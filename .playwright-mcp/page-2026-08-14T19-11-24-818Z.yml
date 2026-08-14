@@ -1,5 +1,0 @@
-- generic [active] [ref=e1]:
-  - heading "M0 Spike" [level=1] [ref=e2]
-  - paragraph [ref=e3]: hello 수신 (protocol v1)
-  - textbox [ref=e4]: "Reply with exactly: BROWSER_E2E_OK"
-  - button "전송" [ref=e5]
