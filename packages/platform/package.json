@@ -1,0 +1,14 @@
+{
+  "name": "@cc/platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ports": "./src/ports/index.ts",
+    "./web": "./src/web/index.ts",
+    "./mock": "./src/mock/index.ts"
+  },
+  "dependencies": {
+    "@cc/protocol": "workspace:*"
+  }
+}

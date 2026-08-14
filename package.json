@@ -1,0 +1,28 @@
+{
+  "name": "control-center",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "build": "vite build --config apps/web/vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "depcruise": "depcruise packages apps --config tooling/dependency-cruiser.cjs",
+    "verify": "pnpm lint && pnpm depcruise && pnpm typecheck && pnpm test",
+    "dev": "pnpm --filter @cc/web dev",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "host": "node packages/agent-host/src/main.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/node": "^22.13.0",
+    "dependency-cruiser": "^16.9.0",
+    "eslint": "^9.20.0",
+    "eslint-plugin-boundaries": "^5.0.1",
+    "prettier": "^3.5.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  }
+}
