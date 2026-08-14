@@ -11,6 +11,14 @@
   "dependencies": {
     "@cc/core": "workspace:*",
     "@cc/platform": "workspace:*",
-    "@cc/protocol": "workspace:*"
+    "@cc/protocol": "workspace:*",
+    "@tanstack/react-virtual": "^3.14.9",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4"
   }
 }

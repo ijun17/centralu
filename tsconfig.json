@@ -5,18 +5,42 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "types": ["node"],
+    "types": [
+      "node",
+      "vite/client"
+    ],
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@cc/protocol": ["packages/protocol/src/index.ts"],
-      "@cc/core": ["packages/core/src/index.ts"],
-      "@cc/platform/ports": ["packages/platform/src/ports/index.ts"],
-      "@cc/platform/web": ["packages/platform/src/web/index.ts"],
-      "@cc/platform/mock": ["packages/platform/src/mock/index.ts"],
-      "@cc/ui": ["packages/ui/src/index.ts"]
+      "@cc/protocol": [
+        "packages/protocol/src/index.ts"
+      ],
+      "@cc/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@cc/platform/ports": [
+        "packages/platform/src/ports/index.ts"
+      ],
+      "@cc/platform/web": [
+        "packages/platform/src/web/index.ts"
+      ],
+      "@cc/platform/mock": [
+        "packages/platform/src/mock/index.ts"
+      ],
+      "@cc/ui": [
+        "packages/ui/src/index.ts"
+      ]
     }
   },
-  "include": ["packages/*/src/**/*", "apps/*/src/**/*", "e2e/**/*", "tooling/**/*.ts"]
+  "include": [
+    "packages/*/src/**/*",
+    "apps/*/src/**/*",
+    "e2e/**/*",
+    "tooling/**/*.ts"
+  ]
 }
