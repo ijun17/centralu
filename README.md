@@ -16,6 +16,8 @@
 | [protocol.md](docs/protocol.md) | UI ↔ Agent Host 메시지 프로토콜, 스키마, 버전 규칙 | architecture |
 | [agent-host.md](docs/agent-host.md) | Node 사이드카 내부 구조, AgentAdapter, 새 도구 추가 절차 | protocol |
 | [state-management.md](docs/state-management.md) | 프론트 상태 흐름: 이벤트 → 스토어 → 셀렉터, 영속화·복원 | architecture, protocol |
+| [spikes/m0-findings.md](docs/spikes/m0-findings.md) | M0 검증 결과: 권한 오버라이드·이벤트·Codex·토폴로지 전부 성립 | — |
+| [plans/m1-plan.md](docs/plans/m1-plan.md) | M1 실행 플랜: 페이즈·태스크·완료 기준·게이트 | 전부 |
 
 ## 문서 규칙
 
