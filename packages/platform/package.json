@@ -10,5 +10,9 @@
   },
   "dependencies": {
     "@cc/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "ws": "^8.21.3"
   }
 }

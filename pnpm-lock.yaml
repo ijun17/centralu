@@ -90,6 +90,13 @@ importers:
       '@cc/protocol':
         specifier: workspace:*
         version: link:../protocol
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
 
   packages/protocol:
     dependencies:
