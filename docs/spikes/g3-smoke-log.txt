@@ -1,0 +1,13 @@
+[smoke] host 기동, port = 54998
+[smoke] 프로젝트 등록: cc-smoke-BGrTA0
+[smoke] 세션 생성: b4d49de1-5291-4f86-b7c2-536c755cbe51
+[smoke] 도구 호출: Write: /var/folders/rh/mncrtqzj1v7ffbksylrrsv300000gn/T/cc-smoke-BGrTA0/smoke.txt
+[smoke] 승인 요청 수신: {"kind":"file_edit","path":"/var/folders/rh/mncrtqzj1v7ffbksylrrsv300000gn/T/cc-smoke-BGrTA0/smoke.t
+[smoke] 승인 detail 정규화 확인: kind = file_edit
+[smoke] 승인 전송
+[smoke] 턴 완료
+[smoke] 수집된 이벤트 종류: session_title, state_change, usage_update, tool_call, files_touched, approval_request, approval_resolved, tool_result, message_delta, context_update, turn_complete
+[smoke] 영속화된 메시지: 7 건
+[smoke] 세션 상태: waiting_input | 이름: Use the Write tool to create the file /v…
+
+✅ G3 스모크 통과 — 실 SDK 세션으로 승인 왕복까지 완주

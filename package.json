@@ -12,7 +12,7 @@
     "verify": "pnpm lint && pnpm depcruise && pnpm typecheck && pnpm test",
     "dev": "pnpm --filter @cc/web dev",
     "e2e": "playwright test --config e2e/playwright.config.ts",
-    "host": "node packages/agent-host/src/main.ts"
+    "host": "tsx packages/agent-host/src/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
@@ -20,7 +20,9 @@
     "dependency-cruiser": "^16.9.0",
     "eslint": "^9.20.0",
     "eslint-plugin-boundaries": "^5.0.1",
+    "globals": "^17.11.0",
     "prettier": "^3.5.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.24.0",
     "vitest": "^3.0.5"

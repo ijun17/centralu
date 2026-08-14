@@ -1,0 +1,123 @@
+/**
+ * 계약 테스트 (T3-2): 실 SDK 없이, 스파이크에서 관찰한 실제 메시지 형태를 픽스처로 검증한다.
+ * SDK 형식이 바뀌면 여기가 먼저 깨진다.
+ */
+import { describe, expect, it } from 'vitest'
+import { approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
+
+const SID = 's1'
+const n = (msg: unknown) => normalizeMessage(msg, SID)
+
+describe('스트리밍 델타', () => {
+  it('stream_event content_block_delta → message_delta', () => {
+    const out = n({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '안녕' } },
+    })
+    expect(out).toEqual([{ type: 'message_delta', sessionId: SID, role: 'assistant', text: '안녕' }])
+  })
+
+  it('텍스트가 아닌 델타는 무시한다', () => {
+    expect(n({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta' } } })).toEqual([])
+  })
+})
+
+describe('도구 호출 (스파이크 실제 형태)', () => {
+  it('Bash tool_use → tool_call (명령 전문이 title)', () => {
+    const out = n({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'npm run build' } }] },
+    })
+    expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'tu1', summary: { tool: 'Bash', title: 'npm run build', readOnly: false } })
+  })
+
+  it('Write tool_use → tool_call + files_touched (충돌 감지용)', () => {
+    const out = n({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'tu2', name: 'Write', input: { file_path: '/tmp/hello.txt', content: 'hi' } }] },
+    })
+    expect(out.map((e) => e.type)).toEqual(['tool_call', 'files_touched'])
+    expect(out[1]).toMatchObject({ type: 'files_touched', paths: ['/tmp/hello.txt'] })
+  })
+
+  it('조회성 도구는 readOnly로 표시된다 (카드 접힘 정책)', () => {
+    expect(toolSummary('Read', { file_path: '/a.ts' }).readOnly).toBe(true)
+    expect(toolSummary('Bash', { command: 'ls' }).readOnly).toBe(false)
+  })
+
+  it('tool_result → ok 판정', () => {
+    const out = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'M0_SPIKE_OK' }] } })
+    expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1', ok: true, summary: 'M0_SPIKE_OK' })
+    const err = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'nope', is_error: true }] } })
+    expect(err[0]).toMatchObject({ ok: false })
+  })
+})
+
+describe('승인 요청 정규화 (배너 판정의 입력)', () => {
+  it('Bash → command (배너 제자리 승인 가능)', () => {
+    expect(approvalDetail('Bash', { command: 'npm test' }, '/p')).toEqual({ kind: 'command', command: 'npm test', cwd: '/p' })
+  })
+
+  it('Write/Edit → file_edit (diff 확인 필요)', () => {
+    const d = approvalDetail('Edit', { file_path: '/a.ts', new_string: 'const a = 1' }, '/p')
+    expect(d).toMatchObject({ kind: 'file_edit', path: '/a.ts', diffPreview: 'const a = 1', multi: false })
+  })
+
+  it('그 외 → other', () => {
+    expect(approvalDetail('WebFetch', { url: 'http://x' }, '/p').kind).toBe('other')
+  })
+})
+
+describe('한도 (M0 발견: rate_limit_event)', () => {
+  it('allowed면 이벤트 없음', () => {
+    expect(n({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1786750200 } })).toEqual([])
+  })
+
+  it('차단이면 limit_reached + 해제 시각 ISO 변환', () => {
+    const out = n({ type: 'rate_limit_event', rate_limit_info: { status: 'blocked', resetsAt: 1786750200, rateLimitType: 'five_hour' } })
+    expect(out[0]).toMatchObject({ type: 'limit_reached', resumeAt: new Date(1786750200 * 1000).toISOString(), windowMins: 300 })
+  })
+})
+
+describe('result 메시지 (usage·컨텍스트·완료)', () => {
+  const RESULT = {
+    type: 'result',
+    subtype: 'success',
+    total_cost_usd: 0.0078,
+    modelUsage: {
+      'claude-haiku-4-5-20251001': {
+        inputTokens: 18, outputTokens: 186, cacheReadInputTokens: 54830,
+        cacheCreationInputTokens: 697, contextWindow: 200000,
+      },
+    },
+  }
+
+  it('컨텍스트 게이지 값을 만든다 (FR-14)', () => {
+    const ctx = n(RESULT).find((e) => e.type === 'context_update')
+    expect(ctx).toMatchObject({ used: 18 + 54830 + 697, window: 200000, exactness: 'exact' })
+  })
+
+  it('usage와 비용을 싣는다', () => {
+    const u = n(RESULT).find((e) => e.type === 'usage_update')
+    expect(u).toMatchObject({ tokens: { outputTokens: 186, costUsd: 0.0078 } })
+  })
+
+  it('성공이면 turn_complete로 끝난다', () => {
+    expect(n(RESULT).at(-1)).toEqual({ type: 'turn_complete', sessionId: SID })
+  })
+
+  it('실패면 error를 낸다', () => {
+    const out = n({ ...RESULT, subtype: 'error_max_turns', is_error: true, result: '최대 턴 초과' })
+    expect(out.at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: '최대 턴 초과' } })
+  })
+})
+
+describe('알 수 없는 메시지는 조용히 무시한다', () => {
+  it.each([
+    { type: 'system', subtype: 'init' },
+    { type: 'system', subtype: 'thinking_tokens' },
+    { type: 'future_message_type' },
+  ])('%o', (msg) => {
+    expect(n(msg)).toEqual([])
+  })
+})

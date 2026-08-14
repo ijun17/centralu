@@ -1,6 +1,7 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
+import globals from 'globals'
 
 /** 레이어 규칙의 원본은 docs/architecture.md §2. 여기가 그 기계 강제판이다. */
 export default tseslint.config(
@@ -95,6 +96,12 @@ export default tseslint.config(
       ],
     },
   },
+  // Node 프로세스 코드: Node 전역 허용
+  {
+    files: ['packages/agent-host/**/*.{ts,mjs}', 'tooling/**/*.{ts,js}', 'e2e/**/*.ts', '*.config.{ts,js}'],
+    languageOptions: { globals: globals.node },
+  },
+  { files: ['**/*.mjs'], rules: { 'no-empty': 'off', '@typescript-eslint/no-unused-expressions': 'off' } },
   // agent-host: protocol만 공유 (core/ui/platform은 프로세스 반대편)
   {
     files: ['packages/agent-host/**/*.ts'],
