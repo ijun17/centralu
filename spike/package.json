@@ -1,0 +1,9 @@
+{
+  "name": "m0-spike",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.231",
+    "ws": "^8.21.3"
+  }
+}
