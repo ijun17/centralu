@@ -3,4 +3,5 @@ packages:
   - apps/*
   - e2e
 allowBuilds:
+  better-sqlite3: true
   esbuild: true
