@@ -2,7 +2,7 @@
 
 - 기준 문서: [product-spec.md](../product-spec.md) §8 M1, [architecture.md](../architecture.md), [m0-findings.md](../spikes/m0-findings.md)
 - 진행 방식: 페이즈 순차 진행. 각 태스크는 **완료 기준(검증 방법 포함)** 이 있고, `[루프 가능]` 표시는 기계 판정이 가능해 ralph류 루프에 위임해도 안전한 구간.
-- 페이즈 경계마다 사람 확인 게이트. 특히 G5(관제 루프 체감)는 기계 판정 불가 — 직접 써봐야 한다.
+- **사람 확인은 마지막 G5 한 번뿐이다** (사용자 결정, 2026-08-15). 중간 게이트(G0/G2/G3)는 자동 검증으로 대체: G0·G2는 lint·테스트가 판정, G3 실 세션 스모크는 에이전트가 직접 실행(haiku, 소액). 중간 판단이 필요한 결정은 기본값을 선택하고 findings/plan에 기록한다. 늦은 발견 리스크는 태스크 단위 커밋으로 완화 — G5에서 문제 발견 시 해당 커밋 단위로 되짚는다.
 - M1 범위 밖 (하지 않는다): Codex 어댑터, 깃 패널 상세, 파일 트리, 코드 뷰어, 첨부, 재시작 복원(M1.5), 사용량 대시보드, 오케스트레이터, Tauri.
 
 ## M0 반영 사항 (전 태스크 공통 제약)
@@ -23,7 +23,7 @@
 **T0-2. 경계 강제 장치** — eslint flat + eslint-plugin-boundaries + no-restricted-imports/globals (fetch·WebSocket·`@tauri-apps/*` 금지 규칙), dependency-cruiser 설정.
 완료: **위반 코드를 일부러 넣은 픽스처가 lint 에러를 내는 것을 테스트로 확인** (규칙이 실제로 작동한다는 증거). `[루프 가능]`
 
-**게이트 G0**: 스캐폴드 커밋. 사람 확인 1분 (구조가 folder-structure.md와 일치하는가).
+**게이트 G0** (자동): 스캐폴드 커밋. dependency-cruiser가 구조 규칙 위반 0을 확인.
 
 ## Phase 1 — protocol
 
@@ -50,7 +50,7 @@
 **T2-5. 리듀서** — applyEvent(state, NormalizedEvent) → 상태 갱신. 파생 셀렉터(인박스·카운터·안읽음·동시세션)용 순수 함수.
 완료: 이벤트 시퀀스 재생 테스트 (스파이크 녹화 픽스처 재사용). `[루프 가능]`
 
-**게이트 G2**: core 커버리지 확인. 사람 확인: 상태 머신 전이 테이블이 product-spec FR-12와 일치하는가.
+**게이트 G2** (자동): core 커버리지 + 전이 테이블이 FR-12 표와 1:1 대응하는지 테스트로 검증 (스펙의 상태·전이를 테스트 케이스로 옮겨 적는다).
 
 ## Phase 3 — agent-host (최소)
 
@@ -58,12 +58,12 @@
 완료: 재연결 시나리오 테스트 (연결→이벤트 N개→끊김→afterSeq 재접속→유실분 수신). `[루프 가능]`
 
 **T3-2. ClaudeAdapter** — M0 제약 반영. SDK 이벤트 → NormalizedEvent 변환(델타·tool_use 요약·approval_request(ApprovalDetail 구조화)·turn_complete·usage·rate_limit→limit_reached·session_title), canUseTool↔respondApproval 브리지, interrupt, 사용자 훅 억제 방침 확인·적용.
-완료: 계약 테스트 (스파이크 덤프 픽스처 → 이벤트 스냅샷) + **실 세션 스모크 1회** (haiku, 승인 1회 왕복). 스모크는 사람이 실행.
+완료: 계약 테스트 (스파이크 덤프 픽스처 → 이벤트 스냅샷) + **실 세션 스모크 1회** (haiku, 승인 1회 왕복). 스모크는 에이전트가 자동 실행.
 
 **T3-3. 세션 매니저 + dev-services 최소** — 세션 수명주기(생성·archive·dispose), store(sqlite write-through: 세션 메타·메시지·읽음 위치), git status 요약(브랜치·변경 수만 — 사이드바용), 프로젝트 등록 검증(디렉토리 존재).
 완료: RPC 통합 테스트 (인메모리 어댑터 목으로). `[루프 가능]`
 
-**게이트 G3**: 미니 CLI 클라이언트로 실 세션 E2E 스모크 (스파이크 d-host 방식). 사람 확인.
+**게이트 G3** (자동): 미니 CLI 클라이언트로 실 세션 E2E 스모크 (스파이크 d-host 방식). 에이전트가 실행하고 결과 로그를 커밋에 남긴다.
 
 ## Phase 4 — platform
 
@@ -110,4 +110,4 @@
 - 커밋 단위 = 태스크 단위. 태스크 완료 기준의 테스트가 커밋에 포함되어야 한다 (no fake completion — placeholder·skip 테스트는 미완료로 간주).
 - `[루프 가능]` 태스크의 루프 완료 조건은 항상 "`pnpm verify` 통과"로 통일.
 - 페이즈 내 태스크는 순서 의존이 명시된 것 외에 병렬 가능 (예: T2-1~T2-4는 상호 독립).
-- 실 SDK 호출이 필요한 검증(T3-2 스모크, G3, G5)은 루프에 넣지 않는다 — 비용과 판단이 걸린 구간은 사람이 실행.
+- 실 SDK 호출이 필요한 검증(T3-2 스모크, G3)은 루프에 넣지 않고 에이전트가 단발로 실행한다 (비용 통제). G5만 사람이 실행.
