@@ -45,5 +45,8 @@
     "apps/*/src/**/*",
     "e2e/**/*",
     "tooling/**/*.ts"
+  ],
+  "exclude": [
+    "**/adapters/codex/generated/**"
   ]
 }

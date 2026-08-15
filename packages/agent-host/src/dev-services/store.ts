@@ -1,9 +1,24 @@
 import Database from 'better-sqlite3'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { ProjectInfo, SessionInfo, StoredMessage } from '@cc/protocol'
 
-const SCHEMA_PATH = fileURLToPath(new URL('../../../protocol/src/schema/schema.sql', import.meta.url))
+/**
+ * 스키마 위치는 실행 형태에 따라 다르다.
+ * dev(tsx)는 소스 트리에서, 번들(배포 `.app`)은 산출물 옆에서 읽는다 —
+ * 번들 후에는 소스 경로가 존재하지 않으므로 후보를 순서대로 찾는다 (F-0).
+ */
+function resolveSchemaPath(): string {
+  const candidates = [
+    new URL('./schema.sql', import.meta.url), // 번들 산출물 레이아웃
+    new URL('../../../protocol/src/schema/schema.sql', import.meta.url), // 소스 트리
+  ].map((u) => fileURLToPath(u))
+  const found = candidates.find((p) => existsSync(p))
+  if (!found) throw new Error(`schema.sql을 찾을 수 없습니다: ${candidates.join(', ')}`)
+  return found
+}
+
+const SCHEMA_PATH = resolveSchemaPath()
 
 /**
  * dev 전용 저장소 (docs/agent-host.md §5). Tauri 전환 시 rusqlite로 대체되며

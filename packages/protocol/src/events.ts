@@ -53,6 +53,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('session_title'), title: z.string() }),
   /** 동시 세션 충돌 감지·최근 수정 파일 하이라이트용 (FR-2, FR-5) */
   z.object({ ...base, type: z.literal('files_touched'), paths: z.array(z.string()) }),
+  /** 컨텍스트 압축이 일어났다 — 대화창에 마커를 남긴다 (FR-14) */
+  z.object({ ...base, type: z.literal('compaction') }),
   z.object({ sessionId: z.string().optional(), type: z.literal('error'), error: ProtocolError }),
 ])
 export type NormalizedEvent = z.infer<typeof NormalizedEvent>

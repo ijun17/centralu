@@ -20,3 +20,4 @@ spike/**/out/
 .omc/
 *.log
 .DS_Store
+apps/desktop/src-tauri/resources/

@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
     "beforeDevCommand": "pnpm vite",
-    "beforeBuildCommand": "pnpm vite build"
+    "beforeBuildCommand": "pnpm -w bundle:host && pnpm vite build"
   },
   "app": {
     "windows": [
@@ -40,6 +40,9 @@
     "category": "DeveloperTool",
     "copyright": "",
     "shortDescription": "에이전트 관제탑",
-    "longDescription": "여러 에이전트 코딩 도구를 한 창에서 실행·관찰·제어합니다."
+    "longDescription": "여러 에이전트 코딩 도구를 한 창에서 실행·관찰·제어합니다.",
+    "resources": [
+      "resources/host/**/*"
+    ]
   }
 }

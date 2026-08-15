@@ -5,13 +5,14 @@
 //! 통신 자체는 UI가 WS로 직접 한다 — dev와 prod가 같은 경로를 쓰는 이유.
 
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostInfo {
@@ -62,6 +63,13 @@ impl Supervisor {
     /// host를 띄우고 감시 스레드를 건다. 실패해도 앱은 계속 뜬다 (UI가 상태를 보여준다).
     pub fn start(&self, app: AppHandle) {
         let me = self.clone();
+        // 배포 빌드에서는 번들된 host가 리소스 디렉토리에 들어 있다 (F-0).
+        let bundled = app
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|d| d.join("resources/host/main.mjs"))
+            .filter(|p| p.exists());
         thread::spawn(move || {
             let mut attempt = 0u32;
             loop {
@@ -70,7 +78,7 @@ impl Supervisor {
                 }
                 emit(&app, if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
 
-                match me.spawn_once(&app) {
+                match me.spawn_once(&app, bundled.as_deref()) {
                     Ok(code) => {
                         // 정상 종료(앱 종료 요청)면 감시를 끝낸다
                         if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
@@ -101,8 +109,8 @@ impl Supervisor {
     }
 
     /// host 한 번 실행 → ready 줄 파싱 → 종료까지 대기. 반환값은 종료 코드.
-    fn spawn_once(&self, app: &AppHandle) -> Result<Option<i32>, String> {
-        let (program, args) = host_command();
+    fn spawn_once(&self, app: &AppHandle, bundled: Option<&Path>) -> Result<Option<i32>, String> {
+        let (program, args) = host_command(bundled);
         let mut cmd = Command::new(&program);
         // stdin을 파이프로 열어두는 것이 **고아 방지의 핵심**이다.
         // 앱이 어떤 이유로 죽든(크래시·SIGKILL 포함) 이 파이프가 닫히고,
@@ -210,7 +218,7 @@ fn kill_group(_pid: u32) {}
 ///
 /// **패키지 매니저를 거치지 않는다** — pnpm 래퍼를 통해 띄우면 래퍼만 죽고
 /// 실제 host(손자)가 고아로 남는다 (실측으로 확인된 문제).
-fn host_command() -> (String, Vec<String>) {
+fn host_command(bundled: Option<&Path>) -> (String, Vec<String>) {
     if let Ok(cmd) = std::env::var("CC_HOST_CMD") {
         let mut parts = cmd.split_whitespace().map(String::from).collect::<Vec<_>>();
         if !parts.is_empty() {
@@ -218,6 +226,22 @@ fn host_command() -> (String, Vec<String>) {
             return (program, parts);
         }
     }
+
+    // 배포 빌드: 번들된 host를 시스템 Node로 실행한다 (F-0a 결정).
+    // Node SEA는 네이티브 애드온 때문에 비용이 과해 도그푸딩 범위에서 제외했다.
+    if let Some(path) = bundled {
+        return (
+            node_program(),
+            vec![
+                path.to_string_lossy().to_string(),
+                "--port".into(),
+                "0".into(),
+                "--watch-parent".into(),
+            ],
+        );
+    }
+
+    // dev: 워크스페이스의 tsx로 소스를 직접 실행
     let root = workspace_root();
     (
         format!("{root}/node_modules/.bin/tsx"),
@@ -228,6 +252,16 @@ fn host_command() -> (String, Vec<String>) {
             "--watch-parent".into(),
         ],
     )
+}
+
+/// GUI 앱은 로그인 셸의 PATH를 물려받지 못한다 — node를 흔한 위치에서 직접 찾는다.
+fn node_program() -> String {
+    for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
+        if Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+    "node".to_string()
 }
 
 fn workspace_root() -> String {

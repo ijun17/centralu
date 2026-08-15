@@ -26,6 +26,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'limit_reached', sessionId: 's1', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 },
   { type: 'session_title', sessionId: 's1', title: 'auth 리팩터링' },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
+  { type: 'compaction', sessionId: 's1' },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } },
 ]
 
