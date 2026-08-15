@@ -43,7 +43,8 @@ pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 | [state-management.md](docs/state-management.md) | 프론트 상태 흐름: 이벤트 → 스토어 → 셀렉터, 영속화·복원 | architecture, protocol |
 | [spikes/m0-findings.md](docs/spikes/m0-findings.md) | M0 검증 결과: 권한 오버라이드·이벤트·Codex·토폴로지 전부 성립 | — |
 | [plans/m1-plan.md](docs/plans/m1-plan.md) | M1 실행 플랜: 페이즈·태스크·완료 기준·게이트 | 전부 |
-| [plans/m1-result.md](docs/plans/m1-result.md) | M1 실행 결과: 게이트 통과 현황, 성능 실측, 구현 중 결정, **G5 실행 방법** | m1-plan |
+| [plans/m1-result.md](docs/plans/m1-result.md) | M1 실행 결과: 게이트 통과 현황, 성능 실측, 구현 중 결정, G5 실측 기록 | m1-plan |
+| [plans/next.md](docs/plans/next.md) | **다음에 할 일**: M1.5 상시 가동(Tauri·알림·복원) → M2 → M3 | m1-result |
 
 ## 문서 규칙
 
