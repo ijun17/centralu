@@ -511,3 +511,84 @@ test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', as
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('concurrent-warning')).toContainText('유실')
 })
+
+test('탭 셸: ⌘⇧1~4로 전환하고 재시작 후 복원한다 (B-0)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await expect(page.getByTestId('tab-bar')).toBeVisible()
+  await page.keyboard.press('Meta+Shift+3')
+  await expect(page.getByTestId('git-panel')).toBeVisible()
+
+  // 스냅샷에 탭이 실리고, 다시 attach하면 그 탭으로 돌아온다
+  const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
+  expect(snap?.tab).toBe('git')
+
+  await page.evaluate(async () => {
+    const store = (window as any).__store
+    store.setState({ tab: 'chat', focusedSessionId: null })
+    await store.getState().attach((window as any).__mock)
+  })
+  await expect(page.getByTestId('git-panel')).toBeVisible()
+})
+
+test('깃 패널: 변경 목록·diff·스테이징·커밋 (B-2, B-6)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [
+      { path: 'src/a.ts', staged: false, status: 'M' },
+      { path: 'src/new.ts', staged: false, status: '?' },
+    ]
+    m.gitState.diffs['src/a.ts'] = '@@ -1,2 +1,2 @@\n-옛 줄\n+새 줄\n 그대로'
+  })
+  await page.keyboard.press('Meta+Shift+3')
+
+  await page.getByTestId('git-file-src/a.ts').click()
+  await expect(page.getByTestId('diff-view')).toBeVisible()
+  // 무채색 diff: 색이 아니라 기호와 밝기로 구분한다
+  await expect(page.locator('[data-diff="add"]')).toContainText('새 줄')
+  await expect(page.locator('[data-diff="del"]')).toContainText('옛 줄')
+
+  await page.getByTestId('git-올리기-all').click()
+  await page.getByTestId('commit-message').fill('테스트 커밋')
+  await page.getByTestId('commit-button').click()
+  await expect(page.getByTestId('toast')).toContainText('커밋')
+  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('테스트 커밋')
+})
+
+test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 보여준다 (B-4)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.branches = [
+      { name: 'main', current: true, remote: false },
+      { name: 'feature/x', current: false, remote: false },
+    ]
+    m.gitState.dirty = ['src/a.ts']
+  })
+  await page.keyboard.press('Meta+Shift+3')
+  await page.getByTestId('git-sub-branches').click()
+  await page.getByTestId('branch-feature/x').click()
+
+  await expect(page.getByTestId('checkout-warning')).toContainText('src/a.ts')
+  await page.getByTestId('checkout-proceed').click()
+  await expect(page.getByTestId('toast')).toContainText('전환')
+})
+
+test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(async () => {
+    const store = (window as any).__store
+    const m = (window as any).__mock
+    m.projects.add = async (path: string) => ({
+      id: 'p-nogit', path, name: 'nogit', defaultTool: 'claude', git: null,
+    })
+    await store.getState().addProject('/tmp/nogit')
+  })
+  await page.getByTestId('new-session-nogit').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('tab-git')).toBeDisabled()
+})

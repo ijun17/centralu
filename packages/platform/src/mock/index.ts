@@ -1,5 +1,9 @@
 import type {
   AdapterCapabilities,
+  GitBranch,
+  GitCommit,
+  GitDiff,
+  GitFileStatus,
   ApprovalDecision,
   ApprovalDetail,
   ApprovalScope,
@@ -84,6 +88,52 @@ export class MockPlatform implements Platform {
 
   setConnectionState(s: ConnectionState): void {
     for (const h of this.connHandlers) h(s)
+  }
+
+  /** 테스트가 주무르는 가짜 깃 상태 */
+  gitState: {
+    files: GitFileStatus[]
+    diffs: Record<string, string>
+    commits: GitCommit[]
+    branches: GitBranch[]
+    dirty: string[]
+    lastCommitMessage?: string
+    pushed: boolean
+  } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], pushed: false }
+
+  readonly git = {
+    status: async (_projectId: string) => [...this.gitState.files],
+    diff: async (_projectId: string, path: string, _staged?: boolean): Promise<GitDiff> => ({
+      diff: this.gitState.diffs[path] ?? '',
+      truncated: false,
+      binary: false,
+    }),
+    log: async (_projectId: string, limit = 50) => this.gitState.commits.slice(0, limit),
+    commitDetail: async (_projectId: string, sha: string) => ({
+      files: [`file-${sha}.ts`],
+      diff: this.gitState.diffs[sha] ?? '',
+      truncated: false,
+    }),
+    branches: async (_projectId: string) => [...this.gitState.branches],
+    checkout: async (_projectId: string, branch: string, dryRun?: boolean) => {
+      if (dryRun) return { ok: this.gitState.dirty.length === 0, conflicts: [...this.gitState.dirty] }
+      this.gitState.branches = this.gitState.branches.map((b) => ({ ...b, current: b.name === branch }))
+      return { ok: true, conflicts: [] }
+    },
+    stage: async (_projectId: string, paths: string[], unstage?: boolean) => {
+      this.gitState.files = this.gitState.files.map((f) =>
+        paths.includes(f.path) ? { ...f, staged: !unstage } : f,
+      )
+    },
+    commit: async (_projectId: string, message: string) => {
+      this.gitState.lastCommitMessage = message
+      this.gitState.files = this.gitState.files.filter((f) => !f.staged)
+      return { ok: true }
+    },
+    push: async (_projectId: string) => {
+      this.gitState.pushed = true
+      return { ok: true }
+    },
   }
 
   /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */

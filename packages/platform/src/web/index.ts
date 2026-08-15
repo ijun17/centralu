@@ -123,6 +123,19 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     agents: new WebAgentPort(rpc),
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
+    git: {
+      status: (projectId) => rpc.call('git.status', { projectId }),
+      diff: (projectId, path, staged) => rpc.call('git.diff', { projectId, path, staged }),
+      log: (projectId, limit) => rpc.call('git.log', { projectId, limit }),
+      commitDetail: (projectId, sha) => rpc.call('git.commitDetail', { projectId, sha }),
+      branches: (projectId) => rpc.call('git.branches', { projectId }),
+      checkout: (projectId, branch, dryRun) => rpc.call('git.checkout', { projectId, branch, dryRun }),
+      stage: async (projectId, paths, unstage) => {
+        await rpc.call('git.stage', { projectId, paths, unstage })
+      },
+      commit: (projectId, message) => rpc.call('git.commit', { projectId, message }),
+      push: (projectId) => rpc.call('git.push', { projectId }),
+    },
     workspace: {
       async save(snapshot) {
         await rpc.call('workspace.save', { layout: snapshot })

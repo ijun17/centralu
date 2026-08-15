@@ -35,6 +35,34 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       return a.capabilities
     },
     'agents.detect': async () => Promise.all([...adapters.values()].map((a) => a.detect())),
+    'git.status': async (p) => mgr.gitStatusFiles(RpcMethods['git.status'].params.parse(p).projectId),
+    'git.diff': async (p) => {
+      const { projectId, path, staged } = RpcMethods['git.diff'].params.parse(p)
+      return mgr.gitDiff(projectId, path, staged)
+    },
+    'git.log': async (p) => {
+      const { projectId, limit } = RpcMethods['git.log'].params.parse(p)
+      return mgr.gitLog(projectId, limit)
+    },
+    'git.commitDetail': async (p) => {
+      const { projectId, sha } = RpcMethods['git.commitDetail'].params.parse(p)
+      return mgr.gitCommitDetail(projectId, sha)
+    },
+    'git.branches': async (p) => mgr.gitBranches(RpcMethods['git.branches'].params.parse(p).projectId),
+    'git.checkout': async (p) => {
+      const { projectId, branch, dryRun } = RpcMethods['git.checkout'].params.parse(p)
+      return mgr.gitCheckout(projectId, branch, dryRun)
+    },
+    'git.stage': async (p) => {
+      const { projectId, paths, unstage } = RpcMethods['git.stage'].params.parse(p)
+      await mgr.gitStage(projectId, paths, unstage)
+      return { ok: true as const }
+    },
+    'git.commit': async (p) => {
+      const { projectId, message } = RpcMethods['git.commit'].params.parse(p)
+      return mgr.gitCommit(projectId, message)
+    },
+    'git.push': async (p) => mgr.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
     'workspace.save': async (p) => {
       mgr.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)
       return { ok: true as const }

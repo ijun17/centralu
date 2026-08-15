@@ -179,6 +179,26 @@ function GlobalKeys() {
         if (next) focusSession(next)
         return
       }
+      // 숫자 단축키는 e.code로 본다 — Shift를 누르면 e.key가 '#' 같은 기호가 된다 (E2E가 잡음)
+      const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
+      // 탭 전환 ⌘⇧1~4 (FR-17)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && digit && Number(digit) <= 4) {
+        e.preventDefault()
+        const tabs = ['chat', 'files', 'git', 'viewer'] as const
+        useStore.getState().setTab(tabs[Number(digit) - 1]!)
+        return
+      }
+      // 프로젝트 점프 ⌘1~9 (FR-17)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && digit) {
+        const st = useStore.getState()
+        const project = Object.values(st.projects)[Number(digit) - 1]
+        if (project) {
+          e.preventDefault()
+          const first = Object.values(st.sessions).find((s) => s.projectId === project.id && !s.archived)
+          if (first) focusSession(first.id)
+        }
+        return
+      }
       if (!typing && e.key === 'Escape') toggleInbox(false)
     }
     // 전역 단축키(앱 밖에서 누른 ⌘⇧A)도 같은 동작으로 들어온다

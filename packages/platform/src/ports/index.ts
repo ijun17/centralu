@@ -3,6 +3,10 @@ import type {
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
+  GitBranch,
+  GitCommit,
+  GitDiff,
+  GitFileStatus,
   NormalizedEvent,
   ProjectInfo,
   SessionInfo,
@@ -84,6 +88,23 @@ export type PlatformCapabilities = {
   openInIde: boolean
 }
 
+/**
+ * 깃 조회·조작 (FR-4, B-1 신설).
+ * 구현은 host의 dev-services에 있다 — git2(Rust) 이관은 측정으로 병목이 확인될 때까지 보류.
+ */
+export interface GitPort {
+  status(projectId: string): Promise<GitFileStatus[]>
+  diff(projectId: string, path: string, staged?: boolean): Promise<GitDiff>
+  log(projectId: string, limit?: number): Promise<GitCommit[]>
+  commitDetail(projectId: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }>
+  branches(projectId: string): Promise<GitBranch[]>
+  /** dryRun이면 무엇이 충돌하는지만 알려준다 (막지 말고 보이게) */
+  checkout(projectId: string, branch: string, dryRun?: boolean): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
+  stage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
+  commit(projectId: string, message: string): Promise<{ ok: boolean; message?: string }>
+  push(projectId: string): Promise<{ ok: boolean; message?: string }>
+}
+
 /** 워크스페이스 스냅샷 (C-3) — 창을 껐다 켜도 보던 자리로 돌아온다 */
 export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
@@ -99,6 +120,7 @@ export interface Platform {
   agents: AgentPort
   projects: ProjectPort
   system: SystemPort
+  git: GitPort
   workspace: WorkspacePort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>

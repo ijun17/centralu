@@ -111,6 +111,8 @@ export const useStore = create<AppState>((set, get) => ({
       const snap = await platform.workspace.load()
       if (snap?.focusedSessionId && get().sessions[snap.focusedSessionId]) {
         get().focusSession(snap.focusedSessionId)
+        // 보던 탭까지 돌아온다 (B-0)
+        if (snap.tab) set({ tab: snap.tab as Tab })
       }
     } catch {
       /* 스냅샷이 없어도 앱은 정상 동작한다 */
@@ -200,6 +202,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setTab(tab) {
     set({ tab })
+    get().saveWorkspace()
   },
   toggleInbox(open) {
     set((s) => ({ inboxOpen: open ?? !s.inboxOpen }))

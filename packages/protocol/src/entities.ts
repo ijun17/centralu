@@ -81,3 +81,32 @@ export const ProtocolError = z.object({
   data: z.unknown().optional(),
 })
 export type ProtocolError = z.infer<typeof ProtocolError>
+
+/** 깃 패널 (FR-4) */
+export const GitFileStatus = z.object({
+  path: z.string(),
+  staged: z.boolean(),
+  status: z.enum(['M', 'A', 'D', 'R', 'U', '?']),
+})
+export type GitFileStatus = z.infer<typeof GitFileStatus>
+
+export const GitCommit = z.object({
+  sha: z.string(),
+  shortSha: z.string(),
+  subject: z.string(),
+  author: z.string(),
+  when: z.number(),
+  parents: z.array(z.string()),
+})
+export type GitCommit = z.infer<typeof GitCommit>
+
+export const GitBranch = z.object({
+  name: z.string(),
+  current: z.boolean(),
+  remote: z.boolean(),
+  upstream: z.string().optional(),
+})
+export type GitBranch = z.infer<typeof GitBranch>
+
+export const GitDiff = z.object({ diff: z.string(), truncated: z.boolean(), binary: z.boolean() })
+export type GitDiff = z.infer<typeof GitDiff>

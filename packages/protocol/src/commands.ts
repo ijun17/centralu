@@ -3,6 +3,10 @@ import {
   AdapterCapabilities,
   ApprovalDecision,
   ApprovalScope,
+  GitBranch,
+  GitCommit,
+  GitDiff,
+  GitFileStatus,
   PermissionPreset,
   SessionState,
   ToolName,
@@ -93,6 +97,33 @@ export const RpcMethods = {
   'agents.detect': {
     params: z.object({}),
     result: z.array(z.object({ tool: ToolName, installed: z.boolean(), loggedIn: z.boolean(), detail: z.string() })),
+  },
+  'git.status': { params: z.object({ projectId: z.string() }), result: z.array(GitFileStatus) },
+  'git.diff': {
+    params: z.object({ projectId: z.string(), path: z.string(), staged: z.boolean().optional() }),
+    result: GitDiff,
+  },
+  'git.log': { params: z.object({ projectId: z.string(), limit: z.number().optional() }), result: z.array(GitCommit) },
+  'git.commitDetail': {
+    params: z.object({ projectId: z.string(), sha: z.string() }),
+    result: z.object({ files: z.array(z.string()), diff: z.string(), truncated: z.boolean() }),
+  },
+  'git.branches': { params: z.object({ projectId: z.string() }), result: z.array(GitBranch) },
+  'git.checkout': {
+    params: z.object({ projectId: z.string(), branch: z.string(), dryRun: z.boolean().optional() }),
+    result: z.object({ ok: z.boolean(), conflicts: z.array(z.string()), message: z.string().optional() }),
+  },
+  'git.stage': {
+    params: z.object({ projectId: z.string(), paths: z.array(z.string()), unstage: z.boolean().optional() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'git.commit': {
+    params: z.object({ projectId: z.string(), message: z.string() }),
+    result: z.object({ ok: z.boolean(), message: z.string().optional() }),
+  },
+  'git.push': {
+    params: z.object({ projectId: z.string() }),
+    result: z.object({ ok: z.boolean(), message: z.string().optional() }),
   },
   'workspace.save': {
     params: z.object({ layout: z.record(z.string(), z.unknown()) }),

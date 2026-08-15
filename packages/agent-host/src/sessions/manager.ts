@@ -13,7 +13,18 @@ import type {
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { gitSummary } from '../dev-services/git.js'
+import {
+  gitSummary,
+  gitStatusFiles,
+  gitDiff,
+  gitLog,
+  gitCommitDetail,
+  gitBranches,
+  gitCheckout,
+  gitStage,
+  gitCommit,
+  gitPush,
+} from '../dev-services/git.js'
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -231,6 +242,41 @@ export class SessionManager {
       })
     }
     this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
+  }
+
+  // ── 깃 (B-1) — 경로 해석만 하고 실제 작업은 dev-services에 위임한다 ──
+  private cwdOf(projectId: string): string {
+    const p = this.store.listProjects().find((x) => x.id === projectId)
+    if (!p) throw Object.assign(new Error(`프로젝트를 찾을 수 없습니다: ${projectId}`), { code: 'internal' })
+    return p.path
+  }
+
+  gitStatusFiles(projectId: string) {
+    return gitStatusFiles(this.cwdOf(projectId))
+  }
+  gitDiff(projectId: string, path: string, staged?: boolean) {
+    return gitDiff(this.cwdOf(projectId), path, { staged })
+  }
+  gitLog(projectId: string, limit?: number) {
+    return gitLog(this.cwdOf(projectId), limit)
+  }
+  gitCommitDetail(projectId: string, sha: string) {
+    return gitCommitDetail(this.cwdOf(projectId), sha)
+  }
+  gitBranches(projectId: string) {
+    return gitBranches(this.cwdOf(projectId))
+  }
+  gitCheckout(projectId: string, branch: string, dryRun?: boolean) {
+    return gitCheckout(this.cwdOf(projectId), branch, { dryRun })
+  }
+  gitStage(projectId: string, paths: string[], unstage?: boolean) {
+    return gitStage(this.cwdOf(projectId), paths, unstage)
+  }
+  gitCommit(projectId: string, message: string) {
+    return gitCommit(this.cwdOf(projectId), message)
+  }
+  gitPush(projectId: string) {
+    return gitPush(this.cwdOf(projectId))
   }
 
   saveWorkspace(layout: Record<string, unknown>): void {
