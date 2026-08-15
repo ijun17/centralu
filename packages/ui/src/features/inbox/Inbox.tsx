@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { afterHandled } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
@@ -17,6 +17,7 @@ export function Inbox() {
   const [now, setNow] = useState(() => Date.now())
   const items = useInbox(now)
   const [cursor, setCursor] = useState(0)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   // 경과 시간 갱신 (1초 폴링은 표시 전용 — 상태는 이벤트 구동)
   useEffect(() => {
@@ -27,9 +28,15 @@ export function Inbox() {
 
   useEffect(() => {
     if (!open) return
+    // 인박스는 모달이다 — 키보드 소유권을 가져온다.
+    // 메시지를 보낸 직후엔 입력창에 포커스가 남아 있어, 그대로 두면 d·j·k가 본문에 타이핑된다.
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    panelRef.current?.focus()
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement
-      if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT') return
       if (e.key === 'ArrowDown' || e.key === 'j') setCursor((c) => Math.min(c + 1, items.length - 1))
       else if (e.key === 'ArrowUp' || e.key === 'k') setCursor((c) => Math.max(c - 1, 0))
       else if (e.key === 'Enter') {
@@ -63,7 +70,12 @@ export function Inbox() {
       data-testid="inbox"
     >
       <div
-        className="w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="기다리는 항목"
+        className="w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">

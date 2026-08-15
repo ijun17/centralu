@@ -38,6 +38,7 @@ export type AppState = {
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
   focusSession(id: string | null): void
+  loadHistory(sessionId: string): Promise<void>
   setTab(t: Tab): void
   toggleInbox(open?: boolean): void
   setToast(msg: string | null): void
@@ -113,7 +114,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   focusSession(id) {
     set({ focusedSessionId: id, tab: 'chat' })
-    if (id) void get().markRead(id)
+    if (!id) return
+    void get().markRead(id)
+    // 아직 안 읽어온 세션이면 저장된 대화를 불러온다 (host 재시작 후에도 기록은 남는다)
+    if (!get().chat[id]) void get().loadHistory(id)
+  },
+
+  async loadHistory(sessionId) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const msgs = await platform.agents.loadMessages(sessionId)
+      const items = messagesToChat(msgs)
+      set((s) => ({ chat: { ...s.chat, [sessionId]: s.chat[sessionId] ?? items } }))
+    } catch {
+      // 기록을 못 불러와도 새 대화는 가능하므로 조용히 넘어간다
+    }
   },
   setTab(tab) {
     set({ tab })
@@ -160,7 +176,22 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({
       chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text }] },
     }))
-    await get().platform!.agents.send(sessionId, text)
+    try {
+      await get().platform!.agents.send(sessionId, text)
+    } catch (err) {
+      // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
+      // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
+      set((s) => ({
+        chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
+      }))
+      const e = err as Error & { code?: string }
+      set({
+        toast:
+          e.code === 'session_not_found'
+            ? '이 세션은 더 이상 실행 중이 아닙니다. 기록은 남아 있으니 새 세션을 시작하세요.'
+            : `보내지 못했습니다: ${e.message}`,
+      })
+    }
   },
 
   async respondApproval(sessionId, requestId, decision, scope) {

@@ -241,3 +241,42 @@ test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) =
   await emitEvent(page, 0, { type: 'limit_reached', usedPercent: 21, windowMins: 10080 })
   await expect(page.getByTestId('limit-badge')).toContainText('21%')
 })
+
+test('메시지 전송 직후에도 인박스 단축키가 동작한다 (회귀: 입력창이 키를 먹던 문제)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업 하나')
+  await newSession(page, 'alpha', '작업 둘')
+  for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
+
+  // 실제 사용 순서: 메시지를 보내면 입력창에 포커스가 남는다. body를 클릭하지 않는다.
+  await page.keyboard.press('Meta+i')
+  await expect(page.getByTestId('inbox')).toBeVisible()
+  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(2)
+
+  // 커서 이동 키가 본문에 타이핑되면 안 된다
+  await page.keyboard.press('j')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('')
+
+  // 아카이브도 동작해야 한다
+  await page.keyboard.press('d')
+  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(1)
+})
+
+test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었는데 기다리게 되던 문제)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 세션이 사라진 상황을 만든다 (host 재시작 후 복원된 세션과 같은 상태)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const id = [...m.sessions.keys()][0]
+    m.sessions.delete(id)
+  })
+
+  await page.getByTestId('prompt-input').fill('계속 진행해줘')
+  await page.getByTestId('send').click()
+
+  await expect(page.getByTestId('toast')).toContainText('새 세션')
+  // 보내지 못한 말풍선은 남지 않는다
+  await expect(page.getByTestId('msg-user').filter({ hasText: '계속 진행해줘' })).toHaveCount(0)
+})
