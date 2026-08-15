@@ -86,9 +86,12 @@ Tauri 전환은 빅뱅이 아니라 **서비스 단위 점진 전환**이다:
 1. `apps/desktop` 생성, Tauri가 agent-host를 사이드카로 spawn (수퍼바이저만 구현).
 2. `createTauriPlatform()` 1차 버전 = **web 구현 그대로 재사용** (전부 WS 위임). 이 시점에 이미 데스크톱 앱이 돈다 — UI 변경 0줄.
 3. system 포트를 Tauri 플러그인으로 교체 (알림·뱃지·단축키·IDE 열기). capability가 true로 바뀌며 UI 기능이 저절로 켜진다.
-4. git → Rust git2 교체 (성능 체감이 가장 큰 곳). GitPort 인터페이스 불변, `platform/tauri/git.ts`만 신규.
-5. store → rusqlite 교체 + **데이터 마이그레이션** (dev sqlite 파일 → 앱 데이터 디렉토리로 복사, 스키마 버전 동일하므로 파일 이동으로 충분).
-6. fs → Rust 교체. dev-services에서 해당 모듈 삭제.
+4~6단계(git·store·fs를 Rust로 이관)는 **보류 상태다** (2026-08-15).
+
+M1.5에서 Tauri가 Node 사이드카를 그대로 감독하는 구조로 굳었고, WS 경로가 dev·prod 공용이라
+이관의 실익이 사라졌다. M2 측정에서도 병목은 나오지 않았다 (유휴 CPU 0%).
+**성능 문제가 실제로 측정될 때만** 다시 꺼낸다 — 포트 인터페이스가 같으므로 그때 옮겨도 UI는 그대로다.
+지금 시점의 사실: `agent-host/dev-services`가 dev와 prod 모두의 구현이다.
 
 각 단계가 독립 배포 가능하고, 문제가 생기면 그 단계만 되돌린다.
 

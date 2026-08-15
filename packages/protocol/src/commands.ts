@@ -52,7 +52,13 @@ export const ProjectInfo = z.object({
   defaultTool: ToolName.default('claude'),
   defaultModel: z.string().optional(),
   git: z
-    .object({ branch: z.string(), changedFiles: z.number(), isRepo: z.boolean() })
+    .object({
+      branch: z.string(),
+      changedFiles: z.number(),
+      isRepo: z.boolean(),
+      /** OS가 접근을 막았다 — '저장소 아님'과 구분해 안내한다 (F-1 실측) */
+      denied: z.boolean().optional(),
+    })
     .nullable()
     .default(null),
 })

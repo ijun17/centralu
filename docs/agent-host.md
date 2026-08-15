@@ -74,12 +74,19 @@ host 재시작 → 세션 프로세스 소멸 → store의 externalId로 resume 
 
 이 설계 덕에 FR-10(재시작 복원)의 절반은 "일반 재연결"과 같은 코드 경로다 — 특수 케이스가 아니라 기본 동작.
 
-## 5. dev-services (수명이 정해진 코드)
+## 5. dev-services (이름과 달리 prod 경로다 — 2026-08-15 정정)
 
-- git: `git` CLI spawn + `--porcelain=v2` 파싱. **의도적으로 얇게** — Tauri 전환 4단계(platform-abstraction §5)에서 삭제된다.
-- store: better-sqlite3. 스키마 DDL은 `protocol/schema.sql`에 버전과 함께 두고 Rust 구현과 공유한다 (같은 파일을 읽는다 — 스키마 이중 정의 금지).
-- fs: readdir lazy 목록 + chokidar 워치.
-- `--dev-services` 플래그가 없으면 이 모듈들은 로드조차 되지 않는다 (prod host는 어댑터+usage+mcp만).
+M1.5에서 Node 사이드카가 배포 경로가 되면서 "Tauri 4단계에서 Rust로 옮기고 삭제한다"는 계획은
+**보류**됐다. 이 디렉토리는 지금 prod에서도 그대로 쓰인다. 이름은 역사적 잔재다.
+
+- **git**: `git` CLI spawn + `--porcelain=v2/-z` 파싱. status·diff·log·branches·checkout·stage·commit·push.
+  git2(Rust) 이관은 **측정으로 병목이 확인될 때까지 하지 않는다** (m2-plan 결정 3).
+  포트 인터페이스가 같으므로 나중에 옮겨도 UI는 그대로다.
+- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. 스키마 DDL은
+  `protocol/src/schema/schema.sql` 한 곳에만 둔다. 번들에서는 산출물 옆에 복사돼 함께 나간다 (F-0).
+- **fs**: readdir lazy 목록 + `git check-ignore`(디렉토리 단위 1회) + 경로 탈출 차단.
+- **attachments**: 붙여넣은 이미지를 `~/.control-center/attachments/<sessionId>/`에 저장한다.
+- `--dev-services` 플래그는 **존재하지 않는다** (문서가 앞서 나갔던 서술). 전부 항상 로드된다.
 
 ## 6. usage 파서
 

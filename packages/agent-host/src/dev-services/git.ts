@@ -12,7 +12,12 @@ const exec = promisify(execFile)
  * 포트 인터페이스가 같으므로 나중에 옮겨도 UI는 그대로다.
  */
 
-export type GitSummary = { isRepo: boolean; branch: string; changedFiles: number }
+/**
+ * `denied`: 저장소이긴 한데 OS가 접근을 막았다 (서명되지 않은 앱이 ~/Desktop 같은 보호 폴더를 읽을 때).
+ * '저장소 아님'과 반드시 구분한다 — 사용자가 할 일이 정반대다 (권한 부여 vs 아무것도 아님).
+ * 배포 `.app` 실측에서 실제로 겪은 상황이다 (F-1).
+ */
+export type GitSummary = { isRepo: boolean; branch: string; changedFiles: number; denied?: boolean }
 export type GitFileStatus = { path: string; staged: boolean; status: 'M' | 'A' | 'D' | 'R' | 'U' | '?' }
 export type GitCommit = { sha: string; shortSha: string; subject: string; author: string; when: number; parents: string[] }
 export type GitBranch = { name: string; current: boolean; remote: boolean; upstream?: string }
@@ -44,8 +49,11 @@ export async function gitSummary(cwd: string): Promise<GitSummary> {
       else if (line && !line.startsWith('#')) changed++
     }
     return { isRepo: true, branch, changedFiles: changed }
-  } catch {
-    return { isRepo: false, branch: '', changedFiles: 0 }
+  } catch (e) {
+    const msg = String((e as { stderr?: string; message?: string }).stderr ?? (e as Error).message ?? '')
+    // macOS TCC: 서명되지 않은 앱이 보호 폴더를 읽으면 여기로 온다
+    const denied = /Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)
+    return { isRepo: denied, branch: '', changedFiles: 0, denied }
   }
 }
 

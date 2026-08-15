@@ -737,3 +737,16 @@ test('설정: 알림 정책을 끄면 저장된다 (E-5)', async ({ page }) => {
   // 단축키 표도 여기서 확인된다 (FR-17)
   await expect(page.getByTestId('shortcut-list')).toContainText('⌘⇧1~4')
 })
+
+test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 반영)', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(async () => {
+    const m = (window as any).__mock
+    m.projects.add = async (path: string) => ({
+      id: 'p-denied', path, name: 'denied', defaultTool: 'claude',
+      git: { branch: '', changedFiles: 0, isRepo: true, denied: true },
+    })
+    await (window as any).__store.getState().addProject('/Users/me/Desktop/proj')
+  })
+  await expect(page.getByTestId('git-denied')).toContainText('권한')
+})
