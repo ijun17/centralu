@@ -22,33 +22,56 @@ type HostStatus =
   | { state: 'restarting'; attempt: number }
   | { state: 'failed'; message: string }
 
-/** 사이드카가 준비될 때까지 기다린다. 앱은 host보다 먼저 뜬다. */
+/**
+ * 사이드카가 준비될 때까지 기다린다. 앱은 host보다 먼저 뜬다.
+ *
+ * **순서가 중요하다:** 이벤트를 먼저 구독하고 그다음 현재 상태를 묻는다.
+ * 반대로 하면 그 사이에 준비가 끝났을 때 신호를 놓쳐 타임아웃까지 멈춘다
+ * (host가 1초 만에 뜨게 되면서 실제로 겪었다). 폴링까지 두어 삼중으로 막는다.
+ */
 async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
-  const existing = await invoke<HostInfo | null>('host_info')
-  if (existing?.token) return existing
-
   return new Promise<HostInfo>((resolve, reject) => {
     let done = false
-    const timer = setTimeout(async () => {
+    const finish = (info: HostInfo) => {
       if (done) return
       done = true
-      const err = await invoke<string | null>('host_error').catch(() => null)
-      reject(new Error(err ?? 'agent-host가 시간 안에 준비되지 않았습니다'))
+      clearTimeout(timer)
+      clearInterval(poll)
+      resolve(info)
+    }
+    const fail = (message: string) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      clearInterval(poll)
+      reject(new Error(message))
+    }
+
+    const timer = setTimeout(() => {
+      void invoke<string | null>('host_error')
+        .catch(() => null)
+        .then((err) => fail(err ?? 'agent-host가 시간 안에 준비되지 않았습니다'))
     }, timeoutMs)
 
+    // ① 먼저 구독한다
     void listen<HostStatus>('host-status', (e) => {
       const p = e.payload
-      if (done || typeof p !== 'object' || p === null) return
-      if (p.state === 'ready') {
-        done = true
-        clearTimeout(timer)
-        resolve({ port: p.port, token: p.token })
-      } else if (p.state === 'failed') {
-        done = true
-        clearTimeout(timer)
-        reject(new Error(p.message))
-      }
+      if (typeof p !== 'object' || p === null) return
+      if (p.state === 'ready') finish({ port: p.port, token: p.token })
+      else if (p.state === 'failed') fail(p.message)
     })
+
+    // ② 이미 준비돼 있었는지 확인한다 (구독 전에 끝난 경우)
+    void invoke<HostInfo | null>('host_info')
+      .then((info) => info?.token && finish(info))
+      .catch(() => {})
+
+    // ③ 이벤트를 놓쳐도 결국 붙는다
+    const poll = setInterval(() => {
+      void invoke<HostInfo | null>('host_info')
+        .then((info) => info?.token && finish(info))
+        .catch(() => {})
+    }, 400)
   })
 }
 

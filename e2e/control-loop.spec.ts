@@ -802,3 +802,11 @@ test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러�
   await expect(page.getByTestId('create-session-error')).toContainText('시작하지 못했습니다')
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
 })
+
+test('host가 이미 준비된 뒤에 붙어도 기동한다 (회귀: 이벤트를 놓쳐 30초 멈추던 문제)', async ({ page }) => {
+  // mock 플랫폼은 즉시 준비되므로, attach가 늦어도 화면이 뜨는지만 본다
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('first-run')).toBeVisible({ timeout: 5000 })
+  // 기동 실패 화면이 아니어야 한다
+  await expect(page.getByText('에이전트 호스트를 시작하지 못했습니다')).toHaveCount(0)
+})

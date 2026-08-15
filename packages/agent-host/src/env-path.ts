@@ -36,7 +36,10 @@ function loginShellPath(): string[] {
   try {
     const out = execFileSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
       encoding: 'utf8',
-      timeout: 4000,
+      timeout: 3000,
+      // SIGTERM을 무시하는 셸이 있어 SIGKILL로 확실히 끊는다 —
+      // 여기서 멈추면 host가 ready를 못 찍고 앱이 통째로 기동 실패한다
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'ignore'],
       // 셸 초기화 스크립트가 대화형 프롬프트를 띄우지 않도록
       env: { ...process.env, TERM: 'dumb', CI: '1' },
