@@ -810,3 +810,23 @@ test('host가 이미 준비된 뒤에 붙어도 기동한다 (회귀: 이벤트�
   // 기동 실패 화면이 아니어야 한다
   await expect(page.getByText('에이전트 호스트를 시작하지 못했습니다')).toHaveCount(0)
 })
+
+test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (도그푸딩: 어디서 보는지 못 찾음)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.fsState.entries[''] = [{ name: 'README.md', path: 'README.md', isDir: false, ignored: false }]
+  })
+
+  // 세션을 만들지 않은 상태에서 프로젝트 이름을 누른다
+  await page.getByTestId('project-header-alpha').click()
+  await expect(page.getByTestId('project-view')).toBeVisible()
+  await expect(page.getByTestId('tab-bar')).toBeVisible()
+
+  await page.getByTestId('tab-git').click()
+  await expect(page.getByTestId('git-file-src/a.ts')).toBeVisible()
+
+  await page.getByTestId('tab-files').click()
+  await expect(page.getByTestId('file-README.md')).toBeVisible()
+})

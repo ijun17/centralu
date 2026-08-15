@@ -35,13 +35,25 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [confirming, setConfirming] = useState<string | null>(null)
   const deleteSession = useStore((s) => s.deleteSession)
+  const focusProject = useStore((s) => s.focusProject)
+  const selected = useStore((s) => s.focusedProjectId === projectId && !s.focusedSessionId)
 
   if (!project) return null
 
   return (
     <section className="border-b border-edge/70 py-2.5" data-testid={`project-${project.name}`}>
       <header className="group flex items-baseline gap-2 px-3">
-        <h2 className="truncate text-[13px] font-medium tracking-tight text-chalk">{project.name}</h2>
+        {/* 프로젝트 이름을 누르면 깃·파일·뷰어를 볼 수 있다 (세션을 고르지 않아도) */}
+        <button
+          className={`truncate text-left text-[13px] font-medium tracking-tight transition-colors ${
+            selected ? 'text-chalk underline decoration-graphite underline-offset-4' : 'text-chalk hover:text-beacon'
+          }`}
+          onClick={() => focusProject(projectId)}
+          data-testid={`project-header-${project.name}`}
+          title="프로젝트 보기 (깃·파일·뷰어)"
+        >
+          {project.name}
+        </button>
         <button
           className="ml-auto rounded px-1 text-[13px] leading-none text-slate opacity-0 transition-opacity group-hover:opacity-100 hover:text-chalk focus-visible:opacity-100"
           onClick={() => setNewSessionOpen(true)}

@@ -13,14 +13,14 @@ const TABS: { id: Tab; label: string; key: string }[] = [
   { id: 'viewer', label: '뷰어', key: '4' },
 ]
 
-export function TabBar({ gitDisabled }: { gitDisabled?: boolean }) {
+export function TabBar({ gitDisabled, chatDisabled }: { gitDisabled?: boolean; chatDisabled?: boolean }) {
   const tab = useStore((s) => s.tab)
   const setTab = useStore((s) => s.setTab)
 
   return (
-    <nav className="flex items-center gap-0.5 border-t border-edge bg-pit px-2 py-1" data-testid="tab-bar">
+    <nav className="flex items-center gap-0.5 border-b border-edge bg-pit px-2 py-1" data-testid="tab-bar">
       {TABS.map((t) => {
-        const disabled = t.id === 'git' && gitDisabled
+        const disabled = (t.id === 'git' && gitDisabled) || (t.id === 'chat' && chatDisabled)
         return (
           <button
             key={t.id}
@@ -28,7 +28,7 @@ export function TabBar({ gitDisabled }: { gitDisabled?: boolean }) {
             disabled={disabled}
             data-testid={`tab-${t.id}`}
             aria-selected={tab === t.id}
-            title={disabled ? 'git 저장소가 아닙니다' : `⌘⇧${t.key}`}
+            title={disabled ? (t.id === 'git' ? 'git 저장소가 아닙니다' : '세션을 선택하세요') : `⌘⇧${t.key}`}
             className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[12px] transition-colors disabled:opacity-30 ${
               tab === t.id ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
             }`}

@@ -22,6 +22,7 @@ export function SessionView() {
   const session = useFocusedSession()
   const tab = useStore((s) => s.tab)
   const project = useStore((s) => (session ? s.projects[session.projectId] : undefined))
+  const projectOnly = useStore((s) => (s.focusedSessionId ? undefined : s.projects[s.focusedProjectId ?? '']))
   const chat = useStore((s) => (s.focusedSessionId ? (s.chat[s.focusedSessionId] ?? EMPTY_CHAT) : EMPTY_CHAT))
   const send = useStore((s) => s.send)
   const interrupt = useStore((s) => s.interrupt)
@@ -51,14 +52,38 @@ export function SessionView() {
     return () => clearTimeout(t)
   }, [session, chat.length, markRead])
 
+  // 세션이 없어도 프로젝트를 고르면 깃·파일·뷰어는 볼 수 있다.
+  // (이것들은 프로젝트의 속성이지 세션의 속성이 아니다 — 도그푸딩에서 지적됨)
   if (!session) {
+    if (!projectOnly) {
+      return (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
+          <p className="text-[13px] text-ash">프로젝트나 세션을 선택하세요</p>
+          <p className="text-[11px] text-slate">
+            <Kbd>⌘</Kbd> <Kbd>I</Kbd> 로 기다리는 항목만 모아볼 수 있습니다
+          </p>
+        </div>
+      )
+    }
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
-        <p className="text-[13px] text-ash">세션을 선택하세요</p>
-        <p className="text-[11px] text-slate">
-          <Kbd>⌘</Kbd> <Kbd>I</Kbd> 로 기다리는 항목만 모아볼 수 있습니다
-        </p>
-      </div>
+      <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
+        <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
+          <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
+            {projectOnly.name}
+          </h1>
+          <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
+        </header>
+        <TabBar gitDisabled={!projectOnly.git} chatDisabled />
+        {tab === 'git' && <GitPanel projectId={projectOnly.id} />}
+        {tab === 'files' && <FileTree projectId={projectOnly.id} />}
+        {tab === 'viewer' && <CodeViewer projectId={projectOnly.id} />}
+        {tab === 'chat' && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+            <p className="text-[13px] text-ash">세션을 선택하거나 새로 시작하세요</p>
+            <p className="text-[11px] text-slate">깃·파일·뷰어는 세션 없이도 볼 수 있습니다</p>
+          </div>
+        )}
+      </section>
     )
   }
 
@@ -109,6 +134,8 @@ export function SessionView() {
           )}
         </span>
       </header>
+
+      <TabBar gitDisabled={!project?.git} />
 
       {tab === 'chat' && (
         <ChatStream scrollRef={scrollRef} chat={chat} pending={session.pendingApproval} sessionId={session.id} />
@@ -217,7 +244,6 @@ export function SessionView() {
       </form>
       )}
 
-      <TabBar gitDisabled={!project?.git} />
     </section>
   )
 }

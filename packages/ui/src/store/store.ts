@@ -38,6 +38,8 @@ export type AppState = {
   sessions: Record<string, SessionSummary>
   chat: Record<string, ChatItem[]>
   focusedSessionId: string | null
+  /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
+  focusedProjectId: string | null
   tab: Tab
   inboxOpen: boolean
   toast: string | null
@@ -51,6 +53,7 @@ export type AppState = {
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
   focusSession(id: string | null): void
+  focusProject(id: string): void
   setAppFocused(focused: boolean): void
   loadHistory(sessionId: string): Promise<void>
   saveWorkspace(): void
@@ -98,6 +101,7 @@ export const useStore = create<AppState>((set, get) => ({
   sessions: {},
   chat: {},
   focusedSessionId: null,
+  focusedProjectId: null,
   tab: 'chat',
   inboxOpen: false,
   toast: null,
@@ -209,9 +213,21 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  /** 프로젝트만 선택 — 세션을 고르지 않아도 깃·파일·뷰어를 볼 수 있다 */
+  focusProject(id) {
+    set((s) => ({
+      focusedProjectId: id,
+      // 다른 프로젝트를 고르면 세션 포커스는 놓는다 (섞이면 어느 프로젝트를 보는지 헷갈린다)
+      focusedSessionId: s.sessions[s.focusedSessionId ?? '']?.projectId === id ? s.focusedSessionId : null,
+      viewerPath: null,
+    }))
+    get().saveWorkspace()
+  },
+
   focusSession(id) {
     const prev = get().focusedSessionId
-    set({ focusedSessionId: id, tab: 'chat' })
+    const projectId = id ? get().sessions[id]?.projectId : undefined
+    set({ focusedSessionId: id, tab: 'chat', ...(projectId ? { focusedProjectId: projectId } : {}) })
     get().saveWorkspace()
 
     // 포커스를 벗어난 세션의 메시지는 잘라낸다 (docs/state-management.md §4).
