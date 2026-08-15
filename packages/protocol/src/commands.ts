@@ -42,6 +42,9 @@ export const SessionInfo = z.object({
   waitingSince: z.number().nullable().default(null),
   /** 프로세스가 살아 있는가. false면 대화를 이어가려면 재개가 필요하다 (FR-10) */
   live: z.boolean().default(true),
+  /** 대화 도중에도 바꿀 수 있다 (FR-7) — 세션 헤더에서 고른다 */
+  model: z.string().nullable().default(null),
+  permissionPreset: PermissionPreset.default('normal'),
 })
 export type SessionInfo = z.infer<typeof SessionInfo>
 
@@ -99,6 +102,15 @@ export const RpcMethods = {
   'agents.resumeSession': {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
+  },
+  /** 모델·권한을 대화 도중에 바꾼다 (다음 턴부터 적용) */
+  'agents.updateSettings': {
+    params: z.object({
+      sessionId: z.string(),
+      model: z.string().nullable().optional(),
+      permissionPreset: PermissionPreset.optional(),
+    }),
+    result: SessionInfo,
   },
   'agents.capabilities': { params: z.object({ tool: ToolName }), result: AdapterCapabilities },
   'agents.detect': {

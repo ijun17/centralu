@@ -1,6 +1,7 @@
 import type {
   AdapterCapabilities,
   Attachment,
+  PermissionPreset,
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
@@ -50,6 +51,9 @@ class WebAgentPort implements AgentPort {
   }
   async archiveSession(sessionId: string) {
     await this.rpc.call('agents.archiveSession', { sessionId })
+  }
+  updateSettings(sessionId: string, settings: { model?: string | null; permissionPreset?: PermissionPreset }) {
+    return this.rpc.call<SessionInfo>('agents.updateSettings', { sessionId, ...settings })
   }
   resumeSession(sessionId: string) {
     return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.resumeSession', {

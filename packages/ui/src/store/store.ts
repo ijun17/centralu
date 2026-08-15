@@ -73,6 +73,10 @@ export type AppState = {
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archive(sessionId: string): Promise<void>
+  updateSessionSettings(
+    sessionId: string,
+    s: { model?: string | null; permissionPreset?: PermissionPreset },
+  ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
@@ -361,6 +365,23 @@ export const useStore = create<AppState>((set, get) => ({
 
   async interrupt(sessionId) {
     await get().platform!.agents.interrupt(sessionId)
+  },
+
+  async updateSessionSettings(sessionId, s) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const info = await platform.agents.updateSettings(sessionId, s)
+      set((st) => ({
+        sessions: {
+          ...st.sessions,
+          [sessionId]: { ...st.sessions[sessionId]!, model: info.model, permissionPreset: info.permissionPreset },
+        },
+      }))
+      set({ toast: s.model !== undefined ? `모델: ${info.model ?? '기본'} (다음 턴부터)` : `권한: ${info.permissionPreset}` })
+    } catch (e) {
+      set({ toast: `설정을 바꾸지 못했습니다: ${(e as Error).message}` })
+    }
   },
 
   async archive(sessionId) {

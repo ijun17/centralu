@@ -1,6 +1,7 @@
 import type {
   AdapterCapabilities,
   Attachment,
+  PermissionPreset,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -180,6 +181,7 @@ export class MockPlatform implements Platform {
         id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`,
         name: params.initialPrompt?.slice(0, 40) ?? '새 세션', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
+        model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
       }
       this.sessions.set(id, info)
       if (params.initialPrompt) await this.agents.send(id, params.initialPrompt)
@@ -219,6 +221,13 @@ export class MockPlatform implements Platform {
         s.waitingSince = null
       }
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
+    },
+    updateSettings: async (sessionId: string, s: { model?: string | null; permissionPreset?: PermissionPreset }) => {
+      const sess = this.sessions.get(sessionId)
+      if (!sess) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      if (s.model !== undefined) sess.model = s.model
+      if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
+      return { ...sess }
     },
     resumeSession: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)

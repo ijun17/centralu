@@ -7,6 +7,7 @@ import type {
   ApprovalScope,
   CreateSessionParams,
   NormalizedEvent,
+  PermissionPreset,
   ProjectInfo,
   SessionInfo,
   StoredMessage,
@@ -86,6 +87,7 @@ export class SessionManager {
       name: params.initialPrompt ? truncate(params.initialPrompt) : '새 세션',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
+      model: params.model ?? null, permissionPreset: params.permissionPreset,
     }
     this.meta.set(id, info)
     this.store.upsertSession(info)
@@ -135,7 +137,13 @@ export class SessionManager {
 
     try {
       const handle = await adapter.createSession(
-        { sessionId, cwd: project.path, permissionPreset: 'normal', resumeExternalId: m.externalId },
+        {
+          sessionId,
+          cwd: project.path,
+          model: m.model ?? undefined,
+          permissionPreset: m.permissionPreset,
+          resumeExternalId: m.externalId,
+        },
         (e) => this.onEvent(e),
       )
       this.handles.set(sessionId, handle)
@@ -148,6 +156,20 @@ export class SessionManager {
     } catch (err) {
       return { session: m, resumed: false, reason: (err as Error).message }
     }
+  }
+
+  /**
+   * 모델·권한 변경 (FR-7). 어댑터가 지원하면 다음 턴부터 반영되고,
+   * 지원하지 않으면 메타만 갱신한다 — 재개할 때 새 설정으로 뜬다.
+   */
+  updateSettings(sessionId: string, s: { model?: string | null; permissionPreset?: PermissionPreset }): SessionInfo {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+    if (s.model !== undefined) m.model = s.model
+    if (s.permissionPreset) m.permissionPreset = s.permissionPreset
+    this.store.upsertSession(m)
+    this.handles.get(sessionId)?.updateSettings?.(s)
+    return { ...m, live: this.handles.has(sessionId) }
   }
 
   /** 프로세스가 살아 있는 세션 (UI가 "이어갈 수 있는지"를 아는 근거) */

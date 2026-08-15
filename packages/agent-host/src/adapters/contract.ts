@@ -33,6 +33,8 @@ export interface SessionHandle {
   respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): void
   /** 저장된 '항상 허용' 규칙 주입 — 재시작 후에도 유지되도록 (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
+  /** 모델·권한 변경 (다음 턴부터). 지원하지 않으면 구현하지 않는다 */
+  updateSettings?(settings: { model?: string | null; permissionPreset?: PermissionPreset }): void
   interrupt(): void
   dispose(): Promise<void>
 }

@@ -475,34 +475,57 @@ test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ 
   await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
-test('세션 생성: 도구·모델·권한을 고르면 그대로 전달된다 (A-3, FR-7 완성)', async ({ page }) => {
+test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더에서 (M2.5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('new-session-alpha').click()
 
+  // 다이얼로그가 단순해졌다: 도구 + 시작 프롬프트뿐
+  await expect(page.getByTestId('model-input')).toHaveCount(0)
   await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('model-input').fill('haiku')
-  await page.getByTestId('preset-safe').click()
   await page.getByTestId('initial-prompt').fill('첫 지시')
   await page.getByTestId('create-session-confirm').click()
 
-  // 고른 값이 host까지 도달했는가 (예전엔 프리셋 'normal' 고정, 모델 미전달)
   const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
-  expect(params).toMatchObject({ tool: 'claude', model: 'haiku', permissionPreset: 'safe', initialPrompt: '첫 지시' })
+  expect(params).toMatchObject({ tool: 'claude', initialPrompt: '첫 지시' })
   await expect(page.getByTestId('msg-user')).toContainText('첫 지시')
+
+  // 모델·권한은 세션 헤더에서 바꾼다
+  await page.getByTestId('model-select').selectOption('haiku')
+  await expect(page.getByTestId('toast')).toContainText('haiku')
+  await page.getByTestId('preset-select').selectOption('safe')
+  const sessions = await page.evaluate(() => [...(window as any).__mock.sessions.values()])
+  expect(sessions[0]).toMatchObject({ model: 'haiku', permissionPreset: 'safe' })
 })
 
-test('세션 생성: 준비 안 된 도구는 고를 수 없다 (A-3)', async ({ page }) => {
+test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무 반응 없던 문제)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
-    const m = (window as any).__mock
-    m.agents.detect = async () => [
-      { tool: 'claude', installed: true, loggedIn: true, detail: 'mock' },
-      { tool: 'codex', installed: false, loggedIn: false, detail: '설치되지 않음' },
+    ;(window as any).__mock.agents.detect = async () => [
+      { tool: 'claude', installed: false, loggedIn: false, detail: 'claude CLI를 찾을 수 없습니다' },
+      { tool: 'codex', installed: true, loggedIn: true, detail: 'codex 0.147' },
     ]
   })
   await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('tool-option-codex')).toBeDisabled()
-  await expect(page.getByTestId('tool-option-claude')).toBeEnabled()
+  // 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 — 이유를 적는다
+  await expect(page.getByTestId('tool-blocked')).toContainText('찾을 수 없습니다')
+  await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
+  // 쓸 수 있는 도구로 바꾸면 즉시 풀린다
+  await page.getByTestId('tool-option-codex').click()
+  await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
+})
+
+test('에이전트 응답이 마크다운으로 렌더된다 (M2.5)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await emitEvent(page, 0, {
+    type: 'message_delta',
+    role: 'assistant',
+    text: '## 결과\n\n- **중요** 항목\n- `코드` 조각\n\n```ts\nconst x = 1\n```',
+  })
+  const md = page.getByTestId('markdown')
+  await expect(md.locator('h2')).toContainText('결과')
+  await expect(md.locator('strong')).toContainText('중요')
+  await expect(md.locator('pre code')).toContainText('const x = 1')
 })
 
 test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', async ({ page }) => {

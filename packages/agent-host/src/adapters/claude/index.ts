@@ -2,6 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEvent } from '@cc/protocol'
+import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, normalizeMessage } from './normalize.js'
 
@@ -173,11 +174,18 @@ export class ClaudeAdapter implements AgentAdapter {
   }
 
   async detect(): Promise<DetectResult> {
+    const path = whichTool('claude')
     try {
-      const { stdout } = await exec('claude', ['--version'], { timeout: 5000 })
-      return { tool: 'claude', installed: true, loggedIn: true, detail: stdout.trim() }
+      const { stdout } = await exec(path ?? 'claude', ['--version'], { timeout: 5000 })
+      // 어디에 설치된 것을 쓰는지 보여준다 — 여러 버전이 깔린 환경에서 혼란을 줄인다
+      return { tool: 'claude', installed: true, loggedIn: true, detail: `${stdout.trim()} · ${path ?? 'PATH'}` }
     } catch {
-      return { tool: 'claude', installed: false, loggedIn: false, detail: 'claude CLI를 찾을 수 없습니다' }
+      return {
+        tool: 'claude',
+        installed: false,
+        loggedIn: false,
+        detail: 'claude CLI를 찾을 수 없습니다 (터미널에서 which claude 로 확인)',
+      }
     }
   }
 

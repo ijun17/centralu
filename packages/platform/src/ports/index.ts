@@ -4,6 +4,7 @@ import type {
   ApprovalScope,
   Attachment,
   CreateSessionParams,
+  PermissionPreset,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -52,6 +53,11 @@ export interface AgentPort {
   archiveSession(sessionId: string): Promise<void>
   /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
   resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
+  /** 모델·권한을 대화 도중에 바꾼다 (FR-7) */
+  updateSettings(
+    sessionId: string,
+    settings: { model?: string | null; permissionPreset?: PermissionPreset },
+  ): Promise<SessionInfo>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
   listSessions(): Promise<SessionInfo[]>

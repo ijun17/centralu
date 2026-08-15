@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, PermissionPreset } from '@cc/protocol'
+import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
@@ -57,7 +58,7 @@ class CodexSession implements SessionHandle {
             },
           }),
       },
-      { cwd: opts.cwd },
+      { cwd: opts.cwd, command: whichTool('codex') ?? 'codex' },
     )
     this.ready = this.start()
   }
@@ -177,9 +178,10 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   async detect(): Promise<DetectResult> {
+    const path = whichTool('codex')
     try {
-      const { stdout } = await exec('codex', ['--version'], { timeout: 5000 })
-      const version = stdout.trim()
+      const { stdout } = await exec(path ?? 'codex', ['--version'], { timeout: 5000 })
+      const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       // 로그인 여부는 인증 파일 존재로 판단한다 (CLI를 띄우지 않고 값싸게)
       const loggedIn = existsSync(join(homedir(), '.codex', 'auth.json'))
       return {
@@ -189,7 +191,12 @@ export class CodexAdapter implements AgentAdapter {
         detail: loggedIn ? version : `${version} · 로그인 필요`,
       }
     } catch {
-      return { tool: 'codex', installed: false, loggedIn: false, detail: '설치되지 않음' }
+      return {
+        tool: 'codex',
+        installed: false,
+        loggedIn: false,
+        detail: 'codex CLI를 찾을 수 없습니다 (터미널에서 which codex 로 확인)',
+      }
     }
   }
 

@@ -12,14 +12,14 @@ function seeded() {
   s.upsertSession({
     id: 's1', projectId: 'p1', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: Date.now(), waitingSince: null, live: true,
+    createdAt: Date.now(), waitingSince: null, live: true, model: null, permissionPreset: 'normal',
   })
   return s
 }
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(3)
+    expect(new Store().schemaVersion).toBe(4)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -102,7 +102,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(3)
+    expect(store.schemaVersion).toBe(4)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -112,6 +112,10 @@ describe('마이그레이션 (E-0)', () => {
     // 새 컬럼도 쓸 수 있다
     store.setTouchedPaths('s1', ['src/a.ts'])
     expect(store.getTouchedPaths('s1')).toEqual(['src/a.ts'])
+
+    // v4: 모델·권한도 기존 세션에 붙는다 (기본값으로)
+    const migrated = store.listSessions().find((s) => s.id === 's1')
+    expect(migrated).toMatchObject({ model: null, permissionPreset: 'normal' })
 
     store.close()
     rmSync(dir, { recursive: true, force: true })

@@ -28,6 +28,10 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
     },
     'agents.resumeSession': async (p) =>
       mgr.resumeSession(RpcMethods['agents.resumeSession'].params.parse(p).sessionId),
+    'agents.updateSettings': async (p) => {
+      const { sessionId, model, permissionPreset } = RpcMethods['agents.updateSettings'].params.parse(p)
+      return mgr.updateSettings(sessionId, { model, permissionPreset })
+    },
     'agents.capabilities': async (p) => {
       const { tool } = RpcMethods['agents.capabilities'].params.parse(p)
       const a = adapters.get(tool)

@@ -11,11 +11,19 @@ import { ClaudeAdapter } from './adapters/claude/index.js'
 import { CodexAdapter } from './adapters/codex/index.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import { createRpcHandler } from './rpc.js'
+import { ensureToolPath } from './env-path.js'
 
 /**
  * Agent Host 진입점.
  * dev: `pnpm host` 로 직접 실행. prod: Tauri가 사이드카로 spawn (docs/architecture.md §4)
  */
+// GUI 앱은 로그인 셸 PATH를 물려받지 못한다 — CLI를 찾으려면 먼저 보강해야 한다 (실측).
+// 사용자의 로그인 셸에게 직접 물어보므로 nvm·mise·수동 설치도 잡힌다.
+const pathResult = ensureToolPath()
+if (pathResult.source !== 'unchanged') {
+  console.error(`[agent-host] PATH 보강 (${pathResult.source === 'shell' ? '로그인 셸' : '기본 후보'})`)
+}
+
 const { values } = parseArgs({
   options: {
     port: { type: 'string', default: '5175' },

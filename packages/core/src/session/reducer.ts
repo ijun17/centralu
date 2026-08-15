@@ -1,4 +1,10 @@
-import type { ApprovalDetail, NormalizedEvent, SessionState, TokenUsage } from '@cc/protocol'
+import type {
+  ApprovalDetail,
+  NormalizedEvent,
+  PermissionPreset,
+  SessionState,
+  TokenUsage,
+} from '@cc/protocol'
 import { transition } from './state-machine.js'
 
 /**
@@ -30,13 +36,16 @@ export type SessionSummary = {
   lastError: { code: string; message: string } | null
   /** 동시 세션 파일 충돌 감지용 (FR-2) */
   touchedPaths: string[]
+  /** 세션 헤더에서 바꾼다 (FR-7) */
+  model: string | null
+  permissionPreset: PermissionPreset
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
   return {
     autoNamed: true, state: 'idle', waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, usage: null, context: null,
-    limit: null, lastError: null, touchedPaths: [], ...init,
+    limit: null, lastError: null, touchedPaths: [], model: null, permissionPreset: 'normal', ...init,
   }
 }
 

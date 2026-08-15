@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { PermissionPreset, ToolName } from '@cc/protocol'
+import type { ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
@@ -9,17 +9,12 @@ type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail
 
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
 
-/** 프리셋은 도구의 전역 설정을 세션 단위로 덮어쓴다 (M0에서 검증한 전제) */
-const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
-  { value: 'safe', label: '안전', hint: '모든 작업을 묻습니다' },
-  { value: 'normal', label: '일반', hint: '위험한 작업만 묻습니다' },
-  { value: 'auto', label: '자동 승인', hint: '묻지 않습니다 — 승인 화면이 뜨지 않습니다' },
-]
-
 /**
- * 세션 생성 (FR-7 완성).
- * 도구 → 모델 → 권한 프리셋 → 시작 프롬프트. 프로젝트별 기본값을 읽고 쓴다.
- * 지금까지는 앱이 프리셋을 'normal'로 고정하고 모델을 아예 전달하지 않았다.
+ * 세션 생성 (FR-7).
+ *
+ * **여기서 고르는 것은 도구뿐이다.** 모델·권한은 세션을 만든 뒤 헤더에서 바꾼다 —
+ * 시작하기 전에 정할 수 있는 것보다, 대화하며 바꿀 수 있는 것이 실제로 더 유용하다.
+ * (도구만 예외인 이유: 도구는 프로세스 자체라 도중에 못 바꾼다)
  */
 export function NewSessionDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const platform = usePlatform()
@@ -30,8 +25,6 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
   const [tools, setTools] = useState<Detection[] | null>(null)
   const [tool, setTool] = useState<ToolName>(project?.defaultTool ?? 'claude')
-  const [model, setModel] = useState(project?.defaultModel ?? '')
-  const [preset, setPreset] = useState<PermissionPreset>('normal')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -47,31 +40,28 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     void detect()
   }, [detect])
 
+  const info = (t: ToolName) => tools?.find((x) => x.tool === t)
   const usable = (t: ToolName) => {
-    const d = tools?.find((x) => x.tool === t)
+    const d = info(t)
     return !tools || (d?.installed === true && d.loggedIn)
   }
+  const blocked = tools ? !usable(tool) : false
 
   return (
     <div
-      className="absolute inset-0 z-30 flex items-start justify-center bg-void/80 pt-[12vh] backdrop-blur-[2px]"
+      className="absolute inset-0 z-30 flex items-start justify-center bg-void/80 pt-[14vh] backdrop-blur-[2px]"
       onClick={onClose}
       data-testid="new-session-dialog"
     >
       <form
-        className="w-[520px] max-w-[92vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="w-[480px] max-w-[92vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
         onSubmit={async (e) => {
           e.preventDefault()
           setBusy(true)
           try {
-            await createSession(projectId, {
-              tool,
-              model: model.trim() || undefined,
-              permissionPreset: preset,
-              initialPrompt: prompt.trim() || undefined,
-            })
+            await createSession(projectId, { tool, initialPrompt: prompt.trim() || undefined })
             onClose()
           } catch (err) {
             setToast((err as Error).message)
@@ -82,103 +72,75 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
       >
         <h2 className="text-[13px] font-medium text-chalk">새 세션 · {project?.name}</h2>
 
-        {/* 동시 세션은 데이터 손실 위험 — 차단하지 않고 여기서 보이게 한다 (FR-2) */}
         {running.length > 0 && (
           <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="concurrent-warning">
             이 디렉토리에서 세션 {running.length}개가 실행 중입니다. 같은 파일을 고치면 변경이 유실될 수 있습니다.
           </p>
         )}
 
-        <Field label="도구">
+        <section className="mt-3.5">
+          <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">도구</h3>
           <div className="flex gap-1.5">
             {(['claude', 'codex'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
-                disabled={!usable(t)}
                 onClick={() => setTool(t)}
                 data-testid={`tool-option-${t}`}
-                title={tools?.find((x) => x.tool === t)?.detail}
-                className={`rounded border px-2.5 py-1 text-[12px] transition-colors disabled:opacity-40 ${
+                title={info(t)?.detail}
+                className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
                   tool === t ? 'border-ash bg-graphite/40 text-chalk' : 'border-edge text-ash hover:text-chalk'
-                }`}
+                } ${tools && !usable(t) ? 'opacity-50' : ''}`}
               >
                 {TOOL_LABEL[t]}
               </button>
             ))}
           </div>
-        </Field>
+          {/* 못 쓰는 이유를 숨기지 않는다 — 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 */}
+          {blocked && (
+            <p className="mt-1.5 text-[11px] text-ash" data-testid="tool-blocked">
+              {info(tool)?.installed
+                ? `${TOOL_LABEL[tool]}에 로그인이 필요합니다 — 터미널에서 ${tool === 'claude' ? 'claude' : 'codex login'} 실행`
+                : `${TOOL_LABEL[tool]}를 찾을 수 없습니다 (${info(tool)?.detail ?? '미설치'})`}
+            </p>
+          )}
+          <p className="mt-1.5 text-[10px] text-slate">모델과 권한은 세션을 만든 뒤 헤더에서 바꿉니다.</p>
+        </section>
 
-        <Field label="모델" hint="비워두면 도구 기본값">
-          <input
-            className="w-full rounded border border-edge bg-panel px-2.5 py-1.5 font-mono text-[12px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-            placeholder={tool === 'claude' ? 'haiku · sonnet · opus' : 'gpt-5.x'}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            data-testid="model-input"
-            spellCheck={false}
-          />
-        </Field>
-
-        <Field label="권한">
-          <div className="flex gap-1.5">
-            {PRESETS.map((p) => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setPreset(p.value)}
-                data-testid={`preset-${p.value}`}
-                title={p.hint}
-                className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
-                  preset === p.value ? 'border-ash bg-graphite/40 text-chalk' : 'border-edge text-ash hover:text-chalk'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 text-[10px] text-slate">{PRESETS.find((p) => p.value === preset)?.hint}</p>
-        </Field>
-
-        <Field label="시작 프롬프트" hint="선택">
+        <section className="mt-3.5">
+          <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">
+            시작 프롬프트 <span className="normal-case tracking-normal text-slate/70">선택</span>
+          </h3>
           <textarea
+            autoFocus
             className="max-h-32 w-full resize-none rounded border border-edge bg-panel px-2.5 py-1.5 text-[12px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
             rows={2}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit()
+            }}
             placeholder="무엇을 시킬까요"
             data-testid="initial-prompt"
           />
-        </Field>
+        </section>
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] text-slate">
-            <Kbd>esc</Kbd> 닫기
+            <Kbd>esc</Kbd> 닫기 · <Kbd>⌘</Kbd> <Kbd>↵</Kbd> 시작
           </span>
           <button type="button" className="ml-auto rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onClose}>
             취소
           </button>
           <button
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
-            disabled={busy || !usable(tool)}
+            disabled={busy || blocked}
             data-testid="create-session-confirm"
           >
-            시작
+            {busy ? '시작하는 중…' : '시작'}
           </button>
         </div>
       </form>
     </div>
-  )
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="mt-3.5">
-      <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">
-        {label}
-        {hint && <span className="ml-1.5 normal-case tracking-normal text-slate/70">{hint}</span>}
-      </h3>
-      {children}
-    </section>
   )
 }

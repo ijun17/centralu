@@ -80,6 +80,19 @@ export class Store {
           tx()
         },
       },
+      {
+        to: 4,
+        run: () => {
+          // FR-7: 모델·권한을 세션별로 기억한다 (대화 도중 변경 가능)
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'model')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`)
+          }
+          if (!cols.some((c) => c.name === 'permission_preset')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN permission_preset TEXT NOT NULL DEFAULT 'normal'`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -120,12 +133,13 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, permission_preset)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @permissionPreset)
          ON CONFLICT(id) DO UPDATE SET
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
-           waiting_since = excluded.waiting_since`,
+           waiting_since = excluded.waiting_since, model = excluded.model,
+           permission_preset = excluded.permission_preset`,
       )
       .run({
         ...s,
@@ -140,6 +154,7 @@ export class Store {
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
                 s.auto_named as autoNamed, s.state, s.archived, s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
+                s.model, s.permission_preset as permissionPreset,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s ORDER BY s.created_at`,
       )

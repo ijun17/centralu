@@ -8,6 +8,8 @@ import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { TabBar } from './TabBar.jsx'
+import { Markdown } from './Markdown.jsx'
+import { SessionSettings } from './SessionSettings.jsx'
 import { GitPanel } from '../git/GitPanel.jsx'
 import { FileTree } from '../files/FileTree.jsx'
 import { CodeViewer } from '../viewer/CodeViewer.jsx'
@@ -89,15 +91,23 @@ export function SessionView() {
           </span>
         )}
 
-        {session.state === 'working' && (
-          <button
-            className="ml-auto rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk"
-            onClick={() => void interrupt(session.id)}
-            data-testid="interrupt"
-          >
-            중단
-          </button>
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <SessionSettings
+            sessionId={session.id}
+            tool={project?.defaultTool ?? 'claude'}
+            model={session.model}
+            preset={session.permissionPreset}
+          />
+          {session.state === 'working' && (
+            <button
+              className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk"
+              onClick={() => void interrupt(session.id)}
+              data-testid="interrupt"
+            >
+              중단
+            </button>
+          )}
+        </span>
       </header>
 
       {tab === 'chat' && (
@@ -332,8 +342,8 @@ function ChatRow({ item }: { item: ChatItem }) {
   }
   if (item.kind === 'assistant') {
     return (
-      <div className="max-w-[75ch] whitespace-pre-wrap text-chalk/90" data-testid="msg-assistant">
-        {item.text}
+      <div data-testid="msg-assistant">
+        <Markdown text={item.text} />
       </div>
     )
   }
