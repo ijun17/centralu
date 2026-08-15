@@ -72,6 +72,8 @@ export interface SystemPort {
   notify(title: string, body: string): Promise<void>
   setBadge(count: number): Promise<void>
   openInIde(path: string, line?: number): Promise<void>
+  /** 디렉토리 선택. 데스크톱은 네이티브 피커, 웹 dev는 경로 입력으로 폴백한다 (FR-19) */
+  pickDirectory(): Promise<string | null>
 }
 
 export type PlatformCapabilities = {

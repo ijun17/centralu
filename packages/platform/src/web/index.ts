@@ -98,6 +98,10 @@ class WebSystemPort implements SystemPort {
   async setBadge(_count: number) {
     /* 브라우저에는 독 뱃지가 없다 */
   }
+  async pickDirectory(): Promise<string | null> {
+    // 브라우저에는 디렉토리 피커가 없다 — dev 전용 폴백
+    return window.prompt('프로젝트 디렉토리의 전체 경로를 입력하세요', '')
+  }
   async openInIde(_path: string, _line?: number) {
     /* Tauri에서만 (capability로 UI가 비활성) */
   }

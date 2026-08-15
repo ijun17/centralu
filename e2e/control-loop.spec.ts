@@ -8,7 +8,8 @@ import { test, expect, type Page } from '@playwright/test'
 /** 브라우저 안의 mock을 조작하는 헬퍼 (window.__mock) */
 async function setup(page: Page, opts: { projects?: string[] } = {}) {
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('sidebar')).toBeVisible()
+  // 프로젝트가 없으면 시작 안내가 먼저 나온다 (FR-19)
+  await expect(page.getByTestId('first-run')).toBeVisible()
   for (const path of opts.projects ?? []) {
     await page.getByTestId('add-project').click()
     await page.getByTestId('project-path-input').fill(path)
@@ -315,4 +316,73 @@ test('이어갈 수 없으면 이유를 알린다 (C-1 폴백, 조용한 실패 
   await page.getByTestId('resume-session').click()
   await expect(page.getByTestId('toast')).toContainText('이어갈 수 없습니다')
   await expect(page.getByTestId('resume-bar')).toBeVisible() // 여전히 안내가 남는다
+})
+
+test('긴 대화는 보이는 것만 그린다 (D-1 가상 스크롤)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '긴 작업')
+
+  // 200턴 분량 주입
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const id = [...m.sessions.keys()][0]
+    for (let i = 0; i < 200; i++) {
+      m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `줄 ${i} — 대화 내용입니다.\n` })
+      m.emit({ type: 'turn_complete', sessionId: id })
+    }
+  })
+
+  // DOM에 200개가 다 그려지면 가상화가 안 된 것이다
+  const rendered = await page.locator('[data-testid="chat-stream"] [data-index]').count()
+  expect(rendered).toBeGreaterThan(0)
+  expect(rendered).toBeLessThan(60)
+})
+
+test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 (D-1)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '긴 작업')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const id = [...m.sessions.keys()][0]
+    for (let i = 0; i < 100; i++) m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `줄 ${i}\n` })
+  })
+
+  const stream = page.getByTestId('chat-stream')
+  await stream.evaluate((el) => { el.scrollTop = 0 }) // 맨 위로 올려 읽는 중
+  const before = await stream.evaluate((el) => el.scrollTop)
+
+  // 새 메시지가 도착해도 끌어내리지 않는다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const id = [...m.sessions.keys()][0]
+    m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '새 줄\n' })
+  })
+  await page.waitForTimeout(300)
+  expect(await stream.evaluate((el) => el.scrollTop)).toBe(before)
+})
+
+test('첫 실행: 도구 상태를 보여주고 다음 행동을 알려준다 (E-1, FR-19)', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('first-run')).toBeVisible()
+  await expect(page.getByTestId('tool-claude')).toContainText('Claude Code')
+
+  // 디렉토리 선택 → 프로젝트 등록 → 관제 화면으로 전환
+  await page.getByTestId('first-run-pick').click()
+  await expect(page.getByTestId('sidebar')).toBeVisible()
+  await expect(page.getByTestId('project-picked')).toBeVisible()
+})
+
+test('첫 실행: 도구가 준비 안 됐으면 설치 명령을 보여준다 (E-1)', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.agents.detect = async () => [
+      { tool: 'claude', installed: false, loggedIn: false, detail: '설치되지 않음' },
+      { tool: 'codex', installed: true, loggedIn: false, detail: 'codex-cli 0.147' },
+    ]
+  })
+  await page.getByTestId('redetect').click()
+  await expect(page.getByTestId('tool-claude')).toContainText('npm i -g @anthropic-ai/claude-code')
+  await expect(page.getByTestId('tool-codex')).toContainText('로그인')
+  await expect(page.getByTestId('first-run-blocked')).toBeVisible()
 })

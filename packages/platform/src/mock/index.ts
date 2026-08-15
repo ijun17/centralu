@@ -31,6 +31,8 @@ export class MockPlatform implements Platform {
   private idc = 0
   private now: () => number
 
+  /** 테스트용: 디렉토리 피커가 돌려줄 값 */
+  nextPickedDirectory: string | null = '/tmp/picked'
   /** 테스트용: 재개 불가로 만들 세션들 */
   readonly unresumable = new Set<string>()
   readonly notifications: { title: string; body: string }[] = []
@@ -197,6 +199,7 @@ export class MockPlatform implements Platform {
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })
     },
+    pickDirectory: async () => this.nextPickedDirectory,
   }
 
   async dispose(): Promise<void> {

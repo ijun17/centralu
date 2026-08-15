@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { shouldCollapseCard, shouldMarkRead } from '@cc/core'
+import type { RefObject } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/core'
 import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
@@ -28,11 +30,6 @@ export function SessionView() {
     }, 3000)
     return () => clearTimeout(t)
   }, [session, chat.length, markRead])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [chat])
 
   if (!session) {
     return (
@@ -85,22 +82,12 @@ export function SessionView() {
         )}
       </header>
 
-      <div
-        ref={scrollRef}
-        className="flex-1 space-y-3 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
-        data-testid="chat-stream"
-      >
-        {chat.map((item) => (
-          <ChatRow key={item.seq} item={item} />
-        ))}
-        {session.pendingApproval && (
-          <ApprovalCard
-            sessionId={session.id}
-            requestId={session.pendingApproval.requestId}
-            detail={session.pendingApproval.detail}
-          />
-        )}
-      </div>
+      <ChatStream
+        scrollRef={scrollRef}
+        chat={chat}
+        pending={session.pendingApproval}
+        sessionId={session.id}
+      />
 
       {/*
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
@@ -150,6 +137,76 @@ export function SessionView() {
         </p>
       </form>
     </section>
+  )
+}
+
+/**
+ * 대화 스트림 — 가상 스크롤 (D-1).
+ *
+ * 세션 하나가 수백 턴이 되면 전부 렌더하는 구조는 버틴다고 해도 스크롤이 끊긴다.
+ * 화면에 보이는 것만 그리되, 두 가지를 지킨다:
+ *   1. 스트리밍 중 자동으로 바닥에 붙되, **사용자가 위로 올려 읽는 중이면 방해하지 않는다**
+ *   2. 승인 카드는 언제나 마지막 항목 — 대기 중인 것을 스크롤로 찾게 하지 않는다
+ */
+function ChatStream({
+  scrollRef,
+  chat,
+  pending,
+  sessionId,
+}: {
+  scrollRef: RefObject<HTMLDivElement | null>
+  chat: ChatItem[]
+  pending: SessionSummary['pendingApproval']
+  sessionId: string
+}) {
+  const stickToBottom = useRef(true)
+
+  const virtualizer = useVirtualizer({
+    count: chat.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 64,
+    overscan: 12,
+    getItemKey: (i) => chat[i]?.seq ?? i,
+  })
+
+  // 사용자가 위로 올렸는지 추적 — 올려둔 동안에는 끌어내리지 않는다
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }
+
+  useEffect(() => {
+    if (!stickToBottom.current) return
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chat.length, pending, scrollRef])
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      className="flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
+      data-testid="chat-stream"
+    >
+      <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+        {virtualizer.getVirtualItems().map((v) => (
+          <div
+            key={v.key}
+            ref={virtualizer.measureElement}
+            data-index={v.index}
+            className="absolute left-0 top-0 w-full pb-3"
+            style={{ transform: `translateY(${v.start}px)` }}
+          >
+            <ChatRow item={chat[v.index]!} />
+          </div>
+        ))}
+      </div>
+
+      {pending && (
+        <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
+      )}
+    </div>
   )
 }
 

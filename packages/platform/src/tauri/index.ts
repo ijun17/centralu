@@ -70,6 +70,10 @@ class TauriSystemPort implements SystemPort {
   async openInIde(path: string, line?: number): Promise<void> {
     await invoke('open_in_ide', { path, line })
   }
+
+  async pickDirectory(): Promise<string | null> {
+    return pickDirectory()
+  }
 }
 
 /** 창을 앞으로 (알림 클릭·전역 단축키) */

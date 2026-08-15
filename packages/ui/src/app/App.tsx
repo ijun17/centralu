@@ -9,6 +9,7 @@ import { SessionView } from '../features/session/SessionView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
 import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
+import { FirstRun } from '../features/onboarding/FirstRun.jsx'
 import { Kbd } from '../components/primitives.jsx'
 
 export function App({ platform }: { platform: Platform }) {
@@ -40,15 +41,24 @@ export function App({ platform }: { platform: Platform }) {
       <div className="relative flex h-screen flex-col bg-void text-chalk">
         <TopBar />
         <ApprovalBanner />
-        <div className="flex min-h-0 flex-1">
-          <Sidebar />
-          <SessionView />
-        </div>
+        <Body />
         <Inbox />
         <Toast />
         <GlobalKeys />
       </div>
     </PlatformProvider>
+  )
+}
+
+/** 프로젝트가 하나도 없으면 시작 안내가 화면을 대신한다 (FR-19) */
+function Body() {
+  const hasProjects = useStore((s) => Object.keys(s.projects).length > 0)
+  if (!hasProjects) return <FirstRun />
+  return (
+    <div className="flex min-h-0 flex-1">
+      <Sidebar />
+      <SessionView />
+    </div>
   )
 }
 
