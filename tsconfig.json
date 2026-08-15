@@ -34,6 +34,9 @@
       ],
       "@cc/ui": [
         "packages/ui/src/index.ts"
+      ],
+      "@cc/platform/tauri": [
+        "packages/platform/src/tauri/index.ts"
       ]
     }
   },

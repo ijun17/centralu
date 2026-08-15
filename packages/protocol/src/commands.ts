@@ -35,6 +35,8 @@ export const SessionInfo = z.object({
   createdAt: z.number(),
   /** 대기 시작 시각 — 인박스 정렬·경과 시간 표시 (FR-12/15) */
   waitingSince: z.number().nullable().default(null),
+  /** 프로세스가 살아 있는가. false면 대화를 이어가려면 재개가 필요하다 (FR-10) */
+  live: z.boolean().default(true),
 })
 export type SessionInfo = z.infer<typeof SessionInfo>
 
@@ -80,6 +82,10 @@ export const RpcMethods = {
   'agents.archiveSession': {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  'agents.resumeSession': {
+    params: z.object({ sessionId: z.string() }),
+    result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
   'agents.capabilities': { params: z.object({ tool: ToolName }), result: AdapterCapabilities },
   'agents.detect': {

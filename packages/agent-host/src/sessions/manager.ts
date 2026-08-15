@@ -54,7 +54,7 @@ export class SessionManager {
   }
 
   listSessions(): SessionInfo[] {
-    return [...this.meta.values()]
+    return [...this.meta.values()].map((s) => ({ ...s, live: this.handles.has(s.id) }))
   }
 
   /** 같은 디렉토리에서 실행 중인 활성 세션 (FR-2 동시 세션 경고의 근거) */
@@ -71,7 +71,7 @@ export class SessionManager {
       id, projectId: params.projectId, tool: params.tool, externalId: null,
       name: params.initialPrompt ? truncate(params.initialPrompt) : '새 세션',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: Date.now(), waitingSince: null,
+      createdAt: Date.now(), waitingSince: null, live: true,
     }
     this.meta.set(id, info)
     this.store.upsertSession(info)
@@ -87,6 +87,49 @@ export class SessionManager {
 
     if (params.initialPrompt) handle.send(params.initialPrompt)
     return info
+  }
+
+  /**
+   * 기존 세션을 되살린다 (FR-10). host를 껐다 켜도 대화를 이어가기 위한 경로.
+   *
+   * 프로세스는 사라졌지만 external_id와 대화 기록은 store에 남아 있다.
+   * 어댑터의 resume이 성공하면 같은 대화를 이어가고, 실패하면 **조용히 죽지 않고**
+   * `resumable: false`로 알린다 — UI가 "기록 보기 + 새 세션"을 안내할 수 있도록.
+   */
+  async resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+
+    // 이미 살아 있으면 그대로 쓴다 (중복 프로세스를 만들지 않는다)
+    if (this.handles.has(sessionId)) return { session: m, resumed: true }
+
+    const adapter = this.adapters.get(m.tool)
+    if (!adapter) return { session: m, resumed: false, reason: `${m.tool} 어댑터가 없습니다` }
+    if (!adapter.capabilities.resume) return { session: m, resumed: false, reason: `${m.tool}는 재개를 지원하지 않습니다` }
+    if (!m.externalId) return { session: m, resumed: false, reason: '재개에 필요한 세션 식별자가 없습니다' }
+
+    const project = this.store.listProjects().find((p) => p.id === m.projectId)
+    if (!project) return { session: m, resumed: false, reason: '프로젝트를 찾을 수 없습니다' }
+
+    try {
+      const handle = await adapter.createSession(
+        { sessionId, cwd: project.path, permissionPreset: 'normal', resumeExternalId: m.externalId },
+        (e) => this.onEvent(e),
+      )
+      this.handles.set(sessionId, handle)
+      m.state = 'idle'
+      m.waitingSince = null
+      this.store.upsertSession(m)
+      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
+      return { session: m, resumed: true }
+    } catch (err) {
+      return { session: m, resumed: false, reason: (err as Error).message }
+    }
+  }
+
+  /** 프로세스가 살아 있는 세션 (UI가 "이어갈 수 있는지"를 아는 근거) */
+  isLive(sessionId: string): boolean {
+    return this.handles.has(sessionId)
   }
 
   /** 이벤트 수신 → 메타 갱신 → 메시지 영속화 → 전파 */

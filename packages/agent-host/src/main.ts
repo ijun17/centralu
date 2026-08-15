@@ -63,3 +63,22 @@ const shutdown = async () => {
 }
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
+
+/**
+ * 부모(Tauri 수퍼바이저)가 사라지면 스스로 종료한다.
+ *
+ * 수퍼바이저가 stdin을 파이프로 열어두므로, 앱이 어떤 이유로 죽든 — 정상 종료든
+ * 크래시든 SIGKILL이든 — 이 파이프가 닫히고 EOF가 온다. 종료 훅에만 기대면
+ * 강제 종료 시 host가 고아로 남아 포트를 물고 있게 된다 (실측으로 확인).
+ * 터미널에서 직접 띄운 경우(TTY)에는 적용하지 않는다.
+ */
+if (!process.stdin.isTTY) {
+  process.stdin.resume()
+  const onParentGone = () => {
+    console.error('[agent-host] 부모 프로세스가 종료되어 함께 종료합니다')
+    void shutdown()
+  }
+  process.stdin.on('end', onParentGone)
+  process.stdin.on('close', onParentGone)
+  process.stdin.on('error', onParentGone)
+}

@@ -31,6 +31,8 @@ export class MockPlatform implements Platform {
   private idc = 0
   private now: () => number
 
+  /** 테스트용: 재개 불가로 만들 세션들 */
+  readonly unresumable = new Set<string>()
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
   badge = 0
@@ -88,7 +90,7 @@ export class MockPlatform implements Platform {
       const info: SessionInfo = {
         id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`,
         name: params.initialPrompt?.slice(0, 40) ?? '새 세션', autoNamed: true, state: 'idle',
-        archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null,
+        archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
       }
       this.sessions.set(id, info)
       if (params.initialPrompt) await this.agents.send(id, params.initialPrompt)
@@ -122,6 +124,16 @@ export class MockPlatform implements Platform {
         s.waitingSince = null
       }
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
+    },
+    resumeSession: async (sessionId: string) => {
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      if (this.unresumable.has(sessionId)) {
+        return { session: { ...s }, resumed: false, reason: '이 세션은 재개할 수 없습니다' }
+      }
+      s.live = true
+      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
+      return { session: { ...s }, resumed: true }
     },
     rename: async (sessionId: string, name: string) => {
       const s = this.sessions.get(sessionId)

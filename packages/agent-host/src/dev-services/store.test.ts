@@ -8,7 +8,7 @@ function seeded() {
   s.upsertSession({
     id: 's1', projectId: 'p1', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: Date.now(), waitingSince: null,
+    createdAt: Date.now(), waitingSince: null, live: true,
   })
   return s
 }

@@ -39,6 +39,11 @@ class WebAgentPort implements AgentPort {
   async archiveSession(sessionId: string) {
     await this.rpc.call('agents.archiveSession', { sessionId })
   }
+  resumeSession(sessionId: string) {
+    return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.resumeSession', {
+      sessionId,
+    })
+  }
   async rename(sessionId: string, name: string) {
     await this.rpc.call('sessions.rename', { sessionId, name })
   }

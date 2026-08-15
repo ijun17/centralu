@@ -72,7 +72,7 @@ export class Store {
          FROM sessions s ORDER BY s.created_at`,
       )
       .all() as (Omit<SessionInfo, 'autoNamed' | 'archived'> & { autoNamed: number; archived: number })[]
-    return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived }))
+    return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived, live: false }))
   }
 
   appendMessages(msgs: StoredMessage[]): void {

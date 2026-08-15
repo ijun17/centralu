@@ -6,10 +6,14 @@
   "exports": {
     "./ports": "./src/ports/index.ts",
     "./web": "./src/web/index.ts",
-    "./mock": "./src/mock/index.ts"
+    "./mock": "./src/mock/index.ts",
+    "./tauri": "./src/tauri/index.ts"
   },
   "dependencies": {
-    "@cc/protocol": "workspace:*"
+    "@cc/protocol": "workspace:*",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-notification": "^2.3.3"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

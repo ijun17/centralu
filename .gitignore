@@ -1,7 +1,22 @@
+# 의존성·빌드 산출물
 node_modules/
 dist/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/WixTools/
+
+# 테스트 산출물
+e2e/test-results/
+playwright-report/
+.playwright-mcp/
+
+# 스파이크 실행 결과 (findings 문서는 docs/spikes에 남긴다)
+spike/**/out/
+
+# 로컬 도구·로그
 .omc/
 *.log
 .DS_Store
-spike/**/out/
-.playwright-mcp/

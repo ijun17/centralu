@@ -13,9 +13,27 @@ import { Kbd } from '../components/primitives.jsx'
 
 export function App({ platform }: { platform: Platform }) {
   const attach = useStore((s) => s.attach)
+  const setAppFocused = useStore((s) => s.setAppFocused)
+
   useEffect(() => {
     void attach(platform)
   }, [platform, attach])
+
+  // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
+  useEffect(() => {
+    const onFocus = () => setAppFocused(true)
+    const onBlur = () => setAppFocused(false)
+    const onVisibility = () => setAppFocused(document.visibilityState === 'visible')
+    setAppFocused(document.hasFocus() && document.visibilityState === 'visible')
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [setAppFocused])
 
   return (
     <PlatformProvider platform={platform}>
@@ -153,8 +171,18 @@ function GlobalKeys() {
       }
       if (!typing && e.key === 'Escape') toggleInbox(false)
     }
+    // 전역 단축키(앱 밖에서 누른 ⌘⇧A)도 같은 동작으로 들어온다
+    const onExternalNext = () => {
+      const st = useStore.getState()
+      const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
+      if (next) focusSession(next)
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('cc:next-waiting', onExternalNext)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('cc:next-waiting', onExternalNext)
+    }
   }, [toggleInbox, focusSession])
 
   return null

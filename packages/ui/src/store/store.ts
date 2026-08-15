@@ -1,8 +1,12 @@
 import { create } from 'zustand'
 import type { NormalizedEvent, ProjectInfo, SessionInfo, StoredMessage } from '@cc/protocol'
 import {
+  allDoneNotification,
   applyEvent,
   archive as archiveSession,
+  badgeCount,
+  countWaiting,
+  notificationFor,
   bumpSeq,
   initialSession,
   markRead as markReadPure,
@@ -34,10 +38,12 @@ export type AppState = {
   tab: Tab
   inboxOpen: boolean
   toast: string | null
+  appFocused: boolean
 
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
   focusSession(id: string | null): void
+  setAppFocused(focused: boolean): void
   loadHistory(sessionId: string): Promise<void>
   setTab(t: Tab): void
   toggleInbox(open?: boolean): void
@@ -68,6 +74,7 @@ export const useStore = create<AppState>((set, get) => ({
   tab: 'chat',
   inboxOpen: false,
   toast: null,
+  appFocused: true,
 
   async attach(platform) {
     set({ platform })
@@ -91,6 +98,10 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
 
+  setAppFocused(focused) {
+    set({ appFocused: focused })
+  },
+
   dispatchEvent(e) {
     const sessionId = e.sessionId
     if (!sessionId) return
@@ -110,6 +121,24 @@ export const useStore = create<AppState>((set, get) => ({
       sessions: { ...st.sessions, [sessionId]: withSeq },
       chat: { ...st.chat, [sessionId]: chat },
     }))
+
+    // 상태가 바뀌었을 때만 알림을 판정한다 (판정은 core, 전달은 system 포트)
+    if (withSeq.state !== cur.state) {
+      const st = get()
+      const platform = st.platform
+      if (!platform) return
+
+      const ctx = { appFocused: st.appFocused }
+      const after = Object.values(st.sessions)
+      const before = after.map((x) => (x.id === sessionId ? cur : x))
+
+      const one = notificationFor({ id: sessionId, name: withSeq.name, state: withSeq.state }, cur.state, ctx)
+      const all = allDoneNotification(after, before, ctx)
+      // 개별 알림이 있으면 그것만 — 같은 순간에 두 번 울리지 않는다
+      const notice = one ?? all
+      if (notice) void platform.system.notify(notice.title, notice.body)
+      void platform.system.setBadge(badgeCount(countWaiting(after)))
+    }
   },
 
   focusSession(id) {

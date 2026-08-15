@@ -41,6 +41,8 @@ export interface AgentPort {
   ): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archiveSession(sessionId: string): Promise<void>
+  /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
+  resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
   listSessions(): Promise<SessionInfo[]>
