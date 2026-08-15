@@ -417,7 +417,7 @@ test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async (
   await newSession(page, 'alpha', '긴 세션')
   await newSession(page, 'alpha', '다른 세션')
 
-  const [longId] = await page.evaluate(() => Object.keys((window as any).__store.getState().sessions))
+  const longId: string = (await page.evaluate(() => Object.keys((window as any).__store.getState().sessions)))[0]!
   await page.evaluate((id) => {
     const m = (window as any).__mock
     const store = (window as any).__store
