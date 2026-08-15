@@ -33,6 +33,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const focusSession = useStore((s) => s.focusSession)
   const sessions = useSessionsOf(projectId)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const deleteSession = useStore((s) => s.deleteSession)
 
   if (!project) return null
 
@@ -93,11 +95,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           const unread = s.lastSeq > s.lastReadSeq
           const focused = focusedSessionId === s.id
           return (
-            <li key={s.id}>
+            <li key={s.id} className="group/row relative">
               <button
                 onClick={() => focusSession(s.id)}
                 data-testid={`session-row-${s.id}`}
-                className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-[13px] transition-colors ${
+                className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-8 text-left text-[13px] transition-colors ${
                   focused
                     ? 'border-l-ash bg-graphite/40 text-chalk'
                     : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
@@ -113,12 +115,76 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                   />
                 )}
               </button>
+              {/* 삭제는 되돌릴 수 없으므로 확인을 받는다. 평소엔 숨어 있다가 호버·포커스에만 나타난다 */}
+              <button
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-[11px] text-slate opacity-0 transition-opacity hover:text-chalk focus-visible:opacity-100 group-hover/row:opacity-100"
+                data-testid={`delete-session-${s.id}`}
+                title="세션 삭제 (기록도 함께 사라집니다)"
+                aria-label={`${s.name} 삭제`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirming(s.id)
+                }}
+              >
+                ✕
+              </button>
             </li>
           )
         })}
       </ul>
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => setNewSessionOpen(false)} />}
+
+      {confirming && (
+        <ConfirmDelete
+          name={sessions.find((s) => s.id === confirming)?.name ?? '세션'}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            void deleteSession(confirming)
+            setConfirming(null)
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+/** 삭제 확인 — 기록까지 사라지므로 한 번 묻는다 */
+function ConfirmDelete({
+  name,
+  onConfirm,
+  onCancel,
+}: {
+  name: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      className="absolute inset-0 z-40 flex items-center justify-center bg-void/80 backdrop-blur-[2px]"
+      onClick={onCancel}
+      data-testid="confirm-delete"
+    >
+      <div
+        className="w-[380px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-[13px] text-chalk">세션을 삭제할까요?</p>
+        <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
+        <p className="mt-1 text-[11px] text-slate">대화 기록과 첨부까지 사라집니다. 되돌릴 수 없습니다.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
+            취소
+          </button>
+          <button
+            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
+            onClick={onConfirm}
+            data-testid="confirm-delete-yes"
+          >
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

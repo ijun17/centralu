@@ -51,6 +51,8 @@ export interface AgentPort {
   ): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archiveSession(sessionId: string): Promise<void>
+  /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */
+  deleteSession(sessionId: string): Promise<void>
   /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
   resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /** 모델·권한을 대화 도중에 바꾼다 (FR-7) */

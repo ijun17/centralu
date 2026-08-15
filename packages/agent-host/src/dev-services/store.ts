@@ -162,6 +162,20 @@ export class Store {
     return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived, live: false }))
   }
 
+  /**
+   * 세션을 완전히 지운다 (대화·검색 인덱스·승인 규칙까지).
+   * 아카이브는 "치우되 남긴다"이고 이건 "없앤다"다 — 둘 다 필요하다.
+   */
+  deleteSession(sessionId: string): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM messages_fts WHERE session_id = ?`).run(sessionId)
+      this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(sessionId)
+      this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(sessionId)
+      this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId)
+    })
+    tx()
+  }
+
   appendMessages(msgs: StoredMessage[]): void {
     const stmt = this.db.prepare(
       `INSERT OR REPLACE INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)`,

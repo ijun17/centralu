@@ -67,6 +67,12 @@ class ClaudeSession implements SessionHandle {
       options: {
         cwd: this.opts.cwd,
         model: this.opts.model,
+        /**
+         * SDK가 자체 동봉한 네이티브 CLI를 찾는데, host를 번들하면 그 경로가 깨진다
+         * ("Native CLI binary for darwin-arm64 not found" — 배포 앱에서 세션 생성이 전부 실패했다).
+         * 사용자가 이미 설치해 쓰는 `claude`를 직접 가리킨다. dev에서도 동일하게 동작한다.
+         */
+        pathToClaudeCodeExecutable: whichTool('claude') ?? undefined,
         includePartialMessages: true,
         permissionMode: PRESET_MODE[preset],
         resume: this.opts.resumeExternalId,

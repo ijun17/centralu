@@ -773,3 +773,32 @@ test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 
   })
   await expect(page.getByTestId('git-denied')).toContainText('권한')
 })
+
+test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '지울 세션')
+  const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toContainText('되돌릴 수 없습니다')
+  await page.getByTestId('confirm-delete-yes').click()
+
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(0)
+})
+
+test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러도 반응 없어 보이던 문제)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.agents.createSession = async () => {
+      throw new Error('claude 세션을 시작하지 못했습니다: Native CLI binary not found')
+    }
+  })
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('create-session-confirm').click()
+
+  // 토스트는 사라지지만 이건 남는다
+  await expect(page.getByTestId('create-session-error')).toContainText('시작하지 못했습니다')
+  await expect(page.getByTestId('new-session-dialog')).toBeVisible()
+})

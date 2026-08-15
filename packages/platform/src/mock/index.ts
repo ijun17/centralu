@@ -222,6 +222,11 @@ export class MockPlatform implements Platform {
       }
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
     },
+    deleteSession: async (sessionId: string) => {
+      this.sessions.delete(sessionId)
+      this.messages.delete(sessionId)
+      this.emit({ type: 'session_deleted', sessionId })
+    },
     updateSettings: async (sessionId: string, s: { model?: string | null; permissionPreset?: PermissionPreset }) => {
       const sess = this.sessions.get(sessionId)
       if (!sess) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })

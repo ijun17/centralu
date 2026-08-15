@@ -55,6 +55,9 @@ class WebAgentPort implements AgentPort {
   updateSettings(sessionId: string, settings: { model?: string | null; permissionPreset?: PermissionPreset }) {
     return this.rpc.call<SessionInfo>('agents.updateSettings', { sessionId, ...settings })
   }
+  async deleteSession(sessionId: string) {
+    await this.rpc.call('agents.deleteSession', { sessionId })
+  }
   resumeSession(sessionId: string) {
     return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.resumeSession', {
       sessionId,

@@ -20,13 +20,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const platform = usePlatform()
   const project = useStore((s) => s.projects[projectId])
   const createSession = useStore((s) => s.createSession)
-  const setToast = useStore((s) => s.setToast)
   const running = useSessionsOf(projectId).filter((s) => !s.archived)
 
   const [tools, setTools] = useState<Detection[] | null>(null)
   const [tool, setTool] = useState<ToolName>(project?.defaultTool ?? 'claude')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // 다이얼로그를 열 때마다 감지한다 — 사용자가 방금 설치·로그인했을 수 있다
   const detect = useCallback(async () => {
@@ -60,11 +60,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         onSubmit={async (e) => {
           e.preventDefault()
           setBusy(true)
+          setError(null)
           try {
             await createSession(projectId, { tool, initialPrompt: prompt.trim() || undefined })
             onClose()
           } catch (err) {
-            setToast((err as Error).message)
+            // 토스트는 2.5초 뒤 사라져서 '눌러도 아무 일이 없다'로 보인다 — 모달 안에 남긴다
+            setError((err as Error).message)
           } finally {
             setBusy(false)
           }
@@ -124,6 +126,12 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             data-testid="initial-prompt"
           />
         </section>
+
+        {error && (
+          <p className="mt-3 rounded border border-edge bg-panel px-2.5 py-2 text-[11px] leading-relaxed text-chalk" data-testid="create-session-error">
+            {error}
+          </p>
+        )}
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] text-slate">

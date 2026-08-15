@@ -28,7 +28,7 @@ import {
   gitPush,
 } from '../dev-services/git.js'
 import { listDir, readTextFile } from '../dev-services/fs.js'
-import { saveAttachment } from '../dev-services/attachments.js'
+import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -89,16 +89,24 @@ export class SessionManager {
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, permissionPreset: params.permissionPreset,
     }
+    // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
+    // 목록에는 보이지만 말을 걸 수 없는 '유령 세션'이 DB에 남는다 (실측으로 확인).
+    let handle: SessionHandle
+    try {
+      handle = await adapter.createSession(
+        {
+          sessionId: id, cwd: params.cwd, model: params.model,
+          permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
+        },
+        (e) => this.onEvent(e),
+      )
+    } catch (err) {
+      const msg = (err as Error).message
+      throw Object.assign(new Error(`${params.tool} 세션을 시작하지 못했습니다: ${msg}`), { code: 'internal' })
+    }
+
     this.meta.set(id, info)
     this.store.upsertSession(info)
-
-    const handle = await adapter.createSession(
-      {
-        sessionId: id, cwd: params.cwd, model: params.model,
-        permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
-      },
-      (e) => this.onEvent(e),
-    )
     this.handles.set(id, handle)
     handle.applyRules?.(this.rulesFor(id, params.projectId))
 
@@ -156,6 +164,19 @@ export class SessionManager {
     } catch (err) {
       return { session: m, resumed: false, reason: (err as Error).message }
     }
+  }
+
+  /** 세션을 완전히 지운다 (프로세스 종료 + 기록·첨부 삭제) */
+  async deleteSession(sessionId: string): Promise<void> {
+    const handle = this.handles.get(sessionId)
+    if (handle) {
+      await handle.dispose().catch(() => {})
+      this.handles.delete(sessionId)
+    }
+    this.meta.delete(sessionId)
+    this.store.deleteSession(sessionId)
+    await clearAttachments(sessionId).catch(() => {})
+    this.emit({ type: 'session_deleted', sessionId })
   }
 
   /**

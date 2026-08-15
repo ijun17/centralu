@@ -99,6 +99,11 @@ export const RpcMethods = {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /** 세션을 완전히 지운다 — 아카이브와 달리 대화 기록·첨부까지 사라진다 */
+  'agents.deleteSession': {
+    params: z.object({ sessionId: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'agents.resumeSession': {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),

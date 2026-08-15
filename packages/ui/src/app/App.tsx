@@ -77,9 +77,17 @@ function TopBar() {
   const [addOpen, setAddOpen] = useState(false)
   const waiting = counts.approval + counts.error + counts.input
 
+  // macOS 신호등(닫기·최소화·전체화면)이 왼쪽 위를 차지하므로 pl로 그만큼 비운다.
+  // 타이틀바를 숨겼기 때문에 이 헤더가 유일한 드래그 손잡이다 —
+  // data-tauri-drag-region이 없으면 창을 옮길 수 없다 (도그푸딩에서 지적됨).
   return (
-    <header className="flex items-center gap-4 border-b border-edge bg-pit px-4 py-2">
-      <span className="text-[12px] font-semibold tracking-[0.16em] text-chalk">CONTROL CENTER</span>
+    <header
+      className="flex items-center gap-4 border-b border-edge bg-pit py-2 pr-4 pl-[86px]"
+      data-tauri-drag-region
+    >
+      <span className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk" data-tauri-drag-region>
+        CONTROL CENTER
+      </span>
 
       <button
         className="group flex items-center gap-2.5 rounded px-2 py-1 transition-colors hover:bg-graphite/50"

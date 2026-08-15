@@ -73,6 +73,7 @@ export type AppState = {
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archive(sessionId: string): Promise<void>
+  deleteSession(sessionId: string): Promise<void>
   updateSessionSettings(
     sessionId: string,
     s: { model?: string | null; permissionPreset?: PermissionPreset },
@@ -155,6 +156,23 @@ export const useStore = create<AppState>((set, get) => ({
   dispatchEvent(e) {
     const sessionId = e.sessionId
     if (!sessionId) return
+
+    // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
+    if (e.type === 'session_deleted') {
+      set((s) => {
+        const sessions = { ...s.sessions }
+        const chat = { ...s.chat }
+        delete sessions[sessionId]
+        delete chat[sessionId]
+        return {
+          sessions,
+          chat,
+          focusedSessionId: s.focusedSessionId === sessionId ? null : s.focusedSessionId,
+        }
+      })
+      return
+    }
+
     const cur = get().sessions[sessionId]
     if (!cur) {
       // 세션 등록 전에 도착한 이벤트 (초기 프롬프트가 곧바로 스트리밍되는 경우).
@@ -365,6 +383,19 @@ export const useStore = create<AppState>((set, get) => ({
 
   async interrupt(sessionId) {
     await get().platform!.agents.interrupt(sessionId)
+  },
+
+  /** 세션 완전 삭제. 되돌릴 수 없으므로 호출 전에 확인을 받는다 (UI 책임) */
+  async deleteSession(sessionId) {
+    const platform = get().platform
+    if (!platform) return
+    const name = get().sessions[sessionId]?.name ?? '세션'
+    try {
+      await platform.agents.deleteSession(sessionId)
+      set({ toast: `삭제했습니다: ${name}` })
+    } catch (e) {
+      set({ toast: `삭제하지 못했습니다: ${(e as Error).message}` })
+    }
   },
 
   async updateSessionSettings(sessionId, s) {
