@@ -10,7 +10,7 @@ import type {
   StoredMessage,
   ToolName,
 } from '@cc/protocol'
-import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe } from '../ports/index.js'
+import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
  * 인메모리 구현 (docs/platform-abstraction.md §6).
@@ -200,6 +200,16 @@ export class MockPlatform implements Platform {
       this.opened.push({ path, line })
     },
     pickDirectory: async () => this.nextPickedDirectory,
+  }
+
+  /** 테스트가 들여다볼 수 있게 공개 */
+  workspaceSnapshot: WorkspaceSnapshot | null = null
+
+  readonly workspace = {
+    save: async (s: WorkspaceSnapshot) => {
+      this.workspaceSnapshot = s
+    },
+    load: async () => this.workspaceSnapshot,
   }
 
   async dispose(): Promise<void> {

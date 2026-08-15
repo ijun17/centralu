@@ -9,7 +9,7 @@ import type {
   StoredMessage,
   ToolName,
 } from '@cc/protocol'
-import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe } from '../ports/index.js'
+import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
 
 /**
@@ -116,6 +116,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     agents: new WebAgentPort(rpc),
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
+    workspace: {
+      async save(snapshot) {
+        await rpc.call('workspace.save', { layout: snapshot })
+      },
+      async load() {
+        return (await rpc.call('workspace.load', {})) as WorkspaceSnapshot | null
+      },
+    },
     capabilities: {
       osNotifications: typeof Notification !== 'undefined',
       dockBadge: false,

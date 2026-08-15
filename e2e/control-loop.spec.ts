@@ -386,3 +386,60 @@ test('첫 실행: 도구가 준비 안 됐으면 설치 명령을 보여준다 (
   await expect(page.getByTestId('tool-codex')).toContainText('로그인')
   await expect(page.getByTestId('first-run-blocked')).toBeVisible()
 })
+
+test('보던 세션으로 돌아온다 (C-3 워크스페이스 스냅샷)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 번째')
+  await newSession(page, 'alpha', '두 번째')
+
+  // 첫 번째 세션을 보다가 앱을 껐다고 하자
+  const firstId = await page.evaluate(() => {
+    const store = (window as any).__store
+    const ids = Object.keys(store.getState().sessions)
+    store.getState().focusSession(ids[0])
+    return ids[0]
+  })
+  const snapshot = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
+  expect(snapshot?.focusedSessionId).toBe(firstId)
+
+  // 다시 attach하면 (앱 재시작) 그 세션이 열려 있다
+  await page.evaluate(async () => {
+    const store = (window as any).__store
+    const m = (window as any).__mock
+    store.setState({ focusedSessionId: null })
+    await store.getState().attach(m)
+  })
+  await expect(page.getByTestId('session-name')).toContainText('첫 번째')
+})
+
+test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '긴 세션')
+  await newSession(page, 'alpha', '다른 세션')
+
+  const [longId] = await page.evaluate(() => Object.keys((window as any).__store.getState().sessions))
+  await page.evaluate((id) => {
+    const m = (window as any).__mock
+    const store = (window as any).__store
+    store.getState().focusSession(id)
+    // 델타는 한 메시지로 합쳐지므로, 항목이 실제로 늘어나는 도구 호출로 채운다
+    for (let i = 0; i < 300; i++) {
+      m.emit({
+        type: 'tool_call', sessionId: id, callId: `c${i}`,
+        summary: { tool: 'Read', title: `파일 ${i}`, readOnly: true, paths: [] },
+      })
+    }
+  }, longId)
+
+  const before = await page.evaluate((id) => (window as any).__store.getState().chat[id].length, longId)
+  expect(before).toBeGreaterThan(100)
+
+  // 다른 세션으로 옮기면 메모리에서 잘린다
+  await page.evaluate(() => {
+    const store = (window as any).__store
+    const ids = Object.keys(store.getState().sessions)
+    store.getState().focusSession(ids[1])
+  })
+  const after = await page.evaluate((id) => (window as any).__store.getState().chat[id].length, longId)
+  expect(after).toBeLessThanOrEqual(50)
+})

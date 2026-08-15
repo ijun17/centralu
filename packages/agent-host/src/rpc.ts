@@ -35,6 +35,11 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       return a.capabilities
     },
     'agents.detect': async () => Promise.all([...adapters.values()].map((a) => a.detect())),
+    'workspace.save': async (p) => {
+      mgr.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)
+      return { ok: true as const }
+    },
+    'workspace.load': async () => mgr.loadWorkspace(),
     'projects.add': async (p) => mgr.addProject(RpcMethods['projects.add'].params.parse(p).path),
     'projects.list': async () => mgr.listProjects(),
     'projects.gitStatus': async (p) => {

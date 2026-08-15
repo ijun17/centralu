@@ -225,6 +225,7 @@ fn host_command() -> (String, Vec<String>) {
             format!("{root}/packages/agent-host/src/main.ts"),
             "--port".into(),
             "0".into(),
+            "--watch-parent".into(),
         ],
     )
 }

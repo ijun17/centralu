@@ -104,6 +104,29 @@ export class Store {
     this.db.prepare(`UPDATE sessions SET last_read_seq = MAX(last_read_seq, ?) WHERE id = ?`).run(seq, sessionId)
   }
 
+  /**
+   * 워크스페이스 스냅샷 (C-3). 종료 시점이 아니라 변화 시마다 저장하므로
+   * 크래시해도 마지막 상태가 남는다 (docs/state-management.md §5).
+   */
+  saveWorkspace(layout: unknown): void {
+    this.db
+      .prepare(
+        `INSERT INTO workspace (id, layout, updated_at) VALUES (1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET layout = excluded.layout, updated_at = excluded.updated_at`,
+      )
+      .run(JSON.stringify(layout), Date.now())
+  }
+
+  loadWorkspace<T = unknown>(): T | null {
+    const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as { layout: string } | undefined
+    if (!row) return null
+    try {
+      return JSON.parse(row.layout) as T
+    } catch {
+      return null
+    }
+  }
+
   addApprovalRule(r: { scope: string; projectId?: string; sessionId?: string; matcher: string; decision: string }): void {
     this.db
       .prepare(`INSERT INTO approval_rules (scope, project_id, session_id, matcher, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)`)

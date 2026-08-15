@@ -94,6 +94,11 @@ export const RpcMethods = {
     params: z.object({}),
     result: z.array(z.object({ tool: ToolName, installed: z.boolean(), loggedIn: z.boolean(), detail: z.string() })),
   },
+  'workspace.save': {
+    params: z.object({ layout: z.record(z.string(), z.unknown()) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
   'projects.add': { params: z.object({ path: z.string() }), result: ProjectInfo },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },
   'projects.gitStatus': { params: z.object({ projectId: z.string() }), result: ProjectInfo },

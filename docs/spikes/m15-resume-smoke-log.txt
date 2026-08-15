@@ -1,0 +1,10 @@
+[resume] 1차 응답: "OK"
+[resume] ✅ 첫 턴 후 재개 식별자가 저장된다 — 15ba73f9-0447-4a69-9754-7412aba568ac
+[resume] host 종료됨 — 프로세스는 사라지고 기록만 남았다
+[resume] ✅ 재시작 후에도 세션이 목록에 남는다
+[resume] ✅ 프로세스가 없으므로 live=false로 표시된다 — live=false
+[resume] ✅ S6 없는 세션 재개는 오류로 알린다 — 세션을 찾을 수 없습니다: no-such-session
+[resume] ✅ S5 재개 성공
+[resume] 2차 응답: "PLUM"
+[resume] ✅ S5 재개된 세션이 이전 맥락을 기억한다 — PLUM
+[resume] 전부 통과

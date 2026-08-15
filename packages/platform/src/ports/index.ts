@@ -84,10 +84,22 @@ export type PlatformCapabilities = {
   openInIde: boolean
 }
 
+/** 워크스페이스 스냅샷 (C-3) — 창을 껐다 켜도 보던 자리로 돌아온다 */
+export type WorkspaceSnapshot = {
+  focusedSessionId?: string | null
+  tab?: string
+}
+
+export interface WorkspacePort {
+  save(snapshot: WorkspaceSnapshot): Promise<void>
+  load(): Promise<WorkspaceSnapshot | null>
+}
+
 export interface Platform {
   agents: AgentPort
   projects: ProjectPort
   system: SystemPort
+  workspace: WorkspacePort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>
 }

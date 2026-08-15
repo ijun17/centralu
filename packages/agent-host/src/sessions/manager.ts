@@ -233,6 +233,14 @@ export class SessionManager {
     this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
   }
 
+  saveWorkspace(layout: Record<string, unknown>): void {
+    this.store.saveWorkspace(layout)
+  }
+
+  loadWorkspace(): Record<string, unknown> | null {
+    return this.store.loadWorkspace<Record<string, unknown>>()
+  }
+
   /** 설정 화면에서 규칙을 보고 지울 수 있어야 한다 (FR-3: 결과를 보이게 한다) */
   listApprovalRules(): { scope: 'session' | 'project'; matcher: string; decision: string }[] {
     return this.store

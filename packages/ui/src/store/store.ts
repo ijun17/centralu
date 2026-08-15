@@ -46,6 +46,7 @@ export type AppState = {
   focusSession(id: string | null): void
   setAppFocused(focused: boolean): void
   loadHistory(sessionId: string): Promise<void>
+  saveWorkspace(): void
   setTab(t: Tab): void
   toggleInbox(open?: boolean): void
   setToast(msg: string | null): void
@@ -62,6 +63,9 @@ export type AppState = {
 }
 
 let chatSeq = 0
+
+/** 비포커스 세션이 유지하는 최근 메시지 수 — 다시 열면 저장소에서 더 불러온다 */
+const WINDOW_SIZE = 50
 
 /** 아직 스토어에 등록되지 않은 세션의 이벤트 보관함 (등록 직후 재생) */
 const pendingEvents = new Map<string, NormalizedEvent[]>()
@@ -98,6 +102,22 @@ export const useStore = create<AppState>((set, get) => ({
       ),
       connection: 'connected',
     })
+
+    // 보던 자리로 돌아온다 (C-3). 없거나 사라진 세션이면 조용히 무시한다.
+    try {
+      const snap = await platform.workspace.load()
+      if (snap?.focusedSessionId && get().sessions[snap.focusedSessionId]) {
+        get().focusSession(snap.focusedSessionId)
+      }
+    } catch {
+      /* 스냅샷이 없어도 앱은 정상 동작한다 */
+    }
+  },
+
+  /** 상태가 바뀔 때마다 저장한다 — '종료 시 저장'은 크래시에 무력하다 */
+  saveWorkspace() {
+    const s = get()
+    void s.platform?.workspace.save({ focusedSessionId: s.focusedSessionId, tab: s.tab }).catch(() => {})
   },
 
   setAppFocused(focused) {
@@ -144,7 +164,20 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   focusSession(id) {
+    const prev = get().focusedSessionId
     set({ focusedSessionId: id, tab: 'chat' })
+    get().saveWorkspace()
+
+    // 포커스를 벗어난 세션의 메시지는 잘라낸다 (docs/state-management.md §4).
+    // 세션 10개 × 수백 턴을 전부 들고 있으면 §7.1 메모리 목표를 지킬 수 없다.
+    // 요약(상태·안읽음·미리보기)은 그대로 남으므로 사이드바·인박스는 정확하다.
+    if (prev && prev !== id) {
+      const items = get().chat[prev]
+      if (items && items.length > WINDOW_SIZE) {
+        set((s) => ({ chat: { ...s.chat, [prev]: items.slice(-WINDOW_SIZE) } }))
+      }
+    }
+
     if (!id) return
     void get().markRead(id)
     // 아직 안 읽어온 세션이면 저장된 대화를 불러온다 (host 재시작 후에도 기록은 남는다)
