@@ -107,7 +107,7 @@ test('승인: 항상 허용은 범위를 알려준다 (T5-4)', async ({ page }) 
   await newSession(page, 'alpha', 'x')
   await injectApproval(page, 0, { kind: 'command', command: 'npm test --watch', cwd: '/tmp/alpha' })
   await page.getByTestId('approve-always').click()
-  await expect(page.getByTestId('toast')).toContainText('세션 범위')
+  await expect(page.getByTestId('toast')).toContainText('이 세션')
   await expect(page.getByTestId('toast')).toContainText('npm test*') // 패턴 제안
 })
 
@@ -139,8 +139,8 @@ test('전역 카운터는 승인과 응답대기를 분리 표기한다 (T5-5, F
   await injectApproval(page, 0, { kind: 'command', command: 'x', cwd: '/tmp' })
   await emitEvent(page, 1, { type: 'turn_complete' })
 
-  await expect(page.getByTestId('count-approval')).toContainText('승인 1')
-  await expect(page.getByTestId('count-input')).toContainText('응답대기 1')
+  await expect(page.getByTestId('count-approval')).toContainText('01')
+  await expect(page.getByTestId('count-input')).toContainText('01')
 })
 
 test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 시나리오)', async ({ page }) => {
@@ -156,15 +156,15 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
   await injectApproval(page, 3, { kind: 'command', command: 'pytest', cwd: '/tmp/beta' })
   for (const idx of [1, 2, 4]) await emitEvent(page, idx, { type: 'turn_complete' })
 
-  await expect(page.getByTestId('count-approval')).toContainText('승인 2')
-  await expect(page.getByTestId('count-input')).toContainText('응답대기 3')
+  await expect(page.getByTestId('count-approval')).toContainText('02')
+  await expect(page.getByTestId('count-input')).toContainText('03')
 
   // 인박스 열기 — 긴급도 순으로 정렬돼 있어야 한다
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()
   const rows = page.locator('[data-testid^="inbox-item-"]')
   await expect(rows).toHaveCount(5)
-  await expect(rows.first()).toContainText('승인 대기')
+  await expect(rows.first()).toContainText('승인 필요')
 
   // 승인 2건을 처리 (Enter로 점프 → y)
   for (let i = 0; i < 2; i++) {
@@ -175,7 +175,7 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
     await expect(page.getByTestId('approval-card')).toBeHidden()
     await page.keyboard.press('Meta+i')
   }
-  await expect(page.getByTestId('count-approval')).toContainText('승인 0')
+  await expect(page.getByTestId('count-approval')).toContainText('00')
 
   // 남은 응답대기 3건은 d(아카이브)로 비운다
   for (let i = 0; i < 5; i++) {
@@ -183,7 +183,7 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
     if (remaining === 0) break
     await page.keyboard.press('d')
   }
-  await expect(page.getByTestId('inbox-empty')).toContainText('인박스 비움')
+  await expect(page.getByTestId('inbox-empty')).toContainText('기다리는 항목이 없습니다')
 })
 
 test('다음 대기로 이동 단축키는 승인부터 순회한다 (T5-5, FR-17)', async ({ page }) => {

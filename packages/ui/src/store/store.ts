@@ -54,6 +54,9 @@ export type AppState = {
 
 let chatSeq = 0
 
+/** 아직 스토어에 등록되지 않은 세션의 이벤트 보관함 (등록 직후 재생) */
+const pendingEvents = new Map<string, NormalizedEvent[]>()
+
 export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',
@@ -91,7 +94,12 @@ export const useStore = create<AppState>((set, get) => ({
     const sessionId = e.sessionId
     if (!sessionId) return
     const cur = get().sessions[sessionId]
-    if (!cur) return
+    if (!cur) {
+      // 세션 등록 전에 도착한 이벤트 (초기 프롬프트가 곧바로 스트리밍되는 경우).
+      // 버리면 첫 턴이 통째로 사라지므로 보관했다가 등록 직후 재생한다.
+      pendingEvents.set(sessionId, [...(pendingEvents.get(sessionId) ?? []), e])
+      return
+    }
 
     const next = applyEvent(cur, e, Date.now())
     const chat = appendChat(get().chat[sessionId] ?? [], e)
@@ -137,6 +145,13 @@ export const useStore = create<AppState>((set, get) => ({
       },
       focusedSessionId: info.id,
     }))
+
+    // 등록 전에 도착해 보관해 둔 이벤트를 순서대로 재생한다
+    const buffered = pendingEvents.get(info.id)
+    if (buffered) {
+      pendingEvents.delete(info.id)
+      for (const e of buffered) get().dispatchEvent(e)
+    }
     return info
   },
 

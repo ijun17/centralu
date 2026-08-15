@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { afterHandled } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
-import { StateDot, formatWaiting } from '../../components/primitives.jsx'
+import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
 
 /**
  * 인박스 (FR-15) — 자리로 돌아왔을 때의 진입점.
@@ -13,8 +13,10 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
   const archive = useStore((s) => s.archive)
+  const projects = useStore((s) => s.projects)
   const [now, setNow] = useState(() => Date.now())
   const items = useInbox(now)
+  const [cursor, setCursor] = useState(0)
 
   // 경과 시간 갱신 (1초 폴링은 표시 전용 — 상태는 이벤트 구동)
   useEffect(() => {
@@ -22,8 +24,6 @@ export function Inbox() {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [open])
-
-  const [cursor, setCursor] = useState(0)
 
   useEffect(() => {
     if (!open) return
@@ -39,7 +39,7 @@ export function Inbox() {
           toggle(false)
         }
       } else if (e.key === 'd') {
-        // dismiss = 아카이브. 인박스를 비우는 1급 수단 (없으면 응답대기가 쌓여 무용지물)
+        // 아카이브는 인박스를 비우는 1급 수단 (없으면 응답대기가 쌓여 무용지물)
         const item = items[cursor]
         if (item) {
           const next = afterHandled(items, item.id)
@@ -57,23 +57,41 @@ export function Inbox() {
   if (!open) return null
 
   return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center bg-black/50 pt-20" data-testid="inbox">
-      <div className="w-[680px] overflow-hidden rounded-lg border border-neutral-700 bg-neutral-950 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2 text-xs text-neutral-400">
-          <span>인박스 — 내 개입을 기다리는 항목</span>
-          <span className="text-neutral-600">↑↓ 이동 · Enter 열기 · d 아카이브 · Esc 닫기</span>
-        </div>
+    <div
+      className="absolute inset-0 z-20 flex items-start justify-center bg-void/80 pt-[12vh] backdrop-blur-[2px]"
+      onClick={() => toggle(false)}
+      data-testid="inbox"
+    >
+      <div
+        className="w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">
+          <h2 className="text-[12px] font-medium text-chalk">기다리는 항목</h2>
+          <span className="readout text-[11px] text-slate">{items.length}</span>
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-slate">
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> 이동
+            <Kbd>↵</Kbd> 열기
+            <Kbd>d</Kbd> 정리
+            <Kbd>esc</Kbd> 닫기
+          </span>
+        </header>
+
         {items.length === 0 ? (
-          <p className="p-8 text-center text-sm text-neutral-500" data-testid="inbox-empty">
-            인박스 비움 ✓
+          <p className="px-4 py-10 text-center text-[13px] text-ash" data-testid="inbox-empty">
+            기다리는 항목이 없습니다
+            <span className="mt-1 block text-[11px] text-slate">에이전트가 끝내면 여기에 모입니다</span>
           </p>
         ) : (
-          <ul>
+          <ul className="max-h-[60vh] overflow-y-auto">
             {items.map((it, i) => (
               <li key={it.id}>
                 <button
-                  className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm hover:bg-neutral-900 ${
-                    i === cursor ? 'bg-neutral-900' : ''
+                  className={`flex w-full items-center gap-2.5 border-l-2 py-2 pl-3 pr-4 text-left transition-colors ${
+                    i === cursor
+                      ? 'border-l-ash bg-graphite/40'
+                      : 'border-l-transparent hover:bg-graphite/20'
                   }`}
                   onClick={() => {
                     focusSession(it.id)
@@ -82,13 +100,24 @@ export function Inbox() {
                   data-testid={`inbox-item-${it.id}`}
                 >
                   <StateDot state={it.state} />
-                  <span className={`truncate ${it.unread ? 'font-semibold text-neutral-100' : 'text-neutral-300'}`}>
+                  <span className={`truncate text-[13px] ${it.unread ? 'text-chalk' : 'text-ash'}`}>
                     {it.name}
                   </span>
-                  {it.unread && <span className="text-[10px] text-sky-400">●</span>}
-                  <span className="ml-auto shrink-0 text-xs text-neutral-500">
-                    {it.state === 'waiting_approval' ? '승인 대기' : it.state === 'error' ? '오류' : '응답 대기'} ·{' '}
-                    {formatWaiting(it.waitingMs)}
+                  <span className="truncate text-[11px] text-slate">
+                    {projects[it.projectId]?.name ?? ''}
+                  </span>
+                  <span className="ml-auto flex shrink-0 items-center gap-2.5">
+                    <span className="text-[11px] text-slate">
+                      {it.state === 'waiting_approval'
+                        ? '승인 필요'
+                        : it.state === 'error'
+                          ? '오류'
+                          : '응답 대기'}
+                    </span>
+                    {/* 오래 기다릴수록 밝아진다 — 새 도형 없이 시간 압력만 말한다 */}
+                    <span className={`readout w-16 text-right text-[11px] ${waitingTone(it.waitingMs)}`}>
+                      {formatWaiting(it.waitingMs)}
+                    </span>
                   </span>
                 </button>
               </li>

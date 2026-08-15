@@ -3,7 +3,7 @@ import { shouldCollapseCard, shouldMarkRead } from '@cc/core'
 import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
-import { StateDot } from '../../components/primitives.jsx'
+import { Kbd, StateDot } from '../../components/primitives.jsx'
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
@@ -36,8 +36,11 @@ export function SessionView() {
 
   if (!session) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-neutral-500" data-testid="empty-focus">
-        세션을 선택하세요 · <kbd className="mx-1">⌘I</kbd> 인박스
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
+        <p className="text-[13px] text-ash">세션을 선택하세요</p>
+        <p className="text-[11px] text-slate">
+          <Kbd>⌘</Kbd> <Kbd>I</Kbd> 로 기다리는 항목만 모아볼 수 있습니다
+        </p>
       </div>
     )
   }
@@ -45,37 +48,48 @@ export function SessionView() {
   const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col" data-testid="session-view">
-      <header className="flex items-center gap-2 border-b border-neutral-800 px-4 py-2 text-sm">
+    <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
+      <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
         <StateDot state={session.state} />
-        <span className="truncate font-medium text-neutral-100" data-testid="session-name">
+        <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
           {session.name}
-        </span>
+        </h1>
+
         {ctxPct !== null && (
           <span
-            className={`ml-2 text-xs ${ctxPct >= 80 ? 'text-amber-400' : 'text-neutral-500'}`}
+            className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-signal-act' : 'text-slate'}`}
             data-testid="context-gauge"
-            title="컨텍스트 사용량"
+            title={`컨텍스트 ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} 토큰`}
           >
-            ctx {ctxPct}%
+            컨텍스트 {ctxPct}%
           </span>
         )}
+
         {session.limit && (
-          <span className="text-xs text-amber-500" data-testid="limit-badge">
-            한도 {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : ''}
-            {session.limit.resumeAt ? ` · ${new Date(session.limit.resumeAt).toLocaleTimeString('ko-KR')} 해제` : ''}
+          <span className="readout text-[11px] text-signal-hold" data-testid="limit-badge">
+            한도 {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : '도달'}
+            {session.limit.resumeAt
+              ? ` · ${new Date(session.limit.resumeAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 해제`
+              : ''}
           </span>
         )}
-        <button
-          className="ml-auto rounded px-2 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800"
-          onClick={() => void interrupt(session.id)}
-          data-testid="interrupt"
-        >
-          중단
-        </button>
+
+        {session.state === 'working' && (
+          <button
+            className="ml-auto rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk"
+            onClick={() => void interrupt(session.id)}
+            data-testid="interrupt"
+          >
+            중단
+          </button>
+        )}
       </header>
 
-      <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto p-4 text-sm" data-testid="chat-stream">
+      <div
+        ref={scrollRef}
+        className="flex-1 space-y-3 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
+        data-testid="chat-stream"
+      >
         {chat.map((item) => (
           <ChatRow key={item.seq} item={item} />
         ))}
@@ -89,7 +103,7 @@ export function SessionView() {
       </div>
 
       <form
-        className="flex gap-2 border-t border-neutral-800 p-3"
+        className="border-t border-edge px-4 py-3"
         onSubmit={(e) => {
           e.preventDefault()
           const t = text.trim()
@@ -98,22 +112,36 @@ export function SessionView() {
           void send(session.id, t)
         }}
       >
-        <textarea
-          className="min-h-[38px] flex-1 resize-y rounded border border-neutral-700 bg-neutral-900 p-2 text-sm text-neutral-100 outline-none focus:border-neutral-500"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              e.currentTarget.form?.requestSubmit()
-            }
-          }}
-          placeholder="메시지 (Enter 전송, Shift+Enter 줄바꿈)"
-          data-testid="prompt-input"
-        />
-        <button className="rounded bg-neutral-700 px-3 text-sm text-white hover:bg-neutral-600" data-testid="send">
-          전송
-        </button>
+        <div className="flex items-end gap-2 rounded border border-edge bg-panel px-3 py-2 transition-colors focus-within:border-graphite">
+          <textarea
+            className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
+            rows={1}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value)
+              e.target.style.height = 'auto'
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                e.currentTarget.form?.requestSubmit()
+              }
+            }}
+            placeholder="메시지를 입력하세요"
+            data-testid="prompt-input"
+          />
+          <button
+            className="shrink-0 rounded px-2 py-1 text-[12px] text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
+            disabled={!text.trim()}
+            data-testid="send"
+          >
+            보내기
+          </button>
+        </div>
+        <p className="mt-1.5 text-[10px] text-slate">
+          <Kbd>Enter</Kbd> 보내기 · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> 줄바꿈
+        </p>
       </form>
     </section>
   )
@@ -122,23 +150,27 @@ export function SessionView() {
 function ChatRow({ item }: { item: ChatItem }) {
   if (item.kind === 'user') {
     return (
-      <div className="ml-auto max-w-[80%] rounded-lg bg-neutral-800 px-3 py-2 text-neutral-100" data-testid="msg-user">
-        {item.text}
+      <div className="flex justify-end" data-testid="msg-user">
+        <div className="max-w-[75%] rounded-lg rounded-br-sm border border-edge bg-panel px-3 py-2 text-chalk">
+          {item.text}
+        </div>
       </div>
     )
   }
   if (item.kind === 'assistant') {
     return (
-      <div className="whitespace-pre-wrap text-neutral-200" data-testid="msg-assistant">
+      <div className="max-w-[75ch] whitespace-pre-wrap text-chalk/90" data-testid="msg-assistant">
         {item.text}
       </div>
     )
   }
   if (item.kind === 'approval') {
+    // 대기 중인 승인은 바로 아래 카드가 보여주므로 로그 줄은 결정 후에만 남긴다
+    if (!item.decision) return null
     return (
-      <div className="text-xs text-neutral-500" data-testid="msg-approval-log">
-        승인 {item.decision === 'deny' ? '거부' : item.decision ? '허용' : '대기'}: {item.summary}
-      </div>
+      <p className="readout text-[11px] text-slate" data-testid="msg-approval-log">
+        {item.decision === 'deny' ? '거부함' : '허용함'} · {item.summary}
+      </p>
     )
   }
   return <ToolCard item={item} />
@@ -148,15 +180,21 @@ function ChatRow({ item }: { item: ChatItem }) {
 function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(!shouldCollapseCard(item.tool, item.readOnly))
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs" data-testid="tool-card">
-      <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((o) => !o)}>
-        <span className="text-neutral-500">{open ? '▾' : '▸'}</span>
-        <span className="font-medium text-neutral-300">{item.tool}</span>
-        <span className="truncate text-neutral-500">{item.title}</span>
-        {item.ok === false && <span className="ml-auto text-rose-400">실패</span>}
+    <div className="rounded border border-edge bg-panel/60" data-testid="tool-card">
+      <button
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="w-2 shrink-0 text-[9px] text-slate">{open ? '▾' : '▸'}</span>
+        <span className="readout shrink-0 text-[11px] text-ash">{item.tool}</span>
+        <span className="readout truncate text-[11px] text-slate">{item.title}</span>
+        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-signal-fault">실패</span>}
       </button>
       {open && item.result && (
-        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] text-neutral-400">{item.result}</pre>
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-edge px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ash">
+          {item.result}
+        </pre>
       )}
     </div>
   )

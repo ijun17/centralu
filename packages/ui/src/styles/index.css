@@ -7,3 +7,135 @@
  */
 @source '../**/*.{ts,tsx}';
 @source '../../../../apps/web/src/**/*.{ts,tsx}';
+
+/*
+ * ── 디자인 토큰 ────────────────────────────────────────────────
+ * 원칙: 색은 장식이 아니라 상태 전용 자원이다.
+ * 화면은 온도가 다른 검정 5단계로만 만들고, 채도 있는 색은
+ * "지금 내 개입이 필요한가"를 말할 때만 쓴다 (product-spec FR-12).
+ * 그래서 화면에서 가장 밝은 것은 언제나 나를 기다리는 것이다.
+ *
+ * 신호색은 산업 제어반(HMI) 관례를 따른다:
+ *   앰버 = 조치 필요, 적색 = 고장, 저채도 청색 = 조용함.
+ */
+@theme {
+  /* 검정 계열 — 유일한 배경 언어 */
+  --color-void: #08090a; /* 앱 바닥 */
+  --color-pit: #0b0d0e; /* 사이드바 */
+  --color-panel: #101214; /* 떠 있는 표면 */
+  --color-edge: #191d20; /* 헤어라인 */
+  --color-graphite: #23282c; /* 호버·눌림 */
+
+  /* 잉크 — 밝기가 곧 위계 */
+  --color-chalk: #e8eaec;
+  --color-ash: #8b9298;
+  --color-slate: #565d63;
+
+  /* 신호색 — 상태에만 쓴다. 장식으로 쓰면 규칙이 무너진다 */
+  --color-signal-act: #ffab3d; /* 승인 대기: 에이전트가 막혀 있다 */
+  --color-signal-fault: #ff5f52; /* 오류 */
+  --color-signal-calm: #7fa8bd; /* 응답 대기: 안 급하다 */
+  --color-signal-run: #5f9e7a; /* 작업 중 */
+  --color-signal-hold: #8d7fb8; /* 한도 */
+
+  /* 기계가 쓴 글자(명령·경로·수치)는 모노, 사람과 모델의 말은 산스.
+     한글은 모노 폴백이 흐트러지므로 산스가 맡는다. */
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard,
+    system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background: var(--color-void);
+    color: var(--color-chalk);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 수치는 흔들리지 않아야 계기판처럼 읽힌다 */
+  :where(button, input, textarea) {
+    font-family: inherit;
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-ash);
+    outline-offset: 1px;
+  }
+  ::selection {
+    background: var(--color-graphite);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-edge);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-graphite);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* 시그니처: 키캡.
+     키보드 우선 도구라는 정체성을 검정 위 검정의 촉감으로 말한다.
+     위쪽 1px 하이라이트와 아래쪽 그림자만으로 눌리는 물체처럼 보이게 한다. */
+  .keycap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.15rem;
+    padding: 0.0625rem 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: var(--color-ash);
+    background: linear-gradient(180deg, #1c2124 0%, #131719 100%);
+    border: 1px solid #0a0c0d;
+    border-radius: 4px;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.06),
+      0 1px 0 rgb(0 0 0 / 0.6);
+  }
+  .keycap-live {
+    color: var(--color-chalk);
+  }
+
+  /* 계기판 수치: 자릿수가 바뀌어도 위치가 흔들리지 않는다 */
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+}
+
+/* 작업 중 표시는 살아있음을 알리는 최소한의 움직임만 갖는다 */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.breathe {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breathe {
+    animation: none;
+    opacity: 0.8;
+  }
+}

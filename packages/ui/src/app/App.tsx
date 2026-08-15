@@ -19,7 +19,7 @@ export function App({ platform }: { platform: Platform }) {
 
   return (
     <PlatformProvider platform={platform}>
-      <div className="relative flex h-screen flex-col bg-neutral-950 text-neutral-100">
+      <div className="relative flex h-screen flex-col bg-void text-chalk">
         <TopBar />
         <ApprovalBanner />
         <div className="flex min-h-0 flex-1">
@@ -34,58 +34,98 @@ export function App({ platform }: { platform: Platform }) {
   )
 }
 
-/** 전역 카운터는 절대 합산하지 않는다 (FR-12) */
+/**
+ * 상단 바 = 계기판. 승인과 응답대기는 절대 합산하지 않는다 (FR-12).
+ * 기다리는 것이 없으면 숫자도 조용해진다 — 색이 보이면 그것이 곧 신호다.
+ */
 function TopBar() {
   const counts = useCounts()
   const toggleInbox = useStore((s) => s.toggleInbox)
   const connection = useStore((s) => s.connection)
   const [addOpen, setAddOpen] = useState(false)
+  const waiting = counts.approval + counts.error + counts.input
 
   return (
-    <header className="flex items-center gap-3 border-b border-neutral-800 px-4 py-2 text-sm">
-      <span className="font-semibold">Control Center</span>
+    <header className="flex items-center gap-4 border-b border-edge bg-pit px-4 py-2">
+      <span className="text-[12px] font-semibold tracking-[0.16em] text-chalk">CONTROL CENTER</span>
+
       <button
-        className="flex items-center gap-2 rounded bg-neutral-900 px-2 py-1 text-xs hover:bg-neutral-800"
+        className="group flex items-center gap-2.5 rounded px-2 py-1 transition-colors hover:bg-graphite/50"
         onClick={() => toggleInbox()}
         data-testid="counter"
-        title="인박스 (⌘I)"
+        title="기다리는 항목 (⌘I)"
       >
-        <span className="text-rose-400" data-testid="count-approval">
-          승인 {counts.approval}
-        </span>
-        <span className="text-neutral-600">·</span>
-        <span className="text-sky-400" data-testid="count-input">
-          응답대기 {counts.input}
-        </span>
+        <Metric
+          label="승인"
+          value={counts.approval}
+          tone={counts.approval > 0 ? 'text-signal-act' : 'text-slate'}
+          testId="count-approval"
+        />
+        <span className="text-edge">│</span>
+        <Metric
+          label="응답 대기"
+          value={counts.input}
+          tone={counts.input > 0 ? 'text-signal-calm' : 'text-slate'}
+          testId="count-input"
+        />
         {counts.error > 0 && (
           <>
-            <span className="text-neutral-600">·</span>
-            <span className="text-rose-500" data-testid="count-error">
-              오류 {counts.error}
-            </span>
+            <span className="text-edge">│</span>
+            <Metric label="오류" value={counts.error} tone="text-signal-fault" testId="count-error" />
           </>
         )}
       </button>
-      <span className="text-[10px] text-neutral-600">
-        <Kbd>⌘I</Kbd> 인박스 <Kbd>⌘⇧A</Kbd> 다음 대기
+
+      <span className="flex items-center gap-1 text-[10px] text-slate">
+        <Kbd live={waiting > 0}>⌘</Kbd>
+        <Kbd live={waiting > 0}>I</Kbd>
+        <span className="mr-2">목록</span>
+        <Kbd live={waiting > 0}>⌘</Kbd>
+        <Kbd live={waiting > 0}>⇧</Kbd>
+        <Kbd live={waiting > 0}>A</Kbd>
+        다음 항목
       </span>
-      <span className="ml-auto flex items-center gap-2 text-xs">
-        <span
-          className={connection === 'connected' ? 'text-emerald-500' : 'text-amber-500'}
-          data-testid="connection"
-        >
-          {connection === 'connected' ? '연결됨' : connection === 'connecting' ? '연결 중…' : '연결 끊김'}
+
+      <span className="ml-auto flex items-center gap-3">
+        <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection">
+          <span
+            className={`size-1.5 rounded-full ${
+              connection === 'connected' ? 'bg-signal-run' : 'bg-signal-act breathe'
+            }`}
+            aria-hidden
+          />
+          {connection === 'connected' ? '연결됨' : connection === 'connecting' ? '연결 중' : '연결 끊김'}
         </span>
         <button
-          className="rounded bg-neutral-800 px-2 py-1 hover:bg-neutral-700"
+          className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk"
           onClick={() => setAddOpen(true)}
           data-testid="add-project"
         >
-          ＋ 프로젝트
+          프로젝트 추가
         </button>
       </span>
+
       {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
     </header>
+  )
+}
+
+function Metric({
+  label,
+  value,
+  tone,
+  testId,
+}: {
+  label: string
+  value: number
+  tone: string
+  testId: string
+}) {
+  return (
+    <span className={`flex items-baseline gap-1.5 ${tone}`} data-testid={testId}>
+      <span className="text-[10px] text-slate">{label}</span>
+      <span className="readout text-[13px] leading-none">{String(value).padStart(2, '0')}</span>
+    </span>
   )
 }
 
@@ -131,8 +171,9 @@ function Toast() {
   if (!toast) return null
   return (
     <div
-      className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded bg-neutral-800 px-3 py-2 text-xs text-neutral-100 shadow-lg"
+      className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded border border-edge bg-panel px-3 py-2 text-[12px] text-chalk shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
       data-testid="toast"
+      role="status"
     >
       {toast}
     </div>
