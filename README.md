@@ -58,14 +58,8 @@ pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 ## 실행
 
 ```bash
-pnpm install
-
-# 데스크톱 앱 (권장 — 사이드카를 알아서 띄운다)
-pnpm --filter @cc/desktop dev
-
-# 웹 개발 모드 (터미널 2개)
-pnpm host          # 에이전트 호스트
-pnpm dev           # http://127.0.0.1:5174 (/?mock=1 로 열면 host 없이 UI만 확인)
+pnpm app          # 배포 앱 빌드 + 실행 (증분 빌드 ~60초) — 도그푸딩은 이걸로
+pnpm app:open     # 이미 빌드된 앱만 열기
+pnpm app:dev      # Tauri dev (프론트 핫 리로드, 알림·뱃지 동작)
+pnpm dev          # 웹만 (host는 pnpm host 별도) — UI 손볼 때만
 ```
-
-검증: `pnpm verify` (lint·타입·단위) · `pnpm e2e` · `pnpm smoke` · `pnpm smoke:resume`
