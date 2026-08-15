@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -25,17 +25,18 @@ export function FirstRun() {
   const [tools, setTools] = useState<Detection[] | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const detect = async () => {
+  const detect = useCallback(async () => {
     try {
       setTools(await platform.agents.detect())
     } catch {
+      // 감지에 실패해도 프로젝트 등록은 막지 않는다
       setTools([])
     }
-  }
+  }, [platform])
+
   useEffect(() => {
     void detect()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [detect])
 
   const usable = tools?.filter((t) => t.installed && t.loggedIn) ?? []
   const canStart = usable.length > 0
