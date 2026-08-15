@@ -102,6 +102,12 @@ export function SessionView() {
         )}
       </div>
 
+      {/*
+        프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
+        말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
+      */}
+      {!session.live && !session.archived && <ResumeBar sessionId={session.id} />}
+
       <form
         className="border-t border-edge px-4 py-3"
         onSubmit={(e) => {
@@ -144,6 +150,44 @@ export function SessionView() {
         </p>
       </form>
     </section>
+  )
+}
+
+/** 죽은 세션을 되살리는 줄. 실패하면 왜 안 되는지 알려준다 (조용한 실패 금지) */
+function ResumeBar({ sessionId }: { sessionId: string }) {
+  const resume = useStore((s) => s.resumeSession)
+  const createSession = useStore((s) => s.createSession)
+  const projectId = useStore((s) => s.sessions[sessionId]?.projectId)
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <div
+      className="flex items-center gap-3 border-t border-edge bg-panel px-4 py-2"
+      data-testid="resume-bar"
+    >
+      <span className="text-[12px] text-ash">이 세션은 실행 중이 아닙니다. 기록은 남아 있습니다.</span>
+      <span className="ml-auto flex items-center gap-1.5">
+        <button
+          className="rounded border border-edge px-2 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+          disabled={busy}
+          data-testid="resume-session"
+          onClick={async () => {
+            setBusy(true)
+            await resume(sessionId)
+            setBusy(false)
+          }}
+        >
+          {busy ? '이어가는 중…' : '이어가기'}
+        </button>
+        <button
+          className="rounded px-2 py-1 text-[12px] text-slate transition-colors hover:text-chalk"
+          data-testid="resume-new-session"
+          onClick={() => projectId && void createSession(projectId)}
+        >
+          새 세션
+        </button>
+      </span>
+    </div>
   )
 }
 

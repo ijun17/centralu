@@ -84,6 +84,14 @@ export class SessionManager {
       (e) => this.onEvent(e),
     )
     this.handles.set(id, handle)
+    handle.applyRules?.(this.rulesFor(id, params.projectId))
+
+    // 재개 식별자는 **생성 즉시** 저장한다. 이벤트가 오기를 기다리면,
+    // 첫 응답 전에 host가 죽은 세션은 영원히 재개할 수 없게 된다 (FR-10).
+    if (handle.externalId) {
+      info.externalId = handle.externalId
+      this.store.upsertSession(info)
+    }
 
     if (params.initialPrompt) handle.send(params.initialPrompt)
     return info
@@ -117,6 +125,7 @@ export class SessionManager {
         (e) => this.onEvent(e),
       )
       this.handles.set(sessionId, handle)
+      handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       m.state = 'idle'
       m.waitingSince = null
       this.store.upsertSession(m)
@@ -203,19 +212,42 @@ export class SessionManager {
     h.send(text)
   }
 
-  respondApproval(sessionId: string, requestId: string, decision: ApprovalDecision, scope?: ApprovalScope): void {
+  respondApproval(
+    sessionId: string,
+    requestId: string,
+    decision: ApprovalDecision,
+    scope?: ApprovalScope,
+    matcher?: string,
+  ): void {
     const m = this.meta.get(sessionId)
-    if (decision === 'always' && m) {
-      // 규칙 영속화 — 어댑터는 세션 메모리에만 갖고 있으므로 재시작 후에도 남으려면 여기 필요
+    // 규칙 영속화 — 어댑터는 메모리에만 갖고 있으므로 재시작 후에도 남으려면 여기 필요 (C-2)
+    if (decision === 'always' && m && matcher) {
       this.store.addApprovalRule({
         scope: scope ?? 'session',
         sessionId: scope === 'project' ? undefined : sessionId,
         projectId: scope === 'project' ? m.projectId : undefined,
-        matcher: '', // 매처는 UI가 확정해 별도 RPC로 저장 (M1: 기본 명령 전문)
+        matcher,
         decision: 'allow',
       })
     }
-    this.requireHandle(sessionId).respondApproval(requestId, decision, scope)
+    this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
+  }
+
+  /** 설정 화면에서 규칙을 보고 지울 수 있어야 한다 (FR-3: 결과를 보이게 한다) */
+  listApprovalRules(): { scope: 'session' | 'project'; matcher: string; decision: string }[] {
+    return this.store
+      .listApprovalRules()
+      .filter((r) => r.matcher)
+      .map((r) => ({ scope: r.scope as 'session' | 'project', matcher: r.matcher, decision: r.decision }))
+  }
+
+  /** 이 세션에 적용되는 저장된 규칙 (세션 범위 + 프로젝트 범위) */
+  private rulesFor(sessionId: string, projectId: string): string[] {
+    return this.store
+      .listApprovalRules()
+      .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))
+      .map((r) => r.matcher)
+      .filter(Boolean)
   }
 
   interrupt(sessionId: string): void {

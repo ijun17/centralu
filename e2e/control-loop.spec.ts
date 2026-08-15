@@ -280,3 +280,39 @@ test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었�
   // 보내지 못한 말풍선은 남지 않는다
   await expect(page.getByTestId('msg-user').filter({ hasText: '계속 진행해줘' })).toHaveCount(0)
 })
+
+test('죽은 세션은 이어가기를 권한다 (C-1, FR-10)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // host 재시작 후 상태를 흉내낸다: 프로세스는 없고 기록만 남은 세션
+  await page.evaluate(() => {
+    const store = (window as any).__store
+    const st = store.getState()
+    const id = st.focusedSessionId
+    store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
+  })
+
+  await expect(page.getByTestId('resume-bar')).toBeVisible()
+  await page.getByTestId('resume-session').click()
+  // 되살아나면 안내가 사라진다
+  await expect(page.getByTestId('resume-bar')).toBeHidden()
+})
+
+test('이어갈 수 없으면 이유를 알린다 (C-1 폴백, 조용한 실패 금지)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const store = (window as any).__store
+    const st = store.getState()
+    const id = st.focusedSessionId
+    m.unresumable.add(id) // 재개 불가로 표시
+    store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
+  })
+
+  await page.getByTestId('resume-session').click()
+  await expect(page.getByTestId('toast')).toContainText('이어갈 수 없습니다')
+  await expect(page.getByTestId('resume-bar')).toBeVisible() // 여전히 안내가 남는다
+})

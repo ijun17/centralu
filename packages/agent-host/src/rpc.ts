@@ -13,8 +13,9 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       return { ok: true as const }
     },
     'agents.respondApproval': async (p) => {
-      const { sessionId, requestId, decision, scope } = RpcMethods['agents.respondApproval'].params.parse(p)
-      mgr.respondApproval(sessionId, requestId, decision, scope)
+      const { sessionId, requestId, decision, scope, matcher } =
+        RpcMethods['agents.respondApproval'].params.parse(p)
+      mgr.respondApproval(sessionId, requestId, decision, scope, matcher)
       return { ok: true as const }
     },
     'agents.interrupt': async (p) => {
@@ -58,7 +59,7 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       const { sessionId, limit, beforeSeq } = RpcMethods['messages.load'].params.parse(p)
       return mgr.loadMessages(sessionId, limit, beforeSeq)
     },
-    'approvals.rules': async () => [],
+    'approvals.rules': async () => mgr.listApprovalRules(),
   }
 
   return async (method: string, params: unknown): Promise<unknown> => {

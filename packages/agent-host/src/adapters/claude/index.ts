@@ -30,6 +30,7 @@ class ClaudeSession implements SessionHandle {
   private notify: (() => void) | null = null
   private closed = false
   private pending = new Map<string, PendingApproval>()
+  /** 자동 승인 매처. 세션 시작 시 저장된 규칙을 주입받고, 'always' 응답으로 늘어난다 */
   private alwaysAllow = new Set<string>()
   private reqCounter = 0
 
@@ -75,7 +76,7 @@ class ClaudeSession implements SessionHandle {
             : async (toolName: string, toolInput: Record<string, unknown>) => {
                 const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
                 const key = detail.kind === 'command' ? detail.command : `${toolName}:${detail.kind}`
-                if (self.alwaysAllow.has(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
+                if (self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
 
                 const requestId = `req-${++self.reqCounter}`
                 self.emit({ type: 'approval_request', sessionId: self.sessionId, requestId, detail })
@@ -110,7 +111,7 @@ class ClaudeSession implements SessionHandle {
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
   }
 
-  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope): void {
+  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): void {
     const p = this.pending.get(requestId)
     if (!p) return
     this.pending.delete(requestId)
@@ -118,13 +119,29 @@ class ClaudeSession implements SessionHandle {
       p.resolve({ behavior: 'deny', message: '사용자가 거부함' })
     } else {
       if (decision === 'always') {
+        // 매처는 core가 계산해 UI가 보내준다 (agent-host는 core를 import하지 않는다 — 경계 규칙).
+        // 없으면 명령 전문으로 대체한다.
         const cmd = (p.input as { command?: string }).command
-        if (cmd) this.alwaysAllow.add(cmd)
+        const m = matcher ?? cmd
+        if (m) this.alwaysAllow.add(m)
       }
       p.resolve({ behavior: 'allow', updatedInput: p.input })
     }
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     void scope // scope별 영속화는 세션 매니저가 store에 기록한다
+  }
+
+  /** 저장된 규칙 주입 (재시작 후에도 '항상 허용'이 유지되도록) */
+  applyRules(matchers: readonly string[]): void {
+    for (const m of matchers) this.alwaysAllow.add(m)
+  }
+
+  /** 접미 와일드카드(`npm test*`)만 지원 — core의 matchesRule과 같은 규칙 */
+  private isAlwaysAllowed(key: string): boolean {
+    for (const m of this.alwaysAllow) {
+      if (m.endsWith('*') ? key.startsWith(m.slice(0, -1)) : key === m) return true
+    }
+    return false
   }
 
   interrupt(): void {

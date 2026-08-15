@@ -75,6 +75,8 @@ export const RpcMethods = {
       requestId: z.string(),
       decision: ApprovalDecision,
       scope: ApprovalScope.optional(),
+      /** '항상 허용'의 대상 패턴. core가 계산해 UI가 보낸다 */
+      matcher: z.string().optional(),
     }),
     result: z.object({ ok: z.literal(true) }),
   },

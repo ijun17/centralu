@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { App } from '@cc/ui'
+import { App, useStore } from '@cc/ui'
 import { createWebPlatform } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
@@ -22,6 +22,7 @@ function seedMock(): Platform {
   const mock = createMockPlatform()
   // E2E가 조작할 수 있게 노출 (mock 모드에서만)
   ;(window as unknown as { __mock: unknown }).__mock = mock
+  ;(window as unknown as { __store: unknown }).__store = useStore
   return mock
 }
 

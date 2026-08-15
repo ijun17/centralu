@@ -29,7 +29,10 @@ export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
   send(text: string): void
-  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope): void
+  /** matcher는 core가 계산해 UI가 전달한다 (경계 규칙: host는 core를 모른다) */
+  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): void
+  /** 저장된 '항상 허용' 규칙 주입 — 재시작 후에도 유지되도록 (FR-10, C-2) */
+  applyRules?(matchers: readonly string[]): void
   interrupt(): void
   dispose(): Promise<void>
 }

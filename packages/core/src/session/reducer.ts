@@ -15,6 +15,12 @@ export type SessionSummary = {
   lastSeq: number
   lastReadSeq: number
   archived: boolean
+  /**
+   * 프로세스가 살아 있는가 (FR-10).
+   * host를 껐다 켜면 기록은 남지만 프로세스는 사라진다 — 그 상태를 UI가 알아야
+   * "이어가기"를 권할 수 있다. 죽은 세션에 말을 걸고 기다리게 두는 것이 최악이다.
+   */
+  live: boolean
   /** 사이드바·인박스 미리보기 한 줄 */
   preview: string
   pendingApproval: { requestId: string; detail: ApprovalDetail } | null
@@ -29,7 +35,7 @@ export type SessionSummary = {
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
   return {
     autoNamed: true, state: 'idle', waitingSince: null, lastSeq: 0, lastReadSeq: 0,
-    archived: false, preview: '', pendingApproval: null, usage: null, context: null,
+    archived: false, live: true, preview: '', pendingApproval: null, usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], ...init,
   }
 }

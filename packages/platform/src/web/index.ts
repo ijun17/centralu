@@ -30,8 +30,14 @@ class WebAgentPort implements AgentPort {
   async send(sessionId: string, text: string) {
     await this.rpc.call('agents.send', { sessionId, text })
   }
-  async respondApproval(sessionId: string, requestId: string, decision: ApprovalDecision, scope?: ApprovalScope) {
-    await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope })
+  async respondApproval(
+    sessionId: string,
+    requestId: string,
+    decision: ApprovalDecision,
+    scope?: ApprovalScope,
+    matcher?: string,
+  ) {
+    await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher })
   }
   async interrupt(sessionId: string) {
     await this.rpc.call('agents.interrupt', { sessionId })

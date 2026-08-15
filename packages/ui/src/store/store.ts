@@ -7,6 +7,7 @@ import {
   badgeCount,
   countWaiting,
   notificationFor,
+  suggestMatcher,
   bumpSeq,
   initialSession,
   markRead as markReadPure,
@@ -55,6 +56,7 @@ export type AppState = {
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archive(sessionId: string): Promise<void>
+  resumeSession(sessionId: string): Promise<boolean>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
 }
@@ -89,7 +91,7 @@ export const useStore = create<AppState>((set, get) => ({
           s.id,
           {
             ...initialSession({ id: s.id, projectId: s.projectId, name: s.name }),
-            autoNamed: s.autoNamed, state: s.state, archived: s.archived,
+            autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
             lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
           },
         ]),
@@ -223,8 +225,34 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  async resumeSession(sessionId) {
+    const platform = get().platform
+    if (!platform) return false
+    try {
+      const res = await platform.agents.resumeSession(sessionId)
+      set((s) => ({
+        sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: res.resumed } },
+        toast: res.resumed ? null : `이어갈 수 없습니다: ${res.reason ?? '알 수 없는 이유'}`,
+      }))
+      return res.resumed
+    } catch (err) {
+      set({ toast: `이어갈 수 없습니다: ${(err as Error).message}` })
+      return false
+    }
+  },
+
   async respondApproval(sessionId, requestId, decision, scope) {
-    await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope)
+    // '항상 허용'의 패턴은 core가 계산한다 (host는 core를 모르므로 여기서 실어 보낸다)
+    const pending = get().sessions[sessionId]?.pendingApproval
+    const matcher =
+      decision === 'always' && pending
+        ? pending.detail.kind === 'command'
+          ? suggestMatcher(pending.detail.command)
+          : pending.detail.kind === 'file_edit'
+            ? pending.detail.path
+            : undefined
+        : undefined
+    await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
   },
 
   async interrupt(sessionId) {

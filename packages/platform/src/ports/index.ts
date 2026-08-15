@@ -38,6 +38,8 @@ export interface AgentPort {
     requestId: string,
     decision: ApprovalDecision,
     scope?: ApprovalScope,
+    /** '항상 허용'의 대상 패턴 (core가 계산) */
+    matcher?: string,
   ): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archiveSession(sessionId: string): Promise<void>
