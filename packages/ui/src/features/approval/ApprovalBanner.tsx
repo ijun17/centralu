@@ -23,7 +23,7 @@ export function ApprovalBanner() {
       className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-1.5"
       data-testid="approval-banner"
     >
-      <span className="size-1.5 shrink-0 rounded-full bg-signal-act" aria-hidden />
+      <span className="size-1.5 shrink-0 rounded-full bg-beacon" aria-hidden />
       <span className="shrink-0 text-[12px] text-ash">{session.name}</span>
       <code
         className="min-w-0 flex-1 truncate font-mono text-[12px] text-chalk"
@@ -51,7 +51,7 @@ export function ApprovalBanner() {
         </span>
       ) : (
         <button
-          className="shrink-0 rounded px-2 py-1 text-[12px] text-signal-act hover:bg-graphite"
+          className="shrink-0 rounded px-2 py-1 text-[12px] text-chalk hover:bg-graphite"
           onClick={() => focusSession(session.id)}
           data-testid="banner-review"
           title={reasonText(decision.reason)}

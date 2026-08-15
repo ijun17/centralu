@@ -10,33 +10,28 @@
 
 /*
  * ── 디자인 토큰 ────────────────────────────────────────────────
- * 원칙: 색은 장식이 아니라 상태 전용 자원이다.
- * 화면은 온도가 다른 검정 5단계로만 만들고, 채도 있는 색은
- * "지금 내 개입이 필요한가"를 말할 때만 쓴다 (product-spec FR-12).
- * 그래서 화면에서 가장 밝은 것은 언제나 나를 기다리는 것이다.
+ * 완전 무채색. 색상(hue)이 하나도 없으므로 위계는 오직 밝기가 만든다.
  *
- * 신호색은 산업 제어반(HMI) 관례를 따른다:
- *   앰버 = 조치 필요, 적색 = 고장, 저채도 청색 = 조용함.
+ * 그래서 규칙이 문자 그대로 성립한다:
+ *   화면에서 가장 밝은 것 = 지금 나를 기다리는 것 (product-spec FR-12).
+ *
+ * 긴급도는 밝기로, 종류는 형태로 구분한다 (색약·흑백 인쇄에서도 동일하게 읽힌다).
+ *   ● 꽉 찬 원 = 내 조치를 기다림   ✕ = 고장
+ *   ○ 빈 원   = 끝났음, 안 급함     ◆ = 진행 중 (호흡)   ▬ = 멈춤
  */
 @theme {
-  /* 검정 계열 — 유일한 배경 언어 */
-  --color-void: #08090a; /* 앱 바닥 */
-  --color-pit: #0b0d0e; /* 사이드바 */
-  --color-panel: #101214; /* 떠 있는 표면 */
-  --color-edge: #191d20; /* 헤어라인 */
-  --color-graphite: #23282c; /* 호버·눌림 */
+  /* 바탕 — 어두운 쪽 5단계 */
+  --color-void: #090909; /* 앱 바닥 */
+  --color-pit: #0c0c0c; /* 사이드바 */
+  --color-panel: #121212; /* 떠 있는 표면 */
+  --color-edge: #1e1e1e; /* 헤어라인 */
+  --color-graphite: #2a2a2a; /* 호버·눌림 */
 
-  /* 잉크 — 밝기가 곧 위계 */
-  --color-chalk: #e8eaec;
-  --color-ash: #8b9298;
-  --color-slate: #565d63;
-
-  /* 신호색 — 상태에만 쓴다. 장식으로 쓰면 규칙이 무너진다 */
-  --color-signal-act: #ffab3d; /* 승인 대기: 에이전트가 막혀 있다 */
-  --color-signal-fault: #ff5f52; /* 오류 */
-  --color-signal-calm: #7fa8bd; /* 응답 대기: 안 급하다 */
-  --color-signal-run: #5f9e7a; /* 작업 중 */
-  --color-signal-hold: #8d7fb8; /* 한도 */
+  /* 잉크 — 밝은 쪽 4단계. 밝기가 곧 긴급도다 */
+  --color-beacon: #ffffff; /* 나를 기다리는 것. 화면에서 유일하게 순백 */
+  --color-chalk: #e9e9e9; /* 본문 */
+  --color-ash: #909090; /* 보조 */
+  --color-slate: #5c5c5c; /* 배경 정보 */
 
   /* 기계가 쓴 글자(명령·경로·수치)는 모노, 사람과 모델의 말은 산스.
      한글은 모노 폴백이 흐트러지므로 산스가 맡는다. */
@@ -56,7 +51,6 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
-  /* 수치는 흔들리지 않아야 계기판처럼 읽힌다 */
   :where(button, input, textarea) {
     font-family: inherit;
   }
@@ -100,12 +94,12 @@
     font-size: 0.6875rem;
     line-height: 1.2;
     color: var(--color-ash);
-    background: linear-gradient(180deg, #1c2124 0%, #131719 100%);
-    border: 1px solid #0a0c0d;
+    background: linear-gradient(180deg, #222222 0%, #151515 100%);
+    border: 1px solid #0a0a0a;
     border-radius: 4px;
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.06),
-      0 1px 0 rgb(0 0 0 / 0.6);
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 1px 0 rgb(0 0 0 / 0.7);
   }
   .keycap-live {
     color: var(--color-chalk);
@@ -117,16 +111,23 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
   }
+
+  /* 색이 없으므로 "기다림"은 빛으로 말한다.
+     순백 위에 아주 옅은 광채를 얹어, 같은 흰색이어도 신호가 먼저 눈에 들어오게 한다. */
+  .beacon {
+    color: var(--color-beacon);
+    text-shadow: 0 0 6px rgb(255 255 255 / 0.45);
+  }
 }
 
 /* 작업 중 표시는 살아있음을 알리는 최소한의 움직임만 갖는다 */
 @keyframes breathe {
   0%,
   100% {
-    opacity: 0.45;
+    opacity: 0.35;
   }
   50% {
-    opacity: 1;
+    opacity: 0.9;
   }
 }
 .breathe {
@@ -136,6 +137,6 @@
 @media (prefers-reduced-motion: reduce) {
   .breathe {
     animation: none;
-    opacity: 0.8;
+    opacity: 0.7;
   }
 }

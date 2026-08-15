@@ -64,8 +64,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
       {/*
         동시 세션은 데이터 손실 위험 — 차단하지 않고 보이게 한다 (FR-2).
-        단 색은 쓰지 않는다: 색은 "지금 내 조치가 필요한 것"의 몫이고,
-        이건 알아둘 정보다. 여기서 색을 쓰면 진짜 신호가 묻힌다.
+        단 밝게 쓰지 않는다: 밝기는 "지금 내 조치가 필요한 것"의 몫이고,
+        이건 알아둘 정보다. 여기서 밝히면 진짜 신호가 묻힌다.
       */}
       {sessions.length > 1 && (
         <p
@@ -96,7 +96,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
                 {unread && (
                   <span
-                    className="ml-auto size-1 shrink-0 rounded-full bg-signal-calm"
+                    className="ml-auto size-1 shrink-0 rounded-full bg-ash"
                     data-testid={`unread-${s.id}`}
                     title="읽지 않음"
                   />

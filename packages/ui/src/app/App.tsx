@@ -36,7 +36,7 @@ export function App({ platform }: { platform: Platform }) {
 
 /**
  * 상단 바 = 계기판. 승인과 응답대기는 절대 합산하지 않는다 (FR-12).
- * 기다리는 것이 없으면 숫자도 조용해진다 — 색이 보이면 그것이 곧 신호다.
+ * 기다리는 것이 없으면 숫자도 어두워진다 — 순백은 나를 기다리는 것의 몫이다.
  */
 function TopBar() {
   const counts = useCounts()
@@ -58,20 +58,20 @@ function TopBar() {
         <Metric
           label="승인"
           value={counts.approval}
-          tone={counts.approval > 0 ? 'text-signal-act' : 'text-slate'}
+          tone={counts.approval > 0 ? 'beacon' : 'text-slate'}
           testId="count-approval"
         />
         <span className="text-edge">│</span>
         <Metric
           label="응답 대기"
           value={counts.input}
-          tone={counts.input > 0 ? 'text-signal-calm' : 'text-slate'}
+          tone={counts.input > 0 ? 'text-ash' : 'text-slate'}
           testId="count-input"
         />
         {counts.error > 0 && (
           <>
             <span className="text-edge">│</span>
-            <Metric label="오류" value={counts.error} tone="text-signal-fault" testId="count-error" />
+            <Metric label="오류" value={counts.error} tone="beacon" testId="count-error" />
           </>
         )}
       </button>
@@ -90,7 +90,7 @@ function TopBar() {
         <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection">
           <span
             className={`size-1.5 rounded-full ${
-              connection === 'connected' ? 'bg-signal-run' : 'bg-signal-act breathe'
+              connection === 'connected' ? 'bg-ash' : 'bg-beacon breathe'
             }`}
             aria-hidden
           />

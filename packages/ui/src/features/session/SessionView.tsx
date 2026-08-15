@@ -57,7 +57,7 @@ export function SessionView() {
 
         {ctxPct !== null && (
           <span
-            className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-signal-act' : 'text-slate'}`}
+            className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-chalk' : 'text-slate'}`}
             data-testid="context-gauge"
             title={`컨텍스트 ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} 토큰`}
           >
@@ -66,7 +66,7 @@ export function SessionView() {
         )}
 
         {session.limit && (
-          <span className="readout text-[11px] text-signal-hold" data-testid="limit-badge">
+          <span className="readout text-[11px] text-ash" data-testid="limit-badge">
             한도 {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : '도달'}
             {session.limit.resumeAt
               ? ` · ${new Date(session.limit.resumeAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 해제`
@@ -189,7 +189,7 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
         <span className="w-2 shrink-0 text-[9px] text-slate">{open ? '▾' : '▸'}</span>
         <span className="readout shrink-0 text-[11px] text-ash">{item.tool}</span>
         <span className="readout truncate text-[11px] text-slate">{item.title}</span>
-        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-signal-fault">실패</span>}
+        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">실패</span>}
       </button>
       {open && item.result && (
         <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-edge px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ash">

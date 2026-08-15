@@ -41,11 +41,11 @@ export function ApprovalCard({
 
   return (
     <div
-      className="overflow-hidden rounded border border-edge border-l-2 border-l-signal-act bg-panel"
+      className="overflow-hidden rounded border border-edge border-l-2 border-l-beacon bg-panel"
       data-testid="approval-card"
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-signal-act">
+        <span className="beacon text-[10px] font-medium tracking-[0.1em]">
           승인 대기
         </span>
         <span className="text-[11px] text-slate">에이전트가 멈춰 기다립니다</span>

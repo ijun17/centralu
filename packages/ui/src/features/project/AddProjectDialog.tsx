@@ -47,7 +47,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
         />
 
         {error && (
-          <p className="mt-2 text-[11px] text-signal-fault" data-testid="add-project-error">
+          <p className="mt-2 text-[11px] text-beacon" data-testid="add-project-error">
             {error}
           </p>
         )}
