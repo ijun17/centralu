@@ -116,7 +116,7 @@ function TopBar() {
         )}
       </button>
 
-      <span className="flex items-center gap-1 text-[10px] text-slate">
+      <span className="flex items-center gap-1 text-[10px] text-slate" data-tauri-drag-region>
         <Kbd live={waiting > 0}>⌘</Kbd>
         <Kbd live={waiting > 0}>I</Kbd>
         <span className="mr-2">목록</span>
@@ -126,8 +126,8 @@ function TopBar() {
         다음 항목
       </span>
 
-      <span className="ml-auto flex items-center gap-3">
-        <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection">
+      <span className="ml-auto flex items-center gap-3" data-tauri-drag-region>
+        <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection" data-tauri-drag-region>
           <span
             className={`size-1.5 rounded-full ${
               connection === 'connected' ? 'bg-ash' : 'bg-beacon breathe'

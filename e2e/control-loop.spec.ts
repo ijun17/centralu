@@ -830,3 +830,18 @@ test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (�
   await page.getByTestId('tab-files').click()
   await expect(page.getByTestId('file-README.md')).toBeVisible()
 })
+
+test('창 드래그 영역과 오버스크롤 차단 (M2.5 창 문제)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 헤더와 탭바가 창 이동 손잡이여야 한다 (타이틀바를 숨겼으므로)
+  await expect(page.locator('header[data-tauri-drag-region]')).toHaveCount(1)
+  await expect(page.locator('nav[data-tauri-drag-region]')).toHaveCount(1)
+
+  // 창 자체는 스크롤되지 않는다 (웹처럼 고무줄로 튕기면 안 된다)
+  const overscroll = await page.evaluate(() => getComputedStyle(document.body).overscrollBehaviorY)
+  expect(overscroll).toBe('none')
+  const bodyOverflow = await page.evaluate(() => getComputedStyle(document.body).overflow)
+  expect(bodyOverflow).toBe('hidden')
+})

@@ -44,12 +44,32 @@
 @layer base {
   html {
     color-scheme: dark;
+    /* 데스크톱 앱은 창 자체가 스크롤되지 않는다.
+       이게 없으면 잡고 당길 때 웹처럼 고무줄로 튕긴다 (도그푸딩 지적). */
+    overscroll-behavior: none;
+    height: 100%;
+    overflow: hidden;
   }
   body {
     background: var(--color-void);
     color: var(--color-chalk);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    height: 100%;
+    overflow: hidden;
+  }
+  /* 창을 옮기는 손잡이 위에서는 글자가 잡히면 안 된다 — 선택이 드래그를 먹는다.
+     본문은 건드리지 않는다: 에이전트 답변은 복사할 수 있어야 한다. */
+  [data-tauri-drag-region] {
+    user-select: none;
+    cursor: default;
+  }
+  /* 내부 스크롤 영역도 경계에서 튕기지 않는다 */
+  [data-scroll],
+  .overflow-auto,
+  .overflow-y-auto {
+    overscroll-behavior: contain;
   }
   :where(button, input, textarea) {
     font-family: inherit;
