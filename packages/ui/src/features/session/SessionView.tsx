@@ -6,8 +6,10 @@ import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
-import { TabBar, TabPlaceholder } from './TabBar.jsx'
+import { TabBar } from './TabBar.jsx'
 import { GitPanel } from '../git/GitPanel.jsx'
+import { FileTree } from '../files/FileTree.jsx'
+import { CodeViewer } from '../viewer/CodeViewer.jsx'
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
@@ -90,12 +92,8 @@ export function SessionView() {
         <ChatStream scrollRef={scrollRef} chat={chat} pending={session.pendingApproval} sessionId={session.id} />
       )}
       {tab === 'git' && <GitPanel projectId={session.projectId} />}
-      {tab === 'files' && (
-        <TabPlaceholder title="파일 트리" hint="M2 C 단계에서 만듭니다. 지금은 깃 탭에서 변경된 파일을 볼 수 있습니다." />
-      )}
-      {tab === 'viewer' && (
-        <TabPlaceholder title="코드 뷰어" hint="M2 C 단계에서 만듭니다. 지금은 IDE에서 열기로 넘어갈 수 있습니다." />
-      )}
+      {tab === 'files' && <FileTree projectId={session.projectId} />}
+      {tab === 'viewer' && <CodeViewer projectId={session.projectId} />}
 
       {/*
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.

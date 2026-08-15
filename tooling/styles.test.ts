@@ -25,6 +25,7 @@ const REQUIRED = [
 ]
 
 let css = ''
+let jsBytes = 0
 let outDir = ''
 
 beforeAll(() => {
@@ -34,9 +35,13 @@ beforeAll(() => {
     stdio: 'pipe',
   })
   const assets = join(outDir, 'assets')
-  const file = readdirSync(assets).find((f) => f.endsWith('.css'))
-  expect(file, '빌드 결과에 CSS 파일이 없다').toBeTruthy()
-  css = readFileSync(join(assets, file!), 'utf8')
+  // CSS 청크가 여러 개일 수 있다 — 하나만 검사하면 지연 로드 청크가 게이트를 빠져나간다
+  const files = readdirSync(assets).filter((f) => f.endsWith('.css'))
+  expect(files.length, '빌드 결과에 CSS 파일이 없다').toBeGreaterThan(0)
+  css = files.map((f) => readFileSync(join(assets, f), 'utf8')).join('\n')
+  jsBytes = readdirSync(assets)
+    .filter((f) => f.endsWith('.js'))
+    .reduce((n, f) => n + readFileSync(join(assets, f)).length, 0)
 }, 120_000)
 
 afterAll(() => {
@@ -60,5 +65,18 @@ describe('빌드된 CSS에 스타일이 실제로 들어 있다', () => {
       return !(r === g && g === b)
     })
     expect([...new Set(chromatic)]).toEqual([])
+  })
+})
+
+describe('번들 회귀 (C-3 결정: 뷰어에 편집기 엔진을 넣지 않는다)', () => {
+  it('CodeMirror·Shiki가 번들에 들어오지 않았다', () => {
+    // 읽기 전용 뷰어에 편집기 엔진은 과하다. 넣으려면 지연 로드가 전제이고,
+    // Shiki의 기본 엔진은 WASM이라 Tauri CSP와도 충돌한다 (tech-stack 금지 목록).
+    expect(css).not.toMatch(/cm-editor|shiki/i)
+  })
+
+  it('앱 전체 JS가 1.5MB를 넘지 않는다', () => {
+    // 지금 ~300KB. 이 선을 넘으면 무거운 의존이 들어온 것이니 근거를 남기고 올려라.
+    expect(jsBytes).toBeLessThan(1_500_000)
   })
 })

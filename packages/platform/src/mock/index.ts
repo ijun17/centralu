@@ -14,7 +14,7 @@ import type {
   StoredMessage,
   ToolName,
 } from '@cc/protocol'
-import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
+import type { AgentPort, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
  * 인메모리 구현 (docs/platform-abstraction.md §6).
@@ -100,6 +100,19 @@ export class MockPlatform implements Platform {
     lastCommitMessage?: string
     pushed: boolean
   } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], pushed: false }
+
+  /** 테스트가 주무르는 가짜 파일 트리 */
+  fsState: { entries: Record<string, FsEntry[]>; files: Record<string, string> } = { entries: {}, files: {} }
+
+  readonly fs = {
+    listDir: async (_projectId: string, path: string) => this.fsState.entries[path] ?? [],
+    readFile: async (_projectId: string, path: string): Promise<FsFile> => ({
+      text: this.fsState.files[path] ?? '',
+      truncated: false,
+      binary: false,
+      bytes: (this.fsState.files[path] ?? '').length,
+    }),
+  }
 
   readonly git = {
     status: async (_projectId: string) => [...this.gitState.files],

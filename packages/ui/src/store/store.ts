@@ -40,6 +40,8 @@ export type AppState = {
   inboxOpen: boolean
   toast: string | null
   appFocused: boolean
+  /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
+  viewerPath: string | null
 
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
@@ -48,6 +50,8 @@ export type AppState = {
   loadHistory(sessionId: string): Promise<void>
   saveWorkspace(): void
   setTab(t: Tab): void
+  /** 파일을 뷰어 탭에서 연다 (파일 트리·깃 패널의 공통 진입점) */
+  openFile(path: string): void
   toggleInbox(open?: boolean): void
   setToast(msg: string | null): void
 
@@ -84,6 +88,7 @@ export const useStore = create<AppState>((set, get) => ({
   inboxOpen: false,
   toast: null,
   appFocused: true,
+  viewerPath: null,
 
   async attach(platform) {
     set({ platform })
@@ -202,6 +207,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setTab(tab) {
     set({ tab })
+    get().saveWorkspace()
+  },
+
+  openFile(path) {
+    set({ viewerPath: path, tab: 'viewer' })
     get().saveWorkspace()
   },
   toggleInbox(open) {

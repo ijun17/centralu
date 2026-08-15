@@ -123,6 +123,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     agents: new WebAgentPort(rpc),
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
+    fs: {
+      listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),
+      readFile: (projectId, path) => rpc.call('fs.readFile', { projectId, path }),
+    },
     git: {
       status: (projectId) => rpc.call('git.status', { projectId }),
       diff: (projectId, path, staged) => rpc.call('git.diff', { projectId, path, staged }),

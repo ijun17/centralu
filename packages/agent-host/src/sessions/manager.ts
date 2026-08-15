@@ -25,6 +25,7 @@ import {
   gitCommit,
   gitPush,
 } from '../dev-services/git.js'
+import { listDir, readTextFile } from '../dev-services/fs.js'
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -277,6 +278,14 @@ export class SessionManager {
   }
   gitPush(projectId: string) {
     return gitPush(this.cwdOf(projectId))
+  }
+
+  // ── 파일 트리·뷰어 (C-1) ──
+  listDir(projectId: string, path: string) {
+    return listDir(this.cwdOf(projectId), path)
+  }
+  readTextFile(projectId: string, path: string) {
+    return readTextFile(this.cwdOf(projectId), path)
   }
 
   saveWorkspace(layout: Record<string, unknown>): void {

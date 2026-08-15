@@ -63,6 +63,14 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       return mgr.gitCommit(projectId, message)
     },
     'git.push': async (p) => mgr.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
+    'fs.listDir': async (p) => {
+      const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
+      return mgr.listDir(projectId, path)
+    },
+    'fs.readFile': async (p) => {
+      const { projectId, path } = RpcMethods['fs.readFile'].params.parse(p)
+      return mgr.readTextFile(projectId, path)
+    },
     'workspace.save': async (p) => {
       mgr.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)
       return { ok: true as const }

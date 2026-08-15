@@ -592,3 +592,66 @@ test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', a
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('tab-git')).toBeDisabled()
 })
+
+test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [
+      { name: 'src', path: 'src', isDir: true, ignored: false },
+      { name: 'node_modules', path: 'node_modules', isDir: true, ignored: true },
+      { name: 'README.md', path: 'README.md', isDir: false, ignored: false },
+    ]
+    m.fsState.entries['src'] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
+    m.fsState.files['src/a.ts'] = '첫 줄\n둘째 줄\n셋째 줄'
+  })
+  await page.keyboard.press('Meta+Shift+2')
+  await expect(page.getByTestId('file-tree')).toBeVisible()
+
+  // 무시된 항목은 기본으로 숨는다
+  await expect(page.getByTestId('dir-node_modules')).toBeHidden()
+  await page.getByTestId('toggle-ignored').check()
+  await expect(page.getByTestId('dir-node_modules')).toBeVisible()
+
+  // 하위는 열어야 읽는다 (lazy)
+  await expect(page.getByTestId('file-src/a.ts')).toBeHidden()
+  await page.getByTestId('dir-src').click()
+  await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
+})
+
+test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'big.ts', path: 'big.ts', isDir: false, ignored: false }]
+    m.fsState.files['big.ts'] = Array.from({ length: 3000 }, (_, i) => `줄 ${i} 내용`).join('\n')
+  })
+  await page.keyboard.press('Meta+Shift+2')
+  await page.getByTestId('file-big.ts').click()
+
+  // 파일을 열면 뷰어 탭으로 전환된다
+  await expect(page.getByTestId('code-viewer')).toBeVisible()
+  await expect(page.getByTestId('viewer-path')).toContainText('big.ts')
+
+  // 3000줄이어도 보이는 것만 그린다 (가상 스크롤)
+  const rendered = await page.locator('[data-testid="code-viewer"] .whitespace-pre').count()
+  expect(rendered).toBeLessThan(120)
+
+  await page.getByTestId('viewer-search').fill('줄 42 ')
+  await expect(page.getByTestId('viewer-match-count')).toContainText('1줄')
+})
+
+test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'logo.png', path: 'logo.png', isDir: false, ignored: false }]
+    m.fs.readFile = async () => ({ text: '', truncated: false, binary: true, bytes: 20480 })
+  })
+  await page.keyboard.press('Meta+Shift+2')
+  await page.getByTestId('file-logo.png').click()
+  await expect(page.getByTestId('viewer-binary')).toContainText('바이너리')
+})

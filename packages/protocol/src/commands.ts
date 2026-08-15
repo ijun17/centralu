@@ -125,6 +125,14 @@ export const RpcMethods = {
     params: z.object({ projectId: z.string() }),
     result: z.object({ ok: z.boolean(), message: z.string().optional() }),
   },
+  'fs.listDir': {
+    params: z.object({ projectId: z.string(), path: z.string() }),
+    result: z.array(z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })),
+  },
+  'fs.readFile': {
+    params: z.object({ projectId: z.string(), path: z.string() }),
+    result: z.object({ text: z.string(), truncated: z.boolean(), binary: z.boolean(), bytes: z.number() }),
+  },
   'workspace.save': {
     params: z.object({ layout: z.record(z.string(), z.unknown()) }),
     result: z.object({ ok: z.literal(true) }),

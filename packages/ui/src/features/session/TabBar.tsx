@@ -41,13 +41,3 @@ export function TabBar({ gitDisabled }: { gitDisabled?: boolean }) {
     </nav>
   )
 }
-
-/** 아직 내용이 없는 탭 — 빈 화면은 막다른 길이 아니라 다음 행동을 알려주는 자리다 */
-export function TabPlaceholder({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center" data-testid="tab-placeholder">
-      <p className="text-[13px] text-ash">{title}</p>
-      <p className="max-w-sm text-[11px] leading-relaxed text-slate">{hint}</p>
-    </div>
-  )
-}

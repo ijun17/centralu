@@ -66,11 +66,18 @@ export interface ProjectPort {
   gitStatus(projectId: string): Promise<ProjectInfo>
 }
 
-/** M1에서는 정의만 — 구현은 M2 (docs/plans/m1-plan.md 범위 밖) */
+/**
+ * 파일 트리·뷰어 (FR-5, FR-6 / C-1).
+ * lazy 목록이 원칙 — 열어본 디렉토리만 읽는다 (대형 저장소에서 가벼움 유지).
+ */
 export interface FsPort {
-  listDir(path: string): Promise<{ name: string; isDir: boolean }[]>
-  readFile(path: string): Promise<string>
+  /** 한 단계만 읽는다. ignored는 .gitignore에 걸리는 항목 (git이 알려준 것을 재사용) */
+  listDir(projectId: string, relPath: string): Promise<FsEntry[]>
+  readFile(projectId: string, relPath: string): Promise<FsFile>
 }
+
+export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
+export type FsFile = { text: string; truncated: boolean; binary: boolean; bytes: number }
 
 export interface SystemPort {
   notify(title: string, body: string): Promise<void>
@@ -121,6 +128,7 @@ export interface Platform {
   projects: ProjectPort
   system: SystemPort
   git: GitPort
+  fs: FsPort
   workspace: WorkspacePort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>

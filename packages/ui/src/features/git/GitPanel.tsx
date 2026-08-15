@@ -44,6 +44,7 @@ export function GitPanel({ projectId }: { projectId: string }) {
 function Changes({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
+  const openFile = useStore((s) => s.openFile)
   const touched = useTouchedPaths(projectId)
   const [files, setFiles] = useState<GitFileStatus[] | null>(null)
   const [selected, setSelected] = useState<GitFileStatus | null>(null)
@@ -171,6 +172,7 @@ function Changes({ projectId }: { projectId: string }) {
         onOpenInIde={async (line) => {
           if (selected) await platform.system.openInIde(selected.path, line)
         }}
+        onOpenViewer={selected ? () => openFile(selected.path) : undefined}
       />
     </div>
   )
@@ -240,10 +242,12 @@ function DiffView({
   path,
   data,
   onOpenInIde,
+  onOpenViewer,
 }: {
   path?: string
   data: { diff: string; truncated: boolean; binary: boolean } | null
   onOpenInIde: (line?: number) => Promise<void>
+  onOpenViewer?: () => void
 }) {
   if (!path) {
     return (
@@ -261,13 +265,16 @@ function DiffView({
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
       <header className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
         <span className="readout truncate text-[11px] text-ash">{path}</span>
-        <button
-          className="ml-auto text-[11px] text-slate hover:text-chalk"
-          onClick={() => void onOpenInIde()}
-          data-testid="open-in-ide"
-        >
-          IDE에서 열기
-        </button>
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {onOpenViewer && (
+            <button className="text-[11px] text-slate hover:text-chalk" onClick={onOpenViewer} data-testid="open-in-viewer">
+              전체 보기
+            </button>
+          )}
+          <button className="text-[11px] text-slate hover:text-chalk" onClick={() => void onOpenInIde()} data-testid="open-in-ide">
+            IDE에서 열기
+          </button>
+        </span>
       </header>
       <div className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]">
         {lines.map((line, i) => {
