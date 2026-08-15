@@ -845,3 +845,93 @@ test('창 드래그 영역과 오버스크롤 차단 (M2.5 창 문제)', async (
   const bodyOverflow = await page.evaluate(() => getComputedStyle(document.body).overflow)
   expect(bodyOverflow).toBe('hidden')
 })
+
+/**
+ * 이전 세션 불러오기 — '+ → 도구 선택 → 이전 대화 목록'.
+ * 터미널에서 하던 대화를 이어받지 못하면 이 앱은 '또 하나의 창'이 된다.
+ */
+async function seedPastSessions(
+  page: Page,
+  data: { supported: boolean; reason?: string; sessions: Record<string, unknown>[] },
+  history: Record<string, { role: string; text: string }[]> = {},
+) {
+  await page.evaluate(
+    ({ d, h }) => {
+      const m = (window as any).__mock
+      m.externalSessions = d
+      for (const [id, msgs] of Object.entries(h)) m.externalHistory.set(id, msgs)
+    },
+    { d: data, h: history },
+  )
+}
+
+test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await seedPastSessions(
+    page,
+    {
+      supported: true,
+      sessions: [
+        { externalId: 'ext-1', tool: 'claude', title: '어제 하던 리팩터링', updatedAt: Date.now() - 3600_000, createdAt: null, branch: 'main', imported: false },
+        { externalId: 'ext-2', tool: 'claude', title: '빌드 깨진 것 추적', updatedAt: Date.now() - 86400_000, createdAt: null, branch: null, imported: true },
+      ],
+    },
+    {
+      'ext-1': [
+        { role: 'user', text: '이 모듈 좀 쪼개줘' },
+        { role: 'assistant', text: '세 파일로 나눴습니다' },
+      ],
+    },
+  )
+
+  await page.getByTestId('new-session-alpha').click()
+  // 기본은 '새 대화' — 불러오기가 기본이 되면 안 된다
+  await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('past-ext-1')).toContainText('어제 하던 리팩터링')
+  await expect(page.getByTestId('past-ext-1')).toContainText('1시간 전')
+  await expect(page.getByTestId('past-ext-2')).toContainText('이미 불러옴')
+
+  await page.getByTestId('past-ext-1').click()
+  await expect(page.getByTestId('resume-note')).toBeVisible()
+  await expect(page.getByTestId('create-session-confirm')).toHaveText('불러오기')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 지난 대화가 화면에 복원된다
+  await expect(page.getByTestId('chat-stream')).toContainText('이 모듈 좀 쪼개줘')
+  await expect(page.getByTestId('chat-stream')).toContainText('세 파일로 나눴습니다')
+
+  // 이어받을 원본이 host로 전달됐는가
+  const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
+  expect(params.resumeExternalId).toBe('ext-1')
+  expect(params.importHistory).toBe(true)
+
+  // 불러온 대화로 안 읽음 배지를 띄우지 않는다 (이미 읽은 대화다)
+  const sessionId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()].at(-1))
+  await expect(page.getByTestId(`unread-${sessionId}`)).toHaveCount(0)
+})
+
+test('구버전 도구는 목록을 못 줘도 새 세션을 막지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await seedPastSessions(page, {
+    supported: false,
+    reason: '설치된 Codex가 이전 세션 목록을 지원하지 않습니다 (codex 업데이트가 필요합니다)',
+    sessions: [],
+  })
+
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('past-unsupported')).toContainText('codex 업데이트가 필요합니다')
+  // 이유는 보이되 길은 열려 있어야 한다
+  await expect(page.getByTestId('create-session-confirm')).toHaveText('시작')
+  await page.getByTestId('initial-prompt').fill('그래도 새로 시작')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  await expect(page.getByTestId('chat-stream')).toContainText('그래도 새로 시작')
+})
+
+test('이전 대화가 없으면 없다고 말한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await seedPastSessions(page, { supported: true, sessions: [] })
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('past-empty')).toBeVisible()
+})

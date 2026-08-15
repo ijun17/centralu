@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEvent } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
+import { listClaudeSessions, readClaudeHistory } from './history.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, normalizeMessage } from './normalize.js'
 
@@ -175,6 +176,7 @@ export class ClaudeAdapter implements AgentAdapter {
     approvals: true, // M0 검증: 전역 bypass를 세션 단위로 덮어쓸 수 있음
     contextUsage: 'exact',
     resume: true,
+    listExternal: true, // SDK listSessions/getSessionMessages (공식 API)
     autoTitle: true,
     attachments: ['image', 'file'],
   }
@@ -193,6 +195,14 @@ export class ClaudeAdapter implements AgentAdapter {
         detail: 'claude CLI를 찾을 수 없습니다 (터미널에서 which claude 로 확인)',
       }
     }
+  }
+
+  listExternalSessions(cwd: string, limit: number) {
+    return listClaudeSessions(cwd, limit)
+  }
+
+  readExternalHistory(externalId: string, cwd: string, limit: number) {
+    return readClaudeHistory(externalId, cwd, limit)
   }
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {

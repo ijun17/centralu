@@ -10,6 +10,7 @@ import type {
   ApprovalDetail,
   ApprovalScope,
   CreateSessionParams,
+  ExternalSession,
   NormalizedEvent,
   ProjectInfo,
   SessionInfo,
@@ -173,6 +174,14 @@ export class MockPlatform implements Platform {
   /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */
   lastCreateParams: CreateSessionParams | null = null
 
+  /** 테스트용: 도구가 갖고 있는 척할 이전 세션. supported=false로 구버전 도구도 재현한다 */
+  externalSessions: { supported: boolean; reason?: string; sessions: ExternalSession[] } = {
+    supported: true,
+    sessions: [],
+  }
+  /** 불러오기를 고른 세션의 이전 대화 (externalId → 줄 목록) */
+  externalHistory = new Map<string, { role: 'user' | 'assistant'; text: string }[]>()
+
   readonly agents: AgentPort = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
@@ -182,8 +191,24 @@ export class MockPlatform implements Platform {
         name: params.initialPrompt?.slice(0, 40) ?? '새 세션', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
+        importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
       }
+      if (params.resumeExternalId) info.externalId = params.resumeExternalId
       this.sessions.set(id, info)
+      // 불러오기: 이전 대화를 이미 읽은 상태로 복원한다 (host의 importHistory와 같은 규칙)
+      if (params.importHistory && params.resumeExternalId) {
+        const history = this.externalHistory.get(params.resumeExternalId) ?? []
+        for (const h of history) {
+          const seq = (this.messages.get(id)?.length ?? 0) + 1
+          this.pushMessage({ sessionId: id, seq, role: h.role, kind: 'text', payload: { text: h.text }, ts: this.now() })
+          info.lastSeq = seq
+          info.lastReadSeq = seq
+        }
+        const firstUser = history.find((h) => h.role === 'user')
+        const listed = this.externalSessions.sessions.find((s) => s.externalId === params.resumeExternalId)
+        if (listed) info.name = listed.title
+        else if (firstUser) info.name = firstUser.text.slice(0, 40)
+      }
       if (params.initialPrompt) await this.agents.send(id, params.initialPrompt)
       return info
     },
@@ -261,8 +286,12 @@ export class MockPlatform implements Platform {
       const filtered = beforeSeq ? all.filter((m) => m.seq < beforeSeq) : all
       return filtered.slice(-limit)
     },
+    listExternalSessions: async (_projectId: string, tool: ToolName, _limit = 30) => ({
+      ...this.externalSessions,
+      sessions: this.externalSessions.sessions.filter((s) => s.tool === tool),
+    }),
     capabilities: async (_tool: ToolName): Promise<AdapterCapabilities> => ({
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'],
+      approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: ['image', 'file'],
     }),
     detect: async () => [
       { tool: 'claude' as const, installed: true, loggedIn: true, detail: 'mock 2.1.0' },

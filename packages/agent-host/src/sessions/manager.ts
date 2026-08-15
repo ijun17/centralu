@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
   ApprovalDecision,
+  ExternalSession,
   Attachment,
   ApprovalScope,
   CreateSessionParams,
@@ -13,7 +14,7 @@ import type {
   StoredMessage,
   ToolName,
 } from '@cc/protocol'
-import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
   gitSummary,
@@ -29,6 +30,13 @@ import {
 } from '../dev-services/git.js'
 import { listDir, readTextFile } from '../dev-services/fs.js'
 import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
+
+/**
+ * 불러올 대화의 최대 줄 수. 오래된 쪽부터 잘린다.
+ * 수백 턴짜리 세션을 통째로 밀어 넣으면 첫 렌더가 눈에 띄게 느려지고,
+ * 정작 사람이 보는 건 마지막 몇 턴이다.
+ */
+const HISTORY_LIMIT = 200
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -77,6 +85,52 @@ export class SessionManager {
     return this.listSessions().filter((s) => s.projectId === projectId && !s.archived)
   }
 
+  /**
+   * 도구가 보관 중인 이전 세션 목록 (터미널에서 만든 것 포함).
+   *
+   * 실패해도 던지지 않는다 — 목록을 못 가져오는 것과 세션을 못 만드는 것은 다른 문제다.
+   * 구버전 도구를 쓰는 사람도 '새 세션'은 그대로 쓸 수 있어야 한다.
+   */
+  async listExternalSessions(
+    projectId: string,
+    tool: ToolName,
+    limit: number,
+  ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }> {
+    const project = this.store.listProjects().find((p) => p.id === projectId)
+    if (!project) return { supported: false, reason: '프로젝트를 찾을 수 없습니다', sessions: [] }
+
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.listExternalSessions || !adapter.capabilities.listExternal) {
+      return { supported: false, reason: `${tool}는 이전 세션 목록을 지원하지 않습니다`, sessions: [] }
+    }
+
+    try {
+      const rows = await adapter.listExternalSessions(project.path, limit)
+      // 이미 불러온 대화를 또 열면 같은 세션이 둘이 된다 — 표시해서 막는다
+      // 이어받은 원본으로 판정한다. externalId로 보면 안 된다 —
+      // 도구가 resume하면서 새 식별자를 발급하면 원본과 달라져 매번 '안 불러옴'이 된다.
+      const known = new Set(
+        [...this.meta.values()]
+          .filter((s) => s.tool === tool)
+          .flatMap((s) => [s.importedFrom, s.externalId].filter((v): v is string => !!v)),
+      )
+      return {
+        supported: true,
+        sessions: rows.map((r) => ({
+          externalId: r.externalId,
+          tool,
+          title: r.title,
+          updatedAt: r.updatedAt,
+          createdAt: r.createdAt ?? null,
+          branch: r.branch ?? null,
+          imported: known.has(r.externalId),
+        })),
+      }
+    } catch (err) {
+      return { supported: false, reason: (err as Error).message, sessions: [] }
+    }
+  }
+
   async createSession(params: CreateSessionParams): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
     if (!adapter) throw Object.assign(new Error(`알 수 없는 도구: ${params.tool}`), { code: 'tool_not_installed' })
@@ -88,6 +142,7 @@ export class SessionManager {
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, permissionPreset: params.permissionPreset,
+      importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
     }
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
     // 목록에는 보이지만 말을 걸 수 없는 '유령 세션'이 DB에 남는다 (실측으로 확인).
@@ -110,6 +165,12 @@ export class SessionManager {
     this.handles.set(id, handle)
     handle.applyRules?.(this.rulesFor(id, params.projectId))
 
+    // 이전 대화 복원. **어댑터가 뜬 다음에** 한다 —
+    // 기록만 있고 말은 못 거는 세션은 유령 세션과 똑같이 나쁘다.
+    if (params.importHistory && params.resumeExternalId) {
+      await this.importHistory(info, adapter, params.resumeExternalId, params.cwd)
+    }
+
     // 재개 식별자는 **생성 즉시** 저장한다. 이벤트가 오기를 기다리면,
     // 첫 응답 전에 host가 죽은 세션은 영원히 재개할 수 없게 된다 (FR-10).
     if (handle.externalId) {
@@ -119,6 +180,61 @@ export class SessionManager {
 
     if (params.initialPrompt) handle.send(params.initialPrompt)
     return info
+  }
+
+  /**
+   * 이전 대화를 화면에 복원한다.
+   *
+   * 이건 **표시용 스냅샷**이다. 모델이 실제로 기억하는 컨텍스트는 도구가 갖고 있고
+   * (resume이 그걸 이어준다), 여기서 저장하는 건 사람이 읽을 대화 기록이다.
+   * 실패해도 세션은 살린다 — 기록을 못 읽었다고 대화까지 막을 이유가 없다.
+   */
+  private async importHistory(
+    info: SessionInfo,
+    adapter: AgentAdapter,
+    externalId: string,
+    cwd: string,
+  ): Promise<void> {
+    if (!adapter.readExternalHistory) return
+    let history: HistoryMessage[]
+    try {
+      history = await adapter.readExternalHistory(externalId, cwd, HISTORY_LIMIT)
+    } catch (err) {
+      this.emit({
+        type: 'error',
+        sessionId: info.id,
+        error: {
+          code: 'internal',
+          message: `이전 대화를 불러오지 못했습니다: ${(err as Error).message}`,
+          retryable: false,
+        },
+      })
+      return
+    }
+    if (history.length === 0) return
+
+    // nextSeq는 DB의 MAX(seq) 기준이라 **넣기 전에는 계속 같은 값**을 준다.
+    // 한 번만 받아서 직접 증가시킨다 (그러지 않으면 전부 같은 seq로 서로를 덮어쓴다).
+    const base = this.store.nextSeq(info.id)
+    const rows: StoredMessage[] = history.map((h, i) => ({
+      sessionId: info.id,
+      seq: base + i,
+      role: h.role,
+      kind: 'text' as const,
+      payload: { text: h.text },
+      ts: h.ts ?? info.createdAt,
+    }))
+    this.store.appendMessages(rows)
+
+    info.lastSeq = rows[rows.length - 1]!.seq
+    // 불러온 대화는 이미 읽은 것이다 — 안 읽음 표시로 사람을 부르면 안 된다
+    info.lastReadSeq = info.lastSeq
+    if (info.autoNamed && info.name === '새 세션') {
+      const firstUser = history.find((h) => h.role === 'user')
+      if (firstUser) info.name = truncate(firstUser.text)
+    }
+    this.store.upsertSession(info)
+    this.emit({ type: 'session_title', sessionId: info.id, title: info.name })
   }
 
   /**

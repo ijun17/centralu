@@ -69,7 +69,15 @@ export type AppState = {
   addProject(path: string): Promise<ProjectInfo>
   createSession(
     projectId: string,
-    opts?: { tool?: ToolName; model?: string; permissionPreset?: PermissionPreset; initialPrompt?: string },
+    opts?: {
+      tool?: ToolName
+      model?: string
+      permissionPreset?: PermissionPreset
+      initialPrompt?: string
+      /** 도구가 갖고 있던 이전 세션을 이어받는다 (터미널에서 만든 대화 포함) */
+      resumeExternalId?: string
+      importHistory?: boolean
+    },
   ): Promise<SessionInfo>
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
   attachFile(sessionId: string, file: File): Promise<Attachment | null>
@@ -305,11 +313,13 @@ export const useStore = create<AppState>((set, get) => ({
       model: opts?.model ?? project.defaultModel,
       permissionPreset: opts?.permissionPreset ?? 'normal',
       initialPrompt: opts?.initialPrompt,
+      resumeExternalId: opts?.resumeExternalId,
+      importHistory: opts?.importHistory,
     })
     set((s) => ({
       sessions: {
         ...s.sessions,
-        [info.id]: initialSession({ id: info.id, projectId, name: info.name }),
+        [info.id]: { ...initialSession({ id: info.id, projectId, name: info.name }), lastSeq: info.lastSeq, lastReadSeq: info.lastReadSeq },
       },
       // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
       chat: opts?.initialPrompt
@@ -317,6 +327,16 @@ export const useStore = create<AppState>((set, get) => ({
         : s.chat,
       focusedSessionId: info.id,
     }))
+
+    // 불러온 세션은 host에 이미 이전 대화가 쌓여 있다 — 화면으로 끌어온다
+    if (opts?.importHistory && opts.resumeExternalId) {
+      const msgs = await platform.agents.loadMessages(info.id)
+      if (msgs.length > 0) {
+        const restored = messagesToChat(msgs)
+        chatSeq = Math.max(chatSeq, ...restored.map((c) => c.seq))
+        set((s) => ({ chat: { ...s.chat, [info.id]: restored } }))
+      }
+    }
 
     // 등록 전에 도착해 보관해 둔 이벤트를 순서대로 재생한다
     const buffered = pendingEvents.get(info.id)

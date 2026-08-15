@@ -30,6 +30,10 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       await mgr.deleteSession(RpcMethods['agents.deleteSession'].params.parse(p).sessionId)
       return { ok: true as const }
     },
+    'agents.listExternalSessions': async (p) => {
+      const { projectId, tool, limit } = RpcMethods['agents.listExternalSessions'].params.parse(p)
+      return mgr.listExternalSessions(projectId, tool, limit)
+    },
     'agents.resumeSession': async (p) =>
       mgr.resumeSession(RpcMethods['agents.resumeSession'].params.parse(p).sessionId),
     'agents.updateSettings': async (p) => {

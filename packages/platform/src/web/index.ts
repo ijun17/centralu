@@ -5,6 +5,7 @@ import type {
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
+  ExternalSession,
   NormalizedEvent,
   ProjectInfo,
   SessionInfo,
@@ -57,6 +58,12 @@ class WebAgentPort implements AgentPort {
   }
   async deleteSession(sessionId: string) {
     await this.rpc.call('agents.deleteSession', { sessionId })
+  }
+  listExternalSessions(projectId: string, tool: ToolName, limit = 30) {
+    return this.rpc.call<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>(
+      'agents.listExternalSessions',
+      { projectId, tool, limit },
+    )
   }
   resumeSession(sessionId: string) {
     return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.resumeSession', {

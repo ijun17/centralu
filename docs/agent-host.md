@@ -93,3 +93,60 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서 "Tauri 4단계에서 
 - chokidar로 `~/.claude/projects/**`, `~/.codex/sessions/**` 감시, **증분 파싱** (파일별 오프셋 저장).
 - 집계 결과는 store에 `usage_facts`로 적재, UI는 `usage.weekly` RPC로 조회.
 - 파싱(IO·포맷 지식)은 여기, 집계 계산(주간 합산·비용 추정)은 `core/usage` — 로그 포맷이 바뀌어도 계산 로직은 무사하다.
+
+## 8. 이전 세션 불러오기 (외부 세션)
+
+Control Center 밖 — 터미널에서 만든 대화를 이어받는 경로다.
+세션 생성 모달의 `+ → 도구 선택 → 이전 대화 목록`이 이 기능의 입구다.
+
+### 8.1 원칙: 공식 API만 쓴다
+
+두 도구 모두 트랜스크립트를 디스크에 남긴다
+(`~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**/rollout-*.jsonl`).
+**그 파일을 직접 파싱하지 않는다.** 그 포맷은 문서화된 계약이 아니라서
+도구가 올라가면 소리 없이 깨지고, 깨진 줄도 모른 채 틀린 대화를 보여주게 된다.
+
+| | 목록 | 대화 읽기 |
+|---|---|---|
+| Claude Code | SDK `listSessions({ dir })` | SDK `getSessionMessages(id, { dir })` |
+| Codex | app-server `thread/list { cwd }` | app-server `thread/read { threadId, includeTurns }` |
+
+버전 호환의 책임은 도구 쪽에 있다 — 각 API가 자기 버전이 쓴 저장 포맷을 스스로 읽는다.
+우리가 관리할 것은 **응답을 대화로 옮기는 변환**뿐이고, 그 변환은 순수 함수로 분리해
+도구를 띄우지 않고 검증한다 (`adapters/history.test.ts`).
+
+### 8.2 구버전 도구와의 호환
+
+목록을 못 가져오는 것과 세션을 못 만드는 것은 다른 문제다.
+**구버전 도구를 쓴다고 새 세션까지 막지 않는다.**
+
+- Claude: 동적 import + 함수 존재 확인. 없으면 모듈 로드가 터지는 대신 '지원 안 함'.
+- Codex: `thread/list`를 모르는 서버는 JSON-RPC `-32601`을 돌려준다.
+  이건 예외가 아니라 정상적인 협상 결과로 보고 이유를 위로 넘긴다.
+  단 진짜 고장(`EACCES` 등)은 '지원 안 함'으로 감추지 않는다 — 원인이 보여야 한다.
+
+`agents.listExternalSessions`는 그래서 던지지 않고 `{ supported, reason?, sessions }`를 돌려준다.
+UI는 `supported: false`를 오류가 아니라 안내로 그린다.
+
+### 8.3 대화 정리
+
+두 도구 모두 사용자 턴에 자기 시스템 텍스트를 끼워 넣는다
+(`<system-reminder>`, `<ide_opened_file>`, `<system_instruction>`, 슬래시 명령 흔적).
+실측에서 목록 제목이 `<system_instruction>You are working inside…`로,
+첫 대화가 `<ide_opened_file>…`로 나왔다.
+
+`adapters/history-text.ts`가 이 블록만 걷어낸다 — 통째로 버리지 않는다.
+주입된 블록 뒤에 진짜 사용자의 말이 이어지는 경우가 많기 때문이다.
+걷어낸 뒤 남는 게 없을 때만 그 줄을 버린다.
+도구 호출/결과는 이름만 남기고 버린다: 불러오기의 목적은 대화를 되찾는 것이지
+실행 로그를 되살리는 게 아니다.
+
+### 8.4 불러온 세션의 정체성
+
+- 도구에게는 `resume`을 건다 → 모델의 실제 맥락이 이어진다.
+- 화면에는 최근 `HISTORY_LIMIT`(200)줄을 복원한다 → **표시용 스냅샷**이다.
+- 복원한 대화는 `lastReadSeq = lastSeq`로 표시한다. 이미 읽은 대화로 사람을 부르지 않는다.
+- 어느 대화를 이어받았는지는 `sessions.imported_from`(스키마 v5)에 남긴다.
+  `external_id`로는 알 수 없다 — 도구가 resume하면서 **새 식별자를 발급**할 수 있어
+  원본과 달라지고, 그러면 목록의 '이미 불러옴' 표시가 매번 틀린다.
+- 기록을 못 읽어도 세션은 살린다. 기록을 못 읽었다고 대화까지 막을 이유가 없다.

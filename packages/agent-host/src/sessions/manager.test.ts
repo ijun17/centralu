@@ -28,7 +28,7 @@ class FakeHandle implements SessionHandle {
 class FakeAdapter implements AgentAdapter {
   readonly tool: ToolName = 'claude'
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'],
+    approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: ['image'],
   }
   last: FakeHandle | null = null
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
@@ -169,5 +169,112 @@ describe('RPC 일반', () => {
 
   it('잘못된 파라미터는 검증에서 걸린다', async () => {
     await expect(rpc('agents.send', { sessionId: 123 })).rejects.toThrow()
+  })
+})
+
+/**
+ * 이전 세션 불러오기 (FR-10 확장).
+ * 도구가 갖고 있던 대화를 이어받는 경로 — 목록·본문은 어댑터의 공식 API에서 온다.
+ */
+describe('이전 세션 불러오기', () => {
+  class ListingAdapter extends FakeAdapter {
+    override readonly capabilities: AdapterCapabilities = {
+      approvals: true, contextUsage: 'exact', resume: true, listExternal: true, autoTitle: true, attachments: [],
+    }
+    listed: { cwd: string; limit: number } | null = null
+    read: { externalId: string; cwd: string } | null = null
+    fail: Error | null = null
+    async listExternalSessions(cwd: string, limit: number) {
+      this.listed = { cwd, limit }
+      if (this.fail) throw this.fail
+      return [{ externalId: 'ext-past', title: '어제 하던 일', updatedAt: 111, branch: 'main' }]
+    }
+    async readExternalHistory(externalId: string, cwd: string) {
+      this.read = { externalId, cwd }
+      if (this.fail) throw this.fail
+      return [
+        { role: 'user' as const, text: '테스트 고쳐줘' },
+        { role: 'assistant' as const, text: '고쳤습니다' },
+      ]
+    }
+  }
+
+  const withListing = () => {
+    const a = new ListingAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    return { a, m, rpc: createRpcHandler(m, adapters) }
+  }
+
+  it('도구가 보관 중인 이전 세션을 목록으로 준다', async () => {
+    const { a, m, rpc: call } = withListing()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const res = await m.listExternalSessions(p.id, 'claude', 30)
+    expect(res.supported).toBe(true)
+    expect(a.listed).toEqual({ cwd: tmpdir(), limit: 30 })
+    expect(res.sessions).toEqual([
+      { externalId: 'ext-past', tool: 'claude', title: '어제 하던 일', updatedAt: 111, createdAt: null, branch: 'main', imported: false },
+    ])
+  })
+
+  it('목록을 못 가져와도 예외 대신 이유를 준다 — 새 세션은 계속 만들 수 있어야 한다', async () => {
+    const { a, m, rpc: call } = withListing()
+    a.fail = new Error('codex 업데이트가 필요합니다')
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const res = await m.listExternalSessions(p.id, 'claude', 30)
+    expect(res).toMatchObject({ supported: false, reason: 'codex 업데이트가 필요합니다', sessions: [] })
+    // 목록이 죽어도 생성 경로는 멀쩡하다
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    expect(s.id).toBeTruthy()
+  })
+
+  it('지원하지 않는 어댑터는 supported=false로 답한다', async () => {
+    const p = await addProject()
+    const res = await mgr.listExternalSessions(p.id, 'claude', 30)
+    expect(res.supported).toBe(false)
+    expect(res.sessions).toEqual([])
+  })
+
+  it('불러오면 이전 대화가 기록에 복원되고, 이미 읽은 것으로 표시된다', async () => {
+    const { a, m, rpc: call } = withListing()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude',
+      resumeExternalId: 'ext-past', importHistory: true,
+    })) as { id: string; name: string; lastSeq: number; lastReadSeq: number }
+
+    expect(a.read).toEqual({ externalId: 'ext-past', cwd: tmpdir() })
+    const msgs = (await call('messages.load', { sessionId: s.id, limit: 100 })) as { role: string; payload: { text: string } }[]
+    expect(msgs.map((x) => [x.role, x.payload.text])).toEqual([
+      ['user', '테스트 고쳐줘'],
+      ['assistant', '고쳤습니다'],
+    ])
+    // 불러온 대화로 사람을 부르지 않는다 (안 읽음 배지가 뜨면 안 된다)
+    const after = m.listSessions().find((x) => x.id === s.id)!
+    expect(after.lastReadSeq).toBe(after.lastSeq)
+    expect(after.lastSeq).toBe(2)
+    // 세션 이름은 이어받은 대화에서 온다
+    expect(after.name).toBe('테스트 고쳐줘')
+  })
+
+  it('불러온 세션도 목록에서 imported로 표시된다 — 같은 대화를 두 번 열지 않게', async () => {
+    const { m, rpc: call } = withListing()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-past', importHistory: true,
+    })
+    const res = await m.listExternalSessions(p.id, 'claude', 30)
+    expect(res.sessions[0]!.imported).toBe(true)
+  })
+
+  it('기록을 못 읽어도 세션은 살아난다 — 대화까지 막을 이유가 없다', async () => {
+    const { a, m, rpc: call } = withListing()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const created = call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-past', importHistory: true,
+    })
+    a.fail = new Error('트랜스크립트를 읽을 수 없습니다')
+    const s = (await created) as { id: string }
+    expect(m.isLive(s.id)).toBe(true)
   })
 })

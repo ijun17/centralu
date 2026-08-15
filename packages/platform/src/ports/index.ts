@@ -4,6 +4,7 @@ import type {
   ApprovalScope,
   Attachment,
   CreateSessionParams,
+  ExternalSession,
   PermissionPreset,
   GitBranch,
   GitCommit,
@@ -53,6 +54,15 @@ export interface AgentPort {
   archiveSession(sessionId: string): Promise<void>
   /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */
   deleteSession(sessionId: string): Promise<void>
+  /**
+   * 도구가 보관 중인 이전 세션 (터미널에서 만든 것 포함).
+   * supported=false면 이유가 함께 온다 — 구버전 도구에서도 '새 세션'은 막지 않는다.
+   */
+  listExternalSessions(
+    projectId: string,
+    tool: ToolName,
+    limit?: number,
+  ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>
   /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
   resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /** 모델·권한을 대화 도중에 바꾼다 (FR-7) */

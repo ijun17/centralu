@@ -57,6 +57,8 @@ export const AdapterCapabilities = z.object({
   approvals: z.boolean(),
   contextUsage: z.enum(['exact', 'estimate', 'none']),
   resume: z.boolean(),
+  /** 도구가 자체 보관 중인 이전 세션 목록을 **공식 API로** 읽을 수 있는가 */
+  listExternal: z.boolean().default(false),
   autoTitle: z.boolean(),
   attachments: z.array(z.enum(['image', 'file'])).default([]),
 })
@@ -125,3 +127,23 @@ export const Attachment = z.object({
   bytes: z.number().optional(),
 })
 export type Attachment = z.infer<typeof Attachment>
+
+/**
+ * 도구가 자체적으로 보관 중인 이전 세션 (Control Center 밖 — 터미널에서 만든 것 포함).
+ *
+ * 목록도 본문도 **각 도구의 공식 API로만** 읽는다.
+ * ~/.claude/projects/**.jsonl 이나 ~/.codex/sessions/**.jsonl 을 직접 파싱하지 않는다:
+ * 그 파일 포맷은 문서화된 계약이 아니라서 도구가 올라가면 소리 없이 깨진다.
+ * 공식 API는 자기 버전의 저장 포맷 차이를 스스로 흡수한다.
+ */
+export const ExternalSession = z.object({
+  externalId: z.string(),
+  tool: ToolName,
+  title: z.string(),
+  updatedAt: z.number(),
+  createdAt: z.number().nullable().default(null),
+  branch: z.string().nullable().default(null),
+  /** 이미 Control Center로 불러온 세션 — 같은 대화를 두 번 열지 않게 한다 */
+  imported: z.boolean().default(false),
+})
+export type ExternalSession = z.infer<typeof ExternalSession>

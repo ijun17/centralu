@@ -21,6 +21,18 @@ export type CreateSessionOpts = {
   resumeExternalId?: string
 }
 
+/** 도구가 보관 중인 이전 세션 한 건 (도구 고유 타입은 여기까지 오지 않는다) */
+export type ExternalSessionSummary = {
+  externalId: string
+  title: string
+  updatedAt: number
+  createdAt?: number
+  branch?: string
+}
+
+/** 복원용 대화 한 줄. 도구를 막론하고 '사람의 말'과 '모델의 말'만 남긴다 */
+export type HistoryMessage = { role: 'user' | 'assistant'; text: string; ts?: number }
+
 export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
 export type EventSink = (event: NormalizedEvent) => void
@@ -44,4 +56,12 @@ export interface AgentAdapter {
   readonly capabilities: AdapterCapabilities
   detect(): Promise<DetectResult>
   createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle>
+  /**
+   * 이 디렉토리에서 도구가 보관 중인 이전 세션 목록.
+   * 구현하지 않으면 '지원 안 함'으로 처리된다 — 지원 여부는 capabilities.listExternal이 말한다.
+   * 구버전 도구를 만나면 던져도 된다: 매니저가 이유와 함께 degrade한다.
+   */
+  listExternalSessions?(cwd: string, limit: number): Promise<ExternalSessionSummary[]>
+  /** 이전 세션의 대화를 읽는다 (표시용 스냅샷. 모델의 실제 컨텍스트는 도구가 갖고 있다) */
+  readExternalHistory?(externalId: string, cwd: string, limit: number): Promise<HistoryMessage[]>
 }

@@ -7,6 +7,7 @@ import {
   GitBranch,
   GitCommit,
   GitDiff,
+  ExternalSession,
   GitFileStatus,
   PermissionPreset,
   SessionState,
@@ -23,6 +24,8 @@ export const CreateSessionParams = z.object({
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
   resumeExternalId: z.string().optional(),
+  /** 재개할 때 이전 대화도 화면에 복원한다 (resumeExternalId와 함께 쓴다) */
+  importHistory: z.boolean().optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 
@@ -45,6 +48,11 @@ export const SessionInfo = z.object({
   /** 대화 도중에도 바꿀 수 있다 (FR-7) — 세션 헤더에서 고른다 */
   model: z.string().nullable().default(null),
   permissionPreset: PermissionPreset.default('normal'),
+  /**
+   * 이어받은 이전 대화의 식별자 (불러오기로 만든 세션만).
+   * externalId와 다를 수 있다 — 도구가 resume하면서 새 식별자를 발급하기 때문이다.
+   */
+  importedFrom: z.string().nullable().default(null),
 })
 export type SessionInfo = z.infer<typeof SessionInfo>
 
@@ -116,6 +124,18 @@ export const RpcMethods = {
       permissionPreset: PermissionPreset.optional(),
     }),
     result: SessionInfo,
+  },
+  /**
+   * 이 프로젝트 디렉토리에서 도구가 보관 중인 이전 세션 (FR-10 확장).
+   * supported=false면 이유를 함께 준다 — 구버전 도구에서도 '새 세션'은 그대로 된다.
+   */
+  'agents.listExternalSessions': {
+    params: z.object({ projectId: z.string(), tool: ToolName, limit: z.number().default(30) }),
+    result: z.object({
+      supported: z.boolean(),
+      reason: z.string().optional(),
+      sessions: z.array(ExternalSession),
+    }),
   },
   'agents.capabilities': { params: z.object({ tool: ToolName }), result: AdapterCapabilities },
   'agents.detect': {

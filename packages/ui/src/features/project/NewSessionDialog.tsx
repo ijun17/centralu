@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ToolName } from '@cc/protocol'
+import type { ExternalSession, ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
@@ -7,7 +7,28 @@ import { Kbd } from '../../components/primitives.jsx'
 
 type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
+/**
+ * 이전 세션 목록의 상태.
+ * 'unsupported'는 실패가 아니라 **정상적인 결과**다 — 구버전 도구는 목록을 못 준다.
+ * 그때도 새 세션은 그대로 만들 수 있어야 하므로 오류로 취급하지 않는다.
+ */
+type PastState =
+  | { status: 'loading' }
+  | { status: 'ok'; sessions: ExternalSession[] }
+  | { status: 'unsupported'; reason: string }
+
 const TOOL_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
+
+/** 방금 · 32분 전 · 3시간 전 · 5일 전 — 정확한 시각보다 '얼마나 됐나'가 중요하다 */
+function ago(ms: number): string {
+  const min = Math.floor((Date.now() - ms) / 60000)
+  if (min < 1) return '방금'
+  if (min < 60) return `${min}분 전`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour}시간 전`
+  const day = Math.floor(hour / 24)
+  return day < 30 ? `${day}일 전` : `${Math.floor(day / 30)}개월 전`
+}
 
 /**
  * 세션 생성 (FR-7).
@@ -28,6 +49,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
+  const [resume, setResume] = useState<ExternalSession | null>(null)
+  const [past, setPast] = useState<PastState>({ status: 'loading' })
+
   // 다이얼로그를 열 때마다 감지한다 — 사용자가 방금 설치·로그인했을 수 있다
   const detect = useCallback(async () => {
     try {
@@ -39,6 +64,27 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   useEffect(() => {
     void detect()
   }, [detect])
+
+  // 도구를 바꾸면 목록도 바뀐다 — 이전 선택은 다른 도구의 것이므로 버린다
+  useEffect(() => {
+    let alive = true
+    setResume(null)
+    setPast({ status: 'loading' })
+    void platform.agents
+      .listExternalSessions(projectId, tool)
+      .then((r) => {
+        if (!alive) return
+        setPast(
+          r.supported
+            ? { status: 'ok', sessions: r.sessions }
+            : { status: 'unsupported', reason: r.reason ?? '이전 세션 목록을 가져올 수 없습니다' },
+        )
+      })
+      .catch((e: Error) => alive && setPast({ status: 'unsupported', reason: e.message }))
+    return () => {
+      alive = false
+    }
+  }, [platform, projectId, tool])
 
   const info = (t: ToolName) => tools?.find((x) => x.tool === t)
   const usable = (t: ToolName) => {
@@ -62,7 +108,14 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           setBusy(true)
           setError(null)
           try {
-            await createSession(projectId, { tool, initialPrompt: prompt.trim() || undefined })
+            await createSession(projectId, {
+              tool,
+              initialPrompt: prompt.trim() || undefined,
+              // 이전 세션을 골랐다면 도구에게 그 대화를 이어달라고 하고(resume),
+              // 화면에도 지난 대화를 복원한다(importHistory).
+              resumeExternalId: resume?.externalId,
+              importHistory: resume ? true : undefined,
+            })
             onClose()
           } catch (err) {
             // 토스트는 2.5초 뒤 사라져서 '눌러도 아무 일이 없다'로 보인다 — 모달 안에 남긴다
@@ -109,9 +162,66 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           <p className="mt-1.5 text-[10px] text-slate">모델과 권한은 세션을 만든 뒤 헤더에서 바꿉니다.</p>
         </section>
 
+        {/*
+          이어서 할 일이 이어서 할 대화보다 많지는 않다.
+          터미널에서 하던 대화를 그대로 끌고 올 수 있어야 이 앱이 '또 하나의 창'이 되지 않는다.
+        */}
         <section className="mt-3.5">
           <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">
-            시작 프롬프트 <span className="normal-case tracking-normal text-slate/70">선택</span>
+            대화 <span className="normal-case tracking-normal text-slate/70">{TOOL_LABEL[tool]}</span>
+          </h3>
+          <div
+            className="max-h-52 overflow-y-auto rounded border border-edge bg-panel"
+            data-testid="past-sessions"
+          >
+            <PastRow
+              selected={!resume}
+              onSelect={() => setResume(null)}
+              testId="past-new"
+              title="새 대화 시작"
+              meta="빈 세션"
+            />
+            {past.status === 'loading' && (
+              <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-loading">
+                이전 대화를 찾는 중…
+              </p>
+            )}
+            {/* 구버전 도구를 쓴다고 새 세션까지 막지 않는다 — 이유만 조용히 알린다 */}
+            {past.status === 'unsupported' && (
+              <p className="px-2.5 py-2 text-[11px] leading-relaxed text-slate" data-testid="past-unsupported">
+                이전 대화를 불러올 수 없습니다 — {past.reason}
+              </p>
+            )}
+            {past.status === 'ok' && past.sessions.length === 0 && (
+              <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-empty">
+                이 폴더에서 진행한 이전 대화가 없습니다.
+              </p>
+            )}
+            {past.status === 'ok' &&
+              past.sessions.map((s) => (
+                <PastRow
+                  key={s.externalId}
+                  selected={resume?.externalId === s.externalId}
+                  onSelect={() => setResume(s)}
+                  testId={`past-${s.externalId}`}
+                  title={s.title}
+                  meta={[ago(s.updatedAt), s.branch, s.imported ? '이미 불러옴' : null]
+                    .filter(Boolean)
+                    .join(' · ')}
+                />
+              ))}
+          </div>
+          {resume && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-slate" data-testid="resume-note">
+              지난 대화를 이어받습니다. 도구가 기억하는 맥락 그대로 이어지고, 화면에는 최근 대화가 복원됩니다.
+            </p>
+          )}
+        </section>
+
+        <section className="mt-3.5">
+          <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">
+            {resume ? '이어서 할 말' : '시작 프롬프트'}{' '}
+            <span className="normal-case tracking-normal text-slate/70">선택</span>
           </h3>
           <textarea
             autoFocus
@@ -135,7 +245,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] text-slate">
-            <Kbd>esc</Kbd> 닫기 · <Kbd>⌘</Kbd> <Kbd>↵</Kbd> 시작
+            <Kbd>esc</Kbd> 닫기 · <Kbd>⌘</Kbd> <Kbd>↵</Kbd> {resume ? '불러오기' : '시작'}
           </span>
           <button type="button" className="ml-auto rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onClose}>
             취소
@@ -145,10 +255,45 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             disabled={busy || blocked}
             data-testid="create-session-confirm"
           >
-            {busy ? '시작하는 중…' : '시작'}
+            {busy ? (resume ? '불러오는 중…' : '시작하는 중…') : resume ? '불러오기' : '시작'}
           </button>
         </div>
       </form>
     </div>
+  )
+}
+
+/**
+ * 목록 한 줄. 선택은 밝기로만 말한다 (무채색 규칙) —
+ * 체크박스를 그리면 '설정'처럼 보이고, 여기서 하는 일은 고르기다.
+ */
+function PastRow({
+  selected,
+  onSelect,
+  title,
+  meta,
+  testId,
+}: {
+  selected: boolean
+  onSelect: () => void
+  title: string
+  meta: string
+  testId: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      data-testid={testId}
+      aria-pressed={selected}
+      className={`flex w-full flex-col gap-0.5 border-l-2 px-2.5 py-1.5 text-left transition-colors ${
+        selected
+          ? 'border-l-ash bg-graphite/40 text-chalk'
+          : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+      }`}
+    >
+      <span className="truncate text-[12px] leading-snug">{title}</span>
+      {meta && <span className="readout truncate text-[10px] text-slate">{meta}</span>}
+    </button>
   )
 }

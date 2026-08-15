@@ -93,6 +93,17 @@ export class Store {
           }
         },
       },
+      {
+        to: 5,
+        run: () => {
+          // 어느 이전 대화를 이어받았는지. external_id로는 알 수 없다 —
+          // 도구가 resume하면서 **새 식별자를 발급**할 수 있어서 원본과 달라진다.
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'imported_from')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN imported_from TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -133,18 +144,19 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, permission_preset)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @permissionPreset)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, permission_preset, imported_from)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @permissionPreset, @importedFrom)
          ON CONFLICT(id) DO UPDATE SET
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
            waiting_since = excluded.waiting_since, model = excluded.model,
-           permission_preset = excluded.permission_preset`,
+           permission_preset = excluded.permission_preset, imported_from = excluded.imported_from`,
       )
       .run({
         ...s,
         autoNamed: s.autoNamed ? 1 : 0,
         archived: s.archived ? 1 : 0,
+        importedFrom: s.importedFrom ?? null,
       })
   }
 
@@ -154,7 +166,7 @@ export class Store {
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
                 s.auto_named as autoNamed, s.state, s.archived, s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
-                s.model, s.permission_preset as permissionPreset,
+                s.model, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s ORDER BY s.created_at`,
       )

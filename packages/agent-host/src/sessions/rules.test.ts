@@ -11,7 +11,7 @@ import { SessionManager } from './manager.js'
 function fakeAdapter(applied: string[][]): AgentAdapter {
   return {
     tool: 'claude',
-    capabilities: { approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [] },
+    capabilities: { approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: [] },
     detect: async () => ({ tool: 'claude', installed: true, loggedIn: true, detail: 'fake' }),
     createSession: async (opts): Promise<SessionHandle> => ({
       sessionId: opts.sessionId,
