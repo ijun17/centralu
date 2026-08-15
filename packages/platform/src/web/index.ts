@@ -17,6 +17,8 @@ import { RpcClient } from './rpc-client.js'
  * Tauri 전환 1단계에서 이 구현을 그대로 재사용한다 (docs/platform-abstraction.md §5).
  */
 export type WebPlatformOptions = {
+  /** host 재기동 시 새 포트·토큰을 알려주는 구독 (Tauri에서 주입) */
+  onEndpointChange?: (cb: (info: { port: number; token: string }) => void) => Unsubscribe
   hostUrl?: string
   token: string
   WebSocketImpl?: typeof WebSocket
@@ -112,6 +114,11 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
   rpc.connect()
 
+  // host가 재기동되면 새 주소로 갈아탄다 (Tauri 수퍼바이저가 알려준다)
+  const unsubscribeEndpoint = opts.onEndpointChange?.((next) => {
+    rpc.updateEndpoint(`ws://127.0.0.1:${next.port}`, next.token)
+  })
+
   return {
     agents: new WebAgentPort(rpc),
     projects: new WebProjectPort(rpc),
@@ -132,6 +139,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       openInIde: false,
     },
     async dispose() {
+      unsubscribeEndpoint?.()
       rpc.close()
     },
   }

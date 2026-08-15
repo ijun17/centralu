@@ -89,7 +89,20 @@ export async function pickDirectory(): Promise<string | null> {
 
 export async function createTauriPlatform(): Promise<Platform> {
   const { port, token } = await waitForHost()
-  const base = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token })
+
+  // 수퍼바이저가 host를 되살리면 포트·토큰이 바뀐다 → 새 주소로 갈아타야 한다.
+  // 이 구독이 없으면 사이드카가 크래시한 뒤 앱이 '연결 끊김'에 머문다 (L4-2 실측).
+  const base = createWebPlatform({
+    hostUrl: `ws://127.0.0.1:${port}`,
+    token,
+    onEndpointChange: (cb) => {
+      const un = listen<HostStatus>('host-status', (e) => {
+        const p = e.payload
+        if (typeof p === 'object' && p !== null && p.state === 'ready') cb({ port: p.port, token: p.token })
+      })
+      return () => void un.then((f) => f())
+    },
+  })
 
   return {
     ...base,

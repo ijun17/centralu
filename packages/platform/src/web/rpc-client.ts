@@ -32,6 +32,20 @@ export class RpcClient {
   private queue: string[] = []
   private readonly WS: typeof WebSocket
 
+  /**
+   * host가 다시 뜨면 포트·토큰이 바뀐다 (수퍼바이저가 빈 포트를 새로 잡으므로).
+   * 옛 주소로 계속 재시도하면 앱은 영영 '연결 끊김'에 머문다 — 실측으로 확인한 결함.
+   */
+  updateEndpoint(url: string, token: string): void {
+    if (this.opts.url === url && this.opts.token === token) return
+    this.opts = { ...this.opts, url, token }
+    this.attempt = 0
+    this.lastSeq = 0 // 새 host는 이벤트 번호를 처음부터 매긴다
+    this.ws?.close()
+    this.ws = null
+    this.connect()
+  }
+
   constructor(private opts: RpcClientOptions) {
     this.WS = opts.WebSocketImpl ?? WebSocket
   }
