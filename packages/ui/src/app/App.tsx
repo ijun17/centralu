@@ -10,6 +10,8 @@ import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
 import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
 import { FirstRun } from '../features/onboarding/FirstRun.jsx'
+import { CommandPalette } from '../features/palette/CommandPalette.jsx'
+import { Settings } from '../features/settings/Settings.jsx'
 import { Kbd } from '../components/primitives.jsx'
 
 export function App({ platform }: { platform: Platform }) {
@@ -43,6 +45,8 @@ export function App({ platform }: { platform: Platform }) {
         <ApprovalBanner />
         <Body />
         <Inbox />
+        <CommandPalette />
+        <Settings />
         <Toast />
         <GlobalKeys />
       </div>
@@ -166,6 +170,12 @@ function GlobalKeys() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       const typing = t.tagName === 'TEXTAREA' || t.tagName === 'INPUT'
+      // 커맨드 팔레트 ⌘K (FR-17)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        useStore.getState().togglePalette()
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault()
         toggleInbox()

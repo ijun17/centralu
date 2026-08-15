@@ -655,3 +655,85 @@ test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', a
   await page.getByTestId('file-logo.png').click()
   await expect(page.getByTestId('viewer-binary')).toContainText('바이너리')
 })
+
+test('첨부: 파일을 붙이면 목록에 뜨고 전송에 실린다 (D, FR-13)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('attach-input').setInputFiles({
+    name: 'screenshot.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('가짜 이미지 데이터'),
+  })
+  await expect(page.getByTestId('attachment-list')).toContainText('screenshot.png')
+
+  await page.getByTestId('prompt-input').fill('이 화면 좀 봐줘')
+  await page.getByTestId('send').click()
+
+  const sent = await page.evaluate(() => (window as any).__mock.sentAttachments)
+  expect(sent).toHaveLength(1)
+  expect(sent[0].name).toBe('screenshot.png')
+  // 대화창에도 첨부가 표시된다
+  await expect(page.getByTestId('msg-user').last()).toContainText('screenshot.png')
+})
+
+test('첨부만으로도 보낼 수 있다 (D 비정상 경로: 빈 텍스트)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await expect(page.getByTestId('send')).toBeDisabled()
+  await page.getByTestId('attach-input').setInputFiles({
+    name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('x'),
+  })
+  await expect(page.getByTestId('send')).toBeEnabled()
+})
+
+test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, FR-21)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'auth 리팩터링')
+  await newSession(page, 'alpha', '배포 스크립트')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const ids = [...m.sessions.keys()]
+    m.searchResults = [{ sessionId: ids[0], seq: 3, snippet: '토큰 만료 처리를 고쳤습니다' }]
+  })
+
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+
+  await page.getByTestId('palette-input').fill('토큰')
+  await expect(page.getByTestId('palette-item-message')).toContainText('토큰 만료')
+
+  await page.getByTestId('palette-item-message').click()
+  await expect(page.getByTestId('session-name')).toContainText('auth 리팩터링')
+})
+
+test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    ;(window as any).__mock.rulesList = [
+      { id: 1, scope: 'session', matcher: 'npm test*', decision: 'allow', createdAt: Date.now() },
+    ]
+  })
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('설정')
+  await page.getByTestId('palette-item-action').click()
+
+  await expect(page.getByTestId('rules-list')).toContainText('npm test*')
+  await page.getByTestId('delete-rule-1').click()
+  await expect(page.getByTestId('rules-empty')).toBeVisible()
+})
+
+test('설정: 알림 정책을 끄면 저장된다 (E-5)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+
+  await page.getByTestId('notify-allDone').uncheck()
+  const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
+  expect(snap?.notifyPolicy?.allDone).toBe(false)
+
+  // 단축키 표도 여기서 확인된다 (FR-17)
+  await expect(page.getByTestId('shortcut-list')).toContainText('⌘⇧1~4')
+})

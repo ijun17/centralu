@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  Attachment,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -101,8 +102,27 @@ export class MockPlatform implements Platform {
     pushed: boolean
   } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], pushed: false }
 
+  readonly savedAttachments: Attachment[] = []
+  readonly sentAttachments: Attachment[] = []
+
   /** 테스트가 주무르는 가짜 파일 트리 */
   fsState: { entries: Record<string, FsEntry[]>; files: Record<string, string> } = { entries: {}, files: {} }
+
+  /** 테스트용 검색·규칙 상태 */
+  searchResults: { sessionId: string; seq: number; snippet: string }[] = []
+  rulesList: { id: number; scope: string; matcher: string; decision: string; createdAt: number }[] = []
+
+  readonly search = {
+    messages: async (query: string) =>
+      this.searchResults.filter((r) => r.snippet.includes(query)),
+  }
+
+  readonly rules = {
+    list: async () => [...this.rulesList],
+    remove: async (id: number) => {
+      this.rulesList = this.rulesList.filter((r) => r.id !== id)
+    },
+  }
 
   readonly fs = {
     listDir: async (_projectId: string, path: string) => this.fsState.entries[path] ?? [],
@@ -165,7 +185,13 @@ export class MockPlatform implements Platform {
       if (params.initialPrompt) await this.agents.send(id, params.initialPrompt)
       return info
     },
-    send: async (sessionId: string, text: string) => {
+    saveAttachment: async (_sessionId: string, name: string, mime: string, dataBase64: string) => {
+      const att = { kind: mime.startsWith('image/') ? ('image' as const) : ('file' as const), path: `/tmp/att/${name}`, name, mime, bytes: dataBase64.length }
+      this.savedAttachments.push(att)
+      return att
+    },
+    send: async (sessionId: string, text: string, attachments?: Attachment[]) => {
+      if (attachments?.length) this.sentAttachments.push(...attachments)
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
       const seq = (this.messages.get(sessionId)?.length ?? 0) + 1

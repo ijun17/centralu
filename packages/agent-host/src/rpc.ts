@@ -8,8 +8,8 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
   const handlers: { [M in RpcMethodName]: (p: unknown) => Promise<unknown> } = {
     'agents.createSession': async (p) => mgr.createSession(RpcMethods['agents.createSession'].params.parse(p)),
     'agents.send': async (p) => {
-      const { sessionId, text } = RpcMethods['agents.send'].params.parse(p)
-      mgr.send(sessionId, text)
+      const { sessionId, text, attachments } = RpcMethods['agents.send'].params.parse(p)
+      mgr.send(sessionId, text, attachments)
       return { ok: true as const }
     },
     'agents.respondApproval': async (p) => {
@@ -63,6 +63,10 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       return mgr.gitCommit(projectId, message)
     },
     'git.push': async (p) => mgr.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
+    'attachments.save': async (p) => {
+      const { sessionId, name, mime, dataBase64 } = RpcMethods['attachments.save'].params.parse(p)
+      return mgr.saveAttachment(sessionId, name, mime, dataBase64)
+    },
     'fs.listDir': async (p) => {
       const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
       return mgr.listDir(projectId, path)
@@ -70,6 +74,14 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
     'fs.readFile': async (p) => {
       const { projectId, path } = RpcMethods['fs.readFile'].params.parse(p)
       return mgr.readTextFile(projectId, path)
+    },
+    'messages.search': async (p) => {
+      const { query, limit } = RpcMethods['messages.search'].params.parse(p)
+      return mgr.searchMessages(query, limit)
+    },
+    'approvals.deleteRule': async (p) => {
+      mgr.deleteApprovalRule(RpcMethods['approvals.deleteRule'].params.parse(p).id)
+      return { ok: true as const }
     },
     'workspace.save': async (p) => {
       mgr.saveWorkspace(RpcMethods['workspace.save'].params.parse(p).layout)

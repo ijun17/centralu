@@ -3,6 +3,7 @@ import {
   AdapterCapabilities,
   ApprovalDecision,
   ApprovalScope,
+  Attachment,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -70,7 +71,7 @@ export type StoredMessage = z.infer<typeof StoredMessage>
 export const RpcMethods = {
   'agents.createSession': { params: CreateSessionParams, result: SessionInfo },
   'agents.send': {
-    params: z.object({ sessionId: z.string(), text: z.string() }),
+    params: z.object({ sessionId: z.string(), text: z.string(), attachments: z.array(Attachment).optional() }),
     result: z.object({ ok: z.literal(true) }),
   },
   'agents.respondApproval': {
@@ -125,6 +126,11 @@ export const RpcMethods = {
     params: z.object({ projectId: z.string() }),
     result: z.object({ ok: z.boolean(), message: z.string().optional() }),
   },
+  /** 붙여넣은 이미지를 host가 파일로 저장한다 (base64를 DB에 넣지 않기 위해) */
+  'attachments.save': {
+    params: z.object({ sessionId: z.string(), name: z.string(), mime: z.string(), dataBase64: z.string() }),
+    result: Attachment,
+  },
   'fs.listDir': {
     params: z.object({ projectId: z.string(), path: z.string() }),
     result: z.array(z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })),
@@ -133,8 +139,16 @@ export const RpcMethods = {
     params: z.object({ projectId: z.string(), path: z.string() }),
     result: z.object({ text: z.string(), truncated: z.boolean(), binary: z.boolean(), bytes: z.number() }),
   },
+  'messages.search': {
+    params: z.object({ query: z.string(), limit: z.number().optional() }),
+    result: z.array(z.object({ sessionId: z.string(), seq: z.number(), snippet: z.string() })),
+  },
   'workspace.save': {
     params: z.object({ layout: z.record(z.string(), z.unknown()) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'approvals.deleteRule': {
+    params: z.object({ id: z.number() }),
     result: z.object({ ok: z.literal(true) }),
   },
   'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
@@ -156,7 +170,15 @@ export const RpcMethods = {
   },
   'approvals.rules': {
     params: z.object({ projectId: z.string().optional() }),
-    result: z.array(z.object({ scope: ApprovalScope, matcher: z.string(), decision: z.string() })),
+    result: z.array(
+      z.object({
+        id: z.number(),
+        scope: ApprovalScope,
+        matcher: z.string(),
+        decision: z.string(),
+        createdAt: z.number(),
+      }),
+    ),
   },
 } as const
 

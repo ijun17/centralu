@@ -2,6 +2,7 @@ import type {
   AdapterCapabilities,
   ApprovalDecision,
   ApprovalScope,
+  Attachment,
   CreateSessionParams,
   GitBranch,
   GitCommit,
@@ -36,7 +37,9 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'res
 
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>
-  send(sessionId: string, text: string): Promise<void>
+  send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
+  /** 붙여넣은 이미지를 저장하고 경로를 받는다 (base64를 대화 기록에 넣지 않기 위해) */
+  saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string): Promise<Attachment>
   respondApproval(
     sessionId: string,
     requestId: string,
@@ -118,6 +121,16 @@ export type WorkspaceSnapshot = {
   tab?: string
 }
 
+/** 대화 검색·승인 규칙 관리 (E-1, E-4) */
+export interface SearchPort {
+  messages(query: string, limit?: number): Promise<{ sessionId: string; seq: number; snippet: string }[]>
+}
+
+export interface ApprovalRulesPort {
+  list(): Promise<{ id: number; scope: string; matcher: string; decision: string; createdAt: number }[]>
+  remove(id: number): Promise<void>
+}
+
 export interface WorkspacePort {
   save(snapshot: WorkspaceSnapshot): Promise<void>
   load(): Promise<WorkspaceSnapshot | null>
@@ -129,6 +142,8 @@ export interface Platform {
   system: SystemPort
   git: GitPort
   fs: FsPort
+  search: SearchPort
+  rules: ApprovalRulesPort
   workspace: WorkspacePort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>

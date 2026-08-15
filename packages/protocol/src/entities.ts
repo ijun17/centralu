@@ -110,3 +110,18 @@ export type GitBranch = z.infer<typeof GitBranch>
 
 export const GitDiff = z.object({ diff: z.string(), truncated: z.boolean(), binary: z.boolean() })
 export type GitDiff = z.infer<typeof GitDiff>
+
+/**
+ * 첨부 (FR-13).
+ * 이미지는 base64로 messages.payload에 넣지 않는다 — DB가 비대해지고 FTS가 오염된다.
+ * host가 파일로 저장하고 경로만 주고받는다 (m2-plan D-1 결정).
+ */
+export const Attachment = z.object({
+  kind: z.enum(['image', 'file']),
+  /** 프로젝트 내 파일이면 상대 경로, 붙여넣은 이미지면 저장된 절대 경로 */
+  path: z.string(),
+  name: z.string(),
+  mime: z.string().optional(),
+  bytes: z.number().optional(),
+})
+export type Attachment = z.infer<typeof Attachment>

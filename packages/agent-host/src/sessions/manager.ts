@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
   ApprovalDecision,
+  Attachment,
   ApprovalScope,
   CreateSessionParams,
   NormalizedEvent,
@@ -26,6 +27,7 @@ import {
   gitPush,
 } from '../dev-services/git.js'
 import { listDir, readTextFile } from '../dev-services/fs.js'
+import { saveAttachment } from '../dev-services/attachments.js'
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -209,7 +211,11 @@ export class SessionManager {
     m.lastSeq = seq
   }
 
-  send(sessionId: string, text: string): void {
+  saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
+    return saveAttachment(sessionId, name, mime, dataBase64)
+  }
+
+  send(sessionId: string, text: string, attachments?: Attachment[]): void {
     const h = this.requireHandle(sessionId)
     const m = this.meta.get(sessionId)!
     const seq = this.store.nextSeq(sessionId)
@@ -221,7 +227,8 @@ export class SessionManager {
       this.emit({ type: 'session_title', sessionId, title: m.name })
     }
     this.store.upsertSession(m)
-    h.send(text)
+    // 첨부는 도구가 이해하는 형태로 어댑터가 변환한다 (경로 멘션 또는 이미지 블록)
+    h.send(attachments?.length ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}` : text)
   }
 
   respondApproval(
@@ -297,11 +304,25 @@ export class SessionManager {
   }
 
   /** 설정 화면에서 규칙을 보고 지울 수 있어야 한다 (FR-3: 결과를 보이게 한다) */
-  listApprovalRules(): { scope: 'session' | 'project'; matcher: string; decision: string }[] {
+  listApprovalRules(): { id: number; scope: 'session' | 'project'; matcher: string; decision: string; createdAt: number }[] {
     return this.store
       .listApprovalRules()
       .filter((r) => r.matcher)
-      .map((r) => ({ scope: r.scope as 'session' | 'project', matcher: r.matcher, decision: r.decision }))
+      .map((r) => ({
+        id: r.id,
+        scope: r.scope as 'session' | 'project',
+        matcher: r.matcher,
+        decision: r.decision,
+        createdAt: r.createdAt,
+      }))
+  }
+
+  deleteApprovalRule(id: number): void {
+    this.store.deleteApprovalRule(id)
+  }
+
+  searchMessages(query: string, limit?: number) {
+    return this.store.searchMessages(query, limit)
   }
 
   /** 이 세션에 적용되는 저장된 규칙 (세션 범위 + 프로젝트 범위) */

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { NormalizedEvent, PermissionPreset, ProjectInfo, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
+import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
 import {
   allDoneNotification,
   applyEvent,
@@ -8,6 +8,8 @@ import {
   countWaiting,
   notificationFor,
   suggestMatcher,
+  DEFAULT_NOTIFY_POLICY,
+  type NotifyPolicy,
   bumpSeq,
   initialSession,
   markRead as markReadPure,
@@ -42,6 +44,9 @@ export type AppState = {
   appFocused: boolean
   /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
   viewerPath: string | null
+  paletteOpen: boolean
+  settingsOpen: boolean
+  notifyPolicy: NotifyPolicy
 
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
@@ -53,6 +58,9 @@ export type AppState = {
   /** 파일을 뷰어 탭에서 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
   toggleInbox(open?: boolean): void
+  togglePalette(open?: boolean): void
+  toggleSettings(open?: boolean): void
+  setNotifyPolicy(p: NotifyPolicy): void
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
@@ -60,7 +68,8 @@ export type AppState = {
     projectId: string,
     opts?: { tool?: ToolName; model?: string; permissionPreset?: PermissionPreset; initialPrompt?: string },
   ): Promise<SessionInfo>
-  send(sessionId: string, text: string): Promise<void>
+  send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
+  attachFile(sessionId: string, file: File): Promise<Attachment | null>
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   interrupt(sessionId: string): Promise<void>
   archive(sessionId: string): Promise<void>
@@ -89,6 +98,9 @@ export const useStore = create<AppState>((set, get) => ({
   toast: null,
   appFocused: true,
   viewerPath: null,
+  paletteOpen: false,
+  settingsOpen: false,
+  notifyPolicy: DEFAULT_NOTIFY_POLICY,
 
   async attach(platform) {
     set({ platform })
@@ -118,6 +130,8 @@ export const useStore = create<AppState>((set, get) => ({
         get().focusSession(snap.focusedSessionId)
         // 보던 탭까지 돌아온다 (B-0)
         if (snap.tab) set({ tab: snap.tab as Tab })
+        const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
+        if (savedPolicy) set({ notifyPolicy: savedPolicy })
       }
     } catch {
       /* 스냅샷이 없어도 앱은 정상 동작한다 */
@@ -160,7 +174,7 @@ export const useStore = create<AppState>((set, get) => ({
       const platform = st.platform
       if (!platform) return
 
-      const ctx = { appFocused: st.appFocused }
+      const ctx = { appFocused: st.appFocused, policy: st.notifyPolicy }
       const after = Object.values(st.sessions)
       const before = after.map((x) => (x.id === sessionId ? cur : x))
 
@@ -217,6 +231,21 @@ export const useStore = create<AppState>((set, get) => ({
   toggleInbox(open) {
     set((s) => ({ inboxOpen: open ?? !s.inboxOpen }))
   },
+  togglePalette(open) {
+    set((s) => ({ paletteOpen: open ?? !s.paletteOpen }))
+  },
+  toggleSettings(open) {
+    set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))
+  },
+  setNotifyPolicy(notifyPolicy) {
+    set({ notifyPolicy })
+    // 정책은 워크스페이스 스냅샷에 함께 실린다 (E-5)
+    void get().platform?.workspace.save({
+      focusedSessionId: get().focusedSessionId,
+      tab: get().tab,
+      notifyPolicy,
+    } as never).catch(() => {})
+  },
   setToast(toast) {
     set({ toast })
   },
@@ -260,13 +289,30 @@ export const useStore = create<AppState>((set, get) => ({
     return info
   },
 
-  async send(sessionId, text) {
+  /** 붙여넣기·드래그로 들어온 파일을 host에 저장하고 첨부 정보를 받는다 (FR-13) */
+  async attachFile(sessionId, file) {
+    const platform = get().platform
+    if (!platform) return null
+    try {
+      const buf = await file.arrayBuffer()
+      let binary = ''
+      const bytes = new Uint8Array(buf)
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
+      return await platform.agents.saveAttachment(sessionId, file.name, file.type || 'application/octet-stream', btoa(binary))
+    } catch (e) {
+      set({ toast: `첨부하지 못했습니다: ${(e as Error).message}` })
+      return null
+    }
+  },
+
+  async send(sessionId, text, attachments) {
     const seq = ++chatSeq
+    const label = attachments?.length ? `${text}${text ? '\n' : ''}📎 ${attachments.map((a) => a.name).join(', ')}` : text
     set((s) => ({
-      chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text }] },
+      chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label }] },
     }))
     try {
-      await get().platform!.agents.send(sessionId, text)
+      await get().platform!.agents.send(sessionId, text, attachments)
     } catch (err) {
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.

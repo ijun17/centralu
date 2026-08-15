@@ -1,5 +1,9 @@
 /** T1-2 완료 기준: 스키마가 실제로 적용되고 CRUD가 도는지 */
 import { describe, expect, it } from 'vitest'
+import Database from 'better-sqlite3'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Store } from './store.js'
 
 function seeded() {
@@ -14,8 +18,8 @@ function seeded() {
 }
 
 describe('Store (dev sqlite)', () => {
-  it('스키마 v1이 적용된다', () => {
-    expect(new Store().schemaVersion).toBe(1)
+  it('최신 스키마까지 마이그레이션된다', () => {
+    expect(new Store().schemaVersion).toBe(3)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -75,5 +79,52 @@ describe('Store (dev sqlite)', () => {
     const rules = s.listApprovalRules()
     expect(rules).toHaveLength(1)
     expect(rules[0]!.matcher).toBe('npm test*')
+  })
+})
+
+describe('마이그레이션 (E-0)', () => {
+  it('v1 DB를 열면 새 컬럼·FTS가 추가되고 기존 메시지가 검색된다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-migrate-'))
+    const file = join(dir, 'old.db')
+
+    // v1 상태를 손으로 만든다 (touched_paths도 messages_fts도 없는 상태)
+    const raw = new Database(file)
+    raw.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT, tool TEXT, external_id TEXT,
+        name TEXT, auto_named INTEGER, state TEXT, archived INTEGER, last_read_seq INTEGER,
+        waiting_since INTEGER, created_at INTEGER);
+      CREATE TABLE messages (session_id TEXT, seq INTEGER, role TEXT, kind TEXT, payload TEXT, ts INTEGER,
+        PRIMARY KEY (session_id, seq));
+      INSERT INTO sessions VALUES ('s1','p1','claude',NULL,'옛 세션',1,'idle',0,0,NULL,0);
+      INSERT INTO messages VALUES ('s1',1,'assistant','text','{"text":"승인을 기다립니다"}',0);
+      PRAGMA user_version = 1;
+    `)
+    raw.close()
+
+    const store = new Store(file)
+    expect(store.schemaVersion).toBe(3)
+
+    // 백필이 되어야 예전 대화도 찾을 수 있다
+    const hits = store.searchMessages('승인')
+    expect(hits.length).toBe(1)
+    expect(hits[0]!.sessionId).toBe('s1')
+
+    // 새 컬럼도 쓸 수 있다
+    store.setTouchedPaths('s1', ['src/a.ts'])
+    expect(store.getTouchedPaths('s1')).toEqual(['src/a.ts'])
+
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('한국어 조사가 붙어도 검색된다 (trigram 토크나이저)', () => {
+    const s = seeded()
+    s.appendMessages([
+      { sessionId: 's1', seq: 10, role: 'assistant', kind: 'text', payload: { text: '승인을 기다리는 중입니다' }, ts: 0 },
+    ])
+    // unicode61이면 '승인'으로 '승인을'을 못 찾는다 — 이게 이 앱에서 실제로 겪을 문제
+    expect(s.searchMessages('승인').length).toBe(1)
+    expect(s.searchMessages('기다리').length).toBe(1)
+    s.close()
   })
 })

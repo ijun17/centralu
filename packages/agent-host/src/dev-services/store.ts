@@ -31,6 +31,63 @@ export class Store {
     this.db = new Database(path)
     this.db.pragma('journal_mode = WAL')
     this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
+    this.migrate()
+  }
+
+  /**
+   * 마이그레이션 러너 (E-0).
+   *
+   * 스키마 파일은 `CREATE TABLE IF NOT EXISTS`뿐이라 **기존 DB에는 컬럼·인덱스 추가가
+   * 조용히 무시된다.** 이미 실사용 데이터가 쌓인 파일이 있으므로(~/.control-center/store.db)
+   * user_version을 보고 순차 적용한다.
+   */
+  private migrate(): void {
+    const current = this.schemaVersion
+    const steps: { to: number; run: () => void }[] = [
+      {
+        to: 2,
+        run: () => {
+          // B-7: 에이전트가 만진 파일을 재시작 후에도 기억한다
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'touched_paths')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN touched_paths TEXT NOT NULL DEFAULT '[]'`)
+          }
+        },
+      },
+      {
+        to: 3,
+        run: () => {
+          // E-1: 대화 전문 검색. 한국어는 조사가 붙으므로 trigram을 쓴다
+          //   (unicode61은 '승인'으로 '승인을'을 못 찾는다)
+          this.db.exec(`
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+              body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
+            );
+          `)
+          // 기존 메시지 백필 — 이게 없으면 예전 대화는 영원히 검색되지 않는다
+          const rows = this.db.prepare(`SELECT session_id, seq, payload FROM messages`).all() as {
+            session_id: string
+            seq: number
+            payload: string
+          }[]
+          const insert = this.db.prepare(`INSERT INTO messages_fts (body, session_id, seq) VALUES (?, ?, ?)`)
+          const tx = this.db.transaction(() => {
+            for (const r of rows) {
+              const body = extractText(r.payload)
+              if (body) insert.run(body, r.session_id, r.seq)
+            }
+          })
+          tx()
+        },
+      },
+    ]
+
+    for (const step of steps) {
+      if (current < step.to) {
+        step.run()
+        this.db.pragma(`user_version = ${step.to}`)
+      }
+    }
   }
 
   get schemaVersion(): number {
@@ -94,10 +151,62 @@ export class Store {
     const stmt = this.db.prepare(
       `INSERT OR REPLACE INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)`,
     )
+    const fts = this.db.prepare(`INSERT INTO messages_fts (body, session_id, seq) VALUES (?, ?, ?)`)
     const tx = this.db.transaction((rows: StoredMessage[]) => {
-      for (const m of rows) stmt.run(m.sessionId, m.seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
+      for (const m of rows) {
+        const payload = JSON.stringify(m.payload)
+        stmt.run(m.sessionId, m.seq, m.role, m.kind, payload, m.ts)
+        const body = extractText(payload)
+        if (body) fts.run(body, m.sessionId, m.seq)
+      }
     })
     tx(msgs)
+  }
+
+  /**
+   * 대화 전문 검색 (E-1). 아카이브된 세션도 포함한다 — 찾으려는 것이 거기 있을 수 있다.
+   */
+  searchMessages(query: string, limit = 50): { sessionId: string; seq: number; snippet: string }[] {
+    const q = query.trim()
+    if (!q) return []
+
+    // trigram 토크나이저는 **3글자 미만을 찾지 못한다** (실측).
+    // 한국어에서 '승인'·'배포' 같은 두 글자 검색은 흔하므로 LIKE로 넘긴다.
+    if (q.length < 3) {
+      return this.db
+        .prepare(
+          `SELECT session_id as sessionId, seq, body as snippet FROM messages_fts
+           WHERE body LIKE ? ORDER BY seq DESC LIMIT ?`,
+        )
+        .all(`%${q}%`, limit) as { sessionId: string; seq: number; snippet: string }[]
+    }
+
+    try {
+      return this.db
+        .prepare(
+          `SELECT session_id as sessionId, seq, snippet(messages_fts, 0, '', '', '…', 12) as snippet
+           FROM messages_fts WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?`,
+        )
+        .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; snippet: string }[]
+    } catch {
+      // FTS 구문 오류(특수문자 등)에는 조용히 빈 결과 — 검색창이 깨지면 안 된다
+      return []
+    }
+  }
+
+  setTouchedPaths(sessionId: string, paths: string[]): void {
+    this.db.prepare(`UPDATE sessions SET touched_paths = ? WHERE id = ?`).run(JSON.stringify(paths), sessionId)
+  }
+
+  getTouchedPaths(sessionId: string): string[] {
+    const row = this.db.prepare(`SELECT touched_paths as p FROM sessions WHERE id = ?`).get(sessionId) as
+      | { p: string }
+      | undefined
+    try {
+      return row ? (JSON.parse(row.p) as string[]) : []
+    } catch {
+      return []
+    }
   }
 
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number): StoredMessage[] {
@@ -148,9 +257,42 @@ export class Store {
       .run(r.scope, r.projectId ?? null, r.sessionId ?? null, r.matcher, r.decision, Date.now())
   }
 
-  listApprovalRules(): { scope: string; matcher: string; decision: string; projectId: string | null; sessionId: string | null }[] {
+  listApprovalRules(): {
+    id: number
+    scope: string
+    matcher: string
+    decision: string
+    projectId: string | null
+    sessionId: string | null
+    createdAt: number
+  }[] {
     return this.db
-      .prepare(`SELECT scope, matcher, decision, project_id as projectId, session_id as sessionId FROM approval_rules ORDER BY created_at`)
-      .all() as { scope: string; matcher: string; decision: string; projectId: string | null; sessionId: string | null }[]
+      .prepare(
+        `SELECT id, scope, matcher, decision, project_id as projectId, session_id as sessionId,
+                created_at as createdAt
+         FROM approval_rules ORDER BY created_at DESC`,
+      )
+      .all() as never
+  }
+
+  /** 규칙은 지울 수 있어야 한다 — 저장만 되고 못 지우면 '결과를 보이게 한다'가 반쪽이다 */
+  deleteApprovalRule(id: number): void {
+    this.db.prepare(`DELETE FROM approval_rules WHERE id = ?`).run(id)
+  }
+}
+
+/** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */
+function extractText(payload: string): string {
+  try {
+    const p = JSON.parse(payload) as Record<string, unknown>
+    if (typeof p.text === 'string') return p.text
+    if (typeof p.title === 'string') return p.title
+    if (p.summary && typeof p.summary === 'object') {
+      const s = p.summary as { title?: string }
+      return s.title ?? ''
+    }
+    return ''
+  } catch {
+    return ''
   }
 }

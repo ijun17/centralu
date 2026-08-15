@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  Attachment,
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
@@ -29,8 +30,11 @@ class WebAgentPort implements AgentPort {
   createSession(params: CreateSessionParams) {
     return this.rpc.call<SessionInfo>('agents.createSession', params)
   }
-  async send(sessionId: string, text: string) {
-    await this.rpc.call('agents.send', { sessionId, text })
+  async send(sessionId: string, text: string, attachments?: Attachment[]) {
+    await this.rpc.call('agents.send', { sessionId, text, attachments })
+  }
+  saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
+    return this.rpc.call<Attachment>('attachments.save', { sessionId, name, mime, dataBase64 })
   }
   async respondApproval(
     sessionId: string,
@@ -123,6 +127,15 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     agents: new WebAgentPort(rpc),
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
+    search: {
+      messages: (query, limit) => rpc.call('messages.search', { query, limit }),
+    },
+    rules: {
+      list: () => rpc.call('approvals.rules', {}),
+      remove: async (id) => {
+        await rpc.call('approvals.deleteRule', { id })
+      },
+    },
     fs: {
       listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),
       readFile: (projectId, path) => rpc.call('fs.readFile', { projectId, path }),

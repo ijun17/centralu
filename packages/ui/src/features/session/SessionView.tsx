@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import type { Attachment } from '@cc/protocol'
 import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/core'
 import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
@@ -24,7 +25,18 @@ export function SessionView() {
   const interrupt = useStore((s) => s.interrupt)
   const markRead = useStore((s) => s.markRead)
   const [text, setText] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const attachFile = useStore((s) => s.attachFile)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 스크린샷을 붙여넣는 흐름이 가장 흔하다 (FR-13)
+  const takeFiles = async (files: FileList | File[] | null) => {
+    if (!files || !session) return
+    for (const f of Array.from(files)) {
+      const att = await attachFile(session.id, f)
+      if (att) setAttachments((prev) => [...prev, att])
+    }
+  }
 
   // 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core)
   useEffect(() => {
@@ -107,12 +119,42 @@ export function SessionView() {
         onSubmit={(e) => {
           e.preventDefault()
           const t = text.trim()
-          if (!t) return
+          if (!t && attachments.length === 0) return
           setText('')
-          void send(session.id, t)
+          setAttachments([])
+          void send(session.id, t, attachments)
         }}
       >
-        <div className="flex items-end gap-2 rounded border border-edge bg-panel px-3 py-2 transition-colors focus-within:border-graphite">
+        {attachments.length > 0 && (
+          <ul className="mb-1.5 flex flex-wrap gap-1.5" data-testid="attachment-list">
+            {attachments.map((a, i) => (
+              <li
+                key={`${a.path}-${i}`}
+                className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
+              >
+                <span className="text-slate">{a.kind === 'image' ? '🖼' : '📄'}</span>
+                <span className="max-w-40 truncate">{a.name}</span>
+                <button
+                  type="button"
+                  className="text-slate hover:text-chalk"
+                  onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
+                  aria-label={`${a.name} 첨부 취소`}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div
+          className="flex items-end gap-2 rounded border border-edge bg-panel px-3 py-2 transition-colors focus-within:border-graphite"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            void takeFiles(e.dataTransfer.files)
+          }}
+          data-testid="input-dropzone"
+        >
           <textarea
             className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
             rows={1}
@@ -128,19 +170,39 @@ export function SessionView() {
                 e.currentTarget.form?.requestSubmit()
               }
             }}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData.files)
+              if (files.length > 0) {
+                e.preventDefault()
+                void takeFiles(files)
+              }
+            }}
             placeholder="메시지를 입력하세요"
             data-testid="prompt-input"
           />
+          <label
+            className="shrink-0 cursor-pointer rounded px-1.5 py-1 text-[12px] text-slate transition-colors hover:bg-graphite hover:text-chalk"
+            title="파일 첨부"
+          >
+            📎
+            <input
+              type="file"
+              multiple
+              className="hidden"
+              data-testid="attach-input"
+              onChange={(e) => void takeFiles(e.target.files)}
+            />
+          </label>
           <button
             className="shrink-0 rounded px-2 py-1 text-[12px] text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
-            disabled={!text.trim()}
+            disabled={!text.trim() && attachments.length === 0}
             data-testid="send"
           >
             보내기
           </button>
         </div>
         <p className="mt-1.5 text-[10px] text-slate">
-          <Kbd>Enter</Kbd> 보내기 · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> 줄바꿈
+          <Kbd>Enter</Kbd> 보내기 · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> 줄바꿈 · 이미지는 붙여넣기(<Kbd>⌘V</Kbd>)
         </p>
       </form>
       )}
