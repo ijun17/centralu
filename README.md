@@ -44,10 +44,26 @@ pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 | [spikes/m0-findings.md](docs/spikes/m0-findings.md) | M0 검증 결과: 권한 오버라이드·이벤트·Codex·토폴로지 전부 성립 | — |
 | [plans/m1-plan.md](docs/plans/m1-plan.md) | M1 실행 플랜: 페이즈·태스크·완료 기준·게이트 | 전부 |
 | [plans/m1-result.md](docs/plans/m1-result.md) | M1 실행 결과: 게이트 통과 현황, 성능 실측, 구현 중 결정, G5 실측 기록 | m1-plan |
-| [plans/m1.5-plan.md](docs/plans/m1.5-plan.md) | **다음 작업**: M1.5 상시 가동(Tauri·알림·복원) + 검증 프로토콜, 이후 마일스톤 개요 | m1-result |
+| [plans/m1.5-plan.md](docs/plans/m1.5-plan.md) | M1.5 계획: 상시 가동 + 검증 프로토콜, 이후 마일스톤 개요 | m1-result |
+| [plans/m1.5-result.md](docs/plans/m1.5-result.md) | **M1.5 실행 결과**: 실측이 잡은 결함 5건, 성능, 남은 한계 | m1.5-plan |
 
 ## 문서 규칙
 
 - 설계를 바꾸면 **코드와 같은 PR에서 해당 문서를 고친다.** 문서와 코드가 다르면 문서가 틀린 것이다.
 - 각 문서의 "결정" 표는 근거를 함께 적는다. 근거 없는 결정은 재검토 대상.
 - 기획서(product-spec)와 충돌하면 기획서가 이긴다 (기능 요구), 단 구현 방식은 설계 문서가 이긴다.
+
+## 실행
+
+```bash
+pnpm install
+
+# 데스크톱 앱 (권장 — 사이드카를 알아서 띄운다)
+pnpm --filter @cc/desktop dev
+
+# 웹 개발 모드 (터미널 2개)
+pnpm host          # 에이전트 호스트
+pnpm dev           # http://127.0.0.1:5174 (/?mock=1 로 열면 host 없이 UI만 확인)
+```
+
+검증: `pnpm verify` (lint·타입·단위) · `pnpm e2e` · `pnpm smoke` · `pnpm smoke:resume`

@@ -443,3 +443,32 @@ test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async (
   const after = await page.evaluate((id) => (window as any).__store.getState().chat[id].length, longId)
   expect(after).toBeLessThanOrEqual(50)
 })
+
+test('인박스 10건을 연속 처리해도 커서가 어긋나지 않는다 (L4-3 반복 조작)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `작업 ${i}`)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    for (const id of m.sessions.keys()) m.emit({ type: 'turn_complete', sessionId: id })
+  })
+
+  await page.keyboard.press('Meta+i')
+  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(10)
+
+  // 키보드만으로 전부 정리 — 중간에 커서가 빈 자리를 가리키면 여기서 깨진다
+  for (let i = 0; i < 10; i++) await page.keyboard.press('d')
+  await expect(page.getByTestId('inbox-empty')).toBeVisible()
+  await expect(page.getByTestId('count-input')).toContainText('00')
+})
+
+test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 700 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 가로 스크롤이 생기면 무언가 넘친 것이다
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+  expect(overflow).toBe(false)
+  await expect(page.getByTestId('sidebar')).toBeVisible()
+  await expect(page.getByTestId('prompt-input')).toBeVisible()
+})
