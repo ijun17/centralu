@@ -40,7 +40,9 @@ describe('승인 규칙 영속 (C-2)', () => {
   it('always + matcher를 주면 규칙이 저장된다', async () => {
     const { mgr, session } = await setup()
     mgr.respondApproval(session.id, 'req-1', 'always', 'session', 'npm test*')
-    expect(mgr.listApprovalRules()).toEqual([{ scope: 'session', matcher: 'npm test*', decision: 'allow' }])
+    // id·createdAt은 설정 화면이 규칙을 지우고 언제 만들었는지 보여주는 데 쓴다 (E-4)
+    expect(mgr.listApprovalRules()).toMatchObject([{ scope: 'session', matcher: 'npm test*', decision: 'allow' }])
+    expect(mgr.listApprovalRules()[0]!.id).toBeGreaterThan(0)
   })
 
   it('매처가 없으면 저장하지 않는다 (빈 규칙은 무용지물이므로)', async () => {
