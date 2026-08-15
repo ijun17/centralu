@@ -45,7 +45,8 @@ pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 | [plans/m1-plan.md](docs/plans/m1-plan.md) | M1 실행 플랜: 페이즈·태스크·완료 기준·게이트 | 전부 |
 | [plans/m1-result.md](docs/plans/m1-result.md) | M1 실행 결과: 게이트 통과 현황, 성능 실측, 구현 중 결정, G5 실측 기록 | m1-plan |
 | [plans/m1.5-plan.md](docs/plans/m1.5-plan.md) | M1.5 계획: 상시 가동 + 검증 프로토콜, 이후 마일스톤 개요 | m1-result |
-| [plans/m1.5-result.md](docs/plans/m1.5-result.md) | **M1.5 실행 결과**: 실측이 잡은 결함 5건, 성능, 남은 한계 | m1.5-plan |
+| [plans/m1.5-result.md](docs/plans/m1.5-result.md) | M1.5 실행 결과: 실측이 잡은 결함 5건, 성능, 남은 한계 | m1.5-plan |
+| [plans/m2-plan.md](docs/plans/m2-plan.md) | **다음 작업**: M2 관제 완성 (Codex·깃 패널·뷰어·첨부·검색·배포 빌드) | m1.5-result |
 
 ## 문서 규칙
 
