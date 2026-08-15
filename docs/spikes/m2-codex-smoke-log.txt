@@ -1,0 +1,11 @@
+[codex] ✅ Codex 감지 — codex-cli 0.147.0
+[codex] ✅ thread id를 생성 즉시 확보 — 01a004dc-40cb-74b0-89e0-00f78cd36c6c
+[codex] ✅ S9 승인 요청 수신 (전역 never를 세션 단위로 덮어씀) — file_edit
+[codex] ✅ S9 승인 후 파일이 실제로 생성됨
+[codex] ✅ FR-18 세션 자동 이름 — Create a file named codex-ok.txt contain
+[codex] · Codex 제목 이벤트는 오지 않음 (짧은 세션)
+[codex] ✅ 토큰/컨텍스트 계기판 이벤트 수신 — usage_update
+[codex] ✅ S10 재개 성공
+[codex] ✅ S10 재개된 세션이 이전 맥락을 기억 — MELON
+[codex] ✅ S11 host를 죽이면 codex app-server도 남지 않는다 — 없음
+[codex] 전부 통과

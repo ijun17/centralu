@@ -18,9 +18,11 @@ async function setup(page: Page, opts: { projects?: string[] } = {}) {
 }
 
 async function newSession(page: Page, projectName: string, prompt: string) {
+  // 새 세션은 다이얼로그를 거친다 (FR-7: 도구·모델·권한을 고른다)
   await page.getByTestId(`new-session-${projectName}`).click()
-  await page.getByTestId('prompt-input').fill(prompt)
-  await page.getByTestId('send').click()
+  await page.getByTestId('initial-prompt').fill(prompt)
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 }
 
 /** mock에 승인 요청을 주입 */
@@ -471,4 +473,41 @@ test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ 
   expect(overflow).toBe(false)
   await expect(page.getByTestId('sidebar')).toBeVisible()
   await expect(page.getByTestId('prompt-input')).toBeVisible()
+})
+
+test('세션 생성: 도구·모델·권한을 고르면 그대로 전달된다 (A-3, FR-7 완성)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('new-session-alpha').click()
+
+  await page.getByTestId('tool-option-claude').click()
+  await page.getByTestId('model-input').fill('haiku')
+  await page.getByTestId('preset-safe').click()
+  await page.getByTestId('initial-prompt').fill('첫 지시')
+  await page.getByTestId('create-session-confirm').click()
+
+  // 고른 값이 host까지 도달했는가 (예전엔 프리셋 'normal' 고정, 모델 미전달)
+  const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
+  expect(params).toMatchObject({ tool: 'claude', model: 'haiku', permissionPreset: 'safe', initialPrompt: '첫 지시' })
+  await expect(page.getByTestId('msg-user')).toContainText('첫 지시')
+})
+
+test('세션 생성: 준비 안 된 도구는 고를 수 없다 (A-3)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.agents.detect = async () => [
+      { tool: 'claude', installed: true, loggedIn: true, detail: 'mock' },
+      { tool: 'codex', installed: false, loggedIn: false, detail: '설치되지 않음' },
+    ]
+  })
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('tool-option-codex')).toBeDisabled()
+  await expect(page.getByTestId('tool-option-claude')).toBeEnabled()
+})
+
+test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '먼저 시작한 작업')
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('concurrent-warning')).toContainText('유실')
 })

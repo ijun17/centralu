@@ -8,6 +8,7 @@ import { HostServer } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
 import { Store } from './dev-services/store.js'
 import { ClaudeAdapter } from './adapters/claude/index.js'
+import { CodexAdapter } from './adapters/codex/index.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import { createRpcHandler } from './rpc.js'
 
@@ -38,7 +39,10 @@ function defaultDbPath(): string {
 }
 
 const store = new Store(dbPath)
-const adapters = new Map<ToolName, AgentAdapter>([['claude', new ClaudeAdapter()]])
+const adapters = new Map<ToolName, AgentAdapter>([
+  ['claude', new ClaudeAdapter()],
+  ['codex', new CodexAdapter()],
+])
 
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
 const server: HostServer = new HostServer({

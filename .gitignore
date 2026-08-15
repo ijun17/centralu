@@ -21,3 +21,6 @@ spike/**/out/
 *.log
 .DS_Store
 apps/desktop/src-tauri/resources/
+
+# Codex 프로토콜 바인딩 (생성물) — 의존 계약만 protocol-contract.json으로 커밋한다
+packages/agent-host/src/adapters/codex/generated/

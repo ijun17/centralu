@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { useStore } from '../../store/store.js'
+import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
 import { StateDot } from '../../components/primitives.jsx'
 
@@ -29,8 +31,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
   const focusedSessionId = useStore((s) => s.focusedSessionId)
   const focusSession = useStore((s) => s.focusSession)
-  const createSession = useStore((s) => s.createSession)
   const sessions = useSessionsOf(projectId)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
 
   if (!project) return null
 
@@ -40,7 +42,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         <h2 className="truncate text-[13px] font-medium tracking-tight text-chalk">{project.name}</h2>
         <button
           className="ml-auto rounded px-1 text-[13px] leading-none text-slate opacity-0 transition-opacity group-hover:opacity-100 hover:text-chalk focus-visible:opacity-100"
-          onClick={() => void createSession(projectId)}
+          onClick={() => setNewSessionOpen(true)}
           title="새 세션"
           aria-label={`${project.name}에 새 세션`}
           data-testid={`new-session-${project.name}`}
@@ -106,6 +108,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           )
         })}
       </ul>
+
+      {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => setNewSessionOpen(false)} />}
     </section>
   )
 }

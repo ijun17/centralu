@@ -86,8 +86,12 @@ export class MockPlatform implements Platform {
     for (const h of this.connHandlers) h(s)
   }
 
+  /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */
+  lastCreateParams: CreateSessionParams | null = null
+
   readonly agents: AgentPort = {
     createSession: async (params: CreateSessionParams) => {
+      this.lastCreateParams = params
       const id = `mock-session-${++this.idc}`
       const info: SessionInfo = {
         id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`,

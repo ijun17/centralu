@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Codex app-server 프로토콜 중 **우리 어댑터가 실제로 의존하는 것만** 적는다.",
+    "생성된 바인딩 642개를 통째로 커밋하는 대신 이 파일을 커밋한다 — 리뷰에 보이는 것은",
+    "'프로토콜이 우리가 쓰는 방식으로 여전히 존재하는가'뿐이어야 하기 때문이다.",
+    "`pnpm codex:bindings --check`가 최신 생성물과 대조해 사라진 항목을 알린다 (변경 축 C4)."
+  ],
+  "verifiedWith": "codex-cli 0.147.0",
+  "clientRequests": [
+    "initialize",
+    "thread/start",
+    "thread/resume",
+    "turn/start",
+    "turn/interrupt"
+  ],
+  "clientNotifications": [
+    "initialized"
+  ],
+  "serverNotifications": [
+    "item/agentMessage/delta",
+    "item/started",
+    "item/completed",
+    "turn/started",
+    "turn/completed",
+    "thread/tokenUsage/updated",
+    "thread/name/updated",
+    "thread/compacted",
+    "account/rateLimits/updated",
+    "error"
+  ],
+  "serverRequests": [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval"
+  ],
+  "approvalDecisions": [
+    "accept",
+    "acceptForSession",
+    "decline"
+  ],
+  "approvalPolicies": [
+    "untrusted",
+    "on-request",
+    "never"
+  ]
+}

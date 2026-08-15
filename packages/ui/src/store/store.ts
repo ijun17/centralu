@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { NormalizedEvent, ProjectInfo, SessionInfo, StoredMessage } from '@cc/protocol'
+import type { NormalizedEvent, PermissionPreset, ProjectInfo, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
 import {
   allDoneNotification,
   applyEvent,
@@ -52,7 +52,10 @@ export type AppState = {
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
-  createSession(projectId: string, opts?: { initialPrompt?: string }): Promise<SessionInfo>
+  createSession(
+    projectId: string,
+    opts?: { tool?: ToolName; model?: string; permissionPreset?: PermissionPreset; initialPrompt?: string },
+  ): Promise<SessionInfo>
   send(sessionId: string, text: string): Promise<void>
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -215,14 +218,23 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform!
     const project = get().projects[projectId]!
     const info = await platform.agents.createSession({
-      projectId, cwd: project.path, tool: project.defaultTool,
-      permissionPreset: 'normal', initialPrompt: opts?.initialPrompt,
+      projectId,
+      cwd: project.path,
+      // 고른 값이 그대로 host까지 간다 — 예전엔 프리셋이 'normal' 고정이고 모델은 전달조차 되지 않았다
+      tool: opts?.tool ?? project.defaultTool,
+      model: opts?.model ?? project.defaultModel,
+      permissionPreset: opts?.permissionPreset ?? 'normal',
+      initialPrompt: opts?.initialPrompt,
     })
     set((s) => ({
       sessions: {
         ...s.sessions,
         [info.id]: initialSession({ id: info.id, projectId, name: info.name }),
       },
+      // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
+      chat: opts?.initialPrompt
+        ? { ...s.chat, [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt }] }
+        : s.chat,
       focusedSessionId: info.id,
     }))
 
