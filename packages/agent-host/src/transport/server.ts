@@ -27,6 +27,7 @@ export class HostServer {
   private wss: WebSocketServer
   private http: Server
   private clients = new Set<WebSocket>()
+  private listenError: ((err: Error) => void) | null = null
 
   constructor(private opts: HostServerOptions) {
     this.http = createServer((req, res) => {
@@ -41,11 +42,33 @@ export class HostServer {
     })
     this.wss = new WebSocketServer({ server: this.http })
     this.wss.on('connection', (ws) => this.onConnection(ws))
+    // ws는 http 서버 에러를 자기 인스턴스로 재방출한다 — 여기서 안 받으면 프로세스가 죽는다
+    this.wss.on('error', (err) => this.listenError?.(err))
   }
 
   listen(): Promise<number> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        this.listenError = null
+        if (err.code === 'EADDRINUSE') {
+          reject(
+            new Error(
+              `포트 ${this.opts.port}이 이미 사용 중입니다.\n` +
+                `  · 이미 host가 떠 있다면 그대로 쓰면 됩니다 (UI만 실행하세요)\n` +
+                `  · 남은 프로세스를 정리하려면: lsof -ti:${this.opts.port} | xargs kill\n` +
+                `  · 다른 포트로 띄우려면: pnpm host --port ${this.opts.port + 1}`,
+            ),
+          )
+          return
+        }
+        reject(err)
+      }
+      // http와 ws 양쪽에서 올 수 있다 (ws가 http 에러를 재방출)
+      this.listenError = onError
+      this.http.once('error', onError)
       this.http.listen(this.opts.port, '127.0.0.1', () => {
+        this.listenError = null
+        this.http.removeListener('error', onError)
         const addr = this.http.address()
         resolve(typeof addr === 'object' && addr ? addr.port : this.opts.port)
       })

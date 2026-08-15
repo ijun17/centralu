@@ -45,7 +45,13 @@ const server: HostServer = new HostServer({
   onRpc: createRpcHandler(mgr, adapters),
 })
 
-const port = await server.listen()
+let port: number
+try {
+  port = await server.listen()
+} catch (err) {
+  console.error(`\n[agent-host] 기동 실패\n${(err as Error).message}\n`)
+  process.exit(1)
+}
 // 이 줄은 Tauri 수퍼바이저가 파싱한다 (포트·토큰 전달 경로)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
 

@@ -1,1 +1,9 @@
 @import 'tailwindcss';
+
+/*
+ * Tailwind v4의 자동 소스 탐지는 Vite root(apps/web) 기준이라
+ * 모노레포의 packages/ui 컴포넌트를 못 찾는다 → 명시적으로 선언한다.
+ * 이게 없으면 유틸리티 클래스가 하나도 생성되지 않는다.
+ */
+@source '../**/*.{ts,tsx}';
+@source '../../../../apps/web/src/**/*.{ts,tsx}';
