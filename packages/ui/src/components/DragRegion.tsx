@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { usePlatform } from '../app/PlatformProvider.jsx'
+import { useStore } from '../store/store.js'
 
 /**
  * 창을 끄는 손잡이.
@@ -22,6 +23,8 @@ export function DragRegion({
   testId?: string
 }) {
   const platform = usePlatform()
+  const setToast = useStore((s) => s.setToast)
+  const warned = useRef(false)
 
   return (
     <div
@@ -34,7 +37,13 @@ export function DragRegion({
         const el = e.target as HTMLElement
         // 조작할 것 위에서는 끌지 않는다. 여기서 막지 않으면 버튼이 안 눌린다
         if (el.closest('button, a, input, textarea, select, label, [role="button"], [data-no-drag]')) return
-        void platform.system.startWindowDrag().catch(() => {})
+        void platform.system.startWindowDrag().catch((err: Error) => {
+          // 삼키지 않는다. 실제로 이것 때문에 창이 안 움직이는 걸 세 번 놓쳤다 —
+          // Tauri 권한(core:window:allow-start-dragging)이 빠지면 여기서 거부된다.
+          if (warned.current) return
+          warned.current = true
+          setToast(`창을 옮길 수 없습니다: ${err.message}`)
+        })
       }}
       onDoubleClick={(e) => {
         const el = e.target as HTMLElement

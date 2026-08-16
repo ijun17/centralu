@@ -80,3 +80,38 @@ describe('번들 회귀 (C-3 결정: 뷰어에 편집기 엔진을 넣지 않는
     expect(jsBytes).toBeLessThan(1_500_000)
   })
 })
+
+/**
+ * Tauri 권한 게이트.
+ *
+ * E2E는 브라우저에서 도는 mock을 쓰므로 **Tauri 권한 누락을 절대 잡지 못한다.**
+ * 실제로 창 이동이 세 번 연속 "안 된다"로 돌아온 원인이 이것이었다:
+ * `core:window:default`는 읽기 전용 묶음이라 `allow-start-dragging`이 없고,
+ * 그러면 data-tauri-drag-region도 startDragging()도 조용히 거부된다.
+ *
+ * 그래서 코드가 부르는 창 기능과 권한 파일을 여기서 맞춰 본다.
+ */
+describe('Tauri 권한', () => {
+  const capability = JSON.parse(
+    readFileSync(join(ROOT, 'apps/desktop/src-tauri/capabilities/default.json'), 'utf8'),
+  ) as { permissions: string[] }
+
+  it('창을 끌 수 있는 권한이 있다 (타이틀바를 숨겼으므로 필수)', () => {
+    expect(capability.permissions).toContain('core:window:allow-start-dragging')
+  })
+
+  it('startDragging을 부르는 코드와 권한이 함께 간다', () => {
+    const tauriPort = readFileSync(join(ROOT, 'packages/platform/src/tauri/index.ts'), 'utf8')
+    // 코드가 부르면 권한이 있어야 하고, 권한이 있으면 부르는 곳이 있어야 한다
+    expect(tauriPort.includes('startDragging()')).toBe(
+      capability.permissions.includes('core:window:allow-start-dragging'),
+    )
+  })
+
+  it('웹뷰가 OS 드롭을 가로채지 않는다 (파일 첨부가 죽는다)', () => {
+    const conf = JSON.parse(
+      readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
+    ) as { app: { windows: { dragDropEnabled?: boolean }[] } }
+    expect(conf.app.windows[0]!.dragDropEnabled).toBe(false)
+  })
+})
