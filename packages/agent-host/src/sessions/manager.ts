@@ -45,6 +45,16 @@ const HISTORY_LIMIT = 200
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
   private meta = new Map<string, SessionInfo>()
+  /**
+   * **지금 돌고 있는 프로세스가 실제로 들고 있는 설정.**
+   *
+   * meta(=화면에 보이는 값)와 다를 수 있다. 권한·모델은 도구를 띄울 때 고정되므로,
+   * 화면만 '자동'으로 바뀌고 프로세스는 옛 설정으로 도는 어긋남이 생긴다.
+   * 그 상태에서 '자동'을 다시 골라도 meta 기준으로는 '바뀐 게 없음'이라 아무 일도 일어나지 않는다
+   * (도그푸딩: "자동으로 선택되어 있는데 계속 물어본다").
+   * 그래서 비교 기준은 언제나 이쪽이다.
+   */
+  private running = new Map<string, { model: string | null; permissionPreset: PermissionPreset }>()
 
   constructor(
     private store: Store,
@@ -163,6 +173,7 @@ export class SessionManager {
     this.meta.set(id, info)
     this.store.upsertSession(info)
     this.handles.set(id, handle)
+    this.running.set(id, { model: info.model, permissionPreset: info.permissionPreset })
     handle.applyRules?.(this.rulesFor(id, params.projectId))
 
     // 이전 대화 복원. **어댑터가 뜬 다음에** 한다 —
@@ -271,6 +282,7 @@ export class SessionManager {
         (e) => this.onEvent(e),
       )
       this.handles.set(sessionId, handle)
+      this.running.set(sessionId, { model: m.model, permissionPreset: m.permissionPreset })
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       m.state = 'idle'
       m.waitingSince = null
@@ -289,6 +301,7 @@ export class SessionManager {
       await handle.dispose().catch(() => {})
       this.handles.delete(sessionId)
     }
+    this.running.delete(sessionId)
     this.meta.delete(sessionId)
     this.store.deleteSession(sessionId)
     await clearAttachments(sessionId).catch(() => {})
@@ -306,16 +319,17 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
 
-    const changed =
-      (s.model !== undefined && s.model !== m.model) ||
-      (s.permissionPreset !== undefined && s.permissionPreset !== m.permissionPreset)
-
     if (s.model !== undefined) m.model = s.model
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
 
     const handle = this.handles.get(sessionId)
     handle?.updateSettings?.(s)
+
+    // 비교 기준은 화면값(meta)이 아니라 **돌고 있는 프로세스의 설정**이다
+    const live = this.running.get(sessionId)
+    const drifted =
+      !!live && (live.model !== m.model || live.permissionPreset !== m.permissionPreset)
 
     /**
      * 권한·모델은 도구 프로세스를 **띄울 때 고정된다**.
@@ -326,7 +340,7 @@ export class SessionManager {
      * 어댑터가 실시간 반영을 지원하지 않으면 **프로세스를 갈아 끼운다.**
      * resume으로 이어지므로 대화는 끊기지 않는다. 조용히 무시하는 것보다 낫다.
      */
-    if (changed && handle && !handle.updateSettings) {
+    if (drifted && handle && !handle.updateSettings) {
       await this.restartSession(sessionId)
     }
 
@@ -571,6 +585,7 @@ export class SessionManager {
     if (h) {
       await h.dispose().catch(() => {})
       this.handles.delete(sessionId)
+      this.running.delete(sessionId)
     }
     return this.resumeSession(sessionId)
   }

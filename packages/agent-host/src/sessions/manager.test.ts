@@ -407,3 +407,42 @@ describe('설정 변경은 실제로 적용된다', () => {
     expect(mgr.isLive(s.id)).toBe(false)
   })
 })
+
+/**
+ * 화면에는 '자동'인데 계속 승인을 묻던 문제 (도그푸딩 5차).
+ * 비교 기준이 meta(화면값)였던 탓에, 이미 meta가 auto인 세션은 다시 골라도
+ * '바뀐 게 없음'으로 판정돼 옛 설정으로 도는 프로세스가 그대로 남았다.
+ */
+describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준으로 본다', () => {
+  it('meta는 이미 auto인데 프로세스가 normal이면, 같은 값을 골라도 갈아 끼운다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const before = adapter.last!
+
+    // 예전 버전이 만들어 놓은 어긋난 상태를 재현한다: 저장값만 auto로 바뀐 세션
+    const meta = mgr.listSessions().find((x) => x.id === s.id)!
+    ;(mgr as unknown as { meta: Map<string, typeof meta> }).meta.get(s.id)!.permissionPreset = 'auto'
+
+    // 사용자가 화면에서 '자동'을 다시 고른다 (meta 기준으로는 변화 없음)
+    await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
+
+    expect(before.disposed).toBe(true)
+    expect(adapter.last).not.toBe(before)
+    expect(mgr.isLive(s.id)).toBe(true)
+  })
+
+  it('프로세스와 화면값이 같으면 건드리지 않는다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'auto',
+    })) as { id: string }
+    const before = adapter.last!
+
+    await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
+
+    expect(before.disposed).toBe(false)
+    expect(adapter.last).toBe(before)
+  })
+})
