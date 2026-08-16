@@ -391,14 +391,17 @@ export class SessionManager {
     if (!adapter) return { session: m, resumed: false, reason: `${m.tool} 어댑터가 없습니다` }
     if (!adapter.capabilities.resume) return { session: m, resumed: false, reason: `${m.tool}는 재개를 지원하지 않습니다` }
     /*
-     * 재개 식별자가 아직 없을 수 있다.
+     * 이어갈 식별자를 고른다.
      *
-     * Claude는 external id를 system/init 메시지로 **비동기로** 준다. 그래서 세션을 만들고
-     * 말을 걸기 전에 새로고침하면 아직 없다 (도그푸딩: "세션 식별자를 불러오지 못했습니다").
-     * 그런데 이 경우 **이어갈 대화 자체가 없다** — 그냥 새 프로세스를 띄우면 잃는 게 없다.
-     * 기록이 있는데 식별자만 없는 경우에만 진짜 문제이므로 그때는 이유를 말한다.
+     * **externalId가 없으면 이어받은 원본(importedFrom)을 쓴다.**
+     * Claude는 external id를 system/init로 비동기로 주기 때문에, 대화를 불러오기만 하고
+     * 말을 걸지 않은 세션은 그 값이 영영 채워지지 않는다. 그런데 그런 세션은 정의상
+     * **원본 id를 갖고 있다** — 그게 바로 이어갈 대상이다.
+     * (실측: ext=null인데 from=c1a50932이고 메시지가 95개인 세션들이 있었다)
      */
-    if (!m.externalId) {
+    const resumeId = m.externalId ?? m.importedFrom
+
+    if (!resumeId) {
       if (this.store.loadMessages(m.id, 1).length > 0) {
         return {
           session: m,
@@ -420,8 +423,8 @@ export class SessionManager {
      * 없어진 걸 미리 알면 무엇이 일어났고 무엇을 할 수 있는지 말해줄 수 있다.
      */
     // 같은 대화를 두 세션이 붙잡으면 도구가 거부한다 — 먼저 막고 누가 쥐고 있는지 알린다
-    if (m.externalId) {
-      const holder = this.holderOf(m.externalId, sessionId)
+    if (resumeId) {
+      const holder = this.holderOf(resumeId, sessionId)
       if (holder) {
         return {
           session: m,
@@ -447,13 +450,15 @@ export class SessionManager {
           cwd: project.path,
           model: m.model ?? undefined,
           permissionPreset: m.permissionPreset,
-          resumeExternalId: m.externalId ?? undefined,
+          resumeExternalId: resumeId ?? undefined,
         },
         (e) => this.onEvent(e),
       )
       this.handles.set(sessionId, handle)
       this.running.set(sessionId, { model: m.model, permissionPreset: m.permissionPreset })
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
+      // 이제야 식별자가 잡혔을 수 있다 — 다음 재개를 위해 남긴다
+      if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
       m.state = 'idle'
       m.waitingSince = null
       this.store.upsertSession(m)
@@ -709,7 +714,7 @@ export class SessionManager {
    * 삭제된 것으로 막아버리면, 도구가 잠깐 응답하지 않는 것만으로 대화가 끊긴다.
    */
   private async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
-    const id = m.externalId
+    const id = m.externalId ?? m.importedFrom
     const adapter = this.adapters.get(m.tool)
     if (!id || !adapter?.listExternalSessions) return false
 

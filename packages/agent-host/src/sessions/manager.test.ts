@@ -743,3 +743,53 @@ describe('재개 식별자가 아직 없을 때', () => {
     expect(r.reason).toMatch(/재개 식별자를 잃었습니다/)
   })
 })
+
+/**
+ * 불러오기만 하고 말을 걸지 않은 세션은 external_id가 채워지지 않는다
+ * (Claude는 그 값을 system/init로 비동기로 주기 때문). 그런데 그런 세션은
+ * 정의상 **이어받은 원본**을 갖고 있다 — 그게 이어갈 대상이다.
+ * 실측: ext=null · from=c1a50932 · 메시지 95개인 세션들이 있었다.
+ */
+describe('식별자가 없으면 이어받은 원본으로 재개한다', () => {
+  class NoIdAdapter extends FakeAdapter {
+    resumedWith: string | undefined
+    override async createSession(opts: CreateSessionOpts, emit: EventSink) {
+      this.resumedWith = opts.resumeExternalId
+      const h = await super.createSession(opts, emit)
+      h.externalId = null // 아직 안 왔다 (말을 걸어야 온다)
+      return h
+    }
+    async listExternalSessions() {
+      return [{ externalId: 'ext-origin', title: '원본', updatedAt: 1 }]
+    }
+    async readExternalHistory() {
+      return [{ role: 'user' as const, text: '불러온 대화' }]
+    }
+  }
+
+  it('external_id가 없어도 importedFrom으로 이어간다', async () => {
+    const a = new NoIdAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    const call = createRpcHandler(m, adapters)
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude',
+      resumeExternalId: 'ext-origin', importHistory: true,
+    })) as { id: string }
+
+    // 불러온 기록은 있는데 식별자는 비어 있는 상태 (실측된 그 상태)
+    expect(m.listSessions().find((x) => x.id === s.id)!.externalId).toBeNull()
+    expect((await call('messages.load', { sessionId: s.id, limit: 10 })) as unknown[]).not.toHaveLength(0)
+
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+    a.resumedWith = undefined
+
+    const r = await m.resumeSession(s.id)
+
+    expect(r.resumed).toBe(true)
+    expect(a.resumedWith).toBe('ext-origin') // 원본으로 이어갔다
+  })
+})
