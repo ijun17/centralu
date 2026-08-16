@@ -453,6 +453,28 @@ function OlderSentinel({
  */
 function DormantNote({ sessionId }: { sessionId: string }) {
   const waking = useStore((s) => !!s.resuming[sessionId])
+  const error = useStore((s) => s.wakeError[sessionId])
+  const wake = useStore((s) => s.wake)
+
+  // 못 깨운 이유가 있으면 그걸 먼저 말한다 — "보내면 이어집니다"는 사실이 아니게 된다
+  if (error && !waking) {
+    return (
+      <p
+        className="flex items-center gap-2 border-t border-edge px-4 py-1.5 text-[11px] leading-relaxed text-ash"
+        data-testid="dormant-note"
+      >
+        <span className="min-w-0 flex-1 break-words">이어가지 못했습니다 — {error}</span>
+        <button
+          className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          onClick={() => void wake(sessionId)}
+          data-testid="dormant-retry"
+        >
+          다시 시도
+        </button>
+      </p>
+    )
+  }
+
   return (
     <p className="border-t border-edge px-4 py-1.5 text-[11px] text-slate" data-testid="dormant-note">
       {waking ? '세션을 깨우는 중…' : '잠들어 있습니다 — 메시지를 보내면 자동으로 이어집니다'}

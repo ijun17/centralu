@@ -1788,3 +1788,35 @@ test('긴 URL·경로가 대화창을 가로로 밀지 않는다', async ({ page
   }))
   expect(page2.scroll).toBeLessThanOrEqual(page2.client)
 })
+
+/**
+ * 깨우기가 실패하면 "메시지를 보내면 자동으로 이어집니다"는 **사실이 아니게 된다.**
+ * 그 상태로 두면 사용자는 왜 안 되는지 알 길이 없다 (도그푸딩 지적).
+ */
+test('깨우지 못하면 이유를 그 자리에 적고 다시 시도할 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 잠든 상태 + 깨울 수 없는 상황을 만든다
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    const store = (window as any).__store
+    m.sessions.get(sid).live = false
+    m.unresumable.add(sid)
+    store.setState({
+      sessions: { ...store.getState().sessions, [sid]: { ...store.getState().sessions[sid], live: false } },
+    })
+  }, id)
+
+  // 다시 고르면 깨우기를 시도하고, 실패 이유가 남는다
+  await page.getByTestId('project-header-alpha').click()
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('dormant-note')).toContainText('이어가지 못했습니다')
+  await expect(page.getByTestId('dormant-note')).toContainText('재개할 수 없습니다')
+
+  // 원인을 고치고 다시 시도하면 살아난다
+  await page.evaluate((sid) => (window as any).__mock.unresumable.delete(sid), id)
+  await page.getByTestId('dormant-retry').click()
+  await expect(page.getByTestId('dormant-note')).toBeHidden()
+})

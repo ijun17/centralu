@@ -93,6 +93,15 @@ export type AppState = {
    */
   resuming: Record<string, boolean>
   /**
+   * 깨우기가 **왜** 실패했나.
+   *
+   * 예전에는 조용히 넘겼다("보낼 때 다시 시도하니까"). 그런데 화면에는
+   * "메시지를 보내면 자동으로 이어집니다"라고 쓰여 있는데 실제로는 안 이어지는
+   * 상태가 되어, 사용자는 원인을 알 길이 없었다 (도그푸딩 지적).
+   * 조용한 실패 금지 — 이유를 그 자리에 적는다.
+   */
+  wakeError: Record<string, string>
+  /**
    * 증거 레인(깃·파일)이 열려 있는가.
    * 탭이 아니라 패널인 이유: 깃 상태는 대화를 **대신하는** 화면이 아니라
    * 대화가 주장하는 것의 **증거**다. 대체 관계가 아닌 것을 탭으로 묶으면
@@ -193,6 +202,13 @@ export type AppState = {
  *  기록을 불러온 세션 — 저장 seq 1..N — 에 새 메시지가 붙으면 그 seq도 1부터 셌다.)
  * 그래서 저장소 항목을 들일 때마다 이 번호를 그 위로 밀어 올린다.
  */
+/** 객체에서 키 하나를 뺀 새 객체 (상태를 직접 고치지 않는다) */
+function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...obj }
+  delete next[key]
+  return next
+}
+
 let chatSeq = 0
 
 /** 저장소에서 들여온 항목보다 항상 큰 번호를 쓰도록 밀어 올린다 */
@@ -238,6 +254,7 @@ export const useStore = create<AppState>((set, get) => ({
   focusedProjectId: null,
   history: {},
   resuming: {},
+  wakeError: {},
   panelOpen: true,
   panelTab: 'git',
   panelWidth: PANEL_DEFAULT,
@@ -619,7 +636,12 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await get().platform!.agents.send(sessionId, text, attachments)
       // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
-      set((s) => (s.sessions[sessionId]?.live ? {} : { sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: true } } }))
+      set((s) => ({
+        sessions: s.sessions[sessionId]?.live
+          ? s.sessions
+          : { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: true } },
+        wakeError: omitKey(s.wakeError, sessionId),
+      }))
     } catch (err) {
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
@@ -720,9 +742,9 @@ export const useStore = create<AppState>((set, get) => ({
   /**
    * 잠든 세션을 미리 깨운다 (고르는 즉시).
    *
-   * 조용히 실패해도 된다 — 못 깨우면 잠든 상태 그대로이고, 메시지를 보낼 때
-   * host가 한 번 더 시도하며 그때는 이유를 알린다. 고르기만 했는데
-   * 오류 토스트가 뜨면 목록을 훑는 동안 화면이 시끄러워진다.
+   * **실패하면 이유를 남긴다.** 토스트로 띄우지는 않는다 — 목록을 훑는 동안
+   * 화면이 시끄러워진다. 대신 그 세션의 안내 줄에 적어서, 왜 안 이어지는지
+   * 보고 있는 사람이 알 수 있게 한다.
    */
   async wake(sessionId) {
     const s = get()
@@ -734,9 +756,12 @@ export const useStore = create<AppState>((set, get) => ({
       const res = await s.platform.agents.resumeSession(sessionId)
       set((st) => ({
         sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
+        wakeError: res.resumed
+          ? omitKey(st.wakeError, sessionId)
+          : { ...st.wakeError, [sessionId]: res.reason ?? '알 수 없는 이유' },
       }))
-    } catch {
-      // 잠든 채로 둔다 — 보낼 때 다시 시도한다
+    } catch (e) {
+      set((st) => ({ wakeError: { ...st.wakeError, [sessionId]: (e as Error).message } }))
     } finally {
       set((st) => {
         const next = { ...st.resuming }
@@ -752,6 +777,7 @@ export const useStore = create<AppState>((set, get) => ({
     const r = await platform.agents.restartSession(sessionId)
     set((s) => ({
       sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
+      wakeError: r.resumed ? omitKey(s.wakeError, sessionId) : { ...s.wakeError, [sessionId]: r.reason ?? '' },
       toast: r.resumed ? '에이전트를 다시 시작했습니다' : `재시작하지 못했습니다: ${r.reason ?? ''}`,
     }))
     return r.resumed
