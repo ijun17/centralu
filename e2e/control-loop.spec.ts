@@ -924,7 +924,8 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
   // 기본은 '새 대화' — 불러오기가 기본이 되면 안 된다
   await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('past-ext-1')).toContainText('어제 하던 리팩터링')
-  await expect(page.getByTestId('past-ext-1')).toContainText('1시간 전')
+  // 제목이 '첫 메시지'인 도구(codex)에서도 최신 여부를 알 수 있어야 한다
+  await expect(page.getByTestId('past-ext-1')).toContainText('마지막 1시간 전')
   await expect(page.getByTestId('past-ext-2')).toContainText('이미 열려 있음')
 
   await page.getByTestId('past-ext-1').click()
@@ -1696,4 +1697,42 @@ test('같은 대화를 두 세션이 열지 않는다 (도구가 거부하기 �
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('past-ext-1')).toContainText('이미 열려 있음')
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
+})
+
+/**
+ * 긴 대화를 불러오면 **맨 아래(최신)** 가 보여야 한다.
+ * 위쪽에 머물면 옛 대화만 보여서 "최신을 안 가져왔다"로 읽힌다 (도그푸딩 지적).
+ */
+test('불러온 대화는 최신부터 보인다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.externalSessions = {
+      supported: true,
+      sessions: [
+        { externalId: 'ext-long', tool: 'claude', title: '아주 오래된 첫 질문', updatedAt: Date.now(), createdAt: null, branch: null, imported: false, importedAs: null },
+      ],
+    }
+    // 200줄짜리 긴 대화 — 마지막이 가장 최신이다
+    m.externalHistory.set(
+      'ext-long',
+      Array.from({ length: 200 }, (_, i) => ({
+        role: i % 2 ? 'assistant' : 'user',
+        text: i === 199 ? '가장 최신 메시지' : `옛 대화 ${i + 1}`,
+      })),
+    )
+  })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('past-ext-long').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 맨 아래(최신)가 화면에 있어야 한다
+  await expect(page.getByTestId('chat-stream')).toContainText('가장 최신 메시지')
+
+  const atBottom = await page.getByTestId('chat-stream').evaluate(
+    (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 80,
+  )
+  expect(atBottom).toBe(true)
 })

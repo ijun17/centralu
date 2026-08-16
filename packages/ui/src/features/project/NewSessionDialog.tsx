@@ -211,7 +211,18 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   }}
                   testId={`past-${s.externalId}`}
                   title={s.title}
-                  meta={[ago(s.updatedAt), s.branch, s.importedAs ? '이미 열려 있음 · 누르면 이동' : null]
+                  /*
+                    제목은 도구가 주는 것이고, 도구마다 뜻이 다르다:
+                      Claude — 요약(대화 전체를 대표한다)
+                      Codex  — **첫 사용자 메시지** (며칠 이어온 대화도 맨 처음 주제로 보인다)
+                    그래서 "언제까지 이어졌나"를 제목 옆에 분명히 적는다 —
+                    안 그러면 최근 대화가 옛날 것처럼 보여서 못 찾는다 (도그푸딩 지적).
+                  */
+                  meta={[
+                    `마지막 ${ago(s.updatedAt)}`,
+                    s.branch,
+                    s.importedAs ? '이미 열려 있음 · 누르면 이동' : null,
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 />

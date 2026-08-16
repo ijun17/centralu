@@ -111,7 +111,14 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
     if (str(row.cwd) && str(row.cwd) !== cwd) continue
     out.push({
       externalId: id,
-      // preview는 '보통 첫 사용자 메시지'인데, 하네스가 주입한 지시문일 때가 있다 (실측)
+      /*
+       * preview는 codex 기준 '보통 **첫** 사용자 메시지'다.
+       * 즉 며칠 이어온 대화도 맨 처음 주제로 표시된다 — Claude가 요약을 주는 것과 다르다.
+       * 목록을 만들면서 마지막 메시지를 가져오려면 스레드마다 thread/read를 해야 해서
+       * 타이핑 응답으로 쓸 수 없다. 그래서 제목은 이대로 두고,
+       * UI가 "마지막 N시간 전"을 함께 적어 최신 여부를 알 수 있게 한다.
+       * (하네스가 주입한 지시문이 섞여 오는 경우가 있어 그것만 걷어낸다)
+       */
       title: cleanTitle(str(row.preview) ?? '') || '제목 없는 세션',
       updatedAt: ms(row.updatedAt) ?? ms(row.recencyAt) ?? Date.now(),
       createdAt: ms(row.createdAt),
