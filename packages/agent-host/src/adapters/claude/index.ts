@@ -1,4 +1,12 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
+
+/**
+ * SDK Query 중 우리가 쓰는 부분만.
+ * 외부 타입을 어댑터 밖으로 내보내지 않기 위해 최소 표면만 적는다.
+ */
+type QueryHandle = AsyncIterable<unknown> & {
+  getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
+}
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEvent } from '@cc/protocol'
@@ -63,7 +71,7 @@ class ClaudeSession implements SessionHandle {
       }
     }
 
-    const q = query({
+    const q: QueryHandle = query({
       prompt: input(),
       options: {
         cwd: this.opts.cwd,
@@ -101,6 +109,8 @@ class ClaudeSession implements SessionHandle {
           const m = msg as { type?: string; session_id?: string; subtype?: string }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
           for (const e of normalizeMessage(msg, this.sessionId)) this.emit(e)
+          // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
+          if (m.type === 'result') void this.reportContext(q)
         }
       } catch (err) {
         this.emit({
@@ -145,6 +155,28 @@ class ClaudeSession implements SessionHandle {
   }
 
   /** 접미 와일드카드(`npm test*`)만 지원 — core의 matchesRule과 같은 규칙 */
+  /**
+   * 컨텍스트 사용량 보고 (FR-14).
+   *
+   * **SDK에 직접 묻는다.** result 메시지의 modelUsage로 계산하면 안 된다 —
+   * 그건 세션 누적이라 캐시 재읽기가 매 턴 더해지고, 창 크기를 넘어선다
+   * (실측: "컨텍스트 533%"). getContextUsage()는 지금 창의 점유를 돌려준다.
+   *
+   * 실패해도 조용히 넘어간다 — 게이지가 잠깐 안 보이는 것이 대화를 막는 것보다 낫다.
+   */
+  private async reportContext(q: QueryHandle): Promise<void> {
+    try {
+      const usage = await q.getContextUsage()
+      const used = Number(usage?.totalTokens ?? 0)
+      const window = Number(usage?.maxTokens ?? 0)
+      if (window > 0 && used >= 0) {
+        this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact' })
+      }
+    } catch {
+      // 컨텍스트를 못 물어봐도 대화는 계속된다
+    }
+  }
+
   private isAlwaysAllowed(key: string): boolean {
     for (const m of this.alwaysAllow) {
       if (m.endsWith('*') ? key.startsWith(m.slice(0, -1)) : key === m) return true

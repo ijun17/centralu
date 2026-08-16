@@ -92,9 +92,13 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
     },
   }
 
-  it('컨텍스트 게이지 값을 만든다 (FR-14)', () => {
-    const ctx = n(RESULT).find((e) => e.type === 'context_update')
-    expect(ctx).toMatchObject({ used: 18 + 54830 + 697, window: 200000, exactness: 'exact' })
+  it('modelUsage로 컨텍스트를 계산하지 않는다 (누적값이라 창을 넘어선다)', () => {
+    /*
+     * modelUsage는 세션 누적이다. 캐시 재읽기가 매 턴 더해지므로
+     * 이걸 더해 쓰면 턴이 쌓일수록 비율이 폭주한다 — 실측 "컨텍스트 533%".
+     * 지금 창의 점유는 SDK의 getContextUsage()가 알고, 어댑터가 그걸 물어서 낸다.
+     */
+    expect(n(RESULT).find((e) => e.type === 'context_update')).toBeUndefined()
   })
 
   it('usage와 비용을 싣는다', () => {

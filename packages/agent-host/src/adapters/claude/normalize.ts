@@ -120,10 +120,15 @@ export function normalizeMessage(msg: unknown, sessionId: string): NormalizedEve
     const modelUsage = (m.modelUsage ?? {}) as Record<string, Json>
     const first = Object.values(modelUsage)[0]
     if (first) {
-      const used =
-        Number(first.inputTokens ?? 0) + Number(first.cacheReadInputTokens ?? 0) + Number(first.cacheCreationInputTokens ?? 0)
-      const window = Number(first.contextWindow ?? 0)
-      if (window > 0) out.push({ type: 'context_update', sessionId, used, window, exactness: 'exact' })
+      /*
+       * 컨텍스트 사용량은 여기서 계산하지 않는다.
+       *
+       * modelUsage는 **세션 누적**이다. 캐시 재읽기(cacheReadInputTokens)가 매 턴
+       * 더해지므로 이걸 더해 쓰면 창 크기를 금세 넘어선다 —
+       * 실제로 "컨텍스트 533%"로 나타났다.
+       * 지금 창에 무엇이 들어 있는지는 SDK의 getContextUsage()가 알고 있고,
+       * 어댑터가 턴이 끝날 때 그걸 물어서 context_update를 낸다.
+       */
       out.push({
         type: 'usage_update',
         sessionId,
