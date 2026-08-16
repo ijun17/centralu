@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import type { ProjectInfo } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useHiddenSessionsOf, useSessionsOf } from '../../store/selectors.js'
-import { StateDot } from '../../components/primitives.jsx'
+import { StateDot, Tooltip } from '../../components/primitives.jsx'
 
 /** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
 export function Sidebar() {
@@ -46,17 +47,30 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   return (
     <section className="border-b border-edge/70 py-2.5" data-testid={`project-${project.name}`}>
       <header className="group flex items-baseline gap-2 px-3">
-        {/* 프로젝트 이름을 누르면 깃·파일·뷰어를 볼 수 있다 (세션을 고르지 않아도) */}
-        <button
-          className={`truncate text-left text-[13px] font-medium tracking-tight transition-colors ${
-            selected ? 'text-chalk underline decoration-graphite underline-offset-4' : 'text-chalk hover:text-beacon'
-          }`}
-          onClick={() => focusProject(projectId)}
-          data-testid={`project-header-${project.name}`}
-          title="프로젝트 보기 (깃·파일·뷰어)"
-        >
-          {project.name}
-        </button>
+        {/*
+          프로젝트 이름을 누르면 깃·파일·터미널을 볼 수 있다 (세션을 고르지 않아도).
+          브랜치·변경 수·동시 세션 같은 배경 정보는 **이름 아래에 줄을 만들지 않는다** —
+          프로젝트가 여럿이면 그 줄들이 쌓여 정작 봐야 할 세션 목록을 밀어낸다.
+          대신 물어볼 때(호버·포커스) 툴팁으로 답한다.
+        */}
+        <Tooltip content={<ProjectDetail project={project} sessionCount={sessions.length} />} testId={`project-tip-${project.name}`}>
+          <button
+            className={`truncate text-left text-[13px] font-medium tracking-tight transition-colors ${
+              selected ? 'text-chalk underline decoration-graphite underline-offset-4' : 'text-chalk hover:text-beacon'
+            }`}
+            onClick={() => focusProject(projectId)}
+            data-testid={`project-header-${project.name}`}
+          >
+            {project.name}
+          </button>
+        </Tooltip>
+
+        {/*
+          자리를 새로 차지하지 않는 표식만 이름 줄에 남긴다.
+          특히 동시 세션은 데이터 유실 위험을 알리는 신호라, 툴팁 뒤로 완전히
+          숨기면 "막지 말고 보이게 하라"를 어기게 된다 (FR-2).
+        */}
+        <ProjectMarks project={project} sessionCount={sessions.length} />
         <button
           className="ml-auto rounded px-1 text-[13px] leading-none text-slate opacity-0 transition-opacity group-hover:opacity-100 hover:text-chalk focus-visible:opacity-100"
           onClick={() => setNewSessionOpen(true)}
@@ -67,43 +81,6 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           +
         </button>
       </header>
-
-      <div className="readout mt-0.5 flex items-center gap-1.5 px-3 text-[10px] text-slate">
-        {project.git?.denied ? (
-          // '저장소 아님'으로 표시하면 사용자가 엉뚱한 결론을 낸다 — 할 일은 권한 부여다
-          <span
-            className="text-ash"
-            data-testid="git-denied"
-            title="시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더에서 Control Center의 접근을 허용하세요"
-          >
-            폴더 접근 권한 필요
-          </span>
-        ) : project.git ? (
-          <>
-            <span className="truncate">{project.git.branch}</span>
-            {project.git.changedFiles > 0 && (
-              <span className="text-ash">{project.git.changedFiles}개 변경</span>
-            )}
-          </>
-        ) : (
-          <span>git 저장소 아님</span>
-        )}
-      </div>
-
-      {/*
-        동시 세션은 데이터 손실 위험 — 차단하지 않고 보이게 한다 (FR-2).
-        단 밝게 쓰지 않는다: 밝기는 "지금 내 조치가 필요한 것"의 몫이고,
-        이건 알아둘 정보다. 여기서 밝히면 진짜 신호가 묻힌다.
-      */}
-      {sessions.length > 1 && (
-        <p
-          className="mt-1 px-3 text-[10px] leading-tight text-slate"
-          data-testid={`concurrent-${project.name}`}
-          title="같은 디렉토리에서 여러 세션이 같은 파일을 고치면 변경이 유실될 수 있습니다"
-        >
-          동시 세션 {sessions.length}개
-        </p>
-      )}
 
       <ul className="mt-1.5">
         {sessions.map((s) => {
@@ -270,5 +247,68 @@ function ConfirmDelete({
         </div>
       </div>
     </div>
+  )
+}
+
+/** 이름 줄에 얹는 표식 — 세로 공간을 새로 쓰지 않는다 */
+function ProjectMarks({
+  project,
+  sessionCount,
+}: {
+  project: ProjectInfo
+  sessionCount: number
+}) {
+  const changed = project.git?.changedFiles ?? 0
+  const risky = sessionCount > 1
+  const denied = project.git?.denied === true
+
+  return (
+    <span className="readout ml-auto flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
+      {changed > 0 && (
+        <span data-testid={`mark-changed-${project.name}`} title={`변경된 파일 ${changed}개`}>
+          {changed}
+        </span>
+      )}
+      {/* 겹친 사각형 = 같은 폴더에서 여럿이 일하는 중 */}
+      {risky && (
+        <span className="text-ash" data-testid={`concurrent-${project.name}`} title={`동시 세션 ${sessionCount}개`}>
+          ⧉{sessionCount}
+        </span>
+      )}
+      {denied && (
+        <span className="text-ash" data-testid={`git-denied-${project.name}`} title="폴더 접근 권한 필요">
+          !
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** 툴팁 내용 — 평소엔 자리를 안 주지만 물어보면 전부 답한다 */
+function ProjectDetail({ project, sessionCount }: { project: ProjectInfo; sessionCount: number }) {
+  return (
+    <span className="block" data-testid={`project-detail-${project.name}`}>
+      <span className="readout block truncate text-slate">{project.path}</span>
+      <span className="mt-1 block">
+        {project.git?.denied ? (
+          // '저장소 아님'으로 표시하면 사용자가 엉뚱한 결론을 낸다 — 할 일은 권한 부여다
+          <span className="text-chalk" data-testid="git-denied">
+            폴더 접근 권한 필요 — 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더
+          </span>
+        ) : project.git ? (
+          <>
+            <span className="text-chalk">{project.git.branch}</span>
+            {project.git.changedFiles > 0 && <span> · {project.git.changedFiles}개 변경</span>}
+          </>
+        ) : (
+          <span>git 저장소 아님</span>
+        )}
+      </span>
+      {sessionCount > 1 && (
+        <span className="mt-1 block text-chalk" data-testid="concurrent-detail">
+          동시 세션 {sessionCount}개 — 같은 파일을 고치면 변경이 유실될 수 있습니다
+        </span>
+      )}
+    </span>
   )
 }

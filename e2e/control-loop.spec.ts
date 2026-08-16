@@ -52,7 +52,9 @@ async function emitEvent(page: Page, sessionIdx: number, event: Record<string, u
 test('프로젝트 등록 → 사이드바 표시 (T5-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await expect(page.getByTestId('project-alpha')).toBeVisible()
-  await expect(page.getByTestId('project-alpha')).toContainText('main')
+  // 브랜치는 이름 아래에 줄을 만들지 않는다 — 물어볼 때(호버) 답한다
+  await page.getByTestId('project-header-alpha').hover()
+  await expect(page.getByTestId('project-tip-alpha')).toContainText('main')
 })
 
 test('없는 경로는 오류를 보여준다 (첫 실행 경험)', async ({ page }) => {
@@ -236,7 +238,12 @@ test('동시 세션 경고를 사이드바에 표시한다 (T5-6, FR-2)', async 
   await newSession(page, 'alpha', '1번')
   await expect(page.getByTestId('concurrent-alpha')).toBeHidden()
   await newSession(page, 'alpha', '2번')
-  await expect(page.getByTestId('concurrent-alpha')).toContainText('동시 세션 2개')
+
+  // 데이터 유실 위험은 툴팁 뒤로 숨기지 않는다 — 이름 줄에 표식이 남는다 (FR-2)
+  await expect(page.getByTestId('concurrent-alpha')).toContainText('2')
+  // 무엇이 위험한지는 물어보면 답한다
+  await page.getByTestId('project-header-alpha').hover()
+  await expect(page.getByTestId('concurrent-detail')).toContainText('유실')
 })
 
 test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) => {
@@ -790,6 +797,9 @@ test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 
     })
     await (window as any).__store.getState().addProject('/Users/me/Desktop/proj')
   })
+  // 막힌 것은 표식으로 바로 보이고, 무엇을 해야 하는지는 호버로 알려준다
+  await expect(page.getByTestId('git-denied-denied')).toBeVisible()
+  await page.getByTestId('project-header-denied').hover()
   await expect(page.getByTestId('git-denied')).toContainText('권한')
 })
 
@@ -1350,4 +1360,19 @@ test('키보드 입력이 셸로 간다', async ({ page }) => {
   )
   expect(sent).toContain('ls')
   expect(sent).toContain('\r')
+})
+
+test('사이드바는 프로젝트당 한 줄만 쓴다 (세로 공간)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 프로젝트 헤더가 세션 한 줄보다 크게 부풀지 않아야 목록이 밀리지 않는다
+  const header = (await page.getByTestId('project-header-alpha').boundingBox())!
+  expect(header.height).toBeLessThan(28)
+
+  // 평소에는 배경 정보가 자리를 차지하지 않는다
+  await expect(page.getByTestId('project-tip-alpha')).toBeHidden()
+  await page.getByTestId('project-header-alpha').hover()
+  await expect(page.getByTestId('project-tip-alpha')).toBeVisible()
+  await expect(page.getByTestId('project-tip-alpha')).toContainText('/tmp/alpha')
 })
