@@ -13,6 +13,7 @@ import type { AgentAdapter } from './adapters/contract.js'
 import { createRpcHandler } from './rpc.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { ensureToolPath } from './env-path.js'
+import { acquireInstanceLock } from './dev-services/instance-lock.js'
 
 /**
  * Agent Host 진입점.
@@ -41,10 +42,40 @@ const dbPath = values.memory
   ? ':memory:'
   : (values.db ?? defaultDbPath())
 
+/**
+ * 데이터 폴더.
+ *
+ * **dev와 배포 앱은 서로 다른 폴더를 쓴다.** 같은 폴더를 쓰면 둘을 동시에 켰을 때
+ * host 두 개가 같은 store.db를 붙잡고, 각자 다른 세션 목록을 들고 있게 된다.
+ * 개발 중에는 배포 앱을 켜둔 채로 dev를 띄우는 게 자연스러우므로 아예 갈라 둔다.
+ */
 function defaultDbPath(): string {
-  const dir = join(homedir(), '.control-center')
+  // 번들된 산출물로 실행되면 배포, 소스에서 실행되면 dev (수퍼바이저가 알려준다)
+  const isDev = process.env.CC_DEV === '1'
+  const dir = join(homedir(), isDev ? '.control-center-dev' : '.control-center')
   mkdirSync(dir, { recursive: true })
   return join(dir, 'store.db')
+}
+
+/**
+ * 같은 데이터 폴더에 host가 둘이면 세션 목록이 어긋나고 SQLite가 경합한다.
+ * 조용히 이상해지는 것보다 뜨지 않고 이유를 말하는 편이 낫다.
+ */
+const lock = acquireInstanceLock(dbPath)
+if (!lock.ok) {
+  console.error(
+    `[agent-host] 이미 다른 Control Center가 이 데이터를 쓰고 있습니다 (pid ${lock.heldByPid}).\n` +
+      `  같은 폴더를 두 host가 쓰면 세션 목록이 어긋납니다.\n` +
+      `  먼저 실행 중인 창을 닫거나, 개발 중이라면 pnpm app:dev를 쓰세요 (데이터 폴더가 따로입니다).`,
+  )
+  process.exit(1)
+}
+process.on('exit', lock.release)
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    lock.release()
+    process.exit(0)
+  })
 }
 
 const store = new Store(dbPath)

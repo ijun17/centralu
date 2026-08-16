@@ -120,6 +120,12 @@ impl Supervisor {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
 
+        // dev로 띄운 host는 배포 앱과 **다른 데이터 폴더**를 쓴다.
+        // 같은 폴더를 두 host가 붙잡으면 세션 목록이 어긋난다.
+        if bundled.is_none() {
+            cmd.env("CC_DEV", "1");
+        }
+
         // 자식을 **자기 자신이 리더인 프로세스 그룹**에 넣는다.
         // node 실행기(tsx)는 다시 자식을 낳으므로, 그룹째 죽이지 않으면 손자가 고아로 남는다.
         #[cfg(unix)]
@@ -241,7 +247,9 @@ fn host_command(bundled: Option<&Path>) -> (String, Vec<String>) {
         );
     }
 
-    // dev: 워크스페이스의 tsx로 소스를 직접 실행
+    // dev: 워크스페이스의 tsx로 소스를 직접 실행.
+    // CC_DEV로 표시해 두면 host가 배포 앱과 **다른 데이터 폴더**를 쓴다 —
+    // 둘을 동시에 켜도 세션 목록이 섞이지 않는다.
     let root = workspace_root();
     (
         format!("{root}/node_modules/.bin/tsx"),
