@@ -52,13 +52,18 @@ export const TokenUsage = z.object({
 })
 export type TokenUsage = z.infer<typeof TokenUsage>
 
-/** 어댑터 능력 선언 — UI는 이걸 보고 기능을 활성/비활성 (architecture §6.2) */
+/**
+ * 어댑터 능력 선언 — UI는 이걸 보고 기능을 활성/비활성 (architecture §6.2).
+ *
+ * **선택 메서드로 알 수 있는 것은 여기 넣지 않는다.** 플래그와 구현이 어긋날 수 있기 때문이다:
+ * 예전에 listExternal 플래그가 있었는데, true인데 메서드가 없으면 조용히 아무 일도 안 했다.
+ * "할 수 있나?"의 답은 하나여야 한다 → 메서드가 있으면 할 수 있다.
+ * 여기 남은 것들은 메서드로 표현되지 않는 성질(승인 지원 여부, 컨텍스트 정확도 등)뿐이다.
+ */
 export const AdapterCapabilities = z.object({
   approvals: z.boolean(),
   contextUsage: z.enum(['exact', 'estimate', 'none']),
   resume: z.boolean(),
-  /** 도구가 자체 보관 중인 이전 세션 목록을 **공식 API로** 읽을 수 있는가 */
-  listExternal: z.boolean().default(false),
   autoTitle: z.boolean(),
   attachments: z.array(z.enum(['image', 'file'])).default([]),
 })
@@ -155,3 +160,31 @@ export const ExternalSession = z.object({
   importedAs: z.string().nullable().default(null),
 })
 export type ExternalSession = z.infer<typeof ExternalSession>
+
+/**
+ * 사용량 스냅샷 — **계정 단위**다 (세션·디렉토리와 무관).
+ *
+ * 도구마다 창의 개수와 이름이 다르므로 배열로 받는다:
+ *   Claude — session(5시간) · weekly_all · weekly_scoped
+ *   Codex  — primary(10080분=주간) · secondary
+ * UI는 창이 몇 개인지 모르는 채로 그린다. 새 창이 생겨도 화면을 고치지 않는다.
+ */
+export const UsageWindow = z.object({
+  id: z.string(),
+  label: z.string(),
+  /** 0~100. 한도 대비 얼마나 썼나 */
+  percent: z.number(),
+  /** 창이 언제 초기화되나 (ISO). 모르면 null */
+  resetsAt: z.string().nullable().default(null),
+  /** 특정 모델에만 걸리는 창이면 그 이름 */
+  scope: z.string().nullable().default(null),
+})
+export type UsageWindow = z.infer<typeof UsageWindow>
+
+export const UsageSnapshot = z.object({
+  plan: z.string().nullable().default(null),
+  windows: z.array(UsageWindow).default([]),
+  /** 일별 토큰. 못 주는 도구는 비운다 — UI가 알아서 그 줄을 접는다 */
+  daily: z.array(z.object({ date: z.string(), tokens: z.number() })).default([]),
+})
+export type UsageSnapshot = z.infer<typeof UsageSnapshot>

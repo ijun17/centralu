@@ -28,7 +28,7 @@ class FakeHandle implements SessionHandle {
 class FakeAdapter implements AgentAdapter {
   readonly tool: ToolName = 'claude'
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: ['image'],
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'],
   }
   last: FakeHandle | null = null
   /** 도구가 뜨지 못하는 상황을 만든다 (되살리기 실패 경로) */
@@ -182,7 +182,7 @@ describe('RPC 일반', () => {
 describe('이전 세션 불러오기', () => {
   class ListingAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, listExternal: true, autoTitle: true, attachments: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
     }
     listed: { cwd: string; limit: number } | null = null
     read: { externalId: string; cwd: string } | null = null
@@ -455,7 +455,7 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
 describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () => {
   class ListingAdapter2 extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, listExternal: true, autoTitle: true, attachments: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
     }
     async listExternalSessions() {
       return [{ externalId: 'ext-past', title: '어제 하던 일', updatedAt: 111 }]
@@ -498,7 +498,7 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
 describe('도구에서 지워진 대화', () => {
   class GoneAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, listExternal: true, autoTitle: true, attachments: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
     }
     /** 도구가 갖고 있다고 답할 id 목록 */
     present: string[] = ['ext-1']

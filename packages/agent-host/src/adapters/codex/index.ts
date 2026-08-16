@@ -8,6 +8,7 @@ import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
+import { readCodexUsage } from './usage-client.js'
 import { approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
 
 const exec = promisify(execFile)
@@ -194,7 +195,6 @@ export class CodexAdapter implements AgentAdapter {
     approvals: true, // M0 실측: thread/start의 approvalPolicy가 전역 설정을 덮어쓴다
     contextUsage: 'exact', // thread/tokenUsage/updated
     resume: true, // thread/resume
-    listExternal: true, // thread/list · thread/read (공식 app-server RPC)
     autoTitle: true, // thread/name/updated
     attachments: ['image', 'file'],
   }
@@ -224,6 +224,14 @@ export class CodexAdapter implements AgentAdapter {
 
   listExternalSessions(cwd: string, limit: number) {
     return listCodexThreads(cwd, limit, whichTool('codex') ?? 'codex')
+  }
+
+  /**
+   * 계정 사용량 (FR-9).
+   * 세션과 무관하므로 단명 클라이언트로 묻는다 — 대화 중인 스레드에 조회를 얹지 않는다.
+   */
+  async listUsage() {
+    return readCodexUsage(whichTool('codex') ?? 'codex')
   }
 
   readExternalHistory(externalId: string, cwd: string, limit: number) {

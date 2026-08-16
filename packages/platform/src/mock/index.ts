@@ -15,6 +15,7 @@ import type {
   ProjectInfo,
   SessionInfo,
   StoredMessage,
+  UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
 import type { AgentPort, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
@@ -180,6 +181,12 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /** 테스트용: 사용량 (supported=false로 '못 가져옴'도 재현한다) */
+  usageState: { supported: boolean; reason?: string; usage: UsageSnapshot | null } = {
+    supported: true,
+    usage: { plan: 'max', windows: [], daily: [] },
+  }
+
   /** 테스트용: 슬래시 명령 목록 (ready=false로 '아직 준비 안 됨'도 재현한다) */
   commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } = {
     ready: true,
@@ -341,8 +348,9 @@ export class MockPlatform implements Platform {
       }
     },
     commands: async (_sessionId: string) => ({ ...this.commandState }),
+    usage: async (_tool: ToolName) => ({ ...this.usageState }),
     capabilities: async (_tool: ToolName): Promise<AdapterCapabilities> => ({
-      approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: ['image', 'file'],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'],
     }),
     detect: async () => [
       { tool: 'claude' as const, installed: true, loggedIn: true, detail: 'mock 2.1.0' },

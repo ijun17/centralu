@@ -13,6 +13,7 @@ import type {
   ProjectInfo,
   SessionInfo,
   StoredMessage,
+  UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
 import type { AgentAdapter, HistoryMessage, SessionHandle } from '../adapters/contract.js'
@@ -68,6 +69,8 @@ export class SessionManager {
   private commandCache = new Map<string, CommandInfo[]>()
   /** 도구가 갖고 있는 대화 id 목록 (짧은 캐시 — 삭제 여부 판단용) */
   private externalIndex = new Map<string, { ids: Set<string>; at: number }>()
+  /** 사용량 캐시 — 모달을 여닫을 때마다 도구를 띄우지 않는다 */
+  private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
 
   constructor(
     private store: Store,
@@ -123,7 +126,7 @@ export class SessionManager {
     if (!project) return { supported: false, reason: '프로젝트를 찾을 수 없습니다', sessions: [] }
 
     const adapter = this.adapters.get(tool)
-    if (!adapter?.listExternalSessions || !adapter.capabilities.listExternal) {
+    if (!adapter?.listExternalSessions) {
       return { supported: false, reason: `${tool}는 이전 세션 목록을 지원하지 않습니다`, sessions: [] }
     }
 
@@ -580,6 +583,28 @@ export class SessionManager {
     }
     // 이어받은 원본이 살아 있으면 그것도 인정한다 (resume이 새 id를 발급했을 수 있다)
     return !ids.has(id) && !(m.importedFrom && ids.has(m.importedFrom))
+  }
+
+  /**
+   * 계정 사용량·한도 (FR-9).
+   *
+   * 짧게 캐시한다 — 모달을 여닫을 때마다 codex app-server를 띄우면 느리다.
+   * 실패해도 던지지 않는다: 사용량을 못 본다고 대화를 막을 이유가 없다.
+   */
+  async usageFor(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }> {
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.listUsage) return { supported: false, reason: `${tool}는 사용량 조회를 지원하지 않습니다`, usage: null }
+
+    const hit = this.usageCache.get(tool)
+    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot }
+
+    try {
+      const snapshot = await withTimeout(adapter.listUsage(), 15_000)
+      this.usageCache.set(tool, { snapshot, at: Date.now() })
+      return { supported: true, usage: snapshot }
+    } catch (err) {
+      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null }
+    }
   }
 
   /** 프로젝트의 작업 디렉토리. 터미널이 자기 키(cwd)를 정할 때 쓴다 */

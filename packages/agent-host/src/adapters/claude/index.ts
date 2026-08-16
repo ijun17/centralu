@@ -4,15 +4,17 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
  * SDK Query 중 우리가 쓰는 부분만.
  * 외부 타입을 어댑터 밖으로 내보내지 않기 위해 최소 표면만 적는다.
  */
-type QueryHandle = AsyncIterable<unknown> & {
-  getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
-  supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
-}
+type QueryHandle = AsyncIterable<unknown> &
+  UsageQuery & {
+    getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
+    supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
+  }
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEvent } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { listClaudeSessions, readClaudeHistory } from './history.js'
+import { readUsage, type UsageQuery } from './usage.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, normalizeMessage } from './normalize.js'
 
@@ -74,7 +76,8 @@ class ClaudeSession implements SessionHandle {
       }
     }
 
-    const q: QueryHandle = (this.query = query({
+    // 사용량은 계정의 성질이지만 SDK는 Query에만 그 메서드를 둔다 — 최근 질의를 빌려 쓴다
+    const q: QueryHandle = (ClaudeAdapter.lastQuery = this.query = query({
       prompt: input(),
       options: {
         cwd: this.opts.cwd,
@@ -213,11 +216,17 @@ class ClaudeSession implements SessionHandle {
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
+  /**
+   * 사용량을 물어볼 창구.
+   *
+   * 사용량은 **계정**의 성질인데 SDK는 세션(Query)에만 그 메서드를 준다.
+   * 그래서 살아 있는 질의 하나를 빌려 쓴다 — 어느 세션에 묻든 답은 같다.
+   */
+  static lastQuery: UsageQuery | null = null
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 검증: 전역 bypass를 세션 단위로 덮어쓸 수 있음
     contextUsage: 'exact',
     resume: true,
-    listExternal: true, // SDK listSessions/getSessionMessages (공식 API)
     autoTitle: true,
     attachments: ['image', 'file'],
   }
@@ -240,6 +249,18 @@ export class ClaudeAdapter implements AgentAdapter {
 
   listExternalSessions(cwd: string, limit: number) {
     return listClaudeSessions(cwd, limit)
+  }
+
+  /**
+   * 계정 사용량 (FR-9).
+   *
+   * **살아 있는 세션이 있어야 물어볼 수 있다** — SDK가 Query에만 이 메서드를 둔다.
+   * 세션이 하나도 없으면 던지고, 매니저가 이유와 함께 degrade한다.
+   */
+  async listUsage() {
+    const q = ClaudeAdapter.lastQuery
+    if (!q) throw new Error('사용량을 보려면 실행 중인 세션이 필요합니다')
+    return readUsage(q)
   }
 
   readExternalHistory(externalId: string, cwd: string, limit: number) {

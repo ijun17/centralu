@@ -14,6 +14,7 @@ import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
 import { FirstRun } from '../features/onboarding/FirstRun.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
+import { UsageModal } from '../features/usage/UsagePanel.jsx'
 import { Kbd } from '../components/primitives.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 
@@ -50,6 +51,7 @@ export function App({ platform }: { platform: Platform }) {
         <Inbox />
         <CommandPalette />
         <Settings />
+        <UsageModal />
         <Toast />
         <GlobalKeys />
       </div>
@@ -154,6 +156,14 @@ function TopBar() {
           />
           {connection === 'connected' ? '연결됨' : connection === 'connecting' ? '연결 중' : '연결 끊김'}
         </span>
+        <button
+          className="rounded px-2 py-1 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+          onClick={() => useStore.getState().toggleUsage(true)}
+          data-testid="open-usage"
+          title="사용량 (구독 한도)"
+        >
+          사용량
+        </button>
         <button
           className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk"
           onClick={() => setAddOpen(true)}

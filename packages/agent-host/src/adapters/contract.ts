@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  UsageSnapshot,
   ApprovalDecision,
   ApprovalScope,
   NormalizedEvent,
@@ -9,8 +10,16 @@ import type {
 
 /**
  * 어댑터 계약 (docs/agent-host.md §2).
+ *
  * 규칙: 외부 SDK 타입은 adapters/<tool>/ 밖으로 한 발짝도 못 나온다 (anti-corruption).
- * 어댑터의 유일한 출력은 NormalizedEvent다.
+ *
+ * 어댑터가 다루는 축이 셋이다. 무엇에 매여 있는지가 곧 어디에 놓이는지다:
+ *   세션  — SessionHandle의 메서드 (대화·승인·슬래시 명령)
+ *   디렉토리 — AgentAdapter의 cwd 인자 메서드 (이전 세션 목록)
+ *   계정  — AgentAdapter의 인자 없는 메서드 (사용량·한도)
+ *
+ * **선택 메서드로 능력을 표현한다.** capabilities에 같은 걸 또 적지 않는다 —
+ * 플래그와 구현이 어긋나면 조용히 아무 일도 안 하게 된다 (실제로 겪었다).
  */
 
 export type CreateSessionOpts = {
@@ -69,4 +78,13 @@ export interface AgentAdapter {
   listExternalSessions?(cwd: string, limit: number): Promise<ExternalSessionSummary[]>
   /** 이전 세션의 대화를 읽는다 (표시용 스냅샷. 모델의 실제 컨텍스트는 도구가 갖고 있다) */
   readExternalHistory?(externalId: string, cwd: string, limit: number): Promise<HistoryMessage[]>
+
+  /**
+   * 계정 사용량·한도 (FR-9).
+   *
+   * 세션도 디렉토리도 아닌 **계정**의 성질이라 인자가 없다.
+   * 구독 한도만 다룬다 — 추가 결제(크레딧)는 범위 밖이다.
+   * 못 가져오면 던진다: 매니저가 이유와 함께 degrade한다.
+   */
+  listUsage?(): Promise<UsageSnapshot>
 }

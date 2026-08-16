@@ -116,6 +116,8 @@ export type AppState = {
   /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
   viewerPath: string | null
   paletteOpen: boolean
+  /** 사용량 모달 (FR-9) */
+  usageOpen: boolean
   settingsOpen: boolean
   notifyPolicy: NotifyPolicy
 
@@ -144,6 +146,7 @@ export type AppState = {
   closeOverlay(): void
   toggleInbox(open?: boolean): void
   togglePalette(open?: boolean): void
+  toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
   setNotifyPolicy(p: NotifyPolicy): void
   setToast(msg: string | null): void
@@ -245,6 +248,7 @@ export const useStore = create<AppState>((set, get) => ({
   appFocused: true,
   viewerPath: null,
   paletteOpen: false,
+  usageOpen: false,
   settingsOpen: false,
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
 
@@ -499,6 +503,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
   togglePalette(open) {
     set((s) => ({ paletteOpen: open ?? !s.paletteOpen }))
+  },
+  toggleUsage(open) {
+    set((s) => ({ usageOpen: open ?? !s.usageOpen }))
   },
   toggleSettings(open) {
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))

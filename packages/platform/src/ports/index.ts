@@ -15,6 +15,7 @@ import type {
   ProjectInfo,
   SessionInfo,
   StoredMessage,
+  UsageSnapshot,
   TerminalInfo,
   ToolName,
 } from '@cc/protocol'
@@ -85,6 +86,8 @@ export interface AgentPort {
    * ready=false는 '없음'이 아니라 '아직 도구가 준비되지 않았다'는 뜻이다.
    */
   commands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }>
+  /** 계정 사용량·한도 (FR-9). 구독 한도만 다룬다 */
+  usage(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>
   detect(): Promise<{ tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }[]>
   /** 이벤트 스트림 — 구독 시점 이후의 이벤트를 받는다 */
   subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe

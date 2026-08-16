@@ -11,6 +11,7 @@ import type {
   ProjectInfo,
   SessionInfo,
   StoredMessage,
+  UsageSnapshot,
   TerminalInfo,
   ToolName,
 } from '@cc/protocol'
@@ -91,6 +92,11 @@ class WebAgentPort implements AgentPort {
   }
   commands(sessionId: string) {
     return this.rpc.call<{ ready: boolean; commands: CommandInfo[] }>('agents.commands', { sessionId })
+  }
+  usage(tool: ToolName) {
+    return this.rpc.call<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>('agents.usage', {
+      tool,
+    })
   }
   capabilities(tool: ToolName) {
     return this.rpc.call<AdapterCapabilities>('agents.capabilities', { tool })

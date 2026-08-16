@@ -1584,3 +1584,68 @@ test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 �
   }, ids[0])
   expect(kept).toBe(true)
 })
+
+/** 사용량 (FR-9) — 구독 한도만 다룬다 */
+test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.usageState = {
+      supported: true,
+      usage: {
+        plan: 'max',
+        windows: [
+          { id: 'session', label: '5시간', percent: 8, resetsAt: new Date(Date.now() + 7_800_000).toISOString(), scope: null },
+          { id: 'weekly_all', label: '주간', percent: 93, resetsAt: new Date(Date.now() + 3 * 86400_000).toISOString(), scope: null },
+        ],
+        daily: [],
+      },
+    }
+  })
+
+  await page.getByTestId('open-usage').click()
+  await expect(page.getByTestId('usage-plan')).toContainText('max')
+  await expect(page.getByTestId('usage-window-session')).toContainText('8%')
+  await expect(page.getByTestId('usage-window-weekly_all')).toContainText('93%')
+
+  // 자세한 건 물어볼 때 답한다
+  await page.getByTestId('usage-window-weekly_all').hover()
+  await expect(page.getByTestId('usage-tip-weekly_all')).toContainText('초기화')
+
+  // 일간을 못 주는 도구면 그 줄을 접는다 (Claude에는 일간 창이 없다)
+  await expect(page.getByTestId('usage-daily')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('usage-modal')).toBeHidden()
+})
+
+test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.usageState = {
+      supported: true,
+      usage: {
+        plan: 'pro',
+        windows: [{ id: 'primary', label: '1주', percent: 22, resetsAt: null, scope: null }],
+        daily: [
+          { date: '2026-08-15', tokens: 115640 },
+          { date: '2026-08-16', tokens: 9005155 },
+        ],
+      },
+    }
+  })
+  await page.getByTestId('open-usage').click()
+  await expect(page.getByTestId('usage-daily')).toContainText('오늘 9.0M')
+})
+
+test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 않는다)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.usageState = {
+      supported: false,
+      reason: '설치된 Claude Code SDK가 사용량 조회를 지원하지 않습니다',
+      usage: null,
+    }
+  })
+  await page.getByTestId('open-usage').click()
+  await expect(page.getByTestId('usage-unavailable')).toContainText('SDK가 사용량 조회를 지원하지 않습니다')
+})

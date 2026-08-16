@@ -8,6 +8,7 @@ import {
   GitCommit,
   GitDiff,
   ExternalSession,
+  UsageSnapshot,
   GitFileStatus,
   PermissionPreset,
   SessionState,
@@ -260,6 +261,14 @@ export const RpcMethods = {
   'agents.commands': {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ ready: z.boolean(), commands: z.array(CommandInfo) }),
+  },
+  /**
+   * 계정 사용량·한도 (FR-9). 구독 한도만 다룬다.
+   * supported=false면 이유가 함께 온다 — 도구가 못 주는 것과 우리가 못 읽은 것을 구분한다.
+   */
+  'agents.usage': {
+    params: z.object({ tool: ToolName }),
+    result: z.object({ supported: z.boolean(), reason: z.string().optional(), usage: UsageSnapshot.nullable() }),
   },
   /** `@` 자동완성용 파일 검색 (프로젝트 안에서만) */
   'files.search': {
