@@ -96,16 +96,45 @@ describe('Tauri 권한', () => {
     readFileSync(join(ROOT, 'apps/desktop/src-tauri/capabilities/default.json'), 'utf8'),
   ) as { permissions: string[] }
 
-  it('창을 끌 수 있는 권한이 있다 (타이틀바를 숨겼으므로 필수)', () => {
-    expect(capability.permissions).toContain('core:window:allow-start-dragging')
+  /**
+   * 코드가 부르는 네이티브 기능과 권한을 맞춰 본다.
+   *
+   * 이 유형을 두 번 놓쳤다: 창 이동(core:window:allow-start-dragging)과
+   * 전역 단축키(global-shortcut:*). 둘 다 `…:default` 묶음에 들어 있을 거라고
+   * 짐작했는데 아니었다 — window:default는 읽기 전용이고, global-shortcut:default는
+   * **아무것도 켜지 않는다**("shortcuts can be inherently dangerous").
+   * 증상은 조용한 무동작이라 E2E(브라우저 mock)로는 영원히 못 잡는다.
+   */
+  const NATIVE_CALLS: { pattern: RegExp; permission: string; files: string[]; what: string }[] = [
+    {
+      pattern: /startDragging\(/,
+      permission: 'core:window:allow-start-dragging',
+      files: ['packages/platform/src/tauri/index.ts'],
+      what: '창 이동',
+    },
+    {
+      pattern: /\bregister\(/,
+      permission: 'global-shortcut:allow-register',
+      files: ['apps/desktop/src/main.tsx'],
+      what: '전역 단축키 등록',
+    },
+    {
+      pattern: /isRegistered\(/,
+      permission: 'global-shortcut:allow-is-registered',
+      files: ['apps/desktop/src/main.tsx'],
+      what: '전역 단축키 확인',
+    },
+  ]
+
+  it.each(NATIVE_CALLS)('$what: 코드가 부르면 권한도 있다', ({ pattern, permission, files }) => {
+    const used = files.some((f) => pattern.test(readFileSync(join(ROOT, f), 'utf8')))
+    if (!used) return // 안 쓰면 권한도 필요 없다
+    expect(capability.permissions).toContain(permission)
   })
 
-  it('startDragging을 부르는 코드와 권한이 함께 간다', () => {
-    const tauriPort = readFileSync(join(ROOT, 'packages/platform/src/tauri/index.ts'), 'utf8')
-    // 코드가 부르면 권한이 있어야 하고, 권한이 있으면 부르는 곳이 있어야 한다
-    expect(tauriPort.includes('startDragging()')).toBe(
-      capability.permissions.includes('core:window:allow-start-dragging'),
-    )
+  it('아무것도 켜지 않는 default 묶음에 기대지 않는다', () => {
+    // 이름이 default라고 해서 필요한 게 들어 있지는 않다 (실측으로 두 번 당했다)
+    expect(capability.permissions).not.toContain('global-shortcut:default')
   })
 
   it('웹뷰가 OS 드롭을 가로채지 않는다 (파일 첨부가 죽는다)', () => {

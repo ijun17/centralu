@@ -12,7 +12,9 @@
     "core:window:allow-show",
     "core:window:allow-unminimize",
     "notification:default",
-    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered",
     "dialog:default",
     "opener:default"
   ]

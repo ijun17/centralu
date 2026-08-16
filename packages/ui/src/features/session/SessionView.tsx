@@ -329,6 +329,15 @@ function ChatStream({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 64,
     overscan: 12,
+    /*
+     * 높이 측정을 다음 프레임으로 미룬다.
+     *
+     * 기본값(false)이면 ResizeObserver 콜백에서 곧바로 flushSync를 부르는데,
+     * React 19가 렌더 도중에 그걸 만나면 경고를 쏟는다
+     * (dev 로그에 "flushSync was called from inside a lifecycle method" 8줄).
+     * 진짜 오류를 그 소음에 묻히게 두면 안 된다.
+     */
+    useAnimationFrameWithResizeObserver: true,
     getItemKey: (i) => chat[i]?.seq ?? i,
   })
 

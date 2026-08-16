@@ -17,6 +17,32 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 
 export type Suggestion = { value: string; label: string; hint: string }
 
+/**
+ * 슬래시 명령 점수. 높을수록 위. null이면 목록에서 뺀다.
+ *
+ * 규칙은 사람이 치는 방식에서 나온다:
+ *  - `usage`를 다 쳤으면 찾는 건 `usage`이지 `usage-credit`이 아니다 → **정확히 일치가 최상위**
+ *  - 앞글자를 치는 건 이름의 **시작**을 떠올린 것이다 → 앞에서 시작하는 쪽이 위
+ *  - 한두 글자만 쳤을 때 이름 중간에 그 글자가 있다고 끼어들면 목록이 쓸모없어진다
+ *    (`u` 하나에 `docs-lookup`이 뜨는 식) → 짧은 질의는 시작·경계 매치만 받는다
+ */
+export function scoreCommand(name: string, query: string): number | null {
+  const n = name.toLowerCase()
+  const q = query.toLowerCase()
+  if (!q) return 100 - Math.min(n.length, 40)
+
+  if (n === q) return 1000
+  if (n.startsWith(q)) return 800 - Math.min(n.length - q.length, 60)
+
+  // `-`·`:`·`_` 뒤도 이름의 시작으로 친다 (usage-credit에서 credit)
+  const boundary = n.split(/[-:_/]/).some((part) => part.startsWith(q))
+  if (boundary) return 500 - Math.min(n.length, 60)
+
+  // 짧은 질의에서 중간 매치는 소음이다
+  if (q.length <= 2) return null
+  return n.includes(q) ? 200 - Math.min(n.length, 60) : null
+}
+
 /** 커서 앞의 글자에서 자동완성 대상을 알아낸다 */
 export function detectTrigger(
   text: string,
@@ -87,11 +113,13 @@ export function useAutocomplete({
   const items = useMemo<Suggestion[]>(() => {
     if (!trigger) return []
     if (trigger.kind === 'command') {
-      const q = trigger.query.toLowerCase()
       return commands.commands
-        .filter((c) => c.name.toLowerCase().includes(q))
+        .map((c) => ({ c, s: scoreCommand(c.name, trigger.query) }))
+        .filter((x): x is { c: CommandInfo; s: number } => x.s !== null)
+        // 점수가 같으면 짧은 이름이 위 — 대개 그쪽이 원래 찾던 것이다
+        .sort((a, b) => (b.s === a.s ? a.c.name.length - b.c.name.length : b.s - a.s))
         .slice(0, 20)
-        .map((c) => ({ value: `/${c.name} `, label: `/${c.name}`, hint: c.argumentHint || c.description }))
+        .map(({ c }) => ({ value: `/${c.name} `, label: `/${c.name}`, hint: c.argumentHint || c.description }))
     }
     return files.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
   }, [trigger, commands, files])

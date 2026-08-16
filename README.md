@@ -58,8 +58,14 @@ pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 ## 실행
 
 ```bash
-pnpm app          # 배포 앱 빌드 + 실행 (증분 빌드 ~60초) — 도그푸딩은 이걸로
+pnpm app:dev      # ← 평소 개발은 이걸로. UI 저장하면 즉시 반영(HMR)
+pnpm app          # 배포 앱 빌드 + 실행 (증분 ~60초)
 pnpm app:open     # 이미 빌드된 앱만 열기
-pnpm app:dev      # Tauri dev (프론트 핫 리로드, 알림·뱃지 동작)
+
+# 무엇을 고쳤느냐에 따라 반영 방식이 다르다
+#   packages/ui, packages/platform  → app:dev에서 저장 즉시 (HMR)
+#   packages/agent-host, protocol    → 앱 재시작 필요 (host는 watch하지 않는다)
+#   apps/desktop/src-tauri (Rust)    → 재컴파일 후 자동 재시작
+#   PATH·번들·네이티브 관련           → pnpm app (배포 앱에서만 재현되는 것들)
 pnpm dev          # 웹만 (host는 pnpm host 별도) — UI 손볼 때만
 ```
