@@ -809,7 +809,8 @@ test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('confirm-delete')).toContainText('되돌릴 수 없습니다')
+  // "되돌릴 수 없습니다"는 사실이 아니다 — 무엇이 지워지고 무엇이 남는지를 말한다
+  await expect(page.getByTestId('confirm-delete')).toContainText('대화 기록과 첨부가 사라집니다')
   await page.getByTestId('confirm-delete-yes').click()
 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
@@ -1117,47 +1118,22 @@ test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) =
 })
 
 /** M2.6 도그푸딩: 숨김/삭제·재시작·첨부·압축된 옛 대화 */
-test('치우기는 Control Center 목록에서만 없앤다 — 도구에는 남아 다시 가져올 수 있다', async ({ page }) => {
+test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명히 말한다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await page.evaluate(() => {
-    const m = (window as any).__mock
-    m.externalSessions = {
-      supported: true,
-      sessions: [
-        { externalId: 'ext-1', tool: 'claude', title: '치울 대화', updatedAt: Date.now(), createdAt: null, branch: null, imported: false },
-      ],
-    }
-    m.externalHistory.set('ext-1', [{ role: 'user', text: '치울 대화' }])
-  })
-
-  // 도구가 갖고 있던 대화를 불러온 세션
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('past-ext-1').click()
-  await page.getByTestId('create-session-confirm').click()
+  await newSession(page, 'alpha', '지울 세션')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
-  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 
-  await page.getByTestId(`hide-session-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
 
-  // 목록에서 사라지고, 따로 '숨김 목록' 같은 건 없다
+  // 실제보다 무섭게 말하면 사람은 정리하지 못하고 목록만 쌓인다
+  await expect(page.getByTestId('delete-notice')).toContainText('Claude Code에는 대화가 그대로 남습니다')
+  await expect(page.getByTestId('delete-notice')).toContainText('이전 대화')
+
+  await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toBeHidden()
-  await expect(page.getByTestId('hidden-toggle-alpha')).toHaveCount(0)
 
-  // 되돌리는 길은 '이전 대화'다 — 치운 세션은 '이미 불러옴'으로 막히면 안 된다
-  await page.evaluate(() => {
-    const m = (window as any).__mock
-    const st = (window as any).__store.getState()
-    // host가 하는 판정을 흉내낸다: 숨긴 세션은 known에서 뺀다
-    const live = Object.values(st.sessions).filter((s: any) => !s.archived)
-    m.externalSessions.sessions[0].imported = live.some((s: any) => s.importedFrom === 'ext-1')
-  })
-  await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('past-ext-1')).not.toContainText('이미 불러옴')
-  await page.getByTestId('past-ext-1').click()
-  await page.getByTestId('create-session-confirm').click()
-
-  // 다시 목록에 있고 대화도 돌아온다
-  await expect(page.getByTestId('chat-stream')).toContainText('치울 대화')
+  // 치우기 버튼은 없다 — 삭제 하나만 남겼다
+  await expect(page.getByTestId(`hide-session-${id}`)).toHaveCount(0)
 })
 
 test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', async ({ page }) => {
@@ -1351,7 +1327,7 @@ test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', 
   // 터미널이 뭔가 출력한 상태를 만든다
   const termId = await page.evaluate(() => {
     const m = (window as any).__mock
-    const t = [...m.terminalState.byCwd.values()][0]
+    const t = [...m.terminalState.byCwd.values()][0][0]
     m.emitTerminal(t.id, 'hello from alpha\r\n')
     return t.id
   })
@@ -1363,13 +1339,13 @@ test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', 
   await expect(page.getByTestId('evidence-terminal')).toBeVisible()
 
   const sameTerminal = await page.evaluate(() => {
-    const m = (window as any).__mock
-    return [...m.terminalState.byCwd.values()].length === 1 && [...m.terminalState.byCwd.values()][0].id
+    const lists = [...(window as any).__mock.terminalState.byCwd.values()]
+    return lists.length === 1 && lists[0].length === 1 && lists[0][0].id
   })
   expect(sameTerminal).toBe(termId)
 
   // 다시 붙을 때 지금까지의 출력을 되살린다 (빈 화면이면 터미널이 아니다)
-  await expect(page.getByTestId('terminal-surface')).toContainText('hello from alpha')
+  await expect(page.getByTestId(`terminal-surface-${termId}`)).toContainText('hello from alpha')
 })
 
 test('키보드 입력이 셸로 간다', async ({ page }) => {
@@ -1378,7 +1354,8 @@ test('키보드 입력이 셸로 간다', async ({ page }) => {
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(page.getByTestId('evidence-terminal')).toBeVisible()
 
-  await page.getByTestId('terminal-surface').click()
+  const id = await page.evaluate(() => [...(window as any).__mock.terminalState.byCwd.values()][0][0].id)
+  await page.getByTestId(`terminal-surface-${id}`).click()
   await page.keyboard.type('ls')
   await page.keyboard.press('Enter')
 
@@ -1402,4 +1379,68 @@ test('사이드바는 프로젝트당 한 줄만 쓴다 (세로 공간)', async 
   await page.getByTestId('project-header-alpha').hover()
   await expect(page.getByTestId('project-tip-alpha')).toBeVisible()
   await expect(page.getByTestId('project-tip-alpha')).toContainText('/tmp/alpha')
+})
+
+test('터미널을 여러 개 열고 닫는다 (세로로 쌓인다)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-terminal').click()
+
+  // 처음 열면 하나는 있다 — 빈 화면에 버튼만 있으면 한 단계가 더 든다
+  await expect(page.getByTestId('terminal-stack').locator('[data-testid^="terminal-surface-"]')).toHaveCount(1)
+
+  await page.getByTestId('terminal-add').click()
+  await page.getByTestId('terminal-add').click()
+  const surfaces = page.getByTestId('terminal-stack').locator('[data-testid^="terminal-surface-"]')
+  await expect(surfaces).toHaveCount(3)
+
+  // 세로로 쌓인다 (가로가 아니라)
+  const first = (await surfaces.nth(0).boundingBox())!
+  const second = (await surfaces.nth(1).boundingBox())!
+  expect(second.y).toBeGreaterThan(first.y)
+  expect(Math.abs(second.x - first.x)).toBeLessThan(2)
+
+  // 가운데를 닫으면 번호가 다시 매겨진다
+  const ids = await page.evaluate(() =>
+    [...(window as any).__mock.terminalState.byCwd.values()][0].map((t: { id: string }) => t.id),
+  )
+  await page.getByTestId(`terminal-close-${ids[1]}`).click()
+  await expect(surfaces).toHaveCount(2)
+  const titles = await page.evaluate(() =>
+    [...(window as any).__mock.terminalState.byCwd.values()][0].map((t: { title: string }) => t.title),
+  )
+  expect(titles).toEqual(['터미널 1', '터미널 2'])
+})
+
+test('좌우 패널 폭을 조절해도 화면이 옆으로 밀리지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 사이드바 폭 조절
+  const sidebar = page.getByTestId('sidebar')
+  const before = (await sidebar.boundingBox())!.width
+  const handle = page.getByTestId('sidebar-resize')
+  const hb = (await handle.boundingBox())!
+  await page.mouse.move(hb.x + 1, hb.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(hb.x + 120, hb.y + 200, { steps: 8 })
+  await page.mouse.up()
+  expect((await sidebar.boundingBox())!.width).toBeGreaterThan(before + 60)
+
+  // 우측 패널을 최대한 넓혀도 가로 스크롤이 생기면 안 된다
+  const panelHandle = page.getByTestId('evidence-resize')
+  const pb = (await panelHandle.boundingBox())!
+  await page.mouse.move(pb.x + 1, pb.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(10, pb.y + 200, { steps: 12 })
+  await page.mouse.up()
+
+  const overflow = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }))
+  expect(overflow.scroll).toBeLessThanOrEqual(overflow.client)
+
+  // 대화 레인이 최소 폭을 지켜서 살아 있다
+  expect((await page.getByTestId('chat-stream').boundingBox())!.width).toBeGreaterThan(200)
 })

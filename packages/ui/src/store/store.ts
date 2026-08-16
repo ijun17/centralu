@@ -41,6 +41,26 @@ export const PANEL_MIN = 260
 export const PANEL_MAX = 900
 export const PANEL_DEFAULT = 340
 
+/** 세션 목록(관찰 레인) 폭 */
+export const SIDEBAR_MIN = 180
+export const SIDEBAR_MAX = 480
+export const SIDEBAR_DEFAULT = 240
+
+/**
+ * 대화 레인이 최소한 지켜야 할 폭.
+ *
+ * 이게 없으면 양쪽 패널을 늘렸을 때 가운데가 0으로 눌리다 못해 전체 레이아웃이
+ * 창 밖으로 밀려나고, 화면이 통째로 가로 스크롤된다 (도그푸딩에서 실제로 나왔다).
+ * 게다가 그 상태에서는 손잡이 위치 계산이 어긋나 끌수록 더 커지는 되먹임이 생긴다.
+ */
+export const CENTER_MIN = 360
+
+/** 창 안에 실제로 들어갈 수 있는 폭으로 자른다 */
+function fitWidth(px: number, min: number, max: number, otherLane: number): number {
+  const available = (typeof window === 'undefined' ? 1280 : window.innerWidth) - otherLane - CENTER_MIN
+  return Math.min(max, Math.max(min, Math.round(Math.min(px, available))))
+}
+
 export type ChatItem =
   | { kind: 'user'; seq: number; text: string }
   | { kind: 'assistant'; seq: number; text: string }
@@ -74,6 +94,8 @@ export type AppState = {
   panelTab: PanelTab
   /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
   panelWidth: number
+  /** 세션 목록 폭(px) */
+  sidebarWidth: number
   /**
    * 넓은 표면. 코드·diff는 360px 패널에서 읽을 수 없다.
    * 대화 위에 덮었다가 esc로 걷는다 — 돌아오면 대화는 스크롤 위치까지 그대로다.
@@ -101,6 +123,7 @@ export type AppState = {
   /** 탭을 고르면 패널이 닫혀 있어도 함께 열린다 — 고른 것이 안 보이면 안 된다 */
   setPanelTab(tab: PanelTab): void
   setPanelWidth(px: number): void
+  setSidebarWidth(px: number): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
   /** 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다 */
@@ -203,6 +226,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelOpen: true,
   panelTab: 'git',
   panelWidth: PANEL_DEFAULT,
+  sidebarWidth: SIDEBAR_DEFAULT,
   overlay: null,
   inboxOpen: false,
   toast: null,
@@ -245,6 +269,7 @@ export const useStore = create<AppState>((set, get) => ({
           set({ panelTab: snap.panelTab })
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
+        if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
       }
@@ -262,6 +287,7 @@ export const useStore = create<AppState>((set, get) => ({
         panelOpen: s.panelOpen,
         panelTab: s.panelTab,
         panelWidth: s.panelWidth,
+        sidebarWidth: s.sidebarWidth,
       })
       .catch(() => {})
   },
@@ -422,7 +448,17 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setPanelWidth(px) {
-    set({ panelWidth: Math.min(PANEL_MAX, Math.max(PANEL_MIN, Math.round(px))) })
+    const s = get()
+    const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
+    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar) })
+    get().saveWorkspace()
+  },
+
+  setSidebarWidth(px) {
+    const s = get()
+    // 패널이 접혀 있으면 32px 띠만 차지한다
+    const panel = s.panelOpen ? s.panelWidth : 32
+    set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel) })
     get().saveWorkspace()
   },
 
@@ -462,6 +498,7 @@ export const useStore = create<AppState>((set, get) => ({
       panelOpen: get().panelOpen,
       panelTab: get().panelTab,
       panelWidth: get().panelWidth,
+      sidebarWidth: get().sidebarWidth,
       notifyPolicy,
     } as never).catch(() => {})
   },

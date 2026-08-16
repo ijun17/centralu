@@ -1,35 +1,107 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import type { TerminalInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * 프로젝트 터미널.
+ * 프로젝트 터미널 (여러 개).
  *
  * **터미널은 프로젝트(정확히는 디렉토리)의 것이다.** 세션의 것이 아니다.
- * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 셸이 그대로 이어진다 —
+ * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 셸들이 그대로 이어진다 —
  * 돌려놓은 dev 서버나 tail이 세션을 옮길 때마다 죽으면 쓸 수가 없다.
  * (깃 워크트리 세션은 디렉토리가 다르므로 자기 터미널을 자동으로 갖는다)
  *
- * 화면 복원은 host의 스크롤백이 한다. 탭을 옮겼다 와도, 창을 껐다 켜도
- * 붙는 순간 지금까지의 출력을 통째로 받아 다시 그린다.
+ * 패널이 길쭉하므로 세로로 쌓는다. 하나를 크게 보고 싶으면 패널 폭이 아니라
+ * 개수를 줄이는 쪽이 맞다 — 그래서 닫기를 각 터미널에 둔다.
  */
-export function Terminal({ projectId }: { projectId: string }) {
+export function TerminalPane({ projectId }: { projectId: string }) {
+  const platform = usePlatform()
+  const [terminals, setTerminals] = useState<TerminalInfo[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const list = await platform.terminal.list(projectId)
+      // 처음 열면 하나는 있어야 한다 — 빈 화면에 버튼만 있으면 한 단계가 더 든다
+      if (list.length === 0) {
+        setTerminals([await platform.terminal.create(projectId, 80, 24)])
+        return
+      }
+      setTerminals(list)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [platform, projectId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const add = async () => {
+    try {
+      const t = await platform.terminal.create(projectId, 80, 24)
+      setTerminals((prev) => [...(prev ?? []), t])
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const close = async (terminalId: string) => {
+    await platform.terminal.close(terminalId).catch(() => {})
+    // 닫으면 번호가 다시 매겨지므로 목록을 통째로 다시 읽는다
+    await load()
+  }
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-terminal">
+      <div className="flex items-center gap-1.5 border-b border-edge px-3 py-1">
+        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">터미널</span>
+        <button
+          className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
+          onClick={() => void add()}
+          data-testid="terminal-add"
+          title="터미널 추가"
+        >
+          + 추가
+        </button>
+      </div>
+
+      {error && (
+        <p className="px-3 py-2 text-[11px] leading-relaxed text-ash" data-testid="terminal-error">
+          터미널을 열 수 없습니다 — {error}
+        </p>
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col" data-testid="terminal-stack">
+        {(terminals ?? []).map((t) => (
+          <TerminalView key={t.terminalId} info={t} onClose={() => void close(t.terminalId)} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * 터미널 하나.
+ *
+ * 화면 복원은 host의 스크롤백이 한다. 탭을 옮겼다 와도, 창을 껐다 켜도
+ * 붙는 순간 지금까지의 출력을 받아 다시 그린다.
+ * 컴포넌트가 사라져도 **셸은 죽이지 않는다** — 탭을 옮긴 것뿐이다.
+ */
+function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => void }) {
   const platform = usePlatform()
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Xterm | null>(null)
-  const idRef = useRef<string | null>(null)
-  const [dead, setDead] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  // 패널 폭이 바뀌면 열 수를 다시 맞춰야 한다
+  const idRef = useRef(info.terminalId)
+  const [dead, setDead] = useState(!info.alive)
   const width = useStore((s) => s.panelWidth)
 
   useEffect(() => {
     const el = hostRef.current
     if (!el) return
-    let disposed = false
 
     const term = new Xterm({
       fontSize: 11,
@@ -54,6 +126,8 @@ export function Terminal({ projectId }: { projectId: string }) {
       }
     }
     safeFit()
+    if (info.history) term.write(info.history)
+    void platform.terminal.resize(info.terminalId, term.cols, term.rows).catch(() => {})
 
     const offOutput = platform.terminal.onOutput((e) => {
       if (e.terminalId === idRef.current) term.write(e.data)
@@ -63,85 +137,73 @@ export function Terminal({ projectId }: { projectId: string }) {
       setDead(true)
       term.write(`\r\n\x1b[2m— 셸이 종료되었습니다${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
     })
-
-    void platform.terminal
-      .attach(projectId, term.cols, term.rows)
-      .then((info) => {
-        if (disposed) return
-        idRef.current = info.terminalId
-        setDead(!info.alive)
-        // 지금까지의 출력을 되살린다 — 붙을 때마다 빈 화면이면 터미널이 아니다
-        if (info.history) term.write(info.history)
-        safeFit()
-        void platform.terminal.resize(info.terminalId, term.cols, term.rows).catch(() => {})
-      })
-      .catch((e: Error) => !disposed && setError(e.message))
-
     const onData = term.onData((data) => {
-      const id = idRef.current
-      if (id) void platform.terminal.input(id, data).catch(() => {})
+      void platform.terminal.input(idRef.current, data).catch(() => {})
     })
 
     // 패널 폭·창 크기가 바뀌면 셸에도 알려야 줄바꿈이 깨지지 않는다
     const ro = new ResizeObserver(() => {
       safeFit()
-      const id = idRef.current
-      if (id) void platform.terminal.resize(id, term.cols, term.rows).catch(() => {})
+      void platform.terminal.resize(idRef.current, term.cols, term.rows).catch(() => {})
     })
     ro.observe(el)
 
     return () => {
-      disposed = true
       ro.disconnect()
       onData.dispose()
       offOutput()
       offExit()
       term.dispose()
       termRef.current = null
-      // **셸은 죽이지 않는다.** 탭을 옮긴 것뿐이고, 터미널은 프로젝트의 것이다
     }
-  }, [platform, projectId])
+    // 정체성은 terminalId뿐이다 — history는 처음 붙을 때만 쓰므로 다시 붙일 이유가 없다
+  }, [platform, info.terminalId, info.history])
 
   // 폭이 바뀐 뒤 한 번 더 맞춘다 (ResizeObserver가 놓치는 경우 대비)
   useEffect(() => {
-    const id = idRef.current
     const term = termRef.current
-    if (!id || !term) return
+    if (!term) return
     const t = setTimeout(() => {
-      void platform.terminal.resize(id, term.cols, term.rows).catch(() => {})
+      void platform.terminal.resize(idRef.current, term.cols, term.rows).catch(() => {})
     }, 60)
     return () => clearTimeout(t)
   }, [width, platform])
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-terminal">
-      {error && (
-        <p className="px-3 py-2 text-[11px] leading-relaxed text-ash" data-testid="terminal-error">
-          터미널을 열 수 없습니다 — {error}
-        </p>
-      )}
-      {dead && !error && (
-        <div className="flex items-center gap-2 border-b border-edge px-3 py-1">
-          <span className="text-[10px] text-slate">셸이 종료됨</span>
+    <div
+      className="flex min-h-0 flex-1 flex-col border-b border-edge last:border-b-0"
+      data-testid={`terminal-${info.terminalId}`}
+    >
+      <div className="flex items-center gap-1.5 px-2 py-0.5">
+        <span className="readout truncate text-[10px] text-slate">{info.title}</span>
+        {dead && (
           <button
-            className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
-            data-testid="terminal-restart"
+            className="rounded px-1 text-[10px] text-ash transition-colors hover:text-chalk"
+            data-testid={`terminal-restart-${info.terminalId}`}
             onClick={async () => {
-              const id = idRef.current
               const term = termRef.current
-              if (!id || !term) return
-              const info = await platform.terminal.restart(id, term.cols, term.rows)
-              idRef.current = info.terminalId
-              setDead(!info.alive)
+              if (!term) return
+              const next = await platform.terminal.restart(idRef.current, term.cols, term.rows)
+              idRef.current = next.terminalId
+              setDead(!next.alive)
               term.reset()
-              if (info.history) term.write(info.history)
+              if (next.history) term.write(next.history)
             }}
           >
             다시 시작
           </button>
-        </div>
-      )}
-      <div ref={hostRef} className="min-h-0 flex-1 px-1 py-1" data-testid="terminal-surface" />
-    </section>
+        )}
+        <button
+          className="ml-auto rounded px-1 text-[10px] text-slate transition-colors hover:text-chalk"
+          onClick={onClose}
+          data-testid={`terminal-close-${info.terminalId}`}
+          title="이 터미널 닫기 (셸이 종료됩니다)"
+          aria-label={`${info.title} 닫기`}
+        >
+          ✕
+        </button>
+      </div>
+      <div ref={hostRef} className="min-h-0 flex-1 px-1 pb-1" data-testid={`terminal-surface-${info.terminalId}`} />
+    </div>
   )
 }

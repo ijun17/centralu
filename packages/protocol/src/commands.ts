@@ -75,6 +75,17 @@ export const ProjectInfo = z.object({
 })
 export type ProjectInfo = z.infer<typeof ProjectInfo>
 
+/** 터미널 하나 (목록·생성·재시작이 모두 이 모양을 돌려준다) */
+export const TerminalInfo = z.object({
+  terminalId: z.string(),
+  cwd: z.string(),
+  title: z.string(),
+  /** 지금까지의 출력 — 다시 붙었을 때 화면을 되살린다 */
+  history: z.string(),
+  alive: z.boolean(),
+})
+export type TerminalInfo = z.infer<typeof TerminalInfo>
+
 export const StoredMessage = z.object({
   sessionId: z.string(),
   seq: z.number(),
@@ -224,21 +235,25 @@ export const RpcMethods = {
     result: z.array(StoredMessage),
   },
   /**
-   * 프로젝트의 터미널에 붙는다. 없으면 만든다.
+   * 프로젝트의 터미널 목록.
    *
    * **터미널의 정체성은 cwd다** — 세션이 아니다.
-   * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 터미널이 이어지고,
+   * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 터미널들이 그대로 이어지고,
    * 나중에 깃 워크트리 세션이 생기면 cwd가 다르므로 자기 터미널을 따로 갖는다.
    */
-  'terminal.attach': {
+  'terminal.list': {
+    params: z.object({ projectId: z.string() }),
+    result: z.object({ terminals: z.array(TerminalInfo) }),
+  },
+  /** 터미널을 하나 더 연다 */
+  'terminal.create': {
     params: z.object({ projectId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
-    result: z.object({
-      terminalId: z.string(),
-      cwd: z.string(),
-      /** 지금까지의 출력 (다시 붙었을 때 화면을 되살린다) */
-      history: z.string(),
-      alive: z.boolean(),
-    }),
+    result: TerminalInfo,
+  },
+  /** 터미널 하나를 닫는다 (셸 종료 + 기록 폐기) */
+  'terminal.close': {
+    params: z.object({ terminalId: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
   },
   'terminal.input': {
     params: z.object({ terminalId: z.string(), data: z.string() }),
@@ -251,7 +266,7 @@ export const RpcMethods = {
   /** 셸을 끝내고 새로 띄운다 (먹통이 됐을 때) */
   'terminal.restart': {
     params: z.object({ terminalId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
-    result: z.object({ terminalId: z.string(), cwd: z.string(), history: z.string(), alive: z.boolean() }),
+    result: TerminalInfo,
   },
   'approvals.rules': {
     params: z.object({ projectId: z.string().optional() }),

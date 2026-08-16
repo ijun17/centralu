@@ -55,42 +55,43 @@ function fakePty() {
 }
 
 describe('터미널은 cwd로 묶인다', () => {
-  it('같은 디렉토리에 두 번 붙으면 같은 터미널이다 (세션을 바꿔도 이어진다)', () => {
+  it('목록은 디렉토리의 것이다 — 세션을 바꿔도 그대로다', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
 
     const cwd = tmp()
-    const a = svc.attach(cwd, 80, 24)
-    const b = svc.attach(cwd, 80, 24)
-
-    expect(b.id).toBe(a.id)
-    expect(fake.spawned).toHaveLength(1) // 셸은 한 번만 뜬다
+    const a = svc.create(cwd, 80, 24)
+    // 세션을 바꿔 다시 조회해도 같은 터미널이 나온다 (새로 띄우지 않는다)
+    expect(svc.list(cwd).map((t) => t.id)).toEqual([a.id])
+    expect(fake.spawned).toHaveLength(1)
   })
 
-  it('디렉토리가 다르면 다른 터미널이다 (깃 워크트리 세션을 위한 준비)', () => {
+  it('디렉토리가 다르면 목록도 다르다 (깃 워크트리 세션을 위한 준비)', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
 
-    const a = svc.attach(tmp(), 80, 24)
-    const b = svc.attach(tmp(), 80, 24)
+    const one = tmp()
+    const two = tmp()
+    svc.create(one, 80, 24)
+    svc.create(two, 80, 24)
 
-    expect(b.id).not.toBe(a.id)
-    expect(fake.spawned).toHaveLength(2)
+    expect(svc.list(one)).toHaveLength(1)
+    expect(svc.list(two)).toHaveLength(1)
+    expect(svc.list(one)[0]!.id).not.toBe(svc.list(two)[0]!.id)
   })
 
-  it('다시 붙을 때 지금까지의 출력을 돌려준다 (빈 화면이면 터미널이 아니다)', () => {
+  it('다시 조회하면 지금까지의 출력을 돌려준다 (빈 화면이면 터미널이 아니다)', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
 
     const cwd = tmp()
-    svc.attach(cwd, 80, 24)
+    svc.create(cwd, 80, 24)
     fake.instances[0]!.emitData('$ pnpm test\r\n254 passed\r\n')
 
-    const again = svc.attach(cwd, 80, 24)
-    expect(again.history()).toContain('254 passed')
+    expect(svc.list(cwd)[0]!.history()).toContain('254 passed')
   })
 
   it('붙는 쪽 화면 크기에 맞춘다', () => {
@@ -98,10 +99,54 @@ describe('터미널은 cwd로 묶인다', () => {
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
 
-    const cwd = tmp()
-    const h = svc.attach(cwd, 80, 24)
+    const h = svc.create(tmp(), 80, 24)
     svc.resize(h.id, 120, 40)
     expect(fake.instances[0]!.resize).toHaveBeenCalledWith(120, 40)
+  })
+})
+
+describe('터미널 여러 개', () => {
+  it('한 디렉토리에 여러 개를 열고 순서대로 이름을 붙인다', () => {
+    const fake = fakePty()
+    const svc = new TerminalService(() => {})
+    stubPty(svc, fake.mod)
+
+    const cwd = tmp()
+    svc.create(cwd, 80, 24)
+    svc.create(cwd, 80, 24)
+    svc.create(cwd, 80, 24)
+
+    expect(svc.list(cwd).map((t) => t.title)).toEqual(['터미널 1', '터미널 2', '터미널 3'])
+    expect(fake.spawned).toHaveLength(3)
+  })
+
+  it('닫으면 셸이 죽고 번호가 다시 매겨진다', () => {
+    const fake = fakePty()
+    const svc = new TerminalService(() => {})
+    stubPty(svc, fake.mod)
+
+    const cwd = tmp()
+    svc.create(cwd, 80, 24)
+    const second = svc.create(cwd, 80, 24)
+    svc.create(cwd, 80, 24)
+
+    svc.close(second.id)
+
+    expect(fake.instances[1]!.kill).toHaveBeenCalled()
+    // 2번을 지웠는데 1,3이 남으면 세는 사람이 헷갈린다
+    expect(svc.list(cwd).map((t) => t.title)).toEqual(['터미널 1', '터미널 2'])
+    expect(svc.list(cwd).map((t) => t.id)).not.toContain(second.id)
+  })
+
+  it('마지막 하나까지 닫으면 목록이 빈다', () => {
+    const fake = fakePty()
+    const svc = new TerminalService(() => {})
+    stubPty(svc, fake.mod)
+
+    const cwd = tmp()
+    const only = svc.create(cwd, 80, 24)
+    svc.close(only.id)
+    expect(svc.list(cwd)).toEqual([])
   })
 })
 
@@ -113,7 +158,7 @@ describe('셸이 끝나거나 못 뜰 때', () => {
     stubPty(svc, fake.mod)
 
     const cwd = tmp()
-    const h = svc.attach(cwd, 80, 24)
+    const h = svc.create(cwd, 80, 24)
     fake.instances[0]!.emitData('작업하던 흔적\r\n')
     fake.instances[0]!.emitExit(0)
 
@@ -135,7 +180,7 @@ describe('셸이 끝나거나 못 뜰 때', () => {
       },
     })
 
-    const h = svc.attach(tmp(), 80, 24)
+    const h = svc.create(tmp(), 80, 24)
     expect(h.alive).toBe(false)
     expect(h.history()).toContain('posix_spawnp failed')
     expect(seen.some((e) => e.data?.includes('posix_spawnp failed'))).toBe(true)
@@ -161,3 +206,30 @@ describe('셸 선택', () => {
 function stubPty(svc: TerminalService, mod: unknown): void {
   ;(svc as unknown as { loadPty: () => unknown }).loadPty = () => mod
 }
+
+/**
+ * 터미널을 여는 일은 눈에 띄게 빨라야 한다.
+ *
+ * 예전에는 create()마다 ensureToolPath()가 로그인 셸을 통째로 띄워서
+ * 터미널 하나 여는 데 1~4초가 들었다 (테스트 러너에서 실측). 사용자에게는
+ * '+ 추가'를 눌러도 한참 아무 일이 없는 것으로 보인다.
+ * 시간을 재는 테스트는 무르지만, 예산을 크게 잡아 '셸을 다시 띄우는' 급의
+ * 퇴행만 잡는다 (셸 1회 탐색이 ~1초, 여기 예산은 3개에 1.5초).
+ */
+describe('여는 속도', () => {
+  it('여러 개를 연달아 열어도 셸 탐색을 되풀이하지 않는다', () => {
+    const fake = fakePty()
+    const svc = new TerminalService(() => {})
+    stubPty(svc, fake.mod)
+    const cwd = tmp()
+
+    const started = process.hrtime.bigint()
+    svc.create(cwd, 80, 24)
+    svc.create(cwd, 80, 24)
+    svc.create(cwd, 80, 24)
+    const ms = Number(process.hrtime.bigint() - started) / 1e6
+
+    expect(fake.spawned).toHaveLength(3)
+    expect(ms).toBeLessThan(1500)
+  })
+})

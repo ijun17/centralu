@@ -39,6 +39,8 @@ const SCROLLBACK_BYTES = 256 * 1024
 export type TerminalHandle = {
   id: string
   cwd: string
+  /** 화면에 붙일 이름 (터미널 1, 터미널 2…) */
+  title: string
   history(): string
   alive: boolean
 }
@@ -46,6 +48,7 @@ export type TerminalHandle = {
 type Entry = {
   id: string
   cwd: string
+  title: string
   pty: Pty | null
   buffer: string
   cols: number
@@ -55,31 +58,51 @@ type Entry = {
 export type TerminalSink = (e: { terminalId: string; data?: string; exitCode?: number | null }) => void
 
 export class TerminalService {
-  private byCwd = new Map<string, Entry>()
+  /** 디렉토리 하나에 터미널 여러 개. 순서가 곧 화면에 쌓이는 순서다 */
+  private byCwd = new Map<string, Entry[]>()
   private byId = new Map<string, Entry>()
   private counter = 0
 
   constructor(private emit: TerminalSink) {}
 
-  /** 그 디렉토리의 터미널에 붙는다. 없거나 죽었으면 새로 띄운다 */
-  attach(cwd: string, cols: number, rows: number): TerminalHandle {
-    const existing = this.byCwd.get(cwd)
-    if (existing?.pty) {
-      // 붙는 쪽 화면 크기에 맞춘다 (여러 곳에서 보면 마지막에 붙은 쪽 기준)
-      this.doResize(existing, cols, rows)
-      return this.toHandle(existing)
-    }
-    if (existing) {
-      // 셸은 죽었지만 출력은 남아 있다 — 기록을 지우지 않고 그 위에 다시 띄운다
-      this.start(existing, cols, rows)
-      return this.toHandle(existing)
-    }
+  /** 그 디렉토리의 터미널 목록. 세션을 바꿔도 이 목록은 그대로다 */
+  list(cwd: string): TerminalHandle[] {
+    return (this.byCwd.get(cwd) ?? []).map((e) => this.toHandle(e))
+  }
 
-    const entry: Entry = { id: `term-${++this.counter}`, cwd, pty: null, buffer: '', cols, rows }
-    this.byCwd.set(cwd, entry)
+  /** 터미널을 하나 더 연다 */
+  create(cwd: string, cols: number, rows: number): TerminalHandle {
+    const siblings = this.byCwd.get(cwd) ?? []
+    const entry: Entry = {
+      id: `term-${++this.counter}`,
+      cwd,
+      // 번호는 자리 순서로 붙인다 — 지우고 다시 만들어도 1,2,3이 이어진다
+      title: `터미널 ${siblings.length + 1}`,
+      pty: null,
+      buffer: '',
+      cols,
+      rows,
+    }
+    siblings.push(entry)
+    this.byCwd.set(cwd, siblings)
     this.byId.set(entry.id, entry)
     this.start(entry, cols, rows)
     return this.toHandle(entry)
+  }
+
+  /** 터미널 하나를 닫는다 (셸 종료 + 기록 폐기) */
+  close(terminalId: string): void {
+    const e = this.byId.get(terminalId)
+    if (!e) return
+    e.pty?.kill()
+    this.byId.delete(terminalId)
+    const siblings = (this.byCwd.get(e.cwd) ?? []).filter((x) => x.id !== terminalId)
+    if (siblings.length === 0) this.byCwd.delete(e.cwd)
+    else {
+      // 번호를 다시 매긴다 — 2번을 지웠는데 1,3이 남으면 세는 사람이 헷갈린다
+      siblings.forEach((x, i) => (x.title = `터미널 ${i + 1}`))
+      this.byCwd.set(e.cwd, siblings)
+    }
   }
 
   input(terminalId: string, data: string): void {
@@ -104,11 +127,11 @@ export class TerminalService {
 
   /** 프로젝트가 사라질 때 정리 */
   closeCwd(cwd: string): void {
-    const e = this.byCwd.get(cwd)
-    if (!e) return
-    e.pty?.kill()
+    for (const e of this.byCwd.get(cwd) ?? []) {
+      e.pty?.kill()
+      this.byId.delete(e.id)
+    }
     this.byCwd.delete(cwd)
-    this.byId.delete(e.id)
   }
 
   disposeAll(): void {
@@ -127,7 +150,7 @@ export class TerminalService {
   }
 
   private toHandle(e: Entry): TerminalHandle {
-    return { id: e.id, cwd: e.cwd, history: () => e.buffer, alive: !!e.pty }
+    return { id: e.id, cwd: e.cwd, title: e.title, history: () => e.buffer, alive: !!e.pty }
   }
 
   private doResize(e: Entry, cols: number, rows: number): void {

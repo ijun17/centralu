@@ -10,6 +10,7 @@ import type {
   ProjectInfo,
   SessionInfo,
   StoredMessage,
+  TerminalInfo,
   ToolName,
 } from '@cc/protocol'
 import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
@@ -177,7 +178,12 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       push: (projectId) => rpc.call('git.push', { projectId }),
     },
     terminal: {
-      attach: (projectId, cols, rows) => rpc.call('terminal.attach', { projectId, cols, rows }),
+      list: async (projectId) =>
+        (await rpc.call<{ terminals: TerminalInfo[] }>('terminal.list', { projectId })).terminals,
+      create: (projectId, cols, rows) => rpc.call('terminal.create', { projectId, cols, rows }),
+      close: async (terminalId) => {
+        await rpc.call('terminal.close', { terminalId })
+      },
       input: async (terminalId, data) => {
         await rpc.call('terminal.input', { terminalId, data })
       },

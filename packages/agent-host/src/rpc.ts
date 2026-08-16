@@ -1,6 +1,15 @@
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
-import type { TerminalService } from './dev-services/terminal.js'
+import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
+
+/** 내부 핸들 → 프로토콜 모양 (history는 그때그때 스냅샷으로 뜬다) */
+const toInfo = (h: TerminalHandle) => ({
+  terminalId: h.id,
+  cwd: h.cwd,
+  title: h.title,
+  history: h.history(),
+  alive: h.alive,
+})
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
 
@@ -137,11 +146,19 @@ export function createRpcHandler(
       const { sessionId, limit, beforeSeq } = RpcMethods['messages.load'].params.parse(p)
       return mgr.loadMessages(sessionId, limit, beforeSeq)
     },
-    'terminal.attach': async (p) => {
-      const { projectId, cols, rows } = RpcMethods['terminal.attach'].params.parse(p)
+    'terminal.list': async (p) => {
+      const { projectId } = RpcMethods['terminal.list'].params.parse(p)
       // 터미널의 키는 프로젝트가 아니라 **디렉토리**다 (워크트리를 위한 준비)
-      const h = requireTerminals().attach(mgr.cwdOfProject(projectId), cols, rows)
-      return { terminalId: h.id, cwd: h.cwd, history: h.history(), alive: h.alive }
+      const cwd = mgr.cwdOfProject(projectId)
+      return { terminals: requireTerminals().list(cwd).map(toInfo) }
+    },
+    'terminal.create': async (p) => {
+      const { projectId, cols, rows } = RpcMethods['terminal.create'].params.parse(p)
+      return toInfo(requireTerminals().create(mgr.cwdOfProject(projectId), cols, rows))
+    },
+    'terminal.close': async (p) => {
+      requireTerminals().close(RpcMethods['terminal.close'].params.parse(p).terminalId)
+      return { ok: true as const }
     },
     'terminal.input': async (p) => {
       const { terminalId, data } = RpcMethods['terminal.input'].params.parse(p)
@@ -157,7 +174,7 @@ export function createRpcHandler(
       const { terminalId, cols, rows } = RpcMethods['terminal.restart'].params.parse(p)
       const h = requireTerminals().restart(terminalId, cols, rows)
       if (!h) throw Object.assign(new Error('터미널을 찾을 수 없습니다'), { code: 'internal' })
-      return { terminalId: h.id, cwd: h.cwd, history: h.history(), alive: h.alive }
+      return toInfo(h)
     },
     'approvals.rules': async () => mgr.listApprovalRules(),
   }

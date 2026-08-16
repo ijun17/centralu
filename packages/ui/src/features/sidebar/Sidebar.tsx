@@ -4,17 +4,30 @@ import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
 import { StateDot, Tooltip } from '../../components/primitives.jsx'
+import { ResizeHandle } from '../../components/ResizeHandle.jsx'
+import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
 
 /** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
 export function Sidebar() {
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
+  const width = useStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useStore((s) => s.setSidebarWidth)
 
   return (
     <aside
-      className="flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-edge bg-pit"
+      className="relative flex h-full shrink-0 flex-col overflow-y-auto border-r border-edge bg-pit"
+      style={{ width }}
       data-testid="sidebar"
     >
+      <ResizeHandle
+        side="right"
+        min={SIDEBAR_MIN}
+        max={SIDEBAR_MAX}
+        onResize={setSidebarWidth}
+        onReset={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+        testId="sidebar-resize"
+      />
       {ids.length === 0 ? (
         <p className="px-4 py-6 text-xs leading-relaxed text-slate">
           등록된 프로젝트가 없습니다.
@@ -36,7 +49,6 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [confirming, setConfirming] = useState<string | null>(null)
   const deleteSession = useStore((s) => s.deleteSession)
-  const archive = useStore((s) => s.archive)
   const focusProject = useStore((s) => s.focusProject)
   const selected = useStore((s) => s.focusedProjectId === projectId && !s.focusedSessionId)
 
@@ -106,28 +118,14 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 )}
               </button>
               {/*
-                치우기와 삭제는 다른 일이다.
+                삭제 하나만 둔다.
 
-                치우기는 **Control Center 목록에서만** 없애는 것이다. 도구(클로드·코덱스)에는
-                대화가 그대로 남아 있으므로 '+ → 이전 대화'에서 다시 가져올 수 있다.
-                그래서 따로 '숨김 목록' UI를 두지 않는다 — 되찾는 길이 이미 하나 있는데
-                비슷한 목록을 또 만들면 어디를 봐야 하는지가 늘어난다.
-
-                삭제는 우리 기록과 첨부까지 지우므로 확인을 받는다.
+                '치우기'를 따로 두려 했지만, 삭제해도 도구(클로드·코덱스)에는 대화가
+                그대로 남아 '+ → 이전 대화'로 되찾을 수 있다. 그러면 둘의 실질 차이가
+                거의 없어서 버튼만 늘고 무엇이 다른지 설명하기 어려워진다.
+                대신 **무엇이 지워지고 무엇이 남는지**를 확인 창에서 분명히 말한다.
               */}
               <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
-                <button
-                  className="rounded px-1 text-[11px] text-slate hover:text-chalk"
-                  data-testid={`hide-session-${s.id}`}
-                  title="목록에서 치우기 — 도구(클로드·코덱스)에는 대화가 남아 있어 '+ → 이전 대화'로 다시 가져올 수 있습니다"
-                  aria-label={`${s.name} 목록에서 치우기`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void archive(s.id, true)
-                  }}
-                >
-                  ⌄
-                </button>
                 <button
                   className="rounded px-1 text-[11px] text-slate hover:text-chalk"
                   data-testid={`delete-session-${s.id}`}
@@ -151,6 +149,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       {confirming && (
         <ConfirmDelete
           name={sessions.find((s) => s.id === confirming)?.name ?? '세션'}
+          tool={project.defaultTool}
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
             void deleteSession(confirming)
@@ -162,16 +161,26 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   )
 }
 
-/** 삭제 확인 — 기록까지 사라지므로 한 번 묻는다 */
+/**
+ * 삭제 확인.
+ *
+ * **무엇이 지워지고 무엇이 남는지를 분명히 말한다.**
+ * "되돌릴 수 없습니다"만 쓰면 사실과 다르다 — 도구(클로드·코덱스)에는 대화가
+ * 그대로 남아서 '+ → 이전 대화'로 되찾을 수 있다. 실제보다 무섭게 말하면
+ * 사람은 정리하지 못하고 목록만 쌓인다.
+ */
 function ConfirmDelete({
   name,
+  tool,
   onConfirm,
   onCancel,
 }: {
   name: string
+  tool: string
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const toolLabel = tool === 'codex' ? 'Codex' : 'Claude Code'
   return (
     <div
       className="absolute inset-0 z-40 flex items-center justify-center bg-void/80 backdrop-blur-[2px]"
@@ -184,7 +193,13 @@ function ConfirmDelete({
       >
         <p className="text-[13px] text-chalk">세션을 삭제할까요?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
-        <p className="mt-1 text-[11px] text-slate">대화 기록과 첨부까지 사라집니다. 되돌릴 수 없습니다.</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate">
+          Control Center의 대화 기록과 첨부가 사라집니다.
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
+          {toolLabel}에는 대화가 그대로 남습니다 — <span className="text-chalk">+ → 이전 대화</span>에서 다시
+          가져올 수 있습니다.
+        </p>
         <div className="mt-4 flex justify-end gap-2">
           <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
             취소

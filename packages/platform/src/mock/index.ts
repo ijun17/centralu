@@ -353,28 +353,50 @@ export class MockPlatform implements Platform {
    * 검증하려는 것은 "세션을 바꿔도 같은 터미널이 이어지는가"이지 셸 자체가 아니다.
    */
   terminalState: {
-    byCwd: Map<string, { id: string; history: string; alive: boolean }>
+    byCwd: Map<string, { id: string; title: string; history: string; alive: boolean }[]>
     input: { terminalId: string; data: string }[]
     resized: { terminalId: string; cols: number; rows: number }[]
-  } = { byCwd: new Map(), input: [], resized: [] }
+    closed: string[]
+  } = { byCwd: new Map(), input: [], resized: [], closed: [] }
   private termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
   private termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
 
   /** 테스트용: 터미널이 뭔가 출력한 상황을 만든다 */
   emitTerminal(terminalId: string, data: string): void {
-    for (const [, t] of this.terminalState.byCwd) if (t.id === terminalId) t.history += data
+    for (const [, list] of this.terminalState.byCwd) {
+      for (const t of list) if (t.id === terminalId) t.history += data
+    }
     for (const h of this.termHandlers) h({ terminalId, data })
   }
 
+  private cwdOf(projectId: string): string {
+    return this.projectsList.find((p) => p.id === projectId)?.path ?? projectId
+  }
+
   readonly terminal: TerminalPort = {
-    attach: async (projectId: string, _cols: number, _rows: number) => {
-      const cwd = this.projectsList.find((p) => p.id === projectId)?.path ?? projectId
-      let t = this.terminalState.byCwd.get(cwd)
-      if (!t) {
-        t = { id: `mock-term-${++this.idc}`, history: '', alive: true }
-        this.terminalState.byCwd.set(cwd, t)
+    list: async (projectId: string) => {
+      const cwd = this.cwdOf(projectId)
+      return (this.terminalState.byCwd.get(cwd) ?? []).map((t) => ({
+        terminalId: t.id, cwd, title: t.title, history: t.history, alive: t.alive,
+      }))
+    },
+    create: async (projectId: string) => {
+      const cwd = this.cwdOf(projectId)
+      const list = this.terminalState.byCwd.get(cwd) ?? []
+      const t = { id: `mock-term-${++this.idc}`, title: `터미널 ${list.length + 1}`, history: '', alive: true }
+      list.push(t)
+      this.terminalState.byCwd.set(cwd, list)
+      return { terminalId: t.id, cwd, title: t.title, history: t.history, alive: true }
+    },
+    close: async (terminalId: string) => {
+      this.terminalState.closed.push(terminalId)
+      for (const [cwd, list] of this.terminalState.byCwd) {
+        const next = list.filter((t) => t.id !== terminalId)
+        if (next.length === list.length) continue
+        next.forEach((t, i) => (t.title = `터미널 ${i + 1}`))
+        if (next.length === 0) this.terminalState.byCwd.delete(cwd)
+        else this.terminalState.byCwd.set(cwd, next)
       }
-      return { terminalId: t.id, cwd, history: t.history, alive: t.alive }
     },
     input: async (terminalId: string, data: string) => {
       this.terminalState.input.push({ terminalId, data })
@@ -383,10 +405,11 @@ export class MockPlatform implements Platform {
       this.terminalState.resized.push({ terminalId, cols, rows })
     },
     restart: async (terminalId: string) => {
-      for (const [cwd, t] of this.terminalState.byCwd) {
-        if (t.id === terminalId) {
+      for (const [cwd, list] of this.terminalState.byCwd) {
+        for (const t of list) {
+          if (t.id !== terminalId) continue
           t.alive = true
-          return { terminalId: t.id, cwd, history: t.history, alive: true }
+          return { terminalId: t.id, cwd, title: t.title, history: t.history, alive: true }
         }
       }
       throw Object.assign(new Error('터미널 없음'), { code: 'internal' })

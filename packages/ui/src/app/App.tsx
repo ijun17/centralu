@@ -73,7 +73,12 @@ function Body() {
         코드를 보는 동안 다른 세션이 나를 부르는 것을 놓친다 —
         관제탑에서 계기판을 가리는 셈이다.
       */}
-      <div className="relative flex min-h-0 flex-1">
+      {/*
+        min-w-0이 없으면 이 레인은 내용의 min-content 폭 아래로 줄지 못한다.
+        그러면 패널을 넓혔을 때 레이아웃이 창 밖으로 밀려나 화면이 통째로
+        가로 스크롤된다 (도그푸딩에서 나온 버그의 진짜 원인).
+      */}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         <SessionView />
         <EvidencePanel />
         <Overlay />

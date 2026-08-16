@@ -56,10 +56,25 @@ function loginShellPath(): string[] {
  * PATH를 보강하고 결과를 돌려준다. 호스트 기동 시 한 번만 호출한다.
  * 터미널에서 `pnpm host`로 띄울 때는 이미 제대로 된 PATH가 있으므로 사실상 무해하다.
  */
+/**
+ * 로그인 셸 탐색 결과 캐시.
+ *
+ * loginShellPath()는 셸을 통째로 띄우므로 한 번에 1초 안팎이 든다.
+ * 터미널을 열 때마다 부르면 그때마다 그만큼 멈춘다 (실측: 터미널 생성이 1~4초).
+ * 프로세스가 사는 동안 PATH가 달라질 일은 없으므로 한 번만 묻는다.
+ */
+let cachedShellPath: string[] | null = null
+
+/** 테스트에서 탐색을 다시 하게 만든다 */
+export function __resetToolPathCache(): void {
+  cachedShellPath = null
+}
+
 export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' | 'unchanged' } {
   const current = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
 
-  const fromShell = loginShellPath()
+  cachedShellPath ??= loginShellPath()
+  const fromShell = cachedShellPath
   const source = fromShell.length > 0 ? 'shell' : 'fallback'
   const candidates = fromShell.length > 0 ? fromShell : FALLBACK.filter((p) => existsSync(p))
 
