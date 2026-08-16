@@ -9,8 +9,18 @@ type SubTab = 'changes' | 'history' | 'branches'
  * 깃 패널 (FR-4, B-2~B-6).
  * 승인 판단의 근거를 앱 안에서 만든다 — 이걸 보려고 IDE로 나가지 않아도 되게.
  */
-export function GitPanel({ projectId, initialPath }: { projectId: string; initialPath?: string | null }) {
-  const [sub, setSub] = useState<SubTab>('changes')
+export function GitPanel({
+  projectId,
+  initialPath,
+  initialSha,
+  initialSub,
+}: {
+  projectId: string
+  initialPath?: string | null
+  initialSha?: string | null
+  initialSub?: SubTab
+}) {
+  const [sub, setSub] = useState<SubTab>(initialSub ?? 'changes')
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="git-panel">
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1">
@@ -34,7 +44,7 @@ export function GitPanel({ projectId, initialPath }: { projectId: string; initia
         ))}
       </nav>
       {sub === 'changes' && <Changes projectId={projectId} initialPath={initialPath} />}
-      {sub === 'history' && <History projectId={projectId} />}
+      {sub === 'history' && <History projectId={projectId} initialSha={initialSha} />}
       {sub === 'branches' && <Branches projectId={projectId} />}
     </section>
   )
@@ -320,7 +330,7 @@ function DiffView({
 }
 
 /** B-3 기록 탭 — 그래프 선은 그리지 않는다 (부모 관계만) */
-function History({ projectId }: { projectId: string }) {
+function History({ projectId, initialSha }: { projectId: string; initialSha?: string | null }) {
   const platform = usePlatform()
   const [commits, setCommits] = useState<GitCommit[] | null>(null)
   const [detail, setDetail] = useState<{ sha: string; files: string[]; diff: string } | null>(null)
@@ -328,6 +338,16 @@ function History({ projectId }: { projectId: string }) {
   useEffect(() => {
     void platform.git.log(projectId, 50).then(setCommits).catch(() => setCommits([]))
   }, [platform, projectId])
+
+  // 우측 패널의 기록에서 눌러 들어온 커밋은 바로 펼친다 —
+  // 넓은 화면에 와서 같은 커밋을 다시 찾게 하면 클릭 한 번이 헛돈다
+  useEffect(() => {
+    if (!initialSha || detail) return
+    void platform.git
+      .commitDetail(projectId, initialSha)
+      .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff }))
+      .catch(() => {})
+  }, [initialSha, detail, platform, projectId])
 
   return (
     <div className="flex min-h-0 flex-1">

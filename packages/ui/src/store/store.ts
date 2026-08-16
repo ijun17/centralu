@@ -28,7 +28,13 @@ import type { ConnectionState, Platform } from '@cc/platform/ports'
  *  - viewer: 파일 한 개 (viewerPath)
  *  - git: 변경·기록·브랜치 전체. path를 주면 그 파일의 diff부터 편다
  */
-export type Overlay = { kind: 'viewer' } | { kind: 'git'; path: string | null } | null
+export type Overlay =
+  | { kind: 'viewer' }
+  | { kind: 'git'; path?: string | null; sha?: string | null; sub?: 'changes' | 'history' | 'branches' }
+  | null
+
+/** 증거 패널이 보여주는 것 */
+export type PanelTab = 'files' | 'git'
 
 export type ChatItem =
   | { kind: 'user'; seq: number; text: string }
@@ -52,6 +58,8 @@ export type AppState = {
    * "그거 어디서 봐?"가 나온다 (도그푸딩에서 실제로 나왔다).
    */
   panelOpen: boolean
+  /** 증거 패널이 파일을 보여주나 깃을 보여주나 */
+  panelTab: PanelTab
   /**
    * 넓은 표면. 코드·diff는 360px 패널에서 읽을 수 없다.
    * 대화 위에 덮었다가 esc로 걷는다 — 돌아오면 대화는 스크롤 위치까지 그대로다.
@@ -74,10 +82,16 @@ export type AppState = {
   loadHistory(sessionId: string): Promise<void>
   saveWorkspace(): void
   togglePanel(open?: boolean): void
+  /** 탭을 고르면 패널이 닫혀 있어도 함께 열린다 — 고른 것이 안 보이면 안 된다 */
+  setPanelTab(tab: PanelTab): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
   /** 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다 */
   openGit(path?: string): void
+  /** 커밋 하나를 넓은 곳에서 펼친다 (340px에서 diff는 못 읽는다) */
+  openCommit(sha: string): void
+  /** 브랜치 전환 화면 */
+  openBranches(): void
   closeOverlay(): void
   toggleInbox(open?: boolean): void
   togglePalette(open?: boolean): void
@@ -130,6 +144,7 @@ export const useStore = create<AppState>((set, get) => ({
   focusedSessionId: null,
   focusedProjectId: null,
   panelOpen: true,
+  panelTab: 'git',
   overlay: null,
   inboxOpen: false,
   toast: null,
@@ -168,6 +183,7 @@ export const useStore = create<AppState>((set, get) => ({
         // 보던 탭까지 돌아온다 (B-0)
         // 구버전 스냅샷의 tab은 무시한다 (탭 구조는 3레인으로 대체됐다)
         if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
+        if (snap.panelTab === 'files' || snap.panelTab === 'git') set({ panelTab: snap.panelTab })
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
       }
@@ -179,7 +195,9 @@ export const useStore = create<AppState>((set, get) => ({
   /** 상태가 바뀔 때마다 저장한다 — '종료 시 저장'은 크래시에 무력하다 */
   saveWorkspace() {
     const s = get()
-    void s.platform?.workspace.save({ focusedSessionId: s.focusedSessionId, panelOpen: s.panelOpen }).catch(() => {})
+    void s.platform?.workspace
+      .save({ focusedSessionId: s.focusedSessionId, panelOpen: s.panelOpen, panelTab: s.panelTab })
+      .catch(() => {})
   },
 
   setAppFocused(focused) {
@@ -293,12 +311,25 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
+  setPanelTab(panelTab) {
+    set({ panelTab, panelOpen: true })
+    get().saveWorkspace()
+  },
+
   openFile(path) {
     set({ viewerPath: path, overlay: { kind: 'viewer' } })
   },
 
   openGit(path) {
     set({ overlay: { kind: 'git', path: path ?? null } })
+  },
+
+  openCommit(sha) {
+    set({ overlay: { kind: 'git', sha, sub: 'history' } })
+  },
+
+  openBranches() {
+    set({ overlay: { kind: 'git', sub: 'branches' } })
   },
 
   closeOverlay() {
@@ -319,6 +350,7 @@ export const useStore = create<AppState>((set, get) => ({
     void get().platform?.workspace.save({
       focusedSessionId: get().focusedSessionId,
       panelOpen: get().panelOpen,
+      panelTab: get().panelTab,
       notifyPolicy,
     } as never).catch(() => {})
   },

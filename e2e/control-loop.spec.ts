@@ -594,8 +594,7 @@ test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 �
     m.gitState.dirty = ['src/a.ts']
   })
   await newSession(page, 'alpha', '작업')
-  await page.getByTestId('evidence-git-full').click()
-  await page.getByTestId('git-sub-branches').click()
+  await page.getByTestId('evidence-branch').click()
   await page.getByTestId('branch-feature/x').click()
 
   await expect(page.getByTestId('checkout-warning')).toContainText('src/a.ts')
@@ -615,8 +614,8 @@ test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', a
   })
   await page.getByTestId('new-session-nogit').click()
   await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('evidence-tab-git')).toBeDisabled()
   await expect(page.getByTestId('evidence-not-repo')).toBeVisible()
-  await expect(page.getByTestId('evidence-git-full')).toBeDisabled()
 })
 
 test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page }) => {
@@ -632,6 +631,7 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
     m.fsState.files['src/a.ts'] = '첫 줄\n둘째 줄\n셋째 줄'
   })
   await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-tree')).toBeVisible()
 
   // 무시된 항목은 기본으로 숨는다
@@ -653,6 +653,7 @@ test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ pa
     m.fsState.files['big.ts'] = Array.from({ length: 3000 }, (_, i) => `줄 ${i} 내용`).join('\n')
   })
   await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-big.ts').click()
 
   // 파일을 열면 넓은 오버레이가 덮인다
@@ -676,6 +677,7 @@ test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', a
     m.fs.readFile = async () => ({ text: '', truncated: false, binary: true, bytes: 20480 })
   })
   await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-logo.png').click()
   await expect(page.getByTestId('viewer-binary')).toContainText('바이너리')
 })
@@ -827,6 +829,7 @@ test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (�
   // 세션이 없어도 증거 패널은 프로젝트의 것이므로 그대로 보인다
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
   await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
+  await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-README.md')).toBeVisible()
 })
 
@@ -969,6 +972,7 @@ test('파일 트리에서 연 파일도 같은 오버레이에 뜬다', async ({
   })
   await newSession(page, 'alpha', '작업')
 
+  await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-README.md').click()
   await expect(page.getByTestId('overlay')).toBeVisible()
   await expect(page.getByTestId('viewer-path')).toContainText('README.md')
@@ -987,6 +991,7 @@ test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 �
   await newSession(page, 'alpha', '첫 번째')
   await newSession(page, 'alpha', '두 번째')
 
+  await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-a.ts').click()
   await expect(page.getByTestId('overlay')).toBeVisible()
 
@@ -994,4 +999,91 @@ test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 �
   await page.getByTestId(`session-row-${first}`).click()
   await expect(page.getByTestId('overlay')).toBeHidden()
   await expect(page.getByTestId('chat-stream')).toContainText('첫 번째')
+})
+
+/** 증거 패널: 탭으로 갈리고, 접어도 되살릴 길이 남는다 */
+test('증거 패널 탭: 깃은 위가 변경·아래가 기록, 파일 탭은 트리', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.gitState.commits = [
+      { sha: 'aaa111', shortSha: 'aaa111', subject: '첫 커밋', author: '나', when: Date.now(), parents: [] },
+      { sha: 'bbb222', shortSha: 'bbb222', subject: '두 번째', author: '나', when: Date.now(), parents: ['a', 'b'] },
+    ]
+    m.fsState.entries[''] = [{ name: 'README.md', path: 'README.md', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  // 깃 탭이 기본 — 위는 변경, 아래는 기록
+  await expect(page.getByTestId('evidence-git')).toBeVisible()
+  await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
+  await expect(page.getByTestId('evidence-tree')).toBeVisible()
+  await expect(page.getByTestId('evidence-commit-aaa111')).toContainText('첫 커밋')
+  await expect(page.getByTestId('evidence-commit-bbb222')).toContainText('병합')
+
+  // 파일 탭으로 가면 트리만
+  await page.getByTestId('evidence-tab-files').click()
+  await expect(page.getByTestId('file-README.md')).toBeVisible()
+  await expect(page.getByTestId('evidence-git')).toBeHidden()
+
+  // 고른 탭은 스냅샷에 실린다
+  const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
+  expect(snap?.panelTab).toBe('files')
+})
+
+test('기록에서 커밋을 누르면 넓은 곳에서 펼쳐진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.commits = [
+      { sha: 'aaa111', shortSha: 'aaa111', subject: '첫 커밋', author: '나', when: Date.now(), parents: [] },
+    ]
+    m.gitState.diffs['aaa111'] = '@@ -0,0 +1 @@\n+새 줄'
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('evidence-commit-aaa111').click()
+  await expect(page.getByTestId('overlay')).toBeVisible()
+  await expect(page.getByTestId('diff-view')).toContainText('새 줄')
+})
+
+test('패널을 접으면 띠가 남고 거기서 다시 편다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [
+      { path: 'a.ts', staged: false, status: 'M' },
+      { path: 'b.ts', staged: false, status: 'M' },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('evidence-close').click()
+  await expect(page.getByTestId('evidence-panel')).toBeHidden()
+
+  // 사라진 것과 접힌 것은 다르다 — 띠가 남고 변경 수는 접힌 채로도 읽힌다
+  await expect(page.getByTestId('evidence-rail')).toBeVisible()
+  await expect(page.getByTestId('evidence-rail-count')).toHaveText('2')
+
+  await page.getByTestId('evidence-open').click()
+  await expect(page.getByTestId('evidence-panel')).toBeVisible()
+})
+
+test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  // 스테이지 전에는 커밋할 수 없다 (올릴 것이 없는데 커밋 버튼이 살아 있으면 거짓말이다)
+  await page.getByTestId('evidence-commit-message').fill('패널에서 커밋')
+  await expect(page.getByTestId('evidence-commit')).toBeDisabled()
+
+  await page.getByTestId('evidence-stage-all').click()
+  await page.getByTestId('evidence-commit').click()
+  await expect(page.getByTestId('toast')).toContainText('커밋')
+  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('패널에서 커밋')
 })

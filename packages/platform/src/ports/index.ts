@@ -138,6 +138,8 @@ export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
   /** 증거 패널(깃·파일)이 열려 있었는가 */
   panelOpen?: boolean
+  /** 증거 패널이 보고 있던 것 */
+  panelTab?: string
   /** @deprecated 탭 구조는 3레인으로 대체됐다. 구버전 스냅샷을 읽을 때만 나타난다 */
   tab?: string
 }
