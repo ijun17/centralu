@@ -139,7 +139,21 @@ export type AppState = {
   markRead(sessionId: string): Promise<void>
 }
 
+/**
+ * 대화 항목의 고유 번호. 이 값이 곧 React key이고 가상 스크롤의 항목 키다.
+ *
+ * **저장소에서 읽어온 항목과 절대 겹치면 안 된다.** 겹치면 같은 key가 둘이 되고,
+ * 가상 스크롤이 둘을 같은 자리에 겹쳐 그려서 글자가 이어붙은 것처럼 뭉개진다.
+ * (실제로 "가끔 이상하게 렌더링된다"로 보고된 증상이 이것이었다:
+ *  기록을 불러온 세션 — 저장 seq 1..N — 에 새 메시지가 붙으면 그 seq도 1부터 셌다.)
+ * 그래서 저장소 항목을 들일 때마다 이 번호를 그 위로 밀어 올린다.
+ */
 let chatSeq = 0
+
+/** 저장소에서 들여온 항목보다 항상 큰 번호를 쓰도록 밀어 올린다 */
+function bumpSeqAbove(items: { seq: number }[]): void {
+  for (const it of items) if (it.seq > chatSeq) chatSeq = it.seq
+}
 
 /** 첨부 상한. 이보다 크면 base64 변환과 WS 전송 양쪽에서 앱이 눈에 띄게 멈춘다 */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -336,6 +350,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE)
       const items = messagesToChat(msgs)
+      bumpSeqAbove(items)
       set((s) => ({
         chat: { ...s.chat, [sessionId]: s.chat[sessionId] ?? items },
         history: {
@@ -360,6 +375,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE, cur.oldestSeq)
       const older = messagesToChat(msgs)
+      bumpSeqAbove(older)
       set((s) => ({
         chat: { ...s.chat, [sessionId]: [...older, ...(s.chat[sessionId] ?? [])] },
         history: {
@@ -467,7 +483,7 @@ export const useStore = create<AppState>((set, get) => ({
       const msgs = await platform.agents.loadMessages(info.id)
       if (msgs.length > 0) {
         const restored = messagesToChat(msgs)
-        chatSeq = Math.max(chatSeq, ...restored.map((c) => c.seq))
+        bumpSeqAbove(restored)
         set((s) => ({ chat: { ...s.chat, [info.id]: restored } }))
       }
     }

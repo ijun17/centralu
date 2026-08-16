@@ -85,12 +85,16 @@ test('도구 카드: 조회성은 접힘, 변경은 펼침 (T5-3)', async ({ pag
     type: 'tool_call', callId: 'c1',
     summary: { tool: 'Read', title: 'Read: a.ts', readOnly: true, paths: [] },
   })
-  await emitEvent(page, 0, { type: 'tool_result', callId: 'c1', ok: true, summary: '파일 내용 200줄' })
-  // 접혀 있으므로 결과가 안 보인다
+  await emitEvent(page, 0, {
+    type: 'tool_result', callId: 'c1', ok: true,
+    summary: `첫 줄\n둘째 줄\n셋째 줄\n넷째 줄\n파일 내용 200줄`,
+  })
+  // 조회성 도구는 접힌 채로 시작한다 — 맛보기만 보이고 뒷부분은 감춘다
   await expect(page.getByTestId('tool-card')).toBeVisible()
-  await expect(page.getByText('파일 내용 200줄')).toBeHidden()
-  await page.getByTestId('tool-card').getByRole('button').first().click()
-  await expect(page.getByText('파일 내용 200줄')).toBeVisible()
+  await expect(page.getByTestId('tool-card-output')).toContainText('첫 줄')
+  await expect(page.getByTestId('tool-card-output')).not.toContainText('파일 내용 200줄')
+  await page.getByTestId('tool-card-toggle').click()
+  await expect(page.getByTestId('tool-card-output')).toContainText('파일 내용 200줄')
 })
 
 test('승인: 카드에서 키보드 y로 허용 (T5-4)', async ({ page }) => {
@@ -1185,4 +1189,86 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
   expect(await page.evaluate(loaded, id)).toBe(251)
   const first = await page.evaluate((sid: string) => (window as any).__store.getState().chat[sid][0].text, id)
   expect(first).toBe('옛 대화 1')
+})
+
+/**
+ * 대화가 뭉개져 보이던 문제 (도그푸딩 4차).
+ * 저장된 기록의 seq와 실시간 항목의 seq가 따로 세어져 React key가 겹쳤고,
+ * 가상 스크롤이 겹친 항목을 같은 자리에 그리면서 글자가 이어붙었다.
+ */
+test('기록을 불러온 세션에 새 말이 붙어도 항목 번호가 겹치지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 저장소에 seq 1..5로 기록이 있는 세션을 새로 펼친다
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    const store = (window as any).__store
+    m.messages.set(
+      sid,
+      Array.from({ length: 5 }, (_, i) => ({
+        sessionId: sid, seq: i + 1, role: i % 2 ? 'assistant' : 'user',
+        kind: 'text', payload: { text: `기록 ${i + 1}` }, ts: Date.now(),
+      })),
+    )
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid)
+  }, id)
+
+  // 그 위에 실시간 대화가 이어진다 (예전에는 여기서 seq가 1부터 다시 셌다)
+  await page.getByTestId('prompt-input').fill('새로 한 말')
+  await page.getByTestId('send').click()
+  await page.evaluate(
+    (sid) => (window as any).__mock.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '새 답' }),
+    id,
+  )
+
+  const seqs = await page.evaluate(
+    (sid) => (window as any).__store.getState().chat[sid].map((c: { seq: number }) => c.seq),
+    id,
+  )
+  expect(new Set(seqs).size).toBe(seqs.length)
+
+  // 겹치지 않으니 옛 기록과 새 말이 각자 제자리에 보인다
+  await expect(page.getByTestId('chat-stream')).toContainText('기록 5')
+  await expect(page.getByTestId('chat-stream')).toContainText('새로 한 말')
+})
+
+test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    m.emit({
+      type: 'tool_call', sessionId: sid, callId: 'c1',
+      summary: { tool: 'Bash', title: 'pnpm test', readOnly: true, paths: [] },
+    })
+    m.emit({
+      type: 'tool_result', sessionId: sid, callId: 'c1', ok: true,
+      summary: Array.from({ length: 40 }, (_, i) => `출력 ${i + 1}`).join('\n'),
+    })
+  }, id)
+
+  const output = page.getByTestId('tool-card-output')
+  await expect(output).toBeVisible()
+
+  // 조회성 도구는 접힌 채로 시작하고, 맛보기만 보인다
+  await expect(output).toContainText('출력 1')
+  await expect(output).not.toContainText('출력 40')
+  await expect(page.getByTestId('tool-card-more')).toContainText('37줄 더 보기')
+
+  // 대화 스크롤을 가로챌 안쪽 스크롤러가 없다
+  const scrollable = await output.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return s.overflowY === 'auto' || s.overflowY === 'scroll' || el.scrollHeight > el.clientHeight + 1
+  })
+  expect(scrollable).toBe(false)
+
+  await page.getByTestId('tool-card-more').click()
+  await expect(output).toContainText('출력 40')
+  const stillScrollable = await output.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
+  expect(stillScrollable).toBe(false)
 })

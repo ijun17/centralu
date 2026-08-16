@@ -52,7 +52,7 @@ export function ApprovalCard({
       </div>
 
       <pre
-        className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap px-3 font-mono text-[12px] leading-relaxed text-chalk"
+        className="mt-2 whitespace-pre-wrap break-words px-3 font-mono text-[12px] leading-relaxed text-chalk"
         data-testid="approval-detail"
       >
         {detailText(detail)}

@@ -358,3 +358,52 @@ describe('자동 이어가기', () => {
     expect(msgs.some((m) => m.payload.text === '이어서')).toBe(false)
   })
 })
+
+/**
+ * 권한·모델은 도구 프로세스를 띄울 때 고정된다.
+ * 살아 있는 세션의 메타만 고치면 화면에는 '자동'인데 계속 승인을 묻는다
+ * (도그푸딩: "권한 자동으로 바꿨는데 왜 물어보냐").
+ */
+describe('설정 변경은 실제로 적용된다', () => {
+  it('권한을 바꾸면 살아 있는 에이전트를 갈아 끼운다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const before = adapter.last!
+
+    await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
+
+    // 조용히 메타만 고치지 않는다 — 새 설정으로 프로세스를 다시 띄운다
+    expect(before.disposed).toBe(true)
+    expect(adapter.last).not.toBe(before)
+    expect(mgr.listSessions().find((x) => x.id === s.id)!.permissionPreset).toBe('auto')
+    expect(mgr.isLive(s.id)).toBe(true)
+  })
+
+  it('같은 값으로 다시 저장하면 프로세스를 건드리지 않는다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const before = adapter.last!
+
+    await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'normal' })
+
+    expect(before.disposed).toBe(false)
+    expect(adapter.last).toBe(before)
+  })
+
+  it('잠든 세션은 메타만 고친다 (띄울 때 새 설정으로 뜬다)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    await mgr.archive(s.id, true)
+    await mgr.archive(s.id, false)
+
+    await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
+    expect(mgr.listSessions().find((x) => x.id === s.id)!.permissionPreset).toBe('auto')
+    expect(mgr.isLive(s.id)).toBe(false)
+  })
+})

@@ -402,25 +402,55 @@ function ChatRow({ item }: { item: ChatItem }) {
   return <ToolCard item={item} />
 }
 
-/** 카드 접힘 정책: 조회성은 접힘, 변경은 펼침 (대화창 가독성의 절반) */
+/** 접었을 때 맛보기로 보여줄 줄 수 — 무슨 명령이 뭘 뱉었는지 알아볼 만큼만 */
+const PREVIEW_LINES = 3
+
+/**
+ * 도구 카드.
+ *
+ * **안쪽에 스크롤을 두지 않는다.** 대화창 안의 작은 스크롤 영역은 휠을 가로채서,
+ * 대화를 넘기려다 카드 안이 굴러가고 대화는 멈춘다 (도그푸딩에서 "불편하다"로 지적됨).
+ * 스크롤은 대화창 하나만 갖는다 — 접으면 맛보기, 펴면 전부. 길이는 사람이 정한다.
+ *
+ * 접힘 기본값: 조회성은 접힘, 변경은 펼침 (대화창 가독성의 절반)
+ */
 function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(!shouldCollapseCard(item.tool, item.readOnly))
+  const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
+  const hidden = Math.max(0, lines.length - PREVIEW_LINES)
+
   return (
     <div className="rounded border border-edge bg-panel/60" data-testid="tool-card">
       <button
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
+        data-testid="tool-card-toggle"
       >
         <span className="w-2 shrink-0 text-[9px] text-slate">{open ? '▾' : '▸'}</span>
         <span className="readout shrink-0 text-[11px] text-ash">{item.tool}</span>
         <span className="readout truncate text-[11px] text-slate">{item.title}</span>
         {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">실패</span>}
       </button>
-      {open && item.result && (
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-edge px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ash">
-          {item.result}
-        </pre>
+
+      {lines.length > 0 && (
+        <div className="border-t border-edge px-2.5 py-1.5">
+          <pre
+            className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ash"
+            data-testid="tool-card-output"
+          >
+            {open ? lines.join('\n') : lines.slice(0, PREVIEW_LINES).join('\n')}
+          </pre>
+          {!open && hidden > 0 && (
+            <button
+              className="readout mt-1 text-[10px] text-slate transition-colors hover:text-chalk"
+              onClick={() => setOpen(true)}
+              data-testid="tool-card-more"
+            >
+              {hidden}줄 더 보기
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

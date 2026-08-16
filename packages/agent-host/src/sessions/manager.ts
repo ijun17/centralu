@@ -299,13 +299,37 @@ export class SessionManager {
    * 모델·권한 변경 (FR-7). 어댑터가 지원하면 다음 턴부터 반영되고,
    * 지원하지 않으면 메타만 갱신한다 — 재개할 때 새 설정으로 뜬다.
    */
-  updateSettings(sessionId: string, s: { model?: string | null; permissionPreset?: PermissionPreset }): SessionInfo {
+  async updateSettings(
+    sessionId: string,
+    s: { model?: string | null; permissionPreset?: PermissionPreset },
+  ): Promise<SessionInfo> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+
+    const changed =
+      (s.model !== undefined && s.model !== m.model) ||
+      (s.permissionPreset !== undefined && s.permissionPreset !== m.permissionPreset)
+
     if (s.model !== undefined) m.model = s.model
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
-    this.handles.get(sessionId)?.updateSettings?.(s)
+
+    const handle = this.handles.get(sessionId)
+    handle?.updateSettings?.(s)
+
+    /**
+     * 권한·모델은 도구 프로세스를 **띄울 때 고정된다**.
+     * Claude는 permissionMode를 query() 시작에 받고, Codex는 approvalPolicy를 thread/start에 받는다.
+     * 그래서 살아 있는 세션의 메타만 고쳐 두면 화면에는 '자동'이라고 쓰여 있는데
+     * 실제로는 계속 승인을 묻는다 — 도그푸딩에서 "권한 자동으로 바꿨는데 왜 물어보냐"로 나왔다.
+     *
+     * 어댑터가 실시간 반영을 지원하지 않으면 **프로세스를 갈아 끼운다.**
+     * resume으로 이어지므로 대화는 끊기지 않는다. 조용히 무시하는 것보다 낫다.
+     */
+    if (changed && handle && !handle.updateSettings) {
+      await this.restartSession(sessionId)
+    }
+
     return { ...m, live: this.handles.has(sessionId) }
   }
 
