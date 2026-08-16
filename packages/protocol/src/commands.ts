@@ -223,6 +223,36 @@ export const RpcMethods = {
     params: z.object({ sessionId: z.string(), limit: z.number().default(200), beforeSeq: z.number().optional() }),
     result: z.array(StoredMessage),
   },
+  /**
+   * 프로젝트의 터미널에 붙는다. 없으면 만든다.
+   *
+   * **터미널의 정체성은 cwd다** — 세션이 아니다.
+   * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 터미널이 이어지고,
+   * 나중에 깃 워크트리 세션이 생기면 cwd가 다르므로 자기 터미널을 따로 갖는다.
+   */
+  'terminal.attach': {
+    params: z.object({ projectId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
+    result: z.object({
+      terminalId: z.string(),
+      cwd: z.string(),
+      /** 지금까지의 출력 (다시 붙었을 때 화면을 되살린다) */
+      history: z.string(),
+      alive: z.boolean(),
+    }),
+  },
+  'terminal.input': {
+    params: z.object({ terminalId: z.string(), data: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'terminal.resize': {
+    params: z.object({ terminalId: z.string(), cols: z.number(), rows: z.number() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** 셸을 끝내고 새로 띄운다 (먹통이 됐을 때) */
+  'terminal.restart': {
+    params: z.object({ terminalId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
+    result: z.object({ terminalId: z.string(), cwd: z.string(), history: z.string(), alive: z.boolean() }),
+  },
   'approvals.rules': {
     params: z.object({ projectId: z.string().optional() }),
     result: z.array(

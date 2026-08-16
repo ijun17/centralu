@@ -150,6 +150,8 @@ export type WorkspaceSnapshot = {
   panelOpen?: boolean
   /** 증거 패널이 보고 있던 것 */
   panelTab?: string
+  /** 증거 패널 폭(px) */
+  panelWidth?: number
   /** @deprecated 탭 구조는 3레인으로 대체됐다. 구버전 스냅샷을 읽을 때만 나타난다 */
   tab?: string
 }
@@ -169,6 +171,25 @@ export interface WorkspacePort {
   load(): Promise<WorkspaceSnapshot | null>
 }
 
+export type TerminalAttach = { terminalId: string; cwd: string; history: string; alive: boolean }
+
+/**
+ * 프로젝트 터미널.
+ *
+ * **정체성은 cwd다** — 세션이 아니다. 같은 프로젝트에서 세션을 바꿔도 같은 터미널이
+ * 이어지고, 깃 워크트리 세션은 cwd가 달라 자기 터미널을 자동으로 갖는다.
+ */
+export interface TerminalPort {
+  /** 그 프로젝트의 터미널에 붙는다 (없으면 만든다). history로 화면을 되살린다 */
+  attach(projectId: string, cols: number, rows: number): Promise<TerminalAttach>
+  input(terminalId: string, data: string): Promise<void>
+  resize(terminalId: string, cols: number, rows: number): Promise<void>
+  /** 셸이 먹통일 때 다시 띄운다 (기록은 남는다) */
+  restart(terminalId: string, cols: number, rows: number): Promise<TerminalAttach>
+  onOutput(handler: (e: { terminalId: string; data: string }) => void): Unsubscribe
+  onExit(handler: (e: { terminalId: string; exitCode: number | null }) => void): Unsubscribe
+}
+
 export interface Platform {
   agents: AgentPort
   projects: ProjectPort
@@ -178,6 +199,7 @@ export interface Platform {
   search: SearchPort
   rules: ApprovalRulesPort
   workspace: WorkspacePort
+  terminal: TerminalPort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>
 }

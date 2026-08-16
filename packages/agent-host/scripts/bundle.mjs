@@ -11,7 +11,7 @@
  *   node_modules/better-sqlite3  — 네이티브 애드온 (필요한 파일만)
  */
 import { build } from 'esbuild'
-import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, rmSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,7 +31,7 @@ await build({
   platform: 'node',
   target: 'node22',
   format: 'esm',
-  external: ['better-sqlite3'],
+  external: ['better-sqlite3', 'node-pty'],
   // 워크스페이스 별칭을 소스로 해석 (빌드 산출물 없이 바로 번들)
   alias: {
     '@cc/protocol': join(ROOT, 'packages/protocol/src/index.ts'),
@@ -66,6 +66,38 @@ cpSync(prebuildSrc, join(dest, 'prebuilds', prebuild))
 mkdirSync(join(dest, 'build/Release'), { recursive: true })
 cpSync(prebuildSrc, join(dest, 'build/Release/better_sqlite3.node'))
 
+// 3-2) 터미널용 PTY — 역시 네이티브 애드온이라 함께 담는다.
+//      node-pty는 N-API 방식이라 Node 버전이 달라도 같은 prebuild가 동작한다.
+const ptyPkg = require.resolve('node-pty/package.json')
+const ptySrc = dirname(ptyPkg)
+const ptyDest = join(OUT, 'node_modules/node-pty')
+mkdirSync(ptyDest, { recursive: true })
+for (const entry of ['package.json', 'lib']) {
+  cpSync(join(ptySrc, entry), join(ptyDest, entry), { recursive: true })
+}
+const ptyPlatform = `${process.platform}-${process.arch}`
+const ptyPrebuildSrc = join(ptySrc, 'prebuilds', ptyPlatform)
+if (!existsSync(ptyPrebuildSrc)) {
+  throw new Error(`이 플랫폼용 node-pty prebuild가 없습니다: ${ptyPlatform}`)
+}
+cpSync(ptyPrebuildSrc, join(ptyDest, 'prebuilds', ptyPlatform), { recursive: true })
+
+/**
+ * spawn-helper는 **실행 파일**이다. 압축을 풀거나 복사하는 과정에서 +x가 날아가면
+ * 셸이 뜨지 않고 `posix_spawnp failed`만 남는다 (실제로 겪었고, 원인을 찾는 데 시간을 썼다).
+ * 복사한 뒤 반드시 실행 권한을 다시 준다.
+ */
+const helper = join(ptyDest, 'prebuilds', ptyPlatform, 'spawn-helper')
+if (existsSync(helper)) {
+  chmodSync(helper, 0o755)
+  // 빌드 시점에 확인한다 — 실행 권한이 없으면 배포 앱에서 터미널이 통째로 죽는다.
+  // 이건 테스트로 잡기 어렵고(번들이 있어야 한다) 증상은 원인을 가리키지 않는다.
+  const mode = statSync(helper).mode
+  if (!(mode & 0o111)) {
+    throw new Error(`spawn-helper에 실행 권한이 없습니다: ${helper} — 터미널이 뜨지 않습니다`)
+  }
+}
+
 // 4) 산출물이 자기 완결적인지 표시 — host_command가 이 파일 존재로 prod를 판단한다
 writeFileSync(
   join(OUT, 'bundle-info.json'),
@@ -77,4 +109,6 @@ writeFileSync(
 )
 
 const size = readFileSync(join(OUT, 'main.mjs')).length
-console.log(`[bundle] main.mjs ${(size / 1024).toFixed(0)}KB + better-sqlite3(${prebuild}) → ${OUT}`)
+console.log(
+  `[bundle] main.mjs ${(size / 1024).toFixed(0)}KB + better-sqlite3(${prebuild}) + node-pty(${ptyPlatform}) → ${OUT}`,
+)

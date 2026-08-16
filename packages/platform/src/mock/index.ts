@@ -17,7 +17,7 @@ import type {
   StoredMessage,
   ToolName,
 } from '@cc/protocol'
-import type { AgentPort, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
+import type { AgentPort, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
  * 인메모리 구현 (docs/platform-abstraction.md §6).
@@ -345,6 +345,59 @@ export class MockPlatform implements Platform {
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('프로젝트 없음'), { code: 'internal' })
       return { ...p }
+    },
+  }
+
+  /**
+   * 목 터미널. 진짜 셸을 띄우지 않고 **cwd로 묶이는 성질**만 흉내낸다 —
+   * 검증하려는 것은 "세션을 바꿔도 같은 터미널이 이어지는가"이지 셸 자체가 아니다.
+   */
+  terminalState: {
+    byCwd: Map<string, { id: string; history: string; alive: boolean }>
+    input: { terminalId: string; data: string }[]
+    resized: { terminalId: string; cols: number; rows: number }[]
+  } = { byCwd: new Map(), input: [], resized: [] }
+  private termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
+  private termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
+
+  /** 테스트용: 터미널이 뭔가 출력한 상황을 만든다 */
+  emitTerminal(terminalId: string, data: string): void {
+    for (const [, t] of this.terminalState.byCwd) if (t.id === terminalId) t.history += data
+    for (const h of this.termHandlers) h({ terminalId, data })
+  }
+
+  readonly terminal: TerminalPort = {
+    attach: async (projectId: string, _cols: number, _rows: number) => {
+      const cwd = this.projectsList.find((p) => p.id === projectId)?.path ?? projectId
+      let t = this.terminalState.byCwd.get(cwd)
+      if (!t) {
+        t = { id: `mock-term-${++this.idc}`, history: '', alive: true }
+        this.terminalState.byCwd.set(cwd, t)
+      }
+      return { terminalId: t.id, cwd, history: t.history, alive: t.alive }
+    },
+    input: async (terminalId: string, data: string) => {
+      this.terminalState.input.push({ terminalId, data })
+    },
+    resize: async (terminalId: string, cols: number, rows: number) => {
+      this.terminalState.resized.push({ terminalId, cols, rows })
+    },
+    restart: async (terminalId: string) => {
+      for (const [cwd, t] of this.terminalState.byCwd) {
+        if (t.id === terminalId) {
+          t.alive = true
+          return { terminalId: t.id, cwd, history: t.history, alive: true }
+        }
+      }
+      throw Object.assign(new Error('터미널 없음'), { code: 'internal' })
+    },
+    onOutput: (h: (e: { terminalId: string; data: string }) => void) => {
+      this.termHandlers.add(h)
+      return () => this.termHandlers.delete(h)
+    },
+    onExit: (h: (e: { terminalId: string; exitCode: number | null }) => void) => {
+      this.termExitHandlers.add(h)
+      return () => this.termExitHandlers.delete(h)
     },
   }
 

@@ -24,6 +24,8 @@ export class RpcClient {
   private ws: WebSocket | null = null
   private pending = new Map<string, Pending>()
   private eventHandlers = new Set<(e: NormalizedEvent) => void>()
+  private termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
+  private termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
   private nextId = 1
   private lastSeq = 0
@@ -110,6 +112,15 @@ export class RpcClient {
       for (const h of this.eventHandlers) h(frame.event)
       return
     }
+    // 터미널 출력은 seq를 갖지 않는다 (재전송 버퍼를 태우지 않는다 — envelope 참고)
+    if (frame.kind === 'term') {
+      for (const h of this.termHandlers) h({ terminalId: frame.terminalId, data: frame.data })
+      return
+    }
+    if (frame.kind === 'term_exit') {
+      for (const h of this.termExitHandlers) h({ terminalId: frame.terminalId, exitCode: frame.exitCode })
+      return
+    }
     if (frame.kind === 'res') {
       const p = this.pending.get(frame.id)
       if (!p) return
@@ -132,6 +143,16 @@ export class RpcClient {
   onEvent(handler: (e: NormalizedEvent) => void): Unsubscribe {
     this.eventHandlers.add(handler)
     return () => this.eventHandlers.delete(handler)
+  }
+
+  onTerminalOutput(handler: (e: { terminalId: string; data: string }) => void): Unsubscribe {
+    this.termHandlers.add(handler)
+    return () => this.termHandlers.delete(handler)
+  }
+
+  onTerminalExit(handler: (e: { terminalId: string; exitCode: number | null }) => void): Unsubscribe {
+    this.termExitHandlers.add(handler)
+    return () => this.termExitHandlers.delete(handler)
   }
 
   onConnectionChange(handler: (s: ConnectionState) => void): Unsubscribe {

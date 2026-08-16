@@ -88,6 +88,20 @@ export class HostServer {
     for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(frame)
   }
 
+  /**
+   * 터미널 출력 push.
+   * 이벤트 로그(seq 링 버퍼)를 태우지 않는다 — 출력량이 대화 이벤트와 자릿수가 다르고,
+   * 놓친 부분은 다시 붙을 때 host의 스크롤백에서 통째로 받는다.
+   */
+  pushTerminal(frame: { terminalId: string; data?: string; exitCode?: number | null }): void {
+    const payload =
+      frame.data !== undefined
+        ? { kind: 'term', terminalId: frame.terminalId, data: frame.data }
+        : { kind: 'term_exit', terminalId: frame.terminalId, exitCode: frame.exitCode ?? null }
+    const json = JSON.stringify(payload)
+    for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(json)
+  }
+
   private onConnection(ws: WebSocket): void {
     let authed = false
 

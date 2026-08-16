@@ -422,8 +422,8 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
     const before = adapter.last!
 
     // 예전 버전이 만들어 놓은 어긋난 상태를 재현한다: 저장값만 auto로 바뀐 세션
-    const meta = mgr.listSessions().find((x) => x.id === s.id)!
-    ;(mgr as unknown as { meta: Map<string, typeof meta> }).meta.get(s.id)!.permissionPreset = 'auto'
+    const internals = mgr as unknown as { meta: Map<string, { permissionPreset: string }> }
+    internals.meta.get(s.id)!.permissionPreset = 'auto'
 
     // 사용자가 화면에서 '자동'을 다시 고른다 (meta 기준으로는 변화 없음)
     await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })

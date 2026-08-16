@@ -19,5 +19,8 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.2"
+  },
+  "scripts": {
+    "postinstall": "node scripts/fix-pty-permissions.mjs"
   }
 }

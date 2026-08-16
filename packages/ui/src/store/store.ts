@@ -34,7 +34,12 @@ export type Overlay =
   | null
 
 /** 증거 패널이 보여주는 것 */
-export type PanelTab = 'files' | 'git'
+export type PanelTab = 'files' | 'git' | 'terminal'
+
+/** 증거 패널 폭의 한계. 좁으면 경로가, 넓으면 대화가 죽는다 */
+export const PANEL_MIN = 260
+export const PANEL_MAX = 900
+export const PANEL_DEFAULT = 340
 
 export type ChatItem =
   | { kind: 'user'; seq: number; text: string }
@@ -67,6 +72,8 @@ export type AppState = {
   panelOpen: boolean
   /** 증거 패널이 파일을 보여주나 깃을 보여주나 */
   panelTab: PanelTab
+  /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
+  panelWidth: number
   /**
    * 넓은 표면. 코드·diff는 360px 패널에서 읽을 수 없다.
    * 대화 위에 덮었다가 esc로 걷는다 — 돌아오면 대화는 스크롤 위치까지 그대로다.
@@ -93,6 +100,7 @@ export type AppState = {
   togglePanel(open?: boolean): void
   /** 탭을 고르면 패널이 닫혀 있어도 함께 열린다 — 고른 것이 안 보이면 안 된다 */
   setPanelTab(tab: PanelTab): void
+  setPanelWidth(px: number): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
   /** 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다 */
@@ -194,6 +202,7 @@ export const useStore = create<AppState>((set, get) => ({
   history: {},
   panelOpen: true,
   panelTab: 'git',
+  panelWidth: PANEL_DEFAULT,
   overlay: null,
   inboxOpen: false,
   toast: null,
@@ -232,7 +241,10 @@ export const useStore = create<AppState>((set, get) => ({
         // 보던 탭까지 돌아온다 (B-0)
         // 구버전 스냅샷의 tab은 무시한다 (탭 구조는 3레인으로 대체됐다)
         if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
-        if (snap.panelTab === 'files' || snap.panelTab === 'git') set({ panelTab: snap.panelTab })
+        if (snap.panelTab === 'files' || snap.panelTab === 'git' || snap.panelTab === 'terminal') {
+          set({ panelTab: snap.panelTab })
+        }
+        if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
       }
@@ -245,7 +257,12 @@ export const useStore = create<AppState>((set, get) => ({
   saveWorkspace() {
     const s = get()
     void s.platform?.workspace
-      .save({ focusedSessionId: s.focusedSessionId, panelOpen: s.panelOpen, panelTab: s.panelTab })
+      .save({
+        focusedSessionId: s.focusedSessionId,
+        panelOpen: s.panelOpen,
+        panelTab: s.panelTab,
+        panelWidth: s.panelWidth,
+      })
       .catch(() => {})
   },
 
@@ -404,6 +421,11 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
+  setPanelWidth(px) {
+    set({ panelWidth: Math.min(PANEL_MAX, Math.max(PANEL_MIN, Math.round(px))) })
+    get().saveWorkspace()
+  },
+
   openFile(path) {
     set({ viewerPath: path, overlay: { kind: 'viewer' } })
   },
@@ -439,6 +461,7 @@ export const useStore = create<AppState>((set, get) => ({
       focusedSessionId: get().focusedSessionId,
       panelOpen: get().panelOpen,
       panelTab: get().panelTab,
+      panelWidth: get().panelWidth,
       notifyPolicy,
     } as never).catch(() => {})
   },

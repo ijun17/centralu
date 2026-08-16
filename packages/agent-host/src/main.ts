@@ -11,6 +11,7 @@ import { ClaudeAdapter } from './adapters/claude/index.js'
 import { CodexAdapter } from './adapters/codex/index.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import { createRpcHandler } from './rpc.js'
+import { TerminalService } from './dev-services/terminal.js'
 import { ensureToolPath } from './env-path.js'
 
 /**
@@ -53,10 +54,11 @@ const adapters = new Map<ToolName, AgentAdapter>([
 ])
 
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+const terminals = new TerminalService((f) => server.pushTerminal(f))
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
-  onRpc: createRpcHandler(mgr, adapters),
+  onRpc: createRpcHandler(mgr, adapters, terminals),
 })
 
 let port: number

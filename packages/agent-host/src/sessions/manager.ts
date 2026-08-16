@@ -470,6 +470,11 @@ export class SessionManager {
     this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
   }
 
+  /** 프로젝트의 작업 디렉토리. 터미널이 자기 키(cwd)를 정할 때 쓴다 */
+  cwdOfProject(projectId: string): string {
+    return this.cwdOf(projectId)
+  }
+
   // ── 깃 (B-1) — 경로 해석만 하고 실제 작업은 dev-services에 위임한다 ──
   private cwdOf(projectId: string): string {
     const p = this.store.listProjects().find((x) => x.id === projectId)

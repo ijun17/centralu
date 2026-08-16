@@ -45,11 +45,31 @@ export const EventPush = z.object({
 })
 export type EventPush = z.infer<typeof EventPush>
 
+/**
+ * 터미널 출력. **재전송 버퍼(seq)를 태우지 않는다** —
+ * 출력량이 대화 이벤트와 자릿수가 다르고, 놓친 부분은 host의 스크롤백에서
+ * 다시 붙일 때 통째로 받는다. 링 버퍼에 섞으면 진짜 이벤트가 밀려난다.
+ */
+export const TerminalPush = z.object({
+  kind: z.literal('term'),
+  terminalId: z.string(),
+  data: z.string(),
+})
+export type TerminalPush = z.infer<typeof TerminalPush>
+
+/** 터미널이 끝났다 (셸 종료). UI는 다시 붙일 수 있게 안내한다 */
+export const TerminalExit = z.object({
+  kind: z.literal('term_exit'),
+  terminalId: z.string(),
+  exitCode: z.number().nullable(),
+})
+export type TerminalExit = z.infer<typeof TerminalExit>
+
 export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, RpcRequest])
 export type ClientFrame = z.infer<typeof ClientFrame>
 
 // 'res'가 ok별로 두 갈래라 discriminatedUnion('kind')를 못 쓴다 — 일반 union 사용
-export const ServerFrame = z.union([HelloServer, EventPush, RpcResponse])
+export const ServerFrame = z.union([HelloServer, EventPush, RpcResponse, TerminalPush, TerminalExit])
 export type ServerFrame = z.infer<typeof ServerFrame>
 
 export function parseClientFrame(raw: unknown) {

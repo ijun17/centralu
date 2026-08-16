@@ -13,6 +13,8 @@
     "@cc/platform": "workspace:*",
     "@cc/protocol": "workspace:*",
     "@tanstack/react-virtual": "^3.14.9",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

@@ -1272,3 +1272,82 @@ test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) 
   const stillScrollable = await output.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
   expect(stillScrollable).toBe(false)
 })
+
+/**
+ * 증거 패널 폭 조절 + 터미널 (M2.7).
+ * 터미널의 정체성은 cwd다 — 세션을 바꿔도 같은 터미널이 이어져야 한다.
+ */
+test('증거 패널 폭을 끌어서 조절하고 재시작 후에도 유지한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  const panel = page.getByTestId('evidence-panel')
+  const before = (await panel.boundingBox())!.width
+
+  const handle = page.getByTestId('evidence-resize')
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + 2, box.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(box.x - 160, box.y + 200, { steps: 8 })
+  await page.mouse.up()
+
+  const after = (await panel.boundingBox())!.width
+  expect(after).toBeGreaterThan(before + 100)
+
+  // 폭은 스냅샷에 실린다 (다음에 열면 그대로)
+  const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
+  expect(snap?.panelWidth).toBeGreaterThan(before + 100)
+
+  // 더블클릭으로 기본값 복귀 — 잘못 끌어놓고 되돌릴 길이 있어야 한다
+  await handle.dblclick()
+  expect((await panel.boundingBox())!.width).toBeCloseTo(340, -1)
+})
+
+test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 세션')
+  await newSession(page, 'alpha', '두 번째 세션')
+
+  await page.getByTestId('evidence-tab-terminal').click()
+  await expect(page.getByTestId('evidence-terminal')).toBeVisible()
+
+  // 터미널이 뭔가 출력한 상태를 만든다
+  const termId = await page.evaluate(() => {
+    const m = (window as any).__mock
+    const t = [...m.terminalState.byCwd.values()][0]
+    m.emitTerminal(t.id, 'hello from alpha\r\n')
+    return t.id
+  })
+
+  // 세션을 바꿔도 같은 터미널에 붙는다 (돌려놓은 dev 서버가 죽으면 안 된다)
+  const first = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+  await page.getByTestId(`session-row-${first}`).click()
+  await page.getByTestId('evidence-tab-terminal').click()
+  await expect(page.getByTestId('evidence-terminal')).toBeVisible()
+
+  const sameTerminal = await page.evaluate(() => {
+    const m = (window as any).__mock
+    return [...m.terminalState.byCwd.values()].length === 1 && [...m.terminalState.byCwd.values()][0].id
+  })
+  expect(sameTerminal).toBe(termId)
+
+  // 다시 붙을 때 지금까지의 출력을 되살린다 (빈 화면이면 터미널이 아니다)
+  await expect(page.getByTestId('terminal-surface')).toContainText('hello from alpha')
+})
+
+test('키보드 입력이 셸로 간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-terminal').click()
+  await expect(page.getByTestId('evidence-terminal')).toBeVisible()
+
+  await page.getByTestId('terminal-surface').click()
+  await page.keyboard.type('ls')
+  await page.keyboard.press('Enter')
+
+  const sent = await page.evaluate(() =>
+    (window as any).__mock.terminalState.input.map((i: { data: string }) => i.data).join(''),
+  )
+  expect(sent).toContain('ls')
+  expect(sent).toContain('\r')
+})

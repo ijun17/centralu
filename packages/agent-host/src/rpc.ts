@@ -1,10 +1,20 @@
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
+import type { TerminalService } from './dev-services/terminal.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
 
 /** RPC 라우팅. 파라미터는 경계에서 1회만 검증한다 (docs/protocol.md §4) */
-export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, AgentAdapter>) {
+export function createRpcHandler(
+  mgr: SessionManager,
+  adapters: Map<ToolName, AgentAdapter>,
+  terminals?: TerminalService,
+) {
+  const requireTerminals = (): TerminalService => {
+    if (!terminals) throw Object.assign(new Error('터미널을 쓸 수 없습니다'), { code: 'internal' })
+    return terminals
+  }
+
   const handlers: { [M in RpcMethodName]: (p: unknown) => Promise<unknown> } = {
     'agents.createSession': async (p) => mgr.createSession(RpcMethods['agents.createSession'].params.parse(p)),
     'agents.send': async (p) => {
@@ -126,6 +136,28 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
     'messages.load': async (p) => {
       const { sessionId, limit, beforeSeq } = RpcMethods['messages.load'].params.parse(p)
       return mgr.loadMessages(sessionId, limit, beforeSeq)
+    },
+    'terminal.attach': async (p) => {
+      const { projectId, cols, rows } = RpcMethods['terminal.attach'].params.parse(p)
+      // 터미널의 키는 프로젝트가 아니라 **디렉토리**다 (워크트리를 위한 준비)
+      const h = requireTerminals().attach(mgr.cwdOfProject(projectId), cols, rows)
+      return { terminalId: h.id, cwd: h.cwd, history: h.history(), alive: h.alive }
+    },
+    'terminal.input': async (p) => {
+      const { terminalId, data } = RpcMethods['terminal.input'].params.parse(p)
+      requireTerminals().input(terminalId, data)
+      return { ok: true as const }
+    },
+    'terminal.resize': async (p) => {
+      const { terminalId, cols, rows } = RpcMethods['terminal.resize'].params.parse(p)
+      requireTerminals().resize(terminalId, cols, rows)
+      return { ok: true as const }
+    },
+    'terminal.restart': async (p) => {
+      const { terminalId, cols, rows } = RpcMethods['terminal.restart'].params.parse(p)
+      const h = requireTerminals().restart(terminalId, cols, rows)
+      if (!h) throw Object.assign(new Error('터미널을 찾을 수 없습니다'), { code: 'internal' })
+      return { terminalId: h.id, cwd: h.cwd, history: h.history(), alive: h.alive }
     },
     'approvals.rules': async () => mgr.listApprovalRules(),
   }

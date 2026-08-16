@@ -176,6 +176,18 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       commit: (projectId, message) => rpc.call('git.commit', { projectId, message }),
       push: (projectId) => rpc.call('git.push', { projectId }),
     },
+    terminal: {
+      attach: (projectId, cols, rows) => rpc.call('terminal.attach', { projectId, cols, rows }),
+      input: async (terminalId, data) => {
+        await rpc.call('terminal.input', { terminalId, data })
+      },
+      resize: async (terminalId, cols, rows) => {
+        await rpc.call('terminal.resize', { terminalId, cols, rows })
+      },
+      restart: (terminalId, cols, rows) => rpc.call('terminal.restart', { terminalId, cols, rows }),
+      onOutput: (h) => rpc.onTerminalOutput(h),
+      onExit: (h) => rpc.onTerminalExit(h),
+    },
     workspace: {
       async save(snapshot) {
         await rpc.call('workspace.save', { layout: snapshot })

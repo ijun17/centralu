@@ -3,7 +3,9 @@ import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, type PanelTab } from '../../store/store.js'
 import { FileTree } from '../files/FileTree.jsx'
+import { Terminal } from './Terminal.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
+import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN } from '../../store/store.js'
 
 /**
  * 증거 레인 (우측).
@@ -24,6 +26,7 @@ export function EvidencePanel() {
     return focused ?? s.focusedProjectId
   })
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
+  const width = useStore((s) => s.panelWidth)
 
   if (!projectId || !project) return null
   // 닫혀 있어도 흔적은 남긴다 — 사라진 것과 접힌 것은 다르다
@@ -31,12 +34,63 @@ export function EvidencePanel() {
 
   return (
     <aside
-      className="flex h-full w-[340px] shrink-0 flex-col overflow-hidden border-l border-edge bg-pit"
+      className="relative flex h-full shrink-0 flex-col overflow-hidden border-l border-edge bg-pit"
+      style={{ width }}
       data-testid="evidence-panel"
     >
+      <ResizeHandle />
       <PanelHeader projectName={project.name} branch={project.git?.branch ?? null} isRepo={!!project.git} />
       <PanelBody projectId={projectId} project={project} />
     </aside>
+  )
+}
+
+/**
+ * 폭 조절 손잡이.
+ *
+ * 340px는 파일 목록에는 맞지만 터미널에는 40컬럼밖에 안 된다.
+ * 무엇을 보느냐에 따라 필요한 폭이 다르므로 사람이 정하게 한다.
+ * 더블클릭하면 기본값으로 돌아온다 — 잘못 끌어 놓고 되돌릴 방법이 없으면 안 된다.
+ */
+function ResizeHandle() {
+  const setPanelWidth = useStore((s) => s.setPanelWidth)
+  const [dragging, setDragging] = useState(false)
+
+  useEffect(() => {
+    if (!dragging) return
+    // 창 오른쪽 끝에서 마우스까지의 거리가 곧 패널 폭이다
+    const onMove = (e: MouseEvent) => setPanelWidth(window.innerWidth - e.clientX)
+    const onUp = () => setDragging(false)
+    // 끄는 동안 텍스트가 잡히면 커서가 튄다
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [dragging, setPanelWidth])
+
+  return (
+    <div
+      className={`absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize transition-colors ${
+        dragging ? 'bg-graphite' : 'hover:bg-graphite/60'
+      }`}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDoubleClick={() => setPanelWidth(PANEL_DEFAULT)}
+      data-testid="evidence-resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-valuemin={PANEL_MIN}
+      aria-valuemax={PANEL_MAX}
+      title="끌어서 폭 조절 · 더블클릭으로 기본값"
+    />
   )
 }
 
@@ -85,6 +139,7 @@ function PanelHeader({
           [
             ['git', '깃'],
             ['files', '파일'],
+            ['terminal', '터미널'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -113,6 +168,9 @@ function PanelBody({
 }) {
   const tab = useStore((s) => s.panelTab)
   const isRepo = !!project.git
+
+  // 터미널은 프로젝트(디렉토리)의 것이라 깃 저장소인지와 무관하다
+  if (tab === 'terminal') return <Terminal projectId={projectId} />
 
   if (tab === 'files' || !isRepo) {
     return (
