@@ -446,3 +446,43 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
     expect(adapter.last).toBe(before)
   })
 })
+
+/**
+ * 숨김의 의미: **Control Center 목록에서만 치운다.**
+ * 도구(클로드·코덱스)에는 대화가 그대로 남으므로 '이전 대화'로 되찾을 수 있어야 한다.
+ * 그 길이 막히면 숨김은 사실상 삭제가 된다.
+ */
+describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () => {
+  class ListingAdapter2 extends FakeAdapter {
+    override readonly capabilities: AdapterCapabilities = {
+      approvals: true, contextUsage: 'exact', resume: true, listExternal: true, autoTitle: true, attachments: [],
+    }
+    async listExternalSessions() {
+      return [{ externalId: 'ext-past', title: '어제 하던 일', updatedAt: 111 }]
+    }
+    async readExternalHistory() {
+      return [{ role: 'user' as const, text: '어제 하던 일' }]
+    }
+  }
+
+  it('목록에 있는 동안은 "이미 불러옴", 치우면 다시 가져올 수 있다', async () => {
+    const a = new ListingAdapter2()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    const call = createRpcHandler(m, adapters)
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude',
+      resumeExternalId: 'ext-past', importHistory: true,
+    })) as { id: string }
+
+    // 목록에 있으면 또 열지 않도록 막는다
+    expect((await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(true)
+
+    await m.archive(s.id, true)
+
+    // 치웠으면 되찾을 수 있어야 한다 — 여기서 막으면 숨김이 곧 삭제다
+    expect((await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(false)
+  })
+})

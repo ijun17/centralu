@@ -116,12 +116,18 @@ export class SessionManager {
 
     try {
       const rows = await adapter.listExternalSessions(project.path, limit)
-      // 이미 불러온 대화를 또 열면 같은 세션이 둘이 된다 — 표시해서 막는다
-      // 이어받은 원본으로 판정한다. externalId로 보면 안 된다 —
-      // 도구가 resume하면서 새 식별자를 발급하면 원본과 달라져 매번 '안 불러옴'이 된다.
+      /*
+       * 이미 목록에 있는 대화를 또 열면 같은 세션이 둘이 되므로 표시해서 막는다.
+       *
+       * 두 가지를 지킨다:
+       *  - 판정은 **이어받은 원본**으로 한다. externalId로 보면 안 된다 —
+       *    도구가 resume하면서 새 식별자를 발급하면 원본과 달라져 매번 '안 불러옴'이 된다.
+       *  - **숨긴 세션은 세지 않는다.** 숨김은 '내 목록에서 치우기'이고 도구에는 데이터가
+       *    남아 있다. 여기서 '이미 불러옴'으로 막아버리면 되돌릴 길이 사라진다.
+       */
       const known = new Set(
         [...this.meta.values()]
-          .filter((s) => s.tool === tool)
+          .filter((s) => s.tool === tool && !s.archived)
           .flatMap((s) => [s.importedFrom, s.externalId].filter((v): v is string => !!v)),
       )
       return {

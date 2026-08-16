@@ -1117,20 +1117,47 @@ test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) =
 })
 
 /** M2.6 도그푸딩: 숨김/삭제·재시작·첨부·압축된 옛 대화 */
-test('세션은 숨기거나 지운다 — 숨긴 것은 다시 꺼낼 수 있다', async ({ page }) => {
+test('치우기는 Control Center 목록에서만 없앤다 — 도구에는 남아 다시 가져올 수 있다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '숨길 세션')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.externalSessions = {
+      supported: true,
+      sessions: [
+        { externalId: 'ext-1', tool: 'claude', title: '치울 대화', updatedAt: Date.now(), createdAt: null, branch: null, imported: false },
+      ],
+    }
+    m.externalHistory.set('ext-1', [{ role: 'user', text: '치울 대화' }])
+  })
+
+  // 도구가 갖고 있던 대화를 불러온 세션
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('past-ext-1').click()
+  await page.getByTestId('create-session-confirm').click()
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 
   await page.getByTestId(`hide-session-${id}`).click()
+
+  // 목록에서 사라지고, 따로 '숨김 목록' 같은 건 없다
   await expect(page.getByTestId(`session-row-${id}`)).toBeHidden()
+  await expect(page.getByTestId('hidden-toggle-alpha')).toHaveCount(0)
 
-  // 사라진 게 아니라 접힌 것이다 — 몇 개인지 보인다
-  await page.getByTestId('hidden-toggle-alpha').click()
-  await expect(page.getByTestId(`hidden-row-${id}`)).toContainText('숨길 세션')
+  // 되돌리는 길은 '이전 대화'다 — 치운 세션은 '이미 불러옴'으로 막히면 안 된다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const st = (window as any).__store.getState()
+    // host가 하는 판정을 흉내낸다: 숨긴 세션은 known에서 뺀다
+    const live = Object.values(st.sessions).filter((s: any) => !s.archived)
+    m.externalSessions.sessions[0].imported = live.some((s: any) => s.importedFrom === 'ext-1')
+  })
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('past-ext-1')).not.toContainText('이미 불러옴')
+  await page.getByTestId('past-ext-1').click()
+  await page.getByTestId('create-session-confirm').click()
 
-  await page.getByTestId(`unhide-session-${id}`).click()
-  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  // 다시 목록에 있고 대화도 돌아온다
+  await expect(page.getByTestId('chat-stream')).toContainText('치울 대화')
 })
 
 test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', async ({ page }) => {

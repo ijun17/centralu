@@ -57,9 +57,17 @@ const num = (v: unknown): number | undefined => (typeof v === 'number' && Number
 export async function listClaudeSessions(cwd: string, limit: number): Promise<ExternalSessionSummary[]> {
   const sdk = await sessionApi()
   if (!sdk?.listSessions) throw new Error(UNSUPPORTED)
-  // includeProgrammatic:false — Control Center가 만든 세션은 이미 사이드바에 있다.
-  // 여기서 보여줄 것은 '밖에서 만든 대화'다. (구버전 SDK는 모르는 옵션을 무시한다)
-  const rows = await sdk.listSessions({ dir: cwd, limit, includeProgrammatic: false })
+  /*
+   * includeProgrammatic:true — SDK로 만든 세션(=Control Center가 만든 것)까지 포함한다.
+   *
+   * 처음에는 false로 걸렀다. "우리가 만든 건 이미 사이드바에 있으니 중복"이라는 이유였는데,
+   * **숨김의 의미가 '목록에서 치우기'가 되면서 그 전제가 깨졌다** —
+   * 숨긴 세션은 사이드바에 없고, 여기서도 안 보이면 되돌릴 길이 사라진다.
+   * (실측: 우리가 만든 세션은 false에서 0건, true에서 1건으로 나왔다)
+   *
+   * 중복은 목록의 imported 표시로 거른다.
+   */
+  const rows = await sdk.listSessions({ dir: cwd, limit, includeProgrammatic: true })
   if (!Array.isArray(rows)) return []
   const out: ExternalSessionSummary[] = []
   for (const r of rows) {

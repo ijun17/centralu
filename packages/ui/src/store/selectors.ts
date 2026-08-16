@@ -33,15 +33,6 @@ export function useSessionsOf(projectId: string): SessionSummary[] {
   )
 }
 
-/** 숨긴 세션 (기록은 남아 있고 언제든 다시 꺼낼 수 있다) */
-export function useHiddenSessionsOf(projectId: string): SessionSummary[] {
-  const sessions = useStore((s) => s.sessions)
-  return useMemo(
-    () => Object.values(sessions).filter((x) => x.projectId === projectId && x.archived),
-    [sessions, projectId],
-  )
-}
-
 export function useUnread(sessionId: string): boolean {
   return useStore((s) => {
     const x = s.sessions[sessionId]
