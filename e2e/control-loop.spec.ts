@@ -1758,3 +1758,33 @@ test('밖에서 이어간 대화가 돌아오면 화면에 붙는다', async ({ 
   await expect(page.getByTestId('chat-stream')).toContainText('터미널에서 한 말')
   await expect(page.getByTestId('chat-stream')).toContainText('터미널 답')
 })
+
+test('긴 URL·경로가 대화창을 가로로 밀지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  const long = `https://example.com/${'very-long-segment'.repeat(20)}`
+  await page.getByTestId('prompt-input').fill(long)
+  await page.getByTestId('send').click()
+  await page.evaluate(
+    ({ sid, text }) =>
+      (window as any).__mock.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text }),
+    { sid: id, text: `참고: ${long}` },
+  )
+  await expect(page.getByTestId('msg-assistant').last()).toBeVisible()
+
+  // 대화창이 가로로 스크롤되면 안 된다
+  const stream = await page.getByTestId('chat-stream').evaluate((el) => ({
+    scroll: el.scrollWidth,
+    client: el.clientWidth,
+  }))
+  expect(stream.scroll).toBeLessThanOrEqual(stream.client + 1)
+
+  // 창 전체도 마찬가지
+  const page2 = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }))
+  expect(page2.scroll).toBeLessThanOrEqual(page2.client)
+})

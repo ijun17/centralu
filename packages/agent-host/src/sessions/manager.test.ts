@@ -697,3 +697,49 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
     expect(await texts(call, s.id)).toEqual(['첫 질문'])
   })
 })
+
+/**
+ * Claude는 external id를 system/init로 **비동기로** 준다.
+ * 그래서 세션을 만들고 말을 걸기 전에 새로고침하면 아직 없다
+ * (도그푸딩: "세션 식별자를 불러오지 못했습니다").
+ */
+describe('재개 식별자가 아직 없을 때', () => {
+  class LateIdAdapter extends FakeAdapter {
+    override async createSession(opts: CreateSessionOpts, emit: EventSink) {
+      const h = await super.createSession(opts, emit)
+      h.externalId = null // 아직 도착하지 않았다
+      return h
+    }
+  }
+  const setup = () => {
+    const a = new LateIdAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    return { a, m, call: createRpcHandler(m, adapters) }
+  }
+
+  it('오간 말이 없으면 그냥 새로 띄운다 (잃을 것이 없다)', async () => {
+    const { m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
+      id: string
+    }
+
+    const r = (await call('agents.restartSession', { sessionId: s.id })) as { resumed: boolean }
+    expect(r.resumed).toBe(true)
+    expect(m.isLive(s.id)).toBe(true)
+  })
+
+  it('기록이 있는데 식별자만 없으면 그때는 이유를 말한다', async () => {
+    const { m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
+      id: string
+    }
+    await call('agents.send', { sessionId: s.id, text: '남는 말' })
+
+    const r = (await m.restartSession(s.id)) as { resumed: boolean; reason?: string }
+    expect(r.resumed).toBe(false)
+    expect(r.reason).toMatch(/재개 식별자를 잃었습니다/)
+  })
+})

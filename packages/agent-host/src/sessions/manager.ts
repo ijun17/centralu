@@ -390,7 +390,24 @@ export class SessionManager {
     const adapter = this.adapters.get(m.tool)
     if (!adapter) return { session: m, resumed: false, reason: `${m.tool} 어댑터가 없습니다` }
     if (!adapter.capabilities.resume) return { session: m, resumed: false, reason: `${m.tool}는 재개를 지원하지 않습니다` }
-    if (!m.externalId) return { session: m, resumed: false, reason: '재개에 필요한 세션 식별자가 없습니다' }
+    /*
+     * 재개 식별자가 아직 없을 수 있다.
+     *
+     * Claude는 external id를 system/init 메시지로 **비동기로** 준다. 그래서 세션을 만들고
+     * 말을 걸기 전에 새로고침하면 아직 없다 (도그푸딩: "세션 식별자를 불러오지 못했습니다").
+     * 그런데 이 경우 **이어갈 대화 자체가 없다** — 그냥 새 프로세스를 띄우면 잃는 게 없다.
+     * 기록이 있는데 식별자만 없는 경우에만 진짜 문제이므로 그때는 이유를 말한다.
+     */
+    if (!m.externalId) {
+      if (this.store.loadMessages(m.id, 1).length > 0) {
+        return {
+          session: m,
+          resumed: false,
+          reason: '이 세션의 재개 식별자를 잃었습니다 — 기록은 읽을 수 있고, 새 세션으로 이어서 시작할 수 있습니다',
+        }
+      }
+      // 오간 말이 없다 = 새로 띄워도 잃을 것이 없다
+    }
 
     const project = this.store.listProjects().find((p) => p.id === m.projectId)
     if (!project) return { session: m, resumed: false, reason: '프로젝트를 찾을 수 없습니다' }
@@ -430,7 +447,7 @@ export class SessionManager {
           cwd: project.path,
           model: m.model ?? undefined,
           permissionPreset: m.permissionPreset,
-          resumeExternalId: m.externalId,
+          resumeExternalId: m.externalId ?? undefined,
         },
         (e) => this.onEvent(e),
       )

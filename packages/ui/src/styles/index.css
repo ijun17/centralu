@@ -170,6 +170,15 @@
   .cc-md {
     font-size: 13px;
     line-height: 1.65;
+    /* 공백 없는 긴 문자열(URL·경로·해시)도 끊어서 가로 스크롤을 막는다 */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
+  }
+  /* 표는 자기 안에서만 스크롤한다 — 대화창을 밀지 않는다 */
+  .cc-md table,
+  .cc-md pre {
+    max-width: 100%;
   }
   .cc-md > * + * {
     margin-top: 0.6em;

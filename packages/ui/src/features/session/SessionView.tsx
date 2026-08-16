@@ -369,7 +369,7 @@ function ChatStream({
             key={v.key}
             ref={virtualizer.measureElement}
             data-index={v.index}
-            className="absolute left-0 top-0 w-full pb-3"
+            className="absolute left-0 top-0 w-full min-w-0 pb-3"
             style={{ transform: `translateY(${v.start}px)` }}
           >
             <ChatRow item={chat[v.index]!} />
@@ -464,7 +464,13 @@ function ChatRow({ item }: { item: ChatItem }) {
   if (item.kind === 'user') {
     return (
       <div className="flex justify-end" data-testid="msg-user">
-        <div className="max-w-[75%] rounded-lg rounded-br-sm border border-edge bg-panel px-3 py-2 text-chalk">
+        {/*
+          긴 URL·경로처럼 공백 없는 문자열은 기본 규칙으로는 안 끊긴다.
+          그러면 말풍선이 가로로 삐져나가 대화창 전체에 가로 스크롤이 생긴다
+          (도그푸딩 지적). whitespace-pre-wrap으로 사용자가 친 줄바꿈은 살리고,
+          break-words로 못 끊는 긴 덩어리도 끊는다.
+        */}
+        <div className="max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-edge bg-panel px-3 py-2 text-chalk">
           {item.text}
         </div>
       </div>
@@ -472,7 +478,7 @@ function ChatRow({ item }: { item: ChatItem }) {
   }
   if (item.kind === 'assistant') {
     return (
-      <div data-testid="msg-assistant">
+      <div className="min-w-0" data-testid="msg-assistant">
         <Markdown text={item.text} />
       </div>
     )
