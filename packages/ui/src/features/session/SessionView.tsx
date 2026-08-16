@@ -7,12 +7,8 @@ import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
-import { TabBar } from './TabBar.jsx'
 import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
-import { GitPanel } from '../git/GitPanel.jsx'
-import { FileTree } from '../files/FileTree.jsx'
-import { CodeViewer } from '../viewer/CodeViewer.jsx'
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
@@ -20,7 +16,6 @@ const EMPTY_CHAT: ChatItem[] = []
 /** 조작 레인 — 전체 폭 (그리드가 아니라 포커스 뷰인 이유) */
 export function SessionView() {
   const session = useFocusedSession()
-  const tab = useStore((s) => s.tab)
   const project = useStore((s) => (session ? s.projects[session.projectId] : undefined))
   const projectOnly = useStore((s) => (s.focusedSessionId ? undefined : s.projects[s.focusedProjectId ?? '']))
   const chat = useStore((s) => (s.focusedSessionId ? (s.chat[s.focusedSessionId] ?? EMPTY_CHAT) : EMPTY_CHAT))
@@ -67,22 +62,18 @@ export function SessionView() {
     }
     return (
       <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
-        <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
+        <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2" data-tauri-drag-region>
           <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
             {projectOnly.name}
           </h1>
           <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
         </header>
-        <TabBar gitDisabled={!projectOnly.git} chatDisabled />
-        {tab === 'git' && <GitPanel projectId={projectOnly.id} />}
-        {tab === 'files' && <FileTree projectId={projectOnly.id} />}
-        {tab === 'viewer' && <CodeViewer projectId={projectOnly.id} />}
-        {tab === 'chat' && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-            <p className="text-[13px] text-ash">세션을 선택하거나 새로 시작하세요</p>
-            <p className="text-[11px] text-slate">깃·파일·뷰어는 세션 없이도 볼 수 있습니다</p>
-          </div>
-        )}
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+          <p className="text-[13px] text-ash">세션을 선택하거나 새로 시작하세요</p>
+          <p className="text-[11px] text-slate">
+            깃·파일은 오른쪽 증거 패널에서 세션 없이도 볼 수 있습니다 (<Kbd>⌘</Kbd> <Kbd>B</Kbd>)
+          </p>
+        </div>
       </section>
     )
   }
@@ -91,7 +82,7 @@ export function SessionView() {
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
-      <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
+      <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2" data-tauri-drag-region>
         <StateDot state={session.state} />
         <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
           {session.name}
@@ -135,22 +126,14 @@ export function SessionView() {
         </span>
       </header>
 
-      <TabBar gitDisabled={!project?.git} />
-
-      {tab === 'chat' && (
-        <ChatStream scrollRef={scrollRef} chat={chat} pending={session.pendingApproval} sessionId={session.id} />
-      )}
-      {tab === 'git' && <GitPanel projectId={session.projectId} />}
-      {tab === 'files' && <FileTree projectId={session.projectId} />}
-      {tab === 'viewer' && <CodeViewer projectId={session.projectId} />}
+      <ChatStream scrollRef={scrollRef} chat={chat} pending={session.pendingApproval} sessionId={session.id} />
 
       {/*
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
         말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
       */}
-      {tab === 'chat' && !session.live && !session.archived && <ResumeBar sessionId={session.id} />}
+      {!session.live && !session.archived && <ResumeBar sessionId={session.id} />}
 
-      {tab === 'chat' && (
       <form
         className="border-t border-edge px-4 py-3"
         onSubmit={(e) => {
@@ -242,8 +225,6 @@ export function SessionView() {
           <Kbd>Enter</Kbd> 보내기 · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> 줄바꿈 · 이미지는 붙여넣기(<Kbd>⌘V</Kbd>)
         </p>
       </form>
-      )}
-
     </section>
   )
 }

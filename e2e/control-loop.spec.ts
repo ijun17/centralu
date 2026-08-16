@@ -342,12 +342,12 @@ test('긴 대화는 보이는 것만 그린다 (D-1 가상 스크롤)', async ({
 
 test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 (D-1)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '긴 작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
     for (let i = 0; i < 100; i++) m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `줄 ${i}\n` })
   })
+  await newSession(page, 'alpha', '긴 작업')
 
   const stream = page.getByTestId('chat-stream')
   await stream.evaluate((el) => { el.scrollTop = 0 }) // 맨 위로 올려 읽는 중
@@ -535,29 +535,30 @@ test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', as
   await expect(page.getByTestId('concurrent-warning')).toContainText('유실')
 })
 
-test('탭 셸: ⌘⇧1~4로 전환하고 재시작 후 복원한다 (B-0)', async ({ page }) => {
+test('3레인: 증거 패널은 대화와 함께 있고 ⌘B로 접힌다 (B-0)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  await expect(page.getByTestId('tab-bar')).toBeVisible()
-  await page.keyboard.press('Meta+Shift+3')
-  await expect(page.getByTestId('git-panel')).toBeVisible()
+  // 깃·파일은 대화를 대신하지 않는다 — 둘이 동시에 보여야 한다
+  await expect(page.getByTestId('chat-stream')).toBeVisible()
+  await expect(page.getByTestId('evidence-panel')).toBeVisible()
+  await expect(page.getByTestId('evidence-project')).toContainText('alpha')
 
-  // 스냅샷에 탭이 실리고, 다시 attach하면 그 탭으로 돌아온다
+  await page.keyboard.press('Meta+b')
+  await expect(page.getByTestId('evidence-panel')).toBeHidden()
+  // 패널을 접어도 대화는 그대로다
+  await expect(page.getByTestId('chat-stream')).toBeVisible()
+
+  // 접힌 상태가 스냅샷에 실리고 재시작 후 복원된다
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
-  expect(snap?.tab).toBe('git')
+  expect(snap?.panelOpen).toBe(false)
 
-  await page.evaluate(async () => {
-    const store = (window as any).__store
-    store.setState({ tab: 'chat', focusedSessionId: null })
-    await store.getState().attach((window as any).__mock)
-  })
-  await expect(page.getByTestId('git-panel')).toBeVisible()
+  await page.keyboard.press('Meta+b')
+  await expect(page.getByTestId('evidence-panel')).toBeVisible()
 })
 
 test('깃 패널: 변경 목록·diff·스테이징·커밋 (B-2, B-6)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.gitState.files = [
@@ -566,7 +567,8 @@ test('깃 패널: 변경 목록·diff·스테이징·커밋 (B-2, B-6)', async (
     ]
     m.gitState.diffs['src/a.ts'] = '@@ -1,2 +1,2 @@\n-옛 줄\n+새 줄\n 그대로'
   })
-  await page.keyboard.press('Meta+Shift+3')
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-git-full').click()
 
   await page.getByTestId('git-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toBeVisible()
@@ -583,7 +585,6 @@ test('깃 패널: 변경 목록·diff·스테이징·커밋 (B-2, B-6)', async (
 
 test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 보여준다 (B-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.gitState.branches = [
@@ -592,7 +593,8 @@ test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 �
     ]
     m.gitState.dirty = ['src/a.ts']
   })
-  await page.keyboard.press('Meta+Shift+3')
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-git-full').click()
   await page.getByTestId('git-sub-branches').click()
   await page.getByTestId('branch-feature/x').click()
 
@@ -613,12 +615,12 @@ test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', a
   })
   await page.getByTestId('new-session-nogit').click()
   await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('tab-git')).toBeDisabled()
+  await expect(page.getByTestId('evidence-not-repo')).toBeVisible()
+  await expect(page.getByTestId('evidence-git-full')).toBeDisabled()
 })
 
 test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [
@@ -629,7 +631,7 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
     m.fsState.entries['src'] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
     m.fsState.files['src/a.ts'] = '첫 줄\n둘째 줄\n셋째 줄'
   })
-  await page.keyboard.press('Meta+Shift+2')
+  await newSession(page, 'alpha', '작업')
   await expect(page.getByTestId('file-tree')).toBeVisible()
 
   // 무시된 항목은 기본으로 숨는다
@@ -645,16 +647,16 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
 
 test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [{ name: 'big.ts', path: 'big.ts', isDir: false, ignored: false }]
     m.fsState.files['big.ts'] = Array.from({ length: 3000 }, (_, i) => `줄 ${i} 내용`).join('\n')
   })
-  await page.keyboard.press('Meta+Shift+2')
+  await newSession(page, 'alpha', '작업')
   await page.getByTestId('file-big.ts').click()
 
-  // 파일을 열면 뷰어 탭으로 전환된다
+  // 파일을 열면 넓은 오버레이가 덮인다
+  await expect(page.getByTestId('overlay')).toBeVisible()
   await expect(page.getByTestId('code-viewer')).toBeVisible()
   await expect(page.getByTestId('viewer-path')).toContainText('big.ts')
 
@@ -668,13 +670,12 @@ test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ pa
 
 test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [{ name: 'logo.png', path: 'logo.png', isDir: false, ignored: false }]
     m.fs.readFile = async () => ({ text: '', truncated: false, binary: true, bytes: 20480 })
   })
-  await page.keyboard.press('Meta+Shift+2')
+  await newSession(page, 'alpha', '작업')
   await page.getByTestId('file-logo.png').click()
   await expect(page.getByTestId('viewer-binary')).toContainText('바이너리')
 })
@@ -713,12 +714,12 @@ test('첨부만으로도 보낼 수 있다 (D 비정상 경로: 빈 텍스트)',
 test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, FR-21)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'auth 리팩터링')
-  await newSession(page, 'alpha', '배포 스크립트')
   await page.evaluate(() => {
     const m = (window as any).__mock
     const ids = [...m.sessions.keys()]
     m.searchResults = [{ sessionId: ids[0], seq: 3, snippet: '토큰 만료 처리를 고쳤습니다' }]
   })
+  await newSession(page, 'alpha', '배포 스크립트')
 
   await page.keyboard.press('Meta+k')
   await expect(page.getByTestId('command-palette')).toBeVisible()
@@ -732,12 +733,12 @@ test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, 
 
 test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     ;(window as any).__mock.rulesList = [
       { id: 1, scope: 'session', matcher: 'npm test*', decision: 'allow', createdAt: Date.now() },
     ]
   })
+  await newSession(page, 'alpha', '작업')
 
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('설정')
@@ -822,12 +823,10 @@ test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (�
   // 세션을 만들지 않은 상태에서 프로젝트 이름을 누른다
   await page.getByTestId('project-header-alpha').click()
   await expect(page.getByTestId('project-view')).toBeVisible()
-  await expect(page.getByTestId('tab-bar')).toBeVisible()
 
-  await page.getByTestId('tab-git').click()
-  await expect(page.getByTestId('git-file-src/a.ts')).toBeVisible()
-
-  await page.getByTestId('tab-files').click()
+  // 세션이 없어도 증거 패널은 프로젝트의 것이므로 그대로 보인다
+  await expect(page.getByTestId('evidence-panel')).toBeVisible()
+  await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
   await expect(page.getByTestId('file-README.md')).toBeVisible()
 })
 
@@ -835,9 +834,8 @@ test('창 드래그 영역과 오버스크롤 차단 (M2.5 창 문제)', async (
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 헤더와 탭바가 창 이동 손잡이여야 한다 (타이틀바를 숨겼으므로)
-  await expect(page.locator('header[data-tauri-drag-region]')).toHaveCount(1)
-  await expect(page.locator('nav[data-tauri-drag-region]')).toHaveCount(1)
+  // 타이틀바를 숨겼으므로 각 레인의 헤더가 창 이동 손잡이다 (상단바·세션·증거)
+  await expect(page.locator('header[data-tauri-drag-region]')).toHaveCount(3)
 
   // 창 자체는 스크롤되지 않는다 (웹처럼 고무줄로 튕기면 안 된다)
   const overscroll = await page.evaluate(() => getComputedStyle(document.body).overscrollBehaviorY)
@@ -934,4 +932,66 @@ test('이전 대화가 없으면 없다고 말한다', async ({ page }) => {
   await seedPastSessions(page, { supported: true, sessions: [] })
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('past-empty')).toBeVisible()
+})
+
+/**
+ * 증거 → 자세히 보기의 연결.
+ * 우측은 목록만, 자세히 보는 일은 넓은 오버레이에서 한다 (340px에서 diff는 못 읽는다).
+ */
+test('변경 파일을 누르면 넓은 오버레이에 diff가 펴지고 esc로 대화가 그대로 돌아온다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n-old()\n+next()'
+  })
+  await newSession(page, 'alpha', '이 함수 고쳐줘')
+
+  await expect(page.getByTestId('evidence-change-count')).toHaveText('1')
+  await page.getByTestId('evidence-file-src/a.ts').click()
+
+  // 오버레이가 덮이고, 누른 파일의 diff부터 펴진다 (목록을 다시 찾게 하지 않는다)
+  await expect(page.getByTestId('overlay')).toBeVisible()
+  await expect(page.getByTestId('diff-view')).toContainText('next()')
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('overlay')).toBeHidden()
+  // 걷으면 대화가 그대로 — 다시 찾아 들어가지 않아도 된다
+  await expect(page.getByTestId('chat-stream')).toContainText('이 함수 고쳐줘')
+})
+
+test('파일 트리에서 연 파일도 같은 오버레이에 뜬다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'README.md', path: 'README.md', isDir: false, ignored: false }]
+    m.fsState.files['README.md'] = '# Alpha\n읽을 수 있어야 한다'
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('file-README.md').click()
+  await expect(page.getByTestId('overlay')).toBeVisible()
+  await expect(page.getByTestId('viewer-path')).toContainText('README.md')
+
+  await page.getByTestId('overlay-close').click()
+  await expect(page.getByTestId('overlay')).toBeHidden()
+})
+
+test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 보여야 한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'a.ts', path: 'a.ts', isDir: false, ignored: false }]
+    m.fsState.files['a.ts'] = 'x'
+  })
+  await newSession(page, 'alpha', '첫 번째')
+  await newSession(page, 'alpha', '두 번째')
+
+  await page.getByTestId('file-a.ts').click()
+  await expect(page.getByTestId('overlay')).toBeVisible()
+
+  const first = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+  await page.getByTestId(`session-row-${first}`).click()
+  await expect(page.getByTestId('overlay')).toBeHidden()
+  await expect(page.getByTestId('chat-stream')).toContainText('첫 번째')
 })

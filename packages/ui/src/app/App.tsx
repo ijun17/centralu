@@ -5,6 +5,8 @@ import { PlatformProvider } from './PlatformProvider.jsx'
 import { useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
+import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
+import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
@@ -58,10 +60,23 @@ export function App({ platform }: { platform: Platform }) {
 function Body() {
   const hasProjects = useStore((s) => Object.keys(s.projects).length > 0)
   if (!hasProjects) return <FirstRun />
+  /*
+    3레인. 좌 = 관찰, 중앙 = 조작, 우 = 증거.
+    오버레이는 중앙과 우측을 함께 덮는다 — diff는 넓어야 읽힌다.
+  */
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
-      <SessionView />
+      {/*
+        오버레이는 중앙·우측만 덮는다. 좌측(관찰 레인)까지 덮으면
+        코드를 보는 동안 다른 세션이 나를 부르는 것을 놓친다 —
+        관제탑에서 계기판을 가리는 셈이다.
+      */}
+      <div className="relative flex min-h-0 flex-1">
+        <SessionView />
+        <EvidencePanel />
+        <Overlay />
+      </div>
     </div>
   )
 }
@@ -197,15 +212,15 @@ function GlobalKeys() {
         if (next) focusSession(next)
         return
       }
-      // 숫자 단축키는 e.code로 본다 — Shift를 누르면 e.key가 '#' 같은 기호가 된다 (E2E가 잡음)
-      const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
-      // 탭 전환 ⌘⇧1~4 (FR-17)
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && digit && Number(digit) <= 4) {
+      // 증거 패널 토글 ⌘B — 탭 전환(⌘⇧1~4)을 대신한다.
+      // 깃·파일은 대화를 대신하는 화면이 아니라 옆에 함께 두는 것이다.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        const tabs = ['chat', 'files', 'git', 'viewer'] as const
-        useStore.getState().setTab(tabs[Number(digit) - 1]!)
+        useStore.getState().togglePanel()
         return
       }
+      // 숫자 단축키는 e.code로 본다 — Shift를 누르면 e.key가 '#' 같은 기호가 된다 (E2E가 잡음)
+      const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
       // 프로젝트 점프 ⌘1~9 (FR-17)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && digit) {
         const st = useStore.getState()

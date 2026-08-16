@@ -19,7 +19,8 @@ export function CommandPalette() {
   const sessions = useStore((s) => s.sessions)
   const projects = useStore((s) => s.projects)
   const focusSession = useStore((s) => s.focusSession)
-  const setTab = useStore((s) => s.setTab)
+  const openGit = useStore((s) => s.openGit)
+  const togglePanel = useStore((s) => s.togglePanel)
   const toggleSettings = useStore((s) => s.toggleSettings)
   const platform = usePlatform()
 
@@ -61,8 +62,8 @@ export function CommandPalette() {
 
     const actions: Item[] = [
       { kind: 'action', id: 'settings', label: '설정 열기', sub: '단축키·알림·승인 규칙', run: () => toggleSettings(true) },
-      { kind: 'action', id: 'tab-git', label: '깃 패널', sub: '⌘⇧3', run: () => setTab('git') },
-      { kind: 'action', id: 'tab-files', label: '파일 트리', sub: '⌘⇧2', run: () => setTab('files') },
+      { kind: 'action', id: 'open-git', label: '깃 전체 보기', sub: '변경·기록·브랜치', run: () => openGit() },
+      { kind: 'action', id: 'toggle-panel', label: '증거 패널', sub: '⌘B · 깃·파일', run: () => togglePanel() },
     ]
 
     return [
@@ -88,7 +89,7 @@ export function CommandPalette() {
         sub: sessions[h.sessionId]?.name ?? '대화',
       })),
     ]
-  }, [query, sessions, projects, hits, setTab, toggleSettings])
+  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings])
 
   const choose = useCallback(
     (item: Item) => {

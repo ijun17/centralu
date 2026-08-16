@@ -136,6 +136,9 @@ export interface GitPort {
 /** 워크스페이스 스냅샷 (C-3) — 창을 껐다 켜도 보던 자리로 돌아온다 */
 export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
+  /** 증거 패널(깃·파일)이 열려 있었는가 */
+  panelOpen?: boolean
+  /** @deprecated 탭 구조는 3레인으로 대체됐다. 구버전 스냅샷을 읽을 때만 나타난다 */
   tab?: string
 }
 

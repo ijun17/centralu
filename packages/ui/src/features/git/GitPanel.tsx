@@ -9,7 +9,7 @@ type SubTab = 'changes' | 'history' | 'branches'
  * 깃 패널 (FR-4, B-2~B-6).
  * 승인 판단의 근거를 앱 안에서 만든다 — 이걸 보려고 IDE로 나가지 않아도 되게.
  */
-export function GitPanel({ projectId }: { projectId: string }) {
+export function GitPanel({ projectId, initialPath }: { projectId: string; initialPath?: string | null }) {
   const [sub, setSub] = useState<SubTab>('changes')
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="git-panel">
@@ -33,7 +33,7 @@ export function GitPanel({ projectId }: { projectId: string }) {
           </button>
         ))}
       </nav>
-      {sub === 'changes' && <Changes projectId={projectId} />}
+      {sub === 'changes' && <Changes projectId={projectId} initialPath={initialPath} />}
       {sub === 'history' && <History projectId={projectId} />}
       {sub === 'branches' && <Branches projectId={projectId} />}
     </section>
@@ -41,7 +41,7 @@ export function GitPanel({ projectId }: { projectId: string }) {
 }
 
 /** B-2 변경 탭 + B-6 스테이징·커밋·푸시 */
-function Changes({ projectId }: { projectId: string }) {
+function Changes({ projectId, initialPath }: { projectId: string; initialPath?: string | null }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const openFile = useStore((s) => s.openFile)
@@ -69,10 +69,21 @@ function Changes({ projectId }: { projectId: string }) {
     void refresh()
   }, [touched.length, refresh])
 
-  const openDiff = async (f: GitFileStatus) => {
-    setSelected(f)
-    setDiff(await platform.git.diff(projectId, f.path, f.staged))
-  }
+  const openDiff = useCallback(
+    async (f: GitFileStatus) => {
+      setSelected(f)
+      setDiff(await platform.git.diff(projectId, f.path, f.staged))
+    },
+    [platform, projectId],
+  )
+
+  // 우측 패널에서 파일을 눌러 들어온 경우 그 diff부터 펴 준다 —
+  // 넓은 화면에 와서 목록을 다시 찾게 하면 클릭 한 번이 헛돈다
+  useEffect(() => {
+    if (!initialPath || !files || selected) return
+    const hit = files.find((f) => f.path === initialPath)
+    if (hit) void openDiff(hit)
+  }, [initialPath, files, selected, openDiff])
 
   const staged = files?.filter((f) => f.staged) ?? []
   const unstaged = files?.filter((f) => !f.staged) ?? []

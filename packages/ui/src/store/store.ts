@@ -23,7 +23,12 @@ import type { ConnectionState, Platform } from '@cc/platform/ports'
  * 명령은 포트로, 상태 갱신은 이벤트 → core 리듀서로만 (CQRS-lite: 낙관적 갱신 없음).
  */
 
-export type Tab = 'chat' | 'files' | 'git' | 'viewer'
+/**
+ * 대화를 덮는 넓은 표면. null이면 아무것도 덮여 있지 않다.
+ *  - viewer: 파일 한 개 (viewerPath)
+ *  - git: 변경·기록·브랜치 전체. path를 주면 그 파일의 diff부터 편다
+ */
+export type Overlay = { kind: 'viewer' } | { kind: 'git'; path: string | null } | null
 
 export type ChatItem =
   | { kind: 'user'; seq: number; text: string }
@@ -40,7 +45,18 @@ export type AppState = {
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
-  tab: Tab
+  /**
+   * 증거 레인(깃·파일)이 열려 있는가.
+   * 탭이 아니라 패널인 이유: 깃 상태는 대화를 **대신하는** 화면이 아니라
+   * 대화가 주장하는 것의 **증거**다. 대체 관계가 아닌 것을 탭으로 묶으면
+   * "그거 어디서 봐?"가 나온다 (도그푸딩에서 실제로 나왔다).
+   */
+  panelOpen: boolean
+  /**
+   * 넓은 표면. 코드·diff는 360px 패널에서 읽을 수 없다.
+   * 대화 위에 덮었다가 esc로 걷는다 — 돌아오면 대화는 스크롤 위치까지 그대로다.
+   */
+  overlay: Overlay
   inboxOpen: boolean
   toast: string | null
   appFocused: boolean
@@ -57,9 +73,12 @@ export type AppState = {
   setAppFocused(focused: boolean): void
   loadHistory(sessionId: string): Promise<void>
   saveWorkspace(): void
-  setTab(t: Tab): void
-  /** 파일을 뷰어 탭에서 연다 (파일 트리·깃 패널의 공통 진입점) */
+  togglePanel(open?: boolean): void
+  /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
+  /** 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다 */
+  openGit(path?: string): void
+  closeOverlay(): void
   toggleInbox(open?: boolean): void
   togglePalette(open?: boolean): void
   toggleSettings(open?: boolean): void
@@ -110,7 +129,8 @@ export const useStore = create<AppState>((set, get) => ({
   chat: {},
   focusedSessionId: null,
   focusedProjectId: null,
-  tab: 'chat',
+  panelOpen: true,
+  overlay: null,
   inboxOpen: false,
   toast: null,
   appFocused: true,
@@ -146,7 +166,8 @@ export const useStore = create<AppState>((set, get) => ({
       if (snap?.focusedSessionId && get().sessions[snap.focusedSessionId]) {
         get().focusSession(snap.focusedSessionId)
         // 보던 탭까지 돌아온다 (B-0)
-        if (snap.tab) set({ tab: snap.tab as Tab })
+        // 구버전 스냅샷의 tab은 무시한다 (탭 구조는 3레인으로 대체됐다)
+        if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
       }
@@ -158,7 +179,7 @@ export const useStore = create<AppState>((set, get) => ({
   /** 상태가 바뀔 때마다 저장한다 — '종료 시 저장'은 크래시에 무력하다 */
   saveWorkspace() {
     const s = get()
-    void s.platform?.workspace.save({ focusedSessionId: s.focusedSessionId, tab: s.tab }).catch(() => {})
+    void s.platform?.workspace.save({ focusedSessionId: s.focusedSessionId, panelOpen: s.panelOpen }).catch(() => {})
   },
 
   setAppFocused(focused) {
@@ -228,6 +249,7 @@ export const useStore = create<AppState>((set, get) => ({
       // 다른 프로젝트를 고르면 세션 포커스는 놓는다 (섞이면 어느 프로젝트를 보는지 헷갈린다)
       focusedSessionId: s.sessions[s.focusedSessionId ?? '']?.projectId === id ? s.focusedSessionId : null,
       viewerPath: null,
+      overlay: null,
     }))
     get().saveWorkspace()
   },
@@ -235,7 +257,8 @@ export const useStore = create<AppState>((set, get) => ({
   focusSession(id) {
     const prev = get().focusedSessionId
     const projectId = id ? get().sessions[id]?.projectId : undefined
-    set({ focusedSessionId: id, tab: 'chat', ...(projectId ? { focusedProjectId: projectId } : {}) })
+    // 세션을 바꾸면 덮어둔 것은 걷는다 — 새 세션의 대화가 먼저 보여야 한다
+    set({ focusedSessionId: id, overlay: null, ...(projectId ? { focusedProjectId: projectId } : {}) })
     get().saveWorkspace()
 
     // 포커스를 벗어난 세션의 메시지는 잘라낸다 (docs/state-management.md §4).
@@ -265,14 +288,21 @@ export const useStore = create<AppState>((set, get) => ({
       // 기록을 못 불러와도 새 대화는 가능하므로 조용히 넘어간다
     }
   },
-  setTab(tab) {
-    set({ tab })
+  togglePanel(open) {
+    set((s) => ({ panelOpen: open ?? !s.panelOpen }))
     get().saveWorkspace()
   },
 
   openFile(path) {
-    set({ viewerPath: path, tab: 'viewer' })
-    get().saveWorkspace()
+    set({ viewerPath: path, overlay: { kind: 'viewer' } })
+  },
+
+  openGit(path) {
+    set({ overlay: { kind: 'git', path: path ?? null } })
+  },
+
+  closeOverlay() {
+    set({ overlay: null })
   },
   toggleInbox(open) {
     set((s) => ({ inboxOpen: open ?? !s.inboxOpen }))
@@ -288,7 +318,7 @@ export const useStore = create<AppState>((set, get) => ({
     // 정책은 워크스페이스 스냅샷에 함께 실린다 (E-5)
     void get().platform?.workspace.save({
       focusedSessionId: get().focusedSessionId,
-      tab: get().tab,
+      panelOpen: get().panelOpen,
       notifyPolicy,
     } as never).catch(() => {})
   },
