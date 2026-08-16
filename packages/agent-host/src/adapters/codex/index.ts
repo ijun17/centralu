@@ -151,6 +151,26 @@ class CodexSession implements SessionHandle {
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
   }
 
+  /** 슬래시 명령(스킬) — app-server의 공식 RPC */
+  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    const res = await this.client.request<{ data?: unknown }>('skills/list', {})
+    const groups = Array.isArray(res?.data) ? res.data : []
+    const out: { name: string; description?: string }[] = []
+    for (const g of groups) {
+      const skills = (g as { skills?: unknown }).skills
+      if (!Array.isArray(skills)) continue
+      for (const s of skills) {
+        const skill = (s ?? {}) as { name?: unknown; description?: unknown; enabled?: unknown }
+        if (typeof skill.name !== 'string' || skill.enabled === false) continue
+        out.push({
+          name: skill.name,
+          description: typeof skill.description === 'string' ? skill.description : '',
+        })
+      }
+    }
+    return out
+  }
+
   interrupt(): void {
     if (this.threadId) void this.client.request('turn/interrupt', { threadId: this.threadId }).catch(() => {})
   }

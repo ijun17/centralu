@@ -216,7 +216,7 @@ describe('이전 세션 불러오기', () => {
     expect(res.supported).toBe(true)
     expect(a.listed).toEqual({ cwd: tmpdir(), limit: 30 })
     expect(res.sessions).toEqual([
-      { externalId: 'ext-past', tool: 'claude', title: '어제 하던 일', updatedAt: 111, createdAt: null, branch: 'main', imported: false },
+      { externalId: 'ext-past', tool: 'claude', title: '어제 하던 일', updatedAt: 111, createdAt: null, branch: 'main', imported: false, importedAs: null },
     ])
   })
 
@@ -477,8 +477,10 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
       resumeExternalId: 'ext-past', importHistory: true,
     })) as { id: string }
 
-    // 목록에 있으면 또 열지 않도록 막는다
-    expect((await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(true)
+    // 목록에 있으면 또 열지 않도록 막는다 — 어느 세션으로 열려 있는지까지 알려준다
+    const listed = (await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!
+    expect(listed.imported).toBe(true)
+    expect(listed.importedAs).toBe(s.id)
 
     await m.archive(s.id, true)
 

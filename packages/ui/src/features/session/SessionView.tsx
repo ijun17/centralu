@@ -10,6 +10,7 @@ import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
+import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
@@ -27,8 +28,32 @@ export function SessionView() {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
+  const [caret, setCaret] = useState(0)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const attachFile = useStore((s) => s.attachFile)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 자동완성: `/`는 스킬, `@`는 파일. 세션이 없으면 입력창 자체가 없다
+  const ac = useAutocomplete({
+    sessionId: session?.id ?? '',
+    projectId: session?.projectId ?? '',
+    text,
+    caret,
+    enabled: !!session && caret >= 0,
+  })
+
+  const pick = (item: Suggestion) => {
+    const next = ac.apply(item)
+    setText(next.text)
+    setCaret(next.caret)
+    // 값이 반영된 뒤에 커서를 옮겨야 한다 (React가 값을 그린 다음)
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+    })
+  }
 
   // 스크린샷을 붙여넣는 흐름이 가장 흔하다 (FR-13)
   const takeFiles = async (files: FileList | File[] | null) => {
@@ -179,7 +204,7 @@ export function SessionView() {
           </ul>
         )}
         <div
-          className={`flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
+          className={`relative flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
             dragging ? 'border-ash' : 'border-edge'
           }`}
           onDragEnter={(e) => {
@@ -198,16 +223,42 @@ export function SessionView() {
           }}
           data-testid="input-dropzone"
         >
+          {ac.open && (
+            <AutocompleteMenu
+              items={ac.items}
+              index={ac.index}
+              loading={ac.loading}
+              kind={ac.kind}
+              onPick={pick}
+            />
+          )}
           <textarea
+            ref={inputRef}
             className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
             rows={1}
             value={text}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onChange={(e) => {
               setText(e.target.value)
+              setCaret(e.target.selectionStart)
               e.target.style.height = 'auto'
               e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
             }}
             onKeyDown={(e) => {
+              // 자동완성이 열려 있으면 방향키·Enter·Tab은 목록의 것이다
+              if (ac.open) {
+                if (e.key === 'ArrowDown') return e.preventDefault(), ac.move(1)
+                if (e.key === 'ArrowUp') return e.preventDefault(), ac.move(-1)
+                if (e.key === 'Escape') return e.preventDefault(), setCaret(-1)
+                if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                  const item = ac.items[ac.index]
+                  if (item) {
+                    e.preventDefault()
+                    pick(item)
+                    return
+                  }
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 e.currentTarget.form?.requestSubmit()
@@ -301,7 +352,7 @@ function ChatStream({
       className="flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
       data-testid="chat-stream"
     >
-      <LoadOlder sessionId={sessionId} />
+      <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
 
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
         {virtualizer.getVirtualItems().map((v) => (
@@ -328,22 +379,57 @@ function ChatStream({
  * 압축된 옛 대화로 거슬러 올라가는 길.
  *
  * 도구가 컨텍스트를 압축해도 **우리 기록은 접히지 않는다** — 모든 메시지는 저장소에 남는다.
- * 접힌 것은 모델의 기억이지 사람의 기록이 아니다. 여기서 더 불러와 그 위를 읽을 수 있다.
+ * 접힌 것은 모델의 기억이지 사람의 기록이 아니다.
+ *
+ * 버튼이 아니라 **위로 스크롤하면 알아서 이어붙인다.** 위로 올리는 행동 자체가
+ * 이미 "더 보고 싶다"는 뜻인데, 거기서 버튼을 한 번 더 누르게 할 이유가 없다.
+ *
+ * 이어붙일 때 **스크롤 위치를 보정한다.** 앞에 내용이 들어가면 보고 있던 줄이
+ * 아래로 밀려 내려가는데, 그러면 읽던 자리를 잃고 위로 또 끌어야 한다.
  */
-function LoadOlder({ sessionId }: { sessionId: string }) {
+function OlderSentinel({
+  sessionId,
+  scrollRef,
+}: {
+  sessionId: string
+  scrollRef: RefObject<HTMLDivElement | null>
+}) {
   const info = useStore((s) => s.history[sessionId])
   const loadOlder = useStore((s) => s.loadOlder)
-  if (!info?.more) return null
+  const ref = useRef<HTMLDivElement>(null)
+  const more = info?.more ?? false
+  const loading = info?.loading ?? false
+
+  useEffect(() => {
+    const el = ref.current
+    const scroller = scrollRef.current
+    if (!el || !scroller || !more) return
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting) || loading) return
+        const before = scroller.scrollHeight
+        void loadOlder(sessionId).then(() => {
+          // 늘어난 만큼 내려서 읽던 자리를 지킨다
+          requestAnimationFrame(() => {
+            const grew = scroller.scrollHeight - before
+            if (grew > 0) scroller.scrollTop += grew
+          })
+        })
+      },
+      // 꼭대기에 닿기 조금 전에 미리 채운다 — 멈칫하는 순간이 안 보이게
+      { root: scroller, rootMargin: '200px 0px 0px 0px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [sessionId, more, loading, loadOlder, scrollRef])
+
+  if (!more) return null
   return (
-    <div className="mb-2 flex justify-center">
-      <button
-        className="rounded border border-edge px-2.5 py-1 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
-        onClick={() => void loadOlder(sessionId)}
-        disabled={info.loading}
-        data-testid="load-older"
-      >
-        {info.loading ? '불러오는 중…' : '이전 대화 더 보기'}
-      </button>
+    <div ref={ref} className="flex justify-center py-2" data-testid="load-older">
+      <span className="readout text-[10px] text-slate">
+        {loading ? '이전 대화를 불러오는 중…' : '위로 올리면 더 불러옵니다'}
+      </span>
     </div>
   )
 }

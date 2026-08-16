@@ -75,6 +75,15 @@ export const ProjectInfo = z.object({
 })
 export type ProjectInfo = z.infer<typeof ProjectInfo>
 
+/** 슬래시 명령(스킬) 하나 */
+export const CommandInfo = z.object({
+  name: z.string(),
+  description: z.string().default(''),
+  /** 인자 힌트 (예: "<file>") */
+  argumentHint: z.string().default(''),
+})
+export type CommandInfo = z.infer<typeof CommandInfo>
+
 /** 터미널 하나 (목록·생성·재시작이 모두 이 모양을 돌려준다) */
 export const TerminalInfo = z.object({
   terminalId: z.string(),
@@ -241,6 +250,22 @@ export const RpcMethods = {
    * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 터미널들이 그대로 이어지고,
    * 나중에 깃 워크트리 세션이 생기면 cwd가 다르므로 자기 터미널을 따로 갖는다.
    */
+  /**
+   * 이 세션에서 쓸 수 있는 슬래시 명령(스킬).
+   *
+   * ready=false는 **아직 도구가 준비되지 않았다**는 뜻이지 없다는 뜻이 아니다 —
+   * 세션을 막 만든 직후에는 CLI가 뜨는 중이라 물어볼 수 없다.
+   * UI는 이걸 구분해서 '없음'과 '불러오는 중'을 다르게 보여준다.
+   */
+  'agents.commands': {
+    params: z.object({ sessionId: z.string() }),
+    result: z.object({ ready: z.boolean(), commands: z.array(CommandInfo) }),
+  },
+  /** `@` 자동완성용 파일 검색 (프로젝트 안에서만) */
+  'files.search': {
+    params: z.object({ projectId: z.string(), query: z.string(), limit: z.number().default(20) }),
+    result: z.array(z.object({ path: z.string(), name: z.string() })),
+  },
   'terminal.list': {
     params: z.object({ projectId: z.string() }),
     result: z.object({ terminals: z.array(TerminalInfo) }),

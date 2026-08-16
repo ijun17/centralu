@@ -1,5 +1,6 @@
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
+import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
 
 /** 내부 핸들 → 프로토콜 모양 (history는 그때그때 스냅샷으로 뜬다) */
@@ -145,6 +146,12 @@ export function createRpcHandler(
     'messages.load': async (p) => {
       const { sessionId, limit, beforeSeq } = RpcMethods['messages.load'].params.parse(p)
       return mgr.loadMessages(sessionId, limit, beforeSeq)
+    },
+    'agents.commands': async (p) =>
+      mgr.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
+    'files.search': async (p) => {
+      const { projectId, query, limit } = RpcMethods['files.search'].params.parse(p)
+      return searchFiles(mgr.cwdOfProject(projectId), query, limit)
     },
     'terminal.list': async (p) => {
       const { projectId } = RpcMethods['terminal.list'].params.parse(p)

@@ -145,5 +145,13 @@ export const ExternalSession = z.object({
   branch: z.string().nullable().default(null),
   /** 이미 Control Center로 불러온 세션 — 같은 대화를 두 번 열지 않게 한다 */
   imported: z.boolean().default(false),
+  /**
+   * 이미 열려 있다면 **그 세션의 id**.
+   *
+   * 표시만으로는 부족하다 — 예전에는 '이미 불러옴'이라고 써 두고도 클릭은 그대로 돼서
+   * 같은 대화가 목록에 둘 생겼다 (실측으로 확인). UI는 이 값이 있으면 새로 만들지 않고
+   * 그 세션으로 데려간다.
+   */
+  importedAs: z.string().nullable().default(null),
 })
 export type ExternalSession = z.infer<typeof ExternalSession>

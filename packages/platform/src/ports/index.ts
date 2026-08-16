@@ -4,6 +4,7 @@ import type {
   ApprovalScope,
   Attachment,
   CreateSessionParams,
+  CommandInfo,
   ExternalSession,
   PermissionPreset,
   GitBranch,
@@ -79,6 +80,11 @@ export interface AgentPort {
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   capabilities(tool: ToolName): Promise<AdapterCapabilities>
+  /**
+   * 이 세션의 슬래시 명령(스킬).
+   * ready=false는 '없음'이 아니라 '아직 도구가 준비되지 않았다'는 뜻이다.
+   */
+  commands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }>
   detect(): Promise<{ tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }[]>
   /** 이벤트 스트림 — 구독 시점 이후의 이벤트를 받는다 */
   subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe
@@ -96,6 +102,8 @@ export interface ProjectPort {
  * lazy 목록이 원칙 — 열어본 디렉토리만 읽는다 (대형 저장소에서 가벼움 유지).
  */
 export interface FsPort {
+  /** `@` 자동완성용 파일 검색 (프로젝트 안에서만) */
+  search(projectId: string, query: string, limit?: number): Promise<{ path: string; name: string }[]>
   /** 한 단계만 읽는다. ignored는 .gitignore에 걸리는 항목 (git이 알려준 것을 재사용) */
   listDir(projectId: string, relPath: string): Promise<FsEntry[]>
   readFile(projectId: string, relPath: string): Promise<FsFile>

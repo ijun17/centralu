@@ -903,7 +903,7 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
       supported: true,
       sessions: [
         { externalId: 'ext-1', tool: 'claude', title: '어제 하던 리팩터링', updatedAt: Date.now() - 3600_000, createdAt: null, branch: 'main', imported: false },
-        { externalId: 'ext-2', tool: 'claude', title: '빌드 깨진 것 추적', updatedAt: Date.now() - 86400_000, createdAt: null, branch: null, imported: true },
+        { externalId: 'ext-2', tool: 'claude', title: '빌드 깨진 것 추적', updatedAt: Date.now() - 86400_000, createdAt: null, branch: null, imported: false, importedAs: null },
       ],
     },
     {
@@ -914,12 +914,18 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
     },
   )
 
+  // ext-2는 이미 불러와 둔 상태로 만든다 (목이 실제 세션을 보고 판정한다)
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('past-ext-2').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
   await page.getByTestId('new-session-alpha').click()
   // 기본은 '새 대화' — 불러오기가 기본이 되면 안 된다
   await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('past-ext-1')).toContainText('어제 하던 리팩터링')
   await expect(page.getByTestId('past-ext-1')).toContainText('1시간 전')
-  await expect(page.getByTestId('past-ext-2')).toContainText('이미 불러옴')
+  await expect(page.getByTestId('past-ext-2')).toContainText('이미 열려 있음')
 
   await page.getByTestId('past-ext-1').click()
   await expect(page.getByTestId('resume-note')).toBeVisible()
@@ -1195,7 +1201,8 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
   const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
   expect(await page.evaluate(loaded, id)).toBe(201) // 200 + 압축 표식
 
-  await page.getByTestId('load-older').click()
+  // 버튼이 아니라 위로 올리면 알아서 이어붙인다
+  await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
   await expect(page.getByTestId('load-older')).toBeHidden() // 더 거슬러 갈 곳이 없다
 
   // 압축으로 모델이 잊은 대화도 우리 기록에는 남아 있다
@@ -1443,4 +1450,96 @@ test('좌우 패널 폭을 조절해도 화면이 옆으로 밀리지 않는다'
 
   // 대화 레인이 최소 폭을 지켜서 살아 있다
   expect((await page.getByTestId('chat-stream').boundingBox())!.width).toBeGreaterThan(200)
+})
+
+/** 슬래시·@ 자동완성 (M2.8) */
+test('슬래시를 치면 스킬이, @를 치면 파일이 뜬다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.commandState = {
+      ready: true,
+      commands: [
+        { name: 'review', description: '변경을 검토합니다', argumentHint: '<path>' },
+        { name: 'commit', description: '커밋합니다', argumentHint: '' },
+      ],
+    }
+    m.fsState.entries[''] = [
+      { name: 'SessionView.tsx', path: 'src/SessionView.tsx', isDir: false, ignored: false },
+      { name: 'store.ts', path: 'src/store.ts', isDir: false, ignored: false },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  // 슬래시 — 맨 앞에서만
+  await page.getByTestId('prompt-input').fill('/rev')
+  await expect(page.getByTestId('autocomplete')).toBeVisible()
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('/review')
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('<path>')
+
+  // Enter로 고르면 입력창에 들어간다
+  await page.getByTestId('prompt-input').press('Enter')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('/review ')
+  await expect(page.getByTestId('autocomplete')).toBeHidden()
+
+  // @ — 파일
+  await page.getByTestId('prompt-input').fill('이거 봐줘 @Session')
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('SessionView.tsx')
+  await page.getByTestId('prompt-input').press('Enter')
+  await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/SessionView.tsx ')
+})
+
+test('스킬을 아직 못 불러왔으면 없다고 하지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    // 세션을 막 만들면 CLI가 뜨는 중이라 물어볼 수 없다
+    ;(window as any).__mock.commandState = { ready: false, commands: [] }
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('prompt-input').fill('/')
+  await expect(page.getByTestId('autocomplete-loading')).toContainText('불러오는 중')
+})
+
+test('문장 중간의 슬래시는 명령으로 보지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.commandState = {
+      ready: true,
+      commands: [{ name: 'review', description: '', argumentHint: '' }],
+    }
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('prompt-input').fill('경로는 src/rev 입니다')
+  await expect(page.getByTestId('autocomplete')).toBeHidden()
+})
+
+test('이미 열려 있는 대화를 다시 고르면 새로 만들지 않고 그 세션으로 간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.externalSessions = {
+      supported: true,
+      sessions: [
+        { externalId: 'ext-1', tool: 'claude', title: '어제 하던 일', updatedAt: Date.now(), createdAt: null, branch: null, imported: false, importedAs: null },
+      ],
+    }
+    m.externalHistory.set('ext-1', [{ role: 'user', text: '어제 하던 일' }])
+  })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('past-ext-1').click()
+  await page.getByTestId('create-session-confirm').click()
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 다시 열면 '이미 열려 있음'으로 표시되고, 누르면 만들지 않고 이동한다
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('past-ext-1')).toContainText('이미 열려 있음')
+  await page.getByTestId('past-ext-1').click()
+
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(id)
+  // 세션이 하나 더 생기지 않았다
+  expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
 })

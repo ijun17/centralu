@@ -6,6 +6,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
  */
 type QueryHandle = AsyncIterable<unknown> & {
   getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
+  supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
 }
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -40,6 +41,8 @@ class ClaudeSession implements SessionHandle {
   private notify: (() => void) | null = null
   private closed = false
   private pending = new Map<string, PendingApproval>()
+  /** 살아 있는 질의 — 슬래시 명령·컨텍스트를 물어보는 창구 */
+  private query: QueryHandle | null = null
   /** 자동 승인 매처. 세션 시작 시 저장된 규칙을 주입받고, 'always' 응답으로 늘어난다 */
   private alwaysAllow = new Set<string>()
   private reqCounter = 0
@@ -71,7 +74,7 @@ class ClaudeSession implements SessionHandle {
       }
     }
 
-    const q: QueryHandle = query({
+    const q: QueryHandle = (this.query = query({
       prompt: input(),
       options: {
         cwd: this.opts.cwd,
@@ -101,7 +104,7 @@ class ClaudeSession implements SessionHandle {
                 })
               },
       },
-    })
+    }))
 
     void (async () => {
       try {
@@ -164,6 +167,12 @@ class ClaudeSession implements SessionHandle {
    *
    * 실패해도 조용히 넘어간다 — 게이지가 잠깐 안 보이는 것이 대화를 막는 것보다 낫다.
    */
+  /** 슬래시 명령 목록 (SDK 공개 API) */
+  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    if (!this.query) throw new Error('세션이 아직 준비되지 않았습니다')
+    return this.query.supportedCommands()
+  }
+
   private async reportContext(q: QueryHandle): Promise<void> {
     try {
       const usage = await q.getContextUsage()

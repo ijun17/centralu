@@ -127,6 +127,15 @@ export class MockPlatform implements Platform {
   }
 
   readonly fs = {
+    search: async (_projectId: string, query: string, limit = 20) => {
+      // 목은 실제 퍼지 매칭을 흉내내지 않는다 — 검증 대상은 UI 흐름이다
+      const all = Object.values(this.fsState.entries).flat().filter((e) => !e.isDir)
+      const q = query.toLowerCase()
+      return all
+        .filter((e) => e.path.toLowerCase().includes(q))
+        .slice(0, limit)
+        .map((e) => ({ path: e.path, name: e.name }))
+    },
     listDir: async (_projectId: string, path: string) => this.fsState.entries[path] ?? [],
     readFile: async (_projectId: string, path: string): Promise<FsFile> => ({
       text: this.fsState.files[path] ?? '',
@@ -169,6 +178,12 @@ export class MockPlatform implements Platform {
       this.gitState.pushed = true
       return { ok: true }
     },
+  }
+
+  /** 테스트용: 슬래시 명령 목록 (ready=false로 '아직 준비 안 됨'도 재현한다) */
+  commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } = {
+    ready: true,
+    commands: [],
   }
 
   /** 테스트용: 재시작을 요청받은 세션 */
@@ -309,10 +324,23 @@ export class MockPlatform implements Platform {
       const filtered = beforeSeq ? all.filter((m) => m.seq < beforeSeq) : all
       return filtered.slice(-limit)
     },
-    listExternalSessions: async (_projectId: string, tool: ToolName, _limit = 30) => ({
-      ...this.externalSessions,
-      sessions: this.externalSessions.sessions.filter((s) => s.tool === tool),
-    }),
+    listExternalSessions: async (_projectId: string, tool: ToolName, _limit = 30) => {
+      // host와 같은 규칙: 숨기지 않은 세션이 들고 있는 원본은 '이미 열려 있음'이다
+      const known = new Map<string, string>()
+      for (const s of this.sessions.values()) {
+        if (s.tool !== tool || s.archived) continue
+        for (const key of [s.importedFrom, s.externalId]) {
+          if (key && !known.has(key)) known.set(key, s.id)
+        }
+      }
+      return {
+        ...this.externalSessions,
+        sessions: this.externalSessions.sessions
+          .filter((s) => s.tool === tool)
+          .map((s) => ({ ...s, imported: known.has(s.externalId), importedAs: known.get(s.externalId) ?? null })),
+      }
+    },
+    commands: async (_sessionId: string) => ({ ...this.commandState }),
     capabilities: async (_tool: ToolName): Promise<AdapterCapabilities> => ({
       approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: ['image', 'file'],
     }),

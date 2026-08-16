@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
   ApprovalDecision,
+  CommandInfo,
   ExternalSession,
   Attachment,
   ApprovalScope,
@@ -31,6 +32,14 @@ import {
 import { listDir, readTextFile } from '../dev-services/fs.js'
 import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
 
+/** 응답이 오지 않는 호출로 화면을 붙잡아 두지 않는다 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('시간 초과')), ms)),
+  ])
+}
+
 /**
  * 불러올 대화의 최대 줄 수. 오래된 쪽부터 잘린다.
  * 수백 턴짜리 세션을 통째로 밀어 넣으면 첫 렌더가 눈에 띄게 느려지고,
@@ -55,6 +64,8 @@ export class SessionManager {
    * 그래서 비교 기준은 언제나 이쪽이다.
    */
   private running = new Map<string, { model: string | null; permissionPreset: PermissionPreset }>()
+  /** 도구+디렉토리별 슬래시 명령 캐시 (세션이 준비되기 전에도 목록을 줄 수 있게) */
+  private commandCache = new Map<string, CommandInfo[]>()
 
   constructor(
     private store: Store,
@@ -125,11 +136,15 @@ export class SessionManager {
        *  - **숨긴 세션은 세지 않는다.** 숨김은 '내 목록에서 치우기'이고 도구에는 데이터가
        *    남아 있다. 여기서 '이미 불러옴'으로 막아버리면 되돌릴 길이 사라진다.
        */
-      const known = new Set(
-        [...this.meta.values()]
-          .filter((s) => s.tool === tool && !s.archived)
-          .flatMap((s) => [s.importedFrom, s.externalId].filter((v): v is string => !!v)),
-      )
+      const known = new Map<string, string>()
+      for (const s of this.meta.values()) {
+        if (s.tool !== tool || s.archived) continue
+        // 한 세션이 여러 식별자를 가질 수 있다: 이어받은 원본과 지금 것.
+        // (도구가 resume하면서 새 id를 발급하면 둘이 달라진다)
+        for (const key of [s.importedFrom, s.externalId]) {
+          if (key && !known.has(key)) known.set(key, s.id)
+        }
+      }
       return {
         supported: true,
         sessions: rows.map((r) => ({
@@ -140,6 +155,7 @@ export class SessionManager {
           createdAt: r.createdAt ?? null,
           branch: r.branch ?? null,
           imported: known.has(r.externalId),
+          importedAs: known.get(r.externalId) ?? null,
         })),
       }
     } catch (err) {
@@ -474,6 +490,39 @@ export class SessionManager {
       })
     }
     this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
+  }
+
+  /**
+   * 슬래시 명령 목록.
+   *
+   * **스킬은 세션이 아니라 도구+디렉토리의 성질이다.** 그래서 (tool, cwd)로 캐시한다 —
+   * 세션을 막 만든 직후에는 CLI가 뜨는 중이라 물어볼 수 없는데(도그푸딩에서 지적됨),
+   * 같은 프로젝트에서 한 번이라도 받아둔 적이 있으면 새 세션도 바로 목록을 갖는다.
+   *
+   * 도구가 준비되지 않았으면 ready=false로 알린다 — '없음'과 '아직'은 다르다.
+   */
+  async listCommands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }> {
+    const m = this.meta.get(sessionId)
+    if (!m) return { ready: false, commands: [] }
+    const cwd = this.cwdOf(m.projectId)
+    const key = `${m.tool}:${cwd}`
+    const cached = this.commandCache.get(key)
+
+    const handle = this.handles.get(sessionId)
+    if (handle?.listCommands) {
+      try {
+        // 준비 전에는 응답이 오지 않을 수 있다 — 입력창을 붙잡아 두지 않는다
+        const rows = await withTimeout(handle.listCommands(), 4000)
+        const commands = rows
+          .filter((c) => typeof c.name === 'string' && c.name.length > 0)
+          .map((c) => ({ name: c.name, description: c.description ?? '', argumentHint: c.argumentHint ?? '' }))
+        if (commands.length > 0) this.commandCache.set(key, commands)
+        return { ready: true, commands }
+      } catch {
+        // 아래에서 캐시로 물러난다
+      }
+    }
+    return cached ? { ready: true, commands: cached } : { ready: false, commands: [] }
   }
 
   /** 프로젝트의 작업 디렉토리. 터미널이 자기 키(cwd)를 정할 때 쓴다 */

@@ -5,6 +5,7 @@ import type {
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
+  CommandInfo,
   ExternalSession,
   NormalizedEvent,
   ProjectInfo,
@@ -88,6 +89,9 @@ class WebAgentPort implements AgentPort {
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number) {
     return this.rpc.call<StoredMessage[]>('messages.load', { sessionId, limit, beforeSeq })
   }
+  commands(sessionId: string) {
+    return this.rpc.call<{ ready: boolean; commands: CommandInfo[] }>('agents.commands', { sessionId })
+  }
   capabilities(tool: ToolName) {
     return this.rpc.call<AdapterCapabilities>('agents.capabilities', { tool })
   }
@@ -161,6 +165,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
     },
     fs: {
+      search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
       listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),
       readFile: (projectId, path) => rpc.call('fs.readFile', { projectId, path }),
     },

@@ -47,6 +47,11 @@ export interface SessionHandle {
   applyRules?(matchers: readonly string[]): void
   /** 모델·권한 변경 (다음 턴부터). 지원하지 않으면 구현하지 않는다 */
   updateSettings?(settings: { model?: string | null; permissionPreset?: PermissionPreset }): void
+  /**
+   * 이 세션에서 쓸 수 있는 슬래시 명령(스킬).
+   * 도구가 아직 준비 중이면 던져도 된다 — 매니저가 캐시로 물러난다.
+   */
+  listCommands?(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
   interrupt(): void
   dispose(): Promise<void>
 }

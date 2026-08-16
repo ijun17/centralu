@@ -51,6 +51,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
   const [resume, setResume] = useState<ExternalSession | null>(null)
+  const focusSession = useStore((s) => s.focusSession)
   const [past, setPast] = useState<PastState>({ status: 'loading' })
 
   // 다이얼로그를 열 때마다 감지한다 — 사용자가 방금 설치·로그인했을 수 있다
@@ -202,10 +203,19 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 <PastRow
                   key={s.externalId}
                   selected={resume?.externalId === s.externalId}
-                  onSelect={() => setResume(s)}
+                  onSelect={() => {
+                    // 이미 열려 있으면 또 만들지 않는다 — 그 세션으로 데려간다.
+                    // 표시만 하고 클릭을 막지 않았더니 같은 대화가 목록에 둘 생겼다 (실측).
+                    if (s.importedAs) {
+                      focusSession(s.importedAs)
+                      onClose()
+                      return
+                    }
+                    setResume(s)
+                  }}
                   testId={`past-${s.externalId}`}
                   title={s.title}
-                  meta={[ago(s.updatedAt), s.branch, s.imported ? '이미 불러옴' : null]
+                  meta={[ago(s.updatedAt), s.branch, s.importedAs ? '이미 열려 있음 · 누르면 이동' : null]
                     .filter(Boolean)
                     .join(' · ')}
                 />
