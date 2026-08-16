@@ -1543,3 +1543,44 @@ test('이미 열려 있는 대화를 다시 고르면 새로 만들지 않고 �
   // 세션이 하나 더 생기지 않았다
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
 })
+
+/**
+ * 터미널을 닫으면 남은 것들의 높이가 늘어난다. 그때 **다시 만들어지면 안 된다** —
+ * 새로 만든 xterm은 기본 크기로 시작했다가 곧바로 실제 크기로 맞춰지고,
+ * 그 resize가 셸의 프롬프트를 다시 그려서 줄이 늘어난 것처럼 보인다.
+ */
+test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-terminal').click()
+  await page.getByTestId('terminal-add').click()
+
+  const ids = await page.evaluate(() =>
+    [...(window as any).__mock.terminalState.byCwd.values()][0].map((t: { id: string }) => t.id),
+  )
+  await expect(page.getByTestId(`terminal-surface-${ids[0]}`)).toBeVisible()
+
+  // 살아남을 터미널이 출력을 갖게 한다 — 닫은 뒤 목록을 다시 읽으면
+  // 이 터미널의 history 스냅샷이 달라지고, 그게 재생성을 부르던 조건이다
+  await page.evaluate((id) => (window as any).__mock.emitTerminal(id, 'dev server running\r\n'), ids[0])
+
+  // 살아남을 터미널의 실제 DOM에 표식을 남긴다
+  await page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="terminal-surface-${id}"] .xterm`) as HTMLElement & {
+      __kept?: boolean
+    }
+    el.__kept = true
+  }, ids[0])
+
+  await page.getByTestId(`terminal-close-${ids[1]}`).click()
+  await expect(page.getByTestId(`terminal-surface-${ids[1]}`)).toHaveCount(0)
+
+  // 같은 DOM 노드가 그대로면 다시 만들어지지 않은 것이다
+  const kept = await page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="terminal-surface-${id}"] .xterm`) as
+      | (HTMLElement & { __kept?: boolean })
+      | null
+    return el?.__kept === true
+  }, ids[0])
+  expect(kept).toBe(true)
+})

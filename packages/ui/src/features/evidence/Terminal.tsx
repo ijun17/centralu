@@ -104,6 +104,17 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
    * 화면에는 프롬프트 줄만 끝없이 늘어나는 것으로 보인다 (도그푸딩에서 지적됨).
    */
   const lastDims = useRef({ cols: 0, rows: 0 })
+  /**
+   * 처음 붙을 때 한 번만 쓰는 지난 출력.
+   *
+   * props로 직접 읽으면 안 된다: 터미널을 하나 닫으면 목록을 다시 읽는데,
+   * 그때 **살아남은 터미널들의 history도 새 스냅샷으로 바뀐다.** 그걸 의존성에 두면
+   * effect가 다시 돌아 xterm이 통째로 재생성되고, 새로 만든 터미널은 기본 크기(80×24)로
+   * 시작했다가 곧바로 실제 크기로 맞춰지면서 셸이 프롬프트를 다시 그린다 —
+   * 닫을 때마다 줄이 늘어나는 것으로 보인다 (도그푸딩에서 두 번 지적됨).
+   */
+  const historyRef = useRef(info.history)
+  historyRef.current = info.history
   const [dead, setDead] = useState(!info.alive)
 
   useEffect(() => {
@@ -143,7 +154,9 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
     }
 
     safeFit()
-    if (info.history) term.write(info.history)
+    if (historyRef.current) term.write(historyRef.current)
+    // 새 xterm은 기본 크기로 시작한다 — 이전 값과 비교하지 말고 반드시 한 번 알린다
+    lastDims.current = { cols: 0, rows: 0 }
     syncSize()
 
     const offOutput = platform.terminal.onOutput((e) => {
@@ -176,8 +189,8 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
       term.dispose()
       termRef.current = null
     }
-    // 정체성은 terminalId뿐이다 — history는 처음 붙을 때만 쓰므로 다시 붙일 이유가 없다
-  }, [platform, info.terminalId, info.history])
+    // **정체성은 terminalId뿐이다.** history·title이 바뀌었다고 다시 붙지 않는다
+  }, [platform, info.terminalId])
 
   return (
     <div
