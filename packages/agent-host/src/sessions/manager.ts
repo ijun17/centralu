@@ -168,9 +168,35 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 이 도구 대화를 **이미 붙잡고 있는 살아 있는 세션**이 있나.
+   *
+   * 도구는 한 대화에 쓰는 쪽이 둘이면 거부한다
+   * (codex: "thread … already has an active writer"). 세션 id가 달라도 같은 원본을
+   * 가리키면 충돌하므로, 우리 쪽에서 먼저 막고 **누가 쥐고 있는지** 알려준다.
+   * 도구가 뱉는 원문은 사용자에게 아무것도 설명해 주지 않는다.
+   */
+  private holderOf(externalId: string, exceptSessionId?: string): SessionInfo | null {
+    for (const s of this.meta.values()) {
+      if (s.id === exceptSessionId || !this.handles.has(s.id)) continue
+      if (s.externalId === externalId || s.importedFrom === externalId) return s
+    }
+    return null
+  }
+
   async createSession(params: CreateSessionParams): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
     if (!adapter) throw Object.assign(new Error(`알 수 없는 도구: ${params.tool}`), { code: 'tool_not_installed' })
+
+    if (params.resumeExternalId) {
+      const holder = this.holderOf(params.resumeExternalId)
+      if (holder) {
+        throw Object.assign(
+          new Error(`이 대화는 이미 "${holder.name}" 세션에서 열려 있습니다 — 그 세션에서 이어가세요`),
+          { code: 'internal' },
+        )
+      }
+    }
 
     const id = randomUUID()
     const info: SessionInfo = {
@@ -308,6 +334,18 @@ export class SessionManager {
      * (실측). 사용자에게는 원인을 전혀 알려주지 않는 문구다.
      * 없어진 걸 미리 알면 무엇이 일어났고 무엇을 할 수 있는지 말해줄 수 있다.
      */
+    // 같은 대화를 두 세션이 붙잡으면 도구가 거부한다 — 먼저 막고 누가 쥐고 있는지 알린다
+    if (m.externalId) {
+      const holder = this.holderOf(m.externalId, sessionId)
+      if (holder) {
+        return {
+          session: m,
+          resumed: false,
+          reason: `이 대화는 "${holder.name}" 세션이 이미 열고 있습니다 (같은 대화를 둘이 쓸 수 없습니다)`,
+        }
+      }
+    }
+
     const gone = await this.externalGone(m, project.path)
     if (gone) {
       return {
@@ -338,6 +376,21 @@ export class SessionManager {
       void this.listCommands(sessionId).catch(() => {})
       return { session: m, resumed: true }
     } catch (err) {
+      /*
+       * 실패한 **뒤에야** 왜 실패했는지 캔다.
+       *
+       * 예전에는 이어가기 전에 매번 도구 목록을 조회했는데, codex는 그때마다
+       * app-server를 띄우므로 세션을 고를 때마다 몇 초가 얹혔다 (도그푸딩 지적).
+       * 값이 비싼 확인은 잘못됐을 때만 한다 — 잘 되는 길은 빨라야 한다.
+       */
+      const gone = await this.externalGone(m, project.path)
+      if (gone) {
+        return {
+          session: m,
+          resumed: false,
+          reason: `이 대화가 ${m.tool === 'codex' ? 'Codex' : 'Claude Code'}에서 삭제되었습니다 — 여기 남은 기록은 읽을 수 있고, 새 세션으로 이어서 시작할 수 있습니다`,
+        }
+      }
       return { session: m, resumed: false, reason: (err as Error).message }
     }
   }

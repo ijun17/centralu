@@ -4,6 +4,7 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { Modal } from '../../components/Modal.jsx'
 
 type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
@@ -95,14 +96,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const blocked = tools ? !usable(tool) : false
 
   return (
-    <div
-      className="absolute inset-0 z-30 flex items-start justify-center bg-void/80 pt-[14vh] backdrop-blur-[2px]"
-      onClick={onClose}
-      data-testid="new-session-dialog"
-    >
+    <Modal onClose={onClose} testId="new-session-dialog" align="top">
       <form
         className="w-[480px] max-w-[92vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
         onSubmit={async (e) => {
           e.preventDefault()
@@ -269,7 +265,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }
 

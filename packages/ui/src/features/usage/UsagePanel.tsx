@@ -3,6 +3,7 @@ import type { ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
+import { Modal } from '../../components/Modal.jsx'
 
 /**
  * 사용량 (FR-9).
@@ -189,24 +190,10 @@ export function UsageModal() {
     return (projectId ? s.projects[projectId]?.defaultTool : undefined) ?? 'claude'
   })
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && toggle(false)
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, toggle])
-
   if (!open) return null
   return (
-    <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[12vh] backdrop-blur-[2px]"
-      onClick={() => toggle(false)}
-      data-testid="usage-modal"
-    >
-      <div
-        className="w-[420px] max-w-[92vw] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal onClose={() => toggle(false)} testId="usage-modal" align="top">
+      <div className="w-[420px] max-w-[92vw] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
           <h2 className="text-[13px] font-medium text-chalk">사용량</h2>
           <span className="readout text-[11px] text-slate">{tool === 'codex' ? 'Codex' : 'Claude Code'}</span>
@@ -220,6 +207,6 @@ export function UsageModal() {
         </header>
         <UsagePanel tool={tool} />
       </div>
-    </div>
+    </Modal>
   )
 }

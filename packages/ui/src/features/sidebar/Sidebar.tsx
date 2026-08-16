@@ -5,6 +5,7 @@ import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
 import { StateDot, Tooltip } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
+import { Modal } from '../../components/Modal.jsx'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
 
 /** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
@@ -182,15 +183,8 @@ function ConfirmDelete({
 }) {
   const toolLabel = tool === 'codex' ? 'Codex' : 'Claude Code'
   return (
-    <div
-      className="absolute inset-0 z-40 flex items-center justify-center bg-void/80 backdrop-blur-[2px]"
-      onClick={onCancel}
-      data-testid="confirm-delete"
-    >
-      <div
-        className="w-[380px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal onClose={onCancel} testId="confirm-delete">
+      <div className="w-[380px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <p className="text-[13px] text-chalk">세션을 삭제할까요?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
         <p className="mt-2 text-[11px] leading-relaxed text-slate">
@@ -213,7 +207,7 @@ function ConfirmDelete({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 

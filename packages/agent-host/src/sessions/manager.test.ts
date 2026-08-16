@@ -560,3 +560,56 @@ describe('도구에서 지워진 대화', () => {
     expect((await m.resumeSession(s.id)).resumed).toBe(true)
   })
 })
+
+/**
+ * 한 대화에 쓰는 쪽이 둘이면 도구가 거부한다
+ * (codex: "thread … already has an active writer"). 원문은 사용자에게 아무것도
+ * 설명하지 못하므로, 우리가 먼저 막고 **누가 쥐고 있는지** 알려준다.
+ */
+describe('같은 대화를 둘이 열지 않는다', () => {
+  class ResumeAdapter extends FakeAdapter {
+    async listExternalSessions() {
+      return [{ externalId: 'ext-1', title: '어제 하던 일', updatedAt: 1 }]
+    }
+    async readExternalHistory() {
+      return [{ role: 'user' as const, text: '어제 하던 일' }]
+    }
+  }
+  const setup = () => {
+    const a = new ResumeAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    return { a, m, call: createRpcHandler(m, adapters) }
+  }
+
+  it('이미 열려 있는 대화를 또 불러오려 하면 누가 쥐고 있는지 말한다', async () => {
+    const { m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })
+
+    await expect(
+      call('agents.createSession', {
+        projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+      }),
+    ).rejects.toThrow(/이미 .*세션에서 열려 있습니다/)
+    // 반쪽짜리 세션이 남지 않는다
+    expect(m.listSessions()).toHaveLength(1)
+  })
+
+  it('쥐고 있던 세션이 잠들면 다시 열 수 있다', async () => {
+    const { m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const first = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+
+    await m.archive(first.id, true) // 프로세스가 정리되면 쥐고 있는 쪽이 없다
+
+    const second = await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })
+    expect(second).toBeTruthy()
+  })
+})

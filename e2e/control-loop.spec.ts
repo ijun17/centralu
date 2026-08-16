@@ -1649,3 +1649,51 @@ test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 �
   await page.getByTestId('open-usage').click()
   await expect(page.getByTestId('usage-unavailable')).toContainText('SDK가 사용량 조회를 지원하지 않습니다')
 })
+
+/**
+ * 모달은 조상의 사정과 무관하게 창 전체를 덮어야 한다.
+ * 사이드바에 폭 조절 손잡이를 넣느라 relative를 붙였더니, 그 안에서 열리던
+ * 세션 생성 모달이 사이드바 폭 안에 갇혔다 (도그푸딩에서 지적됨).
+ */
+test('모달은 사이드바 안에 갇히지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  const sidebarWidth = (await page.getByTestId('sidebar').boundingBox())!.width
+  await page.getByTestId('new-session-alpha').click()
+
+  const dialog = (await page.getByTestId('new-session-dialog').boundingBox())!
+  const viewport = page.viewportSize()!
+  // 덮개가 창 전체다 (사이드바 폭이 아니라)
+  expect(dialog.width).toBeGreaterThan(sidebarWidth * 2)
+  expect(Math.round(dialog.width)).toBe(viewport.width)
+
+  // body 바로 아래에 붙는다 — 조상 positioning에 휘둘리지 않는다
+  const parentIsBody = await page.evaluate(
+    () => document.querySelector('[data-testid="new-session-dialog"]')?.parentElement === document.body,
+  )
+  expect(parentIsBody).toBe(true)
+})
+
+test('같은 대화를 두 세션이 열지 않는다 (도구가 거부하기 전에 우리가 막는다)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.externalSessions = {
+      supported: true,
+      sessions: [
+        { externalId: 'ext-1', tool: 'claude', title: '하나뿐인 대화', updatedAt: Date.now(), createdAt: null, branch: null, imported: false, importedAs: null },
+      ],
+    }
+    m.externalHistory.set('ext-1', [{ role: 'user', text: '하나뿐인 대화' }])
+  })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('past-ext-1').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 다시 열면 '이미 열려 있음'이라 새로 만들지 않고 그 세션으로 간다
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('past-ext-1')).toContainText('이미 열려 있음')
+  expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
+})

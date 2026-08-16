@@ -74,9 +74,18 @@ class CodexSession implements SessionHandle {
 
     if (this.opts.resumeExternalId) {
       // 재개 (FR-10). 실패하면 세션 매니저가 폴백을 안내한다
-      const res = await this.client.request<Record<string, unknown>>('thread/resume', {
-        threadId: this.opts.resumeExternalId,
-      })
+      let res: Record<string, unknown>
+      try {
+        res = await this.client.request<Record<string, unknown>>('thread/resume', {
+          threadId: this.opts.resumeExternalId,
+        })
+      } catch (err) {
+        // 원문("already has an active writer")은 사용자에게 아무것도 설명하지 못한다
+        const msg = (err as Error).message
+        throw /active writer/i.test(msg)
+          ? new Error('이 대화를 다른 곳에서 이미 열고 있습니다 (터미널의 codex이거나 다른 세션)')
+          : err
+      }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
     } else {
       const res = await this.client.request<Record<string, unknown>>('thread/start', {
