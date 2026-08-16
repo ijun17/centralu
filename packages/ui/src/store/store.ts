@@ -84,6 +84,15 @@ export type AppState = {
    */
   history: Record<string, { oldestSeq: number; more: boolean; loading: boolean }>
   /**
+   * 지금 깨우는 중인 세션.
+   *
+   * 세션을 고르면 **바로 깨운다.** 예전에는 메시지를 보낼 때 깨웠는데,
+   * 그러면 앱을 켜고 첫 응답까지 프로세스 기동 시간이 통째로 얹힌다.
+   * 게다가 잠든 세션에는 물어볼 프로세스가 없어서 슬래시 스킬 목록도 못 받는다.
+   * 고르는 행동이 이미 "이 세션을 쓰겠다"는 뜻이므로 그때 준비를 시작한다.
+   */
+  resuming: Record<string, boolean>
+  /**
    * 증거 레인(깃·파일)이 열려 있는가.
    * 탭이 아니라 패널인 이유: 깃 상태는 대화를 **대신하는** 화면이 아니라
    * 대화가 주장하는 것의 **증거**다. 대체 관계가 아닌 것을 탭으로 묶으면
@@ -166,6 +175,8 @@ export type AppState = {
     s: { model?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
+  /** 세션을 고르는 즉시 깨운다 (첫 응답을 기다리지 않게) */
+  wake(sessionId: string): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
 }
@@ -223,6 +234,7 @@ export const useStore = create<AppState>((set, get) => ({
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
+  resuming: {},
   panelOpen: true,
   panelTab: 'git',
   panelWidth: PANEL_DEFAULT,
@@ -385,6 +397,7 @@ export const useStore = create<AppState>((set, get) => ({
     void get().markRead(id)
     // 아직 안 읽어온 세션이면 저장된 대화를 불러온다 (host 재시작 후에도 기록은 남는다)
     if (!get().chat[id]) void get().loadHistory(id)
+    void get().wake(id)
   },
 
   async loadHistory(sessionId) {
@@ -686,6 +699,35 @@ export const useStore = create<AppState>((set, get) => ({
    * 에이전트만 재시작한다. 대화 기록은 그대로 두고 프로세스만 갈아 끼운다 —
    * 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다.
    */
+  /**
+   * 잠든 세션을 미리 깨운다 (고르는 즉시).
+   *
+   * 조용히 실패해도 된다 — 못 깨우면 잠든 상태 그대로이고, 메시지를 보낼 때
+   * host가 한 번 더 시도하며 그때는 이유를 알린다. 고르기만 했는데
+   * 오류 토스트가 뜨면 목록을 훑는 동안 화면이 시끄러워진다.
+   */
+  async wake(sessionId) {
+    const s = get()
+    const session = s.sessions[sessionId]
+    if (!s.platform || !session || session.live || session.archived || s.resuming[sessionId]) return
+
+    set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
+    try {
+      const res = await s.platform.agents.resumeSession(sessionId)
+      set((st) => ({
+        sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
+      }))
+    } catch {
+      // 잠든 채로 둔다 — 보낼 때 다시 시도한다
+    } finally {
+      set((st) => {
+        const next = { ...st.resuming }
+        delete next[sessionId]
+        return { resuming: next }
+      })
+    }
+  },
+
   async restartSession(sessionId) {
     const platform = get().platform!
     set((s) => ({ sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'idle' } } }))

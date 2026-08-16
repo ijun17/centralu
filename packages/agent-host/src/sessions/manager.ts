@@ -66,6 +66,8 @@ export class SessionManager {
   private running = new Map<string, { model: string | null; permissionPreset: PermissionPreset }>()
   /** 도구+디렉토리별 슬래시 명령 캐시 (세션이 준비되기 전에도 목록을 줄 수 있게) */
   private commandCache = new Map<string, CommandInfo[]>()
+  /** 도구가 갖고 있는 대화 id 목록 (짧은 캐시 — 삭제 여부 판단용) */
+  private externalIndex = new Map<string, { ids: Set<string>; at: number }>()
 
   constructor(
     private store: Store,
@@ -211,6 +213,10 @@ export class SessionManager {
       this.store.upsertSession(info)
     }
 
+    // 세션이 살아 있는 지금 스킬을 미리 받아둔다.
+    // 나중에 잠든 뒤에는 물어볼 프로세스가 없다 — 그때를 위한 준비다.
+    void this.listCommands(id).catch(() => {})
+
     if (params.initialPrompt) handle.send(params.initialPrompt)
     return info
   }
@@ -292,6 +298,22 @@ export class SessionManager {
     const project = this.store.listProjects().find((p) => p.id === m.projectId)
     if (!project) return { session: m, resumed: false, reason: '프로젝트를 찾을 수 없습니다' }
 
+    /*
+     * 도구 쪽에서 이 대화가 지워졌는지 먼저 본다.
+     *
+     * 그냥 이어가려 하면 프로세스는 뜨지만 첫 턴이 error_during_execution으로 죽는다
+     * (실측). 사용자에게는 원인을 전혀 알려주지 않는 문구다.
+     * 없어진 걸 미리 알면 무엇이 일어났고 무엇을 할 수 있는지 말해줄 수 있다.
+     */
+    const gone = await this.externalGone(m, project.path)
+    if (gone) {
+      return {
+        session: m,
+        resumed: false,
+        reason: `이 대화가 ${m.tool === 'codex' ? 'Codex' : 'Claude Code'}에서 삭제되었습니다 — 여기 남은 기록은 읽을 수 있고, 새 세션으로 이어서 시작할 수 있습니다`,
+      }
+    }
+
     try {
       const handle = await adapter.createSession(
         {
@@ -310,6 +332,7 @@ export class SessionManager {
       m.waitingSince = null
       this.store.upsertSession(m)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
+      void this.listCommands(sessionId).catch(() => {})
       return { session: m, resumed: true }
     } catch (err) {
       return { session: m, resumed: false, reason: (err as Error).message }
@@ -506,7 +529,10 @@ export class SessionManager {
     if (!m) return { ready: false, commands: [] }
     const cwd = this.cwdOf(m.projectId)
     const key = `${m.tool}:${cwd}`
-    const cached = this.commandCache.get(key)
+    // 메모리 → 디스크 순으로 찾는다. host를 껐다 켜도 목록이 남아 있어야
+    // 잠든 세션에서도 슬래시가 동작한다
+    const cached = this.commandCache.get(key) ?? this.store.loadCommands<CommandInfo[]>(m.tool, cwd) ?? undefined
+    if (cached) this.commandCache.set(key, cached)
 
     const handle = this.handles.get(sessionId)
     if (handle?.listCommands) {
@@ -516,13 +542,44 @@ export class SessionManager {
         const commands = rows
           .filter((c) => typeof c.name === 'string' && c.name.length > 0)
           .map((c) => ({ name: c.name, description: c.description ?? '', argumentHint: c.argumentHint ?? '' }))
-        if (commands.length > 0) this.commandCache.set(key, commands)
+        if (commands.length > 0) {
+          this.commandCache.set(key, commands)
+          this.store.saveCommands(m.tool, cwd, commands)
+        }
         return { ready: true, commands }
       } catch {
         // 아래에서 캐시로 물러난다
       }
     }
     return cached ? { ready: true, commands: cached } : { ready: false, commands: [] }
+  }
+
+  /**
+   * 이어갈 대화가 도구 쪽에 아직 있는지.
+   *
+   * 목록 조회 자체가 공짜가 아니므로(codex는 app-server를 띄운다) 짧게 캐시한다.
+   * **판단이 안 서면 없다고 하지 않는다** — 목록을 못 받았다고 멀쩡한 세션을
+   * 삭제된 것으로 막아버리면, 도구가 잠깐 응답하지 않는 것만으로 대화가 끊긴다.
+   */
+  private async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
+    const id = m.externalId
+    const adapter = this.adapters.get(m.tool)
+    if (!id || !adapter?.listExternalSessions) return false
+
+    const key = `${m.tool}:${cwd}`
+    const cached = this.externalIndex.get(key)
+    let ids = cached && Date.now() - cached.at < 30_000 ? cached.ids : null
+    if (!ids) {
+      try {
+        const rows = await adapter.listExternalSessions(cwd, 200)
+        ids = new Set(rows.map((r) => r.externalId))
+        this.externalIndex.set(key, { ids, at: Date.now() })
+      } catch {
+        return false // 확인 못 했으면 막지 않는다
+      }
+    }
+    // 이어받은 원본이 살아 있으면 그것도 인정한다 (resume이 새 id를 발급했을 수 있다)
+    return !ids.has(id) && !(m.importedFrom && ids.has(m.importedFrom))
   }
 
   /** 프로젝트의 작업 디렉토리. 터미널이 자기 키(cwd)를 정할 때 쓴다 */

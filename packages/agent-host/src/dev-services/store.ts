@@ -104,6 +104,28 @@ export class Store {
           }
         },
       },
+      {
+        to: 6,
+        run: () => {
+          /*
+           * 슬래시 명령(스킬) 캐시.
+           *
+           * 스킬은 세션이 아니라 **도구+디렉토리의 성질**이라 세션과 함께 사라지면 안 된다.
+           * 메모리에만 두면 host를 껐다 켠 뒤 첫 세션(=잠들어 있는 세션)에서 영영 못 받는다:
+           * 잠든 세션에는 물어볼 프로세스가 없고, 캐시도 비어 있기 때문이다
+           * (도그푸딩에서 지적됨). 그래서 디스크에 남긴다.
+           */
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS command_cache (
+              tool TEXT NOT NULL,
+              cwd TEXT NOT NULL,
+              commands TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (tool, cwd)
+            )
+          `)
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -258,6 +280,28 @@ export class Store {
       )
       .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
     return rows.reverse().map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
+  }
+
+  /** 스킬 목록을 남긴다 (도구+디렉토리 단위) */
+  saveCommands(tool: string, cwd: string, commands: unknown): void {
+    this.db
+      .prepare(
+        `INSERT INTO command_cache (tool, cwd, commands, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(tool, cwd) DO UPDATE SET commands = excluded.commands, updated_at = excluded.updated_at`,
+      )
+      .run(tool, cwd, JSON.stringify(commands), Date.now())
+  }
+
+  loadCommands<T>(tool: string, cwd: string): T | null {
+    const row = this.db
+      .prepare(`SELECT commands FROM command_cache WHERE tool = ? AND cwd = ?`)
+      .get(tool, cwd) as { commands: string } | undefined
+    if (!row) return null
+    try {
+      return JSON.parse(row.commands) as T
+    } catch {
+      return null
+    }
   }
 
   nextSeq(sessionId: string): number {

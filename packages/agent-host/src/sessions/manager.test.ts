@@ -488,3 +488,75 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
     expect((await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(false)
   })
 })
+
+/**
+ * 도구(클로드·코덱스)에서 대화를 지웠을 때.
+ *
+ * 실측: 그냥 이어가려 하면 프로세스는 뜨고 첫 턴이 error_during_execution으로 죽는다.
+ * 조용한 성공은 아니지만(그게 최악이다) 사용자에게는 원인을 전혀 알려주지 않는다.
+ */
+describe('도구에서 지워진 대화', () => {
+  class GoneAdapter extends FakeAdapter {
+    override readonly capabilities: AdapterCapabilities = {
+      approvals: true, contextUsage: 'exact', resume: true, listExternal: true, autoTitle: true, attachments: [],
+    }
+    /** 도구가 갖고 있다고 답할 id 목록 */
+    present: string[] = ['ext-1']
+    failList = false
+    async listExternalSessions() {
+      if (this.failList) throw new Error('목록을 못 받았다')
+      return this.present.map((externalId) => ({ externalId, title: externalId, updatedAt: 1 }))
+    }
+  }
+
+  const setup = () => {
+    const a = new GoneAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    return { a, m, call: createRpcHandler(m, adapters) }
+  }
+
+  it('지워진 대화를 이어가려 하면 무엇이 일어났는지 말해준다', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+
+    a.present = [] // 사용자가 클로드 코드에서 지웠다
+    const r = await m.resumeSession(s.id)
+
+    expect(r.resumed).toBe(false)
+    expect(r.reason).toMatch(/Claude Code에서 삭제/)
+    // 기록은 읽을 수 있어야 한다 — 세션을 지워버리지 않는다
+    expect(m.listSessions().find((x) => x.id === s.id)).toBeDefined()
+  })
+
+  it('목록을 못 받았으면 삭제로 단정하지 않는다 (도구가 잠깐 안 될 뿐일 수 있다)', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+
+    a.failList = true
+    const r = await m.resumeSession(s.id)
+
+    // 확인을 못 했다고 멀쩡한 세션을 막으면 도구가 잠깐 느린 것만으로 대화가 끊긴다
+    expect(r.resumed).toBe(true)
+  })
+
+  it('이어받은 원본이 살아 있으면 지워진 것으로 보지 않는다', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+
+    // resume이 새 id를 발급해 external_id는 ext-1이 아니지만, 원본은 남아 있다
+    a.present = ['ext-1']
+    expect((await m.resumeSession(s.id)).resumed).toBe(true)
+  })
+})

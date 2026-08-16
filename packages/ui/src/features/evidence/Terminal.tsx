@@ -4,7 +4,6 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useStore } from '../../store/store.js'
 
 /**
  * 프로젝트 터미널 (여러 개).
@@ -96,8 +95,16 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Xterm | null>(null)
   const idRef = useRef(info.terminalId)
+  /**
+   * 마지막으로 셸에 알려준 크기.
+   *
+   * **같은 크기를 다시 보내면 안 된다.** pty resize는 SIGWINCH를 일으키고 셸은
+   * 프롬프트를 다시 그린다. 그런데 fit()은 요소 레이아웃을 건드려 ResizeObserver를
+   * 다시 깨우므로, 크기가 그대로여도 계속 도는 되먹임이 생긴다 —
+   * 화면에는 프롬프트 줄만 끝없이 늘어나는 것으로 보인다 (도그푸딩에서 지적됨).
+   */
+  const lastDims = useRef({ cols: 0, rows: 0 })
   const [dead, setDead] = useState(!info.alive)
-  const width = useStore((s) => s.panelWidth)
 
   useEffect(() => {
     const el = hostRef.current
@@ -125,9 +132,19 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
         // 아직 레이아웃이 없을 때가 있다 — 다음 기회에 맞춘다
       }
     }
+    /** 크기가 **실제로 달라졌을 때만** 셸에 알린다 */
+    const syncSize = () => {
+      safeFit()
+      const { cols, rows } = term
+      if (cols < 2 || rows < 2) return
+      if (cols === lastDims.current.cols && rows === lastDims.current.rows) return
+      lastDims.current = { cols, rows }
+      void platform.terminal.resize(idRef.current, cols, rows).catch(() => {})
+    }
+
     safeFit()
     if (info.history) term.write(info.history)
-    void platform.terminal.resize(info.terminalId, term.cols, term.rows).catch(() => {})
+    syncSize()
 
     const offOutput = platform.terminal.onOutput((e) => {
       if (e.terminalId === idRef.current) term.write(e.data)
@@ -141,14 +158,17 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
       void platform.terminal.input(idRef.current, data).catch(() => {})
     })
 
-    // 패널 폭·창 크기가 바뀌면 셸에도 알려야 줄바꿈이 깨지지 않는다
+    // 패널 폭·창 크기가 바뀌면 셸에도 알려야 줄바꿈이 깨지지 않는다.
+    // 관찰 콜백은 한 프레임 뒤로 미뤄 연속 변경을 한 번으로 합친다.
+    let pending = 0
     const ro = new ResizeObserver(() => {
-      safeFit()
-      void platform.terminal.resize(idRef.current, term.cols, term.rows).catch(() => {})
+      cancelAnimationFrame(pending)
+      pending = requestAnimationFrame(syncSize)
     })
     ro.observe(el)
 
     return () => {
+      cancelAnimationFrame(pending)
       ro.disconnect()
       onData.dispose()
       offOutput()
@@ -158,16 +178,6 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
     }
     // 정체성은 terminalId뿐이다 — history는 처음 붙을 때만 쓰므로 다시 붙일 이유가 없다
   }, [platform, info.terminalId, info.history])
-
-  // 폭이 바뀐 뒤 한 번 더 맞춘다 (ResizeObserver가 놓치는 경우 대비)
-  useEffect(() => {
-    const term = termRef.current
-    if (!term) return
-    const t = setTimeout(() => {
-      void platform.terminal.resize(idRef.current, term.cols, term.rows).catch(() => {})
-    }, 60)
-    return () => clearTimeout(t)
-  }, [width, platform])
 
   return (
     <div

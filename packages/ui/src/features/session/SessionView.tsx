@@ -169,7 +169,7 @@ export function SessionView() {
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
         말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
       */}
-      {!session.live && !session.archived && <DormantNote />}
+      {!session.live && !session.archived && <DormantNote sessionId={session.id} />}
 
       <form
         className="border-t border-edge px-4 py-3"
@@ -442,10 +442,11 @@ function OlderSentinel({
  * 이어갈 수단은 우리가 갖고 있다. 이제 말을 걸면 host가 알아서 되살린다.
  * 여기서는 그 사실만 조용히 알린다 (놀라지 않도록).
  */
-function DormantNote() {
+function DormantNote({ sessionId }: { sessionId: string }) {
+  const waking = useStore((s) => !!s.resuming[sessionId])
   return (
     <p className="border-t border-edge px-4 py-1.5 text-[11px] text-slate" data-testid="dormant-note">
-      잠들어 있습니다 — 메시지를 보내면 자동으로 이어집니다
+      {waking ? '세션을 깨우는 중…' : '잠들어 있습니다 — 메시지를 보내면 자동으로 이어집니다'}
     </p>
   )
 }

@@ -19,7 +19,7 @@ function seeded() {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(5)
+    expect(new Store().schemaVersion).toBe(6)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -102,7 +102,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(5)
+    expect(store.schemaVersion).toBe(6)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
