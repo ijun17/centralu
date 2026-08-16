@@ -41,6 +41,8 @@ export type ChatItem =
   | { kind: 'assistant'; seq: number; text: string }
   | { kind: 'tool'; seq: number; tool: string; title: string; readOnly: boolean; result?: string; ok?: boolean }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
+  /** 대화의 경계 표식 (압축 지점 등). 대화가 아니라 대화에 대한 사실이다 */
+  | { kind: 'mark'; seq: number; text: string }
 
 export type AppState = {
   platform: Platform | null
@@ -51,6 +53,11 @@ export type AppState = {
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
+  /**
+   * 세션별로 지금 화면에 있는 가장 오래된 기록 지점.
+   * 압축으로 모델이 잊은 대화도 우리 저장소에는 남아 있으므로, 여기서부터 더 거슬러 읽는다.
+   */
+  history: Record<string, { oldestSeq: number; more: boolean; loading: boolean }>
   /**
    * 증거 레인(깃·파일)이 열려 있는가.
    * 탭이 아니라 패널인 이유: 깃 상태는 대화를 **대신하는** 화면이 아니라
@@ -80,6 +87,8 @@ export type AppState = {
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
   loadHistory(sessionId: string): Promise<void>
+  /** 더 오래된 대화를 앞에 붙인다 (압축 이전 대화를 읽기 위한 길) */
+  loadOlder(sessionId: string): Promise<void>
   saveWorkspace(): void
   togglePanel(open?: boolean): void
   /** 탭을 고르면 패널이 닫혀 있어도 함께 열린다 — 고른 것이 안 보이면 안 된다 */
@@ -116,7 +125,10 @@ export type AppState = {
   attachFile(sessionId: string, file: File): Promise<Attachment | null>
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   interrupt(sessionId: string): Promise<void>
-  archive(sessionId: string): Promise<void>
+  /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
+  archive(sessionId: string, archived?: boolean): Promise<void>
+  /** 에이전트만 재시작한다 (대화는 그대로) */
+  restartSession(sessionId: string): Promise<boolean>
   deleteSession(sessionId: string): Promise<void>
   updateSessionSettings(
     sessionId: string,
@@ -128,6 +140,28 @@ export type AppState = {
 }
 
 let chatSeq = 0
+
+/** 첨부 상한. 이보다 크면 base64 변환과 WS 전송 양쪽에서 앱이 눈에 띄게 멈춘다 */
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+/**
+ * 바이트 → base64.
+ *
+ * 한 글자씩 이어붙이면(`binary += String.fromCharCode(b)`) 문자열이 매번 새로 만들어져
+ * 스크린샷 한 장(수 MB)에도 수십 초씩 멈춘다 — 화면에는 아무 일도 안 일어난 것처럼 보인다.
+ * 실제로 "파일 첨부 안 됨"으로 보고된 증상이 이것이었다. 청크로 끊어 처리한다.
+ */
+function toBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000
+  const parts: string[] = []
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK)))
+  }
+  return btoa(parts.join(''))
+}
+
+/** 한 번에 거슬러 읽는 기록 분량 */
+const HISTORY_PAGE = 200
 
 /** 비포커스 세션이 유지하는 최근 메시지 수 — 다시 열면 저장소에서 더 불러온다 */
 const WINDOW_SIZE = 50
@@ -143,6 +177,7 @@ export const useStore = create<AppState>((set, get) => ({
   chat: {},
   focusedSessionId: null,
   focusedProjectId: null,
+  history: {},
   panelOpen: true,
   panelTab: 'git',
   overlay: null,
@@ -299,11 +334,48 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     try {
-      const msgs = await platform.agents.loadMessages(sessionId)
+      const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE)
       const items = messagesToChat(msgs)
-      set((s) => ({ chat: { ...s.chat, [sessionId]: s.chat[sessionId] ?? items } }))
+      set((s) => ({
+        chat: { ...s.chat, [sessionId]: s.chat[sessionId] ?? items },
+        history: {
+          ...s.history,
+          [sessionId]: {
+            oldestSeq: msgs[0]?.seq ?? 0,
+            more: msgs.length >= HISTORY_PAGE,
+            loading: false,
+          },
+        },
+      }))
     } catch {
       // 기록을 못 불러와도 새 대화는 가능하므로 조용히 넘어간다
+    }
+  },
+
+  async loadOlder(sessionId) {
+    const platform = get().platform
+    const cur = get().history[sessionId]
+    if (!platform || !cur?.more || cur.loading || cur.oldestSeq <= 1) return
+    set((s) => ({ history: { ...s.history, [sessionId]: { ...cur, loading: true } } }))
+    try {
+      const msgs = await platform.agents.loadMessages(sessionId, HISTORY_PAGE, cur.oldestSeq)
+      const older = messagesToChat(msgs)
+      set((s) => ({
+        chat: { ...s.chat, [sessionId]: [...older, ...(s.chat[sessionId] ?? [])] },
+        history: {
+          ...s.history,
+          [sessionId]: {
+            oldestSeq: msgs[0]?.seq ?? cur.oldestSeq,
+            more: msgs.length >= HISTORY_PAGE,
+            loading: false,
+          },
+        },
+      }))
+    } catch (e) {
+      set((s) => ({
+        history: { ...s.history, [sessionId]: { ...cur, loading: false } },
+        toast: `이전 대화를 불러오지 못했습니다: ${(e as Error).message}`,
+      }))
     }
   },
   togglePanel(open) {
@@ -413,12 +485,18 @@ export const useStore = create<AppState>((set, get) => ({
   async attachFile(sessionId, file) {
     const platform = get().platform
     if (!platform) return null
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      set({ toast: `${file.name}은(는) 너무 큽니다 (최대 ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB)` })
+      return null
+    }
     try {
       const buf = await file.arrayBuffer()
-      let binary = ''
-      const bytes = new Uint8Array(buf)
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
-      return await platform.agents.saveAttachment(sessionId, file.name, file.type || 'application/octet-stream', btoa(binary))
+      return await platform.agents.saveAttachment(
+        sessionId,
+        file.name,
+        file.type || 'application/octet-stream',
+        toBase64(new Uint8Array(buf)),
+      )
     } catch (e) {
       set({ toast: `첨부하지 못했습니다: ${(e as Error).message}` })
       return null
@@ -433,6 +511,8 @@ export const useStore = create<AppState>((set, get) => ({
     }))
     try {
       await get().platform!.agents.send(sessionId, text, attachments)
+      // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
+      set((s) => (s.sessions[sessionId]?.live ? {} : { sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: true } } }))
     } catch (err) {
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
@@ -440,12 +520,8 @@ export const useStore = create<AppState>((set, get) => ({
         chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
       }))
       const e = err as Error & { code?: string }
-      set({
-        toast:
-          e.code === 'session_not_found'
-            ? '이 세션은 더 이상 실행 중이 아닙니다. 기록은 남아 있으니 새 세션을 시작하세요.'
-            : `보내지 못했습니다: ${e.message}`,
-      })
+      // host가 알아서 되살린 뒤 보낸다 — 여기까지 왔다면 되살리기 자체가 실패한 것이다
+      set({ toast: `보내지 못했습니다: ${e.message}` })
     }
   },
 
@@ -513,12 +589,36 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async archive(sessionId) {
-    await get().platform!.agents.archiveSession(sessionId)
+  async archive(sessionId, archived = true) {
+    await get().platform!.agents.archiveSession(sessionId, archived)
+    set((s) => {
+      const cur = s.sessions[sessionId]!
+      return {
+        sessions: {
+          ...s.sessions,
+          [sessionId]: archived ? archiveSession(cur) : { ...cur, archived: false, live: false },
+        },
+        // 숨기면 포커스를 놓는다. 꺼내면 바로 그 세션을 본다 — 꺼낸 이유가 그것이다
+        focusedSessionId:
+          archived && s.focusedSessionId === sessionId ? null : archived ? s.focusedSessionId : sessionId,
+      }
+    })
+    if (!archived) void get().loadHistory(sessionId)
+  },
+
+  /**
+   * 에이전트만 재시작한다. 대화 기록은 그대로 두고 프로세스만 갈아 끼운다 —
+   * 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다.
+   */
+  async restartSession(sessionId) {
+    const platform = get().platform!
+    set((s) => ({ sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'idle' } } }))
+    const r = await platform.agents.restartSession(sessionId)
     set((s) => ({
-      sessions: { ...s.sessions, [sessionId]: archiveSession(s.sessions[sessionId]!) },
-      focusedSessionId: s.focusedSessionId === sessionId ? null : s.focusedSessionId,
+      sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
+      toast: r.resumed ? '에이전트를 다시 시작했습니다' : `재시작하지 못했습니다: ${r.reason ?? ''}`,
     }))
+    return r.resumed
   },
 
   async rename(sessionId, name) {
@@ -564,6 +664,10 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       ]
     case 'approval_resolved':
       return items.map((it) => (it.kind === 'approval' && it.requestId === e.requestId ? { ...it, decision: e.decision } : it))
+    case 'compaction':
+      // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
+      // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다
+      return [...items, { kind: 'mark', seq: ++chatSeq, text: '여기서 이전 대화가 압축되었습니다' }]
     default:
       return items
   }
@@ -580,6 +684,8 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       const last = items[items.length - 1]
       if (last?.kind === 'assistant') last.text += e.text ?? ''
       else items.push({ kind: 'assistant', seq: m.seq, text: e.text ?? '' })
+    } else if (m.kind === 'marker') {
+      items.push({ kind: 'mark', seq: m.seq, text: '여기서 이전 대화가 압축되었습니다' })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary) items.push({ kind: 'tool', seq: m.seq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly })

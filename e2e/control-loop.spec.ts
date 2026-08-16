@@ -279,30 +279,38 @@ test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었�
   await page.getByTestId('prompt-input').fill('계속 진행해줘')
   await page.getByTestId('send').click()
 
-  await expect(page.getByTestId('toast')).toContainText('새 세션')
+  await expect(page.getByTestId('toast')).toContainText('보내지 못했습니다')
   // 보내지 못한 말풍선은 남지 않는다
   await expect(page.getByTestId('msg-user').filter({ hasText: '계속 진행해줘' })).toHaveCount(0)
 })
 
-test('죽은 세션은 이어가기를 권한다 (C-1, FR-10)', async ({ page }) => {
+test('잠든 세션은 말을 걸면 알아서 이어진다 (C-1, FR-10)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
   // host 재시작 후 상태를 흉내낸다: 프로세스는 없고 기록만 남은 세션
   await page.evaluate(() => {
+    const m = (window as any).__mock
     const store = (window as any).__store
     const st = store.getState()
     const id = st.focusedSessionId
+    m.sessions.get(id).live = false
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
 
-  await expect(page.getByTestId('resume-bar')).toBeVisible()
-  await page.getByTestId('resume-session').click()
-  // 되살아나면 안내가 사라진다
-  await expect(page.getByTestId('resume-bar')).toBeHidden()
+  // 막지 않는다. 잠들어 있다는 사실만 알리고 입력은 그대로 열려 있다
+  await expect(page.getByTestId('dormant-note')).toBeVisible()
+  await expect(page.getByTestId('prompt-input')).toBeEnabled()
+
+  await page.getByTestId('prompt-input').fill('이어서 해줘')
+  await page.getByTestId('send').click()
+
+  // 이어가기 버튼을 누른 적이 없는데 대화가 이어진다
+  await expect(page.getByTestId('chat-stream')).toContainText('이어서 해줘')
+  await expect(page.getByTestId('dormant-note')).toBeHidden()
 })
 
-test('이어갈 수 없으면 이유를 알린다 (C-1 폴백, 조용한 실패 금지)', async ({ page }) => {
+test('정말 이어갈 수 없으면 이유를 알린다 (조용한 실패 금지)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -312,12 +320,16 @@ test('이어갈 수 없으면 이유를 알린다 (C-1 폴백, 조용한 실패 
     const st = store.getState()
     const id = st.focusedSessionId
     m.unresumable.add(id) // 재개 불가로 표시
+    m.sessions.get(id).live = false
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
 
-  await page.getByTestId('resume-session').click()
+  await page.getByTestId('prompt-input').fill('이어서 해줘')
+  await page.getByTestId('send').click()
+
   await expect(page.getByTestId('toast')).toContainText('이어갈 수 없습니다')
-  await expect(page.getByTestId('resume-bar')).toBeVisible() // 여전히 안내가 남는다
+  // 보내지 못한 말풍선은 남지 않는다
+  await expect(page.getByTestId('msg-user').filter({ hasText: '이어서 해줘' })).toHaveCount(0)
 })
 
 test('긴 대화는 보이는 것만 그린다 (D-1 가상 스크롤)', async ({ page }) => {
@@ -838,7 +850,9 @@ test('창 드래그 영역과 오버스크롤 차단 (M2.5 창 문제)', async (
   await newSession(page, 'alpha', '작업')
 
   // 타이틀바를 숨겼으므로 각 레인의 헤더가 창 이동 손잡이다 (상단바·세션·증거)
-  await expect(page.locator('header[data-tauri-drag-region]')).toHaveCount(3)
+  // 각 레인의 헤더가 창 이동 손잡이다 (상단바·세션·증거).
+  // 속성만으로는 헤더 '안의 글자'를 잡았을 때 죽으므로 mousedown도 함께 받는다
+  await expect(page.locator('[data-tauri-drag-region]')).toHaveCount(3)
 
   // 창 자체는 스크롤되지 않는다 (웹처럼 고무줄로 튕기면 안 된다)
   const overscroll = await page.evaluate(() => getComputedStyle(document.body).overscrollBehaviorY)
@@ -1086,4 +1100,89 @@ test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) =
   await page.getByTestId('evidence-commit').click()
   await expect(page.getByTestId('toast')).toContainText('커밋')
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('패널에서 커밋')
+})
+
+/** M2.6 도그푸딩: 숨김/삭제·재시작·첨부·압축된 옛 대화 */
+test('세션은 숨기거나 지운다 — 숨긴 것은 다시 꺼낼 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '숨길 세션')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId(`hide-session-${id}`).click()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeHidden()
+
+  // 사라진 게 아니라 접힌 것이다 — 몇 개인지 보인다
+  await page.getByTestId('hidden-toggle-alpha').click()
+  await expect(page.getByTestId(`hidden-row-${id}`)).toContainText('숨길 세션')
+
+  await page.getByTestId(`unhide-session-${id}`).click()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+})
+
+test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '이 대화는 남아야 한다')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId('restart-session').click()
+  await expect(page.getByTestId('toast')).toContainText('다시 시작')
+
+  expect(await page.evaluate(() => (window as any).__mock.restarted)).toContain(id)
+  await expect(page.getByTestId('chat-stream')).toContainText('이 대화는 남아야 한다')
+})
+
+test('드래그해서 떨어뜨려도 첨부된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 웹뷰가 드롭을 가로채지 않는다는 전제 아래, 떨어뜨린 파일이 첨부로 잡히는지
+  const dt = await page.evaluateHandle(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(['스크린샷 내용'], 'shot.png', { type: 'image/png' }))
+    return data
+  })
+  await page.getByTestId('input-dropzone').dispatchEvent('drop', { dataTransfer: dt })
+
+  await expect(page.getByTestId('attachment-list')).toContainText('shot.png')
+  await page.getByTestId('send').click()
+  const sent = await page.evaluate(() => (window as any).__mock.sentAttachments)
+  expect(sent.at(-1).name).toBe('shot.png')
+})
+
+test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 저장소에는 250줄이 있고 화면에는 최근 200줄만 있다
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    const rows = Array.from({ length: 250 }, (_, i) => ({
+      sessionId: sid, seq: i + 1, role: i % 2 ? 'assistant' : 'user',
+      kind: 'text', payload: { text: `옛 대화 ${i + 1}` }, ts: Date.now(),
+    }))
+    m.messages.set(sid, rows)
+  }, id)
+  // 앱을 다시 열어 그 세션을 펼친 상황 (메모리에 든 대화 없이 저장소에서 읽는다)
+  await page.evaluate((sid) => {
+    const store = (window as any).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid)
+  }, id)
+
+  // 압축 지점은 대화에 표시된다 (모델은 잊었지만 기록은 남아 있다는 사실)
+  await page.evaluate((sid) => (window as any).__mock.emit({ type: 'compaction', sessionId: sid }), id)
+  await expect(page.getByTestId('msg-mark')).toContainText('압축')
+
+  // 화면에는 최근 200줄만 있다 (가상 스크롤이라 실제로 그려지는 건 더 적다)
+  const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
+  expect(await page.evaluate(loaded, id)).toBe(201) // 200 + 압축 표식
+
+  await page.getByTestId('load-older').click()
+  await expect(page.getByTestId('load-older')).toBeHidden() // 더 거슬러 갈 곳이 없다
+
+  // 압축으로 모델이 잊은 대화도 우리 기록에는 남아 있다
+  expect(await page.evaluate(loaded, id)).toBe(251)
+  const first = await page.evaluate((sid: string) => (window as any).__store.getState().chat[sid][0].text, id)
+  expect(first).toBe('옛 대화 1')
 })

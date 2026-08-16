@@ -103,14 +103,26 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   'agents.interrupt': { params: z.object({ sessionId: z.string() }), result: z.object({ ok: z.literal(true) }) },
+  /**
+   * 목록에서 숨긴다(=아카이브). 삭제와 달리 **기록은 남는다** — 되돌릴 수 있다.
+   * archived:false면 다시 꺼낸다.
+   */
   'agents.archiveSession': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({ sessionId: z.string(), archived: z.boolean().default(true) }),
     result: z.object({ ok: z.literal(true) }),
   },
   /** 세션을 완전히 지운다 — 아카이브와 달리 대화 기록·첨부까지 사라진다 */
   'agents.deleteSession': {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 세션에 연결된 에이전트만 재시작한다 (대화 기록은 그대로).
+   * 도구가 이상해졌을 때 세션을 새로 만들지 않고 프로세스만 갈아 끼우는 길.
+   */
+  'agents.restartSession': {
+    params: z.object({ sessionId: z.string() }),
+    result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
   'agents.resumeSession': {
     params: z.object({ sessionId: z.string() }),

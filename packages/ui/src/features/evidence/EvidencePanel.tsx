@@ -3,6 +3,7 @@ import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, type PanelTab } from '../../store/store.js'
 import { FileTree } from '../files/FileTree.jsx'
+import { DragRegion } from '../../components/DragRegion.jsx'
 
 /**
  * 증거 레인 (우측).
@@ -55,7 +56,7 @@ function PanelHeader({
 
   return (
     <>
-      <header className="flex items-center gap-2 border-b border-edge px-3 py-2" data-tauri-drag-region>
+      <DragRegion className="flex items-center gap-2 border-b border-edge px-3 py-2">
         <span className="readout truncate text-[11px] text-ash" data-testid="evidence-project">
           {projectName}
         </span>
@@ -77,7 +78,7 @@ function PanelHeader({
         >
           ›
         </button>
-      </header>
+      </DragRegion>
 
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1" data-testid="evidence-tabs">
         {(

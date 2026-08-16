@@ -51,7 +51,10 @@ export interface AgentPort {
     matcher?: string,
   ): Promise<void>
   interrupt(sessionId: string): Promise<void>
-  archiveSession(sessionId: string): Promise<void>
+  /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */
+  archiveSession(sessionId: string, archived?: boolean): Promise<void>
+  /** 세션에 연결된 에이전트만 재시작한다 (대화는 그대로) */
+  restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */
   deleteSession(sessionId: string): Promise<void>
   /**
@@ -106,6 +109,13 @@ export interface SystemPort {
   openInIde(path: string, line?: number): Promise<void>
   /** 디렉토리 선택. 데스크톱은 네이티브 피커, 웹 dev는 경로 입력으로 폴백한다 (FR-19) */
   pickDirectory(): Promise<string | null>
+  /**
+   * 지금부터 창을 끈다 (타이틀바를 숨겼으므로 우리가 손잡이를 만들어야 한다).
+   * data-tauri-drag-region만으로는 부족하다 — 그 속성은 **mousedown 타깃 자신**에
+   * 있어야 해서, 헤더 안의 글자를 잡으면 죽는다. 실제로 "가끔만 된다"로 나타났다.
+   * 웹에서는 아무 일도 하지 않는다.
+   */
+  startWindowDrag(): Promise<void>
 }
 
 export type PlatformCapabilities = {

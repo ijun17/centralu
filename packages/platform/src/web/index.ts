@@ -50,8 +50,13 @@ class WebAgentPort implements AgentPort {
   async interrupt(sessionId: string) {
     await this.rpc.call('agents.interrupt', { sessionId })
   }
-  async archiveSession(sessionId: string) {
-    await this.rpc.call('agents.archiveSession', { sessionId })
+  async archiveSession(sessionId: string, archived = true) {
+    await this.rpc.call('agents.archiveSession', { sessionId, archived })
+  }
+  restartSession(sessionId: string) {
+    return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.restartSession', {
+      sessionId,
+    })
   }
   updateSettings(sessionId: string, settings: { model?: string | null; permissionPreset?: PermissionPreset }) {
     return this.rpc.call<SessionInfo>('agents.updateSettings', { sessionId, ...settings })
@@ -118,6 +123,10 @@ class WebSystemPort implements SystemPort {
   async setBadge(_count: number) {
     /* 브라우저에는 독 뱃지가 없다 */
   }
+  async startWindowDrag(): Promise<void> {
+    // 브라우저에는 옮길 창이 없다
+  }
+
   async pickDirectory(): Promise<string | null> {
     // 브라우저에는 디렉토리 피커가 없다 — dev 전용 폴백
     return window.prompt('프로젝트 디렉토리의 전체 경로를 입력하세요', '')

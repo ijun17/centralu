@@ -359,6 +359,9 @@ export class SessionManager {
       : e.type === 'tool_result' ? 'tool_result'
       : e.type === 'approval_request' || e.type === 'approval_resolved' ? 'approval'
       : e.type === 'message_delta' ? 'text'
+      // 압축 지점을 기록에 남긴다. 모델의 컨텍스트에서는 옛 대화가 접혔지만
+      // 우리 기록에는 그대로 있다 — 어디서 접혔는지 보여야 거슬러 읽을 수 있다.
+      : e.type === 'compaction' ? 'marker'
       : null
     if (!kind) return
     const seq = this.store.nextSeq(m.id)
@@ -374,9 +377,27 @@ export class SessionManager {
     return saveAttachment(sessionId, name, mime, dataBase64)
   }
 
-  send(sessionId: string, text: string, attachments?: Attachment[]): void {
+  /**
+   * 말을 건다.
+   *
+   * 프로세스가 없으면 **되살리고 나서 보낸다.** 예전에는 "이 세션은 실행 중이 아닙니다"로
+   * 되돌려보냈는데, 그건 기계 사정을 사람에게 떠넘기는 것이다 — 사람은 이어서 말하고
+   * 싶을 뿐이고, 이어갈 수단(external_id)은 우리가 갖고 있다.
+   */
+  async send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+
+    if (!this.handles.has(sessionId)) {
+      const r = await this.resumeSession(sessionId)
+      if (!r.resumed) {
+        throw Object.assign(new Error(`대화를 이어갈 수 없습니다: ${r.reason ?? '알 수 없는 이유'}`), {
+          code: 'session_not_found',
+        })
+      }
+    }
+
     const h = this.requireHandle(sessionId)
-    const m = this.meta.get(sessionId)!
     const seq = this.store.nextSeq(sessionId)
     this.store.appendMessages([{ sessionId, seq, role: 'user', kind: 'text', payload: { text }, ts: Date.now() }])
     m.lastSeq = seq
@@ -497,18 +518,37 @@ export class SessionManager {
     this.requireHandle(sessionId).interrupt()
   }
 
-  async archive(sessionId: string): Promise<void> {
-    const h = this.handles.get(sessionId)
-    if (h) await h.dispose()
-    this.handles.delete(sessionId)
+  /**
+   * 목록에서 숨긴다 / 다시 꺼낸다. 삭제와 다르다 — 기록·첨부는 그대로 남는다.
+   * 숨길 때 프로세스는 정리한다(자원을 붙들 이유가 없다). 꺼낼 때 자동으로 띄우지는
+   * 않는다 — 말을 걸면 그때 알아서 이어진다 (send의 자동 이어가기).
+   */
+  async archive(sessionId: string, archived = true): Promise<void> {
     const m = this.meta.get(sessionId)
-    if (m) {
-      m.archived = true
-      m.state = 'idle'
-      m.waitingSince = null
-      this.store.upsertSession(m)
-      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
+    if (!m) return
+    if (archived) {
+      const h = this.handles.get(sessionId)
+      if (h) await h.dispose().catch(() => {})
+      this.handles.delete(sessionId)
     }
+    m.archived = archived
+    m.state = 'idle'
+    m.waitingSince = null
+    this.store.upsertSession(m)
+    this.emit({ type: 'state_change', sessionId, state: 'idle', reason: archived ? 'archived' : 'unarchived' })
+  }
+
+  /**
+   * 에이전트만 재시작한다 (FR-10 확장).
+   * 도구가 먹통이 됐을 때 세션을 새로 만들면 대화가 끊긴다 — 프로세스만 갈아 끼운다.
+   */
+  async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    const h = this.handles.get(sessionId)
+    if (h) {
+      await h.dispose().catch(() => {})
+      this.handles.delete(sessionId)
+    }
+    return this.resumeSession(sessionId)
   }
 
   rename(sessionId: string, name: string): void {

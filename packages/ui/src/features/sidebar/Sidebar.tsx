@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
-import { useSessionsOf } from '../../store/selectors.js'
+import { useHiddenSessionsOf, useSessionsOf } from '../../store/selectors.js'
 import { StateDot } from '../../components/primitives.jsx'
 
 /** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
@@ -34,7 +34,10 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const sessions = useSessionsOf(projectId)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [confirming, setConfirming] = useState<string | null>(null)
+  const [hiddenOpen, setHiddenOpen] = useState(false)
   const deleteSession = useStore((s) => s.deleteSession)
+  const archive = useStore((s) => s.archive)
+  const hidden = useHiddenSessionsOf(projectId)
   const focusProject = useStore((s) => s.focusProject)
   const selected = useStore((s) => s.focusedProjectId === projectId && !s.focusedSessionId)
 
@@ -127,29 +130,98 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                   />
                 )}
               </button>
-              {/* 삭제는 되돌릴 수 없으므로 확인을 받는다. 평소엔 숨어 있다가 호버·포커스에만 나타난다 */}
-              <button
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-[11px] text-slate opacity-0 transition-opacity hover:text-chalk focus-visible:opacity-100 group-hover/row:opacity-100"
-                data-testid={`delete-session-${s.id}`}
-                title="세션 삭제 (기록도 함께 사라집니다)"
-                aria-label={`${s.name} 삭제`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setConfirming(s.id)
-                }}
-              >
-                ✕
-              </button>
+              {/*
+                숨기기와 삭제는 다른 일이다.
+                숨기기는 되돌릴 수 있고(기록이 남는다), 삭제는 되돌릴 수 없다.
+                되돌릴 수 있는 쪽을 먼저·크게 두고, 삭제는 확인을 받는다.
+              */}
+              <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
+                <button
+                  className="rounded px-1 text-[11px] text-slate hover:text-chalk"
+                  data-testid={`hide-session-${s.id}`}
+                  title="목록에서 숨기기 (기록은 남고 나중에 다시 꺼낼 수 있습니다)"
+                  aria-label={`${s.name} 숨기기`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void archive(s.id, true)
+                  }}
+                >
+                  ⌄
+                </button>
+                <button
+                  className="rounded px-1 text-[11px] text-slate hover:text-chalk"
+                  data-testid={`delete-session-${s.id}`}
+                  title="완전히 삭제 (기록도 함께 사라집니다)"
+                  aria-label={`${s.name} 삭제`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setConfirming(s.id)
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
             </li>
           )
         })}
       </ul>
 
+      {/* 숨긴 것은 사라진 게 아니다 — 몇 개인지 보이고, 펴면 되돌릴 수 있다 */}
+      {hidden.length > 0 && (
+        <div className="mt-1">
+          <button
+            className="flex w-full items-center gap-1.5 px-3 py-1 text-left text-[10px] text-slate transition-colors hover:text-ash"
+            onClick={() => setHiddenOpen((v) => !v)}
+            data-testid={`hidden-toggle-${project.name}`}
+            aria-expanded={hiddenOpen}
+          >
+            <span className="text-[9px]">{hiddenOpen ? '▾' : '▸'}</span>
+            숨김 {hidden.length}개
+          </button>
+          {hiddenOpen && (
+            <ul data-testid={`hidden-list-${project.name}`}>
+              {hidden.map((s) => (
+                <li key={s.id} className="group/hidden relative">
+                  <button
+                    className="flex w-full items-center gap-2 py-1 pl-6 pr-14 text-left text-[12px] text-slate transition-colors hover:text-ash"
+                    onClick={() => void archive(s.id, false)}
+                    data-testid={`hidden-row-${s.id}`}
+                    title="다시 꺼내기"
+                  >
+                    <span className="truncate">{s.name}</span>
+                  </button>
+                  <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/hidden:opacity-100">
+                    <button
+                      className="rounded px-1 text-[10px] text-slate hover:text-chalk"
+                      onClick={() => void archive(s.id, false)}
+                      data-testid={`unhide-session-${s.id}`}
+                      aria-label={`${s.name} 다시 꺼내기`}
+                      title="다시 꺼내기"
+                    >
+                      ⌃
+                    </button>
+                    <button
+                      className="rounded px-1 text-[10px] text-slate hover:text-chalk"
+                      onClick={() => setConfirming(s.id)}
+                      data-testid={`delete-session-${s.id}`}
+                      aria-label={`${s.name} 삭제`}
+                      title="완전히 삭제"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => setNewSessionOpen(false)} />}
 
       {confirming && (
         <ConfirmDelete
-          name={sessions.find((s) => s.id === confirming)?.name ?? '세션'}
+          name={[...sessions, ...hidden].find((s) => s.id === confirming)?.name ?? '세션'}
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
             void deleteSession(confirming)

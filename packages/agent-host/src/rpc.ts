@@ -9,7 +9,7 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
     'agents.createSession': async (p) => mgr.createSession(RpcMethods['agents.createSession'].params.parse(p)),
     'agents.send': async (p) => {
       const { sessionId, text, attachments } = RpcMethods['agents.send'].params.parse(p)
-      mgr.send(sessionId, text, attachments)
+      await mgr.send(sessionId, text, attachments)
       return { ok: true as const }
     },
     'agents.respondApproval': async (p) => {
@@ -23,7 +23,8 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       return { ok: true as const }
     },
     'agents.archiveSession': async (p) => {
-      await mgr.archive(RpcMethods['agents.archiveSession'].params.parse(p).sessionId)
+      const a = RpcMethods['agents.archiveSession'].params.parse(p)
+      await mgr.archive(a.sessionId, a.archived)
       return { ok: true as const }
     },
     'agents.deleteSession': async (p) => {
@@ -34,6 +35,8 @@ export function createRpcHandler(mgr: SessionManager, adapters: Map<ToolName, Ag
       const { projectId, tool, limit } = RpcMethods['agents.listExternalSessions'].params.parse(p)
       return mgr.listExternalSessions(projectId, tool, limit)
     },
+    'agents.restartSession': async (p) =>
+      mgr.restartSession(RpcMethods['agents.restartSession'].params.parse(p).sessionId),
     'agents.resumeSession': async (p) =>
       mgr.resumeSession(RpcMethods['agents.resumeSession'].params.parse(p).sessionId),
     'agents.updateSettings': async (p) => {

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { Platform, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
 
@@ -96,6 +97,10 @@ class TauriSystemPort implements SystemPort {
 
   async pickDirectory(): Promise<string | null> {
     return pickDirectory()
+  }
+
+  async startWindowDrag(): Promise<void> {
+    await getCurrentWindow().startDragging()
   }
 }
 

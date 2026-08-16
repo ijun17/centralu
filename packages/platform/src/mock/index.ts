@@ -171,6 +171,9 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /** 테스트용: 재시작을 요청받은 세션 */
+  restarted: string[] = []
+
   /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */
   lastCreateParams: CreateSessionParams | null = null
 
@@ -221,6 +224,15 @@ export class MockPlatform implements Platform {
       if (attachments?.length) this.sentAttachments.push(...attachments)
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      // host와 같은 규칙: 잠들어 있으면 되살리고 나서 보낸다 (자동 이어가기)
+      if (!s.live) {
+        if (this.unresumable.has(sessionId)) {
+          throw Object.assign(new Error('대화를 이어갈 수 없습니다: 이 세션은 재개할 수 없습니다'), {
+            code: 'session_not_found',
+          })
+        }
+        s.live = true
+      }
       const seq = (this.messages.get(sessionId)?.length ?? 0) + 1
       this.pushMessage({ sessionId, seq, role: 'user', kind: 'text', payload: { text }, ts: this.now() })
       s.lastSeq = seq
@@ -238,12 +250,13 @@ export class MockPlatform implements Platform {
     interrupt: async (sessionId: string) => {
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     },
-    archiveSession: async (sessionId: string) => {
+    archiveSession: async (sessionId: string, archived = true) => {
       const s = this.sessions.get(sessionId)
       if (s) {
-        s.archived = true
+        s.archived = archived
         s.state = 'idle'
         s.waitingSince = null
+        if (archived) s.live = false
       }
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
     },
@@ -258,6 +271,16 @@ export class MockPlatform implements Platform {
       if (s.model !== undefined) sess.model = s.model
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
       return { ...sess }
+    },
+    restartSession: async (sessionId: string) => {
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      this.restarted.push(sessionId)
+      if (this.unresumable.has(sessionId)) {
+        return { session: { ...s }, resumed: false, reason: '이 세션은 재개할 수 없습니다' }
+      }
+      s.live = true
+      return { session: { ...s }, resumed: true }
     },
     resumeSession: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
@@ -335,6 +358,7 @@ export class MockPlatform implements Platform {
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })
     },
+    startWindowDrag: async () => {},
     pickDirectory: async () => this.nextPickedDirectory,
   }
 

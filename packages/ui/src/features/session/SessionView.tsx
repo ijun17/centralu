@@ -7,6 +7,7 @@ import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
+import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 
@@ -21,9 +22,11 @@ export function SessionView() {
   const chat = useStore((s) => (s.focusedSessionId ? (s.chat[s.focusedSessionId] ?? EMPTY_CHAT) : EMPTY_CHAT))
   const send = useStore((s) => s.send)
   const interrupt = useStore((s) => s.interrupt)
+  const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
   const attachFile = useStore((s) => s.attachFile)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -62,12 +65,12 @@ export function SessionView() {
     }
     return (
       <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
-        <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2" data-tauri-drag-region>
+        <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
           <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
             {projectOnly.name}
           </h1>
           <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
-        </header>
+        </DragRegion>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
           <p className="text-[13px] text-ash">세션을 선택하거나 새로 시작하세요</p>
           <p className="text-[11px] text-slate">
@@ -82,7 +85,7 @@ export function SessionView() {
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
-      <header className="flex items-center gap-2.5 border-b border-edge px-4 py-2" data-tauri-drag-region>
+      <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
         <StateDot state={session.state} />
         <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
           {session.name}
@@ -123,8 +126,17 @@ export function SessionView() {
               중단
             </button>
           )}
+          {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
+          <button
+            className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
+            onClick={() => void restart(session.id)}
+            data-testid="restart-session"
+            title="에이전트만 다시 시작합니다 (대화 기록은 그대로)"
+          >
+            새로고침
+          </button>
         </span>
-      </header>
+      </DragRegion>
 
       <ChatStream scrollRef={scrollRef} chat={chat} pending={session.pendingApproval} sessionId={session.id} />
 
@@ -132,7 +144,7 @@ export function SessionView() {
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
         말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
       */}
-      {!session.live && !session.archived && <ResumeBar sessionId={session.id} />}
+      {!session.live && !session.archived && <DormantNote />}
 
       <form
         className="border-t border-edge px-4 py-3"
@@ -167,10 +179,21 @@ export function SessionView() {
           </ul>
         )}
         <div
-          className="flex items-end gap-2 rounded border border-edge bg-panel px-3 py-2 transition-colors focus-within:border-graphite"
+          className={`flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
+            dragging ? 'border-ash' : 'border-edge'
+          }`}
+          onDragEnter={(e) => {
+            e.preventDefault()
+            setDragging(true)
+          }}
           onDragOver={(e) => e.preventDefault()}
+          onDragLeave={(e) => {
+            // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+          }}
           onDrop={(e) => {
             e.preventDefault()
+            setDragging(false)
             void takeFiles(e.dataTransfer.files)
           }}
           data-testid="input-dropzone"
@@ -278,6 +301,8 @@ function ChatStream({
       className="flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
       data-testid="chat-stream"
     >
+      <LoadOlder sessionId={sessionId} />
+
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
         {virtualizer.getVirtualItems().map((v) => (
           <div
@@ -299,41 +324,43 @@ function ChatStream({
   )
 }
 
-/** 죽은 세션을 되살리는 줄. 실패하면 왜 안 되는지 알려준다 (조용한 실패 금지) */
-function ResumeBar({ sessionId }: { sessionId: string }) {
-  const resume = useStore((s) => s.resumeSession)
-  const createSession = useStore((s) => s.createSession)
-  const projectId = useStore((s) => s.sessions[sessionId]?.projectId)
-  const [busy, setBusy] = useState(false)
-
+/**
+ * 압축된 옛 대화로 거슬러 올라가는 길.
+ *
+ * 도구가 컨텍스트를 압축해도 **우리 기록은 접히지 않는다** — 모든 메시지는 저장소에 남는다.
+ * 접힌 것은 모델의 기억이지 사람의 기록이 아니다. 여기서 더 불러와 그 위를 읽을 수 있다.
+ */
+function LoadOlder({ sessionId }: { sessionId: string }) {
+  const info = useStore((s) => s.history[sessionId])
+  const loadOlder = useStore((s) => s.loadOlder)
+  if (!info?.more) return null
   return (
-    <div
-      className="flex items-center gap-3 border-t border-edge bg-panel px-4 py-2"
-      data-testid="resume-bar"
-    >
-      <span className="text-[12px] text-ash">이 세션은 실행 중이 아닙니다. 기록은 남아 있습니다.</span>
-      <span className="ml-auto flex items-center gap-1.5">
-        <button
-          className="rounded border border-edge px-2 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
-          disabled={busy}
-          data-testid="resume-session"
-          onClick={async () => {
-            setBusy(true)
-            await resume(sessionId)
-            setBusy(false)
-          }}
-        >
-          {busy ? '이어가는 중…' : '이어가기'}
-        </button>
-        <button
-          className="rounded px-2 py-1 text-[12px] text-slate transition-colors hover:text-chalk"
-          data-testid="resume-new-session"
-          onClick={() => projectId && void createSession(projectId)}
-        >
-          새 세션
-        </button>
-      </span>
+    <div className="mb-2 flex justify-center">
+      <button
+        className="rounded border border-edge px-2.5 py-1 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
+        onClick={() => void loadOlder(sessionId)}
+        disabled={info.loading}
+        data-testid="load-older"
+      >
+        {info.loading ? '불러오는 중…' : '이전 대화 더 보기'}
+      </button>
     </div>
+  )
+}
+
+/**
+ * 프로세스가 없는 세션.
+ *
+ * 예전에는 "이 세션은 실행 중이 아닙니다"라고 막고 [이어가기]를 누르게 했다.
+ * 그건 기계 사정을 사람에게 떠넘기는 것이다 — 사람은 이어서 말하고 싶을 뿐이고,
+ * 이어갈 수단은 우리가 갖고 있다. 이제 말을 걸면 host가 알아서 되살린다.
+ * 여기서는 그 사실만 조용히 알린다 (놀라지 않도록).
+ */
+function DormantNote() {
+  return (
+    <p className="border-t border-edge px-4 py-1.5 text-[11px] text-slate" data-testid="dormant-note">
+      잠들어 있습니다 — 메시지를 보내면 자동으로 이어집니다
+    </p>
   )
 }
 
@@ -361,6 +388,15 @@ function ChatRow({ item }: { item: ChatItem }) {
       <p className="readout text-[11px] text-slate" data-testid="msg-approval-log">
         {item.decision === 'deny' ? '거부함' : '허용함'} · {item.summary}
       </p>
+    )
+  }
+  if (item.kind === 'mark') {
+    return (
+      <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
+        <span className="h-px flex-1 bg-edge" />
+        <span className="readout shrink-0 text-[10px] text-slate">{item.text}</span>
+        <span className="h-px flex-1 bg-edge" />
+      </div>
     )
   }
   return <ToolCard item={item} />

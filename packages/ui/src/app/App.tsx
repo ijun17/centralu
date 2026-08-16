@@ -15,6 +15,7 @@ import { FirstRun } from '../features/onboarding/FirstRun.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
 import { Kbd } from '../components/primitives.jsx'
+import { DragRegion } from '../components/DragRegion.jsx'
 
 export function App({ platform }: { platform: Platform }) {
   const attach = useStore((s) => s.attach)
@@ -96,11 +97,8 @@ function TopBar() {
   // 타이틀바를 숨겼기 때문에 이 헤더가 유일한 드래그 손잡이다 —
   // data-tauri-drag-region이 없으면 창을 옮길 수 없다 (도그푸딩에서 지적됨).
   return (
-    <header
-      className="flex items-center gap-4 border-b border-edge bg-pit py-2 pr-4 pl-[86px]"
-      data-tauri-drag-region
-    >
-      <span className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk" data-tauri-drag-region>
+    <DragRegion className="flex items-center gap-4 border-b border-edge bg-pit py-2 pr-4 pl-[86px]">
+      <span className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk">
         CONTROL CENTER
       </span>
 
@@ -131,7 +129,7 @@ function TopBar() {
         )}
       </button>
 
-      <span className="flex items-center gap-1 text-[10px] text-slate" data-tauri-drag-region>
+      <span className="flex items-center gap-1 text-[10px] text-slate">
         <Kbd live={waiting > 0}>⌘</Kbd>
         <Kbd live={waiting > 0}>I</Kbd>
         <span className="mr-2">목록</span>
@@ -141,8 +139,8 @@ function TopBar() {
         다음 항목
       </span>
 
-      <span className="ml-auto flex items-center gap-3" data-tauri-drag-region>
-        <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection" data-tauri-drag-region>
+      <span className="ml-auto flex items-center gap-3">
+        <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection">
           <span
             className={`size-1.5 rounded-full ${
               connection === 'connected' ? 'bg-ash' : 'bg-beacon breathe'
@@ -161,7 +159,7 @@ function TopBar() {
       </span>
 
       {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
-    </header>
+    </DragRegion>
   )
 }
 

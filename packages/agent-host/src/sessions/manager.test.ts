@@ -31,8 +31,11 @@ class FakeAdapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, listExternal: false, autoTitle: true, attachments: ['image'],
   }
   last: FakeHandle | null = null
+  /** 도구가 뜨지 못하는 상황을 만든다 (되살리기 실패 경로) */
+  failCreate: string | null = null
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
+    if (this.failCreate) throw new Error(this.failCreate)
     this.last = new FakeHandle(opts.sessionId, emit)
     return this.last
   }
@@ -276,5 +279,82 @@ describe('이전 세션 불러오기', () => {
     a.fail = new Error('트랜스크립트를 읽을 수 없습니다')
     const s = (await created) as { id: string }
     expect(m.isLive(s.id)).toBe(true)
+  })
+})
+
+/** M2.6 도그푸딩: 숨김·재시작·자동 이어가기 */
+describe('세션 숨김과 삭제는 다른 일이다', () => {
+  it('숨기면 목록에서 빠지지만 기록은 남고, 다시 꺼낼 수 있다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: s.id, text: '기억해둘 말' })
+
+    await rpc('agents.archiveSession', { sessionId: s.id, archived: true })
+    expect(mgr.listSessions().find((x) => x.id === s.id)!.archived).toBe(true)
+    // 숨긴 것은 프로세스만 정리한다 — 기록은 그대로다
+    expect(mgr.isLive(s.id)).toBe(false)
+    const msgs = (await rpc('messages.load', { sessionId: s.id, limit: 100 })) as unknown[]
+    expect(msgs.length).toBeGreaterThan(0)
+
+    await rpc('agents.archiveSession', { sessionId: s.id, archived: false })
+    expect(mgr.listSessions().find((x) => x.id === s.id)!.archived).toBe(false)
+  })
+
+  it('삭제는 되돌릴 수 없다 — 기록까지 사라진다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: s.id, text: '사라질 말' })
+    await rpc('agents.deleteSession', { sessionId: s.id })
+
+    expect(mgr.listSessions().find((x) => x.id === s.id)).toBeUndefined()
+    expect((await rpc('messages.load', { sessionId: s.id, limit: 100 })) as unknown[]).toHaveLength(0)
+  })
+})
+
+describe('에이전트 재시작', () => {
+  it('프로세스만 갈아 끼우고 대화 기록은 남긴다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: s.id, text: '첫 말' })
+    const before = adapter.last!
+
+    const r = (await rpc('agents.restartSession', { sessionId: s.id })) as { resumed: boolean }
+    expect(r.resumed).toBe(true)
+    expect(before.disposed).toBe(true) // 옛 프로세스는 정리한다
+    expect(adapter.last).not.toBe(before) // 새 프로세스로 갈아 끼웠다
+    expect(mgr.isLive(s.id)).toBe(true)
+
+    const msgs = (await rpc('messages.load', { sessionId: s.id, limit: 100 })) as { payload: { text?: string } }[]
+    expect(msgs.some((m) => m.payload.text === '첫 말')).toBe(true)
+  })
+})
+
+describe('자동 이어가기', () => {
+  it('프로세스가 없어도 말을 걸면 되살려서 보낸다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    // host 재시작 후 상태: 기록·external_id는 있고 프로세스만 없다
+    await mgr.archive(s.id, true)
+    await mgr.archive(s.id, false)
+    expect(mgr.isLive(s.id)).toBe(false)
+
+    await rpc('agents.send', { sessionId: s.id, text: '이어서 해줘' })
+
+    expect(mgr.isLive(s.id)).toBe(true)
+    expect(adapter.last!.sent).toContain('이어서 해줘')
+  })
+
+  it('정말 이어갈 수 없으면 조용히 삼키지 않고 이유를 던진다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await mgr.archive(s.id, true)
+    await mgr.archive(s.id, false)
+    // 도구 자체가 뜨지 못하는 상황
+    adapter.failCreate = '도구를 시작할 수 없습니다'
+
+    await expect(rpc('agents.send', { sessionId: s.id, text: '이어서' })).rejects.toThrow(/이어갈 수 없습니다/)
+    // 보내지 못한 말은 기록에도 남지 않는다 (있지도 않은 대화를 만들지 않는다)
+    const msgs = (await rpc('messages.load', { sessionId: s.id, limit: 100 })) as { payload: { text?: string } }[]
+    expect(msgs.some((m) => m.payload.text === '이어서')).toBe(false)
   })
 })
