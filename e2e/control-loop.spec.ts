@@ -1736,3 +1736,25 @@ test('불러온 대화는 최신부터 보인다', async ({ page }) => {
   )
   expect(atBottom).toBe(true)
 })
+
+test('밖에서 이어간 대화가 돌아오면 화면에 붙는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // host가 따라잡아 저장소에 넣은 상황을 만든다
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    const rows = m.messages.get(sid) ?? []
+    m.messages.set(sid, [
+      ...rows,
+      { sessionId: sid, seq: rows.length + 1, role: 'user', kind: 'text', payload: { text: '터미널에서 한 말' }, ts: Date.now() },
+      { sessionId: sid, seq: rows.length + 2, role: 'assistant', kind: 'text', payload: { text: '터미널 답' }, ts: Date.now() },
+    ])
+    m.emit({ type: 'history_synced', sessionId: sid, added: 2 })
+  }, id)
+
+  // 이벤트를 받으면 화면을 다시 읽는다
+  await expect(page.getByTestId('chat-stream')).toContainText('터미널에서 한 말')
+  await expect(page.getByTestId('chat-stream')).toContainText('터미널 답')
+})

@@ -126,7 +126,7 @@ export type AppState = {
   focusSession(id: string | null): void
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
-  loadHistory(sessionId: string): Promise<void>
+  loadHistory(sessionId: string, force?: boolean): Promise<void>
   /** 더 오래된 대화를 앞에 붙인다 (압축 이전 대화를 읽기 위한 길) */
   loadOlder(sessionId: string): Promise<void>
   saveWorkspace(): void
@@ -316,6 +316,16 @@ export const useStore = create<AppState>((set, get) => ({
     const sessionId = e.sessionId
     if (!sessionId) return
 
+    /*
+     * 밖에서(터미널의 도구로) 이어간 대화를 host가 따라잡았다.
+     * 내용은 저장소에 들어갔으므로 화면을 통째로 다시 읽는다 —
+     * 이벤트로 한 줄씩 재생하면 우리가 이미 아는 부분과 섞일 수 있다.
+     */
+    if (e.type === 'history_synced') {
+      void get().loadHistory(sessionId, true)
+      return
+    }
+
     // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
     if (e.type === 'session_deleted') {
       set((s) => {
@@ -404,7 +414,7 @@ export const useStore = create<AppState>((set, get) => ({
     void get().wake(id)
   },
 
-  async loadHistory(sessionId) {
+  async loadHistory(sessionId, force = false) {
     const platform = get().platform
     if (!platform) return
     try {
@@ -412,7 +422,8 @@ export const useStore = create<AppState>((set, get) => ({
       const items = messagesToChat(msgs)
       bumpSeqAbove(items)
       set((s) => ({
-        chat: { ...s.chat, [sessionId]: s.chat[sessionId] ?? items },
+        // force면 갈아 끼운다 — 밖에서 이어간 대화를 따라잡을 때 쓴다
+        chat: { ...s.chat, [sessionId]: force ? items : (s.chat[sessionId] ?? items) },
         history: {
           ...s.history,
           [sessionId]: {
@@ -789,6 +800,9 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       ]
     case 'approval_resolved':
       return items.map((it) => (it.kind === 'approval' && it.requestId === e.requestId ? { ...it, decision: e.decision } : it))
+    case 'history_synced':
+      // 실제 내용은 저장소에 들어갔다 — 화면은 dispatchEvent 밖에서 다시 읽는다
+      return items
     case 'compaction':
       // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
       // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다

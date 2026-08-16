@@ -55,6 +55,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('files_touched'), paths: z.array(z.string()) }),
   /** 컨텍스트 압축이 일어났다 — 대화창에 마커를 남긴다 (FR-14) */
   z.object({ ...base, type: z.literal('compaction') }),
+  /** 밖에서 이어간 대화를 따라잡았다 — UI가 기록을 다시 읽는 신호 */
+  z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** 세션이 삭제됐다 — 다른 창·재연결에서도 목록이 맞아야 한다 */
   z.object({ ...base, type: z.literal('session_deleted') }),
   z.object({ sessionId: z.string().optional(), type: z.literal('error'), error: ProtocolError }),

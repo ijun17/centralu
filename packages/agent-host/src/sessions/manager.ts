@@ -49,6 +49,13 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 const HISTORY_LIMIT = 200
 
 /**
+ * 따라잡을 때 읽는 분량. 복원(200)보다 넉넉히 잡는다 —
+ * 밖에서 한참 작업하고 돌아왔다면 그 사이가 200줄을 넘을 수 있고,
+ * 우리가 아는 마지막 말을 못 찾으면 아무것도 못 붙인다.
+ */
+const SYNC_LIMIT = 600
+
+/**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
  * 상태 추적·저장은 전부 여기서 한다.
  */
@@ -251,6 +258,67 @@ export class SessionManager {
   }
 
   /**
+   * 도구 쪽에서 이어진 대화를 우리 기록에 따라잡는다.
+   *
+   * 왜 필요한가: Control Center에서 하다가 터미널의 클로드·코덱스로 옮겨 작업하고
+   * 다시 돌아올 수 있다. 그동안 오간 말은 도구에만 쌓이고 우리 화면은 멈춰 있다
+   * (도그푸딩 지적). 모델은 resume으로 전체를 기억하므로 **화면만 어긋난다** —
+   * 그래서 더 헷갈린다.
+   *
+   * 붙이는 규칙: 도구 기록에서 **우리가 마지막으로 아는 말**을 찾고 그 뒤만 가져온다.
+   * 우리가 보낸 말도 도구를 거쳐 갔으므로 도구 기록은 완전본이다 — 뒤쪽만 이어붙이면
+   * 중복 없이 맞춰진다. 못 찾으면 아무것도 붙이지 않는다:
+   * 어긋난 채 두는 것이 같은 말을 두 번 쌓는 것보다 낫다.
+   */
+  private async syncImportedHistory(info: SessionInfo, adapter: AgentAdapter, cwd: string): Promise<number> {
+    const externalId = info.externalId ?? info.importedFrom
+    if (!adapter.readExternalHistory || !externalId) return 0
+
+    let history: HistoryMessage[]
+    try {
+      history = await adapter.readExternalHistory(externalId, cwd, SYNC_LIMIT)
+    } catch {
+      return 0 // 못 읽어도 대화는 계속된다
+    }
+    if (history.length === 0) return 0
+
+    const ours = this.store.loadMessages(info.id, SYNC_LIMIT)
+    const lastKnown = [...ours].reverse().find((m) => m.kind === 'text')
+    const lastText = (lastKnown?.payload as { text?: string } | undefined)?.text?.trim()
+
+    // 우리가 아는 마지막 말 뒤부터가 새 것이다
+    let start = -1
+    if (lastText) {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i]!.text.trim() === lastText) {
+          start = i + 1
+          break
+        }
+      }
+    } else if (ours.length === 0) {
+      start = 0 // 기록이 비었으면 전부 새 것이다
+    }
+    if (start < 0 || start >= history.length) return 0
+
+    const fresh = history.slice(start)
+    const base = this.store.nextSeq(info.id)
+    this.store.appendMessages(
+      fresh.map((h, i) => ({
+        sessionId: info.id,
+        seq: base + i,
+        role: h.role,
+        kind: 'text' as const,
+        payload: { text: h.text },
+        ts: h.ts ?? Date.now(),
+      })),
+    )
+    info.lastSeq = base + fresh.length - 1
+    // 밖에서 오간 말이다 — 내가 읽은 적이 없으니 안 읽음으로 둔다
+    this.store.upsertSession(info)
+    return fresh.length
+  }
+
+  /**
    * 이전 대화를 화면에 복원한다.
    *
    * 이건 **표시용 스냅샷**이다. 모델이 실제로 기억하는 컨텍스트는 도구가 갖고 있고
@@ -374,6 +442,12 @@ export class SessionManager {
       this.store.upsertSession(m)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       void this.listCommands(sessionId).catch(() => {})
+
+      // 밖에서(터미널의 도구로) 이어간 대화를 따라잡는다
+      const added = await this.syncImportedHistory(m, adapter, project.path)
+      if (added > 0) {
+        this.emit({ type: 'history_synced', sessionId, added })
+      }
       return { session: m, resumed: true }
     } catch (err) {
       /*

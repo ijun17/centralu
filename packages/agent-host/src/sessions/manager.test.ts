@@ -613,3 +613,87 @@ describe('같은 대화를 둘이 열지 않는다', () => {
     expect(second).toBeTruthy()
   })
 })
+
+/**
+ * Control Center에서 하다가 터미널의 도구로 옮겨 작업하고 돌아올 수 있다.
+ * 그동안 오간 말은 도구에만 쌓이고 우리 화면은 멈춰 있다 — 모델은 다 기억하므로
+ * **화면만 어긋나서** 더 헷갈린다. 깨울 때 따라잡는다.
+ */
+describe('밖에서 이어간 대화를 따라잡는다', () => {
+  class SyncAdapter extends FakeAdapter {
+    /** 도구가 갖고 있는 대화 (터미널에서 이어가면 여기가 늘어난다) */
+    toolHistory: { role: 'user' | 'assistant'; text: string }[] = []
+    async listExternalSessions() {
+      return [{ externalId: 'ext-1', title: '대화', updatedAt: 1 }]
+    }
+    async readExternalHistory() {
+      return this.toolHistory
+    }
+  }
+  const setup = () => {
+    const a = new SyncAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    return { a, m, call: createRpcHandler(m, adapters) }
+  }
+  const texts = async (call: ReturnType<typeof createRpcHandler>, id: string) =>
+    ((await call('messages.load', { sessionId: id, limit: 200 })) as { payload: { text?: string } }[])
+      .map((r) => r.payload.text)
+      .filter(Boolean)
+
+  it('밖에서 늘어난 뒷부분만 이어붙인다 (중복 없이)', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [
+      { role: 'user', text: '첫 질문' },
+      { role: 'assistant', text: '첫 답' },
+    ]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    expect(await texts(call, s.id)).toEqual(['첫 질문', '첫 답'])
+
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+
+    // 그 사이 터미널에서 이어서 작업했다
+    a.toolHistory.push({ role: 'user', text: '터미널에서 한 말' }, { role: 'assistant', text: '터미널 답' })
+
+    await m.resumeSession(s.id)
+
+    expect(await texts(call, s.id)).toEqual(['첫 질문', '첫 답', '터미널에서 한 말', '터미널 답'])
+    expect(events.some((e) => e.type === 'history_synced')).toBe(true)
+  })
+
+  it('밖에서 아무 일도 없었으면 아무것도 붙이지 않는다', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: '첫 질문' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+    await m.resumeSession(s.id)
+
+    expect(await texts(call, s.id)).toEqual(['첫 질문'])
+  })
+
+  it('우리가 아는 마지막 말을 못 찾으면 붙이지 않는다 (같은 말을 두 번 쌓는 것보다 낫다)', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: '첫 질문' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+    // 도구 기록이 통째로 달라졌다 (압축 등으로 앞부분이 사라진 경우)
+    a.toolHistory = [{ role: 'user', text: '전혀 다른 대화' }]
+    await m.resumeSession(s.id)
+
+    expect(await texts(call, s.id)).toEqual(['첫 질문'])
+  })
+})
