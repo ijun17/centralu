@@ -27,6 +27,7 @@ const REQUIRED = [
   // 동작 테스트로는 절대 안 잡히는 유형이다 (E2E는 클래스 이름을 보지 않는다).
   { needle: 'bg-add-bg', why: 'diff 추가 배경 (유채색 예외)' },
   { needle: 'cc-orbit', why: '작업 중 회전 테두리 (@property + @keyframes)' },
+  { needle: 'cc-chip', why: '세션 표식 칩의 안쪽 그림자 (@layer components)' },
 ]
 
 let css = ''

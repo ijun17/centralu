@@ -2353,3 +2353,37 @@ test('프로젝트를 끌어서 순서를 바꾼다', async ({ page }) => {
 
   await expect.poll(order).toEqual(['beta', 'alpha'])
 })
+
+/**
+ * 사이드바의 + 와 ✕ 는 같은 세로줄에 선다.
+ *
+ * 눈으로만 맞추면 한쪽 여백을 고칠 때 다시 어긋난다 — 실제로 4px과 12px로
+ * 벌어져 있었다. 오른쪽 끝의 실제 좌표를 재서 못 박는다.
+ */
+test('사이드바의 + 와 삭제 버튼이 같은 세로줄에 선다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 삭제는 호버해야 나타난다
+  await page.getByTestId(`session-row-${id}`).hover()
+
+  const plus = (await page.getByTestId('new-session-alpha').boundingBox())!
+  const del = (await page.getByTestId(`delete-session-${id}`).boundingBox())!
+
+  expect(Math.abs(plus.x + plus.width - (del.x + del.width))).toBeLessThanOrEqual(1)
+})
+
+/** 입력창의 첨부·보내기도 같은 부품이라 크기와 높이가 같아야 한다 */
+test('입력창의 첨부와 보내기 버튼이 같은 크기·같은 높이다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  const attach = (await page.getByTestId('attach-open').boundingBox())!
+  const send = (await page.getByTestId('send').boundingBox())!
+
+  expect(Math.abs(attach.width - send.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(attach.height - send.height)).toBeLessThanOrEqual(1)
+  // 아래쪽 끝이 같은 줄에 선다 (입력창이 커져도 나란히 남는다)
+  expect(Math.abs(attach.y + attach.height - (send.y + send.height))).toBeLessThanOrEqual(1)
+})

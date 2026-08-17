@@ -131,12 +131,16 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const reorderSessions = useStore((s) => s.reorderSessions)
   const selected = useStore((s) => s.focusedProjectId === projectId && !s.focusedSessionId)
 
-  if (!project) return null
-
+  /*
+   * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면
+   * 훅 순서가 달라져 React가 던진다 — 프로젝트를 지우는 순간에 터지는 종류다.
+   */
   const drop = useDropLine(PROJECT_MIME, (draggedId, before) => {
     const ids = Object.keys(useStore.getState().projects)
     void reorderProjects(moveTo(ids, draggedId, projectId, before))
   })
+
+  if (!project) return null
 
   return (
     <section
@@ -238,7 +242,12 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 거의 없어서 버튼만 늘고 무엇이 다른지 설명하기 어려워진다.
                 대신 **무엇이 지워지고 무엇이 남는지**를 확인 창에서 분명히 말한다.
               */}
-              <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
+              {/*
+                오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
+                같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
+                (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
+              */}
+              <span className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
                 {/*
                   삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
                   누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.

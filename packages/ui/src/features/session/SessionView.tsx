@@ -34,6 +34,7 @@ export function SessionView() {
   const [dragging, setDragging] = useState(false)
   const [caret, setCaret] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const attachFile = useStore((s) => s.attachFile)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -313,20 +314,29 @@ export function SessionView() {
             placeholder="Type a message"
             data-testid="prompt-input"
           />
-          <label
-            className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5 text-slate transition-colors hover:bg-graphite hover:text-chalk"
-            title="Attach file"
-            aria-label="Attach file"
+          {/*
+            첨부도 보내기와 **같은 부품**을 쓴다. 예전엔 label로 따로 만들어서
+            안쪽 여백(6px vs 4px)과 아이콘 크기(16 vs 15)가 달랐고, 나란히 선 두 버튼의
+            크기와 높이가 어긋나 보였다 (도그푸딩 지적).
+            파일 선택기는 숨긴 input을 눌러 연다 — label 없이도 같은 일을 한다.
+          */}
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            className="hidden"
+            data-testid="attach-input"
+            onChange={(e) => void takeFiles(e.target.files)}
+          />
+          <IconButton
+            label="Attach file"
+            onClick={() => fileRef.current?.click()}
+            testId="attach-open"
+            placement="top"
+            className="shrink-0"
           >
-            <PlusIcon size={16} />
-            <input
-              type="file"
-              multiple
-              className="hidden"
-              data-testid="attach-input"
-              onChange={(e) => void takeFiles(e.target.files)}
-            />
-          </label>
+            <PlusIcon size={15} />
+          </IconButton>
           <IconButton
             type="submit"
             label="Send (Enter)"
