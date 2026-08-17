@@ -228,3 +228,28 @@ test('9칸을 처음 여는 데 걸리는 시간', async ({ page }) => {
   console.log(`9칸 처음 열기: ${opened}ms, 대화가 채워진 칸 ${loadedCount}/9`)
   expect(loadedCount).toBe(9)
 })
+
+/**
+ * 대화가 길어지면 느려지는가 — "위쪽을 UI에서 지우면 좋아지나"에 대한 답.
+ *
+ * 이미 세 겹으로 자르고 있다: 비포커스 세션은 50개로 잘리고(WINDOW_SIZE),
+ * 기록은 200개씩 창으로 읽고, 가상 스크롤이 보이는 줄만 그린다.
+ * 그래도 **목록 길이 자체가** 부담인지는 재봐야 안다.
+ */
+for (const n of [200, 5000]) {
+  test(`대화 ${n}줄에서 스트리밍`, async ({ page }) => {
+    const ids = await boot(page, 1)
+    await page.evaluate(
+      ({ sid, count }: { sid: string; count: number }) => {
+        const store = (window as never as { __store: any }).__store
+        const items = Array.from({ length: count }, (_, i) => ({
+          kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `지난 대화 ${i} `.repeat(8),
+        }))
+        store.setState({ chat: { ...store.getState().chat, [sid]: items } })
+      },
+      { sid: ids[0]!, count: n },
+    )
+    await page.getByTestId(`session-row-${ids[0]}`).click()
+    show(`포커스 뷰 · 대화 ${n}줄`, await streamAndMeasure(page, ids, 120))
+  })
+}
