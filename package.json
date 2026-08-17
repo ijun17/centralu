@@ -20,6 +20,7 @@
     "bundle:host": "node packages/agent-host/scripts/bundle.mjs",
     "codex:bindings": "node packages/agent-host/scripts/codex-bindings.mjs",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
+    "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",
     "app": "pnpm --filter @cc/desktop exec tauri build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Control Center.app\"",
     "app:open": "open \"apps/desktop/src-tauri/target/release/bundle/macos/Control Center.app\"",
     "app:dev": "pnpm --filter @cc/desktop exec tauri dev"

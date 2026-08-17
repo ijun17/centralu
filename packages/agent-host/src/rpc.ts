@@ -205,8 +205,32 @@ export function createRpcHandler(
   }
 
   return async (method: string, params: unknown): Promise<unknown> => {
-    const h = handlers[method as RpcMethodName]
+    const name = method as RpcMethodName
+    const h = handlers[name]
     if (!h) throw Object.assign(new Error(`Unknown method: ${method}`), { code: 'internal' })
-    return h(params)
+    const result = await h(params)
+
+    /*
+     * 내보내는 것이 **선언한 모양과 같은지** 여기서 확인한다.
+     *
+     * result 스키마 50개는 오랫동안 런타임에서 한 번도 쓰이지 않았다 — 문서일 뿐
+     * 아무도 지키지 않는 약속이었다. 그동안 통로가 스키마와 어긋나도 아무 일도
+     * 일어나지 않았고, 실제로 두 번 어긋났다 (effort 유실, Codex 모델 shape).
+     *
+     * 켜기 전에 실 host로 47/50을 대조해 스키마가 실제 응답과 맞는 것을 확인했다
+     * (`pnpm smoke:schemas`). 그러지 않고 켜면 틀린 스키마가 멀쩡한 기능을 죽인다.
+     *
+     * 던지는 이유: 모양이 어긋난 응답을 그대로 보내면 화면에서 이상하게 나타나고,
+     * 그때는 어디서 어긋났는지 알 수 없다. 여기가 가장 가까운 자리다.
+     */
+    const checked = RpcMethods[name].result.safeParse(result)
+    if (!checked.success) {
+      const where = checked.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+        .join(' / ')
+      throw Object.assign(new Error(`${method}의 응답이 선언과 다릅니다 — ${where}`), { code: 'internal' })
+    }
+    return checked.data
   }
 }
