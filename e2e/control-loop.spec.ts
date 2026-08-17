@@ -2873,3 +2873,72 @@ test('도구 카드는 배시든 에딧이든 접힌 채로 나온다', async ({
   await expect(card.getByTestId('tool-card-toggle')).toHaveAttribute('aria-expanded', 'true')
   expect(id).toBeTruthy()
 })
+
+/**
+ * 끌 때 어디에 놓일지 보여야 한다 (도그푸딩:
+ * "위치 표시자가 안 보여서 탭을 드랍하면 어디에 위치할지 모르겠다").
+ *
+ * Playwright의 dragAndDrop은 한 번에 끝나 중간을 못 본다.
+ * 그래서 드래그 이벤트를 직접 만들어 **끄는 도중**의 화면을 확인한다.
+ */
+test('칸을 끄는 동안 놓일 자리가 좌우로 표시된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'a')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await newSession(page, 'alpha', 'b')
+  const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, b])
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
+
+  /** 대상 칸의 왼쪽/오른쪽 위에서 dragover를 일으킨다 */
+  const hover = (side: 'left' | 'right') =>
+    page.evaluate(
+      ({ from, to, where }: { from: string; to: string; where: string }) => {
+        const dt = new DataTransfer()
+        const header = document
+          .querySelector(`[data-testid="grid-panel-${from}"]`)!
+          .querySelector('[data-testid="pane-header"]')!
+        header.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }))
+        const card = document.querySelector(`[data-testid="grid-panel-${to}"]`)!
+        const r = card.getBoundingClientRect()
+        const x = where === 'left' ? r.left + r.width * 0.2 : r.left + r.width * 0.8
+        card.dispatchEvent(
+          new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: x, clientY: r.top + 10 }),
+        )
+      },
+      { from: a!, to: b!, where: side },
+    )
+
+  await hover('left')
+  await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-drop', 'before')
+
+  await hover('right')
+  await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-drop', 'after')
+
+  // 끌고 있는 원본은 흐려져 "이게 움직이는 중"임을 보인다
+  const cls = (await page.getByTestId(`grid-panel-${a}`).getAttribute('class')) ?? ''
+  expect(cls).toContain('opacity-40')
+
+  /*
+   * 끌리는 그림은 **칸**이어야 한다.
+   * draggable인 요소가 머리글이라 브라우저는 기본적으로 머리글만 찍어 들고 다닌다 —
+   * 칸은 제자리에 있고 얇은 띠만 따라다니니 무엇을 옮기는지 알 수 없다.
+   */
+  const lifted = await page.evaluate((from: string) => {
+    let captured: string | null = null
+    const real = DataTransfer.prototype.setDragImage
+    DataTransfer.prototype.setDragImage = function (el: Element, x: number, y: number) {
+      captured = (el as HTMLElement).getAttribute('data-testid')
+      return real.call(this, el, x, y)
+    }
+    const header = document
+      .querySelector(`[data-testid="grid-panel-${from}"]`)!
+      .querySelector('[data-testid="pane-header"]')!
+    header.dispatchEvent(new DragEvent('dragstart', { dataTransfer: new DataTransfer(), bubbles: true }))
+    DataTransfer.prototype.setDragImage = real
+    return captured
+  }, a!)
+  expect(lifted).toBe(`grid-panel-${a}`)
+})

@@ -5,6 +5,7 @@ import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
+import { dropEdge, dropSide, type DropTarget } from './drop.js'
 
 /**
  * 컨트롤 센터 — 여러 세션을 한 화면에서.
@@ -23,7 +24,12 @@ export function ControlCenter() {
   const setGridPanels = useStore((s) => s.setGridPanels)
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
-  const [over, setOver] = useState<string | null>(null)
+  /** 놓으면 어디로 갈지 — 어느 칸의 어느 쪽인가 */
+  const [over, setOver] = useState<DropTarget>(null)
+  /** 지금 끌고 있는 칸. 원본을 흐리게 해서 "이게 움직이는 중"임을 보인다 */
+  const [dragging, setDragging] = useState<string | null>(null)
+  /** 끌 때 머리글이 아니라 **칸 전체**를 들어 올리기 위한 참조 */
+  const cards = useRef(new Map<string, HTMLDivElement>())
 
   // 열 수가 폭에서 나오므로 폭이 바뀌면 다시 잰다
   useEffect(() => {
@@ -98,24 +104,41 @@ export function ControlCenter() {
           {visible.map((id) => (
             <div
               key={id}
+              ref={(el) => {
+                if (el) cards.current.set(id, el)
+                else cards.current.delete(id)
+              }}
               /*
-                놓을 자리 표시는 inset 그림자다 — border는 칸을 1px 키워서
-                끌고 다니는 동안 격자 전체가 밀린다 (사이드바에서 겪은 그 문제).
+                놓을 자리는 **어느 쪽인지**까지 보여야 한다.
+                예전엔 칸 전체에 테두리를 둘렀는데, 그러면 "여기 근처"까지만 알 뿐
+                앞에 놓이는지 뒤에 놓이는지 손을 떼기 전까지 알 수 없었다 (도그푸딩).
+
+                선은 inset 그림자로 그린다 — border는 칸을 키워서 격자 전체를 민다
+                (사이드바에서 겪은 그 문제).
               */
-              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge ${
-                over === id ? 'shadow-[inset_0_0_0_2px_var(--color-ash)]' : ''
-              }`}
+              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge transition-opacity ${
+                dragging === id ? 'opacity-40' : ''
+              } ${dropEdge(over, id)}`}
               data-testid={`grid-panel-${id}`}
+              data-drop={dropSide(over, id)}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes(SESSION_MIME)) return
                 e.preventDefault()
                 e.stopPropagation()
-                setOver(id)
+                // 자기 자신 위에서는 자리를 표시하지 않는다 — 옮길 곳이 아니다
+                if (dragging === id) return setOver(null)
+                const r = e.currentTarget.getBoundingClientRect()
+                setOver({ id, before: dropsBefore({ top: r.left, height: r.width }, e.clientX) })
               }}
-              onDragLeave={() => setOver((cur) => (cur === id ? null : cur))}
+              onDragLeave={() => setOver((cur) => (cur?.id === id ? null : cur))}
+              onDragEnd={() => {
+                setDragging(null)
+                setOver(null)
+              }}
               onDrop={(e) => {
                 const dragged = e.dataTransfer.getData(SESSION_MIME)
                 setOver(null)
+                setDragging(null)
                 if (!dragged) return
                 e.preventDefault()
                 e.stopPropagation()
@@ -145,6 +168,18 @@ export function ControlCenter() {
                 headerDrag={(e) => {
                   e.dataTransfer.setData(SESSION_MIME, id)
                   e.dataTransfer.effectAllowed = 'move'
+                  /*
+                     끌리는 것은 **칸이다**, 머리글이 아니다.
+                     draggable인 요소가 머리글이라 브라우저는 머리글만 찍어 들고 다녔다 —
+                     칸은 제자리에 있고 얇은 띠 하나만 따라다니니 무엇을 옮기는지 알 수 없었다
+                     (도그푸딩). 들어 올릴 그림을 칸으로 바꿔준다.
+                   */
+                  const card = cards.current.get(id)
+                  if (card) {
+                    const r = card.getBoundingClientRect()
+                    e.dataTransfer.setDragImage(card, e.clientX - r.left, e.clientY - r.top)
+                  }
+                  setDragging(id)
                 }}
                 headerExtra={
                   <IconButton
