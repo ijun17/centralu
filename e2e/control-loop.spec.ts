@@ -1850,6 +1850,27 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
 })
 
 /**
+ * "지금 로딩이 안떠서 작업 중인지 멈춘 건지 헷갈린다" (도그푸딩).
+ * 보낸 순간부터 답이 올 때까지 살아 있다는 표시가 있어야 하고, 거기서 멈출 수 있어야 한다.
+ */
+test('응답을 기다리는 동안 표시가 뜨고 거기서 중지할 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('initial-prompt').fill('오래 걸리는 일')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  await page.getByTestId('prompt-input').fill('한참 걸리는 걸 해줘')
+  await page.getByTestId('send').click()
+
+  // 보낸 즉시 보인다 — host 응답을 기다리지 않는다
+  await expect(page.getByTestId('activity-row')).toBeVisible()
+
+  await page.getByTestId('activity-interrupt').click()
+  await expect(page.getByTestId('activity-row')).toBeHidden()
+})
+
+/**
  * 깃 탭 — VSCode처럼 스테이지된 것과 아닌 것을 나눠 보여준다.
  * 커밋 직전에 알아야 할 유일한 사실이 "무엇이 실리나"인데,
  * 한 목록에 섞여 있으면 그걸 줄 끝의 작은 꼬리표로 읽어야 했다.
@@ -1995,6 +2016,88 @@ test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', 
 
   await page.getByTestId('dir-src').click()
   await expect(dir).not.toHaveClass(/rotate-90/)
+})
+
+/**
+ * 빈 입력창이 커진 채로 서 있던 문제 (도그푸딩).
+ * 높이를 타이핑 이벤트에서만 계산하면, 보낸 뒤 값만 비고 높이는 남는다.
+ */
+test('메시지를 보낸 뒤 입력창 높이가 한 줄로 돌아온다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  const input = page.getByTestId('prompt-input')
+  const oneLine = (await input.boundingBox())!.height
+
+  await input.fill('첫 줄\n둘째 줄\n셋째 줄\n넷째 줄')
+  const grown = (await input.boundingBox())!.height
+  expect(grown).toBeGreaterThan(oneLine + 20)
+
+  await page.getByTestId('send').click()
+  await expect(input).toHaveValue('')
+
+  // 값이 비었으면 높이도 한 줄이어야 한다 — 아무것도 안 쳤는데 높은 칸이 남으면 안 된다
+  expect((await input.boundingBox())!.height).toBeCloseTo(oneLine, 0)
+})
+
+/**
+ * 반대 방향도 값에서 나와야 한다: 자동완성이 긴 경로를 넣으면 칸도 따라 커진다.
+ *
+ * `fill()`은 input 이벤트를 쏘므로 옛 코드에서도 통과한다 — 그래서 **자동완성으로 고르는
+ * 진짜 경로**를 쓴다. 그 길은 React 상태만 바꾸고 DOM 이벤트를 만들지 않는다.
+ */
+test('자동완성으로 넣은 값에도 입력창 높이가 따라온다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'a'.repeat(120) + '.ts', path: 'src/' + 'a'.repeat(120) + '.ts', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  const input = page.getByTestId('prompt-input')
+
+  await input.fill('@a')
+  await expect(page.getByTestId('autocomplete')).toBeVisible()
+  const beforePick = (await input.boundingBox())!.height
+  await page.keyboard.press('Tab')
+
+  // 고른 순간 값이 길어졌으니 칸도 커져야 한다
+  await expect(input).not.toHaveValue('@a')
+  expect((await input.boundingBox())!.height).toBeGreaterThan(beforePick)
+})
+
+/**
+ * 긴 응답을 읽는 동안 "이게 뭘 물어본 답이었지"를 위로 되돌아가 찾게 하지 않는다.
+ * 가상 스크롤이라 CSS sticky를 못 쓰므로 스크롤 위치로 계산해 얹는다 —
+ * 그 계산이 맞는지를 여기서 본다.
+ */
+test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  const input = page.getByTestId('prompt-input')
+  // 스크롤이 생길 만큼 길게 — 짧으면 지나갈 것 자체가 없다
+  await input.fill('첫 번째 질문\n' + '내용\n'.repeat(40))
+  await page.getByTestId('send').click()
+  await input.fill('두 번째 질문')
+  await page.getByTestId('send').click()
+
+  const stream = page.getByTestId('chat-stream')
+
+  // 맨 위에서는 붙일 것이 없다 (내 메시지가 아직 화면 위로 지나가지 않았다)
+  await stream.evaluate((el) => (el.scrollTop = 0))
+  await expect(page.getByTestId('sticky-user')).toBeHidden()
+
+  /*
+    아래로 내리면 지나간 내 메시지가 붙는다.
+    어느 것이 붙는지는 "완전히 지나갔는가"로 정해지고 그건 줄 높이에 달렸다 —
+    테스트가 그 산수를 따라 하면 레이아웃이 조금만 바뀌어도 깨진다.
+    여기서 지킬 계약은 둘이다: 맨 위에선 안 뜬다, 내리면 내가 한 말이 뜬다.
+  */
+  await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
+  await expect(page.getByTestId('sticky-user')).toBeVisible()
+  await expect(page.getByTestId('sticky-user')).toContainText(/작업|첫 번째 질문/)
+
 })
 
 /** 경로를 외워서 치지 않아도 되게 — 트리에서 끌어다 입력창에 놓는다 */

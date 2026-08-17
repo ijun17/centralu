@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Attachment } from '@cc/protocol'
@@ -6,11 +6,16 @@ import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/cor
 import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
+import { ChevronIcon, CloseIcon, PlusIcon, SendIcon } from '../../components/icons.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
+import { appendPath, readDragPath } from '../files/dragPath.js'
+
+/** 입력창이 커질 수 있는 최대 높이. CSS의 max-h-40과 같은 값이어야 한다 */
+const COMPOSER_MAX_H = 160
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
@@ -18,7 +23,6 @@ const EMPTY_CHAT: ChatItem[] = []
 /** 조작 레인 — 전체 폭 (그리드가 아니라 포커스 뷰인 이유) */
 export function SessionView() {
   const session = useFocusedSession()
-  const project = useStore((s) => (session ? s.projects[session.projectId] : undefined))
   const projectOnly = useStore((s) => (s.focusedSessionId ? undefined : s.projects[s.focusedProjectId ?? '']))
   const chat = useStore((s) => (s.focusedSessionId ? (s.chat[s.focusedSessionId] ?? EMPTY_CHAT) : EMPTY_CHAT))
   const send = useStore((s) => s.send)
@@ -32,6 +36,24 @@ export function SessionView() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const attachFile = useStore((s) => s.attachFile)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  /*
+   * 입력창 높이는 **값에서** 나온다.
+   *
+   * 예전엔 onChange에서 직접 style.height를 만졌는데, 그러면 타이핑으로 값이 바뀔 때만
+   * 높이가 맞는다. 보내고 나면 setText('')로 값만 비고 높이는 남아서, 빈 입력창이
+   * 커진 채로 서 있었다 — 아무것도 안 썼는데 높고, 뭐라도 치면 돌아오는 그 증상이다
+   * (도그푸딩 지적). 자동완성으로 긴 경로를 넣을 때는 반대로 안 커졌다.
+   *
+   * 값이 바뀌는 경로는 앞으로도 늘어난다(붙여넣기·복원·세션 전환…). 경로마다 높이를
+   * 다시 맞추는 대신 값 하나만 보게 한다. 페인트 전에 재는 useLayoutEffect라 깜빡이지 않는다.
+   */
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`
+  }, [text])
 
   // 자동완성: `/`는 스킬, `@`는 파일. 세션이 없으면 입력창 자체가 없다
   const ac = useAutocomplete({
@@ -138,9 +160,12 @@ export function SessionView() {
         <span className="ml-auto flex shrink-0 items-center gap-2">
           <SessionSettings
             sessionId={session.id}
-            tool={project?.defaultTool ?? 'claude'}
+            // 프로젝트 기본값이 아니라 **이 세션의** 도구다 (섞어 쓸 수 있다)
+            tool={session.tool}
             model={session.model}
+            effort={session.effort}
             preset={session.permissionPreset}
+            live={session.live}
           />
           {session.state === 'working' && (
             <button
@@ -163,7 +188,13 @@ export function SessionView() {
         </span>
       </DragRegion>
 
-      <ChatStream scrollRef={scrollRef} chat={chat} pending={session.pendingApproval} sessionId={session.id} />
+      <ChatStream
+        scrollRef={scrollRef}
+        chat={chat}
+        pending={session.pendingApproval}
+        sessionId={session.id}
+        working={session.state === 'working'}
+      />
 
       {/*
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
@@ -189,15 +220,21 @@ export function SessionView() {
                 key={`${a.path}-${i}`}
                 className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
               >
-                <span className="text-slate">{a.kind === 'image' ? '🖼' : '📄'}</span>
+                {/*
+                  이모지를 쓰지 않는다 — OS·폰트마다 생김새가 다르고 대부분 유채색이라
+                  "색은 diff 본문에만"이라는 규칙을 곧바로 깬다. 한 글자 기호면 둘 다 없다.
+                */}
+                <span className="readout text-[9px] text-slate" title={a.kind === 'image' ? '이미지' : '파일'}>
+                  {a.kind === 'image' ? 'IMG' : 'DOC'}
+                </span>
                 <span className="max-w-40 truncate">{a.name}</span>
                 <button
                   type="button"
-                  className="text-slate hover:text-chalk"
+                  className="text-slate transition-colors hover:text-chalk"
                   onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
                   aria-label={`${a.name} 첨부 취소`}
                 >
-                  ✕
+                  <CloseIcon size={11} />
                 </button>
               </li>
             ))}
@@ -219,6 +256,24 @@ export function SessionView() {
           onDrop={(e) => {
             e.preventDefault()
             setDragging(false)
+            // 트리에서 끌어온 경로는 첨부가 아니라 문장에 넣는다.
+            // 구분하지 않으면 files가 비어 있어 아무 일도 안 일어난다.
+            const path = readDragPath(e.dataTransfer)
+            if (path) {
+              setText((prev) => {
+                const next = appendPath(prev, path)
+                // 커서를 끝으로 옮겨야 이어서 칠 수 있다
+                requestAnimationFrame(() => {
+                  const el = inputRef.current
+                  if (!el) return
+                  el.focus()
+                  el.setSelectionRange(next.length, next.length)
+                  setCaret(next.length)
+                })
+                return next
+              })
+              return
+            }
             void takeFiles(e.dataTransfer.files)
           }}
           data-testid="input-dropzone"
@@ -241,8 +296,6 @@ export function SessionView() {
             onChange={(e) => {
               setText(e.target.value)
               setCaret(e.target.selectionStart)
-              e.target.style.height = 'auto'
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
             }}
             onKeyDown={(e) => {
               // 자동완성이 열려 있으면 방향키·Enter·Tab은 목록의 것이다
@@ -275,10 +328,11 @@ export function SessionView() {
             data-testid="prompt-input"
           />
           <label
-            className="shrink-0 cursor-pointer rounded px-1.5 py-1 text-[12px] text-slate transition-colors hover:bg-graphite hover:text-chalk"
+            className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5 text-slate transition-colors hover:bg-graphite hover:text-chalk"
             title="파일 첨부"
+            aria-label="파일 첨부"
           >
-            📎
+            <PlusIcon size={16} />
             <input
               type="file"
               multiple
@@ -288,11 +342,13 @@ export function SessionView() {
             />
           </label>
           <button
-            className="shrink-0 rounded px-2 py-1 text-[12px] text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
+            className="flex shrink-0 items-center justify-center rounded p-1.5 text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
             disabled={!text.trim() && attachments.length === 0}
             data-testid="send"
+            title="보내기 (Enter)"
+            aria-label="보내기"
           >
-            보내기
+            <SendIcon />
           </button>
         </div>
         <p className="mt-1.5 text-[10px] text-slate">
@@ -316,11 +372,13 @@ function ChatStream({
   chat,
   pending,
   sessionId,
+  working,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
   pending: SessionSummary['pendingApproval']
   sessionId: string
+  working: boolean
 }) {
   const stickToBottom = useRef(true)
 
@@ -341,18 +399,51 @@ function ChatStream({
     getItemKey: (i) => chat[i]?.seq ?? i,
   })
 
+  /*
+   * 지금 화면 위로 지나간 **가장 최근 내 메시지**.
+   *
+   * position:sticky는 못 쓴다 — 가상 스크롤의 줄들은 absolute로 얹혀 있어서
+   * sticky가 걸리지 않는다. 대신 스크롤 위치로 "어느 턴을 보고 있나"를 계산해
+   * 목록 위에 한 줄로 띄운다.
+   *
+   * 렌더된 줄만 보면 화면 밖으로 멀리 밀린 메시지를 놓친다. measurementsCache는
+   * 이미 잰 모든 줄의 위치를 갖고 있으므로 그걸 쓴다.
+   */
+  const [stickyIndex, setStickyIndex] = useState<number | null>(null)
+
+  const syncSticky = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const top = el.scrollTop
+    let found: number | null = null
+    for (const m of virtualizer.measurementsCache) {
+      // 기준은 시작이 아니라 **끝**이다. 줄이 아직 반쯤 보이는데 위에 또 띄우면
+      // 같은 말이 두 번 나온다 — 완전히 지나갔을 때만 붙인다.
+      if (m.end > top) break // 여기서부터는 아직 화면 안이거나 아래다
+      if (chat[m.index]?.kind === 'user') found = m.index
+    }
+    setStickyIndex(found)
+  }, [chat, virtualizer])
+
   // 사용자가 위로 올렸는지 추적 — 올려둔 동안에는 끌어내리지 않는다
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    syncSticky()
   }
+
+  // 내용이 늘어나면 스크롤 없이도 기준이 달라진다
+  useEffect(syncSticky, [syncSticky, chat.length])
+
+  const pinned = stickyIndex !== null ? chat[stickyIndex] : undefined
+  const stickyText = pinned?.kind === 'user' ? pinned.text : null
 
   useEffect(() => {
     if (!stickToBottom.current) return
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [chat.length, pending, scrollRef])
+  }, [chat.length, pending, working, scrollRef])
 
   return (
     <div
@@ -361,6 +452,18 @@ function ChatStream({
       className="flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
       data-testid="chat-stream"
     >
+      {/*
+        지금 보고 있는 턴이 어느 질문에 대한 답인지 — 긴 응답을 읽는 동안
+        위로 되돌아가 확인하지 않아도 되게 한 줄로 남긴다.
+      */}
+      {stickyText !== null && (
+        <div className="sticky top-0 z-10 -mx-4 mb-1 px-4" data-testid="sticky-user">
+          <div className="truncate rounded border border-slate/30 bg-graphite/95 px-2.5 py-1 text-[11px] text-ash backdrop-blur-sm">
+            {stickyText}
+          </div>
+        </div>
+      )}
+
       <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
 
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
@@ -369,7 +472,14 @@ function ChatStream({
             key={v.key}
             ref={virtualizer.measureElement}
             data-index={v.index}
-            className="absolute left-0 top-0 w-full min-w-0 pb-3"
+            /*
+              턴 경계에 여백을 더 준다. 모든 줄이 같은 간격이면 내 말과 모델의 답이
+              한 덩어리로 붙어 보여서, 긴 응답 뒤에 어디서 내 차례가 시작됐는지 못 찾는다.
+              내 말 앞은 넓게 띄우고(= 이전 턴과 분리), 뒤는 조금만 띄운다(= 답과 한 묶음).
+            */
+            className={`absolute left-0 top-0 w-full min-w-0 ${
+              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
+            }`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
             <ChatRow item={chat[v.index]!} />
@@ -380,8 +490,63 @@ function ChatStream({
       {pending && (
         <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
       )}
+
+      {working && <ActivityRow sessionId={sessionId} />}
     </div>
   )
+}
+
+/**
+ * 답을 기다리는 중이라는 표시.
+ *
+ * 첫 글자가 나오기까지 수십 초가 걸리는 일이 흔한데, 그동안 화면이 완전히 조용하면
+ * **일하는 중인지 멈춘 건지 구분할 방법이 없다** (도그푸딩에서 지적됨).
+ *
+ * 그래서 두 가지를 같이 보여준다:
+ *   - 움직이는 점: "살아 있다". 정지 화면과 구분되는 건 결국 움직임뿐이다.
+ *   - 경과 시간: "얼마나 됐나". 3초와 3분은 같은 '대기'가 아니다 —
+ *     숫자가 올라가는 걸 보면 멈춘 게 아니라는 것도 같이 알 수 있다.
+ *
+ * 중지 버튼을 여기에 둔다. 상단에도 있지만, 기다리는 사람의 눈은 대화 맨 아래에 있다.
+ */
+function ActivityRow({ sessionId }: { sessionId: string }) {
+  const interrupt = useStore((s) => s.interrupt)
+  const [seconds, setSeconds] = useState(0)
+
+  useEffect(() => {
+    // 마운트 시점이 곧 이 턴이 시작된 시점이다 (working이 아니면 렌더되지 않는다)
+    const started = Date.now()
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <div className="flex items-center gap-2 py-2" data-testid="activity-row">
+      <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
+      <span className="text-[12px] text-ash">응답 기다리는 중</span>
+      {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
+      {seconds >= 2 && (
+        <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
+          {formatElapsed(seconds)}
+        </span>
+      )}
+      <button
+        type="button"
+        className="ml-auto rounded border border-edge px-2 py-0.5 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk"
+        onClick={() => void interrupt(sessionId)}
+        data-testid="activity-interrupt"
+      >
+        중지
+      </button>
+    </div>
+  )
+}
+
+export function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}초`
+  const min = Math.floor(seconds / 60)
+  if (min < 60) return `${min}분 ${seconds % 60}초`
+  return `${Math.floor(min / 60)}시간 ${min % 60}분`
 }
 
 /**
@@ -492,7 +657,12 @@ function ChatRow({ item }: { item: ChatItem }) {
           (도그푸딩 지적). whitespace-pre-wrap으로 사용자가 친 줄바꿈은 살리고,
           break-words로 못 끊는 긴 덩어리도 끊는다.
         */}
-        <div className="max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-edge bg-panel px-3 py-2 text-chalk">
+        {/*
+          바탕(void #090909)과 대비가 서야 "내가 한 말"이 보인다.
+          panel(#121212)+edge(#1e1e1e)로는 두 단계 차이뿐이라 어두운 화면에서 사실상 안 보였다
+          (도그푸딩 지적). 호버 배경과 같은 graphite로 올리고 테두리는 한 단계 더 밝게 준다.
+        */}
+        <div className="max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-chalk">
           {item.text}
         </div>
       </div>
@@ -551,7 +721,10 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
         aria-expanded={open}
         data-testid="tool-card-toggle"
       >
-        <span className="w-2 shrink-0 text-[9px] text-slate">{open ? '▾' : '▸'}</span>
+        {/* 펼침 표시는 앱 전체에서 하나여야 한다 — 파일 트리와 같은 셰브런 */}
+        <span className="shrink-0 text-slate">
+          <ChevronIcon open={open} />
+        </span>
         <span className="readout shrink-0 text-[11px] text-ash">{item.tool}</span>
         <span className="readout truncate text-[11px] text-slate">{item.title}</span>
         {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">실패</span>}

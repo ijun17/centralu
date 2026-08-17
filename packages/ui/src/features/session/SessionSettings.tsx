@@ -26,10 +26,18 @@ const SELECT =
  * 도구별 모델 목록. 셀렉터를 열 때마다 도구를 띄우면 그 클릭이 느려지므로
  * host가 캐시하고, 여기서는 도구가 바뀔 때만 한 번 묻는다.
  */
-export function useModels(tool: ToolName): { models: ModelOption[]; reason?: string } {
+export function useModels(tool: ToolName, live: boolean): { models: ModelOption[]; reason?: string } {
   const platform = usePlatform()
   const [state, setState] = useState<{ models: ModelOption[]; reason?: string }>({ models: [] })
 
+  /*
+   * `live`가 의존성에 있는 이유:
+   *
+   * Claude SDK는 모델 목록을 Query에만 둔다. 그래서 **실행 중인 세션이 없으면 못 읽는다**.
+   * 앱을 켜고 잠든 세션을 고르면 그 순간엔 질의가 없어서 목록이 비고, 한 번 비면
+   * 다시 묻지 않아 셀렉터에 "기본"만 남았다 (도그푸딩 지적).
+   * 세션이 깨어나는 순간 다시 묻는다.
+   */
   useEffect(() => {
     let alive = true
     void platform.agents
@@ -40,7 +48,7 @@ export function useModels(tool: ToolName): { models: ModelOption[]; reason?: str
     return () => {
       alive = false
     }
-  }, [platform, tool])
+  }, [platform, tool, live])
 
   return state
 }
@@ -51,15 +59,18 @@ export function SessionSettings({
   model,
   effort,
   preset,
+  live,
 }: {
   sessionId: string
   tool: ToolName
   model: string | null
   effort: string | null
   preset: PermissionPreset
+  /** 프로세스가 살아 있는가 — Claude는 살아 있어야 모델 목록을 준다 */
+  live: boolean
 }) {
   const update = useStore((s) => s.updateSessionSettings)
-  const { models, reason } = useModels(tool)
+  const { models, reason } = useModels(tool, live)
 
   const current = models.find((m) => m.id === model)
   // 목록에 없는 모델(직접 설정했거나 목록을 못 읽은 경우)도 유실되지 않게 남긴다
@@ -79,9 +90,15 @@ export function SessionSettings({
         data-testid="model-select"
         title={reason ? `모델 목록을 읽지 못했습니다: ${reason}` : '모델 — 다음 턴부터 적용됩니다'}
       >
-        <option value="" className="bg-panel">
-          기본
-        </option>
+        {/*
+          도구가 자기 '기본' 항목을 주면(Claude의 `default`) 우리 것을 또 넣지 않는다 —
+          같은 뜻의 줄이 둘이면 어느 쪽을 골라야 하는지 알 수 없다.
+        */}
+        {!models.some((m) => m.id === 'default') && (
+          <option value="" className="bg-panel">
+            기본
+          </option>
+        )}
         {options.map((m) => (
           <option key={m.id} value={m.id} className="bg-panel" title={m.description}>
             {m.label}
