@@ -72,6 +72,24 @@ log('대상 세션:', worker.id, '(readme-담당)')
 const orc = await rpc('orchestrator.get', {})
 log('오케스트레이터:', orc.id, '· projectId =', JSON.stringify(orc.projectId))
 
+// 먼저: 자기가 무엇인지 아는가 (AGENTS.md가 실제로 읽히는지)
+{
+  const mark = events.length
+  await rpc('agents.send', { sessionId: orc.id, text: '너는 무엇이고, 어떤 도구를 갖고 있어? 두 줄로.' })
+  await new Promise<void>((resolve) => {
+    const t = setInterval(() => {
+      if (events.slice(mark).some((e) => e.sessionId === orc.id && e.type === 'turn_complete')) {
+        clearInterval(t); resolve()
+      }
+    }, 500)
+    setTimeout(() => { clearInterval(t); resolve() }, 120000)
+  })
+  const who = events.slice(mark).filter((e) => e.sessionId === orc.id && e.type === 'message_delta').map((e) => e.text).join('')
+  console.log('\n── 자기소개 ──\n' + who.trim().slice(0, 400) + '\n')
+  const knows = /오케스트레이터|Control Center/.test(who) && /list_sessions|send_to_session|손이 없/.test(who)
+  console.log(`  자기가 무엇인지 아는가 ${knows ? '✅' : '❌'}\n`)
+}
+
 // 오케스트레이터에게 **도구를 쓸 수밖에 없는** 일을 시킨다
 const before = events.length
 await rpc('agents.send', {

@@ -105,7 +105,20 @@ class ClaudeSession implements SessionHandle {
          * 매니저가 넘겨준 것뿐이다 — 이 앱이 관리하는 세션 밖으로 나갈 방법이 없다.
          */
         ...(this.opts.orchestratorTools
-          ? { mcpServers: { [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools) } }
+          ? {
+              mcpServers: { [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools) },
+              /*
+               * 오케스트레이터는 자기 폴더의 AGENTS.md를 읽어야 한다 — 자기가 무엇인지
+               * 거기 적혀 있고, 사람이 고쳐서 성격을 정할 수 있다.
+               *
+               * 'project'만 넣는 이유: 실측으로 확인한 값이다.
+               *   생략      → CLAUDE.md ✅ · 사용자 전역 훅 3개도 함께 실행됨
+               *   ['project'] → CLAUDE.md ✅ · 훅 0개
+               *   []        → CLAUDE.md ❌
+               * 관제탑이 사람의 전역 훅에 휘둘리면 안 된다.
+               */
+              settingSources: ['project'] as never,
+            }
           : {}),
         permissionMode: PRESET_MODE[preset],
         resume: this.opts.resumeExternalId,
