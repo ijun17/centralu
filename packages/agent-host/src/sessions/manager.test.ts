@@ -32,7 +32,7 @@ class FakeHandle implements SessionHandle {
 }
 
 class FakeAdapter implements AgentAdapter {
-  readonly tool: ToolName = 'claude'
+  tool: ToolName = 'claude'
   readonly capabilities: AdapterCapabilities = {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'],
   }
@@ -55,6 +55,7 @@ class FakeAdapter implements AgentAdapter {
 
 let store: Store
 let adapter: FakeAdapter
+let codexAdapter: FakeAdapter
 let mgr: SessionManager
 let events: NormalizedEvent[]
 let rpc: ReturnType<typeof createRpcHandler>
@@ -63,7 +64,10 @@ beforeEach(() => {
   store = new Store()
   adapter = new FakeAdapter()
   events = []
-  const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+  // codex도 등록한다 — 도구 전환을 시험하려면 갈아 끼울 대상이 있어야 한다
+  codexAdapter = new FakeAdapter()
+  ;(codexAdapter as { tool: ToolName }).tool = 'codex'
+  const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter], ['codex', codexAdapter]])
   mgr = new SessionManager(store, adapters, (e) => events.push(e))
   rpc = createRpcHandler(mgr, adapters)
 })
@@ -175,7 +179,9 @@ describe('승인·읽음·메시지', () => {
 describe('RPC 일반', () => {
   it('capabilities와 detect를 돌려준다', async () => {
     expect(await rpc('agents.capabilities', { tool: 'claude' })).toMatchObject({ approvals: true })
-    expect(await rpc('agents.detect', {})).toHaveLength(1)
+    // 등록된 어댑터를 그대로 돌려준다 (개수가 아니라 내용을 본다 — 하네스가 늘어도 안 깨진다)
+    const found = (await rpc('agents.detect', {})) as { tool: string }[]
+    expect(found.map((x) => x.tool)).toContain('claude')
   })
 
   it('알 수 없는 메서드는 에러', async () => {
@@ -928,6 +934,23 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     const { orc, tools } = await setup()
     expect((await tools.readSession('남의-세션')).error).toMatch(/관리하는 세션이 아닙니다/)
     expect((await tools.readSession(orc.id)).error).toMatch(/자기 자신/)
+  })
+
+  /*
+   * 겉은 오케스트레이터인데 도구도 역할도 없는 세션이 가장 나쁘다.
+   * codex 어댑터는 orchestratorTools를 아직 쓰지 않으므로 바꾸는 것을 막는다.
+   */
+  it('오케스트레이터는 codex로 바꿀 수 없다 — 도구를 붙이는 길이 아직 없다', async () => {
+    const { orc } = await setup()
+    await expect(mgr.switchTool(orc.id, 'codex')).rejects.toThrow(/오케스트레이터는 아직 Claude/)
+  })
+
+  it('평범한 세션은 바꿀 수 있다', async () => {
+    const { a } = await setup()
+    const r = await mgr.switchTool(a.id, 'codex')
+    expect(r.tool).toBe('codex')
+    // 새 도구는 옛 대화를 모른다 — 이어갈 실마리를 끊는다
+    expect(r.externalId).toBeNull()
   })
 
   it('평범한 세션에는 도구가 붙지 않는다 — 오케스트레이터만 받는다', async () => {

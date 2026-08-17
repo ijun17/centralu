@@ -475,8 +475,16 @@ export class SessionManager {
       // 오간 말이 없다 = 새로 띄워도 잃을 것이 없다
     }
 
-    const project = this.store.listProjects().find((p) => p.id === m.projectId)
-    if (!project) return { session: m, resumed: false, reason: 'Project not found' }
+    /*
+     * **오케스트레이터에는 프로젝트가 없다.**
+     *
+     * 여기서 프로젝트를 요구하는 바람에 앱을 다시 켜면 오케스트레이터가 영영 죽었다
+     * ("Could not resume the conversation: Project not found" — 실측).
+     * 만들 때만 되고 이어가지는 못하는 세션이었던 셈이다.
+     */
+    const project = m.projectId === null ? null : this.store.listProjects().find((p) => p.id === m.projectId)
+    if (m.projectId !== null && !project) return { session: m, resumed: false, reason: 'Project not found' }
+    const cwd = this.cwdOf(m.projectId)
 
     /*
      * 도구 쪽에서 이 대화가 지워졌는지 먼저 본다.
@@ -497,7 +505,7 @@ export class SessionManager {
       }
     }
 
-    const gone = await this.externalGone(m, project.path)
+    const gone = await this.externalGone(m, cwd)
     if (gone) {
       return {
         session: m,
@@ -510,11 +518,20 @@ export class SessionManager {
       const handle = await adapter.createSession(
         {
           sessionId,
-          cwd: project.path,
+          cwd,
           model: m.model ?? undefined,
           effort: m.effort ?? undefined,
           permissionPreset: m.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
+          /*
+           * **도구와 역할은 되살릴 때도 따라와야 한다.**
+           *
+           * 만들 때만 붙이면, 다시 뜬 오케스트레이터는 도구도 역할도 없는
+           * 평범한 세션이 된다 — 빈 폴더에 앉아 아무것도 못 하면서
+           * 겉보기에는 멀쩡한, 가장 나쁜 상태다.
+           */
+          orchestratorTools: m.projectId === null ? this.orchestratorToolsFor(sessionId) : undefined,
+          systemPromptAppend: m.projectId === null ? ORCHESTRATOR_ROLE : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -529,10 +546,11 @@ export class SessionManager {
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       void this.listCommands(sessionId).catch(() => {})
 
-      // 밖에서(터미널의 도구로) 이어간 대화를 따라잡는다
-      const added = await this.syncImportedHistory(m, adapter, project.path)
-      if (added > 0) {
-        this.emit({ type: 'history_synced', sessionId, added })
+      // 밖에서(터미널의 도구로) 이어간 대화를 따라잡는다.
+      // 오케스트레이터는 밖에서 이어갈 수 없는 세션이라 해당 없다 (프로젝트가 없다)
+      if (project) {
+        const added = await this.syncImportedHistory(m, adapter, project.path)
+        if (added > 0) this.emit({ type: 'history_synced', sessionId, added })
       }
       return { session: m, resumed: true }
     } catch (err) {
@@ -543,7 +561,7 @@ export class SessionManager {
        * app-server를 띄우므로 세션을 고를 때마다 몇 초가 얹혔다 (도그푸딩 지적).
        * 값이 비싼 확인은 잘못됐을 때만 한다 — 잘 되는 길은 빨라야 한다.
        */
-      const gone = await this.externalGone(m, project.path)
+      const gone = await this.externalGone(m, cwd)
       if (gone) {
         return {
           session: m,
@@ -786,6 +804,24 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
+
+    /*
+     * **오케스트레이터는 아직 Claude만 된다.**
+     *
+     * 도구를 붙이는 길이 어댑터마다 다르다: Claude는 인프로세스 MCP로 붙지만
+     * (adapters/claude/orchestrator-mcp.ts), Codex는 실제 MCP 서버가 필요하다 —
+     * host에 HTTP 엔드포인트를 열고 스레드별 config로 물려야 하고, 그 경로는 아직 없다.
+     *
+     * 막지 않으면 겉은 오케스트레이터인데 도구도 역할도 없는 세션이 된다.
+     * 빈 폴더에 앉아 아무것도 못 하면서 멀쩡해 보이는 것이 가장 나쁘다 —
+     * 안 되는 것은 안 된다고 말한다.
+     */
+    if (this.store.orchestratorId() === sessionId && tool !== 'claude') {
+      throw Object.assign(
+        new Error('오케스트레이터는 아직 Claude Code만 됩니다 — 다른 도구에 이 앱의 세션 도구를 붙이는 길이 아직 없습니다'),
+        { code: 'internal' },
+      )
+    }
 
     const adapter = this.adapters.get(tool)
     if (!adapter) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
