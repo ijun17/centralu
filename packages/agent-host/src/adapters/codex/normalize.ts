@@ -128,15 +128,29 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return events
     }
 
+    /*
+     * 사용량 갱신은 **한도에 걸린 것과 다르다.**
+     *
+     * 여기에 조건이 없어서 코덱스 세션은 첫 도구 호출 직후 곧바로 'limited'가 됐다 —
+     * 실측에서 usedPercent 27%인데도 그랬다. 그러면 아이콘 회전이 멈추고 흐려지고,
+     * 있지도 않은 "Limit 27%" 딱지가 붙는다 (도그푸딩: "배시 돌 때 로딩이 안 돈다").
+     *
+     * 도구는 걸렸는지를 직접 알려준다 — `rateLimitReachedType`이 null이면 안 걸린 것이다
+     * (Claude 어댑터도 `status !== 'allowed'`일 때만 낸다. 같은 규칙이어야 한다).
+     * 남는 사용량 정보는 잃지 않는다: 사용량 창이 `agents.usage`로 따로 읽는다.
+     */
     case 'account/rateLimits/updated': {
-      const primary = obj(obj(p.rateLimits).primary)
-      const used = num(primary.usedPercent)
+      const snapshot = obj(p.rateLimits)
+      const reached = str(snapshot.rateLimitReachedType) !== '' || snapshot.spendControlReached === true
+      if (!reached) return []
+
+      const primary = obj(snapshot.primary)
       const resetsAt = num(primary.resetsAt)
       return [
         {
           type: 'limit_reached',
           sessionId,
-          usedPercent: used,
+          usedPercent: num(primary.usedPercent),
           windowMins: num(primary.windowDurationMins),
           resumeAt: resetsAt ? new Date(resetsAt * 1000).toISOString() : undefined,
         },

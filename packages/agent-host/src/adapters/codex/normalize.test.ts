@@ -63,12 +63,40 @@ describe('상태·계기판', () => {
     expect(out[1]).toMatchObject({ type: 'context_update', used: 120, window: 1_000_000, exactness: 'exact' })
   })
 
-  it('rateLimits → limit_reached (주간 윈도우·해제 시각 포함)', () => {
+  /*
+   * 사용량 갱신 ≠ 한도 도달.
+   *
+   * 이 구분이 없어서 코덱스 세션은 첫 도구 호출 직후 곧바로 'limited'가 됐다 —
+   * 실측에서 27%인데도 그랬다. 아이콘 회전이 멈추고 흐려지고 없는 딱지가 붙었다.
+   * 도구가 `rateLimitReachedType`으로 직접 알려주는데 우리가 안 봤다.
+   */
+  it('아직 안 걸렸으면 아무 일도 없다 — 사용량이 올라가는 것은 정상이다', () => {
+    expect(
+      n('account/rateLimits/updated', {
+        rateLimits: {
+          primary: { usedPercent: 27, windowDurationMins: 10080, resetsAt: 1787198872 },
+          rateLimitReachedType: null,
+        },
+      }),
+    ).toEqual([])
+  })
+
+  it('걸렸을 때만 limit_reached (주간 윈도우·해제 시각 포함)', () => {
     const out = n('account/rateLimits/updated', {
-      rateLimits: { primary: { usedPercent: 21, windowDurationMins: 10080, resetsAt: 1787198872 } },
+      rateLimits: {
+        primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1787198872 },
+        rateLimitReachedType: 'rate_limit_reached',
+      },
     })
-    expect(out[0]).toMatchObject({ type: 'limit_reached', usedPercent: 21, windowMins: 10080 })
+    expect(out[0]).toMatchObject({ type: 'limit_reached', usedPercent: 100, windowMins: 10080 })
     expect((out[0] as { resumeAt?: string }).resumeAt).toMatch(/^\d{4}-/)
+  })
+
+  it('지출 한도도 한도다', () => {
+    const out = n('account/rateLimits/updated', {
+      rateLimits: { primary: { usedPercent: 40 }, spendControlReached: true },
+    })
+    expect(out[0]).toMatchObject({ type: 'limit_reached' })
   })
 
   it('thread/name/updated → session_title (FR-18 자동 이름)', () => {
