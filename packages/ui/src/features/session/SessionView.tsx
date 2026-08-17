@@ -21,11 +21,61 @@ const COMPOSER_MAX_H = 160
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
 
-/** 조작 레인 — 전체 폭 (그리드가 아니라 포커스 뷰인 이유) */
+/**
+ * 포커스 뷰 — 고른 세션 하나를 전체 폭으로.
+ *
+ * 세션 화면 자체는 SessionPane이 그린다. 컨트롤 센터의 격자 칸도 **같은 부품**을 쓴다:
+ * 복사본을 두면 모델·권한을 한쪽에서 바꿨을 때 다른 쪽이 옛 값을 들고 있게 된다.
+ * 여기서는 "무엇을 보여줄지"만 고르고, 그리는 일은 넘긴다.
+ */
 export function SessionView() {
   const session = useFocusedSession()
   const projectOnly = useStore((s) => (s.focusedSessionId ? undefined : s.projects[s.focusedProjectId ?? '']))
-  const chat = useStore((s) => (s.focusedSessionId ? (s.chat[s.focusedSessionId] ?? EMPTY_CHAT) : EMPTY_CHAT))
+
+  if (!session) {
+    if (!projectOnly) {
+      return (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
+          <p className="text-[13px] text-ash">Select a project or session</p>
+          <p className="text-[11px] text-slate">
+            <Kbd>⌘</Kbd> <Kbd>I</Kbd> shows everything waiting on you
+          </p>
+        </div>
+      )
+    }
+    return (
+      <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
+        <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
+          <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
+            {projectOnly.name}
+          </h1>
+          <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
+        </DragRegion>
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+          <p className="text-[13px] text-ash">Select a session or start a new one</p>
+          <p className="text-[11px] text-slate">
+            Git and files are in the evidence panel on the right, even without a session (<Kbd>⌘</Kbd> <Kbd>B</Kbd>)
+          </p>
+        </div>
+      </section>
+    )
+  }
+
+  return <SessionPane sessionId={session.id} />
+}
+
+/**
+ * 세션 하나의 화면 — 머리글·대화·입력창.
+ *
+ * **포커스 뷰와 컨트롤 센터가 이걸 같이 쓴다.** 그래서 그리드 칸에서 모델을 바꾸면
+ * 사이드바와 포커스 뷰가 곧바로 따라온다: 상태를 복사하지 않고 store 하나만 보기 때문이다.
+ *
+ * 입력 중인 글은 이 부품이 들고 있으므로 **칸마다 따로**다 — 그리드에서 A에 쓰다가
+ * B에 쓰기 시작해도 서로 섞이지 않는다.
+ */
+export function SessionPane({ sessionId }: { sessionId: string }) {
+  const session = useStore((s) => s.sessions[sessionId])
+  const chat = useStore((s) => s.chat[sessionId] ?? EMPTY_CHAT)
   const send = useStore((s) => s.send)
   const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
@@ -56,9 +106,9 @@ export function SessionView() {
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`
   }, [text])
 
-  // 자동완성: `/`는 스킬, `@`는 파일. 세션이 없으면 입력창 자체가 없다
+  // 자동완성: `/`는 스킬, `@`는 파일
   const ac = useAutocomplete({
-    sessionId: session?.id ?? '',
+    sessionId,
     projectId: session?.projectId ?? '',
     text,
     caret,
@@ -98,36 +148,8 @@ export function SessionView() {
     return () => clearTimeout(t)
   }, [session, chat.length, markRead])
 
-  // 세션이 없어도 프로젝트를 고르면 깃·파일·뷰어는 볼 수 있다.
-  // (이것들은 프로젝트의 속성이지 세션의 속성이 아니다 — 도그푸딩에서 지적됨)
-  if (!session) {
-    if (!projectOnly) {
-      return (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
-          <p className="text-[13px] text-ash">Select a project or session</p>
-          <p className="text-[11px] text-slate">
-            <Kbd>⌘</Kbd> <Kbd>I</Kbd> shows everything waiting on you
-          </p>
-        </div>
-      )
-    }
-    return (
-      <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
-        <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
-          <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
-            {projectOnly.name}
-          </h1>
-          <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
-        </DragRegion>
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-          <p className="text-[13px] text-ash">Select a session or start a new one</p>
-          <p className="text-[11px] text-slate">
-            Git and files are in the evidence panel on the right, even without a session (<Kbd>⌘</Kbd> <Kbd>B</Kbd>)
-          </p>
-        </div>
-      </section>
-    )
-  }
+  // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다
+  if (!session) return null
 
   const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
 

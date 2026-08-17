@@ -57,6 +57,9 @@ export interface AgentPort {
   interrupt(sessionId: string): Promise<void>
   /** 사이드바 순서 (사람이 끌어서 정한다). 전체 순서를 통째로 보낸다 */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
+  /** 컨트롤 센터 배치 — 추가·제거·순서가 전부 이 한 가지로 온다 */
+  controlCenter(): Promise<string[]>
+  setControlCenter(sessionIds: string[]): Promise<string[]>
   /** 고를 수 있는 모델과 각 모델의 추론 강도 (도구가 공식 API로 알려주는 것) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */

@@ -146,6 +146,24 @@ export class Store {
           }
         },
       },
+      {
+        to: 9,
+        run: () => {
+          /*
+           * 컨트롤 센터에 올려둔 세션.
+           *
+           * 세션 테이블의 컬럼이 아니라 **따로 둔다**: 그리드에 있는 것과 세션이
+           * 존재하는 것은 다른 사실이고, 그리드에서 빼도 세션은 그대로 남는다.
+           * 컬럼으로 두면 "안 올라간 세션"을 0과 NULL 중 무엇으로 볼지가 계속 애매해진다.
+           */
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS control_center (
+              session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+              position   INTEGER NOT NULL
+            )
+          `)
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -218,6 +236,30 @@ export class Store {
   setSessionOrder(orderedIds: readonly string[]): void {
     const stmt = this.db.prepare(`UPDATE sessions SET sidebar_order = ? WHERE id = ?`)
     this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
+  }
+
+  /** 컨트롤 센터 배치 — 올려둔 순서대로 */
+  listControlCenter(): string[] {
+    return (
+      this.db.prepare(`SELECT session_id FROM control_center ORDER BY position`).all() as {
+        session_id: string
+      }[]
+    ).map((r) => r.session_id)
+  }
+
+  /**
+   * 배치를 통째로 다시 쓴다.
+   *
+   * 추가·제거·순서 바꾸기가 모두 이 한 가지로 오므로 지우고 새로 넣는 게 가장 단순하다.
+   * 목록이 짧고(사람이 보는 화면이다) 한 트랜잭션이라 중간 상태가 보이지 않는다.
+   */
+  setControlCenter(sessionIds: readonly string[]): void {
+    const del = this.db.prepare(`DELETE FROM control_center`)
+    const ins = this.db.prepare(`INSERT INTO control_center (session_id, position) VALUES (?, ?)`)
+    this.db.transaction(() => {
+      del.run()
+      sessionIds.forEach((id, i) => ins.run(id, i))
+    })()
   }
 
   listSessions(): SessionInfo[] {

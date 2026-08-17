@@ -33,6 +33,7 @@ export type MockOptions = {
 export class MockPlatform implements Platform {
   private projectsList: ProjectInfo[] = []
   sessions = new Map<string, SessionInfo>()
+  private gridPanels: string[] = []
   private messages = new Map<string, StoredMessage[]>()
   private handlers = new Set<(e: NormalizedEvent) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
@@ -277,6 +278,11 @@ export class MockPlatform implements Platform {
       const others = [...this.sessions.entries()].filter(([, s]) => s.projectId !== projectId)
       this.sessions = new Map([...others, ...mine.map((s) => [s.id, s] as const)])
       return [...this.sessions.values()]
+    },
+    controlCenter: async () => [...this.gridPanels],
+    setControlCenter: async (sessionIds: string[]) => {
+      this.gridPanels = sessionIds.filter((id) => this.sessions.has(id))
+      return [...this.gridPanels]
     },
     models: async (tool: ToolName) => ({
       supported: true,

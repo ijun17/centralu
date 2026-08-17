@@ -8,6 +8,7 @@ import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
+import { ControlCenter } from '../features/control-center/ControlCenter.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
 import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
@@ -62,11 +63,15 @@ export function App({ platform }: { platform: Platform }) {
 /** 프로젝트가 하나도 없으면 시작 안내가 화면을 대신한다 (FR-19) */
 function Body() {
   const hasProjects = useStore((s) => Object.keys(s.projects).length > 0)
+  // 훅은 **이른 return보다 먼저** — 아래 FirstRun 분기 뒤에 두면 렌더마다 훅 수가 달라진다
+  const view = useStore((s) => s.view)
+
   if (!hasProjects) return <FirstRun />
   /*
     3레인. 좌 = 관찰, 중앙 = 조작, 우 = 증거.
     오버레이는 중앙과 우측을 함께 덮는다 — diff는 넓어야 읽힌다.
   */
+
   return (
     <div className="flex min-h-0 flex-1">
       <Sidebar />
@@ -81,8 +86,19 @@ function Body() {
         가로 스크롤된다 (도그푸딩에서 나온 버그의 진짜 원인).
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1">
-        <SessionView />
-        <EvidencePanel />
+        {/*
+          컨트롤 센터에는 우측 증거 패널이 없다. 그리드가 이미 화면을 나눠 쓰는데
+          거기서 또 한 레인을 떼면 패널이 최소 폭 아래로 내려간다 — 그리드를
+          보류했던 근거(§5.4)를 우리 손으로 재현하는 셈이다.
+        */}
+        {view === 'grid' ? (
+          <ControlCenter />
+        ) : (
+          <>
+            <SessionView />
+            <EvidencePanel />
+          </>
+        )}
         <Overlay />
       </div>
     </div>

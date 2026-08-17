@@ -116,6 +116,7 @@ export function Sidebar() {
         onReset={() => setSidebarWidth(SIDEBAR_DEFAULT)}
         testId="sidebar-resize"
       />
+      <ControlCenterButton />
       {ids.length === 0 ? (
         <p className="px-4 py-6 text-xs leading-relaxed text-slate">
           No projects yet.
@@ -126,6 +127,70 @@ export function Sidebar() {
         ids.map((id) => <ProjectBlock key={id} projectId={id} />)
       )}
     </aside>
+  )
+}
+
+/**
+ * 컨트롤 센터로 가는 문.
+ *
+ * **프로젝트와 다르게 생겨야 한다.** 목록의 다른 줄과 같은 모양이면 "프로젝트 하나"로
+ * 읽히는데, 이건 프로젝트가 아니라 **보는 방식**이다. 둥근 박스로 감싸 목록에서
+ * 떼어 놓는다 — 같은 종류가 아니라는 걸 글자보다 모양이 먼저 말한다.
+ *
+ * 세션을 여기 떨어뜨리면 컨트롤 센터로 들어가면서 그 세션이 올라간다. 화면을 먼저
+ * 열고 다시 끌어야 한다면 두 번 일하는 셈이라, 끌어온 김에 한 번에 처리한다.
+ */
+function ControlCenterButton() {
+  const view = useStore((s) => s.view)
+  const setView = useStore((s) => s.setView)
+  const panels = useStore((s) => s.gridPanels)
+  const setGridPanels = useStore((s) => s.setGridPanels)
+  const [over, setOver] = useState(false)
+  const active = view === 'grid'
+
+  return (
+    <div className="px-2 pb-1 pt-2">
+      <button
+        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+          active
+            ? 'border-slate/50 bg-graphite text-chalk'
+            : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
+        } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-ash)]' : ''}`}
+        onClick={() => setView(active ? 'focus' : 'grid')}
+        data-testid="control-center-button"
+        title="See sessions side by side"
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(SESSION_MIME)) return
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          const id = e.dataTransfer.getData(SESSION_MIME)
+          setOver(false)
+          if (!id) return
+          e.preventDefault()
+          if (!panels.includes(id)) void setGridPanels([...panels, id])
+          setView('grid')
+        }}
+      >
+        <GridIcon />
+        <span className="truncate font-medium tracking-tight">Control Center</span>
+        {panels.length > 0 && <span className="readout ml-auto text-[10px] text-slate">{panels.length}</span>}
+      </button>
+    </div>
+  )
+}
+
+/** 나뉜 화면 — 컨트롤 센터가 하는 일을 그대로 그린 기호 */
+function GridIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="9" y="1.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="1.5" y="9" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="9" y="9" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
   )
 }
 

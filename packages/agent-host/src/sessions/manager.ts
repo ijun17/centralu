@@ -134,6 +134,24 @@ export class SessionManager {
     return this.listSessions()
   }
 
+  /** 컨트롤 센터 배치 */
+  controlCenter(): string[] {
+    return this.store.listControlCenter()
+  }
+
+  /**
+   * 배치 저장.
+   *
+   * **모르는 세션은 걷어낸다.** 지워진 세션의 id가 배치에 남아 돌아오면 화면이
+   * 없는 것을 그리려 한다 — 저장 시점에 한 번 거르면 그 뒤로는 신경 쓸 일이 없다.
+   */
+  setControlCenter(sessionIds: readonly string[]): string[] {
+    const known = new Set(this.meta.keys())
+    const clean = [...new Set(sessionIds.filter((id) => known.has(id)))]
+    this.store.setControlCenter(clean)
+    return clean
+  }
+
   async listProjects(): Promise<ProjectInfo[]> {
     return Promise.all(this.store.listProjects().map((p) => this.projectInfo(p.id, p.path)))
   }

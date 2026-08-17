@@ -2434,3 +2434,54 @@ test('끌어서 옮기는 동안 목록이 밀리지 않는다', async ({ page }
   expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(0.5)
   expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(0.5)
 })
+
+/**
+ * 컨트롤 센터 — 여러 세션을 한 화면에서.
+ *
+ * 사양서 §5.4가 v1에서 보류했던 그리드다. 되살리면서 지킨 것:
+ * 패널이 최소 폭 아래로 내려가지 않게 열 수를 폭에서 계산하고,
+ * 칸은 포커스 뷰와 **같은 부품**을 써서 설정이 갈라지지 않게 한다.
+ */
+test('세션을 끌어다 놓으면 컨트롤 센터에 올라간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+
+  // 끌어온 김에 화면까지 열린다 — 열고 다시 끌면 두 번 일이다
+  await expect(page.getByTestId('control-center')).toBeVisible()
+  await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
+
+  // 우측 증거 패널은 없다 (§5.4: 한 레인 더 떼면 패널이 최소 폭 아래로 간다)
+  await expect(page.getByTestId('evidence-panel')).toBeHidden()
+})
+
+test('그리드 칸과 포커스 뷰가 같은 설정을 본다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
+
+  // 그리드 칸에서 모델을 바꾸고
+  await page.getByTestId(`grid-panel-${id}`).getByTestId('model-select').selectOption('opus')
+
+  // 포커스 뷰로 돌아오면 그대로여야 한다 — 복사본이면 여기서 갈라진다
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId('model-select')).toHaveValue('opus')
+})
+
+test('컨트롤 센터에서 빼도 세션은 사이드바에 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  await page.getByTestId(`grid-remove-${id}`).click()
+
+  await expect(page.getByTestId(`grid-panel-${id}`)).toBeHidden()
+  // 화면에서만 내린 것이다 — 세션은 그대로 돌아간다
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+})

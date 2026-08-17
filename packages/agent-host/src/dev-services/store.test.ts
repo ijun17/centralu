@@ -20,7 +20,7 @@ function seeded() {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(8)
+    expect(new Store().schemaVersion).toBe(9)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -103,7 +103,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(8)
+    expect(store.schemaVersion).toBe(9)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -217,6 +217,52 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.setProjectOrder(['p2', 'p1'])
     expect(s.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
+    s.close()
+  })
+})
+
+/**
+ * 컨트롤 센터 배치는 **껐다 켜도 그대로**여야 한다 — 사람이 짠 화면이기 때문이다.
+ * 세션 테이블이 아니라 따로 두었으므로, 세션을 저장해도 배치가 흔들리지 않는지 함께 본다.
+ */
+describe('마이그레이션 v9 — 컨트롤 센터 배치', () => {
+  it('올려둔 순서대로 돌아온다', () => {
+    const s = seeded()
+    for (const id of ['s2', 's3']) {
+      s.upsertSession({
+        id, projectId: 'p1', tool: 'claude', externalId: null, name: id,
+        autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+        createdAt: Date.now(), waitingSince: null, live: true,
+        model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+      })
+    }
+    s.setControlCenter(['s3', 's1'])
+    expect(s.listControlCenter()).toEqual(['s3', 's1'])
+    s.close()
+  })
+
+  it('통째로 다시 쓴다 — 추가·제거·순서가 모두 한 가지로 온다', () => {
+    const s = seeded()
+    s.setControlCenter(['s1'])
+    s.setControlCenter([])
+    expect(s.listControlCenter()).toEqual([])
+    s.close()
+  })
+
+  it('세션을 다시 저장해도 배치는 그대로', () => {
+    const s = seeded()
+    s.setControlCenter(['s1'])
+    const before = s.listSessions()[0]!
+    s.upsertSession({ ...before, name: 'renamed' })
+    expect(s.listControlCenter()).toEqual(['s1'])
+    s.close()
+  })
+
+  it('세션을 지우면 배치에서도 빠진다 — 없는 것을 그리려 하면 안 된다', () => {
+    const s = seeded()
+    s.setControlCenter(['s1'])
+    s.deleteSession('s1')
+    expect(s.listControlCenter()).toEqual([])
     s.close()
   })
 })

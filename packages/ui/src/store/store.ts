@@ -201,6 +201,17 @@ export type AppState = {
   /** 사이드바 순서 (사람이 끌어서 정한다) */
   reorderProjects(orderedIds: string[]): Promise<void>
   reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
+  /**
+   * 컨트롤 센터.
+   *
+   * `view`는 화면 하나를 고르는 값이다 — 포커스 뷰와 그리드는 **같은 세션 상태를**
+   * 다르게 보여줄 뿐이므로, 세션 데이터를 따로 들지 않고 보는 방식만 바꾼다.
+   * (그래야 그리드에서 모델을 바꿔도 사이드바·포커스 뷰가 같이 따라온다.)
+   */
+  view: 'focus' | 'grid'
+  gridPanels: string[]
+  setView(view: 'focus' | 'grid'): void
+  setGridPanels(sessionIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
 }
@@ -269,6 +280,8 @@ export const useStore = create<AppState>((set, get) => ({
   wakeError: {},
   panelOpen: true,
   panelTab: 'git',
+  view: 'focus' as const,
+  gridPanels: [] as string[],
   panelWidth: PANEL_DEFAULT,
   treeHeight: TREE_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
@@ -305,7 +318,12 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    const [projects, sessions] = await Promise.all([platform.projects.list(), platform.agents.listSessions()])
+    const [projects, sessions, gridPanels] = await Promise.all([
+      platform.projects.list(),
+      platform.agents.listSessions(),
+      // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
+      platform.agents.controlCenter().catch(() => [] as string[]),
+    ])
     set({
       projects: Object.fromEntries(projects.map((p) => [p.id, p])),
       sessions: Object.fromEntries(
@@ -318,6 +336,7 @@ export const useStore = create<AppState>((set, get) => ({
           },
         ]),
       ),
+      gridPanels,
       connection: 'connected',
     })
 
@@ -845,6 +864,28 @@ export const useStore = create<AppState>((set, get) => ({
       set({ projects: Object.fromEntries(fresh.map((p) => [p.id, p])) })
     } catch (e) {
       set({ projects: before, toast: `Could not save order: ${(e as Error).message}` })
+    }
+  },
+
+  setView(view) {
+    set({ view })
+  },
+
+  /**
+   * 배치를 통째로 저장한다 (추가·제거·순서가 전부 이 한 가지로 온다).
+   *
+   * 화면을 먼저 바꾸고 저장이 뒤따라간다 — 끌어놓은 패널이 서버 왕복을 기다렸다가
+   * 자리를 잡으면 손이 멈칫한 것처럼 느껴진다. 실패하면 host가 준 진실로 되돌린다.
+   */
+  async setGridPanels(sessionIds) {
+    const platform = get().platform
+    if (!platform) return
+    const before = get().gridPanels
+    set({ gridPanels: sessionIds })
+    try {
+      set({ gridPanels: await platform.agents.setControlCenter(sessionIds) })
+    } catch (e) {
+      set({ gridPanels: before, toast: `Could not save layout: ${(e as Error).message}` })
     }
   },
 

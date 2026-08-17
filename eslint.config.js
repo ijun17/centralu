@@ -1,6 +1,7 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
+import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 
 /** 레이어 규칙의 원본은 docs/architecture.md §2. 여기가 그 기계 강제판이다. */
@@ -13,6 +14,24 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  /*
+   * 훅 규칙.
+   *
+   * "이른 return 뒤에 훅"을 **두 번** 저질렀다 (ProjectBlock, Body). 둘 다 조건이
+   * 맞는 순간에만 터지는 런타임 크래시라 타입 검사도 테스트도 잡지 못했고,
+   * 두 번째는 컨트롤 센터를 열자마자 화면이 하얘졌다.
+   *
+   * 주석으로 "훅은 먼저"라고 적어 두는 걸로는 세 번째를 막지 못한다.
+   */
+  {
+    files: ['packages/ui/**/*.tsx', 'packages/ui/**/*.ts', 'apps/**/*.tsx'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      // 의존성 누락은 "가끔 안 갱신됨"으로 나타나 원인을 찾기 어렵다 — 경고로 남긴다
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
   {

@@ -55,6 +55,14 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call<SessionInfo[]>('sessions.reorder', { projectId, orderedIds })
   }
 
+  controlCenter() {
+    return this.rpc.call<string[]>('controlCenter.get', {})
+  }
+
+  setControlCenter(sessionIds: string[]) {
+    return this.rpc.call<string[]>('controlCenter.set', { sessionIds })
+  }
+
   models(tool: ToolName) {
     return this.rpc.call<{ supported: boolean; reason?: string; models: ModelOption[] }>('agents.models', {
       tool,

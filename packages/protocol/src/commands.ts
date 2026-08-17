@@ -247,6 +247,17 @@ export const RpcMethods = {
     params: z.object({ projectId: z.string(), orderedIds: z.array(z.string()) }),
     result: z.array(SessionInfo),
   },
+  /**
+   * 컨트롤 센터에 올려둔 세션들 (순서 포함).
+   *
+   * 자동 흐름 그리드라 배치가 곧 순서 하나다. 그래서 **추가·제거·순서 바꾸기가
+   * 전부 이 한 가지**로 표현된다 — "목록을 이렇게 만들어라".
+   */
+  'controlCenter.get': { params: z.object({}), result: z.array(z.string()) },
+  'controlCenter.set': {
+    params: z.object({ sessionIds: z.array(z.string()) }),
+    result: z.array(z.string()),
+  },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },
   'projects.gitStatus': { params: z.object({ projectId: z.string() }), result: ProjectInfo },
   'sessions.list': { params: z.object({}), result: z.array(SessionInfo) },
