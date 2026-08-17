@@ -1,20 +1,11 @@
 import type {
-  AdapterCapabilities,
   Attachment,
   PermissionPreset,
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
-  CommandInfo,
-  ExternalSession,
   NormalizedEvent,
-  ProjectInfo,
-  SessionInfo,
-  StoredMessage,
-  UsageSnapshot,
-  TerminalInfo,
   ToolName,
-  ModelOption,
 } from '@cc/protocol'
 import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
@@ -34,13 +25,13 @@ export type WebPlatformOptions = {
 class WebAgentPort implements AgentPort {
   constructor(private rpc: RpcClient) {}
   createSession(params: CreateSessionParams) {
-    return this.rpc.call<SessionInfo>('agents.createSession', params)
+    return this.rpc.call('agents.createSession', params)
   }
   async send(sessionId: string, text: string, attachments?: Attachment[]) {
     await this.rpc.call('agents.send', { sessionId, text, attachments })
   }
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
-    return this.rpc.call<Attachment>('attachments.save', { sessionId, name, mime, dataBase64 })
+    return this.rpc.call('attachments.save', { sessionId, name, mime, dataBase64 })
   }
   async respondApproval(
     sessionId: string,
@@ -52,19 +43,19 @@ class WebAgentPort implements AgentPort {
     await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher })
   }
   reorderSessions(projectId: string, orderedIds: string[]) {
-    return this.rpc.call<SessionInfo[]>('sessions.reorder', { projectId, orderedIds })
+    return this.rpc.call('sessions.reorder', { projectId, orderedIds })
   }
 
   controlCenter() {
-    return this.rpc.call<string[]>('controlCenter.get', {})
+    return this.rpc.call('controlCenter.get', {})
   }
 
   setControlCenter(sessionIds: string[]) {
-    return this.rpc.call<string[]>('controlCenter.set', { sessionIds })
+    return this.rpc.call('controlCenter.set', { sessionIds })
   }
 
   models(tool: ToolName) {
-    return this.rpc.call<{ supported: boolean; reason?: string; models: ModelOption[] }>('agents.models', {
+    return this.rpc.call('agents.models', {
       tool,
     })
   }
@@ -76,24 +67,24 @@ class WebAgentPort implements AgentPort {
     await this.rpc.call('agents.archiveSession', { sessionId, archived })
   }
   restartSession(sessionId: string) {
-    return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.restartSession', {
+    return this.rpc.call('agents.restartSession', {
       sessionId,
     })
   }
   updateSettings(sessionId: string, settings: { model?: string | null; permissionPreset?: PermissionPreset }) {
-    return this.rpc.call<SessionInfo>('agents.updateSettings', { sessionId, ...settings })
+    return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
   }
   async deleteSession(sessionId: string) {
     await this.rpc.call('agents.deleteSession', { sessionId })
   }
   listExternalSessions(projectId: string, tool: ToolName, limit = 30) {
-    return this.rpc.call<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>(
+    return this.rpc.call(
       'agents.listExternalSessions',
       { projectId, tool, limit },
     )
   }
   resumeSession(sessionId: string) {
-    return this.rpc.call<{ session: SessionInfo; resumed: boolean; reason?: string }>('agents.resumeSession', {
+    return this.rpc.call('agents.resumeSession', {
       sessionId,
     })
   }
@@ -104,24 +95,24 @@ class WebAgentPort implements AgentPort {
     await this.rpc.call('sessions.markRead', { sessionId, seq })
   }
   listSessions() {
-    return this.rpc.call<SessionInfo[]>('sessions.list', {})
+    return this.rpc.call('sessions.list', {})
   }
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number) {
-    return this.rpc.call<StoredMessage[]>('messages.load', { sessionId, limit, beforeSeq })
+    return this.rpc.call('messages.load', { sessionId, limit, beforeSeq })
   }
   commands(sessionId: string) {
-    return this.rpc.call<{ ready: boolean; commands: CommandInfo[] }>('agents.commands', { sessionId })
+    return this.rpc.call('agents.commands', { sessionId })
   }
   usage(tool: ToolName) {
-    return this.rpc.call<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>('agents.usage', {
+    return this.rpc.call('agents.usage', {
       tool,
     })
   }
   capabilities(tool: ToolName) {
-    return this.rpc.call<AdapterCapabilities>('agents.capabilities', { tool })
+    return this.rpc.call('agents.capabilities', { tool })
   }
   detect() {
-    return this.rpc.call<{ tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }[]>('agents.detect', {})
+    return this.rpc.call('agents.detect', {})
   }
   subscribe(handler: (e: NormalizedEvent) => void): Unsubscribe {
     return this.rpc.onEvent(handler)
@@ -134,16 +125,16 @@ class WebAgentPort implements AgentPort {
 class WebProjectPort implements ProjectPort {
   constructor(private rpc: RpcClient) {}
   reorder(orderedIds: string[]) {
-    return this.rpc.call<ProjectInfo[]>('projects.reorder', { orderedIds })
+    return this.rpc.call('projects.reorder', { orderedIds })
   }
   add(path: string) {
-    return this.rpc.call<ProjectInfo>('projects.add', { path })
+    return this.rpc.call('projects.add', { path })
   }
   list() {
-    return this.rpc.call<ProjectInfo[]>('projects.list', {})
+    return this.rpc.call('projects.list', {})
   }
   gitStatus(projectId: string) {
-    return this.rpc.call<ProjectInfo>('projects.gitStatus', { projectId })
+    return this.rpc.call('projects.gitStatus', { projectId })
   }
 }
 
@@ -212,7 +203,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     },
     terminal: {
       list: async (projectId) =>
-        (await rpc.call<{ terminals: TerminalInfo[] }>('terminal.list', { projectId })).terminals,
+        (await rpc.call('terminal.list', { projectId })).terminals,
       create: (projectId, cols, rows) => rpc.call('terminal.create', { projectId, cols, rows }),
       close: async (terminalId) => {
         await rpc.call('terminal.close', { terminalId })

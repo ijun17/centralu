@@ -32,6 +32,23 @@ export const CreateSessionParams = z.object({
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 
+/**
+ * 세션 설정 변경. **이름을 주는 이유**는 포트도 이 타입을 그대로 쓰기 위해서다.
+ *
+ * 예전에는 포트가 `{ model?, permissionPreset? }`라고 손으로 다시 적었고,
+ * 나중에 추가된 `effort`가 거기 빠진 채로 남았다. 그런데도 동작했다 —
+ * 스토어가 **변수**로 넘기면 TypeScript는 초과 속성을 검사하지 않기 때문이다.
+ * 타입이 "없다"고 말하는 필드가 실제로는 흐르고 있었다.
+ */
+export const UpdateSettingsParams = z.object({
+  sessionId: z.string(),
+  model: z.string().nullable().optional(),
+  /** 추론 강도. 모델마다 지원 단계가 다르므로 문자열 그대로 나른다 */
+  effort: z.string().nullable().optional(),
+  permissionPreset: PermissionPreset.optional(),
+})
+export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
+
 export const SessionInfo = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -155,13 +172,7 @@ export const RpcMethods = {
   },
   /** 모델·권한을 대화 도중에 바꾼다 (다음 턴부터 적용) */
   'agents.updateSettings': {
-    params: z.object({
-      sessionId: z.string(),
-      model: z.string().nullable().optional(),
-      /** 추론 강도. 모델마다 지원 단계가 다르므로 문자열 그대로 나른다 */
-      effort: z.string().nullable().optional(),
-      permissionPreset: PermissionPreset.optional(),
-    }),
+    params: UpdateSettingsParams,
     result: SessionInfo,
   },
   /**
@@ -358,5 +369,15 @@ export const RpcMethods = {
 } as const
 
 export type RpcMethodName = keyof typeof RpcMethods
-export type RpcParams<M extends RpcMethodName> = z.infer<(typeof RpcMethods)[M]['params']>
-export type RpcResult<M extends RpcMethodName> = z.infer<(typeof RpcMethods)[M]['result']>
+
+/**
+ * **보내는 쪽**이 갖춰야 하는 것 (`z.input`).
+ *
+ * 출력 타입이 아닌 이유: `.default()`가 붙은 필드는 파서가 채우므로 부르는 쪽은
+ * 생략할 수 있다. 둘을 하나로 뭉뚱그리면 `files.search`의 `limit`처럼
+ * "생략 가능한데 필수라고 우기는" 자리가 생긴다 — 실제로 걸렸다.
+ */
+export type RpcParams<M extends RpcMethodName> = z.input<(typeof RpcMethods)[M]['params']>
+
+/** **받는 쪽**이 손에 쥐는 것 (`z.output`) — 기본값이 채워진 뒤다 */
+export type RpcResult<M extends RpcMethodName> = z.output<(typeof RpcMethods)[M]['result']>

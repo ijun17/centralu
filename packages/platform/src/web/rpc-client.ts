@@ -3,6 +3,9 @@ import {
   parseServerFrame,
   type NormalizedEvent,
   type ProtocolError,
+  type RpcMethodName,
+  type RpcParams,
+  type RpcResult,
 } from '@cc/protocol'
 import type { ConnectionState, Unsubscribe } from '../ports/index.js'
 
@@ -130,10 +133,23 @@ export class RpcClient {
     }
   }
 
-  call<T>(method: string, params: unknown): Promise<T> {
+  /**
+   * RPC 한 번. **메서드 이름도 파라미터도 결과도 `RpcMethods`에서 나온다.**
+   *
+   * 예전 시그니처는 `call<T>(method: string, params: unknown)`이었다. 셋 다 검사되지
+   * 않는다는 뜻이다: 이름은 오타가 나도 컴파일이 지나가고, 결과 타입은 검증이 아니라
+   * **단언**이라 host가 다른 것을 줘도 TypeScript는 거짓말을 믿는다.
+   *
+   * 그 틈으로 실제로 두 번 샜다 — RPC가 effort를 삼킨 것, Codex 모델 shape을 잘못 짚은 것.
+   * 둘 다 "스키마는 A라는데 손으로 쓴 통로는 B"였다. 통로를 손으로 쓰는 한
+   * 다음 것도 같은 방식으로 샌다.
+   *
+   * 이제 `commands.ts`를 고치면 **컴파일러가 따라야 할 곳을 전부 알려준다.**
+   */
+  call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
     const id = String(this.nextId++)
     const frame = JSON.stringify({ kind: 'rpc', id, method, params })
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<RpcResult<M>>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
       if (this.ws?.readyState === 1) this.ws.send(frame)
       else this.queue.push(frame) // 재연결 후 전송

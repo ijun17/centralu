@@ -6,7 +6,7 @@ import type {
   CreateSessionParams,
   CommandInfo,
   ExternalSession,
-  PermissionPreset,
+  UpdateSettingsParams,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -79,11 +79,11 @@ export interface AgentPort {
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>
   /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
   resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
-  /** 모델·권한을 대화 도중에 바꾼다 (FR-7) */
-  updateSettings(
-    sessionId: string,
-    settings: { model?: string | null; permissionPreset?: PermissionPreset },
-  ): Promise<SessionInfo>
+  /**
+   * 모델·권한·추론 강도를 대화 도중에 바꾼다 (FR-7).
+   * 항목은 프로토콜이 정한다 — 여기 다시 적으면 늦게 추가된 필드가 조용히 빠진다.
+   */
+  updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<SessionInfo>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
   listSessions(): Promise<SessionInfo[]>
