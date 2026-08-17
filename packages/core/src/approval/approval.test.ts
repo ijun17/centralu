@@ -6,7 +6,6 @@ import {
   findMatchingRule,
   matchesRule,
   previewMatches,
-  shouldCollapseCard,
   suggestMatcher,
 } from './approval.js'
 
@@ -45,23 +44,6 @@ describe('배너 제자리 승인 판정 (FR-3 — 강제 아닌 정보 부족 �
 
   it('알 수 없는 종류는 항상 확인 필요', () => {
     expect(bannerDecision({ kind: 'other', raw: '{}' }).mode).toBe('needs_review')
-  })
-})
-
-describe('카드 접힘 정책 (대화창 가독성)', () => {
-  it('조회성 도구는 접힘', () => {
-    expect(shouldCollapseCard('Read')).toBe(true)
-    expect(shouldCollapseCard('Grep')).toBe(true)
-  })
-
-  it('변경 도구는 펼침', () => {
-    expect(shouldCollapseCard('Edit')).toBe(false)
-    expect(shouldCollapseCard('Write')).toBe(false)
-    expect(shouldCollapseCard('Bash')).toBe(false)
-  })
-
-  it('어댑터가 readOnly를 알려주면 그것을 우선한다', () => {
-    expect(shouldCollapseCard('Bash', true)).toBe(true)
   })
 })
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { DragEvent, ReactNode, RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Attachment } from '@cc/protocol'
-import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/core'
+import { shouldMarkRead, type SessionSummary } from '@cc/core'
 import { EMPTY_DRAFT, useStore, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
@@ -894,10 +894,17 @@ const PREVIEW_LINES = 3
  * 대화를 넘기려다 카드 안이 굴러가고 대화는 멈춘다 (도그푸딩에서 "불편하다"로 지적됨).
  * 스크롤은 대화창 하나만 갖는다 — 접으면 맛보기, 펴면 전부. 길이는 사람이 정한다.
  *
- * 접힘 기본값: 조회성은 접힘, 변경은 펼침 (대화창 가독성의 절반)
+ * **기본은 접힘이다.**
+ *
+ * 예전엔 조회성만 접고 변경(Bash·Edit·MCP)은 펼쳤다. 변경은 봐야 한다는 생각이었는데,
+ * 실제로 써 보니 도구를 몇 번만 써도 대화가 출력으로 뒤덮여 정작 답을 못 읽는다
+ * (도그푸딩). 무엇을 했는지는 제목 줄이 이미 말한다 — 명령이든 경로든.
+ *
+ * 접어도 놓치지 않는 것 둘: 실패는 제목 줄에 'Failed'로 남고,
+ * 출력은 맛보기 몇 줄이 그대로 보인다.
  */
 function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
-  const [open, setOpen] = useState(!shouldCollapseCard(item.tool, item.readOnly))
+  const [open, setOpen] = useState(false)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
 

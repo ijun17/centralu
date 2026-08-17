@@ -2846,3 +2846,30 @@ test('컨트롤 센터에 들어가면 사이드바에서 고른 것은 컨트�
   await row.click()
   expect(await row.getAttribute('class')).toBe(focusedClass)
 })
+
+/**
+ * 도구 카드는 기본으로 접힌다 (도그푸딩: "배시·에딧·MCP 기본값 닫힌 상태로").
+ * 몇 번만 써도 대화가 출력으로 뒤덮여 정작 답을 못 읽는다.
+ */
+test('도구 카드는 배시든 에딧이든 접힌 채로 나온다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await emitEvent(page, 0, {
+    type: 'tool_call', callId: 'c1',
+    summary: { tool: 'Bash', title: 'npm run build', readOnly: false, paths: [] },
+  })
+  await emitEvent(page, 0, { type: 'tool_result', callId: 'c1', ok: true, summary: 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8' })
+
+  const card = page.getByTestId('tool-card').first()
+  await expect(card).toBeVisible()
+  await expect(card.getByTestId('tool-card-toggle')).toHaveAttribute('aria-expanded', 'false')
+  // 접혀도 무엇을 했는지는 보인다
+  await expect(card).toContainText('npm run build')
+
+  // 누르면 펴진다
+  await card.getByTestId('tool-card-toggle').click()
+  await expect(card.getByTestId('tool-card-toggle')).toHaveAttribute('aria-expanded', 'true')
+  expect(id).toBeTruthy()
+})

@@ -38,16 +38,14 @@ export function bannerDecision(detail: ApprovalDetail, policy = DEFAULT_BANNER_P
   }
 }
 
-/** 승인 카드의 접힘 정책과 함께 쓰이는 도구 분류 (FR-3 카드 접힘) */
-const READ_ONLY_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'WebFetch', 'WebSearch', 'TodoWrite'])
-
-export function isReadOnlyTool(tool: string): boolean {
-  return READ_ONLY_TOOLS.has(tool)
-}
-
-export function shouldCollapseCard(tool: string, readOnly?: boolean): boolean {
-  return readOnly ?? isReadOnlyTool(tool)
-}
+/*
+ * 도구 카드의 접힘 정책은 여기 없다.
+ *
+ * "조회성은 접고 변경은 펼친다"는 규칙이 있었는데, 도구를 몇 번만 써도 대화가
+ * 출력으로 뒤덮여 답을 못 읽었다 (도그푸딩). 지금은 **전부 접는다** —
+ * 입력이 무엇이든 답이 같으므로 정책이랄 것이 없어졌다.
+ * 규칙이 하나로 줄면 그 규칙은 코드가 아니라 기본값으로 표현하는 게 맞다.
+ */
 
 /**
  * "항상 허용" 규칙 (FR-3). 패턴을 허용하되 등록 시 매치 미리보기를 보여준다 —
