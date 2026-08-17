@@ -55,11 +55,11 @@ export function useFocusedSession(): SessionSummary | undefined {
  * 한 곳에서 계산하는 이유: 세션 줄과 프로젝트 줄이 각자 판단하면 언젠가 한쪽만 고쳐진다.
  */
 export function useSelectedSessionId(): string | null {
-  return useStore((s) => (s.view === 'grid' ? null : s.focusedSessionId))
+  return useStore((s) => (s.view === 'focus' ? s.focusedSessionId : null))
 }
 
 export function useIsProjectSelected(projectId: string): boolean {
-  return useStore((s) => s.view !== 'grid' && s.focusedProjectId === projectId && !s.focusedSessionId)
+  return useStore((s) => s.view === 'focus' && s.focusedProjectId === projectId && !s.focusedSessionId)
 }
 
 /** 비포커스 세션의 승인 요청 = 전역 배너 대상 (FR-3) */

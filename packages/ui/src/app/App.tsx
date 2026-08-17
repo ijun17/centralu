@@ -10,6 +10,7 @@ import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
 import { ControlCenter } from '../features/control-center/ControlCenter.jsx'
+import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
 import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
@@ -99,7 +100,9 @@ function Body() {
           거기서 또 한 레인을 떼면 패널이 최소 폭 아래로 내려간다 — 그리드를
           보류했던 근거(§5.4)를 우리 손으로 재현하는 셈이다.
         */}
-        {view === 'grid' ? (
+        {view === 'orchestrator' ? (
+          <OrchestratorView />
+        ) : view === 'grid' ? (
           <ControlCenter />
         ) : (
           <>

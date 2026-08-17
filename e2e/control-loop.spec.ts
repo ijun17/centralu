@@ -2942,3 +2942,56 @@ test('칸을 끄는 동안 놓일 자리가 좌우로 표시된다', async ({ pa
   }, a!)
   expect(lifted).toBe(`grid-panel-${a}`)
 })
+
+/**
+ * 오케스트레이터 — 말로 관제 (FR-11).
+ * 컨트롤 센터 바로 위에 선다: 둘은 같은 것을 보는 두 방식이다.
+ */
+test('오케스트레이터는 컨트롤 센터 위에 있고 눌러서 연다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  const orc = page.getByTestId('orchestrator-button')
+  const cc = page.getByTestId('control-center-button')
+  await expect(orc).toBeVisible()
+
+  // 순서: 오케스트레이터가 컨트롤 센터보다 위
+  const a = (await orc.boundingBox())!
+  const b = (await cc.boundingBox())!
+  expect(a.y).toBeLessThan(b.y)
+
+  await orc.click()
+  await expect(orc).toHaveAttribute('aria-pressed', 'true')
+  // 세션 하나짜리 화면이 뜬다 (포커스 뷰와 같은 부품)
+  await expect(page.getByTestId('session-view')).toBeVisible()
+  await expect(page.getByTestId('control-center')).toBeHidden()
+})
+
+test('오케스트레이터를 보는 동안에는 사이드바에서 세션이 골라져 보이지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  const row = page.getByTestId(`session-row-${id}`)
+  await row.click()
+  const selected = (await row.getAttribute('class')) ?? ''
+
+  await page.getByTestId('orchestrator-button').click()
+  await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
+  expect(await row.getAttribute('class')).not.toBe(selected)
+
+  // 돌아오면 다시 골라진 모양
+  await row.click()
+  expect(await row.getAttribute('class')).toBe(selected)
+})
+
+test('오케스트레이터 세션은 프로젝트 목록에 끼지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  await page.getByTestId('orchestrator-button').click()
+  await expect(page.getByTestId('session-view')).toBeVisible()
+
+  const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
+  expect(orcId).toBeTruthy()
+  // 프로젝트에 속하지 않으므로 사이드바 어느 프로젝트 밑에도 줄이 없다
+  await expect(page.getByTestId(`session-row-${orcId}`)).toHaveCount(0)
+})

@@ -30,8 +30,12 @@ const exec = promisify(execFile)
  * 제약 3가지:
  *  1. allowedTools에 bare 도구명 금지 (canUseTool이 셰도잉됨)
  *  2. includePartialMessages: true (스트리밍 델타)
- *  3. settingSources를 지정하지 않아 사용자 훅·플러그인을 로드하지 않는다
- *     (Control Center 세션이 사용자 훅으로 오염되지 않도록 — 기본값 결정)
+ *  3. settingSources를 지정하지 않는다 = **사용자 설정·훅·CLAUDE.md를 전부 로드한다.**
+ *     (한때 주석이 정반대로 적혀 있었다. 실측: 생략하면 전역 훅 3개가 실제로 돌았다.)
+ *     의도한 것이다 — 이 앱은 워크플로우를 강제하지 않는다. 사람이 자기 도구에
+ *     맞춰 둔 설정은 이 앱 안에서도 그대로 살아 있어야 한다.
+ *     예외는 오케스트레이터뿐이다(settingSources: []): 그쪽은 파일로 들어오는 지시가
+ *     곧 권한 상승 통로라서 닫아 둔다.
  */
 
 type PendingApproval = { resolve: (r: { behavior: 'allow'; updatedInput: unknown } | { behavior: 'deny'; message: string }) => void; input: unknown }

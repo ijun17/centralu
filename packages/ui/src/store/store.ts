@@ -225,9 +225,22 @@ export type AppState = {
    * 다르게 보여줄 뿐이므로, 세션 데이터를 따로 들지 않고 보는 방식만 바꾼다.
    * (그래야 그리드에서 모델을 바꿔도 사이드바·포커스 뷰가 같이 따라온다.)
    */
-  view: 'focus' | 'grid'
+  /**
+   * 지금 무엇을 보고 있나.
+   *   focus        세션 하나 (기본)
+   *   grid         컨트롤 센터 — 눈으로 관제
+   *   orchestrator 오케스트레이터 — 말로 관제
+   */
+  view: 'focus' | 'grid' | 'orchestrator'
+  /** 오케스트레이터 세션 id (아직 부른 적 없으면 null) */
+  orchestratorId: string | null
   gridPanels: string[]
-  setView(view: 'focus' | 'grid'): void
+  setView(view: 'focus' | 'grid' | 'orchestrator'): void
+  /**
+   * 오케스트레이터를 연다. **없으면 그때 만들어진다** (host가 판단한다).
+   * 미리 만들지 않는 이유: 쓰지도 않는 세션이 도구 프로세스를 물고 있게 된다.
+   */
+  openOrchestrator(): Promise<void>
   setGridPanels(sessionIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
@@ -300,6 +313,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelTab: 'git',
   view: 'focus' as const,
   gridPanels: [] as string[],
+  orchestratorId: null as string | null,
   panelWidth: PANEL_DEFAULT,
   treeHeight: TREE_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
@@ -916,6 +930,27 @@ export const useStore = create<AppState>((set, get) => ({
 
   setView(view) {
     set({ view })
+  },
+
+  async openOrchestrator() {
+    const platform = get().platform
+    if (!platform) return
+    /*
+     * 화면부터 바꾼다. 세션을 만드는 데 몇 초가 걸릴 수 있는데 그동안 아무 반응이
+     * 없으면 누른 사람은 버튼이 죽은 줄 안다 — 보낸 즉시 '작업 중'으로 두는 것과 같은 이유다.
+     */
+    set({ view: 'orchestrator' })
+    try {
+      const info = await platform.agents.orchestrator()
+      set((s) => ({
+        orchestratorId: info.id,
+        sessions: { ...s.sessions, [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }) },
+      }))
+      if (!get().chat[info.id]) void get().loadHistory(info.id)
+    } catch (e) {
+      // 못 열었으면 화면을 되돌린다 — 빈 화면을 켜둔 채 이유를 안 말하는 것이 최악이다
+      set({ view: 'focus', toast: `Could not open the orchestrator: ${(e as Error).message}` })
+    }
   },
 
   /**
