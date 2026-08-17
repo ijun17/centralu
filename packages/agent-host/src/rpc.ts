@@ -61,8 +61,15 @@ export function createRpcHandler(
     'agents.resumeSession': async (p) =>
       mgr.resumeSession(RpcMethods['agents.resumeSession'].params.parse(p).sessionId),
     'agents.updateSettings': async (p) => {
-      const { sessionId, model, permissionPreset } = RpcMethods['agents.updateSettings'].params.parse(p)
-      return await mgr.updateSettings(sessionId, { model, permissionPreset })
+      /*
+       * **필드를 하나씩 꺼내 쓰지 않는다.**
+       *
+       * effort를 추가했을 때 여기서 꺼내는 걸 빠뜨렸고, UI는 보내는데 host에는
+       * 도착하지 않아 아무 일도 안 일어났다 — 오류도 없이 조용히 무시됐다.
+       * parse된 결과를 통째로 넘기면 설정이 늘어나도 이 자리를 다시 고칠 일이 없다.
+       */
+      const { sessionId, ...settings } = RpcMethods['agents.updateSettings'].params.parse(p)
+      return await mgr.updateSettings(sessionId, settings)
     },
     'agents.capabilities': async (p) => {
       const { tool } = RpcMethods['agents.capabilities'].params.parse(p)

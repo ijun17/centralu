@@ -2173,3 +2173,42 @@ test('두 번 붙여도 스트리밍 글자가 곱해지지 않는다', async ({
   const reply = page.getByTestId('msg-assistant').last()
   await expect(reply).toHaveText('가나다')
 })
+
+/**
+ * 바닥에 붙어 있으면 스트리밍 응답을 따라 내려간다.
+ *
+ * 스트리밍은 **항목 수가 안 늘고 마지막 항목이 길어진다.** 그래서 항목 수를
+ * 기준으로 삼으면 답이 길어지는 동안 화면이 멈춘다 — 총 높이를 봐야 두 경우가
+ * 한 기준으로 묶인다.
+ *
+ * 주의: 이 테스트는 mock 위에서 **옛 로직으로도 통과한다.** 브라우저의 스크롤
+ * 앵커링이 가려주는 것으로 보인다. 그래서 이건 회귀를 잡는 그물이 아니라
+ * "따라 내려간다"는 계약을 적어둔 것이다 — 실제 증상은 앱에서 확인해야 한다.
+ */
+test('바닥에 있으면 길어지는 응답을 따라 내려간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  const stream = page.getByTestId('chat-stream')
+  await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
+
+  // 항목 하나가 길어지기만 한다 — 개수는 그대로다
+  // 화면을 확실히 넘기도록 충분히 길게 — 안 넘으면 스크롤 자체가 없어 검사가 무의미하다
+  for (let i = 0; i < 150; i++) {
+    await page.evaluate((n) => {
+      const s = (window as any).__store.getState()
+      ;(window as any).__mock.emit({
+        type: 'message_delta',
+        sessionId: s.focusedSessionId,
+        role: 'assistant',
+        text: `line ${n}\n`,
+      })
+    }, i)
+  }
+
+  await expect
+    .poll(async () => stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+      timeout: 3000,
+    })
+    .toBeLessThan(40)
+})

@@ -26,7 +26,6 @@ export function SessionView() {
   const projectOnly = useStore((s) => (s.focusedSessionId ? undefined : s.projects[s.focusedProjectId ?? '']))
   const chat = useStore((s) => (s.focusedSessionId ? (s.chat[s.focusedSessionId] ?? EMPTY_CHAT) : EMPTY_CHAT))
   const send = useStore((s) => s.send)
-  const interrupt = useStore((s) => s.interrupt)
   const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
   const [text, setText] = useState('')
@@ -157,25 +156,11 @@ export function SessionView() {
           </span>
         )}
 
+        {/*
+          중지는 여기 두지 않는다 — 대화 맨 아래 '응답 기다리는 중' 옆에 이미 있다.
+          같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
+        */}
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          <SessionSettings
-            sessionId={session.id}
-            // 프로젝트 기본값이 아니라 **이 세션의** 도구다 (섞어 쓸 수 있다)
-            tool={session.tool}
-            model={session.model}
-            effort={session.effort}
-            preset={session.permissionPreset}
-            live={session.live}
-          />
-          {session.state === 'working' && (
-            <button
-              className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk"
-              onClick={() => void interrupt(session.id)}
-              data-testid="interrupt"
-            >
-              Stop
-            </button>
-          )}
           {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
           <button
             className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
@@ -351,9 +336,25 @@ export function SessionView() {
             <SendIcon />
           </button>
         </div>
-        <p className="mt-1.5 text-[10px] text-slate">
-          <Kbd>Enter</Kbd> send · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> newline · paste images (<Kbd>⌘V</Kbd>)
-        </p>
+        {/*
+          모델·강도·권한은 **보내기 직전에** 정하는 것들이라 입력창 아래에 둔다.
+          헤더에 있을 때는 화면 반대쪽 끝이라, 무엇을 어떤 설정으로 보내는지
+          한눈에 같이 보이지 않았다. 여기 있으면 손과 눈이 같은 자리에 머문다.
+        */}
+        <div className="mt-1.5 flex items-center gap-2">
+          <SessionSettings
+            sessionId={session.id}
+            // 프로젝트 기본값이 아니라 **이 세션의** 도구다 (섞어 쓸 수 있다)
+            tool={session.tool}
+            model={session.model}
+            effort={session.effort}
+            preset={session.permissionPreset}
+            live={session.live}
+          />
+          <p className="ml-auto text-[10px] text-slate">
+            <Kbd>Enter</Kbd> send · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> newline · paste images (<Kbd>⌘V</Kbd>)
+          </p>
+        </div>
       </form>
     </section>
   )
@@ -439,11 +440,32 @@ function ChatStream({
   const pinned = stickyIndex !== null ? chat[stickyIndex] : undefined
   const stickyText = pinned?.kind === 'user' ? pinned.text : null
 
+  /*
+   * 바닥에 붙어 있으면 계속 따라간다.
+   *
+   * 기준이 chat.length였는데, 스트리밍 응답은 **항목 수가 안 늘고 마지막 항목이
+   * 길어진다.** 그래서 답이 길어지는 동안 화면이 그 자리에 멈춰 있었다
+   * (도그푸딩: "맨 아래인데 새 대화가 생겨도 안 따라간다").
+   *
+   * 가상 스크롤의 총 높이를 보면 두 경우가 한 기준으로 묶인다 — 항목이 늘어도,
+   * 있던 항목이 길어져도 총 높이는 바뀐다.
+   *
+   * 한 번 더 맞추는 이유: 새 줄은 다음 프레임에 측정되므로, 그 전에 잰
+   * scrollHeight로 내리면 몇 픽셀 모자란다.
+   */
+  const totalSize = virtualizer.getTotalSize()
   useEffect(() => {
     if (!stickToBottom.current) return
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [chat.length, pending, working, scrollRef])
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    const id = requestAnimationFrame(() => {
+      if (stickToBottom.current && scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    })
+    return () => cancelAnimationFrame(id)
+  }, [totalSize, pending, working, scrollRef])
 
   return (
     <div
