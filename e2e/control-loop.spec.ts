@@ -3063,3 +3063,35 @@ test('에이전트를 바꾸면 이어갈 실마리를 끊는다 — 새 도구�
   )
   expect(ext).toBeNull()
 })
+
+/**
+ * 오케스트레이터가 넣어준 말도 대화창에 나타나야 한다.
+ *
+ * 예전에는 사용자 메시지를 만드는 곳이 UI 하나뿐이라, UI가 자기 것을 스스로 그리는
+ * 것으로 충분했다. 오케스트레이터가 두 번째 생산자가 되면서 그 가정이 깨졌다 —
+ * 주입된 말은 **저장은 되는데 화면에는 영영 안 나타났다** (앱을 다시 켜야 보였다).
+ */
+test('남이 넣어준 말도 대화창에 뜬다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await emitEvent(page, 0, { type: 'user_message', seq: 991, text: '오케스트레이터가 시킨 일' })
+  await expect(page.getByTestId('chat-stream')).toContainText('오케스트레이터가 시킨 일')
+})
+
+test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await page.getByTestId('prompt-input').fill('같은 말')
+  await page.getByTestId('send').click()
+  // host가 "그 말이 더해졌다"고 알려온다 — 이미 그려둔 것이므로 확정만 되어야 한다
+  await emitEvent(page, 0, { type: 'user_message', seq: 992, text: '같은 말' })
+
+  const count = await page.evaluate(() => {
+    const st = (window as any).__store.getState()
+    const id = st.focusedSessionId
+    return st.chat[id].filter((i: any) => i.kind === 'user' && i.text === '같은 말').length
+  })
+  expect(count).toBe(1)
+})

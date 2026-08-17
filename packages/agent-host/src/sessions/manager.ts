@@ -652,13 +652,29 @@ export class SessionManager {
     const target = this.meta.get(sessionId)
     if (!target || !this.meta.has(orchestratorId)) return
 
-    const preview = this.previewOf(sessionId)
+    /*
+     * **이름만으로는 어느 세션인지 알 수 없다.**
+     *
+     * 세션 이름은 첫 프롬프트를 자른 것이라(FR-18), 압축된 대화를 이어받은 세션은
+     * 전부 "This session is being continued from a p…"가 된다. 실제로 그런 세션이
+     * 네 개 있었고, 보고에 이름만 실려 어느 프로젝트 것인지 알 수 없었다.
+     * 잘못 짚으면 엉뚱한 프로젝트에 지시가 간다 — id와 프로젝트를 함께 싣는다.
+     *
+     * 보고 본문도 넉넉히 준다. 한 줄짜리 미리보기는 목록용이지 보고용이 아니다.
+     */
+    const project = target.projectId
+      ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(사라진 프로젝트)')
+      : '(없음)'
+    const preview = this.previewOf(sessionId, 600)
     try {
       await this.send(
         orchestratorId,
-        `[Control Center] "${target.name}" 세션이 지시한 일을 마쳤습니다.\n` +
-          `마지막 응답: ${preview || '(내용 없음)'}\n` +
-          `자세히 보려면 read_session이 아니라 사람에게 그 세션을 열어보라고 알리면 됩니다.`,
+        `[Control Center] 지시한 일이 끝났습니다.\n` +
+          `세션: ${target.name}\n` +
+          `id: ${sessionId}\n` +
+          `프로젝트: ${project}\n\n` +
+          `마지막 응답:\n${preview || '(내용 없음)'}\n\n` +
+          `더 필요하면 read_session으로 그 세션의 최근 대화를 읽을 수 있습니다.`,
       )
     } catch {
       // 오케스트레이터가 잠들었거나 지워졌을 수 있다 — 보고 하나 때문에 앱이 흔들리면 안 된다
@@ -741,6 +757,14 @@ export class SessionManager {
       this.emit({ type: 'session_title', sessionId, title: m.name })
     }
     this.store.upsertSession(m)
+    /*
+     * **말이 더해졌다고 알린다.**
+     *
+     * 예전에는 알리지 않았다. 사용자 메시지를 만드는 곳이 UI 하나뿐이라 UI가
+     * 자기 것을 스스로 그리면 충분했기 때문이다. 오케스트레이터가 두 번째 생산자가
+     * 되면서 그 가정이 깨졌다 — 주입된 말은 저장은 되는데 화면에는 영영 안 나타났다.
+     */
+    this.emit({ type: 'user_message', sessionId, seq, text })
     // 첨부는 도구가 이해하는 형태로 어댑터가 변환한다 (경로 멘션 또는 이미지 블록)
     h.send(attachments?.length ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}` : text)
   }
@@ -1090,6 +1114,56 @@ export class SessionManager {
           }))
       },
 
+      recall: async (query, limit = 12) => {
+        const byId = projects()
+        const hits = this.store.searchMessages(query, limit * 3)
+        const out: { sessionId: string; session: string; project: string; snippet: string }[] = []
+        for (const h of hits) {
+          const s = this.meta.get(h.sessionId)
+          // 오케스트레이터 자신의 말은 뺀다 — 자기가 한 말을 근거로 되짚으면 메아리가 된다
+          if (!s || s.id === orchestratorId) continue
+          out.push({
+            sessionId: s.id,
+            session: s.name,
+            project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
+            snippet: h.snippet.slice(0, 300),
+          })
+          if (out.length >= limit) break
+        }
+        return { hits: out }
+      },
+
+      readSession: async (sessionId, limit = 40) => {
+        // 범위 판정은 sendToSession과 같은 규칙 — 이 앱이 관리하는 세션만
+        if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 읽지 않습니다' }
+        const target = this.meta.get(sessionId)
+        if (!target) return { ok: false, error: `이 앱이 관리하는 세션이 아닙니다: ${sessionId}` }
+
+        /*
+         * 저장된 한 행은 스트리밍 델타 하나다. 그대로 주면 토막 수백 개가 나가므로
+         * UI가 하는 것과 같이 **연속된 assistant 조각을 한 줄로 이어붙인다.**
+         */
+        const rows = this.store.loadMessages(sessionId, 800)
+        const lines: string[] = []
+        for (const r of rows) {
+          const p = r.payload as { text?: string; summary?: { title?: string } }
+          if (r.kind === 'text' && r.role === 'assistant') {
+            const last = lines[lines.length - 1]
+            if (last?.startsWith('에이전트: ')) lines[lines.length - 1] = last + (p.text ?? '')
+            else lines.push('에이전트: ' + (p.text ?? ''))
+          } else if (r.kind === 'text') {
+            lines.push('사람: ' + (p.text ?? ''))
+          } else if (r.kind === 'tool_call' && p.summary?.title) {
+            lines.push('도구: ' + p.summary.title)
+          }
+        }
+        return {
+          ok: true,
+          state: target.state,
+          lines: lines.slice(-limit).map((l) => (l.length > 2000 ? l.slice(0, 2000) + '…' : l)),
+        }
+      },
+
       sendToSession: async (sessionId, text, reportBack) => {
         /*
          * 조용히 실패하지 않는다. 오케스트레이터가 이름을 잘못 짚었을 때
@@ -1115,11 +1189,38 @@ export class SessionManager {
     }
   }
 
-  /** 사이드바가 보는 것과 같은 한 줄 — 오케스트레이터도 같은 것을 본다 */
-  private previewOf(sessionId: string): string {
-    const last = this.store.loadMessages(sessionId, 1)
-    const p = last[0]?.payload as { text?: string; summary?: { title?: string } } | undefined
-    return (p?.text ?? p?.summary?.title ?? '').slice(0, 120)
+  /**
+   * 마지막 응답 — **조각이 아니라 한 덩어리로.**
+   *
+   * 저장소의 한 행은 메시지 하나가 아니라 **스트리밍 델타 하나**다
+   * (persistMessage가 message_delta마다 한 행씩 쌓는다). 그래서 마지막 한 행만 읽으면
+   * 답변의 꼬리 토막이 나온다 — 실제로 오케스트레이터에게 문장 중간부터 시작하는
+   * 보고가 갔다 ("걸러야 합니다 — ...").
+   *
+   * UI는 이 조각들을 이어붙여 되돌린다(messagesToChat). 여기서도 같이 한다:
+   * 뒤에서부터 연속된 assistant 조각을 모으고, 다른 종류를 만나면 거기가 경계다.
+   */
+  private previewOf(sessionId: string, maxChars = 120): string {
+    // 델타는 잘게 쪼개지므로 넉넉히 읽는다. 한 응답이 수백 조각인 경우가 흔하다
+    const rows = this.store.loadMessages(sessionId, 500)
+    const parts: string[] = []
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i]!
+      const isAssistantText = r.kind === 'text' && r.role === 'assistant'
+      if (isAssistantText) {
+        parts.unshift((r.payload as { text?: string }).text ?? '')
+        continue
+      }
+      // 모으기 시작한 뒤에 다른 종류를 만나면 그 응답의 시작이다
+      if (parts.length > 0) break
+      // 아직 못 만났으면 도구 호출 등을 건너뛰고 그 앞의 응답을 찾는다
+      const title = (r.payload as { summary?: { title?: string } }).summary?.title
+      if (r.kind === 'tool_call' && title && rows.every((x) => x.role !== 'assistant')) {
+        return title.slice(0, maxChars)
+      }
+    }
+    const text = parts.join('').trim()
+    return text.length > maxChars ? text.slice(0, maxChars) + '…' : text
   }
 
   /**

@@ -36,6 +36,9 @@ export function orchestratorMcp(tools: OrchestratorTools) {
       '일을 시킬 때는 send_to_session을 쓴다 — 대상 세션의 승인 설정이 그대로 적용되므로,',
       '위험한 작업이면 그 세션에서 사람에게 승인을 묻게 된다.',
       '사람이 결과를 기다리는 일이면 reportBack을 켠다 — 그 세션이 마치면 여기로 알려준다.',
+      '보고만으로 부족하면 read_session으로 그 세션의 대화를 직접 읽는다.',
+      '"저번에", "예전에 저쪽에서" 같은 이야기가 나오면 recall로 지난 대화를 찾는다 —',
+      '사람과 나눈 대화가 프로젝트를 가로지르는 기억이고, 그 기억은 검색으로만 닿는다.',
     ].join('\n'),
     tools: [
       tool(
@@ -61,6 +64,59 @@ export function orchestratorMcp(tools: OrchestratorTools) {
               },
             ],
           }
+        },
+      ),
+
+      tool(
+        'recall',
+        '지난 대화 전체에서 찾는다 (프로젝트를 가로지른다). "저번에 저쪽에서 하던 방식" 같은 것을 떠올릴 때 쓴다.',
+        {
+          query: z.string().describe('찾을 낱말. 문장보다 낱말이 잘 걸린다'),
+          limit: z.number().optional().describe('가져올 조각 수 (기본 12)'),
+        },
+        async ({ query, limit }) => {
+          const r = await tools.recall(query, limit)
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text:
+                  r.hits.length === 0
+                    ? `"${query}"로는 찾은 것이 없습니다. 다른 낱말로 다시 찾아보세요.`
+                    : r.hits
+                        .map((h) => `- [${h.project}] ${h.session} (${h.sessionId})\n    ${h.snippet}`)
+                        .join('\n'),
+              },
+            ],
+          }
+        },
+      ),
+
+      tool(
+        'read_session',
+        '한 세션의 최근 대화를 읽는다. 이미 끝난 일을 확인할 때 쓴다 — 방금 시킨 일의 결과를 기다리는 용도로는 send_to_session의 reportBack이 맞다.',
+        {
+          sessionId: z.string().describe('list_sessions가 준 세션 id'),
+          limit: z.number().optional().describe('읽을 줄 수 (기본 40, 최근 것부터)'),
+        },
+        async ({ sessionId, limit }) => {
+          const r = await tools.readSession(sessionId, limit)
+          if (!r.ok) {
+            return { content: [{ type: 'text' as const, text: `읽지 못했습니다 — ${r.error}` }], isError: true }
+          }
+          /*
+           * **아직 답하는 중이면 그렇다고 말한다.**
+           *
+           * 실측: read_session이 생기자 모델이 reportBack 대신 이것을 골랐는데,
+           * 보내자마자 읽어서 사람의 지시만 있고 답은 없는 상태를 "결과"로 받았다.
+           * 설득하는 문구 대신 지금 상태라는 사실을 준다 — 판단은 읽는 쪽이 한다.
+           */
+          const busy = r.state === 'working'
+          const head = busy
+            ? '⏳ 이 세션은 아직 답하는 중입니다. 아래는 지금까지의 대화이고, 마지막 답은 빠져 있을 수 있습니다.\n' +
+              '   끝난 뒤에 알고 싶으면 send_to_session의 reportBack을 쓰세요.\n\n'
+            : ''
+          return { content: [{ type: 'text' as const, text: head + (r.lines?.join('\n') || '(대화 없음)') }] }
         },
       ),
 

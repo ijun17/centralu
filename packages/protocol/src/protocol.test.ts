@@ -26,6 +26,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'limit_reached', sessionId: 's1', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 },
   { type: 'session_title', sessionId: 's1', title: 'auth 리팩터링' },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
+  { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },
   { type: 'compaction', sessionId: 's1' },
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },

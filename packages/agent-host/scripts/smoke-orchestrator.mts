@@ -118,7 +118,7 @@ log('오케스트레이터:', orc.id, '· projectId =', JSON.stringify(orc.proje
 const before = events.length
 await rpc('agents.send', {
   sessionId: orc.id,
-  text: '지금 관리 중인 세션 목록을 확인하고, "readme-담당" 세션에게 "hello라고만 답해줘"라고 전달해줘. 끝나면 나한테 알려줘.',
+  text: '지금 관리 중인 세션 목록을 확인하고, "readme-담당" 세션에게 "hello라고만 답해줘"라고 전달해줘. 보낼 때 reportBack을 켜서 그 세션이 마치면 나에게 알려지도록 해줘.',
 })
 
 // 오케스트레이터의 턴이 끝날 때까지
@@ -146,6 +146,12 @@ console.log('── 오케스트레이터 이벤트 순서 ──')
 console.log(mine.filter((x) => x.sessionId === orc.id).map((x) => x.type).join(' → '))
 log('대상 세션이 움직였나:', workerGotWork)
 
+// 새 도구도 실제로 쓰이는지 — 보고가 부실할 때 확인할 길이 있어야 한다
+const usedRead = toolCalls.some((t) => String(t).includes('read_session'))
+const usedRecall = toolCalls.some((t) => String(t).includes('recall'))
+console.log(`  read_session 사용 가능  ${usedRead ? '✅ (이번 턴에 씀)' : '— (이번 턴엔 안 씀)'}`)
+console.log(`  recall 사용 가능        ${usedRecall ? '✅ (이번 턴에 씀)' : '— (이번 턴엔 안 씀)'}`)
+
 const usedList = toolCalls.some((t) => String(t).includes('list_sessions'))
 const usedSend = toolCalls.some((t) => String(t).includes('send_to_session'))
 console.log(`\n  list_sessions 호출  ${usedList ? '✅' : '❌'}`)
@@ -158,7 +164,12 @@ console.log(`  대상 세션이 실제로 움직임 ${workerGotWork ? '✅' : '�
  */
 const reported = await new Promise<boolean>((resolve) => {
   const t = setInterval(() => {
-    if (events.some((e) => e.sessionId === orc.id && e.type === 'message_delta' && String(e.text).includes('마쳤'))) {
+    /*
+     * 보고는 오케스트레이터에게 **주입되는 사용자 메시지**다 (모델이 한 말이 아니다).
+     * 예전엔 message_delta에서 찾았는데, 그건 오케스트레이터가 보고를 읽고 한 말을
+     * 우연히 잡은 것이라 문구를 바꾸자 통과하지 않았다. 이제 user_message로 직접 본다.
+     */
+    if (events.some((e) => e.sessionId === orc.id && e.type === 'user_message' && String(e.text).includes('[Control Center]'))) {
       clearInterval(t); resolve(true)
     }
   }, 500)

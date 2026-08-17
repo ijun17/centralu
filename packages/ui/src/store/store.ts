@@ -71,7 +71,8 @@ function fitWidth(px: number, min: number, max: number, otherLane: number): numb
 }
 
 export type ChatItem =
-  | { kind: 'user'; seq: number; text: string }
+  /** pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다 */
+  | { kind: 'user'; seq: number; text: string; pending?: boolean }
   | { kind: 'assistant'; seq: number; text: string }
   | { kind: 'tool'; seq: number; tool: string; title: string; readOnly: boolean; result?: string; ok?: boolean }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
@@ -768,7 +769,12 @@ export const useStore = create<AppState>((set, get) => ({
      */
     const prevState = get().sessions[sessionId]?.state
     set((s) => ({
-      chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label }] },
+      /*
+        pending: 내가 방금 그린 것이고 host의 확인을 아직 못 받았다.
+        host가 user_message로 같은 말을 알려주면 이 항목이 그것으로 확정된다 —
+        표식이 없으면 같은 말이 두 번 그려진다.
+      */
+      chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label, pending: true }] },
       sessions: s.sessions[sessionId]
         ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' } }
         : s.sessions,
@@ -1125,6 +1131,16 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       ]
     case 'approval_resolved':
       return items.map((it) => (it.kind === 'approval' && it.requestId === e.requestId ? { ...it, decision: e.decision } : it))
+    case 'user_message': {
+      /*
+       * 내가 보낸 말이면 이미 그려져 있다 — 확정만 한다.
+       * 남이 보낸 말(오케스트레이터의 send_to_session)이면 여기가 화면에 나타나는
+       * 유일한 길이다. 이 갈래가 없던 동안 주입된 말은 저장만 되고 안 보였다.
+       */
+      const idx = items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      if (idx === -1) return [...items, { kind: 'user', seq: ++chatSeq, text: e.text }]
+      return items.map((it, i) => (i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it))
+    }
     case 'history_synced':
       // 실제 내용은 저장소에 들어갔다 — 화면은 dispatchEvent 밖에서 다시 읽는다
       return items

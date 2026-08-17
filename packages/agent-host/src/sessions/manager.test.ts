@@ -24,6 +24,10 @@ class FakeHandle implements SessionHandle {
   interrupt() {}
   /** 턴이 끝났다고 알린다 (보고 되돌아오기 테스트용) */
   finishTurn() { this.emit({ type: 'turn_complete', sessionId: this.sessionId }) }
+  /** 스트리밍 조각 하나 (실제 저장 형태를 그대로 재현한다) */
+  emitDelta(text: string) {
+    this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
+  }
   async dispose() { this.disposed = true }
 }
 
@@ -867,7 +871,14 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     adapter.handleOf(a.id)!.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
     const sent = adapter.handleOf(orc.id)!.sent
-    expect(sent.some((t) => t.includes('마쳤습니다'))).toBe(true)
+    const report = sent.find((t) => t.includes('[Control Center]'))
+    expect(report).toBeTruthy()
+    /*
+     * **이름만으로는 어느 세션인지 모른다.** 압축을 이어받은 세션은 이름이 전부
+     * "This session is being continued from a p…"라 실제로 네 개가 같은 이름이었다.
+     * 잘못 짚으면 엉뚱한 프로젝트에 지시가 간다 — id가 반드시 실려야 한다.
+     */
+    expect(report).toContain(a.id)
   })
 
   /*
@@ -882,8 +893,41 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
       adapter.handleOf(a.id)!.finishTurn()
       await new Promise((r) => setTimeout(r, 0))
     }
-    const reports = adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('마쳤습니다'))
+    const reports = adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('[Control Center]'))
     expect(reports.length).toBe(1)
+  })
+
+  /*
+   * 저장소의 한 행은 메시지가 아니라 **스트리밍 델타 하나**다.
+   * 마지막 한 행만 읽으면 답변의 꼬리 토막이 나온다 — 실제로 오케스트레이터에게
+   * 문장 중간부터 시작하는 보고가 갔다.
+   */
+  it('미리보기는 조각이 아니라 이어붙인 응답이다', async () => {
+    const { a, tools } = await setup()
+    const h = adapter.handleOf(a.id)!
+    for (const part of ['원인은 ', '델타를 ', '이어붙이지 ', '않은 것입니다.']) {
+      h.emitDelta(part)
+    }
+    await new Promise((r) => setTimeout(r, 0))
+    const list = await tools.listSessions()
+    expect(list.find((s) => s.sessionId === a.id)?.preview).toBe('원인은 델타를 이어붙이지 않은 것입니다.')
+  })
+
+  it('read_session은 조각을 한 줄로 모아 돌려준다', async () => {
+    const { a, tools } = await setup()
+    const h = adapter.handleOf(a.id)!
+    for (const part of ['앞부분 ', '뒷부분']) h.emitDelta(part)
+    await new Promise((r) => setTimeout(r, 0))
+
+    const r = await tools.readSession(a.id)
+    expect(r.ok).toBe(true)
+    expect(r.lines).toContain('에이전트: 앞부분 뒷부분')
+  })
+
+  it('read_session도 이 앱의 세션만 읽는다', async () => {
+    const { orc, tools } = await setup()
+    expect((await tools.readSession('남의-세션')).error).toMatch(/관리하는 세션이 아닙니다/)
+    expect((await tools.readSession(orc.id)).error).toMatch(/자기 자신/)
   })
 
   it('평범한 세션에는 도구가 붙지 않는다 — 오케스트레이터만 받는다', async () => {

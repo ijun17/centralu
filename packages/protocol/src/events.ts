@@ -17,6 +17,17 @@ const base = { sessionId: z.string() }
 
 export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
+  /**
+   * 사람의 말이 대화에 더해졌다.
+   *
+   * **UI가 자기가 보낸 것만 그리면 되던 시절에는 없어도 됐다.** 그런데 오케스트레이터가
+   * send_to_session으로 남의 세션에 말을 걸면서 사용자 메시지의 생산자가 둘이 됐다 —
+   * 그때부터 UI를 거치지 않은 말은 화면에 나타날 길이 없었다 (저장은 됐다).
+   *
+   * seq를 함께 보내는 이유: 보낸 UI는 이미 낙관적으로 그려 뒀으므로 같은 말을 두 번
+   * 그리면 안 된다. 받는 쪽이 그것을 가려낼 수 있어야 한다.
+   */
+  z.object({ ...base, type: z.literal('user_message'), seq: z.number(), text: z.string() }),
   z.object({ ...base, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
   z.object({
     ...base,

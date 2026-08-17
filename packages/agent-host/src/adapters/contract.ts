@@ -53,6 +53,25 @@ export type OrchestratorTools = {
    * 기본이 꺼짐인 이유: 끝날 때마다 깨우면 서로 깨우는 고리가 되고, 턴 값도 두 배가 된다.
    */
   sendToSession(sessionId: string, text: string, reportBack?: boolean): Promise<{ ok: boolean; error?: string }>
+  /**
+   * 한 세션의 최근 대화를 읽는다.
+   *
+   * 이게 없어서 오케스트레이터는 보고가 부실할 때 **확인할 방법이 아예 없었다** —
+   * list_sessions의 한 줄과 보고가 같은 소스라 우회도 안 됐다.
+   * 사양서(FR-11)에는 처음부터 있던 도구다.
+   */
+  readSession(
+    sessionId: string,
+    limit?: number,
+  ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
+  /**
+   * 지난 대화에서 찾는다 — **프로젝트를 가로지르는 기억**.
+   *
+   * 기억을 따로 저장하지 않는 이유: 무엇을 기억할지 누가 정하느냐는 문제를 새로 만들고,
+   * 증류된 요약은 원본이 바뀌어도 그대로 남는다. 우리는 대화를 하나도 지우지 않으므로
+   * **찾을 수만 있으면 그게 기억이다.**
+   */
+  recall(query: string, limit?: number): Promise<{ hits: { sessionId: string; session: string; project: string; snippet: string }[] }>
 }
 
 export type CreateSessionOpts = {
