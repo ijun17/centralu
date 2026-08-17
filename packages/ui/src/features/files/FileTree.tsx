@@ -51,13 +51,27 @@ function Dir({
   const open = defaultOpen
   const [entries, setEntries] = useState<FsEntry[] | null>(null)
 
+  /*
+   * 한 번 읽으면 다시 안 읽으려고 `entries`를 가드로 뒀는데, 그게 **입력이 바뀌어도**
+   * 막았다. 다른 프로젝트의 세션을 골라 projectId가 바뀌어도 이미 채워진 entries
+   * 때문에 그대로 돌아나가서, 파일 트리가 옛 프로젝트를 계속 보여줬다 (도그푸딩 지적).
+   *
+   * 가드를 빼도 계속 읽지 않는다 — 이 효과는 open·projectId·path가 **바뀔 때만** 돈다.
+   * "다시 읽지 않는다"는 조건을 상태로 흉내 내지 말고 의존성으로 말하게 한다.
+   *
+   * 응답이 늦게 오는 사이 프로젝트가 또 바뀔 수 있으므로 늦은 응답은 버린다.
+   */
   useEffect(() => {
-    if (!open || entries) return
+    if (!open) return
+    let alive = true
     void platform.fs
       .listDir(projectId, path)
-      .then(setEntries)
-      .catch(() => setEntries([]))
-  }, [open, entries, platform, projectId, path])
+      .then((e) => alive && setEntries(e))
+      .catch(() => alive && setEntries([]))
+    return () => {
+      alive = false
+    }
+  }, [open, platform, projectId, path])
 
   if (!open && depth > 0) return null
   const visible = (entries ?? []).filter((e) => showIgnored || !e.ignored)

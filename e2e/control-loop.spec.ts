@@ -2265,3 +2265,25 @@ test('끊겼다 돌아오면 돌던 세션이 스스로 되살아난다', async 
     })
     .toBe(true)
 })
+
+/** 다른 프로젝트의 세션으로 옮기면 파일 트리도 따라가야 한다 */
+test('프로젝트를 바꾸면 파일 트리도 바뀐다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'only-in-alpha.ts', path: 'only-in-alpha.ts', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', 'work a')
+  await page.getByTestId('evidence-tab-files').click()
+  await expect(page.getByTestId('file-only-in-alpha.ts')).toBeVisible()
+
+  // 두 번째 프로젝트는 다른 파일을 갖는다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'only-in-beta.ts', path: 'only-in-beta.ts', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'beta', 'work b')
+
+  await expect(page.getByTestId('file-only-in-beta.ts')).toBeVisible()
+  await expect(page.getByTestId('file-only-in-alpha.ts')).toBeHidden()
+})
