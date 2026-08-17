@@ -2780,3 +2780,44 @@ test('컨트롤 센터 버튼은 눌러도 꺼지지 않는다 — 나가려면 
   await expect(page.getByTestId('control-center')).toBeHidden()
 })
 
+/**
+ * "A에 쓰던 글이 B의 입력창에 앉아 있다" — 그대로 보내면 엉뚱한 세션에 간다 (실측 확인).
+ * 원인은 쓰다 만 글이 세션이 아니라 화면의 그 자리에 붙어 있던 것.
+ */
+test('쓰다 만 글은 세션을 따라다니지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await newSession(page, 'alpha', 'second')
+  const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId(`session-row-${a}`).click()
+  await page.getByTestId('prompt-input').fill('A에게 하려던 말')
+
+  // B의 입력창은 비어 있어야 한다
+  await page.getByTestId(`session-row-${b}`).click()
+  await expect(page.getByTestId('prompt-input')).toHaveValue('')
+
+  // A로 돌아오면 쓰던 글이 그대로 있어야 한다
+  await page.getByTestId(`session-row-${a}`).click()
+  await expect(page.getByTestId('prompt-input')).toHaveValue('A에게 하려던 말')
+})
+
+/**
+ * 화면을 갈아 끼우는 컨트롤 센터에서는 반대 증상이 났다 — 부품이 사라지며 글도 같이 사라졌다.
+ */
+test('그리드에서 쓰다 만 글은 화면을 바꿨다 돌아와도 남아 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  const panel = page.getByTestId(`grid-panel-${id}`)
+  await panel.getByTestId('prompt-input').fill('그리드에서 쓰던 글')
+
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('prompt-input')).toHaveValue('그리드에서 쓰던 글')
+
+  await page.getByTestId('control-center-button').click()
+  await expect(panel.getByTestId('prompt-input')).toHaveValue('그리드에서 쓰던 글')
+})

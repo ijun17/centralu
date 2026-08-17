@@ -36,6 +36,10 @@ export type Overlay =
 /** 증거 패널이 보여주는 것 */
 export type PanelTab = 'files' | 'git' | 'terminal'
 
+/** 아직 보내지 않은 것. 글과 첨부는 함께 움직인다 — 한쪽만 세션에 묶으면 반쪽만 고친 게 된다 */
+export type Draft = { text: string; attachments: Attachment[] }
+export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
+
 /** 증거 패널 폭의 한계. 좁으면 경로가, 넓으면 대화가 죽는다 */
 export const PANEL_MIN = 260
 export const PANEL_MAX = 900
@@ -80,6 +84,17 @@ export type AppState = {
   projects: Record<string, ProjectInfo>
   sessions: Record<string, SessionSummary>
   chat: Record<string, ChatItem[]>
+  /**
+   * 아직 보내지 않은 글 — **세션별로** 둔다.
+   *
+   * 예전에는 입력창 부품이 들고 있었다. 그러면 글이 세션이 아니라 화면의 그 자리에
+   * 붙는다: 포커스 뷰에서 세션을 바꿔도 같은 부품이 재사용되므로 A에 쓰던 글이
+   * B의 입력창에 그대로 앉아 있었다 — 그대로 보내면 **엉뚱한 세션에 간다** (실측 확인).
+   * 반대로 화면을 갈아 끼우는 컨트롤 센터에서는 부품이 사라지며 글도 같이 사라졌다.
+   *
+   * 저장소에는 넣지 않는다. 앱을 껐다 켤 때까지 살아남아야 할 만큼 무거운 것은 아니다.
+   */
+  drafts: Record<string, Draft>
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
@@ -165,6 +180,8 @@ export type AppState = {
   toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
   setNotifyPolicy(p: NotifyPolicy): void
+  /** 아직 보내지 않은 것을 세션에 붙여 둔다 (비면 지운다) */
+  setDraft(sessionId: string, draft: Draft): void
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
@@ -273,6 +290,7 @@ export const useStore = create<AppState>((set, get) => ({
   projects: {},
   sessions: {},
   chat: {},
+  drafts: {},
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
@@ -622,6 +640,17 @@ export const useStore = create<AppState>((set, get) => ({
       sidebarWidth: get().sidebarWidth,
       notifyPolicy,
     } as never).catch(() => {})
+  },
+  setDraft(sessionId, draft) {
+    set((s) => {
+      // 빈 초안은 남기지 않는다 — 안 그러면 세션을 지워도 찌꺼기가 쌓인다
+      if (!draft.text && draft.attachments.length === 0) {
+        if (!(sessionId in s.drafts)) return {}
+        const { [sessionId]: _gone, ...rest } = s.drafts
+        return { drafts: rest }
+      }
+      return { drafts: { ...s.drafts, [sessionId]: draft } }
+    })
   },
   setToast(toast) {
     set({ toast })

@@ -3,7 +3,7 @@ import type { DragEvent, ReactNode, RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Attachment } from '@cc/protocol'
 import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/core'
-import { useStore, type ChatItem } from '../../store/store.js'
+import { EMPTY_DRAFT, useStore, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { ChevronIcon, CloseIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
@@ -70,8 +70,8 @@ export function SessionView() {
  * **포커스 뷰와 컨트롤 센터가 이걸 같이 쓴다.** 그래서 그리드 칸에서 모델을 바꾸면
  * 사이드바와 포커스 뷰가 곧바로 따라온다: 상태를 복사하지 않고 store 하나만 보기 때문이다.
  *
- * 입력 중인 글은 이 부품이 들고 있으므로 **칸마다 따로**다 — 그리드에서 A에 쓰다가
- * B에 쓰기 시작해도 서로 섞이지 않는다.
+ * 쓰다 만 글은 이 부품이 아니라 **세션**이 들고 있다. 그래서 화면을 바꿔도 남고,
+ * 세션을 바꾸면 따라오지 않는다 — 부품이 들고 있던 시절엔 둘 다 반대였다.
  */
 export function SessionPane({
   sessionId,
@@ -102,8 +102,40 @@ export function SessionPane({
   const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
 
-  const [text, setText] = useState('')
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  /*
+   * 쓰다 만 글은 **세션의 것**이다. 이 부품의 것이 아니다.
+   *
+   * useState로 들고 있었더니 글이 화면의 그 자리에 붙었다. 포커스 뷰에서 세션을
+   * 바꿔도 같은 부품이 재사용되므로 A에 쓰던 글이 B의 입력창에 그대로 앉았고,
+   * 그대로 보내면 엉뚱한 세션에 갔다. 반대로 컨트롤 센터는 화면을 갈아 끼우니
+   * 부품이 사라지며 글도 같이 사라졌다 — 같은 원인의 양쪽 증상이다.
+   */
+  const draft = useStore((s) => s.drafts[sessionId] ?? EMPTY_DRAFT)
+  const setDraft = useStore((s) => s.setDraft)
+  const text = draft.text
+  const attachments = draft.attachments
+
+  const patchDraft = useCallback(
+    (patch: (cur: Draft) => Draft) => {
+      setDraft(sessionId, patch(useStore.getState().drafts[sessionId] ?? EMPTY_DRAFT))
+    },
+    [sessionId, setDraft],
+  )
+  const setText = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      patchDraft((cur) => ({ ...cur, text: typeof next === 'function' ? next(cur.text) : next }))
+    },
+    [patchDraft],
+  )
+  const setAttachments = useCallback(
+    (next: Attachment[] | ((prev: Attachment[]) => Attachment[])) => {
+      patchDraft((cur) => ({
+        ...cur,
+        attachments: typeof next === 'function' ? next(cur.attachments) : next,
+      }))
+    },
+    [patchDraft],
+  )
   const [dragging, setDragging] = useState(false)
   const [caret, setCaret] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
