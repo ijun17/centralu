@@ -85,6 +85,11 @@ export interface AgentPort {
   /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
   resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
+   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
+   * **대화는 이어지지 않는다** — 새 도구는 옛 대화를 모른다. 기록은 우리 저장소에 남는다.
+   */
+  switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo>
+  /**
    * 모델·권한·추론 강도를 대화 도중에 바꾼다 (FR-7).
    * 항목은 프로토콜이 정한다 — 여기 다시 적으면 늦게 추가된 필드가 조용히 빠진다.
    */

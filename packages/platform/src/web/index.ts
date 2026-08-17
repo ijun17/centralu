@@ -49,6 +49,9 @@ class WebAgentPort implements AgentPort {
   orchestrator() {
     return this.rpc.call('orchestrator.get', {})
   }
+  switchTool(sessionId: string, tool: ToolName) {
+    return this.rpc.call('agents.switchTool', { sessionId, tool })
+  }
   controlCenter() {
     return this.rpc.call('controlCenter.get', {})
   }

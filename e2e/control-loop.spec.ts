@@ -3014,3 +3014,52 @@ test('오케스트레이터에서 @는 세션을 집는다', async ({ page }) =>
   // 파일 경로가 아니라 세션 이름이다 — 프로젝트 이름이 힌트로 붙는다
   await expect(menu).toContainText('alpha')
 })
+
+/**
+ * 에이전트 바꾸기 (claude ↔ codex).
+ *
+ * 모델·권한과 나란히 있지만 성질이 다르다 — 대화가 끊긴다.
+ * 그래서 **확인 없이는 바뀌지 않는다.**
+ */
+test('에이전트를 바꾸려면 대화가 끊긴다는 것을 확인해야 한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await expect(page.getByTestId('tool-select')).toHaveValue('claude')
+
+  // 고르기만 하면 확인 창이 뜬다 — 아직 바뀌지 않는다
+  await page.getByTestId('tool-select').selectOption('codex')
+  await expect(page.getByTestId('tool-switch-confirm')).toBeVisible()
+  await expect(page.getByTestId('tool-switch-confirm')).toContainText('will not have this conversation')
+  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('claude')
+
+  // 취소하면 그대로
+  await page.getByTestId('tool-switch-cancel').click()
+  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('claude')
+
+  // 확인해야 바뀐다
+  await page.getByTestId('tool-select').selectOption('codex')
+  await page.getByTestId('tool-switch-confirm-btn').click()
+  await expect(page.getByTestId('tool-select')).toHaveValue('codex')
+  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('codex')
+  // 사이드바 표식도 따라온다
+  await expect(page.getByTestId('tool-mark-codex')).toBeVisible()
+})
+
+test('에이전트를 바꾸면 이어갈 실마리를 끊는다 — 새 도구는 옛 대화를 모른다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId('tool-select').selectOption('codex')
+  await page.getByTestId('tool-switch-confirm-btn').click()
+  await expect(page.getByTestId('tool-select')).toHaveValue('codex')
+
+  // host가 externalId를 끊었는지 (codex에 Claude의 대화 id를 넘기면 엉뚱한 것을 잡는다)
+  const ext = await page.evaluate(
+    (s) => [...(window as any).__mock.sessions.values()].find((x: any) => x.id === s)?.externalId,
+    id,
+  )
+  expect(ext).toBeNull()
+})

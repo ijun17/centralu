@@ -279,6 +279,15 @@ export class MockPlatform implements Platform {
       this.sessions = new Map([...others, ...mine.map((s) => [s.id, s] as const)])
       return [...this.sessions.values()]
     },
+    switchTool: async (sessionId: string, tool: ToolName) => {
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      // 실물과 같은 규칙: 도구를 바꾸면 이어갈 실마리를 끊는다
+      const next = { ...s, tool, externalId: null, importedFrom: null, live: false }
+      this.sessions.set(sessionId, next)
+      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
+      return next
+    },
     orchestrator: async () => {
       // 실물과 같은 규칙: 없으면 그 자리에서 만든다. 프로젝트에는 속하지 않는다
       const found = [...this.sessions.values()].find((x) => x.projectId === null)

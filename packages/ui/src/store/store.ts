@@ -211,6 +211,11 @@ export type AppState = {
     s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
+  /**
+   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
+   * **대화는 이어지지 않는다** — 부르는 쪽이 사람에게 먼저 그 사실을 알려야 한다.
+   */
+  switchTool(sessionId: string, tool: ToolName): Promise<void>
   /** 세션을 고르는 즉시 깨운다 (첫 응답을 기다리지 않게) */
   wake(sessionId: string): Promise<void>
   /** 재연결 후 돌던 세션 되살리기 (host가 죽으면 프로세스도 함께 죽는다) */
@@ -843,6 +848,21 @@ export const useStore = create<AppState>((set, get) => ({
       set({ toast: `Deleted: ${name}` })
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
+    }
+  },
+
+  async switchTool(sessionId, tool) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const info = await platform.agents.switchTool(sessionId, tool)
+      set((s) => ({
+        sessions: s.sessions[sessionId]
+          ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, tool: info.tool, live: false } }
+          : s.sessions,
+      }))
+    } catch (e) {
+      set({ toast: `Could not switch the agent: ${(e as Error).message}` })
     }
   },
 

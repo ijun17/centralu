@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Modal } from '../../components/Modal.jsx'
 import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
@@ -53,6 +54,68 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
   return state
 }
 
+/**
+ * 에이전트 셀렉터 — **되돌릴 수 없는 것을 조용히 하지 않는다.**
+ *
+ * 모델·권한과 나란히 두지만 성질이 다르다: 저쪽은 같은 대화를 이어가며 바뀌고,
+ * 이쪽은 대화가 끊긴다 (externalId가 도구 고유 id라 새 도구가 이어받을 수 없다).
+ * 같은 줄에 있다고 같은 무게로 다루면 사람이 그 차이를 모른 채 누른다.
+ */
+function ToolSwitch({ sessionId, tool }: { sessionId: string; tool: ToolName }) {
+  const switchTool = useStore((s) => s.switchTool)
+  const [asking, setAsking] = useState<ToolName | null>(null)
+
+  return (
+    <>
+      <select
+        className={SELECT}
+        value={tool}
+        onChange={(e) => setAsking(e.target.value as ToolName)}
+        data-testid="tool-select"
+        title="Agent — switching starts a fresh conversation"
+      >
+        <option value="claude" className="bg-panel">Claude Code</option>
+        <option value="codex" className="bg-panel">Codex</option>
+      </select>
+
+      {asking && asking !== tool && (
+        <Modal onClose={() => setAsking(null)} testId="tool-switch-confirm">
+          <h2 className="text-[13px] font-medium text-chalk">Switch to {TOOL_LABEL[asking]}?</h2>
+          <p className="mt-2 text-[12px] leading-relaxed text-ash">
+            {TOOL_LABEL[asking]} <b className="text-chalk">will not have this conversation.</b> Each tool keeps
+            its own memory, so the new agent starts fresh.
+          </p>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-slate">
+            Your transcript stays here, and the {TOOL_LABEL[tool]} conversation is still available
+            under <span className="text-ash">+ → past conversations</span>.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+              onClick={() => setAsking(null)}
+              data-testid="tool-switch-cancel"
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded border border-graphite px-2.5 py-1 text-[12px] text-chalk hover:bg-graphite/50"
+              onClick={() => {
+                void switchTool(sessionId, asking)
+                setAsking(null)
+              }}
+              data-testid="tool-switch-confirm-btn"
+            >
+              Switch
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+const TOOL_LABEL: Record<ToolName, string> = { claude: 'Claude Code', codex: 'Codex' }
+
 export function SessionSettings({
   sessionId,
   tool,
@@ -78,6 +141,7 @@ export function SessionSettings({
 
   return (
     <span className="flex shrink-0 items-center gap-1.5">
+      <ToolSwitch sessionId={sessionId} tool={tool} />
       <select
         className={SELECT}
         value={model ?? ''}

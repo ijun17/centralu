@@ -745,6 +745,55 @@ export class SessionManager {
     h.send(attachments?.length ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}` : text)
   }
 
+  /**
+   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
+   *
+   * **문맥은 이어지지 않는다.** externalId는 도구 자신의 대화 id다
+   * (Claude의 session_id, Codex의 threadId). 도구만 바꾸고 그 id를 들고 가면
+   * codex에게 Claude의 UUID를 넘기게 된다 — 그래서 여기서 **끊어낸다**.
+   *
+   * 잃는 것은 '이어갈 실마리'뿐이고 대화 기록은 우리 저장소에 그대로 남는다.
+   * 옛 도구의 대화도 그 도구 안에 남아 있어 '+ → 이전 대화'로 다시 불러올 수 있다.
+   *
+   * 세션은 자리고 에이전트는 도구다 — 자리(이름·순서·기록·컨트롤 센터 칸)는 그대로 두고
+   * 도구만 갈아 끼운다.
+   */
+  async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
+
+    const adapter = this.adapters.get(tool)
+    if (!adapter) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
+
+    /*
+     * 바꾸기 전에 그 도구를 쓸 수 있는지 본다.
+     * 확인 없이 갈아 끼우면 옛 프로세스는 이미 죽었는데 새 것은 안 뜨는 상태가 된다 —
+     * 되돌릴 수도 없고 이유도 모르는 자리다.
+     */
+    const d = await adapter.detect()
+    if (!d.installed || !d.loggedIn) {
+      throw Object.assign(new Error(`${tool}를 쓸 수 없습니다: ${d.detail}`), { code: 'tool_not_installed' })
+    }
+
+    const old = this.handles.get(sessionId)
+    if (old) {
+      await old.dispose().catch(() => {})
+      this.handles.delete(sessionId)
+      this.running.delete(sessionId)
+    }
+
+    m.tool = tool
+    // 새 도구는 옛 대화를 모른다. 실마리를 들고 가면 엉뚱한 대화를 잡는다
+    m.externalId = null
+    m.importedFrom = null
+    this.store.upsertSession(m)
+    this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
+
+    // 새 프로세스는 말을 걸 때 뜬다 (resumeSession과 같은 규칙 — 여기서 띄우면 안 쓸 수도 있는 도구가 돈다)
+    return { ...m, live: false }
+  }
+
   respondApproval(
     sessionId: string,
     requestId: string,

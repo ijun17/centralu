@@ -71,6 +71,10 @@ export function createRpcHandler(
       const { sessionId, ...settings } = RpcMethods['agents.updateSettings'].params.parse(p)
       return await mgr.updateSettings(sessionId, settings)
     },
+    'agents.switchTool': async (p) => {
+      const { sessionId, tool } = RpcMethods['agents.switchTool'].params.parse(p)
+      return mgr.switchTool(sessionId, tool)
+    },
     'agents.capabilities': async (p) => {
       const { tool } = RpcMethods['agents.capabilities'].params.parse(p)
       const a = adapters.get(tool)

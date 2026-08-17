@@ -174,6 +174,17 @@ export const RpcMethods = {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
+  /**
+   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
+   *
+   * updateSettings와 **따로 두는 이유**: 모델·권한은 같은 대화를 이어가며 바뀌지만
+   * 도구를 바꾸면 대화가 이어지지 않는다 (externalId가 도구 고유 id라 끊어내야 한다).
+   * 결과가 다른 일을 같은 문으로 부르면 부르는 쪽이 그 차이를 모른 채 쓴다.
+   */
+  'agents.switchTool': {
+    params: z.object({ sessionId: z.string(), tool: ToolName }),
+    result: SessionInfo,
+  },
   /** 모델·권한을 대화 도중에 바꾼다 (다음 턴부터 적용) */
   'agents.updateSettings': {
     params: UpdateSettingsParams,
