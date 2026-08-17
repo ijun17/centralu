@@ -91,8 +91,16 @@
     outline: 1px solid var(--color-ash);
     outline-offset: 1px;
   }
+  /*
+   * 선택 표시는 **반투명 흰빛**이다.
+   *
+   * 전에는 graphite 단색이었는데, 내 말풍선 배경이 같은 graphite라 그 위에서는
+   * 선택해도 아무 변화가 없었다 (도그푸딩 지적). 알파를 쓰면 밑에 무엇이 깔려
+   * 있든 그만큼 밝아지므로, 앞으로 배경이 늘어나도 같은 문제가 다시 생기지 않는다.
+   * 순백 자체는 '나를 기다리는 것'의 몫이라 불투명도로 눌러 둔다.
+   */
   ::selection {
-    background: var(--color-graphite);
+    background: rgb(255 255 255 / 0.24);
   }
   ::-webkit-scrollbar {
     width: 10px;
