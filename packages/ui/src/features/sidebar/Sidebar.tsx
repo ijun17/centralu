@@ -241,23 +241,34 @@ function ProjectMarks({
       **이름 바로 옆에 붙인다.** ml-auto로 반대쪽 끝까지 밀어 놨더니, 이 숫자들이
       무엇에 대한 것인지 이름과 떨어져서 안 읽혔다 (도그푸딩: "이 숫자는 뭐야?").
       바로 옆에 있으면 "이 프로젝트의 변경 22개"로 한 덩어리로 읽힌다.
+
+      설명은 **앱 툴팁**으로 준다. 브라우저 기본 title은 1~2초를 기다려야 뜨는데,
+      "이게 뭐지?" 싶을 때 그만큼 멈춰 있어야 하면 그냥 안 물어보게 된다.
+      숫자만 있고 단위가 없는 표식일수록 답이 빨라야 한다.
     */
     <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
       {changed > 0 && (
-        <span data-testid={`mark-changed-${project.name}`} title={`${changed} changed files`}>
-          {changed}
-        </span>
+        <Tooltip content={`${changed} uncommitted file${changed > 1 ? 's' : ''}`} testId={`mark-changed-tip-${project.name}`}>
+          <span data-testid={`mark-changed-${project.name}`}>{changed}</span>
+        </Tooltip>
       )}
       {/* 겹친 사각형 = 같은 폴더에서 여럿이 일하는 중 */}
       {risky && (
-        <span className="text-ash" data-testid={`concurrent-${project.name}`} title={`${sessionCount} concurrent sessions`}>
-          ⧉{sessionCount}
-        </span>
+        <Tooltip
+          content={`${sessionCount} sessions running in the same folder — they can overwrite each other's edits`}
+          testId={`concurrent-tip-${project.name}`}
+        >
+          <span className="text-ash" data-testid={`concurrent-${project.name}`}>
+            ⧉{sessionCount}
+          </span>
+        </Tooltip>
       )}
       {denied && (
-        <span className="text-ash" data-testid={`git-denied-${project.name}`} title="Folder access permission required">
-          !
-        </span>
+        <Tooltip content="Folder access permission required" testId={`git-denied-tip-${project.name}`}>
+          <span className="text-ash" data-testid={`git-denied-${project.name}`}>
+            !
+          </span>
+        </Tooltip>
       )}
     </span>
   )

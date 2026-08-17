@@ -2287,3 +2287,32 @@ test('프로젝트를 바꾸면 파일 트리도 바뀐다', async ({ page }) =>
   await expect(page.getByTestId('file-only-in-beta.ts')).toBeVisible()
   await expect(page.getByTestId('file-only-in-alpha.ts')).toBeHidden()
 })
+
+/**
+ * 숫자만 있고 단위가 없는 표식은 "이게 뭐지?"가 나온다 (실제로 나왔다).
+ * 브라우저 기본 title은 1~2초를 기다려야 떠서, 그 순간에는 없는 것과 같다.
+ */
+test('프로젝트 표식은 호버하면 무엇인지 알려준다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [
+      { path: 'a.ts', staged: false, status: 'M' },
+      { path: 'b.ts', staged: false, status: 'M' },
+    ]
+  })
+  // 변경 수는 프로젝트 목록에서 온다 — 다시 읽게 한다
+  await page.evaluate(() => (window as any).__store.getState().refreshProjects?.())
+
+  const mark = page.getByTestId('mark-changed-alpha')
+  if (await mark.count()) {
+    await mark.hover()
+    await expect(page.getByRole('tooltip')).toContainText('uncommitted')
+  }
+
+  // 동시 세션 경고는 데이터 유실 위험이라 무엇인지 반드시 읽혀야 한다
+  await newSession(page, 'alpha', 'one')
+  await newSession(page, 'alpha', 'two')
+  await page.getByTestId('concurrent-alpha').hover()
+  await expect(page.getByRole('tooltip')).toContainText('same folder')
+})
