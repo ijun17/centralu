@@ -60,6 +60,13 @@ export type CreateSessionOpts = {
   resumeExternalId?: string
   /** 주어지면 이 세션은 오케스트레이터다 — 어댑터가 자기 방식으로 도구를 붙인다 */
   orchestratorTools?: OrchestratorTools
+  /**
+   * 앱이 보증하는 역할 설명. 도구의 기본 프롬프트에 **덧붙인다**.
+   *
+   * 파일(AGENTS.md)로 두지 않는 이유: 사람이 지우거나 잘못 고치면 함께 사라진다.
+   * 사람이 정할 몫과 우리가 지켜야 할 몫은 같은 자리에 두지 않는다.
+   */
+  systemPromptAppend?: string
 }
 
 /** 도구가 보관 중인 이전 세션 한 건 (도구 고유 타입은 여기까지 오지 않는다) */

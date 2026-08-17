@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { orchestratorHome } from './orchestrator-home.js'
+import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
@@ -282,6 +282,7 @@ export class SessionManager {
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
           // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
           orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
+          systemPromptAppend: params.projectId === null ? ORCHESTRATOR_ROLE : undefined,
         },
         (e) => this.onEvent(e),
       )

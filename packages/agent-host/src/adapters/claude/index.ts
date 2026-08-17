@@ -108,16 +108,29 @@ class ClaudeSession implements SessionHandle {
           ? {
               mcpServers: { [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools) },
               /*
-               * 오케스트레이터는 자기 폴더의 AGENTS.md를 읽어야 한다 — 자기가 무엇인지
-               * 거기 적혀 있고, 사람이 고쳐서 성격을 정할 수 있다.
+               * **파일에서 지시를 읽지 않는다.**
                *
-               * 'project'만 넣는 이유: 실측으로 확인한 값이다.
-               *   생략      → CLAUDE.md ✅ · 사용자 전역 훅 3개도 함께 실행됨
-               *   ['project'] → CLAUDE.md ✅ · 훅 0개
-               *   []        → CLAUDE.md ❌
-               * 관제탑이 사람의 전역 훅에 휘둘리면 안 된다.
+               * 워커 세션은 자기 프로젝트에만 권한이 있지만 파일은 쓸 수 있다.
+               * 그 세션이 오케스트레이터 폴더에 지시문을 써 넣으면, 모든 세션에
+               * 지시할 수 있는 오케스트레이터가 그걸 자기 지시로 읽는다 —
+               * 낮은 권한에서 높은 권한으로 넘어가는 길이다.
+               *
+               * 실측값 (probe):
+               *   생략        CLAUDE.md 읽음 · 사용자 전역 훅 3개 실행
+               *   ['project'] CLAUDE.md 읽음 · 훅 0개
+               *   []          아무것도 안 읽음      ← 관제탑에는 이것뿐이다
+               *
+               * 역할은 아래 systemPrompt로 직접 주입한다. 파일을 거치지 않으므로
+               * 도중에 누구도 바꿔 쓸 수 없다.
                */
-              settingSources: ['project'] as never,
+              settingSources: [] as never,
+              /*
+               * 역할은 파일이 아니라 여기서 보증한다. AGENTS.md는 사람이 고칠 수 있고
+               * 고쳐야 하는 파일이라, 지워지면 안 되는 것을 거기 두면 안 된다.
+               */
+              ...(this.opts.systemPromptAppend
+                ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: this.opts.systemPromptAppend } }
+                : {}),
             }
           : {}),
         permissionMode: PRESET_MODE[preset],
