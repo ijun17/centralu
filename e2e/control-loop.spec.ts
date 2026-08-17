@@ -2387,3 +2387,34 @@ test('입력창의 첨부와 보내기 버튼이 같은 크기·같은 높이다
   // 아래쪽 끝이 같은 줄에 선다 (입력창이 커져도 나란히 남는다)
   expect(Math.abs(attach.y + attach.height - (send.y + send.height))).toBeLessThanOrEqual(1)
 })
+
+/**
+ * 놓을 자리 표시가 목록을 밀면 안 된다.
+ *
+ * border로 그리면 요소가 1px 커져서, 표시가 줄을 옮길 때마다 목록 전체가 밀린다 —
+ * 끌고 다니면 딸깍딸깍 튀고, 손이 노리는 지점도 계속 움직인다.
+ */
+test('끌어서 옮기는 동안 목록이 밀리지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+  const ids = await page.evaluate(() => Object.keys((window as any).__store.getState().sessions))
+
+  const rowBox = async () => (await page.getByTestId(`session-row-${ids[1]}`).boundingBox())!
+  const before = await rowBox()
+
+  // 놓기 표시가 켜진 상태를 만든다 (dragover만 발생시킨다)
+  await page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="session-row-${id}"]`)!.parentElement!
+    const dt = new DataTransfer()
+    dt.setData('application/x-cc-session', 'other')
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(
+      new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: r.top + 2 }),
+    )
+  }, ids[0])
+
+  const after = await rowBox()
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(0.5)
+  expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(0.5)
+})

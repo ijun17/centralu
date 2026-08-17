@@ -78,10 +78,21 @@ function SessionRow({
   )
 }
 
-/** 놓일 자리 표시 — 얇은 선 하나면 충분하다 */
+/**
+ * 놓일 자리 표시 — 얇은 선 하나면 충분하다.
+ *
+ * **테두리로 그리면 안 된다.** border는 요소의 크기를 1px 늘려서, 표시가 줄을 옮길
+ * 때마다 목록 전체가 그만큼 밀린다 — 끌고 다니면 딸깍딸깍 튀는 그 느낌이다
+ * (도그푸딩 지적). 게다가 손이 노리는 지점이 계속 움직이니 놓기도 어려워진다.
+ *
+ * inset 그림자는 **박스 크기를 건드리지 않는다.** 같은 선을 그리면서 레이아웃은
+ * 가만히 있다. 새 DOM도 필요 없다.
+ */
 function dropLine(edge: 'top' | 'bottom' | null): string {
   if (!edge) return ''
-  return edge === 'top' ? 'border-t border-t-ash' : 'border-b border-b-ash'
+  return edge === 'top'
+    ? 'shadow-[inset_0_2px_0_0_var(--color-ash)]'
+    : 'shadow-[inset_0_-2px_0_0_var(--color-ash)]'
 }
 
 /** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
