@@ -2995,3 +2995,22 @@ test('오케스트레이터 세션은 프로젝트 목록에 끼지 않는다', 
   // 프로젝트에 속하지 않으므로 사이드바 어느 프로젝트 밑에도 줄이 없다
   await expect(page.getByTestId(`session-row-${orcId}`)).toHaveCount(0)
 })
+
+/**
+ * 오케스트레이터의 `@`는 파일이 아니라 **세션**을 집는다.
+ * 말로만 지목하면 이름을 잘못 짚을 수 있고, 엉뚱한 세션에 일이 가면
+ * 그 프로젝트가 실제로 바뀐다.
+ */
+test('오케스트레이터에서 @는 세션을 집는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'readme 담당')
+  await page.getByTestId('orchestrator-button').click()
+  await expect(page.getByTestId('session-view')).toBeVisible()
+
+  await page.getByTestId('prompt-input').fill('@readme')
+  const menu = page.getByTestId('autocomplete')
+  await expect(menu).toBeVisible()
+  await expect(menu).toContainText('readme')
+  // 파일 경로가 아니라 세션 이름이다 — 프로젝트 이름이 힌트로 붙는다
+  await expect(menu).toContainText('alpha')
+})

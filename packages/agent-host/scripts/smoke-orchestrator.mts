@@ -118,7 +118,7 @@ log('오케스트레이터:', orc.id, '· projectId =', JSON.stringify(orc.proje
 const before = events.length
 await rpc('agents.send', {
   sessionId: orc.id,
-  text: '지금 관리 중인 세션 목록을 확인하고, "readme-담당" 세션에게 "hello라고만 답해줘"라고 전달해줘.',
+  text: '지금 관리 중인 세션 목록을 확인하고, "readme-담당" 세션에게 "hello라고만 답해줘"라고 전달해줘. 끝나면 나한테 알려줘.',
 })
 
 // 오케스트레이터의 턴이 끝날 때까지
@@ -151,6 +151,20 @@ const usedSend = toolCalls.some((t) => String(t).includes('send_to_session'))
 console.log(`\n  list_sessions 호출  ${usedList ? '✅' : '❌'}`)
 console.log(`  send_to_session 호출 ${usedSend ? '✅' : '❌'}`)
 console.log(`  대상 세션이 실제로 움직임 ${workerGotWork ? '✅' : '❌'}`)
+
+/*
+ * 보고가 되돌아오는가 — "한 창"의 나머지 절반.
+ * 워커가 마치면 오케스트레이터 창에 알림이 와야 한다.
+ */
+const reported = await new Promise<boolean>((resolve) => {
+  const t = setInterval(() => {
+    if (events.some((e) => e.sessionId === orc.id && e.type === 'message_delta' && String(e.text).includes('마쳤'))) {
+      clearInterval(t); resolve(true)
+    }
+  }, 500)
+  setTimeout(() => { clearInterval(t); resolve(false) }, 120000)
+})
+console.log(`  일이 끝나면 보고가 돌아옴 ${reported ? '✅' : '❌'}`)
 
 ws.close()
 host.kill()

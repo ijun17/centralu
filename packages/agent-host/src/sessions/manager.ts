@@ -83,6 +83,8 @@ export class SessionManager {
   private externalIndex = new Map<string, { ids: Set<string>; at: number }>()
   /** 사용량 캐시 — 모달을 여닫을 때마다 도구를 띄우지 않는다 */
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
+  /** 끝나면 알려달라고 부탁받은 세션 → 알릴 오케스트레이터 (한 번 알리면 지운다) */
+  private awaitingReport = new Map<string, string>()
 
   constructor(
     private store: Store,
@@ -628,6 +630,39 @@ export class SessionManager {
       }
     }
     this.emit(e)
+    if (e.type === 'turn_complete' && e.sessionId) void this.reportBackIfAwaited(e.sessionId)
+  }
+
+  /**
+   * 시킨 일이 끝나면 오케스트레이터에게 알린다 — **"한 창"의 나머지 절반**.
+   *
+   * 이게 없으면 지시는 한 창에서 하고 결과는 그 세션에 가서 봐야 한다.
+   * 그러면 창을 옮겨 다니는 고통이 그대로 남는다 — 애초에 없애려던 것이다.
+   *
+   * 밀기는 위험하므로 **부탁받았을 때만** 한다:
+   *  - 지시할 때 오케스트레이터가 reportBack을 켠 건만 되돌아온다
+   *  - 한 번 알리면 표식을 지운다. 그래야 그 세션이 이후 스스로 도는 턴마다
+   *    오케스트레이터를 깨우지 않는다 — 그건 서로 깨우는 고리가 된다
+   */
+  private async reportBackIfAwaited(sessionId: string): Promise<void> {
+    const orchestratorId = this.awaitingReport.get(sessionId)
+    if (!orchestratorId) return
+    this.awaitingReport.delete(sessionId)
+
+    const target = this.meta.get(sessionId)
+    if (!target || !this.meta.has(orchestratorId)) return
+
+    const preview = this.previewOf(sessionId)
+    try {
+      await this.send(
+        orchestratorId,
+        `[Control Center] "${target.name}" 세션이 지시한 일을 마쳤습니다.\n` +
+          `마지막 응답: ${preview || '(내용 없음)'}\n` +
+          `자세히 보려면 read_session이 아니라 사람에게 그 세션을 열어보라고 알리면 됩니다.`,
+      )
+    } catch {
+      // 오케스트레이터가 잠들었거나 지워졌을 수 있다 — 보고 하나 때문에 앱이 흔들리면 안 된다
+    }
   }
 
   /**
@@ -1006,7 +1041,7 @@ export class SessionManager {
           }))
       },
 
-      sendToSession: async (sessionId, text) => {
+      sendToSession: async (sessionId, text, reportBack) => {
         /*
          * 조용히 실패하지 않는다. 오케스트레이터가 이름을 잘못 짚었을 때
          * 아무 일도 안 일어나면 사람은 "시켰는데 안 했다"로만 보게 된다 —
@@ -1021,6 +1056,8 @@ export class SessionManager {
 
         try {
           await this.send(sessionId, text)
+          // 부탁받았을 때만 되돌아온다 — 기본은 조용하다
+          if (reportBack) this.awaitingReport.set(sessionId, orchestratorId)
           return { ok: true }
         } catch (e) {
           return { ok: false, error: (e as Error).message }

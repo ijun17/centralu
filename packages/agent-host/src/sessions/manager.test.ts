@@ -22,6 +22,8 @@ class FakeHandle implements SessionHandle {
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
   }
   interrupt() {}
+  /** 턴이 끝났다고 알린다 (보고 되돌아오기 테스트용) */
+  finishTurn() { this.emit({ type: 'turn_complete', sessionId: this.sessionId }) }
   async dispose() { this.disposed = true }
 }
 
@@ -847,6 +849,41 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     const r = await tools.sendToSession(orc.id, '나에게')
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/자기 자신/)
+  })
+
+  it('reportBack 없이 보내면 끝나도 조용하다', async () => {
+    const { a, orc, tools } = await setup()
+    const before = adapter.handleOf(orc.id)!.sent.length
+    await tools.sendToSession(a.id, '조용히 해줘')
+    // 대상 세션의 턴이 끝난다
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(adapter.handleOf(orc.id)!.sent.length).toBe(before)
+  })
+
+  it('reportBack이면 끝났을 때 오케스트레이터에게 한 번 알린다', async () => {
+    const { a, orc, tools } = await setup()
+    await tools.sendToSession(a.id, '끝나면 알려줘', true)
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    const sent = adapter.handleOf(orc.id)!.sent
+    expect(sent.some((t) => t.includes('마쳤습니다'))).toBe(true)
+  })
+
+  /*
+   * 이 기능의 유일한 위험: 서로 깨우는 고리.
+   * 한 번 알린 뒤에도 표식이 남아 있으면, 그 세션이 이후 스스로 도는 턴마다
+   * 오케스트레이터를 깨우고 그때마다 턴 값이 든다.
+   */
+  it('한 번만 알린다 — 그 세션이 계속 돌아도 다시 깨우지 않는다', async () => {
+    const { a, orc, tools } = await setup()
+    await tools.sendToSession(a.id, '끝나면 알려줘', true)
+    for (let i = 0; i < 3; i++) {
+      adapter.handleOf(a.id)!.finishTurn()
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    const reports = adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('마쳤습니다'))
+    expect(reports.length).toBe(1)
   })
 
   it('평범한 세션에는 도구가 붙지 않는다 — 오케스트레이터만 받는다', async () => {

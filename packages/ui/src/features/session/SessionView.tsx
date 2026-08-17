@@ -169,6 +169,8 @@ export function SessionPane({
     text,
     caret,
     enabled: !!session && caret >= 0,
+    // 오케스트레이터에겐 파일이 없다 — `@`는 세션을 집는다 (프로젝트 없음이 그 표식이다)
+    atSource: session && session.projectId === null ? 'sessions' : 'files',
   })
 
   const pick = (item: Suggestion) => {

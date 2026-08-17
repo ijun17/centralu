@@ -46,8 +46,13 @@ export type OrchestratedSession = {
 export type OrchestratorTools = {
   /** 지금 이 앱이 관리하는 세션들 (오케스트레이터 자신과 아카이브는 뺀다) */
   listSessions(): Promise<OrchestratedSession[]>
-  /** 한 세션에 일을 시킨다. 대상이 아니면 이유를 돌려준다 — 조용히 실패하지 않는다 */
-  sendToSession(sessionId: string, text: string): Promise<{ ok: boolean; error?: string }>
+  /**
+   * 한 세션에 일을 시킨다. 대상이 아니면 이유를 돌려준다 — 조용히 실패하지 않는다.
+   *
+   * `reportBack`이면 그 세션의 턴이 끝날 때 오케스트레이터에게 한 번 알린다.
+   * 기본이 꺼짐인 이유: 끝날 때마다 깨우면 서로 깨우는 고리가 되고, 턴 값도 두 배가 된다.
+   */
+  sendToSession(sessionId: string, text: string, reportBack?: boolean): Promise<{ ok: boolean; error?: string }>
 }
 
 export type CreateSessionOpts = {

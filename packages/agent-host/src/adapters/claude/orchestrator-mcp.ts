@@ -35,6 +35,7 @@ export function orchestratorMcp(tools: OrchestratorTools) {
       '프로젝트를 가로지르는 질문이나 여러 세션에 걸친 일이면 먼저 list_sessions로 지금 상태를 본다.',
       '일을 시킬 때는 send_to_session을 쓴다 — 대상 세션의 승인 설정이 그대로 적용되므로,',
       '위험한 작업이면 그 세션에서 사람에게 승인을 묻게 된다.',
+      '사람이 결과를 기다리는 일이면 reportBack을 켠다 — 그 세션이 마치면 여기로 알려준다.',
     ].join('\n'),
     tools: [
       tool(
@@ -69,9 +70,13 @@ export function orchestratorMcp(tools: OrchestratorTools) {
         {
           sessionId: z.string().describe('list_sessions가 준 세션 id'),
           text: z.string().describe('그 세션에 보낼 지시'),
+          reportBack: z
+            .boolean()
+            .optional()
+            .describe('그 세션이 일을 마치면 나에게 알려줄지. 사람이 결과를 기다리는 일이면 true'),
         },
-        async ({ sessionId, text }) => {
-          const r = await tools.sendToSession(sessionId, text)
+        async ({ sessionId, text, reportBack }) => {
+          const r = await tools.sendToSession(sessionId, text, reportBack)
           /*
            * 실패를 그대로 말해준다. 조용히 성공한 척하면 오케스트레이터는 시켰다고
            * 믿고 다음으로 넘어가고, 사람은 "시켰는데 안 했다"만 보게 된다.

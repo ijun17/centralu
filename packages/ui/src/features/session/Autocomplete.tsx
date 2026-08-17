@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CommandInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useStore } from '../../store/store.js'
 
 /**
  * 입력창 자동완성 — `/`는 스킬, `@`는 파일.
@@ -67,12 +68,21 @@ export function useAutocomplete({
   text,
   caret,
   enabled,
+  atSource = 'files',
 }: {
   sessionId: string
   projectId: string
   text: string
   caret: number
   enabled: boolean
+  /**
+   * `@`가 무엇을 가리키나.
+   *
+   * 오케스트레이터에게 파일은 의미가 없다 — 손이 없어서 파일을 만지지 않는다.
+   * 대신 `@`는 **세션**을 집는다: 말로 지목하면 이름을 잘못 짚을 수 있고,
+   * 엉뚱한 세션에 일이 가면 그 프로젝트가 실제로 바뀐다.
+   */
+  atSource?: 'files' | 'sessions'
 }) {
   const platform = usePlatform()
   const [commands, setCommands] = useState<{ ready: boolean; commands: CommandInfo[] }>({
@@ -81,6 +91,14 @@ export function useAutocomplete({
   })
   const [files, setFiles] = useState<{ path: string; name: string }[]>([])
   const [index, setIndex] = useState(0)
+  // 세션 목록은 이미 스토어에 있다 — 오케스트레이터의 `@`는 여기서 고른다
+  const sessionMap = useStore((s) => s.sessions)
+  const projectMap = useStore((s) => s.projects)
+  const sessions = useMemo(() => Object.values(sessionMap), [sessionMap])
+  const projectNames = useMemo(
+    () => Object.fromEntries(Object.values(projectMap).map((p) => [p.id, p.name])),
+    [projectMap],
+  )
 
   const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
 
@@ -99,7 +117,7 @@ export function useAutocomplete({
 
   // 파일은 칠 때마다 찾는다 (host가 색인을 들고 있어 빠르다)
   useEffect(() => {
-    if (trigger?.kind !== 'file') return
+    if (trigger?.kind !== 'file' || atSource !== 'files') return
     let alive = true
     void platform.fs
       .search(projectId, trigger.query, 20)
@@ -108,7 +126,7 @@ export function useAutocomplete({
     return () => {
       alive = false
     }
-  }, [trigger?.kind, trigger?.query, platform, projectId])
+  }, [trigger?.kind, trigger?.query, platform, projectId, atSource])
 
   const items = useMemo<Suggestion[]>(() => {
     if (!trigger) return []
@@ -121,8 +139,15 @@ export function useAutocomplete({
         .slice(0, 20)
         .map(({ c }) => ({ value: `/${c.name} `, label: `/${c.name}`, hint: c.argumentHint || c.description }))
     }
+    if (atSource === 'sessions') {
+      const q = trigger.query.toLowerCase()
+      return sessions
+        .filter((x) => !x.archived && x.projectId !== null && x.name.toLowerCase().includes(q))
+        .slice(0, 20)
+        .map((x) => ({ value: `@${x.name} `, label: x.name, hint: projectNames[x.projectId!] ?? '' }))
+    }
     return files.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
-  }, [trigger, commands, files])
+  }, [trigger, commands, files, atSource, sessions, projectNames])
 
   // 목록이 바뀌면 첫 항목으로 되돌린다 — 커서가 엉뚱한 곳에 남아 있으면 잘못 고른다
   useEffect(() => {
