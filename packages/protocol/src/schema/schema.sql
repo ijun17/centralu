@@ -1,5 +1,5 @@
 -- Control Center 로컬 저장 스키마 v1
--- dev(better-sqlite3)와 prod(rusqlite)가 이 파일을 공유한다 (docs/agent-host.md §5)
+-- host(better-sqlite3)가 읽는다. 마이그레이션은 dev-services/store.ts의 steps가 담당한다.
 PRAGMA user_version = 1;
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE TABLE IF NOT EXISTS sessions (
   id            TEXT PRIMARY KEY,
-  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  -- 오케스트레이터는 프로젝트에 속하지 않는다 (앱에 하나, 프로젝트를 가로지른다).
+  -- NOT NULL이면 아무 데나 매달아야 하고 그 프로젝트를 지우면 CASCADE로 함께 죽는다.
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
   tool          TEXT NOT NULL,
   external_id   TEXT,
   name          TEXT NOT NULL,

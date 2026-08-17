@@ -116,7 +116,7 @@ export function Inbox() {
                     {it.name}
                   </span>
                   <span className="truncate text-[11px] text-slate">
-                    {projects[it.projectId]?.name ?? ''}
+                    {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center gap-2.5">
                     <span className="text-[11px] text-slate">

@@ -15,7 +15,8 @@ import { transition } from './state-machine.js'
  */
 export type SessionSummary = {
   id: string
-  projectId: string
+  /** 오케스트레이터만 null — 프로젝트를 가로지르는 세션이라 어디에도 속하지 않는다 */
+  projectId: string | null
   /**
    * 이 세션이 쓰는 도구.
    *

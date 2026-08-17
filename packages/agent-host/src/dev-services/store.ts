@@ -164,6 +164,62 @@ export class Store {
           `)
         },
       },
+      {
+        to: 10,
+        run: () => {
+          /*
+           * 오케스트레이터는 **프로젝트에 속하지 않는다.**
+           *
+           * 앱에 하나뿐이고 프로젝트를 가로지르는 세션이라, project_id가 NOT NULL이면
+           * 아무 프로젝트에나 매달아야 하고 그 프로젝트를 지우면 CASCADE로 함께 죽는다.
+           * 둘 다 틀렸다.
+           *
+           * SQLite는 컬럼의 NOT NULL을 못 푼다 — 표준 절차대로 테이블을 다시 만든다.
+           * 이 프로젝트에서 가장 위험한 변경이므로 **옮긴 줄 수를 세어 확인**한다.
+           * 조용히 한 줄이라도 잃으면 되돌릴 방법이 없다.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string; notnull: number }[]
+          const pid = cols.find((c) => c.name === 'project_id')
+          if (!pid || pid.notnull === 0) return // 이미 nullable
+
+          const before = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
+          const names = cols.map((c) => c.name).join(', ')
+
+          this.db.pragma('foreign_keys = OFF')
+          this.db.exec(`
+            CREATE TABLE sessions_new (
+              id            TEXT PRIMARY KEY,
+              project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
+              tool          TEXT NOT NULL,
+              external_id   TEXT,
+              name          TEXT NOT NULL,
+              auto_named    INTEGER NOT NULL DEFAULT 1,
+              state         TEXT NOT NULL DEFAULT 'idle',
+              archived      INTEGER NOT NULL DEFAULT 0,
+              is_orchestrator INTEGER NOT NULL DEFAULT 0,
+              last_read_seq INTEGER NOT NULL DEFAULT 0,
+              waiting_since INTEGER,
+              created_at    INTEGER NOT NULL,
+              touched_paths TEXT NOT NULL DEFAULT '[]',
+              model         TEXT,
+              effort        TEXT,
+              permission_preset TEXT NOT NULL DEFAULT 'normal',
+              imported_from TEXT,
+              sidebar_order INTEGER NOT NULL DEFAULT 0
+            )
+          `)
+          this.db.exec(`INSERT INTO sessions_new (${names}) SELECT ${names} FROM sessions`)
+          this.db.exec(`DROP TABLE sessions`)
+          this.db.exec(`ALTER TABLE sessions_new RENAME TO sessions`)
+          this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived)`)
+          this.db.pragma('foreign_keys = ON')
+
+          const after = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
+          if (after !== before) {
+            throw new Error(`세션 이관 중 유실: ${before} → ${after}`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {

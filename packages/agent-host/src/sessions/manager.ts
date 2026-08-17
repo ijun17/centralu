@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { orchestratorHome } from './orchestrator-home.js'
 import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
@@ -710,7 +711,7 @@ export class SessionManager {
       this.store.addApprovalRule({
         scope: scope ?? 'session',
         sessionId: scope === 'project' ? undefined : sessionId,
-        projectId: scope === 'project' ? m.projectId : undefined,
+        projectId: scope === 'project' ? (m.projectId ?? undefined) : undefined,
         matcher,
         decision: 'allow',
       })
@@ -840,7 +841,15 @@ export class SessionManager {
   }
 
   // ── 깃 (B-1) — 경로 해석만 하고 실제 작업은 dev-services에 위임한다 ──
-  private cwdOf(projectId: string): string {
+  /**
+   * 프로젝트의 작업 디렉토리. **오케스트레이터(projectId=null)는 중립 자리를 쓴다.**
+   *
+   * 프로젝트 안에 두면 그 프로젝트의 세션과 같은 파일을 만지게 된다 — FR-2가 경고하는
+   * 동시 세션 충돌을 우리 손으로 만드는 셈이다. 오케스트레이터에겐 손이 없다:
+   * 일은 세션이 하고, 오케스트레이터는 시키고 읽는다.
+   */
+  private cwdOf(projectId: string | null): string {
+    if (projectId === null) return orchestratorHome()
     const p = this.store.listProjects().find((x) => x.id === projectId)
     if (!p) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
     return p.path
@@ -913,7 +922,7 @@ export class SessionManager {
   }
 
   /** 이 세션에 적용되는 저장된 규칙 (세션 범위 + 프로젝트 범위) */
-  private rulesFor(sessionId: string, projectId: string): string[] {
+  private rulesFor(sessionId: string, projectId: string | null): string[] {
     return this.store
       .listApprovalRules()
       .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))

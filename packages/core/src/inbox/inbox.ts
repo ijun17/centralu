@@ -9,7 +9,8 @@ import { isUnread } from '../unread/unread.js'
 
 export type InboxCandidate = {
   id: string
-  projectId: string
+  /** 오케스트레이터는 프로젝트가 없다 */
+  projectId: string | null
   name: string
   state: SessionState
   waitingSince: number | null

@@ -18,9 +18,66 @@ function seeded() {
   return s
 }
 
+/**
+ * v10은 테이블을 통째로 다시 만든다 (SQLite는 NOT NULL을 못 푼다).
+ * 이 프로젝트에서 가장 위험한 변경이라, **옛 DB에 데이터를 넣고 실제로 올려본다.**
+ * 한 줄이라도 조용히 잃으면 되돌릴 방법이 없다.
+ */
+describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
+  it('옛 DB(v9)의 세션·메시지가 그대로 살아 넘어온다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v10-'))
+    const file = join(dir, 'store.db')
+
+    // v9 상태의 DB를 손으로 만든다 (project_id NOT NULL)
+    const old = new Database(file)
+    old.pragma('foreign_keys = ON')
+    old.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE sessions (id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
+        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
+        archived INTEGER NOT NULL DEFAULT 0, is_orchestrator INTEGER NOT NULL DEFAULT 0,
+        last_read_seq INTEGER NOT NULL DEFAULT 0, waiting_since INTEGER, created_at INTEGER NOT NULL,
+        touched_paths TEXT NOT NULL DEFAULT '[]', model TEXT, effort TEXT,
+        permission_preset TEXT NOT NULL DEFAULT 'normal', imported_from TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
+    `)
+    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
+    for (const id of ['s1', 's2', 's3']) {
+      old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES (?,?,?,?,?)`)
+        .run(id, 'p1', 'claude', '이름 ' + id, 1)
+      old.prepare(`INSERT INTO messages VALUES (?,?,?,?,?,?)`).run(id, 1, 'user', 'text', '{"text":"안녕"}', 1)
+    }
+    old.pragma('user_version = 9')
+    old.close()
+
+    const store = new Store(file)
+    expect(store.schemaVersion).toBe(10)
+    expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
+    expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
+    expect(store.loadMessages('s1').length).toBe(1)
+
+    // 그리고 이제 프로젝트 없는 세션이 들어간다
+    store.upsertSession({
+      id: 'orc', projectId: null, tool: 'claude', externalId: null, name: 'Orchestrator',
+      autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
+      permissionPreset: 'normal', importedFrom: null,
+    })
+    expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(9)
+    expect(new Store().schemaVersion).toBe(10)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -103,7 +160,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(9)
+    expect(store.schemaVersion).toBe(10)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')

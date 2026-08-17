@@ -51,7 +51,11 @@ export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
 
 export const SessionInfo = z.object({
   id: z.string(),
-  projectId: z.string(),
+  /**
+   * 소속 프로젝트. **오케스트레이터만 null이다** — 앱에 하나뿐이고 프로젝트를 가로지른다.
+   * 프로젝트에 매달면 그 프로젝트를 지울 때 함께 죽는다.
+   */
+  projectId: z.string().nullable(),
   tool: ToolName,
   externalId: z.string().nullable(),
   name: z.string(),

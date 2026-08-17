@@ -74,7 +74,7 @@ export function CommandPalette() {
           kind: 'session',
           id: s.id,
           label: s.name,
-          sub: projects[s.projectId]?.name ?? '',
+          sub: (s.projectId ? projects[s.projectId]?.name : 'Orchestrator') ?? '',
         })),
       ...Object.values(projects)
         .filter((p) => match(p.name))
