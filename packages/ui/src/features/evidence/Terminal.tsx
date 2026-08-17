@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 
 /**
  * 프로젝트 터미널 (여러 개).
@@ -58,13 +59,15 @@ export function TerminalPane({ projectId }: { projectId: string }) {
     <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-terminal">
       <div className="flex items-center gap-1.5 border-b border-edge px-3 py-1">
         <span className="text-[11px] uppercase tracking-[0.12em] text-slate">터미널</span>
+        {/* 글자를 빼고 기호만 남긴다 — 옆의 '터미널'이 이미 무엇에 대한 +인지 말해준다 */}
         <button
-          className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
+          className="ml-auto flex items-center justify-center rounded p-1 text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
           onClick={() => void add()}
           data-testid="terminal-add"
           title="터미널 추가"
+          aria-label="터미널 추가"
         >
-          + 추가
+          <PlusIcon size={16} />
         </button>
       </div>
 
@@ -223,7 +226,7 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
           title="이 터미널 닫기 (셸이 종료됩니다)"
           aria-label={`${info.title} 닫기`}
         >
-          ✕
+          <CloseIcon size={11} />
         </button>
       </div>
       <div ref={hostRef} className="min-h-0 flex-1 px-1 pb-1" data-testid={`terminal-surface-${info.terminalId}`} />

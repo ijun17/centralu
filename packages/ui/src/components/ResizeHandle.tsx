@@ -18,14 +18,20 @@ export function ResizeHandle({
   testId,
   min,
   max,
+  onDraggingChange,
 }: {
-  /** 손잡이가 붙는 모서리. 'left'면 왼쪽 모서리를 끈다(우측 패널) */
-  side: 'left' | 'right'
+  /**
+   * 손잡이가 붙는 모서리.
+   * 'left'/'right'는 폭을, 'top'은 높이를 조절한다 — 위아래로 나뉜 두 칸의 경계다.
+   */
+  side: 'left' | 'right' | 'top'
   onResize: (width: number) => void
   onReset: () => void
   testId: string
   min: number
   max: number
+  /** 끄는 중에는 애니메이션을 꺼야 한다 — 매 프레임 보간하면 손을 따라오지 못한다 */
+  onDraggingChange?: (dragging: boolean) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -37,12 +43,19 @@ export function ResizeHandle({
 
     const onMove = (e: MouseEvent) => {
       const rect = pane.getBoundingClientRect()
-      onResize(side === 'left' ? rect.right - e.clientX : e.clientX - rect.left)
+      onResize(
+        side === 'left' ? rect.right - e.clientX
+        : side === 'right' ? e.clientX - rect.left
+        : rect.bottom - e.clientY,
+      )
     }
-    const onUp = () => setDragging(false)
+    const onUp = () => {
+      setDragging(false)
+      onDraggingChange?.(false)
+    }
 
     // 끄는 동안 글자가 잡히면 커서가 튄다
-    document.body.style.cursor = 'col-resize'
+    document.body.style.cursor = side === 'top' ? 'row-resize' : 'col-resize'
     document.body.style.userSelect = 'none'
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -52,25 +65,28 @@ export function ResizeHandle({
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [dragging, onResize, side])
+  }, [dragging, onResize, side, onDraggingChange])
 
   return (
     <div
       ref={ref}
-      className={`absolute top-0 z-10 h-full w-1 cursor-col-resize transition-colors ${
-        side === 'left' ? 'left-0' : 'right-0'
+      className={`absolute z-10 transition-colors ${
+        side === 'top'
+          ? 'left-0 top-0 h-1 w-full cursor-row-resize'
+          : `top-0 h-full w-1 cursor-col-resize ${side === 'left' ? 'left-0' : 'right-0'}`
       } ${dragging ? 'bg-graphite' : 'hover:bg-graphite/60'}`}
       onMouseDown={(e) => {
         e.preventDefault()
         setDragging(true)
+        onDraggingChange?.(true)
       }}
       onDoubleClick={onReset}
       data-testid={testId}
       role="separator"
-      aria-orientation="vertical"
+      aria-orientation={side === 'top' ? 'horizontal' : 'vertical'}
       aria-valuemin={min}
       aria-valuemax={max}
-      title="끌어서 폭 조절 · 더블클릭으로 기본값"
+      title={side === 'top' ? '끌어서 높이 조절 · 더블클릭으로 기본값' : '끌어서 폭 조절 · 더블클릭으로 기본값'}
     />
   )
 }

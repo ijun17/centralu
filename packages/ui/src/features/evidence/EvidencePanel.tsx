@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { GitCommit, GitFileStatus } from '@cc/protocol'
+import { laneCount, layoutCommits } from '@cc/core'
+import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
+import { ChevronIcon } from '../../components/icons.jsx'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, type PanelTab } from '../../store/store.js'
 import { FileTree } from '../files/FileTree.jsx'
 import { TerminalPane } from './Terminal.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN } from '../../store/store.js'
+import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, TREE_DEFAULT, TREE_MAX, TREE_MIN } from '../../store/store.js'
 
 /**
  * 증거 레인 (우측).
@@ -29,30 +32,51 @@ export function EvidencePanel() {
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const width = useStore((s) => s.panelWidth)
   const setPanelWidth = useStore((s) => s.setPanelWidth)
+  const [resizing, setResizing] = useState(false)
 
   if (!projectId || !project) return null
-  // 닫혀 있어도 흔적은 남긴다 — 사라진 것과 접힌 것은 다르다
-  if (!open) return <CollapsedRail projectId={projectId} isRepo={!!project.git} />
 
+  /*
+   * 열고 닫힐 때 **폭이 미끄러진다.**
+   *
+   * 예전엔 접힌 띠와 패널을 통째로 갈아 끼워서 화면이 툭 바뀌었다. 그러면 눈이
+   * "무엇이 어디로 갔는지" 따라가지 못해, 접은 건지 사라진 건지 순간 헷갈린다.
+   * 폭이 이어지면 같은 것이 접혔다는 게 저절로 읽힌다.
+   *
+   * 끄는 중에는 전환을 끈다 — 매 프레임 보간하면 손을 따라오지 못하고 끈적해진다.
+   */
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col overflow-hidden border-l border-edge bg-pit"
-      style={{ width }}
-      data-testid="evidence-panel"
+      className={`relative flex h-full shrink-0 flex-col overflow-hidden border-l border-edge bg-pit ${
+        resizing ? '' : 'transition-[width] duration-200 ease-out motion-reduce:transition-none'
+      }`}
+      style={{ width: open ? width : RAIL_W }}
+      data-testid={open ? 'evidence-panel' : 'evidence-rail-shell'}
     >
-      <ResizeHandle
-        side="left"
-        min={PANEL_MIN}
-        max={PANEL_MAX}
-        onResize={setPanelWidth}
-        onReset={() => setPanelWidth(PANEL_DEFAULT)}
-        testId="evidence-resize"
-      />
-      <PanelHeader projectName={project.name} branch={project.git?.branch ?? null} isRepo={!!project.git} />
-      <PanelBody projectId={projectId} project={project} />
+      {open ? (
+        <>
+          <ResizeHandle
+            side="left"
+            min={PANEL_MIN}
+            max={PANEL_MAX}
+            onResize={setPanelWidth}
+            onReset={() => setPanelWidth(PANEL_DEFAULT)}
+            onDraggingChange={setResizing}
+            testId="evidence-resize"
+          />
+          <PanelHeader projectName={project.name} branch={project.git?.branch ?? null} isRepo={!!project.git} />
+          <PanelBody projectId={projectId} project={project} />
+        </>
+      ) : (
+        // 닫혀 있어도 흔적은 남긴다 — 사라진 것과 접힌 것은 다르다
+        <CollapsedRail projectId={projectId} isRepo={!!project.git} />
+      )}
     </aside>
   )
 }
+
+/** 접힌 띠의 폭. CollapsedRail이 그리는 폭과 같아야 전환이 이어진다 */
+const RAIL_W = 32
 
 function PanelHeader({
   projectName,
@@ -90,7 +114,8 @@ function PanelHeader({
           data-testid="evidence-close"
           title="증거 패널 접기 (⌘B)"
         >
-          ›
+          {/* 접기도 '펼침의 반대'라 같은 표시를 쓴다 — 뜻이 같으면 모양도 같아야 한다 */}
+          <ChevronIcon open={false} />
         </button>
       </DragRegion>
 
@@ -171,8 +196,9 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
   }, [platform, projectId, isRepo, touched])
 
   return (
-    <aside
-      className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-l border-edge bg-pit py-2"
+    /* 껍데기(폭·테두리·배경)는 바깥 aside가 갖는다 — 여기서 또 그리면 전환 중에 선이 겹친다 */
+    <div
+      className="flex h-full w-8 shrink-0 flex-col items-center gap-2 py-2"
       data-testid="evidence-rail"
     >
       <button
@@ -201,7 +227,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
       >
         증거
       </span>
-    </aside>
+    </div>
   )
 }
 
@@ -245,7 +271,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   }
 
   return (
-    <section className="flex min-h-0 flex-[3] flex-col border-b border-edge" data-testid="evidence-git">
+    <section className="flex min-h-0 flex-1 flex-col border-b border-edge" data-testid="evidence-git">
       <div className="flex items-center gap-1.5 px-3 py-1.5">
         <span className="text-[11px] uppercase tracking-[0.12em] text-slate">변경</span>
         {files && files.length > 0 && (
@@ -277,26 +303,41 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
         </p>
       ) : (
         <>
-          <ul className="min-h-0 flex-1 overflow-y-auto">
-            {[...staged, ...unstaged].map((f) => (
-              <ChangeRow key={`${f.path}-${f.staged ? 's' : 'u'}`} file={f} onOpen={() => openGit(f.path)} />
-            ))}
-          </ul>
+          {/*
+            스테이지된 것과 아닌 것을 **나눠서** 보여준다.
+            커밋에 무엇이 실릴지가 커밋 직전에 알아야 할 유일한 사실인데,
+            한 목록에 섞어두면 그걸 줄 끝의 작은 꼬리표로 읽어야 했다.
+            위가 실릴 것, 아래가 안 실릴 것 — 경계가 곧 답이다.
+          */}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ChangeGroup
+              title="스테이지됨"
+              files={staged}
+              onOpen={openGit}
+              busy={busy}
+              action={{
+                id: 'unstage',
+                one: '내리기',
+                all: '모두 내리기',
+                run: (paths) => run(() => platform.git.stage(projectId, paths, true)),
+              }}
+            />
+            <ChangeGroup
+              title="변경됨"
+              files={unstaged}
+              onOpen={openGit}
+              busy={busy}
+              action={{
+                id: 'stage',
+                one: '올리기',
+                all: '모두 올리기',
+                run: (paths) => run(() => platform.git.stage(projectId, paths)),
+              }}
+            />
+          </div>
 
           {/* 커밋은 좁은 곳에서도 되어야 한다 — 확인하고 바로 마무리하는 흐름이 끊기면 안 된다 */}
           <div className="border-t border-edge px-3 py-2">
-            {unstaged.length > 0 && (
-              <button
-                className="mb-1.5 w-full rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
-                disabled={busy}
-                data-testid="evidence-stage-all"
-                onClick={() =>
-                  void run(() => platform.git.stage(projectId, unstaged.map((f) => f.path)))
-                }
-              >
-                {unstaged.length}개 올리기
-              </button>
-            )}
             <input
               className="w-full rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
               placeholder="커밋 메시지"
@@ -340,11 +381,71 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   )
 }
 
-function ChangeRow({ file, onOpen }: { file: GitFileStatus; onOpen: () => void }) {
+/** 한 무리(스테이지됨 / 변경됨). 비어 있으면 머리글도 내보내지 않는다 */
+function ChangeGroup({
+  title,
+  files,
+  onOpen,
+  busy,
+  action,
+}: {
+  title: string
+  files: GitFileStatus[]
+  onOpen: (path: string) => void
+  busy: boolean
+  action: { id: 'stage' | 'unstage'; one: string; all: string; run: (paths: string[]) => Promise<void> }
+}) {
+  if (files.length === 0) return null
   return (
-    <li>
+    <section data-testid={`evidence-group-${title}`}>
+      <header className="sticky top-0 flex items-center gap-1.5 bg-pit px-3 py-1">
+        <h4 className="text-[10px] uppercase tracking-[0.12em] text-slate">{title}</h4>
+        <span className="readout text-[10px] text-slate">{files.length}</span>
+        <button
+          className="ml-auto text-[10px] text-slate transition-colors hover:text-chalk disabled:opacity-40"
+          disabled={busy}
+          onClick={() => void action.run(files.map((f) => f.path))}
+          data-testid={`evidence-${action.id}-all`}
+        >
+          {action.all}
+        </button>
+      </header>
+      <ul>
+        {files.map((f) => (
+          <ChangeRow
+            key={f.path}
+            file={f}
+            onOpen={() => onOpen(f.path)}
+            busy={busy}
+            actionId={action.id}
+            actionLabel={action.one}
+            onAction={() => void action.run([f.path])}
+          />
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function ChangeRow({
+  file,
+  onOpen,
+  busy,
+  actionId,
+  actionLabel,
+  onAction,
+}: {
+  file: GitFileStatus
+  onOpen: () => void
+  busy: boolean
+  actionId: 'stage' | 'unstage'
+  actionLabel: string
+  onAction: () => void
+}) {
+  return (
+    <li className="group/file relative">
       <button
-        className="flex w-full items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-graphite/25"
+        className="flex w-full items-center gap-2 px-3 py-1 pr-12 text-left transition-colors hover:bg-graphite/25"
         onClick={onOpen}
         data-testid={`evidence-file-${file.path}`}
         title={`${file.path} — diff 보기`}
@@ -354,7 +455,19 @@ function ChangeRow({ file, onOpen }: { file: GitFileStatus; onOpen: () => void }
         <span className="truncate text-[12px] text-ash" dir="rtl">
           {file.path}
         </span>
-        {file.staged && <span className="readout ml-auto shrink-0 text-[9px] text-slate">올림</span>}
+      </button>
+      {/*
+        파일 하나만 올리고 내리는 길. 이게 없으면 "이것만 빼고 커밋"을 하려고
+        터미널로 나가야 했다 — 확인하던 자리에서 그대로 끝낼 수 있어야 한다.
+      */}
+      <button
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-slate opacity-0 transition-opacity hover:text-chalk focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
+        disabled={busy}
+        onClick={onAction}
+        data-testid={`evidence-${actionId}-${file.path}`}
+        title={`${file.path} ${actionLabel}`}
+      >
+        {actionLabel}
       </button>
     </li>
   )
@@ -362,13 +475,17 @@ function ChangeRow({ file, onOpen }: { file: GitFileStatus; onOpen: () => void }
 
 /**
  * 깃 트리 — 어떻게 여기까지 왔나.
- * 그래프 선은 그리지 않는다: 340px에서 선을 그리면 제목이 설 자리가 없고,
- * 실제로 알고 싶은 건 '무엇이 언제 들어왔나'다. 병합만 표시한다.
+ *
+ * 선을 그린다. 예전엔 좁다는 이유로 점만 찍었는데, 그러면 갈라짐과 합쳐짐이 사라져
+ * 그냥 목록이 된다 — 트리라고 부를 이유가 없어진다. 레인 폭을 9px로 좁게 잡으면
+ * 실제 저장소에서 제목 자리를 거의 뺏지 않는다.
  */
 function GitTree({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const openCommit = useStore((s) => s.openCommit)
   const touched = useTouchedCount(projectId)
+  const height = useStore((s) => s.treeHeight)
+  const setTreeHeight = useStore((s) => s.setTreeHeight)
   const [commits, setCommits] = useState<GitCommit[] | null>(null)
 
   useEffect(() => {
@@ -378,8 +495,25 @@ function GitTree({ projectId }: { projectId: string }) {
       .catch(() => setCommits([]))
   }, [platform, projectId, touched])
 
+  const graph = useMemo(() => {
+    const rows = layoutCommits(commits ?? [])
+    return { rows, lanes: laneCount(rows) }
+  }, [commits])
+
   return (
-    <section className="flex min-h-0 flex-[2] flex-col" data-testid="evidence-tree">
+    <section
+      className="relative flex shrink-0 flex-col"
+      style={{ height }}
+      data-testid="evidence-tree"
+    >
+      <ResizeHandle
+        side="top"
+        min={TREE_MIN}
+        max={TREE_MAX}
+        onResize={setTreeHeight}
+        onReset={() => setTreeHeight(TREE_DEFAULT)}
+        testId="evidence-tree-resize"
+      />
       <div className="px-3 py-1.5">
         <span className="text-[11px] uppercase tracking-[0.12em] text-slate">기록</span>
       </div>
@@ -394,15 +528,14 @@ function GitTree({ projectId }: { projectId: string }) {
           {commits.map((c, i) => (
             <li key={c.sha}>
               <button
-                className="flex w-full items-start gap-2 px-3 py-1 text-left transition-colors hover:bg-graphite/25"
+                /* 높이를 고정한다 — 행마다 높이가 다르면 선이 경계에서 어긋나 끊겨 보인다 */
+                className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-graphite/25"
+                style={{ height: ROW_H }}
                 onClick={() => openCommit(c.sha)}
                 data-testid={`evidence-commit-${c.shortSha}`}
                 title={`${c.subject} — ${c.author}`}
               >
-                {/* 최신 하나만 채운 점. 나머지는 지나간 것이다 */}
-                <span className="mt-1 shrink-0 text-[8px] text-slate" aria-hidden>
-                  {i === 0 ? '●' : '○'}
-                </span>
+                <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12px] text-ash">{c.subject}</span>
                   <span className="readout block truncate text-[10px] text-slate">

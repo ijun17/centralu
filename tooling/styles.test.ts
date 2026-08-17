@@ -22,6 +22,11 @@ const REQUIRED = [
   { needle: 'bg-void', why: 'packages/ui 컴포넌트에서 쓰는 유틸리티' },
   { needle: 'text-ash', why: '텍스트 위계' },
   { needle: 'border-edge', why: '경계선' },
+  // 아래 둘은 "예외로 허용한 색"이 실제로 산출물까지 갔는지 본다.
+  // 토큰만 선언하고 유틸리티가 생성되지 않으면 diff는 배경 없이 그려지는데,
+  // 동작 테스트로는 절대 안 잡히는 유형이다 (E2E는 클래스 이름을 보지 않는다).
+  { needle: 'bg-add-bg', why: 'diff 추가 배경 (유채색 예외)' },
+  { needle: 'cc-orbit', why: '작업 중 회전 테두리 (@property + @keyframes)' },
 ]
 
 let css = ''
@@ -58,11 +63,35 @@ describe('빌드된 CSS에 스타일이 실제로 들어 있다', () => {
     expect(css.length).toBeGreaterThan(8_000)
   })
 
-  it('팔레트가 무채색이다 (R=G=B) — 색은 상태 전용이라는 규칙의 기계 검증', () => {
+  /**
+   * 유채색은 **여기 적힌 것만** 허용한다.
+   *
+   * 정책: 색을 다 빼고 시작했고, 앞으로 **하나씩 근거를 달아 더한다**.
+   * 기준은 "예뻐지는가"가 아니라 **밝기 체계를 건드리는가**다 —
+   * "화면에서 가장 밝은 것 = 나를 기다리는 것"이 언제나 참이어야 하므로,
+   * 상태·긴급도를 말하는 자리에는 색이 들어올 수 없다. 아래 예외들은 그 체계 **밖**에 있다:
+   *
+   * 이 검사는 **CSS만** 본다. 별도 파일로 들어오는 색(예: 파일 타입 아이콘 SVG —
+   * vscode-icons, MIT)은 여기 걸리지 않는다. 그건 분류를 말하는 그림이라
+   * 밝기 체계와 겹치지 않아서 의도한 예외지만, 검사 범위 밖이라는 사실 자체는 알고 있어야 한다.
+   *
+   *   - diff 추가/삭제(add/del): 승인 판단은 훑어보며 하는 일인데, 초록·빨강은 학습된
+   *     관습을 넘어 거의 반사에 가깝다. 대신 diff 본문 밖으로 나가지 않는다.
+   *   - 은하수 궤도(cc-orbit): '작업 중'을 회전으로 말하는 테두리. 거의 흰빛에 아주 옅은
+   *     푸른·보랏빛만 섞어서, 순백(beacon)보다 눈에 덜 띄도록 눌러 둔다.
+   *
+   * 이 목록에 없는 유채색이 CSS에 들어오면 실패한다 — 예외를 늘리려면 여기 근거를 적어라.
+   */
+  it('허용된 예외 말고는 팔레트가 무채색이다 (R=G=B)', () => {
+    const ALLOWED = new Set([
+      '7ee787', '10251a', // diff 추가
+      'ffa198', '2b1517', // diff 삭제
+      '8ea8d8', 'b09ad8', // 은하수 궤도 (e9e9e9는 chalk라 무채색)
+    ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {
       const [r, g, b] = [h.slice(0, 2), h.slice(2, 4), h.slice(4, 6)]
-      return !(r === g && g === b)
+      return !(r === g && g === b) && !ALLOWED.has(h)
     })
     expect([...new Set(chromatic)]).toEqual([])
   })
@@ -135,6 +164,32 @@ describe('Tauri 권한', () => {
   it('아무것도 켜지 않는 default 묶음에 기대지 않는다', () => {
     // 이름이 default라고 해서 필요한 게 들어 있지는 않다 (실측으로 두 번 당했다)
     expect(capability.permissions).not.toContain('global-shortcut:default')
+  })
+
+  /**
+   * 상단 바 높이와 신호등 위치는 **같이 움직여야 한다.**
+   *
+   * 처음엔 바를 타이틀바 높이(28px)로 줄여 맞췄는데 너무 얇아졌다. 이제는 반대로
+   * 바 높이를 정하고 `trafficLightPosition`으로 버튼을 거기에 맞춘다 —
+   * 화면이 요구하는 높이를 창 장식이 정하게 두지 않는다.
+   *
+   * 한쪽만 고치면 아무 오류 없이 그냥 어긋나 보인다(실제로 그렇게 어긋났다).
+   * E2E는 브라우저라 신호등을 볼 수 없으므로 여기서 관계를 검사한다.
+   */
+  it('신호등 위치가 상단 바 높이의 가운데다', () => {
+    const conf = JSON.parse(
+      readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
+    ) as { app: { windows: { trafficLightPosition?: { x: number; y: number } }[] } }
+    const pos = conf.app.windows[0]!.trafficLightPosition
+    expect(pos, 'trafficLightPosition이 없으면 macOS 기본값으로 돌아가 어긋난다').toBeTruthy()
+
+    const header = readFileSync(join(ROOT, 'packages/ui/src/app/App.tsx'), 'utf8')
+    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-edge bg-pit/.exec(header)
+    expect(m, '상단 바의 h-* 클래스를 찾지 못했다').toBeTruthy()
+
+    const barPx = Number(m![1]) * 4 // tailwind h-9 = 36px
+    const BUTTON = 12 // macOS 신호등 지름
+    expect(pos!.y).toBe((barPx - BUTTON) / 2)
   })
 
   it('웹뷰가 OS 드롭을 가로채지 않는다 (파일 첨부가 죽는다)', () => {

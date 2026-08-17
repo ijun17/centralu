@@ -256,8 +256,12 @@ function FileGroup({
 }
 
 /**
- * diff 뷰 — **무채색 결정 적용** (m2-plan 결정 1).
- * 색 대신 배경 밝기 2단과 `+`/`-` 기호로 추가·삭제를 구분한다.
+ * diff 뷰.
+ *
+ * 여기만 유채색을 쓴다 (m2-plan 결정 1의 예외 — styles/index.css의 --color-add/del 참고).
+ * 추가는 초록, 삭제는 빨강. 무채색으로도 `+`/`-`와 밝기로 구분은 되지만,
+ * 승인 판단은 훑어보며 하는 일이라 한 줄씩 읽게 만들면 그 흐름이 끊긴다.
+ * 기호는 그대로 둔다 — 색을 못 보는 사람에게 색만 남기면 정보가 사라진다.
  */
 function DiffView({
   path,
@@ -308,13 +312,13 @@ function DiffView({
               key={i}
               data-diff={kind}
               className={
-                kind === 'add' ? 'bg-graphite/50 text-chalk'
-                : kind === 'del' ? 'bg-panel text-slate line-through decoration-slate/40'
+                kind === 'add' ? 'bg-add-bg text-add'
+                : kind === 'del' ? 'bg-del-bg text-del'
                 : kind === 'hunk' ? 'bg-panel/60 text-ash'
                 : 'text-ash'
               }
             >
-              <span className="inline-block w-4 select-none text-center text-slate">
+              <span className="inline-block w-4 select-none text-center opacity-70">
                 {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
               </span>
               {line.replace(/^[+-]/, '')}

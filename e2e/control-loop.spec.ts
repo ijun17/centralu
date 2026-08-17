@@ -1850,6 +1850,71 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
 })
 
 /**
+ * 깃 탭 — VSCode처럼 스테이지된 것과 아닌 것을 나눠 보여준다.
+ * 커밋 직전에 알아야 할 유일한 사실이 "무엇이 실리나"인데,
+ * 한 목록에 섞여 있으면 그걸 줄 끝의 작은 꼬리표로 읽어야 했다.
+ */
+test('깃 패널이 스테이지됨과 변경됨을 나눠 보여주고 파일 하나씩 올릴 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [
+      { path: 'src/a.ts', staged: true, status: 'M' },
+      { path: 'src/b.ts', staged: false, status: 'M' },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await expect(page.getByTestId('evidence-group-스테이지됨')).toContainText('src/a.ts')
+  await expect(page.getByTestId('evidence-group-변경됨')).toContainText('src/b.ts')
+
+  // 파일 하나만 올린다 — "이것만 빼고 커밋"을 하려고 터미널로 나가지 않아도 된다
+  await page.getByTestId('evidence-stage-src/b.ts').click({ force: true })
+  await expect(page.getByTestId('evidence-group-변경됨')).toBeHidden()
+  await expect(page.getByTestId('evidence-group-스테이지됨')).toContainText('src/b.ts')
+})
+
+/** 점만 있으면 목록이지 트리가 아니다 — 갈라짐과 합쳐짐이 선으로 보여야 한다 */
+test('깃 기록이 커밋을 선으로 잇는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.commits = [
+      { sha: 'm', shortSha: 'mmmmmmm', subject: '병합', author: 'a', when: 0, parents: ['x', 'y'] },
+      { sha: 'x', shortSha: 'xxxxxxx', subject: '본류', author: 'a', when: 0, parents: ['z'] },
+      { sha: 'y', shortSha: 'yyyyyyy', subject: '가지', author: 'a', when: 0, parents: ['z'] },
+      { sha: 'z', shortSha: 'zzzzzzz', subject: '뿌리', author: 'a', when: 0, parents: [] },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  // 병합 커밋에서 두 갈래가 뻗는다 (직선 하나 + 갈라지는 곡선 하나)
+  const merge = page.getByTestId('commit-graph-mmmmmmm')
+  await expect(merge).toBeVisible()
+  expect(await merge.locator('path').count()).toBeGreaterThan(0)
+
+  // 가지가 본류로 합쳐지므로 뿌리에는 선이 하나만 내려온다
+  await expect(page.getByTestId('commit-graph-zzzzzzz')).toBeVisible()
+})
+
+/** 커밋 목록과 기록 중 무엇을 더 볼지는 그때그때 다르다 */
+test('깃 패널의 변경과 기록 사이 높이를 조절할 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  const before = (await page.getByTestId('evidence-tree').boundingBox())!.height
+  const handle = page.getByTestId('evidence-tree-resize')
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2, box.y - 80)
+  await page.mouse.up()
+
+  const after = (await page.getByTestId('evidence-tree').boundingBox())!.height
+  expect(after).toBeGreaterThan(before + 40)
+})
+
+/**
  * 세션 표식 하나가 도구와 상태를 같이 말한다.
  * 점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
  */
