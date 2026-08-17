@@ -21,7 +21,11 @@
         "hiddenTitle": true,
         "backgroundColor": "#090909",
         "theme": "Dark",
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "trafficLightPosition": {
+          "x": 19,
+          "y": 12
+        }
       }
     ],
     "security": {

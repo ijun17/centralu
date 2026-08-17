@@ -2019,6 +2019,29 @@ test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', 
 })
 
 /**
+ * 상단 바는 macOS 신호등 버튼과 같은 축에 있어야 한다.
+ *
+ * 버튼은 타이틀바 28px 띠의 세로 가운데에 고정되고 우리가 옮길 수 없다 —
+ * 그래서 바 높이가 28px여야 우리 글자의 가운데도 같은 자리에 온다.
+ * 브라우저 E2E는 신호등을 볼 수 없으므로 **높이 자체**를 못 박아 둔다.
+ * 안쪽에 패딩을 더하다 보면 소리 없이 어긋나는데, 그때 여기서 걸린다.
+ */
+test('상단 바 높이가 macOS 타이틀바(28px)와 같다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const bar = page.getByTestId('app-header')
+  const box = (await bar.boundingBox())!
+  // 아래 테두리 1px까지 29px
+  expect(box.height).toBeLessThanOrEqual(29)
+  expect(box.y).toBe(0)
+
+  // 글자도 그 안에서 가운데여야 한다 (위아래 여백 차이가 1px 이내)
+  const text = (await page.getByTestId('app-title').boundingBox())!
+  const top = text.y - box.y
+  const bottom = box.y + box.height - (text.y + text.height)
+  expect(Math.abs(top - bottom)).toBeLessThanOrEqual(1.5)
+})
+
+/**
  * 빈 입력창이 커진 채로 서 있던 문제 (도그푸딩).
  * 높이를 타이핑 이벤트에서만 계산하면, 보낸 뒤 값만 비고 높이는 남는다.
  */

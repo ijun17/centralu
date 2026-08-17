@@ -102,15 +102,35 @@ function TopBar() {
 
   // macOS 신호등(닫기·최소화·전체화면)이 왼쪽 위를 차지하므로 pl로 그만큼 비운다.
   // 타이틀바를 숨겼기 때문에 이 헤더가 유일한 드래그 손잡이다 —
-  // data-tauri-drag-region이 없으면 창을 옮길 수 없다 (도그푸딩에서 지적됨).
+  /*
+   * 상단 바.
+   *
+   * data-tauri-drag-region이 없으면 창을 옮길 수 없다 (도그푸딩에서 지적됨).
+   *
+   * **신호등과 같은 축에 선다.** 처음엔 바를 타이틀바 높이(28px)로 줄여서 맞췄는데,
+   * 그러니 바가 너무 얇아졌다. 신호등 위치는 tauri.conf.json의
+   * `trafficLightPosition`으로 우리가 정할 수 있으므로, 이제 **바 높이를 먼저 정하고
+   * 버튼을 거기에 맞춘다** — 화면이 요구하는 높이를 창 장식이 정하게 두지 않는다.
+   *
+   *   바 높이 36px, 버튼 지름 12px → y = (36 - 12) / 2 = 12
+   *
+   * 둘은 같이 움직여야 한다. 바 높이를 바꾸면 tauri.conf.json의 y도 함께 고쳐라
+   * (tooling/styles.test.ts가 그 관계를 검사한다).
+   */
   return (
-    <DragRegion className="flex items-center gap-4 border-b border-edge bg-pit py-2 pr-4 pl-[86px]">
-      <span className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk">
+    <DragRegion
+      className="flex h-9 shrink-0 items-center gap-4 border-b border-edge bg-pit pr-4 pl-[86px]"
+      testId="app-header"
+    >
+      <span
+        className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk"
+        data-testid="app-title"
+      >
         CONTROL CENTER
       </span>
 
       <button
-        className="group flex items-center gap-2.5 rounded px-2 py-1 transition-colors hover:bg-graphite/50"
+        className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-graphite/50"
         onClick={() => toggleInbox()}
         data-testid="counter"
         title="기다리는 항목 (⌘I)"
