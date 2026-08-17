@@ -68,10 +68,16 @@ export function Tooltip({
   children,
   content,
   testId,
+  placement = 'bottom',
+  align = 'left',
 }: {
   children: ReactNode
   content: ReactNode
   testId?: string
+  /** 화면 아래쪽 요소는 위로 띄운다 — 아래로 띄우면 창 밖으로 나간다 */
+  placement?: 'bottom' | 'top'
+  /** 오른쪽 끝 요소는 오른쪽 정렬 — 왼쪽 정렬이면 툴팁이 창 밖으로 밀린다 */
+  align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -87,7 +93,9 @@ export function Tooltip({
         <span
           role="tooltip"
           data-testid={testId}
-          className="pointer-events-none absolute left-0 top-full z-30 mt-1 w-max max-w-64 rounded border border-edge bg-panel px-2 py-1.5 text-[11px] leading-relaxed text-ash shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+          className={`pointer-events-none absolute z-30 w-max max-w-64 rounded border border-edge bg-panel px-2 py-1.5 text-[11px] leading-relaxed text-ash shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)] ${
+            placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
+          } ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
           {content}
         </span>

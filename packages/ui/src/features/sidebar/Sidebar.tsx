@@ -6,6 +6,7 @@ import { useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
 
@@ -89,15 +90,16 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           크기를 키우는 것만으로는 안 된다 — 안 보이는 것은 아무리 커도 안 보인다.
           평소엔 slate로 눌러 두고 호버에서 밝아지게 해서, 세션 목록을 읽는 데는 방해하지 않는다.
         */}
-        <button
-          className="-my-1 ml-auto flex shrink-0 items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
-          onClick={() => setNewSessionOpen(true)}
-          title="New session"
-          aria-label={`New session in ${project.name}`}
-          data-testid={`new-session-${project.name}`}
-        >
-          <PlusIcon size={15} />
-        </button>
+        <span className="-my-1 ml-auto shrink-0">
+          <IconButton
+            label={`New session in ${project.name}`}
+            onClick={() => setNewSessionOpen(true)}
+            testId={`new-session-${project.name}`}
+            align="right"
+          >
+            <PlusIcon size={15} />
+          </IconButton>
+        </span>
       </header>
 
       <ul className="mt-1.5">
@@ -142,18 +144,14 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                   삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
                   누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.
                 */}
-                <button
-                  className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
-                  data-testid={`delete-session-${s.id}`}
-                  title="Delete permanently (history goes too)"
-                  aria-label={`Delete ${s.name}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setConfirming(s.id)
-                  }}
+                <IconButton
+                  label="Delete permanently (history goes too)"
+                  testId={`delete-session-${s.id}`}
+                  align="right"
+                  onClick={() => setConfirming(s.id)}
                 >
                   <CloseIcon size={13} />
-                </button>
+                </IconButton>
               </span>
             </li>
           )

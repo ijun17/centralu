@@ -62,3 +62,23 @@ export function SendIcon({ size = 15 }: { size?: number }) {
     </svg>
   )
 }
+
+/**
+ * 다시 시작 — 원을 그리는 화살표.
+ *
+ * "Restart"라는 글자를 아이콘으로 바꾸면 뜻이 약해지므로, 거의 표준에 가까운
+ * 기호를 쓴다. 화살촉이 있어야 '되돌린다'가 아니라 '다시 돈다'로 읽힌다.
+ */
+export function RestartIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M13.5 8a5.5 5.5 0 11-1.61-3.89"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path d="M13.5 2v3.2h-3.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}

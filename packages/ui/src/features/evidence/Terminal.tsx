@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { TerminalInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
 
 /**
  * 프로젝트 터미널 (여러 개).
@@ -60,15 +61,11 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       <div className="flex items-center gap-1.5 border-b border-edge px-3 py-1">
         <span className="text-[11px] uppercase tracking-[0.12em] text-slate">Terminal</span>
         {/* 글자를 빼고 기호만 남긴다 — 옆의 '터미널'이 이미 무엇에 대한 +인지 말해준다 */}
-        <button
-          className="ml-auto flex items-center justify-center rounded p-1 text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
-          onClick={() => void add()}
-          data-testid="terminal-add"
-          title="New terminal"
-          aria-label="New terminal"
-        >
-          <PlusIcon size={16} />
-        </button>
+        <span className="ml-auto">
+          <IconButton label="New terminal" onClick={() => void add()} testId="terminal-add" align="right">
+            <PlusIcon size={16} />
+          </IconButton>
+        </span>
       </div>
 
       {error && (
@@ -219,15 +216,16 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
             Restart
           </button>
         )}
-        <button
-          className="ml-auto rounded px-1 text-[10px] text-slate transition-colors hover:text-chalk"
-          onClick={onClose}
-          data-testid={`terminal-close-${info.terminalId}`}
-          title="Close this terminal (the shell exits)"
-          aria-label={`Close ${info.title}`}
-        >
-          <CloseIcon size={11} />
-        </button>
+        <span className="ml-auto">
+          <IconButton
+            label="Close terminal (the shell exits)"
+            onClick={onClose}
+            testId={`terminal-close-${info.terminalId}`}
+            align="right"
+          >
+            <CloseIcon size={11} />
+          </IconButton>
+        </span>
       </div>
       <div ref={hostRef} className="min-h-0 flex-1 px-1 pb-1" data-testid={`terminal-surface-${info.terminalId}`} />
     </div>

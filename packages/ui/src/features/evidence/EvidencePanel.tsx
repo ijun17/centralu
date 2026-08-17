@@ -3,6 +3,7 @@ import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
 import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, type PanelTab } from '../../store/store.js'
 import { FileTree } from '../files/FileTree.jsx'
@@ -108,15 +109,17 @@ function PanelHeader({
             {branch}
           </button>
         )}
-        <button
-          className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+        <span className="ml-auto shrink-0">
+        <IconButton
+          label="Collapse panel (⌘B)"
           onClick={() => togglePanel(false)}
-          data-testid="evidence-close"
-          title="Collapse evidence panel (⌘B)"
+          testId="evidence-close"
+          align="right"
         >
           {/* 접기도 '펼침의 반대'라 같은 표시를 쓴다 — 뜻이 같으면 모양도 같아야 한다 */}
           <ChevronIcon open={false} />
-        </button>
+        </IconButton>
+        </span>
       </DragRegion>
 
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1" data-testid="evidence-tabs">

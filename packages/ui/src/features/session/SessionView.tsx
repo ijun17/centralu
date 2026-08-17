@@ -6,7 +6,8 @@ import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/cor
 import { useStore, type ChatItem } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
-import { ChevronIcon, CloseIcon, PlusIcon, SendIcon } from '../../components/icons.jsx'
+import { ChevronIcon, CloseIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
@@ -162,14 +163,14 @@ export function SessionView() {
         */}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
-          <button
-            className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
+          <IconButton
+            label="Restart agent (chat history is kept)"
             onClick={() => void restart(session.id)}
-            data-testid="restart-session"
-            title="Restarts only the agent (chat history is kept)"
+            testId="restart-session"
+            align="right"
           >
-            Restart
-          </button>
+            <RestartIcon />
+          </IconButton>
         </span>
       </DragRegion>
 
@@ -326,15 +327,17 @@ export function SessionView() {
               onChange={(e) => void takeFiles(e.target.files)}
             />
           </label>
-          <button
-            className="flex shrink-0 items-center justify-center rounded p-1.5 text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
+          <IconButton
+            type="submit"
+            label="Send (Enter)"
             disabled={!text.trim() && attachments.length === 0}
-            data-testid="send"
-            title="Send (Enter)"
-            aria-label="Send"
+            testId="send"
+            placement="top"
+            align="right"
+            className="shrink-0 text-ash"
           >
             <SendIcon />
-          </button>
+          </IconButton>
         </div>
         {/*
           모델·강도·권한은 **보내기 직전에** 정하는 것들이라 입력창 아래에 둔다.

@@ -2212,3 +2212,22 @@ test('바닥에 있으면 길어지는 응답을 따라 내려간다', async ({ 
     })
     .toBeLessThan(40)
 })
+
+/**
+ * 아이콘만 있는 버튼은 **무슨 버튼인지 물어볼 방법**이 있어야 한다.
+ * 하나씩 만들면 어떤 건 툴팁이 있고 어떤 건 없는 상태가 된다 — 실제로 그랬다.
+ */
+test('아이콘 버튼은 호버하면 설명이 뜬다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await page.getByTestId('send').hover()
+  await expect(page.getByRole('tooltip')).toContainText('Send')
+
+  await page.getByTestId('restart-session').hover()
+  await expect(page.getByRole('tooltip')).toContainText('Restart')
+
+  // 마우스뿐 아니라 포커스에도 떠야 한다 — 키보드로만 도는 사람에게도 같은 정보가 필요하다
+  await page.getByTestId('restart-session').focus()
+  await expect(page.getByRole('tooltip')).toBeVisible()
+})

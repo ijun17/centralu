@@ -5,6 +5,7 @@ import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
 
 /**
  * 사용량 (FR-9).
@@ -201,14 +202,11 @@ export function UsageModal() {
         <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
           <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
           <span className="readout text-[11px] text-slate">{tool === 'codex' ? 'Codex' : 'Claude Code'}</span>
-          <button
-            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-slate hover:text-chalk"
-            onClick={() => toggle(false)}
-            data-testid="usage-close"
-            aria-label="Close"
-          >
-            <CloseIcon size={11} />
-          </button>
+          <span className="ml-auto">
+            <IconButton label="Close" onClick={() => toggle(false)} testId="usage-close" align="right">
+              <CloseIcon size={11} />
+            </IconButton>
+          </span>
         </header>
         <UsagePanel tool={tool} />
       </div>
