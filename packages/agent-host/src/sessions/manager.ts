@@ -239,7 +239,16 @@ export class SessionManager {
     return null
   }
 
-  async createSession(params: CreateSessionParams): Promise<SessionInfo> {
+  /**
+   * 세션을 만든다.
+   *
+   * projectId가 `string | null`인 이유: 오케스트레이터는 프로젝트에 속하지 않는다.
+   * RPC 계약(CreateSessionParams)은 여전히 프로젝트를 요구하므로 밖에서는 null을 못 보낸다 —
+   * 프로젝트 없는 세션을 만들 수 있는 곳은 아래 `orchestrator()` 하나뿐이다.
+   */
+  async createSession(
+    params: Omit<CreateSessionParams, 'projectId'> & { projectId: string | null },
+  ): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
     if (!adapter) throw Object.assign(new Error(`Unknown tool: ${params.tool}`), { code: 'tool_not_installed' })
 
@@ -966,6 +975,35 @@ export class SessionManager {
       this.running.delete(sessionId)
     }
     return this.resumeSession(sessionId)
+  }
+
+  /**
+   * 앱에 하나뿐인 오케스트레이터. 없으면 그 자리에서 만든다.
+   *
+   * **불러야 생긴다.** 앱을 켤 때 미리 만들면 쓰지도 않는 세션이 도구 프로세스를
+   * 하나 물고 있게 된다 — 관제탑을 켜는 값으로는 비싸다.
+   *
+   * 프로세스가 죽어 있어도 그대로 돌려준다. 살리는 건 말을 걸 때의 일이고(FR-10),
+   * 여기서 되살리면 사이드바를 그리는 것만으로 도구가 뜬다.
+   */
+  async orchestrator(): Promise<SessionInfo> {
+    const known = this.store.orchestratorId()
+    if (known) {
+      const m = this.meta.get(known)
+      if (m) return m
+      // id는 남았는데 세션이 사라진 경우 — 표식만 지우고 새로 만든다
+    }
+
+    const info = await this.createSession({
+      projectId: null,
+      cwd: orchestratorHome(),
+      tool: 'claude',
+      permissionPreset: 'normal',
+    })
+    this.store.markOrchestrator(info.id)
+    // 자동 이름(FR-18)이 첫 프롬프트로 덮어쓰지 않게 사람이 정한 이름으로 둔다
+    this.rename(info.id, 'Orchestrator')
+    return this.meta.get(info.id)!
   }
 
   rename(sessionId: string, name: string): void {

@@ -57,6 +57,11 @@ export interface AgentPort {
   interrupt(sessionId: string): Promise<void>
   /** 사이드바 순서 (사람이 끌어서 정한다). 전체 순서를 통째로 보낸다 */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
+  /**
+   * 앱에 하나뿐인 오케스트레이터. **부르면 없을 때 만든다.**
+   * 프로젝트에 속하지 않으므로 projectId는 null이다.
+   */
+  orchestrator(): Promise<SessionInfo>
   /** 컨트롤 센터 배치 — 추가·제거·순서가 전부 이 한 가지로 온다 */
   controlCenter(): Promise<string[]>
   setControlCenter(sessionIds: string[]): Promise<string[]>

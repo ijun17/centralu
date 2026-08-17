@@ -323,3 +323,30 @@ describe('마이그레이션 v9 — 컨트롤 센터 배치', () => {
     s.close()
   })
 })
+
+describe('오케스트레이터는 하나뿐', () => {
+  it('표식이 없으면 null', () => {
+    expect(seeded().orchestratorId()).toBeNull()
+  })
+
+  it('표식을 옮기면 이전 것은 내려간다 — 둘이 될 수 없다', () => {
+    const s = seeded()
+    const mk = (id: string) =>
+      s.upsertSession({
+        id, projectId: null, tool: 'claude', externalId: null, name: id,
+        autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+        createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
+        permissionPreset: 'normal', importedFrom: null,
+      })
+    mk('a')
+    mk('b')
+
+    s.markOrchestrator('a')
+    expect(s.orchestratorId()).toBe('a')
+
+    s.markOrchestrator('b')
+    expect(s.orchestratorId()).toBe('b')
+    // 'a'가 남아 있으면 여기서 둘 중 하나가 임의로 뽑힌다 — 그게 이 테스트의 요점이다
+    expect(s.listSessions().filter((x) => x.projectId === null).length).toBe(2)
+  })
+})

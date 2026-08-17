@@ -109,6 +109,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.interrupt': { sessionId: S },
   'agents.archiveSession': { sessionId: S, archived: false },
   'agents.resumeSession': { sessionId: S },
+  'orchestrator.get': {},
   'controlCenter.get': {},
   'controlCenter.set': { sessionIds: [S] },
   'workspace.save': { layout: { focusedSessionId: S } },

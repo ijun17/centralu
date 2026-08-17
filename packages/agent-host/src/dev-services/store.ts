@@ -334,6 +334,27 @@ export class Store {
     })()
   }
 
+  /**
+   * 앱에 하나뿐인 오케스트레이터의 id (없으면 null).
+   *
+   * SessionInfo에 플래그로 싣지 않는다 — `projectId === null`과 같은 사실을 두 곳에 두면
+   * 언젠가 한쪽만 고쳐진다. "누가 오케스트레이터인가"는 여기서 한 번만 답한다.
+   */
+  orchestratorId(): string | null {
+    const row = this.db.prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 LIMIT 1`).get() as
+      | { id: string }
+      | undefined
+    return row?.id ?? null
+  }
+
+  /** 하나뿐이라는 것을 저장소가 지킨다 — 나머지는 전부 내린다 */
+  markOrchestrator(sessionId: string): void {
+    this.db.transaction(() => {
+      this.db.prepare(`UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1`).run()
+      this.db.prepare(`UPDATE sessions SET is_orchestrator = 1 WHERE id = ?`).run(sessionId)
+    })()
+  }
+
   listSessions(): SessionInfo[] {
     const rows = this.db
       .prepare(

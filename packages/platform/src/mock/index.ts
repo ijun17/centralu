@@ -279,6 +279,20 @@ export class MockPlatform implements Platform {
       this.sessions = new Map([...others, ...mine.map((s) => [s.id, s] as const)])
       return [...this.sessions.values()]
     },
+    orchestrator: async () => {
+      // 실물과 같은 규칙: 없으면 그 자리에서 만든다. 프로젝트에는 속하지 않는다
+      const found = [...this.sessions.values()].find((x) => x.projectId === null)
+      if (found) return found
+      const id = `orc-${++this.idc}`
+      const info = {
+        id, projectId: null, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
+        autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
+        createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null,
+        permissionPreset: 'normal' as const, importedFrom: null,
+      }
+      this.sessions.set(id, info)
+      return info
+    },
     controlCenter: async () => [...this.gridPanels],
     setControlCenter: async (sessionIds: string[]) => {
       this.gridPanels = sessionIds.filter((id) => this.sessions.has(id))

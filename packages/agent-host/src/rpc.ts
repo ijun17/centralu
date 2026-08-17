@@ -132,6 +132,7 @@ export function createRpcHandler(
     },
     'workspace.load': async () => mgr.loadWorkspace(),
     'projects.add': async (p) => mgr.addProject(RpcMethods['projects.add'].params.parse(p).path),
+    'orchestrator.get': async () => mgr.orchestrator(),
     'controlCenter.get': async () => mgr.controlCenter(),
     'controlCenter.set': async (p) =>
       mgr.setControlCenter(RpcMethods['controlCenter.set'].params.parse(p).sessionIds),

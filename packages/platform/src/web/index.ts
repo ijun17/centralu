@@ -46,6 +46,9 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })
   }
 
+  orchestrator() {
+    return this.rpc.call('orchestrator.get', {})
+  }
   controlCenter() {
     return this.rpc.call('controlCenter.get', {})
   }
