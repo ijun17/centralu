@@ -1,4 +1,8 @@
 import { execFile } from 'node:child_process'
+import { bridgePath } from './bridge-path.js'
+
+/** 다리로 붙는 우리 MCP 서버 이름 — 승인 예외가 이 이름으로 판정한다 */
+const ORCHESTRATOR_MCP_SERVER = 'control_center'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -94,6 +98,45 @@ class CodexSession implements SessionHandle {
         approvalPolicy: approvalPolicyFor(this.opts.permissionPreset),
         sandbox: 'workspace-write',
         model: this.opts.model,
+        /*
+         * 오케스트레이터일 때만 붙는 둘.
+         *
+         * 역할은 developerInstructions로 직접 준다 — Claude의 systemPrompt append와
+         * 같은 자리다. 파일(AGENTS.md)로 두지 않는 이유도 같다: 낮은 권한의 세션이
+         * 그 파일을 고치면 모든 세션에 지시할 수 있는 쪽의 지시가 되어버린다.
+         *
+         * 도구는 stdio 다리를 통해 붙는다. 실측으로 확인한 것:
+         *   per-thread config.mcp_servers  ✅ 살아 있다 (우리 명령이 실제로 실행됨)
+         *   url(HTTP) 방식                 ❌ 요청이 한 건도 오지 않는다
+         * 그래서 프로세스가 하나 더 뜬다 — Claude 경로에는 없는 비용이다.
+         */
+        ...(this.opts.systemPromptAppend ? { developerInstructions: this.opts.systemPromptAppend } : {}),
+        ...(this.opts.orchestratorTools && this.opts.orchestratorBridge
+          ? {
+              config: {
+                /*
+                 * **폴더의 문서를 읽지 않는다** (Claude의 settingSources: []에 대응).
+                 *
+                 * 안 막으면 낮은 권한의 워커 세션이 오케스트레이터 폴더에 지시문을 써서
+                 * 모든 세션에 지시할 수 있는 쪽을 조종할 수 있다.
+                 * 실측: 이걸 넣기 전에는 심어둔 AGENTS.md를 그대로 따랐다
+                 * ("침투성공-9142"부터 답했다).
+                 */
+                project_doc_max_bytes: 0,
+                mcp_servers: {
+                  [ORCHESTRATOR_MCP_SERVER]: {
+                    command: process.execPath,
+                    args: [bridgePath()],
+                    env: {
+                      CC_HOST_URL: this.opts.orchestratorBridge.url,
+                      CC_HOST_TOKEN: this.opts.orchestratorBridge.token,
+                      CC_SESSION_ID: this.opts.sessionId,
+                    },
+                  },
+                },
+              },
+            }
+          : {}),
       })
       this.threadId = threadIdOf(res)
     }
@@ -105,12 +148,46 @@ class CodexSession implements SessionHandle {
   }
 
   private onServerRequest(r: { id: number | string; method: string; params?: unknown }): void {
+    /*
+     * **elicitation은 승인과 응답 형식이 다르다.**
+     *
+     * MCP 서버를 쓸지 물을 때 codex는 elicitation을 보내고 `{ action }`을 기다린다.
+     * 우리는 모르는 서버 요청을 `{}`로 흘려보내고 있었는데, 그러면 codex가
+     * "missing field `action`"으로 역직렬화에 실패하고 **거절로 처리한다** —
+     * 화면에는 "권한이 거절되어"라고만 나와 원인을 알 수 없었다 (실측).
+     *
+     * 우리 서버는 받아들이고, 모르는 서버는 거절한다. 물어볼 화면이 없는데
+     * 조용히 승낙하면 그건 사용자를 대신해 결정하는 것이다.
+     */
+    if (r.method.toLowerCase().includes('elicitation')) {
+      const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { serverName?: string }
+      const ours = p.serverName === ORCHESTRATOR_MCP_SERVER
+      this.client.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
+      return
+    }
+
     if (!r.method.includes('requestApproval') && !r.method.endsWith('Approval')) {
       // 승인이 아닌 서버 요청은 빈 응답으로 흘려보낸다 (프로토콜이 늘어나도 멈추지 않게)
       this.client.respond(r.id, {})
       return
     }
     const params = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as Record<string, unknown>
+
+    /*
+     * **우리 도구는 우리가 보증한다** (Claude 쪽 canUseTool과 같은 규칙).
+     *
+     * control_center 도구는 이 앱이 관리하는 세션 밖으로 나갈 수 없고, 진짜 위험한 일 —
+     * 대상 세션이 무엇을 실행하는가 — 은 그 세션의 권한이 그대로 가른다.
+     * 여기서 또 물으면 승인이 두 겹이 되고 "한 창에서 지시한다"가 무너진다.
+     *
+     * 실측: 이걸 안 하면 오케스트레이터가 "세션 목록 조회 요청이 승인되지 않아"라며
+     * 첫 도구에서 멈춰 선다.
+     */
+    if (JSON.stringify(params).includes(`"${ORCHESTRATOR_MCP_SERVER}"`)) {
+      this.client.respond(r.id, { decision: 'accept' })
+      return
+    }
+
     const detail = approvalDetailFrom(r.method, params)
 
     // 저장된 '항상 허용' 규칙에 맞으면 묻지 않는다 (C-2와 같은 규칙)

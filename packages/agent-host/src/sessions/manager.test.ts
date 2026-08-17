@@ -940,9 +940,21 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
    * 겉은 오케스트레이터인데 도구도 역할도 없는 세션이 가장 나쁘다.
    * codex 어댑터는 orchestratorTools를 아직 쓰지 않으므로 바꾸는 것을 막는다.
    */
-  it('오케스트레이터는 codex로 바꿀 수 없다 — 도구를 붙이는 길이 아직 없다', async () => {
+  it('오케스트레이터도 codex로 바꿀 수 있다 (다리로 도구가 붙는다)', async () => {
     const { orc } = await setup()
-    await expect(mgr.switchTool(orc.id, 'codex')).rejects.toThrow(/오케스트레이터는 아직 Claude/)
+    const r = await mgr.switchTool(orc.id, 'codex')
+    expect(r.tool).toBe('codex')
+  })
+
+  /*
+   * 다리는 별도 프로세스라 토큰만 있으면 무엇이든 부를 수 있다.
+   * 그 문으로 다른 세션이 남의 세션에 지시하게 두면 접근 범위가 구조가 아니라 약속이 된다.
+   */
+  it('도구 실행 문은 오케스트레이터만 열 수 있다', async () => {
+    const { a, orc } = await setup()
+    await expect(mgr.runOrchestratorTool(a.id, 'list_sessions', {})).rejects.toThrow(/오케스트레이터만/)
+    const r = await mgr.runOrchestratorTool(orc.id, 'list_sessions', {})
+    expect(r.text).toContain(a.id)
   })
 
   it('평범한 세션은 바꿀 수 있다', async () => {

@@ -69,7 +69,12 @@ const worker = await rpc('agents.createSession', {
 await rpc('sessions.rename', { sessionId: worker.id, name: 'readme-담당' })
 log('대상 세션:', worker.id, '(readme-담당)')
 
-const orc = await rpc('orchestrator.get', {})
+const ORC_TOOL = (process.env.ORC_TOOL ?? 'claude') as 'claude' | 'codex'
+let orc = await rpc('orchestrator.get', {})
+if (ORC_TOOL !== 'claude') {
+  orc = await rpc('agents.switchTool', { sessionId: orc.id, tool: ORC_TOOL })
+  log(`오케스트레이터를 ${ORC_TOOL}로 바꿈`)
+}
 log('오케스트레이터:', orc.id, '· projectId =', JSON.stringify(orc.projectId))
 
 /*

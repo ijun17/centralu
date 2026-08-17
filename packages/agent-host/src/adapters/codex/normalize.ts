@@ -25,7 +25,19 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
     return { tool: 'Edit', title: paths.join(', ') || 'Edit files', readOnly: false, paths }
   }
   if (type === 'mcpToolCall') {
-    return { tool: str(obj(item.invocation).tool) || 'MCP', title: str(item.title) || 'MCP tool', readOnly: false, paths: [] }
+    /*
+     * 이름은 **최상위의 server·tool**에 있다 (generated/v2/ThreadItem.ts).
+     * invocation.tool을 읽고 있어서 코덱스의 MCP 호출이 전부 'MCP'로 뭉개져 보였다 —
+     * 오케스트레이터를 코덱스로 돌려보다 드러났다.
+     */
+    const tool = str(item.tool) || str(obj(item.invocation).tool)
+    const server = str(item.server)
+    return {
+      tool: tool || 'MCP',
+      title: [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool',
+      readOnly: false,
+      paths: [],
+    }
   }
   if (type === 'webSearch') {
     return { tool: 'WebSearch', title: str(item.query), readOnly: true, paths: [] }

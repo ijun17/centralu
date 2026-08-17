@@ -284,6 +284,21 @@ export const RpcMethods = {
    * 미리 만들어 두면 쓰지도 않는 세션이 도구 프로세스를 물고 있게 된다.
    */
   'orchestrator.get': { params: z.object({}), result: SessionInfo },
+  /**
+   * 오케스트레이터 도구 — **별도 프로세스(다리)가 host로 돌아오는 길**.
+   *
+   * Claude는 인프로세스로 붙어서 이 문이 필요 없다. Codex는 스레드별 config로
+   * stdio 서버만 물릴 수 있어서(HTTP는 실측에서 안 붙었다) 다리가 필요하고,
+   * 다리는 판단을 하지 않는다 — 이름과 인자만 넘기고 규칙은 전부 host에 남는다.
+   */
+  'orchestrator.tools': {
+    params: z.object({}),
+    result: z.array(z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() })),
+  },
+  'orchestrator.tool': {
+    params: z.object({ sessionId: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) }),
+    result: z.object({ text: z.string(), isError: z.boolean().optional() }),
+  },
   'controlCenter.get': { params: z.object({}), result: z.array(z.string()) },
   'controlCenter.set': {
     params: z.object({ sessionIds: z.array(z.string()) }),

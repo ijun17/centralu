@@ -8,6 +8,7 @@
  * 산출물 (apps/desktop/src-tauri/resources/host/):
  *   main.mjs                     — 번들된 host (better-sqlite3만 external)
  *   schema.sql                   — store가 산출물 옆에서 찾는다
+ *   codex-orchestrator-bridge.mjs — codex가 node로 직접 띄운다 (번들 안 함)
  *   node_modules/better-sqlite3  — 네이티브 애드온 (필요한 파일만)
  */
 import { build } from 'esbuild'
@@ -45,6 +46,14 @@ await build({
 
 // 2) 스키마 동봉 — store.ts가 산출물 옆에서 먼저 찾는다
 cpSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(OUT, 'schema.sql'))
+/*
+ * Codex 오케스트레이터의 stdio 다리.
+ * codex가 `node <경로>`로 직접 띄우므로 번들하지 않고 **파일 그대로** 옆에 둔다.
+ */
+cpSync(
+  join(ROOT, 'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs'),
+  join(OUT, 'codex-orchestrator-bridge.mjs'),
+)
 
 // 3) 네이티브 애드온 — 이 플랫폼 prebuild만 골라 담는다 (26MB 전체 복사 회피)
 const pkgJson = require.resolve('better-sqlite3/package.json')

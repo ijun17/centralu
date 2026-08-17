@@ -122,6 +122,20 @@ describe('상태·계기판', () => {
     ])
   })
 
+  /*
+   * 이름이 최상위에 있는데 invocation.tool을 읽어서 코덱스의 MCP 호출이 전부
+   * 'MCP'로 뭉개져 보였다 — 대화창에서 무슨 도구를 썼는지 알 수 없었다.
+   */
+  it('MCP 도구 호출은 서버·도구 이름을 보여준다', () => {
+    const out = n('item/started', {
+      item: { type: 'mcpToolCall', id: 'm1', server: 'control_center', tool: 'list_sessions', status: 'inProgress' },
+    })
+    expect(out[0]).toMatchObject({
+      type: 'tool_call',
+      summary: { tool: 'list_sessions', title: 'control_center: list_sessions' },
+    })
+  })
+
   it('thread/compacted → compaction 마커 (FR-14)', () => {
     expect(n('thread/compacted', {})).toEqual([{ type: 'compaction', sessionId: S, failed: false }])
   })

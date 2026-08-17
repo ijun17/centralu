@@ -91,6 +91,13 @@ export type CreateSessionOpts = {
    * 사람이 정할 몫과 우리가 지켜야 할 몫은 같은 자리에 두지 않는다.
    */
   systemPromptAppend?: string
+  /**
+   * 도구를 **인프로세스로 못 붙이는** 어댑터가 host로 돌아올 길.
+   *
+   * Claude는 필요 없다(함수가 그대로 도구가 된다). Codex는 스레드별 config로
+   * stdio 서버만 물릴 수 있어서 별도 프로세스가 뜨고, 그 프로세스가 이 주소로 돌아온다.
+   */
+  orchestratorBridge?: { url: string; token: string }
 }
 
 /** 도구가 보관 중인 이전 세션 한 건 (도구 고유 타입은 여기까지 오지 않는다) */

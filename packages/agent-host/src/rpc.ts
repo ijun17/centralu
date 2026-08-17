@@ -11,6 +11,7 @@ const toInfo = (h: TerminalHandle) => ({
   history: h.history(),
   alive: h.alive,
 })
+import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
 
@@ -137,6 +138,11 @@ export function createRpcHandler(
     'workspace.load': async () => mgr.loadWorkspace(),
     'projects.add': async (p) => mgr.addProject(RpcMethods['projects.add'].params.parse(p).path),
     'orchestrator.get': async () => mgr.orchestrator(),
+    'orchestrator.tools': async () => orchestratorToolSchemas(),
+    'orchestrator.tool': async (p) => {
+      const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)
+      return mgr.runOrchestratorTool(sessionId, name, args)
+    },
     'controlCenter.get': async () => mgr.controlCenter(),
     'controlCenter.set': async (p) =>
       mgr.setControlCenter(RpcMethods['controlCenter.set'].params.parse(p).sessionIds),

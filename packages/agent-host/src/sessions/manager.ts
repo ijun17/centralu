@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
+import { runOrchestratorTool } from './orchestrator-tools.js'
 import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
@@ -90,6 +91,11 @@ export class SessionManager {
     private store: Store,
     private adapters: Map<ToolName, AgentAdapter>,
     private emit: (e: NormalizedEvent) => void,
+    /**
+     * host 자신의 주소. 포트는 listen() 뒤에야 정해지므로 값이 아니라 **묻는 함수**로 받는다.
+     * 인프로세스로 도구를 못 붙이는 어댑터(Codex)의 다리가 이 주소로 돌아온다.
+     */
+    private endpoint?: () => { url: string; token: string } | null,
   ) {
     for (const s of store.listSessions()) this.meta.set(s.id, s)
   }
@@ -285,6 +291,7 @@ export class SessionManager {
           // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
           orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
           systemPromptAppend: params.projectId === null ? ORCHESTRATOR_ROLE : undefined,
+          orchestratorBridge: params.projectId === null ? (this.endpoint?.() ?? undefined) : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -532,6 +539,7 @@ export class SessionManager {
            */
           orchestratorTools: m.projectId === null ? this.orchestratorToolsFor(sessionId) : undefined,
           systemPromptAppend: m.projectId === null ? ORCHESTRATOR_ROLE : undefined,
+          orchestratorBridge: m.projectId === null ? (this.endpoint?.() ?? undefined) : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -804,24 +812,6 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
-
-    /*
-     * **오케스트레이터는 아직 Claude만 된다.**
-     *
-     * 도구를 붙이는 길이 어댑터마다 다르다: Claude는 인프로세스 MCP로 붙지만
-     * (adapters/claude/orchestrator-mcp.ts), Codex는 실제 MCP 서버가 필요하다 —
-     * host에 HTTP 엔드포인트를 열고 스레드별 config로 물려야 하고, 그 경로는 아직 없다.
-     *
-     * 막지 않으면 겉은 오케스트레이터인데 도구도 역할도 없는 세션이 된다.
-     * 빈 폴더에 앉아 아무것도 못 하면서 멀쩡해 보이는 것이 가장 나쁘다 —
-     * 안 되는 것은 안 된다고 말한다.
-     */
-    if (this.store.orchestratorId() === sessionId && tool !== 'claude') {
-      throw Object.assign(
-        new Error('오케스트레이터는 아직 Claude Code만 됩니다 — 다른 도구에 이 앱의 세션 도구를 붙이는 길이 아직 없습니다'),
-        { code: 'internal' },
-      )
-    }
 
     const adapter = this.adapters.get(tool)
     if (!adapter) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
@@ -1257,6 +1247,20 @@ export class SessionManager {
     }
     const text = parts.join('').trim()
     return text.length > maxChars ? text.slice(0, maxChars) + '…' : text
+  }
+
+  /**
+   * 다리가 부르는 도구 실행 (Codex 경로).
+   *
+   * **오케스트레이터 자신만 부를 수 있다.** 다리는 별도 프로세스라 토큰만 있으면
+   * 무엇이든 부를 수 있는데, 그 문으로 다른 세션이 남의 세션에 지시하게 두면
+   * 접근 범위가 구조가 아니라 약속이 된다.
+   */
+  async runOrchestratorTool(sessionId: string, name: string, args: Record<string, unknown>) {
+    if (this.store.orchestratorId() !== sessionId) {
+      throw Object.assign(new Error('오케스트레이터만 쓸 수 있는 도구입니다'), { code: 'internal' })
+    }
+    return runOrchestratorTool(this.orchestratorToolsFor(sessionId), name, args)
   }
 
   /**

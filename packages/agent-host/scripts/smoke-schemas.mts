@@ -111,6 +111,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.archiveSession': { sessionId: S, archived: false },
   'agents.resumeSession': { sessionId: S },
   'orchestrator.get': {},
+  'orchestrator.tools': {},
   'controlCenter.get': {},
   'controlCenter.set': { sessionIds: [S] },
   'workspace.save': { layout: { focusedSessionId: S } },
@@ -155,6 +156,14 @@ const SKIP: Record<string, string> = {
 const ok: string[] = []
 const bad: { m: string; issues: string }[] = []
 const failed: { m: string; why: string }[] = []
+
+// orchestrator.tool은 오케스트레이터 자신만 부를 수 있다 — 그 id를 먼저 얻는다
+try {
+  const orc = (await rpc('orchestrator.get', {})) as { id: string }
+  CASES['orchestrator.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
+} catch {
+  SKIP['orchestrator.tool'] = '오케스트레이터를 못 만듦'
+}
 
 // git.commitDetail은 sha를 얻어서 채운다
 try {

@@ -84,7 +84,16 @@ const adapters = new Map<ToolName, AgentAdapter>([
   ['codex', new CodexAdapter()],
 ])
 
-const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+/*
+ * host 자신의 주소를 매니저에게 알려준다 — 인프로세스로 도구를 못 붙이는 어댑터의
+ * 다리가 이 주소로 돌아온다. 포트는 listen() 뒤에야 정해지므로 값이 아니라 함수로 준다.
+ */
+const mgr = new SessionManager(
+  store,
+  adapters,
+  (e) => server.broadcast(e),
+  () => (port ? { url: `ws://127.0.0.1:${port}`, token } : null),
+)
 const terminals = new TerminalService((f) => server.pushTerminal(f))
 const server: HostServer = new HostServer({
   port: Number(values.port),
