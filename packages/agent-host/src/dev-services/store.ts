@@ -185,9 +185,37 @@ export class Store {
           const before = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
           const names = cols.map((c) => c.name).join(', ')
 
+          /*
+           * **한 덩어리로 돈다.**
+           *
+           * DROP과 RENAME 사이에서 무엇이든 잘못되면 세션 테이블이 사라진 DB가 남는다.
+           * 되돌릴 방법이 없는 상태다.
+           *
+           * foreign_keys 프래그마는 트랜잭션 **안에서는 무시된다**(SQLite 규칙).
+           * 그래서 끄고 → 트랜잭션 → 켜는 순서를 지킨다.
+           */
           this.db.pragma('foreign_keys = OFF')
-          this.db.exec(`
-            CREATE TABLE sessions_new (
+          try {
+            this.db.transaction(() => this.rebuildSessionsTable(names, before))()
+          } finally {
+            this.db.pragma('foreign_keys = ON')
+          }
+        },
+      },
+    ]
+
+    for (const step of steps) {
+      if (current < step.to) {
+        step.run()
+        this.db.pragma(`user_version = ${step.to}`)
+      }
+    }
+  }
+
+  /** v10: project_id의 NOT NULL을 푼다. SQLite는 컬럼을 못 고치므로 테이블을 다시 만든다 */
+  private rebuildSessionsTable(names: string, before: number): void {
+    this.db.exec(`
+      CREATE TABLE sessions_new (
               id            TEXT PRIMARY KEY,
               project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
               tool          TEXT NOT NULL,
@@ -209,25 +237,13 @@ export class Store {
             )
           `)
           this.db.exec(`INSERT INTO sessions_new (${names}) SELECT ${names} FROM sessions`)
-          this.db.exec(`DROP TABLE sessions`)
-          this.db.exec(`ALTER TABLE sessions_new RENAME TO sessions`)
-          this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived)`)
-          this.db.pragma('foreign_keys = ON')
+    this.db.exec(`DROP TABLE sessions`)
+    this.db.exec(`ALTER TABLE sessions_new RENAME TO sessions`)
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived)`)
 
-          const after = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
-          if (after !== before) {
-            throw new Error(`세션 이관 중 유실: ${before} → ${after}`)
-          }
-        },
-      },
-    ]
-
-    for (const step of steps) {
-      if (current < step.to) {
-        step.run()
-        this.db.pragma(`user_version = ${step.to}`)
-      }
-    }
+    // 한 줄이라도 조용히 잃으면 되돌릴 방법이 없다 — 던지면 트랜잭션이 통째로 물러난다
+    const after = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
+    if (after !== before) throw new Error(`세션 이관 중 유실: ${before} → ${after}`)
   }
 
   get schemaVersion(): number {
