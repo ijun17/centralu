@@ -4,6 +4,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
+import { CloseIcon } from '../../components/icons.jsx'
 
 /**
  * 사용량 (FR-9).
@@ -184,9 +185,12 @@ export function formatTokens(n: number): string {
 export function UsageModal() {
   const open = useStore((s) => s.usageOpen)
   const toggle = useStore((s) => s.toggleUsage)
-  // 사용량은 계정 단위지만 도구마다 다르다 — 지금 보고 있는 프로젝트의 도구를 쓴다
+  // 사용량은 계정 단위지만 도구마다 다르다 — **보고 있는 세션의** 도구를 쓴다.
+  // 프로젝트 기본값으로 대신하면 섞어 쓸 때 엉뚱한 도구의 한도를 보여준다.
   const tool = useStore((s) => {
-    const projectId = s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : s.focusedProjectId
+    const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
+    if (session) return session.tool
+    const projectId = s.focusedProjectId
     return (projectId ? s.projects[projectId]?.defaultTool : undefined) ?? 'claude'
   })
 
@@ -201,8 +205,9 @@ export function UsageModal() {
             className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-slate hover:text-chalk"
             onClick={() => toggle(false)}
             data-testid="usage-close"
+            aria-label="닫기"
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         </header>
         <UsagePanel tool={tool} />

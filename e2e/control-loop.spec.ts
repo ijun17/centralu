@@ -1822,6 +1822,52 @@ test('깨우지 못하면 이유를 그 자리에 적고 다시 시도할 수 �
 })
 
 /**
+ * 제목이 비슷한 두 세션을 다른 도구로 착각한 일이 있었다 (도그푸딩).
+ * 목록에서 어느 도구인지 보여야 하고, 헤더·사용량도 **그 세션의** 도구를 써야 한다.
+ */
+test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('tool-option-claude').click()
+  await page.getByTestId('initial-prompt').fill('클로드 쪽 작업')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('tool-option-codex').click()
+  await page.getByTestId('initial-prompt').fill('코덱스 쪽 작업')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 목록에서 도구가 구분된다
+  await expect(page.getByTestId('tool-mark-claude')).toHaveCount(1)
+  await expect(page.getByTestId('tool-mark-codex')).toHaveCount(1)
+
+  // 지금 보고 있는 건 codex 세션 — 사용량도 그 도구를 물어야 한다
+  await page.getByTestId('open-usage').click()
+  await expect(page.getByTestId('usage-modal')).toContainText('Codex')
+})
+
+/**
+ * 세션 표식 하나가 도구와 상태를 같이 말한다.
+ * 점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
+ */
+test('작업 중인 세션은 표식 테두리가 돈다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  const mark = page.getByTestId('tool-mark-claude')
+  await expect(mark).toHaveAttribute('data-state', /idle|waiting_input|working/)
+
+  await page.getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId('send').click()
+
+  await expect(mark).toHaveAttribute('data-state', 'working')
+  await expect(mark).toHaveClass(/cc-orbit/)
+})
+
+/**
  * 모델 목록을 하드코딩하고 있었더니 Fable이 나왔는데 고를 수가 없었다.
  * 이제 도구의 공식 API가 주는 목록을 그대로 보여주고, 강도도 모델에 붙어서 온다.
  */

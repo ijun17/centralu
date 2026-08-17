@@ -15,6 +15,9 @@ const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string 
   idle: { glyph: '·', tone: 'text-slate', label: '유휴' },
 }
 
+/** 상태의 한국어 이름. 점을 안 그리는 자리(도구 표식 등)에서도 같은 말을 써야 한다 */
+export const stateLabel = (state: SessionState): string => SIGNAL[state].label
+
 export function StateDot({ state }: { state: SessionState }) {
   const s = SIGNAL[state]
   return (

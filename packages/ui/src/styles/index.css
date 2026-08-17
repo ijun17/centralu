@@ -33,6 +33,19 @@
   --color-ash: #909090; /* 보조 */
   --color-slate: #5c5c5c; /* 배경 정보 */
 
+  /*
+   * diff 전용 색 — **앱에서 유일하게 유채색을 쓰는 곳**이다.
+   *
+   * 무채색 규칙을 여기서만 푸는 이유: 추가/삭제의 초록·빨강은 학습된 관습이 아니라
+   * 거의 반사에 가깝다. 승인 여부를 판단하는 자리에서 그 반사를 버리고 `+`/`-`를
+   * 한 줄씩 읽게 하는 건 비용이 너무 크다.
+   * 대신 **diff 본문 밖으로 절대 나가지 않는다** — 상태·긴급도는 여전히 밝기가 말한다.
+   */
+  --color-add: #7ee787;
+  --color-add-bg: #10251a;
+  --color-del: #ffa198;
+  --color-del-bg: #2b1517;
+
   /* 기계가 쓴 글자(명령·경로·수치)는 모노, 사람과 모델의 말은 산스.
      한글은 모노 폴백이 흐트러지므로 산스가 맡는다. */
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
@@ -258,4 +271,45 @@
   .cc-md th { color: var(--color-chalk); font-weight: 600; background: var(--color-panel); }
   .cc-md td { color: var(--color-ash); }
   .cc-md input[type='checkbox'] { accent-color: var(--color-graphite); margin-right: 0.4em; }
+}
+
+/*
+ * 은하수 궤도 — 세션 도구 표식이 '작업 중'일 때 두르는 회전 테두리.
+ *
+ * 점 하나가 깜빡이는 것보다 도는 것이 훨씬 잘 읽힌다. 깜빡임은 정지 화면에서도
+ * 흉내 낼 수 있지만 회전은 매 프레임이 달라야 해서, 보는 순간 "살아 있다"가 확정된다.
+ *
+ * 색은 거의 흰빛에 아주 옅은 푸른·보랏빛만 섞는다. 여기서 진짜 색을 쓰면
+ * 화면에서 가장 눈에 띄는 것이 '작업 중'이 되어버리는데, 그 자리는 '나를 기다리는 것'의 몫이다.
+ */
+@property --cc-orbit {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes cc-orbit-spin {
+  to {
+    --cc-orbit: 360deg;
+  }
+}
+
+.cc-orbit {
+  background: conic-gradient(
+    from var(--cc-orbit),
+    transparent 0deg,
+    #8ea8d8 70deg,
+    #e9e9e9 130deg,
+    #b09ad8 190deg,
+    transparent 280deg
+  );
+  animation: cc-orbit-spin 1.4s linear infinite;
+}
+
+/* 움직임에 민감한 사람에게 회전은 방해다 — 그때는 밝기만 남긴다 */
+@media (prefers-reduced-motion: reduce) {
+  .cc-orbit {
+    animation: none;
+    background: var(--color-ash);
+  }
 }

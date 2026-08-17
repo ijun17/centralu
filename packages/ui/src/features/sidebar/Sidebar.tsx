@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
-import { StateDot, Tooltip } from '../../components/primitives.jsx'
+import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
+import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
 
@@ -82,14 +83,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           숨기면 "막지 말고 보이게 하라"를 어기게 된다 (FR-2).
         */}
         <ProjectMarks project={project} sessionCount={sessions.length} />
+        {/*
+          **항상 보인다.** 예전엔 호버해야 나타났는데, 새 세션은 이 앱에서 가장 자주 하는 일이라
+          "있는 줄도 몰랐다"가 나오면 안 된다 (도그푸딩에서 지적됨).
+          크기를 키우는 것만으로는 안 된다 — 안 보이는 것은 아무리 커도 안 보인다.
+          평소엔 slate로 눌러 두고 호버에서 밝아지게 해서, 세션 목록을 읽는 데는 방해하지 않는다.
+        */}
         <button
-          className="ml-auto rounded px-1 text-[13px] leading-none text-slate opacity-0 transition-opacity group-hover:opacity-100 hover:text-chalk focus-visible:opacity-100"
+          className="-my-1 ml-auto flex shrink-0 items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
           onClick={() => setNewSessionOpen(true)}
           title="새 세션"
           aria-label={`${project.name}에 새 세션`}
           data-testid={`new-session-${project.name}`}
         >
-          +
+          <PlusIcon size={15} />
         </button>
       </header>
 
@@ -108,7 +115,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
                 }`}
               >
-                <StateDot state={s.state} />
+                {/*
+                  표식 하나가 두 가지를 말한다: 글자는 도구, 테두리는 상태.
+                  점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
+                */}
+                <ToolMark tool={s.tool} state={s.state} />
                 <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
                 {unread && (
                   <span
@@ -127,8 +138,12 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 대신 **무엇이 지워지고 무엇이 남는지**를 확인 창에서 분명히 말한다.
               */}
               <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
+                {/*
+                  삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
+                  누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.
+                */}
                 <button
-                  className="rounded px-1 text-[11px] text-slate hover:text-chalk"
+                  className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
                   data-testid={`delete-session-${s.id}`}
                   title="완전히 삭제 (기록도 함께 사라집니다)"
                   aria-label={`${s.name} 삭제`}
@@ -137,7 +152,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     setConfirming(s.id)
                   }}
                 >
-                  ✕
+                  <CloseIcon size={13} />
                 </button>
               </span>
             </li>
@@ -150,7 +165,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       {confirming && (
         <ConfirmDelete
           name={sessions.find((s) => s.id === confirming)?.name ?? '세션'}
-          tool={project.defaultTool}
+          // 프로젝트 기본값이 아니라 이 세션의 도구다 — 어디에 기록이 남는지 알려주는 문장이라 틀리면 안 된다
+          tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool}
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
             void deleteSession(confirming)
@@ -270,6 +286,69 @@ function ProjectDetail({ project, sessionCount }: { project: ProjectInfo; sessio
           동시 세션 {sessionCount}개 — 같은 파일을 고치면 변경이 유실될 수 있습니다
         </span>
       )}
+    </span>
+  )
+}
+
+/**
+ * 어느 도구의 세션인가.
+ *
+ * **공식 로고를 쓰지 않는다.** 두 회사의 마크는 상표이고 각자 브랜드 가이드라인이 있다 —
+ * 로고 파일을 앱에 넣어 배포하면 그 규칙에 걸릴 수 있다. 우리 글리프면 그 문제 자체가 없고,
+ * 무채색·형태로 구분하는 이 앱의 규칙과도 맞는다.
+ *
+ * 이게 없으면 제목이 비슷한 두 세션을 구분할 방법이 없다 (도그푸딩에서 실제로 착각했다).
+ */
+/**
+ * 세션 표식 — 도구와 상태를 한 자리에서.
+ *
+ * **공식 로고를 쓰지 않는다.** 두 회사의 마크는 상표이고 각자 브랜드 가이드라인이 있다 —
+ * 로고 파일을 앱에 넣어 배포하면 그 규칙에 걸릴 수 있다. 우리 글리프면 그 문제 자체가 없고,
+ * 무채색·형태로 구분하는 이 앱의 규칙과도 맞는다.
+ *
+ * 테두리가 상태다. 밝을수록 급하다 — 이 앱 전체를 관통하는 규칙 그대로다.
+ * '작업 중'만 회전한다: 멈춘 것과 도는 것은 정지 화면에서도 구분되므로,
+ * "일하는 중인가 멈춘 건가"라는 질문에 움직임만큼 확실히 답하는 게 없다.
+ *
+ * 멈춘 상태(한도·오류)는 글자를 흐리게 해서 활성 상태와 구분한다.
+ * 여섯 상태를 테두리 밝기만으로 다 가르기는 어려워서, 이름은 툴팁에 그대로 싣는다.
+ */
+const RING: Record<SessionState, string> = {
+  working: '', // cc-orbit가 배경을 맡는다
+  waiting_approval: 'var(--color-beacon)',
+  error: 'var(--color-beacon)',
+  waiting_input: 'var(--color-ash)',
+  limited: 'var(--color-slate)',
+  idle: 'transparent',
+}
+
+function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
+  const toolName = tool === 'codex' ? 'Codex' : 'Claude Code'
+  const label = `${toolName} · ${stateLabel(state)}`
+  const stalled = state === 'limited' || state === 'error'
+
+  return (
+    <span
+      className={`shrink-0 rounded-[5px] p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
+      style={state === 'working' ? undefined : { background: RING[state] }}
+      title={label}
+      aria-label={label}
+      data-testid={`tool-mark-${tool}`}
+      data-state={state}
+    >
+      <span
+        /*
+         * 밝은 칩에 어두운 글자 — 목록에서 한눈에 잡히되,
+         * 순백(beacon)은 쓰지 않는다. 그건 "나를 기다리는 것"의 몫이라
+         * 여기서 써버리면 진짜 신호가 묻힌다. 한 단계 낮은 chalk를 쓴다.
+         * 글자는 터미널 폰트(모노) — 한 글자 기호는 폭이 고정돼야 줄이 흔들리지 않는다.
+         */
+        className={`readout flex size-[14px] items-center justify-center rounded-[3.5px] bg-chalk text-[9px] font-semibold leading-none text-void ${
+          stalled ? 'opacity-50' : ''
+        }`}
+      >
+        {tool === 'codex' ? 'X' : 'C'}
+      </span>
     </span>
   )
 }
