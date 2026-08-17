@@ -463,11 +463,20 @@ function ChatStream({
     setStickyIndex(found)
   }, [chat, virtualizer])
 
+  /**
+   * 우리가 마지막으로 알고 있는 스크롤 위치.
+   *
+   * "사람이 올렸는가"를 플래그가 아니라 **위치 변화**로 판정하기 위한 기준이다:
+   * 내용이 늘어나도 scrollTop은 그대로지만, 사람이 올리면 줄어든다.
+   */
+  const lastTop = useRef(0)
+
   // 사용자가 위로 올렸는지 추적 — 올려둔 동안에는 끌어내리지 않는다
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    lastTop.current = el.scrollTop
     syncSticky()
   }
 
@@ -495,7 +504,21 @@ function ChatStream({
     if (!stickToBottom.current) return
     const el = scrollRef.current
     if (!el) return
+    /*
+     * 플래그만 믿으면 안 되는 이유 (아래 rAF에만 있던 방어가 여기에도 필요하다).
+     *
+     * 스크롤 이벤트는 비동기다. 사람이 위로 올린 직후 가상 스크롤이 줄을 재면서
+     * 총 높이가 바뀌면, 스크롤 이벤트가 처리되기 **전에** 이 effect가 먼저 돌 수 있다.
+     * 그때 플래그는 아직 true라서 바로 아래 줄이 사람을 도로 바닥으로 끌어내렸다.
+     * 위치로 판정하면 그 경합이 없다 — 내용이 늘어도 scrollTop은 그대로지만,
+     * 사람이 올리면 줄어든다.
+     */
+    if (el.scrollTop < lastTop.current - 4) {
+      stickToBottom.current = false
+      return
+    }
     el.scrollTop = el.scrollHeight
+    lastTop.current = el.scrollTop
     const id = requestAnimationFrame(() => {
       const later = scrollRef.current
       if (!later) return
@@ -510,6 +533,7 @@ function ChatStream({
        */
       if (later.scrollHeight - later.scrollTop - later.clientHeight > 80) return
       later.scrollTop = later.scrollHeight
+      lastTop.current = later.scrollTop
     })
     return () => cancelAnimationFrame(id)
   }, [totalSize, pending, working, scrollRef])
