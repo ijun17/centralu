@@ -463,8 +463,23 @@ export const useStore = create<AppState>((set, get) => ({
   focusSession(id) {
     const prev = get().focusedSessionId
     const projectId = id ? get().sessions[id]?.projectId : undefined
+    /*
+     * 세션을 고르면 **그 세션이 보여야 한다.**
+     *
+     * 컨트롤 센터를 열어둔 채 사이드바에서 다른 세션을 눌러도 화면이 그대로였다:
+     * 고른 것은 바뀌었는데 보이는 것은 안 바뀌니, 누른 사람 눈에는 아무 일도 안 일어난 것이다.
+     * 여기 두는 이유는 부르는 곳이 열 군데(사이드바·인박스·팔레트·승인 배너…)라서다 —
+     * 호출부마다 붙이면 언젠가 한 곳을 빠뜨린다.
+     *
+     * 선택 해제(null)는 뷰를 건드리지 않는다. 그건 "이걸 봐라"가 아니기 때문이다.
+     */
     // 세션을 바꾸면 덮어둔 것은 걷는다 — 새 세션의 대화가 먼저 보여야 한다
-    set({ focusedSessionId: id, overlay: null, ...(projectId ? { focusedProjectId: projectId } : {}) })
+    set({
+      focusedSessionId: id,
+      overlay: null,
+      ...(id ? { view: 'focus' as const } : {}),
+      ...(projectId ? { focusedProjectId: projectId } : {}),
+    })
     get().saveWorkspace()
 
     // 포커스를 벗어난 세션의 메시지는 잘라낸다 (docs/state-management.md §4).

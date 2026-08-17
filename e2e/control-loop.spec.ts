@@ -2555,6 +2555,26 @@ test('그리드 칸은 대화가 길어져도 입력창을 밀어내지 않는�
 })
 
 /**
+ * 컨트롤 센터를 열어둔 채 다른 세션을 골라도 화면이 그대로였다 (도그푸딩).
+ * 고른 것은 바뀌었는데 보이는 것이 안 바뀌면, 누른 사람에게는 아무 일도 안 일어난 것이다.
+ */
+test('컨트롤 센터에서 세션을 고르면 그 세션으로 넘어간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+  const ids = await page.evaluate(() =>
+    Object.keys((window as any).__store.getState().sessions),
+  )
+
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId('control-center')).toBeVisible()
+
+  await page.getByTestId(`session-row-${ids[0]}`).click()
+  await expect(page.getByTestId('control-center')).toBeHidden()
+  await expect(page.getByTestId('session-view')).toBeVisible()
+})
+
+/**
  * 칸을 열면 **최신 대화가 먼저** 보여야 한다 (도그푸딩:
  * "스크롤이 아래에서부터 시작하는 게 아니라 위에서부터 시작해서 쭉 내려가다 이상해진다").
  *
