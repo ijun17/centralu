@@ -237,7 +237,12 @@ function ProjectMarks({
   const denied = project.git?.denied === true
 
   return (
-    <span className="readout ml-auto flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
+    /*
+      **이름 바로 옆에 붙인다.** ml-auto로 반대쪽 끝까지 밀어 놨더니, 이 숫자들이
+      무엇에 대한 것인지 이름과 떨어져서 안 읽혔다 (도그푸딩: "이 숫자는 뭐야?").
+      바로 옆에 있으면 "이 프로젝트의 변경 22개"로 한 덩어리로 읽힌다.
+    */
+    <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
       {changed > 0 && (
         <span data-testid={`mark-changed-${project.name}`} title={`${changed} changed files`}>
           {changed}
