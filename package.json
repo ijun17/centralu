@@ -12,6 +12,7 @@
     "verify": "pnpm lint && pnpm depcruise && pnpm typecheck && pnpm test",
     "dev": "pnpm --filter @cc/web dev",
     "e2e": "playwright test --config e2e/playwright.config.ts",
+    "perf": "PERF=1 playwright test perf- --config e2e/playwright.config.ts --workers=1",
     "host": "tsx packages/agent-host/src/main.ts",
     "verify:all": "pnpm verify && pnpm e2e",
     "smoke": "node packages/agent-host/scripts/smoke.mjs",
