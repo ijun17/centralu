@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider } from './PlatformProvider.jsx'
+import { isForeground } from './foreground.js'
 import { useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
@@ -29,10 +30,17 @@ export function App({ platform }: { platform: Platform }) {
 
   // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
   useEffect(() => {
-    const onFocus = () => setAppFocused(true)
+    /*
+       세 핸들러가 **같은 판정**을 쓴다.
+       예전엔 visibilitychange만 visibility를 봤다 — 다른 앱으로 간 뒤 가림 이벤트가
+       한 번 더 뜨면 창은 여전히 'visible'이라 다시 '눈앞'으로 돌아갔고,
+       그때부터 알림이 조용히 막혔다. 자리를 비운 사람에게 알리는 게 이 앱의 전제인데.
+     */
+    // blur 시점에 document.hasFocus()가 아직 낡았을 수 있으므로, 아는 값은 직접 넘긴다
+    const onFocus = () => setAppFocused(isForeground(true, document.visibilityState))
     const onBlur = () => setAppFocused(false)
-    const onVisibility = () => setAppFocused(document.visibilityState === 'visible')
-    setAppFocused(document.hasFocus() && document.visibilityState === 'visible')
+    const onVisibility = () => setAppFocused(isForeground(document.hasFocus(), document.visibilityState))
+    onVisibility()
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
     document.addEventListener('visibilitychange', onVisibility)

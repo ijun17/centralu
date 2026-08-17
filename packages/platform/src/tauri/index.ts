@@ -79,11 +79,24 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
 class TauriSystemPort implements SystemPort {
   private granted: boolean | null = null
 
+  private warned = false
+
+  /**
+   * 알림은 **자리를 비운 사람에게 닿는 유일한 수단**이다. 그래서 못 보냈으면 말한다.
+   *
+   * 예전엔 권한이 없으면 그냥 return이었다. 그러면 "알림이 안 온다"를 밝혀낼 방법이
+   * 없다 — 코드는 정상이고 화면에도 아무 일이 없으니 도구를 의심하게 된다.
+   * 한 번만 알린다 (매 알림마다 띄우면 그게 더 소음이다).
+   */
   async notify(title: string, body: string): Promise<void> {
     if (this.granted === null) {
       this.granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
     }
-    if (!this.granted) return
+    if (!this.granted) {
+      if (this.warned) return
+      this.warned = true
+      throw new Error('Notifications are turned off — enable them for Control Center in System Settings')
+    }
     sendNotification({ title, body })
   }
 

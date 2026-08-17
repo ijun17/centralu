@@ -461,7 +461,10 @@ export const useStore = create<AppState>((set, get) => ({
       const all = allDoneNotification(after, before, ctx)
       // 개별 알림이 있으면 그것만 — 같은 순간에 두 번 울리지 않는다
       const notice = one ?? all
-      if (notice) void platform.system.notify(notice.title, notice.body)
+      // 못 보냈으면 화면에 남긴다 — 조용히 사라지면 "알림이 안 온다"를 밝혀낼 수 없다
+      if (notice) {
+        void platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
+      }
       void platform.system.setBadge(badgeCount(countWaiting(after)))
     }
   },
