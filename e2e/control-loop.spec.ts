@@ -2231,3 +2231,37 @@ test('아이콘 버튼은 호버하면 설명이 뜬다', async ({ page }) => {
   await page.getByTestId('restart-session').focus()
   await expect(page.getByRole('tooltip')).toBeVisible()
 })
+
+/**
+ * host가 죽으면 수퍼바이저가 다시 띄우지만, 새 host는 살아 있던 에이전트를
+ * 하나도 모른다 — 프로세스가 함께 죽었기 때문이다. 그래서 화면에는 세션이 전부
+ * 잠든 채로 남았고 사람이 하나씩 눌러 깨워야 했다.
+ * 무엇이 돌고 있었는지는 UI가 아니까, 그걸 근거로 되살린다.
+ */
+test('끊겼다 돌아오면 돌던 세션이 스스로 되살아난다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // host가 죽었다: 프로세스가 사라지고 연결이 끊긴다
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    m.sessions.get(sid).live = false
+    m.setConnectionState('disconnected')
+  }, id)
+  await expect.poll(async () => page.evaluate(() => (window as any).__store.getState().connection)).not.toBe('connected')
+
+  // 수퍼바이저가 다시 띄웠다
+  await page.evaluate(() => (window as any).__mock.setConnectionState('connected'))
+
+  /*
+    UI의 live 플래그는 끊긴 뒤에도 낡은 채로 true라 그것만 보면 아무것도 검사하지 못한다.
+    **host 쪽 실제 상태**가 다시 살아났는지를 본다 — 되살리기가 정말 일어났다는 증거다.
+  */
+  await expect
+    .poll(async () => page.evaluate((sid) => (window as any).__mock.sessions.get(sid).live, id), {
+      timeout: 5000,
+    })
+    .toBe(true)
+})

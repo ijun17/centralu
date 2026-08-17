@@ -196,6 +196,8 @@ export type AppState = {
   resumeSession(sessionId: string): Promise<boolean>
   /** 세션을 고르는 즉시 깨운다 (첫 응답을 기다리지 않게) */
   wake(sessionId: string): Promise<void>
+  /** 재연결 후 돌던 세션 되살리기 (host가 죽으면 프로세스도 함께 죽는다) */
+  recoverAfterReconnect(): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
 }
@@ -292,7 +294,12 @@ export const useStore = create<AppState>((set, get) => ({
     set({ platform })
     subscriptions.push(
       platform.agents.subscribe((e) => get().dispatchEvent(e)),
-      platform.agents.onConnectionChange((connection) => set({ connection })),
+      platform.agents.onConnectionChange((connection) => {
+        const was = get().connection
+        set({ connection })
+        // 끊겼다가 돌아왔다 — 돌던 세션을 되살린다
+        if (connection === 'connected' && was !== 'connected') void get().recoverAfterReconnect()
+      }),
     )
 
     const [projects, sessions] = await Promise.all([platform.projects.list(), platform.agents.listSessions()])
@@ -806,6 +813,43 @@ export const useStore = create<AppState>((set, get) => ({
    * 화면이 시끄러워진다. 대신 그 세션의 안내 줄에 적어서, 왜 안 이어지는지
    * 보고 있는 사람이 알 수 있게 한다.
    */
+  /**
+   * 끊겼다 돌아온 뒤 **돌고 있던 세션을 되살린다.**
+   *
+   * host가 죽으면 수퍼바이저가 다시 띄우지만(최대 5회, 지수 백오프),
+   * 그 host는 **살아 있던 에이전트 프로세스를 하나도 모른다** — 프로세스는 함께
+   * 죽었고 새 host의 메모리는 비어 있다. 그래서 화면에는 세션이 전부 잠든 채로
+   * 남고, 사람이 하나씩 눌러 깨워야 했다 (도그푸딩: "다른 데서 세션 연결이 끊긴다").
+   *
+   * 무엇이 돌고 있었는지는 **UI가 안다** — 끊기기 직전의 live 상태가 여기 있다.
+   * 그걸 근거로 되살린다. 아카이브된 것과 원래 잠들어 있던 것은 건드리지 않는다:
+   * 끊김을 핑계로 사람이 안 켠 것까지 켜면 그건 복구가 아니라 다른 일이다.
+   */
+  async recoverAfterReconnect() {
+    const s = get()
+    if (!s.platform) return
+
+    const wasLive = Object.values(s.sessions).filter((x) => x.live && !x.archived)
+    if (wasLive.length === 0) return
+
+    // 새 host의 진실로 먼저 맞춘다 — 그 사이 도구에서 지워졌을 수도 있다
+    const fresh = await s.platform.agents.listSessions().catch(() => null)
+    if (!fresh) return
+    const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
+
+    const toWake = wasLive.filter((x) => !alive.has(x.id))
+    if (toWake.length === 0) return
+
+    set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
+    // live 표시를 먼저 내려야 wake가 "이미 살아 있다"고 판단하고 그냥 돌아가지 않는다
+    set((st) => ({
+      sessions: Object.fromEntries(
+        Object.entries(st.sessions).map(([id, v]) => [id, toWake.some((w) => w.id === id) ? { ...v, live: false } : v]),
+      ),
+    }))
+    for (const x of toWake) await get().wake(x.id)
+  },
+
   async wake(sessionId) {
     const s = get()
     const session = s.sessions[sessionId]
