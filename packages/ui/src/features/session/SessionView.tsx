@@ -344,6 +344,11 @@ export function SessionView() {
           헤더에 있을 때는 화면 반대쪽 끝이라, 무엇을 어떤 설정으로 보내는지
           한눈에 같이 보이지 않았다. 여기 있으면 손과 눈이 같은 자리에 머문다.
         */}
+        {/*
+          단축키 안내는 뺐다. Enter로 보내고 ⇧Enter로 줄을 바꾸는 건 채팅 입력창의
+          기본값이라 한 번 배우면 끝인데, 안내는 매번 자리를 차지한다 —
+          한 번 읽고 나면 그때부터는 노이즈다 (도그푸딩: "당연한 것들이라").
+        */}
         <div className="mt-1.5 flex items-center gap-2">
           <SessionSettings
             sessionId={session.id}
@@ -354,9 +359,6 @@ export function SessionView() {
             preset={session.permissionPreset}
             live={session.live}
           />
-          <p className="ml-auto text-[10px] text-slate">
-            <Kbd>Enter</Kbd> send · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> newline · paste images (<Kbd>⌘V</Kbd>)
-          </p>
         </div>
       </form>
     </section>
