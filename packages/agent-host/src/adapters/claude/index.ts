@@ -18,6 +18,7 @@ import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEv
 import { whichTool } from '../../env-path.js'
 import { listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
+import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, normalizeMessage } from './normalize.js'
@@ -98,6 +99,14 @@ class ClaudeSession implements SessionHandle {
          */
         effort: this.opts.effort as never,
         includePartialMessages: true,
+        /*
+         * 오케스트레이터에게만 도구를 준다 (FR-11).
+         * 인프로세스 MCP라 별도 프로세스가 없고, 이 도구들이 볼 수 있는 것은
+         * 매니저가 넘겨준 것뿐이다 — 이 앱이 관리하는 세션 밖으로 나갈 방법이 없다.
+         */
+        ...(this.opts.orchestratorTools
+          ? { mcpServers: { [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools) } }
+          : {}),
         permissionMode: PRESET_MODE[preset],
         resume: this.opts.resumeExternalId,
         // allowedTools는 절대 설정하지 않는다 (M0: canUseTool 셰도잉)
@@ -105,6 +114,21 @@ class ClaudeSession implements SessionHandle {
           preset === 'auto'
             ? undefined
             : async (toolName: string, toolInput: Record<string, unknown>) => {
+                /*
+                 * **우리 도구는 우리가 보증한다.**
+                 *
+                 * 오케스트레이터의 control_center 도구는 이 앱이 관리하는 세션 밖으로
+                 * 나갈 수 없고(매니저만 본다), 진짜 위험한 일 — 대상 세션이 무엇을
+                 * 실행하는가 — 은 **그 세션의 권한 설정이 그대로 가른다.**
+                 * 여기서 또 물으면 승인이 두 겹이 되고, "한 창에서 지시한다"는
+                 * 이 기능의 존재 이유가 사라진다.
+                 *
+                 * 실측에서 이걸 안 하면 목록 한 번 읽는 데도 승인 창이 떠서
+                 * 오케스트레이터가 첫 도구에서 멈춰 섰다.
+                 */
+                if (toolName.startsWith(`mcp__${ORCHESTRATOR_MCP_NAME}__`)) {
+                  return { behavior: 'allow' as const, updatedInput: toolInput }
+                }
                 const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
                 const key = detail.kind === 'command' ? detail.command : `${toolName}:${detail.kind}`
                 if (self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -31,12 +31,18 @@ class FakeAdapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'],
   }
   last: FakeHandle | null = null
+  /** 오케스트레이터에게만 오는 도구 — 붙는지/안 붙는지를 테스트가 본다 */
+  lastOrchestratorTools: OrchestratorTools | undefined
+  private handles = new Map<string, FakeHandle>()
+  handleOf(id: string) { return this.handles.get(id) }
   /** 도구가 뜨지 못하는 상황을 만든다 (되살리기 실패 경로) */
   failCreate: string | null = null
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     if (this.failCreate) throw new Error(this.failCreate)
+    this.lastOrchestratorTools = opts.orchestratorTools
     this.last = new FakeHandle(opts.sessionId, emit)
+    this.handles.set(opts.sessionId, this.last)
     return this.last
   }
 }
@@ -791,5 +797,61 @@ describe('식별자가 없으면 이어받은 원본으로 재개한다', () => 
 
     expect(r.resumed).toBe(true)
     expect(a.resumedWith).toBe('ext-origin') // 원본으로 이어갔다
+  })
+})
+
+/**
+ * 오케스트레이터의 도구 (FR-11).
+ *
+ * **여기가 접근 범위의 경계다.** 이 도구들이 볼 수 있는 것이 곧 오케스트레이터가
+ * 할 수 있는 전부다 — 규칙으로 막는 게 아니라 볼 수 있는 것이 그것뿐이어야 한다.
+ */
+describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
+  const setup = async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const orc = (await rpc('orchestrator.get', {})) as { id: string }
+    // 도구는 세션을 만들 때 어댑터에 전달된다 — 그 인스턴스를 그대로 시험한다
+    const tools = adapter.lastOrchestratorTools!
+    return { p, a, orc, tools }
+  }
+
+  it('목록에 자기 자신은 없다 — 자기에게 시키면 고리가 된다', async () => {
+    const { a, orc, tools } = await setup()
+    const list = await tools.listSessions()
+    expect(list.map((s) => s.sessionId)).toContain(a.id)
+    expect(list.map((s) => s.sessionId)).not.toContain(orc.id)
+  })
+
+  it('보관된 세션도 없다', async () => {
+    const { a, tools } = await setup()
+    await rpc('agents.archiveSession', { sessionId: a.id, archived: true })
+    expect((await tools.listSessions()).map((s) => s.sessionId)).not.toContain(a.id)
+  })
+
+  it('세션에 일을 시키면 실제로 전달된다', async () => {
+    const { a, tools } = await setup()
+    expect(await tools.sendToSession(a.id, '테스트 고쳐줘')).toEqual({ ok: true })
+    expect(adapter.handleOf(a.id)?.sent).toContain('테스트 고쳐줘')
+  })
+
+  it('모르는 세션은 이유를 돌려준다 — 조용히 삼키지 않는다', async () => {
+    const { tools } = await setup()
+    const r = await tools.sendToSession('남의-세션-id', '안녕')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/관리하는 세션이 아닙니다/)
+  })
+
+  it('자기 자신에게는 보낼 수 없다', async () => {
+    const { orc, tools } = await setup()
+    const r = await tools.sendToSession(orc.id, '나에게')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/자기 자신/)
+  })
+
+  it('평범한 세션에는 도구가 붙지 않는다 — 오케스트레이터만 받는다', async () => {
+    const p = await addProject()
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
+    expect(adapter.lastOrchestratorTools).toBeUndefined()
   })
 })

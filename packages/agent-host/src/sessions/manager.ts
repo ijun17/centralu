@@ -18,7 +18,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import type { AgentAdapter, HistoryMessage, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
   gitSummary,
@@ -280,6 +280,8 @@ export class SessionManager {
         {
           sessionId: id, cwd: params.cwd, model: params.model, effort: params.effort,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
+          // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
+          orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -975,6 +977,62 @@ export class SessionManager {
       this.running.delete(sessionId)
     }
     return this.resumeSession(sessionId)
+  }
+
+  /**
+   * 오케스트레이터에게 줄 도구 (FR-11).
+   *
+   * **이 앱이 관리하는 세션 밖으로 나갈 방법이 없다.** 매니저의 meta만 보므로
+   * 터미널에서 만든 남의 세션도, 파일도, 프로젝트 디렉토리도 닿지 않는다 —
+   * 막는 규칙을 따로 쓴 게 아니라 볼 수 있는 것이 그것뿐이다.
+   */
+  private orchestratorToolsFor(orchestratorId: string): OrchestratorTools {
+    const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+
+    return {
+      listSessions: async () => {
+        const byId = projects()
+        return [...this.meta.values()]
+          // 자기 자신은 뺀다 — 자기에게 시키는 것은 고리를 만든다
+          .filter((s) => s.id !== orchestratorId && !s.archived)
+          .map((s) => ({
+            sessionId: s.id,
+            name: s.name,
+            project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
+            state: s.state,
+            tool: s.tool,
+            preview: this.previewOf(s.id),
+          }))
+      },
+
+      sendToSession: async (sessionId, text) => {
+        /*
+         * 조용히 실패하지 않는다. 오케스트레이터가 이름을 잘못 짚었을 때
+         * 아무 일도 안 일어나면 사람은 "시켰는데 안 했다"로만 보게 된다 —
+         * 이유를 돌려주면 오케스트레이터가 스스로 되묻거나 고칠 수 있다.
+         */
+        if (sessionId === orchestratorId) {
+          return { ok: false, error: '자기 자신에게는 보낼 수 없습니다' }
+        }
+        const target = this.meta.get(sessionId)
+        if (!target) return { ok: false, error: `이 앱이 관리하는 세션이 아닙니다: ${sessionId}` }
+        if (target.archived) return { ok: false, error: `보관된 세션입니다: ${target.name}` }
+
+        try {
+          await this.send(sessionId, text)
+          return { ok: true }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      },
+    }
+  }
+
+  /** 사이드바가 보는 것과 같은 한 줄 — 오케스트레이터도 같은 것을 본다 */
+  private previewOf(sessionId: string): string {
+    const last = this.store.loadMessages(sessionId, 1)
+    const p = last[0]?.payload as { text?: string; summary?: { title?: string } } | undefined
+    return (p?.text ?? p?.summary?.title ?? '').slice(0, 120)
   }
 
   /**

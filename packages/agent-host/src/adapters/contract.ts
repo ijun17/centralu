@@ -23,6 +23,33 @@ import type {
  * 플래그와 구현이 어긋나면 조용히 아무 일도 안 하게 된다 (실제로 겪었다).
  */
 
+/**
+ * 오케스트레이터에게만 주는 도구 (FR-11).
+ *
+ * **여기가 접근 범위의 경계다.** 이 인터페이스가 줄 수 있는 것이 곧 오케스트레이터가
+ * 할 수 있는 전부다 — 이 앱이 관리하는 세션 밖으로 나갈 방법이 아예 없다.
+ * 파일도, 프로젝트도, 다른 도구도 여기 없다.
+ *
+ * 도구 중립적으로 둔다. Claude는 인프로세스 MCP로, 다른 도구는 자기 방식으로
+ * 노출하면 된다 — SDK 타입은 adapters/<tool>/ 밖으로 한 발짝도 못 나온다.
+ */
+export type OrchestratedSession = {
+  sessionId: string
+  name: string
+  project: string
+  state: string
+  tool: ToolName
+  /** 마지막으로 무슨 일이 있었는지 한 줄 */
+  preview: string
+}
+
+export type OrchestratorTools = {
+  /** 지금 이 앱이 관리하는 세션들 (오케스트레이터 자신과 아카이브는 뺀다) */
+  listSessions(): Promise<OrchestratedSession[]>
+  /** 한 세션에 일을 시킨다. 대상이 아니면 이유를 돌려준다 — 조용히 실패하지 않는다 */
+  sendToSession(sessionId: string, text: string): Promise<{ ok: boolean; error?: string }>
+}
+
 export type CreateSessionOpts = {
   sessionId: string
   cwd: string
@@ -31,6 +58,8 @@ export type CreateSessionOpts = {
   effort?: string
   permissionPreset: PermissionPreset
   resumeExternalId?: string
+  /** 주어지면 이 세션은 오케스트레이터다 — 어댑터가 자기 방식으로 도구를 붙인다 */
+  orchestratorTools?: OrchestratorTools
 }
 
 /** 도구가 보관 중인 이전 세션 한 건 (도구 고유 타입은 여기까지 오지 않는다) */

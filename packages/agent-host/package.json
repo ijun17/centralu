@@ -13,7 +13,8 @@
     "@cc/protocol": "workspace:*",
     "better-sqlite3": "^13.0.3",
     "node-pty": "^1.1.0",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
