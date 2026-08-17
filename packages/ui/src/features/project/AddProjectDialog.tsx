@@ -32,8 +32,8 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           }
         }}
       >
-        <h2 className="text-[13px] font-medium text-chalk">프로젝트 추가</h2>
-        <p className="mt-1 text-[11px] text-slate">에이전트를 실행할 디렉토리의 전체 경로를 입력하세요.</p>
+        <h2 className="text-[13px] font-medium text-chalk">Add project</h2>
+        <p className="mt-1 text-[11px] text-slate">Enter the full path of the directory where agents will run.</p>
 
         <input
           autoFocus
@@ -54,21 +54,21 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] text-slate">
-            <Kbd>esc</Kbd> 닫기
+            <Kbd>esc</Kbd> Close
           </span>
           <button
             type="button"
             className="ml-auto rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
             onClick={onClose}
           >
-            취소
+            Cancel
           </button>
           <button
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
             disabled={busy || !path.trim()}
             data-testid="project-add-confirm"
           >
-            추가
+            Add
           </button>
         </div>
       </form>

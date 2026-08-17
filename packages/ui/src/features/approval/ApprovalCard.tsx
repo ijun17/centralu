@@ -31,7 +31,7 @@ export function ApprovalCard({
       else if (k === 'a') {
         const scope = e.altKey ? 'project' : 'session'
         void respond(sessionId, requestId, 'always', scope)
-        setToast(`${scope === 'project' ? '이 프로젝트' : '이 세션'}에서 항상 허용: ${matcherOf(detail)}`)
+        setToast(`Always allow in ${scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
       } else return
       e.preventDefault()
     }
@@ -46,9 +46,9 @@ export function ApprovalCard({
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span className="beacon text-[10px] font-medium tracking-[0.1em]">
-          승인 대기
+          Awaiting approval
         </span>
-        <span className="text-[11px] text-slate">에이전트가 멈춰 기다립니다</span>
+        <span className="text-[11px] text-slate">Agent is blocked, waiting</span>
       </div>
 
       <pre
@@ -59,21 +59,21 @@ export function ApprovalCard({
       </pre>
 
       <div className="mt-3 flex items-center gap-1.5 border-t border-edge bg-void/40 px-3 py-2">
-        <ActionKey k="y" label="허용" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" />
-        <ActionKey k="n" label="거부" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" />
+        <ActionKey k="y" label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" />
+        <ActionKey k="n" label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" />
         <ActionKey
           k="a"
-          label="항상 허용"
+          label="Always allow"
           testId="approve-always"
-          title="⌥를 누른 채 클릭하면 프로젝트 전체에 적용됩니다"
+          title="Hold ⌥ and click to apply to the whole project"
           onClick={(alt) => {
             const scope = alt ? 'project' : 'session'
             void respond(sessionId, requestId, 'always', scope)
-            setToast(`${scope === 'project' ? '이 프로젝트' : '이 세션'}에서 항상 허용: ${matcherOf(detail)}`)
+            setToast(`Always allow in ${scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
           }}
         />
         <span className="ml-auto text-[10px] text-slate">
-          <Kbd>⌥</Kbd> <Kbd>a</Kbd> 프로젝트 전체
+          <Kbd>⌥</Kbd> <Kbd>a</Kbd> whole project
         </span>
       </div>
     </div>
@@ -113,5 +113,5 @@ export function detailText(d: ApprovalDetail): string {
 }
 
 export function matcherOf(d: ApprovalDetail): string {
-  return d.kind === 'command' ? suggestMatcher(d.command) : d.kind === 'file_edit' ? d.path : '기타'
+  return d.kind === 'command' ? suggestMatcher(d.command) : d.kind === 'file_edit' ? d.path : 'other'
 }

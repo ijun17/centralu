@@ -23,7 +23,7 @@ import { acquireInstanceLock } from './dev-services/instance-lock.js'
 // 사용자의 로그인 셸에게 직접 물어보므로 nvm·mise·수동 설치도 잡힌다.
 const pathResult = ensureToolPath()
 if (pathResult.source !== 'unchanged') {
-  console.error(`[agent-host] PATH 보강 (${pathResult.source === 'shell' ? '로그인 셸' : '기본 후보'})`)
+  console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
 
 const { values } = parseArgs({
@@ -64,9 +64,9 @@ function defaultDbPath(): string {
 const lock = acquireInstanceLock(dbPath)
 if (!lock.ok) {
   console.error(
-    `[agent-host] 이미 다른 Control Center가 이 데이터를 쓰고 있습니다 (pid ${lock.heldByPid}).\n` +
-      `  같은 폴더를 두 host가 쓰면 세션 목록이 어긋납니다.\n` +
-      `  먼저 실행 중인 창을 닫거나, 개발 중이라면 pnpm app:dev를 쓰세요 (데이터 폴더가 따로입니다).`,
+    `[agent-host] Another Control Center is already using this data (pid ${lock.heldByPid}).\n` +
+      `  Two hosts on the same folder will desync session lists.\n` +
+      `  Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).`,
   )
   process.exit(1)
 }
@@ -96,7 +96,7 @@ let port: number
 try {
   port = await server.listen()
 } catch (err) {
-  console.error(`\n[agent-host] 기동 실패\n${(err as Error).message}\n`)
+  console.error(`\n[agent-host] failed to start\n${(err as Error).message}\n`)
   process.exit(1)
 }
 // 이 줄은 Tauri 수퍼바이저가 파싱한다 (포트·토큰 전달 경로)
@@ -130,9 +130,9 @@ function record(kind: string, err: unknown): void {
   }
 }
 
-process.on('unhandledRejection', (reason) => record('처리되지 않은 거절', reason))
+process.on('unhandledRejection', (reason) => record('Unhandled rejection', reason))
 process.on('uncaughtException', (err) => {
-  record('처리되지 않은 예외', err)
+  record('Uncaught exception', err)
   void shutdown()
 })
 
@@ -157,7 +157,7 @@ process.on('SIGTERM', shutdown)
 if (values['watch-parent']) {
   process.stdin.resume()
   const onParentGone = () => {
-    console.error('[agent-host] 부모 프로세스가 종료되어 함께 종료합니다')
+    console.error('[agent-host] parent process exited; shutting down')
     void shutdown()
   }
   process.stdin.on('end', onParentGone)

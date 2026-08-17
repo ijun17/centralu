@@ -66,7 +66,7 @@ describe('프로젝트', () => {
   })
 
   it('없는 디렉토리는 거부한다', async () => {
-    await expect(rpc('projects.add', { path: '/nope/does/not/exist' })).rejects.toThrow(/디렉토리/)
+    await expect(rpc('projects.add', { path: '/nope/does/not/exist' })).rejects.toThrow(/Directory not found/)
   })
 
   it('같은 경로 재등록은 중복을 만들지 않는다', async () => {
@@ -167,7 +167,7 @@ describe('RPC 일반', () => {
   })
 
   it('알 수 없는 메서드는 에러', async () => {
-    await expect(rpc('nope.nope', {})).rejects.toThrow(/알 수 없는 메서드/)
+    await expect(rpc('nope.nope', {})).rejects.toThrow(/Unknown method/)
   })
 
   it('잘못된 파라미터는 검증에서 걸린다', async () => {
@@ -352,7 +352,7 @@ describe('자동 이어가기', () => {
     // 도구 자체가 뜨지 못하는 상황
     adapter.failCreate = '도구를 시작할 수 없습니다'
 
-    await expect(rpc('agents.send', { sessionId: s.id, text: '이어서' })).rejects.toThrow(/이어갈 수 없습니다/)
+    await expect(rpc('agents.send', { sessionId: s.id, text: '이어서' })).rejects.toThrow(/Could not resume the conversation/)
     // 보내지 못한 말은 기록에도 남지 않는다 (있지도 않은 대화를 만들지 않는다)
     const msgs = (await rpc('messages.load', { sessionId: s.id, limit: 100 })) as { payload: { text?: string } }[]
     expect(msgs.some((m) => m.payload.text === '이어서')).toBe(false)
@@ -527,7 +527,7 @@ describe('도구에서 지워진 대화', () => {
     const r = await m.resumeSession(s.id)
 
     expect(r.resumed).toBe(false)
-    expect(r.reason).toMatch(/Claude Code에서 삭제/)
+    expect(r.reason).toMatch(/was deleted in Claude Code/)
     // 기록은 읽을 수 있어야 한다 — 세션을 지워버리지 않는다
     expect(m.listSessions().find((x) => x.id === s.id)).toBeDefined()
   })
@@ -593,7 +593,7 @@ describe('같은 대화를 둘이 열지 않는다', () => {
       call('agents.createSession', {
         projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
       }),
-    ).rejects.toThrow(/이미 .*세션에서 열려 있습니다/)
+    ).rejects.toThrow(/already open in the ".*" session/)
     // 반쪽짜리 세션이 남지 않는다
     expect(m.listSessions()).toHaveLength(1)
   })
@@ -740,7 +740,7 @@ describe('재개 식별자가 아직 없을 때', () => {
 
     const r = (await m.restartSession(s.id)) as { resumed: boolean; reason?: string }
     expect(r.resumed).toBe(false)
-    expect(r.reason).toMatch(/재개 식별자를 잃었습니다/)
+    expect(r.reason).toMatch(/Lost this session's resume id/)
   })
 })
 

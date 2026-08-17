@@ -179,7 +179,7 @@ export function AutocompleteMenu({
       {loading && items.length === 0 ? (
         // '없음'이 아니라 '아직'이다 — 세션이 막 떴을 때 스킬이 없는 것처럼 보이면 안 된다
         <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="autocomplete-loading">
-          {kind === 'command' ? '스킬을 불러오는 중…' : '찾는 중…'}
+          {kind === 'command' ? 'Loading skills…' : 'Searching…'}
         </p>
       ) : (
         <ul ref={listRef} className="max-h-56 overflow-y-auto">

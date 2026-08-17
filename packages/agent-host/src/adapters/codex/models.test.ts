@@ -98,7 +98,7 @@ describe('collectModels — 커서를 끝까지 따라간다', () => {
 
   it('커서가 끝나지 않으면 조용히 자르지 않고 잘렸다고 말한다', async () => {
     await expect(collectModels(async () => ({ data: [m('x')], nextCursor: 'never-ends' }))).rejects.toThrow(
-      /잘렸습니다/,
+      /list truncated/,
     )
   })
 })

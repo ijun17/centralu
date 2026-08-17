@@ -51,7 +51,7 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
     const timer = setTimeout(() => {
       void invoke<string | null>('host_error')
         .catch(() => null)
-        .then((err) => fail(err ?? 'agent-host가 시간 안에 준비되지 않았습니다'))
+        .then((err) => fail(err ?? 'agent-host did not become ready in time'))
     }, timeoutMs)
 
     // ① 먼저 구독한다
@@ -111,7 +111,7 @@ export async function focusWindow(): Promise<void> {
 
 /** 디렉토리 선택 — 웹 dev의 경로 타이핑을 대체한다 (FR-19) */
 export async function pickDirectory(): Promise<string | null> {
-  const picked = await openDialog({ directory: true, multiple: false, title: '프로젝트 디렉토리 선택' })
+  const picked = await openDialog({ directory: true, multiple: false, title: 'Choose project directory' })
   return typeof picked === 'string' ? picked : null
 }
 

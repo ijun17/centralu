@@ -17,9 +17,9 @@ import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
  */
 
 const LABEL: Record<string, string> = {
-  session: '5시간',
-  weekly_all: '주간',
-  weekly_scoped: '주간 (모델별)',
+  session: '5 hours',
+  weekly_all: 'Weekly',
+  weekly_scoped: 'Weekly (per model)',
 }
 
 type RawLimit = {
@@ -67,7 +67,7 @@ export type UsageQuery = {
 }
 
 export const UNSUPPORTED =
-  '설치된 Claude Code SDK가 사용량 조회를 지원하지 않습니다 (SDK 업데이트가 필요합니다)'
+  'The installed Claude Code SDK does not support usage queries (update the SDK)'
 
 export async function readUsage(q: UsageQuery | null): Promise<UsageSnapshot> {
   const fn = q?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET

@@ -58,14 +58,14 @@ export function TerminalPane({ projectId }: { projectId: string }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-terminal">
       <div className="flex items-center gap-1.5 border-b border-edge px-3 py-1">
-        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">터미널</span>
+        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">Terminal</span>
         {/* 글자를 빼고 기호만 남긴다 — 옆의 '터미널'이 이미 무엇에 대한 +인지 말해준다 */}
         <button
           className="ml-auto flex items-center justify-center rounded p-1 text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
           onClick={() => void add()}
           data-testid="terminal-add"
-          title="터미널 추가"
-          aria-label="터미널 추가"
+          title="New terminal"
+          aria-label="New terminal"
         >
           <PlusIcon size={16} />
         </button>
@@ -73,7 +73,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
 
       {error && (
         <p className="px-3 py-2 text-[11px] leading-relaxed text-ash" data-testid="terminal-error">
-          터미널을 열 수 없습니다 — {error}
+          Could not open terminal — {error}
         </p>
       )}
 
@@ -168,7 +168,7 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
     const offExit = platform.terminal.onExit((e) => {
       if (e.terminalId !== idRef.current) return
       setDead(true)
-      term.write(`\r\n\x1b[2m— 셸이 종료되었습니다${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
+      term.write(`\r\n\x1b[2m— shell exited${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
     })
     const onData = term.onData((data) => {
       void platform.terminal.input(idRef.current, data).catch(() => {})
@@ -216,15 +216,15 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
               if (next.history) term.write(next.history)
             }}
           >
-            다시 시작
+            Restart
           </button>
         )}
         <button
           className="ml-auto rounded px-1 text-[10px] text-slate transition-colors hover:text-chalk"
           onClick={onClose}
           data-testid={`terminal-close-${info.terminalId}`}
-          title="이 터미널 닫기 (셸이 종료됩니다)"
-          aria-label={`${info.title} 닫기`}
+          title="Close this terminal (the shell exits)"
+          aria-label={`Close ${info.title}`}
         >
           <CloseIcon size={11} />
         </button>

@@ -15,7 +15,7 @@ export function FileTree({ projectId }: { projectId: string }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="file-tree">
       <header className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
-        <span className="text-[11px] text-slate">프로젝트 파일</span>
+        <span className="text-[11px] text-slate">Project files</span>
         <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate">
           <input
             type="checkbox"
@@ -24,7 +24,7 @@ export function FileTree({ projectId }: { projectId: string }) {
             onChange={(e) => setShowIgnored(e.target.checked)}
             data-testid="toggle-ignored"
           />
-          무시된 항목
+          Ignored
         </label>
       </header>
       <div className="min-h-0 flex-1 overflow-auto py-1">
@@ -71,7 +71,7 @@ function Dir({
           <FileRow key={e.path} entry={e} depth={depth} />
         ),
       )}
-      {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-[12px] text-slate">비어 있습니다</li>}
+      {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-[12px] text-slate">Empty</li>}
     </ul>
   )
 }
@@ -129,7 +129,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
         <span className="truncate">{entry.name}</span>
         {/* 에이전트가 방금 만진 파일 (FR-5) — 색이 아니라 기호로 */}
         {touched.includes(entry.path) && (
-          <span className="ml-auto shrink-0 text-[9px] text-slate" title="에이전트가 수정함">
+          <span className="ml-auto shrink-0 text-[9px] text-slate" title="Edited by agent">
             ◆
           </span>
         )}

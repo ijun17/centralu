@@ -21,7 +21,7 @@ export function createRpcHandler(
   terminals?: TerminalService,
 ) {
   const requireTerminals = (): TerminalService => {
-    if (!terminals) throw Object.assign(new Error('터미널을 쓸 수 없습니다'), { code: 'internal' })
+    if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
     return terminals
   }
 
@@ -67,7 +67,7 @@ export function createRpcHandler(
     'agents.capabilities': async (p) => {
       const { tool } = RpcMethods['agents.capabilities'].params.parse(p)
       const a = adapters.get(tool)
-      if (!a) throw Object.assign(new Error(`알 수 없는 도구: ${tool}`), { code: 'tool_not_installed' })
+      if (!a) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
       return a.capabilities
     },
     'agents.detect': async () => Promise.all([...adapters.values()].map((a) => a.detect())),
@@ -130,7 +130,7 @@ export function createRpcHandler(
       const { projectId } = RpcMethods['projects.gitStatus'].params.parse(p)
       const all = await mgr.listProjects()
       const found = all.find((x) => x.id === projectId)
-      if (!found) throw Object.assign(new Error('프로젝트를 찾을 수 없습니다'), { code: 'internal' })
+      if (!found) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       return found
     },
     'sessions.list': async () => mgr.listSessions(),
@@ -182,7 +182,7 @@ export function createRpcHandler(
     'terminal.restart': async (p) => {
       const { terminalId, cols, rows } = RpcMethods['terminal.restart'].params.parse(p)
       const h = requireTerminals().restart(terminalId, cols, rows)
-      if (!h) throw Object.assign(new Error('터미널을 찾을 수 없습니다'), { code: 'internal' })
+      if (!h) throw Object.assign(new Error('Terminal not found'), { code: 'internal' })
       return toInfo(h)
     },
     'approvals.rules': async () => mgr.listApprovalRules(),
@@ -190,7 +190,7 @@ export function createRpcHandler(
 
   return async (method: string, params: unknown): Promise<unknown> => {
     const h = handlers[method as RpcMethodName]
-    if (!h) throw Object.assign(new Error(`알 수 없는 메서드: ${method}`), { code: 'internal' })
+    if (!h) throw Object.assign(new Error(`Unknown method: ${method}`), { code: 'internal' })
     return h(params)
   }
 }

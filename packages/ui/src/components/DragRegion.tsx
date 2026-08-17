@@ -42,7 +42,7 @@ export function DragRegion({
           // Tauri 권한(core:window:allow-start-dragging)이 빠지면 여기서 거부된다.
           if (warned.current) return
           warned.current = true
-          setToast(`창을 옮길 수 없습니다: ${err.message}`)
+          setToast(`Could not move window: ${err.message}`)
         })
       }}
       onDoubleClick={(e) => {

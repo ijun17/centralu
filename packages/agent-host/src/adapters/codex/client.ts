@@ -58,7 +58,7 @@ export class CodexClient {
       const unexpected = !this.closed
       this.closed = true
       // 조용히 흘리면 기다리던 쪽이 영원히 멈춘다 — 어느 쪽이든 이유를 붙여 거절한다
-      const why = unexpected ? 'codex app-server가 종료되었습니다' : 'codex 연결을 닫는 중에 요청이 취소되었습니다'
+      const why = unexpected ? 'codex app-server exited' : 'request cancelled while closing the codex connection'
       for (const [, p] of this.pending) p.reject(new Error(why))
       this.pending.clear()
       this.handlers.onExit(code)
@@ -71,7 +71,7 @@ export class CodexClient {
     try {
       msg = JSON.parse(line) as Record<string, unknown>
     } catch {
-      console.error('[codex] 비JSON 출력:', line.slice(0, 200))
+      console.error('[codex] non-JSON output:', line.slice(0, 200))
       return
     }
 
@@ -97,13 +97,13 @@ export class CodexClient {
   }
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs = 120_000): Promise<T> {
-    if (this.closed) return Promise.reject(new Error('codex app-server가 이미 종료되었습니다'))
+    if (this.closed) return Promise.reject(new Error('codex app-server has already exited'))
     const id = String(this.nextId++)
     this.write({ id, method, params })
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
       setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`${method} 응답이 없습니다`))
+        if (this.pending.delete(id)) reject(new Error(`No response for ${method}`))
       }, timeoutMs)
     })
   }

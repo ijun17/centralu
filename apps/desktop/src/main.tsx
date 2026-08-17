@@ -23,8 +23,8 @@ createTauriPlatform()
 function Starting() {
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-2 bg-void" data-testid="starting">
-      <p className="text-[13px] text-ash">에이전트 호스트를 준비하는 중…</p>
-      <p className="text-[11px] text-slate">처음 실행이라면 폴더 접근 권한을 물어볼 수 있습니다.</p>
+      <p className="text-[13px] text-ash">Starting the agent host…</p>
+      <p className="text-[11px] text-slate">On first run, macOS may ask for folder access.</p>
     </div>
   )
 }
@@ -33,17 +33,17 @@ function Starting() {
 function StartupFailure({ message }: { message: string }) {
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 bg-void px-8 text-center">
-      <p className="text-[13px] text-chalk">에이전트 호스트를 시작하지 못했습니다</p>
+      <p className="text-[13px] text-chalk">Could not start the agent host</p>
       <p className="max-w-md font-mono text-[11px] leading-relaxed text-ash">{message}</p>
       <p className="max-w-md text-[11px] leading-relaxed text-slate">
-        Node.js가 설치돼 있어야 합니다 (<span className="font-mono">node --version</span>). 앱을 다시 실행해도
-        같은 문제가 반복되면 터미널에서 로그를 확인하세요.
+        Node.js must be installed (<span className="font-mono">node --version</span>). If restarting the app hits the
+        same problem, check the logs in a terminal.
       </p>
       <button
         className="mt-1 rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
         onClick={() => location.reload()}
       >
-        다시 시도
+        Retry
       </button>
     </div>
   )
@@ -65,6 +65,6 @@ async function registerGlobalShortcut() {
     })
   } catch (e) {
     // 단축키가 이미 다른 앱에 잡혀 있어도 앱은 정상 동작해야 한다
-    console.warn('전역 단축키를 등록하지 못했습니다', e)
+    console.warn('Could not register the global shortcut', e)
   }
 }

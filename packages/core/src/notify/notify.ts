@@ -43,10 +43,10 @@ export function notificationFor(
   if (session.state === prevState) return null
 
   if (session.state === 'waiting_approval' && policy.approval) {
-    return { kind: 'approval', sessionId: session.id, title: '승인 대기', body: `${session.name} — 에이전트가 멈춰 기다립니다` }
+    return { kind: 'approval', sessionId: session.id, title: 'Awaiting approval', body: `${session.name} — agent is blocked, waiting` }
   }
   if (session.state === 'error' && policy.error) {
-    return { kind: 'error', sessionId: session.id, title: '오류', body: `${session.name} — 세션이 중단되었습니다` }
+    return { kind: 'error', sessionId: session.id, title: 'Error', body: `${session.name} — session stopped` }
   }
   return null
 }
@@ -76,8 +76,8 @@ export function allDoneNotification(
     const waiting = sessions.filter((s) => !s.archived && isWaiting(s.state)).length
     return {
       kind: 'all_done',
-      title: '전부 완료',
-      body: waiting > 0 ? `${waiting}개 세션이 응답을 기다립니다` : '모든 세션이 작업을 마쳤습니다',
+      title: 'All done',
+      body: waiting > 0 ? `${waiting} sessions are waiting for input` : 'Every session has finished',
     }
   }
   return null

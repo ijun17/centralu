@@ -103,9 +103,9 @@ export function SessionView() {
     if (!projectOnly) {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
-          <p className="text-[13px] text-ash">프로젝트나 세션을 선택하세요</p>
+          <p className="text-[13px] text-ash">Select a project or session</p>
           <p className="text-[11px] text-slate">
-            <Kbd>⌘</Kbd> <Kbd>I</Kbd> 로 기다리는 항목만 모아볼 수 있습니다
+            <Kbd>⌘</Kbd> <Kbd>I</Kbd> shows everything waiting on you
           </p>
         </div>
       )
@@ -119,9 +119,9 @@ export function SessionView() {
           <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
         </DragRegion>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-          <p className="text-[13px] text-ash">세션을 선택하거나 새로 시작하세요</p>
+          <p className="text-[13px] text-ash">Select a session or start a new one</p>
           <p className="text-[11px] text-slate">
-            깃·파일은 오른쪽 증거 패널에서 세션 없이도 볼 수 있습니다 (<Kbd>⌘</Kbd> <Kbd>B</Kbd>)
+            Git and files are in the evidence panel on the right, even without a session (<Kbd>⌘</Kbd> <Kbd>B</Kbd>)
           </p>
         </div>
       </section>
@@ -142,17 +142,17 @@ export function SessionView() {
           <span
             className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-chalk' : 'text-slate'}`}
             data-testid="context-gauge"
-            title={`컨텍스트 ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} 토큰`}
+            title={`Context ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} tokens`}
           >
-            컨텍스트 {ctxPct}%
+            Context {ctxPct}%
           </span>
         )}
 
         {session.limit && (
           <span className="readout text-[11px] text-ash" data-testid="limit-badge">
-            한도 {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : '도달'}
+            Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
             {session.limit.resumeAt
-              ? ` · ${new Date(session.limit.resumeAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 해제`
+              ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
               : ''}
           </span>
         )}
@@ -173,7 +173,7 @@ export function SessionView() {
               onClick={() => void interrupt(session.id)}
               data-testid="interrupt"
             >
-              중단
+              Stop
             </button>
           )}
           {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
@@ -181,9 +181,9 @@ export function SessionView() {
             className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
             onClick={() => void restart(session.id)}
             data-testid="restart-session"
-            title="에이전트만 다시 시작합니다 (대화 기록은 그대로)"
+            title="Restarts only the agent (chat history is kept)"
           >
-            새로고침
+            Restart
           </button>
         </span>
       </DragRegion>
@@ -224,7 +224,7 @@ export function SessionView() {
                   이모지를 쓰지 않는다 — OS·폰트마다 생김새가 다르고 대부분 유채색이라
                   "색은 diff 본문에만"이라는 규칙을 곧바로 깬다. 한 글자 기호면 둘 다 없다.
                 */}
-                <span className="readout text-[9px] text-slate" title={a.kind === 'image' ? '이미지' : '파일'}>
+                <span className="readout text-[9px] text-slate" title={a.kind === 'image' ? 'Image' : 'File'}>
                   {a.kind === 'image' ? 'IMG' : 'DOC'}
                 </span>
                 <span className="max-w-40 truncate">{a.name}</span>
@@ -232,7 +232,7 @@ export function SessionView() {
                   type="button"
                   className="text-slate transition-colors hover:text-chalk"
                   onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
-                  aria-label={`${a.name} 첨부 취소`}
+                  aria-label={`Remove attachment ${a.name}`}
                 >
                   <CloseIcon size={11} />
                 </button>
@@ -324,13 +324,13 @@ export function SessionView() {
                 void takeFiles(files)
               }
             }}
-            placeholder="메시지를 입력하세요"
+            placeholder="Type a message"
             data-testid="prompt-input"
           />
           <label
             className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5 text-slate transition-colors hover:bg-graphite hover:text-chalk"
-            title="파일 첨부"
-            aria-label="파일 첨부"
+            title="Attach file"
+            aria-label="Attach file"
           >
             <PlusIcon size={16} />
             <input
@@ -345,14 +345,14 @@ export function SessionView() {
             className="flex shrink-0 items-center justify-center rounded p-1.5 text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-40"
             disabled={!text.trim() && attachments.length === 0}
             data-testid="send"
-            title="보내기 (Enter)"
-            aria-label="보내기"
+            title="Send (Enter)"
+            aria-label="Send"
           >
             <SendIcon />
           </button>
         </div>
         <p className="mt-1.5 text-[10px] text-slate">
-          <Kbd>Enter</Kbd> 보내기 · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> 줄바꿈 · 이미지는 붙여넣기(<Kbd>⌘V</Kbd>)
+          <Kbd>Enter</Kbd> send · <Kbd>⇧</Kbd> <Kbd>Enter</Kbd> newline · paste images (<Kbd>⌘V</Kbd>)
         </p>
       </form>
     </section>
@@ -523,7 +523,7 @@ function ActivityRow({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex items-center gap-2 py-2" data-testid="activity-row">
       <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
-      <span className="text-[12px] text-ash">응답 기다리는 중</span>
+      <span className="text-[12px] text-ash">Waiting for response</span>
       {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
       {seconds >= 2 && (
         <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
@@ -536,17 +536,17 @@ function ActivityRow({ sessionId }: { sessionId: string }) {
         onClick={() => void interrupt(sessionId)}
         data-testid="activity-interrupt"
       >
-        중지
+        Stop
       </button>
     </div>
   )
 }
 
 export function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}초`
+  if (seconds < 60) return `${seconds}s`
   const min = Math.floor(seconds / 60)
-  if (min < 60) return `${min}분 ${seconds % 60}초`
-  return `${Math.floor(min / 60)}시간 ${min % 60}분`
+  if (min < 60) return `${min}m ${seconds % 60}s`
+  return `${Math.floor(min / 60)}h ${min % 60}m`
 }
 
 /**
@@ -602,7 +602,7 @@ function OlderSentinel({
   return (
     <div ref={ref} className="flex justify-center py-2" data-testid="load-older">
       <span className="readout text-[10px] text-slate">
-        {loading ? '이전 대화를 불러오는 중…' : '위로 올리면 더 불러옵니다'}
+        {loading ? 'Loading earlier messages…' : 'Scroll up to load more'}
       </span>
     </div>
   )
@@ -628,13 +628,13 @@ function DormantNote({ sessionId }: { sessionId: string }) {
         className="flex items-center gap-2 border-t border-edge px-4 py-1.5 text-[11px] leading-relaxed text-ash"
         data-testid="dormant-note"
       >
-        <span className="min-w-0 flex-1 break-words">이어가지 못했습니다 — {error}</span>
+        <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
         <button
           className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
           onClick={() => void wake(sessionId)}
           data-testid="dormant-retry"
         >
-          다시 시도
+          Retry
         </button>
       </p>
     )
@@ -642,7 +642,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
 
   return (
     <p className="border-t border-edge px-4 py-1.5 text-[11px] text-slate" data-testid="dormant-note">
-      {waking ? '세션을 깨우는 중…' : '잠들어 있습니다 — 메시지를 보내면 자동으로 이어집니다'}
+      {waking ? 'Waking session…' : 'Dormant — sending a message resumes it automatically'}
     </p>
   )
 }
@@ -680,7 +680,7 @@ function ChatRow({ item }: { item: ChatItem }) {
     if (!item.decision) return null
     return (
       <p className="readout text-[11px] text-slate" data-testid="msg-approval-log">
-        {item.decision === 'deny' ? '거부함' : '허용함'} · {item.summary}
+        {item.decision === 'deny' ? 'Denied' : 'Allowed'} · {item.summary}
       </p>
     )
   }
@@ -727,7 +727,7 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
         </span>
         <span className="readout shrink-0 text-[11px] text-ash">{item.tool}</span>
         <span className="readout truncate text-[11px] text-slate">{item.title}</span>
-        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">실패</span>}
+        {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">Failed</span>}
       </button>
 
       {lines.length > 0 && (
@@ -744,7 +744,7 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
               onClick={() => setOpen(true)}
               data-testid="tool-card-more"
             >
-              {hidden}줄 더 보기
+              {hidden} more lines
             </button>
           )}
         </div>

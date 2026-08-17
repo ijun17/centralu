@@ -7,12 +7,12 @@ import type { SessionState } from '@cc/protocol'
  * 승인 대기만 순백이고 나머지는 어둡다 — 화면에서 가장 밝은 것이 곧 나를 기다리는 것이다.
  */
 const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string }> = {
-  waiting_approval: { glyph: '●', tone: 'beacon', label: '승인 대기' },
-  error: { glyph: '✕', tone: 'text-beacon', label: '오류' },
-  waiting_input: { glyph: '○', tone: 'text-ash', label: '응답 대기' },
-  working: { glyph: '◆', tone: 'text-ash breathe', label: '작업 중' },
-  limited: { glyph: '▬', tone: 'text-slate', label: '한도 도달' },
-  idle: { glyph: '·', tone: 'text-slate', label: '유휴' },
+  waiting_approval: { glyph: '●', tone: 'beacon', label: 'Awaiting approval' },
+  error: { glyph: '✕', tone: 'text-beacon', label: 'Error' },
+  waiting_input: { glyph: '○', tone: 'text-ash', label: 'Waiting for input' },
+  working: { glyph: '◆', tone: 'text-ash breathe', label: 'Working' },
+  limited: { glyph: '▬', tone: 'text-slate', label: 'Limit reached' },
+  idle: { glyph: '·', tone: 'text-slate', label: 'Idle' },
 }
 
 /** 상태의 한국어 이름. 점을 안 그리는 자리(도구 표식 등)에서도 같은 말을 써야 한다 */
@@ -39,10 +39,10 @@ export function Kbd({ children, live = false }: { children: ReactNode; live?: bo
 
 export function formatWaiting(ms: number): string {
   const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}초`
+  if (s < 60) return `${s}s`
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}분`
-  return `${Math.floor(m / 60)}시간 ${m % 60}분`
+  if (m < 60) return `${m}m`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
 /**

@@ -23,12 +23,12 @@ const TOOL_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Code
 /** 방금 · 32분 전 · 3시간 전 · 5일 전 — 정확한 시각보다 '얼마나 됐나'가 중요하다 */
 function ago(ms: number): string {
   const min = Math.floor((Date.now() - ms) / 60000)
-  if (min < 1) return '방금'
-  if (min < 60) return `${min}분 전`
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
   const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour}시간 전`
+  if (hour < 24) return `${hour}h ago`
   const day = Math.floor(hour / 24)
-  return day < 30 ? `${day}일 전` : `${Math.floor(day / 30)}개월 전`
+  return day < 30 ? `${day}d ago` : `${Math.floor(day / 30)}mo ago`
 }
 
 /**
@@ -79,7 +79,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         setPast(
           r.supported
             ? { status: 'ok', sessions: r.sessions }
-            : { status: 'unsupported', reason: r.reason ?? '이전 세션 목록을 가져올 수 없습니다' },
+            : { status: 'unsupported', reason: r.reason ?? 'Could not list past conversations' },
         )
       })
       .catch((e: Error) => alive && setPast({ status: 'unsupported', reason: e.message }))
@@ -122,16 +122,16 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           }
         }}
       >
-        <h2 className="text-[13px] font-medium text-chalk">새 세션 · {project?.name}</h2>
+        <h2 className="text-[13px] font-medium text-chalk">New session · {project?.name}</h2>
 
         {running.length > 0 && (
           <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="concurrent-warning">
-            이 디렉토리에서 세션 {running.length}개가 실행 중입니다. 같은 파일을 고치면 변경이 유실될 수 있습니다.
+            {running.length} sessions are already running in this directory. Editing the same files can lose changes.
           </p>
         )}
 
         <section className="mt-3.5">
-          <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">도구</h3>
+          <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">Tool</h3>
           <div className="flex gap-1.5">
             {(['claude', 'codex'] as const).map((t) => (
               <button
@@ -152,11 +152,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           {blocked && (
             <p className="mt-1.5 text-[11px] text-ash" data-testid="tool-blocked">
               {info(tool)?.installed
-                ? `${TOOL_LABEL[tool]}에 로그인이 필요합니다 — 터미널에서 ${tool === 'claude' ? 'claude' : 'codex login'} 실행`
-                : `${TOOL_LABEL[tool]}를 찾을 수 없습니다 (${info(tool)?.detail ?? '미설치'})`}
+                ? `${TOOL_LABEL[tool]} needs a login — run ${tool === 'claude' ? 'claude' : 'codex login'} in a terminal`
+                : `${TOOL_LABEL[tool]} not found (${info(tool)?.detail ?? 'not installed'})`}
             </p>
           )}
-          <p className="mt-1.5 text-[10px] text-slate">모델과 권한은 세션을 만든 뒤 헤더에서 바꿉니다.</p>
+          <p className="mt-1.5 text-[10px] text-slate">Model and permissions are changed in the header after the session is created.</p>
         </section>
 
         {/*
@@ -165,7 +165,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         */}
         <section className="mt-3.5">
           <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">
-            대화 <span className="normal-case tracking-normal text-slate/70">{TOOL_LABEL[tool]}</span>
+            Conversations <span className="normal-case tracking-normal text-slate/70">{TOOL_LABEL[tool]}</span>
           </h3>
           <div
             className="max-h-52 overflow-y-auto rounded border border-edge bg-panel"
@@ -175,23 +175,23 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               selected={!resume}
               onSelect={() => setResume(null)}
               testId="past-new"
-              title="새 대화 시작"
-              meta="빈 세션"
+              title="Start a new conversation"
+              meta="Empty session"
             />
             {past.status === 'loading' && (
               <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-loading">
-                이전 대화를 찾는 중…
+                Looking for past conversations…
               </p>
             )}
             {/* 구버전 도구를 쓴다고 새 세션까지 막지 않는다 — 이유만 조용히 알린다 */}
             {past.status === 'unsupported' && (
               <p className="px-2.5 py-2 text-[11px] leading-relaxed text-slate" data-testid="past-unsupported">
-                이전 대화를 불러올 수 없습니다 — {past.reason}
+                Could not load past conversations — {past.reason}
               </p>
             )}
             {past.status === 'ok' && past.sessions.length === 0 && (
               <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-empty">
-                이 폴더에서 진행한 이전 대화가 없습니다.
+                No past conversations in this folder.
               </p>
             )}
             {past.status === 'ok' &&
@@ -219,9 +219,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                     안 그러면 최근 대화가 옛날 것처럼 보여서 못 찾는다 (도그푸딩 지적).
                   */
                   meta={[
-                    `마지막 ${ago(s.updatedAt)}`,
+                    `last ${ago(s.updatedAt)}`,
                     s.branch,
-                    s.importedAs ? '이미 열려 있음 · 누르면 이동' : null,
+                    s.importedAs ? 'Already open · click to jump' : null,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
@@ -230,15 +230,15 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           </div>
           {resume && (
             <p className="mt-1.5 text-[10px] leading-relaxed text-slate" data-testid="resume-note">
-              지난 대화를 이어받습니다. 도구가 기억하는 맥락 그대로 이어지고, 화면에는 최근 대화가 복원됩니다.
+              Resumes a past conversation. The tool keeps its context, and recent messages are restored here.
             </p>
           )}
         </section>
 
         <section className="mt-3.5">
           <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">
-            {resume ? '이어서 할 말' : '시작 프롬프트'}{' '}
-            <span className="normal-case tracking-normal text-slate/70">선택</span>
+            {resume ? 'Continue with' : 'Initial prompt'}{' '}
+            <span className="normal-case tracking-normal text-slate/70">optional</span>
           </h3>
           <textarea
             autoFocus
@@ -249,7 +249,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit()
             }}
-            placeholder="무엇을 시킬까요"
+            placeholder="What should it do?"
             data-testid="initial-prompt"
           />
         </section>
@@ -262,17 +262,17 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] text-slate">
-            <Kbd>esc</Kbd> 닫기 · <Kbd>⌘</Kbd> <Kbd>↵</Kbd> {resume ? '불러오기' : '시작'}
+            <Kbd>esc</Kbd> close · <Kbd>⌘</Kbd> <Kbd>↵</Kbd> {resume ? 'Load' : 'Start'}
           </span>
           <button type="button" className="ml-auto rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onClose}>
-            취소
+            Cancel
           </button>
           <button
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
             disabled={busy || blocked}
             data-testid="create-session-confirm"
           >
-            {busy ? (resume ? '불러오는 중…' : '시작하는 중…') : resume ? '불러오기' : '시작'}
+            {busy ? (resume ? 'Loading…' : 'Starting…') : resume ? 'Load' : 'Start'}
           </button>
         </div>
       </form>

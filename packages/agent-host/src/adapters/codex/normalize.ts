@@ -22,10 +22,10 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
   if (type === 'fileChange') {
     const changes = Array.isArray(item.changes) ? item.changes : []
     const paths = changes.map((c) => str(obj(c).path)).filter(Boolean)
-    return { tool: 'Edit', title: paths.join(', ') || '파일 수정', readOnly: false, paths }
+    return { tool: 'Edit', title: paths.join(', ') || 'Edit files', readOnly: false, paths }
   }
   if (type === 'mcpToolCall') {
-    return { tool: str(obj(item.invocation).tool) || 'MCP', title: str(item.title) || 'MCP 도구', readOnly: false, paths: [] }
+    return { tool: str(obj(item.invocation).tool) || 'MCP', title: str(item.title) || 'MCP tool', readOnly: false, paths: [] }
   }
   if (type === 'webSearch') {
     return { tool: 'WebSearch', title: str(item.query), readOnly: true, paths: [] }
@@ -51,7 +51,7 @@ export function approvalDetailFrom(method: string, params: Record<string, unknow
     const diff = changes.map((c) => str(obj(c).diff ?? obj(c).unifiedDiff)).filter(Boolean).join('\n')
     return {
       kind: 'file_edit',
-      path: paths[0] ?? str(params.path) ?? '(경로 없음)',
+      path: paths[0] ?? str(params.path) ?? '(no path)',
       diffPreview: diff.slice(0, 4000),
       multi: paths.length > 1,
     }
@@ -147,7 +147,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         {
           type: 'error',
           sessionId,
-          error: { code: 'internal', message: str(obj(p.error).message) || str(p.message) || '알 수 없는 오류', retryable: true },
+          error: { code: 'internal', message: str(obj(p.error).message) || str(p.message) || 'Unknown error', retryable: true },
         },
       ]
 

@@ -53,10 +53,10 @@ export class HostServer {
         if (err.code === 'EADDRINUSE') {
           reject(
             new Error(
-              `포트 ${this.opts.port}이 이미 사용 중입니다.\n` +
-                `  · 이미 host가 떠 있다면 그대로 쓰면 됩니다 (UI만 실행하세요)\n` +
-                `  · 남은 프로세스를 정리하려면: lsof -ti:${this.opts.port} | xargs kill\n` +
-                `  · 다른 포트로 띄우려면: pnpm host --port ${this.opts.port + 1}`,
+              `Port ${this.opts.port} is already in use.\n` +
+                `  · If a host is already running, just use it (start only the UI)\n` +
+                `  · To clean up a leftover process: lsof -ti:${this.opts.port} | xargs kill\n` +
+                `  · To use another port: pnpm host --port ${this.opts.port + 1}`,
             ),
           )
           return
@@ -110,11 +110,11 @@ export class HostServer {
       try {
         parsedJson = JSON.parse(String(raw))
       } catch {
-        return this.sendError(ws, null, { code: 'internal', message: '잘못된 JSON', retryable: false })
+        return this.sendError(ws, null, { code: 'internal', message: 'Malformed JSON', retryable: false })
       }
       const frame = parseClientFrame(parsedJson)
       if (!frame.success) {
-        return this.sendError(ws, null, { code: 'internal', message: '알 수 없는 프레임', retryable: false })
+        return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
       }
 
       if (frame.data.kind === 'hello') {
@@ -125,7 +125,7 @@ export class HostServer {
         if (frame.data.protocolVersion !== PROTOCOL_VERSION) {
           this.sendError(ws, null, {
             code: 'version_mismatch',
-            message: `프로토콜 버전 불일치 (서버 ${PROTOCOL_VERSION}, 클라이언트 ${frame.data.protocolVersion})`,
+            message: `Protocol version mismatch (server ${PROTOCOL_VERSION}, client ${frame.data.protocolVersion})`,
             retryable: false,
           })
           ws.close(4002, 'version mismatch')
@@ -161,7 +161,7 @@ export class HostServer {
         const e = err as Error & { code?: ProtocolError['code'] }
         this.sendError(ws, frame.data.id, {
           code: e.code ?? 'internal',
-          message: e.message ?? '알 수 없는 오류',
+          message: e.message ?? 'Unknown error',
           retryable: false,
         })
       }

@@ -20,7 +20,7 @@ function safeJoin(root: string, rel: string): string {
   const target = resolve(root, rel || '.')
   const rootResolved = resolve(root)
   if (target !== rootResolved && !target.startsWith(rootResolved + sep)) {
-    throw Object.assign(new Error('프로젝트 밖의 경로입니다'), { code: 'internal' })
+    throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
   }
   return target
 }
@@ -70,7 +70,7 @@ export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
 export async function readTextFile(root: string, rel: string): Promise<FsFile> {
   const file = safeJoin(root, rel)
   const info = await stat(file)
-  if (info.isDirectory()) throw Object.assign(new Error('디렉토리입니다'), { code: 'internal' })
+  if (info.isDirectory()) throw Object.assign(new Error('Path is a directory'), { code: 'internal' })
 
   const buf = await readFile(file)
   // 널 바이트가 있으면 바이너리로 본다 (git과 같은 휴리스틱)

@@ -133,17 +133,17 @@ function TopBar() {
         className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-graphite/50"
         onClick={() => toggleInbox()}
         data-testid="counter"
-        title="기다리는 항목 (⌘I)"
+        title="Waiting (⌘I)"
       >
         <Metric
-          label="승인"
+          label="Approvals"
           value={counts.approval}
           tone={counts.approval > 0 ? 'beacon' : 'text-slate'}
           testId="count-approval"
         />
         <span className="text-edge">│</span>
         <Metric
-          label="응답 대기"
+          label="Waiting for input"
           value={counts.input}
           tone={counts.input > 0 ? 'text-ash' : 'text-slate'}
           testId="count-input"
@@ -151,7 +151,7 @@ function TopBar() {
         {counts.error > 0 && (
           <>
             <span className="text-edge">│</span>
-            <Metric label="오류" value={counts.error} tone="beacon" testId="count-error" />
+            <Metric label="Error" value={counts.error} tone="beacon" testId="count-error" />
           </>
         )}
       </button>
@@ -159,11 +159,11 @@ function TopBar() {
       <span className="flex items-center gap-1 text-[10px] text-slate">
         <Kbd live={waiting > 0}>⌘</Kbd>
         <Kbd live={waiting > 0}>I</Kbd>
-        <span className="mr-2">목록</span>
+        <span className="mr-2">List</span>
         <Kbd live={waiting > 0}>⌘</Kbd>
         <Kbd live={waiting > 0}>⇧</Kbd>
         <Kbd live={waiting > 0}>A</Kbd>
-        다음 항목
+        Next item
       </span>
 
       <span className="ml-auto flex items-center gap-3">
@@ -174,22 +174,22 @@ function TopBar() {
             }`}
             aria-hidden
           />
-          {connection === 'connected' ? '연결됨' : connection === 'connecting' ? '연결 중' : '연결 끊김'}
+          {connection === 'connected' ? 'Connected' : connection === 'connecting' ? 'Connecting' : 'Disconnected'}
         </span>
         <button
           className="rounded px-2 py-1 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
           onClick={() => useStore.getState().toggleUsage(true)}
           data-testid="open-usage"
-          title="사용량 (구독 한도)"
+          title="Usage (plan limits)"
         >
-          사용량
+          Usage
         </button>
         <button
           className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk"
           onClick={() => setAddOpen(true)}
           data-testid="add-project"
         >
-          프로젝트 추가
+          Add project
         </button>
       </span>
 

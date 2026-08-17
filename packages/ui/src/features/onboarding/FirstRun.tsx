@@ -44,19 +44,19 @@ export function FirstRun() {
   return (
     <div className="flex flex-1 items-center justify-center px-8" data-testid="first-run">
       <div className="w-full max-w-lg">
-        <h1 className="text-[15px] font-medium tracking-tight text-chalk">시작하기</h1>
+        <h1 className="text-[15px] font-medium tracking-tight text-chalk">Get started</h1>
         <p className="mt-1 text-[12px] text-ash">
-          에이전트를 실행할 프로젝트를 등록하면 관제가 시작됩니다.
+          Register a project to run agents in and monitoring begins.
         </p>
 
         {/* 1단계: 도구 감지 — 하나만 준비돼 있어도 진행할 수 있다 */}
         <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-[0.12em] text-slate">에이전트 도구</h2>
+          <h2 className="text-[11px] uppercase tracking-[0.12em] text-slate">Agent tools</h2>
           <ul className="mt-2 space-y-1.5">
             {tools === null ? (
-              <li className="text-[12px] text-slate">확인 중…</li>
+              <li className="text-[12px] text-slate">Checking…</li>
             ) : tools.length === 0 ? (
-              <li className="text-[12px] text-ash">도구를 확인할 수 없습니다</li>
+              <li className="text-[12px] text-ash">Could not detect tools</li>
             ) : (
               tools.map((t) => <ToolRow key={t.tool} d={t} />)
             )}
@@ -66,13 +66,13 @@ export function FirstRun() {
             onClick={() => void detect()}
             data-testid="redetect"
           >
-            다시 확인
+            Check again
           </button>
         </section>
 
         {/* 2단계: 프로젝트 등록 */}
         <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-[0.12em] text-slate">프로젝트</h2>
+          <h2 className="text-[11px] uppercase tracking-[0.12em] text-slate">Project</h2>
           <button
             className="mt-2 w-full rounded border border-edge bg-panel px-3 py-2.5 text-left text-[13px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
             disabled={busy}
@@ -89,22 +89,22 @@ export function FirstRun() {
               }
             }}
           >
-            디렉토리 선택…
+            Choose directory…
             <span className="mt-0.5 block text-[11px] text-slate">
-              에이전트가 이 디렉토리에서 실행됩니다. git 저장소가 아니어도 됩니다.
+              Agents run in this directory. It does not have to be a git repo.
             </span>
           </button>
         </section>
 
         {!canStart && tools !== null && tools.length > 0 && (
           <p className="mt-5 text-[11px] leading-relaxed text-ash" data-testid="first-run-blocked">
-            사용할 수 있는 도구가 없습니다. 위 안내대로 설치·로그인한 뒤 다시 확인을 눌러주세요.
-            프로젝트는 지금 등록해 두어도 됩니다.
+            No usable tools. Install and log in as shown above, then press Check again.
+            You can still register a project now.
           </p>
         )}
 
         <p className="mt-6 text-[11px] text-slate">
-          <Kbd>⌘</Kbd> <Kbd>I</Kbd> 는 언제든 기다리는 항목만 모아 보여줍니다.
+          <Kbd>⌘</Kbd> <Kbd>I</Kbd> shows everything waiting on you, anytime.
         </p>
       </div>
     </div>
@@ -122,12 +122,12 @@ function ToolRow({ d }: { d: Detection }) {
       <span className="readout text-[11px] text-slate">{d.detail}</span>
       {!d.installed && (
         <code className="ml-auto rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ash">
-          {INSTALL_HINT[d.tool] ?? '설치 필요'}
+          {INSTALL_HINT[d.tool] ?? 'Install required'}
         </code>
       )}
       {d.installed && !d.loggedIn && (
         <span className="ml-auto text-[11px] text-ash">
-          터미널에서 <code className="font-mono">{d.tool}</code> 실행 후 로그인
+          Run <code className="font-mono">{d.tool}</code> in a terminal and log in
         </span>
       )}
     </li>

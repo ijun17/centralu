@@ -27,7 +27,7 @@ describe('세션 생성 실패', () => {
     const project = (await mgr.listProjects())[0]!
     await expect(
       mgr.createSession({ projectId: project.id, cwd: '/tmp', tool: 'claude', permissionPreset: 'normal' }),
-    ).rejects.toThrow('시작하지 못했습니다')
+    ).rejects.toThrow('Could not start')
 
     expect(mgr.listSessions()).toHaveLength(0)
     expect(store.listSessions()).toHaveLength(0)

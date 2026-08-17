@@ -30,9 +30,9 @@ describe('claude 사용량', () => {
     const s = claudeSnapshot(RAW)
     expect(s.plan).toBe('max')
     expect(s.windows.map((w) => [w.id, w.label, w.percent])).toEqual([
-      ['session', '5시간', 8],
-      ['weekly_all', '주간', 15],
-      ['weekly_scoped', '주간 (모델별)', 6],
+      ['session', '5 hours', 8],
+      ['weekly_all', 'Weekly', 15],
+      ['weekly_scoped', 'Weekly (per model)', 6],
     ])
     expect(s.windows[2]!.scope).toBe('Opus')
   })
@@ -80,7 +80,7 @@ describe('codex 사용량', () => {
     const s = codexSnapshot(RATE, USAGE)
     expect(s.plan).toBe('pro')
     expect(s.windows).toHaveLength(1) // secondary가 null이면 넣지 않는다
-    expect(s.windows[0]).toMatchObject({ id: 'primary', label: '1주', percent: 22 })
+    expect(s.windows[0]).toMatchObject({ id: 'primary', label: '1w', percent: 22 })
     // 초 단위 유닉스 시각 → ISO
     expect(s.windows[0]!.resetsAt).toMatch(/^\d{4}-/)
   })

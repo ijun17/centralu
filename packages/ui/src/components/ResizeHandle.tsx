@@ -86,7 +86,7 @@ export function ResizeHandle({
       aria-orientation={side === 'top' ? 'horizontal' : 'vertical'}
       aria-valuemin={min}
       aria-valuemax={max}
-      title={side === 'top' ? '끌어서 높이 조절 · 더블클릭으로 기본값' : '끌어서 폭 조절 · 더블클릭으로 기본값'}
+      title={side === 'top' ? 'Drag to resize height · double-click to reset' : 'Drag to resize width · double-click to reset'}
     />
   )
 }

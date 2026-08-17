@@ -49,9 +49,9 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   if (!path) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2" data-testid="viewer-empty">
-        <p className="text-[13px] text-ash">파일을 선택하세요</p>
+        <p className="text-[13px] text-ash">Select a file</p>
         <p className="text-[11px] text-slate">
-          <Kbd>⌘⇧2</Kbd> 파일 트리에서 고르면 여기에 열립니다
+          <Kbd>⌘⇧2</Kbd> pick a file in the tree to open it here
         </p>
       </div>
     )
@@ -65,14 +65,14 @@ export function CodeViewer({ projectId }: { projectId: string }) {
         </span>
         <input
           className="ml-2 w-40 rounded border border-edge bg-panel px-2 py-0.5 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-          placeholder="파일 내 검색"
+          placeholder="Search in file"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           data-testid="viewer-search"
         />
         {query && (
           <span className="readout text-[10px] text-slate" data-testid="viewer-match-count">
-            {matches.size}줄
+            {matches.size} lines
           </span>
         )}
         <button
@@ -80,15 +80,15 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           onClick={() => void platform.system.openInIde(path)}
           data-testid="viewer-open-ide"
         >
-          IDE에서 열기
+          Open in IDE
         </button>
       </header>
 
       {file === null ? (
-        <p className="p-3 text-[12px] text-slate">읽는 중…</p>
+        <p className="p-3 text-[12px] text-slate">Loading…</p>
       ) : file.binary ? (
         <p className="p-3 text-[12px] text-slate" data-testid="viewer-binary">
-          바이너리 파일입니다 ({(file.bytes / 1024).toFixed(0)}KB)
+          Binary file ({(file.bytes / 1024).toFixed(0)}KB)
         </p>
       ) : (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[18px]">
@@ -107,7 +107,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             ))}
           </div>
           {file.truncated && (
-            <p className="p-2 text-[11px] text-slate">…파일이 커서 일부만 표시합니다. IDE에서 열어 확인하세요.</p>
+            <p className="p-2 text-[11px] text-slate">…file is large; showing part of it. Open in your IDE to see the rest.</p>
           )}
         </div>
       )}

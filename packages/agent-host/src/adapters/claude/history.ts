@@ -15,7 +15,7 @@ import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
  */
 
 export const UNSUPPORTED =
-  '설치된 Claude Code SDK가 이전 세션 목록을 지원하지 않습니다 (SDK 업데이트가 필요합니다)'
+  'The installed Claude Code SDK does not support listing past sessions (update the SDK)'
 
 /** SDK 표면 중 우리가 쓰는 부분만. 여기 없는 필드는 있어도 무시한다 (앞으로 늘어나도 안전) */
 type SdkSessionInfo = {
@@ -79,7 +79,7 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
       title:
         [r.customTitle, r.summary, r.firstPrompt]
           .map((c) => (typeof c === 'string' ? cleanTitle(c) : ''))
-          .find((c) => c.length > 0) ?? '제목 없는 세션',
+          .find((c) => c.length > 0) ?? 'Untitled session',
       updatedAt: num(r.lastModified) ?? Date.now(),
       createdAt: num(r.createdAt),
       branch: str(r.gitBranch),

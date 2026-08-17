@@ -14,9 +14,9 @@ import { useStore } from '../../store/store.js'
  */
 
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
-  { value: 'safe', label: '안전', hint: '모든 작업을 묻습니다' },
-  { value: 'normal', label: '일반', hint: '위험한 작업만 묻습니다' },
-  { value: 'auto', label: '자동', hint: '묻지 않습니다 — 승인 화면이 뜨지 않습니다' },
+  { value: 'safe', label: 'Safe', hint: 'Asks for everything' },
+  { value: 'normal', label: 'Normal', hint: 'Asks only for risky actions' },
+  { value: 'auto', label: 'Auto', hint: 'Never asks — no approval prompts' },
 ]
 
 const SELECT =
@@ -88,7 +88,7 @@ export function SessionSettings({
           void update(sessionId, { model: next, effort: null })
         }}
         data-testid="model-select"
-        title={reason ? `모델 목록을 읽지 못했습니다: ${reason}` : '모델 — 다음 턴부터 적용됩니다'}
+        title={reason ? `Could not load models: ${reason}` : 'Model — applies from the next turn'}
       >
         {/*
           도구가 자기 '기본' 항목을 주면(Claude의 `default`) 우리 것을 또 넣지 않는다 —
@@ -96,7 +96,7 @@ export function SessionSettings({
         */}
         {!models.some((m) => m.id === 'default') && (
           <option value="" className="bg-panel">
-            기본
+            Default
           </option>
         )}
         {options.map((m) => (
@@ -113,14 +113,14 @@ export function SessionSettings({
           value={effort ?? ''}
           onChange={(e) => void update(sessionId, { effort: e.target.value || null })}
           data-testid="effort-select"
-          title="추론 강도 — 높을수록 더 깊게 생각하고 더 많이 씁니다"
+          title="Reasoning effort — higher thinks deeper and costs more"
         >
           <option value="" className="bg-panel">
-            강도 · 기본
+            Effort · Default
           </option>
           {current.efforts.map((lv) => (
             <option key={lv} value={lv} className="bg-panel">
-              강도 · {lv}
+              Effort · {lv}
             </option>
           ))}
         </select>
@@ -135,7 +135,7 @@ export function SessionSettings({
       >
         {PRESETS.map((p) => (
           <option key={p.value} value={p.value} className="bg-panel">
-            권한 · {p.label}
+            Perms · {p.label}
           </option>
         ))}
       </select>

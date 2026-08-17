@@ -14,7 +14,7 @@ function resolveSchemaPath(): string {
     new URL('../../../protocol/src/schema/schema.sql', import.meta.url), // 소스 트리
   ].map((u) => fileURLToPath(u))
   const found = candidates.find((p) => existsSync(p))
-  if (!found) throw new Error(`schema.sql을 찾을 수 없습니다: ${candidates.join(', ')}`)
+  if (!found) throw new Error(`schema.sql not found: ${candidates.join(', ')}`)
   return found
 }
 

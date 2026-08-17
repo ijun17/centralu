@@ -39,14 +39,14 @@ export function ApprovalBanner() {
             onClick={() => void respond(session.id, pending.requestId, 'allow')}
             data-testid="banner-allow"
           >
-            <Kbd live>y</Kbd> 허용
+            <Kbd live>y</Kbd> Allow
           </button>
           <button
             className="rounded px-1.5 py-1 text-[12px] text-slate hover:bg-graphite hover:text-chalk"
             onClick={() => void respond(session.id, pending.requestId, 'deny')}
             data-testid="banner-deny"
           >
-            거부
+            Deny
           </button>
         </span>
       ) : (
@@ -56,7 +56,7 @@ export function ApprovalBanner() {
           data-testid="banner-review"
           title={reasonText(decision.reason)}
         >
-          내용 확인 →
+          Review →
         </button>
       )}
     </div>
@@ -65,10 +65,10 @@ export function ApprovalBanner() {
 
 function reasonText(reason: string): string {
   return reason === 'diff_required'
-    ? '변경 내용을 봐야 판단할 수 있습니다'
+    ? 'You need to see the diff to decide'
     : reason === 'too_long'
-      ? '명령이 길어 여기서는 잘립니다'
+      ? 'Command is too long to show here'
       : reason === 'multi_file'
-        ? '여러 파일을 한 번에 수정합니다'
-        : '내용을 확인해야 합니다'
+        ? 'Edits several files at once'
+        : 'Needs review'
 }

@@ -41,14 +41,14 @@ export function Overlay() {
     <div className="absolute inset-0 z-20 flex flex-col bg-void" data-testid="overlay">
       <header className="flex items-center gap-2 border-b border-edge bg-pit px-3 py-1.5">
         <span className="text-[11px] uppercase tracking-[0.12em] text-slate">
-          {overlay.kind === 'git' ? '깃' : '파일'}
+          {overlay.kind === 'git' ? 'Git' : 'Files'}
         </span>
         <button
           className="ml-auto flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
           onClick={close}
           data-testid="overlay-close"
         >
-          <Kbd>esc</Kbd> 대화로 돌아가기
+          <Kbd>esc</Kbd> back to chat
         </button>
       </header>
       {overlay.kind === 'viewer' ? (

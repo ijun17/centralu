@@ -103,7 +103,7 @@ function PanelHeader({
             className="readout truncate text-[10px] text-slate transition-colors hover:text-chalk"
             onClick={openBranches}
             data-testid="evidence-branch"
-            title="브랜치 전환"
+            title="Switch branch"
           >
             {branch}
           </button>
@@ -112,7 +112,7 @@ function PanelHeader({
           className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
           onClick={() => togglePanel(false)}
           data-testid="evidence-close"
-          title="증거 패널 접기 (⌘B)"
+          title="Collapse evidence panel (⌘B)"
         >
           {/* 접기도 '펼침의 반대'라 같은 표시를 쓴다 — 뜻이 같으면 모양도 같아야 한다 */}
           <ChevronIcon open={false} />
@@ -122,9 +122,9 @@ function PanelHeader({
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1" data-testid="evidence-tabs">
         {(
           [
-            ['git', '깃'],
-            ['files', '파일'],
-            ['terminal', '터미널'],
+            ['git', 'Git'],
+            ['files', 'Files'],
+            ['terminal', 'Terminal'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -162,7 +162,7 @@ function PanelBody({
       <div className="flex min-h-0 flex-1 flex-col">
         {tab === 'git' && !isRepo && (
           <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-not-repo">
-            git 저장소가 아닙니다
+            Not a git repository
           </p>
         )}
         <FileTree projectId={projectId} />
@@ -205,7 +205,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
         className="rounded px-1 py-0.5 text-[12px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
         onClick={() => togglePanel(true)}
         data-testid="evidence-open"
-        title="증거 패널 펴기 (⌘B)"
+        title="Expand evidence panel (⌘B)"
       >
         ‹
       </button>
@@ -214,7 +214,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
           className="readout rounded px-1 text-[10px] text-ash transition-colors hover:text-chalk"
           onClick={() => togglePanel(true)}
           data-testid="evidence-rail-count"
-          title={`변경된 파일 ${count}개`}
+          title={`${count} changed files`}
         >
           {count}
         </button>
@@ -225,7 +225,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
         style={{ writingMode: 'vertical-rl' }}
         aria-hidden
       >
-        증거
+        Evidence
       </span>
     </div>
   )
@@ -273,7 +273,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   return (
     <section className="flex min-h-0 flex-1 flex-col border-b border-edge" data-testid="evidence-git">
       <div className="flex items-center gap-1.5 px-3 py-1.5">
-        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">변경</span>
+        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">Changes</span>
         {files && files.length > 0 && (
           <>
             <span className="readout text-[10px] text-ash" data-testid="evidence-change-count">
@@ -283,9 +283,9 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
               className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
               onClick={() => openGit()}
               data-testid="evidence-git-full"
-              title="넓은 화면에서 보기"
+              title="Open in wide view"
             >
-              넓게
+              Expand
             </button>
           </>
         )}
@@ -293,13 +293,13 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
 
       {denied ? (
         <p className="px-3 pb-2 text-[11px] leading-relaxed text-ash" data-testid="evidence-git-denied">
-          폴더 접근 권한이 필요합니다 — 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더
+          Folder access permission required — System Settings → Privacy & Security → Files and Folders
         </p>
       ) : files === null ? (
-        <p className="px-3 pb-2 text-[11px] text-slate">읽는 중…</p>
+        <p className="px-3 pb-2 text-[11px] text-slate">Loading…</p>
       ) : files.length === 0 ? (
         <p className="px-3 pb-2 text-[11px] text-slate" data-testid="evidence-clean">
-          변경 사항이 없습니다
+          No changes
         </p>
       ) : (
         <>
@@ -311,26 +311,26 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
           */}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ChangeGroup
-              title="스테이지됨"
+              title="Staged"
               files={staged}
               onOpen={openGit}
               busy={busy}
               action={{
                 id: 'unstage',
-                one: '내리기',
-                all: '모두 내리기',
+                one: 'Unstage',
+                all: 'Unstage all',
                 run: (paths) => run(() => platform.git.stage(projectId, paths, true)),
               }}
             />
             <ChangeGroup
-              title="변경됨"
+              title="Changed"
               files={unstaged}
               onOpen={openGit}
               busy={busy}
               action={{
                 id: 'stage',
-                one: '올리기',
-                all: '모두 올리기',
+                one: 'Stage',
+                all: 'Stage all',
                 run: (paths) => run(() => platform.git.stage(projectId, paths)),
               }}
             />
@@ -340,7 +340,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
           <div className="border-t border-edge px-3 py-2">
             <input
               className="w-full rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-              placeholder="커밋 메시지"
+              placeholder="Commit message"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               data-testid="evidence-commit-message"
@@ -353,12 +353,12 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
                 onClick={() =>
                   void run(async () => {
                     const r = await platform.git.commit(projectId, message.trim())
-                    setToast(r.ok ? '커밋했습니다' : (r.message ?? '커밋 실패'))
+                    setToast(r.ok ? 'Committed' : (r.message ?? 'Commit failed'))
                     if (r.ok) setMessage('')
                   })
                 }
               >
-                커밋
+                Commit
               </button>
               <button
                 className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
@@ -367,11 +367,11 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
                 onClick={() =>
                   void run(async () => {
                     const r = await platform.git.push(projectId)
-                    setToast(r.ok ? '푸시했습니다' : (r.message ?? '푸시 실패'))
+                    setToast(r.ok ? 'Pushed' : (r.message ?? 'Push failed'))
                   })
                 }
               >
-                푸시
+                Push
               </button>
             </div>
           </div>
@@ -397,7 +397,7 @@ function ChangeGroup({
 }) {
   if (files.length === 0) return null
   return (
-    <section data-testid={`evidence-group-${title}`}>
+    <section data-testid={`evidence-group-${title.toLowerCase()}`}>
       <header className="sticky top-0 flex items-center gap-1.5 bg-pit px-3 py-1">
         <h4 className="text-[10px] uppercase tracking-[0.12em] text-slate">{title}</h4>
         <span className="readout text-[10px] text-slate">{files.length}</span>
@@ -448,7 +448,7 @@ function ChangeRow({
         className="flex w-full items-center gap-2 px-3 py-1 pr-12 text-left transition-colors hover:bg-graphite/25"
         onClick={onOpen}
         data-testid={`evidence-file-${file.path}`}
-        title={`${file.path} — diff 보기`}
+        title={`${file.path} — view diff`}
       >
         {/* 종류는 색이 아니라 글자로 구분한다 (완전 무채색) */}
         <span className="readout w-3 shrink-0 text-[10px] text-ash">{file.status.slice(0, 1).toUpperCase()}</span>
@@ -515,13 +515,13 @@ function GitTree({ projectId }: { projectId: string }) {
         testId="evidence-tree-resize"
       />
       <div className="px-3 py-1.5">
-        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">기록</span>
+        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">History</span>
       </div>
       {commits === null ? (
-        <p className="px-3 pb-2 text-[11px] text-slate">읽는 중…</p>
+        <p className="px-3 pb-2 text-[11px] text-slate">Loading…</p>
       ) : commits.length === 0 ? (
         <p className="px-3 pb-2 text-[11px] text-slate" data-testid="evidence-no-commits">
-          커밋이 없습니다
+          No commits
         </p>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto pb-1" data-testid="evidence-commits">
@@ -540,7 +540,7 @@ function GitTree({ projectId }: { projectId: string }) {
                   <span className="block truncate text-[12px] text-ash">{c.subject}</span>
                   <span className="readout block truncate text-[10px] text-slate">
                     {c.shortSha} · {c.author}
-                    {c.parents.length > 1 && ' · 병합'}
+                    {c.parents.length > 1 && ' · merge'}
                   </span>
                 </span>
               </button>

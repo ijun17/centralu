@@ -10,7 +10,7 @@ export function PlatformProvider({ platform, children }: { platform: Platform; c
 
 export function usePlatform(): Platform {
   const p = useContext(PlatformContext)
-  if (!p) throw new Error('PlatformProvider 밖에서 usePlatform을 호출했습니다')
+  if (!p) throw new Error('usePlatform was called outside of PlatformProvider')
   return p
 }
 

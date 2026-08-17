@@ -37,7 +37,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
   if (state.loading) {
     return (
       <p className="px-4 py-6 text-center text-[12px] text-slate" data-testid="usage-loading">
-        사용량을 읽는 중…
+        Loading usage…
       </p>
     )
   }
@@ -46,7 +46,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
   if (!state.usage || state.usage.windows.length === 0) {
     return (
       <p className="px-4 py-6 text-center text-[12px] leading-relaxed text-ash" data-testid="usage-unavailable">
-        사용량을 볼 수 없습니다
+        Usage unavailable
         {state.reason && <span className="mt-1 block text-[11px] text-slate">{state.reason}</span>}
       </p>
     )
@@ -58,7 +58,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
     <div className="px-4 py-4" data-testid="usage-panel">
       {plan && (
         <p className="readout mb-3 text-[11px] text-slate" data-testid="usage-plan">
-          {plan} 플랜
+          {plan} plan
         </p>
       )}
 
@@ -95,7 +95,7 @@ function Donut({ window: w }: { window: UsageWindow }) {
             {w.label}
             {w.scope && ` · ${w.scope}`}
           </span>
-          <span className="readout mt-1 block">{w.percent}% 사용</span>
+          <span className="readout mt-1 block">{w.percent}% used</span>
           <span className="readout block text-slate">{resetText(w.resetsAt)}</span>
         </span>
       }
@@ -129,15 +129,15 @@ function Donut({ window: w }: { window: UsageWindow }) {
 
 /** 남은 시간을 사람 단위로 — 정확한 시각보다 '얼마나 남았나'가 먼저다 */
 function resetText(resetsAt: string | null): string {
-  if (!resetsAt) return '초기화 시각 모름'
+  if (!resetsAt) return 'reset time unknown'
   const ms = new Date(resetsAt).getTime() - Date.now()
-  if (!Number.isFinite(ms)) return '초기화 시각 모름'
-  if (ms <= 0) return '곧 초기화'
+  if (!Number.isFinite(ms)) return 'reset time unknown'
+  if (ms <= 0) return 'resets soon'
   const min = Math.floor(ms / 60000)
-  if (min < 60) return `${min}분 후 초기화`
+  if (min < 60) return `resets in ${min}m`
   const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour}시간 ${min % 60}분 후 초기화`
-  return `${Math.floor(hour / 24)}일 ${hour % 24}시간 후 초기화`
+  if (hour < 24) return `resets in ${hour}h ${min % 60}m`
+  return `resets in ${Math.floor(hour / 24)}d ${hour % 24}h`
 }
 
 /** 일별 토큰 — 최근 7일만. 막대는 그날 최대치 대비 길이다 */
@@ -149,9 +149,9 @@ function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
   return (
     <section className="mt-5 border-t border-edge pt-3" data-testid="usage-daily">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">일별 토큰</span>
+        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">Daily tokens</span>
         {today && (
-          <span className="readout ml-auto text-[11px] text-chalk">오늘 {formatTokens(today.tokens)}</span>
+          <span className="readout ml-auto text-[11px] text-chalk">Today {formatTokens(today.tokens)}</span>
         )}
       </div>
       <ul className="mt-2 space-y-1">
@@ -199,13 +199,13 @@ export function UsageModal() {
     <Modal onClose={() => toggle(false)} testId="usage-modal" align="top">
       <div className="w-[420px] max-w-[92vw] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
-          <h2 className="text-[13px] font-medium text-chalk">사용량</h2>
+          <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
           <span className="readout text-[11px] text-slate">{tool === 'codex' ? 'Codex' : 'Claude Code'}</span>
           <button
             className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-slate hover:text-chalk"
             onClick={() => toggle(false)}
             data-testid="usage-close"
-            aria-label="닫기"
+            aria-label="Close"
           >
             <CloseIcon size={11} />
           </button>

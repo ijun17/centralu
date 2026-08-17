@@ -63,7 +63,7 @@ describe('"전부 완료" 알림 (자리를 뜬 사람에게 필요한 신호)',
   it('아카이브된 세션은 계산에서 빠진다', () => {
     const prev = [w('working'), w('waiting_input', true)]
     const now = [w('waiting_input'), w('waiting_input', true)]
-    expect(allDoneNotification(now, prev, bg)?.body).toContain('1개')
+    expect(allDoneNotification(now, prev, bg)?.body).toContain('1 sessions')
   })
 })
 

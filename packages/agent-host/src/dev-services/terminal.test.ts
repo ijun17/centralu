@@ -116,7 +116,7 @@ describe('터미널 여러 개', () => {
     svc.create(cwd, 80, 24)
     svc.create(cwd, 80, 24)
 
-    expect(svc.list(cwd).map((t) => t.title)).toEqual(['터미널 1', '터미널 2', '터미널 3'])
+    expect(svc.list(cwd).map((t) => t.title)).toEqual(['Terminal 1', 'Terminal 2', 'Terminal 3'])
     expect(fake.spawned).toHaveLength(3)
   })
 
@@ -134,7 +134,7 @@ describe('터미널 여러 개', () => {
 
     expect(fake.instances[1]!.kill).toHaveBeenCalled()
     // 2번을 지웠는데 1,3이 남으면 세는 사람이 헷갈린다
-    expect(svc.list(cwd).map((t) => t.title)).toEqual(['터미널 1', '터미널 2'])
+    expect(svc.list(cwd).map((t) => t.title)).toEqual(['Terminal 1', 'Terminal 2'])
     expect(svc.list(cwd).map((t) => t.id)).not.toContain(second.id)
   })
 

@@ -149,7 +149,7 @@ class ClaudeSession implements SessionHandle {
     if (!p) return
     this.pending.delete(requestId)
     if (decision === 'deny') {
-      p.resolve({ behavior: 'deny', message: '사용자가 거부함' })
+      p.resolve({ behavior: 'deny', message: 'Denied by user' })
     } else {
       if (decision === 'always') {
         // 매처는 core가 계산해 UI가 보내준다 (agent-host는 core를 import하지 않는다 — 경계 규칙).
@@ -181,7 +181,7 @@ class ClaudeSession implements SessionHandle {
    */
   /** 슬래시 명령 목록 (SDK 공개 API) */
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
-    if (!this.query) throw new Error('세션이 아직 준비되지 않았습니다')
+    if (!this.query) throw new Error('Session is not ready yet')
     return this.query.supportedCommands()
   }
 
@@ -219,7 +219,7 @@ class ClaudeSession implements SessionHandle {
    */
   interrupt(): void {
     for (const [id, p] of this.pending) {
-      p.resolve({ behavior: 'deny', message: '사용자가 중단함' })
+      p.resolve({ behavior: 'deny', message: 'Stopped by user' })
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
     }
     this.pending.clear()
@@ -229,7 +229,7 @@ class ClaudeSession implements SessionHandle {
       this.emit({
         type: 'error',
         sessionId: this.sessionId,
-        error: { code: 'internal', message: `중단하지 못했습니다: ${err.message}`, retryable: true },
+        error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true },
       })
     })
 
@@ -239,7 +239,7 @@ class ClaudeSession implements SessionHandle {
   async dispose(): Promise<void> {
     this.closed = true
     this.notify?.()
-    for (const [, p] of this.pending) p.resolve({ behavior: 'deny', message: '세션 종료' })
+    for (const [, p] of this.pending) p.resolve({ behavior: 'deny', message: 'Session closed' })
     this.pending.clear()
   }
 }
@@ -273,7 +273,7 @@ export class ClaudeAdapter implements AgentAdapter {
         tool: 'claude',
         installed: false,
         loggedIn: false,
-        detail: 'claude CLI를 찾을 수 없습니다 (터미널에서 which claude 로 확인)',
+        detail: 'claude CLI not found (check with `which claude` in a terminal)',
       }
     }
   }
@@ -290,14 +290,14 @@ export class ClaudeAdapter implements AgentAdapter {
    */
   async listUsage() {
     const q = ClaudeAdapter.lastQuery
-    if (!q) throw new Error('사용량을 보려면 실행 중인 세션이 필요합니다')
+    if (!q) throw new Error('A running session is required to read usage')
     return readUsage(q)
   }
 
   async listModels() {
     // 사용량과 같은 사정 — SDK는 이 메서드도 Query에만 둔다
     const q = ClaudeAdapter.lastQuery
-    if (!q) throw new Error('모델 목록을 보려면 실행 중인 세션이 필요합니다')
+    if (!q) throw new Error('A running session is required to list models')
     return readClaudeModels(q)
   }
 

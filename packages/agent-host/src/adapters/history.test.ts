@@ -38,7 +38,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
       ['a', '리팩터링'],
       ['b', '요약만 있음'],
       ['c', '첫 프롬프트만'],
-      ['d', '제목 없는 세션'],
+      ['d', 'Untitled session'],
     ])
     expect(out[0]).toMatchObject({ updatedAt: 1000, branch: 'main' })
     expect(out[2]!.createdAt).toBe(500)
@@ -108,7 +108,7 @@ describe('codex — thread/list · thread/read', () => {
     )
     expect(out).toEqual([
       { externalId: 't1', title: '테스트 고치기', updatedAt: 1_700_000_000_000, createdAt: 1_699_999_000_000 },
-      { externalId: 't2', title: '제목 없는 세션', updatedAt: 1_700_000_500_000, createdAt: undefined },
+      { externalId: 't2', title: 'Untitled session', updatedAt: 1_700_000_500_000, createdAt: undefined },
     ])
   })
 
@@ -155,7 +155,7 @@ describe('codex — thread/list · thread/read', () => {
     expect(isUnknownMethod(new Error('unknown method thread/list'))).toBe(true)
     // 진짜 고장은 '지원 안 함'으로 감추면 안 된다 — 그래야 사용자가 원인을 본다
     expect(isUnknownMethod(new Error('EACCES: permission denied'))).toBe(false)
-    expect(CODEX_UNSUPPORTED).toMatch(/업데이트/)
+    expect(CODEX_UNSUPPORTED).toMatch(/update/)
   })
 })
 

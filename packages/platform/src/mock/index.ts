@@ -214,7 +214,7 @@ export class MockPlatform implements Platform {
       const info: SessionInfo = {
         id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`,
         effort: params.effort ?? null,
-        name: params.initialPrompt?.slice(0, 40) ?? '새 세션', autoNamed: true, state: 'idle',
+        name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
         importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
@@ -246,11 +246,11 @@ export class MockPlatform implements Platform {
     send: async (sessionId: string, text: string, attachments?: Attachment[]) => {
       if (attachments?.length) this.sentAttachments.push(...attachments)
       const s = this.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       // host와 같은 규칙: 잠들어 있으면 되살리고 나서 보낸다 (자동 이어가기)
       if (!s.live) {
         if (this.unresumable.has(sessionId)) {
-          throw Object.assign(new Error('대화를 이어갈 수 없습니다: 이 세션은 재개할 수 없습니다'), {
+          throw Object.assign(new Error('Could not resume the conversation: this session cannot be resumed'), {
             code: 'session_not_found',
           })
         }
@@ -260,7 +260,7 @@ export class MockPlatform implements Platform {
       this.pushMessage({ sessionId, seq, role: 'user', kind: 'text', payload: { text }, ts: this.now() })
       s.lastSeq = seq
       s.lastReadSeq = seq
-      if (s.autoNamed && s.name === '새 세션') {
+      if (s.autoNamed && s.name === 'New session') {
         s.name = text.slice(0, 40)
         this.emit({ type: 'session_title', sessionId, title: s.name })
       }
@@ -308,7 +308,7 @@ export class MockPlatform implements Platform {
       s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
     ) => {
       const sess = this.sessions.get(sessionId)
-      if (!sess) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       if (s.model !== undefined) sess.model = s.model
       if (s.effort !== undefined) sess.effort = s.effort
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
@@ -316,19 +316,19 @@ export class MockPlatform implements Platform {
     },
     restartSession: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       this.restarted.push(sessionId)
       if (this.unresumable.has(sessionId)) {
-        return { session: { ...s }, resumed: false, reason: '이 세션은 재개할 수 없습니다' }
+        return { session: { ...s }, resumed: false, reason: 'This session cannot be resumed' }
       }
       s.live = true
       return { session: { ...s }, resumed: true }
     },
     resumeSession: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
+      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       if (this.unresumable.has(sessionId)) {
-        return { session: { ...s }, resumed: false, reason: '이 세션은 재개할 수 없습니다' }
+        return { session: { ...s }, resumed: false, reason: 'This session cannot be resumed' }
       }
       s.live = true
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
@@ -400,7 +400,7 @@ export class MockPlatform implements Platform {
     list: async () => this.projectsList.map((p) => ({ ...p })),
     gitStatus: async (projectId: string) => {
       const p = this.projectsList.find((x) => x.id === projectId)
-      if (!p) throw Object.assign(new Error('프로젝트 없음'), { code: 'internal' })
+      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       return { ...p }
     },
   }
@@ -440,7 +440,7 @@ export class MockPlatform implements Platform {
     create: async (projectId: string) => {
       const cwd = this.cwdOf(projectId)
       const list = this.terminalState.byCwd.get(cwd) ?? []
-      const t = { id: `mock-term-${++this.idc}`, title: `터미널 ${list.length + 1}`, history: '', alive: true }
+      const t = { id: `mock-term-${++this.idc}`, title: `Terminal ${list.length + 1}`, history: '', alive: true }
       list.push(t)
       this.terminalState.byCwd.set(cwd, list)
       return { terminalId: t.id, cwd, title: t.title, history: t.history, alive: true }
@@ -450,7 +450,7 @@ export class MockPlatform implements Platform {
       for (const [cwd, list] of this.terminalState.byCwd) {
         const next = list.filter((t) => t.id !== terminalId)
         if (next.length === list.length) continue
-        next.forEach((t, i) => (t.title = `터미널 ${i + 1}`))
+        next.forEach((t, i) => (t.title = `Terminal ${i + 1}`))
         if (next.length === 0) this.terminalState.byCwd.delete(cwd)
         else this.terminalState.byCwd.set(cwd, next)
       }
@@ -469,7 +469,7 @@ export class MockPlatform implements Platform {
           return { terminalId: t.id, cwd, title: t.title, history: t.history, alive: true }
         }
       }
-      throw Object.assign(new Error('터미널 없음'), { code: 'internal' })
+      throw Object.assign(new Error('Terminal not found'), { code: 'internal' })
     },
     onOutput: (h: (e: { terminalId: string; data: string }) => void) => {
       this.termHandlers.add(h)

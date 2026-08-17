@@ -74,26 +74,26 @@ export function Inbox() {
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="기다리는 항목"
+        aria-label="Waiting"
         className="w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">
-          <h2 className="text-[12px] font-medium text-chalk">기다리는 항목</h2>
+          <h2 className="text-[12px] font-medium text-chalk">Waiting</h2>
           <span className="readout text-[11px] text-slate">{items.length}</span>
           <span className="ml-auto flex items-center gap-1 text-[10px] text-slate">
             <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd> 이동
-            <Kbd>↵</Kbd> 열기
-            <Kbd>d</Kbd> 정리
-            <Kbd>esc</Kbd> 닫기
+            <Kbd>↓</Kbd> Move
+            <Kbd>↵</Kbd> Open
+            <Kbd>d</Kbd> Dismiss
+            <Kbd>esc</Kbd> Close
           </span>
         </header>
 
         {items.length === 0 ? (
           <p className="px-4 py-10 text-center text-[13px] text-ash" data-testid="inbox-empty">
-            기다리는 항목이 없습니다
-            <span className="mt-1 block text-[11px] text-slate">에이전트가 끝내면 여기에 모입니다</span>
+            Nothing waiting
+            <span className="mt-1 block text-[11px] text-slate">Finished agents collect here</span>
           </p>
         ) : (
           <ul className="max-h-[60vh] overflow-y-auto">
@@ -121,10 +121,10 @@ export function Inbox() {
                   <span className="ml-auto flex shrink-0 items-center gap-2.5">
                     <span className="text-[11px] text-slate">
                       {it.state === 'waiting_approval'
-                        ? '승인 필요'
+                        ? 'Needs approval'
                         : it.state === 'error'
-                          ? '오류'
-                          : '응답 대기'}
+                          ? 'Error'
+                          : 'Waiting for input'}
                     </span>
                     {/* 오래 기다릴수록 밝아진다 — 새 도형 없이 시간 압력만 말한다 */}
                     <span className={`readout w-16 text-right text-[11px] ${waitingTone(it.waitingMs)}`}>

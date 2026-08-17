@@ -32,9 +32,9 @@ export function Sidebar() {
       />
       {ids.length === 0 ? (
         <p className="px-4 py-6 text-xs leading-relaxed text-slate">
-          등록된 프로젝트가 없습니다.
+          No projects yet.
           <br />
-          위의 <span className="text-ash">프로젝트 추가</span>로 시작하세요.
+          Start with <span className="text-ash">Add project</span> above.
         </p>
       ) : (
         ids.map((id) => <ProjectBlock key={id} projectId={id} />)
@@ -92,8 +92,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         <button
           className="-my-1 ml-auto flex shrink-0 items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
           onClick={() => setNewSessionOpen(true)}
-          title="새 세션"
-          aria-label={`${project.name}에 새 세션`}
+          title="New session"
+          aria-label={`New session in ${project.name}`}
           data-testid={`new-session-${project.name}`}
         >
           <PlusIcon size={15} />
@@ -125,7 +125,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                   <span
                     className="ml-auto size-1 shrink-0 rounded-full bg-ash"
                     data-testid={`unread-${s.id}`}
-                    title="읽지 않음"
+                    title="Unread"
                   />
                 )}
               </button>
@@ -145,8 +145,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 <button
                   className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
                   data-testid={`delete-session-${s.id}`}
-                  title="완전히 삭제 (기록도 함께 사라집니다)"
-                  aria-label={`${s.name} 삭제`}
+                  title="Delete permanently (history goes too)"
+                  aria-label={`Delete ${s.name}`}
                   onClick={(e) => {
                     e.stopPropagation()
                     setConfirming(s.id)
@@ -164,7 +164,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
       {confirming && (
         <ConfirmDelete
-          name={sessions.find((s) => s.id === confirming)?.name ?? '세션'}
+          name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
           // 프로젝트 기본값이 아니라 이 세션의 도구다 — 어디에 기록이 남는지 알려주는 문장이라 틀리면 안 된다
           tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool}
           onCancel={() => setConfirming(null)}
@@ -201,25 +201,24 @@ function ConfirmDelete({
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
-        <p className="text-[13px] text-chalk">세션을 삭제할까요?</p>
+        <p className="text-[13px] text-chalk">Delete this session?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
         <p className="mt-2 text-[11px] leading-relaxed text-slate">
-          Control Center의 대화 기록과 첨부가 사라집니다.
+          Chat history and attachments in Control Center will be gone.
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
-          {toolLabel}에는 대화가 그대로 남습니다 — <span className="text-chalk">+ → 이전 대화</span>에서 다시
-          가져올 수 있습니다.
+          The conversation stays in {toolLabel} — you can pull it back from <span className="text-chalk">+ → Past conversations</span>.
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
-            취소
+            Cancel
           </button>
           <button
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
             onClick={onConfirm}
             data-testid="confirm-delete-yes"
           >
-            삭제
+            Delete
           </button>
         </div>
       </div>
@@ -242,18 +241,18 @@ function ProjectMarks({
   return (
     <span className="readout ml-auto flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
       {changed > 0 && (
-        <span data-testid={`mark-changed-${project.name}`} title={`변경된 파일 ${changed}개`}>
+        <span data-testid={`mark-changed-${project.name}`} title={`${changed} changed files`}>
           {changed}
         </span>
       )}
       {/* 겹친 사각형 = 같은 폴더에서 여럿이 일하는 중 */}
       {risky && (
-        <span className="text-ash" data-testid={`concurrent-${project.name}`} title={`동시 세션 ${sessionCount}개`}>
+        <span className="text-ash" data-testid={`concurrent-${project.name}`} title={`${sessionCount} concurrent sessions`}>
           ⧉{sessionCount}
         </span>
       )}
       {denied && (
-        <span className="text-ash" data-testid={`git-denied-${project.name}`} title="폴더 접근 권한 필요">
+        <span className="text-ash" data-testid={`git-denied-${project.name}`} title="Folder access permission required">
           !
         </span>
       )}
@@ -270,20 +269,20 @@ function ProjectDetail({ project, sessionCount }: { project: ProjectInfo; sessio
         {project.git?.denied ? (
           // '저장소 아님'으로 표시하면 사용자가 엉뚱한 결론을 낸다 — 할 일은 권한 부여다
           <span className="text-chalk" data-testid="git-denied">
-            폴더 접근 권한 필요 — 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더
+            Folder access permission required — System Settings → Privacy & Security → Files and Folders
           </span>
         ) : project.git ? (
           <>
             <span className="text-chalk">{project.git.branch}</span>
-            {project.git.changedFiles > 0 && <span> · {project.git.changedFiles}개 변경</span>}
+            {project.git.changedFiles > 0 && <span> · {project.git.changedFiles} changed</span>}
           </>
         ) : (
-          <span>git 저장소 아님</span>
+          <span>not a git repo</span>
         )}
       </span>
       {sessionCount > 1 && (
         <span className="mt-1 block text-chalk" data-testid="concurrent-detail">
-          동시 세션 {sessionCount}개 — 같은 파일을 고치면 변경이 유실될 수 있습니다
+          {sessionCount} concurrent sessions — editing the same files can lose changes
         </span>
       )}
     </span>

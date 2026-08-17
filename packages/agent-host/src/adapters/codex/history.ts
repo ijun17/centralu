@@ -15,7 +15,7 @@ import { CodexClient } from './client.js'
  */
 
 export const UNSUPPORTED =
-  '설치된 Codex가 이전 세션 목록을 지원하지 않습니다 (codex 업데이트가 필요합니다)'
+  'The installed Codex does not support listing past sessions (update codex)'
 
 /** 구버전이 모르는 메서드를 불렀을 때의 응답. 문구는 버전마다 달라서 넓게 본다 */
 export function isUnknownMethod(err: unknown): boolean {
@@ -119,7 +119,7 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
        * UI가 "마지막 N시간 전"을 함께 적어 최신 여부를 알 수 있게 한다.
        * (하네스가 주입한 지시문이 섞여 오는 경우가 있어 그것만 걷어낸다)
        */
-      title: cleanTitle(str(row.preview) ?? '') || '제목 없는 세션',
+      title: cleanTitle(str(row.preview) ?? '') || 'Untitled session',
       updatedAt: ms(row.updatedAt) ?? ms(row.recencyAt) ?? Date.now(),
       createdAt: ms(row.createdAt),
     })

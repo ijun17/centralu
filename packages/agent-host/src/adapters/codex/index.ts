@@ -56,7 +56,7 @@ class CodexSession implements SessionHandle {
             sessionId: this.sessionId,
             error: {
               code: 'adapter_crashed',
-              message: `codex app-server가 종료되었습니다 (code ${code ?? 'null'})`,
+              message: `codex app-server exited (code ${code ?? 'null'})`,
               retryable: true,
             },
           }),
@@ -84,7 +84,7 @@ class CodexSession implements SessionHandle {
         // 원문("already has an active writer")은 사용자에게 아무것도 설명하지 못한다
         const msg = (err as Error).message
         throw /active writer/i.test(msg)
-          ? new Error('이 대화를 다른 곳에서 이미 열고 있습니다 (터미널의 codex이거나 다른 세션)')
+          ? new Error('This conversation is already open elsewhere (codex in a terminal, or another session)')
           : err
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
@@ -138,7 +138,7 @@ class CodexSession implements SessionHandle {
 
   send(text: string): void {
     void this.ready.then(() => {
-      if (!this.threadId) throw new Error('스레드가 준비되지 않았습니다')
+      if (!this.threadId) throw new Error('Thread is not ready')
       return this.client.request('turn/start', {
         threadId: this.threadId,
         input: [{ type: 'text', text }],
@@ -194,7 +194,7 @@ class CodexSession implements SessionHandle {
       this.emit({
         type: 'error',
         sessionId: this.sessionId,
-        error: { code: 'internal', message: `중단하지 못했습니다: ${err.message}`, retryable: true },
+        error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true },
       })
     })
   }
@@ -233,14 +233,14 @@ export class CodexAdapter implements AgentAdapter {
         tool: 'codex',
         installed: true,
         loggedIn,
-        detail: loggedIn ? version : `${version} · 로그인 필요`,
+        detail: loggedIn ? version : `${version} · login required`,
       }
     } catch {
       return {
         tool: 'codex',
         installed: false,
         loggedIn: false,
-        detail: 'codex CLI를 찾을 수 없습니다 (터미널에서 which codex 로 확인)',
+        detail: 'codex CLI not found (check with `which codex` in a terminal)',
       }
     }
   }

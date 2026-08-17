@@ -26,9 +26,9 @@ export function GitPanel({
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1">
         {(
           [
-            ['changes', '변경'],
-            ['history', '기록'],
-            ['branches', '브랜치'],
+            ['changes', 'Changes'],
+            ['history', 'History'],
+            ['branches', 'Branches'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -102,21 +102,21 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
     <div className="flex min-h-0 flex-1">
       <div className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-edge">
         {files === null ? (
-          <p className="p-3 text-[12px] text-slate">읽는 중…</p>
+          <p className="p-3 text-[12px] text-slate">Loading…</p>
         ) : files.length === 0 ? (
           <p className="p-3 text-[12px] text-slate" data-testid="git-clean">
-            변경 사항이 없습니다
+            No changes
           </p>
         ) : (
           <>
             <FileGroup
-              title="스테이지됨"
+              title="Staged"
               files={staged}
               touched={touched}
               onOpen={openDiff}
               selected={selected}
               action={{
-                label: '내리기',
+                label: 'Unstage',
                 run: async (paths) => {
                   await platform.git.stage(projectId, paths, true)
                   await refresh()
@@ -124,13 +124,13 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
               }}
             />
             <FileGroup
-              title="변경됨"
+              title="Changed"
               files={unstaged}
               touched={touched}
               onOpen={openDiff}
               selected={selected}
               action={{
-                label: '올리기',
+                label: 'Stage',
                 run: async (paths) => {
                   await platform.git.stage(projectId, paths)
                   await refresh()
@@ -150,9 +150,9 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
               setBusy(false)
               if (res.ok) {
                 setMessage('')
-                setToast(`${staged.length}개 파일을 커밋했습니다`)
+                setToast(`Committed ${staged.length} files`)
                 await refresh()
-              } else setToast(res.message ?? '커밋하지 못했습니다')
+              } else setToast(res.message ?? 'Commit failed')
             }}
           >
             <textarea
@@ -160,7 +160,7 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
               rows={2}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="커밋 메시지"
+              placeholder="Commit message"
               data-testid="commit-message"
             />
             <div className="mt-1.5 flex gap-1.5">
@@ -169,7 +169,7 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
                 disabled={busy || !message.trim()}
                 data-testid="commit-button"
               >
-                커밋 ({staged.length})
+                Commit ({staged.length})
               </button>
               <button
                 type="button"
@@ -177,10 +177,10 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
                 data-testid="push-button"
                 onClick={async () => {
                   const res = await platform.git.push(projectId)
-                  setToast(res.ok ? '푸시했습니다' : (res.message ?? '푸시하지 못했습니다'))
+                  setToast(res.ok ? 'Pushed' : (res.message ?? 'Push failed'))
                 }}
               >
-                푸시
+                Push
               </button>
             </div>
           </form>
@@ -223,9 +223,9 @@ function FileGroup({
         <button
           className="ml-auto text-[10px] text-slate hover:text-chalk"
           onClick={() => void action.run(files.map((f) => f.path))}
-          data-testid={`git-${action.label}-all`}
+          data-testid={`git-${action.label.toLowerCase()}-all`}
         >
-          모두 {action.label}
+          {action.label} all
         </button>
       </header>
       <ul>
@@ -243,7 +243,7 @@ function FileGroup({
               <span className="truncate">{f.path}</span>
               {/* 에이전트가 만진 파일 — 내가 고친 것과 구분한다 (B-7) */}
               {touched.includes(f.path) && (
-                <span className="ml-auto shrink-0 text-[9px] text-slate" title="에이전트가 수정함">
+                <span className="ml-auto shrink-0 text-[9px] text-slate" title="Edited by agent">
                   ◆
                 </span>
               )}
@@ -277,12 +277,12 @@ function DiffView({
   if (!path) {
     return (
       <div className="flex flex-1 items-center justify-center text-[12px] text-slate" data-testid="diff-empty">
-        파일을 선택하면 변경 내용을 보여줍니다
+        Select a file to see its diff
       </div>
     )
   }
   if (data?.binary) {
-    return <div className="flex flex-1 items-center justify-center text-[12px] text-slate">바이너리 파일입니다</div>
+    return <div className="flex flex-1 items-center justify-center text-[12px] text-slate">Binary file</div>
   }
 
   const lines = (data?.diff ?? '').split('\n')
@@ -293,11 +293,11 @@ function DiffView({
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {onOpenViewer && (
             <button className="text-[11px] text-slate hover:text-chalk" onClick={onOpenViewer} data-testid="open-in-viewer">
-              전체 보기
+              Show all
             </button>
           )}
           <button className="text-[11px] text-slate hover:text-chalk" onClick={() => void onOpenInIde()} data-testid="open-in-ide">
-            IDE에서 열기
+            Open in IDE
           </button>
         </span>
       </header>
@@ -326,7 +326,7 @@ function DiffView({
           )
         })}
         {data?.truncated && (
-          <p className="p-2 text-[11px] text-slate">…변경이 너무 커서 일부만 표시합니다. IDE에서 열어 확인하세요.</p>
+          <p className="p-2 text-[11px] text-slate">…diff is too large; showing part of it. Open in your IDE to see the rest.</p>
         )}
       </div>
     </div>
@@ -370,15 +370,15 @@ function History({ projectId, initialSha }: { projectId: string; initialSha?: st
             >
               <span className="truncate text-[12px] text-chalk">{c.subject}</span>
               <span className="readout text-[10px] text-slate">
-                {c.shortSha} · {c.author} · {new Date(c.when).toLocaleDateString('ko-KR')}
-                {c.parents.length > 1 && ' · 병합'}
+                {c.shortSha} · {c.author} · {new Date(c.when).toLocaleDateString('en-US')}
+                {c.parents.length > 1 && ' · merge'}
               </span>
             </button>
           </li>
         ))}
-        {commits?.length === 0 && <li className="p-3 text-[12px] text-slate">커밋이 없습니다</li>}
+        {commits?.length === 0 && <li className="p-3 text-[12px] text-slate">No commits</li>}
       </ul>
-      <DiffView path={detail ? `${detail.files.length}개 파일` : undefined} data={detail ? { diff: detail.diff, truncated: false, binary: false } : null} onOpenInIde={async () => {}} />
+      <DiffView path={detail ? `${detail.files.length} files` : undefined} data={detail ? { diff: detail.diff, truncated: false, binary: false } : null} onOpenInIde={async () => {}} />
     </div>
   )
 }
@@ -408,9 +408,9 @@ function Branches({ projectId }: { projectId: string }) {
     const res = await platform.git.checkout(projectId, branch)
     setPending(null)
     if (res.ok) {
-      setToast(`${branch}로 전환했습니다`)
+      setToast(`Switched to ${branch}`)
       load()
-    } else setToast(res.message ?? '전환하지 못했습니다')
+    } else setToast(res.message ?? 'Could not switch')
   }
 
   const local = (branches ?? []).filter((b) => !b.name.startsWith('remotes/'))
@@ -421,7 +421,7 @@ function Branches({ projectId }: { projectId: string }) {
       {pending && (
         <div className="border-b border-edge bg-panel p-3" data-testid="checkout-warning">
           <p className="text-[12px] text-chalk">
-            {pending.branch}로 전환하면 아래 변경이 영향을 받을 수 있습니다.
+            Switching to {pending.branch} may affect the changes below.
           </p>
           <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-[11px] text-ash">
             {pending.conflicts.slice(0, 10).map((p) => (
@@ -434,16 +434,16 @@ function Branches({ projectId }: { projectId: string }) {
               onClick={() => void doCheckout(pending.branch)}
               data-testid="checkout-proceed"
             >
-              그래도 전환
+              Switch anyway
             </button>
             <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={() => setPending(null)}>
-              취소
+              Cancel
             </button>
           </div>
         </div>
       )}
-      <BranchList title="로컬" branches={local} onPick={attempt} />
-      <BranchList title="원격" branches={remote} onPick={attempt} />
+      <BranchList title="Local" branches={local} onPick={attempt} />
+      <BranchList title="Remote" branches={remote} onPick={attempt} />
     </div>
   )
 }

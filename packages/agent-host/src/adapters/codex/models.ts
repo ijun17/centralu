@@ -39,7 +39,7 @@ export async function collectModels(
     if (!cursor) return out
   }
   // 조용히 자르지 않는다 — 잘린 목록을 전부인 것처럼 보여주는 게 제일 나쁘다
-  throw new Error(`모델이 너무 많아 ${MAX_PAGES}페이지까지만 읽었습니다 (목록이 잘렸습니다)`)
+  throw new Error(`Too many models; read only ${MAX_PAGES} pages (list truncated)`)
 }
 
 export async function listCodexModels(command: string): Promise<ModelOption[]> {

@@ -145,7 +145,7 @@ export function normalizeMessage(msg: unknown, sessionId: string): NormalizedEve
       out.push({
         type: 'error',
         sessionId,
-        error: { code: 'internal', message: str(m.result, `턴 실패: ${str(m.subtype)}`), retryable: true },
+        error: { code: 'internal', message: str(m.result, `Turn failed: ${str(m.subtype)}`), retryable: true },
       })
     } else {
       out.push({ type: 'turn_complete', sessionId })

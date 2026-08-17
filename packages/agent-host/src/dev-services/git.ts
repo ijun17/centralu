@@ -181,7 +181,7 @@ export async function gitCheckout(
   branch: string,
   opts: { dryRun?: boolean } = {},
 ): Promise<{ ok: boolean; conflicts: string[]; message?: string }> {
-  if (!(await isRepo(cwd))) return { ok: false, conflicts: [], message: 'git 저장소가 아닙니다' }
+  if (!(await isRepo(cwd))) return { ok: false, conflicts: [], message: 'Not a git repository' }
   if (opts.dryRun) {
     const dirty = (await gitStatusFiles(cwd)).filter((f) => f.status !== '?').map((f) => f.path)
     return { ok: dirty.length === 0, conflicts: [...new Set(dirty)] }
@@ -213,7 +213,7 @@ export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: str
   try {
     const branches = await gitBranches(cwd)
     const current = branches.find((b) => b.current)
-    if (!current) return { ok: false, message: '현재 브랜치를 알 수 없습니다 (detached HEAD)' }
+    if (!current) return { ok: false, message: 'Current branch is unknown (detached HEAD)' }
     const args = current.upstream ? ['push'] : ['push', '--set-upstream', 'origin', current.name]
     await git(cwd, args)
     return { ok: true }
@@ -225,5 +225,5 @@ export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: str
 /** git의 원문 오류를 그대로 보여준다 — 요약하면 사용자가 다음 행동을 못 정한다 */
 function cleanGitError(e: unknown): string {
   const err = e as { stderr?: string; message?: string }
-  return (err.stderr || err.message || '알 수 없는 오류').trim().split('\n').slice(0, 6).join('\n')
+  return (err.stderr || err.message || 'Unknown error').trim().split('\n').slice(0, 6).join('\n')
 }

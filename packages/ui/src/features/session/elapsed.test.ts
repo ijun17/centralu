@@ -7,15 +7,15 @@ import { formatElapsed } from './SessionView.jsx'
  */
 describe('formatElapsed', () => {
   it('1분 미만은 초로', () => {
-    expect(formatElapsed(0)).toBe('0초')
-    expect(formatElapsed(59)).toBe('59초')
+    expect(formatElapsed(0)).toBe('0s')
+    expect(formatElapsed(59)).toBe('59s')
   })
   it('1분부터는 분과 초로 — 초를 버리면 숫자가 멈춰 보인다', () => {
-    expect(formatElapsed(60)).toBe('1분 0초')
-    expect(formatElapsed(125)).toBe('2분 5초')
+    expect(formatElapsed(60)).toBe('1m 0s')
+    expect(formatElapsed(125)).toBe('2m 5s')
   })
   it('1시간부터는 시간과 분으로', () => {
-    expect(formatElapsed(3600)).toBe('1시간 0분')
-    expect(formatElapsed(7860)).toBe('2시간 11분')
+    expect(formatElapsed(3600)).toBe('1h 0m')
+    expect(formatElapsed(7860)).toBe('2h 11m')
   })
 })

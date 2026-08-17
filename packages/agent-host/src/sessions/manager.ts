@@ -38,7 +38,7 @@ import { saveAttachment, clearAttachments } from '../dev-services/attachments.js
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('시간 초과')), ms)),
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Timed out')), ms)),
   ])
 }
 
@@ -93,7 +93,7 @@ export class SessionManager {
 
   async addProject(path: string): Promise<ProjectInfo> {
     if (!existsSync(path) || !statSync(path).isDirectory()) {
-      throw Object.assign(new Error(`디렉토리를 찾을 수 없습니다: ${path}`), { code: 'internal' })
+      throw Object.assign(new Error(`Directory not found: ${path}`), { code: 'internal' })
     }
     const existing = this.store.findProjectByPath(path)
     const id = existing?.id ?? randomUUID()
@@ -134,11 +134,11 @@ export class SessionManager {
     limit: number,
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }> {
     const project = this.store.listProjects().find((p) => p.id === projectId)
-    if (!project) return { supported: false, reason: '프로젝트를 찾을 수 없습니다', sessions: [] }
+    if (!project) return { supported: false, reason: 'Project not found', sessions: [] }
 
     const adapter = this.adapters.get(tool)
     if (!adapter?.listExternalSessions) {
-      return { supported: false, reason: `${tool}는 이전 세션 목록을 지원하지 않습니다`, sessions: [] }
+      return { supported: false, reason: `${tool} does not support listing past sessions`, sessions: [] }
     }
 
     try {
@@ -197,13 +197,13 @@ export class SessionManager {
 
   async createSession(params: CreateSessionParams): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
-    if (!adapter) throw Object.assign(new Error(`알 수 없는 도구: ${params.tool}`), { code: 'tool_not_installed' })
+    if (!adapter) throw Object.assign(new Error(`Unknown tool: ${params.tool}`), { code: 'tool_not_installed' })
 
     if (params.resumeExternalId) {
       const holder = this.holderOf(params.resumeExternalId)
       if (holder) {
         throw Object.assign(
-          new Error(`이 대화는 이미 "${holder.name}" 세션에서 열려 있습니다 — 그 세션에서 이어가세요`),
+          new Error(`This conversation is already open in the "${holder.name}" session — continue there`),
           { code: 'internal' },
         )
       }
@@ -212,7 +212,7 @@ export class SessionManager {
     const id = randomUUID()
     const info: SessionInfo = {
       id, projectId: params.projectId, tool: params.tool, externalId: null,
-      name: params.initialPrompt ? truncate(params.initialPrompt) : '새 세션',
+      name: params.initialPrompt ? truncate(params.initialPrompt) : 'New session',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, effort: params.effort ?? null,
@@ -232,7 +232,7 @@ export class SessionManager {
       )
     } catch (err) {
       const msg = (err as Error).message
-      throw Object.assign(new Error(`${params.tool} 세션을 시작하지 못했습니다: ${msg}`), { code: 'internal' })
+      throw Object.assign(new Error(`Could not start ${params.tool} session: ${msg}`), { code: 'internal' })
     }
 
     this.meta.set(id, info)
@@ -346,7 +346,7 @@ export class SessionManager {
         sessionId: info.id,
         error: {
           code: 'internal',
-          message: `이전 대화를 불러오지 못했습니다: ${(err as Error).message}`,
+          message: `Could not load past conversation: ${(err as Error).message}`,
           retryable: false,
         },
       })
@@ -370,7 +370,7 @@ export class SessionManager {
     info.lastSeq = rows[rows.length - 1]!.seq
     // 불러온 대화는 이미 읽은 것이다 — 안 읽음 표시로 사람을 부르면 안 된다
     info.lastReadSeq = info.lastSeq
-    if (info.autoNamed && info.name === '새 세션') {
+    if (info.autoNamed && info.name === 'New session') {
       const firstUser = history.find((h) => h.role === 'user')
       if (firstUser) info.name = truncate(firstUser.text)
     }
@@ -387,14 +387,14 @@ export class SessionManager {
    */
   async resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
     // 이미 살아 있으면 그대로 쓴다 (중복 프로세스를 만들지 않는다)
     if (this.handles.has(sessionId)) return { session: m, resumed: true }
 
     const adapter = this.adapters.get(m.tool)
-    if (!adapter) return { session: m, resumed: false, reason: `${m.tool} 어댑터가 없습니다` }
-    if (!adapter.capabilities.resume) return { session: m, resumed: false, reason: `${m.tool}는 재개를 지원하지 않습니다` }
+    if (!adapter) return { session: m, resumed: false, reason: `No adapter for ${m.tool}` }
+    if (!adapter.capabilities.resume) return { session: m, resumed: false, reason: `${m.tool} does not support resume` }
     /*
      * 이어갈 식별자를 고른다.
      *
@@ -411,14 +411,14 @@ export class SessionManager {
         return {
           session: m,
           resumed: false,
-          reason: '이 세션의 재개 식별자를 잃었습니다 — 기록은 읽을 수 있고, 새 세션으로 이어서 시작할 수 있습니다',
+          reason: 'Lost this session\'s resume id — the history is still readable, and you can continue in a new session',
         }
       }
       // 오간 말이 없다 = 새로 띄워도 잃을 것이 없다
     }
 
     const project = this.store.listProjects().find((p) => p.id === m.projectId)
-    if (!project) return { session: m, resumed: false, reason: '프로젝트를 찾을 수 없습니다' }
+    if (!project) return { session: m, resumed: false, reason: 'Project not found' }
 
     /*
      * 도구 쪽에서 이 대화가 지워졌는지 먼저 본다.
@@ -434,7 +434,7 @@ export class SessionManager {
         return {
           session: m,
           resumed: false,
-          reason: `이 대화는 "${holder.name}" 세션이 이미 열고 있습니다 (같은 대화를 둘이 쓸 수 없습니다)`,
+          reason: `The "${holder.name}" session already has this conversation open (two sessions cannot share one conversation)`,
         }
       }
     }
@@ -444,7 +444,7 @@ export class SessionManager {
       return {
         session: m,
         resumed: false,
-        reason: `이 대화가 ${m.tool === 'codex' ? 'Codex' : 'Claude Code'}에서 삭제되었습니다 — 여기 남은 기록은 읽을 수 있고, 새 세션으로 이어서 시작할 수 있습니다`,
+        reason: `This conversation was deleted in ${m.tool === 'codex' ? 'Codex' : 'Claude Code'} — the history kept here is still readable, and you can continue in a new session`,
       }
     }
 
@@ -490,7 +490,7 @@ export class SessionManager {
         return {
           session: m,
           resumed: false,
-          reason: `이 대화가 ${m.tool === 'codex' ? 'Codex' : 'Claude Code'}에서 삭제되었습니다 — 여기 남은 기록은 읽을 수 있고, 새 세션으로 이어서 시작할 수 있습니다`,
+          reason: `This conversation was deleted in ${m.tool === 'codex' ? 'Codex' : 'Claude Code'} — the history kept here is still readable, and you can continue in a new session`,
         }
       }
       return { session: m, resumed: false, reason: (err as Error).message }
@@ -520,7 +520,7 @@ export class SessionManager {
     s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<SessionInfo> {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
     if (s.model !== undefined) m.model = s.model
     if (s.effort !== undefined) m.effort = s.effort
@@ -629,12 +629,12 @@ export class SessionManager {
    */
   async send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void> {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
     if (!this.handles.has(sessionId)) {
       const r = await this.resumeSession(sessionId)
       if (!r.resumed) {
-        throw Object.assign(new Error(`대화를 이어갈 수 없습니다: ${r.reason ?? '알 수 없는 이유'}`), {
+        throw Object.assign(new Error(`Could not resume the conversation: ${r.reason ?? 'unknown reason'}`), {
           code: 'session_not_found',
         })
       }
@@ -645,7 +645,7 @@ export class SessionManager {
     this.store.appendMessages([{ sessionId, seq, role: 'user', kind: 'text', payload: { text }, ts: Date.now() }])
     m.lastSeq = seq
     m.lastReadSeq = seq // 내가 보낸 건 읽은 것
-    if (m.autoNamed && m.name === '새 세션') {
+    if (m.autoNamed && m.name === 'New session') {
       m.name = truncate(text)
       this.emit({ type: 'session_title', sessionId, title: m.name })
     }
@@ -750,7 +750,7 @@ export class SessionManager {
    */
   async usageFor(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }> {
     const adapter = this.adapters.get(tool)
-    if (!adapter?.listUsage) return { supported: false, reason: `${tool}는 사용량 조회를 지원하지 않습니다`, usage: null }
+    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null }
 
     const hit = this.usageCache.get(tool)
     if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot }
@@ -775,7 +775,7 @@ export class SessionManager {
   async listModels(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }> {
     const adapter = this.adapters.get(tool)
     if (!adapter?.listModels) {
-      return { supported: false, reason: `${tool}는 모델 목록 조회를 지원하지 않습니다`, models: [] }
+      return { supported: false, reason: `${tool} does not support listing models`, models: [] }
     }
 
     const hit = this.modelCache.get(tool)
@@ -799,7 +799,7 @@ export class SessionManager {
   // ── 깃 (B-1) — 경로 해석만 하고 실제 작업은 dev-services에 위임한다 ──
   private cwdOf(projectId: string): string {
     const p = this.store.listProjects().find((x) => x.id === projectId)
-    if (!p) throw Object.assign(new Error(`프로젝트를 찾을 수 없습니다: ${projectId}`), { code: 'internal' })
+    if (!p) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
     return p.path
   }
 
@@ -942,7 +942,7 @@ export class SessionManager {
 
   private requireHandle(sessionId: string): SessionHandle {
     const h = this.handles.get(sessionId)
-    if (!h) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
+    if (!h) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     return h
   }
 }

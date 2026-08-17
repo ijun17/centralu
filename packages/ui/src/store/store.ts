@@ -502,7 +502,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set((s) => ({
         history: { ...s.history, [sessionId]: { ...cur, loading: false } },
-        toast: `이전 대화를 불러오지 못했습니다: ${(e as Error).message}`,
+        toast: `Could not load past conversation: ${(e as Error).message}`,
       }))
     }
   },
@@ -643,7 +643,7 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return null
     if (file.size > MAX_ATTACHMENT_BYTES) {
-      set({ toast: `${file.name}은(는) 너무 큽니다 (최대 ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB)` })
+      set({ toast: `${file.name} is too large (max ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB)` })
       return null
     }
     try {
@@ -655,7 +655,7 @@ export const useStore = create<AppState>((set, get) => ({
         toBase64(new Uint8Array(buf)),
       )
     } catch (e) {
-      set({ toast: `첨부하지 못했습니다: ${(e as Error).message}` })
+      set({ toast: `Could not attach: ${(e as Error).message}` })
       return null
     }
   },
@@ -700,7 +700,7 @@ export const useStore = create<AppState>((set, get) => ({
       }))
       const e = err as Error & { code?: string }
       // host가 알아서 되살린 뒤 보낸다 — 여기까지 왔다면 되살리기 자체가 실패한 것이다
-      set({ toast: `보내지 못했습니다: ${e.message}` })
+      set({ toast: `Could not send: ${e.message}` })
     }
   },
 
@@ -711,11 +711,11 @@ export const useStore = create<AppState>((set, get) => ({
       const res = await platform.agents.resumeSession(sessionId)
       set((s) => ({
         sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: res.resumed } },
-        toast: res.resumed ? null : `이어갈 수 없습니다: ${res.reason ?? '알 수 없는 이유'}`,
+        toast: res.resumed ? null : `Could not resume: ${res.reason ?? 'unknown reason'}`,
       }))
       return res.resumed
     } catch (err) {
-      set({ toast: `이어갈 수 없습니다: ${(err as Error).message}` })
+      set({ toast: `Could not resume: ${(err as Error).message}` })
       return false
     }
   },
@@ -739,7 +739,7 @@ export const useStore = create<AppState>((set, get) => ({
       await get().platform!.agents.interrupt(sessionId)
     } catch (err) {
       // 못 멈췄는데 조용하면 멈춘 줄 알고 기다린다 — 이 프로젝트가 금지하는 실패다
-      set({ toast: `중지하지 못했습니다: ${(err as Error).message}` })
+      set({ toast: `Could not stop: ${(err as Error).message}` })
     }
   },
 
@@ -747,12 +747,12 @@ export const useStore = create<AppState>((set, get) => ({
   async deleteSession(sessionId) {
     const platform = get().platform
     if (!platform) return
-    const name = get().sessions[sessionId]?.name ?? '세션'
+    const name = get().sessions[sessionId]?.name ?? 'Session'
     try {
       await platform.agents.deleteSession(sessionId)
-      set({ toast: `삭제했습니다: ${name}` })
+      set({ toast: `Deleted: ${name}` })
     } catch (e) {
-      set({ toast: `삭제하지 못했습니다: ${(e as Error).message}` })
+      set({ toast: `Could not delete: ${(e as Error).message}` })
     }
   },
 
@@ -772,9 +772,9 @@ export const useStore = create<AppState>((set, get) => ({
           },
         },
       }))
-      set({ toast: s.model !== undefined ? `모델: ${info.model ?? '기본'} (다음 턴부터)` : `권한: ${info.permissionPreset}` })
+      set({ toast: s.model !== undefined ? `Model: ${info.model ?? 'Default'} (from next turn)` : `Perms: ${info.permissionPreset}` })
     } catch (e) {
-      set({ toast: `설정을 바꾸지 못했습니다: ${(e as Error).message}` })
+      set({ toast: `Could not change settings: ${(e as Error).message}` })
     }
   },
 
@@ -818,7 +818,7 @@ export const useStore = create<AppState>((set, get) => ({
         sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
         wakeError: res.resumed
           ? omitKey(st.wakeError, sessionId)
-          : { ...st.wakeError, [sessionId]: res.reason ?? '알 수 없는 이유' },
+          : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
       }))
     } catch (e) {
       set((st) => ({ wakeError: { ...st.wakeError, [sessionId]: (e as Error).message } }))
@@ -838,7 +838,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({
       sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
       wakeError: r.resumed ? omitKey(s.wakeError, sessionId) : { ...s.wakeError, [sessionId]: r.reason ?? '' },
-      toast: r.resumed ? '에이전트를 다시 시작했습니다' : `재시작하지 못했습니다: ${r.reason ?? ''}`,
+      toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
     }))
     return r.resumed
   },
@@ -902,7 +902,7 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'compaction':
       // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
       // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다
-      return [...items, { kind: 'mark', seq: ++chatSeq, text: '여기서 이전 대화가 압축되었습니다' }]
+      return [...items, { kind: 'mark', seq: ++chatSeq, text: 'Earlier messages were compacted here' }]
     default:
       return items
   }
@@ -920,7 +920,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       if (last?.kind === 'assistant') last.text += e.text ?? ''
       else items.push({ kind: 'assistant', seq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
-      items.push({ kind: 'mark', seq: m.seq, text: '여기서 이전 대화가 압축되었습니다' })
+      items.push({ kind: 'mark', seq: m.seq, text: 'Earlier messages were compacted here' })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary) items.push({ kind: 'tool', seq: m.seq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly })

@@ -116,7 +116,7 @@ test('승인: 항상 허용은 범위를 알려준다 (T5-4)', async ({ page }) 
   await newSession(page, 'alpha', 'x')
   await injectApproval(page, 0, { kind: 'command', command: 'npm test --watch', cwd: '/tmp/alpha' })
   await page.getByTestId('approve-always').click()
-  await expect(page.getByTestId('toast')).toContainText('이 세션')
+  await expect(page.getByTestId('toast')).toContainText('this session')
   await expect(page.getByTestId('toast')).toContainText('npm test*') // 패턴 제안
 })
 
@@ -173,7 +173,7 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
   await expect(page.getByTestId('inbox')).toBeVisible()
   const rows = page.locator('[data-testid^="inbox-item-"]')
   await expect(rows).toHaveCount(5)
-  await expect(rows.first()).toContainText('승인 필요')
+  await expect(rows.first()).toContainText('Needs approval')
 
   // 승인 2건을 처리 (Enter로 점프 → y)
   for (let i = 0; i < 2; i++) {
@@ -192,7 +192,7 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
     if (remaining === 0) break
     await page.keyboard.press('d')
   }
-  await expect(page.getByTestId('inbox-empty')).toContainText('기다리는 항목이 없습니다')
+  await expect(page.getByTestId('inbox-empty')).toContainText('Nothing waiting')
 })
 
 test('다음 대기로 이동 단축키는 승인부터 순회한다 (T5-5, FR-17)', async ({ page }) => {
@@ -243,7 +243,7 @@ test('동시 세션 경고를 사이드바에 표시한다 (T5-6, FR-2)', async 
   await expect(page.getByTestId('concurrent-alpha')).toContainText('2')
   // 무엇이 위험한지는 물어보면 답한다
   await page.getByTestId('project-header-alpha').hover()
-  await expect(page.getByTestId('concurrent-detail')).toContainText('유실')
+  await expect(page.getByTestId('concurrent-detail')).toContainText('lose')
 })
 
 test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) => {
@@ -290,7 +290,7 @@ test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었�
   await page.getByTestId('prompt-input').fill('계속 진행해줘')
   await page.getByTestId('send').click()
 
-  await expect(page.getByTestId('toast')).toContainText('보내지 못했습니다')
+  await expect(page.getByTestId('toast')).toContainText('Could not send')
   // 보내지 못한 말풍선은 남지 않는다
   await expect(page.getByTestId('msg-user').filter({ hasText: '계속 진행해줘' })).toHaveCount(0)
 })
@@ -338,7 +338,7 @@ test('정말 이어갈 수 없으면 이유를 알린다 (조용한 실패 금�
   await page.getByTestId('prompt-input').fill('이어서 해줘')
   await page.getByTestId('send').click()
 
-  await expect(page.getByTestId('toast')).toContainText('이어갈 수 없습니다')
+  await expect(page.getByTestId('toast')).toContainText('Could not resume')
   // 보내지 못한 말풍선은 남지 않는다
   await expect(page.getByTestId('msg-user').filter({ hasText: '이어서 해줘' })).toHaveCount(0)
 })
@@ -402,13 +402,13 @@ test('첫 실행: 도구가 준비 안 됐으면 설치 명령을 보여준다 (
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.agents.detect = async () => [
-      { tool: 'claude', installed: false, loggedIn: false, detail: '설치되지 않음' },
+      { tool: 'claude', installed: false, loggedIn: false, detail: 'not installed' },
       { tool: 'codex', installed: true, loggedIn: false, detail: 'codex-cli 0.147' },
     ]
   })
   await page.getByTestId('redetect').click()
   await expect(page.getByTestId('tool-claude')).toContainText('npm i -g @anthropic-ai/claude-code')
-  await expect(page.getByTestId('tool-codex')).toContainText('로그인')
+  await expect(page.getByTestId('tool-codex')).toContainText('log in')
   await expect(page.getByTestId('first-run-blocked')).toBeVisible()
 })
 
@@ -524,13 +524,13 @@ test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     ;(window as any).__mock.agents.detect = async () => [
-      { tool: 'claude', installed: false, loggedIn: false, detail: 'claude CLI를 찾을 수 없습니다' },
+      { tool: 'claude', installed: false, loggedIn: false, detail: 'claude CLI not found' },
       { tool: 'codex', installed: true, loggedIn: true, detail: 'codex 0.147' },
     ]
   })
   await page.getByTestId('new-session-alpha').click()
   // 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 — 이유를 적는다
-  await expect(page.getByTestId('tool-blocked')).toContainText('찾을 수 없습니다')
+  await expect(page.getByTestId('tool-blocked')).toContainText('not found')
   await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
   // 쓸 수 있는 도구로 바꾸면 즉시 풀린다
   await page.getByTestId('tool-option-codex').click()
@@ -555,7 +555,7 @@ test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', as
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '먼저 시작한 작업')
   await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('concurrent-warning')).toContainText('유실')
+  await expect(page.getByTestId('concurrent-warning')).toContainText('lose')
 })
 
 test('3레인: 증거 패널은 대화와 함께 있고 ⌘B로 접힌다 (B-0)', async ({ page }) => {
@@ -599,10 +599,10 @@ test('깃 패널: 변경 목록·diff·스테이징·커밋 (B-2, B-6)', async (
   await expect(page.locator('[data-diff="add"]')).toContainText('새 줄')
   await expect(page.locator('[data-diff="del"]')).toContainText('옛 줄')
 
-  await page.getByTestId('git-올리기-all').click()
+  await page.getByTestId('git-stage-all').click()
   await page.getByTestId('commit-message').fill('테스트 커밋')
   await page.getByTestId('commit-button').click()
-  await expect(page.getByTestId('toast')).toContainText('커밋')
+  await expect(page.getByTestId('toast')).toContainText('Committed')
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('테스트 커밋')
 })
 
@@ -622,7 +622,7 @@ test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 �
 
   await expect(page.getByTestId('checkout-warning')).toContainText('src/a.ts')
   await page.getByTestId('checkout-proceed').click()
-  await expect(page.getByTestId('toast')).toContainText('전환')
+  await expect(page.getByTestId('toast')).toContainText('Switched')
 })
 
 test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', async ({ page }) => {
@@ -689,7 +689,7 @@ test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ pa
   expect(rendered).toBeLessThan(120)
 
   await page.getByTestId('viewer-search').fill('줄 42 ')
-  await expect(page.getByTestId('viewer-match-count')).toContainText('1줄')
+  await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
 })
 
 test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', async ({ page }) => {
@@ -702,7 +702,7 @@ test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', a
   await newSession(page, 'alpha', '작업')
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-logo.png').click()
-  await expect(page.getByTestId('viewer-binary')).toContainText('바이너리')
+  await expect(page.getByTestId('viewer-binary')).toContainText('Binary')
 })
 
 test('첨부: 파일을 붙이면 목록에 뜨고 전송에 실린다 (D, FR-13)', async ({ page }) => {
@@ -766,7 +766,7 @@ test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await newSession(page, 'alpha', '작업')
 
   await page.keyboard.press('Meta+k')
-  await page.getByTestId('palette-input').fill('설정')
+  await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
 
   await expect(page.getByTestId('rules-list')).toContainText('npm test*')
@@ -800,7 +800,7 @@ test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 
   // 막힌 것은 표식으로 바로 보이고, 무엇을 해야 하는지는 호버로 알려준다
   await expect(page.getByTestId('git-denied-denied')).toBeVisible()
   await page.getByTestId('project-header-denied').hover()
-  await expect(page.getByTestId('git-denied')).toContainText('권한')
+  await expect(page.getByTestId('git-denied')).toContainText('permission')
 })
 
 test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page }) => {
@@ -810,7 +810,7 @@ test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page
 
   await page.getByTestId(`delete-session-${id}`).click()
   // "되돌릴 수 없습니다"는 사실이 아니다 — 무엇이 지워지고 무엇이 남는지를 말한다
-  await expect(page.getByTestId('confirm-delete')).toContainText('대화 기록과 첨부가 사라집니다')
+  await expect(page.getByTestId('confirm-delete')).toContainText('Chat history and attachments')
   await page.getByTestId('confirm-delete-yes').click()
 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
@@ -822,14 +822,14 @@ test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러�
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.agents.createSession = async () => {
-      throw new Error('claude 세션을 시작하지 못했습니다: Native CLI binary not found')
+      throw new Error('Could not start claude session: Native CLI binary not found')
     }
   })
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
 
   // 토스트는 사라지지만 이건 남는다
-  await expect(page.getByTestId('create-session-error')).toContainText('시작하지 못했습니다')
+  await expect(page.getByTestId('create-session-error')).toContainText('Could not start')
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
 })
 
@@ -838,7 +838,7 @@ test('host가 이미 준비된 뒤에 붙어도 기동한다 (회귀: 이벤트�
   await page.goto('/?mock=1')
   await expect(page.getByTestId('first-run')).toBeVisible({ timeout: 5000 })
   // 기동 실패 화면이 아니어야 한다
-  await expect(page.getByText('에이전트 호스트를 시작하지 못했습니다')).toHaveCount(0)
+  await expect(page.getByText('Could not start the agent host')).toHaveCount(0)
 })
 
 test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (도그푸딩: 어디서 보는지 못 찾음)', async ({ page }) => {
@@ -925,12 +925,12 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
   await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('past-ext-1')).toContainText('어제 하던 리팩터링')
   // 제목이 '첫 메시지'인 도구(codex)에서도 최신 여부를 알 수 있어야 한다
-  await expect(page.getByTestId('past-ext-1')).toContainText('마지막 1시간 전')
-  await expect(page.getByTestId('past-ext-2')).toContainText('이미 열려 있음')
+  await expect(page.getByTestId('past-ext-1')).toContainText('last 1h ago')
+  await expect(page.getByTestId('past-ext-2')).toContainText('Already open')
 
   await page.getByTestId('past-ext-1').click()
   await expect(page.getByTestId('resume-note')).toBeVisible()
-  await expect(page.getByTestId('create-session-confirm')).toHaveText('불러오기')
+  await expect(page.getByTestId('create-session-confirm')).toHaveText('Load')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
@@ -952,14 +952,14 @@ test('구버전 도구는 목록을 못 줘도 새 세션을 막지 않는다', 
   await setup(page, { projects: ['/tmp/alpha'] })
   await seedPastSessions(page, {
     supported: false,
-    reason: '설치된 Codex가 이전 세션 목록을 지원하지 않습니다 (codex 업데이트가 필요합니다)',
+    reason: 'The installed Codex does not support listing past sessions (update codex)',
     sessions: [],
   })
 
   await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('past-unsupported')).toContainText('codex 업데이트가 필요합니다')
+  await expect(page.getByTestId('past-unsupported')).toContainText('update codex')
   // 이유는 보이되 길은 열려 있어야 한다
-  await expect(page.getByTestId('create-session-confirm')).toHaveText('시작')
+  await expect(page.getByTestId('create-session-confirm')).toHaveText('Start')
   await page.getByTestId('initial-prompt').fill('그래도 새로 시작')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -1056,7 +1056,7 @@ test('증거 패널 탭: 깃은 위가 변경·아래가 기록, 파일 탭은 �
   await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
   await expect(page.getByTestId('evidence-tree')).toBeVisible()
   await expect(page.getByTestId('evidence-commit-aaa111')).toContainText('첫 커밋')
-  await expect(page.getByTestId('evidence-commit-bbb222')).toContainText('병합')
+  await expect(page.getByTestId('evidence-commit-bbb222')).toContainText('merge')
 
   // 파일 탭으로 가면 트리만
   await page.getByTestId('evidence-tab-files').click()
@@ -1120,7 +1120,7 @@ test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) =
 
   await page.getByTestId('evidence-stage-all').click()
   await page.getByTestId('evidence-commit').click()
-  await expect(page.getByTestId('toast')).toContainText('커밋')
+  await expect(page.getByTestId('toast')).toContainText('Committed')
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('패널에서 커밋')
 })
 
@@ -1133,8 +1133,8 @@ test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명�
   await page.getByTestId(`delete-session-${id}`).click()
 
   // 실제보다 무섭게 말하면 사람은 정리하지 못하고 목록만 쌓인다
-  await expect(page.getByTestId('delete-notice')).toContainText('Claude Code에는 대화가 그대로 남습니다')
-  await expect(page.getByTestId('delete-notice')).toContainText('이전 대화')
+  await expect(page.getByTestId('delete-notice')).toContainText('stays in Claude Code')
+  await expect(page.getByTestId('delete-notice')).toContainText('Past conversations')
 
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toBeHidden()
@@ -1149,7 +1149,7 @@ test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', 
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.getByTestId('restart-session').click()
-  await expect(page.getByTestId('toast')).toContainText('다시 시작')
+  await expect(page.getByTestId('toast')).toContainText('Agent restarted')
 
   expect(await page.evaluate(() => (window as any).__mock.restarted)).toContain(id)
   await expect(page.getByTestId('chat-stream')).toContainText('이 대화는 남아야 한다')
@@ -1196,7 +1196,7 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
 
   // 압축 지점은 대화에 표시된다 (모델은 잊었지만 기록은 남아 있다는 사실)
   await page.evaluate((sid) => (window as any).__mock.emit({ type: 'compaction', sessionId: sid }), id)
-  await expect(page.getByTestId('msg-mark')).toContainText('압축')
+  await expect(page.getByTestId('msg-mark')).toContainText('compacted')
 
   // 화면에는 최근 200줄만 있다 (가상 스크롤이라 실제로 그려지는 건 더 적다)
   const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
@@ -1279,7 +1279,7 @@ test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) 
   // 조회성 도구는 접힌 채로 시작하고, 맛보기만 보인다
   await expect(output).toContainText('출력 1')
   await expect(output).not.toContainText('출력 40')
-  await expect(page.getByTestId('tool-card-more')).toContainText('37줄 더 보기')
+  await expect(page.getByTestId('tool-card-more')).toContainText('37 more lines')
 
   // 대화 스크롤을 가로챌 안쪽 스크롤러가 없다
   const scrollable = await output.evaluate((el) => {
@@ -1420,7 +1420,7 @@ test('터미널을 여러 개 열고 닫는다 (세로로 쌓인다)', async ({ 
   const titles = await page.evaluate(() =>
     [...(window as any).__mock.terminalState.byCwd.values()][0].map((t: { title: string }) => t.title),
   )
-  expect(titles).toEqual(['터미널 1', '터미널 2'])
+  expect(titles).toEqual(['Terminal 1', 'Terminal 2'])
 })
 
 test('좌우 패널 폭을 조절해도 화면이 옆으로 밀리지 않는다', async ({ page }) => {
@@ -1502,7 +1502,7 @@ test('스킬을 아직 못 불러왔으면 없다고 하지 않는다', async ({
   await newSession(page, 'alpha', '작업')
 
   await page.getByTestId('prompt-input').fill('/')
-  await expect(page.getByTestId('autocomplete-loading')).toContainText('불러오는 중')
+  await expect(page.getByTestId('autocomplete-loading')).toContainText('Loading skills')
 })
 
 test('문장 중간의 슬래시는 명령으로 보지 않는다', async ({ page }) => {
@@ -1539,7 +1539,7 @@ test('이미 열려 있는 대화를 다시 고르면 새로 만들지 않고 �
 
   // 다시 열면 '이미 열려 있음'으로 표시되고, 누르면 만들지 않고 이동한다
   await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('past-ext-1')).toContainText('이미 열려 있음')
+  await expect(page.getByTestId('past-ext-1')).toContainText('Already open')
   await page.getByTestId('past-ext-1').click()
 
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -1598,8 +1598,8 @@ test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', 
       usage: {
         plan: 'max',
         windows: [
-          { id: 'session', label: '5시간', percent: 8, resetsAt: new Date(Date.now() + 7_800_000).toISOString(), scope: null },
-          { id: 'weekly_all', label: '주간', percent: 93, resetsAt: new Date(Date.now() + 3 * 86400_000).toISOString(), scope: null },
+          { id: 'session', label: '5 hours', percent: 8, resetsAt: new Date(Date.now() + 7_800_000).toISOString(), scope: null },
+          { id: 'weekly_all', label: 'Weekly', percent: 93, resetsAt: new Date(Date.now() + 3 * 86400_000).toISOString(), scope: null },
         ],
         daily: [],
       },
@@ -1613,7 +1613,7 @@ test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', 
 
   // 자세한 건 물어볼 때 답한다
   await page.getByTestId('usage-window-weekly_all').hover()
-  await expect(page.getByTestId('usage-tip-weekly_all')).toContainText('초기화')
+  await expect(page.getByTestId('usage-tip-weekly_all')).toContainText('reset')
 
   // 일간을 못 주는 도구면 그 줄을 접는다 (Claude에는 일간 창이 없다)
   await expect(page.getByTestId('usage-daily')).toHaveCount(0)
@@ -1629,7 +1629,7 @@ test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) =
       supported: true,
       usage: {
         plan: 'pro',
-        windows: [{ id: 'primary', label: '1주', percent: 22, resetsAt: null, scope: null }],
+        windows: [{ id: 'primary', label: '1 week', percent: 22, resetsAt: null, scope: null }],
         daily: [
           { date: '2026-08-15', tokens: 115640 },
           { date: '2026-08-16', tokens: 9005155 },
@@ -1638,7 +1638,7 @@ test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) =
     }
   })
   await page.getByTestId('open-usage').click()
-  await expect(page.getByTestId('usage-daily')).toContainText('오늘 9.0M')
+  await expect(page.getByTestId('usage-daily')).toContainText('Today 9.0M')
 })
 
 test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 않는다)', async ({ page }) => {
@@ -1646,12 +1646,12 @@ test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 �
   await page.evaluate(() => {
     ;(window as any).__mock.usageState = {
       supported: false,
-      reason: '설치된 Claude Code SDK가 사용량 조회를 지원하지 않습니다',
+      reason: 'The installed Claude Code SDK does not support usage queries',
       usage: null,
     }
   })
   await page.getByTestId('open-usage').click()
-  await expect(page.getByTestId('usage-unavailable')).toContainText('SDK가 사용량 조회를 지원하지 않습니다')
+  await expect(page.getByTestId('usage-unavailable')).toContainText('does not support usage queries')
 })
 
 /**
@@ -1698,7 +1698,7 @@ test('같은 대화를 두 세션이 열지 않는다 (도구가 거부하기 �
 
   // 다시 열면 '이미 열려 있음'이라 새로 만들지 않고 그 세션으로 간다
   await page.getByTestId('new-session-alpha').click()
-  await expect(page.getByTestId('past-ext-1')).toContainText('이미 열려 있음')
+  await expect(page.getByTestId('past-ext-1')).toContainText('Already open')
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
 })
 
@@ -1815,8 +1815,8 @@ test('깨우지 못하면 이유를 그 자리에 적고 다시 시도할 수 �
   // 다시 고르면 깨우기를 시도하고, 실패 이유가 남는다
   await page.getByTestId('project-header-alpha').click()
   await page.getByTestId(`session-row-${id}`).click()
-  await expect(page.getByTestId('dormant-note')).toContainText('이어가지 못했습니다')
-  await expect(page.getByTestId('dormant-note')).toContainText('재개할 수 없습니다')
+  await expect(page.getByTestId('dormant-note')).toContainText('Could not resume')
+  await expect(page.getByTestId('dormant-note')).toContainText('cannot be resumed')
 
   // 원인을 고치고 다시 시도하면 살아난다
   await page.evaluate((sid) => (window as any).__mock.unresumable.delete(sid), id)
@@ -1889,13 +1889,13 @@ test('깃 패널이 스테이지됨과 변경됨을 나눠 보여주고 파일 �
   })
   await newSession(page, 'alpha', '작업')
 
-  await expect(page.getByTestId('evidence-group-스테이지됨')).toContainText('src/a.ts')
-  await expect(page.getByTestId('evidence-group-변경됨')).toContainText('src/b.ts')
+  await expect(page.getByTestId('evidence-group-staged')).toContainText('src/a.ts')
+  await expect(page.getByTestId('evidence-group-changed')).toContainText('src/b.ts')
 
   // 파일 하나만 올린다 — "이것만 빼고 커밋"을 하려고 터미널로 나가지 않아도 된다
   await page.getByTestId('evidence-stage-src/b.ts').click({ force: true })
-  await expect(page.getByTestId('evidence-group-변경됨')).toBeHidden()
-  await expect(page.getByTestId('evidence-group-스테이지됨')).toContainText('src/b.ts')
+  await expect(page.getByTestId('evidence-group-changed')).toBeHidden()
+  await expect(page.getByTestId('evidence-group-staged')).toContainText('src/b.ts')
 })
 
 /** 점만 있으면 목록이지 트리가 아니다 — 갈라짐과 합쳐짐이 선으로 보여야 한다 */

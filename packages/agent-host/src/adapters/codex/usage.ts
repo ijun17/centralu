@@ -16,10 +16,10 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 
 /** 창 길이(분)로 사람이 아는 이름을 만든다 — 도구가 이름을 주지 않는다 */
 function labelFor(mins: number | null): string {
-  if (mins === null) return '한도'
-  if (mins >= 10080) return `${Math.round(mins / 10080)}주`
-  if (mins >= 1440) return `${Math.round(mins / 1440)}일`
-  return `${Math.round(mins / 60)}시간`
+  if (mins === null) return 'Limit'
+  if (mins >= 10080) return `${Math.round(mins / 10080)}w`
+  if (mins >= 1440) return `${Math.round(mins / 1440)}d`
+  return `${Math.round(mins / 60)}h`
 }
 
 function toWindow(id: string, raw: unknown): UsageWindow | null {

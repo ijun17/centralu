@@ -77,7 +77,7 @@ export class TerminalService {
       id: `term-${++this.counter}`,
       cwd,
       // 번호는 자리 순서로 붙인다 — 지우고 다시 만들어도 1,2,3이 이어진다
-      title: `터미널 ${siblings.length + 1}`,
+      title: `Terminal ${siblings.length + 1}`,
       pty: null,
       buffer: '',
       cols,
@@ -100,7 +100,7 @@ export class TerminalService {
     if (siblings.length === 0) this.byCwd.delete(e.cwd)
     else {
       // 번호를 다시 매긴다 — 2번을 지웠는데 1,3이 남으면 세는 사람이 헷갈린다
-      siblings.forEach((x, i) => (x.title = `터미널 ${i + 1}`))
+      siblings.forEach((x, i) => (x.title = `Terminal ${i + 1}`))
       this.byCwd.set(e.cwd, siblings)
     }
   }
@@ -120,7 +120,7 @@ export class TerminalService {
     if (!e) return null
     e.pty?.kill()
     e.pty = null
-    this.append(e, '\r\n[2m— 셸을 다시 시작했습니다 —[0m\r\n')
+    this.append(e, '\r\n[2m— shell restarted —[0m\r\n')
     this.start(e, cols, rows)
     return this.toHandle(e)
   }
@@ -172,7 +172,7 @@ export class TerminalService {
     try {
       pty = this.loadPty()
     } catch (err) {
-      this.append(e, `\r\n[2m터미널을 열 수 없습니다: ${(err as Error).message}[0m\r\n`)
+      this.append(e, `\r\n[2mCould not open terminal: ${(err as Error).message}[0m\r\n`)
       return
     }
 
@@ -198,7 +198,7 @@ export class TerminalService {
       })
     } catch (err) {
       // 조용히 죽지 않는다 — 빈 검은 화면만 남으면 원인을 알 길이 없다
-      const msg = `\r\n[2m셸을 시작하지 못했습니다: ${(err as Error).message}[0m\r\n`
+      const msg = `\r\n[2mCould not start shell: ${(err as Error).message}[0m\r\n`
       this.append(e, msg)
       this.emit({ terminalId: e.id, data: msg })
       this.emit({ terminalId: e.id, exitCode: null })

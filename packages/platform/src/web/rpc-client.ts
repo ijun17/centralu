@@ -168,7 +168,7 @@ export class RpcClient {
     this.closed = true
     this.ws?.close()
     this.ws = null
-    for (const [, p] of this.pending) p.reject(new Error('연결이 종료되었습니다'))
+    for (const [, p] of this.pending) p.reject(new Error('Connection closed'))
     this.pending.clear()
   }
 }

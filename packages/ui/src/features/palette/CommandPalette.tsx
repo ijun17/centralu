@@ -61,9 +61,9 @@ export function CommandPalette() {
     const match = (s: string) => !q || s.toLowerCase().includes(q)
 
     const actions: Item[] = [
-      { kind: 'action', id: 'settings', label: '설정 열기', sub: '단축키·알림·승인 규칙', run: () => toggleSettings(true) },
-      { kind: 'action', id: 'open-git', label: '깃 전체 보기', sub: '변경·기록·브랜치', run: () => openGit() },
-      { kind: 'action', id: 'toggle-panel', label: '증거 패널', sub: '⌘B · 깃·파일', run: () => togglePanel() },
+      { kind: 'action', id: 'settings', label: 'Open settings', sub: 'Shortcuts · notifications · approval rules', run: () => toggleSettings(true) },
+      { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
+      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: '⌘B · Git · files', run: () => togglePanel() },
     ]
 
     return [
@@ -86,7 +86,7 @@ export function CommandPalette() {
         id: `${h.sessionId}-${h.seq}`,
         sessionId: h.sessionId,
         label: h.snippet.trim().slice(0, 80),
-        sub: sessions[h.sessionId]?.name ?? '대화',
+        sub: sessions[h.sessionId]?.name ?? 'Chat',
       })),
     ]
   }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings])
@@ -135,7 +135,7 @@ export function CommandPalette() {
         <input
           ref={inputRef}
           className="w-full border-b border-edge bg-transparent px-4 py-3 text-[13px] text-chalk placeholder:text-slate focus:outline-none"
-          placeholder="세션·프로젝트·대화 내용 검색"
+          placeholder="Search sessions, projects, messages"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -146,7 +146,7 @@ export function CommandPalette() {
         <ul className="max-h-[50vh] overflow-y-auto">
           {items.length === 0 ? (
             <li className="px-4 py-6 text-center text-[12px] text-slate" data-testid="palette-empty">
-              결과가 없습니다
+              No results
             </li>
           ) : (
             items.map((item, i) => (
@@ -159,7 +159,7 @@ export function CommandPalette() {
                   data-testid={`palette-item-${item.kind}`}
                 >
                   <span className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-slate">
-                    {item.kind === 'session' ? '세션' : item.kind === 'project' ? '폴더' : item.kind === 'message' ? '대화' : '동작'}
+                    {item.kind === 'session' ? 'Session' : item.kind === 'project' ? 'Folder' : item.kind === 'message' ? 'Chat' : 'Action'}
                   </span>
                   <span className="truncate text-[13px] text-chalk">{item.label}</span>
                   <span className="ml-auto shrink-0 truncate text-[11px] text-slate">{item.sub}</span>
@@ -170,9 +170,9 @@ export function CommandPalette() {
         </ul>
         <footer className="flex items-center gap-1 border-t border-edge px-3 py-1.5 text-[10px] text-slate">
           <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd> 이동
-          <Kbd>↵</Kbd> 열기
-          <Kbd>esc</Kbd> 닫기
+          <Kbd>↓</Kbd> Move
+          <Kbd>↵</Kbd> Open
+          <Kbd>esc</Kbd> Close
         </footer>
       </div>
     </div>
