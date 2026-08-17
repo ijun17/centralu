@@ -1874,6 +1874,41 @@ test('응답을 기다리는 동안 표시가 뜨고 거기서 중지할 수 있
 })
 
 /**
+ * "컴팩트 할 때 응답 기다리는 거랑 UI가 똑같아서, 응답을 하고 있는 건지
+ *  컴팩트 중이라 오래 걸리는 건지 모르겠다" (도그푸딩).
+ *
+ * 프로브로 재보니 수동 압축 한 번이 39초였다. 그동안 화면이 '응답 대기'와
+ * 한 글자도 다르지 않으면 기다리는 사람에게는 판단할 근거가 없다.
+ */
+test('압축 중은 응답 대기와 다르게 보인다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '시작')
+
+  await page.getByTestId('prompt-input').fill('대화를 정리해줘')
+  await page.getByTestId('send').click()
+  await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
+
+  await emitEvent(page, 0, { type: 'activity', activity: 'compacting' })
+  await expect(page.getByTestId('activity-label')).toHaveText('Compacting context')
+
+  // 압축이 끝나면 평범한 대기로 돌아온다 — 상태는 내내 working이었다
+  await emitEvent(page, 0, { type: 'activity', activity: null })
+  await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
+})
+
+/**
+ * 압축 실패는 지금까지 통째로 삼켜졌다 (실측: "Not enough messages to compact.").
+ * 컨텍스트가 그대로인데 화면에는 아무 일도 없었던 것처럼 보이면 안 된다.
+ */
+test('압축이 실패하면 대화에 그 사실이 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '시작')
+
+  await emitEvent(page, 0, { type: 'compaction', failed: true, reason: 'Not enough messages to compact.' })
+  await expect(page.getByText('Compaction failed — Not enough messages to compact.')).toBeVisible()
+})
+
+/**
  * 깃 탭 — VSCode처럼 스테이지된 것과 아닌 것을 나눠 보여준다.
  * 커밋 직전에 알아야 할 유일한 사실이 "무엇이 실리나"인데,
  * 한 목록에 섞여 있으면 그걸 줄 끝의 작은 꼬리표로 읽어야 했다.

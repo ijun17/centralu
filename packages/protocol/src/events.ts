@@ -3,6 +3,7 @@ import {
   ApprovalDecision,
   ApprovalDetail,
   ProtocolError,
+  SessionActivity,
   SessionState,
   TokenUsage,
   ToolSummary,
@@ -53,8 +54,23 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('session_title'), title: z.string() }),
   /** 동시 세션 충돌 감지·최근 수정 파일 하이라이트용 (FR-2, FR-5) */
   z.object({ ...base, type: z.literal('files_touched'), paths: z.array(z.string()) }),
+  /** 지금 무엇을 하느라 바쁜가 — null이면 평범한 응답 대기 */
+  z.object({ ...base, type: z.literal('activity'), activity: SessionActivity.nullable() }),
   /** 컨텍스트 압축이 일어났다 — 대화창에 마커를 남긴다 (FR-14) */
-  z.object({ ...base, type: z.literal('compaction') }),
+  z.object({
+    ...base,
+    type: z.literal('compaction'),
+    /**
+     * 실패도 마커로 남긴다. 조용히 넘기면 압축이 안 된 채로 대화가 이어지는데
+     * 사용자는 왜 컨텍스트가 그대로인지 알 수 없다
+     * (실측: "Not enough messages to compact." — 지금까지 통째로 삼키고 있었다).
+     */
+    failed: z.boolean().default(false),
+    reason: z.string().optional(),
+    /** 얼마나 줄었나. 도구가 알려줄 때만 (Claude compact_metadata) */
+    before: z.number().optional(),
+    after: z.number().optional(),
+  }),
   /** 밖에서 이어간 대화를 따라잡았다 — UI가 기록을 다시 읽는 신호 */
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** 세션이 삭제됐다 — 다른 창·재연결에서도 목록이 맞아야 한다 */

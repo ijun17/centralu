@@ -116,6 +116,47 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
   })
 })
 
+/*
+ * 픽스처는 지어낸 게 아니라 프로브로 관찰한 실제 메시지다.
+ * 관찰한 순서: status:'compacting' → (39.1초) → status:null(+compact_result) → compact_boundary
+ */
+describe('압축 — 무엇을 하는 중인지 말한다', () => {
+  it('압축이 시작되면 activity로 알린다 (응답 대기와 구분되어야 한다)', () => {
+    expect(n({ type: 'system', subtype: 'status', status: 'compacting' })).toEqual([
+      { type: 'activity', sessionId: SID, activity: 'compacting' },
+    ])
+  })
+
+  it('평범한 요청 중은 activity가 없다', () => {
+    expect(n({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([
+      { type: 'activity', sessionId: SID, activity: null },
+    ])
+  })
+
+  it('압축 실패를 삼키지 않는다 — 이유까지 남긴다', () => {
+    const out = n({
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      compact_result: 'failed',
+      compact_error: 'Not enough messages to compact.',
+    })
+    expect(out).toEqual([
+      { type: 'activity', sessionId: SID, activity: null },
+      { type: 'compaction', sessionId: SID, failed: true, reason: 'Not enough messages to compact.' },
+    ])
+  })
+
+  it('compact_boundary → 마커 (Claude에는 지금까지 이 마커가 없었다)', () => {
+    const out = n({
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'manual', pre_tokens: 25485, post_tokens: 3686, duration_ms: 39099 },
+    })
+    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686 }])
+  })
+})
+
 describe('알 수 없는 메시지는 조용히 무시한다', () => {
   it.each([
     { type: 'system', subtype: 'init' },

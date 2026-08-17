@@ -1029,11 +1029,27 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'compaction':
       // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
       // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다
-      return [...items, { kind: 'mark', seq: ++chatSeq, text: 'Earlier messages were compacted here' }]
+      return [...items, { kind: 'mark', seq: ++chatSeq, text: compactionText(e) }]
     default:
       return items
   }
 }
+
+/**
+ * 압축 마커에 무엇을 적을 것인가.
+ *
+ * "압축됐다"만으로는 부족하다. 실패했는데 성공한 것처럼 보이면 최악이고,
+ * 얼마나 줄었는지는 다음 압축이 언제 올지 가늠하게 해준다 (도구가 알려줄 때만).
+ */
+export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): string {
+  if (e.failed) return `Compaction failed — ${e.reason ?? 'unknown reason'}`
+  if (e.before != null && e.after != null) {
+    return `Context compacted here · ${fmtTokens(e.before)} → ${fmtTokens(e.after)}`
+  }
+  return 'Earlier messages were compacted here'
+}
+
+const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /** 메시지 복원 (재시작·세션 전환 시) */
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
@@ -1047,7 +1063,9 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       if (last?.kind === 'assistant') last.text += e.text ?? ''
       else items.push({ kind: 'assistant', seq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
-      items.push({ kind: 'mark', seq: m.seq, text: 'Earlier messages were compacted here' })
+      // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
+      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' }>
+      items.push({ kind: 'mark', seq: m.seq, text: compactionText(e) })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary) items.push({ kind: 'tool', seq: m.seq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly })

@@ -74,6 +74,11 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const item = obj(p.item)
       const type = str(item.type)
       if (type === 'userMessage' || type === 'reasoning' || type === 'agentMessage') return []
+      /*
+       * 압축은 도구 호출이 아니다. 이걸 걸러내지 않으면 대화에 'contextCompaction'이라는
+       * 정체불명의 도구 줄이 생긴다 — 그리고 정작 필요한 "지금 압축 중"은 어디에도 없다.
+       */
+      if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: 'compacting' }]
       const s = itemSummary(item)
       return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s }]
     }
@@ -86,6 +91,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '' }] : []
       }
       if (type === 'userMessage' || type === 'reasoning') return []
+      // 마커는 thread/compacted가 낸다 — 여기서 또 내면 같은 자리에 두 줄이 생긴다
+      if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: null }]
       const s = itemSummary(item)
       const out: NormalizedEvent[] = [
         {
@@ -140,7 +147,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'session_title', sessionId, title: str(p.name) }]
 
     case 'thread/compacted':
-      return [{ type: 'compaction', sessionId }]
+      return [{ type: 'compaction', sessionId, failed: false }]
 
     case 'error':
       return [

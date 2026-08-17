@@ -3,6 +3,7 @@ import type {
   ApprovalDetail,
   NormalizedEvent,
   PermissionPreset,
+  SessionActivity,
   SessionState,
   TokenUsage,
 } from '@cc/protocol'
@@ -26,6 +27,11 @@ export type SessionSummary = {
   name: string
   autoNamed: boolean
   state: SessionState
+  /**
+   * 바쁜 동안 무엇을 하느라 바쁜가 (state를 세분한다, 대체하지 않는다).
+   * null이면 그냥 답을 기다리는 중.
+   */
+  activity: SessionActivity | null
   waitingSince: number | null
   lastSeq: number
   lastReadSeq: number
@@ -54,7 +60,7 @@ export type SessionSummary = {
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
   return {
-    autoNamed: true, state: 'idle', waitingSince: null, lastSeq: 0, lastReadSeq: 0,
+    autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, permissionPreset: 'normal',
     tool: 'claude' as const, ...init,
@@ -77,7 +83,16 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
   const isWaitingNow = state === 'waiting_approval' || state === 'waiting_input' || state === 'error'
   const waitingSince = isWaitingNow ? (wasWaiting && s.waitingSince != null ? s.waitingSince : now) : null
 
-  const next: SessionSummary = illegal ? { ...s } : { ...s, state, waitingSince }
+  /*
+   * 바쁨의 종류는 바쁨보다 오래 살지 못한다.
+   *
+   * 압축 중에 프로세스가 죽거나 턴이 끝나버리면 도구는 "끝났다"는 신호를 못 보낸다.
+   * 그때 activity가 남아 있으면 화면은 영원히 "Compacting"이라고 거짓말한다 —
+   * 그래서 working에서 벗어나는 순간 함께 지운다.
+   */
+  const activity = event.type === 'activity' ? event.activity : state === 'working' ? s.activity : null
+
+  const next: SessionSummary = illegal ? { ...s } : { ...s, state, waitingSince, activity }
 
   switch (event.type) {
     case 'message_delta':

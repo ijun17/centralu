@@ -44,6 +44,44 @@ export function normalizeMessage(msg: unknown, sessionId: string): NormalizedEve
   const type = str(m.type)
   const out: NormalizedEvent[] = []
 
+  /*
+   * 지금 무엇을 하는 중인가.
+   *
+   * 프로브로 실제 순서를 확인했다:
+   *   status:'compacting' → (39초) → status:null + compact_result:'success' → compact_boundary
+   * 그 39초 동안 화면은 '응답 대기'와 한 글자도 다르지 않았다 — 도그푸딩에서 나온 문제다.
+   */
+  if (type === 'system' && str(m.subtype) === 'status') {
+    out.push({ type: 'activity', sessionId, activity: m.status === 'compacting' ? 'compacting' : null })
+    /*
+     * 실패는 삼키지 않는다. 압축이 실패하면 컨텍스트는 그대로인데 화면에는
+     * 아무 일도 없었던 것처럼 보인다 — 실측에서 실제로 나온 경우다
+     * ("Not enough messages to compact.").
+     */
+    if (str(m.compact_result) === 'failed') {
+      out.push({ type: 'compaction', sessionId, failed: true, reason: str(m.compact_error, 'Unknown reason') })
+    }
+    return out
+  }
+
+  /*
+   * 압축이 끝난 지점 (FR-14).
+   *
+   * 이게 없어서 **Claude 세션에는 압축 마커가 한 번도 뜬 적이 없다** — Codex에만 있었다.
+   * 마커가 없으면 접힌 자리를 모르니 "그 위로 거슬러 읽기"도 성립하지 않는다.
+   */
+  if (type === 'system' && str(m.subtype) === 'compact_boundary') {
+    const meta = (m.compact_metadata ?? {}) as Json
+    out.push({
+      type: 'compaction',
+      sessionId,
+      failed: false,
+      before: typeof meta.pre_tokens === 'number' ? meta.pre_tokens : undefined,
+      after: typeof meta.post_tokens === 'number' ? meta.post_tokens : undefined,
+    })
+    return out
+  }
+
   // 스트리밍 델타 (includePartialMessages: true 필요 — M0 확인)
   if (type === 'stream_event') {
     const e = m.event as Json | undefined

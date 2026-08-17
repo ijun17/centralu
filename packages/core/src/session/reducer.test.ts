@@ -79,6 +79,35 @@ describe('세션 이름 (FR-18)', () => {
   })
 })
 
+describe('바쁨의 종류 (activity)', () => {
+  const working = () => applyEvent(s0(), ev({ type: 'state_change', state: 'working' }), NOW)
+
+  it('압축 중임을 담되 상태는 여전히 working이다', () => {
+    const s = applyEvent(working(), ev({ type: 'activity', activity: 'compacting' }), NOW)
+    expect(s.activity).toBe('compacting')
+    // 상태를 늘리지 않는 것이 요점이다 — state === 'working'을 보는 코드가 그대로 맞아야 한다
+    expect(s.state).toBe('working')
+  })
+
+  it('턴이 끝나면 activity도 끝난다 — 도구가 끝났다고 말해주지 않아도', () => {
+    const s = applyEvent(
+      applyEvent(working(), ev({ type: 'activity', activity: 'compacting' }), NOW),
+      ev({ type: 'turn_complete' }),
+      NOW,
+    )
+    expect(s.activity).toBeNull()
+  })
+
+  it('압축 중 오류로 죽어도 "Compacting"이 남지 않는다', () => {
+    const s = applyEvent(
+      applyEvent(working(), ev({ type: 'activity', activity: 'compacting' }), NOW),
+      ev({ type: 'error', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } }),
+      NOW,
+    )
+    expect(s.activity).toBeNull()
+  })
+})
+
 describe('한도·컨텍스트·오류', () => {
   it('limit_reached가 limited 상태와 해제 정보를 남긴다', () => {
     let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)

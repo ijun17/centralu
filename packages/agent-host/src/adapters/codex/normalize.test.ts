@@ -77,8 +77,25 @@ describe('상태·계기판', () => {
     ])
   })
 
+  /*
+   * Codex는 압축을 ThreadItem으로 흘린다 (generated/v2/ThreadItem.ts: `contextCompaction`).
+   * 걸러내지 않으면 itemSummary를 타고 **가짜 도구 호출 줄**이 대화에 생긴다.
+   * 주의: 이 배선은 생성된 타입에서 추론한 것이고 실행으로 확인하지는 못했다 (Claude 쪽은 확인함).
+   */
+  it('압축 item은 도구 호출이 아니라 activity다', () => {
+    expect(n('item/started', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
+      { type: 'activity', sessionId: S, activity: 'compacting' },
+    ])
+  })
+
+  it('압축이 끝나면 activity를 지운다 (마커는 thread/compacted가 낸다 — 두 줄이 되면 안 된다)', () => {
+    expect(n('item/completed', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
+      { type: 'activity', sessionId: S, activity: null },
+    ])
+  })
+
   it('thread/compacted → compaction 마커 (FR-14)', () => {
-    expect(n('thread/compacted', {})).toEqual([{ type: 'compaction', sessionId: S }])
+    expect(n('thread/compacted', {})).toEqual([{ type: 'compaction', sessionId: S, failed: false }])
   })
 
   it('모르는 알림은 조용히 버린다 (프로토콜이 늘어나도 안 깨진다)', () => {

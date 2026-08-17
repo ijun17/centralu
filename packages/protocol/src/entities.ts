@@ -4,6 +4,17 @@ import { z } from 'zod'
 export const SessionState = z.enum(['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error'])
 export type SessionState = z.infer<typeof SessionState>
 
+/**
+ * 바쁜 동안 **무엇을 하느라** 바쁜가. SessionState와는 다른 축이다.
+ *
+ * 압축 중에도 상태는 여전히 'working'이다 — 나를 기다리는 게 아니니 바꿀 이유가 없고,
+ * 상태를 늘리면 `state === 'working'`을 보는 모든 코드가 조용히 틀리게 된다.
+ * 그런데 화면만 보면 답을 만드는 중과 구분이 안 된다: 둘 다 점만 깜빡인다.
+ * 실측으로 수동 압축 한 번이 39초 걸렸다 — 그동안 멈춘 건지 일하는 건지 알 방법이 없었다.
+ */
+export const SessionActivity = z.enum(['compacting'])
+export type SessionActivity = z.infer<typeof SessionActivity>
+
 export const ToolName = z.enum(['claude', 'codex'])
 export type ToolName = z.infer<typeof ToolName>
 

@@ -203,6 +203,7 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
         pending={session.pendingApproval}
         sessionId={session.id}
         working={session.state === 'working'}
+        activity={session.activity}
       />
 
       {/*
@@ -411,12 +412,14 @@ function ChatStream({
   pending,
   sessionId,
   working,
+  activity,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
   pending: SessionSummary['pendingApproval']
   sessionId: string
   working: boolean
+  activity: SessionSummary['activity']
 }) {
   const stickToBottom = useRef(true)
 
@@ -584,7 +587,7 @@ function ChatStream({
         <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
       )}
 
-      {working && <ActivityRow sessionId={sessionId} />}
+      {working && <ActivityRow sessionId={sessionId} activity={activity} />}
     </div>
   )
 }
@@ -602,7 +605,7 @@ function ChatStream({
  *
  * 중지 버튼을 여기에 둔다. 상단에도 있지만, 기다리는 사람의 눈은 대화 맨 아래에 있다.
  */
-function ActivityRow({ sessionId }: { sessionId: string }) {
+function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
   const [seconds, setSeconds] = useState(0)
 
@@ -616,7 +619,13 @@ function ActivityRow({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex items-center gap-2 py-2" data-testid="activity-row">
       <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
-      <span className="text-[12px] text-ash">Waiting for response</span>
+      {/*
+        같은 '대기'가 아니다. 압축은 실측 39초까지 걸렸는데 문구가 같으면
+        기다리는 사람은 멈춘 건지 오래 걸리는 건지 판단할 근거가 없다.
+      */}
+      <span className="text-[12px] text-ash" data-testid="activity-label">
+        {activity === 'compacting' ? 'Compacting context' : 'Waiting for response'}
+      </span>
       {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
       {seconds >= 2 && (
         <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
