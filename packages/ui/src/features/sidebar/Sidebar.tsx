@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
-import { useSessionsOf } from '../../store/selectors.js'
+import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
@@ -203,7 +203,7 @@ function GridIcon({ size = 13 }: { size?: number }) {
 
 function ProjectBlock({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
-  const focusedSessionId = useStore((s) => s.focusedSessionId)
+  const focusedSessionId = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   const sessions = useSessionsOf(projectId)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
@@ -212,7 +212,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const focusProject = useStore((s) => s.focusProject)
   const reorderProjects = useStore((s) => s.reorderProjects)
   const reorderSessions = useStore((s) => s.reorderSessions)
-  const selected = useStore((s) => s.focusedProjectId === projectId && !s.focusedSessionId)
+  const selected = useIsProjectSelected(projectId)
 
   /*
    * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면

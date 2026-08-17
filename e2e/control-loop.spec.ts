@@ -2821,3 +2821,28 @@ test('그리드에서 쓰다 만 글은 화면을 바꿨다 돌아와도 남아 
   await page.getByTestId('control-center-button').click()
   await expect(panel.getByTestId('prompt-input')).toHaveValue('그리드에서 쓰던 글')
 })
+
+/**
+ * "세션 선택했다가 컨트롤 센터 들어가도 세션 선택한 UI가 남아 있다" (도그푸딩).
+ * 화면에 밝은 것이 둘이면 어느 쪽을 보고 있는지 화면이 스스로 모순된다.
+ */
+test('컨트롤 센터에 들어가면 사이드바에서 고른 것은 컨트롤 센터뿐이다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  const row = page.getByTestId(`session-row-${id}`)
+  await row.click()
+  const focusedClass = (await row.getAttribute('class')) ?? ''
+
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId('control-center')).toBeVisible()
+
+  // 세션 줄은 더 이상 골라진 모양이 아니어야 한다
+  expect(await row.getAttribute('class')).not.toBe(focusedClass)
+  await expect(page.getByTestId('control-center-button')).toHaveAttribute('aria-pressed', 'true')
+
+  // 돌아오면 다시 골라진 모양
+  await row.click()
+  expect(await row.getAttribute('class')).toBe(focusedClass)
+})

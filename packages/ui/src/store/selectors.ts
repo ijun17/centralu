@@ -44,6 +44,24 @@ export function useFocusedSession(): SessionSummary | undefined {
   return useStore((s) => (s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined))
 }
 
+/**
+ * 사이드바에서 **지금 고른 것**.
+ *
+ * 컨트롤 센터를 보고 있으면 세션도 프로젝트도 고른 것이 아니다 — 고른 것은 컨트롤 센터다.
+ * 예전에는 세션 줄이 `focusedSessionId`만 봐서, 컨트롤 센터에 들어가도 세션이 계속
+ * 골라진 것처럼 밝게 남아 있었다 (도그푸딩). 화면에 밝은 것이 둘이면 어느 쪽을 보고
+ * 있는지 화면이 스스로 모순된다.
+ *
+ * 한 곳에서 계산하는 이유: 세션 줄과 프로젝트 줄이 각자 판단하면 언젠가 한쪽만 고쳐진다.
+ */
+export function useSelectedSessionId(): string | null {
+  return useStore((s) => (s.view === 'grid' ? null : s.focusedSessionId))
+}
+
+export function useIsProjectSelected(projectId: string): boolean {
+  return useStore((s) => s.view !== 'grid' && s.focusedProjectId === projectId && !s.focusedSessionId)
+}
+
 /** 비포커스 세션의 승인 요청 = 전역 배너 대상 (FR-3) */
 export function useBannerApproval() {
   const sessions = useStore((s) => s.sessions)
