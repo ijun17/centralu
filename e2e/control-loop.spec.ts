@@ -2520,3 +2520,69 @@ test('컨트롤 센터에서 빼도 세션은 사이드바에 남는다', async 
   // 화면에서만 내린 것이다 — 세션은 그대로 돌아간다
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
+
+/**
+ * 그리드 칸에 대화가 쌓여도 입력창은 자리를 지켜야 한다 (도그푸딩).
+ *
+ * flex 자식의 min-height 기본값은 auto라 내용보다 작아지지 못한다. 그래서 대화가
+ * 길어지면 칸이 통째로 늘어나 입력창을 칸 밖으로 밀어냈다 — "쭉 내려가다 멈추고
+ * 입력창이 안 나온다"가 그 증상이다. 칸 높이가 정해진 컨트롤 센터에서 먼저 드러났다.
+ */
+test('그리드 칸은 대화가 길어져도 입력창을 밀어내지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 칸 높이를 확실히 넘기는 분량
+  await page.evaluate((sid) => {
+    const store = (window as any).__store
+    const items = Array.from({ length: 60 }, (_, i) => ({
+      kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `긴 대화 ${i}`,
+    }))
+    store.setState({ chat: { ...store.getState().chat, [sid]: items } })
+  }, id)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  const panel = page.getByTestId(`grid-panel-${id}`)
+  await expect(panel).toBeVisible()
+
+  // 입력창이 칸 **안에** 있어야 한다. 보이기만 해서는 부족하다 — 밀려난 것도 '보인다'
+  const composer = panel.getByTestId('prompt-input')
+  await expect(composer).toBeVisible()
+  const box = (await composer.boundingBox())!
+  const card = (await panel.boundingBox())!
+  expect(box.y + box.height).toBeLessThanOrEqual(card.y + card.height + 1)
+})
+
+/**
+ * 칸을 열면 **최신 대화가 먼저** 보여야 한다 (도그푸딩:
+ * "스크롤이 아래에서부터 시작하는 게 아니라 위에서부터 시작해서 쭉 내려가다 이상해진다").
+ *
+ * 원인은 입력창이 밀려난 것과 같았다. 대화 영역이 줄어들지 못하고 내용만큼 늘어나면
+ * scrollHeight와 clientHeight가 같아진다 — **스크롤이 아예 성립하지 않는다.**
+ * 그래서 두 가지를 함께 본다: 정말 스크롤되는가, 그리고 바닥에 서 있는가.
+ */
+test('그리드 칸을 열면 최신 대화가 먼저 보인다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.evaluate((sid) => {
+    const store = (window as any).__store
+    const items = Array.from({ length: 80 }, (_, i) => ({
+      kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `긴 대화 ${i} `.repeat(6),
+    }))
+    store.setState({ chat: { ...store.getState().chat, [sid]: items } })
+  }, id)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
+
+  const box = await page.getByTestId(`grid-panel-${id}`).getByTestId('chat-stream').evaluate((el) => ({
+    top: el.scrollTop, h: el.scrollHeight, c: el.clientHeight,
+  }))
+  // 칸 안에서 스크롤이 성립해야 한다 (늘어나 버리면 이 둘이 같아진다)
+  expect(box.h).toBeGreaterThan(box.c)
+  // 그리고 맨 아래에 서 있어야 한다
+  expect(box.h - box.c - box.top).toBeLessThanOrEqual(40)
+})

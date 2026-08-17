@@ -154,7 +154,13 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
   const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
+    /*
+      min-h-0이 없으면 안 된다.
+      flex 자식의 min-height 기본값은 auto라 **내용보다 작아지지 못한다.**
+      그래서 대화가 길어지면 이 칸이 통째로 늘어나 입력창을 밖으로 밀어냈다
+      (컨트롤 센터에서 칸 높이가 정해져 있으니 곧바로 드러났다 — 입력창이 아예 안 보였다).
+    */
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
       <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
         <StateDot state={session.state} />
         <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
@@ -545,7 +551,8 @@ function ChatStream({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
+      /* min-h-0: overflow-y-auto가 걸려 있어도 줄어들지 못하면 스스로 늘어난다 */
+      className="min-h-0 flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
       data-testid="chat-stream"
     >
       {/*
