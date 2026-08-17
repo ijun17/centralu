@@ -47,8 +47,19 @@ export class CodexClient {
       if (s) console.error('[codex]', s.slice(0, 500))
     })
     this.proc.on('exit', (code) => {
+      /*
+       * **우리가 닫은 것과 저쪽이 죽은 것은 다르다.**
+       *
+       * dispose()가 closed를 세운 뒤 kill하므로 여기 올 때 closed면 정상 종료다.
+       * 그런데도 남은 요청을 전부 실패로 만들고 있었고, 그 거절을 아무도 받지 않아
+       * **프로세스가 통째로 죽었다** (모델 목록을 읽고 정리하는 순간 그랬다).
+       * 정상 종료인지 아닌지를 메시지로 구분한다 — 원인을 찾을 때 이 한 줄이 갈림길이다.
+       */
+      const unexpected = !this.closed
       this.closed = true
-      for (const [, p] of this.pending) p.reject(new Error('codex app-server가 종료되었습니다'))
+      // 조용히 흘리면 기다리던 쪽이 영원히 멈춘다 — 어느 쪽이든 이유를 붙여 거절한다
+      const why = unexpected ? 'codex app-server가 종료되었습니다' : 'codex 연결을 닫는 중에 요청이 취소되었습니다'
+      for (const [, p] of this.pending) p.reject(new Error(why))
       this.pending.clear()
       this.handlers.onExit(code)
     })

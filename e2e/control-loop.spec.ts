@@ -1319,9 +1319,12 @@ test('증거 패널 폭을 끌어서 조절하고 재시작 후에도 유지한�
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snap?.panelWidth).toBeGreaterThan(before + 100)
 
-  // 더블클릭으로 기본값 복귀 — 잘못 끌어놓고 되돌릴 길이 있어야 한다
+  // 더블클릭으로 기본값 복귀 — 잘못 끌어놓고 되돌릴 길이 있어야 한다.
+  // 폭이 미끄러지므로(열고 닫힘 전환) 곧바로 재면 중간값이 잡힌다 — 멈출 때까지 기다린다.
   await handle.dblclick()
-  expect((await panel.boundingBox())!.width).toBeCloseTo(340, -1)
+  await expect
+    .poll(async () => (await panel.boundingBox())!.width, { timeout: 2000 })
+    .toBeCloseTo(340, -1)
 })
 
 test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', async ({ page }) => {
@@ -2021,17 +2024,17 @@ test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', 
 /**
  * 상단 바는 macOS 신호등 버튼과 같은 축에 있어야 한다.
  *
- * 버튼은 타이틀바 28px 띠의 세로 가운데에 고정되고 우리가 옮길 수 없다 —
- * 그래서 바 높이가 28px여야 우리 글자의 가운데도 같은 자리에 온다.
- * 브라우저 E2E는 신호등을 볼 수 없으므로 **높이 자체**를 못 박아 둔다.
+ * 버튼 위치는 tauri.conf.json의 trafficLightPosition으로 우리가 정하고,
+ * **바 높이와의 관계**는 tooling/styles.test.ts가 검사한다.
+ * 여기서는 브라우저가 볼 수 있는 것만 본다: 바 안에서 글자가 가운데인가.
  * 안쪽에 패딩을 더하다 보면 소리 없이 어긋나는데, 그때 여기서 걸린다.
  */
-test('상단 바 높이가 macOS 타이틀바(28px)와 같다', async ({ page }) => {
+test('상단 바 안에서 제목이 세로 가운데에 선다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const bar = page.getByTestId('app-header')
   const box = (await bar.boundingBox())!
-  // 아래 테두리 1px까지 29px
-  expect(box.height).toBeLessThanOrEqual(29)
+  // 아래 테두리 1px까지
+  expect(box.height).toBeLessThanOrEqual(37)
   expect(box.y).toBe(0)
 
   // 글자도 그 안에서 가운데여야 한다 (위아래 여백 차이가 1px 이내)
@@ -2138,4 +2141,35 @@ test('파일 트리에서 끌어다 놓으면 입력창에 @경로가 들어간�
 
   // 자동완성이 넣는 것과 같은 모양이어야 한다
   await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/a.ts ')
+})
+
+/**
+ * 같은 델타가 여러 번 적용되던 문제 (도그푸딩: "호호스트가스트가...").
+ *
+ * attach가 구독을 끊지 않아서, 두 번 붙으면 이벤트가 두 번 적용됐다.
+ * 스트리밍 델타는 누적이라 한 번 어긋나면 그 뒤가 전부 어긋난다.
+ */
+test('두 번 붙여도 스트리밍 글자가 곱해지지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 앱이 다시 붙는 상황(호스트 재연결·재마운트)을 그대로 재현한다
+  await page.evaluate(async () => {
+    const s = (window as any).__store.getState()
+    await s.attach(s.platform)
+  })
+
+  // 델타를 한 번만 흘린다 — 구독이 겹쳤다면 화면에는 두 번 쌓인다
+  await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    ;(window as any).__mock.emit({
+      type: 'message_delta',
+      sessionId: s.focusedSessionId,
+      role: 'assistant',
+      text: '가나다',
+    })
+  })
+
+  const reply = page.getByTestId('msg-assistant').last()
+  await expect(reply).toHaveText('가나다')
 })

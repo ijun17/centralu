@@ -61,7 +61,12 @@ export async function listCodexModels(command: string): Promise<ModelOption[]> {
      * 페이지 수에 상한을 둔다. 서버가 커서를 계속 돌려주는 상황에서
      * 무한히 도는 것보다는 멈추는 편이 낫다 — 대신 **잘렸다고 말한다**.
      */
-    return collectModels(async (cursor) => {
+    /*
+     * **await를 빼면 안 된다.** return만 하면 finally가 그 자리에서 돌아
+     * 요청이 날아가는 중에 서버를 죽인다 — 코덱스 모델 목록이 한 번도
+     * 성공한 적이 없던 이유가 이것이었다 (화면엔 "기본"만 남았다).
+     */
+    return await collectModels(async (cursor) => {
       try {
         return await client.request<{ data?: unknown; nextCursor?: unknown }>(
           'model/list',

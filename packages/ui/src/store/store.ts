@@ -278,9 +278,22 @@ export const useStore = create<AppState>((set, get) => ({
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
 
   async attach(platform) {
+    /*
+     * **먼저 이전 구독을 끊는다.**
+     *
+     * 구독은 매번 **새 클로저**라 Set에 넣어도 겹치지 않는다. 그래서 attach가 두 번
+     * 돌면 같은 이벤트가 두 번, 세 번 돌면 세 번 적용된다 — 화면에는 글자가
+     * "호호스트가스트가"처럼 그대로 곱해져 나온다 (도그푸딩에서 ×3, ×2로 두 번 나왔다).
+     *
+     * 스트리밍 델타는 **누적**이라 이 유형이 특히 나쁘다: 한 번 어긋나면 그 뒤로
+     * 전부 어긋난 채 쌓인다. attach는 언제 불려도 같은 상태가 되게(멱등) 만든다.
+     */
+    detachAll()
     set({ platform })
-    platform.agents.subscribe((e) => get().dispatchEvent(e))
-    platform.agents.onConnectionChange((connection) => set({ connection }))
+    subscriptions.push(
+      platform.agents.subscribe((e) => get().dispatchEvent(e)),
+      platform.agents.onConnectionChange((connection) => set({ connection })),
+    )
 
     const [projects, sessions] = await Promise.all([platform.projects.list(), platform.agents.listSessions()])
     set({
@@ -842,6 +855,16 @@ export const useStore = create<AppState>((set, get) => ({
     set((st) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(st.sessions[sessionId]!, s.lastSeq) } }))
   },
 }))
+
+/**
+ * 살아 있는 구독들. 스토어 상태가 아니라 모듈 스코프에 둔다 —
+ * 화면이 다시 그려질 이유가 없는 값이라 상태에 넣으면 불필요한 렌더만 는다.
+ */
+const subscriptions: (() => void)[] = []
+
+function detachAll(): void {
+  for (const off of subscriptions.splice(0)) off()
+}
 
 /** 이벤트를 대화 아이템으로 (스트리밍 델타는 마지막 assistant 항목에 append) */
 function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {

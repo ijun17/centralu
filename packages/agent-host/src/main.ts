@@ -1,8 +1,8 @@
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import type { ToolName } from '@cc/protocol'
 import { HostServer } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
@@ -101,6 +101,40 @@ try {
 }
 // 이 줄은 Tauri 수퍼바이저가 파싱한다 (포트·토큰 전달 경로)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
+
+/**
+ * 거절 하나로 죽지 않는다.
+ *
+ * Node는 미처리 거절이 뜨면 **프로세스를 종료한다.** 이 host는 모든 세션의 부모라,
+ * 어딘가에서 새어 나온 거절 하나가 **살아 있는 세션 전부를 끊는다** —
+ * 프로젝트를 추가하다가 관계없는 세션들이 함께 끊긴 일이 실제로 있었다.
+ * 게다가 stderr는 배포된 앱에서 아무 데도 남지 않아, 왜 죽었는지조차 알 수 없었다.
+ *
+ * 그래서 두 가지를 한다:
+ *   1. 거절은 **삼키지 않고 크게 적되** 살려 둔다. 대개 한 요청의 문제이지
+ *      프로세스 전체가 못 쓰게 된 상황은 아니다. 세션을 다 끊는 대가가 훨씬 크다.
+ *   2. 예외·거절을 **파일로 남긴다.** 다음에 같은 일이 생기면 추측하지 않아도 된다.
+ *
+ * uncaughtException은 상태가 깨졌을 수 있어 다르다 — 남기고 정상 경로로 내려간다.
+ */
+const crashLog = join(dirname(dbPath), 'host-errors.log')
+
+function record(kind: string, err: unknown): void {
+  const e = err as Error
+  const line = `[${new Date().toISOString()}] ${kind}: ${e?.stack ?? String(err)}\n`
+  console.error(`[agent-host] ${kind}`, e?.stack ?? err)
+  try {
+    appendFileSync(crashLog, line)
+  } catch {
+    // 로그도 못 남기는 상황이면 stderr가 마지막 수단이다 — 여기서 또 던지지 않는다
+  }
+}
+
+process.on('unhandledRejection', (reason) => record('처리되지 않은 거절', reason))
+process.on('uncaughtException', (err) => {
+  record('처리되지 않은 예외', err)
+  void shutdown()
+})
 
 const shutdown = async () => {
   await mgr.disposeAll()
