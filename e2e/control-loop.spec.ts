@@ -3095,3 +3095,33 @@ test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => 
   })
   expect(count).toBe(1)
 })
+
+/**
+ * 응답이 끝나면 화면을 한 번 쓸고 가는 바람.
+ * 글자로 "끝났습니다"라고 적는 대신 화면이 한 번 숨을 쉰다.
+ */
+test('보고 있는 세션이 끝나면 바람이 한 번 불고 사라진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await expect(page.getByTestId('gust')).toHaveCount(0)
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('gust')).toBeVisible()
+
+  /*
+   * 지나간 뒤에는 DOM에서 걷는다. 투명한 채로 남겨두면 화면 전체를 덮는 요소가
+   * 항상 하나 떠 있게 된다 — 언젠가 무언가를 가린다.
+   */
+  await expect(page.getByTestId('gust')).toHaveCount(0, { timeout: 3000 })
+})
+
+test('화면 밖 세션이 끝나면 불지 않는다 — 그건 알림의 몫이다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')  // 이쪽을 보고 있다
+
+  // 0번(보고 있지 않은 세션)이 끝난다
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await page.waitForTimeout(200)
+  await expect(page.getByTestId('gust')).toHaveCount(0)
+})

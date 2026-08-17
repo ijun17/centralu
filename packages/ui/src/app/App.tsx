@@ -3,6 +3,7 @@ import { nextWaitingSession } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider } from './PlatformProvider.jsx'
 import { isForeground } from './foreground.js'
+import { Gust } from './Gust.jsx'
 import { useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
@@ -62,6 +63,7 @@ export function App({ platform }: { platform: Platform }) {
         <CommandPalette />
         <Settings />
         <UsageModal />
+        <Gust />
         <Toast />
         <GlobalKeys />
       </div>

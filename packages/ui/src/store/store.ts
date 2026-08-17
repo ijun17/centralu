@@ -144,6 +144,11 @@ export type AppState = {
   inboxOpen: boolean
   toast: string | null
   appFocused: boolean
+  /**
+   * 방금 응답을 마친 세션 — 화면을 한 번 쓸고 갈 바람의 방아쇠.
+   * at을 함께 두는 이유: 같은 세션이 연달아 끝나도 **매번** 불어야 한다 (키로 쓴다).
+   */
+  completion: { sessionId: string; at: number } | null
   /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
   viewerPath: string | null
   paletteOpen: boolean
@@ -327,6 +332,7 @@ export const useStore = create<AppState>((set, get) => ({
   inboxOpen: false,
   toast: null,
   appFocused: true,
+  completion: null as { sessionId: string; at: number } | null,
   viewerPath: null,
   paletteOpen: false,
   usageOpen: false,
@@ -433,6 +439,13 @@ export const useStore = create<AppState>((set, get) => ({
       void get().loadHistory(sessionId, true)
       return
     }
+
+    /*
+     * 응답이 끝났다 — 화면을 한 번 쓸고 갈 바람의 방아쇠.
+     * 시각을 함께 담는 이유: 같은 세션이 연달아 끝나도 매번 불어야 한다.
+     * 실제로 불지 말지는 화면이 정한다 (보이지 않는 세션이면 불지 않는다).
+     */
+    if (e.type === 'turn_complete') set({ completion: { sessionId, at: Date.now() } })
 
     // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
     if (e.type === 'session_deleted') {
