@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
+import { ChevronIcon } from '../../components/icons.jsx'
+import { iconForFile } from './fileIcon.js'
+import { setDragPath } from './dragPath.js'
 
 /**
  * 파일 트리 (FR-5, C-2).
@@ -89,11 +92,14 @@ function DirRow({
     <li>
       <button
         className="flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] text-ash transition-colors hover:text-chalk"
-        style={{ paddingLeft: `${depth * 12 + 10}px` }}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => setOpen((o) => !o)}
         data-testid={`dir-${entry.path}`}
       >
-        <span className="w-2 shrink-0 text-[9px] text-slate">{open ? '▾' : '▸'}</span>
+        {/* 파일의 확장자 칸과 같은 폭 — 그래야 폴더와 파일의 이름이 한 줄에 선다 */}
+        <span className="flex w-7 shrink-0 justify-center text-slate">
+          <ChevronIcon open={open} />
+        </span>
         <span className={`truncate ${entry.ignored ? 'text-slate' : ''}`}>{entry.name}</span>
       </button>
       {open && <Dir projectId={projectId} path={entry.path} depth={depth + 1} showIgnored={showIgnored} defaultOpen />}
@@ -112,10 +118,14 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
         className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] transition-colors ${
           current === entry.path ? 'bg-graphite/40 text-chalk' : entry.ignored ? 'text-slate' : 'text-ash hover:text-chalk'
         }`}
-        style={{ paddingLeft: `${depth * 12 + 22}px` }}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => openFile(entry.path)}
         data-testid={`file-${entry.path}`}
+        /* 대화에 파일을 얹는 가장 짧은 길 — 경로를 외워서 치지 않아도 되게 */
+        draggable
+        onDragStart={(e) => setDragPath(e.dataTransfer, entry.path)}
       >
+        <FileKind name={entry.name} />
         <span className="truncate">{entry.name}</span>
         {/* 에이전트가 방금 만진 파일 (FR-5) — 색이 아니라 기호로 */}
         {touched.includes(entry.path) && (
@@ -125,6 +135,30 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
         )}
       </button>
     </li>
+  )
+}
+
+/**
+ * 파일 종류 표식 — vscode-icons(MIT).
+ *
+ * 익숙한 그림이라 이름을 읽기 전에 종류가 잡힌다. 이 앱은 색을 다 빼고 시작했으므로
+ * 색을 들이는 건 그 자체로 결정인데, 파일 종류는 **상태가 아니라 분류**라
+ * 밝기 체계("가장 밝은 것 = 나를 기다리는 것")와 겹치지 않는다.
+ * 아이콘은 작고 채도가 낮아 목록을 훑는 눈을 뺏지도 않는다.
+ *
+ * 표에 없는 확장자는 기본 파일 아이콘으로 떨어진다 — 목록이 못 따라와도 빈칸은 없다.
+ */
+function FileKind({ name }: { name: string }) {
+  return (
+    <img
+      src={iconForFile(name)}
+      alt=""
+      width={13}
+      height={13}
+      className="w-7 shrink-0 px-[7px]"
+      draggable={false}
+      aria-hidden
+    />
   )
 }
 

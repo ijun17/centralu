@@ -1975,3 +1975,41 @@ test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) =>
   })
   expect(effort).toBeNull()
 })
+
+/** 펼침 표시는 접힘=오른쪽, 펼침=아래쪽. 같은 글리프를 돌려서 두 상태가 어긋나지 않게 한다 */
+test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'src', path: 'src', isDir: true, ignored: false }]
+    m.fsState.entries['src'] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
+
+  const dir = page.getByTestId('dir-src').locator('svg')
+  await expect(dir).not.toHaveClass(/rotate-90/)
+
+  await page.getByTestId('dir-src').click()
+  await expect(dir).toHaveClass(/rotate-90/)
+
+  await page.getByTestId('dir-src').click()
+  await expect(dir).not.toHaveClass(/rotate-90/)
+})
+
+/** 경로를 외워서 치지 않아도 되게 — 트리에서 끌어다 입력창에 놓는다 */
+test('파일 트리에서 끌어다 놓으면 입력창에 @경로가 들어간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
+
+  await page.getByTestId('prompt-input').fill('이거 봐줘')
+  await page.dragAndDrop('[data-testid="file-src/a.ts"]', '[data-testid="input-dropzone"]')
+
+  // 자동완성이 넣는 것과 같은 모양이어야 한다
+  await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/a.ts ')
+})
