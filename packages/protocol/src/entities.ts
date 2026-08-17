@@ -107,6 +107,27 @@ export const GitCommit = z.object({
 })
 export type GitCommit = z.infer<typeof GitCommit>
 
+/**
+ * 고를 수 있는 모델 한 종류.
+ *
+ * **목록을 우리가 적지 않는다.** 도구가 공식 API로 알려주는 것을 그대로 나른다
+ * (Claude: `supportedModels()`, Codex: `model/list`).
+ * 하드코딩하면 새 모델이 나올 때마다 이 앱이 조용히 뒤처진다 —
+ * 실제로 Fable이 나왔는데 목록에 없어서 고를 수 없었다.
+ *
+ * 추론 강도도 모델마다 지원 여부와 단계가 다르므로 모델에 붙여서 온다.
+ * 별도 플래그로 두면 "이 모델이 지원하나?"의 답이 둘이 되어 어긋난다.
+ */
+export const ModelOption = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  /** 이 모델이 지원하는 추론 강도. 비어 있으면 강도 선택이 없는 모델이다 */
+  efforts: z.array(z.string()),
+  defaultEffort: z.string().nullable(),
+})
+export type ModelOption = z.infer<typeof ModelOption>
+
 export const GitBranch = z.object({
   name: z.string(),
   current: z.boolean(),

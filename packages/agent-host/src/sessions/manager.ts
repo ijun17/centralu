@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
+  ModelOption,
   ApprovalDecision,
   CommandInfo,
   ExternalSession,
@@ -71,7 +72,10 @@ export class SessionManager {
    * (도그푸딩: "자동으로 선택되어 있는데 계속 물어본다").
    * 그래서 비교 기준은 언제나 이쪽이다.
    */
-  private running = new Map<string, { model: string | null; permissionPreset: PermissionPreset }>()
+  private running = new Map<
+    string,
+    { model: string | null; effort: string | null; permissionPreset: PermissionPreset }
+  >()
   /** 도구+디렉토리별 슬래시 명령 캐시 (세션이 준비되기 전에도 목록을 줄 수 있게) */
   private commandCache = new Map<string, CommandInfo[]>()
   /** 도구가 갖고 있는 대화 id 목록 (짧은 캐시 — 삭제 여부 판단용) */
@@ -211,7 +215,8 @@ export class SessionManager {
       name: params.initialPrompt ? truncate(params.initialPrompt) : '새 세션',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
-      model: params.model ?? null, permissionPreset: params.permissionPreset,
+      model: params.model ?? null, effort: params.effort ?? null,
+      permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
     }
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
@@ -220,7 +225,7 @@ export class SessionManager {
     try {
       handle = await adapter.createSession(
         {
-          sessionId: id, cwd: params.cwd, model: params.model,
+          sessionId: id, cwd: params.cwd, model: params.model, effort: params.effort,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
         },
         (e) => this.onEvent(e),
@@ -233,7 +238,7 @@ export class SessionManager {
     this.meta.set(id, info)
     this.store.upsertSession(info)
     this.handles.set(id, handle)
-    this.running.set(id, { model: info.model, permissionPreset: info.permissionPreset })
+    this.running.set(id, { model: info.model, effort: info.effort, permissionPreset: info.permissionPreset })
     handle.applyRules?.(this.rulesFor(id, params.projectId))
 
     // 이전 대화 복원. **어댑터가 뜬 다음에** 한다 —
@@ -449,13 +454,14 @@ export class SessionManager {
           sessionId,
           cwd: project.path,
           model: m.model ?? undefined,
+          effort: m.effort ?? undefined,
           permissionPreset: m.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
         },
         (e) => this.onEvent(e),
       )
       this.handles.set(sessionId, handle)
-      this.running.set(sessionId, { model: m.model, permissionPreset: m.permissionPreset })
+      this.running.set(sessionId, { model: m.model, effort: m.effort, permissionPreset: m.permissionPreset })
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // 이제야 식별자가 잡혔을 수 있다 — 다음 재개를 위해 남긴다
       if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
@@ -511,12 +517,13 @@ export class SessionManager {
    */
   async updateSettings(
     sessionId: string,
-    s: { model?: string | null; permissionPreset?: PermissionPreset },
+    s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<SessionInfo> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`세션을 찾을 수 없습니다: ${sessionId}`), { code: 'session_not_found' })
 
     if (s.model !== undefined) m.model = s.model
+    if (s.effort !== undefined) m.effort = s.effort
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
 
@@ -526,7 +533,8 @@ export class SessionManager {
     // 비교 기준은 화면값(meta)이 아니라 **돌고 있는 프로세스의 설정**이다
     const live = this.running.get(sessionId)
     const drifted =
-      !!live && (live.model !== m.model || live.permissionPreset !== m.permissionPreset)
+      !!live &&
+      (live.model !== m.model || live.effort !== m.effort || live.permissionPreset !== m.permissionPreset)
 
     /**
      * 권한·모델은 도구 프로세스를 **띄울 때 고정된다**.
@@ -753,6 +761,33 @@ export class SessionManager {
       return { supported: true, usage: snapshot }
     } catch (err) {
       return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null }
+    }
+  }
+
+  /**
+   * 고를 수 있는 모델과 각 모델의 추론 강도.
+   *
+   * 사용량과 같은 계정 축이라 인자가 tool뿐이다. 목록은 자주 바뀌지 않으므로
+   * 5분 캐시를 둔다 — 셀렉터를 열 때마다 도구 프로세스를 띄우면 그 클릭이 느려진다.
+   */
+  private modelCache = new Map<ToolName, { models: ModelOption[]; at: number }>()
+
+  async listModels(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }> {
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.listModels) {
+      return { supported: false, reason: `${tool}는 모델 목록 조회를 지원하지 않습니다`, models: [] }
+    }
+
+    const hit = this.modelCache.get(tool)
+    if (hit && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
+
+    try {
+      const models = await withTimeout(adapter.listModels(), 15_000)
+      this.modelCache.set(tool, { models, at: Date.now() })
+      return { supported: true, models }
+    } catch (err) {
+      // 못 읽었다고 목록을 비워 두면 이미 고른 모델까지 사라진다 — 마지막으로 읽은 걸 남긴다
+      return { supported: false, reason: (err as Error).message, models: hit?.models ?? [] }
     }
   }
 

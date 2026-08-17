@@ -213,6 +213,7 @@ export class MockPlatform implements Platform {
       const id = `mock-session-${++this.idc}`
       const info: SessionInfo = {
         id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`,
+        effort: params.effort ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? '새 세션', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
@@ -269,6 +270,21 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
       this.emit({ type: 'turn_complete', sessionId })
     },
+    models: async (tool: ToolName) => ({
+      supported: true,
+      models:
+        tool === 'codex'
+          ? [
+              { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
+              { id: 'gpt-5.6-terra-mini', label: 'gpt-5.6-terra-mini', efforts: [], defaultEffort: null },
+            ]
+          : [
+              { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null },
+              { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null },
+              { id: 'fable', label: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null },
+              { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null },
+            ],
+    }),
     interrupt: async (sessionId: string) => {
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     },
@@ -287,10 +303,14 @@ export class MockPlatform implements Platform {
       this.messages.delete(sessionId)
       this.emit({ type: 'session_deleted', sessionId })
     },
-    updateSettings: async (sessionId: string, s: { model?: string | null; permissionPreset?: PermissionPreset }) => {
+    updateSettings: async (
+      sessionId: string,
+      s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
+    ) => {
       const sess = this.sessions.get(sessionId)
       if (!sess) throw Object.assign(new Error('세션 없음'), { code: 'session_not_found' })
       if (s.model !== undefined) sess.model = s.model
+      if (s.effort !== undefined) sess.effort = s.effort
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
       return { ...sess }
     },
@@ -354,6 +374,7 @@ export class MockPlatform implements Platform {
     }),
     detect: async () => [
       { tool: 'claude' as const, installed: true, loggedIn: true, detail: 'mock 2.1.0' },
+      { tool: 'codex' as const, installed: true, loggedIn: true, detail: 'mock codex' },
     ],
     subscribe: (handler: (e: NormalizedEvent) => void): Unsubscribe => {
       this.handlers.add(handler)

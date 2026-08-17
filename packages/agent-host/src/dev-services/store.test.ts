@@ -4,6 +4,7 @@ import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { SessionInfo } from '@cc/protocol'
 import { Store } from './store.js'
 
 function seeded() {
@@ -12,14 +13,14 @@ function seeded() {
   s.upsertSession({
     id: 's1', projectId: 'p1', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: Date.now(), waitingSince: null, live: true, model: null, permissionPreset: 'normal', importedFrom: null,
+    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
   })
   return s
 }
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(6)
+    expect(new Store().schemaVersion).toBe(7)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -102,7 +103,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(6)
+    expect(store.schemaVersion).toBe(7)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -115,7 +116,7 @@ describe('마이그레이션 (E-0)', () => {
 
     // v4: 모델·권한도 기존 세션에 붙는다 (기본값으로)
     const migrated = store.listSessions().find((s) => s.id === 's1')
-    expect(migrated).toMatchObject({ model: null, permissionPreset: 'normal', importedFrom: null })
+    expect(migrated).toMatchObject({ model: null, effort: null, permissionPreset: 'normal', importedFrom: null })
 
     store.close()
     rmSync(dir, { recursive: true, force: true })
@@ -141,12 +142,42 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
       id: 's-import', projectId: 'p1', tool: 'claude' as const, externalId: 'ext-new',
       name: '이어받은 대화', autoNamed: true, state: 'idle' as const, archived: false,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
-      model: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old',
+      model: null, effort: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old',
     }
     store.upsertSession(base)
     const back = store.listSessions().find((s) => s.id === 's-import')!
     // resume이 새 식별자를 발급해도 어느 대화에서 왔는지는 남아 있어야 한다
     expect(back.importedFrom).toBe('ext-old')
     expect(back.externalId).toBe('ext-new')
+  })
+})
+
+/**
+ * 추론 강도는 모델과 같은 성질이라 세션과 함께 남아야 한다.
+ * 이미 쓰고 있는 DB에 컬럼이 붙는 것이므로 마이그레이션이 실제로 도는지 확인한다.
+ */
+describe('마이그레이션 v7 — 추론 강도', () => {
+  const row = (over: Partial<SessionInfo>): SessionInfo => ({
+    id: 's-x', projectId: 'p1', tool: 'claude', externalId: null, name: '세션',
+    autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+    createdAt: Date.now(), waitingSince: null, live: true,
+    model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+    ...over,
+  })
+
+  it('effort 컬럼이 생기고 왕복한다', () => {
+    const store = seeded()
+    store.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
+    const back = store.listSessions().find((r) => r.id === 's-effort')
+    expect(back?.effort).toBe('xhigh')
+    expect(back?.model).toBe('fable')
+    store.close()
+  })
+
+  it('강도를 안 고른 세션은 null로 남는다 — 빈 문자열과 구분된다', () => {
+    const store = seeded()
+    store.upsertSession(row({ id: 's-none' }))
+    expect(store.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
+    store.close()
   })
 })

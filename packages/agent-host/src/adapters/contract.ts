@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  ModelOption,
   UsageSnapshot,
   ApprovalDecision,
   ApprovalScope,
@@ -26,6 +27,8 @@ export type CreateSessionOpts = {
   sessionId: string
   cwd: string
   model?: string
+  /** 추론 강도. 모델마다 단계가 달라 문자열 그대로 나른다 */
+  effort?: string
   permissionPreset: PermissionPreset
   resumeExternalId?: string
 }
@@ -55,7 +58,11 @@ export interface SessionHandle {
   /** 저장된 '항상 허용' 규칙 주입 — 재시작 후에도 유지되도록 (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
   /** 모델·권한 변경 (다음 턴부터). 지원하지 않으면 구현하지 않는다 */
-  updateSettings?(settings: { model?: string | null; permissionPreset?: PermissionPreset }): void
+  updateSettings?(settings: {
+    model?: string | null
+    effort?: string | null
+    permissionPreset?: PermissionPreset
+  }): void
   /**
    * 이 세션에서 쓸 수 있는 슬래시 명령(스킬).
    * 도구가 아직 준비 중이면 던져도 된다 — 매니저가 캐시로 물러난다.
@@ -87,4 +94,13 @@ export interface AgentAdapter {
    * 못 가져오면 던진다: 매니저가 이유와 함께 degrade한다.
    */
   listUsage?(): Promise<UsageSnapshot>
+
+  /**
+   * 고를 수 있는 모델과 각 모델이 지원하는 추론 강도.
+   *
+   * 사용량과 같은 **계정** 축이라 인자가 없다 — 어느 디렉토리에서 묻든 답이 같다.
+   * 목록을 우리가 적지 않기 위한 창구다: 도구가 새 모델을 내면 여기로 그냥 따라온다.
+   * 구버전 도구를 만나면 던져도 된다 — 매니저가 이유와 함께 degrade한다.
+   */
+  listModels?(): Promise<ModelOption[]>
 }

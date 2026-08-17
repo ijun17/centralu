@@ -1,4 +1,5 @@
 import type {
+  ToolName,
   ApprovalDetail,
   NormalizedEvent,
   PermissionPreset,
@@ -14,6 +15,14 @@ import { transition } from './state-machine.js'
 export type SessionSummary = {
   id: string
   projectId: string
+  /**
+   * 이 세션이 쓰는 도구.
+   *
+   * 프로젝트의 기본 도구와 다를 수 있다 — 한 프로젝트에서 claude 세션과 codex 세션을
+   * 섞어 쓸 수 있기 때문이다. 없을 때 프로젝트 기본값으로 대신하면 헤더·사용량이
+   * 틀린 도구를 가리킨다 (도그푸딩: 제목이 비슷한 두 세션을 다른 도구로 착각했다).
+   */
+  tool: ToolName
   name: string
   autoNamed: boolean
   state: SessionState
@@ -38,6 +47,8 @@ export type SessionSummary = {
   touchedPaths: string[]
   /** 세션 헤더에서 바꾼다 (FR-7) */
   model: string | null
+  /** 추론 강도. 지원하지 않는 모델이면 null이다 (단계는 모델마다 다르다) */
+  effort: string | null
   permissionPreset: PermissionPreset
 }
 
@@ -45,7 +56,8 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
   return {
     autoNamed: true, state: 'idle', waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, usage: null, context: null,
-    limit: null, lastError: null, touchedPaths: [], model: null, permissionPreset: 'normal', ...init,
+    limit: null, lastError: null, touchedPaths: [], model: null, effort: null, permissionPreset: 'normal',
+    tool: 'claude' as const, ...init,
   }
 }
 

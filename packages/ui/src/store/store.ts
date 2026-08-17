@@ -42,6 +42,11 @@ export const PANEL_MAX = 900
 export const PANEL_DEFAULT = 340
 
 /** 세션 목록(관찰 레인) 폭 */
+/** 깃 탭에서 '기록'이 차지할 높이. 나머지는 '변경'이 가져간다 */
+export const TREE_MIN = 80
+export const TREE_MAX = 900
+export const TREE_DEFAULT = 200
+
 export const SIDEBAR_MIN = 180
 export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 240
@@ -112,6 +117,7 @@ export type AppState = {
   panelTab: PanelTab
   /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
   panelWidth: number
+  treeHeight: number
   /** 세션 목록 폭(px) */
   sidebarWidth: number
   /**
@@ -143,6 +149,7 @@ export type AppState = {
   /** 탭을 고르면 패널이 닫혀 있어도 함께 열린다 — 고른 것이 안 보이면 안 된다 */
   setPanelTab(tab: PanelTab): void
   setPanelWidth(px: number): void
+  setTreeHeight(px: number): void
   setSidebarWidth(px: number): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
@@ -184,7 +191,7 @@ export type AppState = {
   deleteSession(sessionId: string): Promise<void>
   updateSessionSettings(
     sessionId: string,
-    s: { model?: string | null; permissionPreset?: PermissionPreset },
+    s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /** 세션을 고르는 즉시 깨운다 (첫 응답을 기다리지 않게) */
@@ -258,6 +265,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelOpen: true,
   panelTab: 'git',
   panelWidth: PANEL_DEFAULT,
+  treeHeight: TREE_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
   overlay: null,
   inboxOpen: false,
@@ -281,7 +289,7 @@ export const useStore = create<AppState>((set, get) => ({
         sessions.map((s) => [
           s.id,
           {
-            ...initialSession({ id: s.id, projectId: s.projectId, name: s.name }),
+            ...initialSession({ id: s.id, projectId: s.projectId, name: s.name, tool: s.tool, effort: s.effort }),
             autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
             lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
           },
@@ -303,6 +311,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
+        const savedTree = (snap as { treeHeight?: number }).treeHeight
+        if (typeof savedTree === 'number') get().setTreeHeight(savedTree)
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
       }
@@ -321,7 +331,8 @@ export const useStore = create<AppState>((set, get) => ({
         panelTab: s.panelTab,
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
-      })
+        treeHeight: s.treeHeight,
+      } as never)
       .catch(() => {})
   },
 
@@ -499,6 +510,11 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
+  setTreeHeight(px) {
+    set({ treeHeight: Math.min(TREE_MAX, Math.max(TREE_MIN, Math.round(px))) })
+    get().saveWorkspace()
+  },
+
   setSidebarWidth(px) {
     const s = get()
     // 패널이 접혀 있으면 32px 띠만 차지한다
@@ -577,7 +593,11 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({
       sessions: {
         ...s.sessions,
-        [info.id]: { ...initialSession({ id: info.id, projectId, name: info.name }), lastSeq: info.lastSeq, lastReadSeq: info.lastReadSeq },
+        [info.id]: {
+          ...initialSession({ id: info.id, projectId, name: info.name, tool: info.tool }),
+          lastSeq: info.lastSeq,
+          lastReadSeq: info.lastReadSeq,
+        },
       },
       // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
       chat: opts?.initialPrompt
@@ -630,8 +650,20 @@ export const useStore = create<AppState>((set, get) => ({
   async send(sessionId, text, attachments) {
     const seq = ++chatSeq
     const label = attachments?.length ? `${text}${text ? '\n' : ''}📎 ${attachments.map((a) => a.name).join(', ')}` : text
+    /*
+     * 보낸 즉시 '작업 중'으로 표시한다.
+     *
+     * host가 state_change를 보내주긴 하지만, 잠든 세션이면 프로세스를 되살리는 데
+     * 몇 초가 걸리고 그동안 화면은 완전히 조용하다 — 보냈는지조차 알 수 없다.
+     * 우리가 아는 사실은 이미 확정이다: **보냈고, 답을 기다린다.**
+     * 실패하면 아래에서 되돌린다.
+     */
+    const prevState = get().sessions[sessionId]?.state
     set((s) => ({
       chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label }] },
+      sessions: s.sessions[sessionId]
+        ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' } }
+        : s.sessions,
     }))
     try {
       await get().platform!.agents.send(sessionId, text, attachments)
@@ -647,6 +679,11 @@ export const useStore = create<AppState>((set, get) => ({
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
       set((s) => ({
         chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
+        // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
+        sessions:
+          s.sessions[sessionId] && prevState
+            ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: prevState } }
+            : s.sessions,
       }))
       const e = err as Error & { code?: string }
       // host가 알아서 되살린 뒤 보낸다 — 여기까지 왔다면 되살리기 자체가 실패한 것이다
@@ -685,7 +722,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async interrupt(sessionId) {
-    await get().platform!.agents.interrupt(sessionId)
+    try {
+      await get().platform!.agents.interrupt(sessionId)
+    } catch (err) {
+      // 못 멈췄는데 조용하면 멈춘 줄 알고 기다린다 — 이 프로젝트가 금지하는 실패다
+      set({ toast: `중지하지 못했습니다: ${(err as Error).message}` })
+    }
   },
 
   /** 세션 완전 삭제. 되돌릴 수 없으므로 호출 전에 확인을 받는다 (UI 책임) */
@@ -709,7 +751,12 @@ export const useStore = create<AppState>((set, get) => ({
       set((st) => ({
         sessions: {
           ...st.sessions,
-          [sessionId]: { ...st.sessions[sessionId]!, model: info.model, permissionPreset: info.permissionPreset },
+          [sessionId]: {
+            ...st.sessions[sessionId]!,
+            model: info.model,
+            effort: info.effort,
+            permissionPreset: info.permissionPreset,
+          },
         },
       }))
       set({ toast: s.model !== undefined ? `모델: ${info.model ?? '기본'} (다음 턴부터)` : `권한: ${info.permissionPreset}` })

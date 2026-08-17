@@ -1820,3 +1820,47 @@ test('깨우지 못하면 이유를 그 자리에 적고 다시 시도할 수 �
   await page.getByTestId('dormant-retry').click()
   await expect(page.getByTestId('dormant-note')).toBeHidden()
 })
+
+/**
+ * 모델 목록을 하드코딩하고 있었더니 Fable이 나왔는데 고를 수가 없었다.
+ * 이제 도구의 공식 API가 주는 목록을 그대로 보여주고, 강도도 모델에 붙어서 온다.
+ */
+test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하는 모델에만 뜬다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 우리가 적은 목록이 아니라 host가 준 목록이다
+  await expect(page.getByTestId('model-select')).toContainText('Fable')
+
+  // 강도를 지원하지 않는 모델에는 셀렉터가 없다 — 아무 효과 없는 칸을 띄우면 거짓말이다
+  await page.getByTestId('model-select').selectOption('haiku')
+  await expect(page.getByTestId('effort-select')).toBeHidden()
+
+  await page.getByTestId('model-select').selectOption('fable')
+  await expect(page.getByTestId('effort-select')).toBeVisible()
+  await page.getByTestId('effort-select').selectOption('xhigh')
+
+  const settings = await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    return s.sessions[s.focusedSessionId]
+  })
+  expect(settings.model).toBe('fable')
+  expect(settings.effort).toBe('xhigh')
+})
+
+/** 모델을 바꾸면 강도는 초기화된다 — 모델마다 단계가 달라서 옛 값이 남으면 안 된다 */
+test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('model-select').selectOption('fable')
+  await page.getByTestId('effort-select').selectOption('max')
+  await page.getByTestId('model-select').selectOption('sonnet')
+
+  // sonnet에는 max가 없다 — 남겨두면 지원하지 않는 조합이 조용히 유지된다
+  const effort = await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    return s.sessions[s.focusedSessionId].effort
+  })
+  expect(effort).toBeNull()
+})

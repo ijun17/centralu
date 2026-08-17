@@ -1,26 +1,17 @@
-import type { PermissionPreset, ToolName } from '@cc/protocol'
+import { useEffect, useState } from 'react'
+import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
+import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * 세션 헤더의 모델·권한 셀렉터 (FR-7).
+ * 세션 헤더의 모델·추론 강도·권한 셀렉터 (FR-7).
  * 대화를 시작한 뒤에도 바꿀 수 있다 — 시작 전에 정하는 것보다 이쪽이 실제로 쓸모 있다.
- * 변경은 다음 턴부터 적용된다.
+ *
+ * **모델 목록을 우리가 적지 않는다.** 도구의 공식 API가 알려주는 것을 그대로 보여준다
+ * (Claude `supportedModels()` · Codex `model/list`).
+ * 예전엔 여기에 하드코딩했는데, 그래서 Fable이 나왔을 때 고를 방법이 없었다 —
+ * 도구가 올라가는데 이 앱만 제자리인 그 상황을 다시 만들지 않는다.
  */
-
-/** 도구별 모델 후보. 목록에 없는 값도 세션에 남아 있으면 그대로 보여준다 */
-const MODELS: Record<ToolName, { value: string; label: string }[]> = {
-  claude: [
-    { value: '', label: '기본' },
-    { value: 'haiku', label: 'Haiku · 빠름' },
-    { value: 'sonnet', label: 'Sonnet' },
-    { value: 'opus', label: 'Opus · 깊게' },
-  ],
-  codex: [
-    { value: '', label: '기본' },
-    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra' },
-    { value: 'gpt-5.6-terra-mini', label: 'gpt-5.6-terra-mini' },
-  ],
-}
 
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'safe', label: '안전', hint: '모든 작업을 묻습니다' },
@@ -28,41 +19,98 @@ const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'auto', label: '자동', hint: '묻지 않습니다 — 승인 화면이 뜨지 않습니다' },
 ]
 
+const SELECT =
+  'cursor-pointer rounded border border-edge bg-panel px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:text-chalk focus:border-graphite focus:outline-none'
+
+/**
+ * 도구별 모델 목록. 셀렉터를 열 때마다 도구를 띄우면 그 클릭이 느려지므로
+ * host가 캐시하고, 여기서는 도구가 바뀔 때만 한 번 묻는다.
+ */
+export function useModels(tool: ToolName): { models: ModelOption[]; reason?: string } {
+  const platform = usePlatform()
+  const [state, setState] = useState<{ models: ModelOption[]; reason?: string }>({ models: [] })
+
+  useEffect(() => {
+    let alive = true
+    void platform.agents
+      .models(tool)
+      .then((r) => alive && setState({ models: r.models, reason: r.supported ? undefined : r.reason }))
+      // 목록을 못 읽어도 세션은 계속 쓸 수 있어야 한다 — 이유만 남기고 기본값으로 돈다
+      .catch((e: Error) => alive && setState({ models: [], reason: e.message }))
+    return () => {
+      alive = false
+    }
+  }, [platform, tool])
+
+  return state
+}
+
 export function SessionSettings({
   sessionId,
   tool,
   model,
+  effort,
   preset,
 }: {
   sessionId: string
   tool: ToolName
   model: string | null
+  effort: string | null
   preset: PermissionPreset
 }) {
   const update = useStore((s) => s.updateSessionSettings)
-  const options = MODELS[tool] ?? MODELS.claude
-  // 목록에 없는 모델(직접 설정한 값)도 유실되지 않게 임시 항목으로 넣는다
-  const known = options.some((o) => o.value === (model ?? ''))
-  const all = known ? options : [...options, { value: model!, label: model! }]
+  const { models, reason } = useModels(tool)
+
+  const current = models.find((m) => m.id === model)
+  // 목록에 없는 모델(직접 설정했거나 목록을 못 읽은 경우)도 유실되지 않게 남긴다
+  const options = model && !current ? [...models, { id: model, label: model, efforts: [], defaultEffort: null }] : models
 
   return (
     <span className="flex shrink-0 items-center gap-1.5">
       <select
-        className="cursor-pointer rounded border border-edge bg-panel px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:text-chalk focus:border-graphite focus:outline-none"
+        className={SELECT}
         value={model ?? ''}
-        onChange={(e) => void update(sessionId, { model: e.target.value || null })}
+        onChange={(e) => {
+          const next = e.target.value || null
+          // 모델이 바뀌면 강도는 초기화한다 — 모델마다 단계가 달라서
+          // 옛 값을 들고 가면 지원하지 않는 조합이 조용히 남는다
+          void update(sessionId, { model: next, effort: null })
+        }}
         data-testid="model-select"
-        title="모델 — 다음 턴부터 적용됩니다"
+        title={reason ? `모델 목록을 읽지 못했습니다: ${reason}` : '모델 — 다음 턴부터 적용됩니다'}
       >
-        {all.map((o) => (
-          <option key={o.value} value={o.value} className="bg-panel">
-            {o.label}
+        <option value="" className="bg-panel">
+          기본
+        </option>
+        {options.map((m) => (
+          <option key={m.id} value={m.id} className="bg-panel" title={m.description}>
+            {m.label}
           </option>
         ))}
       </select>
 
+      {/* 강도는 지원하는 모델에서만 보인다 — 아무 효과 없는 셀렉터를 띄우면 거짓말이 된다 */}
+      {current && current.efforts.length > 0 && (
+        <select
+          className={SELECT}
+          value={effort ?? ''}
+          onChange={(e) => void update(sessionId, { effort: e.target.value || null })}
+          data-testid="effort-select"
+          title="추론 강도 — 높을수록 더 깊게 생각하고 더 많이 씁니다"
+        >
+          <option value="" className="bg-panel">
+            강도 · 기본
+          </option>
+          {current.efforts.map((lv) => (
+            <option key={lv} value={lv} className="bg-panel">
+              강도 · {lv}
+            </option>
+          ))}
+        </select>
+      )}
+
       <select
-        className="cursor-pointer rounded border border-edge bg-panel px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:text-chalk focus:border-graphite focus:outline-none"
+        className={SELECT}
         value={preset}
         onChange={(e) => void update(sessionId, { permissionPreset: e.target.value as PermissionPreset })}
         data-testid="preset-select"

@@ -5,8 +5,11 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
  * 외부 타입을 어댑터 밖으로 내보내지 않기 위해 최소 표면만 적는다.
  */
 type QueryHandle = AsyncIterable<unknown> &
-  UsageQuery & {
+  UsageQuery &
+  ModelQuery & {
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
+    /** 진행 중인 턴을 끊는다. 스트리밍 입력 모드에서만 쓸 수 있다 — 우리가 쓰는 모드가 그렇다 */
+    interrupt(): Promise<unknown>
     supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
   }
 import { execFile } from 'node:child_process'
@@ -15,6 +18,7 @@ import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEv
 import { whichTool } from '../../env-path.js'
 import { listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
+import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, normalizeMessage } from './normalize.js'
 
@@ -88,6 +92,11 @@ class ClaudeSession implements SessionHandle {
          * 사용자가 이미 설치해 쓰는 `claude`를 직접 가리킨다. dev에서도 동일하게 동작한다.
          */
         pathToClaudeCodeExecutable: whichTool('claude') ?? undefined,
+        /*
+         * 추론 강도. 모델이 지원할 때만 의미가 있어서, 지원 여부 판단은
+         * 목록을 주는 쪽(supportedModels)에 맡기고 여기서는 받은 값을 넘기기만 한다.
+         */
+        effort: this.opts.effort as never,
         includePartialMessages: true,
         permissionMode: PRESET_MODE[preset],
         resume: this.opts.resumeExternalId,
@@ -196,13 +205,34 @@ class ClaudeSession implements SessionHandle {
     return false
   }
 
+  /**
+   * 중단.
+   *
+   * 두 가지를 **둘 다** 해야 한다. 예전엔 승인만 거절하고 말았는데,
+   * 그러면 도구를 기다리던 턴만 풀릴 뿐 모델이 그냥 생각 중일 때는 아무 일도 일어나지 않았다.
+   * 버튼은 눌리는데 아무것도 멈추지 않는 것 — 이 프로젝트가 금지하는 조용한 실패다.
+   *
+   *   1) 대기 중 승인 거절: canUseTool이 promise를 붙들고 있으면 그 자리에서 멈춰 있어
+   *      중단 신호가 도착해도 정리될 지점이 없다. 먼저 풀어준다.
+   *   2) SDK interrupt: 실제로 턴을 끊는다. 우리는 프롬프트를 async generator로 넘기는
+   *      스트리밍 입력 모드라 이 메서드를 쓸 수 있다.
+   */
   interrupt(): void {
-    // 진행 중 승인을 거부해 턴을 끊는다 (SDK interrupt는 스트림 모드에서 제한적)
     for (const [id, p] of this.pending) {
       p.resolve({ behavior: 'deny', message: '사용자가 중단함' })
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
     }
     this.pending.clear()
+
+    void this.query?.interrupt().catch((err: Error) => {
+      // 못 끊었으면 그렇다고 말한다. 멈춘 줄 알고 기다리게 두는 게 제일 나쁘다.
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: { code: 'internal', message: `중단하지 못했습니다: ${err.message}`, retryable: true },
+      })
+    })
+
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
@@ -222,7 +252,8 @@ export class ClaudeAdapter implements AgentAdapter {
    * 사용량은 **계정**의 성질인데 SDK는 세션(Query)에만 그 메서드를 준다.
    * 그래서 살아 있는 질의 하나를 빌려 쓴다 — 어느 세션에 묻든 답은 같다.
    */
-  static lastQuery: UsageQuery | null = null
+  /** 사용량·모델 목록은 계정의 성질인데 SDK는 둘 다 Query에만 둔다 — 최근 질의를 빌려 쓴다 */
+  static lastQuery: (UsageQuery & ModelQuery) | null = null
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 검증: 전역 bypass를 세션 단위로 덮어쓸 수 있음
     contextUsage: 'exact',
@@ -261,6 +292,13 @@ export class ClaudeAdapter implements AgentAdapter {
     const q = ClaudeAdapter.lastQuery
     if (!q) throw new Error('사용량을 보려면 실행 중인 세션이 필요합니다')
     return readUsage(q)
+  }
+
+  async listModels() {
+    // 사용량과 같은 사정 — SDK는 이 메서드도 Query에만 둔다
+    const q = ClaudeAdapter.lastQuery
+    if (!q) throw new Error('모델 목록을 보려면 실행 중인 세션이 필요합니다')
+    return readClaudeModels(q)
   }
 
   readExternalHistory(externalId: string, cwd: string, limit: number) {

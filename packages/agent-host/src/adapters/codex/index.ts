@@ -9,6 +9,7 @@ import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionH
 import { CodexClient } from './client.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
 import { readCodexUsage } from './usage-client.js'
+import { listCodexModels } from './models.js'
 import { approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
 
 const exec = promisify(execFile)
@@ -141,6 +142,11 @@ class CodexSession implements SessionHandle {
       return this.client.request('turn/start', {
         threadId: this.threadId,
         input: [{ type: 'text', text }],
+        /*
+         * 추론 강도는 턴 단위로 넘긴다 — codex가 "이 턴과 이후 턴"에 적용한다고
+         * 문서화한 자리다. 세션을 다시 띄우지 않고 바꿀 수 있어서 이쪽이 더 싸다.
+         */
+        ...(this.opts.effort ? { effort: this.opts.effort } : {}),
       })
     }).catch((e: Error) => {
       this.emit({
@@ -182,7 +188,15 @@ class CodexSession implements SessionHandle {
   }
 
   interrupt(): void {
-    if (this.threadId) void this.client.request('turn/interrupt', { threadId: this.threadId }).catch(() => {})
+    if (!this.threadId) return
+    // 실패를 삼키면 "멈췄겠지" 하고 기다리게 된다 — 안 멈췄으면 안 멈췄다고 말한다
+    void this.client.request('turn/interrupt', { threadId: this.threadId }).catch((err: Error) => {
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: { code: 'internal', message: `중단하지 못했습니다: ${err.message}`, retryable: true },
+      })
+    })
   }
 
   async dispose(): Promise<void> {
@@ -241,6 +255,10 @@ export class CodexAdapter implements AgentAdapter {
    */
   async listUsage() {
     return readCodexUsage(whichTool('codex') ?? 'codex')
+  }
+
+  async listModels() {
+    return listCodexModels(whichTool('codex') ?? 'codex')
   }
 
   readExternalHistory(externalId: string, cwd: string, limit: number) {

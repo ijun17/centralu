@@ -10,6 +10,7 @@ import {
   ExternalSession,
   UsageSnapshot,
   GitFileStatus,
+  ModelOption,
   PermissionPreset,
   SessionState,
   ToolName,
@@ -22,6 +23,7 @@ export const CreateSessionParams = z.object({
   cwd: z.string(),
   tool: ToolName,
   model: z.string().optional(),
+  effort: z.string().optional(),
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
   resumeExternalId: z.string().optional(),
@@ -48,6 +50,8 @@ export const SessionInfo = z.object({
   live: z.boolean().default(true),
   /** 대화 도중에도 바꿀 수 있다 (FR-7) — 세션 헤더에서 고른다 */
   model: z.string().nullable().default(null),
+  /** 추론 강도. 지원하지 않는 모델이면 null이다 */
+  effort: z.string().nullable().default(null),
   permissionPreset: PermissionPreset.default('normal'),
   /**
    * 이어받은 이전 대화의 식별자 (불러오기로 만든 세션만).
@@ -154,6 +158,8 @@ export const RpcMethods = {
     params: z.object({
       sessionId: z.string(),
       model: z.string().nullable().optional(),
+      /** 추론 강도. 모델마다 지원 단계가 다르므로 문자열 그대로 나른다 */
+      effort: z.string().nullable().optional(),
       permissionPreset: PermissionPreset.optional(),
     }),
     result: SessionInfo,
@@ -266,6 +272,18 @@ export const RpcMethods = {
    * 계정 사용량·한도 (FR-9). 구독 한도만 다룬다.
    * supported=false면 이유가 함께 온다 — 도구가 못 주는 것과 우리가 못 읽은 것을 구분한다.
    */
+  /**
+   * 고를 수 있는 모델 목록. 도구가 공식 API로 알려주는 것을 그대로 나른다.
+   * 구버전 도구는 모를 수 있으므로 supported=false + 이유로 내려온다.
+   */
+  'agents.models': {
+    params: z.object({ tool: ToolName }),
+    result: z.object({
+      supported: z.boolean(),
+      reason: z.string().optional(),
+      models: z.array(ModelOption),
+    }),
+  },
   'agents.usage': {
     params: z.object({ tool: ToolName }),
     result: z.object({ supported: z.boolean(), reason: z.string().optional(), usage: UsageSnapshot.nullable() }),

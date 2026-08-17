@@ -14,6 +14,7 @@ import type {
   UsageSnapshot,
   TerminalInfo,
   ToolName,
+  ModelOption,
 } from '@cc/protocol'
 import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
@@ -50,6 +51,12 @@ class WebAgentPort implements AgentPort {
   ) {
     await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher })
   }
+  models(tool: ToolName) {
+    return this.rpc.call<{ supported: boolean; reason?: string; models: ModelOption[] }>('agents.models', {
+      tool,
+    })
+  }
+
   async interrupt(sessionId: string) {
     await this.rpc.call('agents.interrupt', { sessionId })
   }
