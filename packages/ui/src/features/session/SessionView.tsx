@@ -14,6 +14,7 @@ import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { appendPath, readDragPath } from '../files/dragPath.js'
+import { decideFollow, isAtBottom, shouldFollowAgain } from './scroll.js'
 
 /** 입력창이 커질 수 있는 최대 높이. CSS의 max-h-40과 같은 값이어야 한다 */
 const COMPOSER_MAX_H = 160
@@ -572,7 +573,7 @@ function ChatStream({
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    stickToBottom.current = isAtBottom(el)
     lastTop.current = el.scrollTop
     syncSticky()
   }
@@ -598,37 +599,27 @@ function ChatStream({
    */
   const totalSize = virtualizer.getTotalSize()
   useEffect(() => {
-    if (!stickToBottom.current) return
     const el = scrollRef.current
     if (!el) return
-    /*
-     * 플래그만 믿으면 안 되는 이유 (아래 rAF에만 있던 방어가 여기에도 필요하다).
-     *
-     * 스크롤 이벤트는 비동기다. 사람이 위로 올린 직후 가상 스크롤이 줄을 재면서
-     * 총 높이가 바뀌면, 스크롤 이벤트가 처리되기 **전에** 이 effect가 먼저 돌 수 있다.
-     * 그때 플래그는 아직 true라서 바로 아래 줄이 사람을 도로 바닥으로 끌어내렸다.
-     * 위치로 판정하면 그 경합이 없다 — 내용이 늘어도 scrollTop은 그대로지만,
-     * 사람이 올리면 줄어든다.
-     */
-    if (el.scrollTop < lastTop.current - 4) {
+
+    // 무엇을 할지는 scroll.ts가 정한다 — 여기서는 DOM만 만진다
+    const decision = decideFollow({
+      sticking: stickToBottom.current,
+      scrollTop: el.scrollTop,
+      lastTop: lastTop.current,
+    })
+    if (decision === 'ignore') return
+    if (decision === 'release') {
       stickToBottom.current = false
       return
     }
+
     el.scrollTop = el.scrollHeight
     lastTop.current = el.scrollTop
     const id = requestAnimationFrame(() => {
       const later = scrollRef.current
-      if (!later) return
-      /*
-       * **그 사이 사람이 올렸으면 끌어내리지 않는다.**
-       *
-       * stickToBottom 플래그만 보면 안 된다: 이 프레임이 예약된 뒤 사람이 위로
-       * 올려도, 스크롤 이벤트가 아직 처리되지 않았으면 플래그는 여전히 true다.
-       * 그러면 예약된 프레임이 사람을 이겨서 화면이 도로 바닥으로 튄다
-       * (전체 스위트에서 간헐적으로 잡혔다 — 사람에게는 "읽으려는데 튀는" 증상이다).
-       * 지금 실제 위치를 다시 재면 그 경합이 사라진다.
-       */
-      if (later.scrollHeight - later.scrollTop - later.clientHeight > 80) return
+      // 예약할 때의 판단이 아니라 **지금 위치**로 다시 정한다
+      if (!later || !shouldFollowAgain(later)) return
       later.scrollTop = later.scrollHeight
       lastTop.current = later.scrollTop
     })
