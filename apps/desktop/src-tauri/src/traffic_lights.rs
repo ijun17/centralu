@@ -35,8 +35,31 @@ pub fn install(app: &tauri::AppHandle) {
             WindowEvent::Resized(_) | WindowEvent::Moved(_) | WindowEvent::Focused(_) | WindowEvent::ScaleFactorChanged { .. }
         ) {
             apply(&w);
+            apply_again_soon(&w);
         }
     });
+}
+
+/// 이벤트 직후에 몇 번 더 잡는다.
+///
+/// macOS 26은 리사이즈 **이벤트를 먼저 주고 창 프레임을 나중에 확정한다.** 그래서
+/// 이벤트 시점에 잡아 둔 위치가 곧바로 밀린다 — "가끔 리사이즈하면 이상해진다"가
+/// 이것이다 (도그푸딩 지적).
+///
+/// HuLa는 여기서 라이브 리사이즈 동안 60Hz로 최대 10초를 돈다. 우리는 **이벤트마다
+/// 짧게 세 번**만 다시 잡는다: 끌고 있는 동안에는 이벤트가 계속 오므로 그 자체가
+/// 폴링 역할을 하고, 손을 떼면 저절로 멈춘다. 상시 도는 태스크도, 끝낼 시점을
+/// 정하는 문제도 없다.
+fn apply_again_soon(window: &tauri::WebviewWindow) {
+    for delay_ms in [16u64, 64, 200] {
+        let w = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            let inner = w.clone();
+            // AppKit은 메인 스레드에서만 만질 수 있다
+            let _ = w.run_on_main_thread(move || apply(&inner));
+        });
+    }
 }
 
 fn apply(window: &tauri::WebviewWindow) {

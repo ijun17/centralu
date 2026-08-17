@@ -475,7 +475,18 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
          * 여기서 써버리면 진짜 신호가 묻힌다. 한 단계 낮은 chalk를 쓴다.
          * 글자는 터미널 폰트(모노) — 한 글자 기호는 폭이 고정돼야 줄이 흔들리지 않는다.
          */
-        className={`readout flex size-[14px] items-center justify-center rounded-[3.5px] bg-chalk text-[9px] font-semibold leading-none text-void ${
+        /*
+          어두운 바탕에 밝은 글자다. 밝은 칩이었더니 회전하는 궤도가 그 밝기에 묻혀
+          정작 '작업 중'이 안 보였다 — 표식이 상태를 겸하는데 상태가 안 보이면
+          표식을 옮긴 의미가 없다.
+
+          사이드바 배경(pit)과 칩 배경(void)은 두 단계 차이뿐이라 테두리 하나로는
+          잘 안 떨어진다. 테두리를 더 밝게 올리는 대신 **키캡과 같은 손길**(cc-chip)을
+          쓴다: 위쪽 1px 하이라이트와 아래쪽 그림자. 밝기를 더 쓰지 않고도 물체로
+          떨어져 보이는데, 밝기는 이 앱에서 긴급도를 말하는 자원이라 장식에 쓰면
+          그만큼 신호가 깎인다.
+        */
+        className={`readout cc-chip flex size-[14px] items-center justify-center rounded-[3.5px] border border-graphite bg-void text-[9px] font-semibold leading-none text-chalk ${
           stalled ? 'opacity-50' : ''
         }`}
       >

@@ -106,6 +106,32 @@ describe('빌드된 CSS에 스타일이 실제로 들어 있다', () => {
   })
 })
 
+/**
+ * 우리가 직접 만든 클래스는 **쓰여야 의미가 있다.**
+ *
+ * 위의 CSS 검사는 `@layer components`에 규칙이 있으면 통과한다 — 유틸리티와 달리
+ * 사용 여부와 무관하게 항상 산출물에 들어가기 때문이다. 그래서 클래스를 정의해 놓고
+ * 정작 컴포넌트에 붙이는 걸 빠뜨려도 초록이었다 (실제로 cc-chip이 그렇게 새어 나갔다:
+ * CSS에는 있는데 어디에도 안 붙어서, 사용자가 "왜 안 바꿨냐"고 물어서야 알았다).
+ *
+ * 산출물에 있는가 + 소스에서 쓰는가, 둘을 다 봐야 "적용됐다"가 된다.
+ */
+describe('우리 클래스는 실제로 쓰인다', () => {
+  const OURS = ['cc-chip', 'cc-orbit']
+  const src = execFileSync('grep', ['-rl', '--include=*.tsx', '--include=*.ts', '-e', 'cc-', 'packages/ui/src'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  })
+    .split('\n')
+    .filter(Boolean)
+    .map((f) => readFileSync(join(ROOT, f), 'utf8'))
+    .join('\n')
+
+  it.each(OURS)('%s — 컴포넌트에 붙어 있다', (name) => {
+    expect(src, `${name}이 CSS에만 있고 어디에도 안 붙어 있다`).toContain(name)
+  })
+})
+
 describe('번들 회귀 (C-3 결정: 뷰어에 편집기 엔진을 넣지 않는다)', () => {
   it('CodeMirror·Shiki가 번들에 들어오지 않았다', () => {
     // 읽기 전용 뷰어에 편집기 엔진은 과하다. 넣으려면 지연 로드가 전제이고,
