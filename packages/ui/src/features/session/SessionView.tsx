@@ -475,9 +475,19 @@ function ChatStream({
     if (!el) return
     el.scrollTop = el.scrollHeight
     const id = requestAnimationFrame(() => {
-      if (stickToBottom.current && scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
+      const later = scrollRef.current
+      if (!later) return
+      /*
+       * **그 사이 사람이 올렸으면 끌어내리지 않는다.**
+       *
+       * stickToBottom 플래그만 보면 안 된다: 이 프레임이 예약된 뒤 사람이 위로
+       * 올려도, 스크롤 이벤트가 아직 처리되지 않았으면 플래그는 여전히 true다.
+       * 그러면 예약된 프레임이 사람을 이겨서 화면이 도로 바닥으로 튄다
+       * (전체 스위트에서 간헐적으로 잡혔다 — 사람에게는 "읽으려는데 튀는" 증상이다).
+       * 지금 실제 위치를 다시 재면 그 경합이 사라진다.
+       */
+      if (later.scrollHeight - later.scrollTop - later.clientHeight > 80) return
+      later.scrollTop = later.scrollHeight
     })
     return () => cancelAnimationFrame(id)
   }, [totalSize, pending, working, scrollRef])

@@ -2110,9 +2110,15 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
 
   const stream = page.getByTestId('chat-stream')
 
-  // 맨 위에서는 붙일 것이 없다 (내 메시지가 아직 화면 위로 지나가지 않았다)
+  /*
+    맨 위에서는 붙일 것이 없다 (내 메시지가 아직 화면 위로 지나가지 않았다).
+
+    **기다렸다가 본다.** 가상 스크롤은 줄 높이를 다음 프레임에 재고, 그 측정이
+    끝나야 "무엇이 위로 지나갔나"가 확정된다. 곧바로 단언하면 측정이 끝나기 전
+    한 프레임을 잡아 간헐적으로 실패한다 (전체 스위트에서 실제로 그랬다).
+  */
   await stream.evaluate((el) => (el.scrollTop = 0))
-  await expect(page.getByTestId('sticky-user')).toBeHidden()
+  await expect(page.getByTestId('sticky-user')).toBeHidden({ timeout: 3000 })
 
   /*
     아래로 내리면 지나간 내 메시지가 붙는다.
