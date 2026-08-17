@@ -156,7 +156,14 @@ function ControlCenterButton() {
             ? 'border-slate/50 bg-graphite text-chalk'
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
         } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-ash)]' : ''}`}
-        onClick={() => setView(active ? 'focus' : 'grid')}
+        /*
+          토글이 아니라 **선택**이다.
+          껐다 켜는 스위치로 두면 "이전 화면 위에 잠깐 덮은 것"처럼 읽힌다 —
+          실제로 그렇게 오해를 샀다. 사이드바의 다른 줄들과 같은 규칙으로 둔다:
+          누르면 이것을 보고, 나가려면 다른 것을 고른다.
+        */
+        onClick={() => setView('grid')}
+        aria-pressed={active}
         data-testid="control-center-button"
         title="See sessions side by side"
         onDragOver={(e) => {

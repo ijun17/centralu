@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { columnsFor, visiblePanels } from '@cc/core'
+import { columnsFor, rowsFor, visiblePanels } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
@@ -39,6 +39,7 @@ export function ControlCenter() {
   const known = new Set(Object.keys(sessions))
   const visible = visiblePanels(panels, known)
   const cols = columnsFor(width, visible.length)
+  const rows = rowsFor(visible.length, cols)
 
   /** 사이드바에서 끌어온 세션을 받는다 — 이미 있으면 그 자리로 옮긴다 */
   const dropSession = (id: string, targetId: string | null, before: boolean) => {
@@ -56,7 +57,11 @@ export function ControlCenter() {
   return (
     <section
       ref={ref}
-      className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-void p-2"
+      /*
+        스크롤하지 않는다. 아래에 더 있을지 모른다면 그건 목록이지 관제탑이 아니다 —
+        화면에 있는 것이 전부여야 "한눈에 본다"가 성립한다.
+      */
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-void p-2"
       data-testid="control-center"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes(SESSION_MIME)) e.preventDefault()
@@ -78,7 +83,18 @@ export function ControlCenter() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+        <div
+          /*
+            높이도 폭처럼 나눠 갖는다. 줄 수를 미리 세어 각 줄에 1fr을 주면
+            칸이 몇 개든 화면에 딱 맞는다 — 남는 공간도, 넘치는 부분도 없다.
+            minmax(0, 1fr)의 0이 중요하다: 기본 min-content면 내용이 큰 칸이 줄을 밀어낸다.
+          */
+          className="grid min-h-0 flex-1 gap-2"
+          style={{
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+          }}
+        >
           {visible.map((id) => (
             <div
               key={id}
@@ -86,15 +102,10 @@ export function ControlCenter() {
                 놓을 자리 표시는 inset 그림자다 — border는 칸을 1px 키워서
                 끌고 다니는 동안 격자 전체가 밀린다 (사이드바에서 겪은 그 문제).
               */
-              className={`relative flex h-[52vh] min-h-[320px] flex-col overflow-hidden rounded-lg border border-edge ${
+              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge ${
                 over === id ? 'shadow-[inset_0_0_0_2px_var(--color-ash)]' : ''
               }`}
               data-testid={`grid-panel-${id}`}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData(SESSION_MIME, id)
-                e.dataTransfer.effectAllowed = 'move'
-              }}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes(SESSION_MIME)) return
                 e.preventDefault()
@@ -115,18 +126,37 @@ export function ControlCenter() {
               {/*
                 빼기는 화면에서만 내린다 — 세션은 사이드바에 그대로 남고 계속 돌아간다.
                 그래서 '삭제'가 아니라 '치우기'로 말한다.
+
+                머리글 슬롯으로 넘긴다. 예전엔 칸 위에 절대좌표로 얹었는데, 그러면
+                헤더의 재시작 버튼과 크기도 높이도 따로 놀았다 (12px vs 14px, 다른 흐름).
+                같은 줄에 두면 맞출 것이 없다.
               */}
-              <span className="absolute right-1 top-1 z-10">
-                <IconButton
-                  label="Remove from Control Center (the session keeps running)"
-                  onClick={() => void setGridPanels(panels.filter((x) => x !== id))}
-                  testId={`grid-remove-${id}`}
-                  align="right"
-                >
-                  <CloseIcon size={12} />
-                </IconButton>
-              </span>
-              <SessionPane sessionId={id} />
+              <SessionPane
+                sessionId={id}
+                /*
+                  칸을 옮기는 손잡이는 **머리글뿐**이다.
+                  예전엔 칸 전체가 draggable이었는데, draggable인 조상이 있으면
+                  브라우저가 그 안의 글자를 못 고르게 한다 — 대화를 긁으면 칸이 끌려왔다.
+
+                  동시에 이 머리글은 창을 끄는 손잡이가 아니다. 포커스 뷰에서는
+                  머리글이 곧 타이틀바지만 여기서는 아니다 — 그대로 뒀더니
+                  칸을 옮기려는데 앱 창이 통째로 움직였다 (도그푸딩).
+                */
+                headerDrag={(e) => {
+                  e.dataTransfer.setData(SESSION_MIME, id)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                headerExtra={
+                  <IconButton
+                    label="Remove from Control Center (the session keeps running)"
+                    onClick={() => void setGridPanels(panels.filter((x) => x !== id))}
+                    testId={`grid-remove-${id}`}
+                    align="right"
+                  >
+                    <CloseIcon size={14} />
+                  </IconButton>
+                }
+              />
             </div>
           ))}
         </div>

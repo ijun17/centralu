@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { MIN_PANEL_W, addPanel, columnsFor, removePanel, visiblePanels } from './layout.js'
+import { MIN_PANEL_W, addPanel, columnsFor, removePanel, rowsFor, visiblePanels } from './layout.js'
+
+describe('rowsFor', () => {
+  it('열 수로 나눈 만큼 줄이 생긴다', () => {
+    expect(rowsFor(6, 3)).toBe(2)
+    expect(rowsFor(4, 3)).toBe(2)
+    expect(rowsFor(3, 3)).toBe(1)
+  })
+
+  it('빈 배치는 줄이 없다', () => {
+    expect(rowsFor(0, 3)).toBe(0)
+  })
+
+  it('열이 0으로 들어와도 나눗셈이 깨지지 않는다', () => {
+    expect(rowsFor(3, 0)).toBe(3)
+  })
+})
 
 describe('columnsFor', () => {
   it('넓으면 여러 열, 좁으면 한 열', () => {

@@ -2504,7 +2504,8 @@ test('그리드 칸과 포커스 뷰가 같은 설정을 본다', async ({ page 
   await page.getByTestId(`grid-panel-${id}`).getByTestId('model-select').selectOption('opus')
 
   // 포커스 뷰로 돌아오면 그대로여야 한다 — 복사본이면 여기서 갈라진다
-  await page.getByTestId('control-center-button').click()
+  // (나가는 방법은 '다른 것을 고르는 것'이다. 컨트롤 센터 버튼은 토글이 아니다)
+  await page.getByTestId(`session-row-${id}`).click()
   await expect(page.getByTestId('model-select')).toHaveValue('opus')
 })
 
@@ -2606,3 +2607,176 @@ test('그리드 칸을 열면 최신 대화가 먼저 보인다', async ({ page 
   // 그리고 맨 아래에 서 있어야 한다
   expect(box.h - box.c - box.top).toBeLessThanOrEqual(40)
 })
+
+/**
+ * "아래에 공간이 있어도 안 늘어나서 보기 불편하다" (도그푸딩).
+ * 높이를 52vh로 못박아 뒀더니 칸이 하나여도 아래가 비었다.
+ * 줄 높이를 minmax(최소, 1fr)로 두면 남는 공간을 칸이 나눠 갖는다.
+ */
+test('그리드 칸은 남는 세로 공간을 채운다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  const panel = page.getByTestId(`grid-panel-${id}`)
+  await expect(panel).toBeVisible()
+
+  const card = (await panel.boundingBox())!
+  const area = (await page.getByTestId('control-center').boundingBox())!
+  // 여백(p-2)을 빼면 화면을 거의 다 쓴다 — 아래가 남으면 안 된다
+  expect(card.height).toBeGreaterThan(area.height - 24)
+})
+
+/**
+ * 컨트롤 센터는 스크롤하지 않는다.
+ * 아래에 더 있을지 모른다면 그건 목록이지 관제탑이 아니다 —
+ * 화면에 있는 것이 전부여야 "한눈에 본다"가 성립한다.
+ */
+test('칸이 많아져도 화면에 딱 맞고 스크롤이 생기지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const ids: string[] = []
+  for (const name of ['a', 'b', 'c', 'd', 'e']) {
+    await newSession(page, 'alpha', name)
+    ids.push(await page.evaluate(() => (window as any).__store.getState().focusedSessionId))
+  }
+  await page.evaluate((list) => (window as any).__store.getState().setGridPanels(list), ids)
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId(`grid-panel-${ids[4]}`)).toBeVisible()
+
+  const scroll = await page.getByTestId('control-center').evaluate((el) => ({
+    h: el.scrollHeight, c: el.clientHeight,
+  }))
+  expect(scroll.h).toBeLessThanOrEqual(scroll.c + 1)
+
+  // 마지막 칸까지 화면 안에 들어와 있다
+  const area = (await page.getByTestId('control-center').boundingBox())!
+  const last = (await page.getByTestId(`grid-panel-${ids[4]}`).boundingBox())!
+  expect(last.y + last.height).toBeLessThanOrEqual(area.y + area.height + 1)
+})
+
+/**
+ * "대화를 드래그하면 칸이 이동해서 텍스트 선택이 안 된다" (도그푸딩).
+ * draggable인 조상이 있으면 브라우저가 그 안의 글자를 못 고르게 한다.
+ */
+test('그리드 칸에서 대화 텍스트를 고를 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate((sid) => {
+    const store = (window as any).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: [{ kind: 'assistant', seq: 1, text: '고를 수 있어야 하는 문장' }] } })
+  }, id)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  const panel = page.getByTestId(`grid-panel-${id}`)
+  await expect(panel).toBeVisible()
+
+  // 끌기 시작을 막는 조상이 없어야 한다
+  const draggableAncestor = await panel.getByTestId('chat-stream').evaluate((el) => {
+    for (let n: HTMLElement | null = el as HTMLElement; n; n = n.parentElement) {
+      if (n.getAttribute('draggable') === 'true') return n.getAttribute('data-testid') ?? 'unknown'
+    }
+    return null
+  })
+  expect(draggableAncestor).toBeNull()
+})
+
+/**
+ * "세션 패널 탭으로 드래그하면 창 자체가 이동한다" (도그푸딩).
+ * 포커스 뷰에서는 머리글이 곧 타이틀바지만, 그리드 칸에서는 아니다.
+ */
+test('그리드 칸의 머리글을 끌어도 앱 창이 움직이지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  const header = page.getByTestId(`grid-panel-${id}`).getByTestId('pane-header')
+  await expect(header).toBeVisible()
+
+  await page.evaluate(() => ((window as any).__mock.windowDrags = 0))
+  const box = (await header.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 40)
+  await page.mouse.up()
+
+  expect(await page.evaluate(() => (window as any).__mock.windowDrags)).toBe(0)
+  // 대신 칸을 옮기는 손잡이여야 한다
+  await expect(header).toHaveAttribute('draggable', 'true')
+})
+
+/**
+ * "사이드바에서 직접 세션에 안 들어가면 컨트롤 센터에서 대화가 안 뜬다" (도그푸딩).
+ *
+ * 기록 불러오기가 focusSession에만 매달려 있었다. 포커스 뷰는 고르는 것과 보는 것이
+ * 같은 동작이라 티가 안 났지만, 컨트롤 센터는 **고르지 않고 보는** 화면이다.
+ */
+test('한 번도 들어가 본 적 없는 세션도 그리드에서 대화가 뜬다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 저장소에는 기록이 있고, 화면에는 아직 안 올라온 상태 (앱을 막 켠 세션)
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    m.messages.set(sid, [
+      { sessionId: sid, seq: 1, role: 'user', kind: 'text', payload: { text: '저장된 옛 질문' }, ts: Date.now() },
+      { sessionId: sid, seq: 2, role: 'assistant', kind: 'text', payload: { text: '저장된 옛 답' }, ts: Date.now() },
+    ])
+    const store = (window as any).__store
+    store.setState({ chat: {}, focusedSessionId: null })
+  }, id)
+
+  // 사이드바를 거치지 않고 곧바로 그리드에 올린다
+  await page.evaluate((sid) => (window as any).__store.getState().setGridPanels([sid]), id)
+  await page.getByTestId('control-center-button').click()
+
+  await expect(page.getByTestId(`grid-panel-${id}`)).toContainText('저장된 옛 답')
+})
+
+/**
+ * 그리드 칸의 '치우기'와 '재시작'이 크기도 높이도 따로 놀았다 (도그푸딩).
+ * 치우기만 칸 위에 절대좌표로 얹혀 있었기 때문이다 — 다른 흐름에 있으면 맞을 리가 없다.
+ * 같은 줄에 넣으면 맞출 것 자체가 없어진다.
+ */
+test('그리드 칸의 재시작과 치우기 버튼이 같은 크기·같은 줄에 선다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="control-center-button"]')
+  const panel = page.getByTestId(`grid-panel-${id}`)
+  await expect(panel).toBeVisible()
+
+  const restart = (await panel.getByTestId('restart-session').boundingBox())!
+  const remove = (await page.getByTestId(`grid-remove-${id}`).boundingBox())!
+
+  expect(Math.abs(restart.width - remove.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(restart.height - remove.height)).toBeLessThanOrEqual(1)
+  // 세로 중심이 같은 줄에 선다
+  expect(Math.abs(restart.y + restart.height / 2 - (remove.y + remove.height / 2))).toBeLessThanOrEqual(1)
+})
+
+/**
+ * 컨트롤 센터 버튼은 토글이 아니라 선택이다.
+ * 껐다 켜는 스위치로 두면 "이전 화면 위에 잠깐 덮은 것"처럼 읽힌다 — 실제로 그렇게 오해를 샀다.
+ */
+test('컨트롤 센터 버튼은 눌러도 꺼지지 않는다 — 나가려면 다른 것을 고른다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId('control-center')).toBeVisible()
+
+  // 한 번 더 눌러도 머문다
+  await page.getByTestId('control-center-button').click()
+  await expect(page.getByTestId('control-center')).toBeVisible()
+
+  // 나가는 방법은 다른 것을 고르는 것뿐
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('control-center')).toBeHidden()
+})
+

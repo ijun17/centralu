@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { RefObject } from 'react'
+import type { DragEvent, ReactNode, RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Attachment } from '@cc/protocol'
 import { shouldCollapseCard, shouldMarkRead, type SessionSummary } from '@cc/core'
@@ -73,12 +73,35 @@ export function SessionView() {
  * 입력 중인 글은 이 부품이 들고 있으므로 **칸마다 따로**다 — 그리드에서 A에 쓰다가
  * B에 쓰기 시작해도 서로 섞이지 않는다.
  */
-export function SessionPane({ sessionId }: { sessionId: string }) {
+export function SessionPane({
+  sessionId,
+  headerExtra,
+  headerDrag,
+}: {
+  sessionId: string
+  /**
+   * 머리글 오른쪽에 덧붙일 버튼 (컨트롤 센터의 '치우기').
+   *
+   * 슬롯으로 받는 이유: 그리드가 자기 버튼을 칸 위에 절대좌표로 얹었더니
+   * 크기도 높이도 헤더의 버튼들과 따로 놀았다. 같은 줄에 넣으면 정렬을 맞출
+   * 필요가 없다 — 애초에 어긋날 수가 없다.
+   */
+  headerExtra?: ReactNode
+  /**
+   * 머리글을 **칸을 옮기는 손잡이**로 쓴다 (컨트롤 센터).
+   *
+   * 주면 이 머리글은 더 이상 창을 끄는 손잡이가 아니다. 포커스 뷰에서는 머리글이
+   * 곧 타이틀바지만 그리드에서는 아니기 때문이다 — 같은 부품이라도 어디에 놓였는지에
+   * 따라 머리글의 뜻이 달라진다. 그 차이를 부품이 혼자 짐작하게 두지 않는다.
+   */
+  headerDrag?: (e: DragEvent<HTMLElement>) => void
+}) {
   const session = useStore((s) => s.sessions[sessionId])
   const chat = useStore((s) => s.chat[sessionId] ?? EMPTY_CHAT)
   const send = useStore((s) => s.send)
   const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
+
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -137,6 +160,20 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
     }
   }
 
+  /*
+   * 이 칸이 그릴 대화를 이 칸이 챙긴다.
+   *
+   * 예전엔 focusSession만 기록을 불러왔다. 포커스 뷰에서는 고르는 것과 보는 것이
+   * 같은 동작이라 티가 안 났는데, 컨트롤 센터는 **고르지 않고 보는** 화면이다 —
+   * 사이드바에서 한 번도 들어가 본 적 없는 세션을 올리면 빈 칸이 떴다 (도그푸딩).
+   * 세션 하나를 그리는 부품이 그 대화를 챙기는 게 맞다.
+   */
+  const loadHistory = useStore((s) => s.loadHistory)
+  const loaded = useStore((s) => !!s.chat[sessionId])
+  useEffect(() => {
+    if (!loaded) void loadHistory(sessionId)
+  }, [sessionId, loaded, loadHistory])
+
   // 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core)
   useEffect(() => {
     if (!session) return
@@ -153,6 +190,52 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
 
   const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
 
+  const HEADER = 'flex items-center gap-2.5 border-b border-edge px-4 py-2'
+  const header = (
+    <>
+      <StateDot state={session.state} />
+      <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
+        {session.name}
+      </h1>
+
+      {ctxPct !== null && (
+        <span
+          className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-chalk' : 'text-slate'}`}
+          data-testid="context-gauge"
+          title={`Context ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} tokens`}
+        >
+          Context {ctxPct}%
+        </span>
+      )}
+
+      {session.limit && (
+        <span className="readout text-[11px] text-ash" data-testid="limit-badge">
+          Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
+          {session.limit.resumeAt
+            ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+            : ''}
+        </span>
+      )}
+
+      {/*
+        중지는 여기 두지 않는다 — 대화 맨 아래 '응답 기다리는 중' 옆에 이미 있다.
+        같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
+      */}
+      <span className="ml-auto flex shrink-0 items-center gap-2">
+        {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
+        <IconButton
+          label="Restart agent (chat history is kept)"
+          onClick={() => void restart(session.id)}
+          testId="restart-session"
+          align="right"
+        >
+          <RestartIcon />
+        </IconButton>
+        {headerExtra}
+      </span>
+    </>
+  )
+
   return (
     /*
       min-h-0이 없으면 안 된다.
@@ -161,47 +244,20 @@ export function SessionPane({ sessionId }: { sessionId: string }) {
       (컨트롤 센터에서 칸 높이가 정해져 있으니 곧바로 드러났다 — 입력창이 아예 안 보였다).
     */
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
-      <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
-        <StateDot state={session.state} />
-        <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
-          {session.name}
-        </h1>
-
-        {ctxPct !== null && (
-          <span
-            className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-chalk' : 'text-slate'}`}
-            data-testid="context-gauge"
-            title={`Context ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} tokens`}
-          >
-            Context {ctxPct}%
-          </span>
-        )}
-
-        {session.limit && (
-          <span className="readout text-[11px] text-ash" data-testid="limit-badge">
-            Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
-            {session.limit.resumeAt
-              ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
-              : ''}
-          </span>
-        )}
-
-        {/*
-          중지는 여기 두지 않는다 — 대화 맨 아래 '응답 기다리는 중' 옆에 이미 있다.
-          같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
-        */}
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
-          <IconButton
-            label="Restart agent (chat history is kept)"
-            onClick={() => void restart(session.id)}
-            testId="restart-session"
-            align="right"
-          >
-            <RestartIcon />
-          </IconButton>
-        </span>
-      </DragRegion>
+      {headerDrag ? (
+        <div
+          className={`${HEADER} cursor-grab active:cursor-grabbing`}
+          draggable
+          onDragStart={headerDrag}
+          data-testid="pane-header"
+        >
+          {header}
+        </div>
+      ) : (
+        <DragRegion className={HEADER} testId="pane-header">
+          {header}
+        </DragRegion>
+      )}
 
       <ChatStream
         scrollRef={scrollRef}

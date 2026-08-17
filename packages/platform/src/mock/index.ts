@@ -510,9 +510,15 @@ export class MockPlatform implements Platform {
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })
     },
-    startWindowDrag: async () => {},
+    startWindowDrag: async () => {
+      // 창을 끈 횟수 — "칸을 옮기려 했는데 앱 창이 움직였다"를 테스트가 볼 수 있어야 한다
+      this.windowDrags++
+    },
     pickDirectory: async () => this.nextPickedDirectory,
   }
+
+  /** 창 끌기가 몇 번 시작됐나 (Playwright에서 확인) */
+  windowDrags = 0
 
   /** 테스트가 들여다볼 수 있게 공개 */
   workspaceSnapshot: WorkspaceSnapshot | null = null

@@ -12,6 +12,18 @@
 export const MIN_PANEL_W = 380
 
 /**
+ * 열 수가 정해졌을 때 필요한 줄 수.
+ *
+ * 컨트롤 센터는 **스크롤하지 않는다.** 화면에 있는 것이 전부여야 한눈에 본다는 말이
+ * 성립한다 — 아래에 더 있을지 모른다면 그건 목록이지 관제탑이 아니다.
+ * 그래서 높이도 폭처럼 나눠 갖는다: 줄 수를 알아야 각 줄에 1fr을 줄 수 있다.
+ */
+export function rowsFor(count: number, cols: number): number {
+  if (count <= 0) return 0
+  return Math.ceil(count / Math.max(1, cols))
+}
+
+/**
  * 폭에 맞는 열 수.
  *
  * 사양서(§5.4)가 그리드를 보류한 첫 근거가 "패널당 600×400이면 아무것도 안 보인다"였다.
