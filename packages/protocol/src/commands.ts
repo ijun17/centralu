@@ -235,6 +235,18 @@ export const RpcMethods = {
   },
   'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
   'projects.add': { params: z.object({ path: z.string() }), result: ProjectInfo },
+  /**
+   * 사이드바 순서 바꾸기. **전체 순서를 통째로 받는다** —
+   * "이걸 저기로" 식으로 주고받으면 목록이 그 사이 바뀌었을 때 어긋난다.
+   */
+  'projects.reorder': {
+    params: z.object({ orderedIds: z.array(z.string()) }),
+    result: z.array(ProjectInfo),
+  },
+  'sessions.reorder': {
+    params: z.object({ projectId: z.string(), orderedIds: z.array(z.string()) }),
+    result: z.array(SessionInfo),
+  },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },
   'projects.gitStatus': { params: z.object({ projectId: z.string() }), result: ProjectInfo },
   'sessions.list': { params: z.object({}), result: z.array(SessionInfo) },

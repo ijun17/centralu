@@ -136,6 +136,16 @@ export class Store {
           }
         },
       },
+      {
+        to: 8,
+        run: () => {
+          // 사이드바 순서를 사람이 정할 수 있게 (프로젝트는 이미 컬럼이 있었다)
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'sidebar_order')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN sidebar_order INTEGER NOT NULL DEFAULT 0`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -193,6 +203,23 @@ export class Store {
       })
   }
 
+  /**
+   * 사이드바 순서 저장.
+   *
+   * **전체 순서를 통째로 받아 다시 매긴다.** "이걸 저기로" 식으로 인접 항목만
+   * 건드리면 값이 촘촘해질 때 재배치가 필요해지고, 그 사이 목록이 바뀌면 어긋난다.
+   * 목록이 짧으니(사람이 보는 사이드바다) 전부 다시 쓰는 게 단순하고 안전하다.
+   */
+  setProjectOrder(orderedIds: readonly string[]): void {
+    const stmt = this.db.prepare(`UPDATE projects SET sidebar_order = ? WHERE id = ?`)
+    this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
+  }
+
+  setSessionOrder(orderedIds: readonly string[]): void {
+    const stmt = this.db.prepare(`UPDATE sessions SET sidebar_order = ? WHERE id = ?`)
+    this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
+  }
+
   listSessions(): SessionInfo[] {
     const rows = this.db
       .prepare(
@@ -201,7 +228,7 @@ export class Store {
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
-         FROM sessions s ORDER BY s.created_at`,
+         FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
       )
       .all() as (Omit<SessionInfo, 'autoNamed' | 'archived'> & { autoNamed: number; archived: number })[]
     return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived, live: false }))

@@ -2316,3 +2316,40 @@ test('프로젝트 표식은 호버하면 무엇인지 알려준다', async ({ p
   await page.getByTestId('concurrent-alpha').hover()
   await expect(page.getByRole('tooltip')).toContainText('same folder')
 })
+
+/** 사이드바 순서는 사람이 정한다 — 끌어서 옮기고, 다시 켜도 그대로여야 한다 */
+test('세션을 끌어서 순서를 바꾼다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  const order = async () =>
+    page.evaluate(() => {
+      const s = (window as any).__store.getState()
+      return Object.values(s.sessions).map((x: any) => x.name)
+    })
+  expect(await order()).toEqual(['first', 'second'])
+
+  const ids = await page.evaluate(() => Object.keys((window as any).__store.getState().sessions))
+  await page.dragAndDrop(`[data-testid="session-row-${ids[1]}"]`, `[data-testid="session-row-${ids[0]}"]`, {
+    targetPosition: { x: 10, y: 2 }, // 위쪽 절반에 놓으면 앞으로 간다
+  })
+
+  await expect.poll(order).toEqual(['second', 'first'])
+})
+
+test('프로젝트를 끌어서 순서를 바꾼다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+
+  const order = async () =>
+    page.evaluate(() =>
+      Object.values((window as any).__store.getState().projects).map((p: any) => p.name),
+    )
+  expect(await order()).toEqual(['alpha', 'beta'])
+
+  await page.dragAndDrop('[data-testid="project-header-beta"]', '[data-testid="project-alpha"]', {
+    targetPosition: { x: 10, y: 2 },
+  })
+
+  await expect.poll(order).toEqual(['beta', 'alpha'])
+})

@@ -20,7 +20,7 @@ function seeded() {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(7)
+    expect(new Store().schemaVersion).toBe(8)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -103,7 +103,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(7)
+    expect(store.schemaVersion).toBe(8)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -179,5 +179,44 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     store.upsertSession(row({ id: 's-none' }))
     expect(store.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
     store.close()
+  })
+})
+
+/**
+ * 사이드바 순서는 사람이 정한 것이라 **다시 켜도 그대로여야 한다.**
+ * 세션 저장(upsert)이 순서를 덮어쓰지 않는지도 함께 본다 — 대화 한 줄마다
+ * upsert가 도는데 거기서 순서가 초기화되면 사람이 정한 것이 계속 흐트러진다.
+ */
+describe('마이그레이션 v8 — 사이드바 순서', () => {
+  it('세션 순서를 저장하고 그 순서로 읽는다', () => {
+    const s = seeded()
+    for (const id of ['s2', 's3']) {
+      s.upsertSession({
+        id, projectId: 'p1', tool: 'claude', externalId: null, name: id,
+        autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+        createdAt: Date.now(), waitingSince: null, live: true,
+        model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+      })
+    }
+    s.setSessionOrder(['s3', 's1', 's2'])
+    expect(s.listSessions().map((x) => x.id)).toEqual(['s3', 's1', 's2'])
+    s.close()
+  })
+
+  it('세션을 다시 저장해도 순서가 흐트러지지 않는다', () => {
+    const s = seeded()
+    s.setSessionOrder(['s1'])
+    const before = s.listSessions()[0]!
+    s.upsertSession({ ...before, name: 'renamed' })
+    expect(s.listSessions().map((x) => x.name)).toEqual(['renamed'])
+    s.close()
+  })
+
+  it('프로젝트 순서도 저장된다', () => {
+    const s = seeded()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.setProjectOrder(['p2', 'p1'])
+    expect(s.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
+    s.close()
   })
 })

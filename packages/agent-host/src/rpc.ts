@@ -133,6 +133,12 @@ export function createRpcHandler(
     'workspace.load': async () => mgr.loadWorkspace(),
     'projects.add': async (p) => mgr.addProject(RpcMethods['projects.add'].params.parse(p).path),
     'projects.list': async () => mgr.listProjects(),
+    'projects.reorder': async (p) =>
+      mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
+    'sessions.reorder': async (p) => {
+      const { projectId, orderedIds } = RpcMethods['sessions.reorder'].params.parse(p)
+      return mgr.reorderSessions(projectId, orderedIds)
+    },
     'projects.gitStatus': async (p) => {
       const { projectId } = RpcMethods['projects.gitStatus'].params.parse(p)
       const all = await mgr.listProjects()

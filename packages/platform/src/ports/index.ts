@@ -55,6 +55,8 @@ export interface AgentPort {
     matcher?: string,
   ): Promise<void>
   interrupt(sessionId: string): Promise<void>
+  /** 사이드바 순서 (사람이 끌어서 정한다). 전체 순서를 통째로 보낸다 */
+  reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
   /** 고를 수 있는 모델과 각 모델의 추론 강도 (도구가 공식 API로 알려주는 것) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */
@@ -98,6 +100,7 @@ export interface AgentPort {
 }
 
 export interface ProjectPort {
+  reorder(orderedIds: string[]): Promise<ProjectInfo[]>
   add(path: string): Promise<ProjectInfo>
   list(): Promise<ProjectInfo[]>
   gitStatus(projectId: string): Promise<ProjectInfo>

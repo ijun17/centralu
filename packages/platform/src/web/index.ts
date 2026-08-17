@@ -51,6 +51,10 @@ class WebAgentPort implements AgentPort {
   ) {
     await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher })
   }
+  reorderSessions(projectId: string, orderedIds: string[]) {
+    return this.rpc.call<SessionInfo[]>('sessions.reorder', { projectId, orderedIds })
+  }
+
   models(tool: ToolName) {
     return this.rpc.call<{ supported: boolean; reason?: string; models: ModelOption[] }>('agents.models', {
       tool,
@@ -121,6 +125,9 @@ class WebAgentPort implements AgentPort {
 
 class WebProjectPort implements ProjectPort {
   constructor(private rpc: RpcClient) {}
+  reorder(orderedIds: string[]) {
+    return this.rpc.call<ProjectInfo[]>('projects.reorder', { orderedIds })
+  }
   add(path: string) {
     return this.rpc.call<ProjectInfo>('projects.add', { path })
   }

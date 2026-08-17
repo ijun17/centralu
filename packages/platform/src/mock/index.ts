@@ -32,7 +32,7 @@ export type MockOptions = {
 
 export class MockPlatform implements Platform {
   private projectsList: ProjectInfo[] = []
-  private sessions = new Map<string, SessionInfo>()
+  sessions = new Map<string, SessionInfo>()
   private messages = new Map<string, StoredMessage[]>()
   private handlers = new Set<(e: NormalizedEvent) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
@@ -270,6 +270,14 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
       this.emit({ type: 'turn_complete', sessionId })
     },
+    reorderSessions: async (projectId: string, orderedIds: string[]) => {
+      const mine = [...this.sessions.values()].filter((s) => s.projectId === projectId)
+      const rank = new Map(orderedIds.map((id, i) => [id, i]))
+      mine.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+      const others = [...this.sessions.entries()].filter(([, s]) => s.projectId !== projectId)
+      this.sessions = new Map([...others, ...mine.map((s) => [s.id, s] as const)])
+      return [...this.sessions.values()]
+    },
     models: async (tool: ToolName) => ({
       supported: true,
       models:
@@ -387,6 +395,11 @@ export class MockPlatform implements Platform {
   }
 
   readonly projects: ProjectPort = {
+    reorder: async (orderedIds: string[]) => {
+      const rank = new Map(orderedIds.map((id, i) => [id, i]))
+      this.projectsList.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+      return [...this.projectsList]
+    },
     add: async (path: string) => {
       const existing = this.projectsList.find((p) => p.path === path)
       if (existing) return existing

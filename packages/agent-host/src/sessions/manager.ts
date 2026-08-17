@@ -109,6 +109,31 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 사이드바 순서 (사람이 끌어서 정한다).
+   *
+   * 받은 목록에 없는 것은 **뒤에 그대로 남긴다** — 화면 밖에 있던 것이
+   * 순서 저장 한 번에 맨 앞으로 튀어나오면 안 된다.
+   */
+  async reorderProjects(orderedIds: readonly string[]): Promise<ProjectInfo[]> {
+    const known = this.store.listProjects().map((p) => p.id)
+    const rest = known.filter((id) => !orderedIds.includes(id))
+    this.store.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
+    return this.listProjects()
+  }
+
+  reorderSessions(projectId: string, orderedIds: readonly string[]): SessionInfo[] {
+    const mine = this.listSessions().filter((s) => s.projectId === projectId)
+    const ids = mine.map((s) => s.id)
+    const rest = ids.filter((id) => !orderedIds.includes(id))
+    this.store.setSessionOrder([...orderedIds.filter((id) => ids.includes(id)), ...rest])
+    // 메모리의 순서도 같이 맞춘다 — 저장만 하면 다시 뜨기 전까지 화면과 어긋난다
+    const rank = new Map([...orderedIds, ...rest].map((id, i) => [id, i]))
+    const sorted = [...this.meta.entries()].sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0))
+    this.meta = new Map(sorted)
+    return this.listSessions()
+  }
+
   async listProjects(): Promise<ProjectInfo[]> {
     return Promise.all(this.store.listProjects().map((p) => this.projectInfo(p.id, p.path)))
   }

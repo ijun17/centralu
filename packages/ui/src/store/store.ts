@@ -198,6 +198,9 @@ export type AppState = {
   wake(sessionId: string): Promise<void>
   /** 재연결 후 돌던 세션 되살리기 (host가 죽으면 프로세스도 함께 죽는다) */
   recoverAfterReconnect(): Promise<void>
+  /** 사이드바 순서 (사람이 끌어서 정한다) */
+  reorderProjects(orderedIds: string[]): Promise<void>
+  reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
 }
@@ -825,6 +828,45 @@ export const useStore = create<AppState>((set, get) => ({
    * 그걸 근거로 되살린다. 아카이브된 것과 원래 잠들어 있던 것은 건드리지 않는다:
    * 끊김을 핑계로 사람이 안 켠 것까지 켜면 그건 복구가 아니라 다른 일이다.
    */
+  /**
+   * 사이드바 순서.
+   *
+   * **화면을 먼저 바꾸고 저장은 뒤따라간다.** 끌어놓은 것이 서버 왕복을 기다렸다가
+   * 움직이면 손이 멈칫한 것처럼 느껴진다. 저장에 실패하면 host가 준 진실로 되돌린다 —
+   * 조용히 어긋난 채로 두지 않는다.
+   */
+  async reorderProjects(orderedIds) {
+    const platform = get().platform
+    if (!platform) return
+    const before = get().projects
+    set({ projects: Object.fromEntries(orderedIds.map((id) => [id, before[id]!]).filter(([, v]) => v)) })
+    try {
+      const fresh = await platform.projects.reorder(orderedIds)
+      set({ projects: Object.fromEntries(fresh.map((p) => [p.id, p])) })
+    } catch (e) {
+      set({ projects: before, toast: `Could not save order: ${(e as Error).message}` })
+    }
+  },
+
+  async reorderSessions(projectId, orderedIds) {
+    const platform = get().platform
+    if (!platform) return
+    const before = get().sessions
+    // 이 프로젝트의 세션만 새 순서로, 나머지는 있던 자리에 그대로
+    const mine = new Set(orderedIds)
+    const reordered: typeof before = {}
+    for (const [id, s] of Object.entries(before)) {
+      if (!mine.has(id)) reordered[id] = s
+    }
+    for (const id of orderedIds) if (before[id]) reordered[id] = before[id]!
+    set({ sessions: reordered })
+    try {
+      await platform.agents.reorderSessions(projectId, orderedIds)
+    } catch (e) {
+      set({ sessions: before, toast: `Could not save order: ${(e as Error).message}` })
+    }
+  },
+
   async recoverAfterReconnect() {
     const s = get()
     if (!s.platform) return

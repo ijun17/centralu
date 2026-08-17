@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
@@ -9,6 +9,80 @@ import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
+import { PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo } from './reorder.js'
+
+/**
+ * 끌어서 순서 바꾸기.
+ *
+ * 끌고 있는 것의 **종류를 MIME으로 밝힌다.** 그래야 세션을 프로젝트 자리에
+ * 떨어뜨렸을 때 아무 일도 안 일어난다 — 종류를 안 보면 엉뚱한 목록이 재배열된다.
+ *
+ * 놓일 자리는 선으로 보여준다. 선이 없으면 손을 떼기 전까지 어디로 갈지 알 수 없고,
+ * 그러면 놓아 보고 되돌리는 일이 반복된다.
+ */
+function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) => void) {
+  const [edge, setEdge] = useState<'top' | 'bottom' | null>(null)
+
+  return {
+    edge,
+    handlers: {
+      onDragOver: (e: React.DragEvent) => {
+        if (!e.dataTransfer.types.includes(mime)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        const r = e.currentTarget.getBoundingClientRect()
+        setEdge(dropsBefore(r, e.clientY) ? 'top' : 'bottom')
+      },
+      onDragLeave: () => setEdge(null),
+      onDrop: (e: React.DragEvent) => {
+        const id = e.dataTransfer.getData(mime)
+        setEdge(null)
+        if (!id) return
+        e.preventDefault()
+        e.stopPropagation()
+        const r = e.currentTarget.getBoundingClientRect()
+        onDrop(id, dropsBefore(r, e.clientY))
+      },
+    },
+  }
+}
+
+/**
+ * 세션 한 줄. 끌 수 있고, 다른 줄을 받을 수 있다.
+ *
+ * 줄마다 놓기 상태를 따로 들고 있어야 **그 줄에만** 선이 그려진다 —
+ * 하나로 묶어 두면 어느 줄 위인지 매번 다시 계산해야 한다.
+ */
+function SessionRow({
+  id,
+  onReorder,
+  children,
+}: {
+  id: string
+  onReorder: (draggedId: string, before: boolean) => void
+  children: ReactNode
+}) {
+  const drop = useDropLine(SESSION_MIME, onReorder)
+  return (
+    <li
+      className={`group/row relative ${dropLine(drop.edge)}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(SESSION_MIME, id)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+      {...drop.handlers}
+    >
+      {children}
+    </li>
+  )
+}
+
+/** 놓일 자리 표시 — 얇은 선 하나면 충분하다 */
+function dropLine(edge: 'top' | 'bottom' | null): string {
+  if (!edge) return ''
+  return edge === 'top' ? 'border-t border-t-ash' : 'border-b border-b-ash'
+}
 
 /** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
 export function Sidebar() {
@@ -53,13 +127,32 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const [confirming, setConfirming] = useState<string | null>(null)
   const deleteSession = useStore((s) => s.deleteSession)
   const focusProject = useStore((s) => s.focusProject)
+  const reorderProjects = useStore((s) => s.reorderProjects)
+  const reorderSessions = useStore((s) => s.reorderSessions)
   const selected = useStore((s) => s.focusedProjectId === projectId && !s.focusedSessionId)
 
   if (!project) return null
 
+  const drop = useDropLine(PROJECT_MIME, (draggedId, before) => {
+    const ids = Object.keys(useStore.getState().projects)
+    void reorderProjects(moveTo(ids, draggedId, projectId, before))
+  })
+
   return (
-    <section className="border-b border-edge/70 py-2.5" data-testid={`project-${project.name}`}>
-      <header className="group flex items-baseline gap-2 px-3">
+    <section
+      className={`border-b border-edge/70 py-2.5 ${dropLine(drop.edge)}`}
+      data-testid={`project-${project.name}`}
+      {...drop.handlers}
+    >
+      {/* 이름 줄을 잡아서 옮긴다 — 섹션 전체를 draggable로 두면 세션 끌기와 겹친다 */}
+      <header
+        className="group flex items-baseline gap-2 px-3"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(PROJECT_MIME, projectId)
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+      >
         {/*
           프로젝트 이름을 누르면 깃·파일·터미널을 볼 수 있다 (세션을 고르지 않아도).
           브랜치·변경 수·동시 세션 같은 배경 정보는 **이름 아래에 줄을 만들지 않는다** —
@@ -107,7 +200,13 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           const unread = s.lastSeq > s.lastReadSeq
           const focused = focusedSessionId === s.id
           return (
-            <li key={s.id} className="group/row relative">
+            <SessionRow
+              key={s.id}
+              id={s.id}
+              onReorder={(draggedId, before) =>
+                void reorderSessions(projectId, moveTo(sessions.map((x) => x.id), draggedId, s.id, before))
+              }
+            >
               <button
                 onClick={() => focusSession(s.id)}
                 data-testid={`session-row-${s.id}`}
@@ -153,7 +252,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                   <CloseIcon size={13} />
                 </IconButton>
               </span>
-            </li>
+            </SessionRow>
           )
         })}
       </ul>
