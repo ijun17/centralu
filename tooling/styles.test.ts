@@ -176,29 +176,40 @@ describe('Tauri 권한', () => {
   })
 
   /**
-   * 상단 바 높이와 신호등 위치는 **같이 움직여야 한다.**
+   * 상단 바 높이는 **세 곳**에 같은 값으로 있어야 한다.
    *
-   * 처음엔 바를 타이틀바 높이(28px)로 줄여 맞췄는데 너무 얇아졌다. 이제는 반대로
-   * 바 높이를 정하고 `trafficLightPosition`으로 버튼을 거기에 맞춘다 —
-   * 화면이 요구하는 높이를 창 장식이 정하게 두지 않는다.
+   *   1. App.tsx의 h-* (화면이 실제로 그리는 높이)
+   *   2. tauri.conf.json의 trafficLightPosition.y (첫 프레임 전의 위치)
+   *   3. traffic_lights.rs의 HEADER_H (그 뒤로 계속 잡아주는 값)
    *
-   * 한쪽만 고치면 아무 오류 없이 그냥 어긋나 보인다(실제로 그렇게 어긋났다).
-   * E2E는 브라우저라 신호등을 볼 수 없으므로 여기서 관계를 검사한다.
+   * 셋이 필요한 이유는 macOS 26부터 창 관리자가 리사이즈와 동기적으로 버튼 위치를
+   * 확정하지 않기 때문이다 — 설정만으로는 창이 뜨면서 기본 자리로 되돌아간다.
+   * 그래서 설정은 첫 프레임을 맡고, Rust가 그 뒤를 맡는다.
+   *
+   * 하나만 고치면 아무 오류 없이 그냥 어긋나 보인다(실제로 그렇게 어긋났다).
+   * E2E는 브라우저라 신호등을 볼 수 없으므로 여기서 세 값을 맞춰 본다.
    */
-  it('신호등 위치가 상단 바 높이의 가운데다', () => {
+  it('상단 바 높이가 설정·Rust·화면에서 모두 같다', () => {
+    const header = readFileSync(join(ROOT, 'packages/ui/src/app/App.tsx'), 'utf8')
+    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-edge bg-pit/.exec(header)
+    expect(m, '상단 바의 h-* 클래스를 찾지 못했다').toBeTruthy()
+    const barPx = Number(m![1]) * 4 // tailwind h-9 = 36px
+    const BUTTON = 12 // macOS 신호등 지름
+
     const conf = JSON.parse(
       readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
     ) as { app: { windows: { trafficLightPosition?: { x: number; y: number } }[] } }
     const pos = conf.app.windows[0]!.trafficLightPosition
-    expect(pos, 'trafficLightPosition이 없으면 macOS 기본값으로 돌아가 어긋난다').toBeTruthy()
-
-    const header = readFileSync(join(ROOT, 'packages/ui/src/app/App.tsx'), 'utf8')
-    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-edge bg-pit/.exec(header)
-    expect(m, '상단 바의 h-* 클래스를 찾지 못했다').toBeTruthy()
-
-    const barPx = Number(m![1]) * 4 // tailwind h-9 = 36px
-    const BUTTON = 12 // macOS 신호등 지름
+    expect(pos, 'trafficLightPosition이 없으면 첫 프레임이 기본 자리에서 시작한다').toBeTruthy()
     expect(pos!.y).toBe((barPx - BUTTON) / 2)
+
+    const rust = readFileSync(join(ROOT, 'apps/desktop/src-tauri/src/traffic_lights.rs'), 'utf8')
+    const h = /const HEADER_H: f64 = ([\d.]+);/.exec(rust)
+    expect(h, 'traffic_lights.rs의 HEADER_H를 찾지 못했다').toBeTruthy()
+    expect(Number(h![1])).toBe(barPx)
+
+    const x = /const INSET_X: f64 = ([\d.]+);/.exec(rust)
+    expect(Number(x![1]), '설정과 Rust의 x가 다르면 첫 프레임에서 옆으로 튄다').toBe(pos!.x)
   })
 
   it('웹뷰가 OS 드롭을 가로채지 않는다 (파일 첨부가 죽는다)', () => {

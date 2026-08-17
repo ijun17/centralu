@@ -59,6 +59,9 @@ fn focus_window(app: AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(target_os = "macos")]
+mod traffic_lights;
+
 pub fn run() {
     let supervisor = Supervisor::new();
 
@@ -79,6 +82,8 @@ pub fn run() {
             let sup = supervisor.clone();
             move |app| {
                 sup.start(app.handle().clone());
+                #[cfg(target_os = "macos")]
+                traffic_lights::install(app.handle());
                 Ok(())
             }
         })

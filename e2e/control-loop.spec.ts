@@ -2111,6 +2111,16 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   const stream = page.getByTestId('chat-stream')
 
   /*
+    **먼저 자리를 잡을 때까지 기다린다.** 보낸 직후에는 아직 바닥으로 내려가는 중이라,
+    그 전에 맨 위로 올리면 뒤늦게 도착한 자동 스크롤이 우리를 다시 바닥으로 데려간다 —
+    그러면 "맨 위인데 왜 붙어 있냐"로 보이지만 사실은 맨 위가 아니었다.
+    (전체 스위트에서 간헐적으로 그렇게 실패했다.)
+  */
+  await expect
+    .poll(async () => stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+    .toBeLessThan(80)
+
+  /*
     맨 위에서는 붙일 것이 없다 (내 메시지가 아직 화면 위로 지나가지 않았다).
 
     **기다렸다가 본다.** 가상 스크롤은 줄 높이를 다음 프레임에 재고, 그 측정이
