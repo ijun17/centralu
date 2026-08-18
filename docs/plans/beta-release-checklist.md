@@ -92,7 +92,10 @@ GitHub Releases (.dmg)        ← 원본. 여기서 시작한다
 - [ ] `codex` CLI 설치 + 로그인 (codex 세션을 쓸 경우)
 - [x] Node가 없을 때 **앱이 뭐라고 말하는지** — 무엇이 없는지·어디를 찾아봤는지·무엇을
       하면 되는지를 기동 화면에 적는다. 낡은 버전은 "없음"이 아니라 "올려야 함"으로 갈린다
-- [ ] claude·codex가 없을 때의 문구는 아직 확인 안 함
+- [x] claude·codex가 없을 때의 문구 — 첫 실행 화면에 무엇이 없는지와 설치 명령
+      (`npm i -g @anthropic-ai/claude-code` / `@openai/codex`)이 함께 뜨고, "Check again"으로
+      다시 본다. 도구가 하나도 없어도 **프로젝트 등록은 열어 둔다**
+      (없는 CLI를 이유로 첫 화면을 막지 않는다)
 
 > Node 의존은 배포에서 가장 큰 마찰이다. 장기적으로는 Node를 동봉하는 편이 낫다(SEA 등).
 > 찾기 자체는 고쳤다 — 예전에는 homebrew 두 곳과 `/usr/bin`만 봐서 **nvm·mise·volta로
