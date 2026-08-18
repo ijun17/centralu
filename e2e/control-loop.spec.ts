@@ -3199,3 +3199,88 @@ test('오갔다고 해서 지난 완료가 다시 불지 않는다', async ({ pa
   await swap(1) // 돌아왔다. 그 사이 끝난 것은 없다
   expect(await blew(page, 300)).toBe(false)
 })
+
+/**
+ * 에이전트가 내민 선택지 (AskUserQuestion).
+ *
+ * 표시만 되고 답이 안 가면 반쪽이다 — 승인 카드가 정확히 그래서 먹통이 됐다.
+ * 그래서 매번 **답이 세션까지 갔는지**까지 본다.
+ */
+const QUESTIONS = [
+  {
+    question: '점심 뭐 먹을까?',
+    header: '점심',
+    options: [
+      { label: '김밥', description: '빠르다' },
+      { label: '라면', description: '따뜻하다' },
+    ],
+    multiSelect: false,
+  },
+  {
+    question: '음료는?',
+    header: '음료',
+    options: [
+      { label: '물', description: '무난하다' },
+      { label: '커피', description: '깨어난다' },
+    ],
+    multiSelect: false,
+  },
+]
+
+test('선택지를 눌러 답하면 그 답이 세션으로 간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+
+  await expect(page.getByTestId('question-card')).toBeVisible()
+  // 설명이 판단 근거다 — 잘리면 이 기능이 죽는다 (실제로 그래서 못 썼다)
+  await expect(page.getByTestId('question-card')).toContainText('따뜻하다')
+
+  await page.getByTestId('question-option').filter({ hasText: '라면' }).click()
+  await page.getByTestId('question-submit').click()
+
+  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 라면')
+  await expect(page.getByTestId('question-card')).toHaveCount(0)
+})
+
+test('질문이 여러 개면 다 답해야 보낼 수 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: QUESTIONS })
+
+  // 반만 보내면 모델이 나머지를 지어낸다 — 그래서 다 고르기 전엔 잠가 둔다
+  await page.getByTestId('question-option').filter({ hasText: '김밥' }).click()
+  await expect(page.getByTestId('question-submit')).toBeDisabled()
+
+  await page.getByTestId('question-option').filter({ hasText: '커피' }).click()
+  await expect(page.getByTestId('question-submit')).toBeEnabled()
+  await page.getByTestId('question-submit').click()
+
+  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 김밥 | 커피')
+})
+
+/*
+ * 도구 스키마가 못 박아 둔 것: "There should be no 'Other' option, that will be
+ * provided automatically." 그 자리는 화면이 만들어 주기로 되어 있다.
+ * 없으면 사람은 내민 둘 중 하나로만 답할 수 있어 셋째 답이 있을 때 할 말이 없어진다.
+ */
+test('기타를 골라 직접 쓴 답도 그대로 간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+
+  await page.getByTestId('question-other').click()
+  await page.getByTestId('question-other-input').fill('둘 다 말고 국수')
+  await page.getByTestId('question-submit').click()
+
+  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 둘 다 말고 국수')
+})
+
+test('기타를 골라 놓고 비워 두면 보낼 수 없다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+
+  await page.getByTestId('question-other').click()
+  await expect(page.getByTestId('question-submit')).toBeDisabled()
+})

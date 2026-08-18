@@ -272,8 +272,15 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
       this.emit({ type: 'turn_complete', sessionId })
     },
-    answerQuestion: async (sessionId: string, requestId: string, _answers: QuestionAnswer[]) => {
+    answerQuestion: async (sessionId: string, requestId: string, answers: QuestionAnswer[]) => {
       this.emit({ type: 'question_resolved', sessionId, requestId })
+      // 무엇이 돌아갔는지 화면에서 확인할 수 있어야 한다 (표시만 되고 답이 안 가면 반쪽이다)
+      this.emit({
+        type: 'message_delta',
+        sessionId,
+        role: 'assistant',
+        text: `답 받음: ${answers.map((a) => a.answers.join('+')).join(' | ')}`,
+      })
       this.emit({ type: 'turn_complete', sessionId })
     },
     reorderSessions: async (projectId: string, orderedIds: string[]) => {

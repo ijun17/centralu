@@ -23,6 +23,16 @@ export function QuestionCard({
 }) {
   const answer = useStore((s) => s.answerQuestion)
   const [picked, setPicked] = useState<Record<number, string[]>>({})
+  /*
+   * **직접 입력.**
+   *
+   * 도구의 스키마가 못을 박아 둔다: "There should be no 'Other' option, that will be
+   * provided automatically." 즉 그 자리는 **화면이 만들어 주기로 되어 있는 것**이고,
+   * 우리가 우리 화면을 그리기로 한 이상 이것도 우리 몫이다. 없으면 사람은 내민 둘 중
+   * 하나로만 답할 수 있어서, 셋째 답이 있을 때 할 말이 없어진다.
+   */
+  const [otherOn, setOtherOn] = useState<Record<number, boolean>>({})
+  const [otherText, setOtherText] = useState<Record<number, string>>({})
   const [sending, setSending] = useState(false)
 
   const toggle = (qi: number, label: string, multi: boolean) => {
@@ -31,17 +41,30 @@ export function QuestionCard({
       if (!multi) return { ...p, [qi]: [label] }
       return { ...p, [qi]: cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label] }
     })
+    // 하나만 고르는 질문이면 직접 입력과 선택지는 서로를 밀어낸다
+    if (!multi) setOtherOn((o) => ({ ...o, [qi]: false }))
+  }
+
+  const toggleOther = (qi: number, multi: boolean) => {
+    setOtherOn((o) => ({ ...o, [qi]: !o[qi] }))
+    if (!multi) setPicked((p) => ({ ...p, [qi]: [] }))
+  }
+
+  /** 이 질문에 대해 실제로 보낼 답 (고른 것 + 직접 쓴 것) */
+  const answersFor = (qi: number): string[] => {
+    const typed = otherOn[qi] ? (otherText[qi] ?? '').trim() : ''
+    return [...(picked[qi] ?? []), ...(typed ? [typed] : [])]
   }
 
   // 모든 질문에 답해야 보낸다 — 반만 보내면 모델은 나머지를 지어낸다
-  const ready = questions.every((_, i) => (picked[i] ?? []).length > 0)
+  const ready = questions.every((_, i) => answersFor(i).length > 0)
 
   const submit = async () => {
     if (!ready || sending) return
     setSending(true)
     const answers: QuestionAnswer[] = questions.map((q, i) => ({
       question: q.question,
-      answers: picked[i] ?? [],
+      answers: answersFor(i),
     }))
     await answer(sessionId, requestId, answers)
     setSending(false)
@@ -67,6 +90,8 @@ export function QuestionCard({
                 <span className="shrink-0 rounded bg-edge px-1.5 py-px text-[10px] text-slate">{q.header}</span>
               )}
               <span className="text-[13px] leading-snug text-chalk">{q.question}</span>
+              {/* 여러 개 고를 수 있다는 것은 눌러보기 전에 알아야 한다 */}
+              {q.multiSelect && <span className="shrink-0 text-[10px] text-slate">여러 개 가능</span>}
             </div>
             <div className="flex flex-col gap-1">
               {q.options.map((o) => {
@@ -89,6 +114,30 @@ export function QuestionCard({
                   </button>
                 )
               })}
+
+              {/* 내민 것 말고 다른 답 — 도구가 화면에게 맡겨 둔 자리다 */}
+              <button
+                type="button"
+                data-testid="question-other"
+                onClick={() => toggleOther(qi, q.multiSelect)}
+                className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
+                  otherOn[qi] ? 'border-beacon bg-edge' : 'border-edge border-dashed hover:bg-edge/50'
+                }`}
+              >
+                <div className="text-[12px] text-slate">기타 — 직접 입력</div>
+              </button>
+
+              {otherOn[qi] && (
+                <textarea
+                  data-testid="question-other-input"
+                  autoFocus
+                  rows={2}
+                  value={otherText[qi] ?? ''}
+                  onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
+                  placeholder="답을 직접 적습니다"
+                  className="w-full resize-y rounded border border-edge bg-void px-2 py-1.5 text-[12px] text-chalk outline-none focus:border-beacon"
+                />
+              )}
             </div>
           </div>
         ))}
