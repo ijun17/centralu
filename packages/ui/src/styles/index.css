@@ -364,7 +364,7 @@
 @keyframes cc-gust {
   0% {
     opacity: 0;
-    transform: translate3d(-80%, 0, 0) skewX(-8deg);
+    transform: translate3d(-75%, 0, 0) skewX(-8deg);
   }
   25% {
     opacity: 0.2;
@@ -374,21 +374,31 @@
   }
   100% {
     opacity: 0;
-    transform: translate3d(180%, 0, 0) skewX(-8deg);
+    transform: translate3d(25%, 0, 0) skewX(-8deg);
   }
 }
 
 /*
- * 띠는 **화면보다 좁다.** 처음엔 화면 전체를 덮는 넓은 띠였는데, 시연해 보니
- * 지나가는 게 아니라 화면이 통째로 물들어 글자가 묻혔다 — 바람이 아니라 덧칠이었다.
- * 좁게 만들어 지나가게 하고, 밝기도 절반으로 눌렀다.
+ * 띠는 **화면보다 훨씬 넓고, 나가면서 끝나지 않는다.**
+ *
+ * 한때 좁았다 — 화면을 덮으면 글자가 묻힌다고 봤기 때문인데, 묻힌 원인은 넓이가 아니라
+ * 밝기였다(그때는 0.42였다). 그래서 밝기는 눌러 둔 채로 넓히기만 한다.
+ *
+ * 넓히는 것만으로는 부족했다. 실측해 보니 easing이 강한 ease-out이라 띠가 앞쪽에서
+ * 거의 다 지나가 버린다 — 화면을 다 덮는 것은 15% 지점 한순간뿐이고, 절반쯤에는
+ * 이미 35%만 남아 오른쪽 밖에서 사라졌다. **넓어졌는데도 화면 전체로는 안 보이는** 상태다.
+ *
+ * 그래서 끝나는 방식을 바꿨다. 밖으로 빠져나가며 끝나는 대신 **화면을 덮은 채로 잦아든다**:
+ * 끝 지점(25%)은 왼쪽 가장자리가 화면 왼쪽에 막 닿는 자리다. 밝기가 가장 센 구간
+ * (25~60%)에서 내내 화면을 가득 덮고, 사라지는 일은 이동이 아니라 불투명도가 한다.
+ * 움직임은 그대로 남으므로 여전히 바람이지, 켜졌다 꺼지는 판이 아니다.
  */
 .cc-gust {
   position: absolute;
   top: -20%;
   bottom: -20%;
-  left: -30%;
-  width: 70%;
+  left: -50%;
+  width: 200%;
   background: linear-gradient(
     100deg,
     transparent 0%,
@@ -399,7 +409,8 @@
     #4ad6d0 80%,
     transparent 100%
   );
-  filter: blur(40px);
+  /* 번짐도 퍼짐이다 — 띠 가장자리가 화면 끝까지 흐려져 경계가 보이지 않는다 */
+  filter: blur(80px);
   mix-blend-mode: screen;
   animation: cc-gust 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
@@ -411,7 +422,7 @@
 @media (prefers-reduced-motion: reduce) {
   .cc-gust {
     animation: cc-gust-still 420ms ease-out forwards;
-    /* 움직임을 걷으면 좁은 띠는 화면 한쪽에만 뜬다 — 그때는 전체를 아주 옅게 */
+    /* 움직임이 없으면 띠를 화면 밖까지 늘려 둘 이유가 없다 — 화면에 딱 맞춰 아주 옅게 */
     left: 0;
     width: 100%;
     transform: none;
