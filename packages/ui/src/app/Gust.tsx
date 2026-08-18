@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/store.js'
-import { isOnScreen } from './onscreen.js'
 
 /** 바람이 지나가는 시간 (CSS의 cc-gust와 같아야 한다 — 끝나면 DOM에서 걷는다) */
 const GUST_MS = 1100
@@ -16,24 +15,25 @@ const GUST_MS = 1100
  * 남아 있으면 언젠가 무언가를 가린다.
  */
 export function Gust() {
-  const completion = useStore((s) => s.completion)
-  const view = useStore((s) => s.view)
-  const focusedSessionId = useStore((s) => s.focusedSessionId)
-  const orchestratorId = useStore((s) => s.orchestratorId)
-  const gridPanels = useStore((s) => s.gridPanels)
+  /*
+   * **끝난 시각 하나만 본다.**
+   *
+   * "보이는가"는 여기서 따지지 않는다 — 완료가 일어난 그 순간에 스토어가 이미 판정했다.
+   * 여기서 또 곱하면 세션을 옮겨 보이게 되는 순간에도 답이 참이 되어, 새로 끝난 것이
+   * 없는데 바람이 분다. 화면 상태를 의존성에 두지 않는 것이 이 컴포넌트의 요점이다.
+   */
+  const at = useStore((s) => s.completion?.at ?? null)
   const [blowing, setBlowing] = useState<number | null>(null)
-
-  const at = completion?.at ?? null
-  const shows =
-    completion !== null &&
-    isOnScreen(view, completion.sessionId, { focusedSessionId, orchestratorId, gridPanels })
+  /** 이미 분 시각은 다시 불지 않는다 — 사건 하나에 바람 하나 */
+  const blown = useRef<number | null>(null)
 
   useEffect(() => {
-    if (!shows || at === null) return
+    if (at === null || blown.current === at) return
+    blown.current = at
     setBlowing(at)
     const t = setTimeout(() => setBlowing(null), GUST_MS)
     return () => clearTimeout(t)
-  }, [at, shows])
+  }, [at])
 
   if (blowing === null) return null
   return (

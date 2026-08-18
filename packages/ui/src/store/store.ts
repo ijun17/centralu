@@ -17,6 +17,7 @@ import {
   type SessionSummary,
 } from '@cc/core'
 import type { ConnectionState, Platform } from '@cc/platform/ports'
+import { isOnScreen } from '../app/onscreen.js'
 
 /**
  * 스토어는 배선만 한다 — 상태 변경 로직은 전부 core (docs/state-management.md §2).
@@ -443,10 +444,28 @@ export const useStore = create<AppState>((set, get) => ({
 
     /*
      * 응답이 끝났다 — 화면을 한 번 쓸고 갈 바람의 방아쇠.
-     * 시각을 함께 담는 이유: 같은 세션이 연달아 끝나도 매번 불어야 한다.
-     * 실제로 불지 말지는 화면이 정한다 (보이지 않는 세션이면 불지 않는다).
+     *
+     * **보이는지를 지금 판정한다.** 예전에는 사실만 담아 두고 "보이는가"는 화면이
+     * 나중에 곱했는데, 그러면 두 시점이 어긋난다: 세션을 옮겨 그 세션이 보이게 되는
+     * 순간에도 곱셈의 답이 참이 되어 **새로 끝난 것이 없는데 바람이 불었다**
+     * (도그푸딩: "세션 창 이동할 때도 막 나고"). 게다가 이 값을 지우지 않으므로
+     * 오갈 때마다 몇 번이고 되풀이됐다.
+     *
+     * 사건이 일어난 그 순간에 한 번 판정하면 어긋날 자리가 없다.
+     * 시각을 함께 담는 이유는 같은 세션이 연달아 끝나도 매번 불어야 해서다.
+     *
+     * 화면 밖에서 끝난 것은 담지 않는다 — 그건 뱃지와 알림의 몫이다.
      */
-    if (e.type === 'turn_complete') set({ completion: { sessionId, at: Date.now() } })
+    if (e.type === 'turn_complete') {
+      const s = get()
+      if (isOnScreen(s.view, sessionId, {
+        focusedSessionId: s.focusedSessionId,
+        orchestratorId: s.orchestratorId,
+        gridPanels: s.gridPanels,
+      })) {
+        set({ completion: { sessionId, at: Date.now() } })
+      }
+    }
 
     // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
     if (e.type === 'session_deleted') {

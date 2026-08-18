@@ -3147,7 +3147,6 @@ test('화면 밖 세션이 끝나면 불지 않는다 — 그건 알림의 몫�
  * 바람이 분다 — 바람은 '끝났다'는 사건이 아니라 '끝나 있다'는 값에 걸려 있다.
  */
 test('이미 끝나 있던 세션으로 옮겨 가도 바람이 불지 않는다', async ({ page }) => {
-  test.fail() // 알려진 버그 — 아직 안 고쳤다. 고치면 이 표시를 뗀다
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다
@@ -3161,10 +3160,11 @@ test('이미 끝나 있던 세션으로 옮겨 가도 바람이 불지 않는다
     const store = (window as never as { __store: { getState(): Record<string, never> } }).__store
     const st = store.getState() as unknown as {
       sessions: Record<string, { id: string }>
-      completion: { sessionId: string } | null
+      focusedSessionId: string
       focusSession(id: string): void
     }
-    const target = st.completion!.sessionId // 아까 끝난 그 세션
+    // 아까 끝난 그 세션 = 지금 보고 있지 않은 쪽
+    const target = Object.values(st.sessions).find((x) => x.id !== st.focusedSessionId)!.id
     st.focusSession(target)
     const after = (store.getState() as unknown as { focusedSessionId: string }).focusedSessionId
     return { target, after }
@@ -3179,7 +3179,6 @@ test('이미 끝나 있던 세션으로 옮겨 가도 바람이 불지 않는다
  * 그리고 한 번 끝난 것으로 **몇 번이고** 분다 — 오갈 때마다 다시 분다.
  */
 test('오갔다고 해서 지난 완료가 다시 불지 않는다', async ({ page }) => {
-  test.fail() // 알려진 버그 — 오갈 때마다 몇 번이고 분다
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
