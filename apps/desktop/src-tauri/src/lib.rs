@@ -64,14 +64,15 @@ fn alert(app: AppHandle, kind: String, sound: bool) {
         // 소리를 구분하는 것은 취향이 아니라 기능이다 — 옆방에서도 무슨 일인지 알 수 있다.
         play_sound(match kind.as_str() {
             "error" => "Basso",     // macOS가 예부터 "잘못됐다"에 쓰는 소리
-            "all_done" => "Glass",  // 끝났다
+            "done" => "Tink",       // 하나 끝났다 — 가볍게
+            "all_done" => "Glass",  // 다 끝났다
             _ => "Submarine",       // 기다리는 중 (승인)
         });
     }
     let Some(window) = app.get_webview_window("main") else { return };
     // 승인·오류는 사람이 와야 풀린다 → 올 때까지 튄다.
-    // "전부 완료"는 알려만 주면 되므로 한 번만 튄다.
-    let attention = if kind == "all_done" {
+    // 완료는 알려만 주면 되므로 한 번만 튄다 — 끝난 일로 계속 부르면 그건 재촉이다.
+    let attention = if kind == "done" || kind == "all_done" {
         tauri::UserAttentionType::Informational
     } else {
         tauri::UserAttentionType::Critical

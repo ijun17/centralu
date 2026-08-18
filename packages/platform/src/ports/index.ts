@@ -135,7 +135,7 @@ export interface FsPort {
 }
 
 /** 무엇 때문에 부르는지 — 소리와 독 튀김의 세기가 여기서 갈린다 */
-export type AlertKind = 'approval' | 'error' | 'all_done'
+export type AlertKind = 'approval' | 'error' | 'done' | 'all_done'
 
 export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
 export type FsFile = { text: string; truncated: boolean; binary: boolean; bytes: number }

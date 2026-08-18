@@ -12,6 +12,14 @@ export type NotifyPolicy = {
   approval: boolean
   /** 오류 발생 시 즉시 알림 */
   error: boolean
+  /**
+   * 세션 하나가 **보이지 않는 곳에서** 응답을 마쳤을 때.
+   *
+   * 원래는 "전부 끝났을 때 한 번"만 울렸다. 그런데 화면 밖 완료마다 카드가 남게 되면서
+   * 어긋났다 — 카드는 매번 쌓이는데 소리는 마지막에만 나서, 자리를 비운 사이 둘이 끝나면
+   * 카드 두 장이 조용히 쌓여 있었다. 카드와 소리는 같은 사건이므로 함께 간다.
+   */
+  done: boolean
   /** 모든 세션이 일을 마쳤을 때 1회 */
   allDone: boolean
   /** 앱이 포그라운드일 때도 알릴지 (기본: 안 알림 — 눈앞에 있는데 알림은 소음) */
@@ -28,6 +36,7 @@ export type NotifyPolicy = {
 export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
   approval: true,
   error: true,
+  done: true,
   allDone: true,
   whenFocused: false,
   sound: true,

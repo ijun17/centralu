@@ -82,6 +82,7 @@ export function Settings() {
                 [
                   ['approval', 'Awaiting approval — when an agent is blocked'],
                   ['error', 'Error'],
+                  ['done', 'A session finishes out of sight'],
                   ['allDone', 'Once when every session finishes'],
                   ['whenFocused', 'Notify even when the app is focused'],
                   ['sound', 'Play a sound — the one signal that reaches the next room'],

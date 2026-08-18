@@ -17,6 +17,7 @@ export function Notices() {
   const dismiss = useStore((s) => s.dismissNotices)
   const focusSession = useStore((s) => s.focusSession)
   const view = useStore((s) => s.view)
+  const appFocused = useStore((s) => s.appFocused)
   const focusedSessionId = useStore((s) => s.focusedSessionId)
   const orchestratorId = useStore((s) => s.orchestratorId)
   const gridPanels = useStore((s) => s.gridPanels)
@@ -27,14 +28,20 @@ export function Notices() {
    * 판정을 **여기 한 곳**에 둔다. 세션을 고를 때, 그리드에 올릴 때, 오케스트레이터를 열 때마다
    * 지우는 코드를 따로 두면 언젠가 한 경로를 빠뜨리고, 그때부터 안 지워지는 카드가 생긴다.
    * 어떤 경로로 보게 됐든 "지금 보이는가" 하나만 물으면 빠질 자리가 없다.
+   *
+   * **앱이 앞에 있는지도 함께 본다.** 만드는 쪽과 걷는 쪽이 같은 기준을 써야 한다 —
+   * 앱이 뒤에 있는데 걷어 버리면, 자리를 비운 사이 온 카드가 돌아오기도 전에 사라진다.
+   * 그러면 정확히 필요한 경우에만 못 보는 카드가 된다. 돌아오는 순간 이 효과가 다시 돌면서
+   * 그때 걷힌다.
    */
   useEffect(() => {
+    if (!appFocused) return
     dismiss(
       notices
         .filter((n) => isOnScreen(view, n.sessionId, { focusedSessionId, orchestratorId, gridPanels }))
         .map((n) => n.sessionId),
     )
-  }, [notices, view, focusedSessionId, orchestratorId, gridPanels, dismiss])
+  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridPanels, dismiss])
 
   if (notices.length === 0) return null
 

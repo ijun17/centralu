@@ -3149,6 +3149,58 @@ test('화면 밖 세션이 끝나면 불지 않는다 — 그건 카드의 몫�
  * macOS에서는 배너 경로 자체가 죽어 있기까지 하다 (플러그인이 2018년에 deprecated된
  * NSUserNotification을 탄다). 그래서 이 카드가 본진이고, 남는 것이 요점이다.
  */
+/*
+ * 도그푸딩 신고: "지금 카드도 안 보여."
+ *
+ * "보인다"의 판정이 **앱 자체를 보지 않았다.** isOnScreen은 어느 세션이 UI에 떠 있는지만
+ * 보므로 앱이 다른 창 뒤에 있어도 참이었다. 그래서 자리를 비운 사이 보고 있던 세션이
+ * 끝나면 바람이 빈 방에서 불고 카드는 만들어지지 않았다 — 알림이 가장 필요한 그 경우에
+ * 정확히 아무 일도 일어나지 않았다.
+ */
+test('앱이 뒤에 있으면 보고 있던 세션이 끝나도 카드가 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work') // 이 세션을 보고 있다
+
+  // 다른 앱으로 넘어간다
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+
+  // 보고 있는 창이 아니므로 바람은 아무도 못 본다 → 남는 신호여야 한다
+  expect(await blew(page)).toBe(false)
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+
+  // 돌아오면 그때 보게 되는 것이므로 걷힌다
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+})
+
+test('자리를 비운 사이 끝나면 소리로도 부른다 — 전부 끝나기를 기다리지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await emitEvent(page, 0, { type: 'turn_complete' })
+
+  await expect
+    .poll(() => page.evaluate(() => (window as never as { __mock: { alerts: { kind: string }[] } }).__mock.alerts))
+    .toEqual([{ kind: 'done', sound: true }])
+})
+
+test('눈앞에 있으면 카드만 남고 소리는 나지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다 → first는 화면 밖
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+
+  // 못 봤으니 카드는 남는다. 그러나 눈앞에 있는 사람을 소리로 부르는 건 소음이다.
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await page.waitForTimeout(300)
+  expect(await page.evaluate(() => (window as never as { __mock: { alerts: unknown[] } }).__mock.alerts.length)).toBe(0)
+})
+
 test('카드는 시간이 지나도 스스로 사라지지 않는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')

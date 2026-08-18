@@ -534,6 +534,9 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
+    /** 이 이벤트로 이미 사람을 불렀나 — 같은 순간에 두 번 울리지 않기 위한 표시 */
+    let announced = false
+
     /*
      * 응답이 끝났다 — 화면을 한 번 쓸고 갈 바람의 방아쇠.
      *
@@ -551,15 +554,36 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'turn_complete') {
       const s = get()
-      const onScreen = isOnScreen(s.view, sessionId, {
-        focusedSessionId: s.focusedSessionId,
-        orchestratorId: s.orchestratorId,
-        gridPanels: s.gridPanels,
-      })
-      if (onScreen) {
+      /*
+       * **본다 = 앱이 앞에 있고 + 그 세션이 화면에 있고.**
+       *
+       * 앞엣것을 빠뜨렸었다. `isOnScreen`은 어느 세션이 UI에 떠 있는지만 보므로 앱이
+       * 다른 창 뒤에 있어도 참이었다 — 그런데 자리를 비우면 앱이 통째로 안 보인다.
+       * 그래서 바람은 빈 방에서 불고, 정작 자리 비움을 위해 만든 카드는 만들어지지
+       * 않았다. 알림이 가장 필요한 경우에 정확히 아무 일도 일어나지 않은 셈이다.
+       */
+      const seen =
+        s.appFocused &&
+        isOnScreen(s.view, sessionId, {
+          focusedSessionId: s.focusedSessionId,
+          orchestratorId: s.orchestratorId,
+          gridPanels: s.gridPanels,
+        })
+      if (seen) {
         set({ completion: { sessionId, at: Date.now() } })
       } else {
         pushNotice(set, { sessionId, kind: 'done', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
+        /*
+         * 카드와 소리는 함께 간다. 카드만 쌓이고 소리가 없으면 "카드가 떴는데 왜 안
+         * 불렀지"가 되고, 자리를 비운 사람에게 카드는 돌아와야 보이는 것이라 반쪽이다.
+         * 소리는 다른 알림과 같은 정책을 탄다 — 눈앞에 있으면 조용히 카드만 남긴다.
+         */
+        if (s.notifyPolicy.done && (!s.appFocused || s.notifyPolicy.whenFocused)) {
+          announced = true
+          void s.platform?.system
+            .alert('done', s.notifyPolicy.sound)
+            .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
+        }
       }
     }
 
@@ -609,7 +633,8 @@ export const useStore = create<AppState>((set, get) => ({
       const one = notificationFor({ id: sessionId, name: withSeq.name, state: withSeq.state }, cur.state, ctx)
       const all = allDoneNotification(after, before, ctx)
       // 개별 알림이 있으면 그것만 — 같은 순간에 두 번 울리지 않는다
-      const notice = one ?? all
+      // 개별 완료로 이미 울렸으면 "전부 완료"는 겹쳐 울리지 않는다 — 같은 순간에 두 번은 소음이다
+      const notice = one ?? (announced ? null : all)
       if (notice) {
         // 배너는 되면 좋은 것으로 내려갔다 (macOS에서 이 경로는 죽어 있다).
         // 못 보냈으면 화면에 남긴다 — 조용히 사라지면 "알림이 안 온다"를 밝혀낼 수 없다.
