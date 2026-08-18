@@ -77,11 +77,31 @@ function parseQuestions(input: unknown): Question[] {
   return out
 }
 
-const PRESET_MODE = {
-  safe: 'default',
-  normal: 'default',
-  auto: 'bypassPermissions',
-} as const
+/**
+ * 프리셋 → SDK 권한 옵션.
+ *
+ * **normal은 값을 보내지 않는다.** 이 앱은 사용자 설정·훅·CLAUDE.md를 전부 로드하면서
+ * (settingSources 미지정) 권한만 조용히 덮어쓰고 있었다. 워크플로우를 강제하지 않는다는
+ * 원칙과 어긋나는 자리는 거기였다.
+ *
+ * 그런데 **그냥 빼면 안 된다.** 실측(probe-perm2.mts):
+ *
+ *   permissionMode:'default'                 우리 콜백 불림   (설정 무시)
+ *   permissionMode:'bypassPermissions'       안 불림
+ *   아무것도 안 보냄                          우리 콜백 불림   ← 설정 여전히 무시!
+ *   안 보냄 + resolvePermissionModeInCli      안 불림          ← 설정이 살아났다
+ *
+ * 안 보내도 SDK가 'default'로 굳힌다. 그래서 **아무것도 안 바꾸면서 바꾼 줄 알게 되는**
+ * 변경이 될 뻔했다. CLI에게 해석을 넘기라고 명시해야 비로소 설정이 산다.
+ *
+ * 이 값으로 세 프리셋의 뜻이 처음으로 서로 달라진다 —
+ * 전에는 safe와 normal이 글자 그대로 같은 동작이었다.
+ */
+function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string, unknown> {
+  if (preset === 'auto') return { permissionMode: 'bypassPermissions' } // 무조건 통과
+  if (preset === 'safe') return { permissionMode: 'default' } // 내 설정과 무관하게 항상 묻는다
+  return { resolvePermissionModeInCli: true } // 내 설정을 따른다
+}
 
 class ClaudeSession implements SessionHandle {
   externalId: string | null = null
@@ -176,7 +196,7 @@ class ClaudeSession implements SessionHandle {
                 : {}),
             }
           : {}),
-        permissionMode: PRESET_MODE[preset],
+        ...permissionOptionsFor(preset),
         resume: this.opts.resumeExternalId,
         // allowedTools는 절대 설정하지 않는다 (M0: canUseTool 셰도잉)
         canUseTool:

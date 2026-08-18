@@ -25,11 +25,21 @@ const exec = promisify(execFile)
  * 규칙: Codex 타입은 여기서 끝난다 — 밖으로 나가는 것은 NormalizedEvent뿐.
  */
 
-/** 권한 프리셋 → Codex approvalPolicy. 전역 설정(`~/.codex/config.toml`)을 세션 단위로 덮어쓴다 */
-function approvalPolicyFor(preset: PermissionPreset): string {
-  if (preset === 'safe') return 'untrusted' // 모든 것을 묻는다
-  if (preset === 'auto') return 'never' // 묻지 않는다
-  return 'on-request' // 기본: 도구가 필요하다고 판단할 때만
+/**
+ * 권한 프리셋 → Codex의 권한 옵션.
+ *
+ * Claude 쪽과 **같은 원칙**이다: normal은 우리가 정하지 않고 도구 자신의 설정
+ * (`~/.codex/config.toml`)을 따른다. 그래서 아무 키도 넣지 않는다 — codex는 빠진 값을
+ * 자기 설정에서 채운다.
+ *
+ * 덮어쓰던 것이 둘이었다는 점이 중요하다. approvalPolicy만이 아니라 **sandbox도**
+ * 'workspace-write'로 못박고 있었다. 사용자가 config.toml에 danger-full-access를
+ * 적어 두었어도 작업 폴더 밖은 막혀 있었다는 뜻이다 — 묻지도 않고 실패한다.
+ */
+function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown> {
+  if (preset === 'safe') return { approvalPolicy: 'untrusted', sandbox: 'workspace-write' } // 모든 것을 묻는다
+  if (preset === 'auto') return { approvalPolicy: 'never', sandbox: 'workspace-write' } // 묻지 않는다
+  return {} // 내 설정을 따른다
 }
 
 class CodexSession implements SessionHandle {
@@ -95,8 +105,7 @@ class CodexSession implements SessionHandle {
     } else {
       const res = await this.client.request<Record<string, unknown>>('thread/start', {
         cwd: this.opts.cwd,
-        approvalPolicy: approvalPolicyFor(this.opts.permissionPreset),
-        sandbox: 'workspace-write',
+        ...permissionOptionsFor(this.opts.permissionPreset),
         model: this.opts.model,
         /*
          * 오케스트레이터일 때만 붙는 둘.
