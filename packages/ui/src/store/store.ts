@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
+import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, QuestionAnswer, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
 import {
   allDoneNotification,
   applyEvent,
@@ -206,6 +206,7 @@ export type AppState = {
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
   attachFile(sessionId: string, file: File): Promise<Attachment | null>
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
+  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
   archive(sessionId: string, archived?: boolean): Promise<void>
@@ -853,6 +854,15 @@ export const useStore = create<AppState>((set, get) => ({
       await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
     } catch (e) {
       set({ toast: (e as Error).message || '승인을 전달하지 못했습니다' })
+    }
+  },
+
+  /** 선택지에 답한다 — 답은 그 도구의 결과로 모델에게 간다 */
+  async answerQuestion(sessionId, requestId, answers) {
+    try {
+      await get().platform!.agents.answerQuestion(sessionId, requestId, answers)
+    } catch (e) {
+      set({ toast: (e as Error).message || '답을 전달하지 못했습니다' })
     }
   },
 

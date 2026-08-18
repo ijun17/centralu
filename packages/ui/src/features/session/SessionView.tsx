@@ -6,6 +6,7 @@ import { shouldMarkRead, type SessionSummary } from '@cc/core'
 import { EMPTY_DRAFT, useStore, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
+import { QuestionCard } from '../approval/QuestionCard.jsx'
 import { ChevronIcon, CloseIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
@@ -298,6 +299,7 @@ export function SessionPane({
         scrollRef={scrollRef}
         chat={chat}
         pending={session.pendingApproval}
+        questions={session.pendingQuestions}
         sessionId={session.id}
         working={session.state === 'working'}
         activity={session.activity}
@@ -507,6 +509,7 @@ function ChatStream({
   scrollRef,
   chat,
   pending,
+  questions,
   sessionId,
   working,
   activity,
@@ -514,6 +517,7 @@ function ChatStream({
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
   pending: SessionSummary['pendingApproval']
+  questions: SessionSummary['pendingQuestions']
   sessionId: string
   working: boolean
   activity: SessionSummary['activity']
@@ -674,6 +678,11 @@ function ChatStream({
       {pending && (
         <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
       )}
+
+      {/* 선택지는 여러 장이 겹칠 수 있다 — 하나만 그리면 나머지는 답할 길이 없다 */}
+      {questions.map((q) => (
+        <QuestionCard key={q.requestId} sessionId={sessionId} requestId={q.requestId} questions={q.questions} />
+      ))}
 
       {working && <ActivityRow sessionId={sessionId} activity={activity} />}
     </div>

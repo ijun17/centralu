@@ -19,6 +19,23 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'approval_request', sessionId: 's1', requestId: 'r2', detail: { kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r3', detail: { kind: 'other', raw: '{}' } },
   { type: 'approval_resolved', sessionId: 's1', requestId: 'r1', decision: 'allow' },
+  {
+    type: 'question_request',
+    sessionId: 's1',
+    requestId: 'q1',
+    questions: [
+      {
+        question: '점심 뭐 먹을까?',
+        header: '점심',
+        options: [
+          { label: '김밥', description: '빠르다' },
+          { label: '라면', description: '따뜻하다' },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+  { type: 'question_resolved', sessionId: 's1', requestId: 'q1' },
   { type: 'turn_complete', sessionId: 's1' },
   { type: 'state_change', sessionId: 's1', state: 'waiting_input' },
   { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.01 } },

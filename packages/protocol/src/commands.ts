@@ -12,6 +12,7 @@ import {
   GitFileStatus,
   ModelOption,
   PermissionPreset,
+  QuestionAnswer,
   SessionState,
   ToolName,
 } from './entities.js'
@@ -145,6 +146,20 @@ export const RpcMethods = {
       scope: ApprovalScope.optional(),
       /** '항상 허용'의 대상 패턴. core가 계산해 UI가 보낸다 */
       matcher: z.string().optional(),
+    }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 선택지에 답한다 (AskUserQuestion). 답은 그 도구의 결과로 모델에게 돌아간다.
+   *
+   * 승인과 나눠 둔 이유는 돌아가는 것이 다르기 때문이다 — 승인은 실행 여부고,
+   * 이건 **내용**이다. 질문이 여러 개면 답도 여러 개 온다.
+   */
+  'agents.answerQuestion': {
+    params: z.object({
+      sessionId: z.string(),
+      requestId: z.string(),
+      answers: z.array(QuestionAnswer),
     }),
     result: z.object({ ok: z.literal(true) }),
   },

@@ -14,7 +14,14 @@ type QueryHandle = AsyncIterable<unknown> &
   }
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, NormalizedEvent } from '@cc/protocol'
+import type {
+  AdapterCapabilities,
+  ApprovalDecision,
+  ApprovalScope,
+  NormalizedEvent,
+  Question,
+  QuestionAnswer,
+} from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
@@ -40,6 +47,36 @@ const exec = promisify(execFile)
 
 type PendingApproval = { resolve: (r: { behavior: 'allow'; updatedInput: unknown } | { behavior: 'deny'; message: string }) => void; input: unknown }
 
+/**
+ * AskUserQuestion의 인자 → 우리 Question[].
+ *
+ * SDK 타입을 믿지 않고 직접 읽는다 (경계 규칙). 형태가 어긋나면 빈 배열을 돌려
+ * **평소 경로로 흘려보낸다** — 반쯤 그린 선택지를 내미는 것보다 낫다.
+ */
+function parseQuestions(input: unknown): Question[] {
+  const raw = (input as { questions?: unknown })?.questions
+  if (!Array.isArray(raw)) return []
+  const out: Question[] = []
+  for (const q of raw) {
+    const o = (q ?? {}) as Record<string, unknown>
+    const opts = Array.isArray(o.options) ? o.options : []
+    const options = opts
+      .map((x) => {
+        const t = (x ?? {}) as Record<string, unknown>
+        return { label: String(t.label ?? ''), description: String(t.description ?? '') }
+      })
+      .filter((x) => x.label !== '')
+    if (typeof o.question !== 'string' || options.length === 0) continue
+    out.push({
+      question: o.question,
+      header: typeof o.header === 'string' ? o.header : '',
+      options,
+      multiSelect: o.multiSelect === true,
+    })
+  }
+  return out
+}
+
 const PRESET_MODE = {
   safe: 'default',
   normal: 'default',
@@ -51,6 +88,8 @@ class ClaudeSession implements SessionHandle {
   private queue: string[] = []
   private notify: (() => void) | null = null
   private closed = false
+  /** 답을 기다리는 선택지들. 승인과 달리 **여러 장이 동시에 떠 있을 수 있다** */
+  private questions = new Map<string, (r: unknown) => void>()
   private pending = new Map<string, PendingApproval>()
   /** 살아 있는 질의 — 슬래시 명령·컨텍스트를 물어보는 창구 */
   private query: QueryHandle | null = null
@@ -159,6 +198,30 @@ class ClaudeSession implements SessionHandle {
                 if (toolName.startsWith(`mcp__${ORCHESTRATOR_MCP_NAME}__`)) {
                   return { behavior: 'allow' as const, updatedInput: toolInput }
                 }
+
+                /*
+                 * **선택지는 승인이 아니라 질문이다** (FR: AskUserQuestion).
+                 *
+                 * 실측으로 길을 찾았다 (probe-askuserquestion.mts):
+                 *   canUseTool로 온다        ✅ 인자(질문·선택지)가 통째로 들어온다
+                 *   onUserDialog로 온다      ❌ 종류를 선언해도 한 번도 안 불렸다
+                 *   그냥 실행시키면          → "The user did not answer the questions."
+                 *
+                 * 그래서 여기서 가로채 사람에게 묻고, 답을 **deny의 message로 돌려준다.**
+                 * 이상해 보이지만 그 message가 곧 이 도구의 결과로 모델에게 간다 —
+                 * 실측에서 모델은 "사용자는 라면을 골랐습니다"라고 정확히 읽었다.
+                 * allow로 보내면 CLI가 자기 화면을 띄우려다 실패하고 답 없이 끝난다.
+                 */
+                if (toolName === 'AskUserQuestion') {
+                  const questions = parseQuestions(toolInput)
+                  // 질문 형태가 아니면 우리가 그릴 수 없다 — 삼키지 말고 평소대로 흘린다
+                  if (questions.length === 0) return { behavior: 'allow' as const, updatedInput: toolInput }
+                  const requestId = `q-${++self.reqCounter}`
+                  self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
+                  return new Promise((resolve) => {
+                    self.questions.set(requestId, resolve as (r: unknown) => void)
+                  })
+                }
                 const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
                 const key = detail.kind === 'command' ? detail.command : `${toolName}:${detail.kind}`
                 if (self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
@@ -217,6 +280,21 @@ class ClaudeSession implements SessionHandle {
     }
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     void scope // scope별 영속화는 세션 매니저가 store에 기록한다
+    return true
+  }
+
+  /**
+   * 선택지에 답한다. 승인과 같은 규칙 — **닿았는지를 돌려준다.**
+   *
+   * 답은 deny의 message로 나간다. 그 message가 이 도구의 결과가 되어 모델에게 간다
+   * (실측으로 확인). 거절이라는 이름이지만 실제로 전달되는 것은 사람이 고른 내용이다.
+   */
+  answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
+    const resolve = this.questions.get(requestId)
+    if (!resolve) return false
+    this.questions.delete(requestId)
+    resolve({ behavior: 'deny', message: JSON.stringify({ answers }) })
+    this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
     return true
   }
 
@@ -279,6 +357,7 @@ class ClaudeSession implements SessionHandle {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
     }
     this.pending.clear()
+    this.releaseQuestions('Stopped by user')
 
     void this.query?.interrupt().catch((err: Error) => {
       // 못 끊었으면 그렇다고 말한다. 멈춘 줄 알고 기다리게 두는 게 제일 나쁘다.
@@ -308,6 +387,16 @@ class ClaudeSession implements SessionHandle {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
     }
     this.pending.clear()
+    this.releaseQuestions('Session closed')
+  }
+
+  /** 답을 기다리던 선택지를 놓아준다 — 승인과 같은 이유로 **말없이 놓지 않는다** */
+  private releaseQuestions(why: string): void {
+    for (const [id, resolve] of this.questions) {
+      resolve({ behavior: 'deny', message: why })
+      this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId: id })
+    }
+    this.questions.clear()
   }
 }
 

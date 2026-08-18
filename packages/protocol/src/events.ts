@@ -3,6 +3,7 @@ import {
   ApprovalDecision,
   ApprovalDetail,
   ProtocolError,
+  Question,
   SessionActivity,
   SessionState,
   TokenUsage,
@@ -43,6 +44,19 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     requestId: z.string(),
     decision: ApprovalDecision,
   }),
+  /*
+   * 에이전트가 선택지를 내밀었다 (AskUserQuestion).
+   *
+   * 승인과 **다른 이벤트**인 이유: 승인은 예/아니오지만 이건 여러 질문 × 여러 선택지고,
+   * 답이 모델에게 돌아가야 한다. 승인 카드에 억지로 얹으면 둘 다 망가진다.
+   */
+  z.object({
+    ...base,
+    type: z.literal('question_request'),
+    requestId: z.string(),
+    questions: z.array(Question),
+  }),
+  z.object({ ...base, type: z.literal('question_resolved'), requestId: z.string() }),
   z.object({ ...base, type: z.literal('turn_complete') }),
   z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
   z.object({ ...base, type: z.literal('usage_update'), tokens: TokenUsage }),

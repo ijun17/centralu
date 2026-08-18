@@ -6,6 +6,7 @@ import type {
   CreateSessionParams,
   NormalizedEvent,
   ToolName,
+  QuestionAnswer,
 } from '@cc/protocol'
 import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
@@ -41,6 +42,9 @@ class WebAgentPort implements AgentPort {
     matcher?: string,
   ) {
     await this.rpc.call('agents.respondApproval', { sessionId, requestId, decision, scope, matcher })
+  }
+  async answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]) {
+    await this.rpc.call('agents.answerQuestion', { sessionId, requestId, answers })
   }
   reorderSessions(projectId: string, orderedIds: string[]) {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })

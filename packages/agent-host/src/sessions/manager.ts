@@ -13,6 +13,7 @@ import type {
   CreateSessionParams,
   NormalizedEvent,
   PermissionPreset,
+  QuestionAnswer,
   ProjectInfo,
   SessionInfo,
   StoredMessage,
@@ -881,6 +882,24 @@ export class SessionManager {
         matcher,
         decision: 'allow',
       })
+    }
+  }
+
+  /**
+   * 선택지에 답한다 (AskUserQuestion).
+   *
+   * 승인에서 배운 것을 그대로 지킨다 — **닿지 않았으면 조용히 성공으로 두지 않는다.**
+   * 답할 수 없는 카드가 화면에 남으면 눌러도 아무 일이 없는 상태가 또 생긴다.
+   */
+  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): void {
+    const handle = this.requireHandle(sessionId)
+    const landed = handle.answerQuestion?.(requestId, answers) ?? false
+    if (!landed) {
+      this.emit({ type: 'question_resolved', sessionId, requestId })
+      throw Object.assign(
+        new Error('그 질문은 이미 사라졌습니다 (에이전트가 다시 시작됨). 답은 전달되지 않았습니다.'),
+        { code: 'question_gone' },
+      )
     }
   }
 

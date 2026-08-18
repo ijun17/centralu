@@ -3,6 +3,7 @@ import type {
   ApprovalDetail,
   NormalizedEvent,
   PermissionPreset,
+  Question,
   SessionActivity,
   SessionState,
   TokenUsage,
@@ -46,6 +47,14 @@ export type SessionSummary = {
   /** 사이드바·인박스 미리보기 한 줄 */
   preview: string
   pendingApproval: { requestId: string; detail: ApprovalDetail } | null
+  /**
+   * 답을 기다리는 선택지들 (AskUserQuestion).
+   *
+   * **목록이다.** 승인은 단일 필드라 두 번째 요청이 첫 번째를 덮어 답할 길이 사라졌다 —
+   * 그 실수를 여기서 반복하지 않는다. 한 번에 최대 4개 질문이 한 장으로 오고,
+   * 장이 여럿 겹칠 수도 있다.
+   */
+  pendingQuestions: { requestId: string; questions: Question[] }[]
   usage: TokenUsage | null
   context: { used: number; window: number; exactness: 'exact' | 'estimate' } | null
   limit: { resumeAt?: string; usedPercent?: number; windowMins?: number } | null
@@ -62,7 +71,7 @@ export type SessionSummary = {
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
   return {
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
-    archived: false, live: true, preview: '', pendingApproval: null, usage: null, context: null,
+    archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, permissionPreset: 'normal',
     tool: 'claude' as const, ...init,
   }
@@ -100,6 +109,17 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, preview: truncate((s.state === 'working' ? s.preview : '') + event.text) }
     case 'tool_call':
       return { ...next, preview: truncate(event.summary.title) }
+    case 'question_request':
+      // 같은 id가 다시 오면 갈아 끼우고, 아니면 뒤에 쌓는다 (덮지 않는다)
+      return {
+        ...next,
+        pendingQuestions: [
+          ...s.pendingQuestions.filter((q) => q.requestId !== event.requestId),
+          { requestId: event.requestId, questions: event.questions },
+        ],
+      }
+    case 'question_resolved':
+      return { ...next, pendingQuestions: s.pendingQuestions.filter((q) => q.requestId !== event.requestId) }
     case 'approval_request':
       return { ...next, pendingApproval: { requestId: event.requestId, detail: event.detail } }
     case 'approval_resolved':
@@ -147,7 +167,7 @@ export function rename(s: SessionSummary, name: string): SessionSummary {
 }
 
 export function archive(s: SessionSummary): SessionSummary {
-  return { ...s, archived: true, state: 'idle', waitingSince: null, pendingApproval: null }
+  return { ...s, archived: true, state: 'idle', waitingSince: null, pendingApproval: null, pendingQuestions: [] }
 }
 
 /** 같은 디렉토리 동시 세션 중 같은 파일을 만진 세션들 (FR-2 데이터 손실 경고) */

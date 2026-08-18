@@ -17,6 +17,7 @@ import type {
   StoredMessage,
   UsageSnapshot,
   ToolName,
+  QuestionAnswer,
 } from '@cc/protocol'
 import type { AgentPort, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 
@@ -269,6 +270,10 @@ export class MockPlatform implements Platform {
     },
     respondApproval: async (sessionId: string, requestId: string, decision: ApprovalDecision, _scope?: ApprovalScope) => {
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
+      this.emit({ type: 'turn_complete', sessionId })
+    },
+    answerQuestion: async (sessionId: string, requestId: string, _answers: QuestionAnswer[]) => {
+      this.emit({ type: 'question_resolved', sessionId, requestId })
       this.emit({ type: 'turn_complete', sessionId })
     },
     reorderSessions: async (projectId: string, orderedIds: string[]) => {

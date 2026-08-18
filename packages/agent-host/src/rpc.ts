@@ -39,6 +39,11 @@ export function createRpcHandler(
       mgr.respondApproval(sessionId, requestId, decision, scope, matcher)
       return { ok: true as const }
     },
+    'agents.answerQuestion': async (p) => {
+      const { sessionId, requestId, answers } = RpcMethods['agents.answerQuestion'].params.parse(p)
+      mgr.answerQuestion(sessionId, requestId, answers)
+      return { ok: true as const }
+    },
     'agents.models': async (p) => mgr.listModels(RpcMethods['agents.models'].params.parse(p).tool),
     'agents.interrupt': async (p) => {
       mgr.interrupt(RpcMethods['agents.interrupt'].params.parse(p).sessionId)

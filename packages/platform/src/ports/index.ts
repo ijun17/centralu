@@ -19,6 +19,7 @@ import type {
   TerminalInfo,
   ToolName,
   ModelOption,
+  QuestionAnswer,
 } from '@cc/protocol'
 
 /**
@@ -54,6 +55,8 @@ export interface AgentPort {
     /** '항상 허용'의 대상 패턴 (core가 계산) */
     matcher?: string,
   ): Promise<void>
+  /** 선택지에 답한다 (AskUserQuestion) — 답은 그 도구의 결과로 모델에게 간다 */
+  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
   /** 사이드바 순서 (사람이 끌어서 정한다). 전체 순서를 통째로 보낸다 */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>

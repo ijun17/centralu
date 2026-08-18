@@ -6,6 +6,7 @@ import type {
   ApprovalScope,
   NormalizedEvent,
   PermissionPreset,
+  QuestionAnswer,
   ToolName,
 } from '@cc/protocol'
 
@@ -128,6 +129,11 @@ export interface SessionHandle {
    * 없고, 사용자는 명령이 실행됐는지 아닌지도 알 수 없다. 도그푸딩에서 실제로 이렇게 막혔다.
    */
   respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): boolean
+  /**
+   * 선택지에 답한다 (AskUserQuestion). 승인과 같은 규칙 — **닿았는지를 돌려준다.**
+   * 이 도구를 지원하지 않는 어댑터는 구현하지 않는다.
+   */
+  answerQuestion?(requestId: string, answers: QuestionAnswer[]): boolean
   /** 저장된 '항상 허용' 규칙 주입 — 재시작 후에도 유지되도록 (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
   /** 모델·권한 변경 (다음 턴부터). 지원하지 않으면 구현하지 않는다 */

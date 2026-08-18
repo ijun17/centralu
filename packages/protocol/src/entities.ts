@@ -44,6 +44,35 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>
 
+/**
+ * 에이전트가 사람에게 내미는 선택지 (AskUserQuestion).
+ *
+ * **자르지 않는다.** 도그푸딩에서 이 도구 호출이 원시 JSON으로 흐르다 중간에 잘려
+ * 두 번째 선택지부터 보이지 않았다 — 답할 수단이 통째로 사라진 것이다.
+ * 승인(ApprovalDetail)과 달리 여기엔 미리보기가 아니라 **답에 필요한 전부**가 담긴다.
+ */
+export const QuestionOption = z.object({
+  label: z.string(),
+  description: z.string().default(''),
+})
+export type QuestionOption = z.infer<typeof QuestionOption>
+
+export const Question = z.object({
+  question: z.string(),
+  /** 짧은 꼬리표 (최대 12자 권장) */
+  header: z.string().default(''),
+  options: z.array(QuestionOption),
+  multiSelect: z.boolean().default(false),
+})
+export type Question = z.infer<typeof Question>
+
+/** 한 질문에 대한 답 — 고른 라벨들 (multiSelect면 여럿, 자유 입력이면 그 텍스트) */
+export const QuestionAnswer = z.object({
+  question: z.string(),
+  answers: z.array(z.string()),
+})
+export type QuestionAnswer = z.infer<typeof QuestionAnswer>
+
 export const ToolSummary = z.object({
   tool: z.string(),
   /** 한 줄 요약 (명령 전문, 파일 경로 등) */

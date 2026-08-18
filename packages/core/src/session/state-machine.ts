@@ -50,6 +50,11 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
       return 'waiting_approval'
     case 'approval_resolved':
       return 'working'
+    /* 선택지도 사람을 기다리는 것이다 — 신호등이 '도는 중'으로 남으면 안 된다 */
+    case 'question_request':
+      return 'waiting_approval'
+    case 'question_resolved':
+      return 'working'
     case 'turn_complete':
       return 'waiting_input'
     case 'limit_reached':
