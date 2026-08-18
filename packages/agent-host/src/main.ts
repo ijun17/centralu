@@ -14,17 +14,19 @@ import { createRpcHandler } from './rpc.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { ensureToolPath } from './env-path.js'
 import { acquireInstanceLock } from './dev-services/instance-lock.js'
+import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 
 /**
  * Agent Host 진입점.
  * dev: `pnpm host` 로 직접 실행. prod: Tauri가 사이드카로 spawn (docs/architecture.md §4)
  */
-// GUI 앱은 로그인 셸 PATH를 물려받지 못한다 — CLI를 찾으려면 먼저 보강해야 한다 (실측).
-// 사용자의 로그인 셸에게 직접 물어보므로 nvm·mise·수동 설치도 잡힌다.
-const pathResult = ensureToolPath()
-if (pathResult.source !== 'unchanged') {
-  console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
-}
+
+/**
+ * 빌드 식별자. 번들러가 `__CC_BUILD__`를 실제 커밋으로 바꿔 넣는다
+ * (소스로 그냥 실행하면 치환이 없으므로 'dev').
+ */
+declare const __CC_BUILD__: string | undefined
+const BUILD = typeof __CC_BUILD__ === 'string' ? __CC_BUILD__ : 'dev'
 
 const { values } = parseArgs({
   options: {
@@ -55,6 +57,25 @@ function defaultDbPath(): string {
   const dir = join(homedir(), isDev ? '.control-center-dev' : '.control-center')
   mkdirSync(dir, { recursive: true })
   return join(dir, 'store.db')
+}
+
+/**
+ * **로그를 가장 먼저 켠다.**
+ *
+ * 이 아래로 나오는 모든 말(PATH 보강, 인스턴스 잠금 충돌, codex의 stderr,
+ * 미처리 거절)이 파일에 남는다. 늦게 켜면 정작 기동에서 어긋난 경우를 놓친다 —
+ * 오늘 못 본 것이 정확히 그 구간이었다.
+ *
+ * 메모리 DB(테스트·스모크)는 남길 폴더가 없으므로 켜지 않는다.
+ */
+const stopLog = dbPath === ':memory:' ? () => {} : teeStderrToFile(hostLogPath(dirname(dbPath)))
+if (dbPath !== ':memory:') console.error(startupBanner({ build: BUILD, db: dbPath, pid: process.pid }))
+
+// GUI 앱은 로그인 셸 PATH를 물려받지 못한다 — CLI를 찾으려면 먼저 보강해야 한다 (실측).
+// 사용자의 로그인 셸에게 직접 물어보므로 nvm·mise·수동 설치도 잡힌다.
+const pathResult = ensureToolPath()
+if (pathResult.source !== 'unchanged') {
+  console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
 
 /**
@@ -149,6 +170,9 @@ const shutdown = async () => {
   await mgr.disposeAll()
   await server.close()
   store.close()
+  // 왜 끝났는지가 다음 조사의 첫 줄이 된다 — 조용히 사라지지 않는다
+  console.error(`[agent-host] shutting down (pid ${process.pid})`)
+  stopLog()
   process.exit(0)
 }
 process.on('SIGINT', shutdown)

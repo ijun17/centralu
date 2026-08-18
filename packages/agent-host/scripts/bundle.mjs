@@ -12,6 +12,7 @@
  *   node_modules/better-sqlite3  — 네이티브 애드온 (필요한 파일만)
  */
 import { build } from 'esbuild'
+import { execFileSync } from 'node:child_process'
 import { chmodSync, cpSync, mkdirSync, rmSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -25,6 +26,23 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
 
 // 1) JS 번들 — 네이티브 애드온은 묶을 수 없으므로 external
+/**
+ * **어느 커밋의 빌드인지 산출물이 스스로 말하게 한다.**
+ *
+ * 도그푸딩에서 "지금 도는 앱이 어느 커밋이냐"에 답하려고 바이너리 mtime과 커밋 시각을
+ * 맞춰 봐야 했다 — 추측이고, 다시 빌드하면 틀어진다. 기동 로그 첫 줄에 박아 둔다.
+ * 깃이 없거나 실패해도 빌드는 계속된다 ('unknown'이 빌드 실패보다 낫다).
+ */
+function buildId() {
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
+    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim()
+    return dirty ? `${sha}-dirty` : sha
+  } catch {
+    return 'unknown'
+  }
+}
+
 await build({
   entryPoints: [join(ROOT, 'packages/agent-host/src/main.ts')],
   outfile: join(OUT, 'main.mjs'),
@@ -36,6 +54,9 @@ await build({
   // 워크스페이스 별칭을 소스로 해석 (빌드 산출물 없이 바로 번들)
   alias: {
     '@cc/protocol': join(ROOT, 'packages/protocol/src/index.ts'),
+  },
+  define: {
+    __CC_BUILD__: JSON.stringify(buildId()),
   },
   banner: {
     // ESM 번들에서 CJS 의존(better-sqlite3)을 require로 불러올 수 있게 한다
