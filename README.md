@@ -1,6 +1,39 @@
-# Control Center
+# Centralu
 
 > 여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 경량 데스크톱 앱
+
+macOS · Apple Silicon 전용 · 베타. 대화 기록은 **당신의 맥에만** 저장된다
+(`~/.control-center/store.db`). 어디로도 전송되지 않는다.
+
+## 쓰려면 필요한 것
+
+이 앱은 혼자 돌지 않는다. 아래가 없으면 앱이 뜨더라도 세션을 만들 수 없다.
+
+| | |
+|---|---|
+| **Node 22 이상** | host(사이드카)가 이 위에서 돈다. 없으면 기동 화면이 무엇이 없는지 말해준다 |
+| **`claude` CLI** + 로그인 | Claude Code 세션용 (`npm i -g @anthropic-ai/claude-code`) |
+| **`codex` CLI** + 로그인 | Codex 세션용 (`npm i -g @openai/codex`). 안 쓸 거면 없어도 된다 |
+
+첫 실행 화면이 이 셋의 상태를 직접 보여주고, 없는 것은 설치 명령까지 함께 적는다.
+
+## 설치
+
+npm 배포를 준비 중이다. 그때까지는 소스에서 빌드한다:
+
+```bash
+pnpm install && pnpm app        # 빌드 후 앱이 열린다
+```
+
+> 왜 npm인가: 브라우저로 받은 파일에는 macOS가 격리 딱지를 붙여 "확인할 수 없습니다"
+> 경고가 뜬다. npm으로 설치한 것에는 그 딱지가 붙지 않아 경고 없이 그냥 열린다.
+> 근거와 실측은 [배포 점검표 §2](docs/plans/beta-release-checklist.md)에 있다.
+
+## 라이선스
+
+[MIT](LICENSE). 기여는 [CONTRIBUTING.md](CONTRIBUTING.md)를 먼저 읽어달라 (CLA가 있다).
+
+---
 
 기획은 [docs/product-spec.md](docs/product-spec.md)(v0.4)가 기준이다. `docs/`의 나머지는 **어떻게 만들 것인가**를 다룬다.
 
@@ -22,12 +55,12 @@ pnpm dev                      # http://127.0.0.1:5174/?mock=1
 검증:
 
 ```bash
-pnpm verify      # lint + 의존 규칙 + 타입 + 단위/통합 테스트 (180개)
-pnpm e2e         # Playwright 관제 루프 시나리오 (14개)
+pnpm verify      # lint + 의존 규칙 + 타입 + 단위/통합 테스트 (484개)
+pnpm e2e         # Playwright 관제 루프 시나리오 (157개)
 pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 ```
 
-현재 상태: **M1 구현 완료** — [실행 결과](docs/plans/m1-result.md), 남은 것은 사람이 직접 써보는 G5.
+현재 상태: **M2 완료 → 도그푸딩 중** — [실행 결과](docs/plans/m2-result.md), 배포 준비는 [점검표](docs/plans/beta-release-checklist.md).
 
 ## 문서 지도
 
