@@ -3097,6 +3097,21 @@ test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => 
 })
 
 /**
+ * 바람이 **한 번이라도 떴는가**를 촘촘히 본다.
+ *
+ * `toHaveCount(0)`으로는 못 잡는다 — 그건 자동 재시도라 바람이 떴다가 사라지기만 하면
+ * 통과한다("끝내 0"이지 "한 번도 안 뜸"이 아니다). 실제로 이 함정 때문에 트리거 버그를
+ * 잡는 테스트가 통과해 버렸다.
+ */
+async function blew(page: import('@playwright/test').Page, ms = 900): Promise<boolean> {
+  for (let i = 0; i < ms / 50; i++) {
+    if ((await page.getByTestId('gust').count()) > 0) return true
+    await page.waitForTimeout(50)
+  }
+  return false
+}
+
+/**
  * 응답이 끝나면 화면을 한 번 쓸고 가는 바람.
  * 글자로 "끝났습니다"라고 적는 대신 화면이 한 번 숨을 쉰다.
  */
@@ -3122,6 +3137,66 @@ test('화면 밖 세션이 끝나면 불지 않는다 — 그건 알림의 몫�
 
   // 0번(보고 있지 않은 세션)이 끝난다
   await emitEvent(page, 0, { type: 'turn_complete' })
+  expect(await blew(page)).toBe(false)
+})
+
+/*
+ * 신고: "세션 창 이동할 때도 막 나고".
+ *
+ * 끝난 것은 아까 한 번이고 그 사이에 끝난 것은 없다. 그런데 그 세션으로 옮겨 가면
+ * 바람이 분다 — 바람은 '끝났다'는 사건이 아니라 '끝나 있다'는 값에 걸려 있다.
+ */
+test('이미 끝나 있던 세션으로 옮겨 가도 바람이 불지 않는다', async ({ page }) => {
+  test.fail() // 알려진 버그 — 아직 안 고쳤다. 고치면 이 표시를 뗀다
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다
+
+  await emitEvent(page, 0, { type: 'turn_complete' }) // 안 보이는 쪽이 끝난다
   await page.waitForTimeout(200)
   await expect(page.getByTestId('gust')).toHaveCount(0)
+
+  // 끝난 그 세션으로 옮겨 간다 — 새로 끝난 것은 아무것도 없다
+  const moved = await page.evaluate(() => {
+    const store = (window as never as { __store: { getState(): Record<string, never> } }).__store
+    const st = store.getState() as unknown as {
+      sessions: Record<string, { id: string }>
+      completion: { sessionId: string } | null
+      focusSession(id: string): void
+    }
+    const target = st.completion!.sessionId // 아까 끝난 그 세션
+    st.focusSession(target)
+    const after = (store.getState() as unknown as { focusedSessionId: string }).focusedSessionId
+    return { target, after }
+  })
+  // **옮겨 갔는지 먼저 확인한다** — 안 옮겨 갔으면 "안 불었다"는 아무 의미가 없다
+  expect(moved.after).toBe(moved.target)
+
+  expect(await blew(page)).toBe(false)
+})
+
+/*
+ * 그리고 한 번 끝난 것으로 **몇 번이고** 분다 — 오갈 때마다 다시 분다.
+ */
+test('오갔다고 해서 지난 완료가 다시 불지 않는다', async ({ page }) => {
+  test.fail() // 알려진 버그 — 오갈 때마다 몇 번이고 분다
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  await emitEvent(page, 1, { type: 'turn_complete' }) // 보고 있는 쪽이 끝난다 — 여기서 한 번 부는 게 맞다
+  await expect(page.getByTestId('gust')).toBeVisible()
+  await expect(page.getByTestId('gust')).toHaveCount(0, { timeout: 3000 })
+
+  const swap = (i: number) =>
+    page.evaluate((idx) => {
+      const st = (window as never as { __store: { getState(): Record<string, never> } }).__store.getState()
+      const list = Object.values(st.sessions as unknown as Record<string, { id: string }>)
+      ;(st as unknown as { focusSession(id: string): void }).focusSession(list[idx]!.id)
+    }, i)
+
+  await swap(0)
+  expect(await blew(page, 300)).toBe(false)
+  await swap(1) // 돌아왔다. 그 사이 끝난 것은 없다
+  expect(await blew(page, 300)).toBe(false)
 })
