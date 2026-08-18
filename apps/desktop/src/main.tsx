@@ -34,10 +34,10 @@ function StartupFailure({ message }: { message: string }) {
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 bg-void px-8 text-center">
       <p className="text-[13px] text-chalk">Could not start the agent host</p>
-      <p className="max-w-md font-mono text-[11px] leading-relaxed text-ash">{message}</p>
+      {/* 사이드카가 준 문장은 여러 줄이다 (무엇이 없는지, 어디를 찾아봤는지) — 줄을 살려서 보여준다 */}
+      <p className="max-w-md whitespace-pre-line font-mono text-[11px] leading-relaxed text-ash">{message}</p>
       <p className="max-w-md text-[11px] leading-relaxed text-slate">
-        Node.js must be installed (<span className="font-mono">node --version</span>). If restarting the app hits the
-        same problem, check the logs in a terminal.
+        If restarting hits the same problem, check <span className="font-mono">~/.control-center/host.log</span>.
       </p>
       <button
         className="mt-1 rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
