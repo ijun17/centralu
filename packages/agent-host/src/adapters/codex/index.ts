@@ -234,14 +234,16 @@ class CodexSession implements SessionHandle {
     })
   }
 
-  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: ApprovalScope, matcher?: string): void {
+  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: ApprovalScope, matcher?: string): boolean {
     const serverId = this.approvals.get(requestId)
-    if (serverId === undefined) return
+    // 스레드를 다시 띄우면 이 맵은 비어 있다 — 그 전에 뜬 카드의 id는 여기에 없다
+    if (serverId === undefined) return false
     this.approvals.delete(requestId)
 
     if (decision === 'always' && matcher) this.alwaysAllow.add(matcher)
     this.client.respond(serverId, { decision: toCodexDecision(decision) })
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
+    return true
   }
 
   /** 슬래시 명령(스킬) — app-server의 공식 RPC */
@@ -276,7 +278,12 @@ class CodexSession implements SessionHandle {
     })
   }
 
+  /** 매달린 승인을 말없이 놓지 않는다 (claude 어댑터와 같은 이유 — 화면이 카드를 붙든 채 막힌다) */
   async dispose(): Promise<void> {
+    for (const requestId of this.approvals.keys()) {
+      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
+    }
+    this.approvals.clear()
     await this.client.dispose()
   }
 }

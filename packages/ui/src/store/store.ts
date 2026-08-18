@@ -845,7 +845,15 @@ export const useStore = create<AppState>((set, get) => ({
             ? pending.detail.path
             : undefined
         : undefined
-    await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
+    /*
+     * 이 스토어에서 유일하게 실패를 삼키던 동작이었다. 승인은 **눌렀는데 아무 일도
+     * 안 일어나는 것이 가장 나쁜** 자리다 — 명령이 돌았는지 안 돌았는지 알 수 없다.
+     */
+    try {
+      await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
+    } catch (e) {
+      set({ toast: (e as Error).message || '승인을 전달하지 못했습니다' })
+    }
   },
 
   async interrupt(sessionId) {

@@ -121,7 +121,13 @@ export interface SessionHandle {
   readonly externalId: string | null
   send(text: string): void
   /** matcher는 core가 계산해 UI가 전달한다 (경계 규칙: host는 core를 모른다) */
-  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): void
+  /**
+   * 승인 응답. **닿았는지를 돌려준다** (false = 그런 요청이 없다).
+   *
+   * 조용히 무시하면 화면은 승인 카드를 붙든 채 영원히 남는다 — 눌러도 아무 일이
+   * 없고, 사용자는 명령이 실행됐는지 아닌지도 알 수 없다. 도그푸딩에서 실제로 이렇게 막혔다.
+   */
+  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): boolean
   /** 저장된 '항상 허용' 규칙 주입 — 재시작 후에도 유지되도록 (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
   /** 모델·권한 변경 (다음 턴부터). 지원하지 않으면 구현하지 않는다 */

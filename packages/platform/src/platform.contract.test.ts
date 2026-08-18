@@ -23,9 +23,10 @@ class EchoHandle implements SessionHandle {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
   }
-  respondApproval(requestId: string, decision: ApprovalDecision) {
+  respondApproval(requestId: string, decision: ApprovalDecision): boolean {
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    return true
   }
   interrupt() {}
   async dispose() {}

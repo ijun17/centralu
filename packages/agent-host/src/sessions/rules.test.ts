@@ -17,7 +17,7 @@ function fakeAdapter(applied: string[][]): AgentAdapter {
       sessionId: opts.sessionId,
       externalId: `ext-${opts.sessionId}`,
       send: () => {},
-      respondApproval: () => {},
+      respondApproval: () => true,
       applyRules: (m) => void applied.push([...m]),
       interrupt: () => {},
       dispose: async () => {},

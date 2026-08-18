@@ -17,9 +17,14 @@ class FakeHandle implements SessionHandle {
     this.sent.push(text)
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
   }
-  respondApproval(requestId: string, decision: ApprovalDecision) {
+  /** 프로세스를 갈아 끼우면 매달린 승인 맵이 비어서 뜬다 — 그 상태를 흉내낸다 */
+  approvalsLost = false
+  dropApprovals() { this.approvalsLost = true }
+  respondApproval(requestId: string, decision: ApprovalDecision): boolean {
+    if (this.approvalsLost) return false
     this.approvals.push({ requestId, decision })
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
+    return true
   }
   interrupt() {}
   /** 턴이 끝났다고 알린다 (보고 되돌아오기 테스트용) */
@@ -147,6 +152,43 @@ describe('승인·읽음·메시지', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     await rpc('agents.respondApproval', { sessionId: s.id, requestId: 'r1', decision: 'allow' })
     expect(adapter.last!.approvals).toEqual([{ requestId: 'r1', decision: 'allow' }])
+  })
+
+  /*
+   * 도그푸딩에서 세션이 통째로 막혔다: 화면에는 "Awaiting approval"이 떠 있는데
+   * 눌러도 아무 반응이 없고, 정작 백엔드의 세션 상태는 idle이었다.
+   *
+   * 원인은 프로세스 교체다. 권한 프리셋을 바꾸면 매니저가 프로세스를 갈아 끼우는데
+   * (updateSettings의 drift 경로), 새 프로세스의 승인 맵은 비어 있다. 그래서 그 전에 뜬
+   * 카드의 requestId는 어디에도 없고, 어댑터는 **조용히 return**했다 —
+   * 화면은 답을 기다리며 영원히 남는다.
+   */
+  it('사라진 승인에 답하면 말해 주고, 화면의 카드도 걷어준다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    adapter.last!.dropApprovals() // 프로세스가 갈아 끼워진 상태
+
+    await expect(
+      rpc('agents.respondApproval', { sessionId: s.id, requestId: 'r-오래된', decision: 'allow' }),
+    ).rejects.toMatchObject({ code: 'approval_gone' })
+
+    // 카드를 걷을 근거가 화면에 도착해야 한다 — 아니면 눌러도 안 사라지는 카드가 남는다
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'approval_resolved', sessionId: s.id, requestId: 'r-오래된' }),
+    )
+  })
+
+  it("사라진 승인은 '항상 허용' 규칙을 남기지 않는다", async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    adapter.last!.dropApprovals()
+
+    await expect(
+      rpc('agents.respondApproval', { sessionId: s.id, requestId: 'r1', decision: 'always', matcher: 'git push' }),
+    ).rejects.toMatchObject({ code: 'approval_gone' })
+
+    // 실행되지도 않은 명령을 항상 허용으로 기억해 두면 다음에 조용히 통과한다
+    expect(await rpc('approvals.rules', {})).toEqual([])
   })
 
   it('메시지가 영속화되고 다시 로드된다', async () => {

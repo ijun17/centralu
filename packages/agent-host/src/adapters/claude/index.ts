@@ -198,9 +198,10 @@ class ClaudeSession implements SessionHandle {
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
   }
 
-  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): void {
+  respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): boolean {
     const p = this.pending.get(requestId)
-    if (!p) return
+    // 프로세스를 갈아 끼우면 이 맵은 비어서 다시 뜬다 — 그 전에 뜬 카드의 id는 여기에 없다
+    if (!p) return false
     this.pending.delete(requestId)
     if (decision === 'deny') {
       p.resolve({ behavior: 'deny', message: 'Denied by user' })
@@ -216,6 +217,7 @@ class ClaudeSession implements SessionHandle {
     }
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     void scope // scope별 영속화는 세션 매니저가 store에 기록한다
+    return true
   }
 
   /** 저장된 규칙 주입 (재시작 후에도 '항상 허용'이 유지되도록) */
@@ -290,10 +292,21 @@ class ClaudeSession implements SessionHandle {
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
+  /**
+   * 매달린 승인을 **말없이 놓지 않는다.**
+   *
+   * 여기서 알리지 않으면 화면에는 승인 카드가 그대로 남는다. 그 카드의 requestId는
+   * 새로 뜬 프로세스의 맵에 없으므로 눌러도 아무 일이 없고, 세션은 멀쩡히 idle인데
+   * 화면만 "에이전트가 막혀 있음"이라고 말한다 — 나가는 길이 없는 상태다.
+   * interrupt()는 이미 이렇게 하고 있었다. 프로세스를 갈아 끼울 때만 빠져 있었다.
+   */
   async dispose(): Promise<void> {
     this.closed = true
     this.notify?.()
-    for (const [, p] of this.pending) p.resolve({ behavior: 'deny', message: 'Session closed' })
+    for (const [id, p] of this.pending) {
+      p.resolve({ behavior: 'deny', message: 'Session closed' })
+      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
+    }
     this.pending.clear()
   }
 }

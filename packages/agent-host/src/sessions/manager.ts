@@ -852,6 +852,26 @@ export class SessionManager {
     matcher?: string,
   ): void {
     const m = this.meta.get(sessionId)
+
+    /*
+     * **닿았는지를 먼저 본다.** 닿지 않았으면 규칙도 남기지 않는다 —
+     * 실행되지도 않은 명령을 '항상 허용'으로 기억해 두면 다음에 조용히 통과한다.
+     */
+    const landed = this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
+
+    if (!landed) {
+      /*
+       * 그런 요청이 없다. 대개 그 사이에 프로세스가 갈아 끼워진 경우다(권한 프리셋을
+       * 바꾸면 그렇게 된다). 화면의 카드는 이미 답할 수 없는 카드이므로 **먼저 걷어내고**,
+       * 그다음에 알린다. 걷어내지 않으면 눌러도 반응 없는 카드가 계속 남는다.
+       */
+      this.emit({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
+      throw Object.assign(
+        new Error('그 승인 요청은 이미 사라졌습니다 (에이전트가 다시 시작됨). 명령은 실행되지 않았습니다.'),
+        { code: 'approval_gone' },
+      )
+    }
+
     // 규칙 영속화 — 어댑터는 메모리에만 갖고 있으므로 재시작 후에도 남으려면 여기 필요 (C-2)
     if (decision === 'always' && m && matcher) {
       this.store.addApprovalRule({
@@ -862,7 +882,6 @@ export class SessionManager {
         decision: 'allow',
       })
     }
-    this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
   }
 
   /**
