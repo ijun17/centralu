@@ -83,6 +83,7 @@ export function Settings() {
                   ['error', 'Error'],
                   ['allDone', 'Once when every session finishes'],
                   ['whenFocused', 'Notify even when the app is focused'],
+                  ['sound', 'Play a sound — the one signal that reaches the next room'],
                 ] as [keyof NotifyPolicy, string][]
               ).map(([key, label]) => (
                 <li key={key}>
@@ -99,12 +100,26 @@ export function Settings() {
                 </li>
               ))}
             </ul>
-            <button
-              className="mt-2 text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
-              onClick={() => setPolicy(DEFAULT_NOTIFY_POLICY)}
-            >
-              Reset to defaults
-            </button>
+            <div className="mt-2 flex items-center gap-3">
+              {/*
+                시험 버튼이 있어야 하는 이유: 알림이 안 오는 것은 **아무 화면도 만들지 않는다.**
+                그래서 도구를 의심하기 전에 확인할 길이 없으면 영원히 미검증으로 남는다 —
+                실제로 이 항목은 그렇게 넉 달을 남아 있었다.
+              */}
+              <button
+                className="rounded border border-edge px-2 py-1 text-[11px] text-chalk hover:bg-edge"
+                data-testid="notify-test"
+                onClick={() => void platform.system.alert('approval', policy.sound)}
+              >
+                Test it
+              </button>
+              <button
+                className="text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
+                onClick={() => setPolicy(DEFAULT_NOTIFY_POLICY)}
+              >
+                Reset to defaults
+              </button>
+            </div>
           </section>
 
           {/* E-4 승인 규칙 */}

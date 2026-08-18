@@ -3130,7 +3130,7 @@ test('보고 있는 세션이 끝나면 바람이 한 번 불고 사라진다', 
   await expect(page.getByTestId('gust')).toHaveCount(0, { timeout: 3000 })
 })
 
-test('화면 밖 세션이 끝나면 불지 않는다 — 그건 알림의 몫이다', async ({ page }) => {
+test('화면 밖 세션이 끝나면 불지 않는다 — 그건 카드의 몫이다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')  // 이쪽을 보고 있다
@@ -3138,6 +3138,128 @@ test('화면 밖 세션이 끝나면 불지 않는다 — 그건 알림의 몫�
   // 0번(보고 있지 않은 세션)이 끝난다
   await emitEvent(page, 0, { type: 'turn_complete' })
   expect(await blew(page)).toBe(false)
+  // 지나가는 신호 대신 남는 신호가 온다 — 안 보고 있었으니 지나가면 놓친다
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+})
+
+/*
+ * 알림 카드 — 자리를 비운 사람을 위한 것.
+ *
+ * OS 배너는 몇 초 뒤 걷히므로, 정작 자리를 비웠을 때 온 것은 돌아오면 이미 없다.
+ * macOS에서는 배너 경로 자체가 죽어 있기까지 하다 (플러그인이 2018년에 deprecated된
+ * NSUserNotification을 탄다). 그래서 이 카드가 본진이고, 남는 것이 요점이다.
+ */
+test('카드는 시간이 지나도 스스로 사라지지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+
+  // 토스트는 2.5초에 걷힌다. 그보다 넉넉히 기다려도 이건 남아 있어야 한다.
+  await page.waitForTimeout(4000)
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+})
+
+test('그 세션을 보게 되면 카드가 걷힌다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  const card = page.getByTestId('notice')
+  await expect(card).toHaveCount(1)
+  const target = await card.getAttribute('data-session')
+
+  await page.evaluate((id) => {
+    const st = (window as never as { __store: { getState(): Record<string, never> } }).__store.getState()
+    ;(st as unknown as { focusSession(id: string): void }).focusSession(id!)
+  }, target)
+
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+})
+
+test('카드를 누르면 그 세션으로 간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  const target = await page.getByTestId('notice').getAttribute('data-session')
+
+  await page.getByTestId('notice-open').click()
+
+  const focused = await page.evaluate(
+    () => (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState().focusedSessionId,
+  )
+  expect(focused).toBe(target)
+  // 갔으면 부를 이유가 없다
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+})
+
+test('×를 누르면 그 세션으로 가지 않고 카드만 걷힌다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  const before = await page.evaluate(
+    () => (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState().focusedSessionId,
+  )
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+
+  await page.getByTestId('notice-close').click()
+
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+  const after = await page.evaluate(
+    () => (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState().focusedSessionId,
+  )
+  // 치우기만 한 것이지 가겠다는 뜻이 아니다
+  expect(after).toBe(before)
+})
+
+/*
+ * 바쁜 세션 하나가 카드를 스무 장 만들면 나머지 세션이 화면 밖으로 밀린다 —
+ * 그러면 카드가 많아질수록 쓸모가 줄어든다.
+ */
+/*
+ * 소리와 독은 **배너가 죽은 자리를 대신한다.**
+ *
+ * 배너 경로(tauri-plugin-notification)는 데스크톱에서 권한 상태를 상수로 돌려주고
+ * 전달 실패를 통째로 버려서, 한 통도 못 나가도 앱이 알 수 없었다. 그래서 실제로
+ * 나가는 쪽을 테스트가 붙잡는다 — 여기가 조용해지면 자리 비움이 다시 깜깜해진다.
+ */
+test('승인 대기가 생기면 소리·독으로도 부른다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  // 알림 정책은 "눈앞에 있으면 알리지 않는다" — 테스트 창은 늘 포커스이므로 그 조건을 연다
+  await page.evaluate(() => {
+    const st = (window as never as { __store: { getState(): Record<string, never> } }).__store.getState()
+    const s = st as unknown as { notifyPolicy: Record<string, boolean>; setNotifyPolicy(p: unknown): void }
+    s.setNotifyPolicy({ ...s.notifyPolicy, whenFocused: true, sound: true })
+  })
+
+  await injectApproval(page, 0, { tool: 'Bash', command: 'rm -rf /tmp/x' })
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as never as { __mock: { alerts: { kind: string; sound: boolean }[] } }).__mock.alerts),
+    )
+    .toEqual([{ kind: 'approval', sound: true }])
+})
+
+test('같은 세션이 여러 번 끝나도 카드는 한 장이다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await emitEvent(page, 0, { type: 'turn_complete' })
+
+  await expect(page.getByTestId('notice')).toHaveCount(1)
 })
 
 /*

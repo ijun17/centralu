@@ -9,7 +9,7 @@ apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/WixTools/
 
 # 테스트 산출물
-e2e/test-results/
+test-results/
 playwright-report/
 .playwright-mcp/
 

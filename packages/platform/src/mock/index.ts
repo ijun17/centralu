@@ -19,7 +19,7 @@ import type {
   ToolName,
   QuestionAnswer,
 } from '@cc/protocol'
-import type { AgentPort, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
+import type { AgentPort, AlertKind, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
  * 인메모리 구현 (docs/platform-abstraction.md §6).
@@ -539,6 +539,9 @@ export class MockPlatform implements Platform {
     notify: async (title: string, body: string) => {
       this.notifications.push({ title, body })
     },
+    alert: async (kind: AlertKind, sound: boolean) => {
+      this.alerts.push({ kind, sound })
+    },
     setBadge: async (count: number) => {
       this.badge = count
     },
@@ -554,6 +557,9 @@ export class MockPlatform implements Platform {
 
   /** 창 끌기가 몇 번 시작됐나 (Playwright에서 확인) */
   windowDrags = 0
+
+  /** 소리·독으로 부른 기록 — 배너가 죽어 있어도 이쪽은 울려야 한다 */
+  alerts: { kind: AlertKind; sound: boolean }[] = []
 
   /** 테스트가 들여다볼 수 있게 공개 */
   workspaceSnapshot: WorkspaceSnapshot | null = null

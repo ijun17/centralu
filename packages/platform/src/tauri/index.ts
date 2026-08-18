@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { Platform, SystemPort } from '../ports/index.js'
+import type { AlertKind, Platform, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
 
 /**
@@ -98,6 +98,22 @@ class TauriSystemPort implements SystemPort {
       throw new Error('Notifications are turned off — enable them for Control Center in System Settings')
     }
     sendNotification({ title, body })
+  }
+
+  /**
+   * 소리와 독 — **실제로 사람에게 닿는 길.**
+   *
+   * 위의 `notify`는 남겨 두지만 믿지 않는다. 플러그인 소스를 읽어보면 데스크톱에서
+   * `permission_state()`와 `request_permission()`이 **둘 다 `Ok(Granted)` 상수**를
+   * 돌려주고, 전달 실패는 `let _ = notification.show()`로 버려진다. 즉 위의 `granted`
+   * 검사는 아무것도 검사하지 않으며 저 throw는 영원히 발생하지 않는다.
+   * 게다가 macOS 경로는 2018년에 deprecated된 `NSUserNotification`이라 배너가 뜨지 않는다.
+   *
+   * 그래서 알림이 왔는지를 이쪽이 책임진다. 실패하면 던진다 — 조용히 넘기면
+   * "알림이 안 온다"를 또 밝혀낼 수 없게 된다.
+   */
+  async alert(kind: AlertKind, sound: boolean): Promise<void> {
+    await invoke('alert', { kind, sound })
   }
 
   async setBadge(count: number): Promise<void> {

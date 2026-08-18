@@ -8,7 +8,7 @@ import type {
   ToolName,
   QuestionAnswer,
 } from '@cc/protocol'
-import type { AgentPort, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
+import type { AgentPort, AlertKind, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
 
 /**
@@ -153,6 +153,11 @@ class WebSystemPort implements SystemPort {
   async notify(title: string, body: string) {
     if (typeof Notification === 'undefined') return
     if (Notification.permission === 'granted') new Notification(title, { body })
+  }
+  async alert(_kind: AlertKind, sound: boolean) {
+    // 브라우저에는 독이 없다. 소리는 낼 수 있지만 자동재생 정책에 막히는 일이 잦아,
+    // "가끔 울리는 알림"으로는 못 믿는다 — 웹은 dev용이므로 조용히 넘긴다.
+    void sound
   }
   async setBadge(_count: number) {
     /* 브라우저에는 독 뱃지가 없다 */

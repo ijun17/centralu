@@ -37,6 +37,20 @@ export type Overlay =
 /** 증거 패널이 보여주는 것 */
 export type PanelTab = 'files' | 'git' | 'terminal'
 
+/**
+ * 화면 밖에서 일어난 일 하나.
+ *
+ * `sessionId`가 곧 신원이다 — 같은 세션이 또 끝나면 카드가 늘지 않고 갱신된다.
+ * 그래야 바쁜 세션 하나가 나머지를 밀어내지 않고, 카드 수가 세션 수를 넘지 않는다.
+ */
+export type Notice = {
+  sessionId: string
+  kind: 'done' | 'approval' | 'error'
+  /** 그때의 세션 이름 — 나중에 바뀌어도 카드에 적힌 것은 그대로 둔다 */
+  name: string
+  at: number
+}
+
 /** 아직 보내지 않은 것. 글과 첨부는 함께 움직인다 — 한쪽만 세션에 묶으면 반쪽만 고친 게 된다 */
 export type Draft = { text: string; attachments: Attachment[] }
 export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
@@ -150,6 +164,16 @@ export type AppState = {
    * at을 함께 두는 이유: 같은 세션이 연달아 끝나도 **매번** 불어야 한다 (키로 쓴다).
    */
   completion: { sessionId: string; at: number } | null
+  /**
+   * 화면 밖에서 일어난 일들 — 우측 상단에 쌓이는 알림 카드.
+   *
+   * **스스로 사라지지 않는다.** OS 배너는 몇 초 뒤 걷혀서, 자리를 비운 사이에 온 것은
+   * 돌아왔을 때 이미 없다. 그게 이 앱이 배너로 못 푸는 부분이고, 그래서 여기 남는다.
+   * 걷히는 경우는 셋뿐이다: 그 세션을 보게 되거나, 카드를 눌러 그리로 가거나, ×를 누르거나.
+   *
+   * 세션당 하나만 둔다. 바쁜 세션 하나가 화면을 채우면 나머지가 묻힌다.
+   */
+  notices: Notice[]
   /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
   viewerPath: string | null
   paletteOpen: boolean
@@ -163,6 +187,8 @@ export type AppState = {
   focusSession(id: string | null): void
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
+  /** 알림 카드를 걷는다 (×를 누르거나, 그 세션을 보게 됐거나) */
+  dismissNotices(sessionIds: string[]): void
   loadHistory(sessionId: string, force?: boolean): Promise<void>
   /** 더 오래된 대화를 앞에 붙인다 (압축 이전 대화를 읽기 위한 길) */
   loadOlder(sessionId: string): Promise<void>
@@ -310,6 +336,23 @@ const WINDOW_SIZE = 50
 /** 아직 스토어에 등록되지 않은 세션의 이벤트 보관함 (등록 직후 재생) */
 const pendingEvents = new Map<string, NormalizedEvent[]>()
 
+/**
+ * 알림 카드를 쌓는다 — 세션당 하나.
+ *
+ * 같은 세션이 또 부르면 늘리지 않고 갱신하며, **자리는 처음 부른 순서를 지킨다.**
+ * 매번 맨 아래로 보내면 바쁜 세션이 카드를 계속 움직여서, 누르려던 카드가
+ * 손가락 밑에서 달아난다.
+ */
+function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notice: Notice): void {
+  set((s) => {
+    const at = s.notices.findIndex((n) => n.sessionId === notice.sessionId)
+    if (at === -1) return { notices: [...s.notices, notice] }
+    const notices = [...s.notices]
+    notices[at] = notice
+    return { notices }
+  })
+}
+
 export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',
@@ -335,6 +378,7 @@ export const useStore = create<AppState>((set, get) => ({
   toast: null,
   appFocused: true,
   completion: null as { sessionId: string; at: number } | null,
+  notices: [] as Notice[],
   viewerPath: null,
   paletteOpen: false,
   usageOpen: false,
@@ -428,6 +472,16 @@ export const useStore = create<AppState>((set, get) => ({
     set({ appFocused: focused })
   },
 
+  dismissNotices(sessionIds) {
+    if (sessionIds.length === 0) return
+    const drop = new Set(sessionIds)
+    set((s) => {
+      const kept = s.notices.filter((n) => !drop.has(n.sessionId))
+      // 같은 배열이면 그대로 둔다 — 새 배열을 넣으면 이걸 보는 효과가 다시 돈다
+      return kept.length === s.notices.length ? {} : { notices: kept }
+    })
+  },
+
   dispatchEvent(e) {
     const sessionId = e.sessionId
     if (!sessionId) return
@@ -454,16 +508,20 @@ export const useStore = create<AppState>((set, get) => ({
      * 사건이 일어난 그 순간에 한 번 판정하면 어긋날 자리가 없다.
      * 시각을 함께 담는 이유는 같은 세션이 연달아 끝나도 매번 불어야 해서다.
      *
-     * 화면 밖에서 끝난 것은 담지 않는다 — 그건 뱃지와 알림의 몫이다.
+     * 화면 밖에서 끝난 것은 바람이 아니라 **카드**로 남는다 — 보고 있지 않았으니
+     * 지나가는 신호로는 놓친다. 둘은 같은 사건의 두 얼굴이고, 서로 배타적이다.
      */
     if (e.type === 'turn_complete') {
       const s = get()
-      if (isOnScreen(s.view, sessionId, {
+      const onScreen = isOnScreen(s.view, sessionId, {
         focusedSessionId: s.focusedSessionId,
         orchestratorId: s.orchestratorId,
         gridPanels: s.gridPanels,
-      })) {
+      })
+      if (onScreen) {
         set({ completion: { sessionId, at: Date.now() } })
+      } else {
+        pushNotice(set, { sessionId, kind: 'done', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
       }
     }
 
@@ -514,9 +572,24 @@ export const useStore = create<AppState>((set, get) => ({
       const all = allDoneNotification(after, before, ctx)
       // 개별 알림이 있으면 그것만 — 같은 순간에 두 번 울리지 않는다
       const notice = one ?? all
-      // 못 보냈으면 화면에 남긴다 — 조용히 사라지면 "알림이 안 온다"를 밝혀낼 수 없다
       if (notice) {
+        // 배너는 되면 좋은 것으로 내려갔다 (macOS에서 이 경로는 죽어 있다).
+        // 못 보냈으면 화면에 남긴다 — 조용히 사라지면 "알림이 안 온다"를 밝혀낼 수 없다.
         void platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
+        // 실제로 사람에게 닿는 길. 권한도 서명도 타지 않는다.
+        void platform.system
+          .alert(notice.kind, st.notifyPolicy.sound)
+          .catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
+      }
+      // 승인·오류는 사람이 와야 풀린다 → 돌아왔을 때 남아 있도록 카드로도 남긴다.
+      // "전부 완료"는 세션 하나의 일이 아니므로 카드를 만들지 않는다 (개별 카드가 이미 있다).
+      if (one) {
+        pushNotice(set, {
+          sessionId,
+          kind: one.kind === 'error' ? 'error' : 'approval',
+          name: withSeq.name,
+          at: Date.now(),
+        })
       }
       void platform.system.setBadge(badgeCount(countWaiting(after)))
     }

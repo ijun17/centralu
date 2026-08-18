@@ -18,6 +18,7 @@ import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
 import { FirstRun } from '../features/onboarding/FirstRun.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
+import { Notices } from '../features/notices/Notices.jsx'
 import { UsageModal } from '../features/usage/UsagePanel.jsx'
 import { Kbd } from '../components/primitives.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
@@ -84,8 +85,11 @@ function Body() {
   */
 
   return (
-    <div className="flex min-h-0 flex-1">
+    // relative: 알림 카드가 이 안에 떠야 한다. 앱 전체에 걸면 상단 바와 승인 배너를
+    // 덮어서, 배너의 버튼을 카드가 가로챈다 (e2e가 클릭이 막히는 것으로 잡아냈다).
+    <div className="relative flex min-h-0 flex-1">
       <Sidebar />
+      <Notices />
       {/*
         오버레이는 중앙·우측만 덮는다. 좌측(관찰 레인)까지 덮으면
         코드를 보는 동안 다른 세션이 나를 부르는 것을 놓친다 —

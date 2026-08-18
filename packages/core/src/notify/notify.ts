@@ -16,6 +16,13 @@ export type NotifyPolicy = {
   allDone: boolean
   /** 앱이 포그라운드일 때도 알릴지 (기본: 안 알림 — 눈앞에 있는데 알림은 소음) */
   whenFocused: boolean
+  /**
+   * 소리를 낼지.
+   *
+   * macOS 배너 경로가 죽어 있는 것을 실측한 뒤로 **소리가 자리 비움의 주력**이 됐다.
+   * 옆방에 가 있어도 닿는 유일한 신호라서 기본값이 켜짐이다.
+   */
+  sound: boolean
 }
 
 export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
@@ -23,6 +30,7 @@ export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
   error: true,
   allDone: true,
   whenFocused: false,
+  sound: true,
 }
 
 export type NotifyRequest = { kind: 'approval' | 'error' | 'all_done'; sessionId?: string; title: string; body: string }

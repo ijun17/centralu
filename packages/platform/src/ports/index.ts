@@ -134,11 +134,22 @@ export interface FsPort {
   readFile(projectId: string, relPath: string): Promise<FsFile>
 }
 
+/** 무엇 때문에 부르는지 — 소리와 독 튀김의 세기가 여기서 갈린다 */
+export type AlertKind = 'approval' | 'error' | 'all_done'
+
 export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
 export type FsFile = { text: string; truncated: boolean; binary: boolean; bytes: number }
 
 export interface SystemPort {
   notify(title: string, body: string): Promise<void>
+  /**
+   * 소리와 독 아이콘으로 부른다.
+   *
+   * `notify`(OS 배너)와 나눠 둔 이유는 **닿는 경로가 다르기** 때문이다. 배너는 알림 권한과
+   * 코드 서명을 타지만 이쪽은 아무것도 타지 않는다. macOS에서 배너 경로가 죽어 있는 것을
+   * 실측한 뒤로, 자리를 비운 사람에게 실제로 닿는 것은 이쪽이다.
+   */
+  alert(kind: AlertKind, sound: boolean): Promise<void>
   setBadge(count: number): Promise<void>
   openInIde(path: string, line?: number): Promise<void>
   /** 디렉토리 선택. 데스크톱은 네이티브 피커, 웹 dev는 경로 입력으로 폴백한다 (FR-19) */
