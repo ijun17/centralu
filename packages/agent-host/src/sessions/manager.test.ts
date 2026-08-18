@@ -33,6 +33,14 @@ class FakeHandle implements SessionHandle {
   emitDelta(text: string) {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
   }
+  emitToolCall(tool: string, title: string) {
+    this.emit({
+      type: 'tool_call',
+      sessionId: this.sessionId,
+      callId: `c-${title.length}`,
+      summary: { tool, title, readOnly: false, paths: [] },
+    })
+  }
   async dispose() { this.disposed = true }
 }
 
@@ -969,7 +977,26 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
 
     const r = await tools.readSession(a.id)
     expect(r.ok).toBe(true)
-    expect(r.lines).toContain('에이전트: 앞부분 뒷부분')
+    // 시각이 앞에 붙는다 — 보는 것은 조각이 이어졌는가다
+    expect(r.lines!.some((l) => l.endsWith('에이전트: 앞부분 뒷부분'))).toBe(true)
+  })
+
+  /*
+   * 도구 호출 본문이 대화를 덮던 문제 (도그푸딩: limit 50인데 python 스크립트 전문과
+   * 커밋 메시지 전문이 대부분이었다). 기본은 한 줄로 접고 필요할 때만 펼친다.
+   */
+  it('read_session은 도구 호출을 기본으로 접는다', async () => {
+    const { a, tools } = await setup()
+    const h = adapter.handleOf(a.id)!
+    h.emitToolCall('Bash', 'python3 - <<EOF\n아주 긴 스크립트 본문\n두 번째 줄\nEOF')
+    await new Promise((r) => setTimeout(r, 0))
+
+    const folded = (await tools.readSession(a.id)).lines!.join('\n')
+    expect(folded).not.toContain('두 번째 줄')
+    expect(folded).toContain('python3')
+
+    const opened = (await tools.readSession(a.id, 40, { tools: true })).lines!.join('\n')
+    expect(opened).toContain('두 번째 줄')
   })
 
   it('read_session도 이 앱의 세션만 읽는다', async () => {

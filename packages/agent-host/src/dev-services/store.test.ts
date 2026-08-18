@@ -58,7 +58,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(10)
+    expect(store.schemaVersion).toBe(11)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -77,7 +77,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(10)
+    expect(new Store().schemaVersion).toBe(11)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -160,7 +160,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(10)
+    expect(store.schemaVersion).toBe(11)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -187,6 +187,43 @@ describe('마이그레이션 (E-0)', () => {
     // unicode61이면 '승인'으로 '승인을'을 못 찾는다 — 이게 이 앱에서 실제로 겪을 문제
     expect(s.searchMessages('승인').length).toBe(1)
     expect(s.searchMessages('기다리').length).toBe(1)
+    s.close()
+  })
+
+  /*
+   * 색인이 메시지보다 8.6배 많았다 (실제 DB: 메시지 28,892 · 색인 249,809).
+   * messages는 덮어쓰는데 색인은 맨 INSERT라, 같은 자리를 다시 쓸 때마다 한 행씩 쌓였다.
+   * recall이 같은 말을 반복해 내놓은 것도, 색인이 본문의 수십 배로 부푼 것도 여기서 나왔다.
+   */
+  it('같은 메시지를 다시 써도 색인이 늘지 않는다', () => {
+    const s = seeded()
+    const msg = {
+      sessionId: 's1', seq: 10, role: 'assistant' as const, kind: 'text' as const,
+      payload: { text: '은하수 그라데이션' }, ts: 0,
+    }
+    for (let i = 0; i < 5; i++) s.appendMessages([msg])
+    expect(s.searchMessages('은하수').length).toBe(1)
+    s.close()
+  })
+
+  it('내용을 고쳐 쓰면 옛 내용은 검색되지 않는다', () => {
+    const s = seeded()
+    const at = { sessionId: 's1', seq: 11, role: 'assistant' as const, kind: 'text' as const, ts: 0 }
+    s.appendMessages([{ ...at, payload: { text: '옛날내용' } }])
+    s.appendMessages([{ ...at, payload: { text: '새내용' } }])
+    expect(s.searchMessages('옛날내용').length).toBe(0)
+    expect(s.searchMessages('새내용').length).toBe(1)
+    s.close()
+  })
+
+  it('본문 전체를 돌려준다 — 자르는 일은 부르는 쪽이 한다', () => {
+    const s = seeded()
+    const long = `${'앞'.repeat(300)}은하수${'뒤'.repeat(300)}`
+    s.appendMessages([
+      { sessionId: 's1', seq: 12, role: 'assistant', kind: 'text', payload: { text: long }, ts: 0 },
+    ])
+    // 예전에는 snippet(...,12)로 15자쯤에서 끊겨 무엇인지 가릴 수 없었다
+    expect(s.searchMessages('은하수')[0]!.body).toBe(long)
     s.close()
   })
 })

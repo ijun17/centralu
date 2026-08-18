@@ -202,6 +202,47 @@ export class Store {
           }
         },
       },
+      {
+        to: 11,
+        run: () => {
+          /*
+           * 색인을 메시지에 다시 못 박는다.
+           *
+           * 그동안 색인은 맨 INSERT라 같은 메시지를 다시 쓸 때마다 행이 하나씩 늘었다.
+           * 실제 DB에서 메시지 28,892건에 색인 249,809행 — **8.6배**였다.
+           * 그래서 recall이 같은 말을 반복해서 내놓았고(limit이 무의미해졌다),
+           * 색인이 본문의 수십 배로 부풀어 있었다.
+           *
+           * 기존 행은 rowid가 메시지와 무관하므로 골라내지 못한다 — 통째로 다시 만든다.
+           * 한 덩어리로 돌린다: 중간에 끊기면 검색이 통째로 빈 채로 남는다.
+           */
+          const tx = this.db.transaction(() => {
+            this.db.exec(`DROP TABLE IF EXISTS messages_fts`)
+            this.db.exec(`
+              CREATE VIRTUAL TABLE messages_fts USING fts5(
+                body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
+              );
+            `)
+            const rows = this.db
+              .prepare(`SELECT rowid, session_id, seq, payload FROM messages`)
+              .all() as { rowid: number; session_id: string; seq: number; payload: string }[]
+            const insert = this.db.prepare(
+              `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
+            )
+            for (const r of rows) {
+              const body = extractText(r.payload)
+              if (body) insert.run(r.rowid, body, r.session_id, r.seq)
+            }
+          })
+          tx()
+          /*
+           * 지운 자리는 SQLite가 알아서 돌려주지 않는다. 겹친 행이 차지하던 공간이
+           * 그대로 파일에 남아 있으므로 여기서 한 번 걷는다 — 실측한 DB에서 165MB → 21MB.
+           * (트랜잭션 안에서는 돌지 않아 커밋 뒤에 따로 부른다.)
+           */
+          this.db.exec('VACUUM')
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -383,17 +424,49 @@ export class Store {
     tx()
   }
 
+  /**
+   * 메시지를 남긴다 — **같은 자리에 두 번 쓰면 덮어쓴다, 색인도 함께.**
+   *
+   * 예전에는 messages만 INSERT OR REPLACE고 색인은 맨 INSERT였다. 그래서 같은 (세션, seq)를
+   * 다시 쓸 때마다 색인에는 **행이 하나씩 늘었다.** 실제 DB에서 메시지 28,892건에
+   * 색인 249,809행 — 8.6배였고, 많은 것은 13번까지 겹쳐 있었다.
+   *
+   * 그 대가를 두 곳에서 치르고 있었다: recall 결과가 같은 말로 도배되어 limit이 무의미했고
+   * (도그푸딩: "limit 8인데 같은 게 5번"), 색인이 본문의 수십 배로 부풀었다.
+   *
+   * 고치는 방법은 색인 행을 **메시지 행에 못 박는 것**이다. rowid를 messages의 rowid로
+   * 쓰면 INSERT OR REPLACE가 알아서 덮는다. (session_id·seq는 UNINDEXED라
+   * WHERE로 지우려 하면 25만 행 전체 훑기가 된다 — 쓸 때마다 그럴 수는 없다.)
+   *
+   * messages도 REPLACE가 아니라 UPDATE여야 한다. REPLACE는 지우고 다시 넣는 것이라
+   * **rowid가 바뀌고**, 그러면 색인이 가리키던 자리가 사라진다.
+   */
   appendMessages(msgs: StoredMessage[]): void {
     const stmt = this.db.prepare(
-      `INSERT OR REPLACE INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, seq) DO UPDATE SET role = excluded.role, kind = excluded.kind,
+         payload = excluded.payload, ts = excluded.ts`,
     )
-    const fts = this.db.prepare(`INSERT INTO messages_fts (body, session_id, seq) VALUES (?, ?, ?)`)
+    const rowidOf = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? AND seq = ?`)
+    const fts = this.db.prepare(
+      `INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
+    )
+    const dropFts = this.db.prepare(`INSERT INTO messages_fts (messages_fts, rowid, body) VALUES ('delete', ?, ?)`)
+    const bodyAt = this.db.prepare(`SELECT body FROM messages_fts WHERE rowid = ?`)
     const tx = this.db.transaction((rows: StoredMessage[]) => {
       for (const m of rows) {
         const payload = JSON.stringify(m.payload)
         stmt.run(m.sessionId, m.seq, m.role, m.kind, payload, m.ts)
         const body = extractText(payload)
-        if (body) fts.run(body, m.sessionId, m.seq)
+        const rid = (rowidOf.get(m.sessionId, m.seq) as { rowid: number } | undefined)?.rowid
+        if (rid === undefined) continue
+        if (body) {
+          fts.run(rid, body, m.sessionId, m.seq)
+        } else {
+          // 본문이 사라진 자리는 색인에서도 걷는다 (안 그러면 옛 본문이 계속 검색된다)
+          const old = (bodyAt.get(rid) as { body: string } | undefined)?.body
+          if (old !== undefined) dropFts.run(rid, old)
+        }
       }
     })
     tx(msgs)
@@ -402,7 +475,15 @@ export class Store {
   /**
    * 대화 전문 검색 (E-1). 아카이브된 세션도 포함한다 — 찾으려는 것이 거기 있을 수 있다.
    */
-  searchMessages(query: string, limit = 50): { sessionId: string; seq: number; snippet: string }[] {
+  /**
+   * 대화 전문 검색. **본문을 통째로 돌려준다** — 자르는 일은 부르는 쪽이 한다.
+   *
+   * 예전에는 여기서 `snippet(..., 12)`으로 잘라 줬는데, 그 12는 글자 수가 아니라
+   * **토큰 수**고 토크나이저가 trigram이라 실질 15자쯤에서 끊겼다. 오케스트레이터에게는
+   * `"은하수 색이 이미 정책 목…"` 같은 것만 도착해서 **이게 찾던 대목인지 가릴 수가 없었다.**
+   * 앞뒤 문맥이 얼마나 필요한지는 쓰는 쪽이 아는 일이라 판단을 넘긴다.
+   */
+  searchMessages(query: string, limit = 50): { sessionId: string; seq: number; body: string }[] {
     const q = query.trim()
     if (!q) return []
 
@@ -411,19 +492,19 @@ export class Store {
     if (q.length < 3) {
       return this.db
         .prepare(
-          `SELECT session_id as sessionId, seq, body as snippet FROM messages_fts
+          `SELECT session_id as sessionId, seq, body FROM messages_fts
            WHERE body LIKE ? ORDER BY seq DESC LIMIT ?`,
         )
-        .all(`%${q}%`, limit) as { sessionId: string; seq: number; snippet: string }[]
+        .all(`%${q}%`, limit) as { sessionId: string; seq: number; body: string }[]
     }
 
     try {
       return this.db
         .prepare(
-          `SELECT session_id as sessionId, seq, snippet(messages_fts, 0, '', '', '…', 12) as snippet
+          `SELECT session_id as sessionId, seq, body
            FROM messages_fts WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?`,
         )
-        .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; snippet: string }[]
+        .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; body: string }[]
     } catch {
       // FTS 구문 오류(특수문자 등)에는 조용히 빈 결과 — 검색창이 깨지면 안 된다
       return []

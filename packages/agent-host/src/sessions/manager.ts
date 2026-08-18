@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
+import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
 import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
@@ -1101,8 +1102,15 @@ export class SessionManager {
     this.store.deleteApprovalRule(id)
   }
 
+  /**
+   * 명령 팔레트의 검색. 저장소는 이제 본문을 통째로 주므로 **여기서 한 줄로 줄인다**
+   * (팔레트는 한 줄만 보여준다). 오케스트레이터의 recall은 같은 본문에서
+   * 훨씬 넓게 잘라 쓴다 — 얼마나 필요한지는 쓰는 쪽이 안다.
+   */
   searchMessages(query: string, limit?: number) {
-    return this.store.searchMessages(query, limit)
+    return this.store
+      .searchMessages(query, limit)
+      .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
   }
 
   /** 이 세션에 적용되는 저장된 규칙 (세션 범위 + 프로젝트 범위) */
@@ -1170,34 +1178,49 @@ export class SessionManager {
           .filter((s) => s.id !== orchestratorId && !s.archived)
           .map((s) => ({
             sessionId: s.id,
-            name: s.name,
+            name: this.labelOf(s),
             project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
             state: s.state,
             tool: s.tool,
             preview: this.previewOf(s.id),
+            lastActive: this.lastActiveOf(s.id),
           }))
       },
 
       recall: async (query, limit = 12) => {
         const byId = projects()
-        const hits = this.store.searchMessages(query, limit * 3)
-        const out: { sessionId: string; session: string; project: string; snippet: string }[] = []
-        for (const h of hits) {
+        // 넉넉히 긁어와서 겹치는 것을 걷어낸 뒤 자른다 — 걷기 전에 자르면 limit이 중복에 먹힌다
+        const raw = this.store.searchMessages(query, limit * 12)
+        const mine = raw.filter((h) => {
           const s = this.meta.get(h.sessionId)
           // 오케스트레이터 자신의 말은 뺀다 — 자기가 한 말을 근거로 되짚으면 메아리가 된다
-          if (!s || s.id === orchestratorId) continue
+          return s && s.id !== orchestratorId
+        })
+        const out: {
+          sessionId: string
+          session: string
+          project: string
+          snippet: string
+          seq: number
+          at?: string
+        }[] = []
+        for (const h of dedupeNearbyHits(mine)) {
+          const s = this.meta.get(h.sessionId)!
           out.push({
             sessionId: s.id,
-            session: s.name,
+            session: this.labelOf(s),
             project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
-            snippet: h.snippet.slice(0, 300),
+            // 델타 한 조각이 아니라 **둘레의 말**에서 잘라낸다 (조각만 보면 판단이 안 된다)
+            snippet: windowAround(this.contextAt(s.id, h.seq) || h.body, query, 160),
+            seq: h.seq, // read_session의 around로 넘기면 그 대목으로 바로 간다
+            at: this.timeOf(h.sessionId, h.seq),
           })
           if (out.length >= limit) break
         }
         return { hits: out }
       },
 
-      readSession: async (sessionId, limit = 40) => {
+      readSession: async (sessionId, limit = 40, opts) => {
         // 범위 판정은 sendToSession과 같은 규칙 — 이 앱이 관리하는 세션만
         if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 읽지 않습니다' }
         const target = this.meta.get(sessionId)
@@ -1207,24 +1230,53 @@ export class SessionManager {
          * 저장된 한 행은 스트리밍 델타 하나다. 그대로 주면 토막 수백 개가 나가므로
          * UI가 하는 것과 같이 **연속된 assistant 조각을 한 줄로 이어붙인다.**
          */
-        const rows = this.store.loadMessages(sessionId, 800)
+        /*
+         * `around`가 있으면 그 언저리를 읽는다 — recall이 준 seq를 그대로 넘기면 된다.
+         * 이게 없어서 "찾았는데 갈 수가 없는" 상태였다: recall은 세션 id만 주고,
+         * read_session은 맨 끝만 읽어서, 결국 세션을 통째로 퍼올려 눈으로 찾아야 했다.
+         */
+        const around = opts?.around
+        const rows = around
+          ? this.store.loadMessages(sessionId, Math.max(limit * 8, 200), around + Math.max(limit * 4, 100))
+          : this.store.loadMessages(sessionId, 800)
+
         const lines: string[] = []
+        const stamp = (ts: number) => new Date(ts).toISOString().slice(0, 16).replace('T', ' ')
         for (const r of rows) {
-          const p = r.payload as { text?: string; summary?: { title?: string } }
+          const p = r.payload as { text?: string; summary?: { title?: string; tool?: string } }
           if (r.kind === 'text' && r.role === 'assistant') {
             const last = lines[lines.length - 1]
-            if (last?.startsWith('에이전트: ')) lines[lines.length - 1] = last + (p.text ?? '')
-            else lines.push('에이전트: ' + (p.text ?? ''))
+            if (last?.includes('에이전트: ')) lines[lines.length - 1] = last + (p.text ?? '')
+            else lines.push(`[${stamp(r.ts)}] 에이전트: ` + (p.text ?? ''))
           } else if (r.kind === 'text') {
-            lines.push('사람: ' + (p.text ?? ''))
+            lines.push(`[${stamp(r.ts)}] 사람: ` + (p.text ?? ''))
           } else if (r.kind === 'tool_call' && p.summary?.title) {
-            lines.push('도구: ' + p.summary.title)
+            /*
+             * **도구는 접는다.** 펼치면 python 스크립트 전문과 커밋 메시지 전문이
+             * 자리를 다 차지해서 정작 사람↔에이전트 대화가 파묻힌다 (도그푸딩).
+             * 무엇을 했는지는 한 줄이면 충분하고, 본문이 필요하면 tools:true로 펼친다.
+             */
+            const title = opts?.tools ? p.summary.title : p.summary.title.split('\n')[0]!.slice(0, 100)
+            lines.push(`[${stamp(r.ts)}] 도구(${p.summary.tool ?? '?'}): ${title}`)
           }
         }
+        const picked = around ? lines.slice(-limit) : lines.slice(-limit)
         return {
           ok: true,
           state: target.state,
-          lines: lines.slice(-limit).map((l) => (l.length > 2000 ? l.slice(0, 2000) + '…' : l)),
+          lines: picked.map((l) => (l.length > 2000 ? l.slice(0, 2000) + '…' : l)),
+        }
+      },
+
+      archiveSession: async (sessionId, archived) => {
+        if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 보관할 수 없습니다' }
+        const target = this.meta.get(sessionId)
+        if (!target) return { ok: false, error: `이 앱이 관리하는 세션이 아닙니다: ${sessionId}` }
+        try {
+          await this.archive(sessionId, archived)
+          return { ok: true }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
         }
       },
 
@@ -1264,6 +1316,68 @@ export class SessionManager {
    * UI는 이 조각들을 이어붙여 되돌린다(messagesToChat). 여기서도 같이 한다:
    * 뒤에서부터 연속된 assistant 조각을 모으고, 다른 종류를 만나면 거기가 경계다.
    */
+  /**
+   * 사람이 세션을 **구분할 수 있는** 이름.
+   *
+   * 압축을 거친 세션은 이름이 전부 "This session is being continued from a previous…"가 된다
+   * (압축 요약이 첫 사용자 메시지가 되고, 자동 이름이 그걸 집는다). 도그푸딩에서
+   * list_sessions의 네 세션이 같은 제목이었다 — 지금은 프로젝트 이름으로 겨우 갈리지만
+   * **한 프로젝트에 세션이 둘이면 못 가른다.** 그러면 오케스트레이터는 짐작하면 안 되니
+   * 매번 사람에게 되물어야 한다.
+   *
+   * 그럴 때는 제목 대신 **첫 진짜 지시**를 이름으로 쓴다. 무엇을 하는 세션인지는
+   * 그쪽이 훨씬 잘 말해준다.
+   */
+  private labelOf(s: SessionInfo): string {
+    if (!/^This session is being continued|^Caveat: The messages below/i.test(s.name)) return s.name
+    const rows = this.store.loadMessages(s.id, 400)
+    for (const r of rows) {
+      if (r.kind !== 'text' || r.role !== 'user') continue
+      const t = ((r.payload as { text?: string }).text ?? '').trim()
+      // 압축 요약 자체는 건너뛴다 — 그게 이름을 망친 장본인이다
+      if (!t || /^This session is being continued|^Caveat:/i.test(t)) continue
+      const one = t.replace(/\s+/g, ' ').slice(0, 60)
+      return `${one}${t.length > 60 ? '…' : ''} (이어받은 세션)`
+    }
+    return `${s.name.slice(0, 40)}…`
+  }
+
+  /**
+   * 그 자리 **둘레의 말**을 되살린다.
+   *
+   * 색인의 한 행은 메시지가 아니라 **스트리밍 델타 하나**라, 대개 수십 자짜리 토막이다.
+   * 그래서 그 행만 잘라 주면 아무리 넓게 잡아도 넓어지지 않는다 —
+   * 도그푸딩에서 `"이 풀리고, 이번에 고친 승인 카드 수정 + 은하수 바"` 같은 것이 그것이다.
+   *
+   * 앞뒤 행을 모아 한 덩어리로 되돌린 다음에야 "이게 찾던 대목인가"를 가릴 수 있다.
+   */
+  private contextAt(sessionId: string, seq: number, span = 60): string {
+    const rows = this.store.loadMessages(sessionId, span * 2, seq + span)
+    const parts: string[] = []
+    for (const r of rows) {
+      if (r.kind !== 'text') continue
+      const t = (r.payload as { text?: string }).text ?? ''
+      if (!t) continue
+      // 사람의 말은 경계를 표시한다 — 누가 한 말인지 섞이면 오히려 헷갈린다
+      parts.push(r.role === 'user' ? `\n[사람] ${t}\n` : t)
+    }
+    return parts.join('')
+  }
+
+  /** 마지막으로 움직인 시각 — 어느 세션이 지금 이야기인지 가른다 */
+  private lastActiveOf(sessionId: string): string | undefined {
+    const rows = this.store.loadMessages(sessionId, 1)
+    const ts = rows[rows.length - 1]?.ts
+    return ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') : undefined
+  }
+
+  /** 그 자리의 시각 — 여러 세션 이야기를 맞출 때 순서를 세울 수 있어야 한다 */
+  private timeOf(sessionId: string, seq: number): string | undefined {
+    const rows = this.store.loadMessages(sessionId, 1, seq + 1)
+    const ts = rows[0]?.ts
+    return ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') : undefined
+  }
+
   private previewOf(sessionId: string, maxChars = 120): string {
     // 델타는 잘게 쪼개지므로 넉넉히 읽는다. 한 응답이 수백 조각인 경우가 흔하다
     const rows = this.store.loadMessages(sessionId, 500)

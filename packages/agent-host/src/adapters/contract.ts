@@ -42,6 +42,8 @@ export type OrchestratedSession = {
   tool: ToolName
   /** 마지막으로 무슨 일이 있었는지 한 줄 */
   preview: string
+  /** 마지막으로 움직인 시각 — 어느 세션이 '지금 이야기'인지 가른다 */
+  lastActive?: string
 }
 
 export type OrchestratorTools = {
@@ -64,6 +66,12 @@ export type OrchestratorTools = {
   readSession(
     sessionId: string,
     limit?: number,
+    opts?: {
+      /** recall이 준 seq. 그 언저리를 읽는다 — 찾은 대목으로 바로 가는 길 */
+      around?: number
+      /** 도구 호출 본문까지 펼칠지. 기본은 접는다 (스크립트 전문이 대화를 덮는다) */
+      tools?: boolean
+    },
   ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
   /**
    * 지난 대화에서 찾는다 — **프로젝트를 가로지르는 기억**.
@@ -72,7 +80,27 @@ export type OrchestratorTools = {
    * 증류된 요약은 원본이 바뀌어도 그대로 남는다. 우리는 대화를 하나도 지우지 않으므로
    * **찾을 수만 있으면 그게 기억이다.**
    */
-  recall(query: string, limit?: number): Promise<{ hits: { sessionId: string; session: string; project: string; snippet: string }[] }>
+  /**
+   * 세션을 보관하거나 되돌린다.
+   *
+   * 막힌 창을 푸는 방법이 앱 재시작 아니면 아카이브→복구인데, 오케스트레이터는
+   * 둘 다 못 해서 결국 사람에게 넘겨야 했다 (도그푸딩). 되돌릴 수 있는 일이라 준다.
+   */
+  archiveSession(sessionId: string, archived: boolean): Promise<{ ok: boolean; error?: string }>
+  recall(
+    query: string,
+    limit?: number,
+  ): Promise<{
+    hits: {
+      sessionId: string
+      session: string
+      project: string
+      snippet: string
+      /** read_session의 around로 넘기면 그 대목으로 간다 */
+      seq: number
+      at?: string
+    }[]
+  }>
 }
 
 export type CreateSessionOpts = {

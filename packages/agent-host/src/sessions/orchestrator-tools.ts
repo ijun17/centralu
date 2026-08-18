@@ -35,6 +35,23 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({
       sessionId: z.string().describe('list_sessions가 준 세션 id'),
       limit: z.number().optional().describe('읽을 줄 수 (기본 40, 최근 것부터)'),
+      around: z
+        .number()
+        .optional()
+        .describe('recall이 준 seq. 주면 그 대목 언저리를 읽는다 (없으면 맨 끝)'),
+      tools: z
+        .boolean()
+        .optional()
+        .describe('도구 호출 본문까지 펼칠지. 기본은 한 줄로 접는다 — 스크립트 전문이 대화를 덮는다'),
+    }),
+  },
+  {
+    name: 'archive_session',
+    description:
+      '세션을 보관하거나(archived=true) 목록으로 되돌린다(false). 보관하면 그 세션의 프로세스가 내려가고 대기 중이던 승인·질문 카드도 걷힌다 — 화면이 막혔을 때 푸는 방법이다. 기록은 지워지지 않는다.',
+    schema: z.object({
+      sessionId: z.string().describe('list_sessions가 준 세션 id'),
+      archived: z.boolean().describe('true면 보관, false면 되돌리기'),
     }),
   },
   {
@@ -61,6 +78,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '위험한 작업이면 그 세션에서 사람에게 승인을 묻게 된다.',
   '사람이 결과를 기다리는 일이면 reportBack을 켠다 — 그 세션이 마치면 여기로 알려준다.',
   '보고만으로 부족하면 read_session으로 그 세션의 대화를 직접 읽는다.',
+  'recall이 준 seq를 read_session의 around에 넣으면 찾은 대목으로 바로 간다 — 세션을 통째로 읽지 않는다.',
   '"저번에", "예전에 저쪽에서" 같은 이야기가 나오면 recall로 지난 대화를 찾는다 —',
   '사람과 나눈 대화가 프로젝트를 가로지르는 기억이고, 그 기억은 검색으로만 닿는다.',
 ].join('\n')
@@ -86,6 +104,7 @@ export async function runOrchestratorTool(
         .map(
           (s) =>
             `- ${s.name} [${s.sessionId}] · 프로젝트 ${s.project} · ${s.tool} · ${s.state}` +
+            (s.lastActive ? ` · 마지막 ${s.lastActive}` : '') +
             (s.preview ? `\n    최근: ${s.preview}` : ''),
         )
         .join('\n'),
@@ -96,11 +115,27 @@ export async function runOrchestratorTool(
     const query = String(args.query ?? '')
     const r = await tools.recall(query, args.limit as number | undefined)
     if (r.hits.length === 0) return { text: `"${query}"로는 찾은 것이 없습니다. 다른 낱말로 다시 찾아보세요.` }
-    return { text: r.hits.map((h) => `- [${h.project}] ${h.session} (${h.sessionId})\n    ${h.snippet}`).join('\n') }
+    /*
+     * seq를 함께 준다 — 이게 recall과 read_session을 맞물리게 하는 고리다.
+     * 없으면 "찾긴 했는데 갈 수가 없어" 세션을 통째로 퍼올려 눈으로 찾아야 한다.
+     */
+    return {
+      text: r.hits
+        .map(
+          (h) =>
+            `- [${h.project}] ${h.session}${h.at ? ` · ${h.at}` : ''}\n` +
+            `    ${h.snippet}\n` +
+            `    → read_session(sessionId="${h.sessionId}", around=${h.seq})`,
+        )
+        .join('\n'),
+    }
   }
 
   if (name === 'read_session') {
-    const r = await tools.readSession(String(args.sessionId ?? ''), args.limit as number | undefined)
+    const r = await tools.readSession(String(args.sessionId ?? ''), args.limit as number | undefined, {
+      around: typeof args.around === 'number' ? args.around : undefined,
+      tools: args.tools === true,
+    })
     if (!r.ok) return { text: `읽지 못했습니다 — ${r.error}`, isError: true }
     /*
      * 아직 답하는 중이면 그렇다고 말한다.
@@ -114,6 +149,16 @@ export async function runOrchestratorTool(
           '   끝난 뒤에 알고 싶으면 send_to_session의 reportBack을 쓰세요.\n\n'
         : ''
     return { text: head + (r.lines?.join('\n') || '(대화 없음)') }
+  }
+
+  if (name === 'archive_session') {
+    const sessionId = String(args.sessionId ?? '')
+    const archived = args.archived === true
+    const r = await tools.archiveSession(sessionId, archived)
+    return {
+      text: r.ok ? `${archived ? '보관했습니다' : '되돌렸습니다'}: ${sessionId}` : `하지 못했습니다 — ${r.error}`,
+      isError: !r.ok,
+    }
   }
 
   if (name === 'send_to_session') {
