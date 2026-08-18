@@ -1,3 +1,4 @@
+import { CLIENT_INFO } from '@cc/protocol'
 import type { ModelOption } from '@cc/protocol'
 import { homedir } from 'node:os'
 import { CodexClient } from './client.js'
@@ -49,7 +50,7 @@ export async function listCodexModels(command: string): Promise<ModelOption[]> {
   )
   try {
     await client.request('initialize', {
-      clientInfo: { name: 'control-center', title: 'Control Center', version: '0.1.0' },
+      clientInfo: CLIENT_INFO,
       capabilities: null,
     })
     client.notify('initialized')

@@ -64,7 +64,7 @@
 실제 프로젝트로 며칠 굴리고 불만을 백로그로 만든다. 실행:
 
 ```bash
-open "apps/desktop/src-tauri/target/release/bundle/macos/Control Center.app"
+open "apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app"
 # 또는 개발 모드: pnpm host & pnpm dev
 ```
 

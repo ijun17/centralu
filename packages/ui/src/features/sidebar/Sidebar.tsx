@@ -117,7 +117,7 @@ export function Sidebar() {
         testId="sidebar-resize"
       />
       <OrchestratorButton />
-      <ControlCenterButton />
+      <GridButton />
       {ids.length === 0 ? (
         <p className="px-4 py-6 text-xs leading-relaxed text-slate">
           No projects yet.
@@ -134,9 +134,9 @@ export function Sidebar() {
 /**
  * 오케스트레이터로 가는 문 — **말로 관제**.
  *
- * 컨트롤 센터 바로 위에 둔다. 둘은 같은 것을 보는 두 방식이라 나란히 서야 한다:
+ * 그리드 바로 위에 둔다. 둘은 같은 것을 보는 두 방식이라 나란히 서야 한다:
  *   오케스트레이터  한 창에서 말로 시킨다
- *   컨트롤 센터    여러 창을 눈으로 본다
+ *   그리드    여러 창을 눈으로 본다
  *
  * 프로젝트 밑이 아니다. 이 세션은 프로젝트에 속하지 않는다 —
  * 여러 프로젝트를 가로지르는 것이 존재 이유이기 때문이다.
@@ -154,7 +154,7 @@ function OrchestratorButton() {
             ? 'border-slate/50 bg-graphite text-chalk'
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
         }`}
-        // 컨트롤 센터와 같은 규칙: 토글이 아니라 선택이다. 나가려면 다른 것을 고른다
+        // 그리드와 같은 규칙: 토글이 아니라 선택이다. 나가려면 다른 것을 고른다
         onClick={() => void open()}
         aria-pressed={active}
         data-testid="orchestrator-button"
@@ -182,16 +182,16 @@ function OrchestratorIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * 컨트롤 센터로 가는 문.
+ * 그리드로 가는 문.
  *
  * **프로젝트와 다르게 생겨야 한다.** 목록의 다른 줄과 같은 모양이면 "프로젝트 하나"로
  * 읽히는데, 이건 프로젝트가 아니라 **보는 방식**이다. 둥근 박스로 감싸 목록에서
  * 떼어 놓는다 — 같은 종류가 아니라는 걸 글자보다 모양이 먼저 말한다.
  *
- * 세션을 여기 떨어뜨리면 컨트롤 센터로 들어가면서 그 세션이 올라간다. 화면을 먼저
+ * 세션을 여기 떨어뜨리면 그리드로 들어가면서 그 세션이 올라간다. 화면을 먼저
  * 열고 다시 끌어야 한다면 두 번 일하는 셈이라, 끌어온 김에 한 번에 처리한다.
  */
-function ControlCenterButton() {
+function GridButton() {
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
   const panels = useStore((s) => s.gridPanels)
@@ -215,7 +215,7 @@ function ControlCenterButton() {
         */
         onClick={() => setView('grid')}
         aria-pressed={active}
-        data-testid="control-center-button"
+        data-testid="grid-button"
         title="See sessions side by side"
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(SESSION_MIME)) return
@@ -233,14 +233,14 @@ function ControlCenterButton() {
         }}
       >
         <GridIcon />
-        <span className="truncate font-medium tracking-tight">Control Center</span>
+        <span className="truncate font-medium tracking-tight">Grid</span>
         {panels.length > 0 && <span className="readout ml-auto text-[10px] text-slate">{panels.length}</span>}
       </button>
     </div>
   )
 }
 
-/** 나뉜 화면 — 컨트롤 센터가 하는 일을 그대로 그린 기호 */
+/** 나뉜 화면 — 그리드가 하는 일을 그대로 그린 기호 */
 function GridIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
@@ -444,7 +444,7 @@ function ConfirmDelete({
         <p className="text-[13px] text-chalk">Delete this session?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
         <p className="mt-2 text-[11px] leading-relaxed text-slate">
-          Chat history and attachments in Control Center will be gone.
+          Chat history and attachments in Centralu will be gone.
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
           The conversation stays in {toolLabel} — you can pull it back from <span className="text-chalk">+ → Past conversations</span>.

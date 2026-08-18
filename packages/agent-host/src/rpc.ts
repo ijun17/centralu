@@ -150,9 +150,9 @@ export function createRpcHandler(
       const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)
       return mgr.runOrchestratorTool(sessionId, name, args)
     },
-    'controlCenter.get': async () => mgr.controlCenter(),
-    'controlCenter.set': async (p) =>
-      mgr.setControlCenter(RpcMethods['controlCenter.set'].params.parse(p).sessionIds),
+    'grid.get': async () => mgr.grid(),
+    'grid.set': async (p) =>
+      mgr.setGridView(RpcMethods['grid.set'].params.parse(p).sessionIds),
     'projects.list': async () => mgr.listProjects(),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),

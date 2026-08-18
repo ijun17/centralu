@@ -8,7 +8,7 @@
 | 항목 | 값 | 확인 방법 |
 |---|---|---|
 | 서명 | 애드혹(유효) + hardened runtime, 공증 없음 | `codesign -dvv <app>` |
-| 아키텍처 | arm64 전용 (Mach-O arm64) | `file <app>/Contents/MacOS/control-center` |
+| 아키텍처 | arm64 전용 (Mach-O arm64) | `file <app>/Contents/MacOS/centralu` |
 | 네이티브 애드온 | `better_sqlite3.node`·`pty.node` 둘 다 arm64 | `file …/node_modules/**/*.node` |
 | 런타임 | `system-node` — **사용자 맥에 Node가 있어야 한다** | `resources/host/bundle-info.json` |
 | Node 하한 | esbuild target `node22` | `scripts/bundle.mjs` |
@@ -121,7 +121,7 @@ npm이 GUI 앱 일반에 맞는 통로라는 말이 아니다. 이 앱에 한해
 ### 2-4. 대가와, 반드시 지켜야 할 조건
 
 - **Launchpad·Spotlight에 안 뜬다** (`node_modules` 안에 살기 때문). 매번 명령으로 켜야 한다
-  → `control-center install` 서브커맨드로 `/Applications`에 복사한다. **postinstall로 몰래 하지 않는다**
+  → `centralu install` 서브커맨드로 `/Applications`에 복사한다. **postinstall로 몰래 하지 않는다**
   (pnpm은 기본 차단이고, 남의 `/Applications`에 조용히 쓰는 것은 신뢰를 깎는다)
 - arm64 전용 바이너리가 인텔 맥에 깔리면 안 된다 → `os`/`cpu` 필드 + 아키텍처별 optional dependency
   (esbuild·swc가 쓰는 그 구조)
@@ -132,7 +132,7 @@ npm이 GUI 앱 일반에 맞는 통로라는 말이 아니다. 이 앱에 한해
 
 ### 2-5. 할 일
 
-- [ ] 패키지 이름 — `control-center`는 npm에 **이미 있다**(HTTP 200). 스코프(`@ijun17/…`)나 다른 이름으로
+- [ ] 패키지 이름 — `grid`는 npm에 **이미 있다**(HTTP 200). 스코프(`@ijun17/…`)나 다른 이름으로
 - [ ] 아키텍처별 optional dependency 구조 (`@…/darwin-arm64`)
 - [ ] `bin` 실행 스크립트 — 번들 안 `.app`을 `open`으로 띄운다
 - [ ] `install` 서브커맨드 (`/Applications`에 복사, 되돌리는 `uninstall`도)

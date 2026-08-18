@@ -1,6 +1,7 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { extname, join } from 'node:path'
+import { DATA_DIR } from '@cc/protocol'
 import type { Attachment } from '@cc/protocol'
 
 /**
@@ -9,7 +10,7 @@ import type { Attachment } from '@cc/protocol'
  * 이미지를 base64로 DB에 넣지 않는다 — 대화 기록이 급격히 커지고 FTS 인덱스가 오염된다.
  * 파일로 저장하고 경로만 주고받는다. 세션을 지우면 함께 정리된다.
  */
-const ROOT = join(homedir(), '.control-center', 'attachments')
+const ROOT = join(homedir(), DATA_DIR, 'attachments')
 
 const EXT: Record<string, string> = {
   'image/png': '.png',

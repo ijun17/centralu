@@ -8,7 +8,7 @@ import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reor
 import { dropEdge, dropSide, type DropTarget } from './drop.js'
 
 /**
- * 컨트롤 센터 — 여러 세션을 한 화면에서.
+ * 그리드 — 여러 세션을 한 화면에서.
  *
  * 사양서(§5.4)는 그리드를 v1에서 제외했었다. 근거 셋 중 첫 번째 —
  * "패널당 600×400이면 대화도 입력창도 제대로 안 보인다" — 는 지금도 유효하다.
@@ -18,7 +18,7 @@ import { dropEdge, dropSide, type DropTarget } from './drop.js'
  * 칸은 포커스 뷰와 **같은 부품(SessionPane)**을 쓴다. 복사본을 두면 여기서 모델을
  * 바꿨을 때 사이드바가 옛 값을 들고 있게 된다 — 화면이 둘이어도 진실은 하나여야 한다.
  */
-export function ControlCenter() {
+export function GridView() {
   const panels = useStore((s) => s.gridPanels)
   const sessions = useStore((s) => s.sessions)
   const setGridPanels = useStore((s) => s.setGridPanels)
@@ -68,7 +68,7 @@ export function ControlCenter() {
         화면에 있는 것이 전부여야 "한눈에 본다"가 성립한다.
       */
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-void p-2"
-      data-testid="control-center"
+      data-testid="grid"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes(SESSION_MIME)) e.preventDefault()
       }}
@@ -80,7 +80,7 @@ export function ControlCenter() {
       }}
     >
       {visible.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-center" data-testid="control-center-empty">
+        <div className="flex flex-1 items-center justify-center text-center" data-testid="grid-empty">
           <p className="text-[13px] leading-relaxed text-ash">
             Drag sessions here from the sidebar
             <span className="mt-1 block text-[11px] text-slate">
@@ -183,7 +183,7 @@ export function ControlCenter() {
                 }}
                 headerExtra={
                   <IconButton
-                    label="Remove from Control Center (the session keeps running)"
+                    label="Remove from the grid (the session keeps running)"
                     onClick={() => void setGridPanels(panels.filter((x) => x !== id))}
                     testId={`grid-remove-${id}`}
                     align="right"

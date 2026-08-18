@@ -1,5 +1,5 @@
 {
-  "name": "control-center",
+  "name": "centralu",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.17.0",
@@ -22,8 +22,8 @@
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
     "smoke:orchestrator": "tsx packages/agent-host/scripts/smoke-orchestrator.mts",
     "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",
-    "app": "pnpm --filter @cc/desktop exec tauri build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Control Center.app\"",
-    "app:open": "open \"apps/desktop/src-tauri/target/release/bundle/macos/Control Center.app\"",
+    "app": "pnpm --filter @cc/desktop exec tauri build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app\"",
+    "app:open": "open \"apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app\"",
     "app:dev": "pnpm --filter @cc/desktop exec tauri dev",
     "smoke:question": "node --import tsx packages/agent-host/scripts/smoke-question.mts"
   },

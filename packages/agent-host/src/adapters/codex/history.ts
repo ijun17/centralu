@@ -1,3 +1,4 @@
+import { CLIENT_INFO } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { CodexClient } from './client.js'
@@ -35,7 +36,7 @@ async function withClient<T>(cwd: string, command: string, fn: (c: CodexClient) 
   )
   try {
     await client.request('initialize', {
-      clientInfo: { name: 'control-center', title: 'Control Center', version: '0.1.0' },
+      clientInfo: CLIENT_INFO,
       capabilities: null,
     })
     client.notify('initialized')

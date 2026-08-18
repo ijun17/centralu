@@ -101,7 +101,7 @@ M1.5에서 Tauri가 Node 사이드카를 그대로 감독하는 구조로 굳었
 // eslint: ui 패키지에 적용
 "no-restricted-imports": ["error", { "patterns": [
   { "group": ["@tauri-apps/*"], "message": "platform/tauri에서만" },
-  { "group": ["@control-center/platform/web", "@control-center/platform/tauri"],
+  { "group": ["@cc/platform/web", "@cc/platform/tauri"],
     "message": "ui는 ports만. 구현 주입은 apps 진입점에서" }
 ]}],
 "no-restricted-globals": ["error",

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Codex ↔ Control Center 다리 (stdio MCP 서버).
+ * Codex ↔ Centralu 다리 (stdio MCP 서버).
  *
  * Codex는 스레드별 config로 **stdio 서버만** 물릴 수 있다 — HTTP(url) 방식은
  * 실측에서 요청이 한 건도 오지 않았다 (codex-cli 0.147.0). 그래서 프로세스가

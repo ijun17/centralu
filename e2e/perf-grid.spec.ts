@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 컨트롤 센터 성능 실측 (계획 7단계).
+ * 그리드 성능 실측 (계획 7단계).
  *
  * 사양서 §5.4: "포커스 뷰 구조는 성능에도 유리 — 화면에 세션 하나만 렌더링하면 되므로
  * 그리드 대비 상시 렌더 부하가 낮다." 그 말이 맞는지, 맞다면 얼마나인지 잰다.
@@ -136,7 +136,7 @@ test('포커스 뷰 1개 (기준선)', async ({ page }) => {
 test('그리드 4칸 전부 스트리밍', async ({ page }) => {
   const ids = await boot(page, 4)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
-  await page.getByTestId('control-center-button').click()
+  await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[3]}`)).toBeVisible()
   show('그리드 4칸 · 4개 스트리밍', await streamAndMeasure(page, ids, 120))
 })
@@ -144,7 +144,7 @@ test('그리드 4칸 전부 스트리밍', async ({ page }) => {
 test('그리드 9칸 전부 스트리밍', async ({ page }) => {
   const ids = await boot(page, 9)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
-  await page.getByTestId('control-center-button').click()
+  await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
   show('그리드 9칸 · 9개 스트리밍', await streamAndMeasure(page, ids, 120))
 })
@@ -152,7 +152,7 @@ test('그리드 9칸 전부 스트리밍', async ({ page }) => {
 test('그리드 9칸인데 1개만 스트리밍 (§5.4의 상시 부하)', async ({ page }) => {
   const ids = await boot(page, 9)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
-  await page.getByTestId('control-center-button').click()
+  await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
   show('그리드 9칸 · 1개만 스트리밍', await streamAndMeasure(page, [ids[0]!], 120))
 })
@@ -160,7 +160,7 @@ test('그리드 9칸인데 1개만 스트리밍 (§5.4의 상시 부하)', async
 test('9칸이 흐르는 동안 글을 칠 수 있는가', async ({ page }) => {
   const ids = await boot(page, 9)
   await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
-  await page.getByTestId('control-center-button').click()
+  await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toBeVisible()
 
   // 배경에서 9개가 계속 흐르게 둔다
@@ -217,7 +217,7 @@ test('9칸을 처음 여는 데 걸리는 시간', async ({ page }) => {
   }, ids)
 
   const t0 = Date.now()
-  await page.getByTestId('control-center-button').click()
+  await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${ids[8]}`)).toContainText('저장된 대화')
   const opened = Date.now() - t0
 

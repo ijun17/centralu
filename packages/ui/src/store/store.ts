@@ -106,7 +106,7 @@ export type AppState = {
    * 예전에는 입력창 부품이 들고 있었다. 그러면 글이 세션이 아니라 화면의 그 자리에
    * 붙는다: 포커스 뷰에서 세션을 바꿔도 같은 부품이 재사용되므로 A에 쓰던 글이
    * B의 입력창에 그대로 앉아 있었다 — 그대로 보내면 **엉뚱한 세션에 간다** (실측 확인).
-   * 반대로 화면을 갈아 끼우는 컨트롤 센터에서는 부품이 사라지며 글도 같이 사라졌다.
+   * 반대로 화면을 갈아 끼우는 그리드에서는 부품이 사라지며 글도 같이 사라졌다.
    *
    * 저장소에는 넣지 않는다. 앱을 껐다 켤 때까지 살아남아야 할 만큼 무거운 것은 아니다.
    */
@@ -273,7 +273,7 @@ export type AppState = {
   reorderProjects(orderedIds: string[]): Promise<void>
   reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
   /**
-   * 컨트롤 센터.
+   * 그리드.
    *
    * `view`는 화면 하나를 고르는 값이다 — 포커스 뷰와 그리드는 **같은 세션 상태를**
    * 다르게 보여줄 뿐이므로, 세션 데이터를 따로 들지 않고 보는 방식만 바꾼다.
@@ -282,7 +282,7 @@ export type AppState = {
   /**
    * 지금 무엇을 보고 있나.
    *   focus        세션 하나 (기본)
-   *   grid         컨트롤 센터 — 눈으로 관제
+   *   grid         그리드 — 눈으로 관제
    *   orchestrator 오케스트레이터 — 말로 관제
    */
   view: 'focus' | 'grid' | 'orchestrator'
@@ -428,7 +428,7 @@ export const useStore = create<AppState>((set, get) => ({
       platform.projects.list(),
       platform.agents.listSessions(),
       // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
-      platform.agents.controlCenter().catch(() => [] as string[]),
+      platform.agents.grid().catch(() => [] as string[]),
     ])
     set({
       projects: Object.fromEntries(projects.map((p) => [p.id, p])),
@@ -690,7 +690,7 @@ export const useStore = create<AppState>((set, get) => ({
     /*
      * 세션을 고르면 **그 세션이 보여야 한다.**
      *
-     * 컨트롤 센터를 열어둔 채 사이드바에서 다른 세션을 눌러도 화면이 그대로였다:
+     * 그리드를 열어둔 채 사이드바에서 다른 세션을 눌러도 화면이 그대로였다:
      * 고른 것은 바뀌었는데 보이는 것은 안 바뀌니, 누른 사람 눈에는 아무 일도 안 일어난 것이다.
      * 여기 두는 이유는 부르는 곳이 열 군데(사이드바·인박스·팔레트·승인 배너…)라서다 —
      * 호출부마다 붙이면 언젠가 한 곳을 빠뜨린다.
@@ -1193,7 +1193,7 @@ export const useStore = create<AppState>((set, get) => ({
     const before = get().gridPanels
     set({ gridPanels: sessionIds })
     try {
-      set({ gridPanels: await platform.agents.setControlCenter(sessionIds) })
+      set({ gridPanels: await platform.agents.setGridView(sessionIds) })
     } catch (e) {
       set({ gridPanels: before, toast: `Could not save layout: ${(e as Error).message}` })
     }

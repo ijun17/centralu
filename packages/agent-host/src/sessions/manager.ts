@@ -168,9 +168,9 @@ export class SessionManager {
     return this.listSessions()
   }
 
-  /** 컨트롤 센터 배치 */
-  controlCenter(): string[] {
-    return this.store.listControlCenter()
+  /** 그리드 배치 */
+  grid(): string[] {
+    return this.store.listGridView()
   }
 
   /**
@@ -179,10 +179,10 @@ export class SessionManager {
    * **모르는 세션은 걷어낸다.** 지워진 세션의 id가 배치에 남아 돌아오면 화면이
    * 없는 것을 그리려 한다 — 저장 시점에 한 번 거르면 그 뒤로는 신경 쓸 일이 없다.
    */
-  setControlCenter(sessionIds: readonly string[]): string[] {
+  setGridView(sessionIds: readonly string[]): string[] {
     const known = new Set(this.meta.keys())
     const clean = [...new Set(sessionIds.filter((id) => known.has(id)))]
-    this.store.setControlCenter(clean)
+    this.store.setGridView(clean)
     return clean
   }
 
@@ -355,7 +355,7 @@ export class SessionManager {
   /**
    * 도구 쪽에서 이어진 대화를 우리 기록에 따라잡는다.
    *
-   * 왜 필요한가: Control Center에서 하다가 터미널의 클로드·코덱스로 옮겨 작업하고
+   * 왜 필요한가: Centralu에서 하다가 터미널의 클로드·코덱스로 옮겨 작업하고
    * 다시 돌아올 수 있다. 그동안 오간 말은 도구에만 쌓이고 우리 화면은 멈춰 있다
    * (도그푸딩 지적). 모델은 resume으로 전체를 기억하므로 **화면만 어긋난다** —
    * 그래서 더 헷갈린다.
@@ -771,7 +771,7 @@ export class SessionManager {
     try {
       await this.send(
         orchestratorId,
-        `[Control Center] 지시한 일이 끝났습니다.\n` +
+        `[Centralu] 지시한 일이 끝났습니다.\n` +
           `세션: ${target.name}\n` +
           `id: ${sessionId}\n` +
           `프로젝트: ${project}\n\n` +
@@ -881,7 +881,7 @@ export class SessionManager {
    * 잃는 것은 '이어갈 실마리'뿐이고 대화 기록은 우리 저장소에 그대로 남는다.
    * 옛 도구의 대화도 그 도구 안에 남아 있어 '+ → 이전 대화'로 다시 불러올 수 있다.
    *
-   * 세션은 자리고 에이전트는 도구다 — 자리(이름·순서·기록·컨트롤 센터 칸)는 그대로 두고
+   * 세션은 자리고 에이전트는 도구다 — 자리(이름·순서·기록·그리드 칸)는 그대로 두고
    * 도구만 갈아 끼운다.
    */
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {

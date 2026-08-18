@@ -316,10 +316,10 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
 })
 
 /**
- * 컨트롤 센터 배치는 **껐다 켜도 그대로**여야 한다 — 사람이 짠 화면이기 때문이다.
+ * 그리드 배치는 **껐다 켜도 그대로**여야 한다 — 사람이 짠 화면이기 때문이다.
  * 세션 테이블이 아니라 따로 두었으므로, 세션을 저장해도 배치가 흔들리지 않는지 함께 본다.
  */
-describe('마이그레이션 v9 — 컨트롤 센터 배치', () => {
+describe('마이그레이션 v9 — 그리드 배치', () => {
   it('올려둔 순서대로 돌아온다', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
@@ -330,33 +330,33 @@ describe('마이그레이션 v9 — 컨트롤 센터 배치', () => {
         model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
       })
     }
-    s.setControlCenter(['s3', 's1'])
-    expect(s.listControlCenter()).toEqual(['s3', 's1'])
+    s.setGridView(['s3', 's1'])
+    expect(s.listGridView()).toEqual(['s3', 's1'])
     s.close()
   })
 
   it('통째로 다시 쓴다 — 추가·제거·순서가 모두 한 가지로 온다', () => {
     const s = seeded()
-    s.setControlCenter(['s1'])
-    s.setControlCenter([])
-    expect(s.listControlCenter()).toEqual([])
+    s.setGridView(['s1'])
+    s.setGridView([])
+    expect(s.listGridView()).toEqual([])
     s.close()
   })
 
   it('세션을 다시 저장해도 배치는 그대로', () => {
     const s = seeded()
-    s.setControlCenter(['s1'])
+    s.setGridView(['s1'])
     const before = s.listSessions()[0]!
     s.upsertSession({ ...before, name: 'renamed' })
-    expect(s.listControlCenter()).toEqual(['s1'])
+    expect(s.listGridView()).toEqual(['s1'])
     s.close()
   })
 
   it('세션을 지우면 배치에서도 빠진다 — 없는 것을 그리려 하면 안 된다', () => {
     const s = seeded()
-    s.setControlCenter(['s1'])
+    s.setGridView(['s1'])
     s.deleteSession('s1')
-    expect(s.listControlCenter()).toEqual([])
+    expect(s.listGridView()).toEqual([])
     s.close()
   })
 })

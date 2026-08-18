@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
+import { DATA_DIR, DATA_DIR_DEV } from '@cc/protocol'
 import type { ToolName } from '@cc/protocol'
 import { HostServer } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
@@ -54,7 +55,7 @@ const dbPath = values.memory
 function defaultDbPath(): string {
   // 번들된 산출물로 실행되면 배포, 소스에서 실행되면 dev (수퍼바이저가 알려준다)
   const isDev = process.env.CC_DEV === '1'
-  const dir = join(homedir(), isDev ? '.control-center-dev' : '.control-center')
+  const dir = join(homedir(), isDev ? DATA_DIR_DEV : DATA_DIR)
   mkdirSync(dir, { recursive: true })
   return join(dir, 'store.db')
 }
@@ -85,7 +86,7 @@ if (pathResult.source !== 'unchanged') {
 const lock = acquireInstanceLock(dbPath)
 if (!lock.ok) {
   console.error(
-    `[agent-host] Another Control Center is already using this data (pid ${lock.heldByPid}).\n` +
+    `[agent-host] Another Centralu is already using this data (pid ${lock.heldByPid}).\n` +
       `  Two hosts on the same folder will desync session lists.\n` +
       `  Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).`,
   )

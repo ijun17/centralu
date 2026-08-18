@@ -95,7 +95,7 @@ class TauriSystemPort implements SystemPort {
     if (!this.granted) {
       if (this.warned) return
       this.warned = true
-      throw new Error('Notifications are turned off — enable them for Control Center in System Settings')
+      throw new Error('Notifications are turned off — enable them for Centralu in System Settings')
     }
     sendNotification({ title, body })
   }

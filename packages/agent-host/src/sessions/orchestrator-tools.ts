@@ -72,7 +72,7 @@ export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
 
 /** 모델에게 주는 안내 — 도구 목록과 함께 간다 */
 export const ORCHESTRATOR_INSTRUCTIONS = [
-  '이 앱(Control Center)이 관리하는 세션들을 다루는 도구다.',
+  '이 앱(Centralu)이 관리하는 세션들을 다루는 도구다.',
   '프로젝트를 가로지르는 질문이나 여러 세션에 걸친 일이면 먼저 list_sessions로 지금 상태를 본다.',
   '일을 시킬 때는 send_to_session을 쓴다 — 대상 세션의 승인 설정이 그대로 적용되므로,',
   '위험한 작업이면 그 세션에서 사람에게 승인을 묻게 된다.',

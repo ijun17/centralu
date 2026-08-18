@@ -195,7 +195,7 @@ export const Attachment = z.object({
 export type Attachment = z.infer<typeof Attachment>
 
 /**
- * 도구가 자체적으로 보관 중인 이전 세션 (Control Center 밖 — 터미널에서 만든 것 포함).
+ * 도구가 자체적으로 보관 중인 이전 세션 (Centralu 밖 — 터미널에서 만든 것 포함).
  *
  * 목록도 본문도 **각 도구의 공식 API로만** 읽는다.
  * ~/.claude/projects/**.jsonl 이나 ~/.codex/sessions/**.jsonl 을 직접 파싱하지 않는다:
@@ -209,7 +209,7 @@ export const ExternalSession = z.object({
   updatedAt: z.number(),
   createdAt: z.number().nullable().default(null),
   branch: z.string().nullable().default(null),
-  /** 이미 Control Center로 불러온 세션 — 같은 대화를 두 번 열지 않게 한다 */
+  /** 이미 Centralu로 불러온 세션 — 같은 대화를 두 번 열지 않게 한다 */
   imported: z.boolean().default(false),
   /**
    * 이미 열려 있다면 **그 세션의 id**.

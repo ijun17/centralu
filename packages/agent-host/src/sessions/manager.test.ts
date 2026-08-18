@@ -547,7 +547,7 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
 })
 
 /**
- * 숨김의 의미: **Control Center 목록에서만 치운다.**
+ * 숨김의 의미: **Centralu 목록에서만 치운다.**
  * 도구(클로드·코덱스)에는 대화가 그대로 남으므로 '이전 대화'로 되찾을 수 있어야 한다.
  * 그 길이 막히면 숨김은 사실상 삭제가 된다.
  */
@@ -775,7 +775,7 @@ describe('같은 대화를 둘이 열지 않는다', () => {
 })
 
 /**
- * Control Center에서 하다가 터미널의 도구로 옮겨 작업하고 돌아올 수 있다.
+ * Centralu에서 하다가 터미널의 도구로 옮겨 작업하고 돌아올 수 있다.
  * 그동안 오간 말은 도구에만 쌓이고 우리 화면은 멈춰 있다 — 모델은 다 기억하므로
  * **화면만 어긋나서** 더 헷갈린다. 깨울 때 따라잡는다.
  */
@@ -1019,7 +1019,7 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     adapter.handleOf(a.id)!.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
     const sent = adapter.handleOf(orc.id)!.sent
-    const report = sent.find((t) => t.includes('[Control Center]'))
+    const report = sent.find((t) => t.includes('[Centralu]'))
     expect(report).toBeTruthy()
     /*
      * **이름만으로는 어느 세션인지 모른다.** 압축을 이어받은 세션은 이름이 전부
@@ -1041,7 +1041,7 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
       adapter.handleOf(a.id)!.finishTurn()
       await new Promise((r) => setTimeout(r, 0))
     }
-    const reports = adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('[Control Center]'))
+    const reports = adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('[Centralu]'))
     expect(reports.length).toBe(1)
   })
 

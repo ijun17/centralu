@@ -17,7 +17,7 @@
 **주의 (어댑터 구현 시 필수):**
 - Claude: `allowedTools`에 bare 도구명(`['Bash']`)을 넣으면 canUseTool이 **셰도잉**되어 콜백이 안 옴 (SDK 경고 `CAN_USE_TOOL_SHADOWED` 확인). 어댑터는 allowedTools를 쓰지 않는다.
 - Claude: 안전한 명령(`echo` 등)은 샌드박스 자동 승인이라 승인 요청 자체가 없음 — 앱 관점에선 장점 (불필요한 승인 소음 감소). "승인 요청이 안 온다 = 버그"가 아님.
-- Claude: SDK 세션에도 사용자 훅·플러그인이 로드됨 (hook_started 관찰, OMC 훅·osascript 알림 실행됨). Control Center 세션에서 사용자 훅 처리 방침 필요 → M1 설계 항목 (억제 옵션 또는 그대로 두기).
+- Claude: SDK 세션에도 사용자 훅·플러그인이 로드됨 (hook_started 관찰, OMC 훅·osascript 알림 실행됨). Centralu 세션에서 사용자 훅 처리 방침 필요 → M1 설계 항목 (억제 옵션 또는 그대로 두기).
 - Codex: 승인 응답 decision은 `accept | acceptForSession | acceptWithExecpolicyAmendment | applyNetworkPolicyAmendment | decline | cancel`. `acceptForSession` = FR-3 "항상 허용(세션)"과 정확히 대응.
 
 ## B. 이벤트 수집 — ✅ 필요한 것 전부 나옴

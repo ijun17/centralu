@@ -314,8 +314,8 @@ export class MockPlatform implements Platform {
       this.sessions.set(id, info)
       return info
     },
-    controlCenter: async () => [...this.gridPanels],
-    setControlCenter: async (sessionIds: string[]) => {
+    grid: async () => [...this.gridPanels],
+    setGridView: async (sessionIds: string[]) => {
       this.gridPanels = sessionIds.filter((id) => this.sessions.has(id))
       return [...this.gridPanels]
     },

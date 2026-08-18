@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { CLIENT_INFO } from '@cc/protocol'
 import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, PermissionPreset } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
@@ -93,7 +94,7 @@ class CodexSession implements SessionHandle {
 
   private async start(): Promise<void> {
     await this.client.request('initialize', {
-      clientInfo: { name: 'control-center', title: 'Control Center', version: '0.1.0' },
+      clientInfo: CLIENT_INFO,
       capabilities: null,
     })
     this.client.notify('initialized')
@@ -379,7 +380,7 @@ export class CodexAdapter implements AgentAdapter {
     )
     try {
       await client.request('initialize', {
-        clientInfo: { name: 'control-center', title: 'Control Center', version: '0.1.0' },
+        clientInfo: CLIENT_INFO,
         capabilities: null,
       })
       client.notify('initialized')

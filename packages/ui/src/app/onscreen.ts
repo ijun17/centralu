@@ -22,6 +22,6 @@ export type Onscreen = {
 export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolean {
   if (view === 'focus') return ctx.focusedSessionId === sessionId
   if (view === 'orchestrator') return ctx.orchestratorId === sessionId
-  // 컨트롤 센터는 여러 개가 동시에 보인다 — 그중 하나만 끝나도 화면에서 끝난 것이다
+  // 그리드는 여러 개가 동시에 보인다 — 그중 하나만 끝나도 화면에서 끝난 것이다
   return ctx.gridPanels.includes(sessionId)
 }

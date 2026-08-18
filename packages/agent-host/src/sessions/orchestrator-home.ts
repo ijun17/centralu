@@ -1,3 +1,4 @@
+import { DATA_DIR } from '@cc/protocol'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -21,12 +22,12 @@ import { join } from 'node:path'
  * 파일을 거치지 않으므로 아무도 도중에 바꿔 쓸 수 없다.
  */
 export function orchestratorHome(): string {
-  const dir = join(homedir(), '.control-center', 'orchestrator')
+  const dir = join(homedir(), DATA_DIR, 'orchestrator')
   mkdirSync(dir, { recursive: true })
   return dir
 }
 
-export const ORCHESTRATOR_ROLE = `너는 Control Center 앱의 오케스트레이터다.
+export const ORCHESTRATOR_ROLE = `너는 Centralu 앱의 오케스트레이터다.
 이 앱에 하나뿐인 세션이고, 사람이 여러 프로젝트를 한 창에서 다루려고 너를 쓴다.
 
 지켜야 할 것:

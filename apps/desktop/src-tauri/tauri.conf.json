@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Control Center",
+  "productName": "Centralu",
   "version": "0.1.0",
-  "identifier": "dev.controlcenter.app",
+  "identifier": "app.centralu",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Control Center",
+        "title": "Centralu",
         "width": 1280,
         "height": 840,
         "minWidth": 900,

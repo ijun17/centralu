@@ -1,4 +1,4 @@
--- Control Center 로컬 저장 스키마 v1
+-- Centralu 로컬 저장 스키마 v1
 -- host(better-sqlite3)가 읽는다. 마이그레이션은 dev-services/store.ts의 steps가 담당한다.
 PRAGMA user_version = 1;
 

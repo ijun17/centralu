@@ -10,7 +10,7 @@ import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
-import { ControlCenter } from '../features/control-center/ControlCenter.jsx'
+import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
@@ -102,14 +102,14 @@ function Body() {
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1">
         {/*
-          컨트롤 센터에는 우측 증거 패널이 없다. 그리드가 이미 화면을 나눠 쓰는데
+          그리드에는 우측 증거 패널이 없다. 그리드가 이미 화면을 나눠 쓰는데
           거기서 또 한 레인을 떼면 패널이 최소 폭 아래로 내려간다 — 그리드를
           보류했던 근거(§5.4)를 우리 손으로 재현하는 셈이다.
         */}
         {view === 'orchestrator' ? (
           <OrchestratorView />
         ) : view === 'grid' ? (
-          <ControlCenter />
+          <GridView />
         ) : (
           <>
             <SessionView />
@@ -159,7 +159,7 @@ function TopBar() {
         className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk"
         data-testid="app-title"
       >
-        CONTROL CENTER
+        CENTRALU
       </span>
 
       <button

@@ -150,7 +150,7 @@ export class Store {
         to: 9,
         run: () => {
           /*
-           * 컨트롤 센터에 올려둔 세션.
+           * 그리드에 올려둔 세션.
            *
            * 세션 테이블의 컬럼이 아니라 **따로 둔다**: 그리드에 있는 것과 세션이
            * 존재하는 것은 다른 사실이고, 그리드에서 빼도 세션은 그대로 남는다.
@@ -351,8 +351,8 @@ export class Store {
     this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
   }
 
-  /** 컨트롤 센터 배치 — 올려둔 순서대로 */
-  listControlCenter(): string[] {
+  /** 그리드 배치 — 올려둔 순서대로 */
+  listGridView(): string[] {
     return (
       this.db.prepare(`SELECT session_id FROM control_center ORDER BY position`).all() as {
         session_id: string
@@ -366,7 +366,7 @@ export class Store {
    * 추가·제거·순서 바꾸기가 모두 이 한 가지로 오므로 지우고 새로 넣는 게 가장 단순하다.
    * 목록이 짧고(사람이 보는 화면이다) 한 트랜잭션이라 중간 상태가 보이지 않는다.
    */
-  setControlCenter(sessionIds: readonly string[]): void {
+  setGridView(sessionIds: readonly string[]): void {
     const del = this.db.prepare(`DELETE FROM control_center`)
     const ins = this.db.prepare(`INSERT INTO control_center (session_id, position) VALUES (?, ?)`)
     this.db.transaction(() => {

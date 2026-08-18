@@ -56,12 +56,12 @@ class WebAgentPort implements AgentPort {
   switchTool(sessionId: string, tool: ToolName) {
     return this.rpc.call('agents.switchTool', { sessionId, tool })
   }
-  controlCenter() {
-    return this.rpc.call('controlCenter.get', {})
+  grid() {
+    return this.rpc.call('grid.get', {})
   }
 
-  setControlCenter(sessionIds: string[]) {
-    return this.rpc.call('controlCenter.set', { sessionIds })
+  setGridView(sessionIds: string[]) {
+    return this.rpc.call('grid.set', { sessionIds })
   }
 
   models(tool: ToolName) {

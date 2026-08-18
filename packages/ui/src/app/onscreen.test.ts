@@ -14,7 +14,7 @@ describe('바람은 화면에 있는 세션이 끝났을 때만 분다', () => {
     expect(isOnScreen('orchestrator', 'a', ctx)).toBe(false)
   })
 
-  it('컨트롤 센터 — 올라와 있는 칸 중 하나', () => {
+  it('그리드 — 올라와 있는 칸 중 하나', () => {
     expect(isOnScreen('grid', 'c', ctx)).toBe(true)
     expect(isOnScreen('grid', 'a', ctx)).toBe(false)
   })

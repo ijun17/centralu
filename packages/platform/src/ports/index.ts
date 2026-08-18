@@ -65,9 +65,9 @@ export interface AgentPort {
    * 프로젝트에 속하지 않으므로 projectId는 null이다.
    */
   orchestrator(): Promise<SessionInfo>
-  /** 컨트롤 센터 배치 — 추가·제거·순서가 전부 이 한 가지로 온다 */
-  controlCenter(): Promise<string[]>
-  setControlCenter(sessionIds: string[]): Promise<string[]>
+  /** 그리드 배치 — 추가·제거·순서가 전부 이 한 가지로 온다 */
+  grid(): Promise<string[]>
+  setGridView(sessionIds: string[]): Promise<string[]>
   /** 고를 수 있는 모델과 각 모델의 추론 강도 (도구가 공식 API로 알려주는 것) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */

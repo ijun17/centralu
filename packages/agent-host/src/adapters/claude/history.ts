@@ -58,7 +58,7 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
   const sdk = await sessionApi()
   if (!sdk?.listSessions) throw new Error(UNSUPPORTED)
   /*
-   * includeProgrammatic:true — SDK로 만든 세션(=Control Center가 만든 것)까지 포함한다.
+   * includeProgrammatic:true — SDK로 만든 세션(=Centralu가 만든 것)까지 포함한다.
    *
    * 처음에는 false로 걸렀다. "우리가 만든 건 이미 사이드바에 있으니 중복"이라는 이유였는데,
    * **숨김의 의미가 '목록에서 치우기'가 되면서 그 전제가 깨졌다** —

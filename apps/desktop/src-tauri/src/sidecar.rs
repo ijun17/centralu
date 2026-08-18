@@ -278,7 +278,7 @@ fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String>
 /// Node가 없는 것인지, 있는데 못 찾는 것인지, 버전이 낮은 것인지 갈리지 않았다.
 fn node_missing_message(looked: &[String]) -> String {
     format!(
-        "Node.js를 찾지 못했습니다. Control Center는 Node {MIN_NODE_MAJOR} 이상이 필요합니다.\n\
+        "Node.js를 찾지 못했습니다. Centralu는 Node {MIN_NODE_MAJOR} 이상이 필요합니다.\n\
          터미널에서 `node --version`으로 확인하고, 없으면 `brew install node` 또는 \
          https://nodejs.org 에서 설치한 뒤 앱을 다시 시작하세요.\n\
          찾아본 곳: {}",

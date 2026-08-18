@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { CLIENT_INFO } from '@cc/protocol'
 import type { UsageSnapshot } from '@cc/protocol'
 import { CodexClient } from './client.js'
 import { toSnapshot } from './usage.js'
@@ -17,7 +18,7 @@ export async function readCodexUsage(command: string): Promise<UsageSnapshot> {
   )
   try {
     await client.request('initialize', {
-      clientInfo: { name: 'control-center', title: 'Control Center', version: '0.1.0' },
+      clientInfo: CLIENT_INFO,
       capabilities: null,
     })
     client.notify('initialized')
