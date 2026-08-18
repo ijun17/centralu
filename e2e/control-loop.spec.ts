@@ -3250,6 +3250,50 @@ test('승인 대기가 생기면 소리·독으로도 부른다', async ({ page 
     .toEqual([{ kind: 'approval', sound: true }])
 })
 
+/*
+ * 도그푸딩 신고: "소리는 들리는데 토스트가 안 뜬다."
+ *
+ * 원인은 시험 버튼이 소리와 독만 울리고 카드를 만들지 않은 것이었다. **절반만 시험하는
+ * 시험 버튼**은 없는 증상을 만든다 — 확인하라고 둔 것이 오해를 낳으면 없느니만 못하다.
+ */
+test('Test it은 소리·독·카드를 다 태운다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다 → first가 화면 밖
+
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('notify-test').click()
+
+  // 소리·독
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as never as { __mock: { alerts: unknown[] } }).__mock.alerts.length),
+    )
+    .toBe(1)
+  // 카드. 설정 창은 비켜야 한다 — 그 뒤에 뜨면 있어도 못 본다
+  await expect(page.getByTestId('settings')).toHaveCount(0)
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+})
+
+test('볼 수 없는 세션이 없으면 카드가 없는 이유를 말한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'only') // 하나뿐이고 그것을 보고 있다
+
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('notify-test').click()
+
+  // 조용히 넘기면 "카드가 안 뜬다"가 되고, 원인을 엉뚱한 데서 찾게 된다
+  await expect(page.getByTestId('toast')).toContainText('off screen')
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+})
+
+test('설정은 상단 바에서 바로 열린다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  // 단축키 표가 이 안에 있다 — 단축키를 알아야만 열 수 있으면 안 된다
+  await page.getByTestId('open-settings').click()
+  await expect(page.getByTestId('settings')).toBeVisible()
+})
+
 test('같은 세션이 여러 번 끝나도 카드는 한 장이다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')

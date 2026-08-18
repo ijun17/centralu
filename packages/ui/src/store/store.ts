@@ -189,6 +189,8 @@ export type AppState = {
   setAppFocused(focused: boolean): void
   /** 알림 카드를 걷는다 (×를 누르거나, 그 세션을 보게 됐거나) */
   dismissNotices(sessionIds: string[]): void
+  /** 설정의 "Test it" — 알림이 지나는 길을 **끝까지** 태워 본다 (소리·독·카드) */
+  testAlert(): void
   loadHistory(sessionId: string, force?: boolean): Promise<void>
   /** 더 오래된 대화를 앞에 붙인다 (압축 이전 대화를 읽기 위한 길) */
   loadOlder(sessionId: string): Promise<void>
@@ -470,6 +472,42 @@ export const useStore = create<AppState>((set, get) => ({
 
   setAppFocused(focused) {
     set({ appFocused: focused })
+  },
+
+  /*
+   * 알림이 안 오는 것은 **아무 화면도 만들지 않는다.** 그래서 눌러서 확인할 길이 없으면
+   * 영원히 미검증으로 남는다 — 실제로 이 항목이 그렇게 넉 달을 남아 있었다.
+   *
+   * 그러므로 이 버튼은 **세 갈래를 다** 태워야 한다. 소리만 울리고 카드를 빼면
+   * "소리는 나는데 카드가 안 뜬다"를 보고 도구를 의심하게 되고, 그건 절반만 시험하는
+   * 시험 버튼이 만든 가짜 증상이다.
+   */
+  testAlert() {
+    const s = get()
+    void s.platform?.system
+      .alert('approval', s.notifyPolicy.sound)
+      .catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
+
+    /*
+     * 카드는 **화면 밖에서 일어난 일**이므로 지금 보이지 않는 세션을 골라 진짜와 같은 길로 태운다.
+     * 보이는 세션으로 만들면 곧바로 스스로 걷혀서 아무것도 확인하지 못한다.
+     */
+    const offScreen = Object.values(s.sessions).find(
+      (x) =>
+        !isOnScreen(s.view, x.id, {
+          focusedSessionId: s.focusedSessionId,
+          orchestratorId: s.orchestratorId,
+          gridPanels: s.gridPanels,
+        }),
+    )
+    if (!offScreen) {
+      // 못 만들었으면 말한다. 조용히 넘기면 "카드가 안 뜬다"가 되고, 원인은 여기가 아니다.
+      set({ toast: 'Sound and dock only — a card needs a session that is off screen' })
+      return
+    }
+    // 설정 창을 비킨다 — 카드는 그 뒤(z-30)에 뜨므로 열어 둔 채로는 보이지 않는다
+    set({ settingsOpen: false })
+    pushNotice(set, { sessionId: offScreen.id, kind: 'approval', name: offScreen.name, at: Date.now() })
   },
 
   dismissNotices(sessionIds) {

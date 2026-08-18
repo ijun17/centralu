@@ -217,6 +217,19 @@ function TopBar() {
         >
           Usage
         </button>
+        {/*
+          설정에는 입구가 커맨드 팔레트 하나뿐이었다. 그런데 그 안에 **단축키 표**가 들어 있다 —
+          단축키를 이미 아는 사람만 단축키 표를 볼 수 있었던 셈이다. 도그푸딩에서 "설정이
+          안 보이는데?"로 드러났다. 흐름을 강요하지 않는 것과 입구를 감추는 것은 다르다.
+        */}
+        <button
+          className="rounded px-2 py-1 text-[11px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
+          onClick={() => useStore.getState().toggleSettings(true)}
+          data-testid="open-settings"
+          title="Settings (shortcuts · notifications · approval rules)"
+        >
+          Settings
+        </button>
         <button
           className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk"
           onClick={() => setAddOpen(true)}

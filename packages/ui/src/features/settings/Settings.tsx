@@ -29,6 +29,7 @@ export function Settings() {
   const toggle = useStore((s) => s.toggleSettings)
   const policy = useStore((s) => s.notifyPolicy)
   const setPolicy = useStore((s) => s.setNotifyPolicy)
+  const testAlert = useStore((s) => s.testAlert)
   const platform = usePlatform()
   const [rules, setRules] = useState<Rule[] | null>(null)
 
@@ -109,7 +110,7 @@ export function Settings() {
               <button
                 className="rounded border border-edge px-2 py-1 text-[11px] text-chalk hover:bg-edge"
                 data-testid="notify-test"
-                onClick={() => void platform.system.alert('approval', policy.sound)}
+                onClick={testAlert}
               >
                 Test it
               </button>
