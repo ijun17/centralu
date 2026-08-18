@@ -818,7 +818,9 @@ function OlderSentinel({
 function DormantNote({ sessionId }: { sessionId: string }) {
   const waking = useStore((s) => !!s.resuming[sessionId])
   const error = useStore((s) => s.wakeError[sessionId])
+  const locked = useStore((s) => !!s.wakeLocked[sessionId])
   const wake = useStore((s) => s.wake)
+  const fork = useStore((s) => s.forkConversation)
 
   // 못 깨운 이유가 있으면 그걸 먼저 말한다 — "보내면 이어집니다"는 사실이 아니게 된다
   if (error && !waking) {
@@ -828,6 +830,21 @@ function DormantNote({ sessionId }: { sessionId: string }) {
         data-testid="dormant-note"
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
+        {/*
+          * 다른 쪽이 쥐고 있을 때는 **재시도만으로는 영영 안 열린다** — 사람이 다른 앱을
+          * 닫으러 가는 것 말고는 길이 없었다. 갈라서 이어가는 길을 그 자리에 함께 둔다.
+          * 원본을 건드리지 않는다는 사실까지 적어야 누르는 것이 무섭지 않다.
+          */}
+        {locked && (
+          <button
+            className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+            onClick={() => void fork(sessionId)}
+            title="Continue in a copy of this conversation. The original stays untouched."
+            data-testid="dormant-fork"
+          >
+            Continue in a fork
+          </button>
+        )}
         <button
           className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
           onClick={() => void wake(sessionId)}

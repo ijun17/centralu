@@ -383,6 +383,15 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       return { session: { ...s }, resumed: true }
     },
+    /** 잠긴 대화에서 갈라져 나온다 — 사본을 가리키게 되므로 잠금이 풀린 것과 같아진다 */
+    forkConversation: async (sessionId: string) => {
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      this.unresumable.delete(sessionId)
+      s.live = true
+      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
+      return { session: { ...s }, resumed: true }
+    },
     rename: async (sessionId: string, name: string) => {
       const s = this.sessions.get(sessionId)
       if (s) {

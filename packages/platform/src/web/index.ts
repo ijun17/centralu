@@ -98,6 +98,9 @@ class WebAgentPort implements AgentPort {
       sessionId,
     })
   }
+  forkConversation(sessionId: string) {
+    return this.rpc.call('agents.forkConversation', { sessionId })
+  }
   async rename(sessionId: string, name: string) {
     await this.rpc.call('sessions.rename', { sessionId, name })
   }

@@ -66,6 +66,8 @@ export function createRpcHandler(
       mgr.restartSession(RpcMethods['agents.restartSession'].params.parse(p).sessionId),
     'agents.resumeSession': async (p) =>
       mgr.resumeSession(RpcMethods['agents.resumeSession'].params.parse(p).sessionId),
+    'agents.forkConversation': async (p) =>
+      mgr.forkConversation(RpcMethods['agents.forkConversation'].params.parse(p).sessionId),
     'agents.updateSettings': async (p) => {
       /*
        * **필드를 하나씩 꺼내 쓰지 않는다.**

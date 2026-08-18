@@ -21,7 +21,15 @@ export type CodexClientHandlers = {
   onNotification: (n: ServerNotification) => void
   /** 서버가 승인을 요청한다. 반환값이 곧 응답 result */
   onServerRequest: (r: ServerRequest) => void
-  onExit: (code: number | null) => void
+  /**
+   * 프로세스가 끝났다. `expected`는 **우리가 닫은 것인지**를 말한다.
+   *
+   * 이 한 값이 없어서 정상 종료가 크래시로 둔갑했다: dispose로 얌전히 닫아도
+   * 어댑터가 "codex app-server exited"를 error로 올렸고, 그 메시지가 진짜 원인
+   * (잠금 충돌)을 덮어썼다. 아래 exit 핸들러는 이미 둘을 구분하고 있었는데
+   * 그 사실을 밖으로 내보내지 않았을 뿐이다.
+   */
+  onExit: (code: number | null, expected: boolean) => void
 }
 
 export class CodexClient {
@@ -61,7 +69,7 @@ export class CodexClient {
       const why = unexpected ? 'codex app-server exited' : 'request cancelled while closing the codex connection'
       for (const [, p] of this.pending) p.reject(new Error(why))
       this.pending.clear()
-      this.handlers.onExit(code)
+      this.handlers.onExit(code, !unexpected)
     })
   }
 

@@ -64,7 +64,17 @@ class CodexSession implements SessionHandle {
       {
         onNotification: (n) => this.onNotification(n),
         onServerRequest: (r) => this.onServerRequest(r),
-        onExit: (code) =>
+        /*
+         * **우리가 닫은 것을 죽었다고 말하지 않는다.**
+         *
+         * 여기가 조사 하루를 통째로 먹은 자리다. 잠긴 스레드를 이어가려다 실패하면
+         * 매니저가 세션을 정리하는데(dispose), 그 정상 종료가 다시 이 자리로 와서
+         * `adapter_crashed`를 올렸다. 화면에는 "codex app-server exited"만 남고
+         * 진짜 이유("already has an active writer")는 그 아래 깔려 보이지 않았다.
+         * 죽지도 않은 프로세스를 죽었다고 말하니, 원인을 찾을 길이 없었다.
+         */
+        onExit: (code, expected) => {
+          if (expected) return
           this.emit({
             type: 'error',
             sessionId: this.sessionId,
@@ -73,7 +83,8 @@ class CodexSession implements SessionHandle {
               message: `codex app-server exited (code ${code ?? 'null'})`,
               retryable: true,
             },
-          }),
+          })
+        },
       },
       { cwd: opts.cwd, command: whichTool('codex') ?? 'codex' },
     )
@@ -95,11 +106,22 @@ class CodexSession implements SessionHandle {
           threadId: this.opts.resumeExternalId,
         })
       } catch (err) {
-        // 원문("already has an active writer")은 사용자에게 아무것도 설명하지 못한다
+        /*
+         * 원문("already has an active writer")은 사용자에게 아무것도 설명하지 못한다.
+         *
+         * 그리고 **사람에게 보여줄 문장만으로는 부족하다** — 위층이 문장을 정규식으로
+         * 다시 읽어야 한다면 그건 계약이 아니다. 기계가 읽을 코드를 함께 올린다:
+         * 이 코드가 있어야 UI가 "갈라서 이어가기"를 내밀 수 있다 (codex의 thread/fork는
+         * 잠겨 있어도 된다 — 실측으로 확인).
+         */
         const msg = (err as Error).message
-        throw /active writer/i.test(msg)
-          ? new Error('This conversation is already open elsewhere (codex in a terminal, or another session)')
-          : err
+        if (/active writer/i.test(msg)) {
+          throw Object.assign(
+            new Error('This conversation is already open elsewhere (codex in a terminal, or another app)'),
+            { code: 'conversation_locked' },
+          )
+        }
+        throw err
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
     } else {
@@ -340,6 +362,35 @@ export class CodexAdapter implements AgentAdapter {
 
   listExternalSessions(cwd: string, limit: number) {
     return listCodexThreads(cwd, limit, whichTool('codex') ?? 'codex')
+  }
+
+  /**
+   * 잠긴 대화에서 갈라져 나온다 (`thread/fork`).
+   *
+   * 사용량 조회와 같은 이유로 **단명 클라이언트**를 쓴다 — 이건 세션이 아니라
+   * 세션을 만들기 **전에** 하는 일이라, 붙잡고 있을 스레드가 아직 없다.
+   *
+   * 원본은 건드리지 않는다. codex가 새 스레드에 `forkedFromId`로 출처를 남겨 준다.
+   */
+  async forkConversation(externalId: string, cwd: string): Promise<string> {
+    const client = new CodexClient(
+      { onNotification: () => {}, onServerRequest: (r) => client.respond(r.id, {}), onExit: () => {} },
+      { cwd, command: whichTool('codex') ?? 'codex' },
+    )
+    try {
+      await client.request('initialize', {
+        clientInfo: { name: 'control-center', title: 'Control Center', version: '0.1.0' },
+        capabilities: null,
+      })
+      client.notify('initialized')
+      const res = await client.request<Record<string, unknown>>('thread/fork', { threadId: externalId })
+      const forked = threadIdOf(res)
+      // 갈라졌다면서 새 id를 못 주면 이어갈 데가 없다 — 조용히 원본으로 되돌아가면 또 잠긴다
+      if (!forked) throw new Error('codex forked the conversation but returned no thread id')
+      return forked
+    } finally {
+      await client.dispose()
+    }
   }
 
   /**

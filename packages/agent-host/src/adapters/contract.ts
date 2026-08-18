@@ -210,4 +210,22 @@ export interface AgentAdapter {
    * 구버전 도구를 만나면 던져도 된다 — 매니저가 이유와 함께 degrade한다.
    */
   listModels?(): Promise<ModelOption[]>
+
+  /**
+   * 잠긴 대화에서 **갈라져 나온다** — 새 externalId를 돌려준다.
+   *
+   * 왜 필요한가: 도구에 따라 한 대화의 쓰기 권한은 하나뿐이다. codex는 잠금으로
+   * 막고("already has an active writer"), 그러면 이 앱에서는 그 대화를 이어갈 방법이
+   * 아예 없었다 — 사람이 다른 앱을 닫으러 가는 것 말고는.
+   *
+   * 그런데 **막히는 건 쓰기 하나뿐이다.** 실측으로 확인한 것:
+   *   thread/resume  ❌ 잠김
+   *   thread/read    ✅ 잠겨 있어도 읽힌다 (우리는 이미 우리 저장소로 읽고 있다)
+   *   thread/fork    ✅ 잠겨 있어도 갈라진다
+   *
+   * 그래서 막다른 길이 아니라 갈림길이다. 원본은 건드리지 않고 사본에서 이어간다.
+   * 이 능력이 없는 어댑터는 구현하지 않는다 — claude는 애초에 잠그지 않으므로 필요 없다
+   * (동시 resume이 그대로 동작한다는 것도 실측으로 확인했다).
+   */
+  forkConversation?(externalId: string, cwd: string): Promise<string>
 }

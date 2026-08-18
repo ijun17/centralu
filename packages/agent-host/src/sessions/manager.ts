@@ -475,7 +475,16 @@ export class SessionManager {
    * 어댑터의 resume이 성공하면 같은 대화를 이어가고, 실패하면 **조용히 죽지 않고**
    * `resumable: false`로 알린다 — UI가 "기록 보기 + 새 세션"을 안내할 수 있도록.
    */
-  async resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+  /**
+   * `lockedElsewhere`는 **문장이 아니라 신호다.**
+   *
+   * 이유를 문장으로만 주면 UI가 그 문장을 정규식으로 되읽어야 한다 — 문구를 고치는 순간
+   * 조용히 깨지는 계약이다. 이 대화를 다른 쪽이 쥐고 있다는 사실만 따로 올려서,
+   * 화면이 "갈라서 이어가기"를 내밀지 말지를 문구와 무관하게 정할 수 있게 한다.
+   */
+  async resumeSession(
+    sessionId: string,
+  ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -533,6 +542,7 @@ export class SessionManager {
           session: m,
           resumed: false,
           reason: `The "${holder.name}" session already has this conversation open (two sessions cannot share one conversation)`,
+          lockedElsewhere: true,
         }
       }
     }
@@ -602,8 +612,49 @@ export class SessionManager {
           reason: `This conversation was deleted in ${m.tool === 'codex' ? 'Codex' : 'Claude Code'} — the history kept here is still readable, and you can continue in a new session`,
         }
       }
+      /*
+       * 어댑터가 "이 대화는 다른 쪽이 쥐고 있다"고 코드로 말해 준다 (codex의 잠금).
+       * 문장을 다시 읽지 않고 그 코드만 본다 — 여기가 화면에 갈림길을 내미는 근거다.
+       */
+      const locked = (err as { code?: string }).code === 'conversation_locked'
+      return { session: m, resumed: false, reason: (err as Error).message, lockedElsewhere: locked || undefined }
+    }
+  }
+
+  /**
+   * 잠긴 대화에서 **갈라져 나와** 이 세션으로 이어간다.
+   *
+   * 원본은 그대로 둔다 — 다른 앱이 쓰던 대화를 빼앗지 않는다. 이 세션의 externalId만
+   * 새 사본을 가리키게 바꾸고 되살린다. 여기까지 오는 사람은 이미 "다른 곳에서 열려
+   * 있습니다"를 보고 스스로 고른 것이므로, 다시 묻지 않는다.
+   *
+   * 우리 저장소의 대화 기록은 손대지 않는다. 사람이 보는 화면은 그대로고,
+   * 이어지는 말만 사본에 쌓인다.
+   */
+  async forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+
+    const source = m.externalId ?? m.importedFrom
+    if (!source) {
+      return { session: m, resumed: false, reason: 'This session has no conversation to fork from' }
+    }
+
+    const adapter = this.adapters.get(m.tool)
+    if (!adapter?.forkConversation) {
+      // 능력이 없으면 없다고 말한다 — 조용히 아무 일도 안 하는 쪽이 훨씬 나쁘다
+      return { session: m, resumed: false, reason: `${m.tool} cannot fork a conversation` }
+    }
+
+    try {
+      const forked = await adapter.forkConversation(source, this.cwdOf(m.projectId))
+      m.externalId = forked
+      this.store.upsertSession(m)
+    } catch (err) {
       return { session: m, resumed: false, reason: (err as Error).message }
     }
+
+    return this.resumeSession(sessionId)
   }
 
   /** 세션을 완전히 지운다 (프로세스 종료 + 기록·첨부 삭제) */

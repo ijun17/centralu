@@ -85,8 +85,18 @@ export interface AgentPort {
     tool: ToolName,
     limit?: number,
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>
-  /** 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다 */
-  resumeSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
+  /**
+   * 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다.
+   * `lockedElsewhere`면 이유를 읽지 않고도 "갈라서 이어가기"를 내밀 수 있다.
+   */
+  resumeSession(
+    sessionId: string,
+  ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
+  /**
+   * 잠긴 대화에서 갈라져 나와 이 세션으로 이어간다.
+   * 원본은 그대로 둔다 — 다른 앱이 쓰던 대화를 빼앗지 않는다.
+   */
+  forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
    * 세션의 에이전트를 바꾼다 (claude ↔ codex).
    * **대화는 이어지지 않는다** — 새 도구는 옛 대화를 모른다. 기록은 우리 저장소에 남는다.

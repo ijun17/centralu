@@ -55,12 +55,20 @@ class FakeAdapter implements AgentAdapter {
   private handles = new Map<string, FakeHandle>()
   handleOf(id: string) { return this.handles.get(id) }
   /** 도구가 뜨지 못하는 상황을 만든다 (되살리기 실패 경로) */
-  failCreate: string | null = null
+  /** 문자열이면 그 문구로, Error면 그대로 던진다 (code를 실어 보낼 때) */
+  failCreate: string | Error | null = null
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    if (this.failCreate) throw new Error(this.failCreate)
+    if (this.failCreate) throw typeof this.failCreate === 'string' ? new Error(this.failCreate) : this.failCreate
     this.lastOrchestratorTools = opts.orchestratorTools
     this.last = new FakeHandle(opts.sessionId, emit)
+    /*
+     * **이어받은 대화의 id를 그대로 보고한다** — 실제 어댑터가 그렇게 한다
+     * (codex는 thread/resume이 돌려준 threadId를, claude는 SDK의 session_id를 쓴다).
+     * 늘 같은 값을 답하게 두면, 갈라져 나온 사본을 가리키게 만들어도 매니저가
+     * 원본으로 되돌려 버리는 것을 테스트가 못 잡는다.
+     */
+    if (opts.resumeExternalId) this.last.externalId = opts.resumeExternalId
     this.handles.set(opts.sessionId, this.last)
     return this.last
   }
@@ -598,6 +606,16 @@ describe('도구에서 지워진 대화', () => {
       if (this.failList) throw new Error('목록을 못 받았다')
       return this.present.map((externalId) => ({ externalId, title: externalId, updatedAt: 1 }))
     }
+    /** 갈라진 원본 id — 원본을 건드리지 않았는지 테스트가 본다 */
+    forkedFrom: string | null = null
+    /** 끄면 '이 도구는 갈라질 수 없다'가 된다 (선택 메서드가 곧 능력이다) */
+    canFork = true
+    forkConversation = async (externalId: string) => {
+      if (!this.canFork) throw new Error('unreachable — canFork=false면 메서드가 없어야 한다')
+      this.forkedFrom = externalId
+      this.present = [...this.present, 'forked-1']
+      return 'forked-1'
+    }
   }
 
   const setup = () => {
@@ -621,6 +639,57 @@ describe('도구에서 지워진 대화', () => {
     expect(r.reason).toMatch(/was deleted in Claude Code/)
     // 기록은 읽을 수 있어야 한다 — 세션을 지워버리지 않는다
     expect(m.listSessions().find((x) => x.id === s.id)).toBeDefined()
+  })
+
+  /*
+   * codex는 한 대화에 쓰는 쪽을 하나로 제한한다("already has an active writer").
+   * 예전에는 그 실패가 화면까지 오는 동안 "codex app-server exited"로 덮여서,
+   * 사람은 죽지도 않은 프로세스가 죽었다는 말을 들었고 빠져나갈 길도 못 받았다.
+   * 이유는 문장이 아니라 **신호**로 와야 UI가 갈림길을 내밀 수 있다.
+   */
+  it('다른 쪽이 대화를 쥐고 있으면 잠겼다는 신호를 함께 준다', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+
+    a.failCreate = Object.assign(new Error('This conversation is already open elsewhere'), {
+      code: 'conversation_locked',
+    })
+    const r = await m.resumeSession(s.id)
+
+    expect(r.resumed).toBe(false)
+    expect(r.lockedElsewhere).toBe(true)
+  })
+
+  it('갈라서 이어가면 원본은 그대로 두고 사본을 가리킨다', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    const before = m.listSessions().find((x) => x.id === s.id)!.externalId
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+
+    const r = await m.forkConversation(s.id)
+
+    expect(r.resumed).toBe(true)
+    expect(a.forkedFrom).toBe(before)
+    // 이 세션은 이제 사본을 가리킨다 — 원본을 다시 잡으러 가면 또 잠긴다
+    expect(m.listSessions().find((x) => x.id === s.id)!.externalId).toBe('forked-1')
+  })
+
+  it('갈라질 수 없는 도구면 조용히 넘기지 않고 그렇다고 말한다', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    // 능력은 플래그가 아니라 **메서드의 유무**로 표현된다 (contract.ts의 규칙)
+    delete (a as { forkConversation?: unknown }).forkConversation
+
+    const r = await m.forkConversation(s.id)
+
+    expect(r.resumed).toBe(false)
+    expect(r.reason).toMatch(/cannot fork/)
   })
 
   it('목록을 못 받았으면 삭제로 단정하지 않는다 (도구가 잠깐 안 될 뿐일 수 있다)', async () => {

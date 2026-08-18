@@ -138,6 +138,14 @@ export type AppState = {
    */
   wakeError: Record<string, string>
   /**
+   * 못 깨운 이유가 **다른 쪽이 쥐고 있어서**인가.
+   *
+   * 이유 문구를 정규식으로 되읽어 판정하지 않는다 — 문구를 고치는 순간 조용히 깨진다.
+   * host가 신호로 따로 내려주므로 그대로 들고만 있는다. 이 값이 참일 때만
+   * "갈라서 이어가기"를 내민다 (그 길이 실제로 열려 있는 경우가 그때뿐이다).
+   */
+  wakeLocked: Record<string, boolean>
+  /**
    * 증거 레인(깃·파일)이 열려 있는가.
    * 탭이 아니라 패널인 이유: 깃 상태는 대화를 **대신하는** 화면이 아니라
    * 대화가 주장하는 것의 **증거**다. 대체 관계가 아닌 것을 탭으로 묶으면
@@ -254,6 +262,11 @@ export type AppState = {
   switchTool(sessionId: string, tool: ToolName): Promise<void>
   /** 세션을 고르는 즉시 깨운다 (첫 응답을 기다리지 않게) */
   wake(sessionId: string): Promise<void>
+  /**
+   * 잠긴 대화에서 갈라져 나와 이어간다.
+   * 다른 앱을 닫으러 가지 않아도 되는 유일한 출구 — 원본은 그대로 둔다.
+   */
+  forkConversation(sessionId: string): Promise<void>
   /** 재연결 후 돌던 세션 되살리기 (host가 죽으면 프로세스도 함께 죽는다) */
   recoverAfterReconnect(): Promise<void>
   /** 사이드바 순서 (사람이 끌어서 정한다) */
@@ -367,6 +380,7 @@ export const useStore = create<AppState>((set, get) => ({
   history: {},
   resuming: {},
   wakeError: {},
+  wakeLocked: {},
   panelOpen: true,
   panelTab: 'git',
   view: 'focus' as const,
@@ -956,6 +970,8 @@ export const useStore = create<AppState>((set, get) => ({
           ? s.sessions
           : { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: true } },
         wakeError: omitKey(s.wakeError, sessionId),
+        // 보내졌다는 건 잠금이 풀렸다는 뜻이다 — 갈림길을 계속 내밀 이유가 없다
+        wakeLocked: omitKey(s.wakeLocked, sessionId),
       }))
     } catch (err) {
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
@@ -1240,9 +1256,42 @@ export const useStore = create<AppState>((set, get) => ({
         wakeError: res.resumed
           ? omitKey(st.wakeError, sessionId)
           : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
+        wakeLocked:
+          res.resumed || !res.lockedElsewhere
+            ? omitKey(st.wakeLocked, sessionId)
+            : { ...st.wakeLocked, [sessionId]: true },
       }))
     } catch (e) {
-      set((st) => ({ wakeError: { ...st.wakeError, [sessionId]: (e as Error).message } }))
+      set((st) => ({
+        wakeError: { ...st.wakeError, [sessionId]: (e as Error).message },
+        wakeLocked: omitKey(st.wakeLocked, sessionId),
+      }))
+    } finally {
+      set((st) => {
+        const next = { ...st.resuming }
+        delete next[sessionId]
+        return { resuming: next }
+      })
+    }
+  },
+
+  async forkConversation(sessionId) {
+    const s = get()
+    if (!s.platform || s.resuming[sessionId]) return
+    set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
+    try {
+      const res = await s.platform.agents.forkConversation(sessionId)
+      set((st) => ({
+        sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
+        wakeError: res.resumed ? omitKey(st.wakeError, sessionId) : { ...st.wakeError, [sessionId]: res.reason ?? '' },
+        // 갈라졌으면 더는 잠긴 상태가 아니다 — 실패했으면 갈림길은 그대로 남겨 둔다
+        wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
+        toast: res.resumed
+          ? 'Continuing in a forked conversation — the original is untouched'
+          : `Could not fork: ${res.reason ?? 'unknown reason'}`,
+      }))
+    } catch (e) {
+      set({ toast: `Could not fork: ${(e as Error).message}` })
     } finally {
       set((st) => {
         const next = { ...st.resuming }

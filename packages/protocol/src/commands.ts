@@ -187,6 +187,25 @@ export const RpcMethods = {
   },
   'agents.resumeSession': {
     params: z.object({ sessionId: z.string() }),
+    result: z.object({
+      session: SessionInfo,
+      resumed: z.boolean(),
+      reason: z.string().optional(),
+      /**
+       * 이 대화를 **다른 쪽이 쥐고 있다**. 화면은 이 값만 보고 갈림길을 내민다 —
+       * reason 문구를 되읽지 않는다 (문구를 고치면 조용히 깨지는 계약이 된다).
+       */
+      lockedElsewhere: z.boolean().optional(),
+    }),
+  },
+  /**
+   * 잠긴 대화에서 **갈라져 나와** 이 세션으로 이어간다.
+   *
+   * 한 대화의 쓰기 권한이 하나뿐인 도구(codex)에서, 다른 앱을 닫지 않고도 이어갈 수 있는
+   * 유일한 길이다. 원본은 건드리지 않고 사본을 만들어 이 세션이 그쪽을 가리키게 한다.
+   */
+  'agents.forkConversation': {
+    params: z.object({ sessionId: z.string() }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
   /**
