@@ -106,6 +106,29 @@ describe('프로젝트', () => {
 })
 
 describe('세션 수명주기', () => {
+  /*
+   * host가 죽으면 세션 프로세스도 함께 죽는다. 그런데 DB에는 마지막 상태가 남아 있어서
+   * 다시 켜면 프로세스가 하나도 없는데 화면은 영원히 '작업 중'이다 (도그푸딩: 40분 넘게
+   * working에 갇힘 / 아카이브→복구로만 풀림 — archive가 state를 idle로 되돌리기 때문).
+   */
+  it('기동 시 프로세스 없는 working·waiting_approval을 idle로 바로잡는다', async () => {
+    const p = await addProject()
+    const live = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: live.id, text: '안녕' })
+    expect((store.listSessions().find((s) => s.id === live.id)!).state).toBe('working')
+
+    // host 재기동 — 같은 store로 매니저를 새로 만든다 (프로세스는 하나도 없다)
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e))
+    const after = (await createRpcHandler(restarted, new Map<ToolName, AgentAdapter>([['claude', adapter]]))('sessions.list', {})) as {
+      id: string
+      state: string
+    }[]
+
+    expect(after.find((s) => s.id === live.id)!.state).toBe('idle')
+    // 화면만이 아니라 DB도 바로잡혀야 한다 — 다음 기동에서 되살아나면 안 된다
+    expect(store.listSessions().find((s) => s.id === live.id)!.state).toBe('idle')
+  })
+
   it('생성 → 전송 → 이벤트 전파', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

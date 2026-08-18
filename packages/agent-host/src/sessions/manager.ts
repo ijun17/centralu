@@ -17,6 +17,7 @@ import type {
   QuestionAnswer,
   ProjectInfo,
   SessionInfo,
+  SessionState,
   StoredMessage,
   UsageSnapshot,
   ToolName,
@@ -99,7 +100,29 @@ export class SessionManager {
      */
     private endpoint?: () => { url: string; token: string } | null,
   ) {
-    for (const s of store.listSessions()) this.meta.set(s.id, s)
+    /*
+     * 기동 시 상태를 **있는 그대로 되살리지 않는다.**
+     *
+     * host가 죽으면 세션 프로세스도 함께 죽는다. 그런데 DB에는 마지막 상태가
+     * 그대로 남아 있어서, 다시 켜면 프로세스가 하나도 없는데 화면에는 `working`이라고
+     * 적혀 있다. 사람은 도는 줄 알고 기다리지만 영원히 아무 일도 일어나지 않는다
+     * (도그푸딩: "40분 넘게 working에 갇혀 있다", "아카이브했다 되돌리면 풀린다" —
+     * archive가 state를 idle로 되돌리기 때문이었다).
+     *
+     * 살아 있는 상태(working·승인 대기)는 **프로세스가 있어야만 참**이다.
+     * 기동 시점에는 어느 세션에도 프로세스가 없으므로 전부 idle로 바로잡는다.
+     * 말을 걸면 그때 깨어난다 — 사실이 아닌 상태를 보여주는 것보다 낫다.
+     */
+    const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
+    for (const s of store.listSessions()) {
+      const stale = !s.archived && LIVE_ONLY.includes(s.state)
+      const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
+      this.meta.set(s.id, fixed)
+      if (stale) {
+        console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
+        store.upsertSession(fixed)
+      }
+    }
   }
 
   async addProject(path: string): Promise<ProjectInfo> {
