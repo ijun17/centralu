@@ -7,7 +7,7 @@
 
 | 항목 | 값 | 확인 방법 |
 |---|---|---|
-| 서명 | `Signature=adhoc`, `TeamIdentifier=not set` | `codesign -dvv <app>` |
+| 서명 | 애드혹(유효) + hardened runtime, 공증 없음 | `codesign -dvv <app>` |
 | 아키텍처 | arm64 전용 (Mach-O arm64) | `file <app>/Contents/MacOS/control-center` |
 | 네이티브 애드온 | `better_sqlite3.node`·`pty.node` 둘 다 arm64 | `file …/node_modules/**/*.node` |
 | 런타임 | `system-node` — **사용자 맥에 Node가 있어야 한다** | `resources/host/bundle-info.json` |
@@ -19,16 +19,37 @@
 
 ## 1. 배포를 막는 것 (이게 안 되면 나머지는 의미 없다)
 
-### 1-1. 서명·공증 — 최우선
+### 1-1. 서명·공증
 
-애드혹 서명 + 다운로드 격리 조합은 Apple Silicon에서 **경고가 아니라 거부**다:
+**공증(notarization)에는 유료 인증서가 필요하다.** 무료 우회로는 없다:
 
-> "Control Center"가 손상되었기 때문에 열 수 없습니다. 휴지통으로 이동해야 합니다.
+| 방법 | 비용 | 배포 |
+|---|---|---|
+| 무료 Apple ID → Apple Development 인증서 | 무료 | ❌ 개발·내 기기용, 공증 불가 |
+| 자체 서명 | 무료 | ❌ Gatekeeper는 Apple 발급 Developer ID만 신뢰 |
+| Apple Developer Program → Developer ID Application | 연 $99 | ✅ 공증 가능 |
 
-테스터 눈에는 앱이 깨졌거나 악성으로 보인다. `xattr -cr` 우회를 안내할 수는 있지만
-첫 화면이 그 안내인 베타는 진행되지 않는다.
+#### 무료로 이미 해결한 것 (`4f405fe`)
 
-- [ ] Apple Developer Program 가입 (연 $99)
+`signingIdentity`가 없으면 Tauri는 codesign을 **건너뛴다.** 그래서 링커가 붙인 반쪽
+서명만 남아 검증이 실패했고, 다른 맥에서 이렇게 떴다:
+
+> "손상되었기 때문에 열 수 없습니다. 휴지통으로 이동해야 합니다."
+
+`signingIdentity: "-"` 한 줄로 문구가 바뀐다 (실측):
+
+> "Apple은 … 악성 코드가 없음을 확인할 수 없습니다."
+
+앞은 **막다른 길**(검증 실패)이고 뒤는 macOS의 **표준 미공증 경로**다.
+hardened runtime도 함께 켜지므로 나중에 공증할 때의 전제조건이 미리 갖춰진다.
+
+#### 유료로 가야 하는 시점
+
+- 비공개 베타(아는 사람 몇 명, 전원 개발자) → **애드혹으로 충분**. $99 미룬다
+- 공개 배포 / brew 탭 / 모르는 사람이 받는 순간 → 공증한다.
+  그 지점부터는 '수상한 앱'으로 보이는 비용이 $99보다 크다
+
+- [ ] (공개 배포 시) Apple Developer Program 가입 (연 $99)
 - [ ] Developer ID Application 인증서 발급
 - [ ] Tauri 빌드에 서명 환경변수 연결
       (`APPLE_CERTIFICATE`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`)
@@ -56,7 +77,9 @@ GitHub Releases (.dmg)        ← 원본. 여기서 시작한다
    └── ijun17/homebrew-tap    ← 나중에 얹는 편의 래퍼
 ```
 
-- [ ] GitHub Releases로 `.dmg` 배포 (원본)
+- [ ] GitHub Releases로 `.dmg` 배포 (원본) — **호스팅 비용 없음**
+- [ ] README에 첫 실행 안내: 시스템 설정 → 개인정보 보호 및 보안 → '확인 없이 열기',
+      또는 `xattr -dr com.apple.quarantine "/Applications/Control Center.app"`
 - [ ] 안정되면 본인 탭 추가 → `brew tap ijun17/tap && brew install --cask control-center`
 - [ ] 탭은 **서명이 끝난 뒤에** — 서명 없는 앱을 brew로 깔면 실패 경험만 넓힌다
 
