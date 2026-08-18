@@ -48,6 +48,9 @@
     "longDescription": "여러 에이전트 코딩 도구를 한 창에서 실행·관찰·제어합니다.",
     "resources": [
       "resources/host/**/*"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }
