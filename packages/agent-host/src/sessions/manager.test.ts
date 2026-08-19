@@ -178,6 +178,30 @@ describe('세션 수명주기', () => {
     expect(list[0]!.name).toBe('내 세션')
   })
 
+  /*
+   * 이름 바꾸기가 실패했는데 UI가 성공한 얼굴을 하는 일이 없어야 한다 (이슈 #5).
+   * 예전에는 세션이 없으면 조용히 return이었고 RPC는 그대로 {ok:true}였다.
+   */
+  it('없는 세션의 이름을 바꾸려 하면 실패로 돌아온다', async () => {
+    await expect(rpc('sessions.rename', { sessionId: 'nope', name: '내 세션' })).rejects.toThrow(/not found/i)
+  })
+
+  it('빈 이름은 거부한다 — 목록에서 아무것도 못 가리키는 줄이 된다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await expect(rpc('sessions.rename', { sessionId: s.id, name: '   ' })).rejects.toThrow(/empty/i)
+    const list = (await rpc('sessions.list', {})) as { name: string }[]
+    expect(list[0]!.name).toBe('New session')
+  })
+
+  it('사람이 정한 이름은 auto:false로 알린다 — 받는 쪽이 자동 이름을 막을 근거다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('sessions.rename', { sessionId: s.id, name: '가드 MCP' })
+    const titles = events.filter((e) => e.type === 'session_title') as { title: string; auto: boolean }[]
+    expect(titles.at(-1)).toMatchObject({ title: '가드 MCP', auto: false })
+  })
+
   it('아카이브하면 핸들이 정리되고 활성 목록에서 빠진다 (FR-20)', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

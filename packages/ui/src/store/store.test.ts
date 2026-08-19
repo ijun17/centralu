@@ -243,3 +243,44 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     expect((mock.workspaceSnapshot as { treeHeight?: number } | null)?.treeHeight).toBe(280)
   })
 })
+
+/*
+ * 이름 바꾸기가 실패했는데 화면만 성공하는 일이 없어야 한다 (이슈 #5).
+ * 이 저장소가 반복해서 데인 버그라, 실패는 반드시 사람 눈에 닿는 자리(토스트)로 나와야 한다.
+ */
+describe('세션 이름 바꾸기 (이슈 #5)', () => {
+  it('성공하면 이름이 바뀌고 자동 이름이 잠긴다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rn-s1', sessionInfo('rn-s1'))
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().rename('rn-s1', '  가드 MCP  ')
+
+    expect(useStore.getState().sessions['rn-s1']).toMatchObject({ name: '가드 MCP', autoNamed: false })
+    expect(useStore.getState().toast).toBeNull()
+  })
+
+  it('실패하면 이름을 그대로 두고 토스트로 알린다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rn-s2', sessionInfo('rn-s2', { name: '옛 이름' }))
+    await useStore.getState().attach(mock)
+    // host가 거절하는 상황 — 세션이 사라진 뒤에 이름을 고치는 것이 실제 경로다
+    mock.sessions.delete('rn-s2')
+
+    await useStore.getState().rename('rn-s2', '새 이름')
+
+    expect(useStore.getState().sessions['rn-s2']!.name).toBe('옛 이름')
+    expect(useStore.getState().toast).toMatch(/Could not rename/)
+  })
+
+  it('빈 이름은 보내지 않고 그 자리에서 알린다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rn-s3', sessionInfo('rn-s3', { name: '옛 이름' }))
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().rename('rn-s3', '   ')
+
+    expect(useStore.getState().sessions['rn-s3']!.name).toBe('옛 이름')
+    expect(useStore.getState().toast).toMatch(/empty/i)
+  })
+})

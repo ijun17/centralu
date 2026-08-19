@@ -143,6 +143,23 @@ describe('세션 이름 (FR-18)', () => {
     const s = applyEvent(rename(s0(), '내가 정한 이름'), ev({ type: 'session_title', title: '자동' }), NOW)
     expect(s.name).toBe('내가 정한 이름')
   })
+
+  /*
+   * 사람이 고친 이름은 **몇 번째든** 다른 화면까지 가야 한다 (이슈 #5).
+   * 예전엔 내 autoNamed만 보고 정해서, 두 번째 변경부터 조용히 버려졌다.
+   */
+  it('사람이 정한 이름(auto:false)은 이미 수동인 세션도 갱신한다', () => {
+    const once = applyEvent(s0(), ev({ type: 'session_title', title: '가드 MCP', auto: false }), NOW)
+    expect(once).toMatchObject({ name: '가드 MCP', autoNamed: false })
+    const twice = applyEvent(once, ev({ type: 'session_title', title: '가드 MCP 2차', auto: false }), NOW)
+    expect(twice.name).toBe('가드 MCP 2차')
+  })
+
+  it('사람이 정한 이름 뒤에 온 자동 이름은 버린다', () => {
+    const named = applyEvent(s0(), ev({ type: 'session_title', title: '가드 MCP', auto: false }), NOW)
+    const s = applyEvent(named, ev({ type: 'session_title', title: 'This session is being continued…', auto: true }), NOW)
+    expect(s.name).toBe('가드 MCP')
+  })
 })
 
 describe('바쁨의 종류 (activity)', () => {

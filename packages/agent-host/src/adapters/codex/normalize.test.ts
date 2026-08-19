@@ -101,7 +101,8 @@ describe('상태·계기판', () => {
 
   it('thread/name/updated → session_title (FR-18 자동 이름)', () => {
     expect(n('thread/name/updated', { name: 'auth 리팩터링' })).toEqual([
-      { type: 'session_title', sessionId: S, title: 'auth 리팩터링' },
+      // auto:true — 도구가 스스로 지은 이름이라 사람이 정한 이름을 덮지 못한다 (이슈 #5)
+      { type: 'session_title', sessionId: S, title: 'auth 리팩터링', auto: true },
     ])
   })
 

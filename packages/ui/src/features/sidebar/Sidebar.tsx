@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
@@ -6,7 +6,7 @@ import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
+import { CloseIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
@@ -57,17 +57,23 @@ function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) 
 function SessionRow({
   id,
   onReorder,
+  draggable,
   children,
 }: {
   id: string
   onReorder: (draggedId: string, before: boolean) => void
+  /**
+   * 이름을 고치는 동안은 끌 수 없다. draggable인 조상 안의 input은 브라우저가
+   * 글자 선택 대신 **끌기**로 해석해서, 고치려고 문지르면 줄이 통째로 딸려온다.
+   */
+  draggable: boolean
   children: ReactNode
 }) {
   const drop = useDropLine(SESSION_MIME, onReorder)
   return (
     <li
       className={`group/row relative ${dropLine(drop.edge)}`}
-      draggable
+      draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
         e.dataTransfer.effectAllowed = 'move'
@@ -260,6 +266,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const sessions = useSessionsOf(projectId)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [confirming, setConfirming] = useState<string | null>(null)
+  /** 지금 이름을 고치는 중인 세션. 한 번에 하나만 — 두 줄이 동시에 입력창이면 어느 쪽이 활성인지 모른다 */
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const renameSession = useStore((s) => s.rename)
   const deleteSession = useStore((s) => s.deleteSession)
   const focusProject = useStore((s) => s.focusProject)
   const reorderProjects = useStore((s) => s.reorderProjects)
@@ -342,60 +351,98 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             <SessionRow
               key={s.id}
               id={s.id}
+              draggable={renaming !== s.id}
               onReorder={(draggedId, before) =>
                 void reorderSessions(projectId, moveTo(sessions.map((x) => x.id), draggedId, s.id, before))
               }
             >
-              <button
-                onClick={() => focusSession(s.id)}
-                data-testid={`session-row-${s.id}`}
-                className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-8 text-left text-[13px] transition-colors ${
-                  focused
-                    ? 'border-l-ash bg-graphite/40 text-chalk'
-                    : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
-                }`}
-              >
-                {/*
-                  표식 하나가 두 가지를 말한다: 글자는 도구, 테두리는 상태.
-                  점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
-                */}
-                <ToolMark tool={s.tool} state={s.state} />
-                <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
-                {unread && (
-                  <span
-                    className="ml-auto size-1 shrink-0 rounded-full bg-ash"
-                    data-testid={`unread-${s.id}`}
-                    title="Unread"
-                  />
-                )}
-              </button>
-              {/*
-                삭제 하나만 둔다.
+              {renaming === s.id ? (
+                <SessionNameInput
+                  id={s.id}
+                  initial={s.name}
+                  onDone={(name) => {
+                    setRenaming(null)
+                    // 같은 이름이면 왕복할 이유가 없다 (실패 토스트가 뜰 이유도 없다)
+                    if (name && name !== s.name) void renameSession(s.id, name)
+                  }}
+                />
+              ) : (
+                <>
+                  <button
+                    onClick={() => focusSession(s.id)}
+                    /*
+                      이름을 두 번 누르면 그 자리에서 고친다 — 파일 탐색기·탭 이름의 관행이라
+                      버튼을 못 찾은 사람도 손이 먼저 안다. 연필 버튼은 그 관행을 모르는
+                      사람을 위한 두 번째 입구다: 어느 한쪽만 두면 절반은 이름을 못 고친다.
+                    */
+                    onDoubleClick={() => setRenaming(s.id)}
+                    data-testid={`session-row-${s.id}`}
+                    /*
+                      오른쪽 여백은 호버에 나타나는 버튼 **두 개**를 비켜야 한다.
+                      pr-8은 삭제 하나만 있던 시절의 값이라, 연필이 늘면서 긴 이름이
+                      버튼 밑으로 들어간다 — 가려진 글자는 잘린 글자보다 나쁘다.
+                    */
+                    className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-[13px] transition-colors ${
+                      focused
+                        ? 'border-l-ash bg-graphite/40 text-chalk'
+                        : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+                    }`}
+                  >
+                    {/*
+                      표식 하나가 두 가지를 말한다: 글자는 도구, 테두리는 상태.
+                      점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
+                    */}
+                    <ToolMark tool={s.tool} state={s.state} />
+                    <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
+                    {unread && (
+                      <span
+                        className="ml-auto size-1 shrink-0 rounded-full bg-ash"
+                        data-testid={`unread-${s.id}`}
+                        title="Unread"
+                      />
+                    )}
+                  </button>
+                  {/*
+                    이름 고치기와 삭제만 둔다.
 
-                '치우기'를 따로 두려 했지만, 삭제해도 도구(클로드·코덱스)에는 대화가
-                그대로 남아 '+ → 이전 대화'로 되찾을 수 있다. 그러면 둘의 실질 차이가
-                거의 없어서 버튼만 늘고 무엇이 다른지 설명하기 어려워진다.
-                대신 **무엇이 지워지고 무엇이 남는지**를 확인 창에서 분명히 말한다.
-              */}
-              {/*
-                오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
-                같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
-                (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
-              */}
-              <span className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
-                {/*
-                  삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
-                  누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.
-                */}
-                <IconButton
-                  label="Delete permanently (history goes too)"
-                  testId={`delete-session-${s.id}`}
-                  align="right"
-                  onClick={() => setConfirming(s.id)}
-                >
-                  <CloseIcon size={13} />
-                </IconButton>
-              </span>
+                    '치우기'를 따로 두려 했지만, 삭제해도 도구(클로드·코덱스)에는 대화가
+                    그대로 남아 '+ → 이전 대화'로 되찾을 수 있다. 그러면 둘의 실질 차이가
+                    거의 없어서 버튼만 늘고 무엇이 다른지 설명하기 어려워진다.
+                    대신 **무엇이 지워지고 무엇이 남는지**를 확인 창에서 분명히 말한다.
+                  */}
+                  {/*
+                    오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
+                    같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
+                    (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
+                  */}
+                  <span className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
+                    {/*
+                      이름 고치기는 삭제 **왼쪽**에 둔다. 되돌릴 수 없는 일(삭제)이 바깥쪽
+                      끝에 서야, 손이 목록 밖에서 들어올 때 그것부터 지나치지 않는다.
+                    */}
+                    <IconButton
+                      label="Rename (auto-naming stops)"
+                      testId={`rename-session-${s.id}`}
+                      align="right"
+                      onClick={() => setRenaming(s.id)}
+                    >
+                      <PencilIcon size={13} />
+                    </IconButton>
+                    {/*
+                      삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
+                      누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.
+                    */}
+                    <IconButton
+                      label="Delete permanently (history goes too)"
+                      testId={`delete-session-${s.id}`}
+                      align="right"
+                      onClick={() => setConfirming(s.id)}
+                    >
+                      <CloseIcon size={13} />
+                    </IconButton>
+                  </span>
+                </>
+              )}
             </SessionRow>
           )
         })}
@@ -417,6 +464,53 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         />
       )}
     </section>
+  )
+}
+
+/**
+ * 세션 이름을 그 자리에서 고친다 (이슈 #5).
+ *
+ * **모달을 띄우지 않는다.** 이름은 다른 이름들 사이에서 골라야 뜻이 생긴다 —
+ * 화면을 덮으면 무엇과 헷갈렸는지 안 보이는 채로 이름을 짓게 된다.
+ * 자동 이름이 첫 프롬프트를 잘라 쓰기 때문에 `This session is being continued…`가
+ * 넷씩 나란히 서던 문제라, 고치는 동안 나머지 넷이 보여야 한다.
+ *
+ * 빈 이름은 **취소로 친다.** 지우고 나가는 실수로 이름 없는 줄을 만들면
+ * 그 줄은 목록에서 아무것도 가리키지 못한다.
+ */
+function SessionNameInput({ id, initial, onDone }: { id: string; initial: string; onDone: (name: string) => void }) {
+  const [text, setText] = useState(initial)
+  /*
+   * Enter로 확정하면 입력창이 사라지는데, 사라지는 순간 blur도 한 번 더 온다.
+   * 막지 않으면 같은 이름으로 두 번 보낸다 — 한 번은 성공하고 한 번은 실패해서
+   * 아무 이유 없는 오류 토스트가 뜬다.
+   */
+  const done = useRef(false)
+  const finish = (name: string) => {
+    if (done.current) return
+    done.current = true
+    onDone(name.trim())
+  }
+
+  return (
+    <input
+      autoFocus
+      className="w-full border-l-2 border-l-ash bg-graphite/40 py-1.5 pl-2.5 pr-3 text-[13px] text-chalk outline-none"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      // 자동 이름은 통째로 갈아치우는 게 보통이라 전체를 잡아 둔다 (덧붙이려면 → 한 번)
+      onFocus={(e) => e.currentTarget.select()}
+      onKeyDown={(e) => {
+        // 전역 단축키(⌘K 등)가 타이핑을 가로채지 않게 여기서 멈춘다
+        e.stopPropagation()
+        if (e.key === 'Enter') finish(text)
+        else if (e.key === 'Escape') finish(initial)
+      }}
+      // 다른 곳을 눌러 나가도 고친 값을 살린다 — 확정 버튼이 따로 없다
+      onBlur={() => finish(text)}
+      data-testid={`session-name-input-${id}`}
+      spellCheck={false}
+    />
   )
 }
 

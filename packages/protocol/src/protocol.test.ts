@@ -41,7 +41,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.01 } },
   { type: 'context_update', sessionId: 's1', used: 1000, window: 200000, exactness: 'exact' },
   { type: 'limit_reached', sessionId: 's1', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 },
+  // auto가 없던 v1 프레임 — 자동 이름으로 읽혀야 한다 (필드 추가가 옛 프레임을 깨면 안 된다)
   { type: 'session_title', sessionId: 's1', title: 'auth 리팩터링' },
+  // 사람이 정한 이름 (이슈 #5). auto=false면 자동 이름이 다시 덮지 않는다
+  { type: 'session_title', sessionId: 's1', title: '가드 MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },

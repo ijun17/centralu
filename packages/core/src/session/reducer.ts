@@ -169,9 +169,20 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
         ...next,
         limit: { resumeAt: event.resumeAt, usedPercent: event.usedPercent, windowMins: event.windowMins },
       }
+    /*
+     * 사람이 지은 이름은 자동 이름이 덮지 않는다 (FR-18, 이슈 #5).
+     *
+     * 판정 근거가 **이벤트**에 있다는 게 핵심이다. 예전엔 내 autoNamed만 보고
+     * 정했는데, 그러면 사람이 두 번째로 고친 이름이 다른 화면에는 영영 안 갔다 —
+     * 이미 autoNamed가 내려가 있어서 그 이벤트를 통째로 버렸기 때문이다.
+     *
+     * `auto`가 없으면 **자동으로 친다** — 스키마의 기본값과 같은 판정이다.
+     * `!event.auto`로 적으면, 파서를 거치지 않고 손으로 만든 이벤트(옛 버전 프레임·
+     * 테스트 픽스처)에서 undefined가 "사람이 정했다"로 뒤집힌다.
+     */
     case 'session_title':
-      // 수동 이름 변경 시 자동 갱신 중단 (FR-18)
-      return s.autoNamed ? { ...next, name: event.title } : next
+      if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
+      return { ...next, name: event.title, autoNamed: false }
     case 'files_touched':
       return { ...next, touchedPaths: [...new Set([...s.touchedPaths, ...event.paths])] }
     case 'error':

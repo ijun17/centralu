@@ -64,6 +64,27 @@ export function SendIcon({ size = 15 }: { size?: number }) {
 }
 
 /**
+ * 이름 고치기 — 연필.
+ *
+ * 글자('Rename')를 쓰지 않는 이유는 이 자리(세션 줄 오른쪽 끝)가 삭제 버튼과
+ * 나란히 서는 좁은 칸이라, 글자를 넣으면 줄마다 이름이 잘리기 때문이다.
+ * 연필은 "고친다"의 거의 표준 기호라 아이콘으로 바꿔도 뜻이 약해지지 않는다.
+ */
+export function PencilIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M11.2 2.3l2.5 2.5-8 8-3.2.7.7-3.2 8-8z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/**
  * 다시 시작 — 원을 그리는 화살표.
  *
  * "Restart"라는 글자를 아이콘으로 바꾸면 뜻이 약해지므로, 거의 표준에 가까운

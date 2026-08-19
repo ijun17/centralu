@@ -291,7 +291,7 @@ export class MockPlatform implements Platform {
       s.lastReadSeq = seq
       if (s.autoNamed && s.name === 'New session') {
         s.name = text.slice(0, 40)
-        this.emit({ type: 'session_title', sessionId, title: s.name })
+        this.emit({ type: 'session_title', sessionId, title: s.name, auto: true })
       }
       this.emit({ type: 'state_change', sessionId, state: 'working' })
     },
@@ -426,12 +426,19 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       return { session: { ...s }, resumed: true }
     },
+    /*
+      실패는 실패로 돌려준다 — host(manager.rename)와 같은 규칙이다.
+      조용히 넘기면 "이름을 바꿨는데 목록은 그대로"가 mock에서만 재현되지 않아,
+      실제 앱에서만 터지는 종류의 버그가 된다.
+    */
     rename: async (sessionId: string, name: string) => {
       const s = this.sessions.get(sessionId)
-      if (s) {
-        s.name = name
-        s.autoNamed = false
-      }
+      if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      const next = name.trim()
+      if (!next) throw Object.assign(new Error('Session name cannot be empty'), { code: 'internal' })
+      s.name = next
+      s.autoNamed = false
+      this.emit({ type: 'session_title', sessionId, title: next, auto: false })
     },
     markRead: async (sessionId: string, seq: number) => {
       const s = this.sessions.get(sessionId)

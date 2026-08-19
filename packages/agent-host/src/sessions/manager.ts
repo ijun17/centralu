@@ -572,7 +572,7 @@ export class SessionManager {
       if (firstUser) info.name = truncate(firstUser.text)
     }
     this.store.upsertSession(info)
-    this.emit({ type: 'session_title', sessionId: info.id, title: info.name })
+    this.emit({ type: 'session_title', sessionId: info.id, title: info.name, auto: true })
   }
 
   /**
@@ -1060,7 +1060,7 @@ export class SessionManager {
     m.lastReadSeq = seq // 내가 보낸 건 읽은 것
     if (m.autoNamed && m.name === 'New session') {
       m.name = truncate(text)
-      this.emit({ type: 'session_title', sessionId, title: m.name })
+      this.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
     }
     this.store.upsertSession(m)
     /*
@@ -1760,12 +1760,29 @@ export class SessionManager {
     return this.meta.get(info.id)!
   }
 
+  /**
+   * 사람이 이름을 정한다 (FR-18).
+   *
+   * **autoNamed를 내려서 자동 이름이 다시 덮지 못하게 한다.** 자동 이름은 첫 프롬프트를
+   * 잘라 쓰는데, 재개·불러오기로 만든 세션은 첫 마디가 다 같아서
+   * `This session is being continued…`짜리 세션이 목록에 넷이나 나란히 섰다 —
+   * 이름으로는 아무것도 못 고르고 본문을 뒤져야 했다 (이슈 #5).
+   * 그러니 사람이 한 번 고른 이름은 무슨 일이 있어도 살아남아야 한다.
+   *
+   * **조용히 넘어가지 않는다.** 예전에는 세션이 없으면 그냥 `return`이었고, RPC는
+   * 그래도 `{ ok: true }`를 돌려줬다 — 이름은 안 바뀌었는데 화면은 성공한 얼굴을 했다.
+   */
   rename(sessionId: string, name: string): void {
     const m = this.meta.get(sessionId)
-    if (!m) return
-    m.name = name
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const next = name.trim()
+    // 빈 이름은 목록에서 아무것도 못 가리키는 줄이 된다 — 받아주면 이름 없는 세션이 생긴다
+    if (!next) throw Object.assign(new Error('Session name cannot be empty'), { code: 'internal' })
+    m.name = next
     m.autoNamed = false
     this.store.upsertSession(m)
+    // auto:false — 받는 쪽이 "사람이 정했다"를 알아야 다음 자동 이름을 막는다
+    this.emit({ type: 'session_title', sessionId, title: next, auto: false })
   }
 
   markRead(sessionId: string, seq: number): void {

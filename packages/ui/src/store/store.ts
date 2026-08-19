@@ -1434,9 +1434,27 @@ export const useStore = create<AppState>((set, get) => ({
     return r.resumed
   },
 
+  /**
+   * 세션 이름 바꾸기 (이슈 #5).
+   *
+   * **먼저 host에 통과시키고, 그다음에 화면을 고친다.** 낙관적으로 먼저 그리면
+   * 실패했을 때 화면에는 새 이름이, DB에는 옛 이름이 남는다 — 다음에 목록을
+   * 다시 받는 순간 이름이 아무 설명 없이 되돌아간다. 이 저장소가 반복해서 데인 종류다.
+   * 실패는 respondApproval/answerQuestion과 같은 방식으로 토스트에 띄운다.
+   */
   async rename(sessionId, name) {
-    await get().platform!.agents.rename(sessionId, name)
-    set((s) => ({ sessions: { ...s.sessions, [sessionId]: renamePure(s.sessions[sessionId]!, name) } }))
+    const next = name.trim()
+    if (!next) {
+      set({ toast: 'Session name cannot be empty' })
+      return
+    }
+    try {
+      await get().platform!.agents.rename(sessionId, next)
+    } catch (e) {
+      set({ toast: `Could not rename: ${(e as Error).message}` })
+      return
+    }
+    set((s) => ({ sessions: { ...s.sessions, [sessionId]: renamePure(s.sessions[sessionId]!, next) } }))
   },
 
   async markRead(sessionId) {

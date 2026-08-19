@@ -88,7 +88,18 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     usedPercent: z.number().optional(),
     windowMins: z.number().optional(),
   }),
-  z.object({ ...base, type: z.literal('session_title'), title: z.string() }),
+  /**
+   * 세션 이름이 바뀌었다.
+   *
+   * **누가 지었는지를 함께 나른다.** 예전엔 제목만 실어 보냈고, 받는 쪽은
+   * "지금 이 세션이 자동 이름인가"라는 자기 상태만 보고 적용 여부를 정했다.
+   * 그래서 사람이 고친 이름은 **첫 번째 변경만 퍼지고 두 번째부터는 조용히 무시**됐다
+   * (한 번 고치면 autoNamed가 내려가 그 뒤로는 이 이벤트를 전부 버렸다).
+   *
+   * auto=false는 "사람이 정했다"는 뜻이고, 그 이름은 자동 이름이 다시 덮지 않는다 (FR-18).
+   * 생략하면 자동 이름이다 — 옛 버전이 보낸 프레임도 그대로 해석된다.
+   */
+  z.object({ ...base, type: z.literal('session_title'), title: z.string(), auto: z.boolean().default(true) }),
   /** 동시 세션 충돌 감지·최근 수정 파일 하이라이트용 (FR-2, FR-5) */
   z.object({ ...base, type: z.literal('files_touched'), paths: z.array(z.string()) }),
   /** 지금 무엇을 하느라 바쁜가 — null이면 평범한 응답 대기 */

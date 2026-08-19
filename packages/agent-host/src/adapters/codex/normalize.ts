@@ -170,7 +170,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     case 'thread/name/updated':
-      return [{ type: 'session_title', sessionId, title: str(p.name) }]
+      // 도구가 스스로 지은 이름이다 → auto:true. 사람이 정한 이름은 이걸로 덮이지 않는다 (이슈 #5)
+      return [{ type: 'session_title', sessionId, title: str(p.name), auto: true }]
 
     case 'thread/compacted':
       return [{ type: 'compaction', sessionId, failed: false }]

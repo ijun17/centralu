@@ -2470,6 +2470,71 @@ test('사이드바의 + 와 삭제 버튼이 같은 세로줄에 선다', async 
   expect(Math.abs(plus.x + plus.width - (del.x + del.width))).toBeLessThanOrEqual(1)
 })
 
+/**
+ * 세션 이름을 사람이 바꾼다 (이슈 #5).
+ *
+ * 자동 이름은 첫 프롬프트를 잘라 쓴다. 재개·불러오기로 만든 세션은 첫 마디가 다 같아서
+ * `This session is being continued…`짜리 세션이 목록에 넷씩 나란히 섰다 —
+ * 이름으로는 아무것도 못 고르고 본문을 뒤져야 했다.
+ */
+test('사이드바에서 세션 이름을 바꾼다 — 그 뒤 자동 이름이 덮지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'This session is being continued from a previous conversation')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  const row = page.getByTestId(`session-row-${id}`)
+  await expect(row).toContainText('This session is being continued')
+
+  await row.hover()
+  await page.getByTestId(`rename-session-${id}`).click()
+  const input = page.getByTestId(`session-name-input-${id}`)
+  await input.fill('가드 MCP')
+  await input.press('Enter')
+
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('가드 MCP')
+
+  // 자동 이름이 다시 덮으면 안 된다 — 도구가 제목을 알려와도 사람이 정한 이름이 이긴다
+  await emitEvent(page, 0, { type: 'session_title', title: 'This session is being continued…', auto: true })
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('가드 MCP')
+})
+
+test('이름 고치다 Escape를 누르면 옛 이름이 그대로다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '원래 이름')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 이름을 두 번 누르는 것도 같은 입구다 (탭 이름의 관행)
+  await page.getByTestId(`session-row-${id}`).dblclick()
+  const input = page.getByTestId(`session-name-input-${id}`)
+  await input.fill('버린 이름')
+  await input.press('Escape')
+
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('원래 이름')
+})
+
+/**
+ * **조용한 실패를 만들지 않는다.** 이름 바꾸기가 실패했는데 목록만 새 이름으로
+ * 바뀌면, 다음에 목록을 다시 받는 순간 아무 설명 없이 되돌아간다.
+ */
+test('이름 바꾸기가 실패하면 목록은 그대로 두고 사람에게 알린다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '원래 이름')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // host가 거절하는 상황을 만든다 — 세션이 사라진 뒤에 이름을 고치는 것이 실제 경로다
+  await page.evaluate((sid: string) => {
+    ;(window as any).__mock.sessions.delete(sid)
+  }, id)
+
+  await page.getByTestId(`session-row-${id}`).dblclick()
+  const input = page.getByTestId(`session-name-input-${id}`)
+  await input.fill('새 이름')
+  await input.press('Enter')
+
+  await expect(page.getByTestId('toast')).toContainText('Could not rename')
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('원래 이름')
+})
+
 /** 입력창의 첨부·보내기도 같은 부품이라 크기와 높이가 같아야 한다 */
 test('입력창의 첨부와 보내기 버튼이 같은 크기·같은 높이다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
