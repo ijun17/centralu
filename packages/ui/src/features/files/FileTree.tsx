@@ -9,14 +9,31 @@ import { setDragPath } from './dragPath.js'
 /**
  * 파일 트리 (FR-5, C-2).
  * lazy 로드 — 열어본 디렉토리만 읽는다. 10k+ 저장소에서도 첫 렌더가 가벼워야 한다.
+ *
+ * **Ignored files are shown by asking, not by default** (issue #17). What `.gitignore`
+ * hides is not a curiosity or two: it is `node_modules`, `dist`, `.next` — thousands of
+ * rows that sort in among `src` and push the code you came for off the screen. So the
+ * toggle stays, and the toggle is the answer to "always show them dimmed?": no, because
+ * showing them always is the same as hiding the rest.
+ *
+ * The switch itself used to be component state, which is why the answer to "can't see
+ * ignored files" was "you can, but it forgets" — leaving for the Git tab or collapsing the
+ * panel put it back to off. It lives on the store now, and comes back with the rest of the
+ * panel's layout. Whether it is on is a way of looking, so unlike expanded folders (#16,
+ * which belong to a project) it is one setting for the whole app.
  */
 export function FileTree({ projectId }: { projectId: string }) {
-  const [showIgnored, setShowIgnored] = useState(false)
+  const showIgnored = useStore((s) => s.showIgnored)
+  const setShowIgnored = useStore((s) => s.setShowIgnored)
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="file-tree">
       <header className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
         <span className="text-[11px] text-slate">Project files</span>
-        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate">
+        {/* 'Ignored' alone read as a state, not an action — it is the showing that is optional */}
+        <label
+          className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-slate"
+          title="Show what .gitignore hides — node_modules, build output, local files"
+        >
           <input
             type="checkbox"
             className="accent-graphite"
@@ -24,7 +41,7 @@ export function FileTree({ projectId }: { projectId: string }) {
             onChange={(e) => setShowIgnored(e.target.checked)}
             data-testid="toggle-ignored"
           />
-          Ignored
+          Show ignored
         </label>
       </header>
       <div className="min-h-0 flex-1 overflow-auto py-1">

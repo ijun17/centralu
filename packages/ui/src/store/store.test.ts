@@ -33,6 +33,7 @@ beforeEach(() => {
     drafts: {},
     workingSince: {},
     expandedDirs: {},
+    showIgnored: false,
     focusedSessionId: null,
     focusedProjectId: null,
     history: {},
@@ -293,6 +294,27 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect((mock.workspaceSnapshot as { treeHeight?: number } | null)?.treeHeight).toBe(280)
+  })
+
+  /*
+   * "무시된 파일을 볼 수 없다"의 실제 내용은 "볼 수는 있는데 매번 잊는다"였다 (이슈 #17).
+   * 스위치가 부품에 있어서 깃 탭으로 나갔다 오면 꺼져 있었다.
+   */
+  it('무시된 파일 보기는 다음 실행에도 남는다 — 볼 방식은 사람의 것이다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('si-s1', sessionInfo('si-s1'))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('si-s1')
+
+    useStore.getState().setShowIgnored(true)
+    await new Promise((r) => setTimeout(r, 0))
+    expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(true)
+
+    // 앱을 다시 켠 셈 — 기본값으로 돌아간 스토어에 같은 스냅샷을 물린다
+    useStore.setState({ showIgnored: false })
+    await useStore.getState().attach(mock)
+
+    expect(useStore.getState().showIgnored).toBe(true)
   })
 })
 

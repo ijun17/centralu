@@ -790,6 +790,49 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
   await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
 })
 
+/**
+ * "Can't see ignored files" (issue #17) turned out to mean "you can, but it forgets."
+ * The switch was component state, so leaving for the Git tab put it back to off — and the
+ * only way to notice a toggle exists is to still be looking at it.
+ *
+ * It stays a toggle rather than becoming "always show, dimmed": what is behind it is
+ * node_modules and build output, thousands of rows that sort in among src. Showing them
+ * always would hide everything else, which is the same complaint pointed the other way.
+ */
+test('showing ignored files is remembered — it is a way of looking, not a per-visit choice', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [
+      { name: 'src', path: 'src', isDir: true, ignored: false },
+      { name: 'node_modules', path: 'node_modules', isDir: true, ignored: true },
+    ]
+  })
+  await newSession(page, 'alpha', 'work')
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('toggle-ignored').check()
+  await expect(page.getByTestId('dir-node_modules')).toBeVisible()
+
+  // The Git tab takes the tree off screen entirely — this is where it used to be forgotten
+  await page.getByTestId('evidence-tab-git').click()
+  await expect(page.getByTestId('evidence-git')).toBeVisible()
+  await page.getByTestId('evidence-tab-files').click()
+
+  await expect(page.getByTestId('toggle-ignored')).toBeChecked()
+  await expect(page.getByTestId('dir-node_modules')).toBeVisible()
+
+  // Still ignored, though — slate says "the repo does not track this" without shouting it
+  const tone = await page
+    .getByTestId('dir-node_modules')
+    .locator('span:not(:has(svg))')
+    .evaluate((el) => getComputedStyle(el).color)
+  const dir = await page
+    .getByTestId('dir-src')
+    .evaluate((el) => getComputedStyle(el).color)
+  const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
+  expect(rgb(tone)[0]!).toBeLessThan(rgb(dir)[0]!)
+})
+
 test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {

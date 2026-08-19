@@ -152,6 +152,23 @@ export type AppState = {
    * later — but it should arrive as its own decision, not as a side effect of this one.
    */
   expandedDirs: Record<string, string[]>
+  /**
+   * Whether the file tree shows what `.gitignore` hides (issue #17).
+   *
+   * A toggle rather than "always show, dimmed", because of *what* is behind it: not a
+   * curiosity or two but `node_modules`, `dist`, `.next` — thousands of entries that sort
+   * in among `src` and push the code you came for off the screen. The tree is lazy so it
+   * would still open fast, but it would stop being a place you can find anything. The
+   * default stays off; ignored rows read in slate when shown, since "the repo does not
+   * track this" is background information, not urgency.
+   *
+   * **Global, and remembered** — unlike expanded folders, which belong to their project.
+   * That difference is the point: an open folder is a fact about a repo, while this is a
+   * way of looking, and a way of looking belongs to the person. It sits with panelOpen and
+   * panelTab in the workspace snapshot for the same reason, and unlike a folder click it is
+   * flipped rarely, so a write per flip costs nothing.
+   */
+  showIgnored: boolean
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
@@ -268,6 +285,8 @@ export type AppState = {
   setDraft(sessionId: string, draft: Draft): void
   /** Open or close a folder in the file tree. The project owns it, not the session (#16) */
   toggleDir(projectId: string, path: string): void
+  /** Show or hide what .gitignore hides (#17) */
+  setShowIgnored(show: boolean): void
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
@@ -500,6 +519,7 @@ export const useStore = create<AppState>((set, get) => ({
   drafts: {},
   workingSince: {},
   expandedDirs: {},
+  showIgnored: false,
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
@@ -612,6 +632,10 @@ export const useStore = create<AppState>((set, get) => ({
         if (typeof savedTree === 'number') get().setTreeHeight(savedTree)
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
+        // Whether the tree shows ignored files is a way of looking, so it comes back with
+        // the rest of the panel's layout rather than being re-chosen every launch (#17)
+        const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
+        if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
       }
     } catch {
       /* 스냅샷이 없어도 앱은 정상 동작한다 */
@@ -637,6 +661,7 @@ export const useStore = create<AppState>((set, get) => ({
         sidebarWidth: s.sidebarWidth,
         treeHeight: s.treeHeight,
         notifyPolicy: s.notifyPolicy,
+        showIgnored: s.showIgnored,
       } as never)
       .catch(() => {})
   },
@@ -1035,6 +1060,10 @@ export const useStore = create<AppState>((set, get) => ({
       const next = cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]
       return { expandedDirs: { ...s.expandedDirs, [projectId]: next } }
     })
+  },
+  setShowIgnored(show) {
+    set({ showIgnored: show })
+    get().saveWorkspace()
   },
   setToast(toast) {
     set({ toast })
