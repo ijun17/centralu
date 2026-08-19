@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
@@ -79,12 +79,25 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
     void refresh()
   }, [touched.length, refresh])
 
+  /*
+   * 요청 세대 번호. 이 diff는 **승인 판단의 근거**다 — 파일을 연달아 누르면 느린 응답이
+   * 나중에 도착해, 지금 보고 있는 파일 이름 아래 **다른 파일의 diff**가 그려질 수 있다.
+   * 마지막 요청만 화면을 쓸 수 있게 한다.
+   */
+  const diffGen = useRef(0)
   const openDiff = useCallback(
     async (f: GitFileStatus) => {
+      const gen = ++diffGen.current
       setSelected(f)
-      setDiff(await platform.git.diff(projectId, f.path, f.staged))
+      setDiff(null) // 옛 파일의 diff를 새 파일 이름 아래 남겨 두지 않는다
+      try {
+        const d = await platform.git.diff(projectId, f.path, f.staged)
+        if (gen === diffGen.current) setDiff(d)
+      } catch (e) {
+        if (gen === diffGen.current) setToast(`Could not load diff: ${(e as Error).message}`)
+      }
     },
-    [platform, projectId],
+    [platform, projectId, setToast],
   )
 
   // 우측 패널에서 파일을 눌러 들어온 경우 그 diff부터 펴 준다 —
@@ -146,13 +159,19 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
             onSubmit={async (e) => {
               e.preventDefault()
               setBusy(true)
-              const res = await platform.git.commit(projectId, message.trim())
-              setBusy(false)
-              if (res.ok) {
-                setMessage('')
-                setToast(`Committed ${staged.length} files`)
-                await refresh()
-              } else setToast(res.message ?? 'Commit failed')
+              // finally가 없으면 RPC가 던지는 순간 busy가 참으로 남아 버튼이 영영 죽는다
+              try {
+                const res = await platform.git.commit(projectId, message.trim())
+                if (res.ok) {
+                  setMessage('')
+                  setToast(`Committed ${staged.length} files`)
+                  await refresh()
+                } else setToast(res.message ?? 'Commit failed')
+              } catch (err) {
+                setToast(`Commit failed: ${(err as Error).message}`)
+              } finally {
+                setBusy(false)
+              }
             }}
           >
             <textarea
@@ -176,8 +195,13 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
                 className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
                 data-testid="push-button"
                 onClick={async () => {
-                  const res = await platform.git.push(projectId)
-                  setToast(res.ok ? 'Pushed' : (res.message ?? 'Push failed'))
+                  // RPC가 던지면(끊김·타임아웃) 잡는 곳이 없어 성공처럼 보였다 — 조용한 실패 금지
+                  try {
+                    const res = await platform.git.push(projectId)
+                    setToast(res.ok ? 'Pushed' : (res.message ?? 'Push failed'))
+                  } catch (err) {
+                    setToast(`Push failed: ${(err as Error).message}`)
+                  }
                 }}
               >
                 Push

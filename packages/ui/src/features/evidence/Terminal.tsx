@@ -23,21 +23,34 @@ export function TerminalPane({ projectId }: { projectId: string }) {
   const [terminals, setTerminals] = useState<TerminalInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  /*
+   * 요청 세대 번호. 목록을 기다리는 사이 프로젝트를 바꾸면 늦은 응답이
+   * **다른 프로젝트의 터미널**을 그리고, 빈 목록이었다면 옛 프로젝트에
+   * 터미널을 하나 만들어 버린다 — 마지막 요청만 화면을 쓸 수 있게 한다.
+   */
+  const loadGen = useRef(0)
   const load = useCallback(async () => {
+    const gen = ++loadGen.current
     try {
       const list = await platform.terminal.list(projectId)
+      if (gen !== loadGen.current) return
       // 처음 열면 하나는 있어야 한다 — 빈 화면에 버튼만 있으면 한 단계가 더 든다
       if (list.length === 0) {
-        setTerminals([await platform.terminal.create(projectId, 80, 24)])
+        const t = await platform.terminal.create(projectId, 80, 24)
+        if (gen !== loadGen.current) return
+        setTerminals([t])
         return
       }
       setTerminals(list)
     } catch (e) {
-      setError((e as Error).message)
+      if (gen === loadGen.current) setError((e as Error).message)
     }
   }, [platform, projectId])
 
   useEffect(() => {
+    // 프로젝트가 바뀌었다 — 옛 프로젝트의 셸을 그대로 보여주면 안 된다
+    setTerminals(null)
+    setError(null)
     void load()
   }, [load])
 
@@ -75,8 +88,12 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       )}
 
       <div className="flex min-h-0 flex-1 flex-col" data-testid="terminal-stack">
+        {/*
+          닫을 id는 TerminalView가 넘겨준다 — 재시작하면 host가 **새 id**를 발급하는데,
+          목록의 t.terminalId로 닫으면 죽은 옛 id를 닫아서 닫기가 영영 안 먹었다.
+        */}
         {(terminals ?? []).map((t) => (
-          <TerminalView key={t.terminalId} info={t} onClose={() => void close(t.terminalId)} />
+          <TerminalView key={t.terminalId} info={t} onClose={(id) => void close(id)} />
         ))}
       </div>
     </section>
@@ -90,7 +107,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
  * 붙는 순간 지금까지의 출력을 받아 다시 그린다.
  * 컴포넌트가 사라져도 **셸은 죽이지 않는다** — 탭을 옮긴 것뿐이다.
  */
-function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => void }) {
+function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (terminalId: string) => void }) {
   const platform = usePlatform()
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Xterm | null>(null)
@@ -219,7 +236,8 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: () => vo
         <span className="ml-auto">
           <IconButton
             label="Close terminal (the shell exits)"
-            onClick={onClose}
+            // props의 id가 아니라 **지금의** id — 재시작을 거쳤으면 둘이 다르다
+            onClick={() => onClose(idRef.current)}
             testId={`terminal-close-${info.terminalId}`}
             align="right"
           >

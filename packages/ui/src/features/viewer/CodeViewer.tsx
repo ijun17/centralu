@@ -24,10 +24,15 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   useEffect(() => {
     setFile(null)
     if (!path) return
+    // 파일·프로젝트를 옮기는 사이 늦게 온 응답이 **다른 파일의 내용**으로 그려지면 안 된다
+    let alive = true
     void platform.fs
       .readFile(projectId, path)
-      .then(setFile)
-      .catch((e: Error) => setToast(e.message))
+      .then((f) => alive && setFile(f))
+      .catch((e: Error) => alive && setToast(e.message))
+    return () => {
+      alive = false
+    }
   }, [platform, projectId, path, setToast])
 
   const lines = useMemo(() => (file?.text ?? '').split('\n'), [file])

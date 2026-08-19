@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
 import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
@@ -191,11 +191,19 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
   const [count, setCount] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!isRepo) return setCount(null)
+    if (!isRepo) {
+      setCount(null)
+      return
+    }
+    // 프로젝트를 옮기는 사이 늦게 온 응답이 남의 프로젝트 숫자를 그리면 안 된다
+    let alive = true
     platform.git
       .status(projectId)
-      .then((f) => setCount(f.length))
-      .catch(() => setCount(null))
+      .then((f) => alive && setCount(f.length))
+      .catch(() => alive && setCount(null))
+    return () => {
+      alive = false
+    }
   }, [platform, projectId, isRepo, touched])
 
   return (
@@ -247,11 +255,15 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // 요청 세대 번호 — 프로젝트를 옮기는 사이 늦게 온 응답이 남의 목록을 그리면 안 된다
+  const statusGen = useRef(0)
   const refresh = useCallback(async () => {
+    const gen = ++statusGen.current
     try {
-      setFiles(await platform.git.status(projectId))
+      const next = await platform.git.status(projectId)
+      if (gen === statusGen.current) setFiles(next)
     } catch {
-      setFiles([])
+      if (gen === statusGen.current) setFiles([])
     }
   }, [platform, projectId])
 
@@ -268,6 +280,9 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
     try {
       await fn()
       await refresh()
+    } catch (e) {
+      // RPC가 던지면(끊김·타임아웃) 잡는 곳이 없어 성공처럼 보였다 — 조용한 실패 금지
+      setToast((e as Error).message)
     } finally {
       setBusy(false)
     }
@@ -492,10 +507,15 @@ function GitTree({ projectId }: { projectId: string }) {
   const [commits, setCommits] = useState<GitCommit[] | null>(null)
 
   useEffect(() => {
+    // 프로젝트를 옮기는 사이 늦게 온 응답이 남의 기록을 그리면 안 된다
+    let alive = true
     platform.git
       .log(projectId, 50)
-      .then(setCommits)
-      .catch(() => setCommits([]))
+      .then((c) => alive && setCommits(c))
+      .catch(() => alive && setCommits([]))
+    return () => {
+      alive = false
+    }
   }, [platform, projectId, touched])
 
   const graph = useMemo(() => {

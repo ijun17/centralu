@@ -24,15 +24,18 @@ export function ApprovalCard({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT') return
-      const k = e.key.toLowerCase()
-      if (k === 'y') void respond(sessionId, requestId, 'allow')
-      else if (k === 'n') void respond(sessionId, requestId, 'deny')
-      else if (k === 'a') {
-        const scope = e.altKey ? 'project' : 'session'
-        void respond(sessionId, requestId, 'always', scope)
-        setToast(`Always allow in ${scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
-      } else return
+      const st = useStore.getState()
+      const action = approvalKeyAction(e, {
+        typing: t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable,
+        // 카드가 다른 화면 뒤에 있거나 **포커스된 세션의 카드가 아니면** 받지 않는다 —
+        // 그리드에서 카드가 여럿 떠 있을 때 y 하나가 전부를 승인하면 안 된다
+        covered: approvalCardCovered(st, sessionId),
+      })
+      if (!action) return
+      void respond(sessionId, requestId, action.decision, action.scope)
+      if (action.decision === 'always') {
+        setToast(`Always allow in ${action.scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
+      }
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
@@ -104,6 +107,58 @@ function ActionKey({
       {label}
     </button>
   )
+}
+
+export type ApprovalKeyAction = { decision: 'allow' | 'deny' | 'always'; scope?: 'session' | 'project' }
+
+/**
+ * 이 카드가 지금 키 입력을 받아도 되는가 (순수 함수 — 테스트가 여기 붙는다).
+ *
+ * 모달·오버레이에 가린 경우 외에 **포커스되지 않은 세션의 카드**도 받으면 안 된다:
+ * 그리드에서는 pane마다 카드가 각자 window 리스너를 달아, 승인이 2개 이상 떠 있을 때
+ * y 한 번이 **전부를 한꺼번에 승인**했다 — 이 앱에서 가장 잘못 눌리면 안 되는 버튼이다.
+ * 키보드 승인은 언제나 "지금 포커스한 그 세션" 하나에만 간다.
+ */
+export function approvalCardCovered(
+  st: {
+    inboxOpen: boolean
+    usageOpen: boolean
+    settingsOpen: boolean
+    paletteOpen: boolean
+    overlay: unknown
+    focusedSessionId: string | null
+  },
+  sessionId: string,
+): boolean {
+  return (
+    st.inboxOpen ||
+    st.usageOpen ||
+    st.settingsOpen ||
+    st.paletteOpen ||
+    st.overlay !== null ||
+    st.focusedSessionId !== sessionId
+  )
+}
+
+/**
+ * 전역 y/n/a 키가 **언제** 승인이 되는지의 전부 (순수 함수 — 테스트가 여기 붙는다).
+ *
+ * ⌘·⌃·⇧ 조합은 다른 단축키다: ⌘A(전체 선택)와, 이 앱이 상단 바에 광고하는
+ * ⌘⇧A(다음 대기)가 그대로 흘러들어 '항상 허용'을 눌렀다 — 승인은 이 앱에서
+ * 가장 잘못 눌리면 안 되는 버튼이다. ⌥만 통과시킨다 (⌥a = 프로젝트 범위 약속).
+ * 입력창에 타이핑 중이거나 카드가 모달·오버레이 뒤에 가려져 있어도 받지 않는다.
+ */
+export function approvalKeyAction(
+  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+  ctx: { typing: boolean; covered: boolean },
+): ApprovalKeyAction | null {
+  if (e.metaKey || e.ctrlKey || e.shiftKey) return null
+  if (ctx.typing || ctx.covered) return null
+  const k = e.key.toLowerCase()
+  if (k === 'y') return { decision: 'allow' }
+  if (k === 'n') return { decision: 'deny' }
+  if (k === 'a') return { decision: 'always', scope: e.altKey ? 'project' : 'session' }
+  return null
 }
 
 export function detailText(d: ApprovalDetail): string {
