@@ -51,10 +51,10 @@ jobs:
             # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
             # versions without warning, and a release build is not the place to find out.
             runner: macos-14
-            # The `.app` is deliberately not uploaded. GitHub artifacts are zips, and
-            # zipping drops the exec bit and the code signature — what you would
-            # download is a bundle that cannot open. The `.dmg` carries both intact.
+            # The `.app` is tarred first (see the step below) because it, not the `.dmg`,
+            # is what npm publishes — the artifact should be the thing that ships.
             artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/macos/Centralu-app.tar.gz
               apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
 
     steps:
@@ -62,11 +62,15 @@ jobs:
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
-        # webkit2gtk is the webview Tauri renders into; libxdo and libayatana-appindicator
-        # are what the tray-icon and global-shortcut features link against (see
-        # apps/desktop/src-tauri/Cargo.toml). patchelf and libfuse2 are not Tauri
-        # dependencies but AppImage tooling ones: linuxdeploy rewrites rpaths with patchelf,
-        # and it is itself distributed as an AppImage, so it needs FUSE to run.
+        # webkit2gtk is the webview Tauri renders into. The rest of the first group is
+        # Tauri's documented prerequisite list, kept whole rather than trimmed to what
+        # today's cargo features happen to need: the `tray-icon` feature has already been
+        # turned on and off once, and a build dependency that disappears when a feature
+        # flips is a slow, confusing failure. These packages cost seconds to install, and
+        # CI is the only place the Linux build is exercised at all — the wrong place to
+        # be clever. patchelf and libfuse2 are not Tauri dependencies but AppImage tooling
+        # ones: linuxdeploy rewrites rpaths with patchelf, and is itself distributed as an
+        # AppImage, so it needs FUSE to run.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -110,6 +114,15 @@ jobs:
           # tooling to unpack and run instead, which works with or without /dev/fuse.
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: pnpm --filter @cc/desktop exec tauri build
+
+      - name: Tar the .app
+        if: runner.os == 'macOS'
+        # A GitHub artifact is a zip, and zipping drops the exec bit — download the `.app`
+        # that way and it cannot open. tar preserves the mode bits and the signed
+        # `_CodeSignature` tree, so the zip ends up wrapping something lossless.
+        # `pnpm release:npm` uses ditto for the same reason on the publishing path.
+        working-directory: apps/desktop/src-tauri/target/release/bundle/macos
+        run: tar czf Centralu-app.tar.gz ./*.app
 
       - uses: actions/upload-artifact@v4
         with:
