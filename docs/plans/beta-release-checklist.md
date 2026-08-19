@@ -148,7 +148,13 @@ npm이 GUI 앱 일반에 맞는 통로라는 말이 아니다. 이 앱에 한해
       `--publish`를 따로 요구한다. 발행 전에 작업 트리 청결·verify·서명·실행 비트·arm64를
       검사하고, 버전은 brand.ts에서 받아 두 package.json에 적는다.
       아키텍처 패키지를 **먼저** 발행한다 (반대로 하면 없는 의존을 바라보는 순간이 생긴다)
-- [ ] 실제 발행 (`pnpm release:npm --publish`) — `npm login` 후.
+- [ ] 실제 발행 (`pnpm release:npm --publish --also-latest`) — `npm login` 후.
+      **프리릴리스는 태그가 필수다** — npm이 `--tag` 없는 발행을 거부한다
+      ("You must specify a tag using --tag when publishing a prerelease version").
+      막는 게 맞다: 안 그러면 베타가 `latest`가 되어 아무 생각 없이 설치한 사람이 베타를 받는다.
+      그래서 `beta` 태그로 올리되, **정식이 하나도 없는 동안에는** `--also-latest`로
+      `latest`도 같은 곳을 가리키게 한다 (안 하면 `npm i -g centralu`가
+      "No matching version found"로 죽는다). 정식이 나온 뒤에는 이 옵션을 쓰면 안 된다.
       알맹이 패키지는 **스코프 없이** `centralu-darwin-arm64`로 간다. `@centralu/…`로 하려면
       npm 조직을 먼저 만들어야 하는데, 그 이름은 사용자에게 안 보이므로 발행을 막을 이유가 없다
       (나중에 바꿔도 껍데기의 optionalDependencies 한 줄이다)

@@ -27,6 +27,20 @@ const skipBuild = process.argv.includes('--skip-build')
  * 미리 받아서 넘길 수 있게 열어 둔다: `pnpm release:npm --publish --otp=123456`
  */
 const otp = process.argv.find((a) => a.startsWith('--otp='))?.slice('--otp='.length)
+/**
+ * 프리릴리스도 `npm i -g centralu`(태그 없는 기본 설치)로 받게 할지.
+ *
+ * 아직 정식 릴리스가 하나도 없으면 `latest` 태그가 비어서 그 명령이 **실패한다** —
+ * "No matching version found for centralu@latest". 베타만 있는 동안에는 이걸 켠다.
+ * 정식이 나온 뒤에는 켜면 안 된다 (베타가 정식을 덮는다).
+ */
+const alsoLatest = process.argv.includes('--also-latest')
+
+/**
+ * 프리릴리스(`0.1.0-beta.1`)는 반드시 태그를 붙여야 한다 — npm이 거부한다.
+ * 안 그러면 베타가 `latest`가 되어, 아무 생각 없이 설치한 사람이 베타를 받는다.
+ */
+const tag = APP_VERSION.includes('-') ? 'beta' : 'latest'
 
 const sh = (cmd: string, args: string[], cwd = ROOT) =>
   execFileSync(cmd, args, { cwd, stdio: 'inherit', encoding: 'utf8' })
@@ -66,7 +80,7 @@ if (publish) {
 
 sh('pnpm', ['verify'])
 
-console.log(`  버전 ${APP_VERSION} · 커밋 ${out('git', ['rev-parse', '--short', 'HEAD'])}`)
+console.log(`  버전 ${APP_VERSION} · 태그 ${tag} · 커밋 ${out('git', ['rev-parse', '--short', 'HEAD'])}`)
 
 // ── 2. 빌드 ────────────────────────────────────────────────────────────
 if (skipBuild) {
@@ -127,7 +141,11 @@ for (const pkgDir of [ARCH_PKG, MAIN_PKG]) {
   const name = (JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name: string }).name
   if (publish) {
     step(`발행: ${name}`)
-    sh('npm', ['publish', '--access', 'public', ...(otp ? ['--otp', otp] : [])], pkgDir)
+    sh('npm', ['publish', '--access', 'public', '--tag', tag, ...(otp ? ['--otp', otp] : [])], pkgDir)
+    if (alsoLatest && tag !== 'latest') {
+      // 태그를 옮기는 것은 발행과 달리 **되돌릴 수 있다** (dist-tag는 언제든 다시 가리킨다)
+      sh('npm', ['dist-tag', 'add', `${name}@${APP_VERSION}`, 'latest', ...(otp ? ['--otp', otp] : [])], pkgDir)
+    }
   } else {
     step(`리허설(pack): ${name}`)
     sh('npm', ['pack', '--dry-run'], pkgDir)
@@ -136,6 +154,6 @@ for (const pkgDir of [ARCH_PKG, MAIN_PKG]) {
 
 console.log(
   publish
-    ? `\n\x1b[32m발행 완료 — npm i -g centralu\x1b[0m`
+    ? `\n\x1b[32m발행 완료 — npm i -g ${tag === 'latest' ? 'centralu' : `centralu@${tag}`}\x1b[0m`
     : `\n리허설이 끝났다. 실제로 올리려면: \x1b[1mpnpm release:npm --publish\x1b[0m`,
 )
