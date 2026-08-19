@@ -5,7 +5,7 @@ pnpm workspaces 모노레포. 패키지 경계 = 의존 규칙 경계 = lint 강
 ## 1. 전체 구조
 
 ```
-control-center/
+centralu/
 ├─ README.md                    # 문서 지도
 ├─ docs/                        # 기획서(product-spec.md) + 설계 문서 (이 폴더)
 ├─ package.json                 # workspace 루트 (스크립트 허브)

@@ -62,8 +62,8 @@ pnpm dev                      # http://127.0.0.1:5174/?mock=1
 검증:
 
 ```bash
-pnpm verify      # lint + 의존 규칙 + 타입 + 단위/통합 테스트 (484개)
-pnpm e2e         # Playwright 관제 루프 시나리오 (157개)
+pnpm verify      # lint + 의존 규칙 + 타입 + 단위/통합 테스트 (574개)
+pnpm e2e         # Playwright 관제 루프 시나리오 (162개, PERF=1 시 8개 추가)
 pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 ```
 
