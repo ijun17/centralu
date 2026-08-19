@@ -42,6 +42,7 @@
   },
   "include": [
     "packages/*/src/**/*",
+    "packages/*/scripts/**/*.mts",
     "apps/*/src/**/*",
     "e2e/**/*",
     "tooling/**/*.ts"

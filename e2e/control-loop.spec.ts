@@ -117,7 +117,9 @@ test('승인: 항상 허용은 범위를 알려준다 (T5-4)', async ({ page }) 
   await injectApproval(page, 0, { kind: 'command', command: 'npm test --watch', cwd: '/tmp/alpha' })
   await page.getByTestId('approve-always').click()
   await expect(page.getByTestId('toast')).toContainText('this session')
-  await expect(page.getByTestId('toast')).toContainText('npm test*') // 패턴 제안
+  // 제안은 승인한 명령 그대로다 — 예전의 'npm test*' 식 확장은 rm -rf 계열에서
+  // 승인 범위를 위험하게 넓혔다 (core suggestMatcher 회귀 테스트가 지킨다)
+  await expect(page.getByTestId('toast')).toContainText('npm test --watch')
 })
 
 test('배너: 명령은 제자리 승인, 파일 수정은 확인 필요 (T5-4, FR-3)', async ({ page }) => {
@@ -365,15 +367,30 @@ test('긴 대화는 보이는 것만 그린다 (D-1 가상 스크롤)', async ({
 
 test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 (D-1)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
+  // 세션을 만들기 **전에** 주입하면 존재하지 않는 세션으로 흘러가 화면에는 아무것도
+  // 쌓이지 않는다 — 스크롤할 거리가 없어 시험이 헛돌았다. 만든 뒤에 채운다.
+  await newSession(page, 'alpha', '긴 작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
-    for (let i = 0; i < 100; i++) m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `줄 ${i}\n` })
+    // 연속 델타는 한 assistant 말풍선으로 합쳐지고, 홑 개행은 마크다운이 한 문단으로
+    // 접는다 — 빈 줄로 문단을 끊어야 실제로 화면이 길어진다
+    for (let i = 0; i < 100; i++) m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: `줄 ${i} — 대화 내용입니다.\n\n` })
   })
-  await newSession(page, 'alpha', '긴 작업')
 
   const stream = page.getByTestId('chat-stream')
+  // "위로 올렸다"가 성립하려면 바닥 슬랙(scroll.ts BOTTOM_SLACK=80px)보다 훨씬 큰
+  // 스크롤 범위가 필요하다 — 안 그러면 맨 위도 "바닥 근처"라 따라가는 게 정답이 되고,
+  // 범위가 0이면 scrollTop이 늘 0이라 통과가 무의미하다
+  await expect.poll(() => stream.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(400)
   await stream.evaluate((el) => { el.scrollTop = 0 }) // 맨 위로 올려 읽는 중
+  // 가상 스크롤은 올려놓은 직후 항목 실측으로 위치를 살짝 고칠 수 있다 —
+  // 그 보정이 끝나 자리가 멈춘 뒤의 값을 기준으로 삼아야 "새 메시지 때문"만 잰다
+  await expect.poll(async () => {
+    const now = await stream.evaluate((el) => el.scrollTop)
+    await page.waitForTimeout(120)
+    return (await stream.evaluate((el) => el.scrollTop)) === now
+  }).toBe(true)
   const before = await stream.evaluate((el) => el.scrollTop)
 
   // 새 메시지가 도착해도 끌어내리지 않는다

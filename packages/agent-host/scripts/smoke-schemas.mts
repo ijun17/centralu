@@ -145,6 +145,8 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
 /** 부를 수 없는 것과 그 이유 — 조용히 빼면 "다 봤다"로 읽힌다 */
 const SKIP: Record<string, string> = {
   'agents.respondApproval': '승인 요청이 떠 있어야 함 (smoke.mjs가 관통)',
+  'agents.answerQuestion': '질문 요청이 떠 있어야 함 (승인과 같은 이유)',
+  'agents.forkConversation': '잠긴 codex 대화가 있어야 함 — 헤드리스로 만들 수 없다',
   'agents.restartSession': '프로세스를 실제로 갈아 끼움 — 뒤 대조를 흔든다',
   'agents.deleteSession': '파괴적 — 맨 끝에서 따로 부른다',
   'git.commitDetail': '커밋 sha가 필요 — git.log 결과로 채운다',
@@ -227,4 +229,6 @@ for (const [m, why] of Object.entries(SKIP)) console.log(`  ${m}: ${why}`)
 
 ws.close()
 host.kill()
-process.exit(bad.length ? 1 : 0)
+// 호출 실패(failed)도 실패다 — 스키마를 대조조차 못 했는데 0으로 끝나면
+// CI가 "다 맞다"로 읽는다. 불일치든 호출 실패든 초록으로 두지 않는다.
+process.exit(bad.length || failed.length ? 1 : 0)

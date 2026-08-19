@@ -27,6 +27,37 @@ pub fn install(app: &tauri::AppHandle) {
 
     apply(&window);
 
+    // 이벤트 직후에 몇 번 더 잡아야 하는 이유:
+    // macOS 26은 리사이즈 **이벤트를 먼저 주고 창 프레임을 나중에 확정한다.** 그래서
+    // 이벤트 시점에 잡아 둔 위치가 곧바로 밀린다 — "가끔 리사이즈하면 이상해진다"가
+    // 이것이다 (도그푸딩 지적).
+    //
+    // 예전에는 이벤트마다 스레드 3개를 새로 만들었는데, 드래그 중에는 이벤트가
+    // 초당 수십 번 오므로 스레드가 수백 개 쌓였다. 지금은 **상주 스레드 하나**가
+    // 채널로 신호를 받아 재보정한다. 보정하는 동안 몰린 신호는 하나로 합친다 —
+    // 어차피 같은 일("지금 프레임 기준으로 다시 잡기")이라 한 번이면 된다.
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    {
+        let w = window.clone();
+        std::thread::spawn(move || {
+            while rx.recv().is_ok() {
+                // HuLa는 60Hz로 최대 10초를 돈다. 우리는 신호당 세 번만
+                // (이벤트 기준 16/64/200ms 시점) 다시 잡는다: 끌고 있는 동안에는
+                // 신호가 계속 와서 그 자체가 폴링이 되고, 손을 떼면 저절로 멈춘다.
+                for wait_ms in [16u64, 48, 136] {
+                    std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+                    let inner = w.clone();
+                    // AppKit은 메인 스레드에서만 만질 수 있다
+                    if w.run_on_main_thread(move || apply(&inner)).is_err() {
+                        return; // 창이 사라졌다 — 더 할 일이 없다
+                    }
+                }
+                // 보정하는 동안 쌓인 신호는 방금 처리한 것과 같은 일이다 — 비운다
+                while rx.try_recv().is_ok() {}
+            }
+        });
+    }
+
     let w = window.clone();
     window.on_window_event(move |event| {
         // Moved까지 보는 이유: 화면 사이를 옮기면 배율이 달라져 좌표가 다시 잡힌다
@@ -35,31 +66,9 @@ pub fn install(app: &tauri::AppHandle) {
             WindowEvent::Resized(_) | WindowEvent::Moved(_) | WindowEvent::Focused(_) | WindowEvent::ScaleFactorChanged { .. }
         ) {
             apply(&w);
-            apply_again_soon(&w);
+            let _ = tx.send(());
         }
     });
-}
-
-/// 이벤트 직후에 몇 번 더 잡는다.
-///
-/// macOS 26은 리사이즈 **이벤트를 먼저 주고 창 프레임을 나중에 확정한다.** 그래서
-/// 이벤트 시점에 잡아 둔 위치가 곧바로 밀린다 — "가끔 리사이즈하면 이상해진다"가
-/// 이것이다 (도그푸딩 지적).
-///
-/// HuLa는 여기서 라이브 리사이즈 동안 60Hz로 최대 10초를 돈다. 우리는 **이벤트마다
-/// 짧게 세 번**만 다시 잡는다: 끌고 있는 동안에는 이벤트가 계속 오므로 그 자체가
-/// 폴링 역할을 하고, 손을 떼면 저절로 멈춘다. 상시 도는 태스크도, 끝낼 시점을
-/// 정하는 문제도 없다.
-fn apply_again_soon(window: &tauri::WebviewWindow) {
-    for delay_ms in [16u64, 64, 200] {
-        let w = window.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            let inner = w.clone();
-            // AppKit은 메인 스레드에서만 만질 수 있다
-            let _ = w.run_on_main_thread(move || apply(&inner));
-        });
-    }
 }
 
 fn apply(window: &tauri::WebviewWindow) {

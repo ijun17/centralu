@@ -117,7 +117,7 @@ export default tseslint.config(
   },
   // Node 프로세스 코드: Node 전역 허용
   {
-    files: ['packages/agent-host/**/*.{ts,mjs}', 'tooling/**/*.{ts,js}', 'e2e/**/*.ts', '*.config.{ts,js}'],
+    files: ['packages/agent-host/**/*.{ts,mts,mjs}', 'tooling/**/*.{ts,js}', 'e2e/**/*.ts', '*.config.{ts,js}'],
     languageOptions: { globals: globals.node },
   },
   { files: ['**/*.mjs'], rules: { 'no-empty': 'off', '@typescript-eslint/no-unused-expressions': 'off' } },

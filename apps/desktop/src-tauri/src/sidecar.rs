@@ -44,8 +44,14 @@ pub struct Supervisor {
     inner: Arc<Mutex<Inner>>,
 }
 
-/// 재시작 백오프 상한. 이 이상 실패하면 사람이 봐야 하는 문제다.
+/// 재시작 백오프 상한. 이 이상 **연속으로** 실패하면 사람이 봐야 하는 문제다.
 const MAX_RESTARTS: u32 = 5;
+
+/// 이만큼 살아 있었으면 "기동 실패의 연속"이 아니라 새로운 사건이다.
+///
+/// 카운터를 영영 안 되돌리면 앱을 며칠 켜두는 동안 드문 크래시가 5번 쌓이는 순간
+/// 수퍼바이저가 완전히 포기한다 — 상한은 연속 실패에만 걸려야 한다.
+const STABLE_UPTIME: Duration = Duration::from_secs(30);
 
 impl Supervisor {
     pub fn new() -> Self {
@@ -64,12 +70,21 @@ impl Supervisor {
     pub fn start(&self, app: AppHandle) {
         let me = self.clone();
         // 배포 빌드에서는 번들된 host가 리소스 디렉토리에 들어 있다 (F-0).
-        let bundled = app
-            .path()
-            .resource_dir()
-            .ok()
-            .map(|d| d.join("resources/host/main.mjs"))
-            .filter(|p| p.exists());
+        //
+        // **존재 여부만으로 dev/prod를 가르면 안 된다** — `tauri dev`의 resource_dir는
+        // target/debug/이고, 한 번이라도 배포 빌드를 하면 거기에도 번들이 복사돼 남는다.
+        // 그러면 dev가 낡은 번들 host를 CC_DEV 없이 띄워, 소스 수정이 반영되지 않고
+        // 배포 앱의 데이터 폴더까지 같이 잡는다. dev 빌드는 무조건 소스 host를 쓴다
+        // (docs/architecture.md §4 — dev는 tsx로 소스 직접 실행 + CC_DEV=1).
+        let bundled = if cfg!(debug_assertions) {
+            None
+        } else {
+            app.path()
+                .resource_dir()
+                .ok()
+                .map(|d| d.join("resources/host/main.mjs"))
+                .filter(|p| p.exists())
+        };
         thread::spawn(move || {
             // Node가 없으면 몇 번을 다시 걸어도 결과가 같다 — 백오프 5회를 돌며
             // 원인 없는 실패를 쌓는 대신 지금 바로, 무엇이 없는지 말한다.
@@ -87,11 +102,16 @@ impl Supervisor {
                 }
                 emit(&app, if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
 
+                let started = std::time::Instant::now();
                 match me.spawn_once(&app, bundled.as_deref()) {
                     Ok(code) => {
                         // 정상 종료(앱 종료 요청)면 감시를 끝낸다
                         if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
                             return;
+                        }
+                        // 충분히 오래 살다 죽었다면 이전 실패 이력은 무관하다 — 처음부터 센다
+                        if started.elapsed() >= STABLE_UPTIME {
+                            attempt = 0;
                         }
                         attempt += 1;
                         let msg = format!("agent-host가 종료되었습니다 (code {code:?})");
@@ -176,15 +196,18 @@ impl Supervisor {
             eprintln!("[agent-host] {line}");
         }
 
-        // stdout이 닫혔다 = 프로세스가 끝났다
-        let mut guard = self.inner.lock().map_err(|_| "lock 실패")?;
-        guard.info = None;
-        let code = guard
-            .child
+        // stdout이 닫혔다 = 프로세스가 끝났다.
+        // wait()는 블로킹이다 — 락을 쥔 채 기다리면 그동안 IPC(info 조회)와
+        // shutdown이 같이 멈춘다. child를 꺼내고 락을 놓은 뒤에 기다린다.
+        let mut child = {
+            let mut guard = self.inner.lock().map_err(|_| "lock 실패")?;
+            guard.info = None;
+            guard.child.take()
+        };
+        let code = child
             .as_mut()
             .and_then(|c| c.wait().ok())
             .and_then(|s| s.code());
-        guard.child = None;
         Ok(code)
     }
 
@@ -196,17 +219,22 @@ impl Supervisor {
 
     /// 앱 종료 시 호출. 사이드카를 **그룹째** 죽인다 — 좀비를 남기지 않는다.
     pub fn shutdown(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.shutting_down = true;
-            if let Some(child) = inner.child.as_mut() {
-                kill_group(child.id());
-                // 정리할 시간을 조금 준 뒤 확인 사살
-                thread::sleep(Duration::from_millis(300));
-                let _ = child.kill();
-                let _ = child.wait();
+        // 락은 child를 꺼내는 동안만 쥔다. 300ms 잠들기·wait()를 락 안에서 하면
+        // 그동안 감시 스레드와 IPC가 같은 락을 기다리며 종료가 서로를 막는다.
+        let child = match self.inner.lock() {
+            Ok(mut inner) => {
+                inner.shutting_down = true;
+                inner.info = None;
+                inner.child.take()
             }
-            inner.child = None;
-            inner.info = None;
+            Err(_) => None,
+        };
+        if let Some(mut child) = child {
+            kill_group(child.id());
+            // 정리할 시간을 조금 준 뒤 확인 사살
+            thread::sleep(Duration::from_millis(300));
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
