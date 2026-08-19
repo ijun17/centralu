@@ -1,78 +1,78 @@
-# 상태 관리 — 이벤트에서 화면까지
+# State management — from event to screen
 
-원칙: **상태는 한 방향으로 흐르고, 파생 가능한 것은 저장하지 않는다.**
+The principle: **state flows one way, and anything derivable is not stored.**
 
-## 1. 전체 흐름
+## 1. The whole flow
 
 ```
-NormalizedEvent (WS 수신, zod 검증 완료)
+NormalizedEvent (received over WS, zod validation done)
       │
       ▼
-core 리듀서 (순수 함수 — 여기가 유일하게 상태를 바꾸는 곳)
+core reducer (pure function — the only place state changes)
   applySessionEvent(sessionState, event) → newSessionState
       │
       ▼
-zustand 스토어 (slice: projects / sessions / messages / usage / settings)
+zustand store (slices: projects / sessions / messages / usage / settings)
       │                                    │
       ▼                                    ▼
-셀렉터 (전부 파생)                      영속화 (write-through → StorePort, debounce)
-  인박스 목록·정렬 (FR-15)
-  전역 카운터 "승인 2 · 응답대기 3" (FR-12)
-  안읽음 (FR-16)
-  동시 세션·파일 충돌 (FR-2)
+selectors (all derived)                persistence (write-through → StorePort, debounced)
+  inbox list and ordering (FR-15)
+  global counters "2 approvals · 3 awaiting" (FR-12)
+  unread (FR-16)
+  concurrent sessions, file conflicts (FR-2)
       │
       ▼
-React 컴포넌트 (포커스 뷰만 메시지 구독, 나머지는 요약만)
+React components (only the focus view subscribes to messages, the rest get summaries)
 ```
 
-명령 방향은 반대로: 컴포넌트 → 스토어 액션 → 포트 메서드. 액션은 **낙관적 갱신을 하지 않는다** — 상태 변화는 반드시 이벤트로 돌아와서 리듀서를 거친다 (CQRS-lite). 예외는 입력창 로컬 상태뿐.
+The command direction is the reverse: component → store action → port method. Actions **do not update optimistically** — a state change must come back as an event and pass through the reducer (CQRS-lite). The only exception is the input box's local state.
 
-## 2. 스토어 설계 (zustand)
+## 2. Store design (zustand)
 
 ```ts
-// 단일 스토어, slice 분할. 리듀서는 core에서 import — 스토어는 배선만
+// A single store, split into slices. Reducers are imported from core — the store only does the wiring
 interface AppStore {
   projects: Record<ProjectId, Project>
-  sessions: Record<SessionId, SessionMeta>       // 상태·제목·안읽음 위치 등 요약
-  messages: Record<SessionId, MessageWindow>     // ⚠ 포커스 세션만 풀 로드 (§4)
+  sessions: Record<SessionId, SessionMeta>       // summary: state, title, read position etc.
+  messages: Record<SessionId, MessageWindow>     // ⚠ only the focused session is fully loaded (§4)
   focus: { sessionId: SessionId | null; tab: Tab }
   // actions
-  dispatchEvent(e: NormalizedEvent): void        // → core 리듀서 호출
+  dispatchEvent(e: NormalizedEvent): void        // → calls the core reducer
   sendMessage(sessionId, input): Promise<void>   // → platform.agents.send
   …
 }
 ```
 
-- **왜 zustand인가**: 이벤트는 React 렌더 사이클 밖(WS 콜백)에서 도착한다. zustand는 React 외부에서 `store.setState` 가능하고, 구독 단위를 셀렉터로 잘라 리렌더를 통제할 수 있다. (tech-stack.md 참조)
-- 세션 상태 전이는 반드시 `core/session`의 전이 테이블을 통과한다. 불법 전이(예: `state_change`가 주장하는 `idle → waiting_approval`)는 dev 모드에서 throw, prod에서 로그 + 무시. 단, **host가 보낸 사실인 `approval_request`/`question_request`는 예외다** — 승인 요청이 실재하는데 테이블이 막으면 인박스·배지에 영영 안 잡혀 에이전트가 영원히 블록된다 (실측). 이 둘은 어느 상태에서든 `waiting_approval`로 전이한다.
+- **Why zustand**: events arrive outside the React render cycle (in a WS callback). zustand allows `store.setState` from outside React, and lets the subscription unit be sliced by selector to control re-renders. (See tech-stack.md)
+- Session state transitions must pass through the transition table in `core/session`. An illegal transition (e.g. an `idle → waiting_approval` that a `state_change` claims) throws in dev mode and is logged and ignored in prod. But **`approval_request`/`question_request`, which are facts sent by the host, are the exception** — if an approval request genuinely exists and the table blocks it, it never appears in the inbox or the badge and the agent is blocked forever (measured). These two transition to `waiting_approval` from any state.
 
-## 3. 파생 상태 규칙 (버그의 절반을 여기서 막는다)
+## 3. Derived state rules (half the bugs are stopped here)
 
-저장 금지 목록 — 다음은 **필드로 존재하면 안 되고** 셀렉터여야 한다:
+The do-not-store list — the following **must not exist as fields** and must be selectors:
 
-| 파생 값 | 계산원 | 근거 |
+| Derived value | Computed from | Reasoning |
 |---|---|---|
-| 인박스 목록·순서 | sessions의 state + 대기 시작 시각 + 안읽음 | 저장하면 상태 변화마다 동기화 필요 → 유령 항목 버그 |
-| 전역 카운터 | 〃 | 〃 |
-| 안읽음 여부 | `lastMessageSeq > lastReadSeq` | 두 수의 비교일 뿐 |
-| 프로젝트 집계 뱃지 | 소속 세션들의 상태 | 〃 |
-| "동시 세션 N개" | 같은 cwd의 활성 세션 수 | 〃 |
+| Inbox list and order | sessions' state + when the wait started + unread | Storing it means synchronising on every state change → ghost item bugs |
+| Global counters | 〃 | 〃 |
+| Unread or not | `lastMessageSeq > lastReadSeq` | It is just a comparison of two numbers |
+| Project aggregate badge | the states of the sessions in it | 〃 |
+| "N concurrent sessions" | the number of active sessions with the same cwd | 〃 |
 
-셀렉터는 `core`의 순수 함수를 감싼 메모이즈 래퍼로 구현한다. 정렬·긴급도 규칙이 core에 있으므로 단위 테스트는 React 없이 돈다.
+Selectors are implemented as memoised wrappers around pure functions in `core`. Because the ordering and urgency rules live in core, the unit tests run without React.
 
-## 4. 메시지 윈도잉 (§7.1 메모리 목표의 실행 방안)
+## 4. Message windowing (how the §7.1 memory target is met)
 
-- 세션당 메시지 전체를 메모리에 들고 있지 않는다. **포커스 세션**: 최근 N(기본 200)개 + 위로 스크롤 시 StorePort에서 페이지 로드. **비포커스 세션**: 메시지를 아예 안 들고, 요약(마지막 한 줄·seq·상태)만 유지.
-- 포커스 해제 시 해당 세션 메시지는 윈도우 크기로 잘라낸다.
-- 스트리밍 `message_delta`는 마지막 메시지에 append — 리스트 항목 재생성 없이 해당 행만 리렌더 (가상 리스트의 measure 재계산 포함).
+- We do not hold every message of a session in memory. **Focused session**: the most recent N (200 by default) + page-loading from StorePort when scrolling up. **Unfocused sessions**: no messages at all, only a summary (last line, seq, state).
+- When focus is lost, that session's messages are trimmed to the window size.
+- A streaming `message_delta` is appended to the last message — only that row re-renders, without recreating list items (including the virtual list's measure recalculation).
 
-## 5. 영속화와 복원 (FR-10)
+## 5. Persistence and restore (FR-10)
 
-- **쓰기**: 이벤트 적용 후 write-through. 메시지는 배치(500ms debounce) append, 세션 메타·워크스페이스는 변화 시마다. "종료 시 저장"이라는 개념 자체가 없다 — 크래시 대비는 공짜로 얻는다.
-- **복원 순서**: ① store에서 워크스페이스+세션 메타 로드 → 사이드바·인박스 즉시 표시(읽기 전용) → ② host 연결 → ③ 세션별 resume 시도 → 성공 시 활성 전환, 실패 시 "기록 보기 + 새 세션" 카드. UI가 뜨는 데 host가 필요 없다는 점이 콜드 스타트 3초 목표의 핵심.
-- 이벤트 재연결(`afterSeq`)과 복원의 관계는 [agent-host.md](agent-host.md) §4.
+- **Writing**: write-through after applying an event. Messages are appended in batches (500ms debounce); session metadata and workspace on every change. There is no such concept as "save on exit" — crash safety comes for free.
+- **Restore order**: ① load the workspace + session metadata from the store → show the sidebar and inbox immediately (read-only) → ② connect to the host → ③ attempt resume per session → on success switch to active, on failure show the "view the record + new session" card. That the UI does not need the host to come up is the key to the 3-second cold start target.
+- The relationship between event reconnection (`afterSeq`) and restore is in [agent-host.md](agent-host.md) §4.
 
-## 6. 설정(settings)의 위치
+## 6. Where settings live
 
-- 단축키, 알림 정책, 카드 접힘 정책, 승인 배너 정책 등은 **데이터**다 (전략 패턴의 전략 테이블). `settings` slice + store 영속화.
-- 정책 판단 함수는 core에 (`shouldCollapseCard(tool, settings)`, `canApproveInBanner(detail, settings)`), UI는 결과만 소비. 정책 변경 = 데이터 변경이지 컴포넌트 수정이 아니다.
+- Shortcuts, notification policy, card collapse policy, approval banner policy and so on are **data** (the strategy table of the strategy pattern). A `settings` slice + store persistence.
+- The policy judgement functions live in core (`shouldCollapseCard(tool, settings)`, `canApproveInBanner(detail, settings)`) and the UI only consumes the result. Changing a policy is a data change, not a component edit.

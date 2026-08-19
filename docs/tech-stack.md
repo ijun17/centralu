@@ -1,69 +1,69 @@
-# 기술 스택 — 라이브러리 선정과 근거
+# Tech stack — library choices and the reasoning
 
-선정 기준은 기획서 §7.1(가벼움)과 아키텍처 변경 축이다: **런타임 오버헤드가 작고, 교체 가능한 위치에 있고, 유지보수가 활발할 것.** "일단 넣고 보는" 의존성 금지 — 추가하려면 이 문서에 행을 추가해야 한다.
+The selection criteria are the product spec §7.1 (lightness) and the architecture's axes of change: **small runtime overhead, sitting in a replaceable position, actively maintained.** No "add it and see" dependencies — adding one requires adding a row to this document.
 
-## 1. 프론트엔드 (packages/ui, apps/web)
+## 1. Front end (packages/ui, apps/web)
 
-| 영역 | 선택 | 근거 | 기각한 대안 |
+| Area | Choice | Reasoning | Alternatives rejected |
 |---|---|---|---|
-| 프레임워크 | **React 19 + TypeScript** | 기획서 v0.4 확정. 에이전트 기반 개발 친화성 | SolidJS/Svelte (v0.4에서 종결) |
-| 빌드 | **Vite** | 웹 dev 모드의 핵심 도구, Tauri 공식 템플릿과 호환 | — |
-| 상태 | **zustand** | ~1KB, 보일러플레이트 없음, React 외부에서 구독 가능(이벤트 스트림→스토어에 필수), 셀렉터 기반 리렌더 제어 | Redux Toolkit (무겁고 의식이 많음), Jotai (이벤트 스트림 적용에 부적합) |
-| 리스트 가상화 | **@tanstack/react-virtual** | 대화 스트림·파일 트리·인박스 전부 필요 (§7.1 60fps) | react-window (역동적 높이 지원 약함) |
-| 마크다운 | **react-markdown** (remark) | 스트리밍 중 부분 파싱 안전, 플러그인 생태계 | 직접 파싱 (범위 아님) |
-| 코드 하이라이트 | **Shiki** (lazy-load, 웹워커) | 정확도 최고, 로드는 코드블록 등장 시로 지연 | highlight.js (품질), Prism (유지보수) |
-| 코드 뷰어/diff | **CodeMirror 6** (read-only + merge view) | Monaco 대비 1/10 크기, 대용량 가상 스크롤 내장, diff 뷰 공식 지원 | Monaco (수 MB, 편집기 전체가 딸려옴 — 뷰어만 필요) |
-| 스타일 | **Tailwind CSS v4** | 런타임 0, 다크 테마 토큰화 용이 | CSS-in-JS 계열 (런타임 비용) |
-| 헤드리스 UI | **Radix UI** (dialog, dropdown, tooltip만) | 접근성·포커스 관리 공짜, 필요한 프리미티브만 개별 설치 | 전체 컴포넌트 킷 (디자인 종속) |
-| 아이콘 | **lucide-react** | 트리셰이킹 완전 | — |
-| 날짜/시간 | **Intl API 직접** + 소형 헬퍼 자작 | "3분째 대기 중" 수준에 라이브러리 불필요 | dayjs/date-fns (불필요 의존) |
-| WS 클라이언트 | **네이티브 WebSocket** + 재연결 래퍼 자작 (~50줄) | 요구가 단순(재연결+백오프+토큰), 의존 줄임 | socket.io (프로토콜 오버헤드) |
+| Framework | **React 19 + TypeScript** | Settled in spec v0.4. Friendly to agent-driven development | SolidJS/Svelte (closed out in v0.4) |
+| Build | **Vite** | The key tool for web dev mode, compatible with the official Tauri template | — |
+| State | **zustand** | ~1KB, no boilerplate, subscribable from outside React (essential for event stream → store), selector-based re-render control | Redux Toolkit (heavy, too much ceremony), Jotai (unsuited to applying an event stream) |
+| List virtualisation | **@tanstack/react-virtual** | Needed by the conversation stream, file tree and inbox alike (§7.1 60fps) | react-window (weak support for dynamic heights) |
+| Markdown | **react-markdown** (remark) | Safe partial parsing mid-stream, plugin ecosystem | Parsing it ourselves (out of scope) |
+| Code highlighting | **Shiki** (lazy-loaded, web worker) | Best accuracy; loading deferred until a code block appears | highlight.js (quality), Prism (maintenance) |
+| Code viewer/diff | **CodeMirror 6** (read-only + merge view) | 1/10 the size of Monaco, virtual scrolling for large files built in, diff view officially supported | Monaco (several MB, the whole editor comes along — we only need a viewer) |
+| Styling | **Tailwind CSS v4** | 0 runtime, easy to tokenise a dark theme | The CSS-in-JS family (runtime cost) |
+| Headless UI | **Radix UI** (dialog, dropdown, tooltip only) | Accessibility and focus management for free, install only the primitives needed | A full component kit (design lock-in) |
+| Icons | **lucide-react** | Fully tree-shakeable | — |
+| Date/time | **the Intl API directly** + a small helper written here | No library needed at the level of "waiting 3 minutes" | dayjs/date-fns (unnecessary dependency) |
+| WS client | **native WebSocket** + a reconnection wrapper written here (~50 lines) | The requirement is simple (reconnect + backoff + token), fewer dependencies | socket.io (protocol overhead) |
 
-## 2. 스키마·검증 (packages/protocol)
+## 2. Schema and validation (packages/protocol)
 
-| 영역 | 선택 | 근거 |
+| Area | Choice | Reasoning |
 |---|---|---|
-| 스키마 | **zod v4** | 타입 추론 = 런타임 검증 단일 소스. 경계(WS 수신, invoke 응답)에서만 검증해 비용 통제 |
+| Schema | **zod v4** | Type inference = runtime validation, single source. Validated only at the boundary (WS receipt, invoke response) to control the cost |
 
 ## 3. Agent Host (packages/agent-host — Node 22+)
 
-| 영역 | 선택 | 근거 | 기각한 대안 |
+| Area | Choice | Reasoning | Alternatives rejected |
 |---|---|---|---|
-| Claude 연동 | **@anthropic-ai/claude-agent-sdk** | 기획서 확정. 스트리밍·resume·canUseTool | PTY 래핑 (기획서에서 기각) |
-| Codex 연동 | **자작 JSON-RPC 클라이언트** (child_process + stdio) | `codex app-server`는 얇은 JSON-RPC — SDK 의존보다 버전 변동(C4) 대응이 쉬움 | 서드파티 래퍼 (유지보수 불명) |
-| WS 서버 | **ws** | 사실상 표준, 단독으로 충분 | Fastify 등 (HTTP 서버 불필요) |
-| dev store | **better-sqlite3** | 동기 API가 이 규모에 단순·최속. prod에서 rusqlite로 대체되는 dev 전용 | node:sqlite (아직 실험적) |
-| dev git | **git CLI spawn 자작 래퍼** (`--porcelain=v2` 파싱) | prod에서 git2(Rust)로 대체될 임시 구현 — 얇을수록 버리기 쉽다 | simple-git (버릴 코드에 의존 추가) |
-| 파일 워처 | **chokidar** | dev 전용, debounce 조합 | — |
-| MCP 서버 | **@modelcontextprotocol/sdk** | 공식 SDK, 오케스트레이터(FR-11)용 | 자작 (스펙 추적 비용) |
+| Claude integration | **@anthropic-ai/claude-agent-sdk** | Settled in the spec. Streaming, resume, canUseTool | PTY wrapping (rejected in the spec) |
+| Codex integration | **a JSON-RPC client written here** (child_process + stdio) | `codex app-server` is thin JSON-RPC — easier to handle version changes (C4) than depending on an SDK | Third-party wrappers (unclear maintenance) |
+| WS server | **ws** | The de facto standard, sufficient on its own | Fastify etc. (no HTTP server needed) |
+| dev store | **better-sqlite3** | The synchronous API is the simplest and fastest at this scale. Dev-only, replaced by rusqlite in prod | node:sqlite (still experimental) |
+| dev git | **a git CLI spawn wrapper written here** (parsing `--porcelain=v2`) | A temporary implementation to be replaced by git2 (Rust) in prod — the thinner, the easier to throw away | simple-git (adding a dependency to code we will throw away) |
+| File watcher | **chokidar** | Dev-only, combined with debounce | — |
+| MCP server | **@modelcontextprotocol/sdk** | The official SDK, for the orchestrator (FR-11) | Writing one (the cost of tracking the spec) |
 
-## 4. Tauri 측 (apps/desktop/src-tauri — M1 이후)
+## 4. The Tauri side (apps/desktop/src-tauri — after M1)
 
-| 영역 | 선택 | 근거 |
+| Area | Choice | Reasoning |
 |---|---|---|
-| 셸 | **Tauri 2.x** | 기획서 확정 |
-| git | **git2** crate | 기획서 확정 (FR-4), 프로세스 spawn 없이 조회 |
-| 저장 | **rusqlite** (bundled) | StorePort의 prod 구현 |
-| 파일 워처 | **notify** crate | debounce는 앱 레벨 |
-| OS 통합 | tauri-plugin-notification / global-shortcut / dialog / opener | 공식 플러그인 우선, 자작 최소화 |
+| Shell | **Tauri 2.x** | Settled in the spec |
+| git | the **git2** crate | Settled in the spec (FR-4), queries without spawning a process |
+| Storage | **rusqlite** (bundled) | The prod implementation of StorePort |
+| File watcher | the **notify** crate | Debounce at the app level |
+| OS integration | tauri-plugin-notification / global-shortcut / dialog / opener | Official plugins first, write as little as possible |
 
-## 5. 개발 도구
+## 5. Development tools
 
-| 영역 | 선택 | 근거 |
+| Area | Choice | Reasoning |
 |---|---|---|
-| 모노레포 | **pnpm workspaces** (단독) | 이 규모에 Turbo/Nx 불필요 — 느려지면 그때 |
-| 테스트 | **Vitest** | Vite와 설정 공유, core/protocol/어댑터 계약 테스트 |
-| E2E | **Playwright** | 웹 dev 모드를 그대로 테스트 대상으로 |
-| 린트 | **ESLint(flat) + eslint-plugin-boundaries** | 레이어 규칙을 기계로 강제 (architecture §2) — 이것 때문에 Biome이 아닌 ESLint |
-| 포맷 | **Prettier** | 논쟁 종결용 |
-| 의존 그래프 검증 | **dependency-cruiser** (CI) | boundaries가 못 잡는 패키지 간 규칙 이중 방어 |
+| Monorepo | **pnpm workspaces** (alone) | Turbo/Nx unnecessary at this scale — when it gets slow, then |
+| Testing | **Vitest** | Shares configuration with Vite; core/protocol/adapter contract tests |
+| E2E | **Playwright** | Test web dev mode directly as the target |
+| Lint | **ESLint (flat) + eslint-plugin-boundaries** | Enforce the layer rules by machine (architecture §2) — this is why it is ESLint and not Biome |
+| Format | **Prettier** | To end the argument |
+| Dependency graph verification | **dependency-cruiser** (CI) | A second line of defence on inter-package rules that boundaries cannot catch |
 
-## 6. 금지 목록 (추가하려면 이 문서에서 근거로 이겨야 함)
+## 6. The forbidden list (to add one, you have to win on reasoning in this document)
 
-- **Electron 계열 무엇이든** — 기획 전제 위반
-- **Monaco** — 크기. 뷰어에 편집기를 넣지 않는다
-- **moment/dayjs/date-fns** — Intl로 충분
-- **axios** — fetch도 UI에선 금지인데 하물며
-- **Redux + 미들웨어 생태계** — zustand로 충분, 사이즈와 의식 비용
-- **CSS-in-JS 런타임** (emotion, styled-components) — §7.1 위반
-- **ORM** (Prisma, Drizzle) — 테이블 6개에 마이그레이션은 SQL 파일이면 된다
+- **Anything in the Electron family** — violates the premise of the spec
+- **Monaco** — size. We do not put an editor in a viewer
+- **moment/dayjs/date-fns** — Intl is enough
+- **axios** — fetch is forbidden in the UI, let alone this
+- **Redux + its middleware ecosystem** — zustand is enough, size and ceremony cost
+- **CSS-in-JS runtimes** (emotion, styled-components) — violates §7.1
+- **ORMs** (Prisma, Drizzle) — with 6 tables, a SQL file is enough for migrations
