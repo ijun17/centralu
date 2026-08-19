@@ -200,7 +200,26 @@ function TopBar() {
       </span>
 
       <span className="ml-auto flex items-center gap-3">
-        <span className="flex items-center gap-1.5 text-[11px] text-slate" data-testid="connection">
+        {/*
+          연결됨은 **slate가 아니라 ash**다.
+
+          slate는 팔레트에서 '배경 정보' 자리다. 상태 표시를 거기 두면 정상인데도 꺼진 것으로
+          읽힌다 — 회색 글자는 "지금 없는 것"의 관습이라, 라벨이 Connected여도 눈은 글자보다
+          색을 먼저 읽는다. 점만 ash였고 글자는 slate라 표시 전체가 그렇게 내려앉아 있었다.
+
+          그렇다고 밝히지는 않는다. 연결됨은 기본 상태라 조용한 게 맞고, 밝기는 급한 것에 쓰는
+          자원이다. 하려는 일은 눈을 끄는 게 아니라 **'꺼짐'과 구별되는 것**이므로 한 단계만 올린다.
+
+          끊김 쪽은 beacon으로 올린다. 글자를 slate로 남겨 두면 급한 쪽이 정상보다 어두워져
+          "화면에서 가장 밝은 것 = 나를 기다리는 것"이 뒤집힌다 — 점은 이미 beacon인데
+          글자만 뒤에 남아 있었고, 그래서 두 상태가 글자로는 같은 밝기였다.
+        */}
+        <span
+          className={`flex items-center gap-1.5 text-[11px] ${
+            connection === 'connected' ? 'text-ash' : 'text-beacon'
+          }`}
+          data-testid="connection"
+        >
           <span
             className={`size-1.5 rounded-full ${
               connection === 'connected' ? 'bg-ash' : 'bg-beacon breathe'
