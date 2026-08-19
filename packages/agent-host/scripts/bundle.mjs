@@ -166,11 +166,24 @@ if (existsSync(helper)) {
   }
 }
 
-// 4) 산출물이 자기 완결적인지 표시 — host_command가 이 파일 존재로 prod를 판단한다
+/*
+ * 4) Mark the output as self-contained — host_command treats this file's existence as "prod".
+ *
+ * `commit` is here as well as in the startup log. The log answers "which commit is the
+ * running app?" only while a host is running; this answers it for a bundle sitting on disk,
+ * which is the case that actually came up — a `.app` had to be identified without launching
+ * it, and the fallback was matching binary mtimes against commit times. That is a guess.
+ */
 writeFileSync(
   join(OUT, 'bundle-info.json'),
   JSON.stringify(
-    { builtAt: new Date().toISOString(), runtime: 'system-node', platform: process.platform, arch: process.arch },
+    {
+      commit: buildId(),
+      builtAt: new Date().toISOString(),
+      runtime: 'system-node',
+      platform: process.platform,
+      arch: process.arch,
+    },
     null,
     2,
   ) + '\n',
