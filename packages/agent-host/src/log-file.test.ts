@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MAX_LOG_BYTES, hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
@@ -78,6 +78,30 @@ describe('host 로그 파일', () => {
     }
     expect(existsSync(`${path}.1`)).toBe(true)
     expect(readFileSync(path, 'utf8')).toContain('after-roll')
+  })
+
+  /*
+   * 회전이 close 뒤 rename에서 실패하면, 예전에는 **닫은 fd 번호**가 그대로 남았다.
+   * OS는 그 번호를 곧 다른 파일(SQLite WAL·pty)에 재발급하므로 다음 writeSync가
+   * 남의 파일에 로그를 쓰는 조용한 오염이 된다. 실패 경로에서도 fd를 비우고
+   * 다시 열어, 그 뒤의 줄이 **여전히 이 로그 파일에** 남는지를 본다.
+   */
+  it('회전이 실패해도 죽은 fd를 붙들지 않고 같은 파일에 계속 쓴다', () => {
+    const dir = tmp()
+    const path = hostLogPath(dir)
+    const stop = teeStderrToFile(path, 64)
+    try {
+      // rename이 실패하게 만든다 — 디렉토리에 쓰기 권한이 없으면 EACCES
+      chmodSync(dir, 0o555)
+      for (let i = 0; i < 12; i++) process.stderr.write(`line ${i} ${'y'.repeat(20)}\n`)
+      process.stderr.write('after-failed-roll\n')
+    } finally {
+      chmodSync(dir, 0o755)
+      stop()
+    }
+    // 회전은 못 했지만(한 파일에 그대로) 로그는 계속 이 파일로 흘렀다
+    expect(existsSync(`${path}.1`)).toBe(false)
+    expect(readFileSync(path, 'utf8')).toContain('after-failed-roll')
   })
 
   /*

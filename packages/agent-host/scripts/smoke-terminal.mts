@@ -14,7 +14,9 @@ const cwd = mkdtempSync(join(tmpdir(), 'cc-term-smoke-'))
 writeFileSync(join(cwd, 'MARKER.txt'), 'x')
 
 const svc = new TerminalService(() => {})
-const h = svc.attach(cwd, 80, 24)
+// attach(cwd)가 list/create로 갈라졌다 (디렉토리 하나에 터미널 여러 개).
+// "다시 붙기"는 이제 list()로 기존 것을 찾는 것이다 — 그 의미를 그대로 검증한다.
+const h = svc.create(cwd, 80, 24)
 console.log(`터미널 생성: ${h.id} · alive=${h.alive}`)
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -29,13 +31,13 @@ const sawMarker = out.includes('MARKER.txt')
 const sawCwd = out.includes(cwd.replace('/private', '')) || out.includes(cwd)
 
 // 같은 디렉토리에 다시 붙으면 같은 터미널 + 기록 유지
-const again = svc.attach(cwd, 80, 24)
-const sameId = again.id === h.id
-const keptHistory = again.history().includes('MARKER.txt')
+const again = svc.list(cwd)[0]
+const sameId = again?.id === h.id
+const keptHistory = again?.history().includes('MARKER.txt') ?? false
 
 // 다른 디렉토리는 자기 터미널 (워크트리 대비)
 const other = mkdtempSync(join(tmpdir(), 'cc-term-other-'))
-const b = svc.attach(other, 80, 24)
+const b = svc.create(other, 80, 24)
 
 console.log('\n판정:')
 console.log('  셸이 실제로 떴는가:', h.alive ? 'O' : 'X')

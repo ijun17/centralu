@@ -15,7 +15,7 @@ import { createRpcHandler } from './rpc.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { ensureToolPath } from './env-path.js'
 import { acquireInstanceLock } from './dev-services/instance-lock.js'
-import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
+import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
 /**
  * Agent Host 진입점.
@@ -92,13 +92,15 @@ if (!lock.ok) {
   )
   process.exit(1)
 }
+/*
+ * 시그널 핸들러를 여기서 달면 안 된다.
+ *
+ * 예전에는 SIGINT/SIGTERM에 lock.release() + process.exit(0)를 먼저 등록했는데,
+ * 핸들러는 등록 순서대로 돌므로 뒤에 등록된 진짜 shutdown()이 **절대 실행되지 않았다** —
+ * 종료할 때마다 자식 프로세스(claude/codex)가 고아로 남고 WAL 체크포인트를 건너뛰었다.
+ * 잠금 해제는 exit 훅 하나로 충분하다 (어떤 경로로 끝나든 마지막에 돈다).
+ */
 process.on('exit', lock.release)
-for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(sig, () => {
-    lock.release()
-    process.exit(0)
-  })
-}
 
 const store = new Store(dbPath)
 const adapters = new Map<ToolName, AgentAdapter>([
@@ -155,6 +157,9 @@ function record(kind: string, err: unknown): void {
   const line = `[${new Date().toISOString()}] ${kind}: ${e?.stack ?? String(err)}\n`
   console.error(`[agent-host] ${kind}`, e?.stack ?? err)
   try {
+    // host.log와 같은 규칙으로 한 세대만 남긴다 — 거절이 반복되는 날 이 파일이
+    // 사용자 폴더를 조용히 먹는다 (회전 없는 append는 상한이 없다)
+    rotateIfLarge(crashLog)
     appendFileSync(crashLog, line)
   } catch {
     // 로그도 못 남기는 상황이면 stderr가 마지막 수단이다 — 여기서 또 던지지 않는다
@@ -169,6 +174,8 @@ process.on('uncaughtException', (err) => {
 
 const shutdown = async () => {
   await mgr.disposeAll()
+  // PTY도 자식 프로세스다 — setsid()로 자기 그룹이라 그룹 kill이 못 미치므로 직접 정리한다
+  terminals.disposeAll()
   await server.close()
   store.close()
   // 왜 끝났는지가 다음 조사의 첫 줄이 된다 — 조용히 사라지지 않는다

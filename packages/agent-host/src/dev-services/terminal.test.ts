@@ -171,6 +171,39 @@ describe('셸이 끝나거나 못 뜰 때', () => {
     expect(fake.spawned).toHaveLength(2)
   })
 
+  /*
+   * restart가 곧 터미널을 영영 죽이는 버튼이던 문제.
+   * kill한 옛 셸의 onExit은 새 셸이 앉은 **뒤에** 늦게 오는데,
+   * 그 콜백이 무조건 pty를 비워서 방금 띄운 새 셸을 죽은 것으로 만들었다.
+   */
+  it('옛 셸의 늦은 종료가 새 셸을 덮어쓰지 않는다', () => {
+    const fake = fakePty()
+    const seen: { terminalId: string; data?: string; exitCode?: number | null }[] = []
+    const svc = new TerminalService((e) => seen.push(e))
+    stubPty(svc, fake.mod)
+
+    const cwd = tmp()
+    const h = svc.create(cwd, 80, 24)
+    svc.restart(h.id, 80, 24)
+    expect(fake.instances[0]!.kill).toHaveBeenCalled()
+
+    // kill의 결과인 onExit이 이제야 도착한다
+    fake.instances[0]!.emitExit(0)
+
+    // 새 셸은 멀쩡히 살아 있어야 하고, 죽었다는 방송도 나가면 안 된다
+    expect(svc.list(cwd)[0]!.alive).toBe(true)
+    expect(seen.some((e) => e.exitCode !== undefined)).toBe(false)
+
+    // 옛 셸이 마지막으로 뱉는 출력도 새 화면에 섞이지 않는다
+    fake.instances[0]!.emitData('죽어가며 남긴 말')
+    expect(svc.list(cwd)[0]!.history()).not.toContain('죽어가며 남긴 말')
+
+    // 진짜 새 셸의 종료는 그대로 전해진다
+    fake.instances[1]!.emitExit(1)
+    expect(svc.list(cwd)[0]!.alive).toBe(false)
+    expect(seen.some((e) => e.exitCode === 1)).toBe(true)
+  })
+
   it('셸을 못 띄우면 조용히 죽지 않고 이유를 화면에 남긴다', () => {
     const seen: { terminalId: string; data?: string }[] = []
     const svc = new TerminalService((e) => seen.push(e))

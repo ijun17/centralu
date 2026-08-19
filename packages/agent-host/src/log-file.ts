@@ -68,14 +68,32 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
   const original = process.stderr.write.bind(process.stderr)
 
   const roll = () => {
+    /*
+     * **닫은 fd 번호를 붙들고 있으면 안 된다.**
+     *
+     * close 뒤에 rename이 실패하면(권한·디스크), 예전에는 그 죽은 번호가 fd에 남았다.
+     * OS는 그 번호를 곧 다른 파일 — SQLite WAL이든 pty든 — 에 재발급하므로,
+     * 다음 writeSync가 **남의 파일에 로그를 쓰는** 조용한 오염이 된다.
+     * 그래서 실패 경로에서도 반드시 비우고 새로 연다.
+     */
     try {
       if (fd !== null) closeSync(fd)
-      renameSync(path, `${path}.1`)
-      fd = openSync(path, 'a')
-      written = 0
     } catch {
-      /* 회전에 실패하면 그냥 계속 쓴다 — 큰 파일이 로그 없는 것보다 낫다 */
+      /* 이미 닫혔으면 그만이다 */
     }
+    fd = null
+    try {
+      renameSync(path, `${path}.1`)
+    } catch {
+      /* 회전에 실패하면 같은 파일에 계속 쓴다 — 큰 파일이 로그 없는 것보다 낫다 */
+    }
+    try {
+      fd = openSync(path, 'a')
+    } catch {
+      /* 못 열면 파일 쪽만 조용해진다 — 원래 stderr 경로는 살아 있다 */
+    }
+    // 실패했더라도 0으로 되돌린다 — 안 그러면 매 줄마다 회전을 다시 시도한다
+    written = 0
   }
 
   process.stderr.write = ((chunk: unknown, enc?: unknown, cb?: unknown) => {

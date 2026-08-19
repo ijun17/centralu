@@ -189,10 +189,20 @@ export class TerminalService {
       })
       e.pty = handle
       handle.onData((data) => {
+        // 재시작 뒤 옛 셸이 마지막으로 뱉는 출력은 버린다 — 새 셸의 화면에 섞이면 안 된다
+        if (e.pty !== handle) return
         this.append(e, data)
         this.emit({ terminalId: e.id, data })
       })
       handle.onExit(({ exitCode }) => {
+        /*
+         * **지금 자리의 주인일 때만 비운다.**
+         *
+         * restart()가 옛 pty를 kill하면 그 onExit은 새 pty가 앉은 **뒤에** 늦게 온다.
+         * 무조건 e.pty = null 하면 방금 띄운 새 셸을 죽은 것으로 만들어
+         * 재시작이 곧 터미널을 영영 죽이는 버튼이 됐다.
+         */
+        if (e.pty !== handle) return
         e.pty = null
         this.emit({ terminalId: e.id, exitCode: exitCode ?? null })
       })
