@@ -1,0 +1,19 @@
+{
+  "name": "centralu",
+  "version": "0.1.0",
+  "description": "여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 macOS 데스크톱 앱",
+  "license": "MIT",
+  "author": "ijun17",
+  "homepage": "https://github.com/ijun17/centralu",
+  "repository": { "type": "git", "url": "git+https://github.com/ijun17/centralu.git" },
+  "bugs": { "url": "https://github.com/ijun17/centralu/issues" },
+  "keywords": ["claude-code", "codex", "agent", "macos", "desktop"],
+  "type": "module",
+  "bin": { "centralu": "bin/centralu.mjs" },
+  "files": ["bin"],
+  "engines": { "node": ">=22" },
+  "os": ["darwin"],
+  "optionalDependencies": {
+    "@centralu/darwin-arm64": "0.1.0"
+  }
+}

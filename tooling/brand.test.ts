@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { APP_ID, APP_NAME, APP_VERSION, DATA_DIR } from '../packages/protocol/src/brand.js'
+import { APP_ID, APP_NAME, APP_SLUG, APP_VERSION, DATA_DIR } from '../packages/protocol/src/brand.js'
 
 /**
  * 이름 계약.
@@ -36,6 +36,21 @@ describe('이름은 한 곳에서 정한다', () => {
     expect(json('apps/desktop/src-tauri/tauri.conf.json').version).toBe(APP_VERSION)
     expect(json('apps/desktop/package.json').version).toBe(APP_VERSION)
     expect(read('apps/desktop/src-tauri/Cargo.toml')).toContain(`version = "${APP_VERSION}"`)
+  })
+
+  it('npm 패키지 이름·버전이 brand.ts를 따른다', () => {
+    // 발행은 되돌릴 수 없다(npm은 24시간 뒤 unpublish를 막는다). 어긋난 채로 나가지 않게
+    // 여기서 먼저 잡는다 — 릴리스 스크립트도 같은 값을 써서 다시 적는다.
+    const main = json('packaging/npm/centralu/package.json')
+    const arch = json('packaging/npm/darwin-arm64/package.json')
+    expect(main.name).toBe(APP_SLUG)
+    expect(main.version).toBe(APP_VERSION)
+    expect(arch.version).toBe(APP_VERSION)
+    expect(arch.name).toBe(`@${APP_SLUG}/darwin-arm64`)
+    // 껍데기와 알맹이는 **정확히 같은 버전**이어야 한다 (범위로 두면 따로 놀 수 있다)
+    expect((main.optionalDependencies as Record<string, string>)[arch.name as string]).toBe(APP_VERSION)
+    // 아키텍처 패키지가 담는 번들 이름도 APP_NAME을 따른다
+    expect(arch.files).toContain(`${APP_NAME}.app`)
   })
 
   it('빌드한 .app을 여는 스크립트가 실제 번들 이름을 가리킨다', () => {

@@ -1,0 +1,12 @@
+{
+  "name": "@centralu/darwin-arm64",
+  "version": "0.1.0",
+  "description": "Centralu 앱 번들 (macOS · Apple Silicon)",
+  "license": "MIT",
+  "author": "ijun17",
+  "homepage": "https://github.com/ijun17/centralu",
+  "repository": { "type": "git", "url": "git+https://github.com/ijun17/centralu.git" },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["Centralu.app"]
+}
