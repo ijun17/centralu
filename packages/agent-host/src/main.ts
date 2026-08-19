@@ -41,6 +41,9 @@ const { values } = parseArgs({
   },
 })
 
+/** 데이터 폴더를 옮겼다면 그 사실. 로그가 켜진 뒤에 적는다 (아래 참조) */
+let movedNote: string | null = null
+
 const token = values.token ?? process.env.CC_HOST_TOKEN ?? randomBytes(16).toString('hex')
 const dbPath = values.memory
   ? ':memory:'
@@ -58,8 +61,14 @@ function defaultDbPath(): string {
   const isDev = process.env.CC_DEV === '1'
   const dir = join(homedir(), isDev ? DATA_DIR_DEV : DATA_DIR)
   const legacy = join(homedir(), isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod)
-  // 로그는 배너보다 먼저 나가지만, 이 한 줄이 없으면 폴더가 왜 사라졌는지 아무도 모른다
-  if (migrateLegacyDataDir(legacy, dir)) console.error(`[agent-host] data folder moved: ${legacy} -> ${dir}`)
+  /*
+   * 이사는 여기서 하되, **말하는 것은 미뤄 둔다.**
+   *
+   * 로그 파일은 이 함수가 경로를 정해준 뒤에야 열린다. 여기서 console.error를 하면
+   * 그 줄은 파일이 아니라 허공(부모 프로세스의 stderr)으로 간다 — 실제로 첫 이사에서
+   * `host.log`에 아무것도 안 남았다. 폴더가 왜 사라졌는지 설명하는 유일한 줄인데.
+   */
+  movedNote = migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
   mkdirSync(dir, { recursive: true })
   // 첨부·오케스트레이터 홈·워크트리가 전부 이 아래로 오게 고정한다 (dev/prod가 갈린다)
   process.env.CC_DATA_DIR = dir
@@ -78,6 +87,8 @@ function defaultDbPath(): string {
  */
 const stopLog = dbPath === ':memory:' ? () => {} : teeStderrToFile(hostLogPath(dirname(dbPath)))
 if (dbPath !== ':memory:') console.error(startupBanner({ build: BUILD, db: dbPath, pid: process.pid }))
+// 배너 바로 다음이다 — 어느 기동에서 옮겼는지가 같은 자리에서 읽혀야 한다
+if (movedNote) console.error(movedNote)
 
 // GUI 앱은 로그인 셸 PATH를 물려받지 못한다 — CLI를 찾으려면 먼저 보강해야 한다 (실측).
 // 사용자의 로그인 셸에게 직접 물어보므로 nvm·mise·수동 설치도 잡힌다.
