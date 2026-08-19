@@ -33,7 +33,8 @@
     "smoke:terminal": "tsx packages/agent-host/scripts/smoke-terminal.mts",
     "smoke:orphan": "tsx packages/agent-host/scripts/smoke-orphan.mts",
     "perf:idle": "node packages/agent-host/scripts/idle-perf.mjs",
-    "release:npm": "tsx scripts/release-npm.mts"
+    "release:npm": "tsx scripts/release-npm.mts",
+    "icon": "tsx scripts/render-icon.mts"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

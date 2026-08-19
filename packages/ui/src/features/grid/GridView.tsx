@@ -116,9 +116,14 @@ export function GridView() {
                 선은 inset 그림자로 그린다 — border는 칸을 키워서 격자 전체를 민다
                 (사이드바에서 겪은 그 문제).
               */
+              /*
+                응답 중인 칸은 테두리가 돈다 (사이드바 표식과 같은 궤도).
+                칸이 여럿일 때 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다 —
+                그리드는 읽는 화면이 아니라 **보는 화면**이라 곁눈으로 잡혀야 한다.
+              */
               className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge transition-opacity ${
-                dragging === id ? 'opacity-40' : ''
-              } ${dropEdge(over, id)}`}
+                sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
+              } ${dragging === id ? 'opacity-40' : ''} ${dropEdge(over, id)}`}
               data-testid={`grid-panel-${id}`}
               data-drop={dropSide(over, id)}
               onDragOver={(e) => {

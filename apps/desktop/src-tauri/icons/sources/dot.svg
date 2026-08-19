@@ -1,0 +1,16 @@
+<!--
+  C · 점과 궤도 — 가는 호가 둥근 사각을 감싼다.
+  가장 담백하지만, 작게 줄이면 가는 호가 먼저 사라진다 (16px에서 확인할 것).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1024" height="1024">
+  <defs>
+    <linearGradient id="arc2" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2d6cf0"/><stop offset="0.4" stop-color="#7b3fe4"/>
+      <stop offset="0.7" stop-color="#d63aa8"/><stop offset="1" stop-color="#ff8a3d"/>
+    </linearGradient>
+  </defs>
+  <rect x="26" y="26" width="460" height="460" rx="112" fill="#0d0d10"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="url(#arc2)" stroke-width="10"
+          stroke-dasharray="470 472" stroke-linecap="round" transform="rotate(-90 256 256)"/>
+  <rect x="196" y="196" width="120" height="120" rx="30" fill="#f5f5f7"/>
+</svg>

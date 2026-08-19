@@ -1,0 +1,21 @@
+<!--
+  A · 궤도 — 앱이 '작업 중'을 뜻할 때 그리는 바로 그 모양.
+  아이콘과 화면이 같은 문법을 쓰면, 앱을 처음 여는 사람도 둘을 한 물건으로 읽는다.
+  고리가 두꺼워 16px 메뉴바에서도 형태가 남는다.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a1a1e"/><stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2d6cf0"/><stop offset="0.35" stop-color="#7b3fe4"/>
+      <stop offset="0.6" stop-color="#d63aa8"/><stop offset="0.8" stop-color="#ff8a3d"/>
+      <stop offset="1" stop-color="#4ad6d0"/>
+    </linearGradient>
+  </defs>
+  <rect x="26" y="26" width="460" height="460" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="132" fill="none" stroke="#232329" stroke-width="26"/>
+  <path d="M 256 124 A 132 132 0 1 1 155 320" fill="none" stroke="url(#arc)" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="42" fill="#f5f5f7"/>
+</svg>

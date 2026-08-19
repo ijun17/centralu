@@ -329,7 +329,8 @@
   }
 }
 
-.cc-orbit {
+.cc-orbit,
+.cc-orbit-ring::after {
   background: conic-gradient(
     from var(--cc-orbit),
     transparent 0deg,
@@ -343,9 +344,40 @@
   animation: cc-orbit-spin 1.4s linear infinite;
 }
 
+/*
+ * 같은 궤도를 **칸의 테두리**로 두른다 (그리드에서 응답 중인 패널).
+ *
+ * 작은 표식 하나로는 칸이 여럿일 때 어느 것이 도는지 눈이 못 따라간다. 테두리는
+ * 칸 전체를 가리키므로 곁눈으로도 잡힌다 — 그리드는 **보는 화면**이지 읽는 화면이 아니다.
+ *
+ * **칸 크기를 건드리지 않는다.** border를 색만 바꾸면 회전을 못 그리고, 두께를 더하면
+ * 격자 전체가 밀린다(사이드바에서 겪은 그 문제). 그래서 덧그린다: 절대 위치 레이어에
+ * 궤도를 칠하고, 마스크로 **가장자리 1px만** 남긴다. 레이아웃은 한 픽셀도 안 움직인다.
+ */
+.cc-orbit-ring::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  /* 안쪽을 도려내 링만 남긴다 — 두 마스크의 차집합 */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  /* 대화·입력창 위에 얹히되 클릭은 통과시킨다 */
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* 움직임에 민감한 사람에게 회전은 방해다 — 그때는 밝기만 남긴다 */
 @media (prefers-reduced-motion: reduce) {
-  .cc-orbit {
+  .cc-orbit,
+  .cc-orbit-ring::after {
     animation: none;
     background: var(--color-ash);
   }

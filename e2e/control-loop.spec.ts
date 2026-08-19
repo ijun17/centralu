@@ -3590,3 +3590,36 @@ test('워크트리가 아닌 세션을 지울 때는 워크트리 이야기를 �
   await expect(page.getByTestId('confirm-delete')).toBeVisible()
   await expect(page.getByTestId('delete-worktree')).toHaveCount(0)
 })
+
+/**
+ * 그리드에서 응답 중인 칸은 **테두리가 돈다.**
+ *
+ * 칸이 여럿일 때 머리글의 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다.
+ * 그리드는 읽는 화면이 아니라 보는 화면이라, 신호가 칸 전체 크기로 있어야 곁눈에 잡힌다.
+ */
+test('그리드: 응답 중인 칸만 테두리가 돈다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫째')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await newSession(page, 'alpha', '둘째')
+  const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.dragAndDrop(`[data-testid="session-row-${a}"]`, '[data-testid="grid-button"]')
+  await page.dragAndDrop(`[data-testid="session-row-${b}"]`, '[data-testid="grid-button"]')
+
+  const panelA = page.getByTestId(`grid-panel-${a}`)
+  const panelB = page.getByTestId(`grid-panel-${b}`)
+
+  // 첫 프롬프트로 둘 다 일하는 중이다 — 끝내고 나서 비교한다
+  for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
+  await expect(panelA).not.toHaveClass(/cc-orbit-ring/)
+  await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
+
+  // a에게만 일을 시킨다
+  await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId(`grid-panel-${a}`).getByTestId('send').click()
+
+  await expect(panelA).toHaveClass(/cc-orbit-ring/)
+  // 옆 칸까지 돌면 "무엇이 바쁜가"를 못 읽는다 — 신호가 아니라 장식이 된다
+  await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
+})
