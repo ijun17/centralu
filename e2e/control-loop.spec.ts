@@ -3115,6 +3115,40 @@ test('오케스트레이터는 그리드 위에 있고 눌러서 연다', async 
   await expect(page.getByTestId('grid')).toBeHidden()
 })
 
+/**
+ * 오케스트레이터는 아직 실험 중이다 (이슈 #1).
+ *
+ * 표식은 **누르기 전에** 보여야 한다 — 막으려는 피해가 "모른 채 누르는 것"이라
+ * 화면 안에 두면 이미 늦는다. 그리고 팔레트 규칙을 어기면 안 된다:
+ * 밝히면 그리드보다 급해 보이는 거짓말이 되고, 유채색은 애초에 금지다.
+ */
+test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말한다 — 밝히지 않고 형태로', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  const mark = page.getByTestId('orchestrator-experimental')
+  await expect(mark).toBeVisible()
+  await expect(mark).toHaveText('Experimental')
+
+  const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
+  const style = (testId: string, prop: string) =>
+    page.getByTestId(testId).evaluate(
+      (el, p) => getComputedStyle(el).getPropertyValue(p),
+      prop,
+    )
+
+  // 무채색이다 (R=G=B) — 이 앱에서 유채색은 diff 본문의 몫이다
+  const markColor = rgb(await style('orchestrator-experimental', 'color'))
+  expect(new Set(markColor).size).toBe(1)
+
+  // 라벨보다 **어둡다**. 밝히면 "지금 나를 기다리는 것"의 자리를 훔친다
+  const labelColor = rgb(await style('orchestrator-button', 'color'))
+  expect(markColor[0]!).toBeLessThan(labelColor[0]!)
+
+  // 종류는 형태로 — 점선 테두리. 사이드바를 좁혀 글자가 잘려도 이건 남는다
+  expect(await style('orchestrator-button', 'border-top-style')).toBe('dashed')
+  expect(await style('grid-button', 'border-top-style')).toBe('solid')
+})
+
 test('오케스트레이터를 보는 동안에는 사이드바에서 세션이 골라져 보이지 않는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')

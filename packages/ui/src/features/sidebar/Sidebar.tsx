@@ -170,6 +170,16 @@ export function Sidebar() {
  *
  * 프로젝트 밑이 아니다. 이 세션은 프로젝트에 속하지 않는다 —
  * 여러 프로젝트를 가로지르는 것이 존재 이유이기 때문이다.
+ *
+ * **아직 실험 중이라고 버튼에 적는다** (이슈 #1). 생김새가 그리드와 똑같아서
+ * 사람이 그 차이를 모른 채 눌렀다. 표식을 오케스트레이터 화면 **안**에 두면
+ * 이미 누른 뒤라 늦는다 — 막으려는 피해가 "모른 채 누르는 것"이기 때문이다.
+ *
+ * 팔레트 규칙(styles/index.css)을 그대로 따른다: **긴급도는 밝기로, 종류는 형태로.**
+ *   - 글자는 slate(배경 정보 자리)다. 밝히면 그리드 버튼보다 급해 보이는 거짓말이 된다 —
+ *     '실험 중'은 급한 것이 아니라 **알고 눌러야 하는 것**이다.
+ *   - 테두리는 점선이다. 밝기를 한 방울도 쓰지 않고 "아직 굳지 않았다"를 말한다.
+ *     글자만으로는 사이드바를 좁혔을 때 잘려 사라지지만, 형태는 남는다.
  */
 function OrchestratorButton() {
   const view = useStore((s) => s.view)
@@ -179,7 +189,7 @@ function OrchestratorButton() {
   return (
     <div className="px-2 pt-2">
       <button
-        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+        className={`flex w-full items-center gap-2 rounded-lg border border-dashed px-2.5 py-1.5 text-left text-[12px] transition-colors ${
           active
             ? 'border-slate/50 bg-graphite text-chalk'
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
@@ -188,10 +198,13 @@ function OrchestratorButton() {
         onClick={() => void open()}
         aria-pressed={active}
         data-testid="orchestrator-button"
-        title="One conversation that can direct your sessions"
+        title="Experimental — one conversation that can direct your sessions. Expect rough edges."
       >
         <OrchestratorIcon />
         <span className="truncate font-medium tracking-tight">Orchestrator</span>
+        <span className="shrink-0 text-[10px] text-slate" data-testid="orchestrator-experimental">
+          Experimental
+        </span>
       </button>
     </div>
   )
