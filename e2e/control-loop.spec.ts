@@ -3192,7 +3192,52 @@ test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말�
 
   // 종류는 형태로 — 점선 테두리. 사이드바를 좁혀 글자가 잘려도 이건 남는다
   expect(await style('orchestrator-button', 'border-top-style')).toBe('dashed')
-  expect(await style('grid-button', 'border-top-style')).toBe('solid')
+  /*
+   * The control used to be `grid-button`. The grid is experimental too now (issue #25), so
+   * that pairing would have compared dashed against dashed and proved nothing. What this
+   * line is for has not changed: a dashed border only *means* something while something
+   * next to it is solid, so the control has to be a finished button of the same shape.
+   * `add-project` is that — same rounded-lg bordered button, one lane over, and finished.
+   */
+  expect(await style('add-project', 'border-top-style')).toBe('solid')
+})
+
+/**
+ * The grid is experimental too (issue #25) — it shipped looking finished while the spec
+ * still listed it under non-goals.
+ *
+ * The mark sits on the button rather than inside the view, and the reason differs from #1.
+ * Pressing this is free and reversible; the cost is the hour spent working inside, where
+ * §5.4's objection (panels too small for a conversation and an input box) is waiting. The
+ * sidebar is never covered, so one mark here is read both before pressing and throughout —
+ * which is what this test pins down.
+ */
+test('the grid says it is experimental, before you press it and while you are in it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  const mark = page.getByTestId('grid-experimental')
+  await expect(mark).toBeVisible()
+  await expect(mark).toHaveText('Experimental')
+
+  const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
+  const style = (testId: string, prop: string) =>
+    page.getByTestId(testId).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)
+
+  // Achromatic (R=G=B) — colour in this app belongs to diff bodies
+  const markColor = rgb(await style('grid-experimental', 'color'))
+  expect(new Set(markColor).size).toBe(1)
+
+  // Darker than the label. Brightening it would steal the slot of "this is waiting for you"
+  const labelColor = rgb(await style('grid-button', 'color'))
+  expect(markColor[0]!).toBeLessThan(labelColor[0]!)
+
+  // Kind is shape — dashed. Survives a narrow sidebar, where the word gets truncated away
+  expect(await style('grid-button', 'border-top-style')).toBe('dashed')
+
+  // And it is still there once you are inside, because the left lane is never covered
+  await page.getByTestId('grid-button').click()
+  await expect(page.getByTestId('grid')).toBeVisible()
+  await expect(mark).toBeVisible()
 })
 
 test('오케스트레이터를 보는 동안에는 사이드바에서 세션이 골라져 보이지 않는다', async ({ page }) => {
