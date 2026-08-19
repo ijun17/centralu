@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { ProjectInfo, SessionInfo, StoredMessage } from '@cc/protocol'
+import { sessionLiveDefaults } from '@cc/protocol'
 
 /**
  * 스키마 위치는 실행 형태에 따라 다르다.
@@ -314,12 +315,19 @@ export class Store {
     return this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(path) as { id: string } | undefined
   }
 
+  /**
+   * UPDATE 절에는 **바뀔 수 있는 것 전부**가 있어야 한다.
+   * tool이 빠져 있어서 에이전트 전환(claude↔codex)이 저장되지 않았다 —
+   * 재시작하면 도구는 되돌아가는데 이어갈 실마리(external_id)는 이미 끊긴 뒤라
+   * 되살릴 수도 없는 세션이 됐다. (project_id·created_at은 정의상 바뀌지 않는다)
+   */
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
         `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, effort, permission_preset, imported_from)
          VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @permissionPreset, @importedFrom)
          ON CONFLICT(id) DO UPDATE SET
+           tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
@@ -407,7 +415,8 @@ export class Store {
          FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
       )
       .all() as (Omit<SessionInfo, 'autoNamed' | 'archived'> & { autoNamed: number; archived: number })[]
-    return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived, live: false }))
+    // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
+    return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived, live: false, ...sessionLiveDefaults() }))
   }
 
   /**

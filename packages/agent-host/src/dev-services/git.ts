@@ -63,13 +63,24 @@ export async function gitStatusFiles(cwd: string): Promise<GitFileStatus[]> {
   const stdout = await git(cwd, ['status', '--porcelain=v2', '-z', '--untracked-files=all'])
   const out: GitFileStatus[] = []
 
-  for (const entry of stdout.split('\0')) {
+  const tokens = stdout.split('\0')
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i]!
     if (!entry) continue
     if (entry.startsWith('1 ') || entry.startsWith('2 ')) {
       // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+      // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>␀<origPath>
       const parts = entry.split(' ')
       const xy = parts[1] ?? '..'
-      const path = parts.slice(8).join(' ')
+      /*
+       * 이름 바뀜(2)은 경로 앞에 필드가 하나 더 있다(<X><score>, 예: R100).
+       * 1과 같은 자리(8)로 읽으면 경로가 "R100 새이름"이 되어 — 존재하지 않는 파일이라 —
+       * 스테이징이 조용히 실패했다. -z에서는 원래 이름이 **다음 NUL 토큰**으로
+       * 따라오므로, 그 토큰을 항목으로 오해하지 않게 건너뛴다.
+       */
+      const rename = entry.startsWith('2 ')
+      const path = parts.slice(rename ? 9 : 8).join(' ')
+      if (rename) i++
       if (!path) continue
       const [x, y] = [xy[0] ?? '.', xy[1] ?? '.']
       if (x !== '.') out.push({ path, staged: true, status: mapStatus(x) })
@@ -130,6 +141,15 @@ export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
   const SEP = '\x1f'
   const stdout = await git(cwd, [
     'log',
+    /*
+     * **자식이 부모보다 먼저 오도록** 정렬을 못박는다.
+     *
+     * 기본 정렬은 커밋 시각이라, rebase·cherry-pick으로 시각이 뒤집힌 커밋은
+     * 부모가 자식보다 먼저 나올 수 있다. 그래프 배치(core git/graph.ts)는 그런 입력에서
+     * 위로 올라가는 선을 그릴 수 없어 간선을 빼는데, 여기서 순서를 보장하면
+     * 애초에 뺄 간선이 생기지 않는다 (유령 레인의 원인이었다).
+     */
+    '--topo-order',
     `-n${limit}`,
     `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`,
   ])

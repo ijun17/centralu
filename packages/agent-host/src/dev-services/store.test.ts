@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SessionInfo } from '@cc/protocol'
+import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
 function seeded() {
@@ -14,6 +15,7 @@ function seeded() {
     id: 's1', projectId: 'p1', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+    ...sessionLiveDefaults(),
   })
   return s
 }
@@ -68,7 +70,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
       id: 'orc', projectId: null, tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
-      permissionPreset: 'normal', importedFrom: null,
+      permissionPreset: 'normal', importedFrom: null, ...sessionLiveDefaults(),
     })
     expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
     rmSync(dir, { recursive: true, force: true })
@@ -98,6 +100,20 @@ describe('Store (dev sqlite)', () => {
     expect(after.name).toBe('auth 리팩터링')
     expect(after.autoNamed).toBe(false)
     expect(after.state).toBe('working')
+  })
+
+  /*
+   * UPDATE 절에 tool이 빠져 있어서 에이전트 전환(claude→codex)이 저장되지 않았다.
+   * 재시작하면 도구는 claude로 되돌아가는데, 전환하면서 이어갈 실마리(external_id)는
+   * 이미 끊은 뒤라 되살릴 수도 없는 세션이 됐다.
+   */
+  it('도구 전환이 저장된다 — 다시 켜도 codex다', () => {
+    const s = seeded()
+    const before = s.listSessions()[0]!
+    s.upsertSession({ ...before, tool: 'codex', externalId: null, importedFrom: null })
+    const after = s.listSessions()[0]!
+    expect(after.tool).toBe('codex')
+    expect(after.externalId).toBeNull()
   })
 
   it('메시지 append/load와 seq 증가', () => {
@@ -237,6 +253,7 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
       name: '이어받은 대화', autoNamed: true, state: 'idle' as const, archived: false,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
       model: null, effort: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old',
+      ...sessionLiveDefaults(),
     }
     store.upsertSession(base)
     const back = store.listSessions().find((s) => s.id === 's-import')!
@@ -256,6 +273,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
     model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+    ...sessionLiveDefaults(),
     ...over,
   })
 
@@ -290,6 +308,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
         model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+        ...sessionLiveDefaults(),
       })
     }
     s.setSessionOrder(['s3', 's1', 's2'])
@@ -328,6 +347,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
         model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+        ...sessionLiveDefaults(),
       })
     }
     s.setGridView(['s3', 's1'])
@@ -373,7 +393,7 @@ describe('오케스트레이터는 하나뿐', () => {
         id, projectId: null, tool: 'claude', externalId: null, name: id,
         autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
-        permissionPreset: 'normal', importedFrom: null,
+        permissionPreset: 'normal', importedFrom: null, ...sessionLiveDefaults(),
       })
     mk('a')
     mk('b')
