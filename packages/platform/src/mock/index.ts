@@ -19,6 +19,7 @@ import type {
   ToolName,
   QuestionAnswer,
 } from '@cc/protocol'
+import { sessionLiveDefaults } from '@cc/protocol'
 import type { AgentPort, AlertKind, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
@@ -63,12 +64,16 @@ export class MockPlatform implements Platform {
 
   /** 테스트가 이벤트를 주입하는 통로 */
   emit(event: NormalizedEvent): void {
+    let out = event
     if (event.sessionId) {
       const s = this.sessions.get(event.sessionId)
       if (s) {
         if (event.type === 'approval_request') {
           s.state = 'waiting_approval'
           s.waitingSince ??= this.now()
+          s.pendingApproval = { requestId: event.requestId, detail: event.detail }
+        } else if (event.type === 'approval_resolved') {
+          if (s.pendingApproval?.requestId === event.requestId) s.pendingApproval = null
         } else if (event.type === 'turn_complete') {
           s.state = 'waiting_input'
           s.waitingSince ??= this.now()
@@ -76,14 +81,30 @@ export class MockPlatform implements Platform {
           s.state = 'working'
           s.waitingSince = null
         }
-        if (event.type === 'message_delta') {
+        /*
+         * 실물(host)과 같은 규칙: 기록으로 남는 이벤트에는 세션 내 seq를 매겨 방송에 싣는다.
+         * UI의 안읽음 추적(lastSeq)은 이 seq만 믿는다 — 목이 안 실어 보내면
+         * 실물에서는 잡힐 버그가 테스트에서만 조용히 지나간다.
+         */
+        const kind =
+          event.type === 'tool_call' ? ('tool_call' as const)
+          : event.type === 'tool_result' ? ('tool_result' as const)
+          : event.type === 'approval_request' || event.type === 'approval_resolved' ? ('approval' as const)
+          : event.type === 'message_delta' ? ('text' as const)
+          : event.type === 'compaction' ? ('marker' as const)
+          : null
+        if (kind) {
           const seq = (this.messages.get(s.id)?.length ?? 0) + 1
-          this.pushMessage({ sessionId: s.id, seq, role: 'assistant', kind: 'text', payload: event, ts: this.now() })
+          this.pushMessage({
+            sessionId: s.id, seq, role: event.type === 'message_delta' ? 'assistant' : 'system',
+            kind, payload: event, ts: this.now(),
+          })
           s.lastSeq = seq
+          out = { ...event, seq } as NormalizedEvent
         }
       }
     }
-    for (const h of this.handlers) h(event)
+    for (const h of this.handlers) h(out)
   }
 
   private pushMessage(m: StoredMessage): void {
@@ -220,6 +241,7 @@ export class MockPlatform implements Platform {
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
         importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
+        ...sessionLiveDefaults(),
       }
       if (params.resumeExternalId) info.externalId = params.resumeExternalId
       this.sessions.set(id, info)
@@ -310,6 +332,7 @@ export class MockPlatform implements Platform {
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null,
         permissionPreset: 'normal' as const, importedFrom: null,
+        ...sessionLiveDefaults(),
       }
       this.sessions.set(id, info)
       return info

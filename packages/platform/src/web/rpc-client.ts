@@ -19,9 +19,18 @@ export type RpcClientOptions = {
   /** 테스트 주입용 */
   WebSocketImpl?: typeof WebSocket
   maxBackoffMs?: number
+  /** RPC 한 번의 응답 제한 시간. host가 응답을 영영 안 주는 경우의 마지막 안전망 */
+  callTimeoutMs?: number
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void }
+/**
+ * `sent`: 프레임이 실제로 소켓을 탔는가.
+ * 끊길 때 **탄 것만** 거절한다 — 아직 큐에 있는 것은 재연결 후 전송되는 것이 기존 계약이다.
+ */
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout>; sent: boolean }
+
+/** RPC 응답 제한 시간 기본값. 세션 생성·깃 작업도 이 안에는 끝난다 (실측 수 초) */
+const DEFAULT_CALL_TIMEOUT_MS = 30_000
 
 export class RpcClient {
   private ws: WebSocket | null = null
@@ -34,7 +43,7 @@ export class RpcClient {
   private lastSeq = 0
   private attempt = 0
   private closed = false
-  private queue: string[] = []
+  private queue: { id: string; frame: string }[] = []
   private readonly WS: typeof WebSocket
 
   /**
@@ -46,8 +55,23 @@ export class RpcClient {
     this.opts = { ...this.opts, url, token }
     this.attempt = 0
     this.lastSeq = 0 // 새 host는 이벤트 번호를 처음부터 매긴다
-    this.ws?.close()
+    /*
+     * **옛 소켓의 핸들러를 먼저 뗀다.** close()는 비동기라 onclose가 나중에 도는데,
+     * 그대로 두면 그 onclose가 방금 만든 새 소켓 참조(this.ws)를 지우고 재연결을 하나 더
+     * 잡는다 — 소켓 둘이 같은 이벤트를 받아 스트리밍 델타가 이중 적용됐다 (실측).
+     */
+    const old = this.ws
+    if (old) {
+      old.onopen = null
+      old.onmessage = null
+      old.onclose = null
+      old.onerror = null
+      old.close()
+    }
     this.ws = null
+    // 옛 host로 나간 RPC의 응답은 영영 오지 않는다 — 여기서 거절하지 않으면
+    // 낙관적 UI가 확인을 기다리며 영원히 '작업 중'에 멈춘다 (onclose 핸들러는 방금 뗐다)
+    this.failInFlight('Host restarted')
     this.connect()
   }
 
@@ -62,6 +86,8 @@ export class RpcClient {
 
   connect(): void {
     if (this.closed) return
+    // 이미 소켓이 있으면 만들지 않는다 — 백오프 타이머와 updateEndpoint가 겹치면 둘이 된다
+    if (this.ws) return
     this.emitConn('connecting')
     const ws = new this.WS(this.opts.url)
     this.ws = ws
@@ -76,15 +102,31 @@ export class RpcClient {
           ...(this.lastSeq > 0 ? { afterSeq: this.lastSeq } : {}),
         }),
       )
-      for (const q of this.queue.splice(0)) ws.send(q)
+      for (const q of this.queue.splice(0)) {
+        ws.send(q.frame)
+        // 이제부터는 '보냈고 답을 기다리는' 호출이다 — 다음 끊김 때 거절 대상이 된다
+        const p = this.pending.get(q.id)
+        if (p) p.sent = true
+      }
       this.emitConn('connected')
     }
 
-    ws.onmessage = (e: MessageEvent) => this.onFrame(String(e.data))
+    ws.onmessage = (e: MessageEvent) => {
+      if (this.ws !== ws) return // 교체된 소켓의 잔류 프레임은 무시한다
+      this.onFrame(String(e.data))
+    }
 
     ws.onclose = () => {
+      if (this.ws !== ws) return // 이미 교체됐다면 새 소켓을 건드리지 않는다
       this.ws = null
       if (this.closed) return
+      /*
+       * **보내고 답을 못 받은 RPC는 여기서 거절한다.** 조용히 두면 낙관적 UI가
+       * 영원히 확인을 기다리고(세션이 '작업 중'에 멈춘다) pending이 무한히 자란다 —
+       * 그 응답은 재연결해도 오지 않는다 (host는 요청을 받은 적이 없거나 이미 버렸다).
+       * 아직 큐에만 있는(안 보낸) 호출은 그대로 둔다 — 재연결 후 전송이 기존 계약이다.
+       */
+      this.failInFlight('Connection lost')
       this.emitConn('disconnected')
       const delay = Math.min(this.opts.maxBackoffMs ?? 5000, 200 * 2 ** this.attempt++)
       setTimeout(() => this.connect(), delay)
@@ -125,11 +167,29 @@ export class RpcClient {
       return
     }
     if (frame.kind === 'res') {
-      const p = this.pending.get(frame.id)
+      const p = this.take(frame.id)
       if (!p) return
-      this.pending.delete(frame.id)
       if (frame.ok) p.resolve(frame.result)
       else p.reject(toError(frame.error))
+    }
+  }
+
+  /** pending에서 하나를 꺼낸다 — 타이머·큐 정리까지가 '꺼내기'다 (안 그러면 유령 타이머가 남는다) */
+  private take(id: string): Pending | undefined {
+    const p = this.pending.get(id)
+    if (!p) return undefined
+    this.pending.delete(id)
+    clearTimeout(p.timer)
+    this.queue = this.queue.filter((q) => q.id !== id)
+    return p
+  }
+
+  /** 보냈는데 답을 못 받은 호출을 전부 거절한다 (재시도 가능 표시와 함께) */
+  private failInFlight(reason: string): void {
+    for (const [id, p] of [...this.pending]) {
+      if (!p.sent) continue
+      this.take(id)
+      p.reject(Object.assign(new Error(reason), { code: 'connection_lost', retryable: true }))
     }
   }
 
@@ -150,9 +210,19 @@ export class RpcClient {
     const id = String(this.nextId++)
     const frame = JSON.stringify({ kind: 'rpc', id, method, params })
     return new Promise<RpcResult<M>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
-      if (this.ws?.readyState === 1) this.ws.send(frame)
-      else this.queue.push(frame) // 재연결 후 전송
+      /*
+       * 제한 시간 안전망. 끊김은 onclose가 잡지만, 소켓은 멀쩡한데 host가 응답을
+       * 삼키는 경우(핸들러 버그·행)에는 아무도 거절해 주지 않는다 — 그때 pending이
+       * 무한히 자라고 그 호출의 UI는 영원히 기다린다. 큐에서 못 나간 호출도 여기서 정리된다.
+       */
+      const timer = setTimeout(() => {
+        if (!this.take(id)) return
+        reject(Object.assign(new Error(`RPC timed out: ${method}`), { code: 'timeout', retryable: true }))
+      }, this.opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS)
+      const sent = this.ws?.readyState === 1
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, sent })
+      if (sent) this.ws!.send(frame)
+      else this.queue.push({ id, frame }) // 재연결 후 전송
     })
   }
 
@@ -184,8 +254,12 @@ export class RpcClient {
     this.closed = true
     this.ws?.close()
     this.ws = null
-    for (const [, p] of this.pending) p.reject(new Error('Connection closed'))
+    for (const [, p] of this.pending) {
+      clearTimeout(p.timer) // 타이머를 안 지우면 닫힌 클라이언트가 프로세스를 물고 있는다
+      p.reject(new Error('Connection closed'))
+    }
     this.pending.clear()
+    this.queue = []
   }
 }
 

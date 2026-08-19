@@ -267,8 +267,12 @@ export type AppState = {
    * 다른 앱을 닫으러 가지 않아도 되는 유일한 출구 — 원본은 그대로 둔다.
    */
   forkConversation(sessionId: string): Promise<void>
-  /** 재연결 후 돌던 세션 되살리기 (host가 죽으면 프로세스도 함께 죽는다) */
-  recoverAfterReconnect(): Promise<void>
+  /**
+   * 재연결 후 복구. host의 세션 목록을 스토어에 병합하고(끊긴 사이 생기고·바뀌고·지워진
+   * 세션), 돌고 있던 세션을 되살린다 (host가 죽으면 프로세스도 함께 죽는다).
+   * `resync`가 참이면 이벤트 재전송이 불가능했다는 뜻이다 — 보던 대화도 저장소에서 다시 읽는다.
+   */
+  recoverAfterReconnect(resync?: boolean): Promise<void>
   /** 사이드바 순서 (사람이 끌어서 정한다) */
   reorderProjects(orderedIds: string[]): Promise<void>
   reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
@@ -318,6 +322,27 @@ function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
 
 let chatSeq = 0
 
+/**
+ * SessionInfo에서 **살아-있는-동안 사실들**만 골라낸다 (승인·질문·활동·한도·사용량).
+ *
+ * host 메모리가 원본인 값들이라, 재연결·재시작 후 목록을 받을 때 이걸 안 옮기면
+ * state=waiting_approval인데 카드 payload가 없어 승인이 화면에 영영 안 나타난다.
+ * 통째로 spread하지 않는 이유: SessionInfo에는 SessionSummary에 없는 필드
+ * (externalId·createdAt…)가 있어 섞이면 안 된다.
+ */
+function liveFactsOf(
+  s: SessionInfo,
+): Pick<SessionSummary, 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context'> {
+  return {
+    pendingApproval: s.pendingApproval,
+    pendingQuestions: s.pendingQuestions,
+    activity: s.activity,
+    limit: s.limit,
+    usage: s.usage,
+    context: s.context,
+  }
+}
+
 /** 저장소에서 들여온 항목보다 항상 큰 번호를 쓰도록 밀어 올린다 */
 function bumpSeqAbove(items: { seq: number }[]): void {
   for (const it of items) if (it.seq > chatSeq) chatSeq = it.seq
@@ -350,6 +375,23 @@ const WINDOW_SIZE = 50
 
 /** 아직 스토어에 등록되지 않은 세션의 이벤트 보관함 (등록 직후 재생) */
 const pendingEvents = new Map<string, NormalizedEvent[]>()
+
+/**
+ * 등록을 기다리며 보관된 이벤트를, **이제 등록된 세션에 한해** 순서대로 재생한다.
+ *
+ * createSession만 이 보관함을 비우던 동안, 앱을 켜기 전부터 host에서 돌던 세션의
+ * 이벤트는 attach가 목록을 등록하기 전에 도착하면 영영 보관함에 남았다 —
+ * 첫 턴의 출력이 재시작 전까지 통째로 사라졌다. 세션이 등록되는 길목마다 이걸 부른다.
+ * 재생 전에 보관함에서 지우므로 두 길목이 겹쳐도 이중 적용은 없다.
+ */
+function replayPendingEvents(get: () => AppState): void {
+  for (const id of [...pendingEvents.keys()]) {
+    if (!get().sessions[id]) continue
+    const buffered = pendingEvents.get(id)!
+    pendingEvents.delete(id)
+    for (const e of buffered) get().dispatchEvent(e)
+  }
+}
 
 /**
  * 알림 카드를 쌓는다 — 세션당 하나.
@@ -418,6 +460,20 @@ export const useStore = create<AppState>((set, get) => ({
       platform.agents.subscribe((e) => get().dispatchEvent(e)),
       platform.agents.onConnectionChange((connection) => {
         const was = get().connection
+        /*
+         * resync_required: 연결 자체는 살아 있는데 host가 끊긴 사이의 이벤트를
+         * 재전송해 주지 못한다는 뜻이다 (재전송 버퍼 밖으로 밀렸다).
+         *
+         * 이 신호를 아무도 소비하지 않던 동안 두 가지가 잘못됐다: 놓친 이벤트는
+         * 영영 복구되지 않았고, 라벨 로직이 connected가 아니면 전부 'Disconnected'로
+         * 그려서 **연결돼 있는데 끊겼다고 표시**했다. 라벨에는 connected로 두고,
+         * 빈 구간은 전체 재동기화(세션 목록 병합 + 보던 대화 다시 읽기)로 메운다.
+         */
+        if (connection === 'resync_required') {
+          set({ connection: 'connected' })
+          void get().recoverAfterReconnect(true)
+          return
+        }
         set({ connection })
         // 끊겼다가 돌아왔다 — 돌던 세션을 되살린다
         if (connection === 'connected' && was !== 'connected') void get().recoverAfterReconnect()
@@ -439,12 +495,18 @@ export const useStore = create<AppState>((set, get) => ({
             ...initialSession({ id: s.id, projectId: s.projectId, name: s.name, tool: s.tool, effort: s.effort }),
             autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
             lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
+            // 살아-있는-동안 사실들도 host가 준다 — 이게 없으면 state=waiting_approval인데
+            // 카드를 그릴 payload가 없어 승인 요청이 화면에 영영 안 나타난다 (재시작 후 실측)
+            ...liveFactsOf(s),
           },
         ]),
       ),
       gridPanels,
       connection: 'connected',
     })
+
+    // 목록 등록 전에 도착한 이벤트를 재생한다 — 앱을 켜기 전부터 돌던 세션의 첫 출력이 여기 있다
+    replayPendingEvents(get)
 
     // 보던 자리로 돌아온다 (C-3). 없거나 사라진 세션이면 조용히 무시한다.
     try {
@@ -469,7 +531,14 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  /** 상태가 바뀔 때마다 저장한다 — '종료 시 저장'은 크래시에 무력하다 */
+  /**
+   * 상태가 바뀔 때마다 저장한다 — '종료 시 저장'은 크래시에 무력하다.
+   *
+   * **스냅샷을 쓰는 곳은 여기 하나뿐이어야 한다.** host는 layout을 통째로 갈아
+   * 끼우므로, 부분 스냅샷을 쓰는 두 번째 작성자가 생기는 순간 서로의 필드를 지운다 —
+   * 실제로 setNotifyPolicy가 자기 목록으로 따로 저장해서, 알림 정책과 기록 높이가
+   * 상대편 저장에 조용히 초기화됐다. 필드를 더하면 **이 함수에** 더해라.
+   */
   saveWorkspace() {
     const s = get()
     void s.platform?.workspace
@@ -480,6 +549,7 @@ export const useStore = create<AppState>((set, get) => ({
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
         treeHeight: s.treeHeight,
+        notifyPolicy: s.notifyPolicy,
       } as never)
       .catch(() => {})
   },
@@ -627,7 +697,18 @@ export const useStore = create<AppState>((set, get) => ({
 
     const next = applyEvent(cur, e, Date.now())
     const chat = appendChat(get().chat[sessionId] ?? [], e)
-    const withSeq = chat.length > 0 ? bumpSeq(next, chat[chat.length - 1]!.seq) : next
+    /*
+     * **안읽음 추적(lastSeq)은 host가 매긴 세션 내 seq로만 민다.**
+     *
+     * 예전에는 대화 아이템의 렌더 키(전 세션 공용 chatSeq)로 밀었다. 그 값이 markRead를
+     * 타고 host의 last_read_seq로 저장되니, 200메시지 세션을 본 뒤 2메시지 세션에
+     * 이벤트가 하나만 와도 그 세션의 last_read_seq가 ~201로 부풀어 — 재시작 후에도 —
+     * 다시는 안읽음 점이 뜨지 않았다. 렌더 키와 저장 시퀀스는 다른 번호 체계다.
+     */
+    const hostSeq = 'seq' in e && typeof e.seq === 'number' ? e.seq : null
+    let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
+    // 내(혹은 오케스트레이터)가 보낸 말은 host도 읽음 처리한다 — 화면도 따라간다
+    if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
 
     set((st) => ({
       sessions: { ...st.sessions, [sessionId]: withSeq },
@@ -837,15 +918,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setNotifyPolicy(notifyPolicy) {
     set({ notifyPolicy })
-    // 정책은 워크스페이스 스냅샷에 함께 실린다 (E-5)
-    void get().platform?.workspace.save({
-      focusedSessionId: get().focusedSessionId,
-      panelOpen: get().panelOpen,
-      panelTab: get().panelTab,
-      panelWidth: get().panelWidth,
-      sidebarWidth: get().sidebarWidth,
-      notifyPolicy,
-    } as never).catch(() => {})
+    // 정책은 워크스페이스 스냅샷에 함께 실린다 (E-5) — 저장은 단일 작성자를 태운다
+    get().saveWorkspace()
   },
   setDraft(sessionId, draft) {
     set((s) => {
@@ -889,11 +963,14 @@ export const useStore = create<AppState>((set, get) => ({
           ...initialSession({ id: info.id, projectId, name: info.name, tool: info.tool }),
           lastSeq: info.lastSeq,
           lastReadSeq: info.lastReadSeq,
+          ...liveFactsOf(info),
         },
       },
       // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
+      // pending을 세우는 이유: host도 첫 프롬프트를 저장하고 user_message로 알린다 —
+      // 이 표식이 없으면 재생된 그 이벤트가 같은 말을 한 번 더 그린다 (send()와 같은 규칙)
       chat: opts?.initialPrompt
-        ? { ...s.chat, [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt }] }
+        ? { ...s.chat, [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt, pending: true }] }
         : s.chat,
       focusedSessionId: info.id,
     }))
@@ -909,11 +986,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     // 등록 전에 도착해 보관해 둔 이벤트를 순서대로 재생한다
-    const buffered = pendingEvents.get(info.id)
-    if (buffered) {
-      pendingEvents.delete(info.id)
-      for (const e of buffered) get().dispatchEvent(e)
-    }
+    replayPendingEvents(get)
     return info
   },
 
@@ -1174,6 +1247,8 @@ export const useStore = create<AppState>((set, get) => ({
         orchestratorId: info.id,
         sessions: { ...s.sessions, [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }) },
       }))
+      // 여기도 세션이 처음 등록되는 길목이다 — 보관해 둔 이벤트가 있으면 재생한다
+      replayPendingEvents(get)
       if (!get().chat[info.id]) void get().loadHistory(info.id)
     } catch (e) {
       // 못 열었으면 화면을 되돌린다 — 빈 화면을 켜둔 채 이유를 안 말하는 것이 최악이다
@@ -1218,28 +1293,69 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async recoverAfterReconnect() {
+  async recoverAfterReconnect(resync = false) {
     const s = get()
     if (!s.platform) return
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live && !x.archived)
-    if (wasLive.length === 0) return
 
-    // 새 host의 진실로 먼저 맞춘다 — 그 사이 도구에서 지워졌을 수도 있다
     const fresh = await s.platform.agents.listSessions().catch(() => null)
     if (!fresh) return
-    const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
 
-    const toWake = wasLive.filter((x) => !alive.has(x.id))
+    /*
+     * **새 host의 목록을 버리지 않고 병합한다.**
+     *
+     * 예전에는 fresh를 live 판정에만 쓰고 버렸다 — 끊긴 사이(다른 앱·터미널에서)
+     * 만들어지거나 이름이 바뀌거나 지워진 세션이 앱을 껐다 켤 때까지 안 보였다.
+     * host가 아는 사실(이름·상태·읽음 위치·승인/질문/한도…)만 덮고, 로컬 파생 상태
+     * (preview·touchedPaths…)는 리듀서의 것이므로 지킨다.
+     * 승인·질문도 host가 원본이다 — 끊긴 사이에 풀렸거나 새로 왔을 수 있어
+     * 로컬 것을 지키면 죽은 requestId의 카드가 남는다.
+     */
+    set((st) => {
+      const sessions: Record<string, SessionSummary> = {}
+      for (const f of fresh) {
+        const cur = st.sessions[f.id]
+        sessions[f.id] = cur
+          ? {
+              ...cur,
+              projectId: f.projectId, tool: f.tool, name: f.name, autoNamed: f.autoNamed,
+              state: f.state, archived: f.archived, live: f.live,
+              // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
+              lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
+              waitingSince: f.waitingSince, model: f.model, effort: f.effort, permissionPreset: f.permissionPreset,
+              ...liveFactsOf(f),
+            }
+          : {
+              ...initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool, effort: f.effort, model: f.model, permissionPreset: f.permissionPreset }),
+              autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
+              lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
+              ...liveFactsOf(f),
+            }
+      }
+      // 지워진 세션의 잔해(대화·포커스)도 함께 걷는다
+      const chat: typeof st.chat = {}
+      for (const [id, items] of Object.entries(st.chat)) if (sessions[id]) chat[id] = items
+      return {
+        sessions,
+        chat,
+        focusedSessionId: st.focusedSessionId && sessions[st.focusedSessionId] ? st.focusedSessionId : null,
+      }
+    })
+    // 병합으로 처음 등록된 세션이 있으면, 등록 전에 도착해 보관해 둔 이벤트를 재생한다
+    replayPendingEvents(get)
+
+    // 재동기화: 빈 구간의 이벤트는 다시 오지 않는다 — 보던 대화를 저장소의 진실로 갈아 끼운다
+    const focused = get().focusedSessionId
+    if (resync && focused) void get().loadHistory(focused, true)
+
+    // 끊기기 직전에 돌고 있었는데 새 host가 모르는 프로세스만 되살린다
+    const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
+    const toWake = wasLive.filter((x) => !alive.has(x.id) && get().sessions[x.id] && !get().sessions[x.id]!.archived)
     if (toWake.length === 0) return
 
     set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
-    // live 표시를 먼저 내려야 wake가 "이미 살아 있다"고 판단하고 그냥 돌아가지 않는다
-    set((st) => ({
-      sessions: Object.fromEntries(
-        Object.entries(st.sessions).map(([id, v]) => [id, toWake.some((w) => w.id === id) ? { ...v, live: false } : v]),
-      ),
-    }))
+    // 병합이 host의 live=false를 반영했으므로 wake가 "이미 살아 있다"고 오판하지 않는다
     for (const x of toWake) await get().wake(x.id)
   },
 
