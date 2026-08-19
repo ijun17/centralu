@@ -1,435 +1,435 @@
-# Centralu 기획서
+# Centralu Product Spec
 
-> 여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 경량 데스크톱 앱
+> A lightweight desktop app that runs, watches and controls several agentic coding tools (Claude Code, Codex CLI) from a single window
 
-- 버전: v0.4 (2차 사용성 검토 반영 — **M0 스파이크 전 마지막 개정**)
-- 작성일: 2026-08-15
-- 상태: 기술 방향 확정 (Tauri / React / Claude Code + Codex / SDK·프로토콜 연동)
-- v0.3 → v0.4 주요 변경: 제품 철학 명문화(§1.2), 배너 제자리 승인 허용(컨텍스트 필요 시에만 점프), 동시 세션 경고를 인라인으로 완화 + 복구 경로 추가, 세션 아카이브(FR-20)·대화 검색(FR-21)·카드 접힘 정책 추가, 인박스 M1 승격, 프론트엔드 React 확정, 열린 질문 4개 종결
-
----
-
-## 1. 개요
-
-### 1.1 문제의식
-
-에이전트 코딩 도구를 실전에서 쓰면 자연스럽게 **여러 프로젝트 × 여러 세션**을 동시에 굴리게 된다. 현재 워크플로우의 고통:
-
-- 터미널 탭이 수십 개로 늘어나고, **어느 세션이 내 입력을 기다리는지** 알 수 없다.
-- 에이전트가 어떤 파일을 바꿨는지 보려면 프로젝트마다 IDE나 `git status`를 따로 열어야 한다.
-- 도구별(Claude Code / Codex) 사용량·컨텍스트 상태가 흩어져 있어 파악이 안 된다.
-- 이런 용도로 IDE를 여러 개 띄우면 램과 배터리가 감당이 안 된다.
-
-핵심은 **터미널 탭이 흩어져 있다는 것**이지, 여러 세션을 동시에 못 본다는 것이 아니다. 이 구분이 화면 설계(§5)의 출발점이다.
-
-### 1.2 제품 정의
-
-**Centralu**는 "에이전트 관제탑"이다. 코드를 *작성*하는 도구가 아니라, 에이전트들이 코드를 작성하는 것을 **한 화면에서 지켜보고, 개입하고, 관리하는** 도구다.
-
-관제탑의 본질은 **다 보여주는 것이 아니라, 지금 봐야 할 것만 골라주는 것**이다.
-
-**제품 철학 — 모든 기능 판단의 기준:**
-
-> **Centralu는 통제하지 않는다. 통제할 수 있게 한다.** 에이전트의 자율성과 사용자의 워크플로를 제한하지 않고, 지금 무슨 일이 일어나는지·무엇이 내 판단을 기다리는지를 정확히 보여준다. **막지 말고, 보이게 하라.** 그리고 이 시스템에서 가장 비싼 자원은 토큰이 아니라 **사람의 주의**다.
-
-기능을 추가하거나 바꿀 때마다 이 기준으로 묻는다: 이것은 강제인가 가시화인가, 사람의 주의를 아끼는가 낭비하는가.
-
-핵심 가치 3가지:
-
-1. **놓치지 않게** — 내 응답을 기다리는 세션이 무엇인지, 얼마나 급한지 즉시 안다
-2. **즉시 개입** — 승인·응답을 키보드로 빠르게 처리하고 다음 대기로 넘어간다
-3. **가볍게** — IDE 여러 개 대신, 유휴 시 거의 자원을 안 먹는 단일 앱
-
-### 1.3 핵심 사용 루프 (이 제품이 지원해야 하는 실제 행동)
-
-```
-자리로 돌아옴
-  → 인박스 확인: "승인 대기 2 · 응답 대기 3"
-  → 긴급한 것(승인)부터 키보드로 순차 처리
-  → 응답 대기는 결과를 읽고(읽음 처리) 다음 지시 또는 종료
-  → 전부 비면 자리를 뜬다 (에이전트들은 계속 일함)
-```
-
-모든 화면·단축키·알림 설계는 이 루프를 빠르게 도는 것을 기준으로 평가한다. "얼마나 많이 보여주는가"가 아니라 **"루프 한 바퀴가 얼마나 빠른가"**가 지표다.
-
-### 1.4 설계 원칙
-
-1. **관찰과 조작의 분리** — 관찰(상태 파악)은 공간이 거의 필요 없다(상태 점·뱃지·카운터). 조작(대화 읽기, 승인, 지시)은 넓은 공간이 필요하다. 따라서 관찰은 밀도 높은 사이드바·인박스에, 조작은 전체 폭 포커스 뷰에 배치한다.
-2. **긴급도 구분** — "에이전트가 막혀 있음(승인 대기)"과 "턴이 끝났음(응답 대기)"은 다른 정보다. 절대 같은 뱃지로 묶지 않는다.
-3. **키보드 우선** — 관제 루프의 모든 동작(세션 이동, 승인, 인박스 순회)은 마우스 없이 가능해야 한다. 마우스보다 느린 GUI는 터미널보다 나쁘다.
-4. **상태와 읽음은 별개** — "세션이 대기 중인가"와 "내가 그 결과를 봤는가"는 독립된 축이다.
-
-### 1.5 비목표 (Non-Goals)
-
-범위가 새는 것을 막기 위해 v1에서 명시적으로 **하지 않는 것**:
-
-- 코드 **편집** 기능 (뷰어만 제공, 편집은 IDE 몫)
-- 터미널 에뮬레이터 (에이전트 대화는 구조화된 GUI, raw 터미널 아님)
-- 깃 고급 조작 (rebase, cherry-pick 등 — 조회 중심, 커밋/스테이징은 후순위)
-- 원격/클라우드 실행 (로컬 머신의 로컬 프로젝트만)
-- Claude Code·Codex 외 도구 (어댑터 구조만 확장 가능하게 설계)
-- ~~**동시 분할 그리드 뷰**~~ — **2026-08-20 철회.** 만들었고, **실험 기능**으로 표시해 내보낸다 (§5.4).
-  줄을 지우지 않고 남겨 둔다: 이 문서가 "안 만든다"고 적어둔 채로 그리드가 화면에 있었던
-  기간이 있었고(이슈 #25), 그 어긋남이 어디서 왔는지가 목록에서 사라지면 안 된다.
+- Version: v0.4 (second usability review folded in — **the last revision before the M0 spike**)
+- Written: 2026-08-15
+- Status: technical direction settled (Tauri / React / Claude Code + Codex / SDK and protocol integration)
+- Main changes v0.3 → v0.4: product philosophy written down (§1.2), approval allowed in place from the banner (jump only when context is needed), the concurrent-session warning softened to inline plus a recovery path, session archive (FR-20)·conversation search (FR-21)·card collapse policy added, inbox promoted to M1, React settled as the front end, 4 open questions closed
 
 ---
 
-## 2. 확정된 기술 방향
+## 1. Overview
 
-| 항목 | 결정 | 근거 |
+### 1.1 The problem
+
+Use agentic coding tools for real work and you end up running **several projects × several sessions** at once. What hurts about the current workflow:
+
+- Terminal tabs multiply into the dozens, and there is no way to tell **which session is waiting on my input**.
+- To see what files an agent changed you have to open an IDE or run `git status` separately, per project.
+- Usage and context state per tool (Claude Code / Codex) is scattered, so you never have a picture of it.
+- Running several IDEs for this eats more RAM and battery than a machine can take.
+
+The core of it is **that the terminal tabs are scattered**, not that you cannot see several sessions at once. That distinction is where the screen design (§5) starts.
+
+### 1.2 What the product is
+
+**Centralu** is an "agent control tower". Not a tool that *writes* code — a tool for **watching, intervening in and managing** agents writing code, from one screen.
+
+The essence of a control tower is **not showing everything, but picking out the thing you need to look at right now**.
+
+**Product philosophy — the test every feature decision is put to:**
+
+> **Centralu does not control. It makes control possible.** It does not restrict the agent's autonomy or the user's workflow; it shows precisely what is happening right now and what is waiting on my judgement. **Do not block, make visible.** And the most expensive resource in this system is not tokens, it is **human attention**.
+
+Every time a feature is added or changed, ask against this standard: is this coercion or visibility, does it conserve human attention or waste it?
+
+3 core values:
+
+1. **Miss nothing** — know instantly which session is waiting for my response, and how urgent it is
+2. **Intervene immediately** — handle approvals and responses quickly from the keyboard and move on to the next waiting item
+3. **Stay light** — one app that consumes almost nothing while idle, instead of several IDEs
+
+### 1.3 The core usage loop (the real behaviour this product has to support)
+
+```
+come back to the desk
+  → check the inbox: "2 waiting for approval · 3 waiting for a response"
+  → handle the urgent ones (approvals) first, in sequence, from the keyboard
+  → for the ones waiting on a response, read the result (mark read) then give the next instruction or end it
+  → when it is all empty, leave the desk (the agents keep working)
+```
+
+Every screen, shortcut and notification design is judged by how fast this loop turns. The metric is not "how much does it show" but **"how fast is one turn of the loop"**.
+
+### 1.4 Design principles
+
+1. **Separate observation from operation** — observation (grasping state) needs almost no space (status dots, badges, counters). Operation (reading a conversation, approving, instructing) needs a lot of space. So observation goes in a dense sidebar and inbox, operation in a full-width focus view.
+2. **Distinguish urgency** — "the agent is blocked (waiting for approval)" and "the turn is over" are different pieces of information. Never merge them into the same badge.
+3. **Keyboard first** — every action in the control loop (moving between sessions, approving, cycling the inbox) must be possible without a mouse. A GUI slower than a mouse is worse than a terminal.
+4. **State and read-status are separate** — "is this session waiting" and "have I seen the result" are independent axes.
+
+### 1.5 Non-goals
+
+To stop the scope leaking, what v1 explicitly **does not do**:
+
+- Code **editing** (viewer only; editing is the IDE's job)
+- A terminal emulator (agent conversation is a structured GUI, not a raw terminal)
+- Advanced git operations (rebase, cherry-pick etc. — read-oriented; commit/staging come later)
+- Remote/cloud execution (local projects on the local machine only)
+- Tools other than Claude Code and Codex (only the adapter structure is designed to extend)
+- ~~**Concurrent split grid view**~~ — **withdrawn 2026-08-20.** It was built, and it ships marked **experimental** (§5.4).
+  The line is kept rather than deleted: there was a period where this document said "we do not build this"
+  while the grid was on screen (issue #25), and where that mismatch came from must not vanish from the list.
+
+---
+
+## 2. Settled technical direction
+
+| Item | Decision | Reasoning |
 |---|---|---|
-| 앱 셸 | **Tauri 2.x** (Rust 코어 + 네이티브 웹뷰) | 요구사항 "가벼움". Electron 대비 메모리·에너지 소모 대폭 절감 |
-| 지원 에이전트 (v1) | **Claude Code, Codex CLI** | 사용자 결정. 어댑터 인터페이스로 추후 확장 |
-| 연동 방식 | **SDK/프로토콜 기반** (PTY 래핑 아님) | 상태 감지(대기 중 여부), 컨텍스트 사용량, 승인 요청을 구조화된 이벤트로 정확히 수신 |
-| 에이전트 어댑터 실행 | Node.js 사이드카 프로세스 | Claude Agent SDK(TypeScript)와 Codex 프로토콜 클라이언트를 Node에서 구동, Tauri가 수퍼바이즈 |
-| 프론트엔드 | **React** (확정) | 유휴 에너지는 프레임워크가 아니라 렌더 정책(§7.1)이 결정. 생태계·에이전트 기반 개발 친화성이 명확히 유리 |
-| 로컬 저장 | SQLite (앱 데이터 디렉토리) | 워크스페이스/세션/사용량 캐시 영속화, 재시작 복원 |
+| App shell | **Tauri 2.x** (Rust core + native webview) | The "lightweight" requirement. Drastically lower memory and energy use than Electron |
+| Supported agents (v1) | **Claude Code, Codex CLI** | User's decision. Extensible later through the adapter interface |
+| Integration | **SDK/protocol based** (not PTY wrapping) | Receive state detection (is it waiting), context usage and approval requests precisely, as structured events |
+| Agent adapter execution | Node.js sidecar process | Run the Claude Agent SDK (TypeScript) and the Codex protocol client in Node, supervised by Tauri |
+| Front end | **React** (settled) | Idle energy is decided by the render policy (§7.1), not the framework. The ecosystem and agent-driven-development friendliness are a clear advantage |
+| Local storage | SQLite (app data directory) | Persist workspace/session/usage cache, restore on restart |
 
-**연동 상세:**
+**Integration detail:**
 
-- **Claude Code** → Claude Agent SDK (TypeScript). 스트리밍 메시지, 세션 resume, 도구 호출 이벤트, 권한 요청 콜백(`canUseTool`), 토큰/컨텍스트 정보를 구조화된 형태로 제공.
-- **Codex CLI** → `codex app-server` JSON-RPC(stdio) 프로토콜. 대화 스트림·승인 요청·세션 관리를 프로그래밍 방식으로 처리. (버전별 프로토콜 차이는 어댑터 내부에서 흡수)
-- 두 도구 모두 **공통 어댑터 인터페이스** 뒤에 숨긴다. → §6.2
+- **Claude Code** → Claude Agent SDK (TypeScript). Provides streaming messages, session resume, tool call events, the permission request callback (`canUseTool`) and token/context information in structured form.
+- **Codex CLI** → the `codex app-server` JSON-RPC (stdio) protocol. Handles conversation stream, approval requests and session management programmatically. (Protocol differences between versions are absorbed inside the adapter.)
+- Both tools are hidden behind a **common adapter interface**. → §6.2
 
-**⚠ 승인 이벤트의 전제 조건 (M0 필수 검증):**
-사용자가 CLI를 전역 bypass(자동 승인)로 설정해 두면 승인 요청 이벤트가 **아예 발생하지 않는다**. Centralu의 승인 UI가 의미를 가지려면, 세션 생성 시 권한 프리셋(FR-7)이 **전역 설정을 세션 단위로 덮어쓸 수 있어야** 한다. Claude Agent SDK는 `permissionMode`/`canUseTool`을 세션 옵션으로 받으므로 가능할 것으로 예상하나, Codex 쪽 동작과 함께 **M0에서 실제로 확인**한다. 불가하면: 승인 UI를 "지원 도구에서만 활성"으로 격하하고 인박스는 응답 대기 중심으로 재구성.
+**⚠ Precondition for approval events (must be verified in M0):**
+If the user has set the CLI to global bypass (auto-approve), approval request events **do not fire at all**. For Centralu's approval UI to mean anything, the permission preset at session creation (FR-7) **must be able to override the global setting per session**. The Claude Agent SDK takes `permissionMode`/`canUseTool` as session options so this is expected to be possible, but it is **actually verified in M0**, along with Codex's behaviour. If it is not possible: demote the approval UI to "enabled only on tools that support it" and rebuild the inbox around waiting-for-response.
 
 ---
 
-## 3. 용어 정의
+## 3. Terminology
 
-| 용어 | 정의 |
+| Term | Definition |
 |---|---|
-| 프로젝트 | 등록된 로컬 디렉토리 하나. 깃 저장소일 수도, 아닐 수도 있다 |
-| 세션 | 하나의 에이전트 대화 인스턴스. 프로젝트에 소속되며 도구(Claude Code/Codex)·모델·권한 설정을 가진다 |
-| 어댑터 | 특정 에이전트 도구를 공통 인터페이스로 감싸는 모듈 |
-| 오케스트레이터 세션 | 다른 세션들을 조회·지시할 수 있도록 지정된 특별한 세션 |
-| 워크스페이스 | 등록된 프로젝트 목록 + 레이아웃 + 열린 세션 전체 상태 (복원 단위) |
-| 인박스 | 프로젝트 구조를 무시하고 "지금 내 개입을 기다리는 항목"만 모아 보여주는 트리아지 뷰 |
-| 읽음/안읽음 | 세션 상태와 독립적으로, 마지막으로 본 이후 새 내용이 있는지 여부 |
-| 아카이브 | 세션 프로세스를 종료하고 목록에서 치우되, 대화 기록은 보존하는 상태 |
+| Project | One registered local directory. It may or may not be a git repository |
+| Session | One agent conversation instance. Belongs to a project and has a tool (Claude Code/Codex), model and permission setting |
+| Adapter | A module wrapping a specific agent tool in the common interface |
+| Orchestrator session | A special session designated to be able to inspect and instruct other sessions |
+| Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
+| Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
+| Read/unread | Independent of session state: whether there is new content since I last looked |
+| Archive | The state where the session process is terminated and it is cleared from the list, but the conversation record is kept |
 
 ---
 
-## 4. 기능 요구사항 상세
+## 4. Functional requirements in detail
 
-### 4.1 원 요구사항 14개의 고도화 (FR-1 ~ FR-14)
+### 4.1 The original 14 requirements, worked out (FR-1 ~ FR-14)
 
-`FR-n`이 원 요구사항 번호와 대응.
+`FR-n` corresponds to the original requirement number.
 
-#### FR-1. 멀티프로젝트 관리 (사이드바 + 포커스 뷰)
+#### FR-1. Multi-project management (sidebar + focus view)
 
-- "한 창에 4개 이상 프로젝트"는 **한 창에서 4개 이상을 등록하고 빠르게 오갈 수 있다**로 충족한다. 동시 분할 표시(그리드)도 있지만 **실험 기능**이며, 이 요구를 충족하는 것은 그리드가 아니라 사이드바다(§5.4).
-- 좌측 사이드바: 전체 프로젝트·세션 트리를 밀도 높게 상시 표시 — 프로젝트명, 브랜치, 변경 파일 수, 세션별 상태 점·안읽음 표시. **관찰은 이것으로 충분하다.**
-- 우측 포커스 뷰: 선택된 세션 하나가 전체 폭을 차지 — 대화·파일·깃·뷰어 탭이 제대로 보이는 크기로.
-- 프로젝트 등록: 디렉토리 선택 또는 드래그앤드롭. 최근 프로젝트 목록 유지.
-- 전환은 키보드로: ⌘1~9 프로젝트 점프, j/k 세션 이동 (→ FR-17).
+- "4+ projects in one window" is satisfied by **being able to register 4+ in one window and move between them quickly**. Concurrent split display (the grid) also exists but is an **experimental feature**; what satisfies this requirement is the sidebar, not the grid (§5.4).
+- Left sidebar: the full project/session tree, densely displayed at all times — project name, branch, changed file count, per-session status dot and unread mark. **This is enough for observation.**
+- Right focus view: one selected session takes the full width — conversation, files, git and viewer tabs at a size where they can actually be seen.
+- Project registration: pick a directory or drag and drop. Keeps a recent projects list.
+- Switching is by keyboard: ⌘1~9 to jump projects, j/k to move between sessions (→ FR-17).
 
-#### FR-2. 워크트리 비강제 + 동시 세션 안전장치
+#### FR-2. Worktrees not forced + concurrent session safeguards
 
-- **원본 디렉토리에서 직접 작업하는 것이 기본.** 깃 워크트리는 만들지도, 요구하지도 않는다.
-- 깃 저장소가 아닌 디렉토리도 프로젝트로 등록 가능 (깃 패널만 비활성).
-- **동시 세션은 데이터 손실 위험이다** (한 에이전트가 다른 에이전트의 변경을 덮어씀). 처리 — 차단이 아니라 **가시화 + 복구**:
-  - 세션 생성 다이얼로그 **안에 인라인 경고** 표시 (모달·추가 클릭 없음): "이 디렉토리에서 세션 N개 실행 중 — 같은 파일을 수정하면 변경이 유실될 수 있음". 읽고 그대로 진행하면 된다. (모달로 흐름을 끊는 것은 "막지 말고 보이게 하라" 위배)
-  - 실행 중에는 프로젝트 헤더에 "동시 세션 N개" 상시 표시.
-  - 두 세션이 **같은 파일을 실제로 수정**한 것이 감지되면(도구 호출 이벤트 기반) 경고 뱃지 + **복구 경로**: 도구 호출 이벤트에 남은 변경 전 내용으로 "이 파일의 이전 상태 보기" 제공. Claude Code의 파일 체크포인트를 복구에 쓸 수 있는지 M0에서 확인. 감지 시점엔 이미 늦었으므로, 경고보다 복구가 진짜 도움이다.
-- (후순위 옵션) 세션 생성 시 "워크트리에서 실행" 체크박스 — 원하는 사람만 격리. **2026-08-19 구현.**
-  - 위치는 **저장소 밖**(`<데이터 폴더>/worktrees/<프로젝트>/<세션>`). 저장소 안에 두면 `.gitignore`에
-    줄을 넣어야 하고(사용자 파일을 우리가 고치는 것) 안 넣으면 `git status`가 지저분해진다.
-  - 브랜치는 `centralu/<세션 id 앞 8자>`. 세션 이름은 생성 시점에 없거나(자동 이름은 나중에 붙는다)
-    공백·유니코드가 섞여 브랜치 이름으로 못 쓴다.
-  - **깃 저장소가 아니면 만들지 않고 이유를 말한다.** 조용히 원본 디렉토리로 떨어뜨리면
-    사용자는 격리된 줄 알고 두 세션을 같은 파일에 붙인다 — 이 기능을 켠 이유가 정확히 그것인데.
-  - **재개·앱 재시작 후에도 같은 워크트리로 돌아간다** (경로를 DB에 남긴다).
-  - 지울 때는 **물어본다**: 커밋 안 된 변경 개수와 경로를 보여주고, 체크해야 지운다.
-    에이전트가 몇 시간 작업한 결과가 거기 있을 수 있다.
+- **Working directly in the original directory is the default.** Git worktrees are neither created nor required.
+- Directories that are not git repositories can be registered as projects too (only the git panel is disabled).
+- **Concurrent sessions are a data loss risk** (one agent overwrites another's changes). The handling — not blocking, but **visibility + recovery**:
+  - An **inline warning inside** the session creation dialog (no modal, no extra click): "N sessions running in this directory — if they modify the same file, changes may be lost". Read it and carry on. (Breaking the flow with a modal violates "do not block, make visible")
+  - While running, show "N concurrent sessions" permanently in the project header.
+  - When two sessions are detected to have **actually modified the same file** (based on tool call events), a warning badge + a **recovery path**: offer "view this file's previous state" from the pre-change content left in the tool call event. Whether Claude Code's file checkpoints can be used for recovery is checked in M0. By the time it is detected it is already too late, so recovery helps more than a warning does.
+- (Lower-priority option) a "run in a worktree" checkbox at session creation — isolation for whoever wants it. **Implemented 2026-08-19.**
+  - The location is **outside the repository** (`<data folder>/worktrees/<project>/<session>`). Inside the repository you would have to
+    add a line to `.gitignore` (us editing the user's file) and without it `git status` gets messy.
+  - The branch is `centralu/<first 8 chars of session id>`. A session name either does not exist at creation time (auto names arrive later)
+    or has spaces and Unicode mixed in and cannot be used as a branch name.
+  - **If it is not a git repository, do not create one and say why.** Silently falling back to the original directory means
+    the user thinks they are isolated and points two sessions at the same file — which is exactly why they turned this on.
+  - **Resume and app restart return to the same worktree** (the path is kept in the DB).
+  - When deleting, **ask**: show the number of uncommitted changes and the path, and require a checkbox to delete.
+    Hours of an agent's work may be sitting there.
 
-#### FR-3. GUI 에이전트 대화
+#### FR-3. GUI agent conversation
 
-- 채팅형 UI: 사용자 메시지 / 에이전트 응답(스트리밍 마크다운) / 도구 호출 카드(접힌 상태 기본, 펼치면 상세).
-- 도구 호출 카드: 명령·파일 경로·diff 요약을 구조화해 표시. raw 출력은 펼쳐야 보임. **접힘 기본값은 도구 종류별로 다르다**: 조회성(Read/Grep/조회성 Bash)은 접힘 — 20번 연속돼도 대화를 안 가린다. 파일 변경(Edit/Write)은 diff 요약 펼침이 기본. 설정에서 도구별 조정 가능. (대화창 가독성의 절반이 이 정책이다)
-- 세션 제어: 중단(interrupt), 재시도, 새 세션, 세션 이름 변경(자동 이름은 FR-18).
-- 메시지 입력: 멀티라인, 첨부(FR-13), 슬래시 커맨드 패스스루(도구가 지원하는 경우).
+- Chat-style UI: user message / agent response (streaming markdown) / tool call card (collapsed by default, expand for detail).
+- Tool call card: shows the command, file path and diff summary in structured form. Raw output only on expand. **The collapse default differs by tool kind**: read-oriented ones (Read/Grep/read-oriented Bash) are collapsed — 20 in a row still does not bury the conversation. File changes (Edit/Write) default to an expanded diff summary. Adjustable per tool in settings. (Half of the conversation view's readability is this policy)
+- Session control: interrupt, retry, new session, rename session (auto naming is FR-18).
+- Message input: multiline, attachments (FR-13), slash command passthrough (where the tool supports it).
 
-**승인 인터랙션 상세 (가장 자주 쓰는 인터랙션 — 여기서 사용성이 갈린다):**
+**Approval interaction in detail (the most frequently used interaction — usability is decided here):**
 
-- **키보드 우선**: 승인 요청이 포커스된 상태에서 `y` 허용 / `n` 거부 / `a` 항상 허용. 마우스 불필요. 버튼은 병행 표시.
-- **"항상 허용"의 범위와 표현력**: 누를 때 범위를 보여준다 — 기본은 **세션 범위**, 수정자 키(⌥a)로 프로젝트 범위. 어느 범위로 저장됐는지 승인 카드에 남긴다. 패턴 규칙(예: `npm test*`)을 허용하되, 등록 시 **현재 세션 기록에서 그 패턴에 매치되는 명령 목록을 미리보기**로 보여준다. 규칙 전체는 설정에서 조회·삭제 가능. 표현력을 제한하는 대신 결과를 보이게 한다.
-- **비포커스 세션의 승인 요청**: 전역 알림 배너(창 상단)에 요청 내용 표시, **배너에서 바로 y/n 승인 가능**. 단, 배너의 정보만으로 판단이 어려운 요청 — 파일 수정(diff를 봐야 함), 다중 파일 작업, 내용이 잘리는 긴 명령 — 은 승인 버튼 대신 **"확인 필요"** 를 표시하고 Enter로 세션 점프 후 승인. 기준은 도구 종류별 기본값(Bash: 명령 전문이 보이면 제자리 승인 가능 / Edit·Write: diff 확인 필요 → 점프), 설정에서 조정 가능. 강제가 아니라 **정보가 부족함을 알리는** 방식이다.
-- **승인 큐**: 여러 승인이 쌓이면 인박스(FR-15)에서 순차 처리 — 하나 처리하면 자동으로 다음 승인으로 이동.
-- 승인 요청 카드에는 판단에 필요한 정보를 요약: 명령 전문 또는 파일 경로+diff 미리보기.
+- **Keyboard first**: with an approval request focused, `y` allow / `n` deny / `a` always allow. No mouse needed. Buttons shown alongside.
+- **The scope and expressiveness of "always allow"**: show the scope as you press — the default is **session scope**, with a modifier (⌥a) for project scope. Record which scope it was saved at on the approval card. Allow pattern rules (e.g. `npm test*`), but when registering one, **preview the list of commands in the current session's history that match that pattern**. Full rules can be inspected and deleted in settings. Rather than limiting expressiveness, make the consequences visible.
+- **Approval requests from unfocused sessions**: show the request in a global notification banner (top of the window), and **allow y/n approval straight from the banner**. But requests where the banner's information is not enough to judge — file edits (you have to see the diff), multi-file operations, long commands that get truncated — show **"needs review"** instead of an approve button, and Enter jumps to the session to approve there. The criterion is a per-tool-kind default (Bash: approvable in place if the full command is visible / Edit·Write: diff must be checked → jump), adjustable in settings. This is not coercion, it is **telling you the information is insufficient**.
+- **Approval queue**: when several approvals pile up, handle them in sequence from the inbox (FR-15) — handling one automatically moves to the next approval.
+- The approval request card summarises what is needed to judge: the full command, or the file path + a diff preview.
 
-#### FR-4. 깃 상태 GUI
+#### FR-4. Git status GUI
 
-프로젝트당 깃 패널 (탭 3개):
+A git panel per project (3 tabs):
 
-- **Changes**: staged/unstaged/untracked 파일 목록, 파일 클릭 시 diff 뷰(사이드바이사이드/인라인). 에이전트가 파일을 바꾸면 실시간 갱신.
-- **History(트리)**: 최근 커밋 로그 + 간단한 브랜치 그래프. 커밋 클릭 시 해당 커밋의 변경 파일·diff.
-- **Branches**: 로컬/원격 브랜치 목록, 현재 브랜치 표시, 체크아웃 — 더티 상태여도 막지 않고 **영향받을 파일을 먼저 보여준 뒤 진행 여부를 묻는다** (M2 결정: '막지 말고 보이게').
-- **IDE로 점프**: diff·파일 목록에서 ⌘클릭(또는 컨텍스트 메뉴) 시 기본 에디터의 해당 파일·해당 줄로 연다 (`code -g path:line`). 왕복 비용 절감의 핵심 디테일.
-- 구현: agent-host의 `git` CLI 래퍼 (M2에서 확정 — Rust git2 이관은 측정으로 병목이 확인될 때까지 보류).
-- v1은 **조회 중심**. 커밋/스테이징/푸시는 **v1.5 확정** — 조회 패널(M2) 완성 직후 같은 패널에 얹는다. rebase·cherry-pick 등 고급 조작은 계속 비목표.
+- **Changes**: staged/unstaged/untracked file list; clicking a file shows a diff view (side-by-side/inline). Updates live when an agent changes a file.
+- **History (tree)**: recent commit log + a simple branch graph. Clicking a commit shows that commit's changed files and diff.
+- **Branches**: local/remote branch list, current branch shown, checkout — not blocked even when dirty; instead **show the files that would be affected first, then ask whether to proceed** (M2 decision: 'do not block, make visible').
+- **Jump to the IDE**: ⌘click (or context menu) on a diff or file list opens that file at that line in the default editor (`code -g path:line`). The key detail for cutting the round-trip cost.
+- Implementation: a `git` CLI wrapper in agent-host (settled in M2 — moving to Rust git2 is deferred until measurement confirms a bottleneck).
+- v1 is **read-oriented**. Commit/staging/push is **settled for v1.5** — added to the same panel right after the read panel (M2) is finished. Advanced operations such as rebase and cherry-pick remain non-goals.
 
-#### FR-5. 프로젝트 파일 트리
+#### FR-5. Project file tree
 
-- 익스플로러 스타일 트리. **lazy-load** (열어본 디렉토리만 읽음 — 대형 레포에서도 가벼움 유지).
-- `.gitignore` 기반 필터 토글 (기본: ignored 숨김).
-- 깃 상태 오버레이 (M/A/U **글리프** 표시 — 무채색 팔레트 결정에 따라 색을 쓰지 않는다).
-- 에이전트가 최근 수정한 파일 하이라이트 ("에이전트가 방금 만진 파일" 추적).
+- Explorer-style tree. **lazy-load** (only directories you open are read — stays light even in a large repo).
+- A `.gitignore`-based filter toggle (default: ignored hidden).
+- Git status overlay (M/A/U shown as **glyphs** — following the achromatic palette decision, no colour is used).
+- Highlight files an agent recently modified (tracking "files the agent just touched").
 
-#### FR-6. 코드 뷰어 (읽기 전용)
+#### FR-6. Code viewer (read-only)
 
-- 파일 클릭 → 신택스 하이라이트된 읽기 전용 뷰. 검색(파일 내), 줄번호, 줄 링크 복사.
-- diff 모드와 일반 모드 전환.
-- 대용량 파일은 가상 스크롤, 바이너리/이미지는 미리보기 또는 안내.
-- 편집 기능 없음(비목표). "IDE에서 열기" 버튼 제공 (FR-4의 줄 단위 점프와 동일 메커니즘).
+- Click a file → syntax-highlighted read-only view. Search (within the file), line numbers, copy line link.
+- Toggle between diff mode and normal mode.
+- Large files use virtual scrolling; binaries/images get a preview or a notice.
+- No editing (non-goal). An "open in IDE" button (the same mechanism as FR-4's line-level jump).
 
-#### FR-7. 프로젝트별·세션별 도구 선택
+#### FR-7. Per-project and per-session tool selection
 
-- 세션 생성 다이얼로그에서 선택: **도구**(Claude Code / Codex) → **모델** → **권한 프리셋**(안전/일반/자동승인) → 시작 프롬프트.
-- **권한 프리셋은 CLI 전역 설정을 세션 단위로 덮어써야 한다** (§2 경고 참조, M0 검증 항목). 사용자의 전역 bypass 설정과 무관하게, Centralu에서 만든 세션은 선택한 프리셋대로 동작해야 승인 UI가 성립한다.
-- 프로젝트별 기본값 저장 ("이 프로젝트는 기본 Codex + gpt-5.x").
-- 한 프로젝트 안에 서로 다른 도구의 세션 동시 운영 가능 (예: Claude Code로 구현 + Codex로 리뷰).
+- Chosen in the session creation dialog: **tool** (Claude Code / Codex) → **model** → **permission preset** (safe/normal/auto-approve) → starting prompt.
+- **The permission preset must override the CLI's global setting per session** (see the §2 warning, an M0 verification item). Regardless of the user's global bypass setting, a session created in Centralu must behave according to the chosen preset, or the approval UI does not hold together.
+- Per-project defaults saved ("this project defaults to Codex + gpt-5.x").
+- Sessions of different tools can run simultaneously within one project (e.g. implement with Claude Code + review with Codex).
 
-#### FR-8. 가벼움 (핵심 비기능 → §7에 수치 목표)
+#### FR-8. Lightness (the key non-functional requirement → numeric targets in §7)
 
-- Tauri + 경량 프론트 + Node 사이드카 1개 구조. 에이전트 CLI 프로세스는 세션이 있을 때만 존재.
-- 포커스 뷰 구조는 성능에도 유리: 화면에 세션 하나만 렌더링하면 되므로 그리드 대비 상시 렌더 부하가 낮다. 비포커스 세션은 이벤트만 수신해 상태·안읽음 갱신.
-- 파일 워처 debounce, 폴링 대신 이벤트 구동.
-- 목표 요약: 유휴 시 CPU ~0%, 앱 자체 메모리 수백 MB 미만. §7.1 참조.
+- The structure is Tauri + a light front end + 1 Node sidecar. Agent CLI processes exist only while there is a session.
+- The focus view structure also helps performance: only one session has to be rendered on screen, so the standing render load is lower than a grid's. Unfocused sessions only receive events to update status and unread state.
+- File watcher debounce, event-driven instead of polling.
+- Target summary: CPU ~0% while idle, app's own memory under a few hundred MB. See §7.1.
 
-#### FR-9. 에이전트 주간 사용량 + 한도 상태
+#### FR-9. Weekly agent usage + limit status
 
-- 도구별·프로젝트별·모델별 토큰 사용량과 추정 비용을 **주간 뷰**(일별 막대 + 주간 합계)로 표시.
-- **SDK로는 주간 집계가 불가능함을 확인** (2026-08 공식 문서 기준): Agent SDK는 자기가 실행한 세션의 턴별 usage(`ResultMessage.usage`, `total_cost_usd`)만 준다. `/usage`가 보여주는 플랜 한도 데이터는 프로그래밍 접근 경로가 없고, Admin Usage API는 API 조직 전용(구독 계정 불가). 따라서 **주간 집계는 로그 파싱이 유일한 경로**이고, SDK 이벤트는 실행 중 세션의 실시간 표시(FR-14)에만 쓴다.
-- 데이터 소스 (외부 서버 불필요, 전부 로컬):
-  - Claude Code: `~/.claude/projects/**` 세션 JSONL의 usage 레코드 집계 (ccusage와 동일 접근)
-  - Codex: `~/.codex/sessions/**` 로그의 token_count 이벤트 집계
-- Centralu 밖에서 실행한 세션의 사용량도 잡힌다(로그 기반이므로) — "내 머신 전체 에이전트 사용량"이 된다.
-- 집계 결과는 SQLite에 캐시, 증분 파싱으로 재계산 비용 최소화.
-- **한도 초과는 1급 상태다** (실전에서 자주 만남): 세션이 rate limit에 걸리면 세션 상태를 `limited`로 표시하고, 도구가 제공하는 범위에서 **해제 예상 시각**("5시간 윈도우, 14:30 해제 예상")을 세션 헤더와 인박스에 표시. 해제 시 OS 알림(옵션) + 재개 버튼.
+- Show token usage and estimated cost per tool, per project and per model in a **weekly view** (daily bars + weekly total).
+- **Confirmed that weekly aggregation is impossible through the SDK** (per the official docs as of 2026-08): the Agent SDK only gives per-turn usage for sessions it ran itself (`ResultMessage.usage`, `total_cost_usd`). The plan limit data `/usage` shows has no programmatic access path, and the Admin Usage API is API-organisation only (not available to subscription accounts). So **log parsing is the only path to weekly aggregation**, and SDK events are used only for live display of running sessions (FR-14).
+- Data sources (no external server needed, all local):
+  - Claude Code: aggregate usage records from the session JSONL under `~/.claude/projects/**` (the same approach as ccusage)
+  - Codex: aggregate token_count events from the logs under `~/.codex/sessions/**`
+- Usage from sessions run outside Centralu is captured too (because it is log-based) — it becomes "all agent usage on my machine".
+- Aggregation results are cached in SQLite, with incremental parsing to minimise the cost of recomputation.
+- **Hitting the limit is a first-class state** (you meet it often in real use): when a session hits a rate limit, show the session state as `limited` and, as far as the tool provides it, show the **expected reset time** ("5-hour window, expected to reset at 14:30") in the session header and the inbox. On reset, an OS notification (optional) + a resume button.
 
-#### FR-10. 재시작 복원
+#### FR-10. Restore on restart
 
-- 종료 시 워크스페이스 스냅샷 저장: 프로젝트 목록, 레이아웃, 각 프로젝트의 열린 세션 ID·도구·이름·읽음 위치.
-- 재시작 시:
-  - UI·레이아웃 즉시 복원
-  - 대화 기록은 로컬 로그/SQLite에서 즉시 로드 (읽기 전용으로 먼저 표시)
-  - 세션 프로세스는 **resume 가능하면 resume** (Claude Agent SDK resume, `codex resume`), 불가하면 "기록만 보기 + 새 세션 시작" 제안
-- 실행 중이던 에이전트 턴은 프로세스 종료와 함께 중단됨을 명시 (복원은 "대화 이어가기"이지 "턴 이어가기"가 아님).
-- 크래시 대비: 스냅샷은 종료 시점이 아니라 상태 변화마다 저장.
+- Save a workspace snapshot on exit: project list, layout, and per project the open session IDs, tools, names and read positions.
+- On restart:
+  - UI and layout restored immediately
+  - Conversation record loaded immediately from local logs/SQLite (shown read-only first)
+  - Session processes are **resumed where resume is possible** (Claude Agent SDK resume, `codex resume`); where not, offer "view the record only + start a new session"
+- Make explicit that an agent turn that was in flight is interrupted when the process dies (restore is "continue the conversation", not "continue the turn").
+- Crash safety: the snapshot is saved on every state change, not at exit.
 
-#### FR-11. 중앙 오케스트레이터 세션
+#### FR-11. Central orchestrator session
 
-- 임의의 세션 하나를 **오케스트레이터로 지정** 가능 (워크스페이스당 0~1개, 왕관 아이콘 표시).
-- 오케스트레이터 세션에는 Centralu가 **MCP 서버로 자신을 노출**해 다음 도구를 제공:
-  - `list_sessions` — 전체 프로젝트·세션·상태 조회
-  - `read_session` — 특정 세션의 최근 대화/결과 읽기
-  - `send_to_session` — 특정 세션에 메시지(작업 지시) 전송
-  - `create_session` — **직접 생성하지 않고 제안 카드를 띄운다**: 대상 프로젝트·시작 프롬프트를 요약한 카드가 표시되고 사람이 [생성]을 눌러 확정. 미등록 프로젝트·중복 세션 등 앱이 모르는 상태가 생기는 것을 막는다. 나머지 세 도구는 자동 실행
-- 이로써 "오케스트레이터에게 '프로젝트 A는 테스트 고치고 B는 리뷰해줘'라고 말하면 알아서 각 세션에 분배"가 가능.
-- 안전장치: 오케스트레이터가 다른 세션에 보낸 지시는 대화창에 뚜렷하게 표시(사람 입력과 구분), 세션별로 "오케스트레이터 지시 수신 거부" 토글.
+- Any one session can be **designated as the orchestrator** (0~1 per workspace, marked with a crown icon).
+- To the orchestrator session, Centralu **exposes itself as an MCP server** offering these tools:
+  - `list_sessions` — inspect all projects, sessions and states
+  - `read_session` — read a particular session's recent conversation/result
+  - `send_to_session` — send a message (a work instruction) to a particular session
+  - `create_session` — **does not create directly; it raises a proposal card**: a card summarising the target project and starting prompt is shown and a human presses [Create] to confirm. This prevents states the app does not know about — unregistered projects, duplicate sessions. The other three tools run automatically
+- This makes it possible to tell the orchestrator "fix the tests in project A and review B" and have it distribute the work to each session.
+- Safeguards: instructions the orchestrator sent to other sessions are shown distinctly in the conversation view (distinguished from human input), and there is a per-session "refuse orchestrator instructions" toggle.
 
-#### FR-12. 대기 상태 표시 — 긴급도 2종 분리 (관제의 핵심)
+#### FR-12. Waiting-state display — two urgency levels, separated (the heart of control)
 
-세션 상태 머신:
+Session state machine:
 
 ```
 idle → working → (waiting_approval | waiting_input | limited | error) → working → …
 ```
 
-| 상태 | 의미 | 긴급도 | 표시 |
+| State | Meaning | Urgency | Display |
 |---|---|---|---|
-| `working` | 에이전트 턴 진행 중 | — | ⚙ 회전 |
-| `waiting_approval` | **에이전트가 막혀 있음.** 내가 안 누르면 아무 일도 안 일어남 | **긴급** | 🔴 (+ 경과 시간) |
-| `waiting_input` | 턴이 끝남. 다음 지시가 없어도 손해 없음 | 안 급함 | 🔵 |
-| `limited` | 사용량 한도로 차단, 해제 시각 대기 | 정보성 | ⏳ (+ 해제 예상) |
-| `error` | 프로세스 오류 등 | 긴급 | ⛔ |
+| `working` | An agent turn is in progress | — | ⚙ spinning |
+| `waiting_approval` | **The agent is blocked.** Nothing happens unless I press something | **urgent** | 🔴 (+ elapsed time) |
+| `waiting_input` | The turn is over. No harm done if there is no next instruction | not urgent | 🔵 |
+| `limited` | Blocked by a usage limit, waiting for the reset time | informational | ⏳ (+ expected reset) |
+| `error` | Process error etc. | urgent | ⛔ |
 
-- **`waiting_approval`과 `waiting_input`은 절대 같은 뱃지로 묶지 않는다.** 색·아이콘·정렬·알림 정책 모두 분리.
-- 전역 카운터도 분리 표기: **"승인 2 · 응답대기 3"** (합산 "대기 5" 금지).
-- 표시 계층: ① 세션 행 상태 점(사이드바) → ② 프로젝트 집계 → ③ 전역 분리 카운터(창 상단 고정) → ④ 독 아이콘 뱃지/OS 알림 — 기본값: 승인·오류는 즉시 알림, 응답대기는 뱃지만. 대신 **모든 세션이 일을 마치면(전부 대기/idle) "전부 완료" 알림 1회** — 자리를 뜬 사람에게 필요한 신호는 개별 세션의 종료가 아니라 이것이다. (설정 가능)
-- **"다음 대기로 이동"** 단축키: 승인 → 오류 → 응답대기 순의 우선순위로 순회 (→ FR-17).
-- 대기 경과 시간 표시 ("3분째 대기 중").
+- **`waiting_approval` and `waiting_input` are never merged into the same badge.** Colour, icon, ordering and notification policy are all separate.
+- The global counter is split too: **"2 approvals · 3 awaiting response"** (a combined "5 waiting" is forbidden).
+- Display layers: ① session row status dot (sidebar) → ② project aggregate → ③ split global counters (pinned at the top of the window) → ④ dock icon badge / OS notification — defaults: approvals and errors notify immediately, awaiting-response is badge only. Instead, **when every session has finished its work (all waiting/idle), one "all done" notification** — the signal someone who left the desk needs is this, not the end of an individual session. (Configurable)
+- The **"go to the next waiting item"** shortcut: cycles in priority order approval → error → awaiting response (→ FR-17).
+- Show elapsed waiting time ("waiting 3 minutes").
 
-#### FR-13. 파일 첨부 / 이미지 붙여넣기
+#### FR-13. File attachments / image paste
 
-- 입력창에 클립보드 **이미지 붙여넣기**(스크린샷 워크플로우), 파일 **드래그앤드롭**, 파일 선택 버튼.
-- 프로젝트 내 파일은 경로 참조로 전달(@경로 멘션), 외부 파일·이미지는 어댑터를 통해 도구가 지원하는 형식으로 전달.
-- 첨부 미리보기(썸네일) 후 전송. 도구별 지원 범위 차이는 어댑터가 알리고 UI가 비활성화로 반영.
+- **Paste an image** from the clipboard into the input box (the screenshot workflow), **drag and drop** files, and a file picker button.
+- Files inside the project are passed as path references (@path mention); external files and images are passed through the adapter in whatever form the tool supports.
+- Attachment preview (thumbnail) before sending. Differences in per-tool support are reported by the adapter and reflected as disabled UI.
 
-#### FR-14. 컨텍스트 사용량 표시
+#### FR-14. Context usage display
 
-- 세션 헤더에 컨텍스트 게이지: 사용 토큰 / 컨텍스트 윈도우 (%). 스트리밍 usage 이벤트에서 갱신.
-- 임계치 경고 (예: 80% 도달 시 게이지 색 변경 + "곧 컴팩션/성능 저하 가능" 툴팁).
-- 컴팩션(요약) 발생 시 대화창에 마커 표시.
-- 도구가 세부 수치를 안 주는 경우 추정치임을 명시(≈ 표시).
+- A context gauge in the session header: tokens used / context window (%). Updated from streaming usage events.
+- Threshold warning (e.g. at 80%, change the gauge colour + a "compaction/degradation may be near" tooltip).
+- Show a marker in the conversation view when compaction (summarisation) happens.
+- Where the tool does not give exact numbers, state that it is an estimate (shown with ≈).
 
-### 4.2 사용성 검토로 추가된 요구사항 (FR-15 ~ FR-19)
+### 4.2 Requirements added by the usability review (FR-15 ~ FR-19)
 
-#### FR-15. 인박스 (트리아지 뷰) — 핵심 사용 루프의 입구
+#### FR-15. Inbox (triage view) — the entrance to the core usage loop
 
-- 프로젝트 구조를 **무시하고**, 지금 내 개입을 기다리는 항목만 모은 단일 리스트.
-- 정렬: 긴급도(승인 → 오류 → 응답대기) 우선, 같은 긴급도 안에서는 대기 시작 시간 오름차순.
-- 각 항목: 세션 이름, 프로젝트, 대기 종류, 경과 시간, 마지막 내용 한 줄 미리보기.
-- 항목 선택 → 해당 세션 포커스 뷰로 점프, 처리(승인/응답) 완료 시 **자동으로 다음 항목으로** 이동.
-- **`d`(dismiss)**: 응답대기 항목을 읽고 만족하면 한 키로 세션 아카이브(FR-20). **인박스를 비우는 1급 수단** — 이게 없으면 응답대기가 계속 쌓여 인박스는 몇 시간 만에 무용지물이 된다.
-- 단축키 하나로 인박스 열기/닫기 (기본 `⌘I`). 앱 시작 시 대기 항목이 있으면 인박스를 먼저 보여준다.
-- FR-1의 사이드바가 "지도"라면 인박스는 "할 일 줄서기"다. 자리로 돌아왔을 때의 진입점은 인박스다.
-- §1.3 루프의 진입점이므로 **M1 범위**다. 리스트 하나라 구현 부담도 작다 — 사이드바보다 먼저 필요할 수 있다.
+- A single list that **ignores** project structure and gathers only the items waiting on my intervention right now.
+- Ordering: urgency first (approval → error → awaiting response); within the same urgency, ascending by when the wait started.
+- Each item: session name, project, kind of wait, elapsed time, a one-line preview of the last content.
+- Select an item → jump to that session's focus view; when handling (approval/response) is complete, **automatically move to the next item**.
+- **`d` (dismiss)**: read an awaiting-response item, and if satisfied, archive the session with one key (FR-20). **The first-class means of emptying the inbox** — without it, awaiting-response items keep piling up and the inbox is useless within hours.
+- One shortcut to open/close the inbox (default `⌘I`). If there are waiting items when the app starts, show the inbox first.
+- If FR-1's sidebar is "the map", the inbox is "the queue of things to do". The entry point when you come back to the desk is the inbox.
+- It is the entry point of the §1.3 loop, so it is **in M1 scope**. It is one list, so the implementation burden is small too — it may be needed before the sidebar.
 
-#### FR-16. 읽음/안읽음
+#### FR-16. Read/unread
 
-- 세션 상태(working/waiting)와 **독립적으로**, "마지막으로 본 이후 새 내용이 있는가"를 추적.
-- 세션별 `last_read_seq` 저장. 읽음 처리 조건: 포커스 뷰에서 스크롤이 최신에 닿았을 때, **또는 세션이 포커스된 채 3초 경과** — 짧은 응답은 스크롤이 발생하지 않으므로 보조 조건이 없으면 영원히 안읽음으로 남는다.
-- 사이드바 세션 행에 안읽음 표시(굵기/점). "에이전트가 5분 혼자 작업하고 끝냄"은 `waiting_input` + **안읽음** — 두 축이 모두 보여야 "결과를 확인 안 한 세션"을 안 놓친다.
-- 인박스의 응답대기 항목 중 안읽은 것을 우선 배치.
+- **Independently** of session state (working/waiting), track "is there new content since I last looked".
+- Store `last_read_seq` per session. Conditions for marking read: when scrolling in the focus view reaches the latest, **or 3 seconds elapse with the session focused** — short responses do not produce scrolling, so without the secondary condition they stay unread forever.
+- Show unread on the sidebar session row (weight/dot). "The agent worked alone for 5 minutes and finished" is `waiting_input` + **unread** — both axes have to be visible to avoid missing "a session whose result I have not checked".
+- Among awaiting-response items in the inbox, put the unread ones first.
 
-#### FR-17. 키보드 전용 조작
+#### FR-17. Keyboard-only operation
 
-관제 루프 전체가 마우스 없이 돌아야 한다. v1 기본 단축키:
+The whole control loop must turn without a mouse. The v1 default shortcuts:
 
-| 동작 | 키 |
+| Action | Key |
 |---|---|
-| 다음 대기로 이동 (우선순위 순회) | `⌘⇧A` (가안) |
-| 인박스 열기/닫기 | `⌘I` |
-| 프로젝트 점프 | `⌘1`~`⌘9` |
-| 프로젝트 내 세션 이동 | `j` / `k` (입력창 비포커스 시) |
-| 승인 허용 / 거부 / 항상 허용 | `y` / `n` / `a` (⌥a: 프로젝트 범위) |
-| 인박스에서 세션 아카이브 (dismiss) | `d` |
-| 커맨드 팔레트 (프로젝트·세션·동작 검색) | `⌘K` |
-| 입력창 포커스 / 해제 | `Enter` / `Esc` |
-| 탭 전환 (대화/파일/깃/뷰어) | `⌘⇧1`~`⌘⇧4` |
+| Go to the next waiting item (priority cycle) | `⌘⇧A` (provisional) |
+| Open/close the inbox | `⌘I` |
+| Jump project | `⌘1`~`⌘9` |
+| Move between sessions within a project | `j` / `k` (when the input box is not focused) |
+| Approve allow / deny / always allow | `y` / `n` / `a` (⌥a: project scope) |
+| Archive session from the inbox (dismiss) | `d` |
+| Command palette (search projects, sessions, actions) | `⌘K` |
+| Focus / leave the input box | `Enter` / `Esc` |
+| Switch tab (conversation/files/git/viewer) | `⌘⇧1`~`⌘⇧4` |
 
-- 단축키는 설정에서 변경 가능. 충돌 감지.
+- Shortcuts are changeable in settings. Conflict detection.
 
-#### FR-18. 세션 자동 이름
+#### FR-18. Automatic session names
 
-- "세션1, 세션2"는 프로젝트 4개를 넘으면 식별 불가. 첫 프롬프트 기반 **자동 제목**을 기본으로.
-- Claude Code는 자체 세션 제목을 이미 생성하므로 그대로 가져온다. Codex 등 미지원 도구는 첫 사용자 메시지 앞부분을 잘라 초기 이름으로.
-- 수동 이름 변경 시 자동 갱신 중단.
+- "Session 1, Session 2" becomes unidentifiable past 4 projects. Default to an **automatic title** based on the first prompt.
+- Claude Code already generates its own session title, so take it as is. Tools that do not support it, such as Codex, get the front of the first user message truncated as an initial name.
+- Manual renaming stops the automatic updates.
 
-#### FR-19. 첫 실행 경험 (온보딩)
+#### FR-19. First-run experience (onboarding)
 
-첫인상을 결정하는 3가지 빈 상태를 명시적으로 설계:
+Three empty states that decide the first impression, designed explicitly:
 
-1. **CLI 미설치**: 도구별 감지 결과를 보여주고 설치 명령 복사 버튼 제공. 하나만 설치돼 있어도 진행 가능.
-2. **로그인 안 됨**: 감지 시 "터미널에서 `claude` / `codex login` 실행" 안내 + 완료 후 재감지 버튼. (로그인 플로우를 앱이 대신하지 않는다 — 각 CLI의 키체인 인증을 그대로 사용)
-3. **프로젝트 0개**: 드래그앤드롭 유도 + 최근 디렉토리 제안. 첫 프로젝트 등록 → 첫 세션 생성까지를 한 흐름으로.
+1. **CLI not installed**: show the per-tool detection result and a button to copy the install command. You can proceed with only one installed.
+2. **Not logged in**: on detection, guidance to "run `claude` / `codex login` in a terminal" + a re-detect button after finishing. (The app does not do the login flow for you — it uses each CLI's own keychain authentication.)
+3. **0 projects**: prompt for drag and drop + suggest recent directories. Registering the first project through creating the first session as one flow.
 
-#### FR-20. 세션 아카이브와 기록
+#### FR-20. Session archive and record
 
-- 아카이브 = 에이전트 프로세스 종료 + 사이드바·인박스에서 제거. **대화 기록은 SQLite에 보존.**
-- 아카이브된 세션은 프로젝트별 "아카이브" 목록과 커맨드 팔레트에서 열람 가능. resume 가능하면 그 자리에서 재개(활성으로 복귀).
-- FR-10(재시작 복원)은 **활성 세션만** 복원 대상 — 아카이브는 복원 범위 밖.
-- 진입점: 인박스 `d`, 세션 헤더 버튼, 커맨드 팔레트.
+- Archive = terminate the agent process + remove from the sidebar and inbox. **The conversation record is kept in SQLite.**
+- Archived sessions can be viewed in a per-project "Archive" list and from the command palette. Where resume is possible, resume in place (return to active).
+- FR-10 (restore on restart) only restores **active sessions** — archives are outside the restore scope.
+- Entry points: `d` in the inbox, a session header button, the command palette.
 
-#### FR-21. 대화 내용 검색
+#### FR-21. Conversation content search
 
-- M1: 커맨드 팔레트(⌘K)에서 세션 이름·프로젝트 검색.
-- M2: 대화 **내용** 전문 검색 (SQLite FTS, 아카이브 포함) — "그거 어디서 얘기했지"는 세션 4개 × 며칠이면 반드시 생긴다.
+- M1: search session names and projects from the command palette (⌘K).
+- M2: full-text search of conversation **content** (SQLite FTS, archives included) — "where did we talk about that" is guaranteed to come up with 4 sessions over a few days.
 
 ---
 
-## 5. 화면 구성
+## 5. Screen composition
 
-### 5.1 메인 레이아웃: 사이드바 + 포커스 뷰
+### 5.1 Main layout: sidebar + focus view
 
-관찰(좌, 밀도 높음)과 조작(우, 전체 폭)의 분리. 그리드 아님.
+Observation (left, dense) separated from operation (right, full width). Not a grid.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ ⌘ Centralu     [🔴 승인 2 · 🔵 응답대기 3]  [사용량] [＋]     │
+│ ⌘ Centralu    [🔴 2 approvals · 🔵 3 awaiting]  [usage] [＋]     │
 ├────────────────┬─────────────────────────────────────────────────┤
-│ ▾ 프로젝트 A     │  auth 리팩터링 (Claude · main · ctx 42%)         │
-│   🔴 auth 리팩터 │ ┌───────────────────────────────────────────┐   │
-│   ⚙ 테스트 수정  │ │                                           │   │
-│ ▾ 프로젝트 B     │ │   대화 스트림 (전체 폭 — 제대로 보인다)        │   │
-│   🔵 API 리뷰 •  │ │                                           │   │
-│ ▾ 프로젝트 C     │ │  ┌─ 승인 요청 ────────────────────────┐    │   │
-│   ⏳ 마이그레이션 │ │  │ Bash: npm run build                │    │   │
-│ ▾ 프로젝트 D     │ │  │ [y 허용] [n 거부] [a 항상 허용]      │    │   │
-│   ⚙ 문서 생성    │ │  └───────────────────────────────────┘    │   │
+│ ▾ project A    │  auth refactor (Claude · main · ctx 42%)        │
+│   🔴 auth ref  │ ┌───────────────────────────────────────────┐   │
+│   ⚙ fix tests  │ │                                           │   │
+│ ▾ project B    │ │   conversation stream (full width —       │   │
+│   🔵 API rev • │ │   it can actually be read)                │   │
+│ ▾ project C    │ │  ┌─ approval request ─────────────────┐   │   │
+│   ⏳ migration │ │  │ Bash: npm run build                │   │   │
+│ ▾ project D    │ │  │ [y allow] [n deny] [a always]      │   │   │
+│   ⚙ gen docs   │ │  └────────────────────────────────────┘   │   │
 │                │ └───────────────────────────────────────────┘   │
-│  (• = 안읽음)   │  [입력창 + 첨부]                                  │
-│                │  [대화 | 파일 | 깃 | 뷰어]                         │
+│  (• = unread)  │  [input box + attachments]                      │
+│                │  [conversation | files | git | viewer]          │
 └────────────────┴─────────────────────────────────────────────────┘
 ```
 
-- 사이드바: 프로젝트·세션 트리, 상태 점(🔴 승인 / 🔵 응답대기 / ⚙ 작업 중 / ⏳ 한도 / ⛔ 오류 / 👑 오케스트레이터), 안읽음 점, 브랜치·변경 수 요약. 접기 가능.
-- 포커스 뷰: 세션 하나가 전체 폭. 하단 탭으로 파일 트리/깃/뷰어 전환 — 전체 폭이므로 각 탭이 실제로 쓸 만한 크기.
+- Sidebar: the project/session tree, status dots (🔴 approval / 🔵 awaiting response / ⚙ working / ⏳ limited / ⛔ error / 👑 orchestrator), unread dot, branch and change-count summary. Collapsible.
+- Focus view: one session at full width. Bottom tabs switch to the file tree/git/viewer — at full width each tab is actually a usable size.
 
-### 5.2 인박스 (⌘I)
+### 5.2 Inbox (⌘I)
 
 ```
-┌─ 인박스 ── 승인 2 · 오류 0 · 응답대기 3 ─────────────────────────┐
-│ 🔴 auth 리팩터링 (A)   Bash 승인 대기        4분    "npm run…"   │
-│ 🔴 마이그레이션 (C)    파일 쓰기 승인 대기     1분    "schema…"    │
-│ 🔵 API 리뷰 (B) •     응답 대기·안읽음      12분    "리뷰 완료…"  │
-│ 🔵 문서 생성 (D)       응답 대기            25분    "README…"    │
-└────────────────────────────────────────────────────────────────┘
+┌─ inbox ── 2 approvals · 0 errors · 3 awaiting ──────────────────┐
+│ 🔴 auth refactor (A)  Bash approval        4m    "npm run…"     │
+│ 🔴 migration (C)      file write approval  1m    "schema…"      │
+│ 🔵 API review (B) •   awaiting · unread    12m   "review done…" │
+│ 🔵 gen docs (D)       awaiting            25m    "README…"      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-- Enter로 점프 → 처리 → 자동으로 다음 항목. 루프가 끝나면 "인박스 비움 ✓".
+- Enter to jump → handle → automatically on to the next item. When the loop is done, "inbox empty ✓".
 
-### 5.3 보조 화면
+### 5.3 Secondary screens
 
-- **사용량 대시보드**: 주간 막대 차트(일별), 도구/모델/프로젝트별 분해, 추정 비용, 한도 윈도우 상태.
-- **세션 생성 다이얼로그**: 도구 → 모델 → 권한 프리셋 → 시작 프롬프트. 동시 세션 경고(FR-2) 포함.
-- **설정**: 도구 경로/감지 상태, 기본 프리셋, 알림 정책(상태별), 단축키, 테마.
+- **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
+- **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme.
 
-### 5.4 그리드 뷰 (**실험 기능**)
+### 5.4 Grid view (**experimental**)
 
-원래 v1에서 제외했다. 근거는 셋이었다:
+Originally excluded from v1. There were three reasons:
 
-1. 14인치 화면에서 2×2면 패널당 ~600×400px — 대화 스트림·입력창·탭을 넣으면 어느 것도 제대로 안 보인다.
-2. "다음 대기로 이동" 루프(한 번에 하나 처리)와 상호작용 모델이 충돌한다.
-3. 멀티프로젝트 요구는 사이드바(상시 관찰) + 키보드 전환(즉시 조작)으로 충족된다.
+1. On a 14-inch screen a 2×2 gives ~600×400px per panel — fit a conversation stream, an input box and tabs in and none of them can properly be seen.
+2. It conflicts as an interaction model with the "go to the next waiting item" loop (handle one at a time).
+3. The multi-project requirement is satisfied by the sidebar (constant observation) + keyboard switching (immediate operation).
 
-**2026-08-20: 결정을 바꾼다.** 그리드는 이미 만들어져 돌고 있다 — 그런데 이 문서만 "안 만든다"고
-말하고 있었고, 화면에도 아무 표시가 없었다(이슈 #25). 없애는 대신 **실험 기능으로 표시해 내보낸다.**
+**2026-08-20: the decision changes.** The grid is already built and running — yet this document alone was
+saying "we do not build this", and there was no mark on screen either (issue #25). Rather than removing it, **it ships marked experimental.**
 
-셋 중 **1과 2는 지금도 그대로다.** 없어진 근거가 아니라 살아 있는 근거라서 여기 남긴다:
+Of the three, **1 and 2 still hold as they were.** They are kept here as live reasons, not dead ones:
 
-- **1** — 열 수를 폭에서 계산해(`columnsFor`) 패널이 최소 폭 아래로 내려가는 것까지는 막았다.
-  하지만 그리드에는 **우측 증거 패널이 없다**: 이미 화면을 나눠 쓰는데 거기서 또 한 레인을
-  떼면 남는 폭이 못 쓸 수준이 된다. 대화는 보이지만 "정말 그랬나"는 못 본다.
-- **2** — ⌘⇧A(다음 대기로 이동)는 세션을 고르면서 **화면을 포커스 뷰로 되돌린다.**
-  한 번에 하나를 처리하는 루프와 여럿을 동시에 보는 화면은 아직 화해하지 못했다.
-- **3** — 여전히 참이다. FR-1을 충족하는 것은 사이드바이고, 그리드는 그 위에 얹힌 **다른 보는 법**이다.
+- **1** — computing the column count from the width (`columnsFor`) at least stopped panels dropping below a minimum width.
+  But the grid has **no right-hand evidence panel**: the screen is already divided, and taking another lane
+  out of it leaves an unusable width. You can see the conversation but not "was that actually so".
+- **2** — ⌘⇧A (go to the next waiting item) picks a session and **puts the screen back to the focus view.**
+  A loop that handles one at a time and a screen that shows several at once have not been reconciled yet.
+- **3** — still true. What satisfies FR-1 is the sidebar; the grid is **another way of looking**, laid on top of it.
 
-그래서 표식은 화면 안이 아니라 **사이드바의 Grid 버튼**에 붙는다(#1의 오케스트레이터와 같은
-처방: slate 글자 + 점선 테두리, 색도 밝기도 쓰지 않는다). 다만 이유는 다르다 — #1은 "모른 채
-누르는 것"을 막으려 했지만, 그리드는 눌러도 공짜고 되돌릴 수 있다. 위험한 건 그 안에서 보내는
-시간이고, 사이드바는 그리드를 보는 동안에도 절대 가려지지 않으므로 표식 하나가 **누르기 전과
-있는 동안**을 모두 덮는다.
+So the mark goes not inside the screen but on **the sidebar's Grid button** (the same prescription as
+#1's orchestrator: slate text + a dashed border, using neither colour nor brightness). The reason differs, though — #1 was
+trying to stop you pressing without knowing, but the grid is free to press and reversible. What is costly is the
+time spent inside it, and the sidebar is never covered while the grid is open, so a single mark covers both **before pressing
+and throughout**.
 
-v2에서 대형 모니터 사용자를 위한 옵션(예: 2분할 비교 뷰)으로 재검토.
+To be revisited in v2 as an option for large-monitor users (e.g. a two-way comparison view).
 
 ---
 
-## 6. 시스템 아키텍처
+## 6. System architecture
 
-### 6.1 프로세스 구조
+### 6.1 Process structure
 
 ```
-┌─────────────────────────── Tauri 앱 (Rust) ───────────────────────────┐
-│  · 창/트레이/알림/단축키        · git2 기반 깃 조회                        │
-│  · 파일 트리/뷰어 파일 IO       · SQLite (워크스페이스·사용량 캐시)          │
-│  · 사이드카 수퍼바이저           · 파일 워처 (debounce)                    │
+┌─────────────────────────── Tauri app (Rust) ──────────────────────────┐
+│  · window/tray/notify/shortcuts   · git2-based git queries            │
+│  · file tree/viewer file IO       · SQLite (workspace, usage cache)   │
+│  · sidecar supervisor             · file watcher (debounce)           │
 └──────────────────────────────┬────────────────────────────────────────┘
-                               │ stdio/IPC (JSON 이벤트)
+                               │ stdio/IPC (JSON events)
 ┌──────────────────────────────┴────────────────────────────────────────┐
-│                     Node 사이드카 (Agent Host)                          │
-│  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC)  │
-│  · 공통 이벤트 정규화                   · MCP 서버 (오케스트레이터용)         │
-│  · 사용량 로그 파서 (~/.claude, ~/.codex 증분 파싱)                        │
+│                      Node sidecar (Agent Host)                        │
+│  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC) │
+│  · common event normalisation         · MCP server (for orchestrator) │
+│  · usage log parser (incremental parse of ~/.claude, ~/.codex)        │
 └──────┬──────────────────────────┬─────────────────────────────────────┘
        │                          │
-  Claude Code 세션들           Codex 세션들   (세션 있을 때만 프로세스 존재)
+  Claude Code sessions       Codex sessions   (processes exist only while sessions do)
 ```
 
-### 6.2 공통 어댑터 인터페이스 (확장의 핵심)
+### 6.2 The common adapter interface (the heart of extension)
 
 ```ts
 interface AgentAdapter {
@@ -439,7 +439,7 @@ interface AgentAdapter {
                   scope?: 'session'|'project'): void
   interrupt(sessionId): void
   dispose(sessionId): void
-  // 어댑터 → 앱 방향은 단일 이벤트 스트림으로 정규화:
+  // The adapter → app direction is normalised into a single event stream:
   // message_delta | tool_call | tool_result | approval_request
   // | turn_complete | usage_update | context_update | state_change
   // | limit_reached | session_title | error
@@ -447,124 +447,124 @@ interface AgentAdapter {
 }
 ```
 
-- UI는 `NormalizedEvent`만 안다. 도구별 차이(승인 방식, usage 형식, resume 방식)는 어댑터 내부에서 흡수.
-- 어댑터는 **capability 선언**을 제공: `{ approvals: boolean, contextUsage: 'exact'|'estimate', resume: boolean, autoTitle: boolean }` — UI는 이걸 보고 기능을 활성/비활성 (예: 승인 오버라이드 불가 도구면 승인 UI 숨김).
-- v2에서 Gemini CLI 등 추가 시 어댑터 하나만 새로 작성하면 됨.
+- The UI knows only `NormalizedEvent`. Per-tool differences (approval mechanism, usage format, resume mechanism) are absorbed inside the adapter.
+- Adapters provide a **capability declaration**: `{ approvals: boolean, contextUsage: 'exact'|'estimate', resume: boolean, autoTitle: boolean }` — the UI enables/disables features from it (e.g. hide the approval UI for a tool that cannot override approvals).
+- Adding Gemini CLI etc. in v2 means writing one new adapter and nothing else.
 
-### 6.3 데이터 모델 (SQLite)
+### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
 - `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, archived, last_read_seq, created_at, …)`
-- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2)
-- `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
-- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계
-- `workspace(id, layout_json, updated_at)` — 스냅샷
+- `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2)
+- `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
+- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation
+- `workspace(id, layout_json, updated_at)` — snapshot
 
 ---
 
-## 7. 비기능 요구사항
+## 7. Non-functional requirements
 
-### 7.1 성능·에너지 목표 (요구사항 "가벼움"의 수치화)
+### 7.1 Performance and energy targets ("lightness", given numbers)
 
-| 지표 | 목표 |
+| Metric | Target |
 |---|---|
-| 유휴 시 CPU (세션 4개 idle) | ≈ 0% (측정치 < 1%) |
-| 앱 메모리 (프로젝트 4개, 세션 4개, 에이전트 프로세스 제외) | < 400MB |
-| 콜드 스타트 → 워크스페이스 복원 완료 | < 3초 |
-| 스트리밍 중 UI 프레임 | 60fps 유지 (가상화 리스트) |
-| 에너지 | macOS Activity Monitor 에너지 영향 "낮음" 유지 (스트리밍 중 제외) |
+| CPU while idle (4 sessions idle) | ≈ 0% (measured < 1%) |
+| App memory (4 projects, 4 sessions, excluding agent processes) | < 400MB |
+| Cold start → workspace restore complete | < 3s |
+| UI frames while streaming | hold 60fps (virtualised list) |
+| Energy | keep macOS Activity Monitor energy impact at "Low" (excluding while streaming) |
 
-달성 수단: 이벤트 구동(폴링 금지), **포커스 뷰 단일 렌더**(비포커스 세션은 상태·안읽음만 갱신), lazy 파일 트리, 워처 debounce, 대화 리스트 가상화, git 조회는 Rust 네이티브.
+How it is achieved: event-driven (no polling), **a single focus-view render** (unfocused sessions update only state and unread), lazy file tree, watcher debounce, virtualised conversation list, git queries native in Rust.
 
-### 7.2 기타
+### 7.2 Other
 
-- **오프라인/장애 내성**: 어댑터 프로세스 크래시 시 세션 상태 `error`로 전환 + 원클릭 재시작. 앱 크래시 시 스냅샷 기반 복원.
-- **보안**: API 키를 직접 다루지 않는다 — 각 CLI의 자체 로그인(키체인)을 그대로 사용. 앱 DB에는 비밀정보 저장 금지.
-- **플랫폼**: macOS 우선 (개발 머신), 구조는 크로스플랫폼 유지 (Tauri).
-- **언어**: UI 한국어 우선, 문자열 분리로 영어 추가 용이하게.
-
----
-
-## 8. 로드맵
-
-### M0 — 기술 검증 스파이크 (짧게)
-
-- Tauri + Node 사이드카에서 Claude Agent SDK 세션 1개 스트리밍 E2E
-- Codex app-server 프로토콜로 동일 시나리오 검증
-- **권한 프리셋이 CLI 전역 설정(bypass)을 세션 단위로 덮어쓸 수 있는지 확인** ← 승인 UI 성립의 전제
-- 승인 요청·usage·세션 제목 이벤트가 실제로 잡히는지 확인 ← 안 되면 연동 방식 재검토
-- Claude Code 파일 체크포인트를 동시 세션 복구 경로(FR-2)로 쓸 수 있는지 확인
-
-### M1 — MVP (첫날부터 관제 루프가 도는 수준)
-
-- 프로젝트 등록 + 사이드바 + 포커스 뷰 (FR-1) — 그리드 아님
-- Claude Code 세션 GUI 대화 + 승인 UI 키보드 우선 (FR-3)
-- **인박스 + `d` 아카이브 (FR-15, 20)** — §1.3 루프의 진입점, 이것 없이는 M1에서 루프가 안 돈다
-- 대기 뱃지 2종 분리 + 전역 분리 카운터 + "다음 대기로 이동" (FR-12, 17 일부)
-- 세션 자동 이름 (FR-18)
-- 읽음/안읽음 (FR-16)
-- 동시 세션 인라인 경고 (FR-2)
-
-### M1.5 — 상시 가동 (2026-08-15 재정의 — 상세는 [plans/m1.5-plan.md](plans/m1.5-plan.md))
-
-원래 "신뢰성" 4개 항목 중 컨텍스트 게이지(FR-14)와 한도 뱃지(FR-9 일부)는 **M1에서 앞당겨 완료**됐다.
-남은 것에 더해, 실사용을 막는 것(터미널 2개 수동 실행·host 종료 시 세션 소멸·알림 없음)을 함께 푼다.
-
-- 데스크톱 셸: Tauri 전환 1~3단계 (사이드카 수퍼바이즈, web 구현 재사용, system 포트 교체)
-- 놓치지 않기: OS 알림·독 뱃지·전역 단축키
-- 끊기지 않기: 세션 resume (FR-10), 승인 규칙 영속 복원, 워크스페이스 스냅샷
-- 규모 견디기: 대화 가상 스크롤·메시지 윈도잉·성능 실측
-- 첫 실행 경험 (FR-19)
-
-### M2 — 관제 완성
-
-- Codex 어댑터 (FR-7 완성)
-- 대화 내용 전문 검색 (FR-21)
-- 깃 패널: Changes/History/Branches + IDE 줄 점프 (FR-4), 직후 커밋/스테이징/푸시 (v1.5 확정분)
-- 파일 트리 + 코드 뷰어 (FR-5, 6)
-- 첨부/이미지 붙여넣기 (FR-13)
-- 커맨드 팔레트 ⌘K, 단축키 설정 (FR-17 완성), OS 알림 정책
-
-### M2.5 — 직접 사용 후 개선
-
-M2까지 만든 뒤 실제 프로젝트로 며칠 굴리고, 거기서 나온 불만을 백로그로 처리한다.
-사람이 직접 판정하는 지점은 여기 한 번이다 (2026-08-15 결정, plans/m1.5-plan.md 참조).
-
-### M3 — 인텔리전스
-
-- 주간 사용량 대시보드 (FR-9 완성)
-- 오케스트레이터 세션 + MCP 도구 (FR-11)
-- ~~워크트리 옵션~~ (2026-08-19 완료 — FR-2의 후순위 옵션), 프로젝트별 기본 프리셋, 성능 튜닝 마감 (§7.1 실측)
+- **Offline/fault tolerance**: on adapter process crash, move the session state to `error` + one-click restart. On app crash, restore from the snapshot.
+- **Security**: we do not handle API keys directly — each CLI's own login (keychain) is used as is. No secrets are stored in the app DB.
+- **Platform**: macOS first (the development machine), with the structure kept cross-platform (Tauri).
+- **Language**: Korean-first UI, with strings separated so English is easy to add.
 
 ---
 
-## 9. 리스크와 대응
+## 8. Roadmap
 
-| 리스크 | 영향 | 대응 |
+### M0 — technical verification spike (short)
+
+- One Claude Agent SDK session streaming E2E from Tauri + a Node sidecar
+- The same scenario verified over the Codex app-server protocol
+- **Confirm that the permission preset can override the CLI's global setting (bypass) per session** ← the precondition for the approval UI holding together
+- Confirm that approval request, usage and session title events actually arrive ← if not, reconsider the integration approach
+- Confirm whether Claude Code file checkpoints can serve as the concurrent-session recovery path (FR-2)
+
+### M1 — MVP (the control loop turning from day one)
+
+- Project registration + sidebar + focus view (FR-1) — not a grid
+- Claude Code session GUI conversation + keyboard-first approval UI (FR-3)
+- **Inbox + `d` archive (FR-15, 20)** — the entry point of the §1.3 loop; without it the loop does not turn in M1
+- Two separated waiting badges + split global counters + "go to the next waiting item" (FR-12, part of 17)
+- Automatic session names (FR-18)
+- Read/unread (FR-16)
+- Inline concurrent-session warning (FR-2)
+
+### M1.5 — always on (redefined 2026-08-15 — detail in [plans/m1.5-plan.md](plans/m1.5-plan.md))
+
+Of the original four "reliability" items, the context gauge (FR-14) and the limit badge (part of FR-9) were **pulled forward and completed in M1**.
+On top of what is left, this milestone also solves what blocks real use (launching 2 terminals by hand, sessions dying when the host does, no notifications).
+
+- Desktop shell: Tauri migration steps 1~3 (sidecar supervision, reuse of the web implementation, system port swap)
+- Miss nothing: OS notifications, dock badge, global shortcuts
+- Do not get cut off: session resume (FR-10), persistent restore of approval rules, workspace snapshot
+- Take the scale: conversation virtual scrolling, message windowing, measured performance
+- First-run experience (FR-19)
+
+### M2 — control completed
+
+- Codex adapter (FR-7 completed)
+- Full-text conversation search (FR-21)
+- Git panel: Changes/History/Branches + IDE line jump (FR-4), then commit/staging/push (the part settled for v1.5)
+- File tree + code viewer (FR-5, 6)
+- Attachments/image paste (FR-13)
+- Command palette ⌘K, shortcut settings (FR-17 completed), OS notification policy
+
+### M2.5 — improvements after using it myself
+
+After building through M2, run it on a real project for a few days and work the complaints that come out of that as a backlog.
+This is the one point where a human judges (decided 2026-08-15, see plans/m1.5-plan.md).
+
+### M3 — intelligence
+
+- Weekly usage dashboard (FR-9 completed)
+- Orchestrator session + MCP tools (FR-11)
+- ~~Worktree option~~ (completed 2026-08-19 — FR-2's lower-priority option), per-project default presets, performance tuning finished (§7.1 measured)
+
+---
+
+## 9. Risks and responses
+
+| Risk | Impact | Response |
 |---|---|---|
-| **권한 프리셋이 전역 bypass를 못 덮어씀** | 승인 UI(핵심 기능) 무력화 | M0 최우선 검증. 불가 시 capability 선언으로 도구별 승인 UI 비활성, 인박스를 응답대기 중심으로 재구성 |
-| Codex 프로토콜이 버전마다 변동 | 어댑터 파손 | 어댑터에 버전 감지 + 프로토콜 스냅샷 테스트, M0에서 조기 검증 |
-| SDK가 컨텍스트/usage 세부치를 충분히 안 줄 수 있음 | FR-14 정확도 | capability로 'estimate' 격하 + ≈ 표시, 로그 파싱 보조 |
-| 같은 디렉토리 동시 세션의 파일 충돌 | **데이터 손실** | 생성 시점 명시적 경고 다이얼로그 + 동일 파일 수정 감지 뱃지 (FR-2), 워크트리 옵션 후순위 |
-| resume 불가 상황(도구 업데이트, 로그 유실) | FR-10 저하 | "기록 보기 + 새 세션" 폴백을 1급 경로로 설계 |
-| 오케스트레이터의 폭주(과도한 지시) | 비용·혼란 | 지시 가시화 + 세션별 수신 거부 + `create_session` 제안 카드 + 승인 프리셋 존중 |
+| **The permission preset cannot override global bypass** | The approval UI (a core feature) is neutered | Top-priority M0 verification. If impossible, disable the approval UI per tool via the capability declaration and rebuild the inbox around awaiting-response |
+| The Codex protocol changes between versions | Adapter breakage | Version detection in the adapter + protocol snapshot tests, verified early in M0 |
+| The SDK may not give enough context/usage detail | FR-14 accuracy | Demote to 'estimate' via capability + show ≈, with log parsing as backup |
+| File conflicts between concurrent sessions in the same directory | **Data loss** | An explicit warning dialog at creation time + a same-file-modification detection badge (FR-2), worktree option later |
+| Situations where resume is impossible (tool update, lost logs) | FR-10 degraded | Design the "view the record + new session" fallback as a first-class path |
+| The orchestrator running away (excessive instructions) | Cost and confusion | Instructions made visible + per-session refusal + a `create_session` proposal card + respecting the approval preset |
 
 ---
 
-## 10. 열린 질문 (다음 결정 대상)
+## 10. Open questions (next to be decided)
 
-1. 사용량 비용 추정의 단가 테이블 관리 방식 (하드코딩 vs 갱신 가능한 로컬 테이블)
+1. How the unit price table for usage cost estimation is maintained (hardcoded vs a locally updatable table)
 
-### 닫힌 질문 (v0.4에서 결정)
+### Closed questions (decided in v0.4)
 
-- 깃 커밋/스테이징 → **v1.5에 넣는다** (조회 패널 완성 직후, 같은 패널 확장). rebase 등 고급 조작은 계속 비목표.
-- 주간 사용량 데이터 소스 → **로그 파싱 유지** (SDK는 자기 세션의 턴별 usage만 제공, 주간 집계·플랜 한도 API 없음 확인 — FR-9 참조).
+- Git commit/staging → **goes into v1.5** (right after the read panel is finished, as an extension of the same panel). Advanced operations such as rebase remain non-goals.
+- Weekly usage data source → **stay with log parsing** (confirmed that the SDK only gives per-turn usage for its own sessions, with no weekly aggregation or plan limit API — see FR-9).
 
-- 프론트엔드 → **React**. 유휴 에너지는 렌더 정책(§7.1)이 결정하므로 프레임워크 경량성은 결정 요인이 아니며, 생태계·에이전트 기반 개발 친화성이 우선.
-- 오케스트레이터 `create_session` → **제안 카드 + 사람 확정** (조회·읽기·전송 세 도구는 자동).
-- "항상 허용" 규칙 → **패턴 허용 + 등록 시 매치 미리보기 + 설정에서 규칙 관리**. 표현력 제한 대신 결과 가시화.
-- `waiting_input` 알림 → **기본 무음(뱃지만), 모든 세션이 일을 마쳤을 때 "전부 완료" 1회 알림**.
+- Front end → **React**. Idle energy is decided by the render policy (§7.1), so framework lightness is not the deciding factor; ecosystem and agent-driven-development friendliness take priority.
+- Orchestrator `create_session` → **proposal card + human confirmation** (the three inspect/read/send tools are automatic).
+- "Always allow" rules → **patterns allowed + a match preview at registration + rule management in settings**. Make the consequences visible instead of limiting expressiveness.
+- `waiting_input` notification → **silent by default (badge only), with one "all done" notification when every session has finished its work**.
 
 ---
 
-**이 문서는 M0 스파이크 전 마지막 개정이다.** M0 검증 결과가 §2의 전제(권한 오버라이드, 승인·usage 이벤트)를 흔들면 문서의 상당 부분은 어차피 다시 쓴다. 그 전까지 추가로 다듬지 않는다 — **다음 작업은 문서가 아니라 코드다.**
+**This document is the last revision before the M0 spike.** If the M0 results shake §2's premises (permission override, approval and usage events) then much of this document gets rewritten anyway. Until then it is not polished any further — **the next piece of work is code, not documents.**
