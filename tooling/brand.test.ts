@@ -45,15 +45,37 @@ describe('이름은 한 곳에서 정한다', () => {
     // 발행은 되돌릴 수 없다(npm은 24시간 뒤 unpublish를 막는다). 어긋난 채로 나가지 않게
     // 여기서 먼저 잡는다 — 릴리스 스크립트도 같은 값을 써서 다시 적는다.
     const main = json('packaging/npm/centralu/package.json')
-    const arch = json('packaging/npm/darwin-arm64/package.json')
     expect(main.name).toBe(APP_SLUG)
     expect(main.version).toBe(APP_VERSION)
-    expect(arch.version).toBe(APP_VERSION)
-    expect(arch.name).toBe(`${APP_SLUG}-darwin-arm64`)
-    // 껍데기와 알맹이는 **정확히 같은 버전**이어야 한다 (범위로 두면 따로 놀 수 있다)
-    expect((main.optionalDependencies as Record<string, string>)[arch.name as string]).toBe(APP_VERSION)
-    // 아키텍처 패키지가 담는 번들 이름도 APP_NAME을 따른다
-    expect(arch.files).toContain(`${APP_NAME}.app`)
+
+    /*
+     * One entry per platform package. The bundle name is what the launcher looks for by
+     * literal name, so a rename that reaches `files` but not the launcher (or the reverse)
+     * ships a package that installs and then cannot find its own app.
+     */
+    const platforms = [
+      { dir: 'darwin-arm64', bundle: `${APP_NAME}.app` },
+      { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage` },
+    ]
+    for (const { dir, bundle } of platforms) {
+      const arch = json(`packaging/npm/${dir}/package.json`)
+      expect(arch.name, dir).toBe(`${APP_SLUG}-${dir}`)
+      expect(arch.version, dir).toBe(APP_VERSION)
+      // 껍데기와 알맹이는 **정확히 같은 버전**이어야 한다 (범위로 두면 따로 놀 수 있다)
+      expect((main.optionalDependencies as Record<string, string>)[arch.name as string], dir).toBe(APP_VERSION)
+      // 아키텍처 패키지가 담는 번들 이름도 APP_NAME을 따른다
+      expect(arch.files, dir).toContain(bundle)
+    }
+
+    /*
+     * npm refuses to install a package whose `os` does not list the running platform. Miss
+     * one here and the shim is simply uninstallable on that platform — with an npm error
+     * about the shim, which points nowhere near this file.
+     */
+    expect(main.os).toEqual(expect.arrayContaining(['darwin', 'linux']))
+    expect(Object.keys(main.optionalDependencies as object).sort()).toEqual(
+      platforms.map((p) => `${APP_SLUG}-${p.dir}`).sort(),
+    )
   })
 
   it('빌드한 .app을 여는 스크립트가 실제 번들 이름을 가리킨다', () => {

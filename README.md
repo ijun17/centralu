@@ -88,6 +88,7 @@ pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
 | [plans/m1.5-result.md](docs/plans/m1.5-result.md) | M1.5 실행 결과: 실측이 잡은 결함 5건, 성능, 남은 한계 | m1.5-plan |
 | [plans/m2-plan.md](docs/plans/m2-plan.md) | M2 계획 v2 (독립 재검증 반영) | m1.5-result |
 | [plans/m2-result.md](docs/plans/m2-result.md) | **M2 실행 결과**: 배포 빌드 통과, 실측 결함 5건, 도그푸딩 시작 방법 | m2-plan |
+| [releasing.md](docs/releasing.md) | How a version reaches users: npm package layout, CI, publish procedure | — |
 
 ## 문서 규칙
 

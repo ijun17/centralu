@@ -1,0 +1,108 @@
+# Publishes the `centralu-linux-x64` npm package.
+#
+# Why this is a workflow and not something a person runs (#14): scripts/release-npm.mts
+# refuses to package a bundle it did not build on the target platform, because every one
+# of its checks reads a real artifact. Nobody here has a Linux machine, so this runner is
+# the only host that can produce and verify that package.
+#
+# Deliberate limits:
+#   * `workflow_dispatch` only. Nothing here fires on a push, a tag, or a merge. Publishing
+#     is not reversible (npm blocks unpublish after 24h), so it stays a decision someone
+#     makes out loud.
+#   * Dry run by default. You have to turn it off on purpose.
+#   * This never publishes the `centralu` shim. The shim pins its platform packages to an
+#     exact version and may only go out once all of them are up, so it is published last,
+#     by hand, from a Mac: `pnpm release:npm --publish`.
+name: publish-linux-npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Rehearse only (npm pack, no publish)'
+        type: boolean
+        default: true
+      also_latest:
+        description: 'Also move the `latest` dist-tag to this version (only while no stable release exists)'
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    # Must stay the same image as .github/workflows/build.yml — see the pin rationale
+    # there. What is published has to be built against the same glibc floor that CI tests.
+    runs-on: ubuntu-22.04
+    # The gate that actually stops an accidental publish. Give this environment a required
+    # reviewer in repo settings and hold NPM_TOKEN here, not at repo level, so the token is
+    # unreachable from any other workflow.
+    environment: npm-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same list and the same reasons as .github/workflows/build.yml — kept in step with it.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils \
+            libfuse2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # Writes an .npmrc outside the checkout and points npm at it. That matters here:
+          # release-npm.mts aborts on a dirty working tree, and an .npmrc dropped into the
+          # repo would trip that check — and would be a credential sitting in the workspace.
+          registry-url: https://registry.npmjs.org
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: linux-x64
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Release
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          # Must be an npm *automation* token. A publish token of the classic kind still
+          # prompts for a 2FA code, and there is nobody here to type it — the run would
+          # just hang until it times out.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # The arguments are assembled in the shell rather than with `${{ a && b || c }}`.
+        # That expression is not a ternary: it falls through to `c` whenever `b` is falsy,
+        # and an empty string is falsy — so the "leave the flag off" branch would have
+        # produced `--publish`. Wrong in the one direction that cannot be undone.
+        run: |
+          args="--platform-only"
+          # Matched against "false", not against "not true": an empty or unexpected value
+          # then rehearses instead of publishing. Both wrong answers exist, only one of
+          # them is reversible.
+          if [ "${{ inputs.dry_run }}" = "false" ]; then args="$args --publish"; fi
+          if [ "${{ inputs.also_latest }}" = "true" ]; then args="$args --also-latest"; fi
+          echo "pnpm release:npm $args"
+          pnpm release:npm $args
+
+      # Keep the exact artifact that was packaged, so a later "what did we actually ship"
+      # question has an answer that is not a rebuild.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: centralu-linux-x64-published
+          path: packaging/npm/linux-x64/*.AppImage
+          if-no-files-found: error

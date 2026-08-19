@@ -1,0 +1,119 @@
+# Builds the desktop bundle on every supported platform and keeps the result as an
+# artifact.
+#
+# Why this exists at all (#14): nobody working on this repo owns a Linux machine, so
+# CI is not a convenience here — it is the only place a Linux bundle can be produced
+# or even proven to compile. Treat a red run on `linux-x64` as the real answer, not as
+# a CI quirk.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push makes an in-flight build irrelevant, and these are slow (Rust release
+# builds with LTO). Let it go.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    # A broken Linux build must not hide a working macOS one — that is exactly the
+    # comparison this workflow exists to give us.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            # Pinned, not `ubuntu-latest`. glibc is forward- but not backward-compatible:
+            # link on 24.04 and the binary refuses to start on 22.04 with
+            # `GLIBC_2.3x not found`. 22.04 is the oldest image that still ships
+            # webkit2gtk-4.1, which makes it the right floor to build against.
+            #
+            # Two artifacts ride on this, not one. Besides the Tauri binary, node-pty has
+            # no Linux prebuild, so `pty.node` is compiled here from source
+            # (packages/agent-host/scripts/bundle.mjs) and is glibc-bound the same way.
+            # Raising this image raises the minimum distro for both.
+            runner: ubuntu-22.04
+            # Which bundles get built is not repeated here — `tauri.linux.conf.json`
+            # and `tauri.conf.json` decide, and duplicating that list is how the two
+            # drift apart. If either stops producing a bundle, the upload step below
+            # fails rather than reporting a green build that shipped nothing.
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+              apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          - target: darwin-arm64
+            # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
+            # versions without warning, and a release build is not the place to find out.
+            runner: macos-14
+            # The `.app` is deliberately not uploaded. GitHub artifacts are zips, and
+            # zipping drops the exec bit and the code signature — what you would
+            # download is a bundle that cannot open. The `.dmg` carries both intact.
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        # webkit2gtk is the webview Tauri renders into; libxdo and libayatana-appindicator
+        # are what the tray-icon and global-shortcut features link against (see
+        # apps/desktop/src-tauri/Cargo.toml). patchelf and libfuse2 are not Tauri
+        # dependencies but AppImage tooling ones: linuxdeploy rewrites rpaths with patchelf,
+        # and it is itself distributed as an AppImage, so it needs FUSE to run.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils \
+            libfuse2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The host sidecar targets node22 (packages/agent-host/scripts/bundle.mjs), and
+          # the native addons are compiled against whatever node runs here.
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          # The cache is only valid per platform; the key would otherwise collide.
+          key: ${{ matrix.target }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build bundle
+        env:
+          # linuxdeploy and appimagetool are AppImages themselves and mount via FUSE.
+          # GitHub runners can refuse that, and when they do the failure is a bare
+          # "failed to run linuxdeploy" with nothing pointing at FUSE. This tells the
+          # tooling to unpack and run instead, which works with or without /dev/fuse.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: pnpm --filter @cc/desktop exec tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: centralu-${{ matrix.target }}
+          path: ${{ matrix.artifacts }}
+          # Without this, a build that silently bundles nothing looks like a green run.
+          if-no-files-found: error

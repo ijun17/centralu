@@ -27,6 +27,8 @@ packages/agent-host/src/adapters/codex/generated/
 
 # npm 배포용으로 복사해 넣는 앱 번들 (릴리스 스크립트가 채운다)
 packaging/npm/darwin-arm64/*.app/
+packaging/npm/linux-x64/*.AppImage
+packaging/npm/linux-x64/icon.png
 
 # 아이콘 후보 비교용 산출물 (pnpm icon --preview)
 icon-preview.png
