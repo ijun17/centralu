@@ -327,6 +327,18 @@ function threadIdOf(res: Record<string, unknown> | undefined): string | null {
   return typeof id === 'string' ? id : null
 }
 
+/**
+ * codex의 설정 폴더.
+ *
+ * codex CLI 본체가 `CODEX_HOME`을 존중한다 — 우리만 홈 경로를 박아 쓰면
+ * `CODEX_HOME`을 쓰는 사람에게 **엉뚱한 폴더를 보고** 로그인 여부를 답하게 된다.
+ * (로그인돼 있는데 "로그인 필요"로 보이거나 그 반대.)
+ */
+function codexHome(): string {
+  const custom = process.env.CODEX_HOME?.trim()
+  return custom ? custom : join(homedir(), '.codex')
+}
+
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
 
@@ -344,7 +356,7 @@ export class CodexAdapter implements AgentAdapter {
       const { stdout } = await exec(path ?? 'codex', ['--version'], { timeout: 5000 })
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       // 로그인 여부는 인증 파일 존재로 판단한다 (CLI를 띄우지 않고 값싸게)
-      const loggedIn = existsSync(join(homedir(), '.codex', 'auth.json'))
+      const loggedIn = existsSync(join(codexHome(), 'auth.json'))
       return {
         tool: 'codex',
         installed: true,
