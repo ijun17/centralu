@@ -565,7 +565,8 @@ function ChatStream({
       if (chat[m.index]?.kind === 'user') found = m.index
     }
     setStickyIndex(found)
-  }, [chat, virtualizer])
+    // scrollRef는 이 컴포넌트가 **받은 prop**이다 — 안에서 만든 ref와 달리 바뀔 수 있다
+  }, [chat, virtualizer, scrollRef])
 
   /**
    * 우리가 마지막으로 알고 있는 스크롤 위치.

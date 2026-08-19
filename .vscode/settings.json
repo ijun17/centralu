@@ -1,0 +1,31 @@
+{
+  // Tailwind v4는 `@import 'tailwindcss'` 하나로 시작하고 `@theme`·`@source`·`@apply`로
+  // 설정한다. VS Code 기본 CSS 검사기는 그 문법을 모르므로 전부 "Unknown at rule"로
+  // 잡는다 — 코드는 멀쩡한데 Problems 패널만 빨개진다. 그래서 이 검사만 끈다.
+  // (실제 CSS 오류는 빌드가 잡는다: `pnpm build`)
+  "css.lint.unknownAtRules": "ignore",
+
+  // 이 저장소의 TypeScript 버전을 쓴다 — VS Code 내장본과 달라지면
+  // 에디터에만 뜨는 유령 오류가 생긴다
+  "typescript.tsdk": "node_modules/typescript/lib",
+
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+
+  // 산출물은 검색·감시에서 뺀다 (모노레포에서 이게 없으면 검색이 느려진다)
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/target/**": true,
+    "**/dist/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/target": true,
+    "**/dist": true,
+    "**/pnpm-lock.yaml": true,
+    "packages/agent-host/src/adapters/codex/generated": true
+  }
+}
