@@ -2019,6 +2019,42 @@ test('압축 중은 응답 대기와 다르게 보인다', async ({ page }) => {
 })
 
 /**
+ * The elapsed count used to restart whenever the row was remounted (issue #23): a turn
+ * three minutes old read as if it had just begun. The lie ran in the worst direction —
+ * the longer the wait, the more it understated it.
+ *
+ * The count is derived from a start instant on the store now, so this ages the turn by
+ * moving that instant rather than by actually waiting. Switching to the grid and back tears
+ * the row down and builds it again, which is precisely what used to reset it.
+ */
+test('the elapsed count survives a view change — the start instant is what is stored', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'start')
+
+  await page.getByTestId('prompt-input').fill('something slow')
+  await page.getByTestId('send').click()
+  await expect(page.getByTestId('activity-row')).toBeVisible()
+
+  const id = await page.evaluate(() => {
+    const store = (window as any).__store
+    const sessionId = store.getState().focusedSessionId as string
+    // Three minutes and five seconds ago. Nothing else feeds the count
+    store.setState({ workingSince: { [sessionId]: Date.now() - 185_000 } })
+    return sessionId
+  })
+  await expect(page.getByTestId('activity-elapsed')).toHaveText(/^3m/)
+
+  await page.getByTestId('grid-button').click()
+  await expect(page.getByTestId('grid')).toBeVisible()
+  await expect(page.getByTestId('activity-row')).toBeHidden()
+
+  // Back to the focus view: a brand new row, still counting from the same instant
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('activity-row')).toBeVisible()
+  await expect(page.getByTestId('activity-elapsed')).toHaveText(/^3m/)
+})
+
+/**
  * 압축 실패는 지금까지 통째로 삼켜졌다 (실측: "Not enough messages to compact.").
  * 컨텍스트가 그대로인데 화면에는 아무 일도 없었던 것처럼 보이면 안 된다.
  */

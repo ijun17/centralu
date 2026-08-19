@@ -727,17 +727,32 @@ function ChatStream({
  *     숫자가 올라가는 걸 보면 멈춘 게 아니라는 것도 같이 알 수 있다.
  *
  * 중지 버튼을 여기에 둔다. 상단에도 있지만, 기다리는 사람의 눈은 대화 맨 아래에 있다.
+ *
+ * **The count is derived; only the tick lives here** (issue #23). This used to read
+ * `Date.now()` on mount and treat that as the start of the turn, which held right up until
+ * the component was remounted — switching to the grid and back, or moving between sessions,
+ * put a three-minute turn back at zero. The lie was small and in the worst direction: the
+ * longer a wait, the more the number understated it.
+ *
+ * Keeping the component alive would not have been the fix. What was stored was the wrong
+ * thing — an elapsed count, which is derived, and derived values should not be the thing
+ * that survives. The start instant lives on the store now (`workingSince`), and this
+ * subtracts it from the current time. The interval below no longer carries any state; it
+ * exists only to make the clock re-read once a second.
  */
 function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
-  const [seconds, setSeconds] = useState(0)
+  const startedAt = useStore((s) => s.workingSince[sessionId])
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    // 마운트 시점이 곧 이 턴이 시작된 시점이다 (working이 아니면 렌더되지 않는다)
-    const started = Date.now()
-    const id = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
+
+  // No instant means we genuinely do not know when this turn began — say nothing rather
+  // than start a fresh count, which is the mistake this whole row is here to stop making
+  const seconds = startedAt == null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000))
 
   return (
     <div className="flex items-center gap-2 py-2" data-testid="activity-row">

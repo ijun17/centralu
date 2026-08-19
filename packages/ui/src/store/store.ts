@@ -111,6 +111,23 @@ export type AppState = {
    * 저장소에는 넣지 않는다. 앱을 껐다 켤 때까지 살아남아야 할 만큼 무거운 것은 아니다.
    */
   drafts: Record<string, Draft>
+  /**
+   * When the turn a session is currently running started — the instant, per session.
+   *
+   * The "Waiting for response" line used to take `Date.now()` on mount and count up from
+   * there, so switching views restarted the clock: a turn three minutes old read as if it
+   * had just begun (issue #23). The component was holding the wrong half. **Elapsed time is
+   * derived; the start instant is the fact.** Keeping the instant here means the count is
+   * recomputed rather than resumed, and nothing depends on a component staying alive.
+   *
+   * Not `waitingSince`, which sounds like the same thing and is the opposite one: that is
+   * when the session started waiting for *a human* (approval, input, error), and the
+   * reducer sets it to null the moment a session goes back to `working` — precisely when
+   * this line is on screen. Two clocks, because there are two directions of waiting.
+   *
+   * Not persisted. A turn does not survive the app closing.
+   */
+  workingSince: Record<string, number>
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
@@ -345,6 +362,42 @@ function liveFactsOf(
   }
 }
 
+/**
+ * Keep `workingSince` in step with who is actually working (issue #23).
+ *
+ * A session that starts a turn gets the current instant; one that stops working loses its
+ * entry, so the next turn cannot inherit the previous turn's start. An entry that is
+ * already there is never overwritten — that is the whole point, since a turn's start does
+ * not move just because we looked again.
+ *
+ * Returns `prev` unchanged when nothing moved. Zustand hands this object straight to
+ * subscribers, so allocating a fresh one per streaming delta would re-render every reader
+ * of it a few times a second for no reason.
+ *
+ * Sessions that were already running before we knew about them (first attach, reconnect)
+ * are stamped with the moment we found out. That is not when the turn began, and we cannot
+ * know when it did — the host does not send it. It is the earliest instant we can honestly
+ * claim, and it is still stable across every view change after that.
+ */
+function trackWorkingSince(
+  prev: Record<string, number>,
+  sessions: Record<string, SessionSummary>,
+  now: number,
+): Record<string, number> {
+  let next = prev
+  const copy = () => (next === prev ? (next = { ...prev }) : next)
+  for (const s of Object.values(sessions)) {
+    if (s.state === 'working') {
+      if (prev[s.id] == null) copy()[s.id] = now
+    } else if (prev[s.id] != null) {
+      delete copy()[s.id]
+    }
+  }
+  // Drop instants for sessions that no longer exist — the ids never come back, but the map grows
+  for (const id of Object.keys(prev)) if (!sessions[id]) delete copy()[id]
+  return next
+}
+
 /** 저장소에서 들여온 항목보다 항상 큰 번호를 쓰도록 밀어 올린다 */
 function bumpSeqAbove(items: { seq: number }[]): void {
   for (const it of items) if (it.seq > chatSeq) chatSeq = it.seq
@@ -419,6 +472,7 @@ export const useStore = create<AppState>((set, get) => ({
   sessions: {},
   chat: {},
   drafts: {},
+  workingSince: {},
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
@@ -488,24 +542,28 @@ export const useStore = create<AppState>((set, get) => ({
       // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
       platform.agents.grid().catch(() => [] as string[]),
     ])
-    set({
+    const known: Record<string, SessionSummary> = Object.fromEntries(
+      sessions.map((s) => [
+        s.id,
+        {
+          ...initialSession({ id: s.id, projectId: s.projectId, name: s.name, tool: s.tool, effort: s.effort }),
+          autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
+          lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
+          // 살아-있는-동안 사실들도 host가 준다 — 이게 없으면 state=waiting_approval인데
+          // 카드를 그릴 payload가 없어 승인 요청이 화면에 영영 안 나타난다 (재시작 후 실측)
+          ...liveFactsOf(s),
+        },
+      ]),
+    )
+    set((st) => ({
       projects: Object.fromEntries(projects.map((p) => [p.id, p])),
-      sessions: Object.fromEntries(
-        sessions.map((s) => [
-          s.id,
-          {
-            ...initialSession({ id: s.id, projectId: s.projectId, name: s.name, tool: s.tool, effort: s.effort }),
-            autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
-            lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
-            // 살아-있는-동안 사실들도 host가 준다 — 이게 없으면 state=waiting_approval인데
-            // 카드를 그릴 payload가 없어 승인 요청이 화면에 영영 안 나타난다 (재시작 후 실측)
-            ...liveFactsOf(s),
-          },
-        ]),
-      ),
+      sessions: known,
+      // A session can already be mid-turn when we arrive; stamp it now so the elapsed
+      // line has an instant to count from instead of its own mount (issue #23)
+      workingSince: trackWorkingSince(st.workingSince, known, Date.now()),
       gridPanels,
       connection: 'connected',
-    })
+    }))
 
     // 목록 등록 전에 도착한 이벤트를 재생한다 — 앱을 켜기 전부터 돌던 세션의 첫 출력이 여기 있다
     replayPendingEvents(get)
@@ -712,10 +770,16 @@ export const useStore = create<AppState>((set, get) => ({
     // 내(혹은 오케스트레이터)가 보낸 말은 host도 읽음 처리한다 — 화면도 따라간다
     if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
 
-    set((st) => ({
-      sessions: { ...st.sessions, [sessionId]: withSeq },
-      chat: { ...st.chat, [sessionId]: chat },
-    }))
+    set((st) => {
+      const sessions = { ...st.sessions, [sessionId]: withSeq }
+      return {
+        sessions,
+        chat: { ...st.chat, [sessionId]: chat },
+        // A turn begins because an event arrived — this is where its start instant is
+        // recorded, so the elapsed line survives remounting (issue #23)
+        workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
+      }
+    })
 
     // 상태가 바뀌었을 때만 알림을 판정한다 (판정은 core, 전달은 system 포트)
     if (withSeq.state !== cur.state) {
@@ -1027,17 +1091,26 @@ export const useStore = create<AppState>((set, get) => ({
      * 실패하면 아래에서 되돌린다.
      */
     const prevState = get().sessions[sessionId]?.state
-    set((s) => ({
-      /*
-        pending: 내가 방금 그린 것이고 host의 확인을 아직 못 받았다.
-        host가 user_message로 같은 말을 알려주면 이 항목이 그것으로 확정된다 —
-        표식이 없으면 같은 말이 두 번 그려진다.
-      */
-      chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label, pending: true }] },
-      sessions: s.sessions[sessionId]
-        ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' } }
-        : s.sessions,
-    }))
+    set((s) => {
+      const sessions = s.sessions[sessionId]
+        ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const } }
+        : s.sessions
+      return {
+        /*
+          pending: 내가 방금 그린 것이고 host의 확인을 아직 못 받았다.
+          host가 user_message로 같은 말을 알려주면 이 항목이 그것으로 확정된다 —
+          표식이 없으면 같은 말이 두 번 그려진다.
+        */
+        chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label, pending: true }] },
+        sessions,
+        /*
+          The wait starts here, not when the host's first event lands. Waking a sleeping
+          session can take seconds, and those seconds are the ones a person is staring at —
+          counting from the host's reply would quietly undercount the worst waits.
+        */
+        workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
+      }
+    })
     try {
       await get().platform!.agents.send(sessionId, text, attachments)
       // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
@@ -1052,14 +1125,19 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
-      set((s) => ({
-        chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
-        // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
-        sessions:
+      set((s) => {
+        const sessions =
           s.sessions[sessionId] && prevState
             ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: prevState } }
-            : s.sessions,
-      }))
+            : s.sessions
+        return {
+          chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
+          // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
+          sessions,
+          // ...and the clock we started above stops with it, so a later turn cannot inherit it
+          workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
+        }
+      })
       const e = err as Error & { code?: string }
       // host가 알아서 되살린 뒤 보낸다 — 여기까지 왔다면 되살리기 자체가 실패한 것이다
       set({ toast: `Could not send: ${e.message}` })
@@ -1344,6 +1422,9 @@ export const useStore = create<AppState>((set, get) => ({
       return {
         sessions,
         chat,
+        // Same reason as attach: a session may have been working across the gap, and the
+        // sessions that vanished should not leave their instants behind (issue #23)
+        workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
         focusedSessionId: st.focusedSessionId && sessions[st.focusedSessionId] ? st.focusedSessionId : null,
       }
     })
@@ -1424,7 +1505,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   async restartSession(sessionId) {
     const platform = get().platform!
-    set((s) => ({ sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'idle' } } }))
+    set((s) => {
+      const sessions = { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'idle' as const } }
+      // Restarting ends whatever turn was running — its clock goes with it (issue #23)
+      return { sessions, workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()) }
+    })
     const r = await platform.agents.restartSession(sessionId)
     set((s) => ({
       sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },

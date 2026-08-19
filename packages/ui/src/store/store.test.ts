@@ -31,6 +31,7 @@ beforeEach(() => {
     sessions: {},
     chat: {},
     drafts: {},
+    workingSince: {},
     focusedSessionId: null,
     focusedProjectId: null,
     history: {},
@@ -192,6 +193,56 @@ describe('살아-있는-동안 사실 이어받기', () => {
     mock.setConnectionState('connected')
 
     await vi.waitFor(() => expect(useStore.getState().sessions['lf-s2']!.pendingApproval).toBeNull())
+  })
+})
+
+/*
+ * When the current turn started (issue #23).
+ *
+ * The "Waiting for response" line counted up from its own mount, so any remount put a
+ * three-minute turn back at zero. The instant lives here now and the count is derived from
+ * it — which only helps if the instant itself holds still while a turn streams, and is let
+ * go when the turn ends. Both are what these check.
+ *
+ * It is deliberately not `waitingSince`: that one is when a session started waiting for a
+ * *human*, and the reducer nulls it the moment a session goes back to working.
+ */
+describe('턴이 시작된 시각 (이슈 #23)', () => {
+  it('스트리밍이 이어지는 동안 시각은 움직이지 않는다 — 경과는 여기서 파생된다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('ws-s1', sessionInfo('ws-s1'))
+    await useStore.getState().attach(mock)
+
+    useStore.getState().dispatchEvent(delta('ws-s1', '첫 글자'))
+    const started = useStore.getState().workingSince['ws-s1']
+    expect(started).toBeDefined()
+    expect(useStore.getState().sessions['ws-s1']!.state).toBe('working')
+
+    useStore.getState().dispatchEvent(delta('ws-s1', ' 그리고 다음'))
+    expect(useStore.getState().workingSince['ws-s1']).toBe(started)
+  })
+
+  it('턴이 끝나면 시각도 놓는다 — 다음 턴이 남의 시작을 물려받으면 안 된다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('ws-s2', sessionInfo('ws-s2'))
+    await useStore.getState().attach(mock)
+
+    useStore.getState().dispatchEvent(delta('ws-s2', '답'))
+    expect(useStore.getState().workingSince['ws-s2']).toBeDefined()
+
+    useStore.getState().dispatchEvent({ sessionId: 'ws-s2', type: 'turn_complete' } as NormalizedEvent)
+    expect(useStore.getState().sessions['ws-s2']!.state).toBe('waiting_input')
+    expect(useStore.getState().workingSince['ws-s2']).toBeUndefined()
+  })
+
+  it('앱을 켜기 전부터 돌던 세션에도 시각이 찍힌다 — 없으면 화면이 셀 근거가 없다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('ws-s3', sessionInfo('ws-s3', { state: 'working' }))
+
+    await useStore.getState().attach(mock)
+
+    // 턴이 진짜 시작된 시각은 host가 안 알려준다 — 우리가 알게 된 순간이 가장 이른 정직한 답이다
+    expect(useStore.getState().workingSince['ws-s3']).toBeDefined()
   })
 })
 
