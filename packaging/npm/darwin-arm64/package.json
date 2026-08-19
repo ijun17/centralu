@@ -1,6 +1,6 @@
 {
-  "name": "@centralu/darwin-arm64",
-  "version": "0.1.0",
+  "name": "centralu-darwin-arm64",
+  "version": "0.1.0-beta.1",
   "description": "Centralu 앱 번들 (macOS · Apple Silicon)",
   "license": "MIT",
   "author": "ijun17",

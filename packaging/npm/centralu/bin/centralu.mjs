@@ -7,7 +7,7 @@
  * **받아온 프로그램이** 붙인다 — 브라우저는 붙이고 npm은 안 붙인다. 그래서 npm으로
  * 설치하면 서명이 애드혹이어도 경고 없이 그냥 열린다 (docs/plans/beta-release-checklist.md §2).
  *
- * 앱 본체는 아키텍처별 패키지(`@centralu/darwin-arm64`)에 들어 있다. 이 패키지는
+ * 앱 본체는 아키텍처별 패키지(`centralu-darwin-arm64`)에 들어 있다. 이 패키지는
  * 그것을 찾아 띄우는 얇은 껍데기다 — esbuild·swc가 쓰는 것과 같은 구조.
  */
 import { execFileSync, spawn } from 'node:child_process'
@@ -24,7 +24,7 @@ const INSTALLED = `/Applications/${BUNDLE}`
 
 /** 아키텍처별 패키지 안의 `.app`. 못 찾으면 null */
 function bundledApp() {
-  for (const dep of ['@centralu/darwin-arm64']) {
+  for (const dep of ['centralu-darwin-arm64']) {
     try {
       return join(dirname(require.resolve(`${dep}/package.json`)), BUNDLE)
     } catch {
@@ -49,7 +49,7 @@ function explainMissing() {
     )
   }
   return (
-    '앱 본체 패키지(@centralu/darwin-arm64)를 찾지 못했습니다.\n' +
+    '앱 본체 패키지(centralu-darwin-arm64)를 찾지 못했습니다.\n' +
     '설치가 중간에 끊겼을 수 있습니다 — `npm i -g centralu`로 다시 설치해 주세요.'
   )
 }

@@ -1,6 +1,6 @@
 {
   "name": "centralu",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 macOS 데스크톱 앱",
   "license": "MIT",
   "author": "ijun17",
@@ -33,6 +33,6 @@
     "darwin"
   ],
   "optionalDependencies": {
-    "@centralu/darwin-arm64": "0.1.0"
+    "centralu-darwin-arm64": "0.1.0-beta.1"
   }
 }

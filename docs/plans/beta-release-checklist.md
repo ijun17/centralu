@@ -148,7 +148,10 @@ npm이 GUI 앱 일반에 맞는 통로라는 말이 아니다. 이 앱에 한해
       `--publish`를 따로 요구한다. 발행 전에 작업 트리 청결·verify·서명·실행 비트·arm64를
       검사하고, 버전은 brand.ts에서 받아 두 package.json에 적는다.
       아키텍처 패키지를 **먼저** 발행한다 (반대로 하면 없는 의존을 바라보는 순간이 생긴다)
-- [ ] 실제 발행 (`pnpm release:npm --publish`) — npm 계정 로그인 후
+- [ ] 실제 발행 (`pnpm release:npm --publish`) — `npm login` 후.
+      알맹이 패키지는 **스코프 없이** `centralu-darwin-arm64`로 간다. `@centralu/…`로 하려면
+      npm 조직을 먼저 만들어야 하는데, 그 이름은 사용자에게 안 보이므로 발행을 막을 이유가 없다
+      (나중에 바꿔도 껍데기의 optionalDependencies 한 줄이다)
 - [ ] GitHub Releases `.dmg`는 **보조 경로**로만 둔다. 거기서 받으면 경고를 본다는 것을 함께 적는다
 - [ ] brew 탭은 서명 이후로 미룬다 — cask는 격리를 기본으로 붙이므로 지금 얹으면 실패 경험만 넓힌다
 
@@ -183,7 +186,11 @@ x64 프리빌드도 함께 넣고 `lipo`로 합쳐야 한다.
 
 - [x] 버전 세 곳 일치 (`tauri.conf.json`, `Cargo.toml`, `apps/desktop/package.json`) — 0.1.0.
       어긋나면 `tooling/brand.test.ts`가 잡는다
-- [ ] 베타면 `0.1.0-beta.1` — 기대치를 버전이 먼저 말하게 한다
+- [x] 베타면 `0.1.0-beta.1` — 기대치를 버전이 먼저 말하게 한다.
+      Tauri가 프리릴리스 문자열을 받아 `Centralu_0.1.0-beta.1_aarch64.dmg`를 만들고,
+      Info.plist의 `CFBundleShortVersionString`에도 그대로 들어가며 앱이 정상 기동하는 것을 확인했다.
+      다만 Apple 규약은 그 필드에 숫자 1~3마디를 기대한다 — 직접 배포에는 무해하지만
+      앱스토어로 갈 일이 생기면 숫자만 남겨야 한다 (지금 경로는 앱스토어가 아니다)
 - [x] README에 전제조건·설치법·알려진 한계 / [ ] 스크린샷은 아직
 - [x] 자동 업데이트 — **Tauri updater는 쓰지 않는다.** npm과 싸운다(앱이 node_modules 안에서
       자기를 갈아치우면 npm이 아는 버전과 어긋난다) 대신 **레지스트리가 곧 업데이트 채널이다**:

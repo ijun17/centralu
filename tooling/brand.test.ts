@@ -46,7 +46,7 @@ describe('이름은 한 곳에서 정한다', () => {
     expect(main.name).toBe(APP_SLUG)
     expect(main.version).toBe(APP_VERSION)
     expect(arch.version).toBe(APP_VERSION)
-    expect(arch.name).toBe(`@${APP_SLUG}/darwin-arm64`)
+    expect(arch.name).toBe(`${APP_SLUG}-darwin-arm64`)
     // 껍데기와 알맹이는 **정확히 같은 버전**이어야 한다 (범위로 두면 따로 놀 수 있다)
     expect((main.optionalDependencies as Record<string, string>)[arch.name as string]).toBe(APP_VERSION)
     // 아키텍처 패키지가 담는 번들 이름도 APP_NAME을 따른다

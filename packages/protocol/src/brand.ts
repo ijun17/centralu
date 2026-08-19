@@ -16,8 +16,14 @@ export const APP_NAME = 'Centralu'
 /** 번들 식별자 — `tauri.conf.json`의 identifier와 같아야 한다 */
 export const APP_ID = 'app.centralu'
 
-/** 세 곳(tauri.conf.json · Cargo.toml · apps/desktop/package.json)이 이 값과 같아야 한다 */
-export const APP_VERSION = '0.1.0'
+/**
+ * 세 곳(tauri.conf.json · Cargo.toml · apps/desktop/package.json)과 npm 패키지 둘이
+ * 이 값과 같아야 한다 — 어긋나면 `tooling/brand.test.ts`가 잡는다.
+ *
+ * 베타를 버전으로 먼저 말한다. "0.1.0"은 완성된 1차 릴리스처럼 읽히지만
+ * "0.1.0-beta.1"은 기대치를 스스로 낮춘다 — 받는 사람이 문서를 안 읽어도 안다.
+ */
+export const APP_VERSION = '0.1.0-beta.1'
 
 /** 기계가 읽는 이름 — 표시용과 달리 소문자·하이픈 형태를 지킨다 */
 export const APP_SLUG = 'centralu'
