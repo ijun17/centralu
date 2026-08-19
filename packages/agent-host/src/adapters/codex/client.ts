@@ -37,6 +37,8 @@ export class CodexClient {
   private nextId = 1
   private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
   private closed = false
+  /** onExit를 한 번만 부르기 위한 표식 ('error'와 'exit'이 둘 다 올 수 있다) */
+  private finished = false
 
   constructor(
     private handlers: CodexClientHandlers,
@@ -49,12 +51,32 @@ export class CodexClient {
       detached: false,
     })
 
+    /**
+     * spawn 실패(ENOENT — nvm 전환·codex 삭제로 경로가 어긋난 경우)는 'exit'이 아니라
+     * 'error'로 온다. 리스너가 없으면 uncaughtException으로 올라가 **host 전체가 죽고,
+     * codex 하나 없다는 이유로 살아 있는 Claude 세션까지 전부 끊긴다.** 여기서 받아서
+     * 이 세션만 실패시킨다.
+     */
+    this.proc.on('error', (err) => {
+      if (this.finished) return
+      this.finished = true
+      this.closed = true
+      const why = `codex app-server failed to start: ${err.message}`
+      for (const [, p] of this.pending) p.reject(new Error(why))
+      this.pending.clear()
+      this.handlers.onExit(null, false)
+    })
+    // spawn이 실패한 뒤의 stdin write는 스트림 'error'로 또 던진다 — 위에서 이미 처리했으므로 삼킨다
+    this.proc.stdin.on('error', () => {})
+
     createInterface({ input: this.proc.stdout }).on('line', (line) => this.onLine(line))
     this.proc.stderr.on('data', (d) => {
       const s = String(d).trim()
       if (s) console.error('[codex]', s.slice(0, 500))
     })
     this.proc.on('exit', (code) => {
+      if (this.finished) return
+      this.finished = true
       /*
        * **우리가 닫은 것과 저쪽이 죽은 것은 다르다.**
        *

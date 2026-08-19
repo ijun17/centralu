@@ -1,7 +1,7 @@
 /** T3-3 완료 기준: 인메모리 어댑터 목으로 RPC 통합 검증 */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { tmpdir } from 'node:os'
-import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
@@ -39,6 +39,15 @@ class FakeHandle implements SessionHandle {
       sessionId: this.sessionId,
       callId: `c-${title.length}`,
       summary: { tool, title, readOnly: false, paths: [] },
+    })
+  }
+  /** 승인 요청 하나 (재연결 복원 테스트용 — detail이 목록에 실려야 카드를 다시 그린다) */
+  emitApproval(requestId: string) {
+    this.emit({
+      type: 'approval_request',
+      sessionId: this.sessionId,
+      requestId,
+      detail: { kind: 'command', command: 'rm -rf node_modules', cwd: '/tmp' },
     })
   }
   async dispose() { this.disposed = true }
@@ -1130,5 +1139,284 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     const p = await addProject()
     await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
     expect(adapter.lastOrchestratorTools).toBeUndefined()
+  })
+
+  /*
+   * recall이 짚어준 seq로 읽으러 왔는데 창 끝머리만 보이던 문제.
+   * around가 있으면 그 대목이 **창 가운데**에 와야 한다 — 아니면
+   * "찾았는데 갈 수가 없는" 상태가 그대로 남는다.
+   */
+  it('read_session의 around는 그 대목을 가운데에 두고 자른다', async () => {
+    const { a, tools } = await setup()
+    // 사람 30마디 + 답 30개 = seq 1..60 (send마다 사용자 행과 에코 델타가 한 쌍)
+    for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: `메시지 ${i}번` })
+
+    // '메시지 15번'의 seq는 29 (i번째 send의 사용자 행이 2i-1)
+    const r = await tools.readSession(a.id, 10, { around: 29 })
+    const joined = r.lines!.join('\n')
+    expect(joined).toContain('메시지 15번')
+    // 꼬리를 자른 게 아니라는 증거 — 끝머리는 창에 없어야 한다
+    expect(joined).not.toContain('메시지 30번')
+  })
+})
+
+/**
+ * 잠든 세션에 말이 **동시에** 두 번 오면 (사람 + 오케스트레이터가 흔한 조합)
+ * 둘 다 "프로세스가 없다"를 보고 각자 되살렸다 — 프로세스가 둘 뜨고
+ * 먼저 뜬 쪽은 핸들 맵에서 밀려나 dispose 없이 영영 고아가 됐다 (TOCTOU).
+ */
+describe('동시에 말을 걸어도 되살리기는 한 번이다', () => {
+  class SlowAdapter extends FakeAdapter {
+    creations = 0
+    override async createSession(opts: CreateSessionOpts, emit: EventSink) {
+      this.creations++
+      // 진짜 어댑터는 프로세스가 뜨는 데 시간이 걸린다 — 그 창에서 경쟁이 난다
+      await new Promise((r) => setTimeout(r, 20))
+      return super.createSession(opts, emit)
+    }
+  }
+
+  it('두 send가 같은 되살리기를 기다린다 — 프로세스는 하나만 뜬다', async () => {
+    const a = new SlowAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    const call = createRpcHandler(m, adapters)
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+    a.creations = 0
+
+    await Promise.all([
+      call('agents.send', { sessionId: s.id, text: '사람의 말' }),
+      call('agents.send', { sessionId: s.id, text: '오케스트레이터의 말' }),
+    ])
+
+    expect(a.creations).toBe(1)
+    expect(a.handleOf(s.id)!.sent).toEqual(expect.arrayContaining(['사람의 말', '오케스트레이터의 말']))
+  })
+})
+
+/**
+ * 첫 프롬프트로 만든 세션. 어댑터로 보내기만 하고 저장하지 않으면
+ * 다시 켠 뒤의 기록이 **답부터 시작한다** — 무엇을 물었는지가 없다.
+ */
+describe('첫 프롬프트도 기록에 남는다', () => {
+  it('user 행으로 저장되고 user_message 이벤트에 seq가 실린다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: p.path, tool: 'claude', initialPrompt: '처음부터 이걸 해줘',
+    })) as { id: string }
+
+    // 어댑터에도 갔고
+    expect(adapter.last!.sent).toEqual(['처음부터 이걸 해줘'])
+    // 기록에도 남았다
+    const msgs = (await rpc('messages.load', { sessionId: s.id, limit: 10 })) as {
+      role: string
+      seq: number
+      payload: { text?: string }
+    }[]
+    const first = msgs.find((m) => m.role === 'user')!
+    expect(first.payload.text).toBe('처음부터 이걸 해줘')
+    // UI의 낙관적 렌더가 자기 것을 알아보는 기준은 seq다 — send()와 같은 계약
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'user_message', sessionId: s.id, seq: first.seq, text: '처음부터 이걸 해줘' }),
+    )
+    // 내가 보낸 건 읽은 것 — 첫 프롬프트로 안읽음 배지가 뜨면 안 된다
+    const after = mgr.listSessions().find((x) => x.id === s.id)!
+    expect(after.lastReadSeq).toBeGreaterThanOrEqual(first.seq)
+  })
+})
+
+/**
+ * 순서는 전역 하나(sidebar_order)다. 한 프로젝트 안에서 끌어 정렬했을 뿐인데
+ * 다른 프로젝트의 순서까지 섞이면 안 된다 — 이 프로젝트가 차지하던 자리만 바뀐다.
+ */
+describe('프로젝트 안의 재정렬은 전역 순서를 흔들지 않는다', () => {
+  it('움직이지 않은 세션은 있던 자리에 그대로 남는다', async () => {
+    const { mkdtempSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const p1 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-p1-')) })) as { id: string; path: string }
+    const p2 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-p2-')) })) as { id: string; path: string }
+    // 전역 순서: a1, b1, a2, b2 (생성 순)
+    const mk = async (proj: { id: string; path: string }) =>
+      ((await rpc('agents.createSession', { projectId: proj.id, cwd: proj.path, tool: 'claude' })) as { id: string }).id
+    const a1 = await mk(p1)
+    const b1 = await mk(p2)
+    const a2 = await mk(p1)
+    const b2 = await mk(p2)
+
+    // p1 안에서만 순서를 뒤집는다
+    const after = mgr.reorderSessions(p1.id, [a2, a1]).map((s) => s.id)
+
+    // p1의 자리(1번째·3번째)만 바뀌고 p2는 그대로다
+    expect(after).toEqual([a2, b1, a1, b2])
+    // 저장도 같은 순서다 — 다시 켜면 화면과 어긋나면 안 된다
+    expect(store.listSessions().map((s) => s.id)).toEqual([a2, b1, a1, b2])
+  })
+})
+
+/**
+ * 밖(터미널)에서 이어간 대화 따라잡기 — **스트리밍으로 쌓인 기록**에서.
+ * 저장된 행은 델타 조각이라, 마지막 행과 완전한 메시지를 비교하면 영원히
+ * 일치하지 않아 따라잡기가 늘 0건이었다 (조용한 실패).
+ */
+describe('델타로 쌓인 기록에서도 따라잡는다', () => {
+  class SyncAdapter2 extends FakeAdapter {
+    toolHistory: { role: 'user' | 'assistant'; text: string }[] = []
+    async listExternalSessions() {
+      return [{ externalId: 'ext-1', title: '대화', updatedAt: 1 }]
+    }
+    async readExternalHistory() {
+      return this.toolHistory
+    }
+  }
+
+  it('마지막 응답을 조각에서 되살려 맞추고, 그 뒤만 이어붙인다', async () => {
+    const a = new SyncAdapter2()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    const call = createRpcHandler(m, adapters)
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: '질문' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+
+    // 응답이 스트리밍 조각으로 쌓인다 (실제 저장 형태)
+    const h = a.handleOf(s.id)!
+    h.emitDelta('답의 ')
+    h.emitDelta('앞부분과 뒷부분')
+    // 도구 기록에는 같은 응답이 **완전한 메시지 하나**로 남아 있다
+    a.toolHistory.push({ role: 'assistant', text: '답의 앞부분과 뒷부분' })
+
+    await m.archive(s.id, true)
+    await m.archive(s.id, false)
+    // 그 사이 터미널에서 이어서 작업했다
+    a.toolHistory.push({ role: 'user', text: '터미널에서 한 말' }, { role: 'assistant', text: '터미널 답' })
+
+    await m.resumeSession(s.id)
+
+    const texts = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as { payload: { text?: string } }[])
+      .map((r) => r.payload.text)
+      .filter(Boolean)
+    // 중복 없이 뒷부분만 붙는다 — 0건(못 찾음)도, 통째 중복도 아니다
+    expect(texts).toEqual(['질문', '답의 ', '앞부분과 뒷부분', '터미널에서 한 말', '터미널 답'])
+    expect(events.some((e) => e.type === 'history_synced' && e.added === 2)).toBe(true)
+  })
+})
+
+/**
+ * 종료 길에 dispose 하나가 실패해도 나머지는 정리되어야 한다.
+ * Promise.all이면 거절 하나가 전체를 끊고, 그 뒤의 정리(터미널·DB)까지 못 간다.
+ */
+describe('disposeAll은 하나가 실패해도 끝까지 간다', () => {
+  it('실패한 세션을 건너뛰고 나머지를 정리한다', async () => {
+    const p = await addProject()
+    const s1 = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h1 = adapter.handleOf(s1.id)!
+    const s2 = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h2 = adapter.handleOf(s2.id)!
+    h1.dispose = async () => {
+      throw new Error('이 프로세스는 죽기를 거부한다')
+    }
+
+    await expect(mgr.disposeAll()).resolves.toBeUndefined()
+    expect(h2.disposed).toBe(true)
+    expect(mgr.isLive(s1.id)).toBe(false)
+    expect(mgr.isLive(s2.id)).toBe(false)
+  })
+})
+
+/**
+ * 어댑터가 죽었다고 알렸는데(adapter_crashed) 핸들이 handles에 남아 있으면,
+ * send()가 handles.has만 보고 **끝난 큐로 push해 다음 말이 조용히 사라진다.**
+ * 핸들을 걷어내면 send의 "없으면 되살려 보낸다" 경로가 자동 복구가 된다.
+ */
+describe('크래시한 세션에 다시 말을 걸면 되살려서 보낸다', () => {
+  it('adapter_crashed가 오면 핸들이 걷히고, 다음 send는 새 프로세스로 간다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const dead = adapter.handleOf(s.id)!
+    // 프로세스가 죽었다 — 어댑터가 알린다 (claude 스트림 침묵 종료 경로와 동일)
+    ;(dead as unknown as { emit: (e: NormalizedEvent) => void }).emit({
+      type: 'error',
+      sessionId: s.id,
+      error: { code: 'adapter_crashed', message: 'process ended unexpectedly', retryable: true },
+    })
+
+    expect(mgr.isLive(s.id)).toBe(false)
+    expect(dead.disposed).toBe(true)
+
+    // 죽은 큐가 아니라 **되살아난 새 프로세스**가 이 말을 받아야 한다
+    await rpc('agents.send', { sessionId: s.id, text: '크래시 후의 말' })
+    const revived = adapter.handleOf(s.id)!
+    expect(revived).not.toBe(dead)
+    expect(revived.sent).toContain('크래시 후의 말')
+    expect(dead.sent).not.toContain('크래시 후의 말')
+  })
+})
+
+/*
+ * 재연결한 UI는 이벤트를 놓쳤다 — 목록(SessionInfo)이 살아-있는-동안 사실까지 실어야
+ * state=waiting_approval인 세션의 카드를 다시 그리고 requestId로 응답할 수 있다.
+ * 이 필드들이 없던 동안 재연결 후 승인 카드가 영영 안 떴다 (실측).
+ */
+describe('살아-있는-동안 사실이 목록에 실린다', () => {
+  const listed = async (id: string) =>
+    ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === id)!
+
+  it('승인 요청이 pendingApproval로 실리고, 해소되면 걷힌다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h = adapter.handleOf(s.id)!
+
+    h.emitApproval('req-1')
+    let m = await listed(s.id)
+    expect(m.state).toBe('waiting_approval')
+    expect(m.pendingApproval).toEqual({
+      requestId: 'req-1',
+      detail: { kind: 'command', command: 'rm -rf node_modules', cwd: '/tmp' },
+    })
+
+    h.respondApproval('req-1', 'allow')
+    m = await listed(s.id)
+    expect(m.pendingApproval).toBeNull()
+  })
+
+  it('활동·한도·사용량·컨텍스트도 실리고, 회복하면 한도가 걷힌다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h = adapter.handleOf(s.id)!
+    const emit = (e: NormalizedEvent) => (h as unknown as { emit: (e: NormalizedEvent) => void }).emit(e)
+
+    emit({ type: 'usage_update', sessionId: s.id, tokens: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 } })
+    emit({ type: 'context_update', sessionId: s.id, used: 100, window: 1000, exactness: 'exact' })
+    emit({ type: 'limit_reached', sessionId: s.id, resumeAt: '2026-08-19T12:00:00Z' })
+    let m = await listed(s.id)
+    expect(m.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 })
+    expect(m.context).toEqual({ used: 100, window: 1000, exactness: 'exact' })
+    expect(m.limit?.resumeAt).toBe('2026-08-19T12:00:00Z')
+
+    // 다시 델타가 흐르면(회복) 한도 배너의 근거는 사라져야 한다
+    h.emitDelta('다시 일한다')
+    m = await listed(s.id)
+    expect(m.limit).toBeNull()
+  })
+
+  it('에러가 오면 죽은 requestId의 승인·질문을 걷는다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h = adapter.handleOf(s.id)!
+    const emit = (e: NormalizedEvent) => (h as unknown as { emit: (e: NormalizedEvent) => void }).emit(e)
+
+    h.emitApproval('req-dead')
+    emit({ type: 'question_request', sessionId: s.id, requestId: 'q-dead', questions: [] })
+    emit({ type: 'error', sessionId: s.id, error: { code: 'internal', message: 'boom', retryable: false } })
+
+    const m = await listed(s.id)
+    expect(m.state).toBe('error')
+    expect(m.pendingApproval).toBeNull()
+    expect(m.pendingQuestions).toEqual([])
   })
 })

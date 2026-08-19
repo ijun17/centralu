@@ -264,6 +264,20 @@ class ClaudeSession implements SessionHandle {
           // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
           if (m.type === 'result') void this.reportContext(q)
         }
+        /*
+         * **스트림이 끝났는데 우리가 닫은 게 아니면 CLI가 죽은 것이다.**
+         *
+         * CLI 프로세스가 조용히 사라지면 스트림은 예외 없이 그냥 끝나기도 한다.
+         * 그때 아무 말도 안 올리면 화면은 영원히 '작업 중'이고 다음 말은 허공으로 간다 —
+         * codex 어댑터가 onExit(expected=false)에서 하는 것과 같은 신호를 올린다.
+         */
+        if (!this.closed) {
+          this.emit({
+            type: 'error',
+            sessionId: this.sessionId,
+            error: { code: 'adapter_crashed', message: 'claude process ended unexpectedly', retryable: true },
+          })
+        }
       } catch (err) {
         this.emit({
           type: 'error',

@@ -22,6 +22,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
+import { sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -89,6 +90,17 @@ export class SessionManager {
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
   /** 끝나면 알려달라고 부탁받은 세션 → 알릴 오케스트레이터 (한 번 알리면 지운다) */
   private awaitingReport = new Map<string, string>()
+  /**
+   * 지금 되살리는 중인 세션 → 그 약속.
+   *
+   * send()가 동시에 두 번 오면 둘 다 "프로세스가 없다"를 보고 각자 되살리기를 시작한다 —
+   * 프로세스가 둘 뜨고, 늦게 핸들 맵에 앉은 쪽이 이기며 먼저 뜬 쪽은 dispose 없이
+   * 영영 고아로 남는다. 그래서 되살리기는 세션당 하나만 돌리고 나머지는 그 약속을 기다린다.
+   */
+  private resuming = new Map<
+    string,
+    Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
+  >()
 
   constructor(
     private store: Store,
@@ -157,12 +169,21 @@ export class SessionManager {
   }
 
   reorderSessions(projectId: string, orderedIds: readonly string[]): SessionInfo[] {
-    const mine = this.listSessions().filter((s) => s.projectId === projectId)
-    const ids = mine.map((s) => s.id)
-    const rest = ids.filter((id) => !orderedIds.includes(id))
-    this.store.setSessionOrder([...orderedIds.filter((id) => ids.includes(id)), ...rest])
+    /*
+     * 순서는 **전역 하나**다(sidebar_order). 이 프로젝트의 것만 0부터 다시 매기면
+     * 다른 프로젝트의 값과 충돌해서, 한 프로젝트를 정렬했을 뿐인데 전체 목록이 섞인다.
+     * 그래서 전역 순서에서 **이 프로젝트가 차지하던 자리만** 새 순서로 갈아 끼우고,
+     * 나머지 세션은 있던 자리에 그대로 둔다.
+     */
+    const all = this.listSessions()
+    const mine = new Set(all.filter((s) => s.projectId === projectId).map((s) => s.id))
+    const rest = [...mine].filter((id) => !orderedIds.includes(id))
+    const replacement = [...orderedIds.filter((id) => mine.has(id)), ...rest]
+    let k = 0
+    const globalOrder = all.map((s) => (mine.has(s.id) ? replacement[k++]! : s.id))
+    this.store.setSessionOrder(globalOrder)
     // 메모리의 순서도 같이 맞춘다 — 저장만 하면 다시 뜨기 전까지 화면과 어긋난다
-    const rank = new Map([...orderedIds, ...rest].map((id, i) => [id, i]))
+    const rank = new Map(globalOrder.map((id, i) => [id, i]))
     const sorted = [...this.meta.entries()].sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0))
     this.meta = new Map(sorted)
     return this.listSessions()
@@ -304,6 +325,7 @@ export class SessionManager {
       model: params.model ?? null, effort: params.effort ?? null,
       permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
+      ...sessionLiveDefaults(),
     }
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
     // 목록에는 보이지만 말을 걸 수 없는 '유령 세션'이 DB에 남는다 (실측으로 확인).
@@ -348,7 +370,24 @@ export class SessionManager {
     // 나중에 잠든 뒤에는 물어볼 프로세스가 없다 — 그때를 위한 준비다.
     void this.listCommands(id).catch(() => {})
 
-    if (params.initialPrompt) handle.send(params.initialPrompt)
+    /*
+     * 첫 프롬프트도 **send()와 같은 규칙으로 남긴다.**
+     *
+     * 어댑터에 보내기만 하면 저장에는 첫 질문이 없다 — 다시 켜면 대화가 답부터
+     * 시작하는 기록이 된다. UI는 user_message의 seq로 자기 낙관적 렌더와 맞추므로
+     * 이벤트도 send()처럼 올린다.
+     */
+    if (params.initialPrompt) {
+      const seq = this.store.nextSeq(id)
+      this.store.appendMessages([
+        { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt }, ts: Date.now() },
+      ])
+      info.lastSeq = seq
+      info.lastReadSeq = seq // 내가 보낸 건 읽은 것
+      this.store.upsertSession(info)
+      this.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt })
+      handle.send(params.initialPrompt)
+    }
     return info
   }
 
@@ -378,8 +417,28 @@ export class SessionManager {
     if (history.length === 0) return 0
 
     const ours = this.store.loadMessages(info.id, SYNC_LIMIT)
-    const lastKnown = [...ours].reverse().find((m) => m.kind === 'text')
-    const lastText = (lastKnown?.payload as { text?: string } | undefined)?.text?.trim()
+    /*
+     * 저장된 한 행은 메시지가 아니라 **스트리밍 델타 하나**다 (persistMessage).
+     * 마지막 행만 집으면 답변의 꼬리 토막이 나와서, 완전한 메시지를 주는 도구 기록과는
+     * 영원히 일치하지 않는다 — 그래서 따라잡기가 늘 0건이었다.
+     * previewOf와 같은 규칙으로 **마지막 메시지를 조각에서 되살려** 비교한다.
+     * (사람의 말은 통짜 한 행이라 그대로 쓴다)
+     */
+    const lastMessageText = (): string | undefined => {
+      const parts: string[] = []
+      for (let i = ours.length - 1; i >= 0; i--) {
+        const r = ours[i]!
+        if (r.kind !== 'text') {
+          if (parts.length > 0) break // 다른 종류를 만나면 그 응답의 시작이다
+          continue
+        }
+        const t = (r.payload as { text?: string }).text ?? ''
+        if (r.role !== 'assistant') return parts.length > 0 ? parts.join('') : t
+        parts.unshift(t)
+      }
+      return parts.length > 0 ? parts.join('') : undefined
+    }
+    const lastText = lastMessageText()?.trim()
 
     // 우리가 아는 마지막 말 뒤부터가 새 것이다
     let start = -1
@@ -483,6 +542,17 @@ export class SessionManager {
    * 화면이 "갈라서 이어가기"를 내밀지 말지를 문구와 무관하게 정할 수 있게 한다.
    */
   async resumeSession(
+    sessionId: string,
+  ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
+    // 이미 되살리는 중이면 그 약속을 같이 기다린다 — 각자 시작하면 프로세스가 둘 뜬다
+    const inflight = this.resuming.get(sessionId)
+    if (inflight) return inflight
+    const p = this.doResumeSession(sessionId).finally(() => this.resuming.delete(sessionId))
+    this.resuming.set(sessionId, p)
+    return p
+  }
+
+  private async doResumeSession(
     sessionId: string,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     const m = this.meta.get(sessionId)
@@ -719,6 +789,7 @@ export class SessionManager {
 
   /** 이벤트 수신 → 메타 갱신 → 메시지 영속화 → 전파 */
   private onEvent(e: NormalizedEvent): void {
+    let seq: number | null = null
     if (e.sessionId) {
       const m = this.meta.get(e.sessionId)
       if (m) {
@@ -727,11 +798,27 @@ export class SessionManager {
           m.externalId = handle.externalId
         }
         this.applyStateHint(e, m)
-        this.persistMessage(e, m)
+        seq = this.persistMessage(e, m)
         this.store.upsertSession(m)
       }
+      /*
+       * **죽은 프로세스의 핸들은 그 자리에서 걷는다.**
+       *
+       * adapter_crashed를 올리고도 핸들을 남겨두면 send()가 handles.has만 보고
+       * 끝난 큐에 push해 **다음 말이 조용히 사라진다** (명시적 restart 전까지).
+       * 걷어내면 send()의 "없으면 되살려 보낸다" 경로가 그대로 자동 복구가 된다.
+       */
+      if (e.type === 'error' && e.error.code === 'adapter_crashed') {
+        const dead = this.handles.get(e.sessionId)
+        if (dead) {
+          this.handles.delete(e.sessionId)
+          this.running.delete(e.sessionId)
+          void dead.dispose().catch(() => {})
+        }
+      }
     }
-    this.emit(e)
+    // 기록으로 남은 이벤트에는 매긴 세션 내 seq를 실어 보낸다 — UI 안읽음 추적의 기준
+    this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
     if (e.type === 'turn_complete' && e.sessionId) void this.reportBackIfAwaited(e.sessionId)
   }
 
@@ -790,6 +877,7 @@ export class SessionManager {
    * 전이 규칙 판정은 하지 않는다 — 그건 core의 몫.
    */
   private applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
+    this.trackLiveFacts(e, m)
     const hint =
       e.type === 'approval_request' ? 'waiting_approval'
       : e.type === 'turn_complete' ? 'waiting_input'
@@ -799,13 +887,67 @@ export class SessionManager {
       : e.type === 'message_delta' || e.type === 'tool_call' ? 'working'
       : null
     if (!hint || m.archived) return
+    const prev = m.state
     m.state = hint
     const waiting = hint === 'waiting_approval' || hint === 'waiting_input' || hint === 'error'
     m.waitingSince = waiting ? (m.waitingSince ?? Date.now()) : null
+    // core 리듀서와 같은 소거 규칙 (docs/state-management.md §2):
+    // 바쁨의 종류는 바쁨보다 오래 살지 못하고, 회복하면 한도 배너를 걷고,
+    // 죽은 requestId의 카드(error·인터럽트·회복으로 requestId가 끝난 것)는
+    // 클릭해도 답할 곳이 없으므로 함께 걷는다 — 재연결 복원이 죽은 카드를 되살리면 안 된다.
+    if (hint !== 'working' && e.type !== 'activity') m.activity = null
+    if (hint === 'working' || hint === 'idle') m.limit = null
+    const cardsDead =
+      hint === 'error' ||
+      ((hint === 'working' || hint === 'idle') && prev !== hint) ||
+      (prev === 'waiting_approval' && hint === 'waiting_input')
+    if (cardsDead) {
+      m.pendingApproval = null
+      m.pendingQuestions = []
+    }
   }
 
-  /** 대화 기록으로 남길 이벤트만 저장 (델타는 합치지 않고 텍스트만 누적) */
-  private persistMessage(e: NormalizedEvent, m: SessionInfo): void {
+  /**
+   * 재연결한 UI가 이어받아야 하는 **살아 있는 사실들**을 메타에 남긴다.
+   *
+   * SessionInfo에 이 필드들이 없던 동안, 끊겼다 돌아온 UI는 state=waiting_approval만
+   * 받고 **payload가 없어 승인 카드를 못 그렸다** — requestId도 없어 응답조차 불가능했다.
+   * DB에는 넣지 않는다 (upsert가 모르는 필드) — host가 재시작되면 정말로 사라진 것이다.
+   */
+  private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
+    switch (e.type) {
+      case 'approval_request':
+        m.pendingApproval = { requestId: e.requestId, detail: e.detail }
+        break
+      case 'approval_resolved':
+        if (m.pendingApproval?.requestId === e.requestId) m.pendingApproval = null
+        break
+      case 'question_request':
+        m.pendingQuestions = [...m.pendingQuestions, { requestId: e.requestId, questions: e.questions }]
+        break
+      case 'question_resolved':
+        m.pendingQuestions = m.pendingQuestions.filter((q) => q.requestId !== e.requestId)
+        break
+      case 'activity':
+        m.activity = e.activity
+        break
+      case 'limit_reached':
+        m.limit = { resumeAt: e.resumeAt, usedPercent: e.usedPercent, windowMins: e.windowMins }
+        break
+      case 'usage_update':
+        m.usage = e.tokens
+        break
+      case 'context_update':
+        m.context = { used: e.used, window: e.window, exactness: e.exactness }
+        break
+    }
+  }
+
+  /**
+   * 대화 기록으로 남길 이벤트만 저장 (델타는 합치지 않고 텍스트만 누적).
+   * 저장했다면 매긴 세션 내 seq를 돌려준다 — 방송에 실어 UI의 안읽음 추적 기준이 된다.
+   */
+  private persistMessage(e: NormalizedEvent, m: SessionInfo): number | null {
     const kind =
       e.type === 'tool_call' ? 'tool_call'
       : e.type === 'tool_result' ? 'tool_result'
@@ -815,7 +957,7 @@ export class SessionManager {
       // 우리 기록에는 그대로 있다 — 어디서 접혔는지 보여야 거슬러 읽을 수 있다.
       : e.type === 'compaction' ? 'marker'
       : null
-    if (!kind) return
+    if (!kind) return null
     const seq = this.store.nextSeq(m.id)
     const msg: StoredMessage = {
       sessionId: m.id, seq, role: e.type === 'message_delta' ? 'assistant' : 'system',
@@ -823,6 +965,7 @@ export class SessionManager {
     }
     this.store.appendMessages([msg])
     m.lastSeq = seq
+    return seq
   }
 
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
@@ -1315,6 +1458,8 @@ export class SessionManager {
           : this.store.loadMessages(sessionId, 800)
 
         const lines: string[] = []
+        /** around가 가리키는 seq가 들어간 줄 — 창을 여기에 맞춰 자른다 */
+        let anchor = -1
         const stamp = (ts: number) => new Date(ts).toISOString().slice(0, 16).replace('T', ' ')
         for (const r of rows) {
           const p = r.payload as { text?: string; summary?: { title?: string; tool?: string } }
@@ -1333,8 +1478,15 @@ export class SessionManager {
             const title = opts?.tools ? p.summary.title : p.summary.title.split('\n')[0]!.slice(0, 100)
             lines.push(`[${stamp(r.ts)}] 도구(${p.summary.tool ?? '?'}): ${title}`)
           }
+          if (around != null && anchor < 0 && r.seq >= around && lines.length > 0) anchor = lines.length - 1
         }
-        const picked = around ? lines.slice(-limit) : lines.slice(-limit)
+        /*
+         * around가 있으면 **그 대목을 가운데에 두고** 자른다.
+         * 예전에는 두 갈래가 똑같이 꼬리를 잘라서, recall이 짚어준 seq로 와도
+         * 창 끝머리만 보였다 — "찾았는데 갈 수가 없는" 상태가 그대로 남았다.
+         */
+        const from = around != null && anchor >= 0 ? Math.max(0, anchor - Math.floor(limit / 2)) : -1
+        const picked = from >= 0 ? lines.slice(from, from + limit) : lines.slice(-limit)
         return {
           ok: true,
           state: target.state,
@@ -1538,7 +1690,8 @@ export class SessionManager {
   }
 
   async disposeAll(): Promise<void> {
-    await Promise.all([...this.handles.values()].map((h) => h.dispose()))
+    // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
+    await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
     this.handles.clear()
   }
 

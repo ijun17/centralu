@@ -38,4 +38,32 @@ describe('codex app-server 종료 판정', () => {
     expect(expected).toBe(false)
     expect(code).toBe(3)
   })
+
+  /*
+   * spawn 실패(ENOENT — nvm 전환·codex 삭제로 경로가 어긋난 경우)는 'exit'이 아니라
+   * 'error'로 온다. 리스너가 없으면 uncaughtException으로 올라가 host 전체가 죽고,
+   * codex 하나 없다는 이유로 살아 있는 Claude 세션까지 전부 끊긴다.
+   * 이 세션만 실패해야 한다: 기다리던 요청은 이유와 함께 거절되고, onExit은 한 번만 온다.
+   */
+  it('없는 명령이면 프로세스를 죽이지 않고 이 세션만 실패시킨다', async () => {
+    let exits = 0
+    const client = new CodexClient(
+      {
+        onNotification: () => {},
+        onServerRequest: () => {},
+        onExit: () => {
+          exits++
+        },
+      },
+      { command: '/nonexistent/cc-no-such-codex' },
+    )
+
+    // 짧은 타임아웃: 거절은 spawn 'error'에서 오지만, 남는 타이머가 러너를 붙들지 않게
+    await expect(client.request('initialize', {}, 1000)).rejects.toThrow(/failed to start/)
+    // 'error'와 'exit'이 둘 다 와도 onExit은 한 번이다 (finished 표식)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(exits).toBe(1)
+    // 이미 끝난 클라이언트에 또 요청하면 조용히 매달리지 않고 바로 거절한다
+    await expect(client.request('x')).rejects.toThrow(/already exited/)
+  })
 })

@@ -413,7 +413,17 @@ export class CodexAdapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const session = new CodexSession(opts, emit)
     // 스레드 id가 생겨야 재개가 가능하다 — 생성 시점에 확보한다 (M1.5 결함 5번 교훈)
-    await session.ready
+    try {
+      await session.ready
+    } catch (err) {
+      /*
+       * 준비에 실패한 세션은 핸들이 밖으로 나가지 않는다 — dispose를 불러줄 사람이 없다.
+       * 생성자에서 이미 뜬 app-server를 여기서 거두지 않으면, 잠긴 스레드를 이어가려다
+       * 실패할 때마다 자식 프로세스가 하나씩 조용히 샜다.
+       */
+      await session.dispose().catch(() => {})
+      throw err
+    }
     return session
   }
 }
