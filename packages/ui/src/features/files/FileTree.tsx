@@ -90,6 +90,15 @@ function Dir({
   )
 }
 
+/**
+ * Whether a folder is open is **the project's** fact, not this row's (issue #16).
+ *
+ * It used to be `useState` here, so it died with the component: moving between two sessions
+ * of the same repo collapsed the whole tree and you dug down the same path again. Drafts
+ * had the same shape of bug and moved onto the session — this one moves onto the *project*,
+ * because an expanded folder is a fact about the code rather than about a conversation.
+ * Two sessions on one repo want the same tree open; two projects almost never do.
+ */
 function DirRow({
   entry,
   projectId,
@@ -101,13 +110,14 @@ function DirRow({
   depth: number
   showIgnored: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const open = useStore((s) => s.expandedDirs[projectId]?.includes(entry.path) ?? false)
+  const toggleDir = useStore((s) => s.toggleDir)
   return (
     <li>
       <button
         className="flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] text-ash transition-colors hover:text-chalk"
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => toggleDir(projectId, entry.path)}
         data-testid={`dir-${entry.path}`}
       >
         {/* 파일의 확장자 칸과 같은 폭 — 그래야 폴더와 파일의 이름이 한 줄에 선다 */}

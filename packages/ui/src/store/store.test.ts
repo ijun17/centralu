@@ -32,6 +32,7 @@ beforeEach(() => {
     chat: {},
     drafts: {},
     workingSince: {},
+    expandedDirs: {},
     focusedSessionId: null,
     focusedProjectId: null,
     history: {},

@@ -2505,6 +2505,53 @@ test('프로젝트를 바꾸면 파일 트리도 바뀐다', async ({ page }) =>
 })
 
 /**
+ * Expanded folders used to live in the tree rows, so switching sessions collapsed them and
+ * you dug down the same path again (issue #16).
+ *
+ * They belong to the **project**, which is the half this test is really about: within one
+ * repo the tree holds, and crossing to another repo it does not. That is the difference
+ * from drafts, which moved onto the session — a draft is something you were saying to one
+ * agent, while an open folder is a fact about the code every session in that repo shares.
+ */
+test('expanded folders follow the project, not the session', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'src', path: 'src', isDir: true, ignored: false }]
+    m.fsState.entries['src'] = [{ name: 'a.ts', path: 'src/a.ts', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', 'first')
+  const first = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+  await page.getByTestId('evidence-tab-files').click()
+
+  await page.getByTestId('dir-src').click()
+  await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
+
+  /*
+    Leaving for the Git tab tears the whole tree down. This is the step that reproduces the
+    original complaint: nothing about switching sessions unmounted these rows on its own,
+    so the state only vanished once something actually took them off screen.
+  */
+  await page.getByTestId('evidence-tab-git').click()
+  await expect(page.getByTestId('evidence-git')).toBeVisible()
+  await page.getByTestId('evidence-tab-files').click()
+  await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
+
+  // Another session in the same repo — same code, so the same tree
+  await newSession(page, 'alpha', 'second')
+  await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
+
+  // A different repo starts closed: this belongs to the project, it is not a global setting
+  await newSession(page, 'beta', 'elsewhere')
+  await expect(page.getByTestId('dir-src')).toBeVisible()
+  await expect(page.getByTestId('file-src/a.ts')).toBeHidden()
+
+  // ...and alpha still has it open when we come back
+  await page.getByTestId(`session-row-${first}`).click()
+  await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
+})
+
+/**
  * 숫자만 있고 단위가 없는 표식은 "이게 뭐지?"가 나온다 (실제로 나왔다).
  * 브라우저 기본 title은 1~2초를 기다려야 떠서, 그 순간에는 없는 것과 같다.
  */

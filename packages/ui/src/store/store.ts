@@ -128,6 +128,30 @@ export type AppState = {
    * Not persisted. A turn does not survive the app closing.
    */
   workingSince: Record<string, number>
+  /**
+   * Which folders are expanded in the file tree — **per project** (issue #16).
+   *
+   * The tree rows used to hold this themselves, so it went away with the component: moving
+   * between sessions collapsed everything and you dug down the same path again. Third time
+   * we have made this mistake (drafts, the elapsed count, this).
+   *
+   * Per project, not per session, and the difference is not an accident. A draft is
+   * something *you* were saying to *one* agent, so it belongs to that session. An expanded
+   * folder is a fact about **the code** — `src/features/session` is where the work is no
+   * matter which of that project's sessions you happen to be reading. Two sessions on the
+   * same repo want the same tree open; two projects almost never do.
+   *
+   * **Not persisted, deliberately.** The complaint was "every time", and every time meant
+   * every session switch — dozens an hour. A relaunch happens once a day, and it is exactly
+   * the moment the tree is most likely to be wrong: branches moved, folders were deleted,
+   * a worktree came and went. Restoring yesterday's paths would either quietly expand into
+   * nothing or fire a listDir per stale path on first paint, which is the cost the lazy
+   * tree exists to avoid. There is a mechanical reason too: the workspace snapshot is one
+   * layout record written straight through to the host with no debounce, so persisting this
+   * would mean an RPC per folder click. If a relaunch turns out to hurt, it can move there
+   * later — but it should arrive as its own decision, not as a side effect of this one.
+   */
+  expandedDirs: Record<string, string[]>
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
@@ -242,6 +266,8 @@ export type AppState = {
   setNotifyPolicy(p: NotifyPolicy): void
   /** 아직 보내지 않은 것을 세션에 붙여 둔다 (비면 지운다) */
   setDraft(sessionId: string, draft: Draft): void
+  /** Open or close a folder in the file tree. The project owns it, not the session (#16) */
+  toggleDir(projectId: string, path: string): void
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
@@ -473,6 +499,7 @@ export const useStore = create<AppState>((set, get) => ({
   chat: {},
   drafts: {},
   workingSince: {},
+  expandedDirs: {},
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
@@ -996,6 +1023,17 @@ export const useStore = create<AppState>((set, get) => ({
         return { drafts: rest }
       }
       return { drafts: { ...s.drafts, [sessionId]: draft } }
+    })
+  },
+  toggleDir(projectId, path) {
+    set((s) => {
+      const cur = s.expandedDirs[projectId] ?? []
+      /*
+        Closing a folder leaves its children in the list on purpose. "As you left it" means
+        the whole shape comes back when you open the parent again, not just its first row.
+      */
+      const next = cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]
+      return { expandedDirs: { ...s.expandedDirs, [projectId]: next } }
     })
   },
   setToast(toast) {
