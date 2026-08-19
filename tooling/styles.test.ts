@@ -245,3 +245,38 @@ describe('Tauri 권한', () => {
     expect(conf.app.windows[0]!.dragDropEnabled).toBe(false)
   })
 })
+
+/**
+ * Linux packaging (issue #14).
+ *
+ * None of this can be run from a Mac, and a wrong bundle config does not fail until a
+ * CI job has spent minutes compiling Rust. These are the parts that are checkable from
+ * here: that the Linux config exists and is separate, and that every icon it names is
+ * actually on disk — a missing icon path is the classic way a Linux bundle dies at the
+ * very last step of the build.
+ */
+describe('Linux 번들 설정', () => {
+  const base = JSON.parse(
+    readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
+  ) as { bundle: { targets: string[]; icon: string[] } }
+  const linux = JSON.parse(
+    readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.linux.conf.json'), 'utf8'),
+  ) as { bundle: { targets: string[]; icon: string[] } }
+
+  it('맥 번들은 건드리지 않는다', () => {
+    // Tauri merges tauri.linux.conf.json over the base one and only on Linux. Putting
+    // the Linux targets in the shared file instead would have made `tauri build` on a
+    // Mac try to produce a .deb.
+    expect(base.bundle.targets).toEqual(['app', 'dmg'])
+  })
+
+  it('deb와 appimage를 만든다', () => {
+    expect(linux.bundle.targets).toEqual(['deb', 'appimage'])
+  })
+
+  it('설정이 가리키는 아이콘이 실제로 있다', () => {
+    for (const icon of linux.bundle.icon) {
+      expect(existsSync(join(ROOT, 'apps/desktop/src-tauri', icon)), `${icon} 가 없다`).toBe(true)
+    }
+  })
+})

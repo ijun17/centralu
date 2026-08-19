@@ -13,7 +13,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+# `tray-icon` was enabled but never used — there is no tray in this app. On Linux that
+# feature is not free: it pulls in libappindicator, which needs
+# `libayatana-appindicator3-dev` present at build time. Turning off a feature we do not
+# use removes a system package from every Linux build. Adding a tray later means adding
+# the feature and the apt dependency back together, which is the honest pairing.
+tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"

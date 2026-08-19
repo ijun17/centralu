@@ -105,19 +105,57 @@ mkdirSync(ptyDest, { recursive: true })
 for (const entry of ['package.json', 'lib']) {
   cpSync(join(ptySrc, entry), join(ptyDest, entry), { recursive: true })
 }
+/**
+ * Where node-pty's native files actually are — which is not the same place on every OS.
+ *
+ * node-pty 1.1.0 publishes prebuilds for darwin and win32 only. On Linux its install
+ * script (`node scripts/prebuild.js || node-gyp rebuild`) finds no matching prebuild,
+ * falls through to a source build, and the result lands in `build/Release` instead.
+ * This script used to only know about `prebuilds/`, so the Linux build died here —
+ * before Tauri bundled anything, because this runs as `beforeBuildCommand` (#14).
+ *
+ * We check in the opposite order from node-pty's own loader (`lib/utils.js` tries
+ * `build/Release` first, `prebuilds/<platform>-<arch>` second), on purpose: a prebuild
+ * is what the package intends to ship, and a stale `build/Release` left over from an
+ * earlier experiment should not quietly win over it. Only one of the two exists on a
+ * clean checkout, so the difference only shows up on a machine that has both — which
+ * is exactly the machine where guessing wrong is hardest to notice.
+ *
+ * A source build is safe to ship because node-pty builds against node-addon-api
+ * (N-API), so the binary is ABI-stable across Node versions — the user's system Node
+ * does not have to match the machine that built it. glibc still has to be old enough,
+ * which is why CI pins the oldest supported runner rather than `ubuntu-latest`.
+ */
 const ptyPlatform = `${process.platform}-${process.arch}`
-const ptyPrebuildSrc = join(ptySrc, 'prebuilds', ptyPlatform)
-if (!existsSync(ptyPrebuildSrc)) {
-  throw new Error(`이 플랫폼용 node-pty prebuild가 없습니다: ${ptyPlatform}`)
+const ptyNativeDir = [join('prebuilds', ptyPlatform), join('build', 'Release')].find((rel) =>
+  existsSync(join(ptySrc, rel, 'pty.node')),
+)
+if (!ptyNativeDir) {
+  throw new Error(
+    `node-pty 네이티브 모듈을 찾지 못했습니다 (${ptyPlatform}).\n` +
+      `찾아본 곳: prebuilds/${ptyPlatform}/pty.node, build/Release/pty.node\n` +
+      '소스 빌드가 돌지 않았을 수 있습니다 — pnpm-workspace.yaml의 allowBuilds에 node-pty가 있는지 확인하세요.',
+  )
 }
-cpSync(ptyPrebuildSrc, join(ptyDest, 'prebuilds', ptyPlatform), { recursive: true })
+mkdirSync(join(ptyDest, ptyNativeDir), { recursive: true })
+// 파일을 하나씩 고른다. `build/Release`는 node-gyp의 중간 산출물(obj.target 등)까지
+// 안고 있어서, 통째로 복사하면 번들에 수십 MB의 오브젝트 파일이 딸려 들어간다.
+for (const file of ['pty.node', 'spawn-helper']) {
+  const from = join(ptySrc, ptyNativeDir, file)
+  if (existsSync(from)) cpSync(from, join(ptyDest, ptyNativeDir, file))
+}
 
 /**
  * spawn-helper는 **실행 파일**이다. 압축을 풀거나 복사하는 과정에서 +x가 날아가면
  * 셸이 뜨지 않고 `posix_spawnp failed`만 남는다 (실제로 겪었고, 원인을 찾는 데 시간을 썼다).
  * 복사한 뒤 반드시 실행 권한을 다시 준다.
+ *
+ * This has to follow whichever directory won above: node-pty resolves the helper as
+ * `<the dir the module loaded from>/spawn-helper` (lib/unixTerminal.js), so guarding
+ * the prebuilds path while shipping a source build would leave the real helper
+ * unchecked — and a source build is exactly where the bit is most likely to be missing.
  */
-const helper = join(ptyDest, 'prebuilds', ptyPlatform, 'spawn-helper')
+const helper = join(ptyDest, ptyNativeDir, 'spawn-helper')
 if (existsSync(helper)) {
   chmodSync(helper, 0o755)
   // 빌드 시점에 확인한다 — 실행 권한이 없으면 배포 앱에서 터미널이 통째로 죽는다.
@@ -140,5 +178,8 @@ writeFileSync(
 
 const size = readFileSync(join(OUT, 'main.mjs')).length
 console.log(
-  `[bundle] main.mjs ${(size / 1024).toFixed(0)}KB + better-sqlite3(${prebuild}) + node-pty(${ptyPlatform}) → ${OUT}`,
+  // node-pty prints the directory, not the platform: "prebuilds/darwin-arm64" and
+  // "build/Release" are the visible difference between a shipped binary and one this
+  // machine compiled, and that is worth seeing in a release log.
+  `[bundle] main.mjs ${(size / 1024).toFixed(0)}KB + better-sqlite3(${prebuild}) + node-pty(${ptyNativeDir}) → ${OUT}`,
 )
