@@ -21,6 +21,12 @@ const MAIN_PKG = join(ROOT, 'packaging/npm/centralu')
 
 const publish = process.argv.includes('--publish')
 const skipBuild = process.argv.includes('--skip-build')
+/**
+ * 2단계 인증이 켜진 계정은 발행마다 OTP를 묻는다. 그 물음은 **대화형 입력**이라
+ * 자동화된 자리(에이전트·CI)에서는 답할 수 없어 그냥 멈춰 버린다.
+ * 미리 받아서 넘길 수 있게 열어 둔다: `pnpm release:npm --publish --otp=123456`
+ */
+const otp = process.argv.find((a) => a.startsWith('--otp='))?.slice('--otp='.length)
 
 const sh = (cmd: string, args: string[], cwd = ROOT) =>
   execFileSync(cmd, args, { cwd, stdio: 'inherit', encoding: 'utf8' })
@@ -47,6 +53,15 @@ if (out('git', ['status', '--porcelain'])) {
   // 커밋되지 않은 변경이 섞여 나가면 "발행된 것"과 "저장소의 것"이 달라진다.
   // host 기동 배너에 박히는 빌드 해시도 `-dirty`가 되어 어느 코드인지 못 가린다.
   fail('작업 트리가 깨끗하지 않다. 커밋하거나 되돌린 뒤 다시 실행해라.')
+}
+
+if (publish) {
+  // 빌드까지 다 돌린 뒤에 인증에서 막히면 몇 분을 버린다 — 제일 먼저 확인한다
+  try {
+    console.log(`  npm 사용자: ${out('npm', ['whoami'])}`)
+  } catch {
+    fail('npm에 로그인돼 있지 않다. `npm login`을 먼저 실행해라 (웹 로그인은 CLI 인증과 별개다).')
+  }
 }
 
 sh('pnpm', ['verify'])
@@ -112,7 +127,7 @@ for (const pkgDir of [ARCH_PKG, MAIN_PKG]) {
   const name = (JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name: string }).name
   if (publish) {
     step(`발행: ${name}`)
-    sh('npm', ['publish', '--access', 'public'], pkgDir)
+    sh('npm', ['publish', '--access', 'public', ...(otp ? ['--otp', otp] : [])], pkgDir)
   } else {
     step(`리허설(pack): ${name}`)
     sh('npm', ['pack', '--dry-run'], pkgDir)
