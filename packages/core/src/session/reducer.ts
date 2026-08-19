@@ -102,7 +102,34 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
    */
   const activity = event.type === 'activity' ? event.activity : state === 'working' ? s.activity : null
 
-  const next: SessionSummary = illegal ? { ...s } : { ...s, state, waitingSince, activity }
+  /*
+   * 회복하면 배너도 함께 내려간다.
+   *
+   * limit·lastError는 "지금 막혀 있다"는 배너의 근거인데, 한도가 풀리거나 오류에서
+   * 살아나 다시 일하기 시작해도 남아 있으면 화면은 계속 막혀 있다고 거짓말한다 —
+   * working/idle 진입은 곧 회복이므로 그 순간 지운다.
+   */
+  const recovered = !illegal && stateChanged && (state === 'working' || state === 'idle')
+  /*
+   * 승인·질문 카드는 **답할 수 있는 동안만** 산다.
+   *
+   * requestId가 죽는 길은 error만이 아니다: 승인 대기 중 인터럽트(turn_complete →
+   * waiting_input)도, resume으로 idle 복귀도, working 재개도 그 요청을 끝장낸다.
+   * 카드를 남겨두면 클릭이 죽은 요청에 답하려다 던진다 — 상태(가시성)와 payload
+   * (액션 가능성)가 따로 놀면 안 된다. 회복 후 요청이 유효하면 호스트가 다시 보낸다
+   * (위의 강제 표면화). 새 요청은 아래 switch가 이 소거 위에 다시 세운다.
+   */
+  const cardsDead =
+    !illegal &&
+    stateChanged &&
+    (state === 'error' || recovered || (s.state === 'waiting_approval' && state === 'waiting_input'))
+  const next: SessionSummary = illegal
+    ? { ...s }
+    : {
+        ...s, state, waitingSince, activity,
+        ...(recovered ? { limit: null, lastError: null } : {}),
+        ...(cardsDead ? { pendingApproval: null, pendingQuestions: [] } : {}),
+      }
 
   switch (event.type) {
     case 'message_delta':
@@ -144,10 +171,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'error':
       return { ...next, lastError: { code: event.error.code, message: event.error.message } }
     case 'turn_complete':
+    case 'state_change': // limited 해제 등 회복 시 배너 정리는 위 recovered에서 일괄 처리
       return next
-    case 'state_change':
-      // limited 해제 등으로 working 복귀 시 limit 정보 정리
-      return stateChanged && state === 'working' ? { ...next, limit: null } : next
     default:
       return next
   }

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AdapterCapabilities,
   ApprovalDecision,
+  ApprovalDetail,
   ApprovalScope,
   Attachment,
   GitBranch,
@@ -12,8 +13,11 @@ import {
   GitFileStatus,
   ModelOption,
   PermissionPreset,
+  Question,
   QuestionAnswer,
+  SessionActivity,
   SessionState,
+  TokenUsage,
   ToolName,
 } from './entities.js'
 
@@ -80,8 +84,39 @@ export const SessionInfo = z.object({
    * externalId와 다를 수 있다 — 도구가 resume하면서 새 식별자를 발급하기 때문이다.
    */
   importedFrom: z.string().nullable().default(null),
+  /**
+   * **살아 있는 동안만 유효한 사실들** — DB가 아니라 host 메모리에서 온다.
+   *
+   * 이 필드들이 없던 동안, 재연결·앱 재시작 후 목록을 다시 받으면
+   * state=waiting_approval인데 **카드를 그릴 payload가 없어** 승인 카드가 안 뜨고
+   * requestId도 없어 응답할 길이 없었다 — 에이전트는 영원히 블록됐다 (실측).
+   * host 프로세스가 재시작되면 정말로 사라진 것이므로 기본값(null/[])이 맞다.
+   */
+  pendingApproval: z.object({ requestId: z.string(), detail: ApprovalDetail }).nullable().default(null),
+  pendingQuestions: z.array(z.object({ requestId: z.string(), questions: z.array(Question) })).default([]),
+  activity: SessionActivity.nullable().default(null),
+  limit: z
+    .object({ resumeAt: z.string().optional(), usedPercent: z.number().optional(), windowMins: z.number().optional() })
+    .nullable()
+    .default(null),
+  usage: TokenUsage.nullable().default(null),
+  context: z
+    .object({ used: z.number(), window: z.number(), exactness: z.enum(['exact', 'estimate']) })
+    .nullable()
+    .default(null),
 })
 export type SessionInfo = z.infer<typeof SessionInfo>
+
+/**
+ * 살아-있는-동안 필드들의 초기값. 저장소 행이나 새 세션에서 SessionInfo를 조립할 때 쓴다 —
+ * 손으로 나열하면 필드가 늘 때 한 곳이 빠진 채 컴파일이 지나간다.
+ */
+export function sessionLiveDefaults(): Pick<
+  SessionInfo,
+  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context'
+> {
+  return { pendingApproval: null, pendingQuestions: [], activity: null, limit: null, usage: null, context: null }
+}
 
 export const ProjectInfo = z.object({
   id: z.string(),

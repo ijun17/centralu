@@ -16,8 +16,18 @@ import {
  */
 const base = { sessionId: z.string() }
 
+/**
+ * host가 이 이벤트를 기록으로 남기며 매긴 **세션 내 메시지 번호** (store의 messages.seq).
+ *
+ * 안읽음 추적(lastSeq/lastReadSeq)은 반드시 이 번호로만 해야 한다. UI의 렌더 키는
+ * 전 세션 공용 카운터라서, 그 값이 세션별 lastSeq로 새어 들어가면 큰 세션을 본 뒤
+ * 작은 세션의 last_read_seq가 부풀려 저장되어 **안읽음 배지가 영구히 꺼진다** (실측).
+ * 기록으로 남는 이벤트에만 붙는다 (envelope의 전역 방송 seq와는 다른 번호다).
+ */
+const persistedSeq = { seq: z.number().optional() }
+
 export const NormalizedEvent = z.discriminatedUnion('type', [
-  z.object({ ...base, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
+  z.object({ ...base, ...persistedSeq, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
   /**
    * 사람의 말이 대화에 더해졌다.
    *
@@ -29,17 +39,19 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * 그리면 안 된다. 받는 쪽이 그것을 가려낼 수 있어야 한다.
    */
   z.object({ ...base, type: z.literal('user_message'), seq: z.number(), text: z.string() }),
-  z.object({ ...base, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
+  z.object({ ...base, ...persistedSeq, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
   z.object({
     ...base,
+    ...persistedSeq,
     type: z.literal('tool_result'),
     callId: z.string(),
     ok: z.boolean(),
     summary: z.string().default(''),
   }),
-  z.object({ ...base, type: z.literal('approval_request'), requestId: z.string(), detail: ApprovalDetail }),
+  z.object({ ...base, ...persistedSeq, type: z.literal('approval_request'), requestId: z.string(), detail: ApprovalDetail }),
   z.object({
     ...base,
+    ...persistedSeq,
     type: z.literal('approval_resolved'),
     requestId: z.string(),
     decision: ApprovalDecision,
@@ -84,6 +96,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /** 컨텍스트 압축이 일어났다 — 대화창에 마커를 남긴다 (FR-14) */
   z.object({
     ...base,
+    ...persistedSeq,
     type: z.literal('compaction'),
     /**
      * 실패도 마커로 남긴다. 조용히 넘기면 압축이 안 된 채로 대화가 이어지는데

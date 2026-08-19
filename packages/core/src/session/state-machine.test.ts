@@ -53,15 +53,31 @@ describe('이벤트 → 전이', () => {
 })
 
 describe('불법 전이 차단', () => {
-  it('idle에서 곧장 waiting_approval로 갈 수 없다', () => {
+  it('추론 전이로는 idle에서 곧장 waiting_approval로 갈 수 없다', () => {
     expect(canTransition('idle', 'waiting_approval')).toBe(false)
-    const r = transition('idle', ev({ type: 'approval_request' } as never))
+    const r = transition('idle', ev({ type: 'state_change', state: 'waiting_approval' } as never))
     expect(r.illegal).toBe(true)
     expect(r.state).toBe('idle') // 상태 유지
   })
 
+  it('승인·질문 요청은 사실이므로 표가 삼키지 못한다 (resume 직후 idle에서도)', () => {
+    // 호스트가 실제로 보낸 요청을 무시하면 에이전트가 영원히 막힌다 — 표는 추론만 거른다
+    for (const type of ['approval_request', 'question_request'] as const) {
+      const r = transition('idle', ev({ type } as never))
+      expect(r.illegal).toBe(false)
+      expect(r.state).toBe('waiting_approval')
+    }
+  })
+
   it('idle에서 turn_complete는 불법 (턴이 없었으므로)', () => {
     expect(transition('idle', ev({ type: 'turn_complete' })).illegal).toBe(true)
+  })
+
+  it('승인 대기 중 인터럽트로 턴이 끝나면 waiting_input으로 빠져나온다 (막다른 상태 금지)', () => {
+    expect(canTransition('waiting_approval', 'waiting_input')).toBe(true)
+    const r = transition('waiting_approval', ev({ type: 'turn_complete' }))
+    expect(r.illegal).toBe(false)
+    expect(r.state).toBe('waiting_input')
   })
 
   it('같은 상태로의 전이는 항상 합법 (멱등)', () => {

@@ -67,6 +67,72 @@ describe('대기 시작 시각 (인박스 정렬의 근거)', () => {
   })
 })
 
+describe('resume 직후 도착하는 승인·질문 (상태표가 삼키면 에이전트가 영원히 막힌다)', () => {
+  it('idle에서 approval_request가 와도 대기로 표면화된다', () => {
+    const s = applyEvent(s0(), ev({ type: 'approval_request', requestId: 'r9', detail: { kind: 'command', command: 'npm i', cwd: '/p' } }), NOW)
+    expect(s.state).toBe('waiting_approval')
+    expect(s.pendingApproval?.requestId).toBe('r9')
+    expect(s.waitingSince).toBe(NOW)
+  })
+
+  it('idle에서 question_request도 마찬가지다', () => {
+    const s = applyEvent(s0(), ev({ type: 'question_request', requestId: 'q9', questions: [{ question: '?', header: '', options: [], multiSelect: false }] }), NOW)
+    expect(s.state).toBe('waiting_approval')
+    expect(s.pendingQuestions).toHaveLength(1)
+    expect(s.waitingSince).toBe(NOW)
+  })
+
+  it('waiting_input(턴 종료 후)에서 온 승인 요청도 삼키지 않는다', () => {
+    const s = applyEvent(replay(TURN), ev({ type: 'approval_request', requestId: 'r10', detail: { kind: 'other', raw: '{}' } }), NOW + 1)
+    expect(s.state).toBe('waiting_approval')
+    expect(s.pendingApproval?.requestId).toBe('r10')
+  })
+})
+
+describe('승인 대기 중 인터럽트 (막다른 상태 금지)', () => {
+  it('waiting_approval에서 turn_complete가 오면 waiting_input으로 빠져나온다', () => {
+    const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'turn_complete' }), NOW)
+    expect(s.state).toBe('waiting_input')
+  })
+
+  it('빠져나올 때 죽은 승인·질문 카드도 함께 걷는다 — 클릭하면 죽은 requestId에 답하게 된다', () => {
+    const waiting = applyEvent(
+      applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'question_request', requestId: 'q1', questions: [] }), NOW),
+      ev({ type: 'turn_complete' }),
+      NOW,
+    )
+    expect(waiting.state).toBe('waiting_input')
+    expect(waiting.pendingApproval).toBeNull()
+    expect(waiting.pendingQuestions).toEqual([])
+  })
+})
+
+/*
+ * 카드는 답할 수 있는 동안만 산다 — requestId가 죽는 길은 error만이 아니다.
+ * resume(idle 복귀)·working 재개도 그 요청을 끝장내므로 카드를 함께 걷는다.
+ * 상태(가시성)와 payload(액션 가능성)가 따로 놀면 응답 불가 카드가 남는다.
+ */
+describe('회복(idle/working 복귀) 시 카드 소거', () => {
+  it('waiting_approval → idle(resume)이면 승인 카드가 걷힌다', () => {
+    const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'state_change', state: 'idle', reason: 'resumed' }), NOW)
+    expect(s.state).toBe('idle')
+    expect(s.pendingApproval).toBeNull()
+  })
+
+  it('waiting_approval → working 재개면 카드가 걷힌다 (호스트가 유효한 요청은 다시 보낸다)', () => {
+    const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'message_delta', role: 'assistant', text: '계속' }), NOW)
+    expect(s.state).toBe('working')
+    expect(s.pendingApproval).toBeNull()
+  })
+
+  it('새 승인 요청은 소거 위에 다시 선다', () => {
+    const idle = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'state_change', state: 'idle', reason: 'resumed' }), NOW)
+    const again = applyEvent(idle, ev({ type: 'approval_request', requestId: 'r2', detail: { kind: 'command', command: 'ls', cwd: '/' } }), NOW)
+    expect(again.state).toBe('waiting_approval')
+    expect(again.pendingApproval?.requestId).toBe('r2')
+  })
+})
+
 describe('세션 이름 (FR-18)', () => {
   it('자동 이름은 session_title로 갱신된다', () => {
     const s = applyEvent(s0(), ev({ type: 'session_title', title: 'auth 리팩터링' }), NOW)
@@ -131,6 +197,37 @@ describe('한도·컨텍스트·오류', () => {
     const s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: '죽음', retryable: true } }), NOW)
     expect(s.state).toBe('error')
     expect(s.lastError).toEqual({ code: 'adapter_crashed', message: '죽음' })
+  })
+
+  it('limited에서 message_delta로 재개해도 limit 배너가 정리된다', () => {
+    let s = applyEvent(s0(), ev({ type: 'message_delta', role: 'assistant', text: 'x' }), NOW)
+    s = applyEvent(s, ev({ type: 'limit_reached', resumeAt: '2026-08-15T14:30:00Z' }), NOW)
+    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: '재개' }), NOW + 1000)
+    expect(s.state).toBe('working')
+    expect(s.limit).toBeNull()
+  })
+
+  it('error에서 회복하면 lastError 배너가 정리된다', () => {
+    let s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: '죽음', retryable: true } }), NOW)
+    s = applyEvent(s, ev({ type: 'message_delta', role: 'assistant', text: '살아남' }), NOW + 1000)
+    expect(s.state).toBe('working')
+    expect(s.lastError).toBeNull()
+  })
+
+  it('idle 복귀도 회복이다 — limit·lastError가 남지 않는다', () => {
+    let s = applyEvent(s0(), ev({ type: 'error', error: { code: 'internal', message: 'x', retryable: false } }), NOW)
+    s = applyEvent(s, ev({ type: 'state_change', state: 'idle' }), NOW)
+    expect(s.lastError).toBeNull()
+  })
+
+  it('error 진입 시 죽은 승인·질문 카드가 정리된다 (requestId가 죽었으므로)', () => {
+    let s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'question_request', requestId: 'q1', questions: [{ question: '?', header: '', options: [], multiSelect: false }] }), NOW)
+    expect(s.pendingApproval).not.toBeNull()
+    expect(s.pendingQuestions).toHaveLength(1)
+    s = applyEvent(s, ev({ type: 'error', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } }), NOW)
+    expect(s.state).toBe('error')
+    expect(s.pendingApproval).toBeNull()
+    expect(s.pendingQuestions).toEqual([])
   })
 })
 

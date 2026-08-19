@@ -24,7 +24,11 @@ export function isWaiting(state: SessionState): boolean {
 const ALLOWED: Record<SessionState, readonly SessionState[]> = {
   idle: ['working', 'error'],
   working: ['waiting_approval', 'waiting_input', 'limited', 'error', 'idle'],
-  waiting_approval: ['working', 'error', 'idle'],
+  /*
+   * waiting_approval → waiting_input: 승인 대기 중 인터럽트로 턴이 끝나는 경로.
+   * 이 전이가 없으면 승인 카드를 무시하고 중단한 세션이 영원히 waiting_approval에 갇힌다.
+   */
+  waiting_approval: ['working', 'waiting_input', 'error', 'idle'],
   waiting_input: ['working', 'error', 'idle'],
   limited: ['working', 'idle', 'error'],
   error: ['working', 'idle'],
@@ -75,6 +79,12 @@ export type TransitionResult = {
 export function transition(from: SessionState, event: NormalizedEvent): TransitionResult {
   const to = nextStateFor(event)
   if (to === null) return { state: from, illegal: false }
+  /*
+   * 승인·질문 요청은 추론이 아니라 호스트가 실제로 보낸 사실이다.
+   * resume 직후 idle에서 도착한 요청을 표가 삼키면 인박스·뱃지가 못 보고
+   * 에이전트는 영원히 막힌다 — 표는 state_change 같은 추론 전이만 거른다.
+   */
+  if (event.type === 'approval_request' || event.type === 'question_request') return { state: to, illegal: false }
   if (!canTransition(from, to)) return { state: from, illegal: true }
   return { state: to, illegal: false }
 }

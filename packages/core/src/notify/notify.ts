@@ -74,30 +74,50 @@ export function notificationFor(
  * 자리를 뜬 사람에게 필요한 신호는 그것이다.
  */
 export function allDoneNotification(
-  sessions: readonly { state: SessionState; archived: boolean }[],
-  prevSessions: readonly { state: SessionState; archived: boolean }[],
+  sessions: readonly { id: string; state: SessionState; archived: boolean }[],
+  prevSessions: readonly { id: string; state: SessionState; archived: boolean }[],
   ctx: NotifyContext,
 ): NotifyRequest | null {
   const policy = ctx.policy ?? DEFAULT_NOTIFY_POLICY
   if (!policy.allDone) return null
   if (ctx.appFocused && !policy.whenFocused) return null
 
-  const busy = (list: readonly { state: SessionState; archived: boolean }[]) =>
-    list.filter((s) => !s.archived && s.state === 'working').length
+  /*
+   * "끝났다"의 반대는 working만이 아니다.
+   *
+   * waiting_approval은 에이전트가 막혀 있는 것이지 손이 빈 게 아니고,
+   * limited는 해제되면 스스로 재개한다 — 이 상태에서 "All done"이 울리면
+   * 승인 카드가 쌓여 있는데 사람은 다 끝난 줄 알고 자리를 뜬다.
+   */
+  const isBusy = (s: { state: SessionState; archived: boolean }) =>
+    !s.archived && (s.state === 'working' || s.state === 'waiting_approval' || s.state === 'limited')
 
-  const active = (list: readonly { state: SessionState; archived: boolean }[]) =>
-    list.filter((s) => !s.archived).length
+  const active = sessions.filter((s) => !s.archived).length
 
-  // 방금 마지막 작업이 끝났고, 알릴 세션이 실제로 있었을 때만
-  if (busy(prevSessions) > 0 && busy(sessions) === 0 && active(sessions) > 0) {
-    const waiting = sessions.filter((s) => !s.archived && isWaiting(s.state)).length
-    return {
-      kind: 'all_done',
-      title: 'All done',
-      body: waiting > 0 ? `${waiting} sessions are waiting for input` : 'Every session has finished',
-    }
+  /*
+   * **개수가 아니라 신원으로 판정한다.**
+   *
+   * busy(prev)>0 && busy(now)===0 식의 개수 비교는, 마지막 working 세션을
+   * **아카이브·삭제한 순간**에도 성립한다 — 일이 끝난 게 아니라 치운 것인데
+   * "All done"이 울린다. 바쁘던 바로 그 세션들이 **여전히 목록에 있고,
+   * 치워지지 않았고, 실제로 손을 뗐을 때**만 끝난 것이다.
+   */
+  const prevBusy = prevSessions.filter(isBusy).map((s) => s.id)
+  if (prevBusy.length === 0 || active === 0) return null
+  const now = new Map(sessions.map((s) => [s.id, s]))
+  for (const id of prevBusy) {
+    const s = now.get(id)
+    if (!s || s.archived || isBusy(s)) return null
   }
-  return null
+  // 그 사이 새로 바빠진 세션이 있어도 아직 끝난 게 아니다
+  if (sessions.some(isBusy)) return null
+
+  const waiting = sessions.filter((s) => !s.archived && isWaiting(s.state)).length
+  return {
+    kind: 'all_done',
+    title: 'All done',
+    body: waiting > 0 ? `${waiting} sessions are waiting for input` : 'Every session has finished',
+  }
 }
 
 /** 독 뱃지 숫자 — 승인과 오류만 센다 (응답 대기는 급하지 않으므로 뱃지를 태우지 않는다) */
