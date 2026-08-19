@@ -75,12 +75,13 @@ Nothing publishes on a push, a tag, or a merge.
    The second command publishes the shim last and refuses to do so if any pinned platform
    package is missing from the registry at this version — which is what step 2 was for.
 
-   **Run this from your own terminal, not from an agent or an ssh session.** The macOS
-   build produces a `.dmg` as well as the `.app`, and Tauri's `bundle_dmg.sh` drives Finder
-   through `osascript` to lay the window out. A shell with no GUI session behind it is
-   denied Automation access and the step exits 64, failing the whole build — even though
-   the `.app`, which is the only thing npm ships, was already built and signed fine.
-   `--skip-build` sidesteps it if a good bundle is already there.
+   A release build produces only the `.app`, not the `.dmg` the plain `pnpm app` build also
+   makes. That is deliberate twice over: a release should build what it publishes, and the
+   DMG step is the one that can fail for reasons unrelated to the code — Tauri's
+   `bundle_dmg.sh` drives Finder through `osascript`, so a shell with no GUI session behind
+   it (an agent, an ssh session) is denied Automation access and exits 64. Losing a release
+   to that, with a correctly built and signed `.app` already sitting there, is not a trade
+   worth making. CI still builds the `.dmg`, which is where a genuine break in it should show.
 
    Useful flags: `--skip-build` reuses an existing bundle, `--otp=123456` for accounts with
    2FA, `--platform-only` publishes the platform package without the shim, `--also-latest`

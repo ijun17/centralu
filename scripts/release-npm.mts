@@ -129,6 +129,15 @@ type Target = {
 const TARGETS: Record<string, Target | undefined> = {
   'darwin-arm64': {
     id: 'darwin-arm64',
+    /*
+     * Only the `.app`, even though the config also builds a `.dmg`. Same rule as Linux —
+     * a release builds what it publishes and nothing else — but here it also removes a
+     * failure mode from the release path: Tauri's `bundle_dmg.sh` drives Finder through
+     * `osascript`, and a shell with no GUI session behind it is denied Automation access
+     * and exits 64. That would fail a release whose `.app` was already built and signed.
+     * The `.dmg` is still built in CI, where a break in it should be visible.
+     */
+    bundles: 'app',
     artifact: `${APP_NAME}.app`,
     locate: () => join(BUNDLE_ROOT, 'macos', `${APP_NAME}.app`),
     install: (src, dest) => {
