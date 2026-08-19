@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider } from './PlatformProvider.jsx'
@@ -14,7 +14,6 @@ import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
-import { AddProjectDialog } from '../features/project/AddProjectDialog.jsx'
 import { FirstRun } from '../features/onboarding/FirstRun.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
@@ -130,7 +129,6 @@ function TopBar() {
   const counts = useCounts()
   const toggleInbox = useStore((s) => s.toggleInbox)
   const connection = useStore((s) => s.connection)
-  const [addOpen, setAddOpen] = useState(false)
   const waiting = counts.approval + counts.error + counts.input
 
   // macOS 신호등(닫기·최소화·전체화면)이 왼쪽 위를 차지하므로 pl로 그만큼 비운다.
@@ -249,16 +247,13 @@ function TopBar() {
         >
           Settings
         </button>
-        <button
-          className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk"
-          onClick={() => setAddOpen(true)}
-          data-testid="add-project"
-        >
-          Add project
-        </button>
+        {/*
+          'Add project'는 여기 있었다. 사이드바 맨 아래로 옮겼다 (이슈 #4) —
+          누르는 곳(화면 오른쪽 끝)과 결과가 나타나는 곳(왼쪽 사이드바)이 화면을
+          가로질러 떨어져 있었다. 상단 바는 **계기판**이라, 무언가를 만드는 버튼이
+          숫자들 옆에 서면 읽는 것과 하는 것이 한 줄에 섞인다.
+        */}
       </span>
-
-      {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
     </DragRegion>
   )
 }

@@ -37,9 +37,12 @@ type Result = {
 async function boot(page: Page, count: number): Promise<string[]> {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('first-run')).toBeVisible()
-  await page.getByTestId('add-project').click()
-  await page.getByTestId('project-path-input').fill('/tmp/alpha')
-  await page.getByTestId('project-add-confirm').click()
+  // 'Add project'는 사이드바에 있는데(이슈 #4) 프로젝트가 0개면 사이드바가 없다 — 시작 안내로 등록한다
+  await page.evaluate(() => {
+    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
+  })
+  await page.getByTestId('first-run-pick').click()
+  await expect(page.getByTestId('project-alpha')).toBeVisible()
 
   const ids: string[] = []
   for (let i = 0; i < count; i++) {

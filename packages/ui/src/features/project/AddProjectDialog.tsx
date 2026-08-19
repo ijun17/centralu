@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { Modal } from '../../components/Modal.jsx'
 
 /** 웹 dev에서는 디렉토리 피커가 없으므로 경로 입력 (Tauri에서 dialog 플러그인으로 교체) */
 export function AddProjectDialog({ onClose }: { onClose: () => void }) {
@@ -9,15 +10,16 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  /*
+    직접 `absolute inset-0`으로 그리다가 Modal로 바꿨다.
+    이 창을 여는 버튼이 사이드바(이슈 #4)로 내려왔는데, 사이드바에는 폭 조절 손잡이
+    때문에 `relative`가 붙어 있다 — absolute는 그걸 기준으로 자리를 잡으므로
+    창이 **사이드바 폭 안에 갇힌다**. 같은 함정을 Modal이 이미 포털로 막아 두었다.
+  */
   return (
-    <div
-      className="absolute inset-0 z-30 flex items-start justify-center bg-void/80 pt-[16vh] backdrop-blur-[2px]"
-      onClick={onClose}
-      data-testid="add-project-dialog"
-    >
+    <Modal onClose={onClose} testId="add-project-dialog" align="top">
       <form
         className="w-[480px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
-        onClick={(e) => e.stopPropagation()}
         onSubmit={async (e) => {
           e.preventDefault()
           setBusy(true)
@@ -41,7 +43,6 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           placeholder="/Users/me/projects/my-app"
           value={path}
           onChange={(e) => setPath(e.target.value)}
-          onKeyDown={(e) => e.key === 'Escape' && onClose()}
           data-testid="project-path-input"
           spellCheck={false}
         />
@@ -72,6 +73,6 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

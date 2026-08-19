@@ -10,10 +10,23 @@ async function setup(page: Page, opts: { projects?: string[] } = {}) {
   await page.goto('/?mock=1')
   // 프로젝트가 없으면 시작 안내가 먼저 나온다 (FR-19)
   await expect(page.getByTestId('first-run')).toBeVisible()
-  for (const path of opts.projects ?? []) {
-    await page.getByTestId('add-project').click()
-    await page.getByTestId('project-path-input').fill(path)
-    await page.getByTestId('project-add-confirm').click()
+  for (const [i, path] of (opts.projects ?? []).entries()) {
+    if (i === 0) {
+      /*
+        첫 프로젝트는 **시작 안내**에서 등록한다. 'Add project' 버튼이 사이드바로
+        내려갔는데(이슈 #4), 프로젝트가 0개면 사이드바 자체가 없기 때문이다 —
+        그 상태를 맡는 화면이 시작 안내다.
+      */
+      await page.evaluate((p: string) => {
+        ;(window as any).__mock.nextPickedDirectory = p
+      }, path)
+      await page.getByTestId('first-run-pick').click()
+    } else {
+      await page.getByTestId('add-project').click()
+      await page.getByTestId('project-path-input').fill(path)
+      await page.getByTestId('project-add-confirm').click()
+    }
+    await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
   }
 }
 
@@ -68,11 +81,36 @@ test('프로젝트 등록 → 사이드바 표시 (T5-2)', async ({ page }) => {
   await expect(page.getByTestId('project-tip-alpha')).toContainText('main')
 })
 
-test('없는 경로는 오류를 보여준다 (첫 실행 경험)', async ({ page }) => {
-  await setup(page)
+test('빈 경로로는 프로젝트를 추가할 수 없다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('add-project').click()
   await page.getByTestId('project-path-input').fill('')
   await expect(page.getByTestId('project-add-confirm')).toBeDisabled()
+})
+
+/**
+ * 누르는 곳과 나타나는 곳이 붙어 있어야 한다 (이슈 #4).
+ *
+ * 예전엔 상단 바 오른쪽 끝이었다 — 화면 반대편을 눌러 놓고 결과는 왼쪽에서 찾았다.
+ * 눈으로만 맞추면 다시 멀어지므로 좌표로 못 박는다.
+ */
+test('Add project 버튼은 사이드바 안에, 프로젝트 목록 아래에 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  const sidebar = (await page.getByTestId('sidebar').boundingBox())!
+  const add = (await page.getByTestId('add-project').boundingBox())!
+  const project = (await page.getByTestId('project-alpha').boundingBox())!
+
+  // 사이드바 안이다 (상단 바가 아니라)
+  expect(add.x).toBeGreaterThanOrEqual(sidebar.x - 1)
+  expect(add.x + add.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
+  // 새 프로젝트가 붙는 자리(목록 끝) 바로 아래다
+  expect(add.y).toBeGreaterThanOrEqual(project.y + project.height - 1)
+
+  // 열리는 창은 사이드바 폭에 갇히지 않는다 (포털로 띄운다)
+  await page.getByTestId('add-project').click()
+  const dialog = (await page.getByTestId('add-project-dialog').boundingBox())!
+  expect(dialog.width).toBeGreaterThan(sidebar.width)
 })
 
 test('세션 생성 → 대화 스트리밍 렌더 (T5-3)', async ({ page }) => {

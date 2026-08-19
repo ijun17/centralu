@@ -3,6 +3,7 @@ import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
+import { AddProjectDialog } from '../project/AddProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
@@ -108,6 +109,7 @@ export function Sidebar() {
   const ids = projectIds ? projectIds.split(',') : []
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+  const [addOpen, setAddOpen] = useState(false)
 
   return (
     <aside
@@ -129,11 +131,32 @@ export function Sidebar() {
         <p className="px-4 py-6 text-xs leading-relaxed text-slate">
           No projects yet.
           <br />
-          Start with <span className="text-ash">Add project</span> above.
+          Start with <span className="text-ash">Add project</span> below.
         </p>
       ) : (
         ids.map((id) => <ProjectBlock key={id} projectId={id} />)
       )}
+      {/*
+        **누르는 곳과 나타나는 곳이 같아야 한다** (이슈 #4).
+        예전엔 상단 바 오른쪽 끝에 있었다 — 화면 반대편을 눌러 놓고, 결과는
+        왼쪽 사이드바에서 찾아야 했다. 새 프로젝트는 목록 **끝**에 붙으므로
+        버튼도 목록 끝에 둔다: 누른 자리 바로 아래에 결과가 자란다.
+
+        오케스트레이터·그리드처럼 밝히지 않는다. 저 둘은 자주 오가는 문이고
+        이건 가끔 한 번 하는 일이라, 목록을 읽는 동안은 물러나 있어야 한다.
+      */}
+      <div className="px-2 py-2">
+        <button
+          className="flex w-full items-center gap-2 rounded-lg border border-edge px-2.5 py-1.5 text-left text-[12px] text-slate transition-colors hover:border-graphite hover:text-chalk"
+          onClick={() => setAddOpen(true)}
+          data-testid="add-project"
+          title="Register a directory for agents to run in"
+        >
+          <PlusIcon size={13} />
+          <span className="truncate">Add project</span>
+        </button>
+      </div>
+      {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
     </aside>
   )
 }
