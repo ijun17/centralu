@@ -1,64 +1,117 @@
-# 기여 안내
+# Contributing
 
-Centralu는 MIT로 공개된다 ([LICENSE](LICENSE)). 이슈·PR 모두 환영한다.
+Centralu is MIT ([LICENSE](LICENSE)). Issues and pull requests are both welcome.
 
-## 먼저 이슈를 연다
+## Open an issue first
 
-작은 수정(오타·명백한 버그)은 바로 PR을 열어도 된다. 그 외에는 **이슈를 먼저 열어달라.**
-이 앱은 화면 하나에 결정이 여러 개 얽혀 있어서(승인 흐름·세션 상태·알림 정책),
-코드를 다 쓴 뒤에 방향이 어긋난 것을 발견하면 서로 시간을 잃는다.
+For something small — a typo, an obvious bug — open the PR directly. For anything else,
+**open an issue first.** A single screen in this app has several decisions tangled
+together (the approval flow, session state, the notification policy), and discovering
+after the code is written that it went the wrong way costs us both.
 
-버그를 신고할 때는 `~/.centralu/host.log`를 함께 붙여달라.
-기동 배너에 빌드 커밋이 박혀 있어 어느 빌드인지 바로 갈린다.
+When reporting a bug, attach `~/.centralu/host.log`. The startup banner has the build
+commit in it, so which build you were on is never in question.
 
-## 보내기 전에 통과시켜야 하는 것
+## Getting it running
 
 ```bash
-pnpm verify      # lint + 의존 규칙 + 타입 + 단위/통합 테스트
-pnpm e2e         # Playwright 시나리오
+pnpm install
+
+# terminal 1 — the agent host (Node sidecar)
+pnpm host --port 5175 --token dev-token
+
+# terminal 2 — the web UI. Development happens in a browser; releases go out as Tauri
+pnpm dev                      # http://127.0.0.1:5174
 ```
 
-Rust를 고쳤다면:
+`http://127.0.0.1:5174/?mock=1` runs the UI against a mock platform with no host at all,
+which is what you want when you are only touching the interface.
+
+For the real app rather than the browser:
+
+```bash
+pnpm app:dev      # ← the normal one. Save a UI file and it is on screen (HMR)
+pnpm app          # build and open the release app (~60s incremental)
+pnpm app:open     # open an already-built app
+```
+
+### How a change reaches the running app
+
+Which of those you need depends on what you touched, and getting it wrong looks like
+your change silently not working.
+
+| Changed | Reaches the app by |
+|---|---|
+| `packages/ui`, `packages/platform` | saving, under `app:dev` (HMR) |
+| `packages/agent-host`, `packages/protocol` | restarting the app — the host is not watched |
+| `apps/desktop/src-tauri` (Rust) | recompiling, then restarting itself |
+| anything touching PATH, the bundle, or native modules | `pnpm app` — those only reproduce in the packaged app |
+
+## What has to pass before you send it
+
+```bash
+pnpm verify      # lint + dependency rules + types + unit/integration tests
+pnpm e2e         # Playwright scenarios
+```
+
+If you touched Rust:
 
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 ```
 
-**배포 앱에서만 재현되는 결함이 있다.** PATH·번들·네이티브 관련을 고쳤다면
-`pnpm app`으로 실제 `.app`을 띄워 확인해달라 — dev 모드는 터미널이 PATH를 주기 때문에
-그 부류의 결함을 영원히 재현하지 못한다.
+**Some defects only reproduce in the packaged app.** If you changed anything to do with
+PATH, bundling or native modules, run `pnpm app` and check the real `.app` — dev mode
+inherits PATH from your terminal, so it will never reproduce that class of bug.
 
-## 코드에 대한 기대
+## What is expected of code
 
-- **주석은 '무엇'이 아니라 '왜'를 적는다.** 특히 실측으로 알아낸 것은 그 값과 함께 남긴다
-- 문서와 코드가 다르면 문서가 틀린 것이다 — 설계를 바꾸면 같은 PR에서 문서를 고친다
-- 테스트는 동작을 설명하는 제목을 단다. 깨졌을 때 제목만 읽고 무엇이 무너졌는지 알아야 한다
+- **Comments say why, not what.** Anything learned by measuring is kept together with
+  the number that was measured.
+- Tests are titled with the behaviour they describe. When one breaks, the title alone
+  should tell you what fell over.
+- New comments and documents are written in English
+  ([#27](https://github.com/ijun17/centralu/issues/27)). Most of the existing ones are
+  Korean; translating one is welcome as long as it keeps the reasoning intact rather
+  than reducing it to a restatement of the code.
 
-## 기여자 라이선스 동의 (CLA)
+### Documentation
 
-**PR을 보내는 것은 아래에 동의하는 것으로 본다.**
+`docs/` is design documentation — [docs/README.md](docs/README.md) is the map.
 
-당신이 보낸 기여물에 대해, 당신은 프로젝트 소유자에게 다음을 부여한다:
+- Change the design, fix the document **in the same PR as the code.** If the document
+  and the code disagree, the document is the one that is wrong.
+- Every "decision" table carries its reasoning. A decision with no reasoning behind it is
+  a decision to revisit.
+- Where a design document conflicts with the spec (`docs/product-spec.md`) on a
+  requirement, the spec wins. On how something is built, the design document wins.
 
-1. 그 기여물을 사용·복제·수정·배포·2차 저작할 수 있는 **영구적이고 전 세계적이며
-   무상인, 취소 불가능한 비독점 권한**
-2. 그 기여물을 **다른 라이선스로 배포할 수 있는 권한** (재라이선스)
-3. 관련 특허가 있다면 그에 대한 실시권
+## Contributor Licence Agreement (CLA)
 
-그리고 다음을 확인한다:
+**Sending a pull request is taken as agreement to what follows.**
 
-- 그 기여물은 당신이 직접 만든 것이거나, 당신에게 이렇게 제출할 권한이 있다
-- 고용 계약이나 다른 계약이 이 부여를 막지 않는다
+For the contribution you send, you grant the project owner:
 
-### 왜 이런 걸 요구하나
+1. A **perpetual, worldwide, royalty-free, irrevocable, non-exclusive right** to use,
+   reproduce, modify, distribute and make derivative works of that contribution
+2. The right to **distribute that contribution under a different licence** (relicensing)
+3. A patent licence to any relevant patents you hold
 
-정직하게 적는다. **나중에 회사용 유료 라이선스를 만들 가능성을 열어두기 위해서다.**
+And you confirm that:
 
-기여물의 저작권이 여러 사람에게 흩어지면, 라이선스를 바꾸려 할 때 **모든 기여자의
-동의를 다시 받아야 한다.** 연락이 닿지 않는 사람이 한 명만 있어도 그 길은 막힌다.
-그래서 지금, 기여가 쌓이기 전에 정해 둔다.
+- The contribution is your own work, or you have the right to submit it this way
+- No employment or other agreement prevents you from granting this
 
-개인 사용자에게 이것이 의미하는 바는 없다 — 이 저장소의 코드는 MIT이고, 앞으로도
-MIT로 남는다. 달라질 수 있는 것은 **미래에 추가될 기능**의 조건이다.
+### Why this is asked for
 
-동의할 수 없다면 PR 대신 이슈로 제안해달라. 아이디어에는 CLA가 필요 없다.
+Stated plainly: **to keep open the possibility of a paid licence for companies later.**
+
+Once copyright in the contributions is spread across many people, changing the licence
+means **getting every one of them to agree again.** A single contributor who cannot be
+reached closes that road. So it is settled now, before contributions accumulate.
+
+For individual users this means nothing. The code in this repository is MIT and stays
+MIT. What could differ is the terms of **features added in the future**.
+
+If you cannot agree to this, open an issue with the suggestion instead of a PR. Ideas do
+not need a CLA.

@@ -1,112 +1,114 @@
 # Centralu
 
-> 여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 경량 데스크톱 앱
+Run, watch and steer several agent coding tools — Claude Code, Codex CLI — from one
+window.
 
-macOS · Apple Silicon 전용 · 베타. 대화 기록은 **당신의 맥에만** 저장된다
-(`~/.centralu/store.db`). 어디로도 전송되지 않는다.
+<!--
+  SCREENSHOT NEEDED HERE.
 
-## 쓰려면 필요한 것
+  It has to show the thing the app is for, which is triage, not chat. That means the
+  sidebar with several sessions in different states at once — one waiting for approval,
+  one waiting for input, one still working — the inbox count, and one session open in
+  the focus view with an approval card on screen.
 
-이 앱은 혼자 돌지 않는다. 아래가 없으면 앱이 뜨더라도 세션을 만들 수 없다.
+  A single idle session proves nothing; that shot would look like every other chat UI.
+-->
+
+Beta. See [where it runs](#where-it-runs).
+
+Your conversations stay on your machine. They are written to `~/.centralu/store.db` and
+sent nowhere. There is no account and no server to sign into.
+
+[한국어 README](README.ko.md)
+
+## What it is
+
+Using agent coding tools in earnest means running several of them at once, across
+several projects. The problem that creates is not that you cannot watch them all —
+it is that the terminal tabs scatter, and you lose track of which one is blocked on
+you. Opening an IDE per project to see what changed costs more RAM and battery than
+the work is worth.
+
+Centralu is a control tower for that. It does not write code. It shows you what the
+agents are doing, and picks out the one that needs you now.
+
+It keeps two kinds of waiting apart, because they cost you different amounts:
+**waiting for approval** means an agent is stuck and burning nothing until you answer;
+**waiting for input** means a turn finished and can sit there all afternoon. Collapsing
+those into one badge is how you end up checking everything and trusting nothing.
+
+The rule it is built on is **do not block, make visible**. Centralu does not take
+options away from you or from the agent, and does not impose a workflow — it tells you
+what is happening and what is waiting on your judgement. The scarce resource here is
+your attention, not tokens.
+
+## What you need
+
+Centralu does not run agents itself; it drives the CLIs you already have. Without these
+it will open, and then be unable to start a session.
 
 | | |
 |---|---|
-| **Node 22 이상** | host(사이드카)가 이 위에서 돈다. 없으면 기동 화면이 무엇이 없는지 말해준다 |
-| **`claude` CLI** + 로그인 | Claude Code 세션용 (`npm i -g @anthropic-ai/claude-code`) |
-| **`codex` CLI** + 로그인 | Codex 세션용 (`npm i -g @openai/codex`). 안 쓸 거면 없어도 된다 |
+| **Node 22 or newer** | the host sidecar runs on it. If it is missing or too old, the app says so at startup and names the version it needs |
+| **`claude` CLI**, logged in | for Claude Code sessions — `npm i -g @anthropic-ai/claude-code` |
+| **`codex` CLI**, logged in | for Codex sessions — `npm i -g @openai/codex`. Skip it if you do not use Codex |
 
-첫 실행 화면이 이 셋의 상태를 직접 보여주고, 없는 것은 설치 명령까지 함께 적는다.
+Either CLI on its own is enough to start. The first-run screen checks for both, says
+which one it found, and prints the command to install or log into whatever is missing.
 
-## 설치
-
-```bash
-npm i -g centralu       # 베타 (centralu@beta 로 베타 줄에 고정할 수도 있다)
-centralu                # 실행
-centralu install        # /Applications에 넣기 (Launchpad·Spotlight에 뜨게)
-centralu update         # 새 버전이 있으면
-```
-
-소스에서 빌드하려면:
+## Install
 
 ```bash
-pnpm install && pnpm app        # 빌드 후 앱이 열린다
+npm i -g centralu   # beta — centralu@beta pins you to the beta line
+centralu            # run it
+centralu install    # add it to /Applications, so Spotlight and Launchpad find it
+centralu update     # when a newer version exists
 ```
 
-> 왜 npm인가: 브라우저로 받은 파일에는 macOS가 격리 딱지를 붙여 "확인할 수 없습니다"
-> 경고가 뜬다. npm으로 설치한 것에는 그 딱지가 붙지 않아 경고 없이 그냥 열린다.
-> 근거와 실측은 [배포 점검표 §2](docs/plans/beta-release-checklist.md)에 있다.
+`centralu install` is a separate command on purpose: writing to someone's
+`/Applications` from a postinstall hook without being asked is not a thing this project
+does. `centralu uninstall` reverses it and leaves your conversations alone.
 
-## 라이선스
+> **Why npm, and not a download.** macOS does not inspect an app and decide it looks
+> dangerous. It looks for a `com.apple.quarantine` tag, and that tag is attached by
+> whatever fetched the file — browsers attach it, npm does not. The same build of
+> Centralu, downloaded, opens with "Apple could not verify it is free of malware"; installed
+> through npm it just opens. That is measured, not assumed: the numbers and the method
+> are in [the beta release checklist §2](docs/plans/beta-release-checklist.md).
 
-[MIT](LICENSE). 기여는 [CONTRIBUTING.md](CONTRIBUTING.md)를 먼저 읽어달라 (CLA가 있다).
+## Where it runs
 
----
+| | |
+|---|---|
+| **macOS, Apple Silicon** | published to npm, and what the project is developed on daily |
+| **Linux, x86-64** | builds in CI. Not published, and never yet launched by anybody |
+| **Windows · Linux on arm64 · Intel Macs** | do not build at all ([#14](https://github.com/ijun17/centralu/issues/14), [#29](https://github.com/ijun17/centralu/issues/29)) |
 
-기획은 [docs/product-spec.md](docs/product-spec.md)(v0.4)가 기준이다. `docs/`의 나머지는 **어떻게 만들 것인가**를 다룬다.
+Linux is the row that needs the longer answer. Nobody on this project owns a Linux
+machine, so CI is not a convenience there — it is the only place a Linux bundle has ever
+existed. It does get built on every push:
+[run 32289487033](https://github.com/ijun17/centralu/actions/runs/32289487033) produced a
+78 MB AppImage and a 5.1 MB `.deb`, and both are downloadable as run artifacts.
 
-## 개발 실행
+What has never happened is anyone starting one. Compiling and running are different
+claims, and only the first has been demonstrated. So `centralu-linux-x64` is not on the
+npm registry — an unlisted platform makes npm answer "not supported yet", which beats
+installing something that may not open. The CI artifact is the only way to get it today,
+and because GitHub artifacts are zips, you will need to `chmod +x` the AppImage after
+unzipping.
 
-```bash
-pnpm install
+If you run Linux and are willing to be the first,
+[#14](https://github.com/ijun17/centralu/issues/14) is where to report what happened —
+including if it did nothing at all.
 
-# 터미널 1 — 에이전트 호스트 (Node 사이드카)
-pnpm host --port 5175 --token dev-token
+## Licence
 
-# 터미널 2 — 웹 UI (개발은 브라우저에서, 출시는 Tauri로)
-pnpm dev                      # http://127.0.0.1:5174
+[MIT](LICENSE). Issues and pull requests are welcome; please read
+[CONTRIBUTING.md](CONTRIBUTING.md) first, as there is a CLA.
 
-# UI만 단독으로 보기 (mock platform, host 불필요)
-pnpm dev                      # http://127.0.0.1:5174/?mock=1
-```
+## Documentation
 
-검증:
-
-```bash
-pnpm verify      # lint + 의존 규칙 + 타입 + 단위/통합 테스트 (574개)
-pnpm e2e         # Playwright 관제 루프 시나리오 (162개, PERF=1 시 8개 추가)
-pnpm smoke       # 실 Claude 세션으로 host 관통 검증 (소액 과금)
-```
-
-현재 상태: **M2 완료 → 도그푸딩 중** — [실행 결과](docs/plans/m2-result.md), 배포 준비는 [점검표](docs/plans/beta-release-checklist.md).
-
-## 문서 지도
-
-| 문서 | 내용 | 먼저 읽어야 할 것 |
-|---|---|---|
-| [product-spec.md](docs/product-spec.md) | 기획서: 요구사항(FR-1~21), 화면, 로드맵, 리스크 | — |
-| [architecture.md](docs/architecture.md) | 전체 아키텍처: 변경 축, 레이어, 의존 규칙, 디자인 패턴, 프로세스 토폴로지 | product-spec §6 |
-| [folder-structure.md](docs/folder-structure.md) | 모노레포 패키지 분할과 배치 규칙, 확장 시나리오별 "코드가 갈 곳" | architecture |
-| [tech-stack.md](docs/tech-stack.md) | 라이브러리 선정과 근거, 금지 목록 | architecture |
-| [platform-abstraction.md](docs/platform-abstraction.md) | **웹 개발 → Tauri 전환의 핵심**: Platform 포트, 구현 매트릭스, 강제 장치 | architecture |
-| [protocol.md](docs/protocol.md) | UI ↔ Agent Host 메시지 프로토콜, 스키마, 버전 규칙 | architecture |
-| [agent-host.md](docs/agent-host.md) | Node 사이드카 내부 구조, AgentAdapter, 새 도구 추가 절차 | protocol |
-| [state-management.md](docs/state-management.md) | 프론트 상태 흐름: 이벤트 → 스토어 → 셀렉터, 영속화·복원 | architecture, protocol |
-| [spikes/m0-findings.md](docs/spikes/m0-findings.md) | M0 검증 결과: 권한 오버라이드·이벤트·Codex·토폴로지 전부 성립 | — |
-| [plans/m1-plan.md](docs/plans/m1-plan.md) | M1 실행 플랜: 페이즈·태스크·완료 기준·게이트 | 전부 |
-| [plans/m1-result.md](docs/plans/m1-result.md) | M1 실행 결과: 게이트 통과 현황, 성능 실측, 구현 중 결정, G5 실측 기록 | m1-plan |
-| [plans/m1.5-plan.md](docs/plans/m1.5-plan.md) | M1.5 계획: 상시 가동 + 검증 프로토콜, 이후 마일스톤 개요 | m1-result |
-| [plans/m1.5-result.md](docs/plans/m1.5-result.md) | M1.5 실행 결과: 실측이 잡은 결함 5건, 성능, 남은 한계 | m1.5-plan |
-| [plans/m2-plan.md](docs/plans/m2-plan.md) | M2 계획 v2 (독립 재검증 반영) | m1.5-result |
-| [plans/m2-result.md](docs/plans/m2-result.md) | **M2 실행 결과**: 배포 빌드 통과, 실측 결함 5건, 도그푸딩 시작 방법 | m2-plan |
-| [releasing.md](docs/releasing.md) | How a version reaches users: npm package layout, CI, publish procedure | — |
-
-## 문서 규칙
-
-- 설계를 바꾸면 **코드와 같은 PR에서 해당 문서를 고친다.** 문서와 코드가 다르면 문서가 틀린 것이다.
-- 각 문서의 "결정" 표는 근거를 함께 적는다. 근거 없는 결정은 재검토 대상.
-- 기획서(product-spec)와 충돌하면 기획서가 이긴다 (기능 요구), 단 구현 방식은 설계 문서가 이긴다.
-
-## 실행
-
-```bash
-pnpm app:dev      # ← 평소 개발은 이걸로. UI 저장하면 즉시 반영(HMR)
-pnpm app          # 배포 앱 빌드 + 실행 (증분 ~60초)
-pnpm app:open     # 이미 빌드된 앱만 열기
-
-# 무엇을 고쳤느냐에 따라 반영 방식이 다르다
-#   packages/ui, packages/platform  → app:dev에서 저장 즉시 (HMR)
-#   packages/agent-host, protocol    → 앱 재시작 필요 (host는 watch하지 않는다)
-#   apps/desktop/src-tauri (Rust)    → 재컴파일 후 자동 재시작
-#   PATH·번들·네이티브 관련           → pnpm app (배포 앱에서만 재현되는 것들)
-pnpm dev          # 웹만 (host는 pnpm host 별도) — UI 손볼 때만
-```
+[docs/product-spec.md](docs/product-spec.md) is the spec that everything else answers to.
+[docs/README.md](docs/README.md) maps the rest. Most of `docs/` is still in Korean; the
+translation is tracked in
+[#27](https://github.com/ijun17/centralu/issues/27).

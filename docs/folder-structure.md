@@ -6,8 +6,10 @@ pnpm workspaces 모노레포. 패키지 경계 = 의존 규칙 경계 = lint 강
 
 ```
 centralu/
-├─ README.md                    # 문서 지도
+├─ README.md                    # 소개 (사용자용). 한국어판은 README.ko.md
+├─ CONTRIBUTING.md              # 개발 실행법·검증·CLA
 ├─ docs/                        # 기획서(product-spec.md) + 설계 문서 (이 폴더)
+│  └─ README.md                 # 문서 지도
 ├─ package.json                 # workspace 루트 (스크립트 허브)
 ├─ pnpm-workspace.yaml
 │
