@@ -39,6 +39,8 @@ export function layoutCommits(commits: GitCommit[]): GraphRow[] {
   }
 
   const rows: GraphRow[] = []
+  /** 이미 그린 커밋들 — rebase/cherry-pick 뒤에는 log가 topo 순서를 보장하지 않는다 */
+  const drawn = new Set<string>()
   for (const c of commits) {
     const above = active()
 
@@ -49,9 +51,19 @@ export function layoutCommits(commits: GitCommit[]): GraphRow[] {
     // 이 커밋을 기다리던 레인은 전부 여기서 끝난다.
     // 여러 자식이 같은 부모를 가리킬 수 있어서 하나만 지우면 유령 레인이 남는다.
     for (let i = 0; i < lanes.length; i++) if (lanes[i] === c.sha) lanes[i] = null
+    drawn.add(c.sha)
 
     const edges: number[] = []
     for (const [n, parent] of c.parents.entries()) {
+      /*
+       * 부모가 이미 위에 그려져 있으면 레인을 잡지 않는다.
+       *
+       * 날짜 역전(rebase/cherry-pick)으로 부모가 자식보다 먼저 나오면, 그 부모를
+       * 기다리는 레인은 아무도 끝내 주지 않아 바닥까지 유령 선이 이어진다.
+       * 이 모델의 선은 아래로만 향하므로 위로 가는 선은 그냥 생략이 맞다 —
+       * 없는 선이 잘리는 것보다 없는 관계가 그려지는 게 나쁘다.
+       */
+      if (drawn.has(parent)) continue
       const held = lanes.indexOf(parent)
       if (held !== -1) {
         edges.push(held) // 이미 기다리는 레인이 있다 → 그리로 합류 (레인을 늘리지 않는다)

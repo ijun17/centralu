@@ -60,6 +60,22 @@ describe('layoutCommits', () => {
     expect(rows[2]!.below).toEqual([])
   })
 
+  it('부모가 자식보다 먼저 와도 유령 레인이 남지 않는다 (rebase 뒤 날짜 역전)', () => {
+    // p가 c보다 위에 찍힌 비-topo 순서 — c의 부모 p는 이미 그려졌으므로 레인을 잡으면 안 된다
+    const rows = layoutCommits([c('p'), c('c', 'p')])
+    expect(rows[1]!.below).toEqual([])
+    expect(rows[1]!.edges).toEqual([])
+    expect(laneCount(rows)).toBe(1)
+  })
+
+  it('병합의 두 번째 부모가 이미 그려졌어도 새 레인을 만들지 않는다', () => {
+    // y가 병합 m보다 먼저 나오는 비-topo 순서
+    const rows = layoutCommits([c('y', 'z'), c('m', 'x', 'y'), c('x', 'z'), c('z')])
+    const bottom = rows.at(-1)!
+    // z가 그려진 뒤에는 어떤 레인도 남지 않아야 한다 — y를 기다리는 유령 레인 금지
+    expect(bottom.below).toEqual([])
+  })
+
   it('above/below는 실제로 이어진다 — 아래 행의 above는 위 행의 below와 같다', () => {
     const rows = layoutCommits([c('m', 'x', 'y'), c('x', 'z'), c('y', 'z'), c('z')])
     for (let i = 1; i < rows.length; i++) {

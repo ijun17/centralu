@@ -85,8 +85,14 @@ export function previewMatches(matcher: string, history: readonly string[]): str
   return [...new Set(history.filter((c) => matchesRule(c, matcher)))]
 }
 
-/** 승인 카드에서 명령으로부터 기본 패턴 제안 (예: "npm test --watch" → "npm test*") */
+/**
+ * 승인 카드의 "항상 허용" 기본 패턴 제안 — 승인한 명령 전체를 그대로.
+ *
+ * 앞 두 단어 + '*'로 넓히던 시절, `rm -rf node_modules` 승인이 `rm -rf*`를 제안해
+ * `rm -rf /`까지 자동 승인될 뻔했다. 전체 명령 뒤에 '*'를 붙이는 것도 안전하지 않다 —
+ * `cmd*`는 `cmd; rm -rf /` 같은 체이닝에 뚫린다. 그래서 기본 제안은 완전 일치이고,
+ * 넓히는 건 사용자가 직접 고쳐서 미리보기(previewMatches)로 결과를 확인한 뒤 한다.
+ */
 export function suggestMatcher(command: string): string {
-  const words = command.trim().split(/\s+/)
-  return words.length <= 2 ? command : `${words.slice(0, 2).join(' ')}*`
+  return command.trim()
 }
