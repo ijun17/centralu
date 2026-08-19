@@ -2,3 +2,6 @@ node_modules
 dist
 pnpm-lock.yaml
 spike
+
+# 릴리스가 복사해 넣는 앱 번들 (빌드 산출물)
+packaging/npm/*/*.app

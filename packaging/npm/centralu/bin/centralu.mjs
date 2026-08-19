@@ -100,16 +100,24 @@ function uninstall() {
   console.log(`대화 기록은 그대로 남아 있습니다 (~/.control-center). 지우려면 직접 지우세요.`)
 }
 
-/** npm 레지스트리가 곧 업데이트 채널이다 — 서버도 서명 키도 따로 필요 없다 */
+/**
+ * npm 레지스트리가 곧 업데이트 채널이다 — 서버도 서명 키도 따로 필요 없다.
+ *
+ * 실패를 뭉뚱그리지 않는다. 못 닿은 것(네트워크)과 없는 것(404)은 **사용자가 할 일이 다르다** —
+ * 앞은 연결을 보라는 말이고, 뒤는 봐도 소용없다는 말이다.
+ */
 async function latestVersion(timeoutMs = 2000) {
-  const stop = AbortSignal.timeout(timeoutMs)
   try {
-    const res = await fetch(`https://registry.npmjs.org/${pkg.name}/latest`, { signal: stop })
-    if (!res.ok) return null
+    const res = await fetch(`https://registry.npmjs.org/${pkg.name}/latest`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (res.status === 404) return { ok: false, reason: 'missing' }
+    if (!res.ok) return { ok: false, reason: `http ${res.status}` }
     const body = await res.json()
-    return typeof body?.version === 'string' ? body.version : null
+    const version = body?.version
+    return typeof version === 'string' ? { ok: true, version } : { ok: false, reason: 'bad-response' }
   } catch {
-    return null // 네트워크가 없어도 앱은 떠야 한다
+    return { ok: false, reason: 'network' } // 네트워크가 없어도 앱은 떠야 한다
   }
 }
 
@@ -126,11 +134,19 @@ function isNewer(a, b) {
 }
 
 async function update() {
-  const latest = await latestVersion(8000)
-  if (!latest) {
-    console.error('레지스트리에 닿지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.')
+  const res = await latestVersion(8000)
+  if (!res.ok) {
+    if (res.reason === 'missing') {
+      console.error(`레지스트리에 ${pkg.name}가 없습니다. 이름이 바뀌었거나 아직 발행 전입니다.`)
+      console.error('https://github.com/ijun17/centralu/releases 를 확인해 주세요.')
+    } else if (res.reason === 'network') {
+      console.error('레지스트리에 닿지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.')
+    } else {
+      console.error(`레지스트리가 예상 밖의 응답을 했습니다 (${res.reason}).`)
+    }
     process.exit(1)
   }
+  const latest = res.version
   if (!isNewer(latest, pkg.version)) {
     console.log(`이미 최신입니다 (${pkg.version}).`)
     return
@@ -147,9 +163,10 @@ async function update() {
 
 /** 앱을 띄운 뒤에만 알린다 — 업데이트 확인 때문에 실행이 늦어지면 안 된다 */
 async function notifyIfOutdated() {
-  const latest = await latestVersion()
-  if (latest && isNewer(latest, pkg.version)) {
-    console.log(`\n새 버전이 있습니다: ${pkg.version} → ${latest}\n  centralu update`)
+  // 여기서는 실패를 **전부 삼킨다.** 앱을 띄우러 온 사람에게 레지스트리 사정을 말할 이유가 없다
+  const res = await latestVersion()
+  if (res.ok && isNewer(res.version, pkg.version)) {
+    console.log(`\n새 버전이 있습니다: ${pkg.version} → ${res.version}\n  centralu update`)
   }
 }
 

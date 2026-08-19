@@ -5,14 +5,33 @@
   "license": "MIT",
   "author": "ijun17",
   "homepage": "https://github.com/ijun17/centralu",
-  "repository": { "type": "git", "url": "git+https://github.com/ijun17/centralu.git" },
-  "bugs": { "url": "https://github.com/ijun17/centralu/issues" },
-  "keywords": ["claude-code", "codex", "agent", "macos", "desktop"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ijun17/centralu.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ijun17/centralu/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "agent",
+    "macos",
+    "desktop"
+  ],
   "type": "module",
-  "bin": { "centralu": "bin/centralu.mjs" },
-  "files": ["bin"],
-  "engines": { "node": ">=22" },
-  "os": ["darwin"],
+  "bin": {
+    "centralu": "bin/centralu.mjs"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin"
+  ],
   "optionalDependencies": {
     "@centralu/darwin-arm64": "0.1.0"
   }

@@ -6,7 +6,7 @@ import globals from 'globals'
 
 /** 레이어 규칙의 원본은 docs/architecture.md §2. 여기가 그 기계 강제판이다. */
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', 'spike/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', 'spike/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', '**/*.app/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

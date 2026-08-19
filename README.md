@@ -19,7 +19,13 @@ macOS · Apple Silicon 전용 · 베타. 대화 기록은 **당신의 맥에만*
 
 ## 설치
 
-npm 배포를 준비 중이다. 그때까지는 소스에서 빌드한다:
+```bash
+npm i -g centralu     # 발행 준비 완료 — 아직 레지스트리에 올리기 전이다
+centralu              # 실행
+centralu install      # /Applications에 넣기 (Launchpad·Spotlight에 뜨게)
+```
+
+그때까지는 소스에서 빌드한다:
 
 ```bash
 pnpm install && pnpm app        # 빌드 후 앱이 열린다

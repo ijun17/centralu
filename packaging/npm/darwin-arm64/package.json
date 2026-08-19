@@ -5,8 +5,17 @@
   "license": "MIT",
   "author": "ijun17",
   "homepage": "https://github.com/ijun17/centralu",
-  "repository": { "type": "git", "url": "git+https://github.com/ijun17/centralu.git" },
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "files": ["Centralu.app"]
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ijun17/centralu.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "Centralu.app"
+  ]
 }
