@@ -1,192 +1,194 @@
-# 아키텍처
+# Architecture
 
-> 목표는 하나다: **예정된 변경이 왔을 때 고치는 곳이 한 군데이게 하라.**
+> There is one goal: **when an expected change arrives, make there be one place to fix.**
 
-## 1. 변경 축 — 이 설계가 견뎌야 하는 변화
+## 1. Axes of change — the changes this design has to survive
 
-이 프로젝트는 시작 시점부터 큰 변경이 **예정**되어 있다. 아키텍처는 이 목록에 맞춰 설계됐고, 새 결정이 이 축들을 어렵게 만들면 잘못된 결정이다.
+Large changes were **expected** in this project from the start. The architecture was designed against this list, and a new decision that makes any of these axes harder is a wrong decision.
 
-| # | 예정된 변경 | 시점 | 격리 장치 |
+| # | Expected change | When | Isolating device |
 |---|---|---|---|
-| C1 | 실행 환경: **브라우저(웹 개발) → Tauri** | M1 이후 | Platform 포트 (→ [platform-abstraction.md](platform-abstraction.md)) |
-| C2 | 서비스 구현 이동: git/store 등 **Node(dev) → Rust(prod)** | Tauri 전환 시, 서비스별 점진 | 포트 인터페이스 고정, 구현만 교체 |
-| C3 | 에이전트 도구 추가: Gemini CLI 등 | v2 | AgentAdapter + capability (→ [agent-host.md](agent-host.md)) |
-| C4 | Codex 프로토콜 버전 변동 | 수시 | 어댑터 내부 격리 + anti-corruption layer |
-| C5 | 화면 구조 변경 (인박스 진화, v2 그리드 등) | 수시 | 순수 도메인 코어 + 파생 상태 셀렉터 |
-| C6 | 프로토콜 진화 (이벤트 추가) | 수시 | 스키마 버전 규칙 (→ [protocol.md](protocol.md)) |
+| C1 | Runtime environment: **browser (web development) → Tauri** | after M1 | Platform ports (→ [platform-abstraction.md](platform-abstraction.md)) |
+| C2 | Service implementations move: git/store etc. **Node (dev) → Rust (prod)** | at the Tauri migration, gradually per service | Port interfaces fixed, only implementations swapped |
+| C3 | New agent tools: Gemini CLI etc. | v2 | AgentAdapter + capability (→ [agent-host.md](agent-host.md)) |
+| C4 | Codex protocol version changes | any time | Isolation inside the adapter + anti-corruption layer |
+| C5 | Screen structure changes (inbox evolving, the v2 grid etc.) | any time | Pure domain core + derived-state selectors |
+| C6 | Protocol evolution (new events) | any time | Schema version rules (→ [protocol.md](protocol.md)) |
 
-## 2. 레이어와 의존 규칙
+## 2. Layers and dependency rules
 
 ```
-┌────────────────────────────────────────────────────┐
-│  apps  (조립: web / desktop 진입점, 여기서만 구현체 선택) │
-├────────────────────────────────────────────────────┤
-│  ui        React 화면·컴포넌트·훅                     │
-├──────────────┬─────────────────────────────────────┤
-│  core        │  platform (포트 인터페이스 + 구현체)     │
-│  순수 도메인   │   ports/ ← ui가 보는 것               │
-│  (IO 없음)    │   web/ tauri/ mock/ ← apps만 아는 것  │
-├──────────────┴─────────────────────────────────────┤
-│  protocol   메시지·이벤트 스키마 (zod) — 모두의 공용어    │
-└────────────────────────────────────────────────────┘
-   agent-host (Node 별도 프로세스) ──→ protocol 만 공유
+┌────────────────────────────────────────────────────────┐
+│  apps  (assembly: web / desktop entry points,          │
+│         the only place an implementation is chosen)    │
+├────────────────────────────────────────────────────────┤
+│  ui        React screens, components, hooks            │
+├──────────────┬─────────────────────────────────────────┤
+│  core        │  platform (port interfaces + impls)     │
+│  pure domain │   ports/ ← what ui sees                 │
+│  (no IO)     │   web/ tauri/ mock/ ← only apps know    │
+├──────────────┴─────────────────────────────────────────┤
+│  protocol   message and event schemas (zod)            │
+│             — everyone's shared language               │
+└────────────────────────────────────────────────────────┘
+   agent-host (separate Node process) ──→ shares protocol only
 ```
 
-**의존 규칙 (위반은 lint 에러다, 리뷰 코멘트가 아니라):**
+**Dependency rules (a violation is a lint error, not a review comment):**
 
-| 패키지 | 의존 가능 | 절대 금지 |
+| Package | May depend on | Absolutely forbidden |
 |---|---|---|
-| `ui` | core, platform**/ports**, protocol, React | platform/web, platform/tauri, `@tauri-apps/*`, fetch/WebSocket 직접 사용 |
-| `core` | protocol | React, DOM, IO 전부 (순수 TS만) |
-| `platform/ports` | protocol | 구현 코드 |
+| `ui` | core, platform**/ports**, protocol, React | platform/web, platform/tauri, `@tauri-apps/*`, using fetch/WebSocket directly |
+| `core` | protocol | React, DOM, all IO (pure TS only) |
+| `platform/ports` | protocol | implementation code |
 | `platform/web` `platform/tauri` | ports, protocol | ui, core |
-| `agent-host` | protocol, 외부 SDK | ui, core, platform |
-| `apps/*` | 전부 (조립 담당) | — |
+| `agent-host` | protocol, external SDKs | ui, core, platform |
+| `apps/*` | everything (it does the assembly) | — |
 
-핵심: **구현체를 아는 곳은 apps 진입점 하나뿐이다.** 나머지 전부는 인터페이스와 스키마만 안다.
+The heart of it: **the only place that knows an implementation is the apps entry point.** Everything else knows only interfaces and schemas.
 
-## 3. 사용하는 디자인 패턴 — 어디에, 왜
+## 3. The design patterns used — where, and why
 
-패턴은 장식이 아니라 변경 축(C1~C6)에 대한 방어다. 각 패턴이 어느 축을 막는지 명시한다.
+Patterns are not decoration, they are defences against the axes of change (C1~C6). Which axis each pattern blocks is stated.
 
-| 패턴 | 적용 위치 | 막는 변경 축 |
+| Pattern | Where it applies | Axis it blocks |
 |---|---|---|
-| **포트와 어댑터 (헥사고날)** | `platform/ports`가 UI의 유일한 외부 세계. 구현은 web/tauri | C1, C2 |
-| **퍼사드** | `Platform` 객체 하나로 포트 묶음 제공 (`platform.git`, `platform.agents` …) | C1 |
-| **의존성 주입** | 부트스트랩에서 Platform 생성 → React Context 하나로 주입. 전역 싱글턴 금지 | C1, 테스트 |
-| **어댑터** | `ClaudeAdapter`/`CodexAdapter`가 도구별 차이를 `NormalizedEvent`로 변환 | C3, C4 |
-| **Anti-corruption layer** | 외부 SDK 타입은 어댑터 밖으로 **한 발짝도 못 나온다**. protocol 타입으로 즉시 변환 | C4 |
-| **명시적 상태 머신** | 세션 상태(FR-12)는 전이 테이블로 정의된 순수 함수. UI에서 if문으로 상태 추론 금지 | C5, 정확성 |
-| **이벤트 구동 (pub-sub)** | 어댑터 → 앱 방향은 단방향 이벤트 스트림. 폴링 금지 (기획서 §7.1) | C6, 성능 |
-| **CQRS-lite** | 명령(포트 메서드 호출)과 상태 갱신(이벤트 수신→리듀서)의 경로를 분리. 명령의 낙관적 반영 최소화 | C5, C6 |
-| **리포지토리** | 영속화는 `StorePort` 뒤에. SQLite 스키마를 아는 건 구현체뿐 | C2 |
-| **파생 상태 (셀렉터)** | 인박스·카운터·정렬은 저장하지 않고 세션 상태에서 **계산**한다. 저장하면 동기화 버그의 근원 | C5 |
-| **전략** | 카드 접힘 정책, 배너 제자리 승인 판단(도구 종류별) 등 정책성 분기는 데이터(설정 테이블)로 | C5 |
+| **Ports and adapters (hexagonal)** | `platform/ports` is the UI's only outside world. Implementations are web/tauri | C1, C2 |
+| **Facade** | One `Platform` object provides the bundle of ports (`platform.git`, `platform.agents` …) | C1 |
+| **Dependency injection** | Platform created at bootstrap → injected through one React Context. No global singletons | C1, testing |
+| **Adapter** | `ClaudeAdapter`/`CodexAdapter` convert per-tool differences into `NormalizedEvent` | C3, C4 |
+| **Anti-corruption layer** | External SDK types **may not take one step** outside the adapter. Converted immediately into protocol types | C4 |
+| **Explicit state machine** | Session state (FR-12) is a pure function defined by a transition table. Inferring state with if statements in the UI is forbidden | C5, correctness |
+| **Event-driven (pub-sub)** | The adapter → app direction is a one-way event stream. No polling (product spec §7.1) | C6, performance |
+| **CQRS-lite** | Separate the path of commands (calling a port method) from state updates (receiving an event → reducer). Minimise optimistic reflection of commands | C5, C6 |
+| **Repository** | Persistence sits behind `StorePort`. Only the implementation knows the SQLite schema | C2 |
+| **Derived state (selectors)** | The inbox, counters and ordering are not stored but **computed** from session state. Storing them is the root of synchronisation bugs | C5 |
+| **Strategy** | Policy branches — the card collapse policy, judging in-place banner approval (per tool kind) — are data (a settings table) | C5 |
 
-안티패턴 금지 목록: 전역 mutable 싱글턴, UI 컴포넌트에서 직접 IO, 이벤트 핸들러 안의 비즈니스 로직(→ core로), 저장된 파생 상태.
+Forbidden anti-patterns: global mutable singletons, IO directly in UI components, business logic inside event handlers (→ move it to core), stored derived state.
 
-## 4. 프로세스 토폴로지 — dev와 prod의 차이를 최소화한다
+## 4. Process topology — minimise the difference between dev and prod
 
-**결정: Agent Host와의 통신은 dev/prod 모두 localhost WebSocket이다.**
+**Decision: communication with the Agent Host is a localhost WebSocket in both dev and prod.**
 
 ```
-[개발기: 브라우저]                        [프로덕션: Tauri]
+[dev machine: browser]                   [production: Tauri]
 
-Vite dev server                        Tauri 앱 (Rust)
-   │                                      │ spawn·감시·재시작 (수퍼바이저)
-Browser (ui)                              │ git2/rusqlite/알림/단축키 (Tauri invoke)
+Vite dev server                        Tauri app (Rust)
+   │                                      │ spawn·watch·restart (supervisor)
+Browser (ui)                              │ git2/rusqlite/notify/shortcuts (Tauri invoke)
    │  WebSocket ws://127.0.0.1:PORT    Webview (ui)
-   ▼                                      │  WebSocket ws://127.0.0.1:PORT (동일!)
-agent-host (node, 단독 실행)               ▼
-   ├─ adapters (claude, codex)         agent-host (node, 사이드카)
+   ▼                                      │  WebSocket ws://127.0.0.1:PORT (identical!)
+agent-host (node, run standalone)         ▼
+   ├─ adapters (claude, codex)         agent-host (node, sidecar)
    ├─ dev-services (git/fs/store/usage)   ├─ adapters (claude, codex)
    └─ mcp server                          ├─ usage parser · mcp server
-                                          └─ (dev-services는 Rust로 대체됨)
+                                          └─ (dev-services replaced by Rust)
 ```
 
-- **AgentPort 구현이 하나로 유지된다** — dev와 prod가 같은 WS 클라이언트를 쓴다. Tauri의 역할은 통신이 아니라 **프로세스 수퍼바이즈**(spawn, 크래시 감지, 재시작)다. stdio 릴레이(Rust 경유 이중 직렬화)를 만들지 않는다.
-- 보안: 임의 포트 + 기동 시 생성한 토큰으로 핸드셰이크, loopback 바인딩만.
-- dev 모드에서 git/fs/store는 agent-host 안의 `dev-services` 모듈이 제공한다 (Node로 구현). Tauri 전환 시 이들만 Rust(invoke)로 갈아타고, **포트는 그대로다** (C2). 전환 순서와 방법은 [platform-abstraction.md](platform-abstraction.md) §5.
-- 이 구조 덕에 M0~M1을 Rust 툴체인 없이 브라우저 + 핫 리로드로 개발하고, Playwright로 E2E까지 돌릴 수 있다.
+- **The AgentPort implementation stays single** — dev and prod use the same WS client. Tauri's role is not communication but **process supervision** (spawn, crash detection, restart). We do not build a stdio relay (double serialisation via Rust).
+- Security: an arbitrary port + a handshake with a token generated at startup, bound to loopback only.
+- In dev mode, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node). At the Tauri migration only these switch to Rust (invoke), and **the ports stay the same** (C2). The order and method of the migration is in [platform-abstraction.md](platform-abstraction.md) §5.
+- This structure is what lets M0~M1 be developed in a browser with hot reload and no Rust toolchain, and run E2E with Playwright.
 
-## 5. 데이터 흐름 (요약 — 상세는 [state-management.md](state-management.md))
+## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 
 ```
-사용자 입력 ──→ 포트 메서드 (명령)
+user input ──→ port method (command)
                     │
-agent-host / tauri ─┴─→ NormalizedEvent 스트림
-                            │ (protocol zod 검증)
-                    core 리듀서 (순수 함수)
+agent-host / tauri ─┴─→ NormalizedEvent stream
+                            │ (protocol zod validation)
+                    core reducer (pure function)
                             │
-                    zustand 스토어 (세션·프로젝트 상태)
+                    zustand store (session and project state)
                             │
-                    셀렉터 (인박스, 카운터, 안읽음 — 전부 파생)
+                    selectors (inbox, counters, unread — all derived)
                             │
-                    React 뷰 (포커스 뷰만 풀 렌더)
+                    React views (only the focus view fully renders)
 ```
 
-## 6. 테스트 전략 (레이어별로 다르게)
+## 6. Test strategy (different per layer)
 
-| 대상 | 방법 | 이유 |
+| Target | Method | Why |
 |---|---|---|
-| core (상태 머신, 인박스 정렬, 읽음 규칙) | Vitest 단위 테스트, 커버리지 최우선 | 순수 함수라 값싸고, 여기가 제품의 두뇌 |
-| protocol | 스키마 golden 테스트 (버전별 샘플 메시지 고정) | C6 회귀 방지 |
-| 어댑터 | 계약 테스트: 녹화된 SDK/프로토콜 응답 재생 → NormalizedEvent 검증 | C4. 실 CLI 없이 CI 가능 |
-| ui | 핵심 플로우만 Playwright (웹 dev 모드 + mock platform) | 브라우저 개발의 보너스 |
-| 의존 규칙 | eslint-plugin-boundaries + dependency-cruiser CI | §2를 문서가 아닌 기계로 강제 |
+| core (state machine, inbox ordering, read rules) | Vitest unit tests, coverage first priority | Pure functions, so they are cheap, and this is the product's brain |
+| protocol | Schema golden tests (sample messages per version, frozen) | Prevents C6 regressions |
+| adapters | Contract tests: replay recorded SDK/protocol responses → verify NormalizedEvent | C4. Possible in CI without a real CLI |
+| ui | Playwright on the core flows only (web dev mode + mock platform) | The bonus of developing in a browser |
+| dependency rules | eslint-plugin-boundaries + dependency-cruiser in CI | Enforce §2 by machine, not by document |
 
-## 7. M0와의 연결
+## 7. The connection to M0
 
-M0 스파이크(기획서 §8)는 이 구조의 **세로 관통 1회**다: `agent-host`(ClaudeAdapter 1개, WS transport) + `protocol`(이벤트 스키마 최소) + 브라우저에서 접속하는 한 페이지 UI. 여기서 §4의 토폴로지와 권한 오버라이드 전제가 실제로 성립하는지 확인한 뒤 나머지를 채운다.
+The M0 spike (product spec §8) is **one vertical slice** through this structure: `agent-host` (1 ClaudeAdapter, WS transport) + `protocol` (a minimal event schema) + a single-page UI connecting from the browser. It confirms that §4's topology and the permission override premise actually hold, and then the rest is filled in.
 
 
-## 부록. 3레인 레이아웃 (M2.5 재배치)
+## Appendix. The three-lane layout (M2.5 rearrangement)
 
-탭(대화/파일/깃/뷰어)을 걷어내고 세 레인으로 바꿨다.
+The tabs (conversation/files/git/viewer) were stripped out and replaced by three lanes.
 
 ```
 ┌──────┬────────────────────────┬─────────┐
-│ 관찰 │ 조작                   │ 증거    │
-│ 240  │ 가변                   │ 340     │
-│ 세션 │ 대화                   │ 변경    │
-│ 목록 │                        │ 파일트리│
+│ obs. │ operate                │ evidence│
+│ 240  │ variable               │ 340     │
+│ sess.│ conversation           │ changed │
+│ list │                        │ filetree│
 └──────┴────────────────────────┴─────────┘
-              ↑ 파일 클릭 시 오버레이가 이 둘을 덮는다
+              ↑ clicking a file overlays these two
 ```
 
-### 왜 탭이 아닌가
+### Why not tabs
 
-탭은 **서로 대체 관계인 것들**을 묶는 장치다. 그런데 깃 상태는 대화를 대신하는
-화면이 아니라 대화가 주장하는 것의 **증거**다. 에이전트가 "세 파일 고쳤습니다"라고
-말할 때 그 말을 확인하는 자리이므로 옆에 함께 있어야 한다.
-대체 관계가 아닌 것을 탭으로 묶은 결과가 도그푸딩에서 나온 "깃·파일·뷰어 어디서 보는 거야?"였다.
+Tabs are a device for grouping **things that substitute for one another**. But git status is not a
+screen that replaces the conversation, it is the **evidence** for what the conversation claims.
+When an agent says "I changed three files", this is where you check that, so it has to sit alongside.
+Grouping non-substitutes under tabs is what produced dogfooding's "where do I look at git, files, the viewer?"
 
-### 우측 패널 내부: 깃 / 파일 두 탭
+### Inside the right-hand panel: two tabs, git / files
 
 ```
-┌─ alpha   main        › ─┐   ← 브랜치를 누르면 전환 화면
-│ [깃] 파일              │
+┌─ alpha   main        › ─┐   ← press the branch for the switch screen
+│ [git] files            │
 ├────────────────────────┤
-│ 변경 3          넓게   │
+│ changed 3        wide  │
 │ M src/a.ts             │
-│ A src/b.ts             │   ← 누르면 오버레이에 diff
-│ ─ 2개 올리기           │
-│ [커밋 메시지  ] 커밋 푸시│
+│ A src/b.ts             │   ← press for a diff in the overlay
+│ ─ push 2               │
+│ [commit message ] c  p │
 ├────────────────────────┤
-│ 기록                   │
-│ ● 인박스 정렬 고침     │   ← 누르면 오버레이에 커밋
-│ ○ 세션 삭제 추가 ·병합 │
+│ history                │
+│ ● fixed inbox ordering │   ← press for the commit in the overlay
+│ ○ add session delete ·m│
 └────────────────────────┘
 ```
 
-깃 탭은 위아래로 **서로 다른 질문**을 놓는다: 위는 "지금 무엇이 바뀌었나",
-아래는 "어떻게 여기까지 왔나". 커밋·푸시는 좁은 곳에서도 되어야 한다 —
-확인하고 바로 마무리하는 흐름이 끊기면 결국 터미널로 나가게 된다.
+The git tab puts **two different questions** above and below: above is "what has changed now",
+below is "how did we get here". Commit and push have to work in a narrow space too —
+if the flow of checking and immediately finishing gets broken, you end up leaving for the terminal.
 
-기록에 그래프 선은 그리지 않는다. 340px에서 선을 그리면 제목이 설 자리가 없고,
-실제로 알고 싶은 건 '무엇이 언제 들어왔나'다. 병합만 표시한다.
+No graph lines are drawn in the history. Drawing lines at 340px leaves no room for the title,
+and what you actually want to know is 'what landed when'. Only merges are marked.
 
-### 접었을 때: 사라지지 않고 띠가 남는다
+### When collapsed: it does not disappear, a strip remains
 
-패널을 접으면 32px 세로 띠가 남는다. `⌘B`를 모르는 상태에서 닫아도
-되돌아올 길이 보여야 하고, 띠에 변경 파일 수가 남아서 접힌 채로도
-"뭔가 바뀌었다"를 읽을 수 있다. 사라진 것과 접힌 것은 다르다.
+Collapse the panel and a 32px vertical strip remains. Closing it without knowing `⌘B`
+still has to leave a visible way back, and the strip keeps the changed file count so that even
+collapsed you can read "something changed". Gone and collapsed are different things.
 
-### 뷰어는 넓은 오버레이
+### The viewer is a wide overlay
 
-이 앱에서 뷰어의 주 용도는 사실상 '에이전트가 만든 diff 확인'인데 340px에서 diff는
-읽을 수 없다. 그렇다고 대화 자리를 뺏으면 돌아올 때 다시 찾아야 한다.
-코드를 읽는 건 깊지만 **짧은** 행위이므로, 덮었다 esc로 걷는 방식이 맞다 —
-걷으면 대화는 스크롤 위치까지 그대로다.
+The viewer's main use in this app is effectively 'checking the diff an agent made', and a diff cannot
+be read at 340px. But taking the conversation's place means having to find your way back afterwards.
+Reading code is a deep but **short** act, so covering and then sweeping it away with esc is the right
+mechanism — sweep it away and the conversation is exactly where it was, scroll position included.
 
-오버레이는 **중앙·우측만** 덮는다. 좌측까지 덮으면 코드를 보는 동안 다른 세션이
-나를 부르는 것을 놓친다. 관제탑에서 계기판을 가리는 셈이다.
+The overlay covers **only the centre and the right.** Covering the left as well means missing another
+session calling for me while I read code. That is covering the instruments in a control tower.
 
-### 단축키 변화
+### Shortcut changes
 
-| 이전 | 이후 |
+| Before | After |
 |---|---|
-| `⌘⇧1~4` 탭 전환 | `⌘B` 증거 패널 접기·펴기 |
-| (없음) | `esc` 오버레이 걷기 |
+| `⌘⇧1~4` switch tab | `⌘B` collapse/expand the evidence panel |
+| (none) | `esc` sweep the overlay away |
 
-`⌘1~9` 프로젝트 점프, `⌘I` 인박스, `⌘K` 팔레트, `⌘⇧A` 다음 대기는 그대로다.
+`⌘1~9` jump project, `⌘I` inbox, `⌘K` palette, `⌘⇧A` next waiting item are unchanged.

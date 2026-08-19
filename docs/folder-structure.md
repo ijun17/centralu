@@ -1,106 +1,106 @@
-# 폴더 구조와 패키지 분할
+# Folder structure and package split
 
-pnpm workspaces 모노레포. 패키지 경계 = 의존 규칙 경계 = lint 강제 단위.
+A pnpm workspaces monorepo. Package boundary = dependency rule boundary = the unit lint enforces.
 
-## 1. 전체 구조
+## 1. The whole structure
 
 ```
 centralu/
-├─ README.md                    # 소개 (사용자용). 한국어판은 README.ko.md
-├─ CONTRIBUTING.md              # 개발 실행법·검증·CLA
-├─ docs/                        # 기획서(product-spec.md) + 설계 문서 (이 폴더)
-│  └─ README.md                 # 문서 지도
-├─ package.json                 # workspace 루트 (스크립트 허브)
+├─ README.md                    # introduction (for users). The Korean edition is README.ko.md
+├─ CONTRIBUTING.md              # how to run development, verification, CLA
+├─ docs/                        # the spec (product-spec.md) + design documents (this folder)
+│  └─ README.md                 # documentation map
+├─ package.json                 # workspace root (script hub)
 ├─ pnpm-workspace.yaml
 │
 ├─ apps/
-│  ├─ web/                      # 개발용 웹 진입점 (Vite)
+│  ├─ web/                      # web entry point for development (Vite)
 │  │  ├─ index.html
-│  │  └─ src/main.tsx           # createWebPlatform() 주입 — 구현체를 아는 유일한 곳 ①
-│  └─ desktop/                  # Tauri 진입점 (M1 이후 생성)
-│     ├─ src/main.tsx           # createTauriPlatform() 주입 — 유일한 곳 ②
-│     └─ src-tauri/             # Rust: 수퍼바이저, git2, rusqlite, OS 통합
+│  │  └─ src/main.tsx           # injects createWebPlatform() — the only place ① that knows an implementation
+│  └─ desktop/                  # Tauri entry point (created after M1)
+│     ├─ src/main.tsx           # injects createTauriPlatform() — the only place ②
+│     └─ src-tauri/             # Rust: supervisor, git2, rusqlite, OS integration
 │        ├─ Cargo.toml
 │        └─ src/
 │
 ├─ packages/
-│  ├─ protocol/                 # 공용어: 이벤트·명령 스키마 (zod). 의존 0
+│  ├─ protocol/                 # the shared language: event and command schemas (zod). 0 dependencies
 │  │  └─ src/
-│  │     ├─ events.ts           # NormalizedEvent 계열
-│  │     ├─ commands.ts         # 요청/응답 RPC
-│  │     ├─ entities.ts         # SessionState, Capability 등 공유 타입
+│  │     ├─ events.ts           # the NormalizedEvent family
+│  │     ├─ commands.ts         # request/response RPC
+│  │     ├─ entities.ts         # shared types such as SessionState, Capability
 │  │     └─ version.ts
 │  │
-│  ├─ core/                     # 순수 도메인. IO·React 금지
+│  ├─ core/                     # pure domain. No IO, no React
 │  │  └─ src/
-│  │     ├─ session/            # 상태 머신 (전이 테이블), 세션 리듀서
-│  │     ├─ inbox/              # 정렬·긴급도 규칙 (전부 순수 함수)
-│  │     ├─ unread/             # 읽음 규칙 (FR-16)
-│  │     ├─ approval/           # 항상 허용 규칙 매칭, 제자리 승인 판단 정책
-│  │     └─ usage/              # 주간 집계 계산 (파서 말고 계산만)
+│  │     ├─ session/            # state machine (transition table), session reducer
+│  │     ├─ inbox/              # ordering and urgency rules (all pure functions)
+│  │     ├─ unread/             # read rules (FR-16)
+│  │     ├─ approval/           # always-allow rule matching, in-place approval policy
+│  │     └─ usage/              # weekly aggregation (the calculation, not the parser)
 │  │
-│  ├─ platform/                 # C1/C2의 방화벽
+│  ├─ platform/                 # the firewall for C1/C2
 │  │  └─ src/
-│  │     ├─ ports/              # 인터페이스만. ui가 import 가능한 유일한 하위 경로
+│  │     ├─ ports/              # interfaces only. The only subpath ui may import
 │  │     │  ├─ agent.ts  git.ts  fs.ts  store.ts  usage.ts  system.ts
-│  │     │  └─ platform.ts      # Platform 퍼사드 + PlatformCapabilities
-│  │     ├─ web/                # 브라우저 구현 (WS/HTTP → agent-host)
-│  │     ├─ tauri/              # Tauri 구현 (invoke/event) — M1 이후
-│  │     └─ mock/               # 테스트·스토리용 인메모리 구현
+│  │     │  └─ platform.ts      # the Platform facade + PlatformCapabilities
+│  │     ├─ web/                # browser implementation (WS/HTTP → agent-host)
+│  │     ├─ tauri/              # Tauri implementation (invoke/event) — after M1
+│  │     └─ mock/               # in-memory implementation for tests and stories
 │  │
-│  ├─ ui/                       # React 앱 전체 (진입점 제외)
+│  ├─ ui/                       # the whole React app (except the entry point)
 │  │  └─ src/
-│  │     ├─ app/                # 루트 컴포넌트, 라우팅(뷰 전환), PlatformProvider
-│  │     ├─ features/           # 기능 단위 수직 분할 (아래 §2)
+│  │     ├─ app/                # root component, routing (view switching), PlatformProvider
+│  │     ├─ features/           # vertical split by feature (§2 below)
 │  │     │  ├─ inbox/  session/  approval/  sidebar/
 │  │     │  ├─ git/  file-tree/  code-viewer/
 │  │     │  └─ usage/  settings/  onboarding/
-│  │     ├─ components/         # 기능 무관 공용 (Button, Kbd, VirtualList…)
-│  │     ├─ store/              # zustand 스토어 + 셀렉터 (리듀서는 core에서 import)
+│  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
+│  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
 │  │     └─ styles/
 │  │
-│  └─ agent-host/               # Node 프로세스 (브라우저 코드 금지)
+│  └─ agent-host/               # the Node process (no browser code)
 │     └─ src/
-│        ├─ main.ts             # CLI 진입 (--port, --token)
-│        ├─ transport/          # WS 서버, 세션 핸드셰이크
-│        ├─ adapters/           # claude/, codex/ + 공통 어댑터 계약
-│        ├─ dev-services/       # dev 전용: git, fs, store(sqlite), watcher
-│        ├─ usage/              # ~/.claude, ~/.codex 로그 증분 파서
-│        └─ mcp/                # 오케스트레이터용 MCP 서버 (M3)
+│        ├─ main.ts             # CLI entry (--port, --token)
+│        ├─ transport/          # WS server, session handshake
+│        ├─ adapters/           # claude/, codex/ + the common adapter contract
+│        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
+│        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
+│        └─ mcp/                # MCP server for the orchestrator (M3)
 │
-├─ e2e/                         # Playwright (apps/web + platform/mock 조합)
-└─ tooling/                     # eslint 설정, dependency-cruiser 규칙, 공용 tsconfig
+├─ e2e/                         # Playwright (apps/web + platform/mock combination)
+└─ tooling/                     # eslint config, dependency-cruiser rules, shared tsconfig
 ```
 
-## 2. ui/features 내부 규칙 (수직 분할)
+## 2. Rules inside ui/features (the vertical split)
 
-각 feature 폴더는 자기 완결적이다:
+Each feature folder is self-contained:
 
 ```
 features/inbox/
-├─ InboxView.tsx        # 화면
-├─ components/          # 이 기능 전용 하위 컴포넌트
-├─ hooks.ts             # 이 기능 전용 훅 (스토어 셀렉터 조합)
-└─ index.ts             # 외부 공개 표면 (barrel) — 다른 feature는 여기로만 import
+├─ InboxView.tsx        # the screen
+├─ components/          # sub-components for this feature only
+├─ hooks.ts             # hooks for this feature only (combinations of store selectors)
+└─ index.ts             # the public surface (barrel) — other features import only through here
 ```
 
-- feature 간 직접 import는 `index.ts` 경유만. 깊은 경로 import 금지 (lint로 강제).
-- 두 feature가 같은 로직을 원하면 그 로직은 core나 components로 **내려간다**. feature 간 수평 의존을 늘리지 않는다.
-- 화면에 붙는 상태는 스토어에, 컴포넌트 로컬 상태(입력 중 텍스트 등)만 useState.
+- Direct imports between features go through `index.ts` only. Deep-path imports are forbidden (enforced by lint).
+- If two features want the same logic, that logic **moves down** into core or components. Horizontal dependencies between features are not increased.
+- State attached to the screen goes in the store; only component-local state (text being typed etc.) uses useState.
 
-## 3. 확장 시나리오별 "코드가 갈 곳"
+## 3. "Where the code goes", per extension scenario
 
-| 하려는 일 | 만지는 곳 | 만지면 안 되는 곳 |
+| What you want to do | What you touch | What you must not touch |
 |---|---|---|
-| 에이전트 도구 추가 (Gemini 등) | `agent-host/adapters/gemini/` + capability 선언 | ui, core (이벤트가 정규화돼 있으므로) |
-| 새 이벤트 종류 추가 | `protocol/events.ts` → core 리듀서 → 소비하는 feature | 다른 feature |
-| git을 Node→Rust로 이동 (C2) | `platform/tauri/git.ts` 신규 + `src-tauri` | ports/git.ts (인터페이스 불변), ui |
-| 새 화면 추가 | `ui/features/<новое>/` | platform, agent-host |
-| OS 알림 방식 변경 | `platform/{web,tauri}/system.ts` | ui (SystemPort 뒤라서) |
-| 세션 상태 규칙 변경 | `core/session/` (+ 전이 테이블 테스트) | ui의 if문 — 애초에 없어야 함 |
+| Add an agent tool (Gemini etc.) | `agent-host/adapters/gemini/` + a capability declaration | ui, core (because events are normalised) |
+| Add a new kind of event | `protocol/events.ts` → core reducer → the consuming feature | other features |
+| Move git from Node to Rust (C2) | new `platform/tauri/git.ts` + `src-tauri` | ports/git.ts (the interface is unchanged), ui |
+| Add a new screen | `ui/features/<new>/` | platform, agent-host |
+| Change how OS notifications work | `platform/{web,tauri}/system.ts` | ui (it is behind SystemPort) |
+| Change session state rules | `core/session/` (+ transition table tests) | if statements in ui — there should not have been any |
 
-## 4. 왜 모노레포인가 (그리고 왜 이 정도 크기인가)
+## 4. Why a monorepo (and why this size)
 
-- protocol을 ui와 agent-host가 **같은 타입으로** 공유해야 한다 — 별도 레포면 버전 드리프트가 바로 생긴다.
-- 패키지 5개는 솔로 개발에 과하지 않다: 경계마다 tsconfig `references`로 빌드 격리, lint 규칙의 단위가 된다. 반대로 이걸 한 src/에 폴더로만 나누면 경계가 관습이 되고, 관습은 마감 앞에서 무너진다.
-- Turborepo 같은 빌드 오케스트레이터는 **지금 넣지 않는다** — pnpm 스크립트로 충분한 규모. 빌드가 느려지면 그때 추가 (YAGNI).
+- ui and agent-host have to share protocol **as the same types** — in separate repos version drift starts immediately.
+- 5 packages is not too much for solo development: each boundary gets build isolation through tsconfig `references` and becomes the unit for lint rules. Split the same thing into folders under one src/ instead and the boundaries become convention, and convention collapses in front of a deadline.
+- A build orchestrator like Turborepo is **not added now** — pnpm scripts are enough at this scale. Add it when the build gets slow (YAGNI).
