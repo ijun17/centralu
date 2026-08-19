@@ -1201,6 +1201,79 @@ test('파일 트리에서 연 파일도 같은 오버레이에 뜬다', async ({
   await expect(page.getByTestId('overlay')).toBeHidden()
 })
 
+/**
+ * The overlay covers the conversation, not the evidence lane (issue #15).
+ *
+ * It used to cover both, so opening a second file meant escape-and-find-it-again: the tree
+ * you clicked from vanished under an opaque panel the moment it did its job. The assertions
+ * below are the two halves of that. Geometry, because "visible" is not enough — the panel
+ * was never unmounted, only hidden behind something painted over it, and Playwright's
+ * visibility check does not see occlusion. Then a second click without an escape first,
+ * because being uncovered is not the point either: the point is that the loop is now one
+ * click long, and Playwright will not click through anything that gets in the way.
+ */
+test('오버레이는 대화만 덮는다 — 다음 파일을 여는 손잡이가 남아 있어야 한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [
+      { name: 'a.ts', path: 'a.ts', isDir: false, ignored: false },
+      { name: 'b.ts', path: 'b.ts', isDir: false, ignored: false },
+    ]
+    m.fsState.files['a.ts'] = '첫 파일'
+    m.fsState.files['b.ts'] = '둘째 파일'
+  })
+  await newSession(page, 'alpha', '작업')
+
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('file-a.ts').click()
+  await expect(page.getByTestId('overlay')).toBeVisible()
+  await expect(page.getByTestId('viewer-path')).toContainText('a.ts')
+
+  // 오버레이의 오른쪽 끝이 증거 패널의 왼쪽 끝을 넘지 않는다
+  const edges = async () => {
+    const o = (await page.getByTestId('overlay').boundingBox())!
+    const p = (await page.getByTestId('evidence-panel').boundingBox())!
+    return { overlayRight: o.x + o.width, panelLeft: p.x }
+  }
+  const viewerEdges = await edges()
+  expect(viewerEdges.overlayRight).toBeLessThanOrEqual(viewerEdges.panelLeft + 1)
+
+  // esc 없이 트리에서 바로 다음 파일로 — 덮여 있으면 이 클릭이 통하지 않는다
+  await page.getByTestId('file-b.ts').click()
+  await expect(page.getByTestId('viewer-path')).toContainText('b.ts')
+})
+
+/**
+ * 같은 규칙이 diff에도 적용된다 (이슈 #15). 오히려 여기가 더 아프다 — 변경 목록은
+ * 하나씩 훑어 내려가는 목록이라, 한 파일을 볼 때마다 목록이 사라지면 그 훑기가 끊긴다.
+ * diff는 unified라 좁아진 폭에서도 열은 그대로고 줄 폭만 준다.
+ */
+test('깃 오버레이도 마찬가지다 — 변경 목록을 덮지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n-old()\n+first()'
+    m.fsState.entries[''] = [{ name: 'notes.md', path: 'notes.md', isDir: false, ignored: false }]
+    m.fsState.files['notes.md'] = '읽을 수 있어야 한다'
+  })
+  await newSession(page, 'alpha', '두 파일 고쳐줘')
+
+  await page.getByTestId('evidence-file-src/a.ts').click()
+  await expect(page.getByTestId('overlay')).toBeVisible()
+  await expect(page.getByTestId('diff-view')).toContainText('first()')
+
+  const o = (await page.getByTestId('overlay').boundingBox())!
+  const p = (await page.getByTestId('evidence-panel').boundingBox())!
+  expect(o.x + o.width).toBeLessThanOrEqual(p.x + 1)
+
+  // 패널이 살아 있다 — 덮여 있으면 이 클릭들이 오버레이에 가로막힌다
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('file-notes.md').click()
+  await expect(page.getByTestId('viewer-path')).toContainText('notes.md')
+})
+
 test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 보여야 한다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {

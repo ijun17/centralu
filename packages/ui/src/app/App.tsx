@@ -80,8 +80,15 @@ function Body() {
   if (!hasProjects) return <FirstRun />
   /*
     3레인. 좌 = 관찰, 중앙 = 조작, 우 = 증거.
-    오버레이는 중앙과 우측을 함께 덮는다 — diff는 넓어야 읽힌다.
+    The overlay covers the middle lane only — see the note below.
   */
+
+  /*
+    The grid and the orchestrator have no evidence lane. The grid already splits the screen;
+    taking one more lane out of it drops the panel below its minimum width, which reproduces
+    by our own hand the very thing that got the grid shelved (§5.4).
+  */
+  const hasEvidenceLane = view !== 'orchestrator' && view !== 'grid'
 
   return (
     // relative: 알림 카드가 이 안에 떠야 한다. 앱 전체에 걸면 상단 바와 승인 배너를
@@ -90,9 +97,20 @@ function Body() {
       <Sidebar />
       <Notices />
       {/*
-        오버레이는 중앙·우측만 덮는다. 좌측(관찰 레인)까지 덮으면
-        코드를 보는 동안 다른 세션이 나를 부르는 것을 놓친다 —
-        관제탑에서 계기판을 가리는 셈이다.
+        The overlay is confined to this lane, and that is why it lives inside this div
+        rather than beside it. Covering the left lane would mean missing another session
+        calling for me while I read code — blinding the instruments in the control tower.
+        Covering the right lane turned out to be just as bad in a quieter way.
+
+        It used to cover the right lane too, on the grounds that "340px can't hold a diff".
+        That is a true sentence and the wrong conclusion: it answers why the overlay is not
+        rendered *inside* the panel, not why it should *hide* the panel. The overlay is not
+        competing with the panel for width — it is competing with the conversation. What
+        the panel holds is the file tree and the change list, which is how you open the
+        next file, so the loop people were left with was: click a file, watch the tree
+        disappear, press escape, click the next one (issue #15). The diff does get ~340px
+        narrower; it is unified, not side-by-side, so that costs line width and not a
+        column, and the tree stays where your hand already is.
       */}
       {/*
         min-w-0이 없으면 이 레인은 내용의 min-content 폭 아래로 줄지 못한다.
@@ -100,23 +118,10 @@ function Body() {
         가로 스크롤된다 (도그푸딩에서 나온 버그의 진짜 원인).
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1">
-        {/*
-          그리드에는 우측 증거 패널이 없다. 그리드가 이미 화면을 나눠 쓰는데
-          거기서 또 한 레인을 떼면 패널이 최소 폭 아래로 내려간다 — 그리드를
-          보류했던 근거(§5.4)를 우리 손으로 재현하는 셈이다.
-        */}
-        {view === 'orchestrator' ? (
-          <OrchestratorView />
-        ) : view === 'grid' ? (
-          <GridView />
-        ) : (
-          <>
-            <SessionView />
-            <EvidencePanel />
-          </>
-        )}
+        {view === 'orchestrator' ? <OrchestratorView /> : view === 'grid' ? <GridView /> : <SessionView />}
         <Overlay />
       </div>
+      {hasEvidenceLane && <EvidencePanel />}
     </div>
   )
 }

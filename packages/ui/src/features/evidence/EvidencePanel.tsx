@@ -23,6 +23,12 @@ import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, TREE_DEFAULT, TREE_MAX, TREE_MIN }
  *
  * 자세히 보는 일(코드·diff·커밋)은 여기서 하지 않는다 — 340px에서 diff는 읽을 수 없다.
  * 클릭하면 넓은 오버레이가 대화 위에 펼쳐진다.
+ *
+ * **This lane stays visible while that overlay is open** (issue #15). It used to be covered
+ * by it, on the reasoning above — but "a diff needs more than 340px" is a reason not to draw
+ * the diff *in here*, not a reason to hide the list that sent you to it. This is where the
+ * next file comes from, so covering it turned reading three changed files into three rounds
+ * of escape-and-find-it-again.
  */
 export function EvidencePanel() {
   const open = useStore((s) => s.panelOpen)

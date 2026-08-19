@@ -5,14 +5,28 @@ import { GitPanel } from '../git/GitPanel.jsx'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
- * 넓은 표면 — 대화 위를 덮는다.
+ * The wide surface — it covers the conversation, and nothing else.
  *
- * 왜 우측 패널 안이 아닌가: 이 앱에서 뷰어의 주 용도는 사실상
- * '에이전트가 만든 diff 확인'인데, 340px에서 diff는 읽을 수가 없다.
+ * Why not inside the right-hand panel: what the viewer is really for here is checking a
+ * diff an agent just wrote, and a diff is unreadable at 340px.
  *
- * 왜 대화 자리를 뺏지 않는가: 코드를 읽는 건 깊지만 **짧은** 행위다.
- * 덮었다 걷으면 대화는 스크롤 위치까지 그대로 돌아온다 —
- * 이 앱에서 가장 비싼 자원은 사람의 주의고, 돌아올 때 다시 찾게 만들면 안 된다.
+ * Why it no longer covers that panel as well: the sentence above got read as "so take the
+ * panel's width too", which does not follow from it. The overlay competes with the
+ * *conversation* for room, not with the panel. Covering the panel took away the file tree
+ * and the change list — the thing you use to open the next file — so the shape of the work
+ * became: click a file, watch the tree disappear, press escape, click the next one. Giving
+ * up ~340px of diff to stop that is cheap, because the diff is unified: the loss is line
+ * width, not a whole column (issue #15). It applies to both kinds, and the `git` kind is
+ * the worse of the two to cover, since the list it was opened from is the list you are
+ * working down.
+ *
+ * Why it covers the conversation rather than replacing it: reading code is deep but
+ * **short**. Draw the cover back and the conversation is exactly as you left it, scroll
+ * position included — the most expensive resource in this app is a person's attention, and
+ * making them find their place again on the way back spends it.
+ *
+ * `inset-0` does not decide **what** gets covered; the parent does. So which lane this
+ * component is mounted inside *is* the answer to that question — see Body in App.tsx.
  */
 export function Overlay() {
   const overlay = useStore((s) => s.overlay)
