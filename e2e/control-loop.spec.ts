@@ -473,7 +473,7 @@ test('첫 실행: 도구 상태를 보여주고 다음 행동을 알려준다 (E
   await expect(page.getByTestId('project-picked')).toBeVisible()
 })
 
-test('첫 실행: 도구가 준비 안 됐으면 설치 명령을 보여준다 (E-1)', async ({ page }) => {
+test('첫 실행: 안 깔린 도구와 로그인 안 된 도구는 할 일이 다르다 (E-1)', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -483,9 +483,33 @@ test('첫 실행: 도구가 준비 안 됐으면 설치 명령을 보여준다 (
     ]
   })
   await page.getByTestId('redetect').click()
+  // 안 깔림 → 설치 명령
   await expect(page.getByTestId('tool-claude')).toContainText('npm i -g @anthropic-ai/claude-code')
-  await expect(page.getByTestId('tool-codex')).toContainText('log in')
+  // 로그인 안 됨 → 로그인 명령. 두 상태를 같은 말로 뭉뜽그리면 사람이 엉뚱한 걸 한다
+  await expect(page.getByTestId('tool-codex')).toContainText('codex login')
+  await expect(page.getByTestId('tool-codex')).not.toContainText('npm i -g')
+  // 둘 다 못 쓰니 이때는 정말로 막힌 것이 맞다
   await expect(page.getByTestId('first-run-blocked')).toBeVisible()
+})
+
+test('첫 실행: 하나만 로그인돼 있으면 막지 않는다 — 나머지는 선택지로 적는다 (#11)', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.agents.detect = async () => [
+      // #11 이전에는 detect()가 이 조합을 아예 만들지 못했다 —
+      // claude는 깔려 있기만 하면 무조건 loggedIn:true였다
+      { tool: 'claude', installed: true, loggedIn: false, detail: '2.1.223 · login required' },
+      { tool: 'codex', installed: true, loggedIn: true, detail: 'codex-cli 0.147' },
+    ]
+  })
+  await page.getByTestId('redetect').click()
+  // 로그인 안 된 claude에게 시킬 일은 '설치'가 아니라 '로그인'이다
+  await expect(page.getByTestId('tool-claude')).toContainText('claude auth login')
+  await expect(page.getByTestId('tool-claude')).not.toContainText('npm i -g')
+  // 쓸 수 있는 도구가 하나라도 있으면 나머지는 할 일이 아니라 선택지다
+  await expect(page.getByTestId('tool-hint-claude')).toContainText('Optional')
+  await expect(page.getByTestId('first-run-blocked')).toHaveCount(0)
 })
 
 test('보던 세션으로 돌아온다 (C-3 워크스페이스 스냅샷)', async ({ page }) => {
@@ -605,12 +629,34 @@ test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무
     ]
   })
   await page.getByTestId('new-session-alpha').click()
-  // 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 — 이유를 적는다
+  // 쓸 수 있는 쪽이 하나라도 있으면 그쪽으로 열어 준다 (#11) — 벽부터 세우지 않는다
+  await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
+  await expect(page.getByTestId('tool-blocked')).toHaveCount(0)
+
+  // 그래도 못 쓰는 쪽을 직접 고르면 이유를 적는다 —
+  // 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다
+  await page.getByTestId('tool-option-claude').click()
   await expect(page.getByTestId('tool-blocked')).toContainText('not found')
   await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
   // 쓸 수 있는 도구로 바꾸면 즉시 풀린다
   await page.getByTestId('tool-option-codex').click()
   await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
+})
+
+test('로그인 안 된 도구는 설치 안 된 도구와 다르게 말한다 (#11)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.detect = async () => [
+      // #11 이전에는 claude가 이 상태로 잡히지 않아 이 분기에 닿을 수 없었다
+      { tool: 'claude', installed: true, loggedIn: false, detail: 'claude 2.1.223 · login required' },
+      { tool: 'codex', installed: false, loggedIn: false, detail: 'codex CLI not found' },
+    ]
+  })
+  await page.getByTestId('new-session-alpha').click()
+  // 둘 다 못 쓰니 옮겨 앉을 곳이 없다 — 대신 claude에게 시킬 일을 정확히 적는다
+  await expect(page.getByTestId('tool-blocked')).toContainText('needs a login')
+  await expect(page.getByTestId('tool-blocked')).toContainText('claude auth login')
+  await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
 })
 
 test('에이전트 응답이 마크다운으로 렌더된다 (M2.5)', async ({ page }) => {

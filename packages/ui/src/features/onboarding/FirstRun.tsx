@@ -11,6 +11,12 @@ const INSTALL_HINT: Record<string, string> = {
   codex: 'npm i -g @openai/codex',
 }
 
+// 로그인 명령이 도구마다 다르다 — 틀린 명령을 적으면 안내가 아니라 함정이다
+const LOGIN_HINT: Record<string, string> = {
+  claude: 'claude auth login',
+  codex: 'codex login',
+}
+
 /**
  * 첫 실행 경험 (FR-19, E-1).
  *
@@ -58,7 +64,7 @@ export function FirstRun() {
             ) : tools.length === 0 ? (
               <li className="text-[12px] text-ash">Could not detect tools</li>
             ) : (
-              tools.map((t) => <ToolRow key={t.tool} d={t} />)
+              tools.map((t) => <ToolRow key={t.tool} d={t} optional={canStart} />)
             )}
           </ul>
           <button
@@ -111,8 +117,17 @@ export function FirstRun() {
   )
 }
 
-function ToolRow({ d }: { d: Detection }) {
+/**
+ * `optional`은 **다른 도구가 이미 준비돼 있다**는 뜻이다.
+ *
+ * 둘 중 하나만 쓸 수 있으면 앱은 정상이다 (제품 규칙). 그런데 안 쓰는 도구 줄이
+ * 준비된 도구 줄과 똑같은 톤으로 "설치하라 / 로그인하라"를 내밀면, 다 갖춰야
+ * 시작할 수 있는 것처럼 읽힌다. 그래서 그 경우에는 **할 일이 아니라 선택지로**
+ * 적는다 — 알리되, 길을 막는 것처럼 보이지 않게.
+ */
+function ToolRow({ d, optional }: { d: Detection; optional: boolean }) {
   const ready = d.installed && d.loggedIn
+  const hintTone = optional ? 'text-slate' : 'text-ash'
   return (
     <li className="flex items-baseline gap-2 text-[12px]" data-testid={`tool-${d.tool}`}>
       <span className={`w-2.5 shrink-0 text-center text-[9px] ${ready ? 'text-chalk' : 'text-slate'}`}>
@@ -120,14 +135,18 @@ function ToolRow({ d }: { d: Detection }) {
       </span>
       <span className={ready ? 'text-chalk' : 'text-ash'}>{d.tool === 'claude' ? 'Claude Code' : 'Codex'}</span>
       <span className="readout text-[11px] text-slate">{d.detail}</span>
-      {!d.installed && (
-        <code className="ml-auto rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ash">
-          {INSTALL_HINT[d.tool] ?? 'Install required'}
-        </code>
-      )}
-      {d.installed && !d.loggedIn && (
-        <span className="ml-auto text-[11px] text-ash">
-          Run <code className="font-mono">{d.tool}</code> in a terminal and log in
+      {!ready && (
+        <span className={`ml-auto text-[11px] ${hintTone}`} data-testid={`tool-hint-${d.tool}`}>
+          {optional && 'Optional — '}
+          {d.installed ? (
+            <>
+              run <code className="font-mono">{LOGIN_HINT[d.tool] ?? `${d.tool} login`}</code> to use it
+            </>
+          ) : (
+            <code className="rounded bg-panel px-1.5 py-0.5 font-mono text-[10px]">
+              {INSTALL_HINT[d.tool] ?? 'Install required'}
+            </code>
+          )}
         </span>
       )}
     </li>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ExternalSession, ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -97,6 +97,27 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     }
   }, [platform, projectId, tool])
 
+  /**
+   * 둘 중 **하나만** 쓸 수 있어도 앱은 정상으로 동작해야 한다 (제품 규칙).
+   *
+   * 기본 도구가 못 쓰는 상태인데 다른 하나가 멀쩡하면 **말없이 그쪽으로 옮긴다.**
+   * 안 그러면 Codex만 쓰는 사람이 다이얼로그를 열 때마다 "Claude에 로그인하라"는
+   * 벽을 만나고, 안 쓰는 도구에 로그인해야 창이 열린다 — 이 앱의 원칙("워크플로를
+   * 강요하지 않는다")에 정면으로 어긋난다.
+   *
+   * 감지 결과가 처음 온 순간 **한 번만** 옮긴다. 그 뒤 사용자가 고른 것은 건드리지 않는다.
+   */
+  const autoPicked = useRef(false)
+  useEffect(() => {
+    if (!tools || autoPicked.current) return
+    autoPicked.current = true
+    const ok = (t: ToolName) => {
+      const d = tools.find((x) => x.tool === t)
+      return d?.installed === true && d.loggedIn
+    }
+    setTool((cur) => (ok(cur) ? cur : ((['claude', 'codex'] as const).find(ok) ?? cur)))
+  }, [tools])
+
   const info = (t: ToolName) => tools?.find((x) => x.tool === t)
   const usable = (t: ToolName) => {
     const d = info(t)
@@ -189,7 +210,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           {blocked && (
             <p className="mt-1.5 text-[11px] text-ash" data-testid="tool-blocked">
               {info(tool)?.installed
-                ? `${TOOL_LABEL[tool]} needs a login — run ${tool === 'claude' ? 'claude' : 'codex login'} in a terminal`
+                ? `${TOOL_LABEL[tool]} needs a login — run ${tool === 'claude' ? 'claude auth login' : 'codex login'} in a terminal`
                 : `${TOOL_LABEL[tool]} not found (${info(tool)?.detail ?? 'not installed'})`}
             </p>
           )}
