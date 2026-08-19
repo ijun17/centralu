@@ -1,7 +1,7 @@
 {
   "name": "centralu-linux-x64",
   "version": "0.1.0-beta.2",
-  "description": "Centralu app bundle (Linux · x86-64)",
+  "description": "Centralu app bundle for Linux on x86-64",
   "license": "MIT",
   "author": "ijun17",
   "homepage": "https://github.com/ijun17/centralu",

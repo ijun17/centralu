@@ -1,41 +1,41 @@
-# A-4: 설계 약속 검증 결과 (2026-08-15)
+# A-4: verifying the design promise (2026-08-15)
 
-> 약속: **"어댑터 하나만 추가하면 UI·core·protocol은 그대로"** (architecture.md 변경 축 C3)
+> The promise: **"add one adapter and ui, core and protocol stay as they are"** (architecture.md axis of change C3)
 >
-> **판정: 약속은 지켜졌다.** 어댑터 밖 변경은 전부 ②(새 기능)였고, ①(어댑터를 붙이려고 어쩔 수 없이)는 없었다.
+> **Verdict: the promise held.** Every change outside the adapter was of kind ②(a new feature); there were no ①(forced in order to attach the adapter).
 
-## 분류
+## Classification
 
-플랜 A-4가 정한 기준대로 `adapters/codex/**` 밖의 변경을 둘로 나눈다.
+By the criterion plan A-4 set, changes outside `adapters/codex/**` are split into two kinds.
 
-### ① 어댑터를 붙이기 위해 불가피했던 변경 — **없음**
+### ① Changes that were unavoidable in order to attach the adapter — **none**
 
-`core`는 **한 줄도 바뀌지 않았다.** 상태 머신·인박스 정렬·읽음 규칙·승인 정책이
-Codex 이벤트를 그대로 받아들였다. `NormalizedEvent`를 소비하는 쪽은 도구가 늘어난 것을 모른다.
+`core` **did not change by a single line.** The state machine, inbox ordering, read rules and approval policy
+accepted Codex events as they were. Whatever consumes `NormalizedEvent` does not know a tool was added.
 
-`platform/ports`도 그대로다 — `AgentPort`에 Codex를 위한 메서드가 하나도 추가되지 않았다.
+`platform/ports` is unchanged too — not one method was added to `AgentPort` for Codex.
 
-### ② Codex가 새 기능을 가져와서 생긴 변경 — 4곳 (정상)
+### ② Changes because Codex brought new capabilities — 4 places (normal)
 
-| 변경 | 이유 |
+| Change | Why |
 |---|---|
-| `protocol`: `compaction` 이벤트 추가 | Codex가 `thread/compacted`를 준다. FR-14가 요구하던 컴팩션 마커의 미구현분이었고, Claude 어댑터도 나중에 같은 이벤트를 쓸 수 있다 |
-| `ui`: `NewSessionDialog` 신설 | 도구가 둘이 되어 **고를 화면**이 필요해졌다 (FR-7). 도구가 하나일 때는 존재 이유가 없던 화면이다 |
-| `ui/store`: `createSession`이 tool·model·preset을 받음 | 위와 같은 이유. 예전엔 `'normal'` 고정에 모델 미전달이었다 |
-| `platform/mock`: `lastCreateParams` 기록 | 테스트가 "고른 값이 전달되는가"를 볼 수 있게 한 검증 장치 |
+| `protocol`: added the `compaction` event | Codex gives `thread/compacted`. This was the unimplemented part of the compaction marker FR-14 asked for, and the Claude adapter can use the same event later |
+| `ui`: new `NewSessionDialog` | With two tools there had to be **a screen to choose on** (FR-7). With one tool the screen had no reason to exist |
+| `ui/store`: `createSession` takes tool, model and preset | Same reason as above. It used to be fixed at `'normal'` with no model passed |
+| `platform/mock`: record `lastCreateParams` | A verification device so tests can see "does the chosen value get passed through" |
 
-## 결론과 후속
+## Conclusion and follow-up
 
-설계 문서(architecture.md C3)를 **고칠 이유가 없다.** 오히려 근거가 하나 생겼다:
-어댑터 인터페이스와 `NormalizedEvent` 정규화가 실제로 도구 차이를 흡수했다.
+There is **no reason to change** the design document (architecture.md C3). If anything there is one more piece of evidence for it:
+the adapter interface and `NormalizedEvent` normalisation did absorb the differences between tools.
 
-다만 정확히 적어둘 것: **"UI가 안 바뀐다"는 약속이 아니었다.** 도구가 늘면 고르는 화면이 필요한 것은
-설계 실패가 아니라 기능 추가다. C3이 방어하는 것은 "새 도구 때문에 **기존 구조**를 뜯어고치는 일"이고,
-그런 일은 일어나지 않았다.
+One thing to state precisely, though: **"the UI does not change" was never the promise.** That adding a tool requires a screen to choose on
+is a feature addition, not a design failure. What C3 defends against is "having to tear up **the existing structure** because of a new tool",
+and that did not happen.
 
-## 부수적으로 드러난 것
+## Things that surfaced along the way
 
-- Codex의 `thread/name/updated`는 짧은 세션에서 오지 않는다. FR-18(자동 이름)은 첫 프롬프트로
-  이미 충족되므로 문제가 아니지만, 제목 이벤트를 전제한 검증 기준은 틀렸었다 — 기준을 고쳤다.
-- 세션 생성 다이얼로그를 도입하니 **시작 프롬프트가 대화창에 안 보이는 결함**이 드러났다 (E2E가 잡음).
-  이전에는 입력창으로만 보냈기 때문에 없던 경로다.
+- Codex's `thread/name/updated` does not arrive in short sessions. FR-18 (automatic names) is already satisfied by the first
+  prompt so this is not a problem, but the verification criterion that assumed a title event was wrong — the criterion was fixed.
+- Introducing the session creation dialog exposed a **defect where the starting prompt was not visible in the conversation view** (E2E caught it).
+  It is a path that did not exist before, when it was only ever sent through the input box.

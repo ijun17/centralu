@@ -1,8 +1,9 @@
 {
-  // Tailwind v4는 `@import 'tailwindcss'` 하나로 시작하고 `@theme`·`@source`·`@apply`로
-  // 설정한다. VS Code 기본 CSS 검사기는 그 문법을 모르므로 전부 "Unknown at rule"로
-  // 잡는다 — 코드는 멀쩡한데 Problems 패널만 빨개진다. 그래서 이 검사만 끈다.
-  // (실제 CSS 오류는 빌드가 잡는다: `pnpm build`)
+  // Tailwind v4 is configured in CSS: one `@import 'tailwindcss'`, then `@theme`,
+  // `@source` and `@apply`. VS Code's built-in CSS validator doesn't know that syntax
+  // and flags every one of them as "Unknown at rule" — the code is fine, the Problems
+  // panel just turns red. So we turn off that one check.
+  // (Real CSS errors still get caught by the build: `pnpm build`.)
   "css.lint.unknownAtRules": "ignore",
 
   // 이 저장소의 TypeScript 버전을 쓴다 — VS Code 내장본과 달라지면

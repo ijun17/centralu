@@ -1,62 +1,62 @@
-# M0 스파이크 결과 (2026-08-15)
+# M0 spike results (2026-08-15)
 
-> 결론: **설계 전제 전부 성립. 아키텍처 수정 불필요, M1 진행 가능.**
-> 검증 코드: `spike/` (일회용 — M1 구현 시작 후 삭제 예정)
+> Conclusion: **every design premise holds. No architecture change needed, M1 can proceed.**
+> Verification code: `spike/` (throwaway — to be deleted once M1 implementation starts)
 
-검증 환경: Claude Code 2.1.223 / Agent SDK 0.3.231 / Codex CLI 0.147.0 / Node 26.
-양쪽 CLI 모두 전역 자동승인 상태에서 검증 (Claude: `defaultMode: bypassPermissions`, Codex: `approval_policy = "never"` + `danger-full-access`) — 기획서 §2가 우려한 최악 조건 그대로.
+Verification environment: Claude Code 2.1.223 / Agent SDK 0.3.231 / Codex CLI 0.147.0 / Node 26.
+Both CLIs were verified with global auto-approve on (Claude: `defaultMode: bypassPermissions`, Codex: `approval_policy = "never"` + `danger-full-access`) — exactly the worst-case condition product spec §2 was worried about.
 
-## A. 권한 오버라이드 — ✅ 양쪽 모두 성립
+## A. Permission override — ✅ holds on both
 
 | | Claude (Agent SDK) | Codex (app-server) |
 |---|---|---|
-| 세션 단위 오버라이드 | `options.permissionMode: 'default'` + `canUseTool` 콜백 | `thread/start` params `approvalPolicy: 'untrusted'` |
-| 전역 bypass 이김? | **예** — Write·Bash(curl) 승인 요청이 콜백으로 도착 | **예** — `item/commandExecution/requestApproval` 서버 요청 도착 |
-| 승인 → 실행 완주 | allow 응답 후 실행됨 | `decision: 'accept'` 응답 후 실행, 파일 생성 확인 |
+| Per-session override | `options.permissionMode: 'default'` + a `canUseTool` callback | `thread/start` params `approvalPolicy: 'untrusted'` |
+| Beats global bypass? | **Yes** — Write and Bash(curl) approval requests arrived at the callback | **Yes** — the `item/commandExecution/requestApproval` server request arrived |
+| Approval → execution completes | executed after an allow response | executed after a `decision: 'accept'` response, file creation confirmed |
 
-**주의 (어댑터 구현 시 필수):**
-- Claude: `allowedTools`에 bare 도구명(`['Bash']`)을 넣으면 canUseTool이 **셰도잉**되어 콜백이 안 옴 (SDK 경고 `CAN_USE_TOOL_SHADOWED` 확인). 어댑터는 allowedTools를 쓰지 않는다.
-- Claude: 안전한 명령(`echo` 등)은 샌드박스 자동 승인이라 승인 요청 자체가 없음 — 앱 관점에선 장점 (불필요한 승인 소음 감소). "승인 요청이 안 온다 = 버그"가 아님.
-- Claude: SDK 세션에도 사용자 훅·플러그인이 로드됨 (hook_started 관찰, OMC 훅·osascript 알림 실행됨). Centralu 세션에서 사용자 훅 처리 방침 필요 → M1 설계 항목 (억제 옵션 또는 그대로 두기).
-- Codex: 승인 응답 decision은 `accept | acceptForSession | acceptWithExecpolicyAmendment | applyNetworkPolicyAmendment | decline | cancel`. `acceptForSession` = FR-3 "항상 허용(세션)"과 정확히 대응.
+**Warnings (essential when implementing the adapter):**
+- Claude: putting a bare tool name in `allowedTools` (`['Bash']`) **shadows** canUseTool and the callback never fires (SDK warning `CAN_USE_TOOL_SHADOWED` observed). The adapter does not use allowedTools.
+- Claude: safe commands (`echo` etc.) are auto-approved by the sandbox, so there is no approval request at all — from the app's point of view an advantage (less needless approval noise). "No approval request arrived = a bug" is not true.
+- Claude: user hooks and plugins are loaded into SDK sessions too (hook_started observed; the OMC hook and an osascript notification ran). A policy for user hooks in Centralu sessions is needed → an M1 design item (suppress them, or leave them alone).
+- Codex: the approval response decisions are `accept | acceptForSession | acceptWithExecpolicyAmendment | applyNetworkPolicyAmendment | decline | cancel`. `acceptForSession` corresponds exactly to FR-3's "always allow (session)".
 
-## B. 이벤트 수집 — ✅ 필요한 것 전부 나옴
+## B. Event collection — ✅ everything needed came through
 
-| 필요 정보 (FR) | Claude | Codex |
+| Information needed (FR) | Claude | Codex |
 |---|---|---|
-| 스트리밍 델타 (FR-3) | `includePartialMessages: true` → `stream_event` | `item/agentMessage/delta` |
-| 도구 호출 (FR-3) | assistant 메시지 `tool_use` 블록 | `item/started`·`completed` (type: commandExecution 등, command·cwd 포함) |
-| 턴 완료 (FR-12) | `result` 메시지 | `turn/completed` |
-| usage/비용 (FR-9) | `result.usage`, `modelUsage` (모델별 tokens+`costUSD`) | `thread/tokenUsage/updated` (턴별 누적) |
-| 컨텍스트 (FR-14) | `modelUsage.contextWindow` (200k) + 턴별 input tokens | tokenUsage total + config의 context window |
-| **한도 (FR-9 limited)** | `rate_limit_event`: status·**resetsAt**·rateLimitType(five_hour) | `account/rateLimits/updated`: **usedPercent 21%·windowDurationMins 10080(주간!)·resetsAt** |
-| 세션 제목 (FR-18) | `listSessions()`/`getSessionInfo()` — summary 필드 (자동 생성) | `thread/name/updated` 알림 + `thread/name/set` |
-| resume (FR-10) | `options.resume: sessionId` — 이전 대화 기억 확인됨 | `thread/resume` 메서드 존재 (미실행, 스키마 확인) |
-| 컴팩션 마커 (FR-14) | — (미확인) | `thread/compacted` 알림 |
+| Streaming deltas (FR-3) | `includePartialMessages: true` → `stream_event` | `item/agentMessage/delta` |
+| Tool calls (FR-3) | `tool_use` blocks in assistant messages | `item/started`·`completed` (type: commandExecution etc., includes command and cwd) |
+| Turn complete (FR-12) | the `result` message | `turn/completed` |
+| usage/cost (FR-9) | `result.usage`, `modelUsage` (per-model tokens + `costUSD`) | `thread/tokenUsage/updated` (cumulative per turn) |
+| Context (FR-14) | `modelUsage.contextWindow` (200k) + per-turn input tokens | tokenUsage total + the context window from config |
+| **Limits (FR-9 limited)** | `rate_limit_event`: status·**resetsAt**·rateLimitType(five_hour) | `account/rateLimits/updated`: **usedPercent 21%·windowDurationMins 10080 (weekly!)·resetsAt** |
+| Session title (FR-18) | `listSessions()`/`getSessionInfo()` — the summary field (auto-generated) | the `thread/name/updated` notification + `thread/name/set` |
+| resume (FR-10) | `options.resume: sessionId` — confirmed it remembers the earlier conversation | the `thread/resume` method exists (not executed, schema confirmed) |
+| Compaction marker (FR-14) | — (not confirmed) | the `thread/compacted` notification |
 
-**보너스 발견:**
-- Claude `listSessions()`가 **머신 전체** 세션 목록(제목·최종수정·firstPrompt)을 반환 — 외부 실행 세션 표시(FR-9의 "머신 전체" 철학)에 활용 가능.
-- Codex에 `account/usage/read`, `AccountTokenUsageDailyBucket` 존재 — **Codex 쪽은 주간 사용량도 API로 조회 가능성** 있음. FR-9 로그 파싱 전에 이 경로 우선 검토.
-- Codex `turn/diff/updated` — 턴 단위 diff를 프로토콜이 직접 줌 (FR-4 실시간 갱신에 활용).
-- Codex `thread/fork`, `turn/steer`, `review/start` 등 풍부한 부가 기능.
+**Bonus findings:**
+- Claude's `listSessions()` returns a **machine-wide** session list (title, last modified, firstPrompt) — usable for displaying externally-run sessions (FR-9's "whole machine" philosophy).
+- Codex has `account/usage/read` and `AccountTokenUsageDailyBucket` — **on the Codex side weekly usage may be queryable through the API**. Investigate this path before FR-9's log parsing.
+- Codex `turn/diff/updated` — the protocol gives per-turn diffs directly (usable for FR-4's live updating).
+- Codex has a rich set of extras: `thread/fork`, `turn/steer`, `review/start` and others.
 
-## C. Codex 프로토콜 안정성 (C4 리스크) — 예상보다 양호
+## C. Codex protocol stability (the C4 risk) — better than expected
 
-- `codex app-server generate-ts` / `generate-json-schema` — **공식 타입 생성기 내장**. 어댑터 빌드 시 버전별 바인딩을 생성·커밋해 diff로 프로토콜 변동을 즉시 감지 가능.
-- 전송: stdio, newline-delimited JSON, `jsonrpc` 필드 없는 경량 JSON-RPC (`{id, method, params}` / `{id, result}`).
-- 핸드셰이크: `initialize` → `initialized` 알림. 여전히 "[experimental]" 표기 — 스냅샷 테스트(기존 계획) 유지.
+- `codex app-server generate-ts` / `generate-json-schema` — **an official type generator is built in**. When building the adapter, generate and commit per-version bindings so protocol changes are detected immediately from the diff.
+- Transport: stdio, newline-delimited JSON, lightweight JSON-RPC without a `jsonrpc` field (`{id, method, params}` / `{id, result}`).
+- Handshake: `initialize` → the `initialized` notification. Still marked "[experimental]" — keep the snapshot tests (the existing plan).
 
-## D. 토폴로지 (dev 웹 개발) — ✅ E2E 성공
+## D. Topology (dev web development) — ✅ E2E succeeded
 
-브라우저 → localhost WS(토큰 인증) → 미니 host → Agent SDK → 스트리밍 델타 → 화면 렌더까지 완주 ("BROWSER_E2E_OK", $0.016). Playwright로 자동 검증 — E2E 테스트 전략도 함께 입증됨.
+Browser → localhost WS (token auth) → mini host → Agent SDK → streaming deltas → rendered on screen, all the way through ("BROWSER_E2E_OK", $0.016). Verified automatically with Playwright — the E2E test strategy was proven along with it.
 
-## E. 파일 체크포인트 (FR-2 복구 경로) — 가능성 확인
+## E. File checkpoints (the FR-2 recovery path) — feasibility confirmed
 
-`~/.claude/file-history/<sessionId>/<hash>@v<N>` 에 세션별 파일 버전 사본이 남는 것 확인. 단 **비공식 포맷** — 1차 복구 경로는 계획대로 어댑터의 tool_call 이벤트에서 변경 전 내용 캡처, file-history는 보조로 재검토 (M2).
+Confirmed that per-session copies of file versions are left at `~/.claude/file-history/<sessionId>/<hash>@v<N>`. But the format is **unofficial** — the primary recovery path stays as planned (capture pre-change content from the adapter's tool_call event), with file-history to be reconsidered as a secondary (M2).
 
-## 설계에 반영할 사항 (문서 수정 없이 구현 시 참고)
+## To reflect in the design (for reference during implementation, no document changes)
 
-1. ClaudeAdapter: allowedTools 사용 금지, includePartialMessages 사용, 사용자 훅 로드 방침 결정 필요.
-2. CodexAdapter: 승인 decision 6종 매핑 (`acceptForSession` → "항상 허용·세션"), 바인딩 생성기를 CI에 편입.
-3. FR-9: Codex는 `account/usage/read` 우선 검토 → 안 되면 로그 파싱 (Claude는 로그 파싱 확정).
-4. protocol의 `limit_reached` 이벤트에 `usedPercent`·`windowMins` 필드 추가 여지 (Codex가 주므로).
+1. ClaudeAdapter: do not use allowedTools, do use includePartialMessages, decide the policy on loading user hooks.
+2. CodexAdapter: map the 6 approval decisions (`acceptForSession` → "always allow, session"), fold the binding generator into CI.
+3. FR-9: for Codex investigate `account/usage/read` first → fall back to log parsing (for Claude, log parsing is settled).
+4. Room to add `usedPercent` and `windowMins` fields to the protocol's `limit_reached` event (since Codex provides them).

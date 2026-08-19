@@ -1,8 +1,7 @@
 # centralu-darwin-arm64
 
-[Centralu](https://github.com/ijun17/centralu)의 macOS(Apple Silicon) 앱 번들이다.
-**직접 설치하지 않는다** — `centralu` 패키지가 optional dependency로 끌어온다.
+The macOS (Apple Silicon) app bundle for [Centralu](https://github.com/ijun17/centralu).
 
-```bash
-npm i -g centralu
-```
+**Don't install this directly.** The `centralu` package pulls it in as an optional
+dependency, so you get the bundle for the machine you're actually on. Installing it by
+hand gets you a `.app` with nothing to launch it.

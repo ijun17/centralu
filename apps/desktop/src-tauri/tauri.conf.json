@@ -44,8 +44,8 @@
     ],
     "category": "DeveloperTool",
     "copyright": "",
-    "shortDescription": "에이전트 관제탑",
-    "longDescription": "여러 에이전트 코딩 도구를 한 창에서 실행·관찰·제어합니다.",
+    "shortDescription": "Agent control tower",
+    "longDescription": "Run, watch and steer several agent coding tools from one window.",
     "resources": [
       "resources/host/**/*"
     ],

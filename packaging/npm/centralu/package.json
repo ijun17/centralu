@@ -1,7 +1,7 @@
 {
   "name": "centralu",
   "version": "0.1.0-beta.2",
-  "description": "여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 데스크톱 앱",
+  "description": "Run, watch and steer several Claude Code and Codex CLI sessions from one window",
   "license": "MIT",
   "author": "ijun17",
   "homepage": "https://github.com/ijun17/centralu",
