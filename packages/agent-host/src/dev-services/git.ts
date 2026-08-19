@@ -247,3 +247,66 @@ function cleanGitError(e: unknown): string {
   const err = e as { stderr?: string; message?: string }
   return (err.stderr || err.message || 'Unknown error').trim().split('\n').slice(0, 6).join('\n')
 }
+
+/*
+ * ── 워크트리 (FR-2의 후순위 옵션) ─────────────────────────────────────
+ *
+ * **원본 디렉토리에서 직접 작업하는 것이 기본이다.** 워크트리는 원하는 사람만 켜는 격리 수단이고,
+ * 여기 있는 함수들은 그 체크박스 하나를 위해 존재한다.
+ *
+ * 위치는 **저장소 밖**이다 (`~/.control-center/worktrees/…`). 저장소 안에 두면 `.gitignore`에
+ * 줄을 넣어야 하고 — 사용자 파일을 우리가 고치는 것이다 — 안 넣으면 `git status`가 지저분해진다.
+ */
+
+export type Worktree = { path: string; branch: string }
+
+/**
+ * 새 워크트리와 브랜치를 만든다. 브랜치는 **지금 HEAD에서** 갈라진다.
+ *
+ * 실패를 삼키지 않는다: 워크트리를 못 만들었는데 세션이 원본 디렉토리에서 조용히 돌면
+ * 사용자는 격리된 줄 알고 있다 — 그게 이 기능에서 가장 나쁜 결말이다.
+ */
+export async function gitWorktreeAdd(repoCwd: string, path: string, branch: string): Promise<Worktree> {
+  await git(repoCwd, ['worktree', 'add', '-b', branch, path])
+  return { path, branch }
+}
+
+/**
+ * 워크트리를 지운다. `force`는 커밋 안 된 변경까지 버린다.
+ *
+ * 지우기 전에 `gitWorktreeDirty`로 물어보는 것은 **호출자의 몫**이다 — 여기서 임의로
+ * 판단하면 "조용히 지웠다"가 된다. 에이전트가 몇 시간 작업한 결과가 들어 있을 수 있는 곳이다.
+ */
+export async function gitWorktreeRemove(repoCwd: string, path: string, force = false): Promise<void> {
+  await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force'] : []), path])
+}
+
+/** 커밋되지 않은 변경이 남아 있는가 — 지워도 되는지 묻기 위한 것 */
+export async function gitWorktreeDirty(path: string): Promise<{ dirty: boolean; changedFiles: number }> {
+  const summary = await gitSummary(path)
+  return { dirty: summary.changedFiles > 0, changedFiles: summary.changedFiles }
+}
+
+/**
+ * 등록된 워크트리 목록. 사람이 Finder에서 지워버린 것을 걸러내는 데 쓴다
+ * (git은 그런 것도 목록에 남겨둔다 — `prune`이 필요한 상태다).
+ */
+export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
+  if (!(await isRepo(repoCwd))) return []
+  const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
+  const list: Worktree[] = []
+  let path = ''
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) path = line.slice('worktree '.length).trim()
+    else if (line.startsWith('branch ') && path) {
+      list.push({ path, branch: line.slice('branch refs/heads/'.length).trim() })
+      path = ''
+    }
+  }
+  return list
+}
+
+/** 사라진 워크트리의 등록만 정리한다 (디렉토리를 지우지는 않는다) */
+export async function gitWorktreePrune(repoCwd: string): Promise<void> {
+  await git(repoCwd, ['worktree', 'prune'])
+}

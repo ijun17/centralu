@@ -244,6 +244,22 @@ export class Store {
           this.db.exec('VACUUM')
         },
       },
+      {
+        to: 12,
+        run: () => {
+          /*
+           * 워크트리 세션 (FR-2 옵션).
+           *
+           * 경로를 DB에 남기는 이유: 재개할 때 **같은 워크트리로 돌아가야** 한다.
+           * 프로젝트 경로로 되돌아가면 격리가 조용히 풀리고, 사용자는 여전히 격리된 줄 안다.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'worktree_path')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_path TEXT`)
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_branch TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -275,6 +291,8 @@ export class Store {
               effort        TEXT,
               permission_preset TEXT NOT NULL DEFAULT 'normal',
               imported_from TEXT,
+              worktree_path TEXT,
+              worktree_branch TEXT,
               sidebar_order INTEGER NOT NULL DEFAULT 0
             )
           `)
@@ -324,14 +342,15 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, effort, permission_preset, imported_from)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @permissionPreset, @importedFrom)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, effort, permission_preset, imported_from, worktree_path, worktree_branch)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
-           permission_preset = excluded.permission_preset, imported_from = excluded.imported_from`,
+           permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
+           worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch`,
       )
       .run({
         ...s,
@@ -339,6 +358,8 @@ export class Store {
         archived: s.archived ? 1 : 0,
         effort: s.effort ?? null,
         importedFrom: s.importedFrom ?? null,
+        worktreePath: s.worktree?.path ?? null,
+        worktreeBranch: s.worktree?.branch ?? null,
       })
   }
 
@@ -411,12 +432,25 @@ export class Store {
                 s.auto_named as autoNamed, s.state, s.archived, s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
+                s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
       )
-      .all() as (Omit<SessionInfo, 'autoNamed' | 'archived'> & { autoNamed: number; archived: number })[]
+      .all() as (Omit<SessionInfo, 'autoNamed' | 'archived' | 'worktree'> & {
+      autoNamed: number
+      archived: number
+      worktreePath: string | null
+      worktreeBranch: string | null
+    })[]
     // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
-    return rows.map((r) => ({ ...r, autoNamed: !!r.autoNamed, archived: !!r.archived, live: false, ...sessionLiveDefaults() }))
+    return rows.map(({ worktreePath, worktreeBranch, ...r }) => ({
+      ...r,
+      autoNamed: !!r.autoNamed,
+      archived: !!r.archived,
+      live: false,
+      worktree: worktreePath ? { path: worktreePath, branch: worktreeBranch ?? '' } : null,
+      ...sessionLiveDefaults(),
+    }))
   }
 
   /**

@@ -14,7 +14,7 @@ function seeded() {
   s.upsertSession({
     id: 's1', projectId: 'p1', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
   })
   return s
@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(11)
+    expect(store.schemaVersion).toBe(12)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -70,7 +70,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
       id: 'orc', projectId: null, tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
-      permissionPreset: 'normal', importedFrom: null, ...sessionLiveDefaults(),
+      permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
     })
     expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
     rmSync(dir, { recursive: true, force: true })
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(11)
+    expect(new Store().schemaVersion).toBe(12)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(11)
+    expect(store.schemaVersion).toBe(12)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -252,7 +252,7 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
       id: 's-import', projectId: 'p1', tool: 'claude' as const, externalId: 'ext-new',
       name: '이어받은 대화', autoNamed: true, state: 'idle' as const, archived: false,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
-      model: null, effort: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old',
+      model: null, effort: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null,
       ...sessionLiveDefaults(),
     }
     store.upsertSession(base)
@@ -272,7 +272,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     id: 's-x', projectId: 'p1', tool: 'claude', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
-    model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+    model: null, effort: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
     ...over,
   })
@@ -307,7 +307,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
         id, projectId: 'p1', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
-        model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+        model: null, effort: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       })
     }
@@ -346,7 +346,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
         id, projectId: 'p1', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
-        model: null, effort: null, permissionPreset: 'normal', importedFrom: null,
+        model: null, effort: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       })
     }
@@ -393,7 +393,7 @@ describe('오케스트레이터는 하나뿐', () => {
         id, projectId: null, tool: 'claude', externalId: null, name: id,
         autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
-        permissionPreset: 'normal', importedFrom: null, ...sessionLiveDefaults(),
+        permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
       })
     mk('a')
     mk('b')

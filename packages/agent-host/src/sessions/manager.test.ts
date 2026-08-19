@@ -1,5 +1,8 @@
 /** T3-3 완료 기준: 인메모리 어댑터 목으로 RPC 통합 검증 */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
@@ -67,8 +70,11 @@ class FakeAdapter implements AgentAdapter {
   /** 문자열이면 그 문구로, Error면 그대로 던진다 (code를 실어 보낼 때) */
   failCreate: string | Error | null = null
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
+  /** 어느 디렉토리에서 띄웠나 — 워크트리 세션이 정말 격리됐는지 보는 유일한 증거다 */
+  lastCwd: string | null = null
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     if (this.failCreate) throw typeof this.failCreate === 'string' ? new Error(this.failCreate) : this.failCreate
+    this.lastCwd = opts.cwd
     this.lastOrchestratorTools = opts.orchestratorTools
     this.last = new FakeHandle(opts.sessionId, emit)
     /*
@@ -1418,5 +1424,132 @@ describe('살아-있는-동안 사실이 목록에 실린다', () => {
     expect(m.state).toBe('error')
     expect(m.pendingApproval).toBeNull()
     expect(m.pendingQuestions).toEqual([])
+  })
+})
+
+/**
+ * 워크트리 세션 (FR-2의 후순위 옵션).
+ *
+ * 진짜 git 저장소와 임시 워크트리 뿌리를 세워서 본다 — 가짜로는 이 기능이 지켜야 할 것
+ * (**격리가 조용히 풀리지 않는다**)을 확인할 수 없다.
+ */
+describe('워크트리 세션', () => {
+  let root = ''
+  let repo = ''
+  let wtRoot = ''
+  let wtMgr: SessionManager
+  let wtRpc: ReturnType<typeof createRpcHandler>
+  let project: { id: string; path: string }
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'cc-mgr-wt-'))
+    repo = join(root, 'repo')
+    wtRoot = join(root, 'worktrees')
+    execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
+    writeFileSync(join(repo, 'a.txt'), 'hello\n')
+    execFileSync('git', ['add', '.'], { cwd: repo })
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: repo })
+
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, wtRoot)
+    wtRpc = createRpcHandler(wtMgr, adapters)
+    project = (await wtRpc('projects.add', { path: repo })) as { id: string; path: string }
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  const create = (worktree: boolean) =>
+    wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree }) as Promise<SessionInfo>
+
+  it('켜면 워크트리에서 띄우고, 끄면 프로젝트 디렉토리에서 띄운다', async () => {
+    const plain = await create(false)
+    expect(plain.worktree).toBeNull()
+    expect(adapter.lastCwd).toBe(repo)
+
+    const isolated = await create(true)
+    expect(isolated.worktree?.path.startsWith(wtRoot)).toBe(true)
+    expect(isolated.worktree?.branch).toMatch(/^centralu\//)
+    // 격리의 증거는 이것 하나다: 도구가 **다른 디렉토리에서** 떴다
+    expect(adapter.lastCwd).toBe(isolated.worktree?.path)
+    expect(existsSync(join(isolated.worktree!.path, 'a.txt'))).toBe(true)
+  })
+
+  it('앱을 껐다 켜고 재개해도 같은 워크트리로 돌아간다', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+
+    // host 재시작을 흉내낸다 — 살아 있는 세션에 대고 재개를 부르면 아무 일도 안 일어난다
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const restartedRpc = createRpcHandler(restarted, adapters)
+    adapter.lastCwd = null
+
+    await restartedRpc('agents.resumeSession', { sessionId: s.id })
+
+    // 여기서 프로젝트 경로로 떨어지면 격리가 조용히 풀린다 — 사용자는 여전히 격리된 줄 안다
+    expect(adapter.lastCwd).toBe(path)
+    expect(adapter.lastCwd).not.toBe(repo)
+  })
+
+  it('host를 재시작해도 워크트리를 기억한다', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    const found = restarted.listSessions().find((x) => x.id === s.id)
+
+    expect(found?.worktree).toEqual({ path, branch: s.worktree!.branch })
+  })
+
+  it('git 저장소가 아니면 만들지 않고, 이유를 말한다', async () => {
+    const plainDir = join(root, 'not-a-repo')
+    mkdirSync(plainDir)
+    const p2 = (await wtRpc('projects.add', { path: plainDir })) as { id: string }
+
+    await expect(
+      wtRpc('agents.createSession', { projectId: p2.id, cwd: plainDir, tool: 'claude', worktree: true }),
+    ).rejects.toThrow(/git repository/i)
+
+    // **조용히 원본 디렉토리로 떨어지지 않는다** — 그게 이 기능에서 가장 나쁜 결말이다
+    expect(wtMgr.listSessions().some((x) => x.projectId === p2.id)).toBe(false)
+  })
+
+  it('도구가 못 뜨면 워크트리를 남기지 않는다', async () => {
+    adapter.failCreate = 'claude is not installed'
+    await expect(create(true)).rejects.toThrow()
+
+    // 세션은 저장조차 안 됐으므로, 여기 남으면 아무도 못 찾는 고아가 된다
+    const left = existsSync(join(wtRoot, project.id)) ? readdirSync(join(wtRoot, project.id)) : []
+    expect(left).toEqual([])
+  })
+
+  it('지울 때 기본은 워크트리를 남긴다', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+
+    await wtRpc('agents.deleteSession', { sessionId: s.id })
+
+    expect(existsSync(path)).toBe(true)
+  })
+
+  it('지우라고 하면 커밋 안 된 변경이 있어도 지운다', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+    writeFileSync(join(path, 'a.txt'), '아직 커밋 안 함\n')
+
+    await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
+
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('상태를 물으면 지워도 되는지 판단할 재료를 준다', async () => {
+    const plain = await create(false)
+    expect(await wtRpc('agents.worktreeStatus', { sessionId: plain.id })).toBeNull()
+
+    const s = await create(true)
+    expect(await wtRpc('agents.worktreeStatus', { sessionId: s.id })).toMatchObject({ dirty: false, changedFiles: 0 })
+
+    writeFileSync(join(s.worktree!.path, 'a.txt'), '고침\n')
+    expect(await wtRpc('agents.worktreeStatus', { sessionId: s.id })).toMatchObject({ dirty: true, changedFiles: 1 })
   })
 })

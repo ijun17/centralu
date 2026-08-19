@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
-import { basename } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
   ModelOption,
@@ -22,7 +23,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import { APP_SLUG, DATA_DIR, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -36,6 +37,9 @@ import {
   gitStage,
   gitCommit,
   gitPush,
+  gitWorktreeAdd,
+  gitWorktreeDirty,
+  gitWorktreeRemove,
 } from '../dev-services/git.js'
 import { listDir, readTextFile } from '../dev-services/fs.js'
 import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
@@ -111,6 +115,12 @@ export class SessionManager {
      * 인프로세스로 도구를 못 붙이는 어댑터(Codex)의 다리가 이 주소로 돌아온다.
      */
     private endpoint?: () => { url: string; token: string } | null,
+    /**
+     * 워크트리를 만들 뿌리. **데이터 폴더 옆에 둔다** — 그래야 dev와 배포 앱이 자연히 갈리고
+     * (`~/.control-center-dev` vs `~/.control-center`), 테스트는 임시 디렉토리를 넣어
+     * 사용자 홈을 건드리지 않는다.
+     */
+    private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
   ) {
     /*
      * 기동 시 상태를 **있는 그대로 되살리지 않는다.**
@@ -317,6 +327,38 @@ export class SessionManager {
     }
 
     const id = randomUUID()
+
+    /*
+     * 워크트리 세션 (FR-2 옵션). **어댑터를 띄우기 전에** 만든다 — cwd로 넘겨야 하기 때문이다.
+     *
+     * 실패하면 세션 생성 자체를 멈춘다. 조용히 원본 디렉토리로 떨어뜨리면 사용자는
+     * 격리된 줄 알고 두 세션을 같은 파일에 붙인다 — 이 기능을 켠 이유가 정확히 그것인데.
+     */
+    let worktree: { path: string; branch: string } | null = null
+    if (params.worktree && params.projectId) {
+      const summary = await gitSummary(params.cwd)
+      if (!summary.isRepo || summary.denied) {
+        throw Object.assign(
+          new Error(
+            summary.denied
+              ? 'Cannot read this git repository — grant folder access and try again'
+              : 'Worktrees need a git repository. This directory is not one.',
+          ),
+          { code: 'internal' },
+        )
+      }
+      const path = this.worktreePathFor(params.projectId, id)
+      // 브랜치 이름에 세션 id 앞자리를 쓴다 — 세션 이름은 아직 없거나(자동 이름은 나중에 붙는다)
+      // 공백·유니코드가 섞여 브랜치 이름으로 못 쓴다
+      const branch = `${APP_SLUG}/${id.slice(0, 8)}`
+      try {
+        worktree = await gitWorktreeAdd(params.cwd, path, branch)
+      } catch (err) {
+        const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
+        throw Object.assign(new Error(`Could not create the worktree: ${String(msg).trim()}`), { code: 'internal' })
+      }
+    }
+
     const info: SessionInfo = {
       id, projectId: params.projectId, tool: params.tool, externalId: null,
       name: params.initialPrompt ? truncate(params.initialPrompt) : 'New session',
@@ -325,6 +367,7 @@ export class SessionManager {
       model: params.model ?? null, effort: params.effort ?? null,
       permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
+      worktree,
       ...sessionLiveDefaults(),
     }
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
@@ -333,7 +376,7 @@ export class SessionManager {
     try {
       handle = await adapter.createSession(
         {
-          sessionId: id, cwd: params.cwd, model: params.model, effort: params.effort,
+          sessionId: id, cwd: worktree?.path ?? params.cwd, model: params.model, effort: params.effort,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
           // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
           orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
@@ -343,6 +386,11 @@ export class SessionManager {
         (e) => this.onEvent(e),
       )
     } catch (err) {
+      // 어댑터가 실패하면 방금 만든 워크트리는 아무도 안 쓴다 — 고아 디렉토리를 남기지 않는다.
+      // (여기서 실패한 세션은 저장조차 되지 않으므로, 안 지우면 되찾을 방법이 없다)
+      if (worktree) {
+        await gitWorktreeRemove(params.cwd, worktree.path, true).catch(() => {})
+      }
       const msg = (err as Error).message
       throw Object.assign(new Error(`Could not start ${params.tool} session: ${msg}`), { code: 'internal' })
     }
@@ -595,7 +643,7 @@ export class SessionManager {
      */
     const project = m.projectId === null ? null : this.store.listProjects().find((p) => p.id === m.projectId)
     if (m.projectId !== null && !project) return { session: m, resumed: false, reason: 'Project not found' }
-    const cwd = this.cwdOf(m.projectId)
+    const cwd = this.cwdFor(m)
 
     /*
      * 도구 쪽에서 이 대화가 지워졌는지 먼저 본다.
@@ -717,7 +765,7 @@ export class SessionManager {
     }
 
     try {
-      const forked = await adapter.forkConversation(source, this.cwdOf(m.projectId))
+      const forked = await adapter.forkConversation(source, this.cwdFor(m))
       m.externalId = forked
       this.store.upsertSession(m)
     } catch (err) {
@@ -728,11 +776,24 @@ export class SessionManager {
   }
 
   /** 세션을 완전히 지운다 (프로세스 종료 + 기록·첨부 삭제) */
-  async deleteSession(sessionId: string): Promise<void> {
+  /**
+   * @param deleteWorktree 워크트리까지 지울지. **기본은 남기는 것이다** — 에이전트가 몇 시간
+   * 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다. UI가 사람에게 먼저 묻는다.
+   */
+  async deleteSession(sessionId: string, deleteWorktree = false): Promise<void> {
+    const m = this.meta.get(sessionId)
     const handle = this.handles.get(sessionId)
     if (handle) {
       await handle.dispose().catch(() => {})
       this.handles.delete(sessionId)
+    }
+    if (m?.worktree && deleteWorktree) {
+      /*
+       * force로 지운다 — 여기까지 온 것은 사람이 "커밋 안 된 변경이 있다"는 말을 듣고도
+       * 지우겠다고 답한 경우다. force 없이는 git이 거부해서 결국 아무것도 못 지운다.
+       * 실패해도 세션 삭제는 계속한다: 세션은 사라졌는데 목록에만 남는 편이 더 나쁘다.
+       */
+      await gitWorktreeRemove(this.cwdOf(m.projectId), m.worktree.path, true).catch(() => {})
     }
     this.running.delete(sessionId)
     this.meta.delete(sessionId)
@@ -1133,7 +1194,7 @@ export class SessionManager {
   async listCommands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }> {
     const m = this.meta.get(sessionId)
     if (!m) return { ready: false, commands: [] }
-    const cwd = this.cwdOf(m.projectId)
+    const cwd = this.cwdFor(m)
     const key = `${m.tool}:${cwd}`
     // 메모리 → 디스크 순으로 찾는다. host를 껐다 켜도 목록이 남아 있어야
     // 잠든 세션에서도 슬래시가 동작한다
@@ -1250,6 +1311,35 @@ export class SessionManager {
    * 동시 세션 충돌을 우리 손으로 만드는 셈이다. 오케스트레이터에겐 손이 없다:
    * 일은 세션이 하고, 오케스트레이터는 시키고 읽는다.
    */
+  /**
+   * 이 세션이 실제로 도는 곳.
+   *
+   * **워크트리 세션은 재개할 때도 같은 워크트리로 돌아가야 한다.** 프로젝트 경로로
+   * 되돌아가면 격리가 조용히 풀리고, 사용자는 여전히 격리된 줄 안다 — 그게 이 기능에서
+   * 가장 나쁜 결말이다. 그래서 cwd를 묻는 자리는 전부 이걸 쓴다.
+   */
+  private cwdFor(m: SessionInfo): string {
+    return m.worktree?.path ?? this.cwdOf(m.projectId)
+  }
+
+  /** 워크트리는 **저장소 밖**에 만든다 — 사용자 저장소를 더럽히지 않는다 (.gitignore도 안 건드린다) */
+  private worktreePathFor(projectId: string, sessionId: string): string {
+    return join(this.worktreeRoot, projectId, sessionId)
+  }
+
+  /** 워크트리를 지워도 되는지 판단할 재료. 워크트리 세션이 아니면 null */
+  async worktreeStatus(
+    sessionId: string,
+  ): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null> {
+    const m = this.meta.get(sessionId)
+    if (!m?.worktree) return null
+    const { dirty, changedFiles } = await gitWorktreeDirty(m.worktree.path).catch(() => ({
+      dirty: false,
+      changedFiles: 0,
+    }))
+    return { ...m.worktree, dirty, changedFiles }
+  }
+
   private cwdOf(projectId: string | null): string {
     if (projectId === null) return orchestratorHome()
     const p = this.store.listProjects().find((x) => x.id === projectId)

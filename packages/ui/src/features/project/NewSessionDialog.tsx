@@ -43,11 +43,20 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const project = useStore((s) => s.projects[projectId])
   const createSession = useStore((s) => s.createSession)
   const running = useSessionsOf(projectId).filter((s) => !s.archived)
+  // 워크트리는 깃 저장소에서만 만들 수 있다 — 아니면 체크박스를 죽이고 이유를 적는다
+  const isRepo = !!project?.git
 
   const [tools, setTools] = useState<Detection[] | null>(null)
   const [tool, setTool] = useState<ToolName>(project?.defaultTool ?? 'claude')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  /**
+   * 이 세션만 워크트리에서 돌린다 (FR-2 옵션).
+   *
+   * **기본은 꺼짐이다.** 스펙이 정한 원칙이 "원본 디렉토리에서 직접 작업"이고,
+   * 워크트리는 원하는 사람만 켜는 격리 수단이다.
+   */
+  const [worktree, setWorktree] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
@@ -112,6 +121,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               // 화면에도 지난 대화를 복원한다(importHistory).
               resumeExternalId: resume?.externalId,
               importHistory: resume ? true : undefined,
+              worktree: worktree || undefined,
             })
             onClose()
           } catch (err) {
@@ -129,6 +139,33 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             {running.length} sessions are already running in this directory. Editing the same files can lose changes.
           </p>
         )}
+
+        {/*
+          경고와 해법을 같은 자리에 둔다. 바로 위 줄이 "같은 파일을 고치면 변경이 유실될 수 있다"고
+          말하는데, 그 해법이 화면 저 아래에 있으면 둘을 잇지 못한다.
+        */}
+        <label
+          className={`mt-2 flex items-start gap-2 text-[11px] leading-relaxed ${
+            isRepo ? 'cursor-pointer text-ash hover:text-chalk' : 'cursor-default text-slate'
+          }`}
+          data-testid="worktree-toggle"
+        >
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-ash"
+            checked={worktree && isRepo}
+            disabled={!isRepo}
+            onChange={(e) => setWorktree(e.target.checked)}
+          />
+          <span>
+            Run in a git worktree
+            <span className="mt-0.5 block text-[10px] text-slate">
+              {isRepo
+                ? 'This session gets its own branch and directory, so it cannot touch the others’ files.'
+                : 'Not a git repository — worktrees need one.'}
+            </span>
+          </span>
+        </label>
 
         <section className="mt-3.5">
           <h3 className="mb-1.5 text-[11px] uppercase tracking-[0.12em] text-slate">Tool</h3>

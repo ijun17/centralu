@@ -117,6 +117,8 @@ const mgr = new SessionManager(
   adapters,
   (e) => server.broadcast(e),
   () => (port ? { url: `ws://127.0.0.1:${port}`, token } : null),
+  // 워크트리는 데이터 폴더 옆에 만든다 — dev와 배포 앱이 서로의 워크트리를 안 건드린다
+  join(dirname(dbPath), 'worktrees'),
 )
 const terminals = new TerminalService((f) => server.pushTerminal(f))
 const server: HostServer = new HostServer({

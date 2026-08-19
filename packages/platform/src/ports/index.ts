@@ -75,7 +75,10 @@ export interface AgentPort {
   /** 세션에 연결된 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */
-  deleteSession(sessionId: string): Promise<void>
+  /** 워크트리 세션이면 워크트리까지 지울지 함께 받는다. 기본은 남기는 것 */
+  deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
+  /** 지워도 되는지 사람에게 묻기 위한 재료. 워크트리 세션이 아니면 null */
+  worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
   /**
    * 도구가 보관 중인 이전 세션 (터미널에서 만든 것 포함).
    * supported=false면 이유가 함께 온다 — 구버전 도구에서도 '새 세션'은 막지 않는다.

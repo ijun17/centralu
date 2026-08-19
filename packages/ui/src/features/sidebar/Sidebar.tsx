@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
+import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
@@ -404,12 +405,13 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
       {confirming && (
         <ConfirmDelete
+          sessionId={confirming}
           name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
           // 프로젝트 기본값이 아니라 이 세션의 도구다 — 어디에 기록이 남는지 알려주는 문장이라 틀리면 안 된다
           tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool}
           onCancel={() => setConfirming(null)}
-          onConfirm={() => {
-            void deleteSession(confirming)
+          onConfirm={(deleteWorktree) => {
+            void deleteSession(confirming, deleteWorktree)
             setConfirming(null)
           }}
         />
@@ -427,17 +429,37 @@ function ProjectBlock({ projectId }: { projectId: string }) {
  * 사람은 정리하지 못하고 목록만 쌓인다.
  */
 function ConfirmDelete({
+  sessionId,
   name,
   tool,
   onConfirm,
   onCancel,
 }: {
+  sessionId: string
   name: string
   tool: string
-  onConfirm: () => void
+  onConfirm: (deleteWorktree: boolean) => void
   onCancel: () => void
 }) {
+  const platform = usePlatform()
   const toolLabel = tool === 'codex' ? 'Codex' : 'Claude Code'
+
+  /*
+   * 워크트리 세션인지, 거기 커밋 안 된 변경이 있는지 **모달을 여는 순간 묻는다.**
+   * 세션 목록에는 경로만 있고 더러운지는 없다 — 그건 파일시스템을 봐야 아는 사실이다.
+   */
+  const [wt, setWt] = useState<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>(null)
+  const [deleteWorktree, setDeleteWorktree] = useState(false)
+  useEffect(() => {
+    let alive = true
+    void platform.agents
+      .worktreeStatus(sessionId)
+      .then((r) => alive && setWt(r))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [platform, sessionId])
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
@@ -449,13 +471,43 @@ function ConfirmDelete({
         <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
           The conversation stays in {toolLabel} — you can pull it back from <span className="text-chalk">+ → Past conversations</span>.
         </p>
+
+        {/*
+          워크트리는 **세션과 수명이 다르다.** 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있어
+          기본은 남기는 쪽이다. 지우려면 사람이 직접 켠다 — 그리고 무엇을 잃는지 먼저 읽는다.
+        */}
+        {wt && (
+          <div className="mt-3 rounded border border-edge bg-panel p-2.5" data-testid="delete-worktree">
+            <p className="text-[11px] text-ash">
+              This session ran in a worktree — <span className="font-mono text-chalk">{wt.branch}</span>
+            </p>
+            {wt.dirty && (
+              <p className="mt-1 text-[11px] text-chalk" data-testid="worktree-dirty">
+                {wt.changedFiles} uncommitted {wt.changedFiles === 1 ? 'change' : 'changes'} would be lost.
+              </p>
+            )}
+            <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[11px] text-ash hover:text-chalk">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-ash"
+                checked={deleteWorktree}
+                onChange={(e) => setDeleteWorktree(e.target.checked)}
+                data-testid="delete-worktree-toggle"
+              />
+              <span>
+                Delete the worktree too
+                <span className="mt-0.5 block text-[10px] break-all text-slate">{wt.path}</span>
+              </span>
+            </label>
+          </div>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
             Cancel
           </button>
           <button
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
-            onClick={onConfirm}
+            onClick={() => onConfirm(deleteWorktree)}
             data-testid="confirm-delete-yes"
           >
             Delete

@@ -66,6 +66,11 @@ export type SessionSummary = {
   /** 추론 강도. 지원하지 않는 모델이면 null이다 (단계는 모델마다 다르다) */
   effort: string | null
   permissionPreset: PermissionPreset
+  /**
+   * 이 세션이 도는 워크트리 (FR-2 옵션). null이면 프로젝트 디렉토리에서 직접 돈다.
+   * 화면이 이걸 알아야 "왜 프로젝트 폴더의 파일이 안 바뀌지"를 겪지 않는다.
+   */
+  worktree: { path: string; branch: string } | null
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
@@ -73,6 +78,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, permissionPreset: 'normal',
+    worktree: null,
     tool: 'claude' as const, ...init,
   }
 }

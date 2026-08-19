@@ -491,6 +491,20 @@ export function SessionPane({
             preset={session.permissionPreset}
             live={session.live}
           />
+          {/*
+            워크트리 세션은 **다른 디렉토리에서 돈다.** 그 사실이 안 보이면 사용자는
+            프로젝트 폴더를 열어보고 "왜 파일이 안 바뀌었지"를 겪는다 — 설정 옆에 붙여
+            무엇을 어디에 보내는지 한자리에서 읽히게 한다.
+          */}
+          {session.worktree && (
+            <span
+              className="readout truncate text-[10px] text-slate"
+              title={`Runs in a git worktree: ${session.worktree.path}`}
+              data-testid="worktree-badge"
+            >
+              ⑂ {session.worktree.branch}
+            </span>
+          )}
         </div>
       </form>
     </section>

@@ -34,6 +34,13 @@ export const CreateSessionParams = z.object({
   resumeExternalId: z.string().optional(),
   /** 재개할 때 이전 대화도 화면에 복원한다 (resumeExternalId와 함께 쓴다) */
   importHistory: z.boolean().optional(),
+  /**
+   * 이 세션만 **깃 워크트리에서** 돌린다 (FR-2의 후순위 옵션).
+   *
+   * 기본은 원본 디렉토리에서 직접 작업하는 것이다 — 워크트리는 강제하지 않는다.
+   * 같은 디렉토리에 세션이 여럿일 때 파일 충돌을 원천적으로 없애고 싶은 사람만 켠다.
+   */
+  worktree: z.boolean().optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 
@@ -84,6 +91,13 @@ export const SessionInfo = z.object({
    * externalId와 다를 수 있다 — 도구가 resume하면서 새 식별자를 발급하기 때문이다.
    */
   importedFrom: z.string().nullable().default(null),
+  /**
+   * 이 세션이 도는 워크트리. null이면 프로젝트 디렉토리에서 직접 돈다(기본).
+   *
+   * 경로를 들고 있는 이유: 재개할 때도 **같은 워크트리**로 돌아가야 한다.
+   * 프로젝트 경로로 되돌아가면 격리가 조용히 풀린다 — 사용자는 여전히 격리된 줄 안다.
+   */
+  worktree: z.object({ path: z.string(), branch: z.string() }).nullable().default(null),
   /**
    * **살아 있는 동안만 유효한 사실들** — DB가 아니라 host 메모리에서 온다.
    *
@@ -209,8 +223,26 @@ export const RpcMethods = {
   },
   /** 세션을 완전히 지운다 — 아카이브와 달리 대화 기록·첨부까지 사라진다 */
   'agents.deleteSession': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({
+      sessionId: z.string(),
+      /**
+       * 워크트리 세션일 때만 의미가 있다. **기본은 남기는 것이다** —
+       * 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다.
+       * UI가 `agents.worktreeStatus`로 먼저 묻고, 사람이 정한 답을 여기로 보낸다.
+       */
+      deleteWorktree: z.boolean().default(false),
+    }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 워크트리를 지워도 되는지 판단할 재료. 지우기 직전에 UI가 묻는다.
+   * `null`이면 워크트리 세션이 아니다 — 물어볼 것도 없다.
+   */
+  'agents.worktreeStatus': {
+    params: z.object({ sessionId: z.string() }),
+    result: z
+      .object({ path: z.string(), branch: z.string(), dirty: z.boolean(), changedFiles: z.number() })
+      .nullable(),
   },
   /**
    * 세션에 연결된 에이전트만 재시작한다 (대화 기록은 그대로).

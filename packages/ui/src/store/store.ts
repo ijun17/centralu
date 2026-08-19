@@ -238,6 +238,8 @@ export type AppState = {
       /** 도구가 갖고 있던 이전 세션을 이어받는다 (터미널에서 만든 대화 포함) */
       resumeExternalId?: string
       importHistory?: boolean
+      /** 이 세션만 깃 워크트리에서 돌린다 (FR-2 옵션) */
+      worktree?: boolean
     },
   ): Promise<SessionInfo>
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
@@ -249,7 +251,7 @@ export type AppState = {
   archive(sessionId: string, archived?: boolean): Promise<void>
   /** 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<boolean>
-  deleteSession(sessionId: string): Promise<void>
+  deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
   updateSessionSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
@@ -955,12 +957,13 @@ export const useStore = create<AppState>((set, get) => ({
       initialPrompt: opts?.initialPrompt,
       resumeExternalId: opts?.resumeExternalId,
       importHistory: opts?.importHistory,
+      worktree: opts?.worktree,
     })
     set((s) => ({
       sessions: {
         ...s.sessions,
         [info.id]: {
-          ...initialSession({ id: info.id, projectId, name: info.name, tool: info.tool }),
+          ...initialSession({ id: info.id, projectId, name: info.name, tool: info.tool, worktree: info.worktree }),
           lastSeq: info.lastSeq,
           lastReadSeq: info.lastReadSeq,
           ...liveFactsOf(info),
@@ -1120,12 +1123,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /** 세션 완전 삭제. 되돌릴 수 없으므로 호출 전에 확인을 받는다 (UI 책임) */
-  async deleteSession(sessionId) {
+  async deleteSession(sessionId, deleteWorktree) {
     const platform = get().platform
     if (!platform) return
     const name = get().sessions[sessionId]?.name ?? 'Session'
     try {
-      await platform.agents.deleteSession(sessionId)
+      await platform.agents.deleteSession(sessionId, deleteWorktree)
       set({ toast: `Deleted: ${name}` })
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
@@ -1160,6 +1163,7 @@ export const useStore = create<AppState>((set, get) => ({
             model: info.model,
             effort: info.effort,
             permissionPreset: info.permissionPreset,
+            worktree: info.worktree,
           },
         },
       }))
@@ -1324,10 +1328,11 @@ export const useStore = create<AppState>((set, get) => ({
               // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
               lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
               waitingSince: f.waitingSince, model: f.model, effort: f.effort, permissionPreset: f.permissionPreset,
+              worktree: f.worktree,
               ...liveFactsOf(f),
             }
           : {
-              ...initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool, effort: f.effort, model: f.model, permissionPreset: f.permissionPreset }),
+              ...initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool, effort: f.effort, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree }),
               autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
               lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
               ...liveFactsOf(f),

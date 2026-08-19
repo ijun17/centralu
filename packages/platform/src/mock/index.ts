@@ -221,6 +221,8 @@ export class MockPlatform implements Platform {
 
   /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */
   lastCreateParams: CreateSessionParams | null = null
+  /** 테스트가 "커밋 안 된 변경이 있는 워크트리"를 만들 수 있게 하는 손잡이 */
+  mockWorktreeDirty = false
 
   /** 테스트용: 도구가 갖고 있는 척할 이전 세션. supported=false로 구버전 도구도 재현한다 */
   externalSessions: { supported: boolean; reason?: string; sessions: ExternalSession[] } = {
@@ -234,8 +236,11 @@ export class MockPlatform implements Platform {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       const id = `mock-session-${++this.idc}`
+      const worktree = params.worktree
+        ? { path: `/mock/worktrees/${id}`, branch: `centralu/${id.slice(-8)}` }
+        : null
       const info: SessionInfo = {
-        id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`,
+        id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`, worktree,
         effort: params.effort ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
@@ -317,7 +322,7 @@ export class MockPlatform implements Platform {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       // 실물과 같은 규칙: 도구를 바꾸면 이어갈 실마리를 끊는다
-      const next = { ...s, tool, externalId: null, importedFrom: null, live: false }
+      const next = { ...s, tool, externalId: null, importedFrom: null, worktree: null, live: false }
       this.sessions.set(sessionId, next)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
       return next
@@ -331,7 +336,7 @@ export class MockPlatform implements Platform {
         id, projectId: null, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null,
-        permissionPreset: 'normal' as const, importedFrom: null,
+        permissionPreset: 'normal' as const, importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       }
       this.sessions.set(id, info)
@@ -370,7 +375,13 @@ export class MockPlatform implements Platform {
       }
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
     },
-    deleteSession: async (sessionId: string) => {
+    /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
+    worktreeStatus: async (sessionId: string) => {
+      const s = this.sessions.get(sessionId)
+      if (!s?.worktree) return null
+      return { ...s.worktree, dirty: this.mockWorktreeDirty, changedFiles: this.mockWorktreeDirty ? 2 : 0 }
+    },
+    deleteSession: async (sessionId: string, _deleteWorktree = false) => {
       this.sessions.delete(sessionId)
       this.messages.delete(sessionId)
       this.emit({ type: 'session_deleted', sessionId })

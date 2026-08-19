@@ -84,8 +84,12 @@ class WebAgentPort implements AgentPort {
   updateSettings(sessionId: string, settings: { model?: string | null; permissionPreset?: PermissionPreset }) {
     return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
   }
-  async deleteSession(sessionId: string) {
-    await this.rpc.call('agents.deleteSession', { sessionId })
+  async worktreeStatus(sessionId: string) {
+    return this.rpc.call('agents.worktreeStatus', { sessionId })
+  }
+
+  async deleteSession(sessionId: string, deleteWorktree = false) {
+    await this.rpc.call('agents.deleteSession', { sessionId, deleteWorktree })
   }
   listExternalSessions(projectId: string, tool: ToolName, limit = 30) {
     return this.rpc.call(

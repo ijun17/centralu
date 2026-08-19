@@ -3519,3 +3519,74 @@ test('기타를 골라 놓고 비워 두면 보낼 수 없다', async ({ page })
   await page.getByTestId('question-other').click()
   await expect(page.getByTestId('question-submit')).toBeDisabled()
 })
+
+/**
+ * 워크트리 옵션 (FR-2).
+ *
+ * 스펙의 원칙은 "원본 디렉토리에서 직접 작업"이고 워크트리는 **원하는 사람만** 켠다.
+ * 그래서 화면이 지켜야 할 것은 둘이다: 기본은 꺼져 있을 것, 켰으면 그 사실이 보일 것.
+ */
+test('워크트리는 기본으로 꺼져 있고, 켜면 세션에 브랜치가 표시된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  const toggle = page.getByTestId('worktree-toggle').locator('input')
+  await expect(toggle).not.toBeChecked()
+
+  await toggle.check()
+  await page.getByTestId('initial-prompt').fill('격리해서 고쳐줘')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 다른 디렉토리에서 돈다는 사실이 안 보이면 "왜 프로젝트 폴더가 안 바뀌지"를 겪는다
+  await expect(page.getByTestId('worktree-badge')).toBeVisible()
+  await expect(page.getByTestId('worktree-badge')).toContainText('centralu/')
+})
+
+test('워크트리를 안 켠 세션에는 표시가 없다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '그냥 여기서 해줘')
+
+  await expect(page.getByTestId('worktree-badge')).toHaveCount(0)
+})
+
+/**
+ * 워크트리는 **세션과 수명이 다르다.** 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있어
+ * 기본은 남기는 쪽이고, 지우려면 사람이 무엇을 잃는지 읽고 직접 켠다.
+ */
+test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('initial-prompt').fill('격리 세션')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 커밋 안 된 변경이 있는 상태를 만든다 — 그때 무엇을 잃는지 말해야 한다
+  await page.evaluate(() => {
+    ;(window as any).__mock.mockWorktreeDirty = true
+  })
+
+  const row = page.getByTestId(/^session-row-/).first()
+  await row.hover()
+  await page.getByTestId(/^delete-session-/).first().click()
+
+  const panel = page.getByTestId('delete-worktree')
+  await expect(panel).toBeVisible()
+  await expect(page.getByTestId('worktree-dirty')).toContainText('2')
+
+  // 기본은 끄져 있다 — 지우는 쪽이 기본이면 되돌릴 수 없는 일이 조용히 일어난다
+  await expect(page.getByTestId('delete-worktree-toggle')).not.toBeChecked()
+})
+
+test('워크트리가 아닌 세션을 지울 때는 워크트리 이야기를 꺼내지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '보통 세션')
+
+  await page.getByTestId(/^session-row-/).first().hover()
+  await page.getByTestId(/^delete-session-/).first().click()
+
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-worktree')).toHaveCount(0)
+})
