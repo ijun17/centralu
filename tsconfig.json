@@ -15,28 +15,27 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "baseUrl": ".",
     "paths": {
       "@cc/protocol": [
-        "packages/protocol/src/index.ts"
+        "./packages/protocol/src/index.ts"
       ],
       "@cc/core": [
-        "packages/core/src/index.ts"
+        "./packages/core/src/index.ts"
       ],
       "@cc/platform/ports": [
-        "packages/platform/src/ports/index.ts"
+        "./packages/platform/src/ports/index.ts"
       ],
       "@cc/platform/web": [
-        "packages/platform/src/web/index.ts"
+        "./packages/platform/src/web/index.ts"
       ],
       "@cc/platform/mock": [
-        "packages/platform/src/mock/index.ts"
+        "./packages/platform/src/mock/index.ts"
       ],
       "@cc/ui": [
-        "packages/ui/src/index.ts"
+        "./packages/ui/src/index.ts"
       ],
       "@cc/platform/tauri": [
-        "packages/platform/src/tauri/index.ts"
+        "./packages/platform/src/tauri/index.ts"
       ]
     }
   },
