@@ -12,7 +12,8 @@
  * rsvg·ImageMagick을 새로 깔게 하면 기여자가 이 스크립트를 못 돌린다.
  */
 import { chromium } from '@playwright/test'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -76,8 +77,34 @@ if (preview) {
   // 투명 배경으로 굽는다 — macOS 아이콘은 스퀘어클 **밖이 비어 있어야** 한다
   await page.screenshot({ path: join(ICONS, 'icon.png'), omitBackground: true })
   writeFileSync(join(ICONS, '.chosen'), `${name}\n`)
-  console.log(`아이콘: ${name} → icons/icon.png (1024×1024)`)
+
+  /*
+   * PNG 한 장으로는 안 된다. Tauri는 icns를 만들 때 크기를 정해진 슬롯에 매핑하는데,
+   * **1024는 "512@2x"로만 인정돼서** 단일 1024 PNG는 매칭에 실패한다:
+   *
+   *     failed to bundle project: Failed to create app icon: `No matching IconType`
+   *
+   * 게다가 512 한 장으로 만들면 큰 슬롯이 비어 Dock 최대 크기에서 흐려진다.
+   * 그래서 공식 생성기로 **다해상도 icns**를 굽는다 (128·256·512·1024와 @2x).
+   */
+  await browser.close()
+  execFileSync('npx', ['tauri', 'icon', join(ICONS, 'icon.png'), '-o', ICONS], {
+    cwd: join(ROOT, 'apps/desktop'),
+    stdio: 'ignore',
+  })
+
+  /*
+   * 생성기는 안드로이드·iOS·윈도우 자산까지 만든다. 이 앱은 macOS 전용이라
+   * 저장소에 들일 이유가 없다 — 안 쓰는 파일이 쌓이면 다음 사람이 "이건 왜 있지"를 겪는다.
+   */
+  for (const junk of ['android', 'ios', 'icon.ico', 'StoreLogo.png', '32x32.png', '64x64.png', '128x128.png', '128x128@2x.png']) {
+    rmSync(join(ICONS, junk), { recursive: true, force: true })
+  }
+  for (const f of readdirSync(ICONS)) if (f.startsWith('Square')) rmSync(join(ICONS, f))
+
+  console.log(`아이콘: ${name} → icons/icon.icns (다해상도)`)
   console.log('앱에 반영하려면 다시 빌드해야 한다: pnpm app')
+  process.exit(0)
 }
 
 await browser.close()
