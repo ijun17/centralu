@@ -21,7 +21,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe('데이터 폴더 이사', () => {
   it('옛 폴더만 있으면 통째로 옮긴다 (내용 그대로)', () => {
-    const from = join(root, '.control-center')
+    const from = join(root, '.control-center') // legacy-name
     const to = join(root, '.centralu')
     seed(from, '진짜 대화 기록')
     writeFileSync(join(from, 'store.db-wal'), 'WAL도 함께')
@@ -35,7 +35,7 @@ describe('데이터 폴더 이사', () => {
   })
 
   it('새 폴더가 이미 있으면 **아무것도 안 한다**', () => {
-    const from = join(root, '.control-center')
+    const from = join(root, '.control-center') // legacy-name
     const to = join(root, '.centralu')
     seed(from, '옛 기록')
     seed(to, '새 기록')
@@ -48,12 +48,12 @@ describe('데이터 폴더 이사', () => {
   })
 
   it('옛 폴더가 없으면 조용히 넘어간다 (새로 설치한 사람)', () => {
-    expect(migrateLegacyDataDir(join(root, '.control-center'), join(root, '.centralu'))).toBe(false)
+    expect(migrateLegacyDataDir(join(root, '.control-center'), join(root, '.centralu'))).toBe(false) // legacy-name
     expect(existsSync(join(root, '.centralu'))).toBe(false)
   })
 
   it('옮기지 못해도 옛 폴더를 손상시키지 않는다', () => {
-    const from = join(root, '.control-center')
+    const from = join(root, '.control-center') // legacy-name
     seed(from, '지켜야 할 기록')
     // 옮길 수 없는 목적지 (부모가 파일이라 디렉토리를 만들 수 없다)
     const blocker = join(root, 'blocker')

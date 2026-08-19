@@ -1,8 +1,7 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { extname, join } from 'node:path'
-import { DATA_DIR } from '@cc/protocol'
 import type { Attachment } from '@cc/protocol'
+import { dataRoot } from '../data-dir.js'
 
 /**
  * 첨부 저장 (D-1).
@@ -10,7 +9,8 @@ import type { Attachment } from '@cc/protocol'
  * 이미지를 base64로 DB에 넣지 않는다 — 대화 기록이 급격히 커지고 FTS 인덱스가 오염된다.
  * 파일로 저장하고 경로만 주고받는다. 세션을 지우면 함께 정리된다.
  */
-const ROOT = join(homedir(), DATA_DIR, 'attachments')
+// **함수다.** 모듈 로드 시점에 정하면 host가 데이터 폴더를 고정하기 전의 값이 박힌다
+const root = () => join(dataRoot(), 'attachments')
 
 const EXT: Record<string, string> = {
   'image/png': '.png',
@@ -25,7 +25,7 @@ export async function saveAttachment(
   mime: string,
   dataBase64: string,
 ): Promise<Attachment> {
-  const dir = join(ROOT, sessionId)
+  const dir = join(root(), sessionId)
   await mkdir(dir, { recursive: true })
   const ext = extname(name) || EXT[mime] || ''
   const file = join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`)
@@ -36,5 +36,5 @@ export async function saveAttachment(
 
 /** 세션 아카이브·삭제 시 함께 정리 */
 export async function clearAttachments(sessionId: string): Promise<void> {
-  await rm(join(ROOT, sessionId), { recursive: true, force: true })
+  await rm(join(root(), sessionId), { recursive: true, force: true })
 }

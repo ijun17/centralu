@@ -61,6 +61,8 @@ function defaultDbPath(): string {
   // 로그는 배너보다 먼저 나가지만, 이 한 줄이 없으면 폴더가 왜 사라졌는지 아무도 모른다
   if (migrateLegacyDataDir(legacy, dir)) console.error(`[agent-host] data folder moved: ${legacy} -> ${dir}`)
   mkdirSync(dir, { recursive: true })
+  // 첨부·오케스트레이터 홈·워크트리가 전부 이 아래로 오게 고정한다 (dev/prod가 갈린다)
+  process.env.CC_DATA_DIR = dir
   return join(dir, 'store.db')
 }
 

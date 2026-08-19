@@ -1,7 +1,6 @@
-import { DATA_DIR } from '@cc/protocol'
 import { mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { dataRoot } from '../data-dir.js'
 
 /**
  * 오케스트레이터의 작업 디렉토리.
@@ -22,7 +21,7 @@ import { join } from 'node:path'
  * 파일을 거치지 않으므로 아무도 도중에 바꿔 쓸 수 없다.
  */
 export function orchestratorHome(): string {
-  const dir = join(homedir(), DATA_DIR, 'orchestrator')
+  const dir = join(dataRoot(), 'orchestrator')
   mkdirSync(dir, { recursive: true })
   return dir
 }

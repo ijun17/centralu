@@ -1,7 +1,10 @@
 import { existsSync, renameSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { DATA_DIR } from '@cc/protocol'
 
 /**
- * 개명 전 데이터 폴더를 새 이름으로 옮긴다 (`~/.control-center` → `~/.centralu`).
+ * 개명 전 데이터 폴더를 새 이름으로 옮긴다 (`~/.control-center` → `~/.centralu`). (legacy-name)
  *
  * **DB를 열기 전에 딱 한 번 부른다.** 열고 나서 옮기면 열린 파일 핸들과 경로가 어긋난다.
  *
@@ -28,4 +31,18 @@ export function migrateLegacyDataDir(from: string, to: string): boolean {
     // (다른 파일시스템에 있거나 권한이 없는 경우. 조용히 죽는 것보다 낫다)
     return false
   }
+}
+
+/**
+ * 데이터 폴더의 뿌리 — 첨부·오케스트레이터 홈·워크트리가 전부 이 아래에 산다.
+ *
+ * **환경변수로 덮을 수 있게 둔 이유:** 그러지 않으면 테스트가 사용자의 진짜 홈에 쓴다.
+ * 실제로 겪었다 — `pnpm verify` 한 번에 `~/.centralu/orchestrator`가 생겼고, 그 빈 폴더가
+ * "새 폴더가 이미 있으면 손대지 않는다"는 안전장치에 걸려 **진짜 데이터의 이사를 막았다.**
+ * 조용히 막혔다는 것이 더 나쁘다.
+ *
+ * host는 기동할 때 이 값을 자기 데이터 폴더로 고정한다 (dev/prod가 갈린다).
+ */
+export function dataRoot(): string {
+  return process.env.CC_DATA_DIR || join(homedir(), DATA_DIR)
 }
