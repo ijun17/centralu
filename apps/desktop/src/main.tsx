@@ -24,7 +24,9 @@ function Starting() {
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-2 bg-void" data-testid="starting">
       <p className="text-[13px] text-ash">Starting the agent host…</p>
-      <p className="text-[11px] text-slate">On first run, macOS may ask for folder access.</p>
+      {/* Not "macOS may ask": it is the OS that asks, and on Linux nothing asks at all.
+          Naming one OS in a message every platform sees makes it read as a bug elsewhere. */}
+      <p className="text-[11px] text-slate">On first run, your system may ask for folder access.</p>
     </div>
   )
 }

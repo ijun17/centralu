@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { useRef, type CSSProperties, type ReactNode } from 'react'
 import { usePlatform } from '../app/PlatformProvider.jsx'
 import { useStore } from '../store/store.js'
 
@@ -16,10 +16,13 @@ import { useStore } from '../store/store.js'
 export function DragRegion({
   children,
   className,
+  style,
   testId,
 }: {
   children?: ReactNode
   className?: string
+  /** For lengths that are not ours to hardcode — e.g. the room the OS window controls need */
+  style?: CSSProperties
   testId?: string
 }) {
   const platform = usePlatform()
@@ -29,6 +32,7 @@ export function DragRegion({
   return (
     <div
       className={className}
+      style={style}
       data-testid={testId}
       // 속성도 함께 둔다 — 네이티브 경로가 먼저 잡아주면 그게 더 매끄럽다
       data-tauri-drag-region

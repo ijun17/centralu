@@ -182,6 +182,17 @@ export type PlatformCapabilities = {
   globalShortcuts: boolean
   processSupervision: boolean
   openInIde: boolean
+  /**
+   * How many px the OS window controls occupy at the left edge of our own top bar.
+   *
+   * macOS puts the traffic lights *inside* the overlay title bar, so our bar has to
+   * leave a hole for them; other desktops draw their decorations in a separate strip
+   * and the bar owns the full width. This used to be a hardcoded `pl-[86px]` in the
+   * header, which is the exact shape of leak this package exists to prevent: the number
+   * is a fact about the window manager, not about the design. Asking for a width rather
+   * than an OS name keeps ui free of platform checks.
+   */
+  windowControlsInset: number
 }
 
 /**

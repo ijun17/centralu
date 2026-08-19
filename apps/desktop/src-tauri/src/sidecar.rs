@@ -307,12 +307,26 @@ fn host_command(bundled: Option<&Path>) -> Result<(String, Vec<String>), String>
 fn node_missing_message(looked: &[String]) -> String {
     format!(
         "Node.js를 찾지 못했습니다. Centralu는 Node {MIN_NODE_MAJOR} 이상이 필요합니다.\n\
-         터미널에서 `node --version`으로 확인하고, 없으면 `brew install node` 또는 \
+         터미널에서 `node --version`으로 확인하고, 없으면 {INSTALL_NODE_HINT} 또는 \
          https://nodejs.org 에서 설치한 뒤 앱을 다시 시작하세요.\n\
          찾아본 곳: {}",
         looked.join(", ")
     )
 }
+
+/// Told to someone who has no Node at all, so it has to name a command they can actually
+/// run. `brew` was hardcoded, which on Linux points at a package manager that is not
+/// there — the one message whose whole job is to unblock a stuck user would have sent
+/// them somewhere else.
+#[cfg(target_os = "macos")]
+const INSTALL_NODE_HINT: &str = "`brew install node`";
+#[cfg(not(target_os = "macos"))]
+const INSTALL_NODE_HINT: &str = "배포판의 패키지 관리자(예: `apt install nodejs`)";
+
+#[cfg(target_os = "macos")]
+const UPGRADE_NODE_HINT: &str = "`brew upgrade node`";
+#[cfg(not(target_os = "macos"))]
+const UPGRADE_NODE_HINT: &str = "배포판의 패키지 관리자";
 
 /// host 번들의 esbuild target이 node22다 — 그 아래에서는 문법부터 깨진다.
 const MIN_NODE_MAJOR: u32 = 22;
@@ -492,7 +506,7 @@ fn check_node_version(path: &str) -> Result<String, String> {
     if major < MIN_NODE_MAJOR {
         return Err(format!(
             "Node {MIN_NODE_MAJOR} 이상이 필요한데 {path}는 {}입니다.\n\
-             `brew upgrade node` 또는 nvm·mise로 {MIN_NODE_MAJOR} 이상을 켠 뒤 앱을 다시 시작하세요.",
+             {UPGRADE_NODE_HINT} 또는 nvm·mise로 {MIN_NODE_MAJOR} 이상을 켠 뒤 앱을 다시 시작하세요.",
             raw.trim()
         ));
     }

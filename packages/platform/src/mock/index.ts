@@ -60,6 +60,9 @@ export class MockPlatform implements Platform {
     globalShortcuts: false,
     processSupervision: false,
     openInIde: true,
+    // A browser has no window controls to leave room for, and E2E runs against this
+    // mock — so the header it measures starts at the window edge.
+    windowControlsInset: 0,
   }
 
   /** 테스트가 이벤트를 주입하는 통로 */

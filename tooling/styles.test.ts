@@ -280,3 +280,27 @@ describe('Linux 번들 설정', () => {
     }
   })
 })
+
+/**
+ * ui must not know which OS it is running on (docs/platform-abstraction.md).
+ *
+ * The point is not tidiness. ui is the one package with no platform implementation
+ * behind it, so an OS check there is invisible to every test we run — E2E drives the
+ * browser mock, and the mock has no OS. It would only show up as "the Linux build looks
+ * wrong" long after the fact. The header padding was the near miss: a hardcoded
+ * `pl-[86px]` that is a macOS traffic-light measurement, now asked for through the
+ * platform port instead.
+ */
+describe('ui는 OS를 모른다', () => {
+  const FORBIDDEN = [/process\.platform/, /navigator\.platform/, /navigator\.userAgentData/, /\bisMac\b/]
+  const src = join(ROOT, 'packages/ui/src')
+  const files = readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((f) => /\.tsx?$/.test(f))
+
+  it('플랫폼 분기가 하나도 없다', () => {
+    const offenders = files.filter((f) => {
+      const text = readFileSync(join(src, f), 'utf8')
+      return FORBIDDEN.some((re) => re.test(text))
+    })
+    expect(offenders, 'OS 차이는 @cc/platform 포트나 Rust 쪽에 둔다').toEqual([])
+  })
+})

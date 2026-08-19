@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
-import { PlatformProvider } from './PlatformProvider.jsx'
+import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { useStore } from '../store/store.js'
@@ -131,8 +131,14 @@ function TopBar() {
   const connection = useStore((s) => s.connection)
   const waiting = counts.approval + counts.error + counts.input
 
-  // macOS 신호등(닫기·최소화·전체화면)이 왼쪽 위를 차지하므로 pl로 그만큼 비운다.
-  // 타이틀바를 숨겼기 때문에 이 헤더가 유일한 드래그 손잡이다 —
+  // 왼쪽 위를 창 버튼이 차지하면 그만큼 비운다. 타이틀바를 숨겼기 때문에
+  // 이 헤더가 유일한 드래그 손잡이다 —
+  //
+  // How much to leave is a platform fact, so we ask instead of assuming. It was
+  // `pl-[86px]`, which is right on macOS (the traffic lights sit inside this bar) and
+  // wrong everywhere else: on desktops that draw their own decorations above us, the
+  // same padding is just a hole at the left edge with nothing in it.
+  const controlsInset = useCapability('windowControlsInset')
   /*
    * 상단 바.
    *
@@ -150,7 +156,8 @@ function TopBar() {
    */
   return (
     <DragRegion
-      className="flex h-9 shrink-0 items-center gap-4 border-b border-edge bg-pit pr-4 pl-[86px]"
+      className="flex h-9 shrink-0 items-center gap-4 border-b border-edge bg-pit pr-4"
+      style={{ paddingLeft: controlsInset }}
       testId="app-header"
     >
       <span

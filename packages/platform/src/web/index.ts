@@ -254,6 +254,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       globalShortcuts: false,
       processSupervision: false,
       openInIde: false,
+      // The browser draws no window controls over our page.
+      windowControlsInset: 0,
     },
     async dispose() {
       unsubscribeEndpoint?.()

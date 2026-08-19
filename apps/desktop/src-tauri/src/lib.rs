@@ -23,11 +23,41 @@ fn host_error(sup: State<'_, Supervisor>) -> Option<String> {
 #[tauri::command]
 fn set_badge(app: AppHandle, count: u32) {
     let Some(window) = app.get_webview_window("main") else { return };
-    let label = if count == 0 { None } else { Some(count.to_string()) };
-    if let Err(e) = window.set_badge_label(label) {
+    if let Err(e) = write_badge(&window, count) {
         eprintln!("[badge] {e}");
     }
 }
+
+#[cfg(target_os = "macos")]
+fn write_badge(window: &tauri::WebviewWindow, count: u32) -> tauri::Result<()> {
+    // The dock badge is a text bubble on macOS, so we hand it the number as a label.
+    window.set_badge_label(if count == 0 { None } else { Some(count.to_string()) })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn write_badge(window: &tauri::WebviewWindow, count: u32) -> tauri::Result<()> {
+    // `set_badge_label` is `#[cfg(target_os = "macos")]` inside tauri itself, so the
+    // macOS branch above is not merely wrong off macOS — it does not compile there.
+    // `set_badge_count` is the portable call.
+    //
+    // Be honest about what it buys us on Linux: it goes out over the Unity launcher
+    // D-Bus API, which only some desktops listen to (GNOME with dash-to-dock, KDE).
+    // Everywhere else it lands nowhere and there is nothing this process can do about
+    // it. That is why Linux must not depend on the badge to reach a person — the
+    // desktop notification in `notify()` and the urgency hint in `alert()` do that.
+    window.set_badge_count(if count == 0 { None } else { Some(i64::from(count)) })
+}
+
+/// The "open this with whatever the desktop uses" command.
+///
+/// This used to be hardcoded to `open`. Off macOS that is not a missing command but a
+/// *different* one: util-linux ships `/usr/bin/open` as an alias of `openvt`, which
+/// switches virtual consoles. So the fallback did not fail loudly, it did something
+/// unrelated. `xdg-open` is the freedesktop equivalent of macOS `open`.
+#[cfg(target_os = "macos")]
+const GENERIC_OPENER: &str = "open";
+#[cfg(not(target_os = "macos"))]
+const GENERIC_OPENER: &str = "xdg-open";
 
 /// 편집기에서 파일을 연다 (FR-4의 왕복 비용 절감).
 #[tauri::command]
@@ -41,11 +71,35 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
     if code.is_ok() {
         return Ok(());
     }
-    std::process::Command::new("open")
+    std::process::Command::new(GENERIC_OPENER)
         .arg(&path)
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("파일을 열지 못했습니다: {e}"))
+}
+
+/// How much room the OS window controls take on the left edge of our own top bar, in px.
+///
+/// macOS keeps the traffic lights *inside* our overlay title bar, so the bar has to
+/// leave a hole for them or the first thing we draw sits under the buttons. Other
+/// desktops draw their decorations in a separate strip above our bar, so the bar owns
+/// the full width and the same padding would just be dead space.
+///
+/// The UI is not allowed to ask which OS it is on (docs/platform-abstraction.md): it
+/// asks how much room to leave and we answer. That keeps the one number that has to
+/// agree with `traffic_lights::INSET_X` on this side of the boundary.
+#[tauri::command]
+fn window_controls_inset() -> u32 {
+    #[cfg(target_os = "macos")]
+    {
+        // INSET_X (19) + the three 12px buttons and the gaps macOS puts between them,
+        // plus breathing room before our first item.
+        86
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        0
+    }
 }
 
 /// 자리를 비운 사람을 부르는 두 가지 — 소리와 독 아이콘.
@@ -58,16 +112,16 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
 ///
 /// 소리와 독은 알림 권한도 코드 서명도 타지 않는다. 이 맥에는 서명 인증서가 0개이므로
 /// (`security find-identity` → 0 valid identities) 지금 사람에게 닿는 길은 여기뿐이다.
+///
+/// On Linux the ranking is the other way round. The banner path there is real — the
+/// notification plugin talks org.freedesktop.Notifications over D-Bus — while the badge
+/// only reaches Unity-style launchers. So Linux leans on the banner, and this function
+/// adds the two things a banner does not do: a sound, and an urgency hint on the window
+/// so the taskbar entry keeps asking after the banner has faded.
 #[tauri::command]
 fn alert(app: AppHandle, kind: String, sound: bool) {
     if sound {
-        // 소리를 구분하는 것은 취향이 아니라 기능이다 — 옆방에서도 무슨 일인지 알 수 있다.
-        play_sound(match kind.as_str() {
-            "error" => "Basso",     // macOS가 예부터 "잘못됐다"에 쓰는 소리
-            "done" => "Tink",       // 하나 끝났다 — 가볍게
-            "all_done" => "Glass",  // 다 끝났다
-            _ => "Submarine",       // 기다리는 중 (승인)
-        });
+        play_sound(&kind);
     }
     let Some(window) = app.get_webview_window("main") else { return };
     // 승인·오류는 사람이 와야 풀린다 → 올 때까지 튄다.
@@ -87,22 +141,92 @@ fn alert(app: AppHandle, kind: String, sound: bool) {
 /// `NSSound`가 더 가벼워 보이지만 재생이 비동기라 객체를 살려 둬야 하고, 그러려면
 /// 스레드를 넘나드는 보관소가 필요하다 (`Retained<NSSound>`는 Send가 아니다).
 /// 짧은 소리 하나에 그 무게를 들이는 대신 `afplay`에 맡긴다 — 알림은 드물게 울린다.
+///
+/// The argument is the alert *kind*, not a sound name. It used to be a macOS sound name
+/// picked by the caller, which meant the caller had to know what macOS calls its sounds
+/// — and there was no honest way for another OS to answer that question.
 #[cfg(target_os = "macos")]
-fn play_sound(name: &str) {
+fn play_sound(kind: &str) {
+    // 소리를 구분하는 것은 취향이 아니라 기능이다 — 옆방에서도 무슨 일인지 알 수 있다.
+    let name = match kind {
+        "error" => "Basso",    // macOS가 예부터 "잘못됐다"에 쓰는 소리
+        "done" => "Tink",      // 하나 끝났다 — 가볍게
+        "all_done" => "Glass", // 다 끝났다
+        _ => "Submarine",      // 기다리는 중 (승인)
+    };
     let path = format!("/System/Library/Sounds/{name}.aiff");
-    match std::process::Command::new("/usr/bin/afplay").arg(&path).spawn() {
-        // 거두지 않으면 좀비가 쌓인다 — 소리 하나가 끝날 때까지만 기다린다
-        Ok(mut child) => {
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-        }
-        Err(e) => eprintln!("[alert] 소리를 내지 못했습니다 ({path}): {e}"),
+    if let Err(e) = spawn_and_reap("/usr/bin/afplay", &[&path]) {
+        eprintln!("[alert] 소리를 내지 못했습니다 ({path}): {e}");
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn play_sound(_name: &str) {}
+/// Same four meanings, spoken in freedesktop terms.
+///
+/// The names are XDG sound-theme event ids, not file paths, because the file layout is
+/// not portable across distributions but the event ids are (the sound theme spec is what
+/// every desktop implements). `canberra-gtk-play` resolves the id through the user's
+/// chosen theme and honours their event-sound setting; if it is not installed we fall
+/// back to playing the freedesktop theme file directly through PulseAudio/PipeWire.
+///
+/// If neither exists we say so once. A silent failure here is exactly the bug this whole
+/// alert path was written to avoid: the person who walked away never learns that the
+/// thing meant to call them back was never able to make a sound.
+///
+/// Known gap, stated rather than hidden: we only notice whether the player *started*,
+/// not whether it found the sound. If canberra is installed but the sound theme is not,
+/// it exits non-zero after we have already stopped looking, and the alert is silent.
+/// Waiting for the exit status would mean blocking the alert path on a subprocess,
+/// which is a worse trade for something that fires on every turn.
+#[cfg(target_os = "linux")]
+fn play_sound(kind: &str) {
+    let event = match kind {
+        "error" => "dialog-error",
+        "done" => "complete",
+        "all_done" => "complete",
+        _ => "message", // waiting on a human (approval)
+    };
+    if spawn_and_reap("canberra-gtk-play", &["-i", event]).is_ok() {
+        return;
+    }
+    let file = format!("/usr/share/sounds/freedesktop/stereo/{event}.oga");
+    if std::path::Path::new(&file).exists() && spawn_and_reap("paplay", &[&file]).is_ok() {
+        return;
+    }
+    warn_once(
+        "[alert] no way to play a sound: install libcanberra-gtk3 (canberra-gtk-play) \
+         or pulseaudio-utils (paplay). Notifications still go out; only the sound is missing.",
+    );
+}
+
+/// Deliberately silent, and deliberately not a compile error.
+///
+/// Windows is not supported yet (issue #14 covers Linux only). Leaving `play_sound`
+/// undefined for it would break the build before anyone got as far as finding out what
+/// else is missing, so this arm exists to keep the failure where it belongs.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn play_sound(_kind: &str) {}
+
+/// Spawns a fire-and-forget child and reaps it. `Err` means it could not start at all.
+///
+/// The reaping matters: without it every alert leaves a zombie behind, and alerts fire
+/// for the whole life of the app. The error is handed back rather than logged here
+/// because the caller knows what it was trying to play, and "could not play a sound"
+/// without the reason is the kind of log line nobody can act on.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn spawn_and_reap(program: &str, args: &[&str]) -> std::io::Result<()> {
+    let mut child = std::process::Command::new(program).args(args).spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// Says a thing once. Repeating it on every alert would itself become the noise.
+#[cfg(target_os = "linux")]
+fn warn_once(message: &str) {
+    static SAID: std::sync::Once = std::sync::Once::new();
+    SAID.call_once(|| eprintln!("{message}"));
+}
 
 /// 창을 앞으로 가져온다 (알림 클릭·전역 단축키에서 사용).
 #[tauri::command]
@@ -133,7 +257,8 @@ pub fn run() {
             set_badge,
             alert,
             open_in_ide,
-            focus_window
+            focus_window,
+            window_controls_inset
         ])
         .setup({
             let sup = supervisor.clone();

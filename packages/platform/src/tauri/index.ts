@@ -147,6 +147,13 @@ export async function pickDirectory(): Promise<string | null> {
 export async function createTauriPlatform(): Promise<Platform> {
   const { port, token } = await waitForHost()
 
+  // Ask the shell how much of our top bar the OS has already claimed. Only Rust knows
+  // (it is a build-time `cfg!`), and this is the one place allowed to know it — the
+  // number reaches ui as a width, never as an OS name.
+  // A failure here must not stop the app from starting: a wrong inset is a cosmetic
+  // problem, and blocking startup over one would turn it into a fatal one.
+  const windowControlsInset = await invoke<number>('window_controls_inset').catch(() => 0)
+
   // 수퍼바이저가 host를 되살리면 포트·토큰이 바뀐다 → 새 주소로 갈아타야 한다.
   // 이 구독이 없으면 사이드카가 크래시한 뒤 앱이 '연결 끊김'에 머문다 (L4-2 실측).
   const base = createWebPlatform({
@@ -170,6 +177,7 @@ export async function createTauriPlatform(): Promise<Platform> {
       globalShortcuts: true,
       processSupervision: true,
       openInIde: true,
+      windowControlsInset,
     },
   }
 }
