@@ -262,6 +262,16 @@ test('동시 세션 경고를 사이드바에 표시한다 (T5-6, FR-2)', async 
 test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'x')
+
+  /*
+   * 아직 턴이 끝나지 않았으면 값이 **없다** (context는 SessionInfo에도 DB에도 없어서
+   * 앱을 껐다 켜면 늘 이 상태다). '모름'과 '0%'는 다른 말이므로 다르게 보여야 한다 —
+   * 값이 없는데 0%로 그리면 "아직 하나도 안 썼다"는 거짓말이 된다.
+   */
+  await expect(page.getByTestId('context-gauge')).toContainText('—')
+  await emitEvent(page, 0, { type: 'context_update', used: 0, window: 200000, exactness: 'exact' })
+  await expect(page.getByTestId('context-gauge')).toContainText('0%')
+
   await emitEvent(page, 0, { type: 'context_update', used: 168000, window: 200000, exactness: 'exact' })
   await expect(page.getByTestId('context-gauge')).toContainText('84%')
 

@@ -234,16 +234,6 @@ export function SessionPane({
         {session.name}
       </h1>
 
-      {ctxPct !== null && (
-        <span
-          className={`readout ml-1 text-[11px] ${ctxPct >= 80 ? 'text-chalk' : 'text-slate'}`}
-          data-testid="context-gauge"
-          title={`Context ${session.context!.used.toLocaleString()} / ${session.context!.window.toLocaleString()} tokens`}
-        >
-          Context {ctxPct}%
-        </span>
-      )}
-
       {session.limit && (
         <span className="readout text-[11px] text-ash" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
@@ -505,6 +495,27 @@ export function SessionPane({
               ⑂ {session.worktree.branch}
             </span>
           )}
+          {/*
+            컨텍스트도 **쓰는 자리 옆**에 둔다. 대화 머리글에 있을 때는 화면 반대쪽
+            끝이라, 길게 쓰는 동안 정작 얼마나 남았는지가 눈에 안 들어왔다 (도그푸딩).
+
+            **모름과 0%를 구별한다.** `context`는 SessionInfo에도 DB에도 없어서
+            앱을 껐다 켜면 그 턴이 끝나기 전까지 값이 없다. 그때 0%처럼 보이면
+            "아직 하나도 안 썼다"는 거짓말이 된다 — 흐린 `—`는 모른다는 뜻이다.
+          */}
+          <span
+            className={`readout ml-auto shrink-0 text-[11px] ${
+              ctxPct === null ? 'text-slate/50' : ctxPct >= 80 ? 'text-chalk' : 'text-slate'
+            }`}
+            data-testid="context-gauge"
+            title={
+              session.context
+                ? `Context ${session.context.used.toLocaleString()} / ${session.context.window.toLocaleString()} tokens`
+                : 'Context unknown — this session has not finished a turn since the app started'
+            }
+          >
+            Context {ctxPct === null ? '—' : `${ctxPct}%`}
+          </span>
         </div>
       </form>
     </section>
