@@ -67,7 +67,7 @@ export function GridView() {
         스크롤하지 않는다. 아래에 더 있을지 모른다면 그건 목록이지 관제탑이 아니다 —
         화면에 있는 것이 전부여야 "한눈에 본다"가 성립한다.
       */
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-void p-2"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-deck p-2"
       data-testid="grid"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes(SESSION_MIME)) e.preventDefault()
@@ -121,7 +121,7 @@ export function GridView() {
                 칸이 여럿일 때 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다 —
                 그리드는 읽는 화면이 아니라 **보는 화면**이라 곁눈으로 잡혀야 한다.
               */
-              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge transition-opacity ${
+              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge bg-void transition-opacity ${
                 sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
               } ${dragging === id ? 'opacity-40' : ''} ${dropEdge(over, id)}`}
               data-testid={`grid-panel-${id}`}
