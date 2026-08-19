@@ -434,6 +434,50 @@ class ClaudeSession implements SessionHandle {
   }
 }
 
+/**
+ * 로그인 여부를 CLI에게 **직접 묻는다** (`claude auth status --json`).
+ *
+ * `claude --version`은 인증을 아예 보지 않는다 — 자격이 하나도 없어도 성공한다.
+ * 그래서 예전에는 "깔려 있음"이 곧 "로그인됨"이었고, 화면은 로그인 안 된 Claude를
+ * 언제나 초록 점으로 그렸다. 세션을 시작해 봐야 그제서야 실패했다 (#11).
+ *
+ * **왜 `claude -p`로 진짜 질의를 던지지 않는가:**
+ * detect()는 앱이 뜰 때마다, 새 세션 다이얼로그를 열 때마다 도는 길목이다.
+ * 여기서 추론을 한 번이라도 태우면 **앱을 켜는 행위 자체에 과금이 붙는다.**
+ * 인증 여부를 알자고 치를 값이 아니다.
+ *
+ * **왜 codex처럼 자격 파일 존재 확인으로 하지 않는가:**
+ * Claude Code의 자격은 한 곳에 있지 않다 — macOS 키체인, OAuth 토큰,
+ * `ANTHROPIC_API_KEY`, `apiKeyHelper`, Bedrock/Vertex 중 어디든 될 수 있고
+ * `CLAUDE_CONFIG_DIR`이 그 위치를 통째로 옮긴다. 그 목록을 우리가 흉내내면
+ * CLI가 한 번 바뀔 때마다 우리 판정이 틀린다. **CLI가 아는 것은 CLI에게 묻는다.**
+ *
+ * 실측(2.1.223): 네트워크를 타지 않는다 — 죽은 프록시를 물려도 답이 같고 0.2초에
+ * 끝난다. `CLAUDE_CONFIG_DIR`도, `ANTHROPIC_API_KEY`도 CLI가 알아서 반영한다.
+ *
+ * 로그인 안 됐을 때는 **종료 코드 1**이지만 stdout에는 JSON이 그대로 나온다.
+ * 그래서 던져진 오류에 붙어 온 stdout도 읽는다.
+ *
+ * 판단이 안 서면 **통과시킨다**(true). 틀린 "로그인 안 됨"은 멀쩡한 것을 고치게
+ * 만들어서 지금 상태보다 나쁘다. 옛 CLI에는 `auth` 하위 명령이 없어서
+ * JSON 대신 오류 문구가 나오는데, 그건 "로그인 안 됨"이 아니라 "모름"이다.
+ */
+async function claudeLoggedIn(bin: string): Promise<boolean> {
+  let out = ''
+  try {
+    out = (await exec(bin, ['auth', 'status', '--json'], { timeout: 5000 })).stdout
+  } catch (e) {
+    // 종료 코드 1(=로그인 안 됨)이어도 stdout의 JSON은 믿을 수 있다
+    out = typeof (e as { stdout?: unknown }).stdout === 'string' ? (e as { stdout: string }).stdout : ''
+  }
+  try {
+    const flag = (JSON.parse(out) as { loggedIn?: unknown }).loggedIn
+    return typeof flag === 'boolean' ? flag : true
+  } catch {
+    return true // JSON이 아니면 이 CLI는 auth status를 모르는 것이다 — 모르면 통과
+  }
+}
+
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
   /**
@@ -457,7 +501,14 @@ export class ClaudeAdapter implements AgentAdapter {
     try {
       const { stdout } = await exec(path ?? 'claude', ['--version'], { timeout: 5000 })
       // 어디에 설치된 것을 쓰는지 보여준다 — 여러 버전이 깔린 환경에서 혼란을 줄인다
-      return { tool: 'claude', installed: true, loggedIn: true, detail: `${stdout.trim()} · ${path ?? 'PATH'}` }
+      const version = `${stdout.trim()} · ${path ?? 'PATH'}`
+      const loggedIn = await claudeLoggedIn(path ?? 'claude')
+      return {
+        tool: 'claude',
+        installed: true,
+        loggedIn,
+        detail: loggedIn ? version : `${version} · login required`,
+      }
     } catch {
       return {
         tool: 'claude',
