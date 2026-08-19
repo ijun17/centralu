@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { bridgePath } from './bridge-path.js'
 
 /** 다리로 붙는 우리 MCP 서버 이름 — 승인 예외가 이 이름으로 판정한다 */
-const ORCHESTRATOR_MCP_SERVER = 'control_center'
+const ORCHESTRATOR_MCP_SERVER = 'centralu'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -208,7 +208,7 @@ class CodexSession implements SessionHandle {
     /*
      * **우리 도구는 우리가 보증한다** (Claude 쪽 canUseTool과 같은 규칙).
      *
-     * control_center 도구는 이 앱이 관리하는 세션 밖으로 나갈 수 없고, 진짜 위험한 일 —
+     * centralu 도구는 이 앱이 관리하는 세션 밖으로 나갈 수 없고, 진짜 위험한 일 —
      * 대상 세션이 무엇을 실행하는가 — 은 그 세션의 권한이 그대로 가른다.
      * 여기서 또 물으면 승인이 두 겹이 되고 "한 창에서 지시한다"가 무너진다.
      *

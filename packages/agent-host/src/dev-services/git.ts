@@ -254,7 +254,7 @@ function cleanGitError(e: unknown): string {
  * **원본 디렉토리에서 직접 작업하는 것이 기본이다.** 워크트리는 원하는 사람만 켜는 격리 수단이고,
  * 여기 있는 함수들은 그 체크박스 하나를 위해 존재한다.
  *
- * 위치는 **저장소 밖**이다 (`~/.control-center/worktrees/…`). 저장소 안에 두면 `.gitignore`에
+ * 위치는 **저장소 밖**이다 (`~/.centralu/worktrees/…`). 저장소 안에 두면 `.gitignore`에
  * 줄을 넣어야 하고 — 사용자 파일을 우리가 고치는 것이다 — 안 넣으면 `git status`가 지저분해진다.
  */
 

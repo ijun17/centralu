@@ -117,7 +117,7 @@ export class SessionManager {
     private endpoint?: () => { url: string; token: string } | null,
     /**
      * 워크트리를 만들 뿌리. **데이터 폴더 옆에 둔다** — 그래야 dev와 배포 앱이 자연히 갈리고
-     * (`~/.control-center-dev` vs `~/.control-center`), 테스트는 임시 디렉토리를 넣어
+     * (`~/.centralu-dev` vs `~/.centralu`), 테스트는 임시 디렉토리를 넣어
      * 사용자 홈을 건드리지 않는다.
      */
     private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),

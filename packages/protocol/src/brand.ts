@@ -37,11 +37,19 @@ export const CLIENT_INFO = { name: APP_SLUG, title: APP_NAME, version: APP_VERSI
 /**
  * 데이터 폴더 이름.
  *
- * **앱 이름을 바꿔도 이것만은 그대로 둔다.** 여기에 이미 사용자의 대화 기록이 들어 있고
- * (`store.db`), 폴더 이름을 바꾸는 순간 그 기록이 통째로 안 보이게 된다. 마이그레이션을
- * 붙일 만한 이득이 없다 — 사용자가 이 경로를 볼 일은 로그를 첨부할 때뿐이다.
+ * 사용자가 이 경로를 보는 자리는 둘이다 — 버그 신고에 `host.log`를 붙일 때, 그리고
+ * 워크트리 경로를 볼 때. 앱 이름과 다르면 그 순간 "이게 뭐지"가 된다.
  */
-export const DATA_DIR = '.control-center'
+export const DATA_DIR = '.centralu'
 
 /** dev로 띄운 host의 데이터 폴더 — 배포 앱과 섞이지 않게 갈라 둔다 */
-export const DATA_DIR_DEV = '.control-center-dev'
+export const DATA_DIR_DEV = '.centralu-dev'
+
+/**
+ * 개명 전 폴더 이름.
+ *
+ * **지우지 못한다.** 여기에 사용자의 대화 기록이 들어 있고, 새 폴더가 아직 없다면
+ * 이것이 유일한 사본이다. host가 DB를 열기 전에 한 번 옮겨준다
+ * (`packages/agent-host/src/main.ts`).
+ */
+export const DATA_DIR_LEGACY = { prod: '.control-center', dev: '.control-center-dev' } as const // legacy-name

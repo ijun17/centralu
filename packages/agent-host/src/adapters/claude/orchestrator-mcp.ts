@@ -21,7 +21,13 @@ import {
  */
 
 /** 서버 이름. 승인 예외가 이 이름으로 판정하므로 한 곳에서만 정한다 */
-export const ORCHESTRATOR_MCP_NAME = 'control_center'
+/**
+ * 오케스트레이터에게 붙는 MCP 서버 이름.
+ *
+ * **화면에 보이는 이름이다** — 도구 호출 카드에 `mcp__centralu__list_sessions`처럼 뜬다.
+ * 그래서 앱 이름과 어긋나면 사용자가 "이건 뭐지"를 겪는다.
+ */
+export const ORCHESTRATOR_MCP_NAME = 'centralu'
 
 export function orchestratorMcp(tools: OrchestratorTools) {
   return createSdkMcpServer({

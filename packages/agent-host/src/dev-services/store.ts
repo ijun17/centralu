@@ -39,7 +39,7 @@ export class Store {
    * 마이그레이션 러너 (E-0).
    *
    * 스키마 파일은 `CREATE TABLE IF NOT EXISTS`뿐이라 **기존 DB에는 컬럼·인덱스 추가가
-   * 조용히 무시된다.** 이미 실사용 데이터가 쌓인 파일이 있으므로(~/.control-center/store.db)
+   * 조용히 무시된다.** 이미 실사용 데이터가 쌓인 파일이 있으므로(~/.centralu/store.db)
    * user_version을 보고 순차 적용한다.
    */
   private migrate(): void {
@@ -158,7 +158,7 @@ export class Store {
            * 컬럼으로 두면 "안 올라간 세션"을 0과 NULL 중 무엇으로 볼지가 계속 애매해진다.
            */
           this.db.exec(`
-            CREATE TABLE IF NOT EXISTS control_center (
+            CREATE TABLE IF NOT EXISTS grid_panels (
               session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
               position   INTEGER NOT NULL
             )
@@ -257,6 +257,30 @@ export class Store {
           if (!cols.some((c) => c.name === 'worktree_path')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_path TEXT`)
             this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_branch TEXT`)
+          }
+        },
+      },
+      {
+        to: 13,
+        run: () => {
+          /*
+           * 개명 마무리: 옛 이름의 테이블에 남은 그리드 배치를 `grid_panels`로 옮긴다. (legacy-name)
+           *
+           * **`ALTER TABLE ... RENAME TO`로 하면 안 된다.** `schema.sql`이 실행될 때마다
+           * `user_version`을 1로 되돌리므로 이 목록은 **매번 처음부터 다시 돈다** — 그래서
+           * 9번이 먼저 빈 `grid_panels`를 만들어 놓고, 여기서 "이미 있네" 하고 건너뛰게 된다.
+           * 그러면 사용자가 올려둔 배치가 옛 테이블에 고아로 남는다 (테스트가 잡은 실제 결함).
+           *
+           * 그래서 옮기고 지운다. 두 번째 실행부터는 옛 테이블이 없으므로 아무 일도 안 한다.
+           */
+          const has = (name: string) =>
+            this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`).get(name) !== undefined
+          if (has('control_center')) { // legacy-name
+            this.db.exec(
+              `INSERT OR IGNORE INTO grid_panels (session_id, position)
+               SELECT session_id, position FROM control_center`, // legacy-name
+            )
+            this.db.exec(`DROP TABLE control_center`) // legacy-name
           }
         },
       },
@@ -383,7 +407,7 @@ export class Store {
   /** 그리드 배치 — 올려둔 순서대로 */
   listGridView(): string[] {
     return (
-      this.db.prepare(`SELECT session_id FROM control_center ORDER BY position`).all() as {
+      this.db.prepare(`SELECT session_id FROM grid_panels ORDER BY position`).all() as {
         session_id: string
       }[]
     ).map((r) => r.session_id)
@@ -396,8 +420,8 @@ export class Store {
    * 목록이 짧고(사람이 보는 화면이다) 한 트랜잭션이라 중간 상태가 보이지 않는다.
    */
   setGridView(sessionIds: readonly string[]): void {
-    const del = this.db.prepare(`DELETE FROM control_center`)
-    const ins = this.db.prepare(`INSERT INTO control_center (session_id, position) VALUES (?, ?)`)
+    const del = this.db.prepare(`DELETE FROM grid_panels`)
+    const ins = this.db.prepare(`INSERT INTO grid_panels (session_id, position) VALUES (?, ?)`)
     this.db.transaction(() => {
       del.run()
       sessionIds.forEach((id, i) => ins.run(id, i))

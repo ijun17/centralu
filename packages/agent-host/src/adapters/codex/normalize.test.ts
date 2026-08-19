@@ -128,11 +128,11 @@ describe('상태·계기판', () => {
    */
   it('MCP 도구 호출은 서버·도구 이름을 보여준다', () => {
     const out = n('item/started', {
-      item: { type: 'mcpToolCall', id: 'm1', server: 'control_center', tool: 'list_sessions', status: 'inProgress' },
+      item: { type: 'mcpToolCall', id: 'm1', server: 'centralu', tool: 'list_sessions', status: 'inProgress' },
     })
     expect(out[0]).toMatchObject({
       type: 'tool_call',
-      summary: { tool: 'list_sessions', title: 'control_center: list_sessions' },
+      summary: { tool: 'list_sessions', title: 'centralu: list_sessions' },
     })
   })
 

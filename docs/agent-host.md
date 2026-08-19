@@ -85,7 +85,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서 "Tauri 4단계에서 
 - **store**: better-sqlite3 + `user_version` 마이그레이션 러너. 스키마 DDL은
   `protocol/src/schema/schema.sql` 한 곳에만 둔다. 번들에서는 산출물 옆에 복사돼 함께 나간다 (F-0).
 - **fs**: readdir lazy 목록 + `git check-ignore`(디렉토리 단위 1회) + 경로 탈출 차단.
-- **attachments**: 붙여넣은 이미지를 `~/.control-center/attachments/<sessionId>/`에 저장한다.
+- **attachments**: 붙여넣은 이미지를 `~/.centralu/attachments/<sessionId>/`에 저장한다.
 - `--dev-services` 플래그는 **존재하지 않는다** (문서가 앞서 나갔던 서술). 전부 항상 로드된다.
 
 ## 6. usage 파서

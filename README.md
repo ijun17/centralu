@@ -3,7 +3,7 @@
 > 여러 에이전트 코딩 도구(Claude Code, Codex CLI)를 한 창에서 실행·관찰·제어하는 경량 데스크톱 앱
 
 macOS · Apple Silicon 전용 · 베타. 대화 기록은 **당신의 맥에만** 저장된다
-(`~/.control-center/store.db`). 어디로도 전송되지 않는다.
+(`~/.centralu/store.db`). 어디로도 전송되지 않는다.
 
 ## 쓰려면 필요한 것
 

@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { DATA_DIR, DATA_DIR_DEV } from '@cc/protocol'
+import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
+import { migrateLegacyDataDir } from './data-dir.js'
 import type { ToolName } from '@cc/protocol'
 import { HostServer } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
@@ -56,9 +57,13 @@ function defaultDbPath(): string {
   // 번들된 산출물로 실행되면 배포, 소스에서 실행되면 dev (수퍼바이저가 알려준다)
   const isDev = process.env.CC_DEV === '1'
   const dir = join(homedir(), isDev ? DATA_DIR_DEV : DATA_DIR)
+  const legacy = join(homedir(), isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod)
+  // 로그는 배너보다 먼저 나가지만, 이 한 줄이 없으면 폴더가 왜 사라졌는지 아무도 모른다
+  if (migrateLegacyDataDir(legacy, dir)) console.error(`[agent-host] data folder moved: ${legacy} -> ${dir}`)
   mkdirSync(dir, { recursive: true })
   return join(dir, 'store.db')
 }
+
 
 /**
  * **로그를 가장 먼저 켠다.**

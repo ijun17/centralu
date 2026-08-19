@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { APP_ID, APP_NAME, APP_SLUG, APP_VERSION, DATA_DIR } from '../packages/protocol/src/brand.js'
+import { APP_ID, APP_NAME, APP_SLUG, APP_VERSION } from '../packages/protocol/src/brand.js'
+
+/** 옛 이름을 일부러 아는 줄에 다는 표식 — 이 파일이 그 줄을 건너뛴다 */
+const LEGACY_MARK = 'legacy-name'
 
 /**
  * 이름 계약.
@@ -83,12 +86,17 @@ describe('이름은 한 곳에서 정한다', () => {
         .split('\n')
         .map((line, i) => ({ line, i: i + 1 }))
         .filter(({ line }) => /control[ _-]?center/i.test(line))
-        // 데이터 폴더 경로와 그 설명은 남아 있어야 한다
-        .filter(({ line }) => !line.includes(DATA_DIR))
-        // DB 테이블 이름도 마찬가지다 — 저장된 것의 이름을 바꾸는 것은
-        // 사용자 데이터를 걸고 하는 일인데, 얻는 것은 화면에 안 보이는 식별자 하나다
-        .filter(({ line }) => !line.includes('control_center'))
-        // 저장소 폴더 이름은 그대로 둔다 (문서의 구조도에 경로로 등장한다)
+        /*
+         * 예외를 **목록으로 기르지 않는다.**
+         *
+         * 한때 데이터 폴더·DB 테이블·저장소 폴더가 여기 예외로 적혀 있었다. 그런 목록은
+         * 자라기만 하고, 자란 목록은 결국 "옛 이름을 찾는다"는 검사를 무력하게 만든다.
+         * 그래서 둘은 마이그레이션으로 없앴고(폴더는 rename, 테이블은 ALTER TABLE),
+         * 남은 자리 — 개명을 **수행하느라** 옛 이름을 알아야 하는 코드 — 는
+         * 그 줄에 `legacy-name` 표식을 달게 했다. 예외가 테스트가 아니라 현장에 적힌다.
+         */
+        .filter(({ line }) => !line.includes(LEGACY_MARK))
+        // 저장소 폴더 이름은 사용자의 로컬 디렉토리다 (문서의 구조도에 경로로 등장한다)
         .filter(({ line }) => line.trim() !== 'control-center/')
       if (stale.length > 0) offenders.push(`${f}:${stale.map((s) => s.i).join(',')}`)
     }

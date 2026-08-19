@@ -97,7 +97,7 @@ function uninstall() {
   rmSync(INSTALLED, { recursive: true, force: true })
   console.log(`지웠습니다: ${INSTALLED}`)
   console.log('패키지 자체를 지우려면: npm uninstall -g centralu')
-  console.log(`대화 기록은 그대로 남아 있습니다 (~/.control-center). 지우려면 직접 지우세요.`)
+  console.log(`대화 기록은 그대로 남아 있습니다 (~/.centralu). 지우려면 직접 지우세요.`)
 }
 
 /**

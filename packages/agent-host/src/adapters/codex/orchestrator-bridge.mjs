@@ -83,7 +83,7 @@ async function handle(msg) {
     return ok(id, {
       protocolVersion: params?.protocolVersion ?? '2025-06-18',
       capabilities: { tools: {} },
-      serverInfo: { name: 'control_center', version: '1' },
+      serverInfo: { name: 'centralu', version: '1' },
     })
   }
   if (method === 'notifications/initialized') return

@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(12)
+    expect(store.schemaVersion).toBe(13)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(12)
+    expect(new Store().schemaVersion).toBe(13)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(12)
+    expect(store.schemaVersion).toBe(13)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -405,5 +405,50 @@ describe('오케스트레이터는 하나뿐', () => {
     expect(s.orchestratorId()).toBe('b')
     // 'a'가 남아 있으면 여기서 둘 중 하나가 임의로 뽑힌다 — 그게 이 테스트의 요점이다
     expect(s.listSessions().filter((x) => x.projectId === null).length).toBe(2)
+  })
+})
+
+/**
+ * 개명의 마지막 조각: DB 테이블 이름.
+ *
+ * 데이터는 그대로여야 한다 — 그리드에 올려둔 세션이 개명 때문에 사라지면
+ * "왜 화면이 비었지"가 되고, 그건 이름 하나 맞추자고 치를 값이 아니다.
+ */
+describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // legacy-name
+  it('올려둔 그리드 배치가 그대로 살아 넘어온다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v13-'))
+    const file = join(dir, 'store.db')
+
+    // v12까지 온 DB를 손으로 만든다 (테이블 이름은 옛것)
+    const old = new Database(file)
+    old.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
+        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
+        archived INTEGER NOT NULL DEFAULT 0, last_read_seq INTEGER NOT NULL DEFAULT 0,
+        waiting_since INTEGER, created_at INTEGER NOT NULL, touched_paths TEXT NOT NULL DEFAULT '[]',
+        model TEXT, effort TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal',
+        imported_from TEXT, worktree_path TEXT, worktree_branch TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
+      CREATE TABLE control_center (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, -- legacy-name
+        position INTEGER NOT NULL);
+    `)
+    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
+    old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES ('s1','p1','claude','올려둔 세션',1)`).run()
+    old.prepare(`INSERT INTO control_center (session_id, position) VALUES ('s1', 0)`).run() // legacy-name
+    old.pragma('user_version = 12')
+    old.close()
+
+    const store = new Store(file)
+
+    expect(store.schemaVersion).toBe(13)
+    expect(store.listGridView()).toEqual(['s1'])
+    rmSync(dir, { recursive: true, force: true })
   })
 })

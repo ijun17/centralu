@@ -155,7 +155,7 @@ M0에서 프로토콜·타입 생성기·승인 오버라이드를 확인했다(
 
 - **D-1. 입력창 첨부** — 클립보드 이미지·드래그앤드롭·파일 선택, 썸네일 미리보기.
   - **저장 위치 결정**: 이미지는 base64로 messages.payload에 넣지 않는다 (DB 비대 + FTS 오염).
-    `~/.control-center/attachments/<sessionId>/`에 파일로 저장하고 payload에는 경로만.
+    `~/.centralu/attachments/<sessionId>/`에 파일로 저장하고 payload에는 경로만.
     아카이브된 세션 삭제 시 함께 정리.
 - **D-2. 어댑터 전달** — 프로젝트 내 파일은 @경로 멘션, 외부 파일·이미지는 도구 형식으로.
   capability(`attachments`)로 UI 반영.
@@ -164,7 +164,7 @@ M0에서 프로토콜·타입 생성기·승인 오버라이드를 확인했다(
 ## E. 검색·팔레트·설정 (FR-21, FR-17 완성, 알림 정책)
 
 - **E-0. 스키마 마이그레이션 러너 (신설 — E-1·B-7의 선행조건)** — 현재 store는 `CREATE TABLE IF NOT
-  EXISTS`만 실행해 **기존 DB에 컬럼·FTS 추가가 조용히 무시된다**. `~/.control-center/store.db`에는
+  EXISTS`만 실행해 **기존 DB에 컬럼·FTS 추가가 조용히 무시된다**. `~/.centralu/store.db`에는
   이미 실사용 데이터가 있다. `user_version` 비교 → 순차 마이그레이션 → FTS 백필.
   - 완료: v1 스키마 DB 파일을 열어 마이그레이션 후 기존 메시지가 검색되는 테스트
 - **E-1. 대화 전문 검색** — FTS5 (가용성은 재검증에서 확인 완료 — 이건 리스크가 아니다).
