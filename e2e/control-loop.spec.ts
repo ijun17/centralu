@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 
 /**
  * M1 Phase 5 완료 기준. mock platform(?mock)으로 UI를 구동한다.
@@ -23,6 +23,17 @@ async function newSession(page: Page, projectName: string, prompt: string) {
   await page.getByTestId('initial-prompt').fill(prompt)
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+}
+
+/**
+ * 모델·강도·권한·에이전트는 입력창 아래 **메뉴 안에** 있다 (셀렉터 네 개가 아니라).
+ * `scope`를 주면 그 칸의 메뉴다 — 그리드는 칸마다 입력창을 갖는다.
+ */
+async function pickSetting(page: Page, testId: string, scope?: Locator) {
+  const root = scope ?? page
+  await root.getByTestId('settings-open').click()
+  await expect(root.getByTestId('settings-menu')).toBeVisible()
+  await root.getByTestId(testId).click()
 }
 
 /** mock에 승인 요청을 주입 */
@@ -529,10 +540,10 @@ test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더
   expect(params).toMatchObject({ tool: 'claude', initialPrompt: '첫 지시' })
   await expect(page.getByTestId('msg-user')).toContainText('첫 지시')
 
-  // 모델·권한은 세션 헤더에서 바꾼다
-  await page.getByTestId('model-select').selectOption('haiku')
+  // 모델·권한은 입력창 아래 설정 메뉴에서 바꾼다
+  await pickSetting(page, 'settings-model-haiku')
   await expect(page.getByTestId('toast')).toContainText('haiku')
-  await page.getByTestId('preset-select').selectOption('safe')
+  await pickSetting(page, 'settings-preset-safe')
   const sessions = await page.evaluate(() => [...(window as any).__mock.sessions.values()])
   expect(sessions[0]).toMatchObject({ model: 'haiku', permissionPreset: 'safe' })
 })
@@ -2016,16 +2027,23 @@ test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
+  const menu = page.getByTestId('settings-menu')
+
   // 우리가 적은 목록이 아니라 host가 준 목록이다
-  await expect(page.getByTestId('model-select')).toContainText('Fable')
+  await page.getByTestId('settings-open').click()
+  await expect(menu).toContainText('Fable')
 
-  // 강도를 지원하지 않는 모델에는 셀렉터가 없다 — 아무 효과 없는 칸을 띄우면 거짓말이다
-  await page.getByTestId('model-select').selectOption('haiku')
-  await expect(page.getByTestId('effort-select')).toBeHidden()
+  // 강도를 지원하지 않는 모델에는 강도 묶음이 없다 — 아무 효과 없는 칸을 띄우면 거짓말이다
+  await menu.getByTestId('settings-model-haiku').click()
+  await page.getByTestId('settings-open').click()
+  // 메뉴가 실제로 열려 있는 것을 먼저 확인한다 — 안 열린 화면에서 "없다"는 아무 증명이 아니다
+  await expect(menu).toContainText('Haiku')
+  await expect(menu).not.toContainText('Effort')
 
-  await page.getByTestId('model-select').selectOption('fable')
-  await expect(page.getByTestId('effort-select')).toBeVisible()
-  await page.getByTestId('effort-select').selectOption('xhigh')
+  await menu.getByTestId('settings-model-fable').click()
+  await page.getByTestId('settings-open').click()
+  await expect(menu).toContainText('Effort')
+  await menu.getByTestId('settings-effort-xhigh').click()
 
   const settings = await page.evaluate(() => {
     const s = (window as any).__store.getState()
@@ -2040,9 +2058,9 @@ test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) =>
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  await page.getByTestId('model-select').selectOption('fable')
-  await page.getByTestId('effort-select').selectOption('max')
-  await page.getByTestId('model-select').selectOption('sonnet')
+  await pickSetting(page, 'settings-model-fable')
+  await pickSetting(page, 'settings-effort-max')
+  await pickSetting(page, 'settings-model-sonnet')
 
   // sonnet에는 max가 없다 — 남겨두면 지원하지 않는 조합이 조용히 유지된다
   const effort = await page.evaluate(() => {
@@ -2518,12 +2536,13 @@ test('그리드 칸과 포커스 뷰가 같은 설정을 본다', async ({ page 
   await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
 
   // 그리드 칸에서 모델을 바꾸고
-  await page.getByTestId(`grid-panel-${id}`).getByTestId('model-select').selectOption('opus')
+  await pickSetting(page, 'settings-model-opus', page.getByTestId(`grid-panel-${id}`))
 
   // 포커스 뷰로 돌아오면 그대로여야 한다 — 복사본이면 여기서 갈라진다
   // (나가는 방법은 '다른 것을 고르는 것'이다. 그리드 버튼은 토글이 아니다)
   await page.getByTestId(`session-row-${id}`).click()
-  await expect(page.getByTestId('model-select')).toHaveValue('opus')
+  // 지금 값은 메뉴를 열지 않아도 버튼에 적혀 있다
+  await expect(page.getByTestId('settings-open')).toContainText('Opus')
 })
 
 test('그리드에서 빼도 세션은 사이드바에 남는다', async ({ page }) => {
@@ -3043,10 +3062,14 @@ test('에이전트를 바꾸려면 대화가 끊긴다는 것을 확인해야 �
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  await expect(page.getByTestId('tool-select')).toHaveValue('claude')
+  // 메뉴 안에서도 지금 도구가 무엇인지 읽힌다
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-tool-claude')).toHaveAttribute('aria-checked', 'true')
+  // 같은 메뉴에 있어도 같은 무게가 아니다 — 무슨 일이 일어나는지 먼저 적혀 있다
+  await expect(page.getByTestId('settings-menu')).toContainText('starts a fresh conversation')
 
   // 고르기만 하면 확인 창이 뜬다 — 아직 바뀌지 않는다
-  await page.getByTestId('tool-select').selectOption('codex')
+  await page.getByTestId('settings-tool-codex').click()
   await expect(page.getByTestId('tool-switch-confirm')).toBeVisible()
   await expect(page.getByTestId('tool-switch-confirm')).toContainText('will not have this conversation')
   expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('claude')
@@ -3056,9 +3079,11 @@ test('에이전트를 바꾸려면 대화가 끊긴다는 것을 확인해야 �
   expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('claude')
 
   // 확인해야 바뀐다
-  await page.getByTestId('tool-select').selectOption('codex')
+  await pickSetting(page, 'settings-tool-codex')
   await page.getByTestId('tool-switch-confirm-btn').click()
-  await expect(page.getByTestId('tool-select')).toHaveValue('codex')
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-tool-codex')).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Escape')
   expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('codex')
   // 사이드바 표식도 따라온다
   await expect(page.getByTestId('tool-mark-codex')).toBeVisible()
@@ -3069,9 +3094,11 @@ test('에이전트를 바꾸면 이어갈 실마리를 끊는다 — 새 도구�
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  await page.getByTestId('tool-select').selectOption('codex')
+  await pickSetting(page, 'settings-tool-codex')
   await page.getByTestId('tool-switch-confirm-btn').click()
-  await expect(page.getByTestId('tool-select')).toHaveValue('codex')
+  await expect
+    .poll(async () => page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id))
+    .toBe('codex')
 
   // host가 externalId를 끊었는지 (codex에 Claude의 대화 id를 넘기면 엉뚱한 것을 잡는다)
   const ext = await page.evaluate(
