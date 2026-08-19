@@ -10,17 +10,19 @@ import { setDragPath } from './dragPath.js'
  * 파일 트리 (FR-5, C-2).
  * lazy 로드 — 열어본 디렉토리만 읽는다. 10k+ 저장소에서도 첫 렌더가 가벼워야 한다.
  *
- * **Ignored files are shown by asking, not by default** (issue #17). What `.gitignore`
- * hides is not a curiosity or two: it is `node_modules`, `dist`, `.next` — thousands of
- * rows that sort in among `src` and push the code you came for off the screen. So the
- * toggle stays, and the toggle is the answer to "always show them dimmed?": no, because
- * showing them always is the same as hiding the rest.
+ * **Ignored files are shown by default** (issue #17). They used to be hidden until you
+ * found this checkbox, and a hidden row does not look filtered — it looks like the file is
+ * not there. That is the wrong first impression for a tree whose job is "show me this
+ * repo", and the file you came for is often exactly the untracked one.
  *
- * The switch itself used to be component state, which is why the answer to "can't see
- * ignored files" was "you can, but it forgets" — leaving for the Git tab or collapsing the
- * panel put it back to off. It lives on the store now, and comes back with the rest of the
- * panel's layout. Whether it is on is a way of looking, so unlike expanded folders (#16,
- * which belong to a project) it is one setting for the whole app.
+ * The toggle stays, because of what `.gitignore` covers: not a curiosity or two but
+ * `node_modules`, `dist`, `.next` — thousands of rows that sort in among `src`. Anyone
+ * drowning in those turns it off once and it stays off, which is only true since the switch
+ * stopped being component state: leaving for the Git tab or collapsing the panel used to
+ * put it back, so "can't see ignored files" really meant "you can, but it forgets". It
+ * lives on the store now and comes back with the rest of the panel's layout. Whether it is
+ * on is a way of looking, so unlike expanded folders (#16, which belong to a project) it is
+ * one setting for the whole app.
  */
 export function FileTree({ projectId }: { projectId: string }) {
   const showIgnored = useStore((s) => s.showIgnored)

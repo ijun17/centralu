@@ -155,12 +155,16 @@ export type AppState = {
   /**
    * Whether the file tree shows what `.gitignore` hides (issue #17).
    *
-   * A toggle rather than "always show, dimmed", because of *what* is behind it: not a
-   * curiosity or two but `node_modules`, `dist`, `.next` — thousands of entries that sort
-   * in among `src` and push the code you came for off the screen. The tree is lazy so it
-   * would still open fast, but it would stop being a place you can find anything. The
-   * default stays off; ignored rows read in slate when shown, since "the repo does not
-   * track this" is background information, not urgency.
+   * **Defaults to on.** It used to default to off, and that was the wrong way round for a
+   * tree you open to *look at a file*: the file you want is often exactly the one git does
+   * not track — a `.env`, a build artefact you are checking, a local note. A tree that
+   * silently omits it does not read as filtered, it reads as "that file is not there", and
+   * the toggle that would explain it is one line of small text you were not looking at.
+   *
+   * Still a toggle rather than always-on, because of *what* is behind it: not a curiosity
+   * or two but `node_modules`, `dist`, `.next` — thousands of entries that sort in among
+   * `src`. Whoever finds that unusable turns it off once, and it stays off. Shown rows read
+   * in slate, since "the repo does not track this" is background information, not urgency.
    *
    * **Global, and remembered** — unlike expanded folders, which belong to their project.
    * That difference is the point: an open folder is a fact about a repo, while this is a
@@ -519,7 +523,7 @@ export const useStore = create<AppState>((set, get) => ({
   drafts: {},
   workingSince: {},
   expandedDirs: {},
-  showIgnored: false,
+  showIgnored: true,
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
@@ -633,7 +637,13 @@ export const useStore = create<AppState>((set, get) => ({
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
         // Whether the tree shows ignored files is a way of looking, so it comes back with
-        // the rest of the panel's layout rather than being re-chosen every launch (#17)
+        // the rest of the panel's layout rather than being re-chosen every launch (#17).
+        //
+        // The `typeof` guard is what lets the default move. Reading the field as a plain
+        // falsy check would make "never wrote one" indistinguishable from "turned it off",
+        // and flipping the default to on would then quietly turn it back on for the one
+        // person who had deliberately turned it off. An absent field takes the new default;
+        // a stored `false` is a decision and outranks it.
         const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
         if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
       }

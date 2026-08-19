@@ -779,7 +779,13 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-tree')).toBeVisible()
 
-  // 무시된 항목은 기본으로 숨는다
+  /*
+    무시된 항목도 **기본으로 보인다** (이슈 #17). 숨겨 두면 걸러진 것으로 읽히지 않고
+    없는 것으로 읽힌다 — 정작 열어보려던 파일이 추적되지 않는 파일인 경우가 잦다.
+    끄면 사라지고, 그 선택은 남는다 (아래 시험이 그 쪽을 지킨다).
+  */
+  await expect(page.getByTestId('dir-node_modules')).toBeVisible()
+  await page.getByTestId('toggle-ignored').uncheck()
   await expect(page.getByTestId('dir-node_modules')).toBeHidden()
   await page.getByTestId('toggle-ignored').check()
   await expect(page.getByTestId('dir-node_modules')).toBeVisible()
@@ -791,15 +797,18 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
 })
 
 /**
- * "Can't see ignored files" (issue #17) turned out to mean "you can, but it forgets."
- * The switch was component state, so leaving for the Git tab put it back to off — and the
- * only way to notice a toggle exists is to still be looking at it.
+ * "Can't see ignored files" (issue #17) turned out to mean two things at once, and both
+ * are pinned here.
  *
- * It stays a toggle rather than becoming "always show, dimmed": what is behind it is
- * node_modules and build output, thousands of rows that sort in among src. Showing them
- * always would hide everything else, which is the same complaint pointed the other way.
+ * The default is **on**: hiding them made the tree look like the file was not there rather
+ * than filtered out, and the untracked file is often the one you opened the tree to find.
+ *
+ * The switch stays, for node_modules and build output — thousands of rows that sort in
+ * among src. So the choice that a person actually makes here is *off*, and off is what has
+ * to survive. It used to be component state, so leaving for the Git tab put it straight
+ * back; the only way to notice a toggle exists is to still be looking at it.
  */
-test('showing ignored files is remembered — it is a way of looking, not a per-visit choice', async ({ page }) => {
+test('hiding ignored files is remembered — it is a way of looking, not a per-visit choice', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -810,18 +819,11 @@ test('showing ignored files is remembered — it is a way of looking, not a per-
   })
   await newSession(page, 'alpha', 'work')
   await page.getByTestId('evidence-tab-files').click()
-  await page.getByTestId('toggle-ignored').check()
-  await expect(page.getByTestId('dir-node_modules')).toBeVisible()
 
-  // The Git tab takes the tree off screen entirely — this is where it used to be forgotten
-  await page.getByTestId('evidence-tab-git').click()
-  await expect(page.getByTestId('evidence-git')).toBeVisible()
-  await page.getByTestId('evidence-tab-files').click()
-
+  // Shown without being asked for — and still ignored: slate says "the repo does not
+  // track this" without shouting it
   await expect(page.getByTestId('toggle-ignored')).toBeChecked()
   await expect(page.getByTestId('dir-node_modules')).toBeVisible()
-
-  // Still ignored, though — slate says "the repo does not track this" without shouting it
   const tone = await page
     .getByTestId('dir-node_modules')
     .locator('span:not(:has(svg))')
@@ -831,6 +833,23 @@ test('showing ignored files is remembered — it is a way of looking, not a per-
     .evaluate((el) => getComputedStyle(el).color)
   const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
   expect(rgb(tone)[0]!).toBeLessThan(rgb(dir)[0]!)
+
+  await page.getByTestId('toggle-ignored').uncheck()
+  await expect(page.getByTestId('dir-node_modules')).toBeHidden()
+
+  // The Git tab takes the tree off screen entirely — this is where it used to be forgotten
+  await page.getByTestId('evidence-tab-git').click()
+  await expect(page.getByTestId('evidence-git')).toBeVisible()
+  await page.getByTestId('evidence-tab-files').click()
+
+  await expect(page.getByTestId('toggle-ignored')).not.toBeChecked()
+  await expect(page.getByTestId('dir-node_modules')).toBeHidden()
+  // The tree is still there, so "hidden" is the filter and not an empty panel
+  await expect(page.getByTestId('dir-src')).toBeVisible()
+
+  // …and it is the stored choice, not just this component's memory
+  const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
+  expect(snap?.showIgnored).toBe(false)
 })
 
 test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ page }) => {

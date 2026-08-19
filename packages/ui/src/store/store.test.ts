@@ -33,7 +33,7 @@ beforeEach(() => {
     drafts: {},
     workingSince: {},
     expandedDirs: {},
-    showIgnored: false,
+    showIgnored: true,
     focusedSessionId: null,
     focusedProjectId: null,
     history: {},
@@ -299,19 +299,42 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
   /*
    * "무시된 파일을 볼 수 없다"의 실제 내용은 "볼 수는 있는데 매번 잊는다"였다 (이슈 #17).
    * 스위치가 부품에 있어서 깃 탭으로 나갔다 오면 꺼져 있었다.
+   *
+   * The direction that matters is now *off*, since on is the default (#17 again). Turning
+   * it off is the only version of this choice a person can make deliberately, so it is the
+   * one that has to survive a relaunch — and it has to survive the default too.
    */
-  it('무시된 파일 보기는 다음 실행에도 남는다 — 볼 방식은 사람의 것이다', async () => {
+  it('무시된 파일 숨기기는 다음 실행에도 남는다 — 볼 방식은 사람의 것이다', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('si-s1', sessionInfo('si-s1'))
     await useStore.getState().attach(mock)
     useStore.getState().focusSession('si-s1')
 
-    useStore.getState().setShowIgnored(true)
+    useStore.getState().setShowIgnored(false)
     await new Promise((r) => setTimeout(r, 0))
-    expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(true)
+    expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(false)
 
     // 앱을 다시 켠 셈 — 기본값으로 돌아간 스토어에 같은 스냅샷을 물린다
-    useStore.setState({ showIgnored: false })
+    useStore.setState({ showIgnored: true })
+    await useStore.getState().attach(mock)
+
+    expect(useStore.getState().showIgnored).toBe(false)
+  })
+
+  /*
+   * A stored `false` outranks the default; an *absent* field must not. The two are only
+   * distinguishable because the snapshot is read with a `typeof` check — read it as `??
+   * false` or `!!snap.showIgnored` instead and every older snapshot suddenly claims someone
+   * turned this off, so the default could never move again. That is what this pins.
+   */
+  it('스냅샷에 없던 설정은 기본값 그대로 둔다 — 안 고른 것과 끈 것은 다르다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('si-s2', sessionInfo('si-s2'))
+    // A snapshot from before this setting existed: it has layout, but no opinion on this
+    mock.workspaceSnapshot = { focusedSessionId: 'si-s2', panelOpen: true, panelTab: 'git' }
+
+    // 앱을 막 켠 셈 — 기본값(켜짐)에서 시작한다
+    useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
 
     expect(useStore.getState().showIgnored).toBe(true)
