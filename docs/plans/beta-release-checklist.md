@@ -62,9 +62,12 @@ hardened runtime도 함께 켜지므로 나중에 공증할 때의 전제조건�
 
 ### 1-2. 저장소·라이선스
 
-- [ ] 원격 저장소 생성 (지금 `git remote`가 비어 있어 릴리스 URL 자체가 없다)
-- [ ] LICENSE 추가 — 없으면 법적으로 "모든 권리 유보"라 남이 못 쓴다
-- [ ] 대화 기록이 **로컬에만** 저장된다는 사실 명시 (`~/.control-center/store.db`)
+- [ ] 원격 저장소 생성 (지금 `git remote`가 비어 있어 릴리스 URL 자체가 없다).
+      개인 계정 아래로 간다 — GitHub 약관상 사람용 무료 계정은 하나뿐이고,
+      브랜드가 필요해지면 그때 Organization으로 **이전**하면 별·이슈·URL이 따라간다
+- [x] LICENSE 추가 — MIT. 기여자 CLA는 `CONTRIBUTING.md`에 (나중에 회사용 유료
+      라이선스로 갈 길을 열어두려면 기여가 쌓이기 전인 지금이 유일한 시점이다)
+- [x] 대화 기록이 **로컬에만** 저장된다는 사실 명시 (`~/.control-center/store.db`) — README 머리말
 
 ## 2. 채널 — npm으로 준다 (실측으로 뒤집힌 결정)
 
@@ -132,7 +135,9 @@ npm이 GUI 앱 일반에 맞는 통로라는 말이 아니다. 이 앱에 한해
 
 ### 2-5. 할 일
 
-- [ ] 패키지 이름 — `grid`는 npm에 **이미 있다**(HTTP 200). 스코프(`@ijun17/…`)나 다른 이름으로
+- [x] 패키지 이름 — **`centralu`** (2026-08-19 실측: npm 404로 비어 있다).
+      옛 이름은 npm에 이미 임자가 있었고(HTTP 200), macOS 자체 기능 이름과도 겹쳤다.
+      GitHub 계정명 `centralu`는 이미 임자가 있으나 저장소는 개인 계정 아래로 가므로 무관하다
 - [ ] 아키텍처별 optional dependency 구조 (`@…/darwin-arm64`)
 - [ ] `bin` 실행 스크립트 — 번들 안 `.app`을 `open`으로 띄운다
 - [ ] `install` 서브커맨드 (`/Applications`에 복사, 되돌리는 `uninstall`도)
@@ -169,11 +174,14 @@ x64 프리빌드도 함께 넣고 `lipo`로 합쳐야 한다.
 
 ## 5. 배포 전 정리
 
-- [ ] 버전 세 곳 일치 (`tauri.conf.json`, `Cargo.toml`, `apps/desktop/package.json`)
+- [x] 버전 세 곳 일치 (`tauri.conf.json`, `Cargo.toml`, `apps/desktop/package.json`) — 0.1.0.
+      어긋나면 `tooling/brand.test.ts`가 잡는다
 - [ ] 베타면 `0.1.0-beta.1` — 기대치를 버전이 먼저 말하게 한다
-- [ ] README에 스크린샷·전제조건·설치법·알려진 한계
-- [ ] 자동 업데이트 검토. 베타는 수정을 자주 밀어야 하는데 지금은 **재설치가 유일한 경로**다
-      (updater도 서명 키가 필요하므로 1-1과 함께 처리)
+- [x] README에 전제조건·설치법·알려진 한계 / [ ] 스크린샷은 아직
+- [ ] 자동 업데이트 — **Tauri updater는 쓰지 않는다.** npm과 싸운다(앱이 node_modules 안에서
+      자기를 갈아치우면 npm이 아는 버전과 어긋난다) 대신 **레지스트리를 업데이트 채널로 쓴다**:
+      `registry.npmjs.org/centralu/latest`에 GET → 새 버전이면 인앱 배너 → `npm i -g centralu@latest`.
+      서명 키도 업데이트 서버도 필요 없으므로 §1-1과 묶을 이유가 없다
 - [ ] 버그 신고 창구 + **`~/.control-center/host.log`를 첨부해달라고 안내**
       (기동 배너에 빌드 커밋이 박혀 있어 어느 빌드인지 바로 갈린다)
 

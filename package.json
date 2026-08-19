@@ -25,7 +25,14 @@
     "app": "pnpm --filter @cc/desktop exec tauri build && open \"apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app\"",
     "app:open": "open \"apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app\"",
     "app:dev": "pnpm --filter @cc/desktop exec tauri dev",
-    "smoke:question": "node --import tsx packages/agent-host/scripts/smoke-question.mts"
+    "smoke:question": "node --import tsx packages/agent-host/scripts/smoke-question.mts",
+    "smoke:perm": "tsx packages/agent-host/scripts/smoke-perm.mts",
+    "smoke:usage": "tsx packages/agent-host/scripts/smoke-usage.mts",
+    "smoke:context": "tsx packages/agent-host/scripts/smoke-context.mts",
+    "smoke:models": "tsx packages/agent-host/scripts/smoke-models.mts",
+    "smoke:terminal": "tsx packages/agent-host/scripts/smoke-terminal.mts",
+    "smoke:orphan": "tsx packages/agent-host/scripts/smoke-orphan.mts",
+    "perf:idle": "node packages/agent-host/scripts/idle-perf.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
