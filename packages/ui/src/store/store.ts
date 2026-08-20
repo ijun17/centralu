@@ -28,11 +28,20 @@ import { isOnScreen } from '../app/onscreen.js'
  * 대화를 덮는 넓은 표면. null이면 아무것도 덮여 있지 않다.
  *  - viewer: 파일 한 개 (viewerPath)
  *  - git: 변경·기록·브랜치 전체. path를 주면 그 파일의 diff부터 편다
+ *
+ * `pick` counts opens instead of naming one. The wide view now outlives the click that made
+ * it — the change list beside it is no longer covered (#15), so it keeps being clicked while
+ * the view is up. That makes "open this file" an **event**, not a state: two clicks on the
+ * same row are two instructions, and the fields below are identical for both. Without a
+ * number that moves, the second one is indistinguishable from no click at all.
  */
 export type Overlay =
   | { kind: 'viewer' }
-  | { kind: 'git'; path?: string | null; sha?: string | null; sub?: 'changes' | 'history' | 'branches' }
+  | { kind: 'git'; path?: string | null; sha?: string | null; sub?: 'changes' | 'history' | 'branches'; pick: number }
   | null
+
+/** 앞서 연 것보다 하나 큰 번호. 깃 밖에서 오면 다시 1부터 — 그 사이 패널은 새로 붙는다 */
+const nextPick = (o: Overlay): number => (o?.kind === 'git' ? o.pick : 0) + 1
 
 /**
  * 증거 패널이 보여주는 것.
@@ -1072,15 +1081,16 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   openGit(path) {
-    set({ overlay: { kind: 'git', path: path ?? null } })
+    // 탭을 적어 보낸다 — 기록을 보던 중에 변경 파일을 누르면 변경으로 돌아와야 한다
+    set((s) => ({ overlay: { kind: 'git', path: path ?? null, sub: 'changes', pick: nextPick(s.overlay) } }))
   },
 
   openCommit(sha) {
-    set({ overlay: { kind: 'git', sha, sub: 'history' } })
+    set((s) => ({ overlay: { kind: 'git', sha, sub: 'history', pick: nextPick(s.overlay) } }))
   },
 
   openBranches() {
-    set({ overlay: { kind: 'git', sub: 'branches' } })
+    set((s) => ({ overlay: { kind: 'git', sub: 'branches', pick: nextPick(s.overlay) } }))
   },
 
   closeOverlay() {

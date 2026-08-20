@@ -9,19 +9,33 @@ type SubTab = 'changes' | 'history' | 'branches'
 /**
  * 깃 패널 (FR-4, B-2~B-6).
  * 승인 판단의 근거를 앱 안에서 만든다 — 이걸 보려고 IDE로 나가지 않아도 되게.
+ *
+ * Everything named `initial*` here used to mean exactly that: read once at mount, because
+ * the panel was born from the click that carried it. It is not, any more — the change list
+ * on the right stays visible while this is open (#15), so clicks keep arriving at a panel
+ * that is already mounted, and a value read once is a value ignored from then on. `pick`
+ * says which click these fields belong to, so each one lands.
  */
 export function GitPanel({
   projectId,
   initialPath,
   initialSha,
   initialSub,
+  pick,
 }: {
   projectId: string
   initialPath?: string | null
   initialSha?: string | null
   initialSub?: SubTab
+  pick: number
 }) {
   const [sub, setSub] = useState<SubTab>(initialSub ?? 'changes')
+
+  // 누른 것이 다른 탭에 있으면 그 탭으로 옮겨 앉는다 — 안 그러면 클릭이 조용히 사라진다
+  useEffect(() => {
+    setSub(initialSub ?? 'changes')
+  }, [pick, initialSub])
+
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="git-panel">
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1">
@@ -44,15 +58,23 @@ export function GitPanel({
           </button>
         ))}
       </nav>
-      {sub === 'changes' && <Changes projectId={projectId} initialPath={initialPath} />}
-      {sub === 'history' && <History projectId={projectId} initialSha={initialSha} />}
+      {sub === 'changes' && <Changes projectId={projectId} initialPath={initialPath} pick={pick} />}
+      {sub === 'history' && <History projectId={projectId} initialSha={initialSha} pick={pick} />}
       {sub === 'branches' && <Branches projectId={projectId} />}
     </section>
   )
 }
 
 /** B-2 변경 탭 + B-6 스테이징·커밋·푸시 */
-function Changes({ projectId, initialPath }: { projectId: string; initialPath?: string | null }) {
+function Changes({
+  projectId,
+  initialPath,
+  pick,
+}: {
+  projectId: string
+  initialPath?: string | null
+  pick: number
+}) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const openFile = useStore((s) => s.openFile)
@@ -101,13 +123,28 @@ function Changes({ projectId, initialPath }: { projectId: string; initialPath?: 
     [platform, projectId, setToast],
   )
 
-  // 우측 패널에서 파일을 눌러 들어온 경우 그 diff부터 펴 준다 —
-  // 넓은 화면에 와서 목록을 다시 찾게 하면 클릭 한 번이 헛돈다
+  /*
+   * 우측 패널에서 파일을 눌러 들어온 경우 그 diff부터 펴 준다 —
+   * 넓은 화면에 와서 목록을 다시 찾게 하면 클릭 한 번이 헛돈다
+   *
+   * The guard used to be `selected`: open the first one, then never again. That was true to
+   * the old shape, where this view covered the list it came from, so there was no second
+   * click to answer. Since the list stayed (#15) the second click is the *normal* one —
+   * you work down the changed files — and it did nothing at all: same name in the header,
+   * same diff underneath, as if the app had stopped responding.
+   *
+   * What it must not key off is `files`. Staging replaces that array, and following it would
+   * drag the diff back to whichever path the overlay was opened with, throwing away a file
+   * picked from the list in here. So: follow the click, not the list.
+   */
+  const opened = useRef(-1)
   useEffect(() => {
-    if (!initialPath || !files || selected) return
+    if (!initialPath || !files || opened.current === pick) return
     const hit = files.find((f) => f.path === initialPath)
-    if (hit) void openDiff(hit)
-  }, [initialPath, files, selected, openDiff])
+    if (!hit) return // 아직 목록에 없다면 다음 갱신 때 다시 본다
+    opened.current = pick
+    void openDiff(hit)
+  }, [pick, initialPath, files, openDiff])
 
   const staged = files?.filter((f) => f.staged) ?? []
   const unstaged = files?.filter((f) => !f.staged) ?? []
@@ -393,7 +430,7 @@ function DiffView({
 }
 
 /** B-3 기록 탭 — 그래프 선은 그리지 않는다 (부모 관계만) */
-function History({ projectId, initialSha }: { projectId: string; initialSha?: string | null }) {
+function History({ projectId, initialSha, pick }: { projectId: string; initialSha?: string | null; pick: number }) {
   const platform = usePlatform()
   const [commits, setCommits] = useState<GitCommit[] | null>(null)
   const [detail, setDetail] = useState<{ sha: string; files: string[]; diff: string } | null>(null)
@@ -402,15 +439,23 @@ function History({ projectId, initialSha }: { projectId: string; initialSha?: st
     void platform.git.log(projectId, 50).then(setCommits).catch(() => setCommits([]))
   }, [platform, projectId])
 
-  // 우측 패널의 기록에서 눌러 들어온 커밋은 바로 펼친다 —
-  // 넓은 화면에 와서 같은 커밋을 다시 찾게 하면 클릭 한 번이 헛돈다
+  /*
+   * 우측 패널의 기록에서 눌러 들어온 커밋은 바로 펼친다 —
+   * 넓은 화면에 와서 같은 커밋을 다시 찾게 하면 클릭 한 번이 헛돈다
+   *
+   * `detail` was the same once-only guard the changes tab had, and it fails the same way:
+   * the history list beside this one is still there to be clicked, and the second commit
+   * you clicked stayed unopened.
+   */
+  const opened = useRef(-1)
   useEffect(() => {
-    if (!initialSha || detail) return
+    if (!initialSha || opened.current === pick) return
+    opened.current = pick
     void platform.git
       .commitDetail(projectId, initialSha)
       .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff }))
       .catch(() => {})
-  }, [initialSha, detail, platform, projectId])
+  }, [pick, initialSha, platform, projectId])
 
   return (
     <div className="flex min-h-0 flex-1">

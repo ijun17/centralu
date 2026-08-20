@@ -68,7 +68,13 @@ export function Overlay() {
       {overlay.kind === 'viewer' ? (
         <CodeViewer projectId={projectId} />
       ) : (
-        <GitPanel projectId={projectId} initialPath={overlay.path} initialSha={overlay.sha} initialSub={overlay.sub} />
+        <GitPanel
+          projectId={projectId}
+          initialPath={overlay.path}
+          initialSha={overlay.sha}
+          initialSub={overlay.sub}
+          pick={overlay.pick}
+        />
       )}
     </div>
   )

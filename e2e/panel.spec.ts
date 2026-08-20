@@ -220,6 +220,105 @@ test('상한에 못 미치면 끊겼다는 말도 하지 않는다', async ({ pa
   await expect(page.getByTestId('evidence-history-cap')).toBeHidden()
 })
 
+/*
+ * ── 변경 목록 → diff ─────────────────────────────────────────────────
+ *
+ * The right-hand list stays visible while the wide view is open (#15), and that was the
+ * point of leaving it there: it is where the next file comes from. So a click on it has to
+ * land in the diff every time, not just the first time.
+ */
+
+test('두 번째 파일을 눌러도 diff가 따라온다 — 목록은 덮이지 않으니 계속 눌린다', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    const m = (window as never as { __mock: any }).__mock
+    m.gitState.files = [
+      { path: 'src/a.ts', staged: false, status: 'M' },
+      { path: 'src/b.ts', staged: false, status: 'M' },
+    ]
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+첫째 파일의 줄'
+    m.gitState.diffs['src/b.ts'] = '@@ -1 +1 @@\n+둘째 파일의 줄'
+  })
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-file-src/a.ts').click()
+  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+
+  // 여기가 무너져 있었다: 이름은 src/b.ts로 바뀌는데 아래는 여전히 첫째 파일의 diff였다
+  await page.getByTestId('evidence-file-src/b.ts').click()
+  await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
+  await expect(page.getByTestId('diff-view')).not.toContainText('첫째 파일의 줄')
+})
+
+test('넓은 목록에서 고른 파일을 목록 갱신이 되돌리지 않는다', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    const m = (window as never as { __mock: any }).__mock
+    m.gitState.files = [
+      { path: 'src/a.ts', staged: false, status: 'M' },
+      { path: 'src/b.ts', staged: false, status: 'M' },
+    ]
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+첫째 파일의 줄'
+    m.gitState.diffs['src/b.ts'] = '@@ -1 +1 @@\n+둘째 파일의 줄'
+  })
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-file-src/a.ts').click()
+  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+
+  // 넓은 화면 자신의 목록에서 고른 것 — 여기서 스테이지하면 목록을 다시 읽는다
+  await page.getByTestId('git-file-src/b.ts').click()
+  await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
+  await page.getByTestId('git-stage-all').click()
+  await expect(page.getByTestId('git-unstage-all')).toBeVisible()
+  // 목록이 새로 와도 처음 들고 온 경로로 끌려가면 안 된다
+  await expect(page.getByTestId('diff-view')).toContainText('둘째 파일의 줄')
+})
+
+test('같은 파일을 다시 눌러도 열린다 — 다른 탭에 가 있어도 돌아온다', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    const m = (window as never as { __mock: any }).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.gitState.diffs['src/a.ts'] = '@@ -1 +1 @@\n+첫째 파일의 줄'
+  })
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-file-src/a.ts').click()
+  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+
+  // 넓은 화면 안에서 기록을 잠깐 들여다본 뒤
+  await page.getByTestId('git-sub-history').click()
+  await expect(page.getByTestId('git-history')).toBeVisible()
+
+  // 같은 파일을 다시 누른다 — 경로가 같다고 해서 "아무 일도 없었다"가 되면 안 된다
+  await page.getByTestId('evidence-file-src/a.ts').click()
+  await expect(page.getByTestId('diff-view')).toContainText('첫째 파일의 줄')
+  await expect(page.getByTestId('git-history')).toBeHidden()
+})
+
+test('커밋도 두 번째부터 열린다 — 목록이 남아 있으니 계속 눌린다', async ({ page }) => {
+  await setup(page)
+  await seedCommits(page, [
+    { sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 },
+    { sha: 'bbb2222', subject: '두 번째', author: '나', daysAgo: 1 },
+  ])
+  await page.evaluate(() => {
+    const m = (window as never as { __mock: any }).__mock
+    m.gitState.diffs['aaa1111'] = '@@ -0,0 +1 @@\n+첫 커밋의 줄'
+    m.gitState.diffs['bbb2222'] = '@@ -0,0 +1 @@\n+두 번째의 줄'
+  })
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-tab-history').click()
+  await page.getByTestId('history-commit-aaa1111').click()
+  await expect(page.getByTestId('diff-view')).toContainText('첫 커밋의 줄')
+
+  await page.getByTestId('history-commit-bbb2222').click()
+  await expect(page.getByTestId('diff-view')).toContainText('두 번째의 줄')
+  await expect(page.getByTestId('diff-view')).not.toContainText('첫 커밋의 줄')
+})
+
 /** 저장소에 묻는 질문이므로 깃 탭과 같은 취급을 받는다 */
 test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', async ({ page }) => {
   await page.goto('/?mock=1')
