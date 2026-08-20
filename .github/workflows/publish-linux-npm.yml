@@ -55,7 +55,11 @@ jobs:
     # The gate that actually stops an accidental publish. Give this environment a required
     # reviewer in repo settings and hold NPM_TOKEN here, not at repo level, so the token is
     # unreachable from any other workflow.
-    environment: npm-publish
+    # The gate exists for publishing — a rehearsal is `npm pack`, needs no token,
+    # and gating it costs a human approval per attempt (three were spent on the
+    # first release's failing rehearsals before this line learned that).
+    # An expression that evaluates to '' means "no environment" to GitHub.
+    environment: ${{ inputs.dry_run == false && 'npm-publish' || '' }}
 
     steps:
       - uses: actions/checkout@v4

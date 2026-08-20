@@ -23,11 +23,21 @@ describe('CLI 탐색 경로 보강', () => {
        * config can't find a tool from a bare PATH, there is nothing to verify
        * on this machine — that is what the early return below is for.
        */
-      const probe = execFileSync(process.env.SHELL ?? '/bin/zsh', ['-ilc', 'command -v claude || command -v pnpm'], {
-        encoding: 'utf8',
-        timeout: 5000,
-        env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
-      }).trim()
+      let probe: string
+      try {
+        probe = execFileSync(process.env.SHELL ?? '/bin/zsh', ['-ilc', 'command -v claude || command -v pnpm'], {
+          encoding: 'utf8',
+          timeout: 5000,
+          env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+        }).trim()
+      } catch {
+        // `command -v` finding nothing exits 1, and execFileSync reports a
+        // nonzero exit as a throw, not an empty string. That answer — "the
+        // shell's own config knows no tool from a bare PATH" — is the same
+        // "nothing to verify here" the early return below handles. CI runners
+        // land here; dev machines with shell config don't.
+        return
+      }
       const toolPath = probe.split('\n').find((l) => l.startsWith('/'))
       if (!toolPath) return // 셸에서도 못 찾으면 검증할 것이 없다
       const toolName = toolPath.split('/').pop()!
