@@ -31,6 +31,7 @@ beforeEach(() => {
     sessions: {},
     chat: {},
     drafts: {},
+    stickToBottom: {},
     workingSince: {},
     expandedDirs: {},
     showIgnored: true,
@@ -419,5 +420,37 @@ describe('세션 이름 바꾸기 (이슈 #5)', () => {
 
     expect(useStore.getState().sessions['rn-s3']!.name).toBe('옛 이름')
     expect(useStore.getState().toast).toMatch(/empty/i)
+  })
+})
+
+describe('대화가 바닥에 서 있었는가 (이슈 #31)', () => {
+  it('아무도 스크롤하지 않은 세션은 바닥에 있는 것으로 본다 — 대화는 최신 줄에서 시작한다', () => {
+    expect(useStore.getState().stickToBottom['sb-s1']).toBeUndefined()
+  })
+
+  it('위로 올려 읽는 중이면 그 사실이 세션에 남는다', () => {
+    useStore.getState().setStickToBottom('sb-s1', false)
+    expect(useStore.getState().stickToBottom['sb-s1']).toBe(false)
+  })
+
+  /*
+   * 기본값(바닥)은 **기록하지 않는 것으로** 기록한다. 그래야 스쳐 간 세션마다
+   * 항목이 하나씩 쌓이지 않는다 — 쓰다 만 글이 빈 초안을 지우는 것과 같은 규칙이다.
+   */
+  it('바닥으로 돌아오면 항목 자체가 사라진다', () => {
+    useStore.getState().setStickToBottom('sb-s2', false)
+    useStore.getState().setStickToBottom('sb-s2', true)
+    expect('sb-s2' in useStore.getState().stickToBottom).toBe(false)
+  })
+
+  /*
+   * 스크롤 한 번에 이벤트가 수십 번 온다. 값이 그대로인데 새 객체를 만들면
+   * 이 map을 보는 모든 구독자가 스크롤하는 내내 다시 그려진다.
+   */
+  it('값이 그대로면 새 상태를 만들지 않는다 — 스크롤은 초당 수십 번 부른다', () => {
+    useStore.getState().setStickToBottom('sb-s3', false)
+    const before = useStore.getState().stickToBottom
+    useStore.getState().setStickToBottom('sb-s3', false)
+    expect(useStore.getState().stickToBottom).toBe(before)
   })
 })

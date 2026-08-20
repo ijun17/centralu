@@ -112,6 +112,29 @@ export type AppState = {
    */
   drafts: Record<string, Draft>
   /**
+   * Whether a conversation was left standing at its newest line — **per session** (#31).
+   *
+   * The flag used to be a ref inside the chat stream, so it was born `true` with every
+   * mount, and the grid mounts and unmounts panels as you move around: look at another
+   * session, come back, and the panel had decided for itself that you were at the bottom.
+   * Fourth time state that belongs to the work has been kept by the view instead (drafts,
+   * the elapsed count, expanded folders, this).
+   *
+   * Per session, and that is the opposite call from expanded folders (#16) on purpose. An
+   * open folder is a fact about *the code*, so every session on that repo wants it; where
+   * you are in a conversation is a fact about *that conversation*, and you read one at a
+   * time.
+   *
+   * **What is kept is "were you at the bottom", not the offset.** A pixel `scrollTop`
+   * restored into a virtualiser that has not measured its rows yet lands *near* the right
+   * place — which is the symptom #31 reported, not a cure for it. The bottom needs no
+   * measurements to be reachable: it is wherever the content ends.
+   *
+   * Absent means yes: a conversation nobody has scrolled starts at its newest line. Not
+   * persisted — where you had scrolled to is not worth surviving the app closing.
+   */
+  stickToBottom: Record<string, boolean>
+  /**
    * When the turn a session is currently running started — the instant, per session.
    *
    * The "Waiting for response" line used to take `Date.now()` on mount and count up from
@@ -287,6 +310,8 @@ export type AppState = {
   setNotifyPolicy(p: NotifyPolicy): void
   /** 아직 보내지 않은 것을 세션에 붙여 둔다 (비면 지운다) */
   setDraft(sessionId: string, draft: Draft): void
+  /** Remember whether the conversation was left at its newest line (#31) */
+  setStickToBottom(sessionId: string, sticking: boolean): void
   /** Open or close a folder in the file tree. The project owns it, not the session (#16) */
   toggleDir(projectId: string, path: string): void
   /** Show or hide what .gitignore hides (#17) */
@@ -521,6 +546,7 @@ export const useStore = create<AppState>((set, get) => ({
   sessions: {},
   chat: {},
   drafts: {},
+  stickToBottom: {},
   workingSince: {},
   expandedDirs: {},
   showIgnored: true,
@@ -1073,6 +1099,16 @@ export const useStore = create<AppState>((set, get) => ({
         return { drafts: rest }
       }
       return { drafts: { ...s.drafts, [sessionId]: draft } }
+    })
+  },
+  setStickToBottom(sessionId, sticking) {
+    set((s) => {
+      // Scrolling fires this by the dozen; only a change is worth a new state object
+      if ((s.stickToBottom[sessionId] ?? true) === sticking) return {}
+      // Sticking is the default, so it is recorded by *not* being recorded — that way the
+      // map only ever holds the sessions someone has actually scrolled away from
+      if (sticking) return { stickToBottom: omitKey(s.stickToBottom, sessionId) }
+      return { stickToBottom: { ...s.stickToBottom, [sessionId]: false } }
     })
   },
   toggleDir(projectId, path) {

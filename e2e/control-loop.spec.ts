@@ -4257,3 +4257,103 @@ test('그리드: 응답 중인 칸만 테두리가 돈다', async ({ page }) => 
   // 옆 칸까지 돌면 "무엇이 바쁜가"를 못 읽는다 — 신호가 아니라 장식이 된다
   await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
 })
+
+/**
+ * A conversation long enough that the panel scrolls and the virtualiser has real work to
+ * do, left where a reader would leave it — at the newest line.
+ *
+ * The pinning loop at the end is setup, not the behaviour under test. Dropping eighty
+ * turns into a view somebody is already looking at is not something a person can do, and
+ * the view is entitled to end up somewhere odd afterwards; the tests below are about what
+ * happens to a position you actually held.
+ */
+async function seedLongChat(page: Page, sessionId: string) {
+  await page.evaluate((sid: string) => {
+    const store = (window as any).__store
+    const items = Array.from({ length: 80 }, (_, i) => ({
+      kind: i % 2 ? 'assistant' : 'user',
+      seq: 1000 + i,
+      // Well past the virtualiser's 64px guess — that gap is where #31 lived
+      text: `line ${i} `.repeat(60),
+    }))
+    store.setState({ chat: { ...store.getState().chat, [sid]: items } })
+  }, sessionId)
+
+  const stream = page.getByTestId('chat-stream')
+  await expect
+    .poll(async () => {
+      await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
+      return distanceFromBottom(stream)
+    })
+    .toBeLessThanOrEqual(80)
+}
+
+/** How far the stream is from its own bottom, in px. `< BOTTOM_SLACK` means "at the bottom" */
+function distanceFromBottom(stream: Locator): Promise<number> {
+  return stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)
+}
+
+/**
+ * Scroll survives leaving a grid panel and coming back (issue #31).
+ *
+ * Fourth time this shape has bitten: draft text, expanded folders, the elapsed count, and
+ * now this. What is preserved is **"was I stuck to the bottom"**, not a pixel offset — a
+ * `scrollTop` restored into a virtualiser that has not measured its rows yet lands *near*
+ * the right place, which was the reported symptom rather than a cure for it.
+ *
+ * Note this one **passes against the old code on a quiet machine**, and fails on a busy
+ * one (measured 339px short, repeatedly, with the suite running in parallel). The gap it
+ * is about opens while rows are being measured, so how much of it you see depends on how
+ * many frames the measuring takes. So: a contract written down, not a net. The net for
+ * this pair is the test below, which fails on the old code every time.
+ */
+test('stuck to the bottom of a grid panel, still there after looking away (#31)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await seedLongChat(page, id)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
+  const stream = page.getByTestId(`grid-panel-${id}`).getByTestId('chat-stream')
+  await expect(stream).toBeVisible()
+  await expect.poll(() => distanceFromBottom(stream)).toBeLessThanOrEqual(80)
+
+  // Away to the focus view and back — the panel is torn down and built again
+  await page.getByTestId(`session-row-${id}`).click()
+  await page.getByTestId('grid-button').click()
+  await expect(stream).toBeVisible()
+
+  await expect.poll(() => distanceFromBottom(stream)).toBeLessThanOrEqual(80)
+})
+
+/**
+ * The other half: reading something further up is also a position worth keeping.
+ *
+ * We cannot promise the exact spot back — that is the offset problem above — but being
+ * yanked to the newest message is a decision the app makes *against* you, and it used to
+ * make it every single time, because the flag was born `true` with the component.
+ */
+test('scrolled up to read, a grid panel does not yank you back down (#31)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await seedLongChat(page, id)
+
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
+  const stream = page.getByTestId(`grid-panel-${id}`).getByTestId('chat-stream')
+  await expect(stream).toBeVisible()
+  await expect.poll(() => distanceFromBottom(stream)).toBeLessThanOrEqual(80)
+
+  // Scroll up by hand — the wheel, so it is a real user scroll and not an assignment
+  await stream.hover()
+  await page.mouse.wheel(0, -4000)
+  await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
+
+  await page.getByTestId(`session-row-${id}`).click()
+  await page.getByTestId('grid-button').click()
+  await expect(stream).toBeVisible()
+
+  // Give the follow logic every chance to drag us down before we believe it did not
+  await page.waitForTimeout(300)
+  expect(await distanceFromBottom(stream)).toBeGreaterThan(80)
+})

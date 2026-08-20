@@ -15,13 +15,22 @@ import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { appendPath, readDragPath } from '../files/dragPath.js'
-import { decideFollow, isAtBottom, shouldFollowAgain } from './scroll.js'
+import { decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
 /** 입력창이 커질 수 있는 최대 높이. CSS의 max-h-40과 같은 값이어야 한다 */
 const COMPOSER_MAX_H = 160
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
+
+/**
+ * 대화창이 열리자마자 바닥에 자리 잡는 데 쓸 프레임 수 (#31).
+ *
+ * 가상 스크롤은 줄을 재면서 총 높이를 몇 프레임에 걸쳐 늘린다. 그동안 계속 바닥을
+ * 다시 짚어야 한다 — 한 번만 짚으면 재기 전 높이에 멈춰 선다. 30프레임은 넉넉한
+ * 상한선일 뿐이고, 사람이 손을 대면 그 즉시 끝난다.
+ */
+const LANDING_FRAMES = 30
 
 /**
  * 포커스 뷰 — 고른 세션 하나를 전체 폭으로.
@@ -547,7 +556,16 @@ function ChatStream({
   working: boolean
   activity: SessionSummary['activity']
 }) {
+  /*
+   * "Was I at the bottom" is the session's fact, not this component's (issue #31).
+   *
+   * It stays a ref here because the follow logic reads it from a scroll handler and from
+   * effects — re-rendering on it would mean re-rendering on every scroll — but the ref is
+   * only a copy. The session holds the original, so a panel that is torn down and built
+   * again does not get to decide for itself where you were.
+   */
   const stickToBottom = useRef(true)
+  const setStickToBottom = useStore((s) => s.setStickToBottom)
 
   const virtualizer = useVirtualizer({
     count: chat.length,
@@ -610,6 +628,130 @@ function ChatStream({
     syncSticky()
   }
 
+  /*
+   * A different conversation is not always a new component.
+   *
+   * The grid throws panels away, but the focus view keeps this one and swaps `sessionId`
+   * underneath it — so without this, the refs would carry one conversation's position into
+   * the next one. Layout effect, so the flag is in place before the follow effect below
+   * reads it on the same commit, and so the cleanup runs while the scroll element is still
+   * attached.
+   */
+  const landed = useRef(false)
+  const landing = useRef(0)
+  const stillLanding = useRef(false)
+
+  /**
+   * The reader has taken the conversation over, so stop arriving at it (#31).
+   *
+   * Wheel, a hand on the scrollbar, a key: the three ways a person moves this list. It is
+   * their intent we are after, not their scroll — `scrollTop` alone cannot tell a wheel
+   * from the browser holding the view still while rows measure.
+   */
+  const endLanding = () => {
+    cancelAnimationFrame(landing.current)
+    stillLanding.current = false
+  }
+
+  useLayoutEffect(() => {
+    // Taken now and closed over: this component renders the scroll element and never
+    // replaces it, and refs are attached before layout effects run
+    const el = scrollRef.current
+    stickToBottom.current = useStore.getState().stickToBottom[sessionId] ?? true
+    lastTop.current = el?.scrollTop ?? 0
+    landed.current = false
+    return () => {
+      cancelAnimationFrame(landing.current)
+      /*
+       * Hand the fact back on the way out — not on every scroll event.
+       *
+       * Arriving is itself a scroll: the position is corrected over several frames while
+       * rows measure, and each correction fires an event from somewhere that is not yet
+       * the bottom. Letting those speak meant a panel could record "was not at the bottom"
+       * about a landing still in progress and then honour that on the way back, which
+       * reads as the app losing your place at random (it did, under load).
+       *
+       * Leaving mid-landing says nothing at all, for the same reason: we never got as far
+       * as a position the reader could have held. Whatever the session already believed
+       * stands.
+       *
+       * The element is read here rather than the follow flag because position is the fact.
+       * `decideFollow` lets go for reasons of its own when measurements shuffle content,
+       * and that is a decision about one frame, not about where the reader was.
+       */
+      if (el && !stillLanding.current) setStickToBottom(sessionId, isAtBottom(el))
+      stillLanding.current = false
+    }
+  }, [sessionId, scrollRef, setStickToBottom])
+
+  /*
+   * Arrive at the bottom, once, and keep going until the bottom stops moving.
+   *
+   * One `scrollTop = scrollHeight` cannot reach the bottom of a list nobody has measured:
+   * rows are 64px guesses until they render, so the number we aim at moves while we aim.
+   * The panel came to rest a few hundred pixels short of the end (measured: 339px on an
+   * 80-turn conversation) — "the scroll has moved up", which is how #31 was reported.
+   *
+   * The follow effect below cannot do this job. It has to tell "the content grew" from
+   * "the reader scrolled up", and it does that by watching `scrollTop` fall — which is
+   * also what happens when rows measure smaller than the guess and the browser clamps us.
+   * On a settling list that reads as a person scrolling, so it lets go, a few pixels
+   * short, permanently. Here we know nobody has touched anything yet.
+   *
+   * Nor can it be a matter of waiting for the height to hold still: measuring is deferred
+   * to a frame of its own and can arrive several frames late, so "two quiet frames" meant
+   * finishing before the list had grown at all — 339px short again, and only sometimes,
+   * which is worse than always.
+   *
+   * Waiting for `chat.length` matters — history arrives after the mount, and there is
+   * nothing to land on before it does.
+   *
+   * If the session was **not** at the bottom we do nothing at all. #31 deliberately does
+   * not promise the offset back: restoring one into an unmeasured virtualiser is what put
+   * you *near* your place rather than at it. Not moving is the honest version of that —
+   * you keep looking at the old messages instead of being dragged to the newest.
+   *
+   * It ends early two ways: the reader touches the conversation (`endLanding` on the
+   * scroller below), or something drags the view up and away from the end. Both are needed.
+   * The first catches the wheel before any number has moved; the second catches everything
+   * that scrolls without a gesture to announce it.
+   */
+  useEffect(() => {
+    if (landed.current || chat.length === 0) return
+    landed.current = true
+    if (!stickToBottom.current) return
+
+    let frames = 0
+    let mine = -1
+    stillLanding.current = true
+    const step = () => {
+      const el = scrollRef.current
+      if (!el) return
+      /*
+       * Pulled *up* and away from the end — that is somebody else, so stop.
+       *
+       * Only up counts. When rows above the viewport measure taller than the guess, Chrome
+       * moves `scrollTop` down the document by the same amount to hold the view still
+       * (scroll anchoring, +32px a frame here); reading any change as a person meant giving
+       * up on the third frame, hundreds of pixels short of the end.
+       */
+      if (mine >= 0 && el.scrollTop < mine - MOVED_UP_SLACK) {
+        stillLanding.current = false
+        return
+      }
+      el.scrollTop = el.scrollHeight
+      mine = el.scrollTop
+      lastTop.current = mine
+      if (++frames < LANDING_FRAMES) landing.current = requestAnimationFrame(step)
+      else stillLanding.current = false
+    }
+    landing.current = requestAnimationFrame(step)
+    // No cleanup here on purpose: this effect re-runs whenever the conversation grows, and
+    // cancelling from there threw the landing away whenever a message arrived first (it
+    // did, under load — the panel simply stayed at the top). The frame is cancelled where
+    // it actually stops being wanted: when the session changes or the panel goes.
+  }, [sessionId, chat.length, scrollRef])
+
   // 내용이 늘어나면 스크롤 없이도 기준이 달라진다
   useEffect(syncSticky, [syncSticky, chat.length])
 
@@ -633,6 +775,17 @@ function ChatStream({
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
+
+    /*
+     * The landing above is already pinning us every frame, so stay out of its way (#31).
+     *
+     * Two writers is worse than one here. This one aims once per size change and then asks
+     * `decideFollow` whether to let go, and on a list that is still measuring the answer
+     * comes back "the reader scrolled up" — which is how the panel ended up a few hundred
+     * pixels short of the end and stayed there. Until the landing is done, there is no
+     * reader to have scrolled.
+     */
+    if (stillLanding.current) return
 
     // 무엇을 할지는 scroll.ts가 정한다 — 여기서는 DOM만 만진다
     const decision = decideFollow({
@@ -662,6 +815,10 @@ function ChatStream({
     <div
       ref={scrollRef}
       onScroll={onScroll}
+      /* 사람이 대화에 손을 대면 '바닥으로 자리 잡기'는 거기서 끝난다 (#31) */
+      onWheel={endLanding}
+      onPointerDown={endLanding}
+      onKeyDown={endLanding}
       /* min-h-0: overflow-y-auto가 걸려 있어도 줄어들지 못하면 스스로 늘어난다 */
       className="min-h-0 flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
       data-testid="chat-stream"
