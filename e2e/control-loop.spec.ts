@@ -2026,6 +2026,10 @@ test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 �
 /** 사용량 (FR-9) — 구독 한도만 다룬다 */
 test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
+  // Focus the project so Usage resolves its tool honestly (project defaultTool),
+  // instead of leaning on the hardcoded 'claude' fallback #26 removes. These three
+  // passed on that fallback alone — adding a project never set focusedProjectId.
+  await page.getByTestId('project-header-alpha').click()
   await page.evaluate(() => {
     ;(window as any).__mock.usageState = {
       supported: true,
@@ -2058,6 +2062,10 @@ test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', 
 
 test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
+  // Focus the project so Usage resolves its tool honestly (project defaultTool),
+  // instead of leaning on the hardcoded 'claude' fallback #26 removes. These three
+  // passed on that fallback alone — adding a project never set focusedProjectId.
+  await page.getByTestId('project-header-alpha').click()
   await page.evaluate(() => {
     ;(window as any).__mock.usageState = {
       supported: true,
@@ -2077,6 +2085,10 @@ test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) =
 
 test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 않는다)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
+  // Focus the project so Usage resolves its tool honestly (project defaultTool),
+  // instead of leaning on the hardcoded 'claude' fallback #26 removes. These three
+  // passed on that fallback alone — adding a project never set focusedProjectId.
+  await page.getByTestId('project-header-alpha').click()
   await page.evaluate(() => {
     ;(window as any).__mock.usageState = {
       supported: false,
