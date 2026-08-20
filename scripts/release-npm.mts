@@ -420,8 +420,8 @@ function assertPinnedPlatformsPublished() {
   if (missing.length === 0) return
   const note =
     `${missing.join(', ')} @${APP_VERSION} is not on the registry yet.\n` +
-    '  Publish every platform package first (Linux comes from the publish-linux-npm workflow),\n' +
-    '  then re-run without --platform-only to publish the shim last.'
+    '  Publish every platform package first — that is what the platform jobs in the release\n' +
+    '  workflow do — then re-run with --shim-only to publish the shim last.'
   if (publish) fail(note)
   console.log(`\n\x1b[33m  경고: ${note}\x1b[0m`)
 }
