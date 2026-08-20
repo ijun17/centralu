@@ -876,6 +876,101 @@ test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ pa
   await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
 })
 
+/**
+ * Copying out of the viewer (issue #36).
+ *
+ * The viewer is virtualized, so only ~40 rows exist in the DOM at any moment, and each row
+ * carries its line number as a sibling span. A browser left to itself therefore copies a
+ * fragment of the selection with the numbers mixed in. These tests read the real clipboard,
+ * because the payload is the whole point — the on-screen highlight is not what was broken.
+ */
+async function openBigFile(page: Page, lines: number, opts: { truncated?: boolean } = {}) {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(
+    ({ n, truncated }) => {
+      const m = (window as any).__mock
+      m.fsState.entries[''] = [{ name: 'big.ts', path: 'big.ts', isDir: false, ignored: false }]
+      const text = Array.from({ length: n }, (_, i) => `const line${i} = ${i}`).join('\n')
+      m.fs.readFile = async () => ({ text, truncated, binary: false, bytes: text.length })
+    },
+    { n: lines, truncated: !!opts.truncated },
+  )
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('file-big.ts').click()
+  await expect(page.getByTestId('code-viewer')).toBeVisible()
+}
+
+const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText())
+
+test('뷰어 복사: ⌘A는 파일 전체를 준다 (#36)', async ({ page }) => {
+  await openBigFile(page, 3000)
+
+  // Nobody clicked anything: the code area takes focus when the file opens, which is what
+  // gives ⌘A somewhere to land.
+  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('Meta+c')
+
+  const copied = await clipboard(page)
+  expect(copied.split('\n')).toHaveLength(3000)
+  expect(copied.startsWith('const line0 = 0\nconst line1 = 1')).toBe(true)
+  expect(copied.endsWith('const line2999 = 2999')).toBe(true)
+})
+
+test('뷰어 복사: 안 그려진 줄까지 이어서 복사한다 (#36)', async ({ page }) => {
+  await openBigFile(page, 3000)
+
+  // Drag from line 3 and hold the pointer past the bottom edge so the list autoscrolls —
+  // the way anyone selects a long stretch. Row 3 is recycled almost immediately, and from
+  // there the browser walks the anchor out of the rows and into the app chrome: left alone,
+  // ⌘C copies "Files / esc back to chat / Open in IDE" and none of the file.
+  const start = (await page.locator('[data-testid="code-viewer"] .whitespace-pre').nth(3).boundingBox())!
+  const view = (await page.getByTestId('code-viewer').boundingBox())!
+  await page.mouse.move(start.x + 2, start.y + start.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(view.x + 60, view.y + view.height + 40, { steps: 5 })
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(100)
+    await page.mouse.move(view.x + 60 + (i % 2), view.y + view.height + 40)
+  }
+  await page.mouse.up()
+  await page.keyboard.press('Meta+c')
+
+  const rows = (await clipboard(page)).split('\n')
+  // Hundreds of the lines in between were never in the DOM to be copied from
+  expect(rows.length).toBeGreaterThan(300)
+  expect(rows[0]).toBe('const line3 = 3')
+  expect(rows[1]).toBe('const line4 = 4')
+  // …the run has no gaps, and no line number rode along with any of it
+  expect(rows.map((r, i) => r === `const line${i + 3} = ${i + 3}`).every(Boolean)).toBe(true)
+})
+
+test('뷰어 복사: 잘린 파일은 잘렸다고 말한다 (#36)', async ({ page }) => {
+  await openBigFile(page, 200, { truncated: true })
+
+  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('Meta+c')
+
+  // Select-all claims "this is the file". When it is not, the clipboard says the same thing
+  // the screen says rather than handing over half a file that looks whole.
+  const copied = await clipboard(page)
+  expect(copied).toContain('const line199 = 199')
+  expect(copied.endsWith('…file is large; showing part of it. Open in your IDE to see the rest.')).toBe(true)
+})
+
+test('뷰어 복사: 검색창의 ⌘A는 그대로다 (#36)', async ({ page }) => {
+  await openBigFile(page, 100)
+
+  // The handler is the code area's, not the window's — select-all inside a text field has
+  // to keep meaning select-all inside that field.
+  const search = page.getByTestId('viewer-search')
+  await search.fill('line1')
+  await search.press('Meta+a')
+  await search.type('line2')
+  await expect(search).toHaveValue('line2')
+})
+
 test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
