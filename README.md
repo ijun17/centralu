@@ -1,7 +1,6 @@
 # Centralu
 
-Run, watch and steer several agent coding tools — Claude Code, Codex CLI — from one
-window.
+Every Claude Code and Codex CLI session you have running, in one window.
 
 <!--
   SCREENSHOT NEEDED HERE.
@@ -16,45 +15,41 @@ window.
 
 Beta. See [where it runs](#where-it-runs).
 
-Your conversations stay on your machine. They are written to `~/.centralu/store.db` and
-sent nowhere. There is no account and no server to sign into.
+Your conversations stay on your machine, in `~/.centralu/store.db`. Nothing is sent
+anywhere. There's no account and nothing to sign into.
 
 [한국어 README](README.ko.md)
 
-## What it is
+## What you get
 
-Using agent coding tools in earnest means running several of them at once, across
-several projects. The problem that creates is not that you cannot watch them all —
-it is that the terminal tabs scatter, and you lose track of which one is blocked on
-you. Opening an IDE per project to see what changed costs more RAM and battery than
-the work is worth.
+Three agents running. One's blocked on a command it wants approved, one finished a
+while back and is sitting idle, one's still going. With terminal tabs, you find that
+out by clicking through all three.
 
-Centralu is a control tower for that. It does not write code. It shows you what the
-agents are doing, and picks out the one that needs you now.
+Centralu shows them together and points at the one that needs you.
 
-It keeps two kinds of waiting apart, because they cost you different amounts:
-**waiting for approval** means an agent is stuck and burning nothing until you answer;
-**waiting for input** means a turn finished and can sit there all afternoon. Collapsing
-those into one badge is how you end up checking everything and trusting nothing.
+- Approve a command or answer a question without leaving the window
+- Get a sound and a dock badge when something starts waiting, even with the app buried behind your editor
+- See "blocked on approval" apart from "finished, waiting on you" — the first is costing you time, the second can sit all afternoon
+- Search anything anyone ever said, including from before the last restart
+- Run an orchestrator session that reads your other sessions and hands them work
 
-The rule it is built on is **do not block, make visible**. Centralu does not take
-options away from you or from the agent, and does not impose a workflow — it tells you
-what is happening and what is waiting on your judgement. The scarce resource here is
-your attention, not tokens.
+It doesn't write code. And it won't approve anything on your behalf — the moment
+something needs approval is exactly the moment a person should be looking.
 
 ## What you need
 
-Centralu does not run agents itself; it drives the CLIs you already have. Without these
-it will open, and then be unable to start a session.
+Centralu drives the CLIs you already have rather than running agents itself. Without
+them it starts up fine and then has nothing to open a session with.
 
 | | |
 |---|---|
-| **Node 22 or newer** | the host sidecar runs on it. If it is missing or too old, the app says so at startup and names the version it needs |
+| **Node 22 or newer** | the host sidecar runs on it. If it's missing or too old, the app says so on startup and names the version it wants |
 | **`claude` CLI**, logged in | for Claude Code sessions — `npm i -g @anthropic-ai/claude-code` |
-| **`codex` CLI**, logged in | for Codex sessions — `npm i -g @openai/codex`. Skip it if you do not use Codex |
+| **`codex` CLI**, logged in | for Codex sessions — `npm i -g @openai/codex`. Skip it if you don't use Codex |
 
-Either CLI on its own is enough to start. The first-run screen checks for both, says
-which one it found, and prints the command to install or log into whatever is missing.
+Either one on its own is enough. The first-run screen tells you which it found and
+prints the command for whatever's missing.
 
 ## Install
 
@@ -65,41 +60,34 @@ centralu install    # add it to /Applications, so Spotlight and Launchpad find i
 centralu update     # when a newer version exists
 ```
 
-`centralu install` is a separate command on purpose: writing to someone's
-`/Applications` from a postinstall hook without being asked is not a thing this project
-does. `centralu uninstall` reverses it and leaves your conversations alone.
+`install` is its own command on purpose. Writing into someone's `/Applications` from a
+postinstall hook, uninvited, isn't something this project does. `centralu uninstall`
+puts it back and leaves your conversations alone.
 
-> **Why npm, and not a download.** macOS does not inspect an app and decide it looks
-> dangerous. It looks for a `com.apple.quarantine` tag, and that tag is attached by
-> whatever fetched the file — browsers attach it, npm does not. The same build of
-> Centralu, downloaded, opens with "Apple could not verify it is free of malware"; installed
-> through npm it just opens. That is measured, not assumed: the numbers and the method
-> are in [the beta release checklist §2](docs/plans/beta-release-checklist.md).
+> **Why npm instead of a download.** macOS never looks at an app and decides it seems
+> dangerous. It checks for a `com.apple.quarantine` tag, and whatever fetched the file
+> is what puts the tag there. Browsers do. npm doesn't. So the same build, downloaded,
+> greets you with "Apple could not verify it is free of malware", and installed through
+> npm it just opens. We measured that rather than assuming it —
+> [beta release checklist §2](docs/plans/beta-release-checklist.md) has the numbers.
 
 ## Where it runs
 
 | | |
 |---|---|
-| **macOS, Apple Silicon** | published to npm, and what the project is developed on daily |
-| **Linux, x86-64** | builds in CI. Not published, and never yet launched by anybody |
-| **Windows · Linux on arm64 · Intel Macs** | do not build at all ([#14](https://github.com/ijun17/centralu/issues/14), [#29](https://github.com/ijun17/centralu/issues/29)) |
+| **macOS, Apple Silicon** | on npm, and what we use every day |
+| **Linux, x86-64** | builds in CI. Not on npm, and nobody has started one yet |
+| **Windows · Linux arm64 · Intel Macs** | don't build at all ([#14](https://github.com/ijun17/centralu/issues/14), [#29](https://github.com/ijun17/centralu/issues/29)) |
 
-Linux is the row that needs the longer answer. Nobody on this project owns a Linux
-machine, so CI is not a convenience there — it is the only place a Linux bundle has ever
-existed. It does get built on every push:
-[run 32289487033](https://github.com/ijun17/centralu/actions/runs/32289487033) produced a
-78 MB AppImage and a 5.1 MB `.deb`, and both are downloadable as run artifacts.
+That Linux row deserves a note. Nobody here has a Linux machine, so CI is the only place
+a Linux bundle has ever existed. Every push builds one:
+[run 32289487033](https://github.com/ijun17/centralu/actions/runs/32289487033) turned out a
+78 MB AppImage and a 5.1 MB `.deb`, and you can download both from the run. Compiling and
+running aren't the same claim, though, and only the first one has been shown — so it stays
+off npm.
 
-What has never happened is anyone starting one. Compiling and running are different
-claims, and only the first has been demonstrated. So `centralu-linux-x64` is not on the
-npm registry — an unlisted platform makes npm answer "not supported yet", which beats
-installing something that may not open. The CI artifact is the only way to get it today,
-and because GitHub artifacts are zips, you will need to `chmod +x` the AppImage after
-unzipping.
-
-If you run Linux and are willing to be the first,
-[#14](https://github.com/ijun17/centralu/issues/14) is where to report what happened —
-including if it did nothing at all.
+If you're on Linux and want to go first, tell us how it went in
+[#14](https://github.com/ijun17/centralu/issues/14). Including if it did nothing at all.
 
 ## Licence
 
@@ -108,7 +96,6 @@ including if it did nothing at all.
 
 ## Documentation
 
-[docs/product-spec.md](docs/product-spec.md) is the spec that everything else answers to.
-[docs/README.md](docs/README.md) maps the rest. Most of `docs/` is still in Korean; the
-translation is tracked in
-[#27](https://github.com/ijun17/centralu/issues/27).
+[docs/product-spec.md](docs/product-spec.md) is the spec everything else answers to, and
+[docs/README.md](docs/README.md) maps the rest. Some of `docs/` is still in Korean —
+[#27](https://github.com/ijun17/centralu/issues/27) tracks the translation.
