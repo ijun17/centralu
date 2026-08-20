@@ -4357,3 +4357,176 @@ test('scrolled up to read, a grid panel does not yank you back down (#31)', asyn
   await page.waitForTimeout(300)
   expect(await distanceFromBottom(stream)).toBeGreaterThan(80)
 })
+
+/** 보내고 대화창에 실제로 붙은 것까지 확인한다 — 기록은 붙은 것에서 나온다 (#38) */
+async function sendMessage(page: Page, body: string) {
+  const seen = await page.getByTestId('msg-user').count()
+  await page.getByTestId('prompt-input').fill(body)
+  await page.getByTestId('prompt-input').press('Enter')
+  await expect(page.getByTestId('msg-user')).toHaveCount(seen + 1)
+}
+
+/**
+ * 화살표로 보낸 말을 되불러온다 (#38).
+ *
+ * 셸이 하는 그대로다. 기록은 따로 저장하지 않는다 — 대화에 이미 내 말이 다 있다.
+ */
+test('arrow up walks back through what you sent, arrow down walks forward (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 프롬프트')
+  await sendMessage(page, '둘째로 보낸 말')
+  await sendMessage(page, '셋째로 보낸 말')
+
+  const input = page.getByTestId('prompt-input')
+  await input.click()
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('셋째로 보낸 말')
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('둘째로 보낸 말')
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('첫 프롬프트')
+
+  // 가장 오래된 것에서 더 위로 눌러도 그 자리다 — 커서가 움직이면 "안 먹는다"로 읽힌다
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('첫 프롬프트')
+
+  await input.press('ArrowDown')
+  await expect(input).toHaveValue('둘째로 보낸 말')
+})
+
+/**
+ * 쓰다 만 글은 화살표 한 번에 잃을 수 있는 것이 아니다.
+ *
+ * 이 앱이 계속 고쳐 온 종류의 손실이라, 되불러오는 동안 초안은 아예 건드리지 않는다.
+ */
+test('arrow down past the newest gives the unsent draft back (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '보낸 말')
+
+  const input = page.getByTestId('prompt-input')
+  await input.fill('아직 안 보낸 글')
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('보낸 말')
+
+  await input.press('ArrowDown')
+  await expect(input).toHaveValue('아직 안 보낸 글')
+})
+
+/** 되불러오기는 지금 이 대화의 것이다 — 남의 말이 내 입력창에 앉으면 그대로 보내진다 */
+test('recall does not reach into another session (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'A에게 한 말')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await newSession(page, 'alpha', 'B에게 한 말')
+
+  const input = page.getByTestId('prompt-input')
+  await input.click()
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('B에게 한 말')
+
+  // 세션을 바꾸면 꺼내둔 것도 따라가지 않는다
+  await page.getByTestId(`session-row-${a}`).click()
+  await expect(input).toHaveValue('')
+  await input.click()
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('A에게 한 말')
+})
+
+/**
+ * 자동완성이 열려 있는 동안 화살표는 목록의 것이다.
+ *
+ * 둘 다 화살표를 원하는데, 열려 있는 쪽이 이긴다 — 목록을 띄워 놓고 고르는 중에
+ * 입력창이 통째로 옛 메시지로 바뀌면 무슨 일이 일어난 건지 알 길이 없다.
+ */
+test('the autocomplete list keeps the arrows while it is open (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.commandState = {
+      ready: true,
+      commands: [
+        { name: 'review', description: '변경을 검토합니다', argumentHint: '' },
+        { name: 'restart', description: '다시 시작합니다', argumentHint: '' },
+      ],
+    }
+  })
+  await newSession(page, 'alpha', '보낸 말')
+
+  const input = page.getByTestId('prompt-input')
+  await input.fill('/re')
+  await expect(page.getByTestId('autocomplete')).toBeVisible()
+  await expect(page.getByTestId('autocomplete-item-0')).toHaveAttribute('aria-selected', 'true')
+
+  await input.press('ArrowDown')
+  // 골라진 줄이 옮겨갔고, 입력창은 내가 친 그대로다
+  await expect(page.getByTestId('autocomplete-item-1')).toHaveAttribute('aria-selected', 'true')
+  await expect(input).toHaveValue('/re')
+
+  await input.press('ArrowUp')
+  await expect(page.getByTestId('autocomplete-item-0')).toHaveAttribute('aria-selected', 'true')
+  await expect(input).toHaveValue('/re')
+})
+
+/**
+ * 여러 줄을 쓰는 중이면 화살표는 먼저 커서의 것이다.
+ *
+ * 첫 줄에서 위로, 마지막 줄에서 아래로 — 그때만 기록이 나선다. 손이 이미 알고 있는
+ * 규칙이라(셸·devtools) 따로 배울 것이 없다.
+ */
+test('in a multi-line draft the arrows move the caret first (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '보낸 말')
+
+  const input = page.getByTestId('prompt-input')
+  await input.fill('첫 줄\n둘째 줄')
+
+  // 커서는 끝(= 마지막 줄)에 있다 — 위 화살표는 커서를 올린다
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('첫 줄\n둘째 줄')
+
+  // 이제 첫 줄이다 — 여기서 한 번 더 누르면 기록이 온다
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('보낸 말')
+})
+
+/**
+ * 조합 중인 화살표는 후보 목록의 키다 (#12).
+ *
+ * 한글·일본어·중국어를 치는 사람에게는 방향키가 글자를 고르는 키이기도 하다.
+ * 여기서 가로채면 고르던 글자가 통째로 사라진다 — 키보드 이벤트를 직접 만들어
+ * 조합 중이라고 말해 준다. 사람 손으로는 재현할 수 없는 상태다.
+ */
+test('arrows do not recall while an IME is composing (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '보낸 말')
+
+  const input = page.getByTestId('prompt-input')
+  await input.fill('ㅎ')
+  await input.evaluate((el) => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', isComposing: true, bubbles: true }))
+  })
+  await expect(input).toHaveValue('ㅎ')
+
+  // 조합이 끝나면 같은 키가 기록을 부른다
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('보낸 말')
+})
+
+/**
+ * 되불러온 글도 친 글과 똑같이 입력창을 키운다.
+ *
+ * 높이는 값에서 나오게 만들어 뒀으므로 새 경로가 하나 늘어도 저절로 따라와야 한다 —
+ * "따라올 것이다"와 "따라온다"는 다르므로 재 본다.
+ */
+test('a recalled multi-line message grows the composer (#38)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '한 줄')
+
+  const input = page.getByTestId('prompt-input')
+  await sendMessage(page, '첫 줄\n둘째 줄\n셋째 줄')
+  const short = await input.evaluate((el) => el.clientHeight)
+
+  await input.click()
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('첫 줄\n둘째 줄\n셋째 줄')
+  expect(await input.evaluate((el) => el.clientHeight)).toBeGreaterThan(short)
+})

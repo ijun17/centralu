@@ -14,6 +14,7 @@ import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
+import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { appendPath, readDragPath } from '../files/dragPath.js'
 import { decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
@@ -123,7 +124,20 @@ export function SessionPane({
    */
   const draft = useStore((s) => s.drafts[sessionId] ?? EMPTY_DRAFT)
   const setDraft = useStore((s) => s.setDraft)
-  const text = draft.text
+
+  /*
+   * 화살표로 되불러온 옛 메시지 (#38). `at`은 기록에서의 자리, `text`는 지금 보이는 글.
+   *
+   * **쓰다 만 글 위에 덮어쓰지 않는다.** 되불러오는 동안 입력창은 이 값을 보여주고,
+   * 세션의 초안은 손대지 않은 채 그대로 남는다. 그래서 가장 최근 것에서 한 번 더
+   * 내려오면 쓰던 글이 그대로 돌아온다 — 초안의 사본을 따로 떠두는 방식이었다면
+   * 그 사본과 초안이 어긋나는 날(세션 전환·전송 실패)이 반드시 온다.
+   *
+   * 부품의 상태인 게 맞다: "기록의 몇 번째를 보고 있나"는 지금 이 순간의 조작이지
+   * 세션의 사실이 아니다. 세션이 바뀌면 아래에서 비운다.
+   */
+  const [recall, setRecall] = useState<{ at: number; text: string } | null>(null)
+  const text = recall ? recall.text : draft.text
   const attachments = draft.attachments
 
   const patchDraft = useCallback(
@@ -134,9 +148,14 @@ export function SessionPane({
   )
   const setText = useCallback(
     (next: string | ((prev: string) => string)) => {
+      // 되불러온 글을 고치는 중이면 그 글을 고친다 — 초안은 여전히 건드리지 않는다
+      if (recall) {
+        setRecall({ ...recall, text: typeof next === 'function' ? next(recall.text) : next })
+        return
+      }
       patchDraft((cur) => ({ ...cur, text: typeof next === 'function' ? next(cur.text) : next }))
     },
-    [patchDraft],
+    [patchDraft, recall],
   )
   const setAttachments = useCallback(
     (next: Attachment[] | ((prev: Attachment[]) => Attachment[])) => {
@@ -172,6 +191,17 @@ export function SessionPane({
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`
   }, [text])
 
+  /*
+   * 세션이 바뀌면 되불러오기는 없던 일이 된다 (#38).
+   *
+   * 포커스 뷰는 세션을 바꿔도 이 부품을 그대로 쓴다. 안 비우면 A의 기록에서 꺼낸
+   * 글이 B의 입력창에 앉아 있게 되는데, 그건 쓰다 만 글을 세션으로 옮긴 이유
+   * 그대로다 — 그대로 보내면 엉뚱한 세션에 간다.
+   *
+   * 그리기 전에 비운다(layout). effect였다면 한 프레임 동안 남의 말이 보인다.
+   */
+  useLayoutEffect(() => setRecall(null), [sessionId])
+
   // 자동완성: `/`는 스킬, `@`는 파일
   const ac = useAutocomplete({
     sessionId,
@@ -194,6 +224,41 @@ export function SessionPane({
       el.focus()
       el.setSelectionRange(next.caret, next.caret)
     })
+  }
+
+  /**
+   * 화살표로 보낸 말을 되불러온다 (#38). 기록이 나섰으면 true — 그러면 커서는 안 움직인다.
+   *
+   * 판단은 history.ts가, 커서 규칙은 여기서. 셋 다 만족해야 기록이 나선다:
+   *  - 자동완성이 닫혀 있다 (열려 있으면 화살표는 목록의 것이다 — 부르는 쪽이 이미 걸렀다)
+   *  - 고른 글자가 없다 (선택이 있는 화살표는 선택을 푸는 키다)
+   *  - 커서가 위 화살표면 첫 줄, 아래 화살표면 마지막 줄에 있다
+   *
+   * 기록은 그때그때 대화에서 훑는다. 미리 만들어 두면 스트리밍 델타마다 수천 줄을
+   * 다시 훑게 되는데, 정작 쓰이는 건 화살표를 누른 순간뿐이다.
+   */
+  const recallHistory = (el: HTMLTextAreaElement, dir: -1 | 1): boolean => {
+    if (el.selectionStart !== el.selectionEnd) return false
+    const caret = el.selectionStart
+    const onEdge = dir === -1 ? onFirstLine(text, caret) : onLastLine(text, caret)
+    if (!onEdge) return false
+
+    const step = stepHistory({ history: sentMessages(chat), at: recall?.at ?? null, dir })
+    if (step.kind === 'none') return false
+
+    const next = step.kind === 'draft' ? draft.text : step.text
+    setRecall(step.kind === 'draft' ? null : { at: step.at, text: step.text })
+    /*
+     * 커서는 끝으로. 셸이 그렇게 하고, 한 줄짜리 기록에서는 그 자리가 첫 줄이자
+     * 마지막 줄이라 위아래로 계속 넘길 수 있다. 여러 줄짜리를 꺼내면 거기서 멈추는데,
+     * 그건 맞는 동작이다 — 그 글을 읽고 고치려고 꺼낸 것이다.
+     */
+    setCaret(next.length)
+    requestAnimationFrame(() => {
+      const later = inputRef.current
+      if (later) later.setSelectionRange(next.length, next.length)
+    })
+    return true
   }
 
   // 스크린샷을 붙여넣는 흐름이 가장 흔하다 (FR-13)
@@ -316,8 +381,14 @@ export function SessionPane({
           e.preventDefault()
           const t = text.trim()
           if (!t && attachments.length === 0) return
-          setText('')
-          setAttachments([])
+          /*
+            보내고 나면 입력창은 정말로 빈다 (#38).
+            되불러오기와 초안을 **둘 다** 비워야 한다 — 하나만 비우면 방금 보낸 자리에
+            아까 쓰다 만 글이 되살아난다. 방금 보낸 말은 이제 기록의 맨 위에 있으니
+            화살표 한 번이면 다시 꺼낼 수 있다.
+          */
+          setRecall(null)
+          setDraft(session.id, EMPTY_DRAFT)
           void send(session.id, t, attachments)
         }}
       >
@@ -418,6 +489,21 @@ export function SessionPane({
                     pick(item)
                     return
                   }
+                }
+              }
+              /*
+                한글·일본어·중국어를 조합하는 동안 방향키는 **후보 목록의 키다** —
+                가로채면 고르던 글자가 사라진다. 이 입력창에는 조합을 아는 코드가
+                하나도 없었으므로(#12) 조용히 틀리기 쉬운 자리다.
+
+                신호를 둘 다 본다: `isComposing`은 표준이고, 브라우저에 따라 조합 중
+                눌린 키가 실제 키 대신 `Process`로 온다.
+              */
+              const composing = e.nativeEvent.isComposing || e.key === 'Process'
+              if (!composing && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
+                  e.preventDefault()
+                  return
                 }
               }
               if (e.key === 'Enter' && !e.shiftKey) {
