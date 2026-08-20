@@ -1,14 +1,18 @@
-# Publishes the `centralu-linux-x64` npm package.
+# Publishes a Linux platform npm package (`centralu-linux-x64`, and — once #29 is
+# actually enabled, see docs/releasing.md — `centralu-linux-arm64`).
 #
 # Why this is a workflow and not something a person runs (#14): scripts/release-npm.mts
 # refuses to package a bundle it did not build on the target platform, because every one
-# of its checks reads a real artifact. Nobody here has a Linux machine, so this runner is
-# the only host that can produce and verify that package.
+# of its checks reads a real artifact. Nobody here has a Linux machine of either
+# architecture, so this runner is the only host that can produce and verify either
+# package.
 #
 # Deliberate limits:
 #   * `workflow_dispatch` only. Nothing here fires on a push, a tag, or a merge. Publishing
 #     is not reversible (npm blocks unpublish after 24h), so it stays a decision someone
-#     makes out loud.
+#     makes out loud. That same "a human has to choose this" property is why the `target`
+#     input below is safe to offer even for an architecture with an unpublished package
+#     and a runner nothing has ever built on (#29) — nothing here can select itself.
 #   * Dry run by default. You have to turn it off on purpose.
 #   * This never publishes the `centralu` shim. The shim pins its platform packages to an
 #     exact version and may only go out once all of them are up, so it is published last,
@@ -18,6 +22,13 @@ name: publish-linux-npm
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: 'Which platform package to build and publish'
+        type: choice
+        options:
+          - linux-x64
+          - linux-arm64
+        default: linux-x64
       dry_run:
         description: 'Rehearse only (npm pack, no publish)'
         type: boolean
@@ -29,9 +40,18 @@ on:
 
 jobs:
   publish:
-    # Must stay the same image as .github/workflows/build.yml — see the pin rationale
-    # there. What is published has to be built against the same glibc floor that CI tests.
-    runs-on: ubuntu-22.04
+    # Must stay the same distro floor as .github/workflows/build.yml — see the pin
+    # rationale there. What is published has to be built against the same glibc floor
+    # that CI tests. `ubuntu-22.04-arm` is the arm64 GitHub-hosted image at that same
+    # floor (https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/,
+    # confirmed still current 2026-01-29 when private-repo support arrived,
+    # https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/)
+    # — not a cross-build, an actually-different runner. The `&&`/`||` below looks like
+    # the ternary the release script's own comment warns against, but that warning is
+    # about a *falsy* right-hand value (an empty string reads as "false" and silently
+    # takes the other branch); both branches here are non-empty runner-label strings, so
+    # there is no such trap.
+    runs-on: ${{ inputs.target == 'linux-arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
     # The gate that actually stops an accidental publish. Give this environment a required
     # reviewer in repo settings and hold NPM_TOKEN here, not at repo level, so the token is
     # unreachable from any other workflow.
@@ -74,7 +94,9 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          key: linux-x64
+          # The cache is only valid per platform (matches the key build.yml uses per
+          # matrix entry); a shared key would let an x64 and an arm64 cache collide.
+          key: ${{ inputs.target }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -103,6 +125,6 @@ jobs:
       # question has an answer that is not a rebuild.
       - uses: actions/upload-artifact@v4
         with:
-          name: centralu-linux-x64-published
-          path: packaging/npm/linux-x64/*.AppImage
+          name: centralu-${{ inputs.target }}-published
+          path: packaging/npm/${{ inputs.target }}/*.AppImage
           if-no-files-found: error

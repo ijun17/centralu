@@ -78,6 +78,33 @@ describe('이름은 한 곳에서 정한다', () => {
     )
   })
 
+  it('linux-arm64 패키지 필드는 맞지만 (#29), shim에는 아직 안 걸려 있다', () => {
+    /*
+     * linux-arm64 is deliberately absent from `platforms` above and from the shim's
+     * `optionalDependencies` — see docs/releasing.md → "Adding a platform" →
+     * "linux-arm64 (#29)". Pinning an *unpublished* platform package there would make
+     * every future `pnpm release:npm --publish` (the step that publishes this shim)
+     * refuse to run until linux-arm64 is also on the registry at that exact version
+     * (assertPinnedPlatformsPublished, above in the release script) — which would block
+     * an ordinary darwin/x64 release behind a package nothing has ever built or
+     * published. So this test only holds the parked package.json to the same shape
+     * linux-x64 has, and asserts the gap is still there — remove the second half of
+     * this test (and add linux-arm64 to `platforms` and to the shim's
+     * `optionalDependencies`) the day a real arm64 artifact gets published.
+     */
+    const arch = json('packaging/npm/linux-arm64/package.json')
+    expect(arch.name).toBe(`${APP_SLUG}-linux-arm64`)
+    expect(arch.os).toEqual(['linux'])
+    expect(arch.cpu).toEqual(['arm64'])
+    expect(arch.files).toContain(`${APP_NAME}.AppImage`)
+
+    const main = json('packaging/npm/centralu/package.json')
+    expect(
+      Object.keys(main.optionalDependencies as object),
+      'linux-arm64 is unpublished — wiring it in here would wedge the next shim publish, see the comment above',
+    ).not.toContain(arch.name)
+  })
+
   it('빌드한 .app을 여는 스크립트가 실제 번들 이름을 가리킨다', () => {
     // productName이 바뀌면 번들 파일 이름도 바뀐다 — 스크립트가 옛 경로면 조용히 안 열린다
     const scripts = json('package.json').scripts as Record<string, string>

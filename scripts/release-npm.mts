@@ -225,6 +225,53 @@ const TARGETS: Record<string, Target | undefined> = {
       console.log(`  ${arch.split(',')[0]}`)
     },
   },
+
+  /*
+   * #29. Same shape as linux-x64 — same AppImage-only rule, same checks — because none of
+   * those checks are architecture-specific: the type-2 magic bytes and the exec bit mean
+   * the same thing on any machine type. Only the final `file` check has to name a
+   * different machine.
+   *
+   * This entry only matters when `pnpm release:npm` runs *on* linux-arm64 hardware
+   * (HOST below is `${process.platform}-${process.arch}`), so adding it here is safe on
+   * its own: nobody has built on that host yet, so this branch has never executed. What
+   * is *not* done yet on purpose — the shim's `optionalDependencies`, the launcher's
+   * TARGETS table — is explained in docs/releasing.md under "Adding a platform" /
+   * "linux-arm64 (#29)".
+   */
+  'linux-arm64': {
+    id: 'linux-arm64',
+    bundles: 'appimage',
+    artifact: `${APP_NAME}.AppImage`,
+    locate: () => soleFile(join(BUNDLE_ROOT, 'appimage'), (n) => n.endsWith('.AppImage')),
+    install: (src, dest) => {
+      rmSync(dest, { force: true })
+      cpSync(src, dest)
+      cpSync(join(ROOT, 'apps/desktop/src-tauri/icons/icon.png'), join(dirname(dest), 'icon.png'))
+      chmodSync(dest, 0o755)
+    },
+    check: (dest) => {
+      // (a) same AppImage-magic check as linux-x64 — arch-independent
+      const magic = head(dest, 11)
+      if (magic.subarray(0, 4).toString('latin1') !== '\x7fELF') fail(`not an ELF binary: ${dest}`)
+      if (magic[8] !== 0x41 || magic[9] !== 0x49 || magic[10] !== 0x02) {
+        fail(`not a type-2 AppImage — magic is ${[...magic.subarray(8, 11)].join(',')}, expected 65,73,2`)
+      }
+      console.log('  AppImage magic ok')
+
+      // (b) exec bit — same as linux-x64
+      const mode = out('/usr/bin/stat', ['-c', '%a', dest])
+      if (!/[157]$/.test(mode)) fail(`no exec bit (${mode})`)
+      console.log('  exec bit ok')
+
+      // (c) machine type — `file` names 64-bit ARM "aarch64", not "arm64" (that spelling
+      // is npm/Node's `process.arch`, used for the id above and for the package's `cpu`
+      // field; the two vocabularies just disagree)
+      const arch = out('/usr/bin/file', ['-b', dest])
+      if (!arch.includes('aarch64')) fail(`not aarch64: ${arch}`)
+      console.log(`  ${arch.split(',')[0]}`)
+    },
+  },
 }
 
 // ── 1. 발행해도 되는 상태인가 ──────────────────────────────────────────

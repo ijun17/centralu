@@ -47,6 +47,39 @@ jobs:
             artifacts: |
               apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
               apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          # linux-arm64 (#29) — commented out on purpose, not missing.
+          #
+          # The runner exists at the right distro floor: GitHub hosts `ubuntu-22.04-arm`,
+          # the same major version as the x64 pin above, so this would NOT raise the
+          # minimum glibc for arm64 users the way an arm64-only-on-24.04 runner would have
+          # (GA for public repos 2025-08-07, https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/;
+          # label confirmed again by Tauri's own CI guide, https://v2.tauri.app/distribute/pipelines/github/).
+          # Private-repo support followed later — GA 2026-01-29,
+          # https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/
+          # — but *not* free like public-repo usage: it draws down the plan's included
+          # minutes and then bills at (per GitHub's rate card at the time of writing)
+          # $0.005/min for the 2-vCPU tier. `ijun17/centralu` happens to be a public repo
+          # right now, where this runner is free, but that can change, and this job fires
+          # on every push and every PR with no human in the loop — the one thing this
+          # comment cannot do is let a repo-visibility flip turn into a silent bill. A
+          # `workflow_dispatch`-gated job would have made that judgment call each run; a
+          # commented line makes it impossible to run by accident either way.
+          #
+          # Uncomment when someone deliberately decides to spend that minute budget:
+          #
+          #   - target: linux-arm64
+          #     runner: ubuntu-22.04-arm
+          #     artifacts: |
+          #       apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          #       apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          #
+          # That alone does not make this a working build — nothing arm64 has ever run
+          # here. `node-pty` has no Linux prebuild at any architecture, so `pty.node` is
+          # compiled by node-gyp on whatever runs this job, and that has only ever been
+          # exercised on x64; `better-sqlite3` raises the identical question. The first
+          # uncommented run is genuinely the first time either gets an answer. See
+          # docs/releasing.md → "Adding a platform" → linux-arm64 (#29) for what to wire
+          # up alongside the uncomment (the shim's `optionalDependencies`, the launcher).
           - target: darwin-arm64
             # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
             # versions without warning, and a release build is not the place to find out.
