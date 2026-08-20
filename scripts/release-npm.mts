@@ -12,8 +12,9 @@
  * below interrogates a real artifact — the code signature, the exec bit, the machine
  * type reported by `file` — and none of those questions can be answered honestly
  * about a Linux binary from a Mac. A cross-build flag would only let us publish an
- * unverified bundle. The other host comes from CI instead
- * (`.github/workflows/publish-linux-npm.yml`).
+ * unverified bundle. The other host comes from CI instead — `.github/workflows/release.yml`
+ * runs one job per platform (and the older single-purpose `publish-linux-npm.yml`, which it
+ * replaces, still works).
  */
 import { execFileSync } from 'node:child_process'
 import {
@@ -47,6 +48,22 @@ const skipBuild = process.argv.includes('--skip-build')
  * published from CI, macOS from a Mac, and whoever goes last publishes the shim.
  */
 const platformOnly = process.argv.includes('--platform-only')
+/**
+ * Publish the `centralu` shim and nothing else.
+ *
+ * The other half of `--platform-only`, and the reason the two exist at all: with the
+ * platforms spread across machines, the "platform packages first, shim last" order has to
+ * hold *across separate runs*. Whoever goes last publishes the shim — and once that is a
+ * workflow rather than a person (`.github/workflows/release.yml`), "last" is its own job
+ * that starts only after every platform job succeeded.
+ *
+ * This is the one mode with no host requirement. The shim ships `bin/centralu.mjs` and
+ * nothing else: no bundle to build, no artifact to interrogate, so no reason to care which
+ * machine runs it. The registry check below is still what enforces the ordering for real.
+ */
+const shimOnly = process.argv.includes('--shim-only')
+// `fail` is a hoisted function declaration, so it is callable from here.
+if (platformOnly && shimOnly) fail('--platform-only and --shim-only are opposites — pass one or neither.')
 /**
  * 2단계 인증이 켜진 계정은 발행마다 OTP를 묻는다. 그 물음은 **대화형 입력**이라
  * 자동화된 자리(에이전트·CI)에서는 답할 수 없어 그냥 멈춰 버린다.
@@ -278,8 +295,9 @@ const TARGETS: Record<string, Target | undefined> = {
 step('발행 전 확인')
 
 const HOST = `${process.platform}-${process.arch}`
-const target = TARGETS[HOST]
-if (!target) {
+// `--shim-only` packages no binary, so it neither has nor needs a target for this host.
+const target = shimOnly ? undefined : TARGETS[HOST]
+if (!shimOnly && !target) {
   fail(
     `no npm package is defined for ${HOST} (have: ${Object.keys(TARGETS).join(', ')}).\n` +
       'The bundle must be built on the platform it ships to, so this cannot be overridden here — ' +
@@ -287,8 +305,8 @@ if (!target) {
   )
 }
 
-const ARCH_PKG = join(ROOT, 'packaging/npm', target.id)
-if (!existsSync(join(ARCH_PKG, 'package.json'))) fail(`platform package is missing: ${ARCH_PKG}/package.json`)
+const ARCH_PKG = target && join(ROOT, 'packaging/npm', target.id)
+if (ARCH_PKG && !existsSync(join(ARCH_PKG, 'package.json'))) fail(`platform package is missing: ${ARCH_PKG}/package.json`)
 
 if (out('git', ['status', '--porcelain'])) {
   // 커밋되지 않은 변경이 섞여 나가면 "발행된 것"과 "저장소의 것"이 달라진다.
@@ -308,52 +326,55 @@ if (publish) {
 sh('pnpm', ['verify'])
 
 console.log(
-  `  ${target.id} · 버전 ${APP_VERSION} · 태그 ${tag} · 커밋 ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
+  `  ${target?.id ?? 'centralu (shim only)'} · 버전 ${APP_VERSION} · 태그 ${tag} · 커밋 ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
 )
 
-// ── 2. 빌드 ────────────────────────────────────────────────────────────
-if (skipBuild) {
-  console.log('\n  --skip-build: 이미 빌드된 번들을 쓴다')
-} else {
-  step('배포 앱 빌드')
-  sh('pnpm', [
-    '--filter',
-    '@cc/desktop',
-    'exec',
-    'tauri',
-    'build',
-    ...(target.bundles ? ['--bundles', target.bundles] : []),
-  ])
-}
-const built = target.locate()
-if (!existsSync(built)) fail(`번들이 없다: ${built}`)
+// ── 2~4. 번들 (--shim-only는 담을 것이 없으므로 통째로 건너뛴다) ───────
+if (target && ARCH_PKG) {
+  // ── 2. 빌드 ──────────────────────────────────────────────────────────
+  if (skipBuild) {
+    console.log('\n  --skip-build: 이미 빌드된 번들을 쓴다')
+  } else {
+    step('배포 앱 빌드')
+    sh('pnpm', [
+      '--filter',
+      '@cc/desktop',
+      'exec',
+      'tauri',
+      'build',
+      ...(target.bundles ? ['--bundles', target.bundles] : []),
+    ])
+  }
+  const built = target.locate()
+  if (!existsSync(built)) fail(`번들이 없다: ${built}`)
 
-// ── 3. 번들을 아키텍처 패키지로 ────────────────────────────────────────
-step('번들 복사')
-const dest = join(ARCH_PKG, target.artifact)
-target.install(built, dest)
+  // ── 3. 번들을 아키텍처 패키지로 ──────────────────────────────────────
+  step('번들 복사')
+  const dest = join(ARCH_PKG, target.artifact)
+  target.install(built, dest)
 
-// ── 4. 넣은 것이 실제로 성립하는가 ─────────────────────────────────────
-step('번들 검증')
-target.check(dest)
+  // ── 4. 넣은 것이 실제로 성립하는가 ───────────────────────────────────
+  step('번들 검증')
+  target.check(dest)
 
-// `files`가 실제로 넣은 것을 가리키지 않으면 tarball이 **껍데기만** 나간다 — pack 로그를
-// 눈으로 확인하기 전에는 티가 안 난다. 이름을 한 곳(APP_NAME)에서 받아 쓰는 이상 여기서 막는다.
-const archManifest = JSON.parse(readFileSync(join(ARCH_PKG, 'package.json'), 'utf8')) as { files?: string[] }
-if (!archManifest.files?.includes(target.artifact)) {
-  fail(`${ARCH_PKG}/package.json "files" does not list ${target.artifact} — the tarball would ship empty`)
-}
-// And the other way round: npm drops a `files` entry that is not on disk without saying so,
-// so a listed-but-absent icon packs, installs, and only shows up as a wrong menu entry later.
-for (const entry of archManifest.files ?? []) {
-  if (!existsSync(join(ARCH_PKG, entry))) {
-    fail(`${ARCH_PKG}/package.json "files" lists ${entry}, which is not on disk — npm would drop it silently`)
+  // `files`가 실제로 넣은 것을 가리키지 않으면 tarball이 **껍데기만** 나간다 — pack 로그를
+  // 눈으로 확인하기 전에는 티가 안 난다. 이름을 한 곳(APP_NAME)에서 받아 쓰는 이상 여기서 막는다.
+  const archManifest = JSON.parse(readFileSync(join(ARCH_PKG, 'package.json'), 'utf8')) as { files?: string[] }
+  if (!archManifest.files?.includes(target.artifact)) {
+    fail(`${ARCH_PKG}/package.json "files" does not list ${target.artifact} — the tarball would ship empty`)
+  }
+  // And the other way round: npm drops a `files` entry that is not on disk without saying so,
+  // so a listed-but-absent icon packs, installs, and only shows up as a wrong menu entry later.
+  for (const entry of archManifest.files ?? []) {
+    if (!existsSync(join(ARCH_PKG, entry))) {
+      fail(`${ARCH_PKG}/package.json "files" lists ${entry}, which is not on disk — npm would drop it silently`)
+    }
   }
 }
 
 // ── 5. 버전을 한 곳(brand.ts)에서 받아 적는다 ──────────────────────────
 step('패키지 버전 맞추기')
-for (const pkgDir of [ARCH_PKG, MAIN_PKG]) {
+for (const pkgDir of ARCH_PKG ? [ARCH_PKG, MAIN_PKG] : [MAIN_PKG]) {
   const file = join(pkgDir, 'package.json')
   const json = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
   json.version = APP_VERSION
@@ -407,8 +428,9 @@ function assertPinnedPlatformsPublished() {
 
 // ── 6. pack (그리고 원하면 publish) ────────────────────────────────────
 // 아키텍처 패키지가 **먼저** 발행돼야 한다. 반대로 하면 메인 패키지를 깐 사람이
-// 없는 optional dependency를 바라보는 순간이 생긴다.
-for (const pkgDir of platformOnly ? [ARCH_PKG] : [ARCH_PKG, MAIN_PKG]) {
+// 없는 optional dependency를 바라보는 순간이 생긴다. `--platform-only`는 앞의 것만,
+// `--shim-only`는 뒤의 것만 — 기계가 여럿으로 나뉘어도 이 순서는 유지된다.
+for (const pkgDir of [...(ARCH_PKG ? [ARCH_PKG] : []), ...(platformOnly ? [] : [MAIN_PKG])]) {
   const name = (JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name: string }).name
   if (pkgDir === MAIN_PKG) assertPinnedPlatformsPublished()
   if (publish) {
@@ -427,8 +449,14 @@ for (const pkgDir of platformOnly ? [ARCH_PKG] : [ARCH_PKG, MAIN_PKG]) {
 if (platformOnly) {
   console.log(
     publish
-      ? `\n\x1b[32m${target.id} 발행 완료 — the centralu shim still has to go out separately\x1b[0m`
-      : `\n리허설이 끝났다 (${target.id}만). 실제로 올리려면: \x1b[1mpnpm release:npm --publish --platform-only\x1b[0m`,
+      ? `\n\x1b[32m${target?.id} 발행 완료 — the centralu shim still has to go out separately\x1b[0m`
+      : `\n리허설이 끝났다 (${target?.id}만). 실제로 올리려면: \x1b[1mpnpm release:npm --publish --platform-only\x1b[0m`,
+  )
+} else if (shimOnly) {
+  console.log(
+    publish
+      ? `\n\x1b[32m발행 완료 — npm i -g ${tag === 'latest' ? 'centralu' : `centralu@${tag}`}\x1b[0m`
+      : `\n리허설이 끝났다 (shim만). 실제로 올리려면: \x1b[1mpnpm release:npm --publish --shim-only\x1b[0m`,
   )
 } else {
   console.log(

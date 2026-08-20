@@ -1,0 +1,312 @@
+# Publishes a whole release — both platform packages and the `centralu` shim — from one
+# `git push --tags`.
+#
+# Why this exists: 0.1.0-beta.2 went out by hand, in three places, in an order a person had
+# to remember (Linux from `publish-linux-npm.yml`, then macOS from a Mac, then the shim from
+# the same Mac). The order is not a preference — the shim pins its platform packages to an
+# *exact* version, so it may only go out once every one of them is already on the registry.
+# A human keeping that straight across three sessions is a mistake waiting for a bad day,
+# and npm blocks unpublish after 24h.
+#
+# The job graph encodes the order instead:
+#
+#     guard ──┬── platform (linux-x64)  ──┐
+#             └── platform (darwin-arm64) ┴── shim
+#
+# `needs: platform` on a matrix job means *every* entry succeeded, so the shim cannot go out
+# while any platform is missing — and that stays true the day linux-arm64 joins the matrix
+# without anyone remembering to update this.
+#
+# Two things are deliberate about the triggers:
+#
+#   * A tag push is a real release. That is the whole point — the version already lives in
+#     `brand.ts`, so the tag is the one place a human states "this one, now", and `guard`
+#     refuses the run if the two disagree.
+#   * `workflow_dispatch` exists to rehearse (`dry_run`, default true). The darwin release
+#     path has only ever run on the developer's Mac; the Linux one had never run anywhere
+#     until it did, and its first run found two mac-only assumptions in `pnpm verify`. The
+#     first run of *this* workflow must be able to be a rehearsal, not a release.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Rehearse only (build + npm pack, no publish, no approval asked)'
+        type: boolean
+        default: true
+      also_latest:
+        description: 'Also move the `latest` dist-tag to this version (correct only while no stable release exists — drop at 1.0)'
+        type: boolean
+        default: true
+
+# Never cancel a release in flight. `build.yml` cancels freely because a newer push makes an
+# older build irrelevant; here a cancelled job could be one that has already put a package on
+# the registry, and there is no taking that back.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Nothing here writes to the repository. The npm credential lives in the `npm-publish`
+# environment, not in this token.
+permissions:
+  contents: read
+
+jobs:
+  # Everything after this is expensive (two Rust release builds) and ends in something that
+  # cannot be undone. This job is neither, so it runs first and alone: when the tag and the
+  # version in the repo disagree, nothing has been built and nothing has been published.
+  guard:
+    name: check the tag against the repo
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      # Strings, not booleans — a job output is always a string. Every consumer below
+      # compares against the literal "false"/"true" for that reason.
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+      also_latest: ${{ steps.plan.outputs.also_latest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: plan
+        env:
+          # Read the inputs through the environment instead of pasting `${{ inputs.* }}`
+          # into the script body. An expression is substituted before the shell ever sees
+          # the line, so a value carrying a quote would be *executing* rather than being
+          # compared. These two are booleans today; the habit is what keeps the next input
+          # from being the exception nobody notices.
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_ALSO_LATEST: ${{ inputs.also_latest }}
+        run: |
+          set -euo pipefail
+
+          # `brand.ts` is the single source for the version — tauri.conf.json, Cargo.toml
+          # and both npm package.json files are checked against it by tooling/brand.test.ts,
+          # which `pnpm verify` runs inside every job below. So matching the tag against
+          # this one declaration matches it against all of them.
+          version=$(sed -n "s/^export const APP_VERSION = '\([^']*\)'.*/\1/p" packages/protocol/src/brand.ts)
+          if [ -z "$version" ]; then
+            echo "::error file=packages/protocol/src/brand.ts::could not read APP_VERSION — has the declaration changed shape?"
+            exit 1
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match APP_VERSION $version — expected v$version."
+              echo "::error::Either the version bump was never committed, or the tag went on the wrong commit. Delete the tag, fix, tag again."
+              exit 1
+            fi
+            # A tag push *is* the release. There is no rehearsing one, so the only way to
+            # rehearse is workflow_dispatch — which is why that trigger exists.
+            dry_run=false
+            # No stable release exists yet, so `npm i -g centralu` (no tag) has to resolve
+            # to the beta or it fails outright with "No matching version found for
+            # centralu@latest". Flip this to false the day 1.0 ships: after that, moving
+            # `latest` onto a prerelease hands betas to people who asked for stable.
+            also_latest=true
+          else
+            # Default to the reversible answer when the value is missing or unexpected.
+            # Both wrong answers exist; only one of them can be taken back.
+            dry_run="${INPUT_DRY_RUN:-true}"
+            also_latest="${INPUT_ALSO_LATEST:-true}"
+          fi
+
+          {
+            echo "version=$version"
+            echo "dry_run=$dry_run"
+            echo "also_latest=$also_latest"
+          } >> "$GITHUB_OUTPUT"
+
+          # Say out loud what the next four jobs are about to do, on the run's summary page.
+          # Reading it off the job graph means already knowing this file.
+          {
+            echo "## centralu $version"
+            echo
+            if [ "$dry_run" = "false" ]; then
+              echo "**Publishing.** Each publish waits for approval on the \`npm-publish\` environment."
+            else
+              echo "**Rehearsal.** Builds and \`npm pack\` only — nothing reaches the registry and no approval is asked for."
+              echo ""
+              echo "The shim job will warn that the platform packages are not on the registry at this version. That is correct: this run published none."
+            fi
+            echo
+            echo "- move the \`latest\` dist-tag: \`$also_latest\`"
+            echo "- triggered by: \`$GITHUB_EVENT_NAME\` \`$GITHUB_REF_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # One job per platform package, each building on the platform it ships to.
+  #
+  # `scripts/release-npm.mts` has no cross-build switch on purpose: every check it runs
+  # interrogates a real artifact (code signature, exec bit, machine type per `file`), and
+  # none of those questions can be answered honestly about a Linux binary from a Mac. So
+  # "which machine" is not a detail of this matrix, it is the reason there is one.
+  platform:
+    name: ${{ matrix.target }}
+    needs: guard
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # A failure on one platform must not cancel the other mid-`npm publish`. The ordering
+      # is enforced by the shim job's `needs`, which requires *both* to have succeeded —
+      # letting a running publish finish is strictly safer than interrupting it.
+      fail-fast: false
+      matrix:
+        include:
+          # Same distro floor as .github/workflows/build.yml — see the pin rationale there.
+          # What gets published has to be built against the same glibc floor CI tests.
+          - target: linux-x64
+            runner: ubuntu-22.04
+          # Pinned for the same reason `build.yml` pins it: `macos-latest` moves between
+          # Xcode and SDK versions without warning, and a release is not where to find out.
+          - target: darwin-arm64
+            runner: macos-14
+          # linux-arm64 (#29) — written out and commented, so enabling it is deleting two
+          # `#`. It stays off because the shim does not pin `centralu-linux-arm64` yet, and
+          # pinning an unpublished package would wedge the *next* ordinary release behind
+          # it (assertPinnedPlatformsPublished in scripts/release-npm.mts). The build itself
+          # is green on this runner as of run 32381990293. Uncommenting alone is not enough:
+          # tooling/release-workflow.test.ts will fail until the shim pins it too, which is
+          # the rest of the checklist in docs/releasing.md → "linux-arm64 (#29)".
+          # - target: linux-arm64
+          #   runner: ubuntu-22.04-arm
+    # The gate that actually stops an accidental publish: a required reviewer on the
+    # `npm-publish` environment, holding NPM_TOKEN there rather than at repo level so no
+    # other workflow can reach it. It earned its keep on the first release, catching an
+    # EOTP failure before anything shipped.
+    #
+    # A rehearsal is `npm pack`. It needs no token, and gating it costs a human approval
+    # per attempt — three were spent on failing rehearsals before `c7e3864` learned that.
+    # An expression evaluating to '' means "no environment" to GitHub.
+    environment: ${{ needs.guard.outputs.dry_run == 'false' && 'npm-publish' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same list and the same reasons as .github/workflows/build.yml — kept in step with it.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils \
+            libfuse2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # Writes an .npmrc outside the checkout and points npm at it. That matters here:
+          # release-npm.mts aborts on a dirty working tree, and an .npmrc dropped into the
+          # repo would trip that check — and would be a credential sitting in the workspace.
+          registry-url: https://registry.npmjs.org
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          # Only valid per platform; a shared key would let two architectures collide.
+          key: ${{ matrix.target }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build, verify and publish the platform package
+        env:
+          # linuxdeploy and appimagetool are AppImages and mount via FUSE, which runners can
+          # refuse — with a bare "failed to run linuxdeploy" that never mentions FUSE. Unused
+          # on macOS, harmless there.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          # Must be a granular token with **Bypass 2FA** (what the npm UI used to call an
+          # automation token). A publish-type token still demands an OTP, and a workflow has
+          # nobody to type it — the first release found this as a bare `EOTP` (#29).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ needs.guard.outputs.dry_run }}
+          ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
+        # The arguments are assembled in the shell rather than with `${{ a && b || c }}`.
+        # That expression is not a ternary: it falls through to `c` whenever `b` is falsy,
+        # and an empty string is falsy — so the "leave the flag off" branch would have
+        # produced `--publish`. Wrong in the one direction that cannot be undone.
+        run: |
+          set -euo pipefail
+          args="--platform-only"
+          # Matched against "false", not against "not true": an empty or unexpected value
+          # then rehearses instead of publishing.
+          if [ "$DRY_RUN" = "false" ]; then args="$args --publish"; fi
+          if [ "$ALSO_LATEST" = "true" ]; then args="$args --also-latest"; fi
+          echo "pnpm release:npm $args"
+          pnpm release:npm $args
+
+  # The shim last, and only if every platform package above went out.
+  #
+  # `centralu` is a launcher script and nothing else — no bundle, no native code — so this
+  # is the one job with no platform requirement, and `--shim-only` is the mode that says so.
+  # The script still refuses to publish it while any pinned platform package is missing from
+  # the registry at this version; `needs` makes that check a formality rather than the last
+  # line of defence, which is the right order for the two to be in.
+  shim:
+    name: centralu (shim)
+    needs: [guard, platform]
+    # No Tauri build happens here, so none of the webkit/AppImage system packages apply.
+    # Kept at the same 22.04 image as the Linux platform job anyway: this is the only host
+    # where `pnpm verify` has ever run on Linux, and this job runs *after* two irreversible
+    # publishes — the wrong place to be the first to try a newer image.
+    runs-on: ubuntu-22.04
+    environment: ${{ needs.guard.outputs.dry_run == 'false' && 'npm-publish' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Publish the shim
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ needs.guard.outputs.dry_run }}
+          ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
+        # In a rehearsal this prints a yellow warning that the platform packages are not on
+        # the registry at this version, and carries on. That is the truth: the rehearsal
+        # published none of them.
+        run: |
+          set -euo pipefail
+          args="--shim-only"
+          if [ "$DRY_RUN" = "false" ]; then args="$args --publish"; fi
+          if [ "$ALSO_LATEST" = "true" ]; then args="$args --also-latest"; fi
+          echo "pnpm release:npm $args"
+          pnpm release:npm $args
+
+      - name: Say where it landed
+        if: needs.guard.outputs.dry_run == 'false'
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Published"
+            echo
+            echo '```'
+            echo "npm i -g centralu@$VERSION"
+            echo '```'
+            echo
+            echo "Verify from a machine that has never had it: install, run \`centralu\`, and check the version in the window."
+          } >> "$GITHUB_STEP_SUMMARY"

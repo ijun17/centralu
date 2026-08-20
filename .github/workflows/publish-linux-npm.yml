@@ -1,6 +1,13 @@
 # Publishes a Linux platform npm package (`centralu-linux-x64`, and — once #29 is
 # actually enabled, see docs/releasing.md — `centralu-linux-arm64`).
 #
+# **Superseded by `release.yml`**, which publishes every platform *and* the shim from one
+# tag push, in the order the shim's exact-version pins require. This file stays until that
+# workflow has done one real release: it is the path 0.1.0-beta.2 actually shipped through,
+# and deleting a proven one before its replacement has ever shipped anything trades a
+# working thing for an untested one. Delete it after that release — the checklist is in
+# docs/releasing.md.
+#
 # Why this is a workflow and not something a person runs (#14): scripts/release-npm.mts
 # refuses to package a bundle it did not build on the target platform, because every one
 # of its checks reads a real artifact. Nobody here has a Linux machine of either
