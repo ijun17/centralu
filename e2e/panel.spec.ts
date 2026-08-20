@@ -111,3 +111,131 @@ test('포커스 뷰는 그대로 — 보고 있는 세션의 도구 하나만', 
   // 옆 세션이 클로드라고 해서 그 한도가 딸려 오면 안 된다
   await expect(page.getByTestId('usage-modal')).not.toContainText('Claude Code')
 })
+
+/*
+ * ── 기록 탭 (#21) ────────────────────────────────────────────────────
+ *
+ * 깃 탭 안의 기록 띠는 커밋을 만드는 동안 곁눈질하는 맥락이라 일곱 줄에 갇혀 있다.
+ * 기록을 **읽으러** 오는 것은 다른 용무라 세로 한 칸을 통째로 쓴다.
+ */
+
+/** `when`을 하루씩 뒤로 물려 커밋 목록을 만든다 (상대 날짜가 줄마다 달라지도록) */
+async function seedCommits(page: Page, list: { sha: string; subject: string; author: string; daysAgo: number }[]) {
+  await page.evaluate((rows: typeof list) => {
+    ;(window as never as { __mock: any }).__mock.gitState.commits = rows.map((r) => ({
+      sha: r.sha,
+      shortSha: r.sha.slice(0, 7),
+      subject: r.subject,
+      author: r.author,
+      when: Date.now() - r.daysAgo * 86_400_000,
+      parents: [],
+    }))
+  }, list)
+}
+
+test('기록은 깃 옆의 탭이고, 짧은 해시와 얼마나 됐나를 함께 적는다', async ({ page }) => {
+  await setup(page)
+  await seedCommits(page, [
+    { sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 },
+    { sha: 'bbb2222', subject: '두 번째', author: '나', daysAgo: 3 },
+  ])
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-tab-history').click()
+  await expect(page.getByTestId('evidence-history')).toBeVisible()
+  await expect(page.getByTestId('history-commit-aaa1111')).toContainText('첫 커밋')
+  await expect(page.getByTestId('history-commit-aaa1111')).toContainText('aaa1111')
+  await expect(page.getByTestId('history-commit-bbb2222')).toContainText('3d ago')
+
+  // 고른 탭은 다음에 열 때를 위해 스냅샷에 실린다
+  const snap = await page.evaluate(() => (window as never as { __mock: any }).__mock.workspaceSnapshot)
+  expect(snap?.panelTab).toBe('history')
+})
+
+test('혼자 쓰는 저장소면 이름을 반복하지 않고, 여럿이면 적는다', async ({ page }) => {
+  await setup(page)
+  await seedCommits(page, [
+    { sha: 'aaa1111', subject: '혼자 한 일', author: '나', daysAgo: 1 },
+    { sha: 'bbb2222', subject: '그것도 혼자', author: '나', daysAgo: 2 },
+  ])
+  await newSession(page, 'alpha', 'claude', '작업')
+  await page.getByTestId('evidence-tab-history').click()
+  await expect(page.getByTestId('history-commit-aaa1111')).toContainText('1d ago')
+  // 340px에서 매 줄 같은 이름은 정보가 아니라 소음이다
+  await expect(page.getByTestId('history-commit-aaa1111')).not.toContainText('나')
+
+  // 구별할 사람이 생기면 그때 자리를 내준다
+  await seedCommits(page, [
+    { sha: 'aaa1111', subject: '내가 한 일', author: '나', daysAgo: 1 },
+    { sha: 'bbb2222', subject: '네가 한 일', author: '너', daysAgo: 2 },
+  ])
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('evidence-tab-history').click()
+  await expect(page.getByTestId('history-commit-bbb2222')).toContainText('너')
+})
+
+test('커밋을 누르면 넓은 곳에서 diff가 펼쳐진다', async ({ page }) => {
+  await setup(page)
+  await seedCommits(page, [{ sha: 'aaa1111', subject: '첫 커밋', author: '나', daysAgo: 0 }])
+  await page.evaluate(() => {
+    ;(window as never as { __mock: any }).__mock.gitState.diffs['aaa1111'] = '@@ -0,0 +1 @@\n+새 줄'
+  })
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-tab-history').click()
+  await page.getByTestId('history-commit-aaa1111').click()
+  await expect(page.getByTestId('overlay')).toBeVisible()
+  await expect(page.getByTestId('diff-view')).toContainText('새 줄')
+})
+
+/** 조용히 끊긴 목록은 "더 오래된 커밋이 없다"고 거짓말하는 목록이다 */
+test('100개에서 끊기고, 끊겼다고 화면에 적는다', async ({ page }) => {
+  await setup(page)
+  await seedCommits(
+    page,
+    Array.from({ length: 130 }, (_, i) => ({
+      sha: `c${String(i).padStart(6, '0')}`,
+      subject: `커밋 ${i}`,
+      author: '나',
+      daysAgo: i,
+    })),
+  )
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-tab-history').click()
+  await expect(page.locator('[data-testid^="history-commit-"]')).toHaveCount(100)
+  await expect(page.getByTestId('evidence-history-cap')).toContainText('Newest 100 commits')
+})
+
+test('상한에 못 미치면 끊겼다는 말도 하지 않는다', async ({ page }) => {
+  await setup(page)
+  await seedCommits(
+    page,
+    Array.from({ length: 12 }, (_, i) => ({ sha: `c${String(i).padStart(6, '0')}`, subject: `커밋 ${i}`, author: '나', daysAgo: i })),
+  )
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('evidence-tab-history').click()
+  await expect(page.locator('[data-testid^="history-commit-"]')).toHaveCount(12)
+  await expect(page.getByTestId('evidence-history-cap')).toBeHidden()
+})
+
+/** 저장소에 묻는 질문이므로 깃 탭과 같은 취급을 받는다 */
+test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('first-run')).toBeVisible()
+  await page.evaluate(async () => {
+    const store = (window as never as { __store: any }).__store
+    const m = (window as never as { __mock: any }).__mock
+    m.projects.add = async (path: string) => ({
+      id: 'p-nogit', path, name: 'nogit', defaultTool: 'claude', git: null,
+    })
+    await store.getState().addProject('/tmp/nogit')
+  })
+  await page.getByTestId('new-session-nogit').click()
+  await page.getByTestId('create-session-confirm').click()
+
+  await expect(page.getByTestId('evidence-tab-git')).toBeDisabled()
+  await expect(page.getByTestId('evidence-tab-history')).toBeDisabled()
+  await expect(page.getByTestId('evidence-not-repo')).toBeVisible()
+})

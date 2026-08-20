@@ -8,6 +8,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, type PanelTab } from '../../store/store.js'
 import { FileTree } from '../files/FileTree.jsx'
 import { TerminalPane } from './Terminal.jsx'
+import { COMMIT_LIMIT, commitAgo, hasMultipleAuthors } from './commits.js'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, TREE_DEFAULT, TREE_MAX, TREE_MIN } from '../../store/store.js'
@@ -129,9 +130,17 @@ function PanelHeader({
       </DragRegion>
 
       <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1" data-testid="evidence-tabs">
+        {/*
+          History sits next to Git rather than inside it (#21). Both are repo questions, so
+          both go dark without a repo — but they are different questions: Git asks "what is
+          uncommitted right now", History asks "how did we get here". The Git tab keeps its
+          short strip of commits as context for staging; this is the same log as a place you
+          go to read it, with the whole column instead of ~7 rows.
+        */}
         {(
           [
             ['git', 'Git'],
+            ['history', 'History'],
             ['files', 'Files'],
             ['terminal', 'Terminal'],
           ] as const
@@ -140,7 +149,7 @@ function PanelHeader({
             key={id}
             onClick={() => setPanelTab(id as PanelTab)}
             data-testid={`evidence-tab-${id}`}
-            disabled={id === 'git' && !isRepo}
+            disabled={(id === 'git' || id === 'history') && !isRepo}
             className={`rounded px-2 py-0.5 text-[12px] transition-colors disabled:opacity-40 ${
               tab === id ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
             }`}
@@ -166,10 +175,15 @@ function PanelBody({
   // 터미널은 프로젝트(디렉토리)의 것이라 깃 저장소인지와 무관하다
   if (tab === 'terminal') return <TerminalPane projectId={projectId} />
 
+  /*
+    깃과 기록은 둘 다 저장소에 묻는 질문이라, 저장소가 아니면 둘 다 답이 없다.
+    탭은 이미 비활성이지만 여기로 닿는 길이 남아 있다 — 저장된 스냅샷으로 되살아나거나,
+    그 탭을 보는 중에 저장소가 아닌 프로젝트로 옮겨 앉거나.
+  */
   if (tab === 'files' || !isRepo) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        {tab === 'git' && !isRepo && (
+        {tab !== 'files' && !isRepo && (
           <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-not-repo">
             Not a git repository
           </p>
@@ -178,6 +192,8 @@ function PanelBody({
       </div>
     )
   }
+
+  if (tab === 'history') return <CommitHistory projectId={projectId} />
 
   // 깃 탭: 위는 지금 무엇이 바뀌었나, 아래는 어떻게 여기까지 왔나.
   // 둘 다 파일 목록이 아니라 서로 다른 질문이라서 나란히 둔다.
@@ -576,6 +592,93 @@ function GitTree({ projectId }: { projectId: string }) {
             </li>
           ))}
         </ul>
+      )}
+    </section>
+  )
+}
+
+/**
+ * 기록 탭 — 로그를 **읽으러 오는** 자리 (#21).
+ *
+ * 위 `GitTree`와 데이터는 같고 용무가 다르다. 저쪽은 커밋을 만드는 동안 곁눈질하는
+ * 맥락이라 일곱 줄에 갇혀 있고, 여기는 세로 한 칸을 통째로 쓴다.
+ *
+ * **선을 그리지 않는다.** 레인은 "이 갈래들이 어디서 만났나"를 물을 때 폭값을 하는데,
+ * "요즘 무슨 일이 있었나"에는 같은 픽셀을 날짜에 주는 편이 낫다. 그래서 그래프는 저쪽에,
+ * 날짜는 이쪽에 둔다 — 두 벌을 만든 게 아니라 질문을 나눈 것이다.
+ *
+ * 눌렀을 때 열리는 것도 새로 만들지 않는다: `openCommit`이 이미 넓은 오버레이의 기록
+ * 탭을 그 커밋으로 펴 준다 (`git show`가 주는 diff 하나를 `DiffView`가 그린다).
+ */
+function CommitHistory({ projectId }: { projectId: string }) {
+  const platform = usePlatform()
+  const openCommit = useStore((s) => s.openCommit)
+  const touched = useTouchedCount(projectId)
+  const [commits, setCommits] = useState<GitCommit[] | null>(null)
+
+  useEffect(() => {
+    // 프로젝트를 옮기는 사이 늦게 온 응답이 남의 기록을 그리면 안 된다
+    let alive = true
+    platform.git
+      .log(projectId, COMMIT_LIMIT)
+      .then((c) => alive && setCommits(c))
+      .catch(() => alive && setCommits([]))
+    return () => {
+      alive = false
+    }
+  }, [platform, projectId, touched])
+
+  // 한 번만 읽는다 — 줄마다 시계를 보면 같은 목록 안에서 기준 시각이 달라진다
+  const now = Date.now()
+  const withAuthor = commits ? hasMultipleAuthors(commits) : false
+
+  if (commits === null) {
+    return (
+      <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-history">
+        Loading…
+      </p>
+    )
+  }
+  if (commits.length === 0) {
+    return (
+      <p className="px-3 py-2 text-[11px] text-slate" data-testid="evidence-history-empty">
+        No commits yet
+      </p>
+    )
+  }
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-history">
+      <ul className="min-h-0 flex-1 overflow-y-auto">
+        {commits.map((c) => (
+          <li key={c.sha}>
+            <button
+              className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-graphite/25"
+              onClick={() => openCommit(c.sha)}
+              data-testid={`history-commit-${c.shortSha}`}
+              title={`${c.subject} — ${c.author}`}
+            >
+              <span className="w-full truncate text-[12px] text-ash">{c.subject}</span>
+              <span className="readout w-full truncate text-[10px] text-slate">
+                {[
+                  c.shortSha,
+                  commitAgo(c.when, now),
+                  ...(withAuthor ? [c.author] : []),
+                  ...(c.parents.length > 1 ? ['merge'] : []),
+                ].join(' · ')}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {/* 조용히 끊긴 목록은 "더 오래된 커밋이 없다"고 거짓말하는 목록이다 */}
+      {commits.length >= COMMIT_LIMIT && (
+        <p
+          className="shrink-0 border-t border-edge px-3 py-1.5 text-[10px] text-slate"
+          data-testid="evidence-history-cap"
+        >
+          Newest {COMMIT_LIMIT} commits — older ones are not listed
+        </p>
       )}
     </section>
   )

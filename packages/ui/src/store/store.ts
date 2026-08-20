@@ -34,8 +34,18 @@ export type Overlay =
   | { kind: 'git'; path?: string | null; sha?: string | null; sub?: 'changes' | 'history' | 'branches' }
   | null
 
-/** 증거 패널이 보여주는 것 */
-export type PanelTab = 'files' | 'git' | 'terminal'
+/**
+ * 증거 패널이 보여주는 것.
+ *
+ * `history`는 깃 탭 안의 기록 띠를 **대신하지 않는다** (#21). 그 띠는 스테이징·커밋을
+ * 하는 동안 곁에 두는 맥락이라 `treeHeight`(기본 200px ≈ 일곱 줄)에 갇혀 있다 —
+ * 변경 목록이 나머지 높이를 가져가야 하기 때문이다. 기록을 **읽으러** 오는 것은 다른
+ * 용무이고, 그때는 세로 한 칸이 통째로 필요하다. 같은 데이터, 다른 일.
+ *
+ * 깃과 나란한 평평한 탭으로 둔다. 깃 탭 안에 또 탭을 넣으면 340px 한 칸에 탭 층이 둘이
+ * 되고, #20이 탭 배치를 다시 짤 때 옮길 것이 상태까지 딸린 덩어리가 된다.
+ */
+export type PanelTab = 'files' | 'git' | 'history' | 'terminal'
 
 /**
  * 화면 밖에서 일어난 일 하나.
@@ -702,7 +712,12 @@ export const useStore = create<AppState>((set, get) => ({
         // 보던 탭까지 돌아온다 (B-0)
         // 구버전 스냅샷의 tab은 무시한다 (탭 구조는 3레인으로 대체됐다)
         if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
-        if (snap.panelTab === 'files' || snap.panelTab === 'git' || snap.panelTab === 'terminal') {
+        if (
+          snap.panelTab === 'files' ||
+          snap.panelTab === 'git' ||
+          snap.panelTab === 'history' ||
+          snap.panelTab === 'terminal'
+        ) {
           set({ panelTab: snap.panelTab })
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
