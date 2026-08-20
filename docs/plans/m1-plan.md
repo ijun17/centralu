@@ -1,113 +1,113 @@
-# M1 실행 플랜 — "첫날부터 관제 루프가 도는 수준"
+# M1 execution plan — "the control loop turning from day one"
 
-- 기준 문서: [product-spec.md](../product-spec.md) §8 M1, [architecture.md](../architecture.md), [m0-findings.md](../spikes/m0-findings.md)
-- 진행 방식: 페이즈 순차 진행. 각 태스크는 **완료 기준(검증 방법 포함)** 이 있고, `[루프 가능]` 표시는 기계 판정이 가능해 ralph류 루프에 위임해도 안전한 구간.
-- **사람 확인은 마지막 G5 한 번뿐이다** (사용자 결정, 2026-08-15). 중간 게이트(G0/G2/G3)는 자동 검증으로 대체: G0·G2는 lint·테스트가 판정, G3 실 세션 스모크는 에이전트가 직접 실행(haiku, 소액). 중간 판단이 필요한 결정은 기본값을 선택하고 findings/plan에 기록한다. 늦은 발견 리스크는 태스크 단위 커밋으로 완화 — G5에서 문제 발견 시 해당 커밋 단위로 되짚는다.
-- M1 범위 밖 (하지 않는다): Codex 어댑터, 깃 패널 상세, 파일 트리, 코드 뷰어, 첨부, 재시작 복원(M1.5), 사용량 대시보드, 오케스트레이터, Tauri.
+- Reference documents: [product-spec.md](../product-spec.md) §8 M1, [architecture.md](../architecture.md), [m0-findings.md](../spikes/m0-findings.md)
+- How it runs: phases in sequence. Each task has **completion criteria (including how it is verified)**, and a `[loopable]` mark means machine judgement is possible and it is safe to delegate to a ralph-style loop.
+- **Human confirmation happens exactly once, at the end, at G5** (user's decision, 2026-08-15). The intermediate gates (G0/G2/G3) are replaced by automatic verification: G0 and G2 are judged by lint and tests, and the G3 real-session smoke is run by the agent itself (haiku, small amounts). Where an intermediate judgement is needed, pick the default and record it in findings/plan. The risk of finding out late is mitigated by committing per task — if a problem is found at G5, trace back by that commit.
+- Outside M1 scope (not done): the Codex adapter, git panel detail, file tree, code viewer, attachments, restore on restart (M1.5), the usage dashboard, the orchestrator, Tauri.
 
-## M0 반영 사항 (전 태스크 공통 제약)
+## M0 items to apply (constraints common to all tasks)
 
-1. ClaudeAdapter: `allowedTools` 사용 금지 (canUseTool 셰도잉), `includePartialMessages: true` 사용.
-2. 안전 명령 자동 승인은 정상 동작 — 승인 요청 부재를 오류로 취급하지 않는다.
-3. Codex 승인 decision 6종은 protocol 설계에 미리 반영 (M2에서 어댑터만 추가되도록).
-4. `limit_reached` 이벤트에 `usedPercent?`, `windowMins?` 필드 포함 (Codex가 제공).
-5. T3-2에서 SDK 세션의 사용자 훅·플러그인 로드 억제 가능 여부 확인 후 방침 결정 (기본 방향: 억제).
+1. ClaudeAdapter: do not use `allowedTools` (it shadows canUseTool), do use `includePartialMessages: true`.
+2. Auto-approval of safe commands is correct behaviour — the absence of an approval request is not treated as an error.
+3. The 6 Codex approval decisions are reflected in the protocol design up front (so that M2 only adds the adapter).
+4. The `limit_reached` event includes `usedPercent?` and `windowMins?` fields (Codex provides them).
+5. In T3-2, check whether loading user hooks and plugins in SDK sessions can be suppressed, then decide the policy (default direction: suppress).
 
 ---
 
-## Phase 0 — 모노레포 스캐폴드
+## Phase 0 — monorepo scaffold
 
-**T0-1. pnpm workspace + 패키지 골격** — folder-structure.md 그대로: `packages/{protocol,core,platform,ui,agent-host}`, `apps/web`, `tooling/`, `e2e/`. tsconfig project references, Vitest, Prettier.
-완료: `pnpm -r build && pnpm -r test` 통과 (각 패키지 placeholder 1개).
+**T0-1. pnpm workspace + package skeleton** — exactly as folder-structure.md: `packages/{protocol,core,platform,ui,agent-host}`, `apps/web`, `tooling/`, `e2e/`. tsconfig project references, Vitest, Prettier.
+Done when: `pnpm -r build && pnpm -r test` passes (1 placeholder per package).
 
-**T0-2. 경계 강제 장치** — eslint flat + eslint-plugin-boundaries + no-restricted-imports/globals (fetch·WebSocket·`@tauri-apps/*` 금지 규칙), dependency-cruiser 설정.
-완료: **위반 코드를 일부러 넣은 픽스처가 lint 에러를 내는 것을 테스트로 확인** (규칙이 실제로 작동한다는 증거). `[루프 가능]`
+**T0-2. Boundary enforcement** — eslint flat + eslint-plugin-boundaries + no-restricted-imports/globals (rules forbidding fetch, WebSocket and `@tauri-apps/*`), dependency-cruiser configuration.
+Done when: **a fixture containing deliberately violating code is confirmed by a test to produce a lint error** (evidence that the rule actually works). `[loopable]`
 
-**게이트 G0** (자동): 스캐폴드 커밋. dependency-cruiser가 구조 규칙 위반 0을 확인.
+**Gate G0** (automatic): commit the scaffold. dependency-cruiser confirms 0 structural rule violations.
 
 ## Phase 1 — protocol
 
-**T1-1. 봉투 + 이벤트 스키마** — Rpc/RpcRes/Push(seq), NormalizedEvent 전종, ApprovalDetail(3 kind), ProtocolError, SessionState. zod v4, discriminated union + unknown 무시 규칙. protocol.md 기준 + M0 반영 4번.
-완료: 타입 추론 = 스키마 일치, golden 픽스처 테스트 통과. `[루프 가능]`
+**T1-1. Envelope + event schemas** — Rpc/RpcRes/Push(seq), all NormalizedEvent kinds, ApprovalDetail (3 kinds), ProtocolError, SessionState. zod v4, discriminated union + the ignore-unknown rule. Per protocol.md + M0 item 4.
+Done when: type inference matches the schema, golden fixture tests pass. `[loopable]`
 
-**T1-2. store 스키마 DDL** — `schema.sql` v1: projects/sessions(archived,last_read_seq)/messages/approval_rules/workspace.
-완료: better-sqlite3로 마이그레이션 적용 테스트. `[루프 가능]`
+**T1-2. store schema DDL** — `schema.sql` v1: projects/sessions(archived,last_read_seq)/messages/approval_rules/workspace.
+Done when: a test applies the migration with better-sqlite3. `[loopable]`
 
-## Phase 2 — core (순수 도메인, 여기가 제품의 두뇌)
+## Phase 2 — core (the pure domain, the product's brain)
 
-**T2-1. 세션 상태 머신** — FR-12 전이 테이블 (idle/working/waiting_approval/waiting_input/limited/error), 이벤트→전이 매핑, 불법 전이 처리.
-완료: 전이 전수 테스트 (합법 전이 전부 + 불법 전이 대표 케이스). `[루프 가능]`
+**T2-1. Session state machine** — the FR-12 transition table (idle/working/waiting_approval/waiting_input/limited/error), event→transition mapping, illegal transition handling.
+Done when: exhaustive transition tests (every legal transition + representative illegal ones). `[loopable]`
 
-**T2-2. 인박스 규칙** — 긴급도 정렬(승인→오류→응답대기), 동일 긴급도 내 대기 시작 오름차순, 안읽음 우선 (FR-15/16).
-완료: 정렬 property 테스트. `[루프 가능]`
+**T2-2. Inbox rules** — urgency ordering (approval→error→awaiting response), ascending by wait start within the same urgency, unread first (FR-15/16).
+Done when: property tests on the ordering. `[loopable]`
 
-**T2-3. 읽음 규칙** — last_read_seq 비교, 읽음 처리 조건(스크롤 최신 도달 ∥ 포커스 3초) 판정 함수 (FR-16).
-완료: 단위 테스트. `[루프 가능]`
+**T2-3. Read rules** — last_read_seq comparison, a function judging the mark-read conditions (scroll reaches latest ∥ focused for 3s) (FR-16).
+Done when: unit tests. `[loopable]`
 
-**T2-4. 승인 정책** — 배너 제자리 승인 판정(ApprovalDetail.kind 기반), always-allow 규칙 매칭(패턴 + 매치 미리보기용 조회), scope(session/project) (FR-3).
-완료: 단위 테스트 (패턴 오적용 케이스 포함). `[루프 가능]`
+**T2-4. Approval policy** — judging in-place banner approval (based on ApprovalDetail.kind), always-allow rule matching (patterns + the lookup for the match preview), scope (session/project) (FR-3).
+Done when: unit tests (including cases where a pattern is misapplied). `[loopable]`
 
-**T2-5. 리듀서** — applyEvent(state, NormalizedEvent) → 상태 갱신. 파생 셀렉터(인박스·카운터·안읽음·동시세션)용 순수 함수.
-완료: 이벤트 시퀀스 재생 테스트 (스파이크 녹화 픽스처 재사용). `[루프 가능]`
+**T2-5. Reducer** — applyEvent(state, NormalizedEvent) → state update. Pure functions for the derived selectors (inbox, counters, unread, concurrent sessions).
+Done when: event sequence replay tests (reusing the recorded spike fixtures). `[loopable]`
 
-**게이트 G2** (자동): core 커버리지 + 전이 테이블이 FR-12 표와 1:1 대응하는지 테스트로 검증 (스펙의 상태·전이를 테스트 케이스로 옮겨 적는다).
+**Gate G2** (automatic): core coverage + a test verifying that the transition table corresponds 1:1 with the FR-12 table (transcribing the spec's states and transitions into test cases).
 
-## Phase 3 — agent-host (최소)
+## Phase 3 — agent-host (minimal)
 
-**T3-1. transport** — ws 서버, 토큰 핸드셰이크, event-log(seq 부여, 링 버퍼, afterSeq 재전송, resync_required), RPC 라우팅.
-완료: 재연결 시나리오 테스트 (연결→이벤트 N개→끊김→afterSeq 재접속→유실분 수신). `[루프 가능]`
+**T3-1. transport** — ws server, token handshake, event-log (assigning seq, ring buffer, afterSeq replay, resync_required), RPC routing.
+Done when: a reconnection scenario test (connect → N events → disconnect → reconnect with afterSeq → receive what was missed). `[loopable]`
 
-**T3-2. ClaudeAdapter** — M0 제약 반영. SDK 이벤트 → NormalizedEvent 변환(델타·tool_use 요약·approval_request(ApprovalDetail 구조화)·turn_complete·usage·rate_limit→limit_reached·session_title), canUseTool↔respondApproval 브리지, interrupt, 사용자 훅 억제 방침 확인·적용.
-완료: 계약 테스트 (스파이크 덤프 픽스처 → 이벤트 스냅샷) + **실 세션 스모크 1회** (haiku, 승인 1회 왕복). 스모크는 에이전트가 자동 실행.
+**T3-2. ClaudeAdapter** — reflecting the M0 constraints. SDK events → NormalizedEvent conversion (deltas, tool_use summaries, approval_request (structured ApprovalDetail), turn_complete, usage, rate_limit→limit_reached, session_title), the canUseTool↔respondApproval bridge, interrupt, confirming and applying the user hook suppression policy.
+Done when: contract tests (spike dump fixtures → event snapshots) + **one real session smoke** (haiku, one approval round trip). The smoke is run automatically by the agent.
 
-**T3-3. 세션 매니저 + dev-services 최소** — 세션 수명주기(생성·archive·dispose), store(sqlite write-through: 세션 메타·메시지·읽음 위치), git status 요약(브랜치·변경 수만 — 사이드바용), 프로젝트 등록 검증(디렉토리 존재).
-완료: RPC 통합 테스트 (인메모리 어댑터 목으로). `[루프 가능]`
+**T3-3. Session manager + minimal dev-services** — session lifecycle (create, archive, dispose), store (sqlite write-through: session metadata, messages, read position), git status summary (branch and change count only — for the sidebar), project registration validation (directory exists).
+Done when: RPC integration tests (with an in-memory adapter mock). `[loopable]`
 
-**게이트 G3** (자동): 미니 CLI 클라이언트로 실 세션 E2E 스모크 (스파이크 d-host 방식). 에이전트가 실행하고 결과 로그를 커밋에 남긴다.
+**Gate G3** (automatic): a real session E2E smoke with a mini CLI client (the spike's d-host approach). The agent runs it and leaves the result log in the commit.
 
 ## Phase 4 — platform
 
-**T4-1. ports 정의** — Platform/AgentPort/GitPort/StorePort/SystemPort/capabilities. M1에서 안 쓰는 포트(fs/usage)는 정의만.
-완료: 타입 체크 + ui에서 import 가능. `[루프 가능]`
+**T4-1. Define the ports** — Platform/AgentPort/GitPort/StorePort/SystemPort/capabilities. Ports unused in M1 (fs/usage) are defined only.
+Done when: type check passes + importable from ui. `[loopable]`
 
-**T4-2. web 구현 + mock 구현** — web: WS RPC 클라이언트(재연결+백오프 ~50줄 자작) + 포트 매핑. mock: 인메모리 전체 구현 + 시나리오 스크립트(세션 N개, 승인 요청 발생기 — Playwright용).
-완료: web은 host 대상 통합 테스트, mock은 계약 테스트 공유 (동일 테스트 스위트를 두 구현에 실행). `[루프 가능]`
+**T4-2. web implementation + mock implementation** — web: a WS RPC client (reconnect + backoff, ~50 lines written here) + port mapping. mock: a full in-memory implementation + scenario scripts (N sessions, an approval request generator — for Playwright).
+Done when: web has integration tests against the host, and mock shares the contract tests (the same test suite run against both implementations). `[loopable]`
 
-## Phase 5 — ui + apps/web (관제 루프 완성)
+## Phase 5 — ui + apps/web (the control loop completed)
 
-빌드 순서 = 사용 루프 순서. 각 태스크는 mock platform 기반 Playwright 시나리오가 완료 기준의 일부.
+Build order = the order of the usage loop. For each task, a Playwright scenario on the mock platform is part of the completion criteria.
 
-**T5-1. 셸** — Vite + Tailwind v4 + PlatformProvider + zustand 배선(dispatchEvent→core 리듀서), 이벤트 구독 시작. 다크/라이트.
-완료: mock 이벤트가 스토어에 반영되는 통합 테스트.
+**T5-1. Shell** — Vite + Tailwind v4 + PlatformProvider + zustand wiring (dispatchEvent→core reducer), start subscribing to events. Dark/light.
+Done when: an integration test showing mock events reaching the store.
 
-**T5-2. 프로젝트 등록 + 사이드바** — 디렉토리 선택(웹 dev에선 경로 입력 폴백), 프로젝트·세션 트리, 상태 점 5종 + 안읽음 점, 브랜치·변경 수 (FR-1).
-완료: Playwright — 등록→사이드바 표시→상태 점 갱신.
+**T5-2. Project registration + sidebar** — directory picker (falling back to path entry in web dev), project/session tree, 5 status dots + unread dot, branch and change count (FR-1).
+Done when: Playwright — register → shown in the sidebar → status dot updates.
 
-**T5-3. 포커스 뷰: 대화** — 가상 리스트(@tanstack/react-virtual), 스트리밍 델타 append, 도구 호출 카드(접힘 정책: 조회성 접힘/변경 펼침), 입력창(멀티라인), 중단 버튼 (FR-3 일부).
-완료: Playwright — mock 스트리밍 렌더, 60fps는 육안 확인만 (정밀 측정은 M1.5).
+**T5-3. Focus view: conversation** — virtual list (@tanstack/react-virtual), streaming delta append, tool call cards (collapse policy: read-oriented collapsed / changes expanded), input box (multiline), interrupt button (part of FR-3).
+Done when: Playwright — mock streaming renders; 60fps checked by eye only (precise measurement in M1.5).
 
-**T5-4. 승인 UI** — 승인 카드 y/n/a(+⌥a scope), 전역 배너(제자리 승인/확인 필요 분기 — core 판정 사용), 승인 큐 자동 다음 (FR-3).
-완료: Playwright — 승인 3연속 시나리오 (배너 승인 1, 점프 승인 1, 항상 허용 1 → 규칙 저장 확인).
+**T5-4. Approval UI** — approval card y/n/a (+⌥a scope), the global banner (branching between in-place approval and "needs review" — using the core judgement), the approval queue auto-advancing (FR-3).
+Done when: Playwright — a 3-in-a-row approval scenario (1 banner approval, 1 jump approval, 1 always-allow → confirm the rule was saved).
 
-**T5-5. 인박스 + 상태 표시** — ⌘I 인박스(정렬은 core), Enter 점프→처리→자동 다음, `d` 아카이브, 전역 분리 카운터, "다음 대기로 이동" 단축키, 대기 경과 시간 (FR-12/15/17/20 일부).
-완료: Playwright — **관제 루프 시나리오**: 대기 5개(승인2+응답3) → 단축키만으로 전부 처리 → "인박스 비움".
+**T5-5. Inbox + status display** — ⌘I inbox (ordering from core), Enter to jump → handle → automatically next, `d` archive, split global counters, the "go to the next waiting item" shortcut, elapsed wait time (parts of FR-12/15/17/20).
+Done when: Playwright — **the control loop scenario**: 5 waiting items (2 approvals + 3 responses) → handle them all with the keyboard alone → "inbox empty".
 
-**T5-6. 읽음/안읽음 + 자동 이름 + 동시 세션 경고** — 읽음 처리 배선(core 판정), 사이드바 굵기/점, listSessions summary→세션 이름, 수동 변경 시 고정, 생성 다이얼로그 인라인 경고 (FR-16/18/2).
-완료: Playwright 각 1 시나리오.
+**T5-6. Read/unread + automatic names + concurrent session warning** — read-marking wiring (core judgement), sidebar weight/dot, listSessions summary→session name, fixed on manual change, the inline warning in the creation dialog (FR-16/18/2).
+Done when: 1 Playwright scenario each.
 
-**게이트 G5 (최종·기계 판정 불가)**: **실전 스모크** — 실제 프로젝트 2개 등록, 실 Claude 세션 3개(승인 발생 작업 포함) 동시 구동, 사용자가 §1.3 루프를 직접 돌려본다. 판정 기준: "터미널 3탭보다 나은가". 여기서 나온 불만이 M1.5 백로그가 된다.
+**Gate G5 (final, cannot be judged by machine)**: **a real-world smoke** — register 2 actual projects, run 3 real Claude sessions concurrently (including work that triggers approvals), and the user turns the §1.3 loop themselves. The criterion: "is this better than 3 terminal tabs". The complaints that come out of this become the M1.5 backlog.
 
-## Phase 6 — 마감
+## Phase 6 — closing out
 
-**T6-1. E2E 회귀 스위트 정리** — Playwright 시나리오를 e2e/로 통합, CI 스크립트(`pnpm verify` = lint+depcruise+test+e2e). `[루프 가능]`
-**T6-2. 유휴 성능 1차 측정** — 세션 4개 idle 상태 CPU 샘플링, 눈에 띄는 위반(폴링·과다 리렌더)만 수정. 정밀 튜닝은 M3.
-**T6-3. 스파이크 정리** — `spike/` 삭제 (findings 문서는 유지), README에 개발 실행법 추가.
+**T6-1. Tidy the E2E regression suite** — consolidate the Playwright scenarios into e2e/, CI script (`pnpm verify` = lint+depcruise+test+e2e). `[loopable]`
+**T6-2. First idle performance measurement** — CPU sampling with 4 sessions idle; fix only conspicuous violations (polling, excessive re-renders). Precise tuning is M3.
+**T6-3. Spike cleanup** — delete `spike/` (keep the findings document), add how to run development to the README.
 
 ---
 
-## 실행 메모
+## Execution notes
 
-- 커밋 단위 = 태스크 단위. 태스크 완료 기준의 테스트가 커밋에 포함되어야 한다 (no fake completion — placeholder·skip 테스트는 미완료로 간주).
-- `[루프 가능]` 태스크의 루프 완료 조건은 항상 "`pnpm verify` 통과"로 통일.
-- 페이즈 내 태스크는 순서 의존이 명시된 것 외에 병렬 가능 (예: T2-1~T2-4는 상호 독립).
-- 실 SDK 호출이 필요한 검증(T3-2 스모크, G3)은 루프에 넣지 않고 에이전트가 단발로 실행한다 (비용 통제). G5만 사람이 실행.
+- The commit unit = the task unit. The test in a task's completion criteria has to be in the commit (no fake completion — placeholder and skipped tests count as incomplete).
+- The loop completion condition for a `[loopable]` task is always the same: "`pnpm verify` passes".
+- Tasks within a phase can run in parallel except where an ordering dependency is stated (e.g. T2-1~T2-4 are mutually independent).
+- Verification needing real SDK calls (the T3-2 smoke, G3) is not put in a loop but run once by the agent (cost control). Only G5 is run by a human.
