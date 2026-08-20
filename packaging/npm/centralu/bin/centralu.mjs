@@ -16,6 +16,7 @@
  * instead of being rediscovered in every function.
  */
 import { execFileSync, spawn } from 'node:child_process'
+import { isNewer } from './semver.mjs'
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -219,17 +220,6 @@ async function latestVersion(timeoutMs = 2000) {
   }
 }
 
-/** `1.2.10` > `1.2.9` — 문자열 비교로는 틀린다 */
-function isNewer(a, b) {
-  const pa = String(a).split('.').map(Number)
-  const pb = String(b).split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] ?? 0
-    const y = pb[i] ?? 0
-    if (x !== y) return x > y
-  }
-  return false
-}
 
 async function update() {
   const res = await latestVersion(8000)
