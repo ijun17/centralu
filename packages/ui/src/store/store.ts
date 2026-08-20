@@ -537,6 +537,42 @@ function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notic
   })
 }
 
+/**
+ * Which tools the Usage modal should report on — deduplicated, in screen order (#26).
+ *
+ * Usage is an **account** property that differs per tool, so the only honest question is
+ * "which tools are on screen right now". The old picker asked a narrower one — *the*
+ * focused session's tool, then the project default, then a hardcoded `'claude'` — and
+ * that question has no answer in the grid: `focusedSessionId` does not name one of nine
+ * panels, so a grid of Codex agents fell through to Claude's limits with nothing on
+ * screen saying a substitution had happened.
+ *
+ * Deduplicated because usage belongs to the account, not the session: two Claude panels
+ * share one number, and printing it twice would suggest they are two separate budgets.
+ *
+ * **An empty result is a real result.** The `'claude'` fallback is gone — it turned
+ * "we cannot tell" into "here is the wrong tool", which is the failure the caller has no
+ * way to detect. The modal says it does not know instead.
+ */
+export function usageTools(s: AppState): ToolName[] {
+  const out: ToolName[] = []
+  const add = (t: ToolName | undefined) => {
+    if (t && !out.includes(t)) out.push(t)
+  }
+
+  // The grid is the case where "the session you are looking at" is not singular
+  if (s.view === 'grid') {
+    for (const id of s.gridPanels) add(s.sessions[id]?.tool)
+    return out
+  }
+
+  // Focus (and the orchestrator) still look at one conversation — unchanged behaviour
+  const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
+  if (session) return [session.tool]
+  add(s.focusedProjectId ? s.projects[s.focusedProjectId]?.defaultTool : undefined)
+  return out
+}
+
 export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',

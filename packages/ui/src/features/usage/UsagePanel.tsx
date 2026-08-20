@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useStore } from '../../store/store.js'
+import { useStore, usageTools } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
@@ -182,33 +182,79 @@ export function formatTokens(n: number): string {
   return String(n)
 }
 
-/** 사용량 모달 — 상단바 계기판에서 연다 */
+const TOOL_LABEL: Record<ToolName, string> = { claude: 'Claude Code', codex: 'Codex' }
+
+/**
+ * 어느 도구의 한도를 물을 것인가 — 판정은 스토어의 `usageTools`가 한다.
+ *
+ * 셀렉터가 배열을 그대로 돌려주면 매 store write마다 새 배열이라 zustand가 변경으로
+ * 읽는다 (docs/state-management.md §3): 스트리밍 델타 한 줄에도 모달이 다시 그려진다.
+ * 문자열은 값이라 **답이 실제로 달라졌을 때만** 다르다.
+ */
+function useUsageTools(): ToolName[] {
+  const key = useStore((s) => usageTools(s).join(','))
+  return useMemo(() => (key ? (key.split(',') as ToolName[]) : []), [key])
+}
+
+/**
+ * 사용량 모달 — 상단바 계기판에서 연다.
+ *
+ * **화면에 있는 도구마다 한 칸씩** 그린다 (#26). 그리드에는 여러 도구가 동시에 떠
+ * 있을 수 있는데, 예전에는 하나만 골라 그렸고 고르지 못하면 조용히 claude로 떨어졌다 —
+ * 그래서 코덱스만 띄운 그리드가 클로드의 한도를 보여줄 수 있었다.
+ *
+ * 세는 단위가 계정이라 칸은 **도구별**이지 칸별이 아니다. 클로드 세션 둘은 같은 숫자를
+ * 나눠 쓰므로 두 번 적으면 예산이 둘인 것처럼 읽힌다.
+ */
 export function UsageModal() {
   const open = useStore((s) => s.usageOpen)
   const toggle = useStore((s) => s.toggleUsage)
-  // 사용량은 계정 단위지만 도구마다 다르다 — **보고 있는 세션의** 도구를 쓴다.
-  // 프로젝트 기본값으로 대신하면 섞어 쓸 때 엉뚱한 도구의 한도를 보여준다.
-  const tool = useStore((s) => {
-    const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
-    if (session) return session.tool
-    const projectId = s.focusedProjectId
-    return (projectId ? s.projects[projectId]?.defaultTool : undefined) ?? 'claude'
-  })
+  const tools = useUsageTools()
 
   if (!open) return null
+  // 하나뿐이면 도구 이름은 머리글에 둔다 — 칸이 하나인데 제목을 또 다는 건 군더더기다
+  const only = tools.length === 1 ? tools[0]! : null
+
   return (
     <Modal onClose={() => toggle(false)} testId="usage-modal" align="top">
       <div className="w-[420px] max-w-[92vw] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
           <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
-          <span className="readout text-[11px] text-slate">{tool === 'codex' ? 'Codex' : 'Claude Code'}</span>
+          {only && <span className="readout text-[11px] text-slate">{TOOL_LABEL[only]}</span>}
           <span className="ml-auto">
             <IconButton label="Close" onClick={() => toggle(false)} testId="usage-close" align="right">
               <CloseIcon size={11} />
             </IconButton>
           </span>
         </header>
-        <UsagePanel tool={tool} />
+
+        {/*
+          칸이 여럿이면 창 아래로 흘러넘친다 — 모달에는 스크롤이 없으므로 여기서 준다.
+          하나일 때 이 상자는 아무 일도 하지 않는다 (70vh를 넘길 일이 없다).
+        */}
+        <div className="max-h-[70vh] overflow-y-auto">
+          {/*
+            모르면 모른다고 적는다. 예전엔 여기서 claude로 떨어졌는데, 그러면 사용자에게는
+            '알 수 없음'이 '틀린 값'으로 도착한다 — 틀렸다는 사실조차 화면에 없다.
+          */}
+          {tools.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[12px] leading-relaxed text-ash" data-testid="usage-no-tool">
+              Usage is counted per tool, and nothing on screen says which tool this is.
+              <span className="mt-1 block text-[11px] text-slate">
+                Open a session — or put panels in the grid — to see its limits.
+              </span>
+            </p>
+          ) : only ? (
+            <UsagePanel tool={only} />
+          ) : (
+            tools.map((t) => (
+              <section key={t} className="border-t border-edge first:border-t-0" data-testid={`usage-section-${t}`}>
+                <h3 className="px-4 pt-3 text-[11px] uppercase tracking-[0.12em] text-slate">{TOOL_LABEL[t]}</h3>
+                <UsagePanel tool={t} />
+              </section>
+            ))
+          )}
+        </div>
       </div>
     </Modal>
   )
