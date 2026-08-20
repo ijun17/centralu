@@ -8,6 +8,7 @@ import {
   SessionState,
   TokenUsage,
   ToolSummary,
+  UpdateStatus,
 } from './entities.js'
 
 /**
@@ -15,6 +16,17 @@ import {
  * 도구별 차이는 어댑터가 흡수하고, UI/core는 이 타입만 안다.
  */
 const base = { sessionId: z.string() }
+
+/**
+ * 세션에 속하지 않는 이벤트 (`error`, `update_status`).
+ *
+ * `sessionId`를 **없애지 않고 optional로 둔다.** 키 자체가 없는 분기를 하나 넣으면
+ * 유니온 전체에서 `e.sessionId`가 타입 오류가 되어, 세션 이벤트만 다루는 코드까지
+ * 전부 고쳐야 한다 — 앱 전역 사건 하나를 더한 대가로는 너무 크고, 그 수선이 지나간
+ * 자리마다 실수가 들어갈 틈이 생긴다. 받는 쪽은 이미 `if (!sessionId) return`으로
+ * 걸러내고 있으므로, 없는 값을 없다고 말하는 데는 이 모양으로 충분하다.
+ */
+const appScoped = { sessionId: z.string().optional() }
 
 /**
  * host가 이 이벤트를 기록으로 남기며 매긴 **세션 내 메시지 번호** (store의 messages.seq).
@@ -124,7 +136,21 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** 세션이 삭제됐다 — 다른 창·재연결에서도 목록이 맞아야 한다 */
   z.object({ ...base, type: z.literal('session_deleted') }),
-  z.object({ sessionId: z.string().optional(), type: z.literal('error'), error: ProtocolError }),
+  /**
+   * The update picture changed (issue #43).
+   *
+   * **The only event here that belongs to no session** — `error` already proved the
+   * union can carry one (its `sessionId` is optional), so this rides the same rails
+   * instead of growing a second stream. Everything downstream that keys off
+   * `sessionId` already guards for its absence.
+   *
+   * It exists because the host checks on a schedule of its own: a check that lands
+   * six hours into a running window has no RPC reply to ride home on, and without
+   * this the answer would sit in the host until the next launch — which is exactly
+   * the long-running window the schedule was for.
+   */
+  z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
+  z.object({ ...appScoped, type: z.literal('error'), error: ProtocolError }),
 ])
 export type NormalizedEvent = z.infer<typeof NormalizedEvent>
 

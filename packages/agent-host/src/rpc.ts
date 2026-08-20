@@ -11,6 +11,7 @@ const toInfo = (h: TerminalHandle) => ({
   history: h.history(),
   alive: h.alive,
 })
+import type { UpdateService } from './updates.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
@@ -20,10 +21,15 @@ export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
   terminals?: TerminalService,
+  updates?: UpdateService,
 ) {
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
     return terminals
+  }
+  const requireUpdates = (): UpdateService => {
+    if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
+    return updates
   }
 
   const handlers: { [M in RpcMethodName]: (p: unknown) => Promise<unknown> } = {
@@ -224,6 +230,11 @@ export function createRpcHandler(
       return toInfo(h)
     },
     'approvals.rules': async () => mgr.listApprovalRules(),
+    'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
+    'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
+    // Answers once the install has started, not once it has finished — see the note on
+    // `updates.apply` in the protocol. The rest arrives as `update_status` events.
+    'updates.apply': async () => requireUpdates().apply(),
   }
 
   return async (method: string, params: unknown): Promise<unknown> => {

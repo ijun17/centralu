@@ -19,6 +19,7 @@ import {
   SessionState,
   TokenUsage,
   ToolName,
+  UpdateStatus,
 } from './entities.js'
 
 /** UI → host RPC. 포트 인터페이스(platform/ports)와 1:1 대응 (docs/protocol.md §3) */
@@ -520,6 +521,45 @@ export const RpcMethods = {
   'terminal.restart': {
     params: z.object({ terminalId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
     result: TerminalInfo,
+  },
+  /**
+   * Where this install stands against the registry (issue #43).
+   *
+   * `force` is the difference between "what do you already know" (app start, cheap,
+   * no network) and "go look now" (the Check now button). One method rather than two
+   * because the answer is the same shape either way, and a caller that wants a fresh
+   * answer wants the same fields a stale one has.
+   *
+   * **This never rejects for a network failure.** A version check that can break the
+   * screen it decorates is worse than no version check; what went wrong comes back in
+   * `error` instead, where the person who pressed the button can read it.
+   */
+  'updates.status': {
+    params: z.object({ force: z.boolean().default(false) }),
+    result: UpdateStatus,
+  },
+  /**
+   * Turn the periodic check on or off.
+   *
+   * The host holds this, not the UI, because the host is what owns the timer — a
+   * preference kept on the other side of the wire from the thing it governs is one
+   * that eventually stops governing it.
+   */
+  'updates.setAuto': {
+    params: z.object({ enabled: z.boolean() }),
+    result: UpdateStatus,
+  },
+  /**
+   * Install the newer version. **Explicitly asked for — never automatic.**
+   *
+   * Answers as soon as the work has *started*, not when it has finished: `npm i -g`
+   * routinely outruns the 30s RPC deadline, and a call that times out while the
+   * install keeps going leaves the screen saying the opposite of what happened.
+   * Progress arrives as `update_status` events instead.
+   */
+  'updates.apply': {
+    params: z.object({}),
+    result: UpdateStatus,
   },
   'approvals.rules': {
     params: z.object({ projectId: z.string().optional() }),

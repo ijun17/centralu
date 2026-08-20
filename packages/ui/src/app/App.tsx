@@ -18,6 +18,7 @@ import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
 import { FirstRun } from '../features/onboarding/FirstRun.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
+import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageModal } from '../features/usage/UsagePanel.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
@@ -217,6 +218,15 @@ function TopBar() {
         so the palette gained both entries in the same change.
       */}
       <span className="ml-auto flex items-center gap-3">
+        {/*
+          "새 버전이 있습니다" — 있을 때만 나타나는 한 줄 (이슈 #43).
+
+          단축키 칩을 걷어낸 자리(위 주석)에 무언가를 다시 놓는 셈인데, 성질이 반대다:
+          칩은 늘 켜져 있으면서 처음 한 번 뒤로는 아무것도 알려주지 않았고, 이 줄은
+          평소엔 아예 없다가 계기판이 할 말이 생겼을 때만 선다. 그리고 이것도 상태다 —
+          "이 앱은 지금 최신이 아니다"는 계기판이 답할 만한 질문이다.
+        */}
+        <UpdateLine />
         {/*
           연결됨은 **slate가 아니라 ash**다.
 

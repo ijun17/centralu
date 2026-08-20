@@ -18,9 +18,10 @@ import type {
   UsageSnapshot,
   ToolName,
   QuestionAnswer,
+  UpdateStatus,
 } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
-import type { AgentPort, AlertKind, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
+import { APP_VERSION, isNewerVersion, sessionLiveDefaults } from '@cc/protocol'
+import type { AgentPort, AlertKind, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, UpdatePort, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
  * 인메모리 구현 (docs/platform-abstraction.md §6).
@@ -651,6 +652,96 @@ export class MockPlatform implements Platform {
       this.workspaceSnapshot = s
     },
     load: async () => this.workspaceSnapshot,
+  }
+
+  /**
+   * 테스트용: 레지스트리가 `latest`로 들고 있는 척할 버전 (이슈 #43).
+   * null이면 못 닿은 것 — '최신이다'와 다르다.
+   */
+  registryVersion: string | null = null
+
+  /** 테스트용: `npm i -g`가 실패하는 상황 (진짜로 돌리지는 않는다) */
+  updateFails: string | null = null
+
+  private updateStatus: UpdateStatus = {
+    current: APP_VERSION,
+    latest: null,
+    newer: false,
+    auto: true,
+    phase: 'idle',
+    error: null,
+    checkedAt: null,
+  }
+
+  /**
+   * 앱 업데이트 (이슈 #43).
+   *
+   * **실물과 같은 규칙을 지킨다.** 특히 두 가지: 비교는 protocol의 것을 쓰고
+   * (`isNewerVersion` — 목이 자기 규칙을 만들면 갈라지는 것이 안 보인다), 설치는
+   * **끝나기 전에** 답하고 나머지는 이벤트로 보낸다. 여기서 `npm i -g`를 흉내만 내는
+   * 것이 아니라 아예 돌리지 않는 것도 계약이다 — 테스트가 기계를 고쳐서는 안 된다.
+   */
+  readonly updates: UpdatePort = {
+    status: async (force = false) => {
+      // 실물과 같다: 자동 확인이 꺼져 있으면 사람이 누르기 전엔 아무 데도 안 묻는다
+      if (!force && !this.updateStatus.auto) return { ...this.updateStatus }
+      if (!force && this.updateStatus.checkedAt !== null) return { ...this.updateStatus }
+      if (this.updateStatus.phase === 'updating' || this.updateStatus.phase === 'restart_required') {
+        return { ...this.updateStatus }
+      }
+      return this.runUpdateCheck()
+    },
+    setAuto: async (enabled: boolean) => {
+      if (this.updateStatus.auto === enabled) return { ...this.updateStatus }
+      this.setUpdateStatus({ auto: enabled })
+      // 켠 사람은 지금 묻고 있는 것이다 — 6시간 뒤가 아니라
+      return enabled ? this.runUpdateCheck() : { ...this.updateStatus }
+    },
+    apply: async () => {
+      if (this.updateStatus.phase === 'updating') return { ...this.updateStatus }
+      const latest = this.updateStatus.latest
+      if (!this.updateStatus.newer || !latest) {
+        this.setUpdateStatus({ phase: 'failed', error: 'There is no newer version to install' })
+        return { ...this.updateStatus }
+      }
+      this.setUpdateStatus({ phase: 'updating', error: null })
+      /*
+       * 끝은 **답을 준 뒤에** 알린다. 설치는 RPC 제한 시간을 넘기는 일이라 실물도 그렇게
+       * 동작하고, 그래서 "설치 중 → 다시 시작하세요"는 이벤트로만 도착한다.
+       */
+      setTimeout(() => {
+        if (this.updateFails) this.setUpdateStatus({ phase: 'failed', error: this.updateFails })
+        else this.setUpdateStatus({ phase: 'restart_required', error: null })
+      }, 0)
+      return { ...this.updateStatus }
+    },
+  }
+
+  private runUpdateCheck(): UpdateStatus {
+    if (this.registryVersion === null) {
+      // 못 닿았다 — 지난번에 알아낸 것은 그대로 둔다 (실물과 같은 규칙)
+      this.setUpdateStatus({ phase: 'idle', error: 'Could not reach the registry — check the network' })
+      return { ...this.updateStatus }
+    }
+    this.setUpdateStatus({
+      latest: this.registryVersion,
+      newer: isNewerVersion(this.registryVersion, this.updateStatus.current),
+      phase: 'idle',
+      error: null,
+      checkedAt: this.now(),
+    })
+    return { ...this.updateStatus }
+  }
+
+  private setUpdateStatus(patch: Partial<UpdateStatus>): void {
+    this.updateStatus = { ...this.updateStatus, ...patch }
+    this.emit({ type: 'update_status', status: { ...this.updateStatus } })
+  }
+
+  /** 시나리오 헬퍼: 레지스트리에 새 버전이 올라온 상황을 만든다 (Playwright에서 사용) */
+  offerUpdate(version: string): void {
+    this.registryVersion = version
+    this.runUpdateCheck()
   }
 
   async dispose(): Promise<void> {

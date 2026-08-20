@@ -454,3 +454,33 @@ describe('대화가 바닥에 서 있었는가 (이슈 #31)', () => {
     expect(useStore.getState().stickToBottom).toBe(before)
   })
 })
+
+/**
+ * 업데이트 상태는 세션에 속하지 않는다 (이슈 #43).
+ *
+ * `dispatchEvent`의 첫 줄은 `if (!sessionId) return`이고, 그것이 이 파일에서 가장 넓은
+ * 문이다. 앱 전역 사건을 그 뒤에 두면 host가 보낸 것이 도착은 하는데 아무 일도 일어나지
+ * 않는다 — 통신도 정상이고 오류도 없어서, 원인을 찾을 실마리가 어디에도 안 남는 종류의
+ * 결함이다. 순서가 곧 계약이라 여기서 못을 박는다.
+ */
+describe('업데이트 상태 (#43)', () => {
+  const status = {
+    current: '0.1.0-beta.2', latest: '9999.0.0', newer: true, auto: true,
+    phase: 'idle' as const, error: null, checkedAt: 1,
+  }
+
+  it('세션이 없는 이벤트도 스토어에 도착한다', () => {
+    useStore.getState().dispatchEvent({ type: 'update_status', status })
+    expect(useStore.getState().update?.latest).toBe('9999.0.0')
+  })
+
+  /** 설치는 사람이 눌러야 시작한다 — 알아냈다는 것만으로는 아무 일도 안 일어난다 */
+  it('새 버전을 알게 되는 것만으로는 아무것도 설치하지 않는다', async () => {
+    const platform = new MockPlatform()
+    platform.registryVersion = '9999.0.0'
+    useStore.setState({ platform })
+    await useStore.getState().checkUpdate(true)
+    expect(useStore.getState().update?.newer).toBe(true)
+    expect(useStore.getState().update?.phase).toBe('idle')
+  })
+})

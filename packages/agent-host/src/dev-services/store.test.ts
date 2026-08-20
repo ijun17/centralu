@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(15)
+    expect(store.schemaVersion).toBe(16)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(15)
+    expect(new Store().schemaVersion).toBe(16)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(15)
+    expect(store.schemaVersion).toBe(16)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -447,7 +447,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(15)
+    expect(store.schemaVersion).toBe(16)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -502,7 +502,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(15)
+    expect(store.schemaVersion).toBe(16)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -574,7 +574,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(15)
+    expect(first.schemaVersion).toBe(16)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -610,6 +610,44 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     const second = new Store(file)
     expect(second.projectCommands('p1')).toEqual([])
     expect(second.listProjects().map((p) => p.name)).toEqual(['p1'])
+    second.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * v16 — host 자신의 설정 (이슈 #43).
+ *
+ * 처음 들어가는 것은 "업데이트를 자동으로 확인할까"이고, 그 답이 **다시 켰을 때 남아
+ * 있어야** 이 설정이 설정이다. 끌 때마다 다시 켜지는 체크상자는 켜져 있는 것과 같다.
+ *
+ * 값이 아예 없는 것과 `'false'`가 들어 있는 것을 구분한다 — 나중에 기본값을 바꿀 때,
+ * 일부러 꺼 둔 사람의 선택만은 덮지 않기 위한 여지다.
+ */
+describe('v16 이관 — host의 설정이 재시작을 넘긴다', () => {
+  it('옛 DB에 테이블이 생기고, 껐다 켜도 값이 남는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v16-'))
+    const file = join(dir, 'store.db')
+
+    const old = new Database(file)
+    old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
+      sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);`)
+    old.pragma('user_version = 15')
+    old.close()
+
+    const first = new Store(file)
+    // 쓴 적이 없는 것은 null이다 — 'false'와 구별된다
+    expect(first.appSetting('updates.auto')).toBeNull()
+    first.setAppSetting('updates.auto', 'false')
+    first.close()
+
+    const second = new Store(file)
+    expect(second.appSetting('updates.auto')).toBe('false')
+    // schema.sql이 user_version을 1로 되돌려 단계가 매번 다시 도는 구조다 —
+    // 두 번째 열기가 테이블을 다시 만들어 답을 지우면 안 된다
+    second.setAppSetting('updates.auto', 'true')
+    expect(second.appSetting('updates.auto')).toBe('true')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })

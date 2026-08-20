@@ -20,6 +20,7 @@ import type {
   ToolName,
   ModelOption,
   QuestionAnswer,
+  UpdateStatus,
 } from '@cc/protocol'
 
 /**
@@ -279,6 +280,30 @@ export interface ApprovalRulesPort {
   remove(id: number): Promise<void>
 }
 
+/**
+ * 앱 자체의 업데이트 (이슈 #43).
+ *
+ * **확인도 설치도 전부 저쪽(host)에서 한다.** 레지스트리에 묻고 `npm i -g`를 돌리는 것은
+ * 브라우저가 할 수 없는 일이고, 무엇보다 확인을 실행기(launcher)에 맡기면 사용자 기계에
+ * 이미 깔린 낡은 사본이 답하게 된다 — 그 사본의 비교가 틀려 있었던 것이 #42다.
+ *
+ * 포트가 나르는 것은 상태 하나뿐이다. 화면은 "지금 어디쯤인가"만 알면 되고,
+ * **재시작은 절대 이쪽에서 하지 않는다** — 앱은 사람에게 말하고 거기서 멈춘다.
+ */
+export interface UpdatePort {
+  /** 지금 아는 것. `force`면 레지스트리에 다시 묻는다 (설정의 '지금 확인') */
+  status(force?: boolean): Promise<UpdateStatus>
+  /** 주기 확인을 켜고 끈다 */
+  setAuto(enabled: boolean): Promise<UpdateStatus>
+  /**
+   * 새 버전을 설치한다. **사람이 눌렀을 때만.**
+   *
+   * 시작하자마자 답한다 — `npm i -g`는 RPC 제한 시간을 넘기기 일쑤라, 끝을 기다리는
+   * 계약으로 두면 실제로는 성공한 설치가 화면에서는 실패로 보인다. 나머지는 이벤트로 온다.
+   */
+  apply(): Promise<UpdateStatus>
+}
+
 export interface WorkspacePort {
   save(snapshot: WorkspaceSnapshot): Promise<void>
   load(): Promise<WorkspaceSnapshot | null>
@@ -314,6 +339,7 @@ export interface Platform {
   search: SearchPort
   rules: ApprovalRulesPort
   workspace: WorkspacePort
+  updates: UpdatePort
   terminal: TerminalPort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>

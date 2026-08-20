@@ -9,8 +9,10 @@ import { HostServer } from '../../agent-host/src/transport/server.js'
 import { SessionManager } from '../../agent-host/src/sessions/manager.js'
 import { Store } from '../../agent-host/src/dev-services/store.js'
 import { createRpcHandler } from '../../agent-host/src/rpc.js'
+import { UpdateService } from '../../agent-host/src/updates.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
+import { APP_VERSION } from '@cc/protocol'
 import type { Platform } from './ports/index.js'
 import { createMockPlatform } from './mock/index.js'
 import { createWebPlatform } from './web/index.js'
@@ -38,13 +40,36 @@ class EchoAdapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink) { return new EchoHandle(opts.sessionId, emit) }
 }
 
-type Harness = { platform: Platform; cleanup: () => Promise<void> }
+/**
+ * `offerUpdate`: 레지스트리에 그 버전이 올라와 있는 상황을 만든다 (이슈 #43).
+ * 두 구현이 같은 자극에 같은 답을 하는지가 이 파일의 존재 이유다.
+ */
+type Harness = { platform: Platform; cleanup: () => Promise<void>; offerUpdate: (version: string) => void }
 
 async function makeWeb(): Promise<Harness> {
   const store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters) })
+  /*
+   * 레지스트리도 `npm i -g`도 **주입한다.**
+   *
+   * 안 그러면 이 스위트가 도는 동안 진짜 레지스트리에 요청이 나가고, 최악의 경우
+   * 테스트가 이 기계의 전역 패키지를 갈아 끼운다. 여기 있는 두 줄이 그 일이 일어날 수
+   * 없다는 보장이다 — 규칙이 아니라 구조로.
+   */
+  let registryVersion: string | null = null
+  const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
+    fetchLatest: async () =>
+      registryVersion === null
+        ? { ok: false as const, reason: 'Could not reach the registry — check the network' }
+        : { ok: true as const, version: registryVersion },
+    run: async () => {},
+  })
+  const server = new HostServer({
+    port: 0,
+    token: 'contract',
+    onRpc: createRpcHandler(mgr, adapters, undefined, updates),
+  })
   const port = await server.listen()
   const platform = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
@@ -54,6 +79,9 @@ async function makeWeb(): Promise<Harness> {
   await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
   return {
     platform,
+    offerUpdate: (version) => {
+      registryVersion = version
+    },
     cleanup: async () => {
       await platform.dispose()
       await mgr.disposeAll()
@@ -65,7 +93,13 @@ async function makeWeb(): Promise<Harness> {
 
 async function makeMock(): Promise<Harness> {
   const platform = createMockPlatform()
-  return { platform, cleanup: async () => platform.dispose() }
+  return {
+    platform,
+    offerUpdate: (version) => {
+      platform.registryVersion = version
+    },
+    cleanup: async () => platform.dispose(),
+  }
 }
 
 async function waitFor(pred: () => boolean | Promise<boolean>, ms = 3000): Promise<void> {
@@ -209,6 +243,61 @@ describe.each([
 
   it('없는 세션 조작은 에러', async () => {
     await expect(h.platform.agents.send('nope', 'x')).rejects.toThrow()
+  })
+
+  /**
+   * 업데이트: 알리는 데서 멈춘다 (이슈 #43).
+   *
+   * 알아냈다는 사실만으로는 아무것도 바뀌지 않는지를 본다. `phase`가 'idle'이라는 것이
+   * 그 말이다 — 새 버전을 찾은 것과 그것을 설치한 것 사이에는 사람의 클릭이 있다.
+   */
+  it('레지스트리에 새것이 있으면 알리되 스스로 설치하지 않는다 (#43)', async () => {
+    h.offerUpdate('9999.0.0')
+    const s = await h.platform.updates.status(true)
+    expect(s.current).toBe(APP_VERSION)
+    expect(s.latest).toBe('9999.0.0')
+    expect(s.newer).toBe(true)
+    expect(s.phase).toBe('idle')
+  })
+
+  /**
+   * 꺼 두면 진짜로 안 묻는다.
+   *
+   * 이 체크상자가 장식이 되는 방식은 하나다: 주기 요청만 막고 **기동 직후의 한 번**은
+   * 그대로 나가는 것. 화면은 앱을 열 때마다 `status(force: false)`를 부르므로, 그 자리에
+   * 가드가 없으면 껐다고 말한 사람의 기계에서 요청이 계속 나간다.
+   */
+  it('자동 확인을 끄면 자동 호출은 레지스트리에 닿지 않는다 (#43)', async () => {
+    await h.platform.updates.setAuto(false)
+    h.offerUpdate('8888.0.0')
+    // 자동 호출은 아무 데도 안 갔다 — 알던 답이 그대로다
+    expect((await h.platform.updates.status(false)).latest).toBe('9999.0.0')
+    // 사람이 누른 것은 여전히 통한다
+    expect((await h.platform.updates.status(true)).latest).toBe('8888.0.0')
+    // 다시 켜면 그 자리에서 묻는다 — 방금 켠 사람은 지금 궁금한 것이다
+    h.offerUpdate('9999.0.0')
+    expect((await h.platform.updates.setAuto(true)).latest).toBe('9999.0.0')
+  })
+
+  /**
+   * 설치는 **시작하자마자** 답하고, 끝났다는 말은 이벤트로 온다 (이슈 #43).
+   *
+   * `npm i -g`는 RPC 제한 시간(30초)을 넘기는 일이 흔하다. 끝을 기다리는 계약으로 두면
+   * 실제로는 성공한 설치가 화면에서는 시간 초과로 보이고, 그 뒤로 두 쪽이 서로 다른
+   * 이야기를 하게 된다.
+   *
+   * 마지막 줄이 이 기능의 전부다: 끝났는데도 **앱은 그대로 돌고 있다.**
+   */
+  it('설치는 시작을 답하고 완료는 이벤트로 알린다 — 스스로 재시작하지 않는다 (#43)', async () => {
+    h.offerUpdate('9999.0.0')
+    await h.platform.updates.status(true)
+    events.length = 0
+
+    const started = await h.platform.updates.apply()
+    expect(started.phase).toBe('updating')
+
+    await waitFor(() => events.some((e) => e.type === 'update_status' && e.status.phase === 'restart_required'))
+    expect((await h.platform.updates.status(false)).phase).toBe('restart_required')
   })
 
   it('구독 해제가 동작한다', async () => {

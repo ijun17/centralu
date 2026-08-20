@@ -54,6 +54,21 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'history_synced', sessionId: 's1', added: 2 },
   { type: 'session_deleted', sessionId: 's1' },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } },
+  /*
+   * 세션에 속하지 않는 이벤트 (이슈 #43). sessionId가 **없어도** 파싱돼야 한다 —
+   * 이 앱이 통째로 낡았다는 사실은 어느 대화의 소유물이 아니다.
+   *
+   * 기본값이 붙은 필드는 생략된 채로도 읽혀야 한다. 옛 host가 status를 절반만 보내도
+   * 새 UI가 그걸 거절하면, 버전 확인이 버전 차이 때문에 죽는 셈이 된다.
+   */
+  { type: 'update_status', status: { current: '0.1.0-beta.2' } },
+  {
+    type: 'update_status',
+    status: {
+      current: '0.1.0-beta.2', latest: '0.1.0-beta.3', newer: true, auto: true,
+      phase: 'restart_required', error: null, checkedAt: 1755000000000,
+    },
+  },
 ]
 
 describe('golden: v1 이벤트 전종', () => {

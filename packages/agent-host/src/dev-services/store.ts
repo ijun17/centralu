@@ -352,6 +352,30 @@ export class Store {
           }
         },
       },
+      {
+        to: 16,
+        run: () => {
+          /*
+           * Settings that belong to the host itself (issue #43).
+           *
+           * The first one is whether to check for updates on a schedule, and it cannot live
+           * in `workspace` with the rest of the preferences: that row is a single blob the
+           * UI writes whole, and the host reading its own setting out of the other side's
+           * document would be a second reader of a record with exactly one author. Worse,
+           * the thing this governs is a **timer in this process**, which has to know its
+           * answer before any UI has connected.
+           *
+           * A key/value table rather than a column, because there is no row it belongs to —
+           * this is about the install, not about a project or a session.
+           */
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS app_settings (
+              key   TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+          `)
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -779,6 +803,29 @@ export class Store {
     } catch {
       return null
     }
+  }
+
+  /**
+   * A setting that belongs to this install rather than to any project or session (#43).
+   *
+   * `null` means never written, which is deliberately distinguishable from a stored
+   * `'false'`: it is what lets a default move later without silently overruling the one
+   * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
+   */
+  appSetting(key: string): string | null {
+    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as
+      | { value: string }
+      | undefined
+    return row?.value ?? null
+  }
+
+  setAppSetting(key: string, value: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO app_settings (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(key, value)
   }
 
   addApprovalRule(r: { scope: string; projectId?: string; sessionId?: string; matcher: string; decision: string }): void {

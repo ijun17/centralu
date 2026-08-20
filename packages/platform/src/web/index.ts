@@ -251,6 +251,18 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         return (await rpc.call('workspace.load', {})) as WorkspaceSnapshot | null
       },
     },
+    /*
+      업데이트는 전부 host에 위임한다 (이슈 #43).
+
+      Tauri 구현이 이 자리를 덮어쓰지 않는 것이 맞다 — `npm i -g`를 도는 것은 Node이지
+      Rust가 아니고, 확인도 같은 WS 너머에서 일어난다. 화면이 진행 상황을 듣는 통로는
+      따로 없다: `update_status`는 다른 이벤트와 같은 스트림을 탄다 (agents.subscribe).
+    */
+    updates: {
+      status: (force = false) => rpc.call('updates.status', { force }),
+      setAuto: (enabled) => rpc.call('updates.setAuto', { enabled }),
+      apply: () => rpc.call('updates.apply', {}),
+    },
     capabilities: {
       osNotifications: typeof Notification !== 'undefined',
       dockBadge: false,

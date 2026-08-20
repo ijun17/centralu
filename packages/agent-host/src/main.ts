@@ -15,6 +15,7 @@ import type { AgentAdapter } from './adapters/contract.js'
 import { createRpcHandler } from './rpc.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { ensureToolPath } from './env-path.js'
+import { UpdateService } from './updates.js'
 import { acquireInstanceLock } from './dev-services/instance-lock.js'
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
@@ -139,10 +140,29 @@ const mgr = new SessionManager(
   join(dirname(dbPath), 'worktrees'),
 )
 const terminals = new TerminalService((f) => server.pushTerminal(f))
+/*
+ * 업데이트 확인은 **host가 한다** — 실행기(launcher)가 아니라 (이슈 #43).
+ *
+ * 실행기에도 같은 코드가 있지만, 도는 것은 사용자 기계에 **이미 깔려 있는** 사본이고
+ * beta.1의 사본은 버전 비교가 틀려 있다 (#42). 그 결함은 소급해서 못 고친다: 고쳤다는
+ * 사실을 알아차려야 할 쪽이 바로 그 틀린 비교다. 여기서 확인하면 앱과 같이 배포된 코드가
+ * 돌기 때문에 앱보다 낡을 수 없고, 낡은 실행기를 통째로 건너뛴다.
+ *
+ * 확인 결과는 사람에게 **알리기만 한다.** 도는 앱을 갈아 끼우는 것은 되돌릴 수 없는 일이라
+ * 조용히 하지 않는다 — 누르면 그때 한다.
+ */
+const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
+const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
+  // 저장된 적이 없으면 켬이 기본이다. 확인은 읽기 전용이고 실패는 통째로 삼키므로 켜 둬도
+  // 잃는 게 없는 반면, 꺼 두면 **설정을 한 번도 안 여는 사람**이 영원히 옛 버전에 남는다 —
+  // 낡은 채로 있을 가능성이 가장 큰 쪽이 정확히 그 사람이다.
+  readAuto: () => store.appSetting(AUTO_UPDATE_CHECK_KEY) !== 'false',
+  writeAuto: (enabled) => store.setAppSetting(AUTO_UPDATE_CHECK_KEY, String(enabled)),
+})
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
-  onRpc: createRpcHandler(mgr, adapters, terminals),
+  onRpc: createRpcHandler(mgr, adapters, terminals, updates),
 })
 
 let port: number
@@ -154,6 +174,15 @@ try {
 }
 // 이 줄은 Tauri 수퍼바이저가 파싱한다 (포트·토큰 전달 경로)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
+
+/*
+ * 기동 직후 한 번, 그다음은 6시간마다 (이슈 #43).
+ *
+ * **listen 뒤에 부른다.** 확인 결과는 방송으로 나가는데, 그 전에는 보낼 소켓이 없다.
+ * 기동 직후를 첫 확인으로 잡는 이유: 앱이 꺼져 있는 동안 새 버전이 나왔을 가능성이
+ * 가장 큰 순간이 바로 여기다. 이 앱은 며칠씩 켜 두는 물건이라 그다음이 필요하다.
+ */
+updates.start()
 
 /**
  * 거절 하나로 죽지 않는다.
@@ -193,6 +222,7 @@ process.on('uncaughtException', (err) => {
 })
 
 const shutdown = async () => {
+  updates.stop()
   await mgr.disposeAll()
   // PTY도 자식 프로세스다 — setsid()로 자기 그룹이라 그룹 kill이 못 미치므로 직접 정리한다
   terminals.disposeAll()

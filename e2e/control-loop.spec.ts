@@ -4671,3 +4671,65 @@ test('returning to the window re-reads every project (#41)', async ({ page }) =>
   await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
   await expect(page.getByTestId('mark-changed-beta')).toHaveText('2')
 })
+
+/**
+ * 업데이트: 알리기만 하고, 사람이 누를 때만 설치한다 (이슈 #43).
+ *
+ * The whole shape of this feature is in one run: a quiet line appears when the registry
+ * has something newer, clicking it is the consent, and the app stops at "restart" rather
+ * than replacing itself out from under the person. Driven entirely through the mock —
+ * `npm i -g` is never run by a test.
+ */
+test('새 버전이 있으면 조용한 줄이 뜨고, 눌러야 설치된다 (#43)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  // 아직 아무 소식이 없을 때는 계기판에 줄이 없다 — 할 말이 있을 때만 나타난다
+  await expect(page.getByTestId('update-line')).toBeHidden()
+
+  // 레지스트리에 새 버전이 올라왔다
+  await page.evaluate(() => (window as any).__mock.offerUpdate('9.9.9'))
+  const line = page.getByTestId('update-line')
+  await expect(line).toContainText('9.9.9')
+
+  // 누르는 것이 곧 동의다 — 그전까지 아무 일도 일어나지 않는다
+  await line.click()
+  /*
+   * 끝나도 **다시 시작하지는 않는다.** 도는 앱을 갈아 끼우는 것은 사람이 정할 일이고,
+   * 이 줄이 그 말을 하는 자리다.
+   */
+  await expect(line).toContainText('Restart')
+})
+
+/**
+ * 설정에 'Updates'가 생겼다 (이슈 #43 / #7이 열어 둔 네 번째 갈래).
+ *
+ * 자동 확인은 **기본으로 켜져 있다** — 읽기 전용이고 실패를 삼키므로 켜 두어 잃는 것이
+ * 없는 반면, 꺼 두면 설정을 한 번도 안 여는 사람이 영원히 옛 버전에 남는다.
+ * 끄면 진짜로 안 묻는다는 것까지 여기서 확인한다: 안 그러면 이 체크상자는 장식이다.
+ */
+test('설정 > Updates: 지금 확인 · 자동 확인 (#43)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await page.getByTestId('settings-tab-updates').click()
+
+  // 지금 도는 것이 무엇인지부터 말한다 — 비교의 한쪽이 안 보이면 나머지도 못 읽는다
+  await expect(page.getByTestId('update-current')).toContainText('0.1.0-beta.2')
+  await expect(page.getByTestId('update-auto')).toBeChecked()
+
+  await page.evaluate(() => {
+    ;(window as any).__mock.registryVersion = '9.9.9'
+  })
+  await page.getByTestId('update-check-now').click()
+  await expect(page.getByTestId('update-state')).toContainText('9.9.9')
+
+  // 꺼 두면 레지스트리에 묻지 않는다
+  await page.getByTestId('update-auto').uncheck()
+  const asked = await page.evaluate(async () => {
+    const m = (window as any).__mock
+    m.registryVersion = null // 이제 물어보면 '못 닿음'이 될 것이다
+    await (window as any).__store.getState().checkUpdate(false)
+    return (window as any).__store.getState().update.latest
+  })
+  // 자동 확인이 꺼진 채로 온 자동 호출은 아무 데도 안 갔다 — 알던 답이 그대로 남는다
+  expect(asked).toBe('9.9.9')
+})

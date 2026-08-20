@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -40,14 +41,26 @@ const SHORTCUTS: [string[], string][] = [
  * or to look up a key. Naming by module would put the next setting wherever its code lives,
  * which is the one thing the person looking for it cannot know.
  *
- * There are three, and three is meant to hold. A category per setting reads worse than no
- * categories at all, so a new one has to earn its place by having somewhere to belong —
- * quiet hours land in Notifications, a default preset in Permissions, rebinding in Shortcuts.
+ * A category per setting reads worse than no categories at all, so a new one has to earn its
+ * place by having somewhere to belong — quiet hours land in Notifications, a default preset
+ * in Permissions, rebinding in Shortcuts.
+ *
+ * **Updates is the fourth, and it earned it** (issue #43). The rule above is what admits it:
+ * asked which of the other three should hold "check for updates automatically", every answer
+ * is wrong. Notifications is about how the app interrupts *you about agents*; putting the
+ * registry in there renames the category. Permissions is what agents may do without asking.
+ * Shortcuts is a key table. And it has room to grow the way the others do — a release
+ * channel, skipping a version, the build this is running — which is the difference between a
+ * category and a drawer with one thing in it.
+ *
+ * It also passes the naming rule: people arrive here asking "am I on the latest?", which is
+ * an errand, not a module.
  */
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'shortcuts', label: 'Shortcuts' },
+  { id: 'updates', label: 'Updates' },
 ] as const
 
 type Category = (typeof CATEGORIES)[number]['id']
@@ -236,9 +249,119 @@ export function Settings() {
                 </ul>
               </section>
             )}
+
+            {/* 업데이트 (이슈 #43) */}
+            {category === 'updates' && <UpdatesSection />}
           </div>
         </div>
       </div>
     </div>
   )
+}
+
+/**
+ * 업데이트 (이슈 #43).
+ *
+ * 이 화면이 하는 말은 세 문장이다: 지금 도는 것은 이것이고, 저쪽에는 저것이 있고,
+ * 올릴지는 당신이 정한다. **자동으로 올리지 않는다** — 도는 앱을 갈아 끼우는 것은
+ * 되돌릴 수 없는 일이고, 이 앱은 되돌릴 수 없는 일을 조용히 하지 않는다.
+ *
+ * 확인은 host가 한다. 실행기(launcher)에도 같은 코드가 있지만 도는 것은 사용자 기계에
+ * 이미 깔린 사본이고, 그 사본의 비교가 틀려 있었다 (#42) — 여기서 확인하면 앱과 같이
+ * 배포된 코드가 도므로 낡은 실행기를 통째로 건너뛴다.
+ */
+function UpdatesSection() {
+  const update = useStore((s) => s.update)
+  const checkUpdate = useStore((s) => s.checkUpdate)
+  const setUpdateAuto = useStore((s) => s.setUpdateAuto)
+  const applyUpdate = useStore((s) => s.applyUpdate)
+
+  /*
+   * host가 아직 답하기 전에도 **지금 버전은 말할 수 있다.**
+   *
+   * 같은 빌드에서 나온 같은 상수이므로(`tooling/brand.test.ts`가 어디서든 같음을 지킨다)
+   * 어긋날 여지가 없고, 그 덕에 이 갈래는 여는 순간부터 비어 있지 않다 — 비교의 한쪽이
+   * 안 보이면 나머지 줄도 읽을 수 없다.
+   */
+  const current = update?.current ?? APP_VERSION
+  const busy = update?.phase === 'checking' || update?.phase === 'updating'
+
+  return (
+    <section>
+      <p className="text-[11px] leading-relaxed text-slate">
+        Centralu updates through npm, the same way it was installed. Checking only asks the
+        registry which version is newest; installing happens when you ask for it, and never
+        restarts the app for you.
+      </p>
+
+      <p className="mt-3 text-[12px] text-ash" data-testid="update-current">
+        Running {current}
+      </p>
+      <p className="mt-1 text-[12px] text-slate" data-testid="update-state">
+        {describe(update)}
+      </p>
+
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk disabled:opacity-50"
+          data-testid="update-check-now"
+          disabled={busy}
+          onClick={() => void checkUpdate(true)}
+        >
+          Check now
+        </button>
+        {update?.newer && update.latest && update.phase !== 'restart_required' && (
+          <button
+            className="rounded border border-edge px-2 py-1 text-[11px] text-chalk transition-colors hover:bg-graphite/50 disabled:opacity-50"
+            data-testid="update-apply"
+            disabled={busy}
+            onClick={() => void applyUpdate()}
+          >
+            Update to {update.latest}
+          </button>
+        )}
+      </div>
+
+      <label className="mt-3 flex items-center gap-2 text-[12px] text-ash">
+        <input
+          type="checkbox"
+          className="accent-graphite"
+          data-testid="update-auto"
+          checked={update?.auto ?? true}
+          onChange={(e) => void setUpdateAuto(e.target.checked)}
+        />
+        Check for updates automatically
+      </label>
+      {/*
+        켜 두는 것이 기본인 이유를 여기 적어 둔다. 끄는 사람이 무엇을 끄는 것인지 알아야
+        하고, 켜 두는 사람도 무엇이 나가는지 알아야 한다 — 몰래 나가는 요청은 없다.
+      */}
+      <p className="mt-1 text-[11px] leading-relaxed text-slate">
+        Once at startup and every six hours while the app is open. It asks the public npm
+        registry for one version number and nothing else; if it cannot reach it, nothing
+        happens and nothing interrupts you.
+      </p>
+    </section>
+  )
+}
+
+/**
+ * 한 줄로 "지금 어디쯤인가".
+ *
+ * **순서가 곧 판단이다.** 진행 중인 것이 먼저고, 그다음이 결과다. 특히 `error`가
+ * `latest`보다 뒤에 오면 안 된다 — 네트워크가 잠깐 끊긴 것을 "최신입니다"로 읽어 주는
+ * 순간, 확인이 자기 발견을 스스로 지운다 (#42가 한 릴리스 내내 숨어 있던 방식이다).
+ */
+function describe(u: UpdateStatus | null): string {
+  if (!u) return 'Not checked yet'
+  if (u.phase === 'checking') return 'Checking…'
+  if (u.phase === 'updating') return `Installing ${u.latest ?? 'the new version'}…`
+  if (u.phase === 'restart_required') {
+    return `Installed ${u.latest ?? 'the new version'}. Restart Centralu to use it.`
+  }
+  if (u.phase === 'failed') return `Update failed: ${u.error ?? 'unknown reason'}`
+  if (u.newer && u.latest) return `${u.latest} is available`
+  if (u.error) return u.error
+  if (u.latest) return 'Up to date'
+  return 'Not checked yet'
 }

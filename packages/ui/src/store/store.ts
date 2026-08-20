@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, QuestionAnswer, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
+import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, QuestionAnswer, SessionInfo, StoredMessage, ToolName, UpdateStatus } from '@cc/protocol'
 import {
   allDoneNotification,
   applyEvent,
@@ -293,6 +293,14 @@ export type AppState = {
   usageOpen: boolean
   settingsOpen: boolean
   notifyPolicy: NotifyPolicy
+  /**
+   * 이 설치가 레지스트리에 비해 어디쯤인가 (이슈 #43).
+   *
+   * **host가 통째로 소유한다** — 여기서 계산하는 필드는 하나도 없다. 확인도 설치도
+   * 저쪽에서 일어나고, 이 값은 그 결과가 도착해 앉는 자리일 뿐이다. null은 아직
+   * 물어보지도 못한 것(연결 전)이고, '최신이다'가 아니다.
+   */
+  update: UpdateStatus | null
 
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
@@ -324,6 +332,12 @@ export type AppState = {
   togglePalette(open?: boolean): void
   toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
+  /** 지금 확인한다 (설정의 버튼). 실패는 화면에 남되 던지지 않는다 */
+  checkUpdate(force?: boolean): Promise<void>
+  /** 주기 확인을 켜고 끈다 */
+  setUpdateAuto(enabled: boolean): Promise<void>
+  /** 새 버전을 설치한다. **재시작은 하지 않는다** — 끝나면 사람에게 말하고 멈춘다 */
+  applyUpdate(): Promise<void>
   setNotifyPolicy(p: NotifyPolicy): void
   /** 아직 보내지 않은 것을 세션에 붙여 둔다 (비면 지운다) */
   setDraft(sessionId: string, draft: Draft): void
@@ -682,6 +696,7 @@ export const useStore = create<AppState>((set, get) => ({
   usageOpen: false,
   settingsOpen: false,
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
+  update: null,
 
   async attach(platform) {
     /*
@@ -766,6 +781,18 @@ export const useStore = create<AppState>((set, get) => ({
 
     // 목록 등록 전에 도착한 이벤트를 재생한다 — 앱을 켜기 전부터 돌던 세션의 첫 출력이 여기 있다
     replayPendingEvents(get)
+
+    /*
+     * host가 이미 알아낸 것을 따라잡는다 (이슈 #43).
+     *
+     * **기다리지 않는다.** 버전 확인 때문에 앱이 늦게 뜨면 순서가 뒤집힌 것이다.
+     * `force: false`라 대개 host의 캐시를 그대로 받아 오지만, 아직 아무것도 모를 때는
+     * 네트워크를 기다릴 수 있다 — 그 몇 초가 화면 앞에 서면 안 된다.
+     *
+     * 구독만으로는 부족한 이유: host의 첫 확인은 기동 직후라 이 창이 붙기 전에 끝나 있다.
+     * 방송은 그때 이미 지나갔으므로, 늦게 온 쪽이 한 번 물어봐야 한다.
+     */
+    void get().checkUpdate(false)
 
     // 보던 자리로 돌아온다 (C-3). 없거나 사라진 세션이면 조용히 무시한다.
     try {
@@ -860,6 +887,18 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   dispatchEvent(e) {
+    /*
+     * 세션에 속하지 않는 사건은 **세션 가드보다 먼저** 처리한다 (이슈 #43).
+     *
+     * 아래 `if (!sessionId) return`은 이 파일에서 가장 넓은 문이고, 여기 걸리면
+     * 조용히 사라진다 — 업데이트 상태를 그 뒤에 두면 host가 보낸 것이 도착은 하는데
+     * 아무 일도 안 일어나는, 원인을 찾기 가장 나쁜 종류의 결함이 된다.
+     */
+    if (e.type === 'update_status') {
+      set({ update: e.status })
+      return
+    }
+
     const sessionId = e.sessionId
     if (!sessionId) return
 
@@ -1189,6 +1228,45 @@ export const useStore = create<AppState>((set, get) => ({
   },
   toggleSettings(open) {
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))
+  },
+
+  /*
+   * 아래 셋은 전부 같은 모양이다: host에게 시키고, 돌아온 상태를 그대로 앉힌다.
+   *
+   * **낙관적으로 미리 그리지 않는다.** 다른 조작들과 다른 점인데, 이유가 있다 —
+   * 여기서 화면이 앞서 나가면 "설치 중"이라고 써 놓고 실제로는 아무 일도 없는 상태가
+   * 만들어질 수 있고, 그건 되돌릴 수 없는 일에 대해 할 수 있는 가장 나쁜 거짓말이다.
+   * 진행 상황은 host가 이벤트로 계속 보내 주므로 기다려도 화면이 멈추지 않는다.
+   */
+  async checkUpdate(force = true) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ update: await platform.updates.status(force) })
+    } catch (e) {
+      // 버전 확인이 화면을 깨뜨리면 안 된다 — 확인 자체보다 앱이 중요하다
+      set({ toast: `Could not check for updates: ${(e as Error).message}` })
+    }
+  },
+
+  async setUpdateAuto(enabled) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ update: await platform.updates.setAuto(enabled) })
+    } catch (e) {
+      set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
+  async applyUpdate() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ update: await platform.updates.apply() })
+    } catch (e) {
+      set({ toast: `Could not update: ${(e as Error).message}` })
+    }
   },
   setNotifyPolicy(notifyPolicy) {
     set({ notifyPolicy })

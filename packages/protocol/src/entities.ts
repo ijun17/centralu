@@ -249,3 +249,49 @@ export const UsageSnapshot = z.object({
   daily: z.array(z.object({ date: z.string(), tokens: z.number() })).default([]),
 })
 export type UsageSnapshot = z.infer<typeof UsageSnapshot>
+
+/**
+ * Where this install stands against the registry (issue #43).
+ *
+ * **One shape carries both the answer and what we are doing about it.** The check and
+ * the update are two steps of one errand ("am I behind, and can I stop being behind"),
+ * and the screen shows one line for the whole errand — splitting them would force the
+ * UI to stitch two facts back together and to invent what to show when they disagree.
+ *
+ * The host owns every field here; nothing on this list is decided on the UI side.
+ */
+export const UpdateStatus = z.object({
+  /** The running build's version — `APP_VERSION`, the value this app was built from */
+  current: z.string(),
+  /**
+   * What the registry's `latest` tag points at, or null until a check has succeeded.
+   *
+   * Null is not "up to date". A check that never reached the network must not read as
+   * good news — that mistake is what let #42 hide for a whole release.
+   */
+  latest: z.string().nullable().default(null),
+  /** `latest` outranks `current`, by the comparison the launcher ships (`isNewerVersion`) */
+  newer: z.boolean().default(false),
+  /** Whether the host re-checks on its own schedule. Settings turns this on and off */
+  auto: z.boolean().default(true),
+  /**
+   * What the update is doing right now.
+   *
+   * `restart_required` is a terminal state on purpose: the new version is on disk and
+   * the running process is still the old one. **The app never restarts itself** —
+   * replacing a running program out from under someone mid-turn is the kind of quiet
+   * irreversible act this app does not do.
+   */
+  phase: z.enum(['idle', 'checking', 'updating', 'restart_required', 'failed']).default('idle'),
+  /**
+   * Why the last check or update did not work, or null when nothing went wrong.
+   *
+   * A failed *check* is swallowed everywhere it matters (it never breaks startup and
+   * never interrupts) but it is still recorded here, because "Check now" that answers
+   * with nothing at all is indistinguishable from a button that does nothing.
+   */
+  error: z.string().nullable().default(null),
+  /** When the last successful check finished (epoch ms), or null if none ever has */
+  checkedAt: z.number().nullable().default(null),
+})
+export type UpdateStatus = z.infer<typeof UpdateStatus>
