@@ -127,6 +127,19 @@ describe('프로젝트', () => {
     await addProject()
     expect((await rpc('projects.list', {}) as unknown[]).length).toBe(1)
   })
+
+  /*
+   * 사이드바의 변경 수는 턴이 끝날 때마다 이 문으로 다시 물어본다 (이슈 #41).
+   * 그래서 **하나만** 재는 길이어야 한다 — 목록을 통째로 만들고 한 줄만 남기면
+   * 턴 한 번에 등록된 프로젝트 수만큼 git status가 돈다.
+   */
+  it('gitStatus는 물어본 프로젝트 하나를 돌려주고, 모르는 id는 거절한다', async () => {
+    const p = await addProject()
+    const one = (await rpc('projects.gitStatus', { projectId: p.id })) as { id: string; path: string }
+    expect(one.id).toBe(p.id)
+    expect(one.path).toBe(p.path)
+    await expect(rpc('projects.gitStatus', { projectId: 'nope' })).rejects.toThrow(/Project not found/)
+  })
 })
 
 describe('세션 수명주기', () => {

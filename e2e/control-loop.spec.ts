@@ -4586,3 +4586,88 @@ test('a recalled multi-line message grows the composer (#38)', async ({ page }) 
   await expect(input).toHaveValue('첫 줄\n둘째 줄\n셋째 줄')
   expect(await input.evaluate((el) => el.clientHeight)).toBeGreaterThan(short)
 })
+
+/**
+ * The sidebar's changed count was read once, at attach, and never again (#41).
+ *
+ * So an agent could edit ten files and commit them while the number beside the project
+ * name sat on whatever it had been at app start — the most visible of the three stale
+ * git surfaces, because it is on screen in every view.
+ *
+ * A turn ending is the cheap, strong signal that the tree moved: it means an agent just
+ * stopped editing in that folder. Which is also why a burst of them has to cost **one**
+ * `git status` — two sessions in one project finishing together are one piece of news.
+ */
+test('a finished turn moves the sidebar changed count, once per burst (#41)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'one')
+  await newSession(page, 'alpha', 'two')
+
+  // The working tree moved while the agents worked
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitStatusCalls = 0
+    m.gitState.files = [
+      { path: 'a.ts', staged: false, status: 'M' },
+      { path: 'b.ts', staged: false, status: 'M' },
+      { path: 'c.ts', staged: false, status: 'M' },
+    ]
+  })
+
+  // Both sessions of the project finish in the same instant — the burst the debounce is for
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    for (const s of [...m.sessions.values()] as any[]) m.emit({ type: 'turn_complete', sessionId: s.id })
+  })
+
+  const mark = page.getByTestId('mark-changed-alpha')
+  await expect(mark).toHaveText('3')
+  await mark.hover()
+  await expect(page.getByRole('tooltip')).toContainText('3 uncommitted files')
+
+  // Two turns, one measurement (800ms per project)
+  expect(await page.evaluate(() => (window as any).__mock.gitStatusCalls)).toBe(1)
+})
+
+/**
+ * Waiting for `turn_complete` alone freezes the count for as long as the turn runs — ten
+ * minutes of watching an agent edit files while the sidebar insists nothing has changed.
+ * Letting an edit through says the tree is about to move, so it counts as news too (#41).
+ */
+test('granting a file edit refreshes the project count before the turn ends (#41)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await injectApproval(page, 0, { kind: 'file_edit', path: 'src/a.ts', diffPreview: '+one', multi: false })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    // The edit lands in the moment after the click — the refresh has to measure after it
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+  })
+
+  await page.getByTestId('approve-allow').click()
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
+})
+
+/**
+ * Nothing in the app watches the filesystem, so work done **outside** it — a commit typed
+ * into a terminal, a rebase, a `git clean` — is invisible until we come back and ask (#41).
+ * Returning to the window is that moment, and it is the only signal we get for it.
+ */
+test('returning to the window re-reads every project (#41)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+
+  await page.evaluate(() => {
+    const store = (window as any).__store.getState()
+    store.setAppFocused(false)
+    // Someone committed in a terminal while the app was in the background
+    ;(window as any).__mock.gitState.files = [
+      { path: 'x.ts', staged: false, status: 'M' },
+      { path: 'y.ts', staged: false, status: 'M' },
+    ]
+    store.setAppFocused(true)
+  })
+
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
+  await expect(page.getByTestId('mark-changed-beta')).toHaveText('2')
+})

@@ -169,10 +169,7 @@ export function createRpcHandler(
     },
     'projects.gitStatus': async (p) => {
       const { projectId } = RpcMethods['projects.gitStatus'].params.parse(p)
-      const all = await mgr.listProjects()
-      const found = all.find((x) => x.id === projectId)
-      if (!found) throw Object.assign(new Error('Project not found'), { code: 'internal' })
-      return found
+      return mgr.projectGitStatus(projectId)
     },
     'sessions.list': async () => mgr.listSessions(),
     'sessions.rename': async (p) => {

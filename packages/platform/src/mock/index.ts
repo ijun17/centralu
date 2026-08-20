@@ -49,6 +49,8 @@ export class MockPlatform implements Platform {
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
   badge = 0
+  /** 테스트용: projects.gitStatus를 몇 번 물었나 — 디바운스가 도는지 보는 눈 (이슈 #41) */
+  gitStatusCalls = 0
 
   constructor(opts: MockOptions = {}) {
     this.now = opts.now ?? (() => Date.now())
@@ -491,6 +493,17 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /**
+   * 프로젝트를 돌려줄 때 변경 수를 **gitState에서 다시 센다** (이슈 #41).
+   *
+   * 실물 host에서 사이드바의 숫자와 깃 패널의 목록은 같은 `git status` 한 번의 두 가지
+   * 읽기다. 목이 숫자를 따로 들고 있으면 테스트가 파일 목록을 바꿔도 숫자는 옛것이
+   * 남는데, 그건 실물이 만들 수 없는 불일치다 — 이 파일 머리말의 계약이 그것이다.
+   */
+  private withGit(p: ProjectInfo): ProjectInfo {
+    return p.git ? { ...p, git: { ...p.git, changedFiles: this.gitState.files.length } } : { ...p }
+  }
+
   readonly projects: ProjectPort = {
     reorder: async (orderedIds: string[]) => {
       const rank = new Map(orderedIds.map((id, i) => [id, i]))
@@ -507,11 +520,12 @@ export class MockPlatform implements Platform {
       this.projectsList.push(info)
       return info
     },
-    list: async () => this.projectsList.map((p) => ({ ...p })),
+    list: async () => this.projectsList.map((p) => this.withGit(p)),
     gitStatus: async (projectId: string) => {
+      this.gitStatusCalls++
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
-      return { ...p }
+      return this.withGit(p)
     },
     /**
      * 등록된 셸 명령 (이슈 #44).

@@ -244,6 +244,20 @@ export class SessionManager {
     return Promise.all(this.store.listProjects().map((p) => this.projectInfo(p.id, p.path)))
   }
 
+  /**
+   * One project, re-measured (issue #41).
+   *
+   * The caller is a refresh loop — the sidebar count is re-read every time a turn ends —
+   * so this has to cost **one** `git status`. Answering it by calling `listProjects` and
+   * discarding all but one row would run a status per registered project on every turn,
+   * which is exactly the quiet cost that keeps this out of the hot path.
+   */
+  async projectGitStatus(projectId: string): Promise<ProjectInfo> {
+    const p = this.store.listProjects().find((x) => x.id === projectId)
+    if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+    return this.projectInfo(p.id, p.path)
+  }
+
   listSessions(): SessionInfo[] {
     return [...this.meta.values()].map((s) => ({ ...s, live: this.handles.has(s.id) }))
   }

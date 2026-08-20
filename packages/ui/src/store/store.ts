@@ -337,6 +337,18 @@ export type AppState = {
 
   addProject(path: string): Promise<ProjectInfo>
   /**
+   * Ask for this project's git status again, debounced (issue #41).
+   *
+   * `project.git` was measured once, at attach, and never again — so the sidebar's changed
+   * count was a snapshot from app start that an agent's edits and commits never moved.
+   * Everything that shows git for a project reads that one field, so this writes back
+   * there rather than growing a second, parallel copy for the sidebar.
+   *
+   * Returns nothing and is safe to call from anywhere: the call is a *hint* that the tree
+   * may have moved, not a request the caller waits on.
+   */
+  refreshProjectGit(projectId: string): void
+  /**
    * Replace this project's saved shell commands (issue #44).
    * Adding one and deleting one both arrive here as "the list is this now".
    */
@@ -534,6 +546,35 @@ const WINDOW_SIZE = 50
 
 /** 아직 스토어에 등록되지 않은 세션의 이벤트 보관함 (등록 직후 재생) */
 const pendingEvents = new Map<string, NormalizedEvent[]>()
+
+/**
+ * How long a project's git refresh waits for the next trigger before it runs (issue #41).
+ *
+ * The triggers arrive in bursts, not singly: three sessions in one project finishing
+ * seconds apart, an approval granted and the turn it unblocked ending right after, a
+ * focus and a visibilitychange for one alt-tab. Each of those would otherwise be its own
+ * `git status` over the same working tree. One trailing window per project collapses a
+ * burst into one measurement, and it has to be short enough that the number has already
+ * moved by the time the eye goes looking for it — 800ms is under the glance.
+ *
+ * The delay also puts the measurement *after* the write it was told about, which matters
+ * for the approval trigger: the edit lands in the moment following the "allow", not in it.
+ */
+const GIT_REFRESH_MS = 800
+
+/**
+ * Pending git refreshes, one timer per project — module scope for the same reason
+ * `subscriptions` is: nothing on screen reads a timer, so keeping it out of the store
+ * costs no renders.
+ */
+const gitRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Whether two git summaries say the same thing — a refresh that found nothing must not redraw */
+function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.branch === b.branch && a.changedFiles === b.changedFiles && a.isRepo === b.isRepo && a.denied === b.denied
+}
 
 /**
  * 등록을 기다리며 보관된 이벤트를, **이제 등록된 세션에 한해** 순서대로 재생한다.
@@ -789,7 +830,23 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setAppFocused(focused) {
+    /*
+     * **Only the false→true edge.** `onVisibility` fires once at mount while `appFocused`
+     * is already true and `attach` has just fetched every project — refreshing on every
+     * call would repeat that fetch for no new information. Focus and visibilitychange also
+     * both fire for a single alt-tab; the debounce would collapse those anyway, but there
+     * is no reason to arm two timers to learn one thing.
+     */
+    const returning = focused && !get().appFocused
     set({ appFocused: focused })
+    /*
+     * Coming back to the window is the only signal we get for work done **outside** the app
+     * (issue #41): a commit typed in a terminal, a rebase, a `git clean`. Nothing in here
+     * watched it happen, so no project is more suspect than another and all of them are
+     * re-measured — refreshing only the focused one would leave every other sidebar row
+     * exactly as stale as before, which is the bug.
+     */
+    if (returning) for (const id of Object.keys(get().projects)) get().refreshProjectGit(id)
   },
 
   dismissNotices(sessionIds) {
@@ -867,6 +924,18 @@ export const useStore = create<AppState>((set, get) => ({
             .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
         }
       }
+
+      /*
+       * A finished turn is the cheapest strong hint that the working tree moved (issue #41):
+       * an agent just stopped editing in that folder, which is the very thing that made the
+       * sidebar's changed count wrong. No filesystem watcher needed for the common case —
+       * that is a bigger design (#34) and this must not wait for it.
+       *
+       * The session may not be registered yet (its events arrive buffered and are replayed
+       * after `attach` lists it); the replay runs this branch again with a project to name.
+       */
+      const projectId = s.sessions[sessionId]?.projectId
+      if (projectId) get().refreshProjectGit(projectId)
     }
 
     // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
@@ -1172,6 +1241,49 @@ export const useStore = create<AppState>((set, get) => ({
     return p
   },
 
+  refreshProjectGit(projectId) {
+    const pending = gitRefreshTimers.get(projectId)
+    if (pending !== undefined) clearTimeout(pending)
+    gitRefreshTimers.set(
+      projectId,
+      setTimeout(() => {
+        gitRefreshTimers.delete(projectId)
+        const platform = get().platform
+        // The project can be gone by the time the window closes (removed, or a reconnect
+        // rebuilt the list). Measuring a folder nobody is showing helps no one.
+        if (!platform || !get().projects[projectId]) return
+        void platform.projects
+          .gitStatus(projectId)
+          .then(({ git }) =>
+            set((s) => {
+              const cur = s.projects[projectId]
+              /*
+               * Nothing new is not an update. This runs after every turn and every return to
+               * the window, and "the count is the same" is the common answer — handing every
+               * row a fresh object each time would re-render the whole sidebar to redraw
+               * identical text.
+               */
+              if (!cur || sameGit(cur.git, git)) return {}
+              /*
+               * **Only `git` is taken from the answer.** The host rebuilds the rest of
+               * ProjectInfo from its own defaults, so swallowing the whole row would let a
+               * reply that landed mid-`setProjectCommands` undo the list being edited.
+               * This action was asked for one field; it writes one field.
+               */
+              return { projects: { ...s.projects, [projectId]: { ...cur, git } } }
+            }),
+          )
+          /*
+           * Silence on failure, deliberately. This is a number in the margin that nobody
+           * asked for — a repo that has just been deleted, or a host that dropped the
+           * project, must not put a toast in front of someone who was doing something else.
+           * The stale count stays, which is exactly where we were before.
+           */
+          .catch(() => {})
+      }, GIT_REFRESH_MS),
+    )
+  },
+
   async setProjectCommands(projectId, commands) {
     const platform = get().platform
     const before = get().projects[projectId]
@@ -1411,6 +1523,20 @@ export const useStore = create<AppState>((set, get) => ({
      */
     try {
       await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
+      /*
+       * Letting an edit or a command through means the tree is **about to** move (issue #41).
+       *
+       * Waiting for `turn_complete` alone would freeze the count for as long as the turn
+       * runs — ten minutes of watching an agent edit twenty files while the sidebar insists
+       * nothing has changed. A denial changes nothing, so it buys no refresh, and neither
+       * does an `other` approval, which is by definition something we cannot read.
+       *
+       * The debounce is what makes this affordable: a run of approvals costs one status.
+       */
+      const changing =
+        decision !== 'deny' && (pending?.detail.kind === 'file_edit' || pending?.detail.kind === 'command')
+      const projectId = get().sessions[sessionId]?.projectId
+      if (changing && projectId) get().refreshProjectGit(projectId)
     } catch (e) {
       set({ toast: (e as Error).message || '승인을 전달하지 못했습니다' })
     }
