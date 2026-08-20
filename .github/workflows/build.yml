@@ -65,13 +65,15 @@ jobs:
           # `workflow_dispatch`-gated job would have made that judgment call each run; a
           # commented line makes it impossible to run by accident either way.
           #
-          # Uncomment when someone deliberately decides to spend that minute budget:
-          #
-          #   - target: linux-arm64
-          #     runner: ubuntu-22.04-arm
-          #     artifacts: |
-          #       apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-          #       apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          # Enabled 2026-08-20: the repo is public, where this runner is free, and #29's
+          # open questions (does node-pty compile on arm64? does the AppImage bundle?)
+          # can only be answered by running it. If the repo ever goes private again,
+          # re-comment this entry first — see the billing note above.
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+            artifacts: |
+              apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+              apps/desktop/src-tauri/target/release/bundle/deb/*.deb
           #
           # That alone does not make this a working build — nothing arm64 has ever run
           # here. `node-pty` has no Linux prebuild at any architecture, so `pty.node` is
