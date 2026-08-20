@@ -76,17 +76,14 @@ puts it back and leaves your conversations alone.
 | | |
 |---|---|
 | **macOS, Apple Silicon** | on npm, and what we use every day |
-| **Linux, x86-64** | builds in CI. Not on npm, and nobody has started one yet |
+| **Linux, x86-64** | on npm since 0.1.0-beta.2. Nobody has reported running it yet — you may be first |
 | **Windows · Linux arm64 · Intel Macs** | don't build at all ([#14](https://github.com/ijun17/centralu/issues/14), [#29](https://github.com/ijun17/centralu/issues/29)) |
 
-That Linux row deserves a note. Nobody here has a Linux machine, so CI is the only place
-a Linux bundle has ever existed. Every push builds one:
-[run 32289487033](https://github.com/ijun17/centralu/actions/runs/32289487033) turned out a
-78 MB AppImage and a 5.1 MB `.deb`, and you can download both from the run. Compiling and
-running aren't the same claim, though, and only the first one has been shown — so it stays
-off npm.
+That Linux row deserves a note. Nobody here has a Linux machine, so the package on npm
+has been built and checked in CI, but never started by a person. Compiling and running
+aren't the same claim, and only the first one has been shown.
 
-If you're on Linux and want to go first, tell us how it went in
+If you're on Linux, `npm i -g centralu` gets you the AppImage — tell us how it went in
 [#14](https://github.com/ijun17/centralu/issues/14). Including if it did nothing at all.
 
 ## Licence
