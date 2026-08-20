@@ -330,6 +330,28 @@ export class Store {
           `)
         },
       },
+      {
+        to: 15,
+        run: () => {
+          /*
+           * Shell commands saved on a project (issue #44).
+           *
+           * A column on the project row, not a table of its own. The list is short, it is
+           * always read and written whole, and it has no life apart from the project it
+           * belongs to — a table would buy per-row identity nobody asks for and would need
+           * its own rule for what happens when the project goes.
+           *
+           * That also keeps `listProjects` a single query, which is what lets the Run menu
+           * say "nothing saved yet" as a fact instead of as "not loaded yet". Contrast
+           * `grid_panels` (v9), which is a table because being on the grid and existing as a
+           * session are two different facts; a saved command has no such second life.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'commands')) {
+            this.db.exec(`ALTER TABLE projects ADD COLUMN commands TEXT NOT NULL DEFAULT '[]'`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -393,10 +415,43 @@ export class Store {
       .run(p.id, p.path, p.name, Date.now())
   }
 
-  listProjects(): Omit<ProjectInfo, 'git'>[] {
+  /**
+   * `commands` is deliberately not in here (issue #44) — `projectCommands` answers that one.
+   *
+   * The column holds JSON, so it needs decoding, and every caller of this method wants a
+   * path or a name. Leaving it out of the row type means the omission is stated rather than
+   * silently cast away, which is how `Omit<ProjectInfo, 'git'>` would have become a lie the
+   * moment the field was added.
+   */
+  listProjects(): Omit<ProjectInfo, 'git' | 'commands'>[] {
     return this.db
       .prepare(`SELECT id, path, name, default_tool as defaultTool, default_model as defaultModel FROM projects ORDER BY sidebar_order, created_at`)
-      .all() as Omit<ProjectInfo, 'git'>[]
+      .all() as Omit<ProjectInfo, 'git' | 'commands'>[]
+  }
+
+  /**
+   * The shell commands saved on a project (issue #44).
+   *
+   * Unreadable JSON reads as "none". A row that somehow got corrupted must not take the
+   * project list — and with it the sidebar — down with it; the worst it can cost is a menu
+   * you have to fill in again.
+   */
+  projectCommands(projectId: string): string[] {
+    const row = this.db.prepare(`SELECT commands FROM projects WHERE id = ?`).get(projectId) as
+      | { commands: string }
+      | undefined
+    if (!row) return []
+    try {
+      const parsed = JSON.parse(row.commands) as unknown
+      return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === 'string') : []
+    } catch {
+      return []
+    }
+  }
+
+  /** The whole list at once — add and delete both arrive here as "it looks like this now" */
+  setProjectCommands(projectId: string, commands: readonly string[]): void {
+    this.db.prepare(`UPDATE projects SET commands = ? WHERE id = ?`).run(JSON.stringify(commands), projectId)
   }
 
   findProjectByPath(path: string): { id: string } | undefined {

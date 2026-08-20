@@ -502,7 +502,7 @@ export class MockPlatform implements Platform {
       if (existing) return existing
       const info: ProjectInfo = {
         id: `mock-project-${++this.idc}`, path, name: path.split('/').filter(Boolean).pop() ?? path,
-        defaultTool: 'claude', git: { branch: 'main', changedFiles: 0, isRepo: true },
+        defaultTool: 'claude', commands: [], git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
       this.projectsList.push(info)
       return info
@@ -512,6 +512,18 @@ export class MockPlatform implements Platform {
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       return { ...p }
+    },
+    /**
+     * 등록된 셸 명령 (이슈 #44).
+     *
+     * **host와 똑같이 빈 줄을 걷어낸다.** 목이 실물보다 너그러우면 E2E는 초록인데
+     * 실제 앱에서만 다르게 동작하는 자리가 생긴다 — 이 파일 머리말의 계약이 그것이다.
+     */
+    setCommands: async (projectId: string, commands: string[]) => {
+      const p = this.projectsList.find((x) => x.id === projectId)
+      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      p.commands = commands.map((c) => c.trim()).filter(Boolean)
+      return [...p.commands]
     },
   }
 

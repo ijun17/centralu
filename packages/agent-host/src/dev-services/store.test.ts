@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(14)
+    expect(store.schemaVersion).toBe(15)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(14)
+    expect(new Store().schemaVersion).toBe(15)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(14)
+    expect(store.schemaVersion).toBe(15)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -447,7 +447,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(14)
+    expect(store.schemaVersion).toBe(15)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -502,7 +502,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(14)
+    expect(store.schemaVersion).toBe(15)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -543,6 +543,74 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const second = new Store(file)
     expect(second.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * v15: a project remembers the shell commands saved on it. (issue #44)
+ *
+ * The Run menu is the only place these are registered, so surviving a relaunch is the whole
+ * point — and the failure would be silent in the worst way. A menu that lost them says
+ * "nothing saved yet", which reads as "you never added any" rather than as "they are gone",
+ * so nobody would think to report it.
+ *
+ * Run against a real v14-shaped database rather than a fresh one: the column has to arrive
+ * on the file people already have, which is the half `CREATE TABLE IF NOT EXISTS` never does.
+ */
+describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', () => {
+  it('옛 DB(v14)에 컬럼이 생기고, 껐다 켜도 명령이 남는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v15-'))
+    const file = join(dir, 'store.db')
+
+    const old = new Database(file)
+    old.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+    `)
+    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
+    old.pragma('user_version = 14')
+    old.close()
+
+    const first = new Store(file)
+    expect(first.schemaVersion).toBe(15)
+    // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
+    expect(first.projectCommands('p1')).toEqual([])
+    first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
+    first.close()
+
+    const second = new Store(file)
+    expect(second.projectCommands('p1')).toEqual(['pnpm test', 'pnpm e2e'])
+    // schema.sql이 user_version을 1로 되돌려 단계가 매번 다시 도는 구조다 —
+    // 두 번째 열기가 컬럼을 다시 만들어 목록을 비우면 안 된다
+    expect(second.listProjects().map((p) => p.id)).toEqual(['p1'])
+    second.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /**
+   * 읽을 수 없는 값은 '없음'으로 읽는다.
+   *
+   * 여기서 던지면 프로젝트 목록을 만드는 길이 통째로 막혀 사이드바가 빈 채로 뜬다 —
+   * 잃을 수 있는 최악이 "메뉴를 다시 채운다"로 끝나야 한다.
+   */
+  it('깨진 값이 들어 있어도 프로젝트 목록은 살아 있다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v15-bad-'))
+    const file = join(dir, 'store.db')
+
+    const first = new Store(file)
+    first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.close()
+
+    const poke = new Database(file)
+    poke.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('{ 이건 JSON이 아니다')
+    poke.close()
+
+    const second = new Store(file)
+    expect(second.projectCommands('p1')).toEqual([])
+    expect(second.listProjects().map((p) => p.name)).toEqual(['p1'])
+    second.close()
     rmSync(dir, { recursive: true, force: true })
   })
 })

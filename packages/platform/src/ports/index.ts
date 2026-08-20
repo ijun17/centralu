@@ -133,6 +133,15 @@ export interface ProjectPort {
   add(path: string): Promise<ProjectInfo>
   list(): Promise<ProjectInfo[]>
   gitStatus(projectId: string): Promise<ProjectInfo>
+  /**
+   * Replace this project's saved shell commands, whole (issue #44).
+   *
+   * Adding and deleting come through the same door, as `reorder` above does: for a short
+   * list a person edits by hand, "make it look like this" already states every edit.
+   * What comes back is what was actually stored — the host drops blank entries, so it can
+   * differ from what was sent.
+   */
+  setCommands(projectId: string, commands: string[]): Promise<string[]>
 }
 
 /**

@@ -93,6 +93,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'projects.list': {},
   'projects.add': { path: cwd },
   'projects.reorder': { orderedIds: [P] },
+  'projects.setCommands': { projectId: P, commands: ['echo 대조용'] },
   'projects.gitStatus': { projectId: P },
   'sessions.list': {},
   'sessions.reorder': { projectId: P, orderedIds: [S] },

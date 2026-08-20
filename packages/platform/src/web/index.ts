@@ -153,6 +153,9 @@ class WebProjectPort implements ProjectPort {
   gitStatus(projectId: string) {
     return this.rpc.call('projects.gitStatus', { projectId })
   }
+  setCommands(projectId: string, commands: string[]) {
+    return this.rpc.call('projects.setCommands', { projectId, commands })
+  }
 }
 
 /** 웹 폴백 — capability가 false이므로 UI가 알아서 기능을 숨긴다 */

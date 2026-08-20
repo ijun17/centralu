@@ -138,6 +138,18 @@ export const ProjectInfo = z.object({
   name: z.string(),
   defaultTool: ToolName.default('claude'),
   defaultModel: z.string().optional(),
+  /**
+   * The shell commands saved on this project — what the Run menu offers (issue #44).
+   *
+   * They arrive **with the project** rather than being asked for when the menu opens. A
+   * separate fetch would force the menu to tell "none saved yet" from "not loaded yet"
+   * (which is why `agents.commands` carries a `ready` flag), and the project is already
+   * in the store in one piece, so there is no reason to invent that distinction here.
+   *
+   * The string is the command itself, with no name beside it. A row therefore shows
+   * exactly what it will run, and there is no label that can drift away from it.
+   */
+  commands: z.array(z.string()).default([]),
   git: z
     .object({
       branch: z.string(),
@@ -369,6 +381,25 @@ export const RpcMethods = {
   'projects.reorder': {
     params: z.object({ orderedIds: z.array(z.string()) }),
     result: z.array(ProjectInfo),
+  },
+  /**
+   * Replace this project's saved shell commands (issue #44).
+   *
+   * The **whole list**, like `projects.reorder` above and for the same reason: it is a
+   * short list a person edits by hand, so "make it look like this" states every edit —
+   * adding, deleting and (one day) reordering all arrive through one door instead of three.
+   *
+   * Nothing on the way through inspects the commands. These are the user's own, the same
+   * as typing into the terminal below; the approval system is for what an *agent* wants to
+   * run, and asking permission for what the person just typed would teach them to wave the
+   * prompt through where it matters.
+   *
+   * Answers with the stored list rather than the project so that saving a command does not
+   * cost a `git status` — the caller already has everything else about the project.
+   */
+  'projects.setCommands': {
+    params: z.object({ projectId: z.string(), commands: z.array(z.string()) }),
+    result: z.array(z.string()),
   },
   'sessions.reorder': {
     params: z.object({ projectId: z.string(), orderedIds: z.array(z.string()) }),

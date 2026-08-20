@@ -161,8 +161,31 @@ export class SessionManager {
     const git = await gitSummary(path)
     return {
       id, path, name: basename(path), defaultTool: 'claude',
+      // Saved shell commands ride along with the project so the Run menu never has a
+      // "loading" state to distinguish from an empty one (issue #44)
+      commands: this.store.projectCommands(id),
       git: git.isRepo ? git : null,
     }
+  }
+
+  /**
+   * Replace this project's saved shell commands (issue #44).
+   *
+   * Blank entries are dropped here rather than trusted to the caller: a row that runs
+   * nothing when clicked is worse than no row, and this is the one place every edit —
+   * from any client — has to pass through.
+   *
+   * Nothing else is inspected. These are the user's own commands and go to their own
+   * shell; the approval machinery exists for what an agent proposes, and running these
+   * through it would put a permission prompt in front of what the person just typed.
+   */
+  setProjectCommands(projectId: string, commands: readonly string[]): string[] {
+    if (!this.store.listProjects().some((p) => p.id === projectId)) {
+      throw Object.assign(new Error('Project not found'), { code: 'internal' })
+    }
+    const clean = commands.map((c) => c.trim()).filter(Boolean)
+    this.store.setProjectCommands(projectId, clean)
+    return clean
   }
 
   /**

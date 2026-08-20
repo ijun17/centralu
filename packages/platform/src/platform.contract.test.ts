@@ -104,6 +104,26 @@ describe.each([
     expect((await h.platform.projects.list()).length).toBe(before)
   })
 
+  /**
+   * 등록한 셸 명령은 **프로젝트와 함께 온다** (이슈 #44).
+   *
+   * 저장이 되는지만 보는 테스트가 아니다. 실행 메뉴는 목록을 따로 묻지 않고 프로젝트에
+   * 딸려 온 것을 그대로 그리므로, 저장은 됐는데 `list()`가 안 실어 보내면 화면에는
+   * "등록한 적이 없다"로 보인다 — 두 구현이 같은 답을 하는지가 여기서 갈린다.
+   */
+  it('프로젝트에 등록한 셸 명령이 목록과 함께 돌아온다 (#44)', async () => {
+    const [p] = await h.platform.projects.list()
+    const saved = await h.platform.projects.setCommands(p!.id, ['pnpm test', '   ', 'pnpm lint'])
+    // 빈 줄은 저장되지 않는다 — 눌러도 아무 일도 일어나지 않는 줄이 목록에 남으면 안 된다
+    expect(saved).toEqual(['pnpm test', 'pnpm lint'])
+    const found = (await h.platform.projects.list()).find((x) => x.id === p!.id)
+    expect(found?.commands).toEqual(['pnpm test', 'pnpm lint'])
+
+    // 지우기도 같은 문으로 온다 — 남은 것만 보내면 그것이 곧 목록이다
+    await h.platform.projects.setCommands(p!.id, ['pnpm lint'])
+    expect((await h.platform.projects.list()).find((x) => x.id === p!.id)?.commands).toEqual(['pnpm lint'])
+  })
+
   it('세션 생성 → 목록 반영', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
