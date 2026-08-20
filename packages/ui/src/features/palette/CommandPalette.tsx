@@ -61,7 +61,9 @@ export function CommandPalette() {
     const match = (s: string) => !q || s.toLowerCase().includes(q)
 
     const actions: Item[] = [
-      { kind: 'action', id: 'settings', label: 'Open settings', sub: 'Shortcuts · notifications · approval rules', run: () => toggleSettings(true) },
+      { kind: 'action', id: 'settings', label: 'Open settings', // The window's own categories, in its own order — the palette should not describe a
+      // room by a floor plan it no longer has (issue #7)
+      sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
       { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: '⌘B · Git · files', run: () => togglePanel() },
     ]

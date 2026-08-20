@@ -1083,6 +1083,8 @@ test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
 
+  // 규칙은 이제 Permissions 갈래에 있다 — 설정이 한 두루마리에 다 쌓이지 않는다 (이슈 #7)
+  await page.getByTestId('settings-tab-permissions').click()
   await expect(page.getByTestId('rules-list')).toContainText('npm test*')
   await page.getByTestId('delete-rule-1').click()
   await expect(page.getByTestId('rules-empty')).toBeVisible()
@@ -1097,7 +1099,8 @@ test('설정: 알림 정책을 끄면 저장된다 (E-5)', async ({ page }) => {
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snap?.notifyPolicy?.allDone).toBe(false)
 
-  // 단축키 표도 여기서 확인된다 (FR-17)
+  // 단축키 표도 여기서 확인된다 (FR-17) — Shortcuts 갈래에 있다
+  await page.getByTestId('settings-tab-shortcuts').click()
   await expect(page.getByTestId('shortcut-list')).toContainText('⌘⇧1~4')
 })
 
@@ -3962,40 +3965,29 @@ test('승인 대기가 생기면 소리·독으로도 부른다', async ({ page 
 })
 
 /*
- * 도그푸딩 신고: "소리는 들리는데 토스트가 안 뜬다."
+ * 설정은 갈래로 나뉜다 (이슈 #7).
  *
- * 원인은 시험 버튼이 소리와 독만 울리고 카드를 만들지 않은 것이었다. **절반만 시험하는
- * 시험 버튼**은 없는 증상을 만든다 — 확인하라고 둔 것이 오해를 낳으면 없느니만 못하다.
+ * 예전엔 세 묶음이 한 두루마리에 쌓여 있었다. 셋일 땐 읽히지만 설정은 늘 늘어나기만 하고,
+ * 여덟이 되는 순간 찾는 것이 스크롤 어딘가에 묻힌다. 갈래는 **사람이 무엇을 찾으러 왔는가**로
+ * 나눈다 — 그만 좀 울리게(Notifications), 아까 그 자동 허용 취소(Permissions), 그 키가 뭐였지
+ * (Shortcuts). 한 번에 한 갈래만 그리므로, 고르지 않은 갈래는 화면에 없어야 한다.
  */
-test('Test it은 소리·독·카드를 다 태운다', async ({ page }) => {
+test('설정은 갈래로 나뉘고 한 번에 한 갈래만 보인다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'first')
-  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다 → first가 화면 밖
-
   await page.getByTestId('open-settings').click()
-  await page.getByTestId('notify-test').click()
 
-  // 소리·독
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as never as { __mock: { alerts: unknown[] } }).__mock.alerts.length),
-    )
-    .toBe(1)
-  // 카드. 설정 창은 비켜야 한다 — 그 뒤에 뜨면 있어도 못 본다
-  await expect(page.getByTestId('settings')).toHaveCount(0)
-  await expect(page.getByTestId('notice')).toHaveCount(1)
-})
+  // 열면 알림부터다 — 가장 자주 오는 용건이다
+  await expect(page.getByTestId('notify-approval')).toBeVisible()
+  await expect(page.getByTestId('shortcut-list')).toBeHidden()
 
-test('볼 수 없는 세션이 없으면 카드가 없는 이유를 말한다', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'only') // 하나뿐이고 그것을 보고 있다
+  await page.getByTestId('settings-tab-shortcuts').click()
+  await expect(page.getByTestId('shortcut-list')).toContainText('⌘K')
+  // 다른 갈래는 접히는 게 아니라 없다 — 안 보이는 채로 남아 있으면 탭이 아니라 장식이다
+  await expect(page.getByTestId('notify-approval')).toBeHidden()
 
-  await page.getByTestId('open-settings').click()
-  await page.getByTestId('notify-test').click()
-
-  // 조용히 넘기면 "카드가 안 뜬다"가 되고, 원인을 엉뚱한 데서 찾게 된다
-  await expect(page.getByTestId('toast')).toContainText('off screen')
-  await expect(page.getByTestId('notice')).toHaveCount(0)
+  await page.getByTestId('settings-tab-permissions').click()
+  await expect(page.getByTestId('rules-empty')).toBeVisible()
+  await expect(page.getByTestId('shortcut-list')).toBeHidden()
 })
 
 test('설정은 상단 바에서 바로 열린다', async ({ page }) => {
