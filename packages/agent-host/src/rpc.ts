@@ -139,6 +139,18 @@ export function createRpcHandler(
       const { projectId, path } = RpcMethods['fs.readFile'].params.parse(p)
       return mgr.readTextFile(projectId, path)
     },
+    'fs.move': async (p) => {
+      const { projectId, from, toDir } = RpcMethods['fs.move'].params.parse(p)
+      return mgr.moveEntry(projectId, from, toDir)
+    },
+    'fs.importFile': async (p) => {
+      const { projectId, toDir, name, dataBase64 } = RpcMethods['fs.importFile'].params.parse(p)
+      return mgr.importFile(projectId, toDir, name, dataBase64)
+    },
+    'fs.resolve': async (p) => {
+      const { projectId, path } = RpcMethods['fs.resolve'].params.parse(p)
+      return { path: await mgr.resolveFile(projectId, path) }
+    },
     'messages.search': async (p) => {
       const { query, limit } = RpcMethods['messages.search'].params.parse(p)
       return mgr.searchMessages(query, limit)

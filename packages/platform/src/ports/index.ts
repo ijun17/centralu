@@ -155,6 +155,36 @@ export interface FsPort {
   /** 한 단계만 읽는다. ignored는 .gitignore에 걸리는 항목 (git이 알려준 것을 재사용) */
   listDir(projectId: string, relPath: string): Promise<FsEntry[]>
   readFile(projectId: string, relPath: string): Promise<FsFile>
+  /**
+   * Move an entry into another folder of the same project (#19, drag inside the tree).
+   *
+   * `toDir` is a folder (`''` is the project root), never a full path — the gesture is a
+   * drop onto a row and the name never changes, which is also why renaming is not reachable
+   * from here (out of scope for #19).
+   *
+   * **Never overwrites**: a destination that is already taken rejects, naming the
+   * collision. `moved: false` means it landed where it already was — a miss, not a failure.
+   */
+  move(projectId: string, from: string, toDir: string): Promise<{ path: string; moved: boolean }>
+  /**
+   * Put a file dragged in from the desktop into the project (#19).
+   *
+   * Bytes, not a source path: the webview does not tell the page where a dropped file came
+   * from, which is the same reason attachments already travel this way. So the original
+   * stays where it was — the only direction that cannot destroy something outside the
+   * project. Rejects rather than overwrite, like `move`.
+   */
+  importFile(projectId: string, toDir: string, name: string, dataBase64: string): Promise<{ path: string }>
+  /**
+   * Move to the OS trash (#18). **Not a delete** — that is the whole decision: the trash
+   * stays reversible *after* the click, which is worth more than a dialog before it.
+   *
+   * `supported: false` comes with a reason the UI can show, the same shape `models()` uses.
+   * A browser has no trash and cannot be given one.
+   */
+  trash(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
+  /** Show it in the desktop's file manager (#19). Unsupported in a browser, with a reason */
+  reveal(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
 }
 
 /** 무엇 때문에 부르는지 — 소리와 독 튀김의 세기가 여기서 갈린다 */
@@ -220,6 +250,15 @@ export type PlatformCapabilities = {
    * to translate and no reason to make the port carry it.
    */
   shortcutKeys: ShortcutKeys
+  /**
+   * What this desktop calls the thing that shows you a file in a folder (#19).
+   *
+   * Same trade as `shortcutKeys` above: "Reveal in Finder" is the phrase everyone knows on
+   * a Mac and a lie everywhere else, and ui is not allowed to ask which OS it is on — so it
+   * asks for the *word* and prints it. Linux has no single answer (Nautilus, Dolphin,
+   * Thunar…), so the generic phrase is the honest one there rather than a guess.
+   */
+  fileManagerName: string
 }
 
 /**

@@ -41,7 +41,7 @@ import {
   gitWorktreeDirty,
   gitWorktreeRemove,
 } from '../dev-services/git.js'
-import { listDir, readTextFile } from '../dev-services/fs.js'
+import { importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
 import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
 
 /** 응답이 오지 않는 호출로 화면을 붙잡아 두지 않는다 */
@@ -1433,6 +1433,18 @@ export class SessionManager {
   }
   readTextFile(projectId: string, path: string) {
     return readTextFile(this.cwdOf(projectId), path)
+  }
+
+  // ── 파일 조작 (#19) — 경로 해석만 하고 검사·실행은 dev-services에 위임한다 ──
+  moveEntry(projectId: string, from: string, toDir: string) {
+    return moveEntry(this.cwdOf(projectId), from, toDir)
+  }
+  importFile(projectId: string, toDir: string, name: string, dataBase64: string) {
+    return importFile(this.cwdOf(projectId), toDir, name, Buffer.from(dataBase64, 'base64'))
+  }
+  /** 데스크톱 셸이 OS에 넘길 절대 경로 (휴지통·파일 관리자). 프로젝트를 아는 쪽이 만든다 */
+  resolveFile(projectId: string, path: string) {
+    return resolveExisting(this.cwdOf(projectId), path)
   }
 
   saveWorkspace(layout: Record<string, unknown>): void {

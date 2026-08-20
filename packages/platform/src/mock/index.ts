@@ -69,6 +69,9 @@ export class MockPlatform implements Platform {
     // 이 mock에는 물어볼 OS가 없다. 맥 표기를 답으로 정한다 — 개발도 E2E도 맥에서 돌고,
     // 이 자리에서 자판을 짐작하기 시작하면 테스트가 도는 기계에 따라 결과가 달라진다.
     shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
+    // 같은 이유로 맥의 이름을 답으로 정한다 — E2E가 도는 기계를 짐작하기 시작하면
+    // 화면에 뭐가 쓰일지가 테스트마다 달라진다.
+    fileManagerName: 'Finder',
   }
 
   /** 테스트가 이벤트를 주입하는 통로 */
@@ -159,6 +162,70 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /** 테스트용: 휴지통으로 보낸 것과 파일 관리자에서 열어본 것 (#18/#19) */
+  readonly trashed: string[] = []
+  readonly revealed: string[] = []
+
+  /**
+   * 루트 밖으로 나가는 경로는 **목에서도** 거절한다.
+   *
+   * 목에는 진짜 파일 시스템이 없으니 검사도 필요 없다고 넘길 뻔한 자리다. 그러면
+   * "프로젝트 밖은 못 건드린다"가 실물에만 있는 규칙이 되고, 그 차이는 E2E(브라우저 목)에
+   * 영원히 안 보인다 — 계약 테스트가 실제로 여기서 갈라진 것을 잡았다.
+   * 문자열만 보고 판정할 수 있다: 조각을 세면서 `..`로 내려간 깊이가 음수가 되면 밖이다.
+   */
+  private requireInside(rel: string): void {
+    const fail = () => {
+      throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
+    }
+    if (rel.startsWith('/')) fail()
+    let depth = 0
+    for (const seg of rel.split('/')) {
+      if (seg === '' || seg === '.') continue
+      if (seg === '..') depth -= 1
+      else depth += 1
+      if (depth < 0) fail()
+    }
+  }
+
+  /** `a/b/c.ts` → `a/b` (루트는 `''`) — 목의 entries가 부모 경로로 묶여 있으므로 */
+  private parentOf(path: string): string {
+    const cut = path.lastIndexOf('/')
+    return cut < 0 ? '' : path.slice(0, cut)
+  }
+
+  /**
+   * 목에서 항목 하나를 떼어낸다. 폴더면 그 아래 목록·파일까지 같이 따라온다 —
+   * 실물에서 폴더를 옮기면 안의 것이 함께 가므로, 목이 껍데기만 옮기면
+   * "옮겼는데 안이 비었다"가 **목에서만** 일어나지 않는 종류의 차이가 된다.
+   */
+  private detach(path: string): FsEntry | null {
+    const parent = this.parentOf(path)
+    const siblings = this.fsState.entries[parent] ?? []
+    const entry = siblings.find((e) => e.path === path)
+    if (!entry) return null
+    this.fsState.entries[parent] = siblings.filter((e) => e.path !== path)
+    return entry
+  }
+
+  /** 옮기거나 지울 때 딸려 가는 것들 — 하위 목록과 파일 내용 */
+  private takeSubtree(path: string): { entries: Record<string, FsEntry[]>; files: Record<string, string> } {
+    const under = (p: string) => p === path || p.startsWith(`${path}/`)
+    const entries: Record<string, FsEntry[]> = {}
+    const files: Record<string, string> = {}
+    for (const [dir, list] of Object.entries(this.fsState.entries)) {
+      if (!under(dir)) continue
+      entries[dir] = list
+      delete this.fsState.entries[dir]
+    }
+    for (const [file, text] of Object.entries(this.fsState.files)) {
+      if (!under(file)) continue
+      files[file] = text
+      delete this.fsState.files[file]
+    }
+    return { entries, files }
+  }
+
   readonly fs = {
     search: async (_projectId: string, query: string, limit = 20) => {
       // 목은 실제 퍼지 매칭을 흉내내지 않는다 — 검증 대상은 UI 흐름이다
@@ -176,6 +243,63 @@ export class MockPlatform implements Platform {
       binary: false,
       bytes: (this.fsState.files[path] ?? '').length,
     }),
+    /**
+     * 실물(host의 `moveEntry`)과 **같은 거절 규칙**을 지킨다: 자리가 차 있으면 옮기지
+     * 않고 무엇과 부딪혔는지 말하고, 폴더를 자기 안으로는 못 넣고, 제자리 드롭은
+     * 실패가 아니라 `moved: false`다. 목이 실물보다 너그러우면 E2E는 초록인데
+     * 실제 앱에서만 다르게 동작하는 자리가 생긴다.
+     */
+    move: async (_projectId: string, from: string, toDir: string) => {
+      this.requireInside(from)
+      this.requireInside(toDir)
+      const name = from.split('/').filter(Boolean).pop() ?? ''
+      const path = toDir ? `${toDir}/${name}` : name
+      if (path === from) return { path, moved: false }
+      if (path.startsWith(`${from}/`)) {
+        throw Object.assign(new Error(`Cannot move ${name} into itself`), { code: 'internal' })
+      }
+      if ((this.fsState.entries[toDir] ?? []).some((e) => e.path === path)) {
+        throw Object.assign(new Error(`${path} already exists — nothing was moved`), { code: 'internal' })
+      }
+      const entry = this.detach(from)
+      if (!entry) throw Object.assign(new Error(`${from} is no longer there`), { code: 'internal' })
+      const sub = this.takeSubtree(from)
+      const rekey = (p: string) => path + p.slice(from.length)
+      for (const [dir, list] of Object.entries(sub.entries)) {
+        this.fsState.entries[rekey(dir)] = list.map((e) => ({ ...e, path: rekey(e.path) }))
+      }
+      for (const [file, text] of Object.entries(sub.files)) this.fsState.files[rekey(file)] = text
+      this.fsState.entries[toDir] = [...(this.fsState.entries[toDir] ?? []), { ...entry, path }]
+      return { path, moved: true }
+    },
+    importFile: async (_projectId: string, toDir: string, name: string, dataBase64: string) => {
+      this.requireInside(toDir)
+      // 이름은 마지막 조각만 쓴다 — 실물과 같은 규칙이라, 이름에 경로가 섞여 와도
+      // 목적지 밖으로 나가지 못한다
+      const leaf = name.split('/').filter(Boolean).pop() ?? ''
+      const path = toDir ? `${toDir}/${leaf}` : leaf
+      if ((this.fsState.entries[toDir] ?? []).some((e) => e.path === path)) {
+        throw Object.assign(new Error(`${path} already exists — nothing was written`), { code: 'internal' })
+      }
+      this.fsState.entries[toDir] = [
+        ...(this.fsState.entries[toDir] ?? []),
+        { name: leaf, path, isDir: false, ignored: false },
+      ]
+      this.fsState.files[path] = atob(dataBase64)
+      return { path }
+    },
+    trash: async (_projectId: string, path: string) => {
+      this.requireInside(path)
+      if (!this.detach(path)) throw Object.assign(new Error(`${path} is no longer there`), { code: 'internal' })
+      this.takeSubtree(path)
+      this.trashed.push(path)
+      return { supported: true }
+    },
+    reveal: async (_projectId: string, path: string) => {
+      this.requireInside(path)
+      this.revealed.push(path)
+      return { supported: true }
+    },
   }
 
   readonly git = {

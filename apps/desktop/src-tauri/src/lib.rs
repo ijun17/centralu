@@ -78,6 +78,78 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
         .map_err(|e| format!("파일을 열지 못했습니다: {e}"))
 }
 
+/// 파일 관리자에서 그 파일을 보여준다 (#19의 "Open in Finder").
+///
+/// `open`·`xdg-open`을 쓰지 않는다 — 그건 **파일을 여는** 명령이라, 스크립트를 골랐을 때
+/// 그것을 실행해 버릴 수 있다. 플러그인의 `reveal_item_in_dir`은 macOS에서 NSWorkspace,
+/// 리눅스에서 org.freedesktop.FileManager1(없으면 상위 폴더 열기)로 내려가는,
+/// "여는 게 아니라 가리키는" 쪽의 API다.
+///
+/// 여기서 플러그인의 **JS 커맨드가 아니라 러스트 함수**를 부르기 때문에
+/// `opener:allow-reveal-item-in-dir` 권한은 필요 없다. 웹뷰가 부르는 것은 이 앱의
+/// 커맨드이고, 앱 자신의 커맨드는 capability 목록을 타지 않는다.
+///
+/// 오류는 **이유만** 돌려준다. 무엇을 하려다 실패했는지는 화면 쪽이 이미 알고 있어서
+/// ("Could not show a.ts: …") 여기서 한 번 더 붙이면 같은 말이 두 번 나온다.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|e| e.to_string())
+}
+
+/// 휴지통으로 보낸다 (#18) — 지우는 게 아니다.
+///
+/// 확인 대화상자 대신 휴지통을 고른 이유가 이것이다: 되돌릴 수 있는 시점이 **누른 뒤**로
+/// 옮겨간다. 대화상자는 누르기 전까지만 되돌릴 수 있다.
+///
+/// macOS 백엔드를 `NsFileManager`로 바꾼다. 크레이트 기본값은 Finder에게 AppleScript로
+/// 시키는 방식인데, 그러면 자동화 권한(TCC)을 물어보고 거절당하면 아무 일도 일어나지
+/// 않는다 — 이 앱은 서명 인증서가 없어서 그 프롬프트가 특히 나쁘게 끝난다.
+/// 대가는 Finder 컨텍스트 메뉴의 "제자리에 돌려놓기"가 일부 macOS에서 안 뜨는 것인데
+/// (macOS 쪽 결함), 파일은 그대로 휴지통에 있고 끌어내면 되므로 되돌릴 수 있다는 약속은
+/// 지켜진다. 권한 프롬프트에 막혀 **삭제 자체가 조용히 실패하는 것**이 더 나쁘다.
+#[tauri::command]
+fn trash_path(path: String) -> Result<(), String> {
+    send_to_trash(&path).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn send_to_trash(path: &str) -> Result<(), trash::Error> {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+    let mut ctx = trash::TrashContext::default();
+    ctx.set_delete_method(DeleteMethod::NsFileManager);
+    ctx.delete(path)
+}
+
+/// 리눅스·윈도우는 기본 백엔드가 곧 OS의 휴지통이다.
+/// 리눅스 쪽은 freedesktop 휴지통 규격 1.0 구현이라 GNOME·KDE·XFCE에서 같은 자리로 간다 —
+/// 다른 마운트 지점의 파일은 규격대로 그 볼륨의 `.Trash-$uid`로 가고, 그럴 수 없는
+/// 파일 시스템(FAT 등)에서는 실패가 그대로 올라온다. 조용히 지우는 것보다 낫다.
+#[cfg(not(target_os = "macos"))]
+fn send_to_trash(path: &str) -> Result<(), trash::Error> {
+    trash::delete(path)
+}
+
+/// 이 데스크톱이 파일 관리자를 뭐라고 부르는가.
+///
+/// 자판 표기(`shortcut_keys`)와 같은 거래다: UI는 어느 OS인지 물을 수 없으므로
+/// **이름**을 물어 그대로 찍는다. 리눅스에는 하나의 답이 없어서(Nautilus·Dolphin·Thunar)
+/// 짐작 대신 일반 명사를 준다.
+#[tauri::command]
+fn file_manager_name() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Finder"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "File Explorer"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "file manager"
+    }
+}
+
 /// How much room the OS window controls take on the left edge of our own top bar, in px.
 ///
 /// macOS keeps the traffic lights *inside* our overlay title bar, so the bar has to
@@ -289,6 +361,9 @@ pub fn run() {
             set_badge,
             alert,
             open_in_ide,
+            reveal_path,
+            trash_path,
+            file_manager_name,
             focus_window,
             window_controls_inset,
             shortcut_keys

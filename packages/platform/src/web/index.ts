@@ -21,6 +21,21 @@ export type WebPlatformOptions = {
   hostUrl?: string
   token: string
   WebSocketImpl?: typeof WebSocket
+  /**
+   * The desktop shell's own file operations, injected by the Tauri build (#18/#19).
+   *
+   * Trashing and revealing are the two things the Node host cannot do — a real OS trash is
+   * `NSFileManager trashItem` / the freedesktop spec, not an unlink into a temp folder — so
+   * they belong to Rust. Absent here means "there is no desktop under this page", which is
+   * exactly the browser's situation, and the port answers `supported: false` for it rather
+   * than pretending.
+   */
+  nativeFiles?: {
+    trash(absPath: string): Promise<void>
+    reveal(absPath: string): Promise<void>
+  }
+  /** 자판 이름과 같은 이유로 셸이 답한다 — 브라우저에는 물어볼 파일 관리자가 없다 */
+  fileManagerName?: string
 }
 
 class WebAgentPort implements AgentPort {
@@ -185,6 +200,13 @@ class WebSystemPort implements SystemPort {
   }
 }
 
+/*
+  브라우저에서 못 하는 두 가지의 이유. **"안 됨"으로 끝내지 않는다** — 왜 안 되는지와
+  어디로 가면 되는지를 함께 말한다 (`models()`가 supported=false에 reason을 다는 것과 같다).
+*/
+const NO_DESKTOP_TRASH = 'A browser has no trash — use the desktop app to delete files'
+const NO_DESKTOP_REVEAL = 'A browser cannot open a file manager — use the desktop app'
+
 export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const url = new URL(opts.hostUrl ?? 'ws://127.0.0.1:5175')
   const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
@@ -212,6 +234,26 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
       listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),
       readFile: (projectId, path) => rpc.call('fs.readFile', { projectId, path }),
+      move: (projectId, from, toDir) => rpc.call('fs.move', { projectId, from, toDir }),
+      importFile: (projectId, toDir, name, dataBase64) =>
+        rpc.call('fs.importFile', { projectId, toDir, name, dataBase64 }),
+      /*
+        휴지통과 '파일 관리자에서 보기'는 **두 걸음**이다: 프로젝트 루트를 아는 host에게
+        절대 경로를 받고, 그것을 OS에 넘길 수 있는 셸에게 건넨다. 경로를 UI가 조립하지
+        않는 이유가 여기 있다 — 루트 밖으로 나가는지 판정하는 자리는 한 곳이어야 한다.
+      */
+      trash: async (projectId, path) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
+        const { path: abs } = await rpc.call('fs.resolve', { projectId, path })
+        await opts.nativeFiles.trash(abs)
+        return { supported: true }
+      },
+      reveal: async (projectId, path) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
+        const { path: abs } = await rpc.call('fs.resolve', { projectId, path })
+        await opts.nativeFiles.reveal(abs)
+        return { supported: true }
+      },
     },
     git: {
       status: (projectId) => rpc.call('git.status', { projectId }),
@@ -279,6 +321,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         (`packages/platform/src/tauri/index.ts`), which is the answer that has to be right.
       */
       shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
+      // Same reason as the keyboard above: the page does not guess. The desktop build
+      // passes the shell's answer in; the browser gets the phrase that is true anywhere.
+      fileManagerName: opts.fileManagerName ?? 'file manager',
     },
     async dispose() {
       unsubscribeEndpoint?.()

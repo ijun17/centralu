@@ -9,16 +9,40 @@
  */
 export const PATH_MIME = 'application/x-cc-path'
 
+/**
+ * `copyMove`인 이유 (#19).
+ *
+ * 같은 드래그가 **떨어지는 곳에 따라 두 가지**가 됐다: 입력창에 놓으면 경로가 문장에
+ * 들어가고(복사), 트리의 폴더에 놓으면 파일이 그리로 옮겨간다(이동). 여기가 `copy`로
+ * 고정돼 있으면 트리 쪽에서 `dropEffect = 'move'`를 세우는 순간 브라우저가 그 드롭을
+ * **거절한다** — 오류 없이, 그냥 아무 일도 일어나지 않는 모양으로.
+ */
 export function setDragPath(dt: DataTransfer, path: string): void {
   dt.setData(PATH_MIME, path)
   dt.setData('text/plain', path)
-  dt.effectAllowed = 'copy'
+  dt.effectAllowed = 'copyMove'
 }
 
 /** 드롭된 것이 우리 경로인가. 아니면 null — 그때는 첨부 경로로 간다 */
 export function readDragPath(dt: DataTransfer): string | null {
   const path = dt.getData(PATH_MIME)
   return path || null
+}
+
+/**
+ * 끌고 있는 것이 우리 경로인가 — **내용을 읽지 않고** 판정한다.
+ *
+ * `dragover` 동안에는 `getData()`가 빈 문자열을 준다 (브라우저가 드롭 전까지 내용을
+ * 가린다). 그래서 "이걸 받을 수 있는가"는 `types`로만 답할 수 있다. 이 구분이 없으면
+ * 커서가 무엇을 할지 말해주지 못한 채 손을 놓아야 한다.
+ */
+export function hasDragPath(dt: DataTransfer): boolean {
+  return [...dt.types].includes(PATH_MIME)
+}
+
+/** OS에서 끌어온 파일인가 (#19의 '핀더에서 끌어다 넣기') */
+export function hasDragFiles(dt: DataTransfer): boolean {
+  return [...dt.types].includes('Files')
 }
 
 /**

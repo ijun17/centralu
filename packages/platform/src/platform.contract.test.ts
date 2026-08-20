@@ -3,7 +3,9 @@
  * 구현이 갈라지면 여기서 잡힌다 — Tauri 구현이 추가되면 세 번째 항목으로 넣는다.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { HostServer } from '../../agent-host/src/transport/server.js'
 import { SessionManager } from '../../agent-host/src/sessions/manager.js'
@@ -43,8 +45,17 @@ class EchoAdapter implements AgentAdapter {
 /**
  * `offerUpdate`: 레지스트리에 그 버전이 올라와 있는 상황을 만든다 (이슈 #43).
  * 두 구현이 같은 자극에 같은 답을 하는지가 이 파일의 존재 이유다.
+ *
+ * `makeDir`: 폴더 하나를 미리 만들어 둔다. **포트로는 폴더를 만들 수 없다** — 만들기는
+ * #19에서 일부러 뺀 것이라, 파일을 어디로 옮길지 시험하려면 준비만 구현별로 해야 한다.
+ * 옮기고 지우는 일 자체는 아래에서 포트로만 한다.
  */
-type Harness = { platform: Platform; cleanup: () => Promise<void>; offerUpdate: (version: string) => void }
+type Harness = {
+  platform: Platform
+  cleanup: () => Promise<void>
+  offerUpdate: (version: string) => void
+  makeDir: (root: string, rel: string) => void
+}
 
 async function makeWeb(): Promise<Harness> {
   const store = new Store()
@@ -82,6 +93,7 @@ async function makeWeb(): Promise<Harness> {
     offerUpdate: (version) => {
       registryVersion = version
     },
+    makeDir: (root, rel) => mkdirSync(join(root, rel), { recursive: true }),
     cleanup: async () => {
       await platform.dispose()
       await mgr.disposeAll()
@@ -97,6 +109,16 @@ async function makeMock(): Promise<Harness> {
     platform,
     offerUpdate: (version) => {
       platform.registryVersion = version
+    },
+    // 목의 파일 트리는 "부모 경로 → 항목들"이라, 폴더 하나는 부모의 줄 하나와 빈 목록이다
+    makeDir: (_root, rel) => {
+      const cut = rel.lastIndexOf('/')
+      const parent = cut < 0 ? '' : rel.slice(0, cut)
+      platform.fsState.entries[parent] = [
+        ...(platform.fsState.entries[parent] ?? []),
+        { name: rel.slice(cut + 1), path: rel, isDir: true, ignored: false },
+      ]
+      platform.fsState.entries[rel] ??= []
     },
     cleanup: async () => platform.dispose(),
   }
@@ -234,6 +256,95 @@ describe.each([
     expect(keys.alt).toBe('⌥')
     // 기호는 붙여 쓴다 (`⌘⇧A`). 이름이 되는 자판에서만 구분자가 생긴다
     expect(keys.join).toBe('')
+  })
+
+  /**
+   * 파일 조작의 계약 (#18, #19).
+   *
+   * 여기서 파일을 만드는 것도 **포트로만** 한다. web 구현 뒤에는 진짜 host가, mock 뒤에는
+   * 메모리가 있어서 준비 과정을 각각 따로 쓰면 두 스위트가 서로 다른 세계를 시험하게 된다 —
+   * 같은 문으로 넣고 같은 문으로 옮겨 봐야 "구현이 갈라지면 여기서 잡힌다"가 참이 된다.
+   */
+  describe('파일 조작 (#18, #19)', () => {
+    let projectId = ''
+    let dir = ''
+
+    beforeAll(async () => {
+      // 실물 host 쪽은 진짜로 디스크에 쓴다 — 임시 디렉토리 밖으로는 한 발도 나가지 않는다
+      dir = mkdtempSync(join(tmpdir(), 'cc-contract-fs-'))
+      projectId = (await h.platform.projects.add(dir)).id
+    })
+    afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+    it('밖에서 들어온 파일이 목록에 나타난다', async () => {
+      const res = await h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('hello'))
+      expect(res.path).toBe('dropped.txt')
+      const listed = await h.platform.fs.listDir(projectId, '')
+      expect(listed.map((e) => e.name)).toContain('dropped.txt')
+      expect((await h.platform.fs.readFile(projectId, 'dropped.txt')).text).toBe('hello')
+    })
+
+    /** 덮어쓰기는 없다 — 무엇과 부딪혔는지 이름을 대고 아무것도 하지 않는다 */
+    it('같은 이름이 이미 있으면 들여오지 않는다', async () => {
+      await expect(h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('other'))).rejects.toThrow(
+        /already exists/,
+      )
+      expect((await h.platform.fs.readFile(projectId, 'dropped.txt')).text).toBe('hello')
+    })
+
+    it('프로젝트 밖으로는 들여오지 못한다', async () => {
+      await expect(h.platform.fs.importFile(projectId, '../..', 'evil.txt', btoa('x'))).rejects.toThrow()
+    })
+
+    it('트리 안에서 옮기면 부모가 바뀐다', async () => {
+      h.makeDir(dir, 'sub')
+      const moved = await h.platform.fs.move(projectId, 'dropped.txt', 'sub')
+      expect(moved).toEqual({ path: 'sub/dropped.txt', moved: true })
+      expect((await h.platform.fs.listDir(projectId, 'sub')).map((e) => e.name)).toContain('dropped.txt')
+    })
+
+    it('제자리에 놓는 것은 실패가 아니다 (moved:false)', async () => {
+      expect(await h.platform.fs.move(projectId, 'sub/dropped.txt', 'sub')).toEqual({
+        path: 'sub/dropped.txt',
+        moved: false,
+      })
+    })
+
+    it('목적지가 차 있으면 옮기지 않는다', async () => {
+      await h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('second'))
+      await expect(h.platform.fs.move(projectId, 'dropped.txt', 'sub')).rejects.toThrow(/already exists/)
+      // 원본은 제자리에 남아 있어야 한다 — 반쯤 옮겨진 상태가 가장 나쁘다
+      expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).toContain('dropped.txt')
+    })
+
+    it('프로젝트 밖으로는 옮기지 못한다', async () => {
+      await expect(h.platform.fs.move(projectId, 'dropped.txt', '../..')).rejects.toThrow()
+    })
+
+    /**
+     * 휴지통·파일 관리자는 **할 수 있는지부터 답한다** (`models()`와 같은 모양).
+     *
+     * 두 구현의 답이 갈리는 것이 정상이다: 브라우저에는 휴지통이 없고 앞으로도 없다.
+     * 계약은 "된다"가 아니라 **"안 되면 이유가 온다"**이다 — 이유 없는 supported:false는
+     * 화면에서 조용한 무동작과 구분되지 않는다.
+     */
+    it('휴지통은 되는지 답하고, 안 되면 이유를 준다', async () => {
+      const res = await h.platform.fs.trash(projectId, 'dropped.txt')
+      if (res.supported) {
+        expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).not.toContain('dropped.txt')
+      } else {
+        expect(res.reason).toMatch(/\S/)
+      }
+    })
+
+    it('파일 관리자에서 보기도 같은 모양으로 답한다', async () => {
+      const res = await h.platform.fs.reveal(projectId, 'sub')
+      if (!res.supported) expect(res.reason).toMatch(/\S/)
+    })
+
+    it('이 데스크톱이 파일 관리자를 뭐라고 부르는지 답한다', () => {
+      expect(h.platform.capabilities.fileManagerName).toMatch(/\S/)
+    })
   })
 
   it('capabilities와 detect를 노출한다', async () => {

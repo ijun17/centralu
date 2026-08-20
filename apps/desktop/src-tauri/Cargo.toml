@@ -3,7 +3,9 @@ name = "centralu"
 version = "0.1.0-beta.2"
 description = "에이전트 관제탑"
 edition = "2021"
-rust-version = "1.77"
+# Raised from 1.77 by the `trash` dependency below, which declares 1.85. CI builds on
+# `stable`, so this is a statement of what the tree actually needs, not a new constraint.
+rust-version = "1.85"
 
 [lib]
 name = "centralu_lib"
@@ -25,6 +27,14 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# 삭제는 **휴지통으로 보내는 것**이다 (#18). 임시 폴더로 옮기는 unlink가 아니라 진짜
+# OS 휴지통이라야 하고, 그건 Node 사이드카가 할 수 없어서 여기로 온다.
+# `trash`는 이 생태계의 표준 크레이트다: macOS는 `NSFileManager trashItem`,
+# 리눅스는 freedesktop 휴지통 규격 1.0을 직접 구현한다 (GNOME·KDE·XFCE 공통).
+# `chrono`는 리눅스 쪽에서 휴지통 정보 파일의 삭제 시각을 적는 데 쓰이므로 남긴다 —
+# 그게 없으면 파일 관리자에서 "언제 지웠는지"가 비어 보인다.
+trash = { version = "5", default-features = false, features = ["chrono"] }
 
 # 신호등 버튼 위치를 잡는 데만 쓴다 (macOS 전용).
 # **새 의존이 아니다** — objc2 계열은 tauri·tao·wry가 이미 끌어오고 있고

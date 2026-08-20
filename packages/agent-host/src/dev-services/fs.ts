@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 
 /**
@@ -8,6 +8,12 @@ import { join, relative, resolve, sep } from 'node:path'
  * 원칙 둘:
  *   1. **한 단계만 읽는다** — 10k+ 파일 저장소에서도 첫 렌더가 빨라야 한다.
  *   2. **프로젝트 밖으로 나가지 않는다** — 경로 탈출(`../../etc/passwd`)을 막는다.
+ *
+ * Issues #18/#19 added writing to that list, and writing is where rule 2 stops being a
+ * tidiness rule: reading the wrong file leaks it, but *moving* or *trashing* the wrong one
+ * destroys something the person never pointed at. So every operation below resolves both
+ * ends through `safeJoin` before it touches anything, and the checks are exported as plain
+ * functions so they can be tested without a filesystem.
  */
 
 export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
@@ -16,13 +22,114 @@ export type FsFile = { text: string; truncated: boolean; binary: boolean; bytes:
 const MAX_TEXT = 2_000_000 // 2MB 넘으면 잘라 보여준다 (뷰어는 어차피 가상 스크롤)
 
 /** 프로젝트 루트를 벗어나는 경로를 막는다 */
-function safeJoin(root: string, rel: string): string {
+export function safeJoin(root: string, rel: string): string {
   const target = resolve(root, rel || '.')
   const rootResolved = resolve(root)
   if (target !== rootResolved && !target.startsWith(rootResolved + sep)) {
     throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
   }
   return target
+}
+
+function fail(message: string): never {
+  throw Object.assign(new Error(message), { code: 'internal' })
+}
+
+/**
+ * The last segment of a path, and nothing else.
+ *
+ * Both writing operations take a *name* from somewhere we do not control — the source
+ * entry for a move, the OS for a drop — and paste it onto a destination directory. Taking
+ * only the last segment is what stops `../../.ssh/authorized_keys` from being a name that
+ * climbs out of the destination. `safeJoin` would catch it too; this catches it earlier and
+ * says so.
+ */
+export function baseName(path: string): string {
+  const name = path.split('/').filter(Boolean).pop() ?? ''
+  if (!name || name === '.' || name === '..') fail(`Not a file name: ${path || '(empty)'}`)
+  return name
+}
+
+/**
+ * Where "drop this onto that folder" lands, as a project-relative path.
+ *
+ * The gesture is *into a directory*, so the caller never gets to choose the new name —
+ * which is also why renaming is not reachable through this door (it is out of scope, #19).
+ */
+export function moveTarget(from: string, toDir: string): string {
+  const name = baseName(from)
+  return toDir ? `${toDir}/${name}` : name
+}
+
+async function exists(abs: string): Promise<boolean> {
+  return stat(abs).then(
+    () => true,
+    () => false,
+  )
+}
+
+/**
+ * Move a file or folder inside the project (#19).
+ *
+ * **Never overwrites.** A collision is reported, not resolved: the app cannot know whether
+ * the file already sitting there is the one an agent is mid-edit on, and quietly replacing
+ * it is the one outcome nobody can undo. `moved: false` means the drop landed where the
+ * entry already was — a miss, not a failure, so the caller stays quiet about it.
+ *
+ * The `exists` check ahead of `rename` is not atomic (POSIX `rename` replaces the
+ * destination and Node exposes no `RENAME_NOREPLACE`). The window is between two calls in
+ * one process driven by one person's drag, so the realistic collision is the one this does
+ * catch: a file that was already there.
+ */
+export async function moveEntry(root: string, from: string, toDir: string): Promise<{ path: string; moved: boolean }> {
+  const src = safeJoin(root, from)
+  if (src === resolve(root)) fail('Cannot move the project itself')
+  const rel = moveTarget(from, toDir)
+  const dst = safeJoin(root, rel)
+  if (src === dst) return { path: rel, moved: false }
+  // A folder cannot be moved inside itself — `rename` would fail, but with EINVAL, which
+  // reaches the person as noise rather than as the reason.
+  if (dst.startsWith(src + sep)) fail(`Cannot move ${baseName(from)} into itself`)
+  if (await exists(dst)) fail(`${rel} already exists — nothing was moved`)
+  await rename(src, dst)
+  return { path: rel, moved: true }
+}
+
+/**
+ * Write a file the OS handed us into the project (#19, dragging in from Finder).
+ *
+ * This takes bytes rather than a source path on purpose: the webview does not tell the page
+ * where a dropped file came from (which is why pasted and dropped attachments already
+ * travel as bytes). So the original stays where it was — the one direction that cannot
+ * destroy something outside the project.
+ *
+ * `wx` makes the no-overwrite rule atomic here, unlike the move above: the create fails if
+ * anything is at that path already.
+ */
+export async function importFile(root: string, toDir: string, name: string, data: Buffer): Promise<{ path: string }> {
+  const rel = toDir ? `${toDir}/${baseName(name)}` : baseName(name)
+  const dst = safeJoin(root, rel)
+  const dir = safeJoin(root, toDir)
+  if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) fail(`${toDir || '.'} is not a folder`)
+  await writeFile(dst, data, { flag: 'wx' }).catch((e: NodeJS.ErrnoException) => {
+    if (e.code === 'EEXIST') fail(`${rel} already exists — nothing was written`)
+    throw e
+  })
+  return { path: rel }
+}
+
+/**
+ * The absolute path of something that is really there.
+ *
+ * Trashing and revealing happen in the desktop shell (Rust), which knows nothing about
+ * projects — so it has to be handed a full path, and this is the only place allowed to make
+ * one. The existence check is part of the contract: "reveal a file that is no longer there"
+ * has to fail out loud, because the shell's answer to a missing path is to do nothing.
+ */
+export async function resolveExisting(root: string, rel: string): Promise<string> {
+  const abs = safeJoin(root, rel)
+  await stat(abs).catch(() => fail(`${rel || '.'} is no longer there`))
+  return abs
 }
 
 /**

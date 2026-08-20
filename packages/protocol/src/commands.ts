@@ -361,6 +361,37 @@ export const RpcMethods = {
     params: z.object({ projectId: z.string(), path: z.string() }),
     result: z.object({ text: z.string(), truncated: z.boolean(), binary: z.boolean(), bytes: z.number() }),
   },
+  /**
+   * Move a file or folder into another folder of the same project (#19).
+   *
+   * The destination is a **folder**, not a full path: the gesture is a drop onto a row, and
+   * the new name is always the old one. `moved: false` means it landed where it already was.
+   */
+  'fs.move': {
+    params: z.object({ projectId: z.string(), from: z.string(), toDir: z.string() }),
+    result: z.object({ path: z.string(), moved: z.boolean() }),
+  },
+  /**
+   * Put a file dragged in from the desktop into the project (#19).
+   *
+   * Bytes, not a source path — the webview never tells the page where a dropped file lives,
+   * which is the same reason attachments travel this way.
+   */
+  'fs.importFile': {
+    params: z.object({ projectId: z.string(), toDir: z.string(), name: z.string(), dataBase64: z.string() }),
+    result: z.object({ path: z.string() }),
+  },
+  /**
+   * The absolute path of a project file, for the desktop shell's own OS calls
+   * (revealing it in the file manager, moving it to the trash).
+   *
+   * The host is the only side that knows the project root, so it is the only side allowed
+   * to build one — and it refuses paths that leave the project, or that are not there.
+   */
+  'fs.resolve': {
+    params: z.object({ projectId: z.string(), path: z.string() }),
+    result: z.object({ path: z.string() }),
+  },
   'messages.search': {
     params: z.object({ query: z.string(), limit: z.number().optional() }),
     result: z.array(z.object({ sessionId: z.string(), seq: z.number(), snippet: z.string() })),

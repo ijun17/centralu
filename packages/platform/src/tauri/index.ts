@@ -133,6 +133,17 @@ class TauriSystemPort implements SystemPort {
   }
 }
 
+/**
+ * 커맨드가 준 `Err(String)`을 Error로 바꿔 다시 던진다.
+ *
+ * Tauri는 러스트 쪽 `Err`를 **문자열 그대로** 거절 값으로 넘긴다. Error가 아니므로
+ * `e.message`가 undefined가 되고, 화면에는 "Could not delete a.ts: undefined"처럼
+ * 이유가 빠진 실패가 뜬다 — 실패를 말하되 왜인지는 안 말하는, 가장 쓸모없는 모양이다.
+ */
+function rethrowAsError(e: unknown): never {
+  throw e instanceof Error ? e : new Error(String(e))
+}
+
 /** 창을 앞으로 (알림 클릭·전역 단축키) */
 export async function focusWindow(): Promise<void> {
   await invoke('focus_window')
@@ -163,11 +174,26 @@ export async function createTauriPlatform(): Promise<Platform> {
     (): ShortcutKeys => ({ mod: '⌘', alt: '⌥', join: '' }),
   )
 
+  // And the same again for what this desktop calls its file manager (#19), so the context
+  // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
+  const fileManagerName = await invoke<string>('file_manager_name').catch(() => 'file manager')
+
   // 수퍼바이저가 host를 되살리면 포트·토큰이 바뀐다 → 새 주소로 갈아타야 한다.
   // 이 구독이 없으면 사이드카가 크래시한 뒤 앱이 '연결 끊김'에 머문다 (L4-2 실측).
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
+    fileManagerName,
+    /*
+      휴지통과 '파일 관리자에서 보기'는 host가 못 하는 두 가지다 (#18/#19).
+      진짜 휴지통은 macOS의 `NSFileManager trashItem`·freedesktop 규격이지 임시 폴더로
+      옮기는 unlink가 아니므로, Node 사이드카가 아니라 여기서 Rust로 내려간다.
+      경로를 만드는 것은 여전히 host의 몫이다 — 프로젝트 루트를 아는 쪽은 거기뿐이다.
+    */
+    nativeFiles: {
+      trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),
+      reveal: (path) => invoke<void>('reveal_path', { path }).catch(rethrowAsError),
+    },
     onEndpointChange: (cb) => {
       const un = listen<HostStatus>('host-status', (e) => {
         const p = e.payload
@@ -188,6 +214,7 @@ export async function createTauriPlatform(): Promise<Platform> {
       openInIde: true,
       windowControlsInset,
       shortcutKeys,
+      fileManagerName,
     },
   }
 }
