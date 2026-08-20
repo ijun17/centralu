@@ -667,11 +667,7 @@ export class SessionManager {
 
     const gone = await this.externalGone(m, cwd)
     if (gone) {
-      return {
-        session: m,
-        resumed: false,
-        reason: `This conversation was deleted in ${m.tool === 'codex' ? 'Codex' : 'Claude Code'} — the history kept here is still readable, and you can continue in a new session`,
-      }
+      return { session: m, resumed: false, reason: externalMissingReason(m.tool, cwd) }
     }
 
     try {
@@ -724,11 +720,7 @@ export class SessionManager {
        */
       const gone = await this.externalGone(m, cwd)
       if (gone) {
-        return {
-          session: m,
-          resumed: false,
-          reason: `This conversation was deleted in ${m.tool === 'codex' ? 'Codex' : 'Claude Code'} — the history kept here is still readable, and you can continue in a new session`,
-        }
+        return { session: m, resumed: false, reason: externalMissingReason(m.tool, cwd) }
       }
       /*
        * 어댑터가 "이 대화는 다른 쪽이 쥐고 있다"고 코드로 말해 준다 (codex의 잠금).
@@ -1807,6 +1799,29 @@ export class SessionManager {
     if (!h) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     return h
   }
+}
+
+/**
+ * What we may honestly say when the tool has no record of a conversation.
+ *
+ * This used to read "This conversation was deleted in Claude Code". Nobody ever observed a
+ * deletion. The tool only answered "not in this directory" — and it keys its session store
+ * **by working directory**, so it says that whenever the folder moves too. That is what
+ * happened (issue #28): renaming the data directory moved the orchestrator's cwd, the tool
+ * looked under a slug that had never existed, and the app told its owner that 924 messages
+ * and an 821KB transcript — both still sitting on disk — had been deleted.
+ *
+ * So: report the observation, name the directory we looked in, and offer the two causes we
+ * cannot tell apart from here. Claiming a deletion we did not witness reads as data loss,
+ * and a person who believes their data is gone stops looking for it.
+ */
+function externalMissingReason(tool: ToolName, cwd: string): string {
+  const label = tool === 'codex' ? 'Codex' : 'Claude Code'
+  return (
+    `${label} has no record of this conversation under ${cwd} — either it was removed there, ` +
+    `or this folder has moved since the session started. The history kept here is still readable, ` +
+    `and you can continue in a new session`
+  )
 }
 
 function truncate(s: string, max = 40): string {

@@ -628,12 +628,17 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
 })
 
 /**
- * 도구(클로드·코덱스)에서 대화를 지웠을 때.
+ * When the tool has no record of the conversation we are trying to resume.
  *
- * 실측: 그냥 이어가려 하면 프로세스는 뜨고 첫 턴이 error_during_execution으로 죽는다.
- * 조용한 성공은 아니지만(그게 최악이다) 사용자에게는 원인을 전혀 알려주지 않는다.
+ * Measured: resuming anyway starts the process and the first turn dies with
+ * error_during_execution — not a silent success (that would be worst), but it tells the user
+ * nothing about the cause.
+ *
+ * And the cause is not necessarily a deletion. The tool files conversations **by working
+ * directory**, so "not found" also means "this folder moved" — which is what actually happened
+ * in issue #28. These tests hold the message to the observation.
  */
-describe('도구에서 지워진 대화', () => {
+describe('도구가 대화를 못 찾을 때', () => {
   class GoneAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
       approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
@@ -664,18 +669,27 @@ describe('도구에서 지워진 대화', () => {
     return { a, m, call: createRpcHandler(m, adapters) }
   }
 
-  it('지워진 대화를 이어가려 하면 무엇이 일어났는지 말해준다', async () => {
+  it('못 찾았다고만 말한다 — 지워졌다고 하지 않는다', async () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    const startedIn = a.lastCwd
     await m.archive(s.id, true)
     await m.archive(s.id, false)
 
-    a.present = [] // 사용자가 클로드 코드에서 지웠다
+    a.present = [] // the tool no longer lists it — an absence is all we actually know
     const r = await m.resumeSession(s.id)
 
     expect(r.resumed).toBe(false)
-    expect(r.reason).toMatch(/was deleted in Claude Code/)
+    /*
+     * This used to assert `/was deleted in Claude Code/` — the test was pinning the lie in
+     * place. All the tool reported was an absence, and an absence has two causes we cannot
+     * tell apart from here: removed there, or the folder moved (issue #28). So: report the
+     * observation, name the directory we looked in, claim no deletion nobody witnessed.
+     */
+    expect(r.reason).toMatch(/has no record of this conversation/)
+    expect(r.reason).toContain(startedIn!)
+    expect(r.reason).not.toMatch(/delete/i)
     // 기록은 읽을 수 있어야 한다 — 세션을 지워버리지 않는다
     expect(m.listSessions().find((x) => x.id === s.id)).toBeDefined()
   })
