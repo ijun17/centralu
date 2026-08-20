@@ -199,6 +199,46 @@ describe('살아-있는-동안 사실 이어받기', () => {
 })
 
 /*
+ * Settings survive a restart on screen, not only in the database (issue #37).
+ *
+ * Reported as "model, effort and permissions do not save": the database held the chosen
+ * values the whole time and the host read them back, but the store's cold-start path took
+ * only `effort` off the list and let initialSession's defaults fill the rest — so the button
+ * under the composer said "Default · Normal" and every restart looked like a loss.
+ * A stored value must come from the session, never from what the startup path bothered to
+ * name, so this checks all of them at once.
+ */
+describe('저장된 세션 설정 이어받기 (이슈 #37)', () => {
+  const stored = {
+    model: 'claude-fable-5[1m]',
+    effort: 'high',
+    permissionPreset: 'auto' as const,
+    worktree: { path: '/tmp/wt/feature', branch: 'feature' },
+  }
+
+  it('앱을 다시 켜면 host가 준 모델·강도·권한·워크트리가 그대로 남는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('ss-s1', sessionInfo('ss-s1', stored))
+
+    await useStore.getState().attach(mock)
+
+    expect(useStore.getState().sessions['ss-s1']).toMatchObject(stored)
+  })
+
+  it('재연결 병합도 같은 값을 준다 — 두 경로가 같은 요약을 만든다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+
+    // 끊긴 사이에 다른 창에서 만들어진 세션이다 — 병합이 처음 등록한다
+    mock.sessions.set('ss-s2', sessionInfo('ss-s2', stored))
+    mock.setConnectionState('disconnected')
+    mock.setConnectionState('connected')
+
+    await vi.waitFor(() => expect(useStore.getState().sessions['ss-s2']).toMatchObject(stored))
+  })
+})
+
+/*
  * When the current turn started (issue #23).
  *
  * The "Waiting for response" line counted up from its own mount, so any remount put a

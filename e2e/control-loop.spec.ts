@@ -2465,6 +2465,35 @@ test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) =>
   expect(effort).toBeNull()
 })
 
+/*
+ * 앱을 다시 켜면 설정이 초기화된 것처럼 보였다 (이슈 #37).
+ *
+ * 저장은 처음부터 멀쩡했다 — DB에도 host 목록에도 고른 값이 그대로 있었다.
+ * 초기화된 건 화면이었다: 시작 경로가 목록에서 강도만 집어 오고 모델·권한은
+ * 기본값으로 채워서, 입력창 아래 버튼이 "Default · Normal"이라고 말했다.
+ * 그래서 여기서는 스토어 값이 아니라 **버튼이 읽어주는 글자**를 본다.
+ */
+test('앱을 다시 켜도 고른 모델과 권한이 그대로 보인다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await pickSetting(page, 'settings-model-fable')
+  await pickSetting(page, 'settings-effort-high')
+  await pickSetting(page, 'settings-preset-auto')
+  await expect(page.getByTestId('settings-open')).toHaveText(/Fable · high · Auto/)
+
+  /*
+   * 앱을 다시 켠 것과 같다: host(mock)는 그대로 살아 있고, 스토어만 목록을 받아
+   * 세션 요약을 처음부터 다시 세운다 — 재시작이 실제로 도는 경로가 이 attach다.
+   */
+  await page.evaluate(async () => {
+    const w = window as any
+    await w.__store.getState().attach(w.__mock)
+  })
+
+  await expect(page.getByTestId('settings-open')).toHaveText(/Fable · high · Auto/)
+})
+
 /** 펼침 표시는 접힘=오른쪽, 펼침=아래쪽. 같은 글리프를 돌려서 두 상태가 어긋나지 않게 한다 */
 test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })

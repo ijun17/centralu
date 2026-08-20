@@ -597,7 +597,22 @@ export const useStore = create<AppState>((set, get) => ({
       sessions.map((s) => [
         s.id,
         {
-          ...initialSession({ id: s.id, projectId: s.projectId, name: s.name, tool: s.tool, effort: s.effort }),
+          /*
+           * Take every stored setting the host hands back, not just one of them (issue #37).
+           *
+           * This asked for `effort` and stopped there, so a cold start rebuilt each session
+           * with `model: null`, `permissionPreset: 'normal'` and `worktree: null` — the
+           * defaults from initialSession — while the database still held what the user had
+           * picked. Nothing was ever lost on the way down; the screen read back its own
+           * defaults and presented them as the session, so every restart looked like the
+           * settings had been thrown away (and the worktree badge vanished with them).
+           * The reconnect merge builds the same summary from the same list and already names
+           * all of these — two places that construct one thing have to ask for one set.
+           */
+          ...initialSession({
+            id: s.id, projectId: s.projectId, name: s.name, tool: s.tool,
+            model: s.model, effort: s.effort, permissionPreset: s.permissionPreset, worktree: s.worktree,
+          }),
           autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
           lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
           // 살아-있는-동안 사실들도 host가 준다 — 이게 없으면 state=waiting_approval인데
