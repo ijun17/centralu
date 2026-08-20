@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { ReasoningEffortOption } from './generated/v2/ReasoningEffortOption.js'
 import { collectModels, toModelOptions } from './models.js'
 
 /**
@@ -18,11 +17,20 @@ describe('toModelOptions', () => {
      * 구현도 같은 짐작을 하고 있어서 둘이 사이좋게 틀린 채로 통과했다.
      * 짐작끼리 맞춰보는 테스트는 아무것도 지켜주지 못한다 — 타입으로 못을 박는다.
      */
+    /*
+     * The shape is written out here instead of importing the generated
+     * ReasoningEffortOption: generated/ is deliberately not committed (see
+     * codex-bindings.mjs — the adapter imports none of it, and protocol drift
+     * is caught by the contract check, not by these types). Importing it here
+     * broke the first CI typecheck ever run on Linux, because only machines
+     * with the codex CLI have the files. If codex renames these fields, the
+     * contract check is the tripwire — not this literal.
+     */
     supportedReasoningEfforts: [
       { reasoningEffort: 'low', description: '빠르게' },
       { reasoningEffort: 'medium', description: '보통' },
       { reasoningEffort: 'high', description: '깊게' },
-    ] satisfies ReasoningEffortOption[],
+    ] satisfies { reasoningEffort: string; description: string }[],
     defaultReasoningEffort: 'medium',
     ...over,
   })
