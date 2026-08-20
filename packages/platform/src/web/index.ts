@@ -256,6 +256,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       openInIde: false,
       // The browser draws no window controls over our page.
       windowControlsInset: 0,
+      /*
+        A page could sniff the keyboard from the user agent, and deliberately does not.
+        This build is the dev server and the contract-test harness, both of which run on a
+        Mac, and a capability that answers differently depending on the machine running the
+        suite is one the contract test cannot pin. The shipped desktop app asks Rust
+        (`packages/platform/src/tauri/index.ts`), which is the answer that has to be right.
+      */
+      shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
     },
     async dispose() {
       unsubscribeEndpoint?.()

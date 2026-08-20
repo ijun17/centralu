@@ -3,6 +3,7 @@ import { nextWaitingSession } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { computeInbox } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 type Item =
@@ -26,6 +27,7 @@ export function CommandPalette() {
   const toggleSettings = useStore((s) => s.toggleSettings)
   const toggleInbox = useStore((s) => s.toggleInbox)
   const platform = usePlatform()
+  const sc = useShortcut()
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
@@ -68,7 +70,7 @@ export function CommandPalette() {
       // room by a floor plan it no longer has (issue #7)
       sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
-      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: '⌘B · Git · files', run: () => togglePanel() },
+      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · Git · files`, run: () => togglePanel() },
       /*
         The two waiting-list shortcuts are here because they stopped being printed on the
         top bar (issue #33). The bar advertised them next to the count, which is the one
@@ -77,12 +79,12 @@ export function CommandPalette() {
         owed, though, so they are said twice: named with their keys in Settings → Shortcuts
         (for looking up), and runnable from here (for doing without knowing the key).
       */
-      { kind: 'action', id: 'waiting', label: 'Waiting list', sub: '⌘I · everything waiting on you', run: () => toggleInbox(true) },
+      { kind: 'action', id: 'waiting', label: 'Waiting list', sub: `${sc('mod', 'I')} · everything waiting on you`, run: () => toggleInbox(true) },
       {
         kind: 'action',
         id: 'next-waiting',
         label: 'Jump to next waiting',
-        sub: '⌘⇧A · approvals first',
+        sub: `${sc('mod', '⇧A')} · approvals first`,
         run: () => {
           // 정렬은 core가 안다 (승인 → 오류 → 응답대기) — App의 전역 단축키와 같은 길이다
           const st = useStore.getState()
@@ -115,7 +117,7 @@ export function CommandPalette() {
         sub: sessions[h.sessionId]?.name ?? 'Chat',
       })),
     ]
-  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings, toggleInbox, focusSession])
+  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings, toggleInbox, focusSession, sc])
 
   const choose = useCallback(
     (item: Item) => {

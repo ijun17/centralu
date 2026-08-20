@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
+import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { TRUNCATED_NOTICE, caretAt, selectedText, wholeFileText, type Caret } from './copy.js'
 
@@ -18,6 +19,8 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const path = useStore((s) => s.viewerPath)
   const setToast = useStore((s) => s.setToast)
+  // 훅은 아래 `if (!path)` 이른 return보다 먼저 — 분기 뒤에 두면 렌더마다 훅 수가 달라진다
+  const sc = useShortcut()
   const [file, setFile] = useState<{ text: string; truncated: boolean; binary: boolean; bytes: number } | null>(null)
   const [query, setQuery] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -160,7 +163,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
       <div className="flex flex-1 flex-col items-center justify-center gap-2" data-testid="viewer-empty">
         <p className="text-[13px] text-ash">Select a file</p>
         <p className="text-[11px] text-slate">
-          <Kbd>⌘⇧2</Kbd> pick a file in the tree to open it here
+          <Kbd>{sc('mod', '⇧2')}</Kbd> pick a file in the tree to open it here
         </p>
       </div>
     )

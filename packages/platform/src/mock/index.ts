@@ -63,6 +63,9 @@ export class MockPlatform implements Platform {
     // A browser has no window controls to leave room for, and E2E runs against this
     // mock — so the header it measures starts at the window edge.
     windowControlsInset: 0,
+    // 이 mock에는 물어볼 OS가 없다. 맥 표기를 답으로 정한다 — 개발도 E2E도 맥에서 돌고,
+    // 이 자리에서 자판을 짐작하기 시작하면 테스트가 도는 기계에 따라 결과가 달라진다.
+    shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
   }
 
   /** 테스트가 이벤트를 주입하는 통로 */

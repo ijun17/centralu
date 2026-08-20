@@ -5,6 +5,7 @@ import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useShortcut } from '../../app/shortcut.js'
 import { useStore, type PanelTab } from '../../store/store.js'
 import { FileTree } from '../files/FileTree.jsx'
 import { TerminalPane } from './Terminal.jsx'
@@ -98,6 +99,7 @@ function PanelHeader({
   const tab = useStore((s) => s.panelTab)
   const setPanelTab = useStore((s) => s.setPanelTab)
   const togglePanel = useStore((s) => s.togglePanel)
+  const sc = useShortcut()
   const openBranches = useStore((s) => s.openBranches)
 
   return (
@@ -118,7 +120,7 @@ function PanelHeader({
         )}
         <span className="ml-auto shrink-0">
         <IconButton
-          label="Collapse panel (⌘B)"
+          label={`Collapse panel (${sc('mod', 'B')})`}
           onClick={() => togglePanel(false)}
           testId="evidence-close"
           align="right"
@@ -209,6 +211,7 @@ function PanelBody({
 function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boolean }) {
   const togglePanel = useStore((s) => s.togglePanel)
   const platform = usePlatform()
+  const sc = useShortcut()
   const touched = useTouchedCount(projectId)
   const [count, setCount] = useState<number | null>(null)
 
@@ -238,7 +241,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
         className="rounded px-1 py-0.5 text-[12px] text-slate transition-colors hover:bg-graphite/50 hover:text-chalk"
         onClick={() => togglePanel(true)}
         data-testid="evidence-open"
-        title="Expand evidence panel (⌘B)"
+        title={`Expand evidence panel (${sc('mod', 'B')})`}
       >
         ‹
       </button>

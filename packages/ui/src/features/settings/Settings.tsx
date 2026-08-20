@@ -2,22 +2,34 @@ import { useCallback, useEffect, useState } from 'react'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 type Rule = { id: number; scope: string; matcher: string; decision: string; createdAt: number }
 
-/** FR-17 단축키 표 — 설정에서 보고 확인할 수 있어야 한다 */
-const SHORTCUTS: [string, string][] = [
-  ['⌘I', 'Waiting'],
-  ['⌘⇧A', 'Jump to next waiting'],
-  ['⌘K', 'Command palette'],
-  ['⌘1~9', 'Jump to project'],
-  ['⌘⇧1~4', 'Switch tab (chat · files · git · viewer)'],
-  ['y / n / a', 'Approve · deny · always allow'],
-  ['⌥a', 'Always allow (project scope)'],
-  ['d', 'Dismiss from inbox'],
-  ['j / k', 'Move in inbox'],
-  ['Enter / Esc', 'Send · close'],
+/**
+ * FR-17 단축키 표 — 설정에서 보고 확인할 수 있어야 한다.
+ *
+ * 조합은 **뜻으로** 적는다: `'mod'`·`'alt'`는 이 기계의 자판이 이름을 붙이고
+ * (`⌘`/`Ctrl`, `⌥`/`Alt`), 나머지 조각은 키 이름 그대로다 (이슈 #32).
+ *
+ * 데스크톱 앱의 단축키 표는 **지금 이 기계의 자판**을 보여준다. 다른 답은 없다 —
+ * 여기 적힌 키를 누르는 곳이 이 기계이기 때문이고, 두 벌을 다 적으면 정작 자기 것을
+ * 찾는 데 시간이 든다.
+ */
+const SHORTCUTS: [string[], string][] = [
+  [['mod', 'I'], 'Waiting'],
+  // `⇧`는 저 자판들에도 찍혀 있어서 옮길 말이 없다. 뒤 키에 붙여 두는 편이
+  // `Ctrl+⇧+A`보다 읽힌다
+  [['mod', '⇧A'], 'Jump to next waiting'],
+  [['mod', 'K'], 'Command palette'],
+  [['mod', '1~9'], 'Jump to project'],
+  [['mod', '⇧1~4'], 'Switch tab (chat · files · git · viewer)'],
+  [['y / n / a'], 'Approve · deny · always allow'],
+  [['alt', 'a'], 'Always allow (project scope)'],
+  [['d'], 'Dismiss from inbox'],
+  [['j / k'], 'Move in inbox'],
+  [['Enter / Esc'], 'Send · close'],
 ]
 
 /**
@@ -55,6 +67,7 @@ export function Settings() {
   const policy = useStore((s) => s.notifyPolicy)
   const setPolicy = useStore((s) => s.setNotifyPolicy)
   const platform = usePlatform()
+  const sc = useShortcut()
   const [rules, setRules] = useState<Rule[] | null>(null)
   const [category, setCategory] = useState<Category>('notifications')
 
@@ -214,9 +227,9 @@ export function Settings() {
             {category === 'shortcuts' && (
               <section>
                 <ul className="grid grid-cols-2 gap-x-6 gap-y-1" data-testid="shortcut-list">
-                  {SHORTCUTS.map(([key, label]) => (
-                    <li key={key} className="flex items-baseline gap-2 text-[12px] text-ash">
-                      <Kbd>{key}</Kbd>
+                  {SHORTCUTS.map(([keys, label]) => (
+                    <li key={label} className="flex items-baseline gap-2 text-[12px] text-ash">
+                      <Kbd>{sc(...keys)}</Kbd>
                       <span className="truncate">{label}</span>
                     </li>
                   ))}

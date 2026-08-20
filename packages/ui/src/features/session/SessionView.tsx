@@ -50,7 +50,7 @@ export function SessionView() {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
           <p className="text-[13px] text-ash">Select a project or session</p>
           <p className="text-[11px] text-slate">
-            <Kbd>⌘</Kbd> <Kbd>I</Kbd> shows everything waiting on you
+            <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you
           </p>
         </div>
       )
@@ -66,7 +66,7 @@ export function SessionView() {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
           <p className="text-[13px] text-ash">Select a session or start a new one</p>
           <p className="text-[11px] text-slate">
-            Git and files are in the evidence panel on the right, even without a session (<Kbd>⌘</Kbd> <Kbd>B</Kbd>)
+            Git and files are in the evidence panel on the right, even without a session (<Kbd mod /> <Kbd>B</Kbd>)
           </p>
         </div>
       </section>

@@ -320,7 +320,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[10px] text-slate">
-            <Kbd>esc</Kbd> close · <Kbd>⌘</Kbd> <Kbd>↵</Kbd> {resume ? 'Load' : 'Start'}
+            <Kbd>esc</Kbd> close · <Kbd mod /> <Kbd>↵</Kbd> {resume ? 'Load' : 'Start'}
           </span>
           <button type="button" className="ml-auto rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onClose}>
             Cancel

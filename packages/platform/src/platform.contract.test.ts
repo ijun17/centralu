@@ -163,6 +163,25 @@ describe.each([
     expect(found?.archived).toBe(true)
   })
 
+  /**
+   * 자판 표기도 capability다 (이슈 #32).
+   *
+   * ui에는 뒤에 붙은 구현이 없어서, 거기 OS 분기를 두면 우리가 돌리는 어떤 테스트에도
+   * 안 보인다 — 그래서 `⌘`는 포트를 통해 온다. 두 구현이 여기서 같은 답을 하는지 본다:
+   * 한쪽만 조용히 바뀌면 브라우저에서 보던 화면과 앱에서 보는 화면이 갈라진다.
+   *
+   * **두 구현 다 맥 표기가 정답이다.** 실제 자판을 아는 건 Rust뿐이고(tauri 구현),
+   * 이 둘은 각각 개발 서버와 E2E의 것이라 자판을 짐작하기 시작하면 테스트가 도는
+   * 기계에 따라 결과가 달라진다.
+   */
+  it('자판이 조합키를 뭐라고 부르는지 답한다 (#32)', () => {
+    const keys = h.platform.capabilities.shortcutKeys
+    expect(keys.mod).toBe('⌘')
+    expect(keys.alt).toBe('⌥')
+    // 기호는 붙여 쓴다 (`⌘⇧A`). 이름이 되는 자판에서만 구분자가 생긴다
+    expect(keys.join).toBe('')
+  })
+
   it('capabilities와 detect를 노출한다', async () => {
     expect((await h.platform.agents.capabilities('claude')).approvals).toBe(true)
     expect((await h.platform.agents.detect()).length).toBeGreaterThan(0)

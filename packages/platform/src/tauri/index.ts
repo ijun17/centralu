@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AlertKind, Platform, SystemPort } from '../ports/index.js'
+import type { AlertKind, Platform, ShortcutKeys, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
 
 /**
@@ -154,6 +154,15 @@ export async function createTauriPlatform(): Promise<Platform> {
   // problem, and blocking startup over one would turn it into a fatal one.
   const windowControlsInset = await invoke<number>('window_controls_inset').catch(() => 0)
 
+  // Same deal for the two modifier keys we print: only Rust knows which keyboard is under
+  // the app, and the labels reach ui as words, never as an OS name (#32).
+  // The fallback is the Mac spelling because a failure here can only mean the command is
+  // missing from the handler list, which is a build-time mistake affecting every platform
+  // equally — and every other implementation in this package answers the same way.
+  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch(
+    (): ShortcutKeys => ({ mod: '⌘', alt: '⌥', join: '' }),
+  )
+
   // 수퍼바이저가 host를 되살리면 포트·토큰이 바뀐다 → 새 주소로 갈아타야 한다.
   // 이 구독이 없으면 사이드카가 크래시한 뒤 앱이 '연결 끊김'에 머문다 (L4-2 실측).
   const base = createWebPlatform({
@@ -178,6 +187,7 @@ export async function createTauriPlatform(): Promise<Platform> {
       processSupervision: true,
       openInIde: true,
       windowControlsInset,
+      shortcutKeys,
     },
   }
 }

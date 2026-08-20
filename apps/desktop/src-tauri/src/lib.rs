@@ -102,6 +102,38 @@ fn window_controls_inset() -> u32 {
     }
 }
 
+/// What this machine's keyboard prints on the two modifier keys the UI shows.
+///
+/// `join` is what goes between keys when a combination is written as one string. macOS
+/// writes `⌘⇧A` with nothing in between, which reads because the parts are symbols; carry
+/// that rule over to keyboards where the parts are words and you get `CtrlShiftA`.
+#[derive(serde::Serialize)]
+struct ShortcutKeys {
+    // `mod` is a Rust keyword, so the field is named for what it is and renamed on the wire.
+    #[serde(rename = "mod")]
+    modifier: &'static str,
+    alt: &'static str,
+    join: &'static str,
+}
+
+/// The labels for shortcut hints, since the UI is not allowed to ask which OS it is on.
+///
+/// The bindings themselves need no help — every handler already takes `metaKey ||
+/// ctrlKey`, so the shortcuts have always worked here and on Linux alike. It was only the
+/// hints that were wrong, and they were wrong everywhere at once because `⌘` was written
+/// out at each of them. A key that is not on the keyboard is a worse hint than none.
+#[tauri::command]
+fn shortcut_keys() -> ShortcutKeys {
+    #[cfg(target_os = "macos")]
+    {
+        ShortcutKeys { modifier: "⌘", alt: "⌥", join: "" }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        ShortcutKeys { modifier: "Ctrl", alt: "Alt", join: "+" }
+    }
+}
+
 /// 자리를 비운 사람을 부르는 두 가지 — 소리와 독 아이콘.
 ///
 /// **배너 대신이 아니라 배너를 대체한다.** macOS에서 `tauri-plugin-notification`은
@@ -258,7 +290,8 @@ pub fn run() {
             alert,
             open_in_ide,
             focus_window,
-            window_controls_inset
+            window_controls_inset,
+            shortcut_keys
         ])
         .setup({
             let sup = supervisor.clone();

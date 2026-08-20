@@ -31,6 +31,11 @@ export interface PlatformCapabilities {
   globalShortcuts: boolean      // web: only within window focus / tauri: true
   processSupervision: boolean   // web: false (the user starts the host) / tauri: true
   openInIde: boolean            // web: false / tauri: true
+  // Not every capability is a yes/no. These two are facts about the machine that the UI
+  // needs in order to draw, asked for as a measurement and as labels rather than as an OS
+  // name — so that ui still never learns which OS it is on.
+  windowControlsInset: number   // px the OS window controls take from our top bar (macOS: 86)
+  shortcutKeys: ShortcutKeys    // { mod, alt, join } — '⌘'/'⌥'/'' here, 'Ctrl'/'Alt'/'+' elsewhere
 }
 ```
 

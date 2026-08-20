@@ -193,6 +193,39 @@ export type PlatformCapabilities = {
    * than an OS name keeps ui free of platform checks.
    */
   windowControlsInset: number
+  /**
+   * What this machine's keyboard prints on the modifier keys we put on screen.
+   *
+   * Every shortcut handler already accepts `metaKey || ctrlKey`, so the keys have always
+   * worked on Linux and Windows — only the labels lied, and they lied in 61 places because
+   * `⌘` was written out at every call site. A symbol nobody's keyboard has is worse than
+   * no hint at all: it tells you the app is not for you.
+   *
+   * Asking for the *labels* rather than for an OS name is the same trade as
+   * `windowControlsInset` above, for the same reason: ui is the one package with no
+   * platform implementation behind it, so an OS check there is invisible to every test we
+   * run (`tooling/styles.test.ts` fails the build if one appears).
+   *
+   * `⇧` is deliberately absent — it is printed on those keyboards too, so there is nothing
+   * to translate and no reason to make the port carry it.
+   */
+  shortcutKeys: ShortcutKeys
+}
+
+/**
+ * 자판이 두 조합키를 뭐라고 부르는가, 그리고 조합을 한 덩어리로 쓸 때 사이에 뭘 넣는가.
+ *
+ * `join`이 있는 이유: 맥은 `⌘⇧A`처럼 붙여 쓰지만, 그 규칙을 그대로 옮기면 다른 자판에서는
+ * `CtrlShiftA`가 된다. 붙여 쓰기는 기호였기 때문에 읽혔던 것이라, 이름이 되는 순간 구분자가
+ * 필요하다 — 자판을 아는 쪽이 함께 답한다.
+ */
+export type ShortcutKeys = {
+  /** `⌘` here, `Ctrl` where there is no command key */
+  mod: string
+  /** `⌥` here, `Alt` elsewhere */
+  alt: string
+  /** What goes between keys when a combination is written as one string */
+  join: string
 }
 
 /**

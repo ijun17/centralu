@@ -110,7 +110,7 @@ export function FirstRun() {
         )}
 
         <p className="mt-6 text-[11px] text-slate">
-          <Kbd>⌘</Kbd> <Kbd>I</Kbd> shows everything waiting on you, anytime.
+          <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you, anytime.
         </p>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
+import { useShortcut } from './shortcut.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { useStore } from '../store/store.js'
@@ -142,6 +143,7 @@ function TopBar() {
   // wrong everywhere else: on desktops that draw their own decorations above us, the
   // same padding is just a hole at the left edge with nothing in it.
   const controlsInset = useCapability('windowControlsInset')
+  const sc = useShortcut()
   /*
    * 상단 바.
    *
@@ -174,7 +176,7 @@ function TopBar() {
         className="group flex items-center gap-2.5 rounded px-2 py-0.5 transition-colors hover:bg-graphite/50"
         onClick={() => toggleInbox()}
         data-testid="counter"
-        title="Waiting (⌘I)"
+        title={`Waiting (${sc('mod', 'I')})`}
       >
         <Metric
           label="Approvals"

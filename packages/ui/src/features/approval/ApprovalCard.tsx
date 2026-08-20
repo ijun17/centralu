@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
 import { suggestMatcher } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
@@ -20,6 +21,7 @@ export function ApprovalCard({
 }) {
   const respond = useStore((s) => s.respondApproval)
   const setToast = useStore((s) => s.setToast)
+  const sc = useShortcut()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -68,7 +70,7 @@ export function ApprovalCard({
           k="a"
           label="Always allow"
           testId="approve-always"
-          title="Hold ⌥ and click to apply to the whole project"
+          title={`Hold ${sc('alt')} and click to apply to the whole project`}
           onClick={(alt) => {
             const scope = alt ? 'project' : 'session'
             void respond(sessionId, requestId, 'always', scope)
@@ -76,7 +78,7 @@ export function ApprovalCard({
           }}
         />
         <span className="ml-auto text-[10px] text-slate">
-          <Kbd>⌥</Kbd> <Kbd>a</Kbd> whole project
+          <Kbd alt /> <Kbd>a</Kbd> whole project
         </span>
       </div>
     </div>

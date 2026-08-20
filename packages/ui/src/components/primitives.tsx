@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { SessionState } from '@cc/protocol'
+import { useCapability } from '../app/PlatformProvider.jsx'
 
 /**
  * 상태 표시 (FR-12).
@@ -32,9 +33,33 @@ export function StateDot({ state }: { state: SessionState }) {
   )
 }
 
-/** 시그니처 요소 — 키보드 우선 도구라는 정체성 */
-export function Kbd({ children, live = false }: { children: ReactNode; live?: boolean }) {
-  return <kbd className={`keycap ${live ? 'keycap-live' : ''}`}>{children}</kbd>
+/**
+ * 시그니처 요소 — 키보드 우선 도구라는 정체성.
+ *
+ * `mod`·`alt`는 글리프가 아니라 **뜻**을 받는다 (이슈 #32). 이 맥에서 `⌘`인 키는 다른
+ * 자판에서 `Ctrl`이고, 핸들러는 진작부터 둘 다 받고 있었다 — 화면만 없는 키를 누르라고
+ * 말했다. `<Kbd>⌘</Kbd>`처럼 호출 지점에 기호를 적는 방식이 그 거짓말을 한 번에 열 파일로
+ * 퍼뜨린 원인이라, 자판 이름은 이제 여기 한 곳에서만 들어온다.
+ */
+export function Kbd({
+  children,
+  live = false,
+  mod = false,
+  alt = false,
+}: {
+  children?: ReactNode
+  live?: boolean
+  /** 여기선 `⌘`, command 키가 없는 자판에선 `Ctrl` */
+  mod?: boolean
+  /** 여기선 `⌥`, 그 밖에선 `Alt` */
+  alt?: boolean
+}) {
+  const keys = useCapability('shortcutKeys')
+  return (
+    <kbd className={`keycap ${live ? 'keycap-live' : ''}`}>
+      {mod ? keys.mod : alt ? keys.alt : children}
+    </kbd>
+  )
 }
 
 export function formatWaiting(ms: number): string {
