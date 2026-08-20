@@ -13,10 +13,20 @@ describe('CLI 탐색 경로 보강', () => {
   it('GUI 앱의 빈약한 PATH에서도 셸이 아는 도구를 찾아낸다', () => {
     const original = process.env.PATH
     try {
-      // 로그인 셸이 아는 도구 하나를 고른다 (환경마다 다르므로 특정 경로를 가정하지 않는다)
+      /*
+       * Pick a tool the login shell knows — but ask with the same crippled PATH
+       * the assertions below will use. An inherited-PATH probe passes for the
+       * wrong reason: on CI the runner injects pnpm via the workflow (invisible
+       * to shell rc files), so a fresh login shell "knows" the tool only while
+       * it inherits today's PATH, and the post-cripple assertion then fails.
+       * First seen on the first Linux run of this suite. If the shell's own
+       * config can't find a tool from a bare PATH, there is nothing to verify
+       * on this machine — that is what the early return below is for.
+       */
       const probe = execFileSync(process.env.SHELL ?? '/bin/zsh', ['-ilc', 'command -v claude || command -v pnpm'], {
         encoding: 'utf8',
         timeout: 5000,
+        env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
       }).trim()
       const toolPath = probe.split('\n').find((l) => l.startsWith('/'))
       if (!toolPath) return // 셸에서도 못 찾으면 검증할 것이 없다
