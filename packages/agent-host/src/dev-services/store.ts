@@ -284,6 +284,52 @@ export class Store {
           }
         },
       },
+      {
+        to: 14,
+        run: () => {
+          /*
+           * The directory a session was created in. Stored, not recomputed. (issue #28)
+           *
+           * Until now every start derived the cwd again — the project's path, or
+           * `orchestratorHome()` (= `dataRoot()/orchestrator`) for the orchestrator. Then the
+           * data directory was renamed to `~/.centralu` from the folder named just below, and
+           * the orchestrator's cwd moved with it. Claude Code keys its session store **by
+           * working directory**, so the tool went looking in a project slug that had never
+           * existed and answered "not found". The 821KB transcript sat untouched under the old
+           * slug the whole time, and the app told its owner the conversation had been deleted.
+           *
+           *   old cwd `~/.control-center/orchestrator` → transcript filed here, still there // legacy-name
+           *   new cwd `~/.centralu/orchestrator`       → no such slug, so "not found"
+           *
+           * The old name is spelled out because naming it is the whole explanation; nothing
+           * here goes near that path (see DATA_DIR_LEGACY in brand.ts).
+           *
+           * A derived cwd is a promise we cannot keep: anything that moves a folder — our own
+           * rename, the user moving a project — silently repoints a live session at a place
+           * its history was never written to. So we write it down once and read it back.
+           *
+           * Backfill is what SQL can prove: a worktree session's worktree, otherwise the
+           * project's path. Orchestrator rows (no project, no worktree) stay NULL — resolving
+           * them here would mean calling `orchestratorHome()`, which creates a directory, and
+           * a migration that touches the user's home on every open is how `pnpm verify` once
+           * blocked the real data move (see data-dir.ts). The manager fills those in the first
+           * time it actually needs the path, and from then on they are stored too.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'cwd')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT`)
+          }
+          // `WHERE cwd IS NULL` matters: schema.sql resets user_version to 1, so every step
+          // replays on every open (see v13's note). Without it this would overwrite the
+          // stored path with a freshly derived one — exactly the bug being fixed.
+          this.db.exec(`
+            UPDATE sessions
+               SET cwd = COALESCE(worktree_path, (SELECT p.path FROM projects p WHERE p.id = sessions.project_id))
+             WHERE cwd IS NULL
+               AND (worktree_path IS NOT NULL OR project_id IS NOT NULL)
+          `)
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -576,6 +622,29 @@ export class Store {
       // FTS 구문 오류(특수문자 등)에는 조용히 빈 결과 — 검색창이 깨지면 안 된다
       return []
     }
+  }
+
+  /**
+   * The directory this session was created in — the one its tool-side history is filed under.
+   *
+   * Deliberately **not** part of `SessionInfo`: it is not something the screen shows, and
+   * `upsertSession` must never carry it. The whole point (issue #28) is that this value is
+   * written once and then left alone; routing it through the same upsert that saves names and
+   * states would let any later save quietly replace it with whatever the caller happened to
+   * hold. `touched_paths` lives on the same terms.
+   *
+   * null means "we do not know yet" — an orchestrator row that predates v14. The manager
+   * resolves it the first time it needs the path and writes it back.
+   */
+  sessionCwd(sessionId: string): string | null {
+    const row = this.db.prepare(`SELECT cwd FROM sessions WHERE id = ?`).get(sessionId) as
+      | { cwd: string | null }
+      | undefined
+    return row?.cwd ?? null
+  }
+
+  setSessionCwd(sessionId: string, cwd: string): void {
+    this.db.prepare(`UPDATE sessions SET cwd = ? WHERE id = ?`).run(cwd, sessionId)
   }
 
   setTouchedPaths(sessionId: string, paths: string[]): void {

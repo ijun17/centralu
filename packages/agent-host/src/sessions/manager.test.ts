@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
+import { sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
@@ -1589,5 +1590,60 @@ describe('워크트리 세션', () => {
 
     writeFileSync(join(s.worktree!.path, 'a.txt'), '고침\n')
     expect(await wtRpc('agents.worktreeStatus', { sessionId: s.id })).toMatchObject({ dirty: true, changedFiles: 1 })
+  })
+})
+
+/**
+ * 세션이 만들어진 디렉토리를 기억한다 (이슈 #28).
+ *
+ * The tool files a conversation under the working directory it was started in, and looks for it
+ * there and nowhere else. Deriving that directory again on every start is therefore a promise
+ * we cannot keep: rename the data folder, move a project, and a live session is suddenly
+ * pointed at a place its history was never written to. That happened — the orchestrator's cwd
+ * followed a data-directory rename, the tool answered "not found", and the app reported a
+ * deletion while an 821KB transcript sat untouched under the old path.
+ */
+describe('재개는 만들어진 곳으로 돌아간다', () => {
+  it('프로젝트 경로가 달라져도 세션이 시작한 디렉토리로 뜬다', async () => {
+    const startedIn = mkdtempSync(join(tmpdir(), 'cc-cwd-'))
+    const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
+    // The session starts somewhere other than the project's path — which is what a rename
+    // leaves behind: the derived answer and the real one stop agreeing.
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: startedIn, tool: 'claude' })) as SessionInfo
+
+    // host 재시작 — 메모리에 남은 것이 아니라 저장된 사실을 읽는지 본다
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    const restarted = new SessionManager(store, adapters, () => {})
+    adapter.lastCwd = null
+
+    await createRpcHandler(restarted, adapters)('agents.resumeSession', { sessionId: s.id })
+
+    expect(adapter.lastCwd).toBe(startedIn)
+    // 프로젝트 경로로 떨어지면 도구는 기록이 없는 곳을 뒤지고, 그 답이 "없다"였다
+    expect(adapter.lastCwd).not.toBe(p.path)
+    rmSync(startedIn, { recursive: true, force: true })
+  })
+
+  /*
+   * Rows created before v14 have no stored path — the migration deliberately leaves the
+   * orchestrator NULL rather than touching the user's home. The first time we need the path we
+   * derive it once and write it down, so the next rename cannot move it either.
+   */
+  it('예전 세션은 처음 필요할 때 한 번 정해지고, 그다음엔 사실이다', async () => {
+    const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
+    // Exactly how every pre-v14 row was written: upsertSession does not carry a cwd, so the
+    // column is NULL — the same state the migration leaves the orchestrator in.
+    store.upsertSession({
+      id: 'old', projectId: p.id, tool: 'claude', externalId: 'ext-1', name: '예전 세션',
+      autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
+      permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
+    })
+    expect(store.sessionCwd('old')).toBeNull()
+
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    await new SessionManager(store, adapters, () => {}).resumeSession('old')
+
+    expect(store.sessionCwd('old')).toBe(p.path)
   })
 })

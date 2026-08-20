@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(13)
+    expect(store.schemaVersion).toBe(14)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(13)
+    expect(new Store().schemaVersion).toBe(14)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(13)
+    expect(store.schemaVersion).toBe(14)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -447,8 +447,102 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(13)
+    expect(store.schemaVersion).toBe(14)
     expect(store.listGridView()).toEqual(['s1'])
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * v14: a session's cwd stops being recomputed. (issue #28)
+ *
+ * The whole failure was a derived path. Renaming the data directory moved the orchestrator's
+ * cwd, Claude Code files conversations by working directory, and the tool went looking under a
+ * slug that had never existed. So this runs against a real v13-shaped database — a migration
+ * that is only assumed to work is exactly the kind that quietly orphans someone's history.
+ */
+describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', () => {
+  const v13Db = (file: string) => {
+    const old = new Database(file)
+    old.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
+        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
+        archived INTEGER NOT NULL DEFAULT 0, is_orchestrator INTEGER NOT NULL DEFAULT 0,
+        last_read_seq INTEGER NOT NULL DEFAULT 0,
+        waiting_since INTEGER, created_at INTEGER NOT NULL, touched_paths TEXT NOT NULL DEFAULT '[]',
+        model TEXT, effort TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal',
+        imported_from TEXT, worktree_path TEXT, worktree_branch TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
+      CREATE TABLE grid_panels (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL);
+    `)
+    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
+    const add = old.prepare(
+      `INSERT INTO sessions (id, project_id, tool, name, created_at, is_orchestrator, worktree_path, worktree_branch)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    )
+    add.run('plain', 'p1', 'claude', '프로젝트 세션', 1, 0, null, null)
+    add.run('wt', 'p1', 'claude', '워크트리 세션', 1, 0, '/tmp/wt/feature', 'feature')
+    add.run('orc', null, 'claude', 'Orchestrator', 1, 1, null, null)
+    old.pragma('user_version = 13')
+    old.close()
+  }
+
+  it('프로젝트·워크트리 세션은 자기 경로로 백필된다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v14-'))
+    const file = join(dir, 'store.db')
+    v13Db(file)
+
+    const store = new Store(file)
+
+    expect(store.schemaVersion).toBe(14)
+    expect(store.sessionCwd('plain')).toBe('/tmp/p1')
+    // A worktree session's history is filed under the worktree, not the project it came from
+    expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /*
+   * The orchestrator is the one row SQL cannot answer for: it has no project and no worktree,
+   * and the only source left is `orchestratorHome()`, which creates a directory under the
+   * user's home. A migration that does that on every open is how `pnpm verify` once created
+   * `~/.centralu/orchestrator` and blocked the real data move (see data-dir.ts). So it stays
+   * NULL here and the manager resolves it the first time it actually needs a path.
+   */
+  it('오케스트레이터는 NULL로 남는다 — 마이그레이션이 홈을 건드리지 않는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v14-orc-'))
+    const file = join(dir, 'store.db')
+    v13Db(file)
+
+    const store = new Store(file)
+
+    expect(store.sessionCwd('orc')).toBeNull()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /*
+   * schema.sql resets user_version to 1, so every migration step replays on every open. A
+   * backfill without `WHERE cwd IS NULL` would therefore rewrite the stored path on each
+   * start — reintroducing the recomputation this version exists to end.
+   */
+  it('다시 열어도 적어둔 경로를 덮어쓰지 않는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v14-again-'))
+    const file = join(dir, 'store.db')
+    v13Db(file)
+
+    const first = new Store(file)
+    first.setSessionCwd('plain', '/tmp/where-it-really-started')
+    first.close()
+
+    const second = new Store(file)
+    expect(second.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
     rmSync(dir, { recursive: true, force: true })
   })
 })

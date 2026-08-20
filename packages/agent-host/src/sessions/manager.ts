@@ -370,13 +370,20 @@ export class SessionManager {
       worktree,
       ...sessionLiveDefaults(),
     }
+    /*
+     * The directory this session starts in. Remembered below, not derived again later —
+     * the tool files the conversation under this exact path, so this is the only path that
+     * can ever find it again (issue #28).
+     */
+    const cwd = worktree?.path ?? params.cwd
+
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
     // 목록에는 보이지만 말을 걸 수 없는 '유령 세션'이 DB에 남는다 (실측으로 확인).
     let handle: SessionHandle
     try {
       handle = await adapter.createSession(
         {
-          sessionId: id, cwd: worktree?.path ?? params.cwd, model: params.model, effort: params.effort,
+          sessionId: id, cwd, model: params.model, effort: params.effort,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
           // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
           orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
@@ -397,6 +404,7 @@ export class SessionManager {
 
     this.meta.set(id, info)
     this.store.upsertSession(info)
+    this.store.setSessionCwd(id, cwd)
     this.handles.set(id, handle)
     this.running.set(id, { model: info.model, effort: info.effort, permissionPreset: info.permissionPreset })
     handle.applyRules?.(this.rulesFor(id, params.projectId))
@@ -1304,14 +1312,29 @@ export class SessionManager {
    * 일은 세션이 하고, 오케스트레이터는 시키고 읽는다.
    */
   /**
-   * 이 세션이 실제로 도는 곳.
+   * 이 세션이 실제로 도는 곳. **적어둔 경로가 계산한 경로를 이긴다** (이슈 #28).
    *
-   * **워크트리 세션은 재개할 때도 같은 워크트리로 돌아가야 한다.** 프로젝트 경로로
-   * 되돌아가면 격리가 조용히 풀리고, 사용자는 여전히 격리된 줄 안다 — 그게 이 기능에서
-   * 가장 나쁜 결말이다. 그래서 cwd를 묻는 자리는 전부 이걸 쓴다.
+   * Recomputing this on every start is what orphaned the orchestrator. The data directory was
+   * renamed, `orchestratorHome()` dutifully answered with the new path, and Claude Code — which
+   * files conversations **by working directory** — went looking somewhere this session's history
+   * had never been written. The tool said "not found"; the app called it a deletion. A session's
+   * history lives where the session started, so that is the path we read back, not one we
+   * re-derive from things that can move underneath it.
+   *
+   * 워크트리 세션이 이 규칙의 첫 사례였다: 재개할 때 프로젝트 경로로 되돌아가면 격리가
+   * 조용히 풀리고, 사용자는 여전히 격리된 줄 안다. 이제는 워크트리 경로도 만들 때 적어두는
+   * 같은 한 값이다 — 특례가 아니라 규칙의 일부다.
+   *
+   * Rows written before v14 have no stored path — the migration deliberately leaves the
+   * orchestrator NULL rather than touching the user's home (see store.ts step 14). Derive
+   * theirs once, here, and write it down; from then on the next rename cannot move them either.
    */
   private cwdFor(m: SessionInfo): string {
-    return m.worktree?.path ?? this.cwdOf(m.projectId)
+    const stored = this.store.sessionCwd(m.id)
+    if (stored) return stored
+    const derived = m.worktree?.path ?? this.cwdOf(m.projectId)
+    this.store.setSessionCwd(m.id, derived)
+    return derived
   }
 
   /** 워크트리는 **저장소 밖**에 만든다 — 사용자 저장소를 더럽히지 않는다 (.gitignore도 안 건드린다) */
