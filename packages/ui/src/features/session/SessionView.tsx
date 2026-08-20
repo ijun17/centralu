@@ -12,6 +12,7 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
+import { RunMenu } from './RunMenu.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
@@ -167,6 +168,15 @@ export function SessionPane({
     [patchDraft],
   )
   const [dragging, setDragging] = useState(false)
+  /*
+   * Whether the Run menu is open — held here rather than inside it (issue #44).
+   *
+   * In the grid this header is the handle that moves the panel, and `draggable` reaches
+   * everything inside it: press on a menu row, move a few pixels, and the browser drags the
+   * panel instead of letting the click land. The header already learned the neighbouring
+   * half of this lesson — a `draggable` ancestor is why the whole cell stopped being one.
+   */
+  const [runOpen, setRunOpen] = useState(false)
   const [caret, setCaret] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -322,6 +332,22 @@ export function SessionPane({
         같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
       */}
       <span className="ml-auto flex shrink-0 items-center gap-2">
+        {/*
+          The project's saved shell commands (issue #44). Before restart because it is the
+          everyday one — restart is a repair.
+
+          The orchestrator has no project, and with no project there is no directory to run
+          in and no terminal to run it in. So it gets no button rather than an empty menu:
+          an entry that could never have anything in it is a worse answer than no entry.
+        */}
+        {session.projectId && (
+          <RunMenu
+            sessionId={session.id}
+            projectId={session.projectId}
+            open={runOpen}
+            onOpenChange={setRunOpen}
+          />
+        )}
         {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
         <IconButton
           label="Restart agent (chat history is kept)"
@@ -347,7 +373,8 @@ export function SessionPane({
       {headerDrag ? (
         <div
           className={`${HEADER} cursor-grab active:cursor-grabbing`}
-          draggable
+          // Not while the Run menu is open — see the note on `runOpen`
+          draggable={!runOpen}
           onDragStart={headerDrag}
           data-testid="pane-header"
         >

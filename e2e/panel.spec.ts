@@ -327,7 +327,7 @@ test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', a
     const store = (window as never as { __store: any }).__store
     const m = (window as never as { __mock: any }).__mock
     m.projects.add = async (path: string) => ({
-      id: 'p-nogit', path, name: 'nogit', defaultTool: 'claude', git: null,
+      id: 'p-nogit', path, name: 'nogit', defaultTool: 'claude', commands: [], git: null,
     })
     await store.getState().addProject('/tmp/nogit')
   })
@@ -337,4 +337,123 @@ test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', a
   await expect(page.getByTestId('evidence-tab-git')).toBeDisabled()
   await expect(page.getByTestId('evidence-tab-history')).toBeDisabled()
   await expect(page.getByTestId('evidence-not-repo')).toBeVisible()
+})
+
+/*
+ * ── 실행 메뉴 (#44) ──────────────────────────────────────────────────
+ *
+ * 등록·실행·삭제가 한 메뉴 안에 있다. 여기서 보는 것은 **명령이 어디로 가는가**다 —
+ * 어느 프로젝트의 셸로 갔고, 그게 사람 눈에 보이는 자리인가. 조용히 도는 명령은
+ * 안 도는 것보다 나쁘다.
+ */
+
+/** 목이 받아 적은 입력 — 어느 터미널의 어느 디렉토리로 갔는지까지 */
+async function typedIntoTerminals(page: Page): Promise<{ cwd: string; data: string }[]> {
+  return page.evaluate(() => {
+    const m = (window as never as { __mock: any }).__mock
+    return m.terminalState.input.map((i: { terminalId: string; data: string }) => {
+      for (const [cwd, list] of m.terminalState.byCwd) {
+        if (list.some((t: { id: string }) => t.id === i.terminalId)) return { cwd, data: i.data }
+      }
+      return { cwd: '(어느 터미널인지 모름)', data: i.data }
+    })
+  })
+}
+
+test('실행 메뉴: 등록한 명령이 프로젝트 터미널에서 돌고, 패널이 터미널로 옮겨 간다', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('run-open').click()
+  await page.getByTestId('run-add-input').fill('pnpm test')
+  await page.getByTestId('run-add').click()
+  await expect(page.getByTestId('run-command-0')).toContainText('pnpm test')
+
+  await page.getByTestId('run-command-0').click()
+
+  // 보이는 자리에서 돌아야 한다 — 탭이 따라오지 않으면 출력이 어디 있는지 알 수 없다
+  await expect(page.getByTestId('evidence-terminal')).toBeVisible()
+  // 사람이 친 것과 구별되지 않아야 한다: 명령 뒤의 \r이 곧 엔터다
+  expect(await typedIntoTerminals(page)).toEqual([{ cwd: '/tmp/alpha', data: 'pnpm test\r' }])
+})
+
+test('실행 메뉴: 등록한 명령은 메뉴를 닫았다 열어도 그대로 있다', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('run-open').click()
+  await page.getByTestId('run-add-input').fill('pnpm lint')
+  await page.getByTestId('run-add').click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('run-menu')).toBeHidden()
+
+  await page.getByTestId('run-open').click()
+  await expect(page.getByTestId('run-command-0')).toContainText('pnpm lint')
+})
+
+test('실행 메뉴: 지우기는 실행과 다른 과녁이다 — 지웠는데 돌면 되돌릴 수 없다', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await page.getByTestId('run-open').click()
+  for (const cmd of ['pnpm test', 'pnpm lint']) {
+    await page.getByTestId('run-add-input').fill(cmd)
+    await page.getByTestId('run-add').click()
+  }
+  await expect(page.getByTestId('run-command-1')).toContainText('pnpm lint')
+
+  await page.getByTestId('run-delete-0').click()
+
+  // 남은 것이 위로 올라온다 — 지운 자리가 빈 줄로 남으면 안 된다
+  await expect(page.getByTestId('run-command-0')).toContainText('pnpm lint')
+  await expect(page.getByTestId('run-command-1')).toBeHidden()
+  // 그리고 아무것도 돌지 않았다
+  expect(await typedIntoTerminals(page)).toEqual([])
+})
+
+/**
+ * 그리드 칸의 실행 버튼이 **그 칸의 프로젝트**로 보내는가.
+ *
+ * 화면에 보이는 터미널을 기준으로 삼았다면 여기서 갈린다: 그리드에는 증거 레인이 아예
+ * 없고, 직전까지 보던 프로젝트는 알파다. 명령은 누른 칸의 세션이 사는 곳으로 가야 한다.
+ */
+test('실행 메뉴: 명령은 누른 칸의 프로젝트로 간다 — 직전에 보던 프로젝트가 아니라', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(async () => {
+    await (window as never as { __store: any }).__store.getState().addProject('/tmp/beta')
+  })
+  const alpha = await newSession(page, 'alpha', 'claude', '알파 작업')
+  const beta = await newSession(page, 'beta', 'claude', '베타 작업')
+
+  // 베타 세션에 명령을 등록해 두고
+  await page.getByTestId('run-open').click()
+  await page.getByTestId('run-add-input').fill('pnpm build')
+  await page.getByTestId('run-add').click()
+  await page.keyboard.press('Escape')
+
+  // 화면은 알파를 보고 있게 만든 다음 그리드로 간다
+  await page.evaluate((id: string) => (window as never as { __store: any }).__store.getState().focusSession(id), alpha)
+  await openGrid(page, [alpha, beta])
+  await expect(page.getByTestId(`grid-panel-${beta}`)).toBeVisible()
+
+  await page.getByTestId(`grid-panel-${beta}`).getByTestId('run-open').click()
+  await page.getByTestId('run-command-0').click()
+
+  expect(await typedIntoTerminals(page)).toEqual([{ cwd: '/tmp/beta', data: 'pnpm build\r' }])
+  // 그리드에는 증거 레인이 없으므로, 보이는 곳까지 데려가야 실행이 보인다
+  await expect(page.getByTestId('evidence-terminal')).toBeVisible()
+  await expect(page.getByTestId('evidence-project')).toContainText('beta')
+})
+
+test('실행 메뉴: 오케스트레이터에는 없다 — 프로젝트가 없으니 돌릴 디렉토리도 없다', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+  await expect(page.getByTestId('run-open')).toBeVisible()
+
+  await page.evaluate(async () => {
+    await (window as never as { __store: any }).__store.getState().openOrchestrator()
+  })
+  await expect(page.getByTestId('session-name')).toContainText('Orchestrator')
+  // 열어도 아무것도 들어갈 수 없는 메뉴는 빈 메뉴보다 없는 편이 정직하다
+  await expect(page.getByTestId('run-open')).toBeHidden()
 })

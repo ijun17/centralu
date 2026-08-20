@@ -85,6 +85,22 @@ export function PencilIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
+ * Run — a filled triangle.
+ *
+ * Filled, where the chevron next door deliberately is not. That note is about *font*
+ * triangles: their weight and alignment belong to whichever font drew them, which is why
+ * they lost to a drawn chevron. Drawn here, the solid mark is the right one — "run" is a
+ * button you press, and an outline reads as a shape being described rather than pressed.
+ */
+export function PlayIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M5.2 3.4l7 4.6-7 4.6z" fill="currentColor" />
+    </svg>
+  )
+}
+
+/**
  * 다시 시작 — 원을 그리는 화살표.
  *
  * "Restart"라는 글자를 아이콘으로 바꾸면 뜻이 약해지므로, 거의 표준에 가까운

@@ -336,6 +336,19 @@ export type AppState = {
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
+  /**
+   * Replace this project's saved shell commands (issue #44).
+   * Adding one and deleting one both arrive here as "the list is this now".
+   */
+  setProjectCommands(projectId: string, commands: string[]): Promise<void>
+  /**
+   * Run one of the project's saved commands in that project's terminal (issue #44).
+   *
+   * Takes the **session**, not the project, because the session is what answers both
+   * questions at once: whose terminal this belongs in, and where the person has to be
+   * standing to see it.
+   */
+  runProjectCommand(sessionId: string, command: string): Promise<void>
   createSession(
     projectId: string,
     opts?: {
@@ -1157,6 +1170,76 @@ export const useStore = create<AppState>((set, get) => ({
     const p = await get().platform!.projects.add(path)
     set((s) => ({ projects: { ...s.projects, [p.id]: p } }))
     return p
+  },
+
+  async setProjectCommands(projectId, commands) {
+    const platform = get().platform
+    const before = get().projects[projectId]
+    if (!platform || !before) return
+    // Draw it first. This is a list being edited by hand, and a row that appears only after
+    // a round trip reads as a click that missed.
+    set((s) => ({ projects: { ...s.projects, [projectId]: { ...before, commands } } }))
+    try {
+      const saved = await platform.projects.setCommands(projectId, commands)
+      set((s) => {
+        const now = s.projects[projectId]
+        // The project could have gone while we were away; nothing to correct if so
+        return now ? { projects: { ...s.projects, [projectId]: { ...now, commands: saved } } } : {}
+      })
+    } catch (e) {
+      /*
+       * Put the old list back and say so. A command that looks saved and is gone at the
+       * next launch is the worse half of this: the menu would then say "nothing saved yet",
+       * which reads as never having added it rather than as having lost it.
+       */
+      set((s) => ({
+        projects: { ...s.projects, [projectId]: before },
+        toast: `Could not save commands: ${(e as Error).message}`,
+      }))
+    }
+  },
+
+  async runProjectCommand(sessionId, command) {
+    const platform = get().platform
+    const projectId = get().sessions[sessionId]?.projectId
+    // The orchestrator has no project, so it has no directory to run in — the header does
+    // not offer the button there, and this is the same fact stated where it is enforced
+    if (!platform || !projectId) return
+
+    try {
+      /*
+       * Find the terminal before anything moves on screen, and that order is the point.
+       *
+       * `TerminalPane` opens a shell itself when a project has none. Switching the tab
+       * first would put two creators on the same empty list, and the command could then
+       * land in the terminal that is *not* the one being drawn — a run nobody can see,
+       * which is the one outcome this must never produce.
+       *
+       * The project comes from the session rather than from whatever the evidence panel
+       * happens to be showing. In the grid those are routinely different projects.
+       */
+      const list = await platform.terminal.list(projectId)
+      const target = list[0] ?? (await platform.terminal.create(projectId, 80, 24))
+      /*
+       * `\r` is what a keyboard sends. Everything downstream then follows for free —
+       * the shell echoes it, the output streams, ctrl-C stops it — because nothing about
+       * this is distinguishable from having been typed into that pty.
+       */
+      await platform.terminal.input(target.terminalId, `${command}\r`)
+    } catch (e) {
+      set({ toast: `Could not run: ${(e as Error).message}` })
+      return
+    }
+
+    /*
+     * Now show it running. The grid has no evidence lane at all (see App.tsx), so a
+     * command started from a grid cell has nowhere to be seen until we leave — and it was
+     * this session's own header that was clicked, so this session is where to leave to.
+     * Already focused means already there: `focusSession` also wakes and marks read, and
+     * neither is something clicking Run asked for.
+     */
+    if (get().focusedSessionId !== sessionId) get().focusSession(sessionId)
+    get().setPanelTab('terminal')
   },
 
   async createSession(projectId, opts) {
