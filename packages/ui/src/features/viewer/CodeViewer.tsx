@@ -5,6 +5,7 @@ import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { TRUNCATED_NOTICE, caretAt, selectedText, wholeFileText, type Caret } from './copy.js'
+import { clearViewerJump, useViewerJump } from './jump.js'
 
 /**
  * 코드 뷰어 (FR-6, C-3) — **읽기 전용**. 편집은 IDE 몫이다 (비목표).
@@ -21,7 +22,21 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   const setToast = useStore((s) => s.setToast)
   // 훅은 아래 `if (!path)` 이른 return보다 먼저 — 분기 뒤에 두면 렌더마다 훅 수가 달라진다
   const sc = useShortcut()
+  const jump = useViewerJump()
   const [file, setFile] = useState<{ text: string; truncated: boolean; binary: boolean; bytes: number } | null>(null)
+  /**
+   * Why the failure gets a place on screen and not only a toast.
+   *
+   * A file can now be opened by clicking a path an agent typed, and that path is a guess —
+   * nothing checked it against the disk before it became a link (see `parseFileRef`). So a
+   * file that is not there is an ordinary outcome here, not an exotic one. The toast alone
+   * could not carry it: it is a 2.5s pill and this overlay covers the lane it appears in,
+   * so the one thing left on screen would be "Loading…", forever, about a file that will
+   * never load.
+   */
+  const [error, setError] = useState<string | null>(null)
+  /** The row a `path:123` click asked for — highlighted, because landing mid-file is disorienting */
+  const [landedIndex, setLandedIndex] = useState(-1)
   const [query, setQuery] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -33,13 +48,19 @@ export function CodeViewer({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     setFile(null)
+    setError(null)
+    setLandedIndex(-1)
     if (!path) return
     // 파일·프로젝트를 옮기는 사이 늦게 온 응답이 **다른 파일의 내용**으로 그려지면 안 된다
     let alive = true
     void platform.fs
       .readFile(projectId, path)
       .then((f) => alive && setFile(f))
-      .catch((e: Error) => alive && setToast(e.message))
+      .catch((e: Error) => {
+        if (!alive) return
+        setError(e.message)
+        setToast(e.message)
+      })
     return () => {
       alive = false
     }
@@ -60,6 +81,24 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     estimateSize: () => 18,
     overscan: 30,
   })
+
+  /**
+   * Land on the line a `path:123` click named (#39).
+   *
+   * Cheap precisely because the list is virtual: the row is not on screen and does not
+   * have to be — `scrollToIndex` works off the row index, so a line 4000 files deep costs
+   * the same as line 4. It waits for `file` because until the text is split there are no
+   * rows to count, and it clamps because an agent's line number can outrun the file it
+   * names (stale reading, truncated file) and a jump past the end should land at the end
+   * rather than nowhere.
+   */
+  useEffect(() => {
+    if (!file || !jump || jump.path !== path) return
+    clearViewerJump()
+    const index = Math.min(jump.line, lines.length) - 1
+    setLandedIndex(index)
+    virtualizer.scrollToIndex(index, { align: 'center' })
+  }, [file, jump, path, lines.length, virtualizer])
 
   /**
    * Remember where the selection began, while the row it began on still exists.
@@ -196,7 +235,11 @@ export function CodeViewer({ projectId }: { projectId: string }) {
         </button>
       </header>
 
-      {file === null ? (
+      {error !== null ? (
+        <p className="p-3 text-[12px] text-ash" data-testid="viewer-error">
+          Could not open this file — {error}
+        </p>
+      ) : file === null ? (
         <p className="p-3 text-[12px] text-slate">Loading…</p>
       ) : file.binary ? (
         <p className="p-3 text-[12px] text-slate" data-testid="viewer-binary">
@@ -224,7 +267,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               <div
                 key={v.key}
                 data-line={v.index}
-                className={`absolute left-0 flex w-full ${matches.has(v.index) ? 'bg-graphite/50' : ''}`}
+                data-landed={v.index === landedIndex || undefined}
+                className={`absolute left-0 flex w-full ${
+                  matches.has(v.index) || v.index === landedIndex ? 'bg-graphite/50' : ''
+                }`}
                 style={{ top: `${v.start}px`, height: `${v.size}px` }}
               >
                 <span className="sticky left-0 w-12 shrink-0 select-none bg-void pr-2 text-right text-slate">

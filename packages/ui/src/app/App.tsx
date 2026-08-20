@@ -373,8 +373,16 @@ function Toast() {
   }, [toast, setToast])
   if (!toast) return null
   return (
+    /*
+      z-30 — the same tier as the notice cards, and above the overlay (z-20).
+
+      Without it this is an opaque pill painted *underneath* the wide surface, so every
+      failure reported while a file or a diff is open said nothing at all. That is the one
+      state where the toast matters most: the overlay covers the lane the pill sits in, and
+      what it covers up is the app's whole answer to "that didn't work".
+    */
     <div
-      className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded border border-edge bg-panel px-3 py-2 text-[12px] text-chalk shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded border border-edge bg-panel px-3 py-2 text-[12px] text-chalk shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
       data-testid="toast"
       role="status"
     >

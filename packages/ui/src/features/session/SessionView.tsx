@@ -111,6 +111,19 @@ export function SessionPane({
 }) {
   const session = useStore((s) => s.sessions[sessionId])
   const chat = useStore((s) => s.chat[sessionId] ?? EMPTY_CHAT)
+  /*
+   * The directory a path in this conversation would be relative to (#39).
+   *
+   * It is read from this session rather than from whatever is focused because a grid cell
+   * renders this same component for a session that is not the focused one — asking the
+   * focused session would resolve one pane's paths against another pane's project. The
+   * orchestrator has no project at all and so gets null, which is what stops its messages
+   * from linking anywhere (see `parseFileRef`).
+   */
+  const projectRoot = useStore((s) => {
+    const pid = s.sessions[sessionId]?.projectId
+    return (pid && s.projects[pid]?.path) || null
+  })
   const send = useStore((s) => s.send)
   const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
@@ -392,6 +405,7 @@ export function SessionPane({
         pending={session.pendingApproval}
         questions={session.pendingQuestions}
         sessionId={session.id}
+        projectRoot={projectRoot}
         working={session.state === 'working'}
         activity={session.activity}
       />
@@ -658,6 +672,7 @@ function ChatStream({
   pending,
   questions,
   sessionId,
+  projectRoot,
   working,
   activity,
 }: {
@@ -666,6 +681,7 @@ function ChatStream({
   pending: SessionSummary['pendingApproval']
   questions: SessionSummary['pendingQuestions']
   sessionId: string
+  projectRoot: string | null
   working: boolean
   activity: SessionSummary['activity']
 }) {
@@ -966,7 +982,7 @@ function ChatStream({
             }`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <ChatRow item={chat[v.index]!} />
+            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} />
           </div>
         ))}
       </div>
@@ -1174,7 +1190,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   )
 }
 
-function ChatRow({ item }: { item: ChatItem }) {
+function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
   if (item.kind === 'user') {
     return (
       <div className="flex justify-end" data-testid="msg-user">
@@ -1198,7 +1214,7 @@ function ChatRow({ item }: { item: ChatItem }) {
   if (item.kind === 'assistant') {
     return (
       <div className="min-w-0" data-testid="msg-assistant">
-        <Markdown text={item.text} />
+        <Markdown text={item.text} projectRoot={projectRoot} />
       </div>
     )
   }
