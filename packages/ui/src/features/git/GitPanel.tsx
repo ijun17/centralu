@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
+import { selectedText } from '../viewer/copy.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
 
@@ -286,6 +287,14 @@ function FileGroup({
  * 추가는 초록, 삭제는 빨강. 무채색으로도 `+`/`-`와 밝기로 구분은 되지만,
  * 승인 판단은 훑어보며 하는 일이라 한 줄씩 읽게 만들면 그 흐름이 끊긴다.
  * 기호는 그대로 둔다 — 색을 못 보는 사람에게 색만 남기면 정보가 사라진다.
+ *
+ * Copying needs the viewer's handler (issue #36), for the opposite reason to the viewer's.
+ * Nothing here is virtualized, so the whole diff is in the DOM — but the markers are drawn
+ * in their own `select-none` span, and here the browser honours that and drops them: a
+ * copied diff came back with added and removed lines looking identical. The screen's − is a
+ * typographic minus anyway, which no patch tool accepts. So the payload is rebuilt from the
+ * data, marker included, and one `onCopy` on the scrolling element is enough — a selection
+ * that cannot lose its rows cannot be walked out of them either.
  */
 function DiffView({
   path,
@@ -309,7 +318,23 @@ function DiffView({
     return <div className="flex flex-1 items-center justify-center text-[12px] text-slate">Binary file</div>
   }
 
-  const lines = (data?.diff ?? '').split('\n')
+  /**
+   * Each line split the way it is drawn: the marker moves into its own span, `body` is what
+   * is left. Splitting it once here is what lets the copy handler below put the line back
+   * together — and it stops `--- a/foo` from losing a dash, which the old blanket
+   * `replace(/^[+-]/, '')` did to every file header, since the classifier calls those
+   * context lines.
+   */
+  const rows = (data?.diff ?? '').split('\n').map((line) => {
+    const kind = line.startsWith('+') && !line.startsWith('+++') ? 'add'
+      : line.startsWith('-') && !line.startsWith('---') ? 'del'
+      : line.startsWith('@@') ? 'hunk'
+      : 'ctx'
+    const marked = kind === 'add' || kind === 'del'
+    // The clipboard gets the ASCII marker. The screen gets the typographic one, below.
+    return { kind, marker: marked ? line[0]! : '', body: marked ? line.slice(1) : line }
+  })
+
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
       <header className="flex items-center gap-2 border-b border-edge px-3 py-1.5">
@@ -325,16 +350,26 @@ function DiffView({
           </button>
         </span>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]">
-        {lines.map((line, i) => {
-          const kind = line.startsWith('+') && !line.startsWith('+++') ? 'add'
-            : line.startsWith('-') && !line.startsWith('---') ? 'del'
-            : line.startsWith('@@') ? 'hunk'
-            : 'ctx'
+      <div
+        className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]"
+        onCopy={(e) => {
+          const payload = selectedText({
+            selection: document.getSelection(),
+            root: e.currentTarget,
+            lines: rows.map((r) => ({ text: r.body, prefix: r.marker })),
+            lastAnchor: null,
+          })
+          if (payload === null) return
+          e.preventDefault()
+          e.clipboardData.setData('text/plain', payload)
+        }}
+      >
+        {rows.map(({ kind, body }, i) => {
           return (
             <div
               key={i}
               data-diff={kind}
+              data-line={i}
               className={
                 kind === 'add' ? 'bg-add-bg text-add'
                 : kind === 'del' ? 'bg-del-bg text-del'
@@ -345,7 +380,7 @@ function DiffView({
               <span className="inline-block w-4 select-none text-center opacity-70">
                 {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
               </span>
-              {line.replace(/^[+-]/, '')}
+              <span data-code>{body}</span>
             </div>
           )
         })}

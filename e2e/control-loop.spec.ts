@@ -728,6 +728,41 @@ test('깃 패널: 변경 목록·diff·스테이징·커밋 (B-2, B-6)', async (
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('테스트 커밋')
 })
 
+test('깃 패널: 복사한 diff는 그 diff 그대로다 (#36)', async ({ page }) => {
+  const diff = '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-const old = 1\n+const next = 1\n   indented\n unchanged'
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate((d) => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.gitState.diffs['src/a.ts'] = d
+  }, diff)
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-git-full').click()
+  await page.getByTestId('git-file-src/a.ts').click()
+  await expect(page.getByTestId('diff-view')).toBeVisible()
+
+  // Drag the whole diff. Nothing here is virtualized, so every row is under the pointer —
+  // what went wrong is the marker: it lives in its own select-none span, and here the
+  // browser honours that and drops it, leaving added and removed lines identical.
+  const rows = page.locator('[data-testid="diff-view"] [data-diff]')
+  const first = (await rows.first().boundingBox())!
+  const last = (await rows.last().boundingBox())!
+  // From the very left edge — the marker column, which is the start of the line
+  await page.mouse.move(first.x + 2, first.y + first.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(last.x + last.width - 4, last.y + last.height / 2, { steps: 10 })
+  await page.mouse.up()
+  await page.keyboard.press('Meta+c')
+
+  // Whatever it looks like on screen, what comes off it is a diff you can apply: ASCII
+  // markers rather than the typographic −, and indentation the DOM had already collapsed
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(diff)
+
+  // The file header used to lose a dash to the marker-stripping, on screen too
+  await expect(page.getByTestId('diff-view')).toContainText('--- a/src/a.ts')
+})
+
 test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 보여준다 (B-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
