@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { nextWaitingSession } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { computeInbox } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Kbd } from '../../components/primitives.jsx'
 
@@ -22,6 +24,7 @@ export function CommandPalette() {
   const openGit = useStore((s) => s.openGit)
   const togglePanel = useStore((s) => s.togglePanel)
   const toggleSettings = useStore((s) => s.toggleSettings)
+  const toggleInbox = useStore((s) => s.toggleInbox)
   const platform = usePlatform()
 
   const [query, setQuery] = useState('')
@@ -66,6 +69,27 @@ export function CommandPalette() {
       sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
       { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: '⌘B · Git · files', run: () => togglePanel() },
+      /*
+        The two waiting-list shortcuts are here because they stopped being printed on the
+        top bar (issue #33). The bar advertised them next to the count, which is the one
+        moment the count itself is what you want to read — and a hint you have already
+        learned keeps charging you attention forever. Somewhere they can be found is still
+        owed, though, so they are said twice: named with their keys in Settings → Shortcuts
+        (for looking up), and runnable from here (for doing without knowing the key).
+      */
+      { kind: 'action', id: 'waiting', label: 'Waiting list', sub: '⌘I · everything waiting on you', run: () => toggleInbox(true) },
+      {
+        kind: 'action',
+        id: 'next-waiting',
+        label: 'Jump to next waiting',
+        sub: '⌘⇧A · approvals first',
+        run: () => {
+          // 정렬은 core가 안다 (승인 → 오류 → 응답대기) — App의 전역 단축키와 같은 길이다
+          const st = useStore.getState()
+          const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
+          if (next) focusSession(next)
+        },
+      },
     ]
 
     return [
@@ -91,7 +115,7 @@ export function CommandPalette() {
         sub: sessions[h.sessionId]?.name ?? 'Chat',
       })),
     ]
-  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings])
+  }, [query, sessions, projects, hits, openGit, togglePanel, toggleSettings, toggleInbox, focusSession])
 
   const choose = useCallback(
     (item: Item) => {

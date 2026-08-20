@@ -19,7 +19,6 @@ import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageModal } from '../features/usage/UsagePanel.jsx'
-import { Kbd } from '../components/primitives.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 
 export function App({ platform }: { platform: Platform }) {
@@ -134,7 +133,6 @@ function TopBar() {
   const counts = useCounts()
   const toggleInbox = useStore((s) => s.toggleInbox)
   const connection = useStore((s) => s.connection)
-  const waiting = counts.approval + counts.error + counts.input
 
   // 왼쪽 위를 창 버튼이 차지하면 그만큼 비운다. 타이틀바를 숨겼기 때문에
   // 이 헤더가 유일한 드래그 손잡이다 —
@@ -199,16 +197,23 @@ function TopBar() {
         )}
       </button>
 
-      <span className="flex items-center gap-1 text-[10px] text-slate">
-        <Kbd live={waiting > 0}>⌘</Kbd>
-        <Kbd live={waiting > 0}>I</Kbd>
-        <span className="mr-2">List</span>
-        <Kbd live={waiting > 0}>⌘</Kbd>
-        <Kbd live={waiting > 0}>⇧</Kbd>
-        <Kbd live={waiting > 0}>A</Kbd>
-        Next item
-      </span>
+      {/*
+        단축키 칩(⌘I · ⌘⇧A)은 여기 없다 (이슈 #33).
 
+        They sat beside the count and brightened with it, so at the one moment the bar has
+        something to say — something is waiting — two of the three bright things were
+        instructions. A shortcut hint is worth reading once and then never again, but a chip
+        on the dashboard charges attention on every glance, forever. 계기판은 상태를 말하는
+        자리다.
+
+        **밝아지는 것은 숫자가 계속 맡는다.** 칩이 켜지던 조건은 `waiting > 0` 하나였는데,
+        숫자는 이미 종류별로(승인은 beacon, 응답대기는 ash) 자기 밝기를 갖고 있다 —
+        더 정확한 신호가 이미 그 자리에 있었고, 칩은 거기 편승했을 뿐이다.
+
+        Where they went: named with their keys in Settings → Shortcuts, and runnable from
+        the command palette (⌘K). Deleting the only visible mention was the failure to avoid,
+        so the palette gained both entries in the same change.
+      */}
       <span className="ml-auto flex items-center gap-3">
         {/*
           연결됨은 **slate가 아니라 ash**다.

@@ -1070,6 +1070,50 @@ test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, 
   await expect(page.getByTestId('session-name')).toContainText('auth 리팩터링')
 })
 
+/**
+ * 상단 바는 계기판이다 — 지시문이 아니라 상태를 말한다 (이슈 #33).
+ *
+ * ⌘I·⌘⇧A 칩이 대기 숫자 옆에 서서 숫자와 **같은 조건으로** 밝아졌다. 뭔가 나를
+ * 기다리는 순간, 즉 바가 할 말이 생기는 유일한 순간에, 밝아지는 것 셋 중 둘이
+ * "이 키를 누르세요"였다는 뜻이다.
+ *
+ * 없앤 것은 **표시**뿐이라 그 둘을 함께 본다: 신호는 숫자가 그대로 맡고, 키는 여전히
+ * 듣고, 이름과 키는 팔레트에서 찾을 수 있다 — 유일하게 보이던 언급을 지우는 것이
+ * 피해야 할 실패였다.
+ */
+test('상단 바: 단축키 칩 대신 숫자가 신호다 (#33)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'A')
+  await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
+
+  // 대기가 있어도 바는 키를 광고하지 않는다 — 예전엔 바로 이때 칩이 가장 밝았다
+  const bar = page.getByTestId('app-header')
+  await expect(bar).toContainText('Approvals')
+  await expect(bar).not.toContainText('Next item')
+  await expect(bar).not.toContainText('List')
+
+  // 밝아지는 일은 숫자가 계속 맡는다 (승인 대기 = 순백)
+  await expect(page.getByTestId('count-approval')).toContainText('01')
+  await expect(page.getByTestId('count-approval')).toHaveClass(/beacon/)
+
+  // 키 자체는 그대로 듣는다 (FR-17은 안 건드렸다)
+  await page.keyboard.press('Meta+i')
+  await expect(page.getByTestId('inbox')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('inbox')).toBeHidden()
+
+  // 이름과 키는 팔레트가 말한다
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('waiting')
+  const actions = page.getByTestId('palette-item-action')
+  await expect(actions.filter({ hasText: 'Waiting list' })).toContainText('⌘I')
+  await expect(actions.filter({ hasText: 'Jump to next waiting' })).toContainText('⌘⇧A')
+
+  // 키를 모르는 사람은 여기서 그대로 실행한다
+  await actions.filter({ hasText: 'Waiting list' }).click()
+  await expect(page.getByTestId('inbox')).toBeVisible()
+})
+
 test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
