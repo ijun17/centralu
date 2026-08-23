@@ -78,14 +78,20 @@
  * So inside the session view the two tokens are redefined rather than swapped at 11 call
  * sites: `void` becomes the reading surface and `panel` the things resting on it, keeping
  * every component's existing class correct. Chosen from measured candidates: this leaves
- * the surface 10 steps clear of the sidebar and an approval card 9 steps clear of the
+ * the surface 6 steps clear of the sidebar and an approval card 8 steps clear of the
  * surface. That second number is the one that matters — brightness means urgency here, and
  * a candidate that lifted the surface to within 2 steps of the approval card was rejected
  * for making the card disappear.
+ *
+ * A brighter variant (#161616 / #1f1f1f) was built and looked at first. It cleared the
+ * sidebar by 10 rather than 6, and read as not belonging to the rest of the app — far
+ * enough up the scale that the conversation stopped looking like the same surface family
+ * as everything around it. Six steps is visible without that cost; three, the value this
+ * replaced, was not visible at all.
  */
 [data-testid='session-view'] {
-  --color-void: #161616;
-  --color-panel: #1f1f1f;
+  --color-void: #121212;
+  --color-panel: #1a1a1a;
 }
 
 @layer base {
