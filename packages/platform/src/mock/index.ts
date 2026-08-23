@@ -92,6 +92,15 @@ export class MockPlatform implements Platform {
         } else if (event.type === 'message_delta' || event.type === 'tool_call') {
           s.state = 'working'
           s.waitingSince = null
+        } else if (event.type === 'context_update') {
+          /*
+           * 실물(host)과 같은 규칙: 컨텍스트 사용량은 **세션에 남는다** (이슈 #48).
+           *
+           * 목이 이걸 흘리는 동안, 목록을 다시 받는 모든 경로(앱 재시작·재연결)에서
+           * 눈금이 `—`로 돌아갔다 — 실물은 그 값을 들고 있으므로, 이 자리가 비어 있으면
+           * E2E는 실물이 만들 수 없는 상태를 정상으로 보고 지나간다.
+           */
+          s.context = { used: event.used, window: event.window, exactness: event.exactness }
         }
         /*
          * 실물(host)과 같은 규칙: 기록으로 남는 이벤트에는 세션 내 seq를 매겨 방송에 싣는다.

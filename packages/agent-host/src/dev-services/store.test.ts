@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(16)
+    expect(store.schemaVersion).toBe(17)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(16)
+    expect(new Store().schemaVersion).toBe(17)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(16)
+    expect(store.schemaVersion).toBe(17)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -447,7 +447,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(16)
+    expect(store.schemaVersion).toBe(17)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -502,7 +502,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(16)
+    expect(store.schemaVersion).toBe(17)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -574,7 +574,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(16)
+    expect(first.schemaVersion).toBe(17)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -650,5 +650,92 @@ describe('v16 이관 — host의 설정이 재시작을 넘긴다', () => {
     expect(second.appSetting('updates.auto')).toBe('true')
     second.close()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * v17 — how full the context is survives the host (issue #48).
+ *
+ * The reading was always right; it lived in memory and died with the process, so a cold start
+ * showed `Context —` on every session until that one happened to work again. The gauge looked
+ * broken when nobody had written the number down — the same disease as #37.
+ *
+ * Run against a real v16-shaped file, because the half that would actually have failed is the
+ * one `CREATE TABLE IF NOT EXISTS` silently skips: adding columns to the database people
+ * already have.
+ */
+describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () => {
+  const v16Db = (file: string) => {
+    const old = new Database(file)
+    old.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, commands TEXT NOT NULL DEFAULT '[]');
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        tool TEXT NOT NULL, external_id TEXT, name TEXT NOT NULL,
+        auto_named INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'idle',
+        archived INTEGER NOT NULL DEFAULT 0, is_orchestrator INTEGER NOT NULL DEFAULT 0,
+        last_read_seq INTEGER NOT NULL DEFAULT 0,
+        waiting_since INTEGER, created_at INTEGER NOT NULL, touched_paths TEXT NOT NULL DEFAULT '[]',
+        model TEXT, effort TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal',
+        imported_from TEXT, worktree_path TEXT, worktree_branch TEXT, cwd TEXT,
+        sidebar_order INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE messages (session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        ts INTEGER NOT NULL, PRIMARY KEY (session_id, seq));
+    `)
+    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1,'[]')`).run()
+    const add = old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES (?,?,?,?,?)`)
+    add.run('worked', 'p1', 'claude', '일한 세션', 1)
+    add.run('fresh', 'p1', 'codex', '아직 안 돈 세션', 1)
+    old.pragma('user_version = 16')
+    old.close()
+  }
+
+  const row = (over: Partial<SessionInfo>): SessionInfo => ({
+    id: 'worked', projectId: 'p1', tool: 'claude', externalId: null, name: '일한 세션',
+    autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+    createdAt: 1, waitingSince: null, live: true, model: null, effort: null,
+    permissionPreset: 'normal', importedFrom: null, worktree: null,
+    ...sessionLiveDefaults(),
+    ...over,
+  })
+
+  it('옛 DB에 컬럼이 생기고, 껐다 켜도 사용량이 남는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v17-'))
+    const file = join(dir, 'store.db')
+    v16Db(file)
+
+    const first = new Store(file)
+    expect(first.schemaVersion).toBe(17)
+    // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
+    expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
+    first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
+    first.close()
+
+    // 껐다 켠 host — 여기서 비어 있던 것이 이슈 그대로의 증상이다
+    const second = new Store(file)
+    expect(second.listSessions().find((s) => s.id === 'worked')!.context).toEqual({
+      used: 168_000, window: 200_000, exactness: 'exact',
+    })
+    // 아직 한 턴도 안 돈 세션은 여전히 모른다 — 0%가 아니라 모름이어야 한다
+    expect(second.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
+    // schema.sql이 user_version을 1로 되돌려 단계가 매번 다시 도는 구조다 —
+    // 두 번째 열기가 컬럼을 다시 만들어 값을 지우면 안 된다
+    expect(second.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
+    second.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /**
+   * 압축(compaction)은 사용량을 **내린다.** 새 값이 옛 값을 못 덮으면 재시작 뒤의 눈금은
+   * 영영 실제보다 높은 채로 남아, 사람은 있지도 않은 한계를 보고 대화를 새로 시작한다.
+   */
+  it('나중 보고가 앞선 보고를 덮는다', () => {
+    const store = seeded()
+    store.upsertSession(row({ id: 's1', context: { used: 190_000, window: 200_000, exactness: 'exact' } }))
+    store.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
+    expect(store.listSessions().find((s) => s.id === 's1')!.context!.used).toBe(24_000)
+    store.close()
   })
 })

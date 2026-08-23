@@ -45,6 +45,15 @@ class FakeHandle implements SessionHandle {
       summary: { tool, title, readOnly: false, paths: [] },
     })
   }
+  /**
+   * 컨텍스트 사용량 한 번 (#48).
+   *
+   * 도구는 **턴 끝에 한 번** 답한다 — claude는 `result` 메시지에서, codex는 tokenUsage에서.
+   * 두 어댑터 모두 이 한 가지 이벤트로 들어오므로 여기서 흉내내는 것으로 둘 다 덮는다.
+   */
+  emitContext(used: number, window: number) {
+    this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact' })
+  }
   /** 승인 요청 하나 (재연결 복원 테스트용 — detail이 목록에 실려야 카드를 다시 그린다) */
   emitApproval(requestId: string) {
     this.emit({
@@ -164,6 +173,31 @@ describe('세션 수명주기', () => {
     expect(after.find((s) => s.id === live.id)!.state).toBe('idle')
     // 화면만이 아니라 DB도 바로잡혀야 한다 — 다음 기동에서 되살아나면 안 된다
     expect(store.listSessions().find((s) => s.id === live.id)!.state).toBe('idle')
+  })
+
+  /*
+   * 컨텍스트 눈금이 재시작 뒤 비어 있었다 (이슈 #48).
+   *
+   * 읽은 값은 처음부터 옳았다 — 저장되지 않았을 뿐이다. 그래서 다시 켜면 그 세션이
+   * **다시 한 턴을 돌기 전까지** 눈금이 비어 있었고, 화면에는 고장 난 계기로 보였다.
+   * 승인·질문 같은 다른 살아-있는-동안 필드와 달리 이것은 우리 프로세스의 사실이 아니라
+   * **대화의 사실**이라, host보다 오래 살아야 한다.
+   */
+  it('컨텍스트 사용량은 host를 껐다 켜도 남는다 (#48)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    // 턴이 끝나며 도구가 답한다 — 이 앱이 이 값을 받는 유일한 순간이다
+    adapter.handleOf(s.id)!.emitContext(168_000, 200_000)
+
+    // host 재기동 — 같은 store로 매니저를 새로 만든다 (메모리에 있던 것은 전부 사라졌다)
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter], ['codex', codexAdapter]])
+    const restarted = new SessionManager(store, adapters, () => {})
+    const after = (await createRpcHandler(restarted, adapters)('sessions.list', {})) as SessionInfo[]
+
+    expect(after.find((x) => x.id === s.id)!.context).toEqual({ used: 168_000, window: 200_000, exactness: 'exact' })
+    // 한 번도 답한 적 없는 세션은 여전히 모른다 — `—`와 `0%`의 구분이 여기서 시작된다
+    const quiet = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as { id: string }
+    expect(store.listSessions().find((x) => x.id === quiet.id)!.context).toBeNull()
   })
 
   it('생성 → 전송 → 이벤트 전파', async () => {

@@ -376,6 +376,37 @@ export class Store {
           `)
         },
       },
+      {
+        to: 17,
+        run: () => {
+          /*
+           * How full a conversation's context is (issue #48).
+           *
+           * The reading was right and arrived once a turn; it simply lived in memory and
+           * died with the host. So a cold start showed `Context —` on every session until
+           * that session happened to work again — a gauge that read as broken when in fact
+           * nobody had ever written the number down. This is the third time for this shape:
+           * model/effort/permission (v4/v7) and the worktree (v12) were the same bug, a
+           * runtime fact coming back as a default.
+           *
+           * Three flat columns rather than one JSON blob, following `worktree_path` /
+           * `worktree_branch` (v12) — the record is small, fixed, and always read whole, so
+           * columns buy the same thing without a decoding rule that can fail. `commands`
+           * (v15) is JSON because it is a list of unknown length; this is not.
+           *
+           * `context_used IS NULL` is the honest "never reported one", which is exactly the
+           * state the gauge already tells apart from 0%. Both adapters feed this through the
+           * one `context_update` event, so nothing here is Claude-shaped (Codex started
+           * sending it in 3ae2029).
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'context_used')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN context_used INTEGER`)
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN context_window INTEGER`)
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN context_exactness TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -491,15 +522,17 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, effort, permission_preset, imported_from, worktree_path, worktree_branch)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, effort, permission_preset, imported_from, worktree_path, worktree_branch, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
            permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
-           worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch`,
+           worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
+           context_used = excluded.context_used, context_window = excluded.context_window,
+           context_exactness = excluded.context_exactness`,
       )
       .run({
         ...s,
@@ -509,6 +542,15 @@ export class Store {
         importedFrom: s.importedFrom ?? null,
         worktreePath: s.worktree?.path ?? null,
         worktreeBranch: s.worktree?.branch ?? null,
+        /*
+         * Context rides the ordinary upsert (issue #48), which the manager already runs after
+         * every event — so a reading is on disk the instant it arrives, with no second write
+         * path to remember. Saving at session close instead would lose exactly the sessions
+         * that matter: the ones a crash or a force-quit ends.
+         */
+        contextUsed: s.context?.used ?? null,
+        contextWindow: s.context?.window ?? null,
+        contextExactness: s.context?.exactness ?? null,
       })
   }
 
@@ -582,6 +624,8 @@ export class Store {
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
+                s.context_used as contextUsed, s.context_window as contextWindow,
+                s.context_exactness as contextExactness,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
       )
@@ -590,15 +634,45 @@ export class Store {
       archived: number
       worktreePath: string | null
       worktreeBranch: string | null
+      contextUsed: number | null
+      contextWindow: number | null
+      contextExactness: string | null
     })[]
     // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
-    return rows.map(({ worktreePath, worktreeBranch, ...r }) => ({
+    return rows.map(({ worktreePath, worktreeBranch, contextUsed, contextWindow, contextExactness, ...r }) => ({
       ...r,
       autoNamed: !!r.autoNamed,
       archived: !!r.archived,
       live: false,
       worktree: worktreePath ? { path: worktreePath, branch: worktreeBranch ?? '' } : null,
       ...sessionLiveDefaults(),
+      /*
+       * **Context is the one that comes back** (issue #48), so it overrules the defaults above.
+       *
+       * The rest of that group are facts about *our* process — a request id nobody can answer
+       * any more, a rate-limit window that expired while we were gone — and are rightly gone
+       * with it. How full the context is, is not: it is a fact about the conversation, and the
+       * conversation is the tool's and outlives us.
+       *
+       * It is shown plainly, with no staleness mark, and that is a decision rather than an
+       * omission. The gauge has never claimed to be live — the reading arrives at the end of a
+       * turn and is already a turn behind while the next one runs; restarting only lengthens a
+       * gap that is always there. The event that really makes it wrong is the conversation
+       * moving without us (someone continuing it in the terminal), which can happen with or
+       * without a restart and which we cannot detect either way. A mark keyed on "we
+       * restarted" would therefore flag the common case, where nothing moved and the number is
+       * exact, and stay silent in the case that actually earns it. The first turn corrects it
+       * regardless — at the very instant the old behaviour would have shown anything at all.
+       */
+      context:
+        contextUsed !== null && contextWindow !== null
+          ? {
+              used: contextUsed,
+              window: contextWindow,
+              // Only the adapter can claim 'exact'; anything we cannot read back says 'estimate'
+              exactness: contextExactness === 'exact' ? ('exact' as const) : ('estimate' as const),
+            }
+          : null,
     }))
   }
 

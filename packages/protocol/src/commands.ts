@@ -115,6 +115,14 @@ export const SessionInfo = z.object({
     .nullable()
     .default(null),
   usage: TokenUsage.nullable().default(null),
+  /**
+   * How full the conversation's context is — **the one above that survives a restart** (#48).
+   *
+   * It sits with the live-only fields because it arrives the same way (an event, once a turn),
+   * but it is not a fact about our process: it describes the conversation, which belongs to the
+   * tool and outlives us. So the store writes it down and reads it back (schema v17), and
+   * `null` here means "this session has never reported one" rather than "we forgot".
+   */
   context: z
     .object({ used: z.number(), window: z.number(), exactness: z.enum(['exact', 'estimate']) })
     .nullable()

@@ -302,9 +302,9 @@ test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) =
   await newSession(page, 'alpha', 'x')
 
   /*
-   * 아직 턴이 끝나지 않았으면 값이 **없다** (context는 SessionInfo에도 DB에도 없어서
-   * 앱을 껐다 켜면 늘 이 상태다). '모름'과 '0%'는 다른 말이므로 다르게 보여야 한다 —
-   * 값이 없는데 0%로 그리면 "아직 하나도 안 썼다"는 거짓말이 된다.
+   * 한 턴도 끝나지 않은 세션은 값이 **없다** — 도구는 턴 끝에 한 번 답한다.
+   * '모름'과 '0%'는 다른 말이므로 다르게 보여야 한다: 값이 없는데 0%로 그리면
+   * "아직 하나도 안 썼다"는 거짓말이 된다.
    */
   await expect(page.getByTestId('context-gauge')).toContainText('—')
   await emitEvent(page, 0, { type: 'context_update', used: 0, window: 200000, exactness: 'exact' })
@@ -315,6 +315,36 @@ test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) =
 
   await emitEvent(page, 0, { type: 'limit_reached', usedPercent: 21, windowMins: 10080 })
   await expect(page.getByTestId('limit-badge')).toContainText('21%')
+})
+
+/**
+ * 컨텍스트 눈금이 재시작 뒤 비어 있었다 (이슈 #48).
+ *
+ * 읽은 값은 처음부터 옳았다 — 아무도 적어두지 않았을 뿐이라, 다시 켜면 그 세션이
+ * **다시 한 턴을 돌기 전까지** 눈금이 비어 있었다. 화면에는 고장 난 계기로 보였다.
+ *
+ * 저장은 host의 몫이고 그쪽은 store·manager 테스트가 지킨다. 여기서 지키는 것은 그다음
+ * 한 칸이다: 목록에 실려 온 값이 **화면까지 도착하는가**. #37이 정확히 이 한 칸에서
+ * 끊겼다 — attach가 목록에서 강도만 집어 오고 나머지는 기본값으로 채웠고, 그래서 DB에는
+ * 멀쩡히 있는 값이 화면에서만 사라졌다. 적어두고도 아무도 안 읽으면 같은 버그다.
+ */
+test('앱을 다시 켜도 컨텍스트 눈금이 채워져 있다 (#48)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await emitEvent(page, 0, { type: 'context_update', used: 168000, window: 200000, exactness: 'exact' })
+  await expect(page.getByTestId('context-gauge')).toContainText('84%')
+
+  // 앱을 다시 켠 것과 같다: 스토어가 목록을 받아 세션 요약을 처음부터 다시 세운다
+  await page.evaluate(async () => {
+    const w = window as any
+    await w.__store.getState().attach(w.__mock)
+  })
+
+  await expect(page.getByTestId('context-gauge')).toContainText('84%')
+  // 낡았을지 모른다는 표는 붙이지 않는다 — 눈금은 한 번도 '지금'을 약속한 적이 없다.
+  // 값은 늘 마지막으로 끝난 턴의 것이고, 재시작은 그 간격을 늘릴 뿐이다.
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 84%')
 })
 
 test('메시지 전송 직후에도 인박스 단축키가 동작한다 (회귀: 입력창이 키를 먹던 문제)', async ({ page }) => {
