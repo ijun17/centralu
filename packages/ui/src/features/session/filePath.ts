@@ -29,6 +29,8 @@
  * empty window (see `viewer-error` in CodeViewer).
  */
 
+import { wireSegments } from '@cc/protocol'
+
 export type FileRef = {
   /** Project-relative path, as `openFile` wants it */
   path: string
@@ -40,6 +42,12 @@ export type FileRef = {
  * Every character a path is allowed to contain. The exclusions carry the weight: no
  * spaces, no quotes, no parentheses, and above all no `:` — which is what rules out
  * `https://…` and `node:fs/promises` once the trailing `:line` has been taken off.
+ *
+ * `\` is excluded too, and that exclusion has a second job (#47): a path an agent printed with
+ * native separators (`src\a.ts`) stays plain text instead of becoming a link. `openFile` takes
+ * wire paths, which are POSIX (see `paths.ts` in the protocol), so `src\a.ts` is not a path this
+ * app can open — and prose is far more likely to be where a lone `\` came from anyway (`\n`,
+ * `\t`). Not linking it is the safe failure; the alternative guesses at a file.
  */
 const PATH_CHARS = /^[A-Za-z0-9._@+/-]+$/
 
@@ -79,7 +87,7 @@ export function parseFileRef(raw: string, projectRoot: string | null): FileRef |
   if (!EXTENSION.test(body)) return null
   // `../shared/a.ts` is relative to the file being discussed, which we do not know. We
   // only know the project root, so resolving it here would be a guess dressed as a fact.
-  if (body.split('/').includes('..')) return null
+  if (wireSegments(body).includes('..')) return null
 
   const root = projectRoot.replace(/\/+$/, '')
   let path = body

@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { WebSocket } from 'ws'
 import { HostServer } from '../../agent-host/src/transport/server.js'
 import { SessionManager } from '../../agent-host/src/sessions/manager.js'
@@ -423,5 +423,46 @@ describe.each([
     await h.platform.agents.send(s.id, 'b')
     await new Promise((r) => setTimeout(r, 100))
     expect(seen.length).toBe(count)
+  })
+})
+
+/**
+ * The half of the path contract this machine cannot run (issue #47).
+ *
+ * Everything above runs the same suite against both implementations, which is what catches them
+ * drifting apart. Separators are the one axis where that does not work: the harness above builds
+ * a real directory with `mkdtempSync` and the host refuses a path that is not on the disk, so a
+ * Windows-shaped project directory can never reach it from here. On the axis it *can* reach, the
+ * two agreed — on the same wrong assumption, which is the failure this file is supposed to make
+ * impossible.
+ *
+ * So the mock's answer is pinned to the function the host uses instead of to the host itself.
+ * `SessionManager.addProject` names a project with `basename` from `node:path`; on Windows that
+ * is `win32.basename`. Reading only `/` here meant the mock called a project
+ * `C:\Users\me\proj` while the host called it `proj`, and e2e — which only ever runs the mock —
+ * had no way to notice.
+ */
+describe('Platform 계약: 경로 구분자 (#47)', () => {
+  it('mock이 짓는 프로젝트 이름은 host가 쓰는 basename과 같은 답이다', async () => {
+    const mock = createMockPlatform()
+    const windowsDir = 'C:\\Users\\me\\proj'
+    expect((await mock.projects.add(windowsDir)).name).toBe(win32.basename(windowsDir))
+
+    const posixDir = '/Users/me/proj'
+    expect((await mock.projects.add(posixDir)).name).toBe(posix.basename(posixDir))
+  })
+
+  /**
+   * 목의 "밖으로 나가지 못한다"는 **와이어 경로**를 읽는다 (#19에서 잡힌 그 규칙).
+   * 조각을 프로토콜에서 얻어 오므로, 실물과 목이 같은 문자열을 같은 조각으로 읽는다.
+   */
+  it('와이어 경로로 루트 밖을 가리키면 목도 거절한다', async () => {
+    const mock = createMockPlatform()
+    const p = await mock.projects.add('/tmp/sep-contract')
+    await expect(mock.fs.importFile(p.id, '../..', 'evil.txt', btoa('x'))).rejects.toThrow(
+      /outside the project/,
+    )
+    // 그리고 안쪽은 그대로 받는다 — 거절이 전부를 막는 것이면 규칙이 아니라 고장이다
+    expect((await mock.fs.importFile(p.id, '', 'ok.txt', btoa('x'))).path).toBe('ok.txt')
   })
 })

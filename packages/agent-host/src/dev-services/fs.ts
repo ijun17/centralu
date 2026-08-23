@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { join, relative, resolve, sep } from 'node:path'
+import { basename, relative, resolve, sep } from 'node:path'
+import { wireBaseName, wireJoin } from '@cc/protocol'
 
 /**
  * 파일 트리·뷰어 서비스 (C-1).
@@ -43,10 +44,20 @@ function fail(message: string): never {
  * only the last segment is what stops `../../.ssh/authorized_keys` from being a name that
  * climbs out of the destination. `safeJoin` would catch it too; this catches it earlier and
  * says so.
+ *
+ * Which characters *are* separators is therefore a security question, not a tidiness one, and
+ * it has two different answers here (#47). The incoming string is a wire path, so `/` is the
+ * only separator in it — that part is settled by the protocol. `\` is settled by the machine:
+ * an ordinary character in a file name on macOS and Linux, a separator on Windows. So the
+ * platform is asked, and a name it would read as a path is **refused** rather than reduced to
+ * its last piece. Reducing it would rename the thing being moved, which is the one outcome
+ * nobody can undo — and refusing costs nothing, because a name with a separator in it was never
+ * a name.
  */
 export function baseName(path: string): string {
-  const name = path.split('/').filter(Boolean).pop() ?? ''
+  const name = wireBaseName(path)
   if (!name || name === '.' || name === '..') fail(`Not a file name: ${path || '(empty)'}`)
+  if (basename(name) !== name) fail(`Not a file name: ${path}`)
   return name
 }
 
@@ -57,8 +68,7 @@ export function baseName(path: string): string {
  * which is also why renaming is not reachable through this door (it is out of scope, #19).
  */
 export function moveTarget(from: string, toDir: string): string {
-  const name = baseName(from)
-  return toDir ? `${toDir}/${name}` : name
+  return wireJoin(toDir, baseName(from))
 }
 
 async function exists(abs: string): Promise<boolean> {
@@ -107,7 +117,7 @@ export async function moveEntry(root: string, from: string, toDir: string): Prom
  * anything is at that path already.
  */
 export async function importFile(root: string, toDir: string, name: string, data: Buffer): Promise<{ path: string }> {
-  const rel = toDir ? `${toDir}/${baseName(name)}` : baseName(name)
+  const rel = wireJoin(toDir, baseName(name))
   const dst = safeJoin(root, rel)
   const dir = safeJoin(root, toDir)
   if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) fail(`${toDir || '.'} is not a folder`)
@@ -139,8 +149,14 @@ export async function resolveExisting(root: string, rel: string): Promise<string
  */
 async function ignoredIn(root: string, names: string[], dir: string): Promise<Set<string>> {
   if (names.length === 0) return new Set()
-  const rel = relative(root, dir)
-  const input = names.map((n) => (rel ? join(rel, n) : n)).join('\n')
+  /*
+   * git speaks POSIX (#47). Its index stores `/` on every platform, and `check-ignore` reads and
+   * prints paths that way — so the native separator `relative` just produced has to go before
+   * the pathspec does, and what comes back needs no conversion at all. On macOS and Linux `sep`
+   * is already `/` and this replacement does nothing, which is the whole reason it was missing.
+   */
+  const rel = relative(root, dir).replaceAll(sep, '/')
+  const input = names.map((n) => wireJoin(rel, n)).join('\n')
   const stdout = await new Promise<string>((resolveOut) => {
     const child = spawn('git', ['check-ignore', '--stdin'], { cwd: root })
     let out = ''
@@ -152,7 +168,7 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
   })
   const set = new Set<string>()
   for (const line of stdout.split('\n')) {
-    const name = line.trim().split('/').pop()
+    const name = wireBaseName(line.trim())
     if (name) set.add(name)
   }
   return set
@@ -167,7 +183,7 @@ export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
   return visible
     .map((e) => ({
       name: e.name,
-      path: rel ? `${rel}/${e.name}` : e.name,
+      path: wireJoin(rel, e.name),
       isDir: e.isDirectory(),
       ignored: ignored.has(e.name),
     }))

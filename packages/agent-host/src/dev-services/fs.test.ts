@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { baseName, importFile, listDir, moveEntry, resolveExisting, safeJoin } from './fs.js'
 
@@ -71,6 +71,30 @@ describe('baseName — 이름 자리에 경로가 들어오지 못한다', () =>
     expect(() => baseName('')).toThrow(/Not a file name/)
     // `../../x` 처럼 생겼어도 이름 자리에서는 `x`가 된다 — 목적지 밖으로 못 나간다
     expect(baseName('../../x')).toBe('x')
+  })
+
+  /**
+   * Which characters are separators has two answers, and this asserts the one this machine can
+   * see (#47). The wire is POSIX, so `/` is settled by the protocol; `\` is settled by the
+   * platform, and here it is an ordinary character in a file name — so a file really called
+   * `a\b.txt` keeps its name and can still be moved.
+   *
+   * The other half cannot be run from here: on Windows `basename` reads that same string as a
+   * path, and `baseName` refuses it rather than quietly moving the file to `b.txt`. What is
+   * checkable on every platform is the invariant behind both answers — whatever comes back is
+   * never something this machine would read as a path.
+   */
+  it('구분자 판정은 플랫폼에게 묻는다 — 여기서 `\\`는 이름의 일부다', () => {
+    expect(baseName('src/a\\b.txt')).toBe('a\\b.txt')
+    for (const input of ['src/app/a.ts', 'a\\b.txt', '../../.ssh/authorized_keys', 'x.md']) {
+      let name: string
+      try {
+        name = baseName(input)
+      } catch {
+        continue // 거절도 맞는 답이다 (Windows에서 두 번째가 그렇다)
+      }
+      expect(name).not.toContain(sep)
+    }
   })
 })
 

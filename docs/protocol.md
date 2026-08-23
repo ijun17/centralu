@@ -61,6 +61,38 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 
 The request and response types of the git/fs/store RPCs are **1:1 with the port interfaces**. Deliberate duplication — the port is the original contract, and RPC and Tauri invoke are just two carriers of that contract.
 
+## 3.1 How a path is spelled ([#47](https://github.com/ijun17/centralu/issues/47))
+
+Two kinds of path cross this boundary, and they are not the same kind of thing.
+
+| Kind | Examples | Encoding |
+|---|---|---|
+| **Project-relative** | the `rel` of every `fs` RPC, `FsEntry.path`, git's file paths, the path a message links to | **POSIX (`/`), always**, on every host and every platform |
+| **Native** | `ProjectInfo.path` — a project's directory | the OS's own spelling, **never taken apart, never normalised** |
+
+**Why relative paths are normalised.** `packages/ui` is not allowed to know which OS it is on
+(see [platform-abstraction.md](platform-abstraction.md); it is enforced by `tooling/styles.test.ts`).
+A relative path carrying a native separator would have to be read one way on Windows and another
+way everywhere else — in the UI — which is exactly the branch that rule forbids. Git settles it
+from the other side too: its own path format is POSIX on every platform and its output reaches the
+screen unchanged, so any other choice would mean converting git's answers for nothing.
+
+**Why absolute paths are not.** A project's directory is chosen by the OS folder picker and handed
+straight back to the OS — a terminal's cwd, a process's cwd, the file manager. Nothing manipulates
+it. Normalising it would be lossy for no gain: `C:\Users\me` has no POSIX spelling that Windows
+will accept back.
+
+**Where the conversion happens.** At the host's edge, where a relative path meets a real
+filesystem, and nowhere else. `@cc/protocol`'s `wireSegments` · `wireBaseName` · `wireJoin` are the
+only place the separator is written down; `osPathBaseName` is for the other kind. On macOS and
+Linux the conversion is the identity, which is why getting it wrong cost nothing until it was
+written down.
+
+This does **not** make the app run on Windows ([#14](https://github.com/ijun17/centralu/issues/14)).
+It is the prerequisite: one named assumption instead of twenty-one anonymous ones, so a Windows
+build fails for reasons that are about Windows. `tooling/paths.test.ts` fails the build on a
+twenty-second.
+
 ## 4. Schema and version rules (the C6 defence)
 
 - Every message is defined by a zod schema and validated **only at the boundary** (once, on receipt. Re-validating internally is forbidden — performance).

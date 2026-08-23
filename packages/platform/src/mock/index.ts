@@ -20,7 +20,15 @@ import type {
   QuestionAnswer,
   UpdateStatus,
 } from '@cc/protocol'
-import { APP_VERSION, isNewerVersion, sessionLiveDefaults } from '@cc/protocol'
+import {
+  APP_VERSION,
+  isNewerVersion,
+  osPathBaseName,
+  sessionLiveDefaults,
+  wireBaseName,
+  wireJoin,
+  wireSegments,
+} from '@cc/protocol'
 import type { AgentPort, AlertKind, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, UpdatePort, WorkspaceSnapshot } from '../ports/index.js'
 
 /**
@@ -182,6 +190,11 @@ export class MockPlatform implements Platform {
    * "프로젝트 밖은 못 건드린다"가 실물에만 있는 규칙이 되고, 그 차이는 E2E(브라우저 목)에
    * 영원히 안 보인다 — 계약 테스트가 실제로 여기서 갈라진 것을 잡았다.
    * 문자열만 보고 판정할 수 있다: 조각을 세면서 `..`로 내려간 깊이가 음수가 되면 밖이다.
+   *
+   * The segments come from `wireSegments` rather than from a `/` written here (#47). Reading the
+   * separator out of the protocol instead of assuming it is what makes this check the *same*
+   * check the host runs: both sides now name one encoding, so a path that means two things on
+   * two machines cannot mean the right thing here and the wrong thing there.
    */
   private requireInside(rel: string): void {
     const fail = () => {
@@ -189,7 +202,7 @@ export class MockPlatform implements Platform {
     }
     if (rel.startsWith('/')) fail()
     let depth = 0
-    for (const seg of rel.split('/')) {
+    for (const seg of wireSegments(rel)) {
       if (seg === '' || seg === '.') continue
       if (seg === '..') depth -= 1
       else depth += 1
@@ -261,8 +274,8 @@ export class MockPlatform implements Platform {
     move: async (_projectId: string, from: string, toDir: string) => {
       this.requireInside(from)
       this.requireInside(toDir)
-      const name = from.split('/').filter(Boolean).pop() ?? ''
-      const path = toDir ? `${toDir}/${name}` : name
+      const name = wireBaseName(from)
+      const path = wireJoin(toDir, name)
       if (path === from) return { path, moved: false }
       if (path.startsWith(`${from}/`)) {
         throw Object.assign(new Error(`Cannot move ${name} into itself`), { code: 'internal' })
@@ -285,8 +298,8 @@ export class MockPlatform implements Platform {
       this.requireInside(toDir)
       // 이름은 마지막 조각만 쓴다 — 실물과 같은 규칙이라, 이름에 경로가 섞여 와도
       // 목적지 밖으로 나가지 못한다
-      const leaf = name.split('/').filter(Boolean).pop() ?? ''
-      const path = toDir ? `${toDir}/${leaf}` : leaf
+      const leaf = wireBaseName(name)
+      const path = wireJoin(toDir, leaf)
       if ((this.fsState.entries[toDir] ?? []).some((e) => e.path === path)) {
         throw Object.assign(new Error(`${path} already exists — nothing was written`), { code: 'internal' })
       }
@@ -647,8 +660,17 @@ export class MockPlatform implements Platform {
     add: async (path: string) => {
       const existing = this.projectsList.find((p) => p.path === path)
       if (existing) return existing
+      /*
+       * The name is the directory's last segment under **either** separator (#47).
+       *
+       * This one is not a wire path — a project's directory is native, and it is the one string
+       * that arrives here still spelled the way its own machine spells it. The host names the
+       * project with `basename` from `node:path`, which reads `\` on Windows; reading only `/`
+       * here meant the mock would have called a project `C:\Users\me\proj` while the host called
+       * it `proj`, and e2e — which only ever runs the mock — would have stayed green about it.
+       */
       const info: ProjectInfo = {
-        id: `mock-project-${++this.idc}`, path, name: path.split('/').filter(Boolean).pop() ?? path,
+        id: `mock-project-${++this.idc}`, path, name: osPathBaseName(path) || path,
         defaultTool: 'claude', commands: [], git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
       this.projectsList.push(info)

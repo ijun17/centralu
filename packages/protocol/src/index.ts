@@ -1,5 +1,6 @@
 export * from './brand.js'
 export * from './semver.js'
+export * from './paths.js'
 export * from './entities.js'
 export * from './events.js'
 export * from './commands.js'
