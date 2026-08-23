@@ -666,9 +666,13 @@ export function SessionPane({
             컨텍스트도 **쓰는 자리 옆**에 둔다. 대화 머리글에 있을 때는 화면 반대쪽
             끝이라, 길게 쓰는 동안 정작 얼마나 남았는지가 눈에 안 들어왔다 (도그푸딩).
 
-            **모름과 0%를 구별한다.** `context`는 SessionInfo에도 DB에도 없어서
-            앱을 껐다 켜면 그 턴이 끝나기 전까지 값이 없다. 그때 0%처럼 보이면
-            "아직 하나도 안 썼다"는 거짓말이 된다 — 흐린 `—`는 모른다는 뜻이다.
+            **모름과 0%를 구별한다.** 한 번도 턴을 끝낸 적 없는 세션에는 값이 없다.
+            그때 0%처럼 보이면 "아직 하나도 안 썼다"는 거짓말이 된다 — 흐린 `—`는
+            모른다는 뜻이다.
+
+            (#48 전에는 재시작한 세션도 여기 걸렸다. `context`가 DB에 없어서 앱을
+            껐다 켜면 값이 사라졌기 때문이다. 지금은 저장되므로 빈칸은 정말로
+            "아직 한 번도 보고된 적 없음"만 뜻한다.)
           */}
           <span
             className={`readout ml-auto shrink-0 text-[11px] ${
@@ -678,7 +682,7 @@ export function SessionPane({
             title={
               session.context
                 ? `Context ${session.context.used.toLocaleString()} / ${session.context.window.toLocaleString()} tokens`
-                : 'Context unknown — this session has not finished a turn since the app started'
+                : 'Context unknown — this session has never reported one'
             }
           >
             Context {ctxPct === null ? '—' : `${ctxPct}%`}
