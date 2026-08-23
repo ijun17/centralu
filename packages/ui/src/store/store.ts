@@ -363,6 +363,29 @@ export type AppState = {
    */
   refreshProjectGit(projectId: string): void
   /**
+   * Changing a repository on purpose, from inside the app (issue #49).
+   *
+   * #41 gave the sidebar three ways to hear that a tree moved — a turn ending, an approval
+   * granted, the window regaining focus — and every one of them is a *guess* that something
+   * probably happened elsewhere. The git panel then went straight to `platform.git` and told
+   * only itself, so **committing, the one change we make deliberately and know about, was the
+   * only one the sidebar never heard**. The count sat on its old value until an unrelated
+   * signal happened to fire.
+   *
+   * So the writes come through here and the refresh is part of the operation rather than
+   * something each call site has to remember. Reads stay on `platform.git`: a panel asking
+   * for its own file list or a diff is nobody else's business, and routing those through the
+   * store would put a debounce in front of a list that has to repaint on the click.
+   *
+   * `push` is deliberately absent. It moves nothing the sidebar shows — `ProjectInfo['git']`
+   * is branch, changed count and is-repo, with no ahead/behind — so a refresh after it would
+   * be a status call whose answer can only be identical.
+   */
+  gitStage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
+  gitCommit(projectId: string, message: string): Promise<{ ok: boolean; message?: string }>
+  /** Switching branch is the one of these that moves the **name** the sidebar shows, not the count */
+  gitCheckout(projectId: string, branch: string): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
+  /**
    * Replace this project's saved shell commands (issue #44).
    * Adding one and deleting one both arrive here as "the list is this now".
    */
@@ -1360,6 +1383,37 @@ export const useStore = create<AppState>((set, get) => ({
           .catch(() => {})
       }, GIT_REFRESH_MS),
     )
+  },
+
+  /*
+   * The three writes (issue #49). Each does the thing, then says the tree moved — the
+   * `await` matters, because a status read that overtakes its own commit measures the repo
+   * as it was and writes that back as news.
+   *
+   * Staging is in here even though it rarely moves the number (porcelain counts one line per
+   * changed path whether it is staged or not). "Rarely" is not "never" — staging a file whose
+   * content matches HEAD drops it out of status entirely — and the debounce plus `sameGit`
+   * mean an answer identical to the last one costs one call and re-renders nothing. The
+   * alternative is a rule about which writes qualify, which is the kind of rule that is
+   * silently wrong for a year.
+   */
+  async gitStage(projectId, paths, unstage) {
+    await get().platform!.git.stage(projectId, paths, unstage)
+    get().refreshProjectGit(projectId)
+  },
+
+  async gitCommit(projectId, message) {
+    const res = await get().platform!.git.commit(projectId, message)
+    // Refresh even when the commit was refused: git can reject *after* moving something
+    // (a hook that stages, a partial index update), and the count must not be left guessing.
+    get().refreshProjectGit(projectId)
+    return res
+  },
+
+  async gitCheckout(projectId, branch) {
+    const res = await get().platform!.git.checkout(projectId, branch)
+    get().refreshProjectGit(projectId)
+    return res
   },
 
   async setProjectCommands(projectId, commands) {

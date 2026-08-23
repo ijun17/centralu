@@ -78,6 +78,17 @@ function Changes({
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const openFile = useStore((s) => s.openFile)
+  /*
+   * Writes go through the store, reads stay on the platform (issue #49).
+   *
+   * The list below is this panel's own — nobody else holds it — so it is read straight from
+   * `platform.git.status` and repainted on the click. What the store owns is the *summary*
+   * the sidebar shows (branch, changed count), which is a different query, so the local
+   * refresh cannot be replaced by the store's: it would have to fetch something the store
+   * does not keep, 800ms late.
+   */
+  const gitStage = useStore((s) => s.gitStage)
+  const gitCommit = useStore((s) => s.gitCommit)
   const touched = useTouchedPaths(projectId)
   const [files, setFiles] = useState<GitFileStatus[] | null>(null)
   const [selected, setSelected] = useState<GitFileStatus | null>(null)
@@ -169,7 +180,7 @@ function Changes({
               action={{
                 label: 'Unstage',
                 run: async (paths) => {
-                  await platform.git.stage(projectId, paths, true)
+                  await gitStage(projectId, paths, true)
                   await refresh()
                 },
               }}
@@ -183,7 +194,7 @@ function Changes({
               action={{
                 label: 'Stage',
                 run: async (paths) => {
-                  await platform.git.stage(projectId, paths)
+                  await gitStage(projectId, paths)
                   await refresh()
                 },
               }}
@@ -199,7 +210,7 @@ function Changes({
               setBusy(true)
               // finally가 없으면 RPC가 던지는 순간 busy가 참으로 남아 버튼이 영영 죽는다
               try {
-                const res = await platform.git.commit(projectId, message.trim())
+                const res = await gitCommit(projectId, message.trim())
                 if (res.ok) {
                   setMessage('')
                   setToast(`Committed ${staged.length} files`)
@@ -491,6 +502,9 @@ function History({ projectId, initialSha, pick }: { projectId: string; initialSh
 function Branches({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
+  // The one write here moves the branch **name** the sidebar prints, so it goes through the
+  // store too (issue #49) — the dry run beside it changes nothing and stays a plain read.
+  const gitCheckout = useStore((s) => s.gitCheckout)
   const [branches, setBranches] = useState<GitBranch[] | null>(null)
   const [pending, setPending] = useState<{ branch: string; conflicts: string[] } | null>(null)
 
@@ -509,7 +523,7 @@ function Branches({ projectId }: { projectId: string }) {
   }
 
   const doCheckout = async (branch: string) => {
-    const res = await platform.git.checkout(projectId, branch)
+    const res = await gitCheckout(projectId, branch)
     setPending(null)
     if (res.ok) {
       setToast(`Switched to ${branch}`)

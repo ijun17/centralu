@@ -275,6 +275,15 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   const platform = usePlatform()
   const openGit = useStore((s) => s.openGit)
   const setToast = useStore((s) => s.setToast)
+  /*
+   * Writes through the store, reads straight from the platform (issue #49).
+   *
+   * This panel sits **beside** the sidebar count it was leaving stale — commit here and the
+   * number a few pixels to the left kept the old value. `refresh` below stays local because
+   * it fetches the file list, which the store does not hold; the store owns the summary.
+   */
+  const gitStage = useStore((s) => s.gitStage)
+  const gitCommit = useStore((s) => s.gitCommit)
   const touched = useTouchedCount(projectId)
   const [files, setFiles] = useState<GitFileStatus[] | null>(null)
   const [message, setMessage] = useState('')
@@ -362,7 +371,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
                 id: 'unstage',
                 one: 'Unstage',
                 all: 'Unstage all',
-                run: (paths) => run(() => platform.git.stage(projectId, paths, true)),
+                run: (paths) => run(() => gitStage(projectId, paths, true)),
               }}
             />
             <ChangeGroup
@@ -374,7 +383,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
                 id: 'stage',
                 one: 'Stage',
                 all: 'Stage all',
-                run: (paths) => run(() => platform.git.stage(projectId, paths)),
+                run: (paths) => run(() => gitStage(projectId, paths)),
               }}
             />
           </div>
@@ -395,7 +404,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
                 data-testid="evidence-commit"
                 onClick={() =>
                   void run(async () => {
-                    const r = await platform.git.commit(projectId, message.trim())
+                    const r = await gitCommit(projectId, message.trim())
                     setToast(r.ok ? 'Committed' : (r.message ?? 'Commit failed'))
                     if (r.ok) setMessage('')
                   })

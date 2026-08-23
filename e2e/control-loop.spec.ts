@@ -4680,6 +4680,106 @@ test('granting a file edit refreshes the project count before the turn ends (#41
 })
 
 /**
+ * Committing from inside the app left the sidebar's count on its old value (#49).
+ *
+ * #41 gave that count three ways to hear that a tree had moved, and every one of them is a
+ * guess that something probably happened somewhere else. The git panel meanwhile went
+ * straight to `platform.git` and told only itself — so the one change we make **on purpose,
+ * knowing exactly which repo it lands in**, was the only one the sidebar never heard.
+ *
+ * The baseline here comes through #41's own path, so what this test adds is the second half:
+ * a commit, and a number beside the project name that follows it.
+ */
+test('깃 패널에서 커밋하면 사이드바의 변경 수도 함께 움직인다 (#49)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [
+      { path: 'src/a.ts', staged: true, status: 'M' },
+      { path: 'src/b.ts', staged: true, status: 'M' },
+      { path: 'src/c.ts', staged: false, status: 'M' },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+
+  // 기준은 #41이 놓아둔 신호로 만든다 — 여기까지는 예전에도 맞았다
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('3')
+
+  await page.getByTestId('evidence-git-full').click()
+  await page.getByTestId('commit-message').fill('올린 둘만 커밋')
+  await page.getByTestId('commit-button').click()
+  await expect(page.getByTestId('toast')).toContainText('Committed')
+
+  // 올린 둘이 나갔다 — 사이드바가 그 사실을 아는지가 이 이슈의 전부다
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
+})
+
+/**
+ * 좁은 패널의 커밋도 같은 길로 간다 (#49).
+ *
+ * 이쪽이 더 두드러진다: 이 버튼은 사이드바 **바로 옆**에 있어서, 커밋하고 나면
+ * 몇 픽셀 왼쪽의 숫자가 옛 값을 붙들고 있는 것이 한눈에 보였다.
+ */
+test('좁은 패널에서 커밋해도 사이드바의 변경 수가 따라온다 (#49)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [
+      { path: 'src/a.ts', staged: true, status: 'M' },
+      { path: 'src/b.ts', staged: false, status: 'M' },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
+
+  await page.getByTestId('evidence-commit-message').fill('패널에서 커밋')
+  await page.getByTestId('evidence-commit').click()
+
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
+})
+
+/**
+ * 커밋만이 아니라 **저장소를 바꾸는 것 전부**가 알린다 (#49).
+ *
+ * 스테이징은 대개 숫자를 안 움직이고(porcelain은 올렸든 아니든 경로당 한 줄이다),
+ * 브랜치 전환은 숫자가 아니라 **이름**을 바꾼다. 그래서 화면의 숫자로는 둘 다 확인할 수
+ * 없다 — 대신 스토어가 다시 재어봤는지를 센다. 어느 쪽이든 무엇이 바뀌었는지 짐작해서
+ * 거르는 규칙을 두지 않는 것이 요점이다: 그런 규칙은 조용히 틀린 채로 오래 간다.
+ *
+ * `push`는 일부러 빠져 있다. 사이드바가 보여주는 것(브랜치·변경 수·저장소 여부) 중
+ * 어느 것도 움직이지 않으므로, 재는 일은 답이 같을 수밖에 없는 호출이 된다.
+ */
+test('스테이징과 브랜치 전환도 사이드바에 알린다 — 푸시는 아니다 (#49)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: false, status: 'M' }]
+    m.gitState.branches = [
+      { name: 'main', current: true, remote: false },
+      { name: 'feature', current: false, remote: false },
+    ]
+  })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-git-full').click()
+
+  await page.evaluate(() => ((window as any).__mock.gitStatusCalls = 0))
+  await page.getByTestId('git-stage-all').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.gitStatusCalls)).toBe(1)
+
+  await page.getByTestId('push-button').click()
+  await expect(page.getByTestId('toast')).toContainText('Pushed')
+  // 푸시는 아무것도 안 물어본다 — 위의 한 번 그대로다
+  expect(await page.evaluate(() => (window as any).__mock.gitStatusCalls)).toBe(1)
+
+  await page.getByTestId('git-sub-branches').click()
+  await page.getByTestId('branch-feature').click()
+  await expect(page.getByTestId('toast')).toContainText('Switched to feature')
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.gitStatusCalls)).toBe(2)
+})
+
+/**
  * Nothing in the app watches the filesystem, so work done **outside** it — a commit typed
  * into a terminal, a rebase, a `git clean` — is invisible until we come back and ask (#41).
  * Returning to the window is that moment, and it is the only signal we get for it.
