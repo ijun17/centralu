@@ -132,11 +132,28 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const output = num(usage.outputTokens) ?? 0
       const cached = num(usage.cachedInputTokens) ?? 0
       const total = num(usage.totalTokens) ?? input + output
-      const window = num(p.contextWindow) ?? num(obj(p.tokenUsage).contextWindow)
+      /*
+       * The field is `modelContextWindow`, on the tokenUsage object — see
+       * generated/v2/ThreadTokenUsage.ts. We read `contextWindow` for a long time, found
+       * nothing, and skipped the event: `usage_update` still went out, so tokens worked
+       * and only the percentage was missing. The adapter meanwhile declared
+       * `contextUsage: 'exact'`, so the app promised a number it never sent.
+       *
+       * The older names stay in the chain because a running Codex may predate the rename,
+       * and reading a field that isn't there costs nothing.
+       */
+      const usageObj = obj(p.tokenUsage)
+      const window =
+        num(usageObj.modelContextWindow) ?? num(p.contextWindow) ?? num(usageObj.contextWindow)
       const events: NormalizedEvent[] = [
         { type: 'usage_update', sessionId, tokens: { inputTokens: input, outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
       ]
-      if (window) events.push({ type: 'context_update', sessionId, used: total, window, exactness: 'exact' })
+      if (window) {
+        events.push({ type: 'context_update', sessionId, used: total, window, exactness: 'exact' })
+      } else {
+        // Say it out loud. A silent skip here is what let a renamed field hide for weeks.
+        warnMissingContextWindow(usageObj)
+      }
       return events
     }
 
@@ -195,4 +212,18 @@ export function toCodexDecision(decision: 'allow' | 'deny' | 'always'): string {
   if (decision === 'deny') return 'decline'
   if (decision === 'always') return 'acceptForSession' // '항상 허용·세션'과 정확히 대응 (M0 확인)
   return 'accept'
+}
+
+/*
+ * Warn once per process: this fires on every token update of every Codex session, and a
+ * repeating line would be noise rather than a signal.
+ */
+let warnedContextWindow = false
+function warnMissingContextWindow(usage: Record<string, unknown>): void {
+  if (warnedContextWindow) return
+  warnedContextWindow = true
+  console.error(
+    '[codex] token usage carried no context window — the context gauge will stay empty. ' +
+      `Fields present: ${Object.keys(usage).join(', ') || '(none)'}`,
+  )
 }

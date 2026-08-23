@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
@@ -173,5 +173,42 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
     expect(toCodexDecision('deny')).toBe('decline')
     // '항상 허용·세션'과 정확히 대응하는 값이 프로토콜에 있다
     expect(toCodexDecision('always')).toBe('acceptForSession')
+  })
+
+  /*
+   * Regression: we read `contextWindow`, Codex sends `modelContextWindow`
+   * (generated/v2/ThreadTokenUsage.ts). Nothing failed — `usage_update` still went out, so
+   * tokens looked right and only the percentage was missing, while the adapter went on
+   * declaring `contextUsage: 'exact'`. The shape below is copied from the generated type.
+   */
+  describe('컨텍스트 창은 modelContextWindow에서 온다', () => {
+    const notification = {
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 't1',
+        turnId: 'turn1',
+        tokenUsage: {
+          total: { totalTokens: 1200, inputTokens: 1000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+          last: { totalTokens: 1200, inputTokens: 1000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+          modelContextWindow: 200000,
+        },
+      },
+    }
+
+    it('퍼센트를 낼 수 있게 context_update를 낸다', () => {
+      const events = n(notification.method, notification.params)
+      const ctx = events.find((e) => e.type === 'context_update')
+      expect(ctx).toMatchObject({ used: 1200, window: 200000, exactness: 'exact' })
+    })
+
+    it('창이 없으면 그 사실이 조용히 묻히지 않는다', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const without = { ...notification, params: { ...notification.params, tokenUsage: { ...notification.params.tokenUsage, modelContextWindow: null } } }
+      const events = n(without.method, without.params)
+      expect(events.some((e) => e.type === 'context_update')).toBe(false)
+      expect(events.some((e) => e.type === 'usage_update')).toBe(true)
+      expect(spy).toHaveBeenCalled()
+      spy.mockRestore()
+    })
   })
 })
