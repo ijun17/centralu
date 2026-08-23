@@ -191,6 +191,25 @@ export function SessionPane({
    */
   const [runOpen, setRunOpen] = useState(false)
   const [caret, setCaret] = useState(0)
+  /*
+   * Whether an IME is mid-composition (issue #12).
+   *
+   * This is the same fact #38 already reads off a `keydown`, held for longer. A key event can
+   * only answer "is this keystroke the IME's"; the question here is "is the value in the box
+   * finished", and that spans every event between `compositionstart` and `compositionend` —
+   * a dozen of them for five Korean syllables.
+   *
+   * It gates autocomplete and nothing else. `한` arrives as `ㅎ`, `하`, `한`, and with `@` in
+   * front each of those is an `fs.search` for a query the person never asked for. The text is
+   * deliberately *not* gated: a composing character has to appear as it is typed, so the store
+   * write behind `value` stays on every event, and so does the height measurement that keeps
+   * that character from being clipped.
+   *
+   * Note this is not a claim about latency. It removes work; whether that is visible was never
+   * measured (see the investigation on #12, which could not separate render cost from the
+   * frame it was waiting for).
+   */
+  const [composing, setComposing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const attachFile = useStore((s) => s.attachFile)
@@ -231,7 +250,9 @@ export function SessionPane({
     projectId: session?.projectId ?? '',
     text,
     caret,
-    enabled: !!session && caret >= 0,
+    // Not while composing (#12) — a half-formed syllable is not a query. Closing the menu also
+    // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
+    enabled: !!session && caret >= 0 && !composing,
     // 오케스트레이터에겐 파일이 없다 — `@`는 세션을 집는다 (프로젝트 없음이 그 표식이다)
     atSource: session && session.projectId === null ? 'sessions' : 'files',
   })
@@ -512,6 +533,8 @@ export function SessionPane({
             className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
             rows={1}
             value={text}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onChange={(e) => {
               setText(e.target.value)
@@ -533,21 +556,29 @@ export function SessionPane({
                 }
               }
               /*
-                한글·일본어·중국어를 조합하는 동안 방향키는 **후보 목록의 키다** —
-                가로채면 고르던 글자가 사라진다. 이 입력창에는 조합을 아는 코드가
-                하나도 없었으므로(#12) 조용히 틀리기 쉬운 자리다.
+                While an IME is composing, Enter and the arrows belong to **the candidate list**,
+                not to us (#38, #12). The arrows move through candidates; Enter commits the
+                syllable being formed. Enter is the worse one to take: our answer to Enter is to
+                send, so the keystroke that was meant to finish a word posts a half-written
+                message instead — and Korean needs that keystroke far more often than English,
+                which is the shape of "this only happens in Korean".
 
-                신호를 둘 다 본다: `isComposing`은 표준이고, 브라우저에 따라 조합 중
-                눌린 키가 실제 키 대신 `Process`로 온다.
+                This reads the key event rather than the `composing` state above, on purpose. The
+                state answers "is the value still forming", which is the right question for
+                autocomplete and the wrong one for a keystroke: it is set from an event that in
+                principle might not arrive, and a stuck `true` there would mean a message that
+                cannot be sent at all. These flags are scoped to this one key and cannot go stale.
+                Both are read because `isComposing` is the standard signal and some browsers
+                report the key itself as `Process` instead.
               */
-              const composing = e.nativeEvent.isComposing || e.key === 'Process'
-              if (!composing && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+              const composingKey = e.nativeEvent.isComposing || e.key === 'Process'
+              if (!composingKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                 if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
                   e.preventDefault()
                   return
                 }
               }
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (!composingKey && e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 e.currentTarget.form?.requestSubmit()
               }
