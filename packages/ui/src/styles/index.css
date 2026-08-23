@@ -65,6 +65,29 @@
     system-ui, sans-serif;
 }
 
+/*
+ * The conversation reads as the front-most surface, not the floor.
+ *
+ * Depth in this palette is named by position — void is the app floor, pit the sidebar,
+ * panel what floats. The conversation was sitting on `void`, which made the thing you
+ * actually read the darkest thing on screen while its own composer and tool cards floated
+ * brighter above it. Backwards, and measurable: the reader reported the conversation and
+ * the sidebar as "the same colour", and they were three steps apart — invisible at this
+ * end of the scale.
+ *
+ * So inside the session view the two tokens are redefined rather than swapped at 11 call
+ * sites: `void` becomes the reading surface and `panel` the things resting on it, keeping
+ * every component's existing class correct. Chosen from measured candidates: this leaves
+ * the surface 10 steps clear of the sidebar and an approval card 9 steps clear of the
+ * surface. That second number is the one that matters — brightness means urgency here, and
+ * a candidate that lifted the surface to within 2 steps of the approval card was rejected
+ * for making the card disappear.
+ */
+[data-testid='session-view'] {
+  --color-void: #161616;
+  --color-panel: #1f1f1f;
+}
+
 @layer base {
   html {
     color-scheme: dark;
