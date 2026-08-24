@@ -22,6 +22,7 @@
     "smoke:resume": "node packages/agent-host/scripts/smoke-resume.mjs",
     "bundle:host": "node packages/agent-host/scripts/bundle.mjs",
     "codex:bindings": "node packages/agent-host/scripts/codex-bindings.mjs",
+    "drift:claude": "node scripts/claude-sdk-drift.mjs",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
     "smoke:orchestrator": "tsx packages/agent-host/scripts/smoke-orchestrator.mts",
     "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",

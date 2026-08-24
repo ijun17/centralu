@@ -1,0 +1,93 @@
+# Detects vendor surface drift on a schedule, before a user's machine does (#46).
+#
+# The app depends on two surfaces it does not own: the Claude Agent SDK (npm) and the
+# Codex app-server protocol (codex CLI). Both move without asking. This job installs the
+# LATEST published version of each — deliberately not the lockfile pins, which are
+# already exercised by `pnpm verify` on every push — and re-checks the two contracts:
+#
+#   claude-sdk      scripts/claude-sdk-drift.mjs — module exports, Query methods,
+#                   option keys and response fields the adapter reads, against the
+#                   shipped .d.ts (plus sdk.mjs for the one probed, untyped option).
+#   codex-protocol  packages/agent-host/scripts/codex-bindings.mjs --check —
+#                   regenerates the app-server bindings from the installed codex and
+#                   diffs protocol-contract.json (the methods we use) against them.
+#
+# A red run means a vendor moved under us; the run itself is the notification. Nothing
+# here bumps a pin, opens a PR, or fixes anything — detect and report only, per the
+# decision on #46. Scope is names, stated honestly: of the two drift bugs that
+# motivated this, 3ae2029 (contextWindow → modelContextWindow: a name we read left the
+# surface) is the class these checks catch; 970b674 (total vs last: both names real,
+# wrong one chosen) is semantic and invisible to any name diff — that class is covered
+# by the adapter's runtime plausibility guards, not by CI.
+#
+# Who hears about a red run: GitHub's docs — "Notifications for scheduled workflows are
+# sent to the user who last modified the cron syntax in the workflow file." Whether
+# that arrives as email depends on that user's own Actions notification settings
+# (a per-user preference, not something this repo can guarantee), so after touching
+# the cron line, check yours. Two more documented behaviors worth knowing:
+#   - "In a public repository, scheduled workflows are automatically disabled when no
+#     repository activity has occurred in 60 days." Two quiet months and this job
+#     stops running — silently, which is exactly the failure mode it exists to prevent.
+#   - Scheduled runs can be delayed or even dropped under load, and "high load times
+#     include the start of every hour" — hence the odd minute below.
+name: drift
+
+on:
+  schedule:
+    # Monday 21:23 UTC = Tuesday 06:23 KST — the red email is waiting at the start of
+    # the workday, not landing in the middle of one. Off the hour on purpose (see above).
+    - cron: '23 21 * * 1'
+  # For "did the vendor just break us?" moments, and because a schedule is the one
+  # trigger that cannot be rehearsed any other way.
+  workflow_dispatch:
+
+# Two jobs, not one with two steps: a Codex drift must not hide a Claude drift, and
+# the job names in the failure email should say which vendor moved before anyone clicks.
+jobs:
+  claude-sdk:
+    # Pinned like build.yml, for this workflow's own reason: its only output is
+    # red/green, and `ubuntu-latest` moving overnight would add a second suspect.
+    # When this goes red, the vendor must be the only thing that changed.
+    runs-on: ubuntu-24.04
+    # A hung npm registry should fail the run, not occupy a runner for six hours.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The floor `engines` declares, same as build.yml.
+          node-version: 22
+
+      # No `pnpm install`, deliberately. The check runs on node builtins alone and
+      # installs @anthropic-ai/claude-agent-sdk@latest into a temp dir itself — the
+      # workspace's node_modules holds the *pinned* SDK, the one thing this job must
+      # not accidentally measure.
+      - run: pnpm drift:claude
+
+  codex-protocol:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install latest Codex CLI
+        # Global, so `codex` lands on PATH where codex-bindings.mjs execFiles it, and
+        # nowhere near the repo's lockfile. `--version` puts the codex version in the
+        # log next to the result — a red run should read "gone as of X.Y.Z" at a glance
+        # (the check script prints it too, but only after generation succeeds).
+        run: |
+          npm install -g @openai/codex@latest
+          codex --version
+
+      # `--check` verifies the contract and leaves no generated files behind; it needs
+      # only node builtins, so no `pnpm install` here either.
+      - run: pnpm codex:bindings --check
