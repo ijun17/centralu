@@ -153,12 +153,18 @@ export function useAutocomplete({
   const items = useMemo<Suggestion[]>(() => {
     if (!trigger) return []
     if (trigger.kind === 'command') {
+      /*
+       * 자르지 않는다. 한때 상위 20개만 남겼는데, 빈 질의 정렬이 짧은 이름 우선이라
+       * 이름이 긴 플러그인 스킬(openai-templates:* 스물한 개)이 **통째로** 잘렸다 —
+       * 화면에는 그냥 "없는 것"으로 보였고, 실제로 그렇게 보고됐다. 목록은 이미
+       * 스크롤(max-h-56)이라 길어서 잃는 것이 없고, 실측 최대 102개는 가상 스크롤이
+       * 필요한 크기가 아니다.
+       */
       return commands.commands
         .map((c) => ({ c, s: scoreCommand(c.name, trigger.query) }))
         .filter((x): x is { c: CommandInfo; s: number } => x.s !== null)
         // 점수가 같으면 짧은 이름이 위 — 대개 그쪽이 원래 찾던 것이다
         .sort((a, b) => (b.s === a.s ? a.c.name.length - b.c.name.length : b.s - a.s))
-        .slice(0, 20)
         .map(({ c }) => ({ value: `/${c.name} `, label: `/${c.name}`, hint: c.argumentHint || c.description }))
     }
     if (atSource === 'sessions') {
