@@ -10,6 +10,7 @@ import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { CloseIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
+import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
 import { PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo } from './reorder.js'
 
@@ -783,6 +784,8 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
   const toolName = tool === 'codex' ? 'Codex' : 'Claude Code'
   const label = `${toolName} · ${stateLabel(state)}`
   const stalled = state === 'limited' || state === 'error'
+  // 그리드 칸 테두리와 **같은 각도**로 돈다 (components/orbit.ts)
+  useOrbitSync(state === 'working')
 
   return (
     <span

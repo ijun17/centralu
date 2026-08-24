@@ -4,6 +4,7 @@ import { useStore } from '../../store/store.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
+import { useOrbitSync } from '../../components/orbit.js'
 import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { dropEdge, dropSide, type DropTarget } from './drop.js'
 
@@ -59,6 +60,12 @@ export function GridView() {
   const visible = visiblePanels(panels, known)
   const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
+
+  /*
+    도는 칸의 테두리는 사이드바 표식과 **같은 각도**에 있어야 한다 (components/orbit.ts).
+    도는 중인 세션을 뒤늦게 그리드로 데려오면 칸의 궤도만 거기서 0부터 시작하기 때문이다.
+  */
+  useOrbitSync(visible.filter((id) => sessions[id]?.state === 'working').join(' '))
 
   /** 사이드바에서 끌어온 세션을 받는다 — 이미 있으면 그 자리로 옮긴다 */
   const dropSession = (id: string, targetId: string | null, before: boolean) => {

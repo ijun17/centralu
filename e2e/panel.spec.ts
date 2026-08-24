@@ -457,3 +457,36 @@ test('실행 메뉴: 오케스트레이터에는 없다 — 프로젝트가 없�
   // 열어도 아무것도 들어갈 수 없는 메뉴는 빈 메뉴보다 없는 편이 정직하다
   await expect(page.getByTestId('run-open')).toBeHidden()
 })
+
+/*
+ * ── 도는 것들은 한 시계를 본다 ──────────────────────────────────────
+ *
+ * 사이드바 표식과 그리드 칸 테두리는 같은 궤도를 같은 1.4초로 돈다. 그런데 CSS
+ * 애니메이션은 **요소가 생긴 순간**부터 세므로, 도는 중인 세션을 뒤늦게 그리드로
+ * 데려오면 칸의 궤도만 거기서 0부터 시작한다. 실측 758ms — 거의 정반대였다.
+ * 주기가 같아도 위상이 다르면 눈에는 그냥 따로 노는 두 개다.
+ */
+test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 — 늦게 합류해도', async ({ page }) => {
+  await setup(page)
+  const id = await newSession(page, 'alpha', 'claude', '작업')
+
+  // 먼저 포커스 뷰에서 돌기 시작한다 — 사이드바 표식의 궤도는 여기서 태어난다
+  await page.getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId('send').click()
+  await expect(page.getByTestId('tool-mark-claude')).toHaveClass(/cc-orbit/)
+
+  // ...칸은 한참 뒤에 생긴다. 고치기 전에는 이 간격이 그대로 각도 차이였다
+  await page.waitForTimeout(700)
+  await openGrid(page, [id])
+  await expect(page.getByTestId(`grid-panel-${id}`)).toHaveClass(/cc-orbit-ring/)
+
+  const phases = await page.evaluate(() =>
+    document
+      .getAnimations()
+      .filter((a) => (a as CSSAnimation).animationName === 'cc-orbit-spin')
+      .map((a) => Math.round(Number(a.currentTime))),
+  )
+  expect(phases).toHaveLength(2)
+  // 같은 각도다. 프레임 하나(16.7ms) 안쪽이면 눈에는 같은 것이다
+  expect(Math.abs(phases[0]! - phases[1]!)).toBeLessThan(17)
+})
