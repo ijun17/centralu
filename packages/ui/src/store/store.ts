@@ -833,6 +833,19 @@ export const useStore = create<AppState>((set, get) => ({
           get().focusSession(snap.focusedSessionId)
         }
         /*
+         * The view comes back *after* the session, on purpose: focusSession forces
+         * view:'focus' (selecting a session must show it), so restoring in the other
+         * order would have the session restore quietly undo the view restore — the
+         * exact bug being fixed, reintroduced by ordering.
+         *
+         * The orchestrator goes through its own door (openOrchestrator) rather than a
+         * bare set: the view alone would be a "Waking the orchestrator…" screen that
+         * nothing is actually waking.
+         */
+        const savedView = (snap as { view?: unknown }).view
+        if (savedView === 'grid') set({ view: 'grid' })
+        else if (savedView === 'orchestrator') void get().openOrchestrator()
+        /*
          * Layout prefs come back even when the focused session is gone (#20). They used
          * to sit inside the session check above, so a snapshot whose session had been
          * deleted threw the whole arrangement away with it — but the panel's shape is a
@@ -892,6 +905,7 @@ export const useStore = create<AppState>((set, get) => ({
     void s.platform?.workspace
       .save({
         focusedSessionId: s.focusedSessionId,
+        view: s.view,
         panelOpen: s.panelOpen,
         // The single-tab field predates the arrangement (#20). It keeps carrying the
         // top group's active tab so an older build reading this snapshot still lands
@@ -1838,6 +1852,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   setView(view) {
     set({ view })
+    get().saveWorkspace()
   },
 
   async openOrchestrator() {
@@ -1848,6 +1863,7 @@ export const useStore = create<AppState>((set, get) => ({
      * 없으면 누른 사람은 버튼이 죽은 줄 안다 — 보낸 즉시 '작업 중'으로 두는 것과 같은 이유다.
      */
     set({ view: 'orchestrator' })
+    get().saveWorkspace()
     try {
       const info = await platform.agents.orchestrator()
       set((s) => ({

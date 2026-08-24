@@ -37,6 +37,7 @@ beforeEach(() => {
     showIgnored: true,
     focusedSessionId: null,
     focusedProjectId: null,
+    view: 'focus',
     history: {},
     resuming: {},
     wakeError: {},
@@ -523,5 +524,42 @@ describe('wake — 포커스 경로의 조용한 깨움', () => {
 
     await useStore.getState().wake(s.id)
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 보던 화면이 재시작을 넘어온다.
+ *
+ * 세션은 돌아오는데 **보는 방식**은 돌아오지 않았다 — 그리드에서 껐는데 포커스 뷰로
+ * 켜졌다. 복원 순서가 함정이다: focusSession이 view를 focus로 강제하므로
+ * (고른 세션은 보여야 하니까), 화면 복원은 그 **뒤**여야 한다.
+ */
+describe('화면(view) 복원', () => {
+  it('그리드에서 껐으면 그리드로 켜진다 — 세션 복원이 덮어쓰지 못한다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('vw-s1', sessionInfo('vw-s1'))
+    mock.workspaceSnapshot = { focusedSessionId: 'vw-s1', view: 'grid' }
+
+    await useStore.getState().attach(mock)
+
+    expect(useStore.getState().focusedSessionId).toBe('vw-s1')
+    expect(useStore.getState().view).toBe('grid')
+  })
+
+  it('화면을 바꾸면 저장된다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+
+    useStore.getState().setView('grid')
+    await new Promise((r) => setTimeout(r, 0))
+    expect((mock.workspaceSnapshot as { view?: string } | null)?.view).toBe('grid')
+  })
+
+  it('모르는 화면 이름은 무시한다 — 스냅샷은 파일이다', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { view: 'hologram' }
+
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().view).toBe('focus')
   })
 })

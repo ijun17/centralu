@@ -297,6 +297,13 @@ export interface GitPort {
 /** 워크스페이스 스냅샷 (C-3) — 창을 껐다 켜도 보던 자리로 돌아온다 */
 export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
+  /**
+   * Which of the three views was showing — focus, grid, or orchestrator. Restoring the
+   * focused session without this landed a person who quit from the grid back in the focus
+   * view: the *session* came back but the *way of looking* did not, which reads as the app
+   * forgetting. Loosely typed like panelLayout: a snapshot is a file, the UI validates.
+   */
+  view?: string
   /** 증거 패널(깃·파일)이 열려 있었는가 */
   panelOpen?: boolean
   /** What the evidence panel was showing — pre-#20 single-tab field, kept for old snapshots/builds */

@@ -4923,3 +4923,31 @@ test('입력창을 포커스하면 잠든 세션이 깨어난다', async ({ page
   // 조용히 — 깨어났다는 토스트도, 실패 토스트도 없다
   await expect(page.getByTestId('toast')).toHaveCount(0)
 })
+
+/**
+ * 보던 화면이 재시작을 넘어온다 (C-3의 남은 반쪽).
+ *
+ * 세션은 돌아오는데 보는 **방식**은 돌아오지 않았다 — 그리드에서 껐는데 포커스 뷰로
+ * 켜졌다. 복원 순서(focusSession이 view를 focus로 강제한다)는 단위 테스트가 지키고,
+ * 여기는 실제 리로드로 한 바퀴 돈다. mock의 재시작 규칙은 #20의 relaunch 테스트와
+ * 같다: localStorage(스냅샷의 대역)만 살아남고, 프로젝트는 다시 등록해야 한다.
+ */
+test('그리드에서 껐다 켜면 그리드로 돌아온다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate((sid: string) => (window as any).__store.getState().setGridPanels([sid]), id)
+  await page.getByTestId('grid-button').click()
+  await expect(page.getByTestId('grid')).toBeVisible()
+
+  // 재시작 — 스냅샷만 살아남는다
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('first-run')).toBeVisible()
+  await page.evaluate((p: string) => {
+    ;(window as any).__mock.nextPickedDirectory = p
+  }, '/tmp/alpha')
+  await page.getByTestId('first-run-pick').click()
+
+  // 프로젝트가 돌아오는 순간, 화면은 포커스 뷰가 아니라 **그리드**여야 한다
+  await expect(page.getByTestId('grid')).toBeVisible()
+})
