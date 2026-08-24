@@ -15,6 +15,9 @@ import { dropEdge, dropSide, type DropTarget } from './drop.js'
  * 그래서 열 수를 **폭에서 계산해** 패널이 최소 폭 아래로 내려가지 않게 한다
  * (core의 columnsFor). 창이 좁으면 열이 줄고, 끝내 한 줄이 된다.
  *
+ * The height is measured too, but only as a guard — see MAX_PANEL_H. It changes nothing
+ * on an ordinary screen, so a panel's shape here is still decided by the width.
+ *
  * 칸은 포커스 뷰와 **같은 부품(SessionPane)**을 쓴다. 복사본을 두면 여기서 모델을
  * 바꿨을 때 사이드바가 옛 값을 들고 있게 된다 — 화면이 둘이어도 진실은 하나여야 한다.
  */
@@ -24,6 +27,8 @@ export function GridView() {
   const setGridPanels = useStore((s) => s.setGridPanels)
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
+  /** Only a guard — it splits a row off a screen tall enough to make a panel absurd (MAX_PANEL_H) */
+  const [height, setHeight] = useState(800)
   /** 놓으면 어디로 갈지 — 어느 칸의 어느 쪽인가 */
   const [over, setOver] = useState<DropTarget>(null)
   /** 지금 끌고 있는 칸. 원본을 흐리게 해서 "이게 움직이는 중"임을 보인다 */
@@ -31,20 +36,28 @@ export function GridView() {
   /** 끌 때 머리글이 아니라 **칸 전체**를 들어 올리기 위한 참조 */
   const cards = useRef(new Map<string, HTMLDivElement>())
 
-  // 열 수가 폭에서 나오므로 폭이 바뀌면 다시 잰다
+  // 열 수가 화면 크기에서 나오므로 크기가 바뀌면 다시 잰다.
+  // Kept as two numbers rather than one object so an observer firing with an unchanged
+  // dimension does not re-render the whole grid
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const ro = new ResizeObserver(([e]) => e && setWidth(e.contentRect.width))
+    const ro = new ResizeObserver(([e]) => {
+      if (!e) return
+      setWidth(e.contentRect.width)
+      setHeight(e.contentRect.height)
+    })
     ro.observe(el)
-    setWidth(el.getBoundingClientRect().width)
+    const box = el.getBoundingClientRect()
+    setWidth(box.width)
+    setHeight(box.height)
     return () => ro.disconnect()
   }, [])
 
   // 지워진 세션이 배치에 남아 있어도 그리지 않는다 (저장된 값은 그대로 둔다)
   const known = new Set(Object.keys(sessions))
   const visible = visiblePanels(panels, known)
-  const cols = columnsFor(width, visible.length)
+  const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
 
   /** 사이드바에서 끌어온 세션을 받는다 — 이미 있으면 그 자리로 옮긴다 */
