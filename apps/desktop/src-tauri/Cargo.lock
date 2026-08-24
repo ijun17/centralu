@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "centralu"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "objc2",
  "objc2-app-kit",

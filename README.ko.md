@@ -75,12 +75,12 @@ centralu update     # 새 버전이 나왔을 때
 | | |
 |---|---|
 | **macOS, Apple Silicon** | npm에 올라가 있고, 우리가 매일 쓰는 환경입니다 |
-| **Linux, x86-64** | 0.1.0-beta.2부터 npm에 있습니다. 실행 보고는 아직 없습니다 — 첫 번째가 되어주세요 |
-| **Windows · Linux arm64 · Intel Mac** | 아예 빌드가 안 됩니다 ([#14](https://github.com/ijun17/centralu/issues/14), [#29](https://github.com/ijun17/centralu/issues/29)) |
+| **Linux, x86-64 · arm64** | npm에 있습니다(x86-64는 0.1.0-beta.2부터, arm64는 beta.3부터). 실행 보고는 아직 없습니다 — 첫 번째가 되어주세요 |
+| **Windows · Intel Mac** | 아예 빌드가 안 됩니다 ([#14](https://github.com/ijun17/centralu/issues/14)) |
 
 리눅스 줄엔 설명이 좀 필요합니다. 여기엔 리눅스 기계가 없어서, npm에 올라간 패키지도
 CI에서 빌드·검사만 거쳤지 사람이 띄워본 적은 없습니다. 컴파일된다와 돌아간다는 다른
-주장이고, 증명된 건 아직 앞엣것뿐입니다.
+주장이고, 증명된 건 아직 앞엣것뿐입니다. 두 아키텍처 다 그렇습니다.
 
 리눅스를 쓰신다면 `npm i -g centralu`로 AppImage가 설치됩니다 —
 [#14](https://github.com/ijun17/centralu/issues/14)에 어땠는지 남겨주세요. 아무 일도

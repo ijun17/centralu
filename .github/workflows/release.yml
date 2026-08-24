@@ -161,15 +161,12 @@ jobs:
           # Xcode and SDK versions without warning, and a release is not where to find out.
           - target: darwin-arm64
             runner: macos-14
-          # linux-arm64 (#29) — written out and commented, so enabling it is deleting two
-          # `#`. It stays off because the shim does not pin `centralu-linux-arm64` yet, and
-          # pinning an unpublished package would wedge the *next* ordinary release behind
-          # it (assertPinnedPlatformsPublished in scripts/release-npm.mts). The build itself
-          # is green on this runner as of run 32381990293. Uncommenting alone is not enough:
-          # tooling/release-workflow.test.ts will fail until the shim pins it too, which is
-          # the rest of the checklist in docs/releasing.md → "linux-arm64 (#29)".
-          # - target: linux-arm64
-          #   runner: ubuntu-22.04-arm
+          # linux-arm64 (#29), on from 0.1.0-beta.3. `ubuntu-22.04-arm` is deliberately the
+          # same distro version as the x64 pin above, so arm64 users get the same glibc floor
+          # rather than a newer one — and the runner is free only while this repository is
+          # public (see docs/releasing.md → "linux-arm64 (#29)" before flipping it private).
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
     # The gate that actually stops an accidental publish: a required reviewer on the
     # `npm-publish` environment, holding NPM_TOKEN there rather than at repo level so no
     # other workflow can reach it. It earned its keep on the first release, catching an

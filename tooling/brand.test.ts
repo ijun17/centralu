@@ -55,6 +55,7 @@ describe('이름은 한 곳에서 정한다', () => {
      */
     const platforms = [
       { dir: 'darwin-arm64', bundle: `${APP_NAME}.app` },
+      { dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` },
       { dir: 'linux-x64', bundle: `${APP_NAME}.AppImage` },
     ]
     for (const { dir, bundle } of platforms) {
@@ -78,31 +79,21 @@ describe('이름은 한 곳에서 정한다', () => {
     )
   })
 
-  it('linux-arm64 패키지 필드는 맞지만 (#29), shim에는 아직 안 걸려 있다', () => {
+  it('두 리눅스 아키텍처는 서로의 패키지를 받지 않는다 (#29)', () => {
     /*
-     * linux-arm64 is deliberately absent from `platforms` above and from the shim's
-     * `optionalDependencies` — see docs/releasing.md → "Adding a platform" →
-     * "linux-arm64 (#29)". Pinning an *unpublished* platform package there would make
-     * every future `pnpm release:npm --publish` (the step that publishes this shim)
-     * refuse to run until linux-arm64 is also on the registry at that exact version
-     * (assertPinnedPlatformsPublished, above in the release script) — which would block
-     * an ordinary darwin/x64 release behind a package nothing has ever built or
-     * published. So this test only holds the parked package.json to the same shape
-     * linux-x64 has, and asserts the gap is still there — remove the second half of
-     * this test (and add linux-arm64 to `platforms` and to the shim's
-     * `optionalDependencies`) the day a real arm64 artifact gets published.
+     * npm picks between these two on `cpu` alone — they share `os`, a version, and a
+     * bundle name. Get one `cpu` wrong and the mistake does not show up here or at
+     * install time; it shows up as an AppImage that will not start on someone's machine,
+     * which is the one failure nobody on this project can reproduce.
      */
-    const arch = json('packaging/npm/linux-arm64/package.json')
-    expect(arch.name).toBe(`${APP_SLUG}-linux-arm64`)
-    expect(arch.os).toEqual(['linux'])
-    expect(arch.cpu).toEqual(['arm64'])
-    expect(arch.files).toContain(`${APP_NAME}.AppImage`)
-
-    const main = json('packaging/npm/centralu/package.json')
-    expect(
-      Object.keys(main.optionalDependencies as object),
-      'linux-arm64 is unpublished — wiring it in here would wedge the next shim publish, see the comment above',
-    ).not.toContain(arch.name)
+    for (const [dir, cpu] of [
+      ['linux-arm64', 'arm64'],
+      ['linux-x64', 'x64'],
+    ] as const) {
+      const arch = json(`packaging/npm/${dir}/package.json`)
+      expect(arch.os, dir).toEqual(['linux'])
+      expect(arch.cpu, dir).toEqual([cpu])
+    }
   })
 
   it('빌드한 .app을 여는 스크립트가 실제 번들 이름을 가리킨다', () => {

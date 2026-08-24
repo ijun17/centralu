@@ -76,12 +76,12 @@ puts it back and leaves your conversations alone.
 | | |
 |---|---|
 | **macOS, Apple Silicon** | on npm, and what we use every day |
-| **Linux, x86-64** | on npm since 0.1.0-beta.2. Nobody has reported running it yet — you may be first |
-| **Windows · Linux arm64 · Intel Macs** | don't build at all ([#14](https://github.com/ijun17/centralu/issues/14), [#29](https://github.com/ijun17/centralu/issues/29)) |
+| **Linux, x86-64 · arm64** | on npm (x86-64 since 0.1.0-beta.2, arm64 since beta.3). Nobody has reported running either yet — you may be first |
+| **Windows · Intel Macs** | don't build at all ([#14](https://github.com/ijun17/centralu/issues/14)) |
 
-That Linux row deserves a note. Nobody here has a Linux machine, so the package on npm
-has been built and checked in CI, but never started by a person. Compiling and running
-aren't the same claim, and only the first one has been shown.
+That Linux row deserves a note. Nobody here has a Linux machine, so the packages on npm
+have been built and checked in CI, but never started by a person. Compiling and running
+aren't the same claim, and only the first one has been shown — on both architectures.
 
 If you're on Linux, `npm i -g centralu` gets you the AppImage — tell us how it went in
 [#14](https://github.com/ijun17/centralu/issues/14). Including if it did nothing at all.

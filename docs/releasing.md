@@ -5,18 +5,16 @@ page and no update server.
 
 ## Why the packages are shaped this way
 
-Three packages go to npm:
+Four packages go to npm:
 
 | Package | Contents | Installed on |
 |---|---|---|
 | `centralu` | a launcher script, a few KB | every supported platform |
 | `centralu-darwin-arm64` | `Centralu.app` | macOS, Apple Silicon |
 | `centralu-linux-x64` | `Centralu.AppImage`, `icon.png` | Linux, x86-64 |
+| `centralu-linux-arm64` | `Centralu.AppImage`, `icon.png` | Linux, arm64 — from 0.1.0-beta.3 |
 
-(A fourth package, `centralu-linux-arm64`, exists in the repo — `packaging/npm/linux-arm64/`
-— but is not wired into the shim yet. See "linux-arm64 (#29)" below.)
-
-`centralu` declares the other two as `optionalDependencies` and carries `os`/`cpu`
+`centralu` declares the other three as `optionalDependencies` and carries `os`/`cpu`
 fields on each of them, so npm installs exactly one bundle for the machine doing the
 installing. This is the same layout esbuild and swc use, and the reason is size: nobody
 downloads a macOS bundle onto a Linux box.
@@ -180,9 +178,10 @@ to `false` at the same time as the 1.0 bump.
 
 ## linux-arm64 (#29)
 
-Steps 1, 2 and 6 above are done; steps 3, 4 and 5 are deliberately not, because all three
-assume `centralu-linux-arm64` already exists on the npm registry, and nothing arm64 has
-ever been built here, let alone published.
+All seven steps above are done as of 0.1.0-beta.3. Three of them (1, 2 and 6) landed early,
+because they cost nothing to have ready; the other four had to wait for the release that
+publishes the package, for the reason below. The history is worth keeping: this is the shape
+every *next* platform will have to move in too.
 
 **Why the runner works, and why it is not just plugged in anyway.** GitHub hosts
 `ubuntu-22.04-arm` — the same distro version as the `ubuntu-22.04` pin `build.yml` already
@@ -206,36 +205,29 @@ gated behind the `npm-publish` environment, so a human already has to choose to 
 generalizing its `target` input to include `linux-arm64` does not add a new way for this
 to happen by accident.
 
-**Why the rest waits.** `packaging/npm/centralu/package.json`'s `optionalDependencies` pin
-exact versions, and `assertPinnedPlatformsPublished` in `scripts/release-npm.mts` refuses
-to publish the shim while any pinned platform is missing from the registry at the release
-version. Pin `centralu-linux-arm64` there before it is ever published, and the *next*
-ordinary darwin/x64 release cannot publish the shim until arm64 catches up too — the trap
-the guard exists to prevent, aimed at this repo's own next release instead of a user's
-install. `tooling/brand.test.ts`'s platform list would fail for the same reason (its
-exact-match assertion checks the shim's `optionalDependencies`, which would not yet have
-the entry). The launcher's `TARGETS` table carries its own comment on this exact rule:
-listing a package that was never released turns "not supported yet" into "your install is
-broken."
+**Why it waited, and why 0.1.0-beta.3 is when it stopped waiting.**
+`packaging/npm/centralu/package.json`'s `optionalDependencies` pin exact versions, and
+`assertPinnedPlatformsPublished` in `scripts/release-npm.mts` refuses to publish the shim
+while any pinned platform is missing from the registry at the release version. Pinning
+`centralu-linux-arm64` on an ordinary day would therefore have wedged the *next*
+darwin/x64 release behind a package nothing had built — the trap that guard exists to
+prevent, aimed at this repo instead of at a user's install. The pin can only be added in
+the same change that publishes what it points at, and `release.yml` is what makes that one
+change: the arm64 job publishes the package, and the shim job does not start until it has.
+That is why all four edits below landed in a single commit for beta.3, and why
+`tooling/release-workflow.test.ts` fails on any partial state.
 
-**Enabling it.** The precondition that used to sit here — "once a build has actually run
-green on `ubuntu-22.04-arm`" — is met: run 32381990293 answered both of #29's open questions
-with evidence rather than reasoning. `node-pty` (no Linux prebuild at any architecture, so
-node-gyp compiles it on the runner) and `better-sqlite3` both build on arm64, and the
-AppImage tooling produces a bundle of a size consistent with x64. What a green build still
-does not prove is that it *launches*; nobody has started it, on either Linux architecture.
-
-The four steps below have to land in one commit. Each is a promise the others keep: the pin
-without the job strands a half-published release at the shim, and the job without the pin
-publishes a package no launcher will ever look for. `tooling/release-workflow.test.ts` fails
-on any partial state, and `tooling/brand.test.ts` on step 2's absence.
-
-1. Add `"centralu-linux-arm64": "<version>"` to `optionalDependencies` in
-   `packaging/npm/centralu/package.json` (`os` already lists `linux`, so no change there).
-2. Add `{ dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` }` to the `platforms` array in
-   `tooling/brand.test.ts`, and delete the parked-package test added alongside it for #29
-   (the one asserting the package is *not* yet in `optionalDependencies`).
-3. Add `'linux-arm64': { pkg: 'centralu-linux-arm64', artifact: `${APP_NAME}.AppImage` }` to
+1. `"centralu-linux-arm64": "<version>"` in `optionalDependencies` in
+   `packaging/npm/centralu/package.json` (`os` already listed `linux`).
+2. `{ dir: 'linux-arm64', bundle: `${APP_NAME}.AppImage` }` in the `platforms` array in
+   `tooling/brand.test.ts`, replacing the parked-package test.
+3. `'linux-arm64': { pkg: 'centralu-linux-arm64', artifact: `${APP_NAME}.AppImage` }` in
    `TARGETS` in `packaging/npm/centralu/bin/centralu.mjs`.
-4. Uncomment the `linux-arm64` matrix entry in `.github/workflows/release.yml` — two `#`.
-   Then rehearse (`workflow_dispatch`, `dry_run` on) before tagging: that job has never run.
+4. The `linux-arm64` matrix entry in `.github/workflows/release.yml`.
+
+**What is still unproven.** Run 32381990293 answered both of #29's build questions with
+evidence: `node-pty` (no Linux prebuild at any architecture, so node-gyp compiles it on the
+runner) and `better-sqlite3` both build on arm64, and the AppImage tooling produces a bundle
+of a size consistent with x64. A green build does not prove it *launches*, and nobody has
+started one — on either Linux architecture. That is the same thing already true of the x64
+package shipped in beta.2, and the README says so on both.

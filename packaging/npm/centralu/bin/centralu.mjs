@@ -46,6 +46,7 @@ const DESKTOP_ENTRY = join(homedir(), '.local/share/applications/centralu.deskto
  */
 const TARGETS = {
   'darwin-arm64': { pkg: 'centralu-darwin-arm64', artifact: BUNDLE },
+  'linux-arm64': { pkg: 'centralu-linux-arm64', artifact: `${APP_NAME}.AppImage` },
   'linux-x64': { pkg: 'centralu-linux-x64', artifact: `${APP_NAME}.AppImage` },
 }
 
