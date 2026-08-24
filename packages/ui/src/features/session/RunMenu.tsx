@@ -99,41 +99,56 @@ export function RunMenu({
           {/*
             An empty project shows the add row and nothing else. A "no commands yet" line
             would be a row that says nothing the empty input does not already say.
+
+            **Each saved command is its own box.** They used to be bare rows stacked with
+            nothing between them, and a list of shell commands is exactly the content that
+            needs the separation: `pnpm build` and `pnpm build:host` on consecutive lines
+            read as one wrapped line until you look twice, and looking twice is what a menu
+            you open mid-task cannot ask for. The box does it with shape and not brightness —
+            a darker inset than the menu it sits on, which is the same move the conversation
+            surface makes with code blocks.
           */}
-          {commands.map((c, i) => (
-            <div key={`${i}-${c}`} className="flex items-center">
-              <button
-                type="button"
-                role="menuitem"
-                data-testid={`run-command-${i}`}
-                title={`${c} — runs in this project's Terminal tab`}
-                onClick={() => {
-                  onOpenChange(false)
-                  void run(sessionId, c)
-                }}
-                className="readout min-w-0 flex-1 truncate px-2.5 py-1 text-left text-[12px] text-ash transition-colors hover:bg-graphite/25 hover:text-chalk"
-              >
-                {c}
-              </button>
-              {/*
-                Removing is its own target, kept apart from the one that runs. Hitting Run
-                when you meant Remove starts something; the reverse only loses a line you
-                can type again — so the risk is all on one side, and that side gets the gap.
-                No confirmation for the same reason: this app saves those for the
-                irreversible, and retyping a command is not that.
-              */}
-              <button
-                type="button"
-                data-testid={`run-delete-${i}`}
-                aria-label={`Remove ${c}`}
-                title={`Remove ${c} from this list`}
-                onClick={() => void save(projectId, commands.filter((_, j) => j !== i))}
-                className="ml-1 shrink-0 px-2 py-1 text-slate transition-colors hover:text-chalk"
-              >
-                <CloseIcon size={11} />
-              </button>
+          {commands.length > 0 && (
+            <div className="flex flex-col gap-1 p-1.5">
+              {commands.map((c, i) => (
+                <div
+                  key={`${i}-${c}`}
+                  className="flex items-center rounded border border-edge bg-void transition-colors hover:border-graphite"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid={`run-command-${i}`}
+                    title={`${c} — runs in this project's Terminal tab`}
+                    onClick={() => {
+                      onOpenChange(false)
+                      void run(sessionId, c)
+                    }}
+                    className="readout min-w-0 flex-1 truncate rounded-l px-2 py-1 text-left text-[12px] text-ash transition-colors hover:bg-graphite/25 hover:text-chalk"
+                  >
+                    {c}
+                  </button>
+                  {/*
+                    Removing is its own target, kept apart from the one that runs. Hitting Run
+                    when you meant Remove starts something; the reverse only loses a line you
+                    can type again — so the risk is all on one side, and that side gets the gap.
+                    No confirmation for the same reason: this app saves those for the
+                    irreversible, and retyping a command is not that.
+                  */}
+                  <button
+                    type="button"
+                    data-testid={`run-delete-${i}`}
+                    aria-label={`Remove ${c}`}
+                    title={`Remove ${c} from this list`}
+                    onClick={() => void save(projectId, commands.filter((_, j) => j !== i))}
+                    className="shrink-0 rounded-r px-2 py-1 text-slate transition-colors hover:text-chalk"
+                  >
+                    <CloseIcon size={11} />
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
 
           <form
             className="flex items-center gap-1.5 border-t border-edge px-2.5 py-1.5 first:border-t-0"

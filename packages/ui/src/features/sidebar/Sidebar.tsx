@@ -177,10 +177,13 @@ export function Sidebar() {
  * 이미 누른 뒤라 늦는다 — 막으려는 피해가 "모른 채 누르는 것"이기 때문이다.
  *
  * 팔레트 규칙(styles/index.css)을 그대로 따른다: **긴급도는 밝기로, 종류는 형태로.**
- *   - 글자는 slate(배경 정보 자리)다. 밝히면 그리드 버튼보다 급해 보이는 거짓말이 된다 —
- *     '실험 중'은 급한 것이 아니라 **알고 눌러야 하는 것**이다.
- *   - 테두리는 점선이다. 밝기를 한 방울도 쓰지 않고 "아직 굳지 않았다"를 말한다.
- *     글자만으로는 사이드바를 좁혔을 때 잘려 사라지지만, 형태는 남는다.
+ * 글자는 slate(배경 정보 자리)다. 밝히면 그리드 버튼보다 급해 보이는 거짓말이 된다 —
+ * '실험 중'은 급한 것이 아니라 **알고 눌러야 하는 것**이다.
+ *
+ * 테두리는 한때 점선이었다. 근거는 "사이드바를 좁히면 글자는 잘려 사라지고 형태만
+ * 남는다"였는데, **재보니 사실이 아니었다.** 'Experimental' 배지는 `shrink-0`이라
+ * 가장 좁은 폭(180px, 버튼 163px)에서도 63px 그대로 서 있고, 대신 잘리는 것은 이름
+ * 쪽이다. 지키던 것이 없었으니 점선도 남을 이유가 없다.
  */
 function OrchestratorButton() {
   const view = useStore((s) => s.view)
@@ -190,7 +193,7 @@ function OrchestratorButton() {
   return (
     <div className="px-2 pt-2">
       <button
-        className={`flex w-full items-center gap-2 rounded-lg border border-dashed px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
           active
             ? 'border-slate/50 bg-graphite text-chalk'
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
@@ -249,8 +252,9 @@ function OrchestratorIcon({ size = 13 }: { size?: number }) {
  * say the same thing twice, and it would cost panel height, which is the one thing the grid
  * cannot spare.
  *
- * Same treatment as #1, for the same palette reason (urgency is brightness, kind is shape):
- * slate text, dashed border, no colour and not one drop of extra brightness.
+ * Same treatment as #1, for the same palette reason (urgency is brightness): slate text, no
+ * colour and not one drop of extra brightness. The dashed border both buttons used to carry
+ * is gone — see OrchestratorButton above for what measuring it turned up.
  */
 function GridButton() {
   const view = useStore((s) => s.view)
@@ -263,7 +267,7 @@ function GridButton() {
   return (
     <div className="px-2 pb-1 pt-1.5">
       <button
-        className={`flex w-full items-center gap-2 rounded-lg border border-dashed px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
           active
             ? 'border-slate/50 bg-graphite text-chalk'
             : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'

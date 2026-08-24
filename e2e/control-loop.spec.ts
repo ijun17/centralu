@@ -3634,7 +3634,7 @@ test('오케스트레이터는 그리드 위에 있고 눌러서 연다', async 
  * 화면 안에 두면 이미 늦는다. 그리고 팔레트 규칙을 어기면 안 된다:
  * 밝히면 그리드보다 급해 보이는 거짓말이 되고, 유채색은 애초에 금지다.
  */
-test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말한다 — 밝히지 않고 형태로', async ({ page }) => {
+test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말한다 — 밝기를 쓰지 않고', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const mark = page.getByTestId('orchestrator-experimental')
@@ -3656,16 +3656,15 @@ test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말�
   const labelColor = rgb(await style('orchestrator-button', 'color'))
   expect(markColor[0]!).toBeLessThan(labelColor[0]!)
 
-  // 종류는 형태로 — 점선 테두리. 사이드바를 좁혀 글자가 잘려도 이건 남는다
-  expect(await style('orchestrator-button', 'border-top-style')).toBe('dashed')
   /*
-   * The control used to be `grid-button`. The grid is experimental too now (issue #25), so
-   * that pairing would have compared dashed against dashed and proved nothing. What this
-   * line is for has not changed: a dashed border only *means* something while something
-   * next to it is solid, so the control has to be a finished button of the same shape.
-   * `add-project` is that — same rounded-lg bordered button, one lane over, and finished.
+   * 이 자리에는 "테두리가 점선이다"가 있었다. 근거는 사이드바를 좁히면 글자가 잘려
+   * 사라지므로 형태가 남아야 한다는 것이었는데, 재보니 글자는 잘리지 않는다 — 배지가
+   * `shrink-0`이라 가장 좁은 폭에서도 그대로다. 그래서 점선을 걷어냈고, 대신 **정말로
+   * 지켜야 하는 것**을 여기서 붙잡는다: 좁혀도 이 말이 화면에 남아 있는가.
    */
-  expect(await style('add-project', 'border-top-style')).toBe('solid')
+  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSidebarWidth(180))
+  await expect(mark).toBeVisible()
+  await expect(mark).toHaveText('Experimental')
 })
 
 /**
@@ -3697,8 +3696,9 @@ test('the grid says it is experimental, before you press it and while you are in
   const labelColor = rgb(await style('grid-button', 'color'))
   expect(markColor[0]!).toBeLessThan(labelColor[0]!)
 
-  // Kind is shape — dashed. Survives a narrow sidebar, where the word gets truncated away
-  expect(await style('grid-button', 'border-top-style')).toBe('dashed')
+  // Survives the narrowest sidebar — the badge is shrink-0, so the *name* truncates, not this
+  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSidebarWidth(180))
+  await expect(mark).toBeVisible()
 
   // And it is still there once you are inside, because the left lane is never covered
   await page.getByTestId('grid-button').click()
@@ -4842,8 +4842,15 @@ test('설정 > Updates: 지금 확인 · 자동 확인 (#43)', async ({ page }) 
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-updates').click()
 
-  // 지금 도는 것이 무엇인지부터 말한다 — 비교의 한쪽이 안 보이면 나머지도 못 읽는다
-  await expect(page.getByTestId('update-current')).toContainText('0.1.0-beta.2')
+  /*
+   * 지금 도는 것이 무엇인지부터 말한다 — 비교의 한쪽이 안 보이면 나머지도 못 읽는다.
+   *
+   * 버전 문자열을 여기 적어두면 **릴리스마다 이 줄이 빨개진다.** 실제로 그랬다:
+   * 0.1.0-beta.3으로 올린 커밋이 이 줄을 깨뜨렸는데, CI가 릴리스 앞에서 돌리는 것은
+   * `pnpm verify`(단위까지)라 아무도 못 봤다. 확인하려는 것은 버전 번호가 아니라
+   * **번호가 화면에 실려 나온다는 것**이므로, 모양만 본다.
+   */
+  await expect(page.getByTestId('update-current')).toContainText(/Running \d+\.\d+\.\d+/)
   await expect(page.getByTestId('update-auto')).toBeChecked()
 
   await page.evaluate(() => {

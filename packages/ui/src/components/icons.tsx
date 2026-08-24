@@ -92,10 +92,25 @@ export function PencilIcon({ size = 13 }: { size?: number }) {
  * they lost to a drawn chevron. Drawn here, the solid mark is the right one — "run" is a
  * button you press, and an outline reads as a shape being described rather than pressed.
  */
-export function PlayIcon({ size = 13 }: { size?: number }) {
+/**
+ * 실행 — 재생 삼각형.
+ *
+ * 예전 삼각형은 16짜리 화판 안에서 7 × 9.2밖에 안 차지했고, 그걸 13px로 그렸다. 옆에
+ * 나란히 서는 재시작 아이콘은 지름 11의 원을 14px로 그리니, **같은 줄에서 잉크의 폭이
+ * 두 배 가까이 차이 났다.** 크기 숫자만 보면 13과 14로 비슷했는데도 눈에는 작았던 이유가
+ * 그것이다 — 화판이 아니라 잉크가 크기를 정한다.
+ *
+ * 그래서 화판을 더 채우고(8.8 × 10.8) 15px로 그린다. 꼭짓점은 둥글다: 이 파일의 다른
+ * 아이콘은 전부 `strokeLinecap="round"`라, 칼같이 뾰족한 삼각형 하나만 혼자 다른
+ * 물건처럼 보였다.
+ */
+export function PlayIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M5.2 3.4l7 4.6-7 4.6z" fill="currentColor" />
+      <path
+        d="M4.6 3.1a.9.9 0 011.37-.76l7.1 4.9a.9.9 0 010 1.52l-7.1 4.9A.9.9 0 014.6 12.9z"
+        fill="currentColor"
+      />
     </svg>
   )
 }
