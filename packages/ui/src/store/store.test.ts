@@ -484,3 +484,44 @@ describe('업데이트 상태 (#43)', () => {
     expect(useStore.getState().update?.phase).toBe('idle')
   })
 })
+
+/**
+ * 입력창 포커스는 기존 wake()를 다시 부른다 — 그 wake가 지켜야 할 성질들.
+ *
+ * 사이드바에서 고르기(focusSession)와 그리드 칸·재시작 복원의 입력창 포커스가
+ * 같은 문으로 들어온다. 실패는 wakeError에 남을 뿐 토스트로 소리치지 않고
+ * (포커스는 행동이 아니다), 이미 살아 있으면 아무 데도 가지 않는다.
+ */
+describe('wake — 포커스 경로의 조용한 깨움', () => {
+  it('잠든 세션을 깨우고 live로 표시한다', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: false } as never } })
+
+    await useStore.getState().wake(s.id)
+    expect(useStore.getState().sessions[s.id]?.live).toBe(true)
+    expect(useStore.getState().toast).toBeNull()
+  })
+
+  it('깨우기 실패는 토스트가 아니라 wakeError로 남는다', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    platform.unresumable.add(s.id)
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: false } as never } })
+
+    await useStore.getState().wake(s.id)
+    expect(useStore.getState().toast).toBeNull()
+    expect(useStore.getState().sessions[s.id]?.live).toBe(false)
+    expect(useStore.getState().wakeError[s.id]).toBeTruthy()
+  })
+
+  it('이미 살아 있으면 아무 데도 안 간다', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    const spy = vi.spyOn(platform.agents, 'resumeSession')
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: true } as never } })
+
+    await useStore.getState().wake(s.id)
+    expect(spy).not.toHaveBeenCalled()
+  })
+})

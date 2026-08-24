@@ -102,18 +102,40 @@ export function useAutocomplete({
 
   const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
 
-  // 스킬은 세션이 준비된 뒤에야 물어볼 수 있다. 한 번 받아두면 계속 쓴다
+  /*
+   * The command list is asked for twice at most, and the second ask is the honest one.
+   *
+   * A sleeping session can only answer from the disk cache, and a cache answers with what
+   * was true last time — it served a plugin's commands for days after the plugin was
+   * uninstalled. So the cached answer renders immediately (an empty menu while a process
+   * boots is worse), and the moment the session comes alive — which composer focus now
+   * starts (warmSession) — the list is fetched once more from the tool itself.
+   */
+  const live = useStore((s) => !!s.sessions[sessionId]?.live)
+  const fetchedLive = useRef(false)
   useEffect(() => {
-    if (trigger?.kind !== 'command' || commands.ready) return
+    if (trigger?.kind !== 'command') return
+    if (commands.ready && (fetchedLive.current || !live)) return
     let alive = true
+    const askedWhileLive = live
     void platform.agents
       .commands(sessionId)
-      .then((r) => alive && setCommands(r))
+      .then((r) => {
+        if (!alive) return
+        fetchedLive.current = askedWhileLive
+        setCommands(r)
+      })
       .catch(() => {})
     return () => {
       alive = false
     }
-  }, [trigger?.kind, commands.ready, platform, sessionId])
+  }, [trigger?.kind, commands.ready, live, platform, sessionId])
+
+  // 포커스 뷰의 SessionPane은 key 없이 세션만 갈아끼운다 — 이전 세션의 목록을 들고 있으면 안 된다
+  useEffect(() => {
+    fetchedLive.current = false
+    setCommands({ ready: false, commands: [] })
+  }, [sessionId])
 
   // 파일은 칠 때마다 찾는다 (host가 색인을 들고 있어 빠르다)
   useEffect(() => {

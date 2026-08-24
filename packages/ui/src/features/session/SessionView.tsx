@@ -125,6 +125,7 @@ export function SessionPane({
     return (pid && s.projects[pid]?.path) || null
   })
   const send = useStore((s) => s.send)
+  const wake = useStore((s) => s.wake)
   const restart = useStore((s) => s.restartSession)
   const markRead = useStore((s) => s.markRead)
 
@@ -533,6 +534,17 @@ export function SessionPane({
             className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
             rows={1}
             value={text}
+            /*
+              Focusing here wakes the session, exactly as selecting it in the sidebar does
+              (focusSession → wake). This second call site exists because two paths reach a
+              composer without ever selecting: a grid panel's input, and the session a
+              restart restored into focus. Both sat asleep until send — so the seconds a
+              resume takes ran after the send button instead of during the typing, and the
+              slash list could only answer from the disk cache (which kept serving an
+              uninstalled plugin's commands). wake() dedups and stays quiet, so a second
+              call on an already-live session costs nothing.
+            */
+            onFocus={() => void wake(sessionId)}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={() => setComposing(false)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}

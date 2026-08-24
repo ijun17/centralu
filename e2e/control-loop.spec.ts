@@ -4894,3 +4894,32 @@ test('설정 > Updates: 지금 확인 · 자동 확인 (#43)', async ({ page }) 
   // 자동 확인이 꺼진 채로 온 자동 호출은 아무 데도 안 갔다 — 알던 답이 그대로 남는다
   expect(asked).toBe('9.9.9')
 })
+
+/**
+ * 입력창 포커스가 잠든 세션을 깨운다.
+ *
+ * 사이드바에서 고르면 이미 깨어난다 (focusSession → wake). 그런데 고르지 **않고**
+ * 입력창에 닿는 길이 둘 있다 — 그리드 칸, 그리고 재시작이 복원해 준 포커스 세션.
+ * 둘 다 보내기 전까지 잠들어 있어서, 재개의 몇 초가 보내기 버튼 뒤에서 흘렀고
+ * 슬래시 목록은 디스크 캐시(지워진 플러그인의 명령을 며칠씩 보여주던 그것)로만 답했다.
+ */
+test('입력창을 포커스하면 잠든 세션이 깨어난다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // 잠든 상태를 만든다 — 앱 재시작이 복원한 포커스 세션이 정확히 이 모양이다
+  await page.evaluate((sid: string) => {
+    const st = (window as any).__store
+    const m = (window as any).__mock
+    ;[...m.sessions.values()].find((x: any) => x.id === sid)!.live = false
+    st.setState({ sessions: { ...st.getState().sessions, [sid]: { ...st.getState().sessions[sid], live: false } } })
+  }, id)
+
+  await page.getByTestId('prompt-input').focus()
+  await expect
+    .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid].live, id))
+    .toBe(true)
+  // 조용히 — 깨어났다는 토스트도, 실패 토스트도 없다
+  await expect(page.getByTestId('toast')).toHaveCount(0)
+})
