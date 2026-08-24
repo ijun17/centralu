@@ -142,7 +142,6 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const input = num(usage.inputTokens) ?? 0
       const output = num(usage.outputTokens) ?? 0
       const cached = num(usage.cachedInputTokens) ?? 0
-      const total = num(usage.totalTokens) ?? input + output
       /*
        * The field is `modelContextWindow`, on the tokenUsage object — see
        * generated/v2/ThreadTokenUsage.ts. We read `contextWindow` for a long time, found
