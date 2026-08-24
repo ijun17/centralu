@@ -799,14 +799,34 @@ export class MockPlatform implements Platform {
   /** 소리·독으로 부른 기록 — 배너가 죽어 있어도 이쪽은 울려야 한다 */
   alerts: { kind: AlertKind; sound: boolean }[] = []
 
-  /** 테스트가 들여다볼 수 있게 공개 */
+  /** Public so tests can look inside */
   workspaceSnapshot: WorkspaceSnapshot | null = null
 
+  /**
+   * The snapshot also survives a reload through localStorage when the page has one
+   * (issue #20). The real host keeps it on disk, so "the arrangement survives a
+   * relaunch" is only testable against this mock if the mock's snapshot outlives the
+   * page too. Unit tests run in node, where touching `localStorage` throws — the
+   * try/catch keeps the in-memory field serving them alone, exactly as before.
+   */
   readonly workspace = {
     save: async (s: WorkspaceSnapshot) => {
       this.workspaceSnapshot = s
+      try {
+        localStorage.setItem('cc-mock-workspace', JSON.stringify(s))
+      } catch {
+        /* node, or storage denied — the in-memory copy still works */
+      }
     },
-    load: async () => this.workspaceSnapshot,
+    load: async (): Promise<WorkspaceSnapshot | null> => {
+      if (this.workspaceSnapshot) return this.workspaceSnapshot
+      try {
+        const raw = localStorage.getItem('cc-mock-workspace')
+        return raw ? (JSON.parse(raw) as WorkspaceSnapshot) : null
+      } catch {
+        return null
+      }
+    },
   }
 
   /**

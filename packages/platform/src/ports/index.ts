@@ -299,8 +299,15 @@ export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
   /** 증거 패널(깃·파일)이 열려 있었는가 */
   panelOpen?: boolean
-  /** 증거 패널이 보고 있던 것 */
+  /** What the evidence panel was showing — pre-#20 single-tab field, kept for old snapshots/builds */
   panelTab?: string
+  /**
+   * The panel's tab arrangement (#20): vertically stacked groups, each an ordered tab
+   * list plus its active tab. One arrangement for the whole app — the panel is a way
+   * of looking, not project state. Loosely typed here on purpose: a snapshot is a file
+   * on disk, and the UI sanitizes whatever comes back (store/panelLayout.ts).
+   */
+  panelLayout?: { tabs: string[]; active: string }[]
   /** 증거 패널 폭(px) */
   panelWidth?: number
   /** 세션 목록 폭(px) */

@@ -7,6 +7,14 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { useStore, type PanelTab } from '../../store/store.js'
+import {
+  PANEL_TABS,
+  PANEL_TAB_MIME,
+  moveTab,
+  moveTabToGroupEnd,
+  splitTab,
+  type PanelGroup,
+} from '../../store/panelLayout.js'
 import { FileTree } from '../files/FileTree.jsx'
 import { TerminalPane } from './Terminal.jsx'
 import { COMMIT_LIMIT, commitAgo, hasMultipleAuthors } from './commits.js'
@@ -42,6 +50,32 @@ export function EvidencePanel() {
   const width = useStore((s) => s.panelWidth)
   const setPanelWidth = useStore((s) => s.setPanelWidth)
   const [resizing, setResizing] = useState(false)
+  const isRepo = !!project?.git
+
+  /*
+   * ⌘⇧1–4 — switch tab. Settings advertises this under Shortcuts, so it has to keep
+   * working when the tabs are rearranged (#20). **The digit follows the tab's identity**
+   * (1 git · 2 history · 3 files · 4 terminal — PANEL_TABS order), not its seat in the
+   * strip: the shortcut list is static text, and static text can only tell the truth
+   * about a mapping that a reorder does not move. Position digits would also silently
+   * retarget muscle memory every time a tab is dragged.
+   */
+  useEffect(() => {
+    if (!projectId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return
+      // e.code, not e.key — Shift turns the key value into '!' '@' … (same as App.tsx)
+      const digit = /^Digit([1-4])$/.exec(e.code)?.[1]
+      if (!digit) return
+      const tab = PANEL_TABS[Number(digit) - 1]!
+      // Without a repo, git/history stay unreachable by key just as their buttons are disabled
+      if ((tab === 'git' || tab === 'history') && !isRepo) return
+      e.preventDefault()
+      useStore.getState().setPanelTab(tab)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [projectId, isRepo])
 
   if (!projectId || !project) return null
 
@@ -73,8 +107,8 @@ export function EvidencePanel() {
             onDraggingChange={setResizing}
             testId="evidence-resize"
           />
-          <PanelHeader projectName={project.name} branch={project.git?.branch ?? null} isRepo={!!project.git} />
-          <PanelBody projectId={projectId} project={project} />
+          <PanelHeader projectName={project.name} branch={project.git?.branch ?? null} />
+          <PanelGroups projectId={projectId} project={project} isRepo={isRepo} />
         </>
       ) : (
         // 닫혀 있어도 흔적은 남긴다 — 사라진 것과 접힌 것은 다르다
@@ -87,100 +121,281 @@ export function EvidencePanel() {
 /** 접힌 띠의 폭. CollapsedRail이 그리는 폭과 같아야 전환이 이어진다 */
 const RAIL_W = 32
 
-function PanelHeader({
-  projectName,
-  branch,
-  isRepo,
-}: {
-  projectName: string
-  branch: string | null
-  isRepo: boolean
-}) {
-  const tab = useStore((s) => s.panelTab)
-  const setPanelTab = useStore((s) => s.setPanelTab)
+function PanelHeader({ projectName, branch }: { projectName: string; branch: string | null }) {
   const togglePanel = useStore((s) => s.togglePanel)
   const sc = useShortcut()
   const openBranches = useStore((s) => s.openBranches)
 
   return (
-    <>
-      <DragRegion className="flex items-center gap-2 border-b border-edge px-3 py-2">
-        <span className="readout truncate text-[11px] text-ash" data-testid="evidence-project">
-          {projectName}
-        </span>
-        {branch && (
-          <button
-            className="readout truncate text-[10px] text-slate transition-colors hover:text-chalk"
-            onClick={openBranches}
-            data-testid="evidence-branch"
-            title="Switch branch"
-          >
-            {branch}
-          </button>
-        )}
-        <span className="ml-auto shrink-0">
-        <IconButton
-          label={`Collapse panel (${sc('mod', 'B')})`}
-          onClick={() => togglePanel(false)}
-          testId="evidence-close"
-          align="right"
+    <DragRegion className="flex items-center gap-2 border-b border-edge px-3 py-2">
+      <span className="readout truncate text-[11px] text-ash" data-testid="evidence-project">
+        {projectName}
+      </span>
+      {branch && (
+        <button
+          className="readout truncate text-[10px] text-slate transition-colors hover:text-chalk"
+          onClick={openBranches}
+          data-testid="evidence-branch"
+          title="Switch branch"
         >
-          {/* 접기도 '펼침의 반대'라 같은 표시를 쓴다 — 뜻이 같으면 모양도 같아야 한다 */}
-          <ChevronIcon open={false} />
-        </IconButton>
-        </span>
-      </DragRegion>
+          {branch}
+        </button>
+      )}
+      <span className="ml-auto shrink-0">
+      <IconButton
+        label={`Collapse panel (${sc('mod', 'B')})`}
+        onClick={() => togglePanel(false)}
+        testId="evidence-close"
+        align="right"
+      >
+        {/* Collapsing is 'the opposite of expanding', so it wears the same mark — same meaning, same shape */}
+        <ChevronIcon open={false} />
+      </IconButton>
+      </span>
+    </DragRegion>
+  )
+}
 
-      <nav className="flex items-center gap-0.5 border-b border-edge px-2 py-1" data-testid="evidence-tabs">
-        {/*
-          History sits next to Git rather than inside it (#21). Both are repo questions, so
-          both go dark without a repo — but they are different questions: Git asks "what is
-          uncommitted right now", History asks "how did we get here". The Git tab keeps its
-          short strip of commits as context for staging; this is the same log as a place you
-          go to read it, with the whole column instead of ~7 rows.
-        */}
-        {(
-          [
-            ['git', 'Git'],
-            ['history', 'History'],
-            ['files', 'Files'],
-            ['terminal', 'Terminal'],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => setPanelTab(id as PanelTab)}
-            data-testid={`evidence-tab-${id}`}
-            disabled={(id === 'git' || id === 'history') && !isRepo}
-            className={`rounded px-2 py-0.5 text-[12px] transition-colors disabled:opacity-40 ${
-              tab === id ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+const TAB_LABELS: Record<PanelTab, string> = {
+  git: 'Git',
+  history: 'History',
+  files: 'Files',
+  terminal: 'Terminal',
+}
+
+/**
+ * The tab groups, stacked vertically (#20). One group is the everyday panel. Dragging
+ * a tab to the bottom half of the body splits a second group off; dragging the bottom
+ * group's last tab back to a strip dissolves it. Every arrangement change goes through
+ * the pure functions in store/panelLayout.ts and lands in the store, which persists it
+ * globally — the panel is a way of looking, so there is one arrangement for the whole
+ * app and it survives a relaunch (the #20 decision).
+ */
+function PanelGroups({
+  projectId,
+  project,
+  isRepo,
+}: {
+  projectId: string
+  project: { git?: { denied?: boolean } | null }
+  isRepo: boolean
+}) {
+  const groups = useStore((s) => s.panelLayout)
+  const setPanelLayout = useStore((s) => s.setPanelLayout)
+
+  return (
+    <>
+      {groups.map((g, gi) => (
+        <TabGroup
+          key={gi}
+          gi={gi}
+          group={g}
+          groups={groups}
+          isRepo={isRepo}
+          onLayout={setPanelLayout}
+          projectId={projectId}
+          project={project}
+        />
+      ))}
     </>
   )
 }
 
-function PanelBody({
+/** One group: its strip of tabs, then whichever tab is active in it */
+function TabGroup({
+  gi,
+  group,
+  groups,
+  isRepo,
+  onLayout,
   projectId,
   project,
 }: {
+  gi: number
+  group: PanelGroup
+  groups: PanelGroup[]
+  isRepo: boolean
+  onLayout: (groups: PanelGroup[]) => void
   projectId: string
   project: { git?: { denied?: boolean } | null }
 }) {
-  const tab = useStore((s) => s.panelTab)
+  const setPanelTab = useStore((s) => s.setPanelTab)
+  const [splitHint, setSplitHint] = useState(false)
+
+  return (
+    <>
+      <nav
+        className={`flex items-center gap-0.5 border-b border-edge px-2 py-1 ${gi > 0 ? 'border-t' : ''}`}
+        data-testid={gi === 0 ? 'evidence-tabs' : `evidence-tabs-${gi}`}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(e) => {
+          // Dropped on the strip but not on a tab: the tab joins this group's end.
+          // This is also the unsplit gesture — the bottom group's last tab dragged up
+          // here empties that group, and an empty group stops existing.
+          const dragged = e.dataTransfer.getData(PANEL_TAB_MIME) as PanelTab
+          if (!dragged) return
+          e.preventDefault()
+          onLayout(moveTabToGroupEnd(groups, dragged, gi))
+        }}
+      >
+        {group.tabs.map((id) => (
+          <TabButton
+            key={id}
+            id={id}
+            active={group.active === id}
+            // Repo questions have no answer without a repo (#21) — and a disabled button
+            // also fires no drag events, so these tabs are arranged from repo projects
+            disabled={(id === 'git' || id === 'history') && !isRepo}
+            groups={groups}
+            onLayout={onLayout}
+            onPick={setPanelTab}
+          />
+        ))}
+      </nav>
+      <div
+        className="relative flex min-h-0 flex-1 flex-col"
+        data-testid={`evidence-body-${gi}`}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          const r = e.currentTarget.getBoundingClientRect()
+          // One group: only the bottom half is a target (that is what "split" means here).
+          // Two groups: this whole body adopts the dropped tab — the halves are taken.
+          setSplitHint(groups.length > 1 || e.clientY > r.top + r.height / 2)
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setSplitHint(false)
+        }}
+        onDrop={(e) => {
+          const dragged = e.dataTransfer.getData(PANEL_TAB_MIME) as PanelTab
+          setSplitHint(false)
+          if (!dragged) return
+          e.preventDefault()
+          const r = e.currentTarget.getBoundingClientRect()
+          if (groups.length === 1) {
+            if (e.clientY > r.top + r.height / 2) onLayout(splitTab(groups, dragged))
+          } else {
+            onLayout(moveTabToGroupEnd(groups, dragged, gi))
+          }
+        }}
+      >
+        <TabBody tab={group.active} projectId={projectId} project={project} />
+        {splitHint && (
+          <div
+            /*
+              The boundary is the meaning ("this half becomes the split"), so it wears
+              the same ash landing line as every other drop indicator — border-edge was
+              measured too faint against the tinted half to read as a boundary at all.
+            */
+            className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-graphite/30 ${
+              groups.length === 1 ? 'top-1/2 shadow-[inset_0_2px_0_0_var(--color-ash)]' : 'top-0'
+            }`}
+            data-testid="evidence-split-hint"
+          />
+        )}
+      </div>
+    </>
+  )
+}
+
+/**
+ * The pointer decides left/right the way the sidebar decides top/bottom (reorder.ts
+ * `dropsBefore`): the boundary at the middle gives each outcome half the button, so
+ * the hand can predict which side it gets.
+ */
+const dropsLeft = (rect: { left: number; width: number }, clientX: number): boolean =>
+  clientX < rect.left + rect.width / 2
+
+function TabButton({
+  id,
+  active,
+  disabled,
+  groups,
+  onLayout,
+  onPick,
+}: {
+  id: PanelTab
+  active: boolean
+  disabled: boolean
+  groups: PanelGroup[]
+  onLayout: (groups: PanelGroup[]) => void
+  onPick: (tab: PanelTab) => void
+}) {
+  // Each button keeps its own drop edge so the line is drawn on that button only —
+  // the same call as the sidebar rows, for the same reason.
+  const [edge, setEdge] = useState<'left' | 'right' | null>(null)
+
+  return (
+    <button
+      onClick={() => onPick(id)}
+      data-testid={`evidence-tab-${id}`}
+      disabled={disabled}
+      draggable={!disabled}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(PANEL_TAB_MIME, id)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+        setEdge(dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX) ? 'left' : 'right')
+      }}
+      onDragLeave={() => setEdge(null)}
+      onDrop={(e) => {
+        const dragged = e.dataTransfer.getData(PANEL_TAB_MIME) as PanelTab
+        setEdge(null)
+        if (!dragged) return
+        e.preventDefault()
+        e.stopPropagation()
+        onLayout(moveTab(groups, dragged, id, dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX)))
+      }}
+      className={`rounded px-2 py-0.5 text-[12px] transition-colors disabled:opacity-40 ${
+        active ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
+      } ${dropLine(edge)}`}
+    >
+      {TAB_LABELS[id]}
+    </button>
+  )
+}
+
+/**
+ * The drop position, as an inset shadow on the target's edge — a border would grow the
+ * button 2px and nudge the whole strip while dragging (the sidebar learned this the
+ * hard way; see its dropLine).
+ */
+function dropLine(edge: 'left' | 'right' | null): string {
+  if (!edge) return ''
+  return edge === 'left'
+    ? 'shadow-[inset_2px_0_0_0_var(--color-ash)]'
+    : 'shadow-[inset_-2px_0_0_0_var(--color-ash)]'
+}
+
+/** What one tab shows. The active tab of every group renders through here. */
+function TabBody({
+  tab,
+  projectId,
+  project,
+}: {
+  tab: PanelTab
+  projectId: string
+  project: { git?: { denied?: boolean } | null }
+}) {
   const isRepo = !!project.git
 
-  // 터미널은 프로젝트(디렉토리)의 것이라 깃 저장소인지와 무관하다
+  // The terminal belongs to the project (a directory), so being a git repo is irrelevant
   if (tab === 'terminal') return <TerminalPane projectId={projectId} />
 
   /*
-    깃과 기록은 둘 다 저장소에 묻는 질문이라, 저장소가 아니면 둘 다 답이 없다.
-    탭은 이미 비활성이지만 여기로 닿는 길이 남아 있다 — 저장된 스냅샷으로 되살아나거나,
-    그 탭을 보는 중에 저장소가 아닌 프로젝트로 옮겨 앉거나.
+    Git and history both ask questions of the repository, so neither has an answer
+    without one. The tabs are disabled then, but paths still lead here — a saved
+    snapshot can restore them, or a non-repo project can move in under a watching tab.
   */
   if (tab === 'files' || !isRepo) {
     return (
@@ -197,8 +412,8 @@ function PanelBody({
 
   if (tab === 'history') return <CommitHistory projectId={projectId} />
 
-  // 깃 탭: 위는 지금 무엇이 바뀌었나, 아래는 어떻게 여기까지 왔나.
-  // 둘 다 파일 목록이 아니라 서로 다른 질문이라서 나란히 둔다.
+  // Git tab: above, what changed right now; below, how we got here.
+  // Two different questions, not two file lists — that is why they sit together.
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <GitChanges projectId={projectId} denied={project.git?.denied} />

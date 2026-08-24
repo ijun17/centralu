@@ -578,6 +578,156 @@ async function cancelDrag(page: Page, from: string) {
 const storedPanels = (page: Page): Promise<string[]> =>
   page.evaluate(() => (window as never as { __store: any }).__store.getState().gridPanels)
 
+/*
+ * ── Panel tabs: reorder, split, and one global arrangement (#20) ─────
+ *
+ * The tabs can be dragged into a new order, and dragged into the bottom half of the
+ * body to split the panel into two stacked groups. The arrangement is global — one for
+ * the whole app, surviving a relaunch — because the panel is a way of looking, not
+ * project state. Drags are dispatched by hand with one shared DataTransfer, the same
+ * technique as the grid tests above (Playwright's dragAndDrop is atomic).
+ */
+
+/** The strip order as the user sees it — every tab button, in DOM order */
+async function tabOrder(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-testid^="evidence-tab-"]')].map(
+      (el) => el.dataset.testid!.slice('evidence-tab-'.length),
+    ),
+  )
+}
+
+async function startTabDrag(page: Page, tab: string) {
+  await page.evaluate((t: string) => {
+    const w = window as never as { __dt?: DataTransfer }
+    w.__dt = new DataTransfer()
+    document
+      .querySelector(`[data-testid="evidence-tab-${t}"]`)!
+      .dispatchEvent(new DragEvent('dragstart', { dataTransfer: w.__dt, bubbles: true }))
+  }, tab)
+}
+
+/** dragover then drop on the left (20%) or right (80%) half of another tab */
+async function dropOnTab(page: Page, target: string, side: 'left' | 'right') {
+  await page.evaluate(
+    ({ to, where }: { to: string; where: string }) => {
+      const dt = (window as never as { __dt?: DataTransfer }).__dt
+      const el = document.querySelector(`[data-testid="evidence-tab-${to}"]`)!
+      const r = el.getBoundingClientRect()
+      const opts = {
+        dataTransfer: dt,
+        bubbles: true,
+        cancelable: true,
+        clientX: where === 'left' ? r.left + r.width * 0.2 : r.left + r.width * 0.8,
+        clientY: r.top + r.height / 2,
+      }
+      el.dispatchEvent(new DragEvent('dragover', opts))
+      el.dispatchEvent(new DragEvent('drop', opts))
+    },
+    { to: target, where: side },
+  )
+}
+
+/** dragover then drop on the bottom half of the top group's body — the split gesture */
+async function dropOnBodyBottom(page: Page) {
+  await page.evaluate(() => {
+    const dt = (window as never as { __dt?: DataTransfer }).__dt
+    const el = document.querySelector('[data-testid="evidence-body-0"]')!
+    const r = el.getBoundingClientRect()
+    const opts = {
+      dataTransfer: dt,
+      bubbles: true,
+      cancelable: true,
+      clientX: r.left + r.width / 2,
+      clientY: r.top + r.height * 0.8,
+    }
+    el.dispatchEvent(new DragEvent('dragover', opts))
+    el.dispatchEvent(new DragEvent('drop', opts))
+  })
+}
+
+test('tab order is dragged, and survives a relaunch — one arrangement for the whole app (#20)', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+  expect(await tabOrder(page)).toEqual(['git', 'history', 'files', 'terminal'])
+
+  await startTabDrag(page, 'terminal')
+  await dropOnTab(page, 'git', 'left')
+  await expect.poll(() => tabOrder(page)).toEqual(['terminal', 'git', 'history', 'files'])
+
+  /*
+   * A relaunch: fresh page, fresh store, fresh mock — only localStorage survives, which
+   * is the mock's stand-in for the host's on-disk snapshot. The project has to be added
+   * again (the mock's projects are in-memory), and the arrangement must already be back.
+   */
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('first-run')).toBeVisible()
+  await page.evaluate((p: string) => {
+    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
+  }, '/tmp/alpha')
+  await page.getByTestId('first-run-pick').click()
+  await newSession(page, 'alpha', 'claude', '다시')
+  await expect.poll(() => tabOrder(page)).toEqual(['terminal', 'git', 'history', 'files'])
+})
+
+test('dragging a tab to the bottom half splits the panel — two tabs visible at once (#20)', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await startTabDrag(page, 'files')
+  await dropOnBodyBottom(page)
+
+  // Git stays on top, the file tree opens below it — both on screen at the same time
+  await expect(page.getByTestId('evidence-git')).toBeVisible()
+  await expect(page.getByTestId('file-tree')).toBeVisible()
+  // The bottom group has its own strip, holding the tab that moved down
+  await expect(page.getByTestId('evidence-tabs-1')).toBeVisible()
+  await expect(page.getByTestId('evidence-tabs-1').getByTestId('evidence-tab-files')).toBeVisible()
+  // The top strip gave that tab up — a tab lives in exactly one group
+  expect(await tabOrder(page)).toEqual(['git', 'history', 'terminal', 'files'])
+})
+
+test('dragging the bottom group‘s last tab back to the top strip closes the split (#20)', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+  await startTabDrag(page, 'files')
+  await dropOnBodyBottom(page)
+  await expect(page.getByTestId('evidence-tabs-1')).toBeVisible()
+
+  await startTabDrag(page, 'files')
+  await dropOnTab(page, 'terminal', 'right')
+
+  await expect(page.getByTestId('evidence-tabs-1')).toBeHidden()
+  await expect.poll(() => tabOrder(page)).toEqual(['git', 'history', 'terminal', 'files'])
+  // One body again, showing the tab that just landed (dropping it is picking it)
+  await expect(page.getByTestId('file-tree')).toBeVisible()
+  await expect(page.getByTestId('evidence-git')).toBeHidden()
+})
+
+test('⌘⇧1–4 keeps working after a reorder — the digit follows the tab, not the seat (#20)', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await startTabDrag(page, 'terminal')
+  await dropOnTab(page, 'git', 'left')
+  await expect.poll(() => tabOrder(page)).toEqual(['terminal', 'git', 'history', 'files'])
+
+  /*
+   * Identity mapping (1 git · 2 history · 3 files · 4 terminal): the Settings list is
+   * static text, so only a mapping a reorder does not move can stay truthful — and
+   * muscle memory should not be silently retargeted by a drag.
+   */
+  await page.keyboard.press('ControlOrMeta+Shift+Digit3')
+  await expect(page.getByTestId('file-tree')).toBeVisible()
+
+  // 4 is still the terminal even though the terminal now sits first in the strip
+  await page.keyboard.press('ControlOrMeta+Shift+Digit4')
+  await expect(page.getByTestId('evidence-terminal')).toBeVisible()
+
+  await page.keyboard.press('ControlOrMeta+Shift+Digit1')
+  await expect(page.getByTestId('evidence-git')).toBeVisible()
+})
+
 test('끄는 동안 격자가 미리 재배열된다 — 칸 크기는 그대로, 저장은 아직', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '첫째')

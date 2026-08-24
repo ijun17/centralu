@@ -18,6 +18,7 @@ import {
 } from '@cc/core'
 import type { ConnectionState, Platform } from '@cc/platform/ports'
 import { isOnScreen } from '../app/onscreen.js'
+import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 
 /**
  * 스토어는 배선만 한다 — 상태 변경 로직은 전부 core (docs/state-management.md §2).
@@ -44,17 +45,12 @@ export type Overlay =
 const nextPick = (o: Overlay): number => (o?.kind === 'git' ? o.pick : 0) + 1
 
 /**
- * 증거 패널이 보여주는 것.
- *
- * `history`는 깃 탭 안의 기록 띠를 **대신하지 않는다** (#21). 그 띠는 스테이징·커밋을
- * 하는 동안 곁에 두는 맥락이라 `treeHeight`(기본 200px ≈ 일곱 줄)에 갇혀 있다 —
- * 변경 목록이 나머지 높이를 가져가야 하기 때문이다. 기록을 **읽으러** 오는 것은 다른
- * 용무이고, 그때는 세로 한 칸이 통째로 필요하다. 같은 데이터, 다른 일.
- *
- * 깃과 나란한 평평한 탭으로 둔다. 깃 탭 안에 또 탭을 넣으면 340px 한 칸에 탭 층이 둘이
- * 되고, #20이 탭 배치를 다시 짤 때 옮길 것이 상태까지 딸린 덩어리가 된다.
+ * The tab set and arrangement live in panelLayout.ts (#20) — the single `panelTab`
+ * value became a group structure when the panel learned to split, and the reasoning
+ * for what the tabs *are* (e.g. why `history` sits beside `git` rather than inside it,
+ * #21) moved with the type. Re-exported so screens keep one import site for the store.
  */
-export type PanelTab = 'files' | 'git' | 'history' | 'terminal'
+export type { PanelGroup, PanelTab } from './panelLayout.js'
 
 /**
  * 화면 밖에서 일어난 일 하나.
@@ -256,8 +252,14 @@ export type AppState = {
    * "그거 어디서 봐?"가 나온다 (도그푸딩에서 실제로 나왔다).
    */
   panelOpen: boolean
-  /** 증거 패널이 파일을 보여주나 깃을 보여주나 */
-  panelTab: PanelTab
+  /**
+   * The tab arrangement (#20): groups stacked vertically, each an ordered tab list
+   * plus its active tab. One group is the everyday panel; two is the split. Global —
+   * one arrangement for the whole app, not per project — and carried in the workspace
+   * snapshot, because the panel's shape is a way of looking, and a way of looking
+   * belongs to the person (the same call as showIgnored, #17).
+   */
+  panelLayout: PanelGroup[]
   /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
   panelWidth: number
   treeHeight: number
@@ -314,8 +316,14 @@ export type AppState = {
   loadOlder(sessionId: string): Promise<void>
   saveWorkspace(): void
   togglePanel(open?: boolean): void
-  /** 탭을 고르면 패널이 닫혀 있어도 함께 열린다 — 고른 것이 안 보이면 안 된다 */
+  /** Picking a tab opens the panel even if it was collapsed — what you picked must be visible */
   setPanelTab(tab: PanelTab): void
+  /**
+   * Replace the tab arrangement (#20). Callers hand in the output of the pure functions
+   * in panelLayout.ts (moveTab / splitTab / …) — the store only wires and persists, per
+   * docs/state-management.md §2.
+   */
+  setPanelLayout(groups: PanelGroup[]): void
   setPanelWidth(px: number): void
   setTreeHeight(px: number): void
   setSidebarWidth(px: number): void
@@ -701,7 +709,7 @@ export const useStore = create<AppState>((set, get) => ({
   wakeError: {},
   wakeLocked: {},
   panelOpen: true,
-  panelTab: 'git',
+  panelLayout: defaultLayout(),
   view: 'focus' as const,
   gridPanels: [] as string[],
   orchestratorId: null as string | null,
@@ -817,21 +825,37 @@ export const useStore = create<AppState>((set, get) => ({
      */
     void get().checkUpdate(false)
 
-    // 보던 자리로 돌아온다 (C-3). 없거나 사라진 세션이면 조용히 무시한다.
+    // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
     try {
       const snap = await platform.workspace.load()
-      if (snap?.focusedSessionId && get().sessions[snap.focusedSessionId]) {
-        get().focusSession(snap.focusedSessionId)
-        // 보던 탭까지 돌아온다 (B-0)
-        // 구버전 스냅샷의 tab은 무시한다 (탭 구조는 3레인으로 대체됐다)
+      if (snap) {
+        if (snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
+          get().focusSession(snap.focusedSessionId)
+        }
+        /*
+         * Layout prefs come back even when the focused session is gone (#20). They used
+         * to sit inside the session check above, so a snapshot whose session had been
+         * deleted threw the whole arrangement away with it — but the panel's shape is a
+         * fact about the person, not about any session. (The legacy `snap.tab` field is
+         * still ignored: that tab structure was replaced by the three lanes.)
+         */
         if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
-        if (
+        /*
+         * The arrangement survives restart, globally (#20 decision). `panelLayout` is
+         * the arrangement; `panelTab` is the pre-#20 single-tab field, kept as the
+         * fallback so a snapshot written before the arrangement existed still restores
+         * the tab that was showing.
+         */
+        const savedLayout = (snap as { panelLayout?: unknown }).panelLayout
+        if (savedLayout != null) {
+          set({ panelLayout: sanitizeLayout(savedLayout) })
+        } else if (
           snap.panelTab === 'files' ||
           snap.panelTab === 'git' ||
           snap.panelTab === 'history' ||
           snap.panelTab === 'terminal'
         ) {
-          set({ panelTab: snap.panelTab })
+          set({ panelLayout: activateTab(defaultLayout(), snap.panelTab) })
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
@@ -869,7 +893,11 @@ export const useStore = create<AppState>((set, get) => ({
       .save({
         focusedSessionId: s.focusedSessionId,
         panelOpen: s.panelOpen,
-        panelTab: s.panelTab,
+        // The single-tab field predates the arrangement (#20). It keeps carrying the
+        // top group's active tab so an older build reading this snapshot still lands
+        // on the tab that was showing.
+        panelTab: s.panelLayout[0]?.active,
+        panelLayout: s.panelLayout,
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
         treeHeight: s.treeHeight,
@@ -1195,8 +1223,13 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
-  setPanelTab(panelTab) {
-    set({ panelTab, panelOpen: true })
+  setPanelTab(tab) {
+    set((s) => ({ panelLayout: activateTab(s.panelLayout, tab), panelOpen: true }))
+    get().saveWorkspace()
+  },
+
+  setPanelLayout(panelLayout) {
+    set({ panelLayout })
     get().saveWorkspace()
   },
 
