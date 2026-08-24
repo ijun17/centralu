@@ -167,7 +167,13 @@ function TopBar() {
       testId="app-header"
     >
       <span
-        className="pointer-events-none text-[12px] font-semibold tracking-[0.16em] text-chalk"
+        /*
+         * 0.16em was wider than anything else on screen. Every other uppercase label in the
+         * app sits at 0.12em, so the title was the one word spelled out letter by letter —
+         * and it is the word people read least, being the name of the app they just opened.
+         * Matching the labels keeps it a title rather than a banner.
+         */
+        className="pointer-events-none text-[12px] font-semibold tracking-[0.12em] text-chalk"
         data-testid="app-title"
       >
         CENTRALU
