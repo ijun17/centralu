@@ -168,12 +168,17 @@ function TopBar() {
     >
       <span
         /*
-         * 0.16em was wider than anything else on screen. Every other uppercase label in the
-         * app sits at 0.12em, so the title was the one word spelled out letter by letter —
-         * and it is the word people read least, being the name of the app they just opened.
-         * Matching the labels keeps it a title rather than a banner.
+         * 0.16em was wider than anything else on screen, and 0.12em — the app's uppercase
+         * label tracking — only made the name look like one more label.
+         *
+         * It isn't one. A label is scanned letter by letter, which is what that tracking is
+         * for; a name is recognised as a single shape and read least often of anything here,
+         * being the app you already opened. So it goes the other way from the labels, to
+         * half of theirs: tight enough to read as one word, still open enough not to be
+         * body text. Rendered at 0.12 / 0.10 / 0.08 / 0.06 / 0.04 / 0.02 / 0 beside the real
+         * ones, this is where CENTRALU stops being spelled out.
          */
-        className="pointer-events-none text-[12px] font-semibold tracking-[0.12em] text-chalk"
+        className="pointer-events-none text-[12px] font-semibold tracking-[0.06em] text-chalk"
         data-testid="app-title"
       >
         CENTRALU
