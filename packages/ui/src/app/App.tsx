@@ -3,6 +3,7 @@ import { nextWaitingSession } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
 import { useShortcut } from './shortcut.js'
+import { letterOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { useStore } from '../store/store.js'
@@ -325,19 +326,25 @@ function GlobalKeys() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       const typing = t.tagName === 'TEXTAREA' || t.tagName === 'INPUT'
+      /*
+        글자도 숫자와 같은 이유로 뜻을 묻는다 (app/keys.ts). 아래 숫자 주석이 말하는
+        "Shift를 누르면 e.key가 기호가 된다"는 글자에도 그대로 일어난다 — 한글 자판에서는
+        조합키 없이도 k가 ㅏ로 온다. 라틴 글자로 온 것은 그대로 믿고, 아닐 때만 자리를 본다.
+      */
+      const letter = letterOf(e)
       // 커맨드 팔레트 ⌘K (FR-17)
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && letter === 'k') {
         e.preventDefault()
         useStore.getState().togglePalette()
         return
       }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
+      if ((e.metaKey || e.ctrlKey) && letter === 'i') {
         e.preventDefault()
         toggleInbox()
         return
       }
       // 다음 대기로 이동: 승인 → 오류 → 응답대기 순 (정렬은 core)
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && letter === 'a') {
         e.preventDefault()
         const st = useStore.getState()
         const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
@@ -346,7 +353,7 @@ function GlobalKeys() {
       }
       // 증거 패널 토글 ⌘B — 탭 전환(⌘⇧1~4)을 대신한다.
       // 깃·파일은 대화를 대신하는 화면이 아니라 옆에 함께 두는 것이다.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+      if ((e.metaKey || e.ctrlKey) && letter === 'b') {
         e.preventDefault()
         useStore.getState().togglePanel()
         return

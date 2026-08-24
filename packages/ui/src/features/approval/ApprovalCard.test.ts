@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { approvalCardCovered, approvalKeyAction } from './ApprovalCard.jsx'
 
-const key = (k: string, mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) => ({
+/**
+ * `code`가 기본값을 갖는 것이 중요하다.
+ *
+ * 예전 이 헬퍼는 `key`만 만들었고, 그래서 `{ key: 'a', altKey: true }`로 ⌥a를 검사했다 —
+ * **맥 자판이 절대 만들지 않는 이벤트다.** ABC 배열에서 ⌥A는 `å`로 오므로, 통과하던 이
+ * 테스트 아래에서 실제 단축키는 죽어 있었다. 만들어낸 이벤트로 검사할 때는 그것이 진짜
+ * 자판이 내는 모양인지부터 확인해야 한다.
+ */
+const key = (
+  k: string,
+  mods: Partial<{ metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; code: string }> = {},
+) => ({
   key: k,
+  code: `Key${k.toUpperCase()}`,
   metaKey: false,
   ctrlKey: false,
   altKey: false,
@@ -19,8 +31,25 @@ describe('approvalKeyAction — 전역 y/n/a가 승인이 되는 조건 (U6)', (
     expect(approvalKeyAction(key('a'), FREE)).toEqual({ decision: 'always', scope: 'session' })
   })
 
-  it('⌥a는 프로젝트 범위 — 이 카드가 광고하는 유일한 조합키다', () => {
-    expect(approvalKeyAction(key('a', { altKey: true }), FREE)).toEqual({ decision: 'always', scope: 'project' })
+  /**
+   * 자판에 물어본 값 그대로다 (UCKeyTranslate): ABC·U.S.에서 ⌥A는 `å`, 한글 2벌식에서
+   * A는 `ㅁ`. 리눅스·윈도우에서는 Alt가 문자를 바꾸지 않아 `a`로 온다 — 셋 다 같은 뜻이다.
+   */
+  it('⌥a는 프로젝트 범위 — 자판이 무슨 글자를 보내든', () => {
+    const project = { decision: 'always', scope: 'project' }
+    expect(approvalKeyAction(key('å', { altKey: true, code: 'KeyA' }), FREE)).toEqual(project) // 맥 ABC
+    expect(approvalKeyAction(key('a', { altKey: true }), FREE)).toEqual(project) // 리눅스·윈도우
+  })
+
+  it('한글 입력 중에도 y/n/a가 통한다 — 한글로 쓰는 사람이 이 앱을 만들었다', () => {
+    expect(approvalKeyAction(key('ㅛ', { code: 'KeyY' }), FREE)).toEqual({ decision: 'allow' })
+    expect(approvalKeyAction(key('ㅜ', { code: 'KeyN' }), FREE)).toEqual({ decision: 'deny' })
+    expect(approvalKeyAction(key('ㅁ', { code: 'KeyA' }), FREE)).toEqual({ decision: 'always', scope: 'session' })
+  })
+
+  /** Dvorak에서 f를 눌렀는데 승인이 되면 안 된다 — 자리가 아니라 글자를 먼저 믿는 이유 */
+  it('라틴 글자로 온 것은 자리를 묻지 않는다 (Dvorak 안전)', () => {
+    expect(approvalKeyAction(key('f', { code: 'KeyY' }), FREE)).toBeNull()
   })
 
   it('⌘·⌃·⇧ 조합은 다른 단축키다 — ⌘A(전체 선택)·⌘⇧A(다음 대기)가 승인으로 새면 안 된다', () => {

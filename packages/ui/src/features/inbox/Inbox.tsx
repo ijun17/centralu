@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { afterHandled } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
+import { letterOf } from '../../app/keys.js'
 import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
 
 /**
@@ -37,15 +38,17 @@ export function Inbox() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown' || e.key === 'j') setCursor((c) => Math.min(c + 1, items.length - 1))
-      else if (e.key === 'ArrowUp' || e.key === 'k') setCursor((c) => Math.max(c - 1, 0))
+      // 글자는 뜻으로 읽는다 — 한글 자판에서 j·k·d는 ㅓ·ㅏ·ㅇ으로 도착한다 (app/keys.ts)
+      const letter = letterOf(e)
+      if (e.key === 'ArrowDown' || letter === 'j') setCursor((c) => Math.min(c + 1, items.length - 1))
+      else if (e.key === 'ArrowUp' || letter === 'k') setCursor((c) => Math.max(c - 1, 0))
       else if (e.key === 'Enter') {
         const item = items[cursor]
         if (item) {
           focusSession(item.id)
           toggle(false)
         }
-      } else if (e.key === 'd') {
+      } else if (letter === 'd') {
         // 아카이브는 인박스를 비우는 1급 수단 (없으면 응답대기가 쌓여 무용지물)
         const item = items[cursor]
         if (item) {

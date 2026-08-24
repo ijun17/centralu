@@ -3,6 +3,7 @@ import type { ApprovalDetail } from '@cc/protocol'
 import { suggestMatcher } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
+import { letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
@@ -151,12 +152,13 @@ export function approvalCardCovered(
  * 입력창에 타이핑 중이거나 카드가 모달·오버레이 뒤에 가려져 있어도 받지 않는다.
  */
 export function approvalKeyAction(
-  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
   ctx: { typing: boolean; covered: boolean },
 ): ApprovalKeyAction | null {
   if (e.metaKey || e.ctrlKey || e.shiftKey) return null
   if (ctx.typing || ctx.covered) return null
-  const k = e.key.toLowerCase()
+  // 글자는 자판이 아니라 **뜻**으로 읽는다 — ⌥가 붙거나 한글 자판이면 `key`는 다른 글자다 (app/keys.ts)
+  const k = letterOf(e)
   if (k === 'y') return { decision: 'allow' }
   if (k === 'n') return { decision: 'deny' }
   if (k === 'a') return { decision: 'always', scope: e.altKey ? 'project' : 'session' }
