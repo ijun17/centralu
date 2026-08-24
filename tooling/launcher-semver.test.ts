@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
-import { isNewer } from '../packaging/npm/centralu/bin/semver.mjs'
+import { copyDiffers, isNewer } from '../packaging/npm/centralu/bin/semver.mjs'
 import { isNewerVersion } from '../packages/protocol/src/semver.js'
 
 /**
@@ -75,5 +75,37 @@ describe('the app-side mirror and the launcher agree', () => {
   it('the app-side copy sees the next prerelease', () => {
     expect(isNewerVersion('0.1.0-beta.2', '0.1.0-beta.1')).toBe(true)
     expect(isNewerVersion('0.1.0-beta.1', '0.1.0-beta.2')).toBe(false)
+  })
+})
+
+/**
+ * Dogfooding, 2026-08-24: `centralu update` on the shipped 0.1.0-beta.1 said "이미
+ * 최신입니다" (that is #42, above). Going around it with `npm i -g centralu` then worked —
+ * the package became 0.1.0-beta.3 — but the copy in /Applications, the one Spotlight
+ * opens, stayed 0.1.0-beta.1. Two versions on one machine, and nothing said so anywhere.
+ *
+ * `npm i -g` touching only the package is the correct behaviour and stays: the whole reason
+ * `centralu install` exists is that this project does not write into someone's
+ * /Applications uninvited. What was missing is the sentence.
+ */
+describe('launcher /Applications copy check', () => {
+  it('says nothing when there is no copy to compare', () => {
+    expect(copyDiffers('0.1.0-beta.3', null)).toBe(false)
+    expect(copyDiffers('0.1.0-beta.3', undefined)).toBe(false)
+    // `defaults` printing nothing is "cannot tell", not "version is empty"
+    expect(copyDiffers('0.1.0-beta.3', '')).toBe(false)
+  })
+
+  it('says nothing when they match', () => {
+    expect(copyDiffers('0.1.0-beta.3', '0.1.0-beta.3')).toBe(false)
+  })
+
+  it('speaks up on the drift that actually happened', () => {
+    expect(copyDiffers('0.1.0-beta.3', '0.1.0-beta.1')).toBe(true)
+  })
+
+  /** Either direction. A copy newer than the package means an update went backwards. */
+  it('speaks up when the copy is ahead too', () => {
+    expect(copyDiffers('0.1.0-beta.1', '0.1.0-beta.3')).toBe(true)
   })
 })

@@ -16,7 +16,7 @@
  * instead of being rediscovered in every function.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { isNewer } from './semver.mjs'
+import { copyDiffers, isNewer } from './semver.mjs'
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -238,6 +238,8 @@ async function update() {
   const latest = res.version
   if (!isNewer(latest, pkg.version)) {
     console.log(`이미 최신입니다 (${pkg.version}).`)
+    // 패키지가 최신이어도 사본은 아닐 수 있다 — `npm i -g`로 올린 사람이 정확히 그 상태다
+    notifyIfCopyStale()
     return
   }
   console.log(`${pkg.version} → ${latest} 로 올립니다.`)
@@ -251,6 +253,43 @@ async function update() {
     execFileSync(process.argv[1], ['install'], { stdio: 'inherit' })
   }
   console.log('끝났습니다. 앱이 떠 있다면 다시 시작해 주세요.')
+}
+
+/**
+ * /Applications에 넣어둔 사본의 버전. 견줄 것이 없으면 null.
+ *
+ * `defaults`를 쓰는 이유는 Info.plist가 XML이라는 보장이 없어서다 — 오늘 Tauri가 XML로
+ * 쓰고 있을 뿐이고, 바이너리 plist로 바뀌면 정규식으로 읽던 쪽이 조용히 못 읽게 된다.
+ * `defaults`는 맥에 항상 있고 둘 다 읽는다.
+ */
+function installedCopyVersion() {
+  if (process.platform !== 'darwin' || !existsSync(INSTALLED)) return null
+  try {
+    const out = execFileSync('/usr/bin/defaults', ['read', join(INSTALLED, 'Contents/Info.plist'), 'CFBundleShortVersionString'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return out.trim()
+  } catch {
+    // 못 읽는 것은 말할 거리가 아니다 — 앱은 이미 떴고, 여기서 할 수 있는 말이 없다
+    return null
+  }
+}
+
+/**
+ * 패키지와 /Applications 사본이 어긋났으면 한 줄.
+ *
+ * `npm i -g centralu`는 패키지만 바꾼다. 그래서 런처는 새것인데 Spotlight에서 열리는 앱은
+ * 옛것인 상태가 조용히 만들어진다 — 실제로 그렇게 됐고(beta.1이 /Applications에 남아 있는
+ * 채로 패키지만 beta.3), 화면 어디에도 그 사실이 없었다.
+ *
+ * **말하되 대신 하지 않는다.** 앱 안의 업데이트 줄과 같은 규칙이다. 묻지도 않고 남의
+ * /Applications를 덮는 일은 이 패키지가 `install`을 따로 둔 이유 그 자체다.
+ */
+function notifyIfCopyStale() {
+  const version = installedCopyVersion()
+  if (!copyDiffers(pkg.version, version)) return
+  console.log(`\n/Applications 사본은 ${version}입니다 (이 패키지는 ${pkg.version}).\n  centralu install`)
 }
 
 /** 앱을 띄운 뒤에만 알린다 — 업데이트 확인 때문에 실행이 늦어지면 안 된다 */
@@ -294,5 +333,6 @@ switch (cmd) {
     break
   default:
     run(cmd ? [cmd, ...rest] : [])
+    notifyIfCopyStale()
     await notifyIfOutdated()
 }

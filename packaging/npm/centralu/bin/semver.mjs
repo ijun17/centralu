@@ -49,6 +49,25 @@ export function isNewer(a, b) {
   return false
 }
 
+/**
+ * Whether the copy in /Applications is a different app than the one this package carries.
+ *
+ * `npm i -g centralu` replaces the package and nothing else. That is deliberate — this
+ * project does not write into someone's /Applications unless asked (`centralu install`) —
+ * but the cost is that the two drift apart in silence, and the copy is the one people
+ * actually click. So the launcher says so. It still does not act.
+ *
+ * Not `isNewer`. Drift in either direction is worth a line: a copy *newer* than the package
+ * means an update went backwards, which is more surprising, not less.
+ *
+ * Lives beside `isNewer` because it ships and is tested for the same reason — a launcher
+ * already on someone's machine cannot be corrected later. 0.1.0-beta.1 is still out there
+ * answering "이미 최신입니다" and always will be.
+ */
+export function copyDiffers(pkgVersion, copyVersion) {
+  return typeof copyVersion === 'string' && copyVersion !== '' && copyVersion !== pkgVersion
+}
+
 function split(v) {
   const dash = v.indexOf('-')
   const core = (dash === -1 ? v : v.slice(0, dash)).split('.').map(Number)
