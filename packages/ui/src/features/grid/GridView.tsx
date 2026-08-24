@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { columnsFor, rowsFor, visiblePanels } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { SessionPane } from '../session/SessionView.jsx'
@@ -6,7 +6,6 @@ import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
-import { dropEdge, dropSide, type DropTarget } from './drop.js'
 
 /**
  * 그리드 — 여러 세션을 한 화면에서.
@@ -30,12 +29,44 @@ export function GridView() {
   const [width, setWidth] = useState(1200)
   /** Only a guard — it splits a row off a screen tall enough to make a panel absurd (MAX_PANEL_H) */
   const [height, setHeight] = useState(800)
-  /** 놓으면 어디로 갈지 — 어느 칸의 어느 쪽인가 */
-  const [over, setOver] = useState<DropTarget>(null)
+  /** Which side of which panel the pointer is on — the preview order derives from this */
+  const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
   /** 지금 끌고 있는 칸. 원본을 흐리게 해서 "이게 움직이는 중"임을 보인다 */
   const [dragging, setDragging] = useState<string | null>(null)
   /** 끌 때 머리글이 아니라 **칸 전체**를 들어 올리기 위한 참조 */
   const cards = useRef(new Map<string, HTMLDivElement>())
+  /** Conversation scroll positions, taken right before a reorder — see the layout effect below */
+  const scrolls = useRef(new Map<string, number>())
+
+  /*
+    Reordering panels moves DOM nodes, and the browser resets a moved node's scrollable
+    descendants to scrollTop 0 — scroll is layout state, not a DOM property (measured: a
+    pane scrolled to 40 came back at 0 after one insertBefore; the node itself survived,
+    so `key={id}` was not the culprit and React never learns anything happened — no effect
+    in the pane re-runs). Every reflow step would kick each conversation back to the top.
+
+    So the handlers below snapshot every pane's conversation scroll *before* changing the
+    order, and this effect puts the values back before paint. It only acts when a snapshot
+    was explicitly taken: restoring on every render would clobber a scroll the user made
+    while a message streamed in.
+  */
+  useLayoutEffect(() => {
+    if (scrolls.current.size === 0) return
+    for (const [id, top] of scrolls.current) {
+      const sc = cards.current.get(id)?.querySelector('[data-testid="chat-stream"]')
+      if (sc && sc.scrollTop !== top) sc.scrollTop = top
+    }
+    scrolls.current.clear()
+  })
+
+  /** Call before any state change that can reorder the panels */
+  const snapshotScroll = () => {
+    scrolls.current.clear()
+    for (const [id, el] of cards.current) {
+      const sc = el.querySelector('[data-testid="chat-stream"]')
+      if (sc) scrolls.current.set(id, sc.scrollTop)
+    }
+  }
 
   // 열 수가 화면 크기에서 나오므로 크기가 바뀌면 다시 잰다.
   // Kept as two numbers rather than one object so an observer firing with an unchanged
@@ -60,6 +91,26 @@ export function GridView() {
   const visible = visiblePanels(panels, known)
   const cols = columnsFor(width, height, visible.length)
   const rows = rowsFor(visible.length, cols)
+
+  /*
+    While a panel is dragged the grid rearranges live (#53). The old inset edge line said
+    "before/after this neighbour", but the grid reflows on drop — so the line pointed at a
+    layout that stopped existing the moment you let go. The only display that cannot lie
+    about the destination is the destination itself, so we show it: the drop then changes
+    nothing visually.
+
+    The preview is **derived**, not stored. The committed order stays in `panels` until the
+    drop, so cancelling (Escape, dropping outside — both surface as dragend without drop)
+    is nothing more than clearing `over`. Two states that must agree cannot disagree if one
+    of them does not exist. A permutation of the same ids also keeps `cols`/`rows` fixed —
+    cells must not change size mid-drag, or the cell the hand is aiming at moves.
+
+    Sidebar drags get no preview: dataTransfer payloads are unreadable during dragover
+    (browser security), so the grid cannot know *which* session is inbound until the drop —
+    and a phantom new cell would change every cell's size anyway.
+  */
+  const preview = dragging && over ? reorderIds(visible, dragging, over.id, over.before) : null
+  const order = preview ?? visible
 
   /*
     도는 칸의 테두리는 사이드바 표식과 **같은 각도**에 있어야 한다 (components/orbit.ts).
@@ -96,7 +147,19 @@ export function GridView() {
         const id = e.dataTransfer.getData(SESSION_MIME)
         if (!id) return
         e.preventDefault()
-        dropSession(id, null, false)
+        snapshotScroll()
+        /*
+          Dropping a grid panel on the padding or a gap: the screen is showing the preview,
+          so that is what must survive the drop. Falling through to dropSession here would
+          append-or-ignore — the arrangement the user is looking at would silently revert.
+        */
+        if (id === dragging && preview) {
+          void setGridPanels(preview)
+        } else {
+          dropSession(id, null, false)
+        }
+        setOver(null)
+        setDragging(null)
       }}
     >
       {visible.length === 0 ? (
@@ -121,7 +184,7 @@ export function GridView() {
             gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
           }}
         >
-          {visible.map((id) => (
+          {order.map((id) => (
             <div
               key={id}
               ref={(el) => {
@@ -129,44 +192,56 @@ export function GridView() {
                 else cards.current.delete(id)
               }}
               /*
-                놓을 자리는 **어느 쪽인지**까지 보여야 한다.
-                예전엔 칸 전체에 테두리를 둘렀는데, 그러면 "여기 근처"까지만 알 뿐
-                앞에 놓이는지 뒤에 놓이는지 손을 떼기 전까지 알 수 없었다 (도그푸딩).
-
-                선은 inset 그림자로 그린다 — border는 칸을 키워서 격자 전체를 민다
-                (사이드바에서 겪은 그 문제).
-              */
-              /*
                 응답 중인 칸은 테두리가 돈다 (사이드바 표식과 같은 궤도).
                 칸이 여럿일 때 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다 —
                 그리드는 읽는 화면이 아니라 **보는 화면**이라 곁눈으로 잡혀야 한다.
               */
               className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge bg-void transition-opacity ${
                 sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
-              } ${dragging === id ? 'opacity-40' : ''} ${dropEdge(over, id)}`}
+              } ${dragging === id ? 'opacity-40' : ''}`}
               data-testid={`grid-panel-${id}`}
-              data-drop={dropSide(over, id)}
+              /*
+                Where the dragged thing lands relative to this panel. The edge line that used
+                to draw this is gone — the reflow shows it — but tests and assistive tech
+                still need the relation as a value, not as a pixel position to reverse-engineer.
+              */
+              data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes(SESSION_MIME)) return
                 e.preventDefault()
                 e.stopPropagation()
-                // 자기 자신 위에서는 자리를 표시하지 않는다 — 옮길 곳이 아니다
-                if (dragging === id) return setOver(null)
+                /*
+                  Over the dragged panel itself: keep the last target instead of clearing it.
+                  The reflow routinely puts the dragged panel under the pointer (hover B's far
+                  half → the panels swap → the pointer is now on the dragged panel). Clearing
+                  here would snap the preview back and the two orders would flicker in a loop.
+                */
+                if (dragging === id) return
                 const r = e.currentTarget.getBoundingClientRect()
-                setOver({ id, before: dropsBefore({ top: r.left, height: r.width }, e.clientX) })
+                const before = dropsBefore({ top: r.left, height: r.width }, e.clientX)
+                // dragover fires continuously, even with the pointer still — only re-render on change
+                if (over?.id === id && over.before === before) return
+                snapshotScroll()
+                setOver({ id, before })
               }}
-              onDragLeave={() => setOver((cur) => (cur?.id === id ? null : cur))}
               onDragEnd={() => {
+                // Fires with or without a drop — Escape and dropping outside land here too,
+                // and clearing `over` *is* the rollback (the preview is derived from it)
+                snapshotScroll()
                 setDragging(null)
                 setOver(null)
               }}
               onDrop={(e) => {
                 const dragged = e.dataTransfer.getData(SESSION_MIME)
+                snapshotScroll()
                 setOver(null)
                 setDragging(null)
                 if (!dragged) return
                 e.preventDefault()
                 e.stopPropagation()
+                // A grid panel commits exactly what the preview shows — anything else could
+                // make the drop change the screen, which is what #53 removes
+                if (dragged === dragging && preview) return void setGridPanels(preview)
                 const r = e.currentTarget.getBoundingClientRect()
                 dropSession(dragged, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))
               }}

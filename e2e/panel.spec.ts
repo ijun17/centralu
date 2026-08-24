@@ -490,3 +490,187 @@ test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 
   // 같은 각도다. 프레임 하나(16.7ms) 안쪽이면 눈에는 같은 것이다
   expect(Math.abs(phases[0]! - phases[1]!)).toBeLessThan(17)
 })
+
+/*
+ * ── Grid: live reflow while dragging (#53) ──────────────────────────
+ *
+ * The old edge line said "before/after this neighbour", but the grid reflows on drop —
+ * the line pointed at a layout that stopped existing the moment you let go. Now the grid
+ * rearranges live while dragging, so the drop changes nothing visually. What has to hold:
+ * the preview is *only* a preview (nothing persists, cancel restores), cells never change
+ * size mid-drag, and panels move as the same DOM nodes (a remount would drop scroll state).
+ *
+ * Playwright's dragAndDrop is atomic — it cannot look at the screen mid-drag. So the drag
+ * events are dispatched by hand, sharing one DataTransfer the way a real drag does
+ * (same technique as control-loop.spec.ts).
+ */
+
+/** The panel order as the user sees it — DOM order is React's render order */
+async function panelOrder(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-testid^="grid-panel-"]')].map(
+      (el) => el.dataset.testid!.slice('grid-panel-'.length),
+    ),
+  )
+}
+
+async function startDrag(page: Page, from: string) {
+  await page.evaluate((id: string) => {
+    const w = window as never as { __dt?: DataTransfer }
+    w.__dt = new DataTransfer()
+    document
+      .querySelector(`[data-testid="grid-panel-${id}"] [data-testid="pane-header"]`)!
+      .dispatchEvent(new DragEvent('dragstart', { dataTransfer: w.__dt, bubbles: true }))
+  }, from)
+}
+
+/** dragover on the left (20%) or right (80%) half of a panel, like a pointer passing over it */
+async function hoverPanel(page: Page, target: string, side: 'left' | 'right') {
+  await page.evaluate(
+    ({ to, where }: { to: string; where: string }) => {
+      const card = document.querySelector(`[data-testid="grid-panel-${to}"]`)!
+      const r = card.getBoundingClientRect()
+      const x = where === 'left' ? r.left + r.width * 0.2 : r.left + r.width * 0.8
+      card.dispatchEvent(
+        new DragEvent('dragover', {
+          dataTransfer: (window as never as { __dt?: DataTransfer }).__dt,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: r.top + r.height / 2,
+        }),
+      )
+    },
+    { to: target, where: side },
+  )
+}
+
+/** drop on a panel, then dragend on the source — the order the browser fires them in */
+async function dropOnPanel(page: Page, target: string, side: 'left' | 'right', from: string) {
+  await page.evaluate(
+    ({ to, where, src }: { to: string; where: string; src: string }) => {
+      const dt = (window as never as { __dt?: DataTransfer }).__dt
+      const card = document.querySelector(`[data-testid="grid-panel-${to}"]`)!
+      const r = card.getBoundingClientRect()
+      const x = where === 'left' ? r.left + r.width * 0.2 : r.left + r.width * 0.8
+      card.dispatchEvent(
+        new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: x, clientY: r.top + r.height / 2 }),
+      )
+      document
+        .querySelector(`[data-testid="grid-panel-${src}"] [data-testid="pane-header"]`)!
+        .dispatchEvent(new DragEvent('dragend', { dataTransfer: dt, bubbles: true }))
+    },
+    { to: target, where: side, src: from },
+  )
+}
+
+/** Escape and dropping outside the window both surface as dragend without a drop */
+async function cancelDrag(page: Page, from: string) {
+  await page.evaluate((src: string) => {
+    document
+      .querySelector(`[data-testid="grid-panel-${src}"] [data-testid="pane-header"]`)!
+      .dispatchEvent(
+        new DragEvent('dragend', { dataTransfer: (window as never as { __dt?: DataTransfer }).__dt, bubbles: true }),
+      )
+  }, from)
+}
+
+const storedPanels = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (window as never as { __store: any }).__store.getState().gridPanels)
+
+test('끄는 동안 격자가 미리 재배열된다 — 칸 크기는 그대로, 저장은 아직', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', '첫째')
+  const b = await newSession(page, 'alpha', 'claude', '둘째')
+  const c = await newSession(page, 'alpha', 'claude', '셋째')
+  await openGrid(page, [a, b, c])
+  await expect(page.getByTestId(`grid-panel-${c}`)).toBeVisible()
+  const sizeBefore = await page.getByTestId(`grid-panel-${b}`).boundingBox()
+
+  await startDrag(page, a)
+  await hoverPanel(page, c, 'right')
+  // The screen already shows the outcome — this is the whole point of #53.
+  // (Polled: React flushes dragover updates at continuous priority, a beat after the event)
+  await expect.poll(() => panelOrder(page)).toEqual([b, c, a])
+  // ...but it is only a preview: the committed order must not move until the drop
+  expect(await storedPanels(page)).toEqual([a, b, c])
+
+  // Cells must not change size mid-drag, or the cell the hand is aiming at moves
+  const sizeDuring = await page.getByTestId(`grid-panel-${b}`).boundingBox()
+  expect(sizeDuring!.width).toBe(sizeBefore!.width)
+  expect(sizeDuring!.height).toBe(sizeBefore!.height)
+
+  // Hovering the other half previews the other outcome — the preview follows the pointer
+  await hoverPanel(page, c, 'left')
+  await expect.poll(() => panelOrder(page)).toEqual([b, a, c])
+
+  await cancelDrag(page, a)
+  await expect.poll(() => panelOrder(page)).toEqual([a, b, c])
+  expect(await storedPanels(page)).toEqual([a, b, c])
+})
+
+test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 이동한다 (스크롤이 산다)', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', '첫째')
+  const b = await newSession(page, 'alpha', 'claude', '둘째')
+  const c = await newSession(page, 'alpha', 'claude', '셋째')
+  await openGrid(page, [a, b, c])
+  await expect(page.getByTestId(`grid-panel-${c}`)).toBeVisible()
+
+  // Give the dragged panel a conversation long enough to scroll, and scroll it
+  await page.evaluate((sid: string) => {
+    const store = (window as never as { __store: any }).__store
+    store.setState({
+      chat: {
+        ...store.getState().chat,
+        [sid]: Array.from({ length: 80 }, (_, i) => ({ kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `지난 대화 ${i}` })),
+      },
+    })
+  }, a)
+  await page.evaluate((sid: string) => {
+    const panel = document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"]`)!
+    panel.dataset.probe = 'same-node'
+    panel.querySelector<HTMLElement>('[data-testid="chat-stream"]')!.scrollTop = 40
+  }, a)
+  /*
+   * The chat adjusts its own scroll for a few frames after content lands (virtualised rows
+   * re-measure). Wait for it to settle and take *that* value as the baseline — pinning the
+   * 40 set above races the chat's measurement pass and fails on a number like 8.
+   */
+  const readScroll = () =>
+    page.evaluate(
+      (sid: string) => document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!.scrollTop,
+      a,
+    )
+  let scrolled = await readScroll()
+  for (let prev = -1; scrolled !== prev; scrolled = await readScroll()) {
+    prev = scrolled
+    await page.waitForTimeout(50)
+  }
+  expect(scrolled).toBeGreaterThan(0) // the pane really is scrolled — otherwise the check below proves nothing
+
+  await startDrag(page, a)
+  await hoverPanel(page, c, 'right')
+  await expect.poll(() => panelOrder(page)).toEqual([b, c, a])
+
+  /*
+   * Two separate things must hold here, because they fail separately:
+   * - the marker proves key={id} made React *move* the pane, not remake it — a remount
+   *   would discard the old node and the marker with it;
+   * - the scrollTop proves GridView put the conversation scroll back. Moving a node resets
+   *   its scrollable descendants to 0 even *without* a remount (scroll is layout state,
+   *   not a DOM property — measured 40 → 0 before GridView restored it), so without the
+   *   restore every reflow step would kick the conversation back to the top.
+   */
+  const after = await page.evaluate((sid: string) => {
+    const panel = document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"]`)!
+    return { probe: panel.dataset.probe ?? null, scrollTop: panel.querySelector<HTMLElement>('[data-testid="chat-stream"]')!.scrollTop }
+  }, a)
+  expect(after).toEqual({ probe: 'same-node', scrollTop: scrolled })
+
+  await dropOnPanel(page, c, 'right', a)
+  // The drop changed nothing visually — and now the store agrees with the screen
+  await expect.poll(() => panelOrder(page)).toEqual([b, c, a])
+  expect(await storedPanels(page)).toEqual([b, c, a])
+})
+

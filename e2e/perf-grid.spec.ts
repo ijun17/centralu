@@ -239,6 +239,82 @@ test('9칸을 처음 여는 데 걸리는 시간', async ({ page }) => {
  * 기록은 200개씩 창으로 읽고, 가상 스크롤이 보이는 줄만 그린다.
  * 그래도 **목록 길이 자체가** 부담인지는 재봐야 안다.
  */
+/**
+ * Dragging a panel now reflows the whole grid on every dragover (#53) — every hover is a
+ * reorder of N keyed panes, each holding a real conversation. The issue's condition for
+ * shipping was that this holds up at the panel counts we actually run: 4 / 6 / 9.
+ *
+ * A dragover is dispatched every frame on a cycling target, alternating left/right halves
+ * so *every* event produces a different order — the worst case; a human hand reorders far
+ * less often. `reorders` counts the frames where the on-screen order actually changed:
+ * if it stays 0 the grid never moved and the frame numbers next to it are meaningless.
+ */
+for (const n of [4, 6, 9]) {
+  test(`드래그 리플로우 ${n}칸`, async ({ page }) => {
+    const ids = await boot(page, n)
+    await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+    await page.getByTestId('grid-button').click()
+    await expect(page.getByTestId(`grid-panel-${ids[n - 1]}`)).toBeVisible()
+
+    const r = await page.evaluate(
+      ({ list, frames }: { list: string[]; frames: number }) =>
+        new Promise<{ p50: number; p95: number; max: number; janky: number; frames: number; reorders: number }>((done) => {
+          const dt = new DataTransfer()
+          document
+            .querySelector(`[data-testid="grid-panel-${list[0]}"] [data-testid="pane-header"]`)!
+            .dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }))
+
+          const gaps: number[] = []
+          let last = performance.now()
+          let reorders = 0
+          let prevOrder = ''
+          let i = 0
+          const domOrder = () =>
+            [...document.querySelectorAll<HTMLElement>('[data-testid^="grid-panel-"]')].map((el) => el.dataset.testid).join()
+          const tick = () => {
+            const now = performance.now()
+            gaps.push(now - last)
+            last = now
+            const target = list[1 + (i % (list.length - 1))]!
+            const card = document.querySelector(`[data-testid="grid-panel-${target}"]`)!
+            const rect = card.getBoundingClientRect()
+            const x = i % 2 ? rect.left + rect.width * 0.8 : rect.left + rect.width * 0.2
+            card.dispatchEvent(
+              new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: x, clientY: rect.top + rect.height / 2 }),
+            )
+            const order = domOrder()
+            if (order !== prevOrder) {
+              if (prevOrder) reorders++
+              prevOrder = order
+            }
+            if (++i < frames) requestAnimationFrame(tick)
+            else {
+              document
+                .querySelector(`[data-testid="grid-panel-${list[0]}"] [data-testid="pane-header"]`)!
+                .dispatchEvent(new DragEvent('dragend', { dataTransfer: dt, bubbles: true }))
+              const sorted = [...gaps].sort((a, b) => a - b)
+              const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
+              done({
+                p50: Math.round(at(0.5) * 10) / 10,
+                p95: Math.round(at(0.95) * 10) / 10,
+                max: Math.round(Math.max(...gaps) * 10) / 10,
+                janky: gaps.filter((g) => g > 32).length,
+                frames: gaps.length,
+                reorders,
+              })
+            }
+          }
+          requestAnimationFrame(tick)
+        }),
+      { list: ids, frames: 120 },
+    )
+    console.log(
+      `드래그 리플로우 ${n}칸: p50=${r.p50}ms p95=${r.p95}ms max=${r.max}ms 건너뜀=${r.janky}/${r.frames} 재배열=${r.reorders}`,
+    )
+    expect(r.reorders).toBeGreaterThan(0)
+  })
+}
+
 for (const n of [200, 5000]) {
   test(`대화 ${n}줄에서 스트리밍`, async ({ page }) => {
     const ids = await boot(page, 1)
