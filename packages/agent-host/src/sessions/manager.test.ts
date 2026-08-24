@@ -1,5 +1,5 @@
 /** T3-3 완료 기준: 인메모리 어댑터 목으로 RPC 통합 검증 */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -79,11 +79,22 @@ class FakeAdapter implements AgentAdapter {
   /** 도구가 뜨지 못하는 상황을 만든다 (되살리기 실패 경로) */
   /** 문자열이면 그 문구로, Error면 그대로 던진다 (code를 실어 보낼 때) */
   failCreate: string | Error | null = null
+  /** 도구가 뜨다 **멈추는** 상황 — 실패도 성공도 아닌 채로 (MGH 재개 사고의 모양) */
+  hangCreate = false
+  /** 멈춘 뒤에도 프로세스는 떠 있었을 수 있다 — 늦게 도착한 핸들을 매니저가 거두는지 본다 */
+  lateHandle: FakeHandle | null = null
+  resolveLate: (() => void) | null = null
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
   /** 어느 디렉토리에서 띄웠나 — 워크트리 세션이 정말 격리됐는지 보는 유일한 증거다 */
   lastCwd: string | null = null
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     if (this.failCreate) throw typeof this.failCreate === 'string' ? new Error(this.failCreate) : this.failCreate
+    if (this.hangCreate) {
+      await new Promise<void>((r) => (this.resolveLate = r))
+      const h = new FakeHandle(opts.sessionId, emit)
+      this.lateHandle = h
+      return h
+    }
     this.lastCwd = opts.cwd
     this.lastOrchestratorTools = opts.orchestratorTools
     this.last = new FakeHandle(opts.sessionId, emit)
@@ -964,6 +975,46 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
  * 그래서 세션을 만들고 말을 걸기 전에 새로고침하면 아직 없다
  * (도그푸딩: "세션 식별자를 불러오지 못했습니다").
  */
+/**
+ * 도구가 뜨다 **멈추면** 그 사실이 이유가 되어 돌아와야 한다 (MGH 재개 사고).
+ *
+ * 상한 없이 기다리면 바깥 RPC가 30초에 "RPC timed out"으로 포기하는데, 매니저의
+ * 진행 중(resuming) 약속은 안 풀린 채라 Retry가 **그 멈춘 약속에 다시 합류했다** —
+ * 화면에는 Retry가 있는데 아무것도 재시도되지 않는 상태. 이제 25초에 단계 이름을
+ * 붙여 실패하고, 그 순간 resuming이 풀려 Retry가 진짜 재시도가 된다.
+ */
+describe('되살리기가 멈출 때', () => {
+  it('멈춘 spawn은 단계 이름을 붙여 실패하고, Retry는 새로 시작한다', async () => {
+    const s = await rpc('agents.createSession', { projectId: (await addProject()).id, cwd: tmpdir(), tool: 'claude' }) as { id: string }
+    await mgr.archive(s.id, true)
+    await mgr.archive(s.id, false)
+
+    vi.useFakeTimers()
+    try {
+      adapter.hangCreate = true
+      const attempt = mgr.resumeSession(s.id)
+      await vi.advanceTimersByTimeAsync(25_100)
+      const r = await attempt
+      expect(r.resumed).toBe(false)
+      expect(r.reason).toMatch(/Starting claude did not finish within 25s/)
+
+      // Retry는 멈춘 약속에 합류하지 않고 새로 뜬다 — 이번엔 정상 spawn
+      adapter.hangCreate = false
+      const retry = mgr.resumeSession(s.id)
+      await vi.advanceTimersByTimeAsync(1)
+      expect((await retry).resumed).toBe(true)
+
+      // 멈췄던 spawn이 늦게 도착하면 매니저가 거둔다 — 안 거두면 스레드를 쥔 프로세스가 샌다
+      adapter.resolveLate!()
+      await vi.advanceTimersByTimeAsync(1)
+      await Promise.resolve()
+      expect(adapter.lateHandle!.disposed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('재개 식별자가 아직 없을 때', () => {
   class LateIdAdapter extends FakeAdapter {
     override async createSession(opts: CreateSessionOpts, emit: EventSink) {

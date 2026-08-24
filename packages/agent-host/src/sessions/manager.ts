@@ -44,11 +44,20 @@ import {
 import { importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
 import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
 
-/** 응답이 오지 않는 호출로 화면을 붙잡아 두지 않는다 */
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/**
+ * 응답이 오지 않는 호출로 화면을 붙잡아 두지 않는다.
+ *
+ * `label`이 곧 진단이다. 이름 없는 시간제한은 바깥의 RPC 30초에서 "RPC timed out:
+ * agents.resumeSession"으로만 터졌고, 그 문구는 **어디서** 멈췄는지를 말하지 않는다 —
+ * 실제로 MGH 세션이 그렇게 죽었을 때 사후에 알아낼 방법이 없었다. 단계마다 제 이름을
+ * 들고 실패하면, 같은 사고의 다음 발생이 곧 진단이 된다.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, label = 'A call'): Promise<T> {
   return Promise.race([
     p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Timed out')), ms)),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(ms / 1000)}s`)), ms),
+    ),
   ])
 }
 
@@ -716,7 +725,7 @@ export class SessionManager {
     }
 
     try {
-      const handle = await adapter.createSession(
+      const creating = adapter.createSession(
         {
           sessionId,
           cwd,
@@ -737,6 +746,22 @@ export class SessionManager {
         },
         (e) => this.onEvent(e),
       )
+      /*
+       * **여기가 상한 없이 기다리던 자리다** — 그리고 그 대기가 이 함수의 유일한
+       * 진행 중(resuming) 약속을 붙들고 있었다. 도구가 뜨다 멈추면 바깥 RPC는 30초에
+       * 포기하지만 이 약속은 안 풀리고, Retry는 dedup 때문에 **그 멈춘 약속에 다시
+       * 합류한다**. 사람 눈에는 "Retry가 안 된다"로 보인다 (MGH 세션에서 실측).
+       *
+       * 25초인 이유: RPC의 30초보다 안쪽이어야 화면이 이름 없는 RPC 시간제한 대신
+       * 이 단계의 이름이 붙은 이유를 받고, resuming도 그때 풀려 Retry가 진짜 재시도가 된다.
+       *
+       * 시간제한이 이겨도 도구 프로세스는 이미 떠 있을 수 있다 — 늦게라도 도착하면
+       * 거둔다. 안 거두면 잠긴 스레드를 쥔 app-server가 조용히 남는다.
+       */
+      const handle = await withTimeout(creating, 25_000, `Starting ${m.tool}`).catch((err) => {
+        void creating.then((h) => h.dispose()).catch(() => {})
+        throw err
+      })
       this.handles.set(sessionId, handle)
       this.running.set(sessionId, { model: m.model, effort: m.effort, permissionPreset: m.permissionPreset })
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
@@ -751,7 +776,8 @@ export class SessionManager {
       // 밖에서(터미널의 도구로) 이어간 대화를 따라잡는다.
       // 오케스트레이터는 밖에서 이어갈 수 없는 세션이라 해당 없다 (프로젝트가 없다)
       if (project) {
-        const added = await this.syncImportedHistory(m, adapter, project.path)
+        // 따라잡기가 멈춰도 세션은 이미 살아 있다 — 붙잡지 말고 다음 기회에 맡긴다
+        const added = await withTimeout(this.syncImportedHistory(m, adapter, project.path), 10_000, 'History catch-up').catch(() => 0)
         if (added > 0) this.emit({ type: 'history_synced', sessionId, added })
       }
       return { session: m, resumed: true }
@@ -763,7 +789,9 @@ export class SessionManager {
        * app-server를 띄우므로 세션을 고를 때마다 몇 초가 얹혔다 (도그푸딩 지적).
        * 값이 비싼 확인은 잘못됐을 때만 한다 — 잘 되는 길은 빨라야 한다.
        */
-      const gone = await this.externalGone(m, cwd)
+      // 사후 확인에도 상한을 둔다 — 진짜 실패 이유(err)를 들고 있는데, 확인이 멈추는
+      // 바람에 그 이유조차 전달 못 하는 것이 최악이다. 판단 못 하면 막지 않는다(false)와 같은 규칙.
+      const gone = await withTimeout(this.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false)
       if (gone) {
         return { session: m, resumed: false, reason: externalMissingReason(m.tool, cwd) }
       }
