@@ -164,6 +164,27 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
     child.on('error', () => resolveOut(''))
     // check-ignore는 매치가 없으면 exit 1 — 오류가 아니다
     child.on('close', () => resolveOut(out))
+    /*
+     * A project does not have to be a git repository — the first-run screen says so in as
+     * many words. When it isn't one, git prints `fatal: not a git repository` and exits
+     * *before reading anything*, and the list we are writing lands on a closed pipe.
+     *
+     * The answer we want is already the right one: nothing is ignored, which is what the
+     * `close` above resolves. The danger is the EPIPE itself. A stream 'error' with no
+     * listener is an uncaught exception, and this runs inside the host — the process every
+     * session in the app is living in. Opening the file tree in a plain directory would take
+     * all of them down together.
+     *
+     * `child.on('error')` does not cover this. That one is about spawning; this one is the
+     * pipe. The Codex client learned the same thing at its own stdin (client.ts).
+     *
+     * Whether it fires is a race between our write and git's exit, which is why this stood
+     * for weeks: on a small directory the whole list fits in the pipe buffer and lands before
+     * git is gone. Past the buffer — measured at 65,536 bytes here, about four thousand
+     * files, or fewer with long names — the write blocks and the EPIPE is certain. CI hit it
+     * on both Linux runners at a fraction of that size, on timing alone.
+     */
+    child.stdin.on('error', () => {})
     child.stdin.end(input)
   })
   const set = new Set<string>()

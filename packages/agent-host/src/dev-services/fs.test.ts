@@ -98,6 +98,33 @@ describe('baseName — 이름 자리에 경로가 들어오지 못한다', () =>
   })
 })
 
+describe('listDir — 저장소가 아닌 프로젝트', () => {
+  /**
+   * 프로젝트는 git 저장소가 아니어도 된다 — 시작 안내가 그렇게 적어 놓았다.
+   *
+   * 저장소가 아니면 `git check-ignore`는 아무것도 읽지 않고 바로 죽고, 우리가 쓰던 목록은
+   * 닫힌 파이프에 떨어진다(EPIPE). 답 자체는 문제가 없다(무시된 파일은 없다). 문제는 그
+   * EPIPE를 아무도 안 듣고 있으면 **호스트 프로세스가 통째로 죽는다**는 것 — 그 안에 든
+   * 세션 전부와 함께.
+   *
+   * 목록이 파이프 버퍼(실측 65,536바이트)를 넘겨야 확실히 재현된다. 그 아래에서는 우리
+   * 쓰기가 git이 사라지기 전에 끝나서 그냥 지나가고, 그래서 이 버그가 몇 주를 살아남았다.
+   * CI의 리눅스 러너 둘은 훨씬 작은 크기에서 타이밍만으로 걸렸다.
+   */
+  it('파일이 많아도 목록이 나온다 — git이 먼저 죽어도 호스트는 산다', async () => {
+    const long = 'n'.repeat(200)
+    const names = Array.from({ length: 400 }, (_, i) => `${String(i).padStart(4, '0')}-${long}.txt`)
+    // 400 × 206바이트 ≈ 82KB — 버퍼를 확실히 넘긴다
+    expect(names.join('\n').length).toBeGreaterThan(65_536)
+    for (const n of names) writeFileSync(join(root, n), '')
+
+    const entries = await listDir(root, '')
+    expect(entries).toHaveLength(names.length)
+    // 저장소가 아니니 무시되는 것도 없다 — 못 물어봤다고 전부 무시로 칠하면 트리가 빈다
+    expect(entries.every((e) => !e.ignored)).toBe(true)
+  })
+})
+
 describe('moveEntry', () => {
   it('파일을 폴더로 옮긴다', async () => {
     writeFileSync(join(root, 'a.ts'), 'hello')
