@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
+import { __resetWarningsForTest, approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
  * A-2 계약 테스트. 픽스처는 M0 스파이크에서 **실제로 녹화한** 프로토콜 출력을 줄인 것이다
@@ -56,7 +56,12 @@ describe('상태·계기판', () => {
 
   it('tokenUsage → usage_update (+ 윈도우가 있으면 context_update)', () => {
     const out = n('thread/tokenUsage/updated', {
-      tokenUsage: { total: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 } },
+      // `last` is required by ThreadTokenUsage and is what fills the window; `total` is the
+      // thread's running spend and feeds usage_update only.
+      tokenUsage: {
+        total: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 },
+        last: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 },
+      },
       contextWindow: 1_000_000,
     })
     expect(out[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 } })
@@ -188,7 +193,8 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
         threadId: 't1',
         turnId: 'turn1',
         tokenUsage: {
-          total: { totalTokens: 1200, inputTokens: 1000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
+          // total is cumulative across the thread; last is this turn. They differ on purpose here.
+          total: { totalTokens: 900000, inputTokens: 800000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 100000, reasoningOutputTokens: 0 },
           last: { totalTokens: 1200, inputTokens: 1000, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 200, reasoningOutputTokens: 0 },
           modelContextWindow: 200000,
         },
@@ -198,10 +204,33 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
     it('퍼센트를 낼 수 있게 context_update를 낸다', () => {
       const events = n(notification.method, notification.params)
       const ctx = events.find((e) => e.type === 'context_update')
+      // 1200 (this turn), not 900000 (everything the thread has spent)
       expect(ctx).toMatchObject({ used: 1200, window: 200000, exactness: 'exact' })
     })
 
+    /*
+     * Regression: reading `total` put the thread's running spend against a fixed window, and
+     * the gauge reported 149,084% on a real session before anyone noticed.
+     */
+    it('창보다 큰 값은 읽기가 아니라 오독이므로 내보내지 않는다', () => {
+      __resetWarningsForTest()
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const absurd = {
+        ...notification,
+        params: {
+          ...notification.params,
+          tokenUsage: { ...notification.params.tokenUsage, last: { ...notification.params.tokenUsage.last, totalTokens: 1_235_017_921 } },
+        },
+      }
+      const events = n(absurd.method, absurd.params)
+      expect(events.some((e) => e.type === 'context_update')).toBe(false)
+      expect(events.some((e) => e.type === 'usage_update')).toBe(true)
+      expect(spy).toHaveBeenCalled()
+      spy.mockRestore()
+    })
+
     it('창이 없으면 그 사실이 조용히 묻히지 않는다', () => {
+      __resetWarningsForTest()
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const without = { ...notification, params: { ...notification.params, tokenUsage: { ...notification.params.tokenUsage, modelContextWindow: null } } }
       const events = n(without.method, without.params)

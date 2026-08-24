@@ -128,6 +128,17 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
 
     case 'thread/tokenUsage/updated': {
       const usage = obj(obj(p.tokenUsage).total)
+      /*
+       * Context occupancy comes from `last`, not `total`.
+       *
+       * `ThreadTokenUsage` carries both (generated/v2/ThreadTokenUsage.ts): `total` is what
+       * the thread has spent since it began, `last` is the most recent turn. Reading `total`
+       * put a running sum against a fixed window, so the gauge climbed forever — it reached
+       * **149,084%** on a real session (1,235,017,921 against a 828,400 window) before this
+       * was noticed. Cumulative spend is a billing number and stays with `usage_update`;
+       * how full the window is describes one request.
+       */
+      const lastTurn = obj(obj(p.tokenUsage).last)
       const input = num(usage.inputTokens) ?? 0
       const output = num(usage.outputTokens) ?? 0
       const cached = num(usage.cachedInputTokens) ?? 0
@@ -148,8 +159,16 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const events: NormalizedEvent[] = [
         { type: 'usage_update', sessionId, tokens: { inputTokens: input, outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
       ]
-      if (window) {
-        events.push({ type: 'context_update', sessionId, used: total, window, exactness: 'exact' })
+      const occupied = num(lastTurn.totalTokens)
+      if (window && occupied !== undefined && occupied <= window) {
+        events.push({ type: 'context_update', sessionId, used: occupied, window, exactness: 'exact' })
+      } else if (window && occupied !== undefined) {
+        /*
+         * More tokens than the window holds is not a reading, it is a misread field — the
+         * shape this bug took the first time. Emit nothing and say so: a blank gauge is
+         * honest, and 149,084% was not.
+         */
+        warnImpossibleContext(occupied, window)
       } else {
         // Say it out loud. A silent skip here is what let a renamed field hide for weeks.
         warnMissingContextWindow(usageObj)
@@ -226,4 +245,28 @@ function warnMissingContextWindow(usage: Record<string, unknown>): void {
     '[codex] token usage carried no context window — the context gauge will stay empty. ' +
       `Fields present: ${Object.keys(usage).join(', ') || '(none)'}`,
   )
+}
+
+/** Warn once per process — this would otherwise repeat on every turn of every session. */
+let warnedImpossible = false
+function warnImpossibleContext(used: number, window: number): void {
+  if (warnedImpossible) return
+  warnedImpossible = true
+  console.error(
+    `[codex] context reading exceeds the window (${used} of ${window}) — gauge left empty. ` +
+      'A used-vs-window ratio above 1 means the wrong field was read, not a full context.',
+  )
+}
+
+/**
+ * Reset the warn-once flags. Tests only.
+ *
+ * The flags exist so a misread field doesn't print on every turn of every session, but that
+ * makes them process state: the second test to check for a warning would find it already
+ * spent and pass for the wrong reason. Same shape as `__setSessionApiForTest` in the Claude
+ * adapter — production keeps the behaviour, tests get a way to start clean.
+ */
+export function __resetWarningsForTest(): void {
+  warnedContextWindow = false
+  warnedImpossible = false
 }
