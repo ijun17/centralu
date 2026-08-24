@@ -101,3 +101,79 @@ describe('CodexClient 스트림 절단', () => {
     }
   }, 30_000)
 })
+
+/**
+ * 깨진 프레임은 조용히 버려지지 않는다 (readline 사고의 재발 방지 그 자체).
+ *
+ * 절단 수정 이후에도 이 층이 남는 이유: 다음 절단이 어디서 올지 모른다 — 파서 회귀,
+ * 코덱스 쪽 끼어쓰기, 새 런타임. 어디서 오든 **매달리는 대신 이유를 들고 실패**해야
+ * 재시도가 의미를 갖고, 사람이 읽을 원인이 남는다.
+ */
+describe('깨진 프레임', () => {
+  it('{로 시작하는 비JSON 줄은 기다리는 요청을 이유와 함께 깨운다', async () => {
+    // 요청을 받으면 **일부러 깨진 프레임**(잘린 JSON)을 내놓는 대역
+    const fake = [
+      `process.stdin.once('data', () => {`,
+      `  process.stdout.write('{"id":"1","result":{"never":"closes"' + '\\n')`,
+      `  setTimeout(() => {}, 60000)`,
+      `})`,
+    ].join('\n')
+    const client = new CodexClient(
+      { onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} },
+      { command: process.execPath, args: ['-e', fake] },
+    )
+    try {
+      await expect(client.request('probe', {}, 10_000)).rejects.toThrow(/could not parse/)
+    } finally {
+      await client.dispose()
+    }
+  })
+
+  it('{로 시작하지 않는 낙서는 세션을 실패시키지 않는다 — 배너는 배너다', async () => {
+    const fake = [
+      `process.stdin.once('data', () => {`,
+      `  process.stdout.write('codex banner: hello\\n')`,
+      `  process.stdout.write(JSON.stringify({ id: '1', result: { ok: true } }) + '\\n', () => setTimeout(() => process.exit(0), 200))`,
+      `})`,
+    ].join('\n')
+    const client = new CodexClient(
+      { onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} },
+      { command: process.execPath, args: ['-e', fake] },
+    )
+    try {
+      const res = await client.request<{ ok: boolean }>('probe', {}, 10_000)
+      expect(res.ok).toBe(true)
+    } finally {
+      await client.dispose()
+    }
+  })
+
+  /**
+   * 프레이밍의 성질 검사: 스트림이 **어떤 조각으로 잘려 도착하든** 프레임은 같아야 한다.
+   * readline 사고는 이 성질의 위반이었다 — 인스턴스가 아니라 성질을 검사해야
+   * 다음 위반도 잡는다. 한 글자씩(최악의 경계), 멀티바이트 한글이 조각 경계에 걸리는
+   * 경우까지 포함한다.
+   */
+  it('한 글자씩 흘려 보내도, 한글이 경계에 걸려도 프레임은 온전하다', async () => {
+    const fake = [
+      `const msg = Buffer.from(JSON.stringify({ id: '1', result: { text: '한글과 emoji 🙂 boundary' } }) + '\\n')`,
+      `process.stdin.once('data', async () => {`,
+      `  for (let i = 0; i < msg.length; i++) {`,
+      `    process.stdout.write(msg.subarray(i, i + 1))`,
+      `    if (i % 7 === 0) await new Promise((r) => setTimeout(r, 1))`,
+      `  }`,
+      `  setTimeout(() => process.exit(0), 200)`,
+      `})`,
+    ].join('\n')
+    const client = new CodexClient(
+      { onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} },
+      { command: process.execPath, args: ['-e', fake] },
+    )
+    try {
+      const res = await client.request<{ text: string }>('probe', {}, 15_000)
+      expect(res.text).toBe('한글과 emoji 🙂 boundary')
+    } finally {
+      await client.dispose()
+    }
+  })
+})

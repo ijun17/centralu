@@ -121,6 +121,28 @@ export class CodexClient {
     try {
       msg = JSON.parse(line) as Record<string, unknown>
     } catch {
+      /*
+       * **`{`로 시작했는데 JSON이 아니면, 그건 남의 낙서가 아니라 깨진 프레임이다.**
+       *
+       * readline이 23MB 응답을 조각냈을 때 이 자리는 그 조각들을 "non-JSON output"으로
+       * 로그에만 적고 버렸다 — 그리고 그 로그는 Finder로 띄운 앱에서 아무도 못 본다
+       * (#56). 기다리던 요청은 답이 이미 도착해 파괴됐다는 사실을 모른 채 시간제한까지
+       * 매달렸고, 화면에는 원인 없는 "RPC timed out"만 남았다. 조용한 버림이 행이 됐다.
+       *
+       * 그래서 깨진 프레임은 **기다리는 모든 요청을 그 자리에서, 이유를 붙여** 깨운다.
+       * 어느 응답의 조각인지는 알 수 없으므로(id가 조각 어딘가에 있다) 전부 깨우는 것이
+       * 정직하다 — 부르는 쪽(매니저)은 어차피 실패를 재시도로 잇는다. 연결은 죽이지
+       * 않는다: 개행 분할이 고쳐진 지금 이 길은 미래의 회귀나 코덱스 쪽 끼어쓰기를
+       * 위한 안전망이고, 다음 프레임부터 멀쩡할 수 있다.
+       *
+       * `{`로 시작하지 않는 줄은 그대로 흘린다 — 코덱스가 stdout에 배너·경고를 섞는
+       * 일이 실제로 있고, 그때마다 세션을 실패시키면 그게 새 버그다.
+       */
+      if (line.startsWith('{')) {
+        const why = `codex sent a frame this client could not parse (${line.length.toLocaleString()} bytes) — a waiting reply may have been destroyed`
+        for (const [, p] of this.pending) p.reject(new Error(why))
+        this.pending.clear()
+      }
       console.error('[codex] non-JSON output:', line.slice(0, 200))
       return
     }
