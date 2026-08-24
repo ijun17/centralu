@@ -25,7 +25,13 @@ const SHORTCUTS: [string[], string][] = [
   [['mod', '⇧A'], 'Jump to next waiting'],
   [['mod', 'K'], 'Command palette'],
   [['mod', '1~9'], 'Jump to project'],
-  [['mod', '⇧1~4'], 'Switch tab (chat · files · git · viewer)'],
+  /*
+   * The digits name tab *identities*, not positions (EvidencePanel's handler) — after a
+   * drag-reorder this list stays true, which is the whole reason identity was chosen.
+   * The names listed here were once "chat · files · git · viewer": tabs that predate the
+   * three-lane layout. Nobody noticed because the shortcut itself didn't exist until #20.
+   */
+  [['mod', '⇧1~4'], 'Panel tab (git · history · files · terminal)'],
   [['y / n / a'], 'Approve · deny · always allow'],
   [['alt', 'a'], 'Always allow (project scope)'],
   [['d'], 'Dismiss from inbox'],
