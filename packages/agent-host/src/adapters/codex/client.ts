@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { createInterface } from 'node:readline'
 
 /**
  * `codex app-server` JSON-RPC 클라이언트 (stdio, newline-delimited).
@@ -69,7 +68,28 @@ export class CodexClient {
     // spawn이 실패한 뒤의 stdin write는 스트림 'error'로 또 던진다 — 위에서 이미 처리했으므로 삼킨다
     this.proc.stdin.on('error', () => {})
 
-    createInterface({ input: this.proc.stdout }).on('line', (line) => this.onLine(line))
+    /*
+     * **readline이 아니라 손으로 자른다.** `readline.createInterface`는 아주 긴 한 줄을
+     * 조용히 조각내서 내놓는다 — 실측: 23,244,422바이트짜리 `thread/resume` 응답(대화가
+     * 164MB인 스레드)이 22,049,101 + 나머지로 갈라져 둘 다 JSON이 아니게 됐고, 응답이
+     * "non-JSON output"으로 버려지니 그 요청의 약속은 영원히 안 풀렸다. 화면에는
+     * "RPC timed out: agents.resumeSession"과 눌러도 소용없는 Retry만 남았다 (MGH 세션).
+     *
+     * 원시 스트림을 그대로 떠 보면 코덱스는 결백하다 — 한 줄은 온전했다. 자른 것은
+     * 우리 쪽 readline이다. 그래서 개행에서만 자르는 버퍼로 바꾼다. 23MB 문자열 연결이
+     * 아깝지 않냐면: 이 코드는 응답이 올 때만 일하고, 거대한 줄은 재개 순간 한 번이다.
+     */
+    let stdoutBuf = ''
+    this.proc.stdout.setEncoding('utf8')
+    this.proc.stdout.on('data', (chunk: string) => {
+      stdoutBuf += chunk
+      let nl
+      while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
+        const line = stdoutBuf.slice(0, nl)
+        stdoutBuf = stdoutBuf.slice(nl + 1)
+        this.onLine(line)
+      }
+    })
     this.proc.stderr.on('data', (d) => {
       const s = String(d).trim()
       if (s) console.error('[codex]', s.slice(0, 500))

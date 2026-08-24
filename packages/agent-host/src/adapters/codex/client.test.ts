@@ -67,3 +67,37 @@ describe('codex app-server 종료 판정', () => {
     await expect(client.request('x')).rejects.toThrow(/already exited/)
   })
 })
+
+/**
+ * 아주 긴 한 줄이 조각나지 않는다 (MGH 재개 사고의 진범).
+ *
+ * `readline.createInterface`는 23,244,422바이트짜리 `thread/resume` 응답을 조용히
+ * 22,049,101 + 나머지로 갈라 내놓았다 — 둘 다 JSON이 아니게 되고, 응답은
+ * "non-JSON output"으로 버려지고, 그 요청의 약속은 영원히 안 풀렸다. 원시 스트림을
+ * 뜨면 코덱스는 한 줄을 온전히 보냈다 — 자른 쪽은 우리다.
+ *
+ * 실물 크기(24MB)로 검사한다. 줄인 크기로는 readline도 통과한다 — 이 버그는
+ * **크기가 조건**이라, 조건을 줄이면 테스트가 지키는 것이 없어진다.
+ */
+describe('CodexClient 스트림 절단', () => {
+  it('24MB 한 줄 응답이 온전히 도착한다', async () => {
+    // app-server 대역: 요청 한 줄을 받으면 거대한 응답 한 줄을 쓴다 (실제 codex 불요)
+    const fake = [
+      `process.stdin.once('data', () => {`,
+      `  const big = JSON.stringify({ id: '1', result: { blob: 'x'.repeat(24 * 1024 * 1024) } })`,
+      `  process.stdout.write(big + '\\n', () => setTimeout(() => process.exit(0), 200))`,
+      `})`,
+    ].join('\n')
+
+    const client = new CodexClient(
+      { onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} },
+      { command: process.execPath, args: ['-e', fake] },
+    )
+    try {
+      const res = await client.request<{ blob: string }>('probe', {}, 20_000)
+      expect(res.blob.length).toBe(24 * 1024 * 1024)
+    } finally {
+      await client.dispose()
+    }
+  }, 30_000)
+})
