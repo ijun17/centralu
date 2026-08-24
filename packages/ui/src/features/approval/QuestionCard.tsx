@@ -3,14 +3,22 @@ import type { Question, QuestionAnswer } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 
 /**
- * 에이전트가 내민 선택지 (AskUserQuestion).
+ * The choices an agent holds out (AskUserQuestion).
  *
- * 승인 카드와 나눠 둔 이유는 돌아가는 것이 다르기 때문이다 — 승인은 실행 여부고,
- * 이건 **내용**이다. 그래서 예/아니오가 아니라 고른 답이 모델에게 간다.
+ * Kept apart from the approval card because what travels back differs — an approval is
+ * whether something runs, this is *content*: the picked answer goes to the model.
  *
- * 도그푸딩에서 이 도구 호출은 선택지 UI 없이 원시 JSON으로 흐르다 중간에 잘렸다.
- * 두 번째 선택지부터 보이지 않아 **답할 수단 자체가 없었다.** 그래서 여기서는
- * 질문도 선택지도 설명도 자르지 않는다 — 자를 거면 애초에 물을 이유가 없다.
+ * In dogfooding this tool call used to flow as raw JSON and get cut off mid-stream; from
+ * the second option on there was **no way to answer at all.** So nothing here truncates —
+ * not the question, not the options, not the descriptions. If it had to be cut, there was
+ * no point asking.
+ *
+ * **Several questions become tabs, not a stack** (issue #8). Stacked, three questions
+ * with descriptions ran past a panel height and the Answer button sat below everything,
+ * so the card read as a wall exactly where the agent is waiting on a person. One question
+ * at a time is also how people actually answer; the tab row keeps the others in reach and
+ * shows which still need one. A single question keeps the flat layout — a tab row of one
+ * would be decoration.
  */
 export function QuestionCard({
   sessionId,
@@ -24,15 +32,16 @@ export function QuestionCard({
   const answer = useStore((s) => s.answerQuestion)
   const [picked, setPicked] = useState<Record<number, string[]>>({})
   /*
-   * **직접 입력.**
+   * **Free-form input.**
    *
-   * 도구의 스키마가 못을 박아 둔다: "There should be no 'Other' option, that will be
-   * provided automatically." 즉 그 자리는 **화면이 만들어 주기로 되어 있는 것**이고,
-   * 우리가 우리 화면을 그리기로 한 이상 이것도 우리 몫이다. 없으면 사람은 내민 둘 중
-   * 하나로만 답할 수 있어서, 셋째 답이 있을 때 할 말이 없어진다.
+   * The tool's schema pins this down: "There should be no 'Other' option, that will be
+   * provided automatically." That slot is the screen's to provide — and since we draw our
+   * own screen, it is ours. Without it a person can only answer with what was offered,
+   * and has nothing to say when the real answer is a third thing.
    */
   const [otherOn, setOtherOn] = useState<Record<number, boolean>>({})
   const [otherText, setOtherText] = useState<Record<number, string>>({})
+  const [active, setActive] = useState(0)
   const [sending, setSending] = useState(false)
 
   const toggle = (qi: number, label: string, multi: boolean) => {
@@ -41,7 +50,7 @@ export function QuestionCard({
       if (!multi) return { ...p, [qi]: [label] }
       return { ...p, [qi]: cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label] }
     })
-    // 하나만 고르는 질문이면 직접 입력과 선택지는 서로를 밀어낸다
+    // On a single-select question, the free-form slot and the options push each other out
     if (!multi) setOtherOn((o) => ({ ...o, [qi]: false }))
   }
 
@@ -50,14 +59,16 @@ export function QuestionCard({
     if (!multi) setPicked((p) => ({ ...p, [qi]: [] }))
   }
 
-  /** 이 질문에 대해 실제로 보낼 답 (고른 것 + 직접 쓴 것) */
+  /** What would actually be sent for this question (picked + typed) */
   const answersFor = (qi: number): string[] => {
     const typed = otherOn[qi] ? (otherText[qi] ?? '').trim() : ''
     return [...(picked[qi] ?? []), ...(typed ? [typed] : [])]
   }
 
-  // 모든 질문에 답해야 보낸다 — 반만 보내면 모델은 나머지를 지어낸다
-  const ready = questions.every((_, i) => answersFor(i).length > 0)
+  // Every question must be answered before sending — send half and the model invents the rest
+  const answered = questions.map((_, i) => answersFor(i).length > 0)
+  const ready = answered.every(Boolean)
+  const tabbed = questions.length > 1
 
   const submit = async () => {
     if (!ready || sending) return
@@ -78,69 +89,104 @@ export function QuestionCard({
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <span className="beacon text-[10px] font-medium tracking-[0.1em]">Agent is asking</span>
         <span className="text-[11px] text-slate">
-          {questions.length > 1 ? `${questions.length} questions` : 'Pick an option'}
+          {tabbed ? `${questions.length} questions` : 'Pick an option'}
         </span>
       </div>
 
+      {tabbed && (
+        /*
+          Same shapes as the evidence panel's tab row — one app, one way to draw a tab.
+          The dot on a tab is its answered state: what still waits is legible without
+          visiting every tab, which is the whole point of not stacking.
+        */
+        <nav className="mt-2 flex items-center gap-0.5 border-b border-edge px-2 pb-1" data-testid="question-tabs">
+          {questions.map((q, qi) => (
+            <button
+              key={qi}
+              type="button"
+              data-testid={`question-tab-${qi}`}
+              data-answered={answered[qi] || undefined}
+              onClick={() => setActive(qi)}
+              className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] transition-colors ${
+                active === qi ? 'bg-graphite/50 text-chalk' : 'text-ash hover:text-chalk'
+              }`}
+            >
+              {q.header || `Q${qi + 1}`}
+              <span
+                aria-hidden
+                className={`size-1 rounded-full ${answered[qi] ? 'bg-ash' : 'bg-slate/40'}`}
+              />
+            </button>
+          ))}
+        </nav>
+      )}
+
       <div className="mt-2 flex flex-col gap-3 px-3">
-        {questions.map((q, qi) => (
-          <div key={qi} className="flex flex-col gap-1.5">
-            <div className="flex items-baseline gap-2">
-              {q.header && (
-                <span className="shrink-0 rounded bg-edge px-1.5 py-px text-[10px] text-slate">{q.header}</span>
-              )}
-              <span className="text-[13px] leading-snug text-chalk">{q.question}</span>
-              {/* 여러 개 고를 수 있다는 것은 눌러보기 전에 알아야 한다 */}
-              {q.multiSelect && <span className="shrink-0 text-[10px] text-slate">여러 개 가능</span>}
-            </div>
-            <div className="flex flex-col gap-1">
-              {q.options.map((o) => {
-                const on = (picked[qi] ?? []).includes(o.label)
-                return (
-                  <button
-                    key={o.label}
-                    type="button"
-                    data-testid="question-option"
-                    onClick={() => toggle(qi, o.label, q.multiSelect)}
-                    className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
-                      on ? 'border-beacon bg-edge' : 'border-edge hover:bg-edge/50'
-                    }`}
-                  >
-                    <div className="text-[12px] text-chalk">{o.label}</div>
-                    {/* 설명이 판단 근거다 — 접거나 자르지 않는다 */}
-                    {o.description && (
-                      <div className="mt-0.5 text-[11px] leading-snug text-slate">{o.description}</div>
-                    )}
-                  </button>
-                )
-              })}
+        {questions.map((q, qi) =>
+          /*
+            Inactive tabs are hidden, not unmounted. Unmounting would drop a half-typed
+            free-form answer the moment someone peeks at the next question — losing what a
+            person wrote is the one cost tabs must not introduce over the stack.
+          */
+          tabbed && qi !== active ? null : (
+            <div key={qi} className="flex flex-col gap-1.5">
+              <div className="flex items-baseline gap-2">
+                {!tabbed && q.header && (
+                  <span className="shrink-0 rounded bg-edge px-1.5 py-px text-[10px] text-slate">{q.header}</span>
+                )}
+                <span className="text-[13px] leading-snug text-chalk">{q.question}</span>
+                {/* That several answers are allowed must be known before pressing, not after */}
+                {q.multiSelect && <span className="shrink-0 text-[10px] text-slate">multiple allowed</span>}
+              </div>
+              <div className="flex flex-col gap-1">
+                {q.options.map((o) => {
+                  const on = (picked[qi] ?? []).includes(o.label)
+                  return (
+                    <button
+                      key={o.label}
+                      type="button"
+                      data-testid="question-option"
+                      onClick={() => toggle(qi, o.label, q.multiSelect)}
+                      className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
+                        on ? 'border-beacon bg-edge' : 'border-edge hover:bg-edge/50'
+                      }`}
+                    >
+                      <div className="text-[12px] text-chalk">{o.label}</div>
+                      {/* The description is the grounds for the choice — never folded, never cut */}
+                      {o.description && (
+                        <div className="mt-0.5 text-[11px] leading-snug text-slate">{o.description}</div>
+                      )}
+                    </button>
+                  )
+                })}
 
-              {/* 내민 것 말고 다른 답 — 도구가 화면에게 맡겨 둔 자리다 */}
-              <button
-                type="button"
-                data-testid="question-other"
-                onClick={() => toggleOther(qi, q.multiSelect)}
-                className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
-                  otherOn[qi] ? 'border-beacon bg-edge' : 'border-edge border-dashed hover:bg-edge/50'
-                }`}
-              >
-                <div className="text-[12px] text-slate">기타 — 직접 입력</div>
-              </button>
+                {/* An answer that wasn't offered — the slot the tool leaves to the screen */}
+                <button
+                  type="button"
+                  data-testid="question-other"
+                  onClick={() => toggleOther(qi, q.multiSelect)}
+                  className={`rounded border px-2.5 py-1.5 text-left transition-colors ${
+                    otherOn[qi] ? 'border-beacon bg-edge' : 'border-edge hover:bg-edge/50'
+                  }`}
+                >
+                  <div className="text-[12px] text-slate">Other — write your own</div>
+                </button>
 
-              {otherOn[qi] && (
-                <textarea
-                  data-testid="question-other-input"
-                  autoFocus
-                  rows={2}
-                  value={otherText[qi] ?? ''}
-                  onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
-                  placeholder="답을 직접 적습니다"
-                  className="w-full resize-y rounded border border-edge bg-void px-2 py-1.5 text-[12px] text-chalk outline-none focus:border-beacon"
-                />
-              )}
+                {otherOn[qi] && (
+                  <textarea
+                    data-testid="question-other-input"
+                    autoFocus
+                    rows={2}
+                    value={otherText[qi] ?? ''}
+                    onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
+                    placeholder="Type your answer"
+                    className="w-full resize-y rounded border border-edge bg-void px-2 py-1.5 text-[12px] text-chalk outline-none focus:border-beacon"
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ),
+        )}
       </div>
 
       <div className="mt-3 flex items-center gap-2 border-t border-edge px-3 py-2">
@@ -154,7 +200,11 @@ export function QuestionCard({
           {sending ? 'Sending…' : 'Answer'}
         </button>
         <span className="text-[11px] text-slate">
-          {ready ? 'Sends your choice back to the agent' : 'Choose an option for every question'}
+          {ready
+            ? 'Sends your choice back to the agent'
+            : tabbed
+              ? `${answered.filter(Boolean).length} of ${questions.length} answered`
+              : 'Choose an option'}
         </span>
       </div>
     </div>

@@ -4198,20 +4198,44 @@ test('선택지를 눌러 답하면 그 답이 세션으로 간다', async ({ pa
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
 
-test('질문이 여러 개면 다 답해야 보낼 수 있다', async ({ page }) => {
+test('질문이 여러 개면 탭으로 나뉘고, 다 답해야 보낼 수 있다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: QUESTIONS })
 
+  // 질문이 여럿이면 쌓지 않고 탭이다 (#8) — 두 번째 질문은 제 탭으로 가야 보인다
+  await expect(page.getByTestId('question-tabs')).toBeVisible()
+  await expect(page.getByTestId('question-card')).not.toContainText('음료는?')
+
   // 반만 보내면 모델이 나머지를 지어낸다 — 그래서 다 고르기 전엔 잠가 둔다
   await page.getByTestId('question-option').filter({ hasText: '김밥' }).click()
   await expect(page.getByTestId('question-submit')).toBeDisabled()
+  // 어느 탭이 아직 비었는지는 탭 줄에서 읽힌다 — 그러라고 쌓기를 버린 것이다
+  await expect(page.getByTestId('question-tab-0')).toHaveAttribute('data-answered', 'true')
+  await expect(page.getByTestId('question-tab-1')).not.toHaveAttribute('data-answered', 'true')
 
+  await page.getByTestId('question-tab-1').click()
   await page.getByTestId('question-option').filter({ hasText: '커피' }).click()
   await expect(page.getByTestId('question-submit')).toBeEnabled()
   await page.getByTestId('question-submit').click()
 
   await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 김밥 | 커피')
+})
+
+/**
+ * 탭을 오가는 것은 공짜여야 한다. 숨김이 unmount였다면 옆 질문을 잠깐 보고 온 사이
+ * 반쯤 쓴 직접 입력이 사라진다 — 쌓기를 탭으로 바꾸며 새로 생기면 안 되는 유일한 비용이다.
+ */
+test('탭을 오가도 고른 것과 쓰던 답이 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: QUESTIONS })
+
+  await page.getByTestId('question-other').click()
+  await page.getByTestId('question-other-input').fill('쓰다 만 답')
+  await page.getByTestId('question-tab-1').click()
+  await page.getByTestId('question-tab-0').click()
+  await expect(page.getByTestId('question-other-input')).toHaveValue('쓰다 만 답')
 })
 
 /*

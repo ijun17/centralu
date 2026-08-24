@@ -16,12 +16,22 @@ import type { GraphRow } from '@cc/core'
 export const ROW_H = 38
 const LANE_W = 9
 const DOT_Y = ROW_H / 2
-const PAD = 7
+/*
+ * The left pad is the panel's text padding (px-3, 12px), not a lane measure.
+ *
+ * The commit row carries no padding of its own — this SVG is its first child, so this
+ * number is the distance between the panel wall and lane 0. It was 7, and the HEAD ring
+ * (r 5 + 1 stroke) reaches 5.5 from center, which left the ring 1.5px off the wall —
+ * visibly touching it. 12 lines the dots up with every other left edge in the panel.
+ * The right side stays narrow: it faces the row's own gap, not the wall.
+ */
+const PAD_L = 12
+const PAD_R = 7
 
-const x = (lane: number) => PAD + lane * LANE_W
+const x = (lane: number) => PAD_L + lane * LANE_W
 
 export function graphWidth(lanes: number): number {
-  return PAD * 2 + Math.max(0, lanes - 1) * LANE_W
+  return PAD_L + PAD_R + Math.max(0, lanes - 1) * LANE_W
 }
 
 /** 레인이 바뀌는 선은 곡선으로. 꺾인 직선은 화살표처럼 보여서 방향을 오해하게 만든다 */
