@@ -60,6 +60,30 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
 const TOOL_LABEL: Record<ToolName, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 /**
+ * 이 도구의 응답 길이 단계 (#54). 비어 있으면 그 도구에는 노브가 없어서 행 자체가 안 뜬다.
+ *
+ * 도구 이름으로 갈리지 않는다 — 어댑터 능력 선언(verbosities)을 읽는다.
+ * codex에만 있는 노브지만 "codex면 보여줘"라고 적는 순간, Claude가 같은 노브를
+ * 얻는 날 이 파일을 아는 사람만 고칠 수 있는 코드가 된다.
+ */
+export function useVerbosities(tool: ToolName): string[] {
+  const platform = usePlatform()
+  const [levels, setLevels] = useState<string[]>([])
+  useEffect(() => {
+    let alive = true
+    void platform.agents
+      .capabilities(tool)
+      .then((c) => alive && setLevels(c.verbosities))
+      // 능력을 못 읽어도 메뉴는 떠야 한다 — 행 하나가 빠질 뿐이다
+      .catch(() => alive && setLevels([]))
+    return () => {
+      alive = false
+    }
+  }, [platform, tool])
+  return levels
+}
+
+/**
  * 메뉴 한 줄.
  *
  * 고른 것은 **왼쪽 한 칸**에만 표식을 넣어 말한다. 오른쪽에 붙이면 줄마다 표식의
@@ -118,6 +142,7 @@ export function SessionSettings({
   tool,
   model,
   effort,
+  verbosity,
   preset,
   live,
 }: {
@@ -125,6 +150,8 @@ export function SessionSettings({
   tool: ToolName
   model: string | null
   effort: string | null
+  /** 응답 길이 (#54). null이면 도구 기본값 */
+  verbosity: string | null
   preset: PermissionPreset
   /** 프로세스가 살아 있는가 — Claude는 살아 있어야 모델 목록을 준다 */
   live: boolean
@@ -132,6 +159,7 @@ export function SessionSettings({
   const update = useStore((s) => s.updateSessionSettings)
   const switchTool = useStore((s) => s.switchTool)
   const { models, reason } = useModels(tool, live)
+  const verbosities = useVerbosities(tool)
   const [open, setOpen] = useState(false)
   const [asking, setAsking] = useState<ToolName | null>(null)
   const rootRef = useRef<HTMLSpanElement>(null)
@@ -173,8 +201,9 @@ export function SessionSettings({
   }
 
   const modelLabel = current?.label ?? model ?? 'Default'
-  // 지금 값은 열지 않아도 읽혀야 한다 — 메뉴로 감춘 대가를 여기서 갚는다
-  const summary = [modelLabel, effort, PRESETS.find((p) => p.value === preset)?.label]
+  // 지금 값은 열지 않아도 읽혀야 한다 — 메뉴로 감춘 대가를 여기서 갚는다.
+  // verbosity는 effort와 단계 이름이 겹쳐서(low/medium/high) 맨몸으로 놓으면 어느 쪽인지 알 수 없다 — 이름을 붙인다
+  const summary = [modelLabel, effort, verbosity && `${verbosity} verbosity`, PRESETS.find((p) => p.value === preset)?.label]
     .filter(Boolean)
     .join(' · ')
 
@@ -250,6 +279,27 @@ export function SessionSettings({
                   label={lv}
                   selected={lv === effort}
                   onPick={() => choose({ effort: lv })}
+                />
+              ))}
+            </MenuSection>
+          )}
+
+          {/* 응답 길이 (#54) — 도구가 이 노브를 줄 때만 보인다. 실측: low 82단어 · high 269단어 (같은 질문) */}
+          {verbosities.length > 0 && (
+            <MenuSection label="Verbosity" note="How long answers run — shorter arrives sooner.">
+              <MenuRow
+                testId="settings-verbosity-default"
+                label="Default"
+                selected={!verbosity}
+                onPick={() => choose({ verbosity: null })}
+              />
+              {verbosities.map((lv) => (
+                <MenuRow
+                  key={lv}
+                  testId={`settings-verbosity-${lv}`}
+                  label={lv}
+                  selected={lv === verbosity}
+                  onPick={() => choose({ verbosity: lv })}
                 />
               ))}
             </MenuSection>

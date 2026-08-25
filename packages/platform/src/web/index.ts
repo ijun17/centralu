@@ -1,12 +1,12 @@
 import type {
   Attachment,
-  PermissionPreset,
   ApprovalDecision,
   ApprovalScope,
   CreateSessionParams,
   NormalizedEvent,
   ToolName,
   QuestionAnswer,
+  UpdateSettingsParams,
 } from '@cc/protocol'
 import type { AgentPort, AlertKind, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
@@ -96,7 +96,13 @@ class WebAgentPort implements AgentPort {
       sessionId,
     })
   }
-  updateSettings(sessionId: string, settings: { model?: string | null; permissionPreset?: PermissionPreset }) {
+  /*
+   * 포트와 같은 타입을 그대로 쓴다 (Omit<UpdateSettingsParams,'sessionId'>).
+   * 여기 손으로 다시 적었을 때 effort가 빠진 채로도 **동작했다** — 스토어가 변수로
+   * 넘기면 TS는 초과 속성을 검사하지 않아서다 (commands.ts의 그 사건). 타입이 거짓말을
+   * 못 하게 protocol의 이름 있는 타입 하나만 쓴다 — verbosity(#54)를 더하며 정리.
+   */
+  updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>) {
     return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
   }
   async worktreeStatus(sessionId: string) {

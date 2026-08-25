@@ -11,7 +11,7 @@ import type { AgentAdapter } from '../adapters/contract.js'
  */
 const failingAdapter: AgentAdapter = {
   tool: 'claude',
-  capabilities: { approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [] },
+  capabilities: { approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [] },
   detect: async () => ({ tool: 'claude', installed: true, loggedIn: true, detail: 'test' }),
   createSession: async () => {
     throw new Error('Native CLI binary for darwin-arm64 not found')

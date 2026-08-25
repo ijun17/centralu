@@ -93,7 +93,7 @@ export class SessionManager {
    */
   private running = new Map<
     string,
-    { model: string | null; effort: string | null; permissionPreset: PermissionPreset }
+    { model: string | null; effort: string | null; verbosity: string | null; permissionPreset: PermissionPreset }
   >()
   /** 도구+디렉토리별 슬래시 명령 캐시 (세션이 준비되기 전에도 목록을 줄 수 있게) */
   private commandCache = new Map<string, CommandInfo[]>()
@@ -411,6 +411,7 @@ export class SessionManager {
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, effort: params.effort ?? null,
+      verbosity: params.verbosity ?? null,
       permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
       worktree,
@@ -430,6 +431,7 @@ export class SessionManager {
       handle = await adapter.createSession(
         {
           sessionId: id, cwd, model: params.model, effort: params.effort,
+          verbosity: params.verbosity,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
           // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
           orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
@@ -452,7 +454,12 @@ export class SessionManager {
     this.store.upsertSession(info)
     this.store.setSessionCwd(id, cwd)
     this.handles.set(id, handle)
-    this.running.set(id, { model: info.model, effort: info.effort, permissionPreset: info.permissionPreset })
+    this.running.set(id, {
+      model: info.model,
+      effort: info.effort,
+      verbosity: info.verbosity,
+      permissionPreset: info.permissionPreset,
+    })
     handle.applyRules?.(this.rulesFor(id, params.projectId))
 
     // 이전 대화 복원. **어댑터가 뜬 다음에** 한다 —
@@ -731,6 +738,7 @@ export class SessionManager {
           cwd,
           model: m.model ?? undefined,
           effort: m.effort ?? undefined,
+          verbosity: m.verbosity ?? undefined,
           permissionPreset: m.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
           /*
@@ -763,7 +771,12 @@ export class SessionManager {
         throw err
       })
       this.handles.set(sessionId, handle)
-      this.running.set(sessionId, { model: m.model, effort: m.effort, permissionPreset: m.permissionPreset })
+      this.running.set(sessionId, {
+        model: m.model,
+        effort: m.effort,
+        verbosity: m.verbosity,
+        permissionPreset: m.permissionPreset,
+      })
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // 이제야 식별자가 잡혔을 수 있다 — 다음 재개를 위해 남긴다
       if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
@@ -873,13 +886,14 @@ export class SessionManager {
    */
   async updateSettings(
     sessionId: string,
-    s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<SessionInfo> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
     if (s.model !== undefined) m.model = s.model
     if (s.effort !== undefined) m.effort = s.effort
+    if (s.verbosity !== undefined) m.verbosity = s.verbosity
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
 
@@ -890,7 +904,10 @@ export class SessionManager {
     const live = this.running.get(sessionId)
     const drifted =
       !!live &&
-      (live.model !== m.model || live.effort !== m.effort || live.permissionPreset !== m.permissionPreset)
+      (live.model !== m.model ||
+        live.effort !== m.effort ||
+        live.verbosity !== m.verbosity ||
+        live.permissionPreset !== m.permissionPreset)
 
     /**
      * 권한·모델은 도구 프로세스를 **띄울 때 고정된다**.

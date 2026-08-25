@@ -30,6 +30,8 @@ export const CreateSessionParams = z.object({
   tool: ToolName,
   model: z.string().optional(),
   effort: z.string().optional(),
+  /** 응답 길이 (codex의 model_verbosity). 지원 단계는 어댑터 능력 선언이 말한다 (#54) */
+  verbosity: z.string().optional(),
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
   resumeExternalId: z.string().optional(),
@@ -58,6 +60,8 @@ export const UpdateSettingsParams = z.object({
   model: z.string().nullable().optional(),
   /** 추론 강도. 모델마다 지원 단계가 다르므로 문자열 그대로 나른다 */
   effort: z.string().nullable().optional(),
+  /** 응답 길이. effort와 같은 규칙으로 문자열 그대로 나른다 (#54) */
+  verbosity: z.string().nullable().optional(),
   permissionPreset: PermissionPreset.optional(),
 })
 export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
@@ -86,6 +90,14 @@ export const SessionInfo = z.object({
   model: z.string().nullable().default(null),
   /** 추론 강도. 지원하지 않는 모델이면 null이다 */
   effort: z.string().nullable().default(null),
+  /**
+   * 응답 길이 (#54). null이면 도구 기본값.
+   *
+   * effort와 달리 **다음에 깰 때** 적용된다 — codex의 turn/start에는 이 자리가 없고
+   * thread config로만 넘어간다 (generated/v2/TurnStartParams.ts에 없음 — 실측).
+   * 매니저의 drift 재시작이 그 길을 이미 알고 있으므로 배관은 effort와 같다.
+   */
+  verbosity: z.string().nullable().default(null),
   permissionPreset: PermissionPreset.default('normal'),
   /**
    * 이어받은 이전 대화의 식별자 (불러오기로 만든 세션만).

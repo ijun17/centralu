@@ -109,6 +109,8 @@ export type CreateSessionOpts = {
   model?: string
   /** 추론 강도. 모델마다 단계가 달라 문자열 그대로 나른다 */
   effort?: string
+  /** 응답 길이 (#54). capabilities.verbosities가 비어 있는 어댑터는 무시한다 */
+  verbosity?: string
   permissionPreset: PermissionPreset
   resumeExternalId?: string
   /** 주어지면 이 세션은 오케스트레이터다 — 어댑터가 자기 방식으로 도구를 붙인다 */
@@ -168,6 +170,7 @@ export interface SessionHandle {
   updateSettings?(settings: {
     model?: string | null
     effort?: string | null
+    verbosity?: string | null
     permissionPreset?: PermissionPreset
   }): void
   /**

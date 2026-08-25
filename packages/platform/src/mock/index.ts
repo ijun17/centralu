@@ -396,7 +396,7 @@ export class MockPlatform implements Platform {
         : null
       const info: SessionInfo = {
         id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`, worktree,
-        effort: params.effort ?? null,
+        effort: params.effort ?? null, verbosity: params.verbosity ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
@@ -490,7 +490,7 @@ export class MockPlatform implements Platform {
       const info = {
         id, projectId: null, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
-        createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null,
+        createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
         permissionPreset: 'normal' as const, importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       }
@@ -543,12 +543,13 @@ export class MockPlatform implements Platform {
     },
     updateSettings: async (
       sessionId: string,
-      s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
+      s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
     ) => {
       const sess = this.sessions.get(sessionId)
       if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       if (s.model !== undefined) sess.model = s.model
       if (s.effort !== undefined) sess.effort = s.effort
+      if (s.verbosity !== undefined) sess.verbosity = s.verbosity
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
       return { ...sess }
     },
@@ -623,8 +624,10 @@ export class MockPlatform implements Platform {
     },
     commands: async (_sessionId: string) => ({ ...this.commandState }),
     usage: async (_tool: ToolName) => ({ ...this.usageState }),
-    capabilities: async (_tool: ToolName): Promise<AdapterCapabilities> => ({
+    capabilities: async (tool: ToolName): Promise<AdapterCapabilities> => ({
       approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'],
+      // 실물과 같은 모양: codex만 응답 길이 노브가 있다 (#54) — UI가 이 배열로 행을 그린다
+      verbosities: tool === 'codex' ? ['low', 'medium', 'high'] : [],
     }),
     detect: async () => [
       { tool: 'claude' as const, installed: true, loggedIn: true, detail: 'mock 2.1.0' },

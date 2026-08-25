@@ -12,6 +12,7 @@ import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, PermissionPr
 import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
+import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
@@ -105,6 +106,12 @@ class CodexSession implements SessionHandle {
       try {
         res = await this.client.request<Record<string, unknown>>('thread/resume', {
           threadId: this.opts.resumeExternalId,
+          /*
+           * 응답 길이는 재개에도 따라와야 한다 (#54). turn/start에는 이 자리가 없어서
+           * (effort와 다른 점) 스레드를 띄우는 이 두 자리가 유일한 길이다 —
+           * 여기 빠지면 "잠들었다 깨면 설정이 풀리는" 종류의 조용한 유실이 된다.
+           */
+          ...(this.opts.verbosity ? { config: { model_verbosity: this.opts.verbosity } } : {}),
         })
       } catch (err) {
         /*
@@ -143,9 +150,18 @@ class CodexSession implements SessionHandle {
          * 그래서 프로세스가 하나 더 뜬다 — Claude 경로에는 없는 비용이다.
          */
         ...(this.opts.systemPromptAppend ? { developerInstructions: this.opts.systemPromptAppend } : {}),
+        /*
+         * config는 아래 오케스트레이터 블록과 **합쳐진다**. 스프레드 둘 다 config 키를
+         * 만들면 뒤가 앞을 통째로 덮으므로, 오케스트레이터 블록 쪽에도 verbosity를 넣는다.
+         * (오케스트레이터에 verbosity를 줄 일은 없지만, 자리가 겹치는 걸 아는 코드가 맞다)
+         */
+        ...(this.opts.verbosity && !(this.opts.orchestratorTools && this.opts.orchestratorBridge)
+          ? { config: { model_verbosity: this.opts.verbosity } }
+          : {}),
         ...(this.opts.orchestratorTools && this.opts.orchestratorBridge
           ? {
               config: {
+                ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
                 /*
                  * **폴더의 문서를 읽지 않는다** (Claude의 settingSources: []에 대응).
                  *
@@ -339,6 +355,18 @@ function codexHome(): string {
   return custom ? custom : join(homedir(), '.codex')
 }
 
+/**
+ * 응답 길이 단계 (#54). `model/list`가 모델별로 알려주지 않아 여기 적는다 — 대신
+ * 생성 타입(generated/Verbosity.ts, ts-rs가 codex 소스에서 뽑는다)에 묶어 둔다:
+ * codex가 단계를 더하거나 빼면 아래 두 검사 중 하나가 **컴파일에서** 터진다.
+ * 실측(codex exec, 같은 질문): low 82단어 · high 269단어 — 이름값을 한다.
+ */
+const CODEX_VERBOSITIES = ['low', 'medium', 'high'] as const satisfies readonly Verbosity[]
+// 빠진 단계가 없는지 — satisfies는 '틀린 값'만 잡고 '빼먹은 값'은 못 잡는다
+type MissingVerbosity = Exclude<Verbosity, (typeof CODEX_VERBOSITIES)[number]>
+const _allVerbositiesListed: MissingVerbosity extends never ? true : never = true
+void _allVerbositiesListed
+
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
 
@@ -348,6 +376,7 @@ export class CodexAdapter implements AgentAdapter {
     resume: true, // thread/resume
     autoTitle: true, // thread/name/updated
     attachments: ['image', 'file'],
+    verbosities: [...CODEX_VERBOSITIES],
   }
 
   async detect(): Promise<DetectResult> {

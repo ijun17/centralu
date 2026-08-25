@@ -106,6 +106,15 @@ export const AdapterCapabilities = z.object({
   resume: z.boolean(),
   autoTitle: z.boolean(),
   attachments: z.array(z.enum(['image', 'file'])).default([]),
+  /**
+   * 응답 길이(verbosity) 단계. 비어 있으면 이 도구에는 그 노브가 없다 (#54).
+   *
+   * 모델에 붙이지 않고 여기 두는 이유: codex의 `model/list`는 모델별 verbosity를
+   * 알려주지 않는다 (generated/v2/Model.ts에 그 필드가 없다 — 실측).
+   * 모델에 붙이려면 우리가 지어내야 하는데, 그 순간 목록 하드코딩 금지 규칙이 깨진다.
+   * 도구 단위 성질은 어댑터 능력 선언이 맞는 자리다.
+   */
+  verbosities: z.array(z.string()).default([]),
 })
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilities>
 

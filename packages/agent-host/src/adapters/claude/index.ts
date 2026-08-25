@@ -494,6 +494,9 @@ export class ClaudeAdapter implements AgentAdapter {
     resume: true,
     autoTitle: true,
     attachments: ['image', 'file'],
+    // SDK 0.3.231의 타입에 응답 길이 노브가 없다 (effortLevel뿐 — #54에서 실측).
+    // 생기면 여기만 채우면 된다 — UI는 이 배열을 보고 행을 그린다.
+    verbosities: [],
   }
 
   async detect(): Promise<DetectResult> {

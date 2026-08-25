@@ -65,6 +65,8 @@ export type SessionSummary = {
   model: string | null
   /** 추론 강도. 지원하지 않는 모델이면 null이다 (단계는 모델마다 다르다) */
   effort: string | null
+  /** 응답 길이 (#54). 지원 여부는 어댑터 능력 선언(verbosities)이 말한다 */
+  verbosity: string | null
   permissionPreset: PermissionPreset
   /**
    * 이 세션이 도는 워크트리 (FR-2 옵션). null이면 프로젝트 디렉토리에서 직접 돈다.
@@ -77,7 +79,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
   return {
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
-    limit: null, lastError: null, touchedPaths: [], model: null, effort: null, permissionPreset: 'normal',
+    limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, permissionPreset: 'normal',
     worktree: null,
     tool: 'claude' as const, ...init,
   }

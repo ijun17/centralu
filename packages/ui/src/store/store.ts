@@ -432,7 +432,7 @@ export type AppState = {
   deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
   updateSessionSettings(
     sessionId: string,
-    s: { model?: string | null; effort?: string | null; permissionPreset?: PermissionPreset },
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /**
@@ -790,7 +790,7 @@ export const useStore = create<AppState>((set, get) => ({
            */
           ...initialSession({
             id: s.id, projectId: s.projectId, name: s.name, tool: s.tool,
-            model: s.model, effort: s.effort, permissionPreset: s.permissionPreset, worktree: s.worktree,
+            model: s.model, effort: s.effort, verbosity: s.verbosity, permissionPreset: s.permissionPreset, worktree: s.worktree,
           }),
           autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
           lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
@@ -1779,12 +1779,26 @@ export const useStore = create<AppState>((set, get) => ({
             ...st.sessions[sessionId]!,
             model: info.model,
             effort: info.effort,
+            verbosity: info.verbosity,
             permissionPreset: info.permissionPreset,
             worktree: info.worktree,
           },
         },
       }))
-      set({ toast: s.model !== undefined ? `Model: ${info.model ?? 'Default'} (from next turn)` : `Perms: ${info.permissionPreset}` })
+      /*
+       * 무엇을 바꿨는지 그대로 말한다. 예전에는 model 아니면 전부 "Perms:"라고 했다 —
+       * effort를 바꿔도 "Perms: normal"이 떠서, 방금 한 일과 화면의 말이 달랐다.
+       * (verbosity(#54)를 더하면서 세 번째로 거짓말할 자리가 생겨 고친다)
+       */
+      const changed =
+        s.model !== undefined
+          ? `Model: ${info.model ?? 'Default'}`
+          : s.effort !== undefined
+            ? `Effort: ${info.effort ?? 'default'}`
+            : s.verbosity !== undefined
+              ? `Verbosity: ${info.verbosity ?? 'default'}`
+              : `Perms: ${info.permissionPreset}`
+      set({ toast: `${changed} (from next turn)` })
     } catch (e) {
       set({ toast: `Could not change settings: ${(e as Error).message}` })
     }
@@ -1946,12 +1960,12 @@ export const useStore = create<AppState>((set, get) => ({
               state: f.state, archived: f.archived, live: f.live,
               // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
               lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
-              waitingSince: f.waitingSince, model: f.model, effort: f.effort, permissionPreset: f.permissionPreset,
+              waitingSince: f.waitingSince, model: f.model, effort: f.effort, verbosity: f.verbosity, permissionPreset: f.permissionPreset,
               worktree: f.worktree,
               ...liveFactsOf(f),
             }
           : {
-              ...initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool, effort: f.effort, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree }),
+              ...initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree }),
               autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
               lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
               ...liveFactsOf(f),

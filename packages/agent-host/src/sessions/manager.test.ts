@@ -69,7 +69,7 @@ class FakeHandle implements SessionHandle {
 class FakeAdapter implements AgentAdapter {
   tool: ToolName = 'claude'
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'],
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [],
   }
   last: FakeHandle | null = null
   /** 오케스트레이터에게만 오는 도구 — 붙는지/안 붙는지를 테스트가 본다 */
@@ -87,7 +87,10 @@ class FakeAdapter implements AgentAdapter {
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' } }
   /** 어느 디렉토리에서 띄웠나 — 워크트리 세션이 정말 격리됐는지 보는 유일한 증거다 */
   lastCwd: string | null = null
+  /** 마지막 세션이 어떤 옵션으로 떴나 — 설정이 프로세스까지 닿았는지의 유일한 증거 */
+  lastOpts: CreateSessionOpts | null = null
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
+    this.lastOpts = opts
     if (this.failCreate) throw typeof this.failCreate === 'string' ? new Error(this.failCreate) : this.failCreate
     if (this.hangCreate) {
       await new Promise<void>((r) => (this.resolveLate = r))
@@ -379,7 +382,7 @@ describe('RPC 일반', () => {
 describe('이전 세션 불러오기', () => {
   class ListingAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
     }
     listed: { cwd: string; limit: number } | null = null
     read: { externalId: string; cwd: string } | null = null
@@ -578,6 +581,27 @@ describe('설정 변경은 실제로 적용된다', () => {
     expect(mgr.isLive(s.id)).toBe(true)
   })
 
+  /*
+   * 응답 길이(#54)는 effort와 달리 turn 단위로 못 바꾼다 (codex의 turn/start에 자리가
+   * 없다). 그래서 이 설정이 실제가 되는 길은 **갈아 끼우기**뿐이고, 새 프로세스가
+   * 그 값으로 떴는지까지 봐야 배관이 끝까지 이어졌다고 말할 수 있다.
+   */
+  it('응답 길이를 바꾸면 갈아 끼우고, 새 프로세스가 그 값으로 뜬다 (#54)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const before = adapter.last!
+
+    await rpc('agents.updateSettings', { sessionId: s.id, verbosity: 'low' })
+
+    expect(before.disposed).toBe(true)
+    expect(adapter.last).not.toBe(before)
+    expect(adapter.lastOpts?.verbosity).toBe('low')
+    expect(mgr.listSessions().find((x) => x.id === s.id)!.verbosity).toBe('low')
+    expect(mgr.isLive(s.id)).toBe(true)
+  })
+
   it('같은 값으로 다시 저장하면 프로세스를 건드리지 않는다', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', {
@@ -652,7 +676,7 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
 describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () => {
   class ListingAdapter2 extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
     }
     async listExternalSessions() {
       return [{ externalId: 'ext-past', title: '어제 하던 일', updatedAt: 111 }]
@@ -700,7 +724,7 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
 describe('도구가 대화를 못 찾을 때', () => {
   class GoneAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
     }
     /** 도구가 갖고 있다고 답할 id 목록 */
     present: string[] = ['ext-1']
@@ -1734,7 +1758,7 @@ describe('재개는 만들어진 곳으로 돌아간다', () => {
     store.upsertSession({
       id: 'old', projectId: p.id, tool: 'claude', externalId: 'ext-1', name: '예전 세션',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
+      createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
     })
     expect(store.sessionCwd('old')).toBeNull()
