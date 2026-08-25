@@ -1502,7 +1502,7 @@ test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 �
 })
 
 /** 증거 패널: 탭으로 갈리고, 접어도 되살릴 길이 남는다 */
-test('증거 패널 탭: 깃은 위가 변경·아래가 기록, 파일 탭은 트리', async ({ page }) => {
+test('증거 패널 탭: 깃은 변경만, 기록은 기록 탭에서 그래프와 함께', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1515,12 +1515,16 @@ test('증거 패널 탭: 깃은 위가 변경·아래가 기록, 파일 탭은 �
   })
   await newSession(page, 'alpha', '작업')
 
-  // 깃 탭이 기본 — 위는 변경, 아래는 기록
+  // 깃 탭이 기본 — 변경만 있다. 기록 스트립은 분할(#20)에서 이웃 탭 스트립을 덮어 떠났다
   await expect(page.getByTestId('evidence-git')).toBeVisible()
   await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
-  await expect(page.getByTestId('evidence-tree')).toBeVisible()
-  await expect(page.getByTestId('evidence-commit-aaa111')).toContainText('첫 커밋')
-  await expect(page.getByTestId('evidence-commit-bbb222')).toContainText('merge')
+  await expect(page.getByTestId('evidence-tree')).toHaveCount(0)
+
+  // 기록은 기록 탭에서 — 스트립에 살던 레인 그래프도 여기로 이사했다
+  await page.getByTestId('evidence-tab-history').click()
+  await expect(page.getByTestId('history-commit-aaa111')).toContainText('첫 커밋')
+  await expect(page.getByTestId('history-commit-bbb222')).toContainText('merge')
+  await expect(page.getByTestId('commit-graph-aaa111')).toBeVisible()
 
   // 파일 탭으로 가면 트리만
   await page.getByTestId('evidence-tab-files').click()
@@ -1543,7 +1547,8 @@ test('기록에서 커밋을 누르면 넓은 곳에서 펼쳐진다', async ({ 
   })
   await newSession(page, 'alpha', '작업')
 
-  await page.getByTestId('evidence-commit-aaa111').click()
+  await page.getByTestId('evidence-tab-history').click()
+  await page.getByTestId('history-commit-aaa111').click()
   await expect(page.getByTestId('overlay')).toBeVisible()
   await expect(page.getByTestId('diff-view')).toContainText('새 줄')
 })
@@ -2458,6 +2463,8 @@ test('깃 기록이 커밋을 선으로 잇는다', async ({ page }) => {
     ]
   })
   await newSession(page, 'alpha', '작업')
+  // 그래프는 기록 탭에 산다 — 깃 탭의 스트립은 분할에서 이웃을 덮어 떠났다
+  await page.getByTestId('evidence-tab-history').click()
 
   // 병합 커밋에서 두 갈래가 뻗는다 (직선 하나 + 갈라지는 곡선 하나)
   const merge = page.getByTestId('commit-graph-mmmmmmm')
@@ -2466,23 +2473,6 @@ test('깃 기록이 커밋을 선으로 잇는다', async ({ page }) => {
 
   // 가지가 본류로 합쳐지므로 뿌리에는 선이 하나만 내려온다
   await expect(page.getByTestId('commit-graph-zzzzzzz')).toBeVisible()
-})
-
-/** 커밋 목록과 기록 중 무엇을 더 볼지는 그때그때 다르다 */
-test('깃 패널의 변경과 기록 사이 높이를 조절할 수 있다', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '작업')
-
-  const before = (await page.getByTestId('evidence-tree').boundingBox())!.height
-  const handle = page.getByTestId('evidence-tree-resize')
-  const box = (await handle.boundingBox())!
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(box.x + box.width / 2, box.y - 80)
-  await page.mouse.up()
-
-  const after = (await page.getByTestId('evidence-tree').boundingBox())!.height
-  expect(after).toBeGreaterThan(before + 40)
 })
 
 /**

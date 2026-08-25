@@ -687,6 +687,35 @@ test('dragging a tab to the bottom half splits the panel — two tabs visible at
   expect(await tabOrder(page)).toEqual(['git', 'history', 'terminal', 'files'])
 })
 
+/*
+ * The dogfooding overlap: git on top, another tab split below, and the top group's
+ * content painted over the bottom group's tab strip. Two causes, both fixed — the git
+ * tab's fixed-height history strip (removed; history lives in its own tab) and the
+ * group body clipping nothing (overflow-hidden now). The hit test is the claim: if
+ * anything overlaps the strip, the point under its tab resolves to the intruder.
+ */
+test('a tall top group never paints over the bottom group‘s tab strip', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = Array.from({ length: 80 }, (_, i) => ({
+      path: `src/f${i}.ts`, staged: false, status: 'M',
+    }))
+  })
+  await newSession(page, 'alpha', 'claude', '작업')
+
+  await startTabDrag(page, 'files')
+  await dropOnBodyBottom(page)
+  await expect(page.getByTestId('evidence-tabs-1')).toBeVisible()
+
+  const hit = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="evidence-tabs-1"]')!
+    const r = el.getBoundingClientRect()
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2))
+  })
+  expect(hit).toBe(true)
+})
+
 test('dragging the bottom group‘s last tab back to the top strip closes the split (#20)', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')

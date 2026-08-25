@@ -31,9 +31,11 @@ export const PANEL_TABS = ['git', 'history', 'files', 'terminal'] as const
 /**
  * What the evidence panel can show.
  *
- * `history` does not replace the log strip inside the git tab (#21). That strip is
- * context kept beside staging and committing, capped at `treeHeight`; coming to *read*
- * the log is a different errand and gets a whole column. Same data, different job.
+ * `history` is the only place the log lives now. It started (#21) alongside a log strip
+ * inside the git tab; that strip was a fixed-height block, and once the panel could
+ * split into stacked groups (#20) it overflowed a short group straight over the next
+ * group's tab strip — so it left, and its lane graph moved here. Wanting the log next
+ * to the git tab is exactly what the split is for: drag `history` below `git`.
  */
 export type PanelTab = (typeof PANEL_TABS)[number]
 

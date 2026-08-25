@@ -20,7 +20,7 @@ import { TerminalPane } from './Terminal.jsx'
 import { COMMIT_LIMIT, commitAgo, hasMultipleAuthors } from './commits.js'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, TREE_DEFAULT, TREE_MAX, TREE_MIN } from '../../store/store.js'
+import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN } from '../../store/store.js'
 
 /**
  * 증거 레인 (우측).
@@ -257,7 +257,13 @@ function TabGroup({
         ))}
       </nav>
       <div
-        className="relative flex min-h-0 flex-1 flex-col"
+        /*
+          overflow-hidden은 이웃 그룹을 지키는 담이다. 이게 없던 동안 위 그룹의 내용이
+          몸통을 넘치면 **아래 그룹의 탭 스트립 위에 그려졌다** (깃 탭의 고정 높이
+          History 스트립이 실제로 그랬다 — 도그푸딩 지적). 탭 하나가 무엇을 그리든
+          자기 몸통 밖으로는 못 나간다는 규칙을 내용물이 아니라 그릇이 지킨다.
+        */
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         data-testid={`evidence-body-${gi}`}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
@@ -412,12 +418,15 @@ function TabBody({
 
   if (tab === 'history') return <CommitHistory projectId={projectId} />
 
-  // Git tab: above, what changed right now; below, how we got here.
-  // Two different questions, not two file lists — that is why they sit together.
+  /*
+    Git tab: what changed right now, alone. The history strip that used to sit below it
+    left with the split feature (#20): it was a fixed-height block, so in a short split
+    half it overflowed the group body straight over the next group's tab strip — and the
+    History tab (#21) already answers "how did we get here" with a full column to do it in.
+  */
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <GitChanges projectId={projectId} denied={project.git?.denied} />
-      <GitTree projectId={projectId} />
     </div>
   )
 }
@@ -741,98 +750,16 @@ function ChangeRow({
 }
 
 /**
- * 깃 트리 — 어떻게 여기까지 왔나.
- *
- * 선을 그린다. 예전엔 좁다는 이유로 점만 찍었는데, 그러면 갈라짐과 합쳐짐이 사라져
- * 그냥 목록이 된다 — 트리라고 부를 이유가 없어진다. 레인 폭을 9px로 좁게 잡으면
- * 실제 저장소에서 제목 자리를 거의 뺏지 않는다.
- */
-function GitTree({ projectId }: { projectId: string }) {
-  const platform = usePlatform()
-  const openCommit = useStore((s) => s.openCommit)
-  const touched = useTouchedCount(projectId)
-  const height = useStore((s) => s.treeHeight)
-  const setTreeHeight = useStore((s) => s.setTreeHeight)
-  const [commits, setCommits] = useState<GitCommit[] | null>(null)
-
-  useEffect(() => {
-    // 프로젝트를 옮기는 사이 늦게 온 응답이 남의 기록을 그리면 안 된다
-    let alive = true
-    platform.git
-      .log(projectId, 50)
-      .then((c) => alive && setCommits(c))
-      .catch(() => alive && setCommits([]))
-    return () => {
-      alive = false
-    }
-  }, [platform, projectId, touched])
-
-  const graph = useMemo(() => {
-    const rows = layoutCommits(commits ?? [])
-    return { rows, lanes: laneCount(rows) }
-  }, [commits])
-
-  return (
-    <section
-      className="relative flex shrink-0 flex-col"
-      style={{ height }}
-      data-testid="evidence-tree"
-    >
-      <ResizeHandle
-        side="top"
-        min={TREE_MIN}
-        max={TREE_MAX}
-        onResize={setTreeHeight}
-        onReset={() => setTreeHeight(TREE_DEFAULT)}
-        testId="evidence-tree-resize"
-      />
-      <div className="px-3 py-1.5">
-        <span className="text-[11px] uppercase tracking-[0.12em] text-slate">History</span>
-      </div>
-      {commits === null ? (
-        <p className="px-3 pb-2 text-[11px] text-slate">Loading…</p>
-      ) : commits.length === 0 ? (
-        <p className="px-3 pb-2 text-[11px] text-slate" data-testid="evidence-no-commits">
-          No commits
-        </p>
-      ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto pb-1" data-testid="evidence-commits">
-          {commits.map((c, i) => (
-            <li key={c.sha}>
-              <button
-                /* 높이를 고정한다 — 행마다 높이가 다르면 선이 경계에서 어긋나 끊겨 보인다 */
-                className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-graphite/25"
-                style={{ height: ROW_H }}
-                onClick={() => openCommit(c.sha)}
-                data-testid={`evidence-commit-${c.shortSha}`}
-                title={`${c.subject} — ${c.author}`}
-              >
-                <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] text-ash">{c.subject}</span>
-                  <span className="readout block truncate text-[10px] text-slate">
-                    {c.shortSha} · {c.author}
-                    {c.parents.length > 1 && ' · merge'}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-/**
  * 기록 탭 — 로그를 **읽으러 오는** 자리 (#21).
  *
- * 위 `GitTree`와 데이터는 같고 용무가 다르다. 저쪽은 커밋을 만드는 동안 곁눈질하는
- * 맥락이라 일곱 줄에 갇혀 있고, 여기는 세로 한 칸을 통째로 쓴다.
+ * 깃 탭 아래 살던 History 스트립의 후계이기도 하다. 그 스트립은 고정 높이라 분할(#20)
+ * 에서 이웃 그룹의 탭 스트립을 덮었고, 같은 질문("어떻게 여기까지 왔나")을 이 탭이
+ * 세로 한 칸으로 이미 답하고 있어서 스트립 쪽을 걷었다.
  *
- * **선을 그리지 않는다.** 레인은 "이 갈래들이 어디서 만났나"를 물을 때 폭값을 하는데,
- * "요즘 무슨 일이 있었나"에는 같은 픽셀을 날짜에 주는 편이 낫다. 그래서 그래프는 저쪽에,
- * 날짜는 이쪽에 둔다 — 두 벌을 만든 게 아니라 질문을 나눈 것이다.
+ * **선(레인 그래프)은 이제 여기서 그린다.** #21 때 이 탭이 날짜를 고르고 선을 버린
+ * 이유는 "그래프는 저쪽(스트립)에 있다"였다 — 그 저쪽이 사라졌으므로 전제도 사라졌다.
+ * 전체 폭의 탭에는 둘이 같이 설 자리가 있다: 선이 갈라짐·합쳐짐을, 날짜가 '얼마나
+ * 됐나'를 말한다. 행 높이는 그래서 고정이다 — 선이 행 경계에서 맞물려야 이어져 보인다.
  *
  * 눌렀을 때 열리는 것도 새로 만들지 않는다: `openCommit`이 이미 넓은 오버레이의 기록
  * 탭을 그 커밋으로 펴 준다 (`git show`가 주는 diff 하나를 `DiffView`가 그린다).
@@ -858,6 +785,10 @@ function CommitHistory({ projectId }: { projectId: string }) {
   // 한 번만 읽는다 — 줄마다 시계를 보면 같은 목록 안에서 기준 시각이 달라진다
   const now = Date.now()
   const withAuthor = commits ? hasMultipleAuthors(commits) : false
+  const graph = useMemo(() => {
+    const rows = layoutCommits(commits ?? [])
+    return { rows, lanes: laneCount(rows) }
+  }, [commits])
 
   if (commits === null) {
     return (
@@ -877,22 +808,28 @@ function CommitHistory({ projectId }: { projectId: string }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-history">
       <ul className="min-h-0 flex-1 overflow-y-auto">
-        {commits.map((c) => (
+        {commits.map((c, i) => (
           <li key={c.sha}>
             <button
-              className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-graphite/25"
+              /* 높이 고정 — 행마다 높이가 다르면 선이 행 경계에서 어긋나 끊겨 보인다 */
+              className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-graphite/25"
+              style={{ height: ROW_H }}
               onClick={() => openCommit(c.sha)}
               data-testid={`history-commit-${c.shortSha}`}
               title={`${c.subject} — ${c.author}`}
             >
-              <span className="w-full truncate text-[12px] text-ash">{c.subject}</span>
-              <span className="readout w-full truncate text-[10px] text-slate">
-                {[
-                  c.shortSha,
-                  commitAgo(c.when, now),
-                  ...(withAuthor ? [c.author] : []),
-                  ...(c.parents.length > 1 ? ['merge'] : []),
-                ].join(' · ')}
+              {/* 왼쪽 여백은 그래프가 진다 (PAD_L) — px-3을 겹치면 점이 벽에서 두 배 멀어진다 */}
+              <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12px] text-ash">{c.subject}</span>
+                <span className="readout block truncate text-[10px] text-slate">
+                  {[
+                    c.shortSha,
+                    commitAgo(c.when, now),
+                    ...(withAuthor ? [c.author] : []),
+                    ...(c.parents.length > 1 ? ['merge'] : []),
+                  ].join(' · ')}
+                </span>
               </span>
             </button>
           </li>

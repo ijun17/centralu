@@ -77,9 +77,6 @@ export const PANEL_DEFAULT = 340
 
 /** 세션 목록(관찰 레인) 폭 */
 /** 깃 탭에서 '기록'이 차지할 높이. 나머지는 '변경'이 가져간다 */
-export const TREE_MIN = 80
-export const TREE_MAX = 900
-export const TREE_DEFAULT = 200
 
 export const SIDEBAR_MIN = 180
 export const SIDEBAR_MAX = 480
@@ -262,7 +259,6 @@ export type AppState = {
   panelLayout: PanelGroup[]
   /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
   panelWidth: number
-  treeHeight: number
   /** 세션 목록 폭(px) */
   sidebarWidth: number
   /**
@@ -325,7 +321,6 @@ export type AppState = {
    */
   setPanelLayout(groups: PanelGroup[]): void
   setPanelWidth(px: number): void
-  setTreeHeight(px: number): void
   setSidebarWidth(px: number): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
@@ -716,7 +711,6 @@ export const useStore = create<AppState>((set, get) => ({
   gridPanels: [] as string[],
   orchestratorId: null as string | null,
   panelWidth: PANEL_DEFAULT,
-  treeHeight: TREE_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
   overlay: null,
   inboxOpen: false,
@@ -874,8 +868,6 @@ export const useStore = create<AppState>((set, get) => ({
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
-        const savedTree = (snap as { treeHeight?: number }).treeHeight
-        if (typeof savedTree === 'number') get().setTreeHeight(savedTree)
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
         // Whether the tree shows ignored files is a way of looking, so it comes back with
@@ -916,7 +908,6 @@ export const useStore = create<AppState>((set, get) => ({
         panelLayout: s.panelLayout,
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
-        treeHeight: s.treeHeight,
         notifyPolicy: s.notifyPolicy,
         showIgnored: s.showIgnored,
       } as never)
@@ -1278,11 +1269,6 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
     set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar) })
-    get().saveWorkspace()
-  },
-
-  setTreeHeight(px) {
-    set({ treeHeight: Math.min(TREE_MAX, Math.max(TREE_MIN, Math.round(px))) })
     get().saveWorkspace()
   },
 

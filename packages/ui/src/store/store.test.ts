@@ -319,23 +319,24 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     expect((mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy } | null)?.notifyPolicy).toEqual(policy)
 
     // 예전에는 이 저장이 notifyPolicy 없는 부분 스냅샷으로 통째로 덮었다 → 재시작 시 정책 초기화
-    useStore.getState().setTreeHeight(300)
+    // (사건 당시의 예시는 treeHeight였다 — 그 설정은 스트립과 함께 떠났고, 규칙은 남는다)
+    useStore.getState().setShowIgnored(false)
     await new Promise((r) => setTimeout(r, 0))
-    const snap = mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy; treeHeight?: number } | null
+    const snap = mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy; showIgnored?: boolean } | null
     expect(snap?.notifyPolicy).toEqual(policy)
-    expect(snap?.treeHeight).toBe(300)
+    expect(snap?.showIgnored).toBe(false)
   })
 
-  it('반대로 정책 저장이 레이아웃(treeHeight)을 지우지도 않는다', async () => {
+  it('반대로 정책 저장이 레이아웃(showIgnored)을 지우지도 않는다', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
-    useStore.getState().setTreeHeight(280)
+    useStore.getState().setShowIgnored(false)
     await new Promise((r) => setTimeout(r, 0))
     useStore.getState().setNotifyPolicy({ ...DEFAULT_NOTIFY_POLICY })
     await new Promise((r) => setTimeout(r, 0))
 
-    expect((mock.workspaceSnapshot as { treeHeight?: number } | null)?.treeHeight).toBe(280)
+    expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(false)
   })
 
   /*
