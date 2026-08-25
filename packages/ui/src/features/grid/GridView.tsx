@@ -254,6 +254,12 @@ export function GridView() {
               }}
             >
               {/*
+                회전 테두리는 실제 자식 레이어가 그린다 (styles/index.css의 cc-orbit-ring-layer).
+                칸의 cc-orbit-ring 클래스는 '이 칸이 돌고 있다'는 표식으로 남는다 — 테스트와
+                보조 기술이 상태를 픽셀이 아니라 값으로 읽을 수 있게.
+              */}
+              {sessions[id]?.state === 'working' && <div className="cc-orbit-ring-layer" aria-hidden />}
+              {/*
                 빼기는 화면에서만 내린다 — 세션은 사이드바에 그대로 남고 계속 돌아간다.
                 그래서 '삭제'가 아니라 '치우기'로 말한다.
 

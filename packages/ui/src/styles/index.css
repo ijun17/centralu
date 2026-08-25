@@ -385,22 +385,47 @@
  * 말하므로 밝기 체계 안에 있고, 그 꼭대기는 여전히 '나를 기다리는 것'의 자리다.
  * 그래서 채도는 올리되 명도는 눌러, 색으로 눈에 띄되 밝기로는 이기지 않게 한다.
  */
-@property --cc-orbit {
-  syntax: '<angle>';
-  initial-value: 0deg;
-  inherits: false;
-}
-
+/*
+ * **도는 것은 그라디언트가 아니라 판이다.**
+ *
+ * 처음에는 등록된 커스텀 속성(--cc-orbit)으로 conic-gradient의 각도를 돌렸다.
+ * 각도 애니메이션은 컴포지터로 못 빠져서 매 프레임 스타일 재계산 + 그라디언트를
+ * 다시 그린다 — WebKit 실측으로 '작업 중' 세션이 있는 것만으로 CPU 24~33%를
+ * 상시 청구했고, 노트북에서는 그게 배터리로 나갔다 (perf-idle.spec.ts).
+ *
+ * 그래서 그라디언트는 한 번 그려두고 **그 판을 transform으로 돌린다.** 회전은
+ * 컴포지터가 맡으므로 메인 스레드는 프레임마다 아무것도 안 한다. 판은 부모보다
+ * 크게 만들어(대각선을 덮게) 돌아도 모서리가 비지 않는다.
+ */
+/*
+ * scale(5)도 transform에 함께 넣는 이유: 판은 **제 크기로 한 번 래스터되고** GPU가
+ * 확대한다. 크기를 inset으로 키우면(-200%) 25배 면적의 비트맵을 만들어 합성하게 되어
+ * 그리드 4칸에서 CPU 9%가 남았다 — 확대는 각도를 보존하고, 1px 링에서 열화는 안 보인다.
+ * 5배는 4.9:1 비율까지 대각선을 덮는다 (칸은 4:1까지 길어진다).
+ */
 @keyframes cc-orbit-spin {
+  from {
+    transform: rotate(0deg) scale(5);
+  }
   to {
-    --cc-orbit: 360deg;
+    transform: rotate(360deg) scale(5);
   }
 }
 
-.cc-orbit,
-.cc-orbit-ring::after {
+.cc-orbit {
+  position: relative;
+  /* 도는 판을 배지의 둥근 모서리로 자른다 */
+  overflow: hidden;
+  /* z-index:-1인 판이 배지 밖(조상 배경 뒤)으로 꺼지지 않게 층을 가둔다 */
+  isolation: isolate;
+}
+
+.cc-orbit::before,
+.cc-orbit-ring-layer::before {
+  content: '';
+  position: absolute;
   background: conic-gradient(
-    from var(--cc-orbit),
+    from 0deg,
     transparent 0deg,
     #2d6cf0 45deg,
     #7b3fe4 95deg,
@@ -412,6 +437,12 @@
   animation: cc-orbit-spin 1.4s linear infinite;
 }
 
+/* 아이콘 칩 뒤로 깐다 — 크기는 scale이 맡으므로 판 자체는 배지 크기 그대로다 */
+.cc-orbit::before {
+  inset: 0;
+  z-index: -1;
+}
+
 /*
  * 같은 궤도를 **칸의 테두리**로 두른다 (그리드에서 응답 중인 패널).
  *
@@ -421,9 +452,12 @@
  * **칸 크기를 건드리지 않는다.** border를 색만 바꾸면 회전을 못 그리고, 두께를 더하면
  * 격자 전체가 밀린다(사이드바에서 겪은 그 문제). 그래서 덧그린다: 절대 위치 레이어에
  * 궤도를 칠하고, 마스크로 **가장자리 1px만** 남긴다. 레이아웃은 한 픽셀도 안 움직인다.
+ *
+ * 가짜 요소가 아니라 **실제 자식**인 이유: 마스크(축 정렬)와 회전(매 프레임)이 한
+ * 요소에 있으면 마스크까지 돌아버린다. 마스크는 이 레이어가 쥐고, 그 안에서 ::before
+ * 판만 돈다 — 마스크는 자식까지 자르므로 링 밖으로는 아무것도 안 샌다.
  */
-.cc-orbit-ring::after {
-  content: '';
+.cc-orbit-ring-layer {
   position: absolute;
   inset: 0;
   border-radius: inherit;
@@ -437,15 +471,21 @@
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   mask-composite: exclude;
+  overflow: hidden;
   /* 대화·입력창 위에 얹히되 클릭은 통과시킨다 */
   pointer-events: none;
   z-index: 1;
 }
 
+/* 크기는 scale이 맡는다 — 판은 칸 크기로 래스터된다 */
+.cc-orbit-ring-layer::before {
+  inset: 0;
+}
+
 /* 움직임에 민감한 사람에게 회전은 방해다 — 그때는 밝기만 남긴다 */
 @media (prefers-reduced-motion: reduce) {
-  .cc-orbit,
-  .cc-orbit-ring::after {
+  .cc-orbit::before,
+  .cc-orbit-ring-layer::before {
     animation: none;
     background: var(--color-ash);
   }
