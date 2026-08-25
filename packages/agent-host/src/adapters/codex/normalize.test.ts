@@ -129,6 +129,29 @@ describe('상태·계기판', () => {
   })
 
   /*
+   * 리뷰(/review → review/start RPC)도 같은 종류다 — 실측(실제 app-server)한 모양:
+   * enteredReviewMode → agentMessage(결과 전문 스트리밍) → exitedReviewMode(review에 전문).
+   * 시작·끝 아이템을 걸러내지 않으면 정체불명의 도구 줄이 되고, exited의 review를
+   * 또 내면 agentMessage로 이미 온 결과가 두 번 붙는다.
+   */
+  it('리뷰 시작 item은 activity=reviewing이다', () => {
+    expect(n('item/started', { item: { type: 'enteredReviewMode', id: 'i1', review: 'current changes' } })).toEqual([
+      { type: 'activity', sessionId: S, activity: 'reviewing' },
+    ])
+  })
+
+  it('리뷰 끝 item은 activity를 지울 뿐, 결과를 또 내지 않는다 (agentMessage로 이미 왔다)', () => {
+    expect(n('item/completed', { item: { type: 'exitedReviewMode', id: 'i2', review: '- [P1] …' } })).toEqual([
+      { type: 'activity', sessionId: S, activity: null },
+    ])
+    // 어느 쪽(started/completed)으로 오든 도구 줄이 되지는 않는다
+    expect(n('item/completed', { item: { type: 'enteredReviewMode', id: 'i1' } })).toEqual([])
+    expect(n('item/started', { item: { type: 'exitedReviewMode', id: 'i2' } })).toEqual([
+      { type: 'activity', sessionId: S, activity: null },
+    ])
+  })
+
+  /*
    * 이름이 최상위에 있는데 invocation.tool을 읽어서 코덱스의 MCP 호출이 전부
    * 'MCP'로 뭉개져 보였다 — 대화창에서 무슨 도구를 썼는지 알 수 없었다.
    */

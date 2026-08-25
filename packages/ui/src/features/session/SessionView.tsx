@@ -1099,7 +1099,7 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         기다리는 사람은 멈춘 건지 오래 걸리는 건지 판단할 근거가 없다.
       */}
       <span className="text-[12px] text-ash" data-testid="activity-label">
-        {activity === 'compacting' ? 'Compacting context' : 'Waiting for response'}
+        {activity === 'compacting' ? 'Compacting context' : activity === 'reviewing' ? 'Reviewing changes' : 'Waiting for response'}
       </span>
       {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
       {seconds >= 2 && (

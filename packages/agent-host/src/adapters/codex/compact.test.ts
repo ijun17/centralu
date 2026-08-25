@@ -75,5 +75,43 @@ describe('codex /compact — 함수로 실행된다', () => {
     // skills/list가 같은 이름을 실어 와도 하나만 남는다
     expect(cmds.filter((c) => c.name === 'compact')).toHaveLength(1)
     expect(cmds.some((c) => c.name === 'deploy')).toBe(true)
+    expect(cmds.some((c) => c.name === 'review')).toBe(true)
+  })
+})
+
+/**
+ * /review도 함수다 (review/start RPC — 실측: 결과는 agentMessage로 스트리밍).
+ * compact과 다른 점 하나: **인자가 의미를 갖는다** — 있으면 그 지시대로(custom),
+ * 없으면 codex CLI의 기본과 같은 "지금 바뀐 것들"(uncommittedChanges)이다.
+ */
+describe('codex /review — 함수로 실행된다', () => {
+  it('인자 없으면 uncommittedChanges 리뷰다', async () => {
+    const h = await session()
+    h.send('/review')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(methods()).toContain('review/start')
+    expect(methods()).not.toContain('turn/start')
+    expect(state.requests.find((r) => r.method === 'review/start')?.params).toEqual({
+      threadId: 't1',
+      target: { type: 'uncommittedChanges' },
+    })
+  })
+
+  it('인자가 있으면 그 지시대로 리뷰한다 (custom)', async () => {
+    const h = await session()
+    h.send('/review 보안 위주로 봐줘')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(state.requests.find((r) => r.method === 'review/start')?.params).toEqual({
+      threadId: 't1',
+      target: { type: 'custom', instructions: '보안 위주로 봐줘' },
+    })
+  })
+
+  it('"/reviewer 채용"은 메시지다 — 접두사가 닮았다고 삼키면 안 된다', async () => {
+    const h = await session()
+    h.send('/reviewer 채용 공고 써줘')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(methods()).toContain('turn/start')
+    expect(methods()).not.toContain('review/start')
   })
 })

@@ -12,7 +12,8 @@ export type SessionState = z.infer<typeof SessionState>
  * 그런데 화면만 보면 답을 만드는 중과 구분이 안 된다: 둘 다 점만 깜빡인다.
  * 실측으로 수동 압축 한 번이 39초 걸렸다 — 그동안 멈춘 건지 일하는 건지 알 방법이 없었다.
  */
-export const SessionActivity = z.enum(['compacting'])
+/** 바쁨의 종류. compacting은 양쪽 다, reviewing은 codex의 /review(전용 RPC)가 낸다 */
+export const SessionActivity = z.enum(['compacting', 'reviewing'])
 export type SessionActivity = z.infer<typeof SessionActivity>
 
 export const ToolName = z.enum(['claude', 'codex'])

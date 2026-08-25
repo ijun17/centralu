@@ -276,6 +276,19 @@ class CodexSession implements SessionHandle {
       if (text.trim() === '/compact') {
         return this.client.request('thread/compact/start', { threadId: this.threadId })
       }
+      /*
+       * /review도 같은 종류다 (review/start RPC). 실측: 인자 없으면 codex CLI의 기본과
+       * 같은 "지금 바뀐 것들" 리뷰, 인자가 있으면 그 지시대로(custom). 결과는 보통
+       * 턴처럼 온다 — 리뷰 본문은 agentMessage로 스트리밍되고(기존 배관), 시작·끝은
+       * enteredReviewMode/exitedReviewMode 아이템으로 온다 (normalize가 activity로 바꾼다).
+       */
+      if (text.trim() === '/review' || text.trim().startsWith('/review ')) {
+        const instructions = text.trim().slice('/review'.length).trim()
+        return this.client.request('review/start', {
+          threadId: this.threadId,
+          target: instructions ? { type: 'custom', instructions } : { type: 'uncommittedChanges' },
+        })
+      }
       return this.client.request('turn/start', {
         threadId: this.threadId,
         input: [{ type: 'text', text }],
@@ -316,8 +329,13 @@ class CodexSession implements SessionHandle {
      * (있는 걸 숨기는 것도 목록의 거짓말이다). codex가 언젠가 목록에 실어 주면
      * 아래 dedupe가 우리 것을 걷어낸다.
      */
-    const out: { name: string; description?: string }[] = [
+    const out: { name: string; description?: string; argumentHint?: string }[] = [
       { name: 'compact', description: '대화를 요약해 컨텍스트를 줄인다 (codex 내장)' },
+      {
+        name: 'review',
+        description: '바뀐 코드를 리뷰한다 (codex 내장). 인자를 주면 그 지시대로 리뷰한다',
+        argumentHint: '[지시]',
+      },
     ]
     for (const g of groups) {
       const skills = (g as { skills?: unknown }).skills

@@ -91,6 +91,13 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
        * 정체불명의 도구 줄이 생긴다 — 그리고 정작 필요한 "지금 압축 중"은 어디에도 없다.
        */
       if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: 'compacting' }]
+      /*
+       * 리뷰의 시작(/review → review/start RPC). 압축과 같은 이유로 도구 줄이 아니라
+       * activity다 — 리뷰 본문은 agentMessage로 따로 스트리밍되므로, 여기서 도구 줄을
+       * 만들면 "enteredReviewMode"라는 정체불명의 호출이 대화에 남는다 (실측한 모양).
+       */
+      if (type === 'enteredReviewMode') return [{ type: 'activity', sessionId, activity: 'reviewing' }]
+      if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
       const s = itemSummary(item)
       return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s }]
     }
@@ -105,6 +112,13 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       if (type === 'userMessage' || type === 'reasoning') return []
       // 마커는 thread/compacted가 낸다 — 여기서 또 내면 같은 자리에 두 줄이 생긴다
       if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: null }]
+      /*
+       * 리뷰의 끝. item.review에 결과 전문이 있지만 내지 않는다 — 같은 글이
+       * agentMessage로 이미 스트리밍됐다 (실측). 여기서 또 내면 결과가 두 번 붙는다.
+       * (시작·끝 아이템은 started/completed 어느 쪽으로 오든 activity로만 남는다)
+       */
+      if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
+      if (type === 'enteredReviewMode') return []
       const s = itemSummary(item)
       const out: NormalizedEvent[] = [
         {

@@ -48,6 +48,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },
+  // codex의 /review(전용 RPC)가 도는 동안 (실측 — enteredReviewMode 아이템)
+  { type: 'activity', sessionId: 's1', activity: 'reviewing' },
   { type: 'compaction', sessionId: 's1' },
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
