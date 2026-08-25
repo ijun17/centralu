@@ -20,7 +20,7 @@ import { TerminalPane } from './Terminal.jsx'
 import { COMMIT_LIMIT, commitAgo, hasMultipleAuthors } from './commits.js'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN } from '../../store/store.js'
+import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
 
 /**
  * 증거 레인 (우측).
@@ -49,6 +49,8 @@ export function EvidencePanel() {
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const width = useStore((s) => s.panelWidth)
   const setPanelWidth = useStore((s) => s.setPanelWidth)
+  // 최소 폭은 실픽셀 고정 (사이드바와 같은 규칙) — 글자 배율이 좁힘의 한계를 못 먹는다
+  const zoom = useTextZoom()
   const [resizing, setResizing] = useState(false)
   const isRepo = !!project?.git
 
@@ -100,7 +102,7 @@ export function EvidencePanel() {
         <>
           <ResizeHandle
             side="left"
-            min={PANEL_MIN}
+            min={PANEL_MIN / zoom}
             max={PANEL_MAX}
             onResize={setPanelWidth}
             onReset={() => setPanelWidth(PANEL_DEFAULT)}

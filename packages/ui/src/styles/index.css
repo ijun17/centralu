@@ -124,6 +124,22 @@
   #root {
     height: 100%;
   }
+  /*
+   * WebKit은 zoom 배율에서 **모든 박스의 scrollWidth를 1px 올림한다**
+   * (실측: 배율 1.25에서 전 요소가 sw = cw + 1 — Playwright WebKit으로 확인).
+   * 그 1px 때문에 overflow가 auto인 곳마다 유령 가로 스크롤바가 선다 —
+   * 입력창(textarea의 기본 overflow가 auto)에서 실제로 나타났다 (도그푸딩).
+   * 이 앱의 textarea는 전부 줄바꿈하는 입력창이라 가로 스크롤이 옳은 경우가 없고,
+   * 세로 스크롤 컨테이너(.overflow-y-auto)도 마찬가지다 — 넘치면 잘리거나 말줄임이
+   * 답이지 가로 스크롤이 답인 자리가 아니다. 양축 스크롤이 진짜 필요한 곳
+   * (코드 뷰어·diff)은 overflow-auto를 쓰므로 이 규칙에 안 걸린다.
+   */
+  textarea {
+    overflow-x: hidden;
+  }
+  .overflow-y-auto {
+    overflow-x: hidden;
+  }
   /* 창을 옮기는 손잡이 위에서는 글자가 잡히면 안 된다 — 선택이 드래그를 먹는다.
      본문은 건드리지 않는다: 에이전트 답변은 복사할 수 있어야 한다. */
   [data-tauri-drag-region] {

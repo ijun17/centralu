@@ -11,7 +11,7 @@ import { CloseIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
-import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../../store/store.js'
+import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo } from './reorder.js'
 
 /**
@@ -110,6 +110,8 @@ export function Sidebar() {
   const ids = projectIds ? projectIds.split(',') : []
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+  // 최소 폭은 실픽셀 고정 — 글자를 키워도 목록을 좁힐 수 있는 한계는 그대로다
+  const zoom = useTextZoom()
   const [addOpen, setAddOpen] = useState(false)
 
   return (
@@ -120,7 +122,7 @@ export function Sidebar() {
     >
       <ResizeHandle
         side="right"
-        min={SIDEBAR_MIN}
+        min={SIDEBAR_MIN / zoom}
         max={SIDEBAR_MAX}
         onResize={setSidebarWidth}
         onReset={() => setSidebarWidth(SIDEBAR_DEFAULT)}

@@ -102,10 +102,24 @@ export const TEXT_SCALE_DEFAULT = 2
  */
 export const CENTER_MIN = 360
 
-/** 창 안에 실제로 들어갈 수 있는 폭으로 자른다 */
-function fitWidth(px: number, min: number, max: number, otherLane: number): number {
-  const available = (typeof window === 'undefined' ? 1280 : window.innerWidth) - otherLane - CENTER_MIN
-  return Math.min(max, Math.max(min, Math.round(Math.min(px, available))))
+/**
+ * 창 안에 실제로 들어갈 수 있는 폭으로 자른다.
+ *
+ * `zoom`이 필요한 이유 (전체 글자 크기): 레이아웃 폭은 zoom 좌표계인데
+ * window.innerWidth는 **실픽셀**이라, 나누지 않으면 배율에서 사용 가능 폭을 부풀려
+ * 계산해 레이아웃이 창 밖으로 밀린다. 그리고 최소 폭(min)은 **실픽셀로 고정**한다 —
+ * 글자를 키웠다고 패널을 좁힐 수 있는 한계까지 커지면, 좁은 창에서 배율을 올리는
+ * 순간 패널이 화면을 다 먹는다 (도그푸딩 요청: 최소 너비는 그대로).
+ */
+function fitWidth(px: number, minReal: number, max: number, otherLane: number, zoom = 1): number {
+  const winW = (typeof window === 'undefined' ? 1280 : window.innerWidth) / zoom
+  const available = winW - otherLane - CENTER_MIN / zoom
+  return Math.min(max, Math.max(Math.round(minReal / zoom), Math.round(Math.min(px, available))))
+}
+
+/** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
+export function useTextZoom(): number {
+  return TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
 }
 
 export type ChatItem =
@@ -1287,7 +1301,7 @@ export const useStore = create<AppState>((set, get) => ({
   setPanelWidth(px) {
     const s = get()
     const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
-    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar) })
+    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar, TEXT_SCALES[s.textScale] ?? 1) })
     get().saveWorkspace()
   },
 
@@ -1295,7 +1309,7 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     // 패널이 접혀 있으면 32px 띠만 차지한다
     const panel = s.panelOpen ? s.panelWidth : 32
-    set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel) })
+    set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel, TEXT_SCALES[s.textScale] ?? 1) })
     get().saveWorkspace()
   },
 
