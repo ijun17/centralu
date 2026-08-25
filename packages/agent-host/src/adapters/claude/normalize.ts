@@ -80,6 +80,19 @@ export function normalizeMessage(
   }
 
   /*
+   * 로컬 명령의 출력 (SDKLocalCommandOutputMessage — /usage류의 **일반화된 채널**).
+   *
+   * /usage의 답이 델타 없는 assistant 메시지로 와서 안 보였던 사건(도그푸딩)의 자매다:
+   * CLI가 로컬에서 처리하는 명령의 출력이 이 system 메시지로 오는 경우가 있고,
+   * 버리면 명령은 실행됐는데 답만 사라진다. 사람에게는 assistant의 말과 같은 자리다.
+   */
+  if (type === 'system' && str(m.subtype) === 'local_command_output') {
+    const content = str(m.content)
+    if (content) out.push({ type: 'message_delta', sessionId, role: 'assistant', text: content })
+    return out
+  }
+
+  /*
    * 압축이 끝난 지점 (FR-14).
    *
    * 이게 없어서 **Claude 세션에는 압축 마커가 한 번도 뜬 적이 없다** — Codex에만 있었다.

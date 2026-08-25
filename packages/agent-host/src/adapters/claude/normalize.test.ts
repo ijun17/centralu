@@ -45,6 +45,14 @@ describe('델타 없이 온 assistant 본문', () => {
     const events = normalizeMessage(assistant, SID, { textStreamed: true })
     expect(events.filter((e) => e.type === 'message_delta')).toEqual([])
   })
+
+  it('로컬 명령 출력(system/local_command_output)도 본문이다 — 같은 부류의 일반 채널', () => {
+    const events = normalizeMessage(
+      { type: 'system', subtype: 'local_command_output', content: '명령 출력 내용' },
+      SID,
+    )
+    expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: '명령 출력 내용' })
+  })
 })
 
 describe('도구 호출 (스파이크 실제 형태)', () => {
