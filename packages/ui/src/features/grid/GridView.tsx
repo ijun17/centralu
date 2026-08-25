@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { columnsFor, rowsFor, visiblePanels } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { useStore, useTextZoom } from '../../store/store.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -89,7 +89,14 @@ export function GridView() {
   // 지워진 세션이 배치에 남아 있어도 그리지 않는다 (저장된 값은 그대로 둔다)
   const known = new Set(Object.keys(sessions))
   const visible = visiblePanels(panels, known)
-  const cols = columnsFor(width, height, visible.length)
+  /*
+   * 실픽셀로 환산해 넘긴다. ResizeObserver의 측정값은 zoom 좌표라, 글자 배율을 올리면
+   * 같은 창이 좁게 측정되어 열이 줄었다 — 3단계에서 한 줄이던 그리드가 4단계에서
+   * 두 줄이 됐다 (도그푸딩). 칸의 최소 폭(MIN_PANEL_W)은 사이드바·패널 최소와 같은
+   * 규칙으로 **실픽셀 고정**이다: 배율은 글자를 키우는 것이지 칸을 좁히는 것이 아니다.
+   */
+  const zoom = useTextZoom()
+  const cols = columnsFor(width * zoom, height * zoom, visible.length)
   const rows = rowsFor(visible.length, cols)
 
   /*

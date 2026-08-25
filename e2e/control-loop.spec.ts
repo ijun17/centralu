@@ -1174,6 +1174,46 @@ test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있�
   expect(small.y + small.height).toBeLessThanOrEqual(viewport.height + 1)
 })
 
+/*
+ * 그리드의 열 수는 글자 배율의 영향을 받지 않는다 (도그푸딩: "3에서는 1줄인데 4에서는
+ * 2줄이야"). ResizeObserver 측정값은 zoom 좌표라, 실픽셀로 환산하지 않으면 배율을
+ * 올릴수록 같은 창이 좁게 측정되어 열이 무너진다. 창 폭 1100은 (사이드바 240을 뺀
+ * 그리드 860에서) 두 칸(MIN_PANEL_W=380)이 배율 1에서는 서고 zoom 좌표 그대로면
+ * 1.25에서 무너지는(860/1.25=688 < 760), 결함이 갈리는 폭이다.
+ */
+test('설정: 글자 크기를 바꿔도 그리드 열 수는 그대로다', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 720 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '하나')
+  await newSession(page, 'alpha', '둘')
+  await page.evaluate(() => {
+    const store = (window as never as { __store: any }).__store
+    const ids = Object.keys(store.getState().sessions)
+    store.getState().setGridPanels(ids)
+  })
+  await page.getByTestId('grid-button').click()
+
+  // 열 수는 안쪽 display:grid 요소에 있다 — 바깥(data-testid="grid")은 flex 컨테이너다
+  const colsOf = () =>
+    page.evaluate(
+      () =>
+        getComputedStyle(document.querySelector<HTMLElement>('[data-testid="grid"] div.grid')!)
+          .gridTemplateColumns.split(' ').length,
+    )
+  const before = await colsOf()
+  expect(before).toBe(2)
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('settings')
+  await page.getByTestId('palette-item-action').click()
+  await page.getByTestId('settings-tab-appearance').click()
+  await page.getByTestId('settings-scale-4').click()
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+
+  expect(await colsOf()).toBe(2)
+})
+
 test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {

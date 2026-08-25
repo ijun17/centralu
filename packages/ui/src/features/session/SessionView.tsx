@@ -1009,7 +1009,12 @@ function ChatStream({
       */}
       {stickyText !== null && (
         <div className="sticky top-0 z-10 -mx-4 mb-1 px-4" data-testid="sticky-user">
-          <div className="truncate rounded border border-slate/30 bg-graphite/95 px-2.5 py-1 text-[11px] text-ash backdrop-blur-sm">
+          {/*
+            말풍선과 같은 옷을 입는다 (폰트·패딩·색 — 도그푸딩 요청). 이 줄은 위로
+            사라진 사용자 메시지의 **연장**이라, 크기가 다르면 다른 종류의 것으로 읽힌다.
+            폭만 다르다: 배너는 전체 폭에 한 줄 말줄임이다 — 자리가 일이기 때문이다.
+          */}
+          <div className="truncate rounded-lg rounded-br-sm border border-slate/40 bg-graphite/95 px-3 py-2 text-[13px] text-chalk backdrop-blur-sm">
             {stickyText}
           </div>
         </div>
