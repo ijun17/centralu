@@ -821,6 +821,21 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
       (sid: string) => document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!.scrollTop,
       a,
     )
+  /*
+   * Setting 40 once is not enough: if the pane's landing pass is still running it takes
+   * the value straight back (the test died on its own precondition, ~1 in 3 under a full
+   * parallel run — same failure on unmodified main). Write until it holds, the same
+   * pattern the fs-watch tests use for slow observers.
+   */
+  await expect
+    .poll(async () => {
+      await page.evaluate((sid: string) => {
+        document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!.scrollTop = 40
+      }, a)
+      await page.waitForTimeout(80)
+      return readScroll()
+    })
+    .toBeGreaterThan(0)
   let scrolled = await readScroll()
   for (let prev = -1; scrolled !== prev; scrolled = await readScroll()) {
     prev = scrolled
