@@ -113,12 +113,12 @@ export function Settings() {
 
   return (
     <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[8vh] backdrop-blur-[2px]"
+      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px]"
       onClick={() => toggle(false)}
       data-testid="settings"
     >
       <div
-        className="flex max-h-[80vh] w-[640px] max-w-[92vw] flex-col overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">

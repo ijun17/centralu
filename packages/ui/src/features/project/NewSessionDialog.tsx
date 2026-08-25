@@ -128,7 +128,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   return (
     <Modal onClose={onClose} testId="new-session-dialog" align="top">
       <form
-        className="w-[480px] max-w-[92vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="w-[480px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
         onSubmit={async (e) => {
           e.preventDefault()

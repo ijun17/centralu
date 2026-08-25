@@ -152,12 +152,12 @@ export function CommandPalette() {
 
   return (
     <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[14vh] backdrop-blur-[2px]"
+      className="absolute inset-0 z-40 flex items-start justify-center bg-void/80 pt-[calc(14vh/var(--text-zoom))] backdrop-blur-[2px]"
       onClick={() => toggle(false)}
       data-testid="command-palette"
     >
       <div
-        className="w-[600px] max-w-[92vw] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -171,7 +171,7 @@ export function CommandPalette() {
           }}
           data-testid="palette-input"
         />
-        <ul className="max-h-[50vh] overflow-y-auto">
+        <ul className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
           {items.length === 0 ? (
             <li className="px-4 py-6 text-center text-[12px] text-slate" data-testid="palette-empty">
               No results

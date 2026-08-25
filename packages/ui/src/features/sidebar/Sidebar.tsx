@@ -631,7 +631,7 @@ function ConfirmDelete({
   }, [platform, sessionId])
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
-      <div className="w-[380px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
+      <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <p className="text-[13px] text-chalk">Delete this session?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
         <p className="mt-2 text-[11px] leading-relaxed text-slate">

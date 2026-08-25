@@ -217,7 +217,7 @@ export function UsageModal() {
 
   return (
     <Modal onClose={() => toggle(false)} testId="usage-modal" align="top">
-      <div className="w-[420px] max-w-[92vw] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
+      <div className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
           <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
           {only && <span className="readout text-[11px] text-slate">{TOOL_LABEL[only]}</span>}
@@ -232,7 +232,7 @@ export function UsageModal() {
           칸이 여럿이면 창 아래로 흘러넘친다 — 모달에는 스크롤이 없으므로 여기서 준다.
           하나일 때 이 상자는 아무 일도 하지 않는다 (70vh를 넘길 일이 없다).
         */}
-        <div className="max-h-[70vh] overflow-y-auto">
+        <div className="max-h-[calc(70vh/var(--text-zoom))] overflow-y-auto">
           {/*
             모르면 모른다고 적는다. 예전엔 여기서 claude로 떨어졌는데, 그러면 사용자에게는
             '알 수 없음'이 '틀린 값'으로 도착한다 — 틀렸다는 사실조차 화면에 없다.

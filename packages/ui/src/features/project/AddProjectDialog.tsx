@@ -19,7 +19,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal onClose={onClose} testId="add-project-dialog" align="top">
       <form
-        className="w-[480px] max-w-[90vw] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="w-[480px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onSubmit={async (e) => {
           e.preventDefault()
           setBusy(true)

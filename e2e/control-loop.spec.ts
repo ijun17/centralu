@@ -1144,6 +1144,36 @@ test('상단 바: 단축키 칩 대신 숫자가 신호다 (#33)', async ({ page
   await expect(page.getByTestId('inbox')).toBeVisible()
 })
 
+/*
+ * 글자 크기(zoom)와 vh의 관계 (도그푸딩: "글자 크기 키우면 세션의 입력창이 안 보이거든").
+ * vh는 zoom의 영향을 안 받아서, 확대하면 100vh 셸이 창보다 커져 맨 아래(입력창)가
+ * 창 밖으로 밀렸다. 셸을 % 사슬로 바꾼 뒤에는 어느 단계에서든 입력창이 창 안에 있다.
+ */
+test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('settings')
+  await page.getByTestId('palette-item-action').click()
+  await page.getByTestId('settings-tab-appearance').click()
+  await page.getByTestId('settings-scale-4').click()
+  await page.keyboard.press('Escape')
+
+  const box = (await page.getByTestId('prompt-input').boundingBox())!
+  const viewport = page.viewportSize()!
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1)
+  // 되돌려도 창 안이다 — 커졌다 작아졌다 하며 자리를 잃지 않는다
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('settings')
+  await page.getByTestId('palette-item-action').click()
+  await page.getByTestId('settings-tab-appearance').click()
+  await page.getByTestId('settings-scale-0').click()
+  await page.keyboard.press('Escape')
+  const small = (await page.getByTestId('prompt-input').boundingBox())!
+  expect(small.y + small.height).toBeLessThanOrEqual(viewport.height + 1)
+})
+
 test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {

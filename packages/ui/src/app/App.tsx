@@ -40,9 +40,15 @@ export function App({ platform }: { platform: Platform }) {
    */
   const textScale = useStore((s) => s.textScale)
   useEffect(() => {
-    ;(document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom = String(
-      TEXT_SCALES[textScale] ?? 1,
-    )
+    const factor = TEXT_SCALES[textScale] ?? 1
+    const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
+    style.zoom = String(factor)
+    /*
+     * vh/vw는 zoom의 영향을 받지 않는다 (실측: 확대하면 100vh 셸이 창을 넘어 입력창이
+     * 잘렸다). 셸은 % 사슬로 바꿨고, 모달들의 vh/vw는 이 변수로 나눠 실제 창 기준으로
+     * 되돌린다 — zoom과 이 변수는 반드시 같은 값이어야 해서 한 자리에서 함께 쓴다.
+     */
+    style.setProperty('--text-zoom', String(factor))
   }, [textScale])
 
   // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
@@ -70,7 +76,8 @@ export function App({ platform }: { platform: Platform }) {
 
   return (
     <PlatformProvider platform={platform}>
-      <div className="relative flex h-screen flex-col bg-void text-chalk">
+      {/* h-screen(100vh)이 아니라 h-full — vh는 zoom을 모르기 때문 (index.css의 --text-zoom 주석) */}
+      <div className="relative flex h-full flex-col bg-void text-chalk">
         <TopBar />
         <ApprovalBanner />
         <Body />

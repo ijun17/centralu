@@ -68,7 +68,7 @@ export function Inbox() {
 
   return (
     <div
-      className="absolute inset-0 z-20 flex items-start justify-center bg-void/80 pt-[12vh] backdrop-blur-[2px]"
+      className="absolute inset-0 z-20 flex items-start justify-center bg-void/80 pt-[calc(12vh/var(--text-zoom))] backdrop-blur-[2px]"
       onClick={() => toggle(false)}
       data-testid="inbox"
     >
@@ -78,7 +78,7 @@ export function Inbox() {
         role="dialog"
         aria-modal="true"
         aria-label="Waiting"
-        className="w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
+        className="w-[640px] max-w-[calc(90vw/var(--text-zoom))] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-baseline gap-2 border-b border-edge px-4 py-2.5">
@@ -99,7 +99,7 @@ export function Inbox() {
             <span className="mt-1 block text-[11px] text-slate">Finished agents collect here</span>
           </p>
         ) : (
-          <ul className="max-h-[60vh] overflow-y-auto">
+          <ul className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
             {items.map((it, i) => (
               <li key={it.id}>
                 <button

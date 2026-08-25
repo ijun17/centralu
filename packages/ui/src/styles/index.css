@@ -97,6 +97,14 @@
 @layer base {
   html {
     color-scheme: dark;
+    /*
+     * 전체 글자 크기(설정 → Appearance)가 루트 zoom으로 적용된다 — 그런데 vh/vw는
+     * zoom의 영향을 받지 않아서, 확대하면 100vh짜리 셸이 창보다 커져 맨 아래
+     * (세션 입력창)가 잘렸다 (도그푸딩 지적). 그래서 (1) 셸은 vh 대신 % 사슬로 잡고
+     * (html→body→#root→App), (2) 남은 vh/vw는 이 변수로 나눠 실제 창 기준으로 되돌린다.
+     * App.tsx의 효과가 zoom과 이 변수를 항상 같은 값으로 쓴다.
+     */
+    --text-zoom: 1;
     /* 데스크톱 앱은 창 자체가 스크롤되지 않는다.
        이게 없으면 잡고 당길 때 웹처럼 고무줄로 튕긴다 (도그푸딩 지적). */
     overscroll-behavior: none;
@@ -111,6 +119,10 @@
     overscroll-behavior: none;
     height: 100%;
     overflow: hidden;
+  }
+  /* 셸의 % 사슬의 마지막 고리 — 이게 없으면 App의 h-full이 auto에 기대어 0이 된다 */
+  #root {
+    height: 100%;
   }
   /* 창을 옮기는 손잡이 위에서는 글자가 잡히면 안 된다 — 선택이 드래그를 먹는다.
      본문은 건드리지 않는다: 에이전트 답변은 복사할 수 있어야 한다. */
