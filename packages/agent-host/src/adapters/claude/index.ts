@@ -257,10 +257,21 @@ class ClaudeSession implements SessionHandle {
 
     void (async () => {
       try {
+        /*
+         * 이 assistant 메시지의 본문이 델타로 이미 나갔는지 센다.
+         * /usage 같은 로컬 합성 응답은 델타가 0개라(실측), 이 표식이 없으면 normalize가
+         * 통짜 본문을 낼지 판단할 수 없다 — 내면 보통 턴에서 두 번 붙고, 안 내면
+         * 로컬 응답이 영영 안 보인다.
+         */
+        let textStreamed = false
         for await (const msg of q) {
           const m = msg as { type?: string; session_id?: string; subtype?: string }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
-          for (const e of normalizeMessage(msg, this.sessionId)) this.emit(e)
+          const events = normalizeMessage(msg, this.sessionId, { textStreamed })
+          for (const e of events) this.emit(e)
+          if (m.type === 'stream_event' && events.some((e) => e.type === 'message_delta')) textStreamed = true
+          // assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다
+          if (m.type === 'assistant') textStreamed = false
           // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
           if (m.type === 'result') void this.reportContext(q)
         }

@@ -39,7 +39,22 @@ export function approvalDetail(name: string, input: Json, cwd: string): Approval
  * SDK 메시지 하나 → 이벤트 0..N개.
  * `msg`는 의도적으로 unknown — SDK 타입을 이 경계 밖으로 흘리지 않기 위해서다.
  */
-export function normalizeMessage(msg: unknown, sessionId: string): NormalizedEvent[] {
+export function normalizeMessage(
+  msg: unknown,
+  sessionId: string,
+  opts?: {
+    /**
+     * 이 assistant 메시지의 본문이 이미 스트리밍 델타로 나갔는가 — 어댑터가 세어서 준다.
+     *
+     * 본문은 보통 stream_event 델타로만 그리고 assistant 메시지의 text 블록은 버렸는데,
+     * **델타 없이 오는 응답이 실재한다**: /usage처럼 CLI가 로컬에서 합성하는 답은
+     * 델타 0개, 통짜 assistant 메시지 하나다 (실측 — 델타 0 · 본문 1,046자).
+     * 그 경우 여기서 안 내면 명령은 실행됐는데 답이 화면에 영영 안 나타난다.
+     * 반대로 스트리밍된 턴에서 또 내면 같은 글이 두 번 붙는다 — 그래서 플래그가 필요하다.
+     */
+    textStreamed?: boolean
+  },
+): NormalizedEvent[] {
   const m = msg as Json
   const type = str(m.type)
   const out: NormalizedEvent[] = []
@@ -96,6 +111,14 @@ export function normalizeMessage(msg: unknown, sessionId: string): NormalizedEve
 
   if (type === 'assistant') {
     const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
+    // 델타 없이 온 본문의 유일한 출구 (위 opts.textStreamed 주석 참고 — /usage가 이 길로 온다)
+    if (!opts?.textStreamed) {
+      const text = content
+        .filter((b) => str(b.type) === 'text')
+        .map((b) => str(b.text))
+        .join('')
+      if (text) out.push({ type: 'message_delta', sessionId, role: 'assistant', text })
+    }
     for (const block of content) {
       if (str(block.type) === 'tool_use') {
         const name = str(block.name)

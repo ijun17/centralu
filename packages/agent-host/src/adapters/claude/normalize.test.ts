@@ -22,6 +22,31 @@ describe('스트리밍 델타', () => {
   })
 })
 
+/*
+ * 델타 없이 오는 본문 (도그푸딩: "클코 사용량 스킬 메시지로 안되는데?").
+ *
+ * /usage처럼 CLI가 로컬에서 합성하는 답은 stream_event가 0개고 통짜 assistant
+ * 메시지 하나다 (실측 — 델타 0 · 본문 1,046자). 본문을 델타로만 그리면 명령은
+ * 실행됐는데 답이 화면에 영영 안 나타난다. 반대로 스트리밍된 턴에서 또 내면
+ * 같은 글이 두 번 붙는다 — textStreamed 플래그가 그 갈림길이다.
+ */
+describe('델타 없이 온 assistant 본문', () => {
+  const assistant = {
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'text', text: '사용량: 18%' }] },
+  }
+
+  it('델타가 없었으면 통짜 본문을 message_delta로 낸다 — /usage의 답이 이 길로 온다', () => {
+    const events = normalizeMessage(assistant, SID, { textStreamed: false })
+    expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: '사용량: 18%' })
+  })
+
+  it('델타로 이미 나간 본문은 또 내지 않는다 — 두 번 붙으면 그게 새 버그다', () => {
+    const events = normalizeMessage(assistant, SID, { textStreamed: true })
+    expect(events.filter((e) => e.type === 'message_delta')).toEqual([])
+  })
+})
+
 describe('도구 호출 (스파이크 실제 형태)', () => {
   it('Bash tool_use → tool_call (명령 전문이 title)', () => {
     const out = n({
