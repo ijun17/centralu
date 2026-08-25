@@ -1,6 +1,6 @@
 {
   "name": "centralu-linux-arm64",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Centralu app bundle for Linux on arm64",
   "license": "MIT",
   "author": "ijun17",
