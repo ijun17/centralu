@@ -150,6 +150,15 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * the long-running window the schedule was for.
    */
   z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
+  /**
+   * 감시 중인 디렉토리에서 뭔가 바뀌었다 (#34 — Finder·터미널·에이전트, 출처 불문).
+   *
+   * 세션이 아니라 **프로젝트**의 사건이라 `update_status`와 같은 길(appScoped)을 탄다.
+   * dirs는 **어느 디렉토리를 다시 읽어야 하는지**만 말한다 — 무엇이 어떻게 바뀌었는지는
+   * 싣지 않는다. 플랫폼마다 이벤트의 정밀도가 달라서(macOS는 rename 뭉뚱그림) 그 정보를
+   * 실으면 셋 중 한 플랫폼에서만 맞는 말이 된다. 다시 읽기는 어차피 한 번의 listDir다.
+   */
+  z.object({ ...appScoped, type: z.literal('fs_changed'), projectId: z.string(), dirs: z.array(z.string()) }),
   z.object({ ...appScoped, type: z.literal('error'), error: ProtocolError }),
 ])
 export type NormalizedEvent = z.infer<typeof NormalizedEvent>

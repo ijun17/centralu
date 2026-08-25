@@ -41,8 +41,8 @@ export function FileTree({ projectId }: { projectId: string }) {
   /*
    * 바꾼 쪽이 다시 읽으라고 알려준다.
    *
-   * 파일 감시자가 없다 (#34는 따로 간다). 그래서 "무엇이 바뀌었는지"를 아는 유일한 시점은
-   * 우리가 바꾼 직후이고, 그때 **바뀐 디렉토리만** 표를 올린다. 트리 전체를 다시 읽는 쪽이
+   * 우리가 바꾼 직후에는 감시자(#34)를 기다릴 이유가 없다 — 무엇이 바뀌었는지 이미
+   * 아는 시점이므로 **바뀐 디렉토리만** 즉시 표를 올린다. 트리 전체를 다시 읽는 쪽이
    * 짧게 끝나지만, 열어둔 폴더가 스무 개인 저장소에서는 옮기기 한 번이 목록 요청 스무 개가
    * 된다 — 이 파일 머리말의 lazy 원칙이 막으려는 것이 그것이다.
    */
@@ -53,6 +53,37 @@ export function FileTree({ projectId }: { projectId: string }) {
       return next
     })
   }, [])
+
+  /*
+   * 그리고 이제 **밖에서 바꾼 것도** 알려온다 (#34).
+   *
+   * 감시 집합은 펼쳐진 디렉토리 그 자체다 — 저장소 전체가 아니라. lazy 트리가
+   * 안 읽은 폴더는 화면에 없으니 감시할 이유도 없고, 그 덕에 Linux의 inotify
+   * 상한(디렉토리당 워치 하나)에도 안 닿는다. 루트('')는 늘 보이므로 늘 넣는다.
+   *
+   * 위의 refresh(우리가 바꾼 직후)와 같은 표를 쓴다 — 바뀌었다는 사실의 출처가
+   * 우리든 Finder든 에이전트든, 화면이 할 일은 같은 "그 디렉토리만 다시 읽기"다.
+   */
+  const platform = usePlatform()
+  const expanded = useStore((s) => s.expandedDirs[projectId])
+  useEffect(() => {
+    // 등록 실패로 트리가 죽으면 안 된다 — 감시는 곁눈이지 본업이 아니다
+    void platform.fs.watch(projectId, ['', ...(expanded ?? [])]).catch(() => {})
+  }, [platform, projectId, expanded])
+  useEffect(() => {
+    // 프로젝트를 떠날 때만 감시를 걷는다. 펼침이 바뀔 때마다 걷었다 다시 걸면
+    // 그 사이의 변화를 놓친다 — 위 효과는 집합을 갈아끼우기만 한다.
+    return () => {
+      void platform.fs.watch(projectId, []).catch(() => {})
+    }
+  }, [platform, projectId])
+  useEffect(
+    () =>
+      platform.agents.subscribe((e) => {
+        if (e.type === 'fs_changed' && e.projectId === projectId) refresh(...e.dirs)
+      }),
+    [platform, projectId, refresh],
+  )
 
   /*
    * 지금 겨누고 있는 폴더는 **하나뿐이다.**

@@ -42,6 +42,7 @@ import {
   gitWorktreeRemove,
 } from '../dev-services/git.js'
 import { importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
+import { DirWatchers } from '../dev-services/watch.js'
 import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
 
 /**
@@ -95,6 +96,11 @@ export class SessionManager {
     string,
     { model: string | null; effort: string | null; verbosity: string | null; permissionPreset: PermissionPreset }
   >()
+  /**
+   * 파일 트리의 감시자 (#34). 펼쳐진 디렉토리만 본다 — 집합은 UI가 fs.watch로 보낸다.
+   * 변화는 fs_changed 이벤트로 나간다 (프로젝트의 사건이라 sessionId가 없다).
+   */
+  private watchers = new DirWatchers((projectId, dirs) => this.emit({ type: 'fs_changed', projectId, dirs }))
   /** 도구+디렉토리별 슬래시 명령 캐시 (세션이 준비되기 전에도 목록을 줄 수 있게) */
   private commandCache = new Map<string, CommandInfo[]>()
   /** 도구가 갖고 있는 대화 id 목록 (짧은 캐시 — 삭제 여부 판단용) */
@@ -1476,6 +1482,15 @@ export class SessionManager {
   listDir(projectId: string, path: string) {
     return listDir(this.cwdOf(projectId), path)
   }
+
+  /**
+   * 파일 트리의 감시 집합 갱신 (#34). UI가 펼친 디렉토리를 통째로 보내면
+   * 변화가 `fs_changed` 이벤트로 되돌아간다 — 방향이 왕복이라 여기 있다:
+   * 요청은 RPC로 오지만 답(변화)은 세션 이벤트와 같은 방송길로 나간다.
+   */
+  watchDirs(projectId: string, paths: readonly string[]): number {
+    return this.watchers.setWatched(projectId, this.cwdOf(projectId), paths)
+  }
   readTextFile(projectId: string, path: string) {
     return readTextFile(this.cwdOf(projectId), path)
   }
@@ -1906,6 +1921,7 @@ export class SessionManager {
   }
 
   async disposeAll(): Promise<void> {
+    this.watchers.close()
     // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
     await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
     this.handles.clear()

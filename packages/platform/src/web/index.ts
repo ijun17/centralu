@@ -239,6 +239,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     fs: {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
       listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),
+      watch: (projectId, paths) => rpc.call('fs.watch', { projectId, paths }),
       readFile: (projectId, path) => rpc.call('fs.readFile', { projectId, path }),
       move: (projectId, from, toDir) => rpc.call('fs.move', { projectId, from, toDir }),
       importFile: (projectId, toDir, name, dataBase64) =>

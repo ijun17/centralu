@@ -61,6 +61,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
    * 기본값이 붙은 필드는 생략된 채로도 읽혀야 한다. 옛 host가 status를 절반만 보내도
    * 새 UI가 그걸 거절하면, 버전 확인이 버전 차이 때문에 죽는 셈이 된다.
    */
+  // 프로젝트의 사건이라 sessionId가 없다 (#34) — update_status와 같은 규칙
+  { type: 'fs_changed', projectId: 'p1', dirs: ['', 'src'] },
   { type: 'update_status', status: { current: '0.1.0-beta.2' } },
   {
     type: 'update_status',

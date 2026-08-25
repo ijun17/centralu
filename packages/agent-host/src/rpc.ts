@@ -135,6 +135,10 @@ export function createRpcHandler(
       const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
       return mgr.listDir(projectId, path)
     },
+    'fs.watch': async (p) => {
+      const { projectId, paths } = RpcMethods['fs.watch'].params.parse(p)
+      return { watched: mgr.watchDirs(projectId, paths) }
+    },
     'fs.readFile': async (p) => {
       const { projectId, path } = RpcMethods['fs.readFile'].params.parse(p)
       return mgr.readTextFile(projectId, path)

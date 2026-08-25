@@ -162,6 +162,8 @@ export class MockPlatform implements Platform {
 
   /** 테스트가 주무르는 가짜 파일 트리 */
   fsState: { entries: Record<string, FsEntry[]>; files: Record<string, string> } = { entries: {}, files: {} }
+  /** fs.watch로 등록된 감시 집합 (#34) — 테스트가 "화면이 뭘 감시해 달랬는지"를 본다 */
+  watchedDirs = new Map<string, string[]>()
 
   /** 테스트용 검색·규칙 상태 */
   searchResults: { sessionId: string; seq: number; snippet: string }[] = []
@@ -259,6 +261,11 @@ export class MockPlatform implements Platform {
         .map((e) => ({ path: e.path, name: e.name }))
     },
     listDir: async (_projectId: string, path: string) => this.fsState.entries[path] ?? [],
+    // 감시 집합을 기록만 한다 — 테스트는 emit으로 fs_changed를 직접 흘려 화면 반응을 본다
+    watch: async (projectId: string, paths: string[]) => {
+      this.watchedDirs.set(projectId, [...paths])
+      return { watched: paths.length }
+    },
     readFile: async (_projectId: string, path: string): Promise<FsFile> => ({
       text: this.fsState.files[path] ?? '',
       truncated: false,

@@ -154,6 +154,11 @@ export interface FsPort {
   search(projectId: string, query: string, limit?: number): Promise<{ path: string; name: string }[]>
   /** 한 단계만 읽는다. ignored는 .gitignore에 걸리는 항목 (git이 알려준 것을 재사용) */
   listDir(projectId: string, relPath: string): Promise<FsEntry[]>
+  /**
+   * 감시할 디렉토리 집합을 통째로 바꾼다 (#34). 화면의 펼쳐진 집합이 곧 감시 집합이다.
+   * 변화는 이벤트 스트림의 `fs_changed`로 온다 — 이 호출은 등록만 한다.
+   */
+  watch(projectId: string, paths: string[]): Promise<{ watched: number }>
   readFile(projectId: string, relPath: string): Promise<FsFile>
   /**
    * Move an entry into another folder of the same project (#19, drag inside the tree).

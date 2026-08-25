@@ -377,6 +377,16 @@ export const RpcMethods = {
     params: z.object({ projectId: z.string(), path: z.string() }),
     result: z.array(z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })),
   },
+  /**
+   * 이 프로젝트에서 감시할 디렉토리 집합 (#34). **전체를 통째로 받는다** —
+   * projects.reorder와 같은 문법, 같은 이유다: 화면의 펼쳐진 집합이 곧 감시 집합이라
+   * "이걸 더하고 저걸 빼고"로 주고받으면 둘이 어긋난 채로도 오류가 없다.
+   * 변화는 `fs_changed` 이벤트로 온다. watched가 보낸 수보다 작으면 상한에 잘린 것이다.
+   */
+  'fs.watch': {
+    params: z.object({ projectId: z.string(), paths: z.array(z.string()) }),
+    result: z.object({ watched: z.number() }),
+  },
   'fs.readFile': {
     params: z.object({ projectId: z.string(), path: z.string() }),
     result: z.object({ text: z.string(), truncated: z.boolean(), binary: z.boolean(), bytes: z.number() }),
