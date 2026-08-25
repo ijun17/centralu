@@ -111,6 +111,11 @@ export interface AgentPort {
    * 항목은 프로토콜이 정한다 — 여기 다시 적으면 늦게 추가된 필드가 조용히 빠진다.
    */
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<SessionInfo>
+  /**
+   * 승격·강등 (#13). 다음에 깰 때 적용된다 — 부르는 쪽이 사람에게 그 사실을 알려야 한다.
+   * 중앙 오케스트레이터는 거부된다.
+   */
+  setSessionKind(sessionId: string, kind: SessionInfo['kind']): Promise<SessionInfo>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
   listSessions(): Promise<SessionInfo[]>

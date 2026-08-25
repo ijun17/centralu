@@ -44,6 +44,11 @@ export type OrchestratedSession = {
   preview: string
   /** 마지막으로 움직인 시각 — 어느 세션이 '지금 이야기'인지 가른다 */
   lastActive?: string
+  /**
+   * 이 세션도 오케스트레이터다 (#13 — 프로젝트 오케스트레이터).
+   * 중앙 오케스트레이터가 계급을 알아야 "그 프로젝트에 걸친 일은 그쪽에 맡긴다"를 할 수 있다.
+   */
+  orchestrator?: boolean
 }
 
 export type OrchestratorTools = {
@@ -87,6 +92,22 @@ export type OrchestratorTools = {
    * 둘 다 못 해서 결국 사람에게 넘겨야 했다 (도그푸딩). 되돌릴 수 있는 일이라 준다.
    */
   archiveSession(sessionId: string, archived: boolean): Promise<{ ok: boolean; error?: string }>
+  /**
+   * 워커 세션을 하나 만든다 (#13).
+   *
+   * 만들기는 주고 지우기는 안 주는 이유: 만든 세션은 사람이 목록에서 보고 되돌릴 수
+   * 있지만(보관·삭제 모두 사람 손에 있다), 지우기는 대화 기록까지 사라져 되돌릴 수 없다.
+   * 프로젝트 오케스트레이터는 자기 프로젝트에만 만들 수 있다 — project 인자는 중앙용이다.
+   */
+  createSession(opts: {
+    /** 프로젝트 이름 또는 id. 프로젝트 오케스트레이터는 생략한다 (자기 프로젝트 고정) */
+    project?: string
+    tool?: ToolName
+    /** 세션 이름. 주면 자동 이름이 덮지 않는다 */
+    name?: string
+    /** 만들자마자 보낼 첫 지시 */
+    firstMessage?: string
+  }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string }>
   recall(
     query: string,
     limit?: number,

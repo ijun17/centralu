@@ -254,8 +254,9 @@ export function SessionPane({
     // Not while composing (#12) — a half-formed syllable is not a query. Closing the menu also
     // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
     enabled: !!session && caret >= 0 && !composing,
-    // 오케스트레이터에겐 파일이 없다 — `@`는 세션을 집는다 (프로젝트 없음이 그 표식이다)
-    atSource: session && session.projectId === null ? 'sessions' : 'files',
+    // 오케스트레이터의 `@`는 세션을 집는다 — 지시의 대상이 파일이 아니라 세션이다.
+    // 판정은 명시적 표식(#13, kind) — 프로젝트 오케스트레이터는 프로젝트가 있어도 세션을 집는다
+    atSource: session && session.kind === 'orchestrator' ? 'sessions' : 'files',
   })
 
   const pick = (item: Suggestion) => {
@@ -660,6 +661,8 @@ export function SessionPane({
             verbosity={session.verbosity}
             preset={session.permissionPreset}
             live={session.live}
+            projectId={session.projectId}
+            kind={session.kind}
           />
           {/*
             워크트리 세션은 **다른 디렉토리에서 돈다.** 그 사실이 안 보이면 사용자는

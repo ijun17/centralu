@@ -66,6 +66,20 @@ export const ORCHESTRATOR_TOOLS = [
         .describe('그 세션이 일을 마치면 나에게 알려줄지. 사람이 결과를 기다리는 일이면 true'),
     }),
   },
+  {
+    name: 'create_session',
+    description:
+      '워커 세션을 하나 만든다 (#13). 시킬 세션이 마땅치 않을 때 쓴다 — 만든 세션은 사람 눈에 보이는 목록에 바로 나타난다. 지우기는 사람 몫이다.',
+    schema: z.object({
+      project: z
+        .string()
+        .optional()
+        .describe('프로젝트 이름 또는 id. 프로젝트 오케스트레이터는 생략한다 (자기 프로젝트에만 만든다)'),
+      tool: z.enum(['claude', 'codex']).optional().describe('생략하면 프로젝트의 기본 도구'),
+      name: z.string().optional().describe('세션 이름. 주면 자동 이름이 덮지 않는다'),
+      firstMessage: z.string().optional().describe('만들자마자 보낼 첫 지시'),
+    }),
+  },
 ] as const
 
 export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
@@ -78,6 +92,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '위험한 작업이면 그 세션에서 사람에게 승인을 묻게 된다.',
   '사람이 결과를 기다리는 일이면 reportBack을 켠다 — 그 세션이 마치면 여기로 알려준다.',
   '보고만으로 부족하면 read_session으로 그 세션의 대화를 직접 읽는다.',
+  '시킬 세션이 마땅치 않으면 create_session으로 새로 만든다 — 지우기는 사람 몫이다.',
   'recall이 준 seq를 read_session의 around에 넣으면 찾은 대목으로 바로 간다 — 세션을 통째로 읽지 않는다.',
   '"저번에", "예전에 저쪽에서" 같은 이야기가 나오면 recall로 지난 대화를 찾는다 —',
   '사람과 나눈 대화가 프로젝트를 가로지르는 기억이고, 그 기억은 검색으로만 닿는다.',
@@ -104,6 +119,8 @@ export async function runOrchestratorTool(
         .map(
           (s) =>
             `- ${s.name} [${s.sessionId}] · 프로젝트 ${s.project} · ${s.tool} · ${s.state}` +
+            // 계급이 보여야 "그 프로젝트 일은 그쪽에 맡긴다"가 가능하다 (#13)
+            (s.orchestrator ? ' · 오케스트레이터' : '') +
             (s.lastActive ? ` · 마지막 ${s.lastActive}` : '') +
             (s.preview ? `\n    최근: ${s.preview}` : ''),
         )
@@ -157,6 +174,21 @@ export async function runOrchestratorTool(
     const r = await tools.archiveSession(sessionId, archived)
     return {
       text: r.ok ? `${archived ? '보관했습니다' : '되돌렸습니다'}: ${sessionId}` : `하지 못했습니다 — ${r.error}`,
+      isError: !r.ok,
+    }
+  }
+
+  if (name === 'create_session') {
+    const r = await tools.createSession({
+      project: typeof args.project === 'string' ? args.project : undefined,
+      tool: args.tool === 'claude' || args.tool === 'codex' ? args.tool : undefined,
+      name: typeof args.name === 'string' ? args.name : undefined,
+      firstMessage: typeof args.firstMessage === 'string' ? args.firstMessage : undefined,
+    })
+    return {
+      text: r.ok
+        ? `만들었습니다: ${r.name} [${r.sessionId}]` + (typeof args.firstMessage === 'string' ? ' — 첫 지시를 보냈습니다' : '')
+        : `만들지 못했습니다 — ${r.error}`,
       isError: !r.ok,
     }
   }

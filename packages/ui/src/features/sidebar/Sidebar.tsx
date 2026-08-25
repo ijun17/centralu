@@ -455,6 +455,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     */}
                     <ToolMark tool={s.tool} state={s.state} />
                     <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
+                    {/*
+                      승격된 세션의 표식 (#13). 겉보기에 보통 세션과 똑같으면 "왜 이
+                      세션만 다른 세션들을 부리지?"를 화면이 설명하지 못한다 —
+                      워크트리 배지와 같은 이유로, 다르게 도는 세션은 다르게 보인다.
+                    */}
+                    {s.kind === 'orchestrator' && (
+                      <span
+                        className="shrink-0 rounded border border-edge px-1 text-[9px] uppercase tracking-wide text-slate"
+                        data-testid={`orchestrator-badge-${s.id}`}
+                        title="Project orchestrator — directs this project's sessions"
+                      >
+                        orch
+                      </span>
+                    )}
                     {unread && (
                       <span
                         className="ml-auto size-1 shrink-0 rounded-full bg-ash"

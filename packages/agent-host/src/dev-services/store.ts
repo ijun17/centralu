@@ -415,6 +415,15 @@ export class Store {
           if (!cols.some((c) => c.name === 'verbosity')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN verbosity TEXT`)
           }
+          /*
+           * is_orchestrator를 여기서도 보장한다 (#13). 새 DB의 DDL과 v10 재구축에는
+           * 있지만, **v10이 일찍 돌아나가는 DB**(project_id가 애초에 nullable이던 옛
+           * 스키마)는 이 컬럼 없이 v17까지 왔다 — orchestratorId()가 읽는 순간
+           * 터지는 지뢰였는데, listSessions까지 읽게 되면서(#13) 겉으로 드러났다.
+           */
+          if (!cols.some((c) => c.name === 'is_orchestrator')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0`)
+          }
         },
       },
     ]
@@ -533,12 +542,13 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, last_read_seq, waiting_since, created_at, model, effort, verbosity, permission_preset, imported_from, worktree_path, worktree_branch, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, permission_preset, imported_from, worktree_path, worktree_branch, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
+           is_orchestrator = excluded.is_orchestrator,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
            verbosity = excluded.verbosity,
            permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
@@ -549,6 +559,8 @@ export class Store {
       .run({
         ...s,
         autoNamed: s.autoNamed ? 1 : 0,
+        // 표식(#13)도 보통의 upsert에 실려 다닌다 — 쓰는 길이 둘이면 한쪽만 고쳐진다
+        isOrchestrator: s.kind === 'orchestrator' ? 1 : 0,
         archived: s.archived ? 1 : 0,
         effort: s.effort ?? null,
         verbosity: s.verbosity ?? null,
@@ -609,31 +621,28 @@ export class Store {
   }
 
   /**
-   * 앱에 하나뿐인 오케스트레이터의 id (없으면 null).
+   * **중앙** 오케스트레이터의 id (없으면 null).
    *
-   * SessionInfo에 플래그로 싣지 않는다 — `projectId === null`과 같은 사실을 두 곳에 두면
-   * 언젠가 한쪽만 고쳐진다. "누가 오케스트레이터인가"는 여기서 한 번만 답한다.
+   * 예전에는 "오케스트레이터는 앱에 하나"여서 이 질의가 곧 전부였다. 프로젝트
+   * 오케스트레이터(#13)가 생기면서 표식(is_orchestrator=1)은 여럿일 수 있고,
+   * 그중 프로젝트가 없는 것이 중앙이다. 표식 자체는 SessionInfo.kind에 실려
+   * 보통의 upsert로 다닌다 — 한때 "두 곳에 두면 한쪽만 고쳐진다"며 여기서만
+   * 답했는데, 프로젝트 오케스트레이터가 그 전제(projectId=null과 같은 사실)를
+   * 깨뜨렸으므로 이제 kind가 유일한 사실이고 이 질의는 그걸 읽을 뿐이다.
    */
   orchestratorId(): string | null {
-    const row = this.db.prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 LIMIT 1`).get() as
-      | { id: string }
-      | undefined
+    const row = this.db
+      .prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL LIMIT 1`)
+      .get() as { id: string } | undefined
     return row?.id ?? null
-  }
-
-  /** 하나뿐이라는 것을 저장소가 지킨다 — 나머지는 전부 내린다 */
-  markOrchestrator(sessionId: string): void {
-    this.db.transaction(() => {
-      this.db.prepare(`UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1`).run()
-      this.db.prepare(`UPDATE sessions SET is_orchestrator = 1 WHERE id = ?`).run(sessionId)
-    })()
   }
 
   listSessions(): SessionInfo[] {
     const rows = this.db
       .prepare(
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
-                s.auto_named as autoNamed, s.state, s.archived, s.last_read_seq as lastReadSeq,
+                s.auto_named as autoNamed, s.state, s.archived, s.is_orchestrator as isOrchestrator,
+                s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.verbosity, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
@@ -642,9 +651,10 @@ export class Store {
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
       )
-      .all() as (Omit<SessionInfo, 'autoNamed' | 'archived' | 'worktree'> & {
+      .all() as (Omit<SessionInfo, 'autoNamed' | 'archived' | 'worktree' | 'kind'> & {
       autoNamed: number
       archived: number
+      isOrchestrator: number
       worktreePath: string | null
       worktreeBranch: string | null
       contextUsed: number | null
@@ -652,10 +662,11 @@ export class Store {
       contextExactness: string | null
     })[]
     // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
-    return rows.map(({ worktreePath, worktreeBranch, contextUsed, contextWindow, contextExactness, ...r }) => ({
+    return rows.map(({ worktreePath, worktreeBranch, contextUsed, contextWindow, contextExactness, isOrchestrator, ...r }) => ({
       ...r,
       autoNamed: !!r.autoNamed,
       archived: !!r.archived,
+      kind: isOrchestrator ? ('orchestrator' as const) : ('worker' as const),
       live: false,
       worktree: worktreePath ? { path: worktreePath, branch: worktreeBranch ?? '' } : null,
       ...sessionLiveDefaults(),

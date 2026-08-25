@@ -16,8 +16,13 @@ import { transition } from './state-machine.js'
  */
 export type SessionSummary = {
   id: string
-  /** 오케스트레이터만 null — 프로젝트를 가로지르는 세션이라 어디에도 속하지 않는다 */
+  /** 중앙 오케스트레이터만 null — 프로젝트를 가로지르는 세션이라 어디에도 속하지 않는다 */
   projectId: string | null
+  /**
+   * 워커인가 오케스트레이터인가 (#13). projectId로 판정하던 시절의 여섯 군데가
+   * 이 한 필드로 모였다 — 프로젝트 오케스트레이터는 프로젝트가 **있으면서** 오케스트레이터다.
+   */
+  kind: 'worker' | 'orchestrator'
   /**
    * 이 세션이 쓰는 도구.
    *
@@ -80,7 +85,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, permissionPreset: 'normal',
-    worktree: null,
+    worktree: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
   }
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
+import { ORCHESTRATOR_ROLE, orchestratorHome, projectOrchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
 import { homedir } from 'node:os'
@@ -363,7 +363,15 @@ export class SessionManager {
    * 프로젝트 없는 세션을 만들 수 있는 곳은 아래 `orchestrator()` 하나뿐이다.
    */
   async createSession(
-    params: Omit<CreateSessionParams, 'projectId'> & { projectId: string | null },
+    params: Omit<CreateSessionParams, 'projectId'> & {
+      projectId: string | null
+      /**
+       * 역할 (#13). RPC 계약에는 없다 — 밖에서 오케스트레이터를 "만들" 수는 없고
+       * (중앙은 orchestrator()가, 프로젝트는 승격(sessions.setKind)이 유일한 길이다),
+       * 여기 있는 이유는 orchestrator()가 자기 세션을 만들 때 쓰기 위해서다.
+       */
+      kind?: SessionInfo['kind']
+    },
   ): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
     if (!adapter) throw Object.assign(new Error(`Unknown tool: ${params.tool}`), { code: 'tool_not_installed' })
@@ -412,7 +420,7 @@ export class SessionManager {
     }
 
     const info: SessionInfo = {
-      id, projectId: params.projectId, tool: params.tool, externalId: null,
+      id, projectId: params.projectId, kind: params.kind ?? 'worker', tool: params.tool, externalId: null,
       name: params.initialPrompt ? truncate(params.initialPrompt) : 'New session',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
@@ -439,10 +447,10 @@ export class SessionManager {
           sessionId: id, cwd, model: params.model, effort: params.effort,
           verbosity: params.verbosity,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
-          // 오케스트레이터만 도구를 받는다 (프로젝트가 없다는 것이 곧 그 표식이다)
-          orchestratorTools: params.projectId === null ? this.orchestratorToolsFor(id) : undefined,
-          systemPromptAppend: params.projectId === null ? ORCHESTRATOR_ROLE : undefined,
-          orchestratorBridge: params.projectId === null ? (this.endpoint?.() ?? undefined) : undefined,
+          // 오케스트레이터만 도구를 받는다 — 판정은 명시적 표식 하나다 (#13, kind)
+          orchestratorTools: info.kind === 'orchestrator' ? this.orchestratorToolsFor(id, info.projectId) : undefined,
+          systemPromptAppend: info.kind === 'orchestrator' ? this.orchestratorRoleFor(info.projectId) : undefined,
+          orchestratorBridge: info.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -753,10 +761,13 @@ export class SessionManager {
            * 만들 때만 붙이면, 다시 뜬 오케스트레이터는 도구도 역할도 없는
            * 평범한 세션이 된다 — 빈 폴더에 앉아 아무것도 못 하면서
            * 겉보기에는 멀쩡한, 가장 나쁜 상태다.
+           *
+           * 그리고 여기가 곧 **승격이 실제가 되는 자리**다 (#13): 살아 있는 동안
+           * 표식만 바뀐 세션이 다음에 깰 때 이 조건을 지나며 도구와 역할을 받는다.
            */
-          orchestratorTools: m.projectId === null ? this.orchestratorToolsFor(sessionId) : undefined,
-          systemPromptAppend: m.projectId === null ? ORCHESTRATOR_ROLE : undefined,
-          orchestratorBridge: m.projectId === null ? (this.endpoint?.() ?? undefined) : undefined,
+          orchestratorTools: m.kind === 'orchestrator' ? this.orchestratorToolsFor(sessionId, m.projectId) : undefined,
+          systemPromptAppend: m.kind === 'orchestrator' ? this.orchestratorRoleFor(m.projectId) : undefined,
+          orchestratorBridge: m.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -793,8 +804,9 @@ export class SessionManager {
       void this.listCommands(sessionId).catch(() => {})
 
       // 밖에서(터미널의 도구로) 이어간 대화를 따라잡는다.
-      // 오케스트레이터는 밖에서 이어갈 수 없는 세션이라 해당 없다 (프로젝트가 없다)
-      if (project) {
+      // 오케스트레이터는 앱이 관리하는 세션이라 밖에서 이어갈 일이 없다 —
+      // 중앙은 프로젝트가 없어 원래 안 걸렸고, 프로젝트 오케스트레이터(#13)는 여기서 거른다
+      if (project && m.kind !== 'orchestrator') {
         // 따라잡기가 멈춰도 세션은 이미 살아 있다 — 붙잡지 말고 다음 기회에 맡긴다
         const added = await withTimeout(this.syncImportedHistory(m, adapter, project.path), 10_000, 'History catch-up').catch(() => 0)
         if (added > 0) this.emit({ type: 'history_synced', sessionId, added })
@@ -1598,15 +1610,23 @@ export class SessionManager {
    * 터미널에서 만든 남의 세션도, 파일도, 프로젝트 디렉토리도 닿지 않는다 —
    * 막는 규칙을 따로 쓴 게 아니라 볼 수 있는 것이 그것뿐이다.
    */
-  private orchestratorToolsFor(orchestratorId: string): OrchestratorTools {
+  private orchestratorToolsFor(orchestratorId: string, scopeProjectId: string | null = null): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+    /**
+     * 계급의 실체 (#13): 중앙(scope=null)은 전부 보고, 프로젝트 오케스트레이터는
+     * **자기 프로젝트만** 본다. 규칙을 도구마다 다시 쓰지 않고 한 판정으로 모은다 —
+     * 여섯 군데의 projectId 판정이 낳은 어긋남을 여기서 반복하지 않기 위해서다.
+     */
+    const inScope = (s: SessionInfo) => scopeProjectId === null || s.projectId === scopeProjectId
+    const scopeError = (id: string) =>
+      scopeProjectId === null ? `이 앱이 관리하는 세션이 아닙니다: ${id}` : `이 프로젝트의 세션이 아닙니다: ${id}`
 
     return {
       listSessions: async () => {
         const byId = projects()
         return [...this.meta.values()]
           // 자기 자신은 뺀다 — 자기에게 시키는 것은 고리를 만든다
-          .filter((s) => s.id !== orchestratorId && !s.archived)
+          .filter((s) => s.id !== orchestratorId && !s.archived && inScope(s))
           .map((s) => ({
             sessionId: s.id,
             name: this.labelOf(s),
@@ -1615,7 +1635,44 @@ export class SessionManager {
             tool: s.tool,
             preview: this.previewOf(s.id),
             lastActive: this.lastActiveOf(s.id),
+            ...(s.kind === 'orchestrator' ? { orchestrator: true } : {}),
           }))
+      },
+
+      createSession: async (opts) => {
+        const all = this.store.listProjects()
+        // 프로젝트 오케스트레이터는 자기 프로젝트 고정 — 인자로도 밖을 못 가리킨다
+        const project =
+          scopeProjectId !== null
+            ? all.find((p) => p.id === scopeProjectId)
+            : all.find((p) => p.id === opts.project || p.name === opts.project)
+        if (!project) {
+          return {
+            ok: false,
+            error:
+              scopeProjectId !== null
+                ? '이 오케스트레이터의 프로젝트를 찾을 수 없습니다'
+                : opts.project
+                  ? `그런 프로젝트가 없습니다: ${opts.project}`
+                  : 'project를 지정하세요 (이름 또는 id)',
+          }
+        }
+        if (scopeProjectId !== null && opts.project && opts.project !== project.id && opts.project !== project.name) {
+          return { ok: false, error: `이 오케스트레이터는 "${project.name}"에만 세션을 만들 수 있습니다` }
+        }
+        try {
+          const info = await this.createSession({
+            projectId: project.id,
+            cwd: project.path,
+            tool: opts.tool ?? project.defaultTool,
+            permissionPreset: 'normal',
+          })
+          if (opts.name) this.rename(info.id, opts.name)
+          if (opts.firstMessage) await this.send(info.id, opts.firstMessage)
+          return { ok: true, sessionId: info.id, name: this.meta.get(info.id)?.name ?? info.name }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
       },
 
       recall: async (query, limit = 12) => {
@@ -1625,7 +1682,7 @@ export class SessionManager {
         const mine = raw.filter((h) => {
           const s = this.meta.get(h.sessionId)
           // 오케스트레이터 자신의 말은 뺀다 — 자기가 한 말을 근거로 되짚으면 메아리가 된다
-          return s && s.id !== orchestratorId
+          return s && s.id !== orchestratorId && inScope(s)
         })
         const out: {
           sessionId: string
@@ -1652,10 +1709,10 @@ export class SessionManager {
       },
 
       readSession: async (sessionId, limit = 40, opts) => {
-        // 범위 판정은 sendToSession과 같은 규칙 — 이 앱이 관리하는 세션만
+        // 범위 판정은 sendToSession과 같은 규칙 — 자기 범위의 세션만
         if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 읽지 않습니다' }
         const target = this.meta.get(sessionId)
-        if (!target) return { ok: false, error: `이 앱이 관리하는 세션이 아닙니다: ${sessionId}` }
+        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 
         /*
          * 저장된 한 행은 스트리밍 델타 하나다. 그대로 주면 토막 수백 개가 나가므로
@@ -1711,7 +1768,7 @@ export class SessionManager {
       archiveSession: async (sessionId, archived) => {
         if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 보관할 수 없습니다' }
         const target = this.meta.get(sessionId)
-        if (!target) return { ok: false, error: `이 앱이 관리하는 세션이 아닙니다: ${sessionId}` }
+        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
         try {
           await this.archive(sessionId, archived)
           return { ok: true }
@@ -1730,7 +1787,7 @@ export class SessionManager {
           return { ok: false, error: '자기 자신에게는 보낼 수 없습니다' }
         }
         const target = this.meta.get(sessionId)
-        if (!target) return { ok: false, error: `이 앱이 관리하는 세션이 아닙니다: ${sessionId}` }
+        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
         if (target.archived) return { ok: false, error: `보관된 세션입니다: ${target.name}` }
 
         try {
@@ -1849,10 +1906,51 @@ export class SessionManager {
    * 접근 범위가 구조가 아니라 약속이 된다.
    */
   async runOrchestratorTool(sessionId: string, name: string, args: Record<string, unknown>) {
-    if (this.store.orchestratorId() !== sessionId) {
+    const m = this.meta.get(sessionId)
+    if (m?.kind !== 'orchestrator') {
       throw Object.assign(new Error('오케스트레이터만 쓸 수 있는 도구입니다'), { code: 'internal' })
     }
-    return runOrchestratorTool(this.orchestratorToolsFor(sessionId), name, args)
+    return runOrchestratorTool(this.orchestratorToolsFor(sessionId, m.projectId), name, args)
+  }
+
+  /** 역할 텍스트 — 중앙(projectId=null)과 프로젝트 오케스트레이터가 다르다 (#13) */
+  private orchestratorRoleFor(projectId: string | null): string {
+    if (projectId === null) return ORCHESTRATOR_ROLE
+    const p = this.store.listProjects().find((x) => x.id === projectId)
+    return projectOrchestratorRole(p?.name ?? projectId)
+  }
+
+  /**
+   * 승격·강등 (#13). **다음에 깰 때 적용된다** — 도구·역할은 프로세스를 띄울 때
+   * 주입되므로, 살아 있는 세션은 표식만 먼저 바뀐다. 그 자리에서 재시작하지 않는
+   * 이유: 승격 대상은 대개 한창 일하던 세션이고, 재시작은 진행 중인 턴을 죽인다.
+   */
+  async setSessionKind(sessionId: string, kind: SessionInfo['kind']): Promise<SessionInfo> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (m.projectId === null) {
+      // 중앙 오케스트레이터를 강등하면 프로젝트 없는 워커가 남는다 — 그런 세션은 이 앱에 없다
+      throw Object.assign(new Error('The central orchestrator cannot change roles'), { code: 'internal' })
+    }
+    if (kind === 'orchestrator' && m.kind !== 'orchestrator') {
+      /*
+       * 프로젝트당 하나. 몰래 갈아치우지 않는다 — 승격이 다른 세션을 조용히 강등하면
+       * 그 세션은 다음에 깰 때 말없이 도구를 잃는다. 지금 누가 그 자리에 있는지
+       * 이름으로 알려주고, 바꾸는 것은 사람이 한다.
+       */
+      const holder = [...this.meta.values()].find(
+        (s) => s.projectId === m.projectId && s.kind === 'orchestrator' && s.id !== sessionId,
+      )
+      if (holder) {
+        throw Object.assign(
+          new Error(`"${holder.name}" is already this project's orchestrator — demote it first`),
+          { code: 'internal' },
+        )
+      }
+    }
+    m.kind = kind
+    this.store.upsertSession(m)
+    return { ...m, live: this.handles.has(sessionId) }
   }
 
   /**
@@ -1874,11 +1972,11 @@ export class SessionManager {
 
     const info = await this.createSession({
       projectId: null,
+      kind: 'orchestrator', // 표식은 세션과 함께 태어난다 — 따로 찍으면 그 사이가 무표식 상태다
       cwd: orchestratorHome(),
       tool: 'claude',
       permissionPreset: 'normal',
     })
-    this.store.markOrchestrator(info.id)
     // 자동 이름(FR-18)이 첫 프롬프트로 덮어쓰지 않게 사람이 정한 이름으로 둔다
     this.rename(info.id, 'Orchestrator')
     return this.meta.get(info.id)!

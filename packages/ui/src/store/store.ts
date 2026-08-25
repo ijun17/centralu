@@ -434,6 +434,8 @@ export type AppState = {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
+  /** 승격·강등 (#13). 다음에 깰 때 적용된다 — 토스트가 그 사실을 말한다 */
+  setSessionKind(sessionId: string, kind: 'worker' | 'orchestrator'): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /**
    * 세션의 에이전트를 바꾼다 (claude ↔ codex).
@@ -789,7 +791,7 @@ export const useStore = create<AppState>((set, get) => ({
            * all of these — two places that construct one thing have to ask for one set.
            */
           ...initialSession({
-            id: s.id, projectId: s.projectId, name: s.name, tool: s.tool,
+            id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
             model: s.model, effort: s.effort, verbosity: s.verbosity, permissionPreset: s.permissionPreset, worktree: s.worktree,
           }),
           autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
@@ -1804,6 +1806,30 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  async setSessionKind(sessionId, kind) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const info = await platform.agents.setSessionKind(sessionId, kind)
+      set((st) => ({
+        sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, kind: info.kind } },
+      }))
+      /*
+       * 적용 시점을 숨기지 않는다 (#13). 도구·역할은 프로세스를 띄울 때 주입되므로
+       * 살아 있는 세션은 표식만 먼저 바뀐다 — 그 사실을 모르면 "승격했는데 도구가
+       * 없다"가 버그 신고로 돌아온다.
+       */
+      set({
+        toast:
+          info.kind === 'orchestrator'
+            ? 'Promoted to project orchestrator — takes effect next time the session wakes'
+            : 'Back to a regular session — takes effect next time the session wakes',
+      })
+    } catch (e) {
+      set({ toast: `Could not change the role: ${(e as Error).message}` })
+    }
+  },
+
   async archive(sessionId, archived = true) {
     await get().platform!.agents.archiveSession(sessionId, archived)
     set((s) => {
@@ -1956,7 +1982,7 @@ export const useStore = create<AppState>((set, get) => ({
         sessions[f.id] = cur
           ? {
               ...cur,
-              projectId: f.projectId, tool: f.tool, name: f.name, autoNamed: f.autoNamed,
+              projectId: f.projectId, kind: f.kind, tool: f.tool, name: f.name, autoNamed: f.autoNamed,
               state: f.state, archived: f.archived, live: f.live,
               // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
               lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
@@ -1965,7 +1991,7 @@ export const useStore = create<AppState>((set, get) => ({
               ...liveFactsOf(f),
             }
           : {
-              ...initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree }),
+              ...initialSession({ id: f.id, projectId: f.projectId, kind: f.kind, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree }),
               autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
               lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
               ...liveFactsOf(f),

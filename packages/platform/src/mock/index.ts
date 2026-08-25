@@ -402,7 +402,7 @@ export class MockPlatform implements Platform {
         ? { path: `/mock/worktrees/${id}`, branch: `centralu/${id.slice(-8)}` }
         : null
       const info: SessionInfo = {
-        id, projectId: params.projectId, tool: params.tool, externalId: `ext-${id}`, worktree,
+        id, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: `ext-${id}`, worktree,
         effort: params.effort ?? null, verbosity: params.verbosity ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
@@ -495,7 +495,7 @@ export class MockPlatform implements Platform {
       if (found) return found
       const id = `orc-${++this.idc}`
       const info = {
-        id, projectId: null, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
+        id, projectId: null, kind: 'orchestrator' as const, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
         permissionPreset: 'normal' as const, importedFrom: null, worktree: null,
@@ -558,6 +558,16 @@ export class MockPlatform implements Platform {
       if (s.effort !== undefined) sess.effort = s.effort
       if (s.verbosity !== undefined) sess.verbosity = s.verbosity
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
+      return { ...sess }
+    },
+    setSessionKind: async (sessionId: string, kind: SessionInfo['kind']) => {
+      const sess = this.sessions.get(sessionId)
+      if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      // 실물과 같은 규칙 (#13): 중앙 오케스트레이터는 역할을 못 바꾼다
+      if (sess.projectId === null) {
+        throw Object.assign(new Error('The central orchestrator cannot change roles'), { code: 'internal' })
+      }
+      sess.kind = kind
       return { ...sess }
     },
     restartSession: async (sessionId: string) => {

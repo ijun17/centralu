@@ -12,7 +12,7 @@ function seeded() {
   const s = new Store()
   s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.upsertSession({
-    id: 's1', projectId: 'p1', tool: 'claude', externalId: null, name: '새 세션',
+    id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
@@ -67,7 +67,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
     // 그리고 이제 프로젝트 없는 세션이 들어간다
     store.upsertSession({
-      id: 'orc', projectId: null, tool: 'claude', externalId: null, name: 'Orchestrator',
+      id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
@@ -249,7 +249,7 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
     const store = new Store()
     store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     const base = {
-      id: 's-import', projectId: 'p1', tool: 'claude' as const, externalId: 'ext-new',
+      id: 's-import', projectId: 'p1', kind: 'worker' as const, tool: 'claude' as const, externalId: 'ext-new',
       name: '이어받은 대화', autoNamed: true, state: 'idle' as const, archived: false,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
       model: null, effort: null, verbosity: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null,
@@ -269,7 +269,7 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
  */
 describe('마이그레이션 v7 — 추론 강도', () => {
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
-    id: 's-x', projectId: 'p1', tool: 'claude', externalId: null, name: '세션',
+    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
     model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -301,7 +301,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
  */
 describe('마이그레이션 v18 — 응답 길이', () => {
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
-    id: 's-x', projectId: 'p1', tool: 'codex', externalId: null, name: '세션',
+    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
     model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -337,7 +337,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
       s.upsertSession({
-        id, projectId: 'p1', tool: 'claude', externalId: null, name: id,
+        id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
         model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -376,7 +376,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
       s.upsertSession({
-        id, projectId: 'p1', tool: 'claude', externalId: null, name: id,
+        id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
         model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -414,30 +414,41 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
   })
 })
 
-describe('오케스트레이터는 하나뿐', () => {
-  it('표식이 없으면 null', () => {
+/**
+ * 표식은 이제 kind 하나다 (#13). 예전에는 markOrchestrator가 따로 있어 "쓰는 길이 둘"
+ * 이었고, 하나뿐이라는 규칙도 저장소가 지켰다 — 프로젝트 오케스트레이터가 생기며
+ * 표식은 여럿일 수 있고(프로젝트마다 하나), 중앙은 그중 프로젝트 없는 것이다.
+ */
+describe('오케스트레이터 표식(kind)', () => {
+  const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
+    s.upsertSession({
+      id, projectId, kind, tool: 'claude', externalId: null, name: id,
+      autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+      permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
+    })
+
+  it('표식이 없으면 중앙은 null', () => {
     expect(seeded().orchestratorId()).toBeNull()
   })
 
-  it('표식을 옮기면 이전 것은 내려간다 — 둘이 될 수 없다', () => {
+  it('kind가 upsert로 왕복한다 — 쓰는 길은 하나다', () => {
     const s = seeded()
-    const mk = (id: string) =>
-      s.upsertSession({
-        id, projectId: null, tool: 'claude', externalId: null, name: id,
-        autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-        createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
-        permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
-      })
-    mk('a')
-    mk('b')
+    mk(s, 'orc', null, 'orchestrator')
+    expect(s.orchestratorId()).toBe('orc')
+    expect(s.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
+    // 강등도 같은 길로 남는다
+    mk(s, 'orc', null, 'worker')
+    expect(s.orchestratorId()).toBeNull()
+    s.close()
+  })
 
-    s.markOrchestrator('a')
-    expect(s.orchestratorId()).toBe('a')
-
-    s.markOrchestrator('b')
-    expect(s.orchestratorId()).toBe('b')
-    // 'a'가 남아 있으면 여기서 둘 중 하나가 임의로 뽑힌다 — 그게 이 테스트의 요점이다
-    expect(s.listSessions().filter((x) => x.projectId === null).length).toBe(2)
+  it('프로젝트 오케스트레이터는 중앙이 아니다 — orchestratorId는 프로젝트 없는 것만 답한다', () => {
+    const s = seeded()
+    mk(s, 'proj-orc', 'p1', 'orchestrator')
+    expect(s.orchestratorId()).toBeNull()
+    expect(s.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('orchestrator')
+    s.close()
   })
 })
 
@@ -726,7 +737,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
   }
 
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
-    id: 'worked', projectId: 'p1', tool: 'claude', externalId: null, name: '일한 세션',
+    id: 'worked', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '일한 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
     permissionPreset: 'normal', importedFrom: null, worktree: null,
