@@ -2748,7 +2748,8 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   // 스크롤이 생길 만큼 길게 — 짧으면 지나갈 것 자체가 없다
   await input.fill('첫 번째 질문\n' + '내용\n'.repeat(40))
   await page.getByTestId('send').click()
-  await input.fill('두 번째 질문')
+  // 두 번째도 길게 — 아래 내용이 화면 하나를 넘어야 첫 번째가 '완전히 지나간' 상태가 된다
+  await input.fill('두 번째 질문\n' + '내용\n'.repeat(40))
   await page.getByTestId('send').click()
 
   const stream = page.getByTestId('chat-stream')
@@ -2783,6 +2784,57 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   await expect(page.getByTestId('sticky-user')).toBeVisible()
   await expect(page.getByTestId('sticky-user')).toContainText(/작업|첫 번째 질문/)
 
+  /*
+    배너가 말하는 동안 원본은 숨는다 (도그푸딩: "같은 말이 두 번 보인다").
+    배너 자체가 흐름에 자리를 차지해 리스트를 밀어내므로, "완전히 지나갔다"고
+    판정된 원본이 배너 밑으로 되밀려 내려와 보였다. visibility로 숨겨 자리는
+    지키되 눈에는 안 보이게 한다.
+
+    조금씩 내리며 배너가 '첫 번째 질문'을 잡는 지점을 찾는다 — 그 지점에서는
+    원본 줄이 화면 가장자리(오버스캔)에 아직 렌더되어 있어 둘을 함께 볼 수 있다.
+  */
+  /*
+    잘게 나눠 내리면 안 된다: 아직 안 잰 줄은 추정 높이로 좌표가 잡혀 있다가
+    화면에 들어오는 순간 실측으로 바뀌며 좌표가 통째로 밀린다 — 그 순간을 폴링이
+    잡으면 "붙었다"가 한 프레임 뒤에 "안 붙었다"로 뒤집힌다 (실제로 그랬다).
+    방금 바닥까지 다녀왔으므로 모든 줄은 실측 완료 — 그 지오메트리로 한 번에 간다.
+  */
+  await stream.evaluate((el) => (el.scrollTop = 0))
+  const q1End = await stream.evaluate((el) => {
+    const rows = [...el.querySelectorAll('div[data-index]')] as HTMLElement[]
+    const row = rows.find((r) => (r.textContent ?? '').includes('첫 번째 질문'))!
+    const y = new DOMMatrixReadOnly(getComputedStyle(row).transform).m42
+    return y + row.offsetHeight
+  })
+  // +80: 배너가 흐름에 자리를 차지하며 리스트를 제 키만큼 밀어내는 것을 넉넉히 덮는다
+  await stream.evaluate((el, y) => (el.scrollTop = y + 80), q1End)
+  await expect(page.getByTestId('sticky-user')).toContainText('첫 번째 질문')
+  // 원본 줄은 화면 가장자리(오버스캔)에 아직 렌더되어 있다 — 렌더는 되지만 보이지 않아야 한다
+  await expect
+    .poll(() =>
+      stream.evaluate((el) => {
+        const rows = [...el.querySelectorAll('div[data-index]')] as HTMLElement[]
+        const row = rows.find((r) => (r.textContent ?? '').includes('첫 번째 질문'))
+        return row ? getComputedStyle(row).visibility : 'gone'
+      }),
+    )
+    .toBe('hidden')
+
+  /*
+    누르면 펼쳐진다 — 전문은 접힌 줄 위에 **겹쳐서** 나온다. 흐름에서 키를 키우면
+    아래 가상 스크롤 좌표가 통째로 밀리기 때문에, 접힌 줄의 자리는 그대로여야 한다.
+  */
+  const collapsed = page.getByTestId('sticky-user').getByRole('button').first()
+  const collapsedBox = (await collapsed.boundingBox())!
+  await collapsed.click()
+  const expanded = page.getByTestId('sticky-user-expanded')
+  await expect(expanded).toBeVisible()
+  // 여러 줄이 펼쳐졌고(접힌 한 줄보다 확실히 크다), 접힌 줄의 자리는 안 변했다
+  expect((await expanded.boundingBox())!.height).toBeGreaterThan(collapsedBox.height * 2)
+  expect((await collapsed.boundingBox())!.height).toBe(collapsedBox.height)
+  // 다시 누르면 접힌다
+  await expanded.click()
+  await expect(page.getByTestId('sticky-user-expanded')).toBeHidden()
 })
 
 /** 경로를 외워서 치지 않아도 되게 — 트리에서 끌어다 입력창에 놓는다 */

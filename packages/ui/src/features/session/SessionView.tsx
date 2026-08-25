@@ -938,6 +938,10 @@ function ChatStream({
   const pinned = stickyIndex !== null ? chat[stickyIndex] : undefined
   const stickyText = pinned?.kind === 'user' ? pinned.text : null
 
+  // 접힘이 기본 — 다른 턴으로 넘어가면 펼침 상태를 끌고 가지 않는다
+  const [stickyOpen, setStickyOpen] = useState(false)
+  useEffect(() => setStickyOpen(false), [stickyIndex])
+
   /*
    * 바닥에 붙어 있으면 계속 따라간다.
    *
@@ -1013,9 +1017,33 @@ function ChatStream({
             말풍선과 같은 옷을 입는다 (폰트·패딩·색 — 도그푸딩 요청). 이 줄은 위로
             사라진 사용자 메시지의 **연장**이라, 크기가 다르면 다른 종류의 것으로 읽힌다.
             폭만 다르다: 배너는 전체 폭에 한 줄 말줄임이다 — 자리가 일이기 때문이다.
+            누르면 펼쳐진다 — 한 줄로 부족한 질문을 위로 되돌아가지 않고 다시 읽는 용도.
+            아주 긴 질문이 화면을 다 덮지 않게 높이만 자르고 안에서 스크롤한다.
           */}
-          <div className="truncate rounded-lg rounded-br-sm border border-slate/40 bg-graphite/95 px-3 py-2 text-[13px] text-chalk backdrop-blur-sm">
-            {stickyText}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setStickyOpen((v) => !v)}
+              aria-expanded={stickyOpen}
+              className="w-full cursor-pointer truncate rounded-lg rounded-br-sm border border-slate/40 bg-graphite/95 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-sm"
+            >
+              {stickyText}
+            </button>
+            {/*
+              펼침은 flow가 아니라 **덮개**다. 배너가 흐름에서 키를 키우면 아래 가상
+              스크롤의 좌표가 통째로 밀린다 — 접힌 한 줄이 자리를 지키고, 전문은 그
+              위에 겹쳐서 보여준다. 아주 긴 질문은 높이를 자르고 안에서 스크롤한다.
+            */}
+            {stickyOpen && (
+              <button
+                type="button"
+                onClick={() => setStickyOpen(false)}
+                data-testid="sticky-user-expanded"
+                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite/95 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-sm"
+              >
+                {stickyText}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1033,9 +1061,15 @@ function ChatStream({
               한 덩어리로 붙어 보여서, 긴 응답 뒤에 어디서 내 차례가 시작됐는지 못 찾는다.
               내 말 앞은 넓게 띄우고(= 이전 턴과 분리), 뒤는 조금만 띄운다(= 답과 한 묶음).
             */
+            /*
+              배너가 흐름에 자리를 차지하며 리스트를 제 높이만큼 밀어내므로, "완전히
+              지나갔다"고 판정된 원본이 배너 밑으로 되밀려 내려와 같은 말이 두 번
+              보인다. 배너가 그 메시지를 대신 말하는 동안 원본은 숨긴다 — visibility라
+              자리와 크기는 그대로여서 가상 스크롤의 측정은 흔들리지 않는다.
+            */
             className={`absolute left-0 top-0 w-full min-w-0 ${
               chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
-            }`}
+            } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
             <ChatRow item={chat[v.index]!} projectRoot={projectRoot} />
