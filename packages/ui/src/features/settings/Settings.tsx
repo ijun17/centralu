@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { TEXT_SCALES, TEXT_SCALE_DEFAULT, useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -64,6 +64,7 @@ const SHORTCUTS: [string[], string][] = [
  */
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications' },
+  { id: 'appearance', label: 'Appearance' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'shortcuts', label: 'Shortcuts' },
   { id: 'updates', label: 'Updates' },
@@ -201,6 +202,8 @@ export function Settings() {
               </section>
             )}
 
+            {category === 'appearance' && <AppearanceSection />}
+
             {/* E-4 승인 규칙 */}
             {category === 'permissions' && (
               <section>
@@ -276,6 +279,44 @@ export function Settings() {
  * 이미 깔린 사본이고, 그 사본의 비교가 틀려 있었다 (#42) — 여기서 확인하면 앱과 같이
  * 배포된 코드가 도므로 낡은 실행기를 통째로 건너뛴다.
  */
+/**
+ * 전체 글자 크기 — 다섯 단계, 가운데가 기본.
+ *
+ * 미리보기가 곧 라벨이다: 각 단추의 "가Aa"가 실제 그 단계의 배율로 그려지므로,
+ * 누르기 전에 결과를 안다. 숫자(85%…)를 따로 쓰지 않는 이유다 — 비율은 읽어도
+ * 크기는 보여야 안다.
+ */
+function AppearanceSection() {
+  const scale = useStore((s) => s.textScale)
+  const setScale = useStore((s) => s.setTextScale)
+  return (
+    <section>
+      <p className="text-[11px] leading-relaxed text-slate">Text size for the whole app.</p>
+      <div className="mt-3 flex items-end gap-2" role="radiogroup" aria-label="Text size">
+        {TEXT_SCALES.map((factor, i) => (
+          <button
+            key={factor}
+            type="button"
+            role="radio"
+            aria-checked={i === scale}
+            data-testid={`settings-scale-${i}`}
+            onClick={() => setScale(i)}
+            className={`rounded border px-2.5 py-1 leading-none transition-colors ${
+              i === scale
+                ? 'border-ash bg-graphite/40 text-chalk'
+                : 'border-edge text-ash hover:bg-graphite/25 hover:text-chalk'
+            }`}
+            title={i === TEXT_SCALE_DEFAULT ? 'Default' : `${Math.round(factor * 100)}%`}
+          >
+            <span style={{ fontSize: `${Math.round(13 * factor)}px` }}>가Aa</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-slate">Applies immediately and is remembered.</p>
+    </section>
+  )
+}
+
 function UpdatesSection() {
   const update = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)

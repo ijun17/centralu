@@ -329,6 +329,8 @@ export type WorkspaceSnapshot = {
   panelWidth?: number
   /** 세션 목록 폭(px) */
   sidebarWidth?: number
+  /** 전체 글자 크기 단계 (TEXT_SCALES 인덱스, 0..4) — 보는 방식이라 여기 실린다 */
+  textScale?: number
   /** @deprecated 탭 구조는 3레인으로 대체됐다. 구버전 스냅샷을 읽을 때만 나타난다 */
   tab?: string
 }

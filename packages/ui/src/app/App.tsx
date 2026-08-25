@@ -6,7 +6,7 @@ import { useShortcut } from './shortcut.js'
 import { letterOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
-import { useStore } from '../store/store.js'
+import { TEXT_SCALES, useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -31,6 +31,19 @@ export function App({ platform }: { platform: Platform }) {
   useEffect(() => {
     void attach(platform)
   }, [platform, attach])
+
+  /*
+   * 전체 글자 크기 (설정 → Appearance, 5단계).
+   *
+   * 루트의 CSS zoom 하나로 적용한다 — 텍스트가 전부 px 고정이라 글꼴만 따로 키울 길이
+   * 없고(스토어의 TEXT_SCALES 주석), zoom은 WKWebView(Tauri)와 브라우저 양쪽에서 산다.
+   */
+  const textScale = useStore((s) => s.textScale)
+  useEffect(() => {
+    ;(document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom = String(
+      TEXT_SCALES[textScale] ?? 1,
+    )
+  }, [textScale])
 
   // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
   useEffect(() => {

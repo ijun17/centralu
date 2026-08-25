@@ -340,6 +340,31 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
   })
 
   /*
+   * 글자 크기(5단계)도 보는 방식이다 — 스냅샷에 실리고, 재시작을 넘기고,
+   * 다섯 단계 밖의 값(망가진 스냅샷·미래 버전)은 가장 가까운 단계로 접힌다.
+   */
+  it('글자 크기 단계가 저장되고, 범위 밖 값은 단계로 접힌다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+
+    useStore.getState().setTextScale(4)
+    await new Promise((r) => setTimeout(r, 0))
+    expect((mock.workspaceSnapshot as { textScale?: number } | null)?.textScale).toBe(4)
+
+    useStore.getState().setTextScale(99)
+    expect(useStore.getState().textScale).toBe(4)
+    useStore.getState().setTextScale(-3)
+    expect(useStore.getState().textScale).toBe(0)
+  })
+
+  it('저장된 글자 크기가 재시작(재연결) 후 되살아난다', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { textScale: 3 }
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().textScale).toBe(3)
+  })
+
+  /*
    * "무시된 파일을 볼 수 없다"의 실제 내용은 "볼 수는 있는데 매번 잊는다"였다 (이슈 #17).
    * 스위치가 부품에 있어서 깃 탭으로 나갔다 오면 꺼져 있었다.
    *

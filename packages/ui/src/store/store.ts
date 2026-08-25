@@ -83,6 +83,17 @@ export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 240
 
 /**
+ * 전체 글자 크기의 다섯 단계 (가운데가 기본).
+ *
+ * 값은 루트의 CSS zoom 배율이다. 글꼴만 키우는 길(rem 전환)은 이 코드베이스의 텍스트가
+ * 전부 px 고정(text-[11px]…)이라 전면 개편이 되고, 글자만 커지고 칸이 안 커지면
+ * 좁은 그리드 칸에서 줄바꿈이 먼저 무너진다 — 화면 전체가 같은 비율로 커지는 쪽이
+ * OS의 디스플레이 배율과 같은 문법이라 예측 가능하다.
+ */
+export const TEXT_SCALES = [0.85, 0.925, 1, 1.1, 1.25] as const
+export const TEXT_SCALE_DEFAULT = 2
+
+/**
  * 대화 레인이 최소한 지켜야 할 폭.
  *
  * 이게 없으면 양쪽 패널을 늘렸을 때 가운데가 0으로 눌리다 못해 전체 레이아웃이
@@ -208,6 +219,8 @@ export type AppState = {
    * flipped rarely, so a write per flip costs nothing.
    */
   showIgnored: boolean
+  /** 전체 글자 크기 단계 — TEXT_SCALES의 인덱스 (0..4). 보는 방식이라 스냅샷에 실린다 */
+  textScale: number
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
@@ -350,6 +363,7 @@ export type AppState = {
   toggleDir(projectId: string, path: string): void
   /** Show or hide what .gitignore hides (#17) */
   setShowIgnored(show: boolean): void
+  setTextScale(step: number): void
   setToast(msg: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
@@ -699,6 +713,7 @@ export const useStore = create<AppState>((set, get) => ({
   workingSince: {},
   expandedDirs: {},
   showIgnored: true,
+  textScale: TEXT_SCALE_DEFAULT,
   focusedSessionId: null,
   focusedProjectId: null,
   history: {},
@@ -880,6 +895,9 @@ export const useStore = create<AppState>((set, get) => ({
         // a stored `false` is a decision and outranks it.
         const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
         if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
+        // 글자 크기도 보는 방식이다 — 같은 typeof 가드, 같은 이유 (없음 ≠ 기본으로 정했음)
+        const savedScale = (snap as { textScale?: number }).textScale
+        if (typeof savedScale === 'number') get().setTextScale(savedScale)
       }
     } catch {
       /* 스냅샷이 없어도 앱은 정상 동작한다 */
@@ -910,6 +928,7 @@ export const useStore = create<AppState>((set, get) => ({
         sidebarWidth: s.sidebarWidth,
         notifyPolicy: s.notifyPolicy,
         showIgnored: s.showIgnored,
+        textScale: s.textScale,
       } as never)
       .catch(() => {})
   },
@@ -1390,6 +1409,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setShowIgnored(show) {
     set({ showIgnored: show })
+    get().saveWorkspace()
+  },
+  setTextScale(step) {
+    // 다섯 단계 밖의 값(망가진 스냅샷·미래 버전)은 가장 가까운 단계로 접는다
+    set({ textScale: Math.min(TEXT_SCALES.length - 1, Math.max(0, Math.round(step))) })
     get().saveWorkspace()
   },
   setToast(toast) {
