@@ -264,6 +264,18 @@ class CodexSession implements SessionHandle {
   send(text: string): void {
     void this.ready.then(() => {
       if (!this.threadId) throw new Error('Thread is not ready')
+      /*
+       * **compact은 메시지가 아니라 함수다** (도그푸딩 지적 — "메시지 보내면 작동하는게
+       * 아니라"가 정확한 관찰이었다). codex CLI에서 /compact은 대화에 들어가지 않고
+       * 압축을 실행하는데, app-server 경로에는 그 슬래시 처리기가 없다 — turn/start로
+       * 보내면 모델이 "/compact"라는 **글자를 읽는다.** 전용 RPC가 따로 있다:
+       * thread/compact/start (generated/ClientRequest.ts). 실측: 즉시 {}를 답하고
+       * turn/started → contextCompaction 아이템 → thread/compacted로 진행돼,
+       * 기존 normalize 배관(압축 중 표시·완료 마커)이 그대로 받는다.
+       */
+      if (text.trim() === '/compact') {
+        return this.client.request('thread/compact/start', { threadId: this.threadId })
+      }
       return this.client.request('turn/start', {
         threadId: this.threadId,
         input: [{ type: 'text', text }],
@@ -298,13 +310,22 @@ class CodexSession implements SessionHandle {
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     const res = await this.client.request<{ data?: unknown }>('skills/list', {})
     const groups = Array.isArray(res?.data) ? res.data : []
-    const out: { name: string; description?: string }[] = []
+    /*
+     * compact은 스킬이 아니라 내장 명령이라 skills/list에 안 나온다 — 그런데 자동완성이
+     * 이 목록으로 그려지므로, 여기 없으면 **쓸 수 있는데 보이지 않는** 명령이 된다
+     * (있는 걸 숨기는 것도 목록의 거짓말이다). codex가 언젠가 목록에 실어 주면
+     * 아래 dedupe가 우리 것을 걷어낸다.
+     */
+    const out: { name: string; description?: string }[] = [
+      { name: 'compact', description: '대화를 요약해 컨텍스트를 줄인다 (codex 내장)' },
+    ]
     for (const g of groups) {
       const skills = (g as { skills?: unknown }).skills
       if (!Array.isArray(skills)) continue
       for (const s of skills) {
         const skill = (s ?? {}) as { name?: unknown; description?: unknown; enabled?: unknown }
         if (typeof skill.name !== 'string' || skill.enabled === false) continue
+        if (out.some((c) => c.name === skill.name)) continue
         out.push({
           name: skill.name,
           description: typeof skill.description === 'string' ? skill.description : '',
