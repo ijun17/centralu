@@ -979,6 +979,31 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
+    /*
+     * 오케스트레이터가 이 세션의 설정을 바꿨다 (#30).
+     *
+     * 토스트가 핵심이다 — 사람이 아닌 손이 바꾼 설정이 화면에 조용히 스며들면,
+     * 다음에 메뉴를 연 사람은 자기가 고른 적 없는 값을 보고 어리둥절해진다.
+     * 값은 스냅샷이라 그대로 덮어쓴다.
+     */
+    if (e.type === 'settings_changed') {
+      const cur0 = get().sessions[sessionId]
+      if (!cur0) return
+      const what = [
+        e.model !== cur0.model ? `model ${e.model ?? 'default'}` : null,
+        e.effort !== cur0.effort ? `effort ${e.effort ?? 'default'}` : null,
+        e.verbosity !== cur0.verbosity ? `verbosity ${e.verbosity ?? 'default'}` : null,
+      ].filter(Boolean).join(' · ')
+      set((s) => ({
+        sessions: {
+          ...s.sessions,
+          [sessionId]: { ...s.sessions[sessionId]!, model: e.model, effort: e.effort, verbosity: e.verbosity },
+        },
+        ...(what ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
+      }))
+      return
+    }
+
     /** 이 이벤트로 이미 사람을 불렀나 — 같은 순간에 두 번 울리지 않기 위한 표시 */
     let announced = false
 

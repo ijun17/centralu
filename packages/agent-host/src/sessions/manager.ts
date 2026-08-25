@@ -1639,6 +1639,37 @@ export class SessionManager {
           }))
       },
 
+      updateSessionSettings: async (sessionId, s) => {
+        if (sessionId === orchestratorId) {
+          // 자기 설정 변경은 자기 프로세스 재시작이다 — 도구 호출 도중의 자살이 된다
+          return { ok: false, error: '자기 자신의 설정은 사람이 바꿉니다' }
+        }
+        const target = this.meta.get(sessionId)
+        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+        if (target.state === 'working') {
+          // 적용에는 재시작이 필요하다 (drift 경로) — 진행 중인 턴을 도구 호출이 죽이면 안 된다
+          return { ok: false, error: `작업 중인 세션입니다: ${target.name} — 끝난 뒤에 바꾸세요` }
+        }
+        try {
+          const info = await this.updateSettings(sessionId, s)
+          /*
+           * **흔적 없는 설정 변경 금지** (#30). 사람이 화면에서 바꾼 것은 RPC 응답이
+           * 화면으로 돌아가지만, 이 길은 사람이 아닌 손이라 방송하지 않으면 화면이
+           * 옛 값을 계속 보여준다 — 값이 몰래 바뀌는 것과 사람 눈에는 같다.
+           */
+          this.emit({
+            type: 'settings_changed',
+            sessionId,
+            model: info.model,
+            effort: info.effort,
+            verbosity: info.verbosity,
+          })
+          return { ok: true }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      },
+
       createSession: async (opts) => {
         const all = this.store.listProjects()
         // 프로젝트 오케스트레이터는 자기 프로젝트 고정 — 인자로도 밖을 못 가리킨다

@@ -1908,3 +1908,88 @@ describe('프로젝트 오케스트레이터 (#13)', () => {
     expect(again.listSessions().find((x) => x.id === s.id)?.kind).toBe('orchestrator')
   })
 })
+
+/**
+ * 오케스트레이터의 앱 지식과 설정 손 (#30).
+ *
+ * 문서는 빌드에 내장된 안내서다 — docs/를 런타임에 읽으면 그 폴더에 쓸 수 있는
+ * 세션이 오케스트레이터의 지식을 고칠 수 있다 (AGENTS.md 공격의 한 다리 건너 재판).
+ * 설정 손은 성능 셋(model·effort·verbosity)뿐이고, 권한 프리셋은 스키마에서부터 없다.
+ */
+describe('오케스트레이터 앱 안내서와 설정 (#30)', () => {
+  it('app_guide — 주제 없이 부르면 개요와 주제 목록, 모르는 주제는 목록을 들려주며 거절', async () => {
+    const orc = await mgr.orchestrator()
+    const top = await mgr.runOrchestratorTool(orc.id, 'app_guide', {})
+    expect(top.text).toContain('Centralu')
+    expect(top.text).toContain('orchestrator')
+
+    const sec = await mgr.runOrchestratorTool(orc.id, 'app_guide', { topic: 'approvals' })
+    expect(sec.text).toContain('승인')
+
+    const bad = await mgr.runOrchestratorTool(orc.id, 'app_guide', { topic: 'no-such' })
+    expect(bad.isError).toBe(true)
+    expect(bad.text).toContain('overview')
+  })
+
+  it('update_session_settings — 바뀌고, 화면에 이벤트로 알려진다 (흔적 없는 변경 금지)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const orc = await mgr.orchestrator()
+
+    const r = await mgr.runOrchestratorTool(orc.id, 'update_session_settings', {
+      sessionId: s.id, effort: 'high',
+    })
+    expect(r.isError).toBeFalsy()
+    expect(mgr.listSessions().find((x) => x.id === s.id)?.effort).toBe('high')
+    const ev = events.find((e) => e.type === 'settings_changed' && e.sessionId === s.id)
+    expect(ev).toBeDefined()
+    expect((ev as { effort: string | null }).effort).toBe('high')
+  })
+
+  it('update_session_settings — 작업 중인 세션은 거절한다 (재시작이 턴을 죽인다)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const orc = await mgr.orchestrator()
+    const internals = mgr as unknown as { meta: Map<string, { state: string }> }
+    internals.meta.get(s.id)!.state = 'working'
+
+    const r = await mgr.runOrchestratorTool(orc.id, 'update_session_settings', {
+      sessionId: s.id, effort: 'low',
+    })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('작업 중')
+  })
+
+  it('update_session_settings — 프로젝트 오케스트레이터는 남의 프로젝트 세션을 못 만진다', async () => {
+    const p1 = await addProject()
+    const p2 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-p30-')) })) as { id: string }
+    const lead = (await rpc('agents.createSession', {
+      projectId: p1.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    const stranger = (await rpc('agents.createSession', {
+      projectId: p2.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    })) as { id: string }
+    await rpc('sessions.setKind', { sessionId: lead.id, kind: 'orchestrator' })
+
+    const r = await mgr.runOrchestratorTool(lead.id, 'update_session_settings', {
+      sessionId: stranger.id, effort: 'low',
+    })
+    expect(r.isError).toBe(true)
+  })
+
+  /*
+   * "대신 승인할 수 없다"의 뒷문 검사: 권한 프리셋이 **스키마에 아예 없다**.
+   * 항목을 검사해 막는 코드였다면 이 테스트는 그 코드를 지웠을 때 침묵한다 —
+   * 표현할 수 없음을 못 박아야 다음 사람이 "편하니까 추가"를 하는 순간 여기가 깨진다.
+   */
+  it('update_session_settings 스키마에 권한 프리셋이 없다 — 뒷문 승인 차단', async () => {
+    const { ORCHESTRATOR_TOOLS } = await import('./orchestrator-tools.js')
+    const tool = ORCHESTRATOR_TOOLS.find((t) => t.name === 'update_session_settings')!
+    const keys = Object.keys((tool.schema as { shape: Record<string, unknown> }).shape)
+    expect(keys.sort()).toEqual(['effort', 'model', 'sessionId', 'verbosity'])
+  })
+})

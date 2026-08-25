@@ -133,6 +133,21 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     after: z.number().optional(),
   }),
   /** 밖에서 이어간 대화를 따라잡았다 — UI가 기록을 다시 읽는 신호 */
+  /**
+   * 오케스트레이터가 이 세션의 설정을 바꿨다 (#30).
+   *
+   * 사람이 화면에서 바꾼 것은 RPC 응답으로 돌아가므로 이벤트가 필요 없다 — 이건
+   * **사람이 아닌 손**이 바꾼 경우를 위한 길이다. 흔적 없는 설정 변경은 이 코드베이스가
+   * 반복해서 고쳐 온 조용한-행동 문제 그 자체라, 값과 함께 방송해 토스트로 남긴다.
+   * 셋 다 스냅샷(새 값 전체)이다 — 델타면 받는 쪽이 이전 값을 기억해야 한다.
+   */
+  z.object({
+    ...base,
+    type: z.literal('settings_changed'),
+    model: z.string().nullable(),
+    effort: z.string().nullable(),
+    verbosity: z.string().nullable(),
+  }),
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** 세션이 삭제됐다 — 다른 창·재연결에서도 목록이 맞아야 한다 */
   z.object({ ...base, type: z.literal('session_deleted') }),

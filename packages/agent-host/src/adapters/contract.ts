@@ -108,6 +108,18 @@ export type OrchestratorTools = {
     /** 만들자마자 보낼 첫 지시 */
     firstMessage?: string
   }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string }>
+  /**
+   * 한 세션의 성능 설정을 바꾼다 (#30).
+   *
+   * **권한 프리셋이 이 타입에 없는 것이 곧 결정이다.** 오케스트레이터가 프리셋을
+   * auto로 바꿀 수 있으면 "대신 승인할 수 없다"는 규칙이 뒷문으로 무너진다 —
+   * 항목을 검사해서 막는 게 아니라 표현할 수 없게 한다.
+   * 변경은 화면에 이벤트로 알려진다 — 흔적 없는 설정 변경 금지.
+   */
+  updateSessionSettings(
+    sessionId: string,
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null },
+  ): Promise<{ ok: boolean; error?: string }>
   recall(
     query: string,
     limit?: number,

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { OrchestratorTools } from '../adapters/contract.js'
+import { appGuide, APP_GUIDE_TOPICS } from './app-guide.js'
 
 /**
  * 오케스트레이터 도구의 **유일한 정의**.
@@ -64,6 +65,28 @@ export const ORCHESTRATOR_TOOLS = [
         .boolean()
         .optional()
         .describe('그 세션이 일을 마치면 나에게 알려줄지. 사람이 결과를 기다리는 일이면 true'),
+    }),
+  },
+  {
+    name: 'app_guide',
+    description:
+      '이 앱(Centralu)의 안내서 (#30). 사람이 "이 앱으로 뭘 할 수 있어?"류를 물으면 여기서 읽고 답한다 — 짐작으로 답하지 않는다.',
+    schema: z.object({
+      topic: z
+        .string()
+        .optional()
+        .describe(`주제: ${APP_GUIDE_TOPICS.join(' | ')}. 생략하면 개요와 주제 목록`),
+    }),
+  },
+  {
+    name: 'update_session_settings',
+    description:
+      '한 세션의 모델·추론 강도·응답 길이를 바꾼다 (#30). 권한(승인) 설정은 여기 없다 — 그건 사람만 바꾼다. 작업 중인 세션은 거절된다 (적용에 재시작이 필요해 진행 중인 턴이 죽는다).',
+    schema: z.object({
+      sessionId: z.string().describe('list_sessions가 준 세션 id'),
+      model: z.string().nullable().optional().describe('모델 id. null이면 도구 기본값'),
+      effort: z.string().nullable().optional().describe('추론 강도. null이면 기본값'),
+      verbosity: z.string().nullable().optional().describe('응답 길이 (codex 전용). null이면 기본값'),
     }),
   },
   {
@@ -174,6 +197,25 @@ export async function runOrchestratorTool(
     const r = await tools.archiveSession(sessionId, archived)
     return {
       text: r.ok ? `${archived ? '보관했습니다' : '되돌렸습니다'}: ${sessionId}` : `하지 못했습니다 — ${r.error}`,
+      isError: !r.ok,
+    }
+  }
+
+  if (name === 'app_guide') {
+    // 정적 내용이라 매니저를 거치지 않는다 — 빌드에 내장된 글이 곧 능력의 전부다 (#30)
+    return appGuide(typeof args.topic === 'string' ? args.topic : undefined)
+  }
+
+  if (name === 'update_session_settings') {
+    const r = await tools.updateSessionSettings(String(args.sessionId ?? ''), {
+      ...(args.model !== undefined ? { model: args.model as string | null } : {}),
+      ...(args.effort !== undefined ? { effort: args.effort as string | null } : {}),
+      ...(args.verbosity !== undefined ? { verbosity: args.verbosity as string | null } : {}),
+    })
+    return {
+      text: r.ok
+        ? `바꿨습니다: ${args.sessionId} — 화면에도 알렸습니다` // 흔적 없는 변경 금지 (#30)
+        : `바꾸지 못했습니다 — ${r.error}`,
       isError: !r.ok,
     }
   }

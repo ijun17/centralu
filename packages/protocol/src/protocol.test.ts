@@ -51,6 +51,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'compaction', sessionId: 's1' },
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
+  { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
   { type: 'history_synced', sessionId: 's1', added: 2 },
   { type: 'session_deleted', sessionId: 's1' },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } },
