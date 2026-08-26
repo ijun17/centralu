@@ -125,8 +125,14 @@ class CodexSession implements SessionHandle {
          */
         const msg = (err as Error).message
         if (/active writer/i.test(msg)) {
+          /*
+           * 실측(#57)으로 이 에러의 뜻이 좁혀졌다: 락은 파일 존재가 아니라 flock이라,
+           * 죽은 프로세스가 남긴 파일은 이 에러를 **못** 만든다. 여기 왔다는 건
+           * 지금 이 순간 flock을 쥔 산 프로세스가 있다는 뜻이다 — 터미널의 codex거나,
+           * 다른 앱이거나, 정리되지 못한 채 fd만 물려받고 살아남은 고아다.
+           */
           throw Object.assign(
-            new Error('This conversation is already open elsewhere (codex in a terminal, or another app)'),
+            new Error('This conversation is already open elsewhere (codex in a terminal, another app, or a process left behind by an unclean shutdown)'),
             { code: 'conversation_locked' },
           )
         }

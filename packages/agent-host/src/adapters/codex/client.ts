@@ -197,8 +197,26 @@ export class CodexClient {
   async dispose(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    this.proc.kill('SIGTERM')
-    await new Promise((r) => setTimeout(r, 100))
-    if (!this.proc.killed) this.proc.kill('SIGKILL')
+    /*
+     * SIGTERM이 아니라 **stdin EOF**로 닫는다. 실측 (#57, codex-cli 0.147.0):
+     *
+     *   stdin EOF → 18ms 안에 스스로 종료하며 thread-writer-locks/<id>.lock을 지운다
+     *   SIGTERM   → 즉사하고 락 파일을 남긴다 (wrapper·vendor binary·둘 다 동일)
+     *
+     * 남은 파일이 재개를 막지는 않는다 — 락은 존재가 아니라 flock이고, 죽은 보유자의
+     * flock은 커널이 풀어준다 (잔류 파일을 둔 채 resume 성공, 실측). 그래도 예전
+     * dispose는 세션을 닫을 때마다 쓰레기 파일을 하나씩 쌓고 있었다. 청소는 codex가
+     * 제일 잘 하니, 청소할 기회를 주는 방식으로 닫는다. 2초 안에 안 나가면 그때 죽인다.
+     */
+    this.proc.stdin.end()
+    const exited = await new Promise<boolean>((resolve) => {
+      if (this.proc.exitCode !== null || this.finished) return resolve(true)
+      const t = setTimeout(() => resolve(false), 2000)
+      this.proc.once('exit', () => {
+        clearTimeout(t)
+        resolve(true)
+      })
+    })
+    if (!exited) this.proc.kill('SIGKILL')
   }
 }

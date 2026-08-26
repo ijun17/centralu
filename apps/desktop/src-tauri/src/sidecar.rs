@@ -230,9 +230,27 @@ impl Supervisor {
             Err(_) => None,
         };
         if let Some(mut child) = child {
+            /*
+             * 그룹째 TERM으로 시작하면 안 된다 — 실측 (#57): codex app-server는 SIGTERM에
+             * 락 파일(thread-writer-locks/<id>.lock)을 남기고 즉사하지만, stdin EOF에는
+             * 18ms 안에 락을 지우며 스스로 나간다. 그룹 TERM은 host의 disposeAll이
+             * EOF로 닫아줄 기회를 뺏고 codex 자식들을 직접 때린다.
+             *
+             * 그래서 순서를 바꾼다: host에게만 TERM → host의 shutdown()이 세션들을 EOF로
+             * 정리하고 DB를 닫을 때까지 기다린다(최대 3초 — 예전 300ms는 WAL 체크포인트가
+             * 끝나기 전에 확인 사살하는 시간이었다). 그 뒤의 그룹 TERM·kill은 host가
+             * 굳어 있을 때만 실제로 일하는 좀비 방지 담보다.
+             */
+            kill_pid(child.id());
+            let mut waited_ms: u64 = 0;
+            while waited_ms < 3000 {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+                waited_ms += 50;
+            }
             kill_group(child.id());
-            // 정리할 시간을 조금 준 뒤 확인 사살
-            thread::sleep(Duration::from_millis(300));
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -242,6 +260,20 @@ impl Supervisor {
 fn emit(app: &AppHandle, status: HostStatus) {
     let _ = app.emit("host-status", status);
 }
+
+/// host 프로세스 하나에만 SIGTERM — 자식(codex 등)은 host가 EOF로 스스로 정리한다 (#57)
+#[cfg(unix)]
+fn kill_pid(pid: u32) {
+    let _ = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(format!("{pid}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(unix))]
+fn kill_pid(_pid: u32) {}
 
 /// 프로세스 그룹 전체에 SIGTERM (음수 pid = 그룹)
 #[cfg(unix)]
