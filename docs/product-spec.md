@@ -242,8 +242,10 @@ The single-workspace-crown design gave way to a **hierarchy** once real use show
   must not be able to quietly widen another session's approval back door.
 - `create_session` acts within scope; settings changes surface as a `settings_changed` event + toast, so the human sees
   what the orchestrator changed the moment it changes it.
-- Still open from the original design: showing orchestrator-sent instructions distinctly in the target session's
-  conversation view, and a per-session "refuse orchestrator instructions" toggle. Neither is built; they stay on the list.
+- Orchestrator-sent instructions are marked in the target session's conversation (built 2026-08-26): a source label
+  above the bubble and a dashed border — shape, not color, per the palette rule. Worker completion reports in the
+  orchestrator's own chat carry the same marker. The sticky banner prefixes the source name.
+- Still open from the original design: a per-session "refuse orchestrator instructions" toggle. Not built; stays on the list.
 
 #### FR-12. Waiting-state display — two urgency levels, separated (the heart of control)
 
