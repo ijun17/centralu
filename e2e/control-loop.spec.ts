@@ -4117,6 +4117,66 @@ test('claude의 생각은 양으로 보인다 — Thinking · ~N tokens, 턴이 
   await expect(page.getByTestId('activity-row')).toHaveCount(0)
 })
 
+/**
+ * 계획이 보인다 (#58 실측, codex turn/plan/updated).
+ * 실측에서 계획은 item으로 안 왔다 — 이 알림을 버리면 codex의 계획 도구 사용이
+ * 화면 어디에도 나타나지 않는다. 스냅샷 교체·turn 종료 시 소멸까지가 계약이다.
+ */
+test('codex 계획이 체크리스트로 보이고, 갱신은 교체이며, 턴이 끝나면 사라진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await emitEvent(page, 0, {
+    type: 'plan_update',
+    steps: [
+      { text: '명령 실행 준비', status: 'inProgress' },
+      { text: '명령 실행', status: 'pending' },
+    ],
+  })
+  await expect(page.getByTestId('activity-plan')).toBeVisible()
+  await expect(page.getByTestId('plan-step-0')).toHaveAttribute('data-status', 'inProgress')
+  await expect(page.getByTestId('plan-step-1')).toContainText('명령 실행')
+
+  // 갱신은 델타 합성이 아니라 스냅샷 교체다
+  await emitEvent(page, 0, {
+    type: 'plan_update',
+    steps: [
+      { text: '명령 실행 준비', status: 'completed' },
+      { text: '명령 실행', status: 'inProgress' },
+    ],
+  })
+  await expect(page.getByTestId('plan-step-0')).toHaveAttribute('data-status', 'completed')
+  await expect(page.getByTestId('plan-step-1')).toHaveAttribute('data-status', 'inProgress')
+
+  // 진행 표시일 뿐이라 턴이 끝나면 계획도 함께 사라진다 (activity와 같은 수명)
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('activity-plan')).toHaveCount(0)
+})
+
+/**
+ * 실행 중 출력이 보인다 (#58 실측, codex item/commandExecution/outputDelta).
+ * 조각의 합은 전체가 아니다(실측: 첫 조각 유실) — 그래서 살아있는 동안은 꼬리만 보여주고,
+ * 완료되면 전체를 실은 result가 조각을 대체한다.
+ */
+test('실행 중 도구 출력이 꼬리로 흐르고, 완료되면 result로 바뀐다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await emitEvent(page, 0, {
+    type: 'tool_call', callId: 'exec-1',
+    summary: { tool: 'Bash', title: 'for i in 1 2 3; do echo tick $i; sleep 1; done', readOnly: false, paths: [] },
+  })
+  await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 2\n' })
+  await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 3\n' })
+  await expect(page.getByTestId('tool-card-live')).toContainText('tick 3')
+
+  // 완료: 전체 출력이 result로 오고, 라이브 꼬리는 역할이 끝나 사라진다
+  await emitEvent(page, 0, { type: 'tool_result', callId: 'exec-1', ok: true, summary: 'tick 1\ntick 2\ntick 3' })
+  await expect(page.getByTestId('tool-card-live')).toHaveCount(0)
+  await expect(page.getByTestId('tool-card-output')).toContainText('tick 1')
+})
+
 test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')

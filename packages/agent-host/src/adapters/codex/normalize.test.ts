@@ -38,6 +38,50 @@ describe('스트리밍·도구 호출', () => {
     expect(n('item/completed', { item: { type: 'reasoning', id: 'rs-1', summary: ['**경로 제약 검토**'], content: [] } })).toEqual([])
   })
 
+  /*
+   * 계획 진행 (#58 실측, 2026-08-26). 실측 모양: 매번 전체 스냅샷
+   * {threadId, turnId, explanation: null, plan: [{step, status}]}.
+   * 계획은 item으로 안 온다 — 이 알림이 화면으로 가는 유일한 길이다.
+   */
+  it('turn/plan/updated → plan_update (스냅샷 그대로)', () => {
+    expect(
+      n('turn/plan/updated', {
+        threadId: 't', turnId: 'u', explanation: null,
+        plan: [
+          { step: 'Set up', status: 'completed' },
+          { step: 'Run the command', status: 'inProgress' },
+          { step: 'Report', status: 'pending' },
+        ],
+      }),
+    ).toEqual([
+      {
+        type: 'plan_update', sessionId: S,
+        steps: [
+          { text: 'Set up', status: 'completed' },
+          { text: 'Run the command', status: 'inProgress' },
+          { text: 'Report', status: 'pending' },
+        ],
+      },
+    ])
+  })
+
+  it('모르는 계획 상태는 pending으로 접힌다 — 새 상태 하나에 진행 표시가 통째로 죽으면 안 된다', () => {
+    const out = n('turn/plan/updated', { plan: [{ step: 'X', status: 'blocked?' }] })
+    expect(out[0]).toMatchObject({ steps: [{ text: 'X', status: 'pending' }] })
+  })
+
+  it('빈 계획은 이벤트가 되지 않는다', () => {
+    expect(n('turn/plan/updated', { plan: [] })).toEqual([])
+  })
+
+  // 실행 중 출력 (#58 실측): {threadId, turnId, itemId, delta}
+  it('commandExecution outputDelta → tool_output_delta', () => {
+    expect(n('item/commandExecution/outputDelta', { threadId: 't', turnId: 'u', itemId: 'exec-1', delta: 'tick 2\n' })).toEqual([
+      { type: 'tool_output_delta', sessionId: S, callId: 'exec-1', text: 'tick 2\n' },
+    ])
+    expect(n('item/commandExecution/outputDelta', { itemId: 'exec-1', delta: '' })).toEqual([])
+  })
+
   it('commandExecution 시작 → tool_call (명령 전문이 제목)', () => {
     const out = n('item/started', {
       item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },

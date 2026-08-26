@@ -292,3 +292,28 @@ describe('thinkingTokens', () => {
     expect(s.thinkingTokens).toBeNull()
   })
 })
+
+/** 계획 스냅샷 (#58, codex turn/plan/updated) — activity와 같은 수명 */
+describe('plan', () => {
+  const steps = [
+    { text: 'Set up', status: 'completed' as const },
+    { text: 'Run', status: 'inProgress' as const },
+  ]
+
+  it('스냅샷이 갈아끼워지고 턴이 끝나면 사라진다 — 남으면 끝난 턴의 계획이 거짓말한다', () => {
+    const working = replay([ev({ type: 'state_change', state: 'working' })])
+    const p1 = applyEvent(working, ev({ type: 'plan_update', steps: [steps[0]!] }), NOW)
+    expect(p1.plan).toEqual([steps[0]])
+    const p2 = applyEvent(p1, ev({ type: 'plan_update', steps }), NOW)
+    expect(p2.plan).toEqual(steps) // 델타 합성이 아니라 교체다
+    const done = applyEvent(p2, ev({ type: 'turn_complete' }), NOW)
+    expect(done.plan).toBeNull()
+  })
+
+  it('working 동안의 다른 이벤트에는 살아남는다', () => {
+    const working = replay([ev({ type: 'state_change', state: 'working' })])
+    const p = applyEvent(working, ev({ type: 'plan_update', steps }), NOW)
+    const after = applyEvent(p, ev({ type: 'message_delta', role: 'assistant', text: '진행' }), NOW)
+    expect(after.plan).toEqual(steps)
+  })
+})

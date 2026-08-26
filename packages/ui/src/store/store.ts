@@ -136,7 +136,8 @@ export type ChatItem =
    * data가 비어 있으면 note가 이유를 말한다 (실패는 보이게).
    */
   | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
-  | { kind: 'tool'; seq: number; tool: string; title: string; readOnly: boolean; result?: string; ok?: boolean }
+  /** live: 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오면 버린다 — 전체는 result에 있다 */
+  | { kind: 'tool'; seq: number; tool: string; title: string; readOnly: boolean; result?: string; ok?: boolean; live?: string }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
   /** 대화의 경계 표식 (압축 지점 등). 대화가 아니라 대화에 대한 사실이다 */
   | { kind: 'mark'; seq: number; text: string }
@@ -2190,7 +2191,21 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (idx === -1) return items
       const real = items.length - 1 - idx
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
-      return items.map((it, i) => (i === real ? { ...target, result: e.summary, ok: e.ok } : it))
+      // live는 여기서 버린다 — 완주한 출력 전체가 result로 왔으므로 조각은 역할이 끝났다
+      return items.map((it, i) => (i === real ? { ...target, result: e.summary, ok: e.ok, live: undefined } : it))
+    }
+    /*
+     * 실행 중 출력 (#58). tool_result와 같은 규칙으로 "열려 있는 마지막 도구 줄"에 단다 —
+     * codex의 itemId를 ChatItem이 들고 있지 않아서이기도 하고, 열린 호출이 동시에 여럿인
+     * 경우가 실측된 적도 없다. 꼬리만 남긴다: 보여줄 것은 "지금 뭐가 나오나"지 전문이 아니다.
+     */
+    case 'tool_output_delta': {
+      const idx = [...items].reverse().findIndex((i) => i.kind === 'tool' && i.result === undefined)
+      if (idx === -1) return items
+      const real = items.length - 1 - idx
+      const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
+      const live = ((target.live ?? '') + e.text).slice(-4000)
+      return items.map((it, i) => (i === real ? { ...target, live } : it))
     }
     case 'approval_request':
       return [

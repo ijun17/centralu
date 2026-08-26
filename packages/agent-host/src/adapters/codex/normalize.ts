@@ -100,6 +100,37 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         ? [{ type: 'reasoning_delta', sessionId, text: '\n\n' }]
         : []
 
+    /*
+     * 계획 진행 (#58 실측). 실측한 모양:
+     *   turn/plan/updated {threadId, turnId, explanation: null,
+     *                      plan: [{step, status: 'pending'|'inProgress'|'completed'}]}
+     * 매번 전체 스냅샷이다. 계획은 item으로는 **안 온다** — 이 알림을 버리면
+     * codex의 계획 도구 사용이 화면 어디에도 나타나지 않는다 (실측: 이 턴의 item은
+     * userMessage/reasoning/agentMessage/commandExecution뿐이었다).
+     */
+    case 'turn/plan/updated': {
+      const steps = (Array.isArray(p.plan) ? p.plan : []).map((raw) => {
+        const it = obj(raw)
+        const raw_ = str(it.status)
+        // 모르는 상태는 pending으로 — 진행 표시가 새 상태 하나에 통째로 죽으면 안 된다
+        const status: 'pending' | 'inProgress' | 'completed' =
+          raw_ === 'inProgress' || raw_ === 'completed' ? raw_ : 'pending'
+        return { text: str(it.step), status }
+      })
+      return steps.length > 0 ? [{ type: 'plan_update', sessionId, steps }] : []
+    }
+
+    /*
+     * 실행 중 출력 (#58 실측): {threadId, turnId, itemId, delta}.
+     * 완료 시 aggregatedOutput이 전체를 다시 실어 오므로 이건 표시 전용이다.
+     * (실측: 첫 조각은 스트림이 붙기 전에 소비돼 빠질 수 있다 — 델타의 합이
+     * 전체 출력이라는 가정은 성립하지 않는다.)
+     */
+    case 'item/commandExecution/outputDelta': {
+      const text = str(p.delta)
+      return text ? [{ type: 'tool_output_delta', sessionId, callId: str(p.itemId), text }] : []
+    }
+
     case 'item/started': {
       const item = obj(p.item)
       const type = str(item.type)

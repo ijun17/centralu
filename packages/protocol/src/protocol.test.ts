@@ -52,6 +52,18 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // 추론 (#58 실측): codex는 요약 텍스트, claude는 토큰 추정치만 — 그래서 둘 다 optional
   { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**경로 제약을 검토 중**' },
   { type: 'reasoning_delta', sessionId: 's1', estTokens: 150 },
+  // #58 실측 (codex turn/plan/updated): 스냅샷 — 세 상태가 다 있는 실제 모양
+  {
+    type: 'plan_update',
+    sessionId: 's1',
+    steps: [
+      { text: 'Set up the command execution plan', status: 'completed' },
+      { text: 'Run the requested shell command', status: 'inProgress' },
+      { text: 'Count its output lines and report', status: 'pending' },
+    ],
+  },
+  // #58 실측 (codex item/commandExecution/outputDelta): 실행 중 출력 조각
+  { type: 'tool_output_delta', sessionId: 's1', callId: 'exec-5de387b1', text: 'tick 2\n' },
   // 에이전트가 내놓은 이미지 (#40) — 표시 전용이라 seq가 없다
   { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/shot.png' },
   // 못 그린 이미지도 이벤트다 — 실패는 보이게

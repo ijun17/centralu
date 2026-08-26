@@ -1123,6 +1123,8 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
   const startedAt = useStore((s) => s.workingSince[sessionId])
   // 생각의 양 (#58) — claude는 thinking 본문이 암호화라 이 추정치가 보여줄 수 있는 전부다
   const thinkingTokens = useStore((s) => s.sessions[sessionId]?.thinkingTokens ?? null)
+  // 계획 스냅샷 (#58, codex) — activity와 같은 수명이라 여기(working 동안만 사는 줄)가 제자리다
+  const plan = useStore((s) => s.sessions[sessionId]?.plan ?? null)
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -1135,7 +1137,30 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
   const seconds = startedAt == null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000))
 
   return (
-    <div className="flex items-center gap-2 py-2" data-testid="activity-row">
+    <div className="py-2" data-testid="activity-row">
+      {/*
+        계획 체크리스트 (#58, codex turn/plan/updated). 진행 표시라 여기(working 동안만
+        보이는 자리)에 산다 — 턴이 끝나면 activity와 함께 사라진다. 상태는 색이 아니라
+        글리프로 가른다 (팔레트 규칙: 모양으로 구분한다).
+      */}
+      {plan && plan.length > 0 && (
+        <ul className="mb-1.5 flex flex-col gap-0.5" data-testid="activity-plan">
+          {plan.map((step, i) => (
+            <li
+              key={i}
+              className={`flex items-baseline gap-1.5 text-[11px] ${step.status === 'inProgress' ? 'text-chalk' : 'text-slate'}`}
+              data-testid={`plan-step-${i}`}
+              data-status={step.status}
+            >
+              <span className="readout shrink-0" aria-hidden>
+                {step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '▸' : '○'}
+              </span>
+              <span className={step.status === 'completed' ? 'line-through opacity-60' : undefined}>{step.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex items-center gap-2">
       <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
       {/*
         같은 '대기'가 아니다. 압축은 실측 39초까지 걸렸는데 문구가 같으면
@@ -1161,6 +1186,7 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
       >
         Stop
       </button>
+      </div>
     </div>
   )
 }
@@ -1411,6 +1437,15 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
+  /*
+   * 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오기 전까지만 —
+   * 맛보기와 달리 **끝쪽**을 보여준다: 돌아가는 명령에서 궁금한 건 처음이 아니라 지금이다.
+   * (조각의 합은 전체가 아니다 — 실측에서 첫 조각이 빠졌다. 전체는 result가 가져온다.)
+   */
+  const liveTail =
+    item.result === undefined && item.live
+      ? item.live.replace(/\s+$/, '').split('\n').slice(-PREVIEW_LINES)
+      : []
 
   return (
     <div className="rounded border border-edge bg-panel/60" data-testid="tool-card">
@@ -1428,6 +1463,17 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
         <span className="readout truncate text-[11px] text-slate">{item.title}</span>
         {item.ok === false && <span className="ml-auto shrink-0 text-[11px] text-chalk">Failed</span>}
       </button>
+
+      {liveTail.length > 0 && (
+        <div className="border-t border-edge px-2.5 py-1.5">
+          <pre
+            className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate"
+            data-testid="tool-card-live"
+          >
+            {liveTail.join('\n')}
+          </pre>
+        </div>
+      )}
 
       {lines.length > 0 && (
         <div className="border-t border-edge px-2.5 py-1.5">

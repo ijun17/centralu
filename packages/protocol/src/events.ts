@@ -59,6 +59,31 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     estTokens: z.number().optional(),
   }),
   /**
+   * 에이전트가 세운 계획의 현재 상태 (#58 실측, codex turn/plan/updated).
+   *
+   * **매번 전체 스냅샷이 온다** — 델타가 아니므로 받는 쪽이 이전 상태를 기억할 필요가
+   * 없다 (settings_changed와 같은 이유). 실측에서 계획은 item으로는 오지 않았다:
+   * 이 알림을 버리면 codex의 계획 도구 사용은 화면 어디에도 나타나지 않는다.
+   *
+   * persistedSeq가 없는 것은 결정이다: 진행 표시지 답이 아니다 — activity와 같은
+   * 수명으로 화면에서만 살고, 턴이 끝나면 사라진다. (실측된 explanation은 null뿐이라
+   * 싣지 않는다 — 관찰되면 그때 더한다.)
+   */
+  z.object({
+    ...base,
+    type: z.literal('plan_update'),
+    steps: z.array(z.object({ text: z.string(), status: z.enum(['pending', 'inProgress', 'completed']) })),
+  }),
+  /**
+   * 실행 중인 도구의 출력 조각 (#58 실측, codex item/commandExecution/outputDelta).
+   *
+   * 완료 시점의 tool_result가 aggregatedOutput으로 전체를 다시 실어 오므로
+   * 기록하지 않는다 — 이건 "지금 뭐가 나오고 있나"를 보여주는 표시 전용 조각이다.
+   * (실측: 첫 조각은 스트림이 붙기 전에 소비될 수 있다 — 완전한 사본이 아니라
+   * 살아 있다는 증거로 취급할 것.)
+   */
+  z.object({ ...base, type: z.literal('tool_output_delta'), callId: z.string(), text: z.string() }),
+  /**
    * 사람의 말이 대화에 더해졌다.
    *
    * **UI가 자기가 보낸 것만 그리면 되던 시절에는 없어도 됐다.** 그런데 오케스트레이터가

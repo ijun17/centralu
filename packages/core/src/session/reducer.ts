@@ -86,6 +86,11 @@ export type SessionSummary = {
    * 벗어나면 죽는다.
    */
   thinkingTokens: number | null
+  /**
+   * 에이전트가 세운 계획의 현재 스냅샷 (#58 — codex turn/plan/updated).
+   * activity와 같은 수명: 진행 표시일 뿐이라 working을 벗어나면 죽는다.
+   */
+  plan: { text: string; status: 'pending' | 'inProgress' | 'completed' }[] | null
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
@@ -93,7 +98,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', worktree: null, thinkingTokens: null, kind: 'worker' as const,
+    permissionPreset: 'normal', worktree: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
   }
 }
@@ -129,6 +134,12 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     : state === 'working' ? s.thinkingTokens
     : null
 
+  // 계획도 바쁨보다 오래 살지 못한다 (#58 — 같은 규칙: 남으면 끝난 턴의 계획이 거짓말한다)
+  const plan =
+    event.type === 'plan_update' ? event.steps
+    : state === 'working' ? s.plan
+    : null
+
   /*
    * 회복하면 배너도 함께 내려간다.
    *
@@ -153,7 +164,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
   const next: SessionSummary = illegal
     ? { ...s }
     : {
-        ...s, state, waitingSince, activity, thinkingTokens,
+        ...s, state, waitingSince, activity, thinkingTokens, plan,
         ...(recovered ? { limit: null, lastError: null } : {}),
         ...(cardsDead ? { pendingApproval: null, pendingQuestions: [] } : {}),
       }
