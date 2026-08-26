@@ -245,7 +245,11 @@ The single-workspace-crown design gave way to a **hierarchy** once real use show
 - Orchestrator-sent instructions are marked in the target session's conversation (built 2026-08-26): a source label
   above the bubble and a dashed border — shape, not color, per the palette rule. Worker completion reports in the
   orchestrator's own chat carry the same marker. The sticky banner prefixes the source name.
-- Still open from the original design: a per-session "refuse orchestrator instructions" toggle. Not built; stays on the list.
+- **Dropped (2026-08-27): the per-session "refuse orchestrator instructions" toggle.** It was written into v0.4 as the
+  other half of that safeguard sentence, never requested and never missed: the person who creates the orchestrator and
+  chooses its scope is the same person who would flip the switch, so refusing your own control tower has no situation
+  behind it. Same rule the adapters follow — build it when a real instance is observed, not because a design sentence
+  once paired it with something else. (Shared-operator setups would change this; that is not what this app is.)
 
 #### FR-12. Waiting-state display — two urgency levels, separated (the heart of control)
 
@@ -585,7 +589,7 @@ This is the one point where a human judges (decided 2026-08-15, see plans/m1.5-p
 | The SDK may not give enough context/usage detail | FR-14 accuracy | Demote to 'estimate' via capability + show ≈, with log parsing as backup |
 | File conflicts between concurrent sessions in the same directory | **Data loss** | An explicit warning dialog at creation time + a same-file-modification detection badge (FR-2), worktree option later |
 | Situations where resume is impossible (tool update, lost logs) | FR-10 degraded | Design the "view the record + new session" fallback as a first-class path |
-| The orchestrator running away (excessive instructions) | Cost and confusion | Instructions made visible + per-session refusal + a `create_session` proposal card + respecting the approval preset |
+| The orchestrator running away (excessive instructions) | Cost and confusion | Instructions made visible (source label, built) + a `create_session` proposal card + respecting the approval preset. Per-session refusal was dropped — see FR-11 |
 
 ---
 
