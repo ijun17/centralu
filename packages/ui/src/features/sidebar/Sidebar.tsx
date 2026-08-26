@@ -216,16 +216,21 @@ function OrchestratorButton() {
   )
 }
 
-/** 갈래길 — 하나가 여럿으로 갈라지는 모양 */
+/**
+ * 왕관 — 다른 세션을 부리는 자리의 표식 (사양서 FR-11의 원래 그림).
+ * 갈래길 모양을 썼었는데, 프로젝트 오케스트레이터 배지(글자 'orch')와 서로 다르게
+ * 생겨서 같은 역할이 두 얼굴을 가졌다 — 왕관 하나로 통일한다 (2026-08-26 사용자 결정).
+ * 채색은 안 한다: 긴급함은 밝기의 몫이고, 이건 종류의 표식이다.
+ */
 function OrchestratorIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
-      <circle cx="3" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="13" cy="3.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="13" cy="8" r="1.5" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="13" cy="12.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M4.8 8h2.4M7.2 8c2 0 2.2-4.5 4.3-4.5M7.2 8h4.3M7.2 8c2 0 2.2 4.5 4.3 4.5"
-        stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path
+        d="M3 12.5 L2.3 5.4 L5.8 7.8 L8 3.8 L10.2 7.8 L13.7 5.4 L13 12.5 Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -464,11 +469,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     */}
                     {s.kind === 'orchestrator' && (
                       <span
-                        className="shrink-0 rounded border border-edge px-1 text-[9px] uppercase tracking-wide text-slate"
+                        className="shrink-0 text-slate"
                         data-testid={`orchestrator-badge-${s.id}`}
                         title="Project orchestrator — directs this project's sessions"
                       >
-                        orch
+                        <OrchestratorIcon size={11} />
                       </span>
                     )}
                     {unread && (

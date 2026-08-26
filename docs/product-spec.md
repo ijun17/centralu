@@ -2,9 +2,10 @@
 
 > A lightweight desktop app that runs, watches and controls several agentic coding tools (Claude Code, Codex CLI) from a single window
 
-- Version: v0.4 (second usability review folded in — **the last revision before the M0 spike**)
-- Written: 2026-08-15
-- Status: technical direction settled (Tauri / React / Claude Code + Codex / SDK and protocol integration)
+- Version: v0.5 (**synced to the implementation, 2026-08-26** — M2 is done and the app is in dogfooding, so this document now describes what exists, not what is planned)
+- Written: 2026-08-15 (v0.4), realigned 2026-08-26 (v0.5)
+- Status: shipped through M2; M2.5 (dogfooding) in progress
+- Main changes v0.4 → v0.5: §2's M0 preconditions recorded as verified; FR-4 updated to the evidence-panel tab layout (History split out of the git panel); FR-9 rewritten to what shipped (limit windows, not a cost dashboard); FR-11 rewritten to the implemented orchestrator design (kind marker, central/per-project hierarchy, curated tools, crown mark); the terminal non-goal withdrawn (§1.5); grid still experimental with its two live objections (§5.4); architecture (§6) corrected to the Node-host reality; measured numbers added to §7.1; roadmap (§8) marked up to date
 - Main changes v0.3 → v0.4: product philosophy written down (§1.2), approval allowed in place from the banner (jump only when context is needed), the concurrent-session warning softened to inline plus a recovery path, session archive (FR-20)·conversation search (FR-21)·card collapse policy added, inbox promoted to M1, React settled as the front end, 4 open questions closed
 
 ---
@@ -64,7 +65,10 @@ Every screen, shortcut and notification design is judged by how fast this loop t
 To stop the scope leaking, what v1 explicitly **does not do**:
 
 - Code **editing** (viewer only; editing is the IDE's job)
-- A terminal emulator (agent conversation is a structured GUI, not a raw terminal)
+- ~~A terminal emulator (agent conversation is a structured GUI, not a raw terminal)~~ — **withdrawn 2026-08-26.**
+  The evidence panel has a Terminal tab. What the line was protecting still stands — the **agent conversation**
+  is a structured GUI, not a PTY wrap — but a project terminal beside it turned out to be part of watching a
+  project, not a replacement for the conversation. Recorded rather than deleted, same reasoning as the grid line below.
 - Advanced git operations (rebase, cherry-pick etc. — read-oriented; commit/staging come later)
 - Remote/cloud execution (local projects on the local machine only)
 - Tools other than Claude Code and Codex (only the adapter structure is designed to extend)
@@ -91,8 +95,8 @@ To stop the scope leaking, what v1 explicitly **does not do**:
 - **Codex CLI** → the `codex app-server` JSON-RPC (stdio) protocol. Handles conversation stream, approval requests and session management programmatically. (Protocol differences between versions are absorbed inside the adapter.)
 - Both tools are hidden behind a **common adapter interface**. → §6.2
 
-**⚠ Precondition for approval events (must be verified in M0):**
-If the user has set the CLI to global bypass (auto-approve), approval request events **do not fire at all**. For Centralu's approval UI to mean anything, the permission preset at session creation (FR-7) **must be able to override the global setting per session**. The Claude Agent SDK takes `permissionMode`/`canUseTool` as session options so this is expected to be possible, but it is **actually verified in M0**, along with Codex's behaviour. If it is not possible: demote the approval UI to "enabled only on tools that support it" and rebuild the inbox around waiting-for-response.
+**⚠ Precondition for approval events — verified in M0, the approval UI stands:**
+If the user has set the CLI to global bypass (auto-approve), approval request events **do not fire at all**. For Centralu's approval UI to mean anything, the permission preset at session creation (FR-7) had to be able to override the global setting per session. **M0 confirmed it can** — the Claude Agent SDK takes `permissionMode`/`canUseTool` per session, and Codex accepts per-thread approval policy — so sessions created in Centralu behave according to their chosen preset regardless of the global setting.
 
 ---
 
@@ -103,7 +107,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 | Project | One registered local directory. It may or may not be a git repository |
 | Session | One agent conversation instance. Belongs to a project and has a tool (Claude Code/Codex), model and permission setting |
 | Adapter | A module wrapping a specific agent tool in the common interface |
-| Orchestrator session | A special session designated to be able to inspect and instruct other sessions |
+| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct sessions within its scope. One central orchestrator (no project) plus at most one per project; scope follows 중앙 > 프로젝트 > 세션 (FR-11) |
 | Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
 | Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
 | Read/unread | Independent of session state: whether there is new content since I last looked |
@@ -161,12 +165,12 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 
 #### FR-4. Git status GUI
 
-A git panel per project (3 tabs):
+Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Files / Terminal** (as built — the original "3-tab git panel" reshaped in use):
 
-- **Changes**: staged/unstaged/untracked file list; clicking a file shows a diff view (side-by-side/inline). Updates live when an agent changes a file.
-- **History (tree)**: recent commit log + a simple branch graph. Clicking a commit shows that commit's changed files and diff.
-- **Branches**: local/remote branch list, current branch shown, checkout — not blocked even when dirty; instead **show the files that would be affected first, then ask whether to proceed** (M2 decision: 'do not block, make visible').
-- **Jump to the IDE**: ⌘click (or context menu) on a diff or file list opens that file at that line in the default editor (`code -g path:line`). The key detail for cutting the round-trip cost.
+- **Git (changes)**: staged/unstaged/untracked file list; clicking a file shows a diff view. Updates live when an agent changes a file.
+- **History**: a separate tab, not a strip inside the git panel — the embedded strip caused overlap when panels were split and could not spare the height for a real graph (dogfooding, 2026-08-26). Commit log with branch lanes; clicking a commit shows its changed files and diff.
+- **Branches**: opened from the panel header — local branch list, current branch shown, checkout not blocked even when dirty; **show the files that would be affected first, then ask whether to proceed** (M2 decision: 'do not block, make visible').
+- **Jump to the IDE**: on a diff or file list, open that file at that line in the default editor. The key detail for cutting the round-trip cost.
 - Implementation: a `git` CLI wrapper in agent-host (settled in M2 — moving to Rust git2 is deferred until measurement confirms a bottleneck).
 - v1 is **read-oriented**. Commit/staging/push is **settled for v1.5** — added to the same panel right after the read panel (M2) is finished. Advanced operations such as rebase and cherry-pick remain non-goals.
 
@@ -176,6 +180,8 @@ A git panel per project (3 tabs):
 - A `.gitignore`-based filter toggle (default: ignored hidden).
 - Git status overlay (M/A/U shown as **glyphs** — following the achromatic palette decision, no colour is used).
 - Highlight files an agent recently modified (tracking "files the agent just touched").
+- **Notices external changes** (issue #34, shipped 2026-08-25): non-recursive watches on the expanded directories only,
+  flushed on a 300ms interval — the tree follows what agents and editors do to the disk without polling the whole repo.
 
 #### FR-6. Code viewer (read-only)
 
@@ -187,7 +193,8 @@ A git panel per project (3 tabs):
 #### FR-7. Per-project and per-session tool selection
 
 - Chosen in the session creation dialog: **tool** (Claude Code / Codex) → **model** → **permission preset** (safe/normal/auto-approve) → starting prompt.
-- **The permission preset must override the CLI's global setting per session** (see the §2 warning, an M0 verification item). Regardless of the user's global bypass setting, a session created in Centralu must behave according to the chosen preset, or the approval UI does not hold together.
+- **The permission preset overrides the CLI's global setting per session** (verified in M0 — see §2). Regardless of the user's global bypass setting, a session created in Centralu behaves according to the chosen preset.
+- The model & effort menu also carries per-tool knobs the tools expose: Claude effort levels, **Codex `model_verbosity`** (issue #54, shipped 2026-08-25 — measured on real runs to change output length before being surfaced).
 - Per-project defaults saved ("this project defaults to Codex + gpt-5.x").
 - Sessions of different tools can run simultaneously within one project (e.g. implement with Claude Code + review with Codex).
 
@@ -198,16 +205,12 @@ A git panel per project (3 tabs):
 - File watcher debounce, event-driven instead of polling.
 - Target summary: CPU ~0% while idle, app's own memory under a few hundred MB. See §7.1.
 
-#### FR-9. Weekly agent usage + limit status
+#### FR-9. Agent usage + limit status
 
-- Show token usage and estimated cost per tool, per project and per model in a **weekly view** (daily bars + weekly total).
-- **Confirmed that weekly aggregation is impossible through the SDK** (per the official docs as of 2026-08): the Agent SDK only gives per-turn usage for sessions it ran itself (`ResultMessage.usage`, `total_cost_usd`). The plan limit data `/usage` shows has no programmatic access path, and the Admin Usage API is API-organisation only (not available to subscription accounts). So **log parsing is the only path to weekly aggregation**, and SDK events are used only for live display of running sessions (FR-14).
-- Data sources (no external server needed, all local):
-  - Claude Code: aggregate usage records from the session JSONL under `~/.claude/projects/**` (the same approach as ccusage)
-  - Codex: aggregate token_count events from the logs under `~/.codex/sessions/**`
-- Usage from sessions run outside Centralu is captured too (because it is log-based) — it becomes "all agent usage on my machine".
-- Aggregation results are cached in SQLite, with incremental parsing to minimise the cost of recomputation.
-- **Hitting the limit is a first-class state** (you meet it often in real use): when a session hits a rate limit, show the session state as `limited` and, as far as the tool provides it, show the **expected reset time** ("5-hour window, expected to reset at 14:30") in the session header and the inbox. On reset, an OS notification (optional) + a resume button.
+**What shipped is the limit-window view, not a cost dashboard.** The usage panel shows **subscription limit windows** per tool — Claude's 5-hour + weekly windows, Codex's weekly window — rendered as an array so a tool growing a new window does not require a UI change. Extra-payment credits are out of scope.
+
+- **Hitting the limit is a first-class state** (you meet it often in real use): when a session hits a rate limit, show the session state as `limited` and, as far as the tool provides it, the **expected reset time** in the session header and the inbox.
+- The original weekly **cost** dashboard (daily bars, per-project/model breakdown, estimated cost) remains open. The research still holds if it is built: weekly aggregation is impossible through the SDK (per-turn usage only, no plan-limit API for subscription accounts), so **log parsing is the only path** — `~/.claude/projects/**` JSONL and `~/.codex/sessions/**` token_count events, cached in SQLite with incremental parsing. Whether the hour it costs is worth it is a dogfooding-era judgement call, not a settled commitment.
 
 #### FR-10. Restore on restart
 
@@ -219,16 +222,28 @@ A git panel per project (3 tabs):
 - Make explicit that an agent turn that was in flight is interrupted when the process dies (restore is "continue the conversation", not "continue the turn").
 - Crash safety: the snapshot is saved on every state change, not at exit.
 
-#### FR-11. Central orchestrator session
+#### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
-- Any one session can be **designated as the orchestrator** (0~1 per workspace, marked with a crown icon).
-- To the orchestrator session, Centralu **exposes itself as an MCP server** offering these tools:
-  - `list_sessions` — inspect all projects, sessions and states
-  - `read_session` — read a particular session's recent conversation/result
-  - `send_to_session` — send a message (a work instruction) to a particular session
-  - `create_session` — **does not create directly; it raises a proposal card**: a card summarising the target project and starting prompt is shown and a human presses [Create] to confirm. This prevents states the app does not know about — unregistered projects, duplicate sessions. The other three tools run automatically
-- This makes it possible to tell the orchestrator "fix the tests in project A and review B" and have it distribute the work to each session.
-- Safeguards: instructions the orchestrator sent to other sessions are shown distinctly in the conversation view (distinguished from human input), and there is a per-session "refuse orchestrator instructions" toggle.
+The single-workspace-crown design gave way to a **hierarchy** once real use showed one conversation cannot hold every project's context:
+
+- **Kind is an explicit marker**, not a null check: a session is `kind: 'orchestrator'` or a normal session. There is one
+  **central orchestrator** (belongs to no project) and optionally **one orchestrator per project**. Scope follows the
+  hierarchy 중앙 > 프로젝트 > 세션: the central orchestrator reaches everything, a project orchestrator only its own
+  project's sessions (an `inScope` predicate guards every tool call).
+- Any session can be **promoted** to its project's orchestrator (and demoted back). Promotion takes effect on the session's
+  next wake and keeps its cwd — resume history survives the role change.
+- Orchestrators are marked with a **crown icon** (the sidebar button and the per-session badge — unified 2026-08-26; the
+  achromatic rule holds: kind is shape, urgency is brightness).
+- The host exposes **curated tools** to orchestrator sessions (inspect sessions, read conversations, send instructions,
+  `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/orchestrator/approvals/
+  settings/updates) — compiled in, not read from `docs/` at runtime, because runtime doc reads are an AGENTS.md-style
+  injection surface one level sideways.
+- **The permission preset is deliberately inexpressible** in the orchestrator's settings tool schema — an orchestrator
+  must not be able to quietly widen another session's approval back door.
+- `create_session` acts within scope; settings changes surface as a `settings_changed` event + toast, so the human sees
+  what the orchestrator changed the moment it changes it.
+- Still open from the original design: showing orchestrator-sent instructions distinctly in the target session's
+  conversation view, and a per-session "refuse orchestrator instructions" toggle. Neither is built; they stay on the list.
 
 #### FR-12. Waiting-state display — two urgency levels, separated (the heart of control)
 
@@ -376,7 +391,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 
 - **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
 - **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
-- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme.
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme, **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels).
 
 ### 5.4 Grid view (**experimental**)
 
@@ -404,7 +419,10 @@ trying to stop you pressing without knowing, but the grid is free to press and r
 time spent inside it, and the sidebar is never covered while the grid is open, so a single mark covers both **before pressing
 and throughout**.
 
-To be revisited in v2 as an option for large-monitor users (e.g. a two-way comparison view).
+The mark has not frozen the screen: since it went on, the grid gained drag reordering that moves panels as the
+same DOM node (conversation scroll survives), a rotating working-border (§7.1's measured cost included it),
+and real-pixel column math that holds under the text scale. **Experimental describes the two open objections
+above, not the build quality.** To be revisited in v2 as an option for large-monitor users.
 
 ---
 
@@ -412,18 +430,21 @@ To be revisited in v2 as an option for large-monitor users (e.g. a two-way compa
 
 ### 6.1 Process structure
 
+As built, the Rust shell is **thinner** than first drawn and the Node host **owns more** — the shell supervises,
+the host does the work, and the UI talks to the host over one WebSocket that is the same in dev and prod
+(details in [architecture.md](architecture.md)):
+
 ```
 ┌─────────────────────────── Tauri app (Rust) ──────────────────────────┐
-│  · window/tray/notify/shortcuts   · git2-based git queries            │
-│  · file tree/viewer file IO       · SQLite (workspace, usage cache)   │
-│  · sidecar supervisor             · file watcher (debounce)           │
+│  · window/tray/notifications      · sidecar supervisor                │
 └──────────────────────────────┬────────────────────────────────────────┘
-                               │ stdio/IPC (JSON events)
+                               │ WebSocket (same protocol dev and prod)
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │                      Node sidecar (Agent Host)                        │
 │  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC) │
-│  · common event normalisation         · MCP server (for orchestrator) │
-│  · usage log parser (incremental parse of ~/.claude, ~/.codex)        │
+│  · common event normalisation         · orchestrator tools (FR-11)    │
+│  · git CLI wrapper (FR-4)             · file tree IO + dir watchers   │
+│  · SQLite (~/.centralu/store.db — sessions, messages, workspace)      │
 └──────┬──────────────────────────┬─────────────────────────────────────┘
        │                          │
   Claude Code sessions       Codex sessions   (processes exist only while sessions do)
@@ -454,7 +475,7 @@ interface AgentAdapter {
 ### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
-- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, archived, last_read_seq, created_at, …)`
+- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, archived, last_read_seq, created_at, …)` — `kind` is derived from `is_orchestrator` + `project_id` (central vs project orchestrator, FR-11)
 - `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2)
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation
@@ -474,7 +495,15 @@ interface AgentAdapter {
 | UI frames while streaming | hold 60fps (virtualised list) |
 | Energy | keep macOS Activity Monitor energy impact at "Low" (excluding while streaming) |
 
-How it is achieved: event-driven (no polling), **a single focus-view render** (unfocused sessions update only state and unread), lazy file tree, watcher debounce, virtualised conversation list, git queries native in Rust.
+How it is achieved: event-driven (no polling), **a single focus-view render** (unfocused sessions update only state and unread), lazy file tree, watcher debounce, virtualised conversation list.
+
+**Measured 2026-08-26** (perf suite, `pnpm perf` — WebKit, the production engine): idle browser-process CPU
+0.1–0.2% with zero React commits; with sessions *working*, 3.3% (focus) / 4.0% (grid, 4 panels). The working
+figures were 24.4% / 32.9% until that day — the spinner animated a conic-gradient's angle through a registered
+custom property, which repaints on the main thread every frame; it now rotates a pre-rasterized plate via
+transform, owned by the compositor. The lesson is recorded here because it is the standing-load version of the
+§7.1 principle: **what the screen does while nothing happens is a battery bill.** The perf suite
+(`e2e/perf-idle.spec.ts`, `e2e/perf-grid.spec.ts`) prints numbers, not verdicts.
 
 ### 7.2 Other
 
@@ -487,7 +516,14 @@ How it is achieved: event-driven (no polling), **a single focus-view render** (u
 
 ## 8. Roadmap
 
-### M0 — technical verification spike (short)
+**Status 2026-08-26: M0 ✓ · M1 ✓ · M1.5 ✓ · M2 ✓ — M2.5 (dogfooding) is where we are.** The milestone
+contents below are kept as written (they record what was decided, and against what); ✓ marks completion.
+Shipped during M2.5 so far, driven by real use: the orchestrator redesign (FR-11 — #13, #30), codex verbosity
+(#54), external file-tree changes (#34), History as its own tab (FR-4), the 5-step text scale, the sticky
+user-message banner, and the standing-render fix measured in §7.1. Of the original M3 list, the orchestrator
+and the worktree option are done; the weekly cost dashboard remains open (FR-9).
+
+### M0 ✓ — technical verification spike (short)
 
 - One Claude Agent SDK session streaming E2E from Tauri + a Node sidecar
 - The same scenario verified over the Codex app-server protocol
@@ -495,7 +531,7 @@ How it is achieved: event-driven (no polling), **a single focus-view render** (u
 - Confirm that approval request, usage and session title events actually arrive ← if not, reconsider the integration approach
 - Confirm whether Claude Code file checkpoints can serve as the concurrent-session recovery path (FR-2)
 
-### M1 — MVP (the control loop turning from day one)
+### M1 ✓ — MVP (the control loop turning from day one)
 
 - Project registration + sidebar + focus view (FR-1) — not a grid
 - Claude Code session GUI conversation + keyboard-first approval UI (FR-3)
@@ -505,7 +541,7 @@ How it is achieved: event-driven (no polling), **a single focus-view render** (u
 - Read/unread (FR-16)
 - Inline concurrent-session warning (FR-2)
 
-### M1.5 — always on (redefined 2026-08-15 — detail in [plans/m1.5-plan.md](plans/m1.5-plan.md))
+### M1.5 ✓ — always on (redefined 2026-08-15 — detail in [plans/m1.5-plan.md](plans/m1.5-plan.md))
 
 Of the original four "reliability" items, the context gauge (FR-14) and the limit badge (part of FR-9) were **pulled forward and completed in M1**.
 On top of what is left, this milestone also solves what blocks real use (launching 2 terminals by hand, sessions dying when the host does, no notifications).
@@ -516,7 +552,7 @@ On top of what is left, this milestone also solves what blocks real use (launchi
 - Take the scale: conversation virtual scrolling, message windowing, measured performance
 - First-run experience (FR-19)
 
-### M2 — control completed
+### M2 ✓ — control completed
 
 - Codex adapter (FR-7 completed)
 - Full-text conversation search (FR-21)
@@ -525,16 +561,16 @@ On top of what is left, this milestone also solves what blocks real use (launchi
 - Attachments/image paste (FR-13)
 - Command palette ⌘K, shortcut settings (FR-17 completed), OS notification policy
 
-### M2.5 — improvements after using it myself
+### M2.5 (in progress) — improvements after using it myself
 
 After building through M2, run it on a real project for a few days and work the complaints that come out of that as a backlog.
 This is the one point where a human judges (decided 2026-08-15, see plans/m1.5-plan.md).
 
 ### M3 — intelligence
 
-- Weekly usage dashboard (FR-9 completed)
-- Orchestrator session + MCP tools (FR-11)
-- ~~Worktree option~~ (completed 2026-08-19 — FR-2's lower-priority option), per-project default presets, performance tuning finished (§7.1 measured)
+- Weekly usage **cost** dashboard (FR-9 — the limit-window view shipped earlier; the cost view is what remains)
+- ~~Orchestrator session~~ (completed 2026-08-25 during M2.5, redesigned — see FR-11)
+- ~~Worktree option~~ (completed 2026-08-19 — FR-2's lower-priority option), per-project default presets, ~~performance tuning~~ (§7.1 measured 2026-08-26)
 
 ---
 
@@ -567,4 +603,8 @@ This is the one point where a human judges (decided 2026-08-15, see plans/m1.5-p
 
 ---
 
-**This document is the last revision before the M0 spike.** If the M0 results shake §2's premises (permission override, approval and usage events) then much of this document gets rewritten anyway. Until then it is not polished any further — **the next piece of work is code, not documents.**
+~~**This document is the last revision before the M0 spike.**~~ M0 came and went without shaking §2's premises,
+and the code ran ahead of the document for ten days — far enough that the paper said "we do not build this"
+about things that were on screen (the grid, #25; then the terminal). **v0.5 (2026-08-26) realigns the document
+to the implementation.** The standing rule from here: when screen and paper disagree, either the screen carries
+a mark (experimental) or the paper gets a strike-through with a date — the disagreement itself must never be silent.
