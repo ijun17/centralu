@@ -40,9 +40,11 @@ async function seedTree(page: Page, entries: Record<string, { name: string; isDi
 
 async function openTree(page: Page, prompt = 'work') {
   await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('initial-prompt').fill(prompt)
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill(prompt)
+  await page.getByTestId('prompt-input').press('Enter')
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-tree')).toBeVisible()
 }

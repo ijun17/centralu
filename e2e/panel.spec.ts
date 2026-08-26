@@ -22,9 +22,11 @@ async function setup(page: Page, path = '/tmp/alpha') {
 async function newSession(page: Page, project: string, tool: 'claude' | 'codex', prompt: string): Promise<string> {
   await page.getByTestId(`new-session-${project}`).click()
   await page.getByTestId(`tool-option-${tool}`).click()
-  await page.getByTestId('initial-prompt').fill(prompt)
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill(prompt)
+  await page.getByTestId('prompt-input').press('Enter')
   return page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
 }
 

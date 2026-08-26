@@ -47,9 +47,11 @@ async function boot(page: Page, count: number): Promise<string[]> {
   const ids: string[] = []
   for (let i = 0; i < count; i++) {
     await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('initial-prompt').fill(`session ${i}`)
     await page.getByTestId('create-session-confirm').click()
     await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+    // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+    await page.getByTestId('prompt-input').fill(`session ${i}`)
+    await page.getByTestId('prompt-input').press('Enter')
     ids.push(await page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId))
   }
 

@@ -33,9 +33,11 @@ async function setup(page: Page, opts: { projects?: string[] } = {}) {
 async function newSession(page: Page, projectName: string, prompt: string) {
   // 새 세션은 다이얼로그를 거친다 (FR-7: 도구·모델·권한을 고른다)
   await page.getByTestId(`new-session-${projectName}`).click()
-  await page.getByTestId('initial-prompt').fill(prompt)
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill(prompt)
+  await page.getByTestId('prompt-input').press('Enter')
 }
 
 /**
@@ -632,14 +634,20 @@ test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('new-session-alpha').click()
 
-  // 다이얼로그가 단순해졌다: 도구 + 시작 프롬프트뿐
+  // 다이얼로그는 도구와 이어가기만 고른다 — 모델 입력도, 프롬프트 칸도 없다 (#8)
   await expect(page.getByTestId('model-input')).toHaveCount(0)
+  await expect(page.getByTestId('initial-prompt')).toHaveCount(0)
   await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('initial-prompt').fill('첫 지시')
   await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
-  expect(params).toMatchObject({ tool: 'claude', initialPrompt: '첫 지시' })
+  expect(params).toMatchObject({ tool: 'claude' })
+  expect(params.initialPrompt).toBeUndefined()
+
+  // 첫 지시는 입력창에서 — 화면에 그대로 남는다
+  await page.getByTestId('prompt-input').fill('첫 지시')
+  await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('msg-user')).toContainText('첫 지시')
 
   // 모델·권한은 입력창 아래 설정 메뉴에서 바꾼다
@@ -1397,7 +1405,7 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
   await expect(page.getByTestId('past-ext-2')).toContainText('Already open')
 
   await page.getByTestId('past-ext-1').click()
-  await expect(page.getByTestId('resume-note')).toBeVisible()
+  // 이어가기를 골랐다는 사실은 버튼 라벨이 말한다 (Load ≠ Start) — 별도 안내문은 걷어냈다 (#8)
   await expect(page.getByTestId('create-session-confirm')).toHaveText('Load')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -1428,9 +1436,11 @@ test('구버전 도구는 목록을 못 줘도 새 세션을 막지 않는다', 
   await expect(page.getByTestId('past-unsupported')).toContainText('update codex')
   // 이유는 보이되 길은 열려 있어야 한다
   await expect(page.getByTestId('create-session-confirm')).toHaveText('Start')
-  await page.getByTestId('initial-prompt').fill('그래도 새로 시작')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill('그래도 새로 시작')
+  await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('chat-stream')).toContainText('그래도 새로 시작')
 })
 
@@ -2391,15 +2401,19 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
 
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('initial-prompt').fill('클로드 쪽 작업')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill('클로드 쪽 작업')
+  await page.getByTestId('prompt-input').press('Enter')
 
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('tool-option-codex').click()
-  await page.getByTestId('initial-prompt').fill('코덱스 쪽 작업')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill('코덱스 쪽 작업')
+  await page.getByTestId('prompt-input').press('Enter')
 
   // 목록에서 도구가 구분된다
   await expect(page.getByTestId('tool-mark-claude')).toHaveCount(1)
@@ -2417,9 +2431,11 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
 test('응답을 기다리는 동안 표시가 뜨고 거기서 중지할 수 있다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('initial-prompt').fill('오래 걸리는 일')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill('오래 걸리는 일')
+  await page.getByTestId('prompt-input').press('Enter')
 
   await page.getByTestId('prompt-input').fill('한참 걸리는 걸 해줘')
   await page.getByTestId('send').click()
@@ -4628,9 +4644,11 @@ test('워크트리는 기본으로 꺼져 있고, 켜면 세션에 브랜치가 
   await expect(toggle).not.toBeChecked()
 
   await toggle.check()
-  await page.getByTestId('initial-prompt').fill('격리해서 고쳐줘')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill('격리해서 고쳐줘')
+  await page.getByTestId('prompt-input').press('Enter')
 
   // 다른 디렉토리에서 돈다는 사실이 안 보이면 "왜 프로젝트 폴더가 안 바뀌지"를 겪는다
   await expect(page.getByTestId('worktree-badge')).toBeVisible()
@@ -4653,9 +4671,11 @@ test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', asyn
 
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
-  await page.getByTestId('initial-prompt').fill('격리 세션')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  await page.getByTestId('prompt-input').fill('격리 세션')
+  await page.getByTestId('prompt-input').press('Enter')
 
   // 커밋 안 된 변경이 있는 상태를 만든다 — 그때 무엇을 잃는지 말해야 한다
   await page.evaluate(() => {
@@ -5266,6 +5286,9 @@ test('입력창을 포커스하면 잠든 세션이 깨어난다', async ({ page
     st.setState({ sessions: { ...st.getState().sessions, [sid]: { ...st.getState().sessions[sid], live: false } } })
   }, id)
 
+  // 헬퍼가 입력창에 포커스를 남겨두므로 한 번 떠났다가 돌아온다 —
+  // 깨우기는 포커스 '이벤트'에 걸려 있어서, 이미 포커스면 focus()가 아무것도 안 쏜다
+  await page.getByTestId('prompt-input').blur()
   await page.getByTestId('prompt-input').focus()
   await expect
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid].live, id))
