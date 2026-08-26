@@ -1,7 +1,7 @@
 /** T1-2 완료 기준: 스키마가 실제로 적용되고 CRUD가 도는지 */
 import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SessionInfo } from '@cc/protocol'
@@ -796,5 +796,33 @@ describe('커밋 귀속 (#50) — 저장소가 아니라 우리 DB에만', () =>
     expect(rows.find((r) => r.sha === '4ce6fc7')?.sessionId).toBe('s-auth2')
     expect(s.commitSessions('p2')).toEqual([{ sha: '4ce6fc7', sessionId: 's-other' }])
     expect(s.commitSessions('p-none')).toEqual([])
+  })
+})
+
+describe('WAL 체크포인트', () => {
+  /*
+   * 실측(2026-08-26): 실사용 DB 옆의 -wal이 97MB로 본 DB(91MB)보다 컸다.
+   * 기본 auto-checkpoint(PASSIVE)는 파일을 줄이지 않는다 — TRUNCATE만 줄인다.
+   * 계약: checkpoint()는 -wal 파일을 0으로 자른다.
+   */
+  it('checkpoint()가 -wal 파일을 0바이트로 자른다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-wal-'))
+    const path = join(dir, 'store.db')
+    const s = new Store(path)
+    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.upsertSession({
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
+      autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      ...sessionLiveDefaults(),
+    })
+    for (let i = 1; i <= 200; i++) {
+      s.appendMessages([{ sessionId: 's1', seq: i, role: 'user', kind: 'text', payload: { text: 'x'.repeat(2000) }, ts: i }])
+    }
+    expect(statSync(path + '-wal').size).toBeGreaterThan(0)
+    s.checkpoint()
+    expect(statSync(path + '-wal').size).toBe(0)
+    s.close()
+    rmSync(dir, { recursive: true, force: true })
   })
 })

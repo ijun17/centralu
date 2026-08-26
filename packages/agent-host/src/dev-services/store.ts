@@ -33,6 +33,22 @@ export class Store {
     this.db.pragma('journal_mode = WAL')
     this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
     this.migrate()
+    /*
+     * 물려받은 WAL을 여기서 접는다. 실측(2026-08-26): store.db 91MB 옆에 store.db-wal이
+     * 97MB — DB보다 컸다. WAL은 close()가 접어주지만, 앱 종료 경로에서 host가 close()에
+     * 못 미치고 SIGKILL당하면(예전 Tauri 300ms 예산) 다음 실행까지 그대로 남는다.
+     * 시작할 때 한 번, 그리고 닫을 때 한 번 — 어느 쪽이 못 돌아도 반대쪽이 접는다.
+     */
+    this.checkpoint()
+  }
+
+  /** WAL을 본 DB에 합치고 파일을 0으로 자른다. 실패해도 치명적이지 않아 조용히 넘어간다 */
+  checkpoint(): void {
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)')
+    } catch {
+      // 다른 연결이 읽는 중이면 TRUNCATE가 미뤄질 수 있다 — 다음 기회에 다시
+    }
   }
 
   /**
@@ -495,6 +511,7 @@ export class Store {
   }
 
   close() {
+    this.checkpoint()
     this.db.close()
   }
 
