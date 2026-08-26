@@ -107,7 +107,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 | Project | One registered local directory. It may or may not be a git repository |
 | Session | One agent conversation instance. Belongs to a project and has a tool (Claude Code/Codex), model and permission setting |
 | Adapter | A module wrapping a specific agent tool in the common interface |
-| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct sessions within its scope. One central orchestrator (no project) plus at most one per project; scope follows 중앙 > 프로젝트 > 세션 (FR-11) |
+| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct sessions within its scope. One central orchestrator (no project) plus at most one per project; scope follows central > project > session (FR-11) |
 | Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
 | Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
 | Read/unread | Independent of session state: whether there is new content since I last looked |
@@ -228,7 +228,7 @@ The single-workspace-crown design gave way to a **hierarchy** once real use show
 
 - **Kind is an explicit marker**, not a null check: a session is `kind: 'orchestrator'` or a normal session. There is one
   **central orchestrator** (belongs to no project) and optionally **one orchestrator per project**. Scope follows the
-  hierarchy 중앙 > 프로젝트 > 세션: the central orchestrator reaches everything, a project orchestrator only its own
+  hierarchy central > project > session: the central orchestrator reaches everything, a project orchestrator only its own
   project's sessions (an `inScope` predicate guards every tool call).
 - Any session can be **promoted** to its project's orchestrator (and demoted back). Promotion takes effect on the session's
   next wake and keeps its cwd — resume history survives the role change.

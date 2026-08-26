@@ -4,9 +4,11 @@
 **how**. Where they disagree on a requirement the spec wins; where they disagree on the
 way something is built, the design doc wins.
 
-Most of these are still in Korean — see
-[#27](https://github.com/ijun17/centralu/issues/27). New documents are written in
-English.
+Design documents are kept in two languages: English is the canonical text (`*.md`),
+Korean is a maintained mirror (`*.ko.md`) — same convention as the repository root
+README. When a design changes, both files change **in the same PR as the code**.
+`plans/` and `spikes/` are records of what happened and are not mirrored
+([#27](https://github.com/ijun17/centralu/issues/27)).
 
 Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-result.md),
 [what release still needs](plans/beta-release-checklist.md).
