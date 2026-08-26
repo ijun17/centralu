@@ -1160,9 +1160,17 @@ test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있�
   await page.getByTestId('settings-scale-4').click()
   await page.keyboard.press('Escape')
 
-  const box = (await page.getByTestId('prompt-input').boundingBox())!
+  /*
+   * 한 번 재서 단언하면 배율 적용 직후의 레이아웃 정착과 경합한다 — 전체 스위트의
+   * 병렬 부하에서만 간헐적으로 몇 픽셀 넘게 읽혔다 (솔로에서는 통과). 정착할 때까지
+   * 폴링한다: 계약은 "정착한 화면에서 입력창이 창 안"이지 "첫 프레임부터"가 아니다.
+   */
   const viewport = page.viewportSize()!
-  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1)
+  const bottomEdge = async () => {
+    const box = await page.getByTestId('prompt-input').boundingBox()
+    return box ? box.y + box.height : Number.POSITIVE_INFINITY
+  }
+  await expect.poll(bottomEdge).toBeLessThanOrEqual(viewport.height + 1)
   // 되돌려도 창 안이다 — 커졌다 작아졌다 하며 자리를 잃지 않는다
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')
@@ -1170,8 +1178,7 @@ test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있�
   await page.getByTestId('settings-tab-appearance').click()
   await page.getByTestId('settings-scale-0').click()
   await page.keyboard.press('Escape')
-  const small = (await page.getByTestId('prompt-input').boundingBox())!
-  expect(small.y + small.height).toBeLessThanOrEqual(viewport.height + 1)
+  await expect.poll(bottomEdge).toBeLessThanOrEqual(viewport.height + 1)
 })
 
 /*
@@ -2835,6 +2842,35 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   // 다시 누르면 접힌다
   await expanded.click()
   await expect(page.getByTestId('sticky-user-expanded')).toBeHidden()
+})
+
+/**
+ * 에이전트가 내놓은 이미지 (#40) — 스크린샷·이미지 Read가 대화에 실제로 보인다.
+ * 저장하지 않는다는 결정(표시 전용, 2026-08-24)은 kind 맵(null)이 지키고,
+ * 여기서 보는 계약은 둘이다: 이미지는 그려진다, 못 그린 이미지는 조용한 공백이
+ * 아니라 이유 있는 상자다.
+ */
+test('에이전트가 보낸 이미지가 대화에 그려진다 — 실패는 이유를 말한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
+  // 8×8 픽셀짜리 진짜 PNG — 가짜 문자열이면 "그려졌다"를 잴 수 없다
+  const PNG =
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8z8Dwn4EIwESMolGFtFEIAJ2yAhH+Iz4jAAAAAElFTkSuQmCC'
+  await page.evaluate(
+    ({ sid, png }: { sid: string; png: string }) => {
+      const mock = (window as never as { __mock: any }).__mock
+      mock.emit({ type: 'message_image', sessionId: sid, mime: 'image/png', data: png, path: '/tmp/shot.png' })
+      mock.emit({ type: 'message_image', sessionId: sid, mime: '', data: '', path: '/tmp/big.png', note: '이미지가 너무 큽니다 (12MB)' })
+    },
+    { sid: id, png: PNG },
+  )
+  const img = page.getByTestId('msg-image').locator('img')
+  await expect(img).toBeVisible()
+  // 실제로 디코드됐는지 본다 — 소스가 깨졌으면 naturalWidth는 0이다
+  await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
+  await expect(page.getByTestId('msg-image-missing')).toContainText('/tmp/big.png')
 })
 
 /** 경로를 외워서 치지 않아도 되게 — 트리에서 끌어다 입력창에 놓는다 */
