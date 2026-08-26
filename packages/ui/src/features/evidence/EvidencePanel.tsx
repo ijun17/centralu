@@ -830,6 +830,8 @@ function CommitHistory({ projectId }: { projectId: string }) {
                     commitAgo(c.when, now),
                     ...(withAuthor ? [c.author] : []),
                     ...(c.parents.length > 1 ? ['merge'] : []),
+                    // 어느 세션이 만들었나 (#50) — 훅 없이 관찰로 안 것. 사람 커밋에는 없다
+                    ...(c.sessionName ? [c.sessionName] : []),
                   ].join(' · ')}
                 </span>
               </span>

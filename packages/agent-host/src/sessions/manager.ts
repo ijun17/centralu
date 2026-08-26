@@ -30,6 +30,7 @@ import {
   gitSummary,
   gitStatusFiles,
   gitDiff,
+  gitHeadSha,
   gitLog,
   gitCommitDetail,
   gitBranches,
@@ -43,7 +44,8 @@ import {
 } from '../dev-services/git.js'
 import { importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
-import { saveAttachment, clearAttachments } from '../dev-services/attachments.js'
+import { saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
+import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 
 /**
  * 응답이 오지 않는 호출로 화면을 붙잡아 두지 않는다.
@@ -960,6 +962,10 @@ export class SessionManager {
         }
         this.applyStateHint(e, m)
         seq = this.persistMessage(e, m)
+        // 이미지는 파일로 영속된다 (#40 2차) — 비동기라 여기서 seq를 받지 않는다
+        if (e.type === 'message_image') void this.persistImage(e, m)
+        // 커밋 귀속 (#50) — git commit 도구 호출을 눈앞에서 지나갈 때 줍는다
+        if (e.type === 'tool_call' || e.type === 'tool_result') this.observeCommit(e, m)
         this.store.upsertSession(m)
       }
       /*
@@ -1131,6 +1137,60 @@ export class SessionManager {
 
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
     return saveAttachment(sessionId, name, mime, dataBase64)
+  }
+
+  /**
+   * 에이전트가 내놓은 이미지의 영속 (#40, 2차 결정 2026-08-26: 표시만 → 영속하되
+   * 총량 500MB). 바이트는 attachments 파일로, DB 행에는 경로만 — 사용자→에이전트
+   * 방향의 첨부와 똑같은 구조라 DB는 계속 텍스트만 남는다.
+   */
+  private async persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): Promise<void> {
+    let stored: string | undefined
+    let note = e.note
+    if (e.data) {
+      try {
+        stored = (await saveAttachment(m.id, 'agent-image', e.mime, e.data)).path
+        // 상한 유지는 쓰는 쪽의 책임 — 넘치면 오래된 파일부터 걷는다
+        void sweepAttachments().catch(() => {})
+      } catch (err) {
+        note = `이미지를 저장하지 못했습니다: ${(err as Error).message}`
+      }
+    }
+    const payload: NormalizedEvent = {
+      type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path: stored ?? e.path, note,
+    }
+    const seq = this.store.nextSeq(m.id)
+    this.store.appendMessages([{ sessionId: m.id, seq, role: 'system', kind: 'image', payload, ts: Date.now() }])
+    m.lastSeq = seq
+    this.store.upsertSession(m)
+  }
+
+  /** tool_call의 callId → 그 호출이 `git commit`이었던 세션 (#50) */
+  private pendingCommits = new Map<string, string>()
+
+  /**
+   * 훅 없는 커밋 귀속 (#50). 에이전트의 커밋은 도구 호출로 일어나고 그 출력이 이미
+   * 이 스트림에 있다 — `[branch abc1234]` 줄에서 해시를 줍고, 출력이 잘렸으면 방금의
+   * HEAD가 그 커밋이다. 저장소에는 아무것도 쓰지 않는다 (결정 2026-08-23).
+   */
+  private observeCommit(e: Extract<NormalizedEvent, { type: 'tool_call' | 'tool_result' }>, m: SessionInfo): void {
+    if (e.type === 'tool_call') {
+      if (looksLikeGitCommit(e.summary.title)) this.pendingCommits.set(e.callId, m.id)
+      return
+    }
+    const sid = this.pendingCommits.get(e.callId)
+    if (!sid) return
+    this.pendingCommits.delete(e.callId)
+    const projectId = m.projectId
+    if (!e.ok || !projectId) return
+    const sha = parseCommitSha(e.summary)
+    if (sha) {
+      this.store.recordCommit(projectId, sha, sid)
+      return
+    }
+    void gitHeadSha(this.cwdOf(projectId))
+      .then((head) => head && this.store.recordCommit(projectId, head, sid))
+      .catch(() => {})
   }
 
   /**
@@ -1468,8 +1528,10 @@ export class SessionManager {
   gitDiff(projectId: string, path: string, staged?: boolean) {
     return gitDiff(this.cwdOf(projectId), path, { staged })
   }
-  gitLog(projectId: string, limit?: number) {
-    return gitLog(this.cwdOf(projectId), limit)
+  async gitLog(projectId: string, limit?: number) {
+    const commits = await gitLog(this.cwdOf(projectId), limit)
+    // 어느 세션이 만든 커밋인지 단다 (#50) — 기록이 없으면 그대로 지나간다
+    return attachCommitSessions(commits, this.store.commitSessions(projectId), (sid) => this.meta.get(sid)?.name)
   }
   gitCommitDetail(projectId: string, sha: string) {
     return gitCommitDetail(this.cwdOf(projectId), sha)
@@ -2045,8 +2107,26 @@ export class SessionManager {
     this.store.markRead(sessionId, seq)
   }
 
-  loadMessages(sessionId: string, limit: number, beforeSeq?: number): StoredMessage[] {
-    return this.store.loadMessages(sessionId, limit, beforeSeq)
+  async loadMessages(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
+    const rows = this.store.loadMessages(sessionId, limit, beforeSeq)
+    /*
+     * 이미지 행은 경로만 저장된다 (#40) — 화면에 줄 때 바이트를 다시 싣는다.
+     * 파일이 없으면(500MB 상한 정리, 외부 삭제) 조용한 공백 대신 이유를 싣는다.
+     */
+    return Promise.all(
+      rows.map(async (r) => {
+        if (r.kind !== 'image') return r
+        const p = r.payload as Extract<NormalizedEvent, { type: 'message_image' }>
+        if (!p.path || p.note) return r
+        try {
+          const { readFile } = await import('node:fs/promises')
+          const data = (await readFile(p.path)).toString('base64')
+          return { ...r, payload: { ...p, data } }
+        } catch {
+          return { ...r, payload: { ...p, note: '이미지가 정리되어 더 이상 없습니다 (총량 상한)' } }
+        }
+      }),
+    )
   }
 
   async disposeAll(): Promise<void> {

@@ -426,6 +426,23 @@ export class Store {
           }
         },
       },
+      {
+        to: 19,
+        run: () => {
+          /*
+           * 커밋 귀속 (#50). 저장소에는 아무것도 쓰지 않는다는 결정(2026-08-23)의
+           * 반쪽 — 기록은 여기, 우리 DB에만 남는다. 해시는 에이전트의 git commit
+           * 도구 출력에서 주운 것이라 짧을 수 있다(접두사 매칭으로 푼다).
+           */
+          this.db.exec(`CREATE TABLE IF NOT EXISTS commit_sessions (
+            project_id TEXT NOT NULL,
+            sha        TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            ts         INTEGER NOT NULL,
+            PRIMARY KEY (project_id, sha)
+          )`)
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -850,6 +867,19 @@ export class Store {
   }
 
   /** 스킬 목록을 남긴다 (도구+디렉토리 단위) */
+  /** 커밋 귀속 기록 (#50) — 저장소가 아니라 여기에만 남는다 */
+  recordCommit(projectId: string, sha: string, sessionId: string): void {
+    this.db
+      .prepare(`INSERT OR REPLACE INTO commit_sessions (project_id, sha, session_id, ts) VALUES (?, ?, ?, ?)`)
+      .run(projectId, sha, sessionId, Date.now())
+  }
+
+  commitSessions(projectId: string): { sha: string; sessionId: string }[] {
+    return this.db
+      .prepare(`SELECT sha, session_id AS sessionId FROM commit_sessions WHERE project_id = ?`)
+      .all(projectId) as { sha: string; sessionId: string }[]
+  }
+
   saveCommands(tool: string, cwd: string, commands: unknown): void {
     this.db
       .prepare(

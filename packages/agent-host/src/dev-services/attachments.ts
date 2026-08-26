@@ -38,3 +38,41 @@ export async function saveAttachment(
 export async function clearAttachments(sessionId: string): Promise<void> {
   await rm(join(root(), sessionId), { recursive: true, force: true })
 }
+
+/** 총량 상한 — 이미지가 영속되면서(#40) 무한히 쌓일 수 있게 됐다. 사용자 결정: 500MB */
+export const ATTACHMENTS_MAX_BYTES = 500 * 1048576
+
+/**
+ * 상한을 넘으면 **오래된 파일부터** 지운다. DB의 경로 참조는 남는다 — 지워진
+ * 이미지는 화면에서 "정리됨" 상자가 되고, 그 상자가 이 정책의 존재를 말해준다.
+ */
+export async function sweepAttachments(maxBytes: number = ATTACHMENTS_MAX_BYTES): Promise<number> {
+  const { readdir, stat, rm: rmFile } = await import('node:fs/promises')
+  const files: { path: string; size: number; mtime: number }[] = []
+  let dirs: string[]
+  try {
+    dirs = await readdir(root())
+  } catch {
+    return 0 // 폴더가 아직 없다 — 지울 것도 없다
+  }
+  for (const d of dirs) {
+    const dir = join(root(), d)
+    const names = await readdir(dir).catch(() => [] as string[])
+    for (const name of names) {
+      const p = join(dir, name)
+      const s = await stat(p).catch(() => null)
+      if (s?.isFile()) files.push({ path: p, size: s.size, mtime: s.mtimeMs })
+    }
+  }
+  let total = files.reduce((a, f) => a + f.size, 0)
+  if (total <= maxBytes) return 0
+  files.sort((a, b) => a.mtime - b.mtime)
+  let removed = 0
+  for (const f of files) {
+    if (total <= maxBytes) break
+    await rmFile(f.path, { force: true }).catch(() => {})
+    total -= f.size
+    removed++
+  }
+  return removed
+}

@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(18)
+    expect(store.schemaVersion).toBe(19)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(18)
+    expect(new Store().schemaVersion).toBe(19)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(18)
+    expect(store.schemaVersion).toBe(19)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -491,7 +491,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(18)
+    expect(store.schemaVersion).toBe(19)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -546,7 +546,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(18)
+    expect(store.schemaVersion).toBe(19)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -618,7 +618,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(18)
+    expect(first.schemaVersion).toBe(19)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -751,7 +751,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     v16Db(file)
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(18)
+    expect(first.schemaVersion).toBe(19)
     // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
     expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
@@ -781,5 +781,20 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     store.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
     expect(store.listSessions().find((s) => s.id === 's1')!.context!.used).toBe(24_000)
     store.close()
+  })
+})
+
+describe('커밋 귀속 (#50) — 저장소가 아니라 우리 DB에만', () => {
+  it('기록하고 프로젝트별로 되찾는다 (같은 해시는 마지막 기록이 이긴다)', () => {
+    const s = new Store()
+    s.recordCommit('p1', '4ce6fc7', 's-auth')
+    s.recordCommit('p1', 'abc1234', 's-docs')
+    s.recordCommit('p2', '4ce6fc7', 's-other') // 다른 프로젝트의 같은 해시는 별개다
+    s.recordCommit('p1', '4ce6fc7', 's-auth2') // 재기록 — 덮는다
+    const rows = s.commitSessions('p1')
+    expect(rows).toHaveLength(2)
+    expect(rows.find((r) => r.sha === '4ce6fc7')?.sessionId).toBe('s-auth2')
+    expect(s.commitSessions('p2')).toEqual([{ sha: '4ce6fc7', sessionId: 's-other' }])
+    expect(s.commitSessions('p-none')).toEqual([])
   })
 })

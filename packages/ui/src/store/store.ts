@@ -2283,6 +2283,10 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary) items.push({ kind: 'tool', seq: m.seq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly })
+    } else if (m.kind === 'image') {
+      // 이미지는 영속된다 (#40 2차) — host가 파일에서 바이트를 다시 실어 보낸다
+      const e = m.payload as { mime?: string; data?: string; path?: string; note?: string }
+      items.push({ kind: 'image', seq: m.seq, mime: e.mime ?? '', data: e.data ?? '', path: e.path, note: e.note })
     }
   }
   return items

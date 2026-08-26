@@ -2871,6 +2871,19 @@ test('에이전트가 보낸 이미지가 대화에 그려진다 — 실패는 �
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
   await expect(page.getByTestId('msg-image-missing')).toContainText('/tmp/big.png')
+
+  /*
+   * 영속 (#40 2차 결정: 표시만 → 남긴다, 총량 500MB). 메모리의 대화를 버리고
+   * 기록에서 강제로 다시 읽어도 이미지가 되살아나야 한다 — 재시작이 걷는 길과 같다.
+   */
+  await page.evaluate((sid: string) => {
+    const store = (window as never as { __store: any }).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid, true)
+  }, id)
+  await expect(img).toBeVisible()
+  await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
 })
 
 /** 경로를 외워서 치지 않아도 되게 — 트리에서 끌어다 입력창에 놓는다 */

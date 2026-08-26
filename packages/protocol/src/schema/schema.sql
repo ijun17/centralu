@@ -68,3 +68,13 @@ CREATE TABLE IF NOT EXISTS workspace (
   layout     TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- 커밋 귀속 (#50): 어느 세션이 이 커밋을 만들었나 — 저장소가 아니라 여기에만 남는다.
+-- 해시는 에이전트의 git commit 도구 출력에서 주운 것이라 짧을 수 있다 (접두사 매칭).
+CREATE TABLE IF NOT EXISTS commit_sessions (
+  project_id TEXT NOT NULL,
+  sha        TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  ts         INTEGER NOT NULL,
+  PRIMARY KEY (project_id, sha)
+);

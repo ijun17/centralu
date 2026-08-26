@@ -170,6 +170,16 @@ export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
 
+/** 지금 HEAD — 커밋 귀속(#50)에서 도구 출력이 잘려 해시를 못 주웠을 때의 대안 */
+export async function gitHeadSha(cwd: string): Promise<string | null> {
+  if (!(await isRepo(cwd))) return null
+  try {
+    return (await git(cwd, ['rev-parse', 'HEAD'])).trim() || null
+  } catch {
+    return null // 커밋이 하나도 없는 저장소 — 귀속할 것도 없다
+  }
+}
+
 export async function gitBranches(cwd: string): Promise<GitBranch[]> {
   if (!(await isRepo(cwd))) return []
   const stdout = await git(cwd, [

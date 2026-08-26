@@ -154,6 +154,12 @@ export const GitCommit = z.object({
   author: z.string(),
   when: z.number(),
   parents: z.array(z.string()),
+  /**
+   * 이 커밋을 만든 세션 이름 (#50). 훅이 아니라 관찰로 안다 — 에이전트의
+   * `git commit` 도구 호출에서 해시를 주워 우리 DB에만 적는다. 사람이 직접 한
+   * 커밋에는 없다 — 그게 정확한 것이다.
+   */
+  sessionName: z.string().optional(),
 })
 export type GitCommit = z.infer<typeof GitCommit>
 

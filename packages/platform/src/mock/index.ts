@@ -121,6 +121,9 @@ export class MockPlatform implements Platform {
           : event.type === 'approval_request' || event.type === 'approval_resolved' ? ('approval' as const)
           : event.type === 'message_delta' ? ('text' as const)
           : event.type === 'compaction' ? ('marker' as const)
+          // 이미지도 영속된다 (#40 2차). 실물은 파일+경로지만 목의 디스크는 메모리다 —
+          // payload에 바이트를 그대로 두면 loadMessages가 실물과 같은 화면을 되살린다
+          : event.type === 'message_image' ? ('image' as const)
           : null
         if (kind) {
           const seq = (this.messages.get(s.id)?.length ?? 0) + 1

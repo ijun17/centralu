@@ -4,7 +4,7 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { useStore } from './store.js'
+import { messagesToChat, useStore } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -587,5 +587,27 @@ describe('화면(view) 복원', () => {
 
     await useStore.getState().attach(mock)
     expect(useStore.getState().view).toBe('focus')
+  })
+})
+
+describe('messagesToChat — 이미지 행 (#40 2차)', () => {
+  it('영속된 이미지가 대화로 되살아난다', () => {
+    const items = messagesToChat([
+      {
+        sessionId: 's1', seq: 1, role: 'system', kind: 'image', ts: 1,
+        payload: { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/a.png' },
+      },
+    ])
+    expect(items).toEqual([{ kind: 'image', seq: 1, mime: 'image/png', data: 'aWJs', path: '/tmp/a.png', note: undefined }])
+  })
+
+  it('정리된 이미지는 이유를 들고 되살아난다 — 조용한 공백이 아니다', () => {
+    const items = messagesToChat([
+      {
+        sessionId: 's1', seq: 2, role: 'system', kind: 'image', ts: 1,
+        payload: { type: 'message_image', sessionId: 's1', mime: 'image/png', data: '', path: '/tmp/b.png', note: '이미지가 정리되어 더 이상 없습니다 (총량 상한)' },
+      },
+    ])
+    expect(items[0]).toMatchObject({ kind: 'image', data: '', note: expect.stringContaining('정리') })
   })
 })
