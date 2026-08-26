@@ -222,7 +222,7 @@ export const StoredMessage = z.object({
   sessionId: z.string(),
   seq: z.number(),
   role: z.enum(['user', 'assistant', 'system']),
-  kind: z.enum(['text', 'tool_call', 'tool_result', 'approval', 'marker', 'image']),
+  kind: z.enum(['text', 'tool_call', 'tool_result', 'approval', 'marker', 'image', 'reasoning']),
   payload: z.unknown(),
   ts: z.number(),
 })

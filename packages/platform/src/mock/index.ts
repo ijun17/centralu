@@ -120,6 +120,8 @@ export class MockPlatform implements Platform {
           : event.type === 'tool_result' ? ('tool_result' as const)
           : event.type === 'approval_request' || event.type === 'approval_resolved' ? ('approval' as const)
           : event.type === 'message_delta' ? ('text' as const)
+          // 추론 요약 (#58) — 실물과 같은 규칙: 텍스트가 실렸을 때만 기록
+          : event.type === 'reasoning_delta' && event.text ? ('reasoning' as const)
           // 시켜서 들어온 말 (FR-11). 실물 payload는 {text, from}이고 이벤트가 그 둘을
           // 그대로 갖고 있어, 복원(messagesToChat)이 같은 화면을 되살린다
           : event.type === 'user_message' ? ('text' as const)
@@ -132,7 +134,10 @@ export class MockPlatform implements Platform {
           const seq = (this.messages.get(s.id)?.length ?? 0) + 1
           this.pushMessage({
             sessionId: s.id, seq,
-            role: event.type === 'message_delta' ? 'assistant' : event.type === 'user_message' ? 'user' : 'system',
+            role:
+              event.type === 'message_delta' || event.type === 'reasoning_delta' ? 'assistant'
+              : event.type === 'user_message' ? 'user'
+              : 'system',
             kind, payload: event, ts: this.now(),
           })
           s.lastSeq = seq

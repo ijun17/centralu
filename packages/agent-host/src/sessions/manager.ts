@@ -1123,6 +1123,9 @@ export class SessionManager {
       : e.type === 'tool_result' ? 'tool_result'
       : e.type === 'approval_request' || e.type === 'approval_resolved' ? 'approval'
       : e.type === 'message_delta' ? 'text'
+      // 추론 요약 (#58) — 텍스트가 실렸을 때만 기록이다. estTokens뿐인 조각(claude)은
+      // 진행 표시로만 살다 사라진다: 내용 없는 행을 쌓으면 기록이 소음이 된다.
+      : e.type === 'reasoning_delta' && e.text ? 'reasoning'
       // 압축 지점을 기록에 남긴다. 모델의 컨텍스트에서는 옛 대화가 접혔지만
       // 우리 기록에는 그대로 있다 — 어디서 접혔는지 보여야 거슬러 읽을 수 있다.
       : e.type === 'compaction' ? 'marker'
@@ -1130,7 +1133,8 @@ export class SessionManager {
     if (!kind) return null
     const seq = this.store.nextSeq(m.id)
     const msg: StoredMessage = {
-      sessionId: m.id, seq, role: e.type === 'message_delta' ? 'assistant' : 'system',
+      sessionId: m.id, seq,
+      role: e.type === 'message_delta' || e.type === 'reasoning_delta' ? 'assistant' : 'system',
       kind, payload: e, ts: Date.now(),
     }
     this.store.appendMessages([msg])

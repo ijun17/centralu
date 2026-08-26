@@ -611,3 +611,21 @@ describe('messagesToChat — 이미지 행 (#40 2차)', () => {
     expect(items[0]).toMatchObject({ kind: 'image', data: '', note: expect.stringContaining('정리') })
   })
 })
+
+/** 추론 요약 (#58) — 델타 행들이 한 덩어리로 되살아난다 (assistant와 같은 규칙) */
+describe('messagesToChat — 추론 행', () => {
+  it('연속된 reasoning 행이 하나로 합쳐진다', () => {
+    const row = (seq: number, text: string) => ({
+      sessionId: 's1', seq, role: 'assistant' as const, kind: 'reasoning' as const, ts: 1,
+      payload: { type: 'reasoning_delta', sessionId: 's1', text },
+    })
+    const items = messagesToChat([row(1, '**경로'), row(2, ' 검토**'), {
+      sessionId: 's1', seq: 3, role: 'assistant', kind: 'text', ts: 1,
+      payload: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: '답' },
+    }])
+    expect(items).toEqual([
+      { kind: 'reasoning', seq: 1, text: '**경로 검토**' },
+      { kind: 'assistant', seq: 3, text: '답' },
+    ])
+  })
+})

@@ -47,6 +47,11 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'session_title', sessionId: 's1', title: '가드 MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
+  // 시켜서 들어온 말의 출처 (FR-11)
+  { type: 'user_message', sessionId: 's1', seq: 13, text: '릴리즈 노트 정리', from: { sessionId: 'orc-1', name: '지휘 세션' } },
+  // 추론 (#58 실측): codex는 요약 텍스트, claude는 토큰 추정치만 — 그래서 둘 다 optional
+  { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**경로 제약을 검토 중**' },
+  { type: 'reasoning_delta', sessionId: 's1', estTokens: 150 },
   // 에이전트가 내놓은 이미지 (#40) — 표시 전용이라 seq가 없다
   { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/shot.png' },
   // 못 그린 이미지도 이벤트다 — 실패는 보이게

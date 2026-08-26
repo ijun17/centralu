@@ -16,6 +16,28 @@ describe('스트리밍·도구 호출', () => {
     ])
   })
 
+  /*
+   * 추론 요약 (#58 실측). thread 설정에 model_reasoning_summary를 켜야만 오는
+   * 스트림이고, 실측 모양은 {itemId, delta, summaryIndex}다. completed 아이템의
+   * summary 전문은 내지 않는다 — 델타로 이미 흐른 글이다.
+   */
+  it('reasoning summaryTextDelta → reasoning_delta', () => {
+    expect(n('item/reasoning/summaryTextDelta', { itemId: 'rs-1', delta: '**경로 제약 검토**', summaryIndex: 0 })).toEqual([
+      { type: 'reasoning_delta', sessionId: S, text: '**경로 제약 검토**' },
+    ])
+  })
+
+  it('둘째 단락부터는 경계가 빈 줄이 된다 — 첫 단락 앞에는 아무것도 없다', () => {
+    expect(n('item/reasoning/summaryPartAdded', { itemId: 'rs-1', summaryIndex: 0 })).toEqual([])
+    expect(n('item/reasoning/summaryPartAdded', { itemId: 'rs-1', summaryIndex: 1 })).toEqual([
+      { type: 'reasoning_delta', sessionId: S, text: '\n\n' },
+    ])
+  })
+
+  it('completed의 reasoning 아이템은 여전히 조용하다 (델타와 중복)', () => {
+    expect(n('item/completed', { item: { type: 'reasoning', id: 'rs-1', summary: ['**경로 제약 검토**'], content: [] } })).toEqual([])
+  })
+
   it('commandExecution 시작 → tool_call (명령 전문이 제목)', () => {
     const out = n('item/started', {
       item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },

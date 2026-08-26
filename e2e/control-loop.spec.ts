@@ -4040,6 +4040,47 @@ test('사람의 같은 문장이 대기 중이어도 시킨 말은 흡수되지 
   expect(counts).toEqual({ total: 2, marked: 1 })
 })
 
+/**
+ * 추론이 보인다 (#58 실측 기반).
+ * codex는 요약 텍스트가 스트리밍되므로 회색 블록으로 대화에 남고,
+ * claude는 본문이 암호화라 "Thinking · ~N tokens" 진행 표시만 가능하다 —
+ * 없는 내용을 있는 척하지 않는 것까지가 계약이다.
+ */
+test('codex 추론 요약이 회색 블록으로 보이고 복원해도 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await emitEvent(page, 0, { type: 'reasoning_delta', text: '**경로 제약을 검토 중**' })
+  await emitEvent(page, 0, { type: 'reasoning_delta', text: '\n\n**최소 횟수 확인**' })
+  await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
+  await expect(page.getByTestId('msg-reasoning')).toContainText('최소 횟수 확인')
+
+  // 복원 레그: 메모리의 대화를 버리고 기록에서 강제로 다시 읽는다
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate((sid: string) => {
+    const store = (window as never as { __store: any }).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid, true)
+  }, id)
+  await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
+})
+
+test('claude의 생각은 양으로 보인다 — Thinking · ~N tokens, 턴이 끝나면 사라진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await emitEvent(page, 0, { type: 'reasoning_delta', estTokens: 500 })
+  await emitEvent(page, 0, { type: 'reasoning_delta', estTokens: 1000 })
+  await expect(page.getByTestId('activity-label')).toContainText('Thinking · ~1.5k tokens')
+
+  // 대화에는 아무것도 남지 않는다 — 내용이 없었으므로
+  await expect(page.getByTestId('msg-reasoning')).toHaveCount(0)
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('activity-row')).toHaveCount(0)
+})
+
 test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')

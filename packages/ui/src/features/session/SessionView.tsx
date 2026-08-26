@@ -1121,6 +1121,8 @@ function ChatStream({
 function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
   const startedAt = useStore((s) => s.workingSince[sessionId])
+  // 생각의 양 (#58) — claude는 thinking 본문이 암호화라 이 추정치가 보여줄 수 있는 전부다
+  const thinkingTokens = useStore((s) => s.sessions[sessionId]?.thinkingTokens ?? null)
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -1140,7 +1142,10 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
         기다리는 사람은 멈춘 건지 오래 걸리는 건지 판단할 근거가 없다.
       */}
       <span className="text-[12px] text-ash" data-testid="activity-label">
-        {activity === 'compacting' ? 'Compacting context' : activity === 'reviewing' ? 'Reviewing changes' : 'Waiting for response'}
+        {activity === 'compacting' ? 'Compacting context'
+        : activity === 'reviewing' ? 'Reviewing changes'
+        : thinkingTokens ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
+        : 'Waiting for response'}
       </span>
       {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
       {seconds >= 2 && (
@@ -1320,6 +1325,18 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
   if (item.kind === 'assistant') {
     return (
       <div className="min-w-0" data-testid="msg-assistant">
+        <Markdown text={item.text} projectRoot={projectRoot} />
+      </div>
+    )
+  }
+  if (item.kind === 'reasoning') {
+    /*
+     * 추론 요약 (#58). 본문이 아니라 본문에 이르는 길이므로 ash로 한 단계 가라앉힌다 —
+     * 밝기가 곧 중요도라는 잉크 규칙 그대로. codex 요약은 **굵은 제목** 마크다운으로
+     * 오므로 Markdown으로 그리되 바탕색 없이 조용히 둔다.
+     */
+    return (
+      <div className="min-w-0 text-[13px] text-ash [&_strong]:text-ash" data-testid="msg-reasoning">
         <Markdown text={item.text} projectRoot={projectRoot} />
       </div>
     )

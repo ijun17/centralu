@@ -111,8 +111,15 @@ class CodexSession implements SessionHandle {
            * 응답 길이는 재개에도 따라와야 한다 (#54). turn/start에는 이 자리가 없어서
            * (effort와 다른 점) 스레드를 띄우는 이 두 자리가 유일한 길이다 —
            * 여기 빠지면 "잠들었다 깨면 설정이 풀리는" 종류의 조용한 유실이 된다.
+           *
+           * 추론 요약도 같은 자리다 (#58 실측): 이 스위치를 켜지 않으면
+           * item/reasoning/* 스트림이 **한 건도 안 온다** — 배선만 하고 스위치를
+           * 안 켜면 아무 일도 일어나지 않는 종류의 기능이다.
            */
-          ...(this.opts.verbosity ? { config: { model_verbosity: this.opts.verbosity } } : {}),
+          config: {
+            model_reasoning_summary: 'auto',
+            ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
+          },
         })
       } catch (err) {
         /*
@@ -158,17 +165,17 @@ class CodexSession implements SessionHandle {
          */
         ...(this.opts.systemPromptAppend ? { developerInstructions: this.opts.systemPromptAppend } : {}),
         /*
-         * config는 아래 오케스트레이터 블록과 **합쳐진다**. 스프레드 둘 다 config 키를
-         * 만들면 뒤가 앞을 통째로 덮으므로, 오케스트레이터 블록 쪽에도 verbosity를 넣는다.
-         * (오케스트레이터에 verbosity를 줄 일은 없지만, 자리가 겹치는 걸 아는 코드가 맞다)
+         * config는 **여기 한 곳에서만 조립한다.** 예전에는 verbosity 스프레드와
+         * 오케스트레이터 스프레드가 각자 config 키를 만들어 뒤가 앞을 통째로 덮는
+         * 함정이 있었다 — 기여자가 셋(요약·verbosity·오케스트레이터)이 되면서
+         * 함정을 기억하는 것보다 없애는 쪽이 싸다.
          */
-        ...(this.opts.verbosity && !(this.opts.orchestratorTools && this.opts.orchestratorBridge)
-          ? { config: { model_verbosity: this.opts.verbosity } }
-          : {}),
-        ...(this.opts.orchestratorTools && this.opts.orchestratorBridge
-          ? {
-              config: {
-                ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
+        config: {
+          // 추론 요약 스위치 (#58 실측): 안 켜면 item/reasoning/* 스트림이 한 건도 안 온다
+          model_reasoning_summary: 'auto',
+          ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
+          ...(this.opts.orchestratorTools && this.opts.orchestratorBridge
+            ? {
                 /*
                  * **폴더의 문서를 읽지 않는다** (Claude의 settingSources: []에 대응).
                  *
@@ -189,9 +196,9 @@ class CodexSession implements SessionHandle {
                     },
                   },
                 },
-              },
-            }
-          : {}),
+              }
+            : {}),
+        },
       })
       this.threadId = threadIdOf(res)
     }
@@ -233,7 +240,13 @@ class CodexSession implements SessionHandle {
     }
 
     if (!r.method.includes('requestApproval') && !r.method.endsWith('Approval')) {
-      // 승인이 아닌 서버 요청은 빈 응답으로 흘려보낸다 (프로토콜이 늘어나도 멈추지 않게)
+      /*
+       * 승인이 아닌 서버 요청은 빈 응답으로 흘려보낸다 (프로토콜이 늘어나도 멈추지 않게).
+       * 단 **무엇을 흘려보냈는지는 남긴다** (#58) — elicitation이 이 빈 {} 때문에
+       * 깨졌을 때 로그 한 줄이 없어서 원인 찾기가 미궁이었다. 요청은 알림과 달라
+       * 우리 답이 저쪽 행동을 바꾼다: 다음 번 같은 사고는 grep 한 번이어야 한다.
+       */
+      console.error('[codex] unknown server request answered with {}:', r.method)
       this.client.respond(r.id, {})
       return
     }

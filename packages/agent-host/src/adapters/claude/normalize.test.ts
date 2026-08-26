@@ -17,7 +17,27 @@ describe('스트리밍 델타', () => {
     expect(out).toEqual([{ type: 'message_delta', sessionId: SID, role: 'assistant', text: '안녕' }])
   })
 
-  it('텍스트가 아닌 델타는 무시한다', () => {
+  /*
+   * thinking (#58 실측): 본문은 항상 ""(암호화)이고 estimated_tokens 증분만 온다.
+   * 그래서 진행 사실(estTokens)만 이벤트가 된다 — 빈 델타는 여전히 아무것도 아니다.
+   */
+  it('thinking_delta의 토큰 추정치는 reasoning_delta가 된다', () => {
+    const out = n({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '', estimated_tokens: 150 } },
+    })
+    expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, estTokens: 150 }])
+  })
+
+  it('thinking에 텍스트가 실려 오는 날이 오면 그대로 흐른다', () => {
+    const out = n({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '경로를 따져보자', estimated_tokens: 10 } },
+    })
+    expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, text: '경로를 따져보자', estTokens: 10 }])
+  })
+
+  it('내용 없는 델타는 무시한다', () => {
     expect(n({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta' } } })).toEqual([])
   })
 })
@@ -121,14 +141,15 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     expect(img).toMatchObject({ data: '', note: expect.stringContaining('너무 큽니다') })
   })
 
-  it('base64가 아닌 이미지 소스는 조용히 넘어간다 (url 등 미실측 모양)', () => {
+  it('base64가 아닌 이미지 소스는 보이는 실패가 된다 (#58 — 예전엔 조용히 사라졌다)', () => {
     const out = n({
       type: 'user',
       message: {
         content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'image', source: { type: 'url', url: 'https://x/y.png' } }] }],
       },
     })
-    expect(out.some((e) => e.type === 'message_image')).toBe(false)
+    const img = out.find((e) => e.type === 'message_image')
+    expect(img).toMatchObject({ data: '', note: expect.stringContaining('url') })
   })
 })
 

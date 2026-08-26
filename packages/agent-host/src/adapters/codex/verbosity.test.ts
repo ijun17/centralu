@@ -57,10 +57,18 @@ describe('codex 응답 길이(verbosity) 전달', () => {
     expect(paramsOf('thread/resume')?.config).toMatchObject({ model_verbosity: 'high' })
   })
 
-  it('안 고르면 config 자체를 보내지 않는다 — codex의 기본값을 우리가 대신 정하지 않는다', async () => {
+  /*
+   * 예전 계약은 "안 고르면 config 자체를 안 보낸다"였다. #58이 한 자리를 바꿨다:
+   * model_reasoning_summary는 우리가 켠다 — 이 스위치 없이는 추론 스트림이 한 건도
+   * 안 와서, 배선한 기능이 존재하지 않는 것과 같아지기 때문이다 (실측). 그 외의
+   * 기본값은 여전히 codex의 것이다: verbosity를 안 골랐으면 그 키는 없어야 한다.
+   */
+  it('안 고르면 verbosity 키를 보내지 않는다 — 추론 요약 스위치만 우리가 켠다', async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
-    expect(paramsOf('thread/start')?.config).toBeUndefined()
+    const config = paramsOf('thread/start')?.config as Record<string, unknown>
+    expect(config.model_reasoning_summary).toBe('auto')
+    expect(config.model_verbosity).toBeUndefined()
   })
 
   /*

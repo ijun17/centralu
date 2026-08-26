@@ -274,3 +274,21 @@ describe('파일 충돌 감지 (FR-2 데이터 손실)', () => {
     expect(detectFileConflicts([a, b])).toEqual([])
   })
 })
+
+/** 생각의 양 (#58) — activity와 같은 수명: working을 벗어나면 죽는다 */
+describe('thinkingTokens', () => {
+  it('추정치가 누적되고 턴이 끝나면 사라진다', () => {
+    const working = replay([ev({ type: 'state_change', state: 'working' })])
+    const t1 = applyEvent(working, ev({ type: 'reasoning_delta', estTokens: 50 }), NOW)
+    const t2 = applyEvent(t1, ev({ type: 'reasoning_delta', estTokens: 150 }), NOW)
+    expect(t2.thinkingTokens).toBe(200)
+    const done = applyEvent(t2, ev({ type: 'turn_complete' }), NOW)
+    expect(done.thinkingTokens).toBeNull()
+  })
+
+  it('텍스트만 실린 조각(codex 요약)은 숫자를 만들지 않는다', () => {
+    const working = replay([ev({ type: 'state_change', state: 'working' })])
+    const s = applyEvent(working, ev({ type: 'reasoning_delta', text: '**검토 중**' }), NOW)
+    expect(s.thinkingTokens).toBeNull()
+  })
+})

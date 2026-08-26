@@ -129,6 +129,8 @@ export type ChatItem =
    */
   | { kind: 'user'; seq: number; text: string; pending?: boolean; from?: { sessionId: string; name: string } }
   | { kind: 'assistant'; seq: number; text: string }
+  /** 추론 요약 (#58). codex만 텍스트를 준다 — claude의 생각은 세션의 thinkingTokens로만 보인다 */
+  | { kind: 'reasoning'; seq: number; text: string }
   /*
    * 에이전트가 내놓은 이미지 (#40). 파일로 영속된다 (attachments/ + 경로 참조, 500MB 상한).
    * data가 비어 있으면 note가 이유를 말한다 (실패는 보이게).
@@ -2209,6 +2211,16 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       }
       return [...items, { kind: 'assistant', seq: ++chatSeq, text: e.text }]
     }
+    case 'reasoning_delta': {
+      // 텍스트 없는 조각(claude의 토큰 추정)은 대화가 아니라 세션 상태(thinkingTokens)다
+      if (!e.text) return items
+      const last = items[items.length - 1]
+      if (last?.kind === 'reasoning') {
+        const copy = items.slice(0, -1)
+        return [...copy, { ...last, text: last.text + e.text }]
+      }
+      return [...items, { kind: 'reasoning', seq: ++chatSeq, text: e.text }]
+    }
     case 'tool_call':
       return [...items, { kind: 'tool', seq: ++chatSeq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly }]
     case 'message_image':
@@ -2284,6 +2296,12 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       const last = items[items.length - 1]
       if (last?.kind === 'assistant') last.text += e.text ?? ''
       else items.push({ kind: 'assistant', seq: m.seq, text: e.text ?? '' })
+    } else if (m.kind === 'reasoning') {
+      // 델타 행들을 한 덩어리로 (assistant와 같은 규칙)
+      const e = m.payload as { text?: string }
+      const last = items[items.length - 1]
+      if (last?.kind === 'reasoning') last.text += e.text ?? ''
+      else items.push({ kind: 'reasoning', seq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
       // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
       const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' }>

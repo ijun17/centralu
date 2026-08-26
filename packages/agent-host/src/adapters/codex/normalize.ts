@@ -82,6 +82,24 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     case 'item/agentMessage/delta':
       return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(p.text) }]
 
+    /*
+     * 추론 요약 (#58 실측). thread 설정에 model_reasoning_summary를 켜야만 오는
+     * 스트림이다 — index.ts가 켠다. 실측 모양:
+     *   item/reasoning/summaryPartAdded {itemId, summaryIndex}         — 새 단락
+     *   item/reasoning/summaryTextDelta {itemId, delta, summaryIndex}  — 본문 조각
+     * completed의 reasoning 아이템에도 summary 전문이 실리지만 내지 않는다 —
+     * 델타로 이미 흘렀으므로 또 내면 같은 글이 두 번 붙는다 (agentMessage와 같은 규칙).
+     */
+    case 'item/reasoning/summaryTextDelta': {
+      const text = str(p.delta)
+      return text ? [{ type: 'reasoning_delta', sessionId, text }] : []
+    }
+    case 'item/reasoning/summaryPartAdded':
+      // 단락 경계. 첫 단락 앞에는 아무것도 없어야 한다
+      return typeof p.summaryIndex === 'number' && p.summaryIndex > 0
+        ? [{ type: 'reasoning_delta', sessionId, text: '\n\n' }]
+        : []
+
     case 'item/started': {
       const item = obj(p.item)
       const type = str(item.type)

@@ -78,6 +78,12 @@ export type SessionSummary = {
    * 화면이 이걸 알아야 "왜 프로젝트 폴더의 파일이 안 바뀌지"를 겪지 않는다.
    */
   worktree: { path: string; branch: string } | null
+  /**
+   * 이번 턴에 모델이 생각에 쓴 토큰 추정치 누계 (#58 — claude는 thinking 본문이
+   * 암호화라 이 숫자가 보여줄 수 있는 전부다). activity와 같은 수명: working을
+   * 벗어나면 죽는다.
+   */
+  thinkingTokens: number | null
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
@@ -85,7 +91,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, permissionPreset: 'normal',
-    worktree: null, kind: 'worker' as const,
+    worktree: null, thinkingTokens: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
   }
 }
@@ -115,6 +121,12 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
    */
   const activity = event.type === 'activity' ? event.activity : state === 'working' ? s.activity : null
 
+  // 생각의 양도 바쁨보다 오래 살지 못한다 (activity와 같은 규칙)
+  const thinkingTokens =
+    event.type === 'reasoning_delta' && event.estTokens ? (s.thinkingTokens ?? 0) + event.estTokens
+    : state === 'working' ? s.thinkingTokens
+    : null
+
   /*
    * 회복하면 배너도 함께 내려간다.
    *
@@ -139,7 +151,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
   const next: SessionSummary = illegal
     ? { ...s }
     : {
-        ...s, state, waitingSince, activity,
+        ...s, state, waitingSince, activity, thinkingTokens,
         ...(recovered ? { limit: null, lastError: null } : {}),
         ...(cardsDead ? { pendingApproval: null, pendingQuestions: [] } : {}),
       }

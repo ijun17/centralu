@@ -118,6 +118,19 @@ export function normalizeMessage(
       if (str(d?.type) === 'text_delta') {
         out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d?.text) })
       }
+      /*
+       * thinking (#58 실측, 2026-08-26): 본문이 통째로 암호화라 thinking은 항상 ""이고
+       * estimated_tokens(증분)만 온다. 그래서 텍스트가 아니라 "생각 중 ~N 토큰"이라는
+       * **진행 사실**만 낼 수 있다 — 없는 내용을 있는 척하지 않는다. 어느 날 CLI가
+       * 텍스트를 실어 보내기 시작하면 여기 text가 그대로 흐른다.
+       */
+      if (str(d?.type) === 'thinking_delta') {
+        const text = str(d?.thinking)
+        const estTokens = typeof d?.estimated_tokens === 'number' ? d.estimated_tokens : undefined
+        if (text || estTokens) {
+          out.push({ type: 'reasoning_delta', sessionId, ...(text ? { text } : {}), ...(estTokens ? { estTokens } : {}) })
+        }
+      }
     }
     return out
   }
@@ -126,6 +139,12 @@ export function normalizeMessage(
     const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
     // 델타 없이 온 본문의 유일한 출구 (위 opts.textStreamed 주석 참고 — /usage가 이 길로 온다)
     if (!opts?.textStreamed) {
+      // thinking 블록도 같은 규칙 — 실측으로는 항상 ""이지만, 텍스트가 실려 오는 날 여기로 흐른다
+      const thinking = content
+        .filter((b) => str(b.type) === 'thinking')
+        .map((b) => str(b.thinking))
+        .join('')
+      if (thinking) out.push({ type: 'reasoning_delta', sessionId, text: thinking })
       const text = content
         .filter((b) => str(b.type) === 'text')
         .map((b) => str(b.text))
@@ -179,7 +198,18 @@ export function normalizeMessage(
           for (const part of c as Json[]) {
             if (str(part.type) !== 'image') continue
             const source = (part.source ?? {}) as Json
-            if (str(source.type) !== 'base64' || !str(source.data)) continue
+            /*
+             * base64가 아닌 소스(url 등)는 예전엔 소리 없이 사라졌다 (#58 조사에서 발견).
+             * 못 그리는 건 어쩔 수 없지만 못 그린다는 사실은 보여야 한다 — 이미지 실패의
+             * 기존 규칙(너무 큼·파일 없음)과 같은 상자를 쓴다.
+             */
+            if (str(source.type) !== 'base64' || !str(source.data)) {
+              out.push({
+                type: 'message_image', sessionId, mime: '', data: '',
+                note: `이 형식의 이미지는 아직 표시하지 못합니다 (source: ${str(source.type) || '없음'})`,
+              })
+              continue
+            }
             const data = str(source.data)
             const mime = str(source.media_type) || 'image/png'
             // base64 ~11M자 ≈ 원본 8MB. 그 이상은 화면에 뿌리는 대신 왜 안 그리는지 말한다

@@ -41,6 +41,24 @@ const persistedSeq = { seq: z.number().optional() }
 export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, ...persistedSeq, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
   /**
+   * 모델의 추론이 보이는 만큼만 (#58 실측, 2026-08-26).
+   *
+   * 두 도구가 내놓는 것이 다르다 — 그래서 두 필드가 다 optional이다:
+   *   codex: 요약 **텍스트**가 스트리밍된다 (item/reasoning/summaryTextDelta,
+   *          단 thread 설정에 model_reasoning_summary를 켜야만 온다) → text
+   *   claude: thinking 본문이 통째로 암호화라 텍스트가 없다 — thinking_delta에는
+   *          estimated_tokens만 실려 온다 → estTokens (증분)
+   * 없는 내용을 있는 척하지 않는다: text가 있으면 기록(kind 'reasoning')까지 남고,
+   * estTokens뿐이면 "생각 중 ~N" 진행 표시로만 살다가 턴이 끝나면 사라진다.
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('reasoning_delta'),
+    text: z.string().optional(),
+    estTokens: z.number().optional(),
+  }),
+  /**
    * 사람의 말이 대화에 더해졌다.
    *
    * **UI가 자기가 보낸 것만 그리면 되던 시절에는 없어도 됐다.** 그런데 오케스트레이터가
