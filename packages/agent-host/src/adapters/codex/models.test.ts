@@ -43,8 +43,22 @@ describe('toModelOptions', () => {
         description: '설명',
         efforts: ['low', 'medium', 'high'],
         defaultEffort: 'medium',
+        tiers: [],
       },
     ])
+  })
+
+  /** 응답 속도 티어 — 실측 모양: serviceTiers: [{id:'priority', name:'Fast', description:'1.5x…'}] */
+  it('속도 티어를 이름·설명째 나른다 — 사용량 경고문은 codex의 문장이 정확하다', () => {
+    const out = toModelOptions([
+      row({ serviceTiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] }),
+    ])
+    expect(out[0]!.tiers).toEqual([{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }])
+  })
+
+  it('망가진 티어 항목은 버리되 목록은 산다', () => {
+    const out = toModelOptions([row({ serviceTiers: [{ name: 'no-id' }, { id: 'ok' }] })])
+    expect(out[0]!.tiers).toEqual([{ id: 'ok', name: 'ok', description: '' }])
   })
 
   it('codex가 숨긴 모델은 우리도 숨긴다', () => {

@@ -118,7 +118,7 @@ export type OrchestratorTools = {
    */
   updateSessionSettings(
     sessionId: string,
-    s: { model?: string | null; effort?: string | null; verbosity?: string | null },
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null },
   ): Promise<{ ok: boolean; error?: string }>
   recall(
     query: string,
@@ -144,6 +144,8 @@ export type CreateSessionOpts = {
   effort?: string
   /** 응답 길이 (#54). capabilities.verbosities가 비어 있는 어댑터는 무시한다 */
   verbosity?: string
+  /** 응답 속도 (codex의 service_tier). 지원 티어는 모델 목록(ModelOption.tiers)이 말한다 */
+  serviceTier?: string
   permissionPreset: PermissionPreset
   resumeExternalId?: string
   /** 주어지면 이 세션은 오케스트레이터다 — 어댑터가 자기 방식으로 도구를 붙인다 */

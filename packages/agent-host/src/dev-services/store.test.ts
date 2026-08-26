@@ -14,7 +14,7 @@ function seeded() {
   s.upsertSession({
     id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
   })
   return s
@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(19)
+    expect(store.schemaVersion).toBe(20)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -69,7 +69,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     store.upsertSession({
       id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
     })
     expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(19)
+    expect(new Store().schemaVersion).toBe(20)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(19)
+    expect(store.schemaVersion).toBe(20)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -189,7 +189,7 @@ describe('마이그레이션 (E-0)', () => {
 
     // v4: 모델·권한도 기존 세션에 붙는다 (기본값으로)
     const migrated = store.listSessions().find((s) => s.id === 's1')
-    expect(migrated).toMatchObject({ model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null })
+    expect(migrated).toMatchObject({ model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null })
 
     store.close()
     rmSync(dir, { recursive: true, force: true })
@@ -252,7 +252,7 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
       id: 's-import', projectId: 'p1', kind: 'worker' as const, tool: 'claude' as const, externalId: 'ext-new',
       name: '이어받은 대화', autoNamed: true, state: 'idle' as const, archived: false,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
-      model: null, effort: null, verbosity: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null,
+      model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null,
       ...sessionLiveDefaults(),
     }
     store.upsertSession(base)
@@ -272,7 +272,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
-    model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
     ...over,
   })
@@ -304,7 +304,7 @@ describe('마이그레이션 v18 — 응답 길이', () => {
     id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
-    model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
     ...over,
   })
@@ -325,6 +325,16 @@ describe('마이그레이션 v18 — 응답 길이', () => {
     expect(store.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
     store.close()
   })
+
+  /** 응답 속도(v20)도 같은 성질 — 같은 왕복 계약 */
+  it('service_tier 컬럼이 생기고 왕복한다', () => {
+    const store = seeded()
+    store.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
+    expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
+    store.upsertSession(row({ id: 's-tier', serviceTier: null }))
+    expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBeNull()
+    store.close()
+  })
 })
 
 /**
@@ -340,7 +350,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
-        model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       })
     }
@@ -379,7 +389,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
-        model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       })
     }
@@ -424,7 +434,7 @@ describe('오케스트레이터 표식(kind)', () => {
     s.upsertSession({
       id, projectId, kind, tool: 'claude', externalId: null, name: id,
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+      createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
     })
 
@@ -491,7 +501,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(19)
+    expect(store.schemaVersion).toBe(20)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -546,7 +556,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(19)
+    expect(store.schemaVersion).toBe(20)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -618,7 +628,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(19)
+    expect(first.schemaVersion).toBe(20)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -739,7 +749,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
     id: 'worked', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '일한 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+    createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
     permissionPreset: 'normal', importedFrom: null, worktree: null,
     ...sessionLiveDefaults(),
     ...over,
@@ -751,7 +761,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     v16Db(file)
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(19)
+    expect(first.schemaVersion).toBe(20)
     // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
     expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
@@ -813,7 +823,7 @@ describe('WAL 체크포인트', () => {
     s.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
       ...sessionLiveDefaults(),
     })
     for (let i = 1; i <= 200; i++) {

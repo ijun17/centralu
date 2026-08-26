@@ -143,6 +143,7 @@ export function SessionSettings({
   model,
   effort,
   verbosity,
+  serviceTier,
   preset,
   live,
   projectId,
@@ -154,6 +155,8 @@ export function SessionSettings({
   effort: string | null
   /** 응답 길이 (#54). null이면 도구 기본값 */
   verbosity: string | null
+  /** 응답 속도 (codex의 service_tier). null이면 도구 기본값 */
+  serviceTier: string | null
   preset: PermissionPreset
   /** 프로세스가 살아 있는가 — Claude는 살아 있어야 모델 목록을 준다 */
   live: boolean
@@ -173,7 +176,7 @@ export function SessionSettings({
 
   const current = models.find((m) => m.id === model)
   // 목록에 없는 모델(직접 설정했거나 목록을 못 읽은 경우)도 유실되지 않게 남긴다
-  const options = model && !current ? [...models, { id: model, label: model, efforts: [], defaultEffort: null }] : models
+  const options = model && !current ? [...models, { id: model, label: model, efforts: [], defaultEffort: null, tiers: [] }] : models
 
   /*
    * 바깥을 누르거나 Esc를 누르면 닫는다.
@@ -210,7 +213,12 @@ export function SessionSettings({
   const modelLabel = current?.label ?? model ?? 'Default'
   // 지금 값은 열지 않아도 읽혀야 한다 — 메뉴로 감춘 대가를 여기서 갚는다.
   // verbosity는 effort와 단계 이름이 겹쳐서(low/medium/high) 맨몸으로 놓으면 어느 쪽인지 알 수 없다 — 이름을 붙인다
-  const summary = [modelLabel, effort, verbosity && `${verbosity} verbosity`, PRESETS.find((p) => p.value === preset)?.label]
+  const summary = [
+    modelLabel, effort, verbosity && `${verbosity} verbosity`,
+    // 티어 id(priority)가 아니라 이름(Fast)을 보여준다 — 사람이 고른 글자 그대로
+    serviceTier && (current?.tiers.find((t) => t.id === serviceTier)?.name ?? serviceTier),
+    PRESETS.find((p) => p.value === preset)?.label,
+  ]
     .filter(Boolean)
     .join(' · ')
 
@@ -263,9 +271,9 @@ export function SessionSettings({
                 label={m.label}
                 title={m.description}
                 selected={m.id === model}
-                // 모델이 바뀌면 강도는 초기화한다 — 모델마다 단계가 달라서
+                // 모델이 바뀌면 강도·속도는 초기화한다 — 모델마다 지원이 달라서
                 // 옛 값을 들고 가면 지원하지 않는 조합이 조용히 남는다
-                onPick={() => choose({ model: m.id, effort: null })}
+                onPick={() => choose({ model: m.id, effort: null, serviceTier: null })}
               />
             ))}
           </MenuSection>
@@ -307,6 +315,28 @@ export function SessionSettings({
                   label={lv}
                   selected={lv === verbosity}
                   onPick={() => choose({ verbosity: lv })}
+                />
+              ))}
+            </MenuSection>
+          )}
+
+          {/* 응답 속도 — 모델이 티어를 줄 때만 보인다 (실측: gpt-5.4+에 Fast 하나, mini엔 없음) */}
+          {current && current.tiers.length > 0 && (
+            <MenuSection label="Speed" note="Faster answers spend more of your usage.">
+              <MenuRow
+                testId="settings-tier-default"
+                label="Default"
+                selected={!serviceTier}
+                onPick={() => choose({ serviceTier: null })}
+              />
+              {current.tiers.map((t) => (
+                <MenuRow
+                  key={t.id}
+                  testId={`settings-tier-${t.id}`}
+                  label={t.name}
+                  title={t.description}
+                  selected={t.id === serviceTier}
+                  onPick={() => choose({ serviceTier: t.id })}
                 />
               ))}
             </MenuSection>

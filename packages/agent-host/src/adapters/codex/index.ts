@@ -119,6 +119,7 @@ class CodexSession implements SessionHandle {
           config: {
             model_reasoning_summary: 'auto',
             ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
+            ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
           },
         })
       } catch (err) {
@@ -174,6 +175,8 @@ class CodexSession implements SessionHandle {
           // 추론 요약 스위치 (#58 실측): 안 켜면 item/reasoning/* 스트림이 한 건도 안 온다
           model_reasoning_summary: 'auto',
           ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
+          // 응답 속도 (실측: priority = "Fast, 1.5x speed, increased usage")
+          ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
           ...(this.opts.orchestratorTools && this.opts.orchestratorBridge
             ? {
                 /*

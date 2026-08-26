@@ -31,5 +31,7 @@ export async function readClaudeModels(q: ModelQuery): Promise<ModelOption[]> {
     // supportsEffort가 false면 단계가 실려 와도 무시한다 — 답이 둘이면 안 된다
     efforts: m.supportsEffort ? (m.supportedEffortLevels ?? []) : [],
     defaultEffort: null,
+    // claude에는 속도 티어가 없다 (SDK에 대응 개념 없음 — 실측)
+    tiers: [],
   }))
 }

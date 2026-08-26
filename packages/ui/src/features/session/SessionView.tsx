@@ -659,6 +659,7 @@ export function SessionPane({
             model={session.model}
             effort={session.effort}
             verbosity={session.verbosity}
+            serviceTier={session.serviceTier}
             preset={session.permissionPreset}
             live={session.live}
             projectId={session.projectId}

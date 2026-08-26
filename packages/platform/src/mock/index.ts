@@ -415,7 +415,7 @@ export class MockPlatform implements Platform {
         : null
       const info: SessionInfo = {
         id, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: `ext-${id}`, worktree,
-        effort: params.effort ?? null, verbosity: params.verbosity ?? null,
+        effort: params.effort ?? null, verbosity: params.verbosity ?? null, serviceTier: params.serviceTier ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
@@ -509,7 +509,7 @@ export class MockPlatform implements Platform {
       const info = {
         id, projectId: null, kind: 'orchestrator' as const, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
-        createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+        createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
         permissionPreset: 'normal' as const, importedFrom: null, worktree: null,
         ...sessionLiveDefaults(),
       }
@@ -526,14 +526,15 @@ export class MockPlatform implements Platform {
       models:
         tool === 'codex'
           ? [
-              { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
-              { id: 'gpt-5.6-terra-mini', label: 'gpt-5.6-terra-mini', efforts: [], defaultEffort: null },
+              // 실측 모양 그대로: 티어는 큰 모델에만 있다 (priority = Fast, 1.5x)
+              { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] },
+              { id: 'gpt-5.6-terra-mini', label: 'gpt-5.6-terra-mini', efforts: [], defaultEffort: null, tiers: [] },
             ]
           : [
-              { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null },
-              { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null },
-              { id: 'fable', label: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null },
-              { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null },
+              { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null, tiers: [] },
+              { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null, tiers: [] },
+              { id: 'fable', label: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null, tiers: [] },
+              { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null, tiers: [] },
             ],
     }),
     interrupt: async (sessionId: string) => {
@@ -562,13 +563,14 @@ export class MockPlatform implements Platform {
     },
     updateSettings: async (
       sessionId: string,
-      s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
+      s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
     ) => {
       const sess = this.sessions.get(sessionId)
       if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       if (s.model !== undefined) sess.model = s.model
       if (s.effort !== undefined) sess.effort = s.effort
       if (s.verbosity !== undefined) sess.verbosity = s.verbosity
+      if (s.serviceTier !== undefined) sess.serviceTier = s.serviceTier
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
       return { ...sess }
     },

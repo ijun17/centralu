@@ -57,6 +57,28 @@ describe('codex 응답 길이(verbosity) 전달', () => {
     expect(paramsOf('thread/resume')?.config).toMatchObject({ model_verbosity: 'high' })
   })
 
+  /** 응답 속도(service_tier)도 같은 배관이다 — 시작·재개 둘 다 */
+  it('속도 티어가 thread/start와 thread/resume의 config.service_tier로 실린다', async () => {
+    const a1 = new CodexAdapter()
+    await a1.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', serviceTier: 'priority' }, () => {})
+    expect(paramsOf('thread/start')?.config).toMatchObject({ service_tier: 'priority' })
+
+    state.requests.length = 0
+    const a2 = new CodexAdapter()
+    await a2.createSession(
+      { sessionId: 's2', cwd: '/tmp', permissionPreset: 'normal', serviceTier: 'priority', resumeExternalId: 'ext-1' },
+      () => {},
+    )
+    expect(paramsOf('thread/resume')?.config).toMatchObject({ service_tier: 'priority' })
+  })
+
+  it('안 고르면 service_tier 키 자체가 없다 — 속도의 기본값도 codex의 것이다', async () => {
+    const adapter = new CodexAdapter()
+    await adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+    const config = paramsOf('thread/start')?.config as Record<string, unknown>
+    expect(config.service_tier).toBeUndefined()
+  })
+
   /*
    * 예전 계약은 "안 고르면 config 자체를 안 보낸다"였다. #58이 한 자리를 바꿨다:
    * model_reasoning_summary는 우리가 켠다 — 이 스위치 없이는 추론 스트림이 한 건도

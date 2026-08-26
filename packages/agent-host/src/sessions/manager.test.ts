@@ -1787,7 +1787,7 @@ describe('재개는 만들어진 곳으로 돌아간다', () => {
     store.upsertSession({
       id: 'old', projectId: p.id, kind: 'worker', tool: 'claude', externalId: 'ext-1', name: '예전 세션',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+      createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
     })
     expect(store.sessionCwd('old')).toBeNull()

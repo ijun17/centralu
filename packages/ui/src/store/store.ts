@@ -465,7 +465,7 @@ export type AppState = {
   deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
   updateSessionSettings(
     sessionId: string,
-    s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
   /** 승격·강등 (#13). 다음에 깰 때 적용된다 — 토스트가 그 사실을 말한다 */
   setSessionKind(sessionId: string, kind: 'worker' | 'orchestrator'): Promise<void>
@@ -825,7 +825,7 @@ export const useStore = create<AppState>((set, get) => ({
            */
           ...initialSession({
             id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
-            model: s.model, effort: s.effort, verbosity: s.verbosity, permissionPreset: s.permissionPreset, worktree: s.worktree,
+            model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier, permissionPreset: s.permissionPreset, worktree: s.worktree,
           }),
           autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
           lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
@@ -1027,11 +1027,12 @@ export const useStore = create<AppState>((set, get) => ({
         e.model !== cur0.model ? `model ${e.model ?? 'default'}` : null,
         e.effort !== cur0.effort ? `effort ${e.effort ?? 'default'}` : null,
         e.verbosity !== cur0.verbosity ? `verbosity ${e.verbosity ?? 'default'}` : null,
+        (e.serviceTier ?? null) !== cur0.serviceTier ? `speed ${e.serviceTier ?? 'default'}` : null,
       ].filter(Boolean).join(' · ')
       set((s) => ({
         sessions: {
           ...s.sessions,
-          [sessionId]: { ...s.sessions[sessionId]!, model: e.model, effort: e.effort, verbosity: e.verbosity },
+          [sessionId]: { ...s.sessions[sessionId]!, model: e.model, effort: e.effort, verbosity: e.verbosity, serviceTier: e.serviceTier ?? null },
         },
         ...(what ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
       }))
@@ -1841,6 +1842,7 @@ export const useStore = create<AppState>((set, get) => ({
             model: info.model,
             effort: info.effort,
             verbosity: info.verbosity,
+            serviceTier: info.serviceTier,
             permissionPreset: info.permissionPreset,
             worktree: info.worktree,
           },
@@ -1858,7 +1860,9 @@ export const useStore = create<AppState>((set, get) => ({
             ? `Effort: ${info.effort ?? 'default'}`
             : s.verbosity !== undefined
               ? `Verbosity: ${info.verbosity ?? 'default'}`
-              : `Perms: ${info.permissionPreset}`
+              : s.serviceTier !== undefined
+                ? `Speed: ${info.serviceTier ?? 'default'}`
+                : `Perms: ${info.permissionPreset}`
       set({ toast: `${changed} (from next turn)` })
     } catch (e) {
       set({ toast: `Could not change settings: ${(e as Error).message}` })

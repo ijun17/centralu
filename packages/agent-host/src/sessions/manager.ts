@@ -96,7 +96,7 @@ export class SessionManager {
    */
   private running = new Map<
     string,
-    { model: string | null; effort: string | null; verbosity: string | null; permissionPreset: PermissionPreset }
+    { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset }
   >()
   /**
    * 파일 트리의 감시자 (#34). 펼쳐진 디렉토리만 본다 — 집합은 UI가 fs.watch로 보낸다.
@@ -428,6 +428,7 @@ export class SessionManager {
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, effort: params.effort ?? null,
       verbosity: params.verbosity ?? null,
+      serviceTier: params.serviceTier ?? null,
       permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
       worktree,
@@ -448,6 +449,7 @@ export class SessionManager {
         {
           sessionId: id, cwd, model: params.model, effort: params.effort,
           verbosity: params.verbosity,
+          serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
           // 오케스트레이터만 도구를 받는다 — 판정은 명시적 표식 하나다 (#13, kind)
           orchestratorTools: info.kind === 'orchestrator' ? this.orchestratorToolsFor(id, info.projectId) : undefined,
@@ -474,6 +476,7 @@ export class SessionManager {
       model: info.model,
       effort: info.effort,
       verbosity: info.verbosity,
+      serviceTier: info.serviceTier,
       permissionPreset: info.permissionPreset,
     })
     handle.applyRules?.(this.rulesFor(id, params.projectId))
@@ -755,6 +758,7 @@ export class SessionManager {
           model: m.model ?? undefined,
           effort: m.effort ?? undefined,
           verbosity: m.verbosity ?? undefined,
+          serviceTier: m.serviceTier ?? undefined,
           permissionPreset: m.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
           /*
@@ -794,6 +798,7 @@ export class SessionManager {
         model: m.model,
         effort: m.effort,
         verbosity: m.verbosity,
+        serviceTier: m.serviceTier,
         permissionPreset: m.permissionPreset,
       })
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
@@ -906,7 +911,7 @@ export class SessionManager {
    */
   async updateSettings(
     sessionId: string,
-    s: { model?: string | null; effort?: string | null; verbosity?: string | null; permissionPreset?: PermissionPreset },
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<SessionInfo> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
@@ -914,6 +919,7 @@ export class SessionManager {
     if (s.model !== undefined) m.model = s.model
     if (s.effort !== undefined) m.effort = s.effort
     if (s.verbosity !== undefined) m.verbosity = s.verbosity
+    if (s.serviceTier !== undefined) m.serviceTier = s.serviceTier
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
 
@@ -927,6 +933,7 @@ export class SessionManager {
       (live.model !== m.model ||
         live.effort !== m.effort ||
         live.verbosity !== m.verbosity ||
+        live.serviceTier !== m.serviceTier ||
         live.permissionPreset !== m.permissionPreset)
 
     /**
@@ -1744,6 +1751,7 @@ export class SessionManager {
             model: info.model,
             effort: info.effort,
             verbosity: info.verbosity,
+            serviceTier: info.serviceTier,
           })
           return { ok: true }
         } catch (e) {

@@ -32,6 +32,8 @@ export const CreateSessionParams = z.object({
   effort: z.string().optional(),
   /** 응답 길이 (codex의 model_verbosity). 지원 단계는 어댑터 능력 선언이 말한다 (#54) */
   verbosity: z.string().optional(),
+  /** 응답 속도 (codex의 service_tier). 지원 티어는 모델 목록(ModelOption.tiers)이 말한다 */
+  serviceTier: z.string().optional(),
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
   resumeExternalId: z.string().optional(),
@@ -62,6 +64,8 @@ export const UpdateSettingsParams = z.object({
   effort: z.string().nullable().optional(),
   /** 응답 길이. effort와 같은 규칙으로 문자열 그대로 나른다 (#54) */
   verbosity: z.string().nullable().optional(),
+  /** 응답 속도. 같은 규칙 — 지원 티어는 모델 목록이 말한다 */
+  serviceTier: z.string().nullable().optional(),
   permissionPreset: PermissionPreset.optional(),
 })
 export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
@@ -112,6 +116,8 @@ export const SessionInfo = z.object({
    * 매니저의 drift 재시작이 그 길을 이미 알고 있으므로 배관은 effort와 같다.
    */
   verbosity: z.string().nullable().default(null),
+  /** 응답 속도 (#54와 같은 배관). null이면 codex 기본. verbosity처럼 다음에 깰 때 적용된다 */
+  serviceTier: z.string().nullable().default(null),
   permissionPreset: PermissionPreset.default('normal'),
   /**
    * 이어받은 이전 대화의 식별자 (불러오기로 만든 세션만).

@@ -104,6 +104,22 @@ export function toModelOptions(data: unknown): ModelOption[] {
       const v = typeof e === 'string' ? e : ((e ?? {}) as { reasoningEffort?: unknown }).reasoningEffort
       if (typeof v === 'string' && v) efforts.push(v)
     }
+    /*
+     * 응답 속도 티어. 실측 모양: serviceTiers: [{id:'priority', name:'Fast',
+     * description:'1.5x speed, increased usage'}] — 이름·설명을 그대로 나른다.
+     * (additionalSpeedTiers는 deprecated라 읽지 않는다)
+     */
+    const tiers: { id: string; name: string; description: string }[] = []
+    for (const t of Array.isArray(row.serviceTiers) ? row.serviceTiers : []) {
+      const tier = (t ?? {}) as { id?: unknown; name?: unknown; description?: unknown }
+      if (typeof tier.id === 'string' && tier.id) {
+        tiers.push({
+          id: tier.id,
+          name: typeof tier.name === 'string' && tier.name ? tier.name : tier.id,
+          description: typeof tier.description === 'string' ? tier.description : '',
+        })
+      }
+    }
     out.push({
       id,
       label: typeof row.displayName === 'string' && row.displayName ? row.displayName : id,
@@ -113,6 +129,7 @@ export function toModelOptions(data: unknown): ModelOption[] {
         typeof row.defaultReasoningEffort === 'string' && row.defaultReasoningEffort
           ? row.defaultReasoningEffort
           : null,
+      tiers,
     })
   }
   return out

@@ -2604,6 +2604,42 @@ test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하
   expect(settings.effort).toBe('xhigh')
 })
 
+/**
+ * 응답 속도 (codex의 service_tier — 실측: gpt-5.4+에 "Fast, 1.5x speed" 하나).
+ * 티어를 주는 모델에서만 묶음이 뜨고, 티어 없는 모델로 바꾸면 값도 함께 초기화된다.
+ */
+test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세션에 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 티어는 codex의 것 — 도구부터 바꾼다
+  await pickSetting(page, 'settings-tool-codex')
+  await page.getByTestId('tool-switch-confirm-btn').click()
+
+  const menu = page.getByTestId('settings-menu')
+  await pickSetting(page, 'settings-model-gpt-5.6-terra')
+  await page.getByTestId('settings-open').click()
+  await expect(menu).toContainText('Speed')
+  await menu.getByTestId('settings-tier-priority').click()
+
+  const tier = await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    return s.sessions[s.focusedSessionId].serviceTier
+  })
+  expect(tier).toBe('priority')
+
+  // 티어 없는 모델로 바꾸면 묶음이 없고 값도 초기화된다 — 지원하지 않는 조합이 조용히 남으면 안 된다
+  await pickSetting(page, 'settings-model-gpt-5.6-terra-mini')
+  await page.getByTestId('settings-open').click()
+  await expect(menu).toContainText('gpt-5.6-terra-mini')
+  await expect(menu).not.toContainText('Speed')
+  const tier2 = await page.evaluate(() => {
+    const s = (window as any).__store.getState()
+    return s.sessions[s.focusedSessionId].serviceTier
+  })
+  expect(tier2).toBeNull()
+})
+
 /** 모델을 바꾸면 강도는 초기화된다 — 모델마다 단계가 달라서 옛 값이 남으면 안 된다 */
 test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })

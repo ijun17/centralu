@@ -181,6 +181,13 @@ export const ModelOption = z.object({
   /** 이 모델이 지원하는 추론 강도. 비어 있으면 강도 선택이 없는 모델이다 */
   efforts: z.array(z.string()),
   defaultEffort: z.string().nullable(),
+  /**
+   * 응답 속도 단계 (codex의 serviceTiers — 실측: gpt-5.4+에 "Fast, 1.5x speed,
+   * increased usage" 하나). verbosity와 달리 model/list가 **모델별로** 알려주므로
+   * 모델에 붙는다 — 어댑터 능력 선언에 두면 "이 모델이 되나?"의 답이 둘이 된다.
+   * 이름·설명을 그대로 나른다: 사용량이 더 든다는 경고문은 codex의 문장이 정확하다.
+   */
+  tiers: z.array(z.object({ id: z.string(), name: z.string(), description: z.string() })).default([]),
 })
 export type ModelOption = z.infer<typeof ModelOption>
 

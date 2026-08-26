@@ -200,6 +200,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     model: z.string().nullable(),
     effort: z.string().nullable(),
     verbosity: z.string().nullable(),
+    /** 응답 속도. 스냅샷 규칙은 위 셋과 같다 — 옛 프레임엔 없으므로 optional */
+    serviceTier: z.string().nullable().optional(),
   }),
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** 세션이 삭제됐다 — 다른 창·재연결에서도 목록이 맞아야 한다 */

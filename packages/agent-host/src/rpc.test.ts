@@ -14,7 +14,7 @@ import { RpcMethods } from '@cc/protocol'
 describe('agents.updateSettings — 필드가 새지 않는다', () => {
   it('스키마가 아는 설정 필드', () => {
     const shape = Object.keys(RpcMethods['agents.updateSettings'].params.shape)
-    expect(shape.sort()).toEqual(['effort', 'model', 'permissionPreset', 'sessionId', 'verbosity'])
+    expect(shape.sort()).toEqual(['effort', 'model', 'permissionPreset', 'serviceTier', 'sessionId', 'verbosity'])
   })
 
   it('핸들러가 sessionId만 떼고 나머지는 통째로 넘긴다', async () => {

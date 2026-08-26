@@ -459,6 +459,16 @@ export class Store {
           )`)
         },
       },
+      {
+        to: 20,
+        run: () => {
+          // 응답 속도(codex의 service_tier) — verbosity(v18)와 같은 성질이라 같은 자리
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'service_tier')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN service_tier TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -576,8 +586,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, permission_preset, imported_from, worktree_path, worktree_branch, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -585,6 +595,7 @@ export class Store {
            is_orchestrator = excluded.is_orchestrator,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
            verbosity = excluded.verbosity,
+           service_tier = excluded.service_tier,
            permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
            worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
            context_used = excluded.context_used, context_window = excluded.context_window,
@@ -598,6 +609,7 @@ export class Store {
         archived: s.archived ? 1 : 0,
         effort: s.effort ?? null,
         verbosity: s.verbosity ?? null,
+        serviceTier: s.serviceTier ?? null,
         importedFrom: s.importedFrom ?? null,
         worktreePath: s.worktree?.path ?? null,
         worktreeBranch: s.worktree?.branch ?? null,
@@ -678,7 +690,7 @@ export class Store {
                 s.auto_named as autoNamed, s.state, s.archived, s.is_orchestrator as isOrchestrator,
                 s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
-                s.model, s.effort, s.verbosity, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
+                s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
