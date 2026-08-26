@@ -50,7 +50,18 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * seq를 함께 보내는 이유: 보낸 UI는 이미 낙관적으로 그려 뒀으므로 같은 말을 두 번
    * 그리면 안 된다. 받는 쪽이 그것을 가려낼 수 있어야 한다.
    */
-  z.object({ ...base, type: z.literal('user_message'), seq: z.number(), text: z.string() }),
+  z.object({
+    ...base,
+    type: z.literal('user_message'),
+    seq: z.number(),
+    text: z.string(),
+    /*
+     * 출처 (FR-11). 없으면 사람이 직접 친 말 — 그래서 optional이고 옛 프레임과 호환된다.
+     * 채우는 곳은 둘뿐: 오케스트레이터의 send_to_session, 워커의 완료 보고(reportBack).
+     * 화면은 이 값으로 "시켜서 들어온 말"을 사람 말과 다르게 그린다.
+     */
+    from: z.object({ sessionId: z.string(), name: z.string() }).optional(),
+  }),
   z.object({ ...base, ...persistedSeq, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
   z.object({
     ...base,

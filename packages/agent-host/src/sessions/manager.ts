@@ -1031,6 +1031,9 @@ export class SessionManager {
           `프로젝트: ${project}\n\n` +
           `마지막 응답:\n${preview || '(내용 없음)'}\n\n` +
           `더 필요하면 read_session으로 그 세션의 최근 대화를 읽을 수 있습니다.`,
+        undefined,
+        // 보고도 사람 말이 아니다 (FR-11) — 보고한 워커 세션을 출처로 단다
+        { sessionId, name: target.name },
       )
     } catch {
       // 오케스트레이터가 잠들었거나 지워졌을 수 있다 — 보고 하나 때문에 앱이 흔들리면 안 된다
@@ -1200,7 +1203,17 @@ export class SessionManager {
    * 되돌려보냈는데, 그건 기계 사정을 사람에게 떠넘기는 것이다 — 사람은 이어서 말하고
    * 싶을 뿐이고, 이어갈 수단(external_id)은 우리가 갖고 있다.
    */
-  async send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void> {
+  async send(
+    sessionId: string,
+    text: string,
+    attachments?: Attachment[],
+    /*
+     * 누가 보냈나 (FR-11). 사람이 보낸 건 비어 있다 — 그게 기본값이라 마이그레이션이
+     * 필요 없다. 오케스트레이터의 send_to_session과 보고 회신(reportBack)만 채운다.
+     * 화면이 이걸로 "사람이 한 말"과 "다른 세션이 시킨 말"을 갈라 그린다.
+     */
+    from?: { sessionId: string; name: string },
+  ): Promise<void> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -1215,7 +1228,9 @@ export class SessionManager {
 
     const h = this.requireHandle(sessionId)
     const seq = this.store.nextSeq(sessionId)
-    this.store.appendMessages([{ sessionId, seq, role: 'user', kind: 'text', payload: { text }, ts: Date.now() }])
+    this.store.appendMessages([
+      { sessionId, seq, role: 'user', kind: 'text', payload: from ? { text, from } : { text }, ts: Date.now() },
+    ])
     m.lastSeq = seq
     m.lastReadSeq = seq // 내가 보낸 건 읽은 것
     if (m.autoNamed && m.name === 'New session') {
@@ -1230,7 +1245,7 @@ export class SessionManager {
      * 자기 것을 스스로 그리면 충분했기 때문이다. 오케스트레이터가 두 번째 생산자가
      * 되면서 그 가정이 깨졌다 — 주입된 말은 저장은 되는데 화면에는 영영 안 나타났다.
      */
-    this.emit({ type: 'user_message', sessionId, seq, text })
+    this.emit({ type: 'user_message', sessionId, seq, text, ...(from ? { from } : {}) })
     // 첨부는 도구가 이해하는 형태로 어댑터가 변환한다 (경로 멘션 또는 이미지 블록)
     h.send(attachments?.length ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}` : text)
   }
@@ -1884,7 +1899,12 @@ export class SessionManager {
         if (target.archived) return { ok: false, error: `보관된 세션입니다: ${target.name}` }
 
         try {
-          await this.send(sessionId, text)
+          // 출처를 달아 보낸다 (FR-11) — 대상 세션 화면에서 사람 말과 구분돼 보인다
+          const orch = this.meta.get(orchestratorId)
+          await this.send(sessionId, text, undefined, {
+            sessionId: orchestratorId,
+            name: orch?.name ?? 'Orchestrator',
+          })
           // 부탁받았을 때만 되돌아온다 — 기본은 조용하다
           if (reportBack) this.awaitingReport.set(sessionId, orchestratorId)
           return { ok: true }

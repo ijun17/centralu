@@ -1165,6 +1165,35 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     expect(adapter.handleOf(a.id)?.sent).toContain('테스트 고쳐줘')
   })
 
+  /*
+   * 시킨 말에는 출처가 남는다 (FR-11 잔여분).
+   * 저장까지는 됐지만 사람 말과 똑같은 행이었다 — "내가 이런 걸 시켰던가?"를
+   * 화면이 답하려면 행 자체에 누가 보냈는지가 실려 있어야 한다.
+   */
+  it('시킨 말은 payload에 출처(from)를 싣고 저장된다', async () => {
+    const { a, orc, tools } = await setup()
+    await tools.sendToSession(a.id, '출처 확인용')
+    const rows = (await rpc('messages.load', { sessionId: a.id, limit: 10 })) as {
+      role: string
+      payload: { text?: string; from?: { sessionId: string; name: string } }
+    }[]
+    const row = rows.find((r) => r.payload?.text === '출처 확인용')
+    expect(row?.role).toBe('user')
+    expect(row?.payload.from?.sessionId).toBe(orc.id)
+  })
+
+  it('보고 회신에도 출처(워커 세션)가 실린다', async () => {
+    const { a, orc, tools } = await setup()
+    await tools.sendToSession(a.id, '끝나면 알려줘', true)
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    const rows = (await rpc('messages.load', { sessionId: orc.id, limit: 20 })) as {
+      payload: { text?: string; from?: { sessionId: string } }
+    }[]
+    const report = rows.find((r) => r.payload?.text?.includes('[Centralu]'))
+    expect(report?.payload.from?.sessionId).toBe(a.id)
+  })
+
   it('모르는 세션은 이유를 돌려준다 — 조용히 삼키지 않는다', async () => {
     const { tools } = await setup()
     const r = await tools.sendToSession('남의-세션-id', '안녕')

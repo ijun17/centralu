@@ -3988,6 +3988,58 @@ test('남이 넣어준 말도 대화창에 뜬다', async ({ page }) => {
   await expect(page.getByTestId('chat-stream')).toContainText('오케스트레이터가 시킨 일')
 })
 
+/**
+ * 시켜서 들어온 말은 출처가 보인다 (FR-11).
+ *
+ * 오케스트레이터의 지시는 저장·표시까지는 됐지만 사람 말과 똑같은 말풍선이었다 —
+ * "내가 이런 걸 시켰던가?"를 화면이 답하지 못했다. from이 달린 말은
+ * 출처 라벨(msg-user-from)을 달고, 재시작이 걷는 복원 경로에서도 라벨이 남아야 한다.
+ */
+test('오케스트레이터가 시킨 말에는 출처 라벨이 붙고, 복원해도 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await emitEvent(page, 0, {
+    type: 'user_message', seq: 991, text: '릴리즈 노트를 정리해줘',
+    from: { sessionId: 'orc-x', name: '지휘 세션' },
+  })
+  await expect(page.getByTestId('msg-user-from')).toContainText('지휘 세션')
+
+  // 재시작 레그: 메모리의 대화를 버리고 기록에서 강제로 다시 읽는다
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate((sid: string) => {
+    const store = (window as never as { __store: any }).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid, true)
+  }, id)
+  await expect(page.getByTestId('msg-user-from')).toContainText('지휘 세션')
+})
+
+/**
+ * 텍스트 일치 확정은 내 말끼리만 성립한다 — 사람이 우연히 같은 문장을 pending으로
+ * 띄워 둔 순간 오케스트레이터의 지시가 오면, 흡수되어 출처 표식이 조용히 사라진다.
+ */
+test('사람의 같은 문장이 대기 중이어도 시킨 말은 흡수되지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+
+  await page.getByTestId('prompt-input').fill('같은 문장')
+  await page.getByTestId('send').click()
+  await emitEvent(page, 0, {
+    type: 'user_message', seq: 993, text: '같은 문장',
+    from: { sessionId: 'orc-x', name: '지휘 세션' },
+  })
+
+  // 사람 말풍선 + 출처 달린 말풍선, 둘 다 남아야 한다
+  await expect(page.getByTestId('msg-user-from')).toBeVisible()
+  const counts = await page.evaluate(() => {
+    const st = (window as any).__store.getState()
+    const items = st.chat[st.focusedSessionId].filter((i: any) => i.kind === 'user' && i.text === '같은 문장')
+    return { total: items.length, marked: items.filter((i: any) => i.from).length }
+  })
+  expect(counts).toEqual({ total: 2, marked: 1 })
+})
+
 test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')

@@ -123,11 +123,14 @@ export function useTextZoom(): number {
 }
 
 export type ChatItem =
-  /** pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다 */
-  | { kind: 'user'; seq: number; text: string; pending?: boolean }
+  /**
+   * pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다.
+   * from: 사람이 아니라 다른 세션이 시킨 말 (FR-11 — 오케스트레이터 지시·워커 보고).
+   */
+  | { kind: 'user'; seq: number; text: string; pending?: boolean; from?: { sessionId: string; name: string } }
   | { kind: 'assistant'; seq: number; text: string }
   /*
-   * 에이전트가 내놓은 이미지 (#40). 표시 전용 — 저장되지 않으므로 재시작하면 사라진다.
+   * 에이전트가 내놓은 이미지 (#40). 파일로 영속된다 (attachments/ + 경로 참조, 500MB 상한).
    * data가 비어 있으면 note가 이유를 말한다 (실패는 보이게).
    */
   | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
@@ -2232,9 +2235,13 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * 내가 보낸 말이면 이미 그려져 있다 — 확정만 한다.
        * 남이 보낸 말(오케스트레이터의 send_to_session)이면 여기가 화면에 나타나는
        * 유일한 길이다. 이 갈래가 없던 동안 주입된 말은 저장만 되고 안 보였다.
+       *
+       * from이 달린 말은 확정 대조에서 뺀다 (FR-11) — 사람이 우연히 같은 문장을
+       * pending으로 띄워 뒀다면 오케스트레이터의 지시가 그 말풍선에 흡수되면서
+       * 출처 표식이 조용히 사라진다. 텍스트 일치는 내 말끼리만 성립하는 가정이다.
        */
-      const idx = items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
-      if (idx === -1) return [...items, { kind: 'user', seq: ++chatSeq, text: e.text }]
+      const idx = e.from ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      if (idx === -1) return [...items, { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}) }]
       return items.map((it, i) => (i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it))
     }
     case 'history_synced':
@@ -2270,7 +2277,8 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of msgs) {
     if (m.kind === 'text' && m.role === 'user') {
-      items.push({ kind: 'user', seq: m.seq, text: String((m.payload as { text?: string })?.text ?? '') })
+      const p = m.payload as { text?: string; from?: { sessionId: string; name: string } }
+      items.push({ kind: 'user', seq: m.seq, text: String(p?.text ?? ''), ...(p?.from ? { from: p.from } : {}) })
     } else if (m.kind === 'text') {
       const e = m.payload as { text?: string }
       const last = items[items.length - 1]

@@ -936,7 +936,9 @@ function ChatStream({
   useEffect(syncSticky, [syncSticky, chat.length])
 
   const pinned = stickyIndex !== null ? chat[stickyIndex] : undefined
-  const stickyText = pinned?.kind === 'user' ? pinned.text : null
+  // 시켜서 들어온 지시도 "지금 하는 일"이므로 고정하되, 출처를 앞에 붙여 사람 말로 위장하지 않게 한다 (FR-11)
+  const stickyText =
+    pinned?.kind === 'user' ? (pinned.from ? `${pinned.from.name} ⤷ ${pinned.text}` : pinned.text) : null
 
   // 접힘이 기본 — 다른 턴으로 넘어가면 펼침 상태를 끌고 가지 않는다
   const [stickyOpen, setStickyOpen] = useState(false)
@@ -1283,7 +1285,17 @@ function DormantNote({ sessionId }: { sessionId: string }) {
 function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
   if (item.kind === 'user') {
     return (
-      <div className="flex justify-end" data-testid="msg-user">
+      <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
+        {/*
+          시켜서 들어온 말 (FR-11). 사람 말과 같은 자리(오른쪽)에 두되 — 세션 입장에선
+          똑같이 "받은 지시"다 — 출처 이름을 위에 달고 테두리를 점선으로 바꾼다.
+          색은 쓰지 않는다(팔레트 규칙): 구분은 밝기가 아니라 모양이 말하게 한다.
+        */}
+        {item.from && (
+          <div className="text-[11px] text-ash" data-testid="msg-user-from">
+            {item.from.name} ⤷
+          </div>
+        )}
         {/*
           긴 URL·경로처럼 공백 없는 문자열은 기본 규칙으로는 안 끊긴다.
           그러면 말풍선이 가로로 삐져나가 대화창 전체에 가로 스크롤이 생긴다
@@ -1295,7 +1307,11 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
           panel(#121212)+edge(#1e1e1e)로는 두 단계 차이뿐이라 어두운 화면에서 사실상 안 보였다
           (도그푸딩 지적). 호버 배경과 같은 graphite로 올리고 테두리는 한 단계 더 밝게 준다.
         */}
-        <div className="max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-chalk">
+        <div
+          className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-graphite px-3 py-2 text-chalk ${
+            item.from ? 'border-dashed border-ash/50' : 'border-slate/40'
+          }`}
+        >
           {item.text}
         </div>
       </div>
