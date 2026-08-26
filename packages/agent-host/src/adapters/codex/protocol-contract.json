@@ -10,8 +10,13 @@
     "initialize",
     "thread/start",
     "thread/resume",
+    "thread/fork",
+    "thread/compact/start",
+    "review/start",
     "turn/start",
-    "turn/interrupt"
+    "turn/interrupt",
+    "model/list",
+    "skills/list"
   ],
   "clientNotifications": [
     "initialized"
@@ -20,8 +25,12 @@
     "item/agentMessage/delta",
     "item/started",
     "item/completed",
+    "item/reasoning/summaryTextDelta",
+    "item/reasoning/summaryPartAdded",
+    "item/commandExecution/outputDelta",
     "turn/started",
     "turn/completed",
+    "turn/plan/updated",
     "thread/tokenUsage/updated",
     "thread/name/updated",
     "thread/compacted",

@@ -23,20 +23,44 @@ type Push    = { kind: 'event'; seq: number; sessionId?: string; event: Normaliz
 
 ## 2. NormalizedEvent (product spec §6.2의 구체화)
 
+**정본 유니온은 `packages/protocol/src/events.ts`에 있다** — 모든 필드·기본값과
+그렇게 정한 이유의 주석까지. 이 목록은 용도별로 묶은 지도다. 골든 픽스처 테스트
+(`protocol.test.ts`)는 스키마에 있는 타입이 픽스처 없이 존재하는 순간 실패한다 —
+스키마가 자기 예제보다 조용히 커질 수 없다.
+
 ```ts
 type NormalizedEvent =
-  | { type: 'message_delta';    sessionId, role, text }         // streaming body
-  | { type: 'tool_call';        sessionId, callId, tool, summary: ToolSummary }
+  // 대화 내용 (별도 표기가 없으면 seq로 영속된다)
+  | { type: 'message_delta';    sessionId, role, text }         // 스트리밍 본문
+  | { type: 'reasoning_delta';  sessionId, text?, estTokens? }  // #58: codex는 요약 텍스트, claude는 토큰 추정치뿐
+  | { type: 'user_message';     sessionId, seq, text, from? }   // 사람의 말, 또는 다른 세션의 지시 (FR-11)
+  | { type: 'tool_call';        sessionId, callId, summary: ToolSummary }
   | { type: 'tool_result';      sessionId, callId, ok, summary }
+  | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커
+  // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
+  | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중
+  | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷
+  | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리
+  // 사람이 답해야 하는 것
   | { type: 'approval_request'; sessionId, requestId, detail: ApprovalDetail }
   | { type: 'approval_resolved';sessionId, requestId, decision }
+  | { type: 'question_request'; sessionId, requestId, questions: Question[] }  // AskUserQuestion
+  | { type: 'question_resolved';sessionId, requestId }
+  // 세션 상태와 계기판
   | { type: 'turn_complete';    sessionId }
   | { type: 'state_change';     sessionId, state: SessionState, reason? }
   | { type: 'usage_update';     sessionId, tokens: TokenUsage }
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
-  | { type: 'limit_reached';    sessionId, resumeAt?: string }
-  | { type: 'session_title';    sessionId, title }
-  | { type: 'files_touched';    sessionId, paths: string[] }    // for FR-2 conflict detection, FR-5 highlighting
+  | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
+  | { type: 'session_title';    sessionId, title, auto }        // auto=false: 사람이 지은 이름 — 자동 이름이 덮지 않는다
+  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: 사람 아닌 손이 설정을 바꿨다
+  | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 충돌 감지, FR-5 하이라이트
+  | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
+  | { type: 'session_deleted';  sessionId }
+  // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
+  | { type: 'update_status';    status: UpdateStatus }          // #43
+  | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 

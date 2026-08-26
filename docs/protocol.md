@@ -21,20 +21,45 @@ type Push    = { kind: 'event'; seq: number; sessionId?: string; event: Normaliz
 
 ## 2. NormalizedEvent (product spec §6.2, made concrete)
 
+The **canonical union lives in `packages/protocol/src/events.ts`** — every field, every
+default, and the reasoning comments. This list is the map, grouped by what the event is
+for; the golden-fixture test (`protocol.test.ts`) fails the moment a type exists in the
+schema without appearing here-adjacent fixtures, so the schema cannot quietly outgrow
+its own examples.
+
 ```ts
 type NormalizedEvent =
+  // conversation content (persisted via seq except where noted)
   | { type: 'message_delta';    sessionId, role, text }         // streaming body
-  | { type: 'tool_call';        sessionId, callId, tool, summary: ToolSummary }
+  | { type: 'reasoning_delta';  sessionId, text?, estTokens? }  // #58: codex gives summary text; claude only a token estimate
+  | { type: 'user_message';     sessionId, seq, text, from? }   // human input, or another session's instruction (FR-11)
+  | { type: 'tool_call';        sessionId, callId, summary: ToolSummary }
   | { type: 'tool_result';      sessionId, callId, ok, summary }
+  | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker
+  // in-turn progress (display-only, never persisted)
+  | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing
+  | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
+  | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail
+  // things a person must answer
   | { type: 'approval_request'; sessionId, requestId, detail: ApprovalDetail }
   | { type: 'approval_resolved';sessionId, requestId, decision }
+  | { type: 'question_request'; sessionId, requestId, questions: Question[] }  // AskUserQuestion
+  | { type: 'question_resolved';sessionId, requestId }
+  // session state and gauges
   | { type: 'turn_complete';    sessionId }
   | { type: 'state_change';     sessionId, state: SessionState, reason? }
   | { type: 'usage_update';     sessionId, tokens: TokenUsage }
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
-  | { type: 'limit_reached';    sessionId, resumeAt?: string }
-  | { type: 'session_title';    sessionId, title }
-  | { type: 'files_touched';    sessionId, paths: string[] }    // for FR-2 conflict detection, FR-5 highlighting
+  | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
+  | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
+  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier? }  // #30: a non-human hand changed settings
+  | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
+  | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
+  | { type: 'session_deleted';  sessionId }
+  // app-scoped (sessionId optional — not every fact belongs to a conversation)
+  | { type: 'update_status';    status: UpdateStatus }          // #43
+  | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 

@@ -90,6 +90,11 @@ const TYPED = [
   // getContextUsage fields (index.ts) — the modelContextWindow lesson, Claude edition
   'totalTokens',
   'maxTokens',
+  // thinking stream (normalize.ts, #58 measured 2026-08-26): the body is encrypted, so
+  // estimated_tokens is the only visible quantity — if either name leaves the surface,
+  // the "Thinking · ~N tokens" row dies silently
+  'thinking_delta',
+  'estimated_tokens',
   // usage response fields (usage.ts)
   'subscription_type',
   'rate_limits',

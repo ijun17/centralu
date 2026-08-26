@@ -47,6 +47,7 @@ interface AdapterCapabilities {
   resume: boolean
   autoTitle: boolean
   attachments: ('image' | 'file')[]
+  verbosities: string[]         // response-length steps; empty = the tool has no such knob (#54)
 }
 ```
 
@@ -62,7 +63,31 @@ Implementation rules:
 1. Create `adapters/<tool>/` and implement `AgentAdapter` (event conversion + detect + capability).
 2. Register the factory in `registry.ts`.
 3. Add contract tests: recorded raw response fixtures → NormalizedEvent snapshot verification.
-4. Done. **ui, core, protocol and platform are unchanged.** (If a change was needed, that is not the adapter's fault but the protocol lacking a concept — consider extending the protocol first)
+4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
+   hand-won protocol knowledge rots silently otherwise.
+5. Done. **ui, core, protocol and platform are unchanged.** (If a change was needed, that is not the adapter's fault but the protocol lacking a concept — consider extending the protocol first)
+
+### 3.1 Vendor-surface drift checks (run these before any SDK/CLI upgrade)
+
+Everything we know about a vendor's protocol was learned by measuring, and a vendor
+upgrade can un-learn it without an error anywhere. Each adapter therefore keeps an
+explicit list of every vendor name it touches, and a script that re-verifies the list:
+
+| Tool | Contract | Check | What it catches |
+|---|---|---|---|
+| Codex | `adapters/codex/protocol-contract.json` — every RPC method and notification we send or read, plus approval enum values | `pnpm codex:bindings --check` (regenerates bindings from the installed CLI, greps for our names) | a method/notification leaving the protocol (change axis C4) |
+| Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields, and runtime-only names like `resolvePermissionModeInCli` | `pnpm drift:claude` (installs `@latest` into a temp dir, never the workspace) | a name leaving the `.d.ts` or the runtime **before** an upgrade lands it on us |
+
+Both are name checks, run in both directions: the vendor must still carry every name
+we use, and our source must still use every name listed (so the contract cannot
+outlive the code). They cannot catch a field that still exists but changed meaning —
+that class is guarded by runtime plausibility checks in the adapters (the
+`149,084%` context-gauge lesson).
+
+**The rule that keeps them honest:** when adapter code starts depending on a new
+vendor name — a new notification, a config key, a field — add it to the contract
+**in the same PR**. A new tool (step 4 above) starts by creating its own equivalent
+of one of these.
 
 ## 4. Session lifecycle and UI reconnection
 
