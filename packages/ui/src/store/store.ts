@@ -438,7 +438,6 @@ export type AppState = {
    * questions at once: whose terminal this belongs in, and where the person has to be
    * standing to see it.
    */
-  runProjectCommand(sessionId: string, command: string): Promise<void>
   createSession(
     projectId: string,
     opts?: {
@@ -1550,49 +1549,6 @@ export const useStore = create<AppState>((set, get) => ({
         toast: `Could not save commands: ${(e as Error).message}`,
       }))
     }
-  },
-
-  async runProjectCommand(sessionId, command) {
-    const platform = get().platform
-    const projectId = get().sessions[sessionId]?.projectId
-    // The orchestrator has no project, so it has no directory to run in — the header does
-    // not offer the button there, and this is the same fact stated where it is enforced
-    if (!platform || !projectId) return
-
-    try {
-      /*
-       * Find the terminal before anything moves on screen, and that order is the point.
-       *
-       * `TerminalPane` opens a shell itself when a project has none. Switching the tab
-       * first would put two creators on the same empty list, and the command could then
-       * land in the terminal that is *not* the one being drawn — a run nobody can see,
-       * which is the one outcome this must never produce.
-       *
-       * The project comes from the session rather than from whatever the evidence panel
-       * happens to be showing. In the grid those are routinely different projects.
-       */
-      const list = await platform.terminal.list(projectId)
-      const target = list[0] ?? (await platform.terminal.create(projectId, 80, 24))
-      /*
-       * `\r` is what a keyboard sends. Everything downstream then follows for free —
-       * the shell echoes it, the output streams, ctrl-C stops it — because nothing about
-       * this is distinguishable from having been typed into that pty.
-       */
-      await platform.terminal.input(target.terminalId, `${command}\r`)
-    } catch (e) {
-      set({ toast: `Could not run: ${(e as Error).message}` })
-      return
-    }
-
-    /*
-     * Now show it running. The grid has no evidence lane at all (see App.tsx), so a
-     * command started from a grid cell has nowhere to be seen until we leave — and it was
-     * this session's own header that was clicked, so this session is where to leave to.
-     * Already focused means already there: `focusSession` also wakes and marks read, and
-     * neither is something clicking Run asked for.
-     */
-    if (get().focusedSessionId !== sessionId) get().focusSession(sessionId)
-    get().setPanelTab('terminal')
   },
 
   async createSession(projectId, opts) {

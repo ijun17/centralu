@@ -14,6 +14,7 @@ import { CodexAdapter } from './adapters/codex/index.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import { createRpcHandler } from './rpc.js'
 import { TerminalService } from './dev-services/terminal.js'
+import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
 import { acquireInstanceLock } from './dev-services/instance-lock.js'
@@ -140,6 +141,8 @@ const mgr = new SessionManager(
   join(dirname(dbPath), 'worktrees'),
 )
 const terminals = new TerminalService((f) => server.pushTerminal(f))
+// 자주 쓰는 명령어 실행기 (#60) — 출력은 터미널과 같은 프레임 레인을 탄다
+const commandRuns = new CommandRunner((f) => server.pushTerminal(f))
 /*
  * 업데이트 확인은 **host가 한다** — 실행기(launcher)가 아니라 (이슈 #43).
  *
@@ -162,7 +165,7 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
-  onRpc: createRpcHandler(mgr, adapters, terminals, updates),
+  onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns),
 })
 
 let port: number
@@ -226,6 +229,7 @@ const shutdown = async () => {
   await mgr.disposeAll()
   // PTY도 자식 프로세스다 — setsid()로 자기 그룹이라 그룹 kill이 못 미치므로 직접 정리한다
   terminals.disposeAll()
+  commandRuns.disposeAll()
   await server.close()
   store.close()
   // 왜 끝났는지가 다음 조사의 첫 줄이 된다 — 조용히 사라지지 않는다

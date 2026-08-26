@@ -807,6 +807,62 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /** 자주 쓰는 명령어 실행 상태 (#60). 키는 실물과 같은 (projectId, command) 짝 */
+  commandRuns = new Map<string, { command: string; runId: string; running: boolean; exitCode: number | null; startedAt: number; history: string }>()
+  private runKey(projectId: string, command: string): string {
+    return `${projectId}\u0000${command}`
+  }
+  /** 테스트용: 돌고 있는 실행이 출력을 뱉는 상황 (터미널과 같은 레인으로 나간다) */
+  emitCommandOutput(projectId: string, command: string, data: string): void {
+    const r = this.commandRuns.get(this.runKey(projectId, command))
+    if (!r) return
+    r.history += data
+    for (const h of this.termHandlers) h({ terminalId: r.runId, data })
+  }
+  /** 테스트용: 실행이 끝나는 상황 — 단발성 명령의 결말 */
+  exitCommand(projectId: string, command: string, exitCode: number): void {
+    const r = this.commandRuns.get(this.runKey(projectId, command))
+    if (!r || !r.running) return
+    r.running = false
+    r.exitCode = exitCode
+    for (const h of this.termExitHandlers) h({ terminalId: r.runId, exitCode })
+  }
+
+  // 실물과 같은 계약 (#60): 명령별 마지막 실행 하나, 재실행은 죽이고 교체, 로그는 살아있는 동안
+  readonly commands = {
+    run: async (projectId: string, command: string, _cols: number, _rows: number) => {
+      const r = {
+        command,
+        runId: `mock-run-${++this.idc}`,
+        running: true,
+        exitCode: null as number | null,
+        startedAt: this.now(),
+        history: '',
+      }
+      this.commandRuns.set(this.runKey(projectId, command), r)
+      const { history: _h, ...rest } = r
+      return rest
+    },
+    stop: async (projectId: string, command: string) => {
+      // 실물은 kill 뒤 onExit이 온다 — 목은 그 결말을 바로 낸다 (130 = SIGINT 관례)
+      this.exitCommand(projectId, command, 130)
+    },
+    state: async (projectId: string) => {
+      const out = []
+      for (const [k, r] of this.commandRuns) {
+        if (!k.startsWith(`${projectId}\u0000`)) continue
+        const { history: _h, ...rest } = r
+        out.push(rest)
+      }
+      return out
+    },
+    log: async (projectId: string, command: string) => {
+      const r = this.commandRuns.get(this.runKey(projectId, command))
+      return r ? { ...r } : null
+    },
+    resize: async () => {},
+  }
+
   readonly system: SystemPort = {
     notify: async (title: string, body: string) => {
       this.notifications.push({ title, body })

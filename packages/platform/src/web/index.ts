@@ -296,6 +296,18 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       onOutput: (h) => rpc.onTerminalOutput(h),
       onExit: (h) => rpc.onTerminalExit(h),
     },
+    // 자주 쓰는 명령어 실행기 (#60) — 출력은 위 terminal.onOutput/onExit이 그대로 나른다
+    commands: {
+      run: (projectId, command, cols, rows) => rpc.call('commands.run', { projectId, command, cols, rows }),
+      stop: async (projectId, command) => {
+        await rpc.call('commands.stop', { projectId, command })
+      },
+      state: async (projectId) => (await rpc.call('commands.state', { projectId })).runs,
+      log: async (projectId, command) => (await rpc.call('commands.log', { projectId, command })).run,
+      resize: async (projectId, command, cols, rows) => {
+        await rpc.call('commands.resize', { projectId, command, cols, rows })
+      },
+    },
     workspace: {
       async save(snapshot) {
         await rpc.call('workspace.save', { layout: snapshot })

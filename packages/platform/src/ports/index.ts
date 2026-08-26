@@ -17,6 +17,7 @@ import type {
   StoredMessage,
   UsageSnapshot,
   TerminalInfo,
+  CommandRunInfo,
   ToolName,
   ModelOption,
   QuestionAnswer,
@@ -395,6 +396,23 @@ export interface TerminalPort {
   onExit(handler: (e: { terminalId: string; exitCode: number | null }) => void): Unsubscribe
 }
 
+/**
+ * 자주 쓰는 명령어 실행기 (#60). 터미널 탭과 별개의 실행 경로다 —
+ * 명령별 프로세스 하나, 마지막 실행 로그 하나 (host 수명 동안).
+ * 출력 스트림은 terminal.onOutput/onExit을 그대로 탄다 (runId가 terminalId 자리).
+ */
+export interface CommandRunPort {
+  /** 실행. 같은 명령이 돌고 있으면 죽이고 새로 시작한다 */
+  run(projectId: string, command: string, cols: number, rows: number): Promise<CommandRunInfo>
+  /** 데브 서버를 끈다. 로그는 남는다 */
+  stop(projectId: string, command: string): Promise<void>
+  /** 실행된 적 있는 명령들의 상태 (목록 뱃지용) */
+  state(projectId: string): Promise<CommandRunInfo[]>
+  /** 마지막 실행, 로그째. 실행된 적 없으면 null */
+  log(projectId: string, command: string): Promise<(CommandRunInfo & { history: string }) | null>
+  resize(projectId: string, command: string, cols: number, rows: number): Promise<void>
+}
+
 export interface Platform {
   agents: AgentPort
   projects: ProjectPort
@@ -406,6 +424,7 @@ export interface Platform {
   workspace: WorkspacePort
   updates: UpdatePort
   terminal: TerminalPort
+  commands: CommandRunPort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>
 }

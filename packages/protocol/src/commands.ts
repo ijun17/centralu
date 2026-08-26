@@ -224,6 +224,22 @@ export const TerminalInfo = z.object({
 })
 export type TerminalInfo = z.infer<typeof TerminalInfo>
 
+/**
+ * 자주 쓰는 명령어의 실행 하나 (#60). 명령별 **마지막 실행**만 남는다 —
+ * 같은 명령을 다시 실행할 때만 교체된다 (사용자 결정, host 수명 동안 유지).
+ * 출력 스트림은 터미널 프레임 레인을 그대로 탄다: runId가 terminalId 자리에 실린다.
+ */
+export const CommandRunInfo = z.object({
+  command: z.string(),
+  /** 실행마다 새 id — 화면이 출력 스트림을 갈아탈 기준 */
+  runId: z.string(),
+  running: z.boolean(),
+  /** null이면 아직 돌고 있거나, 프로세스를 띄우지도 못한 것 (history가 이유를 말한다) */
+  exitCode: z.number().nullable(),
+  startedAt: z.number(),
+})
+export type CommandRunInfo = z.infer<typeof CommandRunInfo>
+
 export const StoredMessage = z.object({
   sessionId: z.string(),
   seq: z.number(),
@@ -614,6 +630,30 @@ export const RpcMethods = {
   'terminal.restart': {
     params: z.object({ terminalId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
     result: TerminalInfo,
+  },
+  /** 자주 쓰는 명령어 실행 (#60). 같은 명령이 돌고 있으면 죽이고 새로 시작한다 */
+  'commands.run': {
+    params: z.object({ projectId: z.string(), command: z.string(), cols: z.number().default(100), rows: z.number().default(30) }),
+    result: CommandRunInfo,
+  },
+  /** 데브 서버를 끈다. 로그는 남는다 — 종료도 결과다 */
+  'commands.stop': {
+    params: z.object({ projectId: z.string(), command: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** 실행된 적 있는 명령들의 상태 (목록 뱃지용 — 로그는 log가 준다) */
+  'commands.state': {
+    params: z.object({ projectId: z.string() }),
+    result: z.object({ runs: z.array(CommandRunInfo) }),
+  },
+  /** 명령 하나의 마지막 실행, 로그째. 실행된 적 없으면 null */
+  'commands.log': {
+    params: z.object({ projectId: z.string(), command: z.string() }),
+    result: z.object({ run: CommandRunInfo.extend({ history: z.string() }).nullable() }),
+  },
+  'commands.resize': {
+    params: z.object({ projectId: z.string(), command: z.string(), cols: z.number(), rows: z.number() }),
+    result: z.object({ ok: z.literal(true) }),
   },
   /**
    * Where this install stands against the registry (issue #43).

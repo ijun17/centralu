@@ -13,6 +13,7 @@ import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { RunMenu } from './RunMenu.jsx'
+import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
@@ -376,14 +377,7 @@ export function SessionPane({
           in and no terminal to run it in. So it gets no button rather than an empty menu:
           an entry that could never have anything in it is a worse answer than no entry.
         */}
-        {session.projectId && (
-          <RunMenu
-            sessionId={session.id}
-            projectId={session.projectId}
-            open={runOpen}
-            onOpenChange={setRunOpen}
-          />
-        )}
+        {session.projectId && <RunMenu open={runOpen} onOpenChange={setRunOpen} />}
         {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
         <IconButton
           label="Restart agent (chat history is kept)"
@@ -405,7 +399,7 @@ export function SessionPane({
       그래서 대화가 길어지면 이 칸이 통째로 늘어나 입력창을 밖으로 밀어냈다
       (그리드에서 칸 높이가 정해져 있으니 곧바로 드러났다 — 입력창이 아예 안 보였다).
     */
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
       {headerDrag ? (
         <div
           className={`${HEADER} cursor-grab active:cursor-grabbing`}
@@ -706,6 +700,11 @@ export function SessionPane({
           </span>
         </div>
       </form>
+
+      {/* 자주 쓰는 명령어 창 (#60) — 칸 안에 뜬다. 그리드 칸이면 그 칸 크기의 창이다 */}
+      {runOpen && session.projectId && (
+        <CommandRunnerOverlay projectId={session.projectId} onClose={() => setRunOpen(false)} />
+      )}
     </section>
   )
 }

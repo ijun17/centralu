@@ -2,6 +2,7 @@ import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
+import type { CommandRunner } from './dev-services/commands.js'
 
 /** 내부 핸들 → 프로토콜 모양 (history는 그때그때 스냅샷으로 뜬다) */
 const toInfo = (h: TerminalHandle) => ({
@@ -22,10 +23,15 @@ export function createRpcHandler(
   adapters: Map<ToolName, AgentAdapter>,
   terminals?: TerminalService,
   updates?: UpdateService,
+  commands?: CommandRunner,
 ) {
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
     return terminals
+  }
+  const requireCommands = (): CommandRunner => {
+    if (!commands) throw Object.assign(new Error('Command runs are unavailable'), { code: 'internal' })
+    return commands
   }
   const requireUpdates = (): UpdateService => {
     if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
@@ -248,6 +254,30 @@ export function createRpcHandler(
       const h = requireTerminals().restart(terminalId, cols, rows)
       if (!h) throw Object.assign(new Error('Terminal not found'), { code: 'internal' })
       return toInfo(h)
+    },
+    // 자주 쓰는 명령어 실행기 (#60) — 터미널과 같은 cwd 규칙 (워크트리 준비)
+    'commands.run': async (p) => {
+      const { projectId, command, cols, rows } = RpcMethods['commands.run'].params.parse(p)
+      const { history: _h, ...rest } = requireCommands().run(mgr.cwdOfProject(projectId), command, cols, rows)
+      return rest
+    },
+    'commands.stop': async (p) => {
+      const { projectId, command } = RpcMethods['commands.stop'].params.parse(p)
+      requireCommands().stop(mgr.cwdOfProject(projectId), command)
+      return { ok: true as const }
+    },
+    'commands.state': async (p) => {
+      const { projectId } = RpcMethods['commands.state'].params.parse(p)
+      return { runs: requireCommands().state(mgr.cwdOfProject(projectId)) }
+    },
+    'commands.log': async (p) => {
+      const { projectId, command } = RpcMethods['commands.log'].params.parse(p)
+      return { run: requireCommands().log(mgr.cwdOfProject(projectId), command) }
+    },
+    'commands.resize': async (p) => {
+      const { projectId, command, cols, rows } = RpcMethods['commands.resize'].params.parse(p)
+      requireCommands().resize(mgr.cwdOfProject(projectId), command, cols, rows)
+      return { ok: true as const }
     },
     'approvals.rules': async () => mgr.listApprovalRules(),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
