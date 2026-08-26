@@ -3881,42 +3881,18 @@ test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말�
 })
 
 /**
- * The grid is experimental too (issue #25) — it shipped looking finished while the spec
- * still listed it under non-goals.
- *
- * The mark sits on the button rather than inside the view, and the reason differs from #1.
- * Pressing this is free and reversible; the cost is the hour spent working inside, where
- * §5.4's objection (panels too small for a conversation and an input box) is waiting. The
- * sidebar is never covered, so one mark here is read both before pressing and throughout —
- * which is what this test pins down.
+ * The grid graduated (2026-08-27, the user's call). The Experimental badge went up when the
+ * view shipped ahead of its spec (issue #25); weeks of dogfooding later it is simply how
+ * sessions get watched side by side, and a warning that no longer warns anyone is clutter
+ * on the one lane that is always on screen. This pins the removal — and that the
+ * orchestrator's badge, whose surface still earns its mark, did not vanish with it.
  */
-test('the grid says it is experimental, before you press it and while you are in it', async ({ page }) => {
+test('the grid no longer calls itself experimental — the orchestrator still does', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  const mark = page.getByTestId('grid-experimental')
-  await expect(mark).toBeVisible()
-  await expect(mark).toHaveText('Experimental')
-
-  const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
-  const style = (testId: string, prop: string) =>
-    page.getByTestId(testId).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)
-
-  // Achromatic (R=G=B) — colour in this app belongs to diff bodies
-  const markColor = rgb(await style('grid-experimental', 'color'))
-  expect(new Set(markColor).size).toBe(1)
-
-  // Darker than the label. Brightening it would steal the slot of "this is waiting for you"
-  const labelColor = rgb(await style('grid-button', 'color'))
-  expect(markColor[0]!).toBeLessThan(labelColor[0]!)
-
-  // Survives the narrowest sidebar — the badge is shrink-0, so the *name* truncates, not this
-  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSidebarWidth(180))
-  await expect(mark).toBeVisible()
-
-  // And it is still there once you are inside, because the left lane is never covered
-  await page.getByTestId('grid-button').click()
-  await expect(page.getByTestId('grid')).toBeVisible()
-  await expect(mark).toBeVisible()
+  await expect(page.getByTestId('grid-button')).toBeVisible()
+  await expect(page.getByTestId('grid-experimental')).toHaveCount(0)
+  await expect(page.getByTestId('orchestrator-experimental')).toBeVisible()
 })
 
 test('오케스트레이터를 보는 동안에는 사이드바에서 세션이 골라져 보이지 않는다', async ({ page }) => {

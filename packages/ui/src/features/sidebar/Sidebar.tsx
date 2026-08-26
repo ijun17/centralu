@@ -246,23 +246,12 @@ function OrchestratorIcon({ size = 13 }: { size?: number }) {
  * 세션을 여기 떨어뜨리면 그리드로 들어가면서 그 세션이 올라간다. 화면을 먼저
  * 열고 다시 끌어야 한다면 두 번 일하는 셈이라, 끌어온 김에 한 번에 처리한다.
  *
- * **The grid is experimental, and this button is where we say so** (issue #25).
- * It shipped looking finished while the spec still listed it under non-goals, so nothing
- * anywhere told a person what they were stepping into.
- *
- * The mark goes on the button, not inside the view — even though the grid *is* a whole view.
- * The reason is not the one from #1 (there the harm was pressing without knowing). Pressing
- * this is free and reversible; the harm is the hour you then spend working inside it, and
- * §5.4's objection ("panels too small for a conversation and an input box") is exactly what
- * that hour runs into. What settles it is that **the left lane is never covered** — the
- * sidebar stays on screen the whole time the grid is open, so a mark here is read both
- * before you press and while you are inside. A second mark on the grid's own surface would
- * say the same thing twice, and it would cost panel height, which is the one thing the grid
- * cannot spare.
- *
- * Same treatment as #1, for the same palette reason (urgency is brightness): slate text, no
- * colour and not one drop of extra brightness. The dashed border both buttons used to carry
- * is gone — see OrchestratorButton above for what measuring it turned up.
+ * **The Experimental badge is gone** (2026-08-27, by the user's call). It went up when the
+ * grid shipped looking finished while the spec still listed it under non-goals (issue #25) —
+ * the mark existed to warn about the hour you might lose inside an unproven view. Weeks of
+ * dogfooding later the grid is simply how sessions get watched side by side, and a warning
+ * that no longer warns anyone is clutter on the one lane that is always on screen.
+ * The orchestrator's badge stays — that surface still is what its mark says it is.
  */
 function GridButton() {
   const view = useStore((s) => s.view)
@@ -289,7 +278,7 @@ function GridButton() {
         onClick={() => setView('grid')}
         aria-pressed={active}
         data-testid="grid-button"
-        title="Experimental — see sessions side by side. Panels get small fast; expect rough edges."
+        title="See sessions side by side."
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(SESSION_MIME)) return
           e.preventDefault()
@@ -307,9 +296,6 @@ function GridButton() {
       >
         <GridIcon />
         <span className="truncate font-medium tracking-tight">Grid</span>
-        <span className="shrink-0 text-[10px] text-slate" data-testid="grid-experimental">
-          Experimental
-        </span>
         {panels.length > 0 && <span className="readout ml-auto text-[10px] text-slate">{panels.length}</span>}
       </button>
     </div>
