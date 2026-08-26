@@ -47,6 +47,21 @@ describe('스트리밍·도구 호출', () => {
     expect(n('item/started', { item: { type: 'userMessage', id: 'u' } })).toEqual([])
     expect(n('item/completed', { item: { type: 'reasoning', id: 'r' } })).toEqual([])
   })
+
+  /*
+   * 이미지 열람 (#40). 실측 모양: {type:'imageView', id, path} — 경로만 온다.
+   * data는 어댑터가 파일을 읽어 채우므로 여기서는 비어 있어야 한다 (순수 함수).
+   */
+  it('imageView 완료 → 경로만 실린 message_image (도구 줄은 안 만든다)', () => {
+    expect(n('item/started', { item: { type: 'imageView', id: 'iv', path: '/tmp/shot.png' } })).toEqual([])
+    expect(n('item/completed', { item: { type: 'imageView', id: 'iv', path: '/tmp/shot.png' } })).toEqual([
+      { type: 'message_image', sessionId: S, mime: '', data: '', path: '/tmp/shot.png' },
+    ])
+  })
+
+  it('경로 없는 imageView는 버린다 (그릴 것이 없다)', () => {
+    expect(n('item/completed', { item: { type: 'imageView', id: 'iv' } })).toEqual([])
+  })
 })
 
 describe('상태·계기판', () => {

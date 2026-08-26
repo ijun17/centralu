@@ -98,6 +98,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
        */
       if (type === 'enteredReviewMode') return [{ type: 'activity', sessionId, activity: 'reviewing' }]
       if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
+      // 이미지 열람의 시작은 도구 줄이 아니다 — completed에서 이미지 자체를 낸다 (#40)
+      if (type === 'imageView') return []
       const s = itemSummary(item)
       return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s }]
     }
@@ -119,6 +121,16 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
        */
       if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
       if (type === 'enteredReviewMode') return []
+      /*
+       * 에이전트가 이미지를 봤다 (#40). 실측 모양: {type:'imageView', id, path} — 경로만
+       * 실려 온다. 파일 읽기는 IO라 여기(순수 함수)서 못 한다: data를 비운 채 내보내고,
+       * 어댑터(index.ts)가 내보내기 직전에 읽어 채운다. mime도 그쪽에서 확장자로 정한다.
+       * (imageGeneration은 아직 실측을 못 했다 — 관찰되면 그때 잇는다, #58과 같은 규칙)
+       */
+      if (type === 'imageView') {
+        const path = str(item.path)
+        return path ? [{ type: 'message_image', sessionId, mime: '', data: '', path }] : []
+      }
       const s = itemSummary(item)
       const out: NormalizedEvent[] = [
         {

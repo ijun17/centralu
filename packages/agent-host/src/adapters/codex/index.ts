@@ -14,6 +14,7 @@ import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionH
 import { CodexClient } from './client.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
+import { imageEventFromDisk } from './images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
 import { approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
@@ -192,7 +193,18 @@ class CodexSession implements SessionHandle {
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
-    for (const e of normalizeNotification(this.sessionId, n)) this.emit(e)
+    for (const e of normalizeNotification(this.sessionId, n)) {
+      /*
+       * 경로만 실려 온 이미지는 여기서 바이트를 채운다 (#40). normalize는 순수 함수라
+       * 파일을 못 읽는다 — IO는 어댑터의 몫이다. 읽기는 비동기지만 이미지는 대화의
+       * 순서에 민감하지 않으므로(도구 줄은 이미 나갔다) 나중에 도착해도 된다.
+       */
+      if (e.type === 'message_image' && !e.data && e.path) {
+        void imageEventFromDisk(this.sessionId, e.path).then((filled) => this.emit(filled))
+        continue
+      }
+      this.emit(e)
+    }
   }
 
   private onServerRequest(r: { id: number | string; method: string; params?: unknown }): void {

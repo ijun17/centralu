@@ -84,6 +84,52 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     const err = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'nope', is_error: true }] } })
     expect(err[0]).toMatchObject({ ok: false })
   })
+
+  /*
+   * 도구 결과에 실려 온 이미지 (#40). 실측 모양(이미지 파일 Read):
+   * content: [{type:'image', source:{type:'base64', data, media_type}}]
+   */
+  it('tool_result의 image 블록 → message_image (실측 모양)', () => {
+    const out = n({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu1',
+            content: [{ type: 'image', source: { type: 'base64', data: 'aWJs', media_type: 'image/png' } }],
+          },
+        ],
+      },
+    })
+    // 도구 줄은 그대로 남고(무엇이 실행됐는지), 이미지가 따로 나온다
+    expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1' })
+    expect(out[1]).toEqual({ type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs' })
+  })
+
+  it('너무 큰 이미지는 그리는 대신 이유를 말한다', () => {
+    const big = 'a'.repeat(11_000_001)
+    const out = n({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'image', source: { type: 'base64', data: big, media_type: 'image/png' } }] },
+        ],
+      },
+    })
+    const img = out.find((e) => e.type === 'message_image')
+    expect(img).toMatchObject({ data: '', note: expect.stringContaining('너무 큽니다') })
+  })
+
+  it('base64가 아닌 이미지 소스는 조용히 넘어간다 (url 등 미실측 모양)', () => {
+    const out = n({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'image', source: { type: 'url', url: 'https://x/y.png' } }] }],
+      },
+    })
+    expect(out.some((e) => e.type === 'message_image')).toBe(false)
+  })
 })
 
 describe('승인 요청 정규화 (배너 판정의 입력)', () => {

@@ -47,6 +47,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'session_title', sessionId: 's1', title: '가드 MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
+  // 에이전트가 내놓은 이미지 (#40) — 표시 전용이라 seq가 없다
+  { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/shot.png' },
+  // 못 그린 이미지도 이벤트다 — 실패는 보이게
+  { type: 'message_image', sessionId: 's1', mime: '', data: '', path: '/tmp/big.png', note: '이미지가 너무 큽니다 (12MB)' },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },
   // codex의 /review(전용 RPC)가 도는 동안 (실측 — enteredReviewMode 아이템)
   { type: 'activity', sessionId: 's1', activity: 'reviewing' },

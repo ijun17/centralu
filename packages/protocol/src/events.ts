@@ -81,6 +81,30 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     questions: z.array(Question),
   }),
   z.object({ ...base, type: z.literal('question_resolved'), requestId: z.string() }),
+  /*
+   * 에이전트가 대화에 이미지를 내놓았다 (#40).
+   *
+   * 실측한 두 갈래를 하나로 접는다: Claude는 tool_result 안에 base64로 실어 오고
+   * (스크린샷·이미지 Read), Codex는 imageView 항목에 **경로만** 실어 온다 —
+   * 경로 쪽은 어댑터가 파일을 읽어 data를 채운 뒤에 내보낸다. UI는 항상 같은
+   * 모양(data URL)만 그린다.
+   *
+   * **persistedSeq가 없는 것은 결정이다** (2026-08-24): 표시 전용. DB는 텍스트만
+   * 남고, 이미지는 터미널 스크롤백처럼 재시작하면 사라진다. 사람들이 지난 이미지를
+   * 찾으러 돌아가는 것이 도그푸딩에서 보이면 그때 재검토한다.
+   *
+   * data가 비어 있으면 note가 이유를 말한다 (너무 큼, 못 읽음 — 실패는 보이게).
+   */
+  z.object({
+    ...base,
+    type: z.literal('message_image'),
+    mime: z.string(),
+    /** base64. 비어 있으면 표시 실패 — note를 보라 */
+    data: z.string(),
+    /** 이미지가 디스크에 있으면 그 출처 (Codex imageView) */
+    path: z.string().optional(),
+    note: z.string().optional(),
+  }),
   z.object({ ...base, type: z.literal('turn_complete') }),
   z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
   z.object({ ...base, type: z.literal('usage_update'), tokens: TokenUsage }),

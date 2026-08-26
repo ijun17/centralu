@@ -1326,6 +1326,32 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
       </div>
     )
   }
+  if (item.kind === 'image') {
+    /*
+     * 에이전트가 내놓은 이미지 (#40). 표시 전용이라 저장되지 않는다 — 재시작하면
+     * 터미널 스크롤백처럼 사라진다. data가 없으면 조용한 공백 대신 이유를 말한다
+     * (실패는 보이게 — 앱 규칙).
+     */
+    if (!item.data) {
+      return (
+        <div className="rounded-lg border border-edge bg-panel px-3 py-2 text-[12px] text-slate" data-testid="msg-image-missing">
+          이미지를 표시하지 못했습니다{item.note ? ` — ${item.note}` : ''}
+          {item.path && <span className="readout mt-1 block truncate text-[11px]">{item.path}</span>}
+        </div>
+      )
+    }
+    return (
+      <div className="min-w-0" data-testid="msg-image">
+        <img
+          src={`data:${item.mime};base64,${item.data}`}
+          alt={item.path ?? 'agent image'}
+          title={item.path}
+          /* 세로로 화면을 다 덮지 않게 자른다 — 원본 비율은 유지 */
+          className="max-h-80 max-w-full rounded-lg border border-edge"
+        />
+      </div>
+    )
+  }
   return <ToolCard item={item} />
 }
 

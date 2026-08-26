@@ -126,6 +126,11 @@ export type ChatItem =
   /** pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다 */
   | { kind: 'user'; seq: number; text: string; pending?: boolean }
   | { kind: 'assistant'; seq: number; text: string }
+  /*
+   * 에이전트가 내놓은 이미지 (#40). 표시 전용 — 저장되지 않으므로 재시작하면 사라진다.
+   * data가 비어 있으면 note가 이유를 말한다 (실패는 보이게).
+   */
+  | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
   | { kind: 'tool'; seq: number; tool: string; title: string; readOnly: boolean; result?: string; ok?: boolean }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
   /** 대화의 경계 표식 (압축 지점 등). 대화가 아니라 대화에 대한 사실이다 */
@@ -2203,6 +2208,8 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     }
     case 'tool_call':
       return [...items, { kind: 'tool', seq: ++chatSeq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly }]
+    case 'message_image':
+      return [...items, { kind: 'image', seq: ++chatSeq, mime: e.mime, data: e.data, path: e.path, note: e.note }]
     case 'tool_result': {
       const idx = [...items].reverse().findIndex((i) => i.kind === 'tool' && i.result === undefined)
       if (idx === -1) return items

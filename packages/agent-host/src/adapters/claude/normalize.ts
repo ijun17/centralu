@@ -170,6 +170,29 @@ export function normalizeMessage(
           ok: block.is_error !== true,
           summary: (typeof c === 'string' ? c : JSON.stringify(c ?? '')).slice(0, 300),
         })
+        /*
+         * 도구 결과에 실려 온 이미지 (#40). 스크린샷을 찍거나 이미지 파일을 Read하면
+         * 여기로 온다 — 실측 모양: {type:'image', source:{type:'base64', data, media_type}}.
+         * (assistant 본문에는 이미지가 실리지 않는다 — 도구 결과가 유일한 길이다)
+         */
+        if (Array.isArray(c)) {
+          for (const part of c as Json[]) {
+            if (str(part.type) !== 'image') continue
+            const source = (part.source ?? {}) as Json
+            if (str(source.type) !== 'base64' || !str(source.data)) continue
+            const data = str(source.data)
+            const mime = str(source.media_type) || 'image/png'
+            // base64 ~11M자 ≈ 원본 8MB. 그 이상은 화면에 뿌리는 대신 왜 안 그리는지 말한다
+            if (data.length > 11_000_000) {
+              out.push({
+                type: 'message_image', sessionId, mime, data: '',
+                note: `이미지가 너무 큽니다 (~${Math.round((data.length * 3) / 4 / 1048576)}MB)`,
+              })
+            } else {
+              out.push({ type: 'message_image', sessionId, mime, data })
+            }
+          }
+        }
       }
     }
     return out
