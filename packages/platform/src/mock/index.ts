@@ -424,6 +424,9 @@ export class MockPlatform implements Platform {
       }
       if (params.resumeExternalId) info.externalId = params.resumeExternalId
       this.sessions.set(id, info)
+      // 실물과 같은 규칙: 마지막에 고른 도구가 그 프로젝트의 기본값이 된다 (manager.createSession)
+      const owner = this.projectsList.find((p) => p.id === params.projectId)
+      if (owner) owner.defaultTool = params.tool
       // 불러오기: 이전 대화를 이미 읽은 상태로 복원한다 (host의 importHistory와 같은 규칙)
       if (params.importHistory && params.resumeExternalId) {
         const history = this.externalHistory.get(params.resumeExternalId) ?? []

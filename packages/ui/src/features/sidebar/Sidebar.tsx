@@ -3,7 +3,6 @@ import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
-import { AddProjectDialog } from '../project/AddProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
@@ -112,7 +111,10 @@ export function Sidebar() {
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   // 최소 폭은 실픽셀 고정 — 글자를 키워도 목록을 좁힐 수 있는 한계는 그대로다
   const zoom = useTextZoom()
-  const [addOpen, setAddOpen] = useState(false)
+  const platform = usePlatform()
+  const addProject = useStore((s) => s.addProject)
+  const setToast = useStore((s) => s.setToast)
+  const [adding, setAdding] = useState(false)
 
   return (
     <aside
@@ -150,8 +152,28 @@ export function Sidebar() {
       */}
       <div className="px-2 py-2">
         <button
-          className="flex w-full items-center gap-2 rounded-lg border border-edge px-2.5 py-1.5 text-left text-[12px] text-slate transition-colors hover:border-graphite hover:text-chalk"
-          onClick={() => setAddOpen(true)}
+          className="flex w-full items-center gap-2 rounded-lg border border-edge px-2.5 py-1.5 text-left text-[12px] text-slate transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
+          /*
+           * **폴더를 고르는 방법은 앱에 하나뿐이어야 한다.**
+           *
+           * 여기는 원래 절대 경로를 손으로 치는 창을 열었다 — 웹 개발 시절의 폴백이
+           * Tauri로 넘어오며 그대로 남은 것이다. 첫 실행 화면은 진작 네이티브 피커를
+           * 쓰고 있었으니, 같은 일을 두 방법으로 시키면서 **더 자주 쓰는 쪽에 더 나쁜
+           * 방법**을 두고 있었다 (Finder 열고 경로 복사해서 돌아오기).
+           * 창이 통째로 사라지고 버튼이 곧 피커가 된다.
+           */
+          onClick={async () => {
+            setAdding(true)
+            try {
+              const picked = await platform.system.pickDirectory()
+              if (picked) await addProject(picked)
+            } catch (e) {
+              setToast((e as Error).message)
+            } finally {
+              setAdding(false)
+            }
+          }}
+          disabled={adding}
           data-testid="add-project"
           title="Register a directory for agents to run in"
         >
@@ -159,7 +181,6 @@ export function Sidebar() {
           <span className="truncate">Add project</span>
         </button>
       </div>
-      {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
     </aside>
   )
 }
@@ -319,7 +340,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const focusedSessionId = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   const sessions = useSessionsOf(projectId)
-  const [newSessionOpen, setNewSessionOpen] = useState(false)
+  // 창의 열림은 스토어가 든다 — 첫 실행 화면도 이 창을 열어야 하기 때문이다
+  const newSessionOpen = useStore((s) => s.newSessionFor === projectId)
+  const openNewSession = useStore((s) => s.openNewSession)
   const [confirming, setConfirming] = useState<string | null>(null)
   /** 지금 이름을 고치는 중인 세션. 한 번에 하나만 — 두 줄이 동시에 입력창이면 어느 쪽이 활성인지 모른다 */
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -389,7 +412,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         <span className="-my-1 ml-auto shrink-0">
           <IconButton
             label={`New session in ${project.name}`}
-            onClick={() => setNewSessionOpen(true)}
+            onClick={() => openNewSession(projectId)}
             testId={`new-session-${project.name}`}
             align="right"
           >
@@ -517,7 +540,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         })}
       </ul>
 
-      {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => setNewSessionOpen(false)} />}
+      {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
 
       {confirming && (
         <ConfirmDelete

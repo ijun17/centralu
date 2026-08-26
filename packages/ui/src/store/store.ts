@@ -250,6 +250,15 @@ export type AppState = {
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
   /**
+   * 세션 생성 창이 열려 있는 프로젝트 (null이면 닫혀 있다).
+   *
+   * 사이드바 칸의 지역 상태였는데 스토어로 올렸다: **첫 실행 화면이 이 창을 열어야
+   * 하기 때문이다.** 프로젝트가 하나 생기는 순간 첫 실행 화면은 사라지므로(App이
+   * 프로젝트 유무로 가른다), 그 화면이 스스로 다음 걸음을 이어줄 방법은 사라지는
+   * 자기 대신 다른 곳에 서게 될 창을 예약하는 것뿐이다.
+   */
+  newSessionFor: string | null
+  /**
    * 세션별로 지금 화면에 있는 가장 오래된 기록 지점.
    * 압축으로 모델이 잊은 대화도 우리 저장소에는 남아 있으므로, 여기서부터 더 거슬러 읽는다.
    */
@@ -390,6 +399,8 @@ export type AppState = {
   setShowIgnored(show: boolean): void
   setTextScale(step: number): void
   setToast(msg: string | null): void
+  /** 세션 생성 창을 연다/닫는다 (null이면 닫기) */
+  openNewSession(projectId: string | null): void
 
   addProject(path: string): Promise<ProjectInfo>
   /**
@@ -740,6 +751,7 @@ export const useStore = create<AppState>((set, get) => ({
   textScale: TEXT_SCALE_DEFAULT,
   focusedSessionId: null,
   focusedProjectId: null,
+  newSessionFor: null,
   history: {},
   resuming: {},
   wakeError: {},
@@ -1444,6 +1456,9 @@ export const useStore = create<AppState>((set, get) => ({
   setToast(toast) {
     set({ toast })
   },
+  openNewSession(projectId) {
+    set({ newSessionFor: projectId })
+  },
 
   async addProject(path) {
     const p = await get().platform!.projects.add(path)
@@ -1577,6 +1592,19 @@ export const useStore = create<AppState>((set, get) => ({
           ...liveFactsOf(info),
         },
       },
+      /*
+       * **고른 도구가 이 프로젝트의 기본값이 된다.**
+       *
+       * default_tool은 프로젝트를 만들 때 'claude'로 박힌 뒤 어디서도 갱신되지 않았다 —
+       * codex를 쓰는 사람은 새 세션을 만들 때마다 영원히 필을 다시 눌러야 했다.
+       * 별도의 설정 항목을 만들지 않는 이유: 마지막 선택이 곧 기본값이라는 사실은
+       * **세션을 만든 행위가 이미 말해 준다.** host도 같은 자리에서 같은 판단을 한다
+       * (manager.createSession) — 여기 것은 이번 실행에서 바로 보이게 하는 낙관적 갱신이다.
+       */
+      projects:
+        opts?.tool && s.projects[projectId]
+          ? { ...s.projects, [projectId]: { ...s.projects[projectId], defaultTool: opts.tool } }
+          : s.projects,
       // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
       // pending을 세우는 이유: host도 첫 프롬프트를 저장하고 user_message로 알린다 —
       // 이 표식이 없으면 재생된 그 이벤트가 같은 말을 한 번 더 그린다 (send()와 같은 규칙)

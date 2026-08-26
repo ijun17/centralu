@@ -21,10 +21,15 @@ async function setup(page: Page, opts: { projects?: string[] } = {}) {
         ;(window as any).__mock.nextPickedDirectory = p
       }, path)
       await page.getByTestId('first-run-pick').click()
+      // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+      await page.getByTestId('new-session-dialog').waitFor()
+      await page.keyboard.press('Escape')
     } else {
+      // 폴더 선택은 앱 전체에서 네이티브 피커 하나뿐이다 (경로 타이핑 창은 없어졌다)
+      await page.evaluate((p: string) => {
+        ;(window as any).__mock.nextPickedDirectory = p
+      }, path)
       await page.getByTestId('add-project').click()
-      await page.getByTestId('project-path-input').fill(path)
-      await page.getByTestId('project-add-confirm').click()
     }
     await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
   }
@@ -83,11 +88,67 @@ test('프로젝트 등록 → 사이드바 표시 (T5-2)', async ({ page }) => {
   await expect(page.getByTestId('project-tip-alpha')).toContainText('main')
 })
 
-test('빈 경로로는 프로젝트를 추가할 수 없다', async ({ page }) => {
+test('폴더 선택을 취소하면 아무것도 등록되지 않는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.nextPickedDirectory = null
+  })
   await page.getByTestId('add-project').click()
-  await page.getByTestId('project-path-input').fill('')
-  await expect(page.getByTestId('project-add-confirm')).toBeDisabled()
+  // 창도 없고 오류도 없다 — 고르지 않았다는 것은 실패가 아니다
+  await expect(page.getByTestId('toast')).toHaveCount(0)
+  const count = await page.evaluate(() => Object.keys((window as any).__store.getState().projects).length)
+  expect(count).toBe(1)
+})
+
+/**
+ * 흐름 점검 (2026-08-27): 첫 실행은 **앱이 무엇인지 말하고, 첫 대화까지 데려가야 한다.**
+ *
+ * 예전에는 둘 다 못 했다 — 첫 줄이 조작 설명이었고, 프로젝트를 등록하는 순간 이 화면이
+ * 사라지면서(App이 프로젝트 유무로 가른다) 사람은 빈 화면 앞에 남았다. 성공의 순간에
+ * 다음 걸음이 없다는 것이 이 화면의 가장 큰 결함이었다.
+ */
+test('첫 실행: 앱이 무엇인지 말하고, 폴더를 고르면 세션 만들기로 이어진다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('first-run')).toBeVisible()
+  // 조작법이 아니라 무엇을 하는 물건인지가 먼저다
+  await expect(page.getByTestId('first-run')).toContainText('Step in when one needs you')
+
+  // 준비된 도구가 있으면 목록은 접혀 있다 — 여기서 고칠 수 있는 것이 없는 체크리스트다
+  await expect(page.getByTestId('first-run-tools')).toBeVisible()
+  await expect(page.getByTestId('first-run-blocked')).toHaveCount(0)
+
+  await page.evaluate(() => {
+    ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
+  })
+  await page.getByTestId('first-run-pick').click()
+
+  // 등록으로 끝나지 않는다 — 다음 걸음(세션 만들기)이 그 프로젝트 자리에서 열린다
+  await expect(page.getByTestId('new-session-dialog')).toBeVisible()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('prompt-input')).toBeVisible()
+})
+
+/**
+ * 마지막에 고른 도구가 그 프로젝트의 기본값이 된다.
+ *
+ * default_tool은 프로젝트 생성 시 'claude'로 박힌 뒤 갱신되는 자리가 없었다 —
+ * codex를 쓰는 사람은 새 세션을 만들 때마다 **영원히** 필을 다시 눌러야 했다.
+ * 설정 항목이 아니라 세션을 만든 행위가 이 사실을 말한다.
+ */
+test('앱이 마지막에 쓴 도구를 기억한다 — 다음 세션은 거기서 시작한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('tool-option-codex').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 두 번째 창은 codex로 열린다 (aria-pressed가 아니라 실제 생성 파라미터로 확인한다)
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
+  expect(params.tool).toBe('codex')
 })
 
 /**
@@ -109,10 +170,6 @@ test('Add project 버튼은 사이드바 안에, 프로젝트 목록 아래에 �
   // 새 프로젝트가 붙는 자리(목록 끝) 바로 아래다
   expect(add.y).toBeGreaterThanOrEqual(project.y + project.height - 1)
 
-  // 열리는 창은 사이드바 폭에 갇히지 않는다 (포털로 띄운다)
-  await page.getByTestId('add-project').click()
-  const dialog = (await page.getByTestId('add-project-dialog').boundingBox())!
-  expect(dialog.width).toBeGreaterThan(sidebar.width)
 })
 
 test('세션 생성 → 대화 스트리밍 렌더 (T5-3)', async ({ page }) => {

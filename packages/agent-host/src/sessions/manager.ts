@@ -176,8 +176,14 @@ export class SessionManager {
 
   private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
     const git = await gitSummary(path)
+    /*
+     * **저장된 값을 읽는다.** 여기 'claude'가 상수로 박혀 있어서, DB의 default_tool은
+     * 읽히는 자리가 하나도 없는 컬럼이었다 — 쓰는 자리도 없었으니 아무도 눈치채지
+     * 못했다 (2026-08-27, 기억하기 기능을 붙이다 테스트가 잡았다).
+     */
+    const stored = this.store.listProjects().find((p) => p.id === id)?.defaultTool
     return {
-      id, path, name: basename(path), defaultTool: 'claude',
+      id, path, name: basename(path), defaultTool: stored === 'codex' ? 'codex' : 'claude',
       // Saved shell commands ride along with the project so the Run menu never has a
       // "loading" state to distinguish from an empty one (issue #44)
       commands: this.store.projectCommands(id),
@@ -471,6 +477,20 @@ export class SessionManager {
     this.meta.set(id, info)
     this.store.upsertSession(info)
     this.store.setSessionCwd(id, cwd)
+    /*
+     * **마지막에 고른 도구가 이 프로젝트의 기본값이 된다.**
+     *
+     * default_tool은 프로젝트 생성 시 'claude'로 박힌 뒤 갱신되는 자리가 없었다 —
+     * codex를 쓰는 사람은 새 세션마다 영원히 필을 다시 눌렀다. 설정 화면을 만드는
+     * 대신 여기 두는 이유: "무엇을 기본으로 쓰는가"는 **세션을 만드는 행위가 이미
+     * 말해 준다.** 그래서 UI든 오케스트레이터의 create_session이든 같은 규칙을 받는다.
+     */
+    if (params.projectId) {
+      const owner = this.store.listProjects().find((p) => p.id === params.projectId)
+      if (owner && owner.defaultTool !== params.tool) {
+        this.store.setProjectDefaultTool(params.projectId, params.tool)
+      }
+    }
     this.handles.set(id, handle)
     this.running.set(id, {
       model: info.model,

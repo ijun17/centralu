@@ -573,6 +573,17 @@ export class Store {
     this.db.prepare(`UPDATE projects SET commands = ? WHERE id = ?`).run(JSON.stringify(commands), projectId)
   }
 
+  /**
+   * The tool a new session in this project starts on.
+   *
+   * Written when a session is created with an explicit tool, not from a settings screen:
+   * the column was set to 'claude' at project creation and never updated again, so a Codex
+   * user re-picked the pill on every single new session, forever.
+   */
+  setProjectDefaultTool(projectId: string, tool: string): void {
+    this.db.prepare(`UPDATE projects SET default_tool = ? WHERE id = ?`).run(tool, projectId)
+  }
+
   findProjectByPath(path: string): { id: string } | undefined {
     return this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(path) as { id: string } | undefined
   }

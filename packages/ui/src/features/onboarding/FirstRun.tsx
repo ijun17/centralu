@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { Kbd } from '../../components/primitives.jsx'
 
 type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
@@ -23,10 +22,20 @@ const LOGIN_HINT: Record<string, string> = {
  * 처음 여는 사람이 마주하는 세 가지 빈 상태를 실제로 설계한다:
  * CLI 미설치 / 로그인 안 됨 / 프로젝트 0개.
  * 빈 화면은 막다른 길이 아니라 **다음 행동을 알려주는 자리**여야 한다.
+ *
+ * **이 화면은 앱이 무엇인지 말하고, 첫 대화까지 데려간다** (2026-08-27 흐름 점검).
+ * 예전에는 둘 다 못 했다: 첫 줄이 "프로젝트를 등록하면 관제가 시작된다"라는 조작
+ * 설명이라 이 앱이 무엇을 하는 물건인지는 어디에도 없었고, 등록하는 순간 화면이
+ * 사라져(App이 프로젝트 유무로 가른다) 사람은 빈 화면과 사이드바 앞에 남겨졌다 —
+ * 성공의 순간에 다음 걸음이 없었다. 이제 프로젝트가 생기면 세션 생성 창을 예약한다.
+ *
+ * 도구 감지 목록은 **문제가 있을 때만 앞에 선다.** 여기서 고칠 수 있는 것이 하나도
+ * 없는 체크리스트(설치·로그인은 터미널의 일이다)가 첫인상의 무게를 가져가면 안 된다.
  */
 export function FirstRun() {
   const platform = usePlatform()
   const addProject = useStore((s) => s.addProject)
+  const openNewSession = useStore((s) => s.openNewSession)
   const setToast = useStore((s) => s.setToast)
   const [tools, setTools] = useState<Detection[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -50,68 +59,89 @@ export function FirstRun() {
   return (
     <div className="flex flex-1 items-center justify-center px-8" data-testid="first-run">
       <div className="w-full max-w-lg">
-        <h1 className="text-[15px] font-medium tracking-tight text-chalk">Get started</h1>
-        <p className="mt-1 text-[12px] text-ash">
-          Register a project to run agents in and monitoring begins.
+        {/*
+          **무엇을 하는 물건인지 먼저 말한다.** 여기 오는 사람은 Claude Code나 Codex를
+          터미널에서 써 본 사람이고, 이 앱을 여는 이유는 "그걸 여러 개 동시에" 하기
+          위해서다. 조작법("디렉토리를 등록하라")은 그 다음이다 — 버튼이 이미 말한다.
+        */}
+        <h1 className="text-[15px] font-medium tracking-tight text-chalk">
+          Keep several agents working. Step in when one needs you.
+        </h1>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-ash">
+          Centralu runs your Claude Code and Codex sessions side by side, and brings the ones that
+          are waiting on an answer to you. Pick a folder to work in — that is all the setup there is.
         </p>
 
-        {/* 1단계: 도구 감지 — 하나만 준비돼 있어도 진행할 수 있다 */}
+        <button
+          className="mt-5 w-full rounded border border-edge bg-panel px-3 py-2.5 text-left text-[13px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+          disabled={busy}
+          data-testid="first-run-pick"
+          onClick={async () => {
+            setBusy(true)
+            try {
+              const picked = await platform.system.pickDirectory()
+              /*
+               * 등록하는 순간 이 화면은 사라진다 — 다음 걸음을 여기서 예약해 두지
+               * 않으면 사람은 빈 화면 앞에 남는다. 창은 사이드바의 그 프로젝트 칸에서
+               * 열린다: 앞으로 세션을 만들 때마다 열릴 바로 그 자리다.
+               */
+              if (picked) openNewSession((await addProject(picked)).id)
+            } catch (e) {
+              setToast((e as Error).message)
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          Choose a folder…
+          <span className="mt-0.5 block text-[11px] text-slate">
+            Agents run here. It does not have to be a git repo, and you can add more later.
+          </span>
+        </button>
+
+        {/*
+          도구 상태는 **문제일 때만 앞에 선다.** 하나라도 쓸 수 있으면 이 목록에서
+          할 일은 없다 — 접어 두고, 준비됐다는 사실만 한 줄로 알린다.
+        */}
         <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-[0.12em] text-slate">Agent tools</h2>
-          <ul className="mt-2 space-y-1.5">
-            {tools === null ? (
-              <li className="text-[12px] text-slate">Checking…</li>
-            ) : tools.length === 0 ? (
-              <li className="text-[12px] text-ash">Could not detect tools</li>
-            ) : (
-              tools.map((t) => <ToolRow key={t.tool} d={t} optional={canStart} />)
-            )}
-          </ul>
-          <button
-            className="mt-2 text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
-            onClick={() => void detect()}
-            data-testid="redetect"
-          >
-            Check again
-          </button>
+          {tools === null ? (
+            <p className="text-[11px] text-slate">Looking for Claude Code and Codex…</p>
+          ) : canStart ? (
+            <details data-testid="first-run-tools">
+              <summary className="cursor-pointer list-none text-[11px] text-slate hover:text-ash">
+                {usable.map((t) => (t.tool === 'claude' ? 'Claude Code' : 'Codex')).join(' · ')} ready ·
+                <span className="ml-1 underline-offset-2 hover:underline">see all tools</span>
+              </summary>
+              <ul className="mt-2 space-y-1.5">
+                {tools.map((t) => (
+                  <ToolRow key={t.tool} d={t} optional />
+                ))}
+              </ul>
+            </details>
+          ) : (
+            <div data-testid="first-run-blocked">
+              <p className="text-[11px] leading-relaxed text-ash">
+                {tools.length === 0
+                  ? 'Could not detect any agent tool. Install one, then press Check again.'
+                  : 'No tool is ready yet — install or log in below, then press Check again. You can pick a folder now either way.'}
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {tools.map((t) => (
+                  <ToolRow key={t.tool} d={t} optional={false} />
+                ))}
+              </ul>
+            </div>
+          )}
+          {tools !== null && (
+            <button
+              className="mt-2 text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
+              onClick={() => void detect()}
+              data-testid="redetect"
+            >
+              Check again
+            </button>
+          )}
         </section>
-
-        {/* 2단계: 프로젝트 등록 */}
-        <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-[0.12em] text-slate">Project</h2>
-          <button
-            className="mt-2 w-full rounded border border-edge bg-panel px-3 py-2.5 text-left text-[13px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
-            disabled={busy}
-            data-testid="first-run-pick"
-            onClick={async () => {
-              setBusy(true)
-              try {
-                const picked = await platform.system.pickDirectory()
-                if (picked) await addProject(picked)
-              } catch (e) {
-                setToast((e as Error).message)
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            Choose directory…
-            <span className="mt-0.5 block text-[11px] text-slate">
-              Agents run in this directory. It does not have to be a git repo.
-            </span>
-          </button>
-        </section>
-
-        {!canStart && tools !== null && tools.length > 0 && (
-          <p className="mt-5 text-[11px] leading-relaxed text-ash" data-testid="first-run-blocked">
-            No usable tools. Install and log in as shown above, then press Check again.
-            You can still register a project now.
-          </p>
-        )}
-
-        <p className="mt-6 text-[11px] text-slate">
-          <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you, anytime.
-        </p>
       </div>
     </div>
   )

@@ -112,6 +112,9 @@ async function boot(page: Page, count: number): Promise<string[]> {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
   })
   await page.getByTestId('first-run-pick').click()
+  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+  await page.getByTestId('new-session-dialog').waitFor()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('project-alpha')).toBeVisible()
 
   const ids: string[] = []

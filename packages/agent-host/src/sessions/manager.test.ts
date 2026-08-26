@@ -163,6 +163,26 @@ describe('프로젝트', () => {
     expect(one.path).toBe(p.path)
     await expect(rpc('projects.gitStatus', { projectId: 'nope' })).rejects.toThrow(/Project not found/)
   })
+
+  /*
+   * 마지막에 고른 도구가 그 프로젝트의 기본값이 된다 (2026-08-27 흐름 점검).
+   *
+   * default_tool은 프로젝트를 만들 때 'claude'로 박힌 뒤 갱신되는 자리가 **없었다** —
+   * codex를 쓰는 사람은 새 세션마다 영원히 필을 다시 눌렀다. 설정 화면이 아니라
+   * 세션을 만드는 행위가 이 사실을 말하므로, UI든 오케스트레이터든 같은 규칙을 받는다.
+   */
+  it('세션을 만들면 그 도구가 프로젝트 기본값이 된다', async () => {
+    const p = await addProject()
+    const list = async () => ((await rpc('projects.list', {})) as { id: string; defaultTool: string }[])
+    expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
+
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })
+    expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('codex')
+
+    // 되돌아오는 것도 같은 길이다 — 마지막 선택이 언제나 이긴다
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
+    expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
+  })
 })
 
 describe('세션 수명주기', () => {
