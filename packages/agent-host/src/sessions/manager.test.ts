@@ -214,6 +214,24 @@ describe('세션 수명주기', () => {
     expect(store.listSessions().find((x) => x.id === quiet.id)!.context).toBeNull()
   })
 
+  /*
+   * /clear가 대화 id를 갈아치운다 (실측 2026-08-26): claude는 /clear에 **새 session_id**로
+   * 새 init을 내고, 어댑터는 핸들의 externalId를 그 값으로 갱신한다. onEvent의 따라잡기가
+   * 이 값을 DB까지 나르지 않으면, 다음 재개가 옛 id로 붙어 **지운 대화가 되살아난다.**
+   * (codex는 실측상 /clear류가 없다 — 스레드 id가 살아 있는 동안 안 바뀐다)
+   */
+  it('/clear로 대화 id가 바뀌면 다음 이벤트에 DB까지 따라온다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    expect(store.listSessions().find((x) => x.id === s.id)!.externalId).toBe('ext-1')
+
+    const h = adapter.handleOf(s.id)!
+    h.externalId = 'ext-after-clear' // 어댑터가 새 init에서 갱신한 상태
+    h.finishTurn() // /clear의 턴이 끝나며 이벤트가 흐른다
+
+    expect(store.listSessions().find((x) => x.id === s.id)!.externalId).toBe('ext-after-clear')
+  })
+
   it('생성 → 전송 → 이벤트 전파', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
