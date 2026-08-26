@@ -225,8 +225,9 @@ function OrchestratorButton() {
 function OrchestratorIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      {/* 그리드 아이콘처럼 뷰박스를 거의 채운다 — 같은 13px인데 도형이 절반만 쓰면 작아 보인다 */}
       <path
-        d="M3 12.5 L2.3 5.4 L5.8 7.8 L8 3.8 L10.2 7.8 L13.7 5.4 L13 12.5 Z"
+        d="M2.6 13.5 L1.8 4.6 L5.9 7.4 L8 2.6 L10.1 7.4 L14.2 4.6 L13.4 13.5 Z"
         stroke="currentColor"
         strokeWidth="1.3"
         strokeLinejoin="round"
