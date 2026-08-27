@@ -32,3 +32,6 @@ packaging/npm/linux-x64/icon.png
 
 # 아이콘 후보 비교용 산출물 (pnpm icon --preview)
 icon-preview.png
+
+# 확인용 스크린샷·임시 산출물 — 저장소에 남길 것이 아니다 (도그푸딩 중 화면 캡처)
+tmp/
