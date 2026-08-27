@@ -173,8 +173,18 @@ describe('한도 (M0 발견: rate_limit_event)', () => {
     expect(n({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1786750200 } })).toEqual([])
   })
 
-  it('차단이면 limit_reached + 해제 시각 ISO 변환', () => {
-    const out = n({ type: 'rate_limit_event', rate_limit_info: { status: 'blocked', resetsAt: 1786750200, rateLimitType: 'five_hour' } })
+  /*
+   * 이 셋이 SDK가 말하는 전부다 ('allowed' | 'allowed_warning' | 'rejected').
+   * 예전 테스트는 status: 'blocked'라는 **없는 값**으로 통과하고 있었다 — 그래서
+   * `!== 'allowed'`라는 판정이 allowed_warning을 삼키는 것을 아무도 못 봤다.
+   * 도구의 어휘를 지어내면 테스트는 우리 상상만 지킨다.
+   */
+  it('경고는 한도가 아니다 — allowed_warning이면 이벤트 없음', () => {
+    expect(n({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1786750200, rateLimitType: 'five_hour' } })).toEqual([])
+  })
+
+  it('rejected면 limit_reached + 해제 시각 ISO 변환', () => {
+    const out = n({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1786750200, rateLimitType: 'five_hour' } })
     expect(out[0]).toMatchObject({ type: 'limit_reached', resumeAt: new Date(1786750200 * 1000).toISOString(), windowMins: 300 })
   })
 })

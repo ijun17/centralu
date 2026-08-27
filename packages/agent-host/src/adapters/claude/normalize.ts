@@ -230,10 +230,22 @@ export function normalizeMessage(
     return out
   }
 
-  // 한도 (M0 발견: rate_limit_event.rate_limit_info)
+  /*
+   * 한도 (M0 발견: rate_limit_event.rate_limit_info).
+   *
+   * **막힌 것만 한도다.** status는 셋이다 (SDK: 'allowed' | 'allowed_warning' | 'rejected').
+   * `!== 'allowed'`로 보던 동안 allowed_warning — "가까워졌지만 아직 통과한다" — 가
+   * rejected와 같은 취급을 받아, 아무것도 막히지 않은 세션에 한도 배너가 붙었다
+   * (도그푸딩: "한도에 도달하지 않았는데 탭에 떴다").
+   *
+   * 코덱스 어댑터가 같은 실수를 먼저 고치면서 이쪽을 기준으로 인용했는데, 기준이
+   * 틀려 있었다. 지금은 코덱스 쪽이 옳다 — 도구가 주는 명시적 신호만 본다.
+   * 경고를 버리는 것은 아니다: 남은 여유는 사용량 창(agents.usage)이 퍼센트로 보여준다.
+   * 배너는 "지금 못 쓴다"는 말이라, 쓸 수 있는데 붙으면 그 말이 거짓이 된다.
+   */
   if (type === 'rate_limit_event') {
     const info = (m.rate_limit_info ?? {}) as Json
-    if (str(info.status) !== 'allowed') {
+    if (str(info.status) === 'rejected') {
       const resetsAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * 1000).toISOString() : undefined
       out.push({
         type: 'limit_reached',
