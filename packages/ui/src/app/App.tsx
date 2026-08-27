@@ -16,7 +16,7 @@ import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { ApprovalBanner } from '../features/approval/ApprovalBanner.jsx'
-import { FirstRun } from '../features/onboarding/FirstRun.jsx'
+import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
@@ -93,13 +93,21 @@ export function App({ platform }: { platform: Platform }) {
   )
 }
 
-/** 프로젝트가 하나도 없으면 시작 안내가 화면을 대신한다 (FR-19) */
+/**
+ * 처음인 사람에게는 소개 화면이 화면을 대신한다 (FR-19 → #63).
+ *
+ * 조건은 "프로젝트 0개"가 아니라 **"아무것도 만든 적 없음"이다** — 세션(오케스트레이터
+ * 포함)이 하나라도 있으면 이 사람은 처음이 아니고, 소개를 다시 보여주는 것은 방해다.
+ * 소개를 지나온 뒤의 빈 상태는 특별한 화면이 아니다: 보통의 3레인에서 사이드바의
+ * Add project와 오케스트레이터의 추천 질문이 다음 걸음을 맡는다.
+ */
 function Body() {
-  const hasProjects = useStore((s) => Object.keys(s.projects).length > 0)
-  // 훅은 **이른 return보다 먼저** — 아래 FirstRun 분기 뒤에 두면 렌더마다 훅 수가 달라진다
+  const virgin = useStore((s) => Object.keys(s.projects).length === 0 && Object.keys(s.sessions).length === 0)
+  const introSeen = useStore((s) => s.introSeen)
+  // 훅은 **이른 return보다 먼저** — 아래 소개 분기 뒤에 두면 렌더마다 훅 수가 달라진다
   const view = useStore((s) => s.view)
 
-  if (!hasProjects) return <FirstRun />
+  if (virgin && !introSeen) return <Intro />
   /*
     3레인. 좌 = 관찰, 중앙 = 조작, 우 = 증거.
     The overlay covers the middle lane only — see the note below.

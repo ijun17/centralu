@@ -176,6 +176,11 @@ export function createRpcHandler(
     'workspace.load': async () => mgr.loadWorkspace(),
     'projects.add': async (p) => mgr.addProject(RpcMethods['projects.add'].params.parse(p).path),
     'orchestrator.get': async () => mgr.orchestrator(),
+    'orchestrator.peek': async () => mgr.orchestratorPeek(),
+    'orchestrator.configure': async (p) => {
+      mgr.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
+      return { ok: true as const }
+    },
     'orchestrator.tools': async () => orchestratorToolSchemas(),
     'orchestrator.tool': async (p) => {
       const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)

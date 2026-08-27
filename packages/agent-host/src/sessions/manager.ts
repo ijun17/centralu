@@ -2107,6 +2107,30 @@ export class SessionManager {
    * 프로세스가 죽어 있어도 그대로 돌려준다. 살리는 건 말을 걸 때의 일이고(FR-10),
    * 여기서 되살리면 사이드바를 그리는 것만으로 도구가 뜬다.
    */
+  /**
+   * 있으면 주고, 없으면 **만들지 않는다** (#63).
+   *
+   * 온보딩이 오케스트레이터 화면을 먼저 보여주면서 "화면을 연다 ≠ 프로세스를 만든다"가
+   * 됐다. 화면은 이걸로 묻기만 하고, 만드는 것은 첫 질문이 던져지는 순간의
+   * orchestrator()다 — 그 전에 만들면 묻지도 않은 사람 몫의 도구 프로세스가 뜬다.
+   */
+  orchestratorPeek(): SessionInfo | null {
+    const known = this.store.orchestratorId()
+    return known ? (this.meta.get(known) ?? null) : null
+  }
+
+  /**
+   * 중앙 오케스트레이터가 돌 도구 (#63, 소개 화면의 카드 선택).
+   *
+   * **아직 세션이 없을 때를 위한 설정이다.** 선택과 생성 사이가 벌어졌기 때문에
+   * (카드 클릭 → …언젠가… 첫 질문) 선택을 어딘가 적어둬야 하고, 이건 설치본의
+   * 성질이므로 app_settings가 맞는 자리다. 이미 만들어진 뒤에는 세션 설정의
+   * Agent 전환이 맡는다 — 이 값은 다시 읽히지 않는다.
+   */
+  configureOrchestrator(tool: 'claude' | 'codex'): void {
+    this.store.setAppSetting('orchestrator_tool', tool)
+  }
+
   async orchestrator(): Promise<SessionInfo> {
     const known = this.store.orchestratorId()
     if (known) {
@@ -2115,11 +2139,18 @@ export class SessionManager {
       // id는 남았는데 세션이 사라진 경우 — 표식만 지우고 새로 만든다
     }
 
+    /*
+     * 도구는 소개 화면의 선택(configureOrchestrator)을 따른다 — 'claude' 하드코딩은
+     * Codex만 설치한 사람이 소개 화면("Codex 준비됨")을 통과하고도 오케스트레이터를
+     * 못 여는 모순을 만들었다 (#63). 코덱스 쪽 배선(stdio 다리)은 프로젝트
+     * 오케스트레이터(#13)가 이미 실측으로 깔아 놓았다.
+     */
+    const configured = this.store.appSetting('orchestrator_tool')
     const info = await this.createSession({
       projectId: null,
       kind: 'orchestrator', // 표식은 세션과 함께 태어난다 — 따로 찍으면 그 사이가 무표식 상태다
       cwd: orchestratorHome(),
-      tool: 'claude',
+      tool: configured === 'codex' ? 'codex' : 'claude',
       permissionPreset: 'normal',
     })
     // 자동 이름(FR-18)이 첫 프롬프트로 덮어쓰지 않게 사람이 정한 이름으로 둔다

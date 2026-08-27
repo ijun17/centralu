@@ -8,19 +8,21 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 /** 브라우저 안의 mock을 조작하는 헬퍼 (window.__mock) */
 async function setup(page: Page, opts: { projects?: string[] } = {}) {
   await page.goto('/?mock=1')
-  // 프로젝트가 없으면 시작 안내가 먼저 나온다 (FR-19)
-  await expect(page.getByTestId('first-run')).toBeVisible()
+  // 처음이면 소개 화면이 먼저다 (#63) — 오케스트레이터가 돌 도구 카드를 하나 고른다
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-claude').click()
+  // 카드 클릭은 오케스트레이터 화면(빈 대화 + 추천 질문)으로 이어진다
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   for (const [i, path] of (opts.projects ?? []).entries()) {
     if (i === 0) {
       /*
-        첫 프로젝트는 **시작 안내**에서 등록한다. 'Add project' 버튼이 사이드바로
-        내려갔는데(이슈 #4), 프로젝트가 0개면 사이드바 자체가 없기 때문이다 —
-        그 상태를 맡는 화면이 시작 안내다.
+        첫 프로젝트는 빈 오케스트레이터 화면의 **탈출구**로 등록한다 (#63 —
+        대화를 강요하지 않는다). 프로젝트가 0개면 사이드바에 + 버튼이 없기 때문이다.
       */
       await page.evaluate((p: string) => {
         ;(window as any).__mock.nextPickedDirectory = p
       }, path)
-      await page.getByTestId('first-run-pick').click()
+      await page.getByTestId('orchestrator-pick-folder').click()
       // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
       await page.getByTestId('new-session-dialog').waitFor()
       await page.keyboard.press('Escape')
@@ -101,31 +103,95 @@ test('폴더 선택을 취소하면 아무것도 등록되지 않는다', async 
 })
 
 /**
- * 흐름 점검 (2026-08-27): 첫 실행은 **앱이 무엇인지 말하고, 첫 대화까지 데려가야 한다.**
+ * 첫 실행 (#63): **오케스트레이터를 먼저 만난다.**
  *
- * 예전에는 둘 다 못 했다 — 첫 줄이 조작 설명이었고, 프로젝트를 등록하는 순간 이 화면이
- * 사라지면서(App이 프로젝트 유무로 가른다) 사람은 빈 화면 앞에 남았다. 성공의 순간에
- * 다음 걸음이 없다는 것이 이 화면의 가장 큰 결함이었다.
+ * 목표는 효율이 아니라 습관이다 — 첫 실행에서 오케스트레이터에게 물어보는 경험을
+ * 겪지 않은 사람은 나중에도 누르지 않는다. 소개 화면의 카드가 곧 도구 감지 표시이고,
+ * 카드 클릭은 설정만 적는다 (프로세스는 첫 질문에서야 뜬다 — 지연 기동).
  */
-test('첫 실행: 앱이 무엇인지 말하고, 폴더를 고르면 세션 만들기로 이어진다', async ({ page }) => {
+test('첫 실행: 소개 화면 → 카드 선택 → 빈 오케스트레이터 대화 (세션은 아직 없다)', async ({ page }) => {
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
-  // 조작법이 아니라 무엇을 하는 물건인지가 먼저다
-  await expect(page.getByTestId('first-run')).toContainText('Step in when one needs you')
+  await expect(page.getByTestId('intro')).toBeVisible()
+  // 앱이 무엇인지가 여전히 첫 문장이고, 오케스트레이터의 역할이 눈에 띄게 선다
+  await expect(page.getByTestId('intro')).toContainText('Step in when one needs you')
+  await expect(page.getByTestId('intro-role')).toContainText('orchestrator')
+  // 나중에 바꿀 수 있다는 안내가 선택의 부담을 낮춘다
+  await expect(page.getByTestId('intro')).toContainText('You can change this later')
 
-  // 준비된 도구가 있으면 목록은 접혀 있다 — 여기서 고칠 수 있는 것이 없는 체크리스트다
-  await expect(page.getByTestId('first-run-tools')).toBeVisible()
-  await expect(page.getByTestId('first-run-blocked')).toHaveCount(0)
+  await page.getByTestId('intro-card-claude').click()
 
+  // 빈 대화 + 추천 질문 3개 + 탈출구 — 그리고 **세션은 아직 만들어지지 않았다**
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  await expect(page.getByTestId('suggest-create-project')).toBeVisible()
+  await expect(page.getByTestId('orchestrator-pick-folder')).toBeVisible()
+  const sessionCount = await page.evaluate(() => (window as any).__mock.sessions.size)
+  expect(sessionCount).toBe(0)
+})
+
+test('추천 질문 클릭 = 즉시 전송 — 그 순간에야 오케스트레이터가 태어난다 (#63 지연 기동)', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-codex').click()
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+
+  await page.getByTestId('suggest-capabilities').click()
+
+  // 질문이 사용자 메시지로 대화에 선다 (입력창 채우기 같은 중간 단계가 없다)
+  await expect(page.getByTestId('msg-user').first()).toContainText('What can you do as the orchestrator?')
+  // 카드는 메시지 수의 함수다 — 첫 마디가 생겼으니 사라진다
+  await expect(page.getByTestId('orchestrator-suggestions')).toHaveCount(0)
+  // 소개 화면에서 고른 도구가 오케스트레이터의 도구다
+  const tool = await page.evaluate(() => {
+    const m = (window as any).__mock
+    return [...m.sessions.values()].find((s: any) => s.projectId === null)?.tool
+  })
+  expect(tool).toBe('codex')
+})
+
+test('첫 실행 탈출구: 대화를 강요하지 않는다 — 폴더를 고르면 세션 만들기로 이어진다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.getByTestId('intro-card-claude').click()
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
   })
-  await page.getByTestId('first-run-pick').click()
+  await page.getByTestId('orchestrator-pick-folder').click()
 
   // 등록으로 끝나지 않는다 — 다음 걸음(세션 만들기)이 그 프로젝트 자리에서 열린다
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('prompt-input')).toBeVisible()
+})
+
+/**
+ * 제안 카드 (#63): propose_project는 **제안이 실행의 전부**다 — 경로 선택과 확정은
+ * 사람이 하고, 수락 사실은 사람의 메시지로 대화에 남는다 (제안-후-사람-확인).
+ */
+test('프로젝트 제안 카드: 폴더를 고르면 프로젝트가 생기고 수락이 대화에 남는다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.getByTestId('intro-card-claude').click()
+  await page.getByTestId('suggest-create-project').click()
+  await expect(page.getByTestId('msg-user').first()).toBeVisible()
+
+  // 오케스트레이터가 propose_project를 부른 상황을 재현한다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const orc = [...m.sessions.values()].find((s: any) => s.projectId === null)
+    m.emit({
+      type: 'tool_call', sessionId: orc.id, callId: 'c-prop',
+      summary: { tool: 'mcp__centralu__propose_project', title: 'To give your agents a folder to work in', readOnly: false, paths: [] },
+    })
+  })
+  await expect(page.getByTestId('project-proposal')).toBeVisible()
+  await expect(page.getByTestId('project-proposal')).toContainText('To give your agents a folder')
+
+  await page.evaluate(() => {
+    ;(window as any).__mock.nextPickedDirectory = '/tmp/proposed'
+  })
+  await page.getByTestId('project-proposal-pick').click()
+
+  // 프로젝트가 생겼고, 수락은 사람의 말로 남는다
+  await expect(page.getByTestId('project-proposed')).toBeVisible()
+  await expect(page.getByTestId('chat-stream')).toContainText('I accepted the proposal')
 })
 
 /**
@@ -551,18 +617,7 @@ test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 
   expect(await stream.evaluate((el) => el.scrollTop)).toBe(before)
 })
 
-test('첫 실행: 도구 상태를 보여주고 다음 행동을 알려준다 (E-1, FR-19)', async ({ page }) => {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
-  await expect(page.getByTestId('tool-claude')).toContainText('Claude Code')
-
-  // 디렉토리 선택 → 프로젝트 등록 → 관제 화면으로 전환
-  await page.getByTestId('first-run-pick').click()
-  await expect(page.getByTestId('sidebar')).toBeVisible()
-  await expect(page.getByTestId('project-picked')).toBeVisible()
-})
-
-test('첫 실행: 안 깔린 도구와 로그인 안 된 도구는 할 일이 다르다 (E-1)', async ({ page }) => {
+test('소개 화면: 카드가 곧 도구 감지 표시다 — 안 깔림과 로그인 안 됨은 처방이 다르다 (E-1)', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -572,33 +627,35 @@ test('첫 실행: 안 깔린 도구와 로그인 안 된 도구는 할 일이 �
     ]
   })
   await page.getByTestId('redetect').click()
-  // 안 깔림 → 설치 명령
-  await expect(page.getByTestId('tool-claude')).toContainText('npm i -g @anthropic-ai/claude-code')
-  // 로그인 안 됨 → 로그인 명령. 두 상태를 같은 말로 뭉뜽그리면 사람이 엉뚱한 걸 한다
-  await expect(page.getByTestId('tool-codex')).toContainText('codex login')
-  await expect(page.getByTestId('tool-codex')).not.toContainText('npm i -g')
+  // 진단은 한눈에 — 비활성 카드는 "Not connected"라고 말한다 (어둡고, 눌리지 않는다)
+  await expect(page.getByTestId('intro-card-claude-status')).toContainText('Not connected')
+  await expect(page.getByTestId('intro-card-claude')).toBeDisabled()
+  // 처방은 상태별로: 안 깔림 → 설치 명령, 로그인 안 됨 → 로그인 명령
+  await expect(page.getByTestId('intro-card-claude')).toContainText('npm i -g @anthropic-ai/claude-code')
+  await expect(page.getByTestId('intro-card-codex')).toContainText('codex login')
+  await expect(page.getByTestId('intro-card-codex')).not.toContainText('npm i -g')
   // 둘 다 못 쓰니 이때는 정말로 막힌 것이 맞다
-  await expect(page.getByTestId('first-run-blocked')).toBeVisible()
+  await expect(page.getByTestId('intro-blocked')).toBeVisible()
 })
 
-test('첫 실행: 하나만 로그인돼 있으면 막지 않는다 — 나머지는 선택지로 적는다 (#11)', async ({ page }) => {
+test('소개 화면: 하나만 준비돼 있으면 막지 않는다 — 그 카드로 지나간다 (#11)', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.agents.detect = async () => [
-      // #11 이전에는 detect()가 이 조합을 아예 만들지 못했다 —
-      // claude는 깔려 있기만 하면 무조건 loggedIn:true였다
       { tool: 'claude', installed: true, loggedIn: false, detail: '2.1.223 · login required' },
       { tool: 'codex', installed: true, loggedIn: true, detail: 'codex-cli 0.147' },
     ]
   })
   await page.getByTestId('redetect').click()
   // 로그인 안 된 claude에게 시킬 일은 '설치'가 아니라 '로그인'이다
-  await expect(page.getByTestId('tool-claude')).toContainText('claude auth login')
-  await expect(page.getByTestId('tool-claude')).not.toContainText('npm i -g')
-  // 쓸 수 있는 도구가 하나라도 있으면 나머지는 할 일이 아니라 선택지다
-  await expect(page.getByTestId('tool-hint-claude')).toContainText('Optional')
-  await expect(page.getByTestId('first-run-blocked')).toHaveCount(0)
+  await expect(page.getByTestId('intro-card-claude')).toContainText('claude auth login')
+  await expect(page.getByTestId('intro-card-claude')).not.toContainText('npm i -g')
+  await expect(page.getByTestId('intro-card-claude')).toBeDisabled()
+  await expect(page.getByTestId('intro-blocked')).toHaveCount(0)
+  // 준비된 카드는 살아 있다 — 클릭하면 앱으로 들어간다
+  await page.getByTestId('intro-card-codex').click()
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
 })
 
 test('보던 세션으로 돌아온다 (C-3 워크스페이스 스냅샷)', async ({ page }) => {
@@ -1369,7 +1426,7 @@ test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러�
 test('host가 이미 준비된 뒤에 붙어도 기동한다 (회귀: 이벤트를 놓쳐 30초 멈추던 문제)', async ({ page }) => {
   // mock 플랫폼은 즉시 준비되므로, attach가 늦어도 화면이 뜨는지만 본다
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('intro')).toBeVisible({ timeout: 5000 })
   // 기동 실패 화면이 아니어야 한다
   await expect(page.getByText('Could not start the agent host')).toHaveCount(0)
 })
@@ -3892,9 +3949,14 @@ test('오케스트레이터는 그리드 위에 있고 눌러서 연다', async 
 
   await orc.click()
   await expect(orc).toHaveAttribute('aria-pressed', 'true')
-  // 세션 하나짜리 화면이 뜬다 (포커스 뷰와 같은 부품)
-  await expect(page.getByTestId('session-view')).toBeVisible()
+  // 처음 열면 빈 대화가 선다 — 세션은 첫 질문에서야 태어난다 (#63 지연 기동)
+  await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
   await expect(page.getByTestId('grid')).toBeHidden()
+
+  // 첫 마디가 세션을 만들고, 그 뒤로는 포커스 뷰와 같은 부품이다
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  await expect(page.getByTestId('session-view')).toBeVisible()
 })
 
 /**
@@ -3974,6 +4036,9 @@ test('오케스트레이터 세션은 프로젝트 목록에 끼지 않는다', 
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   await page.getByTestId('orchestrator-button').click()
+  // 세션은 첫 마디에서 태어난다 (#63)
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()
 
   const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
@@ -3991,6 +4056,9 @@ test('오케스트레이터에서 @는 세션을 집는다', async ({ page }) =>
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'readme 담당')
   await page.getByTestId('orchestrator-button').click()
+  // 세션은 첫 마디에서 태어난다 (#63)
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()
 
   await page.getByTestId('prompt-input').fill('@readme')
@@ -5346,13 +5414,14 @@ test('그리드에서 껐다 켜면 그리드로 돌아온다', async ({ page })
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // 재시작 — 스냅샷만 살아남는다
+  // 재시작 — 스냅샷만 살아남는다. 소개 화면은 다시 나오지 않는다 (introSeen도 스냅샷에 남았다)
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
+  await expect(page.getByTestId('add-project')).toBeVisible()
+  await expect(page.getByTestId('intro')).toHaveCount(0)
   await page.evaluate((p: string) => {
     ;(window as any).__mock.nextPickedDirectory = p
   }, '/tmp/alpha')
-  await page.getByTestId('first-run-pick').click()
+  await page.getByTestId('add-project').click()
 
   // 프로젝트가 돌아오는 순간, 화면은 포커스 뷰가 아니라 **그리드**여야 한다
   await expect(page.getByTestId('grid')).toBeVisible()

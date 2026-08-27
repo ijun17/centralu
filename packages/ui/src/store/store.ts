@@ -516,15 +516,29 @@ export type AppState = {
    *   orchestrator 오케스트레이터 — 말로 관제
    */
   view: 'focus' | 'grid' | 'orchestrator'
-  /** 오케스트레이터 세션 id (아직 부른 적 없으면 null) */
+  /** 오케스트레이터 세션 id (아직 만든 적 없으면 null — 화면은 빈 대화 + 추천 질문) */
   orchestratorId: string | null
+  /** 첫 질문으로 세션을 만드는 중 (#63) — 빈 화면이 죽은 척하지 않게 하는 표시 */
+  orchestratorWaking: boolean
+  /**
+   * 소개 화면(오케스트레이터 + 도구 카드)을 지나왔는가 (#63).
+   * 워크스페이스 스냅샷에 남는다 — 이 화면은 첫 실행에 딱 한 번이다.
+   */
+  introSeen: boolean
   gridPanels: string[]
   setView(view: 'focus' | 'grid' | 'orchestrator'): void
   /**
-   * 오케스트레이터를 연다. **없으면 그때 만들어진다** (host가 판단한다).
-   * 미리 만들지 않는 이유: 쓰지도 않는 세션이 도구 프로세스를 물고 있게 된다.
+   * 오케스트레이터 **화면**을 연다. 세션은 만들지 않는다 (#63 지연 기동) —
+   * 이미 있으면 붙고, 없으면 빈 대화가 첫 질문을 기다린다. 만드는 것은 askOrchestrator다.
    */
   openOrchestrator(): Promise<void>
+  /**
+   * 오케스트레이터에게 묻는다. **세션이 없으면 이 순간 만들어진다** — 추천 질문 카드와
+   * 빈 화면의 입력창이 둘 다 이 문으로 들어온다 (#63).
+   */
+  askOrchestrator(text: string): Promise<void>
+  /** 소개 화면 통과 (#63): 도구 선택을 host에 적고, 오케스트레이터 화면으로 간다 */
+  completeIntro(tool: ToolName): Promise<void>
   setGridPanels(sessionIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
@@ -761,6 +775,8 @@ export const useStore = create<AppState>((set, get) => ({
   view: 'focus' as const,
   gridPanels: [] as string[],
   orchestratorId: null as string | null,
+  orchestratorWaking: false,
+  introSeen: false,
   panelWidth: PANEL_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
   overlay: null,
@@ -889,6 +905,14 @@ export const useStore = create<AppState>((set, get) => ({
          * bare set: the view alone would be a "Waking the orchestrator…" screen that
          * nothing is actually waking.
          */
+        /*
+         * introSeen은 **view보다 먼저** 되살린다 (#63). 아래 openOrchestrator가
+         * saveWorkspace를 부르는데, 그 시점의 introSeen이 아직 초기값(false)이면
+         * 방금 읽은 스냅샷 위에 false를 되써서 저장값이 지워진다 — 다음 실행이
+         * 소개 화면을 또 보여줬다 (실측: 복원 도중의 부분 저장이 마지막에 복원되는
+         * 필드를 잡아먹는다).
+         */
+        if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
         const savedView = (snap as { view?: unknown }).view
         if (savedView === 'grid') set({ view: 'grid' })
         else if (savedView === 'orchestrator') void get().openOrchestrator()
@@ -965,6 +989,7 @@ export const useStore = create<AppState>((set, get) => ({
         notifyPolicy: s.notifyPolicy,
         showIgnored: s.showIgnored,
         textScale: s.textScale,
+        introSeen: s.introSeen,
       } as never)
       .catch(() => {})
   },
@@ -1210,6 +1235,9 @@ export const useStore = create<AppState>((set, get) => ({
       focusedProjectId: id,
       // 다른 프로젝트를 고르면 세션 포커스는 놓는다 (섞이면 어느 프로젝트를 보는지 헷갈린다)
       focusedSessionId: s.sessions[s.focusedSessionId ?? '']?.projectId === id ? s.focusedSessionId : null,
+      // 프로젝트 화면은 포커스 레인에만 있다 — 고른 것은 보여야 한다 (focusSession과 같은 규칙).
+      // 온보딩이 오케스트레이터 뷰를 먼저 열면서(#63) 이 조합이 실제로 생겼다 (e2e가 잡았다)
+      view: 'focus',
       viewerPath: null,
       overlay: null,
     }))
@@ -1611,8 +1639,14 @@ export const useStore = create<AppState>((set, get) => ({
       chat: opts?.initialPrompt
         ? { ...s.chat, [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt, pending: true }] }
         : s.chat,
-      focusedSessionId: info.id,
     }))
+    /*
+     * focusedSessionId를 직접 세우지 않고 focusSession을 거친다 — "고른 세션은 보여야
+     * 한다"는 뷰 강제가 저기 있다. 직접 세우던 시절엔 문제가 없었다: 다이얼로그를 쓸 때
+     * 화면은 이미 포커스 뷰였다. 온보딩이 오케스트레이터 뷰를 먼저 열면서(#63) 거기서
+     * 만든 세션이 **보이지 않는** 조합이 생겼다 (e2e가 잡았다).
+     */
+    get().focusSession(info.id)
 
     // 불러온 세션은 host에 이미 이전 대화가 쌓여 있다 — 화면으로 끌어온다
     if (opts?.importHistory && opts.resumeExternalId) {
@@ -1947,13 +1981,20 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     /*
-     * 화면부터 바꾼다. 세션을 만드는 데 몇 초가 걸릴 수 있는데 그동안 아무 반응이
-     * 없으면 누른 사람은 버튼이 죽은 줄 안다 — 보낸 즉시 '작업 중'으로 두는 것과 같은 이유다.
+     * 화면부터 바꾼다. 조회가 늦어도 그동안 아무 반응이 없으면 누른 사람은 버튼이
+     * 죽은 줄 안다 — 보낸 즉시 '작업 중'으로 두는 것과 같은 이유다.
      */
     set({ view: 'orchestrator' })
     get().saveWorkspace()
     try {
-      const info = await platform.agents.orchestrator()
+      /*
+       * **묻기만 한다 — 만들지 않는다** (#63 지연 기동). 화면을 여는 것과 프로세스를
+       * 만드는 것이 갈라졌다: 없으면 빈 대화(추천 질문 카드)가 서고, 만드는 것은
+       * 첫 질문이 던져지는 순간의 askOrchestrator다. 예전처럼 여기서 만들면
+       * 묻지도 않은 사람 몫의 도구 프로세스가 뜬다.
+       */
+      const info = await platform.agents.orchestratorPeek()
+      if (!info) return
       set((s) => ({
         orchestratorId: info.id,
         sessions: { ...s.sessions, [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }) },
@@ -1965,6 +2006,47 @@ export const useStore = create<AppState>((set, get) => ({
       // 못 열었으면 화면을 되돌린다 — 빈 화면을 켜둔 채 이유를 안 말하는 것이 최악이다
       set({ view: 'focus', toast: `Could not open the orchestrator: ${(e as Error).message}` })
     }
+  },
+
+  async askOrchestrator(text) {
+    const platform = get().platform
+    if (!platform) return
+    let id = get().orchestratorId
+    if (!id) {
+      // 첫 질문이 곧 탄생이다 (#63) — 카드를 누른 순간에만 프로세스가 뜬다
+      set({ orchestratorWaking: true })
+      try {
+        const info = await platform.agents.orchestrator()
+        set((s) => ({
+          orchestratorId: info.id,
+          sessions: { ...s.sessions, [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }) },
+        }))
+        replayPendingEvents(get)
+        id = info.id
+      } catch (e) {
+        set({ toast: `Could not start the orchestrator: ${(e as Error).message}` })
+        return
+      } finally {
+        set({ orchestratorWaking: false })
+      }
+    }
+    await get().send(id, text)
+  },
+
+  async completeIntro(tool) {
+    const platform = get().platform
+    /*
+     * 화면부터 통과시킨다 — 설정 저장이 실패해도 소개 화면에 사람을 가두지 않는다
+     * (기본값 claude로 동작한다). 카드 클릭은 설정을 적을 뿐, 프로세스는 안 뜬다.
+     */
+    set({ introSeen: true })
+    get().saveWorkspace()
+    try {
+      await platform?.agents.configureOrchestrator(tool)
+    } catch (e) {
+      set({ toast: `Could not save the choice: ${(e as Error).message}` })
+    }
+    void get().openOrchestrator()
   },
 
   /**

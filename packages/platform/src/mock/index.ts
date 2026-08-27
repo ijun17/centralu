@@ -53,6 +53,8 @@ export class MockPlatform implements Platform {
 
   /** 테스트용: 디렉토리 피커가 돌려줄 값 */
   nextPickedDirectory: string | null = '/tmp/picked'
+  /** 소개 화면에서 고른 오케스트레이터 도구 (#63) — 실물은 app_settings에 적는다 */
+  orchestratorTool: ToolName = 'claude'
   /** 테스트용: 재개 불가로 만들 세션들 */
   readonly unresumable = new Set<string>()
   readonly notifications: { title: string; body: string }[] = []
@@ -510,7 +512,8 @@ export class MockPlatform implements Platform {
       if (found) return found
       const id = `orc-${++this.idc}`
       const info = {
-        id, projectId: null, kind: 'orchestrator' as const, tool: 'claude' as const, externalId: null, name: 'Orchestrator',
+        // 실물과 같은 규칙: 도구는 소개 화면의 선택을 따른다 (#63)
+        id, projectId: null, kind: 'orchestrator' as const, tool: this.orchestratorTool, externalId: null, name: 'Orchestrator',
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
         permissionPreset: 'normal' as const, importedFrom: null, worktree: null,
@@ -518,6 +521,11 @@ export class MockPlatform implements Platform {
       }
       this.sessions.set(id, info)
       return info
+    },
+    // 실물과 같은 규칙 (#63): 화면 열기는 묻기만 한다 — 만드는 것은 첫 질문의 orchestrator()다
+    orchestratorPeek: async () => [...this.sessions.values()].find((x) => x.projectId === null) ?? null,
+    configureOrchestrator: async (tool: ToolName) => {
+      this.orchestratorTool = tool
     },
     grid: async () => [...this.gridPanels],
     setGridView: async (sessionIds: string[]) => {

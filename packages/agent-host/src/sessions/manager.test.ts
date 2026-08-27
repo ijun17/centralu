@@ -1876,6 +1876,34 @@ describe('프로젝트 오케스트레이터 (#13)', () => {
     await expect(rpc('sessions.setKind', { sessionId: orc.id, kind: 'worker' })).rejects.toThrow(/central/i)
   })
 
+  /**
+   * #63 온보딩: 화면 열기와 프로세스 만들기가 갈라졌다.
+   * peek은 절대 만들지 않고, 소개 화면의 카드 선택(configure)은 첫 orchestrator()가 읽는다.
+   */
+  it('peek은 만들지 않는다 — 소개 화면에서 고른 도구로 첫 질문 때 태어난다 (#63)', async () => {
+    // 화면을 여는 것만으로는 아무것도 안 생긴다 (지연 기동)
+    expect(mgr.orchestratorPeek()).toBeNull()
+
+    mgr.configureOrchestrator('codex')
+    const orc = await mgr.orchestrator()
+    expect(orc.tool).toBe('codex')
+    // 코덱스 오케스트레이터도 도구 배선을 받는다 — #13이 깔아 둔 stdio 다리 그 길이다
+    expect(codexAdapter.lastOpts?.orchestratorTools).toBeDefined()
+
+    // 태어난 뒤의 peek은 같은 세션을 준다 — 두 번째 오케스트레이터는 없다
+    expect(mgr.orchestratorPeek()?.id).toBe(orc.id)
+  })
+
+  it('propose_project는 제안이 전부다 — 프로젝트를 만들지 않는다 (#63 제안-후-사람-확인)', async () => {
+    const orc = await mgr.orchestrator()
+    const before = ((await rpc('projects.list', {})) as unknown[]).length
+    const r = await mgr.runOrchestratorTool(orc.id, 'propose_project', { reason: '작업 폴더가 필요합니다' })
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('사람')
+    // 도구가 폴더를 등록하는 길은 없다 — 카드의 버튼(사람의 피커)만이 그 길이다
+    expect(((await rpc('projects.list', {})) as unknown[]).length).toBe(before)
+  })
+
   it('프로젝트당 하나 — 자리가 차 있으면 이름을 대며 거절한다', async () => {
     const p = await addProject()
     const mk = () => rpc('agents.createSession', {

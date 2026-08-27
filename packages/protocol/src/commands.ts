@@ -515,6 +515,23 @@ export const RpcMethods = {
    */
   'orchestrator.get': { params: z.object({}), result: SessionInfo },
   /**
+   * 있으면 주고, **없으면 만들지 않는다** (#63).
+   *
+   * 온보딩이 오케스트레이터 화면을 먼저 보여주게 되면서 "화면을 연다"와 "프로세스를
+   * 만든다"가 갈라졌다 — 화면은 이걸로 묻기만 하고, 만드는 것은 사람이 첫 질문을
+   * 던지는 순간의 `orchestrator.get`이다. 그 전에 만들면 묻지도 않은 사람 몫의
+   * 도구 프로세스가 떠 있게 된다 (지연 기동 원칙).
+   */
+  'orchestrator.peek': { params: z.object({}), result: SessionInfo.nullable() },
+  /**
+   * 중앙 오케스트레이터가 **어느 도구 위에서 돌지** (#63, 소개 화면의 카드 선택).
+   * 아직 세션이 없을 때를 위한 설정이다 — 이미 있으면 세션 설정의 Agent 전환이 맡는다.
+   */
+  'orchestrator.configure': {
+    params: z.object({ tool: ToolName }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * 오케스트레이터 도구 — **별도 프로세스(다리)가 host로 돌아오는 길**.
    *
    * Claude는 인프로세스로 붙어서 이 문이 필요 없다. Codex는 스레드별 config로

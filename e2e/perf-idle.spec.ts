@@ -107,11 +107,13 @@ async function boot(page: Page, count: number): Promise<string[]> {
   })
 
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-claude').click()
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   await page.evaluate(() => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
   })
-  await page.getByTestId('first-run-pick').click()
+  await page.getByTestId('orchestrator-pick-folder').click()
   // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')

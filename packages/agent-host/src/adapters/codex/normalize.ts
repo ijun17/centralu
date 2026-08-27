@@ -32,6 +32,18 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      */
     const tool = str(item.tool) || str(obj(item.invocation).tool)
     const server = str(item.server)
+    // 제안 카드(#63)는 이유를 제목으로 쓴다 — claude 쪽 toolSummary와 같은 규칙
+    if (tool.endsWith('propose_project')) {
+      const rawArgs = obj(item.invocation).arguments
+      let reason = ''
+      try {
+        const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
+        reason = str(obj(parsed).reason)
+      } catch {
+        /* 인자가 JSON이 아니면 이유 없이 카드만 뜬다 — 버튼이 일한다 */
+      }
+      return { tool, title: reason || tool, readOnly: false, paths: [] }
+    }
     return {
       tool: tool || 'MCP',
       title: [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool',

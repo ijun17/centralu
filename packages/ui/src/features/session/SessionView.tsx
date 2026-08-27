@@ -10,6 +10,8 @@ import { QuestionCard } from '../approval/QuestionCard.jsx'
 import { ChevronIcon, CloseIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
+import { Modal } from '../../components/Modal.jsx'
+import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { RunMenu } from './RunMenu.jsx'
@@ -1074,7 +1076,7 @@ function ChatStream({
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} />
+            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} sessionId={sessionId} />
           </div>
         ))}
       </div>
@@ -1313,7 +1315,16 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   )
 }
 
-function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
+function ChatRow({
+  item,
+  projectRoot,
+  sessionId,
+}: {
+  item: ChatItem
+  projectRoot: string | null
+  /** 제안 카드(#63)가 수락 사실을 그 세션에 되말하기 위해 필요하다 */
+  sessionId: string
+}) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
@@ -1399,19 +1410,99 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
         </div>
       )
     }
-    return (
-      <div className="min-w-0" data-testid="msg-image">
+    return <ImageMessage mime={item.mime} data={item.data} path={item.path} />
+  }
+  // 오케스트레이터의 프로젝트 제안 (#63) — 도구 카드가 아니라 행동 카드로 그린다
+  if (/propose_project$/.test(item.tool)) return <ProjectProposalCard item={item} sessionId={sessionId} />
+  return <ToolCard item={item} />
+}
+
+/**
+ * 대화 속 이미지 (#40 → #62 확대).
+ *
+ * 본문에서는 max-h-80으로 잘려 있어 스크린샷의 글자가 안 읽힌다 — 누르면 모달로
+ * 크게 본다. Modal 컴포넌트를 그대로 쓰는 이유: 포털이라 그리드 칸의 overflow에
+ * 갇히지 않고(#62에서 지적한 함정), esc·바깥 클릭 닫기를 다시 만들지 않는다.
+ */
+function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?: string }) {
+  const [zoom, setZoom] = useState(false)
+  const src = `data:${mime};base64,${data}`
+  return (
+    <div className="min-w-0" data-testid="msg-image">
+      <button type="button" onClick={() => setZoom(true)} title={path} className="block cursor-zoom-in">
         <img
-          src={`data:${item.mime};base64,${item.data}`}
-          alt={item.path ?? 'agent image'}
-          title={item.path}
+          src={src}
+          alt={path ?? 'agent image'}
           /* 세로로 화면을 다 덮지 않게 자른다 — 원본 비율은 유지 */
           className="max-h-80 max-w-full rounded-lg border border-edge"
         />
-      </div>
-    )
-  }
-  return <ToolCard item={item} />
+      </button>
+      {zoom && (
+        <Modal onClose={() => setZoom(false)} testId="image-lightbox">
+          {/* vh/vw는 zoom을 모른다 — 다른 모달들과 같은 보정 (index.css --text-zoom) */}
+          <img
+            src={src}
+            alt={path ?? 'agent image'}
+            className="max-h-[calc(90vh/var(--text-zoom))] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge"
+          />
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 프로젝트 제안 카드 (#63) — **제안은 도구가, 확정은 사람이.**
+ *
+ * 오케스트레이터의 propose_project는 카드를 띄우는 것이 실행의 전부다. 경로 선택은
+ * 네이티브 피커에서 사람이 하고, 수락하면 그 사실을 **사람의 메시지로** 대화에
+ * 되말한다 — 도구 결과를 몰래 고쳐 넣는 것보다 정직하고, 모델은 다음 걸음
+ * (세션 만들까요?)을 자연스럽게 잇는다. 이 분리가 read_session/recall을 타고 들어온
+ * 주입이 임의 폴더에 닿는 길을 막는 안전 경계다 (제안-후-사람-확인).
+ */
+function ProjectProposalCard({
+  item,
+  sessionId,
+}: {
+  item: Extract<ChatItem, { kind: 'tool' }>
+  sessionId: string
+}) {
+  const platform = usePlatform()
+  const addProject = useStore((s) => s.addProject)
+  const setToast = useStore((s) => s.setToast)
+  const [busy, setBusy] = useState(false)
+  // 어댑터가 이유를 제목에 실어 보낸다 (normalize의 propose_project 특례) —
+  // 이유가 없으면 도구 이름이 그대로 오므로 그때는 기본 문장을 쓴다
+  const reason = item.title && !/propose_project$/.test(item.title) ? item.title : null
+
+  return (
+    <div className="rounded-lg border border-edge bg-panel px-4 py-3" data-testid="project-proposal">
+      <p className="text-[11px] uppercase tracking-wide text-slate">Project proposal</p>
+      <p className="mt-1 text-[13px] text-chalk">{reason ?? 'The orchestrator suggests registering a project folder.'}</p>
+      <button
+        className="mt-2.5 rounded border border-edge bg-pit px-3 py-1.5 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+        disabled={busy}
+        data-testid="project-proposal-pick"
+        onClick={async () => {
+          setBusy(true)
+          try {
+            const picked = await platform.system.pickDirectory()
+            if (picked) {
+              const p = await addProject(picked)
+              // 수락은 사람의 말로 남는다 — 오케스트레이터가 다음 걸음을 잇는 재료다
+              await useStore.getState().send(sessionId, `I accepted the proposal — created the project "${p.name}".`)
+            }
+          } catch (e) {
+            setToast((e as Error).message)
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        Choose a folder…
+      </button>
+    </div>
+  )
 }
 
 /** 접었을 때 맛보기로 보여줄 줄 수 — 무슨 명령이 뭘 뱉었는지 알아볼 만큼만 */

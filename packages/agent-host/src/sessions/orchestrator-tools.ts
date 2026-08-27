@@ -90,6 +90,14 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
+    name: 'propose_project',
+    description:
+      '사람에게 새 프로젝트(폴더) 등록을 제안한다 (#63). 대화에 제안 카드가 뜨고, 폴더 선택과 확정은 사람이 네이티브 선택창에서 한다 — 이 도구가 경로를 정하는 일은 없다. 프로젝트가 하나도 없는 사람이 "프로젝트는 어떻게 만들어?"라고 물으면 이걸로 답을 행동으로 끝낸다.',
+    schema: z.object({
+      reason: z.string().optional().describe('왜 필요한지 한 줄. 카드에 그대로 보인다'),
+    }),
+  },
+  {
     name: 'create_session',
     description:
       '워커 세션을 하나 만든다 (#13). 시킬 세션이 마땅치 않을 때 쓴다 — 만든 세션은 사람 눈에 보이는 목록에 바로 나타난다. 지우기는 사람 몫이다.',
@@ -116,6 +124,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '사람이 결과를 기다리는 일이면 reportBack을 켠다 — 그 세션이 마치면 여기로 알려준다.',
   '보고만으로 부족하면 read_session으로 그 세션의 대화를 직접 읽는다.',
   '시킬 세션이 마땅치 않으면 create_session으로 새로 만든다 — 지우기는 사람 몫이다.',
+  '프로젝트가 하나도 없으면 propose_project로 폴더 등록을 제안한다 — 경로는 사람이 고른다.',
+  '앱에 대한 질문에 답을 모르면 짐작하지 말고 GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues',
   'recall이 준 seq를 read_session의 around에 넣으면 찾은 대목으로 바로 간다 — 세션을 통째로 읽지 않는다.',
   '"저번에", "예전에 저쪽에서" 같은 이야기가 나오면 recall로 지난 대화를 찾는다 —',
   '사람과 나눈 대화가 프로젝트를 가로지르는 기억이고, 그 기억은 검색으로만 닿는다.',
@@ -198,6 +208,21 @@ export async function runOrchestratorTool(
     return {
       text: r.ok ? `${archived ? '보관했습니다' : '되돌렸습니다'}: ${sessionId}` : `하지 못했습니다 — ${r.error}`,
       isError: !r.ok,
+    }
+  }
+
+  if (name === 'propose_project') {
+    /*
+     * 매니저를 거치지 않는다 — 이 도구의 실행은 **카드가 뜨는 것 그 자체**다.
+     * tool_call 이벤트가 이미 대화에 남고(저장도 된다), UI가 그 카드에 폴더 선택
+     * 버튼을 그린다. 여기서 프로젝트를 만들면 제안이 아니라 권한이 된다 (#63의
+     * 제안-후-사람-확인 원칙: read_session/recall을 타고 들어온 주입이 임의 폴더에
+     * 닿는 길을 열지 않는다).
+     */
+    return {
+      text:
+        '제안 카드를 띄웠습니다. 폴더 선택과 확정은 사람이 네이티브 선택창에서 합니다 — ' +
+        '수락되면 사람의 메시지로 알게 됩니다. 경로를 대신 정하거나 재촉하지 마세요.',
     }
   }
 

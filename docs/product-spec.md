@@ -332,11 +332,30 @@ The whole control loop must turn without a mouse. The v1 default shortcuts:
 
 #### FR-19. First-run experience (onboarding)
 
-Three empty states that decide the first impression, designed explicitly:
+**Orchestrator-first** (#63, 2026-08-27 — replaces the folder-first flow). The goal is habit
+formation, not efficiency: someone who never asks the orchestrator anything on first run
+will not press it later either, and questions about the app should land on the orchestrator
+rather than on the maintainer. Exactly two stops, no wizard:
 
-1. **CLI not installed**: show the per-tool detection result and a button to copy the install command. You can proceed with only one installed.
-2. **Not logged in**: on detection, guidance to "run `claude` / `codex login` in a terminal" + a re-detect button after finishing. (The app does not do the login flow for you — it uses each CLI's own keychain authentication.)
-3. **0 projects**: prompt for drag and drop + suggest recent directories. Registering the first project through creating the first session as one flow.
+1. **Intro screen** (shown once, to a truly virgin install — no projects and no sessions):
+   a one-line statement of what the app is, a prominent one-or-two-sentence explanation of
+   the orchestrator's role, and two large agent cards (Claude Code / Codex). **The cards are
+   the tool detection display**: a ready tool is an active card; a tool that is not ready is
+   dimmed and disabled with "Not connected" and the specific remedy inside (install command
+   vs. login command — the app does not do the login flow for you), plus a re-detect button.
+   Clicking a ready card stores which tool the orchestrator will run on ("you can change
+   this later" is stated on screen) and advances. It does **not** start any process.
+2. **The normal orchestrator session view**, empty. While the conversation has 0 messages,
+   three large action-oriented suggested questions are shown (create a project / what can
+   the orchestrator do / how to run several sessions) plus an always-available escape hatch
+   ("or just pick a folder" → native picker → session-creation dialog). Clicking a question
+   **sends it immediately** — that click (or the first typed message) is what actually
+   spawns the orchestrator process (lazy spawn). The suggestions are a function of message
+   count, not an onboarding state machine; the composer, sidebar and grid stay fully usable.
+
+The project-creation answer ends in an action: the orchestrator's `propose_project` tool
+renders a proposal card whose only power is to open the **native picker for the human** —
+the tool itself cannot register a folder (propose-not-power; see §FR-11 security notes).
 
 #### FR-20. Session archive and record
 

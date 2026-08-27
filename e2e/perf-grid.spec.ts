@@ -36,12 +36,14 @@ type Result = {
 
 async function boot(page: Page, count: number): Promise<string[]> {
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
-  // 'Add project'는 사이드바에 있는데(이슈 #4) 프로젝트가 0개면 사이드바가 없다 — 시작 안내로 등록한다
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-claude').click()
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  // 첫 프로젝트는 빈 오케스트레이터 화면의 탈출구로 등록한다 (#63)
   await page.evaluate(() => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
   })
-  await page.getByTestId('first-run-pick').click()
+  await page.getByTestId('orchestrator-pick-folder').click()
   // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')

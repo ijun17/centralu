@@ -20,6 +20,8 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     if (p) paths.push(p)
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
+  // 제안 카드(#63)는 이유를 제목으로 쓴다 — UI가 그대로 사람에게 보여주는 유일한 인자다
+  else if (name.endsWith('propose_project')) title = str(input.reason, name)
   return { tool: name, title, readOnly: READ_ONLY.has(name), paths }
 }
 

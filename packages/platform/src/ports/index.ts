@@ -67,6 +67,13 @@ export interface AgentPort {
    * 프로젝트에 속하지 않으므로 projectId는 null이다.
    */
   orchestrator(): Promise<SessionInfo>
+  /**
+   * 있으면 주고, **없으면 만들지 않는다** (#63). 화면을 여는 쪽이 쓴다 —
+   * 만드는 것은 사람이 첫 질문을 던지는 순간의 orchestrator()다 (지연 기동).
+   */
+  orchestratorPeek(): Promise<SessionInfo | null>
+  /** 중앙 오케스트레이터가 돌 도구 (#63, 소개 화면의 카드 선택). 생성 전에만 의미가 있다 */
+  configureOrchestrator(tool: ToolName): Promise<void>
   /** 그리드 배치 — 추가·제거·순서가 전부 이 한 가지로 온다 */
   grid(): Promise<string[]>
   setGridView(sessionIds: string[]): Promise<string[]>

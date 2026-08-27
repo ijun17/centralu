@@ -9,12 +9,14 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function setup(page: Page, path = '/tmp/alpha') {
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-claude').click()
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   // 프로젝트가 0개면 사이드바가 없다 — 첫 프로젝트는 시작 안내에서 등록한다
   await page.evaluate((p: string) => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
   }, path)
-  await page.getByTestId('first-run-pick').click()
+  await page.getByTestId('orchestrator-pick-folder').click()
   // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
   await page.getByTestId('new-session-dialog').waitFor()
   await page.keyboard.press('Escape')
@@ -327,7 +329,9 @@ test('커밋도 두 번째부터 열린다 — 목록이 남아 있으니 계속
 /** 저장소에 묻는 질문이므로 깃 탭과 같은 취급을 받는다 */
 test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', async ({ page }) => {
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-claude').click()
+  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   await page.evaluate(async () => {
     const store = (window as never as { __store: any }).__store
     const m = (window as never as { __mock: any }).__mock
@@ -507,7 +511,9 @@ test('명령어 창: 오케스트레이터에는 없다 — 프로젝트가 없�
   await expect(page.getByTestId('run-open')).toBeVisible()
 
   await page.evaluate(async () => {
-    await (window as never as { __store: any }).__store.getState().openOrchestrator()
+    const st = (window as never as { __store: any }).__store.getState()
+    await st.openOrchestrator() // 화면만 연다 — 세션은 만들지 않는다 (#63)
+    await st.askOrchestrator('hello') // 첫 질문이 세션을 만든다
   })
   await expect(page.getByTestId('session-name')).toContainText('Orchestrator')
   // 열어도 아무것도 들어갈 수 없는 메뉴는 빈 메뉴보다 없는 편이 정직하다
@@ -717,14 +723,13 @@ test('tab order is dragged, and survives a relaunch — one arrangement for the 
    * again (the mock's projects are in-memory), and the arrangement must already be back.
    */
   await page.goto('/?mock=1')
-  await expect(page.getByTestId('first-run')).toBeVisible()
+  // 소개 화면은 다시 나오지 않는다 — introSeen이 스냅샷(localStorage)에 남았다 (#63)
+  await expect(page.getByTestId('add-project')).toBeVisible()
   await page.evaluate((p: string) => {
     ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
   }, '/tmp/alpha')
-  await page.getByTestId('first-run-pick').click()
-  // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
+  await page.getByTestId('add-project').click()
+  await expect(page.getByTestId('project-alpha')).toBeVisible()
   await newSession(page, 'alpha', 'claude', '다시')
   await expect.poll(() => tabOrder(page)).toEqual(['terminal', 'git', 'history', 'files'])
 })
