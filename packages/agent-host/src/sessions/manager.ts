@@ -89,6 +89,27 @@ const MEMORY_MESSAGES = 40
 const MEMORY_LINE_CHARS = 600
 
 /**
+ * 스트리밍 중 디스크에 남기는 주기 (#66).
+ *
+ * 메시지 하나가 행 하나가 되면서, 델타마다 쓰던 안전은 주기 flush가 대신한다 —
+ * 죽어도 잃는 것은 마지막 2초(또는 2천 자) 안쪽이다. 델타마다 쓰지 않는 이유:
+ * 자라는 본문을 매번 통째로 다시 쓰는 것이라, 긴 답변에서 쓰기량이 제곱이 된다.
+ */
+const STREAM_FLUSH_CHARS = 2000
+const STREAM_FLUSH_MS = 2000
+
+/**
+ * recall 결과 둘레를 되살릴 때의 예산 (#66) — 개수가 아니라 **글자**로 잰다.
+ *
+ * 행이 델타였을 때는 행 120개가 한두 문장이었지만, 행이 메시지가 되면 행 120개는
+ * 수십만 자가 될 수 있다 — recall 한 번이 오케스트레이터의 문맥을 다 태운다.
+ * 그래서 목표 지점에서 가까운 메시지부터, 메시지당 상한을 두고, 총예산까지 담는다.
+ */
+const CONTEXT_SPAN_MSGS = 8
+const CONTEXT_MSG_CHARS = 600
+const CONTEXT_CHARS = 4000
+
+/**
  * "여기까지는 옛 도구의 대화다" 표식이 저장되는 자리.
  *
  * 세션 행에 컬럼을 더하지 않는 이유: 이건 세션의 성질이 아니라 **이 설치본에서
@@ -104,6 +125,17 @@ const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
   private meta = new Map<string, SessionInfo>()
+  /**
+   * 지금 스트리밍 중인 메시지 — 세션당 하나 (#66).
+   *
+   * 저장의 단위가 델타에서 메시지로 바뀌면서, "이 세션의 열린 메시지가 어느 행인가"를
+   * 여기서 든다. 델타가 오면 본문이 자라고(주기 flush), 경계(도구 호출·턴 종료·
+   * 사람 말·프로세스 종료)를 만나면 닫히며 그때 한 번 색인된다.
+   */
+  private streams = new Map<
+    string,
+    { seq: number; kind: 'text' | 'reasoning'; payload: Record<string, unknown>; text: string; written: number; lastWrite: number }
+  >()
   /**
    * **지금 돌고 있는 프로세스가 실제로 들고 있는 설정.**
    *
@@ -585,11 +617,9 @@ export class SessionManager {
 
     const ours = this.store.loadMessages(info.id, SYNC_LIMIT)
     /*
-     * 저장된 한 행은 메시지가 아니라 **스트리밍 델타 하나**다 (persistMessage).
-     * 마지막 행만 집으면 답변의 꼬리 토막이 나와서, 완전한 메시지를 주는 도구 기록과는
-     * 영원히 일치하지 않는다 — 그래서 따라잡기가 늘 0건이었다.
-     * previewOf와 같은 규칙으로 **마지막 메시지를 조각에서 되살려** 비교한다.
-     * (사람의 말은 통짜 한 행이라 그대로 쓴다)
+     * loadMessages는 이제 병합된 메시지를 준다 (#66). 이 되살리기 루프는 그래도
+     * 남는다 — 도구 호출 없이 턴이 갈린 연속 assistant 메시지를 도구 기록과 같은
+     * 단위로 잇는 일은 여전히 여기 몫이고, 병합된 행에는 멱등이라 해가 없다.
      */
     const lastMessageText = (): string | undefined => {
       const parts: string[] = []
@@ -944,6 +974,8 @@ export class SessionManager {
    */
   async deleteSession(sessionId: string, deleteWorktree = false): Promise<void> {
     const m = this.meta.get(sessionId)
+    // 행이 곧 지워지므로 마지막 flush는 의미가 없다 — 추적만 걷는다 (#66)
+    this.streams.delete(sessionId)
     const handle = this.handles.get(sessionId)
     if (handle) {
       await handle.dispose().catch(() => {})
@@ -1180,32 +1212,92 @@ export class SessionManager {
   }
 
   /**
-   * 대화 기록으로 남길 이벤트만 저장 (델타는 합치지 않고 텍스트만 누적).
-   * 저장했다면 매긴 세션 내 seq를 돌려준다 — 방송에 실어 UI의 안읽음 추적 기준이 된다.
+   * 대화 기록으로 남길 이벤트만 저장. 저장했다면 매긴 세션 내 seq를 돌려준다 —
+   * 방송에 실어 UI의 안읽음 추적 기준이 된다.
+   *
+   * **스트리밍 델타는 행을 만들지 않고 열린 행을 키운다** (#66).
+   * 예전에는 델타 하나가 행 하나였다 — 한 문장이 행 아홉 개가 되고, DB의 84%가
+   * 조각이었으며, 페이지네이션은 행을 세느라 의미를 잃고, trigram 색인은 1~2자
+   * 본문을 색인하지 못해 검색이 죽었다. 지금은 메시지가 시작될 때 행 하나를 만들고
+   * (첫 조각은 그 자리에서 남긴다 — 죽어도 시작은 남게), 이후 조각은 본문에 이어
+   * 붙이며 주기적으로만 flush한다. 색인은 스트림이 닫힐 때 한 번이다.
    */
   private persistMessage(e: NormalizedEvent, m: SessionInfo): number | null {
+    // 추론 요약 (#58)은 텍스트가 실렸을 때만 기록이다. estTokens뿐인 조각(claude)은
+    // 진행 표시로만 살다 사라진다: 내용 없는 행을 쌓으면 기록이 소음이 된다.
+    if (e.type === 'message_delta' || (e.type === 'reasoning_delta' && e.text)) {
+      const streamKind = e.type === 'message_delta' ? ('text' as const) : ('reasoning' as const)
+      const text = e.text ?? ''
+      const run = this.streams.get(m.id)
+      if (run && run.kind === streamKind) {
+        run.text += text
+        if (run.text.length - run.written >= STREAM_FLUSH_CHARS || Date.now() - run.lastWrite >= STREAM_FLUSH_MS) {
+          this.flushStream(m.id, run)
+        }
+        m.lastSeq = run.seq
+        return run.seq
+      }
+      // 종류가 갈리면(답변↔추론) 그 자리가 경계다
+      if (run) this.closeStream(m.id)
+      // 빈 조각으로 행을 시작하지 않는다 — codex가 끝에 보내는 "" 델타가 빈 행 1,853개를 만들었다
+      if (!text) return null
+      const seq = this.store.nextSeq(m.id)
+      const fresh = { seq, kind: streamKind, payload: { ...e } as Record<string, unknown>, text, written: 0, lastWrite: 0 }
+      this.streams.set(m.id, fresh)
+      this.flushStream(m.id, fresh)
+      m.lastSeq = seq
+      return seq
+    }
+
+    /*
+     * 스트림이 아닌 **기록**은 전부 메시지의 경계다 — 도구 호출이 답변 중간에 오면
+     * 그 앞까지가 한 덩어리다. 반면 activity·usage_update처럼 기록되지 않는
+     * 이벤트는 스트리밍과 자연스럽게 섞이므로 경계가 아니다. 턴의 끝(turn_complete·
+     * error·working이 아닌 state_change)도 경계다 — 기록은 안 남지만 메시지는 끝났다.
+     */
     const kind =
       e.type === 'tool_call' ? 'tool_call'
       : e.type === 'tool_result' ? 'tool_result'
       : e.type === 'approval_request' || e.type === 'approval_resolved' ? 'approval'
-      : e.type === 'message_delta' ? 'text'
-      // 추론 요약 (#58) — 텍스트가 실렸을 때만 기록이다. estTokens뿐인 조각(claude)은
-      // 진행 표시로만 살다 사라진다: 내용 없는 행을 쌓으면 기록이 소음이 된다.
-      : e.type === 'reasoning_delta' && e.text ? 'reasoning'
       // 압축 지점을 기록에 남긴다. 모델의 컨텍스트에서는 옛 대화가 접혔지만
       // 우리 기록에는 그대로 있다 — 어디서 접혔는지 보여야 거슬러 읽을 수 있다.
       : e.type === 'compaction' ? 'marker'
       : null
+    const boundary =
+      kind !== null ||
+      e.type === 'turn_complete' ||
+      e.type === 'error' ||
+      (e.type === 'state_change' && e.state !== 'working')
+    if (boundary) this.closeStream(m.id)
     if (!kind) return null
     const seq = this.store.nextSeq(m.id)
-    const msg: StoredMessage = {
-      sessionId: m.id, seq,
-      role: e.type === 'message_delta' || e.type === 'reasoning_delta' ? 'assistant' : 'system',
-      kind, payload: e, ts: Date.now(),
-    }
+    const msg: StoredMessage = { sessionId: m.id, seq, role: 'system', kind, payload: e, ts: Date.now() }
     this.store.appendMessages([msg])
     m.lastSeq = seq
     return seq
+  }
+
+  /** 열린 스트림 행을 지금 모습대로 디스크에 — 색인은 닫힐 때 한 번이다 (#66) */
+  private flushStream(sessionId: string, run: { seq: number; kind: 'text' | 'reasoning'; payload: Record<string, unknown>; text: string; written: number; lastWrite: number }): void {
+    this.store.upsertMessageNoIndex({
+      sessionId, seq: run.seq, role: 'assistant', kind: run.kind,
+      payload: { ...run.payload, text: run.text }, ts: Date.now(),
+    })
+    run.written = run.text.length
+    run.lastWrite = Date.now()
+  }
+
+  /** 메시지가 끝났다 — 마지막 모습을 남기고 이제서야 검색 색인에 넣는다 (#66) */
+  private closeStream(sessionId: string): void {
+    const run = this.streams.get(sessionId)
+    if (!run) return
+    this.streams.delete(sessionId)
+    this.store.appendMessages([
+      {
+        sessionId, seq: run.seq, role: 'assistant', kind: run.kind,
+        payload: { ...run.payload, text: run.text }, ts: Date.now(),
+      },
+    ])
   }
 
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
@@ -1297,6 +1389,8 @@ export class SessionManager {
     }
 
     const h = this.requireHandle(sessionId)
+    // 사람의 말은 언제나 메시지의 경계다 — 인터럽트 후 이어 말하면 그 앞까지가 한 덩어리 (#66)
+    this.closeStream(sessionId)
     const seq = this.store.nextSeq(sessionId)
     this.store.appendMessages([
       { sessionId, seq, role: 'user', kind: 'text', payload: from ? { text, from } : { text }, ts: Date.now() },
@@ -1353,6 +1447,7 @@ export class SessionManager {
 
     const old = this.handles.get(sessionId)
     if (old) {
+      this.closeStream(sessionId) // 진행 중이던 메시지는 여기까지가 전부다 — 남기고 색인한다 (#66)
       await old.dispose().catch(() => {})
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
@@ -1755,6 +1850,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) return
     if (archived) {
+      this.closeStream(sessionId) // 진행 중이던 메시지를 반쯤 열린 채 두지 않는다 (#66)
       const h = this.handles.get(sessionId)
       if (h) await h.dispose().catch(() => {})
       this.handles.delete(sessionId)
@@ -1773,6 +1869,7 @@ export class SessionManager {
   async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
     const h = this.handles.get(sessionId)
     if (h) {
+      this.closeStream(sessionId) // 죽는 프로세스의 마지막 말을 남긴다 (#66)
       await h.dispose().catch(() => {})
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
@@ -1924,18 +2021,20 @@ export class SessionManager {
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 
         /*
-         * 저장된 한 행은 스트리밍 델타 하나다. 그대로 주면 토막 수백 개가 나가므로
-         * UI가 하는 것과 같이 **연속된 assistant 조각을 한 줄로 이어붙인다.**
-         */
-        /*
          * `around`가 있으면 그 언저리를 읽는다 — recall이 준 seq를 그대로 넘기면 된다.
          * 이게 없어서 "찾았는데 갈 수가 없는" 상태였다: recall은 세션 id만 주고,
          * read_session은 맨 끝만 읽어서, 결국 세션을 통째로 퍼올려 눈으로 찾아야 했다.
+         *
+         * 읽는 개수는 메시지 단위다 (#66) — 행이 델타였던 시절의 ×8 보정은
+         * 병합된 행에 그대로 쓰면 수백 메시지를 퍼올리는 일이 된다.
          */
         const around = opts?.around
         const rows = around
-          ? this.store.loadMessages(sessionId, Math.max(limit * 8, 200), around + Math.max(limit * 4, 100))
-          : this.store.loadMessages(sessionId, 800)
+          ? [
+              ...this.store.loadMessages(sessionId, limit, around + 1),
+              ...this.store.loadMessagesFrom(sessionId, around, limit),
+            ]
+          : this.store.loadMessages(sessionId, limit * 2)
 
         const lines: string[] = []
         /** around가 가리키는 seq가 들어간 줄 — 창을 여기에 맞춰 자른다 */
@@ -2017,17 +2116,6 @@ export class SessionManager {
   }
 
   /**
-   * 마지막 응답 — **조각이 아니라 한 덩어리로.**
-   *
-   * 저장소의 한 행은 메시지 하나가 아니라 **스트리밍 델타 하나**다
-   * (persistMessage가 message_delta마다 한 행씩 쌓는다). 그래서 마지막 한 행만 읽으면
-   * 답변의 꼬리 토막이 나온다 — 실제로 오케스트레이터에게 문장 중간부터 시작하는
-   * 보고가 갔다 ("걸러야 합니다 — ...").
-   *
-   * UI는 이 조각들을 이어붙여 되돌린다(messagesToChat). 여기서도 같이 한다:
-   * 뒤에서부터 연속된 assistant 조각을 모으고, 다른 종류를 만나면 거기가 경계다.
-   */
-  /**
    * 사람이 세션을 **구분할 수 있는** 이름.
    *
    * 압축을 거친 세션은 이름이 전부 "This session is being continued from a previous…"가 된다
@@ -2041,7 +2129,8 @@ export class SessionManager {
    */
   private labelOf(s: SessionInfo): string {
     if (!/^This session is being continued|^Caveat: The messages below/i.test(s.name)) return s.name
-    const rows = this.store.loadMessages(s.id, 400)
+    // 메시지 단위라 100이면 충분하다 (#66) — 400 메시지는 델타 시절의 보정이었다
+    const rows = this.store.loadMessages(s.id, 100)
     for (const r of rows) {
       if (r.kind !== 'text' || r.role !== 'user') continue
       const t = ((r.payload as { text?: string }).text ?? '').trim()
@@ -2056,19 +2145,35 @@ export class SessionManager {
   /**
    * 그 자리 **둘레의 말**을 되살린다.
    *
-   * 색인의 한 행은 메시지가 아니라 **스트리밍 델타 하나**라, 대개 수십 자짜리 토막이다.
-   * 그래서 그 행만 잘라 주면 아무리 넓게 잡아도 넓어지지 않는다 —
-   * 도그푸딩에서 `"이 풀리고, 이번에 고친 승인 카드 수정 + 은하수 바"` 같은 것이 그것이다.
-   *
-   * 앞뒤 행을 모아 한 덩어리로 되돌린 다음에야 "이게 찾던 대목인가"를 가릴 수 있다.
+   * 예산은 개수가 아니라 **글자**다 (#66). 행이 델타였을 때는 행 120개가 한두
+   * 문장이라 넉넉했지만, 행이 메시지가 되면 같은 개수가 수십만 자일 수 있다 —
+   * recall 한 번이 오케스트레이터의 문맥을 다 태운다. 그래서 목표 지점에서 가까운
+   * 메시지부터 번갈아(앞·뒤) 담고, 메시지당 상한과 총예산에서 멈춘다.
    */
-  private contextAt(sessionId: string, seq: number, span = 60): string {
-    const rows = this.store.loadMessages(sessionId, span * 2, seq + span)
-    const parts: string[] = []
-    for (const r of rows) {
+  private contextAt(sessionId: string, seq: number): string {
+    // seq+1: 목표 행 자신을 포함해 앞쪽으로, 그리고 그 뒤쪽으로
+    const before = this.store.loadMessages(sessionId, CONTEXT_SPAN_MSGS, seq + 1)
+    const after = this.store.loadMessagesFrom(sessionId, seq, CONTEXT_SPAN_MSGS)
+    const nearFirst: StoredMessage[] = []
+    const b = [...before].reverse()
+    for (let i = 0; i < Math.max(b.length, after.length); i++) {
+      if (b[i]) nearFirst.push(b[i]!)
+      if (after[i]) nearFirst.push(after[i]!)
+    }
+    let budget = CONTEXT_CHARS
+    const chosen: StoredMessage[] = []
+    for (const r of nearFirst) {
       if (r.kind !== 'text') continue
-      const t = (r.payload as { text?: string }).text ?? ''
+      const t = ((r.payload as { text?: string }).text ?? '').slice(0, CONTEXT_MSG_CHARS)
       if (!t) continue
+      if (budget < t.length) break
+      budget -= t.length
+      chosen.push(r)
+    }
+    chosen.sort((x, y) => x.seq - y.seq)
+    const parts: string[] = []
+    for (const r of chosen) {
+      const t = ((r.payload as { text?: string }).text ?? '').slice(0, CONTEXT_MSG_CHARS)
       // 사람의 말은 경계를 표시한다 — 누가 한 말인지 섞이면 오히려 헷갈린다
       parts.push(r.role === 'user' ? `\n[사람] ${t}\n` : t)
     }
@@ -2090,8 +2195,8 @@ export class SessionManager {
   }
 
   private previewOf(sessionId: string, maxChars = 120): string {
-    // 델타는 잘게 쪼개지므로 넉넉히 읽는다. 한 응답이 수백 조각인 경우가 흔하다
-    const rows = this.store.loadMessages(sessionId, 500)
+    // 읽기는 병합된 메시지 단위다 (#66) — 마지막 응답을 찾는 데 수백 행이 필요 없다
+    const rows = this.store.loadMessages(sessionId, 30)
     const parts: string[] = []
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i]!
@@ -2320,6 +2425,8 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     this.watchers.close()
+    // 진행 중이던 메시지들을 지금 모습대로 남긴다 — 종료가 마지막 2초를 삼키면 안 된다 (#66)
+    for (const id of [...this.streams.keys()]) this.closeStream(id)
     // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
     await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
     this.handles.clear()

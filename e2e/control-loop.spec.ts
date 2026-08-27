@@ -1960,7 +1960,7 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 저장소에는 250줄이 있고 화면에는 최근 200줄만 있다
+  // 저장소에는 250줄이 있고 화면에는 최근 한 페이지(HISTORY_PAGE=100)만 있다
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const rows = Array.from({ length: 250 }, (_, i) => ({
@@ -1980,13 +1980,16 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
   await page.evaluate((sid) => (window as any).__mock.emit({ type: 'compaction', sessionId: sid }), id)
   await expect(page.getByTestId('msg-mark')).toContainText('compacted')
 
-  // 화면에는 최근 200줄만 있다 (가상 스크롤이라 실제로 그려지는 건 더 적다)
+  // 화면에는 최근 한 페이지만 있다 (가상 스크롤이라 실제로 그려지는 건 더 적다)
   const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
-  expect(await page.evaluate(loaded, id)).toBe(201) // 200 + 압축 표식
+  expect(await page.evaluate(loaded, id)).toBe(101) // 100 + 압축 표식
 
-  // 버튼이 아니라 위로 올리면 알아서 이어붙인다
-  await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
-  await expect(page.getByTestId('load-older')).toBeHidden() // 더 거슬러 갈 곳이 없다
+  // 버튼이 아니라 위로 올리면 알아서 이어붙인다. 한 번 불러오면 위치 보정이
+  // 읽던 자리를 지키느라 꼭대기에서 내려오므로(#61), 사람처럼 다시 올린다.
+  await expect(async () => {
+    await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
+    await expect(page.getByTestId('load-older')).toBeHidden({ timeout: 500 }) // 더 거슬러 갈 곳이 없다
+  }).toPass()
 
   // 압축으로 모델이 잊은 대화도 우리 기록에는 남아 있다
   expect(await page.evaluate(loaded, id)).toBe(251)

@@ -669,8 +669,12 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(parts.join(''))
 }
 
-/** 한 번에 거슬러 읽는 기록 분량 */
-const HISTORY_PAGE = 200
+/**
+ * 한 번에 거슬러 읽는 기록 분량 — **행이 아니라 메시지 개수다** (#66).
+ * host의 loadMessages가 델타 조각을 메시지로 병합해 세므로, 200이던 시절의
+ * "행 200개 = 토큰 200개 = 두어 문장"이 아니라 진짜 메시지 100개가 온다.
+ */
+const HISTORY_PAGE = 100
 
 /** 비포커스 세션이 유지하는 최근 메시지 수 — 다시 열면 저장소에서 더 불러온다 */
 const WINDOW_SIZE = 50

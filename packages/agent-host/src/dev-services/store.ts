@@ -896,14 +896,102 @@ export class Store {
     }
   }
 
+  /**
+   * 대화를 읽는다 — **limit은 행이 아니라 메시지 개수다** (#66).
+   *
+   * 예전 데이터는 스트리밍 델타 하나가 행 하나라, 행으로 세면 한 페이지가
+   * 토큰 200개 = 두어 문장이었다. 세션을 열면 답변 꼬리 토막만 보였고,
+   * 위로 스크롤하면 한 세션에 52번을 되읽었다 (#64의 방아쇠).
+   *
+   * 그래서 여기서 연속된 assistant 조각(text·reasoning)을 한 메시지로 합친 뒤에
+   * 센다. 새 데이터는 이미 메시지 하나가 행 하나라 병합이 그대로 통과한다 —
+   * 두 형식이 섞여 있어도(마이그레이션 전) 같은 모양이 나온다.
+   *
+   * 합친 메시지의 seq는 **첫 조각의 seq**다. beforeSeq 커서가 그 seq로 돌아오면
+   * 그 앞부터 이어 읽으므로 페이지 경계에서 같은 조각을 두 번 주지 않는다.
+   * ts는 마지막 조각의 것 — "언제까지 말했나"가 목록 정렬에 쓰인다.
+   */
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number): StoredMessage[] {
-    const rows = this.db
+    const stmt = this.db.prepare(
+      `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
+       WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
+    )
+    // 최신부터 병합해 내려간다. limit+1개가 모이면 limit번째 메시지의 경계가
+    // 확정된 것이다 — 조각이 배치 경계에 걸쳐 있어도 잘리지 않는다.
+    const merged: StoredMessage[] = []
+    let cursor: number | null = beforeSeq ?? null
+    const BATCH = 400
+    outer: for (;;) {
+      const raw = stmt.all(sessionId, cursor, cursor, BATCH) as (StoredMessage & { payload: string })[]
+      if (raw.length === 0) break
+      for (const r of raw) {
+        const row: StoredMessage = { ...r, payload: JSON.parse(r.payload) }
+        const oldest = merged[merged.length - 1]
+        if (oldest && continuesRun(row, oldest)) {
+          // row가 더 오래된 조각이다 — 앞에 이어 붙인다
+          const head = (row.payload as { text?: string }).text ?? ''
+          const tail = (oldest.payload as { text?: string }).text ?? ''
+          oldest.payload = { ...(oldest.payload as object), text: head + tail }
+          oldest.seq = row.seq
+        } else {
+          merged.push(row)
+          if (merged.length > limit) break outer
+        }
+      }
+      cursor = raw[raw.length - 1]!.seq
+      if (raw.length < BATCH) break
+    }
+    return merged.slice(0, limit).reverse()
+  }
+
+  /**
+   * afterSeq **뒤의** 대화 — loadMessages의 앞으로 가는 짝 (#66).
+   * recall이 준 자리의 "다음에 무슨 말이 오갔나"를 읽을 때 쓴다. 같은 병합 규칙.
+   */
+  loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20): StoredMessage[] {
+    const stmt = this.db.prepare(
+      `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
+       WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
+    )
+    const merged: StoredMessage[] = []
+    let cursor = afterSeq
+    const BATCH = 400
+    outer: for (;;) {
+      const raw = stmt.all(sessionId, cursor, BATCH) as (StoredMessage & { payload: string })[]
+      if (raw.length === 0) break
+      for (const r of raw) {
+        const row: StoredMessage = { ...r, payload: JSON.parse(r.payload) }
+        const newest = merged[merged.length - 1]
+        if (newest && continuesRun(newest, row)) {
+          const head = (newest.payload as { text?: string }).text ?? ''
+          const tail = (row.payload as { text?: string }).text ?? ''
+          newest.payload = { ...(newest.payload as object), text: head + tail }
+          newest.ts = row.ts // 마지막 조각의 시각
+        } else {
+          merged.push(row)
+          if (merged.length > limit) break outer
+        }
+      }
+      cursor = raw[raw.length - 1]!.seq
+      if (raw.length < BATCH) break
+    }
+    return merged.slice(0, limit)
+  }
+
+  /**
+   * 스트리밍 중의 행 갱신 — **색인은 건드리지 않는다** (#66).
+   *
+   * 자라는 본문을 델타마다 trigram으로 다시 색인하면 메시지 길이의 제곱이 된다.
+   * 스트림이 닫힐 때 appendMessages가 한 번 색인한다 (turn_complete 경계).
+   */
+  upsertMessageNoIndex(m: StoredMessage): void {
+    this.db
       .prepare(
-        `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
-         WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
+        `INSERT INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, seq) DO UPDATE SET role = excluded.role, kind = excluded.kind,
+           payload = excluded.payload, ts = excluded.ts`,
       )
-      .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
-    return rows.reverse().map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
+      .run(m.sessionId, m.seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
   }
 
   /** 스킬 목록을 남긴다 (도구+디렉토리 단위) */
@@ -1027,6 +1115,16 @@ export class Store {
 }
 
 /** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */
+/**
+ * older가 newer의 같은 메시지 조각인가 (#66) — UI의 messagesToChat과 같은 규칙:
+ * assistant의 text끼리, reasoning끼리만 잇는다. 사람의 말(role=user)은 잇지 않는다.
+ */
+function continuesRun(older: StoredMessage, newer: StoredMessage): boolean {
+  if (older.kind !== newer.kind || older.role !== newer.role) return false
+  if (older.role !== 'assistant') return false
+  return older.kind === 'text' || older.kind === 'reasoning'
+}
+
 function extractText(payload: string): string {
   try {
     const p = JSON.parse(payload) as Record<string, unknown>

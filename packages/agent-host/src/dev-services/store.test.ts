@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { SessionInfo } from '@cc/protocol'
+import type { SessionInfo, StoredMessage } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
@@ -834,5 +834,93 @@ describe('WAL 체크포인트', () => {
     expect(statSync(path + '-wal').size).toBe(0)
     s.close()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/*
+ * 읽기는 델타 시절의 데이터도 메시지로 병합한다 (#66).
+ * 마이그레이션 전의 26만 행이 그대로 있어도, limit은 행이 아니라 메시지를 센다.
+ */
+describe('loadMessages는 델타 조각을 메시지로 병합한다 (#66)', () => {
+  const delta = (seq: number, text: string) =>
+    ({ sessionId: 's1', seq, role: 'assistant' as const, kind: 'text' as const, payload: { type: 'message_delta', text }, ts: seq })
+
+  it('연속 assistant 조각이 한 메시지가 되고, seq는 첫 조각의 것이다', () => {
+    const s = seeded()
+    s.appendMessages([
+      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 1 },
+      delta(2, '한 '), delta(3, '번에 '), delta(4, '뽑기'),
+    ])
+    const msgs = s.loadMessages('s1')
+    expect(msgs.map((m) => [m.seq, (m.payload as { text?: string }).text])).toEqual([
+      [1, '질문'],
+      [2, '한 번에 뽑기'],
+    ])
+  })
+
+  it('limit은 병합된 메시지를 센다 — 조각 수가 아니라', () => {
+    const s = seeded()
+    const rows = []
+    for (let turn = 0; turn < 4; turn++) {
+      rows.push({ sessionId: 's1', seq: turn * 11 + 1, role: 'user' as const, kind: 'text' as const, payload: { text: `질문${turn}` }, ts: turn * 11 + 1 })
+      for (let t = 0; t < 10; t++) rows.push(delta(turn * 11 + 2 + t, `조각${turn}-${t} `))
+    }
+    s.appendMessages(rows)
+    // 마지막 2개 = 질문3 + 그 답 (조각 10개가 아니라)
+    const page = s.loadMessages('s1', 2)
+    expect(page.length).toBe(2)
+    expect((page[0]!.payload as { text?: string }).text).toBe('질문3')
+    expect((page[1]!.payload as { text?: string }).text).toContain('조각3-0')
+    expect((page[1]!.payload as { text?: string }).text).toContain('조각3-9')
+    // 커서(첫 조각의 seq)로 이어 읽으면 같은 조각이 두 번 오지 않는다
+    const older = s.loadMessages('s1', 2, page[0]!.seq)
+    expect((older[1]!.payload as { text?: string }).text).toContain('조각2-9')
+  })
+
+  it('경계는 병합하지 않는다 — 사람의 말·도구 호출·reasoning이 갈라놓는다', () => {
+    const s = seeded()
+    s.appendMessages([
+      delta(1, '앞'),
+      { sessionId: 's1', seq: 2, role: 'system', kind: 'tool_call', payload: { summary: { tool: 'Bash', title: 'ls' } }, ts: 2 },
+      delta(3, '뒤'),
+      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: '생각' }, ts: 4 },
+      delta(5, '또'),
+    ])
+    expect(s.loadMessages('s1').map((m) => [m.kind, (m.payload as { text?: string }).text])).toEqual([
+      ['text', '앞'], ['tool_call', undefined], ['text', '뒤'], ['reasoning', '생각'], ['text', '또'],
+    ])
+  })
+
+  it('배치 경계에 걸친 조각도 잘리지 않는다', () => {
+    const s = seeded()
+    const rows: StoredMessage[] = [{ sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 1 }]
+    // 내부 배치(400행)보다 긴 답변 — 500조각이 한 메시지가 되어야 한다
+    for (let t = 0; t < 500; t++) rows.push(delta(t + 2, `${t},`))
+    s.appendMessages(rows)
+    const msgs = s.loadMessages('s1', 10)
+    expect(msgs.length).toBe(2)
+    const text = (msgs[1]!.payload as { text?: string }).text!
+    expect(text.startsWith('0,1,')).toBe(true)
+    expect(text.endsWith('499,')).toBe(true)
+  })
+
+  it('loadMessagesFrom은 그 자리 뒤를 같은 규칙으로 읽는다', () => {
+    const s = seeded()
+    s.appendMessages([
+      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 1 },
+      delta(2, '답 '), delta(3, '전체'),
+      { sessionId: 's1', seq: 4, role: 'user', kind: 'text', payload: { text: '다음 질문' }, ts: 4 },
+    ])
+    const after = s.loadMessagesFrom('s1', 1, 10)
+    expect(after.map((m) => (m.payload as { text?: string }).text)).toEqual(['답 전체', '다음 질문'])
+  })
+
+  it('upsertMessageNoIndex는 본문만 갱신하고 색인은 건드리지 않는다', () => {
+    const s = seeded()
+    s.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문' }, ts: 1 })
+    expect((s.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('자라는 본문')
+    expect(s.searchMessages('자라는 본문').length).toBe(0) // 색인은 닫힐 때(appendMessages) 한 번
+    s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문 끝' }, ts: 2 }])
+    expect(s.searchMessages('자라는 본문').length).toBe(1)
   })
 })

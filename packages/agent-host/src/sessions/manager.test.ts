@@ -1289,9 +1289,8 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
   })
 
   /*
-   * 저장소의 한 행은 메시지가 아니라 **스트리밍 델타 하나**다.
-   * 마지막 한 행만 읽으면 답변의 꼬리 토막이 나온다 — 실제로 오케스트레이터에게
-   * 문장 중간부터 시작하는 보고가 갔다.
+   * 스트리밍 조각은 하나의 메시지로 저장된다 (#66). 턴이 끝나면 그 행이 확정되고,
+   * 미리보기·read_session은 조각이 아니라 완성된 문장을 읽는다.
    */
   it('미리보기는 조각이 아니라 이어붙인 응답이다', async () => {
     const { a, tools } = await setup()
@@ -1299,6 +1298,7 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     for (const part of ['원인은 ', '델타를 ', '이어붙이지 ', '않은 것입니다.']) {
       h.emitDelta(part)
     }
+    h.finishTurn() // 스트림이 닫히며 지금까지의 본문이 한 행으로 남는다 (#66)
     await new Promise((r) => setTimeout(r, 0))
     const list = await tools.listSessions()
     expect(list.find((s) => s.sessionId === a.id)?.preview).toBe('원인은 델타를 이어붙이지 않은 것입니다.')
@@ -1308,6 +1308,7 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     const { a, tools } = await setup()
     const h = adapter.handleOf(a.id)!
     for (const part of ['앞부분 ', '뒷부분']) h.emitDelta(part)
+    h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
     const r = await tools.readSession(a.id)
@@ -1570,7 +1571,7 @@ describe('델타로 쌓인 기록에서도 따라잡는다', () => {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
     })) as { id: string }
 
-    // 응답이 스트리밍 조각으로 쌓인다 (실제 저장 형태)
+    // 응답이 스트리밍 조각으로 흘러온다 — 저장은 한 행으로 합쳐진다 (#66)
     const h = a.handleOf(s.id)!
     h.emitDelta('답의 ')
     h.emitDelta('앞부분과 뒷부분')
@@ -1587,8 +1588,9 @@ describe('델타로 쌓인 기록에서도 따라잡는다', () => {
     const texts = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as { payload: { text?: string } }[])
       .map((r) => r.payload.text)
       .filter(Boolean)
-    // 중복 없이 뒷부분만 붙는다 — 0건(못 찾음)도, 통째 중복도 아니다
-    expect(texts).toEqual(['질문', '답의 ', '앞부분과 뒷부분', '터미널에서 한 말', '터미널 답'])
+    // 중복 없이 뒷부분만 붙는다 — 0건(못 찾음)도, 통째 중복도 아니다.
+    // 스트리밍 조각 둘은 저장에서 이미 한 행이다 (#66)
+    expect(texts).toEqual(['질문', '답의 앞부분과 뒷부분', '터미널에서 한 말', '터미널 답'])
     expect(events.some((e) => e.type === 'history_synced' && e.added === 2)).toBe(true)
   })
 })
@@ -2139,5 +2141,69 @@ describe('오케스트레이터 앱 안내서와 설정 (#30)', () => {
     const tool = ORCHESTRATOR_TOOLS.find((t) => t.name === 'update_session_settings')!
     const keys = Object.keys((tool.schema as { shape: Record<string, unknown> }).shape)
     expect(keys.sort()).toEqual(['effort', 'model', 'sessionId', 'verbosity'])
+  })
+})
+
+/*
+ * 저장의 단위가 델타에서 **메시지**로 바뀌었다 (#66).
+ * 예전에는 한 문장이 행 아홉 개였다 — DB의 84%가 조각이었고, 페이지네이션은 행을
+ * 세느라 의미를 잃었으며, trigram 색인은 1~2자 본문을 색인하지 못해 검색이 죽었다.
+ */
+describe('스트리밍 메시지는 행 하나로 저장된다 (#66)', () => {
+  const openSession = async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    return { s, h: adapter.handleOf(s.id)! }
+  }
+
+  it('조각 여럿이 한 행이 되고, 끝의 빈 조각은 행을 만들지 않는다', async () => {
+    const { s, h } = await openSession()
+    for (const part of ['한 ', '번에 ', '뽑게 ', '하면 ', '됩니다.']) h.emitDelta(part)
+    h.emitDelta('') // codex가 끝에 보내는 빈 델타 — 빈 행 1,853개의 출처였다
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const rows = store.loadMessages(s.id, 50)
+    const texts = rows.filter((r) => r.kind === 'text').map((r) => (r.payload as { text?: string }).text)
+    expect(texts).toEqual(['한 번에 뽑게 하면 됩니다.'])
+  })
+
+  it('턴이 닫히면 조각 경계에 걸친 구절도 검색된다', async () => {
+    const { h } = await openSession()
+    // '뽑게'는 두 조각에 걸쳐 있다 — 행이 조각이던 시절엔 영영 찾을 수 없던 모양
+    h.emitDelta('한 번에 뽑')
+    h.emitDelta('게 하면 됩니다.')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(store.searchMessages('뽑게 하면').length).toBe(1)
+  })
+
+  it('도구 호출은 메시지의 경계다 — 앞뒤가 서로 다른 행이 된다', async () => {
+    const { s, h } = await openSession()
+    h.emitDelta('먼저 살펴보고')
+    h.emitToolCall('Bash', 'ls')
+    h.emitDelta('결과는 이렇습니다')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const rows = store.loadMessages(s.id, 50)
+    expect(rows.map((r) => r.kind)).toEqual(['text', 'tool_call', 'text'])
+    // 경계에서 닫힌 행도 색인된다 — 도구 호출 전의 말이 검색에서 빠지면 안 된다
+    expect(store.searchMessages('먼저 살펴보고').length).toBe(1)
+  })
+
+  it('사람의 말(send)도 경계다 — 인터럽트 후 이어 말해도 열린 행에 붙지 않는다', async () => {
+    const { s, h } = await openSession()
+    h.emitDelta('하던 말')
+    await new Promise((r) => setTimeout(r, 0))
+    await mgr.send(s.id, '멈추고 이것부터')
+    h.emitDelta('새 답')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const texts = store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)
+    // fake 핸들은 send에 echo 델타로 답한다 — 그 echo와 '새 답' 사이에는 경계가 없으므로 한 행이 맞다
+    expect(texts).toEqual(['하던 말', '멈추고 이것부터', 'echo:멈추고 이것부터새 답'])
   })
 })

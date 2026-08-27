@@ -501,7 +501,7 @@ interface AgentAdapter {
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
 - `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, archived, last_read_seq, created_at, …)` — `kind` is derived from `is_orchestrator` + `project_id` (central vs project orchestrator, FR-11)
-- `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2)
+- `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. Reads merge legacy per-delta rows, so pre-migration data behaves identically.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation
 - `workspace(id, layout_json, updated_at)` — snapshot

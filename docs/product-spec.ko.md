@@ -501,7 +501,7 @@ interface AgentAdapter {
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
 - `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, archived, last_read_seq, created_at, …)` — `kind`는 `is_orchestrator` + `project_id`에서 파생된다 (중앙 vs 프로젝트 오케스트레이터, FR-11)
-- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2)
+- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계
 - `workspace(id, layout_json, updated_at)` — 스냅숏
