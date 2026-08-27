@@ -114,11 +114,17 @@ function Body() {
     return (
       <div className="relative flex min-h-0 flex-1">
         {/*
-          뷰 전환 버튼은 없다 (minimal). 소개가 가운데를 차지한 동안 오케스트레이터·
-          그리드를 누르면 화면이 안 바뀌는 죽은 클릭이 된다 — 아직 문이 아닌 것을
-          문처럼 보이게 두지 않는다. 여기 사이드바가 있는 이유는 하나, Add project다.
+          **사이드바는 그대로 다 보인다.** 한때 뷰 전환 버튼을 빼고 세웠다 — 소개가
+          가운데를 잡고 있는 동안 눌러도 화면이 안 바뀌니 죽은 클릭이라는 이유였다.
+          그 진단은 맞았는데 처방이 틀렸다: 버튼을 감출 게 아니라 **동작하게** 하면
+          된다. 지금은 오케스트레이터도 그리드도 누르면 소개를 지나 그 화면으로 간다
+          (store의 setView·openOrchestrator가 introSeen을 세운다).
+
+          흐름을 강요하지 않는다는 것이 이 온보딩의 전제다. 소개를 안 읽고 바로
+          쓰겠다는 사람의 길을 화면에서 지우면, 대화를 강요하지 않겠다면서 대신
+          '소개 읽기'를 강요하는 셈이 된다.
         */}
-        <Sidebar minimal />
+        <Sidebar />
         <Notices />
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <Intro />

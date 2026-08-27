@@ -115,10 +115,10 @@ test('첫 실행: 소개 화면 → 카드 선택 → 빈 오케스트레이터 
   // 앱이 무엇인지가 여전히 첫 문장이고, 오케스트레이터의 역할이 눈에 띄게 선다
   // 한 줄이 전부다 — 이 화면이 파는 것은 "말을 걸 상대가 있다" 하나다
   await expect(page.getByTestId('intro-role')).toContainText('orchestrator')
-  // 소개를 읽는 동안에도 프로젝트를 만들 수 있어야 한다 (대화를 강요하지 않는다)
+  // 소개를 읽는 동안에도 사이드바는 전부 살아 있다 — 흐름을 강요하지 않는다
   await expect(page.getByTestId('add-project')).toBeVisible()
-  // 뷰 전환 버튼은 아직 문이 아니다 — 죽은 클릭을 문처럼 보이게 두지 않는다
-  await expect(page.getByTestId('orchestrator-button')).toHaveCount(0)
+  await expect(page.getByTestId('orchestrator-button')).toBeVisible()
+  await expect(page.getByTestId('grid-button')).toBeVisible()
   // 나중에 바꿀 수 있다는 안내가 선택의 부담을 낮춘다
   await expect(page.getByTestId('intro')).toContainText('You can change this later')
 
@@ -166,6 +166,28 @@ test('소개 화면에서도 프로젝트를 만들 수 있다 — 사이드바�
   await expect(page.getByTestId('project-alpha')).toBeVisible()
   await expect(page.getByTestId('intro')).toHaveCount(0)
   await expect(page.getByTestId('orchestrator-button')).toBeVisible()
+})
+
+/**
+ * 소개를 건너뛰는 길도 열려 있어야 한다 (#63).
+ *
+ * 한때 소개 옆 사이드바에서 뷰 전환 버튼을 뺐다 — 눌러도 화면이 안 바뀌니
+ * 죽은 클릭이라는 이유였다. 진단은 맞고 처방이 틀렸다: 감출 게 아니라 동작하게
+ * 하면 된다. 감추면 "대화를 강요하지 않는다"면서 '소개 읽기'를 강요하게 된다.
+ */
+test('소개는 건너뛸 수 있다 — 그리드 버튼이 실제로 동작한다 (#63)', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro')).toBeVisible()
+
+  // 도구 카드를 고르지 않고 그리드로 간다
+  await page.getByTestId('grid-button').click()
+
+  await expect(page.getByTestId('grid')).toBeVisible()
+  await expect(page.getByTestId('intro')).toHaveCount(0)
+
+  // 지나온 소개는 다시 나오지 않는다 (다시 켜도)
+  await page.reload()
+  await expect(page.getByTestId('intro')).toHaveCount(0)
 })
 
 test('첫 실행 탈출구: 대화를 강요하지 않는다 — 폴더를 고르면 세션 만들기로 이어진다', async ({ page }) => {

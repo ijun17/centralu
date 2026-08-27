@@ -103,14 +103,8 @@ function dropLine(edge: 'top' | 'bottom' | null): string {
     : 'shadow-[inset_0_-2px_0_0_var(--color-ash)]'
 }
 
-/**
- * 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1).
- *
- * `minimal`은 소개 화면 옆에 설 때다 (#63): 뷰 전환 버튼을 빼고 프로젝트 목록과
- * Add project만 남긴다. 소개가 가운데를 차지한 동안 그 버튼들은 눌러도 화면이
- * 바뀌지 않는 죽은 클릭이기 때문이다.
- */
-export function Sidebar({ minimal = false }: { minimal?: boolean } = {}) {
+/** 관찰 레인 — 밀도 높게, 공간은 조금만 (docs/architecture.md 설계 원칙 1) */
+export function Sidebar() {
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
   const width = useStore((s) => s.sidebarWidth)
@@ -138,8 +132,8 @@ export function Sidebar({ minimal = false }: { minimal?: boolean } = {}) {
         onReset={() => setSidebarWidth(SIDEBAR_DEFAULT)}
         testId="sidebar-resize"
       />
-      {!minimal && <OrchestratorButton />}
-      {!minimal && <GridButton />}
+      <OrchestratorButton />
+      <GridButton />
       {ids.length === 0 ? (
         <p className="px-4 py-6 text-xs leading-relaxed text-slate">
           No projects yet.

@@ -2027,7 +2027,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setView(view) {
-    set({ view })
+    /*
+     * 화면을 골랐다 = 소개를 지나왔다 (#63).
+     *
+     * 소개 화면 옆의 사이드바에서 그리드나 오케스트레이터를 누르는 사람은 "설명은
+     * 됐고 앱을 쓰겠다"고 말한 것이다. 그 클릭이 화면을 안 바꾸면 버튼이 고장 난
+     * 것처럼 보이고, 그렇다고 버튼을 감추면 소개 읽기를 강요하는 셈이 된다 —
+     * 대화를 강요하지 않겠다는 이 온보딩의 전제와 정면으로 어긋난다.
+     */
+    set({ view, introSeen: true })
     get().saveWorkspace()
   },
 
@@ -2038,7 +2046,8 @@ export const useStore = create<AppState>((set, get) => ({
      * 화면부터 바꾼다. 조회가 늦어도 그동안 아무 반응이 없으면 누른 사람은 버튼이
      * 죽은 줄 안다 — 보낸 즉시 '작업 중'으로 두는 것과 같은 이유다.
      */
-    set({ view: 'orchestrator' })
+    // 여기로 들어온 것도 소개를 지나온 것이다 (setView와 같은 이유, #63)
+    set({ view: 'orchestrator', introSeen: true })
     get().saveWorkspace()
     try {
       /*
