@@ -79,6 +79,25 @@ const HISTORY_LIMIT = 200
 const SYNC_LIMIT = 600
 
 /**
+ * 새 오케스트레이터에게 넘길 지난 대화의 분량 (줄 수와 줄 길이).
+ *
+ * 시스템 프롬프트에 붙는 글이라 예산이 있다. 전부 넣으면 문맥을 되찾자고 문맥을
+ * 다 쓰는 셈이고, 너무 적으면 "무슨 이야기 중이었나"가 안 남는다. 40줄 × 600자면
+ * 최근 몇 턴의 줄기가 남는다 — 세부가 필요하면 recall이 우리 저장소를 뒤진다.
+ */
+const MEMORY_MESSAGES = 40
+const MEMORY_LINE_CHARS = 600
+
+/**
+ * "여기까지는 옛 도구의 대화다" 표식이 저장되는 자리.
+ *
+ * 세션 행에 컬럼을 더하지 않는 이유: 이건 세션의 성질이 아니라 **이 설치본에서
+ * 일어난 사건**이고, 새 도구가 첫 마디를 하는 순간 의미를 잃는다 (그때부터는
+ * externalId가 답을 갖는다). app_settings는 그런 값이 사는 자리다.
+ */
+const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
+
+/**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
  * 상태 추적·저장은 전부 여기서 한다.
  */
@@ -724,7 +743,18 @@ export class SessionManager {
     const resumeId = m.externalId ?? m.importedFrom
 
     if (!resumeId) {
-      if (this.store.loadMessages(m.id, 1).length > 0) {
+      /*
+       * **잃어버린 것과 놓기로 한 것을 가른다.**
+       *
+       * 이 가드는 "기록은 있는데 이어갈 id가 없다"를 사고로 보고 막는다 — 옳다.
+       * 그런데 도구를 바꾸면 정확히 같은 모양이 **의도적으로** 만들어진다(새 도구는
+       * 옛 대화를 이어받을 수 없다). 그래서 그 순간 경계를 적어 두고, 그 뒤로 오간
+       * 말이 없으면 새로 띄워도 잃을 것이 없다고 판단한다.
+       * (경계 뒤에 말이 오갔다면 그건 새 도구의 대화이고, 그때는 externalId가 있다.)
+       */
+      const boundary = Number(this.store.appSetting(freshStartKey(m.id)) ?? '-1')
+      const newest = this.store.loadMessages(m.id, 1)[0]
+      if (newest && newest.seq > boundary) {
         return {
           session: m,
           resumed: false,
@@ -792,7 +822,16 @@ export class SessionManager {
            * 표식만 바뀐 세션이 다음에 깰 때 이 조건을 지나며 도구와 역할을 받는다.
            */
           orchestratorTools: m.kind === 'orchestrator' ? this.orchestratorToolsFor(sessionId, m.projectId) : undefined,
-          systemPromptAppend: m.kind === 'orchestrator' ? this.orchestratorRoleFor(m.projectId) : undefined,
+          /*
+           * 여기가 **기억을 넘기는 자리**다. 도구를 바꾸면 externalId가 끊겨서
+           * 이 길(새 프로세스)로 들어오는데, 그때 지난 대화를 함께 실어 보낸다.
+           * 이어가기(resume)로 들어온 세션은 도구가 이미 문맥을 갖고 있으므로
+           * 같은 말을 두 번 넣지 않는다.
+           */
+          systemPromptAppend:
+            m.kind === 'orchestrator'
+              ? this.orchestratorRoleFor(m.projectId) + (resumeId ? '' : this.orchestratorMemory(m.id))
+              : undefined,
           orchestratorBridge: m.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
         },
         (e) => this.onEvent(e),
@@ -1344,6 +1383,15 @@ export class SessionManager {
     m.effort = null
     m.verbosity = null
     m.serviceTier = null
+    /*
+     * 여기까지가 옛 도구의 대화다 — 경계를 적어 둔다 (doResumeSession의 가드가 읽는다).
+     * 이걸 안 남기면 "이어갈 id가 없는데 기록은 있다"가 사고로 보여서, 방금 바꾼
+     * 세션이 다음 기동에서 "resume id를 잃었다"며 안 깨어난다.
+     */
+    // 경계는 **저장소의 마지막 seq**로 적는다. 메모리의 lastSeq는 뒤처질 수 있고
+     // (이벤트로 들어온 줄이 meta를 거치지 않는 길이 있다), 한 줄만 어긋나도
+     // 가드가 "잃어버렸다"로 읽어서 방금 바꾼 세션이 안 깨어난다
+    this.store.setAppSetting(freshStartKey(m.id), String(this.store.loadMessages(m.id, 1)[0]?.seq ?? 0))
     this.store.upsertSession(m)
     this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
 
@@ -2084,6 +2132,43 @@ export class SessionManager {
     if (projectId === null) return ORCHESTRATOR_ROLE
     const p = this.store.listProjects().find((x) => x.id === projectId)
     return projectOrchestratorRole(p?.name ?? projectId)
+  }
+
+  /**
+   * 새로 태어난 오케스트레이터에게 **지난 기억을 넘긴다**.
+   *
+   * 도구를 바꾸면 프로세스가 갈리고 그 도구의 문맥은 사라진다 — 화면에는 어제까지
+   * 나눈 대화가 그대로 보이는데 정작 상대는 그걸 하나도 모르는 상태가 된다.
+   * 워커 세션이라면 "새 대화를 시작했다"로 정직하지만, 오케스트레이터는 앱에 하나뿐인
+   * **상주 상대**다. 기억을 잃는 것이 곧 관계가 끊기는 것이라 다르게 다뤄야 한다.
+   *
+   * 우리 저장소에는 그 대화가 남아 있으므로, 새 프로세스의 시스템 프롬프트에
+   * 요약을 붙여 넘긴다. resume이 아니라 **인계**다 — 토씨까지 복원하지는 못하고,
+   * 무슨 이야기를 하던 중이었는지를 넘긴다.
+   *
+   * **사람의 말과 자기 답만 넣는다.** 도구 결과(read_session·recall이 퍼온 다른
+   * 세션의 본문)는 뺀다: 워커가 쓴 글이 시스템 프롬프트로 승격되는 길을 열면,
+   * 낮은 권한에서 높은 권한으로 넘어가는 그 통로가 여기 다시 생긴다
+   * (orchestrator-home.ts가 폴더 문서를 끈 것과 같은 이유).
+   */
+  private orchestratorMemory(sessionId: string): string {
+    const rows = this.store.loadMessages(sessionId, MEMORY_MESSAGES)
+    const lines: string[] = []
+    for (const m of rows) {
+      if (m.kind !== 'text') continue
+      if (m.role !== 'user' && m.role !== 'assistant') continue
+      const text = String((m.payload as { text?: unknown }).text ?? '').trim()
+      if (!text) continue
+      lines.push(`${m.role === 'user' ? '사람' : '나'}: ${text.slice(0, MEMORY_LINE_CHARS)}`)
+    }
+    if (lines.length === 0) return ''
+    return [
+      '',
+      '# 지난 대화 (이 프로세스가 시작되기 전)',
+      '이 앱의 기록에서 가져온 요약이다. 도구가 바뀌면서 문맥은 사라졌지만 대화는 이어진다 —',
+      '처음 만난 것처럼 굴지 말고, 필요하면 recall로 더 찾아본다.',
+      ...lines,
+    ].join('\n')
   }
 
   /**

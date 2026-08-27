@@ -1377,6 +1377,32 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
    * "The 'sonnet' model is not supported when using Codex with a ChatGPT account."
    * 도구를 바꾸는 기능이 고장 난 게 아니라, 도구에만 뜻이 있는 값을 들고 넘어갔던 것이다.
    */
+  /**
+   * 오케스트레이터는 앱에 하나뿐인 상주 상대다 — 도구를 바꿨다고 처음 만난 사이가
+   * 되면 안 된다. 도구의 문맥은 되살릴 수 없지만 우리 기록은 남아 있으므로,
+   * 새 프로세스에 지난 대화를 요약해 넘긴다 (resume이 아니라 인계).
+   */
+  it('도구를 바꾼 오케스트레이터는 지난 대화를 넘겨받는다', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.send(orc.id, '알파 프로젝트 상태 좀 봐줘')
+    mgr['store'].appendMessages([
+      {
+        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id), role: 'assistant', kind: 'text',
+        payload: { text: '알파는 테스트 두 개가 깨져 있습니다' }, ts: Date.now(),
+      },
+    ])
+
+    await mgr.switchTool(orc.id, 'codex')
+    await mgr.resumeSession(orc.id)
+
+    const handed = codexAdapter.lastOpts?.systemPromptAppend ?? ''
+    expect(handed).toContain('지난 대화')
+    expect(handed).toContain('알파 프로젝트 상태')
+    expect(handed).toContain('테스트 두 개가 깨져')
+    // 역할도 함께 간다 — 기억만 있고 자기가 누구인지 모르면 반쪽이다
+    expect(handed).toContain('오케스트레이터')
+  })
+
   it('도구를 바꾸면 모델·강도·응답길이·티어를 놓는다 — 옆 도구의 사전에 없는 낱말이다', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', {

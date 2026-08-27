@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Modal } from '../../components/Modal.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
 import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -56,8 +55,6 @@ export function useModels(tool: ToolName, live: boolean): { models: ModelOption[
 
   return state
 }
-
-const TOOL_LABEL: Record<ToolName, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 /**
  * 이 도구의 응답 길이 단계 (#54). 비어 있으면 그 도구에는 노브가 없어서 행 자체가 안 뜬다.
@@ -167,11 +164,9 @@ export function SessionSettings({
 }) {
   const update = useStore((s) => s.updateSessionSettings)
   const setKind = useStore((s) => s.setSessionKind)
-  const switchTool = useStore((s) => s.switchTool)
   const { models, reason } = useModels(tool, live)
   const verbosities = useVerbosities(tool)
   const [open, setOpen] = useState(false)
-  const [asking, setAsking] = useState<ToolName | null>(null)
   const rootRef = useRef<HTMLSpanElement>(null)
 
   const current = models.find((m) => m.id === model)
@@ -385,62 +380,20 @@ export function SessionSettings({
           </MenuSection>
 
           {/*
-            에이전트는 **되돌릴 수 없는 것**이라 맨 아래에 따로 세운다.
-            위의 셋은 같은 대화를 이어가며 바뀌지만 이쪽은 대화가 끊긴다
-            (externalId가 도구 고유 id라 새 도구가 이어받을 수 없다).
-            같은 메뉴에 있다고 같은 무게로 다루면 사람이 그 차이를 모른 채 누른다 —
-            그래서 무슨 일이 일어나는지 먼저 적고, 눌러도 곧바로 바뀌지 않는다.
+            **에이전트 바꾸기는 여기 없다** (도그푸딩 판정).
+
+            대화가 이어지지 않으므로 이 메뉴에서 도구를 바꾸는 것은 "바꾸기"가 아니라
+            "새 대화 시작하기"였다 — 그건 세션 만들기가 이미, 더 정직하게 하는 일이다.
+            같은 일을 하는 두 번째 문이면서 이름만 다른 셈이라, 무엇이 남고 무엇이
+            사라지는지 확인 창으로 매번 설명해야 했다. 절반짜리 기능은 걷어낸다.
+
+            남은 예외는 오케스트레이터 하나이고, 그건 앱 설정(⌘,)의 Orchestrator에
+            있다 — 앱에 하나뿐이라 "다른 도구로 새로 만든다"가 성립하지 않는
+            유일한 세션이기 때문이다. 설치본 단위의 값이니 자리도 앱 설정이 맞다.
           */}
-          <MenuSection label="Agent" note="Switching starts a fresh conversation.">
-            {(Object.keys(TOOL_LABEL) as ToolName[]).map((t) => (
-              <MenuRow
-                key={t}
-                testId={`settings-tool-${t}`}
-                label={TOOL_LABEL[t]}
-                selected={t === tool}
-                title={t === tool ? undefined : `${TOOL_LABEL[t]} will not have this conversation`}
-                onPick={() => {
-                  setOpen(false)
-                  if (t !== tool) setAsking(t)
-                }}
-              />
-            ))}
-          </MenuSection>
         </div>
       )}
 
-      {asking && asking !== tool && (
-        <Modal onClose={() => setAsking(null)} testId="tool-switch-confirm">
-          <h2 className="text-[13px] font-medium text-chalk">Switch to {TOOL_LABEL[asking]}?</h2>
-          <p className="mt-2 text-[12px] leading-relaxed text-ash">
-            {TOOL_LABEL[asking]} <b className="text-chalk">will not have this conversation.</b> Each tool keeps
-            its own memory, so the new agent starts fresh.
-          </p>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-slate">
-            Your transcript stays here, and the {TOOL_LABEL[tool]} conversation is still available
-            under <span className="text-ash">+ → past conversations</span>.
-          </p>
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
-              onClick={() => setAsking(null)}
-              data-testid="tool-switch-cancel"
-            >
-              Cancel
-            </button>
-            <button
-              className="rounded border border-graphite px-2.5 py-1 text-[12px] text-chalk hover:bg-graphite/50"
-              onClick={() => {
-                void switchTool(sessionId, asking)
-                setAsking(null)
-              }}
-              data-testid="tool-switch-confirm-btn"
-            >
-              Switch
-            </button>
-          </div>
-        </Modal>
-      )}
     </span>
   )
 }

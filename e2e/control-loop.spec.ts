@@ -2817,9 +2817,11 @@ test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 티어는 codex의 것 — 도구부터 바꾼다
-  await pickSetting(page, 'settings-tool-codex')
-  await page.getByTestId('tool-switch-confirm-btn').click()
+  // 티어는 codex의 것 — codex 세션을 만든다 (세션 메뉴에는 도구 바꾸기가 없다)
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('tool-option-codex').click()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   const menu = page.getByTestId('settings-menu')
   await pickSetting(page, 'settings-model-gpt-5.6-terra')
@@ -4145,58 +4147,58 @@ test('오케스트레이터에서 @는 세션을 집는다', async ({ page }) =>
 })
 
 /**
- * 에이전트 바꾸기 (claude ↔ codex).
+ * 세션 메뉴에는 **에이전트 바꾸기가 없다** (도그푸딩 판정).
  *
- * 모델·권한과 나란히 있지만 성질이 다르다 — 대화가 끊긴다.
- * 그래서 **확인 없이는 바뀌지 않는다.**
+ * 대화가 이어지지 않으니 거기서의 '바꾸기'는 '새 대화 시작'과 같은 말이었고,
+ * 그건 세션 만들기가 이미 더 정직하게 한다. 같은 일을 하는 두 번째 문을 없앤다.
  */
-test('에이전트를 바꾸려면 대화가 끊긴다는 것을 확인해야 한다', async ({ page }) => {
+test('세션 설정 메뉴에서 에이전트는 못 바꾼다 — 새로 만들면 되는 일이다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
-  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 메뉴 안에서도 지금 도구가 무엇인지 읽힌다
   await page.getByTestId('settings-open').click()
-  await expect(page.getByTestId('settings-tool-claude')).toHaveAttribute('aria-checked', 'true')
-  // 같은 메뉴에 있어도 같은 무게가 아니다 — 무슨 일이 일어나는지 먼저 적혀 있다
-  await expect(page.getByTestId('settings-menu')).toContainText('starts a fresh conversation')
-
-  // 고르기만 하면 확인 창이 뜬다 — 아직 바뀌지 않는다
-  await page.getByTestId('settings-tool-codex').click()
-  await expect(page.getByTestId('tool-switch-confirm')).toBeVisible()
-  await expect(page.getByTestId('tool-switch-confirm')).toContainText('will not have this conversation')
-  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('claude')
-
-  // 취소하면 그대로
-  await page.getByTestId('tool-switch-cancel').click()
-  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('claude')
-
-  // 확인해야 바뀐다
-  await pickSetting(page, 'settings-tool-codex')
-  await page.getByTestId('tool-switch-confirm-btn').click()
-  await page.getByTestId('settings-open').click()
-  await expect(page.getByTestId('settings-tool-codex')).toHaveAttribute('aria-checked', 'true')
-  await page.keyboard.press('Escape')
-  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id)).toBe('codex')
-  // 사이드바 표식도 따라온다
-  await expect(page.getByTestId('tool-mark-codex')).toBeVisible()
+  await expect(page.getByTestId('settings-menu')).toBeVisible()
+  // 모델·권한은 그대로 있다 — 저 둘은 같은 대화를 이어가며 바뀐다
+  await expect(page.getByTestId('settings-menu')).toContainText('Permissions')
+  await expect(page.getByTestId('settings-tool-codex')).toHaveCount(0)
+  await expect(page.getByTestId('settings-menu')).not.toContainText('starts a fresh conversation')
 })
 
-test('에이전트를 바꾸면 이어갈 실마리를 끊는다 — 새 도구는 옛 대화를 모른다', async ({ page }) => {
+/**
+ * 남은 예외는 오케스트레이터 하나 — 앱에 하나뿐이라 "다른 도구로 새로 만든다"가
+ * 성립하지 않는다. 자리는 앱 설정이고, 확인을 한 번 받는다.
+ */
+test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'work')
-  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  // 세션을 만들어 둔다 — 살아 있으면 그 자리에서 갈아 끼운다
+  await page.getByTestId('orchestrator-button').click()
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
 
-  await pickSetting(page, 'settings-tool-codex')
-  await page.getByTestId('tool-switch-confirm-btn').click()
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-orchestrator').click()
+  await expect(page.getByTestId('orchestrator-tool-claude')).toHaveAttribute('aria-checked', 'true')
+
+  // 고르기만 하면 확인 창이 뜬다 — 아직 바뀌지 않는다
+  await page.getByTestId('orchestrator-tool-codex').click()
+  await expect(page.getByTestId('orchestrator-switch-confirm')).toContainText('working context is lost')
+  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId)).toBe('claude')
+
+  await page.getByTestId('orchestrator-switch-cancel').click()
+  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId)).toBe('claude')
+
+  // 확인해야 바뀐다
+  await page.getByTestId('orchestrator-tool-codex').click()
+  await page.getByTestId('orchestrator-switch-confirm-btn').click()
   await expect
-    .poll(async () => page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, id))
+    .poll(async () => page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId))
     .toBe('codex')
 
   // host가 externalId를 끊었는지 (codex에 Claude의 대화 id를 넘기면 엉뚱한 것을 잡는다)
   const ext = await page.evaluate(
     (s) => [...(window as any).__mock.sessions.values()].find((x: any) => x.id === s)?.externalId,
-    id,
+    orcId,
   )
   expect(ext).toBeNull()
 })

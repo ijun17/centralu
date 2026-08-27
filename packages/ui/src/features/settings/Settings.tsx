@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
+import { APP_VERSION, type ToolName, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 import { TEXT_SCALES, TEXT_SCALE_DEFAULT, useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { Modal } from '../../components/Modal.jsx'
 
 type Rule = { id: number; scope: string; matcher: string; decision: string; createdAt: number }
 
@@ -63,6 +64,18 @@ const SHORTCUTS: [string[], string][] = [
  * an errand, not a module.
  */
 const CATEGORIES = [
+  /*
+   * 오케스트레이터는 **설치본에 하나뿐인 존재**라 자리가 여기다.
+   *
+   * 에이전트 바꾸기는 원래 세션 설정 메뉴에 있었고 거기서 걷어냈다 — 대화가
+   * 이어지지 않으니 그 메뉴에서의 '바꾸기'는 '새 대화 시작'과 같은 말이었고,
+   * 그건 세션 만들기가 이미 더 정직하게 하는 일이다. 오케스트레이터만 예외인
+   * 이유는 하나: 앱에 하나뿐이라 "다른 도구로 새로 만든다"가 성립하지 않는다.
+   *
+   * 그리고 소개 화면이 이미 여기를 가리키고 있었다 ("You can change this later
+   * in Settings") — 지금까지는 지키지 않은 약속이었다.
+   */
+  { id: 'orchestrator', label: 'Orchestrator' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'permissions', label: 'Permissions' },
@@ -160,6 +173,7 @@ export function Settings() {
             is one a test can pass on and a screen reader can walk into.
           */}
           <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="settings-pane">
+            {category === 'orchestrator' && <OrchestratorSettings />}
             {/* E-5 알림 정책 */}
             {category === 'notifications' && (
               <section>
@@ -286,6 +300,117 @@ export function Settings() {
  * 누르기 전에 결과를 안다. 숫자(85%…)를 따로 쓰지 않는 이유다 — 비율은 읽어도
  * 크기는 보여야 안다.
  */
+/**
+ * 오케스트레이터가 어느 도구 위에서 도는가.
+ *
+ * **앱에서 에이전트를 바꿀 수 있는 유일한 자리다.** 세션 설정 메뉴에도 같은 것이
+ * 있었는데 걷어냈다: 대화가 이어지지 않으니 거기서의 '바꾸기'는 '새 대화 시작'과
+ * 같은 말이었고, 그건 세션 만들기가 이미 더 정직하게 하는 일이다. 오케스트레이터만
+ * 남은 이유는 앱에 하나뿐이라 "다른 도구로 새로 만든다"가 성립하지 않아서다.
+ *
+ * 두 경우를 한 자리에서 다룬다: 아직 태어나지 않았으면 선택만 적어 두고(다음
+ * 첫 질문이 그 도구로 태어난다), 이미 살아 있으면 그 자리에서 갈아 끼운다.
+ * 확인을 한 번 받는 이유는 하나 — 프로세스가 바뀌면 그 도구의 문맥은 사라진다.
+ * (기록은 남고, 새 프로세스는 지난 대화를 요약으로 넘겨받는다.)
+ */
+function OrchestratorSettings() {
+  const platform = usePlatform()
+  const orchestratorId = useStore((s) => s.orchestratorId)
+  const live = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
+  const switchTool = useStore((s) => s.switchTool)
+  const setToast = useStore((s) => s.setToast)
+  const [saved, setSaved] = useState<ToolName | null>(null)
+  const [asking, setAsking] = useState<ToolName | null>(null)
+
+  // 세션이 아직 없으면 화면에 보일 값은 저장된 선택뿐이다 (소개 화면에서 고른 그것)
+  useEffect(() => {
+    const alive = true
+    void platform.agents
+      .orchestratorPeek()
+      .then((s) => alive && setSaved((s?.tool ?? null) as ToolName | null))
+      .catch(() => {})
+  }, [platform])
+
+  const current = live ?? saved ?? 'claude'
+
+  const apply = async (tool: ToolName) => {
+    try {
+      // 살아 있으면 갈아 끼우고, 아직 없으면 선택만 적어 둔다
+      if (orchestratorId) await switchTool(orchestratorId, tool)
+      else await platform.agents.configureOrchestrator(tool)
+      setSaved(tool)
+    } catch (e) {
+      setToast((e as Error).message)
+    }
+  }
+
+  return (
+    <section data-testid="settings-orchestrator">
+      <p className="text-[11px] leading-relaxed text-slate">
+        The orchestrator is the one session that belongs to the app rather than a project. Pick
+        which agent it runs on.
+      </p>
+      <div className="mt-3 space-y-1.5">
+        {(['claude', 'codex'] as ToolName[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="radio"
+            aria-checked={t === current}
+            data-testid={`orchestrator-tool-${t}`}
+            onClick={() => t !== current && setAsking(t)}
+            className={`flex w-full items-baseline gap-2 rounded border px-3 py-2 text-left transition-colors ${
+              t === current ? 'border-ash text-chalk' : 'border-edge text-ash hover:border-graphite hover:text-chalk'
+            }`}
+          >
+            <span className="w-2 shrink-0 text-[10px] leading-none" aria-hidden>
+              {t === current ? '✓' : ''}
+            </span>
+            <span className="text-[12px]">{t === 'claude' ? 'Claude Code' : 'Codex'}</span>
+          </button>
+        ))}
+      </div>
+
+      {asking && (
+        <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
+          <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4">
+            <h2 className="text-[13px] font-medium text-chalk">
+              Run the orchestrator on {asking === 'claude' ? 'Claude Code' : 'Codex'}?
+            </h2>
+            <p className="mt-2 text-[12px] leading-relaxed text-ash">
+              The current agent process ends and a new one starts.{' '}
+              <b className="text-chalk">Its working context is lost</b> — each tool keeps its own.
+            </p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-slate">
+              Your transcript stays, and the new agent is handed a summary of what you two have
+              been talking about.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+                onClick={() => setAsking(null)}
+                data-testid="orchestrator-switch-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded border border-graphite px-2.5 py-1 text-[12px] text-chalk hover:bg-graphite/50"
+                onClick={() => {
+                  void apply(asking)
+                  setAsking(null)
+                }}
+                data-testid="orchestrator-switch-confirm-btn"
+              >
+                Switch
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </section>
+  )
+}
+
 function AppearanceSection() {
   const scale = useStore((s) => s.textScale)
   const setScale = useStore((s) => s.setTextScale)
