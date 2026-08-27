@@ -94,12 +94,15 @@ export function App({ platform }: { platform: Platform }) {
 }
 
 /**
- * 처음인 사람에게는 소개 화면이 화면을 대신한다 (FR-19 → #63).
+ * 처음인 사람에게는 소개가 **가운데 레인을** 대신한다 (FR-19 → #63).
  *
  * 조건은 "프로젝트 0개"가 아니라 **"아무것도 만든 적 없음"이다** — 세션(오케스트레이터
  * 포함)이 하나라도 있으면 이 사람은 처음이 아니고, 소개를 다시 보여주는 것은 방해다.
- * 소개를 지나온 뒤의 빈 상태는 특별한 화면이 아니다: 보통의 3레인에서 사이드바의
- * Add project와 오케스트레이터의 추천 질문이 다음 걸음을 맡는다.
+ *
+ * **사이드바는 함께 선다.** 소개가 화면을 통째로 덮던 동안에는 Add project가 화면에
+ * 없어서, 소개를 읽는 사람에게 프로젝트를 만들 길이 막혀 있었다 — 대화를 강요하지
+ * 않는다는 이 흐름의 전제를 화면이 어기고 있었던 셈이다 (도그푸딩 지적).
+ * 증거 레인만 없다: 볼 프로젝트도 세션도 아직 없다.
  */
 function Body() {
   const virgin = useStore((s) => Object.keys(s.projects).length === 0 && Object.keys(s.sessions).length === 0)
@@ -107,7 +110,22 @@ function Body() {
   // 훅은 **이른 return보다 먼저** — 아래 소개 분기 뒤에 두면 렌더마다 훅 수가 달라진다
   const view = useStore((s) => s.view)
 
-  if (virgin && !introSeen) return <Intro />
+  if (virgin && !introSeen) {
+    return (
+      <div className="relative flex min-h-0 flex-1">
+        {/*
+          뷰 전환 버튼은 없다 (minimal). 소개가 가운데를 차지한 동안 오케스트레이터·
+          그리드를 누르면 화면이 안 바뀌는 죽은 클릭이 된다 — 아직 문이 아닌 것을
+          문처럼 보이게 두지 않는다. 여기 사이드바가 있는 이유는 하나, Add project다.
+        */}
+        <Sidebar minimal />
+        <Notices />
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <Intro />
+        </div>
+      </div>
+    )
+  }
   /*
     3레인. 좌 = 관찰, 중앙 = 조작, 우 = 증거.
     The overlay covers the middle lane only — see the note below.

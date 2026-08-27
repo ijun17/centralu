@@ -60,20 +60,19 @@ export function Intro() {
   return (
     <div className="flex flex-1 items-center justify-center px-8" data-testid="intro">
       <div className="w-full max-w-xl">
-        {/* 앱이 무엇인지가 여전히 첫 문장이다 — 소개 화면이 그 자리를 물려받았다 */}
-        <h1 className="text-[15px] font-medium tracking-tight text-chalk">
-          Keep several agents working. Step in when one needs you.
-        </h1>
         {/*
-          오케스트레이터의 역할은 **눈에 띄게** (사용자 요구). 이 화면의 일은 도구
-          선택이 아니라 "이 앱에는 말을 걸 상대가 있다"를 각인시키는 것이다.
+          **한 줄이 전부다.** 세 문단짜리 설명을 읽고 시작하는 사람은 없다 —
+          길수록 안 읽히고, 안 읽히면 이 화면은 아무것도 가르치지 못한 채 클릭
+          하나만 받아 간다 (도그푸딩 지적). 남길 문장은 이 화면이 존재하는 이유
+          하나: **말을 걸 상대가 있다.** 나머지는 다음 화면의 질문 카드가 한다.
         */}
-        <p className="mt-3 text-[13px] leading-relaxed text-ash" data-testid="intro-role">
-          Centralu comes with an <span className="text-chalk">orchestrator</span> — a resident agent
-          that watches your sessions, answers questions about this app, and carries your
-          instructions across projects. Ask it anything, starting on the next screen.
+        <h1 className="text-[19px] font-medium tracking-tight text-chalk" data-testid="intro-role">
+          Meet your <span className="text-chalk">orchestrator</span>.
+        </h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-ash">
+          It watches every session and answers whatever you ask about this app.
         </p>
-        <p className="mt-4 text-[12px] text-slate">Pick which tool your orchestrator runs on:</p>
+        <p className="mt-5 text-[12px] text-slate">Run it on:</p>
 
         <div className="mt-2 grid grid-cols-2 gap-3">
           {cards.map((t) => {
