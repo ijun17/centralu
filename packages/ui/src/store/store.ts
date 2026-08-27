@@ -1894,7 +1894,23 @@ export const useStore = create<AppState>((set, get) => ({
       const info = await platform.agents.switchTool(sessionId, tool)
       set((s) => ({
         sessions: s.sessions[sessionId]
-          ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, tool: info.tool, live: false } }
+          ? {
+              ...s.sessions,
+              [sessionId]: {
+                ...s.sessions[sessionId]!,
+                tool: info.tool,
+                /*
+                 * 모델과 딸린 설정은 host가 놓는다 (manager.switchTool의 주석) —
+                 * 화면도 따라 놓지 않으면 메뉴에는 'sonnet'이 그대로 켜져 있는데
+                 * 실제 세션은 codex 기본값으로 도는, 읽을수록 틀린 화면이 된다.
+                 */
+                model: info.model,
+                effort: info.effort,
+                verbosity: info.verbosity,
+                serviceTier: info.serviceTier,
+                live: false,
+              },
+            }
           : s.sessions,
       }))
     } catch (e) {

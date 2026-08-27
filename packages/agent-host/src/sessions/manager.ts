@@ -1323,6 +1323,27 @@ export class SessionManager {
     // 새 도구는 옛 대화를 모른다. 실마리를 들고 가면 엉뚱한 대화를 잡는다
     m.externalId = null
     m.importedFrom = null
+    /*
+     * **모델과 그 딸린 설정도 함께 놓는다.**
+     *
+     * 실측(smoke-switch-tool): claude에서 sonnet을 고른 세션을 codex로 바꾸면
+     * 프로세스는 뜨는데 첫 턴이 400으로 죽는다 —
+     *   "The 'sonnet' model is not supported when using Codex with a ChatGPT account."
+     * 모델을 비우고 같은 일을 하면 정상이다. 즉 이 기능이 안 되는 것이 아니라,
+     * 도구에만 의미가 있는 값을 도구를 건너 들고 갔던 것이다.
+     *
+     * 모델 id는 도구의 어휘다 — 'sonnet'과 'gpt-5.6-terra'는 같은 자리를 가리키는
+     * 두 이름이 아니라 서로의 사전에 없는 낱말이다. effort도 범위가 다르고
+     * (claude는 max까지, codex는 high까지), verbosity·serviceTier는 아예 codex 전용이다.
+     * 그러니 옮길 수 있는 값이 아니라 **새로 고를 값**이고, null은 "그 도구의 기본"이다.
+     *
+     * 권한 프리셋은 남긴다: safe/normal/auto는 도구가 아니라 사람이 정한 방침이고,
+     * 두 어댑터가 같은 뜻으로 구현한다.
+     */
+    m.model = null
+    m.effort = null
+    m.verbosity = null
+    m.serviceTier = null
     this.store.upsertSession(m)
     this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
 

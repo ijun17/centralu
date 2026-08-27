@@ -1369,6 +1369,33 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     expect(r.externalId).toBeNull()
   })
 
+  /**
+   * 모델 id는 도구의 어휘다.
+   *
+   * 실측(smoke-switch-tool): claude에서 sonnet을 고른 세션을 codex로 바꾸면
+   * 프로세스는 뜨는데 첫 턴이 400으로 죽었다 —
+   * "The 'sonnet' model is not supported when using Codex with a ChatGPT account."
+   * 도구를 바꾸는 기능이 고장 난 게 아니라, 도구에만 뜻이 있는 값을 들고 넘어갔던 것이다.
+   */
+  it('도구를 바꾸면 모델·강도·응답길이·티어를 놓는다 — 옆 도구의 사전에 없는 낱말이다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'safe', model: 'sonnet', effort: 'max',
+    })) as { id: string }
+
+    const r = await mgr.switchTool(s.id, 'codex')
+    expect(r.model).toBeNull()
+    expect(r.effort).toBeNull()
+    expect(r.verbosity).toBeNull()
+    expect(r.serviceTier).toBeNull()
+    // 다음에 깰 때 어댑터가 받는 것도 비어 있어야 한다 — 저장만 지우면 반쪽이다
+    await mgr.resumeSession(s.id)
+    expect(codexAdapter.lastOpts?.model).toBeUndefined()
+    expect(codexAdapter.lastOpts?.effort).toBeUndefined()
+    // 권한은 사람이 정한 방침이라 도구를 건너 살아남는다
+    expect(codexAdapter.lastOpts?.permissionPreset).toBe('safe')
+  })
+
   it('평범한 세션에는 도구가 붙지 않는다 — 오케스트레이터만 받는다', async () => {
     const p = await addProject()
     await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })

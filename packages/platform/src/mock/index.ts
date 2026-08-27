@@ -500,8 +500,15 @@ export class MockPlatform implements Platform {
     switchTool: async (sessionId: string, tool: ToolName) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
-      // 실물과 같은 규칙: 도구를 바꾸면 이어갈 실마리를 끊는다
-      const next = { ...s, tool, externalId: null, importedFrom: null, worktree: null, live: false }
+      /*
+       * 실물과 같은 규칙: 도구를 바꾸면 이어갈 실마리를 끊고, **모델과 딸린 설정도 놓는다**
+       * (실측으로 확인된 규칙 — manager.switchTool 주석 참고: 'sonnet'을 든 채 codex로
+       * 가면 첫 턴이 400으로 죽는다). 워크트리는 디렉토리 사실이라 도구와 무관하다.
+       */
+      const next = {
+        ...s, tool, externalId: null, importedFrom: null, live: false,
+        model: null, effort: null, verbosity: null, serviceTier: null,
+      }
       this.sessions.set(sessionId, next)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
       return next
