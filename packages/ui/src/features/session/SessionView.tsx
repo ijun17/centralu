@@ -19,7 +19,7 @@ import { SessionSettings } from './SessionSettings.jsx'
 import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { appendPath, readDragPath } from '../files/dragPath.js'
-import { decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
+import { anchorAt, decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
 /** 입력창이 커질 수 있는 최대 높이. CSS의 max-h-40과 같은 값이어야 한다 */
 const COMPOSER_MAX_H = 160
@@ -747,6 +747,8 @@ function ChatStream({
    */
   const stickToBottom = useRef(true)
   const setStickToBottom = useStore((s) => s.setStickToBottom)
+  // 바닥이 아닌 자리는 줄(seq)로 남는다 (#61) — 픽셀이 아니라 줄이라야 측정을 넘어 살아남는다
+  const setScrollAnchor = useStore((s) => s.setScrollAnchor)
 
   const virtualizer = useVirtualizer({
     count: chat.length,
@@ -800,12 +802,43 @@ function ChatStream({
    */
   const lastTop = useRef(0)
 
+  /**
+   * 지금 화면 맨 위에 걸친 줄 (#61) — **떠날 때가 아니라 움직일 때마다** 갱신한다.
+   *
+   * 떠나는 순간에 계산하려다 실패했다: 포커스 뷰는 컴포넌트를 그대로 두고 sessionId만
+   * 갈아 끼우는데, React는 **새 세션으로 렌더한 뒤에** 정리 함수를 돌린다. 그 시점에
+   * 손에 잡히는 대화와 측정값은 이미 다음 세션의 것이라, 떠나는 세션의 자리를 물을
+   * 상대가 없다 (e2e가 3,959px 어긋남으로 잡았다).
+   *
+   * 그래서 사실을 미리 손에 들고 있는다. ref라 다시 그리지 않고, 스크롤 핸들러는
+   * 어차피 syncSticky로 이미 한 바퀴 돌고 있으므로 이진 탐색 하나가 더해질 뿐이다.
+   */
+  const anchor = useRef<{ seq: number; offset: number } | null>(null)
+
+  /**
+   * 스크롤이 실제로 일어난 순간에 잰 "바닥이었나" (#61).
+   *
+   * `stickToBottom`과 갈라놓는 이유가 둘이다. 하나는 위 anchor와 같다 — 정리 함수가
+   * 도는 시점의 요소는 이미 다음 세션의 것이라 거기서 재면 안 된다. 다른 하나는
+   * 원래 주석이 "따라가기 플래그 말고 위치를 봐라"라고 한 그 이유다: 아래 follow
+   * 효과의 release는 줄이 재어지며 내용이 밀릴 때도 플래그를 내리는데, 그건 한
+   * 프레임에 대한 판단이지 사람이 어디를 보고 있었나에 대한 답이 아니다.
+   * 그래서 **여기서만** 쓰이고, 스크롤 이벤트에서만 적힌다.
+   */
+  const wasAtBottom = useRef(true)
+
   // 사용자가 위로 올렸는지 추적 — 올려둔 동안에는 끌어내리지 않는다
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
     stickToBottom.current = isAtBottom(el)
+    wasAtBottom.current = stickToBottom.current
     lastTop.current = el.scrollTop
+    /*
+     * 착지 중에는 기억하지 않는다. 그 스크롤은 사람이 아니라 우리가 낸 것이고,
+     * 중간 프레임의 자리를 "읽던 자리"로 적어두면 다음 도착이 거기로 간다.
+     */
+    if (!stillLanding.current) anchor.current = anchorAt(el.scrollTop, virtualizer.measurementsCache, chat)
     syncSticky()
   }
 
@@ -822,6 +855,19 @@ function ChatStream({
   const landing = useRef(0)
   const stillLanding = useRef(false)
 
+  /*
+   * 정리 함수는 **떠나는 순간의** 대화와 측정값을 봐야 한다 (#61).
+   *
+   * 효과는 sessionId가 바뀔 때만 도는데, 그 클로저가 잡은 chat은 마운트 시점의
+   * 것이다 — 그걸로 앵커를 계산하면 그동안 자란 대화가 통째로 빠진 채 엉뚱한 줄을
+   * 가리킨다. 의존성에 chat을 넣는 방법은 더 나쁘다: 대화가 자랄 때마다 효과가
+   * 다시 돌면서 착지가 매번 처음부터 시작한다. 그래서 값이 아니라 창구를 넘긴다.
+   */
+  const chatRef = useRef(chat)
+  chatRef.current = chat
+  const virtRef = useRef(virtualizer)
+  virtRef.current = virtualizer
+
   /**
    * The reader has taken the conversation over, so stop arriving at it (#31).
    *
@@ -832,17 +878,60 @@ function ChatStream({
   const endLanding = () => {
     cancelAnimationFrame(landing.current)
     stillLanding.current = false
+    setSettling(false)
   }
+
+  /**
+   * 자리를 잡는 동안에는 **보여주지 않는다** (#61).
+   *
+   * 착지도 복원도 한 프레임에 끝나지 않는다 — 줄을 재는 동안 목표가 움직여서
+   * 프레임마다 다시 겨눠야 한다. 그 중간 위치들이 그대로 그려진 것이 "맨 아래에
+   * 붙어 있어도 조금 위에서 시작해 아래로 미끄러진다"는 증상이었다. 고칠 것은
+   * 겨누는 횟수가 아니라 **중간 과정을 보여주는 것** 자체다.
+   *
+   * `visibility: hidden`이어야 한다 (display:none이 아니라). 가상 스크롤은 그리는
+   * 동안 줄을 재는데, 레이아웃 박스가 사라지면 잴 것이 없어져서 영원히 자리를
+   * 못 잡는다. 숨긴 채로도 재고 있다가, 자리가 정해지면 그때 나타난다.
+   *
+   * 목표에 닿는 순간 바로 보여준다 — 루프는 그 뒤로도 몇 프레임 더 붙잡고 있지만,
+   * 이미 제자리이므로 더 움직이는 것은 눈에 보이지 않는다.
+   */
+  const [settling, setSettling] = useState(false)
 
   useLayoutEffect(() => {
     // Taken now and closed over: this component renders the scroll element and never
     // replaces it, and refs are attached before layout effects run
     const el = scrollRef.current
     stickToBottom.current = useStore.getState().stickToBottom[sessionId] ?? true
+    wasAtBottom.current = stickToBottom.current
     lastTop.current = el?.scrollTop ?? 0
     landed.current = false
+    // 앞 세션에서 들고 있던 자리는 여기서 놓는다 — 안 놓으면 다음 이탈이 남의 줄을 적는다
+    anchor.current = null
     return () => {
       cancelAnimationFrame(landing.current)
+      /*
+       * 떠나면서 **보고 있던 줄**을 남긴다 (#61).
+       *
+       * 여기서 남기는 것이 없던 시절, 바닥이 아닌 자리는 통째로 잊혔다 — 돌아오면
+       * 착지 루프는 (바닥이 아니므로) 아무것도 하지 않고, 브라우저는 새 요소를
+       * scrollTop 0에서 시작하니 결과가 "맨 위로 튐"이었다. 위치를 안 쓴다는 결정은
+       * 픽셀에 대한 것이었는데, 그게 "줄도 안 쓴다"로 넘어가 있었다.
+       *
+       * 착지 중이면 남기지 않는다 — 아래 setStickToBottom과 같은 이유다. 아직
+       * 사람이 가질 수 있었던 자리가 아니다.
+       */
+      /*
+       * 손에 들고 있던 자리를 그대로 넘긴다 — 여기서 새로 계산하지 않는다 (위 anchor 주석).
+       *
+       * 바닥이었는지도 el이 아니라 ref로 판정한다. 같은 이유다: 세션 전환에서 이
+       * 정리 함수가 도는 시점의 el은 **다음 세션의 대화를 담은** 같은 요소라,
+       * 거기서 잰 "바닥인가"는 떠나는 세션에 대한 답이 아니다. 두 ref 모두 스크롤이
+       * 실제로 일어난 순간에 적힌 값이다.
+       */
+      if (el && !stillLanding.current) {
+        setScrollAnchor(sessionId, wasAtBottom.current ? null : anchor.current)
+      }
       /*
        * Hand the fact back on the way out — not on every scroll event.
        *
@@ -856,14 +945,19 @@ function ChatStream({
        * as a position the reader could have held. Whatever the session already believed
        * stands.
        *
-       * The element is read here rather than the follow flag because position is the fact.
-       * `decideFollow` lets go for reasons of its own when measurements shuffle content,
-       * and that is a decision about one frame, not about where the reader was.
+       * The element is not read here (it was, until #61): by the time this runs on a
+       * session switch the same element already holds the *next* conversation, so it
+       * answers about the wrong session — it reported "at the bottom" for a session left
+       * halfway up, and the anchor saved beside it was then never consulted. `wasAtBottom`
+       * is the same fact taken at the only moment it is true: when the reader scrolled.
+       * (Still not the follow flag, for the reason its own comment gives.)
        */
-      if (el && !stillLanding.current) setStickToBottom(sessionId, isAtBottom(el))
+      if (el && !stillLanding.current) setStickToBottom(sessionId, wasAtBottom.current)
       stillLanding.current = false
     }
-  }, [sessionId, scrollRef, setStickToBottom])
+    // chat/virtualizer는 ref로 읽는다 (위 chatRef 주석) — 의존성에 넣으면 대화가
+    // 자랄 때마다 이 효과가 다시 돌면서 착지가 매번 처음부터 시작한다
+  }, [sessionId, scrollRef, setStickToBottom, setScrollAnchor])
 
   /*
    * Arrive at the bottom, once, and keep going until the bottom stops moving.
@@ -900,11 +994,56 @@ function ChatStream({
   useEffect(() => {
     if (landed.current || chat.length === 0) return
     landed.current = true
-    if (!stickToBottom.current) return
+
+    /*
+     * 바닥이 아니었다면 **남겨둔 줄로 돌아간다** (#61).
+     *
+     * 예전엔 여기서 그냥 return이었고, 그게 "돌아오면 맨 위" 버그의 전부였다.
+     * 착지와 같은 문제를 풀지만 과녁이 다르다: 바닥은 재지 않아도 닿지만, 줄은
+     * 그 위의 모든 줄을 재야 자리가 정해진다. 그래서 같은 방식으로 프레임마다
+     * 다시 겨눈다 — 위쪽 줄들이 측정될 때마다 목표가 움직이므로.
+     */
+    if (!stickToBottom.current) {
+      const anchor = useStore.getState().scrollAnchor[sessionId]
+      if (!anchor) return
+      let frames = 0
+      let prev = -1
+      stillLanding.current = true
+      setSettling(true)
+      const seek = () => {
+        const el = scrollRef.current
+        if (!el) return
+        const index = chatRef.current.findIndex((c) => c.seq === anchor.seq)
+        // 그 줄이 사라졌다면(기록을 다시 불러왔다든지) 되돌릴 자리가 없다 —
+        // 억지로 비슷한 데 떨어뜨리느니 지금 보이는 것을 그대로 둔다
+        if (index < 0) {
+          stillLanding.current = false
+          setSettling(false)
+          return
+        }
+        const m = virtRef.current.measurementsCache[index]
+        if (m) {
+          const target = m.start + anchor.offset
+          el.scrollTop = target
+          lastTop.current = el.scrollTop
+          // 목표가 멈췄다 = 위쪽 줄들이 다 재어졌다. 더 기다릴 이유가 없다
+          if (Math.abs(target - prev) <= 1) setSettling(false)
+          prev = target
+        }
+        if (++frames < LANDING_FRAMES) landing.current = requestAnimationFrame(seek)
+        else {
+          stillLanding.current = false
+          setSettling(false)
+        }
+      }
+      landing.current = requestAnimationFrame(seek)
+      return
+    }
 
     let frames = 0
     let mine = -1
     stillLanding.current = true
+    setSettling(true)
     const step = () => {
       const el = scrollRef.current
       if (!el) return
@@ -918,13 +1057,19 @@ function ChatStream({
        */
       if (mine >= 0 && el.scrollTop < mine - MOVED_UP_SLACK) {
         stillLanding.current = false
+        setSettling(false)
         return
       }
       el.scrollTop = el.scrollHeight
       mine = el.scrollTop
       lastTop.current = mine
+      // 바닥에 닿았으면 이미 제자리다 — 루프는 계속 붙잡고 있되 화면은 지금 보여준다
+      if (isAtBottom(el)) setSettling(false)
       if (++frames < LANDING_FRAMES) landing.current = requestAnimationFrame(step)
-      else stillLanding.current = false
+      else {
+        stillLanding.current = false
+        setSettling(false)
+      }
     }
     landing.current = requestAnimationFrame(step)
     // No cleanup here on purpose: this effect re-runs whenever the conversation grows, and
@@ -1007,8 +1152,15 @@ function ChatStream({
       onPointerDown={endLanding}
       onKeyDown={endLanding}
       /* min-h-0: overflow-y-auto가 걸려 있어도 줄어들지 못하면 스스로 늘어난다 */
-      className="min-h-0 flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed"
+      /*
+       * invisible(= visibility:hidden)은 자리를 잡는 동안만이다 (#61 위 주석).
+       * 재는 일은 계속되어야 하므로 레이아웃은 남기고 그림만 감춘다.
+       */
+      className={`min-h-0 flex-1 overflow-y-auto px-4 py-4 text-[13px] leading-relaxed ${
+        settling ? 'invisible' : ''
+      }`}
       data-testid="chat-stream"
+      data-settling={settling || undefined}
     >
       {/*
         지금 보고 있는 턴이 어느 질문에 대한 답인지 — 긴 응답을 읽는 동안

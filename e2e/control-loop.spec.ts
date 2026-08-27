@@ -4992,6 +4992,74 @@ test('scrolled up to read, a grid panel does not yank you back down (#31)', asyn
   expect(await distanceFromBottom(stream)).toBeGreaterThan(80)
 })
 
+/**
+ * #61: 돌아왔을 때 **읽던 자리**여야 한다 — "바닥은 아니었다"만으로는 부족하다.
+ *
+ * #31이 지킨 것은 "바닥으로 끌어내리지 않는다"까지였다. 그런데 아무것도 남기지
+ * 않았으므로 브라우저는 새 요소를 scrollTop 0에서 시작했고, 결과는 매번 **맨 위**였다 —
+ * 80턴짜리 대화에서 중간을 읽다 나갔다 오면 처음으로 되돌아가 있었다.
+ * 이제 떠날 때 화면 맨 위에 걸친 줄(seq)을 남기고, 돌아오면 그 줄로 되돌아간다.
+ */
+test('읽던 자리로 돌아온다 — 맨 위가 아니라 (#61)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await seedLongChat(page, id)
+
+  const stream = page.getByTestId('chat-stream')
+  // 중간쯤으로 올라가 읽는다 (바닥도 꼭대기도 아닌 자리라야 이 버그가 산다)
+  await stream.hover()
+  await page.mouse.wheel(0, -3000)
+  await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
+  const before = await stream.evaluate((el) => el.scrollTop)
+  expect(before).toBeGreaterThan(200)
+
+  // 화면을 떠났다 돌아온다 (그리드는 칸을 통째로 버리고 다시 만든다)
+  await page.getByTestId('grid-button').click()
+  await expect(page.getByTestId('grid')).toBeVisible()
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(stream).toBeVisible()
+
+  // 자리를 잡는 동안 중간 위치가 그려지지 않는다 — 재는 동안은 감춘 채로 잰다
+  await expect(stream).not.toHaveAttribute('data-settling', 'true')
+
+  // 같은 줄 언저리다. 픽셀까지 같기를 요구하지 않는 이유는 줄을 다시 재기 때문 —
+  // 하지만 "맨 위로 돌아갔다"와는 확실히 구별된다
+  const after = await stream.evaluate((el) => el.scrollTop)
+  expect(Math.abs(after - before)).toBeLessThan(120)
+})
+
+/**
+ * 같은 일이 그리드 없이도 일어난다 (사용자 지적): 포커스 뷰에서 세션만 바꿔도
+ * 같은 컴포넌트가 sessionId만 갈아 끼우므로, 남긴 것이 없으면 자리를 잃는다.
+ */
+test('세션을 바꿨다 돌아와도 읽던 자리다 (#61)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await seedLongChat(page, a)
+  await newSession(page, 'alpha', 'second')
+
+  await page.getByTestId(`session-row-${a}`).click()
+  const stream = page.getByTestId('chat-stream')
+  await stream.hover()
+  await page.mouse.wheel(0, -3000)
+  await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
+  const before = await stream.evaluate((el) => el.scrollTop)
+
+  // 옆 세션에 들렀다 온다 — 화면 종류는 그대로이고 sessionId만 바뀐다
+  const b = await page.evaluate(
+    (aId: string) => Object.keys((window as any).__store.getState().sessions).find((x) => x !== aId),
+    a,
+  )
+  await page.getByTestId(`session-row-${b}`).click()
+  await page.getByTestId(`session-row-${a}`).click()
+  await expect(stream).toBeVisible()
+
+  const after = await stream.evaluate((el) => el.scrollTop)
+  expect(Math.abs(after - before)).toBeLessThan(120)
+})
+
 /** 보내고 대화창에 실제로 붙은 것까지 확인한다 — 기록은 붙은 것에서 나온다 (#38) */
 async function sendMessage(page: Page, body: string) {
   const seen = await page.getByTestId('msg-user').count()

@@ -183,6 +183,22 @@ export type AppState = {
    */
   stickToBottom: Record<string, boolean>
   /**
+   * 바닥이 아닌 자리에서 떠났을 때 **어느 줄의 어디를** 보고 있었나 (#61).
+   *
+   * 위 주석이 "픽셀 offset은 안 남긴다"고 한 것은 지금도 맞다 — 재지 않은 가상
+   * 스크롤에 생 scrollTop을 꽂으면 *비슷한* 자리에 떨어진다. 그런데 그 결론이
+   * "아무것도 안 남긴다"였고, 그 결과 바닥이 아니었던 대화는 돌아올 때마다 맨 위에서
+   * 다시 시작했다 (#61의 "스크롤이 위로 올라간다").
+   *
+   * 그래서 남기는 것은 픽셀이 아니라 **줄**이다: 화면 맨 위에 걸쳐 있던 항목의 seq와
+   * 그 항목 안에서의 offset. seq는 측정과 무관한 사실이라 재고 나서도 같은 줄을
+   * 가리키고, 나머지 몇 픽셀은 줄을 재는 동안 프레임마다 다시 맞춘다.
+   *
+   * 바닥에 있었으면 여기 없다 — 그건 stickToBottom이 이미 말하고, 바닥은 잴 필요가
+   * 없는 자리다. 저장하지 않는다: 어디까지 읽었는지는 앱 종료를 넘길 값이 아니다.
+   */
+  scrollAnchor: Record<string, { seq: number; offset: number }>
+  /**
    * When the turn a session is currently running started — the instant, per session.
    *
    * The "Waiting for response" line used to take `Date.now()` on mount and count up from
@@ -393,6 +409,8 @@ export type AppState = {
   setDraft(sessionId: string, draft: Draft): void
   /** Remember whether the conversation was left at its newest line (#31) */
   setStickToBottom(sessionId: string, sticking: boolean): void
+  /** 떠날 때 보고 있던 줄을 남긴다 (#61). null이면 지운다 — 바닥이었다는 뜻이다 */
+  setScrollAnchor(sessionId: string, anchor: { seq: number; offset: number } | null): void
   /** Open or close a folder in the file tree. The project owns it, not the session (#16) */
   toggleDir(projectId: string, path: string): void
   /** Show or hide what .gitignore hides (#17) */
@@ -767,6 +785,7 @@ export const useStore = create<AppState>((set, get) => ({
   chat: {},
   drafts: {},
   stickToBottom: {},
+  scrollAnchor: {},
   workingSince: {},
   expandedDirs: {},
   showIgnored: true,
@@ -1160,6 +1179,8 @@ export const useStore = create<AppState>((set, get) => ({
         return {
           sessions,
           chat,
+          // 읽던 자리도 세션과 함께 사라진다 — 같은 id가 다시 날 일은 없다 (#61)
+          scrollAnchor: omitKey(s.scrollAnchor, sessionId),
           focusedSessionId: s.focusedSessionId === sessionId ? null : s.focusedSessionId,
         }
       })
@@ -1477,6 +1498,18 @@ export const useStore = create<AppState>((set, get) => ({
       // map only ever holds the sessions someone has actually scrolled away from
       if (sticking) return { stickToBottom: omitKey(s.stickToBottom, sessionId) }
       return { stickToBottom: { ...s.stickToBottom, [sessionId]: false } }
+    })
+  },
+  setScrollAnchor(sessionId, anchor) {
+    set((s) => {
+      if (!anchor) {
+        // 바닥에서 떠났다 — 지난 앵커가 남아 있으면 다음 도착이 그 옛 자리로 간다
+        if (!(sessionId in s.scrollAnchor)) return {}
+        return { scrollAnchor: omitKey(s.scrollAnchor, sessionId) }
+      }
+      const cur = s.scrollAnchor[sessionId]
+      if (cur && cur.seq === anchor.seq && cur.offset === anchor.offset) return {}
+      return { scrollAnchor: { ...s.scrollAnchor, [sessionId]: anchor } }
     })
   },
   toggleDir(projectId, path) {
