@@ -29,8 +29,9 @@ GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues`,
   sessions: `# 세션
 세션 하나 = 에이전트 프로세스 하나 (Claude Code 또는 Codex).
 - 만들기: 사이드바 프로젝트의 + 버튼. 이전 대화 불러오기(재개)도 여기서 한다.
-- 프로젝트가 하나도 없으면 + 버튼도 없다 — 그때는 propose_project로 폴더 등록을
-  제안한다 (사이드바 맨 아래 Add project 버튼도 같은 일을 한다). 경로는 사람이 고른다.
+- 프로젝트를 만드는 곳은 **사이드바 맨 아래의 Add project 버튼 하나뿐이다**
+  (누르면 폴더 선택창이 열린다). 프로젝트가 0개면 세션의 + 버튼은 아예 없으므로,
+  "프로젝트 어떻게 만들어?"에는 이 버튼을 알려주고 propose_project로 자리를 짚어 준다.
 - 잠들기/깨우기: 앱을 껐다 켜면 기록은 남고 프로세스만 사라진다 — 말을 걸거나
   입력창을 누르면 이어서 깨어난다.
 - 워크트리 옵션: 세션을 깃 워크트리(별도 디렉토리·브랜치)에서 돌려 파일 충돌을 막는다.
@@ -44,7 +45,7 @@ GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues`,
   세션만 보고 시킨다. 승격·강등은 다음에 깰 때 적용된다.
 - 도구: list_sessions(목록) · send_to_session(지시, reportBack 가능) ·
   read_session(대화 읽기) · recall(지난 대화 검색) · archive_session(보관) ·
-  create_session(워커 만들기) · propose_project(프로젝트 등록 제안 — 확정은 사람) ·
+  create_session(워커 만들기) · propose_project(Add project 버튼 짚어 주기) ·
   app_guide(이 안내서) · update_session_settings(설정).
 - 승인은 대신 못 한다 — 대상 세션의 승인 설정이 그대로 살아 있다.`,
 

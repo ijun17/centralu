@@ -183,10 +183,46 @@ test('첫 실행 탈출구: 대화를 강요하지 않는다 — 폴더를 고�
 })
 
 /**
- * 제안 카드 (#63): propose_project는 **제안이 실행의 전부**다 — 경로 선택과 확정은
- * 사람이 하고, 수락 사실은 사람의 메시지로 대화에 남는다 (제안-후-사람-확인).
+ * 제안 (#63): propose_project는 **가리키는 것이 실행의 전부**다.
+ *
+ * 대화 안에 두 번째 폴더 피커를 두면 사이드바의 Add project와 같은 일을 하는 문이
+ * 둘이 되고, 처음 보는 사람은 "프로젝트는 오케스트레이터에게 시키는 것"으로 배운다.
+ * 문은 앱에 하나여야 하고, 오케스트레이터는 그 문이 어디인지 알려줄 뿐이다.
  */
-test('프로젝트 제안 카드: 폴더를 고르면 프로젝트가 생기고 수락이 대화에 남는다', async ({ page }) => {
+test('프로젝트 제안: 대화에는 버튼이 없고, 사이드바의 Add project에 불이 켜진다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await page.getByTestId('intro-card-claude').click()
+  await page.getByTestId('suggest-create-project').click()
+  await expect(page.getByTestId('msg-user').first()).toBeVisible()
+
+  // 불이 켜지기 전에는 평범한 버튼이다
+  await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
+
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const orc = [...m.sessions.values()].find((s: any) => s.projectId === null)
+    m.emit({
+      type: 'tool_call', sessionId: orc.id, callId: 'c-prop',
+      summary: { tool: 'mcp__centralu__propose_project', title: 'so your agents have a folder to work in', readOnly: false, paths: [] },
+    })
+  })
+
+  // 대화에 남는 것은 위치를 알려주는 한 줄이다 — 누를 것이 아니다
+  await expect(page.getByTestId('project-proposal')).toContainText('Add project')
+  await expect(page.getByTestId('project-proposal').locator('button')).toHaveCount(0)
+  // 그리고 진짜 문에 불이 켜진다
+  await expect(page.getByTestId('add-project')).toHaveAttribute('data-hint', 'true')
+
+  // 가리킨 문으로 들어가면 불은 꺼진다 — 지나간 안내가 남아 반짝이면 잔소리다
+  await page.evaluate(() => {
+    ;(window as any).__mock.nextPickedDirectory = '/tmp/proposed'
+  })
+  await page.getByTestId('add-project').click()
+  await expect(page.getByTestId('project-proposed')).toBeVisible()
+  await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
+})
+
+test('가리킨 뒤 다른 말을 걸면 불이 꺼진다 — 화제가 옮겨갔다 (#63)', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.getByTestId('intro-card-claude').click()
   await page.getByTestId('suggest-create-project').click()
@@ -201,17 +237,14 @@ test('프로젝트 제안 카드: 폴더를 고르면 프로젝트가 생기고 
       summary: { tool: 'mcp__centralu__propose_project', title: 'To give your agents a folder to work in', readOnly: false, paths: [] },
     })
   })
-  await expect(page.getByTestId('project-proposal')).toBeVisible()
-  await expect(page.getByTestId('project-proposal')).toContainText('To give your agents a folder')
+  await expect(page.getByTestId('add-project')).toHaveAttribute('data-hint', 'true')
 
-  await page.evaluate(() => {
-    ;(window as any).__mock.nextPickedDirectory = '/tmp/proposed'
-  })
-  await page.getByTestId('project-proposal-pick').click()
+  // 프로젝트를 만들지 않고 다른 이야기를 시작한다
+  await page.getByTestId('prompt-input').fill('never mind — what can you do?')
+  await page.getByTestId('prompt-input').press('Enter')
 
-  // 프로젝트가 생겼고, 수락은 사람의 말로 남는다
-  await expect(page.getByTestId('project-proposed')).toBeVisible()
-  await expect(page.getByTestId('chat-stream')).toContainText('I accepted the proposal')
+  // 안내는 여기서 끝난다. 계속 반짝이면 안내가 아니라 잔소리다
+  await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
 })
 
 /**

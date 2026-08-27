@@ -521,6 +521,14 @@ export type AppState = {
   /** 첫 질문으로 세션을 만드는 중 (#63) — 빈 화면이 죽은 척하지 않게 하는 표시 */
   orchestratorWaking: boolean
   /**
+   * 사이드바의 Add project를 가리키는 중 (#63).
+   *
+   * 오케스트레이터의 propose_project가 켜고, **사람이 그 문으로 들어가거나 화제를
+   * 옮기면 꺼진다.** 끄는 조건을 시간이 아니라 행동으로 두는 이유: 읽는 도중에
+   * 꺼지면 가리킨 적이 없는 것과 같고, 영영 켜져 있으면 안내가 아니라 잔소리다.
+   */
+  addProjectHint: boolean
+  /**
    * 소개 화면(오케스트레이터 + 도구 카드)을 지나왔는가 (#63).
    * 워크스페이스 스냅샷에 남는다 — 이 화면은 첫 실행에 딱 한 번이다.
    */
@@ -777,6 +785,7 @@ export const useStore = create<AppState>((set, get) => ({
   orchestratorId: null as string | null,
   orchestratorWaking: false,
   introSeen: false,
+  addProjectHint: false,
   panelWidth: PANEL_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
   overlay: null,
@@ -1168,6 +1177,15 @@ export const useStore = create<AppState>((set, get) => ({
     const next = applyEvent(cur, e, Date.now())
     const chat = appendChat(get().chat[sessionId] ?? [], e)
     /*
+     * 프로젝트 제안 (#63)은 **가리키는 것**으로 끝난다.
+     *
+     * 대화 안에 폴더 피커 버튼을 두면 사이드바의 Add project와 같은 일을 하는 문이
+     * 둘이 되고, 처음 보는 사람은 "프로젝트는 오케스트레이터에게 시키는 것"으로
+     * 배운다 — 실제로는 그 반대여야 한다. 그래서 여기서는 사이드바 버튼에 불을
+     * 켤 뿐이다: 문은 앱에 하나, 오케스트레이터는 그 문이 어디 있는지 알려준다.
+     */
+    if (e.type === 'tool_call' && /propose_project$/.test(e.summary.tool)) set({ addProjectHint: true })
+    /*
      * **안읽음 추적(lastSeq)은 host가 매긴 세션 내 seq로만 민다.**
      *
      * 예전에는 대화 아이템의 렌더 키(전 세션 공용 chatSeq)로 밀었다. 그 값이 markRead를
@@ -1490,7 +1508,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   async addProject(path) {
     const p = await get().platform!.projects.add(path)
-    set((s) => ({ projects: { ...s.projects, [p.id]: p } }))
+    // 가리키던 문으로 들어왔으니 불을 끈다 (#63) — 지나간 안내가 남아 반짝이면 잔소리다
+    set((s) => ({ projects: { ...s.projects, [p.id]: p }, addProjectHint: false }))
     return p
   },
 
@@ -1697,6 +1716,8 @@ export const useStore = create<AppState>((set, get) => ({
      * 실패하면 아래에서 되돌린다.
      */
     const prevState = get().sessions[sessionId]?.state
+    // 다음 말을 걸었다 = 화제가 옮겨갔다. 지난 안내는 여기서 꺼진다 (#63)
+    if (get().addProjectHint) set({ addProjectHint: false })
     set((s) => {
       const sessions = s.sessions[sessionId]
         ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const } }

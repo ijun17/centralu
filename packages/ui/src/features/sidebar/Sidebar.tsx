@@ -121,6 +121,8 @@ export function Sidebar({ minimal = false }: { minimal?: boolean } = {}) {
   const addProject = useStore((s) => s.addProject)
   const setToast = useStore((s) => s.setToast)
   const [adding, setAdding] = useState(false)
+  // 오케스트레이터가 이 버튼을 가리키는 중인가 (#63)
+  const hint = useStore((s) => s.addProjectHint)
 
   return (
     <aside
@@ -158,7 +160,20 @@ export function Sidebar({ minimal = false }: { minimal?: boolean } = {}) {
       */}
       <div className="px-2 py-2">
         <button
-          className="flex w-full items-center gap-2 rounded-lg border border-edge px-2.5 py-1.5 text-left text-[12px] text-slate transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
+          /*
+           * 오케스트레이터가 여기를 가리키면 불이 켜진다 (#63).
+           *
+           * 대화 안에 또 하나의 폴더 피커를 두는 대신 **이 버튼 하나를 밝힌다** —
+           * 문은 앱에 하나여야 하고, 두 번째 문을 그리면 사람은 "프로젝트는
+           * 오케스트레이터에게 시키는 것"으로 배운다. 유채색은 쓰지 않는다
+           * (팔레트 규칙): 평소 물러나 있던 이 버튼이 chalk로 올라오는 것만으로
+           * 화면에서 가장 밝은 것이 되고, 그게 곧 "여기"라는 뜻이다.
+           */
+          className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors disabled:opacity-40 ${
+            hint
+              ? 'breathe border-ash text-chalk'
+              : 'border-edge text-slate hover:border-graphite hover:text-chalk'
+          }`}
           /*
            * **폴더를 고르는 방법은 앱에 하나뿐이어야 한다.**
            *
@@ -181,6 +196,7 @@ export function Sidebar({ minimal = false }: { minimal?: boolean } = {}) {
           }}
           disabled={adding}
           data-testid="add-project"
+          data-hint={hint || undefined}
           title="Register a directory for agents to run in"
         >
           <PlusIcon size={13} />

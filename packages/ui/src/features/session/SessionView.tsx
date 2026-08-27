@@ -11,7 +11,6 @@ import { ChevronIcon, CloseIcon, PlusIcon, RestartIcon, SendIcon } from '../../c
 import { IconButton } from '../../components/IconButton.jsx'
 import { Kbd, StateDot } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
-import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
 import { RunMenu } from './RunMenu.jsx'
@@ -1076,7 +1075,7 @@ function ChatStream({
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} sessionId={sessionId} />
+            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} />
           </div>
         ))}
       </div>
@@ -1315,16 +1314,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   )
 }
 
-function ChatRow({
-  item,
-  projectRoot,
-  sessionId,
-}: {
-  item: ChatItem
-  projectRoot: string | null
-  /** 제안 카드(#63)가 수락 사실을 그 세션에 되말하기 위해 필요하다 */
-  sessionId: string
-}) {
+function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
@@ -1412,8 +1402,8 @@ function ChatRow({
     }
     return <ImageMessage mime={item.mime} data={item.data} path={item.path} />
   }
-  // 오케스트레이터의 프로젝트 제안 (#63) — 도구 카드가 아니라 행동 카드로 그린다
-  if (/propose_project$/.test(item.tool)) return <ProjectProposalCard item={item} sessionId={sessionId} />
+  // 오케스트레이터의 프로젝트 제안 (#63) — 도구 카드가 아니라 사이드바를 가리키는 한 줄
+  if (/propose_project$/.test(item.tool)) return <ProjectProposalRow item={item} />
   return <ToolCard item={item} />
 }
 
@@ -1452,56 +1442,32 @@ function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?
 }
 
 /**
- * 프로젝트 제안 카드 (#63) — **제안은 도구가, 확정은 사람이.**
+ * 프로젝트 제안 (#63) — **버튼이 아니라 손가락이다.**
  *
- * 오케스트레이터의 propose_project는 카드를 띄우는 것이 실행의 전부다. 경로 선택은
- * 네이티브 피커에서 사람이 하고, 수락하면 그 사실을 **사람의 메시지로** 대화에
- * 되말한다 — 도구 결과를 몰래 고쳐 넣는 것보다 정직하고, 모델은 다음 걸음
- * (세션 만들까요?)을 자연스럽게 잇는다. 이 분리가 read_session/recall을 타고 들어온
- * 주입이 임의 폴더에 닿는 길을 막는 안전 경계다 (제안-후-사람-확인).
+ * 처음엔 여기에 폴더 피커 버튼을 달았다. 도그푸딩에서 그게 틀렸음이 드러났다:
+ * 사이드바의 Add project와 똑같은 일을 하는 문이 둘이 되고, 처음 보는 사람은
+ * "프로젝트는 오케스트레이터에게 시키는 것"으로 배운다 — 정확히 반대여야 한다.
+ * 폴더를 고르는 방법은 앱에 하나뿐이라는 규칙(사이드바 Add project)도 그 순간 깨진다.
+ *
+ * 그래서 이 줄은 아무것도 하지 않는다. 대신 **사이드바의 그 버튼에 불이 켜진다**
+ * (store의 addProjectHint). 오케스트레이터가 하는 일은 문을 대신 여는 것이 아니라
+ * 문이 어디 있는지 알려주는 것이고, 한 번 배운 자리는 다음부터 혼자 찾아간다.
  */
-function ProjectProposalCard({
-  item,
-  sessionId,
-}: {
-  item: Extract<ChatItem, { kind: 'tool' }>
-  sessionId: string
-}) {
-  const platform = usePlatform()
-  const addProject = useStore((s) => s.addProject)
-  const setToast = useStore((s) => s.setToast)
-  const [busy, setBusy] = useState(false)
+function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   // 어댑터가 이유를 제목에 실어 보낸다 (normalize의 propose_project 특례) —
   // 이유가 없으면 도구 이름이 그대로 오므로 그때는 기본 문장을 쓴다
   const reason = item.title && !/propose_project$/.test(item.title) ? item.title : null
-
   return (
-    <div className="rounded-lg border border-edge bg-panel px-4 py-3" data-testid="project-proposal">
-      <p className="text-[11px] uppercase tracking-wide text-slate">Project proposal</p>
-      <p className="mt-1 text-[13px] text-chalk">{reason ?? 'The orchestrator suggests registering a project folder.'}</p>
-      <button
-        className="mt-2.5 rounded border border-edge bg-pit px-3 py-1.5 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
-        disabled={busy}
-        data-testid="project-proposal-pick"
-        onClick={async () => {
-          setBusy(true)
-          try {
-            const picked = await platform.system.pickDirectory()
-            if (picked) {
-              const p = await addProject(picked)
-              // 수락은 사람의 말로 남는다 — 오케스트레이터가 다음 걸음을 잇는 재료다
-              await useStore.getState().send(sessionId, `I accepted the proposal — created the project "${p.name}".`)
-            }
-          } catch (e) {
-            setToast((e as Error).message)
-          } finally {
-            setBusy(false)
-          }
-        }}
-      >
-        Choose a folder…
-      </button>
-    </div>
+    <p className="flex items-baseline gap-2 text-[12px] text-ash" data-testid="project-proposal">
+      {/* 왼쪽 아래를 가리킨다 — 불이 켜진 버튼이 실제로 있는 방향이다 */}
+      <span className="shrink-0 text-slate" aria-hidden>
+        ↙
+      </span>
+      <span>
+        <span className="text-chalk">Add project</span> at the bottom of the sidebar
+        {reason ? ` — ${reason}` : ''}
+      </span>
+    </p>
   )
 }
 
