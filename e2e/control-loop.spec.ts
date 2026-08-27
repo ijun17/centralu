@@ -4182,7 +4182,7 @@ test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({
 
   // 고르기만 하면 확인 창이 뜬다 — 아직 바뀌지 않는다
   await page.getByTestId('orchestrator-tool-codex').click()
-  await expect(page.getByTestId('orchestrator-switch-confirm')).toContainText('working context is lost')
+  await expect(page.getByTestId('orchestrator-switch-confirm')).toContainText('Details it remembers may be lost')
   expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId)).toBe('claude')
 
   await page.getByTestId('orchestrator-switch-cancel').click()

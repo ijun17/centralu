@@ -377,13 +377,20 @@ function OrchestratorSettings() {
             <h2 className="text-[13px] font-medium text-chalk">
               Run the orchestrator on {asking === 'claude' ? 'Claude Code' : 'Codex'}?
             </h2>
+            {/*
+              **요약은 손실이라는 사실을 적는다.**
+              "요약을 넘겨받는다"까지만 쓰면 아무것도 안 잃는 것처럼 읽힌다 — 실제로는
+              최근 몇 턴의 줄기만 가고 세부는 떨어진다. 사람이 확인을 누르기 전에
+              알아야 할 것은 무엇이 남느냐가 아니라 **무엇이 사라질 수 있느냐**다.
+            */}
             <p className="mt-2 text-[12px] leading-relaxed text-ash">
               The current agent process ends and a new one starts.{' '}
-              <b className="text-chalk">Its working context is lost</b> — each tool keeps its own.
+              <b className="text-chalk">Details it remembers may be lost</b> — each tool keeps its
+              own memory, and none of it carries over.
             </p>
             <p className="mt-1.5 text-[12px] leading-relaxed text-slate">
-              Your transcript stays, and the new agent is handed a summary of what you two have
-              been talking about.
+              Your transcript stays here. The new agent is handed a <b className="text-ash">summary</b> of
+              your recent turns, so it knows what you were discussing — but not every detail of it.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
