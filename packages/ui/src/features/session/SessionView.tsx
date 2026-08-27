@@ -129,6 +129,8 @@ export function SessionPane({
   const send = useStore((s) => s.send)
   const wake = useStore((s) => s.wake)
   const restart = useStore((s) => s.restartSession)
+  // 프로세스를 갈아 끼우는 중인가 (wake·fork와 같은 자물쇠) — 버튼이 돌고 잠기는 근거
+  const restarting = useStore((s) => !!s.resuming[sessionId])
   const markRead = useStore((s) => s.markRead)
 
   /*
@@ -380,13 +382,23 @@ export function SessionPane({
         */}
         {session.projectId && <RunMenu open={runOpen} onOpenChange={setRunOpen} />}
         {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
+        {/*
+          누르는 동안 **아이콘이 돌고 버튼이 잠긴다.**
+          몇 초 걸리는 일인데 화면이 조용하면 한 번 더 누르게 되고, 그 두 번째
+          누름은 방금 뜬 프로세스를 다시 죽인다 — 고치려던 버튼이 고장을 만든다.
+          잠금은 스토어에 있다(resuming): 그리드↔포커스로 화면이 갈려도 도는 중이라는
+          사실은 세션의 것이지 이 부품의 것이 아니다.
+        */}
         <IconButton
-          label="Restart agent (chat history is kept)"
+          label={restarting ? 'Restarting the agent…' : 'Restart agent (chat history is kept)'}
           onClick={() => void restart(session.id)}
+          disabled={restarting}
           testId="restart-session"
           align="right"
         >
-          <RestartIcon />
+          <span className={restarting ? 'cc-spin block' : 'block'} data-testid={restarting ? 'restart-spinning' : undefined}>
+            <RestartIcon />
+          </span>
         </IconButton>
         {headerExtra}
       </span>

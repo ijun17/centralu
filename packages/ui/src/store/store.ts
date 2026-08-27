@@ -2294,19 +2294,43 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async restartSession(sessionId) {
-    const platform = get().platform!
+    const platform = get().platform
+    /*
+     * **두 번 누르지 못하게 한다** (도그푸딩).
+     *
+     * 재시작은 프로세스를 죽이고 다시 띄우는 일이라 몇 초가 걸리는데 그동안 화면은
+     * 조용했다. 그래서 사람이 한 번 더 누르고, 두 번째 누름은 **방금 뜬 프로세스를
+     * 다시 죽인다** — 고치려고 누른 버튼이 고장을 만드는 자리였다.
+     *
+     * 자물쇠는 wake·fork가 쓰는 그 `resuming`이다. 셋 다 "이 세션의 프로세스를 지금
+     * 갈아 끼우는 중"이라는 같은 사실을 말하므로, 표시등을 따로 두면 한쪽이 도는
+     * 동안 다른 쪽 버튼이 멀쩡해 보이는 상태가 생긴다.
+     */
+    if (!platform || get().resuming[sessionId]) return false
     set((s) => {
       const sessions = { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'idle' as const } }
       // Restarting ends whatever turn was running — its clock goes with it (issue #23)
-      return { sessions, workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()) }
+      return {
+        sessions,
+        workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
+        resuming: { ...s.resuming, [sessionId]: true },
+      }
     })
-    const r = await platform.agents.restartSession(sessionId)
-    set((s) => ({
-      sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
-      wakeError: r.resumed ? omitKey(s.wakeError, sessionId) : { ...s.wakeError, [sessionId]: r.reason ?? '' },
-      toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
-    }))
-    return r.resumed
+    try {
+      const r = await platform.agents.restartSession(sessionId)
+      set((s) => ({
+        sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
+        wakeError: r.resumed ? omitKey(s.wakeError, sessionId) : { ...s.wakeError, [sessionId]: r.reason ?? '' },
+        toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
+      }))
+      return r.resumed
+    } catch (e) {
+      // 던져서 끝나면 자물쇠가 영영 안 풀린다 — 버튼이 죽은 채로 남는다
+      set({ toast: `Could not restart: ${(e as Error).message}` })
+      return false
+    } finally {
+      set((s) => ({ resuming: omitKey(s.resuming, sessionId) }))
+    }
   },
 
   /**

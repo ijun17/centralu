@@ -1900,6 +1900,43 @@ test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', 
   await expect(page.getByTestId('chat-stream')).toContainText('이 대화는 남아야 한다')
 })
 
+/**
+ * 재시작은 몇 초짜리 일이다 — 그동안 화면이 조용하면 한 번 더 누르게 되고,
+ * **두 번째 누름은 방금 뜬 프로세스를 다시 죽인다.** 고치려고 누른 버튼이
+ * 고장을 만드는 자리였다. 도는 아이콘은 장식이 아니라 "받았다"는 응답이다.
+ */
+test('재시작하는 동안 아이콘이 돌고 버튼은 다시 눌리지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 실물처럼 시간이 걸리게 만든다 — 즉시 끝나면 이 버그는 재현되지 않는다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const real = m.agents.restartSession.bind(m.agents)
+    m.agents.restartSession = async (id: string) => {
+      await new Promise((r) => setTimeout(r, 1200))
+      return real(id)
+    }
+  })
+
+  const button = page.getByTestId('restart-session')
+  await button.click()
+
+  // 도는 중이고, 잠겨 있다
+  await expect(page.getByTestId('restart-spinning')).toBeVisible()
+  await expect(button).toBeDisabled()
+
+  // 그 사이 다시 누르려 해도 두 번째 재시작은 일어나지 않는다
+  await button.click({ force: true })
+  await expect(page.getByTestId('toast')).toContainText('Agent restarted')
+  const count = await page.evaluate(() => (window as any).__mock.restarted.length)
+  expect(count).toBe(1)
+
+  // 끝나면 원래대로 — 다음에 또 고칠 수 있어야 한다
+  await expect(button).toBeEnabled()
+  await expect(page.getByTestId('restart-spinning')).toHaveCount(0)
+})
+
 test('드래그해서 떨어뜨려도 첨부된다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
