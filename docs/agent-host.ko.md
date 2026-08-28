@@ -8,26 +8,40 @@
 
 ```
 agent-host/src/
-├─ main.ts              # CLI: --port --token --dev-services
+├─ main.ts              # CLI(--port --token --dev-services), 기동 순서,
+│                       #   그리고 도구 → 어댑터 레지스트리 (Map 리터럴. registry.ts는 없다)
+├─ rpc.ts               # RPC 메서드 분배
 ├─ transport/
-│  ├─ server.ts         # ws server, handshake, RPC routing
-│  └─ event-log.ts      # assigns seq, ring buffer, afterSeq replay (protocol §1)
+│  ├─ server.ts         # ws 서버, 핸드셰이크, RPC 라우팅
+│  └─ event-log.ts      # seq 부여, 링 버퍼, afterSeq 재생 (protocol §1)
 ├─ adapters/
-│  ├─ contract.ts       # AgentAdapter interface + capability types
-│  ├─ claude/           # based on the Claude Agent SDK
-│  ├─ codex/            # app-server JSON-RPC client (written here)
-│  └─ registry.ts       # tool name → adapter factory, install/login detection
-├─ sessions/            # session lifecycle management (tracking state above the adapter)
-├─ dev-services/        # dev-only git/fs/store — deleted in stages at the Tauri migration
-├─ usage/               # incremental parser for ~/.claude, ~/.codex JSONL (resident)
-└─ mcp/                 # MCP server for the orchestrator (M3)
+│  ├─ contract.ts       # AgentAdapter 인터페이스 + 능력 타입
+│  ├─ claude/           # Claude Agent SDK 기반 (orchestrator-mcp.ts 포함)
+│  └─ codex/            # app-server JSON-RPC 클라이언트 (직접 작성. stdio 다리 포함)
+├─ sessions/            # 세션 수명, 오케스트레이터 도구, 앱 안내
+├─ dev-services/        # git/fs/store (store는 dev 전용이 아니다 — 메시지가 사는 곳이다)
+├─ log-file.ts          # stderr를 ~/.centralu/host.log로 흘린다 (stdout은 예약됨, 아래 참고)
+├─ env-path.ts          # PATH 보강 — GUI 앱은 로그인 셸 PATH를 물려받지 못한다
+├─ data-dir.ts          # 데이터 폴더 위치 판정과 이전
+└─ updates.ts           # 업데이트 확인
 ```
+
+사용량 파싱과 오케스트레이터의 MCP 표면은 **자기 디렉토리를 갖지 않는다**: 계정 사용량은
+도구마다 다른 질문이라 `adapters/<tool>/usage.ts`에 있고, 오케스트레이터 도구는
+`sessions/orchestrator-tools.ts`에 한 번 정의된 뒤 어댑터마다 다른 길로 노출된다 —
+claude는 인프로세스, codex는 stdio 다리.
+
+**stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증
+토큰을 읽어 가는 핸드셰이크다. 나머지는 전부 stderr로 간다. `log-file.ts`가 파일로 흘리는
+것이 stderr이고, Finder로 띄운 `.app`의 stdout은 **닿는 곳이 아예 없기** 때문이다 — 그래서
+이 패키지의 `console.log`는 터미널에서는 멀쩡해 보이면서 배포에서만 아무에게도 닿지 않는다.
+`eslint.config.js`의 `no-console`이 그 한 줄만 빼고 전부 막는다.
 
 ## 2. AgentAdapter 계약 (product spec §6.2의 구현 명세)
 
 ```ts
 interface AgentAdapter {
-  readonly tool: 'claude' | 'codex' | string
+  readonly tool: ToolName                  // a closed enum in @cc/protocol — see #74
   readonly capabilities: AdapterCapabilities
   detect(): Promise<DetectResult>          // installed / logged in (FR-19)
   createSession(opts: CreateSessionOpts): Promise<SessionHandle>
@@ -63,11 +77,26 @@ interface AdapterCapabilities {
 ## 3. 새 도구 추가 절차 (C3 — 이 문서가 존재하는 이유)
 
 1. `adapters/<tool>/`을 만들고 `AgentAdapter`를 구현한다 (이벤트 변환 + detect + capability).
-2. `registry.ts`에 팩토리를 등록한다.
+2. `@cc/protocol`의 `ToolName`에 도구를 넣고 `TOOL_META` 항목을 준다 — 표시 이름, 한 글자
+   마크, 설치 명령, 로그인 명령. 그다음 `main.ts`의 `adapters` Map에 어댑터를 등록한다.
 3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증.
 4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1) —
    측정으로 얻은 프로토콜 지식은 그냥 두면 조용히 썩는다.
-5. 끝. **ui, core, protocol, platform은 변경되지 않는다.** (변경이 필요했다면 그것은 어댑터의 잘못이 아니라 프로토콜에 개념이 부족한 것이다 — 프로토콜 확장을 먼저 검토한다)
+5. 끝. **ui, core, platform은 변경되지 않고**, protocol은 2번의 두 항목만큼만 바뀐다.
+   (그 이상이 필요했다면 그것은 어댑터의 잘못이 아니라 프로토콜에 개념이 부족한 것이다 —
+   프로토콜 확장을 먼저 검토한다)
+
+이 문장은 예전에 더 셌고, 사실이 아니었다: protocol도 안 바뀐다고 적혀 있었지만 실제로 세
+번째 도구를 넣으려면 11개 파일에 흩어진 약 20곳을 고쳐야 했다 — 따로 노는 `TOOL_LABEL` 맵
+세 벌, 사이드바와 호스트의 인라인 `tool === 'codex' ? … : …` 삼항, 배지 글자, 설치·로그인
+명령, 그리고 리터럴 `['claude', 'codex']` 배열 네 개. **동작** 쪽 경계는 언제나 깨끗했고
+**표시** 쪽이 샜다. 이건 방향이 거꾸로다 — 새 도구의 비용이, 어댑터 디렉토리만 봐서는
+존재조차 알 수 없는 잔손질로 청구된다는 뜻이기 때문이다. `TOOL_META`는 위 문장을 참으로
+만들기 위해 있다 (#74).
+
+**능력은 절대 `TOOL_META`에 넣지 않는다.** 도구가 *할 수 있는 것*은 어댑터가 선언하고
+(`AdapterCapabilities`, `ModelOption`) 런타임에 발견된다. `TOOL_META`가 담는 것은 어떻게
+보여줄지뿐이다. 둘을 섞는 순간 노브 하나를 UI에 두 번 가르쳐야 하는 코드가 된다.
 
 ### 3.1 벤더 표면 드리프트 체크 (SDK/CLI 업그레이드 전에 반드시 돌린다)
 
@@ -114,11 +143,24 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 - **attachments**: 붙여넣은 이미지를 `~/.centralu/attachments/<sessionId>/`에 저장한다.
 - `--dev-services` 플래그는 **존재하지 않는다** (문서가 앞서 나갔다). 모든 것이 항상 로드된다.
 
-## 6. 사용량 파서
+## 6. 사용량과 한도 (FR-9)
 
-- `~/.claude/projects/**`와 `~/.codex/sessions/**`를 chokidar로 감시하며 **증분 파싱**한다 (파일별로 오프셋을 저장).
-- 집계 결과는 `usage_facts`로 스토어에 기록되고, UI는 `usage.weekly` RPC로 조회한다.
-- 파싱(IO와 포맷 지식)은 여기에, 집계(주간 합산, 비용 추정)는 `core/usage`에 둔다 — 로그 포맷이 바뀌어도 계산 로직은 살아남는다.
+**도구에게 묻는다. 도구의 파일을 읽지 않는다.** `agents.usage` → `SessionManager.usageFor(tool)`
+→ 어댑터의 선택 메서드 `listUsage()`이고, 그 안에서 도구 자신의 API를 부른다 (한쪽은 Claude
+SDK, 다른 쪽은 `app-server`). 답하지 못하는 어댑터는 던지고, 매니저가 이유를 달아 degrade한다 —
+자신 있게 틀린 숫자를 보여주는 것보다 낫다.
+
+사용량은 세션도 디렉토리도 아닌 **계정**의 성질이라 `listUsage()`에는 인자가 없다 — 어느
+폴더에서 묻든 답이 같다. 다루는 것은 구독 한도뿐이고, 추가 결제(크레딧)는 범위 밖이다.
+
+이 절은 원래 전혀 다른 것을 적고 있었다: chokidar로 `~/.claude/projects/**`와
+`~/.codex/sessions/**`를 감시하며 증분 파싱하고, `usage_facts` 행을 써서 `usage.weekly` RPC로
+읽고, 집계는 `core/usage`에서 한다는 설계. **그중 어느 것도 존재하지 않는다** — chokidar는
+의존성이 아니고, `core/usage`라는 디렉토리는 없고, `usage.weekly` 메서드도 없으며,
+`usage_facts`는 `schema.sql`에 남아 있지만 읽거나 쓰는 코드가 없다. 게다가 그것은 §8.1이
+말하는 규칙의 **정반대**였고, 두 절이 이 문서 안에서 서로를 부정한 채 나란히 있었다. 도구의
+비공개 JSONL을 읽는 것이 바로 §8.1이 금지하는 일이고, 이유도 거기 적혀 있다: 문서화되지 않은
+포맷은 업그레이드에서 소리 없이 깨지며, 숫자가 조용히 깨지는 것은 숫자가 없는 것보다 나쁘다.
 
 ## 8. 이전 세션 가져오기 (외부 세션)
 

@@ -6,26 +6,41 @@ A standalone Node process. In dev the developer starts it directly (`pnpm host`)
 
 ```
 agent-host/src/
-├─ main.ts              # CLI: --port --token --dev-services
+├─ main.ts              # CLI (--port --token --dev-services), startup order, and the
+│                       #   tool → adapter registry (a Map literal; there is no registry.ts)
+├─ rpc.ts               # RPC method dispatch
 ├─ transport/
 │  ├─ server.ts         # ws server, handshake, RPC routing
 │  └─ event-log.ts      # assigns seq, ring buffer, afterSeq replay (protocol §1)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
-│  ├─ claude/           # based on the Claude Agent SDK
-│  ├─ codex/            # app-server JSON-RPC client (written here)
-│  └─ registry.ts       # tool name → adapter factory, install/login detection
-├─ sessions/            # session lifecycle management (tracking state above the adapter)
-├─ dev-services/        # dev-only git/fs/store — deleted in stages at the Tauri migration
-├─ usage/               # incremental parser for ~/.claude, ~/.codex JSONL (resident)
-└─ mcp/                 # MCP server for the orchestrator (M3)
+│  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
+│  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
+├─ sessions/            # session lifecycle, orchestrator tools, app guide
+├─ dev-services/        # git/fs/store (the store is not dev-only — it is where messages live)
+├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
+├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
+├─ data-dir.ts          # locating and migrating the data directory
+└─ updates.ts           # update checks
 ```
+
+Usage parsing and the orchestrator's MCP surface do **not** have their own directories:
+per-account usage lives in `adapters/<tool>/usage.ts` (it is a per-tool question), and the
+orchestrator's tools are defined once in `sessions/orchestrator-tools.ts` and exposed per
+adapter — in-process for claude, over a stdio bridge for codex.
+
+**stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
+supervisor parses for the port and auth token. Everything else goes to stderr, because that
+is what `log-file.ts` tees to `~/.centralu/host.log` — and a `.app` launched from Finder has
+no stdout destination at all, so a `console.log` here reaches nobody in production while
+looking fine in a terminal. `no-console` in `eslint.config.js` enforces this everywhere in
+the package except that one line.
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
 ```ts
 interface AgentAdapter {
-  readonly tool: 'claude' | 'codex' | string
+  readonly tool: ToolName                  // a closed enum in @cc/protocol — see #74
   readonly capabilities: AdapterCapabilities
   detect(): Promise<DetectResult>          // installed / logged in (FR-19)
   createSession(opts: CreateSessionOpts): Promise<SessionHandle>
@@ -61,11 +76,28 @@ Implementation rules:
 ## 3. Procedure for adding a new tool (C3 — the reason this document exists)
 
 1. Create `adapters/<tool>/` and implement `AgentAdapter` (event conversion + detect + capability).
-2. Register the factory in `registry.ts`.
+2. Add the tool to `ToolName` and give it a `TOOL_META` entry in `@cc/protocol` — display
+   name, one-glyph mark, install command, login command. Then register the adapter in the
+   `adapters` Map in `main.ts`.
 3. Add contract tests: recorded raw response fixtures → NormalizedEvent snapshot verification.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise.
-5. Done. **ui, core, protocol and platform are unchanged.** (If a change was needed, that is not the adapter's fault but the protocol lacking a concept — consider extending the protocol first)
+5. Done. **ui, core and platform are unchanged**, and protocol changes only by the two
+   entries in step 2. (If more was needed, that is not the adapter's fault but the protocol
+   lacking a concept — consider extending the protocol first)
+
+This claim used to be stronger and untrue: it said protocol was unchanged too, while in
+practice a third tool meant editing roughly twenty hard-coded sites across eleven files —
+three separate `TOOL_LABEL` maps, inline `tool === 'codex' ? … : …` ternaries in the sidebar
+and the host, the badge letter, the install and login commands, and four literal
+`['claude', 'codex']` arrays. The behavioural half of the boundary was always clean; the
+presentational half leaked, which is the wrong way round, because it meant the cost of a new
+tool was paid in small edits that this directory gave no hint about. `TOOL_META` exists so
+that the sentence above can be true (#74).
+
+**Capability never goes in `TOOL_META`.** What a tool *can do* is declared by its adapter
+(`AdapterCapabilities`, `ModelOption`) and discovered at runtime; `TOOL_META` holds only how
+to present it. Mixing the two is how a knob ends up having to be taught to the UI twice.
 
 ### 3.1 Vendor-surface drift checks (run these before any SDK/CLI upgrade)
 
@@ -114,11 +146,26 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
 - **attachments**: saves pasted images to `~/.centralu/attachments/<sessionId>/`.
 - The `--dev-services` flag **does not exist** (the document got ahead of itself). Everything is always loaded.
 
-## 6. The usage parser
+## 6. Usage and limits (FR-9)
 
-- Watches `~/.claude/projects/**` and `~/.codex/sessions/**` with chokidar, **parsing incrementally** (an offset stored per file).
-- Aggregation results are written to the store as `usage_facts`; the UI queries them with the `usage.weekly` RPC.
-- Parsing (IO and format knowledge) lives here; aggregation (weekly sums, cost estimation) lives in `core/usage` — if the log format changes, the calculation logic survives.
+**We ask the tool, we do not read its files.** `agents.usage` → `SessionManager.usageFor(tool)`
+→ the adapter's optional `listUsage()`, which calls the tool's own API (the Claude SDK for one,
+`app-server` for the other). An adapter that cannot answer throws, and the manager degrades
+with the reason attached rather than showing a confident wrong number.
+
+Usage is an **account** property, not a session or directory one, which is why `listUsage()`
+takes no arguments — the answer is the same whichever folder you ask from. Only subscription
+limits are in scope; metered credits are not.
+
+This section used to describe something else entirely: a chokidar watcher parsing
+`~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
+that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —
+chokidar is not a dependency, `core/usage` is not a directory, there is no `usage.weekly`
+method, and while `usage_facts` is still in `schema.sql` no code reads or writes it. It was
+also the *opposite* of the rule §8.1 states, and the two sections sat in this file
+contradicting each other. Reading a tool's private JSONL is exactly what §8.1 forbids, for
+the reason given there: an undocumented format breaks silently on upgrade, and a silent break
+in a number is worse than a missing number.
 
 ## 8. Importing previous sessions (external sessions)
 
