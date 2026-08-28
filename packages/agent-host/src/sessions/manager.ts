@@ -23,7 +23,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import { APP_SLUG, DATA_DIR, sessionLiveDefaults } from '@cc/protocol'
+import { APP_SLUG, DATA_DIR, TOOL_META, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -2454,7 +2454,7 @@ export class SessionManager {
  * and a person who believes their data is gone stops looking for it.
  */
 function externalMissingReason(tool: ToolName, cwd: string): string {
-  const label = tool === 'codex' ? 'Codex' : 'Claude Code'
+  const label = TOOL_META[tool].label
   return (
     `${label} has no record of this conversation under ${cwd} — either it was removed there, ` +
     `or this folder has moved since the session started. The history kept here is still readable, ` +

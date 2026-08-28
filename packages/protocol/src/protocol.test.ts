@@ -9,6 +9,8 @@ import {
   parseClientFrame,
   parseEventLenient,
   parseServerFrame,
+  TOOL_META,
+  TOOL_NAMES,
 } from './index.js'
 
 const GOLDEN_EVENTS_V1: unknown[] = [
@@ -147,5 +149,31 @@ describe('봉투', () => {
 
   it('seq는 이벤트 푸시에 필수다 (재연결 복원의 근거)', () => {
     expect(parseServerFrame({ kind: 'event', event: GOLDEN_EVENTS_V1[0] }).success).toBe(false)
+  })
+})
+
+/**
+ * The type system already guarantees that `TOOL_META` has an entry per tool — `Record<ToolName, …>`
+ * will not compile otherwise. What it cannot check is whether those entries are *distinguishable*,
+ * and that is the property the screen depends on.
+ */
+describe('tool presentation metadata', () => {
+  it('gives every tool a mark no other tool uses', () => {
+    // The session chip shows one glyph and nothing else. Two tools sharing a mark is not a
+    // typo you notice in review — it is two different agents that look identical in the
+    // sidebar, and the only place the difference shows is a hover title.
+    const marks = TOOL_NAMES.map((t) => TOOL_META[t].mark)
+    expect(new Set(marks).size).toBe(marks.length)
+  })
+
+  it('gives every tool a label and both fix-it commands', () => {
+    // An empty install/login string renders as an empty <code> block: the intro card would say
+    // "Not connected" and then offer nothing to run.
+    for (const t of TOOL_NAMES) {
+      const meta = TOOL_META[t]
+      expect(meta.label.length).toBeGreaterThan(0)
+      expect(meta.install.length).toBeGreaterThan(0)
+      expect(meta.login.length).toBeGreaterThan(0)
+    }
   })
 })

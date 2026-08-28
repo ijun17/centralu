@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ExternalSession, ToolName } from '@cc/protocol'
+import { TOOL_META, TOOL_NAMES, type ExternalSession, type ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
@@ -17,8 +17,6 @@ type PastState =
   | { status: 'loading' }
   | { status: 'ok'; sessions: ExternalSession[] }
   | { status: 'unsupported'; reason: string }
-
-const TOOL_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 /** 방금 · 32분 전 · 3시간 전 · 5일 전 — 정확한 시각보다 '얼마나 됐나'가 중요하다 */
 function ago(ms: number): string {
@@ -120,7 +118,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
       const d = tools.find((x) => x.tool === t)
       return d?.installed === true && d.loggedIn
     }
-    setTool((cur) => (ok(cur) ? cur : ((['claude', 'codex'] as const).find(ok) ?? cur)))
+    setTool((cur) => (ok(cur) ? cur : (TOOL_NAMES.find(ok) ?? cur)))
   }, [tools])
 
   const info = (t: ToolName) => tools?.find((x) => x.tool === t)
@@ -175,7 +173,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
         {/* 도구 — 소제목 없이 필 두 개면 뜻이 선다. 모델·권한은 만든 뒤 헤더에서 */}
         <div className="mt-3 flex gap-1.5">
-          {(['claude', 'codex'] as const).map((t) => (
+          {TOOL_NAMES.map((t) => (
             <button
               key={t}
               type="button"
@@ -186,7 +184,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 tool === t ? 'border-ash bg-graphite/40 text-chalk' : 'border-edge text-ash hover:text-chalk'
               } ${tools && !usable(t) ? 'opacity-50' : ''}`}
             >
-              {TOOL_LABEL[t]}
+              {TOOL_META[t].label}
             </button>
           ))}
         </div>
@@ -194,8 +192,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         {blocked && (
           <p className="mt-1.5 text-[11px] text-ash" data-testid="tool-blocked">
             {info(tool)?.installed
-              ? `${TOOL_LABEL[tool]} needs a login — run ${tool === 'claude' ? 'claude auth login' : 'codex login'} in a terminal`
-              : `${TOOL_LABEL[tool]} not found (${info(tool)?.detail ?? 'not installed'})`}
+              ? `${TOOL_META[tool].label} needs a login — run ${TOOL_META[tool].login} in a terminal`
+              : `${TOOL_META[tool].label} not found (${info(tool)?.detail ?? 'not installed'})`}
           </p>
         )}
 

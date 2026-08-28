@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { APP_VERSION, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { APP_VERSION, TOOL_META, TOOL_NAMES, type ToolName, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 import { TEXT_SCALES, TEXT_SCALE_DEFAULT, useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -351,7 +351,7 @@ function OrchestratorSettings() {
         which agent it runs on.
       </p>
       <div className="mt-3 space-y-1.5">
-        {(['claude', 'codex'] as ToolName[]).map((t) => (
+        {TOOL_NAMES.map((t) => (
           <button
             key={t}
             type="button"
@@ -366,7 +366,7 @@ function OrchestratorSettings() {
             <span className="w-2 shrink-0 text-[10px] leading-none" aria-hidden>
               {t === current ? '✓' : ''}
             </span>
-            <span className="text-[12px]">{t === 'claude' ? 'Claude Code' : 'Codex'}</span>
+            <span className="text-[12px]">{TOOL_META[t].label}</span>
           </button>
         ))}
       </div>
@@ -375,7 +375,7 @@ function OrchestratorSettings() {
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
           <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4">
             <h2 className="text-[13px] font-medium text-chalk">
-              Run the orchestrator on {asking === 'claude' ? 'Claude Code' : 'Codex'}?
+              Run the orchestrator on {TOOL_META[asking].label}?
             </h2>
             {/*
               **요약은 손실이라는 사실을 적는다.**

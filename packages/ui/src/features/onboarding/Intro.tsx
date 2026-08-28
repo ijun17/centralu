@@ -1,22 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ToolName } from '@cc/protocol'
+import { TOOL_META, TOOL_NAMES, type ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 
 type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
-
-const INSTALL_HINT: Record<string, string> = {
-  claude: 'npm i -g @anthropic-ai/claude-code',
-  codex: 'npm i -g @openai/codex',
-}
-
-// 로그인 명령이 도구마다 다르다 — 틀린 명령을 적으면 안내가 아니라 함정이다
-const LOGIN_HINT: Record<string, string> = {
-  claude: 'claude auth login',
-  codex: 'codex login',
-}
-
-const TOOL_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 /**
  * 소개 화면 (#63) — 첫 실행에 딱 한 번, "네 오케스트레이터를 만나라".
@@ -52,7 +39,7 @@ export function Intro() {
   const ready = (t: Detection) => t.installed && t.loggedIn
   const anyReady = (tools ?? []).some(ready)
   // 목록에 없어도 두 도구의 카드는 선다 — "없다"도 카드가 말할 상태다
-  const cards: Detection[] = (['claude', 'codex'] as ToolName[]).map(
+  const cards: Detection[] = TOOL_NAMES.map(
     (tool) =>
       tools?.find((t) => t.tool === tool) ?? { tool, installed: false, loggedIn: false, detail: 'not found' },
   )
@@ -93,7 +80,7 @@ export function Intro() {
                     : 'cursor-not-allowed border-edge/60 bg-panel/40 opacity-40'
                 }`}
               >
-                <span className="block text-[14px] font-medium text-chalk">{TOOL_LABEL[t.tool]}</span>
+                <span className="block text-[14px] font-medium text-chalk">{TOOL_META[t.tool].label}</span>
                 {ok ? (
                   <span className="readout mt-1 block text-[11px] text-slate">{t.detail}</span>
                 ) : (
@@ -103,7 +90,7 @@ export function Intro() {
                       Not connected
                     </span>
                     <code className="mt-1.5 block truncate rounded bg-pit px-1.5 py-1 font-mono text-[10px] text-slate">
-                      {t.installed ? (LOGIN_HINT[t.tool] ?? `${t.tool} login`) : (INSTALL_HINT[t.tool] ?? 'Install required')}
+                      {t.installed ? TOOL_META[t.tool].login : TOOL_META[t.tool].install}
                     </code>
                   </>
                 )}

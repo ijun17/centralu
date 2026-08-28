@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
+import { TOOL_META, type ProjectInfo, type SessionState, type ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
@@ -639,12 +639,12 @@ function ConfirmDelete({
 }: {
   sessionId: string
   name: string
-  tool: string
+  tool: ToolName
   onConfirm: (deleteWorktree: boolean) => void
   onCancel: () => void
 }) {
   const platform = usePlatform()
-  const toolLabel = tool === 'codex' ? 'Codex' : 'Claude Code'
+  const toolLabel = TOOL_META[tool].label
 
   /*
    * 워크트리 세션인지, 거기 커밋 안 된 변경이 있는지 **모달을 여는 순간 묻는다.**
@@ -832,8 +832,7 @@ const RING: Record<SessionState, string> = {
 }
 
 function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
-  const toolName = tool === 'codex' ? 'Codex' : 'Claude Code'
-  const label = `${toolName} · ${stateLabel(state)}`
+  const label = `${TOOL_META[tool].label} · ${stateLabel(state)}`
   const stalled = state === 'limited' || state === 'error'
   // 그리드 칸 테두리와 **같은 각도**로 돈다 (components/orbit.ts)
   useOrbitSync(state === 'working')
@@ -869,7 +868,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
           stalled ? 'opacity-50' : ''
         }`}
       >
-        {tool === 'codex' ? 'X' : 'C'}
+        {TOOL_META[tool].mark}
       </span>
     </span>
   )

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
+import { TOOL_META, type ToolName, type UsageSnapshot, type UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
@@ -182,8 +182,6 @@ export function formatTokens(n: number): string {
   return String(n)
 }
 
-const TOOL_LABEL: Record<ToolName, string> = { claude: 'Claude Code', codex: 'Codex' }
-
 /**
  * 어느 도구의 한도를 물을 것인가 — 판정은 스토어의 `usageTools`가 한다.
  *
@@ -220,7 +218,7 @@ export function UsageModal() {
       <div className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
           <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
-          {only && <span className="readout text-[11px] text-slate">{TOOL_LABEL[only]}</span>}
+          {only && <span className="readout text-[11px] text-slate">{TOOL_META[only].label}</span>}
           <span className="ml-auto">
             <IconButton label="Close" onClick={() => toggle(false)} testId="usage-close" align="right">
               <CloseIcon size={11} />
@@ -249,7 +247,7 @@ export function UsageModal() {
           ) : (
             tools.map((t) => (
               <section key={t} className="border-t border-edge first:border-t-0" data-testid={`usage-section-${t}`}>
-                <h3 className="px-4 pt-3 text-[11px] uppercase tracking-[0.12em] text-slate">{TOOL_LABEL[t]}</h3>
+                <h3 className="px-4 pt-3 text-[11px] uppercase tracking-[0.12em] text-slate">{TOOL_META[t].label}</h3>
                 <UsagePanel tool={t} />
               </section>
             ))

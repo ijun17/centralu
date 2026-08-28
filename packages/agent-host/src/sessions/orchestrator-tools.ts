@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ToolName } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import { appGuide, APP_GUIDE_TOPICS } from './app-guide.js'
 
@@ -106,7 +107,16 @@ export const ORCHESTRATOR_TOOLS = [
         .string()
         .optional()
         .describe('프로젝트 이름 또는 id. 프로젝트 오케스트레이터는 생략한다 (자기 프로젝트에만 만든다)'),
-      tool: z.enum(['claude', 'codex']).optional().describe('생략하면 프로젝트의 기본 도구'),
+      /*
+       * Deliberately the same union the rest of the app uses, not a copy of it. A second
+       * literal here could fall behind and the orchestrator would be unable to name a tool
+       * that exists — a failure with no error, only an option that is never offered.
+       *
+       * Note the coupling runs both ways: if `ToolName` ever opens up (#74), this schema
+       * widens with it. That is a decision to make there, with the injection surface in
+       * view, not something to discover here.
+       */
+      tool: ToolName.optional().describe('생략하면 프로젝트의 기본 도구'),
       name: z.string().optional().describe('세션 이름. 주면 자동 이름이 덮지 않는다'),
       firstMessage: z.string().optional().describe('만들자마자 보낼 첫 지시'),
     }),
@@ -247,7 +257,7 @@ export async function runOrchestratorTool(
   if (name === 'create_session') {
     const r = await tools.createSession({
       project: typeof args.project === 'string' ? args.project : undefined,
-      tool: args.tool === 'claude' || args.tool === 'codex' ? args.tool : undefined,
+      tool: ToolName.safeParse(args.tool).data,
       name: typeof args.name === 'string' ? args.name : undefined,
       firstMessage: typeof args.firstMessage === 'string' ? args.firstMessage : undefined,
     })
