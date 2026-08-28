@@ -565,7 +565,15 @@ export class Store {
     tx()
     const after = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
     if (after.n < before.n) {
-      console.log(`[store] merged streaming rows into messages: ${before.n} -> ${after.n} rows`)
+      /*
+       * stderr, not stdout. The host tees **stderr** to `~/.centralu/host.log`
+       * (`teeStderrToFile`); a `.app` launched from Finder has no stdout anywhere, so a
+       * `console.log` here reaches nobody. This line was written with `console.log` and
+       * was duly lost — the v21 migration ran on the real store, rewrote 349,825 rows
+       * into 57,709, and left no trace of having run. The one irreversible thing this
+       * process does was also the one thing it did silently.
+       */
+      console.error(`[store] merged streaming rows into messages: ${before.n} -> ${after.n} rows`)
       this.db.exec('VACUUM') // 지운 자리는 SQLite가 알아서 돌려주지 않는다 (v11 주석)
     }
   }

@@ -143,7 +143,27 @@ export default tseslint.config(
           ],
         },
       ],
+      /*
+       * The host logs to stderr, never stdout.
+       *
+       * `teeStderrToFile` is what puts host output into `~/.centralu/host.log`, and it
+       * only intercepts stderr. A `.app` launched from Finder has no stdout destination
+       * at all, so `console.log` in this package is not a quieter log — it is a line that
+       * reaches nobody, in production only, while working perfectly in the terminal.
+       * That already happened once: the v21 migration announced itself with `console.log`
+       * and rewrote 349,825 rows into 57,709 leaving no trace it had run.
+       *
+       * stdout is not merely unused here — it is *reserved*. `main.ts` prints exactly one
+       * line to it, the handshake the Tauri supervisor parses for the port and auth token,
+       * which is also why the tee must never be widened to include stdout: that would copy
+       * the token into a plaintext file. main.ts is exempted below for that one line.
+       */
+      'no-console': ['error', { allow: ['error', 'warn'] }],
     },
+  },
+  {
+    files: ['packages/agent-host/src/main.ts', 'packages/agent-host/**/*.test.ts', 'packages/agent-host/scripts/**'],
+    rules: { 'no-console': 'off' },
   },
   { files: ['**/*.test.ts', '**/*.test.tsx', 'e2e/**/*'], rules: { '@typescript-eslint/no-explicit-any': 'off' } },
 )

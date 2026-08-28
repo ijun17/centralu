@@ -115,3 +115,29 @@ describe('host 로그 파일', () => {
     expect(b).toContain('42')
   })
 })
+
+/*
+ * stdout is deliberately not part of this. `main.ts` prints exactly one line there — the
+ * handshake the Tauri supervisor parses for the port and the auth token — so teeing stdout
+ * would copy that token into a plaintext file under the user's home directory.
+ *
+ * That makes "just log it" genuinely wrong in this package, and the trade has a cost: a
+ * `console.log` anywhere in the host is invisible in a Finder-launched `.app`, where stdout
+ * goes nowhere at all. It happened — the v21 migration announced itself on stdout and left
+ * no trace of having run. The lint rule (`no-console` in eslint.config.js) is the guard on
+ * the writing side; this is the guard on the plumbing side.
+ */
+describe('stdout은 파일로 새지 않는다', () => {
+  it('teeStderrToFile은 stdout을 건드리지 않는다 — 토큰이 그리로 나간다', () => {
+    const path = hostLogPath(tmp())
+    const before = process.stdout.write
+    const stop = teeStderrToFile(path)
+    try {
+      expect(process.stdout.write).toBe(before)
+      process.stdout.write('{"ready":true,"token":"secret-token"}\n')
+    } finally {
+      stop()
+    }
+    expect(existsSync(path) ? readFileSync(path, 'utf8') : '').not.toContain('secret-token')
+  })
+})
