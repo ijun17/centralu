@@ -53,12 +53,25 @@ export function CommandPalette() {
     }
   }, [open, query, platform])
 
+  /**
+   * 비우는 것은 **닫을 때**다. 열 때가 아니다.
+   *
+   * 이 효과는 `open`이 true가 된 **렌더 다음에** 돈다. 그런데 입력창은 그 렌더에서 이미
+   * 화면에 있다 — 그 사이에 사람이 친 글자는 이 효과가 지워 버린다. ⌘K를 누르자마자
+   * 타이핑하는 사람이 첫 글자를 잃는 것이고, 기계가 느릴수록(=그 틈이 벌어질수록) 더 잘
+   * 일어난다. 전체 e2e를 병렬로 돌릴 때 간헐적으로 재현됐다: 필터가 비워진 채 팔레트가
+   * 열려 있어 항목이 5개 그대로 남았다.
+   *
+   * 닫을 때 비우면 다음에 열릴 때는 이미 비어 있고, 렌더 뒤에 입력을 덮어쓰는 쓰기가
+   * 아예 사라진다. 사람이 보는 동작은 똑같다.
+   */
   useEffect(() => {
     if (open) {
-      setQuery('')
-      setCursor(0)
       setTimeout(() => inputRef.current?.focus(), 0)
+      return
     }
+    setQuery('')
+    setCursor(0)
   }, [open])
 
   const items = useMemo<Item[]>(() => {
