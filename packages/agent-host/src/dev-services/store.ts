@@ -469,6 +469,10 @@ export class Store {
           }
         },
       },
+      {
+        to: 21,
+        run: () => this.mergeDeltaRows(),
+      },
     ]
 
     for (const step of steps) {
@@ -476,6 +480,93 @@ export class Store {
         step.run()
         this.db.pragma(`user_version = ${step.to}`)
       }
+    }
+  }
+
+  /**
+   * v21: 델타 시절의 행들을 메시지로 합친다 (#66).
+   *
+   * 쓰기는 이미 메시지 단위로 바뀌었지만(persistMessage), 그 전에 쌓인 행들은
+   * **토큰 하나가 행 하나**다. 읽기가 병합해 주므로 동작에는 문제가 없었고,
+   * 그래서 이 이사는 급한 일이 아니라 **미룰 수 있는 일**이었다 — 크기와 검색을 위한 것이다.
+   * (실측: 한 세션이 시간당 32,698행 → 761행, 행당 2.1자 → 222자)
+   *
+   * 규칙은 읽기(loadMessages)와 **같아야 한다**: 연속된 assistant의 text끼리,
+   * reasoning끼리만 잇는다. 다르면 이사 전후로 대화가 달라 보인다.
+   *
+   * 합친 자리의 seq는 **첫 조각의 것**을 남긴다 — 읽음 위치(last_read_seq)와
+   * fresh_start 경계가 전부 숫자 비교라, 중간 seq가 사라져 구멍이 생겨도 안전하다.
+   * 반대로 마지막 seq를 남기면 "안 읽음"이 되살아난다.
+   *
+   * 색인은 통째로 다시 만든다 (v11과 같은 이유: 행이 지워지면 rowid에 못 박힌
+   * 색인이 엉뚱한 곳을 가리킨다). VACUUM은 트랜잭션 밖에서 부른다.
+   */
+  private mergeDeltaRows(): void {
+    const before = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
+    const tx = this.db.transaction(() => {
+      const rows = this.db
+        .prepare(`SELECT rowid, session_id, seq, role, kind, payload FROM messages ORDER BY session_id, seq`)
+        .all() as { rowid: number; session_id: string; seq: number; role: string; kind: string; payload: string }[]
+
+      const update = this.db.prepare(`UPDATE messages SET payload = ?, ts = ? WHERE rowid = ?`)
+      const del = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
+
+      /** 지금 이어붙이는 중인 런 — 첫 조각의 행에 본문을 모은다 */
+      let head: { rowid: number; sessionId: string; kind: string; payload: Record<string, unknown>; text: string } | null = null
+      let lastTs = 0
+      const closeRun = () => {
+        if (!head) return
+        update.run(JSON.stringify({ ...head.payload, text: head.text }), lastTs, head.rowid)
+        head = null
+      }
+
+      for (const r of rows) {
+        const streaming = r.role === 'assistant' && (r.kind === 'text' || r.kind === 'reasoning')
+        if (!streaming) {
+          closeRun()
+          continue
+        }
+        let payload: Record<string, unknown>
+        try {
+          payload = JSON.parse(r.payload) as Record<string, unknown>
+        } catch {
+          closeRun() // 못 읽는 행은 건드리지 않는다 — 합치려다 잃는 것보다 남기는 편이 낫다
+          continue
+        }
+        const text = typeof payload.text === 'string' ? payload.text : ''
+        if (head && head.sessionId === r.session_id && head.kind === r.kind) {
+          head.text += text
+          lastTs = Date.now()
+          del.run(r.rowid)
+        } else {
+          closeRun()
+          head = { rowid: r.rowid, sessionId: r.session_id, kind: r.kind, payload, text }
+          lastTs = Date.now()
+        }
+      }
+      closeRun()
+
+      // 색인 재구축 (v11과 같은 방식) — 지워진 행이 남긴 자리를 걷는다
+      this.db.exec(`DROP TABLE IF EXISTS messages_fts`)
+      this.db.exec(`
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+          body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
+        );
+      `)
+      const fresh = this.db
+        .prepare(`SELECT rowid, session_id, seq, payload FROM messages`)
+        .all() as { rowid: number; session_id: string; seq: number; payload: string }[]
+      const insert = this.db.prepare(`INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`)
+      for (const r of fresh) {
+        const body = extractText(r.payload)
+        if (body) insert.run(r.rowid, body, r.session_id, r.seq)
+      }
+    })
+    tx()
+    const after = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
+    if (after.n < before.n) {
+      console.log(`[store] merged streaming rows into messages: ${before.n} -> ${after.n} rows`)
+      this.db.exec('VACUUM') // 지운 자리는 SQLite가 알아서 돌려주지 않는다 (v11 주석)
     }
   }
 

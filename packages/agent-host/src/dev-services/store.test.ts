@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(20)
+    expect(store.schemaVersion).toBe(21)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(20)
+    expect(new Store().schemaVersion).toBe(21)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(20)
+    expect(store.schemaVersion).toBe(21)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -501,7 +501,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(20)
+    expect(store.schemaVersion).toBe(21)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -556,7 +556,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(20)
+    expect(store.schemaVersion).toBe(21)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -628,7 +628,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(20)
+    expect(first.schemaVersion).toBe(21)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -761,7 +761,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     v16Db(file)
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(20)
+    expect(first.schemaVersion).toBe(21)
     // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
     expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
@@ -922,5 +922,97 @@ describe('loadMessages는 델타 조각을 메시지로 병합한다 (#66)', () 
     expect(s.searchMessages('자라는 본문').length).toBe(0) // 색인은 닫힐 때(appendMessages) 한 번
     s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문 끝' }, ts: 2 }])
     expect(s.searchMessages('자라는 본문').length).toBe(1)
+  })
+})
+
+/*
+ * v21 이관 (#66): 델타 시절의 행을 메시지로 합친다.
+ *
+ * 가장 중요한 성질은 크기가 아니라 **읽기와 같은 답을 준다**는 것이다 —
+ * 이사 전에도 loadMessages가 병합해 보여주고 있었으므로, 이사 뒤에 대화가
+ * 달라 보이면 그건 데이터를 잃은 것이다.
+ */
+describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
+  const oldDbWithDeltas = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v21-'))
+    const file = join(dir, 'store.db')
+    const s = new Store(file)
+    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.upsertSession({
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '새 세션',
+      autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      ...sessionLiveDefaults(),
+    })
+    // 실측한 모양 그대로: 토큰 하나가 행 하나
+    s.appendMessages([
+      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '맵 추출 어떻게 해?' }, ts: 1 },
+      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '한 ' }, ts: 2 },
+      { sessionId: 's1', seq: 3, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '번에 ' }, ts: 3 },
+      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '뽑게 됩니다.' }, ts: 4 },
+      { sessionId: 's1', seq: 5, role: 'system', kind: 'tool_call', payload: { summary: { tool: 'Bash', title: 'ls' } }, ts: 5 },
+      { sessionId: 's1', seq: 6, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '결과는 ' }, ts: 6 },
+      { sessionId: 's1', seq: 7, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '이렇습니다' }, ts: 7 },
+      { sessionId: 's1', seq: 8, role: 'assistant', kind: 'reasoning', payload: { text: '생각 ' }, ts: 8 },
+      { sessionId: 's1', seq: 9, role: 'assistant', kind: 'reasoning', payload: { text: '조각' }, ts: 9 },
+    ])
+    s.markRead('s1', 3) // 답변 중간을 읽은 상태 — 이사 뒤 안읽음이 되살아나면 안 된다
+    const beforeRead = s.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
+    s.close()
+    return { file, beforeRead }
+  }
+
+  it('행은 줄지만 읽은 결과는 이사 전과 똑같다', () => {
+    const { file, beforeRead } = oldDbWithDeltas()
+    // 이사 전 상태로 되돌린다 (쓰기는 이미 새 방식이므로 버전만 낮춰 이 단계를 다시 태운다)
+    const raw = new Database(file)
+    raw.pragma('user_version = 20')
+    const rawRows = (raw.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }).n
+    raw.close()
+
+    const s = new Store(file)
+    const rows = s.loadMessages('s1', 50)
+    const afterRead = rows.map((m) => [m.kind, (m.payload as { text?: string }).text])
+
+    expect(afterRead).toEqual(beforeRead) // 대화가 달라 보이면 잃은 것이다
+    expect(afterRead).toEqual([
+      ['text', '맵 추출 어떻게 해?'],
+      ['text', '한 번에 뽑게 됩니다.'],
+      ['tool_call', undefined],
+      ['text', '결과는 이렇습니다'],
+      ['reasoning', '생각 조각'],
+    ])
+    // 9행 → 5행
+    const nowRows = s.loadMessages('s1', 50).length
+    expect(rawRows).toBe(9)
+    expect(nowRows).toBe(5)
+    s.close()
+  })
+
+  it('합친 자리의 seq는 첫 조각의 것이라 읽음 위치가 뒤로 가지 않는다', () => {
+    const { file } = oldDbWithDeltas()
+    const raw = new Database(file)
+    raw.pragma('user_version = 20')
+    raw.close()
+
+    const s = new Store(file)
+    const merged = s.loadMessages('s1', 50)
+    expect(merged[1]!.seq).toBe(2) // 2,3,4를 합친 자리는 2번
+    // 읽음 위치(3)는 그대로고, 첫 조각(2)이 남았으므로 이미 읽은 답변이 안읽음으로 돌아오지 않는다
+    expect(s.listSessions()[0]!.lastReadSeq).toBe(3)
+    s.close()
+  })
+
+  it('합친 뒤에는 조각 경계에 걸린 구절도 검색된다', () => {
+    const { file } = oldDbWithDeltas()
+    const raw = new Database(file)
+    raw.pragma('user_version = 20')
+    raw.close()
+
+    const s = new Store(file)
+    expect(s.searchMessages('번에 뽑게').length).toBe(1) // 옛 색인으로는 영영 못 찾던 구절
+    expect(s.searchMessages('결과는 이렇습니다').length).toBe(1)
+    s.close()
   })
 })
