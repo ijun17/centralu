@@ -1,9 +1,12 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { OrchestratorTools } from '../contract.js'
 import {
+  MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
+  profileAllows,
   runOrchestratorTool,
+  type ToolProfile,
 } from '../../sessions/orchestrator-tools.js'
 
 /**
@@ -29,7 +32,7 @@ import {
  */
 export const ORCHESTRATOR_MCP_NAME = 'centralu'
 
-export function orchestratorMcp(tools: OrchestratorTools) {
+export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile = 'orchestrator') {
   return createSdkMcpServer({
     name: ORCHESTRATOR_MCP_NAME,
     version: '1',
@@ -43,8 +46,9 @@ export function orchestratorMcp(tools: OrchestratorTools) {
      * 오케스트레이터에게 이 도구들은 곁다리가 아니라 존재 이유다.
      */
     alwaysLoad: true,
-    instructions: ORCHESTRATOR_INSTRUCTIONS,
-    tools: ORCHESTRATOR_TOOLS.map((t) =>
+    instructions: profile === 'manager' ? MANAGER_INSTRUCTIONS : ORCHESTRATOR_INSTRUCTIONS,
+    // 묶음이 허용하는 것만 노출한다 (#69) — 실행 쪽도 같은 판정을 한 번 더 한다
+    tools: ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) => {
         const r = await runOrchestratorTool(tools, t.name, args)
         return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }

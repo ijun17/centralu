@@ -181,7 +181,12 @@ export function createRpcHandler(
       mgr.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
       return { ok: true as const }
     },
-    'orchestrator.tools': async () => orchestratorToolSchemas(),
+    'orchestrator.tools': async (p) => {
+      const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
+      // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)
+      const profile = sessionId ? mgr.toolProfileOf(sessionId) : 'orchestrator'
+      return orchestratorToolSchemas(profile ?? 'orchestrator')
+    },
     'orchestrator.tool': async (p) => {
       const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)
       return mgr.runOrchestratorTool(sessionId, name, args)

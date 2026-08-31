@@ -91,7 +91,8 @@ async function handle(msg) {
 
   if (method === 'tools/list') {
     try {
-      const tools = await rpc('orchestrator.tools', {})
+      // 자기 세션 id를 실어 보낸다 — 매니저 세션(#69)은 부분집합만 받아야 한다
+      const tools = await rpc('orchestrator.tools', { sessionId: SESSION_ID })
       return ok(id, { tools })
     } catch (e) {
       return err(id, `도구 목록을 못 받았습니다 — ${e.message}`)

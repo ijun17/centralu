@@ -407,6 +407,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const reorderProjects = useStore((s) => s.reorderProjects)
   const reorderSessions = useStore((s) => s.reorderSessions)
   const selected = useIsProjectSelected(projectId)
+  // 매니저의 워크트리 제안이 이 프로젝트를 가리키는가 (#69) — + 버튼이 밝아진다
+  const proposalHere = useStore((s) => s.worktreeProposal?.projectId === projectId)
 
   /*
    * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면
@@ -464,7 +466,15 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           크기를 키우는 것만으로는 안 된다 — 안 보이는 것은 아무리 커도 안 보인다.
           평소엔 slate로 눌러 두고 호버에서 밝아지게 해서, 세션 목록을 읽는 데는 방해하지 않는다.
         */}
-        <span className="-my-1 ml-auto shrink-0">
+        <span
+          /*
+           * 매니저의 워크트리 제안 (#69)이 이 버튼을 밝힌다 — Add project와 같은 원칙:
+           * 대화에 두 번째 문을 그리지 않고, 있는 문에 불을 켠다. 눌러서 열리는 창에
+           * 브랜치 이름이 채워져 있다 (openNewSession이 제안을 소비한다).
+           */
+          className={`-my-1 ml-auto shrink-0 ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
+          data-worktree-proposal={proposalHere || undefined}
+        >
           <IconButton
             label={`New session in ${project.name}`}
             onClick={() => openNewSession(projectId)}

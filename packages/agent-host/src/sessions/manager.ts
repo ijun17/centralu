@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome, projectOrchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { profileAllows, runOrchestratorTool, type ToolProfile } from './orchestrator-tools.js'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
@@ -633,8 +633,11 @@ export class SessionManager {
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
-          // 오케스트레이터만 도구를 받는다 — 판정은 명시적 표식 하나다 (#13, kind)
+          // 오케스트레이터는 전부, 워크트리 매니저(#69)는 부분집합을 받는다.
+          // 갓 만든 세션은 자식이 없으므로 여기서 매니저일 수 없다 — 매니저가 되는 것은
+          // 첫 자식이 붙은 뒤 다음에 깰 때다 (wake 쪽 조건이 그 승격의 실제다, #13과 같은 무늬).
           orchestratorTools: info.kind === 'orchestrator' ? this.orchestratorToolsFor(id, info.projectId) : undefined,
+          toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : undefined,
           systemPromptAppend: info.kind === 'orchestrator' ? this.orchestratorRoleFor(info.projectId) : undefined,
           orchestratorBridge: info.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
         },
@@ -986,7 +989,15 @@ export class SessionManager {
            * 그리고 여기가 곧 **승격이 실제가 되는 자리**다 (#13): 살아 있는 동안
            * 표식만 바뀐 세션이 다음에 깰 때 이 조건을 지나며 도구와 역할을 받는다.
            */
-          orchestratorTools: m.kind === 'orchestrator' ? this.orchestratorToolsFor(sessionId, m.projectId) : undefined,
+          orchestratorTools:
+            m.kind === 'orchestrator'
+              ? this.orchestratorToolsFor(sessionId, m.projectId)
+              : // 워크트리 매니저 (#69): 자식이 있으면 매니저다 — 자식만 보는 도구를 받는다
+                this.isWorktreeManager(sessionId)
+                ? this.orchestratorToolsFor(sessionId, m.projectId, sessionId)
+                : undefined,
+          toolProfile:
+            m.kind === 'orchestrator' ? 'orchestrator' : this.isWorktreeManager(sessionId) ? 'manager' : undefined,
           /*
            * 여기가 **기억을 넘기는 자리**다. 도구를 바꾸면 externalId가 끊겨서
            * 이 길(새 프로세스)로 들어오는데, 그때 지난 대화를 함께 실어 보낸다.
@@ -997,7 +1008,10 @@ export class SessionManager {
             m.kind === 'orchestrator'
               ? this.orchestratorRoleFor(m.projectId) + (resumeId ? '' : this.orchestratorMemory(m.id))
               : undefined,
-          orchestratorBridge: m.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
+          orchestratorBridge:
+            m.kind === 'orchestrator' || this.isWorktreeManager(sessionId)
+              ? (this.endpoint?.() ?? undefined)
+              : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -2035,16 +2049,30 @@ export class SessionManager {
    * 터미널에서 만든 남의 세션도, 파일도, 프로젝트 디렉토리도 닿지 않는다 —
    * 막는 규칙을 따로 쓴 게 아니라 볼 수 있는 것이 그것뿐이다.
    */
-  private orchestratorToolsFor(orchestratorId: string, scopeProjectId: string | null = null): OrchestratorTools {
+  private orchestratorToolsFor(
+    orchestratorId: string,
+    scopeProjectId: string | null = null,
+    childrenOf?: string,
+  ): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
     /**
      * 계급의 실체 (#13): 중앙(scope=null)은 전부 보고, 프로젝트 오케스트레이터는
      * **자기 프로젝트만** 본다. 규칙을 도구마다 다시 쓰지 않고 한 판정으로 모은다 —
      * 여섯 군데의 projectId 판정이 낳은 어긋남을 여기서 반복하지 않기 위해서다.
+     *
+     * 워크트리 매니저(#69)는 한 단계 더 좁다: **자기 자식만** 본다. 자식 집합은
+     * 호출 시점에 판정한다 — 스폰 이후 생긴 자식도 보여야 하기 때문이다.
      */
-    const inScope = (s: SessionInfo) => scopeProjectId === null || s.projectId === scopeProjectId
+    const inScope = (s: SessionInfo) =>
+      childrenOf !== undefined
+        ? s.parentSessionId === childrenOf
+        : scopeProjectId === null || s.projectId === scopeProjectId
     const scopeError = (id: string) =>
-      scopeProjectId === null ? `이 앱이 관리하는 세션이 아닙니다: ${id}` : `이 프로젝트의 세션이 아닙니다: ${id}`
+      childrenOf !== undefined
+        ? `이 매니저의 워크트리 세션이 아닙니다: ${id}`
+        : scopeProjectId === null
+          ? `이 앱이 관리하는 세션이 아닙니다: ${id}`
+          : `이 프로젝트의 세션이 아닙니다: ${id}`
 
     return {
       listSessions: async () => {
@@ -2377,10 +2405,38 @@ export class SessionManager {
    */
   async runOrchestratorTool(sessionId: string, name: string, args: Record<string, unknown>) {
     const m = this.meta.get(sessionId)
-    if (m?.kind !== 'orchestrator') {
+    const profile = this.toolProfileOf(sessionId)
+    if (!m || !profile) {
       throw Object.assign(new Error('오케스트레이터만 쓸 수 있는 도구입니다'), { code: 'internal' })
     }
-    return runOrchestratorTool(this.orchestratorToolsFor(sessionId, m.projectId), name, args)
+    /*
+     * 노출만 좁히면 이름을 아는 쪽이 그냥 부른다 (#69) — 다리는 별도 프로세스라
+     * 토큰만 있으면 무엇이든 물을 수 있다. 실행 쪽에서도 같은 판정을 한다.
+     */
+    if (!profileAllows(profile, name)) {
+      throw Object.assign(new Error(`이 세션의 도구가 아닙니다: ${name}`), { code: 'internal' })
+    }
+    const tools =
+      profile === 'manager'
+        ? this.orchestratorToolsFor(sessionId, m.projectId, sessionId)
+        : this.orchestratorToolsFor(sessionId, m.projectId)
+    return runOrchestratorTool(tools, name, args)
+  }
+
+  /**
+   * 이 세션이 받는 도구 묶음 (#69). null이면 도구 없음.
+   * 매니저 판정은 관계 하나다: 워크트리 자식이 있으면 매니저다 (아카이브된 자식 포함 —
+   * 도구는 위험하지 않고, 입양으로 선 매니저가 자식을 정리한 뒤에도 제안은 할 수 있어야 한다).
+   */
+  toolProfileOf(sessionId: string): ToolProfile | null {
+    const m = this.meta.get(sessionId)
+    if (!m) return null
+    if (m.kind === 'orchestrator') return 'orchestrator'
+    return this.isWorktreeManager(sessionId) ? 'manager' : null
+  }
+
+  private isWorktreeManager(sessionId: string): boolean {
+    return [...this.meta.values()].some((s) => s.parentSessionId === sessionId)
   }
 
   /** 역할 텍스트 — 중앙(projectId=null)과 프로젝트 오케스트레이터가 다르다 (#13) */

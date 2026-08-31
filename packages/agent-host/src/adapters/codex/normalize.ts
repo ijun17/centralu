@@ -44,6 +44,18 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
       }
       return { tool, title: reason || tool, readOnly: false, paths: [] }
     }
+    // 워크트리 제안 (#69) — 브랜치 이름이 제목이다. 그 제목이 UI 프리필의 유일한 운반로다
+    if (tool.endsWith('propose_worktree_session')) {
+      const rawArgs = obj(item.invocation).arguments
+      let branch = ''
+      try {
+        const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
+        branch = str(obj(parsed).branch)
+      } catch {
+        /* 인자가 JSON이 아니면 이름 없이 카드만 뜬다 — 창은 빈 이름으로 열린다 */
+      }
+      return { tool, title: branch || tool, readOnly: false, paths: [] }
+    }
     return {
       tool: tool || 'MCP',
       title: [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool',

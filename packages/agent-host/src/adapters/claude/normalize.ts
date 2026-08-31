@@ -22,6 +22,8 @@ export function toolSummary(name: string, input: Json): ToolSummary {
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
   // 제안 카드(#63)는 이유를 제목으로 쓴다 — UI가 그대로 사람에게 보여주는 유일한 인자다
   else if (name.endsWith('propose_project')) title = str(input.reason, name)
+  // 제안 카드가 브랜치 이름을 미리 채우는 유일한 운반로다 (#69) — 제목에 싣는다
+  else if (name.endsWith('propose_worktree_session')) title = str(input.branch, name)
   return { tool: name, title, readOnly: READ_ONLY.has(name), paths }
 }
 

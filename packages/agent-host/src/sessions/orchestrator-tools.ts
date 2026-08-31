@@ -121,9 +121,44 @@ export const ORCHESTRATOR_TOOLS = [
       firstMessage: z.string().optional().describe('만들자마자 보낼 첫 지시'),
     }),
   },
+  {
+    name: 'propose_worktree_session',
+    description:
+      '워크트리 브랜치 세션을 **사람에게 제안한다** (#69). 브랜치 이름을 미리 채운 새 세션 창이 준비되고, 사이드바의 + 버튼에 불이 켜진다 — 만드는 것은 사람이 그 창에서 한다. 이 도구는 아무것도 만들지 않는다 (propose_project와 같은 규칙).',
+    schema: z.object({
+      branch: z.string().describe('제안할 브랜치 이름. 작업 내용이 읽히는 이름으로 (예: feat/login-fix)'),
+      reason: z.string().optional().describe('무슨 작업을 위한 브랜치인지 한 마디'),
+    }),
+  },
 ] as const
 
 export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
+
+/**
+ * 워크트리 매니저의 도구 목록 (#69) — 오케스트레이터의 부분집합 + 제안 도구.
+ *
+ * **여기 없는 이름은 매니저가 부를 수 없다** (판정은 manager.runOrchestratorTool).
+ * create_session이 빠진 것이 핵심이다: 매니저의 세션 생성은 제안(propose)이고,
+ * 실제 생성은 사람이 창에서 한다. 설정 변경·앱 안내·프로젝트 제안도 매니저의
+ * 일이 아니다 — 최소한의 세션 생성 기능과 워크트리 관리 컨텍스트만 준다 (설계 결정).
+ */
+export const MANAGER_TOOL_NAMES = [
+  'list_sessions',
+  'read_session',
+  'send_to_session',
+  'propose_worktree_session',
+] as const satisfies readonly OrchestratorToolName[]
+
+/** 매니저에게 주는 안내 — 워크트리 관리 컨텍스트 (#69 설계의 3층 규칙 포함) */
+export const MANAGER_INSTRUCTIONS = [
+  '너는 이 프로젝트의 워크트리 매니저다. 네 아래의 워크트리 브랜치 세션들을 지켜보고 조율한다.',
+  '새 작업 브랜치가 필요하면 propose_worktree_session으로 **제안한다** — 브랜치 이름은 작업이 읽히는 이름으로.',
+  '만드는 것은 사람이다. 제안하면 브랜치 이름이 미리 채워진 창이 준비되고, 사람이 확인해서 만든다.',
+  '자원 배정(포트·DB 경로 등)은 **말하지 말고 적어라**: 각 워크트리 안의 파일(.env.local 등)로 물질화한다.',
+  '대화는 저장소가 아니다 — 압축되고 재시작되면 사라진다. 파일에 적힌 배정만 살아남는다.',
+  '자식 세션의 상태는 list_sessions와 read_session으로 물어서 안다 — 밀려오는 알림은 없다 (pull, not push).',
+  '병합은 네 권한 밖이다. "이 브랜치는 끝났고 깨끗하게 병합된다"까지만 보고하고, 병합 버튼은 사람이 누른다.',
+].join('\n')
 
 /** 모델에게 주는 안내 — 도구 목록과 함께 간다 */
 export const ORCHESTRATOR_INSTRUCTIONS = [
@@ -235,6 +270,22 @@ export async function runOrchestratorTool(
     }
   }
 
+  if (name === 'propose_worktree_session') {
+    /*
+     * propose_project와 같은 규칙 (#69): 이 도구의 실행은 **가리키는 것 그 자체**다.
+     * tool_call 이벤트가 대화에 남으면 UI가 브랜치 이름이 채워진 새 세션 창을 준비한다.
+     * 여기서 세션을 만들면 제안이 권한이 된다 — 병합 다음으로 파괴적인 것이
+     * 사용자의 실제 저장소에 브랜치·디렉토리를 만드는 일이다.
+     */
+    const branch = String(args.branch ?? '').trim()
+    if (!branch) return { text: 'branch를 주세요 — 제안할 브랜치 이름이 있어야 창을 채웁니다.', isError: true }
+    return {
+      text:
+        `"${branch}" 브랜치 세션을 제안했습니다. 사이드바 +에 불이 켜지고, 사람이 열면 이름이 채워진 창이 뜹니다 — ` +
+        '만드는 것도, 이름을 고치는 것도 사람 몫입니다.',
+    }
+  }
+
   if (name === 'app_guide') {
     // 정적 내용이라 매니저를 거치지 않는다 — 빌드에 내장된 글이 곧 능력의 전부다 (#30)
     return appGuide(typeof args.topic === 'string' ? args.topic : undefined)
@@ -289,8 +340,18 @@ export async function runOrchestratorTool(
 }
 
 /** 다리(별도 프로세스)가 tools/list에 쓸 수 있는 형태 */
-export function orchestratorToolSchemas(): { name: string; description: string; inputSchema: unknown }[] {
-  return ORCHESTRATOR_TOOLS.map((t) => ({
+/** 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합 */
+export type ToolProfile = 'orchestrator' | 'manager'
+
+/** 이 묶음이 허용하는 도구인가 — 노출(schemas)과 실행(run) 둘 다 이걸로 판정한다 */
+export function profileAllows(profile: ToolProfile, name: string): boolean {
+  return profile === 'orchestrator' || (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
+}
+
+export function orchestratorToolSchemas(
+  profile: ToolProfile = 'orchestrator',
+): { name: string; description: string; inputSchema: unknown }[] {
+  return ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: z.toJSONSchema(t.schema),

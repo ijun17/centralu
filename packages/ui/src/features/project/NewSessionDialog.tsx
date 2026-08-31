@@ -66,7 +66,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * 브랜치 이름 (#69). 브랜치 이름이 곧 세션 이름이자 디렉토리 이름 — 사실상 영구라
    * 만들기 전에 정할 자리가 있어야 한다. 비우면 host가 자동 이름을 쓴다 (강제 없음).
    */
-  const [branch, setBranch] = useState('')
+  const [branch, setBranch] = useState(useStore.getState().newSessionBranch)
   const [error, setError] = useState<string | null>(null)
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)

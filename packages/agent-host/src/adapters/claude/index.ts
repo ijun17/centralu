@@ -169,7 +169,9 @@ class ClaudeSession implements SessionHandle {
          */
         ...(this.opts.orchestratorTools
           ? {
-              mcpServers: { [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools) },
+              mcpServers: {
+                [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile),
+              },
               /*
                * **파일에서 지시를 읽지 않는다.**
                *

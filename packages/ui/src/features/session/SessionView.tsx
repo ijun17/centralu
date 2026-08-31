@@ -1568,6 +1568,8 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
   }
   // 오케스트레이터의 프로젝트 제안 (#63) — 도구 카드가 아니라 사이드바를 가리키는 한 줄
   if (/propose_project$/.test(item.tool)) return <ProjectProposalRow item={item} />
+  // 매니저의 워크트리 제안 (#69) — 같은 원칙: 가리키고, 값(브랜치 이름)은 창에 미리 채워진다
+  if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
   return <ToolCard item={item} />
 }
 
@@ -1630,6 +1632,34 @@ function ProjectProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }
       <span>
         <span className="text-chalk">Add project</span> at the bottom of the sidebar
         {reason ? ` — ${reason}` : ''}
+      </span>
+    </p>
+  )
+}
+
+/**
+ * 워크트리 제안 (#69) — propose_project와 같은 원칙(문은 하나, 여기는 손가락)에
+ * 값이 하나 실린다: 브랜치 이름. 사이드바의 + 버튼이 밝아지고, 그 문을 열면
+ * 워크트리가 켜지고 이름이 채워진 창이 뜬다. 만드는 것은 끝까지 사람이다.
+ */
+function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
+  const branch = item.title && !/propose_worktree_session$/.test(item.title) ? item.title : null
+  return (
+    <p className="flex items-baseline gap-2 text-[12px] text-ash" data-testid="worktree-proposal">
+      <span className="shrink-0 text-slate" aria-hidden>
+        ↖
+      </span>
+      <span>
+        {branch ? (
+          <>
+            Branch <span className="font-mono text-chalk">{branch}</span> proposed
+          </>
+        ) : (
+          'A worktree session was proposed'
+        )}
+        {' — the '}
+        <span className="text-chalk">+</span>
+        {' button on this project opens the prefilled dialog'}
       </span>
     </p>
   )

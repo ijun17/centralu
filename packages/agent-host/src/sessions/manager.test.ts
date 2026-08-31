@@ -2318,6 +2318,40 @@ describe('워크트리 세션의 매니저 (#69)', () => {
     await expect(m2.deleteSession(manager.id)).resolves.toBeUndefined()
   })
 
+  it('매니저는 부분집합 도구만 부를 수 있다 — 노출과 실행이 같은 판정을 쓴다 (#69)', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id))
+    const m2 = boot()
+    const manager = m2.listSessions().find((s) => s.name === 'Worktrees')!
+
+    expect(m2.toolProfileOf(manager.id)).toBe('manager')
+    // 허용된 것: 제안 도구가 돈다 (아무것도 만들지 않는다 — 가리키기만)
+    const before = m2.listSessions().length
+    const r = await m2.runOrchestratorTool(manager.id, 'propose_worktree_session', { branch: 'feat/x' })
+    expect(r.isError).not.toBe(true)
+    expect(m2.listSessions().length).toBe(before)
+    // 막힌 것: create_session은 매니저의 도구가 아니다 — 생성은 제안을 거쳐 사람이 한다
+    await expect(m2.runOrchestratorTool(manager.id, 'create_session', {})).rejects.toThrow(/이 세션의 도구가 아닙니다/)
+    // 보통 세션은 아무 도구도 못 부른다
+    await expect(m2.runOrchestratorTool('wt-a', 'list_sessions', {})).rejects.toThrow()
+  })
+
+  it('매니저의 눈은 자기 자식까지다 — 같은 프로젝트의 남에게도 지시할 수 없다 (#69)', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id))
+    store.upsertSession(wtRow('other', p.id, { worktree: null, parentSessionId: null }))
+    const m2 = boot()
+    const manager = m2.listSessions().find((s) => s.name === 'Worktrees')!
+
+    const list = await m2.runOrchestratorTool(manager.id, 'list_sessions', {})
+    expect(list.text).toContain('wt-a')
+    expect(list.text).not.toContain('other')
+
+    const send = await m2.runOrchestratorTool(manager.id, 'send_to_session', { sessionId: 'other', text: '해줘' })
+    expect(send.isError).toBe(true)
+    expect(send.text).toContain('이 매니저의 워크트리 세션이 아닙니다')
+  })
+
   it('adoption은 링크만 쓴다 — 세션도 대화도 지우지 않는다', async () => {
     const p = await addProject()
     store.upsertSession(wtRow('wt-a', p.id))

@@ -558,7 +558,8 @@ export const RpcMethods = {
    * 다리는 판단을 하지 않는다 — 이름과 인자만 넘기고 규칙은 전부 host에 남는다.
    */
   'orchestrator.tools': {
-    params: z.object({}),
+    /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
+    params: z.object({ sessionId: z.string().optional() }),
     result: z.array(z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() })),
   },
   'orchestrator.tool': {

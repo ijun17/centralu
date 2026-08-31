@@ -5681,3 +5681,45 @@ test('워크트리 브랜치 이름을 정하면 세션 이름이 된다', async
   // 세션 이름 = 브랜치 이름 — 사이드바의 들여진 줄에 그 이름이 선다
   await expect(page.locator('li[data-nested]').getByText('feat/login-fix')).toBeVisible()
 })
+
+/**
+ * 매니저의 워크트리 제안 (#69) — propose-not-power의 세 번째 사례.
+ * 제안 줄이 대화에 남고, + 버튼이 밝아지고, 열면 브랜치 이름이 채워져 있다.
+ * 만드는 것은 끝까지 사람이다.
+ */
+test('워크트리 제안: 대화에 줄이 남고, +가 밝아지고, 창에 이름이 채워진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  // 매니저와 자식을 만든다 (매니저 세션은 목록 순서상 0번이 아니라 이름으로 집는다)
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 매니저 세션을 열고, 매니저가 제안했다고 친다 — 브랜치 이름은 제목에 실려 온다
+  await page.getByText('Worktrees', { exact: true }).click()
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const manager = [...m.sessions.values()].find((s: any) => s.name === 'Worktrees')
+    m.emit({
+      type: 'tool_call', sessionId: manager.id, callId: 'c-prop',
+      summary: { tool: 'mcp__centralu__propose_worktree_session', title: 'feat/proposed-work', readOnly: false, paths: [] },
+    })
+  })
+
+  // 대화에 제안 줄 — 도구 카드가 아니라 가리키는 한 줄이다
+  await expect(page.getByTestId('worktree-proposal')).toContainText('feat/proposed-work')
+  // 이 프로젝트의 + 버튼이 밝아진다
+  await expect(page.locator('[data-worktree-proposal]')).toHaveCount(1)
+
+  // 그 문을 열면: 워크트리 켜짐 + 브랜치 이름 채워짐
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
+  await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/proposed-work')
+
+  // 제안은 여는 순간 소비된다 — 닫고 다시 열면 보통의 빈 창이다
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-worktree-proposal]')).toHaveCount(0)
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
+})

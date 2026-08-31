@@ -276,11 +276,19 @@ export type AppState = {
    */
   newSessionFor: string | null
   /**
+   * 매니저의 워크트리 제안 (#69). propose_worktree_session이 세우고, 그 프로젝트의
+   * 새 세션 창이 열릴 때 소비된다 — 창은 워크트리가 켜지고 브랜치 이름이 채워진 채 뜬다.
+   * 프로젝트에 키를 묶는 이유: 다른 프로젝트의 창까지 물들이면 제안이 오염이 된다.
+   */
+  worktreeProposal: { projectId: string; branch: string } | null
+  /**
    * 새 세션 창이 워크트리 체크를 켠 채 열리는가 (#69).
    * 매니저 줄의 +가 켠다 — 매니저 아래에 만드는 세션은 워크트리 세션이 기본이라서다.
    * 창에서 끄는 것은 자유다 (강제가 아니라 예열이다).
    */
   newSessionWorktree: boolean
+  /** 새 세션 창의 브랜치 이름 초기값 (#69) — 제안이 채운다. 빈 문자열이면 없음 */
+  newSessionBranch: string
   /**
    * 세션별로 지금 화면에 있는 가장 오래된 기록 지점.
    * 압축으로 모델이 잊은 대화도 우리 저장소에는 남아 있으므로, 여기서부터 더 거슬러 읽는다.
@@ -807,6 +815,8 @@ export const useStore = create<AppState>((set, get) => ({
   focusedProjectId: null,
   newSessionFor: null,
   newSessionWorktree: false,
+  newSessionBranch: '',
+  worktreeProposal: null,
   history: {},
   resuming: {},
   wakeError: {},
@@ -1253,6 +1263,15 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'tool_call' && /propose_project$/.test(e.summary.tool)) set({ addProjectHint: true })
     /*
+     * 워크트리 제안 (#69) — 같은 원칙(가리키기)에 값이 하나 실린다: 브랜치 이름.
+     * 어댑터가 제목에 실어 보낸다 (다른 운반로가 없다). 제목이 도구 이름 그대로면
+     * 이름 없는 제안이다 — 창은 빈 이름으로 열린다.
+     */
+    if (e.type === 'tool_call' && /propose_worktree_session$/.test(e.summary.tool) && cur.projectId) {
+      const branch = /propose_worktree_session$/.test(e.summary.title) ? '' : e.summary.title
+      set({ worktreeProposal: { projectId: cur.projectId, branch } })
+    }
+    /*
      * **안읽음 추적(lastSeq)은 host가 매긴 세션 내 seq로만 민다.**
      *
      * 예전에는 대화 아이템의 렌더 키(전 세션 공용 chatSeq)로 밀었다. 그 값이 markRead를
@@ -1582,7 +1601,18 @@ export const useStore = create<AppState>((set, get) => ({
     set({ toast })
   },
   openNewSession(projectId, opts) {
-    set({ newSessionFor: projectId, newSessionWorktree: opts?.worktree ?? false })
+    /*
+     * 제안(#69)은 **여는 순간** 소비된다 — 어느 문으로 열든 (프로젝트 +, 매니저 +,
+     * 제안 줄). 남겨 두면 다음에 무관하게 연 창까지 물들인다.
+     */
+    const prop = get().worktreeProposal
+    const matched = projectId !== null && prop?.projectId === projectId
+    set({
+      newSessionFor: projectId,
+      newSessionWorktree: (opts?.worktree ?? false) || matched,
+      newSessionBranch: matched ? prop.branch : '',
+      ...(matched ? { worktreeProposal: null } : {}),
+    })
   },
 
   async addProject(path) {

@@ -148,8 +148,15 @@ export type CreateSessionOpts = {
   serviceTier?: string
   permissionPreset: PermissionPreset
   resumeExternalId?: string
-  /** 주어지면 이 세션은 오케스트레이터다 — 어댑터가 자기 방식으로 도구를 붙인다 */
+  /** 주어지면 이 세션은 앱 도구를 받는다 — 어댑터가 자기 방식으로 붙인다 */
   orchestratorTools?: OrchestratorTools
+  /**
+   * 받는 도구 묶음 (#69). 'orchestrator'는 전부, 'manager'는 워크트리 매니저의
+   * 부분집합(제안·조회·지시)이다. orchestratorTools가 있을 때만 뜻이 있다.
+   * 노출과 실행 양쪽이 같은 판정(profileAllows)을 쓴다 — 노출만 좁히면
+   * 이름을 아는 쪽이 그냥 부른다.
+   */
+  toolProfile?: 'orchestrator' | 'manager'
   /**
    * 앱이 보증하는 역할 설명. 도구의 기본 프롬프트에 **덧붙인다**.
    *
