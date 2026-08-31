@@ -156,6 +156,8 @@ export interface ProjectPort {
    * differ from what was sent.
    */
   setCommands(projectId: string, commands: string[]): Promise<string[]>
+  /** 워크트리 프로비저닝 설정 저장 (#69). null이면 지운다 */
+  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
 }
 
 /**

@@ -751,7 +751,8 @@ export class MockPlatform implements Platform {
        */
       const info: ProjectInfo = {
         id: `mock-project-${++this.idc}`, path, name: osPathBaseName(path) || path,
-        defaultTool: 'claude', commands: [], git: { branch: 'main', changedFiles: 0, isRepo: true },
+        defaultTool: 'claude', commands: [], worktreeSetup: null,
+        git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
       this.projectsList.push(info)
       return info
@@ -774,6 +775,15 @@ export class MockPlatform implements Platform {
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       p.commands = commands.map((c) => c.trim()).filter(Boolean)
       return [...p.commands]
+    },
+    // 실물과 같은 규칙 (#69): 빈 설정은 null로 눕는다 — 목이 더 너그러우면 계약이 흩어진다
+    setWorktreeSetup: async (projectId: string, setup: { command: string; copyFiles: string[] } | null) => {
+      const p = this.projectsList.find((x) => x.id === projectId)
+      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      const clean = setup
+        ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
+        : null
+      p.worktreeSetup = clean && (clean.command || clean.copyFiles.length) ? clean : null
     },
   }
 

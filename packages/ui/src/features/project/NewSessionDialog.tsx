@@ -46,6 +46,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const platform = usePlatform()
   const project = useStore((s) => s.projects[projectId])
   const createSession = useStore((s) => s.createSession)
+  const saveWorktreeSetup = useStore((s) => s.saveWorktreeSetup)
   const running = useSessionsOf(projectId).filter((s) => !s.archived)
   // 워크트리는 깃 저장소에서만 만들 수 있다 — 아니면 체크박스를 죽이고 이유를 적는다
   const isRepo = !!project?.git
@@ -67,6 +68,14 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * 만들기 전에 정할 자리가 있어야 한다. 비우면 host가 자동 이름을 쓴다 (강제 없음).
    */
   const [branch, setBranch] = useState(useStore.getState().newSessionBranch)
+  /**
+   * 프로비저닝 (#69). 저장된 설정이 있으면 접힌 요약으로, 없으면(첫 사용) 펼친 채 —
+   * 처음 "아, node_modules 깔아야 하는데"가 떠오르는 순간에 입력칸이 눈앞에 있어야 한다.
+   */
+  const savedSetup = project?.worktreeSetup ?? null
+  const [setupOpen, setSetupOpen] = useState(!savedSetup)
+  const [setupCommand, setSetupCommand] = useState(savedSetup?.command ?? '')
+  const [copyFiles, setCopyFiles] = useState(savedSetup?.copyFiles.join(', ') ?? '')
   const [error, setError] = useState<string | null>(null)
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
@@ -159,6 +168,21 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           setBusy(true)
           setError(null)
           try {
+            /*
+             * 프로비저닝 설정은 **만들기 전에** 저장한다 (#69) — host가 워크트리를 만들면서
+             * 저장된 설정을 읽어 돌리므로, 순서가 바뀌면 방금 적은 셋업이 이번 생성에는
+             * 적용되지 않는다. 바뀌었을 때만 왕복한다.
+             */
+            if (worktree && setupOpen) {
+              const next = {
+                command: setupCommand.trim(),
+                copyFiles: copyFiles.split(',').map((f) => f.trim()).filter(Boolean),
+              }
+              const changed =
+                next.command !== (savedSetup?.command ?? '') ||
+                next.copyFiles.join('\n') !== (savedSetup?.copyFiles ?? []).join('\n')
+              if (changed) await saveWorktreeSetup(projectId, next.command || next.copyFiles.length ? next : null)
+            }
             await createSession(projectId, {
               tool,
               // 이전 세션을 골랐다면 도구에게 그 대화를 이어달라고 하고(resume),
@@ -303,15 +327,55 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           이름이 곧 세션 이름·디렉토리 이름이라(사실상 영구) 만들기 전이 정할 유일한 순간이다.
         */}
         {isRepo && worktree && (
-          <input
-            type="text"
-            value={branch}
-            onChange={(e) => setBranch(e.target.value)}
-            placeholder="Branch name (blank = auto)"
-            data-testid="worktree-branch-input"
-            spellCheck={false}
-            className="mt-1.5 w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-          />
+          <>
+            <input
+              type="text"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="Branch name (blank = auto)"
+              data-testid="worktree-branch-input"
+              spellCheck={false}
+              className="mt-1.5 w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+            />
+            {/*
+              프로비저닝 (#69) — 새 워크트리는 빈 작업대다 (추적 파일만 있고 node_modules도
+              gitignored .env도 없다). 여기 적은 것이 생성 때 자동으로 돈다: 복사 → 셋업.
+              저장돼 있으면 한 줄 요약으로 접는다 — 매번 펼치면 확인할 것 없는 확인이 된다.
+            */}
+            {setupOpen ? (
+              <div className="mt-1.5 space-y-1.5" data-testid="worktree-setup-edit">
+                <input
+                  type="text"
+                  value={setupCommand}
+                  onChange={(e) => setSetupCommand(e.target.value)}
+                  placeholder="Setup command, runs once in the new worktree (e.g. pnpm install)"
+                  data-testid="worktree-setup-command"
+                  spellCheck={false}
+                  className="w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+                />
+                <input
+                  type="text"
+                  value={copyFiles}
+                  onChange={(e) => setCopyFiles(e.target.value)}
+                  placeholder="Files to copy from the project, comma-separated (e.g. .env.local)"
+                  data-testid="worktree-copy-files"
+                  spellCheck={false}
+                  className="w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                data-testid="worktree-setup-summary"
+                onClick={() => setSetupOpen(true)}
+                className="mt-1.5 block w-full truncate rounded border border-edge/60 px-2 py-1 text-left font-mono text-[10px] text-slate hover:border-graphite hover:text-ash"
+                title="Edit worktree setup"
+              >
+                {savedSetup?.command ? `setup: ${savedSetup.command}` : 'setup: (none)'}
+                {savedSetup?.copyFiles.length ? ` · copies: ${savedSetup.copyFiles.join(', ')}` : ''}
+              </button>
+            )}
+          </>
         )}
 
         {error && (

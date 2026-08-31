@@ -187,6 +187,10 @@ class WebProjectPort implements ProjectPort {
   setCommands(projectId: string, commands: string[]) {
     return this.rpc.call('projects.setCommands', { projectId, commands })
   }
+
+  async setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null) {
+    await this.rpc.call('projects.setWorktreeSetup', { projectId, setup })
+  }
 }
 
 /** 웹 폴백 — capability가 false이므로 UI가 알아서 기능을 숨긴다 */

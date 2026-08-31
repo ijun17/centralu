@@ -476,6 +476,8 @@ export type AppState = {
    * Adding one and deleting one both arrive here as "the list is this now".
    */
   setProjectCommands(projectId: string, commands: string[]): Promise<void>
+  /** 워크트리 프로비저닝 설정 저장 (#69) — 새 세션 창의 워크트리 영역이 부른다 */
+  saveWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
   /**
    * Run one of the project's saved commands in that project's terminal (issue #44).
    *
@@ -1694,6 +1696,19 @@ export const useStore = create<AppState>((set, get) => ({
     const res = await get().platform!.git.checkout(projectId, branch)
     get().refreshProjectGit(projectId)
     return res
+  },
+
+  async saveWorktreeSetup(projectId, setup) {
+    const platform = get().platform
+    const before = get().projects[projectId]
+    if (!platform || !before) return
+    await platform.projects.setWorktreeSetup(projectId, setup)
+    // 요약 줄이 다음에 열릴 때 맞아야 한다 — host의 정규화 규칙(빈 설정 = null)을 따라간다
+    const clean = setup && (setup.command || setup.copyFiles.length) ? setup : null
+    set((s) => {
+      const now = s.projects[projectId]
+      return now ? { projects: { ...s.projects, [projectId]: { ...now, worktreeSetup: clean } } } : {}
+    })
   },
 
   async setProjectCommands(projectId, commands) {

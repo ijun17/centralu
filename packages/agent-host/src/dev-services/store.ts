@@ -488,6 +488,20 @@ export class Store {
           }
         },
       },
+      {
+        to: 23,
+        run: () => {
+          /*
+           * 워크트리 프로비저닝 (#69): 새 워크트리는 빈 작업대다 — node_modules도
+           * .env도 없다. 프로젝트마다 셋업 커맨드와 복사할 파일 목록을 기억한다.
+           * 레포가 아니라 여기(우리 DB)에 사는 이유: 레포에는 아무것도 쓰지 않는다 (#50).
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'worktree_setup')) {
+            this.db.exec(`ALTER TABLE projects ADD COLUMN worktree_setup TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -685,6 +699,34 @@ export class Store {
   /** The whole list at once — add and delete both arrive here as "it looks like this now" */
   setProjectCommands(projectId: string, commands: readonly string[]): void {
     this.db.prepare(`UPDATE projects SET commands = ? WHERE id = ?`).run(JSON.stringify(commands), projectId)
+  }
+
+  /**
+   * 워크트리 프로비저닝 설정 (#69). null이면 아무것도 안 돈다 — 강제하지 않는다.
+   * projectCommands와 같은 규칙: 통째로 읽고 통째로 쓴다.
+   */
+  worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
+    const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
+      | { worktree_setup: string | null }
+      | undefined
+    if (!row?.worktree_setup) return null
+    try {
+      const parsed = JSON.parse(row.worktree_setup) as { command?: unknown; copyFiles?: unknown }
+      const command = typeof parsed.command === 'string' ? parsed.command : ''
+      const copyFiles = Array.isArray(parsed.copyFiles)
+        ? parsed.copyFiles.filter((f): f is string => typeof f === 'string')
+        : []
+      if (!command && copyFiles.length === 0) return null
+      return { command, copyFiles }
+    } catch {
+      return null
+    }
+  }
+
+  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
+    this.db
+      .prepare(`UPDATE projects SET worktree_setup = ? WHERE id = ?`)
+      .run(setup ? JSON.stringify(setup) : null, projectId)
   }
 
   /**

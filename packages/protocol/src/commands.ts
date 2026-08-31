@@ -210,6 +210,13 @@ export const ProjectInfo = z.object({
    * exactly what it will run, and there is no label that can drift away from it.
    */
   commands: z.array(z.string()).default([]),
+  /**
+   * 워크트리 프로비저닝 (#69). 새 워크트리는 빈 작업대다 — 추적 파일만 있고
+   * node_modules도 gitignored .env도 없다. 생성 순서: 워크트리 → 파일 복사 → 셋업
+   * (Vibe Kanban이 검증한 순서). null이면 아무것도 안 돈다 — 강제하지 않는다.
+   * 레포가 아니라 우리 DB에 산다 (#50: 저장소에는 아무것도 쓰지 않는다).
+   */
+  worktreeSetup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable().default(null),
   git: z
     .object({
       branch: z.string(),
@@ -517,6 +524,14 @@ export const RpcMethods = {
   'projects.setCommands': {
     params: z.object({ projectId: z.string(), commands: z.array(z.string()) }),
     result: z.array(z.string()),
+  },
+  /** 워크트리 프로비저닝 설정 저장 (#69) — 새 세션 창의 워크트리 영역이 편집한다 */
+  'projects.setWorktreeSetup': {
+    params: z.object({
+      projectId: z.string(),
+      setup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable(),
+    }),
+    result: z.object({ ok: z.literal(true) }),
   },
   'sessions.reorder': {
     params: z.object({ projectId: z.string(), orderedIds: z.array(z.string()) }),

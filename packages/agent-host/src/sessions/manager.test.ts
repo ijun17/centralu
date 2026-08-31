@@ -1,7 +1,7 @@
 /** T3-3 완료 기준: 인메모리 어댑터 목으로 RPC 통합 검증 */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
@@ -1845,6 +1845,48 @@ describe('워크트리 세션', () => {
     ).rejects.toThrow(/Not a valid branch name/)
     // 거절됐으면 워크트리도 세션도 남지 않는다
     expect(wtMgr.listSessions().filter((x) => x.worktree).length).toBe(0)
+  })
+
+  it('프로비저닝 (#69): 파일이 복사되고, 셋업이 워크트리 안에서 결정론적 변수와 함께 돈다', async () => {
+    // gitignored 파일 — git worktree add로는 절대 따라오지 않는 종류다
+    writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
+    store.setWorktreeSetup(project.id, {
+      command: 'echo "$CENTRALU_WORKTREE:$CENTRALU_WORKTREE_INDEX" > setup-ran.txt',
+      copyFiles: ['.env.local'],
+    })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/provisioned',
+    })) as SessionInfo
+
+    // 복사: .env의 내용이 git이 아니라 우리 손으로 건너왔다
+    expect(readFileSync(join(s.worktree!.path, '.env.local'), 'utf8')).toBe('SECRET=1\n')
+    // 셋업: 워크트리 안에서, 브랜치 이름과 순번을 환경으로 받아서 돌았다
+    expect(readFileSync(join(s.worktree!.path, 'setup-ran.txt'), 'utf8').trim()).toBe('feat/provisioned:1')
+  })
+
+  it('프로비저닝 실패는 세션 생성을 막지 않는다 — 반쯤 차려진 작업대가 아무것도 없는 것보다 낫다', async () => {
+    store.setWorktreeSetup(project.id, { command: 'exit 7', copyFiles: ['does-not-exist.env'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
+    })) as SessionInfo
+
+    expect(s.worktree).not.toBeNull()
+    expect(existsSync(s.worktree!.path)).toBe(true)
+  })
+
+  it('복사 목록의 경로 이탈은 거절된다 — 프로젝트 안의 상대 경로만 뜻한다', async () => {
+    const outside = join(root, 'outside-secret.txt')
+    writeFileSync(outside, 'leak\n')
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['../outside-secret.txt'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
+    })) as SessionInfo
+
+    expect(existsSync(join(s.worktree!.path, '..', 'outside-secret.txt'))).toBe(false)
+    expect(existsSync(join(s.worktree!.path, 'outside-secret.txt'))).toBe(false)
   })
 
   it('지울 때 기본은 워크트리를 남긴다', async () => {

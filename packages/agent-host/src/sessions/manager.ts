@@ -3,8 +3,9 @@ import { ORCHESTRATOR_ROLE, orchestratorHome, projectOrchestratorRole } from './
 import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool, type ToolProfile } from './orchestrator-tools.js'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
-import { existsSync, statSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, statSync } from 'node:fs'
+import { exec } from 'node:child_process'
 import type {
   ModelOption,
   ApprovalDecision,
@@ -40,6 +41,7 @@ import {
   gitPush,
   gitWorktreeAdd,
   gitValidBranchName,
+  type Worktree,
   gitWorktreeDirty,
   gitWorktreeRemove,
 } from '../dev-services/git.js'
@@ -345,6 +347,8 @@ export class SessionManager {
       // Saved shell commands ride along with the project so the Run menu never has a
       // "loading" state to distinguish from an empty one (issue #44)
       commands: this.store.projectCommands(id),
+      // 워크트리 프로비저닝(#69)도 함께 실린다 — 새 세션 창이 별도 fetch 없이 프리필한다
+      worktreeSetup: this.store.worktreeSetup(id),
       git: git.isRepo ? git : null,
     }
   }
@@ -367,6 +371,17 @@ export class SessionManager {
     const clean = commands.map((c) => c.trim()).filter(Boolean)
     this.store.setProjectCommands(projectId, clean)
     return clean
+  }
+
+  /** 워크트리 프로비저닝 설정 (#69) — 새 세션 창의 워크트리 영역이 저장한다 */
+  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
+    if (!this.store.listProjects().some((p) => p.id === projectId)) {
+      throw Object.assign(new Error('Project not found'), { code: 'internal' })
+    }
+    const clean = setup
+      ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
+      : null
+    this.store.setWorktreeSetup(projectId, clean && (clean.command || clean.copyFiles.length) ? clean : null)
   }
 
   /**
@@ -591,6 +606,8 @@ export class SessionManager {
         const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
         throw Object.assign(new Error(`Could not create the worktree: ${String(msg).trim()}`), { code: 'internal' })
       }
+      // 빈 작업대를 차린다 (#69): 파일 복사 → 셋업 커맨드. 순서는 VK가 검증한 그대로다
+      await this.provisionWorktree(params.cwd, worktree, params.projectId)
     }
 
     /*
@@ -1875,6 +1892,76 @@ export class SessionManager {
   /** 워크트리는 **저장소 밖**에 만든다 — 사용자 저장소를 더럽히지 않는다 (.gitignore도 안 건드린다) */
   private worktreePathFor(projectId: string, sessionId: string): string {
     return join(this.worktreeRoot, projectId, sessionId)
+  }
+
+  /**
+   * 새 워크트리의 작업대를 차린다 (#69): gitignored 파일 복사 → 셋업 커맨드.
+   *
+   * 새 워크트리는 추적 파일만 있는 빈 작업대다 — node_modules도 .env도 없어서,
+   * 세션의 첫 턴이 일이 아니라 "command not found"로 시작한다. .env류는 에이전트가
+   * 복구할 수도 없다 (내용이 git에 없다). 이 카테고리 전체의 최다 반복 불만이다.
+   *
+   * **실패해도 세션 생성은 계속한다.** 반쯤 차려진 작업대는 에이전트가 마저 차릴 수
+   * 있지만, 셋업이 죽었다고 세션까지 안 만들면 사람은 이유도 모른 채 아무것도 못 얻는다.
+   * 실패는 stderr(→host.log)에 남긴다.
+   *
+   * **상한 90초.** pnpm install이 이 레포에서 6.5초(실측)지만, 콜드 스토어나 무거운
+   * 프로젝트는 더 걸린다. RPC 30초보다 길어서 생성 응답이 늦어질 수 있는데, 그건
+   * 셋업이 도는 동안 세션을 미리 여는 것보다 낫다 — 첫 턴이 설치와 경합하면
+   * 이 기능의 존재 이유가 사라진다.
+   */
+  private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<void> {
+    const setup = this.store.worktreeSetup(projectId)
+    if (!setup) return
+
+    for (const f of setup.copyFiles) {
+      const src = resolve(projectCwd, f)
+      // 경로 이탈 차단 — 목록은 프로젝트 안의 상대 경로만 뜻한다 (fs 포트와 같은 규칙)
+      if (!src.startsWith(resolve(projectCwd) + '/')) {
+        console.error(`[worktree] copy refused (outside project): ${f}`)
+        continue
+      }
+      if (!existsSync(src)) {
+        // 없는 파일은 건너뛰되 흔적을 남긴다 — .env가 안 왔는데 조용하면 한참 뒤에 발견된다
+        console.error(`[worktree] copy skipped (missing): ${f}`)
+        continue
+      }
+      const dst = join(worktree.path, f)
+      mkdirSync(dirname(dst), { recursive: true })
+      cpSync(src, dst, { recursive: true })
+    }
+
+    if (!setup.command) return
+    /*
+     * 결정론적 변수 두 개 — 앱이 자원 배정에 대해 아는 전부다 (#69 자원 결정).
+     * 순번은 이 프로젝트의 기존 워크트리 세션 수 + 1. 삭제 후 재사용될 수 있지만
+     * 충돌의 결과는 재앙이 아니라 에러 메시지고, 그건 에이전트가 읽고 고치는 종류다.
+     */
+    const index = [...this.meta.values()].filter((s) => s.projectId === projectId && s.worktree).length + 1
+    await new Promise<void>((done) => {
+      exec(
+        setup.command,
+        {
+          cwd: worktree.path,
+          timeout: 90_000,
+          env: {
+            ...process.env,
+            CENTRALU_WORKTREE: worktree.branch,
+            CENTRALU_WORKTREE_INDEX: String(index),
+          },
+        },
+        (err, _stdout, stderr) => {
+          if (err) {
+            console.error(
+              `[worktree] setup failed (${worktree.branch}): ${err.message}\n${String(stderr).slice(0, 2000)}`,
+            )
+          } else {
+            console.error(`[worktree] setup ok (${worktree.branch}): ${setup.command}`)
+          }
+          done() // 실패해도 계속 — 위 주석의 이유
+        },
+      )
+    })
   }
 
   /** 워크트리를 지워도 되는지 판단할 재료. 워크트리 세션이 아니면 null */

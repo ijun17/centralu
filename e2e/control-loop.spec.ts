@@ -5723,3 +5723,35 @@ test('워크트리 제안: 대화에 줄이 남고, +가 밝아지고, 창에 �
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
 })
+
+/**
+ * 워크트리 프로비저닝 (#69) — 첫 사용은 펼쳐진 입력칸, 저장 후엔 접힌 요약.
+ * 설정은 만들기 전에 저장된다 (host가 생성 중에 읽어 돌리므로).
+ */
+test('워크트리 셋업: 처음엔 입력칸, 저장 뒤엔 요약으로 접힌다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  // 저장된 설정이 없으니 입력칸이 펼쳐져 있다
+  await expect(page.getByTestId('worktree-setup-edit')).toBeVisible()
+  await page.getByTestId('worktree-setup-command').fill('pnpm install')
+  await page.getByTestId('worktree-copy-files').fill('.env.local, .env')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 저장됐다 — 목이 실물과 같은 정규화를 했는지까지 본다
+  const saved = await page.evaluate(() => {
+    const m = (window as any).__mock
+    return m.projectsList?.[0]?.worktreeSetup ?? [...(m.projectsList ?? [])][0]?.worktreeSetup
+  })
+  expect(saved).toEqual({ command: 'pnpm install', copyFiles: ['.env.local', '.env'] })
+
+  // 다음에 열면 접힌 요약 한 줄 — 누르면 다시 편집할 수 있다
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await expect(page.getByTestId('worktree-setup-summary')).toContainText('setup: pnpm install')
+  await expect(page.getByTestId('worktree-setup-summary')).toContainText('copies: .env.local, .env')
+  await page.getByTestId('worktree-setup-summary').click()
+  await expect(page.getByTestId('worktree-setup-command')).toHaveValue('pnpm install')
+})
