@@ -276,6 +276,12 @@ export type AppState = {
    */
   newSessionFor: string | null
   /**
+   * 새 세션 창이 워크트리 체크를 켠 채 열리는가 (#69).
+   * 매니저 줄의 +가 켠다 — 매니저 아래에 만드는 세션은 워크트리 세션이 기본이라서다.
+   * 창에서 끄는 것은 자유다 (강제가 아니라 예열이다).
+   */
+  newSessionWorktree: boolean
+  /**
    * 세션별로 지금 화면에 있는 가장 오래된 기록 지점.
    * 압축으로 모델이 잊은 대화도 우리 저장소에는 남아 있으므로, 여기서부터 더 거슬러 읽는다.
    */
@@ -419,7 +425,7 @@ export type AppState = {
   setTextScale(step: number): void
   setToast(msg: string | null): void
   /** 세션 생성 창을 연다/닫는다 (null이면 닫기) */
-  openNewSession(projectId: string | null): void
+  openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
 
   addProject(path: string): Promise<ProjectInfo>
   /**
@@ -798,6 +804,7 @@ export const useStore = create<AppState>((set, get) => ({
   focusedSessionId: null,
   focusedProjectId: null,
   newSessionFor: null,
+  newSessionWorktree: false,
   history: {},
   resuming: {},
   wakeError: {},
@@ -1572,8 +1579,8 @@ export const useStore = create<AppState>((set, get) => ({
   setToast(toast) {
     set({ toast })
   },
-  openNewSession(projectId) {
-    set({ newSessionFor: projectId })
+  openNewSession(projectId, opts) {
+    set({ newSessionFor: projectId, newSessionWorktree: opts?.worktree ?? false })
   },
 
   async addProject(path) {
@@ -1703,7 +1710,11 @@ export const useStore = create<AppState>((set, get) => ({
       sessions: {
         ...s.sessions,
         [info.id]: {
-          ...initialSession({ id: info.id, projectId, name: info.name, tool: info.tool, worktree: info.worktree }),
+          ...initialSession({
+            id: info.id, projectId, name: info.name, tool: info.tool, worktree: info.worktree,
+            // 소속도 host가 정한다 (#69) — 빠뜨리면 매니저 아래 만든 세션이 재시작 전까지 최상위에 선다
+            parentSessionId: info.parentSessionId,
+          }),
           lastSeq: info.lastSeq,
           lastReadSeq: info.lastReadSeq,
           ...liveFactsOf(info),

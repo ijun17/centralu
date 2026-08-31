@@ -415,9 +415,34 @@ export class MockPlatform implements Platform {
       const worktree = params.worktree
         ? { path: `/mock/worktrees/${id}`, branch: `centralu/${id.slice(-8)}` }
         : null
+      /*
+       * 실물과 같은 규칙 (#69, manager.managerFor): 워크트리 세션은 태어나는 순간부터
+       * 매니저 아래에 선다. 매니저는 자식을 가진 보통 세션이고, 없으면 행만 만든다
+       * (live=false — 프로세스는 말을 걸 때 태어난다).
+       */
+      let parentSessionId: string | null = null
+      if (worktree && params.projectId) {
+        const withKids = new Set([...this.sessions.values()].map((x) => x.parentSessionId).filter(Boolean))
+        let mgr = [...this.sessions.values()].find(
+          (x) => x.projectId === params.projectId && !x.worktree && withKids.has(x.id) && !x.archived,
+        )
+        if (!mgr) {
+          const mgrId = `mock-manager-${++this.idc}`
+          mgr = {
+            id: mgrId, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: null,
+            name: 'Worktrees', autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+            createdAt: this.now(), waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+            serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+            parentSessionId: null, ...sessionLiveDefaults(),
+          }
+          this.sessions.set(mgrId, mgr)
+          this.emit({ type: 'session_created', sessionId: mgrId, session: mgr })
+        }
+        parentSessionId = mgr.id
+      }
       const info: SessionInfo = {
         id, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: `ext-${id}`, worktree,
-        parentSessionId: null,
+        parentSessionId,
         effort: params.effort ?? null, verbosity: params.verbosity ?? null, serviceTier: params.serviceTier ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,

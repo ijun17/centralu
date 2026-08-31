@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { TOOL_META, type ProjectInfo, type SessionState, type ToolName } from '@cc/protocol'
+import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
@@ -59,6 +60,7 @@ function SessionRow({
   id,
   onReorder,
   draggable,
+  nested,
   children,
 }: {
   id: string
@@ -68,12 +70,18 @@ function SessionRow({
    * 글자 선택 대신 **끌기**로 해석해서, 고치려고 문지르면 줄이 통째로 딸려온다.
    */
   draggable: boolean
+  /**
+   * 매니저 아래에 들여 그려지는 워크트리 세션인가 (#69).
+   * 들여쓰기 + 세로 안내선 — 계급은 사이드바에만 산다 (그리드는 평평하다, 설계 결정).
+   */
+  nested?: boolean
   children: ReactNode
 }) {
   const drop = useDropLine(SESSION_MIME, onReorder)
   return (
     <li
-      className={`group/row relative ${dropLine(drop.edge)}`}
+      data-nested={nested || undefined}
+      className={`group/row relative ${nested ? 'ml-4 border-l border-edge/60' : ''} ${dropLine(drop.edge)}`}
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
@@ -351,6 +359,37 @@ function GridIcon({ size = 13 }: { size?: number }) {
   )
 }
 
+/**
+ * 세션 목록을 트리 순서로 편다 (#69): 매니저 바로 아래에 그 워크트리 자식들.
+ *
+ * 계급은 사이드바에만 산다 — 그리드·인박스·팔레트는 평평한 목록 그대로다 (설계 결정:
+ * "The hierarchy lives in the sidebar; the grid stays a flat set of panels").
+ *
+ * 부모가 이 목록에 없으면(아카이브됨 등) 자식은 최상위로 그린다 — 들여쓰기는 관계의
+ * 표시일 뿐이라, 부모가 안 보이는데 들여 그리면 없는 것 아래 매달린 것처럼 보인다.
+ */
+function orderAsTree(
+  sessions: SessionSummary[],
+): { s: SessionSummary; nested: boolean; managerOfLive: number }[] {
+  const here = new Set(sessions.map((x) => x.id))
+  const kids = new Map<string, SessionSummary[]>()
+  const roots: SessionSummary[] = []
+  for (const s of sessions) {
+    if (s.parentSessionId && here.has(s.parentSessionId)) {
+      kids.set(s.parentSessionId, [...(kids.get(s.parentSessionId) ?? []), s])
+    } else {
+      roots.push(s)
+    }
+  }
+  return roots.flatMap((root) => {
+    const children = kids.get(root.id) ?? []
+    return [
+      { s: root, nested: false, managerOfLive: children.length },
+      ...children.map((c) => ({ s: c, nested: true, managerOfLive: 0 })),
+    ]
+  })
+}
+
 function ProjectBlock({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
   const focusedSessionId = useSelectedSessionId()
@@ -438,14 +477,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       </header>
 
       <ul className="mt-1.5">
-        {sessions.map((s) => {
+        {orderAsTree(sessions).map(({ s, nested, managerOfLive }) => {
           const unread = s.lastSeq > s.lastReadSeq
           const focused = focusedSessionId === s.id
           return (
             <SessionRow
               key={s.id}
               id={s.id}
-              draggable={renaming !== s.id}
+              nested={nested}
+              /*
+               * 자식 줄은 끌 수 없다 — 자리가 곧 소속이다 (#69). 부모 아래 들여
+               * 그려지는 줄을 손으로 옮기게 두면, 옮긴 자리가 소속처럼 읽히는데
+               * 실제 소속(parentSessionId)은 그대로라 화면이 거짓말을 하게 된다.
+               */
+              draggable={renaming !== s.id && !nested}
               onReorder={(draggedId, before) =>
                 void reorderSessions(projectId, moveTo(sessions.map((x) => x.id), draggedId, s.id, before))
               }
@@ -536,6 +581,22 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     >
                       <PencilIcon size={13} />
                     </IconButton>
+                    {/*
+                      매니저 줄의 + (#69) — 이 세션 아래에 워크트리 세션을 하나 더.
+                      프로젝트 헤더의 +와 같은 창을 열되 워크트리가 켜진 채 열린다.
+                      호버 그룹 안에 두는 이유: 항상 보이면 헤더의 +와 두 개가 나란히
+                      떠서 어느 쪽이 무엇인지 설명이 필요해진다 — 필요할 때만 보인다.
+                    */}
+                    {managerOfLive > 0 && (
+                      <IconButton
+                        label={`New worktree session under ${s.name}`}
+                        testId={`new-worktree-session-${s.id}`}
+                        align="right"
+                        onClick={() => openNewSession(projectId, { worktree: true })}
+                      >
+                        <PlusIcon size={13} />
+                      </IconButton>
+                    )}
                     {/*
                       삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
                       누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.

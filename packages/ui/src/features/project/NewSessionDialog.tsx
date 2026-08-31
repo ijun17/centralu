@@ -57,9 +57,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * 이 세션만 워크트리에서 돌린다 (FR-2 옵션).
    *
    * **기본은 꺼짐이다.** 스펙이 정한 원칙이 "원본 디렉토리에서 직접 작업"이고,
-   * 워크트리는 원하는 사람만 켜는 격리 수단이다.
+   * 워크트리는 원하는 사람만 켜는 격리 수단이다. 예외는 매니저 줄의 +로 열린
+   * 경우 하나 (#69) — 거기서는 켜진 채 열린다. 강제가 아니라 예열이다: 끄는 건 자유고,
+   * 초기값이라 열려 있는 동안 스토어를 다시 읽지 않는다 (mount마다 한 번).
    */
-  const [worktree, setWorktree] = useState(false)
+  const [worktree, setWorktree] = useState(useStore.getState().newSessionWorktree)
   const [error, setError] = useState<string | null>(null)
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)

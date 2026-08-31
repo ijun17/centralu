@@ -4900,9 +4900,13 @@ test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', asyn
     ;(window as any).__mock.mockWorktreeDirty = true
   })
 
-  const row = page.getByTestId(/^session-row-/).first()
+  /*
+   * 워크트리 세션은 이제 매니저 아래 들여 그려진다 (#69) — 목록의 첫 줄은 매니저다.
+   * `.first()`로 잡으면 매니저의 삭제를 누르게 되므로, 들여진 줄을 집는다.
+   */
+  const row = page.locator('li[data-nested]').getByTestId(/^session-row-/)
   await row.hover()
-  await page.getByTestId(/^delete-session-/).first().click()
+  await page.locator('li[data-nested]').getByTestId(/^delete-session-/).click()
 
   const panel = page.getByTestId('delete-worktree')
   await expect(panel).toBeVisible()
@@ -5610,4 +5614,55 @@ test('그리드에서 껐다 켜면 그리드로 돌아온다', async ({ page })
 
   // 프로젝트가 돌아오는 순간, 화면은 포커스 뷰가 아니라 **그리드**여야 한다
   await expect(page.getByTestId('grid')).toBeVisible()
+})
+
+/**
+ * 세션 트리 (#69): 워크트리 세션은 매니저 아래에 들여 그려진다.
+ *
+ * 계급은 사이드바에만 산다 — 매니저는 자식을 가진 보통 세션이고, 워크트리 세션을
+ * 만들면 매니저가 없던 프로젝트에도 매니저 줄이 생긴다 (행만, 프로세스는 없다).
+ */
+test('워크트리 세션은 사이드바에서 매니저 아래에 선다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 매니저 줄이 생겼고, 워크트리 세션이 그 아래에 들여 그려진다
+  const manager = page.getByText('Worktrees', { exact: true })
+  await expect(manager).toBeVisible()
+  const nested = page.locator('li[data-nested]')
+  await expect(nested).toHaveCount(1)
+
+  // 매니저 줄을 호버하면 +가 나온다 — 누르면 워크트리가 켜진 채 새 세션 창이 열린다
+  await manager.hover()
+  const mgrRow = page.locator('li', { has: manager })
+  await mgrRow.locator('[data-testid^="new-worktree-session-"]').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeVisible()
+  await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
+
+  // 그 창으로 하나 더 만들면 같은 매니저 아래에 선다 — 매니저는 프로젝트당 하나면 충분하다
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  await expect(page.locator('li[data-nested]')).toHaveCount(2)
+  await expect(page.getByText('Worktrees', { exact: true })).toHaveCount(1)
+})
+
+test('프로젝트 헤더의 +로 열면 워크트리는 여전히 꺼져 있다 — 예열은 매니저 줄의 +만 한다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  // 먼저 매니저 줄의 +로 한 번 열었다 닫는다 — 예열 상태가 새어 남지 않아야 한다
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  const manager = page.getByText('Worktrees', { exact: true })
+  await manager.hover()
+  await page.locator('li', { has: manager }).locator('[data-testid^="new-worktree-session-"]').click()
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
 })
