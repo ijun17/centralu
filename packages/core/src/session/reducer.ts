@@ -86,6 +86,12 @@ export type SessionSummary = {
    */
   parentSessionId: string | null
   /**
+   * 이 워크트리 브랜치의 작업이 프로젝트 줄기에 다 들어갔다 (#69).
+   * 배지 하나로 그려진다. 스쿼시·리베이스 병합은 로컬 감지 불가(실측)라 false로
+   * 남을 수 있다 — 놓침의 비용은 배지지 데이터가 아니다.
+   */
+  merged: boolean
+  /**
    * 이번 턴에 모델이 생각에 쓴 토큰 추정치 누계 (#58 — claude는 thinking 본문이
    * 암호화라 이 숫자가 보여줄 수 있는 전부다). activity와 같은 수명: working을
    * 벗어나면 죽는다.
@@ -103,7 +109,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', worktree: null, parentSessionId: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
+    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, thinkingTokens: null, plan: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
   }
 }
@@ -217,6 +223,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
      * `!event.auto`로 적으면, 파서를 거치지 않고 손으로 만든 이벤트(옛 버전 프레임·
      * 테스트 픽스처)에서 undefined가 "사람이 정했다"로 뒤집힌다.
      */
+    case 'worktree_merged':
+      return { ...next, merged: true }
     case 'session_title':
       if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
       return { ...next, name: event.title, autoNamed: false }

@@ -1781,7 +1781,8 @@ describe('워크트리 세션', () => {
     const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
     const found = restarted.listSessions().find((x) => x.id === s.id)
 
-    expect(found?.worktree).toEqual({ path, branch: s.worktree!.branch })
+    // base(#69 병합 감지 기준점)도 재시작을 넘긴다 — 잃으면 그 세션은 자동 감지에서 빠진다
+    expect(found?.worktree).toEqual({ path, branch: s.worktree!.branch, base: s.worktree!.base })
   })
 
   it('git 저장소가 아니면 만들지 않고, 이유를 말한다', async () => {
@@ -1887,6 +1888,51 @@ describe('워크트리 세션', () => {
 
     expect(existsSync(join(s.worktree!.path, '..', 'outside-secret.txt'))).toBe(false)
     expect(existsSync(join(s.worktree!.path, 'outside-secret.txt'))).toBe(false)
+  })
+
+  it('병합 감지 (#69): 줄기에 들어간 브랜치만 merged가 되고, 갓 만든 브랜치는 아니다', async () => {
+    const fresh = await create(true)
+    const worked = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/done',
+    })) as SessionInfo
+
+    // 브랜치에서 일하고 (커밋), 줄기(main)로 병합한다 — 전부 터미널에서 하는 일이다
+    writeFileSync(join(worked.worktree!.path, 'work.txt'), 'done\n')
+    const g = (dir: string, args: string[]) =>
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir })
+    g(worked.worktree!.path, ['add', '.'])
+    g(worked.worktree!.path, ['commit', '-qm', 'work'])
+    g(repo, ['merge', '-q', '--no-ff', 'feat/done'])
+
+    await wtMgr.refreshMergedWorktrees(project.id)
+
+    const after = new Map(wtMgr.listSessions().map((x) => [x.id, x]))
+    expect(after.get(worked.id)?.worktreeMerged).toBe(true)
+    // 갓 만든(일 안 한) 브랜치는 HEAD의 조상이지만 merged가 아니다 — base 기록이 그 구분이다
+    expect(after.get(fresh.id)?.worktreeMerged).toBe(false)
+    // 이벤트도 흘렀다 — 화면 배지의 근거
+    expect(events.some((e) => e.type === 'worktree_merged' && e.sessionId === worked.id)).toBe(true)
+  })
+
+  it('병합된 자식은 매니저를 붙들지 않는다 (#69)', async () => {
+    const worked = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pin',
+    })) as SessionInfo
+    const manager = wtMgr.listSessions().find((x) => x.id === worked.parentSessionId)!
+
+    // 산 자식이 있는 동안은 못 지운다
+    await expect(wtMgr.deleteSession(manager.id)).rejects.toThrow(/worktree session/)
+
+    writeFileSync(join(worked.worktree!.path, 'w.txt'), 'x\n')
+    const g = (dir: string, args: string[]) =>
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir })
+    g(worked.worktree!.path, ['add', '.'])
+    g(worked.worktree!.path, ['commit', '-qm', 'w'])
+    g(repo, ['merge', '-q', '--no-ff', 'feat/pin'])
+    await wtMgr.refreshMergedWorktrees(project.id)
+
+    // 병합됐으면 이력이다 — 매니저는 풀려난다
+    await expect(wtMgr.deleteSession(manager.id)).resolves.toBeUndefined()
   })
 
   it('지울 때 기본은 워크트리를 남긴다', async () => {

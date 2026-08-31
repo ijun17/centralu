@@ -502,6 +502,21 @@ export class Store {
           }
         },
       },
+      {
+        to: 24,
+        run: () => {
+          /*
+           * 병합 감지의 기준점 (#69): 워크트리 브랜치가 생성될 때의 HEAD sha.
+           * 갓 만든 브랜치는 HEAD의 조상이라, 이 기준 없이 is-ancestor만 보면
+           * 만들자마자 "병합됨"으로 읽힌다. 이전 행(base 없음)은 자동 감지에서 빠진다 —
+           * 추측으로 채우면 틀린 배지가 되고, 사람이 지우는 길은 언제나 열려 있다.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'worktree_base')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_base TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -753,8 +768,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, parent_session_id, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @parentSessionId, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -765,6 +780,7 @@ export class Store {
            service_tier = excluded.service_tier,
            permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
            worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
+           worktree_base = excluded.worktree_base,
            parent_session_id = excluded.parent_session_id,
            context_used = excluded.context_used, context_window = excluded.context_window,
            context_exactness = excluded.context_exactness`,
@@ -781,6 +797,7 @@ export class Store {
         importedFrom: s.importedFrom ?? null,
         worktreePath: s.worktree?.path ?? null,
         worktreeBranch: s.worktree?.branch ?? null,
+        worktreeBase: s.worktree?.base ?? null,
         parentSessionId: s.parentSessionId ?? null,
         /*
          * Context rides the ordinary upsert (issue #48), which the manager already runs after
@@ -861,6 +878,7 @@ export class Store {
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
+                s.worktree_base as worktreeBase,
                 s.parent_session_id as parentSessionId,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
@@ -873,18 +891,21 @@ export class Store {
       isOrchestrator: number
       worktreePath: string | null
       worktreeBranch: string | null
+      worktreeBase: string | null
       contextUsed: number | null
       contextWindow: number | null
       contextExactness: string | null
     })[]
     // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
-    return rows.map(({ worktreePath, worktreeBranch, contextUsed, contextWindow, contextExactness, isOrchestrator, ...r }) => ({
+    return rows.map(({ worktreePath, worktreeBranch, worktreeBase, contextUsed, contextWindow, contextExactness, isOrchestrator, ...r }) => ({
       ...r,
       autoNamed: !!r.autoNamed,
       archived: !!r.archived,
       kind: isOrchestrator ? ('orchestrator' as const) : ('worker' as const),
       live: false,
-      worktree: worktreePath ? { path: worktreePath, branch: worktreeBranch ?? '' } : null,
+      worktree: worktreePath
+        ? { path: worktreePath, branch: worktreeBranch ?? '', ...(worktreeBase ? { base: worktreeBase } : {}) }
+        : null,
       ...sessionLiveDefaults(),
       /*
        * **Context is the one that comes back** (issue #48), so it overrules the defaults above.

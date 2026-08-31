@@ -32,6 +32,7 @@ import {
   gitStatusFiles,
   gitDiff,
   gitHeadSha,
+  gitBranchMerged,
   gitLog,
   gitCommitDetail,
   gitBranches,
@@ -217,6 +218,15 @@ export class SessionManager {
       }
     }
     this.adoptOrphanWorktrees()
+    /*
+     * 병합 감지도 기동에 한 번 돈다 (#69) — 앱이 꺼진 사이 터미널에서 병합됐을 수 있다.
+     * 실패는 세션 복원을 막을 이유가 못 되므로 기다리지 않는다.
+     */
+    for (const pid of new Set(
+      [...this.meta.values()].filter((s) => s.worktree && s.projectId).map((s) => s.projectId as string),
+    )) {
+      void this.refreshMergedWorktrees(pid).catch(() => {})
+    }
   }
 
   /**
@@ -451,6 +461,12 @@ export class SessionManager {
   async projectGitStatus(projectId: string): Promise<ProjectInfo> {
     const p = this.store.listProjects().find((x) => x.id === projectId)
     if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+    /*
+     * 병합 감지(#69)가 여기 얹혀 산다 — UI가 턴이 끝날 때마다 디바운스로 부르는 길이라,
+     * "일이 방금 움직였다"는 신호와 같은 주기다. 터미널에서 병합해도 다음 새로고침에 잡힌다.
+     * 응답을 막지 않는다: 배지는 이벤트로 따로 흐른다.
+     */
+    void this.refreshMergedWorktrees(projectId).catch(() => {})
     return this.projectInfo(p.id, p.path)
   }
 
@@ -575,7 +591,7 @@ export class SessionManager {
      * 실패하면 세션 생성 자체를 멈춘다. 조용히 원본 디렉토리로 떨어뜨리면 사용자는
      * 격리된 줄 알고 두 세션을 같은 파일에 붙인다 — 이 기능을 켠 이유가 정확히 그것인데.
      */
-    let worktree: { path: string; branch: string } | null = null
+    let worktree: Worktree | null = null
     if (params.worktree && params.projectId) {
       const summary = await gitSummary(params.cwd)
       if (!summary.isRepo || summary.denied) {
@@ -600,8 +616,12 @@ export class SessionManager {
         throw Object.assign(new Error(`Not a valid branch name: ${requested}`), { code: 'internal' })
       }
       const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
+      // 병합 감지의 기준점 (#69): 브랜치가 갈라진 지점. 이게 없으면 갓 만든 브랜치가
+      // HEAD의 조상이라는 이유만으로 "병합됨"으로 읽힌다.
+      const baseSha = await gitHeadSha(params.cwd)
       try {
         worktree = await gitWorktreeAdd(params.cwd, path, branch)
+        if (baseSha) worktree = { ...worktree, base: baseSha }
       } catch (err) {
         const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
         throw Object.assign(new Error(`Could not create the worktree: ${String(msg).trim()}`), { code: 'internal' })
@@ -1147,7 +1167,11 @@ export class SessionManager {
      * 자식이 아카이브되면 더는 붙들지 않는다 — 병합된/끝난 작업이 매니저를 영원히
      * 고정하면 보호가 벌이 된다 (설계: merged children do not pin the manager).
      */
-    const liveKids = [...this.meta.values()].filter((s) => s.parentSessionId === sessionId && !s.archived)
+    const liveKids = [...this.meta.values()].filter(
+      // 병합된 자식은 붙들지 않는다 (#69 설계: merged children do not pin the manager) —
+      // 이력이지 진행 중인 일이 아니다. 아카이브도 같다.
+      (s) => s.parentSessionId === sessionId && !s.archived && !s.worktreeMerged,
+    )
     if (liveKids.length > 0) {
       throw Object.assign(
         new Error(
@@ -2524,6 +2548,31 @@ export class SessionManager {
 
   private isWorktreeManager(sessionId: string): boolean {
     return [...this.meta.values()].some((s) => s.parentSessionId === sessionId)
+  }
+
+  /**
+   * 이 프로젝트의 워크트리 브랜치들이 줄기에 들어갔는지 다시 판정한다 (#69).
+   *
+   * 부르는 곳은 둘이다: 기동(한 번), 그리고 프로젝트 git 새로고침(projects.gitStatus —
+   * UI가 턴이 끝날 때마다 디바운스로 부르는 그 길). **우리 버튼에 의존하지 않는다**:
+   * 터미널에서 병합하는 것이 정상 사용이고, 브랜치가 줄기에 들어갔는지는 git이 직접
+   * 답할 수 있는 질문이다 (설계 결정). base가 없는 옛 세션은 건너뛴다 — 추측으로
+   * 채우면 갓 만든 브랜치가 병합됨으로 읽힌다.
+   *
+   * false→true 한 방향만 흐른다: 병합은 되돌려지지 않고(revert는 새 커밋이다),
+   * 한 방향이면 이벤트 폭풍도 없다.
+   */
+  async refreshMergedWorktrees(projectId: string): Promise<void> {
+    const cwd = this.cwdOf(projectId)
+    for (const m of this.meta.values()) {
+      if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged || m.archived) continue
+      const merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base).catch(() => false)
+      if (!merged) continue
+      const next = { ...m, worktreeMerged: true }
+      this.meta.set(m.id, next)
+      this.emit({ type: 'worktree_merged', sessionId: m.id })
+      console.error(`[worktree] branch merged into trunk: ${m.worktree.branch} (${m.id.slice(0, 8)})`)
+    }
   }
 
   /** 역할 텍스트 — 중앙(projectId=null)과 프로젝트 오케스트레이터가 다르다 (#13) */

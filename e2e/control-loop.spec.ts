@@ -5755,3 +5755,25 @@ test('워크트리 셋업: 처음엔 입력칸, 저장 뒤엔 요약으로 접�
   await page.getByTestId('worktree-setup-summary').click()
   await expect(page.getByTestId('worktree-setup-command')).toHaveValue('pnpm install')
 })
+
+/** 병합 배지 (#69) — 사실의 통지가 배지가 되고, 정리는 사람이 삭제 대화에서 한다 */
+test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('worktree-branch-input').fill('feat/badge')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveCount(0)
+
+  // host의 감지가 이 이벤트를 흘린다 — 터미널에서 병합해도 같은 길이다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const child = [...m.sessions.values()].find((s: any) => s.worktree)
+    m.emit({ type: 'worktree_merged', sessionId: child.id })
+  })
+
+  await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveCount(1)
+  await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveText('merged')
+})

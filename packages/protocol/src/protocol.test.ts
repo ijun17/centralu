@@ -82,6 +82,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // host가 스스로 만든 세션의 통지 (#69) — session은 SessionInfo지만 이벤트 스키마는
   // unknown으로 나른다 (events가 commands를 의존하지 않게). 받는 쪽이 파싱한다.
   { type: 'session_created', sessionId: 's-new', session: { id: 's-new', projectId: 'p1', name: 'Worktrees' } },
+  { type: 'worktree_merged', sessionId: 's1' },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } },
   /*
    * 세션에 속하지 않는 이벤트 (이슈 #43). sessionId가 **없어도** 파싱돼야 한다 —

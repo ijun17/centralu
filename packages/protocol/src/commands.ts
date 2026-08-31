@@ -138,7 +138,23 @@ export const SessionInfo = z.object({
    * 경로를 들고 있는 이유: 재개할 때도 **같은 워크트리**로 돌아가야 한다.
    * 프로젝트 경로로 되돌아가면 격리가 조용히 풀린다 — 사용자는 여전히 격리된 줄 안다.
    */
-  worktree: z.object({ path: z.string(), branch: z.string() }).nullable().default(null),
+  worktree: z
+    .object({
+      path: z.string(),
+      branch: z.string(),
+      /** 생성 시점의 HEAD sha (#69) — 병합 감지의 기준점. 갓 만든 브랜치를 병합됨으로 안 읽기 위한 것 */
+      base: z.string().optional(),
+    })
+    .nullable()
+    .default(null),
+  /**
+   * 이 워크트리 브랜치의 작업이 프로젝트 줄기에 다 들어갔는가 (#69).
+   *
+   * git에서 파생되는 사실이라 저장하지 않는다 — 기동 때와 프로젝트 git 새로고침 때
+   * 다시 판정한다. 스쿼시·리베이스 병합은 로컬 감지 불가(실측)라 이 값이 false로
+   * 남을 수 있다. 그 비용은 배지 하나다: 사람이 지우는 길은 언제나 열려 있다.
+   */
+  worktreeMerged: z.boolean().default(false),
   /**
    * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위(보통).
    *
@@ -187,9 +203,18 @@ export type SessionInfo = z.infer<typeof SessionInfo>
  */
 export function sessionLiveDefaults(): Pick<
   SessionInfo,
-  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context'
+  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'worktreeMerged'
 > {
-  return { pendingApproval: null, pendingQuestions: [], activity: null, limit: null, usage: null, context: null }
+  return {
+    pendingApproval: null,
+    pendingQuestions: [],
+    activity: null,
+    limit: null,
+    usage: null,
+    context: null,
+    // 병합 여부(#69)도 여기 산다 — git에서 파생되는 사실이라 기동 때 다시 판정한다
+    worktreeMerged: false,
+  }
 }
 
 export const ProjectInfo = z.object({

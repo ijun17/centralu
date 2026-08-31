@@ -268,7 +268,7 @@ function cleanGitError(e: unknown): string {
  * 줄을 넣어야 하고 — 사용자 파일을 우리가 고치는 것이다 — 안 넣으면 `git status`가 지저분해진다.
  */
 
-export type Worktree = { path: string; branch: string }
+export type Worktree = { path: string; branch: string; base?: string }
 
 /**
  * 새 워크트리와 브랜치를 만든다. 브랜치는 **지금 HEAD에서** 갈라진다.
@@ -279,6 +279,32 @@ export type Worktree = { path: string; branch: string }
 export async function gitWorktreeAdd(repoCwd: string, path: string, branch: string): Promise<Worktree> {
   await git(repoCwd, ['worktree', 'add', '-b', branch, path])
   return { path, branch }
+}
+
+/**
+ * 이 브랜치의 작업이 프로젝트의 현재 줄기(HEAD)에 **다 들어갔는가** (#69).
+ *
+ * 두 판정의 합이다:
+ *   1. 브랜치 끝이 생성 시점(base)에서 움직였는가 — 안 움직였으면 "아직 일 안 함"이지
+ *      "병합됨"이 아니다. 갓 만든 브랜치는 HEAD의 조상이라 is-ancestor만 보면
+ *      만들자마자 merged로 읽힌다 (이 함정 때문에 base를 기록한다).
+ *   2. 브랜치가 HEAD의 조상인가 (`merge-base --is-ancestor`) — 보통 병합과 FF 병합을
+ *      잡는다.
+ *
+ * **못 잡는 것 (실측, 2026-08-29):** 스쿼시 병합은 로컬에서 감지 불가다 — is-ancestor
+ * NO, `branch --merged` NO, `git cherry`조차 미병합으로 답했다. 리베이스 병합도 sha가
+ * 바뀌면 놓친다. 그런 브랜치는 자동 표식 없이 남고, 사람이 지우는 길(삭제 대화)은
+ * 언제나 열려 있다 — 놓침의 비용은 배지 하나지, 데이터가 아니다.
+ */
+export async function gitBranchMerged(projectCwd: string, branch: string, baseSha: string): Promise<boolean> {
+  try {
+    const tip = (await git(projectCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])).trim()
+    if (!tip || tip === baseSha) return false
+    await git(projectCwd, ['merge-base', '--is-ancestor', tip, 'HEAD'])
+    return true
+  } catch {
+    return false // 브랜치가 없거나 조상이 아니다 — 어느 쪽이든 "병합됨"은 아니다
+  }
 }
 
 /**

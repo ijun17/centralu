@@ -102,6 +102,9 @@ export class MockPlatform implements Platform {
         } else if (event.type === 'message_delta' || event.type === 'tool_call') {
           s.state = 'working'
           s.waitingSince = null
+        } else if (event.type === 'worktree_merged') {
+          // 실물과 같은 규칙 (#69): 재연결 후 목록에도 남아야 한다
+          s.worktreeMerged = true
         } else if (event.type === 'context_update') {
           /*
            * 실물(host)과 같은 규칙: 컨텍스트 사용량은 **세션에 남는다** (이슈 #48).

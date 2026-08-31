@@ -8,6 +8,13 @@ import type { SessionInfo, StoredMessage } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
+/**
+ * 지금의 최신 스키마 버전 — 마이그레이션을 더할 때 여기 **한 곳**만 올린다.
+ * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
+ * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
+ */
+const LATEST_SCHEMA = 24
+
 function seeded() {
   const s = new Store()
   s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
@@ -60,7 +67,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(23)
+    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -79,7 +86,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(23)
+    expect(new Store().schemaVersion).toBe(LATEST_SCHEMA)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +183,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(23)
+    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -501,7 +508,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(23)
+    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -556,7 +563,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(23)
+    expect(store.schemaVersion).toBe(LATEST_SCHEMA)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -628,7 +635,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(23)
+    expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -761,7 +768,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     v16Db(file)
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(23)
+    expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
     expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))

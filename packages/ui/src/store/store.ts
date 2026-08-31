@@ -908,7 +908,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...initialSession({
             id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
             model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier, permissionPreset: s.permissionPreset, worktree: s.worktree,
-            parentSessionId: s.parentSessionId,
+            parentSessionId: s.parentSessionId, merged: s.worktreeMerged,
           }),
           autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
           lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
@@ -1213,7 +1213,7 @@ export const useStore = create<AppState>((set, get) => ({
               ...initialSession({
                 id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
                 model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier,
-                permissionPreset: s.permissionPreset, worktree: s.worktree, parentSessionId: s.parentSessionId,
+                permissionPreset: s.permissionPreset, worktree: s.worktree, parentSessionId: s.parentSessionId, merged: s.worktreeMerged,
               }),
               autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
               lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
@@ -1761,7 +1761,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...initialSession({
             id: info.id, projectId, name: info.name, tool: info.tool, worktree: info.worktree,
             // 소속도 host가 정한다 (#69) — 빠뜨리면 매니저 아래 만든 세션이 재시작 전까지 최상위에 선다
-            parentSessionId: info.parentSessionId,
+            parentSessionId: info.parentSessionId, merged: info.worktreeMerged,
           }),
           lastSeq: info.lastSeq,
           lastReadSeq: info.lastReadSeq,
@@ -2293,11 +2293,11 @@ export const useStore = create<AppState>((set, get) => ({
               lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
               waitingSince: f.waitingSince, model: f.model, effort: f.effort, verbosity: f.verbosity, permissionPreset: f.permissionPreset,
               worktree: f.worktree,
-              parentSessionId: f.parentSessionId,
+              parentSessionId: f.parentSessionId, merged: f.worktreeMerged,
               ...liveFactsOf(f),
             }
           : {
-              ...initialSession({ id: f.id, projectId: f.projectId, kind: f.kind, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree, parentSessionId: f.parentSessionId }),
+              ...initialSession({ id: f.id, projectId: f.projectId, kind: f.kind, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree, parentSessionId: f.parentSessionId, merged: f.worktreeMerged }),
               autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
               lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
               ...liveFactsOf(f),

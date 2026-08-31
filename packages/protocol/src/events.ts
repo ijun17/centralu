@@ -246,6 +246,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...base, type: z.literal('session_created'), session: z.unknown() }),
   /**
+   * 워크트리 브랜치가 프로젝트 줄기에 다 들어갔다 (#69). 감지는 host가 하고
+   * (기동·프로젝트 git 새로고침), 화면은 배지를 켠다. 정리(트리 제거)는 사람이
+   * 삭제 대화에서 한다 — 이 이벤트는 사실의 통지이지 행동이 아니다.
+   */
+  z.object({ ...base, type: z.literal('worktree_merged') }),
+  /**
    * The update picture changed (issue #43).
    *
    * **The only event here that belongs to no session** — `error` already proved the

@@ -557,6 +557,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         <OrchestratorIcon size={11} />
                       </span>
                     )}
+                    {/*
+                      병합됨 (#69) — 이 브랜치의 작업이 줄기에 들어갔다. 이력이지 진행 중인
+                      일이 아니라는 표시고, 이 상태의 자식은 매니저 삭제를 붙들지 않는다.
+                      트리 정리는 사람이 삭제 대화에서 한다 (거긴 이미 무엇이 남는지 말한다).
+                    */}
+                    {s.merged && (
+                      <span
+                        className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+                        data-testid={`merged-badge-${s.id}`}
+                        title="Branch merged into the trunk — safe to clean up from the delete dialog"
+                      >
+                        merged
+                      </span>
+                    )}
                     {unread && (
                       <span
                         className="ml-auto size-1 shrink-0 rounded-full bg-ash"
