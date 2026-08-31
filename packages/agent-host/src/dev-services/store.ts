@@ -473,6 +473,21 @@ export class Store {
         to: 21,
         run: () => this.mergeDeltaRows(),
       },
+      {
+        to: 22,
+        run: () => {
+          /*
+           * 세션 트리 (#69): 워크트리 세션이 매니저 세션 아래에 매달린다.
+           * FK 제약은 걸지 않는다 — 부모가 지워질 때 자식까지 CASCADE로 죽으면
+           * 워크트리 세션의 대화가 부모 삭제 한 번에 사라진다. 링크가 끊긴 자식은
+           * 다음 기동의 입양(adoptOrphanWorktrees)이 다시 붙인다.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'parent_session_id')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN parent_session_id TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -696,8 +711,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, parent_session_id, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @parentSessionId, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -708,6 +723,7 @@ export class Store {
            service_tier = excluded.service_tier,
            permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
            worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
+           parent_session_id = excluded.parent_session_id,
            context_used = excluded.context_used, context_window = excluded.context_window,
            context_exactness = excluded.context_exactness`,
       )
@@ -723,6 +739,7 @@ export class Store {
         importedFrom: s.importedFrom ?? null,
         worktreePath: s.worktree?.path ?? null,
         worktreeBranch: s.worktree?.branch ?? null,
+        parentSessionId: s.parentSessionId ?? null,
         /*
          * Context rides the ordinary upsert (issue #48), which the manager already runs after
          * every event — so a reading is on disk the instant it arrives, with no second write
@@ -802,6 +819,7 @@ export class Store {
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
+                s.parent_session_id as parentSessionId,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq

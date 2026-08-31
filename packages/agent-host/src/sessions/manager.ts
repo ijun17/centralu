@@ -213,6 +213,112 @@ export class SessionManager {
         store.upsertSession(fixed)
       }
     }
+    this.adoptOrphanWorktrees()
+  }
+
+  /**
+   * 워크트리 세션은 매니저 없이 서지 않는다 (#69).
+   *
+   * 이 분류의 1번 문서화된 실패가 고아 워크트리다 (Vibe Kanban #1764/#2335/#1571 —
+   * 병합 후 안 치워지고, 과욕한 수거기가 산 것을 지우고, 사라진 트리에 유령 실행이
+   * 남는다). 고아는 **아무도 책임지지 않을 때** 생기므로, 소속을 기동마다 강제한다:
+   * 부모 없는 워크트리 세션은 프로젝트의 매니저에 붙이고, 매니저가 없으면 만든다.
+   *
+   * 매니저는 새 종류가 아니라 **워크트리 자식을 가진 보통 세션**이다. 여기서 만드는
+   * 것도 행 하나뿐이다 — 프로세스는 뜨지 않는다 (오케스트레이터의 lazy-spawn과 같은
+   * 분리: 행이 먼저 있고, 말을 걸 때 태어난다). 붙일 매니저를 고를 때 기존 세션을
+   * 마음대로 승격시키지 않는 이유도 같다: 어떤 세션이 매니저가 되는가는 곧 어떤
+   * 세션이 삭제 보호를 받는가라서, 조용한 승격은 조용한 잠금이 된다.
+   *
+   * 덧셈뿐이라(링크만 쓰고 아무것도 지우지 않는다) 재실행해도 안전하고, #66의 행
+   * 재작성 같은 마이그레이션 의식이 필요 없다.
+   */
+  private adoptOrphanWorktrees(): void {
+    const all = [...this.meta.values()]
+    // 부모가 없는 것뿐 아니라 **부모가 사라진 것**도 고아다 — 아카이브된 자식만 남긴 채
+    // 매니저가 지워지면 링크는 허공을 가리킨다 (삭제 보호는 산 자식만 지킨다)
+    const orphans = all.filter(
+      (s) => s.worktree && s.projectId && (!s.parentSessionId || !this.meta.has(s.parentSessionId)),
+    )
+    if (orphans.length === 0) return
+
+    const byProject = new Map<string, SessionInfo[]>()
+    for (const o of orphans) {
+      const list = byProject.get(o.projectId as string) ?? []
+      list.push(o)
+      byProject.set(o.projectId as string, list)
+    }
+
+    for (const [projectId, kids] of byProject) {
+      let manager: SessionInfo
+      try {
+        manager = this.managerFor(projectId)
+      } catch {
+        continue // 프로젝트 행이 없으면 다음 기동에 다시 본다 — 지금 지어내지 않는다
+      }
+      for (const kid of kids) {
+        const linked = { ...kid, parentSessionId: manager.id }
+        this.store.upsertSession(linked)
+        this.meta.set(kid.id, linked)
+      }
+      console.error(
+        `[agent-host] adopted ${kids.length} orphan worktree session(s) under manager ${manager.id.slice(0, 8)} (${projectId.slice(0, 8)})`,
+      )
+    }
+  }
+
+  /**
+   * 이 프로젝트의 워크트리 매니저 — 없으면 행 하나를 만든다 (#69).
+   *
+   * 판정: **워크트리 자식을 가진, 워크트리가 아닌 세션.** 표식 컬럼을 더하지 않는
+   * 이유는 설계 그대로다 — 매니저는 새 종류가 아니라 관계의 이름이고, 관계는 이미
+   * parent_session_id가 말한다. 표식이 따로 있으면 링크와 표식이 어긋나는 상태가
+   * 생긴다 (#13이 is_orchestrator로 흩어진 판정을 모은 것과 같은 이유로, 판정은
+   * 한 곳에만 둔다).
+   *
+   * 만들 때는 행만 만든다 — 프로세스는 뜨지 않는다 (오케스트레이터의 lazy-spawn과
+   * 같은 분리). 기존 세션을 조용히 매니저로 승격시키지도 않는다: 매니저가 된다는 것은
+   * 삭제 보호를 받는다는 뜻이라, 조용한 승격은 조용한 잠금이다.
+   */
+  private managerFor(projectId: string): SessionInfo {
+    const all = [...this.meta.values()]
+    const withKids = new Set(all.filter((s) => s.parentSessionId).map((s) => s.parentSessionId as string))
+    const existing = all.find((s) => s.projectId === projectId && !s.worktree && withKids.has(s.id) && !s.archived)
+    if (existing) return existing
+
+    const stored = this.store.listProjects().find((p) => p.id === projectId)
+    if (!stored) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    const manager: SessionInfo = {
+      id: randomUUID(),
+      projectId,
+      kind: 'worker',
+      tool: stored.defaultTool === 'codex' ? 'codex' : 'claude',
+      externalId: null,
+      name: 'Worktrees',
+      autoNamed: false,
+      state: 'idle',
+      archived: false,
+      lastReadSeq: 0,
+      lastSeq: 0,
+      createdAt: Date.now(),
+      waitingSince: null,
+      // 행만 만든다 — 프로세스가 없으므로 live는 거짓이 맞다 (말을 걸면 깨어난다)
+      live: false,
+      model: null,
+      effort: null,
+      verbosity: null,
+      serviceTier: null,
+      permissionPreset: 'normal',
+      importedFrom: null,
+      worktree: null,
+      parentSessionId: null,
+      ...sessionLiveDefaults(),
+    }
+    this.store.upsertSession(manager)
+    this.store.setSessionCwd(manager.id, stored.path)
+    this.meta.set(manager.id, manager)
+    this.emit({ type: 'session_created', sessionId: manager.id, session: manager })
+    return manager
   }
 
   async addProject(path: string): Promise<ProjectInfo> {
@@ -489,6 +595,9 @@ export class SessionManager {
       permissionPreset: params.permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
       worktree,
+      // 워크트리 세션은 태어나는 순간부터 매니저 아래에 선다 (#69) — 고아는 만들지 않는다.
+      // (worktree가 있으면 projectId도 있다 — 워크트리는 프로젝트 디렉토리에서만 만들어진다)
+      parentSessionId: worktree && params.projectId ? this.managerFor(params.projectId).id : null,
       ...sessionLiveDefaults(),
     }
     /*
@@ -528,6 +637,16 @@ export class SessionManager {
     this.meta.set(id, info)
     this.store.upsertSession(info)
     this.store.setSessionCwd(id, cwd)
+    /*
+     * UI가 이 세션을 **이벤트로도** 알게 한다 (#69).
+     *
+     * RPC로 만든 쪽은 응답으로 이미 알지만, host가 만드는 세션(오케스트레이터의
+     * create_session, 워크트리 입양의 매니저)은 이 이벤트가 유일한 통지다. 이게 없던
+     * 동안 그런 세션의 이벤트는 pendingEvents 보관함에 들어가 등록을 기다렸는데,
+     * 등록시켜 줄 것이 아무것도 없었다 — 재연결 후 listSessions로만 나타났다.
+     * 받는 쪽은 이미 아는 세션이면 버린다(멱등).
+     */
+    this.emit({ type: 'session_created', sessionId: id, session: info })
     /*
      * **마지막에 고른 도구가 이 프로젝트의 기본값이 된다.**
      *
@@ -974,6 +1093,22 @@ export class SessionManager {
    */
   async deleteSession(sessionId: string, deleteWorktree = false): Promise<void> {
     const m = this.meta.get(sessionId)
+    /*
+     * 살아 있는 워크트리 자식이 있는 매니저는 지울 수 없다 (#69).
+     *
+     * 이 분류의 1번 실패가 고아 워크트리이고, 고아는 책임자가 사라질 때 생긴다.
+     * 자식이 아카이브되면 더는 붙들지 않는다 — 병합된/끝난 작업이 매니저를 영원히
+     * 고정하면 보호가 벌이 된다 (설계: merged children do not pin the manager).
+     */
+    const liveKids = [...this.meta.values()].filter((s) => s.parentSessionId === sessionId && !s.archived)
+    if (liveKids.length > 0) {
+      throw Object.assign(
+        new Error(
+          `This session manages ${liveKids.length} worktree session(s) — delete or archive them first`,
+        ),
+        { code: 'internal' },
+      )
+    }
     // 행이 곧 지워지므로 마지막 flush는 의미가 없다 — 추적만 걷는다 (#66)
     this.streams.delete(sessionId)
     const handle = this.handles.get(sessionId)

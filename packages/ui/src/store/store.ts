@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, QuestionAnswer, SessionInfo, StoredMessage, ToolName, UpdateStatus } from '@cc/protocol'
+import { SessionInfo } from '@cc/protocol'
+import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, QuestionAnswer, StoredMessage, ToolName, UpdateStatus } from '@cc/protocol'
 import {
   allDoneNotification,
   applyEvent,
@@ -886,6 +887,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...initialSession({
             id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
             model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier, permissionPreset: s.permissionPreset, worktree: s.worktree,
+            parentSessionId: s.parentSessionId,
           }),
           autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
           lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
@@ -1171,6 +1173,37 @@ export const useStore = create<AppState>((set, get) => ({
        */
       const projectId = s.sessions[sessionId]?.projectId
       if (projectId) get().refreshProjectGit(projectId)
+    }
+
+    /*
+     * host가 스스로 만든 세션의 유일한 통지 (#69) — 오케스트레이터의 create_session,
+     * 워크트리 입양이 세우는 매니저. 이게 없던 동안 그런 세션은 재연결 후에야 나타났고,
+     * 그 전에 도착한 이벤트는 보관함에서 영영 나오지 못했다 (비우는 조건이 "등록되면"인데
+     * 등록시켜 줄 것이 없었다). RPC로 만든 쪽은 응답으로 이미 등록했으므로 조용히 버린다.
+     */
+    if (e.type === 'session_created') {
+      const parsed = SessionInfo.safeParse(e.session)
+      if (parsed.success && !get().sessions[parsed.data.id]) {
+        const s = parsed.data
+        set((st) => ({
+          sessions: {
+            ...st.sessions,
+            [s.id]: {
+              ...initialSession({
+                id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
+                model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier,
+                permissionPreset: s.permissionPreset, worktree: s.worktree, parentSessionId: s.parentSessionId,
+              }),
+              autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
+              lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
+              ...liveFactsOf(s),
+            },
+          },
+        }))
+        // 등록 전에 도착해 보관해 둔 이벤트가 있으면 지금이 재생할 순간이다
+        replayPendingEvents(get)
+      }
+      return
     }
 
     // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
@@ -2201,10 +2234,11 @@ export const useStore = create<AppState>((set, get) => ({
               lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
               waitingSince: f.waitingSince, model: f.model, effort: f.effort, verbosity: f.verbosity, permissionPreset: f.permissionPreset,
               worktree: f.worktree,
+              parentSessionId: f.parentSessionId,
               ...liveFactsOf(f),
             }
           : {
-              ...initialSession({ id: f.id, projectId: f.projectId, kind: f.kind, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree }),
+              ...initialSession({ id: f.id, projectId: f.projectId, kind: f.kind, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree, parentSessionId: f.parentSessionId }),
               autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
               lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
               ...liveFactsOf(f),

@@ -232,6 +232,20 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /** 세션이 삭제됐다 — 다른 창·재연결에서도 목록이 맞아야 한다 */
   z.object({ ...base, type: z.literal('session_deleted') }),
   /**
+   * 세션이 **host 쪽에서** 생겼다 (#69).
+   *
+   * UI가 직접 만든 세션은 RPC 응답으로 알지만, host가 스스로 만드는 세션 —
+   * 워크트리 고아 입양이 세우는 매니저, 오케스트레이터의 create_session — 은
+   * 알 길이 없었다: 모르는 세션의 이벤트는 보관함(pendingEvents)에 들어가는데,
+   * 보관함을 비우는 조건이 "세션이 등록되면"이라 등록 이벤트 없이는 영영 남았다.
+   * 재연결 후 listSessions로만 나타나는 세션은 "목록에 바로 나타난다"는
+   * create_session 도구 설명과 어긋난 채였다.
+   *
+   * 세션 전체를 싣는다 — id만 보내면 받는 쪽이 다시 fetch해야 하고, 그 fetch가
+   * 도착하기 전 이벤트는 여전히 갈 곳이 없다.
+   */
+  z.object({ ...base, type: z.literal('session_created'), session: z.unknown() }),
+  /**
    * The update picture changed (issue #43).
    *
    * **The only event here that belongs to no session** — `error` already proved the

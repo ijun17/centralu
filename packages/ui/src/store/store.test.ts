@@ -16,7 +16,7 @@ function sessionInfo(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
     id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: true,
     state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: 0,
     waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal',
-    importedFrom: null, worktree: null, ...sessionLiveDefaults(), ...over,
+    importedFrom: null, worktree: null, parentSessionId: null, ...sessionLiveDefaults(), ...over,
   }
 }
 

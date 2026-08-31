@@ -1806,6 +1806,21 @@ describe('워크트리 세션', () => {
     expect(left).toEqual([])
   })
 
+  it('워크트리 세션은 태어나는 순간부터 매니저 아래에 선다 (#69)', async () => {
+    const isolated = await create(true)
+
+    expect(isolated.parentSessionId).not.toBeNull()
+    const manager = wtMgr.listSessions().find((x) => x.id === isolated.parentSessionId)!
+    expect(manager.name).toBe('Worktrees')
+    expect(manager.worktree).toBeNull()
+    // 두 번째 워크트리 세션은 같은 매니저를 재사용한다 — 프로젝트당 하나면 충분하다
+    const second = await create(true)
+    expect(second.parentSessionId).toBe(manager.id)
+    // 프로젝트 폴더에서 직접 도는 세션은 트리 밖이다
+    const plain = await create(false)
+    expect(plain.parentSessionId).toBeNull()
+  })
+
   it('지울 때 기본은 워크트리를 남긴다', async () => {
     const s = await create(true)
     const path = s.worktree!.path
@@ -1881,7 +1896,7 @@ describe('재개는 만들어진 곳으로 돌아간다', () => {
       id: 'old', projectId: p.id, kind: 'worker', tool: 'claude', externalId: 'ext-1', name: '예전 세션',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null, serviceTier: null,
-      permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
+      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
     })
     expect(store.sessionCwd('old')).toBeNull()
 
@@ -2205,5 +2220,87 @@ describe('스트리밍 메시지는 행 하나로 저장된다 (#66)', () => {
     const texts = store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)
     // fake 핸들은 send에 echo 델타로 답한다 — 그 echo와 '새 답' 사이에는 경계가 없으므로 한 행이 맞다
     expect(texts).toEqual(['하던 말', '멈추고 이것부터', 'echo:멈추고 이것부터새 답'])
+  })
+})
+
+/**
+ * 세션 트리의 기반 (#69-1): 워크트리 세션은 매니저 없이 서지 않는다.
+ *
+ * 이 분류의 1번 문서화된 실패가 고아 워크트리다 (Vibe Kanban #1764/#2335/#1571).
+ * 고아는 책임자가 없을 때 생기므로, 소속을 두 길목에서 강제한다 — 만들 때 붙이고,
+ * 기동할 때 입양한다.
+ */
+describe('워크트리 세션의 매니저 (#69)', () => {
+  const wtRow = (id: string, projectId: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
+    id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id,
+    autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+    createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+    serviceTier: null, permissionPreset: 'normal', importedFrom: null,
+    worktree: { path: `/tmp/wt/${id}`, branch: `centralu/${id}` }, parentSessionId: null,
+    ...sessionLiveDefaults(), ...over,
+  })
+  const boot = () =>
+    new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e))
+
+  it('기동 시 고아 워크트리 세션에 매니저를 세워 붙인다 — 행만, 프로세스는 없다', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id))
+    store.upsertSession(wtRow('wt-b', p.id))
+
+    const m2 = boot()
+
+    const all = m2.listSessions()
+    const manager = all.find((s) => s.name === 'Worktrees')!
+    expect(manager).toBeDefined()
+    expect(manager.worktree).toBeNull()
+    expect(manager.live).toBe(false) // 입양은 행을 만들 뿐 에이전트를 깨우지 않는다 (lazy-spawn)
+    expect(all.find((s) => s.id === 'wt-a')?.parentSessionId).toBe(manager.id)
+    expect(all.find((s) => s.id === 'wt-b')?.parentSessionId).toBe(manager.id)
+  })
+
+  it('두 번 기동해도 매니저는 하나다 (멱등)', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id))
+
+    boot()
+    const m3 = boot()
+
+    expect(m3.listSessions().filter((s) => s.name === 'Worktrees').length).toBe(1)
+  })
+
+  it('부모가 사라진 자식도 고아다 — 다음 기동이 다시 입양한다', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'gone-forever' }))
+
+    const m2 = boot()
+
+    const kid = m2.listSessions().find((s) => s.id === 'wt-a')!
+    expect(kid.parentSessionId).not.toBe('gone-forever')
+    expect(m2.listSessions().some((s) => s.id === kid.parentSessionId)).toBe(true)
+  })
+
+  it('살아 있는 자식이 있는 매니저는 지울 수 없다 — 아카이브된 자식은 붙들지 않는다', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id))
+    const m2 = boot()
+    const manager = m2.listSessions().find((s) => s.name === 'Worktrees')!
+
+    await expect(m2.deleteSession(manager.id)).rejects.toThrow(/worktree session/)
+
+    // 자식을 아카이브하면 매니저는 풀려난다 — 끝난 작업이 매니저를 영원히 고정하면 보호가 벌이 된다
+    await m2.archive('wt-a', true)
+    await expect(m2.deleteSession(manager.id)).resolves.toBeUndefined()
+  })
+
+  it('adoption은 링크만 쓴다 — 세션도 대화도 지우지 않는다', async () => {
+    const p = await addProject()
+    store.upsertSession(wtRow('wt-a', p.id))
+    store.appendMessages([
+      { sessionId: 'wt-a', seq: 1, role: 'user', kind: 'text', payload: { text: '남아야 한다' }, ts: 1 },
+    ])
+
+    boot()
+
+    expect(store.loadMessages('wt-a', 10).length).toBe(1)
   })
 })

@@ -14,7 +14,7 @@ function seeded() {
   s.upsertSession({
     id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
     ...sessionLiveDefaults(),
   })
   return s
@@ -60,7 +60,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     old.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(21)
+    expect(store.schemaVersion).toBe(22)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
@@ -70,7 +70,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
       id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
-      permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
+      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
     })
     expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
     rmSync(dir, { recursive: true, force: true })
@@ -79,7 +79,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 
 describe('Store (dev sqlite)', () => {
   it('최신 스키마까지 마이그레이션된다', () => {
-    expect(new Store().schemaVersion).toBe(21)
+    expect(new Store().schemaVersion).toBe(22)
   })
 
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
@@ -176,7 +176,7 @@ describe('마이그레이션 (E-0)', () => {
     raw.close()
 
     const store = new Store(file)
-    expect(store.schemaVersion).toBe(21)
+    expect(store.schemaVersion).toBe(22)
 
     // 백필이 되어야 예전 대화도 찾을 수 있다
     const hits = store.searchMessages('승인')
@@ -252,7 +252,7 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
       id: 's-import', projectId: 'p1', kind: 'worker' as const, tool: 'claude' as const, externalId: 'ext-new',
       name: '이어받은 대화', autoNamed: true, state: 'idle' as const, archived: false,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
-      model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null,
+      model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null, parentSessionId: null,
       ...sessionLiveDefaults(),
     }
     store.upsertSession(base)
@@ -272,7 +272,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
-    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
     ...sessionLiveDefaults(),
     ...over,
   })
@@ -304,7 +304,7 @@ describe('마이그레이션 v18 — 응답 길이', () => {
     id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
-    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+    model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
     ...sessionLiveDefaults(),
     ...over,
   })
@@ -350,7 +350,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
-        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
         ...sessionLiveDefaults(),
       })
     }
@@ -389,7 +389,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
-        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+        model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
         ...sessionLiveDefaults(),
       })
     }
@@ -435,7 +435,7 @@ describe('오케스트레이터 표식(kind)', () => {
       id, projectId, kind, tool: 'claude', externalId: null, name: id,
       autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
-      permissionPreset: 'normal', importedFrom: null, worktree: null, ...sessionLiveDefaults(),
+      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
     })
 
   it('표식이 없으면 중앙은 null', () => {
@@ -501,7 +501,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(21)
+    expect(store.schemaVersion).toBe(22)
     expect(store.listGridView()).toEqual(['s1'])
     rmSync(dir, { recursive: true, force: true })
   })
@@ -556,7 +556,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
 
     const store = new Store(file)
 
-    expect(store.schemaVersion).toBe(21)
+    expect(store.schemaVersion).toBe(22)
     expect(store.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
     expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
@@ -628,7 +628,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
     old.close()
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(21)
+    expect(first.schemaVersion).toBe(22)
     // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', ['pnpm test', 'pnpm e2e'])
@@ -750,7 +750,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     id: 'worked', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '일한 세션',
     autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
     createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', importedFrom: null, worktree: null,
+    permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
     ...sessionLiveDefaults(),
     ...over,
   })
@@ -761,7 +761,7 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     v16Db(file)
 
     const first = new Store(file)
-    expect(first.schemaVersion).toBe(21)
+    expect(first.schemaVersion).toBe(22)
     // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
     expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
@@ -823,7 +823,7 @@ describe('WAL 체크포인트', () => {
     s.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
       ...sessionLiveDefaults(),
     })
     for (let i = 1; i <= 200; i++) {
@@ -942,7 +942,7 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '새 세션',
       autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
-      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
       ...sessionLiveDefaults(),
     })
     // 실측한 모양 그대로: 토큰 하나가 행 하나
@@ -1014,5 +1014,18 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
     expect(s.searchMessages('번에 뽑게').length).toBe(1) // 옛 색인으로는 영영 못 찾던 구절
     expect(s.searchMessages('결과는 이렇습니다').length).toBe(1)
     s.close()
+  })
+})
+
+/** #69-1: 세션 트리 링크는 보통의 upsert에 실려 다닌다 — 쓰는 길이 둘이면 한쪽만 고쳐진다 */
+describe('parent_session_id 왕복 (#69)', () => {
+  it('부모 링크가 저장되고 되읽힌다', () => {
+    const s = seeded()
+    const before = s.listSessions().find((x) => x.id === 's1')!
+    expect(before.parentSessionId).toBeNull()
+
+    s.upsertSession({ ...before, parentSessionId: 'mgr-1' })
+
+    expect(s.listSessions().find((x) => x.id === 's1')?.parentSessionId).toBe('mgr-1')
   })
 })

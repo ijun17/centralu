@@ -417,6 +417,7 @@ export class MockPlatform implements Platform {
         : null
       const info: SessionInfo = {
         id, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: `ext-${id}`, worktree,
+        parentSessionId: null,
         effort: params.effort ?? null, verbosity: params.verbosity ?? null, serviceTier: params.serviceTier ?? null,
         name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
@@ -523,7 +524,7 @@ export class MockPlatform implements Platform {
         id, projectId: null, kind: 'orchestrator' as const, tool: this.orchestratorTool, externalId: null, name: 'Orchestrator',
         autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
         createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
-        permissionPreset: 'normal' as const, importedFrom: null, worktree: null,
+        permissionPreset: 'normal' as const, importedFrom: null, worktree: null, parentSessionId: null,
         ...sessionLiveDefaults(),
       }
       this.sessions.set(id, info)

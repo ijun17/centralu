@@ -81,6 +81,11 @@ export type SessionSummary = {
    */
   worktree: { path: string; branch: string } | null
   /**
+   * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위.
+   * 사이드바 트리가 이 필드 하나로 그려진다 — 매니저는 자식을 가진 보통 세션이다.
+   */
+  parentSessionId: string | null
+  /**
    * 이번 턴에 모델이 생각에 쓴 토큰 추정치 누계 (#58 — claude는 thinking 본문이
    * 암호화라 이 숫자가 보여줄 수 있는 전부다). activity와 같은 수명: working을
    * 벗어나면 죽는다.
@@ -98,7 +103,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', worktree: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
+    permissionPreset: 'normal', worktree: null, parentSessionId: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
   }
 }
