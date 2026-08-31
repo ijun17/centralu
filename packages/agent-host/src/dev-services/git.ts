@@ -282,6 +282,22 @@ export async function gitWorktreeAdd(repoCwd: string, path: string, branch: stri
 }
 
 /**
+ * 브랜치 이름이 될 수 있는가 (#69) — 판정은 git 자신에게 시킨다.
+ *
+ * ref 이름 규칙(잠금 접미사, 연속 점, 제어 문자, `@{`…)을 우리가 다시 적으면
+ * git이 규칙을 고칠 때 우리 것만 낡는다. `check-ref-format --branch`가 그 판정의
+ * 원본이고, 종료 코드가 곧 답이다. 저장소가 필요 없는 명령이라 cwd는 아무 데나 된다.
+ */
+export async function gitValidBranchName(name: string): Promise<boolean> {
+  try {
+    await git(process.cwd(), ['check-ref-format', '--branch', name])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * 워크트리를 지운다. `force`는 커밋 안 된 변경까지 버린다.
  *
  * 지우기 전에 `gitWorktreeDirty`로 물어보는 것은 **호출자의 몫**이다 — 여기서 임의로

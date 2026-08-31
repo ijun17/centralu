@@ -39,6 +39,7 @@ import {
   gitCommit,
   gitPush,
   gitWorktreeAdd,
+  gitValidBranchName,
   gitWorktreeDirty,
   gitWorktreeRemove,
 } from '../dev-services/git.js'
@@ -573,9 +574,17 @@ export class SessionManager {
         )
       }
       const path = this.worktreePathFor(params.projectId, id)
-      // 브랜치 이름에 세션 id 앞자리를 쓴다 — 세션 이름은 아직 없거나(자동 이름은 나중에 붙는다)
-      // 공백·유니코드가 섞여 브랜치 이름으로 못 쓴다
-      const branch = `${APP_SLUG}/${id.slice(0, 8)}`
+      /*
+       * 브랜치 이름은 사람이 정할 수 있다 (#69) — 브랜치 이름이 곧 세션 이름이라
+       * 사실상 영구라서다. 안 정하면 세션 id 앞자리를 쓴다 (세션 이름은 아직 없거나
+       * 자동 이름은 나중에 붙고, 공백·유니코드가 섞여 브랜치 이름으로 못 쓴다).
+       * 검증은 git 자신에게 시킨다 — ref 규칙을 우리가 다시 적지 않는다.
+       */
+      const requested = params.worktreeBranch?.trim()
+      if (requested && !(await gitValidBranchName(requested))) {
+        throw Object.assign(new Error(`Not a valid branch name: ${requested}`), { code: 'internal' })
+      }
+      const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
       try {
         worktree = await gitWorktreeAdd(params.cwd, path, branch)
       } catch (err) {
@@ -584,10 +593,17 @@ export class SessionManager {
       }
     }
 
+    /*
+     * 세션 이름 = 브랜치 이름 (#69, 사람이 브랜치를 정한 경우). Conductor는 워크스페이스마다
+     * "고유한 도시 이름"을 붙이는데 그 이름은 브랜치가 무엇을 하는지 아무것도 말하지 않는다 —
+     * 뜻을 나르는 사람이 읽을 식별자는 브랜치 이름뿐이다. autoNamed=false로 두어
+     * 자동 이름이 덮지 않는다.
+     */
+    const namedByBranch = worktree && params.worktreeBranch ? worktree.branch : null
     const info: SessionInfo = {
       id, projectId: params.projectId, kind: params.kind ?? 'worker', tool: params.tool, externalId: null,
-      name: params.initialPrompt ? truncate(params.initialPrompt) : 'New session',
-      autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      name: namedByBranch ?? (params.initialPrompt ? truncate(params.initialPrompt) : 'New session'),
+      autoNamed: !namedByBranch, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, effort: params.effort ?? null,
       verbosity: params.verbosity ?? null,

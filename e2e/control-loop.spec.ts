@@ -5666,3 +5666,18 @@ test('프로젝트 헤더의 +로 열면 워크트리는 여전히 꺼져 있다
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
 })
+
+test('워크트리 브랜치 이름을 정하면 세션 이름이 된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('new-session-alpha').click()
+  // 브랜치 칸은 워크트리를 켜기 전엔 없다 — 꺼진 옵션의 세부를 미리 펼치지 않는다
+  await expect(page.getByTestId('worktree-branch-input')).toHaveCount(0)
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('worktree-branch-input').fill('feat/login-fix')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  // 세션 이름 = 브랜치 이름 — 사이드바의 들여진 줄에 그 이름이 선다
+  await expect(page.locator('li[data-nested]').getByText('feat/login-fix')).toBeVisible()
+})

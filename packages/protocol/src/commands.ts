@@ -46,6 +46,14 @@ export const CreateSessionParams = z.object({
    * 같은 디렉토리에 세션이 여럿일 때 파일 충돌을 원천적으로 없애고 싶은 사람만 켠다.
    */
   worktree: z.boolean().optional(),
+  /**
+   * 워크트리 브랜치 이름 (#69). 생략하면 자동 이름(`centralu/<id 앞 8자>`)이다.
+   *
+   * 브랜치 이름이 곧 세션 이름이자 워크트리 디렉토리 이름이다 — 사실상 영구라서
+   * (나중에 바꾸려면 트리를 다시 만들어야 한다) 여기서 사람이 정할 수 있어야 한다.
+   * 검증은 host가 한다 (`git check-ref-format` — 규칙을 우리가 다시 적지 않는다).
+   */
+  worktreeBranch: z.string().optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 

@@ -487,6 +487,8 @@ export type AppState = {
       importHistory?: boolean
       /** 이 세션만 깃 워크트리에서 돌린다 (FR-2 옵션) */
       worktree?: boolean
+      /** 워크트리 브랜치 이름 (#69). 비우면 host가 자동 이름을 쓴다 */
+      worktreeBranch?: string
     },
   ): Promise<SessionInfo>
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
@@ -1705,6 +1707,7 @@ export const useStore = create<AppState>((set, get) => ({
       resumeExternalId: opts?.resumeExternalId,
       importHistory: opts?.importHistory,
       worktree: opts?.worktree,
+      worktreeBranch: opts?.worktreeBranch,
     })
     set((s) => ({
       sessions: {

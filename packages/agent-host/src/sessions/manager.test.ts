@@ -1821,6 +1821,32 @@ describe('워크트리 세션', () => {
     expect(plain.parentSessionId).toBeNull()
   })
 
+  it('브랜치 이름을 정하면 그 이름이 브랜치·세션 이름이 된다 (#69)', async () => {
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/login-fix',
+    })) as SessionInfo
+
+    expect(s.worktree?.branch).toBe('feat/login-fix')
+    expect(s.name).toBe('feat/login-fix')
+    // 자동 이름이 덮으면 브랜치와 세션 이름이 갈라진다 — 브랜치 이름이 유일한 식별자다
+    expect(s.autoNamed).toBe(false)
+    // 실제로 그 브랜치가 체크아웃됐다
+    const head = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: s.worktree!.path, encoding: 'utf8',
+    }).trim()
+    expect(head).toBe('feat/login-fix')
+  })
+
+  it('브랜치 이름이 될 수 없는 것은 거절한다 — 판정은 git이 한다', async () => {
+    await expect(
+      wtRpc('agents.createSession', {
+        projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'bad..name',
+      }),
+    ).rejects.toThrow(/Not a valid branch name/)
+    // 거절됐으면 워크트리도 세션도 남지 않는다
+    expect(wtMgr.listSessions().filter((x) => x.worktree).length).toBe(0)
+  })
+
   it('지울 때 기본은 워크트리를 남긴다', async () => {
     const s = await create(true)
     const path = s.worktree!.path

@@ -413,7 +413,7 @@ export class MockPlatform implements Platform {
       this.lastCreateParams = params
       const id = `mock-session-${++this.idc}`
       const worktree = params.worktree
-        ? { path: `/mock/worktrees/${id}`, branch: `centralu/${id.slice(-8)}` }
+        ? { path: `/mock/worktrees/${id}`, branch: params.worktreeBranch?.trim() || `centralu/${id.slice(-8)}` }
         : null
       /*
        * 실물과 같은 규칙 (#69, manager.managerFor): 워크트리 세션은 태어나는 순간부터
@@ -444,7 +444,9 @@ export class MockPlatform implements Platform {
         id, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: `ext-${id}`, worktree,
         parentSessionId,
         effort: params.effort ?? null, verbosity: params.verbosity ?? null, serviceTier: params.serviceTier ?? null,
-        name: params.initialPrompt?.slice(0, 40) ?? 'New session', autoNamed: true, state: 'idle',
+        // 실물과 같은 규칙 (#69): 사람이 브랜치를 정했으면 그 이름이 세션 이름이고, 자동 이름이 덮지 않는다
+        name: (params.worktreeBranch?.trim() || undefined) ?? params.initialPrompt?.slice(0, 40) ?? 'New session',
+        autoNamed: !params.worktreeBranch?.trim(), state: 'idle',
         archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
         model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
         importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,

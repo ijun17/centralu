@@ -62,6 +62,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * 초기값이라 열려 있는 동안 스토어를 다시 읽지 않는다 (mount마다 한 번).
    */
   const [worktree, setWorktree] = useState(useStore.getState().newSessionWorktree)
+  /**
+   * 브랜치 이름 (#69). 브랜치 이름이 곧 세션 이름이자 디렉토리 이름 — 사실상 영구라
+   * 만들기 전에 정할 자리가 있어야 한다. 비우면 host가 자동 이름을 쓴다 (강제 없음).
+   */
+  const [branch, setBranch] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
@@ -161,6 +166,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               resumeExternalId: resume?.externalId,
               importHistory: resume ? true : undefined,
               worktree: worktree || undefined,
+              worktreeBranch: (worktree && branch.trim()) || undefined,
             })
             onClose()
           } catch (err) {
@@ -291,6 +297,21 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               <span className="text-slate"> — own branch and directory, can’t touch the others’ files</span>
             </span>
           </label>
+        )}
+        {/*
+          브랜치 이름은 켰을 때만 묻는다 — 꺼진 옵션의 세부를 미리 펼치면 창이 설명서가 된다.
+          이름이 곧 세션 이름·디렉토리 이름이라(사실상 영구) 만들기 전이 정할 유일한 순간이다.
+        */}
+        {isRepo && worktree && (
+          <input
+            type="text"
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            placeholder="Branch name (blank = auto)"
+            data-testid="worktree-branch-input"
+            spellCheck={false}
+            className="mt-1.5 w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+          />
         )}
 
         {error && (
