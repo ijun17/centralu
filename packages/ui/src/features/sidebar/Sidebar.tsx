@@ -562,6 +562,12 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     onDoubleClick={() => setRenaming(s.id)}
                     data-testid={`session-row-${s.id}`}
                     /*
+                      안읽음(FR-16)은 이름 밝기가 말한다 (아래 truncate의 text-chalk).
+                      화면에 없는 사실을 테스트가 볼 수 있게 속성으로도 남긴다 —
+                      클래스 이름을 단언하면 색을 고칠 때마다 테스트가 깨진다.
+                    */
+                    data-unread={(unread && !focused) || undefined}
+                    /*
                       오른쪽 여백은 호버에 나타나는 버튼 **두 개**를 비켜야 한다.
                       pr-8은 삭제 하나만 있던 시절의 값이라, 연필이 늘면서 긴 이름이
                       버튼 밑으로 들어간다 — 가려진 글자는 잘린 글자보다 나쁘다.
@@ -593,25 +599,14 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       </span>
                     )}
                     {/*
-                      안읽음 점 (FR-16) — "내가 딴 데 있는 동안 이 줄이 움직였다".
-                      그러니 **보고 있는 줄에는 뜨지 않는다.** 눈앞의 대화를 두고
-                      "안 읽었다"고 말하는 표식은 알림이 아니라 소음이다.
+                      안읽음 점은 여기 있다가 **지워졌다** (도그푸딩 2026-09-02).
 
-                      이름은 이미 이 규칙을 알고 있었다 (바로 위 `unread && !focused`).
-                      점만 몰라서, 같은 줄의 표식 둘이 서로 다른 말을 하고 있었다.
-
-                      특히 **돌아가는 동안** 티가 났다: 읽음 처리는 3초 타이머인데 그
-                      타이머가 session 객체를 의존성에 두고 있어(맥락 사용량·상태가 바뀔
-                      때마다 새 객체) 턴이 도는 내내 다시 시작됐다 — 그래서 보고 있는
-                      세션에 점이 켜진 채로 있었다 (도그푸딩: "세션 돌아갈 때 하얀 점").
+                      같은 사실을 이 줄에서 세 번째로 말하고 있었다: 도구 표식의 테두리가
+                      상태를(턴이 끝나면 ash 링), 이름 밝기가 안읽음을(위의 text-chalk)
+                      이미 말한다. 딴 데 있는 동안 턴이 끝나면 셋이 한꺼번에 켜지니
+                      점은 정보를 더하지 않고 "저건 또 뭐지"라는 질문만 더했다 —
+                      실제로 그 질문을 받았다. 판정(lastReadSeq·markRead)은 그대로다.
                     */}
-                    {unread && !focused && (
-                      <span
-                        className="ml-auto size-1 shrink-0 rounded-full bg-ash"
-                        data-testid={`unread-${s.id}`}
-                        title="Unread"
-                      />
-                    )}
                   </button>
                   {/*
                     이름 고치기와 삭제만 둔다.

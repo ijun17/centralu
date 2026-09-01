@@ -505,33 +505,36 @@ test('안읽음 표시와 읽음 처리 (T5-6, FR-16)', async ({ page }) => {
   await newSession(page, 'alpha', 'A작업')
   await newSession(page, 'beta', 'B작업') // 포커스 = beta
 
+  /*
+    안읽음의 화면 표현은 **이름 밝기 하나다** (점은 지웠다 — 같은 사실을 상태 링·이름과
+    세 번째로 말하는 표식이었다). 테스트는 색 클래스가 아니라 줄의 data-unread를 본다.
+  */
   // 비포커스 세션에 새 내용 → 안읽음
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '결과입니다' })
   const sessionId = await page.evaluate(() => {
     const m = (window as any).__mock
     return [...(m as any).sessions.values()][0].id
   })
-  await expect(page.getByTestId(`unread-${sessionId}`)).toBeVisible()
+  const row = page.getByTestId(`session-row-${sessionId}`)
+  await expect(row).toHaveAttribute('data-unread', 'true')
 
   // 포커스하면 읽음 처리 (3초 규칙)
-  await page.getByTestId(`session-row-${sessionId}`).click()
-  await expect(page.getByTestId(`unread-${sessionId}`)).toBeHidden({ timeout: 8000 })
+  await row.click()
+  await expect(row).not.toHaveAttribute('data-unread', 'true', { timeout: 8000 })
 
   /*
-    **보고 있는 줄에는 애초에 안 뜬다.**
+    **보고 있는 줄은 애초에 안읽음으로 그리지 않는다.**
 
-    이 줄의 뜻은 "내가 딴 데 있는 동안 움직였다"이므로, 눈앞의 대화에 붙으면 소음이다.
+    "내가 딴 데 있는 동안 움직였다"가 뜻이므로 눈앞의 대화에 붙으면 소음이다.
     그리고 실제로 붙어 있었다 — 읽음 처리 타이머가 session 객체에 매여 있어서 턴이
-    도는 내내 3초를 못 채웠다 (도그푸딩: "세션 돌아갈 때 하얀 점"). 3초를 기다려
-    사라지는 것으로는 이 계약을 못 잡는다: 답이 계속 오는 동안은 그 3초가 오지 않는다.
-  */
-  /*
-    시간 제한이 3초 **아래**여야 한다. 기본값(5초)으로 두면 읽음 타이머가 도는 사이에
-    점이 알아서 사라지고, 폴링이 그 뒤를 잡아 통과해 버린다 — 실제로 고치기 전 코드에서
-    통과했다. 여기서 물어야 하는 것은 "잠깐이라도 켜졌나"이므로 그 3초 안에 본다.
+    도는 내내 3초를 못 채웠다 (도그푸딩: "세션 돌아갈 때 하얀 점").
+
+    시간 제한이 그 3초 **아래**여야 한다. 기본값(5초)으로 두면 읽음 타이머가 표식을
+    먼저 끄고 폴링이 그 뒤를 잡아 통과해 버린다 — 실제로 고치기 전 코드에서 통과했다.
+    묻는 것은 "잠깐이라도 켜졌나"이므로 그 3초 안에 본다.
   */
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '보는 중에 더 왔다' })
-  await expect(page.getByTestId(`unread-${sessionId}`)).toHaveCount(0, { timeout: 1000 })
+  await expect(row).not.toHaveAttribute('data-unread', 'true', { timeout: 1000 })
 })
 
 test('동시 세션 경고를 사이드바에 표시한다 (T5-6, FR-2)', async ({ page }) => {
@@ -1769,9 +1772,9 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
   expect(params.resumeExternalId).toBe('ext-1')
   expect(params.importHistory).toBe(true)
 
-  // 불러온 대화로 안 읽음 배지를 띄우지 않는다 (이미 읽은 대화다)
+  // 불러온 대화를 안 읽음으로 그리지 않는다 (이미 읽은 대화다)
   const sessionId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()].at(-1))
-  await expect(page.getByTestId(`unread-${sessionId}`)).toHaveCount(0)
+  await expect(page.getByTestId(`session-row-${sessionId}`)).not.toHaveAttribute('data-unread', 'true')
 })
 
 test('구버전 도구는 목록을 못 줘도 새 세션을 막지 않는다', async ({ page }) => {
