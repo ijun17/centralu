@@ -156,6 +156,54 @@ test('a path that is not there says so, in the viewer and on top of it', async (
 })
 
 /**
+ * Agents also write links, not just backticks — `[manager.ts](src/a.ts)` — and those used
+ * to render as anchors whose relative href led nowhere. A link whose target is a project
+ * file is the same thing as a backticked path, so it gets the same button.
+ */
+test('a markdown link to a project file opens the viewer', async ({ page }) => {
+  await setup(page)
+  await seedFiles(page, { 'src/a.ts': 'first line' })
+  await newSession(page, 'alpha', 'work')
+  await agentSays(page, 'I changed [the manager](src/a.ts) and left [the docs](https://example.com) alone.')
+
+  // 파일이 아닌 진짜 웹 링크는 그대로 앵커다
+  await expect(page.getByTestId('markdown').locator('a')).toHaveText('the docs')
+  const link = page.getByTestId('file-link')
+  await expect(link).toHaveText('the manager')
+  await link.click()
+  await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts')
+})
+
+/** 우클릭은 Finder다 — 뷰어가 아니라 실물 파일이 필요할 때의 문 */
+test('right-clicking a file link reveals it in Finder', async ({ page }) => {
+  await setup(page)
+  await seedFiles(page, { 'src/a.ts': 'first line' })
+  await newSession(page, 'alpha', 'work')
+  await agentSays(page, 'See `src/a.ts`.')
+
+  await page.getByTestId('file-link').click({ button: 'right' })
+  // 뷰어는 열리지 않고 (우클릭은 열기가 아니다), reveal 포트로 그 경로가 간다
+  await expect(page.getByTestId('overlay')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__mock.revealed)).toEqual(['src/a.ts'])
+})
+
+/**
+ * A model-written href the browser would *interpret* never reaches the DOM: not a file,
+ * not http(s)/mailto → the words stay words. The alternative is an attribute a scheme can
+ * be smuggled into.
+ */
+test('a link that is neither a file nor a web URL renders as plain text', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'work')
+  await agentSays(page, 'Do not click [here](foo://bar) or [there](packages/ui).')
+
+  const md = page.getByTestId('markdown').last()
+  await expect(md).toContainText('Do not click here or there.')
+  await expect(md.locator('a')).toHaveCount(0)
+  await expect(page.getByTestId('file-link')).toHaveCount(0)
+})
+
+/**
  * The orchestrator has no project, so it has no root for a relative path to be relative
  * *to* — and guessing one from whatever project happens to be selected would open a file
  * of the same name from some other repository. The same sentence therefore links in a

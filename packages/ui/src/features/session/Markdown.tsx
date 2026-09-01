@@ -1,9 +1,9 @@
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../../store/store.js'
 import { requestViewerJump } from '../viewer/jump.js'
-import { parseFileRef } from './filePath.js'
+import { parseFileRef, type FileRef } from './filePath.js'
 
 /**
  * 에이전트 응답 렌더링.
@@ -24,15 +24,32 @@ export const Markdown = memo(function Markdown({
   text: string
   projectRoot: string | null
 }) {
-  const openFile = useStore((s) => s.openFile)
-
   return (
     <div className="cc-md max-w-[80ch] text-chalk/90" data-testid="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // 링크는 새 창으로 (앱 안에서 이동하면 세션이 날아간다)
-          a: ({ ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+          /*
+           * 링크 셋 갈래 (#39 확장):
+           *  - href가 이 프로젝트의 파일이면 백틱 경로와 같은 파일 링크다 — 에이전트는
+           *    `[manager.ts](packages/.../manager.ts)`처럼도 쓰고, 그게 죽은 링크였다.
+           *  - http(s)·mailto는 새 창으로 (앱 안에서 이동하면 세션이 날아간다).
+           *  - 그 밖의 href는 **DOM에 싣지 않는다.** 모델이 낸 문자열을 브라우저가
+           *    해석할 속성에 두지 않는다는 규칙(아래 code 주석)은 a에도 똑같이 성립한다 —
+           *    글자만 남기는 것이 정직한 렌더링이다.
+           */
+          a: ({ node: _node, href, children, ...props }) => {
+            const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
+            if (ref) return <FileLink refInfo={ref}>{children}</FileLink>
+            if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
+              return (
+                <a {...props} href={href} target="_blank" rel="noreferrer noopener">
+                  {children}
+                </a>
+              )
+            }
+            return <>{children}</>
+          },
           /*
            * A path the agent typed opens in the viewer (#39).
            *
@@ -41,8 +58,9 @@ export const Markdown = memo(function Markdown({
            * safety property, and it is why this is a `<button>` and not an `<a href>` —
            * the text comes out of a model, so there must be no attribute anywhere on this
            * element that a browser would try to *interpret*. No href, therefore no scheme,
-           * therefore nothing for `javascript:` to be smuggled into. Adding any second
-           * action to this element would give that text somewhere to go; don't.
+           * therefore nothing for `javascript:` to be smuggled into. (Right-click reveal
+           * goes through `fs.reveal`, which refuses anything above the project root — the
+           * same property, kept on the host side.)
            *
            * `<code>` stays inside so the thing still looks like the code span it was, and
            * so the surrounding `.cc-md` rules (including the `pre code` reset) keep
@@ -55,20 +73,9 @@ export const Markdown = memo(function Markdown({
             const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null
             if (!ref) return <code {...props}>{children}</code>
             return (
-              <button
-                type="button"
-                className="cursor-pointer underline decoration-slate underline-offset-2 hover:decoration-chalk"
-                title={ref.line === null ? `Open ${ref.path}` : `Open ${ref.path} at line ${ref.line}`}
-                data-testid="file-link"
-                onClick={() => {
-                  // The line goes first: by the time `openFile` renders the viewer, the
-                  // row it should land on has to already be waiting for it.
-                  if (ref.line !== null) requestViewerJump(ref.path, ref.line)
-                  openFile(ref.path)
-                }}
-              >
+              <FileLink refInfo={ref}>
                 <code>{children}</code>
-              </button>
+              </FileLink>
             )
           },
         }}
@@ -78,3 +85,42 @@ export const Markdown = memo(function Markdown({
     </div>
   )
 })
+
+/** 링크의 href는 퍼센트 인코딩돼 있을 수 있다 — 못 풀면 원문 그대로 판정한다 */
+function tryDecode(href: string): string {
+  try {
+    return decodeURIComponent(href)
+  } catch {
+    return href
+  }
+}
+
+/**
+ * 대화 속 파일 링크 하나 — 백틱 경로와 마크다운 링크가 같은 버튼이다.
+ * 클릭은 읽기 전용 뷰어(#39), 우클릭은 Finder다. 우클릭이 메뉴가 아니라 바로 여는
+ * 이유: 항목이 하나뿐인 메뉴는 손만 느리게 한다 (파일 트리는 항목이 여럿이라 메뉴가 맞다).
+ */
+function FileLink({ refInfo, children }: { refInfo: FileRef; children: ReactNode }) {
+  const openFile = useStore((s) => s.openFile)
+  const revealFile = useStore((s) => s.revealFile)
+  return (
+    <button
+      type="button"
+      className="cursor-pointer underline decoration-slate underline-offset-2 hover:decoration-chalk"
+      title={`Open ${refInfo.path}${refInfo.line === null ? '' : ` at line ${refInfo.line}`} · Right-click: Reveal in Finder`}
+      data-testid="file-link"
+      onClick={() => {
+        // The line goes first: by the time `openFile` renders the viewer, the
+        // row it should land on has to already be waiting for it.
+        if (refInfo.line !== null) requestViewerJump(refInfo.path, refInfo.line)
+        openFile(refInfo.path)
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        void revealFile(refInfo.path)
+      }}
+    >
+      {children}
+    </button>
+  )
+}

@@ -420,6 +420,8 @@ export type AppState = {
   setSidebarWidth(px: number): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
   openFile(path: string): void
+  /** 대화 속 파일 링크의 우클릭 — 지금 보는 세션의 프로젝트에서 Finder로 보여준다 */
+  revealFile(path: string): Promise<void>
   /** 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다 */
   openGit(path?: string): void
   /** 커밋 하나를 넓은 곳에서 펼친다 (340px에서 diff는 못 읽는다) */
@@ -1494,6 +1496,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   openFile(path) {
     set({ viewerPath: path, overlay: { kind: 'viewer' } })
+  },
+
+  /*
+   * 우클릭의 Finder 열기. 경로는 파일 링크와 같은 자격(지금 보는 세션의 프로젝트 상대)으로
+   * 들어오고, 파일 트리의 reveal과 같은 포트를 지난다 — 실패는 트리와 같은 문장으로 시끄럽다.
+   */
+  async revealFile(path) {
+    const s = get()
+    const projectId = s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null
+    if (!projectId || !s.platform) return
+    try {
+      const res = await s.platform.fs.reveal(projectId, path)
+      if (!res.supported) set({ toast: res.reason ?? 'Showing files is not available here' })
+    } catch (e) {
+      set({ toast: `Could not show ${path}: ${(e as Error).message}` })
+    }
   },
 
   openGit(path) {
