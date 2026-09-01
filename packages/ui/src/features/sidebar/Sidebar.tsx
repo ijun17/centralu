@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { TOOL_META, type ProjectInfo, type SessionState, type ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -413,6 +413,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [managerDialog, setManagerDialog] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  /** 메뉴가 매달릴 자리 — 누른 버튼이다 (사이드바 모서리가 아니라) */
+  const menuAnchor = useRef<HTMLSpanElement>(null)
   const [deleting, setDeleting] = useState(false)
 
   /*
@@ -483,6 +485,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           호버 없이도 버튼을 꺼낸다. 특히 제안: 숨은 버튼을 반짝이게 해봐야 아무도 못 본다.
         */}
         <span
+          ref={menuAnchor}
           className={`-my-1 ml-auto shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
             menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
           } ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
@@ -501,6 +504,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         {menuOpen && (
           <ProjectMenu
             project={project}
+            anchor={menuAnchor}
             onClose={() => setMenuOpen(false)}
             onNewSession={() => openNewSession(projectId)}
             onStartManager={() => setManagerDialog(true)}
@@ -756,18 +760,66 @@ function SessionNameInput({
  */
 function ProjectMenu({
   project,
+  anchor,
   onClose,
   onNewSession,
   onStartManager,
   onDelete,
 }: {
   project: ProjectInfo
+  anchor: RefObject<HTMLElement | null>
   onClose: () => void
   onNewSession: () => void
   onStartManager: () => void
   onDelete: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+
+  /*
+   * **누른 버튼 아래에 뜬다.**
+   *
+   * 예전에는 `absolute right-2 top-6`이었다. 이 줄에는 자기 positioned 조상이 없어서
+   * 그 좌표는 사이드바 전체를 기준으로 풀렸고, 어느 프로젝트를 누르든 메뉴는 사이드바
+   * 우상단 한 자리에 떴다 — 열 번째 프로젝트를 눌렀는데 답이 맨 위에서 나온다
+   * (도그푸딩 지적). 메뉴는 **자기를 부른 것 옆에** 있어야 무엇에 대한 메뉴인지 읽힌다.
+   *
+   * `fixed`인 이유: 사이드바는 `overflow-y-auto`라, 흐름 안에 두면 목록 아래쪽 프로젝트의
+   * 메뉴가 잘린다. 뷰포트 기준으로 띄우면 잘릴 상자가 없다.
+   *
+   * 아래에 자리가 없으면 위로 뒤집는다. 그래서 높이를 **먼저 재야** 하는데, 높이는
+   * 그려 봐야 안다 — useLayoutEffect(그리기 전에 돈다)로 재고 자리를 정하므로,
+   * 자리가 안 정해진 프레임은 화면에 나가지 않는다 (visibility로 가려 둔다).
+   */
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  useLayoutEffect(() => {
+    const place = () => {
+      const a = anchor.current
+      const el = ref.current
+      if (!a || !el) return
+      const r = a.getBoundingClientRect()
+      const h = el.offsetHeight
+      const GAP = 4 // 버튼과 메뉴 사이 — 붙여 놓으면 어디까지가 버튼인지 안 보인다
+      const EDGE = 8 // 창 가장자리에 딱 붙지 않게
+      const below = r.bottom + GAP
+      setPos({
+        top: below + h <= window.innerHeight - EDGE ? below : Math.max(EDGE, r.top - GAP - h),
+        // 오른쪽 끝을 버튼에 맞춘다 — 메뉴가 버튼에서 흘러나온 것처럼 읽힌다
+        right: Math.max(EDGE, window.innerWidth - r.right),
+      })
+    }
+    place()
+    /*
+     * 사이드바가 스크롤되면 버튼은 움직이는데 fixed 메뉴는 안 움직인다 — 다시 붙인다.
+     * capture로 듣는 이유: 스크롤은 버블링하지 않아서 window의 일반 리스너로는
+     * 사이드바 안쪽 스크롤이 안 잡힌다.
+     */
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [anchor])
   /*
    * 바깥을 누르면 닫는다. 메뉴가 열린 채로 다른 프로젝트를 누르면 두 메뉴가 동시에
    * 떠 있는 것처럼 보이는데, 실제로는 각자 자기 상태를 들고 있어 아무도 안 닫힌다.
@@ -818,7 +870,8 @@ function ProjectMenu({
       ref={ref}
       role="menu"
       data-testid={`project-menu-open-${project.name}`}
-      className="absolute right-2 top-6 z-30 w-48 rounded border border-edge bg-panel py-1 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      className="fixed z-30 w-48 rounded border border-edge bg-panel py-1 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      style={{ top: pos?.top ?? 0, right: pos?.right ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       <Row label="New session" onPick={onNewSession} testId={`new-session-${project.name}`} />
       {/*

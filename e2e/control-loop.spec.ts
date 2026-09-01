@@ -886,6 +886,46 @@ test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ 
   await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
+/**
+ * 메뉴는 **자기를 부른 버튼 옆에** 뜬다.
+ *
+ * 예전에는 사이드바 우상단 한 자리에 고정이었다 (positioned 조상이 없어 좌표가 사이드바
+ * 기준으로 풀렸다) — 열 번째 프로젝트를 눌렀는데 답이 맨 위에서 나오니, 무엇에 대한
+ * 메뉴인지 화면이 말해 주지 않았다. 아래에 자리가 없으면 위로 뒤집는다.
+ */
+test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면 위로 뒤집는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+
+  const geometry = async (name: string) => {
+    await page.getByTestId(`project-header-${name}`).hover()
+    await page.getByTestId(`project-menu-${name}`).click()
+    const menu = page.getByTestId(`project-menu-open-${name}`)
+    await expect(menu).toBeVisible()
+    const b = (await page.getByTestId(`project-menu-${name}`).boundingBox())!
+    const m = (await menu.boundingBox())!
+    const viewport = page.viewportSize()!
+    await page.keyboard.press('Escape')
+    return { b, m, viewport }
+  }
+
+  const alpha = await geometry('alpha')
+  // 버튼 아래에, 버튼의 오른쪽 끝에 맞춰서
+  expect(alpha.m.y).toBeGreaterThanOrEqual(alpha.b.y + alpha.b.height)
+  expect(Math.round(alpha.m.x + alpha.m.width)).toBe(Math.round(alpha.b.x + alpha.b.width))
+  // 그리고 화면 안에 온전히 들어온다
+  expect(alpha.m.y + alpha.m.height).toBeLessThanOrEqual(alpha.viewport.height)
+
+  /*
+    아래로 펴면 넘치는 자리에서만 뒤집기가 보이고, 그 자리는 창을 낮춰야 생긴다.
+    320px에서는 아직 들어갔다(메뉴 바닥 307.5 < 312) — 뒤집기가 아니라 실측이
+    기준을 정한다.
+  */
+  await page.setViewportSize({ width: 1200, height: 240 })
+  const beta = await geometry('beta')
+  expect(beta.m.y + beta.m.height).toBeLessThanOrEqual(beta.b.y) // 버튼 위로 갔다
+  expect(beta.m.y).toBeGreaterThanOrEqual(0)
+})
+
 test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더에서 (M2.5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('project-menu-alpha').click()
