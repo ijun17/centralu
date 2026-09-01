@@ -44,6 +44,7 @@ async function seedTree(page: Page, entries: Record<string, { name: string; isDi
 }
 
 async function openTree(page: Page, prompt = 'work') {
+  await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()

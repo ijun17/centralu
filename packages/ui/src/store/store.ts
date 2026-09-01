@@ -464,6 +464,16 @@ export type AppState = {
 
   addProject(path: string): Promise<ProjectInfo>
   /**
+   * Delete a project — the record here, and optionally the folder on disk.
+   *
+   * Two calls, in this order and not the other: the trash first, the record second. The
+   * path is only known from the record, so removing it first would leave nothing to point
+   * the trash at; and if the trash refuses (a browser has none), nothing has been deleted
+   * yet and the whole thing stops with the reason. The reverse order can lose the folder
+   * *and* the history in the failure case, which is the one case that matters.
+   */
+  deleteProject(projectId: string, deleteFiles: boolean): Promise<void>
+  /**
    * Ask for this project's git status again, debounced (issue #41).
    *
    * `project.git` was measured once, at attach, and never again — so the sidebar's changed
@@ -1392,11 +1402,26 @@ export const useStore = create<AppState>((set, get) => ({
      *
      * 선택 해제(null)는 뷰를 건드리지 않는다. 그건 "이걸 봐라"가 아니기 때문이다.
      */
+    /*
+     * **오케스트레이터는 'focus'가 아니라 자기 화면으로 간다** (도그푸딩 버그).
+     *
+     * 여기서 무조건 `view: 'focus'`를 켜는 바람에, 상단 바의 '응답 대기' 목록에서
+     * 오케스트레이터를 누르면 오케스트레이터 대화가 **세션 화면의 틀 안에서** 열렸다.
+     * 증상 둘이 거기서 나온다: 오른쪽 증거 레인이 딸려 나오고(App의 hasEvidenceLane은
+     * view로 판단한다 — 오케스트레이터에는 볼 저장소가 없다), 사이드바의 오케스트레이터
+     * 버튼은 안 눌린 것처럼 보인다(active 역시 view로 판단한다).
+     *
+     * 고치는 자리가 여기인 이유는 위 주석과 같다: 이 함수를 부르는 곳이 열 군데다
+     * (인박스·알림 카드·팔레트·승인 배너·단축키…). 그중 하나만 오케스트레이터를
+     * 만나도 같은 증상이 나므로, 판단은 부르는 쪽이 아니라 여기 한 곳에 있어야 한다.
+     */
+    const orchestrator =
+      !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
     // 세션을 바꾸면 덮어둔 것은 걷는다 — 새 세션의 대화가 먼저 보여야 한다
     set({
       focusedSessionId: id,
       overlay: null,
-      ...(id ? { view: 'focus' as const } : {}),
+      ...(id ? { view: orchestrator ? ('orchestrator' as const) : ('focus' as const) } : {}),
       ...(projectId ? { focusedProjectId: projectId } : {}),
     })
     get().saveWorkspace()
@@ -1690,6 +1715,43 @@ export const useStore = create<AppState>((set, get) => ({
     // 가리키던 문으로 들어왔으니 불을 끈다 (#63) — 지나간 안내가 남아 반짝이면 잔소리다
     set((s) => ({ projects: { ...s.projects, [p.id]: p }, addProjectHint: false }))
     return p
+  },
+
+  async deleteProject(projectId, deleteFiles) {
+    const platform = get().platform
+    if (!platform || !get().projects[projectId]) return
+    if (deleteFiles) {
+      /*
+       * `'.'`는 프로젝트 루트다 — host의 resolveExisting이 루트 기준으로 풀고 밖은 거절하므로,
+       * 여기서 절대경로를 만들어 넘기지 않는다. 지우는 손은 셸(Rust)에 있고 그 손이 하는 일은
+       * **휴지통으로 옮기기**다 (fs 포트의 규칙: "Not a delete — that is the whole decision").
+       */
+      const r = await platform.fs.trash(projectId, '.')
+      if (!r.supported) throw new Error(r.reason ?? 'This build cannot delete files')
+    }
+    await platform.projects.remove(projectId)
+    /*
+     * 세션은 host가 쏘는 session_deleted로도 사라지지만, 여기서 한 번 더 걷는다:
+     * 그 이벤트를 기다리는 동안 화면에는 없는 프로젝트의 세션 줄이 남는다.
+     */
+    set((s) => {
+      const projects = omitKey(s.projects, projectId)
+      const doomed = Object.values(s.sessions).filter((x) => x.projectId === projectId).map((x) => x.id)
+      const sessions = { ...s.sessions }
+      const chat = { ...s.chat }
+      for (const id of doomed) {
+        delete sessions[id]
+        delete chat[id]
+      }
+      return {
+        projects,
+        sessions,
+        chat,
+        focusedProjectId: s.focusedProjectId === projectId ? null : s.focusedProjectId,
+        focusedSessionId:
+          s.focusedSessionId && doomed.includes(s.focusedSessionId) ? null : s.focusedSessionId,
+      }
+    })
   },
 
   refreshProjectGit(projectId) {

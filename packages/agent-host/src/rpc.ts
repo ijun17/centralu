@@ -199,6 +199,10 @@ export function createRpcHandler(
     'projects.list': async () => mgr.listProjects(),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
+    'projects.delete': async (p) => {
+      await mgr.deleteProject(RpcMethods['projects.delete'].params.parse(p).projectId)
+      return { ok: true as const }
+    },
     'projects.setCommands': async (p) => {
       const { projectId, commands } = RpcMethods['projects.setCommands'].params.parse(p)
       return mgr.setProjectCommands(projectId, commands)

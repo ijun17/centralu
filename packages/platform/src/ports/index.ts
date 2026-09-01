@@ -143,6 +143,14 @@ export interface ProjectPort {
   list(): Promise<ProjectInfo[]>
   gitStatus(projectId: string): Promise<ProjectInfo>
   /**
+   * Delete a project and everything this app remembers about it.
+   *
+   * The folder is not this call's business — the OS trash belongs to the shell, so the
+   * caller empties it first and only then removes the record. That order is forced: the
+   * path lives in the row, so deleting the row first would leave nothing to point at.
+   */
+  remove(projectId: string): Promise<{ ok: true }>
+  /**
    * Replace this project's saved shell commands, whole (issue #44).
    *
    * Adding and deleting come through the same door, as `reorder` above does: for a short

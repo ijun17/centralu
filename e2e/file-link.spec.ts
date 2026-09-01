@@ -32,6 +32,7 @@ async function seedFiles(page: Page, files: Record<string, string>) {
 }
 
 async function newSession(page: Page, projectName: string, prompt: string) {
+  await page.getByTestId(`project-menu-${projectName}`).click()
   await page.getByTestId(`new-session-${projectName}`).click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()

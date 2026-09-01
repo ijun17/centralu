@@ -540,6 +540,19 @@ export const RpcMethods = {
   'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
   'projects.add': { params: z.object({ path: z.string() }), result: ProjectInfo },
   /**
+   * 프로젝트를 **지운다** — 목록에서 빼는 것이 아니라 이 앱의 기록에서 없앤다
+   * (세션·대화·검색 색인·승인 규칙·사용량 귀속까지).
+   *
+   * **폴더는 건드리지 않는다.** 파일을 버리는 일은 OS 휴지통을 통해서만 하고 그건
+   * 셸(Rust)의 몫이라, 부르는 쪽이 이 명령보다 먼저 끝낸다. 여기에 `deleteFiles`
+   * 같은 스위치를 두지 않는 이유이기도 하다 — host는 파일을 버릴 손이 없으므로,
+   * 받아 봐야 지킬 수 없는 약속이 된다.
+   */
+  'projects.delete': {
+    params: z.object({ projectId: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * 사이드바 순서 바꾸기. **전체 순서를 통째로 받는다** —
    * "이걸 저기로" 식으로 주고받으면 목록이 그 사이 바뀌었을 때 어긋난다.
    */

@@ -15,6 +15,17 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/** 점 셋 — "여기에 더 있다". 글리프(⋯)가 아니라 도형이라 폰트를 타지 않는다 */
+export function DotsIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <circle cx="3.5" cy="8" r="1.25" />
+      <circle cx="8" cy="8" r="1.25" />
+      <circle cx="12.5" cy="8" r="1.25" />
+    </svg>
+  )
+}
+
 export function CloseIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -43,7 +54,13 @@ export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number 
       className={`shrink-0 transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
       aria-hidden
     >
-      <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M6 3.5L10.5 8L6 12.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -130,7 +147,13 @@ export function RestartIcon({ size = 14 }: { size?: number }) {
         strokeWidth="1.5"
         strokeLinecap="round"
       />
-      <path d="M13.5 2v3.2h-3.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M13.5 2v3.2h-3.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -150,7 +173,12 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
       <circle cx="11.5" cy="3.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
       <path d="M4.5 5.1v5.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       {/* 줄기에서 갈라져 나온 가지가 다시 아래로 내려온다 — 갈라짐과 되돌아옴이 한 획에 */}
-      <path d="M11.5 5.1v1.4a2.4 2.4 0 01-2.4 2.4H6.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M11.5 5.1v1.4a2.4 2.4 0 01-2.4 2.4H6.9"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
   )
 }

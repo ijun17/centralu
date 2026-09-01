@@ -395,6 +395,31 @@ export class SessionManager {
     return this.projectInfo(id, path)
   }
 
+  /**
+   * 프로젝트를 지운다 (등록 해제가 아니라 **삭제**다).
+   *
+   * 파일은 건드리지 않는다 — 폴더를 지우는 일은 OS의 휴지통을 통해서만 하고, 그건
+   * 셸(Rust)의 일이라 호출하는 쪽에서 이 명령보다 **먼저** 끝낸다. 순서가 그 방향인
+   * 이유: 경로를 아는 유일한 근거가 이 DB의 행이라, 행을 먼저 지우면 무엇을 버릴지
+   * 물어볼 곳이 없어진다. 반대로 휴지통이 실패하면 아무것도 안 지운 채로 끝난다.
+   *
+   * 세션은 `deleteSession`을 그대로 거친다 — 프로세스를 정리하고 첨부를 지우고
+   * `session_deleted`를 쏘는 일을 여기서 다시 쓰면 언젠가 두 벌이 어긋난다.
+   * 다만 **워크트리는 남긴다.** 지우려면 git이 필요한데 그 저장소가 방금 사라졌을 수도
+   * 있고, 무엇보다 워크트리 안의 것은 아직 병합되지 않은 사람의 일이다 —
+   * 세션 삭제 창이 워크트리를 기본으로 남기는 것과 같은 판단이다.
+   *
+   * 자식이 있는 매니저를 먼저 지우려 하면 #69의 보호가 막는다. 그래서 **잎부터** 지운다.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    const mine = [...this.meta.values()].filter((s) => s.projectId === projectId)
+    const leavesFirst = [...mine].sort(
+      (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
+    )
+    for (const s of leavesFirst) await this.deleteSession(s.id).catch(() => {})
+    this.store.deleteProject(projectId)
+  }
+
   private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
     const git = await gitSummary(path)
     /*

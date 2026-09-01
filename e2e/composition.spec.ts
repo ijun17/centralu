@@ -30,6 +30,7 @@ async function setup(page: Page) {
 }
 
 async function newSession(page: Page, prompt: string) {
+  await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('tool-option-claude').click()
   await page.getByTestId('create-session-confirm').click()

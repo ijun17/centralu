@@ -121,6 +121,7 @@ async function boot(page: Page, count: number): Promise<string[]> {
 
   const ids: string[] = []
   for (let i = 0; i < count; i++) {
+    await page.getByTestId('project-menu-alpha').click()
     await page.getByTestId('new-session-alpha').click()
     await page.getByTestId('create-session-confirm').click()
     await expect(page.getByTestId('new-session-dialog')).toBeHidden()

@@ -340,6 +340,18 @@ export class MockPlatform implements Platform {
     },
     trash: async (_projectId: string, path: string) => {
       this.requireInside(path)
+      /*
+       * 프로젝트 루트(`'.'`)는 목록에 **항목으로 없다** — 항목은 루트 안의 것들이다.
+       * 실물에서는 host의 resolveExisting이 루트를 stat해서 통과시키므로(실재하는 폴더다),
+       * 여기서 "그런 항목 없음"으로 거절하면 목이 실물보다 **엄격해진다** — 프로젝트를
+       * 폴더째 지우는 길이 E2E에서만 막힌다.
+       */
+      if (wireSegments(path).every((seg) => seg === '' || seg === '.')) {
+        this.fsState.entries = {}
+        this.fsState.files = {}
+        this.trashed.push(path)
+        return { supported: true }
+      }
       if (!this.detach(path)) throw Object.assign(new Error(`${path} is no longer there`), { code: 'internal' })
       this.takeSubtree(path)
       this.trashed.push(path)
@@ -782,6 +794,21 @@ export class MockPlatform implements Platform {
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       return this.withGit(p)
+    },
+    /*
+     * 실물과 같은 순서로 없앤다: 세션을 하나씩 지우며 `session_deleted`를 쏘고,
+     * 그 다음 프로젝트를 뺀다. 화면은 그 이벤트로 목록을 비우므로, 목이 프로젝트만
+     * 조용히 지우면 E2E에서는 사이드바에 유령 세션이 남는다.
+     */
+    remove: async (projectId: string) => {
+      const at = this.projectsList.findIndex((x) => x.id === projectId)
+      if (at === -1) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      for (const s of [...this.sessions.values()].filter((s) => s.projectId === projectId)) {
+        this.sessions.delete(s.id)
+        this.emit({ type: 'session_deleted', sessionId: s.id })
+      }
+      this.projectsList.splice(at, 1)
+      return { ok: true as const }
     },
     /**
      * 등록된 셸 명령 (이슈 #44).

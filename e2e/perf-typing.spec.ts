@@ -74,6 +74,8 @@ async function boot(page: Page): Promise<string> {
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('project-alpha')).toBeVisible()
 
+  await page.getByTestId('project-menu-alpha').click()
+
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()

@@ -5,10 +5,11 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
+import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { BranchIcon, CloseIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
+import { CloseIcon, DotsIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
@@ -411,6 +412,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   // 매니저의 워크트리 제안이 이 프로젝트를 가리키는가 (#69) — + 버튼이 밝아진다
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [managerDialog, setManagerDialog] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   /*
    * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면
@@ -444,10 +447,15 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           프로젝트가 여럿이면 그 줄들이 쌓여 정작 봐야 할 세션 목록을 밀어낸다.
           대신 물어볼 때(호버·포커스) 툴팁으로 답한다.
         */}
-        <Tooltip content={<ProjectDetail project={project} sessionCount={sessions.length} />} testId={`project-tip-${project.name}`}>
+        <Tooltip
+          content={<ProjectDetail project={project} sessionCount={sessions.length} />}
+          testId={`project-tip-${project.name}`}
+        >
           <button
             className={`truncate text-left text-[13px] font-medium tracking-tight transition-colors ${
-              selected ? 'text-chalk underline decoration-graphite underline-offset-4' : 'text-chalk hover:text-beacon'
+              selected
+                ? 'text-chalk underline decoration-graphite underline-offset-4'
+                : 'text-chalk hover:text-beacon'
             }`}
             onClick={() => focusProject(projectId)}
             data-testid={`project-header-${project.name}`}
@@ -463,46 +471,42 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         */}
         <ProjectMarks project={project} sessionCount={sessions.length} />
         {/*
-          **항상 보인다.** 예전엔 호버해야 나타났는데, 새 세션은 이 앱에서 가장 자주 하는 일이라
-          "있는 줄도 몰랐다"가 나오면 안 된다 (도그푸딩에서 지적됨).
-          크기를 키우는 것만으로는 안 된다 — 안 보이는 것은 아무리 커도 안 보인다.
-          평소엔 slate로 눌러 두고 호버에서 밝아지게 해서, 세션 목록을 읽는 데는 방해하지 않는다.
+          이 줄의 모든 동작이 한 버튼 뒤에 있다 (도그푸딩 요청).
+
+          예전에는 `+`(새 세션)가 **항상** 보였다. 그때의 이유는 "새 세션은 가장 자주 하는
+          일이라 있는 줄도 몰랐다가 나오면 안 된다"였고, 그 이유는 여전히 옳다 — 다만 그
+          사이 이 줄에 할 일이 셋이 됐다(새 세션·워크트리 매니저·프로젝트 삭제). 셋을 다
+          아이콘으로 늘어놓으면 프로젝트 이름보다 버튼이 길어진다. 그래서 하나로 접고,
+          대신 **평소에는 감춘다**: 접힌 버튼이 늘 떠 있으면 목록을 읽는 눈만 방해한다.
+
+          감췄지만 잃지 않는다 — 키보드 포커스(focus-within)와 워크트리 제안(#69)은
+          호버 없이도 버튼을 꺼낸다. 특히 제안: 숨은 버튼을 반짝이게 해봐야 아무도 못 본다.
         */}
-        {/*
-          매니저 자리를 **먼저** 만드는 문 (#76). 저장소이면서 아직 자리가 없을 때만 뜬다 —
-          만들고 나면 그 자리는 세션 목록에 줄로 서 있으므로, 같은 일을 하는 문이 둘이 되지
-          않게 여기서는 사라진다. `+`(새 세션) 왼쪽에 두는 이유: 왼쪽이 먼저 오는 일이다.
-        */}
-        {project.git?.isRepo && !project.worktreeManager && (
-          <span className="-my-1 ml-auto shrink-0">
-            <IconButton
-              label={`Start worktree manager in ${project.name}`}
-              onClick={() => setManagerDialog(true)}
-              testId={`start-worktree-manager-${project.name}`}
-              align="right"
-            >
-              <BranchIcon size={13} />
-            </IconButton>
-          </span>
-        )}
         <span
-          /*
-           * 매니저의 워크트리 제안 (#69)이 이 버튼을 밝힌다 — Add project와 같은 원칙:
-           * 대화에 두 번째 문을 그리지 않고, 있는 문에 불을 켠다. 눌러서 열리는 창에
-           * 브랜치 이름이 채워져 있다 (openNewSession이 제안을 소비한다).
-           */
-          className={`-my-1 shrink-0 ${project.git?.isRepo && !project.worktreeManager ? '' : 'ml-auto'} ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
+          className={`-my-1 ml-auto shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
+            menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
+          } ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
+          data-testid={`project-actions-${project.name}`}
           data-worktree-proposal={proposalHere || undefined}
         >
           <IconButton
-            label={`New session in ${project.name}`}
-            onClick={() => openNewSession(projectId)}
-            testId={`new-session-${project.name}`}
+            label={`Actions for ${project.name}`}
+            onClick={() => setMenuOpen((v) => !v)}
+            testId={`project-menu-${project.name}`}
             align="right"
           >
-            <PlusIcon size={15} />
+            <DotsIcon size={14} />
           </IconButton>
         </span>
+        {menuOpen && (
+          <ProjectMenu
+            project={project}
+            onClose={() => setMenuOpen(false)}
+            onNewSession={() => openNewSession(projectId)}
+            onStartManager={() => setManagerDialog(true)}
+            onDelete={() => setDeleting(true)}
+          />
+        )}
       </header>
 
       <ul className="mt-1.5">
@@ -521,7 +525,15 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                */
               draggable={renaming !== s.id && !nested}
               onReorder={(draggedId, before) =>
-                void reorderSessions(projectId, moveTo(sessions.map((x) => x.id), draggedId, s.id, before))
+                void reorderSessions(
+                  projectId,
+                  moveTo(
+                    sessions.map((x) => x.id),
+                    draggedId,
+                    s.id,
+                    before,
+                  ),
+                )
               }
             >
               {renaming === s.id ? (
@@ -647,7 +659,10 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       </ul>
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
-      {managerDialog && <WorktreeManagerDialog projectId={projectId} onClose={() => setManagerDialog(false)} />}
+      {managerDialog && (
+        <WorktreeManagerDialog projectId={projectId} onClose={() => setManagerDialog(false)} />
+      )}
+      {deleting && <DeleteProjectDialog project={project} onClose={() => setDeleting(false)} />}
 
       {confirming && (
         <ConfirmDelete
@@ -677,7 +692,15 @@ function ProjectBlock({ projectId }: { projectId: string }) {
  * 빈 이름은 **취소로 친다.** 지우고 나가는 실수로 이름 없는 줄을 만들면
  * 그 줄은 목록에서 아무것도 가리키지 못한다.
  */
-function SessionNameInput({ id, initial, onDone }: { id: string; initial: string; onDone: (name: string) => void }) {
+function SessionNameInput({
+  id,
+  initial,
+  onDone,
+}: {
+  id: string
+  initial: string
+  onDone: (name: string) => void
+}) {
   const [text, setText] = useState(initial)
   /*
    * Enter로 확정하면 입력창이 사라지는데, 사라지는 순간 blur도 한 번 더 온다.
@@ -721,6 +744,100 @@ function SessionNameInput({ id, initial, onDone }: { id: string; initial: string
  * 그대로 남아서 '+ → 이전 대화'로 되찾을 수 있다. 실제보다 무섭게 말하면
  * 사람은 정리하지 못하고 목록만 쌓인다.
  */
+/**
+ * 프로젝트 줄의 행동 메뉴.
+ *
+ * 아이콘 세 개 대신 목록 하나인 이유는 **이름이 필요해서**다. `+`는 새 세션이라고
+ * 배울 수 있었지만, 가지 아이콘이 워크트리 매니저이고 휴지통이 프로젝트 삭제라는 건
+ * 눌러 보기 전에는 모른다 — 그리고 그중 하나는 눌러 보면 안 되는 것이다.
+ *
+ * 삭제는 **맨 아래, 선 하나 아래**다. 위쪽 둘은 매일 하는 일이고 이건 한 번 하는 일이라,
+ * 손이 기억으로 움직일 때 같은 무리에 있으면 안 된다.
+ */
+function ProjectMenu({
+  project,
+  onClose,
+  onNewSession,
+  onStartManager,
+  onDelete,
+}: {
+  project: ProjectInfo
+  onClose: () => void
+  onNewSession: () => void
+  onStartManager: () => void
+  onDelete: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  /*
+   * 바깥을 누르면 닫는다. 메뉴가 열린 채로 다른 프로젝트를 누르면 두 메뉴가 동시에
+   * 떠 있는 것처럼 보이는데, 실제로는 각자 자기 상태를 들고 있어 아무도 안 닫힌다.
+   */
+  useEffect(() => {
+    const away = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose()
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    // capture: 아래에서 stopPropagation 하는 줄들이 있어도 닫힘은 반드시 온다
+    window.addEventListener('mousedown', away, true)
+    window.addEventListener('keydown', esc, true)
+    return () => {
+      window.removeEventListener('mousedown', away, true)
+      window.removeEventListener('keydown', esc, true)
+    }
+  }, [onClose])
+
+  const Row = ({
+    label,
+    onPick,
+    testId,
+    danger,
+  }: {
+    label: string
+    onPick: () => void
+    testId: string
+    danger?: boolean
+  }) => (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={testId}
+      onClick={() => {
+        onPick()
+        onClose()
+      }}
+      className={`block w-full px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-graphite/25 ${
+        danger ? 'text-ash hover:text-beacon' : 'text-ash hover:text-chalk'
+      }`}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      data-testid={`project-menu-open-${project.name}`}
+      className="absolute right-2 top-6 z-30 w-48 rounded border border-edge bg-panel py-1 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+    >
+      <Row label="New session" onPick={onNewSession} testId={`new-session-${project.name}`} />
+      {/*
+        매니저 자리를 **먼저** 만드는 문 (#76). 저장소이면서 아직 자리가 없을 때만 나온다 —
+        만들고 나면 그 자리는 세션 목록에 줄로 서 있으므로, 같은 일을 하는 문이 둘이 되지 않는다.
+      */}
+      {project.git?.isRepo && !project.worktreeManager && (
+        <Row
+          label="Start worktree manager"
+          onPick={onStartManager}
+          testId={`start-worktree-manager-${project.name}`}
+        />
+      )}
+      <div className="my-1 border-t border-edge" />
+      <Row label="Delete project…" onPick={onDelete} testId={`delete-project-${project.name}`} danger />
+    </div>
+  )
+}
+
 function ConfirmDelete({
   sessionId,
   name,
@@ -741,7 +858,9 @@ function ConfirmDelete({
    * 워크트리 세션인지, 거기 커밋 안 된 변경이 있는지 **모달을 여는 순간 묻는다.**
    * 세션 목록에는 경로만 있고 더러운지는 없다 — 그건 파일시스템을 봐야 아는 사실이다.
    */
-  const [wt, setWt] = useState<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>(null)
+  const [wt, setWt] = useState<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>(
+    null,
+  )
   const [deleteWorktree, setDeleteWorktree] = useState(false)
   useEffect(() => {
     let alive = true
@@ -762,7 +881,8 @@ function ConfirmDelete({
           Chat history and attachments in Centralu will be gone.
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
-          The conversation stays in {toolLabel} — you can pull it back from <span className="text-chalk">+ → Past conversations</span>.
+          The conversation stays in {toolLabel} — you can pull it back from{' '}
+          <span className="text-chalk">+ → Past conversations</span>.
         </p>
 
         {/*
@@ -812,13 +932,7 @@ function ConfirmDelete({
 }
 
 /** 이름 줄에 얹는 표식 — 세로 공간을 새로 쓰지 않는다 */
-function ProjectMarks({
-  project,
-  sessionCount,
-}: {
-  project: ProjectInfo
-  sessionCount: number
-}) {
+function ProjectMarks({ project, sessionCount }: { project: ProjectInfo; sessionCount: number }) {
   const changed = project.git?.changedFiles ?? 0
   const risky = sessionCount > 1
   const denied = project.git?.denied === true
@@ -835,7 +949,10 @@ function ProjectMarks({
     */
     <span className="readout flex shrink-0 items-center gap-1.5 text-[10px] text-slate">
       {changed > 0 && (
-        <Tooltip content={`${changed} uncommitted file${changed > 1 ? 's' : ''}`} testId={`mark-changed-tip-${project.name}`}>
+        <Tooltip
+          content={`${changed} uncommitted file${changed > 1 ? 's' : ''}`}
+          testId={`mark-changed-tip-${project.name}`}
+        >
           <span data-testid={`mark-changed-${project.name}`}>{changed}</span>
         </Tooltip>
       )}

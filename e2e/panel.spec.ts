@@ -25,6 +25,7 @@ async function setup(page: Page, path = '/tmp/alpha') {
 
 /** 세션 하나를 만들고 그 id를 돌려준다 */
 async function newSession(page: Page, project: string, tool: 'claude' | 'codex', prompt: string): Promise<string> {
+  await page.getByTestId(`project-menu-${project}`).click()
   await page.getByTestId(`new-session-${project}`).click()
   await page.getByTestId(`tool-option-${tool}`).click()
   await page.getByTestId('create-session-confirm').click()
@@ -340,6 +341,7 @@ test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', a
     })
     await store.getState().addProject('/tmp/nogit')
   })
+  await page.getByTestId('project-menu-nogit').click()
   await page.getByTestId('new-session-nogit').click()
   await page.getByTestId('create-session-confirm').click()
 

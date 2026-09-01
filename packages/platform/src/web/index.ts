@@ -180,6 +180,9 @@ class WebProjectPort implements ProjectPort {
   gitStatus(projectId: string) {
     return this.rpc.call('projects.gitStatus', { projectId })
   }
+  remove(projectId: string) {
+    return this.rpc.call('projects.delete', { projectId })
+  }
   setCommands(projectId: string, commands: string[]) {
     return this.rpc.call('projects.setCommands', { projectId, commands })
   }

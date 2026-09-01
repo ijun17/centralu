@@ -1064,6 +1064,40 @@ export class Store {
   }
 
   /**
+   * 프로젝트를 완전히 지운다 — 세션·대화·색인·규칙·귀속까지.
+   *
+   * **FK의 CASCADE에 기대지 않는다.** `sessions.project_id`에는 걸려 있지만 messages는
+   * 세션을 타고 두 다리 건너이고, `messages_fts`는 가상 테이블이라 외래키 자체가 없다.
+   * 그대로 두면 지운 프로젝트의 말이 검색에 계속 나온다 — 지운 것이 안 지워진 자리다.
+   * 그래서 세션마다 deleteSession을 거친다: 한 세션을 없애는 규칙이 한 곳에만 있어야
+   * 다음에 테이블이 하나 더 늘어도 고칠 곳이 한 곳이다.
+   *
+   * project_id를 들고 있는 나머지 셋(approval_rules·usage_facts·commit_sessions)도 같이
+   * 간다. usage_facts는 날짜별 집계라 아깝지만, 지운 프로젝트의 이름이 사용량 화면에
+   * 남아 있는 쪽이 더 이상하다.
+   *
+   * 한 덩어리로 돈다 — 중간에 끊기면 세션 없는 프로젝트나 프로젝트 없는 세션이 남는다.
+   */
+  deleteProject(projectId: string): void {
+    const tx = this.db.transaction(() => {
+      const ids = this.db.prepare(`SELECT id FROM sessions WHERE project_id = ?`).all(projectId) as {
+        id: string
+      }[]
+      for (const { id } of ids) {
+        this.db.prepare(`DELETE FROM messages_fts WHERE session_id = ?`).run(id)
+        this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id)
+        this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(id)
+        this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id)
+      }
+      this.db.prepare(`DELETE FROM approval_rules WHERE project_id = ?`).run(projectId)
+      this.db.prepare(`DELETE FROM usage_facts WHERE project_id = ?`).run(projectId)
+      this.db.prepare(`DELETE FROM commit_sessions WHERE project_id = ?`).run(projectId)
+      this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
+    })
+    tx()
+  }
+
+  /**
    * 메시지를 남긴다 — **같은 자리에 두 번 쓰면 덮어쓴다, 색인도 함께.**
    *
    * 예전에는 messages만 INSERT OR REPLACE고 색인은 맨 INSERT였다. 그래서 같은 (세션, seq)를
