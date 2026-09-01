@@ -3277,6 +3277,38 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   await expect(page.getByTestId('sticky-user')).toContainText(/작업|첫 번째 질문/)
 
   /*
+    **띠는 말풍선과 같은 자리, 같은 폭을 갖는다.**
+
+    전체 폭이던 시절 도그푸딩에서 "위에 딱 안 붙었다"고 읽혔다. 실측하면 천장과의
+    간격은 0px였고(확대 0.9~1.2 전부), 떨어져 보이게 한 것은 위치가 아니라 모양이었다 —
+    오른쪽 75% 말풍선이 갑자기 좌우 끝까지 뻗으면 내 말이 아니라 머리말 아래 떠 있는
+    도구 띠로 보인다. 그래서 두 가지를 계약으로 남긴다: 오른쪽 끝이 같을 것,
+    75%를 넘지 않을 것. (등장 애니메이션이 끝난 뒤에 잰다 — 도는 동안은 몇 px 아래다.)
+  */
+  await page.evaluate(
+    () =>
+      new Promise<void>((r) => {
+        const el = document.querySelector('[data-testid="sticky-user"] .cc-hang')
+        void Promise.all((el?.getAnimations?.() ?? []).map((a) => a.finished.catch(() => {}))).then(() => r())
+      }),
+  )
+  const shape = await page.evaluate(() => {
+    const s = document.querySelector('[data-testid="chat-stream"]') as HTMLElement
+    const btn = document.querySelector('[data-testid="sticky-user"] button') as HTMLElement
+    const cs = getComputedStyle(s)
+    const rowWidth = s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+    const b = btn.getBoundingClientRect()
+    return {
+      gapFromCeiling: Math.round(b.top - s.getBoundingClientRect().top),
+      rightInset: Math.round(s.getBoundingClientRect().right - parseFloat(cs.paddingRight) - b.right),
+      widthRatio: b.width / rowWidth,
+    }
+  })
+  expect(shape.gapFromCeiling).toBe(0)
+  expect(shape.rightInset).toBe(0)
+  expect(shape.widthRatio).toBeLessThanOrEqual(0.76)
+
+  /*
     배너가 말하는 동안 원본은 숨는다 (도그푸딩: "같은 말이 두 번 보인다").
     배너 자체가 흐름에 자리를 차지해 리스트를 밀어내므로, "완전히 지나갔다"고
     판정된 원본이 배너 밑으로 되밀려 내려와 보였다. visibility로 숨겨 자리는

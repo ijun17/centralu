@@ -272,6 +272,38 @@
 }
 
 /*
+ * 천장에 매달리는 띠가 **매달리는 것처럼 보이게** 한다.
+ *
+ * 실측으로는 이미 붙어 있다 (스크롤 칸 천장과의 간격 0px, 확대 0.9~1.2 전부 동일).
+ * 그런데도 "안 붙었다"로 읽혔다 — 띠가 아무 예고 없이 그 자리에 **나타나기** 때문이다.
+ * 나타난 것은 어디서 왔는지 모르니 떠 있는 것으로 보이고, 올라와서 멎은 것은
+ * 천장에 닿은 것으로 보인다. 그래서 몇 px 아래에서 시작해 위로 올라와 멎는다.
+ *
+ * transform을 쓰고 fill-mode는 기본값(none)으로 둔다: 애니메이션이 끝나면 변환이
+ * 사라져야 안쪽 backdrop-filter가 원래 기준으로 돌아온다 (transform이 남으면
+ * 그 요소가 컨테이닝 블록이 되어 뒤에 비치는 것이 달라진다).
+ */
+@keyframes cc-hang {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.cc-hang {
+  animation: cc-hang 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-hang {
+    animation: none;
+  }
+}
+
+/*
  * 누른 버튼이 **일하는 중**임을 그 자리에서 말한다.
  *
  * 재시작은 프로세스를 죽이고 다시 띄우는 일이라 몇 초가 걸리는데, 그동안 화면에는
