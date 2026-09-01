@@ -54,7 +54,11 @@ async function newSession(page: Page, projectName: string, prompt: string) {
  */
 async function pickSetting(page: Page, testId: string, scope?: Locator) {
   const root = scope ?? page
-  await root.getByTestId('settings-open').click()
+  // 이미 열려 있으면 그대로 쓴다 — 모델을 고르면 메뉴가 열린 채 남으므로(아래 계약),
+  // 무조건 누르면 토글이 메뉴를 닫아버린다
+  if (!(await root.getByTestId('settings-menu').isVisible())) {
+    await root.getByTestId('settings-open').click()
+  }
   await expect(root.getByTestId('settings-menu')).toBeVisible()
   await root.getByTestId(testId).click()
 }
@@ -3087,17 +3091,21 @@ test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하
   await page.getByTestId('settings-open').click()
   await expect(menu).toContainText('Fable')
 
+  /*
+    모델을 골라도 메뉴는 열린 채다 (도그푸딩 요청) — 강도·속도 묶음이 고른 모델을
+    따라 바뀌므로, 모델을 고른 사람의 일은 보통 아직 안 끝났다. 예전에는 여기서
+    메뉴를 다시 여는 클릭이 줄마다 끼어 있었다 — 그 춤이 곧 불편의 증거였다.
+  */
   // 강도를 지원하지 않는 모델에는 강도 묶음이 없다 — 아무 효과 없는 칸을 띄우면 거짓말이다
   await menu.getByTestId('settings-model-haiku').click()
-  await page.getByTestId('settings-open').click()
-  // 메뉴가 실제로 열려 있는 것을 먼저 확인한다 — 안 열린 화면에서 "없다"는 아무 증명이 아니다
-  await expect(menu).toContainText('Haiku')
+  await expect(menu).toBeVisible()
   await expect(menu).not.toContainText('Effort')
 
   await menu.getByTestId('settings-model-fable').click()
-  await page.getByTestId('settings-open').click()
   await expect(menu).toContainText('Effort')
   await menu.getByTestId('settings-effort-xhigh').click()
+  // 강도는 그 자체로 끝인 선택이다 — 고르면 닫힌다
+  await expect(menu).toBeHidden()
 
   const settings = await page.evaluate(() => {
     const s = (window as any).__store.getState()
@@ -3123,8 +3131,8 @@ test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   const menu = page.getByTestId('settings-menu')
+  // 모델을 고르면 메뉴가 열린 채라 Speed 묶음이 그 자리에서 이어진다
   await pickSetting(page, 'settings-model-gpt-5.6-terra')
-  await page.getByTestId('settings-open').click()
   await expect(menu).toContainText('Speed')
   await menu.getByTestId('settings-tier-priority').click()
 
@@ -3136,8 +3144,7 @@ test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세
 
   // 티어 없는 모델로 바꾸면 묶음이 없고 값도 초기화된다 — 지원하지 않는 조합이 조용히 남으면 안 된다
   await pickSetting(page, 'settings-model-gpt-5.6-terra-mini')
-  await page.getByTestId('settings-open').click()
-  await expect(menu).toContainText('gpt-5.6-terra-mini')
+  await expect(menu).toBeVisible()
   await expect(menu).not.toContainText('Speed')
   const tier2 = await page.evaluate(() => {
     const s = (window as any).__store.getState()

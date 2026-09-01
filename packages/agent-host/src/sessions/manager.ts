@@ -1147,7 +1147,17 @@ export class SessionManager {
       }
     }
 
+    /*
+     * 단계별 시간을 잰다 — **성공했지만 느린 재개가 흔적을 남기게.**
+     *
+     * 시간제한 메시지는 실패에만 붙는다. 재개가 9초 걸리고 성공하면 로그에는
+     * 아무것도 없어서, "깨우는 게 느린데?"라는 지적에 어느 단계가 먹었는지
+     * 답할 길이 실측 스크립트를 새로 짜는 것뿐이었다 (도그푸딩에서 실제로 그랬다).
+     * 아래 한 줄이 host.log에 남는다: 확인(목록)·시작(프로세스+resume)·따라잡기.
+     */
+    const t0 = Date.now()
     const gone = await this.externalGone(m, cwd)
+    const tCheck = Date.now() - t0
     if (gone) {
       return { session: m, resumed: false, reason: externalMissingReason(m.tool, cwd) }
     }
@@ -1211,10 +1221,12 @@ export class SessionManager {
        * 시간제한이 이겨도 도구 프로세스는 이미 떠 있을 수 있다 — 늦게라도 도착하면
        * 거둔다. 안 거두면 잠긴 스레드를 쥔 app-server가 조용히 남는다.
        */
+      const tStartFrom = Date.now()
       const handle = await withTimeout(creating, 25_000, `Starting ${m.tool}`).catch((err) => {
         void creating.then((h) => h.dispose()).catch(() => {})
         throw err
       })
+      const tStart = Date.now() - tStartFrom
       this.handles.set(sessionId, handle)
       this.running.set(sessionId, {
         model: m.model,
@@ -1235,11 +1247,20 @@ export class SessionManager {
       // 밖에서(터미널의 도구로) 이어간 대화를 따라잡는다.
       // 오케스트레이터는 앱이 관리하는 세션이라 밖에서 이어갈 일이 없다 — 프로젝트가 없어서
       // 이 조건에 원래 안 걸린다 (프로젝트를 가진 오케스트레이터는 이제 존재하지 않는다)
+      let tCatchup = 0
+      let added = 0
       if (project) {
         // 따라잡기가 멈춰도 세션은 이미 살아 있다 — 붙잡지 말고 다음 기회에 맡긴다
-        const added = await withTimeout(this.syncImportedHistory(m, adapter, project.path), 10_000, 'History catch-up').catch(() => 0)
+        const tCatchupFrom = Date.now()
+        added = await withTimeout(this.syncImportedHistory(m, adapter, project.path), 10_000, 'History catch-up').catch(() => 0)
+        tCatchup = Date.now() - tCatchupFrom
         if (added > 0) this.emit({ type: 'history_synced', sessionId, added })
       }
+      // catchup이 수백 ms 미만이면 건너뛴 것이다 (바뀐 게 없어 전문을 안 읽었다)
+      console.error(
+        `[agent-host] resumed ${sessionId.slice(0, 8)} tool=${m.tool} ` +
+          `check=${tCheck}ms start=${tStart}ms catchup=${tCatchup}ms added=${added} total=${Date.now() - t0}ms`,
+      )
       return { session: m, resumed: true }
     } catch (err) {
       /*

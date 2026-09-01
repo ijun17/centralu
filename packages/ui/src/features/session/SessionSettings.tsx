@@ -192,10 +192,17 @@ export function SessionSettings({
     }
   }, [open])
 
-  const choose = (patch: Parameters<typeof update>[1]) => {
+  /*
+   * 고르면 닫는다 — 하나 고르러 열었는데 계속 열려 있으면 입력창을 다시 눌러야 한다.
+   *
+   * **모델만 예외다** (keep, 도그푸딩 요청). 강도·속도 묶음은 고른 모델이 정하므로,
+   * 모델을 고른 사람의 일은 보통 아직 안 끝났다 — 닫아버리면 강도를 고르러 메뉴를
+   * 다시 열어야 하고, 실제로 e2e조차 모델을 고를 때마다 메뉴를 다시 여는 춤을 추고
+   * 있었다. 강도·권한처럼 그 자체로 끝인 선택은 지금처럼 닫는다.
+   */
+  const choose = (patch: Parameters<typeof update>[1], opts?: { keep?: boolean }) => {
     void update(sessionId, patch)
-    // 고르면 닫는다 — 하나 고르러 열었는데 계속 열려 있으면 입력창을 다시 눌러야 한다
-    setOpen(false)
+    if (!opts?.keep) setOpen(false)
   }
 
   const modelLabel = current?.label ?? model ?? 'Default'
@@ -249,7 +256,7 @@ export function SessionSettings({
                 testId="settings-model-default"
                 label="Default"
                 selected={!model}
-                onPick={() => choose({ model: null, effort: null })}
+                onPick={() => choose({ model: null, effort: null }, { keep: true })}
               />
             )}
             {options.map((m) => (
@@ -261,7 +268,7 @@ export function SessionSettings({
                 selected={m.id === model}
                 // 모델이 바뀌면 강도·속도는 초기화한다 — 모델마다 지원이 달라서
                 // 옛 값을 들고 가면 지원하지 않는 조합이 조용히 남는다
-                onPick={() => choose({ model: m.id, effort: null, serviceTier: null })}
+                onPick={() => choose({ model: m.id, effort: null, serviceTier: null }, { keep: true })}
               />
             ))}
           </MenuSection>
