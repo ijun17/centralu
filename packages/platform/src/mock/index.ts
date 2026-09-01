@@ -884,6 +884,8 @@ export class MockPlatform implements Platform {
       attachments: ['image', 'file'],
       // 실물과 같은 모양: codex만 응답 길이 노브가 있다 (#54) — UI가 이 배열로 행을 그린다
       verbosities: tool === 'codex' ? ['low', 'medium', 'high'] : [],
+      // 실물과 같은 모양: codex만 writer lock이 있다 (UI는 아직 안 읽지만 모양은 실물을 따른다)
+      exclusiveWriter: tool === 'codex',
     }),
     detect: async () => [
       { tool: 'claude' as const, installed: true, loggedIn: true, detail: 'mock 2.1.0' },

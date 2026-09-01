@@ -510,6 +510,10 @@ export class ClaudeAdapter implements AgentAdapter {
     // SDK 0.3.231의 타입에 응답 길이 노브가 없다 (effortLevel뿐 — #54에서 실측).
     // 생기면 여기만 채우면 된다 — UI는 이 배열을 보고 행을 그린다.
     verbosities: [],
+    // 대화 파일(JSONL)에 잠금이 없다 — 우리가 세션을 쥔 동안에도 터미널의 claude가
+    // 같은 대화에 쓸 수 있다. 그러니 "내려놓은 시각까지는 전부 내 것" 표식을 못 찍는다.
+    // 어차피 여기 기록 읽기는 SDK가 로컬 파일을 읽는 것이라 스킵의 이득도 몇 ms뿐이다.
+    exclusiveWriter: false,
   }
 
   async detect(): Promise<DetectResult> {

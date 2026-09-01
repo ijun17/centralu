@@ -450,6 +450,10 @@ export class CodexAdapter implements AgentAdapter {
     autoTitle: true, // thread/name/updated
     attachments: ['image', 'file'],
     verbosities: [...CODEX_VERBOSITIES],
+    // app-server의 writer lock ("already has an active writer" — client.ts가 번역하는 그 오류).
+    // 우리가 핸들을 쥔 동안의 기록 변화는 전부 우리 것이라는 보장이고, 매니저가 그 위에서
+    // 따라잡기 스킵 표식을 찍는다 (48.6MB/8초짜리 thread/read를 건너뛰는 근거다).
+    exclusiveWriter: true,
   }
 
   async detect(): Promise<DetectResult> {

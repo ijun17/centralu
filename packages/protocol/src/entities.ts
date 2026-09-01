@@ -160,6 +160,18 @@ export const AdapterCapabilities = z.object({
    * 도구 단위 성질은 어댑터 능력 선언이 맞는 자리다.
    */
   verbosities: z.array(z.string()).default([]),
+  /**
+   * 우리가 핸들을 쥔 동안 **다른 누구도 이 대화에 쓸 수 없다**는 보장 (#, 2026-09-02).
+   *
+   * codex가 그렇다 — app-server가 스레드에 writer lock을 걸어서, 두 번째로 열면
+   * "already has an active writer"로 거절된다 (어댑터가 그 오류를 번역까지 한다).
+   * claude는 아니다: 대화 파일에 잠금이 없어 이론상 밖에서 동시에 쓸 수 있다.
+   *
+   * 매니저는 이 보장 위에서만 "핸들을 내려놓는 시각 = 여기까지는 전부 내가 아는 내용"
+   * 이라는 표식을 찍는다 (syncImportedHistory의 스킵). 보장이 없는 도구에 찍으면
+   * 살아 있는 동안 밖에서 쓴 말이 영영 안 들어온다 — 그래서 기본값이 false다.
+   */
+  exclusiveWriter: z.boolean().default(false),
 })
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilities>
 

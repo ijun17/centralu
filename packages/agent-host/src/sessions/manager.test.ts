@@ -69,7 +69,7 @@ class FakeHandle implements SessionHandle {
 class FakeAdapter implements AgentAdapter {
   tool: ToolName = 'claude'
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [],
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false,
   }
   last: FakeHandle | null = null
   /** 오케스트레이터에게만 오는 도구 — 붙는지/안 붙는지를 테스트가 본다 */
@@ -410,7 +410,7 @@ describe('RPC 일반', () => {
 describe('이전 세션 불러오기', () => {
   class ListingAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
     }
     listed: { cwd: string; limit: number } | null = null
     read: { externalId: string; cwd: string } | null = null
@@ -672,6 +672,66 @@ describe('밖에서 바뀌지 않은 기록은 다시 읽지 않는다', () => {
 
     expect(a.reads).toBe(2)
   })
+
+  /*
+   * writer lock이 있는 도구(codex): 우리가 핸들을 쥔 동안 밖에서 못 쓴다.
+   * 그래서 내려놓는 시각의 표식이 "그보다 오래된 변화는 전부 우리 것"을 뜻할 수 있다.
+   * 이게 없으면 앱 안에서 대화할 때마다 updatedAt이 올라가서, 매일 쓰는 세션의
+   * 아침 첫 깨우기가 항상 전문 읽기(실측 48.6MB/8.9초)에 걸렸다.
+   */
+  class LockingAdapter extends SyncAdapter {
+    override readonly capabilities: AdapterCapabilities = {
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: true,
+    }
+  }
+
+  it('잠금 도구는 앱 안에서 한 대화 때문에 다시 읽지 않는다 — 내려놓은 표식이 덮는다', async () => {
+    const a = new LockingAdapter()
+    const first = relaunch(a)
+    const p = (await first.call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await first.call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
+      id: string
+    }
+    // 앱 안에서 대화했다 — 도구 쪽 updatedAt이 올라간다 (내려놓기 전이므로 전부 우리 것)
+    await first.call('agents.send', { sessionId: s.id, text: '작업해줘' })
+    a.updatedAt = Date.now() - 1000
+    await first.m.disposeAll() // 여기서 표식이 찍힌다
+
+    const second = relaunch(a)
+    await second.call('agents.send', { sessionId: s.id, text: '이어서' })
+    expect(a.reads).toBe(0) // 바뀐 건 전부 우리가 한 말이다 — 전문을 안 읽는다
+  })
+
+  it('잠금 도구도 내려놓은 뒤 밖에서 쓰면 읽는다 — 표식은 게으름이지 귀마개가 아니다', async () => {
+    const a = new LockingAdapter()
+    const first = relaunch(a)
+    const p = (await first.call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await first.call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
+      id: string
+    }
+    await first.m.disposeAll()
+
+    a.updatedAt = Date.now() + 60_000 // 내려놓은 뒤 터미널에서 이어갔다
+    const second = relaunch(a)
+    await second.call('agents.send', { sessionId: s.id, text: '이어서' })
+    expect(a.reads).toBe(1)
+  })
+
+  it('잠금 없는 도구에는 표식을 찍지 않는다 — 살아 있는 동안 밖에서 쓴 말이 사라지면 안 된다', async () => {
+    const a = new SyncAdapter() // exclusiveWriter: false (claude의 모양)
+    const first = relaunch(a)
+    const p = (await first.call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await first.call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
+      id: string
+    }
+    // 살아 있는 동안 밖에서도 썼다 (claude에는 잠금이 없어 가능하다)
+    a.updatedAt = Date.now() - 1000
+    await first.m.disposeAll()
+
+    const second = relaunch(a)
+    await second.call('agents.send', { sessionId: s.id, text: '이어서' })
+    expect(a.reads).toBe(1) // 표식이 그 말을 덮었다면 여기가 0이 된다
+  })
 })
 
 /**
@@ -791,7 +851,7 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
 describe('지운 세션은 이전 대화 목록에서 되찾을 수 있다', () => {
   class ListingAdapter2 extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
     }
     async listExternalSessions() {
       return [{ externalId: 'ext-past', title: '어제 하던 일', updatedAt: 111 }]
@@ -843,7 +903,7 @@ describe('지운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
 describe('도구가 대화를 못 찾을 때', () => {
   class GoneAdapter extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
     }
     /** 도구가 갖고 있다고 답할 id 목록 */
     present: string[] = ['ext-1']

@@ -129,6 +129,11 @@ const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
  * 도구마다 단위가 달라도 상관없다 — 비교는 언제나 같은 도구가 준 값끼리다.
  */
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
+/*
+ * 값의 뜻: **이 시각까지의 밖 기록은 전부 내가 아는 내용이다.** 두 손이 쓴다 —
+ * 따라잡기가 읽고 나서(도구가 준 updatedAt), 그리고 writer lock이 있는 도구의 핸들을
+ * 내려놓을 때(우리 시계). 같은 기계라 두 시계는 비교 가능하다.
+ */
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -1992,6 +1997,29 @@ export class SessionManager {
    * **판단이 안 서면 없다고 하지 않는다** — 목록을 못 받았다고 멀쩡한 세션을
    * 삭제된 것으로 막아버리면, 도구가 잠깐 응답하지 않는 것만으로 대화가 끊긴다.
    */
+  /**
+   * 핸들을 내려놓는 순간, "여기까지는 전부 내가 아는 내용"이라고 적는다.
+   *
+   * 스킵 표식(externalSyncedKey)은 따라잡기가 읽을 때만 갱신됐다. 그런데 앱 안에서
+   * 대화하면 도구의 updatedAt이 올라가므로, **매일 쓰는 세션일수록** 다음 깨우기가
+   * "밖에서 바뀌었나?"에 걸려 전문을 다시 읽었다 — 읽어 봐야 전부 우리가 한 말인데.
+   * 스킵이 정작 제일 흔한 경우(아침 첫 깨우기)에 안 걸리는 셈이었다.
+   *
+   * writer lock이 있는 도구(capabilities.exclusiveWriter — codex)는 우리가 핸들을
+   * 쥔 동안 밖에서 못 쓴다. 그러니 내려놓는 시각을 찍으면: 그보다 오래된 변화는
+   * 전부 우리 것(스킵), 그 뒤의 변화는 진짜 밖의 것(읽음). 크래시로 여기를 못
+   * 지나면 표식이 낡은 채 남고, 낡은 표식은 읽는 쪽으로 떨어진다 — 안전한 방향이다.
+   *
+   * 잠금이 없는 도구(claude)에는 찍지 않는다: 살아 있는 동안 밖에서 쓴 말이
+   * 영영 안 들어오게 된다. 도구 이름이 아니라 능력 선언으로 가른다.
+   */
+  private stampExternalSynced(sessionId: string): void {
+    const m = this.meta.get(sessionId)
+    if (!m || !(m.externalId ?? m.importedFrom)) return
+    if (!this.adapters.get(m.tool)?.capabilities.exclusiveWriter) return
+    this.store.setAppSetting(externalSyncedKey(sessionId), String(Date.now()))
+  }
+
   private async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
     const id = m.externalId ?? m.importedFrom
     if (!id) return false
@@ -2332,6 +2360,8 @@ export class SessionManager {
     if (h) {
       this.closeStream(sessionId) // 죽는 프로세스의 마지막 말을 남긴다 (#66)
       await h.dispose().catch(() => {})
+      // dispose가 **끝난 뒤에** 찍는다 — 내려가는 프로세스의 마지막 flush까지 표식 안쪽에 들어오게
+      this.stampExternalSynced(sessionId)
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
     }
@@ -2921,6 +2951,9 @@ export class SessionManager {
     for (const id of [...this.streams.keys()]) this.closeStream(id)
     // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
     await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
+    // dispose가 끝난 뒤에 찍는다 (stampExternalSynced 주석). 크래시에는 안 찍는다 —
+    // 죽은 시각을 모르는데 지금 시각을 찍으면 죽음~발견 사이의 밖 기록을 삼킬 수 있다.
+    for (const id of this.handles.keys()) this.stampExternalSynced(id)
     this.handles.clear()
   }
 
