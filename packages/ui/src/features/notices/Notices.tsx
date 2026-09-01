@@ -55,7 +55,12 @@ export function Notices() {
       data-testid="notices"
     >
       {notices.map((n) => (
-        <NoticeCard key={n.sessionId} notice={n} onOpen={() => focusSession(n.sessionId)} onClose={() => dismiss([n.sessionId])} />
+        <NoticeCard
+          key={n.sessionId}
+          notice={n}
+          onOpen={() => focusSession(n.sessionId, { preferGrid: true })}
+          onClose={() => dismiss([n.sessionId])}
+        />
       ))}
     </div>
   )
@@ -68,7 +73,15 @@ const LOOK: Record<Notice['kind'], { label: string; edge: string }> = {
   done: { label: 'Finished', edge: 'border-l-graphite' },
 }
 
-function NoticeCard({ notice, onOpen, onClose }: { notice: Notice; onOpen: () => void; onClose: () => void }) {
+function NoticeCard({
+  notice,
+  onOpen,
+  onClose,
+}: {
+  notice: Notice
+  onOpen: () => void
+  onClose: () => void
+}) {
   const look = LOOK[notice.kind]
   return (
     <div

@@ -24,6 +24,13 @@ import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reor
 export function GridView() {
   const panels = useStore((s) => s.gridPanels)
   const sessions = useStore((s) => s.sessions)
+  /*
+   * 고른 칸. 그리드에서 "고른 것"은 오래 아무 뜻이 없었다 — 열두 칸이 똑같이 서 있고
+   * 보는 화면이니 그럴 만했다. 알림에서 그리드로 오는 길이 생기면서 뜻이 생겼다
+   * (store의 preferGrid): 온 사람은 **어느 칸 때문에 왔는지** 알아야 하고, 이어서
+   * 답을 치려면 그 칸의 입력창에 손이 가 있어야 한다.
+   */
+  const focusedSessionId = useStore((s) => s.focusedSessionId)
   const setGridPanels = useStore((s) => s.setGridPanels)
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
@@ -58,6 +65,23 @@ export function GridView() {
     }
     scrolls.current.clear()
   })
+
+  /*
+   * 고른 칸의 입력창에 손을 얹는다.
+   *
+   * 알림에서 그리드로 온 사람은 **답을 하러** 온 것이다 — 칸이 밝아진 것만으로는
+   * 어느 입력창에 쳐야 하는지 손이 모르고, 열두 칸 중에서 그걸 찾아 누르는 일이
+   * 남는다. 그리드는 칸을 클릭해도 고른 것이 바뀌지 않으므로(여기엔 focusSession을
+   * 부르는 자리가 없다), 이 효과가 사람의 손을 뺏을 일도 없다: 값이 바뀌는 경우는
+   * 밖에서 데려온 경우뿐이다.
+   */
+  useEffect(() => {
+    if (!focusedSessionId) return
+    const input = cards.current
+      .get(focusedSessionId)
+      ?.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')
+    input?.focus()
+  }, [focusedSessionId])
 
   /** Call before any state change that can reorder the panels */
   const snapshotScroll = () => {
@@ -203,9 +227,16 @@ export function GridView() {
                 칸이 여럿일 때 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다 —
                 그리드는 읽는 화면이 아니라 **보는 화면**이라 곁눈으로 잡혀야 한다.
               */
-              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge bg-void transition-opacity ${
-                sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
-              } ${dragging === id ? 'opacity-40' : ''}`}
+              /*
+                고른 칸은 테두리가 밝다. 도는 테두리(응답 중)와 겹쳐도 읽힌다 —
+                하나는 움직임이고 하나는 밝기라, 무채색 규칙 안에서 서로 다른 축이다.
+              */
+              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border bg-void transition-opacity ${
+                focusedSessionId === id ? 'border-slate' : 'border-edge'
+              } ${sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''} ${
+                dragging === id ? 'opacity-40' : ''
+              }`}
+              data-focused={focusedSessionId === id || undefined}
               data-testid={`grid-panel-${id}`}
               /*
                 Where the dragged thing lands relative to this panel. The edge line that used

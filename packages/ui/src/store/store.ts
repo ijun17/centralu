@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { SessionInfo } from '@cc/protocol'
-import type { Attachment, NormalizedEvent, PermissionPreset, ProjectInfo, QuestionAnswer, StoredMessage, ToolName, UpdateStatus } from '@cc/protocol'
+import type {
+  Attachment,
+  NormalizedEvent,
+  PermissionPreset,
+  ProjectInfo,
+  QuestionAnswer,
+  StoredMessage,
+  ToolName,
+  UpdateStatus,
+} from '@cc/protocol'
 import {
   allDoneNotification,
   applyEvent,
@@ -39,7 +48,13 @@ import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type Panel
  */
 export type Overlay =
   | { kind: 'viewer' }
-  | { kind: 'git'; path?: string | null; sha?: string | null; sub?: 'changes' | 'history' | 'branches'; pick: number }
+  | {
+      kind: 'git'
+      path?: string | null
+      sha?: string | null
+      sub?: 'changes' | 'history' | 'branches'
+      pick: number
+    }
   | null
 
 /** 앞서 연 것보다 하나 큰 번호. 깃 밖에서 오면 다시 1부터 — 그 사이 패널은 새로 붙는다 */
@@ -141,7 +156,14 @@ export type ChatItem =
    * attachments: 함께 실어 보낸 것들. 이미지는 실물 썸네일로 그린다 (📎 라벨의 후신 —
    * 라벨을 text에 섞던 시절엔 그린 것과 보낸 것이 달라 이중 렌더가 났다, #75).
    */
-  | { kind: 'user'; seq: number; text: string; attachments?: ChatAttachment[]; pending?: boolean; from?: { sessionId: string; name: string } }
+  | {
+      kind: 'user'
+      seq: number
+      text: string
+      attachments?: ChatAttachment[]
+      pending?: boolean
+      from?: { sessionId: string; name: string }
+    }
   | { kind: 'assistant'; seq: number; text: string }
   /** 추론 요약 (#58). codex만 텍스트를 준다 — claude의 생각은 세션의 thinkingTokens로만 보인다 */
   | { kind: 'reasoning'; seq: number; text: string }
@@ -151,7 +173,16 @@ export type ChatItem =
    */
   | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
   /** live: 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오면 버린다 — 전체는 result에 있다 */
-  | { kind: 'tool'; seq: number; tool: string; title: string; readOnly: boolean; result?: string; ok?: boolean; live?: string }
+  | {
+      kind: 'tool'
+      seq: number
+      tool: string
+      title: string
+      readOnly: boolean
+      result?: string
+      ok?: boolean
+      live?: string
+    }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
   /** 대화의 경계 표식 (압축 지점 등). 대화가 아니라 대화에 대한 사실이다 */
   | { kind: 'mark'; seq: number; text: string }
@@ -398,7 +429,16 @@ export type AppState = {
 
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
-  focusSession(id: string | null): void
+  /**
+   * Show a session.
+   *
+   * `preferGrid` is for the doors that alerts open (the inbox, the "done" cards): if the
+   * session already has a panel on the grid, go there instead of replacing the grid with
+   * one big pane. You put it on the grid to watch it; an alert about it is not a reason to
+   * take the other panels off the screen. Deliberate navigation — the sidebar, the palette —
+   * leaves this off: picking a row means "give me that one, large".
+   */
+  focusSession(id: string | null, opts?: { preferGrid?: boolean }): void
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
   /** 알림 카드를 걷는다 (×를 누르거나, 그 세션을 보게 됐거나) */
@@ -507,7 +547,10 @@ export type AppState = {
   gitStage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
   gitCommit(projectId: string, message: string): Promise<{ ok: boolean; message?: string }>
   /** Switching branch is the one of these that moves the **name** the sidebar shows, not the count */
-  gitCheckout(projectId: string, branch: string): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
+  gitCheckout(
+    projectId: string,
+    branch: string,
+  ): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
   /**
    * Replace this project's saved shell commands (issue #44).
    * Adding one and deleting one both arrive here as "the list is this now".
@@ -540,7 +583,12 @@ export type AppState = {
   ): Promise<SessionInfo>
   send(sessionId: string, text: string, attachments?: ChatAttachment[]): Promise<void>
   attachFile(sessionId: string, file: File): Promise<ChatAttachment | null>
-  respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
+  respondApproval(
+    sessionId: string,
+    requestId: string,
+    decision: 'allow' | 'deny' | 'always',
+    scope?: 'session' | 'project',
+  ): Promise<void>
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
@@ -550,7 +598,13 @@ export type AppState = {
   deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
   updateSessionSettings(
     sessionId: string,
-    s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
+    s: {
+      model?: string | null
+      effort?: string | null
+      verbosity?: string | null
+      serviceTier?: string | null
+      permissionPreset?: PermissionPreset
+    },
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /**
@@ -762,7 +816,12 @@ const gitRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
   if (a === b) return true
   if (!a || !b) return false
-  return a.branch === b.branch && a.changedFiles === b.changedFiles && a.isRepo === b.isRepo && a.denied === b.denied
+  return (
+    a.branch === b.branch &&
+    a.changedFiles === b.changedFiles &&
+    a.isRepo === b.isRepo &&
+    a.denied === b.denied
+  )
 }
 
 /**
@@ -941,12 +1000,27 @@ export const useStore = create<AppState>((set, get) => ({
            * all of these — two places that construct one thing have to ask for one set.
            */
           ...initialSession({
-            id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
-            model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier, permissionPreset: s.permissionPreset, worktree: s.worktree,
-            parentSessionId: s.parentSessionId, merged: s.worktreeMerged,
+            id: s.id,
+            projectId: s.projectId,
+            kind: s.kind,
+            name: s.name,
+            tool: s.tool,
+            model: s.model,
+            effort: s.effort,
+            verbosity: s.verbosity,
+            serviceTier: s.serviceTier,
+            permissionPreset: s.permissionPreset,
+            worktree: s.worktree,
+            parentSessionId: s.parentSessionId,
+            merged: s.worktreeMerged,
           }),
-          autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
-          lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
+          autoNamed: s.autoNamed,
+          state: s.state,
+          archived: s.archived,
+          live: s.live,
+          lastSeq: s.lastSeq,
+          lastReadSeq: s.lastReadSeq,
+          waitingSince: s.waitingSince,
           // 살아-있는-동안 사실들도 host가 준다 — 이게 없으면 state=waiting_approval인데
           // 카드를 그릴 payload가 없어 승인 요청이 화면에 영영 안 나타난다 (재시작 후 실측)
           ...liveFactsOf(s),
@@ -1155,11 +1229,19 @@ export const useStore = create<AppState>((set, get) => ({
         e.effort !== cur0.effort ? `effort ${e.effort ?? 'default'}` : null,
         e.verbosity !== cur0.verbosity ? `verbosity ${e.verbosity ?? 'default'}` : null,
         (e.serviceTier ?? null) !== cur0.serviceTier ? `speed ${e.serviceTier ?? 'default'}` : null,
-      ].filter(Boolean).join(' · ')
+      ]
+        .filter(Boolean)
+        .join(' · ')
       set((s) => ({
         sessions: {
           ...s.sessions,
-          [sessionId]: { ...s.sessions[sessionId]!, model: e.model, effort: e.effort, verbosity: e.verbosity, serviceTier: e.serviceTier ?? null },
+          [sessionId]: {
+            ...s.sessions[sessionId]!,
+            model: e.model,
+            effort: e.effort,
+            verbosity: e.verbosity,
+            serviceTier: e.serviceTier ?? null,
+          },
         },
         ...(what ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
       }))
@@ -1204,7 +1286,12 @@ export const useStore = create<AppState>((set, get) => ({
       if (seen) {
         set({ completion: { sessionId, at: Date.now() } })
       } else {
-        pushNotice(set, { sessionId, kind: 'done', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
+        pushNotice(set, {
+          sessionId,
+          kind: 'done',
+          name: s.sessions[sessionId]?.name ?? sessionId,
+          at: Date.now(),
+        })
         /*
          * 카드와 소리는 함께 간다. 카드만 쌓이고 소리가 없으면 "카드가 떴는데 왜 안
          * 불렀지"가 되고, 자리를 비운 사람에게 카드는 돌아와야 보이는 것이라 반쪽이다.
@@ -1246,12 +1333,27 @@ export const useStore = create<AppState>((set, get) => ({
             ...st.sessions,
             [s.id]: {
               ...initialSession({
-                id: s.id, projectId: s.projectId, kind: s.kind, name: s.name, tool: s.tool,
-                model: s.model, effort: s.effort, verbosity: s.verbosity, serviceTier: s.serviceTier,
-                permissionPreset: s.permissionPreset, worktree: s.worktree, parentSessionId: s.parentSessionId, merged: s.worktreeMerged,
+                id: s.id,
+                projectId: s.projectId,
+                kind: s.kind,
+                name: s.name,
+                tool: s.tool,
+                model: s.model,
+                effort: s.effort,
+                verbosity: s.verbosity,
+                serviceTier: s.serviceTier,
+                permissionPreset: s.permissionPreset,
+                worktree: s.worktree,
+                parentSessionId: s.parentSessionId,
+                merged: s.worktreeMerged,
               }),
-              autoNamed: s.autoNamed, state: s.state, archived: s.archived, live: s.live,
-              lastSeq: s.lastSeq, lastReadSeq: s.lastReadSeq, waitingSince: s.waitingSince,
+              autoNamed: s.autoNamed,
+              state: s.state,
+              archived: s.archived,
+              live: s.live,
+              lastSeq: s.lastSeq,
+              lastReadSeq: s.lastReadSeq,
+              waitingSince: s.waitingSince,
               ...liveFactsOf(s),
             },
           },
@@ -1307,7 +1409,9 @@ export const useStore = create<AppState>((set, get) => ({
     if (e.type === 'tool_call' && /propose_worktree_session$/.test(e.summary.tool) && cur.projectId) {
       const branch = /propose_worktree_session$/.test(e.summary.title) ? '' : e.summary.title
       set((st) => ({
-        worktreeProposals: st.worktreeProposals.some((p) => p.projectId === cur.projectId && p.branch === branch)
+        worktreeProposals: st.worktreeProposals.some(
+          (p) => p.projectId === cur.projectId && p.branch === branch,
+        )
           ? st.worktreeProposals // 같은 제안이 다시 와도 줄을 서지 않는다 (재생·재연결 멱등)
           : [...st.worktreeProposals, { projectId: cur.projectId as string, branch }],
       }))
@@ -1389,7 +1493,7 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
-  focusSession(id) {
+  focusSession(id, opts) {
     const prev = get().focusedSessionId
     const projectId = id ? get().sessions[id]?.projectId : undefined
     /*
@@ -1415,13 +1519,16 @@ export const useStore = create<AppState>((set, get) => ({
      * (인박스·알림 카드·팔레트·승인 배너·단축키…). 그중 하나만 오케스트레이터를
      * 만나도 같은 증상이 나므로, 판단은 부르는 쪽이 아니라 여기 한 곳에 있어야 한다.
      */
-    const orchestrator =
-      !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
+    const orchestrator = !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
+    // 이미 그리드에 올라와 있는 세션이면 그리드가 목적지다 (위 preferGrid 주석)
+    const onGrid = !!id && !!opts?.preferGrid && get().gridPanels.includes(id)
     // 세션을 바꾸면 덮어둔 것은 걷는다 — 새 세션의 대화가 먼저 보여야 한다
     set({
       focusedSessionId: id,
       overlay: null,
-      ...(id ? { view: orchestrator ? ('orchestrator' as const) : ('focus' as const) } : {}),
+      ...(id
+        ? { view: orchestrator ? ('orchestrator' as const) : onGrid ? ('grid' as const) : ('focus' as const) }
+        : {}),
       ...(projectId ? { focusedProjectId: projectId } : {}),
     })
     get().saveWorkspace()
@@ -1701,7 +1808,12 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => {
         const p = s.projects[projectId]
         return p
-          ? { projects: { ...s.projects, [projectId]: { ...p, worktreeManager: { sessionId: info.id, baseBranch } } } }
+          ? {
+              projects: {
+                ...s.projects,
+                [projectId]: { ...p, worktreeManager: { sessionId: info.id, baseBranch } },
+              },
+            }
           : {}
       })
       get().focusSession(info.id)
@@ -1736,7 +1848,9 @@ export const useStore = create<AppState>((set, get) => ({
      */
     set((s) => {
       const projects = omitKey(s.projects, projectId)
-      const doomed = Object.values(s.sessions).filter((x) => x.projectId === projectId).map((x) => x.id)
+      const doomed = Object.values(s.sessions)
+        .filter((x) => x.projectId === projectId)
+        .map((x) => x.id)
       const sessions = { ...s.sessions }
       const chat = { ...s.chat }
       for (const id of doomed) {
@@ -1891,9 +2005,14 @@ export const useStore = create<AppState>((set, get) => ({
         ...s.sessions,
         [info.id]: {
           ...initialSession({
-            id: info.id, projectId, name: info.name, tool: info.tool, worktree: info.worktree,
+            id: info.id,
+            projectId,
+            name: info.name,
+            tool: info.tool,
+            worktree: info.worktree,
             // 소속도 host가 정한다 (#69) — 빠뜨리면 매니저 아래 만든 세션이 재시작 전까지 최상위에 선다
-            parentSessionId: info.parentSessionId, merged: info.worktreeMerged,
+            parentSessionId: info.parentSessionId,
+            merged: info.worktreeMerged,
           }),
           lastSeq: info.lastSeq,
           lastReadSeq: info.lastReadSeq,
@@ -1917,7 +2036,10 @@ export const useStore = create<AppState>((set, get) => ({
       // pending을 세우는 이유: host도 첫 프롬프트를 저장하고 user_message로 알린다 —
       // 이 표식이 없으면 재생된 그 이벤트가 같은 말을 한 번 더 그린다 (send()와 같은 규칙)
       chat: opts?.initialPrompt
-        ? { ...s.chat, [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt, pending: true }] }
+        ? {
+            ...s.chat,
+            [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt, pending: true }],
+          }
         : s.chat,
     }))
     /*
@@ -2011,7 +2133,11 @@ export const useStore = create<AppState>((set, get) => ({
     })
     try {
       // 바이트는 이미 host의 파일에 있다 — 전송에는 경로만 싣는다 (data를 실으면 페이로드가 두 배)
-      await get().platform!.agents.send(sessionId, text, attachments?.map(({ data: _, ...a }) => a))
+      await get().platform!.agents.send(
+        sessionId,
+        text,
+        attachments?.map(({ data: _, ...a }) => a),
+      )
       // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
       set((s) => ({
         sessions: s.sessions[sessionId]?.live
@@ -2291,7 +2417,10 @@ export const useStore = create<AppState>((set, get) => ({
       if (!info) return
       set((s) => ({
         orchestratorId: info.id,
-        sessions: { ...s.sessions, [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }) },
+        sessions: {
+          ...s.sessions,
+          [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }),
+        },
       }))
       // 여기도 세션이 처음 등록되는 길목이다 — 보관해 둔 이벤트가 있으면 재생한다
       replayPendingEvents(get)
@@ -2313,7 +2442,10 @@ export const useStore = create<AppState>((set, get) => ({
         const info = await platform.agents.orchestrator()
         set((s) => ({
           orchestratorId: info.id,
-          sessions: { ...s.sessions, [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }) },
+          sessions: {
+            ...s.sessions,
+            [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }),
+          },
         }))
         replayPendingEvents(get)
         id = info.id
@@ -2406,19 +2538,49 @@ export const useStore = create<AppState>((set, get) => ({
         sessions[f.id] = cur
           ? {
               ...cur,
-              projectId: f.projectId, kind: f.kind, tool: f.tool, name: f.name, autoNamed: f.autoNamed,
-              state: f.state, archived: f.archived, live: f.live,
+              projectId: f.projectId,
+              kind: f.kind,
+              tool: f.tool,
+              name: f.name,
+              autoNamed: f.autoNamed,
+              state: f.state,
+              archived: f.archived,
+              live: f.live,
               // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
-              lastSeq: Math.max(cur.lastSeq, f.lastSeq), lastReadSeq: f.lastReadSeq,
-              waitingSince: f.waitingSince, model: f.model, effort: f.effort, verbosity: f.verbosity, permissionPreset: f.permissionPreset,
+              lastSeq: Math.max(cur.lastSeq, f.lastSeq),
+              lastReadSeq: f.lastReadSeq,
+              waitingSince: f.waitingSince,
+              model: f.model,
+              effort: f.effort,
+              verbosity: f.verbosity,
+              permissionPreset: f.permissionPreset,
               worktree: f.worktree,
-              parentSessionId: f.parentSessionId, merged: f.worktreeMerged,
+              parentSessionId: f.parentSessionId,
+              merged: f.worktreeMerged,
               ...liveFactsOf(f),
             }
           : {
-              ...initialSession({ id: f.id, projectId: f.projectId, kind: f.kind, name: f.name, tool: f.tool, effort: f.effort, verbosity: f.verbosity, model: f.model, permissionPreset: f.permissionPreset, worktree: f.worktree, parentSessionId: f.parentSessionId, merged: f.worktreeMerged }),
-              autoNamed: f.autoNamed, state: f.state, archived: f.archived, live: f.live,
-              lastSeq: f.lastSeq, lastReadSeq: f.lastReadSeq, waitingSince: f.waitingSince,
+              ...initialSession({
+                id: f.id,
+                projectId: f.projectId,
+                kind: f.kind,
+                name: f.name,
+                tool: f.tool,
+                effort: f.effort,
+                verbosity: f.verbosity,
+                model: f.model,
+                permissionPreset: f.permissionPreset,
+                worktree: f.worktree,
+                parentSessionId: f.parentSessionId,
+                merged: f.worktreeMerged,
+              }),
+              autoNamed: f.autoNamed,
+              state: f.state,
+              archived: f.archived,
+              live: f.live,
+              lastSeq: f.lastSeq,
+              lastReadSeq: f.lastReadSeq,
+              waitingSince: f.waitingSince,
               ...liveFactsOf(f),
             }
       }
@@ -2443,7 +2605,9 @@ export const useStore = create<AppState>((set, get) => ({
 
     // 끊기기 직전에 돌고 있었는데 새 host가 모르는 프로세스만 되살린다
     const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
-    const toWake = wasLive.filter((x) => !alive.has(x.id) && get().sessions[x.id] && !get().sessions[x.id]!.archived)
+    const toWake = wasLive.filter(
+      (x) => !alive.has(x.id) && get().sessions[x.id] && !get().sessions[x.id]!.archived,
+    )
     if (toWake.length === 0) return
 
     set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
@@ -2491,7 +2655,9 @@ export const useStore = create<AppState>((set, get) => ({
       const res = await s.platform.agents.forkConversation(sessionId)
       set((st) => ({
         sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
-        wakeError: res.resumed ? omitKey(st.wakeError, sessionId) : { ...st.wakeError, [sessionId]: res.reason ?? '' },
+        wakeError: res.resumed
+          ? omitKey(st.wakeError, sessionId)
+          : { ...st.wakeError, [sessionId]: res.reason ?? '' },
         // 갈라졌으면 더는 잠긴 상태가 아니다 — 실패했으면 갈림길은 그대로 남겨 둔다
         wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
         toast: res.resumed
@@ -2536,7 +2702,9 @@ export const useStore = create<AppState>((set, get) => ({
       const r = await platform.agents.restartSession(sessionId)
       set((s) => ({
         sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
-        wakeError: r.resumed ? omitKey(s.wakeError, sessionId) : { ...s.wakeError, [sessionId]: r.reason ?? '' },
+        wakeError: r.resumed
+          ? omitKey(s.wakeError, sessionId)
+          : { ...s.wakeError, [sessionId]: r.reason ?? '' },
         toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
       }))
       return r.resumed
@@ -2576,7 +2744,9 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get().sessions[sessionId]
     if (!s || s.lastReadSeq >= s.lastSeq) return
     await get().platform!.agents.markRead(sessionId, s.lastSeq)
-    set((st) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(st.sessions[sessionId]!, s.lastSeq) } }))
+    set((st) => ({
+      sessions: { ...st.sessions, [sessionId]: markReadPure(st.sessions[sessionId]!, s.lastSeq) },
+    }))
   },
 }))
 
@@ -2612,16 +2782,30 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       return [...items, { kind: 'reasoning', seq: ++chatSeq, text: e.text }]
     }
     case 'tool_call':
-      return [...items, { kind: 'tool', seq: ++chatSeq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly }]
+      return [
+        ...items,
+        {
+          kind: 'tool',
+          seq: ++chatSeq,
+          tool: e.summary.tool,
+          title: e.summary.title,
+          readOnly: e.summary.readOnly,
+        },
+      ]
     case 'message_image':
-      return [...items, { kind: 'image', seq: ++chatSeq, mime: e.mime, data: e.data, path: e.path, note: e.note }]
+      return [
+        ...items,
+        { kind: 'image', seq: ++chatSeq, mime: e.mime, data: e.data, path: e.path, note: e.note },
+      ]
     case 'tool_result': {
       const idx = [...items].reverse().findIndex((i) => i.kind === 'tool' && i.result === undefined)
       if (idx === -1) return items
       const real = items.length - 1 - idx
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       // live는 여기서 버린다 — 완주한 출력 전체가 result로 왔으므로 조각은 역할이 끝났다
-      return items.map((it, i) => (i === real ? { ...target, result: e.summary, ok: e.ok, live: undefined } : it))
+      return items.map((it, i) =>
+        i === real ? { ...target, result: e.summary, ok: e.ok, live: undefined } : it,
+      )
     }
     /*
      * 실행 중 출력 (#58). tool_result와 같은 규칙으로 "열려 있는 마지막 도구 줄"에 단다 —
@@ -2640,12 +2824,21 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       return [
         ...items,
         {
-          kind: 'approval', seq: ++chatSeq, requestId: e.requestId,
-          summary: e.detail.kind === 'command' ? e.detail.command : e.detail.kind === 'file_edit' ? e.detail.path : e.detail.raw,
+          kind: 'approval',
+          seq: ++chatSeq,
+          requestId: e.requestId,
+          summary:
+            e.detail.kind === 'command'
+              ? e.detail.command
+              : e.detail.kind === 'file_edit'
+                ? e.detail.path
+                : e.detail.raw,
         },
       ]
     case 'approval_resolved':
-      return items.map((it) => (it.kind === 'approval' && it.requestId === e.requestId ? { ...it, decision: e.decision } : it))
+      return items.map((it) =>
+        it.kind === 'approval' && it.requestId === e.requestId ? { ...it, decision: e.decision } : it,
+      )
     case 'user_message': {
       /*
        * 내가 보낸 말이면 이미 그려져 있다 — 확정만 한다.
@@ -2661,11 +2854,12 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * 보낸 것이 달라 확정이 안 맞물리고 두 번째 말풍선이 붙었다 (코덱스에서 발견).
        * 지금은 첨부가 별도 필드라 text가 곧 원문이다 — 이 동일성이 이 대조의 전제다.
        */
-      const idx = e.from
-        ? -1
-        : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
-      if (idx === -1) return [...items, { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}) }]
-      return items.map((it, i) => (i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it))
+      const idx = e.from ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      if (idx === -1)
+        return [...items, { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}) }]
+      return items.map((it, i) =>
+        i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it,
+      )
     }
     case 'history_synced':
       // 실제 내용은 저장소에 들어갔다 — 화면은 dispatchEvent 밖에서 다시 읽는다
@@ -2700,7 +2894,11 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of msgs) {
     if (m.kind === 'text' && m.role === 'user') {
-      const p = m.payload as { text?: string; from?: { sessionId: string; name: string }; attachments?: ChatAttachment[] }
+      const p = m.payload as {
+        text?: string
+        from?: { sessionId: string; name: string }
+        attachments?: ChatAttachment[]
+      }
       items.push({
         kind: 'user',
         seq: m.seq,
@@ -2726,11 +2924,25 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       items.push({ kind: 'mark', seq: m.seq, text: compactionText(e) })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
-      if (e.summary) items.push({ kind: 'tool', seq: m.seq, tool: e.summary.tool, title: e.summary.title, readOnly: e.summary.readOnly })
+      if (e.summary)
+        items.push({
+          kind: 'tool',
+          seq: m.seq,
+          tool: e.summary.tool,
+          title: e.summary.title,
+          readOnly: e.summary.readOnly,
+        })
     } else if (m.kind === 'image') {
       // 이미지는 영속된다 (#40 2차) — host가 파일에서 바이트를 다시 실어 보낸다
       const e = m.payload as { mime?: string; data?: string; path?: string; note?: string }
-      items.push({ kind: 'image', seq: m.seq, mime: e.mime ?? '', data: e.data ?? '', path: e.path, note: e.note })
+      items.push({
+        kind: 'image',
+        seq: m.seq,
+        mime: e.mime ?? '',
+        data: e.data ?? '',
+        path: e.path,
+        note: e.note,
+      })
     }
   }
   return items

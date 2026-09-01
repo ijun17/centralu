@@ -45,7 +45,7 @@ export function Inbox() {
       else if (e.key === 'Enter') {
         const item = items[cursor]
         if (item) {
-          focusSession(item.id)
+          focusSession(item.id, { preferGrid: true })
           toggle(false)
         }
       } else if (letter === 'd') {
@@ -104,12 +104,10 @@ export function Inbox() {
               <li key={it.id}>
                 <button
                   className={`flex w-full items-center gap-2.5 border-l-2 py-2 pl-3 pr-4 text-left transition-colors ${
-                    i === cursor
-                      ? 'border-l-ash bg-graphite/40'
-                      : 'border-l-transparent hover:bg-graphite/20'
+                    i === cursor ? 'border-l-ash bg-graphite/40' : 'border-l-transparent hover:bg-graphite/20'
                   }`}
                   onClick={() => {
-                    focusSession(it.id)
+                    focusSession(it.id, { preferGrid: true })
                     toggle(false)
                   }}
                   data-testid={`inbox-item-${it.id}`}

@@ -24,7 +24,12 @@ async function setup(page: Page, path = '/tmp/alpha') {
 }
 
 /** 세션 하나를 만들고 그 id를 돌려준다 */
-async function newSession(page: Page, project: string, tool: 'claude' | 'codex', prompt: string): Promise<string> {
+async function newSession(
+  page: Page,
+  project: string,
+  tool: 'claude' | 'codex',
+  prompt: string,
+): Promise<string> {
   await page.getByTestId(`project-menu-${project}`).click()
   await page.getByTestId(`new-session-${project}`).click()
   await page.getByTestId(`tool-option-${tool}`).click()
@@ -37,7 +42,10 @@ async function newSession(page: Page, project: string, tool: 'claude' | 'codex',
 }
 
 async function openGrid(page: Page, ids: string[]) {
-  await page.evaluate((l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l), ids)
+  await page.evaluate(
+    (l: string[]) => (window as never as { __store: any }).__store.getState().setGridPanels(l),
+    ids,
+  )
   await page.getByTestId('grid-button').click()
 }
 
@@ -128,7 +136,10 @@ test('포커스 뷰는 그대로 — 보고 있는 세션의 도구 하나만', 
  */
 
 /** `when`을 하루씩 뒤로 물려 커밋 목록을 만든다 (상대 날짜가 줄마다 달라지도록) */
-async function seedCommits(page: Page, list: { sha: string; subject: string; author: string; daysAgo: number }[]) {
+async function seedCommits(
+  page: Page,
+  list: { sha: string; subject: string; author: string; daysAgo: number }[],
+) {
   await page.evaluate((rows: typeof list) => {
     ;(window as never as { __mock: any }).__mock.gitState.commits = rows.map((r) => ({
       sha: r.sha,
@@ -219,7 +230,12 @@ test('상한에 못 미치면 끊겼다는 말도 하지 않는다', async ({ pa
   await setup(page)
   await seedCommits(
     page,
-    Array.from({ length: 12 }, (_, i) => ({ sha: `c${String(i).padStart(6, '0')}`, subject: `커밋 ${i}`, author: '나', daysAgo: i })),
+    Array.from({ length: 12 }, (_, i) => ({
+      sha: `c${String(i).padStart(6, '0')}`,
+      subject: `커밋 ${i}`,
+      author: '나',
+      daysAgo: i,
+    })),
   )
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -337,7 +353,12 @@ test('git 저장소가 아니면 기록 탭도 깃 탭처럼 비활성이다', a
     const store = (window as never as { __store: any }).__store
     const m = (window as never as { __mock: any }).__mock
     m.projects.add = async (path: string) => ({
-      id: 'p-nogit', path, name: 'nogit', defaultTool: 'claude', commands: [], git: null,
+      id: 'p-nogit',
+      path,
+      name: 'nogit',
+      defaultTool: 'claude',
+      commands: [],
+      git: null,
     })
     await store.getState().addProject('/tmp/nogit')
   })
@@ -363,7 +384,9 @@ async function commandRuns(page: Page): Promise<{ key: string; running: boolean;
   return page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     return [...m.commandRuns.entries()].map(([key, r]: [string, any]) => ({
-      key, running: r.running, history: r.history,
+      key,
+      running: r.running,
+      history: r.history,
     }))
   })
 }
@@ -489,7 +512,10 @@ test('명령어 창: 명령은 누른 칸의 프로젝트로 간다 — 직전�
   await page.keyboard.press('Escape')
 
   // 화면은 알파를 보고 있게 만든 다음 그리드로 간다
-  await page.evaluate((id: string) => (window as never as { __store: any }).__store.getState().focusSession(id), alpha)
+  await page.evaluate(
+    (id: string) => (window as never as { __store: any }).__store.getState().focusSession(id),
+    alpha,
+  )
   await openGrid(page, [alpha, beta])
   await expect(page.getByTestId(`grid-panel-${beta}`)).toBeVisible()
 
@@ -502,7 +528,8 @@ test('명령어 창: 명령은 누른 칸의 프로젝트로 간다 — 직전�
   expect(runs).toHaveLength(1)
   const betaProjectId = await page.evaluate(() => {
     const s = (window as never as { __store: any }).__store.getState()
-    return (Object.values(s.projects) as { id: string; path: string }[]).find((p) => p.path === '/tmp/beta')!.id
+    return (Object.values(s.projects) as { id: string; path: string }[]).find((p) => p.path === '/tmp/beta')!
+      .id
   })
   expect(runs[0]!.key.startsWith(betaProjectId)).toBe(true)
 })
@@ -572,8 +599,8 @@ test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 
 /** The panel order as the user sees it — DOM order is React's render order */
 async function panelOrder(page: Page): Promise<string[]> {
   return page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('[data-testid^="grid-panel-"]')].map(
-      (el) => el.dataset.testid!.slice('grid-panel-'.length),
+    [...document.querySelectorAll<HTMLElement>('[data-testid^="grid-panel-"]')].map((el) =>
+      el.dataset.testid!.slice('grid-panel-'.length),
     ),
   )
 }
@@ -618,7 +645,13 @@ async function dropOnPanel(page: Page, target: string, side: 'left' | 'right', f
       const r = card.getBoundingClientRect()
       const x = where === 'left' ? r.left + r.width * 0.2 : r.left + r.width * 0.8
       card.dispatchEvent(
-        new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: x, clientY: r.top + r.height / 2 }),
+        new DragEvent('drop', {
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: r.top + r.height / 2,
+        }),
       )
       document
         .querySelector(`[data-testid="grid-panel-${src}"] [data-testid="pane-header"]`)!
@@ -634,7 +667,10 @@ async function cancelDrag(page: Page, from: string) {
     document
       .querySelector(`[data-testid="grid-panel-${src}"] [data-testid="pane-header"]`)!
       .dispatchEvent(
-        new DragEvent('dragend', { dataTransfer: (window as never as { __dt?: DataTransfer }).__dt, bubbles: true }),
+        new DragEvent('dragend', {
+          dataTransfer: (window as never as { __dt?: DataTransfer }).__dt,
+          bubbles: true,
+        }),
       )
   }, from)
 }
@@ -655,8 +691,8 @@ const storedPanels = (page: Page): Promise<string[]> =>
 /** The strip order as the user sees it — every tab button, in DOM order */
 async function tabOrder(page: Page): Promise<string[]> {
   return page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('[data-testid^="evidence-tab-"]')].map(
-      (el) => el.dataset.testid!.slice('evidence-tab-'.length),
+    [...document.querySelectorAll<HTMLElement>('[data-testid^="evidence-tab-"]')].map((el) =>
+      el.dataset.testid!.slice('evidence-tab-'.length),
     ),
   )
 }
@@ -710,7 +746,9 @@ async function dropOnBodyBottom(page: Page) {
   })
 }
 
-test('tab order is dragged, and survives a relaunch — one arrangement for the whole app (#20)', async ({ page }) => {
+test('tab order is dragged, and survives a relaunch — one arrangement for the whole app (#20)', async ({
+  page,
+}) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
   expect(await tabOrder(page)).toEqual(['git', 'history', 'files', 'terminal'])
@@ -736,7 +774,9 @@ test('tab order is dragged, and survives a relaunch — one arrangement for the 
   await expect.poll(() => tabOrder(page)).toEqual(['terminal', 'git', 'history', 'files'])
 })
 
-test('dragging a tab to the bottom half splits the panel — two tabs visible at once (#20)', async ({ page }) => {
+test('dragging a tab to the bottom half splits the panel — two tabs visible at once (#20)', async ({
+  page,
+}) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -765,7 +805,9 @@ test('a tall top group never paints over the bottom group‘s tab strip', async 
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.gitState.files = Array.from({ length: 80 }, (_, i) => ({
-      path: `src/f${i}.ts`, staged: false, status: 'M',
+      path: `src/f${i}.ts`,
+      staged: false,
+      status: 'M',
     }))
   })
   await newSession(page, 'alpha', 'claude', '작업')
@@ -782,7 +824,9 @@ test('a tall top group never paints over the bottom group‘s tab strip', async 
   expect(hit).toBe(true)
 })
 
-test('dragging the bottom group‘s last tab back to the top strip closes the split (#20)', async ({ page }) => {
+test('dragging the bottom group‘s last tab back to the top strip closes the split (#20)', async ({
+  page,
+}) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
   await startTabDrag(page, 'files')
@@ -799,7 +843,9 @@ test('dragging the bottom group‘s last tab back to the top strip closes the sp
   await expect(page.getByTestId('evidence-git')).toBeHidden()
 })
 
-test('⌘⇧1–4 keeps working after a reorder — the digit follows the tab, not the seat (#20)', async ({ page }) => {
+test('⌘⇧1–4 keeps working after a reorder — the digit follows the tab, not the seat (#20)', async ({
+  page,
+}) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', '작업')
 
@@ -868,7 +914,11 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
     store.setState({
       chat: {
         ...store.getState().chat,
-        [sid]: Array.from({ length: 80 }, (_, i) => ({ kind: i % 2 ? 'assistant' : 'user', seq: 1000 + i, text: `지난 대화 ${i}` })),
+        [sid]: Array.from({ length: 80 }, (_, i) => ({
+          kind: i % 2 ? 'assistant' : 'user',
+          seq: 1000 + i,
+          text: `지난 대화 ${i}`,
+        })),
       },
     })
   }, a)
@@ -884,7 +934,9 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
    */
   const readScroll = () =>
     page.evaluate(
-      (sid: string) => document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!.scrollTop,
+      (sid: string) =>
+        document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!
+          .scrollTop,
       a,
     )
   /*
@@ -896,7 +948,9 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
   await expect
     .poll(async () => {
       await page.evaluate((sid: string) => {
-        document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!.scrollTop = 40
+        document.querySelector<HTMLElement>(
+          `[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`,
+        )!.scrollTop = 40
       }, a)
       await page.waitForTimeout(80)
       return readScroll()
@@ -924,7 +978,10 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
    */
   const after = await page.evaluate((sid: string) => {
     const panel = document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"]`)!
-    return { probe: panel.dataset.probe ?? null, scrollTop: panel.querySelector<HTMLElement>('[data-testid="chat-stream"]')!.scrollTop }
+    return {
+      probe: panel.dataset.probe ?? null,
+      scrollTop: panel.querySelector<HTMLElement>('[data-testid="chat-stream"]')!.scrollTop,
+    }
   }, a)
   expect(after).toEqual({ probe: 'same-node', scrollTop: scrolled })
 
@@ -934,3 +991,53 @@ test('놓으면 미리 보던 그대로 남는다 — 칸은 같은 노드로 �
   expect(await storedPanels(page)).toEqual([b, c, a])
 })
 
+/**
+ * 알림에서 오는 길은 **그리드를 우선한다** (도그푸딩 요청).
+ *
+ * 칸에 올려 둔 것은 보려고 올린 것이다. 그 세션이 응답을 마쳤다고 해서 그리드를 걷고
+ * 큰 화면 하나로 갈아치우면, 알림 하나가 나머지 칸을 전부 화면에서 치우는 셈이 된다.
+ * 대신 그 칸이 밝아지고 그 칸의 입력창에 손이 얹힌다 — 온 이유가 답하러 온 것이라서다.
+ */
+test('알림에서 누른 세션이 그리드에 있으면 그리드의 그 칸으로 간다', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', '첫째')
+  const b = await newSession(page, 'alpha', 'claude', '둘째')
+  await openGrid(page, [a, b])
+  await expect(page.getByTestId('grid')).toBeVisible()
+
+  // 그리드를 보고 있는 중에 b가 응답을 마친다 — 보고 있지 않은 세션이라 카드가 뜬다
+  await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), a)
+
+  await page.evaluate((id: string) => {
+    const m = (window as any).__mock
+    m.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    m.emit({ type: 'turn_complete', sessionId: id })
+  }, b)
+
+  await page.getByTestId('notice-open').click()
+
+  // 그리드에 남아 있고, 온 이유인 칸이 밝다
+  expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('grid')
+  await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-focused', 'true')
+  await expect(page.getByTestId(`grid-panel-${a}`)).not.toHaveAttribute('data-focused', 'true')
+})
+
+/** 그리드에 없는 세션이면 예전 그대로 — 큰 화면으로 간다 */
+test('그리드에 없는 세션은 알림에서 눌러도 포커스 뷰로 간다', async ({ page }) => {
+  await setup(page)
+  const onGrid = await newSession(page, 'alpha', 'claude', '칸 안')
+  const outside = await newSession(page, 'alpha', 'claude', '칸 밖의 세션')
+  await openGrid(page, [onGrid])
+  await expect(page.getByTestId('grid')).toBeVisible()
+
+  await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), onGrid)
+
+  await page.evaluate((id: string) => {
+    const m = (window as any).__mock
+    m.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    m.emit({ type: 'turn_complete', sessionId: id })
+  }, outside)
+
+  await page.getByTestId('notice-open').click()
+  expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('focus')
+})
