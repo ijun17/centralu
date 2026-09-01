@@ -28,6 +28,15 @@ const SCHEMA_PATH = resolveSchemaPath()
 export class Store {
   private db: Database.Database
 
+  /**
+   * 이번에 **실제로 돌린** 마이그레이션 스텝 수.
+   *
+   * 진단이자 회귀 방지선이다. "이미 지난 스텝을 다시 돌지 않는다"는 성질은 눈에
+   * 보이지 않아서, 한 번 깨지면(schema.sql의 `PRAGMA user_version`이 그랬듯) 결과가
+   * 옳은 채로 시간만 먹으며 아무도 모르게 지낸다. 세어 두면 테스트가 물어볼 수 있다.
+   */
+  migrationsRun = 0
+
   constructor(path = ':memory:') {
     this.db = new Database(path)
     this.db.pragma('journal_mode = WAL')
@@ -57,6 +66,16 @@ export class Store {
    * 스키마 파일은 `CREATE TABLE IF NOT EXISTS`뿐이라 **기존 DB에는 컬럼·인덱스 추가가
    * 조용히 무시된다.** 이미 실사용 데이터가 쌓인 파일이 있으므로(~/.centralu/store.db)
    * user_version을 보고 순차 적용한다.
+   *
+   * **한 번 지난 스텝은 다시 돌지 않는다.** 오랫동안 그러지 못했다 — schema.sql이
+   * 열 때마다 `PRAGMA user_version = 1`을 다시 적어서, v27인 DB도 매 실행 26개를
+   * 처음부터 다시 돌았다. 스텝들이 하나같이 멱등하게(guard로) 쓰여 있어서 결과는
+   * 옳았고, 그래서 **비용만 조용히 자랐다**: 열 때마다 4.4~5.0초, 그중 v3·v11·v21이
+   * 각각 전체 메시지(66,700건)를 훑는 값이었다. 그 PRAGMA를 지운 것이 이 성질을 만든다.
+   *
+   * 아래 스텝들은 여전히 **멱등하게 써야 한다.** 새 DB는 0에서 시작해 26개를 순서대로
+   * 한 번에 다 돌고, schema.sql이 이미 만들어 둔 테이블 위에서 도는 스텝이 많다
+   * (예: v13은 v9가 만든 빈 테이블을 보고 건너뛴다).
    */
   private migrate(): void {
     const current = this.schemaVersion
@@ -581,6 +600,7 @@ export class Store {
       if (current < step.to) {
         step.run()
         this.db.pragma(`user_version = ${step.to}`)
+        this.migrationsRun += 1
       }
     }
   }

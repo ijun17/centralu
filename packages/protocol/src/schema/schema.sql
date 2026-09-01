@@ -1,6 +1,14 @@
 -- Centralu 로컬 저장 스키마 v1
 -- host(better-sqlite3)가 읽는다. 마이그레이션은 dev-services/store.ts의 steps가 담당한다.
-PRAGMA user_version = 1;
+--
+-- **여기서 user_version을 정하지 않는다.** 이 파일은 열 때마다 실행되므로(테이블은
+-- CREATE IF NOT EXISTS라 안전하다), `PRAGMA user_version = 1`이 있으면 이미 v27인 DB도
+-- 매번 1로 되돌아가 마이그레이션 26개가 **전부 다시 돌았다**. 실측(2026-09-02,
+-- store.db 94MB · 메시지 66,700건): 열 때마다 4.4~5.0초, 그중 v3 1.4초 + v11 1.7초 +
+-- v21 1.7초가 전부 전체 테이블 스캔이었다 — 대화가 쌓일수록 커지는 시작 비용이다.
+--
+-- 값을 아예 안 적으면 새 DB는 0에서 시작해 스텝이 한 번 전부 돌고(예전과 같다),
+-- 기존 DB는 마지막 스텝이 적어둔 번호를 그대로 들고 있어 아무것도 다시 돌지 않는다.
 
 CREATE TABLE IF NOT EXISTS projects (
   id            TEXT PRIMARY KEY,

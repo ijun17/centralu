@@ -89,6 +89,37 @@ describe('Store (dev sqlite)', () => {
     expect(new Store().schemaVersion).toBe(LATEST_SCHEMA)
   })
 
+  /**
+   * 두 번째로 여는 DB는 마이그레이션을 **하나도** 돌지 않는다.
+   *
+   * 오래 깨져 있던 성질이라 못을 박는다. schema.sql이 열 때마다 `user_version = 1`을
+   * 다시 적는 바람에 v27짜리 DB도 매 실행 26개를 처음부터 돌았다 — 스텝이 전부 멱등해서
+   * 결과는 옳았고, 그래서 **아무도 몰랐다.** 실측한 값은 열 때마다 4.4~5.0초였다
+   * (store.db 94MB · 메시지 66,700건; v3·v11·v21이 각각 전체 스캔).
+   *
+   * 시간이 아니라 횟수로 잰다. 시간은 기계와 데이터 크기를 타지만, "다시 돌았는가"는
+   * 어디서든 같은 답이다.
+   */
+  it('한 번 지난 마이그레이션은 다시 돌지 않는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-store-'))
+    const file = join(dir, 'store.db')
+
+    const first = new Store(file)
+    expect(first.migrationsRun).toBeGreaterThan(0)
+    expect(first.schemaVersion).toBe(LATEST_SCHEMA)
+    first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.close()
+
+    const again = new Store(file)
+    expect(again.migrationsRun).toBe(0)
+    expect(again.schemaVersion).toBe(LATEST_SCHEMA)
+    // 그리고 데이터는 그대로다 — 안 돌았다는 것이 안 읽힌다는 뜻이면 안 된다
+    expect(again.listProjects().map((p) => p.id)).toEqual(['p1'])
+    again.close()
+
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
     const s = seeded()
     s.addProject({ id: 'p1b', path: '/tmp/p1', name: '이름변경' })
@@ -502,7 +533,15 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
     const dir = mkdtempSync(join(tmpdir(), 'cc-v13-'))
     const file = join(dir, 'store.db')
 
-    // v12까지 온 DB를 손으로 만든다 (테이블 이름은 옛것)
+    /*
+     * 옛 DB를 손으로 만든다 (테이블 이름은 옛것).
+     *
+     * **번호는 진짜여야 한다.** 이 파일에는 옛 이름의 테이블이 있고 `grid_panels`가 없는데,
+     * 그건 v9(grid_panels를 만드는 스텝) 이전의 모습이다. 예전에는 12로 적어도 통과했다 —
+     * schema.sql이 user_version을 1로 되돌려서 v9가 어차피 다시 돌았기 때문이다. 그 재실행을
+     * 없애자 이 거짓말이 곧바로 드러났다(`no such table: grid_panels`). 실제 v12 DB라면
+     * v9를 지나왔으므로 그 테이블을 반드시 갖고 있다.
+     */
     const old = new Database(file)
     old.exec(`
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
@@ -525,7 +564,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
     old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
     old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES ('s1','p1','claude','올려둔 세션',1)`).run()
     old.prepare(`INSERT INTO control_center (session_id, position) VALUES ('s1', 0)`).run() // legacy-name
-    old.pragma('user_version = 12')
+    old.pragma('user_version = 8')
     old.close()
 
     const store = new Store(file)
