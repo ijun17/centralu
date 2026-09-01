@@ -1249,13 +1249,19 @@ function ChatStream({
       */}
       {stickyText !== null && (
         /*
-          `-top-4`이지 `top-0`이 아니다.
+          `top-0`이 아니라 음수 offset이다.
           이 스크롤 칸은 `py-4`를 두르고 있고, sticky는 **자기 컨테이닝 블록(부모의
           content box) 밖으로 못 나간다** — 그래서 `top-0`은 천장이 아니라 패딩 아래
           16px에 붙었다 (실측: gap 16px). 음수 offset이 그 16px을 되돌려 진짜 천장에
           닿게 한다. 패딩 자체는 남겨둔다: 맨 위로 올렸을 때 대화가 숨 쉴 자리다.
+
+          16이 아니라 **17**인 이유: 확대(--text-zoom 1.1 등)에서는 헤더 높이가 소수점
+          픽셀에 떨어져, 딱 맞춘 가장자리가 반올림에 따라 1px 실금으로 벌어진다 —
+          그 틈으로 지나가는 대화가 블러 없이 비쳤다 (도그푸딩: "실금 정도로 뒤에 보여").
+          1px을 천장 위로 겹쳐 넣으면 스크롤 칸이 그만큼 잘라낼 뿐이고(위 모서리는
+          어차피 테두리도 둥글림도 없다), 어떤 반올림에서도 틈이 안 생긴다.
         */
-        <div className="sticky -top-4 z-10 -mx-4 mb-1 flex justify-end px-4" data-testid="sticky-user">
+        <div className="sticky -top-[17px] z-10 -mx-4 mb-1 flex justify-end px-4" data-testid="sticky-user">
           {/*
             말풍선과 **같은 옷, 같은 자리, 같은 폭**을 갖는다. 이 줄은 위로 사라진
             사용자 메시지의 연장이라, 하나라도 다르면 다른 종류의 것으로 읽힌다.

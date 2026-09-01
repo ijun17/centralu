@@ -492,14 +492,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           data-testid={`project-actions-${project.name}`}
           data-worktree-proposal={proposalHere || undefined}
         >
-          <IconButton
-            label={`Actions for ${project.name}`}
+          {/*
+            IconButton이 아니라 맨 버튼이다 — 툴팁을 떼기 위해서 (도그푸딩 2026-09-02).
+            누르면 이름 붙은 메뉴가 바로 그 자리에 뜨는 버튼이라, 호버 툴팁은 설명이
+            아니라 열린 메뉴 옆에 겹쳐 남는 소음이었다. 스크린리더용 이름은 남긴다.
+          */}
+          <button
+            type="button"
+            aria-label={`Actions for ${project.name}`}
             onClick={() => setMenuOpen((v) => !v)}
-            testId={`project-menu-${project.name}`}
-            align="right"
+            data-testid={`project-menu-${project.name}`}
+            className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
           >
             <DotsIcon size={14} />
-          </IconButton>
+          </button>
         </span>
         {menuOpen && (
           <ProjectMenu
@@ -804,15 +810,29 @@ function ProjectMenu({
       const a = anchor.current
       const el = ref.current
       if (!a || !el) return
+      /*
+       * **전부 레이아웃 px로 환산해서 계산한다** — 확대(--text-zoom) 때문이다.
+       *
+       * getBoundingClientRect는 확대가 곱해진 화면 px를 주는데, 여기서 정한 top/right는
+       * 확대된 루트 안의 길이라 그릴 때 확대가 **한 번 더** 곱해진다. 그대로 섞으면
+       * 확대 1.1에서 메뉴가 버튼보다 24px 아래, 103px 왼쪽에 떴다 (1.25에선 54px/249px —
+       * 실측. 도그푸딩 "메뉴 위치가 이상해"의 정체다). e2e가 확대 1.0에서만 재서 놓쳤다.
+       *
+       * 창 크기(innerWidth/Height)는 확대를 모르고, offsetHeight는 원래 레이아웃 px다 —
+       * 화면 px(rect)와 창 px만 확대로 나눠서 한 좌표계로 모은다.
+       */
+      const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
       const r = a.getBoundingClientRect()
       const h = el.offsetHeight
+      const winH = window.innerHeight / zoom
+      const winW = window.innerWidth / zoom
       const GAP = 4 // 버튼과 메뉴 사이 — 붙여 놓으면 어디까지가 버튼인지 안 보인다
       const EDGE = 8 // 창 가장자리에 딱 붙지 않게
-      const below = r.bottom + GAP
+      const below = r.bottom / zoom + GAP
       setPos({
-        top: below + h <= window.innerHeight - EDGE ? below : Math.max(EDGE, r.top - GAP - h),
+        top: below + h <= winH - EDGE ? below : Math.max(EDGE, r.top / zoom - GAP - h),
         // 오른쪽 끝을 버튼에 맞춘다 — 메뉴가 버튼에서 흘러나온 것처럼 읽힌다
-        right: Math.max(EDGE, window.innerWidth - r.right),
+        right: Math.max(EDGE, winW - r.right / zoom),
       })
     }
     place()

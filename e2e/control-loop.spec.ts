@@ -939,6 +939,28 @@ test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면
   expect(alpha.m.y + alpha.m.height).toBeLessThanOrEqual(alpha.viewport.height)
 
   /*
+    **확대에서도.** 잰 좌표(확대가 곱해진 화면 px)를 fixed 길이(그릴 때 확대가 또
+    곱해진다)에 그대로 쓰면, 확대 1.1에서 메뉴가 버튼보다 24px 아래·103px 왼쪽에
+    떴다 (실측 — 도그푸딩 "메뉴 위치가 이상해"). 확대 1.0만 재는 테스트는 이 부류를
+    통째로 놓친다. 사용자의 실제 설정이 1.1이다.
+  */
+  await page.evaluate(() => {
+    const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
+    style.zoom = '1.1'
+    style.setProperty('--text-zoom', '1.1')
+  })
+  const zoomed = await geometry('alpha')
+  const gap = zoomed.m.y - (zoomed.b.y + zoomed.b.height)
+  expect(gap).toBeGreaterThanOrEqual(2)
+  expect(gap).toBeLessThanOrEqual(8) // 확대가 두 번 곱해지면 여기가 24를 넘는다
+  expect(Math.abs(zoomed.m.x + zoomed.m.width - (zoomed.b.x + zoomed.b.width))).toBeLessThanOrEqual(2)
+  await page.evaluate(() => {
+    const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
+    style.zoom = '1'
+    style.setProperty('--text-zoom', '1')
+  })
+
+  /*
     아래로 펴면 넘치는 자리에서만 뒤집기가 보이고, 그 자리는 창을 낮춰야 생긴다.
     320px에서는 아직 들어갔다(메뉴 바닥 307.5 < 312) — 뒤집기가 아니라 실측이
     기준을 정한다.
@@ -3370,7 +3392,13 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
       widthRatio: b.width / rowWidth,
     }
   })
-  expect(shape.gapFromCeiling).toBe(0)
+  /*
+    0이 아니라 살짝 음수다: 확대 배율에서 소수점 픽셀 반올림이 만드는 1px 실금을
+    덮으려고 천장 위로 1px 겹쳐 넣는다 (SessionView의 -top-[17px] 주석). 계약은
+    "틈이 없다(≤0)"와 "떠내려가지 않았다(-3 초과)" 둘이다.
+  */
+  expect(shape.gapFromCeiling).toBeLessThanOrEqual(0)
+  expect(shape.gapFromCeiling).toBeGreaterThan(-3)
   expect(shape.rightInset).toBe(0)
   expect(shape.widthRatio).toBeLessThanOrEqual(0.76)
 
