@@ -445,6 +445,16 @@ export const RpcMethods = {
     result: z.object({ files: z.array(z.string()), diff: z.string(), truncated: z.boolean() }),
   },
   'git.branches': { params: z.object({ projectId: z.string() }), result: z.array(GitBranch) },
+  /**
+   * git이 무시하는 것들 (#76) — 새 워크트리에 **없을** 것들의 목록.
+   *
+   * 워크트리 셋업 창이 "무엇을 복사할까"의 후보로 내민다. bytes는 거들 뿐이라 null일
+   * 수 있다(측정이 오래 걸리면 포기한다) — 목록 자체가 답이고 크기는 판단의 재료다.
+   */
+  'git.ignoredEntries': {
+    params: z.object({ projectId: z.string() }),
+    result: z.array(z.object({ path: z.string(), bytes: z.number().nullable() })),
+  },
   'git.checkout': {
     params: z.object({ projectId: z.string(), branch: z.string(), dryRun: z.boolean().optional() }),
     result: z.object({ ok: z.boolean(), conflicts: z.array(z.string()), message: z.string().optional() }),

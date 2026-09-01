@@ -1971,6 +1971,40 @@ describe('워크트리 세션', () => {
     expect(wtMgr.listSessions().find((s) => s.id === worked.id)?.worktreeMerged).toBe(true)
   })
 
+  /*
+   * #76: 복사 후보는 **git이 무시하는 것들**이다 — 새 워크트리에 정확히 그것들이 없다.
+   * 통째로 무시되는 디렉토리는 한 줄로 접히고(안을 펼치면 목록이 소음이 된다),
+   * .DS_Store는 빠진다.
+   */
+  it('복사 후보로 gitignored 항목을 짚어 준다 — 디렉토리는 한 줄로 접힌다 (#76)', async () => {
+    writeFileSync(join(repo, '.gitignore'), 'node_modules/\n.env.local\n')
+    mkdirSync(join(repo, 'node_modules', 'pkg'), { recursive: true })
+    writeFileSync(join(repo, 'node_modules', 'pkg', 'index.js'), 'x\n')
+    writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
+    writeFileSync(join(repo, '.DS_Store'), 'junk\n')
+
+    const entries = await wtMgr.gitIgnoredEntries(project.id)
+    const paths = entries.map((e) => e.path)
+
+    expect(paths).toContain('node_modules/') // 안의 파일들이 아니라 한 줄
+    expect(paths).toContain('.env.local')
+    expect(paths.some((p) => p.includes('node_modules/pkg'))).toBe(false)
+    expect(paths.some((p) => p.endsWith('.DS_Store'))).toBe(false)
+  })
+
+  it('복사는 clone을 먼저 시도하고, 안 되면 그냥 복사한다 — 어느 쪽이든 내용은 같다 (#76)', async () => {
+    // 디렉토리째 복사되는지 (예전 cpSync가 하던 일을 clone 경로도 해야 한다)
+    mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
+    writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/cloned',
+    })) as SessionInfo
+
+    expect(readFileSync(join(s.worktree!.path, 'vendor', 'deep', 'blob.bin'), 'utf8')).toBe('payload\n')
+  })
+
   it('병합된 자식은 매니저를 붙들지 않는다 (#69)', async () => {
     const worked = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pin',

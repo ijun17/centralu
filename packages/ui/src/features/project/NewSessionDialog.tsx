@@ -18,6 +18,27 @@ type PastState =
   | { status: 'ok'; sessions: ExternalSession[] }
   | { status: 'unsupported'; reason: string }
 
+/**
+ * 쉼표로 적은 목록 하나를 읽는다 (#76).
+ *
+ * 저장할 때(아래 copyFiles.split)와 **같은 규칙이어야 한다** — 후보 칩이 "이미 골랐나"를
+ * 다르게 세면, 눌러 넣은 항목이 눌러도 안 빠지는 상태가 생긴다.
+ */
+const splitList = (s: string): string[] =>
+  s
+    .split(',')
+    .map((f) => f.trim())
+    .filter(Boolean)
+
+/** 630MB · 8.5GB — 자릿수만 맞으면 된다. 이 숫자는 정확도가 아니라 규모를 말한다 */
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n}B`
+  const kb = n / 1024
+  if (kb < 1024) return `${Math.round(kb)}KB`
+  const mb = kb / 1024
+  return mb < 1024 ? `${Math.round(mb)}MB` : `${(mb / 1024).toFixed(1)}GB`
+}
+
 /** 방금 · 32분 전 · 3시간 전 · 5일 전 — 정확한 시각보다 '얼마나 됐나'가 중요하다 */
 function ago(ms: number): string {
   const min = Math.floor((Date.now() - ms) / 60000)
@@ -77,6 +98,26 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const [setupCommand, setSetupCommand] = useState(savedSetup?.command ?? '')
   const [copyFiles, setCopyFiles] = useState(savedSetup?.copyFiles.join(', ') ?? '')
   const [error, setError] = useState<string | null>(null)
+  /**
+   * 복사 후보 (#76) — git이 무시하는 것들, 곧 **새 워크트리에 없을 것들**.
+   *
+   * 목록을 내밀되 앱이 고르지는 않는다: "무시된 건 전부 복사"를 기본값으로 삼으면 이
+   * 저장소에서만 node_modules 637MB + Rust target 8.5GB가 딸려 온다. 대신 크기를 함께
+   * 보여준다 — 이 목록에서 사람이 실제로 하는 판단이 "이건 너무 크다"라서다.
+   * 워크트리를 켰을 때만 물어본다 (안 쓸 목록을 위해 du를 돌리지 않는다).
+   */
+  const [ignored, setIgnored] = useState<{ path: string; bytes: number | null }[] | null>(null)
+  useEffect(() => {
+    if (!isRepo || !worktree || ignored) return
+    let alive = true
+    void platform.git
+      .ignoredEntries(projectId)
+      .then((list) => alive && setIgnored(list))
+      .catch(() => alive && setIgnored([]))
+    return () => {
+      alive = false
+    }
+  }, [isRepo, worktree, ignored, platform, projectId])
 
   // 이어받을 이전 세션. null이면 '새 세션'이다 (기본값)
   const [resume, setResume] = useState<ExternalSession | null>(null)
@@ -174,10 +215,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
              * 적용되지 않는다. 바뀌었을 때만 왕복한다.
              */
             if (worktree && setupOpen) {
-              const next = {
-                command: setupCommand.trim(),
-                copyFiles: copyFiles.split(',').map((f) => f.trim()).filter(Boolean),
-              }
+              const next = { command: setupCommand.trim(), copyFiles: splitList(copyFiles) }
               const changed =
                 next.command !== (savedSetup?.command ?? '') ||
                 next.copyFiles.join('\n') !== (savedSetup?.copyFiles ?? []).join('\n')
@@ -362,6 +400,43 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   spellCheck={false}
                   className="w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
                 />
+                {/*
+                  후보를 **짚어만 준다** (#76). 누르면 위 칸에 들어가고, 다시 누르면 빠진다 —
+                  칸이 여전히 진실이라 손으로 친 것과 눌러 넣은 것이 갈리지 않는다.
+                */}
+                {ignored && ignored.length > 0 && (
+                  <div data-testid="worktree-ignored-suggestions">
+                    <p className="text-[10px] text-slate">
+                      Not in a fresh worktree — tap to copy (big ones cost time and disk):
+                    </p>
+                    <ul className="mt-1 flex flex-wrap gap-1">
+                      {ignored.map((e) => {
+                        const picked = splitList(copyFiles).includes(e.path)
+                        return (
+                          <li key={e.path}>
+                            <button
+                              type="button"
+                              data-testid={`ignored-${e.path}`}
+                              onClick={() => {
+                                const cur = splitList(copyFiles)
+                                const next = picked ? cur.filter((f) => f !== e.path) : [...cur, e.path]
+                                setCopyFiles(next.join(', '))
+                              }}
+                              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+                                picked
+                                  ? 'border-ash bg-graphite/40 text-chalk'
+                                  : 'border-edge text-slate hover:border-graphite hover:text-ash'
+                              }`}
+                            >
+                              {e.path}
+                              {e.bytes !== null && <span className="ml-1 text-slate">{fmtBytes(e.bytes)}</span>}
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
               </div>
             ) : (
               <button

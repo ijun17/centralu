@@ -194,6 +194,62 @@ export async function gitRevParse(cwd: string, ref: string): Promise<string | nu
   }
 }
 
+/**
+ * git이 무시하는 것들 — 새 워크트리에 **없을** 파일 목록 (#76).
+ *
+ * 새 워크트리에 빠지는 게 정확히 이것들이라(추적 파일은 git이 가져다 준다), "무엇을
+ * 복사할까"의 후보는 이 목록이 전부다. 그래서 앱이 고르지 않고 **짚어만 준다** —
+ * 여기서 "전부 복사"를 기본값으로 삼으면 이 저장소만 해도 node_modules 637MB와
+ * Rust target 8.5GB가 딸려 온다.
+ *
+ * `--directory`가 핵심이다: 통째로 무시되는 디렉토리는 그 안을 펼치지 않고 한 줄로
+ * 접어 준다 (node_modules/ 안의 파일 수만 줄이 되면 목록이 아니라 소음이다).
+ *
+ * .DS_Store만 빼낸다. macOS 저장소마다 수십 개씩 나오는데 옮길 이유가 하나도 없고,
+ * 목록의 맨 앞자리를 늘 차지해서 정작 봐야 할 .env를 밀어낸다.
+ */
+export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path: string; bytes: number | null }[]> {
+  if (!(await isRepo(cwd))) return []
+  let raw: string
+  try {
+    raw = await git(cwd, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
+  } catch {
+    return []
+  }
+  const paths = raw
+    .split('\0')
+    .filter(Boolean)
+    .filter((p) => !p.endsWith('.DS_Store'))
+  if (paths.length === 0) return []
+
+  /*
+   * 크기를 함께 준다 — 이 목록에서 사람이 실제로 하는 판단이 "이건 너무 크다"라서다.
+   * du 한 번에 전부 물어보고, 오래 걸리면 크기 없이 목록만 준다 (크기는 거들 뿐이라
+   * 이것 때문에 창이 멈추면 주객이 바뀐다).
+   */
+  const sizes = new Map<string, number>()
+  try {
+    const out = await new Promise<string>((resolve, reject) => {
+      execFile('du', ['-sk', ...paths.slice(0, limit)], { cwd, timeout: 5000, maxBuffer: 1 << 20 }, (err, stdout) =>
+        // du는 읽을 수 없는 항목 하나에도 non-zero로 끝난다 — 나온 만큼은 쓴다
+        stdout ? resolve(stdout) : reject(err),
+      )
+    })
+    for (const line of out.split('\n')) {
+      const [kb, ...rest] = line.split('\t')
+      const p = rest.join('\t').trim()
+      if (p && kb) sizes.set(p.replace(/\/$/, ''), Number(kb) * 1024)
+    }
+  } catch {
+    // 크기 없이 간다
+  }
+
+  return paths
+    .slice(0, limit)
+    .map((p) => ({ path: p, bytes: sizes.get(p.replace(/\/$/, '')) ?? null }))
+    .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0))
+}
+
 export async function gitBranches(cwd: string): Promise<GitBranch[]> {
   if (!(await isRepo(cwd))) return []
   const stdout = await git(cwd, [

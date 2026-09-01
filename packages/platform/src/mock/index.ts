@@ -170,9 +170,11 @@ export class MockPlatform implements Platform {
     commits: GitCommit[]
     branches: GitBranch[]
     dirty: string[]
+    /** git이 무시하는 것들 (#76) — 셋업 창이 복사 후보로 내미는 목록 */
+    ignored: { path: string; bytes: number | null }[]
     lastCommitMessage?: string
     pushed: boolean
-  } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], pushed: false }
+  } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], ignored: [], pushed: false }
 
   readonly savedAttachments: Attachment[] = []
   readonly sentAttachments: Attachment[] = []
@@ -364,6 +366,7 @@ export class MockPlatform implements Platform {
       truncated: false,
     }),
     branches: async (_projectId: string) => [...this.gitState.branches],
+    ignoredEntries: async (_projectId: string) => [...this.gitState.ignored],
     checkout: async (_projectId: string, branch: string, dryRun?: boolean) => {
       if (dryRun) return { ok: this.gitState.dirty.length === 0, conflicts: [...this.gitState.dirty] }
       this.gitState.branches = this.gitState.branches.map((b) => ({ ...b, current: b.name === branch }))

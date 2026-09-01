@@ -5793,6 +5793,44 @@ test('워크트리 셋업: 처음엔 입력칸, 저장 뒤엔 요약으로 접�
   await expect(page.getByTestId('worktree-setup-command')).toHaveValue('pnpm install')
 })
 
+/**
+ * 복사 후보 (#76) — 앱은 **짚어만 준다.**
+ *
+ * "무시된 건 전부 복사"를 기본값으로 삼지 않는 이유가 이 화면에 그대로 있다: 목록에
+ * node_modules 637MB가 크기와 함께 서 있고, 누를지는 사람이 정한다.
+ */
+test('워크트리 셋업: gitignored 후보를 짚어 주고, 눌러서 넣고 뺀다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.gitState.ignored = [
+      { path: 'node_modules/', bytes: 668213248 },
+      { path: '.env.local', bytes: 24 },
+      { path: 'weird/', bytes: null },
+    ]
+  })
+
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+
+  // 크기가 함께 보인다 — 이 목록에서 사람이 하는 판단이 "이건 너무 크다"라서다
+  await expect(page.getByTestId('ignored-node_modules/')).toContainText('637MB')
+  // 크기를 못 잰 것도 목록에는 선다 (크기는 거들 뿐이다)
+  await expect(page.getByTestId('ignored-weird/')).toBeVisible()
+
+  await page.getByTestId('ignored-.env.local').click()
+  await expect(page.getByTestId('worktree-copy-files')).toHaveValue('.env.local')
+  await page.getByTestId('ignored-node_modules/').click()
+  await expect(page.getByTestId('worktree-copy-files')).toHaveValue('.env.local, node_modules/')
+  // 다시 누르면 빠진다 — 칸이 여전히 진실이라 손으로 친 것과 갈리지 않는다
+  await page.getByTestId('ignored-.env.local').click()
+  await expect(page.getByTestId('worktree-copy-files')).toHaveValue('node_modules/')
+
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  const saved = await page.evaluate(() => (window as any).__mock.projectsList[0].worktreeSetup)
+  expect(saved).toEqual({ command: '', copyFiles: ['node_modules/'] })
+})
+
 /** 병합 배지 (#69) — 사실의 통지가 배지가 되고, 정리는 사람이 삭제 대화에서 한다 */
 test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })

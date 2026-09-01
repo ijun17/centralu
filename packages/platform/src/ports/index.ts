@@ -307,6 +307,8 @@ export interface GitPort {
   log(projectId: string, limit?: number): Promise<GitCommit[]>
   commitDetail(projectId: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }>
   branches(projectId: string): Promise<GitBranch[]>
+  /** git이 무시하는 것들 (#76) — 새 워크트리에 없을 것들, 복사 후보로 짚어 준다 */
+  ignoredEntries(projectId: string): Promise<{ path: string; bytes: number | null }[]>
   /** dryRun이면 무엇이 충돌하는지만 알려준다 (막지 말고 보이게) */
   checkout(projectId: string, branch: string, dryRun?: boolean): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
   stage(projectId: string, paths: string[], unstage?: boolean): Promise<void>

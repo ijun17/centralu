@@ -4,7 +4,7 @@ import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool, type ToolProfile } from './orchestrator-tools.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { cpSync, existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   ModelOption,
@@ -37,6 +37,7 @@ import {
   gitLog,
   gitCommitDetail,
   gitBranches,
+  gitIgnoredEntries,
   gitCheckout,
   gitStage,
   gitCommit,
@@ -47,7 +48,7 @@ import {
   gitWorktreeDirty,
   gitWorktreeRemove,
 } from '../dev-services/git.js'
-import { importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
+import { copyTree, importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -2041,7 +2042,8 @@ export class SessionManager {
       }
       const dst = join(worktree.path, f)
       mkdirSync(dirname(dst), { recursive: true })
-      cpSync(src, dst, { recursive: true })
+      // clone 우선 (#76) — 8.5GB target이 4초·10MB로 건너온다 (실측). 안 되면 일반 복사
+      await copyTree(src, dst)
     }
 
     if (!setup.command) return
@@ -2113,6 +2115,10 @@ export class SessionManager {
   }
   gitBranches(projectId: string) {
     return gitBranches(this.cwdOf(projectId))
+  }
+  /** 새 워크트리에 없을 것들 (#76) — 복사 후보를 짚어 주는 데 쓴다 */
+  gitIgnoredEntries(projectId: string) {
+    return gitIgnoredEntries(this.cwdOf(projectId))
   }
   gitCheckout(projectId: string, branch: string, dryRun?: boolean) {
     return gitCheckout(this.cwdOf(projectId), branch, { dryRun })

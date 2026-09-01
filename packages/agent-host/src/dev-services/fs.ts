@@ -229,3 +229,35 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
     bytes: info.size,
   }
 }
+
+/**
+ * 파일·디렉토리를 통째로 옮긴다 — **가능하면 복사가 아니라 clone으로** (#76).
+ *
+ * APFS의 clonefile은 데이터 블록을 공유하는 참조를 만든다: 만드는 순간에는 바이트를
+ * 하나도 쓰지 않고, 이후 어느 쪽이 고쳐도 그 부분만 갈라진다(copy-on-write). 워크트리
+ * 격리가 깨지지 않는다는 뜻이다 — 심볼릭 링크와 결정적으로 다른 점이 이것이고, 그래서
+ * node_modules를 링크하지 않고 clone한다 (한쪽 설치가 다른 쪽을 바꾸면 안 된다).
+ *
+ * 실측 (이 저장소, APFS):
+ *   Rust target 8.5GB — clone 3.98초·디스크 10MB  vs  일반 복사 14.7초·디스크 8.5GB
+ *   node_modules 637MB (pnpm 심볼릭 숲) — 4.18초 vs 4.44초 (차이 없음, 손해도 없음)
+ * 이득은 **실제 바이트가 있는 것**에서 나온다. 작은 파일 더미에서는 비용이 메타데이터라
+ * 어느 쪽이든 같다.
+ *
+ * clone이 안 되는 자리가 여럿이다 — 다른 파일시스템, 다른 볼륨, APFS 아님, macOS 아님.
+ * 전부 같은 처리를 한다: **조용히 일반 복사로 돌아간다.** 여기서 실패를 던지면 복사
+ * 하나 때문에 세션 생성이 막히는데, 그건 이 기능이 막으려던 바로 그 상황이다.
+ */
+export async function copyTree(src: string, dst: string): Promise<void> {
+  if (process.platform === 'darwin') {
+    const cloned = await new Promise<boolean>((done) => {
+      // -c는 clonefile을 요구한다 (되면 쓰고 안 되면 실패한다 — 조용히 복사로 눕지 않는다)
+      const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore' })
+      p.on('error', () => done(false))
+      p.on('close', (code) => done(code === 0))
+    })
+    if (cloned) return
+  }
+  const { cpSync } = await import('node:fs')
+  cpSync(src, dst, { recursive: true })
+}

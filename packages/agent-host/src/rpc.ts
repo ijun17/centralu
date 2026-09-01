@@ -119,6 +119,8 @@ export function createRpcHandler(
       return mgr.gitCommitDetail(projectId, sha)
     },
     'git.branches': async (p) => mgr.gitBranches(RpcMethods['git.branches'].params.parse(p).projectId),
+    'git.ignoredEntries': async (p) =>
+      mgr.gitIgnoredEntries(RpcMethods['git.ignoredEntries'].params.parse(p).projectId),
     'git.checkout': async (p) => {
       const { projectId, branch, dryRun } = RpcMethods['git.checkout'].params.parse(p)
       return mgr.gitCheckout(projectId, branch, dryRun)

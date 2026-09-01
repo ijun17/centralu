@@ -282,6 +282,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       log: (projectId, limit) => rpc.call('git.log', { projectId, limit }),
       commitDetail: (projectId, sha) => rpc.call('git.commitDetail', { projectId, sha }),
       branches: (projectId) => rpc.call('git.branches', { projectId }),
+      ignoredEntries: (projectId) => rpc.call('git.ignoredEntries', { projectId }),
       checkout: (projectId, branch, dryRun) => rpc.call('git.checkout', { projectId, branch, dryRun }),
       stage: async (projectId, paths, unstage) => {
         await rpc.call('git.stage', { projectId, paths, unstage })
