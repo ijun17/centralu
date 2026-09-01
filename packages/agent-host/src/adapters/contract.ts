@@ -88,7 +88,6 @@ export type OrchestratorTools = {
    * 막힌 창을 푸는 방법이 앱 재시작 아니면 아카이브→복구인데, 오케스트레이터는
    * 둘 다 못 해서 결국 사람에게 넘겨야 했다 (도그푸딩). 되돌릴 수 있는 일이라 준다.
    */
-  archiveSession(sessionId: string, archived: boolean): Promise<{ ok: boolean; error?: string }>
   /**
    * 워커 세션을 하나 만든다 (#13).
    *

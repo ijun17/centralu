@@ -463,11 +463,19 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
   }
   await expect(page.getByTestId('count-approval')).toContainText('00')
 
-  // 남은 응답대기 3건은 d(아카이브)로 비운다
+  /*
+    남은 응답대기 3건은 **답을 해서** 비운다.
+    한때 `d` 한 키로 비울 수 있었는데, 그건 세션을 아카이브하는 것이었고 되돌리는 문이
+    없어서 사람 눈에는 삭제였다 (2026-09-02 폐기). 인박스는 상태의 뷰라, 비우는 방법은
+    상태를 바꾸는 것 하나뿐이다 — 그게 곧 답하기다.
+  */
   for (let i = 0; i < 5; i++) {
     const remaining = await page.locator('[data-testid^="inbox-item-"]').count()
     if (remaining === 0) break
-    await page.keyboard.press('d')
+    await page.keyboard.press('Enter')
+    await page.getByTestId('prompt-input').fill('이어서 해줘')
+    await page.getByTestId('prompt-input').press('Enter')
+    await page.keyboard.press('Meta+i')
   }
   await expect(page.getByTestId('inbox-empty')).toContainText('Nothing waiting')
 })
@@ -588,9 +596,14 @@ test('메시지 전송 직후에도 인박스 단축키가 동작한다 (회귀:
   await page.keyboard.press('j')
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
 
-  // 아카이브도 동작해야 한다
+  /*
+    그리고 `d`에는 **아무것도 없어야 한다.** 예전에는 이 키가 세션을 아카이브했고,
+    화면에는 "Dismiss"라고 적혀 있었다 — 대답을 안 하겠다는 뜻으로 누른 키가 세션을
+    목록에서 영영 지웠다. 한 글자 뒤에 되돌릴 수 없는 일을 숨겨두지 않는다.
+  */
   await page.keyboard.press('d')
-  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(1)
+  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(2)
+  await expect(page.getByTestId('prompt-input')).toHaveValue('')
 })
 
 test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었는데 기다리게 되던 문제)', async ({ page }) => {
@@ -837,7 +850,7 @@ test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async (
   expect(after).toBeLessThanOrEqual(50)
 })
 
-test('인박스 10건을 연속 처리해도 커서가 어긋나지 않는다 (L4-3 반복 조작)', async ({ page }) => {
+test('인박스 10건을 위아래로 훑어도 커서가 목록 밖으로 나가지 않는다 (L4-3 반복 조작)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `작업 ${i}`)
   await page.evaluate(() => {
@@ -848,10 +861,17 @@ test('인박스 10건을 연속 처리해도 커서가 어긋나지 않는다 (L
   await page.keyboard.press('Meta+i')
   await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(10)
 
-  // 키보드만으로 전부 정리 — 중간에 커서가 빈 자리를 가리키면 여기서 깨진다
-  for (let i = 0; i < 10; i++) await page.keyboard.press('d')
-  await expect(page.getByTestId('inbox-empty')).toBeVisible()
-  await expect(page.getByTestId('count-input')).toContainText('00')
+  /*
+    키보드만으로 끝까지 내려갔다 올라온다. 커서가 목록 밖을 가리키면 Enter가 아무
+    세션도 열지 못하고, 그 순간 인박스는 눌러도 안 되는 창이 된다.
+    (예전에는 `d`로 항목을 지워가며 이걸 확인했다 — 그 키는 세션을 아카이브했고,
+     아카이브는 폐기됐다. 커서가 지켜야 할 것은 그대로다.)
+  */
+  for (let i = 0; i < 15; i++) await page.keyboard.press('j')
+  for (let i = 0; i < 15; i++) await page.keyboard.press('k')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('inbox')).toBeHidden()
+  await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
 test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ page }) => {

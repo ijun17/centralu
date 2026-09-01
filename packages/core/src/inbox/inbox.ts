@@ -16,7 +16,6 @@ export type InboxCandidate = {
   waitingSince: number | null
   lastSeq: number
   lastReadSeq: number
-  archived: boolean
   preview?: string
 }
 
@@ -28,7 +27,7 @@ export type InboxItem = InboxCandidate & {
 
 export function buildInbox(sessions: readonly InboxCandidate[], now: number): InboxItem[] {
   return sessions
-    .filter((s) => !s.archived && isWaiting(s.state))
+    .filter((s) => isWaiting(s.state))
     .map((s) => ({
       ...s,
       unread: isUnread(s),
@@ -50,7 +49,6 @@ export type WaitingCounts = { approval: number; error: number; input: number }
 export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts {
   const c: WaitingCounts = { approval: 0, error: 0, input: 0 }
   for (const s of sessions) {
-    if (s.archived) continue
     if (s.state === 'waiting_approval') c.approval++
     else if (s.state === 'error') c.error++
     else if (s.state === 'waiting_input') c.input++
@@ -70,8 +68,3 @@ export function nextWaitingSession(inbox: readonly InboxItem[], currentId: strin
   return inbox[(idx + 1) % inbox.length]!.id
 }
 
-/** 항목 처리 후 자동 이동 대상 (FR-15). 처리된 항목은 이미 목록에서 빠졌다고 가정. */
-export function afterHandled(inbox: readonly InboxItem[], handledId: string): string | null {
-  const remaining = inbox.filter((i) => i.id !== handledId)
-  return remaining[0]?.id ?? null
-}

@@ -189,7 +189,7 @@ describe('세션 수명주기', () => {
   /*
    * host가 죽으면 세션 프로세스도 함께 죽는다. 그런데 DB에는 마지막 상태가 남아 있어서
    * 다시 켜면 프로세스가 하나도 없는데 화면은 영원히 '작업 중'이다 (도그푸딩: 40분 넘게
-   * working에 갇힘 / 아카이브→복구로만 풀림 — archive가 state를 idle로 되돌리기 때문).
+   * working에 갇힘. 그때의 우회로가 아카이브→복구였는데, 아카이브는 그 뒤 폐기됐다).
    */
   it('기동 시 프로세스 없는 working·waiting_approval을 idle로 바로잡는다', async () => {
     const p = await addProject()
@@ -300,16 +300,6 @@ describe('세션 수명주기', () => {
     await rpc('sessions.rename', { sessionId: s.id, name: '가드 MCP' })
     const titles = events.filter((e) => e.type === 'session_title') as { title: string; auto: boolean }[]
     expect(titles.at(-1)).toMatchObject({ title: '가드 MCP', auto: false })
-  })
-
-  it('아카이브하면 핸들이 정리되고 활성 목록에서 빠진다 (FR-20)', async () => {
-    const p = await addProject()
-    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
-    await rpc('agents.archiveSession', { sessionId: s.id })
-    expect(adapter.last!.disposed).toBe(true)
-    expect(mgr.activeSessionsIn(p.id)).toHaveLength(0)
-    const list = (await rpc('sessions.list', {})) as { archived: boolean }[]
-    expect(list[0]!.archived).toBe(true) // 기록은 남는다
   })
 
   it('없는 세션 조작은 session_not_found', async () => {
@@ -520,24 +510,12 @@ describe('이전 세션 불러오기', () => {
   })
 })
 
-/** M2.6 도그푸딩: 숨김·재시작·자동 이어가기 */
-describe('세션 숨김과 삭제는 다른 일이다', () => {
-  it('숨기면 목록에서 빠지지만 기록은 남고, 다시 꺼낼 수 있다', async () => {
-    const p = await addProject()
-    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await rpc('agents.send', { sessionId: s.id, text: '기억해둘 말' })
-
-    await rpc('agents.archiveSession', { sessionId: s.id, archived: true })
-    expect(mgr.listSessions().find((x) => x.id === s.id)!.archived).toBe(true)
-    // 숨긴 것은 프로세스만 정리한다 — 기록은 그대로다
-    expect(mgr.isLive(s.id)).toBe(false)
-    const msgs = (await rpc('messages.load', { sessionId: s.id, limit: 100 })) as unknown[]
-    expect(msgs.length).toBeGreaterThan(0)
-
-    await rpc('agents.archiveSession', { sessionId: s.id, archived: false })
-    expect(mgr.listSessions().find((x) => x.id === s.id)!.archived).toBe(false)
-  })
-
+/**
+ * M2.6 도그푸딩. 한때 여기 '숨김(아카이브)'이 함께 있었다 — 2026-09-02에 폐기했다:
+ * 들어가는 문(인박스의 `d`)만 있고 나오는 문이 없어서, 사람 눈에는 삭제와 같았다.
+ * 남은 것은 삭제 하나뿐이고, 그래서 삭제가 무엇을 지우는지가 더 중요해졌다.
+ */
+describe('세션 삭제', () => {
   it('삭제는 되돌릴 수 없다 — 기록까지 사라진다', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
@@ -572,8 +550,8 @@ describe('자동 이어가기', () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     // host 재시작 후 상태: 기록·external_id는 있고 프로세스만 없다
-    await mgr.archive(s.id, true)
-    await mgr.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태) — 예전에는 아카이브/되돌리기로 만들던 상태다
+    await mgr.disposeAll()
     expect(mgr.isLive(s.id)).toBe(false)
 
     await rpc('agents.send', { sessionId: s.id, text: '이어서 해줘' })
@@ -585,8 +563,8 @@ describe('자동 이어가기', () => {
   it('정말 이어갈 수 없으면 조용히 삼키지 않고 이유를 던진다', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await mgr.archive(s.id, true)
-    await mgr.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태) — 예전에는 아카이브/되돌리기로 만들던 상태다
+    await mgr.disposeAll()
     // 도구 자체가 뜨지 못하는 상황
     adapter.failCreate = '도구를 시작할 수 없습니다'
 
@@ -658,8 +636,8 @@ describe('설정 변경은 실제로 적용된다', () => {
     const s = (await rpc('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
     })) as { id: string }
-    await mgr.archive(s.id, true)
-    await mgr.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태) — 예전에는 아카이브/되돌리기로 만들던 상태다
+    await mgr.disposeAll()
 
     await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
     expect(mgr.listSessions().find((x) => x.id === s.id)!.permissionPreset).toBe('auto')
@@ -711,7 +689,7 @@ describe('설정 어긋남(drift)은 화면값이 아니라 프로세스 기준�
  * 도구(클로드·코덱스)에는 대화가 그대로 남으므로 '이전 대화'로 되찾을 수 있어야 한다.
  * 그 길이 막히면 숨김은 사실상 삭제가 된다.
  */
-describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () => {
+describe('지운 세션은 이전 대화 목록에서 되찾을 수 있다', () => {
   class ListingAdapter2 extends FakeAdapter {
     override readonly capabilities: AdapterCapabilities = {
       approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [],
@@ -724,7 +702,7 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
     }
   }
 
-  it('목록에 있는 동안은 "이미 불러옴", 치우면 다시 가져올 수 있다', async () => {
+  it('목록에 있는 동안은 "이미 불러옴", 지우면 다시 가져올 수 있다', async () => {
     const a = new ListingAdapter2()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
     const m = new SessionManager(store, adapters, (e) => events.push(e))
@@ -741,9 +719,13 @@ describe('치운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
     expect(listed.imported).toBe(true)
     expect(listed.importedAs).toBe(s.id)
 
-    await m.archive(s.id, true)
+    await m.deleteSession(s.id)
 
-    // 치웠으면 되찾을 수 있어야 한다 — 여기서 막으면 숨김이 곧 삭제다
+    /*
+      지운 세션은 이전 대화 목록에서 **되찾을 수 있어야 한다.** 여기서 막으면 삭제가
+      도구의 기록까지 태워버린 것처럼 보인다 — 삭제 창이 약속하는 문장(대화는 도구에
+      남아 있고 + → Past conversations로 다시 꺼낼 수 있다)이 곧 이 단언이다.
+    */
     expect((await m.listExternalSessions(p.id, 'claude', 30)).sessions[0]!.imported).toBe(false)
   })
 })
@@ -795,8 +777,8 @@ describe('도구가 대화를 못 찾을 때', () => {
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     const startedIn = a.lastCwd
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
 
     a.present = [] // the tool no longer lists it — an absence is all we actually know
     const r = await m.resumeSession(s.id)
@@ -825,8 +807,8 @@ describe('도구가 대화를 못 찾을 때', () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
 
     a.failCreate = Object.assign(new Error('This conversation is already open elsewhere'), {
       code: 'conversation_locked',
@@ -842,8 +824,8 @@ describe('도구가 대화를 못 찾을 때', () => {
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     const before = m.listSessions().find((x) => x.id === s.id)!.externalId
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
 
     const r = await m.forkConversation(s.id)
 
@@ -870,8 +852,8 @@ describe('도구가 대화를 못 찾을 때', () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
 
     a.failList = true
     const r = await m.resumeSession(s.id)
@@ -886,8 +868,8 @@ describe('도구가 대화를 못 찾을 때', () => {
     const s = (await call('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
     })) as { id: string }
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
 
     // resume이 새 id를 발급해 external_id는 ext-1이 아니지만, 원본은 남아 있다
     a.present = ['ext-1']
@@ -935,11 +917,11 @@ describe('같은 대화를 둘이 열지 않는다', () => {
   it('쥐고 있던 세션이 잠들면 다시 열 수 있다', async () => {
     const { m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
-    const first = (await call('agents.createSession', {
+    await call('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
-    })) as { id: string }
+    })
 
-    await m.archive(first.id, true) // 프로세스가 정리되면 쥐고 있는 쪽이 없다
+    await m.disposeAll() // 프로세스가 정리되면 쥐고 있는 쪽이 없다
 
     const second = await call('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
@@ -987,8 +969,8 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
     })) as { id: string }
     expect(await texts(call, s.id)).toEqual(['첫 질문', '첫 답'])
 
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
 
     // 그 사이 터미널에서 이어서 작업했다
     a.toolHistory.push({ role: 'user', text: '터미널에서 한 말' }, { role: 'assistant', text: '터미널 답' })
@@ -1007,8 +989,8 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
     })) as { id: string }
 
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
     await m.resumeSession(s.id)
 
     expect(await texts(call, s.id)).toEqual(['첫 질문'])
@@ -1022,8 +1004,8 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
     })) as { id: string }
 
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
     // 도구 기록이 통째로 달라졌다 (압축 등으로 앞부분이 사라진 경우)
     a.toolHistory = [{ role: 'user', text: '전혀 다른 대화' }]
     await m.resumeSession(s.id)
@@ -1048,8 +1030,8 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
 describe('되살리기가 멈출 때', () => {
   it('멈춘 spawn은 단계 이름을 붙여 실패하고, Retry는 새로 시작한다', async () => {
     const s = await rpc('agents.createSession', { projectId: (await addProject()).id, cwd: tmpdir(), tool: 'claude' }) as { id: string }
-    await mgr.archive(s.id, true)
-    await mgr.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태) — 예전에는 아카이브/되돌리기로 만들던 상태다
+    await mgr.disposeAll()
 
     vi.useFakeTimers()
     try {
@@ -1157,8 +1139,8 @@ describe('식별자가 없으면 이어받은 원본으로 재개한다', () => 
     expect(m.listSessions().find((x) => x.id === s.id)!.externalId).toBeNull()
     expect((await call('messages.load', { sessionId: s.id, limit: 10 })) as unknown[]).not.toHaveLength(0)
 
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
     a.resumedWith = undefined
 
     const r = await m.resumeSession(s.id)
@@ -1189,12 +1171,6 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     const list = await tools.listSessions()
     expect(list.map((s) => s.sessionId)).toContain(a.id)
     expect(list.map((s) => s.sessionId)).not.toContain(orc.id)
-  })
-
-  it('보관된 세션도 없다', async () => {
-    const { a, tools } = await setup()
-    await rpc('agents.archiveSession', { sessionId: a.id, archived: true })
-    expect((await tools.listSessions()).map((s) => s.sessionId)).not.toContain(a.id)
   })
 
   it('세션에 일을 시키면 실제로 전달된다', async () => {
@@ -1471,8 +1447,8 @@ describe('동시에 말을 걸어도 되살리기는 한 번이다', () => {
     const call = createRpcHandler(m, adapters)
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
     a.creations = 0
 
     await Promise.all([
@@ -1578,8 +1554,8 @@ describe('델타로 쌓인 기록에서도 따라잡는다', () => {
     // 도구 기록에는 같은 응답이 **완전한 메시지 하나**로 남아 있다
     a.toolHistory.push({ role: 'assistant', text: '답의 앞부분과 뒷부분' })
 
-    await m.archive(s.id, true)
-    await m.archive(s.id, false)
+    // 프로세스만 내린다 (host 재시작과 같은 상태)
+    await m.disposeAll()
     // 그 사이 터미널에서 이어서 작업했다
     a.toolHistory.push({ role: 'user', text: '터미널에서 한 말' }, { role: 'assistant', text: '터미널 답' })
 
@@ -2099,7 +2075,7 @@ describe('재개는 만들어진 곳으로 돌아간다', () => {
     // column is NULL — the same state the migration leaves the orchestrator in.
     store.upsertSession({
       id: 'old', projectId: p.id, kind: 'worker', tool: 'claude', externalId: 'ext-1', name: '예전 세션',
-      autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
     })
@@ -2378,7 +2354,7 @@ describe('마지막으로 고른 모델·강도가 프로젝트 기본값이 된
 describe('워크트리 세션의 매니저 (#69)', () => {
   const wtRow = (id: string, projectId: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
     id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id,
-    autoNamed: true, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+    autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
     serviceTier: null, permissionPreset: 'normal', importedFrom: null,
     worktree: { path: `/tmp/wt/${id}`, branch: `centralu/${id}` }, parentSessionId: null,
@@ -2432,8 +2408,8 @@ describe('워크트리 세션의 매니저 (#69)', () => {
 
     await expect(m2.deleteSession(manager.id)).rejects.toThrow(/worktree session/)
 
-    // 자식을 아카이브하면 매니저는 풀려난다 — 끝난 작업이 매니저를 영원히 고정하면 보호가 벌이 된다
-    await m2.archive('wt-a', true)
+    // 자식이 사라지면 매니저는 풀려난다 — 끝난 작업이 매니저를 영원히 고정하면 보호가 벌이 된다
+    await m2.deleteSession('wt-a')
     await expect(m2.deleteSession(manager.id)).resolves.toBeUndefined()
   })
 

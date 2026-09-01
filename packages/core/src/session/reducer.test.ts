@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { applyEvent, archive, detectFileConflicts, initialSession, markRead, rename } from './reducer.js'
+import { applyEvent, detectFileConflicts, initialSession, markRead, rename } from './reducer.js'
 
 const NOW = 1_000_000
 const s0 = () => initialSession({ id: 's1', projectId: 'p1', name: '새 세션' })
@@ -253,12 +253,6 @@ describe('읽음·아카이브', () => {
     expect(markRead(markRead(s0(), 5), 2).lastReadSeq).toBe(5)
   })
 
-  it('아카이브하면 대기에서 빠지고 pending이 정리된다', () => {
-    const s = archive(replay(TURN.slice(0, 3)))
-    expect(s.archived).toBe(true)
-    expect(s.state).toBe('idle')
-    expect(s.pendingApproval).toBeNull()
-  })
 })
 
 describe('파일 충돌 감지 (FR-2 데이터 손실)', () => {
@@ -268,11 +262,6 @@ describe('파일 충돌 감지 (FR-2 데이터 손실)', () => {
     expect(detectFileConflicts([a, b])).toEqual([{ path: 'src/x.ts', sessionIds: ['a', 'b'] }])
   })
 
-  it('아카이브된 세션은 충돌로 치지 않는다', () => {
-    const a = applyEvent(initialSession({ id: 'a', projectId: 'p1', name: 'a' }), ev({ type: 'files_touched', paths: ['x'] }), NOW)
-    const b = archive(applyEvent(initialSession({ id: 'b', projectId: 'p1', name: 'b' }), ev({ type: 'files_touched', paths: ['x'] }), NOW))
-    expect(detectFileConflicts([a, b])).toEqual([])
-  })
 })
 
 /** 생각의 양 (#58) — activity와 같은 수명: working을 벗어나면 죽는다 */

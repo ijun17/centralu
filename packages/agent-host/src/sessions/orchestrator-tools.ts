@@ -48,15 +48,6 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
-    name: 'archive_session',
-    description:
-      '세션을 보관하거나(archived=true) 목록으로 되돌린다(false). 보관하면 그 세션의 프로세스가 내려가고 대기 중이던 승인·질문 카드도 걷힌다 — 화면이 막혔을 때 푸는 방법이다. 기록은 지워지지 않는다.',
-    schema: z.object({
-      sessionId: z.string().describe('list_sessions가 준 세션 id'),
-      archived: z.boolean().describe('true면 보관, false면 되돌리기'),
-    }),
-  },
-  {
     name: 'send_to_session',
     description: '한 세션에 메시지를 보내 일을 시킨다. sessionId는 list_sessions가 준 것이어야 한다.',
     schema: z.object({
@@ -257,16 +248,6 @@ export async function runOrchestratorTool(
           '   끝난 뒤에 알고 싶으면 send_to_session의 reportBack을 쓰세요.\n\n'
         : ''
     return { text: head + (r.lines?.join('\n') || '(대화 없음)') }
-  }
-
-  if (name === 'archive_session') {
-    const sessionId = String(args.sessionId ?? '')
-    const archived = args.archived === true
-    const r = await tools.archiveSession(sessionId, archived)
-    return {
-      text: r.ok ? `${archived ? '보관했습니다' : '되돌렸습니다'}: ${sessionId}` : `하지 못했습니다 — ${r.error}`,
-      isError: !r.ok,
-    }
   }
 
   if (name === 'propose_project') {

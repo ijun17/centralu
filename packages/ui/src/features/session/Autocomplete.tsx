@@ -188,7 +188,7 @@ export function useAutocomplete({
     if (atSource === 'sessions') {
       const q = trigger.query.toLowerCase()
       return sessions
-        .filter((x) => !x.archived && x.projectId !== null && x.name.toLowerCase().includes(q))
+        .filter((x) => x.projectId !== null && x.name.toLowerCase().includes(q))
         .slice(0, 20)
         .map((x) => ({ value: `@${x.name} `, label: x.name, hint: projectNames[x.projectId!] ?? '' }))
     }

@@ -29,7 +29,20 @@ import {
   wireJoin,
   wireSegments,
 } from '@cc/protocol'
-import type { AgentPort, AlertKind, ConnectionState, FsEntry, FsFile, Platform, ProjectPort, SystemPort, TerminalPort, Unsubscribe, UpdatePort, WorkspaceSnapshot } from '../ports/index.js'
+import type {
+  AgentPort,
+  AlertKind,
+  ConnectionState,
+  FsEntry,
+  FsFile,
+  Platform,
+  ProjectPort,
+  SystemPort,
+  TerminalPort,
+  Unsubscribe,
+  UpdatePort,
+  WorkspaceSnapshot,
+} from '../ports/index.js'
 
 /**
  * 인메모리 구현 (docs/platform-abstraction.md §6).
@@ -121,29 +134,42 @@ export class MockPlatform implements Platform {
          * 실물에서는 잡힐 버그가 테스트에서만 조용히 지나간다.
          */
         const kind =
-          event.type === 'tool_call' ? ('tool_call' as const)
-          : event.type === 'tool_result' ? ('tool_result' as const)
-          : event.type === 'approval_request' || event.type === 'approval_resolved' ? ('approval' as const)
-          : event.type === 'message_delta' ? ('text' as const)
-          // 추론 요약 (#58) — 실물과 같은 규칙: 텍스트가 실렸을 때만 기록
-          : event.type === 'reasoning_delta' && event.text ? ('reasoning' as const)
-          // 시켜서 들어온 말 (FR-11). 실물 payload는 {text, from}이고 이벤트가 그 둘을
-          // 그대로 갖고 있어, 복원(messagesToChat)이 같은 화면을 되살린다
-          : event.type === 'user_message' ? ('text' as const)
-          : event.type === 'compaction' ? ('marker' as const)
-          // 이미지도 영속된다 (#40 2차). 실물은 파일+경로지만 목의 디스크는 메모리다 —
-          // payload에 바이트를 그대로 두면 loadMessages가 실물과 같은 화면을 되살린다
-          : event.type === 'message_image' ? ('image' as const)
-          : null
+          event.type === 'tool_call'
+            ? ('tool_call' as const)
+            : event.type === 'tool_result'
+              ? ('tool_result' as const)
+              : event.type === 'approval_request' || event.type === 'approval_resolved'
+                ? ('approval' as const)
+                : event.type === 'message_delta'
+                  ? ('text' as const)
+                  : // 추론 요약 (#58) — 실물과 같은 규칙: 텍스트가 실렸을 때만 기록
+                    event.type === 'reasoning_delta' && event.text
+                    ? ('reasoning' as const)
+                    : // 시켜서 들어온 말 (FR-11). 실물 payload는 {text, from}이고 이벤트가 그 둘을
+                      // 그대로 갖고 있어, 복원(messagesToChat)이 같은 화면을 되살린다
+                      event.type === 'user_message'
+                      ? ('text' as const)
+                      : event.type === 'compaction'
+                        ? ('marker' as const)
+                        : // 이미지도 영속된다 (#40 2차). 실물은 파일+경로지만 목의 디스크는 메모리다 —
+                          // payload에 바이트를 그대로 두면 loadMessages가 실물과 같은 화면을 되살린다
+                          event.type === 'message_image'
+                          ? ('image' as const)
+                          : null
         if (kind) {
           const seq = (this.messages.get(s.id)?.length ?? 0) + 1
           this.pushMessage({
-            sessionId: s.id, seq,
+            sessionId: s.id,
+            seq,
             role:
-              event.type === 'message_delta' || event.type === 'reasoning_delta' ? 'assistant'
-              : event.type === 'user_message' ? 'user'
-              : 'system',
-            kind, payload: event, ts: this.now(),
+              event.type === 'message_delta' || event.type === 'reasoning_delta'
+                ? 'assistant'
+                : event.type === 'user_message'
+                  ? 'user'
+                  : 'system',
+            kind,
+            payload: event,
+            ts: this.now(),
           })
           s.lastSeq = seq
           out = { ...event, seq } as NormalizedEvent
@@ -191,8 +217,7 @@ export class MockPlatform implements Platform {
   rulesList: { id: number; scope: string; matcher: string; decision: string; createdAt: number }[] = []
 
   readonly search = {
-    messages: async (query: string) =>
-      this.searchResults.filter((r) => r.snippet.includes(query)),
+    messages: async (query: string) => this.searchResults.filter((r) => r.snippet.includes(query)),
   }
 
   readonly rules = {
@@ -274,7 +299,9 @@ export class MockPlatform implements Platform {
   readonly fs = {
     search: async (_projectId: string, query: string, limit = 20) => {
       // 목은 실제 퍼지 매칭을 흉내내지 않는다 — 검증 대상은 UI 흐름이다
-      const all = Object.values(this.fsState.entries).flat().filter((e) => !e.isDir)
+      const all = Object.values(this.fsState.entries)
+        .flat()
+        .filter((e) => !e.isDir)
       const q = query.toLowerCase()
       return all
         .filter((e) => e.path.toLowerCase().includes(q))
@@ -352,7 +379,8 @@ export class MockPlatform implements Platform {
         this.trashed.push(path)
         return { supported: true }
       }
-      if (!this.detach(path)) throw Object.assign(new Error(`${path} is no longer there`), { code: 'internal' })
+      if (!this.detach(path))
+        throw Object.assign(new Error(`${path} is no longer there`), { code: 'internal' })
       this.takeSubtree(path)
       this.trashed.push(path)
       return { supported: true }
@@ -407,10 +435,11 @@ export class MockPlatform implements Platform {
   }
 
   /** 테스트용: 슬래시 명령 목록 (ready=false로 '아직 준비 안 됨'도 재현한다) */
-  commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } = {
-    ready: true,
-    commands: [],
-  }
+  commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } =
+    {
+      ready: true,
+      commands: [],
+    }
 
   /** 테스트용: 재시작을 요청받은 세션 */
   restarted: string[] = []
@@ -433,7 +462,10 @@ export class MockPlatform implements Platform {
       this.lastCreateParams = params
       const id = `mock-session-${++this.idc}`
       const worktree = params.worktree
-        ? { path: `/mock/worktrees/${id}`, branch: params.worktreeBranch?.trim() || `centralu/${id.slice(-8)}` }
+        ? {
+            path: `/mock/worktrees/${id}`,
+            branch: params.worktreeBranch?.trim() || `centralu/${id.slice(-8)}`,
+          }
         : null
       /*
        * 실물과 같은 규칙 (#69, manager.managerFor): 워크트리 세션은 태어나는 순간부터
@@ -451,37 +483,68 @@ export class MockPlatform implements Platform {
          */
         const seated = owner?.worktreeManager && this.sessions.get(owner.worktreeManager.sessionId)
         const withKids = new Set([...this.sessions.values()].map((x) => x.parentSessionId).filter(Boolean))
-        let mgr =
-          seated && !seated.archived
-            ? seated
-            : [...this.sessions.values()].find(
-                (x) => x.projectId === projectId && !x.worktree && withKids.has(x.id) && !x.archived,
-              )
+        let mgr: SessionInfo | undefined =
+          seated ||
+          [...this.sessions.values()].find(
+            (x) => x.projectId === projectId && !x.worktree && withKids.has(x.id),
+          )
         if (!mgr) {
           const mgrId = `mock-manager-${++this.idc}`
           mgr = {
-            id: mgrId, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: null,
-            name: 'Worktrees', autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-            createdAt: this.now(), waitingSince: null, live: false, model: null, effort: null, verbosity: null,
-            serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
-            parentSessionId: null, ...sessionLiveDefaults(),
+            id: mgrId,
+            projectId: params.projectId,
+            kind: 'worker',
+            tool: params.tool,
+            externalId: null,
+            name: 'Worktrees',
+            autoNamed: false,
+            state: 'idle',
+            lastReadSeq: 0,
+            lastSeq: 0,
+            createdAt: this.now(),
+            waitingSince: null,
+            live: false,
+            model: null,
+            effort: null,
+            verbosity: null,
+            serviceTier: null,
+            permissionPreset: 'normal',
+            importedFrom: null,
+            worktree: null,
+            parentSessionId: null,
+            ...sessionLiveDefaults(),
           }
           this.sessions.set(mgrId, mgr)
           this.emit({ type: 'session_created', sessionId: mgrId, session: mgr })
         }
         // 관계로 찾았거나 방금 만든 자리도 프로젝트가 가리키게 한다 (실물의 자가 치유)
-        if (owner) owner.worktreeManager = { sessionId: mgr.id, baseBranch: owner.worktreeManager?.baseBranch ?? '' }
+        if (owner)
+          owner.worktreeManager = { sessionId: mgr.id, baseBranch: owner.worktreeManager?.baseBranch ?? '' }
         parentSessionId = mgr.id
       }
       const info: SessionInfo = {
-        id, projectId: params.projectId, kind: 'worker', tool: params.tool, externalId: `ext-${id}`, worktree,
+        id,
+        projectId: params.projectId,
+        kind: 'worker',
+        tool: params.tool,
+        externalId: `ext-${id}`,
+        worktree,
         parentSessionId,
-        effort: params.effort ?? null, verbosity: params.verbosity ?? null, serviceTier: params.serviceTier ?? null,
+        effort: params.effort ?? null,
+        verbosity: params.verbosity ?? null,
+        serviceTier: params.serviceTier ?? null,
         // 실물과 같은 규칙 (#69): 사람이 브랜치를 정했으면 그 이름이 세션 이름이고, 자동 이름이 덮지 않는다
-        name: (params.worktreeBranch?.trim() || undefined) ?? params.initialPrompt?.slice(0, 40) ?? 'New session',
-        autoNamed: !params.worktreeBranch?.trim(), state: 'idle',
-        archived: false, lastReadSeq: 0, lastSeq: 0, createdAt: this.now(), waitingSince: null, live: true,
-        model: params.model ?? null, permissionPreset: params.permissionPreset ?? 'normal',
+        name:
+          (params.worktreeBranch?.trim() || undefined) ?? params.initialPrompt?.slice(0, 40) ?? 'New session',
+        autoNamed: !params.worktreeBranch?.trim(),
+        state: 'idle',
+        lastReadSeq: 0,
+        lastSeq: 0,
+        createdAt: this.now(),
+        waitingSince: null,
+        live: true,
+        model: params.model ?? null,
+        permissionPreset: params.permissionPreset ?? 'normal',
         importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
         ...sessionLiveDefaults(),
       }
@@ -495,7 +558,14 @@ export class MockPlatform implements Platform {
         const history = this.externalHistory.get(params.resumeExternalId) ?? []
         for (const h of history) {
           const seq = (this.messages.get(id)?.length ?? 0) + 1
-          this.pushMessage({ sessionId: id, seq, role: h.role, kind: 'text', payload: { text: h.text }, ts: this.now() })
+          this.pushMessage({
+            sessionId: id,
+            seq,
+            role: h.role,
+            kind: 'text',
+            payload: { text: h.text },
+            ts: this.now(),
+          })
           info.lastSeq = seq
           info.lastReadSeq = seq
         }
@@ -508,7 +578,13 @@ export class MockPlatform implements Platform {
       return info
     },
     saveAttachment: async (_sessionId: string, name: string, mime: string, dataBase64: string) => {
-      const att = { kind: mime.startsWith('image/') ? ('image' as const) : ('file' as const), path: `/tmp/att/${name}`, name, mime, bytes: dataBase64.length }
+      const att = {
+        kind: mime.startsWith('image/') ? ('image' as const) : ('file' as const),
+        path: `/tmp/att/${name}`,
+        name,
+        mime,
+        bytes: dataBase64.length,
+      }
       this.savedAttachments.push(att)
       this.attachmentData.set(att.path, dataBase64)
       return att
@@ -520,20 +596,29 @@ export class MockPlatform implements Platform {
       // host와 같은 규칙: 잠들어 있으면 되살리고 나서 보낸다 (자동 이어가기)
       if (!s.live) {
         if (this.unresumable.has(sessionId)) {
-          throw Object.assign(new Error('Could not resume the conversation: this session cannot be resumed'), {
-            code: 'session_not_found',
-          })
+          throw Object.assign(
+            new Error('Could not resume the conversation: this session cannot be resumed'),
+            {
+              code: 'session_not_found',
+            },
+          )
         }
         s.live = true
       }
       const seq = (this.messages.get(sessionId)?.length ?? 0) + 1
       // 실물과 같은 규칙: 첨부도 payload에 남고, 이미지 바이트는 "디스크"(여기선 맵)에서 다시 실린다
       const stored = attachments?.map((a) =>
-        a.kind === 'image' && this.attachmentData.has(a.path) ? { ...a, data: this.attachmentData.get(a.path) } : a,
+        a.kind === 'image' && this.attachmentData.has(a.path)
+          ? { ...a, data: this.attachmentData.get(a.path) }
+          : a,
       )
       this.pushMessage({
-        sessionId, seq, role: 'user', kind: 'text',
-        payload: { text, ...(stored?.length ? { attachments: stored } : {}) }, ts: this.now(),
+        sessionId,
+        seq,
+        role: 'user',
+        kind: 'text',
+        payload: { text, ...(stored?.length ? { attachments: stored } : {}) },
+        ts: this.now(),
       })
       s.lastSeq = seq
       s.lastReadSeq = seq
@@ -543,7 +628,12 @@ export class MockPlatform implements Platform {
       }
       this.emit({ type: 'state_change', sessionId, state: 'working' })
     },
-    respondApproval: async (sessionId: string, requestId: string, decision: ApprovalDecision, _scope?: ApprovalScope) => {
+    respondApproval: async (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+      _scope?: ApprovalScope,
+    ) => {
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
       this.emit({ type: 'turn_complete', sessionId })
     },
@@ -575,8 +665,15 @@ export class MockPlatform implements Platform {
        * 가면 첫 턴이 400으로 죽는다). 워크트리는 디렉토리 사실이라 도구와 무관하다.
        */
       const next = {
-        ...s, tool, externalId: null, importedFrom: null, live: false,
-        model: null, effort: null, verbosity: null, serviceTier: null,
+        ...s,
+        tool,
+        externalId: null,
+        importedFrom: null,
+        live: false,
+        model: null,
+        effort: null,
+        verbosity: null,
+        serviceTier: null,
       }
       this.sessions.set(sessionId, next)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
@@ -589,10 +686,27 @@ export class MockPlatform implements Platform {
       const id = `orc-${++this.idc}`
       const info = {
         // 실물과 같은 규칙: 도구는 소개 화면의 선택을 따른다 (#63)
-        id, projectId: null, kind: 'orchestrator' as const, tool: this.orchestratorTool, externalId: null, name: 'Orchestrator',
-        autoNamed: false, state: 'idle' as const, archived: false, lastReadSeq: 0, lastSeq: 0,
-        createdAt: this.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
-        permissionPreset: 'normal' as const, importedFrom: null, worktree: null, parentSessionId: null,
+        id,
+        projectId: null,
+        kind: 'orchestrator' as const,
+        tool: this.orchestratorTool,
+        externalId: null,
+        name: 'Orchestrator',
+        autoNamed: false,
+        state: 'idle' as const,
+        lastReadSeq: 0,
+        lastSeq: 0,
+        createdAt: this.now(),
+        waitingSince: null,
+        live: true,
+        model: null,
+        effort: null,
+        verbosity: null,
+        serviceTier: null,
+        permissionPreset: 'normal' as const,
+        importedFrom: null,
+        worktree: null,
+        parentSessionId: null,
         ...sessionLiveDefaults(),
       }
       this.sessions.set(id, info)
@@ -614,28 +728,48 @@ export class MockPlatform implements Platform {
         tool === 'codex'
           ? [
               // 실측 모양 그대로: 티어는 큰 모델에만 있다 (priority = Fast, 1.5x)
-              { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] },
-              { id: 'gpt-5.6-terra-mini', label: 'gpt-5.6-terra-mini', efforts: [], defaultEffort: null, tiers: [] },
+              {
+                id: 'gpt-5.6-terra',
+                label: 'gpt-5.6-terra',
+                efforts: ['low', 'medium', 'high'],
+                defaultEffort: 'medium',
+                tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }],
+              },
+              {
+                id: 'gpt-5.6-terra-mini',
+                label: 'gpt-5.6-terra-mini',
+                efforts: [],
+                defaultEffort: null,
+                tiers: [],
+              },
             ]
           : [
-              { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null, tiers: [] },
-              { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null, tiers: [] },
-              { id: 'fable', label: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null, tiers: [] },
+              {
+                id: 'sonnet',
+                label: 'Sonnet',
+                efforts: ['low', 'medium', 'high', 'xhigh'],
+                defaultEffort: null,
+                tiers: [],
+              },
+              {
+                id: 'opus',
+                label: 'Opus',
+                efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+                defaultEffort: null,
+                tiers: [],
+              },
+              {
+                id: 'fable',
+                label: 'Fable',
+                efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+                defaultEffort: null,
+                tiers: [],
+              },
               { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null, tiers: [] },
             ],
     }),
     interrupt: async (sessionId: string) => {
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
-    },
-    archiveSession: async (sessionId: string, archived = true) => {
-      const s = this.sessions.get(sessionId)
-      if (s) {
-        s.archived = archived
-        s.state = 'idle'
-        s.waitingSince = null
-        if (archived) s.live = false
-      }
-      this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'archived' })
     },
     /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
     worktreeStatus: async (sessionId: string) => {
@@ -650,7 +784,13 @@ export class MockPlatform implements Platform {
     },
     updateSettings: async (
       sessionId: string,
-      s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
+      s: {
+        model?: string | null
+        effort?: string | null
+        verbosity?: string | null
+        serviceTier?: string | null
+        permissionPreset?: PermissionPreset
+      },
     ) => {
       const sess = this.sessions.get(sessionId)
       if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
@@ -718,7 +858,7 @@ export class MockPlatform implements Platform {
       // host와 같은 규칙: 숨기지 않은 세션이 들고 있는 원본은 '이미 열려 있음'이다
       const known = new Map<string, string>()
       for (const s of this.sessions.values()) {
-        if (s.tool !== tool || s.archived) continue
+        if (s.tool !== tool) continue
         for (const key of [s.importedFrom, s.externalId]) {
           if (key && !known.has(key)) known.set(key, s.id)
         }
@@ -727,13 +867,21 @@ export class MockPlatform implements Platform {
         ...this.externalSessions,
         sessions: this.externalSessions.sessions
           .filter((s) => s.tool === tool)
-          .map((s) => ({ ...s, imported: known.has(s.externalId), importedAs: known.get(s.externalId) ?? null })),
+          .map((s) => ({
+            ...s,
+            imported: known.has(s.externalId),
+            importedAs: known.get(s.externalId) ?? null,
+          })),
       }
     },
     commands: async (_sessionId: string) => ({ ...this.commandState }),
     usage: async (_tool: ToolName) => ({ ...this.usageState }),
     capabilities: async (tool: ToolName): Promise<AdapterCapabilities> => ({
-      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'],
+      approvals: true,
+      contextUsage: 'exact',
+      resume: true,
+      autoTitle: true,
+      attachments: ['image', 'file'],
       // 실물과 같은 모양: codex만 응답 길이 노브가 있다 (#54) — UI가 이 배열로 행을 그린다
       verbosities: tool === 'codex' ? ['low', 'medium', 'high'] : [],
     }),
@@ -781,8 +929,13 @@ export class MockPlatform implements Platform {
        * it `proj`, and e2e — which only ever runs the mock — would have stayed green about it.
        */
       const info: ProjectInfo = {
-        id: `mock-project-${++this.idc}`, path, name: osPathBaseName(path) || path,
-        defaultTool: 'claude', commands: [], worktreeSetup: null, worktreeManager: null,
+        id: `mock-project-${++this.idc}`,
+        path,
+        name: osPathBaseName(path) || path,
+        defaultTool: 'claude',
+        commands: [],
+        worktreeSetup: null,
+        worktreeManager: null,
         git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
       this.projectsList.push(info)
@@ -840,19 +993,37 @@ export class MockPlatform implements Platform {
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       const branch = baseBranch.trim()
-      if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
+      if (!branch)
+        throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
       const seated = p.worktreeManager && this.sessions.get(p.worktreeManager.sessionId)
-      if (seated && !seated.archived) {
+      if (seated) {
         p.worktreeManager = { sessionId: seated.id, baseBranch: branch }
         return { ...seated }
       }
       const id = `mock-session-${++this.idc}`
       const manager: SessionInfo = {
-        id, projectId, kind: 'worker', tool: p.defaultTool, externalId: null, name: 'Worktrees',
-        autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
-        createdAt: this.now(), waitingSince: null, live: false, model: null, effort: null,
-        verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null,
-        worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
+        id,
+        projectId,
+        kind: 'worker',
+        tool: p.defaultTool,
+        externalId: null,
+        name: 'Worktrees',
+        autoNamed: false,
+        state: 'idle',
+        lastReadSeq: 0,
+        lastSeq: 0,
+        createdAt: this.now(),
+        waitingSince: null,
+        live: false,
+        model: null,
+        effort: null,
+        verbosity: null,
+        serviceTier: null,
+        permissionPreset: 'normal',
+        importedFrom: null,
+        worktree: null,
+        parentSessionId: null,
+        ...sessionLiveDefaults(),
       }
       this.sessions.set(id, manager)
       p.worktreeManager = { sessionId: id, baseBranch: branch }
@@ -890,13 +1061,22 @@ export class MockPlatform implements Platform {
     list: async (projectId: string) => {
       const cwd = this.cwdOf(projectId)
       return (this.terminalState.byCwd.get(cwd) ?? []).map((t) => ({
-        terminalId: t.id, cwd, title: t.title, history: t.history, alive: t.alive,
+        terminalId: t.id,
+        cwd,
+        title: t.title,
+        history: t.history,
+        alive: t.alive,
       }))
     },
     create: async (projectId: string) => {
       const cwd = this.cwdOf(projectId)
       const list = this.terminalState.byCwd.get(cwd) ?? []
-      const t = { id: `mock-term-${++this.idc}`, title: `Terminal ${list.length + 1}`, history: '', alive: true }
+      const t = {
+        id: `mock-term-${++this.idc}`,
+        title: `Terminal ${list.length + 1}`,
+        history: '',
+        alive: true,
+      }
       list.push(t)
       this.terminalState.byCwd.set(cwd, list)
       return { terminalId: t.id, cwd, title: t.title, history: t.history, alive: true }
@@ -938,7 +1118,17 @@ export class MockPlatform implements Platform {
   }
 
   /** 자주 쓰는 명령어 실행 상태 (#60). 키는 실물과 같은 (projectId, command) 짝 */
-  commandRuns = new Map<string, { command: string; runId: string; running: boolean; exitCode: number | null; startedAt: number; history: string }>()
+  commandRuns = new Map<
+    string,
+    {
+      command: string
+      runId: string
+      running: boolean
+      exitCode: number | null
+      startedAt: number
+      history: string
+    }
+  >()
   private runKey(projectId: string, command: string): string {
     return `${projectId}\u0000${command}`
   }

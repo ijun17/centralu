@@ -78,7 +78,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 
 | Group | Methods | Notes |
 |---|---|---|
-| agents | `createSession, send, respondApproval, interrupt, archiveSession, resumeSession` | product spec §6.2 |
+| agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2 |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |

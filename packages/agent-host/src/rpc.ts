@@ -61,11 +61,6 @@ export function createRpcHandler(
       mgr.interrupt(RpcMethods['agents.interrupt'].params.parse(p).sessionId)
       return { ok: true as const }
     },
-    'agents.archiveSession': async (p) => {
-      const a = RpcMethods['agents.archiveSession'].params.parse(p)
-      await mgr.archive(a.sessionId, a.archived)
-      return { ok: true as const }
-    },
     'agents.deleteSession': async (p) => {
       const { sessionId, deleteWorktree } = RpcMethods['agents.deleteSession'].params.parse(p)
       await mgr.deleteSession(sessionId, deleteWorktree)

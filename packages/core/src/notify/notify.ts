@@ -74,8 +74,8 @@ export function notificationFor(
  * 자리를 뜬 사람에게 필요한 신호는 그것이다.
  */
 export function allDoneNotification(
-  sessions: readonly { id: string; state: SessionState; archived: boolean }[],
-  prevSessions: readonly { id: string; state: SessionState; archived: boolean }[],
+  sessions: readonly { id: string; state: SessionState }[],
+  prevSessions: readonly { id: string; state: SessionState }[],
   ctx: NotifyContext,
 ): NotifyRequest | null {
   const policy = ctx.policy ?? DEFAULT_NOTIFY_POLICY
@@ -89,10 +89,10 @@ export function allDoneNotification(
    * limited는 해제되면 스스로 재개한다 — 이 상태에서 "All done"이 울리면
    * 승인 카드가 쌓여 있는데 사람은 다 끝난 줄 알고 자리를 뜬다.
    */
-  const isBusy = (s: { state: SessionState; archived: boolean }) =>
-    !s.archived && (s.state === 'working' || s.state === 'waiting_approval' || s.state === 'limited')
+  const isBusy = (s: { state: SessionState }) =>
+    s.state === 'working' || s.state === 'waiting_approval' || s.state === 'limited'
 
-  const active = sessions.filter((s) => !s.archived).length
+  const active = sessions.length
 
   /*
    * **개수가 아니라 신원으로 판정한다.**
@@ -107,12 +107,12 @@ export function allDoneNotification(
   const now = new Map(sessions.map((s) => [s.id, s]))
   for (const id of prevBusy) {
     const s = now.get(id)
-    if (!s || s.archived || isBusy(s)) return null
+    if (!s || isBusy(s)) return null
   }
   // 그 사이 새로 바빠진 세션이 있어도 아직 끝난 게 아니다
   if (sessions.some(isBusy)) return null
 
-  const waiting = sessions.filter((s) => !s.archived && isWaiting(s.state)).length
+  const waiting = sessions.filter((s) => isWaiting(s.state)).length
   return {
     kind: 'all_done',
     title: 'All done',

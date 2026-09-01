@@ -202,8 +202,9 @@ export class SessionManager {
      * host가 죽으면 세션 프로세스도 함께 죽는다. 그런데 DB에는 마지막 상태가
      * 그대로 남아 있어서, 다시 켜면 프로세스가 하나도 없는데 화면에는 `working`이라고
      * 적혀 있다. 사람은 도는 줄 알고 기다리지만 영원히 아무 일도 일어나지 않는다
-     * (도그푸딩: "40분 넘게 working에 갇혀 있다", "아카이브했다 되돌리면 풀린다" —
-     * archive가 state를 idle로 되돌리기 때문이었다).
+     * (도그푸딩: "40분 넘게 working에 갇혀 있다". 그때 사람들이 찾아낸 우회로가
+     * 아카이브했다 되돌리기였는데, 그건 archive가 state를 idle로 되돌렸기 때문이다 —
+     * 아카이브는 그 뒤 폐기됐고, 그 우회로가 필요 없도록 여기서 바로잡는다).
      *
      * 살아 있는 상태(working·승인 대기)는 **프로세스가 있어야만 참**이다.
      * 기동 시점에는 어느 세션에도 프로세스가 없으므로 전부 idle로 바로잡는다.
@@ -211,7 +212,7 @@ export class SessionManager {
      */
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
     for (const s of store.listSessions()) {
-      const stale = !s.archived && LIVE_ONLY.includes(s.state)
+      const stale = LIVE_ONLY.includes(s.state)
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
       this.meta.set(s.id, fixed)
       if (stale) {
@@ -313,11 +314,11 @@ export class SessionManager {
     const link = this.store.worktreeManager(projectId)
     if (link) {
       const seated = this.meta.get(link.sessionId)
-      if (seated && !seated.archived) return seated
+      if (seated) return seated
     }
 
     const withKids = new Set(all.filter((s) => s.parentSessionId).map((s) => s.parentSessionId as string))
-    const existing = all.find((s) => s.projectId === projectId && !s.worktree && withKids.has(s.id) && !s.archived)
+    const existing = all.find((s) => s.projectId === projectId && !s.worktree && withKids.has(s.id))
     if (existing) {
       this.store.setWorktreeManager(projectId, { sessionId: existing.id, baseBranch: link?.baseBranch ?? '' })
       return existing
@@ -334,7 +335,6 @@ export class SessionManager {
       name: 'Worktrees',
       autoNamed: false,
       state: 'idle',
-      archived: false,
       lastReadSeq: 0,
       lastSeq: 0,
       createdAt: Date.now(),
@@ -444,7 +444,7 @@ export class SessionManager {
         const link = this.store.worktreeManager(id)
         if (!link) return null
         const seated = this.meta.get(link.sessionId)
-        return seated && !seated.archived ? link : null
+        return seated ? link : null
       })(),
       git: git.isRepo ? git : null,
     }
@@ -563,7 +563,7 @@ export class SessionManager {
 
   /** 같은 디렉토리에서 실행 중인 활성 세션 (FR-2 동시 세션 경고의 근거) */
   activeSessionsIn(projectId: string): SessionInfo[] {
-    return this.listSessions().filter((s) => s.projectId === projectId && !s.archived)
+    return this.listSessions().filter((s) => s.projectId === projectId)
   }
 
   /**
@@ -598,7 +598,7 @@ export class SessionManager {
        */
       const known = new Map<string, string>()
       for (const s of this.meta.values()) {
-        if (s.tool !== tool || s.archived) continue
+        if (s.tool !== tool) continue
         // 한 세션이 여러 식별자를 가질 수 있다: 이어받은 원본과 지금 것.
         // (도구가 resume하면서 새 id를 발급하면 둘이 달라진다)
         for (const key of [s.importedFrom, s.externalId]) {
@@ -735,7 +735,7 @@ export class SessionManager {
     const info: SessionInfo = {
       id, projectId: params.projectId, kind: params.kind ?? 'worker', tool: params.tool, externalId: null,
       name: namedByBranch ?? (params.initialPrompt ? truncate(params.initialPrompt) : 'New session'),
-      autoNamed: !namedByBranch, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+      autoNamed: !namedByBranch, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, effort: params.effort ?? null,
       verbosity: params.verbosity ?? null,
@@ -1265,12 +1265,12 @@ export class SessionManager {
     const liveKids = [...this.meta.values()].filter(
       // 병합된 자식은 붙들지 않는다 (#69 설계: merged children do not pin the manager) —
       // 이력이지 진행 중인 일이 아니다. 아카이브도 같다.
-      (s) => s.parentSessionId === sessionId && !s.archived && !s.worktreeMerged,
+      (s) => s.parentSessionId === sessionId && !s.worktreeMerged,
     )
     if (liveKids.length > 0) {
       throw Object.assign(
         new Error(
-          `This session manages ${liveKids.length} worktree session(s) — delete or archive them first`,
+          `This session manages ${liveKids.length} worktree session(s) — delete them first`,
         ),
         { code: 'internal' },
       )
@@ -1467,7 +1467,7 @@ export class SessionManager {
       : e.type === 'state_change' ? e.state
       : e.type === 'message_delta' || e.type === 'tool_call' ? 'working'
       : null
-    if (!hint || m.archived) return
+    if (!hint) return
     const prev = m.state
     m.state = hint
     const waiting = hint === 'waiting_approval' || hint === 'waiting_input' || hint === 'error'
@@ -2238,27 +2238,6 @@ export class SessionManager {
   }
 
   /**
-   * 목록에서 숨긴다 / 다시 꺼낸다. 삭제와 다르다 — 기록·첨부는 그대로 남는다.
-   * 숨길 때 프로세스는 정리한다(자원을 붙들 이유가 없다). 꺼낼 때 자동으로 띄우지는
-   * 않는다 — 말을 걸면 그때 알아서 이어진다 (send의 자동 이어가기).
-   */
-  async archive(sessionId: string, archived = true): Promise<void> {
-    const m = this.meta.get(sessionId)
-    if (!m) return
-    if (archived) {
-      this.closeStream(sessionId) // 진행 중이던 메시지를 반쯤 열린 채 두지 않는다 (#66)
-      const h = this.handles.get(sessionId)
-      if (h) await h.dispose().catch(() => {})
-      this.handles.delete(sessionId)
-    }
-    m.archived = archived
-    m.state = 'idle'
-    m.waitingSince = null
-    this.store.upsertSession(m)
-    this.emit({ type: 'state_change', sessionId, state: 'idle', reason: archived ? 'archived' : 'unarchived' })
-  }
-
-  /**
    * 에이전트만 재시작한다 (FR-10 확장).
    * 도구가 먹통이 됐을 때 세션을 새로 만들면 대화가 끊긴다 — 프로세스만 갈아 끼운다.
    */
@@ -2301,7 +2280,7 @@ export class SessionManager {
         const byId = projects()
         return [...this.meta.values()]
           // 자기 자신은 뺀다 — 자기에게 시키는 것은 고리를 만든다
-          .filter((s) => s.id !== orchestratorId && !s.archived && inScope(s))
+          .filter((s) => s.id !== orchestratorId && inScope(s))
           .map((s) => ({
             sessionId: s.id,
             name: this.labelOf(s),
@@ -2462,18 +2441,6 @@ export class SessionManager {
         }
       },
 
-      archiveSession: async (sessionId, archived) => {
-        if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 보관할 수 없습니다' }
-        const target = this.meta.get(sessionId)
-        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
-        try {
-          await this.archive(sessionId, archived)
-          return { ok: true }
-        } catch (e) {
-          return { ok: false, error: (e as Error).message }
-        }
-      },
-
       sendToSession: async (sessionId, text, reportBack) => {
         /*
          * 조용히 실패하지 않는다. 오케스트레이터가 이름을 잘못 짚었을 때
@@ -2485,7 +2452,6 @@ export class SessionManager {
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
-        if (target.archived) return { ok: false, error: `보관된 세션입니다: ${target.name}` }
 
         try {
           // 출처를 달아 보낸다 (FR-11) — 대상 세션 화면에서 사람 말과 구분돼 보인다
@@ -2683,7 +2649,7 @@ export class SessionManager {
     // 생긴 워크트리들이 그 경우고, 그때의 기준이 곧 그때의 뜻이다
     const trunk = this.trunkOf(projectId) ?? 'HEAD'
     for (const m of this.meta.values()) {
-      if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged || m.archived) continue
+      if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged) continue
       const merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)
       if (!merged) continue
       const next = { ...m, worktreeMerged: true }

@@ -103,7 +103,6 @@ export const SessionInfo = z.object({
   name: z.string(),
   autoNamed: z.boolean(),
   state: SessionState,
-  archived: z.boolean().default(false),
   lastReadSeq: z.number().default(0),
   lastSeq: z.number().default(0),
   createdAt: z.number(),
@@ -340,14 +339,12 @@ export const RpcMethods = {
   },
   'agents.interrupt': { params: z.object({ sessionId: z.string() }), result: z.object({ ok: z.literal(true) }) },
   /**
-   * 목록에서 숨긴다(=아카이브). 삭제와 달리 **기록은 남는다** — 되돌릴 수 있다.
-   * archived:false면 다시 꺼낸다.
+   * 세션을 완전히 지운다 — 대화 기록·첨부까지 사라진다.
+   *
+   * 한때 그 앞에 아카이브(목록에서만 숨기기)가 있었다. 2026-09-02에 폐기했다:
+   * 들어가는 문(인박스의 `d`)만 있고 나오는 문이 없어서, 사람 눈에는 삭제와
+   * 구별되지 않았다. 자세한 경위는 sessions/manager.ts의 deleteSession 주석에.
    */
-  'agents.archiveSession': {
-    params: z.object({ sessionId: z.string(), archived: z.boolean().default(true) }),
-    result: z.object({ ok: z.literal(true) }),
-  },
-  /** 세션을 완전히 지운다 — 아카이브와 달리 대화 기록·첨부까지 사라진다 */
   'agents.deleteSession': {
     params: z.object({
       sessionId: z.string(),

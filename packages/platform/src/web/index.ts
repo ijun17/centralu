@@ -94,9 +94,6 @@ class WebAgentPort implements AgentPort {
   async interrupt(sessionId: string) {
     await this.rpc.call('agents.interrupt', { sessionId })
   }
-  async archiveSession(sessionId: string, archived = true) {
-    await this.rpc.call('agents.archiveSession', { sessionId, archived })
-  }
   restartSession(sessionId: string) {
     return this.rpc.call('agents.restartSession', {
       sessionId,

@@ -297,7 +297,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - Ordering: urgency first (approval → error → awaiting response); within the same urgency, ascending by when the wait started.
 - Each item: session name, project, kind of wait, elapsed time, a one-line preview of the last content.
 - Select an item → jump to that session's focus view; when handling (approval/response) is complete, **automatically move to the next item**.
-- **`d` (dismiss)**: read an awaiting-response item, and if satisfied, archive the session with one key (FR-20). **The first-class means of emptying the inbox** — without it, awaiting-response items keep piling up and the inbox is useless within hours.
+- ~~**`d` (dismiss)**~~ — **retired 2026-09-02.** It archived the session, which was the only entry point archive ever had and had no exit; "I do not need to answer this" removed the session from the app. The inbox is a view of *state*, so the only honest way to empty it is to change the state — that is, to answer. See FR-20.
 - One shortcut to open/close the inbox (default `⌘I`). If there are waiting items when the app starts, show the inbox first.
 - If FR-1's sidebar is "the map", the inbox is "the queue of things to do". The entry point when you come back to the desk is the inbox.
 - It is the entry point of the §1.3 loop, so it is **in M1 scope**. It is one list, so the implementation burden is small too — it may be needed before the sidebar.
@@ -320,7 +320,6 @@ The whole control loop must turn without a mouse. The v1 default shortcuts:
 | Jump project | `⌘1`~`⌘9` |
 | Move between sessions within a project | `j` / `k` (when the input box is not focused) |
 | Approve allow / deny / always allow | `y` / `n` / `a` (⌥a: project scope) |
-| Archive session from the inbox (dismiss) | `d` |
 | Command palette (search projects, sessions, actions) | `⌘K` |
 | Focus / leave the input box | `Enter` / `Esc` |
 | Switch tab (conversation/files/git/viewer) | `⌘⇧1`~`⌘⇧4` |
@@ -360,12 +359,27 @@ The project-creation answer ends in an action: the orchestrator's `propose_proje
 renders a proposal card whose only power is to open the **native picker for the human** —
 the tool itself cannot register a folder (propose-not-power; see §FR-11 security notes).
 
-#### FR-20. Session archive and record
+#### FR-20. Session archive — **retired (2026-09-02)**
 
-- Archive = terminate the agent process + remove from the sidebar and inbox. **The conversation record is kept in SQLite.**
-- Archived sessions can be viewed in a per-project "Archive" list and from the command palette. Where resume is possible, resume in place (return to active).
-- FR-10 (restore on restart) only restores **active sessions** — archives are outside the restore scope.
-- Entry points: `d` in the inbox, a session header button, the command palette.
+Archive is gone: the flag, the RPC, the orchestrator's `archive_session` tool, and the `d`
+key. Schema v28 drops the column, so nothing is hidden any more.
+
+What was built was half of what is written above this line: the way in (`d` in the inbox)
+without any of the ways out (the per-project Archive list, the palette, resume in place).
+So a key labelled "Dismiss" removed a session from the sidebar, the palette and the inbox
+with no path back — indistinguishable from deletion, and reachable by one keystroke. An
+agent could do it too, through `archive_session`.
+
+The stated purpose was to empty the inbox. That is the category error: the inbox is a view
+of session *state*, and "I do not need to answer this" is not a state the agent can be in —
+so the key had no lever except removing the session from the set entirely. Emptying the
+inbox now means answering, which is the thing the inbox exists to prompt.
+
+Nothing needed archive to keep a record: deleting a session already says the conversation
+survives in Claude/Codex and can be pulled back from **+ → Past conversations** (there is a
+host test that holds that promise). If the sidebar ever does get crowded — worktree sessions
+are the plausible source — the answer belongs where the crowding is (collapsing merged
+children), not in a global hidden state.
 
 #### FR-21. Conversation content search
 
@@ -503,7 +517,7 @@ interface AgentAdapter {
 ### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
-- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, archived, last_read_seq, created_at, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11)
+- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11)
 - `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. Reads merge legacy per-delta rows, so pre-migration data behaves identically.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation
@@ -563,7 +577,7 @@ and the worktree option are done; the weekly cost dashboard remains open (FR-9).
 
 - Project registration + sidebar + focus view (FR-1) — not a grid
 - Claude Code session GUI conversation + keyboard-first approval UI (FR-3)
-- **Inbox + `d` archive (FR-15, 20)** — the entry point of the §1.3 loop; without it the loop does not turn in M1
+- **Inbox (FR-15)** — the entry point of the §1.3 loop; without it the loop does not turn in M1
 - Two separated waiting badges + split global counters + "go to the next waiting item" (FR-12, part of 17)
 - Automatic session names (FR-18)
 - Read/unread (FR-16)

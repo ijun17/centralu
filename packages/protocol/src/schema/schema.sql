@@ -30,13 +30,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   name          TEXT NOT NULL,
   auto_named    INTEGER NOT NULL DEFAULT 1,
   state         TEXT NOT NULL DEFAULT 'idle',
-  archived      INTEGER NOT NULL DEFAULT 0,
   is_orchestrator INTEGER NOT NULL DEFAULT 0,
   last_read_seq INTEGER NOT NULL DEFAULT 0,
   waiting_since INTEGER,
   created_at    INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 
 CREATE TABLE IF NOT EXISTS messages (
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

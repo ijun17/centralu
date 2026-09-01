@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { afterHandled } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
 import { letterOf } from '../../app/keys.js'
@@ -13,7 +12,6 @@ export function Inbox() {
   const open = useStore((s) => s.inboxOpen)
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
-  const archive = useStore((s) => s.archive)
   const projects = useStore((s) => s.projects)
   const [now, setNow] = useState(() => Date.now())
   const items = useInbox(now)
@@ -48,21 +46,13 @@ export function Inbox() {
           focusSession(item.id, { preferGrid: true })
           toggle(false)
         }
-      } else if (letter === 'd') {
-        // 아카이브는 인박스를 비우는 1급 수단 (없으면 응답대기가 쌓여 무용지물)
-        const item = items[cursor]
-        if (item) {
-          const next = afterHandled(items, item.id)
-          void archive(item.id)
-          if (next) setCursor(Math.min(cursor, items.length - 2))
-        }
       } else if (e.key === 'Escape') toggle(false)
       else return
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, focusSession, toggle, archive])
+  }, [open, items, cursor, focusSession, toggle])
 
   if (!open) return null
 
@@ -88,7 +78,6 @@ export function Inbox() {
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd> Move
             <Kbd>↵</Kbd> Open
-            <Kbd>d</Kbd> Dismiss
             <Kbd>esc</Kbd> Close
           </span>
         </header>

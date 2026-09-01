@@ -231,14 +231,6 @@ describe.each([
     expect(msgs[0]!.role).toBe('user')
   })
 
-  it('아카이브하면 archived=true (기록은 남는다)', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
-    await h.platform.agents.archiveSession(s.id)
-    const found = (await h.platform.agents.listSessions()).find((x) => x.id === s.id)
-    expect(found?.archived).toBe(true)
-  })
-
   /**
    * 자판 표기도 capability다 (이슈 #32).
    *

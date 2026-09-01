@@ -12,7 +12,7 @@ import type { SessionSummary } from '@cc/core'
 const toCandidate = (x: SessionSummary) => ({
   id: x.id, projectId: x.projectId, name: x.name, state: x.state,
   waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
-  archived: x.archived, preview: x.preview,
+  preview: x.preview,
 })
 
 export function useInbox(now: number): InboxItem[] {
@@ -28,7 +28,7 @@ export function useCounts() {
 export function useSessionsOf(projectId: string): SessionSummary[] {
   const sessions = useStore((s) => s.sessions)
   return useMemo(
-    () => Object.values(sessions).filter((x) => x.projectId === projectId && !x.archived),
+    () => Object.values(sessions).filter((x) => x.projectId === projectId),
     [sessions, projectId],
   )
 }
@@ -67,7 +67,7 @@ export function useBannerApproval() {
   const sessions = useStore((s) => s.sessions)
   const focusedId = useStore((s) => s.focusedSessionId)
   return useMemo(() => {
-    const first = Object.values(sessions).find((x) => !x.archived && x.pendingApproval && x.id !== focusedId)
+    const first = Object.values(sessions).find((x) => x.pendingApproval && x.id !== focusedId)
     return first ? { session: first, pending: first.pendingApproval! } : null
   }, [sessions, focusedId])
 }

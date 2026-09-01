@@ -262,7 +262,7 @@ export function SessionPane({
         프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
         말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
       */}
-      {!session.live && !session.archived && <DormantNote sessionId={session.id} />}
+      {!session.live && <DormantNote sessionId={session.id} />}
 
       <Composer sessionId={session.id} />
 

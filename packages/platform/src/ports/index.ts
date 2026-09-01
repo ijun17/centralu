@@ -80,7 +80,6 @@ export interface AgentPort {
   /** 고를 수 있는 모델과 각 모델의 추론 강도 (도구가 공식 API로 알려주는 것) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */
-  archiveSession(sessionId: string, archived?: boolean): Promise<void>
   /** 세션에 연결된 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */

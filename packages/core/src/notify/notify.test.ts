@@ -38,7 +38,7 @@ describe('즉시 알림 (승인·오류만)', () => {
 
 describe('"전부 완료" 알림 (자리를 뜬 사람에게 필요한 신호)', () => {
   // 판정이 신원 기반이라 prev/now의 같은 세션은 같은 id를 가져야 한다
-  const w = (id: string, state: SessionState, archived = false) => ({ id, state, archived })
+  const w = (id: string, state: SessionState) => ({ id, state })
 
   it('마지막 작업이 끝났을 때 한 번 알린다', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
@@ -79,19 +79,13 @@ describe('"전부 완료" 알림 (자리를 뜬 사람에게 필요한 신호)',
     expect(allDoneNotification(now, prev, bg)).toMatchObject({ kind: 'all_done' })
   })
 
-  it('아카이브된 세션은 계산에서 빠진다', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_input', true)]
-    const now = [w('a', 'waiting_input'), w('b', 'waiting_input', true)]
-    expect(allDoneNotification(now, prev, bg)?.body).toContain('1 sessions')
-  })
-
   /*
    * 개수 비교의 함정: 마지막 working 세션을 **치우면** busy가 0이 되지만
    * 일이 끝난 게 아니다 — 신원 비교라야 "바쁘던 그 세션이 실제로 손을 뗐다"를 안다.
    */
-  it('마지막 working 세션을 아카이브해도 "All done"은 울리지 않는다', () => {
+  it('마지막 working 세션을 지워도 "All done"은 울리지 않는다', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
-    const now = [w('a', 'working', true), w('b', 'waiting_input')]
+    const now = [w('b', 'waiting_input')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 

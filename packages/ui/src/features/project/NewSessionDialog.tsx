@@ -76,7 +76,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const project = useStore((s) => s.projects[projectId])
   const createSession = useStore((s) => s.createSession)
   const saveWorktreeSetup = useStore((s) => s.saveWorktreeSetup)
-  const running = useSessionsOf(projectId).filter((s) => !s.archived)
+  const running = useSessionsOf(projectId)
   // 워크트리는 깃 저장소에서만 만들 수 있다 — 아니면 체크박스를 죽이고 이유를 적는다
   const isRepo = !!project?.git
 

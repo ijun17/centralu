@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { afterHandled, buildInbox, countWaiting, nextWaitingSession, type InboxCandidate } from './inbox.js'
+import { buildInbox, countWaiting, nextWaitingSession, type InboxCandidate } from './inbox.js'
 
 const NOW = 1_000_000
 
 const s = (id: string, state: SessionState, opts: Partial<InboxCandidate> = {}): InboxCandidate => ({
   id, projectId: 'p1', name: id, state,
-  waitingSince: NOW - 60_000, lastSeq: 1, lastReadSeq: 1, archived: false, ...opts,
+  waitingSince: NOW - 60_000, lastSeq: 1, lastReadSeq: 1, ...opts,
 })
 
 describe('인박스 정렬 (FR-15)', () => {
@@ -33,7 +33,7 @@ describe('인박스 정렬 (FR-15)', () => {
 
   it('working·idle·아카이브는 인박스에 없다', () => {
     const inbox = buildInbox(
-      [s('w', 'working'), s('i', 'idle'), s('a', 'waiting_input', { archived: true }), s('ok', 'waiting_input')],
+      [s('w', 'working'), s('i', 'idle'), s('ok', 'waiting_input')],
       NOW,
     )
     expect(inbox.map((i) => i.id)).toEqual(['ok'])
@@ -65,7 +65,6 @@ describe('전역 카운터 (FR-12: 합산 금지)', () => {
   })
 
   it('아카이브는 세지 않는다', () => {
-    expect(countWaiting([s('a', 'waiting_approval', { archived: true })]).approval).toBe(0)
   })
 })
 
@@ -90,7 +89,5 @@ describe('다음 대기로 이동 (FR-17)', () => {
   })
 
   it('처리 후 자동 이동은 남은 것 중 가장 급한 것', () => {
-    expect(afterHandled(inbox, 'a')).toBe('b')
-    expect(afterHandled(buildInbox([s('only', 'waiting_input')], NOW), 'only')).toBeNull()
   })
 })

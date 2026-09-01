@@ -42,7 +42,6 @@ export type SessionSummary = {
   waitingSince: number | null
   lastSeq: number
   lastReadSeq: number
-  archived: boolean
   /**
    * 프로세스가 살아 있는가 (FR-10).
    * host를 껐다 켜면 기록은 남지만 프로세스는 사라진다 — 그 상태를 UI가 알아야
@@ -107,7 +106,7 @@ export type SessionSummary = {
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name'> & Partial<SessionSummary>): SessionSummary {
   return {
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
-    archived: false, live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
+    live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
     permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, thinkingTokens: null, plan: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
@@ -253,15 +252,10 @@ export function rename(s: SessionSummary, name: string): SessionSummary {
   return { ...s, name, autoNamed: false }
 }
 
-export function archive(s: SessionSummary): SessionSummary {
-  return { ...s, archived: true, state: 'idle', waitingSince: null, pendingApproval: null, pendingQuestions: [] }
-}
-
 /** 같은 디렉토리 동시 세션 중 같은 파일을 만진 세션들 (FR-2 데이터 손실 경고) */
 export function detectFileConflicts(sessions: readonly SessionSummary[]): { path: string; sessionIds: string[] }[] {
   const byPath = new Map<string, string[]>()
   for (const s of sessions) {
-    if (s.archived) continue
     for (const p of s.touchedPaths) byPath.set(p, [...(byPath.get(p) ?? []), s.id])
   }
   return [...byPath.entries()]

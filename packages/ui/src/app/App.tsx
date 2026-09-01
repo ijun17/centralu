@@ -418,7 +418,7 @@ function GlobalKeys() {
         const project = Object.values(st.projects)[Number(digit) - 1]
         if (project) {
           e.preventDefault()
-          const first = Object.values(st.sessions).find((s) => s.projectId === project.id && !s.archived)
+          const first = Object.values(st.sessions).find((s) => s.projectId === project.id)
           if (first) focusSession(first.id)
         }
         return

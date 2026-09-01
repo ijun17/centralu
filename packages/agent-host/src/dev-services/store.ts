@@ -214,7 +214,10 @@ export class Store {
            * 이 프로젝트에서 가장 위험한 변경이므로 **옮긴 줄 수를 세어 확인**한다.
            * 조용히 한 줄이라도 잃으면 되돌릴 방법이 없다.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string; notnull: number }[]
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as {
+            name: string
+            notnull: number
+          }[]
           const pid = cols.find((c) => c.name === 'project_id')
           if (!pid || pid.notnull === 0) return // 이미 nullable
 
@@ -259,9 +262,12 @@ export class Store {
                 body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
               );
             `)
-            const rows = this.db
-              .prepare(`SELECT rowid, session_id, seq, payload FROM messages`)
-              .all() as { rowid: number; session_id: string; seq: number; payload: string }[]
+            const rows = this.db.prepare(`SELECT rowid, session_id, seq, payload FROM messages`).all() as {
+              rowid: number
+              session_id: string
+              seq: number
+              payload: string
+            }[]
             const insert = this.db.prepare(
               `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
             )
@@ -309,8 +315,10 @@ export class Store {
            * 그래서 옮기고 지운다. 두 번째 실행부터는 옛 테이블이 없으므로 아무 일도 안 한다.
            */
           const has = (name: string) =>
-            this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`).get(name) !== undefined
-          if (has('control_center')) { // legacy-name
+            this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`).get(name) !==
+            undefined
+          if (has('control_center')) {
+            // legacy-name
             this.db.exec(
               `INSERT OR IGNORE INTO grid_panels (session_id, position)
                SELECT session_id, position FROM control_center`, // legacy-name
@@ -564,7 +572,9 @@ export class Store {
            * 그래서 표식을 지운다. 잃는 것은 도구 몇 개뿐이고 대화는 그대로다.
            * 중앙 오케스트레이터(project_id IS NULL)는 건드리지 않는다.
            */
-          this.db.exec(`UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1 AND project_id IS NOT NULL`)
+          this.db.exec(
+            `UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1 AND project_id IS NOT NULL`,
+          )
         },
       },
       {
@@ -592,6 +602,30 @@ export class Store {
           if (!cols.some((c) => c.name === 'worktree_manager')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN worktree_manager TEXT`)
           }
+        },
+      },
+      {
+        to: 28,
+        run: () => {
+          /*
+           * 아카이브 폐기 (2026-09-02 도그푸딩).
+           *
+           * 인박스의 `d`가 유일한 진입점이었는데 화면에는 "Dismiss"라고 적혀 있었고,
+           * 되돌리는 UI는 **하나도 없었다** — 팔레트도 사이드바도 `!archived`로 거르기만
+           * 했다. 그래서 "대답 안 하겠다"는 뜻으로 누른 키가 세션을 사람 눈에서 영영
+           * 지웠다. FR-20은 나가는 문(프로젝트별 Archive 목록·팔레트·제자리 재개)까지
+           * 설계했지만 그 절반이 구현되지 않은 채 배포돼 있었다.
+           *
+           * 숨겨져 있던 세션은 **전부 다시 보이게 된다** — 컬럼이 사라지면 거를 것도
+           * 없어지기 때문이다. 그게 이 이사의 목적이다: 앱에 보이지 않는 세션은 없다.
+           *
+           * 인덱스를 먼저 지우는 이유: SQLite는 인덱스가 참조하는 컬럼을 DROP 하지 못한다.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'archived')) return
+          this.db.exec(`DROP INDEX IF EXISTS idx_sessions_project`)
+          this.db.exec(`ALTER TABLE sessions DROP COLUMN archived`)
+          this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)`)
         },
       },
     ]
@@ -628,13 +662,26 @@ export class Store {
     const tx = this.db.transaction(() => {
       const rows = this.db
         .prepare(`SELECT rowid, session_id, seq, role, kind, payload FROM messages ORDER BY session_id, seq`)
-        .all() as { rowid: number; session_id: string; seq: number; role: string; kind: string; payload: string }[]
+        .all() as {
+        rowid: number
+        session_id: string
+        seq: number
+        role: string
+        kind: string
+        payload: string
+      }[]
 
       const update = this.db.prepare(`UPDATE messages SET payload = ?, ts = ? WHERE rowid = ?`)
       const del = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
 
       /** 지금 이어붙이는 중인 런 — 첫 조각의 행에 본문을 모은다 */
-      let head: { rowid: number; sessionId: string; kind: string; payload: Record<string, unknown>; text: string } | null = null
+      let head: {
+        rowid: number
+        sessionId: string
+        kind: string
+        payload: Record<string, unknown>
+        text: string
+      } | null = null
       let lastTs = 0
       const closeRun = () => {
         if (!head) return
@@ -675,10 +722,15 @@ export class Store {
           body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
         );
       `)
-      const fresh = this.db
-        .prepare(`SELECT rowid, session_id, seq, payload FROM messages`)
-        .all() as { rowid: number; session_id: string; seq: number; payload: string }[]
-      const insert = this.db.prepare(`INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`)
+      const fresh = this.db.prepare(`SELECT rowid, session_id, seq, payload FROM messages`).all() as {
+        rowid: number
+        session_id: string
+        seq: number
+        payload: string
+      }[]
+      const insert = this.db.prepare(
+        `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
+      )
       for (const r of fresh) {
         const body = extractText(r.payload)
         if (body) insert.run(r.rowid, body, r.session_id, r.seq)
@@ -727,7 +779,7 @@ export class Store {
               sidebar_order INTEGER NOT NULL DEFAULT 0
             )
           `)
-          this.db.exec(`INSERT INTO sessions_new (${names}) SELECT ${names} FROM sessions`)
+    this.db.exec(`INSERT INTO sessions_new (${names}) SELECT ${names} FROM sessions`)
     this.db.exec(`DROP TABLE sessions`)
     this.db.exec(`ALTER TABLE sessions_new RENAME TO sessions`)
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived)`)
@@ -765,7 +817,9 @@ export class Store {
    */
   listProjects(): Omit<ProjectInfo, 'git' | 'commands'>[] {
     return this.db
-      .prepare(`SELECT id, path, name, default_tool as defaultTool, default_model as defaultModel, default_effort as defaultEffort FROM projects ORDER BY sidebar_order, created_at`)
+      .prepare(
+        `SELECT id, path, name, default_tool as defaultTool, default_model as defaultModel, default_effort as defaultEffort FROM projects ORDER BY sidebar_order, created_at`,
+      )
       .all() as Omit<ProjectInfo, 'git' | 'commands'>[]
   }
 
@@ -778,8 +832,7 @@ export class Store {
    */
   projectCommands(projectId: string): string[] {
     const row = this.db.prepare(`SELECT commands FROM projects WHERE id = ?`).get(projectId) as
-      | { commands: string }
-      | undefined
+      { commands: string } | undefined
     if (!row) return []
     try {
       const parsed = JSON.parse(row.commands) as unknown
@@ -800,8 +853,7 @@ export class Store {
    */
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
     const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
-      | { worktree_setup: string | null }
-      | undefined
+      { worktree_setup: string | null } | undefined
     if (!row?.worktree_setup) return null
     try {
       const parsed = JSON.parse(row.worktree_setup) as { command?: unknown; copyFiles?: unknown }
@@ -831,13 +883,15 @@ export class Store {
    */
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
     const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
-      | { worktree_manager: string | null }
-      | undefined
+      { worktree_manager: string | null } | undefined
     if (!row?.worktree_manager) return null
     try {
       const parsed = JSON.parse(row.worktree_manager) as { sessionId?: unknown; baseBranch?: unknown }
       if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
-      return { sessionId: parsed.sessionId, baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '' }
+      return {
+        sessionId: parsed.sessionId,
+        baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '',
+      }
     } catch {
       return null
     }
@@ -880,12 +934,12 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, archived, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @archived, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
-           state = excluded.state, archived = excluded.archived, last_read_seq = excluded.last_read_seq,
+           state = excluded.state, last_read_seq = excluded.last_read_seq,
            is_orchestrator = excluded.is_orchestrator,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
            verbosity = excluded.verbosity,
@@ -902,7 +956,6 @@ export class Store {
         autoNamed: s.autoNamed ? 1 : 0,
         // 표식(#13)도 보통의 upsert에 실려 다닌다 — 쓰는 길이 둘이면 한쪽만 고쳐진다
         isOrchestrator: s.kind === 'orchestrator' ? 1 : 0,
-        archived: s.archived ? 1 : 0,
         effort: s.effort ?? null,
         verbosity: s.verbosity ?? null,
         serviceTier: s.serviceTier ?? null,
@@ -985,7 +1038,7 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
-                s.auto_named as autoNamed, s.state, s.archived, s.is_orchestrator as isOrchestrator,
+                s.auto_named as autoNamed, s.state, s.is_orchestrator as isOrchestrator,
                 s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
@@ -997,9 +1050,8 @@ export class Store {
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
       )
-      .all() as (Omit<SessionInfo, 'autoNamed' | 'archived' | 'worktree' | 'kind'> & {
+      .all() as (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
       autoNamed: number
-      archived: number
       isOrchestrator: number
       worktreePath: string | null
       worktreeBranch: string | null
@@ -1009,44 +1061,58 @@ export class Store {
       contextExactness: string | null
     })[]
     // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
-    return rows.map(({ worktreePath, worktreeBranch, worktreeBase, contextUsed, contextWindow, contextExactness, isOrchestrator, ...r }) => ({
-      ...r,
-      autoNamed: !!r.autoNamed,
-      archived: !!r.archived,
-      kind: isOrchestrator ? ('orchestrator' as const) : ('worker' as const),
-      live: false,
-      worktree: worktreePath
-        ? { path: worktreePath, branch: worktreeBranch ?? '', ...(worktreeBase ? { base: worktreeBase } : {}) }
-        : null,
-      ...sessionLiveDefaults(),
-      /*
-       * **Context is the one that comes back** (issue #48), so it overrules the defaults above.
-       *
-       * The rest of that group are facts about *our* process — a request id nobody can answer
-       * any more, a rate-limit window that expired while we were gone — and are rightly gone
-       * with it. How full the context is, is not: it is a fact about the conversation, and the
-       * conversation is the tool's and outlives us.
-       *
-       * It is shown plainly, with no staleness mark, and that is a decision rather than an
-       * omission. The gauge has never claimed to be live — the reading arrives at the end of a
-       * turn and is already a turn behind while the next one runs; restarting only lengthens a
-       * gap that is always there. The event that really makes it wrong is the conversation
-       * moving without us (someone continuing it in the terminal), which can happen with or
-       * without a restart and which we cannot detect either way. A mark keyed on "we
-       * restarted" would therefore flag the common case, where nothing moved and the number is
-       * exact, and stay silent in the case that actually earns it. The first turn corrects it
-       * regardless — at the very instant the old behaviour would have shown anything at all.
-       */
-      context:
-        contextUsed !== null && contextWindow !== null
+    return rows.map(
+      ({
+        worktreePath,
+        worktreeBranch,
+        worktreeBase,
+        contextUsed,
+        contextWindow,
+        contextExactness,
+        isOrchestrator,
+        ...r
+      }) => ({
+        ...r,
+        autoNamed: !!r.autoNamed,
+        kind: isOrchestrator ? ('orchestrator' as const) : ('worker' as const),
+        live: false,
+        worktree: worktreePath
           ? {
-              used: contextUsed,
-              window: contextWindow,
-              // Only the adapter can claim 'exact'; anything we cannot read back says 'estimate'
-              exactness: contextExactness === 'exact' ? ('exact' as const) : ('estimate' as const),
+              path: worktreePath,
+              branch: worktreeBranch ?? '',
+              ...(worktreeBase ? { base: worktreeBase } : {}),
             }
           : null,
-    }))
+        ...sessionLiveDefaults(),
+        /*
+         * **Context is the one that comes back** (issue #48), so it overrules the defaults above.
+         *
+         * The rest of that group are facts about *our* process — a request id nobody can answer
+         * any more, a rate-limit window that expired while we were gone — and are rightly gone
+         * with it. How full the context is, is not: it is a fact about the conversation, and the
+         * conversation is the tool's and outlives us.
+         *
+         * It is shown plainly, with no staleness mark, and that is a decision rather than an
+         * omission. The gauge has never claimed to be live — the reading arrives at the end of a
+         * turn and is already a turn behind while the next one runs; restarting only lengthens a
+         * gap that is always there. The event that really makes it wrong is the conversation
+         * moving without us (someone continuing it in the terminal), which can happen with or
+         * without a restart and which we cannot detect either way. A mark keyed on "we
+         * restarted" would therefore flag the common case, where nothing moved and the number is
+         * exact, and stay silent in the case that actually earns it. The first turn corrects it
+         * regardless — at the very instant the old behaviour would have shown anything at all.
+         */
+        context:
+          contextUsed !== null && contextWindow !== null
+            ? {
+                used: contextUsed,
+                window: contextWindow,
+                // Only the adapter can claim 'exact'; anything we cannot read back says 'estimate'
+                exactness: contextExactness === 'exact' ? ('exact' as const) : ('estimate' as const),
+              }
+            : null,
+      }),
+    )
   }
 
   /**
@@ -1124,7 +1190,9 @@ export class Store {
     const fts = this.db.prepare(
       `INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
     )
-    const dropFts = this.db.prepare(`INSERT INTO messages_fts (messages_fts, rowid, body) VALUES ('delete', ?, ?)`)
+    const dropFts = this.db.prepare(
+      `INSERT INTO messages_fts (messages_fts, rowid, body) VALUES ('delete', ?, ?)`,
+    )
     const bodyAt = this.db.prepare(`SELECT body FROM messages_fts WHERE rowid = ?`)
     const tx = this.db.transaction((rows: StoredMessage[]) => {
       for (const m of rows) {
@@ -1198,8 +1266,7 @@ export class Store {
    */
   sessionCwd(sessionId: string): string | null {
     const row = this.db.prepare(`SELECT cwd FROM sessions WHERE id = ?`).get(sessionId) as
-      | { cwd: string | null }
-      | undefined
+      { cwd: string | null } | undefined
     return row?.cwd ?? null
   }
 
@@ -1208,13 +1275,14 @@ export class Store {
   }
 
   setTouchedPaths(sessionId: string, paths: string[]): void {
-    this.db.prepare(`UPDATE sessions SET touched_paths = ? WHERE id = ?`).run(JSON.stringify(paths), sessionId)
+    this.db
+      .prepare(`UPDATE sessions SET touched_paths = ? WHERE id = ?`)
+      .run(JSON.stringify(paths), sessionId)
   }
 
   getTouchedPaths(sessionId: string): string[] {
     const row = this.db.prepare(`SELECT touched_paths as p FROM sessions WHERE id = ?`).get(sessionId) as
-      | { p: string }
-      | undefined
+      { p: string } | undefined
     try {
       return row ? (JSON.parse(row.p) as string[]) : []
     } catch {
@@ -1356,12 +1424,16 @@ export class Store {
   }
 
   nextSeq(sessionId: string): number {
-    const row = this.db.prepare(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`).get(sessionId) as { m: number }
+    const row = this.db
+      .prepare(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`)
+      .get(sessionId) as { m: number }
     return row.m + 1
   }
 
   markRead(sessionId: string, seq: number): void {
-    this.db.prepare(`UPDATE sessions SET last_read_seq = MAX(last_read_seq, ?) WHERE id = ?`).run(seq, sessionId)
+    this.db
+      .prepare(`UPDATE sessions SET last_read_seq = MAX(last_read_seq, ?) WHERE id = ?`)
+      .run(seq, sessionId)
   }
 
   /**
@@ -1378,7 +1450,8 @@ export class Store {
   }
 
   loadWorkspace<T = unknown>(): T | null {
-    const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as { layout: string } | undefined
+    const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as
+      { layout: string } | undefined
     if (!row) return null
     try {
       return JSON.parse(row.layout) as T
@@ -1396,8 +1469,7 @@ export class Store {
    */
   appSetting(key: string): string | null {
     const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as
-      | { value: string }
-      | undefined
+      { value: string } | undefined
     return row?.value ?? null
   }
 
@@ -1410,9 +1482,17 @@ export class Store {
       .run(key, value)
   }
 
-  addApprovalRule(r: { scope: string; projectId?: string; sessionId?: string; matcher: string; decision: string }): void {
+  addApprovalRule(r: {
+    scope: string
+    projectId?: string
+    sessionId?: string
+    matcher: string
+    decision: string
+  }): void {
     this.db
-      .prepare(`INSERT INTO approval_rules (scope, project_id, session_id, matcher, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .prepare(
+        `INSERT INTO approval_rules (scope, project_id, session_id, matcher, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
       .run(r.scope, r.projectId ?? null, r.sessionId ?? null, r.matcher, r.decision, Date.now())
   }
 

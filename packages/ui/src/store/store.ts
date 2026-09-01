@@ -13,7 +13,6 @@ import type {
 import {
   allDoneNotification,
   applyEvent,
-  archive as archiveSession,
   badgeCount,
   countWaiting,
   notificationFor,
@@ -592,7 +591,6 @@ export type AppState = {
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
-  archive(sessionId: string, archived?: boolean): Promise<void>
   /** 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<boolean>
   deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
@@ -1016,7 +1014,6 @@ export const useStore = create<AppState>((set, get) => ({
           }),
           autoNamed: s.autoNamed,
           state: s.state,
-          archived: s.archived,
           live: s.live,
           lastSeq: s.lastSeq,
           lastReadSeq: s.lastReadSeq,
@@ -1349,8 +1346,7 @@ export const useStore = create<AppState>((set, get) => ({
               }),
               autoNamed: s.autoNamed,
               state: s.state,
-              archived: s.archived,
-              live: s.live,
+                  live: s.live,
               lastSeq: s.lastSeq,
               lastReadSeq: s.lastReadSeq,
               waitingSince: s.waitingSince,
@@ -2323,22 +2319,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async archive(sessionId, archived = true) {
-    await get().platform!.agents.archiveSession(sessionId, archived)
-    set((s) => {
-      const cur = s.sessions[sessionId]!
-      return {
-        sessions: {
-          ...s.sessions,
-          [sessionId]: archived ? archiveSession(cur) : { ...cur, archived: false, live: false },
-        },
-        // 숨기면 포커스를 놓는다. 꺼내면 바로 그 세션을 본다 — 꺼낸 이유가 그것이다
-        focusedSessionId:
-          archived && s.focusedSessionId === sessionId ? null : archived ? s.focusedSessionId : sessionId,
-      }
-    })
-    if (!archived) void get().loadHistory(sessionId)
-  },
 
   /**
    * 에이전트만 재시작한다. 대화 기록은 그대로 두고 프로세스만 갈아 끼운다 —
@@ -2516,7 +2496,7 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     if (!s.platform) return
 
-    const wasLive = Object.values(s.sessions).filter((x) => x.live && !x.archived)
+    const wasLive = Object.values(s.sessions).filter((x) => x.live)
 
     const fresh = await s.platform.agents.listSessions().catch(() => null)
     if (!fresh) return
@@ -2544,7 +2524,6 @@ export const useStore = create<AppState>((set, get) => ({
               name: f.name,
               autoNamed: f.autoNamed,
               state: f.state,
-              archived: f.archived,
               live: f.live,
               // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
               lastSeq: Math.max(cur.lastSeq, f.lastSeq),
@@ -2576,7 +2555,6 @@ export const useStore = create<AppState>((set, get) => ({
               }),
               autoNamed: f.autoNamed,
               state: f.state,
-              archived: f.archived,
               live: f.live,
               lastSeq: f.lastSeq,
               lastReadSeq: f.lastReadSeq,
@@ -2606,7 +2584,7 @@ export const useStore = create<AppState>((set, get) => ({
     // 끊기기 직전에 돌고 있었는데 새 host가 모르는 프로세스만 되살린다
     const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
     const toWake = wasLive.filter(
-      (x) => !alive.has(x.id) && get().sessions[x.id] && !get().sessions[x.id]!.archived,
+      (x) => !alive.has(x.id) && get().sessions[x.id],
     )
     if (toWake.length === 0) return
 
@@ -2618,7 +2596,7 @@ export const useStore = create<AppState>((set, get) => ({
   async wake(sessionId) {
     const s = get()
     const session = s.sessions[sessionId]
-    if (!s.platform || !session || session.live || session.archived || s.resuming[sessionId]) return
+    if (!s.platform || !session || session.live || s.resuming[sessionId]) return
 
     set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
     try {

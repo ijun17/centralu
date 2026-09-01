@@ -109,7 +109,7 @@ export function CommandPalette() {
 
     return [
       ...Object.values(sessions)
-        .filter((s) => !s.archived && match(s.name))
+        .filter((s) => match(s.name))
         .slice(0, 8)
         .map<Item>((s) => ({
           kind: 'session',
@@ -137,7 +137,7 @@ export function CommandPalette() {
       if (item.kind === 'session' || item.kind === 'message') {
         focusSession(item.kind === 'session' ? item.id : item.sessionId)
       } else if (item.kind === 'project') {
-        const first = Object.values(sessions).find((s) => s.projectId === item.id && !s.archived)
+        const first = Object.values(sessions).find((s) => s.projectId === item.id)
         if (first) focusSession(first.id)
       } else item.run()
       toggle(false)
