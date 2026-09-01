@@ -1614,7 +1614,15 @@ export class SessionManager {
     this.closeStream(sessionId)
     const seq = this.store.nextSeq(sessionId)
     this.store.appendMessages([
-      { sessionId, seq, role: 'user', kind: 'text', payload: from ? { text, from } : { text }, ts: Date.now() },
+      {
+        sessionId,
+        seq,
+        role: 'user',
+        kind: 'text',
+        // 첨부도 말의 일부다 — 경로만 남기고(D-1), 이미지 바이트는 loadMessages가 다시 싣는다
+        payload: { text, ...(from ? { from } : {}), ...(attachments?.length ? { attachments } : {}) },
+        ts: Date.now(),
+      },
     ])
     m.lastSeq = seq
     m.lastReadSeq = seq // 내가 보낸 건 읽은 것
@@ -2766,18 +2774,37 @@ export class SessionManager {
      * 이미지 행은 경로만 저장된다 (#40) — 화면에 줄 때 바이트를 다시 싣는다.
      * 파일이 없으면(500MB 상한 정리, 외부 삭제) 조용한 공백 대신 이유를 싣는다.
      */
+    const { readFile } = await import('node:fs/promises')
     return Promise.all(
       rows.map(async (r) => {
-        if (r.kind !== 'image') return r
-        const p = r.payload as Extract<NormalizedEvent, { type: 'message_image' }>
-        if (!p.path || p.note) return r
-        try {
-          const { readFile } = await import('node:fs/promises')
-          const data = (await readFile(p.path)).toString('base64')
-          return { ...r, payload: { ...p, data } }
-        } catch {
-          return { ...r, payload: { ...p, note: '이미지가 정리되어 더 이상 없습니다 (총량 상한)' } }
+        if (r.kind === 'image') {
+          const p = r.payload as Extract<NormalizedEvent, { type: 'message_image' }>
+          if (!p.path || p.note) return r
+          try {
+            const data = (await readFile(p.path)).toString('base64')
+            return { ...r, payload: { ...p, data } }
+          } catch {
+            return { ...r, payload: { ...p, note: '이미지가 정리되어 더 이상 없습니다 (총량 상한)' } }
+          }
         }
+        // 사용자 첨부의 이미지도 같은 규칙 — 파일이 살아 있으면 바이트를 싣고,
+        // 정리됐으면 조용히 경로만 남긴다 (화면은 이름 칩으로 눕는다)
+        if (r.kind === 'text' && r.role === 'user') {
+          const p = r.payload as { attachments?: Attachment[] }
+          if (!p?.attachments?.some((a) => a.kind === 'image')) return r
+          const attachments = await Promise.all(
+            p.attachments.map(async (a) => {
+              if (a.kind !== 'image') return a
+              try {
+                return { ...a, data: (await readFile(a.path)).toString('base64') }
+              } catch {
+                return a
+              }
+            }),
+          )
+          return { ...r, payload: { ...p, attachments } }
+        }
+        return r
       }),
     )
   }

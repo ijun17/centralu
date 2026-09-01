@@ -5778,7 +5778,7 @@ test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', as
   await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveText('merged')
 })
 
-/** #75: 첨부를 실은 말은 한 번만 그려진다 — 라벨(📎)과 원문이 달라도 확정이 맞물린다 */
+/** #75: 첨부를 실은 말은 한 번만 그려진다 — text가 보낸 원문 그대로라 확정이 맞물린다 */
 test('첨부와 함께 보낸 말은 한 번만 그려진다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 인사')
@@ -5792,7 +5792,37 @@ test('첨부와 함께 보낸 말은 한 번만 그려진다', async ({ page }) 
 
   const bubbles = page.getByText('이 이미지 봐줘')
   await expect(bubbles).toHaveCount(1)
-  await expect(page.getByText('📎 shot.png')).toBeVisible()
+  // 바이트 없는 첨부는 이름 칩으로 눕는다 — 무엇을 보냈는지는 남는다
+  await expect(page.getByTestId('msg-user-attachment')).toContainText('shot.png')
+})
+
+/** 이미지 첨부는 실물 썸네일로 서고, 누르면 에이전트 이미지와 같은 확대가 열린다 */
+test('보낸 이미지는 말풍선에 실물로 보이고 눌러 확대된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 진짜 1×1 PNG — 가짜 바이트면 <img>가 깨져 칩으로 눕는 경로를 타 버린다
+  const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+  await page.getByTestId('attach-input').setInputFiles({
+    name: 'pixel.png', mimeType: 'image/png', buffer: Buffer.from(PNG_1PX, 'base64'),
+  })
+  await expect(page.getByTestId('attachment-list')).toContainText('pixel.png')
+  await page.getByTestId('prompt-input').fill('이거 봐줘')
+  await page.getByTestId('send').click()
+
+  const thumb = page.getByTestId('msg-user-attachment')
+  await expect(thumb.locator('img')).toBeVisible()
+  await thumb.locator('img').click()
+  await expect(page.getByTestId('image-lightbox')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('image-lightbox')).toHaveCount(0)
+
+  // 저장소에서 다시 불러도 썸네일이 되살아난다 — host가 파일에서 바이트를 다시 싣는 규칙 (재시작과 같은 길)
+  await page.evaluate(async () => {
+    const store = (window as any).__store.getState()
+    await store.loadHistory(store.focusedSessionId, true)
+  })
+  await expect(page.getByTestId('msg-user-attachment').locator('img')).toBeVisible()
 })
 
 

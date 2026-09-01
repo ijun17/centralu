@@ -176,6 +176,8 @@ export class MockPlatform implements Platform {
 
   readonly savedAttachments: Attachment[] = []
   readonly sentAttachments: Attachment[] = []
+  /** 목의 디스크는 메모리다 — 실물이 attachments/ 파일에서 다시 읽는 바이트를 여기서 되찾는다 */
+  readonly attachmentData = new Map<string, string>()
 
   /** 테스트가 주무르는 가짜 파일 트리 */
   fsState: { entries: Record<string, FsEntry[]>; files: Record<string, string> } = { entries: {}, files: {} }
@@ -480,6 +482,7 @@ export class MockPlatform implements Platform {
     saveAttachment: async (_sessionId: string, name: string, mime: string, dataBase64: string) => {
       const att = { kind: mime.startsWith('image/') ? ('image' as const) : ('file' as const), path: `/tmp/att/${name}`, name, mime, bytes: dataBase64.length }
       this.savedAttachments.push(att)
+      this.attachmentData.set(att.path, dataBase64)
       return att
     },
     send: async (sessionId: string, text: string, attachments?: Attachment[]) => {
@@ -496,7 +499,14 @@ export class MockPlatform implements Platform {
         s.live = true
       }
       const seq = (this.messages.get(sessionId)?.length ?? 0) + 1
-      this.pushMessage({ sessionId, seq, role: 'user', kind: 'text', payload: { text }, ts: this.now() })
+      // 실물과 같은 규칙: 첨부도 payload에 남고, 이미지 바이트는 "디스크"(여기선 맵)에서 다시 실린다
+      const stored = attachments?.map((a) =>
+        a.kind === 'image' && this.attachmentData.has(a.path) ? { ...a, data: this.attachmentData.get(a.path) } : a,
+      )
+      this.pushMessage({
+        sessionId, seq, role: 'user', kind: 'text',
+        payload: { text, ...(stored?.length ? { attachments: stored } : {}) }, ts: this.now(),
+      })
       s.lastSeq = seq
       s.lastReadSeq = seq
       if (s.autoNamed && s.name === 'New session') {

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent, ReactNode, RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { Attachment } from '@cc/protocol'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
-import { EMPTY_DRAFT, useStore, type ChatItem, type Draft } from '../../store/store.js'
+import { EMPTY_DRAFT, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../approval/QuestionCard.jsx'
@@ -177,7 +176,7 @@ export function SessionPane({
     [patchDraft, recall],
   )
   const setAttachments = useCallback(
-    (next: Attachment[] | ((prev: Attachment[]) => Attachment[])) => {
+    (next: ChatAttachment[] | ((prev: ChatAttachment[]) => ChatAttachment[])) => {
       patchDraft((cur) => ({
         ...cur,
         attachments: typeof next === 'function' ? next(cur.attachments) : next,
@@ -1095,8 +1094,11 @@ function ChatStream({
 
   const pinned = stickyIndex !== null ? chat[stickyIndex] : undefined
   // 시켜서 들어온 지시도 "지금 하는 일"이므로 고정하되, 출처를 앞에 붙여 사람 말로 위장하지 않게 한다 (FR-11)
+  // 이미지만 보낸 말은 text가 비어 있다 — 배너에는 첨부 이름이 그 말을 대신한다
+  const pinnedText =
+    pinned?.kind === 'user' ? pinned.text || (pinned.attachments?.map((a) => a.name).join(', ') ?? '') : null
   const stickyText =
-    pinned?.kind === 'user' ? (pinned.from ? `${pinned.from.name} ⤷ ${pinned.text}` : pinned.text) : null
+    pinned?.kind === 'user' && pinnedText ? (pinned.from ? `${pinned.from.name} ⤷ ${pinnedText}` : pinnedText) : null
 
   // 접힘이 기본 — 다른 턴으로 넘어가면 펼침 상태를 끌고 가지 않는다
   const [stickyOpen, setStickyOpen] = useState(false)
@@ -1503,13 +1505,28 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
           panel(#121212)+edge(#1e1e1e)로는 두 단계 차이뿐이라 어두운 화면에서 사실상 안 보였다
           (도그푸딩 지적). 호버 배경과 같은 graphite로 올리고 테두리는 한 단계 더 밝게 준다.
         */}
-        <div
-          className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-graphite px-3 py-2 text-chalk ${
-            item.from ? 'border-dashed border-ash/50' : 'border-slate/40'
-          }`}
-        >
-          {item.text}
-        </div>
+        {/*
+          첨부는 본문 위에 실물로 선다 — 이미지는 썸네일(누르면 확대), 파일은 이름 칩.
+          예전엔 text에 "📎 이름"을 섞어 그렸는데, 그건 그림이 아니라 목록이었고
+          보낸 원문과 그린 텍스트가 달라지는 부작용(#75)까지 낳았다.
+        */}
+        {item.attachments && item.attachments.length > 0 && (
+          <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
+            {item.attachments.map((a, i) => (
+              <UserAttachment key={`${a.path}-${i}`} att={a} />
+            ))}
+          </div>
+        )}
+        {/* 이미지만 보낸 말이면 빈 말풍선을 세우지 않는다 */}
+        {(item.text || !item.attachments?.length) && (
+          <div
+            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-graphite px-3 py-2 text-chalk ${
+              item.from ? 'border-dashed border-ash/50' : 'border-slate/40'
+            }`}
+          >
+            {item.text}
+          </div>
+        )}
       </div>
     )
   }
@@ -1581,29 +1598,81 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
  * 갇히지 않고(#62에서 지적한 함정), esc·바깥 클릭 닫기를 다시 만들지 않는다.
  */
 function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?: string }) {
-  const [zoom, setZoom] = useState(false)
-  const src = `data:${mime};base64,${data}`
   return (
     <div className="min-w-0" data-testid="msg-image">
-      <button type="button" onClick={() => setZoom(true)} title={path} className="block cursor-zoom-in">
-        <img
-          src={src}
-          alt={path ?? 'agent image'}
-          /* 세로로 화면을 다 덮지 않게 자른다 — 원본 비율은 유지 */
-          className="max-h-80 max-w-full rounded-lg border border-edge"
-        />
+      <ZoomableImage
+        src={`data:${mime};base64,${data}`}
+        alt={path ?? 'agent image'}
+        /* 세로로 화면을 다 덮지 않게 자른다 — 원본 비율은 유지 */
+        thumbClassName="max-h-80 max-w-full rounded-lg border border-edge"
+      />
+    </div>
+  )
+}
+
+/** 썸네일 + 확대 한 쌍 — 에이전트 이미지(#40)와 사용자 첨부가 같은 확대를 쓴다 */
+function ZoomableImage({
+  src,
+  alt,
+  thumbClassName,
+  onError,
+}: {
+  src: string
+  alt: string
+  thumbClassName: string
+  onError?: () => void
+}) {
+  const [zoom, setZoom] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setZoom(true)} title={alt} className="block cursor-zoom-in">
+        <img src={src} alt={alt} className={thumbClassName} onError={onError} />
       </button>
       {zoom && (
         <Modal onClose={() => setZoom(false)} testId="image-lightbox">
           {/* vh/vw는 zoom을 모른다 — 다른 모달들과 같은 보정 (index.css --text-zoom) */}
           <img
             src={src}
-            alt={path ?? 'agent image'}
+            alt={alt}
             className="max-h-[calc(90vh/var(--text-zoom))] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge"
           />
         </Modal>
       )}
-    </div>
+    </>
+  )
+}
+
+/**
+ * 사용자가 실어 보낸 첨부 하나.
+ *
+ * 이미지면 실물 썸네일로 서고, 파일이거나 바이트가 없으면(재시작 후 500MB 상한 정리,
+ * 깨진 데이터) 입력창의 칩과 같은 문법(IMG/DOC + 이름)으로 눕는다 — 무엇을 보냈는지는
+ * 바이트가 사라져도 남아야 한다.
+ */
+function UserAttachment({ att }: { att: ChatAttachment }) {
+  const [broken, setBroken] = useState(false)
+  if (att.kind !== 'image' || !att.data || broken) {
+    return (
+      <span
+        className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
+        data-testid="msg-user-attachment"
+        title={att.name}
+      >
+        <span className="readout text-[9px] text-slate">{att.kind === 'image' ? 'IMG' : 'DOC'}</span>
+        <span className="max-w-40 truncate">{att.name}</span>
+      </span>
+    )
+  }
+  return (
+    <span data-testid="msg-user-attachment">
+      <ZoomableImage
+        src={`data:${att.mime};base64,${att.data}`}
+        alt={att.name}
+        /* 말풍선 옆에 서는 것이라 에이전트 이미지보다 낮게 잡는다 */
+        thumbClassName="max-h-48 max-w-full rounded-lg border border-slate/40"
+        onError={() => setBroken(true)}
+      />
+    </span>
   )
 }
 

@@ -67,8 +67,17 @@ export type Notice = {
   at: number
 }
 
+/**
+ * 첨부 + 화면용 바이트.
+ *
+ * data는 이미지 썸네일을 그릴 때만 쓴다 — 저장·전송은 경로로만 오간다 (D-1).
+ * 보낼 때는 방금 읽은 바이트가 손에 있으니 왕복 없이 채우고, 재시작 후에는
+ * host가 loadMessages에서 파일을 다시 실어 준다 (#40의 에이전트 이미지와 같은 규칙).
+ */
+export type ChatAttachment = Attachment & { data?: string }
+
 /** 아직 보내지 않은 것. 글과 첨부는 함께 움직인다 — 한쪽만 세션에 묶으면 반쪽만 고친 게 된다 */
-export type Draft = { text: string; attachments: Attachment[] }
+export type Draft = { text: string; attachments: ChatAttachment[] }
 export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
 
 /** 증거 패널 폭의 한계. 좁으면 경로가, 넓으면 대화가 죽는다 */
@@ -128,8 +137,11 @@ export type ChatItem =
    * pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다.
    * from: 사람이 아니라 다른 세션이 시킨 말 (FR-11 — 오케스트레이터 지시·워커 보고).
    */
-  /** sentText: 실제로 host에 보낸 원문 (#75). 첨부가 있으면 text(표시용 라벨)와 달라서, 확정 대조는 이걸로 한다 */
-  | { kind: 'user'; seq: number; text: string; sentText?: string; pending?: boolean; from?: { sessionId: string; name: string } }
+  /**
+   * attachments: 함께 실어 보낸 것들. 이미지는 실물 썸네일로 그린다 (📎 라벨의 후신 —
+   * 라벨을 text에 섞던 시절엔 그린 것과 보낸 것이 달라 이중 렌더가 났다, #75).
+   */
+  | { kind: 'user'; seq: number; text: string; attachments?: ChatAttachment[]; pending?: boolean; from?: { sessionId: string; name: string } }
   | { kind: 'assistant'; seq: number; text: string }
   /** 추론 요약 (#58). codex만 텍스트를 준다 — claude의 생각은 세션의 thinkingTokens로만 보인다 */
   | { kind: 'reasoning'; seq: number; text: string }
@@ -507,8 +519,8 @@ export type AppState = {
       worktreeBranch?: string
     },
   ): Promise<SessionInfo>
-  send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
-  attachFile(sessionId: string, file: File): Promise<Attachment | null>
+  send(sessionId: string, text: string, attachments?: ChatAttachment[]): Promise<void>
+  attachFile(sessionId: string, file: File): Promise<ChatAttachment | null>
   respondApproval(sessionId: string, requestId: string, decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project'): Promise<void>
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -1834,12 +1846,15 @@ export const useStore = create<AppState>((set, get) => ({
     }
     try {
       const buf = await file.arrayBuffer()
-      return await platform.agents.saveAttachment(
+      const b64 = toBase64(new Uint8Array(buf))
+      const saved = await platform.agents.saveAttachment(
         sessionId,
         file.name,
         file.type || 'application/octet-stream',
-        toBase64(new Uint8Array(buf)),
+        b64,
       )
+      // 이미지는 방금 읽은 바이트로 즉시 썸네일을 그린다 — host 왕복이 필요 없다
+      return saved.kind === 'image' ? { ...saved, data: b64 } : saved
     } catch (e) {
       set({ toast: `Could not attach: ${(e as Error).message}` })
       return null
@@ -1848,7 +1863,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   async send(sessionId, text, attachments) {
     const seq = ++chatSeq
-    const label = attachments?.length ? `${text}${text ? '\n' : ''}📎 ${attachments.map((a) => a.name).join(', ')}` : text
     /*
      * 보낸 즉시 '작업 중'으로 표시한다.
      *
@@ -1870,7 +1884,15 @@ export const useStore = create<AppState>((set, get) => ({
           host가 user_message로 같은 말을 알려주면 이 항목이 그것으로 확정된다 —
           표식이 없으면 같은 말이 두 번 그려진다.
         */
-        chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label, sentText: text, pending: true }] },
+        chat: {
+          ...s.chat,
+          [sessionId]: [
+            ...(s.chat[sessionId] ?? []),
+            // 첨부는 라벨(📎 이름)로 text에 섞지 않는다 — 이미지는 실물로, 파일은 칩으로 따로 그린다.
+            // text가 보낸 원문 그대로라 user_message 확정 대조도 이걸로 성립한다 (#75).
+            { kind: 'user', seq, text, ...(attachments?.length ? { attachments } : {}), pending: true },
+          ],
+        },
         sessions,
         /*
           The wait starts here, not when the host's first event lands. Waking a sleeping
@@ -1881,7 +1903,8 @@ export const useStore = create<AppState>((set, get) => ({
       }
     })
     try {
-      await get().platform!.agents.send(sessionId, text, attachments)
+      // 바이트는 이미 host의 파일에 있다 — 전송에는 경로만 싣는다 (data를 실으면 페이로드가 두 배)
+      await get().platform!.agents.send(sessionId, text, attachments?.map(({ data: _, ...a }) => a))
       // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
       set((s) => ({
         sessions: s.sessions[sessionId]?.live
@@ -2551,13 +2574,13 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * 출처 표식이 조용히 사라진다. 텍스트 일치는 내 말끼리만 성립하는 가정이다.
        */
       /*
-       * 대조는 **보낸 원문**으로 한다 (#75). 첨부가 있으면 그린 것(라벨: 📎 이름들)과
-       * 보낸 것(원문)이 달라서, 그린 텍스트로 대조하면 영영 안 맞는다 — 확정 대신
-       * 두 번째 말풍선이 붙었다 (첨부 있는 모든 전송에서 이중 렌더, 코덱스에서 발견).
+       * 대조는 **보낸 원문**으로 한다 (#75). 첨부를 📎 라벨로 text에 섞던 시절, 그린 것과
+       * 보낸 것이 달라 확정이 안 맞물리고 두 번째 말풍선이 붙었다 (코덱스에서 발견).
+       * 지금은 첨부가 별도 필드라 text가 곧 원문이다 — 이 동일성이 이 대조의 전제다.
        */
       const idx = e.from
         ? -1
-        : items.findIndex((i) => i.kind === 'user' && i.pending && (i.sentText ?? i.text) === e.text)
+        : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
       if (idx === -1) return [...items, { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}) }]
       return items.map((it, i) => (i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it))
     }
@@ -2594,8 +2617,15 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of msgs) {
     if (m.kind === 'text' && m.role === 'user') {
-      const p = m.payload as { text?: string; from?: { sessionId: string; name: string } }
-      items.push({ kind: 'user', seq: m.seq, text: String(p?.text ?? ''), ...(p?.from ? { from: p.from } : {}) })
+      const p = m.payload as { text?: string; from?: { sessionId: string; name: string }; attachments?: ChatAttachment[] }
+      items.push({
+        kind: 'user',
+        seq: m.seq,
+        text: String(p?.text ?? ''),
+        ...(p?.from ? { from: p.from } : {}),
+        // 첨부 복원 — 이미지 바이트(data)는 host가 loadMessages에서 파일을 읽어 실어 준다
+        ...(p?.attachments?.length ? { attachments: p.attachments } : {}),
+      })
     } else if (m.kind === 'text') {
       const e = m.payload as { text?: string }
       const last = items[items.length - 1]

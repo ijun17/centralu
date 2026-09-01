@@ -2335,6 +2335,30 @@ describe('스트리밍 메시지는 행 하나로 저장된다 (#66)', () => {
     // fake 핸들은 send에 echo 델타로 답한다 — 그 echo와 '새 답' 사이에는 경계가 없으므로 한 행이 맞다
     expect(texts).toEqual(['하던 말', '멈추고 이것부터', 'echo:멈추고 이것부터새 답'])
   })
+
+  it('첨부는 payload에 경로로 남고, 이미지 바이트는 loadMessages가 파일에서 다시 싣는다', async () => {
+    const { s } = await openSession()
+    const dir = mkdtempSync(join(tmpdir(), 'cc-att-'))
+    const img = join(dir, 'shot.png')
+    writeFileSync(img, Buffer.from('PNG바이트'))
+    await mgr.send(s.id, '이 화면 봐줘', [
+      { kind: 'image', path: img, name: 'shot.png', mime: 'image/png', bytes: 9 },
+      // 500MB 상한 정리로 사라진 파일 — 경로만 남고 화면은 이름 칩으로 눕는다
+      { kind: 'image', path: join(dir, 'gone.png'), name: 'gone.png', mime: 'image/png', bytes: 9 },
+    ])
+
+    // DB에는 바이트가 없다 (D-1: 경로만)
+    const raw = store.loadMessages(s.id, 50).find((r) => r.role === 'user')!
+    const rawAtts = (raw.payload as { attachments: { data?: string }[] }).attachments
+    expect(rawAtts.map((a) => a.data)).toEqual([undefined, undefined])
+
+    // 화면에 줄 때는 살아 있는 파일만 바이트가 실린다
+    const served = (await mgr.loadMessages(s.id, 50)).find((r) => r.role === 'user')!
+    const atts = (served.payload as { attachments: { name: string; data?: string }[] }).attachments
+    expect(atts[0]?.data).toBe(Buffer.from('PNG바이트').toString('base64'))
+    expect(atts[1]?.data).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
 
 /**
