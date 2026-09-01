@@ -123,6 +123,12 @@ const CONTEXT_CHARS = 4000
  * externalId가 답을 갖는다). app_settings는 그런 값이 사는 자리다.
  */
 const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
+/**
+ * 이 세션의 **밖 기록을 어느 시점까지 읽었는가** (도구가 준 updatedAt 그대로).
+ *
+ * 도구마다 단위가 달라도 상관없다 — 비교는 언제나 같은 도구가 준 값끼리다.
+ */
+const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
 
 /**
  * 세션 수명주기 + 영속화. 어댑터는 상태를 갖지 않으므로 (docs/agent-host.md §2)
@@ -162,8 +168,14 @@ export class SessionManager {
   private watchers = new DirWatchers((projectId, dirs) => this.emit({ type: 'fs_changed', projectId, dirs }))
   /** 도구+디렉토리별 슬래시 명령 캐시 (세션이 준비되기 전에도 목록을 줄 수 있게) */
   private commandCache = new Map<string, CommandInfo[]>()
-  /** 도구가 갖고 있는 대화 id 목록 (짧은 캐시 — 삭제 여부 판단용) */
-  private externalIndex = new Map<string, { ids: Set<string>; at: number }>()
+  /**
+   * 도구가 갖고 있는 대화 → 마지막으로 바뀐 시각 (짧은 캐시).
+   *
+   * 예전엔 id만 담은 Set이었다 — 살았나 죽었나만 물었으니까. 그런데 목록은
+   * `updatedAt`도 같이 주고(ExternalSessionSummary), 그걸 버리는 바람에 바로 뒤에서
+   * "밖에서 바뀐 게 있나"를 **대화를 통째로 다시 읽어서** 물었다. 이미 산 답이었다.
+   */
+  private externalIndex = new Map<string, { ids: Map<string, number>; at: number }>()
   /** 사용량 캐시 — 모달을 여닫을 때마다 도구를 띄우지 않는다 */
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
   /** 끝나면 알려달라고 부탁받은 세션 → 알릴 오케스트레이터 (한 번 알리면 지운다) */
@@ -877,13 +889,49 @@ export class SessionManager {
     const externalId = info.externalId ?? info.importedFrom
     if (!adapter.readExternalHistory || !externalId) return 0
 
+    /*
+     * **바뀌지 않은 기록은 다시 읽지 않는다.**
+     *
+     * 이 따라잡기는 "앱 밖(터미널의 도구)에서 이 대화를 이어갔다면 그것도 가져오자"는
+     * 보정이다. 그런데 밖에서 쓴 적이 없으면 읽을 것이 없는데도 매번 전문을 읽었고,
+     * 그 값은 대화 길이를 따라 자란다 — 775턴짜리 codex 스레드에서 실측 **48.6MB /
+     * 8.9초**였다. 게다가 그 8.9초는 첫 메시지가 나가기 전에 치른다 (아래 resume에서
+     * 이걸 await한다). 잠든 세션을 깨워 말을 걸면 9초를 기다리게 한 정체가 이것이다.
+     *
+     * 도구에게 "조금만 달라"고 할 수는 없다. codex의 thread/read에는 개수라는 개념이
+     * 없다 — 실측: limit을 실어도 무시하고 똑같이 48.6MB를 준다. 전부 아니면 전무다.
+     * 그러니 **덜 받는 대신 안 묻는다.**
+     *
+     * 물을 상대는 이미 있다. 목록이 주는 `updatedAt`이 그것이고, 바로 앞 externalGone이
+     * 그 목록을 이미 받아 캐시에 넣어 뒀다 — 여기서는 공짜다.
+     *
+     * 도구 이름이 나오지 않는다는 점이 중요하다. 이건 codex의 예외가 아니라 따라잡기의
+     * 규칙이라, claude에도 그대로 적용되고 다음에 붙일 어댑터도 그냥 따라온다.
+     * `listExternalSessions`가 없는 어댑터는 시각을 모르므로 예전처럼 매번 읽는다 —
+     * **모르면 건너뛰지 않는다**(이 파일의 다른 선택 기능들과 같은 degrade 방향).
+     */
+    /* `cwd`(프로젝트 경로)가 아니라 `cwdFor`로 묻는다 — 바로 앞 externalGone이 그 열쇠로
+       캐시를 채웠기 때문이다. 여기서 다른 열쇠를 쓰면 아끼려던 목록 조회를 한 번 더 낸다
+       (워크트리 세션은 두 경로가 다르다). 목록에 없으면 시각을 모르니 예전처럼 읽는다. */
+    const changedAt = (await this.externalIndexOf(info.tool, this.cwdFor(info)))?.get(externalId) ?? null
+    const key = externalSyncedKey(info.id)
+    if (changedAt !== null && changedAt <= Number(this.store.appSetting(key) ?? '-1')) return 0
+    /* 읽어낸 지점을 남긴다. 붙일 것이 없었어도 남긴다 — "읽었다"와 "새 것이 있었다"는
+       다른 사실이고, 전자를 안 적으면 바뀔 때마다가 아니라 매번 다시 읽는다. */
+    const mark = () => {
+      if (changedAt !== null) this.store.setAppSetting(key, String(changedAt))
+    }
+
     let history: HistoryMessage[]
     try {
       history = await adapter.readExternalHistory(externalId, cwd, SYNC_LIMIT)
     } catch {
-      return 0 // 못 읽어도 대화는 계속된다
+      return 0 // 못 읽어도 대화는 계속된다 (표식도 남기지 않는다 — 읽은 적이 없다)
     }
-    if (history.length === 0) return 0
+    if (history.length === 0) {
+      mark()
+      return 0
+    }
 
     const ours = this.store.loadMessages(info.id, SYNC_LIMIT)
     /*
@@ -919,7 +967,10 @@ export class SessionManager {
     } else if (ours.length === 0) {
       start = 0 // 기록이 비었으면 전부 새 것이다
     }
-    if (start < 0 || start >= history.length) return 0
+    if (start < 0 || start >= history.length) {
+      mark()
+      return 0
+    }
 
     const fresh = history.slice(start)
     const base = this.store.nextSeq(info.id)
@@ -936,6 +987,7 @@ export class SessionManager {
     info.lastSeq = base + fresh.length - 1
     // 밖에서 오간 말이다 — 내가 읽은 적이 없으니 안 읽음으로 둔다
     this.store.upsertSession(info)
+    mark()
     return fresh.length
   }
 
@@ -1921,23 +1973,36 @@ export class SessionManager {
    */
   private async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
     const id = m.externalId ?? m.importedFrom
-    const adapter = this.adapters.get(m.tool)
-    if (!id || !adapter?.listExternalSessions) return false
-
-    const key = `${m.tool}:${cwd}`
-    const cached = this.externalIndex.get(key)
-    let ids = cached && Date.now() - cached.at < 30_000 ? cached.ids : null
-    if (!ids) {
-      try {
-        const rows = await adapter.listExternalSessions(cwd, 200)
-        ids = new Set(rows.map((r) => r.externalId))
-        this.externalIndex.set(key, { ids, at: Date.now() })
-      } catch {
-        return false // 확인 못 했으면 막지 않는다
-      }
-    }
+    if (!id) return false
+    const ids = await this.externalIndexOf(m.tool, cwd)
+    if (!ids) return false // 확인 못 했으면 막지 않는다
     // 이어받은 원본이 살아 있으면 그것도 인정한다 (resume이 새 id를 발급했을 수 있다)
     return !ids.has(id) && !(m.importedFrom && ids.has(m.importedFrom))
+  }
+
+  /**
+   * 도구가 보관 중인 대화 목록 → `외부 id → 마지막으로 바뀐 시각`.
+   *
+   * 깨우는 길에서 두 번 필요하다 (아직 있나? / 밖에서 바뀌었나?). 한 번만 묻고
+   * 30초 들고 있는다 — codex는 이 한 줄에도 app-server를 띄운다 (실측 0.27초).
+   * 목록을 못 받았으면 `null`이다: **모르는 것과 없는 것을 섞지 않는다.**
+   * 부르는 쪽 둘 다 모를 때는 아무것도 막지 않는 쪽으로 간다.
+   */
+  private async externalIndexOf(tool: ToolName, cwd: string): Promise<Map<string, number> | null> {
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.listExternalSessions) return null
+
+    const key = `${tool}:${cwd}`
+    const cached = this.externalIndex.get(key)
+    if (cached && Date.now() - cached.at < 30_000) return cached.ids
+    try {
+      const rows = await adapter.listExternalSessions(cwd, 200)
+      const ids = new Map(rows.map((r) => [r.externalId, r.updatedAt]))
+      this.externalIndex.set(key, { ids, at: Date.now() })
+      return ids
+    } catch {
+      return null
+    }
   }
 
   /**

@@ -576,6 +576,105 @@ describe('자동 이어가기', () => {
 })
 
 /**
+ * 깨우는 길에서 **밖 기록을 다시 읽는 값**을 안 내도 되는 때가 있다.
+ *
+ * 이 따라잡기는 앱 밖(터미널의 도구)에서 이어간 말을 가져오는 보정인데, 밖에서 쓴 적이
+ * 없어도 매번 전문을 읽었다. 값은 대화 길이를 따라 자란다 — codex 775턴 스레드에서
+ * 실측 48.6MB / 8.9초였고, 그 8.9초는 **첫 메시지가 나가기 전에** 치른다.
+ *
+ * 여기서 지킬 계약은 셋이다: 안 바뀌었으면 안 읽는다, 바뀌었으면 읽는다,
+ * **모르면 읽는다.** 마지막 것이 제일 중요하다 — 모르는 것을 '안 바뀜'으로 접으면
+ * 밖에서 한 말이 영영 안 들어온다.
+ */
+describe('밖에서 바뀌지 않은 기록은 다시 읽지 않는다', () => {
+  class SyncAdapter extends FakeAdapter {
+    updatedAt = 100
+    reads = 0
+    lists = 0
+    async listExternalSessions() {
+      this.lists++
+      return [{ externalId: 'ext-1', title: '어제 하던 일', updatedAt: this.updatedAt }]
+    }
+    async readExternalHistory() {
+      this.reads++
+      return [{ role: 'user' as const, text: '밖에서 한 말' }]
+    }
+  }
+  /** 목록을 줄 줄 모르는 도구 — 시각을 알 길이 없다 */
+  class BlindAdapter extends FakeAdapter {
+    reads = 0
+    async readExternalHistory() {
+      this.reads++
+      return [{ role: 'user' as const, text: '밖에서 한 말' }]
+    }
+  }
+
+  /** 같은 store 위에 매니저를 새로 세운다 = 앱을 껐다 켠 것 (캐시는 비고 표식은 남는다) */
+  const relaunch = (a: AgentAdapter) => {
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    return { m, call: createRpcHandler(m, adapters) }
+  }
+
+  const sleepingSession = async (a: AgentAdapter) => {
+    const { m, call } = relaunch(a)
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as {
+      id: string
+    }
+    await m.disposeAll() // host 재시작 후 상태: 기록은 있고 프로세스만 없다
+    return s.id
+  }
+
+  it('두 번째로 깨울 때는 안 읽는다 — 그리고 목록을 새로 묻지도 않는다', async () => {
+    const a = new SyncAdapter()
+    const id = await sleepingSession(a)
+
+    const first = relaunch(a)
+    await first.call('agents.send', { sessionId: id, text: '이어서' })
+    expect(a.reads).toBe(1)
+    /*
+      목록 조회는 **원래 내던 값이다** (externalGone이 "이 대화가 아직 있나"를 묻는다).
+      새 왕복을 더한 게 아니라 그 답에 딸려 온 updatedAt을 안 버린 것뿐이라는 증거.
+    */
+    expect(a.lists).toBe(1)
+
+    await first.m.disposeAll()
+    const second = relaunch(a)
+    await second.call('agents.send', { sessionId: id, text: '한 번 더' })
+    expect(a.reads).toBe(1) // 밖에서 바뀐 게 없으니 48.6MB를 다시 받지 않는다
+  })
+
+  it('밖에서 이어갔으면 읽는다 — 아끼자고 놓치지 않는다', async () => {
+    const a = new SyncAdapter()
+    const id = await sleepingSession(a)
+
+    const first = relaunch(a)
+    await first.call('agents.send', { sessionId: id, text: '이어서' })
+    expect(a.reads).toBe(1)
+
+    await first.m.disposeAll()
+    a.updatedAt = 200 // 터미널에서 이 대화를 이어갔다
+    const second = relaunch(a)
+    await second.call('agents.send', { sessionId: id, text: '한 번 더' })
+    expect(a.reads).toBe(2)
+  })
+
+  it('시각을 알 수 없는 도구는 예전처럼 매번 읽는다', async () => {
+    const a = new BlindAdapter()
+    const id = await sleepingSession(a)
+
+    const first = relaunch(a)
+    await first.call('agents.send', { sessionId: id, text: '이어서' })
+    await first.m.disposeAll()
+    const second = relaunch(a)
+    await second.call('agents.send', { sessionId: id, text: '한 번 더' })
+
+    expect(a.reads).toBe(2)
+  })
+})
+
+/**
  * 권한·모델은 도구 프로세스를 띄울 때 고정된다.
  * 살아 있는 세션의 메타만 고치면 화면에는 '자동'인데 계속 승인을 묻는다
  * (도그푸딩: "권한 자동으로 바꿨는데 왜 물어보냐").

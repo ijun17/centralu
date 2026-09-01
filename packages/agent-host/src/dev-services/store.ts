@@ -317,8 +317,8 @@ export class Store {
           const has = (name: string) =>
             this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`).get(name) !==
             undefined
-          if (has('control_center')) {
-            // legacy-name
+          // 표식은 옛 이름이 **적힌 그 줄**에 달아야 검사가 본다 — 다음 줄에 달면 못 본다
+          if (has('control_center')) { // legacy-name
             this.db.exec(
               `INSERT OR IGNORE INTO grid_panels (session_id, position)
                SELECT session_id, position FROM control_center`, // legacy-name
