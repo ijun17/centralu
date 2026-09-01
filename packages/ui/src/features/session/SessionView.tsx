@@ -1248,20 +1248,32 @@ function ChatStream({
         위로 되돌아가 확인하지 않아도 되게 한 줄로 남긴다.
       */}
       {stickyText !== null && (
-        <div className="sticky top-0 z-10 -mx-4 mb-1 px-4" data-testid="sticky-user">
+        /*
+          `-top-4`이지 `top-0`이 아니다.
+          이 스크롤 칸은 `py-4`를 두르고 있고, sticky는 **자기 컨테이닝 블록(부모의
+          content box) 밖으로 못 나간다** — 그래서 `top-0`은 천장이 아니라 패딩 아래
+          16px에 붙었다 (실측: gap 16px). 음수 offset이 그 16px을 되돌려 진짜 천장에
+          닿게 한다. 패딩 자체는 남겨둔다: 맨 위로 올렸을 때 대화가 숨 쉴 자리다.
+        */
+        <div className="sticky -top-4 z-10 -mx-4 mb-1 px-4" data-testid="sticky-user">
           {/*
             말풍선과 같은 옷을 입는다 (폰트·패딩·색 — 도그푸딩 요청). 이 줄은 위로
             사라진 사용자 메시지의 **연장**이라, 크기가 다르면 다른 종류의 것으로 읽힌다.
             폭만 다르다: 배너는 전체 폭에 한 줄 말줄임이다 — 자리가 일이기 때문이다.
             누르면 펼쳐진다 — 한 줄로 부족한 질문을 위로 되돌아가지 않고 다시 읽는 용도.
             아주 긴 질문이 화면을 다 덮지 않게 높이만 자르고 안에서 스크롤한다.
+
+            천장에 붙었으므로 **위쪽 모서리는 둥글지 않고 위 테두리도 없다** — 떠 있는
+            카드가 아니라 화면에 매달린 띠다. 배경은 반투명이라 지나가는 대화가 뒤에
+            비쳐 보이고(blur로 글자는 안 읽히게), 그래서 이 줄이 대화를 가린 것이 아니라
+            **덮고 있다**는 것이 눈에 남는다.
           */}
           <div className="relative">
             <button
               type="button"
               onClick={() => setStickyOpen((v) => !v)}
               aria-expanded={stickyOpen}
-              className="w-full cursor-pointer truncate rounded-lg rounded-br-sm border border-slate/40 bg-graphite/95 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-sm"
+              className="w-full cursor-pointer truncate rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-graphite/55 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-md"
             >
               {stickyText}
             </button>
@@ -1275,7 +1287,12 @@ function ChatStream({
                 type="button"
                 onClick={() => setStickyOpen(false)}
                 data-testid="sticky-user-expanded"
-                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite/95 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-sm"
+                /*
+                  접힌 띠와 같은 모양이되 **여기는 덜 투명하다.** 접힌 줄의 투명함은
+                  "가린 게 아니라 덮었다"를 보이려는 것이고, 펼친 이유는 읽으려는 것이다 —
+                  긴 질문 위로 대화가 비치면 그 목적이 곧바로 깨진다.
+                */
+                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-graphite/90 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-md"
               >
                 {stickyText}
               </button>

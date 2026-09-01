@@ -629,3 +629,54 @@ describe('messagesToChat — 추론 행', () => {
     ])
   })
 })
+
+/**
+ * 대화 항목의 **정체성(identity)** — 바뀐 줄만 새 객체가 된다.
+ *
+ * 화면 쪽 최적화가 이 규칙 위에 서 있다: ChatRow는 memo라, 항목 객체가 그대로면 다시
+ * 그리지 않는다. 그래서 스트리밍 조각 하나가 도착할 때 다시 그려지는 말풍선은 **하나**다
+ * (실측 1.0 렌더/조각). 리듀서가 어느 날 `items.map((i) => ({ ...i }))` 같은 걸 하면
+ * 그 성질이 조용히 사라진다 — 화면은 똑같이 보이고 비용만 대화 길이에 비례해 자란다.
+ * 렌더 수는 브라우저에서만 셀 수 있지만, 그 근거인 정체성은 여기서 못 박을 수 있다.
+ */
+describe('대화 항목의 정체성 — 바뀐 줄만 새 객체다', () => {
+  const idOf = (sessionId: string) => useStore.getState().chat[sessionId] ?? []
+
+  it('스트리밍 조각은 마지막 줄만 새로 만든다', async () => {
+    const s = 'ident-s1'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: s, seq: 1, text: '질문' } as NormalizedEvent)
+    useStore.getState().dispatchEvent(delta(s, '답 '))
+    const before = idOf(s)
+    expect(before.length).toBe(2)
+
+    useStore.getState().dispatchEvent(delta(s, '이어서'))
+    const after = idOf(s)
+    expect(after.length).toBe(2)
+    expect(after[0]).toBe(before[0]) // 사람의 말은 손대지 않는다 — 같은 객체다
+    expect(after[1]).not.toBe(before[1]) // 자라는 줄만 새 객체
+  })
+
+  it('도구 결과는 그 도구 줄만 새로 만든다 — 뒤에 온 말들은 그대로다', async () => {
+    const s = 'ident-s2'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+    useStore.getState().dispatchEvent({
+      type: 'tool_call', sessionId: s, callId: 'c1',
+      summary: { tool: 'Read', title: 'a.ts', readOnly: true, paths: [] },
+    } as NormalizedEvent)
+    useStore.getState().dispatchEvent(delta(s, '읽는 중'))
+    const before = idOf(s)
+    expect(before.length).toBe(2)
+
+    useStore.getState().dispatchEvent({
+      type: 'tool_result', sessionId: s, callId: 'c1', ok: true, summary: '12 lines',
+    } as NormalizedEvent)
+    const after = idOf(s)
+    expect(after[0]).not.toBe(before[0]) // 결과가 붙은 도구 줄만
+    expect(after[1]).toBe(before[1]) // 그 뒤의 말은 건드리지 않는다
+  })
+})
