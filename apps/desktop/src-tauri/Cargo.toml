@@ -1,6 +1,6 @@
 [package]
 name = "centralu"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 description = "에이전트 관제탑"
 edition = "2021"
 # Raised from 1.77 by the `trash` dependency below, which declares 1.85. CI builds on
