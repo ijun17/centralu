@@ -633,16 +633,6 @@ export class MockPlatform implements Platform {
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
       return { ...sess }
     },
-    setSessionKind: async (sessionId: string, kind: SessionInfo['kind']) => {
-      const sess = this.sessions.get(sessionId)
-      if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
-      // 실물과 같은 규칙 (#13): 중앙 오케스트레이터는 역할을 못 바꾼다
-      if (sess.projectId === null) {
-        throw Object.assign(new Error('The central orchestrator cannot change roles'), { code: 'internal' })
-      }
-      sess.kind = kind
-      return { ...sess }
-    },
     restartSession: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })

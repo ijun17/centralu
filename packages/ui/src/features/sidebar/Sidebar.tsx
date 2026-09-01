@@ -263,7 +263,7 @@ function OrchestratorButton() {
 
 /**
  * 왕관 — 다른 세션을 부리는 자리의 표식 (사양서 FR-11의 원래 그림).
- * 갈래길 모양을 썼었는데, 프로젝트 오케스트레이터 배지(글자 'orch')와 서로 다르게
+ * 갈래길 모양을 썼었는데, 오케스트레이터 배지(글자 'orch')와 서로 다르게
  * 생겨서 같은 역할이 두 얼굴을 가졌다 — 왕관 하나로 통일한다 (2026-08-26 사용자 결정).
  * 채색은 안 한다: 긴급함은 밝기의 몫이고, 이건 종류의 표식이다.
  */
@@ -543,20 +543,6 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     */}
                     <ToolMark tool={s.tool} state={s.state} />
                     <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
-                    {/*
-                      승격된 세션의 표식 (#13). 겉보기에 보통 세션과 똑같으면 "왜 이
-                      세션만 다른 세션들을 부리지?"를 화면이 설명하지 못한다 —
-                      워크트리 배지와 같은 이유로, 다르게 도는 세션은 다르게 보인다.
-                    */}
-                    {s.kind === 'orchestrator' && (
-                      <span
-                        className="shrink-0 text-slate"
-                        data-testid={`orchestrator-badge-${s.id}`}
-                        title="Project orchestrator — directs this project's sessions"
-                      >
-                        <OrchestratorIcon size={11} />
-                      </span>
-                    )}
                     {/*
                       병합됨 (#69) — 이 브랜치의 작업이 줄기에 들어갔다. 이력이지 진행 중인
                       일이 아니라는 표시고, 이 상태의 자식은 매니저 삭제를 붙들지 않는다.

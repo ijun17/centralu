@@ -258,7 +258,7 @@ export function SessionPane({
     // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
     enabled: !!session && caret >= 0 && !composing,
     // 오케스트레이터의 `@`는 세션을 집는다 — 지시의 대상이 파일이 아니라 세션이다.
-    // 판정은 명시적 표식(#13, kind) — 프로젝트 오케스트레이터는 프로젝트가 있어도 세션을 집는다
+    // 판정은 명시적 표식(kind)으로 한다: 오케스트레이터에게는 고를 파일 트리가 없다
     atSource: session && session.kind === 'orchestrator' ? 'sessions' : 'files',
   })
 
@@ -668,8 +668,6 @@ export function SessionPane({
             serviceTier={session.serviceTier}
             preset={session.permissionPreset}
             live={session.live}
-            projectId={session.projectId}
-            kind={session.kind}
           />
           {/*
             워크트리 세션은 **다른 디렉토리에서 돈다.** 그 사실이 안 보이면 사용자는

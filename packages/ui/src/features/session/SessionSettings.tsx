@@ -143,8 +143,6 @@ export function SessionSettings({
   serviceTier,
   preset,
   live,
-  projectId,
-  kind,
 }: {
   sessionId: string
   tool: ToolName
@@ -157,13 +155,8 @@ export function SessionSettings({
   preset: PermissionPreset
   /** 프로세스가 살아 있는가 — Claude는 살아 있어야 모델 목록을 준다 */
   live: boolean
-  /** 중앙 오케스트레이터(null)는 역할을 못 바꾼다 — Role 묶음이 안 뜬다 */
-  projectId: string | null
-  /** 워커인가 프로젝트 오케스트레이터인가 (#13) */
-  kind: 'worker' | 'orchestrator'
 }) {
   const update = useStore((s) => s.updateSessionSettings)
-  const setKind = useStore((s) => s.setSessionKind)
   const { models, reason } = useModels(tool, live)
   const verbosities = useVerbosities(tool)
   const [open, setOpen] = useState(false)
@@ -338,33 +331,11 @@ export function SessionSettings({
           )}
 
           {/*
-            승격·강등 (#13). 중앙 오케스트레이터(projectId=null)에는 안 뜬다 — 역할을
-            바꿀 수 없는 세션에 바꾸는 줄을 보여주면 눌러본 사람만 거절을 배운다.
-            적용 시점(다음에 깰 때)은 묶음 머리에 적는다 — 도구·역할은 프로세스를
-            띄울 때 주입되므로 지금 살아 있는 세션은 표식만 먼저 바뀐다.
+            **역할 묶음은 여기 없다** (2026-09-01 폐기). 세션을 "프로젝트 오케스트레이터"로
+            승격하는 줄이 있었는데, 프로젝트 안에서 세션을 지휘하는 자리가 워크트리
+            매니저(#69)와 둘이 되면서 만든 사람조차 둘을 헷갈렸고 승격은 한 번도 쓰이지
+            않았다. 지휘석은 관계에서 나온다(자식이 있으면 매니저다) — 고르는 것이 아니다.
           */}
-          {projectId !== null && (
-            <MenuSection label="Role" note="An orchestrator directs this project's sessions. Applies next time the session wakes.">
-              <MenuRow
-                testId="settings-kind-worker"
-                label="Worker"
-                selected={kind === 'worker'}
-                onPick={() => {
-                  setOpen(false)
-                  if (kind !== 'worker') void setKind(sessionId, 'worker')
-                }}
-              />
-              <MenuRow
-                testId="settings-kind-orchestrator"
-                label="Project orchestrator"
-                selected={kind === 'orchestrator'}
-                onPick={() => {
-                  setOpen(false)
-                  if (kind !== 'orchestrator') void setKind(sessionId, 'orchestrator')
-                }}
-              />
-            </MenuSection>
-          )}
 
           <MenuSection label="Permissions">
             {PRESETS.map((p) => (

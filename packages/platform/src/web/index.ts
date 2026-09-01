@@ -112,9 +112,6 @@ class WebAgentPort implements AgentPort {
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>) {
     return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
   }
-  setSessionKind(sessionId: string, kind: SessionInfo['kind']) {
-    return this.rpc.call('sessions.setKind', { sessionId, kind })
-  }
   async worktreeStatus(sessionId: string) {
     return this.rpc.call('agents.worktreeStatus', { sessionId })
   }

@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 25
+const LATEST_SCHEMA = 26
 
 function seeded() {
   const s = new Store()
@@ -432,9 +432,8 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
 })
 
 /**
- * 표식은 이제 kind 하나다 (#13). 예전에는 markOrchestrator가 따로 있어 "쓰는 길이 둘"
- * 이었고, 하나뿐이라는 규칙도 저장소가 지켰다 — 프로젝트 오케스트레이터가 생기며
- * 표식은 여럿일 수 있고(프로젝트마다 하나), 중앙은 그중 프로젝트 없는 것이다.
+ * 표식은 kind 하나다 (#13). 예전에는 markOrchestrator가 따로 있어 "쓰는 길이 둘"이었다.
+ * 프로젝트 오케스트레이터가 폐기되면서(v26) 표식이 붙은 세션은 다시 앱에 하나뿐이다.
  */
 describe('오케스트레이터 표식(kind)', () => {
   const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
@@ -460,12 +459,35 @@ describe('오케스트레이터 표식(kind)', () => {
     s.close()
   })
 
-  it('프로젝트 오케스트레이터는 중앙이 아니다 — orchestratorId는 프로젝트 없는 것만 답한다', () => {
-    const s = seeded()
-    mk(s, 'proj-orc', 'p1', 'orchestrator')
-    expect(s.orchestratorId()).toBeNull()
-    expect(s.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('orchestrator')
-    s.close()
+  /**
+   * v26 — 프로젝트 오케스트레이터 폐기의 안전장치 (2026-09-01).
+   *
+   * **강등이 아니라 승격이 될 뻔한 자리다.** 코드에서 프로젝트 범위 단계가 사라지면서,
+   * 표식이 남은 세션은 다음에 깰 때 자기 프로젝트가 아니라 **모든 프로젝트**를 보는
+   * 도구를 받는다 — 화면 어디에도 안 나타나는 권한 확대다. 그래서 데이터를 먼저 고친다.
+   */
+  it('v26: 프로젝트를 가진 옛 표식은 지워지고, 중앙 표식은 살아남는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v26-'))
+    const file = join(dir, 'store.db')
+
+    // v25 상태를 만든다: 프로젝트 오케스트레이터 하나 + 중앙 하나
+    const before = new Store(file)
+    before.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    mk(before, 'proj-orc', 'p1', 'orchestrator')
+    mk(before, 'central', null, 'orchestrator')
+    before.close()
+    const raw = new Database(file)
+    raw.pragma('user_version = 25')
+    raw.close()
+
+    const after = new Store(file)
+    expect(after.schemaVersion).toBe(LATEST_SCHEMA)
+    // 프로젝트를 가진 표식은 사라진다 — 대화는 그대로다
+    expect(after.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
+    // 중앙은 그대로 — 이 앱의 유일한 오케스트레이터다
+    expect(after.orchestratorId()).toBe('central')
+    after.close()
+    rmSync(dir, { recursive: true, force: true })
   })
 })
 

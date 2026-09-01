@@ -531,6 +531,23 @@ export class Store {
           }
         },
       },
+      {
+        to: 26,
+        run: () => {
+          /*
+           * 프로젝트 오케스트레이터 폐기 (2026-09-01, #13 되돌림).
+           *
+           * **데이터를 먼저 고쳐야 하는 이유가 있다.** 코드에서 프로젝트 범위 단계가
+           * 사라지면서, 표식이 남은 세션은 강등되는 게 아니라 **중앙 시야를 얻는다** —
+           * 자기 프로젝트만 보던 세션이 다음에 깰 때 모든 프로젝트의 세션에 지시할 수
+           * 있게 된다. 조용한 권한 확대라 화면 어디에도 안 나타난다.
+           *
+           * 그래서 표식을 지운다. 잃는 것은 도구 몇 개뿐이고 대화는 그대로다.
+           * 중앙 오케스트레이터(project_id IS NULL)는 건드리지 않는다.
+           */
+          this.db.exec(`UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1 AND project_id IS NOT NULL`)
+        },
+      },
     ]
 
     for (const step of steps) {

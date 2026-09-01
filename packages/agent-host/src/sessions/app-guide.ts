@@ -39,10 +39,10 @@ GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues`,
 - 에이전트 전환(claude↔codex): 대화는 이어지지 않는다 — 새 도구는 옛 대화를 모른다.`,
 
   orchestrator: `# 오케스트레이터
-계급: 중앙 > 프로젝트 > 세션.
-- 중앙 오케스트레이터(너일 수 있다): 프로젝트를 가로질러 모든 세션을 보고 시킨다.
-- 프로젝트 오케스트레이터: 세션 설정 메뉴의 Role에서 승격한다. 자기 프로젝트의
-  세션만 보고 시킨다. 승격·강등은 다음에 깰 때 적용된다.
+세션을 지휘하는 자리는 둘이다.
+- 오케스트레이터(너일 수 있다): 앱에 하나뿐이고, 프로젝트를 가로질러 모든 세션을 보고 시킨다.
+- 워크트리 매니저: 프로젝트마다 워크트리 세션을 만들면 저절로 생긴다. 자기 워크트리
+  자식만 보고 시킨다 — 역할을 고르는 게 아니라 자식이 있으면 매니저다.
 - 도구: list_sessions(목록) · send_to_session(지시, reportBack 가능) ·
   read_session(대화 읽기) · recall(지난 대화 검색) · archive_session(보관) ·
   create_session(워커 만들기) · propose_project(Add project 버튼 짚어 주기) ·
@@ -61,7 +61,6 @@ GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues`,
 - Effort: 추론 강도 (모델이 지원할 때만 보인다).
 - Verbosity: 응답 길이 (codex 전용) — 짧을수록 빨리 온다. 다음에 깰 때 적용.
 - Permissions: 승인 프리셋 (위 approvals 참고).
-- Role: Worker ↔ Project orchestrator 승격·강등.
 - Agent: claude ↔ codex 전환 (대화는 이어지지 않는다).
 앱 설정(⌘,): 알림 정책 · 저장된 승인 규칙 · 단축키 목록 · 업데이트.`,
 

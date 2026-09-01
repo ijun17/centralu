@@ -535,8 +535,6 @@ export type AppState = {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<void>
-  /** 승격·강등 (#13). 다음에 깰 때 적용된다 — 토스트가 그 사실을 말한다 */
-  setSessionKind(sessionId: string, kind: 'worker' | 'orchestrator'): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /**
    * 세션의 에이전트를 바꾼다 (claude ↔ codex).
@@ -2105,30 +2103,6 @@ export const useStore = create<AppState>((set, get) => ({
       set({ toast: `${changed} (from next turn)` })
     } catch (e) {
       set({ toast: `Could not change settings: ${(e as Error).message}` })
-    }
-  },
-
-  async setSessionKind(sessionId, kind) {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      const info = await platform.agents.setSessionKind(sessionId, kind)
-      set((st) => ({
-        sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, kind: info.kind } },
-      }))
-      /*
-       * 적용 시점을 숨기지 않는다 (#13). 도구·역할은 프로세스를 띄울 때 주입되므로
-       * 살아 있는 세션은 표식만 먼저 바뀐다 — 그 사실을 모르면 "승격했는데 도구가
-       * 없다"가 버그 신고로 돌아온다.
-       */
-      set({
-        toast:
-          info.kind === 'orchestrator'
-            ? 'Promoted to project orchestrator — takes effect next time the session wakes'
-            : 'Back to a regular session — takes effect next time the session wakes',
-      })
-    } catch (e) {
-      set({ toast: `Could not change the role: ${(e as Error).message}` })
     }
   },
 

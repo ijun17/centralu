@@ -2022,44 +2022,13 @@ describe('재개는 만들어진 곳으로 돌아간다', () => {
 })
 
 /**
- * 프로젝트 오케스트레이터 (#13).
+ * 오케스트레이터 — 앱에 하나뿐인 자리.
  *
- * 판정이 projectId===null에서 명시적 표식(kind)으로 옮겨졌다 — 이 묶음이 지키는 것은
- * 그 표식의 세 가지 약속이다: 승격은 다음에 깰 때 실제가 된다, 계급은 눈의 범위다
- * (프로젝트 오케스트레이터는 자기 프로젝트만 본다), 자리는 프로젝트당 하나다.
+ * 프로젝트마다 하나씩 두던 단계(#13)는 폐기했다 (2026-09-01): 프로젝트 안에서 세션을
+ * 지휘하는 자리가 워크트리 매니저(#69)와 둘이 되면서 개념이 하나 많았고, 승격은 한 번도
+ * 쓰이지 않았다. 남은 약속은 둘이다 — 자리는 하나이고(지연 기동), 시야에는 경계가 없다.
  */
-describe('프로젝트 오케스트레이터 (#13)', () => {
-  const newProject = () => rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-proj-')) }) as Promise<{ id: string; path: string }>
-
-  it('승격은 표식만 바꾸고, 다음에 깰 때 도구·역할이 붙는다', async () => {
-    const p = await addProject()
-    const s = (await rpc('agents.createSession', {
-      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    // 살아 있는 세션 — 이 시점의 프로세스에는 도구가 없다
-    expect(adapter.lastOpts?.orchestratorTools).toBeUndefined()
-
-    const info = (await rpc('sessions.setKind', { sessionId: s.id, kind: 'orchestrator' })) as SessionInfo
-    expect(info.kind).toBe('orchestrator')
-    // 표식만 바뀌었다 — 프로세스는 재시작되지 않는다 (진행 중인 턴을 죽이지 않는다)
-    expect(adapter.lastOpts?.orchestratorTools).toBeUndefined()
-
-    // 다음에 깰 때 = 재시작. 여기서 도구와 프로젝트 역할이 주입된다
-    await mgr.restartSession(s.id)
-    expect(adapter.lastOpts?.orchestratorTools).toBeDefined()
-    expect(adapter.lastOpts?.systemPromptAppend).toContain('오케스트레이터')
-
-    // 강등도 같은 길 — 다음 기동부터 보통 세션으로 뜬다
-    await rpc('sessions.setKind', { sessionId: s.id, kind: 'worker' })
-    await mgr.restartSession(s.id)
-    expect(adapter.lastOpts?.orchestratorTools).toBeUndefined()
-  })
-
-  it('중앙 오케스트레이터는 역할을 못 바꾼다 — 프로젝트 없는 워커는 이 앱에 없다', async () => {
-    const orc = await mgr.orchestrator()
-    await expect(rpc('sessions.setKind', { sessionId: orc.id, kind: 'worker' })).rejects.toThrow(/central/i)
-  })
-
+describe('오케스트레이터', () => {
   /**
    * #63 온보딩: 화면 열기와 프로세스 만들기가 갈라졌다.
    * peek은 절대 만들지 않고, 소개 화면의 카드 선택(configure)은 첫 orchestrator()가 읽는다.
@@ -2088,60 +2057,7 @@ describe('프로젝트 오케스트레이터 (#13)', () => {
     expect(((await rpc('projects.list', {})) as unknown[]).length).toBe(before)
   })
 
-  it('프로젝트당 하나 — 자리가 차 있으면 이름을 대며 거절한다', async () => {
-    const p = await addProject()
-    const mk = () => rpc('agents.createSession', {
-      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    }) as Promise<{ id: string }>
-    const a = await mk()
-    const b = await mk()
-    await rpc('sessions.rename', { sessionId: a.id, name: '리드' })
-    await rpc('sessions.setKind', { sessionId: a.id, kind: 'orchestrator' })
-
-    // 몰래 갈아치우면 a는 다음에 깰 때 말없이 도구를 잃는다 — 거절이 맞다
-    await expect(rpc('sessions.setKind', { sessionId: b.id, kind: 'orchestrator' })).rejects.toThrow(/리드/)
-  })
-
-  it('프로젝트 오케스트레이터의 눈은 자기 프로젝트에 갇힌다', async () => {
-    const p1 = await addProject()
-    const p2 = await newProject()
-    const mine = (await rpc('agents.createSession', {
-      projectId: p1.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    const sibling = (await rpc('agents.createSession', {
-      projectId: p1.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    const stranger = (await rpc('agents.createSession', {
-      projectId: p2.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    await rpc('sessions.setKind', { sessionId: mine.id, kind: 'orchestrator' })
-
-    const list = await mgr.runOrchestratorTool(mine.id, 'list_sessions', {})
-    expect(list.text).toContain(sibling.id)
-    expect(list.text).not.toContain(stranger.id)
-
-    // 범위 밖 세션은 보내기도 막힌다 — 목록에서 숨기는 것만으로는 계약이 아니다
-    const sent = await mgr.runOrchestratorTool(mine.id, 'send_to_session', {
-      sessionId: stranger.id, text: '해봐',
-    })
-    expect(sent.isError).toBe(true)
-    expect(sent.text).toContain('프로젝트')
-  })
-
-  it('중앙 오케스트레이터의 목록에는 프로젝트 오케스트레이터가 표시된다 — 계급이 보여야 맡길 수 있다', async () => {
-    const p = await addProject()
-    const lead = (await rpc('agents.createSession', {
-      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    await rpc('sessions.setKind', { sessionId: lead.id, kind: 'orchestrator' })
-    const orc = await mgr.orchestrator()
-
-    const list = await mgr.runOrchestratorTool(orc.id, 'list_sessions', {})
-    expect(list.text).toContain(lead.id)
-    expect(list.text).toContain('오케스트레이터')
-  })
-
-  it('create_session — 중앙은 프로젝트 이름으로 만들고, 이름 없는 요청은 거절한다', async () => {
+  it('create_session — 프로젝트 이름으로 만들고, 이름 없는 요청은 거절한다', async () => {
     const p = await addProject()
     const orc = await mgr.orchestrator()
 
@@ -2157,34 +2073,27 @@ describe('프로젝트 오케스트레이터 (#13)', () => {
     expect(worker?.kind).toBe('worker')
   })
 
-  it('create_session — 프로젝트 오케스트레이터는 자기 프로젝트에만 만든다', async () => {
+  /**
+   * 시야에 프로젝트 경계가 없다. 프로젝트 단계를 걷어낸 뒤 남아야 하는 성질이고,
+   * 경계를 다시 들여오면 여기서 걸린다 — 매니저(#69)의 childrenOf만이 유일한 좁힘이다.
+   */
+  it('목록과 지시는 프로젝트를 가로지른다', async () => {
     const p1 = await addProject()
-    const p2 = await newProject()
-    const lead = (await rpc('agents.createSession', {
+    const p2 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-proj-')) })) as { id: string }
+    const here = (await rpc('agents.createSession', {
       projectId: p1.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
     })) as { id: string }
-    await rpc('sessions.setKind', { sessionId: lead.id, kind: 'orchestrator' })
-
-    // 인자를 생략하면 자기 프로젝트다
-    const made = await mgr.runOrchestratorTool(lead.id, 'create_session', { name: '부하' })
-    expect(made.isError).toBeFalsy()
-    const sessions = (await rpc('sessions.list', {})) as SessionInfo[]
-    expect(sessions.find((x) => x.name === '부하')?.projectId).toBe(p1.id)
-
-    // 다른 프로젝트를 가리켜도 밖으로 못 나간다
-    const outside = await mgr.runOrchestratorTool(lead.id, 'create_session', { project: p2.id })
-    expect(outside.isError).toBe(true)
-  })
-
-  it('승격은 저장을 넘긴다 — host를 다시 켜도 오케스트레이터다', async () => {
-    const p = await addProject()
-    const s = (await rpc('agents.createSession', {
-      projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
+    const there = (await rpc('agents.createSession', {
+      projectId: p2.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
     })) as { id: string }
-    await rpc('sessions.setKind', { sessionId: s.id, kind: 'orchestrator' })
+    const orc = await mgr.orchestrator()
 
-    const again = new SessionManager(store, new Map([['claude', adapter], ['codex', codexAdapter]]), () => {})
-    expect(again.listSessions().find((x) => x.id === s.id)?.kind).toBe('orchestrator')
+    const list = await mgr.runOrchestratorTool(orc.id, 'list_sessions', {})
+    expect(list.text).toContain(here.id)
+    expect(list.text).toContain(there.id)
+
+    const sent = await mgr.runOrchestratorTool(orc.id, 'send_to_session', { sessionId: there.id, text: '해봐' })
+    expect(sent.isError).toBeFalsy()
   })
 })
 
@@ -2241,23 +2150,6 @@ describe('오케스트레이터 앱 안내서와 설정 (#30)', () => {
     })
     expect(r.isError).toBe(true)
     expect(r.text).toContain('작업 중')
-  })
-
-  it('update_session_settings — 프로젝트 오케스트레이터는 남의 프로젝트 세션을 못 만진다', async () => {
-    const p1 = await addProject()
-    const p2 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-p30-')) })) as { id: string }
-    const lead = (await rpc('agents.createSession', {
-      projectId: p1.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    const stranger = (await rpc('agents.createSession', {
-      projectId: p2.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
-    })) as { id: string }
-    await rpc('sessions.setKind', { sessionId: lead.id, kind: 'orchestrator' })
-
-    const r = await mgr.runOrchestratorTool(lead.id, 'update_session_settings', {
-      sessionId: stranger.id, effort: 'low',
-    })
-    expect(r.isError).toBe(true)
   })
 
   /*

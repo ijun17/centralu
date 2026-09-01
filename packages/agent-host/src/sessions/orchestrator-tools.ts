@@ -106,7 +106,7 @@ export const ORCHESTRATOR_TOOLS = [
       project: z
         .string()
         .optional()
-        .describe('프로젝트 이름 또는 id. 프로젝트 오케스트레이터는 생략한다 (자기 프로젝트에만 만든다)'),
+        .describe('프로젝트 이름 또는 id'),
       /*
        * Deliberately the same union the rest of the app uses, not a copy of it. A second
        * literal here could fall behind and the orchestrator would be unable to name a tool
@@ -210,8 +210,6 @@ export async function runOrchestratorTool(
         .map(
           (s) =>
             `- ${s.name} [${s.sessionId}] · 프로젝트 ${s.project} · ${s.tool} · ${s.state}` +
-            // 계급이 보여야 "그 프로젝트 일은 그쪽에 맡긴다"가 가능하다 (#13)
-            (s.orchestrator ? ' · 오케스트레이터' : '') +
             // 병합 여부가 안 보이면 매니저는 끝난 브랜치에 계속 일을 시킨다 (#69 도그푸딩)
             (s.merged ? ' · 병합됨(merged)' : '') +
             (s.lastActive ? ` · 마지막 ${s.lastActive}` : '') +

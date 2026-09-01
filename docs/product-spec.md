@@ -107,7 +107,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 | Project | One registered local directory. It may or may not be a git repository |
 | Session | One agent conversation instance. Belongs to a project and has a tool (Claude Code/Codex), model and permission setting |
 | Adapter | A module wrapping a specific agent tool in the common interface |
-| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct sessions within its scope. One central orchestrator (no project) plus at most one per project; scope follows central > project > session (FR-11) |
+| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct every session in the app. Exactly one, belonging to no project. A project's own directing seat is the worktree manager, which is defined by having worktree children rather than by a role (FR-11, #69) |
 | Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
 | Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
 | Read/unread | Independent of session state: whether there is new content since I last looked |
@@ -224,23 +224,26 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 
 #### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
-The single-workspace-crown design gave way to a **hierarchy** once real use showed one conversation cannot hold every project's context:
-
-- **Kind is an explicit marker**, not a null check: a session is `kind: 'orchestrator'` or a normal session. There is one
-  **central orchestrator** (belongs to no project) and optionally **one orchestrator per project**. Scope follows the
-  hierarchy central > project > session: the central orchestrator reaches everything, a project orchestrator only its own
-  project's sessions (an `inScope` predicate guards every tool call).
-- Any session can be **promoted** to its project's orchestrator (and demoted back). Promotion takes effect on the session's
-  next wake and keeps its cwd — resume history survives the role change.
-- Orchestrators are marked with a **crown icon** (the sidebar button and the per-session badge — unified 2026-08-26; the
-  achromatic rule holds: kind is shape, urgency is brightness).
+- **Kind is an explicit marker**, not a null check: a session is `kind: 'orchestrator'` or a normal session. There is
+  exactly one orchestrator, and it belongs to no project — it reaches every session in the app (an `inScope` predicate
+  guards every tool call).
+- The orchestrator is marked with a **crown icon** on its sidebar button (the achromatic rule holds: kind is shape,
+  urgency is brightness).
+- **Retired (2026-09-01): the per-project orchestrator, and with it promote/demote (`sessions.setKind`).** #13 built a
+  three-tier hierarchy (central > project > session) on the reasoning that one conversation cannot hold every project's
+  context. The worktree manager (#69) then arrived and took the same seat from a different direction — a session that
+  directs a project's sessions — and having two of those was one concept too many: the app's own author confused them
+  in dogfooding, and the promote row was never used once. What survives is the pair that earns its keep: one
+  orchestrator across everything, and a manager per project whose scope comes from a **relationship** (it has worktree
+  children) rather than from a menu choice. Schema v26 clears the marker off any session that still carries it with a
+  project — without that step, removing the project tier would silently *widen* those sessions to central scope.
 - The host exposes **curated tools** to orchestrator sessions (inspect sessions, read conversations, send instructions,
   `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/orchestrator/approvals/
   settings/updates) — compiled in, not read from `docs/` at runtime, because runtime doc reads are an AGENTS.md-style
   injection surface one level sideways.
 - **The permission preset is deliberately inexpressible** in the orchestrator's settings tool schema — an orchestrator
   must not be able to quietly widen another session's approval back door.
-- `create_session` acts within scope; settings changes surface as a `settings_changed` event + toast, so the human sees
+- Settings changes surface as a `settings_changed` event + toast, so the human sees
   what the orchestrator changed the moment it changes it.
 - Orchestrator-sent instructions are marked in the target session's conversation (built 2026-08-26): a source label
   above the bubble and a dashed border — shape, not color, per the palette rule. Worker completion reports in the
@@ -500,7 +503,7 @@ interface AgentAdapter {
 ### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
-- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, archived, last_read_seq, created_at, …)` — `kind` is derived from `is_orchestrator` + `project_id` (central vs project orchestrator, FR-11)
+- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, archived, last_read_seq, created_at, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11)
 - `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. Reads merge legacy per-delta rows, so pre-migration data behaves identically.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation

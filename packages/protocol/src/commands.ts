@@ -81,10 +81,10 @@ export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
 /**
  * 세션의 역할 (#13).
  *
- * `projectId === null`이 곧 오케스트레이터라는 판정이 여섯 군데에 흩어져 있었다 —
- * 프로젝트 오케스트레이터(프로젝트가 **있는** 오케스트레이터)가 생기는 순간 그 여섯
- * 군데가 서로 다른 답을 내기 시작하므로, 판정을 명시적 표식 하나로 모은다.
- * 계급: 중앙(projectId=null) > 프로젝트(projectId=P) > 워커.
+ * `projectId === null`이 곧 오케스트레이터라는 판정이 여섯 군데에 흩어져 있었고, 그
+ * 흩어짐을 표식 하나로 모은 것이 이 필드다. 프로젝트 오케스트레이터가 폐기되면서
+ * (2026-09-01) 두 판정은 다시 같은 뜻이 됐지만, 표식은 남긴다 — 판정이 한 군데인 편이
+ * 여전히 낫고, 되돌리는 마이그레이션은 얻는 것 없이 위험만 있다.
  */
 export const SessionKind = z.enum(['worker', 'orchestrator'])
 export type SessionKind = z.infer<typeof SessionKind>
@@ -92,9 +92,8 @@ export type SessionKind = z.infer<typeof SessionKind>
 export const SessionInfo = z.object({
   id: z.string(),
   /**
-   * 소속 프로젝트. **중앙 오케스트레이터만 null이다** — 프로젝트를 가로지르는 세션이라
+   * 소속 프로젝트. **오케스트레이터만 null이다** — 프로젝트를 가로지르는 세션이라
    * 어디에도 매달지 않는다 (매달면 그 프로젝트를 지울 때 함께 죽는다).
-   * 프로젝트 오케스트레이터(#13)는 프로젝트가 있다 — 역할은 kind가 말한다.
    */
   projectId: z.string().nullable(),
   /** 워커인가 오케스트레이터인가. 기본은 워커 — 옛 프레임에는 이 필드가 없다 */
@@ -620,18 +619,11 @@ export const RpcMethods = {
     params: z.object({ sessionId: z.string(), name: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
-  /**
-   * 세션을 오케스트레이터로 승격하거나 워커로 되돌린다 (#13).
-   *
-   * **다음에 깰 때 적용된다** — 도구·역할 프롬프트는 프로세스를 띄울 때 주입되므로,
-   * 살아 있는 세션은 표식만 먼저 바뀐다. 그 자리에서 재시작하지 않는 이유:
-   * 승격하는 세션은 대개 한창 일하던 세션이고, 재시작은 진행 중인 턴을 죽인다.
-   * 중앙 오케스트레이터(projectId=null)는 이 문으로 못 바꾼다.
+  /*
+   * 여기 있던 sessions.setKind(#13의 승격·강등)는 폐기했다 (2026-09-01).
+   * 오케스트레이터는 이제 앱에 하나(중앙)뿐이고, 프로젝트 안에서 세션을 지휘하는 자리는
+   * 워크트리 매니저(#69)다 — 역할은 고르는 것이 아니라 관계에서 나온다.
    */
-  'sessions.setKind': {
-    params: z.object({ sessionId: z.string(), kind: SessionKind }),
-    result: SessionInfo,
-  },
   'sessions.markRead': {
     params: z.object({ sessionId: z.string(), seq: z.number() }),
     result: z.object({ ok: z.literal(true) }),
