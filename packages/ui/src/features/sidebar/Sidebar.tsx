@@ -408,7 +408,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const reorderSessions = useStore((s) => s.reorderSessions)
   const selected = useIsProjectSelected(projectId)
   // 매니저의 워크트리 제안이 이 프로젝트를 가리키는가 (#69) — + 버튼이 밝아진다
-  const proposalHere = useStore((s) => s.worktreeProposal?.projectId === projectId)
+  const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
 
   /*
    * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면

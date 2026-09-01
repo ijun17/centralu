@@ -222,7 +222,9 @@ export const ProjectInfo = z.object({
   path: z.string(),
   name: z.string(),
   defaultTool: ToolName.default('claude'),
-  defaultModel: z.string().optional(),
+  defaultModel: z.string().nullable().optional(),
+  /** 마지막으로 고른 추론 강도 (#69 ⑤) — default_tool·default_model과 같은 규칙: 고른 행위가 곧 기본값이다 */
+  defaultEffort: z.string().nullable().optional(),
   /**
    * The shell commands saved on this project — what the Run menu offers (issue #44).
    *

@@ -39,6 +39,8 @@ export type OrchestratedSession = {
   name: string
   project: string
   state: string
+  /** 워크트리 브랜치가 줄기에 들어갔는가 (#69) — 매니저가 "끝난 일"을 스스로 판단하는 근거 */
+  merged?: boolean
   tool: ToolName
   /** 마지막으로 무슨 일이 있었는지 한 줄 */
   preview: string

@@ -2344,6 +2344,30 @@ describe('스트리밍 메시지는 행 하나로 저장된다 (#66)', () => {
  * 고아는 책임자가 없을 때 생기므로, 소속을 두 길목에서 강제한다 — 만들 때 붙이고,
  * 기동할 때 입양한다.
  */
+describe('마지막으로 고른 모델·강도가 프로젝트 기본값이 된다 (#69 ⑤)', () => {
+  it('설정을 바꾸면 프로젝트에 적히고, 새 세션 생성이 그 값을 받는다', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    await mgr.updateSettings(a.id, { model: 'opus', effort: 'high' })
+
+    const proj = (await rpc('projects.list', {})) as { id: string; defaultModel?: string | null; defaultEffort?: string | null }[]
+    expect(proj.find((x) => x.id === p.id)?.defaultModel).toBe('opus')
+    expect(proj.find((x) => x.id === p.id)?.defaultEffort).toBe('high')
+  })
+
+  it('도구가 다른 세션의 선택은 적지 않는다 — codex 모델이 claude 기본값을 덮으면 첫 턴이 400으로 죽는다', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    await mgr.updateSettings(a.id, { model: 'opus', effort: 'high' })
+    // 프로젝트 기본 도구가 claude인 채로, codex 세션의 모델 선택이 끼어든다
+    const b = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as SessionInfo
+    // codex 세션 생성이 기본 도구를 codex로 바꿨다 — 이제 codex의 선택이 적힌다
+    await mgr.updateSettings(b.id, { model: 'gpt-5-codex' })
+    const proj = (await rpc('projects.list', {})) as { id: string; defaultModel?: string | null }[]
+    expect(proj.find((x) => x.id === p.id)?.defaultModel).toBe('gpt-5-codex')
+  })
+})
+
 describe('워크트리 세션의 매니저 (#69)', () => {
   const wtRow = (id: string, projectId: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
     id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id,

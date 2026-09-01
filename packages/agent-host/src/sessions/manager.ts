@@ -351,9 +351,12 @@ export class SessionManager {
      * 읽히는 자리가 하나도 없는 컬럼이었다 — 쓰는 자리도 없었으니 아무도 눈치채지
      * 못했다 (2026-08-27, 기억하기 기능을 붙이다 테스트가 잡았다).
      */
-    const stored = this.store.listProjects().find((p) => p.id === id)?.defaultTool
+    const row = this.store.listProjects().find((p) => p.id === id)
+    const stored = row?.defaultTool
     return {
       id, path, name: basename(path), defaultTool: stored === 'codex' ? 'codex' : 'claude',
+      defaultModel: row?.defaultModel ?? null,
+      defaultEffort: row?.defaultEffort ?? null,
       // Saved shell commands ride along with the project so the Run menu never has a
       // "loading" state to distinguish from an empty one (issue #44)
       commands: this.store.projectCommands(id),
@@ -1219,6 +1222,18 @@ export class SessionManager {
     if (s.serviceTier !== undefined) m.serviceTier = s.serviceTier
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
+    /*
+     * 마지막으로 고른 모델·강도가 이 프로젝트의 기본값이 된다 (#69 ⑤).
+     * default_tool이 배운 교훈 그대로다: 설정 화면을 만드는 대신, 고르는 행위가
+     * 이미 말해 주는 사실을 적는다. Opus·high를 쓰는 사람이 새 세션마다 네 번
+     * 클릭하는 반복이 여기서 끝난다. 도구별 모델이라 도구가 같은 세션의 선택만 적는다.
+     */
+    if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
+      const p = this.store.listProjects().find((x) => x.id === m.projectId)
+      if (p && p.defaultTool === m.tool) {
+        this.store.setProjectDefaultModel(m.projectId, m.model, m.effort)
+      }
+    }
 
     const handle = this.handles.get(sessionId)
     handle?.updateSettings?.(s)
@@ -2196,6 +2211,7 @@ export class SessionManager {
             name: this.labelOf(s),
             project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
             state: s.state,
+            ...(s.worktreeMerged ? { merged: true } : {}),
             tool: s.tool,
             preview: this.previewOf(s.id),
             lastActive: this.lastActiveOf(s.id),

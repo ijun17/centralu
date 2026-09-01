@@ -212,6 +212,8 @@ export async function runOrchestratorTool(
             `- ${s.name} [${s.sessionId}] · 프로젝트 ${s.project} · ${s.tool} · ${s.state}` +
             // 계급이 보여야 "그 프로젝트 일은 그쪽에 맡긴다"가 가능하다 (#13)
             (s.orchestrator ? ' · 오케스트레이터' : '') +
+            // 병합 여부가 안 보이면 매니저는 끝난 브랜치에 계속 일을 시킨다 (#69 도그푸딩)
+            (s.merged ? ' · 병합됨(merged)' : '') +
             (s.lastActive ? ` · 마지막 ${s.lastActive}` : '') +
             (s.preview ? `\n    최근: ${s.preview}` : ''),
         )

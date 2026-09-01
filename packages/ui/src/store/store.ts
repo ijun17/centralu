@@ -128,7 +128,8 @@ export type ChatItem =
    * pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다.
    * from: 사람이 아니라 다른 세션이 시킨 말 (FR-11 — 오케스트레이터 지시·워커 보고).
    */
-  | { kind: 'user'; seq: number; text: string; pending?: boolean; from?: { sessionId: string; name: string } }
+  /** sentText: 실제로 host에 보낸 원문 (#75). 첨부가 있으면 text(표시용 라벨)와 달라서, 확정 대조는 이걸로 한다 */
+  | { kind: 'user'; seq: number; text: string; sentText?: string; pending?: boolean; from?: { sessionId: string; name: string } }
   | { kind: 'assistant'; seq: number; text: string }
   /** 추론 요약 (#58). codex만 텍스트를 준다 — claude의 생각은 세션의 thinkingTokens로만 보인다 */
   | { kind: 'reasoning'; seq: number; text: string }
@@ -280,7 +281,12 @@ export type AppState = {
    * 새 세션 창이 열릴 때 소비된다 — 창은 워크트리가 켜지고 브랜치 이름이 채워진 채 뜬다.
    * 프로젝트에 키를 묶는 이유: 다른 프로젝트의 창까지 물들이면 제안이 오염이 된다.
    */
-  worktreeProposal: { projectId: string; branch: string } | null
+  /**
+   * 큐다 (#69 도그푸딩): 매니저가 브랜치 둘을 연달아 제안했을 때 슬롯이 하나면
+   * 마지막 것만 살아남았다 — 첫 제안은 대화 줄에서 이름을 읽어 손으로 쳐야 했다.
+   * 창을 열 때마다 그 프로젝트의 가장 오래된 제안 하나를 소비한다 (FIFO).
+   */
+  worktreeProposals: { projectId: string; branch: string }[]
   /**
    * 새 세션 창이 워크트리 체크를 켠 채 열리는가 (#69).
    * 매니저 줄의 +가 켠다 — 매니저 아래에 만드는 세션은 워크트리 세션이 기본이라서다.
@@ -818,7 +824,7 @@ export const useStore = create<AppState>((set, get) => ({
   newSessionFor: null,
   newSessionWorktree: false,
   newSessionBranch: '',
-  worktreeProposal: null,
+  worktreeProposals: [],
   history: {},
   resuming: {},
   wakeError: {},
@@ -1271,7 +1277,11 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'tool_call' && /propose_worktree_session$/.test(e.summary.tool) && cur.projectId) {
       const branch = /propose_worktree_session$/.test(e.summary.title) ? '' : e.summary.title
-      set({ worktreeProposal: { projectId: cur.projectId, branch } })
+      set((st) => ({
+        worktreeProposals: st.worktreeProposals.some((p) => p.projectId === cur.projectId && p.branch === branch)
+          ? st.worktreeProposals // 같은 제안이 다시 와도 줄을 서지 않는다 (재생·재연결 멱등)
+          : [...st.worktreeProposals, { projectId: cur.projectId as string, branch }],
+      }))
     }
     /*
      * **안읽음 추적(lastSeq)은 host가 매긴 세션 내 seq로만 민다.**
@@ -1607,13 +1617,14 @@ export const useStore = create<AppState>((set, get) => ({
      * 제안(#69)은 **여는 순간** 소비된다 — 어느 문으로 열든 (프로젝트 +, 매니저 +,
      * 제안 줄). 남겨 두면 다음에 무관하게 연 창까지 물들인다.
      */
-    const prop = get().worktreeProposal
-    const matched = projectId !== null && prop?.projectId === projectId
+    const queue = get().worktreeProposals
+    const at = projectId !== null ? queue.findIndex((p) => p.projectId === projectId) : -1
+    const prop = at >= 0 ? queue[at] : undefined
     set({
       newSessionFor: projectId,
-      newSessionWorktree: (opts?.worktree ?? false) || matched,
-      newSessionBranch: matched ? prop.branch : '',
-      ...(matched ? { worktreeProposal: null } : {}),
+      newSessionWorktree: (opts?.worktree ?? false) || !!prop,
+      newSessionBranch: prop?.branch ?? '',
+      ...(prop ? { worktreeProposals: queue.filter((_, i) => i !== at) } : {}),
     })
   },
 
@@ -1746,7 +1757,9 @@ export const useStore = create<AppState>((set, get) => ({
       cwd: project.path,
       // 고른 값이 그대로 host까지 간다 — 예전엔 프리셋이 'normal' 고정이고 모델은 전달조차 되지 않았다
       tool: opts?.tool ?? project.defaultTool,
-      model: opts?.model ?? project.defaultModel,
+      model: opts?.model ?? project.defaultModel ?? undefined,
+      // 강도도 기억을 따라간다 (#69 ⑤) — 모델만 기억하면 Opus는 오는데 high는 또 눌러야 한다
+      effort: project.defaultEffort ?? undefined,
       permissionPreset: opts?.permissionPreset ?? 'normal',
       initialPrompt: opts?.initialPrompt,
       resumeExternalId: opts?.resumeExternalId,
@@ -1857,7 +1870,7 @@ export const useStore = create<AppState>((set, get) => ({
           host가 user_message로 같은 말을 알려주면 이 항목이 그것으로 확정된다 —
           표식이 없으면 같은 말이 두 번 그려진다.
         */
-        chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label, pending: true }] },
+        chat: { ...s.chat, [sessionId]: [...(s.chat[sessionId] ?? []), { kind: 'user', seq, text: label, sentText: text, pending: true }] },
         sessions,
         /*
           The wait starts here, not when the host's first event lands. Waking a sleeping
@@ -2537,7 +2550,14 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * pending으로 띄워 뒀다면 오케스트레이터의 지시가 그 말풍선에 흡수되면서
        * 출처 표식이 조용히 사라진다. 텍스트 일치는 내 말끼리만 성립하는 가정이다.
        */
-      const idx = e.from ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      /*
+       * 대조는 **보낸 원문**으로 한다 (#75). 첨부가 있으면 그린 것(라벨: 📎 이름들)과
+       * 보낸 것(원문)이 달라서, 그린 텍스트로 대조하면 영영 안 맞는다 — 확정 대신
+       * 두 번째 말풍선이 붙었다 (첨부 있는 모든 전송에서 이중 렌더, 코덱스에서 발견).
+       */
+      const idx = e.from
+        ? -1
+        : items.findIndex((i) => i.kind === 'user' && i.pending && (i.sentText ?? i.text) === e.text)
       if (idx === -1) return [...items, { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}) }]
       return items.map((it, i) => (i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it))
     }

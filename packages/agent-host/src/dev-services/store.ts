@@ -517,6 +517,20 @@ export class Store {
           }
         },
       },
+      {
+        to: 25,
+        run: () => {
+          /*
+           * 마지막으로 고른 추론 강도도 프로젝트 기본값이 된다 (#69 도그푸딩 ⑤).
+           * default_model은 v1부터 있었지만 effort 자리가 없어서, Opus·high를 고른
+           * 사람이 세션마다 high를 다시 눌렀다 — default_tool이 배운 교훈 그대로다.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'default_effort')) {
+            this.db.exec(`ALTER TABLE projects ADD COLUMN default_effort TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -687,7 +701,7 @@ export class Store {
    */
   listProjects(): Omit<ProjectInfo, 'git' | 'commands'>[] {
     return this.db
-      .prepare(`SELECT id, path, name, default_tool as defaultTool, default_model as defaultModel FROM projects ORDER BY sidebar_order, created_at`)
+      .prepare(`SELECT id, path, name, default_tool as defaultTool, default_model as defaultModel, default_effort as defaultEffort FROM projects ORDER BY sidebar_order, created_at`)
       .all() as Omit<ProjectInfo, 'git' | 'commands'>[]
   }
 
@@ -753,6 +767,13 @@ export class Store {
    */
   setProjectDefaultTool(projectId: string, tool: string): void {
     this.db.prepare(`UPDATE projects SET default_tool = ? WHERE id = ?`).run(tool, projectId)
+  }
+
+  /** 마지막으로 고른 모델·강도가 기본값이 된다 (#69 ⑤) — default_tool과 같은 규칙 */
+  setProjectDefaultModel(projectId: string, model: string | null, effort: string | null): void {
+    this.db
+      .prepare(`UPDATE projects SET default_model = ?, default_effort = ? WHERE id = ?`)
+      .run(model, effort, projectId)
   }
 
   findProjectByPath(path: string): { id: string } | undefined {

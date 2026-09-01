@@ -5777,3 +5777,48 @@ test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', as
   await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveCount(1)
   await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveText('merged')
 })
+
+/** #75: 첨부를 실은 말은 한 번만 그려진다 — 라벨(📎)과 원문이 달라도 확정이 맞물린다 */
+test('첨부와 함께 보낸 말은 한 번만 그려진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 인사')
+
+  // 첨부를 실어 보낸다 — 목이 실물 host처럼 원문만 담긴 user_message를 돌려준다
+  await page.evaluate(async () => {
+    const store = (window as any).__store.getState()
+    const sid = Object.keys(store.sessions).find((id: string) => store.sessions[id].name !== 'Orchestrator')
+    await store.send(sid, '이 이미지 봐줘', [{ kind: 'image', path: '/tmp/att/shot.png', name: 'shot.png', mime: 'image/png', bytes: 10 }])
+  })
+
+  const bubbles = page.getByText('이 이미지 봐줘')
+  await expect(bubbles).toHaveCount(1)
+  await expect(page.getByText('📎 shot.png')).toBeVisible()
+})
+
+
+/** #69 도그푸딩 ③: 제안은 큐다 — 둘을 제안받으면 +를 두 번 열어 둘 다 소비한다 */
+test('워크트리 제안 둘은 창을 두 번 열어 순서대로 채워진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const manager = [...m.sessions.values()].find((s: any) => s.name === 'Worktrees')
+    for (const branch of ['feat/first', 'feat/second']) {
+      m.emit({ type: 'tool_call', sessionId: manager.id, callId: 'c-' + branch,
+        summary: { tool: 'mcp__centralu__propose_worktree_session', title: branch, readOnly: false, paths: [] } })
+    }
+  })
+
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/first')
+  await page.keyboard.press('Escape')
+  await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/second')
+  await page.keyboard.press('Escape')
+  // 큐가 비었다 — 글로우도 꺼지고 다음 창은 보통 창이다
+  await expect(page.locator('[data-worktree-proposal]')).toHaveCount(0)
+})
