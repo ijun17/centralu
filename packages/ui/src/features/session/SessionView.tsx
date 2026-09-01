@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent, ReactNode, RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
@@ -49,7 +49,10 @@ export function SessionView() {
   if (!session) {
     if (!projectOnly) {
       return (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center" data-testid="empty-focus">
+        <div
+          className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
+          data-testid="empty-focus"
+        >
           <p className="text-[13px] text-ash">Select a project or session</p>
           <p className="text-[11px] text-slate">
             <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you
@@ -68,7 +71,8 @@ export function SessionView() {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
           <p className="text-[13px] text-ash">Select a session or start a new one</p>
           <p className="text-[11px] text-slate">
-            Git and files are in the evidence panel on the right, even without a session (<Kbd mod /> <Kbd>B</Kbd>)
+            Git and files are in the evidence panel on the right, even without a session (<Kbd mod />{' '}
+            <Kbd>B</Kbd>)
           </p>
         </div>
       </section>
@@ -125,13 +129,181 @@ export function SessionPane({
     const pid = s.sessions[sessionId]?.projectId
     return (pid && s.projects[pid]?.path) || null
   })
-  const send = useStore((s) => s.send)
-  const wake = useStore((s) => s.wake)
   const restart = useStore((s) => s.restartSession)
   // 프로세스를 갈아 끼우는 중인가 (wake·fork와 같은 자물쇠) — 버튼이 돌고 잠기는 근거
   const restarting = useStore((s) => !!s.resuming[sessionId])
   const markRead = useStore((s) => s.markRead)
 
+  /*
+   * Whether the Run menu is open — held here rather than inside it (issue #44).
+   *
+   * In the grid this header is the handle that moves the panel, and `draggable` reaches
+   * everything inside it: press on a menu row, move a few pixels, and the browser drags the
+   * panel instead of letting the click land. The header already learned the neighbouring
+   * half of this lesson — a `draggable` ancestor is why the whole cell stopped being one.
+   */
+  const [runOpen, setRunOpen] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const loadHistory = useStore((s) => s.loadHistory)
+  const loaded = useStore((s) => !!s.chat[sessionId])
+  useEffect(() => {
+    if (!loaded) void loadHistory(sessionId)
+  }, [sessionId, loaded, loadHistory])
+
+  // 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core)
+  useEffect(() => {
+    if (!session) return
+    const t = setTimeout(() => {
+      const el = scrollRef.current
+      const atBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight < 40 : true
+      if (shouldMarkRead({ focused: true, atBottom, focusedForMs: 3000 })) void markRead(session.id)
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [session, chat.length, markRead])
+
+  // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다
+  if (!session) return null
+
+  const HEADER = 'flex items-center gap-2.5 border-b border-edge px-4 py-2'
+  const header = (
+    <>
+      <StateDot state={session.state} />
+      <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
+        {session.name}
+      </h1>
+
+      {session.limit && (
+        <span className="readout text-[11px] text-ash" data-testid="limit-badge">
+          Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
+          {session.limit.resumeAt
+            ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+            : ''}
+        </span>
+      )}
+
+      {/*
+        중지는 여기 두지 않는다 — 대화 맨 아래 '응답 기다리는 중' 옆에 이미 있다.
+        같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
+      */}
+      <span className="ml-auto flex shrink-0 items-center gap-2">
+        {/*
+          The project's saved shell commands (issue #44). Before restart because it is the
+          everyday one — restart is a repair.
+
+          The orchestrator has no project, and with no project there is no directory to run
+          in and no terminal to run it in. So it gets no button rather than an empty menu:
+          an entry that could never have anything in it is a worse answer than no entry.
+        */}
+        {session.projectId && <RunMenu open={runOpen} onOpenChange={setRunOpen} />}
+        {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
+        {/*
+          누르는 동안 **아이콘이 돌고 버튼이 잠긴다.**
+          몇 초 걸리는 일인데 화면이 조용하면 한 번 더 누르게 되고, 그 두 번째
+          누름은 방금 뜬 프로세스를 다시 죽인다 — 고치려던 버튼이 고장을 만든다.
+          잠금은 스토어에 있다(resuming): 그리드↔포커스로 화면이 갈려도 도는 중이라는
+          사실은 세션의 것이지 이 부품의 것이 아니다.
+        */}
+        <IconButton
+          label={restarting ? 'Restarting the agent…' : 'Restart agent (chat history is kept)'}
+          onClick={() => void restart(session.id)}
+          disabled={restarting}
+          testId="restart-session"
+          align="right"
+        >
+          <span
+            className={restarting ? 'cc-spin block' : 'block'}
+            data-testid={restarting ? 'restart-spinning' : undefined}
+          >
+            <RestartIcon />
+          </span>
+        </IconButton>
+        {headerExtra}
+      </span>
+    </>
+  )
+
+  return (
+    /*
+      min-h-0이 없으면 안 된다.
+      flex 자식의 min-height 기본값은 auto라 **내용보다 작아지지 못한다.**
+      그래서 대화가 길어지면 이 칸이 통째로 늘어나 입력창을 밖으로 밀어냈다
+      (그리드에서 칸 높이가 정해져 있으니 곧바로 드러났다 — 입력창이 아예 안 보였다).
+    */
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
+      {headerDrag ? (
+        <div
+          className={`${HEADER} cursor-grab active:cursor-grabbing`}
+          // Not while the Run menu is open — see the note on `runOpen`
+          draggable={!runOpen}
+          onDragStart={headerDrag}
+          data-testid="pane-header"
+        >
+          {header}
+        </div>
+      ) : (
+        <DragRegion className={HEADER} testId="pane-header">
+          {header}
+        </DragRegion>
+      )}
+
+      <ChatStream
+        scrollRef={scrollRef}
+        chat={chat}
+        pending={session.pendingApproval}
+        questions={session.pendingQuestions}
+        sessionId={session.id}
+        projectRoot={projectRoot}
+        working={session.state === 'working'}
+        activity={session.activity}
+      />
+
+      {/*
+        프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
+        말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
+      */}
+      {!session.live && !session.archived && <DormantNote sessionId={session.id} />}
+
+      <Composer sessionId={session.id} />
+
+      {/* 자주 쓰는 명령어 창 (#60) — 칸 안에 뜬다. 그리드 칸이면 그 칸 크기의 창이다 */}
+      {runOpen && session.projectId && (
+        <CommandRunnerOverlay projectId={session.projectId} onClose={() => setRunOpen(false)} />
+      )}
+    </section>
+  )
+}
+
+/**
+ * 입력창 (FR-7).
+ *
+ * **따로 선 부품인 이유는 오직 하나, 초안이 전역 스토어에 있기 때문이다.**
+ * 쓰다 만 글은 세션의 것이라 스토어에 있어야 하고(아래 draft 주석), 그러면 한 글자마다
+ * 스토어가 바뀐다. 이 코드가 SessionPane 안에 있던 동안에는
+ * 그 한 글자가 **머리글·대화 스트림·화면에 보이는 모든 말풍선**을 다시 그렸다
+ * (실측: pane=1.0 stream=1.0 row=2.0 렌더/글자, 답변이 흐르는 중에는 두 배).
+ * 대화의 크기에 비례하는 비용을 타이핑이 낼 이유가 없다.
+ *
+ * 그래서 초안을 읽는 자리를 여기 하나로 좁혔다. 위에서는 이제 `sessionId`만 내려온다.
+ *
+ * 대화(chat)를 구독하지 않는 것도 같은 이유다 — 필요한 곳은 화살표 되불러오기
+ * 한 곳뿐이고, 거기서는 누른 그 순간에 getState()로 훑는다. 구독했다면 스트리밍
+ * 델타마다 입력창이 다시 그려져 방금 옮긴 비용이 그대로 돌아온다.
+ */
+const Composer = memo(function Composer({ sessionId }: { sessionId: string }) {
+  /*
+   * 세션에서 **여기 정말로 필요한 것만** 집는다.
+   *
+   * 세션 객체를 통째로 구독하면 답변이 흐르는 동안 델타마다 입력창 전체(첨부 목록·
+   * 자동완성 메뉴까지)가 다시 그려진다 — 정작 이 부품이 세션에서 읽는 것은 셋뿐이고,
+   * 셋 다 대화 중에 바뀌지 않는 값이다. 모델·권한·컨텍스트처럼 실제로 변하는 것들은
+   * 아래 ComposerFooter가 따로 구독한다.
+   */
+  const alive = useStore((s) => !!s.sessions[sessionId])
+  const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? '')
+  const isOrchestrator = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator')
+  const send = useStore((s) => s.send)
+  const wake = useStore((s) => s.wake)
   /*
    * 쓰다 만 글은 **세션의 것**이다. 이 부품의 것이 아니다.
    *
@@ -185,15 +357,6 @@ export function SessionPane({
     [patchDraft],
   )
   const [dragging, setDragging] = useState(false)
-  /*
-   * Whether the Run menu is open — held here rather than inside it (issue #44).
-   *
-   * In the grid this header is the handle that moves the panel, and `draggable` reaches
-   * everything inside it: press on a menu row, move a few pixels, and the browser drags the
-   * panel instead of letting the click land. The header already learned the neighbouring
-   * half of this lesson — a `draggable` ancestor is why the whole cell stopped being one.
-   */
-  const [runOpen, setRunOpen] = useState(false)
   const [caret, setCaret] = useState(0)
   /*
    * Whether an IME is mid-composition (issue #12).
@@ -217,8 +380,6 @@ export function SessionPane({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const attachFile = useStore((s) => s.attachFile)
-  const scrollRef = useRef<HTMLDivElement>(null)
-
   /*
    * 입력창 높이는 **값에서** 나온다.
    *
@@ -251,15 +412,15 @@ export function SessionPane({
   // 자동완성: `/`는 스킬, `@`는 파일
   const ac = useAutocomplete({
     sessionId,
-    projectId: session?.projectId ?? '',
+    projectId,
     text,
     caret,
     // Not while composing (#12) — a half-formed syllable is not a query. Closing the menu also
     // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
-    enabled: !!session && caret >= 0 && !composing,
+    enabled: alive && caret >= 0 && !composing,
     // 오케스트레이터의 `@`는 세션을 집는다 — 지시의 대상이 파일이 아니라 세션이다.
     // 판정은 명시적 표식(kind)으로 한다: 오케스트레이터에게는 고를 파일 트리가 없다
-    atSource: session && session.kind === 'orchestrator' ? 'sessions' : 'files',
+    atSource: isOrchestrator ? 'sessions' : 'files',
   })
 
   const pick = (item: Suggestion) => {
@@ -292,7 +453,11 @@ export function SessionPane({
     const onEdge = dir === -1 ? onFirstLine(text, caret) : onLastLine(text, caret)
     if (!onEdge) return false
 
-    const step = stepHistory({ history: sentMessages(chat), at: recall?.at ?? null, dir })
+    const step = stepHistory({
+      history: sentMessages(useStore.getState().chat[sessionId] ?? EMPTY_CHAT),
+      at: recall?.at ?? null,
+      dir,
+    })
     if (step.kind === 'none') return false
 
     const next = step.kind === 'draft' ? draft.text : step.text
@@ -312,9 +477,9 @@ export function SessionPane({
 
   // 스크린샷을 붙여넣는 흐름이 가장 흔하다 (FR-13)
   const takeFiles = async (files: FileList | File[] | null) => {
-    if (!files || !session) return
+    if (!files || !alive) return
     for (const f of Array.from(files)) {
-      const att = await attachFile(session.id, f)
+      const att = await attachFile(sessionId, f)
       if (att) setAttachments((prev) => [...prev, att])
     }
   }
@@ -327,221 +492,108 @@ export function SessionPane({
    * 사이드바에서 한 번도 들어가 본 적 없는 세션을 올리면 빈 칸이 떴다 (도그푸딩).
    * 세션 하나를 그리는 부품이 그 대화를 챙기는 게 맞다.
    */
-  const loadHistory = useStore((s) => s.loadHistory)
-  const loaded = useStore((s) => !!s.chat[sessionId])
-  useEffect(() => {
-    if (!loaded) void loadHistory(sessionId)
-  }, [sessionId, loaded, loadHistory])
 
-  // 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core)
-  useEffect(() => {
-    if (!session) return
-    const t = setTimeout(() => {
-      const el = scrollRef.current
-      const atBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight < 40 : true
-      if (shouldMarkRead({ focused: true, atBottom, focusedForMs: 3000 })) void markRead(session.id)
-    }, 3000)
-    return () => clearTimeout(t)
-  }, [session, chat.length, markRead])
-
-  // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다
-  if (!session) return null
-
-  const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
-
-  const HEADER = 'flex items-center gap-2.5 border-b border-edge px-4 py-2'
-  const header = (
-    <>
-      <StateDot state={session.state} />
-      <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="session-name">
-        {session.name}
-      </h1>
-
-      {session.limit && (
-        <span className="readout text-[11px] text-ash" data-testid="limit-badge">
-          Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
-          {session.limit.resumeAt
-            ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
-            : ''}
-        </span>
-      )}
-
-      {/*
-        중지는 여기 두지 않는다 — 대화 맨 아래 '응답 기다리는 중' 옆에 이미 있다.
-        같은 일을 하는 버튼이 화면 양 끝에 하나씩 있으면 어느 쪽이 무엇인지 매번 확인하게 된다.
-      */}
-      <span className="ml-auto flex shrink-0 items-center gap-2">
-        {/*
-          The project's saved shell commands (issue #44). Before restart because it is the
-          everyday one — restart is a repair.
-
-          The orchestrator has no project, and with no project there is no directory to run
-          in and no terminal to run it in. So it gets no button rather than an empty menu:
-          an entry that could never have anything in it is a worse answer than no entry.
-        */}
-        {session.projectId && <RunMenu open={runOpen} onOpenChange={setRunOpen} />}
-        {/* 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다 — 프로세스만 갈아 끼운다 */}
-        {/*
-          누르는 동안 **아이콘이 돌고 버튼이 잠긴다.**
-          몇 초 걸리는 일인데 화면이 조용하면 한 번 더 누르게 되고, 그 두 번째
-          누름은 방금 뜬 프로세스를 다시 죽인다 — 고치려던 버튼이 고장을 만든다.
-          잠금은 스토어에 있다(resuming): 그리드↔포커스로 화면이 갈려도 도는 중이라는
-          사실은 세션의 것이지 이 부품의 것이 아니다.
-        */}
-        <IconButton
-          label={restarting ? 'Restarting the agent…' : 'Restart agent (chat history is kept)'}
-          onClick={() => void restart(session.id)}
-          disabled={restarting}
-          testId="restart-session"
-          align="right"
-        >
-          <span className={restarting ? 'cc-spin block' : 'block'} data-testid={restarting ? 'restart-spinning' : undefined}>
-            <RestartIcon />
-          </span>
-        </IconButton>
-        {headerExtra}
-      </span>
-    </>
-  )
+  // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다 — 훅이 모두 돈 뒤에 판단한다
+  if (!alive) return null
 
   return (
-    /*
-      min-h-0이 없으면 안 된다.
-      flex 자식의 min-height 기본값은 auto라 **내용보다 작아지지 못한다.**
-      그래서 대화가 길어지면 이 칸이 통째로 늘어나 입력창을 밖으로 밀어냈다
-      (그리드에서 칸 높이가 정해져 있으니 곧바로 드러났다 — 입력창이 아예 안 보였다).
-    */
-    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="session-view">
-      {headerDrag ? (
-        <div
-          className={`${HEADER} cursor-grab active:cursor-grabbing`}
-          // Not while the Run menu is open — see the note on `runOpen`
-          draggable={!runOpen}
-          onDragStart={headerDrag}
-          data-testid="pane-header"
-        >
-          {header}
-        </div>
-      ) : (
-        <DragRegion className={HEADER} testId="pane-header">
-          {header}
-        </DragRegion>
-      )}
-
-      <ChatStream
-        scrollRef={scrollRef}
-        chat={chat}
-        pending={session.pendingApproval}
-        questions={session.pendingQuestions}
-        sessionId={session.id}
-        projectRoot={projectRoot}
-        working={session.state === 'working'}
-        activity={session.activity}
-      />
-
-      {/*
-        프로세스가 없는 세션 (host 재시작 후). 기록은 남아 있으니 읽을 수는 있다.
-        말을 걸기 전에 이어갈 수 있음을 알려준다 — 보낸 뒤에 실패를 알리는 것보다 낫다 (FR-10).
-      */}
-      {!session.live && !session.archived && <DormantNote sessionId={session.id} />}
-
-      <form
-        className="border-t border-edge px-4 py-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const t = text.trim()
-          if (!t && attachments.length === 0) return
-          /*
+    <form
+      className="border-t border-edge px-4 py-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        const t = text.trim()
+        if (!t && attachments.length === 0) return
+        /*
             보내고 나면 입력창은 정말로 빈다 (#38).
             되불러오기와 초안을 **둘 다** 비워야 한다 — 하나만 비우면 방금 보낸 자리에
             아까 쓰다 만 글이 되살아난다. 방금 보낸 말은 이제 기록의 맨 위에 있으니
             화살표 한 번이면 다시 꺼낼 수 있다.
           */
-          setRecall(null)
-          setDraft(session.id, EMPTY_DRAFT)
-          void send(session.id, t, attachments)
-        }}
-      >
-        {attachments.length > 0 && (
-          <ul className="mb-1.5 flex flex-wrap gap-1.5" data-testid="attachment-list">
-            {attachments.map((a, i) => (
-              <li
-                key={`${a.path}-${i}`}
-                className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
-              >
-                {/*
+        setRecall(null)
+        setDraft(sessionId, EMPTY_DRAFT)
+        void send(sessionId, t, attachments)
+      }}
+    >
+      {attachments.length > 0 && (
+        <ul className="mb-1.5 flex flex-wrap gap-1.5" data-testid="attachment-list">
+          {attachments.map((a, i) => (
+            <li
+              key={`${a.path}-${i}`}
+              className="flex items-center gap-1.5 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-ash"
+            >
+              {/*
                   이모지를 쓰지 않는다 — OS·폰트마다 생김새가 다르고 대부분 유채색이라
                   "색은 diff 본문에만"이라는 규칙을 곧바로 깬다. 한 글자 기호면 둘 다 없다.
                 */}
-                <span className="readout text-[9px] text-slate" title={a.kind === 'image' ? 'Image' : 'File'}>
-                  {a.kind === 'image' ? 'IMG' : 'DOC'}
-                </span>
-                <span className="max-w-40 truncate">{a.name}</span>
-                <button
-                  type="button"
-                  className="text-slate transition-colors hover:text-chalk"
-                  onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
-                  aria-label={`Remove attachment ${a.name}`}
-                >
-                  <CloseIcon size={11} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div
-          className={`relative flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
-            dragging ? 'border-ash' : 'border-edge'
-          }`}
-          onDragEnter={(e) => {
-            e.preventDefault()
-            setDragging(true)
-          }}
-          onDragOver={(e) => e.preventDefault()}
-          onDragLeave={(e) => {
-            // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
-          }}
-          onDrop={(e) => {
-            e.preventDefault()
-            setDragging(false)
-            // 트리에서 끌어온 경로는 첨부가 아니라 문장에 넣는다.
-            // 구분하지 않으면 files가 비어 있어 아무 일도 안 일어난다.
-            const path = readDragPath(e.dataTransfer)
-            if (path) {
-              setText((prev) => {
-                const next = appendPath(prev, path)
-                // 커서를 끝으로 옮겨야 이어서 칠 수 있다
-                requestAnimationFrame(() => {
-                  const el = inputRef.current
-                  if (!el) return
-                  el.focus()
-                  el.setSelectionRange(next.length, next.length)
-                  setCaret(next.length)
-                })
-                return next
+              <span className="readout text-[9px] text-slate" title={a.kind === 'image' ? 'Image' : 'File'}>
+                {a.kind === 'image' ? 'IMG' : 'DOC'}
+              </span>
+              <span className="max-w-40 truncate">{a.name}</span>
+              <button
+                type="button"
+                className="text-slate transition-colors hover:text-chalk"
+                onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
+                aria-label={`Remove attachment ${a.name}`}
+              >
+                <CloseIcon size={11} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div
+        className={`relative flex items-end gap-2 rounded border bg-panel px-3 py-2 transition-colors focus-within:border-graphite ${
+          dragging ? 'border-ash' : 'border-edge'
+        }`}
+        onDragEnter={(e) => {
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={(e) => {
+          // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          // 트리에서 끌어온 경로는 첨부가 아니라 문장에 넣는다.
+          // 구분하지 않으면 files가 비어 있어 아무 일도 안 일어난다.
+          const path = readDragPath(e.dataTransfer)
+          if (path) {
+            setText((prev) => {
+              const next = appendPath(prev, path)
+              // 커서를 끝으로 옮겨야 이어서 칠 수 있다
+              requestAnimationFrame(() => {
+                const el = inputRef.current
+                if (!el) return
+                el.focus()
+                el.setSelectionRange(next.length, next.length)
+                setCaret(next.length)
               })
-              return
-            }
-            void takeFiles(e.dataTransfer.files)
-          }}
-          data-testid="input-dropzone"
-        >
-          {ac.open && (
-            <AutocompleteMenu
-              items={ac.items}
-              index={ac.index}
-              loading={ac.loading}
-              kind={ac.kind}
-              onPick={pick}
-            />
-          )}
-          <textarea
-            ref={inputRef}
-            className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
-            rows={1}
-            value={text}
-            /*
+              return next
+            })
+            return
+          }
+          void takeFiles(e.dataTransfer.files)
+        }}
+        data-testid="input-dropzone"
+      >
+        {ac.open && (
+          <AutocompleteMenu
+            items={ac.items}
+            index={ac.index}
+            loading={ac.loading}
+            kind={ac.kind}
+            onPick={pick}
+          />
+        )}
+        <textarea
+          ref={inputRef}
+          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-chalk placeholder:text-slate focus:outline-none"
+          rows={1}
+          value={text}
+          /*
               Focusing here wakes the session, exactly as selecting it in the sidebar does
               (focusSession → wake). This second call site exists because two paths reach a
               composer without ever selecting: a grid panel's input, and the session a
@@ -551,30 +603,30 @@ export function SessionPane({
               uninstalled plugin's commands). wake() dedups and stays quiet, so a second
               call on an already-live session costs nothing.
             */
-            onFocus={() => void wake(sessionId)}
-            onCompositionStart={() => setComposing(true)}
-            onCompositionEnd={() => setComposing(false)}
-            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-            onChange={(e) => {
-              setText(e.target.value)
-              setCaret(e.target.selectionStart)
-            }}
-            onKeyDown={(e) => {
-              // 자동완성이 열려 있으면 방향키·Enter·Tab은 목록의 것이다
-              if (ac.open) {
-                if (e.key === 'ArrowDown') return e.preventDefault(), ac.move(1)
-                if (e.key === 'ArrowUp') return e.preventDefault(), ac.move(-1)
-                if (e.key === 'Escape') return e.preventDefault(), setCaret(-1)
-                if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
-                  const item = ac.items[ac.index]
-                  if (item) {
-                    e.preventDefault()
-                    pick(item)
-                    return
-                  }
+          onFocus={() => void wake(sessionId)}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+          onChange={(e) => {
+            setText(e.target.value)
+            setCaret(e.target.selectionStart)
+          }}
+          onKeyDown={(e) => {
+            // 자동완성이 열려 있으면 방향키·Enter·Tab은 목록의 것이다
+            if (ac.open) {
+              if (e.key === 'ArrowDown') return (e.preventDefault(), ac.move(1))
+              if (e.key === 'ArrowUp') return (e.preventDefault(), ac.move(-1))
+              if (e.key === 'Escape') return (e.preventDefault(), setCaret(-1))
+              if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                const item = ac.items[ac.index]
+                if (item) {
+                  e.preventDefault()
+                  pick(item)
+                  return
                 }
               }
-              /*
+            }
+            /*
                 While an IME is composing, Enter and the arrows belong to **the candidate list**,
                 not to us (#38, #12). The arrows move through candidates; Enter commits the
                 syllable being formed. Enter is the worse one to take: our answer to Enter is to
@@ -590,134 +642,147 @@ export function SessionPane({
                 Both are read because `isComposing` is the standard signal and some browsers
                 report the key itself as `Process` instead.
               */
-              const composingKey = e.nativeEvent.isComposing || e.key === 'Process'
-              if (!composingKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-                if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
-                  e.preventDefault()
-                  return
-                }
-              }
-              if (!composingKey && e.key === 'Enter' && !e.shiftKey) {
+            const composingKey = e.nativeEvent.isComposing || e.key === 'Process'
+            if (!composingKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+              if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
                 e.preventDefault()
-                e.currentTarget.form?.requestSubmit()
+                return
               }
-            }}
-            onPaste={(e) => {
-              const files = Array.from(e.clipboardData.files)
-              if (files.length > 0) {
-                e.preventDefault()
-                void takeFiles(files)
-              }
-            }}
-            placeholder="Type a message"
-            data-testid="prompt-input"
-          />
-          {/*
+            }
+            if (!composingKey && e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              e.currentTarget.form?.requestSubmit()
+            }
+          }}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files)
+            if (files.length > 0) {
+              e.preventDefault()
+              void takeFiles(files)
+            }
+          }}
+          placeholder="Type a message"
+          data-testid="prompt-input"
+        />
+        {/*
             첨부도 보내기와 **같은 부품**을 쓴다. 예전엔 label로 따로 만들어서
             안쪽 여백(6px vs 4px)과 아이콘 크기(16 vs 15)가 달랐고, 나란히 선 두 버튼의
             크기와 높이가 어긋나 보였다 (도그푸딩 지적).
             파일 선택기는 숨긴 input을 눌러 연다 — label 없이도 같은 일을 한다.
           */}
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            className="hidden"
-            data-testid="attach-input"
-            onChange={(e) => void takeFiles(e.target.files)}
-          />
-          <IconButton
-            label="Attach file"
-            onClick={() => fileRef.current?.click()}
-            testId="attach-open"
-            placement="top"
-            className="shrink-0"
-          >
-            <PlusIcon size={15} />
-          </IconButton>
-          <IconButton
-            type="submit"
-            label="Send (Enter)"
-            disabled={!text.trim() && attachments.length === 0}
-            testId="send"
-            placement="top"
-            align="right"
-            className="shrink-0 text-ash"
-          >
-            <SendIcon />
-          </IconButton>
-        </div>
-        {/*
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          className="hidden"
+          data-testid="attach-input"
+          onChange={(e) => void takeFiles(e.target.files)}
+        />
+        <IconButton
+          label="Attach file"
+          onClick={() => fileRef.current?.click()}
+          testId="attach-open"
+          placement="top"
+          className="shrink-0"
+        >
+          <PlusIcon size={15} />
+        </IconButton>
+        <IconButton
+          type="submit"
+          label="Send (Enter)"
+          disabled={!text.trim() && attachments.length === 0}
+          testId="send"
+          placement="top"
+          align="right"
+          className="shrink-0 text-ash"
+        >
+          <SendIcon />
+        </IconButton>
+      </div>
+      {/*
           모델·강도·권한은 **보내기 직전에** 정하는 것들이라 입력창 아래에 둔다.
           헤더에 있을 때는 화면 반대쪽 끝이라, 무엇을 어떤 설정으로 보내는지
           한눈에 같이 보이지 않았다. 여기 있으면 손과 눈이 같은 자리에 머문다.
         */}
-        {/*
+      {/*
           단축키 안내는 뺐다. Enter로 보내고 ⇧Enter로 줄을 바꾸는 건 채팅 입력창의
           기본값이라 한 번 배우면 끝인데, 안내는 매번 자리를 차지한다 —
           한 번 읽고 나면 그때부터는 노이즈다 (도그푸딩: "당연한 것들이라").
         */}
-        <div className="mt-1.5 flex items-center gap-2">
-          <SessionSettings
-            sessionId={session.id}
-            // 프로젝트 기본값이 아니라 **이 세션의** 도구다 (섞어 쓸 수 있다)
-            tool={session.tool}
-            model={session.model}
-            effort={session.effort}
-            verbosity={session.verbosity}
-            serviceTier={session.serviceTier}
-            preset={session.permissionPreset}
-            live={session.live}
-          />
-          {/*
-            워크트리 세션은 **다른 디렉토리에서 돈다.** 그 사실이 안 보이면 사용자는
-            프로젝트 폴더를 열어보고 "왜 파일이 안 바뀌었지"를 겪는다 — 설정 옆에 붙여
-            무엇을 어디에 보내는지 한자리에서 읽히게 한다.
-          */}
-          {session.worktree && (
-            <span
-              className="readout truncate text-[10px] text-slate"
-              title={`Runs in a git worktree: ${session.worktree.path}`}
-              data-testid="worktree-badge"
-            >
-              ⑂ {session.worktree.branch}
-            </span>
-          )}
-          {/*
-            컨텍스트도 **쓰는 자리 옆**에 둔다. 대화 머리글에 있을 때는 화면 반대쪽
-            끝이라, 길게 쓰는 동안 정작 얼마나 남았는지가 눈에 안 들어왔다 (도그푸딩).
-
-            **모름과 0%를 구별한다.** 한 번도 턴을 끝낸 적 없는 세션에는 값이 없다.
-            그때 0%처럼 보이면 "아직 하나도 안 썼다"는 거짓말이 된다 — 흐린 `—`는
-            모른다는 뜻이다.
-
-            (#48 전에는 재시작한 세션도 여기 걸렸다. `context`가 DB에 없어서 앱을
-            껐다 켜면 값이 사라졌기 때문이다. 지금은 저장되므로 빈칸은 정말로
-            "아직 한 번도 보고된 적 없음"만 뜻한다.)
-          */}
-          <span
-            className={`readout ml-auto shrink-0 text-[11px] ${
-              ctxPct === null ? 'text-slate/50' : ctxPct >= 80 ? 'text-chalk' : 'text-slate'
-            }`}
-            data-testid="context-gauge"
-            title={
-              session.context
-                ? `Context ${session.context.used.toLocaleString()} / ${session.context.window.toLocaleString()} tokens`
-                : 'Context unknown — this session has never reported one'
-            }
-          >
-            Context {ctxPct === null ? '—' : `${ctxPct}%`}
-          </span>
-        </div>
-      </form>
-
-      {/* 자주 쓰는 명령어 창 (#60) — 칸 안에 뜬다. 그리드 칸이면 그 칸 크기의 창이다 */}
-      {runOpen && session.projectId && (
-        <CommandRunnerOverlay projectId={session.projectId} onClose={() => setRunOpen(false)} />
-      )}
-    </section>
+      <ComposerFooter sessionId={sessionId} />
+    </form>
   )
-}
+})
+
+/**
+ * 입력창 아래 줄 — 모델·강도·권한, 워크트리, 컨텍스트.
+ *
+ * 입력창과 **따로 구독하는 이유**: 여기 있는 값들은 대화 중에 계속 바뀌고(컨텍스트는
+ * 턴마다, live는 재시작마다), 입력창은 그 변화와 아무 상관이 없다. 한 부품이었을 때는
+ * 답변이 흐르는 동안 델타마다 textarea까지 통째로 다시 그려졌다.
+ *
+ * 자리가 여기인 것은 그대로다 — 모델·권한은 **보내기 직전에** 정하는 것들이라
+ * 헤더(화면 반대쪽 끝)가 아니라 손과 눈이 머무는 이 자리에 있어야 한다.
+ */
+const ComposerFooter = memo(function ComposerFooter({ sessionId }: { sessionId: string }) {
+  const session = useStore((s) => s.sessions[sessionId])
+  if (!session) return null
+  const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      <SessionSettings
+        sessionId={session.id}
+        // 프로젝트 기본값이 아니라 **이 세션의** 도구다 (섞어 쓸 수 있다)
+        tool={session.tool}
+        model={session.model}
+        effort={session.effort}
+        verbosity={session.verbosity}
+        serviceTier={session.serviceTier}
+        preset={session.permissionPreset}
+        live={session.live}
+      />
+      {/*
+          워크트리 세션은 **다른 디렉토리에서 돈다.** 그 사실이 안 보이면 사용자는
+          프로젝트 폴더를 열어보고 "왜 파일이 안 바뀌었지"를 겪는다 — 설정 옆에 붙여
+          무엇을 어디에 보내는지 한자리에서 읽히게 한다.
+        */}
+      {session.worktree && (
+        <span
+          className="readout truncate text-[10px] text-slate"
+          title={`Runs in a git worktree: ${session.worktree.path}`}
+          data-testid="worktree-badge"
+        >
+          ⑂ {session.worktree.branch}
+        </span>
+      )}
+      {/*
+          컨텍스트도 **쓰는 자리 옆**에 둔다. 대화 머리글에 있을 때는 화면 반대쪽
+          끝이라, 길게 쓰는 동안 정작 얼마나 남았는지가 눈에 안 들어왔다 (도그푸딩).
+
+          **모름과 0%를 구별한다.** 한 번도 턴을 끝낸 적 없는 세션에는 값이 없다.
+          그때 0%처럼 보이면 "아직 하나도 안 썼다"는 거짓말이 된다 — 흐린 `—`는
+          모른다는 뜻이다.
+
+          (#48 전에는 재시작한 세션도 여기 걸렸다. `context`가 DB에 없어서 앱을
+          껐다 켜면 값이 사라졌기 때문이다. 지금은 저장되므로 빈칸은 정말로
+          "아직 한 번도 보고된 적 없음"만 뜻한다.)
+        */}
+      <span
+        className={`readout ml-auto shrink-0 text-[11px] ${
+          ctxPct === null ? 'text-slate/50' : ctxPct >= 80 ? 'text-chalk' : 'text-slate'
+        }`}
+        data-testid="context-gauge"
+        title={
+          session.context
+            ? `Context ${session.context.used.toLocaleString()} / ${session.context.window.toLocaleString()} tokens`
+            : 'Context unknown — this session has never reported one'
+        }
+      >
+        Context {ctxPct === null ? '—' : `${ctxPct}%`}
+      </span>
+    </div>
+  )
+})
 
 /**
  * 대화 스트림 — 가상 스크롤 (D-1).
@@ -1096,7 +1161,11 @@ function ChatStream({
   const pinnedText =
     pinned?.kind === 'user' ? pinned.text || (pinned.attachments?.map((a) => a.name).join(', ') ?? '') : null
   const stickyText =
-    pinned?.kind === 'user' && pinnedText ? (pinned.from ? `${pinned.from.name} ⤷ ${pinnedText}` : pinnedText) : null
+    pinned?.kind === 'user' && pinnedText
+      ? pinned.from
+        ? `${pinned.from.name} ⤷ ${pinnedText}`
+        : pinnedText
+      : null
 
   // 접힘이 기본 — 다른 턴으로 넘어가면 펼침 상태를 끌고 가지 않는다
   const [stickyOpen, setStickyOpen] = useState(false)
@@ -1250,7 +1319,12 @@ function ChatStream({
 
       {/* 선택지는 여러 장이 겹칠 수 있다 — 하나만 그리면 나머지는 답할 길이 없다 */}
       {questions.map((q) => (
-        <QuestionCard key={q.requestId} sessionId={sessionId} requestId={q.requestId} questions={q.questions} />
+        <QuestionCard
+          key={q.requestId}
+          sessionId={sessionId}
+          requestId={q.requestId}
+          questions={q.questions}
+        />
       ))}
 
       {working && <ActivityRow sessionId={sessionId} activity={activity} />}
@@ -1320,37 +1394,42 @@ function ActivityRow({ sessionId, activity }: { sessionId: string; activity: Ses
               <span className="readout shrink-0" aria-hidden>
                 {step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '▸' : '○'}
               </span>
-              <span className={step.status === 'completed' ? 'line-through opacity-60' : undefined}>{step.text}</span>
+              <span className={step.status === 'completed' ? 'line-through opacity-60' : undefined}>
+                {step.text}
+              </span>
             </li>
           ))}
         </ul>
       )}
       <div className="flex items-center gap-2">
-      <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
-      {/*
+        <span className="size-1.5 animate-pulse rounded-full bg-chalk" aria-hidden />
+        {/*
         같은 '대기'가 아니다. 압축은 실측 39초까지 걸렸는데 문구가 같으면
         기다리는 사람은 멈춘 건지 오래 걸리는 건지 판단할 근거가 없다.
       */}
-      <span className="text-[12px] text-ash" data-testid="activity-label">
-        {activity === 'compacting' ? 'Compacting context'
-        : activity === 'reviewing' ? 'Reviewing changes'
-        : thinkingTokens ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
-        : 'Waiting for response'}
-      </span>
-      {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
-      {seconds >= 2 && (
-        <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
-          {formatElapsed(seconds)}
+        <span className="text-[12px] text-ash" data-testid="activity-label">
+          {activity === 'compacting'
+            ? 'Compacting context'
+            : activity === 'reviewing'
+              ? 'Reviewing changes'
+              : thinkingTokens
+                ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
+                : 'Waiting for response'}
         </span>
-      )}
-      <button
-        type="button"
-        className="ml-auto rounded border border-edge px-2 py-0.5 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk"
-        onClick={() => void interrupt(sessionId)}
-        data-testid="activity-interrupt"
-      >
-        Stop
-      </button>
+        {/* 1초짜리 대기에까지 숫자를 띄우면 그냥 소음이다 */}
+        {seconds >= 2 && (
+          <span className="readout text-[11px] text-slate" data-testid="activity-elapsed">
+            {formatElapsed(seconds)}
+          </span>
+        )}
+        <button
+          type="button"
+          className="ml-auto rounded border border-edge px-2 py-0.5 text-[11px] text-slate transition-colors hover:border-graphite hover:text-chalk"
+          onClick={() => void interrupt(sessionId)}
+          data-testid="activity-interrupt"
+        >
+          Stop
+        </button>
       </div>
     </div>
   )
@@ -1446,10 +1525,10 @@ function DormantNote({ sessionId }: { sessionId: string }) {
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
         {/*
-          * 다른 쪽이 쥐고 있을 때는 **재시도만으로는 영영 안 열린다** — 사람이 다른 앱을
-          * 닫으러 가는 것 말고는 길이 없었다. 갈라서 이어가는 길을 그 자리에 함께 둔다.
-          * 원본을 건드리지 않는다는 사실까지 적어야 누르는 것이 무섭지 않다.
-          */}
+         * 다른 쪽이 쥐고 있을 때는 **재시도만으로는 영영 안 열린다** — 사람이 다른 앱을
+         * 닫으러 가는 것 말고는 길이 없었다. 갈라서 이어가는 길을 그 자리에 함께 둔다.
+         * 원본을 건드리지 않는다는 사실까지 적어야 누르는 것이 무섭지 않다.
+         */}
         {locked && (
           <button
             className="shrink-0 rounded border border-edge px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
@@ -1478,7 +1557,16 @@ function DormantNote({ sessionId }: { sessionId: string }) {
   )
 }
 
-function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
+/**
+ * 말풍선 한 줄.
+ *
+ * **memo인 이유는 스트리밍이다.** 답변이 흐르는 동안 델타 하나가 바꾸는 것은 마지막
+ * 한 줄뿐인데(store의 message_delta는 나머지 항목의 정체성을 그대로 둔다), memo가
+ * 없으면 조각 하나마다 화면에 보이는 말풍선이 **전부** 다시 그려졌다 — 긴 답변이
+ * 화면을 채운 상태에서 그건 마크다운 재파싱 여러 번이다 (실측: 2.7 렌더/글자).
+ * Markdown 자체는 이미 memo지만, 그 위의 껍데기가 매번 새로 도는 것은 못 막는다.
+ */
+const ChatRow = memo(function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
@@ -1573,7 +1661,10 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
      */
     if (!item.data) {
       return (
-        <div className="rounded-lg border border-edge bg-panel px-3 py-2 text-[12px] text-slate" data-testid="msg-image-missing">
+        <div
+          className="rounded-lg border border-edge bg-panel px-3 py-2 text-[12px] text-slate"
+          data-testid="msg-image-missing"
+        >
           이미지를 표시하지 못했습니다{item.note ? ` — ${item.note}` : ''}
           {item.path && <span className="readout mt-1 block truncate text-[11px]">{item.path}</span>}
         </div>
@@ -1586,7 +1677,7 @@ function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | 
   // 매니저의 워크트리 제안 (#69) — 같은 원칙: 가리키고, 값(브랜치 이름)은 창에 미리 채워진다
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
   return <ToolCard item={item} />
-}
+})
 
 /**
  * 대화 속 이미지 (#40 → #62 확대).

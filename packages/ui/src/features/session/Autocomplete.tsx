@@ -18,6 +18,9 @@ import { useStore } from '../../store/store.js'
 
 export type Suggestion = { value: string; label: string; hint: string }
 
+/** 구독하지 않을 때 돌려줄 **고정된** 빈 지도 — 매번 새 객체면 memo도 selector도 소용없다 */
+const EMPTY_MAP: Record<string, never> = {}
+
 /**
  * 슬래시 명령 점수. 높을수록 위. null이면 목록에서 뺀다.
  *
@@ -91,16 +94,25 @@ export function useAutocomplete({
   })
   const [files, setFiles] = useState<{ path: string; name: string }[]>([])
   const [index, setIndex] = useState(0)
-  // 세션 목록은 이미 스토어에 있다 — 오케스트레이터의 `@`는 여기서 고른다
-  const sessionMap = useStore((s) => s.sessions)
-  const projectMap = useStore((s) => s.projects)
+
+  const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
+
+  /*
+   * 세션 목록은 이미 스토어에 있다 — 오케스트레이터의 `@`는 여기서 고른다.
+   *
+   * **`@`를 치고 있을 때만 구독한다.** `s.sessions`는 세션 하나가 숨만 쉬어도 통째로
+   * 새 객체가 되는 지도라, 그냥 구독해 두면 답변이 흐르는 동안 델타마다 이 훅이
+   * 다시 돌고 그걸 쓰는 입력창까지 같이 다시 그려졌다 (실측: 답변 중 2.0 렌더/글자).
+   * 정작 이 값이 필요한 순간은 메뉴가 열려 있는 몇 초뿐이다.
+   */
+  const wantSessions = atSource === 'sessions' && trigger?.kind === 'file'
+  const sessionMap = useStore((s) => (wantSessions ? s.sessions : EMPTY_MAP))
+  const projectMap = useStore((s) => (wantSessions ? s.projects : EMPTY_MAP))
   const sessions = useMemo(() => Object.values(sessionMap), [sessionMap])
   const projectNames = useMemo(
     () => Object.fromEntries(Object.values(projectMap).map((p) => [p.id, p.name])),
     [projectMap],
   )
-
-  const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
 
   /*
    * The command list is asked for twice at most, and the second ask is the honest one.
@@ -160,12 +172,18 @@ export function useAutocomplete({
        * 스크롤(max-h-56)이라 길어서 잃는 것이 없고, 실측 최대 102개는 가상 스크롤이
        * 필요한 크기가 아니다.
        */
-      return commands.commands
-        .map((c) => ({ c, s: scoreCommand(c.name, trigger.query) }))
-        .filter((x): x is { c: CommandInfo; s: number } => x.s !== null)
-        // 점수가 같으면 짧은 이름이 위 — 대개 그쪽이 원래 찾던 것이다
-        .sort((a, b) => (b.s === a.s ? a.c.name.length - b.c.name.length : b.s - a.s))
-        .map(({ c }) => ({ value: `/${c.name} `, label: `/${c.name}`, hint: c.argumentHint || c.description }))
+      return (
+        commands.commands
+          .map((c) => ({ c, s: scoreCommand(c.name, trigger.query) }))
+          .filter((x): x is { c: CommandInfo; s: number } => x.s !== null)
+          // 점수가 같으면 짧은 이름이 위 — 대개 그쪽이 원래 찾던 것이다
+          .sort((a, b) => (b.s === a.s ? a.c.name.length - b.c.name.length : b.s - a.s))
+          .map(({ c }) => ({
+            value: `/${c.name} `,
+            label: `/${c.name}`,
+            hint: c.argumentHint || c.description,
+          }))
+      )
     }
     if (atSource === 'sessions') {
       const q = trigger.query.toLowerCase()
@@ -199,7 +217,8 @@ export function useAutocomplete({
     items,
     index,
     loading,
-    move: (delta: number) => setIndex((i) => (items.length === 0 ? 0 : (i + delta + items.length) % items.length)),
+    move: (delta: number) =>
+      setIndex((i) => (items.length === 0 ? 0 : (i + delta + items.length) % items.length)),
     apply,
   }
 }
