@@ -454,6 +454,13 @@ export type AppState = {
   setToast(msg: string | null): void
   /** 세션 생성 창을 연다/닫는다 (null이면 닫기) */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
+  /**
+   * 워크트리 매니저 자리를 만든다 (#76) — 첫 브랜치보다 **먼저**.
+   *
+   * 만들고 나면 그 자리로 데려간다: 방금 만든 것과 이야기하려고 만드는 것이라,
+   * 목록에 한 줄이 늘기만 하고 끝나면 절반만 한 셈이다.
+   */
+  createWorktreeManager(projectId: string, baseBranch: string): Promise<void>
 
   addProject(path: string): Promise<ProjectInfo>
   /**
@@ -1654,6 +1661,28 @@ export const useStore = create<AppState>((set, get) => ({
       newSessionBranch: prop?.branch ?? '',
       ...(prop ? { worktreeProposals: queue.filter((_, i) => i !== at) } : {}),
     })
+  },
+
+  async createWorktreeManager(projectId, baseBranch) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const info = await platform.projects.createWorktreeManager(projectId, baseBranch)
+      /*
+       * 세션 등록은 session_created 이벤트가 이미 한다 (#69). 여기서 또 넣지 않는 이유는
+       * 그 길이 재시작·다른 창에서도 도는 유일한 길이라서다 — 두 곳에서 넣으면 한쪽이
+       * 조용히 낡는다. 여기서는 **프로젝트 쪽 링크만** 갱신하고 그 자리로 데려간다.
+       */
+      set((s) => {
+        const p = s.projects[projectId]
+        return p
+          ? { projects: { ...s.projects, [projectId]: { ...p, worktreeManager: { sessionId: info.id, baseBranch } } } }
+          : {}
+      })
+      get().focusSession(info.id)
+    } catch (e) {
+      set({ toast: `Could not start the worktree manager: ${(e as Error).message}` })
+    }
   },
 
   async addProject(path) {

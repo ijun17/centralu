@@ -548,6 +548,33 @@ export class Store {
           this.db.exec(`UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1 AND project_id IS NOT NULL`)
         },
       },
+      {
+        to: 27,
+        run: () => {
+          /*
+           * 워크트리 매니저의 자리와 줄기 (#76).
+           *
+           * **왜 프로젝트에 다는가.** 매니저는 지금까지 순전히 관계였다 — 워크트리 자식이
+           * 있으면 매니저다. 그 규칙은 표식과 링크가 어긋날 수 없다는 장점이 있었지만,
+           * 자식이 생기기 전에는 매니저가 존재할 수 없다는 뜻이기도 했다: 첫 브랜치는
+           * 언제나 사람이 혼자 정해야 했고, 매니저의 제안 기능은 두 번째 브랜치부터
+           * 쓸모가 생겼다.
+           *
+           * 세션에 표식 컬럼을 다는 대신 **프로젝트가 자기 매니저를 가리킨다.** 여전히
+           * 링크지 플래그가 아니고, "프로젝트당 하나"가 컬럼 하나로 구조가 된다 (예전엔
+           * 명령형 검사였다). 가리키는 세션이 사라지거나 보관되면 없는 것으로 친다 —
+           * 링크가 끊긴 상태를 매니저 없음으로 읽는 쪽이, 유령을 붙드는 쪽보다 안전하다.
+           *
+           * baseBranch가 같이 사는 이유: 줄기는 매니저의 성질이고 매니저는 프로젝트당
+           * 하나라, 둘은 같은 자리에 산다. 이 값이 세 질문의 답을 한 번에 고정한다 —
+           * 어디서 갈라지는가, 어디로 병합하는가, 무엇을 기준으로 병합됐다고 하는가.
+           */
+          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'worktree_manager')) {
+            this.db.exec(`ALTER TABLE projects ADD COLUMN worktree_manager TEXT`)
+          }
+        },
+      },
     ]
 
     for (const step of steps) {
@@ -773,6 +800,33 @@ export class Store {
     this.db
       .prepare(`UPDATE projects SET worktree_setup = ? WHERE id = ?`)
       .run(setup ? JSON.stringify(setup) : null, projectId)
+  }
+
+  /**
+   * 이 프로젝트의 워크트리 매니저 자리와 줄기 (#76).
+   *
+   * **가리키는 세션이 실제로 있는지는 여기서 보지 않는다** — 그건 세션을 아는 쪽
+   * (SessionManager)의 일이고, 저장소는 자기가 적어 둔 것을 그대로 돌려준다.
+   * 링크가 끊긴 상태(세션 삭제·보관)의 판정을 두 곳에 두면 서로 다른 답을 낸다.
+   */
+  worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
+    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
+      | { worktree_manager: string | null }
+      | undefined
+    if (!row?.worktree_manager) return null
+    try {
+      const parsed = JSON.parse(row.worktree_manager) as { sessionId?: unknown; baseBranch?: unknown }
+      if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
+      return { sessionId: parsed.sessionId, baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '' }
+    } catch {
+      return null
+    }
+  }
+
+  setWorktreeManager(projectId: string, manager: { sessionId: string; baseBranch: string } | null): void {
+    this.db
+      .prepare(`UPDATE projects SET worktree_manager = ? WHERE id = ?`)
+      .run(manager ? JSON.stringify(manager) : null, projectId)
   }
 
   /**

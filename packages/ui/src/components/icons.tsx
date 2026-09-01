@@ -134,3 +134,23 @@ export function RestartIcon({ size = 14 }: { size?: number }) {
     </svg>
   )
 }
+
+/**
+ * 갈라지는 줄기 — 워크트리 매니저 (#76).
+ *
+ * 점 세 개와 선으로 그린 브랜치는 거의 표준에 가까운 기호라, 이 앱에서 처음 보는
+ * 버튼인데도 "깃의 무언가"로는 바로 읽힌다. 왕관(오케스트레이터)과 헷갈릴 일도 없다:
+ * 하나는 자리이고 하나는 갈래라, 모양이 말하는 것이 서로 다르다.
+ */
+export function BranchIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="4.5" cy="3.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="4.5" cy="12.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="11.5" cy="3.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M4.5 5.1v5.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      {/* 줄기에서 갈라져 나온 가지가 다시 아래로 내려온다 — 갈라짐과 되돌아옴이 한 획에 */}
+      <path d="M11.5 5.1v1.4a2.4 2.4 0 01-2.4 2.4H6.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}

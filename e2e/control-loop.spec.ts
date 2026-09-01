@@ -5650,6 +5650,43 @@ test('워크트리 세션은 사이드바에서 매니저 아래에 선다', asy
   await expect(page.getByText('Worktrees', { exact: true })).toHaveCount(1)
 })
 
+/**
+ * 매니저를 **먼저** 만든다 (#76).
+ *
+ * 여기서 확인하는 것은 순서다: 자식이 하나도 없는 상태에서 자리가 서고, 그 뒤에 만든
+ * 워크트리가 그 자리 아래로 들어간다. 그리고 자리가 생기면 만들기 버튼은 사라진다 —
+ * 같은 일을 하는 문이 둘이 되지 않아야 한다.
+ */
+test('워크트리 매니저를 먼저 만들면 그 아래로 워크트리가 들어간다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('start-worktree-manager-alpha').click()
+  // 줄기는 현재 브랜치가 채워져 있다 — 짐작을 사람 눈앞에 놓고 확인받는다
+  await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
+  await page.getByTestId('worktree-manager-confirm').click()
+  await expect(page.getByTestId('worktree-manager-dialog')).toBeHidden()
+
+  /*
+    자리가 섰고 — 자식은 하나도 없다. 그리고 만들자마자 그 자리를 열어 준다:
+    방금 만든 상대와 이야기하려고 만드는 것이라, 목록에 줄만 늘고 끝나면 절반이다.
+  */
+  // 사이드바로 좁혀서 센다 — 매니저를 열어 둔 상태라 대화창 머리에도 같은 이름이 있다
+  const sidebar = page.getByTestId('sidebar')
+  await expect(sidebar.getByText('Worktrees', { exact: true })).toHaveCount(1)
+  await expect(page.getByTestId('session-name')).toHaveText('Worktrees')
+  await expect(page.locator('li[data-nested]')).toHaveCount(0)
+  // 자리가 생겼으니 만들기 문은 닫힌다
+  await expect(page.getByTestId('start-worktree-manager-alpha')).toHaveCount(0)
+
+  // 이제 만든 워크트리는 먼저 선 자리 아래로 들어간다 — 두 번째 매니저가 생기지 않는다
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  await expect(page.locator('li[data-nested]')).toHaveCount(1)
+  await expect(sidebar.getByText('Worktrees', { exact: true })).toHaveCount(1)
+})
+
 test('프로젝트 헤더의 +로 열면 워크트리는 여전히 꺼져 있다 — 예열은 매니저 줄의 +만 한다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 

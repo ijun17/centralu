@@ -201,6 +201,10 @@ export function createRpcHandler(
       const { projectId, commands } = RpcMethods['projects.setCommands'].params.parse(p)
       return mgr.setProjectCommands(projectId, commands)
     },
+    'worktrees.createManager': async (p) => {
+      const { projectId, baseBranch } = RpcMethods['worktrees.createManager'].params.parse(p)
+      return mgr.createWorktreeManager(projectId, baseBranch)
+    },
     'projects.setWorktreeSetup': async (p) => {
       const { projectId, setup } = RpcMethods['projects.setWorktreeSetup'].params.parse(p)
       mgr.setWorktreeSetup(projectId, setup)

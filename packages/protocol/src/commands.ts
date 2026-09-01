@@ -243,6 +243,11 @@ export const ProjectInfo = z.object({
    * 레포가 아니라 우리 DB에 산다 (#50: 저장소에는 아무것도 쓰지 않는다).
    */
   worktreeSetup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable().default(null),
+  /**
+   * 이 프로젝트의 워크트리 매니저 자리와 줄기 (#76). null이면 아직 없다 — 화면은 그때
+   * "매니저 시작"을 내민다. baseBranch가 워크트리가 갈라지는 곳이자 병합 판정의 기준이다.
+   */
+  worktreeManager: z.object({ sessionId: z.string(), baseBranch: z.string() }).nullable().default(null),
   git: z
     .object({
       branch: z.string(),
@@ -550,6 +555,18 @@ export const RpcMethods = {
   'projects.setCommands': {
     params: z.object({ projectId: z.string(), commands: z.array(z.string()) }),
     result: z.array(z.string()),
+  },
+  /**
+   * 워크트리 매니저 자리를 만든다 (#76) — 자식이 하나도 없을 때도.
+   *
+   * baseBranch는 이 프로젝트의 **줄기**다: 워크트리가 갈라지는 곳이자, 병합됐는지를
+   * 재는 기준이다. 기본값을 host가 지어내지 않는다 — 어느 브랜치가 줄기인지는
+   * 저장소마다 다르고, 틀린 기본값은 워크트리가 엉뚱한 데서 갈라진 뒤에야 드러난다.
+   * 이미 자리가 있으면 그 자리를 돌려주고 줄기만 새로 적는다 (줄기를 고치는 길).
+   */
+  'worktrees.createManager': {
+    params: z.object({ projectId: z.string(), baseBranch: z.string() }),
+    result: SessionInfo,
   },
   /** 워크트리 프로비저닝 설정 저장 (#69) — 새 세션 창의 워크트리 영역이 편집한다 */
   'projects.setWorktreeSetup': {

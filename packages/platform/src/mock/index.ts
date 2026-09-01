@@ -427,10 +427,21 @@ export class MockPlatform implements Platform {
        */
       let parentSessionId: string | null = null
       if (worktree && params.projectId) {
+        const projectId = params.projectId
+        const owner = this.projectsList.find((p) => p.id === projectId)
+        /*
+         * 찾는 순서도 실물 그대로다 (#76): 프로젝트가 가리키는 자리 → 관계 → 만들기.
+         * 여기서 첫 갈래를 빼먹었더니 먼저 만들어 둔 매니저 옆에 두 번째 매니저가
+         * 섰다 (e2e가 잡았다) — 목이 실물보다 게으르면 계약이 화면에서만 갈라진다.
+         */
+        const seated = owner?.worktreeManager && this.sessions.get(owner.worktreeManager.sessionId)
         const withKids = new Set([...this.sessions.values()].map((x) => x.parentSessionId).filter(Boolean))
-        let mgr = [...this.sessions.values()].find(
-          (x) => x.projectId === params.projectId && !x.worktree && withKids.has(x.id) && !x.archived,
-        )
+        let mgr =
+          seated && !seated.archived
+            ? seated
+            : [...this.sessions.values()].find(
+                (x) => x.projectId === projectId && !x.worktree && withKids.has(x.id) && !x.archived,
+              )
         if (!mgr) {
           const mgrId = `mock-manager-${++this.idc}`
           mgr = {
@@ -443,6 +454,8 @@ export class MockPlatform implements Platform {
           this.sessions.set(mgrId, mgr)
           this.emit({ type: 'session_created', sessionId: mgrId, session: mgr })
         }
+        // 관계로 찾았거나 방금 만든 자리도 프로젝트가 가리키게 한다 (실물의 자가 치유)
+        if (owner) owner.worktreeManager = { sessionId: mgr.id, baseBranch: owner.worktreeManager?.baseBranch ?? '' }
         parentSessionId = mgr.id
       }
       const info: SessionInfo = {
@@ -754,7 +767,7 @@ export class MockPlatform implements Platform {
        */
       const info: ProjectInfo = {
         id: `mock-project-${++this.idc}`, path, name: osPathBaseName(path) || path,
-        defaultTool: 'claude', commands: [], worktreeSetup: null,
+        defaultTool: 'claude', commands: [], worktreeSetup: null, worktreeManager: null,
         git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
       this.projectsList.push(info)
@@ -787,6 +800,34 @@ export class MockPlatform implements Platform {
         ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
         : null
       p.worktreeSetup = clean && (clean.command || clean.copyFiles.length) ? clean : null
+    },
+    /*
+     * 실물과 같은 규칙 (#76): 자리는 프로젝트당 하나이고, 다시 부르면 **줄기만 고쳐진다**.
+     * 매니저 행은 워크트리 세션의 부모로 태어나므로 여기서도 프로세스 없는 행으로 만든다
+     * (live:false) — 목이 살아 있는 세션을 만들면 화면이 실물보다 앞서 나간다.
+     */
+    createWorktreeManager: async (projectId: string, baseBranch: string) => {
+      const p = this.projectsList.find((x) => x.id === projectId)
+      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      const branch = baseBranch.trim()
+      if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
+      const seated = p.worktreeManager && this.sessions.get(p.worktreeManager.sessionId)
+      if (seated && !seated.archived) {
+        p.worktreeManager = { sessionId: seated.id, baseBranch: branch }
+        return { ...seated }
+      }
+      const id = `mock-session-${++this.idc}`
+      const manager: SessionInfo = {
+        id, projectId, kind: 'worker', tool: p.defaultTool, externalId: null, name: 'Worktrees',
+        autoNamed: false, state: 'idle', archived: false, lastReadSeq: 0, lastSeq: 0,
+        createdAt: this.now(), waitingSince: null, live: false, model: null, effort: null,
+        verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null,
+        worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
+      }
+      this.sessions.set(id, manager)
+      p.worktreeManager = { sessionId: id, baseBranch: branch }
+      this.emit({ type: 'session_created', sessionId: id, session: manager })
+      return { ...manager }
     },
   }
 

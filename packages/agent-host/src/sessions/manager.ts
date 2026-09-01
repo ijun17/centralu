@@ -32,6 +32,7 @@ import {
   gitStatusFiles,
   gitDiff,
   gitHeadSha,
+  gitRevParse,
   gitBranchMerged,
   gitLog,
   gitCommitDetail,
@@ -293,11 +294,33 @@ export class SessionManager {
    * 같은 분리). 기존 세션을 조용히 매니저로 승격시키지도 않는다: 매니저가 된다는 것은
    * 삭제 보호를 받는다는 뜻이라, 조용한 승격은 조용한 잠금이다.
    */
-  private managerFor(projectId: string): SessionInfo {
+  private managerFor(projectId: string, baseBranch?: string): SessionInfo {
+    /*
+     * 찾는 순서가 곧 이 기능의 역사다 (#76).
+     *
+     * 1) 프로젝트가 가리키는 자리 — 자식이 없어도 매니저다. 이게 없으면 첫 브랜치를
+     *    정하기 전에 매니저와 상의할 방법이 없었다.
+     * 2) 관계로 찾기 — #76 이전에 생긴 매니저들에는 링크가 없다. 찾으면 그 자리에서
+     *    링크를 적어 준다(자가 치유): 다음부터는 1)에서 바로 걸리고, 자식을 다 정리해도
+     *    자리가 사라지지 않는다.
+     * 3) 없으면 만든다.
+     *
+     * 가리키는 세션이 사라졌거나 보관됐으면 없는 것으로 친다 — 유령을 붙들면 말을
+     * 걸 수 없는 자리에 자식이 매달린다.
+     */
     const all = [...this.meta.values()]
+    const link = this.store.worktreeManager(projectId)
+    if (link) {
+      const seated = this.meta.get(link.sessionId)
+      if (seated && !seated.archived) return seated
+    }
+
     const withKids = new Set(all.filter((s) => s.parentSessionId).map((s) => s.parentSessionId as string))
     const existing = all.find((s) => s.projectId === projectId && !s.worktree && withKids.has(s.id) && !s.archived)
-    if (existing) return existing
+    if (existing) {
+      this.store.setWorktreeManager(projectId, { sessionId: existing.id, baseBranch: link?.baseBranch ?? '' })
+      return existing
+    }
 
     const stored = this.store.listProjects().find((p) => p.id === projectId)
     if (!stored) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
@@ -329,9 +352,36 @@ export class SessionManager {
     }
     this.store.upsertSession(manager)
     this.store.setSessionCwd(manager.id, stored.path)
+    this.store.setWorktreeManager(projectId, { sessionId: manager.id, baseBranch: baseBranch ?? link?.baseBranch ?? '' })
     this.meta.set(manager.id, manager)
     this.emit({ type: 'session_created', sessionId: manager.id, session: manager })
     return manager
+  }
+
+  /**
+   * 매니저 자리를 **먼저** 만든다 (#76) — 자식이 하나도 없을 때도.
+   *
+   * 자식이 없는 매니저는 도구를 못 쓰는 게 아니라 **볼 것이 없는** 상태다: 도구 묶음은
+   * 그대로 받되 시야(childrenOf)가 비어 있어서, list_sessions는 빈 목록을 주고
+   * read/send는 "이 매니저의 워크트리 세션이 아닙니다"로 거절한다. 그래서 프로필을
+   * 하나 더 만들지 않았다 — 이미 있는 범위 판정이 그 일을 한다.
+   *
+   * 줄기(baseBranch)는 여기서만 정해진다. 기본값을 우리가 지어내지 않는 이유: 어느
+   * 브랜치가 줄기인지는 저장소마다 다르고(main·master·develop), 틀린 기본값은 워크트리가
+   * 엉뚱한 데서 갈라진 뒤에야 드러난다. 부르는 쪽(화면)이 현재 브랜치를 채워 보낸다.
+   */
+  async createWorktreeManager(projectId: string, baseBranch: string): Promise<SessionInfo> {
+    const stored = this.store.listProjects().find((p) => p.id === projectId)
+    if (!stored) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    const branch = baseBranch.trim()
+    if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
+    if (!(await gitValidBranchName(branch))) {
+      throw Object.assign(new Error(`Not a branch name: ${branch}`), { code: 'internal' })
+    }
+    const manager = this.managerFor(projectId, branch)
+    // 이미 있던 자리에도 줄기를 적어 준다 — 만들기를 다시 눌러 줄기를 고치는 길이 된다
+    this.store.setWorktreeManager(projectId, { sessionId: manager.id, baseBranch: branch })
+    return { ...manager, live: this.handles.has(manager.id) }
   }
 
   async addProject(path: string): Promise<ProjectInfo> {
@@ -362,6 +412,14 @@ export class SessionManager {
       commands: this.store.projectCommands(id),
       // 워크트리 프로비저닝(#69)도 함께 실린다 — 새 세션 창이 별도 fetch 없이 프리필한다
       worktreeSetup: this.store.worktreeSetup(id),
+      // 매니저 자리와 줄기 (#76). 가리키는 세션이 없거나 보관됐으면 없는 것으로 준다 —
+      // 화면이 유령 자리로 안내하지 않게, 판정은 세션을 아는 이쪽에서 한다
+      worktreeManager: (() => {
+        const link = this.store.worktreeManager(id)
+        if (!link) return null
+        const seated = this.meta.get(link.sessionId)
+        return seated && !seated.archived ? link : null
+      })(),
       git: git.isRepo ? git : null,
     }
   }
@@ -619,11 +677,19 @@ export class SessionManager {
         throw Object.assign(new Error(`Not a valid branch name: ${requested}`), { code: 'internal' })
       }
       const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
+      /*
+       * 어디서 갈라지는가 (#76). 매니저가 줄기를 쥐고 있으면 거기서, 없으면 예전처럼
+       * 루트의 HEAD에서 갈라진다. 줄기를 못 찾으면(브랜치가 지워졌다) HEAD로 물러나되
+       * 조용히는 아니다 — 로그에 남긴다.
+       */
+      const trunk = params.projectId ? this.trunkOf(params.projectId) : null
+      const from = trunk && (await gitRevParse(params.cwd, trunk)) ? trunk : null
+      if (trunk && !from) console.error(`[worktree] trunk not found, forking from HEAD instead: ${trunk}`)
       // 병합 감지의 기준점 (#69): 브랜치가 갈라진 지점. 이게 없으면 갓 만든 브랜치가
-      // HEAD의 조상이라는 이유만으로 "병합됨"으로 읽힌다.
-      const baseSha = await gitHeadSha(params.cwd)
+      // 줄기의 조상이라는 이유만으로 "병합됨"으로 읽힌다.
+      const baseSha = from ? await gitRevParse(params.cwd, from) : await gitHeadSha(params.cwd)
       try {
-        worktree = await gitWorktreeAdd(params.cwd, path, branch)
+        worktree = await gitWorktreeAdd(params.cwd, path, branch, from ?? undefined)
         if (baseSha) worktree = { ...worktree, base: baseSha }
       } catch (err) {
         const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
@@ -2546,8 +2612,26 @@ export class SessionManager {
     return this.isWorktreeManager(sessionId) ? 'manager' : null
   }
 
+  /**
+   * 매니저인가 — 두 가지 중 하나면 그렇다.
+   *
+   *   1. 워크트리 자식이 있다 (아카이브된 자식 포함 — 도구는 위험하지 않고, 자식을
+   *      정리한 뒤에도 제안은 할 수 있어야 한다). #69부터의 원래 규칙.
+   *   2. 프로젝트가 이 세션을 자기 매니저로 가리킨다 (#76). 자식이 생기기 전의 자리다.
+   *
+   * 둘 다 링크다 — 세션에 플래그를 다는 대신 관계로 판정한다는 원칙은 그대로다.
+   * 자식 없는 매니저도 도구는 다 받지만 **볼 것이 없다**: 시야가 childrenOf라
+   * list_sessions는 비어 있고 read/send는 거절된다. 그래서 남는 일은 제안 하나다.
+   */
   private isWorktreeManager(sessionId: string): boolean {
-    return [...this.meta.values()].some((s) => s.parentSessionId === sessionId)
+    if ([...this.meta.values()].some((s) => s.parentSessionId === sessionId)) return true
+    const projectId = this.meta.get(sessionId)?.projectId
+    return !!projectId && this.store.worktreeManager(projectId)?.sessionId === sessionId
+  }
+
+  /** 이 프로젝트의 줄기 브랜치 (#76). 매니저가 없거나 안 정했으면 null — 그때는 HEAD가 기준이다 */
+  private trunkOf(projectId: string): string | null {
+    return this.store.worktreeManager(projectId)?.baseBranch || null
   }
 
   /**
@@ -2564,9 +2648,12 @@ export class SessionManager {
    */
   async refreshMergedWorktrees(projectId: string): Promise<void> {
     const cwd = this.cwdOf(projectId)
+    // 줄기가 정해져 있으면 그것을 기준으로 (#76). 없으면 HEAD — 매니저를 만들기 전에
+    // 생긴 워크트리들이 그 경우고, 그때의 기준이 곧 그때의 뜻이다
+    const trunk = this.trunkOf(projectId) ?? 'HEAD'
     for (const m of this.meta.values()) {
       if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged || m.archived) continue
-      const merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base).catch(() => false)
+      const merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)
       if (!merged) continue
       const next = { ...m, worktreeMerged: true }
       this.meta.set(m.id, next)

@@ -4,10 +4,11 @@ import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
+import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { CloseIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
+import { BranchIcon, CloseIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
@@ -409,6 +410,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const selected = useIsProjectSelected(projectId)
   // 매니저의 워크트리 제안이 이 프로젝트를 가리키는가 (#69) — + 버튼이 밝아진다
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
+  const [managerDialog, setManagerDialog] = useState(false)
 
   /*
    * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면
@@ -466,13 +468,30 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           크기를 키우는 것만으로는 안 된다 — 안 보이는 것은 아무리 커도 안 보인다.
           평소엔 slate로 눌러 두고 호버에서 밝아지게 해서, 세션 목록을 읽는 데는 방해하지 않는다.
         */}
+        {/*
+          매니저 자리를 **먼저** 만드는 문 (#76). 저장소이면서 아직 자리가 없을 때만 뜬다 —
+          만들고 나면 그 자리는 세션 목록에 줄로 서 있으므로, 같은 일을 하는 문이 둘이 되지
+          않게 여기서는 사라진다. `+`(새 세션) 왼쪽에 두는 이유: 왼쪽이 먼저 오는 일이다.
+        */}
+        {project.git?.isRepo && !project.worktreeManager && (
+          <span className="-my-1 ml-auto shrink-0">
+            <IconButton
+              label={`Start worktree manager in ${project.name}`}
+              onClick={() => setManagerDialog(true)}
+              testId={`start-worktree-manager-${project.name}`}
+              align="right"
+            >
+              <BranchIcon size={13} />
+            </IconButton>
+          </span>
+        )}
         <span
           /*
            * 매니저의 워크트리 제안 (#69)이 이 버튼을 밝힌다 — Add project와 같은 원칙:
            * 대화에 두 번째 문을 그리지 않고, 있는 문에 불을 켠다. 눌러서 열리는 창에
            * 브랜치 이름이 채워져 있다 (openNewSession이 제안을 소비한다).
            */
-          className={`-my-1 ml-auto shrink-0 ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
+          className={`-my-1 shrink-0 ${project.git?.isRepo && !project.worktreeManager ? '' : 'ml-auto'} ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
           data-worktree-proposal={proposalHere || undefined}
         >
           <IconButton
@@ -628,6 +647,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       </ul>
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
+      {managerDialog && <WorktreeManagerDialog projectId={projectId} onClose={() => setManagerDialog(false)} />}
 
       {confirming && (
         <ConfirmDelete

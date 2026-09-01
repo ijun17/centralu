@@ -180,6 +180,20 @@ export async function gitHeadSha(cwd: string): Promise<string | null> {
   }
 }
 
+/**
+ * 이 ref가 가리키는 sha — 없으면 null (#76).
+ *
+ * 존재 확인과 sha 읽기를 한 번에 한다. 줄기 브랜치가 지워졌는지 묻는 자리와 그
+ * 브랜치의 sha를 기록하는 자리가 같은 질문을 두 번 하지 않게 하려는 것이다.
+ */
+export async function gitRevParse(cwd: string, ref: string): Promise<string | null> {
+  try {
+    return (await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])).trim() || null
+  } catch {
+    return null
+  }
+}
+
 export async function gitBranches(cwd: string): Promise<GitBranch[]> {
   if (!(await isRepo(cwd))) return []
   const stdout = await git(cwd, [
@@ -276,31 +290,57 @@ export type Worktree = { path: string; branch: string; base?: string }
  * 실패를 삼키지 않는다: 워크트리를 못 만들었는데 세션이 원본 디렉토리에서 조용히 돌면
  * 사용자는 격리된 줄 알고 있다 — 그게 이 기능에서 가장 나쁜 결말이다.
  */
-export async function gitWorktreeAdd(repoCwd: string, path: string, branch: string): Promise<Worktree> {
-  await git(repoCwd, ['worktree', 'add', '-b', branch, path])
+/**
+ * 워크트리를 하나 만든다.
+ *
+ * `from`을 주면 **그 줄기에서** 갈라진다 (#76). 안 주면 예전처럼 루트의 HEAD에서
+ * 갈라지는데, 그건 사람이 루트에서 브랜치를 바꿔 둔 순간 의미가 조용히 달라지는 기준이다 —
+ * 매니저가 줄기를 쥐고 있으면 "어디서 갈라지는가"의 답이 하나로 고정된다.
+ *
+ * 없는 줄기를 주면 git이 거절한다. 우리가 미리 검사해서 조용히 HEAD로 물러나지 않는
+ * 이유: 지정한 줄기가 아닌 데서 갈라진 워크트리는 나중에 "왜 병합이 안 잡히지"로 돌아온다.
+ */
+export async function gitWorktreeAdd(
+  repoCwd: string,
+  path: string,
+  branch: string,
+  from?: string,
+): Promise<Worktree> {
+  await git(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
   return { path, branch }
 }
 
 /**
- * 이 브랜치의 작업이 프로젝트의 현재 줄기(HEAD)에 **다 들어갔는가** (#69).
+ * 이 브랜치의 작업이 **줄기에 다 들어갔는가** (#69).
  *
  * 두 판정의 합이다:
  *   1. 브랜치 끝이 생성 시점(base)에서 움직였는가 — 안 움직였으면 "아직 일 안 함"이지
- *      "병합됨"이 아니다. 갓 만든 브랜치는 HEAD의 조상이라 is-ancestor만 보면
+ *      "병합됨"이 아니다. 갓 만든 브랜치는 줄기의 조상이라 is-ancestor만 보면
  *      만들자마자 merged로 읽힌다 (이 함정 때문에 base를 기록한다).
- *   2. 브랜치가 HEAD의 조상인가 (`merge-base --is-ancestor`) — 보통 병합과 FF 병합을
- *      잡는다.
+ *   2. 브랜치가 줄기의 조상인가 (`merge-base --is-ancestor`) — 보통 병합과 FF 병합을 잡는다.
+ *
+ * **줄기가 무엇인지는 부르는 쪽이 말한다** (#76). 예전에는 언제나 루트의 HEAD였는데,
+ * 그건 사람이 루트에서 브랜치를 갈아탄 순간 뜻이 조용히 바뀌는 기준이었다: main에
+ * 병합했는데 루트가 딴 브랜치에 있으면 안 잡히고, 반대로 루트의 HEAD가 우연히 그
+ * 브랜치를 품고 있으면 병합된 적 없는 브랜치가 merged로 읽혔다. 매니저가 줄기를 쥐면
+ * (worktreeManager.baseBranch) 이 질문의 답이 하나로 고정된다. 줄기가 없으면 HEAD로
+ * 물러난다 — 매니저를 만들기 전에 생긴 워크트리들이 그 경우다.
  *
  * **못 잡는 것 (실측, 2026-08-29):** 스쿼시 병합은 로컬에서 감지 불가다 — is-ancestor
  * NO, `branch --merged` NO, `git cherry`조차 미병합으로 답했다. 리베이스 병합도 sha가
  * 바뀌면 놓친다. 그런 브랜치는 자동 표식 없이 남고, 사람이 지우는 길(삭제 대화)은
  * 언제나 열려 있다 — 놓침의 비용은 배지 하나지, 데이터가 아니다.
  */
-export async function gitBranchMerged(projectCwd: string, branch: string, baseSha: string): Promise<boolean> {
+export async function gitBranchMerged(
+  projectCwd: string,
+  branch: string,
+  baseSha: string,
+  trunk = 'HEAD',
+): Promise<boolean> {
   try {
     const tip = (await git(projectCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])).trim()
     if (!tip || tip === baseSha) return false
-    await git(projectCwd, ['merge-base', '--is-ancestor', tip, 'HEAD'])
+    await git(projectCwd, ['merge-base', '--is-ancestor', tip, trunk])
     return true
   } catch {
     return false // 브랜치가 없거나 조상이 아니다 — 어느 쪽이든 "병합됨"은 아니다

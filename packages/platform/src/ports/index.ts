@@ -153,6 +153,11 @@ export interface ProjectPort {
   setCommands(projectId: string, commands: string[]): Promise<string[]>
   /** 워크트리 프로비저닝 설정 저장 (#69). null이면 지운다 */
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
+  /**
+   * 워크트리 매니저 자리를 만든다 (#76). 이미 있으면 그 자리를 주고 줄기만 새로 적는다.
+   * baseBranch는 부르는 쪽이 정한다 — 기본값을 아래에서 지어내면 틀린 줄기가 조용히 박힌다.
+   */
+  createWorktreeManager(projectId: string, baseBranch: string): Promise<SessionInfo>
 }
 
 /**

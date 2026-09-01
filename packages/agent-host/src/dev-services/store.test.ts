@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 26
+const LATEST_SCHEMA = 27
 
 function seeded() {
   const s = new Store()
@@ -1071,5 +1071,30 @@ describe('worktree_setup 왕복 (#69)', () => {
     // 빈 설정을 저장하면 "설정 없음"이다 — 빈 문자열 커맨드가 exec되는 일이 없어야 한다
     s.setWorktreeSetup('p1', { command: '', copyFiles: [] })
     expect(s.worktreeSetup('p1')).toBeNull()
+  })
+})
+
+/** v27 (#76): 매니저 자리와 줄기는 프로젝트가 든다 — 세션의 플래그가 아니라 링크다 */
+describe('worktree_manager 왕복 (#76)', () => {
+  it('저장·되읽기, 지우기', () => {
+    const s = seeded()
+    expect(s.worktreeManager('p1')).toBeNull()
+
+    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
+    expect(s.worktreeManager('p1')).toEqual({ sessionId: 'mgr-1', baseBranch: 'main' })
+
+    // 줄기만 고치는 길 — 자리를 옮기지 않고 기준만 바꾼다
+    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'develop' })
+    expect(s.worktreeManager('p1')?.baseBranch).toBe('develop')
+
+    s.setWorktreeManager('p1', null)
+    expect(s.worktreeManager('p1')).toBeNull()
+  })
+
+  it('프로젝트마다 하나 — 컬럼이 하나라 둘일 수가 없다', () => {
+    const s = seeded()
+    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
+    s.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
+    expect(s.worktreeManager('p1')?.sessionId).toBe('mgr-2')
   })
 })

@@ -1914,6 +1914,63 @@ describe('워크트리 세션', () => {
     expect(events.some((e) => e.type === 'worktree_merged' && e.sessionId === worked.id)).toBe(true)
   })
 
+  /*
+   * #76: 자리를 먼저 만든다. 여기서 검사하는 것은 "만들어지는가"가 아니라 **자식 없이도
+   * 매니저인가** — 자식이 도구의 조건이던 시절에는 첫 브랜치를 정하기 전에 상의할 상대가
+   * 아예 없었다.
+   */
+  it('매니저 자리를 먼저 만든다 — 자식이 없어도 매니저다 (#76)', async () => {
+    const manager = await wtMgr.createWorktreeManager(project.id, 'main')
+
+    expect(manager.name).toBe('Worktrees')
+    expect(manager.live).toBe(false) // 행만 만든다 — 프로세스는 말을 걸 때 뜬다
+    expect(wtMgr.listSessions().some((s) => s.parentSessionId === manager.id)).toBe(false)
+    expect(wtMgr.toolProfileOf(manager.id)).toBe('manager')
+    // 줄기는 프로젝트가 든다 — 다음 워크트리가 여기서 갈라진다
+    expect(store.worktreeManager(project.id)).toEqual({ sessionId: manager.id, baseBranch: 'main' })
+  })
+
+  it('자리는 프로젝트당 하나 — 다시 부르면 줄기만 고쳐진다 (#76)', async () => {
+    const first = await wtMgr.createWorktreeManager(project.id, 'main')
+    const again = await wtMgr.createWorktreeManager(project.id, 'develop')
+
+    expect(again.id).toBe(first.id)
+    expect(store.worktreeManager(project.id)?.baseBranch).toBe('develop')
+    expect(wtMgr.listSessions().filter((s) => s.name === 'Worktrees')).toHaveLength(1)
+  })
+
+  it('먼저 만든 자리 아래로 워크트리가 들어간다 — 두 번째 매니저가 생기지 않는다 (#76)', async () => {
+    const manager = await wtMgr.createWorktreeManager(project.id, 'main')
+    const kid = await create(true)
+
+    expect(kid.parentSessionId).toBe(manager.id)
+    expect(wtMgr.listSessions().filter((s) => s.name === 'Worktrees')).toHaveLength(1)
+  })
+
+  /*
+   * 줄기를 쥔다는 것의 실제 (#76). 사람이 루트에서 다른 브랜치로 갈아탄 뒤에도 병합
+   * 판정이 흔들리지 않아야 한다 — 예전에는 기준이 그때그때의 HEAD라 조용히 뜻이 바뀌었다.
+   */
+  it('줄기가 정해져 있으면 루트가 딴 브랜치에 있어도 병합이 잡힌다 (#76)', async () => {
+    await wtMgr.createWorktreeManager(project.id, 'main')
+    const worked = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/trunked',
+    })) as SessionInfo
+
+    const g = (dir: string, args: string[]) =>
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir })
+    writeFileSync(join(worked.worktree!.path, 'trunked.txt'), 'x\n')
+    g(worked.worktree!.path, ['add', '.'])
+    g(worked.worktree!.path, ['commit', '-qm', 'trunked'])
+    g(repo, ['merge', '-q', '--no-ff', 'feat/trunked'])
+    // 병합한 뒤 사람이 루트를 딴 데로 옮긴다 — HEAD 기준이었다면 여기서 판정이 뒤집힌다
+    g(repo, ['checkout', '-q', '-b', 'somewhere-else', 'HEAD~1'])
+
+    await wtMgr.refreshMergedWorktrees(project.id)
+
+    expect(wtMgr.listSessions().find((s) => s.id === worked.id)?.worktreeMerged).toBe(true)
+  })
+
   it('병합된 자식은 매니저를 붙들지 않는다 (#69)', async () => {
     const worked = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pin',
