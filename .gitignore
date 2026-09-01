@@ -22,8 +22,12 @@ spike/**/out/
 .DS_Store
 apps/desktop/src-tauri/resources/
 
-# Codex 프로토콜 바인딩 (생성물) — 의존 계약만 protocol-contract.json으로 커밋한다
-packages/agent-host/src/adapters/codex/generated/
+# Codex 프로토콜 바인딩 (생성물) — 의존 계약만 protocol-contract.json으로 커밋한다.
+# 예외 하나: Verbosity.ts는 어댑터가 컴파일 타임에 import한다 (#54의 드리프트 덫) —
+# 커밋하지 않으면 generated/를 만들어 본 적 없는 CI(release의 pnpm verify)가 깨진다.
+# 디렉터리 자체(/)를 무시하면 안의 부정(!)이 무력해서 /* 로 바꿨다.
+packages/agent-host/src/adapters/codex/generated/*
+!packages/agent-host/src/adapters/codex/generated/Verbosity.ts
 
 # npm 배포용으로 복사해 넣는 앱 번들 (릴리스 스크립트가 채운다)
 packaging/npm/darwin-arm64/*.app/

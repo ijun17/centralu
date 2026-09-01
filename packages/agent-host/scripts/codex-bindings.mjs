@@ -1,10 +1,14 @@
 /**
  * A-1: Codex app-server 프로토콜 계약 검증.
  *
- * 생성된 바인딩(642개, 2.6MB)은 **커밋하지 않는다** — 우리 어댑터는 그중 하나도 import하지 않고,
- * 통째로 커밋하면 리뷰가 봐야 할 신호가 노이즈에 묻힌다.
- * 대신 `protocol-contract.json`(우리가 실제로 쓰는 메서드 목록)만 커밋하고,
- * 생성물과 대조해 **사라진 것**을 알린다 (변경 축 C4: 프로토콜 변동 감지).
+ * 생성된 바인딩(642개, 2.6MB)은 **커밋하지 않는다** — 통째로 커밋하면 리뷰가 봐야 할
+ * 신호가 노이즈에 묻힌다. 대신 `protocol-contract.json`(우리가 실제로 쓰는 메서드 목록)만
+ * 커밋하고, 생성물과 대조해 **사라진 것**을 알린다 (변경 축 C4: 프로토콜 변동 감지).
+ *
+ * 예외 하나: `generated/Verbosity.ts`는 커밋한다 (#54). 어댑터가 컴파일 타임에 import해서
+ * (CODEX_VERBOSITIES의 satisfies 드리프트 덫), 없으면 tsc가 도는 모든 곳 — 특히 release의
+ * `pnpm verify` — 이 깨진다. 여기서 재생성하면 그 파일도 갱신되므로, codex가 단계를 바꾸면
+ * git diff와 컴파일 에러가 함께 드러낸다.
  *
  *   pnpm codex:bindings          — 타입 생성 (로컬 참고용, gitignore됨) + 계약 검증
  *   pnpm codex:bindings --check  — 계약 검증만 (CI용)
