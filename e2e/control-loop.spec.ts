@@ -516,6 +516,22 @@ test('안읽음 표시와 읽음 처리 (T5-6, FR-16)', async ({ page }) => {
   // 포커스하면 읽음 처리 (3초 규칙)
   await page.getByTestId(`session-row-${sessionId}`).click()
   await expect(page.getByTestId(`unread-${sessionId}`)).toBeHidden({ timeout: 8000 })
+
+  /*
+    **보고 있는 줄에는 애초에 안 뜬다.**
+
+    이 줄의 뜻은 "내가 딴 데 있는 동안 움직였다"이므로, 눈앞의 대화에 붙으면 소음이다.
+    그리고 실제로 붙어 있었다 — 읽음 처리 타이머가 session 객체에 매여 있어서 턴이
+    도는 내내 3초를 못 채웠다 (도그푸딩: "세션 돌아갈 때 하얀 점"). 3초를 기다려
+    사라지는 것으로는 이 계약을 못 잡는다: 답이 계속 오는 동안은 그 3초가 오지 않는다.
+  */
+  /*
+    시간 제한이 3초 **아래**여야 한다. 기본값(5초)으로 두면 읽음 타이머가 도는 사이에
+    점이 알아서 사라지고, 폴링이 그 뒤를 잡아 통과해 버린다 — 실제로 고치기 전 코드에서
+    통과했다. 여기서 물어야 하는 것은 "잠깐이라도 켜졌나"이므로 그 3초 안에 본다.
+  */
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '보는 중에 더 왔다' })
+  await expect(page.getByTestId(`unread-${sessionId}`)).toHaveCount(0, { timeout: 1000 })
 })
 
 test('동시 세션 경고를 사이드바에 표시한다 (T5-6, FR-2)', async ({ page }) => {

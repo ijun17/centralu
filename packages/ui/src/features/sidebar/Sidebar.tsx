@@ -592,7 +592,20 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         merged
                       </span>
                     )}
-                    {unread && (
+                    {/*
+                      안읽음 점 (FR-16) — "내가 딴 데 있는 동안 이 줄이 움직였다".
+                      그러니 **보고 있는 줄에는 뜨지 않는다.** 눈앞의 대화를 두고
+                      "안 읽었다"고 말하는 표식은 알림이 아니라 소음이다.
+
+                      이름은 이미 이 규칙을 알고 있었다 (바로 위 `unread && !focused`).
+                      점만 몰라서, 같은 줄의 표식 둘이 서로 다른 말을 하고 있었다.
+
+                      특히 **돌아가는 동안** 티가 났다: 읽음 처리는 3초 타이머인데 그
+                      타이머가 session 객체를 의존성에 두고 있어(맥락 사용량·상태가 바뀔
+                      때마다 새 객체) 턴이 도는 내내 다시 시작됐다 — 그래서 보고 있는
+                      세션에 점이 켜진 채로 있었다 (도그푸딩: "세션 돌아갈 때 하얀 점").
+                    */}
+                    {unread && !focused && (
                       <span
                         className="ml-auto size-1 shrink-0 rounded-full bg-ash"
                         data-testid={`unread-${s.id}`}
