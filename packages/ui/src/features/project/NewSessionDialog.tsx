@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { TOOL_META, TOOL_NAMES, type ExternalSession, type ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useSessionsOf } from '../../store/selectors.js'
-import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
+
+/** 칸 하나의 생김새. 셋이 같은 모양이어야 '같은 종류의 답'으로 읽힌다 */
+const inputClass =
+  'w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none'
 
 type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
@@ -62,6 +65,11 @@ function ago(ms: number): string {
  * 이름이 되는 규칙(FR-18)도 입력창의 첫 메시지에 똑같이 적용된다 (manager가 send에서
  * 'New session'을 첫 문장으로 바꾼다). 소제목·안내문도 같은 이유로 걷어냈다:
  * 이 창의 본체는 대화 목록 하나다.
+ *
+ * 틀은 다른 창(Settings·Inbox)과 같다 — **머리 고정 / 본체 스크롤 / 발 고정.**
+ * 도구와 시작 버튼은 창이 얼마나 길어지든 제자리에 있어야 하고, 길어지는 것은
+ * 가운데(대화 목록·워크트리 설정)뿐이다. 예전에는 창 전체가 자라서, 워크트리를 켜고
+ * 후보를 펼치면 시작 버튼이 화면 밖으로 밀려났다.
  */
 export function NewSessionDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const platform = usePlatform()
@@ -185,10 +193,16 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   }
   const blocked = tools ? !usable(tool) : false
 
+  // 복사로 딸려올 무게 — 이 목록에서 사람이 하는 판단이 "이건 너무 크다"라서 합계를 보여준다
+  const picks = splitList(copyFiles)
+  const pickedBytes = (ignored ?? [])
+    .filter((e) => picks.includes(e.path))
+    .reduce((n, e) => n + (e.bytes ?? 0), 0)
+
   return (
     <Modal onClose={onClose} testId="new-session-dialog" align="top">
       <form
-        className="w-[480px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        className="flex max-h-[calc(82vh/var(--text-zoom))] w-[480px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onKeyDown={(e) => {
           if (e.key === 'Escape') return onClose()
           /*
@@ -219,7 +233,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               const changed =
                 next.command !== (savedSetup?.command ?? '') ||
                 next.copyFiles.join('\n') !== (savedSetup?.copyFiles ?? []).join('\n')
-              if (changed) await saveWorktreeSetup(projectId, next.command || next.copyFiles.length ? next : null)
+              if (changed)
+                await saveWorktreeSetup(projectId, next.command || next.copyFiles.length ? next : null)
             }
             await createSession(projectId, {
               tool,
@@ -239,231 +254,281 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           }
         }}
       >
-        <h2 className="text-[13px] font-medium text-chalk">New session · {project?.name}</h2>
-
-        {/* 도구 — 소제목 없이 필 두 개면 뜻이 선다. 모델·권한은 만든 뒤 헤더에서 */}
-        <div className="mt-3 flex gap-1.5">
-          {TOOL_NAMES.map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTool(t)}
-              data-testid={`tool-option-${t}`}
-              title={info(t)?.detail}
-              className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
-                tool === t ? 'border-ash bg-graphite/40 text-chalk' : 'border-edge text-ash hover:text-chalk'
-              } ${tools && !usable(t) ? 'opacity-50' : ''}`}
-            >
-              {TOOL_META[t].label}
-            </button>
-          ))}
-        </div>
-        {/* 못 쓰는 이유를 숨기지 않는다 — 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 */}
-        {blocked && (
-          <p className="mt-1.5 text-[11px] text-ash" data-testid="tool-blocked">
-            {info(tool)?.installed
-              ? `${TOOL_META[tool].label} needs a login — run ${TOOL_META[tool].login} in a terminal`
-              : `${TOOL_META[tool].label} not found (${info(tool)?.detail ?? 'not installed'})`}
-          </p>
-        )}
-
         {/*
+          머리는 고정하고 본체만 구른다 (Settings·Inbox와 같은 틀) — 워크트리를 켜면
+          입력칸과 후보 칩이 붙어 창이 화면 밖으로 자라던 자리다. 시작 버튼은
+          아래 붙박이라 어디까지 스크롤했든 항상 손에 있다.
+        */}
+        <header className="shrink-0 border-b border-edge px-4 py-2.5">
+          <h2 className="text-[13px] font-medium text-chalk">
+            New session <span className="text-slate">·</span>{' '}
+            <span className="text-ash">{project?.name}</span>
+          </h2>
+          {/* 도구 — 소제목 없이 필 두 개면 뜻이 선다. 모델·권한은 만든 뒤 헤더에서 */}
+          <div className="mt-2.5 flex gap-1.5">
+            {TOOL_NAMES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTool(t)}
+                data-testid={`tool-option-${t}`}
+                title={info(t)?.detail}
+                className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+                  tool === t
+                    ? 'border-ash bg-graphite/40 text-chalk'
+                    : 'border-edge text-ash hover:border-graphite hover:text-chalk'
+                } ${tools && !usable(t) ? 'opacity-50' : ''}`}
+              >
+                {TOOL_META[t].label}
+              </button>
+            ))}
+          </div>
+          {/* 못 쓰는 이유를 숨기지 않는다 — 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다 */}
+          {blocked && (
+            <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="tool-blocked">
+              {info(tool)?.installed
+                ? `${TOOL_META[tool].label} needs a login — run ${TOOL_META[tool].login} in a terminal`
+                : `${TOOL_META[tool].label} not found (${info(tool)?.detail ?? 'not installed'})`}
+            </p>
+          )}
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {/*
           이 창의 본체. 터미널에서 하던 대화를 그대로 끌고 올 수 있어야
           이 앱이 '또 하나의 창'이 되지 않는다.
         */}
-        <div
-          className="mt-3 max-h-64 overflow-y-auto rounded border border-edge bg-panel"
-          data-testid="past-sessions"
-        >
-          <PastRow
-            selected={!resume}
-            onSelect={() => setResume(null)}
-            testId="past-new"
-            title="Start a new conversation"
-            meta=""
-          />
-          {past.status === 'loading' && (
-            <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-loading">
-              Looking for past conversations…
-            </p>
-          )}
-          {/* 구버전 도구를 쓴다고 새 세션까지 막지 않는다 — 이유만 조용히 알린다 */}
-          {past.status === 'unsupported' && (
-            <p className="px-2.5 py-2 text-[11px] leading-relaxed text-slate" data-testid="past-unsupported">
-              Could not load past conversations — {past.reason}
-            </p>
-          )}
-          {past.status === 'ok' && past.sessions.length === 0 && (
-            <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-empty">
-              No past conversations in this folder.
-            </p>
-          )}
-          {past.status === 'ok' &&
-            past.sessions.map((s) => (
-              <PastRow
-                key={s.externalId}
-                selected={resume?.externalId === s.externalId}
-                onSelect={() => {
-                  // 이미 열려 있으면 또 만들지 않는다 — 그 세션으로 데려간다.
-                  // 표시만 하고 클릭을 막지 않았더니 같은 대화가 목록에 둘 생겼다 (실측).
-                  if (s.importedAs) {
-                    focusSession(s.importedAs)
-                    onClose()
-                    return
-                  }
-                  setResume(s)
-                }}
-                testId={`past-${s.externalId}`}
-                title={s.title}
-                /*
+          <div
+            className="max-h-64 overflow-y-auto rounded border border-edge bg-panel"
+            data-testid="past-sessions"
+          >
+            <PastRow
+              selected={!resume}
+              onSelect={() => setResume(null)}
+              testId="past-new"
+              title="Start a new conversation"
+              meta=""
+            />
+            {past.status === 'loading' && (
+              <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-loading">
+                Looking for past conversations…
+              </p>
+            )}
+            {/* 구버전 도구를 쓴다고 새 세션까지 막지 않는다 — 이유만 조용히 알린다 */}
+            {past.status === 'unsupported' && (
+              <p
+                className="px-2.5 py-2 text-[11px] leading-relaxed text-slate"
+                data-testid="past-unsupported"
+              >
+                Could not load past conversations — {past.reason}
+              </p>
+            )}
+            {past.status === 'ok' && past.sessions.length === 0 && (
+              <p className="px-2.5 py-2 text-[11px] text-slate" data-testid="past-empty">
+                No past conversations in this folder.
+              </p>
+            )}
+            {past.status === 'ok' &&
+              past.sessions.map((s) => (
+                <PastRow
+                  key={s.externalId}
+                  selected={resume?.externalId === s.externalId}
+                  onSelect={() => {
+                    // 이미 열려 있으면 또 만들지 않는다 — 그 세션으로 데려간다.
+                    // 표시만 하고 클릭을 막지 않았더니 같은 대화가 목록에 둘 생겼다 (실측).
+                    if (s.importedAs) {
+                      focusSession(s.importedAs)
+                      onClose()
+                      return
+                    }
+                    setResume(s)
+                  }}
+                  testId={`past-${s.externalId}`}
+                  title={s.title}
+                  /*
                   제목은 도구가 주는 것이고, 도구마다 뜻이 다르다:
                     Claude — 요약(대화 전체를 대표한다)
                     Codex  — **첫 사용자 메시지** (며칠 이어온 대화도 맨 처음 주제로 보인다)
                   그래서 "언제까지 이어졌나"를 제목 옆에 분명히 적는다 —
                   안 그러면 최근 대화가 옛날 것처럼 보여서 못 찾는다 (도그푸딩 지적).
                 */
-                meta={[
-                  `last ${ago(s.updatedAt)}`,
-                  s.branch,
-                  s.importedAs ? 'Already open · click to jump' : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              />
-            ))}
-        </div>
+                  meta={[
+                    `last ${ago(s.updatedAt)}`,
+                    s.branch,
+                    s.importedAs ? 'Already open · click to jump' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                />
+              ))}
+          </div>
 
-        {/*
+          {/*
           경고와 해법을 같은 자리에 둔다 — "같은 파일을 고치면 유실될 수 있다"의 해법이
           워크트리다. 체크박스는 저장소일 때만 그린다: 쓸 수 없는 옵션의 설명은
           만들기라는 일에는 소음이다.
         */}
-        {running.length > 0 && (
-          <p className="mt-2.5 text-[11px] leading-relaxed text-ash" data-testid="concurrent-warning">
-            {running.length} sessions are already running in this directory. Editing the same files can lose changes.
-          </p>
-        )}
-        {isRepo && (
-          <label
-            className="mt-2.5 flex cursor-pointer items-center gap-2 text-[11px] text-ash hover:text-chalk"
-            data-testid="worktree-toggle"
-          >
-            <input
-              type="checkbox"
-              className="accent-ash"
-              checked={worktree}
-              onChange={(e) => setWorktree(e.target.checked)}
-            />
-            <span>
-              Run in a git worktree
-              <span className="text-slate"> — own branch and directory, can’t touch the others’ files</span>
-            </span>
-          </label>
-        )}
-        {/*
-          브랜치 이름은 켰을 때만 묻는다 — 꺼진 옵션의 세부를 미리 펼치면 창이 설명서가 된다.
-          이름이 곧 세션 이름·디렉토리 이름이라(사실상 영구) 만들기 전이 정할 유일한 순간이다.
+          {running.length > 0 && (
+            <p className="mt-2.5 text-[11px] leading-relaxed text-ash" data-testid="concurrent-warning">
+              {running.length} sessions are already running in this directory. Editing the same files can lose
+              changes.
+            </p>
+          )}
+          {isRepo && (
+            <label
+              className="mt-2.5 flex cursor-pointer items-center gap-2 text-[11px] text-ash hover:text-chalk"
+              data-testid="worktree-toggle"
+            >
+              <input
+                type="checkbox"
+                className="accent-ash"
+                checked={worktree}
+                onChange={(e) => setWorktree(e.target.checked)}
+              />
+              <span>
+                Run in a git worktree
+                <span className="text-slate"> — own branch and directory, can’t touch the others’ files</span>
+              </span>
+            </label>
+          )}
+          {/*
+          켰을 때만 세부를 묻고, 물을 때는 **한 덩어리로** 묶는다 (삭제 확인 창의 워크트리
+          칸과 같은 모양) — 전체폭 입력칸이 그냥 쌓이면 체크박스에 딸린 것인지, 창에
+          딸린 것인지 눈으로 안 갈린다. 이름이 곧 세션 이름·디렉토리 이름이라(사실상 영구)
+          만들기 전이 정할 유일한 순간이다.
         */}
-        {isRepo && worktree && (
-          <>
-            <input
-              type="text"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              placeholder="Branch name (blank = auto)"
-              data-testid="worktree-branch-input"
-              spellCheck={false}
-              className="mt-1.5 w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-            />
-            {/*
+          {isRepo && worktree && (
+            <div
+              className="mt-2 space-y-2.5 rounded border border-edge bg-panel p-2.5"
+              data-testid="worktree-options"
+            >
+              <Field label="Branch" hint="blank = auto">
+                <input
+                  type="text"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  placeholder="feature/…"
+                  data-testid="worktree-branch-input"
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              </Field>
+              {/*
               프로비저닝 (#69) — 새 워크트리는 빈 작업대다 (추적 파일만 있고 node_modules도
               gitignored .env도 없다). 여기 적은 것이 생성 때 자동으로 돈다: 복사 → 셋업.
               저장돼 있으면 한 줄 요약으로 접는다 — 매번 펼치면 확인할 것 없는 확인이 된다.
             */}
-            {setupOpen ? (
-              <div className="mt-1.5 space-y-1.5" data-testid="worktree-setup-edit">
-                <input
-                  type="text"
-                  value={setupCommand}
-                  onChange={(e) => setSetupCommand(e.target.value)}
-                  placeholder="Setup command, runs once in the new worktree (e.g. pnpm install)"
-                  data-testid="worktree-setup-command"
-                  spellCheck={false}
-                  className="w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-                />
-                <input
-                  type="text"
-                  value={copyFiles}
-                  onChange={(e) => setCopyFiles(e.target.value)}
-                  placeholder="Files to copy from the project, comma-separated (e.g. .env.local)"
-                  data-testid="worktree-copy-files"
-                  spellCheck={false}
-                  className="w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-                />
-                {/*
-                  후보를 **짚어만 준다** (#76). 누르면 위 칸에 들어가고, 다시 누르면 빠진다 —
-                  칸이 여전히 진실이라 손으로 친 것과 눌러 넣은 것이 갈리지 않는다.
-                */}
-                {ignored && ignored.length > 0 && (
-                  <div data-testid="worktree-ignored-suggestions">
-                    <p className="text-[10px] text-slate">
-                      Not in a fresh worktree — tap to copy (big ones cost time and disk):
-                    </p>
-                    <ul className="mt-1 flex flex-wrap gap-1">
-                      {ignored.map((e) => {
-                        const picked = splitList(copyFiles).includes(e.path)
-                        return (
-                          <li key={e.path}>
-                            <button
-                              type="button"
-                              data-testid={`ignored-${e.path}`}
-                              onClick={() => {
-                                const cur = splitList(copyFiles)
-                                const next = picked ? cur.filter((f) => f !== e.path) : [...cur, e.path]
-                                setCopyFiles(next.join(', '))
-                              }}
-                              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
-                                picked
-                                  ? 'border-ash bg-graphite/40 text-chalk'
-                                  : 'border-edge text-slate hover:border-graphite hover:text-ash'
-                              }`}
-                            >
-                              {e.path}
-                              {e.bytes !== null && <span className="ml-1 text-slate">{fmtBytes(e.bytes)}</span>}
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                data-testid="worktree-setup-summary"
-                onClick={() => setSetupOpen(true)}
-                className="mt-1.5 block w-full truncate rounded border border-edge/60 px-2 py-1 text-left font-mono text-[10px] text-slate hover:border-graphite hover:text-ash"
-                title="Edit worktree setup"
-              >
-                {savedSetup?.command ? `setup: ${savedSetup.command}` : 'setup: (none)'}
-                {savedSetup?.copyFiles.length ? ` · copies: ${savedSetup.copyFiles.join(', ')}` : ''}
-              </button>
-            )}
-          </>
-        )}
+              {setupOpen ? (
+                <div className="space-y-2.5" data-testid="worktree-setup-edit">
+                  <Field label="Setup command" hint="runs once, in the new worktree">
+                    <input
+                      type="text"
+                      value={setupCommand}
+                      onChange={(e) => setSetupCommand(e.target.value)}
+                      placeholder="pnpm install"
+                      data-testid="worktree-setup-command"
+                      spellCheck={false}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Copy from the project" hint="comma-separated">
+                    <input
+                      type="text"
+                      value={copyFiles}
+                      onChange={(e) => setCopyFiles(e.target.value)}
+                      placeholder=".env.local"
+                      data-testid="worktree-copy-files"
+                      spellCheck={false}
+                      className={inputClass}
+                    />
+                    {/*
+                    후보를 **짚어만 준다** (#76). 누르면 위 칸에 들어가고, 다시 누르면 빠진다 —
+                    칸이 여전히 진실이라 손으로 친 것과 눌러 넣은 것이 갈리지 않는다.
+                  */}
+                    {ignored && ignored.length > 0 && (
+                      <div className="mt-1.5" data-testid="worktree-ignored-suggestions">
+                        <ul className="flex flex-wrap gap-1">
+                          {ignored.map((e) => {
+                            const picked = picks.includes(e.path)
+                            return (
+                              <li key={e.path}>
+                                <button
+                                  type="button"
+                                  data-testid={`ignored-${e.path}`}
+                                  onClick={() => {
+                                    const next = picked
+                                      ? picks.filter((f) => f !== e.path)
+                                      : [...picks, e.path]
+                                    setCopyFiles(next.join(', '))
+                                  }}
+                                  className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+                                    picked
+                                      ? 'border-ash bg-graphite/40 text-chalk'
+                                      : 'border-edge text-slate hover:border-graphite hover:text-ash'
+                                  }`}
+                                >
+                                  {e.path}
+                                  {e.bytes !== null && (
+                                    <span className="ml-1 text-slate">{fmtBytes(e.bytes)}</span>
+                                  )}
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                        {/*
+                        고른 것의 **합계**를 적는다. 칩마다 크기가 붙어 있어도 사람은 그걸 더하지
+                        않는다 — Rust target 하나로 8.5GB가 붙는 저장소에서, 합계가 없으면
+                        워크트리를 만들고 나서야 무게를 안다.
+                      */}
+                        {picks.length > 0 && (
+                          <p className="mt-1.5 text-[10px] text-slate" data-testid="copy-total">
+                            {picks.length} to copy{pickedBytes > 0 ? ` · ~${fmtBytes(pickedBytes)}` : ''}
+                            {pickedBytes > 1024 ** 3 && (
+                              <span className="text-ash"> — every worktree pays this again</span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </Field>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="worktree-setup-summary"
+                  onClick={() => setSetupOpen(true)}
+                  className="block w-full truncate rounded border border-edge px-2 py-1 text-left font-mono text-[10px] text-slate hover:border-graphite hover:text-ash"
+                  title="Edit worktree setup"
+                >
+                  {savedSetup?.command ? `setup: ${savedSetup.command}` : 'setup: (none)'}
+                  {savedSetup?.copyFiles.length ? ` · copies: ${savedSetup.copyFiles.join(', ')}` : ''}
+                </button>
+              )}
+            </div>
+          )}
 
-        {error && (
-          <p className="mt-3 rounded border border-edge bg-panel px-2.5 py-2 text-[11px] leading-relaxed text-chalk" data-testid="create-session-error">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p
+              className="mt-3 rounded border border-edge bg-panel px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
+              data-testid="create-session-error"
+            >
+              {error}
+            </p>
+          )}
+        </div>
 
-        <div className="mt-4 flex items-center gap-2">
-          <span className="text-[10px] text-slate">
-            <Kbd>↑↓</Kbd> pick · <Kbd>↵</Kbd> {resume ? 'Load' : 'Start'} · <Kbd>esc</Kbd> close
-          </span>
-          <button type="button" className="ml-auto rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onClose}>
+        {/*
+          단축키 안내는 걷어냈다 (2026-09-02 도그푸딩) — ↑↓·↵·esc는 목록이 있는 창이면
+          어차피 손이 먼저 아는 것이고, 매번 읽히는 자리에 놓기엔 값이 너무 작다.
+          동작은 그대로다: 안내만 없앴다.
+        */}
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-edge px-4 py-2.5">
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-[12px] text-slate transition-colors hover:text-chalk"
+            onClick={onClose}
+          >
             Cancel
           </button>
           <button
@@ -475,9 +540,32 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           >
             {busy ? (resume ? 'Loading…' : 'Starting…') : resume ? 'Load' : 'Start'}
           </button>
-        </div>
+        </footer>
       </form>
     </Modal>
+  )
+}
+
+/**
+ * 라벨 + 칸.
+ *
+ * 긴 안내를 placeholder에 넣던 것을 라벨로 올렸다 — placeholder는 **타이핑을 시작하는
+ * 순간 사라져서**, 정작 "여기 뭘 적는 칸이었지"를 되묻는 순간에는 없다. 게다가 480px
+ * 창에서 "Setup command, runs once in the new worktree (e.g. pnpm install)"는 잘려서
+ * 끝까지 읽히지도 않았다.
+ *
+ * label 대신 div인 이유: 이 안에 후보 칩(버튼)이 들어가는데, label 안의 클릭은 칸으로
+ * 넘어간다 — 칩을 누를 때마다 입력칸이 잡히는 건 고르기를 방해한다.
+ */
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1 text-[10px] text-ash">
+        {label}
+        {hint && <span className="text-slate"> · {hint}</span>}
+      </p>
+      {children}
+    </div>
   )
 }
 

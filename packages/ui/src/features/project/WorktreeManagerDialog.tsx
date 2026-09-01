@@ -40,7 +40,8 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
   return (
     <Modal onClose={onClose} testId="worktree-manager-dialog">
       <form
-        className="w-[26rem] rounded-lg border border-edge bg-panel p-4"
+        /* 다른 모달과 같은 껍데기 — 나란히 열리는 창 둘의 바탕이 다르면 한쪽이 남의 앱처럼 보인다 */
+        className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
         onSubmit={async (e) => {
           e.preventDefault()
           const trunk = branch.trim()
@@ -101,7 +102,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-edge px-2.5 py-1 text-[12px] text-ash transition-colors hover:text-chalk"
+            className="rounded px-2 py-1 text-[12px] text-slate transition-colors hover:text-chalk"
           >
             Cancel
           </button>
@@ -109,7 +110,7 @@ export function WorktreeManagerDialog({ projectId, onClose }: { projectId: strin
             type="submit"
             disabled={!branch.trim() || busy}
             data-testid="worktree-manager-confirm"
-            className="rounded border border-ash px-2.5 py-1 text-[12px] text-chalk transition-colors hover:bg-graphite/40 disabled:opacity-50"
+            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
           >
             {busy ? 'Starting…' : 'Start manager'}
           </button>

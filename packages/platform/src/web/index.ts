@@ -4,7 +4,6 @@ import type {
   ApprovalScope,
   CreateSessionParams,
   NormalizedEvent,
-  SessionInfo,
   ToolName,
   QuestionAnswer,
   UpdateSettingsParams,
