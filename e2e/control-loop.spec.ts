@@ -5084,6 +5084,22 @@ test('설정은 상단 바에서 바로 열린다', async ({ page }) => {
   await expect(page.getByTestId('settings')).toBeVisible()
 })
 
+/*
+ * 체크박스는 우리가 그린다 (도그푸딩: 창이 키를 잃으면 체크의 배경색이 OS 손에서
+ * 회색으로 바뀌었다 — accent-color로는 그 비활성 칠을 못 이긴다). 크로미움은
+ * macOS의 비활성 칠을 재현하지 못하므로, 여기서는 그 원인 — 그리기를 OS에
+ * 맡겼다는 사실 — 이 제거됐는지를 본다.
+ */
+test('체크박스는 네이티브 그리기를 쓰지 않는다 — 창 활성/비활성이 같은 픽셀이다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('open-settings').click()
+  const box = page.getByTestId('notify-approval')
+  await expect(box).toBeVisible()
+  expect(await box.evaluate((el) => getComputedStyle(el).appearance)).toBe('none')
+  // 그리기를 가져왔으면 체크 표시도 우리 것이어야 한다 — 없으면 켠 것이 안 보인다
+  expect(await box.evaluate((el) => getComputedStyle(el, '::after').borderRightWidth)).not.toBe('0px')
+})
+
 test('같은 세션이 여러 번 끝나도 카드는 한 장이다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')

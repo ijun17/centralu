@@ -160,6 +160,54 @@
     outline-offset: 1px;
   }
   /*
+   * 체크박스는 우리가 그린다 (도그푸딩: 창이 키를 잃으면 배경색이 달라졌다).
+   *
+   * 네이티브 컨트롤은 OS가 그리므로 창의 활성/비활성에 따라 색이 바뀐다 —
+   * accent-color로는 그 규칙을 못 이긴다(비활성 회색은 시맨틱 색이라 덮어쓸 자리가
+   * 없다). appearance: none으로 그리기를 가져오면 두 상태가 같은 픽셀이 된다.
+   *
+   * 색은 변수 둘로 갈린다. 기존 accent-ash 클래스는 accent-color로는 이제 아무것도
+   * 못 하지만 "이 체크는 밝은 쪽"이라는 표지로 남는다 — 아래 매핑이 그 표지를 읽어
+   * call site 여섯 곳을 그대로 둔다. 지우면 매핑이 기본(graphite)으로 떨어진다.
+   */
+  input[type='checkbox'] {
+    --cc-check-bg: var(--color-graphite);
+    --cc-check-mark: var(--color-chalk);
+    appearance: none;
+    position: relative;
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    border: 1px solid var(--color-graphite);
+    border-radius: 3px;
+    background: transparent;
+    cursor: inherit;
+  }
+  input[type='checkbox'].accent-ash {
+    --cc-check-bg: var(--color-ash);
+    --cc-check-mark: var(--color-void);
+  }
+  input[type='checkbox']:checked {
+    background: var(--cc-check-bg);
+    border-color: var(--cc-check-bg);
+  }
+  /* 체크 표시 — 돌린 ㄴ자. url() SVG는 var() 색을 못 받아서 테두리 두 변으로 그린다 */
+  input[type='checkbox']:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 3.5px;
+    height: 7px;
+    border-right: 1.5px solid var(--cc-check-mark);
+    border-bottom: 1.5px solid var(--cc-check-mark);
+    transform: rotate(45deg);
+  }
+  /* 마크다운 할 일 목록의 체크(읽기 전용)도 같은 그림 — 흐림만 더한다 */
+  input[type='checkbox']:disabled {
+    opacity: 0.6;
+  }
+  /*
    * 선택 표시는 **반투명 흰빛**이다.
    *
    * 전에는 graphite 단색이었는데, 내 말풍선 배경이 같은 graphite라 그 위에서는
@@ -428,7 +476,8 @@
   }
   .cc-md th { color: var(--color-chalk); font-weight: 600; background: var(--color-panel); }
   .cc-md td { color: var(--color-ash); }
-  .cc-md input[type='checkbox'] { accent-color: var(--color-graphite); margin-right: 0.4em; }
+  /* 그리기는 전역 체크박스 규칙(base)이 맡는다 — 여기는 글줄 안 배치만 */
+  .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }
 }
 
 /*
