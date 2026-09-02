@@ -2730,6 +2730,16 @@ test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', 
   // 자세한 건 물어볼 때 답한다
   await page.getByTestId('usage-window-weekly_all').hover()
   await expect(page.getByTestId('usage-tip-weekly_all')).toContainText('reset')
+  /*
+   * 그리고 **잘리지 않는다** (도그푸딩: 도넛이 모달 스크롤 상자의 바닥 근처라 absolute
+   * 툴팁은 아래가 잘려 보였다). 잘림의 원인 — 스크롤 상자 안의 absolute — 이 제거됐는지와
+   * (체크박스 테스트와 같은 문법: 크로미움 rect는 잘려도 그대로라 증상 대신 원인을 잰다),
+   * 창 안에 온전히 있는지를 함께 본다.
+   */
+  const tip = page.getByTestId('usage-tip-weekly_all')
+  expect(await tip.evaluate((el) => getComputedStyle(el).position)).toBe('fixed')
+  const tb = (await tip.boundingBox())!
+  expect(tb.y + tb.height).toBeLessThanOrEqual(page.viewportSize()!.height)
 
   // 일간을 못 주는 도구면 그 줄을 접는다 (Claude에는 일간 창이 없다)
   await expect(page.getByTestId('usage-daily')).toHaveCount(0)

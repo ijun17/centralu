@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { SessionState } from '@cc/protocol'
 import { useCapability } from '../app/PlatformProvider.jsx'
 
@@ -105,8 +105,56 @@ export function Tooltip({
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLSpanElement>(null)
+  const tipRef = useRef<HTMLSpanElement>(null)
+  /*
+   * **absolute가 아니라 fixed다** (도그푸딩: 사용량 도넛의 툴팁이 모달의 스크롤 상자에
+   * 아래가 잘렸다). 트리거 안의 absolute는 조상 어딘가의 overflow에 반드시 잘린다 —
+   * 사이드바(overflow-y-auto)의 버튼 툴팁도 같은 지뢰 위에 서 있었다. 뷰포트 기준으로
+   * 띄우면 잘릴 상자가 없다. 계산은 RowMenu(사이드바 메뉴)와 같은 규칙이다:
+   * 확대(--text-zoom)가 rect에는 곱해져 있고 fixed 길이에는 또 곱해질 것이므로,
+   * 전부 레이아웃 px로 환산해 한 좌표계에서 계산한다.
+   */
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    const a = anchorRef.current
+    const el = tipRef.current
+    if (!a || !el) return
+    const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
+    const r = a.getBoundingClientRect()
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    const winW = window.innerWidth / zoom
+    const winH = window.innerHeight / zoom
+    const GAP = 4
+    const EDGE = 8
+    let top = placement === 'top' ? r.top / zoom - GAP - h : r.bottom / zoom + GAP
+    // 창을 벗어나면 반대쪽으로 뒤집는다 — placement는 기본 방향이지 약속이 아니다
+    if (placement === 'bottom' && top + h > winH - EDGE) top = r.top / zoom - GAP - h
+    else if (placement === 'top' && top < EDGE) top = r.bottom / zoom + GAP
+    const left = Math.max(
+      EDGE,
+      Math.min(align === 'right' ? r.right / zoom - w : r.left / zoom, winW - EDGE - w),
+    )
+    setPos({ top, left })
+  }, [open, placement, align])
+  /*
+   * 스크롤하면 잰 자리가 낡는다 — 다시 재는 대신 닫는다. 호버 툴팁은 손이 그대로면
+   * 곧 다시 뜨고, 스크롤 중인 손은 어차피 다른 데를 보고 있다.
+   */
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    return () => window.removeEventListener('scroll', close, true)
+  }, [open])
   return (
     <span
+      ref={anchorRef}
       className="relative inline-flex min-w-0"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -116,11 +164,11 @@ export function Tooltip({
       {children}
       {open && (
         <span
+          ref={tipRef}
           role="tooltip"
           data-testid={testId}
-          className={`pointer-events-none absolute z-30 w-max max-w-64 rounded border border-edge bg-panel px-2 py-1.5 text-[11px] leading-relaxed text-ash shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)] ${
-            placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
-          } ${align === 'right' ? 'right-0' : 'left-0'}`}
+          className="pointer-events-none fixed z-50 w-max max-w-64 rounded border border-edge bg-panel px-2 py-1.5 text-[11px] leading-relaxed text-ash shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+          style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
         >
           {content}
         </span>
