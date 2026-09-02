@@ -583,6 +583,30 @@ test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 
 })
 
 /*
+ * ── 밝은 테두리는 손을 따라간다 ────────────────────────────────────
+ *
+ * 고른 칸 표시는 focusedSessionId를 그리는데, 그리드 안에서는 아무도 그 값을
+ * 바꾸지 않았다 — 앱을 켤 때 복원된 세션의 칸만 며칠이고 밝았다 (도그푸딩).
+ * 다른 칸의 입력창에 손을 얹으면 고른 것도 따라와야 하고, 뷰는 그리드에 남아야 한다.
+ */
+test('그리드에서 다른 칸의 입력창을 누르면 밝은 테두리가 따라온다 — 뷰는 그리드 그대로', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', '첫째')
+  const b = await newSession(page, 'alpha', 'claude', '둘째')
+  await openGrid(page, [a, b])
+
+  // 마지막으로 고른 세션(b)의 칸이 밝은 채로 시작한다
+  await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-focused', 'true')
+
+  await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').click()
+
+  await expect(page.getByTestId(`grid-panel-${a}`)).toHaveAttribute('data-focused', 'true')
+  await expect(page.getByTestId(`grid-panel-${b}`)).not.toHaveAttribute('data-focused', 'true')
+  // 고른 것이 바뀌었다고 포커스 뷰로 끌려가면 안 된다 (preferGrid)
+  await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
+})
+
+/*
  * ── Grid: live reflow while dragging (#53) ──────────────────────────
  *
  * The old edge line said "before/after this neighbour", but the grid reflows on drop —

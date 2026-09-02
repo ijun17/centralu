@@ -31,6 +31,7 @@ export function GridView() {
    * 답을 치려면 그 칸의 입력창에 손이 가 있어야 한다.
    */
   const focusedSessionId = useStore((s) => s.focusedSessionId)
+  const focusSession = useStore((s) => s.focusSession)
   const setGridPanels = useStore((s) => s.setGridPanels)
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
@@ -71,9 +72,9 @@ export function GridView() {
    *
    * 알림에서 그리드로 온 사람은 **답을 하러** 온 것이다 — 칸이 밝아진 것만으로는
    * 어느 입력창에 쳐야 하는지 손이 모르고, 열두 칸 중에서 그걸 찾아 누르는 일이
-   * 남는다. 그리드는 칸을 클릭해도 고른 것이 바뀌지 않으므로(여기엔 focusSession을
-   * 부르는 자리가 없다), 이 효과가 사람의 손을 뺏을 일도 없다: 값이 바뀌는 경우는
-   * 밖에서 데려온 경우뿐이다.
+   * 남는다. 값이 바뀌는 경우는 둘이다: 밖에서 데려온 경우(이 효과가 필요한 그 경우)와,
+   * 칸 안에 손을 얹어서 바뀐 경우(onFocusCapture) — 후자는 입력창이 이미 포커스를
+   * 쥐고 있으므로 아래 focus()는 아무 일도 안 하고, 사람의 손을 뺏을 일이 없다.
    */
   useEffect(() => {
     if (!focusedSessionId) return
@@ -238,6 +239,19 @@ export function GridView() {
               }`}
               data-focused={focusedSessionId === id || undefined}
               data-testid={`grid-panel-${id}`}
+              /*
+                손이 닿은 칸이 고른 칸이다 (도그푸딩: 앱을 켤 때 복원된 세션의 칸만
+                계속 밝았다 — 다른 칸에 며칠을 타이핑해도 표시는 안 움직였다).
+                밝은 테두리가 focusedSessionId를 그리는데, 그리드 안에서는 아무도
+                그 값을 바꾸지 않았던 것이다. 입력창에 포커스가 앉는 순간이 "여기서
+                일한다"의 실체이므로 그때 고른 것도 따라온다 — preferGrid라 뷰는
+                그대로고, markRead·"마지막 보던 세션"(다음 실행의 예열 대상)도
+                같이 맞는 값이 된다. WKWebView는 버튼 클릭에 포커스를 주지 않으므로
+                ×버튼 따위로는 안 움직인다.
+              */
+              onFocusCapture={() => {
+                if (focusedSessionId !== id) focusSession(id, { preferGrid: true })
+              }}
               /*
                 Where the dragged thing lands relative to this panel. The edge line that used
                 to draw this is gone — the reflow shows it — but tests and assistive tech
