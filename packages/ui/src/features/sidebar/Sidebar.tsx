@@ -9,7 +9,7 @@ import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { CloseIcon, DotsIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
+import { CloseIcon, DotsIcon, HandoffIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
@@ -401,10 +401,13 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const newSessionOpen = useStore((s) => s.newSessionFor === projectId)
   const openNewSession = useStore((s) => s.openNewSession)
   const [confirming, setConfirming] = useState<string | null>(null)
+  /** 인수인계 확인 창이 떠 있는 세션 (없으면 null) */
+  const [handingOff, setHandingOff] = useState<string | null>(null)
   /** 지금 이름을 고치는 중인 세션. 한 번에 하나만 — 두 줄이 동시에 입력창이면 어느 쪽이 활성인지 모른다 */
   const [renaming, setRenaming] = useState<string | null>(null)
   const renameSession = useStore((s) => s.rename)
   const deleteSession = useStore((s) => s.deleteSession)
+  const handoffSession = useStore((s) => s.handoffSession)
   const focusProject = useStore((s) => s.focusProject)
   const reorderProjects = useStore((s) => s.reorderProjects)
   const reorderSessions = useStore((s) => s.reorderSessions)
@@ -641,6 +644,21 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       <PencilIcon size={13} />
                     </IconButton>
                     {/*
+                      인수인계하고 새로 시작 (도그푸딩 — 늙은 스레드의 되살리기가 느려지는
+                      문제의 출구). 워크트리 세션은 아직 못 한다: 워크트리의 수명이 세션에
+                      묶여 있어 갈아타기의 "같은 자리"가 성립하지 않는다.
+                    */}
+                    {!s.worktree && (
+                      <IconButton
+                        label="Hand off to a fresh session"
+                        testId={`handoff-session-${s.id}`}
+                        align="right"
+                        onClick={() => setHandingOff(s.id)}
+                      >
+                        <HandoffIcon size={13} />
+                      </IconButton>
+                    )}
+                    {/*
                       매니저 줄의 + (#69) — 이 세션 아래에 워크트리 세션을 하나 더.
                       프로젝트 헤더의 +와 같은 창을 열되 워크트리가 켜진 채 열린다.
                       호버 그룹 안에 두는 이유: 항상 보이면 헤더의 +와 두 개가 나란히
@@ -689,13 +707,80 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           // 프로젝트 기본값이 아니라 이 세션의 도구다 — 어디에 기록이 남는지 알려주는 문장이라 틀리면 안 된다
           tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool}
           onCancel={() => setConfirming(null)}
-          onConfirm={(deleteWorktree) => {
-            void deleteSession(confirming, deleteWorktree)
+          onConfirm={(deleteWorktree, deleteExternal) => {
+            void deleteSession(confirming, deleteWorktree, deleteExternal)
             setConfirming(null)
           }}
         />
       )}
+
+      {handingOff && (
+        <ConfirmHandoff
+          name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
+          tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool}
+          onCancel={() => setHandingOff(null)}
+          onConfirm={() => {
+            // 창은 닫고 진행은 세션 안에서 보인다 — 인수인계 요청과 글이 그대로 대화에 남는다
+            void handoffSession(handingOff)
+            setHandingOff(null)
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+/**
+ * 인수인계 확인 창 (도그푸딩 요청).
+ *
+ * 순서를 문장으로 다 말한다 — 이 버튼 하나가 "글 부탁 → 새 세션 → 진짜 삭제" 세 단계를
+ * 묶기 때문이다. 파괴가 끝에 있으므로 경고는 삭제 팔레트로 선다 (프로젝트 삭제와 같은
+ * 문법). 이름 타이핑은 요구하지 않는다: 마지막 단계가 실패해도 세션 둘이 남을 뿐
+ * 잃는 것이 없고, 성공했다면 잃는 것은 사람이 방금 읽고 승인한 그것뿐이다.
+ */
+function ConfirmHandoff({
+  name,
+  tool,
+  onConfirm,
+  onCancel,
+}: {
+  name: string
+  tool: ToolName
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const toolLabel = TOOL_META[tool].label
+  return (
+    <Modal onClose={onCancel} testId="confirm-handoff">
+      <div className="w-[400px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
+        <p className="text-[13px] text-chalk">Hand off to a fresh session?</p>
+        <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-ash">
+          This session writes a handoff note (you will see it in the conversation), then a fresh session with
+          the same name and settings starts from that note.
+        </p>
+        <p
+          className="mt-2 rounded border border-del/40 bg-del-bg px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
+          data-testid="handoff-warning"
+        >
+          When the new session is ready,{' '}
+          <span className="text-del">this session is deleted for real — including the {toolLabel} conversation
+          file</span>. Only the note survives.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del transition-colors hover:border-del/70"
+            onClick={onConfirm}
+            data-testid="confirm-handoff-yes"
+          >
+            Hand off
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -929,11 +1014,17 @@ function ConfirmDelete({
   sessionId: string
   name: string
   tool: ToolName
-  onConfirm: (deleteWorktree: boolean) => void
+  onConfirm: (deleteWorktree: boolean, deleteExternal: boolean) => void
   onCancel: () => void
 }) {
   const platform = usePlatform()
   const toolLabel = TOOL_META[tool].label
+  /*
+   * 도구 쪽 원본까지 지울지 (도그푸딩 "진짜로 삭제"). 기본은 남긴다 — 아래 안내문이
+   * 약속하는 "되돌릴 길"이 그 파일이다. 켜면 안내문이 같은 자리에서 경고로 바뀐다
+   * (프로젝트 삭제와 같은 문법: 두 문장을 같이 띄워 고르게 하지 않는다).
+   */
+  const [deleteExternal, setDeleteExternal] = useState(false)
 
   /*
    * 워크트리 세션인지, 거기 커밋 안 된 변경이 있는지 **모달을 여는 순간 묻는다.**
@@ -961,10 +1052,34 @@ function ConfirmDelete({
         <p className="mt-2 text-[11px] leading-relaxed text-slate">
           Chat history and attachments in Centralu will be gone.
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
-          The conversation stays in {toolLabel} — you can pull it back from{' '}
-          <span className="text-chalk">+ → Past conversations</span>.
-        </p>
+        {deleteExternal ? (
+          <p
+            className="mt-1 rounded border border-del/40 bg-del-bg px-2 py-1.5 text-[11px] leading-relaxed text-chalk"
+            data-testid="delete-external-warning"
+          >
+            <span className="text-del">The conversation file in {toolLabel} is deleted too</span> — there will
+            be nothing left to pull back.
+          </p>
+        ) : (
+          <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
+            The conversation stays in {toolLabel} — you can pull it back from{' '}
+            <span className="text-chalk">+ → Past conversations</span>.
+          </p>
+        )}
+        <label
+          className={`mt-2 flex cursor-pointer items-start gap-2 text-[11px] ${
+            deleteExternal ? 'text-del' : 'text-ash hover:text-chalk'
+          }`}
+          data-testid="delete-external-toggle"
+        >
+          <input
+            type="checkbox"
+            className={`mt-0.5 ${deleteExternal ? 'accent-del' : 'accent-ash'}`}
+            checked={deleteExternal}
+            onChange={(e) => setDeleteExternal(e.target.checked)}
+          />
+          <span>Delete the {toolLabel} conversation file too</span>
+        </label>
 
         {/*
           워크트리는 **세션과 수명이 다르다.** 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있어
@@ -1001,7 +1116,7 @@ function ConfirmDelete({
           </button>
           <button
             className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
-            onClick={() => onConfirm(deleteWorktree)}
+            onClick={() => onConfirm(deleteWorktree, deleteExternal)}
             data-testid="confirm-delete-yes"
           >
             Delete

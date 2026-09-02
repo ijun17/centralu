@@ -23,7 +23,7 @@ import type {
   QuestionAnswer,
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
-import { listClaudeSessions, readClaudeHistory } from './history.js'
+import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
@@ -560,6 +560,11 @@ export class ClaudeAdapter implements AgentAdapter {
 
   listExternalSessions(cwd: string, limit: number) {
     return listClaudeSessions(cwd, limit)
+  }
+
+  /** 대화 원본 삭제 ("진짜로 삭제") — SDK의 deleteSession이 자기 파일 배치를 안다 */
+  deleteExternalConversation(externalId: string, cwd: string) {
+    return deleteClaudeSession(externalId, cwd)
   }
 
   /**

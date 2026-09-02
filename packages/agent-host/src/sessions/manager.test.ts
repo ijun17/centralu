@@ -2618,3 +2618,66 @@ describe('워크트리 세션의 매니저 (#69)', () => {
     expect(store.loadMessages('wt-a', 10).length).toBe(1)
   })
 })
+
+/**
+ * 도구 쪽 원본까지 삭제 (도그푸딩 "진짜로 삭제").
+ *
+ * 우리 삭제는 우리 DB만 걷어냈고 codex rollout(실측 550MB)·claude JSONL은 남았다.
+ * deleteExternal은 사람이 체크박스로 명시했을 때만 원본을 지운다. 순서가 계약이다:
+ * 원본 삭제가 실패하면 우리 쪽도 지우지 않는다 — "지웠다"고 답했는데 원본이 남는
+ * 것이 최악이라서다.
+ */
+describe('도구 쪽 원본까지 삭제 (deleteExternal)', () => {
+  class ExternallyDeletableAdapter extends FakeAdapter {
+    deletedExternals: { externalId: string; cwd: string }[] = []
+    failExternalDelete = false
+    async deleteExternalConversation(externalId: string, cwd: string) {
+      if (this.failExternalDelete) throw new Error('tool refused to delete')
+      this.deletedExternals.push({ externalId, cwd })
+    }
+  }
+
+  async function setupWith(a: FakeAdapter) {
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    const r = createRpcHandler(m, adapters)
+    const p = (await r('projects.add', { path: tmpdir() })) as { id: string; path: string }
+    const s = (await r('agents.createSession', {
+      projectId: p.id,
+      cwd: p.path,
+      tool: 'claude',
+      permissionPreset: 'normal',
+    })) as SessionInfo
+    return { m, r, s }
+  }
+
+  it('deleteExternal이면 어댑터에 원본 삭제를 시킨다 — externalId와 cwd가 그대로 간다', async () => {
+    const a = new ExternallyDeletableAdapter()
+    const { m, r, s } = await setupWith(a)
+    await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
+    expect(a.deletedExternals).toEqual([{ externalId: 'ext-1', cwd: tmpdir() }])
+    expect(m.listSessions().some((x) => x.id === s.id)).toBe(false)
+  })
+
+  it('플래그가 없으면 원본은 손대지 않는다 — 기본은 남기는 것', async () => {
+    const a = new ExternallyDeletableAdapter()
+    const { r, s } = await setupWith(a)
+    await r('agents.deleteSession', { sessionId: s.id })
+    expect(a.deletedExternals).toEqual([])
+  })
+
+  it('원본 삭제가 실패하면 우리 쪽도 지우지 않는다 — "지웠다"는 거짓말을 만들지 않는다', async () => {
+    const a = new ExternallyDeletableAdapter()
+    a.failExternalDelete = true
+    const { m, s } = await setupWith(a)
+    await expect(m.deleteSession(s.id, false, true)).rejects.toThrow(/refused/)
+    expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
+    expect(store.loadMessages(s.id, 10)).toBeDefined() // 대화도 그대로다
+  })
+
+  it('어댑터가 지원하지 않으면 그렇게 말한다 — 조용히 우리 것만 지우면 반쪽 삭제다', async () => {
+    const { m, s } = await setupWith(new FakeAdapter())
+    await expect(m.deleteSession(s.id, false, true)).rejects.toThrow(/does not support/)
+    expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
+  })
+})

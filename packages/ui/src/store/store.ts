@@ -569,6 +569,10 @@ export type AppState = {
     opts?: {
       tool?: ToolName
       model?: string
+      /** 명시하면 프로젝트 기본값 대신 이 값 — 인수인계가 죽는 세션의 설정을 통째로 넘길 때 쓴다 */
+      effort?: string
+      verbosity?: string
+      serviceTier?: string
       permissionPreset?: PermissionPreset
       initialPrompt?: string
       /** 도구가 갖고 있던 이전 세션을 이어받는다 (터미널에서 만든 대화 포함) */
@@ -593,7 +597,14 @@ export type AppState = {
   /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
   /** 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<boolean>
-  deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
+  deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
+  /**
+   * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 코덱스 스레드의 되살리기 7~13초 문제의 출구).
+   * 죽는 세션이 인수인계 글을 쓰고 → 같은 설정·이름의 새 세션이 그 글로 시작하고 →
+   * 기존 세션은 도구 쪽 원본까지 **정말로** 지워진다. 파괴는 맨 끝이다: 새 세션이
+   * 성공적으로 서기 전에는 아무것도 지우지 않는다.
+   */
+  handoffSession(sessionId: string): Promise<void>
   updateSessionSettings(
     sessionId: string,
     s: {
@@ -693,6 +704,26 @@ function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
 }
 
 let chatSeq = 0
+
+/** 진행 중인 인수인계 — 같은 세션에 두 번 걸면 새 세션이 둘 태어난다 (모듈 상태: 재진입 가드일 뿐, 그릴 것은 없다) */
+const handoffInFlight = new Set<string>()
+
+/**
+ * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
+ * 넘어가야 한다는 지적). 죽는 세션만이 전체 맥락을 갖고 있으므로 글은 그쪽이 쓴다.
+ * e2e·테스트가 이 문구로 인수인계 메시지를 식별하므로 export한다.
+ */
+export const HANDOFF_PROMPT = `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor. It is the only thing they will receive, so make it self-contained — never reference "the conversation above".
+
+Cover, in this order:
+1. Project & goal — what this project is and what we are working toward.
+2. Current state — what is done, what is mid-flight, and the exact state of unfinished work (files, branches, commands to resume).
+3. Decisions & why — choices already made, with the reasons and evidence, so your successor does not relitigate them.
+4. Next steps — what should happen next, in priority order.
+5. Pitfalls — mistakes already made, dead ends, things that look right but are wrong, environment quirks.
+6. Working with the user — the language the user speaks, their tone, the response style they prefer, and standing instructions or conventions (build commands, commit style, things never to do).
+
+Write the note itself in the language the user has mostly used in this conversation. Reply with the note only — no preamble, no closing remarks.`
 
 /**
  * SessionInfo에서 **살아-있는-동안 사실들**만 골라낸다 (승인·질문·활동·한도·사용량).
@@ -2006,7 +2037,9 @@ export const useStore = create<AppState>((set, get) => ({
       tool: opts?.tool ?? project.defaultTool,
       model: opts?.model ?? project.defaultModel ?? undefined,
       // 강도도 기억을 따라간다 (#69 ⑤) — 모델만 기억하면 Opus는 오는데 high는 또 눌러야 한다
-      effort: project.defaultEffort ?? undefined,
+      effort: opts?.effort ?? project.defaultEffort ?? undefined,
+      verbosity: opts?.verbosity,
+      serviceTier: opts?.serviceTier,
       permissionPreset: opts?.permissionPreset ?? 'normal',
       initialPrompt: opts?.initialPrompt,
       resumeExternalId: opts?.resumeExternalId,
@@ -2269,15 +2302,92 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /** 세션 완전 삭제. 되돌릴 수 없으므로 호출 전에 확인을 받는다 (UI 책임) */
-  async deleteSession(sessionId, deleteWorktree) {
+  async deleteSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
     if (!platform) return
     const name = get().sessions[sessionId]?.name ?? 'Session'
     try {
-      await platform.agents.deleteSession(sessionId, deleteWorktree)
+      await platform.agents.deleteSession(sessionId, deleteWorktree, deleteExternal)
       set({ toast: `Deleted: ${name}` })
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
+    }
+  },
+
+  async handoffSession(sessionId) {
+    const s = get()
+    const session = s.sessions[sessionId]
+    const project = session?.projectId ? s.projects[session.projectId] : null
+    if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
+    // 매니저 삭제 규칙과 같다 — 살아 있는 자식이 있으면 마지막 삭제가 어차피 거부된다.
+    // 실패를 맨 끝(파괴 직전)에서 만나는 대신 시작에서 거른다.
+    const liveKids = Object.values(s.sessions).filter(
+      (x) => x.parentSessionId === sessionId && !x.merged,
+    )
+    if (session.worktree || liveKids.length > 0) {
+      set({ toast: 'Worktree sessions cannot hand off yet — merge or delete them first' })
+      return
+    }
+    handoffInFlight.add(sessionId)
+    try {
+      /*
+       * 표식은 **보내기 전의 대화 길이**다. send()가 낙관적으로 내 말풍선을 먼저 밀어
+       * 넣으므로, 호출 직후 길이는 이미 프롬프트를 포함한다 — 그 뒤에 오는 항목이 답이다.
+       * (seq는 클라이언트 카운터라 host 세계와 비교할 수 없다 — 위치로 센다)
+       */
+      const sendP = get().send(sessionId, HANDOFF_PROMPT)
+      const markIdx = (get().chat[sessionId] ?? []).length
+      await sendP
+      // 전송 실패는 입력창 복원 경로로 흘러 프롬프트가 초안에 남는다 — 사람이 쓴 글이 아니니 걷는다
+      if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === HANDOFF_PROMPT)) {
+        if (get().drafts[sessionId]?.text.includes(HANDOFF_PROMPT)) get().setDraft(sessionId, EMPTY_DRAFT)
+        throw new Error('could not reach the session')
+      }
+
+      // 답을 기다린다 — 글이 다 써지고 턴이 끝날 때까지 (10분 한도)
+      const deadline = Date.now() + 10 * 60_000
+      let note = ''
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 500))
+        const st = get()
+        const cur = st.sessions[sessionId]
+        if (!cur) throw new Error('the session disappeared while writing the note')
+        if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
+        if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
+        if (st.connection !== 'connected') continue // 끊긴 동안은 판단하지 않는다
+        const texts = (st.chat[sessionId] ?? [])
+          .slice(markIdx)
+          .filter((i): i is Extract<ChatItem, { kind: 'assistant' }> => i.kind === 'assistant')
+        if (texts.length > 0 && cur.state !== 'working' && cur.state !== 'waiting_approval') {
+          note = texts.map((t) => t.text).join('\n\n').trim()
+          break
+        }
+      }
+      if (!note) throw new Error('the session returned an empty note')
+
+      /*
+       * 새 세션은 죽는 세션의 설정을 **전부** 물려받는다 (#37이 가르친 규칙: 하나만
+       * 옮기면 나머지가 기본값으로 새로 태어난다). 이름도 물려받는다 — 갈아타기의
+       * 요점은 같은 자리가 이어지는 것이다.
+       */
+      const info = await get().createSession(session.projectId!, {
+        tool: session.tool,
+        model: session.model ?? undefined,
+        effort: session.effort ?? undefined,
+        verbosity: session.verbosity ?? undefined,
+        serviceTier: session.serviceTier ?? undefined,
+        permissionPreset: session.permissionPreset,
+        initialPrompt: note,
+      })
+      await get().rename(info.id, session.name)
+
+      // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
+      await s.platform.agents.deleteSession(sessionId, false, true)
+      set({ toast: `Handed off: ${session.name}` })
+    } catch (e) {
+      set({ toast: `Handoff failed: ${(e as Error).message}` })
+    } finally {
+      handoffInFlight.delete(sessionId)
     }
   },
 

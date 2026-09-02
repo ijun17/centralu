@@ -138,6 +138,32 @@ export function PlayIcon({ size = 15 }: { size?: number }) {
  * "Restart"라는 글자를 아이콘으로 바꾸면 뜻이 약해지므로, 거의 표준에 가까운
  * 기호를 쓴다. 화살촉이 있어야 '되돌린다'가 아니라 '다시 돈다'로 읽힌다.
  */
+/**
+ * 인수인계 — 상자에서 오른쪽으로 나가는 화살표 (로그아웃 계열 글리프).
+ * "여기 것을 밖의 새 자리로 옮긴다"로 읽힌다. 재시작(원형 화살표)과 모양이 달라야
+ * 하는 이유: 하나는 같은 대화를 다시 잇는 것이고 하나는 대화를 갈아타는 것이다.
+ */
+export function HandoffIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M6.5 2.5H4a1.5 1.5 0 00-1.5 1.5v8A1.5 1.5 0 004 13.5h2.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10 5l3 3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12.5 8H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function RestartIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>

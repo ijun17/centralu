@@ -70,6 +70,8 @@ export class MockPlatform implements Platform {
   orchestratorTool: ToolName = 'claude'
   /** 테스트용: 재개 불가로 만들 세션들 */
   readonly unresumable = new Set<string>()
+  /** deleteExternal로 지워진 세션 id — "진짜로 삭제"가 실제로 전달됐는지의 관찰점 */
+  readonly externallyDeleted: string[] = []
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
   badge = 0
@@ -777,7 +779,9 @@ export class MockPlatform implements Platform {
       if (!s?.worktree) return null
       return { ...s.worktree, dirty: this.mockWorktreeDirty, changedFiles: this.mockWorktreeDirty ? 2 : 0 }
     },
-    deleteSession: async (sessionId: string, _deleteWorktree = false) => {
+    deleteSession: async (sessionId: string, _deleteWorktree = false, deleteExternal = false) => {
+      // host와 같은 규칙: 원본 삭제를 명시한 경우 그 사실이 기록에 남는다 (테스트가 검증할 관찰점)
+      if (deleteExternal) this.externallyDeleted.push(sessionId)
       this.sessions.delete(sessionId)
       this.messages.delete(sessionId)
       this.emit({ type: 'session_deleted', sessionId })

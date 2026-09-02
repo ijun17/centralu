@@ -230,6 +230,16 @@ export interface AgentAdapter {
    * 구버전 도구를 만나면 던져도 된다: 매니저가 이유와 함께 degrade한다.
    */
   listExternalSessions?(cwd: string, limit: number): Promise<ExternalSessionSummary[]>
+
+  /**
+   * 도구 쪽 대화 원본을 **정말로** 지운다 (도그푸딩 요청 — "진짜로 삭제").
+   *
+   * 우리 세션 삭제는 우리 DB만 걷어냈다: codex rollout(실측 550MB)·claude JSONL은
+   * 도구의 것이라 남겨 뒀다. 남기는 것이 기본이라는 규칙은 그대로다 — 이 메서드는
+   * 사람이 체크박스로 명시한 경우에만 불린다. 실패하면 던진다: 매니저가 우리 쪽
+   * 삭제를 멈추고 그대로 알린다 ("지웠다"고 말했는데 원본이 남는 것이 최악이다).
+   */
+  deleteExternalConversation?(externalId: string, cwd: string): Promise<void>
   /** 이전 세션의 대화를 읽는다 (표시용 스냅샷. 모델의 실제 컨텍스트는 도구가 갖고 있다) */
   readExternalHistory?(externalId: string, cwd: string, limit: number): Promise<HistoryMessage[]>
 

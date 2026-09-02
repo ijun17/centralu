@@ -354,6 +354,14 @@ export const RpcMethods = {
        * UI가 `agents.worktreeStatus`로 먼저 묻고, 사람이 정한 답을 여기로 보낸다.
        */
       deleteWorktree: z.boolean().default(false),
+      /**
+       * 도구 쪽 대화 원본까지 지운다 (도그푸딩 "진짜로 삭제" — codex rollout 실측 550MB,
+       * claude JSONL). 기본은 역시 남기는 것이다: 그 파일은 도구의 것이고, 남아 있으면
+       * 삭제를 후회했을 때 그 도구에서 이어갈 마지막 길이 된다. 사람이 체크박스로
+       * 명시한 경우에만 켠다. 원본 삭제가 실패하면 우리 쪽 삭제도 멈춘다 —
+       * "지웠다"고 답했는데 원본이 남는 것이 최악의 결과라서다.
+       */
+      deleteExternal: z.boolean().default(false),
     }),
     result: z.object({ ok: z.literal(true) }),
   },

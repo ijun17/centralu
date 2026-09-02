@@ -84,7 +84,8 @@ export interface AgentPort {
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */
   /** 워크트리 세션이면 워크트리까지 지울지 함께 받는다. 기본은 남기는 것 */
-  deleteSession(sessionId: string, deleteWorktree?: boolean): Promise<void>
+  /** deleteExternal이면 도구 쪽 대화 원본(codex rollout·claude JSONL)까지 지운다 — "진짜로 삭제" */
+  deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /** 지워도 되는지 사람에게 묻기 위한 재료. 워크트리 세션이 아니면 null */
   worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
   /**

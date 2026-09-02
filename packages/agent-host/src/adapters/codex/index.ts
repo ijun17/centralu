@@ -589,6 +589,25 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   /**
+   * 스레드 원본을 지운다 (thread/delete RPC). fork와 같은 이유로 단명 클라이언트다 —
+   * 세션은 이미 dispose된 뒤라 붙잡고 있을 프로세스가 없다. 이 호출이 rollout 파일을
+   * 도구 쪽에서 거둬 간다 (실측 550MB짜리가 여기서 사라진다).
+   */
+  async deleteExternalConversation(externalId: string, cwd: string): Promise<void> {
+    const client = new CodexClient(
+      { onNotification: () => {}, onServerRequest: (r) => client.respond(r.id, {}), onExit: () => {} },
+      { cwd, command: whichTool('codex') ?? 'codex' },
+    )
+    try {
+      await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
+      client.notify('initialized')
+      await client.request('thread/delete', { threadId: externalId })
+    } finally {
+      await client.dispose()
+    }
+  }
+
+  /**
    * 계정 사용량 (FR-9).
    * 세션과 무관하므로 단명 클라이언트로 묻는다 — 대화 중인 스레드에 조회를 얹지 않는다.
    */

@@ -31,6 +31,7 @@ type SdkSessionMessage = { type?: unknown; message?: unknown }
 type SessionApi = {
   listSessions?: (o?: Record<string, unknown>) => Promise<SdkSessionInfo[]>
   getSessionMessages?: (id: string, o?: Record<string, unknown>) => Promise<SdkSessionMessage[]>
+  deleteSession?: (id: string, o?: Record<string, unknown>) => Promise<void>
 }
 
 let cached: SessionApi | null | undefined
@@ -129,4 +130,18 @@ function textOf(message: unknown): string {
     else if (block?.type === 'tool_use' && typeof block.name === 'string') parts.push(`\`${block.name}\``)
   }
   return parts.join('\n\n').trim()
+}
+
+/**
+ * 대화 원본을 도구 쪽에서 지운다 (도그푸딩 "진짜로 삭제").
+ *
+ * 파일(`~/.claude/projects/**`)을 우리가 직접 rm하지 않는 이유는 읽기와 같다 —
+ * 트랜스크립트가 어디에 어떤 부속(서브에이전트 폴더 등)과 함께 사는지는 SDK의
+ * 사정이고, SDK의 `deleteSession`이 자기 배치를 스스로 안다. 없으면(구버전)
+ * UNSUPPORTED로 던진다 — 매니저가 이유와 함께 사람에게 알린다.
+ */
+export async function deleteClaudeSession(externalId: string, cwd: string): Promise<void> {
+  const sdk = await sessionApi()
+  if (!sdk?.deleteSession) throw new Error(UNSUPPORTED)
+  await sdk.deleteSession(externalId, { dir: cwd })
 }

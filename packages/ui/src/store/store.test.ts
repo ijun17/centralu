@@ -764,3 +764,75 @@ describe('그리드 세션 예열', () => {
     expect(useStore.getState().sessions['warm-c']!.live).toBe(false)
   })
 })
+
+/**
+ * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 스레드의 되살리기 7~13초 문제의 출구).
+ * 죽는 세션이 쓴 글이 새 세션의 첫 메시지가 되고, 이름·설정이 이어지고,
+ * 기존 세션은 원본까지 지워진다. 파괴는 맨 끝 — 실패하면 아무것도 안 지워진다.
+ */
+describe('인수인계하고 새로 시작', () => {
+  it('글을 받아 새 세션을 만들고 이름을 물려주고 원본까지 지운다', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho1')
+    mock.sessions.set('ho-s1', sessionInfo('ho-s1', { projectId: proj.id, name: '메아', model: 'gpt-5.6', tool: 'codex' }))
+    await useStore.getState().attach(mock)
+
+    const done = useStore.getState().handoffSession('ho-s1')
+    // 인수인계 요청은 숨기지 않는다 — 세션의 보통 메시지로 들어간다
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    // 죽는 세션이 글을 쓴다
+    mock.emit({ type: 'message_delta', sessionId: 'ho-s1', role: 'assistant', text: '후계자에게: 상태 요약' } as NormalizedEvent)
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-s1' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-s1', state: 'waiting_input' } as NormalizedEvent)
+    await done
+
+    // 새 세션: 글이 첫 메시지고, 설정과 이름이 이어진다
+    expect(mock.lastCreateParams?.initialPrompt).toBe('후계자에게: 상태 요약')
+    expect(mock.lastCreateParams?.tool).toBe('codex')
+    expect(mock.lastCreateParams?.model).toBe('gpt-5.6')
+    const heir = [...mock.sessions.values()].find((r) => r.name === '메아')
+    expect(heir).toBeDefined()
+    expect(heir!.id).not.toBe('ho-s1')
+    // 기존 세션은 원본까지 정말로 지워졌다
+    expect(mock.sessions.has('ho-s1')).toBe(false)
+    expect(mock.externallyDeleted).toContain('ho-s1')
+    // 화면은 새 세션을 본다
+    expect(useStore.getState().focusedSessionId).toBe(heir!.id)
+  })
+
+  it('세션이 글을 쓰다 에러가 나면 아무것도 지우지 않는다 — 파괴는 성공 뒤에만', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho2')
+    mock.sessions.set('ho-s2', sessionInfo('ho-s2', { projectId: proj.id, name: '메아2' }))
+    await useStore.getState().attach(mock)
+
+    const done = useStore.getState().handoffSession('ho-s2')
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-s2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    mock.emit({ type: 'state_change', sessionId: 'ho-s2', state: 'error' } as NormalizedEvent)
+    await done
+
+    expect(mock.sessions.has('ho-s2')).toBe(true)
+    expect(mock.externallyDeleted).not.toContain('ho-s2')
+    expect(useStore.getState().toast).toMatch(/Handoff failed/)
+  })
+
+  it('워크트리 세션은 거른다 — 워크트리의 수명이 세션에 묶여 있다', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho3')
+    mock.sessions.set(
+      'ho-s3',
+      sessionInfo('ho-s3', { projectId: proj.id, worktree: { path: '/tmp/wt', branch: 'centralu/x' } }),
+    )
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().handoffSession('ho-s3')
+
+    expect(mock.sessions.has('ho-s3')).toBe(true)
+    expect((useStore.getState().chat['ho-s3'] ?? []).length).toBe(0)
+    expect(useStore.getState().toast).toMatch(/Worktree sessions/)
+  })
+})

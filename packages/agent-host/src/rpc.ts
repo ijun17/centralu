@@ -62,8 +62,8 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'agents.deleteSession': async (p) => {
-      const { sessionId, deleteWorktree } = RpcMethods['agents.deleteSession'].params.parse(p)
-      await mgr.deleteSession(sessionId, deleteWorktree)
+      const { sessionId, deleteWorktree, deleteExternal } = RpcMethods['agents.deleteSession'].params.parse(p)
+      await mgr.deleteSession(sessionId, deleteWorktree, deleteExternal)
       return { ok: true as const }
     },
     'agents.worktreeStatus': async (p) =>

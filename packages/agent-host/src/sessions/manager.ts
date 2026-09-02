@@ -1331,7 +1331,7 @@ export class SessionManager {
    * @param deleteWorktree 워크트리까지 지울지. **기본은 남기는 것이다** — 에이전트가 몇 시간
    * 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다. UI가 사람에게 먼저 묻는다.
    */
-  async deleteSession(sessionId: string, deleteWorktree = false): Promise<void> {
+  async deleteSession(sessionId: string, deleteWorktree = false, deleteExternal = false): Promise<void> {
     const m = this.meta.get(sessionId)
     /*
      * 살아 있는 워크트리 자식이 있는 매니저는 지울 수 없다 (#69).
@@ -1359,6 +1359,25 @@ export class SessionManager {
     if (handle) {
       await handle.dispose().catch(() => {})
       this.handles.delete(sessionId)
+    }
+    /*
+     * 도구 쪽 원본 삭제 ("진짜로 삭제")는 **우리 쪽을 지우기 전에** 한다. 실패하면
+     * 그대로 던져서 세션이 목록에 남게 — "지웠다"고 답했는데 원본이 살아 있는 것이
+     * 최악이라서다(사람은 550MB가 사라진 줄 안다). dispose 뒤인 이유: codex는
+     * 살아 있는 동안 writer lock을 쥐고 있어 지울 수 없다.
+     */
+    if (deleteExternal && m) {
+      const externalId = m.externalId ?? m.importedFrom
+      if (externalId) {
+        const del = this.adapters.get(m.tool)?.deleteExternalConversation
+        if (!del) {
+          throw Object.assign(
+            new Error(`${m.tool} does not support deleting its conversation file`),
+            { code: 'internal' },
+          )
+        }
+        await del.call(this.adapters.get(m.tool), externalId, this.cwdFor(m))
+      }
     }
     if (m?.worktree && deleteWorktree) {
       /*
