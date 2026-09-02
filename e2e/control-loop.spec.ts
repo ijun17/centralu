@@ -971,6 +971,28 @@ test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면
   expect(beta.m.y).toBeGreaterThanOrEqual(0)
 })
 
+/*
+ * 좁은 사이드바 (도그푸딩: 사이드바를 줄이면 메뉴가 창 왼쪽 밖으로 나가 안 보였다).
+ * 메뉴는 버튼의 오른쪽 끝에 맞춰 왼쪽으로 펼쳐지는데, 버튼이 창 왼쪽 근처면
+ * 메뉴 폭(192px)이 최소 사이드바(180px)보다 넓어 왼쪽이 잘린다 — 세션 메뉴도
+ * 같은 껍데기(RowMenu)를 쓰므로 한쪽만 재면 둘 다 잰 것이다.
+ */
+test('사이드바가 좁아도 줄 메뉴는 화면 안에 온전히 있다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '좁은 데서')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate(() => (window as any).__store.getState().setSidebarWidth(0)) // 최소로 접힌다
+
+  await page.getByTestId('project-menu-alpha').click()
+  const pm = (await page.getByTestId('project-menu-open-alpha').boundingBox())!
+  expect(pm.x).toBeGreaterThanOrEqual(0)
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  const sm = (await page.getByTestId(`session-menu-open-${id}`).boundingBox())!
+  expect(sm.x).toBeGreaterThanOrEqual(0)
+})
+
 test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더에서 (M2.5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('project-menu-alpha').click()
@@ -1640,6 +1662,7 @@ test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page
   await newSession(page, 'alpha', '지울 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
+  await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
   // "되돌릴 수 없습니다"는 사실이 아니다 — 무엇이 지워지고 무엇이 남는지를 말한다
   await expect(page.getByTestId('confirm-delete')).toContainText('Chat history and attachments')
@@ -1659,6 +1682,7 @@ test('세션 삭제: 체크박스를 켜면 도구 쪽 원본까지 지운다 �
   await newSession(page, 'alpha', '진짜로 지울 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
+  await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
   // 기본: 원본은 남는다는 안내가 서 있다
   await expect(page.getByTestId('delete-notice')).toContainText('stays in')
@@ -1684,7 +1708,7 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   await newSession(page, 'alpha', '갈아탈 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
-  await page.getByTestId(`session-row-${id}`).hover()
+  await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
   await expect(page.getByTestId('handoff-warning')).toContainText('deleted for real')
   await page.getByTestId('confirm-handoff-yes').click()
@@ -2135,6 +2159,7 @@ test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명�
   await newSession(page, 'alpha', '지울 세션')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
+  await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
 
   // 실제보다 무섭게 말하면 사람은 정리하지 못하고 목록만 쌓인다
@@ -3867,9 +3892,9 @@ test('사이드바의 프로젝트 메뉴와 삭제 버튼이 같은 세로줄�
   await page.getByTestId(`session-row-${id}`).hover()
 
   const plus = (await page.getByTestId('project-menu-alpha').boundingBox())!
-  const del = (await page.getByTestId(`delete-session-${id}`).boundingBox())!
+  const dots = (await page.getByTestId(`session-menu-${id}`).boundingBox())!
 
-  expect(Math.abs(plus.x + plus.width - (del.x + del.width))).toBeLessThanOrEqual(1)
+  expect(Math.abs(plus.x + plus.width - (dots.x + dots.width))).toBeLessThanOrEqual(1)
 })
 
 /**
@@ -3887,7 +3912,7 @@ test('사이드바에서 세션 이름을 바꾼다 — 그 뒤 자동 이름이
   const row = page.getByTestId(`session-row-${id}`)
   await expect(row).toContainText('This session is being continued')
 
-  await row.hover()
+  await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`rename-session-${id}`).click()
   const input = page.getByTestId(`session-name-input-${id}`)
   await input.fill('가드 MCP')
@@ -5419,8 +5444,10 @@ test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', asyn
    * 워크트리 세션은 이제 매니저 아래 들여 그려진다 (#69) — 목록의 첫 줄은 매니저다.
    * `.first()`로 잡으면 매니저의 삭제를 누르게 되므로, 들여진 줄을 집는다.
    */
-  const row = page.locator('li[data-nested]').getByTestId(/^session-row-/)
-  await row.hover()
+  await page
+    .locator('li[data-nested]')
+    .getByTestId(/^session-menu-/)
+    .click()
   await page
     .locator('li[data-nested]')
     .getByTestId(/^delete-session-/)
@@ -5439,9 +5466,9 @@ test('워크트리가 아닌 세션을 지울 때는 워크트리 이야기를 �
   await newSession(page, 'alpha', '보통 세션')
 
   await page
-    .getByTestId(/^session-row-/)
+    .getByTestId(/^session-menu-/)
     .first()
-    .hover()
+    .click()
   await page
     .getByTestId(/^delete-session-/)
     .first()
@@ -6164,9 +6191,9 @@ test('워크트리 세션은 사이드바에서 매니저 아래에 선다', asy
   const nested = page.locator('li[data-nested]')
   await expect(nested).toHaveCount(1)
 
-  // 매니저 줄을 호버하면 +가 나온다 — 누르면 워크트리가 켜진 채 새 세션 창이 열린다
-  await manager.hover()
+  // 매니저 줄의 ⋯ 메뉴에 있다 — 누르면 워크트리가 켜진 채 새 세션 창이 열린다
   const mgrRow = page.locator('li', { has: manager })
+  await mgrRow.locator('[data-testid^="session-menu-"]').click()
   await mgrRow.locator('[data-testid^="new-worktree-session-"]').click()
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
@@ -6231,7 +6258,7 @@ test('프로젝트 헤더의 +로 열면 워크트리는 여전히 꺼져 있다
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   const manager = page.getByText('Worktrees', { exact: true })
-  await manager.hover()
+  await page.locator('li', { has: manager }).locator('[data-testid^="session-menu-"]').click()
   await page.locator('li', { has: manager }).locator('[data-testid^="new-worktree-session-"]').click()
   await page.keyboard.press('Escape')
 

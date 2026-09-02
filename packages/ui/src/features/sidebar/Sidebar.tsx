@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { TOOL_META, type ProjectInfo, type SessionState, type ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -9,8 +9,7 @@ import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { CloseIcon, DotsIcon, HandoffIcon, PencilIcon, PlusIcon } from '../../components/icons.jsx'
-import { IconButton } from '../../components/IconButton.jsx'
+import { DotsIcon, PlusIcon } from '../../components/icons.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
@@ -403,6 +402,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const [confirming, setConfirming] = useState<string | null>(null)
   /** 인수인계 확인 창이 떠 있는 세션 (없으면 null) */
   const [handingOff, setHandingOff] = useState<string | null>(null)
+  /** 열린 세션 메뉴 — 줄이 여럿이라 앵커는 ref가 아니라 누른 버튼 요소로 든다 */
+  const [sessionMenu, setSessionMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
   /** 지금 이름을 고치는 중인 세션. 한 번에 하나만 — 두 줄이 동시에 입력창이면 어느 쪽이 활성인지 모른다 */
   const [renaming, setRenaming] = useState<string | null>(null)
   const renameSession = useStore((s) => s.rename)
@@ -513,7 +514,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         {menuOpen && (
           <ProjectMenu
             project={project}
-            anchor={menuAnchor}
+            anchorEl={menuAnchor.current}
             onClose={() => setMenuOpen(false)}
             onNewSession={() => openNewSession(projectId)}
             onStartManager={() => setManagerDialog(true)}
@@ -618,75 +619,48 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                     */}
                   </button>
                   {/*
-                    이름 고치기와 삭제만 둔다.
-
-                    '치우기'를 따로 두려 했지만, 삭제해도 도구(클로드·코덱스)에는 대화가
-                    그대로 남아 '+ → 이전 대화'로 되찾을 수 있다. 그러면 둘의 실질 차이가
-                    거의 없어서 버튼만 늘고 무엇이 다른지 설명하기 어려워진다.
-                    대신 **무엇이 지워지고 무엇이 남는지**를 확인 창에서 분명히 말한다.
+                    아이콘 넷(연필·인수인계·워크트리·삭제) 대신 메뉴 하나 (도그푸딩 요청 —
+                    프로젝트 줄과 같은 문법). 아이콘이 넷이 되자 이름 없는 그림 맞추기가
+                    됐고, 그중 둘(인수인계·삭제)은 잘못 누르면 안 되는 것이었다.
                   */}
                   {/*
                     오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
                     같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
                     (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
                   */}
-                  <span className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
-                    {/*
-                      이름 고치기는 삭제 **왼쪽**에 둔다. 되돌릴 수 없는 일(삭제)이 바깥쪽
-                      끝에 서야, 손이 목록 밖에서 들어올 때 그것부터 지나치지 않는다.
-                    */}
-                    <IconButton
-                      label="Rename (auto-naming stops)"
-                      testId={`rename-session-${s.id}`}
-                      align="right"
-                      onClick={() => setRenaming(s.id)}
+                  <span
+                    className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 ${
+                      sessionMenu?.id === s.id ? 'opacity-100' : 'opacity-0'
+                    }`}
+                    data-testid={`session-actions-${s.id}`}
+                  >
+                    {/* 프로젝트 ⋯와 같은 맨 버튼 — 이름 붙은 메뉴가 바로 뜨므로 툴팁은 소음이다 */}
+                    <button
+                      type="button"
+                      aria-label={`Actions for ${s.name}`}
+                      onClick={(e) => {
+                        // updater 안에서 읽으면 늦다 — React가 핸들러를 끝내며 currentTarget을 비운다
+                        const el = e.currentTarget
+                        setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
+                      }}
+                      data-testid={`session-menu-${s.id}`}
+                      className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
                     >
-                      <PencilIcon size={13} />
-                    </IconButton>
-                    {/*
-                      인수인계하고 새로 시작 (도그푸딩 — 늙은 스레드의 되살리기가 느려지는
-                      문제의 출구). 워크트리 세션은 아직 못 한다: 워크트리의 수명이 세션에
-                      묶여 있어 갈아타기의 "같은 자리"가 성립하지 않는다.
-                    */}
-                    {!s.worktree && (
-                      <IconButton
-                        label="Hand off to a fresh session"
-                        testId={`handoff-session-${s.id}`}
-                        align="right"
-                        onClick={() => setHandingOff(s.id)}
-                      >
-                        <HandoffIcon size={13} />
-                      </IconButton>
-                    )}
-                    {/*
-                      매니저 줄의 + (#69) — 이 세션 아래에 워크트리 세션을 하나 더.
-                      프로젝트 헤더의 +와 같은 창을 열되 워크트리가 켜진 채 열린다.
-                      호버 그룹 안에 두는 이유: 항상 보이면 헤더의 +와 두 개가 나란히
-                      떠서 어느 쪽이 무엇인지 설명이 필요해진다 — 필요할 때만 보인다.
-                    */}
-                    {managerOfLive > 0 && (
-                      <IconButton
-                        label={`New worktree session under ${s.name}`}
-                        testId={`new-worktree-session-${s.id}`}
-                        align="right"
-                        onClick={() => openNewSession(projectId, { worktree: true })}
-                      >
-                        <PlusIcon size={13} />
-                      </IconButton>
-                    )}
-                    {/*
-                      삭제는 호버에서만 나타난다 — 되돌릴 수 없는 일을 목록에 늘어놓으면
-                      누르려던 것 옆에서 잘못 눌린다. 대신 나타났을 때는 확실히 잡히도록 키웠다.
-                    */}
-                    <IconButton
-                      label="Delete permanently (history goes too)"
-                      testId={`delete-session-${s.id}`}
-                      align="right"
-                      onClick={() => setConfirming(s.id)}
-                    >
-                      <CloseIcon size={13} />
-                    </IconButton>
+                      <DotsIcon size={14} />
+                    </button>
                   </span>
+                  {sessionMenu?.id === s.id && (
+                    <SessionMenu
+                      session={s}
+                      managerOfLive={managerOfLive}
+                      anchorEl={sessionMenu.el}
+                      onClose={() => setSessionMenu(null)}
+                      onRename={() => setRenaming(s.id)}
+                      onNewWorktree={() => openNewSession(projectId, { worktree: true })}
+                      onHandoff={() => setHandingOff(s.id)}
+                      onDelete={() => setConfirming(s.id)}
+                    />
+                  )}
                 </>
               )}
             </SessionRow>
@@ -857,20 +831,21 @@ function SessionNameInput({
  * 삭제는 **맨 아래, 선 하나 아래**다. 위쪽 둘은 매일 하는 일이고 이건 한 번 하는 일이라,
  * 손이 기억으로 움직일 때 같은 무리에 있으면 안 된다.
  */
-function ProjectMenu({
-  project,
-  anchor,
+/**
+ * 사이드바 줄 메뉴의 공통 껍데기 — 배치(줌 보정·뒤집기·가장자리)와 닫힘 규칙이 여기 산다.
+ * 프로젝트 메뉴에서 뽑아냈다: 세션 줄도 같은 메뉴를 갖게 되면서, 이 계산을 두 번
+ * 적으면 한쪽만 고치는 미래가 눈에 보였다 (줌 보정이 이미 한 번 그랬다).
+ */
+function RowMenu({
+  anchorEl,
+  testId,
   onClose,
-  onNewSession,
-  onStartManager,
-  onDelete,
+  children,
 }: {
-  project: ProjectInfo
-  anchor: RefObject<HTMLElement | null>
+  anchorEl: HTMLElement | null
+  testId: string
   onClose: () => void
-  onNewSession: () => void
-  onStartManager: () => void
-  onDelete: () => void
+  children: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -892,9 +867,8 @@ function ProjectMenu({
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
   useLayoutEffect(() => {
     const place = () => {
-      const a = anchor.current
       const el = ref.current
-      if (!a || !el) return
+      if (!anchorEl || !el) return
       /*
        * **전부 레이아웃 px로 환산해서 계산한다** — 확대(--text-zoom) 때문이다.
        *
@@ -907,8 +881,9 @@ function ProjectMenu({
        * 화면 px(rect)와 창 px만 확대로 나눠서 한 좌표계로 모은다.
        */
       const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
-      const r = a.getBoundingClientRect()
+      const r = anchorEl.getBoundingClientRect()
       const h = el.offsetHeight
+      const w = el.offsetWidth
       const winH = window.innerHeight / zoom
       const winW = window.innerWidth / zoom
       const GAP = 4 // 버튼과 메뉴 사이 — 붙여 놓으면 어디까지가 버튼인지 안 보인다
@@ -916,8 +891,14 @@ function ProjectMenu({
       const below = r.bottom / zoom + GAP
       setPos({
         top: below + h <= winH - EDGE ? below : Math.max(EDGE, r.top / zoom - GAP - h),
-        // 오른쪽 끝을 버튼에 맞춘다 — 메뉴가 버튼에서 흘러나온 것처럼 읽힌다
-        right: Math.max(EDGE, winW - r.right / zoom),
+        /*
+         * 오른쪽 끝을 버튼에 맞춘다 — 메뉴가 버튼에서 흘러나온 것처럼 읽힌다.
+         * 단 왼쪽 가장자리도 지킨다 (도그푸딩: 사이드바가 좁으면 메뉴가 창 왼쪽 밖으로
+         * 나가 안 보였다). right는 "창 오른쪽에서 얼마"라 값이 클수록 메뉴가 왼쪽으로
+         * 가는데, 버튼이 창 왼쪽 가까이 서면 메뉴 폭만큼이 화면 밖이 된다 —
+         * 메뉴의 왼쪽 끝이 EDGE 안쪽에 남도록 위에서 자른다.
+         */
+        right: Math.max(EDGE, Math.min(winW - r.right / zoom, winW - EDGE - w)),
       })
     }
     place()
@@ -932,7 +913,7 @@ function ProjectMenu({
       window.removeEventListener('scroll', place, true)
       window.removeEventListener('resize', place)
     }
-  }, [anchor])
+  }, [anchorEl])
   /*
    * 바깥을 누르면 닫는다. 메뉴가 열린 채로 다른 프로젝트를 누르면 두 메뉴가 동시에
    * 떠 있는 것처럼 보이는데, 실제로는 각자 자기 상태를 들고 있어 아무도 안 닫힌다.
@@ -951,25 +932,37 @@ function ProjectMenu({
     }
   }, [onClose])
 
-  const Row = ({
-    label,
-    onPick,
-    testId,
-    danger,
-  }: {
-    label: string
-    onPick: () => void
-    testId: string
-    danger?: boolean
-  }) => (
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      data-testid={testId}
+      className="fixed z-30 w-48 rounded border border-edge bg-panel py-1 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
+      style={{ top: pos?.top ?? 0, right: pos?.right ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** 메뉴 한 줄. 닫기는 onClick에 묶어서 받는다 — 여는 쪽이 onClose를 안다 */
+function ActionRow({
+  label,
+  onClick,
+  testId,
+  danger,
+}: {
+  label: string
+  onClick: () => void
+  testId: string
+  danger?: boolean
+}) {
+  return (
     <button
       type="button"
       role="menuitem"
       data-testid={testId}
-      onClick={() => {
-        onPick()
-        onClose()
-      }}
+      onClick={onClick}
       className={`block w-full px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-graphite/25 ${
         danger ? 'text-ash hover:text-beacon' : 'text-ash hover:text-chalk'
       }`}
@@ -977,30 +970,109 @@ function ProjectMenu({
       {label}
     </button>
   )
+}
 
+function ProjectMenu({
+  project,
+  anchorEl,
+  onClose,
+  onNewSession,
+  onStartManager,
+  onDelete,
+}: {
+  project: ProjectInfo
+  anchorEl: HTMLElement | null
+  onClose: () => void
+  onNewSession: () => void
+  onStartManager: () => void
+  onDelete: () => void
+}) {
+  const pick = (fn: () => void) => () => {
+    fn()
+    onClose()
+  }
   return (
-    <div
-      ref={ref}
-      role="menu"
-      data-testid={`project-menu-open-${project.name}`}
-      className="fixed z-30 w-48 rounded border border-edge bg-panel py-1 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
-      style={{ top: pos?.top ?? 0, right: pos?.right ?? 0, visibility: pos ? 'visible' : 'hidden' }}
-    >
-      <Row label="New session" onPick={onNewSession} testId={`new-session-${project.name}`} />
+    <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
+      <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
       {/*
         매니저 자리를 **먼저** 만드는 문 (#76). 저장소이면서 아직 자리가 없을 때만 나온다 —
         만들고 나면 그 자리는 세션 목록에 줄로 서 있으므로, 같은 일을 하는 문이 둘이 되지 않는다.
       */}
       {project.git?.isRepo && !project.worktreeManager && (
-        <Row
+        <ActionRow
           label="Start worktree manager"
-          onPick={onStartManager}
+          onClick={pick(onStartManager)}
           testId={`start-worktree-manager-${project.name}`}
         />
       )}
       <div className="my-1 border-t border-edge" />
-      <Row label="Delete project…" onPick={onDelete} testId={`delete-project-${project.name}`} danger />
-    </div>
+      <ActionRow
+        label="Delete project…"
+        onClick={pick(onDelete)}
+        testId={`delete-project-${project.name}`}
+        danger
+      />
+    </RowMenu>
+  )
+}
+
+/**
+ * 세션 줄의 행동 메뉴 (도그푸딩: 호버 아이콘이 넷까지 늘었다 — 연필·인수인계·워크트리·
+ * 삭제. 프로젝트 줄이 아이콘 셋에서 메뉴로 간 것과 같은 이유다: **이름이 필요하다.**
+ * 인수인계 화살표가 무엇인지는 눌러 보기 전에 모르고, 그중 둘은 눌러 보면 안 되는 것이다.)
+ *
+ * 삭제는 맨 아래 선 하나 아래 — 매일 하는 일과 한 번 하는 일을 같은 무리에 두지 않는다.
+ */
+function SessionMenu({
+  session,
+  managerOfLive,
+  anchorEl,
+  onClose,
+  onRename,
+  onNewWorktree,
+  onHandoff,
+  onDelete,
+}: {
+  session: SessionSummary
+  managerOfLive: number
+  anchorEl: HTMLElement | null
+  onClose: () => void
+  onRename: () => void
+  onNewWorktree: () => void
+  onHandoff: () => void
+  onDelete: () => void
+}) {
+  const pick = (fn: () => void) => () => {
+    fn()
+    onClose()
+  }
+  return (
+    <RowMenu anchorEl={anchorEl} testId={`session-menu-open-${session.id}`} onClose={onClose}>
+      <ActionRow label="Rename" onClick={pick(onRename)} testId={`rename-session-${session.id}`} />
+      {/* 매니저 줄에만 — 이 세션 아래에 워크트리 세션을 하나 더 (#69) */}
+      {managerOfLive > 0 && (
+        <ActionRow
+          label="New worktree session"
+          onClick={pick(onNewWorktree)}
+          testId={`new-worktree-session-${session.id}`}
+        />
+      )}
+      {/* 워크트리 세션은 아직 못 한다 — 워크트리의 수명이 세션에 묶여 있다 */}
+      {!session.worktree && (
+        <ActionRow
+          label="Hand off to a fresh session…"
+          onClick={pick(onHandoff)}
+          testId={`handoff-session-${session.id}`}
+        />
+      )}
+      <div className="my-1 border-t border-edge" />
+      <ActionRow
+        label="Delete session…"
+        onClick={pick(onDelete)}
+        testId={`delete-session-${session.id}`}
+        danger
+      />
+    </RowMenu>
   )
 }
 
