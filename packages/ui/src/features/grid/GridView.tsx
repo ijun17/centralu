@@ -229,25 +229,22 @@ export function GridView() {
                 그리드는 읽는 화면이 아니라 **보는 화면**이라 곁눈으로 잡혀야 한다.
               */
               /*
-                고른 칸은 테두리가 밝다. 도는 테두리(응답 중)와 겹쳐도 읽힌다 —
-                하나는 움직임이고 하나는 밝기라, 무채색 규칙 안에서 서로 다른 축이다.
+                고른 칸을 테두리로 밝히지 않는다 (도그푸딩 두 번의 결론). 처음에는
+                갱신이 안 돼서 한 칸만 며칠이고 밝았고, 손을 따라가게 고치자 이번에는
+                표시 자체가 필요 없다는 판단이 왔다 — 어디에 타이핑 중인지는 커서와
+                입력창의 포커스 윤곽이 이미 말한다. 응답 중(cc-orbit-ring)만 남는다.
               */
-              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border bg-void transition-opacity ${
-                focusedSessionId === id ? 'border-slate' : 'border-edge'
-              } ${sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''} ${
-                dragging === id ? 'opacity-40' : ''
-              }`}
+              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-edge bg-void transition-opacity ${
+                sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
+              } ${dragging === id ? 'opacity-40' : ''}`}
               data-focused={focusedSessionId === id || undefined}
               data-testid={`grid-panel-${id}`}
               /*
-                손이 닿은 칸이 고른 칸이다 (도그푸딩: 앱을 켤 때 복원된 세션의 칸만
-                계속 밝았다 — 다른 칸에 며칠을 타이핑해도 표시는 안 움직였다).
-                밝은 테두리가 focusedSessionId를 그리는데, 그리드 안에서는 아무도
-                그 값을 바꾸지 않았던 것이다. 입력창에 포커스가 앉는 순간이 "여기서
-                일한다"의 실체이므로 그때 고른 것도 따라온다 — preferGrid라 뷰는
-                그대로고, markRead·"마지막 보던 세션"(다음 실행의 예열 대상)도
-                같이 맞는 값이 된다. WKWebView는 버튼 클릭에 포커스를 주지 않으므로
-                ×버튼 따위로는 안 움직인다.
+                손이 닿은 칸이 고른 칸이다 (도그푸딩: 앱을 켤 때 복원된 세션에
+                박제된 채 안 움직였다). 그리는 데는 이제 안 쓰지만 값은 실체가 있다:
+                markRead가 이 칸의 안읽음을 지우고, "마지막 보던 세션"(다음 실행의
+                예열 대상)이 실제 손이 간 세션이 된다. preferGrid라 뷰는 그대로고,
+                WKWebView는 버튼 클릭에 포커스를 주지 않으므로 ×버튼으로는 안 움직인다.
               */
               onFocusCapture={() => {
                 if (focusedSessionId !== id) focusSession(id, { preferGrid: true })

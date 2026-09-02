@@ -583,19 +583,21 @@ test('그리드 칸 테두리와 사이드바 표식은 같은 각도로 돈다 
 })
 
 /*
- * ── 밝은 테두리는 손을 따라간다 ────────────────────────────────────
+ * ── 고른 세션은 손을 따라간다 ──────────────────────────────────────
  *
- * 고른 칸 표시는 focusedSessionId를 그리는데, 그리드 안에서는 아무도 그 값을
- * 바꾸지 않았다 — 앱을 켤 때 복원된 세션의 칸만 며칠이고 밝았다 (도그푸딩).
- * 다른 칸의 입력창에 손을 얹으면 고른 것도 따라와야 하고, 뷰는 그리드에 남아야 한다.
+ * 그리드 안에서는 아무도 focusedSessionId를 바꾸지 않았다 — 앱을 켤 때 복원된
+ * 세션에 며칠이고 박제됐다 (도그푸딩). 다른 칸의 입력창에 손을 얹으면 고른 것도
+ * 따라와야 한다: markRead와 "마지막 보던 세션"(다음 실행의 예열 대상)이 이 값에서
+ * 나온다. 뷰는 그리드에 남아야 한다. (테두리로 그리지는 않는다 — 같은 도그푸딩에서
+ * 표시 자체를 걷어냈다. 커서가 이미 말하는 것을 테두리가 반복할 이유가 없다.)
  */
-test('그리드에서 다른 칸의 입력창을 누르면 밝은 테두리가 따라온다 — 뷰는 그리드 그대로', async ({ page }) => {
+test('그리드에서 다른 칸의 입력창을 누르면 고른 세션이 따라온다 — 뷰는 그리드 그대로', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', '첫째')
   const b = await newSession(page, 'alpha', 'claude', '둘째')
   await openGrid(page, [a, b])
 
-  // 마지막으로 고른 세션(b)의 칸이 밝은 채로 시작한다
+  // 마지막으로 고른 세션(b)에서 시작한다
   await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-focused', 'true')
 
   await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').click()
