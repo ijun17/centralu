@@ -6482,6 +6482,9 @@ test('프로젝트 삭제: 이름을 쳐야 열리고, 파일 체크는 경고�
   await expect(page.getByTestId('delete-project-note')).toHaveCount(0)
   await expect(page.getByTestId('delete-project-warning')).toContainText('/tmp/alpha')
   await expect(confirm).toHaveText('Delete and trash folder')
+  // 경고는 삭제 팔레트로 선다 (도그푸딩: 위험한 자리는 빨갛게) — diff의 del 색 그대로다
+  await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', 'rgb(43, 21, 23)')
+  await expect(confirm).toHaveCSS('color', 'rgb(255, 161, 152)')
 
   // 4. 지운다 — 프로젝트도 세션도 사라지고, 폴더는 휴지통으로 갔다
   await confirm.click()

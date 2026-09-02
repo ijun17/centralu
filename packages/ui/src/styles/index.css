@@ -187,6 +187,12 @@
     --cc-check-bg: var(--color-ash);
     --cc-check-mark: var(--color-void);
   }
+  /* 위험을 켜는 체크 (프로젝트 삭제의 '폴더까지') — diff 삭제 팔레트를 그대로 쓴다 */
+  input[type='checkbox'].accent-del {
+    border-color: var(--color-del);
+    --cc-check-bg: var(--color-del);
+    --cc-check-mark: var(--color-del-bg);
+  }
   input[type='checkbox']:checked {
     background: var(--cc-check-bg);
     border-color: var(--cc-check-bg);

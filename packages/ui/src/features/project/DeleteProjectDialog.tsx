@@ -57,13 +57,20 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           같은 자리에서 설명이 경고로 바뀐다. 두 문장을 함께 띄우면 어느 쪽이 지금
           벌어질 일인지 사람이 골라 읽어야 하는데, 그 고르기는 여기서 하면 안 되는 일이다.
         */}
+        {/*
+          위험한 상태는 **빨갛다** (도그푸딩 요청). 색은 diff의 삭제 팔레트(--color-del)를
+          그대로 쓴다 — 이 앱에서 빨강은 이미 "없어지는 것"의 색이라, 새 언어를
+          만드는 게 아니라 있는 언어를 넓히는 것이다. 제일 아픈 문장(커밋 안 된
+          작업까지 간다)이 제일 진하다.
+        */}
         {withFiles ? (
           <p
-            className="mt-2 rounded border border-ash/40 bg-panel px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
+            className="mt-2 rounded border border-del/40 bg-del-bg px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
             data-testid="delete-project-warning"
           >
             The folder itself goes to the Trash — <span className="readout text-ash">{project.path}</span> and
-            everything inside it, including work the agents have not committed. Centralu’s records go with it.
+            everything inside it, <span className="text-del">including work the agents have not committed</span>.
+            Centralu’s records go with it.
           </p>
         ) : (
           <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="delete-project-note">
@@ -73,12 +80,15 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         )}
 
         <label
-          className="mt-3 flex cursor-pointer items-start gap-2 text-[11px] text-ash hover:text-chalk"
+          className={`mt-3 flex cursor-pointer items-start gap-2 text-[11px] ${
+            withFiles ? 'text-del' : 'text-ash hover:text-chalk'
+          }`}
           data-testid="delete-project-files-toggle"
         >
+          {/* 켜는 순간 체크도 빨갛다 — 경고문과 같은 palette, 같은 순간 */}
           <input
             type="checkbox"
-            className="mt-0.5 accent-ash"
+            className={`mt-0.5 ${withFiles ? 'accent-del' : 'accent-ash'}`}
             checked={withFiles}
             onChange={(e) => setWithFiles(e.target.checked)}
           />
@@ -120,11 +130,12 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           >
             Cancel
           </button>
+          {/* 실행 버튼도 삭제 팔레트다 — 되돌릴 수 없는 일의 방아쇠가 중립색이면 안 된다 */}
           <button
             type="submit"
             disabled={!armed || busy}
             data-testid="delete-project-confirm"
-            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+            className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del transition-colors hover:border-del/70 disabled:opacity-40"
           >
             {busy ? 'Deleting…' : withFiles ? 'Delete and trash folder' : 'Delete'}
           </button>
