@@ -729,3 +729,38 @@ describe('전송 실패 시 쓴 글 복원', () => {
     expect(useStore.getState().drafts[s]).toBeUndefined()
   })
 })
+
+/**
+ * 그리드 세션 예열 (도그푸딩: 메아 — codex 큰 스레드 되살리기가 실측 7~13초).
+ * 줄일 수 없는 비용은 사람이 안 기다리는 시간으로 옮긴다: 그리드에 올려둔 세션은
+ * 앱이 뜰 때 백그라운드에서 깨워 둔다. 실패해도 앱은 뜨고, 실패는 클릭해서 깨울
+ * 때와 같은 자리(wakeError)에 남는다.
+ */
+describe('그리드 세션 예열', () => {
+  it('attach가 그리드에 올려둔 잠든 세션을 미리 깨운다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('warm-a', sessionInfo('warm-a', { live: false }))
+    mock.sessions.set('warm-b', sessionInfo('warm-b', { live: false }))
+    await mock.agents.setGridView(['warm-a', 'warm-b'])
+    await useStore.getState().attach(mock)
+
+    await vi.waitFor(() => {
+      expect(useStore.getState().sessions['warm-a']!.live).toBe(true)
+      expect(useStore.getState().sessions['warm-b']!.live).toBe(true)
+    })
+  })
+
+  it('깨우기 실패는 그 칸의 wakeError로 남는다 — 앱은 계속 뜬다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('warm-c', sessionInfo('warm-c', { live: false }))
+    mock.unresumable.add('warm-c')
+    await mock.agents.setGridView(['warm-c'])
+    await useStore.getState().attach(mock)
+
+    await vi.waitFor(() => {
+      expect(useStore.getState().wakeError['warm-c']).toBeTruthy()
+    })
+    expect(useStore.getState().connection).toBe('connected')
+    expect(useStore.getState().sessions['warm-c']!.live).toBe(false)
+  })
+})
