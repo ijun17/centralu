@@ -19,9 +19,14 @@ import { useStore } from '../../store/store.js'
  * 도구가 올라가는데 이 앱만 제자리인 그 상황을 다시 만들지 않는다.
  */
 
+/*
+ * 힌트는 짧아야 한다. 'Asks only for risky actions'(27자)는 w-56 메뉴에서 라벨
+ * 공간을 다 먹어 **Normal이라는 글자 자체가 안 보였다** (도그푸딩) — 설명이
+ * 이름을 지우면 그 줄은 고를 수 없는 줄이다.
+ */
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'safe', label: 'Safe', hint: 'Asks for everything' },
-  { value: 'normal', label: 'Normal', hint: 'Asks only for risky actions' },
+  { value: 'normal', label: 'Normal', hint: 'Asks when risky' },
   { value: 'auto', label: 'Auto', hint: 'Never asks' },
 ]
 
@@ -117,8 +122,14 @@ function MenuRow({
       <span className="w-2 shrink-0 text-[10px] leading-none text-ash" aria-hidden>
         {selected ? '✓' : ''}
       </span>
-      <span className="min-w-0 truncate text-[12px]">{label}</span>
-      {hint && <span className="readout ml-auto shrink-0 truncate text-[10px] text-slate">{hint}</span>}
+      {/*
+        라벨이 이긴다. 전에는 힌트가 shrink-0이라 좁아지면 **라벨이 0까지 줄었다** —
+        설명은 남고 이름이 사라지는 줄이 됐다 (Normal 실종 사건). shrink 가중치를
+        낮춰 라벨이 마지막까지 버티게 하되, 모델 이름처럼 라벨 자신이 길 때는
+        여전히 말줄임이 된다 (min-w-0 truncate는 그대로다).
+      */}
+      <span className="min-w-0 shrink-[0.2] truncate text-[12px]">{label}</span>
+      {hint && <span className="readout ml-auto min-w-0 truncate text-[10px] text-slate">{hint}</span>}
     </button>
   )
 }

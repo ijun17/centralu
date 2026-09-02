@@ -5085,6 +5085,24 @@ test('설정은 상단 바에서 바로 열린다', async ({ page }) => {
 })
 
 /*
+ * 설정 메뉴 줄에서 **이름이 설명에 밀려 사라지면 안 된다** (도그푸딩: 권한 묶음에서
+ * Normal이 안 보였다). 힌트가 shrink-0이라 좁은 메뉴(w-56)에서 라벨이 0까지
+ * 줄어들었다 — 설명은 남고 고를 이름이 사라진 줄이었다. 세 줄 모두 라벨이
+ * 잘리지 않았는지를 직접 잰다.
+ */
+test('권한 프리셋 이름은 설명에 밀려 잘리지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 지시')
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-menu')).toBeVisible()
+  for (const v of ['safe', 'normal', 'auto']) {
+    const label = page.getByTestId(`settings-preset-${v}`).locator('span').nth(1)
+    await expect(label, v).not.toBeEmpty()
+    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth), `${v} label clipped`).toBe(true)
+  }
+})
+
+/*
  * 체크박스는 우리가 그린다 (도그푸딩: 창이 키를 잃으면 체크의 배경색이 OS 손에서
  * 회색으로 바뀌었다 — accent-color로는 그 비활성 칠을 못 이긴다). 크로미움은
  * macOS의 비활성 칠을 재현하지 못하므로, 여기서는 그 원인 — 그리기를 OS에
