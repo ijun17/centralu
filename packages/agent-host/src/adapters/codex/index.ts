@@ -55,6 +55,19 @@ class CodexSession implements SessionHandle {
   private approvals = new Map<string, number | string>()
   private reqCounter = 0
   private alwaysAllow = new Set<string>()
+  /**
+   * compact/review 턴이 도는 동안 도착한 메시지 (도그푸딩 실측 2026-09-02, MGH 세션).
+   *
+   * codex 0.147.0의 turn/start는 compact 턴이 도는 동안 **성공을 답하면서 입력을 버린다** —
+   * rollout에는 설정 적용(thread_settings_applied)만 남고 user 메시지는 한 줄도 남지 않았고,
+   * 에러도 오지 않아 우리 화면에는 보낸 것처럼 보였다. 상류도 이 턴들을 조종 불가로
+   * 못박는다 ("cannot steer a compact turn" — turn_processor.rs). 일반 턴은 다르다:
+   * codex core가 도는 턴에 입력을 합류시키므로 그대로 보낸다. 그래서 **우리가 시작한**
+   * compact/review 동안만 여기 쌓고, 그 턴이 끝나면 한 턴으로 내보낸다.
+   */
+  private pendingInputs: string[] = []
+  /** 조종 불가 턴(compact/review)이 도는 중 — 그 턴은 우리가 시작했으므로 우리가 안다 */
+  private blockingTurn = false
   /** 스레드 준비 완료 — 생성 시점에 await해 externalId를 확보한다 */
   readonly ready: Promise<void>
 
@@ -209,6 +222,11 @@ class CodexSession implements SessionHandle {
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
+    // compact/review가 끝나는 자리 — 그동안 쌓인 메시지가 있으면 이제 내보낸다
+    if (n.method === 'turn/completed' && this.blockingTurn) {
+      this.blockingTurn = false
+      this.flushPending()
+    }
     for (const e of normalizeNotification(this.sessionId, n)) {
       /*
        * 경로만 실려 온 이미지는 여기서 바이트를 채운다 (#40). normalize는 순수 함수라
@@ -299,6 +317,15 @@ class CodexSession implements SessionHandle {
     void this.ready.then(() => {
       if (!this.threadId) throw new Error('Thread is not ready')
       /*
+       * compact/review가 도는 동안은 보내지 않고 쌓는다 — pendingInputs 주석의 실측이
+       * 근거다 (보내면 codex가 성공을 답하며 **버린다**). 슬래시 함수가 여기 끼면
+       * 글자 그대로 전달되는 한계는 남는데, compact 중의 /compact은 어차피 무의미하다.
+       */
+      if (this.blockingTurn) {
+        this.pendingInputs.push(text)
+        return
+      }
+      /*
        * **compact은 메시지가 아니라 함수다** (도그푸딩 지적 — "메시지 보내면 작동하는게
        * 아니라"가 정확한 관찰이었다). codex CLI에서 /compact은 대화에 들어가지 않고
        * 압축을 실행하는데, app-server 경로에는 그 슬래시 처리기가 없다 — turn/start로
@@ -308,19 +335,32 @@ class CodexSession implements SessionHandle {
        * 기존 normalize 배관(압축 중 표시·완료 마커)이 그대로 받는다.
        */
       if (text.trim() === '/compact') {
-        return this.client.request('thread/compact/start', { threadId: this.threadId })
+        this.blockingTurn = true
+        return this.client.request('thread/compact/start', { threadId: this.threadId }).catch((e: unknown) => {
+          // 시작하지 못한 턴을 기다리면 큐가 영원히 잠긴다 — 풀고 쌓인 것부터 내보낸다
+          this.blockingTurn = false
+          this.flushPending()
+          throw e
+        })
       }
       /*
        * /review도 같은 종류다 (review/start RPC). 실측: 인자 없으면 codex CLI의 기본과
        * 같은 "지금 바뀐 것들" 리뷰, 인자가 있으면 그 지시대로(custom). 결과는 보통
        * 턴처럼 온다 — 리뷰 본문은 agentMessage로 스트리밍되고(기존 배관), 시작·끝은
        * enteredReviewMode/exitedReviewMode 아이템으로 온다 (normalize가 activity로 바꾼다).
+       * 상류가 review 턴도 조종 불가로 분류하므로("cannot steer a review turn")
+       * compact과 같이 큐로 지킨다.
        */
       if (text.trim() === '/review' || text.trim().startsWith('/review ')) {
         const instructions = text.trim().slice('/review'.length).trim()
+        this.blockingTurn = true
         return this.client.request('review/start', {
           threadId: this.threadId,
           target: instructions ? { type: 'custom', instructions } : { type: 'uncommittedChanges' },
+        }).catch((e: unknown) => {
+          this.blockingTurn = false
+          this.flushPending()
+          throw e
         })
       }
       return this.client.request('turn/start', {
@@ -332,6 +372,24 @@ class CodexSession implements SessionHandle {
          */
         ...(this.opts.effort ? { effort: this.opts.effort } : {}),
       })
+    }).catch((e: Error) => {
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: { code: 'internal', message: e.message, retryable: true },
+      })
+    })
+  }
+
+  /** 막혔던 메시지를 한 턴으로 내보낸다 — 각 메시지는 제 input 항목으로 (경계를 뭉개지 않는다) */
+  private flushPending(): void {
+    if (this.pendingInputs.length === 0 || !this.threadId) return
+    const input = this.pendingInputs.map((text) => ({ type: 'text', text }))
+    this.pendingInputs = []
+    void this.client.request('turn/start', {
+      threadId: this.threadId,
+      input,
+      ...(this.opts.effort ? { effort: this.opts.effort } : {}),
     }).catch((e: Error) => {
       this.emit({
         type: 'error',
@@ -405,6 +463,24 @@ class CodexSession implements SessionHandle {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     }
     this.approvals.clear()
+    /*
+     * compact이 끝나기를 기다리던 메시지와 함께 죽는 경우 — 화면에는 이미 보낸 것으로
+     * 남아 있으므로(매니저가 먼저 기록한다), 말없이 버리면 원래 버그가 종료 시점에만
+     * 다시 태어난다. 배달 안 됐다고 말해야 사용자가 다시 보낼 수 있다.
+     */
+    if (this.pendingInputs.length > 0) {
+      const n = this.pendingInputs.length
+      this.pendingInputs = []
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: {
+          code: 'internal',
+          message: `${n} message(s) sent during compaction were not delivered — please resend`,
+          retryable: false,
+        },
+      })
+    }
     await this.client.dispose()
   }
 }

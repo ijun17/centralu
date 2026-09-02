@@ -10,12 +10,20 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
  */
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params: Record<string, unknown> | undefined }[],
+  /** 세션이 등록한 알림 콜백 — 테스트가 turn/completed를 흉내 낼 때 쓴다 */
+  handlers: null as null | { onNotification: (n: { method: string; params?: unknown }) => void },
+  /** 여기 든 메서드는 실패한다 — compact 시작 실패 경로용 */
+  failMethods: new Set<string>(),
 }))
 
 vi.mock('./client.js', () => ({
   CodexClient: class {
+    constructor(handlers: { onNotification: (n: { method: string; params?: unknown }) => void }) {
+      state.handlers = handlers
+    }
     request(method: string, params?: Record<string, unknown>): Promise<unknown> {
       state.requests.push({ method, params })
+      if (state.failMethods.has(method)) return Promise.reject(new Error(`${method} failed (test)`))
       if (method === 'thread/start') return Promise.resolve({ thread: { id: 't1' } })
       if (method === 'skills/list') {
         return Promise.resolve({
@@ -33,14 +41,19 @@ vi.mock('./client.js', () => ({
 const { CodexAdapter } = await import('./index.js')
 
 const methods = () => state.requests.map((r) => r.method)
+const tick = () => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
   state.requests.length = 0
+  state.failMethods.clear()
 })
 
-async function session() {
+async function session(emit: (e: unknown) => void = () => {}) {
   const adapter = new CodexAdapter()
-  const handle = await adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+  const handle = await adapter.createSession(
+    { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' },
+    emit as Parameters<typeof adapter.createSession>[1],
+  )
   return handle
 }
 
@@ -113,5 +126,88 @@ describe('codex /review — 함수로 실행된다', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(methods()).toContain('turn/start')
     expect(methods()).not.toContain('review/start')
+  })
+})
+
+/**
+ * compact이 도는 동안 turn/start로 들어간 입력을 codex(0.147.0)는 **성공을 답하며
+ * 버린다** — 도그푸딩 실측(2026-09-02, MGH 세션): rollout에 설정 적용만 남고
+ * user 메시지가 한 줄도 없었고, 에러도 오지 않아 화면에는 보낸 것처럼 남았다.
+ * 상류도 compact/review 턴을 조종 불가로 분류한다 ("cannot steer a compact turn").
+ * 그래서 어댑터가 그 동안의 메시지를 쌓았다가 턴이 끝나면 내보내는지를 본다.
+ */
+describe('codex compact/review 중 메시지 — 버리는 자리에 보내지 않는다', () => {
+  it('compact 중에는 쌓고, 끝나면 한 턴으로 순서대로 나간다', async () => {
+    const h = await session()
+    h.send('/compact')
+    await tick()
+    h.send('첫 메시지')
+    h.send('둘째 메시지')
+    await tick()
+    // 여기서 turn/start가 나갔다면 codex가 버렸을 것이다
+    expect(methods()).not.toContain('turn/start')
+
+    state.handlers!.onNotification({ method: 'turn/completed', params: {} })
+    await tick()
+    const turn = state.requests.find((r) => r.method === 'turn/start')
+    expect(turn?.params?.input).toEqual([
+      { type: 'text', text: '첫 메시지' },
+      { type: 'text', text: '둘째 메시지' },
+    ])
+  })
+
+  it('compact이 끝난 뒤의 메시지는 즉시 나간다 — 큐가 필요보다 오래 살면 안 된다', async () => {
+    const h = await session()
+    h.send('/compact')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/completed', params: {} })
+    await tick()
+    h.send('끝난 뒤 메시지')
+    await tick()
+    expect(state.requests.find((r) => r.method === 'turn/start')?.params?.input).toEqual([
+      { type: 'text', text: '끝난 뒤 메시지' },
+    ])
+  })
+
+  it('review 중에도 같다 — 상류가 조종 불가로 분류하는 건 둘 다다', async () => {
+    const h = await session()
+    h.send('/review')
+    await tick()
+    h.send('리뷰 중 메시지')
+    await tick()
+    expect(methods()).not.toContain('turn/start')
+    state.handlers!.onNotification({ method: 'turn/completed', params: {} })
+    await tick()
+    expect(state.requests.find((r) => r.method === 'turn/start')?.params?.input).toEqual([
+      { type: 'text', text: '리뷰 중 메시지' },
+    ])
+  })
+
+  it('compact 시작이 실패하면 큐가 풀린다 — 잠긴 큐는 영원한 유실이다', async () => {
+    state.failMethods.add('thread/compact/start')
+    const events: { type: string }[] = []
+    const h = await session((e) => events.push(e as { type: string }))
+    h.send('/compact')
+    h.send('같이 보낸 메시지')
+    await tick()
+    await tick()
+    // 실패는 알려지고, 쌓였던 메시지는 그래도 나간다
+    expect(events.some((e) => e.type === 'error')).toBe(true)
+    expect(
+      state.requests.some(
+        (r) => r.method === 'turn/start' && JSON.stringify(r.params?.input).includes('같이 보낸 메시지'),
+      ),
+    ).toBe(true)
+  })
+
+  it('배달 못 한 채 dispose되면 말한다 — 화면에는 이미 보낸 것으로 남아 있다', async () => {
+    const events: { type: string; error?: { message: string } }[] = []
+    const h = await session((e) => events.push(e as { type: string; error?: { message: string } }))
+    h.send('/compact')
+    await tick()
+    h.send('유실 후보')
+    await tick()
+    await h.dispose()
+    expect(events.some((e) => e.type === 'error' && /not delivered/.test(e.error?.message ?? ''))).toBe(true)
   })
 })
