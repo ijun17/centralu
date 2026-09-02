@@ -61,4 +61,30 @@ describe('claude 스트림이 예고 없이 끝날 때', () => {
 
     expect(events.some((e) => e.type === 'error')).toBe(false)
   })
+
+  /*
+   * SDK가 입력을 안 당겨 가는 동안(턴이 도는 중이 이 모양이다) 큐에 남은 메시지는
+   * dispose와 함께 아무도 안 읽게 된다. 화면에는 이미 보낸 것으로 남아 있으므로
+   * (매니저가 먼저 기록한다) 말없이 버리면 "보냈는데 에이전트가 못 읽은" 상태가
+   * 조용히 생긴다 — codex compact 큐 유실 사고(2026-09-02)와 같은 종류다.
+   */
+  it('큐에 메시지를 남긴 채 닫히면 유실을 말한다 — 침묵은 원래 버그의 재연이다', async () => {
+    const events: NormalizedEvent[] = []
+    const adapter = new ClaudeAdapter()
+    const handle = await adapter.createSession(
+      { sessionId: 's3', cwd: '/tmp', permissionPreset: 'normal' },
+      (e) => events.push(e),
+    )
+
+    handle.send('배달 안 된 메시지')
+    await handle.dispose()
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        sessionId: 's3',
+        error: expect.objectContaining({ message: expect.stringContaining('not delivered') }),
+      }),
+    )
+  })
 })

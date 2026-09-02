@@ -2151,8 +2151,23 @@ export const useStore = create<AppState>((set, get) => ({
           s.sessions[sessionId] && prevState
             ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: prevState } }
             : s.sessions
+        /*
+         * 쓴 글은 입력창으로 되돌린다. 입력창은 보내는 순간 비워지는데(#38), 말풍선을
+         * 걷어내기만 하면 문장이 **어디에도 없다** — 토스트는 실패를 알리지만 글을
+         * 돌려주지는 못한다. 실패가 오기 전에 새로 쓴 글이 있으면 덮지 않고 앞에
+         * 잇는다: 순서상 실패한 말이 먼저 쓴 말이다.
+         */
+        const cur = s.drafts[sessionId] ?? EMPTY_DRAFT
+        const drafts = {
+          ...s.drafts,
+          [sessionId]: {
+            text: cur.text ? `${text}\n${cur.text}` : text,
+            attachments: [...(attachments ?? []), ...cur.attachments],
+          },
+        }
         return {
           chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
+          drafts,
           // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
           sessions,
           // ...and the clock we started above stops with it, so a later turn cannot inherit it

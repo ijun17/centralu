@@ -680,3 +680,52 @@ describe('대화 항목의 정체성 — 바뀐 줄만 새 객체다', () => {
     expect(after[1]).toBe(before[1]) // 그 뒤의 말은 건드리지 않는다
   })
 })
+
+/**
+ * 전송 실패 시 쓴 글 복원 (2026-09-02 유실 사고 후속).
+ *
+ * 입력창은 보내는 순간 비워진다(#38). 실패하면 말풍선을 걷어내는데, 그러면 문장이
+ * **어디에도 없다** — 토스트는 실패를 알릴 뿐 글을 돌려주지 못한다. 실패한 문장은
+ * 입력창으로 돌아와야 다시 보낼 수 있다.
+ */
+describe('전송 실패 시 쓴 글 복원', () => {
+  it('실패하면 문장이 입력창으로 돌아온다', async () => {
+    const s = 'sf-s1'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+    mock.sessions.delete(s) // host가 거절하는 상황 (rename 실패 테스트와 같은 수법)
+
+    await useStore.getState().send(s, '날아가면 안 되는 문장')
+
+    expect(useStore.getState().drafts[s]?.text).toBe('날아가면 안 되는 문장')
+    expect(useStore.getState().toast).toMatch(/Could not send/)
+    // 보낸 것처럼 남는 말풍선은 여전히 없다 (기존 동작 유지)
+    expect((useStore.getState().chat[s] ?? []).some((i) => i.kind === 'user')).toBe(false)
+  })
+
+  it('실패를 기다리는 사이 새로 쓴 글은 덮지 않는다 — 실패한 말이 앞에 붙는다', async () => {
+    const s = 'sf-s2'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+    mock.sessions.delete(s)
+
+    const inFlight = useStore.getState().send(s, '먼저 보낸 문장')
+    useStore.getState().setDraft(s, { text: '그새 쓴 문장', attachments: [] })
+    await inFlight
+
+    expect(useStore.getState().drafts[s]?.text).toBe('먼저 보낸 문장\n그새 쓴 문장')
+  })
+
+  it('성공하면 입력창을 건드리지 않는다', async () => {
+    const s = 'sf-s3'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().send(s, '잘 가는 문장')
+
+    expect(useStore.getState().drafts[s]).toBeUndefined()
+  })
+})

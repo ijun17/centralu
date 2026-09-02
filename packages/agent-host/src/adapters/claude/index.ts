@@ -429,6 +429,25 @@ class ClaudeSession implements SessionHandle {
   async dispose(): Promise<void> {
     this.closed = true
     this.notify?.()
+    /*
+     * 큐에 남은 메시지도 같은 규칙이다 (codex 어댑터의 compact 큐와 대칭 — 2026-09-02
+     * 유실 사고 후 맞춤). generator가 closed를 보고 빠져나가면 여기 남은 건 아무도
+     * 안 읽는다 — 화면에는 이미 보낸 것으로 남아 있으므로(매니저가 먼저 기록한다),
+     * 말없이 버리면 "보냈는데 에이전트가 못 읽는" 상태가 조용히 생긴다.
+     */
+    if (this.queue.length > 0) {
+      const n = this.queue.length
+      this.queue.length = 0
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: {
+          code: 'internal',
+          message: `${n} message(s) were still queued when the session closed and were not delivered — please resend`,
+          retryable: false,
+        },
+      })
+    }
     for (const [id, p] of this.pending) {
       p.resolve({ behavior: 'deny', message: 'Session closed' })
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
