@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 28
+const LATEST_SCHEMA = 29
 
 function seeded() {
   const s = new Store()
@@ -1080,6 +1080,61 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
     const s = new Store(file)
     expect(s.searchMessages('번에 뽑게').length).toBe(1) // 옛 색인으로는 영영 못 찾던 구절
     expect(s.searchMessages('결과는 이렇습니다').length).toBe(1)
+    s.close()
+  })
+
+  /*
+   * 시각 보존 (실사고 2026-09-03): 이 스텝이 ts에 Date.now()를 찍었고, 병합할 게
+   * 없는 행에도 UPDATE를 때렸다. beta.4가 user_version을 되감아 스텝이 재실행되자
+   * 새벽 대화 전체의 시각이 실행 시각으로 덮였다 — "대화가 저장 안 된 것 같다"의 정체.
+   */
+  it('합친 행의 시각은 마지막 조각의 것이다 — 지금이 아니라', () => {
+    const { file } = oldDbWithDeltas()
+    const raw = new Database(file)
+    raw.pragma('user_version = 20')
+    raw.close()
+
+    const s = new Store(file)
+    const ts = s.loadMessages('s1', 50).map((m) => m.ts)
+    // [user 1] [2+3+4 병합→4] [tool 5] [6+7 병합→7] [8+9 병합→9]
+    expect(ts).toEqual([1, 4, 5, 7, 9])
+    s.close()
+  })
+})
+
+/**
+ * v29: v21이 짓밟은 시각 복원. 원본 시각은 지워졌으니 정확히 되돌릴 수는 없고,
+ * seq(진실)와 이웃의 ts로 조인다 — 뒤 행보다 미래인 시각은 거짓이므로 뒤 행의
+ * 시각으로 눌러 앉힌다.
+ */
+describe('v29 이관 — 짓밟힌 시각을 이웃으로 조인다', () => {
+  it('뒤 행보다 미래인 ts만 고치고, 멀쩡한 ts는 건드리지 않는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v29-'))
+    const file = join(dir, 'store.db')
+    const s0 = new Store(file)
+    s0.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s0.upsertSession({
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
+      autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+      createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
+      ...sessionLiveDefaults(),
+    })
+    s0.appendMessages([
+      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 100 },
+      // 짓밟힌 행 — 실제로는 110쯤이었는데 마이그레이션 시각(999999)이 찍혔다
+      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: '답' }, ts: 999_999 },
+      { sessionId: 's1', seq: 3, role: 'system', kind: 'tool_call', payload: {}, ts: 120 },
+      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'text', payload: { text: '끝' }, ts: 130 },
+    ])
+    s0.close()
+
+    const raw = new Database(file)
+    raw.pragma('user_version = 28') // v29만 다시 태운다
+    raw.close()
+
+    const s = new Store(file)
+    expect(s.loadMessages('s1', 50).map((m) => m.ts)).toEqual([100, 120, 120, 130])
     s.close()
   })
 })

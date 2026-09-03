@@ -629,6 +629,46 @@ export class Store {
           this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)`)
         },
       },
+      {
+        to: 29,
+        run: () => {
+          /*
+           * v21 병합이 짓밟은 시각 복원 (실사고 2026-09-03).
+           *
+           * 병합 스텝이 assistant 행의 ts에 원래 시각 대신 `Date.now()`를 찍었다 —
+           * 그것도 병합할 게 없는 행까지. beta.4가 user_version을 되감아 그 스텝이
+           * 재실행되면서, 새벽 대화 전체의 시각이 실행 시각(13:44)으로 덮였다.
+           * 원래 시각은 지워졌으니 되돌릴 수는 없다 — 대신 **이웃이 아는 사실로
+           * 조인다**: seq는 진실이므로, 어떤 행의 ts가 자기보다 뒤 행(seq가 큰)의
+           * ts보다 크면 그 행의 시각은 거짓이다. 뒤에서 앞으로 걸으며 최소값으로
+           * 눌러 앉히면, 덮인 행은 "다음 진짜 행의 시각"이라는 상계로 돌아온다 —
+           * 정확하진 않지만 순서와 크게 어긋나지 않는 근사다.
+           */
+          const rows = this.db
+            .prepare(`SELECT rowid, session_id, ts FROM messages ORDER BY session_id, seq DESC`)
+            .all() as { rowid: number; session_id: string; ts: number }[]
+          const fix = this.db.prepare(`UPDATE messages SET ts = ? WHERE rowid = ?`)
+          let repaired = 0
+          const tx = this.db.transaction(() => {
+            let session = ''
+            let floor = Number.MAX_SAFE_INTEGER
+            for (const r of rows) {
+              if (r.session_id !== session) {
+                session = r.session_id
+                floor = Number.MAX_SAFE_INTEGER
+              }
+              if (r.ts > floor) {
+                fix.run(floor, r.rowid)
+                repaired += 1
+              } else {
+                floor = r.ts
+              }
+            }
+          })
+          tx()
+          if (repaired > 0) console.error(`[store] repaired ${repaired} message timestamps trampled by the merge migration`)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -674,7 +714,7 @@ export class Store {
     const before = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
     const tx = this.db.transaction(() => {
       const rows = this.db
-        .prepare(`SELECT rowid, session_id, seq, role, kind, payload FROM messages ORDER BY session_id, seq`)
+        .prepare(`SELECT rowid, session_id, seq, role, kind, payload, ts FROM messages ORDER BY session_id, seq`)
         .all() as {
         rowid: number
         session_id: string
@@ -682,6 +722,7 @@ export class Store {
         role: string
         kind: string
         payload: string
+        ts: number
       }[]
 
       const update = this.db.prepare(`UPDATE messages SET payload = ?, ts = ? WHERE rowid = ?`)
@@ -694,11 +735,19 @@ export class Store {
         kind: string
         payload: Record<string, unknown>
         text: string
+        merged: boolean
       } | null = null
       let lastTs = 0
       const closeRun = () => {
         if (!head) return
-        update.run(JSON.stringify({ ...head.payload, text: head.text }), lastTs, head.rowid)
+        /*
+         * **합친 런만 고쳐 쓴다.** 예전에는 조각이 하나뿐인 행에도 UPDATE를 때렸고,
+         * ts에는 원래 시각 대신 `Date.now()`를 찍었다 — 이 마이그레이션이 돌 때마다
+         * 모든 assistant 행의 시각이 "지금"으로 덮였다 (실사고 2026-09-03: beta.4가
+         * user_version을 되감아 이 스텝이 재실행됐고, 새벽 대화 전체가 13:44로 찍혔다).
+         * 시각은 마지막 조각의 것이다 — 조각들 자신이 갖고 있던 사실을 남긴다.
+         */
+        if (head.merged) update.run(JSON.stringify({ ...head.payload, text: head.text }), lastTs, head.rowid)
         head = null
       }
 
@@ -718,12 +767,13 @@ export class Store {
         const text = typeof payload.text === 'string' ? payload.text : ''
         if (head && head.sessionId === r.session_id && head.kind === r.kind) {
           head.text += text
-          lastTs = Date.now()
+          head.merged = true
+          lastTs = r.ts
           del.run(r.rowid)
         } else {
           closeRun()
-          head = { rowid: r.rowid, sessionId: r.session_id, kind: r.kind, payload, text }
-          lastTs = Date.now()
+          head = { rowid: r.rowid, sessionId: r.session_id, kind: r.kind, payload, text, merged: false }
+          lastTs = r.ts
         }
       }
       closeRun()
