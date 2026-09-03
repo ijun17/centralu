@@ -345,6 +345,8 @@ export type WorkspaceSnapshot = {
    * on disk, and the UI sanitizes whatever comes back (store/panelLayout.ts).
    */
   panelLayout?: { tabs: string[]; active: string }[]
+  /** 위 묶음이 차지하는 몫 (0.15–0.85). 묶음이 둘일 때만 뜻이 있다 — 나눈 비율도 보는 방식이다 */
+  panelSplit?: number
   /** 증거 패널 폭(px) */
   panelWidth?: number
   /** 세션 목록 폭(px) */

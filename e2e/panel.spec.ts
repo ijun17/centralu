@@ -820,6 +820,48 @@ test('dragging a tab to the bottom half splits the panel — two tabs visible at
 })
 
 /*
+ * 나눈 비율 조절 (도그푸딩 요청). 반반 고정은 "터미널은 좁아도 되고 diff는 넓어야
+ * 한다"를 못 담았다. 경계(아래 몸통의 윗변)를 끌면 몫이 바뀌고, 스냅샷에 실려
+ * 재실행에도 남으며, 더블클릭이면 반반으로 돌아온다.
+ */
+test('나뉜 두 칸의 경계는 끌어서 옮긴다 — 재실행에도 남고, 더블클릭이면 반반', async ({ page }) => {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', '작업')
+  await startTabDrag(page, 'files')
+  await dropOnBodyBottom(page)
+  await expect(page.getByTestId('evidence-tabs-1')).toBeVisible()
+
+  const topHeight = () =>
+    page.getByTestId('evidence-body-0').evaluate((el) => el.getBoundingClientRect().height)
+  const before = await topHeight()
+
+  // 경계를 아래로 120px — 위 몸통이 커진다
+  const handle = page.getByTestId('panel-split-handle')
+  const hb = (await handle.boundingBox())!
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + 120, { steps: 4 })
+  await page.mouse.up()
+  expect(await topHeight()).toBeGreaterThan(before + 80)
+  const saved = await page.evaluate(() => (window as any).__store.getState().panelSplit)
+  expect(saved).toBeGreaterThan(0.6)
+
+  // 재실행 — 배치가 돌아오는 자리에서 비율도 같이 돌아온다
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('add-project')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__store.getState().panelSplit)).toBeCloseTo(saved, 5)
+
+  // 되돌리기: 프로젝트를 다시 붙여 패널을 띄우고 더블클릭 — 반반
+  await page.evaluate((p: string) => {
+    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
+  }, '/tmp/alpha')
+  await page.getByTestId('add-project').click()
+  await newSession(page, 'alpha', 'claude', '다시')
+  await page.getByTestId('panel-split-handle').dblclick()
+  expect(await page.evaluate(() => (window as any).__store.getState().panelSplit)).toBe(0.5)
+})
+
+/*
  * The dogfooding overlap: git on top, another tab split below, and the top group's
  * content painted over the bottom group's tab strip. Two causes, both fixed — the git
  * tab's fixed-height history strip (removed; history lives in its own tab) and the

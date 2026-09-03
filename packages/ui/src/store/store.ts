@@ -383,6 +383,12 @@ export type AppState = {
    * belongs to the person (the same call as showIgnored, #17).
    */
   panelLayout: PanelGroup[]
+  /**
+   * 위아래로 나뉜 두 묶음 중 **위가 차지하는 몫** (0.15–0.85, 도그푸딩 요청).
+   * 묶음이 하나면 뜻이 없다. 반반 고정은 "터미널은 좁아도 되고 diff는 넓어야 한다"는
+   * 실제 사용을 못 담았다 — 나눈 비율도 보는 방식이라 스냅샷에 실린다.
+   */
+  panelSplit: number
   /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
   panelWidth: number
   /** 세션 목록 폭(px) */
@@ -455,6 +461,7 @@ export type AppState = {
    * docs/state-management.md §2.
    */
   setPanelLayout(groups: PanelGroup[]): void
+  setPanelSplit(share: number): void
   setPanelWidth(px: number): void
   setSidebarWidth(px: number): void
   /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
@@ -954,6 +961,7 @@ export const useStore = create<AppState>((set, get) => ({
   orchestratorWaking: false,
   introSeen: false,
   addProjectHint: false,
+  panelSplit: 0.5,
   panelWidth: PANEL_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
   overlay: null,
@@ -1125,6 +1133,11 @@ export const useStore = create<AppState>((set, get) => ({
         const savedLayout = (snap as { panelLayout?: unknown }).panelLayout
         if (savedLayout != null) {
           set({ panelLayout: sanitizeLayout(savedLayout) })
+          // 나눈 비율도 배치의 일부다 — 배치가 돌아오는 자리에서 같이 돌아온다
+          const savedSplit = (snap as { panelSplit?: unknown }).panelSplit
+          if (typeof savedSplit === 'number' && Number.isFinite(savedSplit)) {
+            get().setPanelSplit(savedSplit)
+          }
         } else if (
           snap.panelTab === 'files' ||
           snap.panelTab === 'git' ||
@@ -1194,6 +1207,7 @@ export const useStore = create<AppState>((set, get) => ({
         // on the tab that was showing.
         panelTab: s.panelLayout[0]?.active,
         panelLayout: s.panelLayout,
+        panelSplit: s.panelSplit,
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
         notifyPolicy: s.notifyPolicy,
@@ -1665,6 +1679,14 @@ export const useStore = create<AppState>((set, get) => ({
     const s = get()
     const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
     set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar, TEXT_SCALES[s.textScale] ?? 1) })
+    get().saveWorkspace()
+  },
+
+  setPanelSplit(share) {
+    // 한 묶음이 15% 아래로 내려가면 탭 띠만 남아 "사라진 것"처럼 읽힌다 — 바닥을 깐다
+    const clamped = Math.min(0.85, Math.max(0.15, share))
+    if (clamped === get().panelSplit) return
+    set({ panelSplit: clamped })
     get().saveWorkspace()
   },
 
