@@ -88,6 +88,10 @@ export interface AgentPort {
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /** 지워도 되는지 사람에게 묻기 위한 재료. 워크트리 세션이 아니면 null */
   worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
+  /** 오케스트레이터의 MCP 서버 제안 목록 (propose_mcp_server → 승인 대기 중인 것들) */
+  mcpProposals(): Promise<{ proposals: { name: string; command: string; args: string[]; why?: string }[] }>
+  /** 제안에 대한 사람의 답 — 승인이면 앱이 등록하고 오케스트레이터를 재시작한다 */
+  resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /**
    * 도구가 보관 중인 이전 세션 (터미널에서 만든 것 포함).
    * supported=false면 이유가 함께 온다 — 구버전 도구에서도 '새 세션'은 막지 않는다.

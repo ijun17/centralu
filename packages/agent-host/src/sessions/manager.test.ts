@@ -2681,3 +2681,54 @@ describe('도구 쪽 원본까지 삭제 (deleteExternal)', () => {
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
   })
 })
+
+/**
+ * MCP 서버 제안 흐름 (도그푸딩 요청, b안): 오케스트레이터는 **제안만** 하고
+ * (propose-not-power — MCP 등록은 임의 명령 실행의 등록이다), 사람이 승인하면
+ * 앱이 등록하고 오케스트레이터를 재시작한다. 재시작 후의 어댑터 설정에 서버가
+ * 실려야 "재시작하면 바로 사용"이 성립한다.
+ */
+describe('MCP 서버 제안 → 승인 → 재시작', () => {
+  it('제안은 설치하지 않고, 승인이 등록하고 재시작하며, 새 설정에 서버가 실린다', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
+      name: 'playwright',
+      command: 'npx',
+      args: ['-y', '@playwright/mcp@latest'],
+      why: '브라우저 자동화',
+    })
+    expect(r.text).toContain('승인')
+    // 제안 단계에서는 아무것도 설치되지 않는다
+    expect(mgr.mcpServers()).toEqual([])
+    expect(mgr.mcpProposals()).toEqual([
+      { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp@latest'], why: '브라우저 자동화' },
+    ])
+
+    await mgr.resolveMcpProposal('playwright', true)
+    expect(mgr.mcpProposals()).toEqual([])
+    expect(mgr.mcpServers()).toEqual([
+      { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
+    ])
+    // 재시작이 일어났고, 새 프로세스의 설정에 승인된 서버가 실렸다
+    expect(adapter.lastOpts?.extraMcpServers).toEqual([
+      { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
+    ])
+  })
+
+  it('거절은 제안만 걷는다 — 등록도 재시작 설정도 없다', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'figma', command: 'npx', args: [] })
+    await mgr.resolveMcpProposal('figma', false)
+    expect(mgr.mcpProposals()).toEqual([])
+    expect(mgr.mcpServers()).toEqual([])
+  })
+
+  it('이미 설치된 이름의 재제안은 거절된다 — 덮어쓰기가 곧 명령 바꿔치기다', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'dup', command: 'npx', args: [] })
+    await mgr.resolveMcpProposal('dup', true)
+    const again = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'dup', command: 'evil', args: [] })
+    expect(again.isError).toBe(true)
+    expect(mgr.mcpServers()).toEqual([{ name: 'dup', command: 'npx', args: [] }])
+  })
+})

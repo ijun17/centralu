@@ -129,6 +129,10 @@ const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
  * 도구마다 단위가 달라도 상관없다 — 비교는 언제나 같은 도구가 준 값끼리다.
  */
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
+
+/** 오케스트레이터 MCP 제안/승인 목록이 사는 app_setting 키 (propose_mcp_server 흐름) */
+const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
+const MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
 /*
  * 값의 뜻: **이 시각까지의 밖 기록은 전부 내가 아는 내용이다.** 두 손이 쓴다 —
  * 따라잡기가 읽고 나서(도구가 준 updatedAt), 그리고 writer lock이 있는 도구의 핸들을
@@ -789,6 +793,8 @@ export class SessionManager {
           toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : undefined,
           systemPromptAppend: info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE : undefined,
           orchestratorBridge: info.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
+          // 사람이 승인한 MCP 서버 (propose_mcp_server → 승인 → 재시작의 결과가 여기서 실린다)
+          extraMcpServers: info.kind === 'orchestrator' ? this.mcpServers() : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -1211,6 +1217,8 @@ export class SessionManager {
             m.kind === 'orchestrator' || this.isWorktreeManager(sessionId)
               ? (this.endpoint?.() ?? undefined)
               : undefined,
+          // 승인된 MCP 서버는 재시작(=이 길)에서 실려야 "승인 → 재시작 → 바로 사용"이 성립한다
+          extraMcpServers: m.kind === 'orchestrator' ? this.mcpServers() : undefined,
         },
         (e) => this.onEvent(e),
       )
@@ -2605,7 +2613,68 @@ export class SessionManager {
           return { ok: false, error: (e as Error).message }
         }
       },
+
+      /*
+       * 제안만 한다 (propose-not-power). 설치·재시작은 사람의 승인 클릭이
+       * resolveMcpProposal을 통해 시킨다 — MCP 등록은 임의 명령 실행의 등록이라,
+       * 여기서 바로 설치하면 read_session으로 들어온 주입 한 줄이 프로세스가 된다.
+       */
+      proposeMcpServer: async (spec) => {
+        if (!/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(spec.name)) {
+          return { ok: false, error: '이름은 영숫자·하이픈·밑줄 32자 이내여야 합니다' }
+        }
+        const installed = this.mcpServers().some((s) => s.name === spec.name)
+        if (installed) return { ok: false, error: `"${spec.name}"은 이미 설치되어 있습니다` }
+        const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
+        proposals.push({ name: spec.name, command: spec.command, args: spec.args, why: spec.why })
+        this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
+        return { ok: true }
+      },
     }
+  }
+
+  /** 사람의 승인을 기다리는 MCP 서버 제안들 */
+  mcpProposals(): { name: string; command: string; args: string[]; why?: string }[] {
+    try {
+      const raw = this.store.appSetting(MCP_PROPOSALS_KEY)
+      return raw ? (JSON.parse(raw) as ReturnType<SessionManager['mcpProposals']>) : []
+    } catch {
+      return []
+    }
+  }
+
+  /** 승인되어 오케스트레이터에 붙는 MCP 서버들 */
+  mcpServers(): { name: string; command: string; args: string[] }[] {
+    try {
+      const raw = this.store.appSetting(MCP_SERVERS_KEY)
+      return raw ? (JSON.parse(raw) as ReturnType<SessionManager['mcpServers']>) : []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * 제안에 대한 사람의 답 (도그푸딩 요청 b안 — 제안 → 원클릭 승인 → 앱이 설치+재시작).
+   * 승인이면 서버 목록에 올리고 **오케스트레이터를 재시작한다** — 재시작은 resume이라
+   * 대화는 이어지고, 다음 기동의 어댑터 설정에 서버가 실려 도구가 바로 보인다.
+   */
+  async resolveMcpProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
+    const proposals = this.mcpProposals()
+    const hit = proposals.find((p) => p.name === name)
+    if (!hit) return { ok: false, error: `No pending proposal named "${name}"` }
+    this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+    if (!approve) return { ok: true }
+
+    const servers = this.mcpServers().filter((s) => s.name !== name)
+    servers.push({ name: hit.name, command: hit.command, args: hit.args })
+    this.store.setAppSetting(MCP_SERVERS_KEY, JSON.stringify(servers))
+
+    const orch = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
+    if (orch) {
+      // 도는 중이어도 갈아 끼운다 — 승인한 사람이 기다리는 것은 "이제 쓸 수 있음"이다
+      await this.restartSession(orch.id).catch(() => {})
+    }
+    return { ok: true }
   }
 
   /**

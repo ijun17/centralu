@@ -72,6 +72,10 @@ export class MockPlatform implements Platform {
   readonly unresumable = new Set<string>()
   /** deleteExternal로 지워진 세션 id — "진짜로 삭제"가 실제로 전달됐는지의 관찰점 */
   readonly externallyDeleted: string[] = []
+  /** 승인 대기 중인 MCP 서버 제안 (테스트가 채워 넣는다) */
+  readonly mcpProposalList: { name: string; command: string; args: string[]; why?: string }[] = []
+  /** 승인된 제안 이름 — 승인 클릭이 실제로 전달됐는지의 관찰점 */
+  readonly mcpApproved: string[] = []
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
   badge = 0
@@ -778,6 +782,13 @@ export class MockPlatform implements Platform {
       const s = this.sessions.get(sessionId)
       if (!s?.worktree) return null
       return { ...s.worktree, dirty: this.mockWorktreeDirty, changedFiles: this.mockWorktreeDirty ? 2 : 0 }
+    },
+    mcpProposals: async () => ({ proposals: [...this.mcpProposalList] }),
+    resolveMcpProposal: async (name: string, approve: boolean) => {
+      const at = this.mcpProposalList.findIndex((p) => p.name === name)
+      if (at === -1) throw Object.assign(new Error(`No pending proposal named "${name}"`), { code: 'internal' })
+      const [hit] = this.mcpProposalList.splice(at, 1)
+      if (approve) this.mcpApproved.push(hit!.name)
     },
     deleteSession: async (sessionId: string, _deleteWorktree = false, deleteExternal = false) => {
       // host와 같은 규칙: 원본 삭제를 명시한 경우 그 사실이 기록에 남는다 (테스트가 검증할 관찰점)

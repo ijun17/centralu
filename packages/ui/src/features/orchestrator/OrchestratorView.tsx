@@ -23,10 +23,50 @@ export function OrchestratorView() {
   const id = useStore((s) => s.orchestratorId)
   // 기록을 아직 안 불러왔으면 "비었다"고 단정하지 않는다 — 카드가 번쩍였다 사라진다
   const chatEmpty = useStore((s) => (id ? s.chat[id] !== undefined && s.chat[id].length === 0 : false))
+  const mcpProposals = useStore((s) => s.mcpProposals)
+  const resolveMcpProposal = useStore((s) => s.resolveMcpProposal)
 
   if (!id) return <OrchestratorEmpty />
   return (
-    <div className="relative flex min-w-0 flex-1">
+    <div className="relative flex min-w-0 flex-1 flex-col">
+      {/*
+        MCP 서버 제안 카드 (propose_mcp_server → b안: 사람의 원클릭 승인). 대화 위에
+        배너로 선다 — 오케스트레이터가 제안한 그 대화 문맥 옆에서 결정해야 하기
+        때문이다. 승인은 곧 임의 명령 실행의 등록이라 명령 전문을 그대로 보여준다.
+      */}
+      {mcpProposals.map((p) => (
+        <div
+          key={p.name}
+          className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2.5"
+          data-testid={`mcp-proposal-${p.name}`}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] text-chalk">
+              Orchestrator asks to install MCP server <span className="readout">{p.name}</span>
+              {p.why && <span className="text-ash"> — {p.why}</span>}
+            </p>
+            <p className="readout mt-0.5 truncate text-[10px] text-slate">
+              {p.command} {p.args.join(' ')}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded border border-ash/50 bg-graphite px-2.5 py-1 text-[11px] text-chalk transition-colors hover:border-ash"
+            onClick={() => void resolveMcpProposal(p.name, true)}
+            data-testid={`mcp-approve-${p.name}`}
+          >
+            Install & restart
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded px-2 py-1 text-[11px] text-slate transition-colors hover:text-chalk"
+            onClick={() => void resolveMcpProposal(p.name, false)}
+            data-testid={`mcp-dismiss-${p.name}`}
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
       <SessionPane sessionId={id} />
       {/*
         세션은 있는데 대화가 빈 경우(만들어만 두고 말을 안 걸었거나, 보내기가 실패한

@@ -908,3 +908,37 @@ describe('인수인계하고 새로 시작', () => {
     expect(useStore.getState().toast).toMatch(/Worktree sessions/)
   })
 })
+
+/** MCP 서버 제안 카드 (b안) — 제안 이벤트가 목록을 새로 읽고, 승인 클릭이 host로 간다 */
+describe('MCP 서버 제안', () => {
+  it('propose_mcp_server 도구 호출이 오면 제안 목록을 다시 읽는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('mcp-s1', sessionInfo('mcp-s1'))
+    await useStore.getState().attach(mock)
+    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: '브라우저' })
+
+    mock.emit({
+      type: 'tool_call', sessionId: 'mcp-s1', callId: 'c1',
+      summary: { tool: 'mcp__centralu__propose_mcp_server', title: 'playwright', readOnly: true, paths: [] },
+    } as NormalizedEvent)
+
+    await vi.waitFor(() => {
+      expect(useStore.getState().mcpProposals).toEqual([
+        { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: '브라우저' },
+      ])
+    })
+  })
+
+  it('승인 클릭이 host로 전달되고 목록이 비워진다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: [] })
+    await useStore.getState().refreshMcpProposals()
+
+    await useStore.getState().resolveMcpProposal('playwright', true)
+
+    expect(mock.mcpApproved).toContain('playwright')
+    expect(useStore.getState().mcpProposals).toEqual([])
+    expect(useStore.getState().toast).toMatch(/Installing playwright/)
+  })
+})

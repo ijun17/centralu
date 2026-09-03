@@ -68,6 +68,13 @@ export function createRpcHandler(
     },
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(RpcMethods['agents.worktreeStatus'].params.parse(p).sessionId),
+    'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
+    'agents.resolveMcpProposal': async (p) => {
+      const { name, approve } = RpcMethods['agents.resolveMcpProposal'].params.parse(p)
+      const r = await mgr.resolveMcpProposal(name, approve)
+      if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown proposal'), { code: 'internal' })
+      return { ok: true as const }
+    },
     'agents.listExternalSessions': async (p) => {
       const { projectId, tool, limit } = RpcMethods['agents.listExternalSessions'].params.parse(p)
       return mgr.listExternalSessions(projectId, tool, limit)

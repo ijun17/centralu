@@ -121,6 +121,19 @@ export const ORCHESTRATOR_TOOLS = [
       reason: z.string().optional().describe('무슨 작업을 위한 브랜치인지 한 마디'),
     }),
   },
+  {
+    name: 'propose_mcp_server',
+    description:
+      'MCP 서버 설치를 **사람에게 제안한다** — 브라우저 자동화(Playwright) 같은 능력이 필요할 때. ' +
+      '이 도구는 아무것도 설치하지 않는다 (propose 규칙). 사람이 승인하면 앱이 서버를 등록하고 ' +
+      '이 세션을 재시작한다 — 재시작 후 도구가 바로 보인다.',
+    schema: z.object({
+      name: z.string().describe('서버 이름 (예: playwright). 도구 접두어가 된다'),
+      command: z.string().describe('실행 명령 (예: npx)'),
+      args: z.array(z.string()).default([]).describe('명령 인자 (예: ["-y", "@playwright/mcp@latest"])'),
+      why: z.string().optional().describe('무엇을 하려고 필요한지 한 마디 — 사람이 승인 여부를 판단할 근거'),
+    }),
+  },
 ] as const
 
 export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
@@ -174,6 +187,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '보고만으로 부족하면 read_session으로 그 세션의 대화를 직접 읽는다.',
   '시킬 세션이 마땅치 않으면 create_session으로 새로 만든다 — 지우기는 사람 몫이다.',
   '프로젝트를 만드는 방법을 물으면 propose_project로 사이드바의 Add project를 짚어 준다 — 등록은 사람이 한다.',
+  '브라우저 자동화 같은 새 능력이 필요하면 propose_mcp_server로 **제안한다** — 사람이 승인하면 앱이 설치하고 너를 재시작해 준다. 재시작해도 대화는 이어진다.',
   '앱에 대한 질문에 답을 모르면 짐작하지 말고 GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues',
   'recall이 준 seq를 read_session의 around에 넣으면 찾은 대목으로 바로 간다 — 세션을 통째로 읽지 않는다.',
   '"저번에", "예전에 저쪽에서" 같은 이야기가 나오면 recall로 지난 대화를 찾는다 —',
@@ -277,6 +291,26 @@ export async function runOrchestratorTool(
       text:
         `"${branch}" 브랜치 세션을 제안했습니다. 사이드바 +에 불이 켜지고, 사람이 열면 이름이 채워진 창이 뜹니다 — ` +
         '만드는 것도, 이름을 고치는 것도 사람 몫입니다.',
+    }
+  }
+
+  if (name === 'propose_mcp_server') {
+    const spec = {
+      name: String(args.name ?? '').trim(),
+      command: String(args.command ?? '').trim(),
+      args: Array.isArray(args.args) ? args.args.map(String) : [],
+      why: typeof args.why === 'string' ? args.why : undefined,
+    }
+    if (!spec.name || !spec.command) {
+      return { text: 'name과 command를 주세요 — 무엇을 어떻게 띄울지 없이는 제안이 성립하지 않습니다.', isError: true }
+    }
+    const r = await tools.proposeMcpServer(spec)
+    if (!r.ok) return { text: `제안하지 못했습니다 — ${r.error}`, isError: true }
+    return {
+      text:
+        `"${spec.name}" MCP 서버를 제안했습니다. 화면에 승인 카드가 떴고, 사람이 승인하면 ` +
+        '앱이 서버를 등록하고 이 세션을 재시작합니다 — 재시작하면 대화는 이어지고 새 도구가 보입니다. ' +
+        '승인 전까지는 설치되지 않습니다.',
     }
   }
 

@@ -217,6 +217,13 @@ class CodexSession implements SessionHandle {
                       CC_SESSION_ID: this.opts.sessionId,
                     },
                   },
+                  // 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름) — claude 쪽과 같은 목록
+                  ...Object.fromEntries(
+                    (this.opts.extraMcpServers ?? []).map((s) => [
+                      s.name,
+                      { command: s.command, args: s.args },
+                    ]),
+                  ),
                 },
               }
             : {}),

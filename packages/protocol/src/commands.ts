@@ -369,6 +369,27 @@ export const RpcMethods = {
    * 워크트리를 지워도 되는지 판단할 재료. 지우기 직전에 UI가 묻는다.
    * `null`이면 워크트리 세션이 아니다 — 물어볼 것도 없다.
    */
+  /**
+   * 오케스트레이터의 MCP 서버 제안 흐름 (propose_mcp_server → 사람의 원클릭 승인 →
+   * 앱이 등록하고 오케스트레이터를 재시작). 제안 목록은 조회로, 답은 resolve로.
+   */
+  'agents.mcpProposals': {
+    params: z.object({}),
+    result: z.object({
+      proposals: z.array(
+        z.object({
+          name: z.string(),
+          command: z.string(),
+          args: z.array(z.string()),
+          why: z.string().optional(),
+        }),
+      ),
+    }),
+  },
+  'agents.resolveMcpProposal': {
+    params: z.object({ name: z.string(), approve: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'agents.worktreeStatus': {
     params: z.object({ sessionId: z.string() }),
     result: z

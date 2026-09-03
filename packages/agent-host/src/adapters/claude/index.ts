@@ -171,6 +171,16 @@ class ClaudeSession implements SessionHandle {
           ? {
               mcpServers: {
                 [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile),
+                /*
+                 * 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름). stdio로 띄운다 —
+                 * npx류 명령은 첫 실행에서 스스로 설치되므로 별도 설치 단계가 없다.
+                 */
+                ...Object.fromEntries(
+                  (this.opts.extraMcpServers ?? []).map((s) => [
+                    s.name,
+                    { type: 'stdio' as const, command: s.command, args: s.args },
+                  ]),
+                ),
               },
               /*
                * **파일에서 지시를 읽지 않는다.**

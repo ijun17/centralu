@@ -129,6 +129,18 @@ export type OrchestratorTools = {
       at?: string
     }[]
   }>
+  /**
+   * MCP 서버 설치를 **사람에게 제안한다** (도그푸딩 요청 — Playwright 같은 능력을
+   * 스스로 갖추고 싶을 때). propose-not-power 규칙 그대로: 이 호출은 아무것도
+   * 설치하지 않는다. 사람이 승인하면 앱이 등록하고 오케스트레이터를 재시작한다 —
+   * 임의 명령 실행의 등록이라, 승인 없는 설치는 곧 뒷문이다.
+   */
+  proposeMcpServer(spec: {
+    name: string
+    command: string
+    args: string[]
+    why?: string
+  }): Promise<{ ok: boolean; error?: string }>
 }
 
 export type CreateSessionOpts = {
@@ -145,6 +157,12 @@ export type CreateSessionOpts = {
   resumeExternalId?: string
   /** 주어지면 이 세션은 앱 도구를 받는다 — 어댑터가 자기 방식으로 붙인다 */
   orchestratorTools?: OrchestratorTools
+  /**
+   * 사람이 승인한 추가 MCP 서버 (오케스트레이터 전용). propose_mcp_server →
+   * 승인 → 재시작의 결과가 여기로 온다. 어댑터는 이 목록을 자기 MCP 설정에
+   * 그대로 병기한다 — 등록은 앱이, 실행 여부는 이 목록이 전부다.
+   */
+  extraMcpServers?: { name: string; command: string; args: string[] }[]
   /**
    * 받는 도구 묶음 (#69). 'orchestrator'는 전부, 'manager'는 워크트리 매니저의
    * 부분집합(제안·조회·지시)이다. orchestratorTools가 있을 때만 뜻이 있다.
