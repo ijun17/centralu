@@ -342,12 +342,29 @@ fn focus_window(app: AppHandle) {
     }
 }
 
+/**
+ * 사람이 모달에서 종료를 확인했다 (도그푸딩 2026-09-04: ⌘Q/⌘W 즉시 종료 방지).
+ *
+ * 플래그를 먼저 세우고 exit를 부른다 — 이 exit이 다시 ExitRequested를 낳는데,
+ * 그때는 관문(아래 run 콜백)이 열려 있어야 한다. 관문이 코드(Some/None)만 보면
+ * 우리가 낸 exit과 시스템 terminate를 못 가르는 플랫폼이 생길 수 있어 플래그가 정본이다.
+ */
+#[tauri::command]
+fn quit_app(app: AppHandle, approved: State<QuitApproved>) {
+    approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.exit(0);
+}
+
+/** 종료 확인 플래그 — 모달의 "Quit"만이 이것을 세운다 */
+struct QuitApproved(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[cfg(target_os = "macos")]
 mod traffic_lights;
 
 pub fn run() {
     let supervisor = Supervisor::new();
+    let quit_approved = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -355,6 +372,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(supervisor.clone())
+        .manage(QuitApproved(quit_approved.clone()))
         .invoke_handler(tauri::generate_handler![
             host_info,
             host_error,
@@ -366,8 +384,19 @@ pub fn run() {
             file_manager_name,
             focus_window,
             window_controls_inset,
-            shortcut_keys
+            shortcut_keys,
+            quit_app
         ])
+        /*
+         * ⌘W·빨간 단추 = 창 닫기. 창 하나짜리 앱이라 닫기는 곧 종료다 — 즉시 닫는
+         * 대신 웹뷰에 묻는다 (도그푸딩: 작업 중 ⌘W 오타 한 번이 세션 전부를 내렸다).
+         */
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("quit-requested", ());
+            }
+        })
         .setup({
             let sup = supervisor.clone();
             move |app| {
@@ -380,6 +409,22 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Tauri 앱을 생성하지 못했습니다")
         .run(move |app, event| {
+            /*
+             * ⌘Q(시스템 terminate)의 관문 (도그푸딩 2026-09-04). 사람이 모달에서
+             * 확인하기 전에는 종료를 막고 웹뷰에 묻는다 — quit_app만이 플래그를
+             * 세우므로, 그 뒤에 다시 도착하는 ExitRequested는 그대로 지나간다.
+             *
+             * `code`는 문서화된 구분선이다: None = 사용자 상호작용(⌘Q·독 Quit·로그아웃),
+             * Some = 프로그램적 종료(AppHandle::exit/restart — 업데이터의 재시작이
+             * 이 길로 온다). Some까지 막으면 앱이 자기 재시작을 자기가 막는다.
+             */
+            if let RunEvent::ExitRequested { api, code, .. } = &event {
+                if code.is_none() && !quit_approved.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                    let _ = app.emit("quit-requested", ());
+                    return;
+                }
+            }
             // 앱이 닫힐 때 사이드카를 확실히 죽인다 (좀비 프로세스 금지)
             if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
                 supervisor.shutdown();

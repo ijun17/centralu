@@ -1,6 +1,9 @@
+import { useEffect, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '@cc/ui'
 import { createTauriPlatform, focusWindow } from '@cc/platform/tauri'
+import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
@@ -15,10 +18,84 @@ root.render(<Starting />)
 
 createTauriPlatform()
   .then(async (platform) => {
-    root.render(<App platform={platform} />)
+    root.render(<DesktopRoot platform={platform} />)
     await registerGlobalShortcut()
   })
   .catch((err: Error) => root.render(<StartupFailure message={err.message} />))
+
+/**
+ * ⌘Q·⌘W 즉시 종료 방지 (도그푸딩 2026-09-04) — 데스크톱만의 관심사라 여기 산다.
+ *
+ * Rust가 종료 요청(시스템 terminate·창 닫기)을 막고 `quit-requested`를 쏘면,
+ * 이 모달이 묻는다. "Quit"만이 quit_app을 불러 관문을 연다 — 오타 한 번이
+ * 도는 세션 전부를 내리는 앱에서 종료는 두 동작이어야 한다.
+ * 웹 빌드(apps/web)에는 이 길 자체가 없다: 브라우저 탭 닫기는 브라우저의 일이다.
+ */
+function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platform'] }) {
+  const [askQuit, setAskQuit] = useState(false)
+  useEffect(() => {
+    const un = listen('quit-requested', () => {
+      setAskQuit(true)
+      // 최소화된 채 ⌘Q면 모달이 안 보여 "종료가 안 되는 앱"이 된다 — 물을 때는 얼굴을 보인다
+      void focusWindow()
+    })
+    return () => void un.then((f) => f())
+  }, [])
+  useEffect(() => {
+    if (!askQuit) return
+    const onKey = (e: KeyboardEvent) => {
+      // Enter = 종료, Esc = 계속 — 모달이 떠 있는 동안 앱의 다른 단축키를 먹지 않게 캡처 단계에서 끊는다
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setAskQuit(false)
+      } else if (e.key === 'Enter') {
+        e.stopPropagation()
+        void invoke('quit_app')
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [askQuit])
+  return (
+    <>
+      <App platform={platform} />
+      {askQuit && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          data-testid="confirm-quit"
+          onClick={() => setAskQuit(false)}
+        >
+          <div
+            className="w-[360px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[13px] text-chalk">Quit Centralu?</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ash">
+              Running agent processes stop with the app. Conversations are saved and resume when
+              you come back.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+                onClick={() => setAskQuit(false)}
+                data-testid="confirm-quit-no"
+              >
+                Cancel <span className="text-[10px] text-slate">esc</span>
+              </button>
+              <button
+                className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del hover:border-del/70"
+                onClick={() => void invoke('quit_app')}
+                data-testid="confirm-quit-yes"
+              >
+                Quit <span className="text-[10px]">⏎</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 function Starting() {
   return (
