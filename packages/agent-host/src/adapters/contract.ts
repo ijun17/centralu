@@ -141,6 +141,14 @@ export type OrchestratorTools = {
     args: string[]
     why?: string
   }): Promise<{ ok: boolean; error?: string }>
+  /**
+   * 재사용할 작업 절차(스킬)를 **사람에게 제안한다** (#71). 스킬은 파일이 아니라
+   * 앱 DB에 산다 — 워커 세션은 파일은 쓸 수 있지만 DB는 못 쓰므로, 낮은 권한이
+   * 오케스트레이터의 지시문에 닿는 길이 열리지 않는다. 승인 전에는 아무 영향이 없다:
+   * 스킬은 모든 세션에 지시할 수 있는 에이전트에 대한 **영구적 영향력**이라,
+   * 자가 저작이 승인 없이 남으면 주입된 텍스트가 곧 영구 권한이 된다.
+   */
+  proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
 }
 
 export type CreateSessionOpts = {

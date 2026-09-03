@@ -313,6 +313,56 @@ export function Settings() {
  * 확인을 한 번 받는 이유는 하나 — 프로세스가 바뀌면 그 도구의 문맥은 사라진다.
  * (기록은 남고, 새 프로세스는 지난 대화를 요약으로 넘겨받는다.)
  */
+/**
+ * 승인된 오케스트레이터 스킬 (#71). 여기 있는 이유: "넣을 수만 있고 열람·삭제가
+ * 없는 스킬은 없느니만 못하다" — 승인은 대화 옆 카드에서, 관리는 설정에서.
+ * 삭제하면 host가 오케스트레이터를 재시작해 프롬프트에서도 즉시 빠진다.
+ */
+function OrchestratorSkills() {
+  const platform = usePlatform()
+  const setToast = useStore((s) => s.setToast)
+  const [skills, setSkills] = useState<{ name: string; content: string }[]>([])
+  const load = useCallback(() => {
+    void platform.agents
+      .orchestratorSkills()
+      .then((r) => setSkills(r.skills))
+      .catch(() => {})
+  }, [platform])
+  useEffect(load, [load])
+
+  if (skills.length === 0) return null
+  return (
+    <div className="mt-5 border-t border-edge pt-3" data-testid="orchestrator-skills">
+      <p className="readout text-[10px] uppercase tracking-[0.12em] text-slate">Approved skills</p>
+      <ul className="mt-2 space-y-2">
+        {skills.map((s) => (
+          <li key={s.name} className="rounded border border-edge p-2.5" data-testid={`orchestrator-skill-${s.name}`}>
+            <div className="flex items-center gap-2">
+              <span className="readout text-[11px] text-chalk">{s.name}</span>
+              <button
+                type="button"
+                className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:text-beacon"
+                data-testid={`delete-skill-${s.name}`}
+                onClick={() => {
+                  void platform.agents
+                    .deleteOrchestratorSkill(s.name)
+                    .then(load)
+                    .catch((e: Error) => setToast(e.message))
+                }}
+              >
+                Delete
+              </button>
+            </div>
+            <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-ash">
+              {s.content}
+            </pre>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function OrchestratorSettings() {
   const platform = usePlatform()
   const orchestratorId = useStore((s) => s.orchestratorId)
@@ -370,6 +420,8 @@ function OrchestratorSettings() {
           </button>
         ))}
       </div>
+
+      <OrchestratorSkills />
 
       {asking && (
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">

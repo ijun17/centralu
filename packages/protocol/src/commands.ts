@@ -390,6 +390,28 @@ export const RpcMethods = {
     params: z.object({ name: z.string(), approve: z.boolean() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /**
+   * 오케스트레이터 스킬 (#71) — 제안 조회·응답과, 승인된 스킬의 목록·삭제.
+   * 삭제가 있는 이유: 넣을 수만 있고 못 지우는 스킬은 없느니만 못하다 (이슈의 결정).
+   */
+  'agents.skillProposals': {
+    params: z.object({}),
+    result: z.object({
+      proposals: z.array(z.object({ name: z.string(), content: z.string(), why: z.string().optional() })),
+    }),
+  },
+  'agents.resolveSkillProposal': {
+    params: z.object({ name: z.string(), approve: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'agents.orchestratorSkills': {
+    params: z.object({}),
+    result: z.object({ skills: z.array(z.object({ name: z.string(), content: z.string() })) }),
+  },
+  'agents.deleteOrchestratorSkill': {
+    params: z.object({ name: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'agents.worktreeStatus': {
     params: z.object({ sessionId: z.string() }),
     result: z

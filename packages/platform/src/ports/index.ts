@@ -92,6 +92,13 @@ export interface AgentPort {
   mcpProposals(): Promise<{ proposals: { name: string; command: string; args: string[]; why?: string }[] }>
   /** 제안에 대한 사람의 답 — 승인이면 앱이 등록하고 오케스트레이터를 재시작한다 */
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
+  /** 오케스트레이터의 스킬 제안 목록 (#71 — propose_skill → 승인 대기 중인 것들) */
+  skillProposals(): Promise<{ proposals: { name: string; content: string; why?: string }[] }>
+  /** 스킬 제안에 대한 사람의 답 — 승인이면 DB에 저장하고 오케스트레이터를 재시작한다 */
+  resolveSkillProposal(name: string, approve: boolean): Promise<void>
+  /** 승인된 스킬 목록 — 설정에서 열람·삭제한다 (못 지우는 스킬은 없느니만 못하다) */
+  orchestratorSkills(): Promise<{ skills: { name: string; content: string }[] }>
+  deleteOrchestratorSkill(name: string): Promise<void>
   /**
    * 도구가 보관 중인 이전 세션 (터미널에서 만든 것 포함).
    * supported=false면 이유가 함께 온다 — 구버전 도구에서도 '새 세션'은 막지 않는다.

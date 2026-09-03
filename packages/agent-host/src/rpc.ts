@@ -75,6 +75,20 @@ export function createRpcHandler(
       if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown proposal'), { code: 'internal' })
       return { ok: true as const }
     },
+    'agents.skillProposals': async () => ({ proposals: mgr.skillProposals() }),
+    'agents.resolveSkillProposal': async (p) => {
+      const { name, approve } = RpcMethods['agents.resolveSkillProposal'].params.parse(p)
+      const r = await mgr.resolveSkillProposal(name, approve)
+      if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown proposal'), { code: 'internal' })
+      return { ok: true as const }
+    },
+    'agents.orchestratorSkills': async () => ({ skills: mgr.orchestratorSkills() }),
+    'agents.deleteOrchestratorSkill': async (p) => {
+      const { name } = RpcMethods['agents.deleteOrchestratorSkill'].params.parse(p)
+      const r = await mgr.deleteOrchestratorSkill(name)
+      if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown skill'), { code: 'internal' })
+      return { ok: true as const }
+    },
     'agents.listExternalSessions': async (p) => {
       const { projectId, tool, limit } = RpcMethods['agents.listExternalSessions'].params.parse(p)
       return mgr.listExternalSessions(projectId, tool, limit)

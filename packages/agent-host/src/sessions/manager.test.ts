@@ -2732,3 +2732,49 @@ describe('MCP 서버 제안 → 승인 → 재시작', () => {
     expect(mgr.mcpServers()).toEqual([{ name: 'dup', command: 'npx', args: [] }])
   })
 })
+
+/**
+ * 오케스트레이터 스킬 (#71): 파일이 아니라 DB에 살고(워커는 파일은 쓰지만 DB는 못
+ * 쓴다), 제안은 저장만이며, 승인이 역할 프롬프트에 싣고, 삭제는 즉시 걷어낸다 —
+ * "넣을 수만 있고 못 지우는 스킬은 없느니만 못하다".
+ */
+describe('오케스트레이터 스킬 — 제안 → 승인 → 프롬프트 탑재 (#71)', () => {
+  it('승인된 스킬만 역할 프롬프트에 실리고, 삭제하면 즉시 빠진다', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.runOrchestratorTool(orc.id, 'propose_skill', {
+      name: 'weekly-report',
+      content: '매주 금요일: 세션들을 훑고 한 주 요약을 만든다',
+      why: '반복 요청',
+    })
+    // 제안 단계 — 아무 효력 없음
+    expect(mgr.orchestratorSkills()).toEqual([])
+    expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('weekly-report')
+
+    await mgr.resolveSkillProposal('weekly-report', true)
+    expect(mgr.orchestratorSkills()).toEqual([
+      { name: 'weekly-report', content: '매주 금요일: 세션들을 훑고 한 주 요약을 만든다' },
+    ])
+    // 재시작된 프로세스의 역할 프롬프트에 스킬이 실렸다
+    expect(adapter.lastOpts?.systemPromptAppend).toContain('### weekly-report')
+    expect(adapter.lastOpts?.systemPromptAppend).toContain('한 주 요약')
+
+    await mgr.deleteOrchestratorSkill('weekly-report')
+    expect(mgr.orchestratorSkills()).toEqual([])
+    expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('weekly-report')
+  })
+
+  it('예산을 지킨다 — 내용 2,000자 초과와 이미 있는 이름은 제안 단계에서 거절', async () => {
+    const orc = await mgr.orchestrator()
+    const long = await mgr.runOrchestratorTool(orc.id, 'propose_skill', {
+      name: 'too-long',
+      content: 'x'.repeat(2_001),
+    })
+    expect(long.isError).toBe(true)
+
+    await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'dup-skill', content: '절차' })
+    await mgr.resolveSkillProposal('dup-skill', true)
+    const again = await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'dup-skill', content: '다른 절차' })
+    expect(again.isError).toBe(true)
+    expect(mgr.orchestratorSkills().find((s) => s.name === 'dup-skill')?.content).toBe('절차')
+  })
+})

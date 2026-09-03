@@ -25,6 +25,8 @@ export function OrchestratorView() {
   const chatEmpty = useStore((s) => (id ? s.chat[id] !== undefined && s.chat[id].length === 0 : false))
   const mcpProposals = useStore((s) => s.mcpProposals)
   const resolveMcpProposal = useStore((s) => s.resolveMcpProposal)
+  const skillProposals = useStore((s) => s.skillProposals)
+  const resolveSkillProposal = useStore((s) => s.resolveSkillProposal)
 
   if (!id) return <OrchestratorEmpty />
   return (
@@ -34,6 +36,44 @@ export function OrchestratorView() {
         배너로 선다 — 오케스트레이터가 제안한 그 대화 문맥 옆에서 결정해야 하기
         때문이다. 승인은 곧 임의 명령 실행의 등록이라 명령 전문을 그대로 보여준다.
       */}
+      {/*
+        스킬 제안 카드 (#71). 승인은 곧 오케스트레이터에 대한 **영구적 영향력**의
+        승인이라 절차 전문을 그대로 보여준다 — 요약만 보고 승인한 스킬은 읽지 않은
+        계약이다. 긴 본문은 안에서 스크롤한다.
+      */}
+      {skillProposals.map((p) => (
+        <div
+          key={p.name}
+          className="flex items-start gap-3 border-b border-edge bg-panel px-4 py-2.5"
+          data-testid={`skill-proposal-${p.name}`}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] text-chalk">
+              Orchestrator proposes skill <span className="readout">{p.name}</span>
+              {p.why && <span className="text-ash"> — {p.why}</span>}
+            </p>
+            <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded border border-edge bg-void px-2 py-1.5 font-sans text-[11px] leading-relaxed text-ash">
+              {p.content}
+            </pre>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded border border-ash/50 bg-graphite px-2.5 py-1 text-[11px] text-chalk transition-colors hover:border-ash"
+            onClick={() => void resolveSkillProposal(p.name, true)}
+            data-testid={`skill-approve-${p.name}`}
+          >
+            Save & restart
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded px-2 py-1 text-[11px] text-slate transition-colors hover:text-chalk"
+            onClick={() => void resolveSkillProposal(p.name, false)}
+            data-testid={`skill-dismiss-${p.name}`}
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
       {mcpProposals.map((p) => (
         <div
           key={p.name}

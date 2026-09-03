@@ -942,3 +942,28 @@ describe('MCP 서버 제안', () => {
     expect(useStore.getState().toast).toMatch(/Installing playwright/)
   })
 })
+
+/** 스킬 제안 (#71) — MCP 제안과 같은 레일: 이벤트가 목록을 깨우고, 승인이 host로 간다 */
+describe('스킬 제안', () => {
+  it('propose_skill 도구 호출이 오면 제안 목록을 다시 읽고, 승인이 저장으로 이어진다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('sk-s1', sessionInfo('sk-s1'))
+    await useStore.getState().attach(mock)
+    mock.skillProposalList.push({ name: 'weekly-report', content: '금요일마다 요약', why: '반복 요청' })
+
+    mock.emit({
+      type: 'tool_call', sessionId: 'sk-s1', callId: 'c1',
+      summary: { tool: 'mcp__centralu__propose_skill', title: 'weekly-report', readOnly: true, paths: [] },
+    } as NormalizedEvent)
+    await vi.waitFor(() => {
+      expect(useStore.getState().skillProposals).toEqual([
+        { name: 'weekly-report', content: '금요일마다 요약', why: '반복 요청' },
+      ])
+    })
+
+    await useStore.getState().resolveSkillProposal('weekly-report', true)
+    expect(mock.skillList).toEqual([{ name: 'weekly-report', content: '금요일마다 요약' }])
+    expect(useStore.getState().skillProposals).toEqual([])
+    expect(useStore.getState().toast).toMatch(/Skill saved/)
+  })
+})

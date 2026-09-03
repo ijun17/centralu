@@ -117,6 +117,18 @@ class WebAgentPort implements AgentPort {
   async resolveMcpProposal(name: string, approve: boolean) {
     await this.rpc.call('agents.resolveMcpProposal', { name, approve })
   }
+  async skillProposals() {
+    return this.rpc.call('agents.skillProposals', {})
+  }
+  async resolveSkillProposal(name: string, approve: boolean) {
+    await this.rpc.call('agents.resolveSkillProposal', { name, approve })
+  }
+  async orchestratorSkills() {
+    return this.rpc.call('agents.orchestratorSkills', {})
+  }
+  async deleteOrchestratorSkill(name: string) {
+    await this.rpc.call('agents.deleteOrchestratorSkill', { name })
+  }
 
   async deleteSession(sessionId: string, deleteWorktree = false, deleteExternal = false) {
     await this.rpc.call('agents.deleteSession', { sessionId, deleteWorktree, deleteExternal })

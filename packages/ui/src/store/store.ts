@@ -336,6 +336,10 @@ export type AppState = {
   mcpProposals: { name: string; command: string; args: string[]; why?: string }[]
   refreshMcpProposals(): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
+  /** 오케스트레이터의 스킬 제안 (#71) — 같은 제안→원클릭 승인 레일 */
+  skillProposals: { name: string; content: string; why?: string }[]
+  refreshSkillProposals(): Promise<void>
+  resolveSkillProposal(name: string, approve: boolean): Promise<void>
   /**
    * 새 세션 창이 워크트리 체크를 켠 채 열리는가 (#69).
    * 매니저 줄의 +가 켠다 — 매니저 아래에 만드는 세션은 워크트리 세션이 기본이라서다.
@@ -973,6 +977,7 @@ export const useStore = create<AppState>((set, get) => ({
   newSessionBranch: '',
   worktreeProposals: [],
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
+  skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
   resuming: {},
   wakeError: {},
@@ -1100,8 +1105,9 @@ export const useStore = create<AppState>((set, get) => ({
     // 목록 등록 전에 도착한 이벤트를 재생한다 — 앱을 켜기 전부터 돌던 세션의 첫 출력이 여기 있다
     replayPendingEvents(get)
 
-    // 앱을 껐다 켜도 승인 대기 중인 MCP 제안은 host에 남아 있다 — 카드가 다시 서야 한다
+    // 앱을 껐다 켜도 승인 대기 중인 제안은 host에 남아 있다 — 카드가 다시 서야 한다
     void get().refreshMcpProposals()
+    void get().refreshSkillProposals()
 
     /*
      * host가 이미 알아낸 것을 따라잡는다 (이슈 #43).
@@ -1489,6 +1495,8 @@ export const useStore = create<AppState>((set, get) => ({
     if (e.type === 'tool_call' && /propose_project$/.test(e.summary.tool)) set({ addProjectHint: true })
     // MCP 서버 제안 (propose_mcp_server) — 목록은 host가 진실이라 다시 읽는다
     if (e.type === 'tool_call' && /propose_mcp_server$/.test(e.summary.tool)) void get().refreshMcpProposals()
+    // 스킬 제안 (#71) — 같은 규칙
+    if (e.type === 'tool_call' && /propose_skill$/.test(e.summary.tool)) void get().refreshSkillProposals()
     /*
      * 워크트리 제안 (#69) — 같은 원칙(가리키기)에 값이 하나 실린다: 브랜치 이름.
      * 어댑터가 제목에 실어 보낸다 (다른 운반로가 없다). 제목이 도구 이름 그대로면
@@ -2401,6 +2409,33 @@ export const useStore = create<AppState>((set, get) => ({
       set({ toast: `Could not resolve the proposal: ${(e as Error).message}` })
     }
     await get().refreshMcpProposals()
+  },
+
+  async refreshSkillProposals() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const r = await platform.agents.skillProposals()
+      set({ skillProposals: r.proposals })
+    } catch {
+      /* 못 읽어도 앱은 정상 — 다음 이벤트가 다시 부른다 */
+    }
+  },
+
+  async resolveSkillProposal(name, approve) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.agents.resolveSkillProposal(name, approve)
+      set({
+        toast: approve
+          ? `Skill saved: ${name} — restarting the orchestrator so it takes effect`
+          : `Dismissed skill proposal: ${name}`,
+      })
+    } catch (e) {
+      set({ toast: `Could not resolve the proposal: ${(e as Error).message}` })
+    }
+    await get().refreshSkillProposals()
   },
 
   async handoffSession(sessionId, opts) {

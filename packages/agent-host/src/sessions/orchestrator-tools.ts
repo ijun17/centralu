@@ -122,6 +122,18 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
+    name: 'propose_skill',
+    description:
+      '재사용할 작업 절차(스킬)를 **사람에게 제안한다** (#71) — 같은 부탁을 반복해서 받거나, 이 사용자 고유의 일하는 방식을 발견했을 때. ' +
+      '이 도구는 아무것도 저장하지 않는다 (propose 규칙). 사람이 승인하면 스킬이 앱 DB에 저장되고 ' +
+      '이 세션이 재시작되며, 그 뒤로는 역할 프롬프트에 늘 실린다. 훅(이벤트 자동 실행)은 스킬이 아니다 — 제안하지 마라.',
+    schema: z.object({
+      name: z.string().describe('스킬 이름 (예: weekly-report). 영숫자·하이픈·밑줄 32자 이내'),
+      content: z.string().describe('절차 본문 (2,000자 이내). 언제 쓰는지 + 단계. 핵심만 — 시스템 프롬프트에 늘 실린다'),
+      why: z.string().optional().describe('왜 필요한지 한 마디 — 사람이 승인 여부를 판단할 근거'),
+    }),
+  },
+  {
     name: 'propose_mcp_server',
     description:
       'MCP 서버 설치를 **사람에게 제안한다** — 브라우저 자동화(Playwright) 같은 능력이 필요할 때. ' +
@@ -188,6 +200,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '시킬 세션이 마땅치 않으면 create_session으로 새로 만든다 — 지우기는 사람 몫이다.',
   '프로젝트를 만드는 방법을 물으면 propose_project로 사이드바의 Add project를 짚어 준다 — 등록은 사람이 한다.',
   '브라우저 자동화 같은 새 능력이 필요하면 propose_mcp_server로 **제안한다** — 사람이 승인하면 앱이 설치하고 너를 재시작해 준다. 재시작해도 대화는 이어진다.',
+  '같은 부탁을 반복해서 받거나 이 사용자 고유의 일하는 방식을 발견하면 propose_skill로 절차를 **제안한다** — 승인된 스킬은 네 역할에 늘 실린다.',
   '앱에 대한 질문에 답을 모르면 짐작하지 말고 GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues',
   'recall이 준 seq를 read_session의 around에 넣으면 찾은 대목으로 바로 간다 — 세션을 통째로 읽지 않는다.',
   '"저번에", "예전에 저쪽에서" 같은 이야기가 나오면 recall로 지난 대화를 찾는다 —',
@@ -291,6 +304,24 @@ export async function runOrchestratorTool(
       text:
         `"${branch}" 브랜치 세션을 제안했습니다. 사이드바 +에 불이 켜지고, 사람이 열면 이름이 채워진 창이 뜹니다 — ` +
         '만드는 것도, 이름을 고치는 것도 사람 몫입니다.',
+    }
+  }
+
+  if (name === 'propose_skill') {
+    const spec = {
+      name: String(args.name ?? '').trim(),
+      content: String(args.content ?? ''),
+      why: typeof args.why === 'string' ? args.why : undefined,
+    }
+    if (!spec.name || !spec.content.trim()) {
+      return { text: 'name과 content를 주세요 — 이름 없는 절차는 찾을 수 없고, 내용 없는 절차는 절차가 아닙니다.', isError: true }
+    }
+    const r = await tools.proposeSkill(spec)
+    if (!r.ok) return { text: `제안하지 못했습니다 — ${r.error}`, isError: true }
+    return {
+      text:
+        `"${spec.name}" 스킬을 제안했습니다. 화면에 승인 카드가 떴고, 사람이 승인하면 저장되고 ` +
+        '이 세션이 재시작됩니다 — 재시작하면 대화는 이어지고 스킬이 역할에 실립니다. 승인 전까지는 아무 효력이 없습니다.',
     }
   }
 

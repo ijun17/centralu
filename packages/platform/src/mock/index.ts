@@ -76,6 +76,10 @@ export class MockPlatform implements Platform {
   readonly mcpProposalList: { name: string; command: string; args: string[]; why?: string }[] = []
   /** 승인된 제안 이름 — 승인 클릭이 실제로 전달됐는지의 관찰점 */
   readonly mcpApproved: string[] = []
+  /** 승인 대기 중인 스킬 제안 (#71 — 테스트가 채워 넣는다) */
+  readonly skillProposalList: { name: string; content: string; why?: string }[] = []
+  /** 승인된 스킬 — 승인·삭제가 실제로 전달됐는지의 관찰점 */
+  readonly skillList: { name: string; content: string }[] = []
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
   badge = 0
@@ -789,6 +793,19 @@ export class MockPlatform implements Platform {
       if (at === -1) throw Object.assign(new Error(`No pending proposal named "${name}"`), { code: 'internal' })
       const [hit] = this.mcpProposalList.splice(at, 1)
       if (approve) this.mcpApproved.push(hit!.name)
+    },
+    skillProposals: async () => ({ proposals: [...this.skillProposalList] }),
+    resolveSkillProposal: async (name: string, approve: boolean) => {
+      const at = this.skillProposalList.findIndex((p) => p.name === name)
+      if (at === -1) throw Object.assign(new Error(`No pending skill proposal named "${name}"`), { code: 'internal' })
+      const [hit] = this.skillProposalList.splice(at, 1)
+      if (approve) this.skillList.push({ name: hit!.name, content: hit!.content })
+    },
+    orchestratorSkills: async () => ({ skills: [...this.skillList] }),
+    deleteOrchestratorSkill: async (name: string) => {
+      const at = this.skillList.findIndex((s) => s.name === name)
+      if (at === -1) throw Object.assign(new Error(`No skill named "${name}"`), { code: 'internal' })
+      this.skillList.splice(at, 1)
     },
     deleteSession: async (sessionId: string, _deleteWorktree = false, deleteExternal = false) => {
       // host와 같은 규칙: 원본 삭제를 명시한 경우 그 사실이 기록에 남는다 (테스트가 검증할 관찰점)

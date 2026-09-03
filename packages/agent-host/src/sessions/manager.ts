@@ -133,6 +133,13 @@ const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
 /** 오케스트레이터 MCP 제안/승인 목록이 사는 app_setting 키 (propose_mcp_server 흐름) */
 const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
 const MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
+
+/** 오케스트레이터 스킬 (#71) — 파일이 아니라 DB에 산다 (워커는 파일은 쓰지만 DB는 못 쓴다) */
+const SKILL_PROPOSALS_KEY = 'orchestrator_skill_proposals'
+const SKILLS_KEY = 'orchestrator_skills'
+/** 스킬 예산 (#71 미결 질문의 답): 시스템 프롬프트를 침식하지 않게 개수·길이를 자른다 */
+const SKILL_MAX_COUNT = 10
+const SKILL_MAX_CHARS = 2_000
 /*
  * 값의 뜻: **이 시각까지의 밖 기록은 전부 내가 아는 내용이다.** 두 손이 쓴다 —
  * 따라잡기가 읽고 나서(도구가 준 updatedAt), 그리고 writer lock이 있는 도구의 핸들을
@@ -791,7 +798,7 @@ export class SessionManager {
           // 첫 자식이 붙은 뒤 다음에 깰 때다 (wake 쪽 조건이 그 승격의 실제다).
           orchestratorTools: info.kind === 'orchestrator' ? this.orchestratorToolsFor(id) : undefined,
           toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : undefined,
-          systemPromptAppend: info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE : undefined,
+          systemPromptAppend: info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt() : undefined,
           orchestratorBridge: info.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
           // 사람이 승인한 MCP 서버 (propose_mcp_server → 승인 → 재시작의 결과가 여기서 실린다)
           extraMcpServers: info.kind === 'orchestrator' ? this.mcpServers() : undefined,
@@ -1211,7 +1218,8 @@ export class SessionManager {
            */
           systemPromptAppend:
             m.kind === 'orchestrator'
-              ? ORCHESTRATOR_ROLE + (resumeId ? '' : this.orchestratorMemory(m.id))
+              ? // 스킬(#71)은 언제나, 기억 인수인계는 새 프로세스일 때만 (기존 규칙 그대로)
+                ORCHESTRATOR_ROLE + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
               : undefined,
           orchestratorBridge:
             m.kind === 'orchestrator' || this.isWorktreeManager(sessionId)
@@ -2630,6 +2638,27 @@ export class SessionManager {
         this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
         return { ok: true }
       },
+
+      // 스킬 제안 (#71) — MCP 제안과 같은 규칙: 제안은 저장만, 영향력은 승인 뒤에
+      proposeSkill: async (spec) => {
+        if (!/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(spec.name)) {
+          return { ok: false, error: '이름은 영숫자·하이픈·밑줄 32자 이내여야 합니다' }
+        }
+        if (!spec.content.trim()) return { ok: false, error: '내용이 비어 있습니다' }
+        if (spec.content.length > SKILL_MAX_CHARS) {
+          return { ok: false, error: `내용이 너무 깁니다 (${spec.content.length}자 > ${SKILL_MAX_CHARS}자) — 절차의 핵심만 남기세요` }
+        }
+        if (this.orchestratorSkills().some((s) => s.name === spec.name)) {
+          return { ok: false, error: `"${spec.name}" 스킬은 이미 있습니다 — 고치려면 사람이 먼저 지워야 합니다` }
+        }
+        if (this.orchestratorSkills().length >= SKILL_MAX_COUNT) {
+          return { ok: false, error: `스킬이 이미 ${SKILL_MAX_COUNT}개입니다 — 시스템 프롬프트 예산이 다 찼으니, 덜 쓰는 것을 지우자고 사람에게 제안하세요` }
+        }
+        const proposals = this.skillProposals().filter((p) => p.name !== spec.name)
+        proposals.push({ name: spec.name, content: spec.content, why: spec.why })
+        this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals))
+        return { ok: true }
+      },
     }
   }
 
@@ -2653,6 +2682,71 @@ export class SessionManager {
     }
   }
 
+  /** 사람의 승인을 기다리는 스킬 제안들 (#71) */
+  skillProposals(): { name: string; content: string; why?: string }[] {
+    try {
+      const raw = this.store.appSetting(SKILL_PROPOSALS_KEY)
+      return raw ? (JSON.parse(raw) as ReturnType<SessionManager['skillProposals']>) : []
+    } catch {
+      return []
+    }
+  }
+
+  /** 승인되어 오케스트레이터의 역할 프롬프트에 실리는 스킬들 (#71) */
+  orchestratorSkills(): { name: string; content: string }[] {
+    try {
+      const raw = this.store.appSetting(SKILLS_KEY)
+      return raw ? (JSON.parse(raw) as ReturnType<SessionManager['orchestratorSkills']>) : []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * 승인된 스킬을 역할 프롬프트에 덧붙일 블록으로 (#71). 도구 불문 텍스트다 —
+   * claude는 systemPrompt append로, codex는 developerInstructions로 같은 글이 간다
+   * (한 저작 형식, N개 어댑터 — NormalizedEvent가 이벤트에 긋는 경계와 같은 자리).
+   */
+  private skillsPrompt(): string {
+    const skills = this.orchestratorSkills()
+    if (skills.length === 0) return ''
+    return (
+      '\n\n## 승인된 스킬 (사람이 승인한 작업 절차 — 해당 상황에서 따른다)\n' +
+      skills.map((s) => `### ${s.name}\n${s.content}`).join('\n\n')
+    )
+  }
+
+  /** 스킬 제안에 대한 사람의 답 (#71) — 승인이면 저장하고 오케스트레이터를 재시작한다 */
+  async resolveSkillProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
+    const proposals = this.skillProposals()
+    const hit = proposals.find((p) => p.name === name)
+    if (!hit) return { ok: false, error: `No pending skill proposal named "${name}"` }
+    this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+    if (!approve) return { ok: true }
+
+    const skills = this.orchestratorSkills().filter((s) => s.name !== name)
+    skills.push({ name: hit.name, content: hit.content })
+    this.store.setAppSetting(SKILLS_KEY, JSON.stringify(skills))
+    await this.restartOrchestrator()
+    return { ok: true }
+  }
+
+  /** 스킬 삭제 (#71 미결 질문의 답: 넣을 수만 있고 못 지우는 스킬은 없느니만 못하다) */
+  async deleteOrchestratorSkill(name: string): Promise<{ ok: boolean; error?: string }> {
+    const skills = this.orchestratorSkills()
+    if (!skills.some((s) => s.name === name)) return { ok: false, error: `No skill named "${name}"` }
+    this.store.setAppSetting(SKILLS_KEY, JSON.stringify(skills.filter((s) => s.name !== name)))
+    // 지운 스킬이 프롬프트에 남아 있으면 삭제가 거짓말이 된다 — 바로 갈아 끼운다
+    await this.restartOrchestrator()
+    return { ok: true }
+  }
+
+  /** 오케스트레이터가 살아 있으면 갈아 끼운다 — 스킬·MCP 변경을 즉시 반영하는 공통 경로 */
+  private async restartOrchestrator(): Promise<void> {
+    const orch = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
+    if (orch) await this.restartSession(orch.id).catch(() => {})
+  }
+
   /**
    * 제안에 대한 사람의 답 (도그푸딩 요청 b안 — 제안 → 원클릭 승인 → 앱이 설치+재시작).
    * 승인이면 서버 목록에 올리고 **오케스트레이터를 재시작한다** — 재시작은 resume이라
@@ -2669,11 +2763,8 @@ export class SessionManager {
     servers.push({ name: hit.name, command: hit.command, args: hit.args })
     this.store.setAppSetting(MCP_SERVERS_KEY, JSON.stringify(servers))
 
-    const orch = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (orch) {
-      // 도는 중이어도 갈아 끼운다 — 승인한 사람이 기다리는 것은 "이제 쓸 수 있음"이다
-      await this.restartSession(orch.id).catch(() => {})
-    }
+    // 도는 중이어도 갈아 끼운다 — 승인한 사람이 기다리는 것은 "이제 쓸 수 있음"이다
+    await this.restartOrchestrator()
     return { ok: true }
   }
 
