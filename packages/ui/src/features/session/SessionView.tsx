@@ -1514,31 +1514,65 @@ function OlderSentinel({
     const scroller = scrollRef.current
     if (!el || !scroller || !more) return
 
+    /*
+     * 불러오기 한 번 = fire 한 번 (재진입 방지는 지역에서). loadOlder 자체도
+     * loading/more를 지키므로 여분의 호출은 조용히 눕는다.
+     */
+    let firing = false
+    const fire = () => {
+      if (firing || loading) return
+      firing = true
+      const before = scroller.scrollHeight
+      void loadOlder(sessionId).then(() => {
+        // 늘어난 만큼 내려서 읽던 자리를 지킨다
+        requestAnimationFrame(() => {
+          const grew = scroller.scrollHeight - before
+          if (grew > 0) scroller.scrollTop += grew
+          firing = false
+        })
+      })
+    }
+
     const io = new IntersectionObserver(
       (entries) => {
-        if (!entries.some((e) => e.isIntersecting) || loading) return
-        const before = scroller.scrollHeight
-        void loadOlder(sessionId).then(() => {
-          // 늘어난 만큼 내려서 읽던 자리를 지킨다
-          requestAnimationFrame(() => {
-            const grew = scroller.scrollHeight - before
-            if (grew > 0) scroller.scrollTop += grew
-          })
-        })
+        if (entries.some((e) => e.isIntersecting)) fire()
       },
       // 꼭대기에 닿기 조금 전에 미리 채운다 — 멈칫하는 순간이 안 보이게
       { root: scroller, rootMargin: '200px 0px 0px 0px' },
     )
     io.observe(el)
-    return () => io.disconnect()
+    /*
+     * IO에만 걸지 않는다 (도그푸딩 2026-09-04: 실물 WKWebView에서 위 스크롤이
+     * 옛 대화를 안 실었다 — Chromium 재현은 전부 통과). 관찰자가 안 깨어나는
+     * 환경이 있어도 스크롤 위치는 거짓말하지 않는다 — 같은 fire라 이중 발화는 없다.
+     */
+    const onScroll = () => {
+      if (scroller.scrollTop < 300) fire()
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      io.disconnect()
+      scroller.removeEventListener('scroll', onScroll)
+    }
   }, [sessionId, more, loading, loadOlder, scrollRef])
 
   if (!more) return null
+  /*
+   * 클릭으로도 불러온다 (도그푸딩 2026-09-04: 메아·리소스 업로드에서 위 스크롤로
+   * 옛 대화가 안 실렸다 — Chromium/목 재현은 전부 통과라 WKWebView의 IO/스크롤
+   * 앵커링 차이가 유력하다). 관찰자가 어떤 이유로든 안 깨어나도 사람 손이 남고,
+   * 실패하면 loadOlder의 토스트가 이유를 말한다 — 조용한 벽이 최악이다.
+   */
   return (
     <div ref={ref} className="flex justify-center py-2" data-testid="load-older">
-      <span className="readout text-[10px] text-slate">
-        {loading ? 'Loading earlier messages…' : 'Scroll up to load more'}
-      </span>
+      <button
+        type="button"
+        onClick={() => void loadOlder(sessionId)}
+        disabled={loading}
+        className="readout rounded border border-edge px-2 py-0.5 text-[10px] text-slate transition-colors hover:border-graphite hover:text-chalk disabled:opacity-60"
+      >
+        {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
+      </button>
     </div>
   )
 }

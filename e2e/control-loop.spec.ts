@@ -2347,6 +2347,42 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
   expect(first).toBe('옛 대화 1')
 })
 
+/*
+ * 스크롤이 아니라 **클릭으로도** 옛 대화를 불러온다 (도그푸딩 2026-09-04: 실물
+ * WKWebView에서 위 스크롤이 옛 페이지를 안 실었다 — 관찰자가 안 깨어나는 환경이
+ * 있어도 사람 손은 남아야 한다).
+ */
+test('옛 대화는 버튼 클릭으로도 이어붙는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    const rows = Array.from({ length: 250 }, (_, i) => ({
+      sessionId: sid, seq: i + 1, role: i % 2 ? 'assistant' : 'user', kind: 'text',
+      payload: { text: `옛 대화 ${i + 1}` }, ts: Date.now(),
+    }))
+    m.messages.set(sid, rows)
+  }, id)
+  await page.evaluate((sid) => {
+    const store = (window as any).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid)
+  }, id)
+
+  const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
+  expect(await page.evaluate(loaded, id)).toBe(100)
+  /*
+   * 위로 올리고 버튼을 누른다 — 스크롤 트리거·IO·클릭 셋 중 무엇이 깨져도
+   * 나머지가 끝까지 데려간다는 계약이다 (100에서 멈추는 "벽"이 그 버그였다).
+   */
+  await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
+  await page.getByTestId('load-older').getByRole('button').click()
+  await expect.poll(() => page.evaluate(loaded, id)).toBe(250)
+  // 다 불러오면 버튼도 물러난다
+  await expect(page.getByTestId('load-older')).toBeHidden()
+})
+
 /**
  * 대화가 뭉개져 보이던 문제 (도그푸딩 4차).
  * 저장된 기록의 seq와 실시간 항목의 seq가 따로 세어져 React key가 겹쳤고,
