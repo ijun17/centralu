@@ -91,6 +91,11 @@ export type SessionSummary = {
    */
   merged: boolean
   /**
+   * 이 브랜치의 풀 리퀘스트 (#76 stage 3). gh로 측정한 파생 사실 — 스쿼시 병합처럼
+   * merged가 로컬에서 못 보는 결말을 이것이 본다. null이면 "모른다"(gh 없음·오프라인 포함).
+   */
+  pr: { number: number; state: 'open' | 'merged' | 'closed'; url: string } | null
+  /**
    * 이번 턴에 모델이 생각에 쓴 토큰 추정치 누계 (#58 — claude는 thinking 본문이
    * 암호화라 이 숫자가 보여줄 수 있는 전부다). activity와 같은 수명: working을
    * 벗어나면 죽는다.
@@ -108,7 +113,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     autoNamed: true, state: 'idle', activity: null, waitingSince: null, lastSeq: 0, lastReadSeq: 0,
     live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
-    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, thinkingTokens: null, plan: null, kind: 'worker' as const,
+    permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
     tool: 'claude' as const, ...init,
   }
 }
@@ -224,6 +229,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
      */
     case 'worktree_merged':
       return { ...next, merged: true }
+    case 'worktree_pr':
+      return { ...next, pr: event.pr }
     case 'session_title':
       if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
       return { ...next, name: event.title, autoNamed: false }

@@ -154,6 +154,18 @@ export const SessionInfo = z.object({
    */
   worktreeMerged: z.boolean().default(false),
   /**
+   * 이 워크트리 브랜치의 풀 리퀘스트 (#76 stage 3). null이면 "모른다"다 — 없다가 아니다.
+   *
+   * gh CLI로 측정한 파생 사실이라 저장하지 않는다(worktreeMerged와 같은 원칙).
+   * 존재 이유는 위 사각지대다: 스쿼시·리베이스 병합은 로컬 감지 불가인데 GitHub PR의
+   * 지배적 결말이 스쿼시다. PR의 MERGED는 서버가 기록한 사실이라 그 사각지대가 없다.
+   * gh가 없거나 오프라인이면 이 값은 그냥 null로 남는다 — 배지 하나의 근거일 뿐이다.
+   */
+  worktreePr: z
+    .object({ number: z.number(), state: z.enum(['open', 'merged', 'closed']), url: z.string() })
+    .nullable()
+    .default(null),
+  /**
    * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위(보통).
    *
    * 워크트리 세션은 반드시 매니저 아래에 선다 — 소속이 없을 때 이 분류의 1번 문서화된
@@ -201,7 +213,7 @@ export type SessionInfo = z.infer<typeof SessionInfo>
  */
 export function sessionLiveDefaults(): Pick<
   SessionInfo,
-  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'worktreeMerged'
+  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'worktreeMerged' | 'worktreePr'
 > {
   return {
     pendingApproval: null,
@@ -212,6 +224,8 @@ export function sessionLiveDefaults(): Pick<
     context: null,
     // 병합 여부(#69)도 여기 산다 — git에서 파생되는 사실이라 기동 때 다시 판정한다
     worktreeMerged: false,
+    // PR 상태(#76 stage 3)도 같은 원칙 — gh로 다시 측정한다
+    worktreePr: null,
   }
 }
 

@@ -41,6 +41,8 @@ export type OrchestratedSession = {
   state: string
   /** 워크트리 브랜치가 줄기에 들어갔는가 (#69) — 매니저가 "끝난 일"을 스스로 판단하는 근거 */
   merged?: boolean
+  /** 이 브랜치의 PR (#76 stage 3) — gh로 측정. "리뷰 대기"와 "그냥 진행 중"을 가른다 */
+  pr?: { number: number; state: 'open' | 'merged' | 'closed' }
   tool: ToolName
   /** 마지막으로 무슨 일이 있었는지 한 줄 */
   preview: string

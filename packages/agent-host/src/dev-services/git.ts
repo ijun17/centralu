@@ -403,6 +403,32 @@ export async function gitBranchMerged(
   }
 }
 
+export type BranchPr = { number: number; state: 'open' | 'merged' | 'closed'; url: string }
+
+/**
+ * 이 브랜치의 풀 리퀘스트 상태 — **gh에게 묻는다** (#76 stage 3).
+ *
+ * gitBranchMerged가 못 보는 것(스쿼시·리베이스 병합 — GitHub PR의 지배적 결말)을
+ * PR 상태는 정확히 안다: MERGED는 추론이 아니라 서버가 기록한 사실이다.
+ *
+ * 조용히 물러나는 함수다. 실패의 두 갈래를 구분해서 돌려준다:
+ *   - `'unavailable'` — gh 자체가 없다(ENOENT). 다시 물어도 답이 안 변하니
+ *     호출자는 이 프로세스에서 그만 묻는 게 맞다.
+ *   - `null` — 지금은 모른다(PR 없음·오프라인·GitHub 저장소 아님·인증 안 됨).
+ *     다음에 물으면 답이 있을 수 있다.
+ * 어느 쪽도 던지지 않는다 — 이 신호는 배지 하나의 근거이지 세션 목록의 전제가 아니다.
+ */
+export async function gitBranchPr(projectCwd: string, branch: string): Promise<BranchPr | 'unavailable' | null> {
+  try {
+    const { stdout } = await exec('gh', ['pr', 'view', branch, '--json', 'number,state,url'], { cwd: projectCwd, ...OK })
+    const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown }
+    if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
+    return { number: j.number, state: j.state === 'MERGED' ? 'merged' : j.state === 'CLOSED' ? 'closed' : 'open', url: j.url }
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
+  }
+}
+
 /**
  * 브랜치 이름이 될 수 있는가 (#69) — 판정은 git 자신에게 시킨다.
  *

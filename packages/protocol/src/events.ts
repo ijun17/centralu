@@ -252,6 +252,16 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...base, type: z.literal('worktree_merged') }),
   /**
+   * 워크트리 브랜치의 PR 상태를 알게 됐다 (#76 stage 3). gh로 측정한 통지다 —
+   * worktree_merged와 같은 문법: 사실의 통지이지 행동이 아니다. PR이 병합(스쿼시 포함)
+   * 되면 worktree_merged가 뒤따른다 — 이 이벤트는 배지(번호·상태·링크)의 근거다.
+   */
+  z.object({
+    ...base,
+    type: z.literal('worktree_pr'),
+    pr: z.object({ number: z.number(), state: z.enum(['open', 'merged', 'closed']), url: z.string() }),
+  }),
+  /**
    * The update picture changed (issue #43).
    *
    * **The only event here that belongs to no session** — `error` already proved the

@@ -34,6 +34,8 @@ import {
   gitHeadSha,
   gitRevParse,
   gitBranchMerged,
+  gitBranchPr,
+  type BranchPr,
   gitLog,
   gitCommitDetail,
   gitBranches,
@@ -2441,6 +2443,8 @@ export class SessionManager {
             project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
             state: s.state,
             ...(s.worktreeMerged ? { merged: true } : {}),
+            // PR 상태(#76 stage 3) — 매니저가 "리뷰 대기 중"과 "그냥 진행 중"을 가르는 근거
+            ...(s.worktreePr ? { pr: { number: s.worktreePr.number, state: s.worktreePr.state } } : {}),
             tool: s.tool,
             preview: this.previewOf(s.id),
             lastActive: this.lastActiveOf(s.id),
@@ -2930,6 +2934,16 @@ export class SessionManager {
   }
 
   /**
+   * PR 상태 측정기 (#76 stage 3). 필드로 두는 이유: gh는 네트워크라 테스트가 실측할 수
+   * 없다 — 시험은 이 자리를 갈아끼운다. prPollMs도 같은 이유로 필드다(시험은 0으로).
+   */
+  prLookup: (projectCwd: string, branch: string) => Promise<BranchPr | 'unavailable' | null> = gitBranchPr
+  prPollMs = 120_000
+  private prCheckedAt = new Map<string, number>()
+  /** gh가 없는 기계에서 스윕마다 ENOENT를 다시 만나지 않기 위한 한 방향 스위치 */
+  private ghAvailable = true
+
+  /**
    * 이 프로젝트의 워크트리 브랜치들이 줄기에 들어갔는지 다시 판정한다 (#69).
    *
    * 부르는 곳은 둘이다: 기동(한 번), 그리고 프로젝트 git 새로고침(projects.gitStatus —
@@ -2948,9 +2962,35 @@ export class SessionManager {
     const trunk = this.trunkOf(projectId) ?? 'HEAD'
     for (const m of this.meta.values()) {
       if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged) continue
-      const merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)
+      let merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)
+      /*
+       * 로컬이 못 보는 병합 (#76 stage 3): 스쿼시·리베이스 병합은 is-ancestor로 감지
+       * 불가(실측, git.ts)인데, GitHub PR의 지배적 결말이 스쿼시다. PR의 MERGED는
+       * 서버가 기록한 사실이라 그 사각지대가 없다 — gh가 있으면 물어서 메운다.
+       *
+       * 로컬이 이미 merged라면 안 묻는다(답이 안 바뀐다). 네트워크 호출이라 세션당
+       * TTL을 두고(스윕은 턴이 끝날 때마다 도는 길이다), gh 자체가 없으면(ENOENT)
+       * 이 프로세스에서는 다시 묻지 않는다 — 답이 변할 수 없는 질문이다.
+       */
+      if (!merged && this.ghAvailable) {
+        const now = Date.now()
+        if (now - (this.prCheckedAt.get(m.id) ?? 0) >= this.prPollMs) {
+          this.prCheckedAt.set(m.id, now)
+          const pr = await this.prLookup(cwd, m.worktree.branch).catch(() => null)
+          if (pr === 'unavailable') {
+            this.ghAvailable = false
+            // 마지막 말을 남긴다 — 없으면 "왜 PR 칩이 안 뜨지"가 미스터리가 된다
+            console.error('[worktree] gh not found — PR detection off for this run (local merge detection unaffected)')
+          }
+          else if (pr && JSON.stringify(pr) !== JSON.stringify(m.worktreePr)) {
+            this.meta.set(m.id, { ...this.meta.get(m.id)!, worktreePr: pr })
+            this.emit({ type: 'worktree_pr', sessionId: m.id, pr })
+          }
+          if (pr && pr !== 'unavailable' && pr.state === 'merged') merged = true
+        }
+      }
       if (!merged) continue
-      const next = { ...m, worktreeMerged: true }
+      const next = { ...this.meta.get(m.id)!, worktreeMerged: true }
       this.meta.set(m.id, next)
       this.emit({ type: 'worktree_merged', sessionId: m.id })
       console.error(`[worktree] branch merged into trunk: ${m.worktree.branch} (${m.id.slice(0, 8)})`)

@@ -6468,6 +6468,40 @@ test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', as
   await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveText('merged')
 })
 
+/** PR 칩 (#76 stage 3) — gh가 측정한 PR 상태가 칩이 되고, 병합되면 merged 배지에 자리를 내준다 */
+test('PR이 열리면 PR 칩이 서고, 병합되면 merged 배지가 대신 선다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('worktree-branch-input').fill('feat/pr-chip')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveCount(0)
+
+  // host의 gh 측정이 이 이벤트를 흘린다 — 스쿼시 병합의 사각지대를 메우는 그 신호
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const child = [...m.sessions.values()].find((s: any) => s.worktree)
+    m.emit({
+      type: 'worktree_pr',
+      sessionId: child.id,
+      pr: { number: 12, state: 'open', url: 'https://github.com/x/y/pull/12' },
+    })
+  })
+  await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveText('PR #12')
+
+  // 병합되면 결말은 한 번만 말한다 — merged 배지가 서고 PR 칩은 물러난다
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const child = [...m.sessions.values()].find((s: any) => s.worktree)
+    m.emit({ type: 'worktree_merged', sessionId: child.id })
+  })
+  await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveCount(1)
+  await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveCount(0)
+})
+
 /** #75: 첨부를 실은 말은 한 번만 그려진다 — text가 보낸 원문 그대로라 확정이 맞물린다 */
 test('첨부와 함께 보낸 말은 한 번만 그려진다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })

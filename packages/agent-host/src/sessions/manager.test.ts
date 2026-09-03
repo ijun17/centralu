@@ -1870,6 +1870,8 @@ describe('워크트리 세션', () => {
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
     wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, wtRoot)
+    // 기본은 "모른다" — 진짜 gh를 부르면 테스트가 기계의 gh 설치 여부에 좌우된다 (#76 stage 3)
+    wtMgr.prLookup = async () => null
     wtRpc = createRpcHandler(wtMgr, adapters)
     project = (await wtRpc('projects.add', { path: repo })) as { id: string; path: string }
   })
@@ -2047,6 +2049,84 @@ describe('워크트리 세션', () => {
     expect(after.get(fresh.id)?.worktreeMerged).toBe(false)
     // 이벤트도 흘렀다 — 화면 배지의 근거
     expect(events.some((e) => e.type === 'worktree_merged' && e.sessionId === worked.id)).toBe(true)
+  })
+
+  /*
+   * #76 stage 3: 스쿼시 병합은 로컬 감지 불가(실측, git.ts)라 PR 상태로 메운다.
+   * 로컬에는 병합 흔적이 전혀 없는 채 PR만 MERGED인 상황 — GitHub의 기본 결말이다.
+   */
+  it('PR 병합 감지 (#76): 로컬이 못 보는 스쿼시 병합을 PR 상태가 잡는다', async () => {
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/squashed',
+    })) as SessionInfo
+
+    const asked: string[] = []
+    wtMgr.prPollMs = 0
+    wtMgr.prLookup = async (_cwd, branch) => {
+      asked.push(branch)
+      return { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' }
+    }
+
+    await wtMgr.refreshMergedWorktrees(project.id)
+
+    // 물은 대상이 그 브랜치다 — 다른 브랜치의 PR을 이 세션에 붙이면 안 된다
+    expect(asked).toContain('feat/squashed')
+    const after = wtMgr.listSessions().find((x) => x.id === s.id)!
+    expect(after.worktreeMerged).toBe(true)
+    expect(after.worktreePr).toEqual({ number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' })
+    // 두 이벤트가 다 흐른다: 칩의 근거(worktree_pr)와 배지의 근거(worktree_merged)
+    expect(events.some((e) => e.type === 'worktree_pr' && e.sessionId === s.id)).toBe(true)
+    expect(events.some((e) => e.type === 'worktree_merged' && e.sessionId === s.id)).toBe(true)
+  })
+
+  it('열린 PR은 칩만 켠다 — 병합됨이 아니다. 상태가 바뀌면 그때 병합됨이 된다 (#76)', async () => {
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/reviewing',
+    })) as SessionInfo
+
+    wtMgr.prPollMs = 0
+    let state: 'open' | 'merged' = 'open'
+    wtMgr.prLookup = async () => ({ number: 3, state, url: 'https://github.com/x/y/pull/3' })
+
+    await wtMgr.refreshMergedWorktrees(project.id)
+    let after = wtMgr.listSessions().find((x) => x.id === s.id)!
+    expect(after.worktreePr?.state).toBe('open')
+    // 열려 있는 것은 아직 결말이 아니다 — 여기서 merged로 읽으면 리뷰 중인 브랜치가 "끝난 일"이 된다
+    expect(after.worktreeMerged).toBe(false)
+
+    state = 'merged'
+    await wtMgr.refreshMergedWorktrees(project.id)
+    after = wtMgr.listSessions().find((x) => x.id === s.id)!
+    expect(after.worktreeMerged).toBe(true)
+    // 상태 변화만 이벤트가 된다: open 1번 + merged 1번 — 같은 답을 스윕마다 방송하면 폭풍이 된다
+    expect(events.filter((e) => e.type === 'worktree_pr' && e.sessionId === s.id).length).toBe(2)
+  })
+
+  it('gh가 없으면 한 번만 묻고, TTL 안에서는 다시 묻지 않는다 (#76)', async () => {
+    await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/no-gh',
+    })
+
+    // TTL: 기본 주기 안의 연속 스윕은 gh를 다시 부르지 않는다 — 턴이 끝날 때마다 도는 길이다
+    let calls = 0
+    wtMgr.prLookup = async () => {
+      calls++
+      return null
+    }
+    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.refreshMergedWorktrees(project.id)
+    expect(calls).toBe(1)
+
+    // gh 자체가 없다(ENOENT)는 답은 프로세스가 사는 동안 안 변한다 — 스위치가 내려간다
+    wtMgr.prPollMs = 0
+    let enoentCalls = 0
+    wtMgr.prLookup = async () => {
+      enoentCalls++
+      return 'unavailable'
+    }
+    await wtMgr.refreshMergedWorktrees(project.id)
+    await wtMgr.refreshMergedWorktrees(project.id)
+    expect(enoentCalls).toBe(1)
   })
 
   /*

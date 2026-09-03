@@ -1079,6 +1079,7 @@ export const useStore = create<AppState>((set, get) => ({
             worktree: s.worktree,
             parentSessionId: s.parentSessionId,
             merged: s.worktreeMerged,
+            pr: s.worktreePr,
           }),
           autoNamed: s.autoNamed,
           state: s.state,
@@ -1439,6 +1440,7 @@ export const useStore = create<AppState>((set, get) => ({
                 worktree: s.worktree,
                 parentSessionId: s.parentSessionId,
                 merged: s.worktreeMerged,
+                pr: s.worktreePr,
               }),
               autoNamed: s.autoNamed,
               state: s.state,
@@ -2130,6 +2132,7 @@ export const useStore = create<AppState>((set, get) => ({
             // 소속도 host가 정한다 (#69) — 빠뜨리면 매니저 아래 만든 세션이 재시작 전까지 최상위에 선다
             parentSessionId: info.parentSessionId,
             merged: info.worktreeMerged,
+            pr: info.worktreePr,
           }),
           lastSeq: info.lastSeq,
           lastReadSeq: info.lastReadSeq,
@@ -2826,6 +2829,7 @@ export const useStore = create<AppState>((set, get) => ({
               worktree: f.worktree,
               parentSessionId: f.parentSessionId,
               merged: f.worktreeMerged,
+              pr: f.worktreePr,
               ...liveFactsOf(f),
             }
           : {
@@ -2842,6 +2846,7 @@ export const useStore = create<AppState>((set, get) => ({
                 worktree: f.worktree,
                 parentSessionId: f.parentSessionId,
                 merged: f.worktreeMerged,
+                pr: f.worktreePr,
               }),
               autoNamed: f.autoNamed,
               state: f.state,

@@ -609,6 +609,21 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       </span>
                     )}
                     {/*
+                      PR 칩 (#76 stage 3) — gh로 측정한 이 브랜치의 풀 리퀘스트.
+                      merged가 서면 안 그린다: PR 병합은 merged 배지를 함께 켜고,
+                      13px 줄에서 같은 결말을 두 번 말하면 둘 다 흐려진다.
+                    */}
+                    {s.pr && !s.merged && (
+                      <span
+                        className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+                        data-testid={`pr-badge-${s.id}`}
+                        title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}
+                      >
+                        PR #{s.pr.number}
+                        {s.pr.state === 'closed' ? ' ✕' : ''}
+                      </span>
+                    )}
+                    {/*
                       안읽음 점은 여기 있다가 **지워졌다** (도그푸딩 2026-09-02).
 
                       같은 사실을 이 줄에서 세 번째로 말하고 있었다: 도구 표식의 테두리가
