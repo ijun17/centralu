@@ -37,7 +37,8 @@ export class Store {
    */
   migrationsRun = 0
 
-  constructor(path = ':memory:') {
+  constructor(private readonly dbPath = ':memory:') {
+    const path = dbPath
     this.db = new Database(path)
     this.db.pragma('journal_mode = WAL')
     this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
@@ -630,12 +631,24 @@ export class Store {
       },
     ]
 
+    const t0 = Date.now()
     for (const step of steps) {
       if (current < step.to) {
         step.run()
         this.db.pragma(`user_version = ${step.to}`)
         this.migrationsRun += 1
       }
+    }
+    /*
+     * 마이그레이션이 돌았다면 **말한다** (도그푸딩 사고의 교훈: beta.4가 151k 메시지
+     * DB를 10초 넘게 조용히 다시 갈았는데, 화면도 로그도 아무 말이 없어 "멈췄다"로
+     * 읽혔고 사람이 Cmd+Q로 죽였다). 한 줄이면 host.log에서 그 침묵이 설명된다.
+     * 메모리 DB(테스트)는 스텝 전부가 매번 돌므로 시끄럽기만 하다 — 파일 DB만.
+     */
+    if (this.migrationsRun > 0 && this.dbPath !== ':memory:') {
+      console.error(
+        `[store] migrated v${current} → v${this.schemaVersion} (${this.migrationsRun} steps, ${Date.now() - t0}ms)`,
+      )
     }
   }
 
