@@ -2183,7 +2183,10 @@ test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명�
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
 
-  // 실제보다 무섭게 말하면 사람은 정리하지 못하고 목록만 쌓인다
+  // 기본은 원본까지 지운다 (2b60589) — 그때는 빨간 경고가 선다
+  await expect(page.getByTestId('delete-external-warning')).toContainText('deleted too')
+  // **남기기로 고르면** 무섭지 않게 말한다 — 실제보다 무섭게 말하면 사람은 정리하지 못하고 목록만 쌓인다
+  await page.getByTestId('delete-external-toggle').locator('input').uncheck()
   await expect(page.getByTestId('delete-notice')).toContainText('stays in Claude Code')
   await expect(page.getByTestId('delete-notice')).toContainText('Past conversations')
 
