@@ -754,7 +754,7 @@ Cover, in this order:
 2. Current state — what is done, what is mid-flight, and the exact state of unfinished work (files, branches, commands to resume).
 3. Decisions & why — choices already made, with the reasons and evidence, so your successor does not relitigate them.
 4. Next steps — what should happen next, in priority order.
-5. Pitfalls — mistakes already made, dead ends, things that look right but are wrong, environment quirks.
+5. Tips & pitfalls — this section evaporates first in handoffs, so be exhaustive, not selective: every practical trick, workaround, non-obvious command, environment quirk, mistake already made, dead end, and thing that looks right but is wrong. A tip that feels too small to mention is exactly the one to write down. If earlier parts of this conversation were compacted into summaries, carry forward every lesson those summaries mention — do not let them die with this session.
 6. Working with the user — the language the user speaks, their tone, the response style they prefer, and standing instructions or conventions (build commands, commit style, things never to do).
 
 Write the note itself in the language the user has mostly used in this conversation.`
