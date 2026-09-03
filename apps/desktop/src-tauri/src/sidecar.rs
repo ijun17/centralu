@@ -37,6 +37,10 @@ struct Inner {
     info: Option<HostInfo>,
     status_text: Option<String>,
     shutting_down: bool,
+    /// host가 죽기 전에 남긴 마지막 말들 (도그푸딩: 설치본이 "Starting…"에 영원히
+    /// 멈춰 보였는데, 진짜 이유 — 다른 인스턴스가 데이터를 쥐고 있음 — 는 host가
+    /// stdout에 또박또박 말하고 있었다. 말은 있었는데 화면까지 오지 않았다.)
+    last_output: Vec<String>,
 }
 
 #[derive(Clone, Default)]
@@ -109,12 +113,29 @@ impl Supervisor {
                         if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
                             return;
                         }
+                        // host가 남긴 마지막 말 — ready 전에 죽었다면 이것이 이유다
+                        let reason = me.take_last_output();
+                        /*
+                         * 다른 인스턴스가 데이터를 쥐고 있으면 다시 띄워봐야 같은 답이다 —
+                         * 백오프 5회(~15초)를 돌며 "Starting…"을 보여주는 대신 지금 바로,
+                         * host가 말한 이유 그대로 사람에게 보여준다 (닫아야 할 것이 뭔지
+                         * 그 문장에 들어 있다).
+                         */
+                        if reason.contains("already using this data") {
+                            me.set_error(&reason);
+                            emit(&app, HostStatus::Failed { message: reason });
+                            return;
+                        }
                         // 충분히 오래 살다 죽었다면 이전 실패 이력은 무관하다 — 처음부터 센다
                         if started.elapsed() >= STABLE_UPTIME {
                             attempt = 0;
                         }
                         attempt += 1;
-                        let msg = format!("agent-host가 종료되었습니다 (code {code:?})");
+                        let msg = if reason.is_empty() {
+                            format!("agent-host가 종료되었습니다 (code {code:?})")
+                        } else {
+                            format!("agent-host가 종료되었습니다 (code {code:?})\n{reason}")
+                        };
                         if attempt > MAX_RESTARTS {
                             me.set_error(&msg);
                             emit(&app, HostStatus::Failed { message: msg });
@@ -139,6 +160,10 @@ impl Supervisor {
 
     /// host 한 번 실행 → ready 줄 파싱 → 종료까지 대기. 반환값은 종료 코드.
     fn spawn_once(&self, app: &AppHandle, bundled: Option<&Path>) -> Result<Option<i32>, String> {
+        // 지난 기동의 유언과 섞이지 않게 비우고 시작한다
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_output.clear();
+        }
         let (program, args) = host_command(bundled)?;
         let mut cmd = Command::new(&program);
         // stdin을 파이프로 열어두는 것이 **고아 방지의 핵심**이다.
@@ -192,8 +217,17 @@ impl Supervisor {
                     continue;
                 }
             }
-            // 그 외 줄은 로그로 흘린다
+            // 그 외 줄은 로그로 흘리되, 마지막 몇 줄은 쥐고 있는다 —
+            // ready 전에 죽으면 이 줄들이 유일한 사인(死因)이다
             eprintln!("[agent-host] {line}");
+            if let Ok(mut inner) = self.inner.lock() {
+                if !line.trim().is_empty() {
+                    inner.last_output.push(line.clone());
+                    if inner.last_output.len() > 6 {
+                        inner.last_output.remove(0);
+                    }
+                }
+            }
         }
 
         // stdout이 닫혔다 = 프로세스가 끝났다.
@@ -215,6 +249,14 @@ impl Supervisor {
         if let Ok(mut inner) = self.inner.lock() {
             inner.status_text = Some(msg.to_string());
         }
+    }
+
+    /// 죽은 host가 남긴 마지막 말들을 꺼내고 비운다 — 다음 기동의 말과 섞이지 않게
+    fn take_last_output(&self) -> String {
+        self.inner
+            .lock()
+            .map(|mut i| std::mem::take(&mut i.last_output).join("\n"))
+            .unwrap_or_default()
     }
 
     /// 앱 종료 시 호출. 사이드카를 **그룹째** 죽인다 — 좀비를 남기지 않는다.
