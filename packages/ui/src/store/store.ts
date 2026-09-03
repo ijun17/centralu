@@ -2526,6 +2526,20 @@ export const useStore = create<AppState>((set, get) => ({
       })
       await get().rename(info.id, session.name)
 
+      /*
+       * 그리드 자리 승계 (도그푸딩 요청 2026-09-04): 죽는 세션이 그리드에 있었으면
+       * 후임자가 **같은 인덱스**에 선다. 삭제가 자리를 비운 뒤에 다시 넣으면 칸이
+       * 사라졌다 나타나고 순서도 밀린다 — 교체는 파괴 전에 한다. deleteOld=false여도
+       * 바꾼다: 그리드는 "지금 일하는 세션들"의 자리고 이어가는 쪽은 후임자다 —
+       * 남겨진 원본은 사이드바에서 닿는다. createSession이 이미 후임자를 포커스했으니,
+       * 여기서는 레인만 바로잡는다(그리드에 있으면 그리드 안에서 보이게).
+       */
+      const grid = get().gridPanels
+      if (grid.includes(sessionId)) {
+        await get().setGridPanels(grid.map((id) => (id === sessionId ? info.id : id)))
+        get().focusSession(info.id, { preferGrid: true })
+      }
+
       // 다 읽은 임시 파일은 휴지통으로 — 저장소를 더럽히지 않는다 (실패해도 치명적이지 않다)
       void s.platform.fs.trash(session.projectId!, HANDOFF_FILE).catch(() => {})
 

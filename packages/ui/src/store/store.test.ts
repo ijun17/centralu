@@ -805,6 +805,30 @@ describe('인수인계하고 새로 시작', () => {
     expect(useStore.getState().focusedSessionId).toBe(heir!.id)
   })
 
+  it('그리드 자리를 물려준다 — 후임자가 같은 인덱스에 서고, 순서는 밀리지 않는다', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho7')
+    mock.sessions.set('ho-g1', sessionInfo('ho-g1', { projectId: proj.id }))
+    mock.sessions.set('ho-g2', sessionInfo('ho-g2', { projectId: proj.id, name: '한가운데' }))
+    mock.sessions.set('ho-g3', sessionInfo('ho-g3', { projectId: proj.id }))
+    await mock.agents.setGridView(['ho-g1', 'ho-g2', 'ho-g3'])
+    await useStore.getState().attach(mock)
+
+    const done = useStore.getState().handoffSession('ho-g2')
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-g2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    mock.fsState.files[HANDOFF_FILE] = '이어서 하세요'
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-g2' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-g2', state: 'waiting_input' } as NormalizedEvent)
+    await done
+
+    const heir = [...mock.sessions.values()].find((r) => r.name === '한가운데' && r.id !== 'ho-g2')!
+    // 가운데 칸이 그대로 후임자다 — 칸이 사라졌다 다시 생기면 배치가 흐트러진다 (도그푸딩)
+    expect(useStore.getState().gridPanels).toEqual(['ho-g1', heir.id, 'ho-g3'])
+    expect(useStore.getState().focusedSessionId).toBe(heir.id)
+  })
+
   it('세션이 글을 쓰다 에러가 나면 아무것도 지우지 않는다 — 파괴는 성공 뒤에만', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho2')
