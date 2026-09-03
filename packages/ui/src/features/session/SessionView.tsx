@@ -1255,16 +1255,15 @@ function ChatStream({
           16px에 붙었다 (실측: gap 16px). 음수 offset이 그 16px을 되돌려 진짜 천장에
           닿게 한다. 패딩 자체는 남겨둔다: 맨 위로 올렸을 때 대화가 숨 쉴 자리다.
 
-          16이 아니라 **19**인 이유: 확대(--text-zoom 1.1 등)에서는 헤더 높이가 소수점
-          픽셀에 떨어져, 딱 맞춘 가장자리가 반올림에 따라 실금으로 벌어진다 —
-          그 틈으로 지나가는 대화가 비쳤다 (도그푸딩: "실금 정도로 뒤에 보여").
-          천장 위로 겹쳐 넣으면 스크롤 칸이 그만큼 잘라낼 뿐이고(위 모서리는 어차피
-          테두리도 둥글림도 없다), 반올림이 어느 쪽으로 떨어져도 틈이 안 생긴다.
-          여유가 1px(-17px)였을 때 트렁크 WebKit 실측은 틈 0이었는데 실제 WKWebView
-          (더 구형인 시스템 엔진)에서 여전히 보인다는 지적이 와서 3px로 늘렸다 —
-          더 잘리는 것은 배너의 위 패딩(8px)뿐이라 글자는 어느 확대에서도 안전하다.
+          16이 아니라 **10**인 이유: 6px 일부러 떨어뜨린다. 천장에 딱 붙이는 시도를
+          두 번 했다 — 1px 겹침, 3px 겹침 + 불투명화. 트렁크 WebKit 실측으로는 틈 0
+          이었는데 실제 WKWebView(구형 시스템 엔진)에서는 끝내 실금이 남았다
+          (도그푸딩 세 번 지적 후 결론: 엔진의 합성 반올림은 우리가 못 이긴다).
+          붙일 수 없다면 **일부러 떨어뜨린다** — 6px 간격은 실금(±1px)을 오차가 아니라
+          디자인 안에 삼키고, 배너는 매달린 띠가 아니라 떠 있는 카드가 된다
+          (그래서 아래 버튼은 말풍선과 같은 네 모서리 둥글림과 온전한 테두리를 입는다).
         */
-        <div className="sticky -top-[19px] z-10 -mx-4 mb-1 flex justify-end px-4" data-testid="sticky-user">
+        <div className="sticky -top-[10px] z-10 -mx-4 mb-1 flex justify-end px-4" data-testid="sticky-user">
           {/*
             말풍선과 **같은 옷, 같은 자리, 같은 폭**을 갖는다. 이 줄은 위로 사라진
             사용자 메시지의 연장이라, 하나라도 다르면 다른 종류의 것으로 읽힌다.
@@ -1276,11 +1275,11 @@ function ChatStream({
             떨어져 보이게 한 것은 위치가 아니라 모양이었다. 그래서 말풍선과 똑같이
             오른쪽 정렬에 `max-w-[75%]`로 두고, 폭은 글자 길이를 따라간다(w-fit).
 
-            천장에 붙었으므로 **위쪽 모서리는 둥글지 않고 위 테두리도 없다** — 떠 있는
-            카드가 아니라 화면에 매달린 띠다. 나타날 때 몇 px 아래에서 올라와 멎는다
-            (cc-hang) — 그 움직임이 "여기 매달렸다"를 말한다.
+            천장에서 6px 떠 있는 **카드**라서 말풍선과 같은 네 모서리 둥글림과 온전한
+            테두리를 입는다 (붙이기를 접은 경위는 위 -top 주석에). 나타날 때 몇 px
+            아래에서 올라와 멎는다(cc-hang) — 그 움직임이 "여기 떠 있다"를 말한다.
             (반투명+블러였던 시절이 있다 — "덮었다"를 보이려는 것이었는데, 비치는
-            대화가 계속 "헤더와의 틈"으로 읽혀서 접었다. 버튼 쪽 주석에 경위가 있다.)
+            대화가 계속 "헤더와의 틈"으로 읽혀서 접었다.)
 
             누르면 펼쳐진다 — 한 줄로 부족한 질문을 위로 되돌아가지 않고 다시 읽는 용도.
             아주 긴 질문이 화면을 다 덮지 않게 높이만 자르고 안에서 스크롤한다.
@@ -1299,7 +1298,7 @@ function ChatStream({
               type="button"
               onClick={() => setStickyOpen((v) => !v)}
               aria-expanded={stickyOpen}
-              className="w-full cursor-pointer truncate rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-panel px-3 py-2 text-left text-[13px] text-chalk"
+              className="w-full cursor-pointer truncate rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-left text-[13px] text-chalk shadow-[0_8px_24px_-8px_rgb(0_0_0/0.8)]"
             >
               {stickyText}
             </button>
@@ -1318,7 +1317,7 @@ function ChatStream({
                   "가린 게 아니라 덮었다"를 보이려는 것이고, 펼친 이유는 읽으려는 것이다 —
                   긴 질문 위로 대화가 비치면 그 목적이 곧바로 깨진다.
                 */
-                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-graphite px-3 py-2 text-left text-[13px] text-chalk"
+                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-slate/40 bg-graphite px-3 py-2 text-left text-[13px] text-chalk shadow-[0_8px_24px_-8px_rgb(0_0_0/0.8)]"
               >
                 {stickyText}
               </button>

@@ -3488,13 +3488,13 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
     }
   })
   /*
-    0이 아니라 살짝 음수다: 확대 배율에서 소수점 픽셀 반올림이 만드는 실금을
-    덮으려고 천장 위로 3px 겹쳐 넣는다 (SessionView의 -top-[19px] 주석 — 1px 여유로는
-    실제 WKWebView에서 부족하다는 도그푸딩 지적으로 늘렸다). 계약은
-    "틈이 없다(≤0)"와 "떠내려가지 않았다(-5 초과)" 둘이다.
+    이제 **일부러 6px 떠 있다** (SessionView의 -top-[10px] 주석 — 딱 붙이기는 실제
+    WKWebView의 합성 반올림에 두 번 졌고, 실금을 디자인 간격 안에 삼키는 쪽으로
+    바꿨다). 계약은 "의도한 간격 근처(4~8px)"다 — 0이면 붙이기로 회귀한 것이고,
+    크면 떠내려간 것이다.
   */
-  expect(shape.gapFromCeiling).toBeLessThanOrEqual(0)
-  expect(shape.gapFromCeiling).toBeGreaterThan(-5)
+  expect(shape.gapFromCeiling).toBeGreaterThanOrEqual(4)
+  expect(shape.gapFromCeiling).toBeLessThanOrEqual(8)
   expect(shape.rightInset).toBe(0)
   expect(shape.widthRatio).toBeLessThanOrEqual(0.76)
 
