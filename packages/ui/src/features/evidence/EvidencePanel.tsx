@@ -225,12 +225,14 @@ function TabGroup({
   const panelSplit = useStore((s) => s.panelSplit)
   const setPanelSplit = useStore((s) => s.setPanelSplit)
   const [splitHint, setSplitHint] = useState(false)
-  const bodyRef = useRef<HTMLDivElement>(null)
+  /** 아래 묶음의 탭 띠 — 두 묶음의 경계가 이 띠의 윗변이라, 조절 손잡이가 여기 산다 */
+  const stripRef = useRef<HTMLElement>(null)
 
   return (
     <>
       <nav
-        className={`flex items-center gap-0.5 border-b border-edge px-2 py-1 ${gi > 0 ? 'border-t' : ''}`}
+        ref={stripRef}
+        className={`relative flex items-center gap-0.5 border-b border-edge px-2 py-1 ${gi > 0 ? 'border-t' : ''}`}
         data-testid={gi === 0 ? 'evidence-tabs' : `evidence-tabs-${gi}`}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
@@ -247,6 +249,36 @@ function TabGroup({
           onLayout(moveTabToGroupEnd(groups, dragged, gi))
         }}
       >
+        {/*
+          경계 조절 손잡이 (도그푸딩 두 번째 지적으로 자리를 옮겼다). 처음에는 아래
+          몸통의 윗변에 뒀는데 그건 **탭 띠 아래**라, 사람이 잡는 "두 패널의 경계" —
+          위 몸통과 아래 탭 띠 사이 — 가 아니었다. 경계는 이 띠의 윗변이다.
+
+          계산이 비율로만 도는 이유: rect는 확대(--text-zoom)가 곱해진 화면 px이고
+          offsetHeight는 레이아웃 px라, 섞으면 확대에서 틀어진다 — 전부 rect로 재서
+          비율만 뽑으면 단위가 지워진다.
+        */}
+        {gi === 1 && (
+          <ResizeHandle
+            side="top"
+            testId="panel-split-handle"
+            min={15}
+            max={85}
+            onReset={() => setPanelSplit(0.5)}
+            onResize={(v) => {
+              // ResizeHandle 계약: v = 손잡이가 붙은 요소(이 띠)의 bottom - 포인터 y
+              const strip = stripRef.current
+              const col = strip?.parentElement
+              const b0 = col?.querySelector<HTMLElement>('[data-testid="evidence-body-0"]')
+              const b1 = col?.querySelector<HTMLElement>('[data-testid="evidence-body-1"]')
+              if (!strip || !b0 || !b1) return
+              const r0 = b0.getBoundingClientRect()
+              const total = r0.height + b1.getBoundingClientRect().height
+              const boundaryY = strip.getBoundingClientRect().bottom - v
+              if (total > 0) setPanelSplit((boundaryY - r0.top) / total)
+            }}
+          />
+        )}
         {group.tabs.map((id) => (
           <TabButton
             key={id}
@@ -275,7 +307,6 @@ function TabGroup({
           basis는 flex-1의 0 그대로라 grow 비가 곧 높이 비다.
         */
         style={groups.length === 2 ? { flexGrow: gi === 0 ? panelSplit : 1 - panelSplit } : undefined}
-        ref={bodyRef}
         data-testid={`evidence-body-${gi}`}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(PANEL_TAB_MIME)) return
@@ -302,27 +333,6 @@ function TabGroup({
           }
         }}
       >
-        {/*
-          경계 조절 손잡이 (도그푸딩 요청). 아래 묶음 몸통의 윗변이 곧 두 묶음의 경계다 —
-          끌면 아래 몸통의 높이가 나오고, 두 몸통 합에 대한 비율로 저장한다.
-          몸통 합으로 나누는 이유: 탭 띠는 고정이라 flexGrow가 나누는 공간이 그것뿐이다.
-        */}
-        {gi === 1 && (
-          <ResizeHandle
-            side="top"
-            testId="panel-split-handle"
-            min={15}
-            max={85}
-            onReset={() => setPanelSplit(0.5)}
-            onResize={(h) => {
-              const other = bodyRef.current?.parentElement?.querySelector<HTMLElement>(
-                '[data-testid="evidence-body-0"]',
-              )
-              const total = (other?.offsetHeight ?? 0) + (bodyRef.current?.offsetHeight ?? 0)
-              if (total > 0) setPanelSplit(1 - h / total)
-            }}
-          />
-        )}
         <TabBody tab={group.active} projectId={projectId} project={project} />
         {splitHint && (
           <div
