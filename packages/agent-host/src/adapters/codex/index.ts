@@ -12,6 +12,7 @@ import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, PermissionPr
 import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
+import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
 import { imageEventFromDisk } from './images.js'
@@ -653,6 +654,11 @@ export class CodexAdapter implements AgentAdapter {
     } finally {
       await client.dispose()
     }
+  }
+
+  /** 죽은 codex의 마지막 컴팩트 요약 (#78) — 롤아웃 파일에서, 바이너리 없이 (rollout.ts) */
+  async lastCompactSummary(externalId: string): Promise<string | null> {
+    return rolloutLastCompactSummary(externalId)
   }
 
   /**

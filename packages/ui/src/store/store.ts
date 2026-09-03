@@ -627,7 +627,14 @@ export type AppState = {
    * 전부 도구별 값이라, codex의 모델명을 claude에 넘기면 생성부터 죽는다.
    * deleteOld: 기본 true. 끄면 기존 세션을 그대로 남긴다 — 갈아타기가 아니라 분기다.
    */
-  handoffSession(sessionId: string, opts?: { tool?: ToolName; deleteOld?: boolean }): Promise<void>
+  /**
+   * mode 'agent'(기본): 죽는 세션이 노트를 쓴다. 'record'(#78): 에이전트에게 아무것도
+   * 묻지 않고 host가 저장소 원문으로 기록을 만든다 — 서비스가 중단된 세션의 출구.
+   */
+  handoffSession(
+    sessionId: string,
+    opts?: { tool?: ToolName; deleteOld?: boolean; mode?: 'agent' | 'record' },
+  ): Promise<void>
   updateSessionSettings(
     sessionId: string,
     s: {
@@ -2447,7 +2454,9 @@ export const useStore = create<AppState>((set, get) => ({
     const project = session?.projectId ? s.projects[session.projectId] : null
     if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
     const heirTool = opts?.tool ?? session.tool
-    const deleteOld = opts?.deleteOld ?? true
+    const mode = opts?.mode ?? 'agent'
+    // record 모드 기본은 **보존** — 응답 불능인 세션의 원본은 후임자가 확인될 때까지 남긴다 (#78)
+    const deleteOld = opts?.deleteOld ?? mode === 'agent'
     // 매니저 삭제 규칙과 같다 — 살아 있는 자식이 있으면 마지막 삭제가 어차피 거부된다.
     // 실패를 맨 끝(파괴 직전)에서 만나는 대신 시작에서 거른다.
     const liveKids = Object.values(s.sessions).filter(
@@ -2459,6 +2468,16 @@ export const useStore = create<AppState>((set, get) => ({
     }
     handoffInFlight.add(sessionId)
     try {
+      let note = ''
+      if (mode === 'record') {
+        /*
+         * 기록 모드 (#78): 에이전트에게 **아무것도 묻지 않는다** — 이 모드가 존재하는
+         * 이유가 그 에이전트의 응답 불능이다. host가 저장소 원문(+codex 롤아웃의
+         * 컴팩트 요약)으로 기록을 만들어 주고, 그것이 후임자의 첫 메시지가 된다.
+         * 파일 경유 없음: 직송은 원자적이다 (세션 생성 성공 = 내용 있음).
+         */
+        note = (await s.platform.agents.exportHandoffRecord(sessionId)).text
+      } else {
       /*
        * 돌고 있는 턴이 있으면 **끝나기를 기다린 뒤** 부탁한다 (실측: 메아 인수인계 —
        * 진행 중이던 턴에 프롬프트가 합류(steer)돼, 직전 작업 보고가 인수인계 글
@@ -2485,7 +2504,6 @@ export const useStore = create<AppState>((set, get) => ({
        * 에이전트가 쓴 바이트가 그대로다. 파일이 안 놓이면 아무것도 지우지 않는다.
        */
       const deadline = Date.now() + 10 * 60_000
-      let note = ''
       for (;;) {
         await new Promise((r) => setTimeout(r, 500))
         const st = get()
@@ -2506,6 +2524,7 @@ export const useStore = create<AppState>((set, get) => ({
           if ((err as Error).message.includes('too large')) throw err
           // 아직 없다 — 계속 기다린다 (턴이 끝났는데도 영영 안 놓이면 위 시한이 끊는다)
         }
+      }
       }
 
       /*
@@ -2540,8 +2559,9 @@ export const useStore = create<AppState>((set, get) => ({
         get().focusSession(info.id, { preferGrid: true })
       }
 
-      // 다 읽은 임시 파일은 휴지통으로 — 저장소를 더럽히지 않는다 (실패해도 치명적이지 않다)
-      void s.platform.fs.trash(session.projectId!, HANDOFF_FILE).catch(() => {})
+      // 다 읽은 임시 파일은 휴지통으로 — 저장소를 더럽히지 않는다 (실패해도 치명적이지 않다).
+      // 기록 모드는 파일을 만든 적이 없다
+      if (mode === 'agent') void s.platform.fs.trash(session.projectId!, HANDOFF_FILE).catch(() => {})
 
       if (deleteOld) {
         // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
@@ -2549,7 +2569,9 @@ export const useStore = create<AppState>((set, get) => ({
       }
       set({ toast: `Handed off: ${session.name}` })
     } catch (e) {
-      set({ toast: `Handoff failed: ${(e as Error).message}` })
+      // 라이브 실패의 다음 카드는 기록 모드다 — 앱이 몰래 갈아타지 않고 사람에게 알려준다 (#78)
+      const hint = mode === 'agent' ? ' — if the agent cannot respond, retry with "From the record"' : ''
+      set({ toast: `Handoff failed: ${(e as Error).message}${hint}` })
     } finally {
       handoffInFlight.delete(sessionId)
     }

@@ -276,6 +276,14 @@ export interface AgentAdapter {
    * 삭제를 멈추고 그대로 알린다 ("지웠다"고 말했는데 원본이 남는 것이 최악이다).
    */
   deleteExternalConversation?(externalId: string, cwd: string): Promise<void>
+  /**
+   * 죽은 도구의 마지막 컴팩트 요약 (#78) — 있으면 인수인계 기록의 머리가 된다.
+   *
+   * **도구 프로세스 없이** 동작해야 한다: 이 메서드가 불리는 순간은 그 도구의
+   * 서비스가 중단됐을 때다. codex는 롤아웃 파일에서 읽고, claude는 스트림에
+   * 요약 본문이 안 실려 구현이 없다 — 없으면 기록 빌더가 원문 압축으로 물러난다.
+   */
+  lastCompactSummary?(externalId: string): Promise<string | null>
   /** 이전 세션의 대화를 읽는다 (표시용 스냅샷. 모델의 실제 컨텍스트는 도구가 갖고 있다) */
   readExternalHistory?(externalId: string, cwd: string, limit: number): Promise<HistoryMessage[]>
 

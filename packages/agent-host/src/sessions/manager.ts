@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool, type ToolProfile } from './orchestrator-tools.js'
+import { buildHandoffRecord } from './handoff-record.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
@@ -2270,6 +2271,30 @@ export class SessionManager {
       changedFiles: 0,
     }))
     return { ...m.worktree, dirty, changedFiles }
+  }
+
+  /**
+   * 죽은-에이전트 인수인계 기록 (#78) — **그 세션의 도구를 부르지 않고** 만든다.
+   *
+   * 이 메서드가 불리는 순간은 그 도구가 응답 불능일 때다: 재료는 우리 저장소의
+   * 원문 전부와, (codex라면) 롤아웃 파일의 마지막 컴팩트 요약뿐이다. 어느 쪽의
+   * 실패도 기록 생성을 막지 않는다 — 요약이 없으면 빌더가 원문 압축으로 물러난다.
+   */
+  async exportHandoffRecord(sessionId: string): Promise<{ text: string }> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const rows = this.store.loadMessages(sessionId, 1_000_000)
+    // 피벗 = 마지막 **성공한** 컴팩트 마커 — 실패한 컴팩트는 아무것도 접지 않았다
+    let pivotSeq: number | null = null
+    for (const r of rows) {
+      const p = r.payload as { type?: string; failed?: boolean }
+      if (r.kind === 'marker' && p.type === 'compaction' && !p.failed) pivotSeq = r.seq
+    }
+    const externalId = m.externalId ?? m.importedFrom
+    const summary = externalId
+      ? ((await this.adapters.get(m.tool)?.lastCompactSummary?.(externalId).catch(() => null)) ?? null)
+      : null
+    return { text: buildHandoffRecord({ name: m.name, tool: m.tool, summary, rows, pivotSeq }) }
   }
 
   private cwdOf(projectId: string | null): string {

@@ -66,6 +66,8 @@ export function createRpcHandler(
       await mgr.deleteSession(sessionId, deleteWorktree, deleteExternal)
       return { ok: true as const }
     },
+    'agents.exportHandoffRecord': async (p) =>
+      mgr.exportHandoffRecord(RpcMethods['agents.exportHandoffRecord'].params.parse(p).sessionId),
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(RpcMethods['agents.worktreeStatus'].params.parse(p).sessionId),
     'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),

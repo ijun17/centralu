@@ -111,6 +111,9 @@ class WebAgentPort implements AgentPort {
   async worktreeStatus(sessionId: string) {
     return this.rpc.call('agents.worktreeStatus', { sessionId })
   }
+  async exportHandoffRecord(sessionId: string) {
+    return this.rpc.call('agents.exportHandoffRecord', { sessionId })
+  }
   async mcpProposals() {
     return this.rpc.call('agents.mcpProposals', {})
   }

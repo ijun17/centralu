@@ -707,10 +707,16 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         <ConfirmHandoff
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool}
+          // 죽은 세션 판정 (#78): 에러거나 한도에 걸린 세션에게 노트를 부탁하는 것은
+          // 응답 불능인 상대에게 유언장을 부탁하는 것이다 — 기록 모드를 미리 선택한다
+          dead={(() => {
+            const s = sessions.find((x) => x.id === handingOff)
+            return s ? s.state === 'error' || !!s.limit : false
+          })()}
           onCancel={() => setHandingOff(null)}
-          onConfirm={(tool, deleteOld) => {
+          onConfirm={(tool, deleteOld, mode) => {
             // 창은 닫고 진행은 세션 안에서 보인다 — 인수인계 요청과 글이 그대로 대화에 남는다
-            void handoffSession(handingOff, { tool, deleteOld })
+            void handoffSession(handingOff, { tool, deleteOld, mode })
             setHandingOff(null)
           }}
         />
@@ -733,25 +739,64 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 function ConfirmHandoff({
   name,
   tool,
+  dead,
   onConfirm,
   onCancel,
 }: {
   name: string
   tool: ToolName
-  onConfirm: (tool: ToolName, deleteOld: boolean) => void
+  /** 에러·한도로 응답 불능인 세션 (#78) — 기본값 셋(모드·대상·삭제)이 통째로 뒤집힌다 */
+  dead: boolean
+  onConfirm: (tool: ToolName, deleteOld: boolean, mode: 'agent' | 'record') => void
   onCancel: () => void
 }) {
-  const [heirTool, setHeirTool] = useState<ToolName>(tool)
-  const [deleteOld, setDeleteOld] = useState(true)
+  /*
+   * 죽은 세션의 기본값 반전 (#78): 모드는 기록으로(묻지 않는다), 대상은 **반대 도구**로
+   * (서비스가 죽어서 넘기는데 같은 도구가 기본이면 한 클릭이 함정이다), 삭제는 해제로
+   * (후임자가 확인될 때까지 원본 보존). 초기값만 뒤집는다 — 이후 라디오를 바꿔도
+   * 다른 선택을 몰래 따라 바꾸지 않는다 (조용한-행동 금지).
+   */
+  const otherTool = (Object.keys(TOOL_META) as ToolName[]).find((t) => t !== tool) ?? tool
+  const [mode, setMode] = useState<'agent' | 'record'>(dead ? 'record' : 'agent')
+  const [heirTool, setHeirTool] = useState<ToolName>(dead ? otherTool : tool)
+  const [deleteOld, setDeleteOld] = useState(!dead)
   const toolLabel = TOOL_META[tool].label
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">
       <div className="w-[400px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
         <p className="text-[13px] text-chalk">Hand off to a fresh session?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
-        <p className="mt-2 text-[11px] leading-relaxed text-ash">
-          This session writes a handoff note (you will see it in the conversation), then a fresh session
-          starts from that note.
+
+        {/* 노트의 출처 — 살아 있으면 에이전트가 쓰고, 죽었으면 앱이 기록으로 만든다 (#78) */}
+        <p className="mt-3 text-[10px] uppercase tracking-[0.12em] text-slate">Handoff note</p>
+        <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Handoff note source">
+          {(
+            [
+              { key: 'agent', label: 'Ask the agent' },
+              { key: 'record', label: 'From the record' },
+            ] as const
+          ).map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              role="radio"
+              aria-checked={mode === m.key}
+              data-testid={`handoff-mode-${m.key}`}
+              onClick={() => setMode(m.key)}
+              className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+                mode === m.key
+                  ? 'border-ash bg-graphite text-chalk'
+                  : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="handoff-mode-note">
+          {mode === 'agent'
+            ? 'This session writes a handoff note (you will see it in the conversation), then a fresh session starts from that note.'
+            : 'The app builds the note from its stored conversation — this session is not asked. Use this when the agent cannot respond (outage, limits).'}
         </p>
 
         {/* 받는 에이전트 — 다른 도구를 고르면 모델·강도 같은 도구별 설정은 물려주지 않는다 */}
@@ -816,7 +861,7 @@ function ConfirmHandoff({
                 ? 'border-del/40 bg-del-bg text-del hover:border-del/70'
                 : 'border-edge bg-panel text-chalk hover:border-graphite'
             }`}
-            onClick={() => onConfirm(heirTool, deleteOld)}
+            onClick={() => onConfirm(heirTool, deleteOld, mode)}
             data-testid="confirm-handoff-yes"
           >
             Hand off

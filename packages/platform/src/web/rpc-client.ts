@@ -46,6 +46,7 @@ const LONG_CALLS = new Set<string>([
   'agents.send', // 잠든 세션이면 되살린 뒤 보낸다 — 같은 비용을 문다
   'agents.createSession', // resumeExternalId로 이전 대화를 이어받을 때
   'agents.restartSession', // 프로세스를 갈아 끼우고 다시 되살린다
+  'agents.exportHandoffRecord', // 수백 MB 롤아웃을 스캔할 수 있다 (#78)
 ])
 
 export class RpcClient {

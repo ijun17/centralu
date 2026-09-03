@@ -784,6 +784,12 @@ export class MockPlatform implements Platform {
     interrupt: async (sessionId: string) => {
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     },
+    /** 죽은-에이전트 인수인계 기록 (#78) — 실물처럼 세션 이름이 실린 결정적 텍스트를 준다 */
+    exportHandoffRecord: async (sessionId: string) => {
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      return { text: `# CentralU Handoff Record (automatic)\n\npredecessor "${s.name}" (${s.tool}) — mock record for ${sessionId}` }
+    },
     /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
     worktreeStatus: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)

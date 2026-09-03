@@ -1754,6 +1754,43 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   await expect(page.getByTestId('chat-stream')).toContainText('후계자 노트')
 })
 
+/*
+ * 죽은-에이전트 인수인계 (#78): 서비스가 중단된 세션에게 노트를 부탁할 수 없다.
+ * 그 상태를 보면 대화상자의 기본값 셋이 통째로 뒤집힌다 — 모드는 기록으로,
+ * 대상은 반대 도구로, 삭제는 해제로. 확인하면 죽은 세션에게 아무것도 묻지 않고
+ * host의 기록이 후임자의 첫 메시지가 된다.
+ */
+test('죽은 세션의 인수인계: 기록 모드가 미리 서고, 묻지 않고 넘어가며, 원본은 남는다 (#78)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '죽을 세션')
+  const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+  // 세션이 죽는다 — 에러 상태가 곧 "노트를 부탁할 수 없다"는 판정 근거다
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.emit({ type: 'error', sessionId: sid, error: { code: 'adapter_crashed', message: 'service down', retryable: false } })
+  }, id)
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`handoff-session-${id}`).click()
+
+  // 기본값 셋이 뒤집혔다: 기록 모드 · 반대 도구 · 삭제 해제
+  await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('handoff-tool-codex')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()
+  await expect(page.getByTestId('handoff-mode-note')).toContainText('not asked')
+
+  await page.getByTestId('confirm-handoff-yes').click()
+
+  // 후임자가 이름을 물려받아 서고, 첫 메시지가 host의 기록이다 — 죽은 세션에겐 아무것도 안 갔다
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mock.sessions.size), { timeout: 15_000 })
+    .toBe(2)
+  await expect(page.getByTestId('chat-stream')).toContainText('Handoff Record')
+  // 원본은 남는다 — 후임자가 확인될 때까지의 보존이 죽은-모드의 기본이다
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(1)
+  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
+})
+
 test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러도 반응 없어 보이던 문제)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
@@ -3569,7 +3606,8 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   await expect(expanded).toBeVisible()
   // 여러 줄이 펼쳐졌고(접힌 한 줄보다 확실히 크다), 접힌 줄의 자리는 안 변했다
   expect((await expanded.boundingBox())!.height).toBeGreaterThan(collapsedBox.height * 2)
-  expect((await collapsed.boundingBox())!.height).toBe(collapsedBox.height)
+  // 정확 일치가 아니라 근사 — WebKit이 같은 줄을 39.125 vs 39.12499237로 답해 플레이크가 났다 (실측 2회)
+  expect((await collapsed.boundingBox())!.height).toBeCloseTo(collapsedBox.height, 1)
   // 다시 누르면 접힌다
   await expanded.click()
   await expect(page.getByTestId('sticky-user-expanded')).toBeHidden()

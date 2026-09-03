@@ -426,6 +426,14 @@ export const RpcMethods = {
     params: z.object({ name: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /**
+   * 죽은-에이전트 인수인계 기록 (#78). 그 세션의 도구를 부르지 않고 host가
+   * 저장소 원문(+codex 롤아웃의 컴팩트 요약)으로 만든다 — 후임자의 initialPrompt가 된다.
+   */
+  'agents.exportHandoffRecord': {
+    params: z.object({ sessionId: z.string() }),
+    result: z.object({ text: z.string() }),
+  },
   'agents.worktreeStatus': {
     params: z.object({ sessionId: z.string() }),
     result: z

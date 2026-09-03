@@ -2950,3 +2950,40 @@ describe('오케스트레이터 스킬 — 제안 → 승인 → 프롬프트 �
     expect(mgr.orchestratorSkills().find((s) => s.name === 'dup-skill')?.content).toBe('절차')
   })
 })
+
+/**
+ * 죽은-에이전트 인수인계 기록 (#78) — 그 세션의 도구를 부르지 않고 만든다.
+ * 재료는 저장소 원문과 (codex라면) 롤아웃의 컴팩트 요약뿐이다.
+ */
+describe('죽은-에이전트 인수인계 기록 (#78)', () => {
+  it('요약이 없으면 원문으로, 요약이 오면 피벗 이전을 요약이 대신한다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as SessionInfo
+    store.appendMessages([
+      { sessionId: s.id, seq: 101, role: 'user', kind: 'text', payload: { text: '옛 질문' }, ts: 1 },
+      { sessionId: s.id, seq: 102, role: 'system', kind: 'marker', payload: { type: 'compaction', failed: false }, ts: 2 },
+      { sessionId: s.id, seq: 103, role: 'user', kind: 'text', payload: { text: '컴팩트 뒤 질문' }, ts: 3 },
+      { sessionId: s.id, seq: 104, role: 'system', kind: 'tool_call', payload: { callId: 'c', summary: { tool: 'Bash', title: 'ls' } }, ts: 4 },
+    ])
+
+    // 요약 추출 실패(어댑터 미구현) → 원문 경로: 피벗 이전도 실린다
+    let out = await mgr.exportHandoffRecord(s.id)
+    expect(out.text).toContain('[user] 옛 질문')
+    expect(out.text).toContain('[user] 컴팩트 뒤 질문')
+    expect(out.text).toContain('[tool] Bash: ls')
+
+    // codex 롤아웃 요약이 오면 — 그 세션의 externalId로 묻고, 피벗 이전은 요약이 대신한다
+    const asked: string[] = []
+    ;(codexAdapter as AgentAdapter).lastCompactSummary = async (ext: string) => {
+      asked.push(ext)
+      return '롤아웃에서 꺼낸 컴팩트 요약 원문. '.repeat(30)
+    }
+    out = await mgr.exportHandoffRecord(s.id)
+    expect(asked).toEqual(['ext-1'])
+    expect(out.text).toContain('롤아웃에서 꺼낸 컴팩트 요약 원문')
+    expect(out.text).not.toContain('옛 질문')
+    expect(out.text).toContain('컴팩트 뒤 질문')
+
+    await expect(mgr.exportHandoffRecord('nope')).rejects.toThrow(/Session not found/)
+  })
+})

@@ -829,6 +829,31 @@ describe('인수인계하고 새로 시작', () => {
     expect(useStore.getState().focusedSessionId).toBe(heir.id)
   })
 
+  /*
+   * 기록 모드 (#78): 서비스가 중단된 에이전트에게 노트를 부탁하는 것은 응답 불능인
+   * 상대에게 유언장을 부탁하는 것이다 — host가 저장소 원문으로 기록을 만들고,
+   * 죽은 세션에게는 **아무것도 묻지 않는다**.
+   */
+  it('기록 모드는 죽은 세션에게 아무것도 묻지 않고, 원본은 기본으로 남긴다 (#78)', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho-rec')
+    mock.sessions.set('ho-r1', sessionInfo('ho-r1', { projectId: proj.id, name: '죽은 메아', tool: 'codex', state: 'error' }))
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().handoffSession('ho-r1', { mode: 'record', tool: 'claude' })
+
+    // 죽은 세션으로 나간 메시지가 없다 — 이 모드의 존재 이유
+    expect((useStore.getState().chat['ho-r1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
+    // 후임자의 첫 메시지가 곧 기록이다 (파일 경유 없는 직송)
+    expect(mock.lastCreateParams?.initialPrompt).toContain('Handoff Record')
+    expect(mock.lastCreateParams?.tool).toBe('claude')
+    // 원본은 남는다 — record 모드의 기본은 보존이다 (후임자가 확인될 때까지)
+    expect(mock.sessions.has('ho-r1')).toBe(true)
+    expect(mock.externallyDeleted).not.toContain('ho-r1')
+    // 이름은 물려받는다
+    expect([...mock.sessions.values()].some((r) => r.name === '죽은 메아' && r.id !== 'ho-r1')).toBe(true)
+  })
+
   it('세션이 글을 쓰다 에러가 나면 아무것도 지우지 않는다 — 파괴는 성공 뒤에만', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho2')
