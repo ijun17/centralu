@@ -1670,6 +1670,8 @@ test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page
 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(0)
+  // 기본값이 진짜 삭제다 — 도구 쪽 원본도 같이 갔다 (도그푸딩 재지적으로 기본을 뒤집었다)
+  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toContain(id)
 })
 
 /*
@@ -1677,25 +1679,27 @@ test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page
  * 안내문의 약속이다). 체크박스를 켜면 그 약속이 같은 자리에서 경고로 바뀌고,
  * 원본까지 지워진다. 안 켜면 원본은 손대지 않는다 — 양쪽 다 실측한다.
  */
-test('세션 삭제: 체크박스를 켜면 도구 쪽 원본까지 지운다 — 안 켜면 남긴다', async ({ page }) => {
+test('세션 삭제: 기본은 원본까지 지운다 — 체크를 끄면 도구 쪽에 남는다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', '진짜로 지울 세션')
+  await newSession(page, 'alpha', '남겨둘 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
-  // 기본: 원본은 남는다는 안내가 서 있다
-  await expect(page.getByTestId('delete-notice')).toContainText('stays in')
-  await expect(page.getByTestId('delete-external-warning')).toHaveCount(0)
-
-  // 체크 → 안내가 같은 자리에서 경고로 바뀐다 (삭제 팔레트)
-  await page.getByTestId('delete-external-toggle').locator('input').check()
-  await expect(page.getByTestId('delete-notice')).toHaveCount(0)
+  // 기본: 원본까지 지운다는 경고가 서 있고 체크가 켜져 있다
+  await expect(page.getByTestId('delete-external-toggle').locator('input')).toBeChecked()
   await expect(page.getByTestId('delete-external-warning')).toContainText('deleted too')
+  await expect(page.getByTestId('delete-notice')).toHaveCount(0)
+
+  // 끄면 경고가 같은 자리에서 "도구에는 남는다"로 바뀐다
+  await page.getByTestId('delete-external-toggle').locator('input').uncheck()
+  await expect(page.getByTestId('delete-external-warning')).toHaveCount(0)
+  await expect(page.getByTestId('delete-notice')).toContainText('stays in')
 
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toContain(id)
+  // 껐으니 원본은 남았다
+  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
 })
 
 /*

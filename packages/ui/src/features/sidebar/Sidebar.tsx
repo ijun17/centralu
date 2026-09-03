@@ -1146,11 +1146,13 @@ function ConfirmDelete({
   const platform = usePlatform()
   const toolLabel = TOOL_META[tool].label
   /*
-   * 도구 쪽 원본까지 지울지 (도그푸딩 "진짜로 삭제"). 기본은 남긴다 — 아래 안내문이
-   * 약속하는 "되돌릴 길"이 그 파일이다. 켜면 안내문이 같은 자리에서 경고로 바뀐다
-   * (프로젝트 삭제와 같은 문법: 두 문장을 같이 띄워 고르게 하지 않는다).
+   * 도구 쪽 원본까지 지울지 (도그푸딩 "진짜로 삭제"). **기본은 지운다** — 처음엔
+   * 남기는 쪽이 기본이었는데, 삭제를 누르는 사람의 실제 의도는 정리라서 "지웠는데
+   * 파일은 남는" 반쪽 삭제가 오히려 어긋났다 (도그푸딩 재지적). 끄면 안내문이 같은
+   * 자리에서 "도구에는 남는다"로 바뀐다 (프로젝트 삭제와 같은 문법: 두 문장을 같이
+   * 띄워 고르게 하지 않는다).
    */
-  const [deleteExternal, setDeleteExternal] = useState(false)
+  const [deleteExternal, setDeleteExternal] = useState(true)
 
   /*
    * 워크트리 세션인지, 거기 커밋 안 된 변경이 있는지 **모달을 여는 순간 묻는다.**
