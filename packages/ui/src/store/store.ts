@@ -747,7 +747,7 @@ export const HANDOFF_FILE = '.centralu-handoff.md'
  */
 export const HANDOFF_PROMPT = `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor, and save it as a file: create or overwrite \`${HANDOFF_FILE}\` at the project root. When the file is written, reply with one short line saying so — the note itself goes in the file, not in your reply.
 
-The note is the only thing your successor receives, so make it self-contained — never reference "the conversation above".
+The note is the only thing your successor receives, so make it self-contained — never reference "the conversation above". It is a file, not a chat message: **length is not a constraint**. Write with the density of a compaction summary, not the brevity of a reply — when in doubt, include it. If your context contains compaction summaries of earlier phases, transcribe their operational content (state, decisions, tips, conventions) rather than re-summarizing it — every re-summarization loses another layer.
 
 Cover, in this order:
 1. Project & goal — what this project is and what we are working toward.
