@@ -715,12 +715,23 @@ let chatSeq = 0
 /** 진행 중인 인수인계 — 같은 세션에 두 번 걸면 새 세션이 둘 태어난다 (모듈 상태: 재진입 가드일 뿐, 그릴 것은 없다) */
 const handoffInFlight = new Set<string>()
 
+/** 인수인계 글이 놓이는 임시 파일 (프로젝트 루트 기준). 읽은 뒤 휴지통으로 보낸다 */
+export const HANDOFF_FILE = '.centralu-handoff.md'
+
 /**
  * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
  * 넘어가야 한다는 지적). 죽는 세션만이 전체 맥락을 갖고 있으므로 글은 그쪽이 쓴다.
+ *
+ * **대화가 아니라 파일로 받는다** (도그푸딩 2차 지적). 처음에는 답변 텍스트를 화면
+ * 대화에서 긁었는데, 스트리밍 조각·직전 턴의 잔여 출력이 섞일 수 있는 자리라
+ * "잘린 것 아니냐"는 불안을 만들었다. 파일은 에이전트가 쓴 바이트가 그대로 온다 —
+ * 섞일 것도 잘릴 것도 없다.
+ *
  * e2e·테스트가 이 문구로 인수인계 메시지를 식별하므로 export한다.
  */
-export const HANDOFF_PROMPT = `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor. It is the only thing they will receive, so make it self-contained — never reference "the conversation above".
+export const HANDOFF_PROMPT = `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor, and save it as a file: create or overwrite \`${HANDOFF_FILE}\` at the project root. When the file is written, reply with one short line saying so — the note itself goes in the file, not in your reply.
+
+The note is the only thing your successor receives, so make it self-contained — never reference "the conversation above".
 
 Cover, in this order:
 1. Project & goal — what this project is and what we are working toward.
@@ -730,7 +741,7 @@ Cover, in this order:
 5. Pitfalls — mistakes already made, dead ends, things that look right but are wrong, environment quirks.
 6. Working with the user — the language the user speaks, their tone, the response style they prefer, and standing instructions or conventions (build commands, commit style, things never to do).
 
-Write the note itself in the language the user has mostly used in this conversation. Reply with the note only — no preamble, no closing remarks.`
+Write the note itself in the language the user has mostly used in this conversation.`
 
 /**
  * SessionInfo에서 **살아-있는-동안 사실들**만 골라낸다 (승인·질문·활동·한도·사용량).
@@ -2353,20 +2364,30 @@ export const useStore = create<AppState>((set, get) => ({
     handoffInFlight.add(sessionId)
     try {
       /*
-       * 표식은 **보내기 전의 대화 길이**다. send()가 낙관적으로 내 말풍선을 먼저 밀어
-       * 넣으므로, 호출 직후 길이는 이미 프롬프트를 포함한다 — 그 뒤에 오는 항목이 답이다.
-       * (seq는 클라이언트 카운터라 host 세계와 비교할 수 없다 — 위치로 센다)
+       * 돌고 있는 턴이 있으면 **끝나기를 기다린 뒤** 부탁한다 (실측: 메아 인수인계 —
+       * 진행 중이던 턴에 프롬프트가 합류(steer)돼, 직전 작업 보고가 인수인계 글
+       * 머리에 통째로 붙었다. 유실은 아니지만 "앞이 잘린 글"로 읽혔다). 턴 경계
+       * 뒤에 보내야 그 뒤에 오는 답이 온전히 인수인계다.
        */
-      const sendP = get().send(sessionId, HANDOFF_PROMPT)
-      const markIdx = (get().chat[sessionId] ?? []).length
-      await sendP
+      const quietBy = Date.now() + 10 * 60_000
+      while (get().sessions[sessionId]?.state === 'working') {
+        if (Date.now() > quietBy) throw new Error('the session never finished its current turn')
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      if (!get().sessions[sessionId]) throw new Error('the session disappeared')
+
+      await get().send(sessionId, HANDOFF_PROMPT)
       // 전송 실패는 입력창 복원 경로로 흘러 프롬프트가 초안에 남는다 — 사람이 쓴 글이 아니니 걷는다
       if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === HANDOFF_PROMPT)) {
         if (get().drafts[sessionId]?.text.includes(HANDOFF_PROMPT)) get().setDraft(sessionId, EMPTY_DRAFT)
         throw new Error('could not reach the session')
       }
 
-      // 답을 기다린다 — 글이 다 써지고 턴이 끝날 때까지 (10분 한도)
+      /*
+       * **파일이 놓이기를 기다린다** — 대화에서 긁지 않는다 (실측: 돌던 턴의 잔여
+       * 출력이 글 머리에 섞여 "잘린 것"으로 읽혔다). 턴이 끝난 뒤 파일을 읽으면
+       * 에이전트가 쓴 바이트가 그대로다. 파일이 안 놓이면 아무것도 지우지 않는다.
+       */
       const deadline = Date.now() + 10 * 60_000
       let note = ''
       for (;;) {
@@ -2375,17 +2396,21 @@ export const useStore = create<AppState>((set, get) => ({
         const cur = st.sessions[sessionId]
         if (!cur) throw new Error('the session disappeared while writing the note')
         if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
-        if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${HANDOFF_FILE}`)
         if (st.connection !== 'connected') continue // 끊긴 동안은 판단하지 않는다
-        const texts = (st.chat[sessionId] ?? [])
-          .slice(markIdx)
-          .filter((i): i is Extract<ChatItem, { kind: 'assistant' }> => i.kind === 'assistant')
-        if (texts.length > 0 && cur.state !== 'working' && cur.state !== 'waiting_approval') {
-          note = texts.map((t) => t.text).join('\n\n').trim()
-          break
+        if (cur.state === 'working' || cur.state === 'waiting_approval') continue
+        try {
+          const f = await s.platform.fs.readFile(session.projectId!, HANDOFF_FILE)
+          if (f.truncated) throw new Error(`${HANDOFF_FILE} is too large to hand over in one piece`)
+          if (!f.binary && f.text.trim()) {
+            note = f.text.trim()
+            break
+          }
+        } catch (err) {
+          if ((err as Error).message.includes('too large')) throw err
+          // 아직 없다 — 계속 기다린다 (턴이 끝났는데도 영영 안 놓이면 위 시한이 끊는다)
         }
       }
-      if (!note) throw new Error('the session returned an empty note')
 
       /*
        * 새 세션은 죽는 세션의 설정을 **전부** 물려받는다 (#37이 가르친 규칙: 하나만
@@ -2402,6 +2427,9 @@ export const useStore = create<AppState>((set, get) => ({
         initialPrompt: note,
       })
       await get().rename(info.id, session.name)
+
+      // 다 읽은 임시 파일은 휴지통으로 — 저장소를 더럽히지 않는다 (실패해도 치명적이지 않다)
+      void s.platform.fs.trash(session.projectId!, HANDOFF_FILE).catch(() => {})
 
       // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
       await s.platform.agents.deleteSession(sessionId, false, true)

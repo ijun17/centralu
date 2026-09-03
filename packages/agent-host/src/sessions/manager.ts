@@ -1220,14 +1220,17 @@ export class SessionManager {
        * 포기하지만 이 약속은 안 풀리고, Retry는 dedup 때문에 **그 멈춘 약속에 다시
        * 합류한다**. 사람 눈에는 "Retry가 안 된다"로 보인다 (MGH 세션에서 실측).
        *
-       * 25초인 이유: RPC의 30초보다 안쪽이어야 화면이 이름 없는 RPC 시간제한 대신
-       * 이 단계의 이름이 붙은 이유를 받고, resuming도 그때 풀려 Retry가 진짜 재시도가 된다.
+       * 150초인 이유: 되살리기 계열 RPC의 180초(rpc-client의 LONG_CALLS)보다 안쪽이어야
+       * 화면이 이름 없는 RPC 시간제한 대신 이 단계의 이름이 붙은 이유를 받고,
+       * resuming도 그때 풀려 Retry가 진짜 재시도가 된다. (원래 25초/30초였는데,
+       * codex thread/resume이 rollout 크기에 비례해 — 550MB≈13.5초 실측 — 자라는 걸
+       * 확인하고 늘렸다. "리소스 업로드" 세션이 25초 벽에 막혀 영영 못 깨어났다.)
        *
        * 시간제한이 이겨도 도구 프로세스는 이미 떠 있을 수 있다 — 늦게라도 도착하면
        * 거둔다. 안 거두면 잠긴 스레드를 쥔 app-server가 조용히 남는다.
        */
       const tStartFrom = Date.now()
-      const handle = await withTimeout(creating, 25_000, `Starting ${m.tool}`).catch((err) => {
+      const handle = await withTimeout(creating, 150_000, `Starting ${m.tool}`).catch((err) => {
         void creating.then((h) => h.dispose()).catch(() => {})
         throw err
       })

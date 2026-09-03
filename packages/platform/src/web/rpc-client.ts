@@ -32,6 +32,22 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; time
 /** RPC 응답 제한 시간 기본값. 세션 생성·깃 작업도 이 안에는 끝난다 (실측 수 초) */
 const DEFAULT_CALL_TIMEOUT_MS = 30_000
 
+/**
+ * 세션을 **되살릴 수 있는** 호출들은 예산이 다르다 (도그푸딩: "리소스 업로드" 세션 —
+ * codex의 thread/resume은 자기 rollout 파일을 통째로 되읽어서, 550MB 스레드가 13.5초,
+ * 더 큰 스레드는 25초를 넘겼다. 30초 기본값 아래서는 큰 스레드가 영영 못 깨어나는
+ * 세션이 된다). 파일은 자라기만 하므로 상한은 크기에 비례해 커질 수 있는 값이어야
+ * 한다 — 180초는 실측 비율(550MB≈13.5s)로 7GB급까지 덮는다. 매니저 쪽 단계 제한
+ * (150초)이 이 안쪽에 있어서, 시간이 다해도 이름 붙은 이유가 화면에 온다.
+ */
+const LONG_CALL_TIMEOUT_MS = 180_000
+const LONG_CALLS = new Set<string>([
+  'agents.resumeSession', // 명시적 깨우기
+  'agents.send', // 잠든 세션이면 되살린 뒤 보낸다 — 같은 비용을 문다
+  'agents.createSession', // resumeExternalId로 이전 대화를 이어받을 때
+  'agents.restartSession', // 프로세스를 갈아 끼우고 다시 되살린다
+])
+
 export class RpcClient {
   private ws: WebSocket | null = null
   private pending = new Map<string, Pending>()
@@ -218,7 +234,7 @@ export class RpcClient {
       const timer = setTimeout(() => {
         if (!this.take(id)) return
         reject(Object.assign(new Error(`RPC timed out: ${method}`), { code: 'timeout', retryable: true }))
-      }, this.opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS)
+      }, this.opts.callTimeoutMs ?? (LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
       const sent = this.ws?.readyState === 1
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, sent })
       if (sent) this.ws!.send(frame)

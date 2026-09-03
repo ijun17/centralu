@@ -1196,10 +1196,10 @@ describe('되살리기가 멈출 때', () => {
     try {
       adapter.hangCreate = true
       const attempt = mgr.resumeSession(s.id)
-      await vi.advanceTimersByTimeAsync(25_100)
+      await vi.advanceTimersByTimeAsync(150_100)
       const r = await attempt
       expect(r.resumed).toBe(false)
-      expect(r.reason).toMatch(/Starting claude did not finish within 25s/)
+      expect(r.reason).toMatch(/Starting claude did not finish within 150s/)
 
       // Retry는 멈춘 약속에 합류하지 않고 새로 뜬다 — 이번엔 정상 spawn
       adapter.hangCreate = false

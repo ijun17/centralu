@@ -4,7 +4,7 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { messagesToChat, useStore } from './store.js'
+import { HANDOFF_FILE, messagesToChat, useStore } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -782,8 +782,9 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    // 죽는 세션이 글을 쓴다
-    mock.emit({ type: 'message_delta', sessionId: 'ho-s1', role: 'assistant', text: '후계자에게: 상태 요약' } as NormalizedEvent)
+    // 죽는 세션이 글을 **파일로** 쓴다 (대화에서 긁지 않는다 — 메아 실측의 교훈)
+    mock.fsState.files[HANDOFF_FILE] = '후계자에게: 상태 요약'
+    mock.emit({ type: 'message_delta', sessionId: 'ho-s1', role: 'assistant', text: '파일에 남겼습니다.' } as NormalizedEvent)
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s1' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s1', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -818,6 +819,33 @@ describe('인수인계하고 새로 시작', () => {
     expect(mock.sessions.has('ho-s2')).toBe(true)
     expect(mock.externallyDeleted).not.toContain('ho-s2')
     expect(useStore.getState().toast).toMatch(/Handoff failed/)
+  })
+
+  it('돌던 턴의 보고가 글 머리에 섞이지 않는다 — 턴이 끝난 뒤에 부탁한다 (메아 실측)', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho4')
+    mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: '메아4', state: 'working' }))
+    await useStore.getState().attach(mock)
+
+    const done = useStore.getState().handoffSession('ho-s4')
+    // 돌던 턴이 아직 안 끝났다 — 프롬프트는 나가지 않고, 그 턴의 보고만 흘러든다
+    await new Promise((r) => setTimeout(r, 700))
+    mock.emit({ type: 'message_delta', sessionId: 'ho-s4', role: 'assistant', text: '적용했습니다: 직전 작업 보고' } as NormalizedEvent)
+    expect((useStore.getState().chat['ho-s4'] ?? []).some((i) => i.kind === 'user')).toBe(false)
+
+    // 턴이 끝나면 그제야 부탁한다
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-s4' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-s4'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    mock.fsState.files[HANDOFF_FILE] = '# 1. 프로젝트와 목표'
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-s4' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
+    await done
+
+    // 직전 턴의 보고는 글에 없다 — "적용했습니다"로 시작하는 인수인계가 바로 그 사고였다
+    expect(mock.lastCreateParams?.initialPrompt).toBe('# 1. 프로젝트와 목표')
   })
 
   it('워크트리 세션은 거른다 — 워크트리의 수명이 세션에 묶여 있다', async () => {

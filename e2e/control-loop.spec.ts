@@ -1707,6 +1707,19 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '갈아탈 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+  /*
+    첫 턴을 끝내 둔다 — 인수인계는 돌던 턴이 끝나기를 기다린다 (돌던 턴의 출력이
+    글에 섞여 "잘린 것처럼" 읽힌 메아 실측). working 전환을 먼저 확인한다:
+    종료 이벤트가 전송의 working보다 먼저 가면 영영 안 끝난 턴이 된다.
+  */
+  await expect
+    .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
+    .toBe('working')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.emit({ type: 'turn_complete', sessionId: sid })
+    m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
+  }, id)
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
@@ -1716,10 +1729,11 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   // 인수인계 요청이 대화에 보통 메시지로 들어간다
   await expect(page.getByTestId('chat-stream')).toContainText('handoff note')
 
-  // 죽는 세션이 글을 쓴다 (mock에는 모델이 없으니 손으로 흉내낸다)
+  // 죽는 세션이 글을 **파일로** 남긴다 (mock에는 모델이 없으니 손으로 흉내낸다)
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
-    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '후계자 노트: 여기까지 했다' })
+    m.fsState.files['.centralu-handoff.md'] = '후계자 노트: 여기까지 했다'
+    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '파일에 남겼습니다.' })
     m.emit({ type: 'turn_complete', sessionId: sid })
     m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
   }, id)
