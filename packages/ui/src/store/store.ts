@@ -607,11 +607,16 @@ export type AppState = {
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /**
    * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 코덱스 스레드의 되살리기 7~13초 문제의 출구).
-   * 죽는 세션이 인수인계 글을 쓰고 → 같은 설정·이름의 새 세션이 그 글로 시작하고 →
-   * 기존 세션은 도구 쪽 원본까지 **정말로** 지워진다. 파괴는 맨 끝이다: 새 세션이
+   * 죽는 세션이 인수인계 글을 쓰고 → 새 세션이 그 글로 시작하고 → 기존 세션은
+   * (기본값으로) 도구 쪽 원본까지 **정말로** 지워진다. 파괴는 맨 끝이다: 새 세션이
    * 성공적으로 서기 전에는 아무것도 지우지 않는다.
+   *
+   * tool: 다른 에이전트에게 넘길 수도 있다 (글은 그냥 텍스트라 도구를 가리지 않는다).
+   * 기본은 지금 도구. 도구가 바뀌면 모델·강도·응답 길이·속도는 물려주지 않는다 —
+   * 전부 도구별 값이라, codex의 모델명을 claude에 넘기면 생성부터 죽는다.
+   * deleteOld: 기본 true. 끄면 기존 세션을 그대로 남긴다 — 갈아타기가 아니라 분기다.
    */
-  handoffSession(sessionId: string): Promise<void>
+  handoffSession(sessionId: string, opts?: { tool?: ToolName; deleteOld?: boolean }): Promise<void>
   updateSessionSettings(
     sessionId: string,
     s: {
@@ -2358,11 +2363,13 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async handoffSession(sessionId) {
+  async handoffSession(sessionId, opts) {
     const s = get()
     const session = s.sessions[sessionId]
     const project = session?.projectId ? s.projects[session.projectId] : null
     if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
+    const heirTool = opts?.tool ?? session.tool
+    const deleteOld = opts?.deleteOld ?? true
     // 매니저 삭제 규칙과 같다 — 살아 있는 자식이 있으면 마지막 삭제가 어차피 거부된다.
     // 실패를 맨 끝(파괴 직전)에서 만나는 대신 시작에서 거른다.
     const liveKids = Object.values(s.sessions).filter(
@@ -2425,15 +2432,17 @@ export const useStore = create<AppState>((set, get) => ({
 
       /*
        * 새 세션은 죽는 세션의 설정을 **전부** 물려받는다 (#37이 가르친 규칙: 하나만
-       * 옮기면 나머지가 기본값으로 새로 태어난다). 이름도 물려받는다 — 갈아타기의
-       * 요점은 같은 자리가 이어지는 것이다.
+       * 옮기면 나머지가 기본값으로 새로 태어난다). 단 **도구가 바뀌면 물려주지
+       * 않는다** — 모델·강도·응답 길이·속도는 도구별 값이라, 넘기면 생성부터 죽거나
+       * 조용히 틀린 설정이 된다. 이름은 언제나 물려받는다.
        */
+      const sameTool = heirTool === session.tool
       const info = await get().createSession(session.projectId!, {
-        tool: session.tool,
-        model: session.model ?? undefined,
-        effort: session.effort ?? undefined,
-        verbosity: session.verbosity ?? undefined,
-        serviceTier: session.serviceTier ?? undefined,
+        tool: heirTool,
+        model: sameTool ? (session.model ?? undefined) : undefined,
+        effort: sameTool ? (session.effort ?? undefined) : undefined,
+        verbosity: sameTool ? (session.verbosity ?? undefined) : undefined,
+        serviceTier: sameTool ? (session.serviceTier ?? undefined) : undefined,
         permissionPreset: session.permissionPreset,
         initialPrompt: note,
       })
@@ -2442,8 +2451,10 @@ export const useStore = create<AppState>((set, get) => ({
       // 다 읽은 임시 파일은 휴지통으로 — 저장소를 더럽히지 않는다 (실패해도 치명적이지 않다)
       void s.platform.fs.trash(session.projectId!, HANDOFF_FILE).catch(() => {})
 
-      // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
-      await s.platform.agents.deleteSession(sessionId, false, true)
+      if (deleteOld) {
+        // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
+        await s.platform.agents.deleteSession(sessionId, false, true)
+      }
       set({ toast: `Handed off: ${session.name}` })
     } catch (e) {
       set({ toast: `Handoff failed: ${(e as Error).message}` })

@@ -1724,6 +1724,9 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
   await expect(page.getByTestId('handoff-warning')).toContainText('deleted for real')
+  // 받는 에이전트는 기본으로 지금 도구가 선택돼 있고, 삭제는 기본으로 켜져 있다
+  await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
   await page.getByTestId('confirm-handoff-yes').click()
 
   // 인수인계 요청이 대화에 보통 메시지로 들어간다

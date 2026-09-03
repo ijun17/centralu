@@ -823,6 +823,48 @@ describe('인수인계하고 새로 시작', () => {
     expect(useStore.getState().toast).toMatch(/Handoff failed/)
   })
 
+  it('다른 에이전트에게 넘기면 도구별 설정은 물려주지 않는다', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho5')
+    mock.sessions.set('ho-s5', sessionInfo('ho-s5', { projectId: proj.id, name: '갈아타기', tool: 'codex', model: 'gpt-5.6', effort: 'high' }))
+    await useStore.getState().attach(mock)
+
+    const done = useStore.getState().handoffSession('ho-s5', { tool: 'claude' })
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-s5'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    mock.fsState.files[HANDOFF_FILE] = '노트'
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-s5' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-s5', state: 'waiting_input' } as NormalizedEvent)
+    await done
+
+    expect(mock.lastCreateParams?.tool).toBe('claude')
+    // codex의 모델·강도를 claude에 넘기면 생성부터 죽는다 — 물려주지 않는다
+    expect(mock.lastCreateParams?.model).toBeUndefined()
+    expect(mock.lastCreateParams?.effort).toBeUndefined()
+    expect(mock.sessions.has('ho-s5')).toBe(false) // 삭제 기본값은 그대로 켜져 있다
+  })
+
+  it('삭제를 끄면 기존 세션이 남는다 — 갈아타기가 아니라 분기', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho6')
+    mock.sessions.set('ho-s6', sessionInfo('ho-s6', { projectId: proj.id, name: '분기' }))
+    await useStore.getState().attach(mock)
+
+    const done = useStore.getState().handoffSession('ho-s6', { deleteOld: false })
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-s6'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    mock.fsState.files[HANDOFF_FILE] = '분기 노트'
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-s6' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-s6', state: 'waiting_input' } as NormalizedEvent)
+    await done
+
+    expect(mock.sessions.has('ho-s6')).toBe(true) // 기존 세션이 산다
+    expect(mock.externallyDeleted).not.toContain('ho-s6')
+    expect([...mock.sessions.values()].filter((r) => r.name === '분기').length).toBe(2)
+  })
+
   it('돌던 턴의 보고가 글 머리에 섞이지 않는다 — 턴이 끝난 뒤에 부탁한다 (메아 실측)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho4')

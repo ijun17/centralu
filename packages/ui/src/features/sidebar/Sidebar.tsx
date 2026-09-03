@@ -693,9 +693,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool}
           onCancel={() => setHandingOff(null)}
-          onConfirm={() => {
+          onConfirm={(tool, deleteOld) => {
             // 창은 닫고 진행은 세션 안에서 보인다 — 인수인계 요청과 글이 그대로 대화에 남는다
-            void handoffSession(handingOff)
+            void handoffSession(handingOff, { tool, deleteOld })
             setHandingOff(null)
           }}
         />
@@ -707,10 +707,13 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 /**
  * 인수인계 확인 창 (도그푸딩 요청).
  *
- * 순서를 문장으로 다 말한다 — 이 버튼 하나가 "글 부탁 → 새 세션 → 진짜 삭제" 세 단계를
- * 묶기 때문이다. 파괴가 끝에 있으므로 경고는 삭제 팔레트로 선다 (프로젝트 삭제와 같은
- * 문법). 이름 타이핑은 요구하지 않는다: 마지막 단계가 실패해도 세션 둘이 남을 뿐
- * 잃는 것이 없고, 성공했다면 잃는 것은 사람이 방금 읽고 승인한 그것뿐이다.
+ * 순서를 문장으로 다 말한다 — 이 버튼 하나가 "글 부탁 → 새 세션 → (기본값) 진짜 삭제"
+ * 세 단계를 묶기 때문이다. 파괴가 끝에 있으므로 경고는 삭제 팔레트로 선다 (프로젝트
+ * 삭제와 같은 문법). 이름 타이핑은 요구하지 않는다: 마지막 단계가 실패해도 세션 둘이
+ * 남을 뿐 잃는 것이 없고, 성공했다면 잃는 것은 사람이 방금 읽고 승인한 그것뿐이다.
+ *
+ * 받는 에이전트를 고를 수 있다 (도그푸딩 요청) — 글은 그냥 텍스트라 도구를 가리지
+ * 않는다. 기본은 지금 도구. 삭제도 체크박스다: 끄면 갈아타기가 아니라 분기가 된다.
  */
 function ConfirmHandoff({
   name,
@@ -720,9 +723,11 @@ function ConfirmHandoff({
 }: {
   name: string
   tool: ToolName
-  onConfirm: () => void
+  onConfirm: (tool: ToolName, deleteOld: boolean) => void
   onCancel: () => void
 }) {
+  const [heirTool, setHeirTool] = useState<ToolName>(tool)
+  const [deleteOld, setDeleteOld] = useState(true)
   const toolLabel = TOOL_META[tool].label
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">
@@ -730,24 +735,73 @@ function ConfirmHandoff({
         <p className="text-[13px] text-chalk">Hand off to a fresh session?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
         <p className="mt-2 text-[11px] leading-relaxed text-ash">
-          This session writes a handoff note (you will see it in the conversation), then a fresh session with
-          the same name and settings starts from that note.
+          This session writes a handoff note (you will see it in the conversation), then a fresh session
+          starts from that note.
         </p>
-        <p
-          className="mt-2 rounded border border-del/40 bg-del-bg px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
-          data-testid="handoff-warning"
+
+        {/* 받는 에이전트 — 다른 도구를 고르면 모델·강도 같은 도구별 설정은 물려주지 않는다 */}
+        <p className="mt-3 text-[10px] uppercase tracking-[0.12em] text-slate">Hand off to</p>
+        <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Hand off to">
+          {(Object.keys(TOOL_META) as ToolName[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="radio"
+              aria-checked={heirTool === t}
+              data-testid={`handoff-tool-${t}`}
+              onClick={() => setHeirTool(t)}
+              className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
+                heirTool === t
+                  ? 'border-ash bg-graphite text-chalk'
+                  : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
+              }`}
+            >
+              {TOOL_META[t].label}
+              {t === tool && <span className="ml-1 text-[10px] text-slate">(current)</span>}
+            </button>
+          ))}
+        </div>
+
+        {deleteOld ? (
+          <p
+            className="mt-3 rounded border border-del/40 bg-del-bg px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
+            data-testid="handoff-warning"
+          >
+            When the new session is ready,{' '}
+            <span className="text-del">this session is deleted for real — including the {toolLabel} conversation
+            file</span>. Only the note survives.
+          </p>
+        ) : (
+          <p className="mt-3 text-[11px] leading-relaxed text-ash" data-testid="handoff-keep-note">
+            This session stays — the new one starts from the note alongside it.
+          </p>
+        )}
+        <label
+          className={`mt-2 flex cursor-pointer items-start gap-2 text-[11px] ${
+            deleteOld ? 'text-del' : 'text-ash hover:text-chalk'
+          }`}
+          data-testid="handoff-delete-toggle"
         >
-          When the new session is ready,{' '}
-          <span className="text-del">this session is deleted for real — including the {toolLabel} conversation
-          file</span>. Only the note survives.
-        </p>
+          <input
+            type="checkbox"
+            className={`mt-0.5 ${deleteOld ? 'accent-del' : 'accent-ash'}`}
+            checked={deleteOld}
+            onChange={(e) => setDeleteOld(e.target.checked)}
+          />
+          <span>Delete this session after the handoff</span>
+        </label>
+
         <div className="mt-4 flex justify-end gap-2">
           <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onCancel}>
             Cancel
           </button>
           <button
-            className="rounded border border-del/40 bg-del-bg px-3 py-1 text-[12px] text-del transition-colors hover:border-del/70"
-            onClick={onConfirm}
+            className={`rounded border px-3 py-1 text-[12px] transition-colors ${
+              deleteOld
+                ? 'border-del/40 bg-del-bg text-del hover:border-del/70'
+                : 'border-edge bg-panel text-chalk hover:border-graphite'
+            }`}
+            onClick={() => onConfirm(heirTool, deleteOld)}
             data-testid="confirm-handoff-yes"
           >
             Hand off
