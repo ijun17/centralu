@@ -122,6 +122,17 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
+    name: 'delete_worktree_session',
+    description:
+      '다 끝난 워크트리 브랜치 세션을 정리한다 (#76) — 세션·워크트리·브랜치가 지워진다. ' +
+      '앱이 그 자리에서 하드 게이트를 잰다: 커밋 안 된 변경이 없고, 지금의 브랜치 끝이 줄기에 ' +
+      '들어갔음이 증명될 때만(스쿼시 병합은 PR 기록으로) 실행된다. 게이트에 걸리면 이유가 돌아온다 — ' +
+      '우회는 없다. 증명 못 하는 브랜치를 정말 버리는 것은 사람이 삭제 대화에서 한다.',
+    schema: z.object({
+      sessionId: z.string().describe('정리할 워크트리 세션의 id (list_sessions의 [id])'),
+    }),
+  },
+  {
     name: 'propose_skill',
     description:
       '재사용할 작업 절차(스킬)를 **사람에게 제안한다** (#71) — 같은 부탁을 반복해서 받거나, 이 사용자 고유의 일하는 방식을 발견했을 때. ' +
@@ -163,7 +174,15 @@ export const MANAGER_TOOL_NAMES = [
   'read_session',
   'send_to_session',
   'propose_worktree_session',
+  'delete_worktree_session',
 ] as const satisfies readonly OrchestratorToolName[]
+
+/**
+ * 매니저에게만 있는 도구 (#76). 오케스트레이터의 시야는 모든 세션이라, 이 권한을
+ * 주면 프로젝트를 가로질러 브랜치가 지워진다 — 삭제는 자기 자식을 지켜보던
+ * 매니저의 문맥에서만 안전하게 판단된다. 하드 게이트가 있어도 시야는 좁게 둔다.
+ */
+const MANAGER_ONLY_TOOL_NAMES = ['delete_worktree_session'] as const satisfies readonly OrchestratorToolName[]
 
 /** 매니저에게 주는 안내 — 워크트리 관리 컨텍스트 (#69 설계의 3층 규칙 포함) */
 export const MANAGER_INSTRUCTIONS = [
@@ -200,6 +219,12 @@ export const MANAGER_INSTRUCTIONS = [
    * "왜 안 되지"가 아니라 "gh를 설치하면 됩니다"라는 안내가 된다.
    */
   '이 PR 감지는 GitHub CLI(gh)에 기댄다. gh가 없는 기계에서는 PR 명령이 실패하고 스쿼시 병합도 자동 감지되지 않는다 — PR 흐름을 쓰려는 사람에게는 gh 설치와 로그인(brew install gh, gh auth login)을 안내한다. 로컬 병합 감지는 gh 없이도 된다.',
+  /*
+   * 정리 권한 (#76 하드 게이트). 유일한 power형 파괴 도구 — 안전판은 프롬프트가
+   * 아니라 host의 측정이다. 이 줄의 역할은 "게이트에 걸렸을 때 우회를 찾지 말라"를
+   * 미리 말해두는 것: 걸린 이유(더러움·미병합)는 해소하거나 사람에게 넘긴다.
+   */
+  '다 끝난 브랜치는 delete_worktree_session으로 정리할 수 있다. 앱이 삭제 순간에 하드 게이트를 잰다 — 커밋 안 된 변경이 없고, 지금의 브랜치 끝이 줄기에 들어갔음이 증명될 때만 지워진다(캐시된 배지가 아니라 그 순간의 측정이다). 게이트에 걸리면 우회하지 마라: 더러우면 그 세션에 커밋을 시키고, 미병합이면 병합이 끝난 뒤 다시 하고, 정말 버릴 브랜치는 사람이 삭제 대화에서 지운다.',
 ].join('\n')
 
 /** 모델에게 주는 안내 — 도구 목록과 함께 간다 */
@@ -322,6 +347,18 @@ export async function runOrchestratorTool(
     }
   }
 
+  if (name === 'delete_worktree_session') {
+    const sessionId = String(args.sessionId ?? '').trim()
+    if (!sessionId) return { text: 'sessionId를 주세요 — list_sessions의 [id]입니다.', isError: true }
+    const r = await tools.deleteWorktreeSession(sessionId)
+    if (!r.ok) return { text: `지우지 않았습니다: ${r.error}`, isError: true }
+    return {
+      text:
+        '정리했습니다 — 세션과 워크트리, 브랜치가 지워졌습니다. ' +
+        '도구 쪽 대화 원본은 남아 있습니다(복구 경로). 무엇을 정리했는지 사람에게 한 줄로 보고하세요.',
+    }
+  }
+
   if (name === 'propose_skill') {
     const spec = {
       name: String(args.name ?? '').trim(),
@@ -419,7 +456,8 @@ export type ToolProfile = 'orchestrator' | 'manager'
 
 /** 이 묶음이 허용하는 도구인가 — 노출(schemas)과 실행(run) 둘 다 이걸로 판정한다 */
 export function profileAllows(profile: ToolProfile, name: string): boolean {
-  return profile === 'orchestrator' || (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
+  if (profile === 'orchestrator') return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name)
+  return (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
 }
 
 export function orchestratorToolSchemas(

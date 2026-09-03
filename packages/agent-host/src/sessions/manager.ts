@@ -35,6 +35,7 @@ import {
   gitRevParse,
   gitBranchMerged,
   gitBranchPr,
+  gitBranchDelete,
   type BranchPr,
   gitLog,
   gitCommitDetail,
@@ -2627,6 +2628,73 @@ export class SessionManager {
       },
 
       /*
+       * 유일한 파괴 권한 (#76 하드 게이트) — propose가 아니라 power인 이유는 게이트다:
+       * **증명 가능하게 무손실일 때만** 실행된다. 커밋 안 된 변경이 없고, 지금 이 순간의
+       * 브랜치 끝이 줄기에 들어갔음이 측정되면, 지워서 잃는 git 내용물이 없다.
+       * 그 증명 밖의 모든 삭제는 여전히 사람의 일이다(사이드바 삭제 대화).
+       *
+       * 판정은 캐시(worktreeMerged 배지)가 아니라 **삭제 순간의 측정**이다 — 배지가
+       * 켜진 뒤에 새 커밋이 얹혔을 수 있다(TOCTOU). 크리티컬한 삭제라(사용자 지시)
+       * 보수적으로 기운다: 도구 쪽 대화 원본은 남기고(마지막 복구 경로), 브랜치를
+       * 지우기 전 팁 sha를 로그로 남긴다(reflog 복구의 표지판).
+       */
+      deleteWorktreeSession: async (sessionId) => {
+        if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 지울 수 없습니다' }
+        const target = this.meta.get(sessionId)
+        if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+        if (!target.worktree?.base || !target.projectId) {
+          return { ok: false, error: '워크트리 브랜치 세션이 아닙니다 — 이 도구는 병합이 끝난 브랜치만 정리합니다' }
+        }
+        if (target.state === 'working' || target.state === 'waiting_approval') {
+          return { ok: false, error: `아직 일하고 있습니다: ${target.name} — 턴이 끝난 뒤에 정리하세요` }
+        }
+        const cwd = this.cwdOf(target.projectId)
+        const { branch, path, base } = target.worktree
+
+        // 게이트 1: 커밋 안 된 변경 — 어느 커밋에도 없는 내용은 지우면 그냥 사라진다.
+        // 측정 실패도 더러움으로 친다: 모르는 것은 안전한 쪽이 아니다.
+        const wt = await gitWorktreeDirty(path).catch(() => ({ dirty: true, changedFiles: -1 }))
+        if (wt.dirty) {
+          const n = wt.changedFiles >= 0 ? `${wt.changedFiles}개 ` : ''
+          return { ok: false, error: `커밋 안 된 변경이 ${n}있습니다 — 그 세션에 커밋(또는 폐기)을 시킨 뒤 다시 부르세요` }
+        }
+
+        // 게이트 2: **지금의** 브랜치 끝이 줄기에 들어갔는가
+        const trunk = this.trunkOf(target.projectId) ?? 'HEAD'
+        let proof: string | null = null
+        if (await gitBranchMerged(cwd, branch, base, trunk).catch(() => false)) {
+          proof = 'trunk ancestry'
+        } else if (this.ghAvailable) {
+          const pr = await this.prLookup(cwd, branch).catch(() => null)
+          if (pr === 'unavailable') this.ghAvailable = false
+          else if (pr && pr.state === 'merged') {
+            const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
+            if (pr.headOid && tip && tip === pr.headOid) proof = `PR #${pr.number}`
+            else if (pr.headOid && tip) {
+              return {
+                ok: false,
+                error: `PR #${pr.number}는 병합됐지만 그 뒤에 새 커밋이 있습니다 — 새 커밋까지 줄기에 들어간 뒤에만 지웁니다`,
+              }
+            }
+          }
+        }
+        if (!proof) {
+          return {
+            ok: false,
+            error: `"${branch}"가 줄기에 들어갔음을 증명하지 못했습니다 — 병합(또는 PR 병합)이 확인된 뒤에만 지웁니다. 증명 없이 버리는 것은 사람이 삭제 대화에서 합니다`,
+          }
+        }
+
+        const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
+        // 도구 쪽 대화 원본은 남긴다(deleteExternal=false) — 이 삭제의 마지막 복구 경로다
+        await this.deleteSession(sessionId, true, false)
+        // 실패해도 되돌리지 않는다: 남은 브랜치 ref는 배지 하나의 비용이지 손실이 아니다
+        await gitBranchDelete(cwd, branch).catch(() => {})
+        console.error(`[worktree] manager cleaned up ${branch} (tip ${tip?.slice(0, 8) ?? '?'}, proof: ${proof})`)
+        return { ok: true }
+      },
+
+      /*
        * 제안만 한다 (propose-not-power). 설치·재시작은 사람의 승인 클릭이
        * resolveMcpProposal을 통해 시킨다 — MCP 등록은 임의 명령 실행의 등록이라,
        * 여기서 바로 설치하면 read_session으로 들어온 주입 한 줄이 프로세스가 된다.
@@ -2981,10 +3049,13 @@ export class SessionManager {
             this.ghAvailable = false
             // 마지막 말을 남긴다 — 없으면 "왜 PR 칩이 안 뜨지"가 미스터리가 된다
             console.error('[worktree] gh not found — PR detection off for this run (local merge detection unaffected)')
-          }
-          else if (pr && JSON.stringify(pr) !== JSON.stringify(m.worktreePr)) {
-            this.meta.set(m.id, { ...this.meta.get(m.id)!, worktreePr: pr })
-            this.emit({ type: 'worktree_pr', sessionId: m.id, pr })
+          } else if (pr) {
+            // headOid는 게이트(#76 하드 게이트)의 재료지 칩의 재료가 아니다 — 프로토콜 모양만 싣는다
+            const chip = { number: pr.number, state: pr.state, url: pr.url }
+            if (JSON.stringify(chip) !== JSON.stringify(m.worktreePr)) {
+              this.meta.set(m.id, { ...this.meta.get(m.id)!, worktreePr: chip })
+              this.emit({ type: 'worktree_pr', sessionId: m.id, pr: chip })
+            }
           }
           if (pr && pr !== 'unavailable' && pr.state === 'merged') merged = true
         }

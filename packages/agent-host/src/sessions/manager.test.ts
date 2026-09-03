@@ -2130,6 +2130,98 @@ describe('워크트리 세션', () => {
   })
 
   /*
+   * #76 하드 게이트: 매니저의 delete_worktree_session은 **증명 가능하게 무손실**일 때만
+   * 실행된다. 베이스 어댑터 목에는 deleteExternalConversation이 없다 — 게이트가 실수로
+   * 외부 삭제(deleteExternal=true)를 하면 성공 테스트가 그 자리에서 던진다.
+   */
+  describe('매니저의 정리 권한 — 하드 게이트 (#76)', () => {
+    const g = (dir: string, args: string[]) =>
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' })
+
+    const makeChild = async (branch: string) => {
+      const s = (await wtRpc('agents.createSession', {
+        projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: branch,
+      })) as SessionInfo
+      return { s, managerId: s.parentSessionId! }
+    }
+
+    it('커밋 안 된 변경이 있으면 지우지 않는다 — 어느 커밋에도 없는 내용이 사라진다', async () => {
+      const { s, managerId } = await makeChild('feat/dirty')
+      writeFileSync(join(s.worktree!.path, 'wip.txt'), 'not committed\n')
+
+      const r = await wtMgr.runOrchestratorTool(managerId, 'delete_worktree_session', { sessionId: s.id })
+
+      expect(r.isError).toBe(true)
+      expect(r.text).toContain('커밋 안 된 변경')
+      // 아무것도 지워지지 않았다 — 거절은 부분 실행이 아니다
+      expect(wtMgr.listSessions().some((x) => x.id === s.id)).toBe(true)
+      expect(existsSync(s.worktree!.path)).toBe(true)
+    })
+
+    it('병합 증명이 없으면 지우지 않는다 — 깨끗해도 줄기에 안 들어간 일은 일이다', async () => {
+      const { s, managerId } = await makeChild('feat/unmerged')
+      writeFileSync(join(s.worktree!.path, 'work.txt'), 'done\n')
+      g(s.worktree!.path, ['add', '.'])
+      g(s.worktree!.path, ['commit', '-qm', 'work'])
+
+      const r = await wtMgr.runOrchestratorTool(managerId, 'delete_worktree_session', { sessionId: s.id })
+
+      expect(r.isError).toBe(true)
+      expect(r.text).toContain('증명하지 못했습니다')
+      expect(wtMgr.listSessions().some((x) => x.id === s.id)).toBe(true)
+      // 브랜치도 그대로다
+      expect(g(repo, ['rev-parse', '--verify', 'refs/heads/feat/unmerged']).trim()).toBeTruthy()
+    })
+
+    it('줄기에 들어간 브랜치는 정리된다 — 세션·워크트리·브랜치가 지워지고 로컬 기록만 사라진다', async () => {
+      const { s, managerId } = await makeChild('feat/done-clean')
+      writeFileSync(join(s.worktree!.path, 'work.txt'), 'done\n')
+      g(s.worktree!.path, ['add', '.'])
+      g(s.worktree!.path, ['commit', '-qm', 'work'])
+      g(repo, ['merge', '-q', '--no-ff', 'feat/done-clean'])
+
+      const r = await wtMgr.runOrchestratorTool(managerId, 'delete_worktree_session', { sessionId: s.id })
+
+      expect(r.isError).not.toBe(true)
+      expect(wtMgr.listSessions().some((x) => x.id === s.id)).toBe(false)
+      expect(existsSync(s.worktree!.path)).toBe(false)
+      expect(() => g(repo, ['rev-parse', '--verify', 'refs/heads/feat/done-clean'])).toThrow()
+    })
+
+    it('스쿼시 병합(PR)도 팁이 PR 머리와 같을 때만 정리된다 — 그 뒤의 새 커밋은 게이트에 걸린다', async () => {
+      const { s, managerId } = await makeChild('feat/squash-clean')
+      writeFileSync(join(s.worktree!.path, 'work.txt'), 'done\n')
+      g(s.worktree!.path, ['add', '.'])
+      g(s.worktree!.path, ['commit', '-qm', 'work'])
+      const tip = g(s.worktree!.path, ['rev-parse', 'HEAD']).trim()
+
+      // 로컬에는 병합 흔적이 없다 — PR만이 병합을 안다 (스쿼시의 실제 모습)
+      wtMgr.prLookup = async () => ({ number: 9, state: 'merged', url: 'https://github.com/x/y/pull/9', headOid: tip })
+
+      // 팁 뒤에 새 커밋이 얹히면: PR이 병합됐어도 그 커밋은 어디에도 안 들어갔다
+      writeFileSync(join(s.worktree!.path, 'after.txt'), 'late work\n')
+      g(s.worktree!.path, ['add', '.'])
+      g(s.worktree!.path, ['commit', '-qm', 'after merge'])
+      const blocked = await wtMgr.runOrchestratorTool(managerId, 'delete_worktree_session', { sessionId: s.id })
+      expect(blocked.isError).toBe(true)
+      expect(blocked.text).toContain('새 커밋')
+
+      // 그 커밋을 되돌려 팁을 PR 머리로 맞추면 통과한다
+      g(s.worktree!.path, ['reset', '--hard', tip])
+      const r = await wtMgr.runOrchestratorTool(managerId, 'delete_worktree_session', { sessionId: s.id })
+      expect(r.isError).not.toBe(true)
+      expect(() => g(repo, ['rev-parse', '--verify', 'refs/heads/feat/squash-clean'])).toThrow()
+    })
+
+    it('오케스트레이터에게는 이 도구가 없다 — 시야가 모든 세션인 자리에 파괴 권한을 주지 않는다', async () => {
+      const { profileAllows, orchestratorToolSchemas } = await import('./orchestrator-tools.js')
+      expect(profileAllows('manager', 'delete_worktree_session')).toBe(true)
+      expect(profileAllows('orchestrator', 'delete_worktree_session')).toBe(false)
+      expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'delete_worktree_session')).toBe(false)
+    })
+  })
+
+  /*
    * #76: 자리를 먼저 만든다. 여기서 검사하는 것은 "만들어지는가"가 아니라 **자식 없이도
    * 매니저인가** — 자식이 도구의 조건이던 시절에는 첫 브랜치를 정하기 전에 상의할 상대가
    * 아예 없었다.

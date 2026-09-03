@@ -403,7 +403,17 @@ export async function gitBranchMerged(
   }
 }
 
-export type BranchPr = { number: number; state: 'open' | 'merged' | 'closed'; url: string }
+export type BranchPr = {
+  number: number
+  state: 'open' | 'merged' | 'closed'
+  url: string
+  /**
+   * PR 머리의 커밋 sha. 하드 게이트(#76)의 "최신화" 판정 근거다: 로컬 팁이 이것과
+   * 같아야 "브랜치의 전부가 그 PR로 들어갔다"가 증명된다 — 스쿼시 병합 뒤 얹힌
+   * 새 커밋은 is-ancestor로도 PR 상태로도 안 보이는 유일한 손실 경로라서다.
+   */
+  headOid?: string
+}
 
 /**
  * 이 브랜치의 풀 리퀘스트 상태 — **gh에게 묻는다** (#76 stage 3).
@@ -420,10 +430,15 @@ export type BranchPr = { number: number; state: 'open' | 'merged' | 'closed'; ur
  */
 export async function gitBranchPr(projectCwd: string, branch: string): Promise<BranchPr | 'unavailable' | null> {
   try {
-    const { stdout } = await exec('gh', ['pr', 'view', branch, '--json', 'number,state,url'], { cwd: projectCwd, ...OK })
-    const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown }
+    const { stdout } = await exec('gh', ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
+    const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
-    return { number: j.number, state: j.state === 'MERGED' ? 'merged' : j.state === 'CLOSED' ? 'closed' : 'open', url: j.url }
+    return {
+      number: j.number,
+      state: j.state === 'MERGED' ? 'merged' : j.state === 'CLOSED' ? 'closed' : 'open',
+      url: j.url,
+      ...(typeof j.headRefOid === 'string' && j.headRefOid ? { headOid: j.headRefOid } : {}),
+    }
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
   }
@@ -453,6 +468,18 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
  */
 export async function gitWorktreeRemove(repoCwd: string, path: string, force = false): Promise<void> {
   await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force'] : []), path])
+}
+
+/**
+ * 브랜치 ref를 지운다 (#76 하드 게이트 전용).
+ *
+ * `-D`인 이유: `-d`의 자체 안전판(병합 확인)은 스쿼시 병합을 못 본다 — 정확히 그
+ * 사각지대를 메우려고 게이트가 있는 것이라, git의 확인 대신 **호출자의 증명**이
+ * 안전판이다. 게이트를 통과하지 않은 코드가 이 함수를 부르면 안 된다.
+ * 지워도 커밋은 reflog에 남는다 — 호출자가 팁 sha를 로그로 남겨 복구 길을 표시한다.
+ */
+export async function gitBranchDelete(repoCwd: string, branch: string): Promise<void> {
+  await git(repoCwd, ['branch', '-D', branch])
 }
 
 /** 커밋되지 않은 변경이 남아 있는가 — 지워도 되는지 묻기 위한 것 */

@@ -61,6 +61,14 @@ export type OrchestratorTools = {
    */
   sendToSession(sessionId: string, text: string, reportBack?: boolean): Promise<{ ok: boolean; error?: string }>
   /**
+   * 다 끝난 워크트리 브랜치 세션을 정리한다 (#76 하드 게이트) — 매니저 전용.
+   *
+   * 유일한 파괴 권한이고, propose가 아니라 power인 이유는 게이트다: host가 삭제
+   * 순간에 **증명 가능하게 무손실**임을 측정했을 때만 실행된다(커밋 안 된 변경 없음 +
+   * 지금 팁이 줄기에 들어갔음). 증명 밖의 모든 삭제는 여전히 사람의 일이다.
+   */
+  deleteWorktreeSession(sessionId: string): Promise<{ ok: boolean; error?: string }>
+  /**
    * 한 세션의 최근 대화를 읽는다.
    *
    * 이게 없어서 오케스트레이터는 보고가 부실할 때 **확인할 방법이 아예 없었다** —
