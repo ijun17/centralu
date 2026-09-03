@@ -45,9 +45,15 @@ function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown>
   return {} // 내 설정을 따른다
 }
 
+/** 재개를 사람 앞에서 기다려 주는 시간 — 잠금 오류("active writer")는 이 안에 온다 (실측 ~0.3s) */
+export const LAZY_RESUME_WAIT_MS = 3_000
+/** 배경 재개의 상한 — 매니저의 단계 제한(150s)과 같은 값. 이걸 넘기면 걸린 것이다 */
+const BACKGROUND_RESUME_CAP_MS = 150_000
+
 class CodexSession implements SessionHandle {
   readonly sessionId: string
   externalId: string | null = null
+  private closed = false
 
   private client: CodexClient
   private threadId: string | null = null
@@ -457,8 +463,43 @@ class CodexSession implements SessionHandle {
     })
   }
 
+  /**
+   * 배경 재개의 감시자 (지연 재개 전용). 핸들을 먼저 내준 뒤 재개가 실패하거나
+   * 상한을 넘기면, 조용히 잠들 수는 없다 — adapter_crashed를 올려서 매니저가
+   * 핸들을 걷고 "없으면 되살려 보낸다" 자동 복구 경로가 서게 한다.
+   */
+  watchBackgroundStart(): void {
+    const timer = setTimeout(() => {
+      if (this.closed) return
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: {
+          code: 'adapter_crashed',
+          message: `Resuming codex did not finish within ${BACKGROUND_RESUME_CAP_MS / 1000}s`,
+          retryable: true,
+        },
+      })
+      void this.dispose().catch(() => {})
+    }, BACKGROUND_RESUME_CAP_MS)
+    this.ready.then(
+      () => clearTimeout(timer),
+      (e: Error) => {
+        clearTimeout(timer)
+        if (this.closed) return
+        this.emit({
+          type: 'error',
+          sessionId: this.sessionId,
+          error: { code: 'adapter_crashed', message: e.message, retryable: true },
+        })
+        void this.dispose().catch(() => {})
+      },
+    )
+  }
+
   /** 매달린 승인을 말없이 놓지 않는다 (claude 어댑터와 같은 이유 — 화면이 카드를 붙든 채 막힌다) */
   async dispose(): Promise<void> {
+    this.closed = true
     for (const requestId of this.approvals.keys()) {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     }
@@ -625,7 +666,37 @@ export class CodexAdapter implements AgentAdapter {
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const session = new CodexSession(opts, emit)
-    // 스레드 id가 생겨야 재개가 가능하다 — 생성 시점에 확보한다 (M1.5 결함 5번 교훈)
+    /*
+     * **재개는 클로드처럼 — 사람 앞에서 기다리지 않는다** (도그푸딩: 같은 스레드가
+     * CLI에선 3초, 우리 경로에선 13초+였다. thread/resume이 파일 전체를 되읽는 비용은
+     * 못 없애지만, 그 비용을 "Waking…" 화면 앞에서 치를 이유는 없다 — 재개는 스레드
+     * id를 이미 알고 있어서, 핸들을 먼저 내줘도 잃는 것이 없다. send는 ready에
+     * 큐잉된다).
+     *
+     * 단 3초는 동기로 기다린다: 잠금 오류("already has an active writer")는 즉시
+     * 오므로(실측 ~0.3s), 이 창 안에서 던져야 "다른 곳에서 열려 있음 → 갈라서
+     * 이어가기" 갈림길 UI가 지금처럼 산다. 새 스레드(thread/start)는 예전 그대로
+     * 끝까지 기다린다 — id가 생겨야 재개가 가능하다 (M1.5 결함 5번 교훈).
+     */
+    if (opts.resumeExternalId) {
+      session.externalId = opts.resumeExternalId
+      const outcome = await Promise.race([
+        session.ready.then(
+          () => 'ready' as const,
+          (err: unknown) => ({ err }),
+        ),
+        new Promise<'pending'>((r) => setTimeout(() => r('pending'), LAZY_RESUME_WAIT_MS)),
+      ])
+      if (outcome === 'pending') {
+        session.watchBackgroundStart()
+        return session
+      }
+      if (outcome !== 'ready') {
+        await session.dispose().catch(() => {})
+        throw outcome.err
+      }
+      return session
+    }
     try {
       await session.ready
     } catch (err) {
