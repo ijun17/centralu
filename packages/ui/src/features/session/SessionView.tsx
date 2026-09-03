@@ -1255,13 +1255,16 @@ function ChatStream({
           16px에 붙었다 (실측: gap 16px). 음수 offset이 그 16px을 되돌려 진짜 천장에
           닿게 한다. 패딩 자체는 남겨둔다: 맨 위로 올렸을 때 대화가 숨 쉴 자리다.
 
-          16이 아니라 **17**인 이유: 확대(--text-zoom 1.1 등)에서는 헤더 높이가 소수점
-          픽셀에 떨어져, 딱 맞춘 가장자리가 반올림에 따라 1px 실금으로 벌어진다 —
-          그 틈으로 지나가는 대화가 블러 없이 비쳤다 (도그푸딩: "실금 정도로 뒤에 보여").
-          1px을 천장 위로 겹쳐 넣으면 스크롤 칸이 그만큼 잘라낼 뿐이고(위 모서리는
-          어차피 테두리도 둥글림도 없다), 어떤 반올림에서도 틈이 안 생긴다.
+          16이 아니라 **19**인 이유: 확대(--text-zoom 1.1 등)에서는 헤더 높이가 소수점
+          픽셀에 떨어져, 딱 맞춘 가장자리가 반올림에 따라 실금으로 벌어진다 —
+          그 틈으로 지나가는 대화가 비쳤다 (도그푸딩: "실금 정도로 뒤에 보여").
+          천장 위로 겹쳐 넣으면 스크롤 칸이 그만큼 잘라낼 뿐이고(위 모서리는 어차피
+          테두리도 둥글림도 없다), 반올림이 어느 쪽으로 떨어져도 틈이 안 생긴다.
+          여유가 1px(-17px)였을 때 트렁크 WebKit 실측은 틈 0이었는데 실제 WKWebView
+          (더 구형인 시스템 엔진)에서 여전히 보인다는 지적이 와서 3px로 늘렸다 —
+          더 잘리는 것은 배너의 위 패딩(8px)뿐이라 글자는 어느 확대에서도 안전하다.
         */
-        <div className="sticky -top-[17px] z-10 -mx-4 mb-1 flex justify-end px-4" data-testid="sticky-user">
+        <div className="sticky -top-[19px] z-10 -mx-4 mb-1 flex justify-end px-4" data-testid="sticky-user">
           {/*
             말풍선과 **같은 옷, 같은 자리, 같은 폭**을 갖는다. 이 줄은 위로 사라진
             사용자 메시지의 연장이라, 하나라도 다르면 다른 종류의 것으로 읽힌다.
@@ -1274,20 +1277,29 @@ function ChatStream({
             오른쪽 정렬에 `max-w-[75%]`로 두고, 폭은 글자 길이를 따라간다(w-fit).
 
             천장에 붙었으므로 **위쪽 모서리는 둥글지 않고 위 테두리도 없다** — 떠 있는
-            카드가 아니라 화면에 매달린 띠다. 배경은 반투명이라 지나가는 대화가 뒤에
-            비쳐 보이고(blur로 글자는 안 읽히게), 그래서 이 줄이 대화를 가린 것이 아니라
-            **덮고 있다**는 것이 눈에 남는다. 나타날 때 몇 px 아래에서 올라와 멎는다
+            카드가 아니라 화면에 매달린 띠다. 나타날 때 몇 px 아래에서 올라와 멎는다
             (cc-hang) — 그 움직임이 "여기 매달렸다"를 말한다.
+            (반투명+블러였던 시절이 있다 — "덮었다"를 보이려는 것이었는데, 비치는
+            대화가 계속 "헤더와의 틈"으로 읽혀서 접었다. 버튼 쪽 주석에 경위가 있다.)
 
             누르면 펼쳐진다 — 한 줄로 부족한 질문을 위로 되돌아가지 않고 다시 읽는 용도.
             아주 긴 질문이 화면을 다 덮지 않게 높이만 자르고 안에서 스크롤한다.
           */}
           <div className="cc-hang relative w-fit max-w-[75%]">
+            {/*
+              **불투명이다** (도그푸딩 세 번째 지적 끝의 결론). 반투명+블러는 "가린 게
+              아니라 덮었다"를 말하려는 것이었는데, 실측으로 기하학적 틈이 0인데도
+              (헤더바닥=스크롤천장, WebKit 실측) 뒤로 비치는 대화가 계속 "헤더와의 틈"
+              으로 읽혔다 — WKWebView는 스크롤 칸 안 sticky의 backdrop-filter가
+              불안정해서 비침이 블러 없이 그대로 보이기도 한다. 말하려던 뉘앙스보다
+              세 번 반복된 오독이 크다. 색은 graphite/55가 void 위에서 만들던 합성색을
+              panel 토큰으로 대신한다 — 보이는 밝기는 그대로다.
+            */}
             <button
               type="button"
               onClick={() => setStickyOpen((v) => !v)}
               aria-expanded={stickyOpen}
-              className="w-full cursor-pointer truncate rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-graphite/55 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-md"
+              className="w-full cursor-pointer truncate rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-panel px-3 py-2 text-left text-[13px] text-chalk"
             >
               {stickyText}
             </button>
@@ -1306,7 +1318,7 @@ function ChatStream({
                   "가린 게 아니라 덮었다"를 보이려는 것이고, 펼친 이유는 읽으려는 것이다 —
                   긴 질문 위로 대화가 비치면 그 목적이 곧바로 깨진다.
                 */
-                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-graphite/90 px-3 py-2 text-left text-[13px] text-chalk backdrop-blur-md"
+                className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-b-lg rounded-br-sm border border-t-0 border-slate/30 bg-graphite px-3 py-2 text-left text-[13px] text-chalk"
               >
                 {stickyText}
               </button>
