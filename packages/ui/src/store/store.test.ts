@@ -796,6 +796,8 @@ describe('인수인계하고 새로 시작', () => {
     const heir = [...mock.sessions.values()].find((r) => r.name === '메아')
     expect(heir).toBeDefined()
     expect(heir!.id).not.toBe('ho-s1')
+    // 화면의 요약도 즉시 물려받은 설정을 보인다 — DB에만 있고 메뉴는 Default면 "안 넘어간 것"으로 읽힌다 (도그푸딩)
+    expect(useStore.getState().sessions[heir!.id]).toMatchObject({ model: 'gpt-5.6', effort: null })
     // 기존 세션은 원본까지 정말로 지워졌다
     expect(mock.sessions.has('ho-s1')).toBe(false)
     expect(mock.externallyDeleted).toContain('ho-s1')

@@ -2089,6 +2089,17 @@ export const useStore = create<AppState>((set, get) => ({
             projectId,
             name: info.name,
             tool: info.tool,
+            /*
+             * 설정도 host가 답한 그대로 (#37의 남은 반쪽 — attach·재연결 병합은 전체를
+             * 받는데 이 낙관적 등록만 빼먹고 있었다). 도그푸딩 실측: 인수인계로 만든
+             * 세션이 DB에는 model·effort를 물려받고도 재시작 전까지 메뉴에 Default로
+             * 보였다 — 설정이 안 넘어간 것처럼 읽힌다.
+             */
+            model: info.model,
+            effort: info.effort,
+            verbosity: info.verbosity,
+            serviceTier: info.serviceTier,
+            permissionPreset: info.permissionPreset,
             worktree: info.worktree,
             // 소속도 host가 정한다 (#69) — 빠뜨리면 매니저 아래 만든 세션이 재시작 전까지 최상위에 선다
             parentSessionId: info.parentSessionId,
