@@ -201,6 +201,20 @@ export function createRpcHandler(
       mgr.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
       return { ok: true as const }
     },
+    'apps.state': async (p) => {
+      const { appId } = RpcMethods['apps.state'].params.parse(p)
+      return mgr.appState(appId)
+    },
+    'apps.setState': async (p) => {
+      const { appId, doc } = RpcMethods['apps.setState'].params.parse(p)
+      mgr.setAppDoc(appId, doc)
+      return { ok: true as const }
+    },
+    'apps.setEnabled': async (p) => {
+      const { appId, enabled } = RpcMethods['apps.setEnabled'].params.parse(p)
+      mgr.setAppEnabled(appId, enabled)
+      return { ok: true as const }
+    },
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
       // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)

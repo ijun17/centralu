@@ -19,6 +19,40 @@ module.exports = {
       },
       to: {},
     },
+    /*
+     * 앱 계층 (#81): 격리는 "완전"이 아니라 **단방향 + 소유권**이고, 그 단방향을
+     * 관례가 아니라 여기서 강제한다. 앱은 통행증(api/contract)으로만 코어를 만지고,
+     * 코어가 앱을 아는 것은 registry(와 계약 타입) 한 줄뿐이다 — 그래야 앱을
+     * 뜯어내도 코어에 흉터가 없다.
+     */
+    {
+      name: 'ui-app-guest-pass',
+      comment: 'UI 앱 내부는 api/contract 통행증으로만 코어에 (#81)',
+      severity: 'error',
+      from: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(api|contract|registry)\\.tsx?$'] },
+      to: { path: '^packages/ui/src/(store|features|app)/' },
+    },
+    {
+      name: 'ui-core-blind-to-apps',
+      comment: 'UI 코어가 앱에서 가져올 수 있는 것은 registry·contract뿐 (#81)',
+      severity: 'error',
+      from: { path: '^packages/ui/src', pathNot: ['^packages/ui/src/apps/'] },
+      to: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(registry|contract)\\.tsx?$'] },
+    },
+    {
+      name: 'host-app-guest-pass',
+      comment: 'host 앱 내부는 contract가 주는 것 밖의 코어에 손대지 않는다 (#81)',
+      severity: 'error',
+      from: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/(contract|registry)\\.ts$'] },
+      to: { path: '^packages/agent-host/src/(sessions|dev-services|adapters)/' },
+    },
+    {
+      name: 'host-core-blind-to-apps',
+      comment: 'host 코어가 앱에서 가져올 수 있는 것은 registry·contract뿐 (#81)',
+      severity: 'error',
+      from: { path: '^packages/agent-host/src', pathNot: ['^packages/agent-host/src/apps/'] },
+      to: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/(registry|contract)\\.ts$'] },
+    },
     {
       name: 'core-no-io',
       comment: 'core는 순수 도메인 — IO 금지',

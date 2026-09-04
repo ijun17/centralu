@@ -259,6 +259,16 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
 
   return {
     agents: new WebAgentPort(rpc),
+    // 앱 상태 (#81) — 얇은 운반. 문서의 의미는 앱만 안다
+    apps: {
+      state: (appId) => rpc.call('apps.state', { appId }),
+      setState: async (appId, doc) => {
+        await rpc.call('apps.setState', { appId, doc })
+      },
+      setEnabled: async (appId, enabled) => {
+        await rpc.call('apps.setEnabled', { appId, enabled })
+      },
+    },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
     search: {

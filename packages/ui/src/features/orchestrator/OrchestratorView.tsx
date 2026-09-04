@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
+import { APPS } from '../../apps/registry.js'
 
 /**
  * 오케스트레이터 화면 — **말로 관제**.
@@ -28,7 +29,14 @@ export function OrchestratorView() {
   const skillProposals = useStore((s) => s.skillProposals)
   const resolveSkillProposal = useStore((s) => s.resolveSkillProposal)
 
-  if (!id) return <OrchestratorEmpty />
+  // 레일(#81)은 오케스트레이터 세션이 없어도 선다 — 사람의 작업대는 챗의 부속이 아니다
+  if (!id)
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <OrchestratorEmpty />
+        <AppRails />
+      </div>
+    )
   return (
     <div className="relative flex min-w-0 flex-1 flex-col">
       {/*
@@ -107,20 +115,49 @@ export function OrchestratorView() {
           </button>
         </div>
       ))}
-      <SessionPane sessionId={id} />
       {/*
-        세션은 있는데 대화가 빈 경우(만들어만 두고 말을 안 걸었거나, 보내기가 실패한
-        경우)에도 같은 카드가 선다 — 카드는 메시지 수의 함수라는 규칙의 나머지 절반.
-        덮개로 띄우는 이유: SessionPane의 입력창·설정 메뉴는 그대로 살아 있어야 한다.
+        가운데는 챗(배차), 오른쪽은 앱 레일(#80·#81) — 관제면. 세션 화면의 오른쪽이
+        증거 패널이듯, 이 화면의 오른쪽은 다른 정체성의 자리다: 사람의 작업대.
       */}
-      {chatEmpty && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-24 top-0 flex items-center justify-center">
-          <div className="pointer-events-auto">
-            <Suggestions ask={(t) => void useStore.getState().send(id, t)} />
-          </div>
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <SessionPane sessionId={id} />
+          {/*
+            세션은 있는데 대화가 빈 경우(만들어만 두고 말을 안 걸었거나, 보내기가 실패한
+            경우)에도 같은 카드가 선다 — 카드는 메시지 수의 함수라는 규칙의 나머지 절반.
+            덮개로 띄우는 이유: SessionPane의 입력창·설정 메뉴는 그대로 살아 있어야 한다.
+          */}
+          {chatEmpty && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-24 top-0 flex items-center justify-center">
+              <div className="pointer-events-auto">
+                <Suggestions ask={(t) => void useStore.getState().send(id, t)} />
+              </div>
+            </div>
+          )}
         </div>
-      )}
+        <AppRails />
+      </div>
     </div>
+  )
+}
+
+/**
+ * 레일 자리에 서는 앱들 (#81). 코어가 앱에 대해 아는 것은 registry 한 줄이고,
+ * 여기는 그 명부를 그리는 것뿐이다 — 꺼진 앱은 안 그린다 (지우는 게 아니라).
+ */
+function AppRails() {
+  const apps = useStore((s) => s.apps)
+  const ensure = useStore((s) => s.ensureAppState)
+  useEffect(() => {
+    for (const a of APPS) if (a.railPanel) void ensure(a.id)
+  }, [ensure])
+  return (
+    <>
+      {APPS.filter((a) => a.railPanel && (apps[a.id]?.enabled ?? true)).map((a) => {
+        const Rail = a.railPanel!
+        return <Rail key={a.id} />
+      })}
+    </>
   )
 }
 

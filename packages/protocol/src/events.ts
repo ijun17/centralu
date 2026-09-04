@@ -276,6 +276,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
   /**
+   * 앱 문서가 바뀌었다 (#81) — 일부러 거칠다: 무엇이 바뀌었는지는 싣지 않고,
+   * 받은 쪽이 apps.state로 다시 읽는다. 앱마다 이벤트 모양을 만들면
+   * 프로토콜이 앱을 알게 된다.
+   */
+  z.object({ ...appScoped, type: z.literal('app_state_changed'), appId: z.string() }),
+  /**
    * 감시 중인 디렉토리에서 뭔가 바뀌었다 (#34 — Finder·터미널·에이전트, 출처 불문).
    *
    * 세션이 아니라 **프로젝트**의 사건이라 `update_status`와 같은 길(appScoped)을 탄다.

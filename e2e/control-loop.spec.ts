@@ -6794,3 +6794,52 @@ test('오케스트레이터는 인박스로 들어가도 오케스트레이터 �
   await expect(page.getByTestId('evidence-panel')).toHaveCount(0)
   await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
 })
+
+/*
+ * 관제 레일 (#80·#81) — 사람의 작업대. 내 차례가 줄로 서고, 한 줄짜리 답은
+ * 줄 안에서 끝나며, 기계의 알림(control_notify)이 꽂히고, 토글이 흔적 없이 끈다.
+ */
+test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 화면에서 돈다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '레일 시험')
+  const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+  // 턴을 끝내 세션을 "내 차례"로 — working 확인 후 끝낸다 (이벤트 역전 방지)
+  await expect
+    .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
+    .toBe('working')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.emit({ type: 'turn_complete', sessionId: sid })
+    m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
+  }, id)
+
+  await page.getByTestId('orchestrator-button').click()
+  await expect(page.getByTestId('control-rail')).toBeVisible()
+
+  // 내 차례에 줄이 서고, 줄 안 즉답이 세션에 닿는다 — 세션을 열지 않고 기어를 돌린다
+  await expect(page.getByTestId(`rail-turn-${id}`)).toBeVisible()
+  await page.getByTestId(`rail-input-${id}`).fill('이어서 진행해')
+  await page.getByTestId(`rail-input-${id}`).press('Enter')
+  await expect
+    .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
+    .toBe('working')
+
+  // 기계의 알림 — 사람이 읽고 지운다
+  await page.evaluate(() => {
+    void (window as any).__store.getState().setAppDoc('control', {
+      notifies: [{ id: 'n1', text: '세션3이 외부 조건에 막혔습니다', priority: 'high', ts: 1 }],
+    })
+  })
+  await expect(page.getByTestId('rail-notify-n1')).toContainText('막혔습니다')
+  await page.getByTestId('rail-notify-dismiss-n1').click()
+  await expect(page.getByTestId('rail-notify-n1')).toHaveCount(0)
+
+  // 토글 오프 = 레일이 흔적 없이 물러난다 (지워지는 게 아니라)
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('settings')
+  await page.getByTestId('palette-item-action').click()
+  await page.getByTestId('settings-tab-apps').click()
+  await page.getByTestId('app-toggle-control').locator('input').uncheck()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('control-rail')).toHaveCount(0)
+})

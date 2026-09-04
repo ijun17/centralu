@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
-import { profileAllows, runOrchestratorTool, type ToolProfile } from './orchestrator-tools.js'
+import { profileAllows, registerAppTools, runOrchestratorTool, type ToolProfile } from './orchestrator-tools.js'
 import { buildHandoffRecord } from './handoff-record.js'
+import { HOST_APPS } from '../apps/registry.js'
+import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
@@ -261,6 +263,80 @@ export class SessionManager {
       [...this.meta.values()].filter((s) => s.worktree && s.projectId).map((s) => s.projectId as string),
     )) {
       void this.refreshMergedWorktrees(pid).catch(() => {})
+    }
+    /*
+     * 앱 도구 등록 (#81). 명부(HOST_APPS)를 이 매니저의 문맥(KV·세션 조회·방송)에
+     * 바인딩해서 orchestrator-tools의 레지스트리에 싣는다 — Claude MCP와 Codex
+     * 다리가 그 레지스트리 하나를 본다. enabled는 클로저로 매번 묻는다.
+     */
+    registerAppTools(
+      HOST_APPS.flatMap((app) => {
+        const t = app.tools
+        if (!t) return []
+        return t.defs.map((d) => ({
+          name: d.name,
+          description: d.description,
+          schema: d.schema,
+          profiles: t.profiles,
+          enabled: () => this.appEnabled(app.id),
+          run: (args: Record<string, unknown>) => t.run(this.appContext(app.id), d.name, args),
+        }))
+      }),
+    )
+  }
+
+  // ── 앱 상태 (#81) — 앱마다 JSON 문서 하나 + 켜짐 여부. 의미는 앱만 안다 ──
+
+  private appKey(appId: string, key: string): string {
+    return `app:${appId}:${key}`
+  }
+
+  /** 기본 켜짐 — 실험 기능이지만 도그푸딩이 곧 실험이다. 끄기는 설정의 토글로 */
+  appEnabled(appId: string): boolean {
+    return this.store.appSetting(this.appKey(appId, 'enabled')) !== '0'
+  }
+
+  appState(appId: string): { doc: unknown; enabled: boolean } {
+    const raw = this.store.appSetting(this.appKey(appId, 'doc'))
+    let doc: unknown = null
+    try {
+      doc = raw ? JSON.parse(raw) : null
+    } catch {
+      doc = null // 깨진 문서는 빈 것으로 — 앱 하나의 상태가 앱 목록 전체를 막으면 안 된다
+    }
+    return { doc, enabled: this.appEnabled(appId) }
+  }
+
+  setAppDoc(appId: string, doc: unknown): void {
+    this.store.setAppSetting(this.appKey(appId, 'doc'), JSON.stringify(doc ?? null))
+    this.emit({ type: 'app_state_changed', appId })
+  }
+
+  setAppEnabled(appId: string, enabled: boolean): void {
+    this.store.setAppSetting(this.appKey(appId, 'enabled'), enabled ? '1' : '0')
+    this.emit({ type: 'app_state_changed', appId })
+  }
+
+  private appContext(appId: string): HostAppContext {
+    return {
+      kv: {
+        get: <T,>(key: string): T | null => {
+          const raw = this.store.appSetting(this.appKey(appId, key))
+          try {
+            return raw ? (JSON.parse(raw) as T) : null
+          } catch {
+            return null
+          }
+        },
+        set: (key: string, value: unknown) => {
+          this.store.setAppSetting(this.appKey(appId, key), JSON.stringify(value ?? null))
+        },
+      },
+      sessionSummary: (id: string) => {
+        const m = this.meta.get(id)
+        return m ? { name: m.name, state: m.state, projectId: m.projectId } : null
+      },
+      emitChanged: () => this.emit({ type: 'app_state_changed', appId }),
     }
   }
 

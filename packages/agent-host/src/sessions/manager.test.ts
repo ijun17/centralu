@@ -2987,3 +2987,51 @@ describe('죽은-에이전트 인수인계 기록 (#78)', () => {
     await expect(mgr.exportHandoffRecord('nope')).rejects.toThrow(/Session not found/)
   })
 })
+
+/**
+ * 앱 계층 (#81): 앱 도구는 레지스트리로 합류하고, 상태는 app:<id>:* KV에 살며,
+ * 꺼진 앱의 손은 즉시 멈춘다. 관제 앱의 control_notify가 첫 소비자다.
+ */
+describe('앱 계층 (#81) — 관제 앱의 control_notify', () => {
+  it('알림이 문서에 쌓이고 방송이 흐른다 — 없는 세션은 거절', async () => {
+    const orc = await mgr.orchestrator()
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+
+    const r = await mgr.runOrchestratorTool(orc.id, 'control_notify', {
+      text: '세션이 외부 승인에 막혔습니다',
+      sessionId: s.id,
+      priority: 'high',
+    })
+    expect(r.isError).not.toBe(true)
+
+    const state = mgr.appState('control')
+    expect(state.enabled).toBe(true)
+    const doc = state.doc as { notifies: { text: string; sessionId?: string; priority?: string }[] }
+    expect(doc.notifies).toHaveLength(1)
+    expect(doc.notifies[0]).toMatchObject({ text: '세션이 외부 승인에 막혔습니다', sessionId: s.id, priority: 'high' })
+    // UI가 다시 읽으라는 신호 — 무엇이 바뀌었는지는 싣지 않는다 (일부러 거친 이벤트)
+    expect(events.some((e) => e.type === 'app_state_changed' && e.appId === 'control')).toBe(true)
+
+    // 없는 세션을 가리키는 알림은 이동 버튼이 허공을 가리킨다 — 제안 단계에서 거른다
+    const bad = await mgr.runOrchestratorTool(orc.id, 'control_notify', { text: 'x', sessionId: 'ghost' })
+    expect(bad.isError).toBe(true)
+  })
+
+  it('꺼진 앱은 노출에서도 실행에서도 사라진다 — 상태는 남는다', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.runOrchestratorTool(orc.id, 'control_notify', { text: '남아야 한다' })
+
+    mgr.setAppEnabled('control', false)
+
+    const { orchestratorToolSchemas } = await import('./orchestrator-tools.js')
+    expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'control_notify')).toBe(false)
+    const r = await mgr.runOrchestratorTool(orc.id, 'control_notify', { text: 'x' })
+    expect(r.isError).toBe(true)
+    // 끄기는 지우기가 아니다 — 문서는 그대로다
+    expect((mgr.appState('control').doc as { notifies: unknown[] }).notifies).toHaveLength(1)
+
+    mgr.setAppEnabled('control', true)
+    expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'control_notify')).toBe(true)
+  })
+})

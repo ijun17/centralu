@@ -335,6 +335,15 @@ export type AppState = {
    */
   mcpProposals: { name: string; command: string; args: string[]; why?: string }[]
   refreshMcpProposals(): Promise<void>
+  /**
+   * 앱 상태 (#81) — 앱마다 {문서, 켜짐}. 스토어는 앱 목록을 모른다(순환 금지):
+   * 항목은 앱의 useAppState가 처음 쓸 때(ensure) 또는 방송(app_state_changed)으로 생긴다.
+   */
+  apps: Record<string, { doc: unknown; enabled: boolean }>
+  ensureAppState(appId: string): Promise<void>
+  refreshAppState(appId: string): Promise<void>
+  setAppDoc(appId: string, doc: unknown): Promise<void>
+  setAppEnabled(appId: string, enabled: boolean): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /** 오케스트레이터의 스킬 제안 (#71) — 같은 제안→원클릭 승인 레일 */
   skillProposals: { name: string; content: string; why?: string }[]
@@ -984,6 +993,7 @@ export const useStore = create<AppState>((set, get) => ({
   newSessionBranch: '',
   worktreeProposals: [],
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
+  apps: {} as Record<string, { doc: unknown; enabled: boolean }>,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
   resuming: {},
@@ -1299,6 +1309,12 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'update_status') {
       set({ update: e.status })
+      return
+    }
+
+    // 앱 문서가 바뀌었다 (#81) — 일부러 거친 이벤트라 무엇이 바뀌었는지는 다시 읽는다
+    if (e.type === 'app_state_changed') {
+      void get().refreshAppState(e.appId)
       return
     }
 
@@ -2391,6 +2407,46 @@ export const useStore = create<AppState>((set, get) => ({
       set({ toast: `Deleted: ${name}` })
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
+    }
+  },
+
+  async ensureAppState(appId) {
+    if (get().apps[appId]) return
+    await get().refreshAppState(appId)
+  },
+
+  async refreshAppState(appId) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const state = await platform.apps.state(appId)
+      set((s) => ({ apps: { ...s.apps, [appId]: state } }))
+    } catch {
+      // 앱 하나의 상태를 못 읽어도 앱은 (빈 문서로) 선다 — 레일이 통째로 죽으면 안 된다
+    }
+  },
+
+  async setAppDoc(appId, doc) {
+    const platform = get().platform
+    if (!platform) return
+    // 화면 먼저, 저장은 뒤따라 — 방송(app_state_changed)이 어차피 진실로 맞춘다
+    set((s) => ({ apps: { ...s.apps, [appId]: { enabled: s.apps[appId]?.enabled ?? true, doc } } }))
+    try {
+      await platform.apps.setState(appId, doc)
+    } catch (e) {
+      set({ toast: `Could not save app state: ${(e as Error).message}` })
+      void get().refreshAppState(appId)
+    }
+  },
+
+  async setAppEnabled(appId, enabled) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.apps.setEnabled(appId, enabled)
+      set((s) => ({ apps: { ...s.apps, [appId]: { doc: s.apps[appId]?.doc ?? null, enabled } } }))
+    } catch (e) {
+      set({ toast: `Could not toggle the app: ${(e as Error).message}` })
     }
   },
 

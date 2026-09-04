@@ -6,6 +6,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
+import { APPS } from '../../apps/registry.js'
 
 type Rule = { id: number; scope: string; matcher: string; decision: string; createdAt: number }
 
@@ -76,6 +77,8 @@ const CATEGORIES = [
    * in Settings") — 지금까지는 지키지 않은 약속이었다.
    */
   { id: 'orchestrator', label: 'Orchestrator' },
+  // 실험 기능은 앱이다 (#81) — 켜고 끄는 곳이 있어야 "안 쓰면 사라진다"가 성립한다
+  { id: 'apps', label: 'Apps' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'permissions', label: 'Permissions' },
@@ -174,6 +177,7 @@ export function Settings() {
           */}
           <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="settings-pane">
             {category === 'orchestrator' && <OrchestratorSettings />}
+            {category === 'apps' && <AppsSettings />}
             {/* E-5 알림 정책 */}
             {category === 'notifications' && (
               <section>
@@ -318,6 +322,51 @@ export function Settings() {
  * 없는 스킬은 없느니만 못하다" — 승인은 대화 옆 카드에서, 관리는 설정에서.
  * 삭제하면 host가 오케스트레이터를 재시작해 프롬프트에서도 즉시 빠진다.
  */
+/**
+ * 앱 목록 (#81) — 명부(registry)의 앱마다 토글 한 줄 + 앱이 가져온 설정 패널.
+ * 끄기는 지우기가 아니다: 상태는 남고 화면·도구만 물러난다 — 실험 기능의 예의.
+ */
+function AppsSettings() {
+  const apps = useStore((s) => s.apps)
+  const ensure = useStore((s) => s.ensureAppState)
+  const setEnabled = useStore((s) => s.setAppEnabled)
+  useEffect(() => {
+    for (const a of APPS) void ensure(a.id)
+  }, [ensure])
+  return (
+    <section data-testid="settings-apps">
+      <p className="text-[11px] leading-relaxed text-slate">
+        Experimental surfaces built on the app layer. Turning one off hides its UI and tools —
+        its data stays until the app itself is removed.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {APPS.map((a) => {
+          const enabled = apps[a.id]?.enabled ?? true
+          return (
+            <li key={a.id} className="rounded border border-edge bg-panel px-3 py-2">
+              <label className="flex cursor-pointer items-center gap-2 text-[12px] text-chalk" data-testid={`app-toggle-${a.id}`}>
+                <input
+                  type="checkbox"
+                  className="accent-ash"
+                  checked={enabled}
+                  onChange={(e) => void setEnabled(a.id, e.target.checked)}
+                />
+                <span>{a.title}</span>
+                <span className="readout ml-auto text-[10px] text-slate">{a.id}</span>
+              </label>
+              {enabled && a.settingsPanel && (
+                <div className="mt-2 border-t border-edge pt-2">
+                  <a.settingsPanel />
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 function OrchestratorSkills() {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)

@@ -470,6 +470,25 @@ export class MockPlatform implements Platform {
   /** 불러오기를 고른 세션의 이전 대화 (externalId → 줄 목록) */
   externalHistory = new Map<string, { role: 'user' | 'assistant'; text: string }[]>()
 
+  /** 앱 상태 (#81) — 목의 디스크는 메모리다. 실물과 같은 규칙: 쓰면 방송한다 */
+  appDocs = new Map<string, unknown>()
+  appDisabled = new Set<string>()
+  readonly apps = {
+    state: async (appId: string) => ({
+      doc: this.appDocs.get(appId) ?? null,
+      enabled: !this.appDisabled.has(appId),
+    }),
+    setState: async (appId: string, doc: unknown) => {
+      this.appDocs.set(appId, doc)
+      this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
+    },
+    setEnabled: async (appId: string, enabled: boolean) => {
+      if (enabled) this.appDisabled.delete(appId)
+      else this.appDisabled.add(appId)
+      this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
+    },
+  }
+
   readonly agents: AgentPort = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params

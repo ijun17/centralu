@@ -258,6 +258,19 @@ export async function runOrchestratorTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolOutput> {
+  /*
+   * 앱 도구 (#81) — 접두로 라우팅하지 않고 등록 명부로 찾는다: 접두 규칙은
+   * 사람을 위한 이름 규약이고, 판정의 정본은 명부다. 실행 시점에 enabled를
+   * 다시 묻는다 — 노출은 스폰 때 굳지만 꺼진 앱의 손은 즉시 멈춰야 한다.
+   */
+  const app = appToolFor(name)
+  if (app) {
+    if (!app.enabled()) return { text: `이 도구의 앱이 꺼져 있습니다: ${name}`, isError: true }
+    const parsed = app.schema.safeParse(args)
+    if (!parsed.success) return { text: `잘못된 인자: ${parsed.error.message}`, isError: true }
+    return app.run(parsed.data as Record<string, unknown>)
+  }
+
   if (name === 'list_sessions') {
     const list = await tools.listSessions()
     if (list.length === 0) return { text: '관리 중인 세션이 없습니다.' }
@@ -454,18 +467,62 @@ export async function runOrchestratorTool(
 /** 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합 */
 export type ToolProfile = 'orchestrator' | 'manager'
 
+/**
+ * 앱이 등록하는 오케스트레이터 도구 (#81).
+ *
+ * 정의가 한 곳이어야 하는 이유는 코어 도구와 같다: Claude는 인프로세스 MCP로,
+ * Codex는 다리로 **같은 목록**을 봐야 한다. 앱 도구는 정적 배열 대신 레지스트리로
+ * 들어온다 — 이름은 반드시 `<appId>_` 접두를 갖고, run은 등록 시점에 앱의
+ * HostAppContext에 바인딩돼 온다. enabled는 호출 시점에 묻는다: 스키마 노출은
+ * 세션 스폰 때 굳지만(살아 있는 세션의 도구 목록은 안 변한다), 실행은 꺼진 앱을
+ * 즉시 거절해야 한다.
+ */
+export type AppToolEntry = {
+  name: string
+  description: string
+  schema: z.ZodObject<z.ZodRawShape>
+  profiles: readonly ToolProfile[]
+  enabled(): boolean
+  run(args: Record<string, unknown>): Promise<ToolOutput>
+}
+
+let appTools: readonly AppToolEntry[] = []
+
+/** host 기동 시 한 번 — 테스트는 다시 불러 갈아끼운다 */
+export function registerAppTools(entries: readonly AppToolEntry[]): void {
+  appTools = entries
+}
+
+function appToolFor(name: string): AppToolEntry | undefined {
+  return appTools.find((t) => t.name === name)
+}
+
 /** 이 묶음이 허용하는 도구인가 — 노출(schemas)과 실행(run) 둘 다 이걸로 판정한다 */
 export function profileAllows(profile: ToolProfile, name: string): boolean {
+  const app = appToolFor(name)
+  if (app) return app.profiles.includes(profile)
   if (profile === 'orchestrator') return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name)
   return (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
+}
+
+/** 지금 켜져 있고 이 묶음에 허용된 앱 도구들 — MCP·다리·스키마가 같은 목록을 쓴다 */
+export function appToolEntries(profile: ToolProfile): AppToolEntry[] {
+  return appTools.filter((t) => t.enabled() && t.profiles.includes(profile))
 }
 
 export function orchestratorToolSchemas(
   profile: ToolProfile = 'orchestrator',
 ): { name: string; description: string; inputSchema: unknown }[] {
-  return ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: z.toJSONSchema(t.schema),
-  }))
+  return [
+    ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: z.toJSONSchema(t.schema),
+    })),
+    ...appToolEntries(profile).map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: z.toJSONSchema(t.schema),
+    })),
+  ]
 }

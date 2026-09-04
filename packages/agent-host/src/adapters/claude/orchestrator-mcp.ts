@@ -4,6 +4,7 @@ import {
   MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
+  appToolEntries,
   profileAllows,
   runOrchestratorTool,
   type ToolProfile,
@@ -47,8 +48,12 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
      */
     alwaysLoad: true,
     instructions: profile === 'manager' ? MANAGER_INSTRUCTIONS : ORCHESTRATOR_INSTRUCTIONS,
-    // 묶음이 허용하는 것만 노출한다 (#69) — 실행 쪽도 같은 판정을 한 번 더 한다
-    tools: ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) =>
+    // 묶음이 허용하는 것만 노출한다 (#69) — 실행 쪽도 같은 판정을 한 번 더 한다.
+    // 앱 도구(#81)도 같은 목록에 합류한다: 실행은 어차피 runOrchestratorTool이 명부로 라우팅한다
+    tools: [
+      ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)),
+      ...appToolEntries(profile),
+    ].map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) => {
         const r = await runOrchestratorTool(tools, t.name, args)
         return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }

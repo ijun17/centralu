@@ -708,6 +708,22 @@ export const RpcMethods = {
    * stdio 서버만 물릴 수 있어서(HTTP는 실측에서 안 붙었다) 다리가 필요하고,
    * 다리는 판단을 하지 않는다 — 이름과 인자만 넘기고 규칙은 전부 host에 남는다.
    */
+  /**
+   * 앱 상태 (#81). 앱마다 JSON 문서 하나 + 켜짐 여부 — 앱별 프로토콜을 만들지 않는다.
+   * 문서의 의미는 앱만 알고, 코어·프로토콜은 운반만 한다.
+   */
+  'apps.state': {
+    params: z.object({ appId: z.string() }),
+    result: z.object({ doc: z.unknown().nullable(), enabled: z.boolean() }),
+  },
+  'apps.setState': {
+    params: z.object({ appId: z.string(), doc: z.unknown() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  'apps.setEnabled': {
+    params: z.object({ appId: z.string(), enabled: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: z.string().optional() }),

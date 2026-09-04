@@ -770,6 +770,38 @@ describe('그리드 세션 예열', () => {
  * 죽는 세션이 쓴 글이 새 세션의 첫 메시지가 되고, 이름·설정이 이어지고,
  * 기존 세션은 원본까지 지워진다. 파괴는 맨 끝 — 실패하면 아무것도 안 지워진다.
  */
+/**
+ * 앱 상태 (#81): 스토어는 앱 목록을 모른다 — 항목은 ensure(첫 사용)와
+ * app_state_changed 방송으로만 생긴다. 문서의 의미는 앱만 안다.
+ */
+describe('앱 상태 (#81)', () => {
+  it('ensure가 불러오고, 방송이 다시 읽게 하고, setAppDoc은 화면 먼저다', async () => {
+    const mock = new MockPlatform()
+    mock.appDocs.set('control', { notifies: [{ id: 'n1', text: '첫 알림', ts: 1 }] })
+    await useStore.getState().attach(mock)
+
+    // 첫 사용: ensure가 채운다
+    await useStore.getState().ensureAppState('control')
+    expect((useStore.getState().apps['control']?.doc as { notifies: unknown[] }).notifies).toHaveLength(1)
+
+    // host 쪽 변경은 방송으로 온다 — 스토어는 다시 읽는다
+    mock.appDocs.set('control', { notifies: [] })
+    mock.emit({ type: 'app_state_changed', appId: 'control' } as NormalizedEvent)
+    await vi.waitFor(() => {
+      expect((useStore.getState().apps['control']?.doc as { notifies: unknown[] }).notifies).toHaveLength(0)
+    })
+
+    // UI 쪽 변경은 화면 먼저, 저장이 뒤따른다
+    await useStore.getState().setAppDoc('control', { notifies: [], metrics: { replies: 1 } })
+    expect(mock.appDocs.get('control')).toMatchObject({ metrics: { replies: 1 } })
+
+    // 토글도 같은 창구
+    await useStore.getState().setAppEnabled('control', false)
+    expect(useStore.getState().apps['control']?.enabled).toBe(false)
+    expect(mock.appDisabled.has('control')).toBe(true)
+  })
+})
+
 describe('인수인계하고 새로 시작', () => {
   it('글을 받아 새 세션을 만들고 이름을 물려주고 원본까지 지운다', async () => {
     const mock = new MockPlatform()

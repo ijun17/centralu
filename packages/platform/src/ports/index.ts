@@ -447,8 +447,19 @@ export interface CommandRunPort {
   resize(projectId: string, command: string, cols: number, rows: number): Promise<void>
 }
 
+/**
+ * 앱 상태 창구 (#81) — 앱마다 JSON 문서 하나 + 켜짐 여부. 앱별 포트를 만들지 않는다:
+ * 문서의 의미는 앱만 알고, 이 창구는 운반만 한다.
+ */
+export interface AppsPort {
+  state(appId: string): Promise<{ doc: unknown; enabled: boolean }>
+  setState(appId: string, doc: unknown): Promise<void>
+  setEnabled(appId: string, enabled: boolean): Promise<void>
+}
+
 export interface Platform {
   agents: AgentPort
+  apps: AppsPort
   projects: ProjectPort
   system: SystemPort
   git: GitPort
