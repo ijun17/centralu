@@ -6834,6 +6834,18 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await page.getByTestId('rail-notify-dismiss-n1').click()
   await expect(page.getByTestId('rail-notify-n1')).toHaveCount(0)
 
+  // 폭 조절 — 왼 모서리 끌기, 더블클릭 = 기본 폭. 보는 방식이라 워크스페이스에 남는다
+  const railBox = async () => (await page.getByTestId('app-rails').boundingBox())!
+  const before = (await railBox()).width
+  const handle = (await page.getByTestId('rail-resize').boundingBox())!
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 100)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + handle.width / 2 - 120, handle.y + 100)
+  await page.mouse.up()
+  expect((await railBox()).width).toBeGreaterThan(before + 60)
+  await page.getByTestId('rail-resize').dblclick()
+  expect(Math.abs((await railBox()).width - before)).toBeLessThan(4)
+
   // 토글 오프 = 레일이 흔적 없이 물러난다 (지워지는 게 아니라)
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')

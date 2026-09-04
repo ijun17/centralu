@@ -362,6 +362,8 @@ export type WorkspaceSnapshot = {
   panelSplit?: number
   /** 증거 패널 폭(px) */
   panelWidth?: number
+  /** 앱 레일 폭(px) (#81) */
+  railWidth?: number
   /** 세션 목록 폭(px) */
   sidebarWidth?: number
   /** 전체 글자 크기 단계 (TEXT_SCALES 인덱스, 0..4) — 보는 방식이라 여기 실린다 */

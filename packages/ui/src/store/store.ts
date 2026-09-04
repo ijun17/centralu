@@ -95,6 +95,11 @@ export type Draft = { text: string; attachments: ChatAttachment[] }
 export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
 
 /** 증거 패널 폭의 한계. 좁으면 경로가, 넓으면 대화가 죽는다 */
+/** 관제 레일 폭 (#81). 하한은 줄 안 즉답(버튼 둘+입력)이 안 부러지는 폭, 상한은 챗을 안 삼키는 폭 */
+export const RAIL_MIN = 220
+export const RAIL_MAX = 520
+export const RAIL_DEFAULT = 288
+
 export const PANEL_MIN = 260
 export const PANEL_MAX = 900
 export const PANEL_DEFAULT = 340
@@ -340,6 +345,9 @@ export type AppState = {
    * 항목은 앱의 useAppState가 처음 쓸 때(ensure) 또는 방송(app_state_changed)으로 생긴다.
    */
   apps: Record<string, { doc: unknown; enabled: boolean }>
+  /** 앱 레일 슬롯의 폭 (#81) — 슬롯의 기하는 코어의 것이고(내용만 앱의 것), 보는 방식이라 워크스페이스에 실린다 */
+  railWidth: number
+  setRailWidth(px: number): void
   ensureAppState(appId: string): Promise<void>
   refreshAppState(appId: string): Promise<void>
   setAppDoc(appId: string, doc: unknown): Promise<void>
@@ -994,6 +1002,7 @@ export const useStore = create<AppState>((set, get) => ({
   worktreeProposals: [],
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
   apps: {} as Record<string, { doc: unknown; enabled: boolean }>,
+  railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
   resuming: {},
@@ -1199,6 +1208,7 @@ export const useStore = create<AppState>((set, get) => ({
         }
         if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
         if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
+        if (typeof snap.railWidth === 'number') get().setRailWidth(snap.railWidth)
         const savedPolicy = (snap as { notifyPolicy?: NotifyPolicy }).notifyPolicy
         if (savedPolicy) set({ notifyPolicy: savedPolicy })
         // Whether the tree shows ignored files is a way of looking, so it comes back with
@@ -1261,6 +1271,7 @@ export const useStore = create<AppState>((set, get) => ({
         panelSplit: s.panelSplit,
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
+        railWidth: s.railWidth,
         notifyPolicy: s.notifyPolicy,
         showIgnored: s.showIgnored,
         textScale: s.textScale,
@@ -2408,6 +2419,13 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
     }
+  },
+
+  setRailWidth(px) {
+    const clamped = Math.min(RAIL_MAX, Math.max(RAIL_MIN, px))
+    if (clamped === get().railWidth) return
+    set({ railWidth: clamped })
+    get().saveWorkspace()
   },
 
   async ensureAppState(appId) {

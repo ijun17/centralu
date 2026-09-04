@@ -3,6 +3,8 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
 import { APPS } from '../../apps/registry.js'
+import { RAIL_DEFAULT, RAIL_MAX, RAIL_MIN } from '../../store/store.js'
+import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 
 /**
  * 오케스트레이터 화면 — **말로 관제**.
@@ -148,16 +150,37 @@ export function OrchestratorView() {
 function AppRails() {
   const apps = useStore((s) => s.apps)
   const ensure = useStore((s) => s.ensureAppState)
+  const railWidth = useStore((s) => s.railWidth)
+  const setRailWidth = useStore((s) => s.setRailWidth)
   useEffect(() => {
     for (const a of APPS) if (a.railPanel) void ensure(a.id)
   }, [ensure])
+  const mounted = APPS.filter((a) => a.railPanel && (apps[a.id]?.enabled ?? true))
+  if (mounted.length === 0) return null
+  /*
+   * 폭은 슬롯(코어)의 기하다 — 내용은 앱의 것이지만, 얼마나 차지하는지는 화면의
+   * 일이라 워크스페이스에 실린다. 증거 패널과 같은 손잡이 문법: 왼 모서리 끌기,
+   * 더블클릭 = 기본 폭.
+   */
   return (
-    <>
-      {APPS.filter((a) => a.railPanel && (apps[a.id]?.enabled ?? true)).map((a) => {
+    <div
+      className="relative flex shrink-0 border-l border-edge"
+      style={{ width: `${railWidth}px` }}
+      data-testid="app-rails"
+    >
+      <ResizeHandle
+        side="left"
+        min={RAIL_MIN}
+        max={RAIL_MAX}
+        onResize={setRailWidth}
+        onReset={() => setRailWidth(RAIL_DEFAULT)}
+        testId="rail-resize"
+      />
+      {mounted.map((a) => {
         const Rail = a.railPanel!
         return <Rail key={a.id} />
       })}
-    </>
+    </div>
   )
 }
 

@@ -51,7 +51,8 @@ export function ControlRail() {
 
   return (
     <aside
-      className="flex w-72 shrink-0 flex-col overflow-y-auto border-l border-edge bg-void"
+      // 폭·테두리는 슬롯(AppRails)의 것 — 레일은 내용만 채운다 (#81 소유권 경계)
+      className="flex w-full min-w-0 flex-col overflow-y-auto bg-void"
       data-testid="control-rail"
     >
       {/* 기계가 사람을 지목해 부른 것들 — 세션 상태로는 안 드러나는 호출 (control_notify) */}
