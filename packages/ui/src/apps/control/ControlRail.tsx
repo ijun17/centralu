@@ -27,7 +27,18 @@ import {
  */
 
 type Notify = { id: string; text: string; sessionId?: string; priority?: 'high' | 'normal'; ts: number }
-type ControlDoc = { notifies?: Notify[] }
+export type ControlDoc = { notifies?: Notify[]; metrics?: Record<string, number> }
+
+/**
+ * 판정 카운터 (#80: "계속 쓰는가"는 감이 아니라 숫자) — 줄 안 즉답과 레일 경유
+ * 진입을 센다. 같은 문서를 host(notify 추가)와 나눠 쓰므로 이론상 마지막-쓰기-승리
+ * 경합이 있다 — 둘 다 드물어 창이 몇 ms고, 잃는 것은 카운트 1이지 데이터가 아니다.
+ */
+export function bumpMetric(doc: ControlDoc | null, key: 'inlineReplies' | 'railOpens'): void {
+  const metrics = { ...(doc?.metrics ?? {}) }
+  metrics[key] = (metrics[key] ?? 0) + 1
+  setAppState('control', { ...(doc ?? {}), metrics })
+}
 
 export function ControlRail() {
   // 기다린 시간(waitingMs)이 흐르게 — 5초면 충분하다 (초시계가 아니라 감각이다)
@@ -145,8 +156,10 @@ function ago(ms: number): string {
  */
 function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; unread: boolean; s?: SessionSummary }) {
   const [text, setText] = useState('')
+  const [showDiff, setShowDiff] = useState(false)
   // 말이 정본, preview는 대화가 안 실린 세션의 물러섬 (RunningRow와 같은 규칙)
   const words = useLastWords(id)
+  const doc = useAppState<ControlDoc>('control')
   if (!s) return null
 
   const approval = s.pendingApproval
@@ -155,7 +168,13 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
 
   return (
     <div className="mt-2" data-testid={`rail-turn-${id}`}>
-      <button className="flex w-full items-baseline gap-1.5 text-left" onClick={() => focusSession(id)}>
+      <button
+        className="flex w-full items-baseline gap-1.5 text-left"
+        onClick={() => {
+          bumpMetric(doc, 'railOpens')
+          focusSession(id)
+        }}
+      >
         <span className={`min-w-0 flex-1 truncate text-[11px] ${unread ? 'text-chalk' : 'text-ash'}`}>{s.name}</span>
         <span className="readout shrink-0 text-[9px] text-slate">{ago(waitingMs)}</span>
       </button>
@@ -169,21 +188,45 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
                 ? approval.detail.path
                 : 'approval requested'}
           </p>
+          {/* diff는 줄에서 판단의 재료다 — 세션을 열지 않고 승인하려면 무엇이 바뀌는지 보여야 한다 */}
+          {approval.detail.kind === 'file_edit' && showDiff && (
+            <pre
+              className="readout mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all rounded border border-edge bg-panel p-1.5 text-[9px] leading-snug text-ash"
+              data-testid={`rail-diff-${id}`}
+            >
+              {approval.detail.diffPreview}
+            </pre>
+          )}
           <div className="mt-1 flex gap-1.5">
             <button
               className="rounded border border-edge bg-panel px-2 py-0.5 text-[10px] text-chalk hover:border-graphite"
-              onClick={() => respondApproval(id, approval.requestId, 'allow')}
+              onClick={() => {
+                bumpMetric(doc, 'inlineReplies')
+                respondApproval(id, approval.requestId, 'allow')
+              }}
               data-testid={`rail-approve-${id}`}
             >
               Approve
             </button>
             <button
               className="rounded px-2 py-0.5 text-[10px] text-slate hover:text-chalk"
-              onClick={() => respondApproval(id, approval.requestId, 'deny')}
+              onClick={() => {
+                bumpMetric(doc, 'inlineReplies')
+                respondApproval(id, approval.requestId, 'deny')
+              }}
               data-testid={`rail-deny-${id}`}
             >
               Deny
             </button>
+            {approval.detail.kind === 'file_edit' && (
+              <button
+                className="rounded px-2 py-0.5 text-[10px] text-slate hover:text-chalk"
+                onClick={() => setShowDiff((v) => !v)}
+                data-testid={`rail-diff-toggle-${id}`}
+              >
+                {showDiff ? 'Hide diff' : 'Diff'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -198,7 +241,10 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
                 <button
                   key={o.label}
                   className="rounded border border-edge bg-panel px-1.5 py-0.5 text-[10px] text-chalk hover:border-graphite"
-                  onClick={() => answerQuestion(id, questionReq, [{ question: question.question, answers: [o.label] }])}
+                  onClick={() => {
+                    bumpMetric(doc, 'inlineReplies')
+                    answerQuestion(id, questionReq, [{ question: question.question, answers: [o.label] }])
+                  }}
                   data-testid={`rail-option-${id}-${o.label}`}
                 >
                   {o.label}
@@ -227,6 +273,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.nativeEvent.isComposing && text.trim()) {
+              bumpMetric(doc, 'inlineReplies')
               send(id, text.trim())
               setText('')
             }

@@ -6835,6 +6835,11 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await expect(page.getByTestId(`rail-running-${id}`)).toContainText('정렬 문제를 고치는 중입니다')
   await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Bash: pnpm verify')
 
+  // 즉답은 판정 숫자로 남는다 — "계속 쓰는가"는 감이 아니라 숫자다
+  await expect
+    .poll(() => page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.metrics ?? {}).inlineReplies ?? 0))
+    .toBeGreaterThan(0)
+
   // 기계의 알림 — 사람이 읽고 지운다
   await page.evaluate(() => {
     void (window as any).__store.getState().setAppDoc('control', {
