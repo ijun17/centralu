@@ -27,7 +27,8 @@ import {
  */
 
 type Notify = { id: string; text: string; sessionId?: string; priority?: 'high' | 'normal'; ts: number }
-export type ControlDoc = { notifies?: Notify[]; metrics?: Record<string, number> }
+export type ControlWatch = { id: string; pattern: string; sessionId?: string }
+export type ControlDoc = { notifies?: Notify[]; metrics?: Record<string, number>; watches?: ControlWatch[] }
 
 /**
  * 판정 카운터 (#80: "계속 쓰는가"는 감이 아니라 숫자) — 줄 안 즉답과 레일 경유

@@ -22,7 +22,17 @@ export type ControlNotify = {
   ts: number
 }
 
-export type ControlDoc = { notifies: ControlNotify[]; metrics?: Record<string, number> }
+/**
+ * 선언형 감시 (#80 체크포인트 v1 — 알림만, 멈춤 없음).
+ *
+ * bypass로 도는 세션은 도중에 멈출 수 없다 — 승인 요청은 도구 쪽 권한 모드가
+ * 만드는 것이라서. 그래서 v1의 계약은 "지켜봐 주고, 걸리면 즉시 부른다"다:
+ * 사람이 패턴을 선언하면 host의 관찰 훅이 툴 호출마다 대조하고, 걸린 순간
+ * 레일 알림(high)이 선다. 멈춤은 프리셋 연동이 생기면 그때의 일이다.
+ */
+export type ControlWatch = { id: string; pattern: string; sessionId?: string }
+
+export type ControlDoc = { notifies: ControlNotify[]; metrics?: Record<string, number>; watches?: ControlWatch[] }
 
 export const controlHostApp: HostAppModule = {
   id: 'control',
@@ -61,5 +71,34 @@ export const controlHostApp: HostAppModule = {
       ctx.emitChanged()
       return { text: '관제 레일에 알림을 올렸습니다. 지우는 것은 사람입니다.' }
     },
+  },
+
+  observe(ctx, e) {
+    if (e.type !== 'tool_call' || !e.sessionId) return
+    const doc = ctx.kv.get<ControlDoc>('doc')
+    const watches = doc?.watches ?? []
+    if (watches.length === 0) return // 감시가 없으면 이 훅은 공짜여야 한다 — kv 읽기 하나로 끝
+    const line = `${e.summary.tool}: ${e.summary.title} ${(e.summary.paths ?? []).join(' ')}`.toLowerCase()
+    const hits = watches.filter(
+      (w) =>
+        w.pattern.trim() &&
+        (!w.sessionId || w.sessionId === e.sessionId) &&
+        line.includes(w.pattern.trim().toLowerCase()),
+    )
+    if (hits.length === 0) return
+    const name = ctx.sessionSummary(e.sessionId)?.name ?? e.sessionId
+    const notifies = doc?.notifies ?? []
+    for (const w of hits) {
+      notifies.push({
+        id: randomUUID(),
+        text: `⏱ ${w.pattern} — ${name}: ${e.summary.title}`,
+        sessionId: e.sessionId,
+        priority: 'high',
+        ts: Date.now(),
+      })
+    }
+    const next: ControlDoc = { ...(doc ?? { notifies: [] }), notifies: notifies.slice(-NOTIFY_CAP) }
+    ctx.kv.set('doc', next)
+    ctx.emitChanged()
   },
 }

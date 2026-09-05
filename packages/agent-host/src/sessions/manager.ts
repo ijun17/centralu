@@ -231,6 +231,25 @@ export class SessionManager {
     private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
   ) {
     /*
+     * 앱 관찰 훅 (#81) — 방송을 가로채 켜진 앱에 흘린다. 규칙(무엇에 반응할지)은
+     * 앱의 의견이고 관찰 자체는 물리라 여기(코어)가 배선한다. app_state_changed는
+     * 앱 자신의 산물이라 되돌리지 않는다 — 앱이 알림을 쓰고 그 방송을 다시 관찰하면
+     * 고리가 된다. 앱의 실패는 방송을 막지 못한다: 삼키고 기록한다.
+     */
+    const rawEmit = this.emit
+    this.emit = (e) => {
+      rawEmit(e)
+      if (e.type === 'app_state_changed') return
+      for (const app of HOST_APPS) {
+        if (!app.observe || !this.appEnabled(app.id)) continue
+        try {
+          app.observe(this.appContext(app.id), e)
+        } catch (err) {
+          console.error(`[apps] ${app.id} observe failed:`, err)
+        }
+      }
+    }
+    /*
      * 기동 시 상태를 **있는 그대로 되살리지 않는다.**
      *
      * host가 죽으면 세션 프로세스도 함께 죽는다. 그런데 DB에는 마지막 상태가

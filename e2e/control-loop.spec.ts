@@ -6867,6 +6867,17 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
   await page.getByTestId('settings-tab-apps').click()
+  // 감시 선언 편집기 (#80 체크포인트 v1) — 패턴이 문서에 남는다 (판정은 host 관찰 훅의 몫)
+  await page.getByTestId('watch-pattern').fill('git commit')
+  await page.getByTestId('watch-add').click()
+  await expect
+    .poll(() => page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length))
+    .toBe(1)
+  await page.locator('[data-testid^="watch-remove-"]').click()
+  await expect
+    .poll(() => page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length))
+    .toBe(0)
+
   await page.getByTestId('app-toggle-control').locator('input').uncheck()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('control-rail')).toHaveCount(0)

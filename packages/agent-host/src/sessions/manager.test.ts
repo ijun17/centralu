@@ -3035,3 +3035,33 @@ describe('앱 계층 (#81) — 관제 앱의 control_notify', () => {
     expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'control_notify')).toBe(true)
   })
 })
+
+describe('앱 관찰 훅 (#81) — 감시가 방송에 반응한다', () => {
+  it('감시 패턴에 걸린 툴 호출이 레일 알림으로 선다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    mgr.setAppDoc('control', { notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }] })
+
+    // 어댑터가 이벤트를 흘리는 그 길로 — onEvent → (감싼) emit → 관찰 훅
+    const sink = (adapter.last as unknown as { emit: (e: NormalizedEvent) => void }).emit
+    sink({
+      type: 'tool_call', sessionId: s.id, callId: 'c1',
+      summary: { tool: 'Bash', title: 'git commit -m "done"', readOnly: false, paths: [] },
+    } as NormalizedEvent)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const doc = mgr.appState('control').doc as { notifies: { text: string; priority?: string }[] }
+    expect(doc.notifies).toHaveLength(1)
+    expect(doc.notifies[0]!.priority).toBe('high')
+    expect(events.some((e) => e.type === 'app_state_changed' && e.appId === 'control')).toBe(true)
+
+    // 앱을 끄면 관찰도 멈춘다
+    mgr.setAppEnabled('control', false)
+    sink({
+      type: 'tool_call', sessionId: s.id, callId: 'c2',
+      summary: { tool: 'Bash', title: 'git commit again', readOnly: false, paths: [] },
+    } as NormalizedEvent)
+    await new Promise((r) => setTimeout(r, 10))
+    expect((mgr.appState('control').doc as { notifies: unknown[] }).notifies).toHaveLength(1)
+  })
+})
