@@ -250,12 +250,12 @@ function OrchestratorButton() {
         onClick={() => void open()}
         aria-pressed={active}
         data-testid="orchestrator-button"
-        title="Experimental — one conversation that can direct your sessions. Expect rough edges."
+        title="Evolving — one conversation that directs your sessions, and it keeps gaining new abilities. Expect it to change."
       >
         <OrchestratorIcon />
         <span className="truncate font-medium tracking-tight">Orchestrator</span>
         <span className="shrink-0 text-[10px] text-slate" data-testid="orchestrator-experimental">
-          Experimental
+          Evolving
         </span>
       </button>
     </div>

@@ -4669,7 +4669,9 @@ test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말�
 
   const mark = page.getByTestId('orchestrator-experimental')
   await expect(mark).toBeVisible()
-  await expect(mark).toHaveText('Experimental')
+  // 'Experimental'(경고) → 'Evolving'(정체성) (도그푸딩 2026-09-05): 스킬·MCP·앱을
+  // 스스로 얻는 기능이라 "깨질 수 있음"보다 "자라는 중"이 진실에 가깝다
+  await expect(mark).toHaveText('Evolving')
 
   const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
   const style = (testId: string, prop: string) =>
@@ -4691,7 +4693,7 @@ test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말�
    */
   await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSidebarWidth(180))
   await expect(mark).toBeVisible()
-  await expect(mark).toHaveText('Experimental')
+  await expect(mark).toHaveText('Evolving')
 })
 
 /**
