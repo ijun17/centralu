@@ -196,9 +196,16 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
       )}
 
       {!approval && !question && s.state === 'waiting_input' && (
-        <input
-          className="mt-1 w-full rounded border border-edge bg-panel px-1.5 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-          placeholder={s.preview ? s.preview.slice(0, 40) : 'Reply…'}
+        <>
+          {/*
+            마지막 활동은 자기 줄에 — placeholder에 넣었더니 "제안된 답장"처럼 읽혔다
+            (도그푸딩 2026-09-05: 입력창 안의 `pnpm verify`가 "이게 정상이야?"를 낳았다).
+            입력창은 언제나 빈 종이처럼 보여야 한다.
+          */}
+          {s.preview && <p className="mt-1 truncate text-[10px] text-slate">{s.preview}</p>}
+          <input
+            className="mt-1 w-full rounded border border-edge bg-panel px-1.5 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+            placeholder="Reply…"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -208,7 +215,8 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
             }
           }}
           data-testid={`rail-input-${id}`}
-        />
+          />
+        </>
       )}
     </div>
   )
