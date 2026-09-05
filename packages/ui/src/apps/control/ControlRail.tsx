@@ -7,6 +7,8 @@ import {
   setAppState,
   useAppState,
   useInbox,
+  useLastWords,
+  useRunningTool,
   useSessionSummaries,
   type SessionSummary,
 } from '../api.js'
@@ -101,18 +103,31 @@ export function ControlRail() {
         <h2 className="text-[10px] uppercase tracking-[0.12em] text-slate">Running {running.length > 0 && running.length}</h2>
         {running.length === 0 && <p className="mt-1.5 text-[11px] text-slate">No sessions working.</p>}
         {running.map((s) => (
-          <button
-            key={s.id}
-            className="mt-1.5 block w-full text-left"
-            onClick={() => focusSession(s.id)}
-            data-testid={`rail-running-${s.id}`}
-          >
-            <span className="block truncate text-[11px] text-ash">{s.name}</span>
-            <span className="block truncate text-[10px] leading-snug text-slate">{s.preview || '…'}</span>
-          </button>
+          <RunningRow key={s.id} s={s} />
         ))}
       </section>
     </aside>
+  )
+}
+
+/**
+ * 진행 중 한 줄 — **서사(말)가 정본, 도구는 보조** (도그푸딩 2026-09-05).
+ * preview만 쓰면 툴 호출이 말을 덮어 "pnpm verify" 한 줄만 남는다 — 끼어들
+ * 타이밍은 도구 이름이 아니라 에이전트가 무슨 생각으로 가는지에서 읽힌다.
+ */
+function RunningRow({ s }: { s: SessionSummary }) {
+  const words = useLastWords(s.id)
+  const tool = useRunningTool(s.id)
+  return (
+    <button
+      className="mt-1.5 block w-full text-left"
+      onClick={() => focusSession(s.id)}
+      data-testid={`rail-running-${s.id}`}
+    >
+      <span className="block truncate text-[11px] text-ash">{s.name}</span>
+      <span className="block truncate text-[10px] leading-snug text-slate">{words ?? s.preview ?? '…'}</span>
+      {tool && <span className="readout block truncate text-[9px] text-slate/70">{tool}</span>}
+    </button>
   )
 }
 
@@ -130,6 +145,8 @@ function ago(ms: number): string {
  */
 function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; unread: boolean; s?: SessionSummary }) {
   const [text, setText] = useState('')
+  // 말이 정본, preview는 대화가 안 실린 세션의 물러섬 (RunningRow와 같은 규칙)
+  const words = useLastWords(id)
   if (!s) return null
 
   const approval = s.pendingApproval
@@ -202,7 +219,7 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
             (도그푸딩 2026-09-05: 입력창 안의 `pnpm verify`가 "이게 정상이야?"를 낳았다).
             입력창은 언제나 빈 종이처럼 보여야 한다.
           */}
-          {s.preview && <p className="mt-1 truncate text-[10px] text-slate">{s.preview}</p>}
+          {(words ?? s.preview) && <p className="mt-1 truncate text-[10px] text-slate">{words ?? s.preview}</p>}
           <input
             className="mt-1 w-full rounded border border-edge bg-panel px-1.5 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
             placeholder="Reply…"

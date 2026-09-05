@@ -6826,6 +6826,15 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
     .toBe('working')
 
+  // 진행 중 줄은 **말이 정본, 도구는 보조** — 툴 제목이 서사를 덮으면 맥락이 사라진다
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '정렬 문제를 고치는 중입니다' })
+    m.emit({ type: 'tool_call', sessionId: sid, callId: 'c9', summary: { tool: 'Bash', title: 'pnpm verify', readOnly: false, paths: [] } })
+  }, id)
+  await expect(page.getByTestId(`rail-running-${id}`)).toContainText('정렬 문제를 고치는 중입니다')
+  await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Bash: pnpm verify')
+
   // 기계의 알림 — 사람이 읽고 지운다
   await page.evaluate(() => {
     void (window as any).__store.getState().setAppDoc('control', {
