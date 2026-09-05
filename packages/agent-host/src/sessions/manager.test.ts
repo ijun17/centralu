@@ -99,6 +99,7 @@ class FakeAdapter implements AgentAdapter {
       return h
     }
     this.lastCwd = opts.cwd
+    this.lastOpts = opts
     this.lastOrchestratorTools = opts.orchestratorTools
     this.last = new FakeHandle(opts.sessionId, emit)
     /*
@@ -2408,7 +2409,7 @@ describe('재개는 만들어진 곳으로 돌아간다', () => {
       id: 'old', projectId: p.id, kind: 'worker', tool: 'claude', externalId: 'ext-1', name: '예전 세션',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null, serviceTier: null,
-      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, ...sessionLiveDefaults(),
+      permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, ...sessionLiveDefaults(),
     })
     expect(store.sessionCwd('old')).toBeNull()
 
@@ -2688,7 +2689,7 @@ describe('워크트리 세션의 매니저 (#69)', () => {
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
     serviceTier: null, permissionPreset: 'normal', importedFrom: null,
-    worktree: { path: `/tmp/wt/${id}`, branch: `centralu/${id}` }, parentSessionId: null,
+    worktree: { path: `/tmp/wt/${id}`, branch: `centralu/${id}` }, parentSessionId: null, scopeSessionIds: null, roleAppend: null,
     ...sessionLiveDefaults(), ...over,
   })
   const boot = () =>
@@ -3063,5 +3064,106 @@ describe('앱 관찰 훅 (#81) — 감시가 방송에 반응한다', () => {
     } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 10))
     expect((mgr.appState('control').doc as { notifies: unknown[] }).notifies).toHaveLength(1)
+  })
+})
+
+/**
+ * 조율 세션 (#80·#81) — 코어의 이름 없는 물리: 시야 허용 목록 + 역할문 박제.
+ * '업무·반장'이라는 의미는 앱의 것이고, 여기서 검사하는 것은 능력의 경계다.
+ */
+describe('조율 세션 — 시야가 잘린 오케스트레이터형 (#80·#81)', () => {
+  it('시야는 허용 목록이 전부고, 역할문은 스폰에 실리며, 구성원은 워커만이다', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    const b = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    const outsider = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+
+    const c = await mgr.createCoordinator({
+      name: '조율자', memberSessionIds: [a.id, b.id], roleAppend: '역할문: 걸러 들어라', tool: 'claude',
+    })
+    expect(c.kind).toBe('coordinator')
+    expect(c.scopeSessionIds).toEqual([a.id, b.id])
+    // 역할문이 스폰에 그대로 실렸다 (박제 → systemPromptAppend)
+    expect(adapter.lastOpts?.systemPromptAppend).toBe('역할문: 걸러 들어라')
+    expect(adapter.lastOpts?.toolProfile).toBe('scoped')
+
+    // 시야: 구성원만 보이고, 밖은 지시도 거절된다
+    const list = await mgr.runOrchestratorTool(c.id, 'list_sessions', {})
+    expect(list.text).toContain(a.id)
+    expect(list.text).toContain(b.id)
+    expect(list.text).not.toContain(outsider.id)
+    const denied = await mgr.runOrchestratorTool(c.id, 'send_to_session', { sessionId: outsider.id, text: 'x' })
+    expect(denied.isError).toBe(true)
+    expect(denied.text).toContain('구성원이 아닙니다')
+
+    // 깊이 1은 구조다: scoped 프로필에 세션 생성 도구가 없다
+    await expect(mgr.runOrchestratorTool(c.id, 'create_session', {})).rejects.toThrow(/이 세션의 도구가 아닙니다/)
+
+    // 구성원은 워커만 — 조율자가 조율자를 거느리면 깊이가 자란다
+    await expect(
+      mgr.createCoordinator({ name: 'x', memberSessionIds: [c.id], roleAppend: 'r', tool: 'claude' }),
+    ).rejects.toThrow(/워커 세션이어야/)
+  })
+
+  it('재기동을 넘긴다 — kind는 시야 관계에서 파생되고, 역할문은 되살 때 다시 입는다', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    const c = await mgr.createCoordinator({
+      name: '살아남는 조율자', memberSessionIds: [a.id], roleAppend: '박제된 역할', tool: 'claude',
+    })
+
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    const restarted = new SessionManager(store, adapters, () => {})
+    const row = restarted.listSessions().find((x) => x.id === c.id)!
+    expect(row.kind).toBe('coordinator') // 표식 열이 아니라 시야 관계에서 파생 (#13 교훈)
+    expect(row.scopeSessionIds).toEqual([a.id])
+
+    // 유니온 단언으로 대입한다 — 맨 null 대입은 TS가 이후 읽기를 null로 좁혀버린다 (resume이 채우는 걸 모른다)
+    adapter.lastOpts = null as CreateSessionOpts | null
+    await createRpcHandler(restarted, adapters)('agents.resumeSession', { sessionId: c.id })
+    expect(adapter.lastOpts?.systemPromptAppend).toBe('박제된 역할')
+    expect(adapter.lastOpts?.toolProfile).toBe('scoped')
+  })
+
+  it('관제 앱의 업무 생성 — 오케스트레이터의 도구 한 번으로 반장·보드·업무가 함께 선다', async () => {
+    const orc = await mgr.orchestrator()
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+
+    const r = await mgr.runOrchestratorTool(orc.id, 'control_create_task', {
+      title: '스킬 구현', goal: '스킬 X를 끝까지', memberSessionIds: [a.id],
+    })
+    expect(r.isError).not.toBe(true)
+
+    const doc = mgr.appState('control').doc as { tasks: { id: string; coordinatorId: string; status: string }[] }
+    expect(doc.tasks).toHaveLength(1)
+    const task = doc.tasks[0]!
+    const foreman = mgr.listSessions().find((s) => s.id === task.coordinatorId)!
+    expect(foreman.kind).toBe('coordinator')
+    expect(foreman.scopeSessionIds).toEqual([a.id])
+    expect(foreman.roleAppend).toContain('반장')
+    expect(foreman.roleAppend).toContain(task.id) // 역할문이 자기 업무 id를 안다
+
+    // 반장이 보드를 쓰고, 남(오케스트레이터 아닌 scoped)이 아니라서 허용된다
+    const upd = await mgr.runOrchestratorTool(task.coordinatorId, 'board_update', {
+      taskId: task.id, content: '# 진행: 1단계 완료',
+    })
+    expect(upd.isError).not.toBe(true)
+    const read = await mgr.runOrchestratorTool(task.coordinatorId, 'board_read', { taskId: task.id })
+    expect(read.text).toContain('1단계 완료')
+
+    // 마감 → 상태 done + 사람 레일에 완료 알림
+    const done = await mgr.runOrchestratorTool(task.coordinatorId, 'control_task_done', {
+      taskId: task.id, summary: '전부 통과',
+    })
+    expect(done.isError).not.toBe(true)
+    const after = mgr.appState('control').doc as { tasks: { status: string }[]; notifies: { text: string }[] }
+    expect(after.tasks[0]!.status).toBe('done')
+    expect(after.notifies.some((n) => n.text.includes('업무 완료') && n.text.includes('전부 통과'))).toBe(true)
+
+    // 반장은 업무를 못 만든다 — 노출도 실행도 막힌다 (깊이 1)
+    await expect(
+      mgr.runOrchestratorTool(task.coordinatorId, 'control_create_task', { title: 'x', goal: 'y', memberSessionIds: [a.id] }),
+    ).rejects.toThrow(/이 세션의 도구가 아닙니다/)
   })
 })

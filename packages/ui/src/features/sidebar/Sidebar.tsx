@@ -258,6 +258,39 @@ function OrchestratorButton() {
           Evolving
         </span>
       </button>
+      <CoordinatorRows />
+    </div>
+  )
+}
+
+/**
+ * 조율 세션들 (#80·#81 — kind 'coordinator'). **코어의 줄이다**: 앱(관제)이 의미를
+ * 입히지만, 세션은 코어 객체라 앱을 꺼도 여기 남아 닿을 수 있어야 한다 (강등 원칙).
+ * 프로젝트가 없으니 오케스트레이터 아래가 자리다.
+ */
+function CoordinatorRows() {
+  const sessions = useStore((s) => s.sessions)
+  const focused = useStore((s) => s.focusedSessionId)
+  const focusSession = useStore((s) => s.focusSession)
+  const coordinators = Object.values(sessions).filter((s) => s.kind === 'coordinator')
+  if (coordinators.length === 0) return null
+  return (
+    <div className="mt-1 space-y-0.5" data-testid="coordinator-rows">
+      {coordinators.map((s) => (
+        <button
+          key={s.id}
+          className={`flex w-full items-center gap-2 rounded border-l-2 py-1 pl-2.5 pr-2 text-left text-[12px] transition-colors ${
+            focused === s.id
+              ? 'border-l-ash bg-graphite/40 text-chalk'
+              : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+          }`}
+          onClick={() => focusSession(s.id)}
+          data-testid={`coordinator-row-${s.id}`}
+        >
+          <ToolMark tool={s.tool} state={s.state} />
+          <span className="truncate">{s.name}</span>
+        </button>
+      ))}
     </div>
   )
 }

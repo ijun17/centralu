@@ -6882,3 +6882,32 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('control-rail')).toHaveCount(0)
 })
+
+/*
+ * 업무 만들기 (#80 목적 2): 구성원을 고르면 반장이 서고, 사이드바·레일 양쪽에서 닿는다.
+ * 생성 로직 본체는 host 앱 도구(유닛이 덮는다) — 여기는 사람 경로의 배선을 확인한다.
+ */
+test('업무 만들기: 레일 다이얼로그 → 반장 세션 → 사이드바·레일에 선다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '구성원이 될 세션')
+  const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+
+  await page.getByTestId('orchestrator-button').click()
+  await page.getByTestId('rail-new-task').click()
+  await page.getByTestId('task-title').fill('스킬 구현')
+  await page.getByTestId('task-goal').fill('스킬 X를 끝까지')
+  await page.getByTestId(`task-member-${workerId}`).check()
+  await page.getByTestId('task-create').click()
+  await expect(page.getByTestId('new-task-dialog')).toBeHidden()
+
+  // 같은 문(control_create_task)을 지났다 — 사람 경로도 host 도구 하나다
+  const invoke = await page.evaluate(() => (window as any).__mock.lastInvoke)
+  expect(invoke.name).toBe('control_create_task')
+  expect(invoke.args.memberSessionIds).toEqual([workerId])
+
+  // 반장이 코어 객체로 선다: 사이드바(코어 줄)와 레일(앱 줄) 양쪽
+  await expect(page.locator('[data-testid^="coordinator-row-"]')).toContainText('스킬 구현')
+  await expect(page.getByTestId('rail-tasks')).toContainText('스킬 구현')
+  // 반장은 레일의 내 차례/진행 중에는 안 선다 — 메타 층은 Tasks 섹션의 몫
+  await expect(page.locator('[data-testid^="rail-turn-coord"]')).toHaveCount(0)
+})

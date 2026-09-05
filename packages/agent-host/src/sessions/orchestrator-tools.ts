@@ -257,6 +257,7 @@ export async function runOrchestratorTool(
   tools: OrchestratorTools,
   name: string,
   args: Record<string, unknown>,
+  caller: AppToolCaller = { sessionId: null, profile: 'human' },
 ): Promise<ToolOutput> {
   /*
    * 앱 도구 (#81) — 접두로 라우팅하지 않고 등록 명부로 찾는다: 접두 규칙은
@@ -268,7 +269,7 @@ export async function runOrchestratorTool(
     if (!app.enabled()) return { text: `이 도구의 앱이 꺼져 있습니다: ${name}`, isError: true }
     const parsed = app.schema.safeParse(args)
     if (!parsed.success) return { text: `잘못된 인자: ${parsed.error.message}`, isError: true }
-    return app.run(parsed.data as Record<string, unknown>)
+    return app.run(parsed.data as Record<string, unknown>, caller)
   }
 
   if (name === 'list_sessions') {
@@ -465,7 +466,27 @@ export async function runOrchestratorTool(
 
 /** 다리(별도 프로세스)가 tools/list에 쓸 수 있는 형태 */
 /** 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합 */
-export type ToolProfile = 'orchestrator' | 'manager'
+export type ToolProfile = 'orchestrator' | 'manager' | 'scoped'
+
+/**
+ * 시야가 잘린 조율 세션의 기본 도구 (#80·#81 물리). '업무'라는 말은 여기 없다 —
+ * 이 묶음은 "허용 목록 안의 세션만 보고 시킬 수 있다"는 능력일 뿐이고,
+ * 역할(반장·위원회…)은 앱이 roleAppend로 입힌다. 세션 생성 도구가 없는 것이
+ * 깊이 1의 구조적 보장이다: 조율자는 조율자를 만들 수 없다.
+ */
+export const SCOPED_TOOL_NAMES = [
+  'list_sessions',
+  'read_session',
+  'send_to_session',
+] as const satisfies readonly OrchestratorToolName[]
+
+/** 조율 세션의 MCP 안내 — 역할은 roleAppend가 입히므로 여기는 능력의 경계만 말한다 */
+export const SCOPED_INSTRUCTIONS = [
+  '너는 배정된 구성원 세션들만 보고 지시할 수 있는 조율 세션이다.',
+  'list_sessions에 보이는 것이 네 시야의 전부다 — 그 밖의 세션은 존재를 물을 수도 없다.',
+  '구성원에게 일을 시킬 때는 send_to_session, 결과 확인은 reportBack 또는 read_session.',
+  '세션을 만들거나 지울 수는 없다 — 그런 일이 필요하면 사람에게 보고한다.',
+].join('\n')
 
 /**
  * 앱이 등록하는 오케스트레이터 도구 (#81).
@@ -477,13 +498,16 @@ export type ToolProfile = 'orchestrator' | 'manager'
  * 세션 스폰 때 굳지만(살아 있는 세션의 도구 목록은 안 변한다), 실행은 꺼진 앱을
  * 즉시 거절해야 한다.
  */
+/** 앱 도구를 부른 주체 — sessionId=null은 사람(UI)이다. 앱이 자기 권한 판정에 쓴다 */
+export type AppToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
+
 export type AppToolEntry = {
   name: string
   description: string
   schema: z.ZodObject<z.ZodRawShape>
   profiles: readonly ToolProfile[]
   enabled(): boolean
-  run(args: Record<string, unknown>): Promise<ToolOutput>
+  run(args: Record<string, unknown>, caller: AppToolCaller): Promise<ToolOutput>
 }
 
 let appTools: readonly AppToolEntry[] = []
@@ -502,6 +526,7 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
   const app = appToolFor(name)
   if (app) return app.profiles.includes(profile)
   if (profile === 'orchestrator') return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name)
+  if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)
   return (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
 }
 

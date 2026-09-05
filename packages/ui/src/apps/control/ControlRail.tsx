@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   answerQuestion,
   focusSession,
+  invokeAppTool,
   respondApproval,
   send,
   setAppState,
@@ -28,7 +29,23 @@ import {
 
 type Notify = { id: string; text: string; sessionId?: string; priority?: 'high' | 'normal'; ts: number }
 export type ControlWatch = { id: string; pattern: string; sessionId?: string }
-export type ControlDoc = { notifies?: Notify[]; metrics?: Record<string, number>; watches?: ControlWatch[] }
+export type ControlTask = {
+  id: string
+  title: string
+  goal: string
+  members: string[]
+  coordinatorId: string
+  status: 'active' | 'done'
+  createdAt: number
+}
+export type ForemanSettings = { tool: 'claude' | 'codex'; model?: string; effort?: string }
+export type ControlDoc = {
+  notifies?: Notify[]
+  metrics?: Record<string, number>
+  watches?: ControlWatch[]
+  tasks?: ControlTask[]
+  foreman?: ForemanSettings
+}
 
 /**
  * 판정 카운터 (#80: "계속 쓰는가"는 감이 아니라 숫자) — 줄 안 즉답과 레일 경유
@@ -49,13 +66,16 @@ export function ControlRail() {
     return () => clearInterval(t)
   }, [])
 
+  const [creating, setCreating] = useState(false)
   const inbox = useInbox(now)
   const sessions = useSessionSummaries()
   const doc = useAppState<ControlDoc>('control')
 
-  // 오케스트레이터 자신은 뺀다 — 상주 대화라 늘 응답 대기고, 이 레일이 그 화면 안에 있다
-  const mine = inbox.filter((i) => sessions[i.id]?.kind !== 'orchestrator')
-  const running = Object.values(sessions).filter((s) => s.state === 'working' && s.kind !== 'orchestrator')
+  // 오케스트레이터(상주 대화)와 반장(메타 층 — Tasks 섹션의 몫)은 뺀다
+  const meta = (id: string) => sessions[id]?.kind === 'orchestrator' || sessions[id]?.kind === 'coordinator'
+  const mine = inbox.filter((i) => !meta(i.id))
+  const running = Object.values(sessions).filter((s) => s.state === 'working' && !meta(s.id))
+  const tasks = doc?.tasks ?? []
   const notifies = [...(doc?.notifies ?? [])].sort(
     (a, b) => Number(b.priority === 'high') - Number(a.priority === 'high') || b.ts - a.ts,
   )
@@ -109,6 +129,55 @@ export function ControlRail() {
           <TurnRow key={item.id} id={item.id} waitingMs={item.waitingMs} unread={item.unread} s={sessions[item.id]} />
         ))}
       </section>
+
+      {/* 업무 — 반장이 조율하는 다중 세션 묶음 (#80 목적 2). 사람은 버스에서 내려 심판석으로 */}
+      <section className="border-b border-edge px-3 py-2" data-testid="rail-tasks">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-[10px] uppercase tracking-[0.12em] text-slate">Tasks {tasks.length > 0 && tasks.filter((t) => t.status === 'active').length}</h2>
+          <button
+            className="text-[10px] text-slate hover:text-chalk"
+            onClick={() => setCreating(true)}
+            data-testid="rail-new-task"
+          >
+            + New task
+          </button>
+        </div>
+        {tasks
+          .filter((t) => t.status === 'active')
+          .map((t) => (
+            <button
+              key={t.id}
+              className="mt-1.5 block w-full text-left"
+              onClick={() => focusSession(t.coordinatorId)}
+              data-testid={`rail-task-${t.id}`}
+            >
+              <span className="block truncate text-[11px] text-ash">
+                {t.title} <span className="text-[9px] text-slate">· {t.members.length}명</span>
+              </span>
+              <span className="block truncate text-[10px] text-slate">
+                반장: {sessions[t.coordinatorId]?.state ?? 'gone'}
+              </span>
+            </button>
+          ))}
+        {tasks.some((t) => t.status === 'done') && (
+          <details className="mt-1.5">
+            <summary className="cursor-pointer text-[10px] text-slate">Done {tasks.filter((t) => t.status === 'done').length}</summary>
+            {tasks
+              .filter((t) => t.status === 'done')
+              .map((t) => (
+                <button
+                  key={t.id}
+                  className="mt-1 block w-full truncate text-left text-[10px] text-slate hover:text-chalk"
+                  onClick={() => focusSession(t.coordinatorId)}
+                >
+                  ✅ {t.title}
+                </button>
+              ))}
+          </details>
+        )}
+      </section>
+
+      {creating && <NewTaskDialog sessions={sessions} onClose={() => setCreating(false)} />}
 
       {/* 진행 중 — 배경. 그리드의 감시를 세로 한 줄씩으로 압축 */}
       <section className="px-3 py-2">
@@ -283,6 +352,95 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
           />
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * 업무 만들기 — 구성원을 고르고 목표를 적으면 반장이 선다.
+ * 생성 로직은 host 앱 도구(control_create_task) 하나뿐이다: 오케스트레이터가 만들든
+ * 사람이 이 창으로 만들든 같은 문을 지난다 (구현이 둘이면 한쪽이 낡는다).
+ */
+function NewTaskDialog({ sessions, onClose }: { sessions: Record<string, SessionSummary>; onClose: () => void }) {
+  const [title, setTitle] = useState('')
+  const [goal, setGoal] = useState('')
+  const [members, setMembers] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const workers = Object.values(sessions).filter((s) => s.kind === 'worker')
+
+  const create = async () => {
+    if (!title.trim() || members.length === 0 || busy) return
+    setBusy(true)
+    const r = await invokeAppTool('control', 'control_create_task', {
+      title: title.trim(),
+      goal: goal.trim(),
+      memberSessionIds: members,
+    })
+    setBusy(false)
+    if (r.isError) setError(r.text)
+    else onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose} data-testid="new-task-dialog">
+      <div
+        className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-[13px] text-chalk">New task</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ash">
+          Pick member sessions and state the goal — a foreman session will coordinate them, keep a
+          board, and call you on the rail when needed.
+        </p>
+        <input
+          className="mt-3 w-full rounded border border-edge bg-panel px-2 py-1.5 text-[12px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+          placeholder="Task name"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          data-testid="task-title"
+        />
+        <textarea
+          className="mt-2 w-full resize-none rounded border border-edge bg-panel px-2 py-1.5 text-[12px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+          rows={2}
+          placeholder="Goal — becomes the foreman's brief"
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          data-testid="task-goal"
+        />
+        <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-slate">Members</p>
+        <div className="mt-1 max-h-40 overflow-y-auto">
+          {workers.length === 0 && <p className="text-[11px] text-slate">No worker sessions yet.</p>}
+          {workers.map((s) => (
+            <label key={s.id} className="flex cursor-pointer items-center gap-2 py-0.5 text-[12px] text-ash hover:text-chalk">
+              <input
+                type="checkbox"
+                className="accent-ash"
+                checked={members.includes(s.id)}
+                onChange={(e) =>
+                  setMembers((m) => (e.target.checked ? [...m, s.id] : m.filter((x) => x !== s.id)))
+                }
+                data-testid={`task-member-${s.id}`}
+              />
+              <span className="truncate">{s.name}</span>
+            </label>
+          ))}
+        </div>
+        {error && <p className="mt-2 text-[11px] text-del">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite disabled:opacity-40"
+            disabled={!title.trim() || members.length === 0 || busy}
+            onClick={() => void create()}
+            data-testid="task-create"
+          >
+            Create
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

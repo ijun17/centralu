@@ -187,7 +187,7 @@ export type CreateSessionOpts = {
    * 노출과 실행 양쪽이 같은 판정(profileAllows)을 쓴다 — 노출만 좁히면
    * 이름을 아는 쪽이 그냥 부른다.
    */
-  toolProfile?: 'orchestrator' | 'manager'
+  toolProfile?: 'orchestrator' | 'manager' | 'scoped'
   /**
    * 앱이 보증하는 역할 설명. 도구의 기본 프롬프트에 **덧붙인다**.
    *

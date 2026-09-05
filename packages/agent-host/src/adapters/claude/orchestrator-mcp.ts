@@ -3,6 +3,7 @@ import type { OrchestratorTools } from '../contract.js'
 import {
   MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_INSTRUCTIONS,
+  SCOPED_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
   appToolEntries,
   profileAllows,
@@ -33,7 +34,7 @@ import {
  */
 export const ORCHESTRATOR_MCP_NAME = 'centralu'
 
-export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile = 'orchestrator') {
+export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile = 'orchestrator', sessionId?: string) {
   return createSdkMcpServer({
     name: ORCHESTRATOR_MCP_NAME,
     version: '1',
@@ -47,7 +48,8 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
      * 오케스트레이터에게 이 도구들은 곁다리가 아니라 존재 이유다.
      */
     alwaysLoad: true,
-    instructions: profile === 'manager' ? MANAGER_INSTRUCTIONS : ORCHESTRATOR_INSTRUCTIONS,
+    instructions:
+      profile === 'manager' ? MANAGER_INSTRUCTIONS : profile === 'scoped' ? SCOPED_INSTRUCTIONS : ORCHESTRATOR_INSTRUCTIONS,
     // 묶음이 허용하는 것만 노출한다 (#69) — 실행 쪽도 같은 판정을 한 번 더 한다.
     // 앱 도구(#81)도 같은 목록에 합류한다: 실행은 어차피 runOrchestratorTool이 명부로 라우팅한다
     tools: [
@@ -55,7 +57,7 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
       ...appToolEntries(profile),
     ].map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>) => {
-        const r = await runOrchestratorTool(tools, t.name, args)
+        const r = await runOrchestratorTool(tools, t.name, args, { sessionId: sessionId ?? null, profile })
         return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
       }),
     ),

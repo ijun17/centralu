@@ -16,6 +16,9 @@ export function ControlSettings() {
   const [target, setTarget] = useState('')
   const m = doc?.metrics ?? {}
   const watches = doc?.watches ?? []
+  const foreman = doc?.foreman ?? { tool: 'claude' as const, effort: 'high' }
+  const saveForeman = (f: { tool: 'claude' | 'codex'; model?: string; effort?: string }) =>
+    setAppState('control', { ...(doc ?? {}), foreman: f })
 
   const add = () => {
     const p = pattern.trim()
@@ -42,6 +45,36 @@ export function ControlSettings() {
           {m.railOpens ?? 0}
         </dd>
       </dl>
+
+      <p className="mt-3 text-slate">
+        Foreman — how task coordinators are spawned. Filtering member reports takes judgment, so
+        cheap models are the wrong default (they flatter and forward).
+      </p>
+      <div className="mt-1.5 flex gap-1.5">
+        <select
+          className="shrink-0 rounded border border-edge bg-panel px-1 py-1 text-[11px] text-ash focus:outline-none"
+          value={foreman.tool}
+          onChange={(e) => saveForeman({ ...foreman, tool: e.target.value as 'claude' | 'codex' })}
+          data-testid="foreman-tool"
+        >
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+        </select>
+        <input
+          className="min-w-0 flex-1 rounded border border-edge bg-panel px-1.5 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+          placeholder="model (blank = tool default)"
+          value={foreman.model ?? ''}
+          onChange={(e) => saveForeman({ ...foreman, model: e.target.value || undefined })}
+          data-testid="foreman-model"
+        />
+        <input
+          className="w-16 rounded border border-edge bg-panel px-1.5 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+          placeholder="effort"
+          value={foreman.effort ?? 'high'}
+          onChange={(e) => saveForeman({ ...foreman, effort: e.target.value || undefined })}
+          data-testid="foreman-effort"
+        />
+      </div>
 
       <p className="mt-3 text-slate">
         Watches — when a tool call matches, a high-priority notice lands on the rail. It watches;

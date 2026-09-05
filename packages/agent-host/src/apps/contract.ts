@@ -1,6 +1,9 @@
 import type { z } from 'zod'
 import type { NormalizedEvent } from '@cc/protocol'
-import type { ToolProfile, ToolOutput } from '../sessions/orchestrator-tools.js'
+import type { AppToolCaller, ToolProfile, ToolOutput } from '../sessions/orchestrator-tools.js'
+
+// 앱이 쓸 타입은 통행증이 재수출한다 — 앱 내부가 코어를 직접 임포트하면 depcruise가 문다
+export type { AppToolCaller, ToolProfile, ToolOutput } from '../sessions/orchestrator-tools.js'
 
 /**
  * 앱의 host 쪽 계약 (#81) — **통행증의 절반**.
@@ -22,6 +25,21 @@ export type HostAppContext = {
   sessionSummary(id: string): { name: string; state: string; projectId: string | null } | null
   /** `app_state_changed` 방송 — UI는 apps.state로 다시 읽는다 (일부러 거친 이벤트) */
   emitChanged(): void
+  /**
+   * 세션 물리 원시형 (#80·#81). **타입형이다** — 범용 세션 주조를 주면 앱이
+   * 임의 권력의 세션을 만드는 칼자루가 된다 (#72의 생성형 앱까지 보면 특히).
+   * 의미(이름·역할문)는 앱이 주고, 능력(시야 강제·박제)은 코어가 강제한다.
+   */
+  sessions: {
+    createCoordinator(opts: {
+      name: string
+      memberSessionIds: string[]
+      roleAppend: string
+      tool: 'claude' | 'codex'
+      model?: string
+      effort?: string
+    }): Promise<{ id: string; name: string }>
+  }
 }
 
 export type HostAppModule = {
@@ -29,8 +47,9 @@ export type HostAppModule = {
   tools?: {
     /** 어느 묶음이 이 도구들을 보는가 — 워커는 어떤 경우에도 아니다 */
     profiles: readonly ToolProfile[]
-    defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape> }[]
-    run(ctx: HostAppContext, name: string, args: Record<string, unknown>): Promise<ToolOutput>
+    /** def.profiles가 있으면 그룹 기본을 덮는다 — 도구마다 시야가 다른 앱(관제)의 요구 */
+    defs: readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; profiles?: readonly ToolProfile[] }[]
+    run(ctx: HostAppContext, name: string, args: Record<string, unknown>, caller: AppToolCaller): Promise<ToolOutput>
   }
   /**
    * 이벤트 관찰 (#80 체크포인트, #81에서 예측한 계약 성장) — **규칙은 앱의 의견,

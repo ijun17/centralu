@@ -19,6 +19,11 @@ function fakeCtx(doc: ControlDoc | null) {
     },
     sessionSummary: (id) => (id === 's1' ? { name: '작업 세션', state: 'working', projectId: 'p1' } : null),
     emitChanged: () => changed++,
+    sessions: {
+      createCoordinator: async () => {
+        throw new Error('감시 테스트에서 조율자를 만들 일은 없다')
+      },
+    },
   }
   return { ctx, kv, changedCount: () => changed }
 }

@@ -487,7 +487,38 @@ export class MockPlatform implements Platform {
       else this.appDisabled.add(appId)
       this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
     },
+    /**
+     * 사람의 앱 도구 호출 (#81). 목의 디스크는 메모리다 — host 앱의 실제 로직은
+     * host 유닛 테스트가 덮고, 여기는 e2e가 필요로 하는 최소 흉내만 낸다.
+     */
+    invoke: async (appId: string, name: string, args: Record<string, unknown>) => {
+      this.lastInvoke = { appId, name, args }
+      if (name === 'control_create_task') {
+        const members = (args.memberSessionIds as string[]) ?? []
+        const id = `coord-${++this.idc}`
+        const title = String(args.title ?? '업무')
+        this.sessions.set(id, {
+          id, projectId: null, kind: 'coordinator', tool: 'claude', externalId: null,
+          name: title, autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
+          createdAt: this.now(), waitingSince: null, live: true, model: null, effort: 'high',
+          verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null,
+          worktree: null, parentSessionId: null, scopeSessionIds: members, roleAppend: '(mock role)',
+          ...sessionLiveDefaults(),
+        })
+        this.emit({ type: 'session_created', sessionId: id, session: this.sessions.get(id) } as NormalizedEvent)
+        const doc = (this.appDocs.get(appId) as { tasks?: unknown[] } | undefined) ?? {}
+        const tasks = [
+          ...((doc.tasks as unknown[]) ?? []),
+          { id: `t-${this.idc}`, title, goal: String(args.goal ?? ''), members, coordinatorId: id, status: 'active', createdAt: this.now() },
+        ]
+        this.appDocs.set(appId, { ...doc, tasks })
+        this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
+        return { text: `업무 "${title}"를 만들었습니다` }
+      }
+      return { text: `mock: ${name}` }
+    },
   }
+  lastInvoke: { appId: string; name: string; args: Record<string, unknown> } | null = null
 
   readonly agents: AgentPort = {
     createSession: async (params: CreateSessionParams) => {
@@ -543,7 +574,7 @@ export class MockPlatform implements Platform {
             permissionPreset: 'normal',
             importedFrom: null,
             worktree: null,
-            parentSessionId: null,
+            parentSessionId: null, scopeSessionIds: null, roleAppend: null,
             ...sessionLiveDefaults(),
           }
           this.sessions.set(mgrId, mgr)
@@ -558,6 +589,8 @@ export class MockPlatform implements Platform {
         id,
         projectId: params.projectId,
         kind: 'worker',
+        scopeSessionIds: null,
+        roleAppend: null,
         tool: params.tool,
         externalId: `ext-${id}`,
         worktree,
@@ -738,7 +771,7 @@ export class MockPlatform implements Platform {
         permissionPreset: 'normal' as const,
         importedFrom: null,
         worktree: null,
-        parentSessionId: null,
+        parentSessionId: null, scopeSessionIds: null, roleAppend: null,
         ...sessionLiveDefaults(),
       }
       this.sessions.set(id, info)
@@ -1084,7 +1117,7 @@ export class MockPlatform implements Platform {
         permissionPreset: 'normal',
         importedFrom: null,
         worktree: null,
-        parentSessionId: null,
+        parentSessionId: null, scopeSessionIds: null, roleAppend: null,
         ...sessionLiveDefaults(),
       }
       this.sessions.set(id, manager)

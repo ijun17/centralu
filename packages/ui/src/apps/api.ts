@@ -106,3 +106,12 @@ export function markRead(sessionId: string): void {
 export function setAppState(id: AppId, doc: unknown): void {
   void useStore.getState().setAppDoc(id, doc)
 }
+
+/** 앱의 host 도구를 사람 권한으로 부른다 (#81) — 업무 만들기 등. 결과 텍스트를 돌려준다 */
+export function invokeAppTool(
+  id: AppId,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ text: string; isError?: boolean }> {
+  return useStore.getState().invokeAppTool(id, name, args)
+}

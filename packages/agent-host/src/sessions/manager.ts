@@ -296,9 +296,9 @@ export class SessionManager {
           name: d.name,
           description: d.description,
           schema: d.schema,
-          profiles: t.profiles,
+          profiles: d.profiles ?? t.profiles,
           enabled: () => this.appEnabled(app.id),
-          run: (args: Record<string, unknown>) => t.run(this.appContext(app.id), d.name, args),
+          run: (args: Record<string, unknown>, caller) => t.run(this.appContext(app.id), d.name, args, caller),
         }))
       }),
     )
@@ -336,6 +336,28 @@ export class SessionManager {
     this.emit({ type: 'app_state_changed', appId })
   }
 
+  /**
+   * 사람이 앱 도구를 직접 부른다 (#81). 프로필 판정 없음 — 사람은 최상위 권한이고,
+   * 판정은 "그 앱의 (등록된) 도구인가"뿐이다. 실행 규칙(enabled·스키마)은 앱 경로와 같다.
+   */
+  async invokeAppTool(appId: string, name: string, args: Record<string, unknown>) {
+    if (!name.startsWith(`${appId}_`) && !HOST_APPS.some((a) => a.id === appId && a.tools?.defs.some((d) => d.name === name))) {
+      throw Object.assign(new Error(`그 앱의 도구가 아닙니다: ${appId}/${name}`), { code: 'internal' })
+    }
+    const app = HOST_APPS.find((a) => a.id === appId)
+    const def = app?.tools?.defs.find((d) => d.name === name)
+    if (!app || !def || !app.tools) {
+      throw Object.assign(new Error(`그 앱의 도구가 아닙니다: ${appId}/${name}`), { code: 'internal' })
+    }
+    if (!this.appEnabled(appId)) return { text: `이 도구의 앱이 꺼져 있습니다: ${name}`, isError: true }
+    const parsed = def.schema.safeParse(args)
+    if (!parsed.success) return { text: `잘못된 인자: ${parsed.error.message}`, isError: true }
+    return app.tools.run(this.appContext(appId), name, parsed.data as Record<string, unknown>, {
+      sessionId: null,
+      profile: 'human',
+    })
+  }
+
   private appContext(appId: string): HostAppContext {
     return {
       kv: {
@@ -356,6 +378,10 @@ export class SessionManager {
         return m ? { name: m.name, state: m.state, projectId: m.projectId } : null
       },
       emitChanged: () => this.emit({ type: 'app_state_changed', appId }),
+      sessions: {
+        // 물리 원시형의 위임 (#81) — 타입형이라 앱이 임의 권력의 세션을 주조할 수 없다
+        createCoordinator: (opts) => this.createCoordinator(opts),
+      },
     }
   }
 
@@ -475,7 +501,7 @@ export class SessionManager {
       permissionPreset: 'normal',
       importedFrom: null,
       worktree: null,
-      parentSessionId: null,
+      parentSessionId: null, scopeSessionIds: null, roleAppend: null,
       ...sessionLiveDefaults(),
     }
     this.store.upsertSession(manager)
@@ -782,6 +808,9 @@ export class SessionManager {
        * 여기 있는 이유는 orchestrator()가 자기 세션을 만들 때 쓰기 위해서다.
        */
       kind?: SessionInfo['kind']
+      /** 조율 세션의 시야·역할문 (#80·#81 물리) — createCoordinator()만 채운다 */
+      scopeSessionIds?: string[]
+      roleAppend?: string
     },
   ): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
@@ -861,6 +890,7 @@ export class SessionManager {
     const namedByBranch = worktree && params.worktreeBranch ? worktree.branch : null
     const info: SessionInfo = {
       id, projectId: params.projectId, kind: params.kind ?? 'worker', tool: params.tool, externalId: null,
+      scopeSessionIds: params.scopeSessionIds ?? null, roleAppend: params.roleAppend ?? null,
       name: namedByBranch ?? (params.initialPrompt ? truncate(params.initialPrompt) : 'New session'),
       autoNamed: !namedByBranch, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
@@ -895,10 +925,18 @@ export class SessionManager {
           // 오케스트레이터는 전부, 워크트리 매니저(#69)는 부분집합을 받는다.
           // 갓 만든 세션은 자식이 없으므로 여기서 매니저일 수 없다 — 매니저가 되는 것은
           // 첫 자식이 붙은 뒤 다음에 깰 때다 (wake 쪽 조건이 그 승격의 실제다).
-          orchestratorTools: info.kind === 'orchestrator' ? this.orchestratorToolsFor(id) : undefined,
-          toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : undefined,
-          systemPromptAppend: info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt() : undefined,
-          orchestratorBridge: info.kind === 'orchestrator' ? (this.endpoint?.() ?? undefined) : undefined,
+          orchestratorTools:
+            info.kind === 'orchestrator' ? this.orchestratorToolsFor(id)
+            : info.kind === 'coordinator' ? this.orchestratorToolsFor(id, undefined, info.scopeSessionIds ?? [])
+            : undefined,
+          toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : info.kind === 'coordinator' ? 'scoped' : undefined,
+          systemPromptAppend:
+            info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt()
+            // 조율 세션의 역할은 창조 시 박제된 roleAppend가 전부다 (#80·#81 — 내용은 앱의 것)
+            : info.kind === 'coordinator' ? (info.roleAppend ?? undefined)
+            : undefined,
+          orchestratorBridge:
+            info.kind === 'orchestrator' || info.kind === 'coordinator' ? (this.endpoint?.() ?? undefined) : undefined,
           // 사람이 승인한 MCP 서버 (propose_mcp_server → 승인 → 재시작의 결과가 여기서 실린다)
           extraMcpServers: info.kind === 'orchestrator' ? this.mcpServers() : undefined,
         },
@@ -1303,12 +1341,16 @@ export class SessionManager {
           orchestratorTools:
             m.kind === 'orchestrator'
               ? this.orchestratorToolsFor(sessionId)
-              : // 워크트리 매니저 (#69): 자식이 있으면 매니저다 — 자식만 보는 도구를 받는다
-                this.isWorktreeManager(sessionId)
-                ? this.orchestratorToolsFor(sessionId, sessionId)
-                : undefined,
+              : m.kind === 'coordinator'
+                ? this.orchestratorToolsFor(sessionId, undefined, m.scopeSessionIds ?? [])
+                : // 워크트리 매니저 (#69): 자식이 있으면 매니저다 — 자식만 보는 도구를 받는다
+                  this.isWorktreeManager(sessionId)
+                  ? this.orchestratorToolsFor(sessionId, sessionId)
+                  : undefined,
           toolProfile:
-            m.kind === 'orchestrator' ? 'orchestrator' : this.isWorktreeManager(sessionId) ? 'manager' : undefined,
+            m.kind === 'orchestrator' ? 'orchestrator'
+            : m.kind === 'coordinator' ? 'scoped'
+            : this.isWorktreeManager(sessionId) ? 'manager' : undefined,
           /*
            * 여기가 **기억을 넘기는 자리**다. 도구를 바꾸면 externalId가 끊겨서
            * 이 길(새 프로세스)로 들어오는데, 그때 지난 대화를 함께 실어 보낸다.
@@ -1319,9 +1361,11 @@ export class SessionManager {
             m.kind === 'orchestrator'
               ? // 스킬(#71)은 언제나, 기억 인수인계는 새 프로세스일 때만 (기존 규칙 그대로)
                 ORCHESTRATOR_ROLE + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
-              : undefined,
+              : m.kind === 'coordinator'
+                ? (m.roleAppend ?? undefined) // 박제된 역할문 재적용 — 앱이 꺼져 있어도 그대로다
+                : undefined,
           orchestratorBridge:
-            m.kind === 'orchestrator' || this.isWorktreeManager(sessionId)
+            m.kind === 'orchestrator' || m.kind === 'coordinator' || this.isWorktreeManager(sessionId)
               ? (this.endpoint?.() ?? undefined)
               : undefined,
           // 승인된 MCP 서버는 재시작(=이 길)에서 실려야 "승인 → 재시작 → 바로 사용"이 성립한다
@@ -2369,6 +2413,45 @@ export class SessionManager {
   }
 
   /**
+   * 시야가 잘린 조율 세션을 만든다 (#80·#81 — 이름 없는 물리).
+   *
+   * "업무·반장"은 여기 없다: 이 함수가 아는 것은 "허용 목록 안의 세션만 보이는
+   * 오케스트레이터형 세션"이라는 능력뿐이고, 역할·이름·의미는 부르는 쪽(앱)이
+   * roleAppend와 name으로 입힌다. 구성원은 워커여야 한다 — 조율자가 조율자를
+   * 구성원으로 가지면 깊이가 자란다 (깊이 1은 구조로 보장한다).
+   */
+  async createCoordinator(params: {
+    name: string
+    memberSessionIds: string[]
+    roleAppend: string
+    tool: ToolName
+    model?: string
+    effort?: string
+  }): Promise<SessionInfo> {
+    for (const id of params.memberSessionIds) {
+      const t = this.meta.get(id)
+      if (!t) throw Object.assign(new Error(`구성원 세션이 없습니다: ${id}`), { code: 'session_not_found' })
+      if (t.kind !== 'worker') {
+        throw Object.assign(new Error(`구성원은 워커 세션이어야 합니다: ${t.name} (${t.kind})`), { code: 'internal' })
+      }
+    }
+    const info = await this.createSession({
+      projectId: null,
+      kind: 'coordinator',
+      cwd: orchestratorHome(),
+      tool: params.tool,
+      model: params.model,
+      effort: params.effort,
+      permissionPreset: 'normal',
+      scopeSessionIds: params.memberSessionIds,
+      roleAppend: params.roleAppend,
+    })
+    // 이름은 부르는 쪽의 의미다 — 자동 이름이 덮지 않게 사람이 정한 이름 취급 (FR-18)
+    this.rename(info.id, params.name)
+    return this.meta.get(info.id)!
+  }
+
+  /**
    * 죽은-에이전트 인수인계 기록 (#78) — **그 세션의 도구를 부르지 않고** 만든다.
    *
    * 이 메서드가 불리는 순간은 그 도구가 응답 불능일 때다: 재료는 우리 저장소의
@@ -2536,7 +2619,7 @@ export class SessionManager {
    * 터미널에서 만든 남의 세션도, 파일도, 프로젝트 디렉토리도 닿지 않는다 —
    * 막는 규칙을 따로 쓴 게 아니라 볼 수 있는 것이 그것뿐이다.
    */
-  private orchestratorToolsFor(orchestratorId: string, childrenOf?: string): OrchestratorTools {
+  private orchestratorToolsFor(orchestratorId: string, childrenOf?: string, scopeIds?: string[]): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
     /**
      * 시야는 두 가지뿐이다. **중앙 오케스트레이터**는 전부 보고, **워크트리 매니저**(#69)는
@@ -2546,11 +2629,14 @@ export class SessionManager {
      * 가운데 단계였던 프로젝트 오케스트레이터(#13)는 폐기했다: 프로젝트마다 세션을 지휘하는
      * 자리가 매니저와 둘이 되면서, 만든 사람조차 둘을 헷갈렸다 (도그푸딩). 개념이 하나 많았다.
      */
-    const inScope = (s: SessionInfo) => (childrenOf !== undefined ? s.parentSessionId === childrenOf : true)
+    const inScope = (s: SessionInfo) =>
+      childrenOf !== undefined ? s.parentSessionId === childrenOf
+      : scopeIds !== undefined ? scopeIds.includes(s.id) // 조율 세션 (#80·#81): 허용 목록이 시야의 전부다
+      : true
     const scopeError = (id: string) =>
-      childrenOf !== undefined
-        ? `이 매니저의 워크트리 세션이 아닙니다: ${id}`
-        : `이 앱이 관리하는 세션이 아닙니다: ${id}`
+      childrenOf !== undefined ? `이 매니저의 워크트리 세션이 아닙니다: ${id}`
+      : scopeIds !== undefined ? `이 조율 세션의 구성원이 아닙니다: ${id}`
+      : `이 앱이 관리하는 세션이 아닙니다: ${id}`
 
     return {
       listSessions: async () => {
@@ -3083,8 +3169,10 @@ export class SessionManager {
       throw Object.assign(new Error(`이 세션의 도구가 아닙니다: ${name}`), { code: 'internal' })
     }
     const tools =
-      profile === 'manager' ? this.orchestratorToolsFor(sessionId, sessionId) : this.orchestratorToolsFor(sessionId)
-    return runOrchestratorTool(tools, name, args)
+      profile === 'manager' ? this.orchestratorToolsFor(sessionId, sessionId)
+      : profile === 'scoped' ? this.orchestratorToolsFor(sessionId, undefined, m.scopeSessionIds ?? [])
+      : this.orchestratorToolsFor(sessionId)
+    return runOrchestratorTool(tools, name, args, { sessionId, profile })
   }
 
   /**
@@ -3096,6 +3184,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) return null
     if (m.kind === 'orchestrator') return 'orchestrator'
+    if (m.kind === 'coordinator') return 'scoped'
     return this.isWorktreeManager(sessionId) ? 'manager' : null
   }
 

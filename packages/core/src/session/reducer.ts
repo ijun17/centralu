@@ -22,7 +22,7 @@ export type SessionSummary = {
    * 워커인가 오케스트레이터인가 (#13). projectId로 판정하던 시절의 여섯 군데가
    * 이 한 필드로 모였다. 프로젝트를 가진 오케스트레이터(#13)는 폐기됐지만, 판정이 한 군데인 편은 여전히 낫다.
    */
-  kind: 'worker' | 'orchestrator'
+  kind: 'worker' | 'orchestrator' | 'coordinator'
   /**
    * 이 세션이 쓰는 도구.
    *

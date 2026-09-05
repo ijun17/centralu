@@ -351,6 +351,7 @@ export type AppState = {
   ensureAppState(appId: string): Promise<void>
   refreshAppState(appId: string): Promise<void>
   setAppDoc(appId: string, doc: unknown): Promise<void>
+  invokeAppTool(appId: string, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
   setAppEnabled(appId: string, enabled: boolean): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /** 오케스트레이터의 스킬 제안 (#71) — 같은 제안→원클릭 승인 레일 */
@@ -2454,6 +2455,16 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ toast: `Could not save app state: ${(e as Error).message}` })
       void get().refreshAppState(appId)
+    }
+  },
+
+  async invokeAppTool(appId, name, args) {
+    const platform = get().platform
+    if (!platform) return { text: 'not connected', isError: true }
+    try {
+      return await platform.apps.invoke(appId, name, args)
+    } catch (e) {
+      return { text: (e as Error).message, isError: true }
     }
   },
 

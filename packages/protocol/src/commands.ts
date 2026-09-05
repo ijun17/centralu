@@ -86,7 +86,7 @@ export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
  * (2026-09-01) 두 판정은 다시 같은 뜻이 됐지만, 표식은 남긴다 — 판정이 한 군데인 편이
  * 여전히 낫고, 되돌리는 마이그레이션은 얻는 것 없이 위험만 있다.
  */
-export const SessionKind = z.enum(['worker', 'orchestrator'])
+export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator'])
 export type SessionKind = z.infer<typeof SessionKind>
 
 export const SessionInfo = z.object({
@@ -165,6 +165,21 @@ export const SessionInfo = z.object({
     .object({ number: z.number(), state: z.enum(['open', 'merged', 'closed']), url: z.string() })
     .nullable()
     .default(null),
+  /**
+   * 조율 세션의 시야 허용 목록 (#80·#81 — 이름 없는 코어 손잡이 ①).
+   *
+   * kind='coordinator' 세션의 오케스트레이터 도구가 볼 수 있는 세션들이다.
+   * 강제는 host가 한다(꺼질 수 있는 앱 코드에 강제를 두지 않는다). "업무"라는
+   * 이름은 코어에 없다 — 이것은 시야라는 물리일 뿐이다.
+   */
+  scopeSessionIds: z.array(z.string()).nullable().default(null),
+  /**
+   * 창조 시 박제된 역할문 (#80·#81 — 이름 없는 코어 손잡이 ②).
+   *
+   * 재기동·재개 때 다시 입힐 수 있어야 하므로 행에 산다. 내용의 의미는 앱만 안다 —
+   * 코어는 스폰 때 systemPromptAppend로 실어 나를 뿐이다.
+   */
+  roleAppend: z.string().nullable().default(null),
   /**
    * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위(보통).
    *
@@ -433,6 +448,21 @@ export const RpcMethods = {
   'agents.exportHandoffRecord': {
     params: z.object({ sessionId: z.string() }),
     result: z.object({ text: z.string() }),
+  },
+  /**
+   * 시야가 잘린 조율 세션을 만든다 (#80·#81 물리). 의견(업무·반장)은 앱의 것이고,
+   * 여기는 "구성원 목록만 보이는 오케스트레이터형 세션"이라는 능력만 만든다.
+   */
+  'agents.createCoordinator': {
+    params: z.object({
+      name: z.string(),
+      memberSessionIds: z.array(z.string()).min(1),
+      roleAppend: z.string(),
+      tool: ToolName,
+      model: z.string().optional(),
+      effort: z.string().optional(),
+    }),
+    result: SessionInfo,
   },
   'agents.worktreeStatus': {
     params: z.object({ sessionId: z.string() }),
@@ -719,6 +749,14 @@ export const RpcMethods = {
   'apps.setState': {
     params: z.object({ appId: z.string(), doc: z.unknown() }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 사람이 앱 도구를 직접 부른다 (#81) — UI의 업무 만들기 등. 사람은 최상위 권한이라
+   * 프로필 판정 대신 "그 앱의 도구인가"만 본다. caller.sessionId=null이 곧 사람이다.
+   */
+  'apps.invoke': {
+    params: z.object({ appId: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) }),
+    result: z.object({ text: z.string(), isError: z.boolean().optional() }),
   },
   'apps.setEnabled': {
     params: z.object({ appId: z.string(), enabled: z.boolean() }),

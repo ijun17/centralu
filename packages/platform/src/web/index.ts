@@ -268,6 +268,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       setEnabled: async (appId, enabled) => {
         await rpc.call('apps.setEnabled', { appId, enabled })
       },
+      invoke: (appId, name, args) => rpc.call('apps.invoke', { appId, name, args }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

@@ -669,6 +669,24 @@ export class Store {
           if (repaired > 0) console.error(`[store] repaired ${repaired} message timestamps trampled by the merge migration`)
         },
       },
+      {
+        to: 30,
+        /*
+         * 조율 세션의 두 손잡이 (#80·#81) — 시야 허용 목록(JSON)과 창조 시 박제된
+         * 역할문. "업무·반장"이라는 이름은 코어에 없다: 이 열들은 물리
+         * (시야 강제·역할 재적용)고, 의미는 앱이 준다.
+         */
+        run: () => {
+          // 멱등 — 테스트가 user_version을 되감아 재실행한다 (parent_session_id 선례)
+          const cols = this.db.pragma('table_info(sessions)') as { name: string }[]
+          if (!cols.some((c) => c.name === 'scope_session_ids')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN scope_session_ids TEXT`)
+          }
+          if (!cols.some((c) => c.name === 'role_append')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN role_append TEXT`)
+          }
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -997,8 +1015,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -1011,6 +1029,8 @@ export class Store {
            worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
            worktree_base = excluded.worktree_base,
            parent_session_id = excluded.parent_session_id,
+           scope_session_ids = excluded.scope_session_ids,
+           role_append = excluded.role_append,
            context_used = excluded.context_used, context_window = excluded.context_window,
            context_exactness = excluded.context_exactness`,
       )
@@ -1027,6 +1047,9 @@ export class Store {
         worktreeBranch: s.worktree?.branch ?? null,
         worktreeBase: s.worktree?.base ?? null,
         parentSessionId: s.parentSessionId ?? null,
+        // 시야는 JSON 배열로 눕는다 (#80·#81) — 관계는 행에 산다 (고아 교훈)
+        scopeSessionIds: s.scopeSessionIds ? JSON.stringify(s.scopeSessionIds) : null,
+        roleAppend: s.roleAppend ?? null,
         /*
          * Context rides the ordinary upsert (issue #48), which the manager already runs after
          * every event — so a reading is on disk the instant it arrives, with no second write
@@ -1108,6 +1131,7 @@ export class Store {
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
                 s.worktree_base as worktreeBase,
                 s.parent_session_id as parentSessionId,
+                s.scope_session_ids as scopeSessionIdsJson, s.role_append as roleAppend,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
@@ -1122,6 +1146,7 @@ export class Store {
       contextUsed: number | null
       contextWindow: number | null
       contextExactness: string | null
+      scopeSessionIdsJson: string | null
     })[]
     // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
     return rows.map(
@@ -1133,11 +1158,21 @@ export class Store {
         contextWindow,
         contextExactness,
         isOrchestrator,
+        scopeSessionIdsJson,
         ...r
       }) => ({
         ...r,
         autoNamed: !!r.autoNamed,
-        kind: isOrchestrator ? ('orchestrator' as const) : ('worker' as const),
+        /*
+         * 조율자 판정도 관계다 (#80·#81): 시야 목록이 있으면 조율 세션이다 —
+         * 표식 열을 따로 두면 표식과 관계가 언젠가 어긋난다 (#13의 교훈).
+         */
+        kind: isOrchestrator
+          ? ('orchestrator' as const)
+          : scopeSessionIdsJson
+            ? ('coordinator' as const)
+            : ('worker' as const),
+        scopeSessionIds: scopeSessionIdsJson ? (JSON.parse(scopeSessionIdsJson) as string[]) : null,
         live: false,
         worktree: worktreePath
           ? {

@@ -457,6 +457,8 @@ export interface AppsPort {
   state(appId: string): Promise<{ doc: unknown; enabled: boolean }>
   setState(appId: string, doc: unknown): Promise<void>
   setEnabled(appId: string, enabled: boolean): Promise<void>
+  /** 사람이 앱 도구를 직접 부른다 (#81) — 업무 만들기 등. 사람은 프로필 판정을 안 받는다 */
+  invoke(appId: string, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
 }
 
 export interface Platform {

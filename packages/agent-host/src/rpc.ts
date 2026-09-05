@@ -68,6 +68,10 @@ export function createRpcHandler(
     },
     'agents.exportHandoffRecord': async (p) =>
       mgr.exportHandoffRecord(RpcMethods['agents.exportHandoffRecord'].params.parse(p).sessionId),
+    'agents.createCoordinator': async (p) => {
+      const params = RpcMethods['agents.createCoordinator'].params.parse(p)
+      return mgr.createCoordinator(params)
+    },
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(RpcMethods['agents.worktreeStatus'].params.parse(p).sessionId),
     'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
@@ -209,6 +213,10 @@ export function createRpcHandler(
       const { appId, doc } = RpcMethods['apps.setState'].params.parse(p)
       mgr.setAppDoc(appId, doc)
       return { ok: true as const }
+    },
+    'apps.invoke': async (p) => {
+      const { appId, name, args } = RpcMethods['apps.invoke'].params.parse(p)
+      return mgr.invokeAppTool(appId, name, args)
     },
     'apps.setEnabled': async (p) => {
       const { appId, enabled } = RpcMethods['apps.setEnabled'].params.parse(p)
