@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process'
-import { readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open, readdir, rename, writeFile } from 'node:fs/promises'
 import { basename, relative, resolve, sep } from 'node:path'
 import { wireBaseName, wireJoin } from '@cc/protocol'
+import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
 
 /**
  * 파일 트리·뷰어 서비스 (C-1).
@@ -21,6 +23,7 @@ export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boo
 export type FsFile = { text: string; truncated: boolean; binary: boolean; bytes: number }
 
 const MAX_TEXT = 2_000_000 // 2MB 넘으면 잘라 보여준다 (뷰어는 어차피 가상 스크롤)
+const READ_TEXT_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 
 /** 프로젝트 루트를 벗어나는 경로를 막는다 */
 export function safeJoin(root: string, rel: string): string {
@@ -71,13 +74,6 @@ export function moveTarget(from: string, toDir: string): string {
   return wireJoin(toDir, baseName(from))
 }
 
-async function exists(abs: string): Promise<boolean> {
-  return stat(abs).then(
-    () => true,
-    () => false,
-  )
-}
-
 /**
  * Move a file or folder inside the project (#19).
  *
@@ -86,21 +82,24 @@ async function exists(abs: string): Promise<boolean> {
  * it is the one outcome nobody can undo. `moved: false` means the drop landed where the
  * entry already was — a miss, not a failure, so the caller stays quiet about it.
  *
- * The `exists` check ahead of `rename` is not atomic (POSIX `rename` replaces the
+ * The destination guard ahead of `rename` is not atomic (POSIX `rename` replaces the
  * destination and Node exposes no `RENAME_NOREPLACE`). The window is between two calls in
  * one process driven by one person's drag, so the realistic collision is the one this does
  * catch: a file that was already there.
  */
 export async function moveEntry(root: string, from: string, toDir: string): Promise<{ path: string; moved: boolean }> {
   const src = safeJoin(root, from)
+  await assertExistingPath(root, from)
   if (src === resolve(root)) fail('Cannot move the project itself')
   const rel = moveTarget(from, toDir)
   const dst = safeJoin(root, rel)
+  await assertExistingPath(root, toDir)
+  const dstState = await assertCreatePath(root, rel)
   if (src === dst) return { path: rel, moved: false }
   // A folder cannot be moved inside itself — `rename` would fail, but with EINVAL, which
   // reaches the person as noise rather than as the reason.
   if (dst.startsWith(src + sep)) fail(`Cannot move ${baseName(from)} into itself`)
-  if (await exists(dst)) fail(`${rel} already exists — nothing was moved`)
+  if (dstState.exists) fail(`${rel} already exists — nothing was moved`)
   await rename(src, dst)
   return { path: rel, moved: true }
 }
@@ -119,8 +118,9 @@ export async function moveEntry(root: string, from: string, toDir: string): Prom
 export async function importFile(root: string, toDir: string, name: string, data: Buffer): Promise<{ path: string }> {
   const rel = wireJoin(toDir, baseName(name))
   const dst = safeJoin(root, rel)
-  const dir = safeJoin(root, toDir)
-  if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) fail(`${toDir || '.'} is not a folder`)
+  const dirInfo = await assertExistingPath(root, toDir)
+  await assertCreatePath(root, rel)
+  if (!dirInfo.isDirectory()) fail(`${toDir || '.'} is not a folder`)
   await writeFile(dst, data, { flag: 'wx' }).catch((e: NodeJS.ErrnoException) => {
     if (e.code === 'EEXIST') fail(`${rel} already exists — nothing was written`)
     throw e
@@ -138,7 +138,7 @@ export async function importFile(root: string, toDir: string, name: string, data
  */
 export async function resolveExisting(root: string, rel: string): Promise<string> {
   const abs = safeJoin(root, rel)
-  await stat(abs).catch(() => fail(`${rel || '.'} is no longer there`))
+  await assertExistingPath(root, rel)
   return abs
 }
 
@@ -197,6 +197,8 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
 
 export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
   const dir = safeJoin(root, rel)
+  const dirInfo = await assertExistingPath(root, rel)
+  if (!dirInfo.isDirectory()) fail(`${rel || '.'} is not a folder`)
   const entries = await readdir(dir, { withFileTypes: true })
   const visible = entries.filter((e) => e.name !== '.git')
   const ignored = await ignoredIn(root, visible.map((e) => e.name), dir)
@@ -213,20 +215,38 @@ export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
 
 export async function readTextFile(root: string, rel: string): Promise<FsFile> {
   const file = safeJoin(root, rel)
-  const info = await stat(file)
-  if (info.isDirectory()) throw Object.assign(new Error('Path is a directory'), { code: 'internal' })
+  const pathInfo = await assertExistingPath(root, rel)
+  if (!pathInfo.isFile()) fail('Path is not a regular file')
 
-  const buf = await readFile(file)
-  // 널 바이트가 있으면 바이너리로 본다 (git과 같은 휴리스틱)
-  const head = buf.subarray(0, 8000)
-  if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: info.size }
+  const handle = await open(file, READ_TEXT_FLAGS).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ELOOP') throw new UnsafePathError(`${rel || '.'} contains a symbolic link`)
+    throw error
+  })
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) fail('Path is not a regular file')
 
-  const truncated = buf.length > MAX_TEXT
-  return {
-    text: (truncated ? buf.subarray(0, MAX_TEXT) : buf).toString('utf8'),
-    truncated,
-    binary: false,
-    bytes: info.size,
+    const buf = Buffer.allocUnsafe(MAX_TEXT + 1)
+    let total = 0
+    while (total < MAX_TEXT + 1) {
+      const { bytesRead } = await handle.read(buf, total, MAX_TEXT + 1 - total, total)
+      if (bytesRead === 0) break
+      total += bytesRead
+    }
+    const bytes = buf.subarray(0, total)
+    // 널 바이트가 있으면 바이너리로 본다 (git과 같은 휴리스틱)
+    const head = bytes.subarray(0, 8000)
+    if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: info.size }
+
+    const truncated = total > MAX_TEXT
+    return {
+      text: (truncated ? bytes.subarray(0, MAX_TEXT) : bytes).toString('utf8'),
+      truncated,
+      binary: false,
+      bytes: info.size,
+    }
+  } finally {
+    await handle.close()
   }
 }
 

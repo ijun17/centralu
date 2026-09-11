@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DirWatchers, MAX_WATCHED_DIRS } from './watch.js'
@@ -122,6 +122,26 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     const root = tmp()
     const w = makeWatcher(() => {})
     expect(w.setWatched('p1', root, ['../outside'])).toBe(0)
+  })
+
+  it('밖을 가리키는 링크 디렉토리는 감시하지 않는다', () => {
+    const root = tmp()
+    const outside = tmp()
+    symlinkSync(outside, join(root, 'linked'), 'dir')
+    const w = makeWatcher(() => {})
+
+    expect(w.setWatched('p1', root, ['linked'])).toBe(0)
+  })
+
+  it('끊어진 링크는 사라진 폴더 알림으로 바꾸지 않는다', async () => {
+    const root = tmp()
+    const got: string[][] = []
+    symlinkSync(join(root, 'missing'), join(root, 'dangling'))
+    const w = makeWatcher((_p, d) => got.push(d), 40)
+
+    expect(w.setWatched('p1', root, ['dangling'])).toBe(0)
+    await new Promise((r) => setTimeout(r, 120))
+    expect(got).toEqual([])
   })
 
   it('상한에 걸리면 지키는 수를 돌려준다 — 조용히 자르지 않는다', () => {
