@@ -69,7 +69,7 @@ jobs:
     environment: ${{ inputs.dry_run == false && 'npm-publish' || '' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Same list and the same reasons as .github/workflows/build.yml — kept in step with it.
       - name: Install Linux system dependencies
@@ -89,9 +89,9 @@ jobs:
             xdg-utils \
             libfuse2
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -100,9 +100,9 @@ jobs:
           # repo would trip that check — and would be a credential sitting in the workspace.
           registry-url: https://registry.npmjs.org
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
           # The cache is only valid per platform (matches the key build.yml uses per
@@ -134,7 +134,7 @@ jobs:
 
       # Keep the exact artifact that was packaged, so a later "what did we actually ship"
       # question has an answer that is not a rebuild.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: centralu-${{ inputs.target }}-published
           path: packaging/npm/${{ inputs.target }}/*.AppImage
