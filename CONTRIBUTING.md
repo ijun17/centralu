@@ -26,11 +26,13 @@ because it is the only part of a PR that says where to go looking themselves.
 ```bash
 pnpm install
 
-# terminal 1 — the agent host (Node sidecar)
-pnpm host --port 5175 --token dev-token
+# browser dev — one shell so the per-launch token is shared without printing it
+CC_HOST_TOKEN="$(openssl rand -hex 16)"
+CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
+HOST_PID=$!
+trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
 
-# terminal 2 — the web UI. Development happens in a browser; releases go out as Tauri
-pnpm dev                      # http://127.0.0.1:5174
+VITE_HOST_TOKEN="$CC_HOST_TOKEN" pnpm dev   # http://127.0.0.1:5174
 ```
 
 ### Looking at the UI without a host
@@ -51,6 +53,11 @@ you arrange by hand survives one.
 Nothing in the scene is special-cased in the UI: it is built through the same ports the
 app calls and the same events the host sends, so a screen that looks right here is not
 being propped up by the demo.
+
+Do not use a fixed token such as `dev-token`, and do not paste real launch tokens into
+issues, logs, screenshots, or test artifacts. The command above discards the host's
+stdout handshake because it contains the token; diagnostic stderr stays visible. If you change the host port, pass the same
+explicit URL to the UI with `VITE_HOST_URL=ws://127.0.0.1:<port>`.
 
 For the real app rather than the browser:
 

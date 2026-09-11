@@ -3,6 +3,7 @@ import { App, useStore } from '@cc/ui'
 import { createWebPlatform } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
+import { browserHostOptions, isMockMode } from './bootstrap.js'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
@@ -19,20 +20,12 @@ import '../../../packages/ui/src/styles/index.css'
  */
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')
-const wantsMock = params.has('mock') || demo !== null
-
-const platform: Platform = wantsMock
-  ? seedMock()
-  : createWebPlatform({
-      hostUrl: import.meta.env.VITE_HOST_URL ?? 'ws://127.0.0.1:5175',
-      token: import.meta.env.VITE_HOST_TOKEN ?? 'dev-token',
-    })
+const platform: Platform = isMockMode(location.search) ? seedMock() : createWebPlatform(browserHostOptions(import.meta.env))
 
 function seedMock(): Platform {
   const mock = createMockPlatform()
-  // E2E가 조작할 수 있게 노출 (mock 모드에서만)
-  ;(window as unknown as { __mock: unknown }).__mock = mock
-  ;(window as unknown as { __store: unknown }).__store = useStore
+  window.__mock = mock
+  window.__store = useStore
   return mock
 }
 
@@ -45,4 +38,6 @@ if (demo !== null) {
   await seedDemo(platform as never, isDemoScene(demo) ? demo : 'focus')
 }
 
-createRoot(document.getElementById('root')!).render(<App platform={platform} />)
+const rootElement = document.getElementById('root')
+if (!rootElement) throw new Error('Root element #root not found')
+createRoot(rootElement).render(<App platform={platform} />)

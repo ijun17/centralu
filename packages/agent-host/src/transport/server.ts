@@ -15,10 +15,19 @@ import { EventLog } from './event-log.js'
  */
 export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
 
+export const DEFAULT_ALLOWED_ORIGINS = [
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+  'tauri://localhost',
+] as const
+
 export type HostServerOptions = {
   port: number
   token: string
   onRpc: RpcHandler
+  allowedOrigins?: readonly string[]
   /** 정적 페이지 서빙 (dev에서 브라우저 접속용, 선택) */
   onHttp?: (path: string) => { body: string | Buffer; contentType: string } | null
 }
@@ -29,8 +38,10 @@ export class HostServer {
   private http: Server
   private clients = new Set<WebSocket>()
   private listenError: ((err: Error) => void) | null = null
+  private readonly allowedOrigins: ReadonlySet<string>
 
   constructor(private opts: HostServerOptions) {
+    this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
     this.http = createServer((req, res) => {
       const hit = opts.onHttp?.(new URL(req.url ?? '/', 'http://x').pathname)
       if (!hit) {
@@ -41,10 +52,21 @@ export class HostServer {
       res.writeHead(200, { 'content-type': hit.contentType })
       res.end(hit.body)
     })
-    this.wss = new WebSocketServer({ server: this.http })
+    this.wss = new WebSocketServer({
+      server: this.http,
+      verifyClient: (info, done) => {
+        done(this.originAllowed(info.req.headers.origin), 403, 'forbidden origin')
+      },
+    })
     this.wss.on('connection', (ws) => this.onConnection(ws))
     // ws는 http 서버 에러를 자기 인스턴스로 재방출한다 — 여기서 안 받으면 프로세스가 죽는다
     this.wss.on('error', (err) => this.listenError?.(err))
+  }
+
+  private originAllowed(origin: string | undefined): boolean {
+    if (origin === undefined || origin === '') return true
+    if (origin === 'null') return false
+    return this.allowedOrigins.has(origin)
   }
 
   listen(): Promise<number> {

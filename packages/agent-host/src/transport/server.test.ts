@@ -18,8 +18,8 @@ async function start(onRpc = async () => ({ ok: true })) {
   return { server: server!, port }
 }
 
-function connect(port: number) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+function connect(port: number, origin?: string) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, origin ? { origin } : undefined)
   const frames: Record<string, unknown>[] = []
   ws.on('message', (d) => frames.push(JSON.parse(String(d))))
   return {
@@ -41,6 +41,86 @@ function connect(port: number) {
 const ev = (text: string): NormalizedEvent => ({ type: 'message_delta', sessionId: 's1', role: 'assistant', text })
 
 describe('핸드셰이크', () => {
+  it('브라우저 dev origin이면 토큰 핸드셰이크를 허용한다', async () => {
+    // Given: the supported Vite browser origin connects to the host.
+    const { port } = await start()
+    const c = connect(port, 'http://127.0.0.1:5174')
+
+    // When: it presents the shared launch token.
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+
+    // Then: the observable handshake succeeds.
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
+    c.ws.close()
+  })
+
+  it('데스크톱 dev origin이면 토큰 핸드셰이크를 허용한다', async () => {
+    // Given: the Tauri desktop dev server origin connects to the host.
+    const { port } = await start()
+    const c = connect(port, 'http://127.0.0.1:5173')
+
+    // When: it presents the shared launch token.
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+
+    // Then: the observable handshake succeeds.
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
+    c.ws.close()
+  })
+
+  it.each(['http://tauri.localhost', 'https://tauri.localhost', 'tauri://localhost'])(
+    'Tauri origin %s이면 토큰 핸드셰이크를 허용한다',
+    async (origin) => {
+      // Given: a supported packaged WebView origin connects to the host.
+      const { port } = await start()
+      const c = connect(port, origin)
+
+      // When: it presents the shared launch token.
+      await c.open()
+      c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+      await c.wait(() => c.frames.length > 0)
+
+      // Then: the observable handshake succeeds.
+      expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
+      c.ws.close()
+    },
+  )
+
+  it('악성 origin은 올바른 토큰을 보내기 전에 업그레이드에서 거부한다', async () => {
+    // Given: a cross-site browser origin knows a valid token.
+    const { port } = await start()
+    const c = connect(port, 'http://evil.example')
+
+    // When: it attempts the WebSocket upgrade.
+    const observed = await new Promise<string>((resolve) => {
+      c.ws.on('open', () => resolve('opened'))
+      c.ws.on('error', (err) => resolve(err.message))
+    })
+
+    // Then: the socket never opens, so token auth is unreachable from that origin.
+    expect(observed).toContain('Unexpected server response')
+    expect(observed).not.toBe('opened')
+  })
+
+  it('literal null origin은 네이티브 무-origin 연결처럼 취급하지 않는다', async () => {
+    // Given: a sandboxed/browser request sends the literal Origin: null value.
+    const { port } = await start()
+    const c = connect(port, 'null')
+
+    // When: it attempts the WebSocket upgrade.
+    const observed = await new Promise<string>((resolve) => {
+      c.ws.on('open', () => resolve('opened'))
+      c.ws.on('error', (err) => resolve(err.message))
+    })
+
+    // Then: the host rejects it at the origin boundary.
+    expect(observed).toContain('Unexpected server response')
+    expect(observed).not.toBe('opened')
+  })
+
   it('올바른 토큰이면 hello_ok', async () => {
     const { port } = await start()
     const c = connect(port)
