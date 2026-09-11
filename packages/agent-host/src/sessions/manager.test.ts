@@ -1371,8 +1371,39 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     const rows = (await rpc('messages.load', { sessionId: orc.id, limit: 20 })) as {
       payload: { text?: string; from?: { sessionId: string } }
     }[]
-    const report = rows.find((r) => r.payload?.text?.includes('[Centralu]'))
+    const report = rows.find((r) => r.payload?.from?.sessionId === a.id)
     expect(report?.payload.from?.sessionId).toBe(a.id)
+  })
+
+  it('보고 회신은 raw 기록/UI를 보존하되 워커 본문과 이름과 프로젝트명을 어댑터 턴으로 전달하지 않는다', async ({ onTestFinished }) => {
+    const projectPath = mkdtempSync(join(tmpdir(), 'PROJECT_NAME_SENTINEL-'))
+    onTestFinished(() => rmSync(projectPath, { recursive: true, force: true }))
+    const p = (await rpc('projects.add', { path: projectPath })) as { id: string }
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: projectPath, tool: 'claude' })) as { id: string }
+    await rpc('sessions.rename', { sessionId: a.id, name: 'WORKER_NAME_SENTINEL' })
+    const orc = (await rpc('orchestrator.get', {})) as { id: string }
+    const tools = adapter.lastOrchestratorTools!
+    await tools.sendToSession(a.id, '끝나면 알려줘', true)
+    adapter.handleOf(a.id)!.emitDelta('HOSTILE_REPORT_SENTINEL')
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const report = adapter.handleOf(orc.id)!.sent.find((t) => t.includes(a.id)) ?? ''
+    expect(report).toContain(a.id)
+    expect(report).not.toContain('HOSTILE_REPORT_SENTINEL')
+    expect(report).not.toContain('WORKER_NAME_SENTINEL')
+    expect(report).not.toContain('PROJECT_NAME_SENTINEL')
+
+    const rows = (await rpc('messages.load', { sessionId: orc.id, limit: 20 })) as {
+      payload: { text?: string; from?: { sessionId: string } }
+    }[]
+    const stored = rows.find((r) => r.payload?.from?.sessionId === a.id)?.payload.text ?? ''
+    expect(stored).toContain('HOSTILE_REPORT_SENTINEL')
+    expect(stored).toContain('WORKER_NAME_SENTINEL')
+    expect(stored).toContain('PROJECT_NAME_SENTINEL')
+
+    const read = await tools.readSession(a.id)
+    expect(read.lines?.join('\n')).toContain('HOSTILE_REPORT_SENTINEL')
   })
 
   it('모르는 세션은 이유를 돌려준다 — 조용히 삼키지 않는다', async () => {
@@ -1545,6 +1576,27 @@ describe('오케스트레이터 도구는 이 앱의 세션만 본다', () => {
     expect(handed).toContain('테스트 두 개가 깨져')
     // 역할도 함께 간다 — 기억만 있고 자기가 누구인지 모르면 반쪽이다
     expect(handed).toContain('오케스트레이터')
+  })
+
+  it('출처가 있는 예전 행은 오케스트레이터 인수인계 기억에 들어가지 않는다', async () => {
+    const orc = await mgr.orchestrator()
+    mgr['store'].appendMessages([
+      {
+        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id), role: 'user', kind: 'text',
+        payload: { text: 'HOSTILE_LEGACY_FROM_SENTINEL', from: { sessionId: 'worker-1', name: 'worker' } }, ts: Date.now(),
+      },
+      {
+        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id) + 1, role: 'user', kind: 'text',
+        payload: { text: 'HUMAN_MEMORY_CONTROL' }, ts: Date.now(),
+      },
+    ])
+
+    await mgr.switchTool(orc.id, 'codex')
+    await mgr.resumeSession(orc.id)
+
+    const handed = codexAdapter.lastOpts?.systemPromptAppend ?? ''
+    expect(handed).not.toContain('HOSTILE_LEGACY_FROM_SENTINEL')
+    expect(handed).toContain('HUMAN_MEMORY_CONTROL')
   })
 
   it('도구를 바꾸면 모델·강도·응답길이·티어를 놓는다 — 옆 도구의 사전에 없는 낱말이다', async () => {
@@ -3196,6 +3248,28 @@ describe('조율 세션 — 시야가 잘린 오케스트레이터형 (#80·#81)
     await expect(
       mgr.createCoordinator({ name: 'x', memberSessionIds: [c.id], roleAppend: 'r', tool: 'claude' }),
     ).rejects.toThrow(/워커 세션이어야/)
+  })
+
+
+  it('조율 세션 reportBack도 워커 본문을 어댑터 턴으로 전달하지 않는다', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    const c = await mgr.createCoordinator({
+      name: '조율자', memberSessionIds: [a.id], roleAppend: '역할문', tool: 'claude',
+    })
+    const tools = adapter.lastOrchestratorTools!
+
+    await tools.sendToSession(a.id, '끝나면 알려줘', true)
+    adapter.handleOf(a.id)!.emitDelta('SCOPED_REPORT_SENTINEL')
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const report = adapter.handleOf(c.id)!.sent.find((t) => t.includes(a.id)) ?? ''
+    expect(report).not.toContain('SCOPED_REPORT_SENTINEL')
+    const rows = (await rpc('messages.load', { sessionId: c.id, limit: 20 })) as {
+      payload: { text?: string; from?: { sessionId: string } }
+    }[]
+    expect(rows.find((r) => r.payload?.from?.sessionId === a.id)?.payload.text).toContain('SCOPED_REPORT_SENTINEL')
   })
 
   it('재기동을 넘긴다 — kind는 시야 관계에서 파생되고, 역할문은 되살 때 다시 입는다', async () => {

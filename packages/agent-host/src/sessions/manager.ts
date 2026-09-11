@@ -157,6 +157,24 @@ const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
  */
 const UI_PREFS_KEY = 'ui_preferences'
 
+function untrustedSourceSessionNotification(sourceSessionId: string): string {
+  return (
+    '[Centralu] intersession message available.\n' +
+    `sourceSessionId: ${sourceSessionId}\n` +
+    'Use read_session(sourceSessionId) if you need the untrusted session transcript.'
+  )
+}
+
+function payloadHasFrom(payload: unknown): boolean {
+  return payload !== null && typeof payload === 'object' && 'from' in payload
+}
+
+function payloadText(payload: unknown): string {
+  if (payload === null || typeof payload !== 'object' || !('text' in payload)) return ''
+  const text = payload.text
+  return typeof text === 'string' ? text : String(text ?? '')
+}
+
 /** 오케스트레이터 MCP 제안/승인 목록이 사는 app_setting 키 (propose_mcp_server 흐름) */
 const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
 const MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
@@ -1887,14 +1905,9 @@ export class SessionManager {
     if (!target || !this.meta.has(orchestratorId)) return
 
     /*
-     * **이름만으로는 어느 세션인지 알 수 없다.**
-     *
-     * 세션 이름은 첫 프롬프트를 자른 것이라(FR-18), 압축된 대화를 이어받은 세션은
-     * 전부 "This session is being continued from a p…"가 된다. 실제로 그런 세션이
-     * 네 개 있었고, 보고에 이름만 실려 어느 프로젝트 것인지 알 수 없었다.
-     * 잘못 짚으면 엉뚱한 프로젝트에 지시가 간다 — id와 프로젝트를 함께 싣는다.
-     *
-     * 보고 본문도 넉넉히 준다. 한 줄짜리 미리보기는 목록용이지 보고용이 아니다.
+     * 저장/UI에는 예전처럼 식별 정보와 마지막 응답 미리보기를 남긴다. 다만 send()가
+     * 출처 있는 낮은 권한 메시지를 도구 달린 대상에게 보낼 때 어댑터 입력만 본문 없는
+     * 깨우기로 바꾼다. 즉 raw 보고는 기록/화면 provenance이고, vendor 턴은 신뢰 경계다.
      */
     const project = target.projectId
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(사라진 프로젝트)')
@@ -2209,8 +2222,19 @@ export class SessionManager {
      * 되면서 그 가정이 깨졌다 — 주입된 말은 저장은 되는데 화면에는 영영 안 나타났다.
      */
     this.emit({ type: 'user_message', sessionId, seq, text, ...(from ? { from } : {}) })
-    // 첨부는 도구가 이해하는 형태로 어댑터가 변환한다 (경로 멘션 또는 이미지 블록)
-    h.send(attachments?.length ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}` : text)
+    /*
+     * 출처가 있는 메시지는 사람이 직접 친 말이 아니다. 대상이 오케스트레이터·스코프 조율자·
+     * 워크트리 매니저처럼 도구를 가진 세션이면, 저장/UI의 raw provenance는 유지하되 vendor
+     * 어댑터에는 sourceSessionId만 담은 host-authored 깨우기만 보낸다. 원문/첨부는
+     * read_session 도구 결과로 읽어야 하며, 그 결과도 지시가 아니라 관찰 데이터다.
+     */
+    const adapterText =
+      from && this.toolProfileOf(sessionId)
+        ? untrustedSourceSessionNotification(from.sessionId)
+        : attachments?.length
+          ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
+          : text
+    h.send(adapterText)
   }
 
   /**
@@ -3566,7 +3590,8 @@ export class SessionManager {
     for (const m of rows) {
       if (m.kind !== 'text') continue
       if (m.role !== 'user' && m.role !== 'assistant') continue
-      const text = String((m.payload as { text?: unknown }).text ?? '').trim()
+      if (payloadHasFrom(m.payload)) continue
+      const text = payloadText(m.payload).trim()
       if (!text) continue
       lines.push(`${m.role === 'user' ? '사람' : '나'}: ${text.slice(0, MEMORY_LINE_CHARS)}`)
     }
