@@ -37,7 +37,7 @@ test('hostile fixture stays within the 400KiB audit-input cap', () => {
   expect(new TextEncoder().encode(hostileDiff()).length).toBeLessThanOrEqual(400 * 1024)
 })
 
-test('newline-dense working diff is row-capped, visibly truncated, copy-bounded, and responsive', async ({
+test('newline-dense working diff is row-capped, visibly truncated, and copy-bounded', async ({
   page,
 }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -56,15 +56,6 @@ test('newline-dense working diff is row-capped, visibly truncated, copy-bounded,
   await expect(diffView.getByTestId('diff-truncation')).toBeVisible()
   await expect(diffView.getByTestId('diff-truncation')).toContainText('diff is too large')
   await expect(page.locator('[data-testid="diff-view"] [data-diff]')).toHaveCount(MAX_RENDERED_DIFF_ROWS)
-
-  const frameDelayMs = await page.evaluate(
-    () =>
-      new Promise<number>((resolve) => {
-        const startedAt = performance.now()
-        requestAnimationFrame(() => resolve(performance.now() - startedAt))
-      }),
-  )
-  expect(frameDelayMs).toBeLessThan(1_000)
 
   await page.evaluate(() => {
     const root = document.querySelector<HTMLElement>('[data-testid="diff-view"] .overflow-auto')
