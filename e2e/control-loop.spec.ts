@@ -1540,6 +1540,18 @@ test('상단 바: 단축키 칩 대신 숫자가 신호다 (#33)', async ({ page
   await expect(page.getByTestId('count-waiting')).toContainText('01')
   await expect(page.getByTestId('count-waiting')).toHaveClass(/beacon/)
 
+  /*
+   * 빛무리는 숫자에만 진다 (사용자 지적 2026-09-12). `beacon`의 text-shadow는 상속되므로
+   * 색만 덮어쓴 이름표가 어두운 글자에 흰 후광을 쓰고 있었다 — 빛나 보이는 게 아니라
+   * 초점이 안 맞아 보인다.
+   */
+  const halo = await page.getByTestId('count-waiting').evaluate((el) => ({
+    label: getComputedStyle(el.firstElementChild!).textShadow,
+    value: getComputedStyle(el.lastElementChild!).textShadow,
+  }))
+  expect(halo.label).toBe('none')
+  expect(halo.value).not.toBe('none')
+
   // 키 자체는 그대로 듣는다 (FR-17은 안 건드렸다)
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()

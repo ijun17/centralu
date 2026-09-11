@@ -355,7 +355,17 @@ function Metric({
 }) {
   return (
     <span className={`flex items-baseline gap-1.5 ${tone}`} data-testid={testId}>
-      <span className="text-[10px] text-slate">{label}</span>
+      {/*
+        빛무리는 **숫자의 것**이다 (사용자 지적 2026-09-12: "번져 보인다").
+
+        `beacon`은 색과 함께 `text-shadow: 0 0 6px rgb(255 255 255 / .45)`를 건다. 색은
+        여기서 text-slate로 덮이지만 **그림자는 상속된다** — 그래서 #5c5c5c 글자가 흰
+        빛무리를 쓰고 있었다. 어두운 글자에 밝은 후광은 빛나 보이는 게 아니라 초점이
+        안 맞아 보인다. 순백 글자 위에서만 빛무리가 빛무리다.
+
+        이름표는 밝기 경쟁에서 빠지는 자리이므로(늘 slate), 상속만 끊는다.
+      */}
+      <span className="text-[10px] text-slate [text-shadow:none]">{label}</span>
       <span className="readout text-[13px] leading-none">{String(value).padStart(2, '0')}</span>
     </span>
   )
