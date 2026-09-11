@@ -165,6 +165,64 @@ describe('readTextFile — 이미지 미리보기', () => {
   })
 })
 
+describe('심볼릭 링크는 프로젝트 경계가 아니다', () => {
+  it('Given 중간 경로가 밖을 가리키는 링크 When 목록을 열면 Then 따라가지 않고 거절한다', async () => {
+    const outside = outsideDir()
+    mkdirSync(join(outside, 'nested'))
+    writeFileSync(join(outside, 'nested', 'secret.txt'), 'leak')
+    symlinkSync(outside, join(root, 'linked'), 'dir')
+
+    await expect(listDir(root, 'linked/nested')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 마지막 경로가 밖의 파일을 가리키는 링크 When 셸 경로를 만들면 Then 거절한다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(resolveExisting(root, 'secret.txt')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 옮길 대상이 링크 When 이동하면 Then 링크 자체도 목적지에 들어가지 못한다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    mkdirSync(join(root, 'dst'))
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(moveEntry(root, 'secret.txt', 'dst')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 이동 목적 폴더가 밖을 가리키는 링크 When 이동하면 Then 밖에 쓰지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(root, 'a.ts'), 'inside')
+    symlinkSync(outside, join(root, 'drop'), 'dir')
+
+    await expect(moveEntry(root, 'a.ts', 'drop')).rejects.toThrow(/symbolic link/i)
+    expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('inside')
+  })
+
+  it('Given 가져오기 목적 폴더가 링크 When 파일을 쓰면 Then 링크 밖에 만들지 않는다', async () => {
+    const outside = outsideDir()
+    symlinkSync(outside, join(root, 'drop'), 'dir')
+
+    await expect(importFile(root, 'drop', 'a.ts', Buffer.from('inside'))).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 읽을 파일이 링크 When 텍스트를 열면 Then 링크 대상을 읽지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(readTextFile(root, 'secret.txt')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 끊어진 링크 When 셸 경로를 만들면 Then 사라진 파일로 숨기지 않고 링크로 거절한다', async () => {
+    symlinkSync(join(root, 'missing.txt'), join(root, 'dangling.txt'))
+
+    await expect(resolveExisting(root, 'dangling.txt')).rejects.toThrow(/symbolic link/i)
+  })
+})
+
 describe('moveEntry', () => {
   it('파일을 폴더로 옮긴다', async () => {
     writeFileSync(join(root, 'a.ts'), 'hello')
