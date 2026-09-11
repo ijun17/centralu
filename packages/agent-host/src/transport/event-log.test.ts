@@ -31,6 +31,14 @@ describe('EventLog: 재연결 복원 (T3-1 완료 기준)', () => {
     expect(log.since(1)).toEqual({ events: [], resyncRequired: false })
   })
 
+  it('앞선 cursor 또는 다른 stream epoch는 재동기화를 요구한다', () => {
+    const log = new EventLog()
+    log.append(ev('1'))
+    expect(log.since(2).resyncRequired).toBe(true)
+    expect(log.since(1, '00000000-0000-4000-8000-000000000000').resyncRequired).toBe(true)
+    expect(log.since(1, log.streamEpoch).resyncRequired).toBe(false)
+  })
+
   it('afterSeq 0이면 버퍼 전체를 준다 (첫 연결)', () => {
     const log = new EventLog()
     log.append(ev('1'))
@@ -57,5 +65,19 @@ describe('EventLog: 재연결 복원 (T3-1 완료 기준)', () => {
     const log = new EventLog(3)
     for (let i = 0; i < 5; i++) log.append(ev(String(i)))
     expect(log.since(4).events.map((e) => e.seq)).toEqual([5])
+  })
+
+
+  it('미래 커서는 재시작/상태 불일치로 보고 재동기화를 요구한다', () => {
+    const log = new EventLog()
+    log.append(ev('1'))
+    expect(log.since(2)).toEqual({ events: [], resyncRequired: true })
+  })
+
+  it('대표 용량에서도 append가 오래된 항목 이동 없이 최신 링 슬롯만 유지한다', () => {
+    const log = new EventLog(3)
+    for (let i = 0; i < 6; i++) log.append(ev(String(i)))
+    expect(log.since(2)).toEqual({ events: [], resyncRequired: true })
+    expect(log.since(3).events.map((e) => e.seq)).toEqual([4, 5, 6])
   })
 })

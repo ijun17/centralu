@@ -36,6 +36,19 @@ no stdout destination at all, so a `console.log` here reaches nobody in producti
 looking fine in a terminal. `no-console` in `eslint.config.js` enforces this everywhere in
 the package except that one line.
 
+### Optional remote composition
+
+`--web-root` adds the built browser and runtime token preflight on the same loopback
+HTTP/WS port. `--token-file` avoids argv secrets; remote readiness stdout omits the
+token. The ordinary local/Tauri readiness JSON remains unchanged. `host-options.ts`
+validates startup before service creation; an explicit `--db` also anchors auxiliary
+files to that data directory. See [remote-host.md](remote-host.md).
+
+The ownership adapter holds a separate SQLite exclusive transaction for this host's
+lifetime. The session message journal owns streaming row/flush/index boundaries;
+SessionManager keeps session lifecycle and metadata ownership. Transport recovery is
+independent of both, so reconnecting an observer cannot create another session owner.
+
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
 ```ts

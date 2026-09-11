@@ -1,7 +1,6 @@
-import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { migrateLegacyDataDir } from './data-dir.js'
@@ -18,6 +17,8 @@ import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
 import { acquireInstanceLock } from './dev-services/instance-lock.js'
+import { HOST_HELP, parseHostOptions } from './host-options.js'
+import { createRemoteWebSurface } from './remote/web-surface.js'
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
 /**
@@ -32,16 +33,8 @@ import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './lo
 declare const __CC_BUILD__: string | undefined
 const BUILD = typeof __CC_BUILD__ === 'string' ? __CC_BUILD__ : 'dev'
 
-const { values } = parseArgs({
-  options: {
-    port: { type: 'string', default: '5175' },
-    token: { type: 'string' },
-    db: { type: 'string' },
-    /** 부모가 죽으면 함께 종료 (Tauri 수퍼바이저가 켠다) */
-    'watch-parent': { type: 'boolean' },
-    memory: { type: 'boolean', default: false },
-  },
-})
+const values = parseHostOptions(process.argv.slice(2), process.env)
+if (values.help) { console.log(HOST_HELP); process.exit(0) }
 
 /** 데이터 폴더를 옮겼다면 그 사실. 로그가 켜진 뒤에 적는다 (아래 참조) */
 let movedNote: string | null = null
@@ -49,7 +42,11 @@ let movedNote: string | null = null
 const token = values.token ?? process.env.CC_HOST_TOKEN ?? randomBytes(16).toString('hex')
 const dbPath = values.memory
   ? ':memory:'
-  : (values.db ?? defaultDbPath())
+  : (values.db ? resolve(values.db) : defaultDbPath())
+if (dbPath !== ':memory:') {
+  mkdirSync(dirname(dbPath), { recursive: true })
+  process.env.CC_DATA_DIR = dirname(dbPath)
+}
 
 /**
  * 데이터 폴더.
@@ -106,7 +103,7 @@ if (pathResult.source !== 'unchanged') {
 const lock = acquireInstanceLock(dbPath)
 if (!lock.ok) {
   console.error(
-    `[agent-host] Another Centralu is already using this data (pid ${lock.heldByPid}).\n` +
+    `[agent-host] Cannot acquire local host ownership: ${lock.reason}${lock.heldByPid ? ` (pid ${lock.heldByPid})` : ''}.\n` +
       `  Two hosts on the same folder will desync session lists.\n` +
       `  Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).`,
   )
@@ -163,9 +160,10 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
   writeAuto: (enabled) => store.setAppSetting(AUTO_UPDATE_CHECK_KEY, String(enabled)),
 })
 const server: HostServer = new HostServer({
-  port: Number(values.port),
+  port: values.port,
   token,
   onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns),
+  ...(values.webRoot ? createRemoteWebSurface({ root: values.webRoot, token, hostLabel: values.hostLabel }) : {}),
 })
 
 let port: number
@@ -176,7 +174,9 @@ try {
   process.exit(1)
 }
 // 이 줄은 Tauri 수퍼바이저가 파싱한다 (포트·토큰 전달 경로)
-console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
+console.log(JSON.stringify(values.webRoot
+  ? { ready: true, port, db: dbPath, mode: 'remote', hostLabel: values.hostLabel }
+  : { ready: true, port, token, db: dbPath }))
 
 /*
  * 기동 직후 한 번, 그다음은 6시간마다 (이슈 #43).
@@ -224,7 +224,10 @@ process.on('uncaughtException', (err) => {
   void shutdown()
 })
 
+let shuttingDown = false
 const shutdown = async () => {
+  if (shuttingDown) return
+  shuttingDown = true
   updates.stop()
   /*
    * **PTY를 먼저 끊는다.** 예전엔 mgr.disposeAll()을 await한 뒤였는데, Tauri 수퍼바이저가
@@ -257,7 +260,7 @@ process.on('SIGTERM', shutdown)
  * **명시적 플래그로만 켠다** — stdin이 /dev/null인 경우(다른 스크립트가 띄울 때)에도
  * EOF가 즉시 오므로, TTY 여부로 판단하면 엉뚱하게 자살한다 (실측으로 확인).
  */
-if (values['watch-parent']) {
+if (values.watchParent) {
   process.stdin.resume()
   const onParentGone = () => {
     console.error('[agent-host] parent process exited; shutting down')

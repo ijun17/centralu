@@ -91,6 +91,16 @@ agent-host (node, run standalone)         ▼
 - In dev mode, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node). At the Tauri migration only these switch to Rust (invoke), and **the ports stay the same** (C2). The order and method of the migration is in [platform-abstraction.md](platform-abstraction.md) §5.
 - This structure is what lets M0~M1 be developed in a browser with hot reload and no Rust toolchain, and run E2E with Playwright.
 
+### Optional trusted remote adapter (Issue 82)
+
+The default topology above is unchanged. A source-run host can additionally serve the
+built browser on its existing loopback HTTP/WS port. An independent OpenSSH local
+forward connects a labeled browser tab to that host. Each execution machine owns its
+store, credentials, sessions and child processes; no database or session authority is
+shared between machines. See [ADR 001](adr/001-trusted-remote-runtime.md) for the decision,
+module deletion tests and rejected hosted-MSA alternative, and [remote-host.md](remote-host.md)
+for operation and failure semantics.
+
 ## 5. Data flow (summary — detail in [state-management.md](state-management.md))
 
 ```

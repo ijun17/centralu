@@ -42,7 +42,9 @@
     "release:npm": "tsx scripts/release-npm.mts",
     "icon": "tsx scripts/render-icon.mts",
     "smoke:goal": "tsx packages/agent-host/scripts/smoke-goal.mts",
-    "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts"
+    "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts",
+    "remote:serve": "node packages/agent-host/scripts/remote-serve.mjs",
+    "remote": "node --import tsx packages/agent-host/src/remote/tunnel-main.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

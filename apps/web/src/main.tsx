@@ -3,6 +3,7 @@ import { App, useStore } from '@cc/ui'
 import { createWebPlatform } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
+import { RemoteBootstrap } from './remote-bootstrap.js'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
@@ -11,12 +12,21 @@ import '../../../packages/ui/src/styles/index.css'
  */
 const params = new URLSearchParams(location.search)
 
-const platform: Platform = params.has('mock')
-  ? seedMock()
-  : createWebPlatform({
-      hostUrl: import.meta.env.VITE_HOST_URL ?? 'ws://127.0.0.1:5175',
-      token: import.meta.env.VITE_HOST_TOKEN ?? 'dev-token',
-    })
+const remoteMode = params.has('remote') || (
+  import.meta.env.PROD &&
+  location.protocol.startsWith('http') &&
+  !import.meta.env.VITE_HOST_URL &&
+  !import.meta.env.VITE_HOST_TOKEN
+)
+
+const platform: Platform | null = params.has('mock') || !remoteMode
+  ? (params.has('mock')
+      ? seedMock()
+      : createWebPlatform({
+          hostUrl: import.meta.env.VITE_HOST_URL ?? 'ws://127.0.0.1:5175',
+          token: import.meta.env.VITE_HOST_TOKEN ?? 'dev-token',
+        }))
+  : null
 
 function seedMock(): Platform {
   const mock = createMockPlatform()
@@ -26,4 +36,6 @@ function seedMock(): Platform {
   return mock
 }
 
-createRoot(document.getElementById('root')!).render(<App platform={platform} />)
+const root = document.getElementById('root')
+if (!root) throw new Error('Missing #root')
+createRoot(root).render(platform ? <App platform={platform} /> : <RemoteBootstrap />)

@@ -5,7 +5,7 @@
 ## 1. Transport layer
 
 - WebSocket, 1 text frame = 1 JSON message.
-- Handshake immediately after connecting: `{ type: 'hello', token, protocolVersion }` → on mismatch, close immediately (with an error code). The token is generated when the host starts; in dev it is passed through an environment variable.
+- Handshake immediately after connecting: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → on mismatch, close immediately (with an error code). The token is generated when the host starts; in dev it is passed through an environment variable.
 - Two kinds, by direction: **RPC** (request/response, UI→host) and the **event stream** (host→UI, one-way push).
 
 ```ts
@@ -16,8 +16,23 @@ type RpcRes  = { kind: 'res';   id: string; ok: true; result: unknown }
 type Push    = { kind: 'event'; seq: number; sessionId?: string; event: NormalizedEvent }
 ```
 
-- `seq` is a monotonically increasing number assigned by the host. On reconnect, `subscribe({ afterSeq })` replays what was missed — **the key device that stops a reconnect being a loss of state.**
-- The host keeps recent events in a ring buffer (+ the store). If afterSeq is outside the buffer it sends `resync_required` and the UI reloads the snapshot.
+- `hello_ok` contains `protocolVersion`, `currentSeq`, `resyncRequired` and optional
+  `streamEpoch`. RPCs are queued until this authenticated readiness frame, not sent on
+  raw socket open. The epoch fields are additive within protocol version 1.
+- `seq` increases within one host lifetime. Reconnect sends the last accepted
+  `(streamEpoch, afterSeq)`. Same-epoch retained events replay in ascending order after
+  `hello_ok`; the client ignores duplicate sequence numbers.
+- An epoch mismatch, ahead-of-host cursor or cursor outside the ring returns
+  `resyncRequired: true` with no replay. The client resets its cursor to `currentSeq`
+  and emits `resync_required` locally so the UI reloads snapshots before continuing.
+- Old version-1 peers without epochs still parse; only peers implementing epochs can
+  detect every same-endpoint replacement. A future cursor still forces resynchronization.
+- Unsent queued RPCs may send after authenticated reconnect. Sent RPCs with a lost
+  response reject as `connection_lost`; callers must reconcile authoritative state
+  before deciding to retry a side effect. `retryable` is not automatic replay permission.
+- Pending calls and queued bytes are bounded; excess work rejects as `overloaded`.
+  Transport shutdown cancels connection timers and rejects remaining calls. Terminal
+  output remains non-replayed; reattachment uses the existing terminal scrollback API.
 
 ## 2. NormalizedEvent (product spec §6.2, made concrete)
 

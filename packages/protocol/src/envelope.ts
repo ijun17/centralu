@@ -6,12 +6,21 @@ import { ProtocolError } from './entities.js'
 
 export const PROTOCOL_VERSION = 1
 
+export const RemoteHostInfo = z.object({
+  mode: z.literal('remote'),
+  hostLabel: z.string().trim().min(1).max(80).refine((label) =>
+    [...label].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)),
+})
+export type RemoteHostInfo = z.infer<typeof RemoteHostInfo>
+
 export const HelloClient = z.object({
   kind: z.literal('hello'),
   token: z.string(),
   protocolVersion: z.number(),
   /** 재연결 시 유실분 재전송 요청 (없으면 전부 새로) */
-  afterSeq: z.number().optional(),
+  afterSeq: z.number().int().nonnegative().optional(),
+  /** Identifies the host lifetime that issued afterSeq. */
+  streamEpoch: z.string().min(1).optional(),
 })
 export type HelloClient = z.infer<typeof HelloClient>
 
@@ -20,7 +29,8 @@ export const HelloServer = z.object({
   protocolVersion: z.number(),
   /** afterSeq가 버퍼 밖이면 true — UI는 스냅샷을 다시 로드해야 한다 */
   resyncRequired: z.boolean().default(false),
-  currentSeq: z.number(),
+  currentSeq: z.number().int().nonnegative(),
+  streamEpoch: z.string().min(1).optional(),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 

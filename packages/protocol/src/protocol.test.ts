@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   NormalizedEvent,
   PROTOCOL_VERSION,
+  RemoteHostInfo,
   parseClientFrame,
   parseEventLenient,
   parseServerFrame,
@@ -144,6 +145,14 @@ describe('전방 호환 (docs/protocol.md §4)', () => {
 })
 
 describe('봉투', () => {
+  it('parses remote metadata at the process boundary without accepting blank or control labels', () => {
+    expect(RemoteHostInfo.parse({ mode: 'remote', hostLabel: ' Alpha ' })).toEqual({ mode: 'remote', hostLabel: 'Alpha' })
+    for (const hostLabel of ['', '   ', 'a'.repeat(81), 'a\nb']) {
+      expect(RemoteHostInfo.safeParse({ mode: 'remote', hostLabel }).success).toBe(false)
+    }
+    expect(RemoteHostInfo.safeParse({ mode: 'local', hostLabel: 'Alpha' }).success).toBe(false)
+  })
+
   it('hello / rpc 클라이언트 프레임', () => {
     expect(parseClientFrame({ kind: 'hello', token: 't', protocolVersion: PROTOCOL_VERSION }).success).toBe(true)
     expect(parseClientFrame({ kind: 'rpc', id: '1', method: 'agents.send', params: {} }).success).toBe(true)

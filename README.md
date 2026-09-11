@@ -86,6 +86,13 @@ aren't the same claim, and only the first one has been shown — on both archite
 If you're on Linux, `npm i -g centralu` gets you the AppImage — tell us how it went in
 [#14](https://github.com/ijun17/centralu/issues/14). Including if it did nothing at all.
 
+## Optional remote execution
+
+Control one trusted execution machine per browser tab through an SSH tunnel, while
+keeping its files, database and CLI credentials on that machine. The desktop stays
+local by default. See the [source-run remote guide](docs/remote-host.md) for setup and
+explicit limits (no shared database, migration or automatic failover).
+
 ## Licence
 
 [MIT](LICENSE). Issues and pull requests are welcome; please read

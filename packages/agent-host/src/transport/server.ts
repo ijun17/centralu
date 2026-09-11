@@ -1,47 +1,53 @@
-import { WebSocketServer, type WebSocket } from 'ws'
 import { createServer, type Server } from 'node:http'
-import {
-  PROTOCOL_VERSION,
-  type NormalizedEvent,
-  type ProtocolError,
-  parseClientFrame,
-} from '@cc/protocol'
+import { WebSocketServer, type WebSocket } from 'ws'
+import { PROTOCOL_VERSION, type NormalizedEvent, type ProtocolError, parseClientFrame } from '@cc/protocol'
 import { EventLog } from './event-log.js'
 
 /**
  * WS 서버 (docs/protocol.md §1). dev/prod 동일 — Tauri는 이 프로세스를 spawn만 한다.
  * 보안: loopback 바인딩 + 기동 시 생성한 토큰 핸드셰이크.
  */
-export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
-
-export type HostServerOptions = {
-  port: number
-  token: string
-  onRpc: RpcHandler
-  /** 정적 페이지 서빙 (dev에서 브라우저 접속용, 선택) */
-  onHttp?: (path: string) => { body: string | Buffer; contentType: string } | null
-}
+export type { HostHttpHandler, HostHttpResponse, HostServerOptions, RpcHandler } from './server-types.js'
+import { DEFAULT_LIMITS, protocolError, rawText, type HostServerOptions, type SocketState } from './server-types.js'
 
 export class HostServer {
   readonly log = new EventLog()
-  private wss: WebSocketServer
-  private http: Server
-  private clients = new Set<WebSocket>()
+  readonly streamEpoch = this.log.streamEpoch
+  private readonly wss: WebSocketServer
+  private readonly http: Server
+  private readonly clients = new Set<WebSocket>()
+  private readonly sockets = new Map<WebSocket, SocketState>()
   private listenError: ((err: Error) => void) | null = null
+  private closePromise: Promise<void> | null = null
 
-  constructor(private opts: HostServerOptions) {
+  constructor(private readonly opts: HostServerOptions) {
     this.http = createServer((req, res) => {
-      const hit = opts.onHttp?.(new URL(req.url ?? '/', 'http://x').pathname)
+      let path = '/'
+      try {
+        path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
+      } catch {
+        res.writeHead(400)
+        res.end('bad request')
+        return
+      }
+      const hit = opts.onHttp?.(path, req) ?? null
       if (!hit) {
         res.writeHead(404)
         res.end('not found')
         return
       }
-      res.writeHead(200, { 'content-type': hit.contentType })
-      res.end(hit.body)
+      res.writeHead(hit.status ?? 200, { 'content-type': hit.contentType ?? 'text/plain; charset=utf-8', ...hit.headers })
+      res.end(hit.body ?? '')
     })
-    this.wss = new WebSocketServer({ server: this.http })
-    this.wss.on('connection', (ws) => this.onConnection(ws))
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: opts.maxPayloadBytes ?? DEFAULT_LIMITS.maxPayloadBytes })
+    this.http.on('upgrade', (request, socket, head) => {
+      if (this.opts.allowUpgrade && !this.opts.allowUpgrade(request)) {
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      this.wss.handleUpgrade(request, socket, head, (ws) => this.onConnection(ws))
+    })
     // ws는 http 서버 에러를 자기 인스턴스로 재방출한다 — 여기서 안 받으면 프로세스가 죽는다
     this.wss.on('error', (err) => this.listenError?.(err))
   }
@@ -76,16 +82,16 @@ export class HostServer {
   }
 
   async close(): Promise<void> {
-    for (const c of this.clients) c.close()
-    await new Promise<void>((r) => this.wss.close(() => r()))
-    await new Promise<void>((r) => this.http.close(() => r()))
+    if (this.closePromise) return this.closePromise
+    this.closePromise = this.closeOnce()
+    return this.closePromise
   }
 
   /** 이벤트 방송 — seq를 부여해 링 버퍼에 남기고 연결된 클라이언트에 push */
   broadcast(event: NormalizedEvent): void {
     const entry = this.log.append(event)
     const frame = JSON.stringify({ kind: 'event', seq: entry.seq, event })
-    for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(frame)
+    for (const ws of this.clients) this.sendIfReady(ws, frame)
   }
 
   /**
@@ -93,86 +99,168 @@ export class HostServer {
    * 이벤트 로그(seq 링 버퍼)를 태우지 않는다 — 출력량이 대화 이벤트와 자릿수가 다르고,
    * 놓친 부분은 다시 붙을 때 host의 스크롤백에서 통째로 받는다.
    */
-  pushTerminal(frame: { terminalId: string; data?: string; exitCode?: number | null }): void {
+  pushTerminal(frame: { readonly terminalId: string; readonly data?: string; readonly exitCode?: number | null }): void {
     const payload =
       frame.data !== undefined
         ? { kind: 'term', terminalId: frame.terminalId, data: frame.data }
         : { kind: 'term_exit', terminalId: frame.terminalId, exitCode: frame.exitCode ?? null }
     const json = JSON.stringify(payload)
-    for (const ws of this.clients) if (ws.readyState === ws.OPEN) ws.send(json)
+    for (const ws of this.clients) this.sendIfReady(ws, json)
+  }
+
+  private async closeOnce(): Promise<void> {
+    const httpClosed = new Promise<void>((resolve) => this.http.close(() => resolve()))
+    this.http.closeAllConnections()
+    for (const state of this.sockets.values()) {
+      clearTimeout(state.handshakeTimer)
+      state.closed = true
+    }
+    for (const ws of this.wss.clients) ws.terminate()
+    await new Promise<void>((resolve) => this.wss.close(() => resolve()))
+    await httpClosed
+    this.clients.clear()
+    this.sockets.clear()
   }
 
   private onConnection(ws: WebSocket): void {
-    let authed = false
+    if (this.sockets.size >= (this.opts.maxSockets ?? DEFAULT_LIMITS.maxSockets)) {
+      this.closeSocket(ws, 1013, 'socket limit')
+      return
+    }
+    const state: SocketState = {
+      authed: false,
+      closed: false,
+      inFlight: 0,
+      handshakeTimer: setTimeout(() => this.closeSocket(ws, 4001, 'auth timeout'), this.opts.handshakeTimeoutMs ?? DEFAULT_LIMITS.handshakeTimeoutMs),
+    }
+    this.sockets.set(ws, state)
 
-    ws.on('message', async (raw) => {
-      let parsedJson: unknown
-      try {
-        parsedJson = JSON.parse(String(raw))
-      } catch {
-        return this.sendError(ws, null, { code: 'internal', message: 'Malformed JSON', retryable: false })
-      }
-      const frame = parseClientFrame(parsedJson)
-      if (!frame.success) {
-        return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
-      }
-
-      if (frame.data.kind === 'hello') {
-        if (frame.data.token !== this.opts.token) {
-          ws.close(4001, 'bad token')
-          return
-        }
-        if (frame.data.protocolVersion !== PROTOCOL_VERSION) {
-          this.sendError(ws, null, {
-            code: 'version_mismatch',
-            message: `Protocol version mismatch (server ${PROTOCOL_VERSION}, client ${frame.data.protocolVersion})`,
-            retryable: false,
-          })
-          ws.close(4002, 'version mismatch')
-          return
-        }
-        authed = true
-        this.clients.add(ws)
-
-        const { events, resyncRequired } = this.log.since(frame.data.afterSeq ?? 0)
-        ws.send(
-          JSON.stringify({
-            kind: 'hello_ok',
-            protocolVersion: PROTOCOL_VERSION,
-            resyncRequired,
-            currentSeq: this.log.currentSeq,
-          }),
-        )
-        // 유실분 재전송 — 재연결이 상태 유실이 되지 않게 (docs/protocol.md §1)
-        for (const e of events) ws.send(JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
-        return
-      }
-
-      if (!authed) {
-        ws.close(4001, 'not authed')
-        return
-      }
-
-      // RPC
-      try {
-        const result = await this.opts.onRpc(frame.data.method, frame.data.params)
-        ws.send(JSON.stringify({ kind: 'res', id: frame.data.id, ok: true, result }))
-      } catch (err) {
-        const e = err as Error & { code?: ProtocolError['code'] }
-        this.sendError(ws, frame.data.id, {
-          code: e.code ?? 'internal',
-          message: e.message ?? 'Unknown error',
-          retryable: false,
-        })
-      }
+    ws.on('message', (raw) => {
+      void this.onMessage(ws, raw)
     })
+    ws.on('close', () => this.forgetSocket(ws))
+    ws.on('error', () => this.forgetSocket(ws))
+  }
 
-    ws.on('close', () => this.clients.delete(ws))
-    ws.on('error', () => this.clients.delete(ws))
+  private async onMessage(ws: WebSocket, raw: string | Buffer | ArrayBuffer | Buffer[]): Promise<void> {
+    const state = this.sockets.get(ws)
+    if (!state || state.closed) return
+    const rawTextValue = rawText(raw)
+    if (Buffer.byteLength(rawTextValue) > (this.opts.maxPayloadBytes ?? DEFAULT_LIMITS.maxPayloadBytes)) {
+      this.closeSocket(ws, 1009, 'message too large')
+      return
+    }
+
+    let parsedJson: unknown
+    try {
+      parsedJson = JSON.parse(rawTextValue)
+    } catch {
+      this.sendError(ws, null, { code: 'internal', message: 'Malformed JSON', retryable: false })
+      return
+    }
+    const frame = parseClientFrame(parsedJson)
+    if (!frame.success) {
+      this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
+      return
+    }
+
+    if (frame.data.kind === 'hello') {
+      this.handleHello(ws, state, frame.data.token, frame.data.protocolVersion, frame.data.afterSeq ?? 0, frame.data.streamEpoch)
+      return
+    }
+
+    if (!state.authed) {
+      this.closeSocket(ws, 4001, 'not authed')
+      return
+    }
+
+    const maxInFlight = this.opts.maxRpcInFlightPerSocket ?? DEFAULT_LIMITS.maxRpcInFlightPerSocket
+    if (state.inFlight >= maxInFlight) {
+      this.sendError(ws, frame.data.id, { code: 'internal', message: 'Too many in-flight RPCs', retryable: true })
+      return
+    }
+    state.inFlight += 1
+    try {
+      const result = await this.opts.onRpc(frame.data.method, frame.data.params)
+      this.sendIfReady(ws, JSON.stringify({ kind: 'res', id: frame.data.id, ok: true, result }))
+    } catch (err) {
+      this.sendError(ws, frame.data.id, protocolError(err))
+    } finally {
+      state.inFlight -= 1
+    }
+  }
+
+  private handleHello(ws: WebSocket, state: SocketState, token: string, protocolVersion: number, afterSeq: number, streamEpoch?: string): void {
+    if (state.authed) {
+      this.sendHelloOk(ws, false)
+      return
+    }
+    if (token !== this.opts.token) {
+      this.closeSocket(ws, 4001, 'bad token')
+      return
+    }
+    if (protocolVersion !== PROTOCOL_VERSION) {
+      this.sendError(ws, null, {
+        code: 'version_mismatch',
+        message: `Protocol version mismatch (server ${PROTOCOL_VERSION}, client ${protocolVersion})`,
+        retryable: false,
+      })
+      this.closeSocket(ws, 4002, 'version mismatch')
+      return
+    }
+    state.authed = true
+    clearTimeout(state.handshakeTimer)
+    this.clients.add(ws)
+
+    const epochMismatch = streamEpoch !== undefined && streamEpoch !== this.streamEpoch
+    const replay = epochMismatch ? { events: [], resyncRequired: true } : this.log.since(afterSeq)
+    this.sendHelloOk(ws, replay.resyncRequired)
+    if (replay.resyncRequired) return
+    for (const entry of replay.events) this.sendIfReady(ws, JSON.stringify({ kind: 'event', seq: entry.seq, event: entry.event }))
+  }
+
+  private sendHelloOk(ws: WebSocket, resyncRequired: boolean): void {
+    this.sendIfReady(
+      ws,
+      JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired, currentSeq: this.log.currentSeq, streamEpoch: this.streamEpoch }),
+    )
+  }
+
+  private sendIfReady(ws: WebSocket, frame: string): boolean {
+    if (ws.readyState !== ws.OPEN) return false
+    if (ws.bufferedAmount + Buffer.byteLength(frame) > (this.opts.maxBufferedBytes ?? DEFAULT_LIMITS.maxBufferedBytes)) {
+      this.closeSocket(ws, 1013, 'outbound buffer limit')
+      return false
+    }
+    ws.send(frame, (error) => {
+      if (error) this.closeSocket(ws, 1011, 'send failed')
+    })
+    return true
   }
 
   private sendError(ws: WebSocket, id: string | null, error: ProtocolError): void {
-    if (ws.readyState !== ws.OPEN) return
-    ws.send(JSON.stringify({ kind: 'res', id: id ?? '0', ok: false, error }))
+    this.sendIfReady(ws, JSON.stringify({ kind: 'res', id: id ?? '0', ok: false, error }))
+  }
+
+  private closeSocket(ws: WebSocket, code: number, reason: string): void {
+    const state = this.sockets.get(ws)
+    if (state?.closed) return
+    if (state) {
+      state.closed = true
+      clearTimeout(state.handshakeTimer)
+    }
+    if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+      ws.close(code, reason)
+      const deadline = setTimeout(() => ws.terminate(), 1000)
+      deadline.unref()
+      ws.once('close', () => clearTimeout(deadline))
+    }
+  }
+
+  private forgetSocket(ws: WebSocket): void {
+    const state = this.sockets.get(ws)
+    if (state) clearTimeout(state.handshakeTimer)
+    this.clients.delete(ws)
+    this.sockets.delete(ws)
   }
 }

@@ -70,7 +70,13 @@ To stop the scope leaking, what v1 explicitly **does not do**:
   is a structured GUI, not a PTY wrap — but a project terminal beside it turned out to be part of watching a
   project, not a replacement for the conversation. Recorded rather than deleted, same reasoning as the grid line below.
 - Advanced git operations (rebase, cherry-pick etc. — read-oriented; commit/staging come later)
-- Remote/cloud execution (local projects on the local machine only)
+- ~~Remote/cloud execution (local projects on the local machine only)~~ — **narrowed for
+  [Issue 82](https://github.com/ijun17/centralu/issues/82).** The desktop remains local by default.
+  An opt-in source-run browser can control one trusted, single-user execution machine
+  through SSH. Its projects, sessions, SQLite and CLI credentials stay on that machine.
+  Hosted/cloud accounts, multi-tenant control, cross-host aggregation/scheduling,
+  shared databases, automatic failover and session migration remain non-goals.
+  See [remote-host.md](remote-host.md) and [ADR 001](adr/001-trusted-remote-runtime.md).
 - Tools other than Claude Code and Codex (only the adapter structure is designed to extend)
 - ~~**Concurrent split grid view**~~ — **withdrawn 2026-08-20.** It was built, and it ships marked **experimental** (§5.4).
   The line is kept rather than deleted: there was a period where this document said "we do not build this"
