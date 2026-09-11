@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { baseName, importFile, listDir, moveEntry, resolveExisting, safeJoin } from './fs.js'
+import { baseName, importFile, listDir, moveEntry, readTextFile, resolveExisting, safeJoin } from './fs.js'
 
 /**
  * 파일을 **바꾸는** 쪽의 검사 (#18, #19).
@@ -16,6 +16,7 @@ import { baseName, importFile, listDir, moveEntry, resolveExisting, safeJoin } f
  */
 
 let root = ''
+const extraDirs: string[] = []
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cc-fs-'))
@@ -23,7 +24,14 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
+  for (const d of extraDirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
+
+function outsideDir(): string {
+  const d = mkdtempSync(join(tmpdir(), 'cc-fs-outside-'))
+  extraDirs.push(d)
+  return d
+}
 
 describe('safeJoin — 프로젝트 밖으로 나가지 않는다', () => {
   it('안쪽 경로는 그대로 붙는다', () => {
@@ -58,6 +66,13 @@ describe('safeJoin — 프로젝트 밖으로 나가지 않는다', () => {
       rmSync(sibling, { recursive: true, force: true })
     }
   })
+})
+
+it('preserves ordinary file and directory names beginning with two dots', async () => {
+  mkdirSync(join(root, '..notes'))
+  writeFileSync(join(root, '..notes', '..draft.txt'), 'ordinary text')
+  expect((await readTextFile(root, '..notes/..draft.txt')).text).toBe('ordinary text')
+  expect((await listDir(root, '..notes')).map((entry) => entry.name)).toContain('..draft.txt')
 })
 
 describe('baseName — 이름 자리에 경로가 들어오지 못한다', () => {
@@ -122,6 +137,64 @@ describe('listDir — 저장소가 아닌 프로젝트', () => {
     expect(entries).toHaveLength(names.length)
     // 저장소가 아니니 무시되는 것도 없다 — 못 물어봤다고 전부 무시로 칠하면 트리가 빈다
     expect(entries.every((e) => !e.ignored)).toBe(true)
+  })
+})
+
+describe('심볼릭 링크는 프로젝트 경계가 아니다', () => {
+  it('Given 중간 경로가 밖을 가리키는 링크 When 목록을 열면 Then 따라가지 않고 거절한다', async () => {
+    const outside = outsideDir()
+    mkdirSync(join(outside, 'nested'))
+    writeFileSync(join(outside, 'nested', 'secret.txt'), 'leak')
+    symlinkSync(outside, join(root, 'linked'), 'dir')
+
+    await expect(listDir(root, 'linked/nested')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 마지막 경로가 밖의 파일을 가리키는 링크 When 셸 경로를 만들면 Then 거절한다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(resolveExisting(root, 'secret.txt')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 옮길 대상이 링크 When 이동하면 Then 링크 자체도 목적지에 들어가지 못한다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    mkdirSync(join(root, 'dst'))
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(moveEntry(root, 'secret.txt', 'dst')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 이동 목적 폴더가 밖을 가리키는 링크 When 이동하면 Then 밖에 쓰지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(root, 'a.ts'), 'inside')
+    symlinkSync(outside, join(root, 'drop'), 'dir')
+
+    await expect(moveEntry(root, 'a.ts', 'drop')).rejects.toThrow(/symbolic link/i)
+    expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('inside')
+  })
+
+  it('Given 가져오기 목적 폴더가 링크 When 파일을 쓰면 Then 링크 밖에 만들지 않는다', async () => {
+    const outside = outsideDir()
+    symlinkSync(outside, join(root, 'drop'), 'dir')
+
+    await expect(importFile(root, 'drop', 'a.ts', Buffer.from('inside'))).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 읽을 파일이 링크 When 텍스트를 열면 Then 링크 대상을 읽지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(readTextFile(root, 'secret.txt')).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('Given 끊어진 링크 When 셸 경로를 만들면 Then 사라진 파일로 숨기지 않고 링크로 거절한다', async () => {
+    symlinkSync(join(root, 'missing.txt'), join(root, 'dangling.txt'))
+
+    await expect(resolveExisting(root, 'dangling.txt')).rejects.toThrow(/symbolic link/i)
   })
 })
 
@@ -213,12 +286,18 @@ describe('importFile — 밖에서 끌어온 파일', () => {
   it('목적지가 프로젝트 밖이면 거절한다', async () => {
     await expect(importFile(root, '..', 'evil.txt', Buffer.from('x'))).rejects.toThrow(/outside the project/)
   })
+
+  it('없는 새 파일은 만들 수 있다 — leaf 없음은 가져오기에서만 허용한다', async () => {
+    const res = await importFile(root, '', 'fresh.txt', Buffer.from('new'))
+    expect(res).toEqual({ path: 'fresh.txt' })
+    expect(readFileSync(join(root, 'fresh.txt'), 'utf8')).toBe('new')
+  })
 })
 
 describe('resolveExisting — 셸에 넘길 절대 경로', () => {
   it('있는 파일의 절대 경로를 준다', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
-    expect(await resolveExisting(root, 'a.ts')).toBe(join(root, 'a.ts'))
+    expect(await resolveExisting(root, 'a.ts')).toBe(realpathSync(join(root, 'a.ts')))
   })
 
   /** 없는 경로를 셸에 넘기면 아무 일도 일어나지 않는다 — 그 침묵을 여기서 막는다 */
@@ -228,5 +307,37 @@ describe('resolveExisting — 셸에 넘길 절대 경로', () => {
 
   it('프로젝트 밖은 거절한다 (휴지통이 남의 파일을 삼키지 않게)', async () => {
     await expect(resolveExisting(root, '../..')).rejects.toThrow(/outside the project/)
+  })
+})
+
+describe('readTextFile — 파일 내용은 정규 파일의 앞부분만 읽는다', () => {
+  it('Given 큰 텍스트 파일 When 열면 Then 표시 한계까지만 돌려주고 전체 크기는 보존한다', async () => {
+    const text = `${'a'.repeat(2_000_000)}tail`
+    writeFileSync(join(root, 'large.txt'), text)
+
+    const file = await readTextFile(root, 'large.txt')
+    expect(file).toEqual({
+      text: 'a'.repeat(2_000_000),
+      truncated: true,
+      binary: false,
+      bytes: Buffer.byteLength(text),
+    })
+  })
+
+  it('Given 앞부분에 널 바이트가 있는 정규 파일 When 열면 Then 바이너리로 표시한다', async () => {
+    writeFileSync(join(root, 'bin.dat'), Buffer.from([0x61, 0, 0x62]))
+
+    await expect(readTextFile(root, 'bin.dat')).resolves.toEqual({
+      text: '',
+      truncated: false,
+      binary: true,
+      bytes: 3,
+    })
+  })
+
+  it('Given 디렉토리 When 파일처럼 열면 Then 정규 파일이 아니므로 거절한다', async () => {
+    mkdirSync(join(root, 'dir'))
+
+    await expect(readTextFile(root, 'dir')).rejects.toThrow(/regular file/i)
   })
 })

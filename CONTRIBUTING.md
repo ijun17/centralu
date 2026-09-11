@@ -17,15 +17,22 @@ commit in it, so which build you were on is never in question.
 ```bash
 pnpm install
 
-# terminal 1 — the agent host (Node sidecar)
-pnpm host --port 5175 --token dev-token
+# browser dev — one shell so the per-launch token is shared without printing it
+CC_HOST_TOKEN="$(openssl rand -hex 16)"
+CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
+HOST_PID=$!
+trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
 
-# terminal 2 — the web UI. Development happens in a browser; releases go out as Tauri
-pnpm dev                      # http://127.0.0.1:5174
+VITE_HOST_TOKEN="$CC_HOST_TOKEN" pnpm dev   # http://127.0.0.1:5174
 ```
 
 `http://127.0.0.1:5174/?mock=1` runs the UI against a mock platform with no host at all,
 which is what you want when you are only touching the interface.
+
+Do not use a fixed token such as `dev-token`, and do not paste real launch tokens into
+issues, logs, screenshots, or test artifacts. The command above discards the host's
+stdout handshake because it contains the token; diagnostic stderr stays visible. If you change the host port, pass the same
+explicit URL to the UI with `VITE_HOST_URL=ws://127.0.0.1:<port>`.
 
 For the real app rather than the browser:
 

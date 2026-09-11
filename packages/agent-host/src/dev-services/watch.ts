@@ -1,5 +1,6 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { safeJoin } from './fs.js'
+import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
 
 /**
  * 파일 트리의 눈 (#34) — **펼쳐진 디렉토리만** 감시한다.
@@ -57,9 +58,12 @@ export class DirWatchers {
       if (cur.has(rel)) continue
       let abs: string
       try {
-        // 트리의 다른 fs 경로들과 같은 규칙 — 프로젝트 밖은 감시 대상이 될 수 없다
+        // 트리의 다른 fs 경로들과 같은 규칙 — 프로젝트 밖과 링크는 감시 대상이 될 수 없다
         abs = safeJoin(root, rel)
-      } catch {
+        const info = assertExistingPathSync(root, rel)
+        if (!info.isDirectory()) continue
+      } catch (error) {
+        if (isMissingPathError(error)) this.schedule(projectId, rel)
         continue
       }
       let w: FSWatcher
@@ -67,7 +71,7 @@ export class DirWatchers {
         w = watch(abs, () => this.schedule(projectId, rel))
       } catch {
         /*
-         * 이미 사라진 디렉토리다 (Finder에서 지운 폴더가 펼쳐져 있던 경우).
+         * 경로 검사 뒤에 사라진 디렉토리다 (Finder에서 지운 폴더가 펼쳐져 있던 경우).
          * 감시는 못 하지만 **그 사실이 곧 알릴 거리다** — 한 번 알리면 UI가
          * 다시 읽고, 빈 목록과 부모의 재조회로 화면에서 걷힌다.
          */
