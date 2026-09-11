@@ -3465,9 +3465,17 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
         { kind: 'image', seq: ++chatSeq, mime: e.mime, data: e.data, path: e.path, note: e.note },
       ]
     case 'tool_result': {
-      const idx = [...items].reverse().findIndex((i) => i.kind === 'tool' && i.result === undefined)
-      if (idx === -1) return items
-      const real = items.length - 1 - idx
+      /*
+       * 결과는 **가장 오래 열려 있는** 도구 줄에 붙는다 (2026-09-12).
+       *
+       * 예전엔 마지막 열린 줄을 찾았다. 한 번에 하나만 열려 있는 동안에는 두 규칙이 같은
+       * 줄을 가리키므로 아무 차이가 없었지만, 호출 둘이 연달아 열리면(claude의 병렬 호출)
+       * 마지막-우선은 두 결과를 **서로 바꿔** 붙인다 — 도구가 뱉은 순서가 곧 호출 순서이기
+       * 때문이다. 복원(messagesToChat)도 같은 규칙을 쓴다: 같은 화면이 두 길에서 서로 다른
+       * 짝을 짓는 일이 없어야 한다.
+       */
+      const real = items.findIndex((i) => i.kind === 'tool' && i.result === undefined)
+      if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       // live는 여기서 버린다 — 완주한 출력 전체가 result로 왔으므로 조각은 역할이 끝났다
       return items.map((it, i) =>
@@ -3613,6 +3621,27 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
           title: e.summary.title,
           readOnly: e.summary.readOnly,
         })
+    } else if (m.kind === 'tool_result') {
+      /*
+       * 복원된 도구 카드도 **출력을 들고 온다** (2026-09-12, 데모 씬에서 드러남).
+       *
+       * host는 tool_call과 tool_result를 각각 한 행으로 남기는데 여기엔 tool_call 분기만
+       * 있었다. 그래서 세션을 다시 열면 카드는 제목만 남고 출력이 통째로 사라졌다 —
+       * 라이브로 보고 있던 사람에게만 보이는 화면이었던 셈이다. 붙이는 규칙은 라이브
+       * (appendChat)와 같다: **아직 결과가 없는 가장 오래된 도구 줄**에 붙인다 — 도구가
+       * 뱉은 순서가 곧 호출 순서라서, 호출 둘이 연달아 열려도 짝이 안 바뀐다.
+       *
+       * 짝을 못 찾으면(페이지 경계로 tool_call이 이 묶음 밖에 있을 때) 조용히 버린다 —
+       * 주인 없는 출력을 대화에 새 줄로 세우면 없던 말이 생긴다.
+       */
+      const e = m.payload as { summary?: string; ok?: boolean }
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        if (it?.kind !== 'tool' || it.result !== undefined) continue
+        const filled: Extract<ChatItem, { kind: 'tool' }> = { ...it, result: e.summary ?? '', ok: e.ok }
+        items[i] = filled
+        break
+      }
     } else if (m.kind === 'image') {
       // 이미지는 영속된다 (#40 2차) — host가 파일에서 바이트를 다시 실어 보낸다
       const e = m.payload as { mime?: string; data?: string; path?: string; note?: string }

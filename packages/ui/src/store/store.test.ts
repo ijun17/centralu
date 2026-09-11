@@ -654,6 +654,47 @@ describe('화면(view) 복원', () => {
   })
 })
 
+describe('messagesToChat — 도구 출력 복원', () => {
+  /*
+   * host는 호출과 결과를 각각 한 행으로 남긴다. 결과 분기가 없던 동안 세션을 다시 열면
+   * 카드가 제목만 남고 출력이 사라졌다 — 라이브로 보던 사람에게만 있던 화면이다.
+   */
+  const call = (seq: number) => ({
+    sessionId: 's',
+    seq,
+    role: 'system' as const,
+    kind: 'tool_call' as const,
+    payload: { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test', readOnly: true } },
+    ts: 0,
+  })
+  const result = (seq: number, summary: string, ok = true) => ({
+    sessionId: 's',
+    seq,
+    role: 'system' as const,
+    kind: 'tool_result' as const,
+    payload: { type: 'tool_result', callId: 'c1', ok, summary },
+    ts: 0,
+  })
+
+  it('결과 행은 아직 결과가 없는 도구 줄에 붙는다', () => {
+    const items = messagesToChat([call(1), result(2, '3 passed')])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'tool', result: '3 passed', ok: true })
+  })
+
+  it('호출이 여럿이면 뱉은 순서대로 짝을 짓는다 — 둘이 서로 바뀌지 않는다', () => {
+    const items = messagesToChat([call(1), call(2), result(3, '첫째'), result(4, '둘째', false)])
+    expect(items.map((i) => (i.kind === 'tool' ? [i.result, i.ok] : null))).toEqual([
+      ['첫째', true],
+      ['둘째', false],
+    ])
+  })
+
+  it('짝 없는 결과는 버린다 — 없던 줄을 만들지 않는다', () => {
+    expect(messagesToChat([result(1, '주인 없는 출력')])).toEqual([])
+  })
+})
+
 describe('messagesToChat — 이미지 행 (#40 2차)', () => {
   it('영속된 이미지가 대화로 되살아난다', () => {
     const items = messagesToChat([
