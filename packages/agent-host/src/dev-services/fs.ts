@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { open, readdir, rename, writeFile } from 'node:fs/promises'
+import { lstat, open, readdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import { wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
@@ -14,9 +14,9 @@ import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-gu
  *
  * Issues #18/#19 added writing to that list, and writing is where rule 2 stops being a
  * tidiness rule: reading the wrong file leaks it, but *moving* or *trashing* the wrong one
- * destroys something the person never pointed at. So every operation below resolves both
- * ends through `safeJoin` before it touches anything, and the checks are exported as plain
- * functions so they can be tested without a filesystem.
+ * destroys something the person never pointed at. Operations reject traversal and symlink
+ * components before use; reads also check the opened object's identity. These pathname
+ * guards are not an atomic sandbox against concurrent same-user filesystem mutations.
  */
 
 export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
@@ -164,8 +164,15 @@ export async function importFile(root: string, toDir: string, name: string, data
  */
 export async function resolveExisting(root: string, rel: string): Promise<string> {
   const abs = safeJoin(root, rel)
-  await assertExistingPath(root, rel)
-  return abs
+  const rootReal = await realpath(root)
+  const expected = await assertExistingPath(root, rel)
+  const canonical = await realpath(abs)
+  safeJoin(rootReal, relative(rootReal, canonical))
+  const current = await lstat(canonical)
+  if (current.isSymbolicLink() || current.dev !== expected.dev || current.ino !== expected.ino) {
+    throw new UnsafePathError('Path changed while resolving the file')
+  }
+  return canonical
 }
 
 /**
@@ -251,6 +258,9 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
   try {
     const info = await handle.stat()
     if (!info.isFile()) fail('Path is not a regular file')
+    if (info.dev !== pathInfo.dev || info.ino !== pathInfo.ino) {
+      throw new UnsafePathError('Path changed while opening the file')
+    }
 
     const mime = imageMime(rel)
     if (mime && mime !== 'image/svg+xml' && info.size > MAX_IMAGE_PREVIEW) {

@@ -3,8 +3,10 @@
 //! 여기서 하는 일은 셋뿐이다: 사이드카 감독, OS 통합(알림·뱃지·단축키·IDE 열기), 창 관리.
 //! 대화·상태·화면은 전부 웹뷰 쪽에 있다 (docs/architecture.md §4).
 
+mod path_safety;
 mod sidecar;
 
+use path_safety::assert_safe_native_path;
 use sidecar::{HostInfo, Supervisor};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
@@ -131,7 +133,9 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
 /// ("Could not show a.ts: …") 여기서 한 번 더 붙이면 같은 말이 두 번 나온다.
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
-    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|e| e.to_string())
+    let native_path = std::path::Path::new(&path);
+    assert_safe_native_path(native_path).map_err(|e| e.to_string())?;
+    tauri_plugin_opener::reveal_item_in_dir(native_path).map_err(|e| e.to_string())
 }
 
 /// 휴지통으로 보낸다 (#18) — 지우는 게 아니다.
@@ -147,11 +151,13 @@ fn reveal_path(path: String) -> Result<(), String> {
 /// 지켜진다. 권한 프롬프트에 막혀 **삭제 자체가 조용히 실패하는 것**이 더 나쁘다.
 #[tauri::command]
 fn trash_path(path: String) -> Result<(), String> {
-    send_to_trash(&path).map_err(|e| e.to_string())
+    let native_path = std::path::Path::new(&path);
+    assert_safe_native_path(native_path).map_err(|e| e.to_string())?;
+    send_to_trash(native_path).map_err(|e| e.to_string())
 }
 
 #[cfg(target_os = "macos")]
-fn send_to_trash(path: &str) -> Result<(), trash::Error> {
+fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
     use trash::macos::{DeleteMethod, TrashContextExtMacos};
     let mut ctx = trash::TrashContext::default();
     ctx.set_delete_method(DeleteMethod::NsFileManager);
@@ -163,7 +169,7 @@ fn send_to_trash(path: &str) -> Result<(), trash::Error> {
 /// 다른 마운트 지점의 파일은 규격대로 그 볼륨의 `.Trash-$uid`로 가고, 그럴 수 없는
 /// 파일 시스템(FAT 등)에서는 실패가 그대로 올라온다. 조용히 지우는 것보다 낫다.
 #[cfg(not(target_os = "macos"))]
-fn send_to_trash(path: &str) -> Result<(), trash::Error> {
+fn send_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
     trash::delete(path)
 }
 

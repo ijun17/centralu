@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -316,7 +316,7 @@ describe('importFile — 밖에서 끌어온 파일', () => {
 describe('resolveExisting — 셸에 넘길 절대 경로', () => {
   it('있는 파일의 절대 경로를 준다', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
-    expect(await resolveExisting(root, 'a.ts')).toBe(join(root, 'a.ts'))
+    expect(await resolveExisting(root, 'a.ts')).toBe(realpathSync(join(root, 'a.ts')))
   })
 
   /** 없는 경로를 셸에 넘기면 아무 일도 일어나지 않는다 — 그 침묵을 여기서 막는다 */
