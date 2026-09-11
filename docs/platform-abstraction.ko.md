@@ -65,10 +65,7 @@ export interface PlatformCapabilities {
 
 ```ts
 // apps/web/src/main.tsx
-const platform = await createWebPlatform({
-  hostUrl: import.meta.env.VITE_HOST_URL ?? 'ws://127.0.0.1:5175',
-  token: import.meta.env.VITE_HOST_TOKEN,
-})
+const platform = isMockMode(location.search) ? seedMock() : createWebPlatform(browserHostOptions(import.meta.env))
 createRoot(el).render(<App platform={platform} />)
 
 // apps/desktop/src/main.tsx  (after M1)
@@ -84,6 +81,7 @@ export const useCapability = (k: keyof PlatformCapabilities) => usePlatform().ca
 ```
 
 - 환경 감지(`window.__TAURI__` 존재 여부)로 자동 분기하지 **않는다** — 진입점이 다르므로 감지는 불필요하고, 감지 로직은 숨은 의존성이 된다.
+- 브라우저 개발은 host를 띄울 때마다 임시 토큰을 새로 만든다. host와 Vite를 같은 셸에서 시작해 `CC_HOST_TOKEN`을 `VITE_HOST_TOKEN`으로 넘긴다. 토큰이 의도적으로 없는 브라우저 경로는 mock 모드(`?mock=1`)뿐이다.
 - 컴포넌트가 `usePlatform()`을 직접 쓰는 일조차 드물어야 한다. 스토어 액션(스토어가 포트를 호출)과 셀렉터로 대부분 충분하다.
 
 ## 5. 이전 플레이북 (C1, C2의 실행 순서)

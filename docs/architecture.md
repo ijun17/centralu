@@ -87,7 +87,7 @@ agent-host (node, run standalone)         ▼
 ```
 
 - **The AgentPort implementation stays single** — dev and prod use the same WS client. Tauri's role is not communication but **process supervision** (spawn, crash detection, restart). We do not build a stdio relay (double serialisation via Rust).
-- Security: an arbitrary port + a handshake with a token generated at startup, bound to loopback only.
+- Security: an arbitrary port + a handshake with a token generated at startup, bound to loopback only. Browser/WebView clients must also come from the explicit dev/Tauri origin allowlist; native clients without an `Origin` header still need the token, and literal `Origin: null` is rejected.
 - In dev mode, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node). At the Tauri migration only these switch to Rust (invoke), and **the ports stay the same** (C2). The order and method of the migration is in [platform-abstraction.md](platform-abstraction.md) §5.
 - This structure is what lets M0~M1 be developed in a browser with hot reload and no Rust toolchain, and run E2E with Playwright.
 

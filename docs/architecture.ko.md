@@ -89,7 +89,7 @@ agent-host (node, run standalone)         ▼
 ```
 
 - **AgentPort 구현은 하나로 유지된다** — dev와 prod가 같은 WS 클라이언트를 쓴다. Tauri의 역할은 통신이 아니라 **프로세스 감독**(spawn, 크래시 감지, 재시작)이다. stdio 릴레이(Rust를 거치는 이중 직렬화)는 만들지 않는다.
-- 보안: 임의 포트 + 시작 시 생성한 토큰으로 하는 핸드셰이크, loopback에만 바인딩.
+- 보안: 임의 포트 + 시작 시 생성한 토큰으로 하는 핸드셰이크, loopback에만 바인딩. 브라우저/WebView 클라이언트는 명시된 dev/Tauri origin allowlist에도 들어야 한다. `Origin` 헤더가 없는 네이티브 클라이언트도 토큰은 필요하고, literal `Origin: null`은 거부한다.
 - dev 모드에서는 git/fs/store를 agent-host 안의 `dev-services` 모듈(Node로 구현)이 제공한다. Tauri 전환 시점에 이 부분만 Rust(invoke)로 바뀌고 **포트는 그대로 유지된다**(C2). 전환의 순서와 방법은 [platform-abstraction.ko.md](platform-abstraction.ko.md) §5에 있다.
 - 이 구조 덕분에 M0~M1을 Rust 툴체인 없이 브라우저에서 핫 리로드로 개발하고, Playwright로 E2E를 돌릴 수 있다.
 

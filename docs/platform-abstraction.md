@@ -63,10 +63,7 @@ The point: **most of the web implementation is "delegate to the host over WS."**
 
 ```ts
 // apps/web/src/main.tsx
-const platform = await createWebPlatform({
-  hostUrl: import.meta.env.VITE_HOST_URL ?? 'ws://127.0.0.1:5175',
-  token: import.meta.env.VITE_HOST_TOKEN,
-})
+const platform = isMockMode(location.search) ? seedMock() : createWebPlatform(browserHostOptions(import.meta.env))
 createRoot(el).render(<App platform={platform} />)
 
 // apps/desktop/src/main.tsx  (after M1)
@@ -82,6 +79,7 @@ export const useCapability = (k: keyof PlatformCapabilities) => usePlatform().ca
 ```
 
 - We do **not** branch automatically by detecting the environment (whether `window.__TAURI__` exists) — the entry points differ, so detection is unnecessary, and detection logic becomes a hidden dependency.
+- Browser development uses a random token for each host launch. Start the host and Vite from the same shell so `CC_HOST_TOKEN` becomes `VITE_HOST_TOKEN`; mock mode (`?mock=1`) is the only browser path that intentionally has no token.
 - Components should rarely even use `usePlatform()` directly. Store actions (the store calls the ports) and selectors are enough for most cases.
 
 ## 5. Migration playbook (the execution order for C1, C2)

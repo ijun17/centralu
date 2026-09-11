@@ -44,11 +44,13 @@ FR-17 단축키(⌘I, ⌘⇧A, y/n/a, d) / FR-18 자동 이름 / FR-20 아카이
 ## G5 실행 방법 (사람이 할 일)
 
 ```bash
-# 터미널 1 — 에이전트 호스트
-pnpm host --port 5175 --token dev-token
+# 같은 셸 — 에이전트 호스트와 웹 UI가 같은 임시 토큰을 쓴다
+CC_HOST_TOKEN="$(openssl rand -hex 16)"
+CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
+HOST_PID=$!
+trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
 
-# 터미널 2 — 웹 UI
-pnpm dev            # http://127.0.0.1:5174
+VITE_HOST_TOKEN="$CC_HOST_TOKEN" pnpm dev   # http://127.0.0.1:5174
 ```
 
 확인 시나리오 (§1.3 루프가 실제로 도는가):
