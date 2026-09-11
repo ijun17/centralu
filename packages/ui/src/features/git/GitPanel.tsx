@@ -5,6 +5,29 @@ import { useStore } from '../../store/store.js'
 import { selectedText } from '../viewer/copy.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
+type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
+type DiffRow = { readonly kind: DiffRowKind; readonly marker: string; readonly body: string }
+
+const MAX_RENDERED_DIFF_ROWS = 1_000
+const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open in your IDE to see the rest.'
+
+function toDiffRow(line: string): DiffRow {
+  const kind: DiffRowKind = line.startsWith('diff --git ') ? 'file'
+    : line.startsWith('+') && !line.startsWith('+++') ? 'add'
+    : line.startsWith('-') && !line.startsWith('---') ? 'del'
+    : line.startsWith('@@') ? 'hunk'
+    : 'ctx'
+  const marked = kind === 'add' || kind === 'del'
+  // The clipboard gets the ASCII marker. The screen gets the typographic one, below.
+  return { kind, marker: marked ? line.charAt(0) : '', body: marked ? line.slice(1) : line }
+}
+
+function renderableDiffRows(diff: string): { readonly rows: readonly DiffRow[]; readonly rowClipped: boolean } {
+  const lines = diff.split('\n', MAX_RENDERED_DIFF_ROWS + 1)
+  const rowClipped = lines.length > MAX_RENDERED_DIFF_ROWS
+  const visibleLines = rowClipped ? lines.slice(0, MAX_RENDERED_DIFF_ROWS) : lines
+  return { rows: visibleLines.map(toDiffRow), rowClipped }
+}
 
 /**
  * 깃 패널 (FR-4, B-2~B-6).
@@ -133,7 +156,7 @@ function Changes({
  * 기호는 그대로 둔다 — 색을 못 보는 사람에게 색만 남기면 정보가 사라진다.
  *
  * Copying needs the viewer's handler (issue #36), for the opposite reason to the viewer's.
- * Nothing here is virtualized, so the whole diff is in the DOM — but the markers are drawn
+ * Nothing here is virtualized, so the shown rows are in the DOM — but the markers are drawn
  * in their own `select-none` span, and here the browser honours that and drops them: a
  * copied diff came back with added and removed lines looking identical. The screen's − is a
  * typographic minus anyway, which no patch tool accepts. So the payload is rebuilt from the
@@ -172,16 +195,8 @@ function DiffView({
    * `replace(/^[+-]/, '')` did to every file header, since the classifier calls those
    * context lines.
    */
-  const rows = (data?.diff ?? '').split('\n').map((line) => {
-    const kind = line.startsWith('diff --git ') ? 'file'
-      : line.startsWith('+') && !line.startsWith('+++') ? 'add'
-      : line.startsWith('-') && !line.startsWith('---') ? 'del'
-      : line.startsWith('@@') ? 'hunk'
-      : 'ctx'
-    const marked = kind === 'add' || kind === 'del'
-    // The clipboard gets the ASCII marker. The screen gets the typographic one, below.
-    return { kind, marker: marked ? line[0]! : '', body: marked ? line.slice(1) : line }
-  })
+  const { rows, rowClipped } = renderableDiffRows(data?.diff ?? '')
+  const truncated = Boolean(data?.truncated) || rowClipped
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
@@ -255,8 +270,10 @@ function DiffView({
             </div>
           )
         })}
-        {data?.truncated && (
-          <p className="p-2 text-[11px] text-slate">…diff is too large; showing part of it. Open in your IDE to see the rest.</p>
+        {truncated && (
+          <p className="p-2 text-[11px] text-slate" data-testid="diff-truncation">
+            {DIFF_TRUNCATED_MESSAGE}
+          </p>
         )}
       </div>
     </div>
@@ -270,7 +287,7 @@ function DiffView({
  */
 function History({ projectId, initialSha, pick }: { projectId: string; initialSha?: string | null; pick: number }) {
   const platform = usePlatform()
-  const [detail, setDetail] = useState<{ sha: string; files: string[]; diff: string } | null>(null)
+  const [detail, setDetail] = useState<{ sha: string; files: string[]; diff: string; truncated: boolean } | null>(null)
 
   const opened = useRef(-1)
   useEffect(() => {
@@ -278,7 +295,7 @@ function History({ projectId, initialSha, pick }: { projectId: string; initialSh
     opened.current = pick
     void platform.git
       .commitDetail(projectId, initialSha)
-      .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff }))
+      .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff, truncated: d.truncated }))
       .catch(() => {})
   }, [pick, initialSha, platform, projectId])
 
@@ -286,7 +303,7 @@ function History({ projectId, initialSha, pick }: { projectId: string; initialSh
     <div className="flex min-h-0 flex-1">
       <DiffView
         path={detail ? `${detail.files.length} files` : undefined}
-        data={detail ? { diff: detail.diff, truncated: false, binary: false } : null}
+        data={detail ? { diff: detail.diff, truncated: detail.truncated, binary: false } : null}
         emptyHint="Pick a commit from the History list on the right"
         onOpenInIde={async () => {}}
       />
@@ -387,5 +404,3 @@ function BranchList({ title, branches, onPick }: { title: string; branches: GitB
     </div>
   )
 }
-
-
