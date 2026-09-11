@@ -2137,6 +2137,21 @@ function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' 
 const PREVIEW_LINES = 3
 
 /**
+ * 맛보기의 **높이 상한** (사용자 지적 2026-09-12).
+ *
+ * PREVIEW_LINES는 `\n`으로 센 줄이다. 그런데 한 줄이 한 줄로 보이리라는 보장이 없다:
+ * 리소스 업로드 응답처럼 개행 없는 JSON 한 덩어리가 오면 논리적으로는 1줄이라 맛보기
+ * 자르기가 아무것도 안 자르고, 화면에서는 수십 줄로 접혀 카드가 대화를 통째로 덮는다.
+ * "접혀 있는데 다 보인다"는 말이 이 뜻이었다.
+ *
+ * 그래서 상한을 하나 더 둔다 — **보이는 줄**로 센 높이. `lh`는 그 요소의 line-height
+ * 한 줄이므로 3lh는 글자 크기나 leading을 바꿔도 늘 정확히 세 줄이다(px로 적으면
+ * leading-relaxed × 11px = 17.875px 같은 값을 손으로 반올림하게 되고, 그 반올림이
+ * 네 번째 줄의 머리를 한 픽셀 보여준다).
+ */
+const PREVIEW_CLAMP = 'max-h-[3lh] overflow-hidden'
+
+/**
  * 도구 카드.
  *
  * **안쪽에 스크롤을 두지 않는다.** 대화창 안의 작은 스크롤 영역은 휠을 가로채서,
@@ -2156,6 +2171,26 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
+  /*
+   * 높이 상한에 **걸렸는지**는 세어서 알 수 없다 — 접히는 자리는 칸 너비가 정한다.
+   * 재서 안다. 이게 없으면 개행 없는 한 덩어리(hidden === 0)가 소리 없이 잘린다:
+   * 펼칠 것이 있다는 말을 아무도 안 하는 상태가 제일 나쁘다.
+   */
+  const outRef = useRef<HTMLPreElement>(null)
+  const [clamped, setClamped] = useState(false)
+  useLayoutEffect(() => {
+    const el = outRef.current
+    if (!el || open) {
+      setClamped(false)
+      return
+    }
+    const measure = () => setClamped(el.scrollHeight - el.clientHeight > 1)
+    measure()
+    // 칸 너비가 바뀌면 접히는 줄 수도 바뀐다 (그리드에서 칸은 늘 움직인다)
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [open, item.result])
   /*
    * 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오기 전까지만 —
    * 맛보기와 달리 **끝쪽**을 보여준다: 돌아가는 명령에서 궁금한 건 처음이 아니라 지금이다.
@@ -2186,7 +2221,7 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
       {liveTail.length > 0 && (
         <div className="border-t border-edge px-2.5 py-1.5">
           <pre
-            className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate"
+            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate ${PREVIEW_CLAMP}`}
             data-testid="tool-card-live"
           >
             {liveTail.join('\n')}
@@ -2197,18 +2232,22 @@ function ToolCard({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
       {lines.length > 0 && (
         <div className="border-t border-edge px-2.5 py-1.5">
           <pre
-            className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ash"
+            ref={outRef}
+            className={`whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ash ${
+              open ? '' : PREVIEW_CLAMP
+            }`}
             data-testid="tool-card-output"
           >
             {open ? lines.join('\n') : lines.slice(0, PREVIEW_LINES).join('\n')}
           </pre>
-          {!open && hidden > 0 && (
+          {!open && (hidden > 0 || clamped) && (
             <button
               className="readout mt-1 text-[10px] text-slate transition-colors hover:text-chalk"
               onClick={() => setOpen(true)}
               data-testid="tool-card-more"
             >
-              {hidden} more lines
+              {/* 줄 수를 셀 수 있을 때만 센다 — 개행 없는 덩어리는 "몇 줄"이 거짓말이다 */}
+              {hidden > 0 ? `${hidden} more lines` : 'Show all'}
             </button>
           )}
         </div>

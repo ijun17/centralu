@@ -2524,6 +2524,61 @@ test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) 
 })
 
 /**
+ * 맛보기는 **보이는 줄**로 센다 (사용자 지적 2026-09-12).
+ *
+ * 개행 없는 JSON 한 덩어리(리소스 업로드 응답)가 오면 줄 세기로는 1줄이라 아무것도
+ * 안 잘리고, 화면에서는 수십 줄로 접혀 접힌 카드가 대화를 통째로 덮었다.
+ */
+test('개행 없는 한 덩어리도 접히면 세 줄에서 멈춘다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.evaluate((sid) => {
+    const m = (window as any).__mock
+    m.emit({
+      type: 'tool_call',
+      sessionId: sid,
+      callId: 'c1',
+      summary: { tool: 'mcp__resource__upload', title: 'upload', readOnly: false, paths: [] },
+    })
+    // 줄바꿈이 하나도 없는 응답 — 논리적으로 1줄, 화면에서는 수십 줄
+    const blob = JSON.stringify({
+      resourceList: Array.from({ length: 30 }, (_, i) => ({
+        ruid: `e0665a7978ed49539afab9544eec53${i}`,
+        name: 'msa_532_5341503_icon_icon_c09af380e8',
+        size: 1013,
+      })),
+    })
+    m.emit({ type: 'tool_result', sessionId: sid, callId: 'c1', ok: true, summary: blob })
+  }, id)
+
+  const output = page.getByTestId('tool-card-output')
+  await expect(output).toBeVisible()
+
+  const collapsed = await output.evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    line: parseFloat(getComputedStyle(el).lineHeight),
+    full: el.scrollHeight,
+  }))
+  // 세 줄 높이를 넘지 않는다 (1px은 반올림 몫)
+  expect(collapsed.height).toBeLessThanOrEqual(collapsed.line * 3 + 1)
+  // 접기 전에는 훨씬 길었다는 것도 같이 적어 둔다 — 상한이 진짜 일하고 있다는 증거
+  expect(collapsed.full).toBeGreaterThan(collapsed.line * 10)
+
+  // 줄 수로는 "몇 줄 더"를 셀 수 없다 (hidden === 0) — 그래도 펼칠 것이 있다고 말해야 한다
+  await expect(page.getByTestId('tool-card-more')).toContainText('Show all')
+
+  await page.getByTestId('tool-card-more').click()
+  const opened = await output.evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    scrollable: el.scrollHeight > el.clientHeight + 1,
+  }))
+  expect(opened.height).toBeGreaterThan(collapsed.line * 10)
+  expect(opened.scrollable).toBe(false)
+})
+
+/**
  * 증거 패널 폭 조절 + 터미널 (M2.7).
  * 터미널의 정체성은 cwd다 — 세션을 바꿔도 같은 터미널이 이어져야 한다.
  */
