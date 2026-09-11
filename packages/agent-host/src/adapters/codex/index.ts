@@ -325,21 +325,6 @@ class CodexSession implements SessionHandle {
       unknown
     >
 
-    /*
-     * **우리 도구는 우리가 보증한다** (Claude 쪽 canUseTool과 같은 규칙).
-     *
-     * centralu 도구는 이 앱이 관리하는 세션 밖으로 나갈 수 없고, 진짜 위험한 일 —
-     * 대상 세션이 무엇을 실행하는가 — 은 그 세션의 권한이 그대로 가른다.
-     * 여기서 또 물으면 승인이 두 겹이 되고 "한 창에서 지시한다"가 무너진다.
-     *
-     * 실측: 이걸 안 하면 오케스트레이터가 "세션 목록 조회 요청이 승인되지 않아"라며
-     * 첫 도구에서 멈춰 선다.
-     */
-    if (JSON.stringify(params).includes(`"${ORCHESTRATOR_MCP_SERVER}"`)) {
-      this.client.respond(r.id, { decision: 'accept' })
-      return
-    }
-
     const detail = approvalDetailFrom(r.method, params)
 
     // 저장된 '항상 허용' 규칙에 맞으면 묻지 않는다 (C-2와 같은 규칙)
