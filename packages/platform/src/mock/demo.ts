@@ -109,9 +109,80 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
    * 한 화면에 같이 있어야 사이드바·인박스·그리드가 실제로 하는 일이 보인다.
    */
   const working = await session(mock, centralu.id, 'claude', '접힌 입력창 마무리')
+  /*
+   * 대화는 **스크롤이 생길 만큼** 길다 (사용자 요청 2026-09-12).
+   *
+   * 두 줄짜리 씬으로는 손으로 볼 수 없는 것이 여럿이다: 위로 올라갈 때의 스크롤 복원,
+   * 가상화, 접힌 도구 카드가 쌓였을 때의 밀도, 긴 답 안에서 마크다운이 서는 모양.
+   * 그래서 실제 도그푸딩 한 자리를 통째로 옮겨 놓는다 — 지어낸 잡담을 늘리는 것보다
+   * 이 앱이 실제로 받는 화면에 가깝다.
+   */
   talk(mock, working.id, [
     ['user', '그리드에서 입력창이 떠오를 때 무지개 링을 덮지 않게 해줘.'],
     ['assistant', '링은 칸의 테두리라 카드보다 위에 서야 합니다. 층 순서를 먼저 재보겠습니다.'],
+  ])
+  tool(mock, working.id, 'demo-a', 'Grep', 'z-index in packages/ui', [
+    'packages/ui/src/styles/index.css:118:  z-index: 1;',
+    'packages/ui/src/features/session/SessionView.tsx:357:  z-20',
+    'packages/ui/src/features/grid/GridView.tsx:238:  z-10',
+  ].join('\n'))
+  talk(mock, working.id, [
+    ['assistant', '링이 `z-index: 1`, 접힌 카드가 `z-20`입니다. 카드가 위에 서 있으니 아랫변이 카드에 잘립니다.'],
+    ['user', '그럼 링을 올리면 되나? 카드를 내리면 안 되고?'],
+    [
+      'assistant',
+      '카드를 내리면 대화가 카드를 덮습니다 — 카드는 떠오를 때 글 위로 올라와야 하니 z-20은 그 자리의 값입니다. 올려야 하는 쪽은 링입니다.',
+    ],
+  ])
+  tool(mock, working.id, 'demo-b', 'Edit', 'packages/ui/src/styles/index.css', '1 line changed')
+  talk(mock, working.id, [
+    ['user', '고쳤으면 재서 보여줘. 눈으로 말고.'],
+    ['assistant', '칸 아랫변의 픽셀을 세로로 훑어서 링 색이 끊기는 줄이 있는지 봤습니다.'],
+  ])
+  tool(
+    mock,
+    working.id,
+    'demo-c',
+    'Bash',
+    'pnpm exec playwright test -g "무지개 링"',
+    [
+      'Running 3 tests using 3 workers',
+      '',
+      '  ✓  1 e2e/panel.spec.ts:196:1 › 접힌 입력창은 응답 중 링을 덮지 않는다 (612ms)',
+      '  ✓  2 e2e/panel.spec.ts:231:1 › 떠오른 입력창도 링을 덮지 않는다 (588ms)',
+      '  ✓  3 e2e/control-loop.spec.ts:1204:1 › 응답이 끝나면 링이 꺼진다 (497ms)',
+      '',
+      '  3 passed (1.4s)',
+    ].join('\n'),
+  )
+  talk(mock, working.id, [
+    ['assistant', '세 개 다 통과합니다. 링을 빼고 돌리면 첫 번째가 떨어지는 것도 확인했습니다 — 테스트가 진짜로 그 줄을 보고 있습니다.'],
+    ['user', '좋아. 그리고 리소스 목록 한 번 더 불러와 줄래?'],
+  ])
+  /*
+   * 줄바꿈이 없는 한 덩어리 — 접힌 카드의 **높이 상한**이 일하는지 손으로 보는 자리다.
+   * 상한이 없으면 이 한 줄이 화면을 통째로 덮는다 (사용자 지적 2026-09-12).
+   */
+  tool(
+    mock,
+    working.id,
+    'demo-d',
+    'mcp__resource__list',
+    'resourceList (sprite)',
+    JSON.stringify({
+      status: { code: 0, message: '' },
+      resourceList: Array.from({ length: 12 }, (_, i) => ({
+        ruid: `e0665a7978ed49539afab9544eec53${String(i).padStart(2, '0')}`,
+        resourceType: 'sprite',
+        name: `msa_532_534150${i}_icon_icon_c09af380e8`,
+        category: 'sprite',
+        subcategory: 'skill',
+      })),
+    }),
+  )
+  talk(mock, working.id, [
+    ['assistant', '12개가 왔습니다. 접힌 카드는 세 줄에서 멈추고, 나머지는 펼쳐서 봅니다.'],
+    ['user', '이제 아래 모서리 곡선만 남았지?'],
   ])
   mock.emit({
     type: 'tool_call',
@@ -209,6 +280,19 @@ async function session(mock: MockPlatform, projectId: string, tool: 'claude' | '
   const info = await mock.agents.createSession({ projectId, cwd: '', tool, permissionPreset: 'normal' })
   await mock.agents.rename(info.id, name)
   return info
+}
+
+/** 지난 도구 한 번 — 부름과 결과가 한 쌍이라 여기서 묶는다 */
+function tool(
+  mock: MockPlatform,
+  sessionId: string,
+  callId: string,
+  name: string,
+  title: string,
+  result: string,
+): void {
+  mock.emit({ type: 'tool_call', sessionId, callId, summary: { tool: name, title, readOnly: true, paths: [] } })
+  mock.emit({ type: 'tool_result', sessionId, callId, ok: true, summary: result })
 }
 
 /** 지난 대화 몇 줄 — 이벤트로 넣는다 (실물에서 오는 길 그대로) */
