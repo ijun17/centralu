@@ -178,6 +178,24 @@ export function SessionPane({
   const [composerMenu, setComposerMenu] = useState(false)
   const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu
 
+  /*
+   * 떠오른 카드가 차지하는 높이 — **재서 안다** (사용자 지적 2026-09-13).
+   *
+   * 상수로 적을 수 없다: 첨부가 붙으면 줄이 하나 생기고, 입력칸은 다섯 줄까지 자란다.
+   * 이 값이 곧 대화 아래 여백이 되므로, 어긋나면 그만큼 마지막 줄이 카드 밑에 깔린다.
+   */
+  const composerRef = useRef<HTMLDivElement>(null)
+  const [composerH, setComposerH] = useState(0)
+  useLayoutEffect(() => {
+    const el = composerRef.current
+    if (!fold || !el) return
+    const measure = () => setComposerH(el.getBoundingClientRect().height)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [fold])
+
   const loadHistory = useStore((s) => s.loadHistory)
   const loaded = useStore((s) => !!s.chat[sessionId])
   useEffect(() => {
@@ -325,6 +343,18 @@ export function SessionPane({
 
       <ChatStream
         bottomPeek={fold}
+        /*
+         * **늘** 카드만큼 벌려 둔다 — 떠오를 때 벌리지 않는다 (사용자 지적 2026-09-13).
+         *
+         * 처음엔 떠 있을 때만 벌렸다(쉴 때 24px). 자리를 아끼는 쪽이 맞아 보였지만, 그건
+         * 카드가 떠오르는 순간 **대화가 위로 움직인다**는 뜻이다. 그리고 카드를 떠오르게
+         * 하는 손짓은 아래쪽으로 손을 내리는 것 — 즉 질문 카드의 답변 버튼을 누르러 가는
+         * 그 동작이다. 누르려고 다가가면 버튼이 위로 달아났다.
+         *
+         * 움직이는 과녁을 만들지 않는 것이 아끼는 자리보다 비싸다. 그래서 빈 자리는 처음부터
+         * 거기 있고, 카드는 그 위에 얹혔다 내려갈 뿐이다 — 대화는 한 픽셀도 안 움직인다.
+         */
+        bottomPad={fold ? composerH : undefined}
         scrollRef={scrollRef}
         chat={chat}
         pending={session.pendingApproval}
@@ -344,7 +374,13 @@ export function SessionPane({
       {/*
         접힘 (사용자 요청 2026-09-10): 둥근 카드가 아래에서 윗머리만 내밀고 있다가 떠오른다.
         **글자로 안내하지 않는다** — 둥근 모서리가 위로 올라올 수 있는 카드라고 말한다.
-        절대 배치라 대화의 높이를 안 건드린다: 떠오를 때 읽던 줄이 밀리지 않는다.
+
+        절대 배치인 것은 그대로다(대화의 레이아웃 높이를 안 건드린다). 다만 **덮지는
+        않는다**: 대화 아래에 카드 높이만큼의 빈 자리가 늘 비워져 있고, 카드는 그 자리에
+        얹혔다 내려간다 (사용자 지적 2026-09-13). 원래는 "밀지 않고 덮는다"가 미덕이었는데,
+        그 미덕의 값이 마지막 몇 줄을 못 읽는 것이었다 — 읽으려고 손을 내린 사람에게 읽을
+        것을 가리는 셈이었다. 그렇다고 떠오를 때 밀어 올리는 것도 답이 아니었다: 카드를
+        부르는 손짓이 곧 답변 버튼을 누르러 가는 손짓이라, 누르려는 버튼이 달아났다.
       */}
       <div
         className={
@@ -409,6 +445,7 @@ export function SessionPane({
               }`
             : undefined
         }
+        ref={composerRef}
         data-testid="composer-shell"
         data-up={fold ? composerUp || undefined : undefined}
         onMouseEnter={fold ? () => setOverComposer(true) : undefined}
@@ -1033,6 +1070,7 @@ function ChatStream({
   working,
   activity,
   bottomPeek = false,
+  bottomPad,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
@@ -1044,6 +1082,16 @@ function ChatStream({
   activity: SessionSummary['activity']
   /** 접힌 입력창이 아래를 조금 가린다 — 마지막 줄이 그 밑에 영영 깔리지 않게 여백을 준다 */
   bottomPeek?: boolean
+  /**
+   * 떠오른 입력 카드의 높이 (px). 주면 아래 여백이 **그 카드만큼** 벌어진다.
+   *
+   * 접힘은 원래 "밀지 않고 덮는다"였다 — 떠오를 때 읽던 줄이 안 움직이는 게 미덕이라고
+   * 봤기 때문이다. 실제로 써 보니 그 미덕의 값이 **마지막 몇 줄을 못 읽는 것**이었다
+   * (사용자 지적 2026-09-13: "올라올 때 대화를 가려서 불편하다"). 그래서 덮는 대신
+   * 밀어 올린다. 값이 카드 높이와 같아야 하므로 상수가 아니라 실측치를 받는다 — 첨부가
+   * 붙거나 입력칸이 여러 줄이 되면 카드가 자란다.
+   */
+  bottomPad?: number
 }) {
   /*
    * "Was I at the bottom" is the session's fact, not this component's (issue #31).
@@ -1456,7 +1504,8 @@ function ChatStream({
       lastTop.current = later.scrollTop
     })
     return () => cancelAnimationFrame(id)
-  }, [totalSize, pending, working, scrollRef])
+    // bottomPad: 카드가 자라면(첨부·여러 줄) 여백도 자란다 — 바닥에 붙어 있었으면 따라간다
+  }, [totalSize, pending, working, bottomPad, scrollRef])
 
   return (
     <div
@@ -1474,6 +1523,8 @@ function ChatStream({
       className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-[13px] leading-relaxed ${
         bottomPeek ? 'pb-14' : 'pb-4'
       } ${settling ? 'invisible' : ''}`}
+      /* 카드가 앉을 빈 자리. 상태가 아니라 크기를 따르므로 전환도 애니메이션도 없다 */
+      style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
       data-testid="chat-stream"
       data-settling={settling || undefined}
     >

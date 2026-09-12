@@ -193,6 +193,78 @@ test('입력창은 튀어 오르지 않고 이어서 떠오른다', async ({ pag
 })
 
 /**
+ * 떠오른 입력창은 **대화를 덮지 않고, 밀지도 않는다** (사용자 지적 2026-09-13).
+ *
+ * 원래 규칙은 "밀지 않고 덮는다"였다 — 읽으려고 손을 내리면 읽을 것이 카드 밑으로
+ * 들어갔다. 반대로 떠오를 때 밀어 올리게 하면 답변 버튼이 손 앞에서 달아난다: 카드를
+ * 부르는 손짓과 버튼을 누르는 손짓이 같기 때문이다. 그래서 빈 자리를 처음부터 비워 둔다.
+ */
+test('떠오른 입력창은 마지막 줄을 덮지도, 밀지도 않는다', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', '하나')
+  // 바닥에 붙을 만큼 길어야 한다 — 짧은 대화는 애초에 카드에 닿지 않는다
+  await page.evaluate((sid: string) => {
+    const m = (window as never as { __mock: any }).__mock
+    for (let i = 0; i < 40; i++) {
+      m.emit({ type: 'user_message', sessionId: sid, seq: 0, text: `물음 ${i + 1}` })
+      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: `답 ${i + 1}` })
+    }
+  }, a)
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
+
+  const read = () =>
+    panel.evaluate((el) => {
+      const sc = el.querySelector('[data-testid="chat-stream"]') as HTMLElement
+      const shell = el.querySelector('[data-testid="composer-shell"]') as HTMLElement
+      const pad = parseFloat(getComputedStyle(sc).paddingBottom)
+      return {
+        pad: Math.round(pad),
+        cardTop: Math.round(shell.getBoundingClientRect().top),
+        cardHeight: Math.round(shell.getBoundingClientRect().height),
+        atBottom: sc.scrollHeight - sc.scrollTop - sc.clientHeight < 2,
+        // 마지막 내용의 화면상 아래끝 (여백은 내용이 아니므로 뺀다)
+        lastBottom: Math.round(sc.getBoundingClientRect().top - sc.scrollTop + (sc.scrollHeight - pad)),
+      }
+    })
+
+  // 최신 줄을 읽는 상태를 만든다 — 불편하다고 한 그 자리다
+  await panel.evaluate((el) => {
+    const sc = el.querySelector('[data-testid="chat-stream"]') as HTMLElement
+    sc.scrollTop = sc.scrollHeight
+    sc.dispatchEvent(new Event('scroll'))
+  })
+  await expect.poll(async () => (await read()).atBottom).toBe(true)
+  // 여백은 300ms에 걸쳐 자리를 잡는다 — 전환 중에 재면 도중의 값을 사실로 적는다
+  await expect.poll(async () => {
+    const m = await read()
+    return m.pad === m.cardHeight
+  }).toBe(true)
+  const down = await read()
+
+  const box = (await panel.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
+  await expect(panel.getByTestId('composer-shell')).toHaveAttribute('data-up', 'true')
+  // 전환이 끝날 때까지 기다린다 — 전환 중에 재면 도중의 자리를 사실로 적는다
+  await page.waitForTimeout(700)
+
+  const up = await read()
+  // 여백은 접혀 있을 때부터 카드만큼이었고, 떠올라도 그대로다
+  expect(down.pad).toBe(up.cardHeight)
+  expect(up.pad).toBe(up.cardHeight)
+  // 마지막 줄은 카드 위에 있다 — 덮이지 않는다
+  expect(up.atBottom).toBe(true)
+  expect(up.lastBottom).toBeLessThanOrEqual(up.cardTop)
+  /*
+   * 그리고 **한 픽셀도 안 움직였다.** 이 단언이 움직이는 과녁을 막는다 — 카드를 부르는
+   * 손짓이 곧 답변 버튼을 누르러 가는 손짓이라, 여기서 밀리면 버튼이 손 앞에서 달아난다.
+   */
+  expect(up.lastBottom).toBe(down.lastBottom)
+})
+
+/**
  * 응답 중인 칸을 두르는 무지개 링은 **칸의 테두리**다. 칸 안에 무엇이 떠 있든 끊기면
  * 안 되는데, 접힌 입력창이 아랫변을 덮고 있었다 (사용자 지적 2026-09-10).
  */
