@@ -216,7 +216,16 @@ export function SessionPane({
   // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다
   if (!session) return null
 
-  const HEADER = 'flex items-center gap-2.5 border-b border-edge px-4 py-2'
+  /*
+   * 머리글 높이는 여백이 아니라 **높이로** 적는다 (2026-09-13).
+   *
+   * 값은 원래대로 40px이다 — 32·36px도 써 봤지만 되돌렸다. 바뀐 것은 적는 방식이다:
+   * py-2로 적으면 높이가 안에 든 것 중 가장 큰 것(도구 단추 줄 23px)에 딸려 정해지고,
+   * 옆에 선 증거 패널 머리글은 그 안에 든 것이 24px이라 41px로 **1px 어긋나 있었다.**
+   * 나란히 선 두 줄은 1px만 달라도 경계가 두 겹으로 보인다. 둘 다 h-10이면 그 차이는
+   * 애초에 생기지 않는다.
+   */
+  const HEADER = 'flex h-10 items-center gap-2.5 border-b border-edge px-4'
   const header = (
     <>
       <StateDot state={session.state} />

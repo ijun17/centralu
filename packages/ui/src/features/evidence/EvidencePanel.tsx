@@ -144,8 +144,14 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
   const sc = useShortcut()
   const openBranches = useStore((s) => s.openBranches)
 
+  /*
+   * 머리글 높이는 **대화 쪽 머리글(SessionView의 HEADER)과 같아야 한다** — 둘은 나란히
+   * 서 있어서 1px만 어긋나도 경계가 두 겹으로 보인다. 여백으로 적던 동안 이쪽이 41px,
+   * 저쪽이 40px이었다(안에 든 것이 각각 24px·23px). 그래서 여백이 아니라 `h-10`으로
+   * 적는다: 안에 든 것이 바뀌어도 두 줄은 계속 한 줄이다.
+   */
   return (
-    <DragRegion className="flex items-center gap-2 border-b border-edge px-3 py-2">
+    <DragRegion className="flex h-10 items-center gap-2 border-b border-edge px-3">
       <span className="readout truncate text-[11px] text-ash" data-testid="evidence-project">
         {projectName}
       </span>
