@@ -4580,9 +4580,21 @@ test('그리드 칸은 대화가 길어져도 입력창을 밀어내지 않는�
   // 입력창이 칸 **안에** 있어야 한다. 보이기만 해서는 부족하다 — 밀려난 것도 '보인다'
   const composer = panel.getByTestId('prompt-input')
   await expect(composer).toBeVisible()
-  const box = (await composer.boundingBox())!
-  const card = (await panel.boundingBox())!
-  expect(box.y + box.height).toBeLessThanOrEqual(card.y + card.height + 1)
+  /*
+   * **자리가 멈춘 뒤에** 잰다 (2026-09-13).
+   *
+   * 칸이 막 생긴 프레임에서는 카드의 절대 위치가 아직 최종값이 아니다 — 실측하면 한두
+   * 프레임 동안 칸 아래로 10px쯤 내려가 있다가 제자리를 찾는다. 그 프레임을 재고 있었던
+   * 탓에 이 단언은 붙을 때도 있고 떨어질 때도 있었다(같은 코드로 세 번 돌려 세 번 실패,
+   * 한 번 통과). 이 테스트가 말하려는 것은 "대화가 길어도 입력창이 칸 밖으로 밀려나지
+   * 않는다"는 **정착 상태**의 성질이므로, 멈춘 값을 본다.
+   */
+  const overflow = async () => {
+    const box = (await composer.boundingBox())!
+    const card = (await panel.boundingBox())!
+    return Math.round(box.y + box.height - (card.y + card.height))
+  }
+  await expect.poll(overflow, { timeout: 2000 }).toBeLessThanOrEqual(1)
 })
 
 /**
