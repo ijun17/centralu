@@ -1570,6 +1570,71 @@ test('상단 바: 단축키 칩 대신 숫자가 신호다 (#33)', async ({ page
   await expect(page.getByTestId('inbox')).toBeVisible()
 })
 
+/**
+ * 도는 표식을 끄는 스위치 (사용자 요청 2026-09-13).
+ *
+ * 취향이 아니라 전력이다 — 쉬지 않는 움직임 하나가 화면을 최대 주사율로 붙든다(실측:
+ * 세션 하나가 도는 동안 앱 CPU 7.0% → 2.9%). 끄면 표식이 사라지는 게 아니라 멈춘다:
+ * 밝은 회색 한 겹이 남아 "지금 돌고 있다"는 말은 계속한다.
+ */
+test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+  await page.evaluate((sid) => {
+    ;(window as any).__mock.emit({ type: 'state_change', sessionId: sid, state: 'working' })
+  }, id)
+  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
+  const panel = page.getByTestId(`grid-panel-${id}`)
+  await expect(panel).toBeVisible()
+
+  /** 지금 실제로 도는 궤도의 수 — 클래스가 아니라 애니메이션을 센다 */
+  const spinning = () =>
+    page.evaluate(
+      () =>
+        document
+          .getAnimations()
+          .filter((a) => (a as CSSAnimation).animationName === 'cc-orbit-spin' && a.playState === 'running')
+          .length,
+    )
+  /** 링이 무엇으로 칠해져 있나 (::before는 실제 판이다) */
+  const ringPaint = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('.cc-orbit-ring-layer')!
+      const s = getComputedStyle(el, '::before')
+      return { image: s.backgroundImage, color: s.backgroundColor }
+    })
+
+  expect(await spinning()).toBeGreaterThan(0)
+  expect((await ringPaint()).image).toContain('conic-gradient')
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('settings')
+  await page.getByTestId('palette-item-action').click()
+  await page.getByTestId('settings-tab-appearance').click()
+  await page.getByTestId('settings-spin-grid').uncheck()
+  await page.getByTestId('settings-spin-icon').uncheck()
+  await page.keyboard.press('Escape')
+
+  // 아무것도 돌지 않는다 — 이게 전력을 아끼는 조건이다
+  await expect.poll(spinning).toBe(0)
+  // 그래도 표식은 남는다: 무지개 대신 밝은 회색 한 겹
+  const paint = await ringPaint()
+  expect(paint.image).toBe('none')
+  expect(paint.color).toBe('rgb(144, 144, 144)')
+  // 칸이 돌고 있다는 사실 자체는 여전히 값으로 읽힌다 (테스트·보조 기술의 자리)
+  await expect(panel).toHaveClass(/cc-orbit-ring/)
+
+  // 다시 켜면 돌아온다 — 그리고 재실행에도 남는다 (작업공간 스냅샷)
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('settings')
+  await page.getByTestId('palette-item-action').click()
+  await page.getByTestId('settings-tab-appearance').click()
+  await page.getByTestId('settings-spin-grid').check()
+  await page.keyboard.press('Escape')
+  await expect.poll(spinning).toBeGreaterThan(0)
+})
+
 /*
  * 글자 크기(zoom)와 vh의 관계 (도그푸딩: "글자 크기 키우면 세션의 입력창이 안 보이거든").
  * vh는 zoom의 영향을 안 받아서, 확대하면 100vh 셸이 창보다 커져 맨 아래(입력창)가

@@ -62,6 +62,24 @@ export function App({ platform }: { platform: Platform }) {
     style.setProperty('--text-zoom', String(factor))
   }, [textScale])
 
+  /*
+   * 도는 표식을 멈추는 자리 (사용자 요청 2026-09-13).
+   *
+   * 스위치를 **뿌리의 속성**으로 내보내고 실제 정지는 CSS가 한다. 도는 것이 그려지는
+   * 자리가 둘(그리드 칸 테두리·사이드바 아이콘)이고 앞으로 더 늘 수 있는데, 자리마다
+   * 설정을 읽게 하면 새로 도는 것을 만들 때마다 이 설정을 기억해야 한다. 뿌리에 한 번
+   * 적어 두면 잊어도 적용된다.
+   *
+   * 이 설정이 취향이 아니라 전력인 이유는 store.ts의 `spinGrid` 주석에 실측과 함께 있다.
+   */
+  const spinGrid = useStore((s) => s.spinGrid)
+  const spinSessionIcon = useStore((s) => s.spinSessionIcon)
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.spinGrid = spinGrid ? 'on' : 'off'
+    root.dataset.spinIcon = spinSessionIcon ? 'on' : 'off'
+  }, [spinGrid, spinSessionIcon])
+
   // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
   useEffect(() => {
     /*

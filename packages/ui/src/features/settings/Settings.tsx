@@ -527,6 +527,10 @@ function AppearanceSection() {
   const setScale = useStore((s) => s.setTextScale)
   const fold = useStore((s) => s.foldComposer)
   const setFold = useStore((s) => s.setFoldComposer)
+  const spinGrid = useStore((s) => s.spinGrid)
+  const setSpinGrid = useStore((s) => s.setSpinGrid)
+  const spinIcon = useStore((s) => s.spinSessionIcon)
+  const setSpinIcon = useStore((s) => s.setSpinSessionIcon)
   return (
     <section>
       <p className="text-[11px] leading-relaxed text-slate">Text size for the whole app.</p>
@@ -573,6 +577,43 @@ function AppearanceSection() {
               reach for it. Off keeps it open, as before.
             </span>
           </span>
+        </label>
+      </div>
+
+      {/*
+        도는 표식을 멈추는 스위치 (사용자 요청 2026-09-13).
+
+        취향 설정처럼 보이지만 **전력 설정**이다. 그래서 설명에 실측을 적는다 — 끄면
+        무엇이 좋아지는지 모르면 아무도 안 만진다. 그리드와 아이콘을 따로 두는 이유는
+        거슬리는 지점이 다르기 때문이다: 칸 테두리는 크고 곁눈에 걸리고, 사이드바
+        아이콘은 작지만 늘 보인다.
+      */}
+      <div className="mt-6 border-t border-edge pt-4">
+        <p className="text-[12px] text-ash">Spinning mark while a session is working</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate">
+          Turning it off does not hide the mark — it stops moving and stays a bright grey. Motion
+          that never stops holds the display at full refresh: measured, turning both off took this
+          app from 7.0% to 2.9% CPU while one session was running.
+        </p>
+        <label className="mt-2.5 flex items-start gap-2 text-[12px] text-ash">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-graphite"
+            checked={spinGrid}
+            onChange={(e) => setSpinGrid(e.target.checked)}
+            data-testid="settings-spin-grid"
+          />
+          <span>Grid panel border</span>
+        </label>
+        <label className="mt-1.5 flex items-start gap-2 text-[12px] text-ash">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-graphite"
+            checked={spinIcon}
+            onChange={(e) => setSpinIcon(e.target.checked)}
+            data-testid="settings-spin-icon"
+          />
+          <span>Session icon in the sidebar</span>
         </label>
       </div>
     </section>

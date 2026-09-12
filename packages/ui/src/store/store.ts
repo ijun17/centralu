@@ -332,6 +332,20 @@ export type AppState = {
    * 끄면 예전처럼 언제나 펼쳐져 있다.
    */
   foldComposer: boolean
+  /**
+   * 도는 표식을 **움직이게 둘까** (사용자 요청 2026-09-13). 그리드 칸 테두리와 사이드바
+   * 세션 아이콘이 따로 논다 — 크기도 자리도 달라서 거슬리는 지점이 다르다.
+   *
+   * 끄면 표식이 사라지는 게 아니라 **멈춘다**: 같은 무지개가 그대로 있고 각도만 고정이다.
+   * "지금 돌고 있다"는 말은 남기고 움직임만 뺀다.
+   *
+   * 이 설정이 있는 이유는 취향이 아니라 전력이다. 실측(2026-09-13, WKWebView): 세션 하나가
+   * 도는 동안 Centralu의 CPU 합계가 7.0% → 2.9%로 떨어졌다. 쉬지 않는 움직임은 화면을
+   * 최대 주사율로 붙들어 두는데, 그 비용은 무엇이 움직이느냐가 아니라 **움직이는 게
+   * 있느냐**로 정해진다.
+   */
+  spinGrid: boolean
+  spinSessionIcon: boolean
   focusedSessionId: string | null
   /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
   focusedProjectId: string | null
@@ -564,6 +578,8 @@ export type AppState = {
   setShowIgnored(show: boolean): void
   setTextScale(step: number): void
   setFoldComposer(fold: boolean): void
+  setSpinGrid(on: boolean): void
+  setSpinSessionIcon(on: boolean): void
   setToast(msg: string | null): void
   /** 세션 생성 창을 연다/닫는다 (null이면 닫기) */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
@@ -1104,6 +1120,8 @@ export const useStore = create<AppState>((set, get) => ({
   textScale: TEXT_SCALE_DEFAULT,
   // 기본은 접음 — 두 줄짜리 그리드에서 읽는 자리가 좁다는 것이 이 기능의 출발점이다
   foldComposer: true,
+  spinGrid: true,
+  spinSessionIcon: true,
   focusedSessionId: null,
   focusedProjectId: null,
   newSessionFor: null,
@@ -1365,6 +1383,11 @@ export const useStore = create<AppState>((set, get) => ({
         // 같은 typeof 가드 — 저장된 false는 사람의 결정이라 기본값보다 세다
         const savedFold = (snap as { foldComposer?: boolean }).foldComposer
         if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
+        // 같은 규칙: 저장된 false는 사람이 끈 것이므로 기본값(켬)보다 세다
+        const savedSpinGrid = (snap as { spinGrid?: boolean }).spinGrid
+        if (typeof savedSpinGrid === 'boolean') set({ spinGrid: savedSpinGrid })
+        const savedSpinIcon = (snap as { spinSessionIcon?: boolean }).spinSessionIcon
+        if (typeof savedSpinIcon === 'boolean') set({ spinSessionIcon: savedSpinIcon })
       }
     } catch {
       /* 스냅샷이 없어도 앱은 정상 동작한다 */
@@ -1417,6 +1440,8 @@ export const useStore = create<AppState>((set, get) => ({
         showIgnored: s.showIgnored,
         textScale: s.textScale,
         foldComposer: s.foldComposer,
+        spinGrid: s.spinGrid,
+        spinSessionIcon: s.spinSessionIcon,
         introSeen: s.introSeen,
       } as never)
       .catch(() => {})
@@ -2103,6 +2128,16 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setFoldComposer(fold) {
     set({ foldComposer: fold })
+    get().saveWorkspace()
+  },
+
+  setSpinGrid(on) {
+    set({ spinGrid: on })
+    get().saveWorkspace()
+  },
+
+  setSpinSessionIcon(on) {
+    set({ spinSessionIcon: on })
     get().saveWorkspace()
   },
 

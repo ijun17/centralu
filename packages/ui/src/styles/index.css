@@ -677,13 +677,32 @@
   inset: 0;
 }
 
-/* 움직임에 민감한 사람에게 회전은 방해다 — 그때는 밝기만 남긴다 */
+/*
+ * 돌지 않을 때의 표식 — **밝기만 남긴다.**
+ *
+ * 무지개를 각도만 고정해 두는 방법도 있었지만, 멈춘 무지개는 "무슨 일이 있었는데 끝난
+ * 자리"처럼 읽힌다. 회색 한 겹이 더 정직하다: 색이 아니라 **밝아짐**이 곧 "지금 돌고
+ * 있다"는 말이고, 그 문법은 이 앱의 다른 상태들과 이미 같다.
+ *
+ * 두 경우가 같은 그림을 쓴다.
+ *  - 움직임에 민감한 사람 (prefers-reduced-motion)
+ *  - 배터리 때문에 사람이 직접 끈 경우 (설정 → Appearance, 2026-09-13)
+ * 둘은 이유가 다르고 결과가 같다 — 그래서 선언은 한 벌이다.
+ *
+ * 그리드와 사이드바는 따로 끈다. 크기도 자리도 달라서 거슬리는 지점이 다르다.
+ */
 @media (prefers-reduced-motion: reduce) {
   .cc-orbit::before,
   .cc-orbit-ring-layer::before {
     animation: none;
     background: var(--color-ash);
   }
+}
+
+[data-spin-icon='off'] .cc-orbit::before,
+[data-spin-grid='off'] .cc-orbit-ring-layer::before {
+  animation: none;
+  background: var(--color-ash);
 }
 
 /*
