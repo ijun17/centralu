@@ -1301,6 +1301,32 @@ export class Store {
    * 세션을 완전히 지운다 (대화·검색 인덱스·승인 규칙까지).
    * 아카이브는 "치우되 남긴다"이고 이건 "없앤다"다 — 둘 다 필요하다.
    */
+  /**
+   * 아직 **주인이 있는** 인수인계 노트들 — 살아 있는 세션이 물려받았다고 적어 둔 전임자 id (#106).
+   *
+   * 파일 이름은 전임자의 id다 (#104). 그래서 "전임자가 사라졌으니 그 노트도 사라져도
+   * 된다"가 **틀린다**: 인수인계의 마지막 걸음이 바로 그 전임자를 지우는 것이고,
+   * 그 순간 후임자는 아직 노트를 열지도 않았다. 누가 그 파일을 물려받았는지는 후임자의
+   * 마커만 알고 있으므로, 청소의 근거도 거기서 나온다.
+   *
+   * JOIN이 산 것: 세션이 사라진 마커는 함께 사라진다 — 죽은 세션이 노트를 붙들지 못한다.
+   */
+  handoffPredecessors(): Set<string> {
+    const rows = this.db
+      .prepare(`SELECT m.payload as payload FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.kind = 'marker'`)
+      .all() as { payload: string }[]
+    const out = new Set<string>()
+    for (const r of rows) {
+      try {
+        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
+        if (p.type === 'handoff' && typeof p.fromSessionId === 'string' && p.fromSessionId) out.add(p.fromSessionId)
+      } catch {
+        // 못 읽는 행은 아무것도 주장하지 않는다 — 청소는 주장이 있을 때만 멈춘다
+      }
+    }
+    return out
+  }
+
   deleteSession(sessionId: string): void {
     const tx = this.db.transaction(() => {
       this.db.prepare(`DELETE FROM messages_fts WHERE session_id = ?`).run(sessionId)

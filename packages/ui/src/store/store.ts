@@ -666,7 +666,7 @@ export type AppState = {
       permissionPreset?: PermissionPreset
       initialPrompt?: string
       /** 물려받은 인수인계 노트 — 첫 메시지가 아니라 기록의 마커로 들어간다 (#102) */
-      handoff?: { from: string; note: string }
+      handoff?: { from: string; note: string; fromSessionId?: string }
       /** 도구가 갖고 있던 이전 세션을 이어받는다 (터미널에서 만든 대화 포함) */
       resumeExternalId?: string
       importHistory?: boolean
@@ -850,19 +850,6 @@ const handoffInFlight = new Set<string>()
  * 여기서 다시 내보내는 것은 테스트·e2e가 이 경로로 인수인계를 식별해서다.
  */
 export { handoffFile }
-
-/**
- * 후임자가 파일을 읽기 전에는 지우지 않는다 (#102).
- *
- * 예전에는 createSession 직후에 휴지통으로 보냈다 — 후임자가 아직 읽지도 않은 파일을
- * 치우는 경주였다. 이제 첫 메시지가 경로만 나르므로 그 경주는 곧 인수인계의 실패다.
- * 여기 담긴 세션의 **첫 턴이 끝나는 순간** 치운다 (dispatchEvent의 turn_complete).
- * 그때가 오지 않으면 파일은 남는다 — 노트는 이미 기록에 박혀 있으므로 유실이 아니다.
- *
- * 프로젝트만이 아니라 **경로까지** 담는 이유 (#104): 치울 것은 이 인수인계의 파일 하나다.
- * 이름을 여기서 다시 지으면 후임자의 id로 짓게 되고, 그것은 전임자의 파일이 아니다.
- */
-const handoffFileToSweep = new Map<string, { projectId: string; path: string }>()
 
 /**
  * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
@@ -1594,16 +1581,6 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'turn_complete') {
       const s = get()
-      /*
-       * 인수인계 파일은 여기서 사라진다 (#102) — 후임자가 한 턴을 마쳤다는 것은
-       * 노트를 읽을 기회가 있었다는 뜻이다. 실패해도 치명적이지 않다: 원문은 마커로
-       * 기록에 있고, 기록 모드의 글은 저장소에서 언제든 다시 만들 수 있다.
-       */
-      const sweep = handoffFileToSweep.get(sessionId)
-      if (sweep !== undefined) {
-        handoffFileToSweep.delete(sessionId)
-        void s.platform?.fs.trash(sweep.projectId, sweep.path).catch(() => {})
-      }
       /*
        * **본다 = 앱이 앞에 있고 + 그 세션이 화면에 있고.**
        *
@@ -2959,8 +2936,9 @@ export const useStore = create<AppState>((set, get) => ({
         serviceTier: sameTool ? (session.serviceTier ?? undefined) : undefined,
         permissionPreset: session.permissionPreset,
         initialPrompt: handoffOpening(session.name, note, notePath),
-        // 노트 원문은 기록으로 간다 — 파일은 이제 순수한 파생물이라 언제 사라져도 된다 (#102)
-        handoff: { from: session.name, note },
+        // 노트 원문은 기록으로 간다 (#102). id도 함께 (#106) — host의 청소가 이 노트에
+        // 아직 주인이 있음을 아는 근거이고, 그것 없이는 전임자 삭제가 곧 노트의 삭제다
+        handoff: { from: session.name, note, fromSessionId: sessionId },
       })
       await get().rename(info.id, session.name)
 
@@ -2979,20 +2957,20 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       /*
-       * 파일 청소는 **후임자의 첫 턴이 끝난 뒤**다 (#102). 예전에는 바로 여기서
-       * 휴지통으로 보냈는데, 그 순간 후임자는 아직 파일을 열지도 않았다 — 첫 메시지가
-       * 노트 전문이던 동안에는 들키지 않던 경주다. 두 모드 모두 파일을 남기므로
-       * (host가 쓰든 에이전트가 쓰든) 청소 대상도 모드를 가리지 않는다.
+       * **여기서는 아무것도 치우지 않는다** (#106).
        *
-       * 치우는 것은 **이 인수인계의 파일 하나**다 (#104) — 이름이 하나였을 때는 먼저 끝난
-       * 후임자가 아직 읽지 않은 남의 글을 치웠고, 그쪽은 시한을 다 쓰고 실패했다.
+       * 청소는 두 번 자리를 옮겼다. 처음엔 바로 이 자리, `createSession` 직후였고 —
+       * 후임자는 아직 파일을 열지도 않았다. #102가 그것을 후임자의 **첫 턴이 끝나는
+       * 순간**으로 옮겼지만, 그 조건은 턴이 성공했는지도 노트를 읽었는지도 묻지 않는다:
+       * 실사고에서 첫 턴은 1초도 안 돼 400으로 죽었고, 디렉토리는 3분 만에 비었다.
+       * 후임자가 받은 것은 이미 없는 파일의 경로였고, 그 글은 다시 만들 수 없다 —
+       * 쓴 전임자가 방금 대체됐기 때문이다.
        *
-       * 빈 `.centralu/handoff/`는 남긴다: 지울 수 있는 유일한 문(fs.trash)은 폴더를
-       * 통째로 가져가므로, 마지막 파일을 세는 순간과 지우는 순간 사이에 시작된 인수인계의
-       * 글이 함께 딸려 간다 — 방금 없앤 그 경주를 청소가 다시 만드는 셈이다.
-       * 값은 빈 폴더 하나고, 그것은 .gitignore에 걸린다.
+       * "읽었는가"는 우리가 관찰할 수 있는 사실이 아니다. 그래서 턴에 매다는 방식 자체를
+       * 버리고, 읽는 이와 경주할 수 없는 두 순간(세션 삭제·기동)을 host에게 맡긴다
+       * (manager.sweepOrphanHandoffNotes). 파일 하나를 남겨 두는 값은 0이다 —
+       * `.centralu/handoff/`는 이미 .gitignore에 걸려 있다.
        */
-      handoffFileToSweep.set(info.id, { projectId: session.projectId!, path: notePath })
 
       if (deleteOld) {
         // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)

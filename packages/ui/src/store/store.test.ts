@@ -1028,7 +1028,8 @@ describe('인수인계하고 새로 시작', () => {
     expect(mock.lastCreateParams?.initialPrompt).toContain(handoffFile('ho-s1'))
     expect(mock.lastCreateParams?.initialPrompt).toContain('후계자에게: 상태 요약') // 미리보기
     // 원문은 기록으로 간다 — 전임자가 사라지면 다시 만들 수 없는 유일한 재료다
-    expect(mock.lastCreateParams?.handoff).toEqual({ from: '메아', note: '후계자에게: 상태 요약' })
+    // id도 함께 간다 (#106) — host의 청소가 이 노트에 아직 주인이 있음을 아는 근거다
+    expect(mock.lastCreateParams?.handoff).toEqual({ from: '메아', note: '후계자에게: 상태 요약', fromSessionId: 'ho-s1' })
     expect(mock.lastCreateParams?.tool).toBe('codex')
     expect(mock.lastCreateParams?.model).toBe('gpt-5.6')
     const heir = [...mock.sessions.values()].find((r) => r.name === '메아')
@@ -1218,10 +1219,12 @@ describe('인수인계하고 새로 시작', () => {
   })
 
   /*
-   * #102: 예전에는 createSession 직후에 파일을 휴지통으로 보냈다 — 후임자가 아직 열지도
-   * 않은 파일을 치우는 경주였고, 첫 메시지가 노트 전문이던 동안에만 들키지 않았다.
+   * #106: 청소는 턴 경계에 매달려 있었다 — 후임자의 **첫 턴이 끝나는 순간**. 그 조건은
+   * 턴이 성공했는지도, 노트를 읽었는지도 묻지 않는다. 실사고에서 첫 턴은 1초도 안 돼
+   * 400으로 죽었고 디렉토리는 3분 만에 비었다. 후임자는 없는 파일의 경로를 들고 있었고,
+   * 그 글은 쓴 세션이 방금 대체됐으므로 다시 만들 수 없다.
    */
-  it('파일은 후임자의 첫 턴이 끝난 뒤에 치운다 (#102)', async () => {
+  it('첫 턴이 실패해도 노트는 남는다 — 턴 경계에서는 아무것도 치우지 않는다 (#106)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-sweep')
     mock.sessions.set('ho-sw', sessionInfo('ho-sw', { projectId: proj.id, name: '치우기' }))
@@ -1237,13 +1240,17 @@ describe('인수인계하고 새로 시작', () => {
     await done
 
     const heir = [...mock.sessions.values()].find((r) => r.name === '치우기' && r.id !== 'ho-sw')!
-    // 후임자가 아직 아무것도 못 했다 — 파일은 그대로 있어야 한다
-    expect(mock.trashed).not.toContain(notePath)
-
+    // 첫 턴이 400으로 죽는다 — 예전에는 이 자리에서 노트가 사라졌다
+    mock.emit({
+      type: 'error', sessionId: heir.id,
+      error: { code: 'internal', message: "The 'opus[1m]' model is not supported", retryable: true },
+    } as NormalizedEvent)
+    // 성공한 턴이 와도 마찬가지다 — 근거는 "읽었는가"인데 그것은 관찰할 수 없다
     mock.emit({ type: 'turn_complete', sessionId: heir.id } as NormalizedEvent)
-    await vi.waitFor(() => {
-      expect(mock.trashed).toContain(notePath)
-    })
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(mock.trashed).not.toContain(notePath)
+    expect(mock.fsState.files[notePath]).toBe('읽히기 전에 사라지면 안 되는 글')
   })
 
   /*
@@ -1281,13 +1288,17 @@ describe('인수인계하고 새로 시작', () => {
     expect(paramsOf('왼쪽')?.initialPrompt).toContain(pathA)
     expect(paramsOf('오른쪽')?.initialPrompt).toContain(pathB)
 
-    // 한쪽 후임자의 첫 턴이 끝난다 — 치우는 것은 제 전임자의 파일 하나뿐이다
+    /*
+     * 한쪽 후임자의 첫 턴이 끝나도 **아무 글도 사라지지 않는다** (#106). 청소가 턴에
+     * 매달려 있던 동안에는 먼저 끝난 쪽이 남의 글을 치웠고(#104가 고친 것), 이제는
+     * 자기 전임자의 글조차 여기서 치우지 않는다 — 읽었는지 알 방법이 없어서다.
+     */
     const heirA = [...mock.sessions.values()].find((r) => r.name === '왼쪽' && r.id !== 'ho-a')!
     mock.emit({ type: 'turn_complete', sessionId: heirA.id } as NormalizedEvent)
-    await vi.waitFor(() => {
-      expect(mock.trashed).toContain(pathA)
-    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(mock.trashed).not.toContain(pathA)
     expect(mock.trashed).not.toContain(pathB)
+    expect(mock.fsState.files[pathA]).toBe('왼쪽의 노트')
     expect(mock.fsState.files[pathB]).toBe('오른쪽의 노트')
   })
 

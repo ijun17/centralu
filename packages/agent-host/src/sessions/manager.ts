@@ -9,7 +9,7 @@ import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import type {
   ModelOption,
@@ -30,7 +30,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import { APP_SLUG, DATA_DIR, handoffFile, sessionLiveDefaults } from '@cc/protocol'
+import { APP_SLUG, DATA_DIR, HANDOFF_DIR, handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -277,6 +277,12 @@ export class SessionManager {
       }
     }
     this.adoptOrphanWorktrees()
+    /*
+     * 고아가 된 인수인계 노트를 걷는다 (#106). **기동이 안전한 순간인 이유**: 지금
+     * 진행 중인 인수인계가 없다 — 읽을 사람이 도중에 있는 파일을 치울 수가 없다.
+     * 실패는 세션 복원을 막을 이유가 못 되므로 기다리지 않는다.
+     */
+    void this.sweepOrphanHandoffNotes().catch(() => {})
     this.claimAppSessions()
     this.renameLegacyManagers()
     this.nameUnnamedWorktrees()
@@ -1136,14 +1142,16 @@ export class SessionManager {
      */
     if (params.handoff) {
       const seq = this.store.nextSeq(id)
-      const { from, note } = params.handoff
+      const { from, note, fromSessionId } = params.handoff
       this.store.appendMessages([
         {
           sessionId: id,
           seq,
           role: 'system',
           kind: 'marker',
-          payload: { type: 'handoff', sessionId: id, seq, from, note },
+          // fromSessionId도 함께 (#106) — 이 세션이 물려받은 노트 파일의 이름이고,
+          // 청소가 "아직 주인이 있다"를 아는 유일한 근거다
+          payload: { type: 'handoff', sessionId: id, seq, from, note, fromSessionId },
           ts: Date.now(),
         },
       ])
@@ -1690,7 +1698,49 @@ export class SessionManager {
     this.meta.delete(sessionId)
     this.store.deleteSession(sessionId)
     await clearAttachments(sessionId).catch(() => {})
+    /*
+     * 이 세션과 함께 쓸모가 끝난 인수인계 노트를 걷는다 (#106). 행이 사라진 **뒤**에
+     * 도는 것이 중요하다 — 방금 지운 세션이 아직 자기 노트를 붙들고 있으면 안 된다.
+     * 지운 세션이 물려받았던 노트(전임자의 이름)도 같은 한 번에 걸린다.
+     */
+    if (m?.projectId) await this.sweepOrphanHandoffNotes(m.projectId).catch(() => {})
     this.emit({ type: 'session_deleted', sessionId })
+  }
+
+  /**
+   * 주인 없는 인수인계 노트를 지운다 (#106).
+   *
+   * **턴 경계에서는 치우지 않는다.** #102가 `createSession` 직후에서 후임자의 첫 턴
+   * 완료로 이 청소를 옮겼는데, 그것도 여전히 읽는 이보다 앞섰다: 첫 턴이 성공했는지도,
+   * 노트를 읽기는 했는지도 보지 않았다. 실사고에서 첫 턴은 1초도 안 돼 400으로
+   * 죽었고, 후임자가 받은 것은 이미 없는 파일의 경로였다. "읽었는가"는 우리가 관찰할
+   * 수 있는 사실이 아니므로, 턴에 매다는 방식 자체를 버린다.
+   *
+   * 남은 두 순간은 읽는 이와 경주할 수 없다 — 세션이 사라질 때(그 세션은 더 읽지
+   * 않는다)와 기동할 때(진행 중인 인수인계가 없다). 남겨 두는 값은 파일 하나이고
+   * `.centralu/handoff/`는 이미 .gitignore에 걸려 있다.
+   *
+   * **빈 디렉토리는 남긴다** (#104) — 폴더를 통째로 가져가는 청소는 그 사이에 시작된
+   * 인수인계의 글을 함께 데려간다. 방금 없앤 경주를 청소가 다시 만드는 셈이다.
+   */
+  private async sweepOrphanHandoffNotes(projectId?: string): Promise<void> {
+    const claimed = this.store.handoffPredecessors()
+    const projects = this.store.listProjects().filter((p) => !projectId || p.id === projectId)
+    for (const p of projects) {
+      const dir = join(p.path, HANDOFF_DIR)
+      let names: string[]
+      try {
+        names = await readdir(dir)
+      } catch {
+        continue // 인수인계를 한 적 없는 프로젝트 — 지울 것도 없다
+      }
+      for (const name of names) {
+        if (!name.endsWith('.md')) continue
+        const owner = name.slice(0, -'.md'.length)
+        if (this.meta.has(owner) || claimed.has(owner)) continue
+        await rm(join(dir, name), { force: true }).catch(() => {})
+      }
+    }
   }
 
   /**

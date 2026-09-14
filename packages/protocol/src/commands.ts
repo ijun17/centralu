@@ -66,7 +66,19 @@ export const CreateSessionParams = z.object({
    * 경로만 나르게 되면서 그 글이 대화에 남을 자리가 없어졌으므로, 세션의 마커로 박아
    * 둔다 (파일은 그 뒤로 순수한 파생물이라 언제 지워도 된다).
    */
-  handoff: z.object({ from: z.string(), note: z.string() }).optional(),
+  handoff: z
+    .object({
+      from: z.string(),
+      note: z.string(),
+      /**
+       * 전임 세션의 id (#106). 이름과 달리 이것은 **파일의 이름**이다 —
+       * `handoffFile(fromSessionId)`이 후임자가 읽으라고 받은 바로 그 경로라, 이 값이
+       * 있어야 host가 "아직 주인이 있는 노트"와 고아를 구별할 수 있다. 옛 프레임과
+       * 기록 모드 밖의 호출을 위해 optional이다: 없으면 그 노트는 아무도 주장하지 않는다.
+       */
+      fromSessionId: z.string().optional(),
+    })
+    .optional(),
   resumeExternalId: z.string().optional(),
   /** 재개할 때 이전 대화도 화면에 복원한다 (resumeExternalId와 함께 쓴다) */
   importHistory: z.boolean().optional(),

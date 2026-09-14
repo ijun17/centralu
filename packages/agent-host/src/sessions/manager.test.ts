@@ -3308,3 +3308,75 @@ describe('실패한 턴은 기록에 남는다 (#107)', () => {
     expect(listed.find((x) => x.id === s.id)?.state).toBe('error')
   })
 })
+
+/**
+ * 인수인계 노트의 수명 (#106).
+ *
+ * 실사고: 후임자에게 `.centralu/handoff/<전임자>.md`를 읽으라고 건넸는데, 그 디렉토리는
+ * 20:03에 생겨 20:06에 비어 있었다. 후임자는 한 글자도 내놓지 못했다 — 없는 파일의
+ * 경로를 받았고, 그 글은 다시 만들 수 없다 (쓴 세션이 방금 대체됐으므로).
+ *
+ * 청소가 두 번 자리를 옮긴 끝에 여기까지 왔다: `createSession` 직후(#102 이전) →
+ * 후임자의 첫 턴 완료(#102) → 읽는 이와 경주할 수 없는 두 순간(세션 삭제·기동).
+ */
+describe('인수인계 노트는 읽는 이와 경주하지 않는다 (#106)', () => {
+  const HANDOFF = '.centralu/handoff'
+  let dir: string
+  const note = (id: string) => join(dir, HANDOFF, `${id}.md`)
+  const placeNote = (id: string, text = '이어서 하세요') => {
+    mkdirSync(join(dir, HANDOFF), { recursive: true })
+    writeFileSync(note(id), text)
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-handoff-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  const project = () => rpc('projects.add', { path: dir }) as Promise<{ id: string; path: string }>
+
+  it('전임자를 지워도 후임자의 노트는 남는다 — 삭제는 인수인계의 마지막 걸음이다', async () => {
+    const p = await project()
+    const dying = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
+    placeNote(dying.id)
+    await rpc('agents.createSession', {
+      projectId: p.id, cwd: dir, tool: 'claude',
+      handoff: { from: dying.name, note: '이어서 하세요', fromSessionId: dying.id },
+    })
+
+    await mgr.deleteSession(dying.id)
+    expect(existsSync(note(dying.id))).toBe(true)
+  })
+
+  it('그 노트를 물려받은 세션까지 사라지면 걷는다 — 읽을 사람이 남아 있지 않다', async () => {
+    const p = await project()
+    const dying = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
+    placeNote(dying.id)
+    const heir = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: dir, tool: 'claude',
+      handoff: { from: dying.name, note: '이어서 하세요', fromSessionId: dying.id },
+    })) as SessionInfo
+
+    await mgr.deleteSession(dying.id)
+    await mgr.deleteSession(heir.id)
+    expect(existsSync(note(dying.id))).toBe(false)
+  })
+
+  it('기동이 고아를 걷는다 — 그때는 진행 중인 인수인계가 없다', async () => {
+    const p = await project()
+    const alive = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
+    placeNote(alive.id, '살아 있는 세션의 글')
+    placeNote('사라진-세션', '주인 없는 글')
+
+    // 같은 저장소를 다시 여는 것이 곧 재기동이다
+    const reborn = new SessionManager(store, new Map([['claude', adapter as AgentAdapter]]), () => {})
+    await vi.waitFor(() => {
+      expect(existsSync(note('사라진-세션'))).toBe(false)
+    })
+    expect(existsSync(note(alive.id))).toBe(true)
+    expect(reborn.listSessions().length).toBeGreaterThan(0)
+
+    // 빈 디렉토리는 남긴다 (#104) — 폴더를 통째로 가져가면 그 사이에 시작된 인수인계가 딸려 간다
+    expect(existsSync(join(dir, HANDOFF))).toBe(true)
+  })
+})

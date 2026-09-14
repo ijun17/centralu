@@ -228,6 +228,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /** 전임 세션의 이름 — 마커에 적히는 유일한 값 */
     from: z.string(),
     note: z.string().optional(),
+    /**
+     * 전임 세션의 id (#106) — 저장된 마커에만 실린다. 이 세션이 물려받은 노트 파일이
+     * 누구의 이름으로 놓여 있는지를 아는 유일한 길이고, 기동 시 고아 청소의 근거다.
+     */
+    fromSessionId: z.string().optional(),
   }),
   /** 밖에서 이어간 대화를 따라잡았다 — UI가 기록을 다시 읽는 신호 */
   /**
