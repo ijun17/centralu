@@ -3040,10 +3040,17 @@ describe('죽은-에이전트 인수인계 기록 (#78)', () => {
     ])
 
     // 요약 추출 실패(어댑터 미구현) → 원문 경로: 피벗 이전도 실린다
-    let out = await mgr.exportHandoffRecord(s.id)
+    let out = await mgr.exportHandoffRecord(s.id, 'claude')
     expect(out.text).toContain('[user] 옛 질문')
     expect(out.text).toContain('[user] 컴팩트 뒤 질문')
-    expect(out.text).toContain('[tool] Bash: ls')
+    expect(out.text).toContain('[104] Bash ls')
+    /*
+     * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 경로라야
+     * 후임자가 받는 첫 메시지가 두 모드에서 같아진다 — 그 수렴이 이 기능의 계약이다.
+     */
+    expect(out.path).toBe(join(p.path, '.centralu-handoff.md'))
+    expect(readFileSync(out.path, 'utf8')).toBe(out.text)
+    expect(out.text.split('\n')[0]).toBe(`# Handoff · ${s.name} · codex → claude`)
 
     // codex 롤아웃 요약이 오면 — 그 세션의 externalId로 묻고, 피벗 이전은 요약이 대신한다
     const asked: string[] = []

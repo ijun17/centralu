@@ -211,6 +211,24 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     before: z.number().optional(),
     after: z.number().optional(),
   }),
+  /**
+   * 이 세션은 인수인계로 태어났고, 전임자의 노트가 여기 박혀 있다 (#102).
+   *
+   * **기록이 필요한 이유가 컴팩션 마커와 같다**: 첫 메시지가 노트 전문이던 시절에는
+   * 그 글이 대화에 저절로 남았지만, 이제 첫 메시지는 경로만 나른다. 에이전트가 쓴
+   * 노트는 전임자가 사라지면 다시 만들 수 없으므로, 파일보다 오래 사는 곳에 둔다.
+   *
+   * `note`가 optional인 것은 의도다 — **방송에는 싣지 않는다.** 노트는 메가바이트가
+   * 될 수 있고, 화면에 그리는 것은 한 줄짜리 마커뿐이다. 원문은 저장된 payload에만 있다.
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('handoff'),
+    /** 전임 세션의 이름 — 마커에 적히는 유일한 값 */
+    from: z.string(),
+    note: z.string().optional(),
+  }),
   /** 밖에서 이어간 대화를 따라잡았다 — UI가 기록을 다시 읽는 신호 */
   /**
    * 오케스트레이터가 이 세션의 설정을 바꿨다 (#30).

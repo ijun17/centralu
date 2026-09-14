@@ -67,8 +67,10 @@ export function createRpcHandler(
       await mgr.deleteSession(sessionId, deleteWorktree, deleteExternal)
       return { ok: true as const }
     },
-    'agents.exportHandoffRecord': async (p) =>
-      mgr.exportHandoffRecord(RpcMethods['agents.exportHandoffRecord'].params.parse(p).sessionId),
+    'agents.exportHandoffRecord': async (p) => {
+      const { sessionId, toTool } = RpcMethods['agents.exportHandoffRecord'].params.parse(p)
+      return mgr.exportHandoffRecord(sessionId, toTool)
+    },
     'agents.createCoordinator': async (p) => {
       const params = RpcMethods['agents.createCoordinator'].params.parse(p)
       return mgr.createCoordinator(params)

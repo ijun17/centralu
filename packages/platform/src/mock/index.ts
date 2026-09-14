@@ -24,6 +24,7 @@ import type {
 } from '@cc/protocol'
 import {
   APP_VERSION,
+  HANDOFF_FILE,
   isNewerVersion,
   osPathBaseName,
   sessionLiveDefaults,
@@ -702,6 +703,24 @@ export class MockPlatform implements Platform {
         if (listed) info.name = listed.title
         else if (firstUser) info.name = firstUser.text.slice(0, 40)
       }
+      /*
+       * 실물과 같은 규칙 (#102): 물려받은 노트는 첫 메시지가 아니라 **마커**로 남는다.
+       * 목이 이걸 빼먹으면 "파일을 잃어도 노트는 남는다"는 계약이 화면에서만 성립한다.
+       */
+      if (params.handoff) {
+        const seq = (this.messages.get(id)?.length ?? 0) + 1
+        const { from, note } = params.handoff
+        this.pushMessage({
+          sessionId: id,
+          seq,
+          role: 'system',
+          kind: 'marker',
+          payload: { type: 'handoff', sessionId: id, seq, from, note },
+          ts: this.now(),
+        })
+        info.lastSeq = seq
+        this.emit({ type: 'handoff', sessionId: id, seq, from })
+      }
       if (params.initialPrompt) await this.agents.send(id, params.initialPrompt)
       return info
     },
@@ -899,11 +918,22 @@ export class MockPlatform implements Platform {
     interrupt: async (sessionId: string) => {
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     },
-    /** 죽은-에이전트 인수인계 기록 (#78) — 실물처럼 세션 이름이 실린 결정적 텍스트를 준다 */
-    exportHandoffRecord: async (sessionId: string) => {
+    /**
+     * 죽은-에이전트 인수인계 기록 (#78) — 실물처럼 세션 이름이 실린 결정적 텍스트를 준다.
+     * 실물과 같이 **파일까지 놓는다** (#102): 두 모드가 한 경로로 모이는 것이 이 기능의
+     * 계약이라, 목이 파일을 빼먹으면 UI 흐름이 목에서만 성립한다.
+     */
+    exportHandoffRecord: async (sessionId: string, toTool?: ToolName) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-      return { text: `# CentralU Handoff Record (automatic)\n\npredecessor "${s.name}" (${s.tool}) — mock record for ${sessionId}` }
+      const text = `# CentralU Handoff Record (automatic)\n\npredecessor "${s.name}" (${s.tool}${toTool ? ` → ${toTool}` : ''}) — mock record for ${sessionId}`
+      this.fsState.files[HANDOFF_FILE] = text
+      // 목록에도 세운다 — 실물처럼 나중에 휴지통으로 보낼 수 있어야 한다
+      const root = this.fsState.entries[''] ?? []
+      if (!root.some((e) => e.path === HANDOFF_FILE)) {
+        this.fsState.entries[''] = [...root, { name: HANDOFF_FILE, path: HANDOFF_FILE, isDir: false, ignored: false }]
+      }
+      return { text, path: HANDOFF_FILE }
     },
     /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
     worktreeStatus: async (sessionId: string) => {

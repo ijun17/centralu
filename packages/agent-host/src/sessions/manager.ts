@@ -9,6 +9,7 @@ import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import type {
   ModelOption,
@@ -29,7 +30,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import { APP_SLUG, DATA_DIR, sessionLiveDefaults } from '@cc/protocol'
+import { APP_SLUG, DATA_DIR, HANDOFF_FILE, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -1125,6 +1126,30 @@ export class SessionManager {
      * 시작하는 기록이 된다. UI는 user_message의 seq로 자기 낙관적 렌더와 맞추므로
      * 이벤트도 send()처럼 올린다.
      */
+    /*
+     * 전임자의 노트를 **마커로 박는다** (#102).
+     *
+     * 첫 메시지가 노트 전문이던 시절에는 그 글이 대화에 저절로 남았다. 이제 첫 메시지는
+     * 경로만 나르므로, 그대로 두면 에이전트가 쓴 — 전임자가 사라지면 다시 만들 수 없는 —
+     * 유일한 원본이 파일 하나에만 존재하게 된다. 컴팩션 마커와 같은 자리에 같은 방식으로
+     * 남긴다. 방송에는 note를 싣지 않는다: 화면이 그리는 것은 한 줄이고 노트는 메가바이트다.
+     */
+    if (params.handoff) {
+      const seq = this.store.nextSeq(id)
+      const { from, note } = params.handoff
+      this.store.appendMessages([
+        {
+          sessionId: id,
+          seq,
+          role: 'system',
+          kind: 'marker',
+          payload: { type: 'handoff', sessionId: id, seq, from, note },
+          ts: Date.now(),
+        },
+      ])
+      info.lastSeq = seq
+      this.emit({ type: 'handoff', sessionId: id, seq, from })
+    }
     if (params.initialPrompt) {
       const seq = this.store.nextSeq(id)
       this.store.appendMessages([
@@ -2587,8 +2612,12 @@ export class SessionManager {
    * 이 메서드가 불리는 순간은 그 도구가 응답 불능일 때다: 재료는 우리 저장소의
    * 원문 전부와, (codex라면) 롤아웃 파일의 마지막 컴팩트 요약뿐이다. 어느 쪽의
    * 실패도 기록 생성을 막지 않는다 — 요약이 없으면 빌더가 원문 압축으로 물러난다.
+   *
+   * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 이름에 쓰는 것이
+   * 핵심이다: 생산자만 다르고 후임자가 받는 첫 메시지는 같아진다. text도 함께
+   * 돌려주는 것은 부르는 쪽이 첫 줄 몇 개를 미리보기로 뽑기 위해서다.
    */
-  async exportHandoffRecord(sessionId: string): Promise<{ text: string }> {
+  async exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     const rows = this.store.loadMessages(sessionId, 1_000_000)
@@ -2602,7 +2631,11 @@ export class SessionManager {
     const summary = externalId
       ? ((await this.adapters.get(m.tool)?.lastCompactSummary?.(externalId).catch(() => null)) ?? null)
       : null
-    return { text: buildHandoffRecord({ name: m.name, tool: m.tool, summary, rows, pivotSeq }) }
+    const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq })
+    // 프로젝트 루트에 놓는다 — 후임자의 cwd가 거기고, UI의 fs 호출도 같은 기준으로 푼다
+    const path = join(this.cwdOf(m.projectId), HANDOFF_FILE)
+    await writeFile(path, text, 'utf8')
+    return { text, path }
   }
 
   private cwdOf(projectId: string | null): string {

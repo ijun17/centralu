@@ -78,6 +78,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
   { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
+  // 인수인계로 태어난 세션의 마커 (#102) — note는 방송에 싣지 않으므로 없는 모양이 골든이다
+  { type: 'handoff', sessionId: 's1', from: '메아' },
   { type: 'history_synced', sessionId: 's1', added: 2 },
   { type: 'session_deleted', sessionId: 's1' },
   // host가 스스로 만든 세션의 통지 (#69) — session은 SessionInfo지만 이벤트 스키마는

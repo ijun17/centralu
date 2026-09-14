@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { SessionInfo } from '@cc/protocol'
+import { HANDOFF_FILE, SessionInfo } from '@cc/protocol'
 import type {
   ToolStatus,
   Attachment,
@@ -648,6 +648,8 @@ export type AppState = {
       serviceTier?: string
       permissionPreset?: PermissionPreset
       initialPrompt?: string
+      /** 물려받은 인수인계 노트 — 첫 메시지가 아니라 기록의 마커로 들어간다 (#102) */
+      handoff?: { from: string; note: string }
       /** 도구가 갖고 있던 이전 세션을 이어받는다 (터미널에서 만든 대화 포함) */
       resumeExternalId?: string
       importHistory?: boolean
@@ -795,8 +797,22 @@ let chatSeq = 0
 /** 진행 중인 인수인계 — 같은 세션에 두 번 걸면 새 세션이 둘 태어난다 (모듈 상태: 재진입 가드일 뿐, 그릴 것은 없다) */
 const handoffInFlight = new Set<string>()
 
-/** 인수인계 글이 놓이는 임시 파일 (프로젝트 루트 기준). 읽은 뒤 휴지통으로 보낸다 */
-export const HANDOFF_FILE = '.centralu-handoff.md'
+/**
+ * 인수인계 글이 놓이는 파일. 이름은 프로토콜에 있다 (#102) — 에이전트가 쓰는 모드와
+ * host가 쓰는 기록 모드가 **같은 경로**로 모여야 후임자의 첫 메시지가 같아지기 때문이다.
+ * 여기서 다시 내보내는 것은 테스트·e2e가 이 이름으로 인수인계를 식별해서다.
+ */
+export { HANDOFF_FILE }
+
+/**
+ * 후임자가 파일을 읽기 전에는 지우지 않는다 (#102).
+ *
+ * 예전에는 createSession 직후에 휴지통으로 보냈다 — 후임자가 아직 읽지도 않은 파일을
+ * 치우는 경주였다. 이제 첫 메시지가 경로만 나르므로 그 경주는 곧 인수인계의 실패다.
+ * 여기 담긴 세션의 **첫 턴이 끝나는 순간** 치운다 (dispatchEvent의 turn_complete).
+ * 그때가 오지 않으면 파일은 남는다 — 노트는 이미 기록에 박혀 있으므로 유실이 아니다.
+ */
+const handoffFileToSweep = new Map<string, string>()
 
 /**
  * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
@@ -822,6 +838,52 @@ Cover, in this order:
 6. Working with the user — the language the user speaks, their tone, the response style they prefer, and standing instructions or conventions (build commands, commit style, things never to do).
 
 Write the note itself in the language the user has mostly used in this conversation.`
+
+/** 미리보기에 실을 줄 수·글자 수 — 무슨 일이 있었는지 알아볼 만큼만, 노트를 옮기지는 않게 */
+const PREVIEW_LINES = 10
+const PREVIEW_CHARS = 700
+
+/** 노트의 첫 줄들 — 빈 줄은 건너뛴다 (마크다운 노트는 머리에 빈 줄이 흔하다) */
+function notePreview(note: string): string {
+  const lines: string[] = []
+  for (const line of note.split('\n')) {
+    if (!line.trim() && lines.length === 0) continue
+    lines.push(line)
+    if (lines.length >= PREVIEW_LINES) break
+  }
+  const head = lines.join('\n').slice(0, PREVIEW_CHARS)
+  return head.length < note.trim().length ? `${head.trimEnd()}\n…` : head
+}
+
+/**
+ * 후임자의 첫 메시지 (#102) — **노트가 아니라 노트의 자리를 건넨다.**
+ *
+ * 예전에는 노트 전문이 그대로 첫 메시지였다. 그런데 위 프롬프트는 전임자에게
+ * "파일이니 길이는 제약이 아니다"라고 말한다 — 길수록 충실한 노트가 되고, 충실할수록
+ * 후임자가 받는 한 통의 메시지가 커졌다 (실측: 긴 세션을 codex에 넘기자 도착하자마자
+ * 에러). 파일은 원래 프로젝트 루트에 있고 후임자의 cwd가 그곳이므로, 첫 메시지는
+ * 경로만 가리키면 된다 — 그제서야 길이는 선언이 아니라 사실로 제약이 아니게 된다.
+ *
+ * 미리보기를 함께 싣는 이유: 대화 기록만 읽는 사람도 무슨 일이 있었는지는 알아야 한다.
+ * 조각으로 읽거나 grep해도 된다고 **명시**하는 이유: 그 말이 없으면 에이전트는 파일을
+ * 통째로 읽어 방금 없앤 그 문제를 스스로 다시 만든다.
+ */
+function handoffOpening(predecessor: string, note: string): string {
+  return [
+    `You are taking over from a session named "${predecessor}". It wrote a handoff note for you and it is on disk, at the project root: \`${HANDOFF_FILE}\`. Read it before anything else.`,
+    '',
+    'The note can be long. Read it in pieces (head, tail, byte offsets) or grep it for what you need — you do not have to pull the whole file into one turn.',
+    '',
+    'It begins:',
+    '',
+    notePreview(note)
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n'),
+    '',
+    'Reply first with a short summary of your understanding of the current state, in the language the note uses.',
+  ].join('\n')
+}
 
 /**
  * SessionInfo에서 **살아-있는-동안 사실들**만 골라낸다 (승인·질문·활동·한도·사용량).
@@ -1471,6 +1533,16 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'turn_complete') {
       const s = get()
+      /*
+       * 인수인계 파일은 여기서 사라진다 (#102) — 후임자가 한 턴을 마쳤다는 것은
+       * 노트를 읽을 기회가 있었다는 뜻이다. 실패해도 치명적이지 않다: 원문은 마커로
+       * 기록에 있고, 기록 모드의 글은 저장소에서 언제든 다시 만들 수 있다.
+       */
+      const sweepProject = handoffFileToSweep.get(sessionId)
+      if (sweepProject !== undefined) {
+        handoffFileToSweep.delete(sessionId)
+        void s.platform?.fs.trash(sweepProject, HANDOFF_FILE).catch(() => {})
+      }
       /*
        * **본다 = 앱이 앞에 있고 + 그 세션이 화면에 있고.**
        *
@@ -2295,6 +2367,7 @@ export const useStore = create<AppState>((set, get) => ({
       serviceTier: opts?.serviceTier,
       permissionPreset: opts?.permissionPreset ?? 'normal',
       initialPrompt: opts?.initialPrompt,
+      handoff: opts?.handoff,
       resumeExternalId: opts?.resumeExternalId,
       importHistory: opts?.importHistory,
       worktree: opts?.worktree,
@@ -2716,10 +2789,12 @@ export const useStore = create<AppState>((set, get) => ({
         /*
          * 기록 모드 (#78): 에이전트에게 **아무것도 묻지 않는다** — 이 모드가 존재하는
          * 이유가 그 에이전트의 응답 불능이다. host가 저장소 원문(+codex 롤아웃의
-         * 컴팩트 요약)으로 기록을 만들어 주고, 그것이 후임자의 첫 메시지가 된다.
-         * 파일 경유 없음: 직송은 원자적이다 (세션 생성 성공 = 내용 있음).
+         * 컴팩트 요약)으로 기록을 만든다.
+         *
+         * host는 그것을 에이전트 모드와 **같은 파일**에 써 놓는다 (#102) — 생산자만
+         * 다르고 후임자가 받는 첫 메시지는 두 모드에서 같다. 돌려받은 text는 미리보기용이다.
          */
-        note = (await s.platform.agents.exportHandoffRecord(sessionId)).text
+        note = (await s.platform.agents.exportHandoffRecord(sessionId, heirTool)).text
       } else {
       /*
        * 돌고 있는 턴이 있으면 **끝나기를 기다린 뒤** 부탁한다 (실측: 메아 인수인계 —
@@ -2745,6 +2820,9 @@ export const useStore = create<AppState>((set, get) => ({
        * **파일이 놓이기를 기다린다** — 대화에서 긁지 않는다 (실측: 돌던 턴의 잔여
        * 출력이 글 머리에 섞여 "잘린 것"으로 읽혔다). 턴이 끝난 뒤 파일을 읽으면
        * 에이전트가 쓴 바이트가 그대로다. 파일이 안 놓이면 아무것도 지우지 않는다.
+       *
+       * 읽은 내용은 후임자에게 통째로 보내지 않는다 (#102) — 미리보기를 뽑고, 원문은
+       * 기록에 박아 둔다. 전임자가 사라지면 이 글은 다시 만들 수 없기 때문이다.
        */
       const deadline = Date.now() + 10 * 60_000
       for (;;) {
@@ -2758,7 +2836,8 @@ export const useStore = create<AppState>((set, get) => ({
         if (cur.state === 'working' || cur.state === 'waiting_approval') continue
         try {
           const f = await s.platform.fs.readFile(session.projectId!, HANDOFF_FILE)
-          if (f.truncated) throw new Error(`${HANDOFF_FILE} is too large to hand over in one piece`)
+          // 잘려 온 파일도 미리보기로는 충분하지만, 기록에 반쪽짜리 원본을 박을 수는 없다
+          if (f.truncated) throw new Error(`${HANDOFF_FILE} is too large for the app to read in one piece`)
           if (!f.binary && f.text.trim()) {
             note = f.text.trim()
             break
@@ -2784,7 +2863,9 @@ export const useStore = create<AppState>((set, get) => ({
         verbosity: sameTool ? (session.verbosity ?? undefined) : undefined,
         serviceTier: sameTool ? (session.serviceTier ?? undefined) : undefined,
         permissionPreset: session.permissionPreset,
-        initialPrompt: note,
+        initialPrompt: handoffOpening(session.name, note),
+        // 노트 원문은 기록으로 간다 — 파일은 이제 순수한 파생물이라 언제 사라져도 된다 (#102)
+        handoff: { from: session.name, note },
       })
       await get().rename(info.id, session.name)
 
@@ -2802,9 +2883,13 @@ export const useStore = create<AppState>((set, get) => ({
         get().focusSession(info.id, { preferGrid: true })
       }
 
-      // 다 읽은 임시 파일은 휴지통으로 — 저장소를 더럽히지 않는다 (실패해도 치명적이지 않다).
-      // 기록 모드는 파일을 만든 적이 없다
-      if (mode === 'agent') void s.platform.fs.trash(session.projectId!, HANDOFF_FILE).catch(() => {})
+      /*
+       * 파일 청소는 **후임자의 첫 턴이 끝난 뒤**다 (#102). 예전에는 바로 여기서
+       * 휴지통으로 보냈는데, 그 순간 후임자는 아직 파일을 열지도 않았다 — 첫 메시지가
+       * 노트 전문이던 동안에는 들키지 않던 경주다. 두 모드 모두 파일을 남기므로
+       * (host가 쓰든 에이전트가 쓰든) 청소 대상도 모드를 가리지 않는다.
+       */
+      handoffFileToSweep.set(info.id, session.projectId!)
 
       if (deleteOld) {
         // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
@@ -3420,6 +3505,9 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
       // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다
       return [...items, { kind: 'mark', seq: ++chatSeq, text: compactionText(e) }]
+    case 'handoff':
+      // 이 세션이 어디서 왔는지 (#102). 노트 원문은 저장된 payload에만 있다 — 여기는 한 줄이다
+      return [...items, { kind: 'mark', seq: ++chatSeq, text: handoffText(e) }]
     default:
       return items
   }
@@ -3440,6 +3528,17 @@ export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' 
 }
 
 const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+
+/**
+ * 인수인계 마커에 무엇을 적을 것인가 (#102).
+ *
+ * 노트 원문은 이 자리에 그리지 않는다 — 메가바이트가 될 수 있고, 후임자가 받은 첫
+ * 메시지가 이미 미리보기를 담고 있다. 여기가 말하는 것은 "이 세션은 저 세션의
+ * 뒤를 잇는다"는 사실 하나고, 원문은 그 사실과 함께 기록에 보관된다.
+ */
+export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
+  return `Handed off from "${e.from}" — the note is kept with this session`
+}
 
 /** 메시지 복원 (재시작·세션 전환 시) */
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
@@ -3472,8 +3571,8 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       else items.push({ kind: 'reasoning', seq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
       // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
-      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' }>
-      items.push({ kind: 'mark', seq: m.seq, text: compactionText(e) })
+      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' }>
+      items.push({ kind: 'mark', seq: m.seq, text: e.type === 'handoff' ? handoffText(e) : compactionText(e) })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary)

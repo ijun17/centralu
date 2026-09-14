@@ -26,6 +26,16 @@ import {
 
 /** UI → host RPC. 포트 인터페이스(platform/ports)와 1:1 대응 (docs/protocol.md §3) */
 
+/**
+ * 인수인계 글이 놓이는 파일 (프로젝트 루트 기준, #102).
+ *
+ * **양쪽 끝이 같은 이름을 알아야 한다.** 살아 있는 인수인계는 죽는 에이전트가 이 파일을
+ * 쓰고(프롬프트가 이 이름을 부른다), 기록 모드는 host가 같은 자리에 쓴다. 두 생산자가
+ * 한 경로로 모이기 때문에 후임자의 첫 메시지가 모드와 무관하게 같아진다 —
+ * 그래서 이 이름은 UI의 상수가 아니라 프로토콜의 상수다.
+ */
+export const HANDOFF_FILE = '.centralu-handoff.md'
+
 export const CreateSessionParams = z.object({
   projectId: z.string(),
   cwd: z.string(),
@@ -38,6 +48,14 @@ export const CreateSessionParams = z.object({
   serviceTier: z.string().optional(),
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
+  /**
+   * 이 세션이 물려받은 인수인계 노트 (#102) — 첫 메시지가 아니라 **기록**으로 들어간다.
+   *
+   * 에이전트가 쓴 노트는 전임자가 사라지면 다시 만들 수 없는 유일한 재료다. 첫 메시지가
+   * 경로만 나르게 되면서 그 글이 대화에 남을 자리가 없어졌으므로, 세션의 마커로 박아
+   * 둔다 (파일은 그 뒤로 순수한 파생물이라 언제 지워도 된다).
+   */
+  handoff: z.object({ from: z.string(), note: z.string() }).optional(),
   resumeExternalId: z.string().optional(),
   /** 재개할 때 이전 대화도 화면에 복원한다 (resumeExternalId와 함께 쓴다) */
   importHistory: z.boolean().optional(),
@@ -497,11 +515,20 @@ export const RpcMethods = {
   },
   /**
    * 죽은-에이전트 인수인계 기록 (#78). 그 세션의 도구를 부르지 않고 host가
-   * 저장소 원문(+codex 롤아웃의 컴팩트 요약)으로 만든다 — 후임자의 initialPrompt가 된다.
+   * 저장소 원문(+codex 롤아웃의 컴팩트 요약)으로 만든다.
+   *
+   * **결과는 파일이다** (#102): host가 프로젝트의 `HANDOFF_FILE`에 써 놓고 그 경로를
+   * 돌려준다 — 에이전트가 직접 쓰는 모드와 **같은 경로**라, 후임자가 받는 첫 메시지는
+   * 두 모드에서 글자 하나 다르지 않다. text도 함께 돌려주는 것은 부르는 쪽이 첫
+   * 메시지에 넣을 짧은 미리보기를 뽑기 위해서다.
    */
   'agents.exportHandoffRecord': {
-    params: z.object({ sessionId: z.string() }),
-    result: z.object({ text: z.string() }),
+    params: z.object({
+      sessionId: z.string(),
+      /** 후임자가 될 도구 — 기록 헤더의 `codex → claude`. 모르면 생략한다 */
+      toTool: ToolName.optional(),
+    }),
+    result: z.object({ text: z.string(), path: z.string() }),
   },
   /**
    * 시야가 잘린 조율 세션을 만든다 (#80·#81 물리). 의견(업무·반장)은 앱의 것이고,
