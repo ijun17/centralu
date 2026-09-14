@@ -8,7 +8,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { CLIENT_INFO } from '@cc/protocol'
-import type { AdapterCapabilities, ApprovalDecision, ApprovalScope, PermissionPreset } from '@cc/protocol'
+import type {
+  AdapterCapabilities,
+  ApprovalDecision,
+  ApprovalScope,
+  PermissionPreset,
+  ToolDescriptor,
+} from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
@@ -695,6 +701,14 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
+
+  readonly descriptor: ToolDescriptor = {
+    name: 'codex',
+    label: 'Codex',
+    mark: 'X',
+    install: 'npm i -g @openai/codex',
+    login: 'codex login',
+  }
 
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 실측: thread/start의 approvalPolicy가 전역 설정을 덮어쓴다

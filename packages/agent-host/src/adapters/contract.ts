@@ -8,6 +8,7 @@ import type {
   PermissionPreset,
   QuestionAnswer,
   ToolName,
+  ToolDescriptor,
 } from '@cc/protocol'
 
 /**
@@ -258,6 +259,16 @@ export interface SessionHandle {
 export interface AgentAdapter {
   readonly tool: ToolName
   readonly capabilities: AdapterCapabilities
+  /**
+   * Who this tool is, for the screens that draw a row per tool.
+   *
+   * It lives on the adapter because the adapter is the only thing that knows the tool
+   * exists. This used to be a `TOOL_META` record in `@cc/protocol` listing two vendors by
+   * name, so adding a third meant editing the shared protocol — an adapter that cannot
+   * introduce itself is not really a plug-in point.
+   */
+  readonly descriptor: ToolDescriptor
+
   detect(): Promise<DetectResult>
   createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle>
   /**

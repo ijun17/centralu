@@ -37,6 +37,7 @@ class EchoHandle implements SessionHandle {
 }
 class EchoAdapter implements AgentAdapter {
   readonly tool: ToolName = 'claude'
+  readonly descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' }
   readonly capabilities = { approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: ['image' as const], verbosities: [], exclusiveWriter: false }
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'echo' } }
   async createSession(opts: CreateSessionOpts, emit: EventSink) { return new EchoHandle(opts.sessionId, emit) }

@@ -9,8 +9,9 @@ import {
   parseClientFrame,
   parseEventLenient,
   parseServerFrame,
-  TOOL_META,
-  TOOL_NAMES,
+  ToolDescriptor,
+  ToolName,
+  ToolStatus,
 } from './index.js'
 
 const GOLDEN_EVENTS_V1: unknown[] = [
@@ -166,27 +167,44 @@ describe('봉투', () => {
 })
 
 /**
- * The type system already guarantees that `TOOL_META` has an entry per tool — `Record<ToolName, …>`
- * will not compile otherwise. What it cannot check is whether those entries are *distinguishable*,
- * and that is the property the screen depends on.
+ * A tool's presentation used to be a `Record<ToolName, …>` compiled into this package, so the
+ * compiler guaranteed every tool had a label and a mark. It is data on the wire now — sent by
+ * whichever adapter the host happens to have — and the schema is the only thing left standing
+ * between a half-filled descriptor and a screen that draws it.
  */
 describe('tool presentation metadata', () => {
-  it('gives every tool a mark no other tool uses', () => {
-    // The session chip shows one glyph and nothing else. Two tools sharing a mark is not a
-    // typo you notice in review — it is two different agents that look identical in the
-    // sidebar, and the only place the difference shows is a hover title.
-    const marks = TOOL_NAMES.map((t) => TOOL_META[t].mark)
-    expect(new Set(marks).size).toBe(marks.length)
+  const descriptor = {
+    name: 'claude',
+    label: 'Claude Code',
+    mark: 'C',
+    install: 'npm i -g @anthropic-ai/claude-code',
+    login: 'claude auth login',
+  }
+
+  it('accepts a tool this build has never heard of', () => {
+    // The point of opening ToolName: a third adapter must not need an edit here to exist.
+    expect(ToolName.safeParse('some-new-agent').success).toBe(true)
   })
 
-  it('gives every tool a label and both fix-it commands', () => {
-    // An empty install/login string renders as an empty <code> block: the intro card would say
-    // "Not connected" and then offer nothing to run.
-    for (const t of TOOL_NAMES) {
-      const meta = TOOL_META[t]
-      expect(meta.label.length).toBeGreaterThan(0)
-      expect(meta.install.length).toBeGreaterThan(0)
-      expect(meta.login.length).toBeGreaterThan(0)
-    }
+  it('refuses a nameless tool', () => {
+    // '' is what a missing id degrades into, and it would key a React list and a session row.
+    expect(ToolName.safeParse('').success).toBe(false)
+  })
+
+  it('refuses a descriptor with no mark', () => {
+    // The session chip shows one glyph and nothing else — there is no second place for the
+    // name to appear, so a descriptor without a mark draws an empty square in the sidebar.
+    const { mark: _mark, ...noMark } = descriptor
+    expect(ToolDescriptor.safeParse(descriptor).success).toBe(true)
+    expect(ToolDescriptor.safeParse(noMark).success).toBe(false)
+  })
+
+  it('refuses a status that is only a detect result', () => {
+    // ToolStatus carries both halves so no screen has to join them. A raw detect result —
+    // installed/loggedIn/detail with no descriptor — is exactly the shape that join used to
+    // take, and it must not pass for the joined one.
+    const detected = { name: 'claude', installed: true, loggedIn: true, detail: 'v2.0.0' }
+    expect(ToolStatus.safeParse({ ...descriptor, ...detected }).success).toBe(true)
+    expect(ToolStatus.safeParse(detected).success).toBe(false)
   })
 })

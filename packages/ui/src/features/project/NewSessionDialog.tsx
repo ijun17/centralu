@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { TOOL_META, TOOL_NAMES, type ExternalSession, type GitBranch, type ToolName } from '@cc/protocol'
+import type { ExternalSession, GitBranch, ToolName, ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useSessionsOf } from '../../store/selectors.js'
+import { useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 
 /** 칸 하나의 생김새. 셋이 같은 모양이어야 '같은 종류의 답'으로 읽힌다 */
 const inputClass =
   'w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none'
-
-type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
 /**
  * 이전 세션 목록의 상태.
@@ -80,8 +78,14 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   // 워크트리는 깃 저장소에서만 만들 수 있다 — 아니면 체크박스를 죽이고 이유를 적는다
   const isRepo = !!project?.git
 
-  const [tools, setTools] = useState<Detection[] | null>(null)
-  const [tool, setTool] = useState<ToolName>(project?.defaultTool ?? 'claude')
+  /**
+   * 필을 세우는 목록은 접속할 때 받아 둔 것이고, 아래 `tools`는 **이 창을 열면서 다시**
+   * 물어본 것이다. 목록은 바뀔 일이 없지만 설치·로그인 여부는 방금 바뀌었을 수 있다.
+   */
+  const allTools = useTools()
+  const [tools, setTools] = useState<ToolStatus[] | null>(null)
+  const [tool, setTool] = useState<ToolName>(project?.defaultTool ?? allTools[0]?.name ?? '')
+  const toolMeta = useToolMeta(tool)
   const [busy, setBusy] = useState(false)
   /**
    * 이 세션만 워크트리에서 돌린다 (FR-2 옵션).
@@ -226,13 +230,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     if (!tools || autoPicked.current) return
     autoPicked.current = true
     const ok = (t: ToolName) => {
-      const d = tools.find((x) => x.tool === t)
+      const d = tools.find((x) => x.name === t)
       return d?.installed === true && d.loggedIn
     }
-    setTool((cur) => (ok(cur) ? cur : (TOOL_NAMES.find(ok) ?? cur)))
+    setTool((cur) => (ok(cur) ? cur : (tools.find((x) => x.installed && x.loggedIn)?.name ?? cur)))
   }, [tools])
 
-  const info = (t: ToolName) => tools?.find((x) => x.tool === t)
+  const info = (t: ToolName) => tools?.find((x) => x.name === t)
   const usable = (t: ToolName) => {
     const d = info(t)
     return !tools || (d?.installed === true && d.loggedIn)
@@ -314,20 +318,20 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           </h2>
           {/* 도구 — 소제목 없이 필 두 개면 뜻이 선다. 모델·권한은 만든 뒤 헤더에서 */}
           <div className="mt-2.5 flex gap-1.5">
-            {TOOL_NAMES.map((t) => (
+            {allTools.map((t) => (
               <button
-                key={t}
+                key={t.name}
                 type="button"
-                onClick={() => setTool(t)}
-                data-testid={`tool-option-${t}`}
-                title={info(t)?.detail}
+                onClick={() => setTool(t.name)}
+                data-testid={`tool-option-${t.name}`}
+                title={info(t.name)?.detail}
                 className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
-                  tool === t
+                  tool === t.name
                     ? 'border-ash bg-graphite/40 text-chalk'
                     : 'border-edge text-ash hover:border-graphite hover:text-chalk'
-                } ${tools && !usable(t) ? 'opacity-50' : ''}`}
+                } ${tools && !usable(t.name) ? 'opacity-50' : ''}`}
               >
-                {TOOL_META[t].label}
+                {t.label}
               </button>
             ))}
           </div>
@@ -335,8 +339,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           {blocked && (
             <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="tool-blocked">
               {info(tool)?.installed
-                ? `${TOOL_META[tool].label} needs a login — run ${TOOL_META[tool].login} in a terminal`
-                : `${TOOL_META[tool].label} not found (${info(tool)?.detail ?? 'not installed'})`}
+                ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
+                : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`}
             </p>
           )}
         </header>

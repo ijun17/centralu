@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { APP_VERSION, TOOL_META, TOOL_NAMES, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { APP_VERSION, type ToolName, type ToolStatus, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 import { TEXT_SCALES, TEXT_SCALE_DEFAULT, useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useTools } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
@@ -419,7 +420,9 @@ function OrchestratorSettings() {
   const switchTool = useStore((s) => s.switchTool)
   const setToast = useStore((s) => s.setToast)
   const [saved, setSaved] = useState<ToolName | null>(null)
-  const [asking, setAsking] = useState<ToolName | null>(null)
+  // 고른 것을 이름이 아니라 통째로 들고 있는다 — 확인 창이 이름을 다시 찾아 헤맬 일이 없다
+  const [asking, setAsking] = useState<ToolStatus | null>(null)
+  const tools = useTools()
 
   // 세션이 아직 없으면 화면에 보일 값은 저장된 선택뿐이다 (소개 화면에서 고른 그것)
   useEffect(() => {
@@ -430,7 +433,7 @@ function OrchestratorSettings() {
       .catch(() => {})
   }, [platform])
 
-  const current = live ?? saved ?? 'claude'
+  const current = live ?? saved ?? (tools[0]?.name ?? null)
 
   const apply = async (tool: ToolName) => {
     try {
@@ -450,22 +453,22 @@ function OrchestratorSettings() {
         which agent it runs on.
       </p>
       <div className="mt-3 space-y-1.5">
-        {TOOL_NAMES.map((t) => (
+        {tools.map((t) => (
           <button
-            key={t}
+            key={t.name}
             type="button"
             role="radio"
-            aria-checked={t === current}
-            data-testid={`orchestrator-tool-${t}`}
-            onClick={() => t !== current && setAsking(t)}
+            aria-checked={t.name === current}
+            data-testid={`orchestrator-tool-${t.name}`}
+            onClick={() => t.name !== current && setAsking(t)}
             className={`flex w-full items-baseline gap-2 rounded border px-3 py-2 text-left transition-colors ${
-              t === current ? 'border-ash text-chalk' : 'border-edge text-ash hover:border-graphite hover:text-chalk'
+              t.name === current ? 'border-ash text-chalk' : 'border-edge text-ash hover:border-graphite hover:text-chalk'
             }`}
           >
             <span className="w-2 shrink-0 text-[10px] leading-none" aria-hidden>
-              {t === current ? '✓' : ''}
+              {t.name === current ? '✓' : ''}
             </span>
-            <span className="text-[12px]">{TOOL_META[t].label}</span>
+            <span className="text-[12px]">{t.label}</span>
           </button>
         ))}
       </div>
@@ -476,7 +479,7 @@ function OrchestratorSettings() {
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
           <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4">
             <h2 className="text-[13px] font-medium text-chalk">
-              Run the orchestrator on {TOOL_META[asking].label}?
+              Run the orchestrator on {asking.label}?
             </h2>
             {/*
               **요약은 손실이라는 사실을 적는다.**
@@ -504,7 +507,7 @@ function OrchestratorSettings() {
               <button
                 className="rounded border border-graphite px-2.5 py-1 text-[12px] text-chalk hover:bg-graphite/50"
                 onClick={() => {
-                  void apply(asking)
+                  void apply(asking.name)
                   setAsking(null)
                 }}
                 data-testid="orchestrator-switch-confirm-btn"

@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { TOOL_META, TOOL_NAMES, type ToolName } from '@cc/protocol'
+import type { ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-
-type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 
 /**
  * 소개 화면 (#63) — 첫 실행에 딱 한 번, "네 오케스트레이터를 만나라".
@@ -22,7 +20,7 @@ type Detection = { tool: ToolName; installed: boolean; loggedIn: boolean; detail
 export function Intro() {
   const platform = usePlatform()
   const completeIntro = useStore((s) => s.completeIntro)
-  const [tools, setTools] = useState<Detection[] | null>(null)
+  const [tools, setTools] = useState<ToolStatus[] | null>(null)
 
   const detect = useCallback(async () => {
     try {
@@ -36,13 +34,10 @@ export function Intro() {
     void detect()
   }, [detect])
 
-  const ready = (t: Detection) => t.installed && t.loggedIn
+  const ready = (t: ToolStatus) => t.installed && t.loggedIn
   const anyReady = (tools ?? []).some(ready)
-  // 목록에 없어도 두 도구의 카드는 선다 — "없다"도 카드가 말할 상태다
-  const cards: Detection[] = TOOL_NAMES.map(
-    (tool) =>
-      tools?.find((t) => t.tool === tool) ?? { tool, installed: false, loggedIn: false, detail: 'not found' },
-  )
+  // detect는 **모든** 도구를 그 상태와 함께 돌려준다 — 안 깔린 도구도 카드가 서는 이유다
+  const cards = tools ?? []
 
   return (
     <div className="flex flex-1 items-center justify-center px-8" data-testid="intro">
@@ -66,10 +61,10 @@ export function Intro() {
             const ok = ready(t)
             return (
               <button
-                key={t.tool}
-                data-testid={`intro-card-${t.tool}`}
+                key={t.name}
+                data-testid={`intro-card-${t.name}`}
                 disabled={!ok}
-                onClick={() => void completeIntro(t.tool)}
+                onClick={() => void completeIntro(t.name)}
                 /*
                  * 비활성은 **어둡게** (사용자 요구) — 회색 글자는 "지금 없는 것"의
                  * 관습이고, 여기서는 그 관습이 정확히 사실이다.
@@ -80,17 +75,17 @@ export function Intro() {
                     : 'cursor-not-allowed border-edge/60 bg-panel/40 opacity-40'
                 }`}
               >
-                <span className="block text-[14px] font-medium text-chalk">{TOOL_META[t.tool].label}</span>
+                <span className="block text-[14px] font-medium text-chalk">{t.label}</span>
                 {ok ? (
                   <span className="readout mt-1 block text-[11px] text-slate">{t.detail}</span>
                 ) : (
                   <>
                     {/* 진단은 한눈에, 처방은 그 아래 — 터미널을 모르는 눈이 먼저다 */}
-                    <span className="mt-1 block text-[12px] text-ash" data-testid={`intro-card-${t.tool}-status`}>
+                    <span className="mt-1 block text-[12px] text-ash" data-testid={`intro-card-${t.name}-status`}>
                       Not connected
                     </span>
                     <code className="mt-1.5 block truncate rounded bg-pit px-1.5 py-1 font-mono text-[10px] text-slate">
-                      {t.installed ? TOOL_META[t.tool].login : TOOL_META[t.tool].install}
+                      {t.installed ? t.login : t.install}
                     </code>
                   </>
                 )}

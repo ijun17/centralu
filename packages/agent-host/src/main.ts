@@ -5,13 +5,10 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { migrateLegacyDataDir } from './data-dir.js'
-import type { ToolName } from '@cc/protocol'
 import { HostServer } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
 import { Store } from './dev-services/store.js'
-import { ClaudeAdapter } from './adapters/claude/index.js'
-import { CodexAdapter } from './adapters/codex/index.js'
-import type { AgentAdapter } from './adapters/contract.js'
+import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -123,10 +120,7 @@ if (!lock.ok) {
 process.on('exit', lock.release)
 
 const store = new Store(dbPath)
-const adapters = new Map<ToolName, AgentAdapter>([
-  ['claude', new ClaudeAdapter()],
-  ['codex', new CodexAdapter()],
-])
+const adapters = createAdapters()
 
 /*
  * host 자신의 주소를 매니저에게 알려준다 — 인프로세스로 도구를 못 붙이는 어댑터의

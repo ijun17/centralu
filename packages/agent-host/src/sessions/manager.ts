@@ -28,7 +28,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import { APP_SLUG, DATA_DIR, TOOL_META, sessionLiveDefaults } from '@cc/protocol'
+import { APP_SLUG, DATA_DIR, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -1425,7 +1425,7 @@ export class SessionManager {
     const gone = await this.externalGone(m, cwd)
     const tCheck = Date.now() - t0
     if (gone) {
-      return { session: m, resumed: false, reason: externalMissingReason(m.tool, cwd) }
+      return { session: m, resumed: false, reason: externalMissingReason(this.toolLabel(m.tool), cwd) }
     }
 
     try {
@@ -1552,7 +1552,7 @@ export class SessionManager {
       // 바람에 그 이유조차 전달 못 하는 것이 최악이다. 판단 못 하면 막지 않는다(false)와 같은 규칙.
       const gone = await withTimeout(this.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false)
       if (gone) {
-        return { session: m, resumed: false, reason: externalMissingReason(m.tool, cwd) }
+        return { session: m, resumed: false, reason: externalMissingReason(this.toolLabel(m.tool), cwd) }
       }
       /*
        * 어댑터가 "이 대화는 다른 쪽이 쥐고 있다"고 코드로 말해 준다 (codex의 잠금).
@@ -2832,7 +2832,7 @@ export class SessionManager {
           const info = await this.createSession({
             projectId: project.id,
             cwd: project.path,
-            tool: opts.tool ?? project.defaultTool,
+            tool: opts.tool ?? project.defaultTool ?? this.firstTool(),
             permissionPreset: 'normal',
           })
           if (opts.name) this.rename(info.id, opts.name)
@@ -3472,7 +3472,25 @@ export class SessionManager {
    * 성질이므로 app_settings가 맞는 자리다. 이미 만들어진 뒤에는 세션 설정의
    * Agent 전환이 맡는다 — 이 값은 다시 읽히지 않는다.
    */
-  configureOrchestrator(tool: 'claude' | 'codex'): void {
+  /**
+   * The tool to use when nothing has chosen one — the first adapter this build registered.
+   *
+   * A project's `defaultTool` is nullable because only the host knows which tools exist, so
+   * a project created before any tool was picked has none. Falling back to a literal
+   * `'claude'` here would put a vendor name back into code that is meant not to know any.
+   */
+  private firstTool(): ToolName {
+    const first = [...this.adapters.keys()][0]
+    if (!first) throw new Error('no agent adapter is registered')
+    return first
+  }
+
+  /** A tool's display name, from whichever adapter owns it — falls back to the bare id. */
+  private toolLabel(tool: ToolName): string {
+    return this.adapters.get(tool)?.descriptor.label ?? tool
+  }
+
+  configureOrchestrator(tool: ToolName): void {
     this.store.setAppSetting('orchestrator_tool', tool)
   }
 
@@ -3609,8 +3627,7 @@ export class SessionManager {
  * cannot tell apart from here. Claiming a deletion we did not witness reads as data loss,
  * and a person who believes their data is gone stops looking for it.
  */
-function externalMissingReason(tool: ToolName, cwd: string): string {
-  const label = TOOL_META[tool].label
+function externalMissingReason(label: string, cwd: string): string {
   return (
     `${label} has no record of this conversation under ${cwd} — either it was removed there, ` +
     `or this folder has moved since the session started. The history kept here is still readable, ` +

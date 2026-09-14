@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { TOOL_META, TOOL_NAMES, type ToolName, type UsageSnapshot } from '@cc/protocol'
+import type { ToolName, UsageSnapshot } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
+import { useToolMeta, useTools } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { UsagePanel } from './UsagePanel.jsx'
 import { usageTone, weeklyWindow } from './weekly.js'
@@ -35,6 +36,9 @@ export function UsageDonuts() {
   const offline = connection !== 'connected'
   const [snap, setSnap] = useState<Partial<Record<ToolName, { usage: UsageSnapshot | null; reason?: string }>>>({})
   const [open, setOpen] = useState<ToolName | null>(null)
+  const tools = useTools()
+  // 훅은 조건부로 부를 수 없다 — 닫혀 있는 동안의 값은 어차피 안 쓰인다
+  const openMeta = useToolMeta(open ?? '')
   /**
    * 도넛이 서는 도구 (사용자 요청 2026-09-09: "연결된 에이전트만 도넛이 뜨는 거야").
    *
@@ -52,15 +56,15 @@ export function UsageDonuts() {
     if (useStore.getState().connection !== 'connected') return
     void platform.agents
       .detect()
-      .then((tools) => setLive(tools.filter((t) => t.installed && t.loggedIn).map((t) => t.tool)))
+      .then((found) => setLive(found.filter((t) => t.installed && t.loggedIn).map((t) => t.name)))
       .catch(() => setLive([]))
-    for (const tool of TOOL_NAMES) {
+    for (const { name: tool } of tools) {
       void platform.agents
         .usage(tool)
         .then((r) => setSnap((s) => ({ ...s, [tool]: { usage: r.usage, reason: r.supported ? undefined : r.reason } })))
         .catch((e: Error) => setSnap((s) => ({ ...s, [tool]: { usage: null, reason: e.message } })))
     }
-  }, [platform])
+  }, [platform, tools])
 
   /*
    * 뜰 때 한 번, 그 뒤로는 5분마다. 한도는 분 단위로 움직이는 값이라 초 단위 폴링은
@@ -158,7 +162,7 @@ export function UsageDonuts() {
           >
             <header className="flex items-center gap-2 border-b border-edge px-4 py-2">
               <h2 className="text-[13px] font-medium text-chalk">Usage</h2>
-              <span className="readout text-[11px] text-slate">{TOOL_META[open].label}</span>
+              <span className="readout text-[11px] text-slate">{openMeta.label}</span>
             </header>
             <div className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
               <UsagePanel tool={open} />
@@ -188,6 +192,7 @@ function Donut({
   active: boolean
   onClick: () => void
 }) {
+  const meta = useToolMeta(tool)
   const w = snap?.usage ? weeklyWindow(snap.usage.windows) : null
   const known = w !== null
   const percent = w?.percent ?? 0
@@ -201,7 +206,7 @@ function Donut({
       testId={`usage-donut-tip-${tool}`}
       content={
         <span className="block">
-          <span className="block text-chalk">{TOOL_META[tool].label}</span>
+          <span className="block text-chalk">{meta.label}</span>
           <span className="readout mt-1 block">
             {known ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used` : 'Weekly usage unknown'}
           </span>
@@ -211,7 +216,7 @@ function Donut({
       <button
         type="button"
         onClick={onClick}
-        aria-label={`${TOOL_META[tool].label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
+        aria-label={`${meta.label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
         data-testid={`usage-donut-${tool}`}
         data-percent={known ? percent : ''}
         /*
@@ -265,7 +270,7 @@ function Donut({
             className={`fill-current font-mono ${known ? 'text-chalk' : 'text-slate'}`}
             style={{ fontSize: '9px' }}
           >
-            {TOOL_META[tool].mark}
+            {meta.mark}
           </text>
         </svg>
       </button>

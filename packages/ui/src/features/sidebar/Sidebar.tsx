@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { TOOL_META, type ProjectInfo, type SessionState, type ToolName } from '@cc/protocol'
+import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
@@ -7,7 +7,7 @@ import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { APPS } from '../../apps/registry.js'
 import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
 import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
-import { useIsProjectSelected, useSelectedSessionId, useSessionsOf } from '../../store/selectors.js'
+import { useIsProjectSelected, useSelectedSessionId, useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { DotsIcon, PlusIcon } from '../../components/icons.jsx'
@@ -748,7 +748,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           sessionId={confirming}
           name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
           // 프로젝트 기본값이 아니라 이 세션의 도구다 — 어디에 기록이 남는지 알려주는 문장이라 틀리면 안 된다
-          tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool}
+          tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool ?? ''}
           onCancel={() => setConfirming(null)}
           onConfirm={(deleteWorktree, deleteExternal) => {
             void deleteSession(confirming, deleteWorktree, deleteExternal)
@@ -760,7 +760,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       {handingOff && (
         <ConfirmHandoff
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
-          tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool}
+          tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool ?? ''}
           // 죽은 세션 판정 (#78): 에러거나 한도에 걸린 세션에게 노트를 부탁하는 것은
           // 응답 불능인 상대에게 유언장을 부탁하는 것이다 — 기록 모드를 미리 선택한다
           dead={(() => {
@@ -810,11 +810,12 @@ function ConfirmHandoff({
    * (후임자가 확인될 때까지 원본 보존). 초기값만 뒤집는다 — 이후 라디오를 바꿔도
    * 다른 선택을 몰래 따라 바꾸지 않는다 (조용한-행동 금지).
    */
-  const otherTool = (Object.keys(TOOL_META) as ToolName[]).find((t) => t !== tool) ?? tool
+  const tools = useTools()
+  const otherTool = tools.find((t) => t.name !== tool)?.name ?? tool
   const [mode, setMode] = useState<'agent' | 'record'>(dead ? 'record' : 'agent')
   const [heirTool, setHeirTool] = useState<ToolName>(dead ? otherTool : tool)
   const [deleteOld, setDeleteOld] = useState(!dead)
-  const toolLabel = TOOL_META[tool].label
+  const toolLabel = useToolMeta(tool).label
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">
       <div className="w-[400px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
@@ -856,22 +857,22 @@ function ConfirmHandoff({
         {/* 받는 에이전트 — 다른 도구를 고르면 모델·강도 같은 도구별 설정은 물려주지 않는다 */}
         <p className="mt-3 text-[10px] uppercase text-slate">Hand off to</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Hand off to">
-          {(Object.keys(TOOL_META) as ToolName[]).map((t) => (
+          {tools.map((t) => (
             <button
-              key={t}
+              key={t.name}
               type="button"
               role="radio"
-              aria-checked={heirTool === t}
-              data-testid={`handoff-tool-${t}`}
-              onClick={() => setHeirTool(t)}
+              aria-checked={heirTool === t.name}
+              data-testid={`handoff-tool-${t.name}`}
+              onClick={() => setHeirTool(t.name)}
               className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${
-                heirTool === t
+                heirTool === t.name
                   ? 'border-ash bg-graphite text-chalk'
                   : 'border-edge bg-panel text-ash hover:border-graphite hover:text-chalk'
               }`}
             >
-              {TOOL_META[t].label}
-              {t === tool && <span className="ml-1 text-[10px] text-slate">(current)</span>}
+              {t.label}
+              {t.name === tool && <span className="ml-1 text-[10px] text-slate">(current)</span>}
             </button>
           ))}
         </div>
@@ -1258,7 +1259,7 @@ function ConfirmDelete({
   onCancel: () => void
 }) {
   const platform = usePlatform()
-  const toolLabel = TOOL_META[tool].label
+  const toolLabel = useToolMeta(tool).label
   /*
    * 도구 쪽 원본까지 지울지 (도그푸딩 "진짜로 삭제"). **기본은 지운다** — 처음엔
    * 남기는 쪽이 기본이었는데, 삭제를 누르는 사람의 실제 의도는 정리라서 "지웠는데
@@ -1467,7 +1468,8 @@ const RING: Record<SessionState, string> = {
 }
 
 function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
-  const label = `${TOOL_META[tool].label} · ${stateLabel(state)}`
+  const meta = useToolMeta(tool)
+  const label = `${meta.label} · ${stateLabel(state)}`
   const stalled = state === 'limited' || state === 'error'
   // 그리드 칸 테두리와 **같은 각도**로 돈다 (components/orbit.ts)
   useOrbitSync(state === 'working')
@@ -1503,7 +1505,7 @@ function ToolMark({ tool, state }: { tool: ToolName; state: SessionState }) {
           stalled ? 'opacity-50' : ''
         }`}
       >
-        {TOOL_META[tool].mark}
+        {meta.mark}
       </span>
     </span>
   )

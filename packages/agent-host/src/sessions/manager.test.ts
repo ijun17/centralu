@@ -68,6 +68,7 @@ class FakeHandle implements SessionHandle {
 
 class FakeAdapter implements AgentAdapter {
   tool: ToolName = 'claude'
+  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false,
   }
@@ -391,8 +392,10 @@ describe('RPC 일반', () => {
   it('capabilities와 detect를 돌려준다', async () => {
     expect(await rpc('agents.capabilities', { tool: 'claude' })).toMatchObject({ approvals: true })
     // 등록된 어댑터를 그대로 돌려준다 (개수가 아니라 내용을 본다 — 하네스가 늘어도 안 깨진다)
-    const found = (await rpc('agents.detect', {})) as { tool: string }[]
-    expect(found.map((x) => x.tool)).toContain('claude')
+    // 감지 결과는 이제 descriptor까지 얹혀 온다 — 화면이 라벨을 따로 찾지 않아도 되는 그 한 덩어리
+    const found = (await rpc('agents.detect', {})) as { name: string; label: string }[]
+    expect(found.map((x) => x.name)).toContain('claude')
+    expect(found.find((x) => x.name === 'claude')?.label).toBe('Claude Code')
   })
 
   it('알 수 없는 메서드는 에러', async () => {

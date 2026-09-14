@@ -18,6 +18,7 @@ import type {
   StoredMessage,
   UsageSnapshot,
   ToolName,
+  ToolStatus,
   QuestionAnswer,
   UpdateStatus,
 } from '@cc/protocol'
@@ -536,9 +537,27 @@ export class MockPlatform implements Platform {
   lastInvoke: { appId: string; name: string; args: Record<string, unknown> } | null = null
 
   /** 도구 감지 결과 — 테스트가 "로그인 안 된 도구"를 만들 수 있게 밖에 둔다 */
-  detected: { tool: 'claude' | 'codex'; installed: boolean; loggedIn: boolean; detail: string }[] = [
-    { tool: 'claude', installed: true, loggedIn: true, detail: 'mock 2.1.0' },
-    { tool: 'codex', installed: true, loggedIn: true, detail: 'mock codex' },
+  detected: ToolStatus[] = [
+    {
+      name: 'claude',
+      label: 'Claude Code',
+      mark: 'C',
+      install: 'npm i -g @anthropic-ai/claude-code',
+      login: 'claude auth login',
+      installed: true,
+      loggedIn: true,
+      detail: 'mock 2.1.0',
+    },
+    {
+      name: 'codex',
+      label: 'Codex',
+      mark: 'X',
+      install: 'npm i -g @openai/codex',
+      login: 'codex login',
+      installed: true,
+      loggedIn: true,
+      detail: 'mock codex',
+    },
   ]
 
   /**
@@ -1146,7 +1165,7 @@ export class MockPlatform implements Platform {
         id,
         projectId,
         kind: 'worker',
-        tool: p.defaultTool,
+        tool: p.defaultTool ?? this.detected[0]?.name ?? 'claude',
         externalId: null,
         name: 'Worktree manager',
         autoNamed: false,

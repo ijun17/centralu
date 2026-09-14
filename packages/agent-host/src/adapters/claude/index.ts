@@ -21,6 +21,7 @@ import type {
   NormalizedEvent,
   Question,
   QuestionAnswer,
+  ToolDescriptor,
 } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
@@ -539,6 +540,14 @@ async function claudeLoggedIn(bin: string): Promise<boolean> {
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
+
+  readonly descriptor: ToolDescriptor = {
+    name: 'claude',
+    label: 'Claude Code',
+    mark: 'C',
+    install: 'npm i -g @anthropic-ai/claude-code',
+    login: 'claude auth login',
+  }
   /**
    * 사용량을 물어볼 창구.
    *

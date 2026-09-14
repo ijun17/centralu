@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { buildInbox, countWaiting, detectFileConflicts, isUnread, type InboxItem } from '@cc/core'
 import { useStore, type AppState } from './store.js'
+import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 
 /**
@@ -14,6 +15,42 @@ const toCandidate = (x: SessionSummary) => ({
   waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
   preview: x.preview,
 })
+
+/**
+ * The agent tools this machine has, as the host reported them when the app connected.
+ *
+ * Empty until that first snapshot lands. The screens that draw a row per tool used to read
+ * a `TOOL_META` constant compiled into `@cc/protocol`, so the list was always present and
+ * always exactly two; now it is data, and a new adapter can appear without either side
+ * being rebuilt. The cost is this one instant of emptiness, which reads as a row that has
+ * not arrived rather than a row that is wrong.
+ */
+export function useTools(): ToolStatus[] {
+  return useStore((s) => s.tools)
+}
+
+/**
+ * How to present one tool — its label and its one-glyph mark.
+ *
+ * **Falls back to the bare identifier instead of throwing.** A stored session can name a
+ * tool this build has no adapter for: one that was removed, or one from a newer build that
+ * wrote the row. `TOOL_META[tool].label` on such a row was a crash in the middle of the
+ * sidebar. A chip that reads `codex` where it should read `Codex` is a smaller failure.
+ */
+export function useToolMeta(tool: ToolName): ToolDescriptor {
+  const tools = useStore((s) => s.tools)
+  return useMemo(
+    () =>
+      tools.find((t) => t.name === tool) ?? {
+        name: tool,
+        label: tool,
+        mark: tool.slice(0, 1).toUpperCase(),
+        install: '',
+        login: '',
+      },
+    [tools, tool],
+  )
+}
 
 export function useInbox(now: number): InboxItem[] {
   const sessions = useStore((s) => s.sessions)

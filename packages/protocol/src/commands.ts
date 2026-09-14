@@ -20,6 +20,7 @@ import {
   SessionState,
   TokenUsage,
   ToolName,
+  ToolStatus,
   UpdateStatus,
 } from './entities.js'
 
@@ -288,7 +289,16 @@ export const ProjectInfo = z.object({
   id: z.string(),
   path: z.string(),
   name: z.string(),
-  defaultTool: ToolName.default('claude'),
+  /**
+   * The tool this project reached for last, if it ever did.
+   *
+   * It defaulted to `'claude'`, which was the last vendor name left in this package after
+   * the tool list became data: a project created on a machine without Claude Code still
+   * claimed to prefer it. There is no sensible default here — only the host knows which
+   * tools exist — so the absence is now recorded as one, and the screens fall back to
+   * whatever the machine actually has.
+   */
+  defaultTool: ToolName.nullable().default(null),
   defaultModel: z.string().nullable().optional(),
   /** 마지막으로 고른 추론 강도 (#69 ⑤) — default_tool·default_model과 같은 규칙: 고른 행위가 곧 기본값이다 */
   defaultEffort: z.string().nullable().optional(),
@@ -576,7 +586,7 @@ export const RpcMethods = {
   'agents.capabilities': { params: z.object({ tool: ToolName }), result: AdapterCapabilities },
   'agents.detect': {
     params: z.object({}),
-    result: z.array(z.object({ tool: ToolName, installed: z.boolean(), loggedIn: z.boolean(), detail: z.string() })),
+    result: z.array(ToolStatus),
   },
   'git.status': { params: z.object({ projectId: z.string() }), result: z.array(GitFileStatus) },
   'git.diff': {

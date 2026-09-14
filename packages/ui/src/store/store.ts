@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { SessionInfo } from '@cc/protocol'
 import type {
+  ToolStatus,
   Attachment,
   CommandRunInfo,
   NormalizedEvent,
@@ -198,6 +199,16 @@ export type AppState = {
   connection: ConnectionState
   projects: Record<string, ProjectInfo>
   sessions: Record<string, SessionSummary>
+  /**
+   * Which agent tools this machine has, as the host reports them.
+   *
+   * The screens that draw a row per tool used to read a `TOOL_META` constant compiled into
+   * `@cc/protocol`, which meant the set of tools was fixed at build time and a new adapter
+   * could not appear without editing the protocol. It arrives over the wire now, so it has
+   * to be held somewhere every screen can reach — the chips in the sidebar need the label
+   * and the mark synchronously, once per row.
+   */
+  tools: ToolStatus[]
   chat: Record<string, ChatItem[]>
   /**
    * 아직 보내지 않은 글 — **세션별로** 둔다.
@@ -1006,7 +1017,7 @@ export function usageTools(s: AppState): ToolName[] {
   // Focus (and the orchestrator) still look at one conversation — unchanged behaviour
   const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
   if (session) return [session.tool]
-  add(s.focusedProjectId ? s.projects[s.focusedProjectId]?.defaultTool : undefined)
+  add(s.focusedProjectId ? (s.projects[s.focusedProjectId]?.defaultTool ?? undefined) : undefined)
   return out
 }
 
@@ -1015,6 +1026,7 @@ export const useStore = create<AppState>((set, get) => ({
   connection: 'connecting',
   projects: {},
   sessions: {},
+  tools: [] as ToolStatus[],
   chat: {},
   drafts: {},
   stickToBottom: {},
@@ -1123,11 +1135,13 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    const [projects, sessions, gridPanels] = await Promise.all([
+    const [projects, sessions, gridPanels, tools] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
       // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
       platform.agents.grid().catch(() => [] as string[]),
+      // 같은 이유로 도구 목록도 앱을 막지 않는다 — 못 읽으면 이름만 나오고 라벨이 빠진다
+      platform.agents.detect().catch(() => [] as ToolStatus[]),
     ])
     const known: Record<string, SessionSummary> = Object.fromEntries(
       sessions.map((s) => [
@@ -1182,6 +1196,7 @@ export const useStore = create<AppState>((set, get) => ({
       // line has an instant to count from instead of its own mount (issue #23)
       workingSince: trackWorkingSince(st.workingSince, known, Date.now()),
       gridPanels,
+      tools,
       connection: 'connected',
     }))
 
@@ -2272,7 +2287,7 @@ export const useStore = create<AppState>((set, get) => ({
       projectId,
       cwd: project.path,
       // 고른 값이 그대로 host까지 간다 — 예전엔 프리셋이 'normal' 고정이고 모델은 전달조차 되지 않았다
-      tool: opts?.tool ?? project.defaultTool,
+      tool: opts?.tool ?? project.defaultTool ?? get().tools[0]?.name ?? '',
       model: opts?.model ?? project.defaultModel ?? undefined,
       // 강도도 기억을 따라간다 (#69 ⑤) — 모델만 기억하면 Opus는 오는데 high는 또 눌러야 한다
       effort: opts?.effort ?? project.defaultEffort ?? undefined,

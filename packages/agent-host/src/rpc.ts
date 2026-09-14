@@ -127,7 +127,13 @@ export function createRpcHandler(
       if (!a) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
       return a.capabilities
     },
-    'agents.detect': async () => Promise.all([...adapters.values()].map((a) => a.detect())),
+    'agents.detect': async () =>
+      Promise.all(
+        [...adapters.values()].map(async (a) => {
+          const { installed, loggedIn, detail } = await a.detect()
+          return { ...a.descriptor, installed, loggedIn, detail }
+        }),
+      ),
     'git.status': async (p) => mgr.gitStatusFiles(RpcMethods['git.status'].params.parse(p).projectId),
     'git.diff': async (p) => {
       const { projectId, path, staged } = RpcMethods['git.diff'].params.parse(p)

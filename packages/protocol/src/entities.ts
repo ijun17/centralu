@@ -35,52 +35,58 @@ export const SessionGoal = z.object({
 export type SessionGoal = z.infer<typeof SessionGoal>
 export type SessionActivity = z.infer<typeof SessionActivity>
 
-export const ToolName = z.enum(['claude', 'codex'])
+/**
+ * A tool's identifier — open, not a fixed list.
+ *
+ * This was `z.enum(['claude', 'codex'])`, which meant every vendor had to be taught to
+ * this package before an adapter for it could exist: a third tool could not be added
+ * without editing a file two layers away from the only code that knows anything about
+ * it. The set of tools is now whatever the host has adapters for, and it travels over
+ * the wire rather than being compiled in on both sides.
+ */
+export const ToolName = z.string().min(1)
 export type ToolName = z.infer<typeof ToolName>
 
 /**
- * Every tool, in order, for the screens that draw one row per tool.
- *
- * Derived from the enum rather than written again: a literal `['claude', 'codex']` in a
- * component is a copy that no compiler checks, and adding a third tool would leave it
- * silently one short — the picker would simply not offer the new tool, with nothing red.
- */
-export const TOOL_NAMES = ToolName.options
-
-/**
- * Everything the screen needs to *present* a tool: its name, its mark, and the two
+ * Everything a screen needs to *present* a tool: its name, its mark, and the two
  * commands that fix a tool that isn't ready.
  *
- * Why this exists in one place. This metadata was spread across six files as ad-hoc
- * ternaries and three separate `TOOL_LABEL` maps, and the login command existed twice —
- * once in the intro cards, once inline in the new-session dialog. Nothing tied the copies
- * together, so they could drift apart while both looked right, and a wrong login command
- * is not a missing hint but a trap: it sends someone to a terminal to run something that
- * cannot work.
+ * Why the shape lives here. Both sides read it — the host names the tool in its "no
+ * record of this conversation" message, and `@cc/agent-host` depends on this package and
+ * not on `@cc/core`. This is the only shelf both sides can reach.
  *
- * Why it lives in protocol. The host needs the label too (it names the tool in the
- * "no record of this conversation" message), and `@cc/agent-host` depends on this package
- * and not on `@cc/core`. This is the only shelf both sides can reach.
+ * **Why the values do not.** They used to: a `TOOL_META` record right here held the
+ * labels, the glyphs, and the install and login commands for two named vendors. Adding a
+ * tool meant editing the shared protocol, which is the opposite of what an adapter is
+ * for. Each adapter now carries its own descriptor, and they reach the UI through
+ * `agents.detect`.
  *
  * This is presentation, not capability. What a tool can *do* is declared by its adapter
  * (`AdapterCapabilities`, `ModelOption`) and must never be listed here — that split is
  * what keeps a new knob from having to be taught to the UI twice.
  */
-export const TOOL_META: Record<ToolName, { label: string; mark: string; install: string; login: string }> = {
-  claude: {
-    label: 'Claude Code',
-    /** One glyph, because the session chip is 14px square and a word does not fit */
-    mark: 'C',
-    install: 'npm i -g @anthropic-ai/claude-code',
-    login: 'claude auth login',
-  },
-  codex: {
-    label: 'Codex',
-    mark: 'X',
-    install: 'npm i -g @openai/codex',
-    login: 'codex login',
-  },
-}
+export const ToolDescriptor = z.object({
+  name: ToolName,
+  label: z.string(),
+  /** One glyph, because the session chip is 14px square and a word does not fit */
+  mark: z.string(),
+  install: z.string(),
+  login: z.string(),
+})
+export type ToolDescriptor = z.infer<typeof ToolDescriptor>
+
+/**
+ * A descriptor and whether that tool can actually be used on this machine right now.
+ *
+ * One type rather than two lists to join: the screens that draw a row per tool need both
+ * halves at once, and a join done in a component is a join that can be done wrong.
+ */
+export const ToolStatus = ToolDescriptor.extend({
+  installed: z.boolean(),
+  loggedIn: z.boolean(),
+  detail: z.string(),
+})
+export type ToolStatus = z.infer<typeof ToolStatus>
 
 /** 권한 프리셋 — CLI 전역 설정을 세션 단위로 덮어쓴다 (M0 검증 완료) */
 export const PermissionPreset = z.enum(['safe', 'normal', 'auto'])
