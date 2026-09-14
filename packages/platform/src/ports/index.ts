@@ -92,7 +92,7 @@ export interface AgentPort {
   worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
   /**
    * 죽은-에이전트 인수인계 기록 (#78) — 그 세션의 도구를 부르지 않고 host가 만든다.
-   * host가 프로젝트의 `HANDOFF_FILE`에 써 놓고 경로를 준다 (#102); text는 미리보기용이다.
+   * host가 `handoffFile(sessionId)`에 써 놓고 경로를 준다 (#102, #104); text는 미리보기용이다.
    */
   exportHandoffRecord(sessionId: string, toTool?: ToolName): Promise<{ text: string; path: string }>
   /** 오케스트레이터의 MCP 서버 제안 목록 (propose_mcp_server → 승인 대기 중인 것들) */

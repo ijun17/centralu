@@ -1,15 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { HANDOFF_FILE, messagesToChat, useStore } from './store.js'
+import { messagesToChat, useStore } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
  * pendingEvents 보관함은 모듈 상태라 테스트 사이에 못 비운다 — 세션 id를 테스트마다 다르게 쓴다.
  */
+
+/**
+ * 전임자가 노트를 **파일로** 남긴 척한다 (#102) — 경로는 넘기는 세션의 id로 갈린다 (#104).
+ * 목록에도 세우는 placeFile로 들어간다: 내용만 꽂아 두면 청소(trash)가 목에서만 거절당한다.
+ */
+function mockNote(mock: MockPlatform, sessionId: string, text: string): string {
+  const path = handoffFile(sessionId)
+  mock.placeFile(path, text)
+  return path
+}
 
 function sessionInfo(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -869,7 +879,7 @@ describe('인수인계하고 새로 시작', () => {
       expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
     // 죽는 세션이 글을 **파일로** 쓴다 (대화에서 긁지 않는다 — 메아 실측의 교훈)
-    mock.fsState.files[HANDOFF_FILE] = '후계자에게: 상태 요약'
+    mockNote(mock, 'ho-s1', '후계자에게: 상태 요약')
     mock.emit({ type: 'message_delta', sessionId: 'ho-s1', role: 'assistant', text: '파일에 남겼습니다.' } as NormalizedEvent)
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s1' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s1', state: 'waiting_input' } as NormalizedEvent)
@@ -879,7 +889,7 @@ describe('인수인계하고 새로 시작', () => {
      * 새 세션의 첫 메시지는 **노트가 아니라 노트의 자리**다 (#102). 미리보기는 실리되
      * 원문은 안 실린다 — 길이가 제약이 아니라는 프롬프트의 약속은 파일에서만 참이다.
      */
-    expect(mock.lastCreateParams?.initialPrompt).toContain('.centralu-handoff.md')
+    expect(mock.lastCreateParams?.initialPrompt).toContain(handoffFile('ho-s1'))
     expect(mock.lastCreateParams?.initialPrompt).toContain('후계자에게: 상태 요약') // 미리보기
     // 원문은 기록으로 간다 — 전임자가 사라지면 다시 만들 수 없는 유일한 재료다
     expect(mock.lastCreateParams?.handoff).toEqual({ from: '메아', note: '후계자에게: 상태 요약' })
@@ -910,7 +920,7 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-g2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mock.fsState.files[HANDOFF_FILE] = '이어서 하세요'
+    mockNote(mock, 'ho-g2', '이어서 하세요')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-g2' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-g2', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -936,9 +946,9 @@ describe('인수인계하고 새로 시작', () => {
 
     // 죽은 세션으로 나간 메시지가 없다 — 이 모드의 존재 이유
     expect((useStore.getState().chat['ho-r1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
-    // 기록도 **같은 파일**로 모인다 (#102) — 생산자만 다르고 후임자가 받는 말은 같다
-    expect(mock.fsState.files[HANDOFF_FILE]).toContain('Handoff Record')
-    expect(mock.lastCreateParams?.initialPrompt).toContain('.centralu-handoff.md')
+    // 기록도 **같은 경로**로 모인다 (#102) — 생산자만 다르고 후임자가 받는 말은 같다
+    expect(mock.fsState.files[handoffFile('ho-r1')]).toContain('Handoff Record')
+    expect(mock.lastCreateParams?.initialPrompt).toContain(handoffFile('ho-r1'))
     expect(mock.lastCreateParams?.initialPrompt).toContain('Handoff Record') // 미리보기
     expect(mock.lastCreateParams?.handoff?.note).toContain('Handoff Record')
     expect(mock.lastCreateParams?.tool).toBe('claude')
@@ -977,7 +987,7 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s5'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mock.fsState.files[HANDOFF_FILE] = '노트'
+    mockNote(mock, 'ho-s5', '노트')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s5' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s5', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -999,7 +1009,7 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s6'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mock.fsState.files[HANDOFF_FILE] = '분기 노트'
+    mockNote(mock, 'ho-s6', '분기 노트')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s6' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s6', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -1027,7 +1037,7 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s4'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mock.fsState.files[HANDOFF_FILE] = '# 1. 프로젝트와 목표'
+    mockNote(mock, 'ho-s4', '# 1. 프로젝트와 목표')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s4' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -1054,7 +1064,7 @@ describe('인수인계하고 새로 시작', () => {
       expect((useStore.getState().chat['ho-big'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
     const huge = '# 1. 프로젝트와 목표\n' + '이 세션은 아주 길었고 노트도 그만큼 길다. '.repeat(20_000)
-    mock.fsState.files[HANDOFF_FILE] = huge
+    mockNote(mock, 'ho-big', huge)
     mock.emit({ type: 'turn_complete', sessionId: 'ho-big' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-big', state: 'waiting_input' } as NormalizedEvent)
     await done
@@ -1063,7 +1073,7 @@ describe('인수인계하고 새로 시작', () => {
     // 노트는 80만 자가 넘는데 첫 메시지는 한 화면이다 — 이 격차가 곧 이 고침이다
     expect(huge.length).toBeGreaterThan(500_000)
     expect(prompt.length).toBeLessThan(2_000)
-    expect(prompt).toContain(HANDOFF_FILE)
+    expect(prompt).toContain(handoffFile('ho-big'))
     expect(prompt).toContain('# 1. 프로젝트와 목표') // 미리보기는 있다
     // 그리고 노트는 유실되지 않는다 — 파일보다 오래 사는 곳(기록)에 원문이 있다
     const kept = mock.lastCreateParams?.handoff?.note ?? ''
@@ -1085,20 +1095,96 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-sw'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    mock.fsState.files[HANDOFF_FILE] = '읽히기 전에 사라지면 안 되는 글'
-    mock.fsState.entries[''] = [{ name: HANDOFF_FILE, path: HANDOFF_FILE, isDir: false, ignored: false }]
+    const notePath = mockNote(mock, 'ho-sw', '읽히기 전에 사라지면 안 되는 글')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-sw' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-sw', state: 'waiting_input' } as NormalizedEvent)
     await done
 
     const heir = [...mock.sessions.values()].find((r) => r.name === '치우기' && r.id !== 'ho-sw')!
     // 후임자가 아직 아무것도 못 했다 — 파일은 그대로 있어야 한다
-    expect(mock.trashed).not.toContain(HANDOFF_FILE)
+    expect(mock.trashed).not.toContain(notePath)
 
     mock.emit({ type: 'turn_complete', sessionId: heir.id } as NormalizedEvent)
     await vi.waitFor(() => {
-      expect(mock.trashed).toContain(HANDOFF_FILE)
+      expect(mock.trashed).toContain(notePath)
     })
+  })
+
+  /*
+   * #104: 한 프로젝트에서 세션 여럿을 동시에 돌리는 것이 이 앱의 존재 이유인데, 인수인계
+   * 파일은 프로젝트마다 하나였다. 그래서 동시에 도는 두 인수인계는 (1) 같은 자리에 써서
+   * 늦게 쓴 쪽이 이겼고 — 기다리던 쪽은 모양이 맞고 내용이 틀린 노트를 조용히 받았다 —
+   * (2) 먼저 첫 턴을 마친 후임자의 청소가 남의 글을 치웠다.
+   */
+  it('같은 프로젝트의 두 인수인계가 서로의 글을 덮지도 치우지도 않는다 (#104)', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho-pair')
+    mock.sessions.set('ho-a', sessionInfo('ho-a', { projectId: proj.id, name: '왼쪽' }))
+    mock.sessions.set('ho-b', sessionInfo('ho-b', { projectId: proj.id, name: '오른쪽' }))
+    await useStore.getState().attach(mock)
+
+    // 둘을 나란히 건다 — 순서대로 하면 이 버그는 아예 나타나지 않는다
+    const a = useStore.getState().handoffSession('ho-a', { deleteOld: false })
+    const b = useStore.getState().handoffSession('ho-b', { deleteOld: false })
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-a'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+      expect((useStore.getState().chat['ho-b'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    const pathA = mockNote(mock, 'ho-a', '왼쪽의 노트')
+    const pathB = mockNote(mock, 'ho-b', '오른쪽의 노트')
+    for (const id of ['ho-a', 'ho-b']) {
+      mock.emit({ type: 'turn_complete', sessionId: id } as NormalizedEvent)
+      mock.emit({ type: 'state_change', sessionId: id, state: 'waiting_input' } as NormalizedEvent)
+    }
+    await Promise.all([a, b])
+
+    // 각자 제 전임자의 글을 받았다 — 이름이 하나였을 때는 둘 다 나중에 쓰인 한 글을 받았다
+    const paramsOf = (from: string) => mock.createParamsLog.find((x) => x.handoff?.from === from)
+    expect(paramsOf('왼쪽')?.handoff?.note).toBe('왼쪽의 노트')
+    expect(paramsOf('오른쪽')?.handoff?.note).toBe('오른쪽의 노트')
+    expect(paramsOf('왼쪽')?.initialPrompt).toContain(pathA)
+    expect(paramsOf('오른쪽')?.initialPrompt).toContain(pathB)
+
+    // 한쪽 후임자의 첫 턴이 끝난다 — 치우는 것은 제 전임자의 파일 하나뿐이다
+    const heirA = [...mock.sessions.values()].find((r) => r.name === '왼쪽' && r.id !== 'ho-a')!
+    mock.emit({ type: 'turn_complete', sessionId: heirA.id } as NormalizedEvent)
+    await vi.waitFor(() => {
+      expect(mock.trashed).toContain(pathA)
+    })
+    expect(mock.trashed).not.toContain(pathB)
+    expect(mock.fsState.files[pathB]).toBe('오른쪽의 노트')
+  })
+
+  /*
+   * #104: 대기 루프는 "파일이 있고 비어 있지 않다"만 본다 — 그것이 **방금 부탁해서 놓인
+   * 글**인지는 묻지 않는다. 그래서 지난 인수인계가 실패하고 남긴 파일은 다음 인수인계에서
+   * 갓 쓴 노트로 배달됐다. 동시성도 필요 없고, 조용하며, 재시작을 견디고, 내용까지
+   * 그럴듯하다. 이제는 묻기 전에 그 자리를 비우므로 남은 글이 배달될 자리가 없다.
+   */
+  it('지난 실패가 남긴 파일을 갓 쓴 노트로 착각하지 않는다 (#104)', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho-stale')
+    mock.sessions.set('ho-st', sessionInfo('ho-st', { projectId: proj.id, name: '오래된 자리' }))
+    await useStore.getState().attach(mock)
+
+    // 지난 번에 실패한 인수인계가 남기고 간 글이 이미 그 자리에 있다
+    const notePath = mockNote(mock, 'ho-st', '지난 달에 실패한 인수인계가 남긴 옛 노트')
+
+    const done = useStore.getState().handoffSession('ho-st', { deleteOld: false })
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-st'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    // 전임자가 턴을 끝냈는데 아무것도 쓰지 않았다 — 옛 글이 배달되던 바로 그 순간이다
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
+    await new Promise((r) => setTimeout(r, 1_500))
+    expect(mock.createParamsLog).toEqual([]) // 후임자는 태어나지 않는다 — 아직 받을 글이 없다
+    expect(mock.fsState.files[notePath]).toBeUndefined() // 자리는 부탁하기 전에 비워졌다
+
+    // 진짜 노트가 놓이면 그제야 넘어간다
+    mockNote(mock, 'ho-st', '방금 쓴 새 노트')
+    await done
+    expect(mock.lastCreateParams?.handoff?.note).toBe('방금 쓴 새 노트')
   })
 
   it('워크트리 세션은 거른다 — 워크트리의 수명이 세션에 묶여 있다', async () => {

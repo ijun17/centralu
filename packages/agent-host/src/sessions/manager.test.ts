@@ -3047,8 +3047,10 @@ describe('죽은-에이전트 인수인계 기록 (#78)', () => {
     /*
      * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 경로라야
      * 후임자가 받는 첫 메시지가 두 모드에서 같아진다 — 그 수렴이 이 기능의 계약이다.
+     * 경로는 **넘기는 세션마다** 갈린다 (#104): 한 프로젝트에 인수인계가 둘이면
+     * 이름이 하나인 파일은 서로를 덮는다.
      */
-    expect(out.path).toBe(join(p.path, '.centralu-handoff.md'))
+    expect(out.path).toBe(join(p.path, '.centralu', 'handoff', `${s.id}.md`))
     expect(readFileSync(out.path, 'utf8')).toBe(out.text)
     expect(out.text.split('\n')[0]).toBe(`# Handoff · ${s.name} · codex → claude`)
 

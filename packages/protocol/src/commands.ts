@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { wireJoin } from './paths.js'
 import {
   AdapterCapabilities,
   ApprovalDecision,
@@ -26,15 +27,25 @@ import {
 
 /** UI → host RPC. 포트 인터페이스(platform/ports)와 1:1 대응 (docs/protocol.md §3) */
 
+/** 인수인계 글이 모이는 디렉토리 (프로젝트 루트 기준, #104) — 파일마다 저장소 루트에 눕지 않게 */
+export const HANDOFF_DIR = '.centralu/handoff'
+
 /**
- * 인수인계 글이 놓이는 파일 (프로젝트 루트 기준, #102).
+ * 인수인계 글이 놓이는 파일 — **넘기는 세션마다 하나** (#102, #104).
  *
- * **양쪽 끝이 같은 이름을 알아야 한다.** 살아 있는 인수인계는 죽는 에이전트가 이 파일을
- * 쓰고(프롬프트가 이 이름을 부른다), 기록 모드는 host가 같은 자리에 쓴다. 두 생산자가
+ * **양쪽 끝이 같은 경로를 알아야 한다.** 살아 있는 인수인계는 죽는 에이전트가 이 파일을
+ * 쓰고(프롬프트가 이 경로를 부른다), 기록 모드는 host가 같은 자리에 쓴다. 두 생산자가
  * 한 경로로 모이기 때문에 후임자의 첫 메시지가 모드와 무관하게 같아진다 —
- * 그래서 이 이름은 UI의 상수가 아니라 프로토콜의 상수다.
+ * 그래서 이 경로는 UI의 것이 아니라 프로토콜의 것이다.
+ *
+ * **이름이 세션 id인 이유** (#104): 한 프로젝트에서 세션 여럿을 동시에 돌리는 것이 이 앱의
+ * 존재 이유라, 이름이 하나면 동시에 도는 두 인수인계가 같은 자리를 놓고 덮어쓴다 —
+ * 마지막에 쓴 쪽이 이기고, 기다리던 쪽은 **모양이 맞고 내용이 틀린** 노트를 조용히 받는다.
+ * 한쪽의 청소가 다른 쪽이 아직 읽지 않은 글을 치우는 것도 같은 뿌리다.
  */
-export const HANDOFF_FILE = '.centralu-handoff.md'
+export function handoffFile(sessionId: string): string {
+  return wireJoin(HANDOFF_DIR, `${sessionId}.md`)
+}
 
 export const CreateSessionParams = z.object({
   projectId: z.string(),
@@ -517,7 +528,7 @@ export const RpcMethods = {
    * 죽은-에이전트 인수인계 기록 (#78). 그 세션의 도구를 부르지 않고 host가
    * 저장소 원문(+codex 롤아웃의 컴팩트 요약)으로 만든다.
    *
-   * **결과는 파일이다** (#102): host가 프로젝트의 `HANDOFF_FILE`에 써 놓고 그 경로를
+   * **결과는 파일이다** (#102): host가 `handoffFile(sessionId)`에 써 놓고 그 경로를
    * 돌려준다 — 에이전트가 직접 쓰는 모드와 **같은 경로**라, 후임자가 받는 첫 메시지는
    * 두 모드에서 글자 하나 다르지 않다. text도 함께 돌려주는 것은 부르는 쪽이 첫
    * 메시지에 넣을 짧은 미리보기를 뽑기 위해서다.

@@ -24,7 +24,7 @@ import type {
 } from '@cc/protocol'
 import {
   APP_VERSION,
-  HANDOFF_FILE,
+  handoffFile,
   isNewerVersion,
   osPathBaseName,
   sessionLiveDefaults,
@@ -324,6 +324,29 @@ export class MockPlatform implements Platform {
     return { entries, files }
   }
 
+  /**
+   * 파일 하나를 목에 눕히고 **올라가는 길까지** 세운다 (#104).
+   *
+   * 실물에서는 host가 부모 폴더를 만들고 나서 쓴다. 목이 내용만 꽂아 두면 그 파일은
+   * 읽히기는 하는데 `trash`가 목록에서 못 찾아 거절한다 — 목이 실물보다 엄격해지는
+   * 자리고, 인수인계 청소가 목에서만 실패한다. 테스트가 "에이전트가 글을 남겼다"를
+   * 흉내낼 때도 이 문으로 들어와야 그 함정을 각자 다시 밟지 않는다.
+   */
+  placeFile(path: string, text: string): void {
+    this.fsState.files[path] = text
+    const segs = wireSegments(path).filter(Boolean)
+    for (let i = 0; i < segs.length; i++) {
+      const here = wireJoin(...segs.slice(0, i + 1))
+      const parent = wireJoin(...segs.slice(0, i))
+      const list = this.fsState.entries[parent] ?? []
+      if (list.some((e) => e.path === here)) continue
+      this.fsState.entries[parent] = [
+        ...list,
+        { name: segs[i]!, path: here, isDir: i < segs.length - 1, ignored: false },
+      ]
+    }
+  }
+
   readonly fs = {
     search: async (_projectId: string, query: string, limit = 20) => {
       // 목은 실제 퍼지 매칭을 흉내내지 않는다 — 검증 대상은 UI 흐름이다
@@ -474,6 +497,8 @@ export class MockPlatform implements Platform {
 
   /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */
   lastCreateParams: CreateSessionParams | null = null
+  /** 테스트용: 모든 createSession 파라미터 — 동시에 둘이 태어나면 "마지막"으로는 누가 뭘 받았는지 못 본다 */
+  readonly createParamsLog: CreateSessionParams[] = []
   /** 테스트가 "커밋 안 된 변경이 있는 워크트리"를 만들 수 있게 하는 손잡이 */
   mockWorktreeDirty = false
 
@@ -579,6 +604,7 @@ export class MockPlatform implements Platform {
   readonly agents: AgentPort = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
+      this.createParamsLog.push(params)
       const id = `mock-session-${++this.idc}`
       const worktree = params.worktree
         ? {
@@ -927,13 +953,9 @@ export class MockPlatform implements Platform {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
       const text = `# CentralU Handoff Record (automatic)\n\npredecessor "${s.name}" (${s.tool}${toTool ? ` → ${toTool}` : ''}) — mock record for ${sessionId}`
-      this.fsState.files[HANDOFF_FILE] = text
-      // 목록에도 세운다 — 실물처럼 나중에 휴지통으로 보낼 수 있어야 한다
-      const root = this.fsState.entries[''] ?? []
-      if (!root.some((e) => e.path === HANDOFF_FILE)) {
-        this.fsState.entries[''] = [...root, { name: HANDOFF_FILE, path: HANDOFF_FILE, isDir: false, ignored: false }]
-      }
-      return { text, path: HANDOFF_FILE }
+      const path = handoffFile(sessionId)
+      this.placeFile(path, text)
+      return { text, path }
     },
     /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
     worktreeStatus: async (sessionId: string) => {

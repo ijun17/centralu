@@ -9,7 +9,7 @@ import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import type {
   ModelOption,
@@ -30,7 +30,7 @@ import type {
   UsageSnapshot,
   ToolName,
 } from '@cc/protocol'
-import { APP_SLUG, DATA_DIR, HANDOFF_FILE, sessionLiveDefaults } from '@cc/protocol'
+import { APP_SLUG, DATA_DIR, handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -2613,7 +2613,7 @@ export class SessionManager {
    * 원문 전부와, (codex라면) 롤아웃 파일의 마지막 컴팩트 요약뿐이다. 어느 쪽의
    * 실패도 기록 생성을 막지 않는다 — 요약이 없으면 빌더가 원문 압축으로 물러난다.
    *
-   * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 이름에 쓰는 것이
+   * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 경로에 쓰는 것이
    * 핵심이다: 생산자만 다르고 후임자가 받는 첫 메시지는 같아진다. text도 함께
    * 돌려주는 것은 부르는 쪽이 첫 줄 몇 개를 미리보기로 뽑기 위해서다.
    */
@@ -2632,8 +2632,11 @@ export class SessionManager {
       ? ((await this.adapters.get(m.tool)?.lastCompactSummary?.(externalId).catch(() => null)) ?? null)
       : null
     const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq })
-    // 프로젝트 루트에 놓는다 — 후임자의 cwd가 거기고, UI의 fs 호출도 같은 기준으로 푼다
-    const path = join(this.cwdOf(m.projectId), HANDOFF_FILE)
+    // 프로젝트 루트 기준으로 놓는다 — 후임자의 cwd가 거기고, UI의 fs 호출도 같은 기준으로 푼다
+    const path = join(this.cwdOf(m.projectId), handoffFile(sessionId))
+    await mkdir(dirname(path), { recursive: true })
+    // 있던 것부터 걷는다 (#104) — 심볼릭 링크가 남아 있으면 쓰기가 그 링크를 따라 프로젝트 밖에 쓴다
+    await rm(path, { force: true })
     await writeFile(path, text, 'utf8')
     return { text, path }
   }

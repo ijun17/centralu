@@ -850,7 +850,7 @@ function ConfirmHandoff({
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="handoff-mode-note">
           {mode === 'agent'
-            ? 'This session writes a handoff note to a file at the project root, then a fresh session starts by reading it.'
+            ? 'This session writes a handoff note to a file in the project, then a fresh session starts by reading it.'
             : 'The app builds the note from its stored conversation — this session is not asked. Use this when the agent cannot respond (outage, limits).'}
         </p>
 

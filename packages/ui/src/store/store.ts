@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { HANDOFF_FILE, SessionInfo } from '@cc/protocol'
+import { handoffFile, SessionInfo } from '@cc/protocol'
 import type {
   ToolStatus,
   Attachment,
@@ -798,11 +798,11 @@ let chatSeq = 0
 const handoffInFlight = new Set<string>()
 
 /**
- * 인수인계 글이 놓이는 파일. 이름은 프로토콜에 있다 (#102) — 에이전트가 쓰는 모드와
+ * 인수인계 글이 놓이는 파일. 경로는 프로토콜이 짓는다 (#102, #104) — 에이전트가 쓰는 모드와
  * host가 쓰는 기록 모드가 **같은 경로**로 모여야 후임자의 첫 메시지가 같아지기 때문이다.
- * 여기서 다시 내보내는 것은 테스트·e2e가 이 이름으로 인수인계를 식별해서다.
+ * 여기서 다시 내보내는 것은 테스트·e2e가 이 경로로 인수인계를 식별해서다.
  */
-export { HANDOFF_FILE }
+export { handoffFile }
 
 /**
  * 후임자가 파일을 읽기 전에는 지우지 않는다 (#102).
@@ -811,8 +811,11 @@ export { HANDOFF_FILE }
  * 치우는 경주였다. 이제 첫 메시지가 경로만 나르므로 그 경주는 곧 인수인계의 실패다.
  * 여기 담긴 세션의 **첫 턴이 끝나는 순간** 치운다 (dispatchEvent의 turn_complete).
  * 그때가 오지 않으면 파일은 남는다 — 노트는 이미 기록에 박혀 있으므로 유실이 아니다.
+ *
+ * 프로젝트만이 아니라 **경로까지** 담는 이유 (#104): 치울 것은 이 인수인계의 파일 하나다.
+ * 이름을 여기서 다시 지으면 후임자의 id로 짓게 되고, 그것은 전임자의 파일이 아니다.
  */
-const handoffFileToSweep = new Map<string, string>()
+const handoffFileToSweep = new Map<string, { projectId: string; path: string }>()
 
 /**
  * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
@@ -825,7 +828,8 @@ const handoffFileToSweep = new Map<string, string>()
  *
  * e2e·테스트가 이 문구로 인수인계 메시지를 식별하므로 export한다.
  */
-export const HANDOFF_PROMPT = `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor, and save it as a file: create or overwrite \`${HANDOFF_FILE}\` at the project root. When the file is written, reply with one short line saying so — the note itself goes in the file, not in your reply.
+export function handoffPrompt(path: string): string {
+  return `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor, and save it as a file: create or overwrite \`${path}\`, relative to the project root (create the directory if it is not there). When the file is written, reply with one short line saying so — the note itself goes in the file, not in your reply.
 
 The note is the only thing your successor receives, so make it self-contained — never reference "the conversation above". It is a file, not a chat message: **length is not a constraint**. Write with the density of a compaction summary, not the brevity of a reply — when in doubt, include it. If your context contains compaction summaries of earlier phases, transcribe their operational content (state, decisions, tips, conventions) rather than re-summarizing it — every re-summarization loses another layer.
 
@@ -838,6 +842,7 @@ Cover, in this order:
 6. Working with the user — the language the user speaks, their tone, the response style they prefer, and standing instructions or conventions (build commands, commit style, things never to do).
 
 Write the note itself in the language the user has mostly used in this conversation.`
+}
 
 /** 미리보기에 실을 줄 수·글자 수 — 무슨 일이 있었는지 알아볼 만큼만, 노트를 옮기지는 않게 */
 const PREVIEW_LINES = 10
@@ -868,9 +873,9 @@ function notePreview(note: string): string {
  * 조각으로 읽거나 grep해도 된다고 **명시**하는 이유: 그 말이 없으면 에이전트는 파일을
  * 통째로 읽어 방금 없앤 그 문제를 스스로 다시 만든다.
  */
-function handoffOpening(predecessor: string, note: string): string {
+function handoffOpening(predecessor: string, note: string, path: string): string {
   return [
-    `You are taking over from a session named "${predecessor}". It wrote a handoff note for you and it is on disk, at the project root: \`${HANDOFF_FILE}\`. Read it before anything else.`,
+    `You are taking over from a session named "${predecessor}". It wrote a handoff note for you and it is on disk, relative to the project root: \`${path}\`. Read it before anything else.`,
     '',
     'The note can be long. Read it in pieces (head, tail, byte offsets) or grep it for what you need — you do not have to pull the whole file into one turn.',
     '',
@@ -1538,10 +1543,10 @@ export const useStore = create<AppState>((set, get) => ({
        * 노트를 읽을 기회가 있었다는 뜻이다. 실패해도 치명적이지 않다: 원문은 마커로
        * 기록에 있고, 기록 모드의 글은 저장소에서 언제든 다시 만들 수 있다.
        */
-      const sweepProject = handoffFileToSweep.get(sessionId)
-      if (sweepProject !== undefined) {
+      const sweep = handoffFileToSweep.get(sessionId)
+      if (sweep !== undefined) {
         handoffFileToSweep.delete(sessionId)
-        void s.platform?.fs.trash(sweepProject, HANDOFF_FILE).catch(() => {})
+        void s.platform?.fs.trash(sweep.projectId, sweep.path).catch(() => {})
       }
       /*
        * **본다 = 앱이 앞에 있고 + 그 세션이 화면에 있고.**
@@ -2783,7 +2788,23 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
     handoffInFlight.add(sessionId)
+    /*
+     * 이 인수인계의 파일 — 넘기는 세션의 id로 짓는다 (#104). 후임자의 id로 지을 수 없다:
+     * 글은 후임자가 태어나기 전에 놓이고, 자리를 아는 것은 전임자와 host뿐이다.
+     */
+    const notePath = handoffFile(sessionId)
     try {
+      /*
+       * **묻기 전에 그 자리를 비운다** (#104). 아래 대기 루프는 "파일이 있고 비어 있지
+       * 않다"만 볼 뿐, 그것이 방금 부탁해서 놓인 글인지는 알지 못한다 — 지난 인수인계가
+       * 실패하고 남긴 파일은 그래서 갓 쓴 노트로 배달됐다 (조용하고, 재시작을 견디고,
+       * 내용까지 그럴듯하다). 남은 것을 탐지하는 대신 **없앤다**.
+       *
+       * 실패는 삼킨다: 대부분은 "그런 파일 없음"이고, 그것이야말로 바라던 상태다.
+       * 두 모드 모두 여기를 지난다 — 기록 모드의 host 쓰기도 빈 자리 위에서 시작한다.
+       */
+      await s.platform.fs.trash(session.projectId!, notePath).catch(() => {})
+
       let note = ''
       if (mode === 'record') {
         /*
@@ -2809,10 +2830,11 @@ export const useStore = create<AppState>((set, get) => ({
       }
       if (!get().sessions[sessionId]) throw new Error('the session disappeared')
 
-      await get().send(sessionId, HANDOFF_PROMPT)
+      const prompt = handoffPrompt(notePath)
+      await get().send(sessionId, prompt)
       // 전송 실패는 입력창 복원 경로로 흘러 프롬프트가 초안에 남는다 — 사람이 쓴 글이 아니니 걷는다
-      if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === HANDOFF_PROMPT)) {
-        if (get().drafts[sessionId]?.text.includes(HANDOFF_PROMPT)) get().setDraft(sessionId, EMPTY_DRAFT)
+      if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === prompt)) {
+        if (get().drafts[sessionId]?.text.includes(prompt)) get().setDraft(sessionId, EMPTY_DRAFT)
         throw new Error('could not reach the session')
       }
 
@@ -2831,13 +2853,13 @@ export const useStore = create<AppState>((set, get) => ({
         const cur = st.sessions[sessionId]
         if (!cur) throw new Error('the session disappeared while writing the note')
         if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${HANDOFF_FILE}`)
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${notePath}`)
         if (st.connection !== 'connected') continue // 끊긴 동안은 판단하지 않는다
         if (cur.state === 'working' || cur.state === 'waiting_approval') continue
         try {
-          const f = await s.platform.fs.readFile(session.projectId!, HANDOFF_FILE)
+          const f = await s.platform.fs.readFile(session.projectId!, notePath)
           // 잘려 온 파일도 미리보기로는 충분하지만, 기록에 반쪽짜리 원본을 박을 수는 없다
-          if (f.truncated) throw new Error(`${HANDOFF_FILE} is too large for the app to read in one piece`)
+          if (f.truncated) throw new Error(`${notePath} is too large for the app to read in one piece`)
           if (!f.binary && f.text.trim()) {
             note = f.text.trim()
             break
@@ -2863,7 +2885,7 @@ export const useStore = create<AppState>((set, get) => ({
         verbosity: sameTool ? (session.verbosity ?? undefined) : undefined,
         serviceTier: sameTool ? (session.serviceTier ?? undefined) : undefined,
         permissionPreset: session.permissionPreset,
-        initialPrompt: handoffOpening(session.name, note),
+        initialPrompt: handoffOpening(session.name, note, notePath),
         // 노트 원문은 기록으로 간다 — 파일은 이제 순수한 파생물이라 언제 사라져도 된다 (#102)
         handoff: { from: session.name, note },
       })
@@ -2888,8 +2910,16 @@ export const useStore = create<AppState>((set, get) => ({
        * 휴지통으로 보냈는데, 그 순간 후임자는 아직 파일을 열지도 않았다 — 첫 메시지가
        * 노트 전문이던 동안에는 들키지 않던 경주다. 두 모드 모두 파일을 남기므로
        * (host가 쓰든 에이전트가 쓰든) 청소 대상도 모드를 가리지 않는다.
+       *
+       * 치우는 것은 **이 인수인계의 파일 하나**다 (#104) — 이름이 하나였을 때는 먼저 끝난
+       * 후임자가 아직 읽지 않은 남의 글을 치웠고, 그쪽은 시한을 다 쓰고 실패했다.
+       *
+       * 빈 `.centralu/handoff/`는 남긴다: 지울 수 있는 유일한 문(fs.trash)은 폴더를
+       * 통째로 가져가므로, 마지막 파일을 세는 순간과 지우는 순간 사이에 시작된 인수인계의
+       * 글이 함께 딸려 간다 — 방금 없앤 그 경주를 청소가 다시 만드는 셈이다.
+       * 값은 빈 폴더 하나고, 그것은 .gitignore에 걸린다.
        */
-      handoffFileToSweep.set(info.id, session.projectId!)
+      handoffFileToSweep.set(info.id, { projectId: session.projectId!, path: notePath })
 
       if (deleteOld) {
         // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
