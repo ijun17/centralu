@@ -202,6 +202,46 @@ describe('상태·계기판', () => {
     expect(n('turn/completed', {})).toEqual([{ type: 'turn_complete', sessionId: S }])
   })
 
+  /*
+   * 실패한 턴도 같은 알림으로 온다 (generated/v2/Turn.ts: status + error). 여기서
+   * turn.*을 통째로 버리던 동안, 400으로 죽은 턴은 성공한 턴과 똑같이 turn_complete
+   * 하나로만 나갔다 — 화면에는 빈 답변이, 상태에는 '사람을 기다리는 중'이 남았다.
+   * 픽스처는 실사고의 모양이다 (#107).
+   */
+  it('실패한 turn/completed → error (turn_complete는 내지 않는다)', () => {
+    const out = n('turn/completed', {
+      threadId: 't1',
+      turn: {
+        id: 'turn-7',
+        items: [],
+        status: 'failed',
+        error: {
+          message: "The 'opus[1m]' model is not supported",
+          codexErrorInfo: 'badRequest',
+          additionalDetails: 'invalid_request_error',
+          misalignment: null,
+        },
+      },
+    })
+    expect(out).toEqual([
+      {
+        type: 'error',
+        sessionId: S,
+        error: {
+          code: 'internal',
+          message: "The 'opus[1m]' model is not supported\ninvalid_request_error",
+          retryable: true,
+        },
+      },
+    ])
+  })
+
+  it('중단된 턴은 실패가 아니다 — 사람이 멈춘 것이고 대화는 계속된다', () => {
+    expect(n('turn/completed', { turn: { id: 't', status: 'interrupted', error: null } })).toEqual([
+      { type: 'turn_complete', sessionId: S },
+    ])
+  })
+
   it('tokenUsage → usage_update (+ 윈도우가 있으면 context_update)', () => {
     const out = n('thread/tokenUsage/updated', {
       // `last` is required by ThreadTokenUsage and is what fills the window; `total` is the

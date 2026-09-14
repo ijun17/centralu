@@ -695,6 +695,43 @@ describe('messagesToChat — 도구 출력 복원', () => {
   })
 })
 
+/**
+ * 실패한 턴은 **보여야 한다** (#107).
+ *
+ * 실사고: codex 롤아웃에는 `task_complete`에 400 전문이 실려 있었는데 앱에는 빈 답변이
+ * 남고 상태는 `waiting_input`이었다. "사람을 기다리는 중"은 거짓말이다 — 기다려야 할
+ * 것은 사람이 아니라 설명이었다. 두 반쪽을 함께 본다: 전사에 남는가, 상태가 정직한가.
+ */
+describe('실패한 턴은 화면에 닿는다 (#107)', () => {
+  const boom = (sessionId: string, message: string) =>
+    ({ type: 'error', sessionId, error: { code: 'internal', message, retryable: true } }) as NormalizedEvent
+
+  it('오류가 전사에 한 줄로 서고, 세션은 idle인 척하지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('err-1', sessionInfo('err-1'))
+    await useStore.getState().attach(mock)
+
+    mock.emit(boom('err-1', "The 'opus[1m]' model is not supported"))
+
+    const last = (useStore.getState().chat['err-1'] ?? []).at(-1)
+    expect(last?.kind).toBe('mark')
+    expect((last as { text: string }).text).toContain("The 'opus[1m]' model is not supported")
+    expect(useStore.getState().sessions['err-1']?.state).toBe('error')
+  })
+
+  it('다시 열어도 그 줄이 있다 — 오류는 마커로 저장된다', () => {
+    const items = messagesToChat([
+      {
+        sessionId: 'err-2', seq: 4, role: 'system', kind: 'marker', ts: 1,
+        payload: { type: 'error', sessionId: 'err-2', error: { code: 'internal', message: '400 invalid_request_error' } },
+      },
+    ])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'mark', seq: 4 })
+    expect((items[0] as { text: string }).text).toContain('400 invalid_request_error')
+  })
+})
+
 describe('messagesToChat — 이미지 행 (#40 2차)', () => {
   it('영속된 이미지가 대화로 되살아난다', () => {
     const items = messagesToChat([

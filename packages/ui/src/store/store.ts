@@ -3619,6 +3619,16 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'handoff':
       // 이 세션이 어디서 왔는지 (#102). 노트 원문은 저장된 payload에만 있다 — 여기는 한 줄이다
       return [...items, { kind: 'mark', seq: ++chatSeq, text: handoffText(e) }]
+    /*
+     * 실패한 턴도 대화에 남는다 (#107).
+     *
+     * 오류는 지금까지 상태만 바꾸고 지나갔다. 그래서 400으로 죽은 턴은 화면에서
+     * **아무 일도 일어나지 않은 것**과 구별되지 않았다 — 빈 답변, 그리고 "사람을
+     * 기다리는 중". 무슨 일이 있었는지는 전사에 있어야 한다: 세션 배지는 다음 턴이
+     * 시작하면 회복되지만, 그때도 사람은 여전히 이유를 모른다.
+     */
+    case 'error':
+      return [...items, { kind: 'mark', seq: ++chatSeq, text: errorText(e) }]
     default:
       return items
   }
@@ -3649,6 +3659,11 @@ const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : Stri
  */
 export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
   return `Handed off from "${e.from}" — the note is kept with this session`
+}
+
+/** 실패한 턴의 한 줄 (#107) — 도구가 보낸 문장을 그대로 나른다. 우리 말로 바꾸면 원인이 지워진다 */
+export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
+  return `The agent could not finish this turn — ${e.error.message}`
 }
 
 /** 메시지 복원 (재시작·세션 전환 시) */
@@ -3682,8 +3697,12 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       else items.push({ kind: 'reasoning', seq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
       // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
-      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' }>
-      items.push({ kind: 'mark', seq: m.seq, text: e.type === 'handoff' ? handoffText(e) : compactionText(e) })
+      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' }>
+      const text =
+        e.type === 'handoff' ? handoffText(e)
+        : e.type === 'error' ? errorText(e)
+        : compactionText(e)
+      items.push({ kind: 'mark', seq: m.seq, text })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary)

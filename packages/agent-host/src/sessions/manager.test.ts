@@ -54,6 +54,10 @@ class FakeHandle implements SessionHandle {
   emitContext(used: number, window: number) {
     this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact' })
   }
+  /** 턴이 오류로 끝났다 (#107) — 어댑터가 실패를 알리는 유일한 길 */
+  emitError(message: string) {
+    this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'internal', message, retryable: true } })
+  }
   /** 승인 요청 하나 (재연결 복원 테스트용 — detail이 목록에 실려야 카드를 다시 그린다) */
   emitApproval(requestId: string) {
     this.emit({
@@ -3279,5 +3283,28 @@ describe('조율 세션 — 시야가 잘린 오케스트레이터형 (#80·#81)
     await expect(
       mgr.runOrchestratorTool(task.coordinatorId, 'control_create_task', { title: 'x', goal: 'y', memberSessionIds: [a.id] }),
     ).rejects.toThrow(/이 세션의 도구가 아닙니다/)
+  })
+})
+
+/**
+ * 실패한 턴은 **기록에 남는다** (#107).
+ *
+ * 오류는 지금까지 상태만 바꾸고 지나갔다 — 저장되는 행이 없으니, 400으로 죽은 턴의
+ * 자리에는 빈 답변만 남고 왜 비었는지는 다시 열어도 알 수 없었다. 실사고의 모양이다:
+ * 롤아웃에는 전문이 있었고 앱에는 한 글자도 없었다.
+ */
+describe('실패한 턴은 기록에 남는다 (#107)', () => {
+  it('오류가 마커 행으로 저장되고, 세션 상태가 error가 된다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    adapter.handleOf(s.id)!.emitError("The 'opus[1m]' model is not supported")
+
+    const rows = store.loadMessages(s.id, 50)
+    const marker = rows.find((r) => r.kind === 'marker')
+    expect(marker).toBeDefined()
+    expect(marker!.payload).toMatchObject({ type: 'error', error: { message: "The 'opus[1m]' model is not supported" } })
+
+    const listed = (await rpc('sessions.list', {})) as SessionInfo[]
+    expect(listed.find((x) => x.id === s.id)?.state).toBe('error')
   })
 })

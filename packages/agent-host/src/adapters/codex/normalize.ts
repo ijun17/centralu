@@ -312,8 +312,38 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return out
     }
 
-    case 'turn/completed':
-      return [{ type: 'turn_complete', sessionId }]
+    /*
+     * 턴이 끝났다 — **끝난 방식까지 읽는다** (#107).
+     *
+     * `turn/completed`는 실패한 턴도 나른다 (generated/v2/Turn.ts: `status`가
+     * "completed" | "interrupted" | "failed"이고, `error`는 failed일 때만 채워진다).
+     * 여기서 `turn.*`을 통째로 버리고 있어서 400이 난 턴도 성공한 턴과 똑같이
+     * `turn_complete` 하나로만 나갔다 — 화면에는 **빈 답변**이 남고 상태는
+     * `waiting_input`이 됐다. 실사고: 롤아웃에는
+     * `The 'opus[1m]' model …` 전문이 있었는데 앱에는 한 글자도 오지 않았고,
+     * host 로그에도 어댑터 오류가 없었다. 아무 데서도 실패라고 말하지 않은 것이다.
+     *
+     * 실패는 `error`로 낸다 — **`turn_complete`를 함께 내지 않는다.** 두 이벤트가
+     * 같이 나가면 상태 머신의 마지막 말이 "사람을 기다리는 중"이 되어, 고치려는
+     * 거짓말을 그대로 다시 하게 된다. Claude 어댑터가 `result`에서 쓰는 규칙과 같다.
+     */
+    case 'turn/completed': {
+      const turn = obj(p.turn)
+      const failure = obj(turn.error)
+      if (str(turn.status) !== 'failed' && !failure.message) return [{ type: 'turn_complete', sessionId }]
+      const detail = str(failure.additionalDetails)
+      return [
+        {
+          type: 'error',
+          sessionId,
+          error: {
+            code: 'internal',
+            message: [str(failure.message) || 'The turn failed', detail].filter(Boolean).join('\n'),
+            retryable: true,
+          },
+        },
+      ]
+    }
 
     case 'turn/started':
       return [{ type: 'state_change', sessionId, state: 'working' }]
