@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS projects (
   path          TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL,
   default_tool  TEXT NOT NULL DEFAULT 'claude',
-  default_model TEXT,
+  -- 도구별 기본 모델·강도 (#107): {"codex":{"model":"gpt-5.6","effort":"high"}, ...}.
+  -- 스칼라 default_model/default_effort가 있던 자리다 — 모델 이름은 도구의 어휘라
+  -- 도구 없이 하나만 기억하면 다른 도구의 세션이 그 이름을 물려받아 첫 턴에 죽었다.
+  default_models TEXT,
   sidebar_order INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL
 );

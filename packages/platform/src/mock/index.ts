@@ -1140,6 +1140,8 @@ export class MockPlatform implements Platform {
         path,
         name: osPathBaseName(path) || path,
         defaultTool: 'claude',
+        // 도구별 기본 모델·강도 (#107) — 아무것도 고른 적 없는 새 프로젝트는 비어 있다
+        defaultModels: {},
         commands: [],
         worktreeSetup: null,
         worktreeManager: null,

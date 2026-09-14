@@ -10,6 +10,7 @@ import type {
   ProjectInfo,
   QuestionAnswer,
   StoredMessage,
+  ToolDefaults,
   ToolName,
   UpdateStatus,
 } from '@cc/protocol'
@@ -809,6 +810,36 @@ function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
 }
 
 let chatSeq = 0
+
+/**
+ * 이 프로젝트가 이 도구를 위해 기억해 둔 모델·강도 중, **그 도구가 아직 받아 주는 것**만 (#107).
+ *
+ * 도구별로 저장하는 것만으로는 부족하다: 모델은 은퇴한다. 어제 고른 이름이 오늘은
+ * 목록에 없고, 그대로 보내면 세션은 첫 턴에 400으로 죽는다 — 기억 하나를 지키려다
+ * 세션을 잃는 거래다. 그래서 쓰는 순간에 물어보고, 없으면 버린다.
+ *
+ * **목록을 못 읽었으면 아무것도 버리지 않는다.** `supported: false`는 "그 모델이 없다"가
+ * 아니라 "지금은 알 수 없다"는 뜻이고, 모른다는 이유로 버리면 도구가 잠시 응답하지
+ * 않는 동안 사람이 고른 값이 조용히 사라진다.
+ *
+ * 강도는 모델과 **함께** 버린다. 강도는 모델의 손잡이라(ModelOption.efforts), 남겨 두면
+ * 어느 모델의 것인지 모르는 high가 도구의 기본 모델에 얹힌다.
+ */
+async function usableDefaults(
+  platform: Platform,
+  tool: ToolName,
+  saved: ToolDefaults | undefined,
+): Promise<ToolDefaults> {
+  const none: ToolDefaults = { model: null, effort: null }
+  if (!saved?.model) return saved ?? none
+  try {
+    const { supported, models } = await platform.agents.models(tool)
+    if (!supported || models.length === 0) return saved
+    return models.some((m) => m.id === saved.model) ? saved : none
+  } catch {
+    return saved // 위와 같은 이유 — 못 물어본 것은 "없다"가 아니다
+  }
+}
 
 /** 진행 중인 인수인계 — 같은 세션에 두 번 걸면 새 세션이 둘 태어난다 (모듈 상태: 재진입 가드일 뿐, 그릴 것은 없다) */
 const handoffInFlight = new Set<string>()
@@ -2395,14 +2426,21 @@ export const useStore = create<AppState>((set, get) => ({
   async createSession(projectId, opts) {
     const platform = get().platform!
     const project = get().projects[projectId]!
+    const tool = opts?.tool ?? project.defaultTool ?? get().tools[0]?.name ?? ''
+    /*
+     * 프로젝트의 기억은 **이 도구의 것만** 꺼낸다 (#107). 예전에는 프로젝트당 모델
+     * 하나였고, 그 하나가 도구를 가리지 않고 실렸다 — 인수인계가 도구를 바꿀 때
+     * 일부러 모델을 비워도(`sameTool ? … : undefined`) 바로 여기서 다시 채워졌다.
+     */
+    const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool])
     const info = await platform.agents.createSession({
       projectId,
       cwd: project.path,
       // 고른 값이 그대로 host까지 간다 — 예전엔 프리셋이 'normal' 고정이고 모델은 전달조차 되지 않았다
-      tool: opts?.tool ?? project.defaultTool ?? get().tools[0]?.name ?? '',
-      model: opts?.model ?? project.defaultModel ?? undefined,
+      tool,
+      model: opts?.model ?? remembered.model ?? undefined,
       // 강도도 기억을 따라간다 (#69 ⑤) — 모델만 기억하면 Opus는 오는데 high는 또 눌러야 한다
-      effort: opts?.effort ?? project.defaultEffort ?? undefined,
+      effort: opts?.effort ?? remembered.effort ?? undefined,
       verbosity: opts?.verbosity,
       serviceTier: opts?.serviceTier,
       permissionPreset: opts?.permissionPreset ?? 'normal',

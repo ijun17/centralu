@@ -907,6 +907,64 @@ describe('앱 상태 (#81)', () => {
   })
 })
 
+/**
+ * 프로젝트의 기본 모델은 **도구의 것**이다 (#107).
+ *
+ * 실사고: `default_tool=codex`인 프로젝트가 `default_model=opus[1m]`을 들고 있었고,
+ * 거기서 태어난 codex 세션은 매 턴 `400 invalid_request_error`로 죽었다. 인수인계는
+ * 도구가 바뀔 때 일부러 모델을 비웠는데(`sameTool ? … : undefined`), 그 아래에서
+ * 프로젝트 기본값이 다시 채웠다 — 가드가 위임한 층에게 무너진 모양이다.
+ */
+describe('프로젝트 기본 모델은 도구를 따라간다 (#107)', () => {
+  const withDefaults = async (mock: MockPlatform, path: string, defaults: Record<string, { model: string | null; effort: string | null }>) => {
+    const proj = await mock.projects.add(path)
+    proj.defaultModels = defaults
+    proj.defaultTool = 'claude'
+    return proj
+  }
+
+  it('도구가 다르면 그 도구의 기억만 온다 — 없으면 아무것도 보내지 않는다', async () => {
+    const mock = new MockPlatform()
+    const proj = await withDefaults(mock, '/tmp/def-1', { claude: { model: 'opus', effort: 'high' } })
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().createSession(proj.id, { tool: 'codex' })
+    expect(mock.lastCreateParams?.tool).toBe('codex')
+    expect(mock.lastCreateParams?.model).toBeUndefined()
+    expect(mock.lastCreateParams?.effort).toBeUndefined()
+
+    // 같은 도구에는 그대로 온다 — 기억하는 기능 자체는 살아 있어야 한다
+    await useStore.getState().createSession(proj.id, { tool: 'claude' })
+    expect(mock.lastCreateParams?.model).toBe('opus')
+    expect(mock.lastCreateParams?.effort).toBe('high')
+  })
+
+  /*
+   * 도구별로 적어 두는 것만으로는 부족하다: 모델은 은퇴한다. 어제 고른 이름이 오늘
+   * 목록에 없으면 그대로 보내는 쪽이 세션을 죽인다 — agents.models가 진실이다.
+   */
+  it('그 도구가 더는 받지 않는 모델은 버린다', async () => {
+    const mock = new MockPlatform()
+    const proj = await withDefaults(mock, '/tmp/def-2', { codex: { model: 'gpt-5-retired', effort: 'high' } })
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().createSession(proj.id, { tool: 'codex' })
+    expect(mock.lastCreateParams?.model).toBeUndefined()
+    // 강도는 모델의 손잡이라 함께 버린다 — 어느 모델의 것인지 모르는 high가 남으면 안 된다
+    expect(mock.lastCreateParams?.effort).toBeUndefined()
+  })
+
+  it('아직 목록에 있는 모델은 그대로 간다', async () => {
+    const mock = new MockPlatform()
+    const proj = await withDefaults(mock, '/tmp/def-3', { codex: { model: 'gpt-5.6-terra', effort: 'medium' } })
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().createSession(proj.id, { tool: 'codex' })
+    expect(mock.lastCreateParams?.model).toBe('gpt-5.6-terra')
+    expect(mock.lastCreateParams?.effort).toBe('medium')
+  })
+})
+
 describe('인수인계하고 새로 시작', () => {
   it('글을 받아 새 세션을 만들고 이름을 물려주고 원본까지 지운다', async () => {
     const mock = new MockPlatform()

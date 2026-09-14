@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { ProjectInfo, SavedCommand, SessionInfo, StoredMessage } from '@cc/protocol'
+import type { ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 
 /**
@@ -701,6 +701,37 @@ export class Store {
           }
         },
       },
+      {
+        to: 32,
+        /**
+         * 기본 모델·강도가 도구를 갖는다 (#107).
+         *
+         * `default_model`·`default_effort`는 프로젝트당 하나였는데 그 옆에 `default_tool`이
+         * 앉아 있었다 — 모델 이름은 도구의 어휘이므로 도구 없는 모델 기본값은 어느 도구의
+         * 것인지 말할 수 없다. 실사고: `default_tool=codex`인 프로젝트가
+         * `default_model=opus[1m]`을 들고 있었고, 거기서 태어난 codex 세션이 매 턴
+         * `400 invalid_request_error`로 죽었다. 화면에는 아무것도 뜨지 않았다.
+         *
+         * **옛 값은 옮기지 않고 버린다.** 지금의 `default_tool`에 붙여 주는 것이 가장
+         * 그럴듯한 추측이지만, 그 추측이 정확히 이 버그를 만든 동작이다 — 스칼라는 어느
+         * 도구를 위해 골랐는지 기록한 적이 없다. 잃은 기본값의 값은 다음 세션에서의
+         * 클릭 한 번이고, 틀린 기본값의 값은 죽은 세션 하나다.
+         *
+         * 컬럼째 지우는 이유: 대화가 아니라 **마지막 선택 하나**라 남겨 둘 것이 없고,
+         * 남겨 두면 다음 사람이 "읽는 데가 있나" 묻는 열이 둘 더 생긴다 (v28 선례).
+         */
+        run: () => {
+          const cols = () => this.db.pragma('table_info(projects)') as { name: string }[]
+          if (!cols().some((c) => c.name === 'default_models')) {
+            this.db.exec(`ALTER TABLE projects ADD COLUMN default_models TEXT`)
+          }
+          for (const dead of ['default_model', 'default_effort']) {
+            if (cols().some((c) => c.name === dead)) {
+              this.db.exec(`ALTER TABLE projects DROP COLUMN ${dead}`)
+            }
+          }
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -910,12 +941,12 @@ export class Store {
    * silently cast away, which is how `Omit<ProjectInfo, 'git'>` would have become a lie the
    * moment the field was added.
    */
-  listProjects(): Omit<ProjectInfo, 'git' | 'commands'>[] {
+  listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
     return this.db
       .prepare(
-        `SELECT id, path, name, default_tool as defaultTool, default_model as defaultModel, default_effort as defaultEffort FROM projects ORDER BY sidebar_order, created_at`,
+        `SELECT id, path, name, default_tool as defaultTool FROM projects ORDER BY sidebar_order, created_at`,
       )
-      .all() as Omit<ProjectInfo, 'git' | 'commands'>[]
+      .all() as Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[]
   }
 
   /**
@@ -1018,11 +1049,39 @@ export class Store {
     this.db.prepare(`UPDATE projects SET default_tool = ? WHERE id = ?`).run(tool, projectId)
   }
 
-  /** 마지막으로 고른 모델·강도가 기본값이 된다 (#69 ⑤) — default_tool과 같은 규칙 */
-  setProjectDefaultModel(projectId: string, model: string | null, effort: string | null): void {
-    this.db
-      .prepare(`UPDATE projects SET default_model = ?, default_effort = ? WHERE id = ?`)
-      .run(model, effort, projectId)
+  /**
+   * 마지막으로 고른 모델·강도가 기본값이 된다 (#69 ⑤) — 단 **도구마다** (#107).
+   *
+   * projectCommands와 같은 규칙으로 통째로 읽고 통째로 쓴다. 못 읽는 JSON은 "없음"으로
+   * 읽는다: 기억 하나를 잃는 값은 클릭 한 번이고, 여기서 던지면 프로젝트 목록이 —
+   * 그러니까 사이드바가 — 함께 넘어간다.
+   */
+  projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
+    const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
+      { default_models: string | null } | undefined
+    if (!row?.default_models) return {}
+    try {
+      const parsed = JSON.parse(row.default_models) as unknown
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+      const out: Record<string, ToolDefaults> = {}
+      for (const [tool, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!v || typeof v !== 'object') continue
+        const { model, effort } = v as { model?: unknown; effort?: unknown }
+        out[tool] = {
+          model: typeof model === 'string' && model ? model : null,
+          effort: typeof effort === 'string' && effort ? effort : null,
+        }
+      }
+      return out
+    } catch {
+      return {}
+    }
+  }
+
+  /** 한 도구의 자리만 고쳐 쓴다 — 다른 도구의 기억은 이 선택과 아무 관계가 없다 (#107) */
+  setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
+    const all = { ...this.projectToolDefaults(projectId), [tool]: d }
+    this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(all), projectId)
   }
 
   findProjectByPath(path: string): { id: string } | undefined {

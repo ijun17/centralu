@@ -669,8 +669,8 @@ export class SessionManager {
     const stored = row?.defaultTool
     return {
       id, path, name: basename(path), defaultTool: stored === 'codex' ? 'codex' : 'claude',
-      defaultModel: row?.defaultModel ?? null,
-      defaultEffort: row?.defaultEffort ?? null,
+      // 도구별 기본 모델·강도 (#107) — commands·worktreeSetup처럼 JSON이라 따로 읽는다
+      defaultModels: this.store.projectToolDefaults(id),
       // Saved shell commands ride along with the project so the Run menu never has a
       // "loading" state to distinguish from an empty one (issue #44)
       commands: this.store.projectCommands(id),
@@ -1714,13 +1714,16 @@ export class SessionManager {
      * 마지막으로 고른 모델·강도가 이 프로젝트의 기본값이 된다 (#69 ⑤).
      * default_tool이 배운 교훈 그대로다: 설정 화면을 만드는 대신, 고르는 행위가
      * 이미 말해 주는 사실을 적는다. Opus·high를 쓰는 사람이 새 세션마다 네 번
-     * 클릭하는 반복이 여기서 끝난다. 도구별 모델이라 도구가 같은 세션의 선택만 적는다.
+     * 클릭하는 반복이 여기서 끝난다.
+     *
+     * **이 세션의 도구 자리에 적는다** (#107). 예전에는 자리가 하나뿐이라 "프로젝트의
+     * 기본 도구와 같은 세션의 선택만 적는다"는 조건으로 막아야 했는데, 그 조건은
+     * 기본 도구가 바뀌는 순간 무너졌다 — codex 세션 하나가 기본 도구를 codex로 돌려
+     * 놓으면 그 다음 codex 선택이 claude를 위해 저장된 값을 덮었다. 이제 도구가
+     * 열쇠라 조건이 필요 없다: 어느 도구의 선택이든 자기 자리에만 앉는다.
      */
     if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
-      const p = this.store.listProjects().find((x) => x.id === m.projectId)
-      if (p && p.defaultTool === m.tool) {
-        this.store.setProjectDefaultModel(m.projectId, m.model, m.effort)
-      }
+      this.store.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
     }
 
     const handle = this.handles.get(sessionId)

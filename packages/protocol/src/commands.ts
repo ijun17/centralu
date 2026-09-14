@@ -314,6 +314,18 @@ export const SavedCommand = z.object({
 })
 export type SavedCommand = z.infer<typeof SavedCommand>
 
+/**
+ * 한 도구를 위해 마지막으로 고른 값들 (#107).
+ *
+ * verbosity·serviceTier는 여기 없다 — 프로젝트 기본값으로 기억된 적이 없고
+ * (컬럼도 없다), 없는 기억을 지금 만들 이유도 없다. 생기면 같은 봉투에 들어온다.
+ */
+export const ToolDefaults = z.object({
+  model: z.string().nullable().default(null),
+  effort: z.string().nullable().default(null),
+})
+export type ToolDefaults = z.infer<typeof ToolDefaults>
+
 export const ProjectInfo = z.object({
   id: z.string(),
   path: z.string(),
@@ -328,9 +340,17 @@ export const ProjectInfo = z.object({
    * whatever the machine actually has.
    */
   defaultTool: ToolName.nullable().default(null),
-  defaultModel: z.string().nullable().optional(),
-  /** 마지막으로 고른 추론 강도 (#69 ⑤) — default_tool·default_model과 같은 규칙: 고른 행위가 곧 기본값이다 */
-  defaultEffort: z.string().nullable().optional(),
+  /**
+   * 마지막으로 고른 모델·강도 — **도구마다 따로** (#107).
+   *
+   * 예전에는 프로젝트당 하나였다 (`defaultModel`·`defaultEffort` 스칼라). 그런데 모델
+   * 이름은 도구의 어휘라, 한 번 Claude 모델을 고른 프로젝트에서 시작한 Codex 세션이
+   * 전부 그 이름을 물려받았다 — 실측: `default_tool=codex`인 프로젝트가
+   * `default_model=opus[1m]`을 들고 있었고, 그 세션은 매 턴 400으로 죽었다.
+   * "고른 행위가 곧 기본값"이라는 규칙은 옳았고 저장 모양이 그 규칙을 표현하지
+   * 못했을 뿐이다: **선택은 언제나 어떤 도구를 위한 선택이다.**
+   */
+  defaultModels: z.record(ToolName, ToolDefaults).default({}),
   /**
    * The shell commands saved on this project — what the Run menu offers (issue #44).
    *

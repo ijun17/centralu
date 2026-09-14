@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 31
+const LATEST_SCHEMA = 32
 
 function seeded() {
   const s = new Store()
@@ -1199,5 +1199,51 @@ describe('worktree_manager 왕복 (#76)', () => {
     s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
     s.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
     expect(s.worktreeManager('p1')?.sessionId).toBe('mgr-2')
+  })
+})
+
+/**
+ * v32 (#107): 기본 모델·강도가 도구를 갖는다.
+ *
+ * 실사고의 모양 그대로 세운다 — `default_tool=codex`인 프로젝트가 Claude 모델 이름을
+ * 스칼라로 들고 있다. 그 값을 codex의 것으로 옮겨 주는 것이 가장 그럴듯한 추측이고,
+ * 그 추측이 정확히 세션을 죽인 동작이다.
+ */
+describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
+  const v31Db = (file: string) => {
+    const old = new Database(file)
+    old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      default_tool TEXT NOT NULL DEFAULT 'claude', default_model TEXT, default_effort TEXT,
+      sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, commands TEXT NOT NULL DEFAULT '[]');`)
+    old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','codex','opus[1m]','high',0,1,'[]')`).run()
+    old.pragma('user_version = 31')
+    old.close()
+  }
+
+  it('옛 스칼라는 어느 도구의 것도 되지 않고 사라진다 — 잃은 기본값은 클릭 한 번, 틀린 기본값은 죽은 세션', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v32-'))
+    const file = join(dir, 'store.db')
+    v31Db(file)
+
+    const s = new Store(file)
+    expect(s.projectToolDefaults('p1')).toEqual({})
+    const cols = (s as unknown as { db: Database.Database }).db
+      .prepare(`PRAGMA table_info(projects)`)
+      .all() as { name: string }[]
+    expect(cols.map((c) => c.name)).not.toContain('default_model')
+    expect(cols.map((c) => c.name)).not.toContain('default_effort')
+
+    // 도구마다 따로 앉고, 서로를 덮지 않는다
+    s.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5.6-terra', effort: 'high' })
+    s.setProjectToolDefaults('p1', 'claude', { model: 'opus', effort: null })
+    s.close()
+
+    const reopened = new Store(file)
+    expect(reopened.projectToolDefaults('p1')).toEqual({
+      codex: { model: 'gpt-5.6-terra', effort: 'high' },
+      claude: { model: 'opus', effort: null },
+    })
+    reopened.close()
+    rmSync(dir, { recursive: true, force: true })
   })
 })
