@@ -8,8 +8,8 @@ import {
   appToolEntries,
   profileAllows,
   runOrchestratorTool,
-  type ToolProfile,
 } from '../../sessions/orchestrator-tools.js'
+import type { ToolProfile } from '../../apps/contract.js'
 
 /**
  * 오케스트레이터의 도구를 Claude에게 붙인다 (FR-11).

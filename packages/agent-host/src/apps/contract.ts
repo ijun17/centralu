@@ -1,9 +1,22 @@
 import type { z } from 'zod'
 import type { NormalizedEvent } from '@cc/protocol'
-import type { AppToolCaller, ToolProfile, ToolOutput } from '../sessions/orchestrator-tools.js'
 
-// 앱이 쓸 타입은 통행증이 재수출한다 — 앱 내부가 코어를 직접 임포트하면 depcruise가 문다
-export type { AppToolCaller, ToolProfile, ToolOutput } from '../sessions/orchestrator-tools.js'
+/*
+ * 런타임의 중심 타입 셋은 **여기서 태어난다** (#97).
+ *
+ * 전에는 sessions/orchestrator-tools.ts가 이것들을 정의하고 이 파일이 재수출했다.
+ * 그러면 "앱이 무엇을 부를 수 있는가"의 정본이 앱을 태우는 층이 아니라 그 위에 탄
+ * 승객 하나(오케스트레이터)에게 있게 된다 — 그 승객을 지우면 런타임이 컴파일되지
+ * 않는다. 오케스트레이터는 런타임의 호출자 중 하나지 주인이 아니다.
+ */
+
+/** 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합 */
+export type ToolProfile = 'orchestrator' | 'manager' | 'scoped'
+
+/** 앱 도구를 부른 주체 — sessionId=null은 사람(UI)이다. 앱이 자기 권한 판정에 쓴다 */
+export type AppToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
+
+export type ToolOutput = { text: string; isError?: boolean }
 
 /**
  * 앱의 host 쪽 계약 (#81) — **통행증의 절반**.

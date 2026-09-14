@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
+import type { AppToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS } from './app-guide.js'
 
 /**
@@ -245,8 +246,6 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '사람과 나눈 대화가 프로젝트를 가로지르는 기억이고, 그 기억은 검색으로만 닿는다.',
 ].join('\n')
 
-export type ToolOutput = { text: string; isError?: boolean }
-
 /**
  * 도구 하나를 실행하고 **모델이 읽을 글**로 만든다.
  *
@@ -465,9 +464,6 @@ export async function runOrchestratorTool(
 }
 
 /** 다리(별도 프로세스)가 tools/list에 쓸 수 있는 형태 */
-/** 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합 */
-export type ToolProfile = 'orchestrator' | 'manager' | 'scoped'
-
 /**
  * 시야가 잘린 조율 세션의 기본 도구 (#80·#81 물리). '업무'라는 말은 여기 없다 —
  * 이 묶음은 "허용 목록 안의 세션만 보고 시킬 수 있다"는 능력일 뿐이고,
@@ -498,9 +494,6 @@ export const SCOPED_INSTRUCTIONS = [
  * 세션 스폰 때 굳지만(살아 있는 세션의 도구 목록은 안 변한다), 실행은 꺼진 앱을
  * 즉시 거절해야 한다.
  */
-/** 앱 도구를 부른 주체 — sessionId=null은 사람(UI)이다. 앱이 자기 권한 판정에 쓴다 */
-export type AppToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
-
 export type AppToolEntry = {
   name: string
   description: string

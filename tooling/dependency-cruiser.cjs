@@ -27,23 +27,27 @@ module.exports = {
      */
     {
       name: 'ui-app-guest-pass',
-      comment: 'UI 앱 내부는 api/contract 통행증으로만 코어에 (#81)',
+      comment: 'UI 앱 런타임은 이 제품의 층을 아예 모른다 (#81 통행증, #97 방향)',
       severity: 'error',
-      from: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(api|contract|registry)\\.tsx?$'] },
+      // 예전엔 api.ts만 예외로 스토어를 임포트했다 — 그 한 줄이 "인박스를 지우면 런타임이
+      // 안 돈다"였다. 이제 통행증은 host.ts가 선언한 표면으로 위임하므로 예외가 없다
+      from: { path: '^packages/ui/src/apps/' },
       to: { path: '^packages/ui/src/(store|features|app)/' },
     },
     {
       name: 'ui-core-blind-to-apps',
-      comment: 'UI 코어가 앱에서 가져올 수 있는 것은 registry·contract뿐 (#81)',
+      comment: 'UI 코어가 앱에서 가져올 수 있는 것은 registry·contract·host뿐 (#81, #97)',
       severity: 'error',
       from: { path: '^packages/ui/src', pathNot: ['^packages/ui/src/apps/'] },
-      to: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(registry|contract)\\.tsx?$'] },
+      to: { path: '^packages/ui/src/apps/', pathNot: ['^packages/ui/src/apps/(registry|contract|host)\\.tsx?$'] },
     },
     {
       name: 'host-app-guest-pass',
       comment: 'host 앱 내부는 contract가 주는 것 밖의 코어에 손대지 않는다 (#81)',
       severity: 'error',
-      from: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/(contract|registry)\\.ts$'] },
+      // contract.ts가 오케스트레이터에서 타입을 빌려 오던 예외는 #97에서 사라졌다 —
+      // 그 타입들은 이제 contract.ts가 정의하고 오케스트레이터가 가져다 쓴다
+      from: { path: '^packages/agent-host/src/apps/' },
       to: { path: '^packages/agent-host/src/(sessions|dev-services|adapters)/' },
     },
     {

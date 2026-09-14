@@ -6,9 +6,10 @@
 import { describe, expect, it } from 'vitest'
 import { ESLint } from 'eslint'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
-const PROTOCOL_SRC = new URL('../packages/protocol/src/', import.meta.url).pathname
+const ROOT = new URL('..', import.meta.url).pathname
+const PROTOCOL_SRC = join(ROOT, 'packages/protocol/src/')
 
 /** Block and line comments, so prose that explains a rule cannot trip it. */
 const stripComments = (code: string) =>
@@ -51,6 +52,73 @@ describe('protocol은 벤더를 모른다', () => {
       .map(({ file }) => file)
     expect(offenders).toEqual([])
   })
+})
+
+/** Every `.ts`/`.tsx` under a directory, tests included, with comments stripped. */
+function sourcesUnder(dir: string): { file: string; code: string }[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const path = join(dir, e.name)
+    if (e.isDirectory()) return sourcesUnder(path)
+    if (!/\.tsx?$/.test(e.name)) return []
+    return [{ file: relative(ROOT, path), code: stripComments(readFileSync(path, 'utf8')) }]
+  })
+}
+
+/** Static, dynamic and re-exported specifiers alike — a leak does not care which form it took. */
+function importsOf(code: string): string[] {
+  const re = /\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g
+  return [...code.matchAll(re)].map((m) => m[1] ?? m[2] ?? m[3]!)
+}
+
+/**
+ * `apps/` is the layer other things are meant to run *on*, and it was running *beside* them.
+ *
+ * The UI runtime imported the inbox's store and re-exported `useInbox` from its own pass, so
+ * the contract an app author reads had one particular product's word in it — and deleting
+ * that product stopped the runtime from compiling. The host half had the same shape one
+ * level down: `apps/contract.ts` borrowed `AppToolCaller` from the orchestrator, which is one
+ * caller of the runtime, not its owner. Both directions are inverted now: the runtime
+ * declares what it needs (`apps/host.ts`) and the host supplies it (`store/app-host.ts`).
+ *
+ * The cycle grew because nothing was checking. This is the checking (#97), and it is the same
+ * rule as the one above, one layer over: a shelf both sides reach must stay one-directional.
+ *
+ * Comments are stripped first — the prose explaining this names the layers it forbids.
+ */
+describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
+  const layers = [
+    {
+      name: 'packages/ui/src/apps',
+      dir: join(ROOT, 'packages/ui/src/apps/'),
+      // 인박스 제품의 두 층. 런타임이 이쪽을 부르면 인박스를 지울 수 없다
+      forbidden: /(^|\/)(store|features)(\/|$)/,
+    },
+    {
+      name: 'packages/agent-host/src/apps',
+      dir: join(ROOT, 'packages/agent-host/src/apps/'),
+      // 오케스트레이터는 런타임의 호출자 중 하나다 — 런타임이 거꾸로 기대면 안 된다
+      forbidden: /(^|\/)sessions(\/|$)/,
+    },
+  ]
+
+  for (const layer of layers) {
+    describe(layer.name, () => {
+      const sources = sourcesUnder(layer.dir)
+
+      it('읽을 소스가 있다', () => {
+        expect(sources.length).toBeGreaterThan(0)
+      })
+
+      it('금지된 층을 임포트하지 않는다', () => {
+        const offenders = sources.flatMap(({ file, code }) =>
+          importsOf(code)
+            .filter((spec) => layer.forbidden.test(spec))
+            .map((spec) => `${file} → ${spec}`),
+        )
+        expect(offenders).toEqual([])
+      })
+    })
+  }
 })
 
 describe('ui 레이어 경계', () => {

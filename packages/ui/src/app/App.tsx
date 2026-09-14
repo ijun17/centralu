@@ -23,6 +23,17 @@ import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
+import { attachAppHost } from '../apps/host.js'
+import { storeAppHost } from '../store/app-host.js'
+
+/*
+ * 앱 런타임에 호스트를 얹는다 (#97) — **모듈 수준이라 첫 렌더보다 먼저다.**
+ *
+ * 앱(레일·설정·전용 화면)은 전부 이 파일 아래에서 그려지므로, 여기서 한 번 얹으면
+ * 어느 진입점(데스크톱·웹)으로 들어와도 앱이 서기 전에 호스트가 서 있다.
+ * 효과 안에서 얹으면 첫 렌더가 빈 호스트를 만난다.
+ */
+attachAppHost(storeAppHost)
 
 export function App({ platform }: { platform: Platform }) {
   const attach = useStore((s) => s.attach)
