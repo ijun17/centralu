@@ -241,7 +241,16 @@ export function GridView() {
                 밝았고, 눈이 칸의 경계가 아니라 카드의 곡선에 먼저 갔다. 둘을 맞바꾼다 —
                 칸을 graphite로 올리고 카드를 edge로 내린다.
               */
-              className={`relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
+              /*
+                isolate: 칸이 자기 층을 가둔다.
+                회전 테두리는 z-30으로 선다 — 칸 안에서 접힌 입력창(z-20)보다 위여야 하기
+                때문이다. 그런데 칸이 쌓임 맥락을 만들지 않으면 그 30이 칸 밖으로까지
+                나가, 파일·깃 오버레이(z-20) 위에 테두리가 그려졌다 (사용자 지적).
+                오버레이 쪽 숫자를 올려 이기는 방법도 있지만, 그러면 다음에 숫자를 고르는
+                사람이 같은 경주를 다시 시작한다. "칸 안에서 가장 위"라는 말이 참이 되려면
+                칸이 울타리여야 한다 — 같은 파일의 .cc-orbit이 배지에 쓰는 방법 그대로다.
+              */
+              className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
                 sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
               } ${dragging === id ? 'opacity-40' : ''}`}
               data-focused={focusedSessionId === id || undefined}

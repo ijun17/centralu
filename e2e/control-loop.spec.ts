@@ -7707,3 +7707,50 @@ test('반장 세션을 열면 증거 패널이 비어 선다 — 직전 프로�
   await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), workerId)
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 })
+
+/**
+ * 돌고 있는 칸의 회전 테두리는 **칸의 테두리**다 — 칸 밖의 것을 덮으면 안 된다.
+ *
+ * 링은 z-30으로 선다. 칸 안에서 접힌 입력창(z-20)이 아랫변을 덮은 적이 있어서 올린 값이다.
+ * 그런데 칸이 쌓임 맥락을 만들지 않으면 그 30은 칸 밖에서도 30이라, 파일·깃 화면(z-20)
+ * 위로 무지개 한 줄이 그려졌다 (사용자 지적).
+ *
+ * 숫자를 비교하지 않고 **그 픽셀의 맨 위에 무엇이 있는지**를 본다. z 값은 쌓임 맥락마다
+ * 뜻이 달라서, 30 > 20이라는 사실만으로는 무엇이 보이는지 알 수 없다.
+ */
+test('돌고 있는 칸의 테두리가 파일·깃 화면 위로 새어 나오지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'work')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+
+  await page.evaluate((sid) => {
+    const store = (window as any).__store
+    store.getState().setGridPanels([sid])
+    store.setState((s: any) => ({
+      sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], state: 'working' } },
+    }))
+  }, id)
+  await page.getByTestId('grid-button').click()
+  await expect(page.locator('.cc-orbit-ring-layer')).toBeVisible()
+
+  await page.evaluate(() => (window as any).__store.getState().openGit())
+  await expect(page.getByTestId('overlay')).toBeVisible()
+
+  const topAtRing = await page.evaluate(() => {
+    const ring = document.querySelector('.cc-orbit-ring-layer') as HTMLElement | null
+    if (!ring) return { found: false, inOverlay: false }
+    /*
+     * 링은 클릭을 통과시키므로(pointer-events: none) 평소에는 hit-test에 잡히지 않는다.
+     * 그대로 물으면 "덮였는가"가 아니라 "클릭이 가는가"를 재게 되어, 링이 화면 위로
+     * 삐져나온 상태에서도 통과한다. 재는 동안만 포인터를 켜서 **그리기 순서**를 묻는다.
+     */
+    const before = ring.style.pointerEvents
+    ring.style.pointerEvents = 'auto'
+    const r = ring.getBoundingClientRect()
+    const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + 1))
+    ring.style.pointerEvents = before
+    return { found: true, inOverlay: !!el?.closest('[data-testid="overlay"]') }
+  })
+  expect(topAtRing.found).toBe(true)
+  expect(topAtRing.inOverlay).toBe(true)
+})
