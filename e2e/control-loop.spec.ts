@@ -5352,6 +5352,38 @@ test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({
 })
 
 /**
+ * **이번 실행에서 열어본 적 없는 오케스트레이터도 갈아 끼울 수 있어야 한다.**
+ *
+ * 위 시험은 세션을 먼저 연 뒤 설정으로 갔다. 그래서 `orchestratorId`가 늘 채워져 있었고,
+ * 앱을 켜고 곧장 설정부터 여는 사람의 자리는 한 번도 지나가지 않았다. 그 자리에서는
+ * 값이 null이라 화면이 switchTool 대신 configureOrchestrator로 흘렀는데, 그것은 host가
+ * "세션이 생긴 뒤에는 다시 읽지 않는다"고 적어 둔 값이다. 선택은 적히고, 아무도 읽지
+ * 않고, 다시 그리면 옛 도구가 도로 올라왔다 (도그푸딩: "바꿔도 코덱스로 돌아온다").
+ */
+test('설정부터 연 사람도 오케스트레이터의 에이전트를 바꾼다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('orchestrator-button').click()
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
+
+  // 앱을 갓 켠 상태를 만든다 — 세션은 남아 있고, 이번 실행에서 연 적은 없다
+  await page.evaluate(() => (window as any).__store.setState({ orchestratorId: null }))
+
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-orchestrator').click()
+  await expect(page.getByTestId('orchestrator-tool-claude')).toHaveAttribute('aria-checked', 'true')
+
+  await page.getByTestId('orchestrator-tool-codex').click()
+  await page.getByTestId('orchestrator-switch-confirm-btn').click()
+
+  // 선택을 적어 두는 것으로 끝나면 안 된다 — 살아 있는 세션이 실제로 바뀌어야 한다
+  await expect
+    .poll(async () => page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId))
+    .toBe('codex')
+})
+
+/**
  * 오케스트레이터가 넣어준 말도 대화창에 나타나야 한다.
  *
  * 예전에는 사용자 메시지를 만드는 곳이 UI 하나뿐이라, UI가 자기 것을 스스로 그리는

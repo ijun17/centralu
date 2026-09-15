@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { APP_VERSION, type ToolName, type ToolStatus, type UpdateStatus } from '@cc/protocol'
+import { APP_VERSION, type SessionInfo, type ToolName, type ToolStatus, type UpdateStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 import { TEXT_SCALES, TEXT_SCALE_DEFAULT, useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -419,7 +419,17 @@ function OrchestratorSettings() {
   const live = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
   const switchTool = useStore((s) => s.switchTool)
   const setToast = useStore((s) => s.setToast)
-  const [saved, setSaved] = useState<ToolName | null>(null)
+  /*
+   * 저장된 선택이 아니라 **세션 자체**를 들고 있는다.
+   *
+   * 예전에는 도구 이름만 꺼내 뒀다. 그래서 갈아 끼울 대상이 있는지를 `orchestratorId`로
+   * 판정했는데, 그 값은 이번 실행에서 오케스트레이터를 **열어봤을 때만** 채워진다.
+   * 앱을 켜고 설정부터 연 사람에게는 늘 null이라, 살아 있는 세션을 두고도
+   * configureOrchestrator로 흘렀다 — 그 값은 host가 "세션이 생긴 뒤에는 다시 읽지
+   * 않는다"고 적어 둔 자리다. 선택은 적히고, 아무도 읽지 않고, 다시 그리면 peek이
+   * 세션에서 옛 도구를 도로 읽어 왔다 (도그푸딩: "바꿔도 코덱스로 돌아온다").
+   */
+  const [peeked, setPeeked] = useState<SessionInfo | null>(null)
   // 고른 것을 이름이 아니라 통째로 들고 있는다 — 확인 창이 이름을 다시 찾아 헤맬 일이 없다
   const [asking, setAsking] = useState<ToolStatus | null>(null)
   const tools = useTools()
@@ -429,18 +439,20 @@ function OrchestratorSettings() {
     const alive = true
     void platform.agents
       .orchestratorPeek()
-      .then((s) => alive && setSaved((s?.tool ?? null) as ToolName | null))
+      .then((s) => alive && setPeeked(s))
       .catch(() => {})
   }, [platform])
 
-  const current = live ?? saved ?? (tools[0]?.name ?? null)
+  /** 갈아 끼울 대상 — 이번 실행에서 열었든 아니든, 존재하기만 하면 된다 */
+  const existingId = orchestratorId ?? peeked?.id ?? null
+  const current = live ?? peeked?.tool ?? (tools[0]?.name ?? null)
 
   const apply = async (tool: ToolName) => {
     try {
       // 살아 있으면 갈아 끼우고, 아직 없으면 선택만 적어 둔다
-      if (orchestratorId) await switchTool(orchestratorId, tool)
+      if (existingId) await switchTool(existingId, tool)
       else await platform.agents.configureOrchestrator(tool)
-      setSaved(tool)
+      setPeeked((p: SessionInfo | null) => (p ? { ...p, tool } : p))
     } catch (e) {
       setToast((e as Error).message)
     }
