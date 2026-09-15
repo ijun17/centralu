@@ -22,6 +22,8 @@ import {
   TokenUsage,
   ToolName,
   ToolStatus,
+  UiPreferences,
+  UiPreferencesPatch,
   UpdateStatus,
 } from './entities.js'
 
@@ -1074,6 +1076,28 @@ export const RpcMethods = {
   'updates.apply': {
     params: z.object({}),
     result: UpdateStatus,
+  },
+  /**
+   * 화면 설정을 읽는다 (UiPreferences).
+   *
+   * **기동 경로에 있다.** 답이 늦게 오면 늦게 오는 것으로 끝나지 않는다 — 입력창이
+   * 잠깐 옛 규칙으로 서 있다가 손가락 밑에서 규칙을 바꾼다. 그래서 이 호출은
+   * 화면이 뜨기 전에 하는 것들과 함께 나가고, 실패는 기본값으로 메운다.
+   */
+  'prefs.get': {
+    params: z.object({}),
+    result: UiPreferences,
+  },
+  /**
+   * 바뀐 것만 적는다. 결과는 **기록된 뒤의 기록 전체**다.
+   *
+   * 쓴 쪽이 자기가 보낸 것을 그대로 믿지 않고 돌려받은 것을 쓰게 하려는 것이다 —
+   * 저장된 모양이 곧 화면이 따르는 모양이어야, 저장이 실패한 설정이 화면에서만
+   * 켜져 있는 일이 생기지 않는다.
+   */
+  'prefs.set': {
+    params: z.object({ patch: UiPreferencesPatch }),
+    result: UiPreferences,
   },
   'approvals.rules': {
     params: z.object({ projectId: z.string().optional() }),

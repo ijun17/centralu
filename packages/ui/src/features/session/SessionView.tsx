@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
 import { EMPTY_DRAFT, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
+import { useShortcut } from '../../app/shortcut.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../approval/QuestionCard.jsx'
 import { ChevronIcon, CloseIcon, CrownIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
@@ -19,6 +20,7 @@ import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomple
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
+import { isComposerSendKey } from './composerKeys.js'
 import { appendPath, readDragPath } from '../files/dragPath.js'
 import { anchorAt, decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
@@ -539,6 +541,9 @@ const Composer = memo(function Composer({
   const isOrchestrator = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator')
   const send = useStore((s) => s.send)
   const wake = useStore((s) => s.wake)
+  // 설정 하나만 꺼낸다 — 기록 전체를 구독하면 설정이 늘 때마다 입력창이 같이 다시 그려진다
+  const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
+  const sc = useShortcut()
   /*
    * 쓰다 만 글은 **세션의 것**이다. 이 부품의 것이 아니다.
    *
@@ -928,7 +933,16 @@ const Composer = memo(function Composer({
                 return
               }
             }
-            if (!composingKey && e.key === 'Enter' && !e.shiftKey) {
+            /*
+                무엇이 보내기인가는 설정이 정한다 (composerKeys.ts). 여기서 직접 따지지
+                않는 이유는 위 조합 판정(composingKey)과 엮인 경우의 수가 브라우저 없이
+                시험할 수 있는 자리에 있어야 해서다.
+
+                켠 사람에게 맨 Enter는 여기서 아무 일도 하지 않는다 — 가로채지 않으므로
+                textarea가 평소대로 줄을 바꾼다. 그것이 이 설정의 전부다.
+              */
+            const sendKey = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing: composingKey }
+            if (isComposerSendKey(sendKey, sendWithModifierEnter)) {
               e.preventDefault()
               e.currentTarget.form?.requestSubmit()
             }
@@ -968,7 +982,12 @@ const Composer = memo(function Composer({
         </IconButton>
         <IconButton
           type="submit"
-          label="Send (Enter)"
+          /*
+            보내는 키가 설정에 따라 달라지므로 라벨도 따라간다. 여기가 앱에서
+            **그 키를 이름으로 말하는 유일한 자리**라, 틀리면 켠 사람이 처음에
+            무엇을 눌러야 하는지 알 길이 없다. `⌘`인지 `Ctrl`인지는 자판이 답한다.
+          */
+          label={`Send (${sendWithModifierEnter ? sc('mod', 'Enter') : 'Enter'})`}
           disabled={!text.trim() && attachments.length === 0}
           testId="send"
           placement="top"

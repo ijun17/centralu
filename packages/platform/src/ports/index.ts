@@ -23,6 +23,8 @@ import type {
   ToolStatus,
   ModelOption,
   QuestionAnswer,
+  UiPreferences,
+  UiPreferencesPatch,
   UpdateStatus,
 } from '@cc/protocol'
 
@@ -419,6 +421,21 @@ export interface UpdatePort {
   apply(): Promise<UpdateStatus>
 }
 
+/**
+ * 화면 설정 (UiPreferences).
+ *
+ * **워크스페이스 스냅샷과 일부러 나눠 놓는다.** 저쪽은 "무엇이 어디에 놓여 있었나"라
+ * 떠날 때 통째로 덮어써도 되는 것이고, 이쪽은 "이 사람이 무엇을 골랐나"라 덮어쓰면
+ * 안 되는 것이다. 한 덩어리에 섞으면 배치를 저장하는 모든 자리가 설정도 같이
+ * 저장하게 되고, 그중 하나라도 낡은 값을 들고 있으면 고른 값이 조용히 되돌아간다.
+ */
+export interface PreferencesPort {
+  /** 기동 때 한 번. 실패는 부르는 쪽이 기본값으로 메운다 — 앱을 막지 않는다 */
+  load(): Promise<UiPreferences>
+  /** 바뀐 것만 적는다. 돌려주는 것은 기록된 뒤의 전체다 */
+  save(patch: UiPreferencesPatch): Promise<UiPreferences>
+}
+
 export interface WorkspacePort {
   save(snapshot: WorkspaceSnapshot): Promise<void>
   load(): Promise<WorkspaceSnapshot | null>
@@ -496,6 +513,7 @@ export interface Platform {
   search: SearchPort
   rules: ApprovalRulesPort
   workspace: WorkspacePort
+  prefs: PreferencesPort
   updates: UpdatePort
   terminal: TerminalPort
   commands: CommandRunPort

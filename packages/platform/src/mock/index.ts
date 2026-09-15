@@ -20,12 +20,15 @@ import type {
   ToolName,
   ToolStatus,
   QuestionAnswer,
+  UiPreferences,
+  UiPreferencesPatch,
   UpdateStatus,
 } from '@cc/protocol'
 import {
   APP_VERSION,
   handoffFile,
   isNewerVersion,
+  parseUiPreferences,
   osPathBaseName,
   sessionLiveDefaults,
   wireBaseName,
@@ -39,6 +42,7 @@ import type {
   FsEntry,
   FsFile,
   Platform,
+  PreferencesPort,
   ProjectPort,
   SystemPort,
   TerminalPort,
@@ -1458,6 +1462,39 @@ export class MockPlatform implements Platform {
       } catch {
         return null
       }
+    },
+  }
+
+  /** Public so tests can look inside — and set it up without going through the port */
+  uiPrefs: UiPreferences = parseUiPreferences(undefined)
+
+  /**
+   * 화면 설정 (UiPreferences).
+   *
+   * 스냅샷과 같은 이유로 localStorage에도 남긴다: 실물은 DB에 두므로 "다시 켜도 고른
+   * 값이 그대로다"가 이 앱의 약속인데, 목이 페이지보다 먼저 죽으면 브라우저에서
+   * 도는 테스트가 그 약속을 아예 볼 수 없다. node에서는 localStorage가 던지므로
+   * try/catch 안쪽만 빠지고 메모리 사본이 그대로 답한다.
+   */
+  readonly prefs: PreferencesPort = {
+    load: async () => {
+      try {
+        const raw = localStorage.getItem('cc-mock-prefs')
+        if (raw) this.uiPrefs = parseUiPreferences(JSON.parse(raw))
+      } catch {
+        /* node, or storage denied — the in-memory copy still works */
+      }
+      return { ...this.uiPrefs }
+    },
+    // 실물과 같은 규칙: 적지 않은 필드는 건드리지 않고, 기록된 뒤의 전체를 돌려준다
+    save: async (patch: UiPreferencesPatch) => {
+      this.uiPrefs = { ...this.uiPrefs, ...patch }
+      try {
+        localStorage.setItem('cc-mock-prefs', JSON.stringify(this.uiPrefs))
+      } catch {
+        /* node, or storage denied — the in-memory copy still works */
+      }
+      return { ...this.uiPrefs }
     },
   }
 

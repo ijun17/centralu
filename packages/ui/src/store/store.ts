@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { handoffFile, SessionInfo } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, handoffFile, SessionInfo } from '@cc/protocol'
 import type {
   ToolStatus,
   Attachment,
@@ -12,6 +12,8 @@ import type {
   StoredMessage,
   ToolDefaults,
   ToolName,
+  UiPreferences,
+  UiPreferencesPatch,
   UpdateStatus,
 } from '@cc/protocol'
 import {
@@ -510,6 +512,14 @@ export type AppState = {
    * 물어보지도 못한 것(연결 전)이고, '최신이다'가 아니다.
    */
   update: UpdateStatus | null
+  /**
+   * 이 사람이 화면에 대해 고른 것들 (protocol의 UiPreferences).
+   *
+   * **기동 때 한 번 받아서 여기 앉는다.** 쓰는 쪽(입력창)이 그때그때 물어보게 두면
+   * 답이 늦게 오는 동안 기본값으로 동작하다가 손가락 밑에서 규칙이 바뀐다 —
+   * 보내기 키가 그런 식으로 바뀌면 이미 보내진 뒤다.
+   */
+  prefs: UiPreferences
 
   attach(platform: Platform): Promise<void>
   dispatchEvent(e: NormalizedEvent): void
@@ -564,6 +574,13 @@ export type AppState = {
   checkUpdate(force?: boolean): Promise<void>
   /** 주기 확인을 켜고 끈다 */
   setUpdateAuto(enabled: boolean): Promise<void>
+  /**
+   * 화면 설정을 바꾼다 — **바꾼 것만** 보낸다.
+   *
+   * 화면은 host가 돌려준 기록을 그대로 앉힌다(낙관적 반영이 아니다): 기록에 실패한
+   * 설정이 화면에서만 켜져 있으면, 다음에 켤 때 조용히 되돌아가 있다.
+   */
+  setPrefs(patch: UiPreferencesPatch): Promise<void>
   /** 새 버전을 설치한다. **재시작은 하지 않는다** — 끝나면 사람에게 말하고 멈춘다 */
   applyUpdate(): Promise<void>
   setNotifyPolicy(p: NotifyPolicy): void
@@ -1179,6 +1196,7 @@ export const useStore = create<AppState>((set, get) => ({
   settingsOpen: false,
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
   update: null,
+  prefs: DEFAULT_UI_PREFERENCES,
 
   async attach(platform) {
     /*
@@ -1238,13 +1256,24 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    const [projects, sessions, gridPanels, tools] = await Promise.all([
+    const [projects, sessions, gridPanels, tools, prefs] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
       // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
       platform.agents.grid().catch(() => [] as string[]),
       // 같은 이유로 도구 목록도 앱을 막지 않는다 — 못 읽으면 이름만 나오고 라벨이 빠진다
       platform.agents.detect().catch(() => [] as ToolStatus[]),
+      /*
+        화면 설정은 **첫 화면보다 늦으면 안 된다.**
+
+        늦게 와도 되는 것(업데이트 확인처럼)과 달리, 이 값은 입력창이 Enter를 어떻게
+        읽을지를 정한다. 뒤늦게 도착하면 사람이 이미 치고 있는 중에 보내기 키가
+        바뀌고, 그 실수는 되돌릴 수 없다 — 말은 이미 나갔다.
+
+        그래도 **막지는 않는다**: 못 읽으면 기본값이다. 설정 하나 때문에 앱이 못 뜨는
+        것은 그 설정이 하는 일보다 훨씬 나쁘다.
+      */
+      platform.prefs.load().catch(() => DEFAULT_UI_PREFERENCES),
     ])
     const known: Record<string, SessionSummary> = Object.fromEntries(
       sessions.map((s) => [
@@ -1300,6 +1329,7 @@ export const useStore = create<AppState>((set, get) => ({
       workingSince: trackWorkingSince(st.workingSince, known, Date.now()),
       gridPanels,
       tools,
+      prefs,
       connection: 'connected',
     }))
 
@@ -2076,6 +2106,17 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       set({ update: await platform.updates.setAuto(enabled) })
     } catch (e) {
+      set({ toast: `Could not save that: ${(e as Error).message}` })
+    }
+  },
+
+  async setPrefs(patch) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      set({ prefs: await platform.prefs.save(patch) })
+    } catch (e) {
+      // 화면은 그대로 둔다 — 저장 못 한 것을 켜 놓으면 다음에 켤 때 조용히 되돌아간다
       set({ toast: `Could not save that: ${(e as Error).message}` })
     }
   },

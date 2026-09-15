@@ -410,6 +410,27 @@ describe.each([
     expect((await h.platform.updates.status(false)).phase).toBe('restart_required')
   })
 
+  /**
+   * 화면 설정 (UiPreferences).
+   *
+   * 여기서 보는 것은 두 가지다. 하나, **아무것도 고른 적 없는 설치의 답은 기본값**이다 —
+   * 읽기가 빈손으로 돌아오면 입력창이 무엇을 할지 모르게 된다. 둘, 쓰기는 **적은 것만**
+   * 바꾼다. 필드가 하나뿐인 지금은 둘째 규칙이 공짜처럼 보이지만, 전체를 덮어쓰는
+   * 구현도 지금은 똑같이 통과한다 — 그래서 필드가 늘기 전에 여기서 못박는다.
+   */
+  it('화면 설정은 기본값에서 시작하고, 쓰기는 적은 것만 바꾼다', async () => {
+    expect(await h.platform.prefs.load()).toEqual({ sendWithModifierEnter: false })
+
+    expect(await h.platform.prefs.save({ sendWithModifierEnter: true })).toEqual({
+      sendWithModifierEnter: true,
+    })
+    // 다시 물어도 같은 답이다 — 답이 기록에서 나온다는 뜻이다
+    expect(await h.platform.prefs.load()).toEqual({ sendWithModifierEnter: true })
+
+    // 아무것도 안 적은 쓰기는 아무것도 되돌리지 않는다
+    expect(await h.platform.prefs.save({})).toEqual({ sendWithModifierEnter: true })
+  })
+
   it('구독 해제가 동작한다', async () => {
     const seen: NormalizedEvent[] = []
     const off = h.platform.agents.subscribe((e) => seen.push(e))

@@ -365,6 +365,17 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
     },
     /*
+      화면 설정은 host의 DB에 산다 — 브라우저 저장소가 아니라.
+
+      localStorage에 두면 같은 기계에서도 dev 서버와 앱이 서로 다른 설정을 갖게 되고,
+      무엇보다 저장소를 비우는 것(캐시 지우기)이 설정을 지우는 일이 된다. 사람이 고른
+      값은 대화·프로젝트와 같은 곳에 있어야 같이 살아남는다.
+    */
+    prefs: {
+      load: () => rpc.call('prefs.get', {}),
+      save: (patch) => rpc.call('prefs.set', { patch }),
+    },
+    /*
       업데이트는 전부 host에 위임한다 (이슈 #43).
 
       Tauri 구현이 이 자리를 덮어쓰지 않는 것이 맞다 — `npm i -g`를 도는 것은 Node이지

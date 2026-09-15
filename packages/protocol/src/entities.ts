@@ -399,3 +399,64 @@ export const UpdateStatus = z.object({
   checkedAt: z.number().nullable().default(null),
 })
 export type UpdateStatus = z.infer<typeof UpdateStatus>
+
+/**
+ * Preferences about the screen itself — how this person wants the app to behave, as
+ * opposed to anything an agent does.
+ *
+ * **One record rather than a flag per errand.** Every screen preference before this one
+ * either lived in the workspace snapshot (which is about *where things are*, not how they
+ * behave) or nowhere at all, and the alternative on the table was a `setX` method per
+ * toggle, the way `updates.setAuto` does it. That shape stops scaling the second there are
+ * three of them: three methods, three handlers, three port members, all to carry booleans
+ * that are read together at startup and never separately. This is a record so the next
+ * preference costs one field.
+ */
+export const UiPreferences = z.object({
+  /**
+   * Enter writes a newline and ⌘/Ctrl+Enter sends, instead of the other way round.
+   *
+   * It exists for people who write prompts in paragraphs. Shift+Enter has always made a
+   * newline, but reaching for Shift on every line break while Enter sits there ready to
+   * send mid-thought means the cost of a slip is a half-written instruction already on its
+   * way to an agent — and you cannot unsend it.
+   *
+   * **Off by default, and that is not timidity.** Enter-sends is what every chat window
+   * does, so it is what an unfamiliar hand expects; and for someone already using this app,
+   * silently moving send onto a different key would break the one keystroke they use more
+   * than any other. A preference that has to be asked for is worse than no preference —
+   * a preference that changes under you is worse than both.
+   */
+  sendWithModifierEnter: z.boolean(),
+})
+export type UiPreferences = z.infer<typeof UiPreferences>
+
+/**
+ * A change to *some* of them. Whatever is left out keeps the value it had.
+ *
+ * Writing the whole record back would work today, with one field and one window. It stops
+ * working the moment there are several: a screen that loaded before a preference existed
+ * would post its own idea of the record and quietly undo the one it never knew about.
+ * Saying only what changed cannot do that.
+ */
+export const UiPreferencesPatch = UiPreferences.partial()
+export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
+
+/** What someone who has never opened Settings gets. Each field's reason is on the field. */
+export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  sendWithModifierEnter: false,
+}
+
+/**
+ * Turn whatever was stored into a usable record.
+ *
+ * **Never throws.** The one thing this must not do is take the app down with it: these are
+ * preferences, and a blob that is missing, empty, half-written by an older build or plain
+ * corrupt is a reason to fall back to the defaults, not a reason to fail to start. Fields
+ * that did not exist when the blob was written fill in from the defaults for the same
+ * reason — that is what lets the record grow without a migration.
+ */
+export function parseUiPreferences(raw: unknown): UiPreferences {
+  const parsed = UiPreferencesPatch.safeParse(raw)
+  return { ...DEFAULT_UI_PREFERENCES, ...(parsed.success ? parsed.data : {}) }
+}

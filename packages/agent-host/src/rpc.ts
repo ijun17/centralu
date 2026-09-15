@@ -352,6 +352,8 @@ export function createRpcHandler(
       requireCommands().resize(mgr.cwdOfProject(projectId), command, cols, rows)
       return { ok: true as const }
     },
+    'prefs.get': async () => mgr.uiPreferences(),
+    'prefs.set': async (p) => mgr.setUiPreferences(RpcMethods['prefs.set'].params.parse(p).patch),
     'approvals.rules': async () => mgr.listApprovalRules(),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
     'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),

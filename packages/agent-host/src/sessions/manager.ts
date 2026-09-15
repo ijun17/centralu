@@ -29,8 +29,17 @@ import type {
   StoredMessage,
   UsageSnapshot,
   ToolName,
+  UiPreferences,
+  UiPreferencesPatch,
 } from '@cc/protocol'
-import { APP_SLUG, DATA_DIR, HANDOFF_DIR, handoffFile, sessionLiveDefaults } from '@cc/protocol'
+import {
+  APP_SLUG,
+  DATA_DIR,
+  HANDOFF_DIR,
+  handoffFile,
+  parseUiPreferences,
+  sessionLiveDefaults,
+} from '@cc/protocol'
 import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
@@ -138,6 +147,15 @@ const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
  * 도구마다 단위가 달라도 상관없다 — 비교는 언제나 같은 도구가 준 값끼리다.
  */
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
+
+/**
+ * 화면 설정이 통째로 사는 app_setting 키 하나.
+ *
+ * 설정마다 키를 하나씩 파면 읽기도 그만큼 늘고, 무엇보다 "기동 때 화면 설정을 다
+ * 가져와라"가 키 목록을 아는 쪽에서만 가능한 일이 된다. 한 덩어리면 그 목록은
+ * 스키마(UiPreferences)가 갖는다.
+ */
+const UI_PREFS_KEY = 'ui_preferences'
 
 /** 오케스트레이터 MCP 제안/승인 목록이 사는 app_setting 키 (propose_mcp_server 흐름) */
 const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
@@ -2777,6 +2795,28 @@ export class SessionManager {
 
   loadWorkspace(): Record<string, unknown> | null {
     return this.store.loadWorkspace<Record<string, unknown>>()
+  }
+
+  /**
+   * 화면 설정 (UiPreferences) — 한 덩어리로 읽고, **바뀐 것만** 받아 적는다.
+   *
+   * 깨진 JSON도 없는 것과 같이 취급한다(parseUiPreferences). 설정 하나 때문에 앱이
+   * 못 뜨는 쪽이, 그 사람이 고른 값을 한 번 잃는 쪽보다 나쁘다.
+   */
+  uiPreferences(): UiPreferences {
+    const raw = this.store.appSetting(UI_PREFS_KEY)
+    if (raw === null) return parseUiPreferences(undefined)
+    try {
+      return parseUiPreferences(JSON.parse(raw))
+    } catch {
+      return parseUiPreferences(undefined)
+    }
+  }
+
+  setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
+    const next: UiPreferences = { ...this.uiPreferences(), ...patch }
+    this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify(next))
+    return next
   }
 
   /** 설정 화면에서 규칙을 보고 지울 수 있어야 한다 (FR-3: 결과를 보이게 한다) */

@@ -1692,6 +1692,59 @@ test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ 
 })
 
 /*
+ * 보내기 키 (설정: Send with ⌘/Ctrl+Enter).
+ *
+ * 순수 판정은 composerKeys.test.ts에 있고, 여기서 보는 것은 그 판정이 **진짜 입력창에
+ * 닿아 있는가**다. 값으로는 알 수 없는 것이 둘 있다: 켠 뒤의 맨 Enter가 정말 줄을
+ * 바꾸는가(가로채지 않아야 textarea가 한다), 그리고 설정이 화면이 뜨기 전에 도착하는가.
+ */
+test('보내기 키: 기본값에서는 Enter가 보낸다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 지시')
+
+  // 설정을 한 번도 열지 않은 사람의 입력창이다 — 여기가 달라지면 그게 회귀다
+  const input = page.getByTestId('prompt-input')
+  await input.fill('그냥 엔터')
+  await input.press('Enter')
+  await expect(input).toHaveValue('')
+  await expect(page.getByTestId('msg-user').last()).toContainText('그냥 엔터')
+})
+
+test('보내기 키: 켜면 Enter는 줄을 바꾸고 조합키+Enter가 보낸다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '첫 지시')
+
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await page.getByTestId('settings-tab-appearance').click()
+  await page.getByTestId('settings-send-with-mod-enter').check()
+  await page.keyboard.press('Escape')
+
+  const input = page.getByTestId('prompt-input')
+  await input.fill('첫 줄')
+  await input.press('Enter')
+  // 줄이 하나 늘었을 뿐, 아무것도 나가지 않았다
+  await expect(input).toHaveValue('첫 줄\n')
+  await input.pressSequentially('둘째 줄')
+  await expect(page.getByTestId('msg-user').filter({ hasText: '첫 줄' })).toHaveCount(0)
+
+  // ⌘(맥)와 Ctrl(그 외)은 한 판정이라 둘 다 보낸다 — 화면은 자기가 어느 자판인지 모른다
+  await input.press('Meta+Enter')
+  await expect(input).toHaveValue('')
+  await expect(page.getByTestId('msg-user').last()).toContainText('둘째 줄')
+
+  await input.fill('컨트롤로도')
+  await input.press('Control+Enter')
+  await expect(input).toHaveValue('')
+  await expect(page.getByTestId('msg-user').last()).toContainText('컨트롤로도')
+
+  // 다시 켜도 고른 값이 그대로다 — 설정이 기억되지 않으면 이 기능은 매번 다시 켜야 한다
+  await page.reload()
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await page.getByTestId('settings-tab-appearance').click()
+  await expect(page.getByTestId('settings-send-with-mod-enter')).toBeChecked()
+})
+
+/*
  * 글자 크기(zoom)와 vh의 관계 (도그푸딩: "글자 크기 키우면 세션의 입력창이 안 보이거든").
  * vh는 zoom의 영향을 안 받아서, 확대하면 100vh 셸이 창보다 커져 맨 아래(입력창)가
  * 창 밖으로 밀렸다. 셸을 % 사슬로 바꾼 뒤에는 어느 단계에서든 입력창이 창 안에 있다.

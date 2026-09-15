@@ -539,6 +539,9 @@ function AppearanceSection() {
   const setScale = useStore((s) => s.setTextScale)
   const fold = useStore((s) => s.foldComposer)
   const setFold = useStore((s) => s.setFoldComposer)
+  const modEnter = useStore((s) => s.prefs.sendWithModifierEnter)
+  const setPrefs = useStore((s) => s.setPrefs)
+  const sc = useShortcut()
   const spinGrid = useStore((s) => s.spinGrid)
   const setSpinGrid = useStore((s) => s.setSpinGrid)
   const spinIcon = useStore((s) => s.spinSessionIcon)
@@ -590,6 +593,33 @@ function AppearanceSection() {
             </span>
           </span>
         </label>
+      </div>
+
+      {/*
+        여러 줄짜리 프롬프트를 쓰는 사람을 위한 스위치.
+
+        자리가 여기인 이유는 옆의 '입력창 접기'와 같다 — 둘 다 **메시지 상자**를
+        어떻게 쓸지에 대한 것이고, 찾으러 오는 사람은 입력창을 떠올리며 온다.
+
+        기본값을 끔으로 두는 이유는 프로토콜의 타입 선언에 적어 뒀다: Enter가 보내기인
+        것은 채팅창의 관습이고, 쓰던 사람 밑에서 그걸 말없이 옮기는 쪽이 아예 안
+        내놓는 쪽보다 나쁘다.
+      */}
+      <div className="mt-6 border-t border-edge pt-4">
+        <label className="flex items-center gap-2 text-[12px] text-ash">
+          <input
+            type="checkbox"
+            className="accent-graphite"
+            data-testid="settings-send-with-mod-enter"
+            checked={modEnter}
+            onChange={(e) => void setPrefs({ sendWithModifierEnter: e.target.checked })}
+          />
+          Send with {sc('mod', 'Enter')}
+        </label>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate">
+          Enter then writes a new line instead of sending, which is what you want when a prompt
+          runs to several paragraphs. Shift+Enter writes a new line either way.
+        </p>
       </div>
 
       {/*
