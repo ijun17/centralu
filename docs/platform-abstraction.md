@@ -79,7 +79,7 @@ export const useCapability = (k: keyof PlatformCapabilities) => usePlatform().ca
 ```
 
 - We do **not** branch automatically by detecting the environment (whether `window.__TAURI__` exists) — the entry points differ, so detection is unnecessary, and detection logic becomes a hidden dependency.
-- Browser development uses a random token for each host launch. Start the host and Vite from the same shell so `CC_HOST_TOKEN` becomes `VITE_HOST_TOKEN`; mock mode (`?mock=1`) is the only browser path that intentionally has no token.
+- Browser development uses a random token for each host launch. Start the host and Vite from the same shell so `CC_HOST_TOKEN` becomes `VITE_HOST_TOKEN`; mock/demo modes (`?mock=1`, `?demo`) intentionally use no host token. Missing or blank credentials in real-host mode render a startup diagnostic instead of attempting a fallback token. Abort startup if random-token generation fails. See [security boundaries](security-boundaries.md) for the threat model and residual limits.
 - Components should rarely even use `usePlatform()` directly. Store actions (the store calls the ports) and selectors are enough for most cases.
 
 ## 5. Migration playbook (the execution order for C1, C2)

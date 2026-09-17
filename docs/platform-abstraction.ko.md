@@ -81,7 +81,7 @@ export const useCapability = (k: keyof PlatformCapabilities) => usePlatform().ca
 ```
 
 - 환경 감지(`window.__TAURI__` 존재 여부)로 자동 분기하지 **않는다** — 진입점이 다르므로 감지는 불필요하고, 감지 로직은 숨은 의존성이 된다.
-- 브라우저 개발은 host를 띄울 때마다 임시 토큰을 새로 만든다. host와 Vite를 같은 셸에서 시작해 `CC_HOST_TOKEN`을 `VITE_HOST_TOKEN`으로 넘긴다. 토큰이 의도적으로 없는 브라우저 경로는 mock 모드(`?mock=1`)뿐이다.
+- 브라우저 개발은 host를 띄울 때마다 임시 토큰을 새로 만든다. host와 Vite를 같은 셸에서 시작해 `CC_HOST_TOKEN`을 `VITE_HOST_TOKEN`으로 넘긴다. mock/demo 모드(`?mock=1`, `?demo`)는 호스트 토큰을 쓰지 않는다. 실제 호스트 모드에서 토큰이 없거나 비어 있으면 대체 토큰으로 연결하지 않고 시작 오류를 화면에 표시한다. 난수 토큰 생성이 실패하면 시작을 중단한다. 위협 모델과 잔여 한계는 [보안 경계](security-boundaries.md)를 참고한다.
 - 컴포넌트가 `usePlatform()`을 직접 쓰는 일조차 드물어야 한다. 스토어 액션(스토어가 포트를 호출)과 셀렉터로 대부분 충분하다.
 
 ## 5. 이전 플레이북 (C1, C2의 실행 순서)

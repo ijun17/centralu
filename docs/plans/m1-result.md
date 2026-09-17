@@ -45,7 +45,8 @@ FR-17 단축키(⌘I, ⌘⇧A, y/n/a, d) / FR-18 자동 이름 / FR-20 아카이
 
 ```bash
 # 같은 셸 — 에이전트 호스트와 웹 UI가 같은 임시 토큰을 쓴다
-CC_HOST_TOKEN="$(openssl rand -hex 16)"
+CC_HOST_TOKEN="$(openssl rand -hex 16)" || exit 1
+[ -n "$CC_HOST_TOKEN" ] || exit 1
 CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
 HOST_PID=$!
 trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
