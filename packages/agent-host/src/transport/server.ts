@@ -18,6 +18,8 @@ export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
 export const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
+  'http://localhost:5173',
+  'http://localhost:5174',
   'http://tauri.localhost',
   'https://tauri.localhost',
   'tauri://localhost',
@@ -41,6 +43,7 @@ export class HostServer {
   private readonly allowedOrigins: ReadonlySet<string>
 
   constructor(private opts: HostServerOptions) {
+    if (!opts.token) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
     this.http = createServer((req, res) => {
       const hit = opts.onHttp?.(new URL(req.url ?? '/', 'http://x').pathname)

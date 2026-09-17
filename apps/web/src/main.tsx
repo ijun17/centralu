@@ -18,9 +18,20 @@ import '../../../packages/ui/src/styles/index.css'
  * `demo`는 `mock`을 함의한다 — 씬은 목 위에서만 자란다. 아무것도 안 붙이면 진짜 host에
  * 붙는다 (ws://127.0.0.1:5175).
  */
+const rootElement = document.getElementById('root')
+if (!rootElement) throw new Error('Root element #root not found')
+
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')
-const platform: Platform = isMockMode(location.search) ? seedMock() : createWebPlatform(browserHostOptions(import.meta.env))
+const root = createRoot(rootElement)
+let platform: Platform | null = null
+let startupError: Error | null = null
+
+try {
+  platform = isMockMode(location.search) ? seedMock() : createWebPlatform(browserHostOptions(import.meta.env))
+} catch (error) {
+  startupError = error instanceof Error ? error : new Error(String(error))
+}
 
 function seedMock(): Platform {
   const mock = createMockPlatform()
@@ -29,15 +40,26 @@ function seedMock(): Platform {
   return mock
 }
 
-/*
- * 씬은 **그리기 전에** 깔린다. 앱은 뜨자마자 목록을 물으므로, 늦게 깔면 빈 화면을 한 번
- * 그린 뒤에야 내용이 들어온다 — 사람이 보려던 그 화면이 아니다.
- */
-if (demo !== null) {
-  const { seedDemo, isDemoScene } = await import('@cc/platform/mock/demo')
-  await seedDemo(platform as never, isDemoScene(demo) ? demo : 'focus')
-}
+if (startupError) {
+  root.render(
+    <main className="flex min-h-screen items-center justify-center bg-base p-6 text-chalk">
+      <section className="max-w-xl rounded-xl border border-edge bg-panel p-5 shadow-panel" role="alert" data-testid="startup-error">
+        <p className="readout text-[11px] uppercase tracking-[0.2em] text-ash">Centralu startup blocked</p>
+        <h1 className="mt-2 text-lg font-semibold">Host token is required</h1>
+        <p className="mt-2 text-sm text-slate">{startupError.message}</p>
+        <p className="mt-3 text-xs text-slate">Use ?mock=1 or ?demo for browser-only mock mode, or launch the UI through the host so VITE_HOST_TOKEN is set.</p>
+      </section>
+    </main>,
+  )
+} else {
+  /*
+   * 씬은 **그리기 전에** 깔린다. 앱은 뜨자마자 목록을 물으므로, 늦게 깔면 빈 화면을 한 번
+   * 그린 뒤에야 내용이 들어온다 — 사람이 보려던 그 화면이 아니다.
+   */
+  if (demo !== null) {
+    const { seedDemo, isDemoScene } = await import('@cc/platform/mock/demo')
+    await seedDemo(platform as never, isDemoScene(demo) ? demo : 'focus')
+  }
 
-const rootElement = document.getElementById('root')
-if (!rootElement) throw new Error('Root element #root not found')
-createRoot(rootElement).render(<App platform={platform} />)
+  root.render(<App platform={platform!} />)
+}

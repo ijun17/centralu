@@ -77,6 +77,29 @@ test('a backticked path opens the file; prose with a slash in it does not', asyn
   await expect(page.getByTestId('code-viewer')).toContainText('second line')
 })
 
+test('viewer Open in IDE uses a host-resolved absolute path and reports resolve failures', async ({ page }) => {
+  await setup(page)
+  await seedFiles(page, { 'src/a.ts': 'first line\nsecond line' })
+  await newSession(page, 'alpha', 'work')
+  await agentSays(page, 'See `src/a.ts`.')
+
+  await page.getByTestId('file-link').click()
+  await expect(page.getByTestId('code-viewer')).toContainText('second line')
+  await page.getByTestId('viewer-open-ide').click()
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mock.opened))
+    .toEqual([{ path: '/mock-project/src/a.ts' }])
+
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    mock.fs.resolve = async () => {
+      throw new Error('resolve blocked')
+    }
+  })
+  await page.getByTestId('viewer-open-ide').click()
+  await expect(page.getByTestId('toast')).toContainText('Could not open in IDE: resolve blocked')
+})
+
 /**
  * Agents print absolute paths as often as relative ones, and the viewer speaks
  * project-relative. A path outside the project is not a link at all: `fs.readFile` refuses

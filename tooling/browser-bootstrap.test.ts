@@ -31,4 +31,33 @@ describe('browser host bootstrap', () => {
     // Then: the caller-supplied secret is the only token used.
     expect(observed).toEqual({ hostUrl: 'ws://127.0.0.1:6000', token: 'random-launch-token' })
   })
+
+  it('recognizes demo mode as host-free mock mode', () => {
+    // Given: the user opens the seeded demo without a host token.
+    const search = '?demo=grid'
+
+    // When: the runtime route is selected.
+    const mockMode = isMockMode(search)
+
+    // Then: demo mode keeps working without touching browser host credentials.
+    expect(mockMode).toBe(true)
+  })
+
+  it('rejects whitespace-only tokens instead of falling back or authenticating empty', () => {
+    // Given: a shell snippet produced an empty-looking token.
+    const readOptions = () => browserHostOptions({ VITE_HOST_TOKEN: '   ' })
+
+    // When / Then: the token fails closed.
+    expect(readOptions).toThrow(MissingHostTokenError)
+  })
+
+  it('main entry keeps the token failure renderable and contains no dev-token fallback', async () => {
+    // Given / When: the browser entry source is inspected as the real startup surface.
+    const source = await import('node:fs/promises').then((fs) => fs.readFile('apps/web/src/main.tsx', 'utf8'))
+
+    // Then: missing credentials are rendered into the DOM instead of left as a top-level module throw.
+    expect(source).toContain('data-testid="startup-error"')
+    expect(source).not.toContain('dev-token')
+  })
+
 })

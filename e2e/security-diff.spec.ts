@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const MAX_RENDERED_DIFF_ROWS = 1_000
 const HOSTILE_DIFF_ROWS = 37_236
 
 async function setup(page: Page): Promise<void> {
@@ -37,9 +36,7 @@ test('hostile fixture stays within the 400KiB audit-input cap', () => {
   expect(new TextEncoder().encode(hostileDiff()).length).toBeLessThanOrEqual(400 * 1024)
 })
 
-test('newline-dense working diff is row-capped, visibly truncated, and copy-bounded', async ({
-  page,
-}) => {
+test('newline-dense working diff is virtualized without losing tail rows', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await setup(page)
   await page.evaluate((diff) => {
@@ -53,29 +50,54 @@ test('newline-dense working diff is row-capped, visibly truncated, and copy-boun
   await page.getByTestId('evidence-file-src/bomb.ts').click()
   const diffView = page.getByTestId('diff-view')
   await expect(diffView).toBeVisible()
-  await expect(diffView.getByTestId('diff-truncation')).toBeVisible()
-  await expect(diffView.getByTestId('diff-truncation')).toContainText('diff is too large')
-  await expect(page.locator('[data-testid="diff-view"] [data-diff]')).toHaveCount(MAX_RENDERED_DIFF_ROWS)
+  await expect(diffView.getByTestId('diff-truncation')).toHaveCount(0)
+  const mountedRows = page.locator('[data-testid="diff-view"] [data-diff]')
+  await expect.poll(() => mountedRows.count()).toBeLessThan(200)
 
   await page.evaluate(() => {
     const root = document.querySelector<HTMLElement>('[data-testid="diff-view"] .overflow-auto')
     if (!root) throw new Error('diff scroll root not found')
-    const range = document.createRange()
-    range.selectNodeContents(root)
-    const selection = document.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
+    root.scrollTop = root.scrollHeight
   })
-  await page.keyboard.press('ControlOrMeta+c')
-  const copied = await page.evaluate(() => navigator.clipboard.readText())
-  expect(copied.startsWith('+row-00000\n+row-00001')).toBe(true)
-  expect(copied).toContain('+row-00999')
-  expect(copied).not.toContain('+row-01000')
-  expect(copied).not.toContain('+row-37235')
+  await expect(diffView).toContainText('row-37235')
+})
+
+test('sticky current-file band follows the visible file while virtualized', async ({ page }) => {
+  const first = Array.from({ length: 80 }, (_, i) => `+first-${String(i).padStart(2, '0')}`).join('\n')
+  const second = Array.from({ length: 80 }, (_, i) => `+second-${String(i).padStart(2, '0')}`).join('\n')
+  const diff = [
+    'diff --git a/src/first.ts b/src/first.ts',
+    first,
+    'diff --git a/src/second.ts b/src/second.ts',
+    second,
+  ].join('\n')
+  await setup(page)
+  await page.evaluate((d) => {
+    const mock = window.__mock
+    if (!mock) throw new Error('mock platform is required')
+    mock.gitState.files = [{ path: 'src/multi.ts', staged: false, status: 'M' }]
+    mock.gitState.diffs['src/multi.ts'] = d
+  }, diff)
+  await newSession(page)
+
+  await page.getByTestId('evidence-file-src/multi.ts').click()
+  await expect(page.getByTestId('diff-current-file-band')).toContainText('src/first.ts')
+  await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('[data-testid="diff-view"] .overflow-auto')
+    if (!root) throw new Error('diff scroll root not found')
+    root.scrollTop = 1_700
+  })
+  await expect(page.getByTestId('diff-current-file-band')).toContainText('src/second.ts')
+  await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('[data-testid="diff-view"] .overflow-auto')
+    if (!root) throw new Error('diff scroll root not found')
+    root.scrollTop = root.scrollHeight
+  })
+  await expect(page.getByTestId('diff-current-file-band')).toContainText('src/second.ts')
 })
 
 test('normal working diff renders completely without a truncation notice', async ({ page }) => {
-  const diff = '@@ -1,2 +1,2 @@\n-old()\n+next()\n unchanged'
+  const diff = 'diff --git a/src/small.ts b/src/small.ts\n@@ -1,2 +1,2 @@\n-old()\n+next()\n unchanged'
   await setup(page)
   await page.evaluate((d) => {
     const mock = window.__mock
@@ -87,11 +109,39 @@ test('normal working diff renders completely without a truncation notice', async
 
   await page.getByTestId('evidence-file-src/small.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('next()')
+  await expect(page.getByTestId('diff-current-file-band')).toContainText('src/small.ts')
   await expect(page.getByTestId('diff-truncation')).toHaveCount(0)
-  await expect(page.locator('[data-testid="diff-view"] [data-diff]')).toHaveCount(4)
+  await expect(page.locator('[data-testid="diff-view"] [data-diff]')).toHaveCount(5)
 })
 
-test('newline-dense commit diff uses the same row cap and truncation notice', async ({ page }) => {
+test('working diff opens IDE through host-resolved absolute handoff and reports resolve failures', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    const mock = window.__mock
+    if (!mock) throw new Error('mock platform is required')
+    mock.gitState.files = [{ path: 'src/small.ts', staged: false, status: 'M' }]
+    mock.gitState.diffs['src/small.ts'] = '@@ -1 +1 @@\n-old()\n+next()'
+  })
+  await newSession(page)
+
+  await page.getByTestId('evidence-file-src/small.ts').click()
+  await page.getByTestId('open-in-ide').click()
+  await expect
+    .poll(() => page.evaluate(() => window.__mock?.opened ?? []))
+    .toEqual([{ path: '/mock-project/src/small.ts' }])
+
+  await page.evaluate(() => {
+    const mock = window.__mock
+    if (!mock) throw new Error('mock platform is required')
+    mock.fs.resolve = async () => {
+      throw new Error('resolve blocked')
+    }
+  })
+  await page.getByTestId('open-in-ide').click()
+  await expect(page.getByTestId('toast')).toContainText('Could not open in IDE: resolve blocked')
+})
+
+test('newline-dense commit diff is virtualized without a lossy row cap', async ({ page }) => {
   await setup(page)
   await page.evaluate((diff) => {
     const mock = window.__mock
@@ -107,7 +157,11 @@ test('newline-dense commit diff uses the same row cap and truncation notice', as
   await page.getByTestId('history-commit-deadbee').click()
   const diffView = page.getByTestId('diff-view')
   await expect(diffView).toBeVisible()
-  await expect(diffView.getByTestId('diff-truncation')).toBeVisible()
-  await expect(diffView.getByTestId('diff-truncation')).toContainText('diff is too large')
-  await expect(page.locator('[data-testid="diff-view"] [data-diff]')).toHaveCount(MAX_RENDERED_DIFF_ROWS)
+  await expect(diffView.getByTestId('diff-truncation')).toHaveCount(0)
+  await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('[data-testid="diff-view"] .overflow-auto')
+    if (!root) throw new Error('diff scroll root not found')
+    root.scrollTop = root.scrollHeight
+  })
+  await expect(diffView).toContainText('row-37235')
 })

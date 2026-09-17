@@ -18,11 +18,12 @@ export type BrowserHostOptions = {
 }
 
 export function isMockMode(search: string): boolean {
-  return new URLSearchParams(search).has('mock')
+  const params = new URLSearchParams(search)
+  return params.has('mock') || params.has('demo')
 }
 
 export function browserHostOptions(env: BrowserEnv): BrowserHostOptions {
-  const token = env.VITE_HOST_TOKEN
+  const token = env.VITE_HOST_TOKEN?.trim()
   if (!token) throw new MissingHostTokenError()
 
   return {

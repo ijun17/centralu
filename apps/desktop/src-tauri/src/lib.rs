@@ -88,34 +88,23 @@ fn write_badge(window: &tauri::WebviewWindow, count: u32) -> tauri::Result<()> {
     window.set_badge_count(if count == 0 { None } else { Some(i64::from(count)) })
 }
 
-/// The "open this with whatever the desktop uses" command.
-///
-/// This used to be hardcoded to `open`. Off macOS that is not a missing command but a
-/// *different* one: util-linux ships `/usr/bin/open` as an alias of `openvt`, which
-/// switches virtual consoles. So the fallback did not fail loudly, it did something
-/// unrelated. `xdg-open` is the freedesktop equivalent of macOS `open`.
-#[cfg(target_os = "macos")]
-const GENERIC_OPENER: &str = "open";
-#[cfg(not(target_os = "macos"))]
-const GENERIC_OPENER: &str = "xdg-open";
-
 /// 편집기에서 파일을 연다 (FR-4의 왕복 비용 절감).
 #[tauri::command]
 fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
+    let native_path = std::path::Path::new(&path);
+    assert_safe_native_path(native_path).map_err(|e| e.to_string())?;
     let target = match line {
         Some(l) => format!("{path}:{l}"),
         None => path.clone(),
     };
-    // code -g path:line 을 먼저 시도하고, 없으면 OS 기본 앱으로 연다
-    let code = std::process::Command::new("code").arg("-g").arg(&target).spawn();
-    if code.is_ok() {
-        return Ok(());
-    }
-    std::process::Command::new(GENERIC_OPENER)
-        .arg(&path)
+    // Only an IDE is allowed here. Falling back to the OS generic opener can execute
+    // attacker-authored files instead of editing them; reveal_path is the safe file-manager path.
+    std::process::Command::new("code")
+        .arg("-g")
+        .arg(&target)
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("파일을 열지 못했습니다: {e}"))
+        .map_err(|e| format!("VS Code에서 파일을 열지 못했습니다: {e}"))
 }
 
 /// 파일 관리자에서 그 파일을 보여준다 (#19의 "Open in Finder").

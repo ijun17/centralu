@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: '.',
+  // Keep security-diff.spec.ts in the default `pnpm e2e` suite; the separate config is only for isolated local reruns.
+  testMatch: /.*\.spec\.ts/,
   timeout: 20000,
   expect: { timeout: 5000 },
   fullyParallel: true,

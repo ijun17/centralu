@@ -375,6 +375,10 @@ export class MockPlatform implements Platform {
       binary: false,
       bytes: (this.fsState.files[path] ?? '').length,
     }),
+    resolve: async (_projectId: string, path: string) => {
+      this.requireInside(path)
+      return { path: `/mock-project/${path}` }
+    },
     /**
      * 실물(host의 `moveEntry`)과 **같은 거절 규칙**을 지킨다: 자리가 차 있으면 옮기지
      * 않고 무엇과 부딪혔는지 말하고, 폴더를 자기 안으로는 못 넣고, 제자리 드롭은

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { lstat, open, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { lstat, open, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import { wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
@@ -14,9 +14,10 @@ import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-gu
  *
  * Issues #18/#19 added writing to that list, and writing is where rule 2 stops being a
  * tidiness rule: reading the wrong file leaks it, but *moving* or *trashing* the wrong one
- * destroys something the person never pointed at. Operations reject traversal and symlink
- * components before use; reads also check the opened object's identity. These pathname
- * guards are not an atomic sandbox against concurrent same-user filesystem mutations.
+ * destroys something the person never pointed at. Operations reject traversal, canonicalize
+ * symlinks that stay under the project root, and reject symlink escapes before use; reads
+ * also check the opened object's identity. These pathname guards are not an atomic sandbox
+ * against concurrent same-user filesystem mutations.
  */
 
 export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
@@ -34,7 +35,7 @@ export type FsFile = {
 
 const MAX_TEXT = 2_000_000 // 2MB 넘으면 잘라 보여준다 (뷰어는 어차피 가상 스크롤)
 const MAX_IMAGE_PREVIEW = 10_000_000 // 10MB — base64와 WebSocket 복사까지 감당할 상한
-const READ_TEXT_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+const READ_TEXT_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW
 
 /** 뷰어가 `img`로 안전하게 표시할 래스터 형식. SVG는 텍스트 뷰어에 남긴다. */
 const IMAGE_MIMES: Record<string, string> = {
@@ -247,14 +248,11 @@ export async function listDir(root: string, rel: string): Promise<FsEntry[]> {
 }
 
 export async function readTextFile(root: string, rel: string): Promise<FsFile> {
-  const file = safeJoin(root, rel)
-  const pathInfo = await assertExistingPath(root, rel)
+  const file = await resolveExisting(root, rel)
+  const pathInfo = await stat(file)
   if (!pathInfo.isFile()) fail('Path is not a regular file')
 
-  const handle = await open(file, READ_TEXT_FLAGS).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ELOOP') throw new UnsafePathError(`${rel || '.'} contains a symbolic link`)
-    throw error
-  })
+  const handle = await open(file, READ_TEXT_FLAGS)
   try {
     const info = await handle.stat()
     if (!info.isFile()) fail('Path is not a regular file')

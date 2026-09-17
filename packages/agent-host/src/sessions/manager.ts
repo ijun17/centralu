@@ -2223,13 +2223,12 @@ export class SessionManager {
      */
     this.emit({ type: 'user_message', sessionId, seq, text, ...(from ? { from } : {}) })
     /*
-     * 출처가 있는 메시지는 사람이 직접 친 말이 아니다. 대상이 오케스트레이터·스코프 조율자·
-     * 워크트리 매니저처럼 도구를 가진 세션이면, 저장/UI의 raw provenance는 유지하되 vendor
-     * 어댑터에는 sourceSessionId만 담은 host-authored 깨우기만 보낸다. 원문/첨부는
-     * read_session 도구 결과로 읽어야 하며, 그 결과도 지시가 아니라 관찰 데이터다.
+     * 출처가 있는 낮은 권한 메시지를 도구 달린 대상에게 보낼 때만 vendor 어댑터 입력을
+     * sourceSessionId 깨우기로 바꾼다. 도구 프로필끼리의 지시와 일반 워커 지시는 원문이어야 한다.
+     * raw provenance는 저장/UI에 남고, 보고 본문은 read_session 관찰 데이터로만 읽힌다.
      */
     const adapterText =
-      from && this.toolProfileOf(sessionId)
+      from && this.toolProfileOf(sessionId) && !this.toolProfileOf(from.sessionId)
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
@@ -3066,11 +3065,24 @@ export class SessionManager {
         for (const r of rows) {
           const p = r.payload as { text?: string; summary?: { title?: string; tool?: string } }
           if (r.kind === 'text' && r.role === 'assistant') {
+            const text = p.text ?? ''
             const last = lines[lines.length - 1]
-            if (last?.includes('에이전트: ')) lines[lines.length - 1] = last + (p.text ?? '')
-            else lines.push(`[${stamp(r.ts)}] 에이전트: ` + (p.text ?? ''))
+            if (last) {
+              try {
+                const parsed = JSON.parse(last) as { role?: string; text?: string }
+                if (parsed.role === 'assistant') {
+                  lines[lines.length - 1] = JSON.stringify({ ...parsed, text: `${parsed.text ?? ''}${text}` })
+                } else {
+                  lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
+                }
+              } catch {
+                lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
+              }
+            } else {
+              lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
+            }
           } else if (r.kind === 'text') {
-            lines.push(`[${stamp(r.ts)}] 사람: ` + (p.text ?? ''))
+            lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'user', text: p.text ?? '' }))
           } else if (r.kind === 'tool_call' && p.summary?.title) {
             /*
              * **도구는 접는다.** 펼치면 python 스크립트 전문과 커밋 메시지 전문이
@@ -3078,7 +3090,7 @@ export class SessionManager {
              * 무엇을 했는지는 한 줄이면 충분하고, 본문이 필요하면 tools:true로 펼친다.
              */
             const title = opts?.tools ? p.summary.title : p.summary.title.split('\n')[0]!.slice(0, 100)
-            lines.push(`[${stamp(r.ts)}] 도구(${p.summary.tool ?? '?'}): ${title}`)
+            lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'tool', tool: p.summary.tool ?? '?', title }))
           }
           if (around != null && anchor < 0 && r.seq >= around && lines.length > 0) anchor = lines.length - 1
         }
@@ -3109,7 +3121,7 @@ export class SessionManager {
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 
         try {
-          // 출처를 달아 보낸다 (FR-11) — 대상 세션 화면에서 사람 말과 구분돼 보인다
+          // 출처를 달아 저장/UI에 남긴다. 어댑터 보고 게이트는 낮은 권한 reportBack에만 걸린다.
           const orch = this.meta.get(orchestratorId)
           await this.send(sessionId, text, undefined, {
             sessionId: orchestratorId,

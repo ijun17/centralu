@@ -1,5 +1,5 @@
-import { lstatSync, realpathSync, type Stats } from 'node:fs'
-import { lstat, realpath } from 'node:fs/promises'
+import { lstatSync, realpathSync, statSync, type Stats } from 'node:fs'
+import { lstat, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export class UnsafePathError extends Error {
@@ -51,7 +51,7 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
   const rootReal = await realpath(root)
   let current = rootReal
   const parts = pathParts(root, rel)
-  if (parts.length === 0) return { stats: await lstat(rootReal), exists: true }
+  if (parts.length === 0) return { stats: await stat(rootReal), exists: true }
 
   for (const [index, part] of parts.entries()) {
     if (part === '..') {
@@ -63,25 +63,36 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
     assertInside(rootReal, candidate)
     let stats: Stats
     try {
-      stats = await lstat(candidate)
+      const linkStats = await lstat(candidate)
+      if (linkStats.isSymbolicLink()) {
+        const target = await realpath(candidate).catch((error: NodeJS.ErrnoException) => {
+          if (isMissingFsPath(error)) throw new MissingPathError(rel)
+          throw error
+        })
+        assertInside(rootReal, target)
+        stats = await stat(target)
+        current = target
+      } else {
+        stats = linkStats
+        current = candidate
+      }
     } catch (error) {
       if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
-      throw new MissingPathError(rel)
+      if (isMissingFsPath(error)) throw new MissingPathError(rel)
+      throw error
     }
-    assertSafeComponent(stats, rel)
     if (index < parts.length - 1 && !stats.isDirectory()) throw new UnsafePathError(`${rel || '.'} is not a folder`)
-    current = candidate
     if (index === parts.length - 1) return { stats, exists: true }
   }
 
-  return { stats: await lstat(current), exists: true }
+  return { stats: await stat(current), exists: true }
 }
 
 function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
   const rootReal = realpathSync(root)
   let current = rootReal
   const parts = pathParts(root, rel)
-  if (parts.length === 0) return { stats: lstatSync(rootReal), exists: true }
+  if (parts.length === 0) return { stats: statSync(rootReal), exists: true }
 
   for (const [index, part] of parts.entries()) {
     if (part === '..') {
@@ -93,18 +104,26 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
     assertInside(rootReal, candidate)
     let stats: Stats
     try {
-      stats = lstatSync(candidate)
+      const linkStats = lstatSync(candidate)
+      if (linkStats.isSymbolicLink()) {
+        const target = realpathSync(candidate)
+        assertInside(rootReal, target)
+        stats = statSync(target)
+        current = target
+      } else {
+        stats = linkStats
+        current = candidate
+      }
     } catch (error) {
       if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
-      throw new MissingPathError(rel)
+      if (isMissingFsPath(error)) throw new MissingPathError(rel)
+      throw error
     }
-    assertSafeComponent(stats, rel)
     if (index < parts.length - 1 && !stats.isDirectory()) throw new UnsafePathError(`${rel || '.'} is not a folder`)
-    current = candidate
     if (index === parts.length - 1) return { stats, exists: true }
   }
 
-  return { stats: lstatSync(current), exists: true }
+  return { stats: statSync(current), exists: true }
 }
 
 function pathParts(root: string, rel: string): readonly string[] {
@@ -124,10 +143,6 @@ function assertInside(rootReal: string, candidate: string): void {
   if (rel === '') return
   if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return
   throw new UnsafePathError('Path is outside the project')
-}
-
-function assertSafeComponent(stats: Stats, rel: string): void {
-  if (stats.isSymbolicLink()) throw new UnsafePathError(`${rel || '.'} contains a symbolic link`)
 }
 
 function isMissingFsPath(error: unknown): error is NodeJS.ErrnoException {

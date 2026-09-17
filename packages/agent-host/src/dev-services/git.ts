@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
+import { assertExistingPath, isMissingPathError } from './path-guard.js'
 
 const exec = promisify(execFile)
 
@@ -103,6 +105,32 @@ function mapStatus(c: string): GitFileStatus['status'] {
   return 'M'
 }
 
+function assertLexicalGitPath(cwd: string, path: string): string {
+  if (!path || path.includes('\0') || path.startsWith(':')) {
+    throw Object.assign(new Error('Invalid git path'), { code: 'internal' })
+  }
+  const root = resolve(cwd)
+  const target = isAbsolute(path) ? resolve(path) : resolve(root, path)
+  const rel = relative(root, target)
+  if (rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return rel
+  throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
+}
+
+async function assertCanonicalGitPath(cwd: string, path: string): Promise<string> {
+  const rel = assertLexicalGitPath(cwd, path)
+  try {
+    await assertExistingPath(cwd, path)
+  } catch (error) {
+    if (isMissingPathError(error)) return rel
+    throw error
+  }
+  return rel
+}
+
+function literalPathspec(path: string): string {
+  return `:(literal)${path}`
+}
+
 /** 파일 diff. 큰 diff는 앞부분만 — 화면은 어차피 가상 스크롤로 자른다 */
 export async function gitDiff(
   cwd: string,
@@ -110,9 +138,10 @@ export async function gitDiff(
   opts: { staged?: boolean; maxBytes?: number } = {},
 ): Promise<{ diff: string; truncated: boolean; binary: boolean }> {
   if (!(await isRepo(cwd))) return { diff: '', truncated: false, binary: false }
+  const safePath = await assertCanonicalGitPath(cwd, path)
   const args = ['diff', '--no-color', '--no-ext-diff']
   if (opts.staged) args.push('--cached')
-  args.push('--', path)
+  args.push('--', literalPathspec(safePath))
 
   let stdout: string
   try {
@@ -123,7 +152,7 @@ export async function gitDiff(
   // 추적되지 않은 파일은 diff가 비어 있다 — 내용을 직접 보여준다
   if (!stdout.trim() && !opts.staged) {
     try {
-      stdout = await git(cwd, ['diff', '--no-color', '--no-index', '/dev/null', path])
+      stdout = await git(cwd, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', safePath])
     } catch (e) {
       // --no-index는 차이가 있으면 exit 1이라 stdout이 error에 실려 온다
       stdout = String((e as { stdout?: string }).stdout ?? '')
@@ -296,7 +325,9 @@ export async function gitCheckout(
 
 export async function gitStage(cwd: string, paths: string[], unstage = false): Promise<void> {
   if (paths.length === 0) return
-  await git(cwd, unstage ? ['restore', '--staged', '--', ...paths] : ['add', '--', ...paths])
+  const safePaths = await Promise.all(paths.map((path) => assertCanonicalGitPath(cwd, path)))
+  const pathspecs = safePaths.map(literalPathspec)
+  await git(cwd, unstage ? ['restore', '--staged', '--', ...pathspecs] : ['add', '--', ...pathspecs])
 }
 
 export async function gitCommit(cwd: string, message: string): Promise<{ ok: boolean; message?: string }> {

@@ -131,6 +131,27 @@ describe('핸드셰이크', () => {
     c.ws.close()
   })
 
+
+
+  it.each(['http://localhost:5173', 'http://localhost:5174'])('localhost dev origin %s is allowed with the token', async (origin) => {
+    // Given: a browser uses localhost instead of 127.0.0.1 for the supported dev port.
+    const { port } = await start()
+    const c = connect(port, origin)
+
+    // When: it presents the shared launch token.
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+
+    // Then: origin allowlisting does not reject the legitimate localhost variant.
+    expect(c.frames[0]).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
+    c.ws.close()
+  })
+
+  it('empty server tokens are rejected before listen', async () => {
+    // Given / When / Then: an empty token cannot accidentally become an accepted credential.
+    expect(() => new HostServer({ port: 0, token: '', onRpc: async () => ({ ok: true }) })).toThrow(/token/i)
+  })
   it('잘못된 토큰이면 연결을 끊는다', async () => {
     const { port } = await start()
     const c = connect(port)

@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs'
+import { lstatSync, watch, type FSWatcher } from 'node:fs'
 import { safeJoin } from './fs.js'
 import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
 
@@ -56,14 +56,14 @@ export class DirWatchers {
 
     for (const rel of want) {
       if (cur.has(rel)) continue
-      let abs: string
+      let abs = ''
       try {
         // 트리의 다른 fs 경로들과 같은 규칙 — 프로젝트 밖과 링크는 감시 대상이 될 수 없다
         abs = safeJoin(root, rel)
         const info = assertExistingPathSync(root, rel)
         if (!info.isDirectory()) continue
       } catch (error) {
-        if (isMissingPathError(error)) this.schedule(projectId, rel)
+        if (isMissingPathError(error) && !isSymlink(abs)) this.schedule(projectId, rel)
         continue
       }
       let w: FSWatcher
@@ -113,5 +113,13 @@ export class DirWatchers {
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
     this.pending.clear()
+  }
+}
+
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink()
+  } catch {
+    return false
   }
 }
