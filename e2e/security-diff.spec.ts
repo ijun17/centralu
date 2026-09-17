@@ -60,6 +60,16 @@ test('newline-dense working diff is virtualized without losing tail rows', async
     root.scrollTop = root.scrollHeight
   })
   await expect(diffView).toContainText('row-37235')
+
+  // Select all means the complete backing diff, not only the virtual rows on screen.
+  await diffView.locator('.overflow-auto').click({ position: { x: 100, y: 100 } })
+  await page.keyboard.press('ControlOrMeta+a')
+  const copied = await diffView.locator('.overflow-auto').evaluate((root) => {
+    const clipboardData = new DataTransfer()
+    root.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData }))
+    return clipboardData.getData('text/plain')
+  })
+  expect(copied).toBe(hostileDiff())
 })
 
 test('sticky current-file band follows the visible file while virtualized', async ({ page }) => {

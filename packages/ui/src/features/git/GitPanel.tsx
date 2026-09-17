@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
-import { selectedText } from '../viewer/copy.js'
+import { caretAt, selectedText, type Caret } from '../viewer/copy.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
 type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
@@ -202,6 +202,52 @@ function DiffView({
   const diffText = data?.diff ?? ''
   const rows = useMemo(() => renderableDiffRows(diffText), [diffText])
   const scrollRef = useRef<HTMLDivElement>(null)
+  const wholeDiff = useRef(false)
+  const anchor = useRef<Caret | null>(null)
+  const copyLines = useMemo(() => rows.map((r) => ({ text: r.body, prefix: r.marker })), [rows])
+
+  // Match the code viewer's selection contract: recycled DOM rows must not shorten copy.
+  useEffect(() => {
+    wholeDiff.current = false
+    anchor.current = null
+  }, [path, diffText])
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const sel = document.getSelection()
+      const root = scrollRef.current
+      if (!sel?.anchorNode || !root?.contains(sel.anchorNode)) return
+      const caret = caretAt(sel.anchorNode, sel.anchorOffset)
+      if (caret || sel.isCollapsed) anchor.current = caret
+    }
+    const onMouseDown = () => { wholeDiff.current = false }
+    const onCopy = (event: ClipboardEvent) => {
+      const root = scrollRef.current
+      if (!root || !path || data?.binary) return
+      const payload = wholeDiff.current
+        ? diffText + (data?.truncated ? `\n${DIFF_TRUNCATED_MESSAGE}` : '')
+        : selectedText({ selection: document.getSelection(), root, lines: copyLines, lastAnchor: anchor.current })
+      if (payload === null) return
+      event.preventDefault()
+      event.clipboardData?.setData('text/plain', payload)
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('copy', onCopy)
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('copy', onCopy)
+    }
+  }, [path, diffText, copyLines, data?.binary, data?.truncated])
+  const paintSelection = () => {
+    const root = scrollRef.current
+    const selection = document.getSelection()
+    if (!root || !selection) return
+    const range = document.createRange()
+    range.selectNodeContents(root)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -260,17 +306,15 @@ function DiffView({
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]"
-        onCopy={(e) => {
-          const payload = selectedText({
-            selection: document.getSelection(),
-            root: e.currentTarget,
-            lines: rows.map((r) => ({ text: r.body, prefix: r.marker })),
-            lastAnchor: null,
-          })
-          if (payload === null) return
-          e.preventDefault()
-          e.clipboardData.setData('text/plain', payload)
+        tabIndex={0}
+        onMouseDown={() => scrollRef.current?.focus()}
+        onKeyDown={(event) => {
+          if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'a') return
+          event.preventDefault()
+          wholeDiff.current = true
+          paintSelection()
         }}
+        onScroll={() => { if (wholeDiff.current) paintSelection() }}
       >
         {currentFile && (
           <div
