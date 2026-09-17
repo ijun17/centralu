@@ -301,7 +301,12 @@ export function CodeViewer({ projectId }: { projectId: string }) {
         )}
         <button
           className="ml-auto shrink-0 text-[11px] text-slate hover:text-chalk"
-          onClick={() => void platform.system.openInIde(path)}
+          onClick={() => {
+            void platform.fs
+              .resolve(projectId, path)
+              .then(({ path: abs }) => platform.system.openInIde(abs))
+              .catch((e) => setToast(`Could not open in IDE: ${(e as Error).message}`))
+          }}
           data-testid="viewer-open-ide"
         >
           Open in IDE

@@ -203,6 +203,8 @@ export interface FsPort {
    */
   watch(projectId: string, paths: string[]): Promise<{ watched: number }>
   readFile(projectId: string, relPath: string): Promise<FsFile>
+  /** Resolve a project-relative path to the host-validated absolute path for native handoff. */
+  resolve(projectId: string, relPath: string): Promise<{ path: string }>
   /**
    * Move an entry into another folder of the same project (#19, drag inside the tree).
    *

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitStage, gitStatusFiles } from './git.js'
+import { gitDiff, gitStage, gitStatusFiles } from './git.js'
 
 /**
  * porcelain v2 파싱은 실제 git 출력으로 확인한다 — 흉내낸 문자열로는
@@ -55,5 +55,78 @@ describe('gitStatusFiles — porcelain v2', () => {
 
     const files = await gitStatusFiles(d)
     expect(files).toEqual([{ path: 'a.txt', staged: false, status: 'M' }])
+  })
+})
+
+describe('git path containment', () => {
+  it('rejects no-index diff paths outside a project subdirectory', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'tracked.txt'), 'base\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+    const sub = join(d, 'pkg')
+    execFileSync('mkdir', ['-p', sub])
+    writeFileSync(join(d, 'outside.txt'), 'outside\n')
+
+    await expect(gitDiff(sub, '../outside.txt')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('treats option-looking filenames as paths when diffing and staging', async () => {
+    const { d } = repo()
+    const name = '--output=owned.patch'
+    writeFileSync(join(d, name), 'content\n')
+
+    const diff = await gitDiff(d, name)
+    expect(diff.diff).toContain('content')
+    await expect(gitStage(d, [name])).resolves.toBeUndefined()
+    expect(await gitStatusFiles(d)).toEqual([{ path: name, staged: true, status: 'A' }])
+  })
+
+  it('rejects symlinked no-index diff paths whose target leaves the project', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'tracked.txt'), 'base\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+    const outside = mkdtempSync(join(tmpdir(), 'cc-git-outside-'))
+    dirs.push(outside)
+    writeFileSync(join(outside, 'secret.txt'), 'secret\n')
+    symlinkSync(outside, join(d, 'linked-out'), 'dir')
+
+    await expect(gitDiff(d, 'linked-out/secret.txt')).rejects.toThrow(/outside the project/i)
+    await expect(gitStage(d, ['linked-out/secret.txt'])).rejects.toThrow(/outside the project/i)
+  })
+
+
+  it('rejects git pathspec magic instead of letting it widen selection', async () => {
+    const { d } = repo()
+    writeFileSync(join(d, 'a.txt'), 'a\n')
+    writeFileSync(join(d, 'b.txt'), 'b\n')
+
+    await expect(gitDiff(d, ':(glob)*.txt')).rejects.toThrow(/invalid git path/i)
+    await expect(gitStage(d, [':(glob)*.txt'])).rejects.toThrow(/invalid git path/i)
+  })
+
+  it('treats wildcard-looking paths literally instead of as git pathspec globs', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'a.txt'), 'a\n')
+    writeFileSync(join(d, 'b.txt'), 'b\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+    writeFileSync(join(d, 'a.txt'), 'changed\n')
+    writeFileSync(join(d, 'b.txt'), 'changed\n')
+
+    const diff = await gitDiff(d, '*.txt')
+    expect(diff.diff).toBe('')
+    await expect(gitStage(d, ['*.txt'])).rejects.toThrow(/pathspec/i)
+    expect(await gitStatusFiles(d)).toEqual([
+      { path: 'a.txt', staged: false, status: 'M' },
+      { path: 'b.txt', staged: false, status: 'M' },
+    ])
+  })
+
+  it('rejects stage paths outside the project', async () => {
+    const { d } = repo()
+
+    await expect(gitStage(d, ['../outside.txt'])).rejects.toThrow(/outside the project/i)
   })
 })

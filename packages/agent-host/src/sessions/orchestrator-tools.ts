@@ -4,6 +4,10 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { AppToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS } from './app-guide.js'
 
+function trustedJsonText(value: string): string {
+  return JSON.stringify(value)
+}
+
 /**
  * 오케스트레이터 도구의 **유일한 정의**.
  *
@@ -284,7 +288,7 @@ export async function runOrchestratorTool(
             // PR 상태(#76 stage 3) — 리뷰 대기 중인 브랜치에 새 일을 시키면 PR이 오염된다
             (s.pr ? ` · PR #${s.pr.number}(${s.pr.state})` : '') +
             (s.lastActive ? ` · 마지막 ${s.lastActive}` : '') +
-            (s.preview ? `\n    최근: ${s.preview}` : ''),
+            (s.preview ? `\n    최근(JSON): ${trustedJsonText(s.preview)}` : ''),
         )
         .join('\n'),
     }
@@ -303,7 +307,7 @@ export async function runOrchestratorTool(
         .map(
           (h) =>
             `- [${h.project}] ${h.session}${h.at ? ` · ${h.at}` : ''}\n` +
-            `    ${h.snippet}\n` +
+            `    snippet(JSON): ${trustedJsonText(h.snippet)}\n` +
             `    → read_session(sessionId="${h.sessionId}", around=${h.seq})`,
         )
         .join('\n'),

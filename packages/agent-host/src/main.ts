@@ -43,7 +43,7 @@ const { values } = parseArgs({
 /** 데이터 폴더를 옮겼다면 그 사실. 로그가 켜진 뒤에 적는다 (아래 참조) */
 let movedNote: string | null = null
 
-const token = values.token ?? process.env.CC_HOST_TOKEN ?? randomBytes(16).toString('hex')
+const token = values.token || process.env.CC_HOST_TOKEN || randomBytes(16).toString('hex')
 const dbPath = values.memory
   ? ':memory:'
   : (values.db ?? defaultDbPath())

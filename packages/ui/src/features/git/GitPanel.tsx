@@ -1,10 +1,50 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
-import { selectedText } from '../viewer/copy.js'
+import { caretAt, selectedText, type Caret } from '../viewer/copy.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
+type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
+type DiffRow = { readonly kind: DiffRowKind; readonly marker: string; readonly body: string }
+
+const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open in your IDE to see the rest.'
+
+function toDiffRow(line: string): DiffRow {
+  const kind: DiffRowKind = line.startsWith('diff --git ')
+    ? 'file'
+    : line.startsWith('+') && !line.startsWith('+++')
+      ? 'add'
+      : line.startsWith('-') && !line.startsWith('---')
+        ? 'del'
+        : line.startsWith('@@')
+          ? 'hunk'
+          : 'ctx'
+  const marked = kind === 'add' || kind === 'del'
+  // The clipboard gets the ASCII marker. The screen gets the typographic one, below.
+  return { kind, marker: marked ? line.charAt(0) : '', body: marked ? line.slice(1) : line }
+}
+
+function renderableDiffRows(diff: string): readonly DiffRow[] {
+  return diff.split('\n').map(toDiffRow)
+}
+
+function diffFileLabel(line: string): string {
+  const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line)
+  if (!m) return line
+  const before = m[1] ?? ''
+  const after = m[2] ?? ''
+  return before === after ? after : `${before} → ${after}`
+}
+
+function currentDiffFile(rows: readonly DiffRow[], firstVisible: number): string | null {
+  for (let i = Math.min(firstVisible, rows.length - 1); i >= 0; i--) {
+    const row = rows[i]
+    if (row?.kind === 'file') return diffFileLabel(row.body)
+  }
+  return null
+}
 
 /**
  * 깃 패널 (FR-4, B-2~B-6).
@@ -116,7 +156,14 @@ function Changes({
         data={diff}
         emptyHint="Pick a file from the Changes list on the right"
         onOpenInIde={async (line) => {
-          if (selected) await platform.system.openInIde(selected.path, line)
+          if (selected) {
+            try {
+              const { path } = await platform.fs.resolve(projectId, selected.path)
+              await platform.system.openInIde(path, line)
+            } catch (e) {
+              setToast(`Could not open in IDE: ${(e as Error).message}`)
+            }
+          }
         }}
         onOpenViewer={selected ? () => openFile(selected.path) : undefined}
       />
@@ -133,12 +180,10 @@ function Changes({
  * 기호는 그대로 둔다 — 색을 못 보는 사람에게 색만 남기면 정보가 사라진다.
  *
  * Copying needs the viewer's handler (issue #36), for the opposite reason to the viewer's.
- * Nothing here is virtualized, so the whole diff is in the DOM — but the markers are drawn
- * in their own `select-none` span, and here the browser honours that and drops them: a
- * copied diff came back with added and removed lines looking identical. The screen's − is a
- * typographic minus anyway, which no patch tool accepts. So the payload is rebuilt from the
- * data, marker included, and one `onCopy` on the scrolling element is enough — a selection
- * that cannot lose its rows cannot be walked out of them either.
+ * The rows are virtualized for large diffs, so the clipboard must be rebuilt from the full
+ * backing data instead of the mounted DOM. Markers are also drawn in their own `select-none`
+ * span, and the screen's − is a typographic minus that no patch tool accepts. The payload is
+ * therefore rebuilt from the data, marker included, so copied diffs stay complete and valid.
  */
 function DiffView({
   path,
@@ -154,9 +199,70 @@ function DiffView({
   onOpenInIde: (line?: number) => Promise<void>
   onOpenViewer?: () => void
 }) {
+  const diffText = data?.diff ?? ''
+  const rows = useMemo(() => renderableDiffRows(diffText), [diffText])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const wholeDiff = useRef(false)
+  const anchor = useRef<Caret | null>(null)
+  const copyLines = useMemo(() => rows.map((r) => ({ text: r.body, prefix: r.marker })), [rows])
+
+  // Match the code viewer's selection contract: recycled DOM rows must not shorten copy.
+  useEffect(() => {
+    wholeDiff.current = false
+    anchor.current = null
+  }, [path, diffText])
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const sel = document.getSelection()
+      const root = scrollRef.current
+      if (!sel?.anchorNode || !root?.contains(sel.anchorNode)) return
+      const caret = caretAt(sel.anchorNode, sel.anchorOffset)
+      if (caret || sel.isCollapsed) anchor.current = caret
+    }
+    const onMouseDown = () => { wholeDiff.current = false }
+    const onCopy = (event: ClipboardEvent) => {
+      const root = scrollRef.current
+      if (!root || !path || data?.binary) return
+      const payload = wholeDiff.current
+        ? diffText + (data?.truncated ? `\n${DIFF_TRUNCATED_MESSAGE}` : '')
+        : selectedText({ selection: document.getSelection(), root, lines: copyLines, lastAnchor: anchor.current })
+      if (payload === null) return
+      event.preventDefault()
+      event.clipboardData?.setData('text/plain', payload)
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('copy', onCopy)
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('copy', onCopy)
+    }
+  }, [path, diffText, copyLines, data?.binary, data?.truncated])
+  const paintSelection = () => {
+    const root = scrollRef.current
+    const selection = document.getSelection()
+    if (!root || !selection) return
+    const range = document.createRange()
+    range.selectNodeContents(root)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 17,
+    overscan: 24,
+  })
+  const virtualRows = virtualizer.getVirtualItems()
+  const currentFile = currentDiffFile(rows, virtualizer.range?.startIndex ?? virtualRows[0]?.index ?? 0)
+
   if (!path) {
     return (
-      <div className="flex flex-1 items-center justify-center text-[12px] text-slate" data-testid="diff-empty">
+      <div
+        className="flex flex-1 items-center justify-center text-[12px] text-slate"
+        data-testid="diff-empty"
+      >
         {emptyHint ?? 'Select a file to see its diff'}
       </div>
     )
@@ -172,16 +278,7 @@ function DiffView({
    * `replace(/^[+-]/, '')` did to every file header, since the classifier calls those
    * context lines.
    */
-  const rows = (data?.diff ?? '').split('\n').map((line) => {
-    const kind = line.startsWith('diff --git ') ? 'file'
-      : line.startsWith('+') && !line.startsWith('+++') ? 'add'
-      : line.startsWith('-') && !line.startsWith('---') ? 'del'
-      : line.startsWith('@@') ? 'hunk'
-      : 'ctx'
-    const marked = kind === 'add' || kind === 'del'
-    // The clipboard gets the ASCII marker. The screen gets the typographic one, below.
-    return { kind, marker: marked ? line[0]! : '', body: marked ? line.slice(1) : line }
-  })
+  const truncated = Boolean(data?.truncated)
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
@@ -189,74 +286,103 @@ function DiffView({
         <span className="readout truncate text-[11px] text-ash">{path}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {onOpenViewer && (
-            <button className="text-[11px] text-slate hover:text-chalk" onClick={onOpenViewer} data-testid="open-in-viewer">
+            <button
+              className="text-[11px] text-slate hover:text-chalk"
+              onClick={onOpenViewer}
+              data-testid="open-in-viewer"
+            >
               Show all
             </button>
           )}
-          <button className="text-[11px] text-slate hover:text-chalk" onClick={() => void onOpenInIde()} data-testid="open-in-ide">
+          <button
+            className="text-[11px] text-slate hover:text-chalk"
+            onClick={() => void onOpenInIde()}
+            data-testid="open-in-ide"
+          >
             Open in IDE
           </button>
         </span>
       </header>
       <div
+        ref={scrollRef}
         className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]"
-        onCopy={(e) => {
-          const payload = selectedText({
-            selection: document.getSelection(),
-            root: e.currentTarget,
-            lines: rows.map((r) => ({ text: r.body, prefix: r.marker })),
-            lastAnchor: null,
-          })
-          if (payload === null) return
-          e.preventDefault()
-          e.clipboardData.setData('text/plain', payload)
+        tabIndex={0}
+        onMouseDown={() => scrollRef.current?.focus()}
+        onKeyDown={(event) => {
+          if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'a') return
+          event.preventDefault()
+          wholeDiff.current = true
+          paintSelection()
         }}
+        onScroll={() => { if (wholeDiff.current) paintSelection() }}
       >
-        {rows.map(({ kind, body }, i) => {
-          /*
-           * 파일 경계 밴드 (사용자 선택 2026-09-07 — 커밋 diff는 여러 파일이 한 텍스트라
-           * 어디서 다음 파일이 시작되는지 안 보였다). sticky라 스크롤 중에도 "지금 보는
-           * 파일"이 위에 남는다. 화면에는 경로만 그리지만 data-line은 그대로라, 복사는
-           * 여전히 원문 `diff --git` 줄을 낸다 (#36의 재구성 방식 덕 — 표시≠복사).
-           */
-          if (kind === 'file') {
-            const m = /^diff --git a\/(.*) b\/(.*)$/.exec(body)
-            const label = m ? (m[1] === m[2] ? m[2] : `${m[1]} → ${m[2]}`) : body
+        {currentFile && (
+          <div
+            className="sticky top-0 z-20 border-b border-edge bg-panel px-3 py-1"
+            data-testid="diff-current-file-band"
+          >
+            <span className="readout text-[11px] text-chalk">{currentFile}</span>
+          </div>
+        )}
+        <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+          {virtualRows.map((v) => {
+            const { kind, body } = rows[v.index]!
+            const i = v.index
+            /*
+             * 파일 경계 밴드 (사용자 선택 2026-09-07 — 커밋 diff는 여러 파일이 한 텍스트라
+             * 어디서 다음 파일이 시작되는지 안 보였다). 가상 스크롤에서 실제 sticky 표시는
+             * 위의 `diff-current-file-band`가 맡고, 이 행은 원문 `diff --git` 위치 자체를
+             * 보여준다. data-line은 그대로라 복사는 원문을 낸다 (#36의 표시≠복사).
+             */
+            if (kind === 'file') {
+              const label = diffFileLabel(body)
+              return (
+                <div
+                  key={v.key}
+                  data-index={v.index}
+                  ref={virtualizer.measureElement}
+                  data-diff="file"
+                  data-line={i}
+                  data-testid="diff-file-band"
+                  className="absolute left-0 top-0 w-full border-b border-edge bg-panel px-3 py-1"
+                  style={{ transform: `translateY(${v.start}px)` }}
+                >
+                  <span data-code className="readout text-[11px] text-chalk">
+                    {label}
+                  </span>
+                </div>
+              )
+            }
             return (
               <div
-                key={i}
-                data-diff="file"
+                key={v.key}
+                data-index={v.index}
+                ref={virtualizer.measureElement}
+                data-diff={kind}
                 data-line={i}
-                data-testid="diff-file-band"
-                className="sticky top-0 z-10 border-b border-edge bg-panel px-3 py-1"
+                className={`absolute left-0 top-0 w-full ${
+                  kind === 'add'
+                    ? 'bg-add-bg text-add'
+                    : kind === 'del'
+                      ? 'bg-del-bg text-del'
+                      : kind === 'hunk'
+                        ? 'bg-panel/60 text-ash'
+                        : 'text-ash'
+                }`}
+                style={{ transform: `translateY(${v.start}px)` }}
               >
-                <span data-code className="readout text-[11px] text-chalk">
-                  {label}
+                <span className="inline-block w-4 select-none text-center opacity-70">
+                  {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
                 </span>
+                <span data-code>{body}</span>
               </div>
             )
-          }
-          return (
-            <div
-              key={i}
-              data-diff={kind}
-              data-line={i}
-              className={
-                kind === 'add' ? 'bg-add-bg text-add'
-                : kind === 'del' ? 'bg-del-bg text-del'
-                : kind === 'hunk' ? 'bg-panel/60 text-ash'
-                : 'text-ash'
-              }
-            >
-              <span className="inline-block w-4 select-none text-center opacity-70">
-                {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
-              </span>
-              <span data-code>{body}</span>
-            </div>
-          )
-        })}
-        {data?.truncated && (
-          <p className="p-2 text-[11px] text-slate">…diff is too large; showing part of it. Open in your IDE to see the rest.</p>
+          })}
+        </div>
+        {truncated && (
+          <p className="p-2 text-[11px] text-slate" data-testid="diff-truncation">
+            {DIFF_TRUNCATED_MESSAGE}
+          </p>
         )}
       </div>
     </div>
@@ -268,9 +394,22 @@ function DiffView({
  * 사이드바에서 커밋을 누르면 그 diff가 여기 넓게 펴진다. 다음 커밋도 사이드바에서 —
  * 같은 목록 두 벌은 혼동이다 (Changes와 같은 판정).
  */
-function History({ projectId, initialSha, pick }: { projectId: string; initialSha?: string | null; pick: number }) {
+function History({
+  projectId,
+  initialSha,
+  pick,
+}: {
+  projectId: string
+  initialSha?: string | null
+  pick: number
+}) {
   const platform = usePlatform()
-  const [detail, setDetail] = useState<{ sha: string; files: string[]; diff: string } | null>(null)
+  const [detail, setDetail] = useState<{
+    sha: string
+    files: string[]
+    diff: string
+    truncated: boolean
+  } | null>(null)
 
   const opened = useRef(-1)
   useEffect(() => {
@@ -278,7 +417,7 @@ function History({ projectId, initialSha, pick }: { projectId: string; initialSh
     opened.current = pick
     void platform.git
       .commitDetail(projectId, initialSha)
-      .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff }))
+      .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff, truncated: d.truncated }))
       .catch(() => {})
   }, [pick, initialSha, platform, projectId])
 
@@ -286,7 +425,7 @@ function History({ projectId, initialSha, pick }: { projectId: string; initialSh
     <div className="flex min-h-0 flex-1">
       <DiffView
         path={detail ? `${detail.files.length} files` : undefined}
-        data={detail ? { diff: detail.diff, truncated: false, binary: false } : null}
+        data={detail ? { diff: detail.diff, truncated: detail.truncated, binary: false } : null}
         emptyHint="Pick a commit from the History list on the right"
         onOpenInIde={async () => {}}
       />
@@ -305,7 +444,10 @@ function Branches({ projectId }: { projectId: string }) {
   const [pending, setPending] = useState<{ branch: string; conflicts: string[] } | null>(null)
 
   const load = useCallback(() => {
-    void platform.git.branches(projectId).then(setBranches).catch(() => setBranches([]))
+    void platform.git
+      .branches(projectId)
+      .then(setBranches)
+      .catch(() => setBranches([]))
   }, [platform, projectId])
   useEffect(load, [load])
 
@@ -350,7 +492,10 @@ function Branches({ projectId }: { projectId: string }) {
             >
               Switch anyway
             </button>
-            <button className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk" onClick={() => setPending(null)}>
+            <button
+              className="rounded px-2 py-1 text-[12px] text-slate hover:text-chalk"
+              onClick={() => setPending(null)}
+            >
               Cancel
             </button>
           </div>
@@ -362,7 +507,15 @@ function Branches({ projectId }: { projectId: string }) {
   )
 }
 
-function BranchList({ title, branches, onPick }: { title: string; branches: GitBranch[]; onPick: (b: string) => void }) {
+function BranchList({
+  title,
+  branches,
+  onPick,
+}: {
+  title: string
+  branches: GitBranch[]
+  onPick: (b: string) => void
+}) {
   if (branches.length === 0) return null
   return (
     <div className="border-b border-edge/60">
@@ -379,7 +532,9 @@ function BranchList({ title, branches, onPick }: { title: string; branches: GitB
             >
               <span className="w-2.5 shrink-0 text-center text-[9px] text-slate">{b.current ? '●' : ''}</span>
               <span className="truncate">{b.name.replace(/^remotes\//, '')}</span>
-              {b.upstream && <span className="readout ml-auto shrink-0 text-[10px] text-slate">→ {b.upstream}</span>}
+              {b.upstream && (
+                <span className="readout ml-auto shrink-0 text-[10px] text-slate">→ {b.upstream}</span>
+              )}
             </button>
           </li>
         ))}
@@ -387,5 +542,3 @@ function BranchList({ title, branches, onPick }: { title: string; branches: GitB
     </div>
   )
 }
-
-

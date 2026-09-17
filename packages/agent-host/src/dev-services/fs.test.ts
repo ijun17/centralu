@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -16,6 +16,7 @@ import { baseName, importFile, listDir, moveEntry, readTextFile, resolveExisting
  */
 
 let root = ''
+const extraDirs: string[] = []
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cc-fs-'))
@@ -23,7 +24,14 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
+  for (const d of extraDirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
+
+function outsideDir(): string {
+  const d = mkdtempSync(join(tmpdir(), 'cc-fs-outside-'))
+  extraDirs.push(d)
+  return d
+}
 
 describe('safeJoin — 프로젝트 밖으로 나가지 않는다', () => {
   it('안쪽 경로는 그대로 붙는다', () => {
@@ -165,6 +173,84 @@ describe('readTextFile — 이미지 미리보기', () => {
   })
 })
 
+describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', () => {
+  it('Given 중간 경로가 밖을 가리키는 링크 When 목록을 열면 Then 프로젝트 밖이라 거절한다', async () => {
+    const outside = outsideDir()
+    mkdirSync(join(outside, 'nested'))
+    writeFileSync(join(outside, 'nested', 'secret.txt'), 'leak')
+    symlinkSync(outside, join(root, 'linked'), 'dir')
+
+    await expect(listDir(root, 'linked/nested')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('Given 마지막 경로가 밖의 파일을 가리키는 링크 When 셸 경로를 만들면 Then 프로젝트 밖이라 거절한다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(resolveExisting(root, 'secret.txt')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('Given 옮길 대상이 밖으로 향한 링크 When 이동하면 Then 밖의 파일을 옮기지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    mkdirSync(join(root, 'dst'))
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(moveEntry(root, 'secret.txt', 'dst')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('Given 이동 목적 폴더가 밖을 가리키는 링크 When 이동하면 Then 밖에 쓰지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(root, 'a.ts'), 'inside')
+    symlinkSync(outside, join(root, 'drop'), 'dir')
+
+    await expect(moveEntry(root, 'a.ts', 'drop')).rejects.toThrow(/outside the project/i)
+    expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('inside')
+  })
+
+  it('Given 가져오기 목적 폴더가 링크 When 파일을 쓰면 Then 링크 밖에 만들지 않는다', async () => {
+    const outside = outsideDir()
+    symlinkSync(outside, join(root, 'drop'), 'dir')
+
+    await expect(importFile(root, 'drop', 'a.ts', Buffer.from('inside'))).rejects.toThrow(/outside the project/i)
+  })
+
+  it('Given 읽을 파일이 링크 When 텍스트를 열면 Then 링크 대상을 읽지 않는다', async () => {
+    const outside = outsideDir()
+    writeFileSync(join(outside, 'secret.txt'), 'leak')
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
+
+    await expect(readTextFile(root, 'secret.txt')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('Given 끊어진 링크 When 셸 경로를 만들면 Then 사라진 파일로 거절한다', async () => {
+    symlinkSync(join(root, 'missing.txt'), join(root, 'dangling.txt'))
+
+    await expect(resolveExisting(root, 'dangling.txt')).rejects.toThrow(/no longer there/i)
+  })
+
+  it('Given 링크가 프로젝트 안을 가리키면 When 파일을 읽으면 Then 일반 파일처럼 허용한다', async () => {
+    mkdirSync(join(root, 'actual'))
+    writeFileSync(join(root, 'actual', 'inside.txt'), 'inside')
+    symlinkSync(join(root, 'actual'), join(root, 'linked'), 'dir')
+
+    await expect(readTextFile(root, 'linked/inside.txt')).resolves.toMatchObject({ text: 'inside', binary: false })
+  })
+
+  it('Given 링크가 프로젝트 안을 가리키면 When 목록을 열면 Then pnpm식 내부 링크도 따라간다', async () => {
+    mkdirSync(join(root, 'store/pkg'), { recursive: true })
+    writeFileSync(join(root, 'store/pkg', 'index.js'), 'export {}')
+    mkdirSync(join(root, 'node_modules'))
+    symlinkSync(join(root, 'store/pkg'), join(root, 'node_modules/pkg'), 'dir')
+
+    await expect(listDir(root, 'node_modules/pkg')).resolves.toEqual([
+      { name: 'index.js', path: 'node_modules/pkg/index.js', isDir: false, ignored: false },
+    ])
+  })
+
+})
+
 describe('moveEntry', () => {
   it('파일을 폴더로 옮긴다', async () => {
     writeFileSync(join(root, 'a.ts'), 'hello')
@@ -258,7 +344,7 @@ describe('importFile — 밖에서 끌어온 파일', () => {
 describe('resolveExisting — 셸에 넘길 절대 경로', () => {
   it('있는 파일의 절대 경로를 준다', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
-    expect(await resolveExisting(root, 'a.ts')).toBe(join(root, 'a.ts'))
+    expect(await resolveExisting(root, 'a.ts')).toBe(realpathSync(join(root, 'a.ts')))
   })
 
   /** 없는 경로를 셸에 넘기면 아무 일도 일어나지 않는다 — 그 침묵을 여기서 막는다 */
