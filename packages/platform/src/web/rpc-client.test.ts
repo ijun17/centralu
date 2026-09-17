@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { RpcClient } from './rpc-client.js'
+import { RpcClient, type RpcClientOptions } from './rpc-client.js'
 
 /**
  * 진짜 소켓 없이 연결·끊김·응답을 손으로 재현하는 가짜 WebSocket.
@@ -11,6 +11,7 @@ class FakeWebSocket {
     return FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!
   }
   readyState = 0
+  bufferedAmount = 0
   sent: string[] = []
   onopen: (() => void) | null = null
   onmessage: ((e: MessageEvent) => void) | null = null
@@ -26,13 +27,14 @@ class FakeWebSocket {
     this.readyState = 3
   }
   /** 서버가 연결을 받아준 것처럼 */
-  open(): void {
+  open(authenticate = true): void {
     this.readyState = 1
     this.onopen?.()
+    if (authenticate) this.receive({ kind: 'hello_ok', protocolVersion: 1, currentSeq: 0, streamEpoch: 'host-a' })
   }
   /** 서버 프레임 수신 */
   receive(frame: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent)
+    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(frame) }))
   }
   /** 연결이 뚝 끊긴 것처럼 (서버 다운·네트워크 단절) */
   drop(): void {
@@ -41,12 +43,12 @@ class FakeWebSocket {
   }
 }
 
-function makeClient(opts?: { callTimeoutMs?: number }): RpcClient {
+function makeClient(opts?: Partial<RpcClientOptions>): RpcClient {
   return new RpcClient({
     url: 'ws://127.0.0.1:1/',
     token: 't',
-    WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
-    callTimeoutMs: opts?.callTimeoutMs,
+    WebSocketImpl: FakeWebSocket,
+    ...opts,
   })
 }
 
@@ -203,6 +205,175 @@ describe('RpcClient 끊김 시 in-flight 거절 (U1)', () => {
     rpc.updateEndpoint('ws://127.0.0.1:2/', 't2')
 
     await expect(call).rejects.toMatchObject({ code: 'connection_lost', retryable: true })
+    rpc.close()
+  })
+})
+
+
+describe('authenticated recovery boundary', () => {
+  it('does not send queued or new RPCs or announce readiness before hello_ok', async () => {
+    const rpc = makeClient()
+    const states: string[] = []
+    rpc.onConnectionChange((state) => states.push(state))
+    rpc.connect()
+    const queued = rpc.call('sessions.list', {})
+    const ws = FakeWebSocket.last
+    ws.open(false)
+    const opened = rpc.call('sessions.list', {})
+    expect(states).not.toContain('connected')
+    expect(rpc.connectionState).toBe('connecting')
+    expect(ws.sent).toHaveLength(1)
+    ws.receive({ kind: 'hello_ok', protocolVersion: 1, currentSeq: 0, streamEpoch: 'a' })
+    expect(states).toContain('connected')
+    expect(ws.sent).toHaveLength(3)
+    ws.receive({ kind: 'res', id: '1', ok: true, result: [] })
+    ws.receive({ kind: 'res', id: '2', ok: true, result: [] })
+    await Promise.all([queued, opened])
+    rpc.close()
+  })
+
+  it('deduplicates replay and detects a restarted host at the identical endpoint', async () => {
+    const rpc = makeClient()
+    const seen: string[] = []
+    rpc.onEvent((e) => seen.push(e.type))
+    rpc.onConnectionChange((s) => seen.push(s))
+    rpc.connect()
+    const first = FakeWebSocket.last
+    first.open()
+    const event = { type: 'message_delta', sessionId: 's', role: 'assistant', text: 'a' }
+    first.receive({ kind: 'event', seq: 30, event })
+    first.receive({ kind: 'event', seq: 30, event })
+    expect(seen.filter((s) => s === 'message_delta')).toHaveLength(1)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(200)
+    const second = FakeWebSocket.last
+    second.open(false)
+    expect(JSON.parse(second.sent[0]!)).toMatchObject({ afterSeq: 30, streamEpoch: 'host-a' })
+    second.receive({ kind: 'hello_ok', protocolVersion: 1, currentSeq: 0, streamEpoch: 'host-b', resyncRequired: true })
+    second.receive({ kind: 'event', seq: 1, event })
+    expect(seen.slice(-2)).toEqual(['resync_required', 'message_delta'])
+    second.drop()
+    await vi.advanceTimersByTimeAsync(200)
+    FakeWebSocket.last.open(false)
+    expect(JSON.parse(FakeWebSocket.last.sent[0]!)).toMatchObject({ afterSeq: 1, streamEpoch: 'host-b' })
+    rpc.close()
+  })
+
+  it('close cancels reconnect timers and rejects subsequent calls immediately', async () => {
+    const rpc = makeClient()
+    rpc.connect()
+    FakeWebSocket.last.open()
+    FakeWebSocket.last.drop()
+    rpc.close()
+    expect(vi.getTimerCount()).toBe(0)
+    await expect(rpc.call('sessions.list', {})).rejects.toMatchObject({ code: 'connection_closed' })
+  })
+})
+
+
+describe('bounded pending calls', () => {
+  it('rejects admission beyond the cap without sending it after reconnect', async () => {
+    const rpc = makeClient({ maxPendingCalls: 1 })
+    rpc.connect()
+    const first = rpc.call('sessions.list', {})
+    await expect(rpc.call('sessions.list', {})).rejects.toMatchObject({ code: 'overloaded' })
+    const ws = FakeWebSocket.last
+    ws.open()
+    expect(ws.sent).toHaveLength(2)
+    ws.receive({ kind: 'res', id: lastRpcId(ws), ok: true, result: [] })
+    await first
+    rpc.close()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('caps queued bytes and socket backlog independently of call count', async () => {
+    const rpc = makeClient({ maxBufferedBytes: 100 })
+    rpc.connect()
+    await expect(rpc.call('sessions.rename', { sessionId: 's', name: 'x'.repeat(101) })).rejects.toMatchObject({ code: 'overloaded' })
+    const ws = FakeWebSocket.last
+    ws.open()
+    ws.bufferedAmount = 100
+    await expect(rpc.call('sessions.list', {})).rejects.toMatchObject({ code: 'overloaded' })
+    expect(ws.sent).toHaveLength(1)
+    rpc.close()
+  })
+
+  it('never replays sent side effects, even when the response was lost', async () => {
+    const rpc = makeClient()
+    rpc.connect()
+    const first = FakeWebSocket.last
+    first.open()
+    const call = rpc.call('sessions.rename', { sessionId: 's', name: 'new' })
+    first.drop()
+    await expect(call).rejects.toMatchObject({ code: 'connection_lost' })
+    await vi.advanceTimersByTimeAsync(200)
+    const next = FakeWebSocket.last
+    next.open()
+    expect(next.sent).toHaveLength(1)
+    rpc.close()
+  })
+
+  it('times out a withheld handshake and ignores events before authentication', async () => {
+    const rpc = makeClient({ handshakeTimeoutMs: 100 })
+    const events: unknown[] = []
+    rpc.onEvent((e) => events.push(e))
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.open(false)
+    ws.receive({ kind: 'event', seq: 1, event: { type: 'turn_complete', sessionId: 's' } })
+    expect(events).toEqual([])
+    await vi.advanceTimersByTimeAsync(100)
+    expect(ws.readyState).toBe(3)
+    rpc.close()
+  })
+})
+
+
+describe('existing attachment budget', () => {
+  it('admits a base64-encoded 20 MiB attachment under default transport limits', async () => {
+    const rpc = makeClient()
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.open()
+    const call = rpc.call('attachments.save', { sessionId: 's', name: 'large.bin', mime: 'application/octet-stream', dataBase64: 'A'.repeat(Math.ceil(20 * 1024 * 1024 / 3) * 4) })
+    expect(ws.sent).toHaveLength(2)
+    ws.receive({ kind: 'res', id: '1', ok: true, result: { path: '/fixture/large.bin' } })
+    await expect(call).resolves.toMatchObject({ path: '/fixture/large.bin' })
+    rpc.close()
+  })
+})
+
+describe('upstream malformed-response salvage survives recovery refactor', () => {
+  it.each([
+    { ok: false, error: { code: 'ENOENT', message: 'file disappeared', retryable: false } },
+    { ok: 'invalid', result: [] },
+  ])('rejects an unreadable response immediately and clears its deadline: %j', async (response) => {
+    const rpc = makeClient()
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.open()
+    const call = rpc.call('sessions.list', {})
+    const rejected = expect(call).rejects.toMatchObject({ code: 'internal', retryable: false })
+    ws.receive({ kind: 'res', id: lastRpcId(ws), ...response })
+    await rejected
+    expect(vi.getTimerCount()).toBe(0)
+    rpc.close()
+  })
+
+  it('resync advances the reconnect watermark without applying discarded replay', async () => {
+    const rpc = makeClient()
+    const seen: string[] = []
+    rpc.onEvent((event) => seen.push(event.type))
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.open(false)
+    ws.receive({ kind: 'hello_ok', protocolVersion: 1, currentSeq: 42, streamEpoch: 'host-a', resyncRequired: true })
+    ws.receive({ kind: 'event', seq: 42, event: { type: 'turn_complete', sessionId: 's' } })
+    expect(seen).toEqual([])
+    ws.drop()
+    await vi.advanceTimersByTimeAsync(200)
+    FakeWebSocket.last.open(false)
+    expect(JSON.parse(FakeWebSocket.last.sent[0]!)).toMatchObject({ afterSeq: 42, streamEpoch: 'host-a' })
     rpc.close()
   })
 })
