@@ -2520,6 +2520,179 @@ test('드래그해서 떨어뜨려도 첨부된다', async ({ page }) => {
   expect(sent.at(-1).name).toBe('shot.png')
 })
 
+/**
+ * #116 — 입력창을 **빗맞힌** 드롭이 앱을 덮어쓰던 버그.
+ *
+ * Tauri가 드롭을 가로채지 않으므로(dragDropEnabled: false) 아무도 안 받은 드롭은 웹뷰의
+ * 기본 동작으로 간다: 떨어뜨린 파일로 이동. PDF 한 장이 창을 가득 덮고 돌아올 길은
+ * 브라우저 뒤로 가기뿐이었다.
+ *
+ * 진짜 OS 드래그는 자동화할 수 없으므로 DataTransfer를 만들어 직접 쏜다 — 앱이 보는
+ * 것(이벤트와 그 위의 types)은 같다.
+ */
+const dropFile = (page: Page, name: string, type = 'application/pdf') =>
+  page.evaluateHandle(
+    ({ n, t }: { n: string; t: string }) => {
+      const data = new DataTransfer()
+      data.items.add(new File(['내용'], n, { type: t }))
+      return data
+    },
+    { n: name, t: type },
+  )
+
+test('끌어다 놓기는 창 전체에서 기본이 거부다 — 받는 자리가 없는 곳에서도', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const before = page.url()
+
+  /*
+    첨부 기능과 **따로** 서는 검사다. 여기서 보는 것은 "붙었나"가 아니라 "브라우저가
+    스스로 결정하지 않았나"이고, 그래서 **아무도 받지 않는 자리**를 고른다 —
+    사이드바 바탕과 문서 바탕. 이 자리들이 바로 PDF가 창을 덮던 자리였다.
+
+    preventDefault가 곧 "웹뷰가 이걸 안 연다"이다. 셋 다 봐야 한다: dragover·dragenter가
+    "여기 놓을 수 있다"는 대답이라, 그게 안 막히면 판단이 브라우저 몫으로 넘어간다.
+  */
+  const floor = await page.evaluate(() => {
+    const out: Record<string, boolean[]> = {}
+    for (const where of ['sidebar', 'body']) {
+      const el = where === 'body' ? document.body : document.querySelector('[data-testid="sidebar"]')!
+      const data = new DataTransfer()
+      data.items.add(new File(['보고서'], 'report.pdf', { type: 'application/pdf' }))
+      out[where] = ['dragenter', 'dragover', 'drop'].map((type) => {
+        const e = new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true })
+        el.dispatchEvent(e)
+        return e.defaultPrevented
+      })
+    }
+    return out
+  })
+  expect(floor).toEqual({ sidebar: [true, true, true], body: [true, true, true] })
+
+  // 그리고 앱은 그 자리에 그대로 있다 — 이 버그의 증상은 "앱이 사라진다"였다
+  expect(page.url()).toBe(before)
+
+  /*
+    예외는 하나뿐이고 좁다. **글자 칸 위의 글자**는 편집 동작이라 통과시킨다 —
+    검색창에 고른 글을 끌어다 놓는 일까지 막으면 파일 때문에 만든 바닥이 글자를 쓸어간다.
+    **파일은 글자 칸 위에서도 막는다**: PDF를 검색창에 떨어뜨리는 것도 웹뷰가 파일을 여는 길이다.
+  */
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('palette-input')).toBeVisible()
+  const overInput = await page.evaluate(() => {
+    // 스스로 막지 않는 글자 칸이어야 **전역 바닥**을 잰다. 입력창 폼은 자기 자리를
+    // 이미 preventDefault하므로, 거기서 재면 가드를 지워도 통과해 아무것도 지키지 못한다.
+    const el = document.querySelector('[data-testid="palette-input"]')!
+    const drag = (kind: 'text' | 'file') => {
+      const data = new DataTransfer()
+      if (kind === 'file') data.items.add(new File(['보고서'], 'report.pdf', { type: 'application/pdf' }))
+      else data.setData('text/plain', '끌어온 글')
+      const e = new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true })
+      el.dispatchEvent(e)
+      return e.defaultPrevented
+    }
+    return { text: drag('text'), file: drag('file') }
+  })
+  expect(overInput.file).toBe(true)
+  expect(overInput.text).toBe(false)
+  await expect(page.getByTestId('session-view')).toBeVisible()
+})
+
+test('입력창이 아니라 칸 아무 데나 떨어뜨려도 첨부된다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  // 대화 한복판 — 입력창과 겹치지 않는 자리다. 여기가 이 버그가 살던 곳이다
+  await page.getByTestId('chat-stream').dispatchEvent('drop', { dataTransfer: await dropFile(page, 'report.pdf') })
+
+  await expect(page.getByTestId('attachment-list')).toContainText('report.pdf')
+  await page.getByTestId('send').click()
+  const sent = await page.evaluate(() => (window as any).__mock.sentAttachments)
+  expect(sent.at(-1).name).toBe('report.pdf')
+})
+
+test('그리드 — 접힌 입력창은 떨어뜨린 그 칸에서 펴진다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'a')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await newSession(page, 'alpha', 'b')
+  const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, b])
+  await page.getByTestId('grid-button').click()
+  const cell = page.getByTestId(`grid-panel-${a}`)
+  await expect(cell).toBeVisible()
+
+  /*
+    기본값이 접힘(foldComposer)이라는 것이 이 버그의 나머지 절반이다 — 받을 수 있는
+    유일한 자리가 대개 화면 밖에 있었다. 첨부가 거기로 들어가면 아무 일도 안 일어난
+    것과 구별되지 않으므로, 붙는 순간 펴져야 한다.
+  */
+  const shell = cell.getByTestId('composer-shell')
+  await expect(shell).not.toHaveAttribute('data-up', 'true')
+
+  // 머리글 — 한 칸 안에서 입력창으로부터 가장 먼 자리
+  await cell.getByTestId('pane-header').dispatchEvent('drop', { dataTransfer: await dropFile(page, 'report.pdf') })
+
+  await expect(shell).toHaveAttribute('data-up', 'true')
+  await expect(cell.getByTestId('attachment-list')).toContainText('report.pdf')
+
+  // 붙는 곳은 **떨어뜨린 칸의 세션**이다 — 포커스된 세션(b)이 아니라
+  const where = await page.evaluate(() => {
+    const drafts = (window as any).__store.getState().drafts
+    const out: Record<string, string[]> = {}
+    for (const [id, d] of Object.entries(drafts as Record<string, any>)) {
+      out[id] = d.attachments.map((x: any) => x.name)
+    }
+    return out
+  })
+  expect(where[a!]).toEqual(['report.pdf'])
+  expect(where[b!] ?? []).toEqual([])
+})
+
+test('그리드 — 칸을 받는 자리로 만들어도 세션 순서 바꾸기는 그대로다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'a')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await newSession(page, 'alpha', 'b')
+  const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, b])
+  await page.getByTestId('grid-button').click()
+  await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
+
+  /*
+    파일 드롭과 순서 바꾸기는 이제 **같은 면**에서 끝난다. 칸이 파일만 받는지
+    (types에 Files가 있는 것만) 여기서 확인한다 — 아니면 자리를 바꾸러 온 드롭을
+    칸이 말없이 삼키고, 그건 "가끔 안 움직인다"로만 드러난다.
+  */
+  await page.evaluate(
+    ({ from, to }: { from: string; to: string }) => {
+      const dt = new DataTransfer()
+      const header = document.querySelector(`[data-testid="grid-panel-${from}"] [data-testid="pane-header"]`)!
+      header.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }))
+      const card = document.querySelector(`[data-testid="grid-panel-${to}"]`)!
+      const r = card.getBoundingClientRect()
+      /*
+        떨어지는 곳은 칸 **안**이다 — 대화 위. 진짜 드롭이 닿는 자리가 거기라서,
+        이벤트는 세션 화면을 지나 칸으로 올라간다. 카드에 곧장 쏘면 세션 화면을
+        건너뛰어 버려, 정작 확인하려는 "지나보내는가"를 확인하지 못한다.
+      */
+      const inside = card.querySelector('[data-testid="chat-stream"]')!
+      // 오른쪽 절반 — b의 뒤로 간다
+      const at = { clientX: r.left + r.width * 0.8, clientY: r.top + 10 }
+      const init = { dataTransfer: dt, bubbles: true, cancelable: true, ...at }
+      inside.dispatchEvent(new DragEvent('dragover', init))
+      inside.dispatchEvent(new DragEvent('drop', init))
+    },
+    { from: a!, to: b! },
+  )
+
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels))
+    .toEqual([b, a])
+})
+
 test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')

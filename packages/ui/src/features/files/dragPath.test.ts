@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { appendPath, hasDragFiles, hasDragPath, PATH_MIME } from './dragPath.js'
+import { appendPath, hasDragFiles, hasDragPath, isFileDrag, PATH_MIME } from './dragPath.js'
+import { PROJECT_MIME, SESSION_MIME } from '../sidebar/reorder.js'
 
 /**
  * 끌어다 놓기와 `@` 자동완성은 결과가 같아야 한다 —
@@ -53,5 +54,36 @@ describe('무엇을 끌고 있는가', () => {
   it('둘 다 아니면 받지 않는다 (선택한 글자를 끌어온 경우 등)', () => {
     expect(hasDragPath(dt(['text/plain']))).toBe(false)
     expect(hasDragFiles(dt(['text/plain']))).toBe(false)
+  })
+})
+
+/**
+ * 세션 칸 전체가 드롭 자리가 되면서 (#116) 같은 면 위에서 **두 종류의 끌기**가 끝난다:
+ * 파일을 붙이러 온 끌기와, 칸·세션·프로젝트의 자리를 바꾸러 온 끌기.
+ *
+ * 가르는 일이 DOM 이벤트에 붙어 있으면 "순서 바꾸기를 삼키지 않는다"는 약속을 브라우저를
+ * 띄워야만 확인할 수 있다. 여기서는 types 배열 하나로 끝난다.
+ */
+describe('칸이 받을 끌기인가', () => {
+  it('OS에서 끌어온 파일은 받는다', () => {
+    expect(isFileDrag(['Files'])).toBe(true)
+  })
+
+  it('트리에서 끌어온 경로도 받는다 — 첨부가 아니라 문장에 들어가지만 답하는 자리는 같다', () => {
+    expect(isFileDrag([PATH_MIME, 'text/plain'])).toBe(true)
+  })
+
+  it('순서 바꾸기는 지나보낸다 — 그 드롭에는 주인이 따로 있다', () => {
+    expect(isFileDrag([SESSION_MIME])).toBe(false)
+    expect(isFileDrag([PROJECT_MIME])).toBe(false)
+  })
+
+  it('모르는 끌기는 받지 않는다 (글자를 긁어 끌어온 경우 등)', () => {
+    expect(isFileDrag(['text/plain'])).toBe(false)
+    expect(isFileDrag([])).toBe(false)
+  })
+
+  it('파일과 함께 실려 온 것이 있어도 파일이면 받는다 — OS가 text/uri-list를 같이 싣는다', () => {
+    expect(isFileDrag(['Files', 'text/uri-list', 'text/plain'])).toBe(true)
   })
 })

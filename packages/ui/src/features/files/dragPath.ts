@@ -56,3 +56,19 @@ export function appendPath(text: string, path: string): string {
   if (!text) return `${mention} `
   return /\s$/.test(text) ? `${text}${mention} ` : `${text} ${mention} `
 }
+
+/**
+ * 세션 칸이 받아야 할 드래그인가 (#116).
+ *
+ * 칸 전체가 드롭 자리가 되면서 **순서 바꾸기와 같은 면을 나눠 쓰게 됐다** — 그리드 칸은
+ * 칸끼리 자리를 바꾸는 자리이기도 하고, 사이드바의 세션·프로젝트도 자기 MIME으로 끌린다.
+ * 그래서 받을 것을 **목록으로** 적는다. "저쪽 것이 아니면 받는다"로 쓰면 새 MIME이 하나
+ * 생길 때마다 칸이 남의 드롭을 말없이 삼키고, 그건 오류 없이 아무 일도 안 일어나는
+ * 모양으로만 드러난다.
+ *
+ * 받는 둘은 뒤에서 하는 일이 다르다: OS 파일은 첨부가 되고, 트리에서 끌어온 경로는
+ * 문장에 들어간다 (입력창의 드롭 처리 그대로). 여기서는 "이 자리가 답할 드래그인가"만 가른다.
+ */
+export function isFileDrag(types: readonly string[]): boolean {
+  return types.includes('Files') || types.includes(PATH_MIME)
+}
