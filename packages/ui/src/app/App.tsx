@@ -81,6 +81,57 @@ export function App({ platform }: { platform: Platform }) {
   }, [spinGrid, spinSessionIcon])
 
   // 알림 정책이 "눈앞에 있으면 알리지 않는다"이므로 포커스 상태를 추적한다
+  /*
+   * 끌어다 놓기는 **창 전체에서 기본이 거부**다 (#116).
+   *
+   * Tauri가 `dragDropEnabled: false`라 드롭은 웹뷰의 기본 동작으로 간다 — 떨어뜨린
+   * 파일로 **이동해 버린다**. PDF 한 장이 창을 가득 덮고, 돌아오는 길은 브라우저의
+   * 뒤로 가기뿐이다(그런 게 있는 줄 아는 사람에게만).
+   *
+   * 그래서 바닥을 깐다: 브라우저가 스스로 결정하는 일은 이 창에서 **한 번도** 없다.
+   * 무언가 일어난다면 그건 우리 핸들러가 한 것이다.
+   *
+   * **캡처 단계이고 조건이 없다.** 조건을 하나라도 달면 — 드래그 종류든, 밑에 깔린
+   * 요소든, 받는 핸들러가 있는지든 — 그 조건의 반대편이 곧 이 버그의 다음 판이 된다.
+   * 실제로 지금까지가 정확히 그 모양이었다: 입력창은 자기 자리를 막았고, 나머지
+   * 창 전부가 웹뷰의 것이었다. 캡처인 이유도 같다 — 아래에서 누가 stopPropagation을
+   * 하더라도 바닥은 먼저 깔려 있어야 한다.
+   *
+   * 셋 다 막는다. `drop`만으로는 모자란다: `dragover`가 "여기 놓을 수 있다"는 대답이라,
+   * 막지 않으면 브라우저가 판단을 자기 몫으로 가져간다. `dragenter`도 같은 대답을 한다.
+   *
+   * 이건 **바닥일 뿐이다.** 입력창과 세션 칸은 지금도 자기 자리에서 preventDefault를
+   * 한다 — 기능의 옳음이 전역 한 줄에 매달리면, 그 한 줄이 옮겨지는 날 기능이 조용히
+   * 죽는다.
+   */
+  useEffect(() => {
+    /*
+     * 예외는 하나뿐이고, 좁다: **글자 칸 위로 끌어온 글자.**
+     *
+     * 그건 브라우저가 앱을 갈아치우는 동작이 아니라 편집 동작이다 — 검색창이나 설정 칸에
+     * 고른 글을 끌어다 놓는 일까지 막으면, 파일 때문에 만든 바닥이 글자까지 쓸어간다.
+     * **파일이 섞인 드래그는 글자 칸 위에서도 막는다.** PDF를 검색창에 떨어뜨리는 것도
+     * 웹뷰가 파일을 여는 길이고, 그 길을 없애는 것이 이 바닥의 목적이다.
+     */
+    const editable = (target: EventTarget | null): boolean => {
+      const el = target instanceof Element ? target : null
+      return !!el?.closest('input, textarea, [contenteditable=""], [contenteditable="true"]')
+    }
+    const deny = (e: globalThis.DragEvent) => {
+      if (editable(e.target) && !e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+    }
+    const opts = { capture: true } as const
+    for (const type of ['dragenter', 'dragover', 'drop'] as const) {
+      window.addEventListener(type, deny, opts)
+    }
+    return () => {
+      for (const type of ['dragenter', 'dragover', 'drop'] as const) {
+        window.removeEventListener(type, deny, opts)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     /*
        세 핸들러가 **같은 판정**을 쓴다.

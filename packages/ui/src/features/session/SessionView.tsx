@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { DragEvent, ReactNode, RefObject } from 'react'
+import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import type { DragEvent, ReactNode, Ref, RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
 import { EMPTY_DRAFT, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
@@ -21,7 +21,7 @@ import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
 import { isComposerSendKey } from './composerKeys.js'
-import { appendPath, readDragPath } from '../files/dragPath.js'
+import { appendPath, isFileDrag, readDragPath } from '../files/dragPath.js'
 import { anchorAt, decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
 /** 입력창이 커질 수 있는 최대 높이. CSS의 max-h-40과 같은 값이어야 한다 */
@@ -32,6 +32,14 @@ const COMPOSER_MAX_H = 160
  * 내민 카드 머리(14px) + 손이 겨누는 여유 40px — 대화 한복판에서는 안 뜬다.
  */
 const COMPOSER_REACH = 54
+
+/**
+ * 입력창이 밖에서 받은 드롭을 대신 처리해 주는 손잡이 (#116).
+ *
+ * 돌려주는 값은 "무언가 정말 들어갔나"다 — 파일이 너무 크거나 저장이 실패하면 아무것도
+ * 안 들어간다. 그때까지 접힌 입력창을 펴면 빈 칸이 올라와 된 것처럼 보인다.
+ */
+type ComposerDrop = { accept: (dt: DataTransfer) => Promise<boolean> }
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
@@ -178,7 +186,18 @@ export function SessionPane({
   const [overComposer, setOverComposer] = useState(false)
   const [composerFocused, setComposerFocused] = useState(false)
   const [composerMenu, setComposerMenu] = useState(false)
-  const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu
+  /**
+   * 칸에 떨어뜨린 것이 첨부로 들어가 **그래서 떠 있는** 상태 (#116).
+   *
+   * 접힌 입력창은 화면 밖에 있다. 거기로 파일이 들어가면 붙은 것을 볼 자리가 없어
+   * 아무 일도 안 일어난 것과 구별되지 않는다 — 방아쇠 넷에 하나를 더 다는 이유다.
+   * 내려가는 때는 손이 칸을 아예 떠날 때(아래 onMouseLeave), hover와 같은 규칙이다.
+   */
+  const [droppedIn, setDroppedIn] = useState(false)
+  /** 받을 수 있는 것이 칸 위에 떠 있나 — 입력창의 테두리와 같은 말을 칸의 크기로 한다 */
+  const [dragOver, setDragOver] = useState(false)
+  const composerDrop = useRef<ComposerDrop>(null)
+  const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu || droppedIn
 
   /*
    * 떠오른 카드가 차지하는 높이 — **재서 안다** (사용자 지적 2026-09-13).
@@ -343,8 +362,72 @@ export function SessionPane({
             }
           : undefined
       }
-      onMouseLeave={fold ? () => setNearComposer(false) : undefined}
+      onMouseLeave={
+        fold
+          ? () => {
+              setNearComposer(false)
+              setDroppedIn(false)
+            }
+          : undefined
+      }
+      /*
+       * 칸 전체가 드롭 자리다 (#116) — 입력창만이 아니라.
+       *
+       * 입력창은 기본으로 접혀 있으므로(store의 foldComposer), 받을 수 있는 유일한 자리가
+       * 대개 화면에 없었다. 파일을 들고 온 사람에게 겨눌 과녁이 없는 셈이다.
+       *
+       * 여기서 처리하면 세 화면이 한 번에 고쳐진다: 포커스 뷰·그리드 칸·오케스트레이터가
+       * 전부 이 부품이다. 그리드에서는 **떨어뜨린 그 칸의 세션**에 붙는다는 뜻이기도 하다 —
+       * 포커스된 세션이 아니라. 같은 이유로 칸마다 자기 입력창을 부른다.
+       */
+      onDragOver={(e) => {
+        // 순서 바꾸기(세션·프로젝트)는 그 자리의 주인이 따로 있다 — 건드리지 않고 지나보낸다
+        if (!isFileDrag(e.dataTransfer.types)) return
+        /*
+         * 입력창 위에 있으면 표시는 그쪽 것이다 (입력창은 테두리를 ash로 밝힌다). 둘이
+         * 같이 밝아지면 어디에 놓는지가 아니라 몇 군데가 받는지를 말하게 된다.
+         *
+         * 끄는 것까지 여기서 한다: 칸 바탕에서 입력창으로 넘어간 것은 칸을 떠난 것이
+         * 아니라 아래 dragleave가 안 온다.
+         *
+         * 판정을 `defaultPrevented`로 하지 않는 이유 — 창의 바닥 guard(App.tsx)가 캡처
+         * 단계에서 모든 드래그를 이미 막아 두므로, 여기 닿을 때 그 값은 늘 true다.
+         * 물어야 하는 것은 "막혔나"가 아니라 "누구 자리인가"다.
+         */
+        if (composerRef.current?.contains(e.target as Node)) {
+          setDragOver(false)
+          return
+        }
+        e.preventDefault()
+        setDragOver(true)
+      }}
+      onDragLeave={(e) => {
+        // 자식으로 들어갈 때도 leave가 오므로 실제로 밖으로 나간 것만 본다
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
+      }}
+      onDrop={(e) => {
+        if (!isFileDrag(e.dataTransfer.types)) return
+        setDragOver(false)
+        // 입력창 위에 정확히 떨어진 것은 이미 입력창이 받았다 — 여기서 또 받으면 두 번 붙는다
+        if (composerRef.current?.contains(e.target as Node)) return
+        e.preventDefault()
+        void composerDrop.current?.accept(e.dataTransfer).then((landed) => {
+          if (landed) setDroppedIn(true)
+        })
+      }}
     >
+      {/*
+        떨어뜨릴 수 있다는 말 (#116). 입력창이 테두리를 ash로 밝히는 것과 **같은 말을**
+        칸의 크기로 한다 — 새 색을 들이지 않고, 순서 바꾸기에는 아예 켜지지 않는다.
+        입력창(z-20)보다 아래에 깔아 떠오른 카드와 그 그림자를 덮지 않는다.
+      */}
+      {dragOver && (
+        <div
+          className="pointer-events-none absolute inset-0 z-10 rounded-lg border border-ash"
+          aria-hidden
+          data-testid="pane-drop-target"
+        />
+      )}
       {headerDrag ? (
         <div
           className={`${HEADER} cursor-grab active:cursor-grabbing`}
@@ -484,6 +567,7 @@ export function SessionPane({
           sessionId={session.id}
           framed={!fold}
           onMenuOpenChange={fold ? setComposerMenu : undefined}
+          dropRef={composerDrop}
         />
       </div>
 
@@ -514,11 +598,14 @@ export function SessionPane({
 const Composer = memo(function Composer({
   sessionId,
   onMenuOpenChange,
+  dropRef,
   framed = true,
 }: {
   sessionId: string
   /** 아래 줄의 메뉴가 열렸나 — 접힌 입력창이 그동안 안 내려가야 한다 (fold) */
   onMenuOpenChange?: (open: boolean) => void
+  /** 칸 아무 데나 떨어진 것을 이 입력창의 처리로 넘기는 손잡이 (#116) */
+  dropRef?: Ref<ComposerDrop>
   /**
    * 자기 윗선을 그을 것인가.
    *
@@ -737,13 +824,52 @@ const Composer = memo(function Composer({
   }
 
   // 스크린샷을 붙여넣는 흐름이 가장 흔하다 (FR-13)
+  // 돌려주는 값은 "하나라도 붙었나" — 접힌 입력창을 펴는 쪽이 이걸 보고 판단한다 (#116).
+  // 붙은 게 없는데 펴면 빈 칸이 올라와 무언가 된 것처럼 거짓말을 한다.
   const takeFiles = async (files: FileList | File[] | null) => {
-    if (!files || !alive) return
+    if (!files || !alive) return false
+    let added = false
     for (const f of Array.from(files)) {
       const att = await attachFile(sessionId, f)
-      if (att) setAttachments((prev) => [...prev, att])
+      if (att) {
+        setAttachments((prev) => [...prev, att])
+        added = true
+      }
     }
+    return added
   }
+
+  /*
+   * 떨어뜨린 것을 받는 일 전부 (#116).
+   *
+   * 이 칸의 입력창이 아니라 **칸 아무 데나** 떨어뜨려도 같은 일이 일어나야 하는데,
+   * 그 판정과 처리가 두 벌이 되면 한쪽만 고쳐지는 날이 온다 — 트리에서 끌어온 경로가
+   * 입력창에서는 문장에 들어가고 칸에서는 조용히 사라지는 식으로. 그래서 처리는 여기
+   * 하나뿐이고, 칸은 손잡이(dropRef)로 이걸 부른다.
+   */
+  const acceptDrop = async (dt: DataTransfer) => {
+    // 트리에서 끌어온 경로는 첨부가 아니라 문장에 넣는다.
+    // 구분하지 않으면 files가 비어 있어 아무 일도 안 일어난다.
+    const path = readDragPath(dt)
+    if (path) {
+      setText((prev) => {
+        const next = appendPath(prev, path)
+        // 커서를 끝으로 옮겨야 이어서 칠 수 있다
+        requestAnimationFrame(() => {
+          const el = inputRef.current
+          if (!el) return
+          el.focus()
+          el.setSelectionRange(next.length, next.length)
+          setCaret(next.length)
+        })
+        return next
+      })
+      return true
+    }
+    return takeFiles(dt.files)
+  }
+  // deps를 주지 않는다 — 위 클로저가 매 렌더의 초안·상태를 봐야 하므로 손잡이도 같이 새것이어야 한다
+  useImperativeHandle(dropRef, () => ({ accept: acceptDrop }))
 
   /*
    * 이 칸이 그릴 대화를 이 칸이 챙긴다.
@@ -841,25 +967,7 @@ const Composer = memo(function Composer({
         onDrop={(e) => {
           e.preventDefault()
           setDragging(false)
-          // 트리에서 끌어온 경로는 첨부가 아니라 문장에 넣는다.
-          // 구분하지 않으면 files가 비어 있어 아무 일도 안 일어난다.
-          const path = readDragPath(e.dataTransfer)
-          if (path) {
-            setText((prev) => {
-              const next = appendPath(prev, path)
-              // 커서를 끝으로 옮겨야 이어서 칠 수 있다
-              requestAnimationFrame(() => {
-                const el = inputRef.current
-                if (!el) return
-                el.focus()
-                el.setSelectionRange(next.length, next.length)
-                setCaret(next.length)
-              })
-              return next
-            })
-            return
-          }
-          void takeFiles(e.dataTransfer.files)
+          void acceptDrop(e.dataTransfer)
         }}
         data-testid="input-dropzone"
       >
