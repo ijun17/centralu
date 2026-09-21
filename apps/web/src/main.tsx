@@ -13,7 +13,7 @@ import '../../../packages/ui/src/styles/index.css'
  *
  *   ?mock=1            인메모리 구현으로 뜬다. **빈 화면** — Playwright가 쓰는 길이다.
  *   ?demo[=씬]         그 위에 씬을 깐다 (프로젝트·세션·대화·깃·사용량). 말을 걸면 답이 온다.
- *                      씬: focus(기본) · grid · empty
+ *                      씬: focus(기본) · grid · empty · shot(리드미용 영문 한 장)
  *
  * `demo`는 `mock`을 함의한다 — 씬은 목 위에서만 자란다. 아무것도 안 붙이면 진짜 host에
  * 붙는다 (ws://127.0.0.1:5175).

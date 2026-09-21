@@ -2,16 +2,8 @@
 
 Every Claude Code and Codex CLI session you have running, in one window.
 
-<!--
-  SCREENSHOT NEEDED HERE.
-
-  It has to show the thing the app is for, which is triage, not chat. That means the
-  sidebar with several sessions in different states at once — one waiting for approval,
-  one waiting for input, one still working — the inbox count, and one session open in
-  the focus view with an approval card on screen.
-
-  A single idle session proves nothing; that shot would look like every other chat UI.
--->
+![Four sessions in one window: one still working, one blocked on an approval it wants for
+`git push --force`, one asking which option to take, one finished and quiet.](docs/images/grid.png)
 
 Beta. See [where it runs](#where-it-runs).
 

@@ -18,7 +18,7 @@ import type { MockPlatform } from './index.js'
  */
 
 /** 지금 있는 씬들. `?demo=<이름>` */
-export const DEMO_SCENES = ['focus', 'grid', 'empty'] as const
+export const DEMO_SCENES = ['focus', 'grid', 'empty', 'shot'] as const
 export type DemoScene = (typeof DEMO_SCENES)[number]
 
 export function isDemoScene(v: string): v is DemoScene {
@@ -34,6 +34,7 @@ export function isDemoScene(v: string): v is DemoScene {
 export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): Promise<void> {
   installResponder(mock)
   if (scene === 'empty') return
+  if (scene === 'shot') return seedShot(mock)
 
   // 소개 화면을 건너뛴다 — 씬의 목적은 그 다음 화면이다
   mock.orchestratorTool = 'claude'
@@ -273,6 +274,236 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     const saved = (await mock.workspace.load()) ?? {}
     await mock.workspace.save({ ...saved, view: 'focus', focusedSessionId: working.id })
   }
+}
+
+/**
+ * 리드미에 넣을 한 장 (`?demo=shot`).
+ *
+ * `focus` 씬과 나누는 이유는 둘이다. 하나는 **언어**다 — 영문 리드미에 한국어 대화가
+ * 박힌 화면을 넣으면 읽는 사람이 제품이 아니라 글자를 먼저 본다. 다른 하나는 **초점**이다.
+ * `focus`는 손으로 UI를 고치라고 만든 씬이라 응답 중인 세션을 열어 두지만, 리드미가
+ * 팔아야 하는 장면은 "승인을 기다리는 것이 하나 있고, 그게 어느 것인지 보인다"이다.
+ * 그래서 여기서는 **승인 대기 세션을 연 채로** 시작한다.
+ *
+ * 대화는 전부 지어낸 것이다. 실제 도그푸딩을 옮겨 오면 사람 이름과 남의 저장소 이야기가
+ * 같이 따라온다 (사용자 요청 2026-09-17).
+ */
+async function seedShot(mock: MockPlatform): Promise<void> {
+  mock.orchestratorTool = 'claude'
+
+  const api = await mock.projects.add('/Users/you/code/payments-api')
+  const site = await mock.projects.add('/Users/you/code/marketing-site')
+
+  mock.usageState = {
+    supported: true,
+    usage: {
+      plan: 'max',
+      windows: [
+        { id: 'session', label: '5 hours', percent: 38, resetsAt: null, scope: null },
+        { id: 'weekly_all', label: 'Weekly', percent: 61, resetsAt: null, scope: null },
+        { id: 'weekly_scoped', label: 'Weekly', percent: 82, resetsAt: null, scope: 'opus' },
+      ],
+      daily: [],
+    },
+  }
+
+  mock.gitState = {
+    ...mock.gitState,
+    files: [
+      { path: 'src/billing/retry.ts', staged: false, status: 'M' },
+      { path: 'src/billing/retry.test.ts', staged: false, status: 'A' },
+      { path: 'docs/legacy-retries.md', staged: false, status: 'D' },
+    ],
+    diffs: {
+      'src/billing/retry.ts': [
+        'diff --git a/src/billing/retry.ts b/src/billing/retry.ts',
+        '@@ -8,7 +8,7 @@',
+        "-const RETRYABLE = [408, 402, 429, 500, 502, 503]",
+        "+const RETRYABLE = [408, 429, 500, 502, 503]",
+        '   return RETRYABLE.includes(status)',
+      ].join('\n'),
+    },
+    commits: [
+      {
+        sha: 'a1b2c3d4e5f6',
+        shortSha: 'a1b2c3d',
+        subject: 'A declined card is not a temporary failure',
+        author: 'you',
+        when: Date.now() - 2 * 3600_000,
+        parents: [],
+      },
+      {
+        sha: 'e4f5a6b7c8d9',
+        shortSha: 'e4f5a6b',
+        subject: 'Name the window the retry budget belongs to',
+        author: 'you',
+        when: Date.now() - 26 * 3600_000,
+        parents: [],
+      },
+    ],
+    branches: [],
+    dirty: [],
+    ignored: [],
+    pushed: false,
+  }
+
+  await mock.projects.setCommands(api.id, [
+    { command: 'pnpm dev', label: 'Dev server' },
+    { command: 'pnpm exec vitest run', label: 'Unit' },
+  ])
+
+  // 응답 중인 세션 — 사이드바에서 도는 것이 하나 있어야 "지금 일하는 중"이 보인다
+  const working = await session(mock, api.id, 'claude', 'Cap the charge retries')
+  talk(mock, working.id, [
+    ['user', 'Declined charges retry forever. Put a ceiling on it.'],
+    ['assistant', 'The policy has no ceiling, so the loop only ends when the card succeeds. Let me find where retryable is decided.'],
+  ])
+  tool(mock, working.id, 'shot-a', 'Grep', 'RETRYABLE in src/billing', [
+    'src/billing/retry.ts:8:const RETRYABLE = [408, 402, 429, 500, 502, 503]',
+    'src/billing/charge.ts:44:  while (isRetryable(res.status)) {',
+  ].join('\n'))
+  talk(mock, working.id, [
+    ['assistant', '402 is on the retryable list. A declined card is not a transient failure, so it should never have been.'],
+    ['user', 'Take it off, and cap whatever is left at five.'],
+  ])
+  tool(mock, working.id, 'shot-b', 'Edit', 'src/billing/retry.ts', '2 lines changed')
+  talk(mock, working.id, [['user', 'Prove it. Not by reading it back to me.']])
+  tool(
+    mock,
+    working.id,
+    'shot-c',
+    'Bash',
+    'pnpm exec vitest run billing',
+    [
+      'Running 4 tests',
+      '',
+      '  \u2713  a declined card is not retried (18ms)',
+      '  \u2713  a 429 is retried (12ms)',
+      '  \u2713  retries stop at five (9ms)',
+      '  \u2713  the budget is per charge, not per process (11ms)',
+      '',
+      '  4 passed (312ms)',
+    ].join('\n'),
+  )
+  talk(mock, working.id, [
+    ['assistant', 'Four pass. With the cap removed the first one fails, so the test is watching the line it claims to.'],
+    ['user', 'Good. Now check nothing else calls the old helper.'],
+  ])
+  mock.emit({
+    type: 'tool_call',
+    sessionId: working.id,
+    callId: 'shot-1',
+    summary: { tool: 'Grep', title: 'isRetryable( across src', readOnly: true, paths: [] },
+  })
+  mock.emit({ type: 'tool_result', sessionId: working.id, callId: 'shot-1', ok: true, summary: '3 files' })
+  mock.emit({
+    type: 'message_delta',
+    sessionId: working.id,
+    role: 'assistant',
+    text: 'Three callers. Two are in the billing path and one is in a script that has not run since March.',
+  })
+  mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact' })
+  mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
+
+  /*
+   * 승인 대기 — 리드미가 팔아야 하는 장면이라 이 세션을 열어 둔다.
+   *
+   * 명령은 **한눈에 위험한 것**으로 고른다. 화면 한 장에서 "왜 사람이 봐야 하는가"가
+   * 설명 없이 전해져야 하고, `--force`는 개발자라면 누구나 멈칫하는 자리다.
+   */
+  const approving = await session(mock, api.id, 'codex', 'Land the release branch')
+  talk(mock, approving.id, [
+    ['user', 'Squash my branch onto main and put it up.'],
+    ['assistant', 'There are nine commits on `release/retry-cap`. I will squash them and rebase onto main before pushing.'],
+  ])
+  tool(mock, approving.id, 'shot-d', 'Bash', 'git log --oneline main..release/retry-cap', [
+    '9f2c1ab A declined card is not a temporary failure',
+    '77ae310 Cap the retries at five',
+    'b0d4e92 Name the window the retry budget belongs to',
+    'c31f008 Test: a 429 is still retried',
+    '5ad7712 Test: the budget is per charge',
+    'fe90b41 Drop the note about legacy retries',
+  ].join('\n'))
+  talk(mock, approving.id, [
+    ['assistant', 'Two of the nine only touch the test file. The squashed message should say what changed in billing, not that tests moved around.'],
+    ['user', 'Use the first commit message and drop the rest.'],
+  ])
+  tool(
+    mock,
+    approving.id,
+    'shot-e',
+    'Bash',
+    'git rebase -i --autosquash main',
+    'Successfully rebased and updated refs/heads/release/retry-cap.',
+  )
+  talk(mock, approving.id, [
+    ['assistant', 'Rebased onto main as one commit. main moved while I was working, so the push will not fast-forward.'],
+  ])
+  mock.emit({
+    type: 'approval_request',
+    sessionId: approving.id,
+    requestId: 'shot-approval',
+    detail: { kind: 'command', command: 'git push --force origin main', cwd: '/Users/you/code/payments-api' },
+  })
+
+  // 질문 대기 — 승인과 다른 종류의 기다림이 같이 있어야 인박스가 무엇을 세는지 보인다
+  const asking = await session(mock, site.id, 'claude', 'Hero line')
+  talk(mock, asking.id, [
+    ['user', 'The hero line is doing nothing. Give me two directions.'],
+    ['assistant', 'Let me see what the page already claims before I write over it.'],
+  ])
+  tool(mock, asking.id, 'shot-f', 'Read', 'src/pages/index.astro', 'hero, features, pricing')
+  talk(mock, asking.id, [
+    ['assistant', 'The section under it already lists the features, so the line above should not list them again.'],
+  ])
+  mock.emit({
+    type: 'question_request',
+    sessionId: asking.id,
+    requestId: 'shot-question',
+    questions: [
+      {
+        question: 'Which one should we ship?',
+        header: 'Hero',
+        multiSelect: false,
+        options: [
+          { label: 'Stop watching. Start steering.', description: 'The one that asks for something' },
+          { label: 'Many agents, one window.', description: 'The one that states the feature' },
+        ],
+      },
+    ],
+  } as NormalizedEvent)
+
+  // 끝난 것 — "기다리는 중"과 "끝나서 조용한 것"이 달라 보여야 한다
+  const done = await session(mock, site.id, 'codex', 'Shrink the hero images')
+  talk(mock, done.id, [
+    ['user', 'The hero images are 4 MB. Convert everything under public/ to webp.'],
+    ['assistant', 'Seven files. I will keep the originals next to them so nothing breaks if a browser refuses webp.'],
+  ])
+  tool(mock, done.id, 'shot-g', 'Bash', 'cwebp -q 82 public/*.png', [
+    'public/hero.png       2.1 MB -> 402 KB',
+    'public/screenshot.png 1.2 MB -> 231 KB',
+    'public/logo-wide.png  418 KB -> 88 KB',
+  ].join('\n'))
+  talk(mock, done.id, [
+    ['assistant', 'Converted 7 files. 4.2 MB down to 890 KB, and the largest one dropped the most.'],
+    ['user', 'Did the markup change?'],
+    ['assistant', 'One line. The `<picture>` element now lists webp first and falls back to the png.'],
+  ])
+  mock.emit({ type: 'turn_complete', sessionId: done.id })
+
+  /*
+   * 그리드로 연다.
+   *
+   * 포커스로 열면 승인 카드가 크게 읽히는 대신 나머지 셋이 사이드바의 한 줄로 줄어든다.
+   * 이 앱이 파는 것은 "여럿이 각각 다른 상태로 있고, 그중 무엇이 나를 기다리는지 보인다"라서,
+   * 그 문장이 성립하는 화면은 칸이 여럿인 쪽이다. 그리드가 **도구 화면이 들어올 자리**이기도
+   * 하다 (사용자 2026-09-17) — 지금 세우는 것이 나중에 그 자리를 설명한다.
+   *
+   * 칸 순서는 상태가 섞이게 둔다: 도는 것 · 승인 대기 · 질문 대기 · 끝난 것.
+   */
+  await mock.agents.setGridView([working.id, approving.id, asking.id, done.id])
+  const saved = (await mock.workspace.load()) ?? {}
+  await mock.workspace.save({ ...saved, view: 'grid', focusedSessionId: approving.id })
 }
 
 /** 세션 하나 — 만들고, 화면이 고를 수 있게 id를 돌려준다 */
