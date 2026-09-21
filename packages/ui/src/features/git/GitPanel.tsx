@@ -211,6 +211,23 @@ function DiffView({
     wholeDiff.current = false
     anchor.current = null
   }, [path, diffText])
+
+  /*
+   * ⌘A는 어딘가에 닿아야 한다.
+   *
+   * 이 칸은 글자 칸이 아니라서 스스로 포커스를 받지 않았고, 파일을 **증거 사이드바에서**
+   * 고르면 포커스가 그 버튼에 남았다. 그러면 ⌘A가 문서로 가 wholeDiff가 서지 않은 채
+   * 복사가 일어났고, 아래 onCopy가 마운트된 행만 담아 브라우저의 제대로 된 복사를
+   * 가로챘다 — 37,236행 중 60행 (#118). 뷰어(CodeViewer)가 같은 이유로 같은 일을 한다.
+   *
+   * **경로마다 한 번만.** 매번 잡으면 검색창에 치는 도중 포커스를 도로 빼앗는다.
+   */
+  const focusedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!path || data?.binary || focusedFor.current === path) return
+    focusedFor.current = path
+    scrollRef.current?.focus()
+  }, [path, data?.binary])
   useEffect(() => {
     const onSelectionChange = () => {
       const sel = document.getSelection()
@@ -223,9 +240,24 @@ function DiffView({
     const onCopy = (event: ClipboardEvent) => {
       const root = scrollRef.current
       if (!root || !path || data?.binary) return
+      const selection = document.getSelection()
+      /*
+       * **줄 수 없는 것을 막지 않는다.**
+       *
+       * 이 리스너는 document에 걸려 있어서 창 안의 모든 복사에 대해 불린다. 선택이 이 칸
+       * 밖에서 시작하거나 끝나면 우리가 만들 수 있는 것은 칸의 몫뿐이고, 그걸로 기본 동작을
+       * 막으면 나머지를 조용히 버린다. 그럴 바엔 브라우저가 하던 대로 두는 편이 정직하다.
+       */
+      const spansOutside =
+        !!selection &&
+        (!selection.anchorNode ||
+          !selection.focusNode ||
+          !root.contains(selection.anchorNode) ||
+          !root.contains(selection.focusNode))
+      if (!wholeDiff.current && spansOutside) return
       const payload = wholeDiff.current
         ? diffText + (data?.truncated ? `\n${DIFF_TRUNCATED_MESSAGE}` : '')
-        : selectedText({ selection: document.getSelection(), root, lines: copyLines, lastAnchor: anchor.current })
+        : selectedText({ selection, root, lines: copyLines, lastAnchor: anchor.current })
       if (payload === null) return
       event.preventDefault()
       event.clipboardData?.setData('text/plain', payload)
