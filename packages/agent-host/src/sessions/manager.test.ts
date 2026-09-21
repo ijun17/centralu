@@ -2916,23 +2916,34 @@ describe('워크트리 세션의 매니저 (#69)', () => {
     expect(send.text).toContain('이 매니저의 워크트리 세션이 아닙니다')
   })
 
-
-
   it('오케스트레이터가 매니저에게 보낸 지시와 첨부는 어댑터 턴에 그대로 도착한다', async () => {
     const p = await addProject()
     store.upsertSession(wtRow('wt-a', p.id))
     const m2 = boot()
     const manager = m2.listSessions().find((s) => s.name === 'Worktree manager')!
     const orc = await m2.orchestrator()
-    const attachments: Attachment[] = [{ kind: 'file', path: 'docs/review.md', name: 'review.md' }]
+    expect(m2.toolProfileOf(orc.id)).toBe('orchestrator')
+    expect(m2.toolProfileOf(manager.id)).toBe('manager')
 
-    await m2.send(manager.id, 'REVIEW_DIRECTIVE', attachments, { sessionId: orc.id, name: 'Orchestrator' })
+    const directive = 'REVIEW_DIRECTIVE\nKeep the review order unchanged.'
+    const result = await m2.runOrchestratorTool(orc.id, 'send_to_session', {
+      sessionId: manager.id, text: directive,
+    })
+    expect(result.isError).not.toBe(true)
+    const handle = adapter.handleOf(manager.id)!
+    expect(handle.sent.at(-1)).toBe(directive)
+    handle.finishTurn()
 
-    const sent = adapter.handleOf(manager.id)!.sent.at(-1) ?? ''
-    expect(sent).toContain('REVIEW_DIRECTIVE')
-    expect(sent).toContain('@docs/review.md')
-    expect(sent).not.toContain('intersession message available')
+    // send_to_session은 텍스트 전용이다. 첨부는 같은 발신자 정보로 send 경계를 검증한다.
+    const attachments: Attachment[] = [
+      { kind: 'file', path: 'docs/review.md', name: 'review.md' },
+      { kind: 'file', path: 'docs/review notes.md', name: 'review notes.md' },
+    ]
+    await m2.send(manager.id, directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
+
+    expect(handle.sent.at(-1)).toBe(`${directive}\n\n@docs/review.md\n@docs/review notes.md`)
   })
+
   it('adoption은 링크만 쓴다 — 세션도 대화도 지우지 않는다', async () => {
     const p = await addProject()
     store.upsertSession(wtRow('wt-a', p.id))
@@ -3268,9 +3279,6 @@ describe('조율 세션 — 시야가 잘린 오케스트레이터형 (#80·#81)
     ).rejects.toThrow(/워커 세션이어야/)
   })
 
-
-
-
   it('오케스트레이터가 조율 세션에게 보낸 지시와 첨부는 어댑터 턴에 그대로 도착한다', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
@@ -3278,15 +3286,27 @@ describe('조율 세션 — 시야가 잘린 오케스트레이터형 (#80·#81)
       name: '조율자', memberSessionIds: [a.id], roleAppend: '역할문', tool: 'claude',
     })
     const orc = await mgr.orchestrator()
-    const attachments: Attachment[] = [{ kind: 'file', path: 'docs/coordinator.md', name: 'coordinator.md' }]
+    expect(mgr.toolProfileOf(orc.id)).toBe('orchestrator')
+    expect(mgr.toolProfileOf(c.id)).toBe('scoped')
 
-    await mgr.send(c.id, 'COORDINATOR_DIRECTIVE', attachments, { sessionId: orc.id, name: 'Orchestrator' })
+    const directive = 'COORDINATOR_DIRECTIVE\nKeep the member order unchanged.'
+    const result = await mgr.runOrchestratorTool(orc.id, 'send_to_session', {
+      sessionId: c.id, text: directive,
+    })
+    expect(result.isError).not.toBe(true)
+    const handle = adapter.handleOf(c.id)!
+    expect(handle.sent.at(-1)).toBe(directive)
+    handle.finishTurn()
 
-    const sent = adapter.handleOf(c.id)!.sent.at(-1) ?? ''
-    expect(sent).toContain('COORDINATOR_DIRECTIVE')
-    expect(sent).toContain('@docs/coordinator.md')
-    expect(sent).not.toContain('intersession message available')
+    const attachments: Attachment[] = [
+      { kind: 'file', path: 'docs/coordinator.md', name: 'coordinator.md' },
+      { kind: 'file', path: 'docs/member notes.md', name: 'member notes.md' },
+    ]
+    await mgr.send(c.id, directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
+
+    expect(handle.sent.at(-1)).toBe(`${directive}\n\n@docs/coordinator.md\n@docs/member notes.md`)
   })
+
   it('조율 세션 reportBack도 워커 본문을 어댑터 턴으로 전달하지 않는다', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
