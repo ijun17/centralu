@@ -1,16 +1,23 @@
+import { randomUUID } from 'node:crypto'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
  * seq 부여 + 링 버퍼 (docs/protocol.md §1).
  * "재연결이 상태 유실이 되지 않게" 하는 핵심 장치 — UI가 꺼져 있어도 host는 계속 적재한다.
  */
-export type LoggedEvent = { seq: number; event: NormalizedEvent }
+export type LoggedEvent = { readonly seq: number; readonly event: NormalizedEvent }
+
+export type ReplayWindow = { readonly events: readonly LoggedEvent[]; readonly resyncRequired: boolean }
 
 export class EventLog {
-  private buf: LoggedEvent[] = []
+  private readonly buf: LoggedEvent[]
+  readonly streamEpoch = randomUUID()
   private seq = 0
+  private count = 0
 
-  constructor(private capacity = 2000) {}
+  constructor(private readonly capacity = 2000) {
+    this.buf = new Array<LoggedEvent>(Math.max(1, Math.trunc(capacity)))
+  }
 
   get currentSeq(): number {
     return this.seq
@@ -18,13 +25,14 @@ export class EventLog {
 
   /** 버퍼에 남아 있는 가장 오래된 seq (없으면 0) */
   get oldestSeq(): number {
-    return this.buf[0]?.seq ?? 0
+    return this.count === 0 ? 0 : this.seq - this.count + 1
   }
 
   append(event: NormalizedEvent): LoggedEvent {
-    const entry = { seq: ++this.seq, event }
-    this.buf.push(entry)
-    if (this.buf.length > this.capacity) this.buf.splice(0, this.buf.length - this.capacity)
+    const entry = { seq: this.seq + 1, event }
+    this.seq = entry.seq
+    this.buf[(entry.seq - 1) % this.buf.length] = entry
+    this.count = Math.min(this.count + 1, this.buf.length)
     return entry
   }
 
@@ -32,12 +40,19 @@ export class EventLog {
    * afterSeq 이후 이벤트를 돌려준다.
    * resyncRequired=true면 버퍼 밖이라 재전송 불가 → UI는 스냅샷을 다시 로드해야 한다.
    */
-  since(afterSeq: number): { events: LoggedEvent[]; resyncRequired: boolean } {
-    if (afterSeq >= this.seq) return { events: [], resyncRequired: false }
-    if (this.buf.length === 0) return { events: [], resyncRequired: afterSeq < this.seq }
-    // 요청 지점이 버퍼에서 밀려났으면 재동기화 필요
-    if (afterSeq > 0 && afterSeq < this.oldestSeq - 1) return { events: [], resyncRequired: true }
-    if (afterSeq === 0 && this.oldestSeq > 1) return { events: [], resyncRequired: true }
-    return { events: this.buf.filter((e) => e.seq > afterSeq), resyncRequired: false }
+  since(afterSeq: number, streamEpoch: string = this.streamEpoch): ReplayWindow {
+    if (streamEpoch !== this.streamEpoch) return { events: [], resyncRequired: true }
+    if (!Number.isInteger(afterSeq) || afterSeq < 0) return { events: [], resyncRequired: true }
+    if (afterSeq === this.seq) return { events: [], resyncRequired: false }
+    if (afterSeq > this.seq) return { events: [], resyncRequired: true }
+    if (this.count === 0) return { events: [], resyncRequired: false }
+    if (afterSeq < this.oldestSeq - 1) return { events: [], resyncRequired: true }
+
+    const events: LoggedEvent[] = []
+    for (let seq = afterSeq + 1; seq <= this.seq; seq += 1) {
+      const entry = this.buf[(seq - 1) % this.buf.length]
+      if (entry) events.push(entry)
+    }
+    return { events, resyncRequired: false }
   }
 }

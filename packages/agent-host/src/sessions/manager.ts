@@ -4,6 +4,7 @@ import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
+import { MessageJournal } from './message-journal.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
@@ -113,16 +114,6 @@ const MEMORY_MESSAGES = 40
 const MEMORY_LINE_CHARS = 600
 
 /**
- * 스트리밍 중 디스크에 남기는 주기 (#66).
- *
- * 메시지 하나가 행 하나가 되면서, 델타마다 쓰던 안전은 주기 flush가 대신한다 —
- * 죽어도 잃는 것은 마지막 2초(또는 2천 자) 안쪽이다. 델타마다 쓰지 않는 이유:
- * 자라는 본문을 매번 통째로 다시 쓰는 것이라, 긴 답변에서 쓰기량이 제곱이 된다.
- */
-const STREAM_FLUSH_CHARS = 2000
-const STREAM_FLUSH_MS = 2000
-
-/**
  * recall 결과 둘레를 되살릴 때의 예산 (#66) — 개수가 아니라 **글자**로 잰다.
  *
  * 행이 델타였을 때는 행 120개가 한두 문장이었지만, 행이 메시지가 되면 행 120개는
@@ -180,17 +171,7 @@ const SKILL_MAX_CHARS = 2_000
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
   private meta = new Map<string, SessionInfo>()
-  /**
-   * 지금 스트리밍 중인 메시지 — 세션당 하나 (#66).
-   *
-   * 저장의 단위가 델타에서 메시지로 바뀌면서, "이 세션의 열린 메시지가 어느 행인가"를
-   * 여기서 든다. 델타가 오면 본문이 자라고(주기 flush), 경계(도구 호출·턴 종료·
-   * 사람 말·프로세스 종료)를 만나면 닫히며 그때 한 번 색인된다.
-   */
-  private streams = new Map<
-    string,
-    { seq: number; kind: 'text' | 'reasoning'; payload: Record<string, unknown>; text: string; written: number; lastWrite: number }
-  >()
+  private journal: MessageJournal
   /**
    * **지금 돌고 있는 프로세스가 실제로 들고 있는 설정.**
    *
@@ -251,6 +232,7 @@ export class SessionManager {
      */
     private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
   ) {
+    this.journal = new MessageJournal(store)
     /*
      * 앱 관찰 훅 (#81) — 방송을 가로채 켜진 앱에 흘린다. 규칙(무엇에 반응할지)은
      * 앱의 의견이고 관찰 자체는 물리라 여기(코어)가 배선한다. app_state_changed는
@@ -1679,7 +1661,7 @@ export class SessionManager {
       )
     }
     // 행이 곧 지워지므로 마지막 flush는 의미가 없다 — 추적만 걷는다 (#66)
-    this.streams.delete(sessionId)
+    this.journal.discard(sessionId)
     const handle = this.handles.get(sessionId)
     if (handle) {
       await handle.dispose().catch(() => {})
@@ -1839,7 +1821,8 @@ export class SessionManager {
           m.externalId = handle.externalId
         }
         this.applyStateHint(e, m)
-        seq = this.persistMessage(e, m)
+        seq = this.journal.persist(e, m.id)
+        if (seq != null) m.lastSeq = seq
         // 이미지는 파일로 영속된다 (#40 2차) — 비동기라 여기서 seq를 받지 않는다
         if (e.type === 'message_image') void this.persistImage(e, m)
         // 커밋 귀속 (#50) — git commit 도구 호출을 눈앞에서 지나갈 때 줍는다
@@ -1995,102 +1978,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * 대화 기록으로 남길 이벤트만 저장. 저장했다면 매긴 세션 내 seq를 돌려준다 —
-   * 방송에 실어 UI의 안읽음 추적 기준이 된다.
-   *
-   * **스트리밍 델타는 행을 만들지 않고 열린 행을 키운다** (#66).
-   * 예전에는 델타 하나가 행 하나였다 — 한 문장이 행 아홉 개가 되고, DB의 84%가
-   * 조각이었으며, 페이지네이션은 행을 세느라 의미를 잃고, trigram 색인은 1~2자
-   * 본문을 색인하지 못해 검색이 죽었다. 지금은 메시지가 시작될 때 행 하나를 만들고
-   * (첫 조각은 그 자리에서 남긴다 — 죽어도 시작은 남게), 이후 조각은 본문에 이어
-   * 붙이며 주기적으로만 flush한다. 색인은 스트림이 닫힐 때 한 번이다.
-   */
-  private persistMessage(e: NormalizedEvent, m: SessionInfo): number | null {
-    // 추론 요약 (#58)은 텍스트가 실렸을 때만 기록이다. estTokens뿐인 조각(claude)은
-    // 진행 표시로만 살다 사라진다: 내용 없는 행을 쌓으면 기록이 소음이 된다.
-    if (e.type === 'message_delta' || (e.type === 'reasoning_delta' && e.text)) {
-      const streamKind = e.type === 'message_delta' ? ('text' as const) : ('reasoning' as const)
-      const text = e.text ?? ''
-      const run = this.streams.get(m.id)
-      if (run && run.kind === streamKind) {
-        run.text += text
-        if (run.text.length - run.written >= STREAM_FLUSH_CHARS || Date.now() - run.lastWrite >= STREAM_FLUSH_MS) {
-          this.flushStream(m.id, run)
-        }
-        m.lastSeq = run.seq
-        return run.seq
-      }
-      // 종류가 갈리면(답변↔추론) 그 자리가 경계다
-      if (run) this.closeStream(m.id)
-      // 빈 조각으로 행을 시작하지 않는다 — codex가 끝에 보내는 "" 델타가 빈 행 1,853개를 만들었다
-      if (!text) return null
-      const seq = this.store.nextSeq(m.id)
-      const fresh = { seq, kind: streamKind, payload: { ...e } as Record<string, unknown>, text, written: 0, lastWrite: 0 }
-      this.streams.set(m.id, fresh)
-      this.flushStream(m.id, fresh)
-      m.lastSeq = seq
-      return seq
-    }
-
-    /*
-     * 스트림이 아닌 **기록**은 전부 메시지의 경계다 — 도구 호출이 답변 중간에 오면
-     * 그 앞까지가 한 덩어리다. 반면 activity·usage_update처럼 기록되지 않는
-     * 이벤트는 스트리밍과 자연스럽게 섞이므로 경계가 아니다. 턴의 끝(turn_complete·
-     * error·working이 아닌 state_change)도 경계다 — 기록은 안 남지만 메시지는 끝났다.
-     */
-    const kind =
-      e.type === 'tool_call' ? 'tool_call'
-      : e.type === 'tool_result' ? 'tool_result'
-      : e.type === 'approval_request' || e.type === 'approval_resolved' ? 'approval'
-      // 압축 지점을 기록에 남긴다. 모델의 컨텍스트에서는 옛 대화가 접혔지만
-      // 우리 기록에는 그대로 있다 — 어디서 접혔는지 보여야 거슬러 읽을 수 있다.
-      : e.type === 'compaction' ? 'marker'
-      /*
-       * 실패도 기록이다 (#107). 오류는 지금까지 상태만 바꾸고 지나갔다 — 화면에
-       * 남는 것은 `lastError` 한 줄뿐이고 그건 다음 턴이 시작하면 지워진다. 그래서
-       * 400으로 죽은 턴의 자리에는 **빈 답변**만 남았고, 왜 비었는지는 어디에도 없었다.
-       * 마커로 박아 두면 전사(그리고 인수인계 기록)에 그 순간이 남는다.
-       */
-      : e.type === 'error' ? 'marker'
-      : null
-    const boundary =
-      kind !== null ||
-      e.type === 'turn_complete' ||
-      e.type === 'error' ||
-      (e.type === 'state_change' && e.state !== 'working')
-    if (boundary) this.closeStream(m.id)
-    if (!kind) return null
-    const seq = this.store.nextSeq(m.id)
-    const msg: StoredMessage = { sessionId: m.id, seq, role: 'system', kind, payload: e, ts: Date.now() }
-    this.store.appendMessages([msg])
-    m.lastSeq = seq
-    return seq
-  }
-
-  /** 열린 스트림 행을 지금 모습대로 디스크에 — 색인은 닫힐 때 한 번이다 (#66) */
-  private flushStream(sessionId: string, run: { seq: number; kind: 'text' | 'reasoning'; payload: Record<string, unknown>; text: string; written: number; lastWrite: number }): void {
-    this.store.upsertMessageNoIndex({
-      sessionId, seq: run.seq, role: 'assistant', kind: run.kind,
-      payload: { ...run.payload, text: run.text }, ts: Date.now(),
-    })
-    run.written = run.text.length
-    run.lastWrite = Date.now()
-  }
-
-  /** 메시지가 끝났다 — 마지막 모습을 남기고 이제서야 검색 색인에 넣는다 (#66) */
-  private closeStream(sessionId: string): void {
-    const run = this.streams.get(sessionId)
-    if (!run) return
-    this.streams.delete(sessionId)
-    this.store.appendMessages([
-      {
-        sessionId, seq: run.seq, role: 'assistant', kind: run.kind,
-        payload: { ...run.payload, text: run.text }, ts: Date.now(),
-      },
-    ])
-  }
-
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
     return saveAttachment(sessionId, name, mime, dataBase64)
   }
@@ -2181,7 +2068,7 @@ export class SessionManager {
 
     const h = this.requireHandle(sessionId)
     // 사람의 말은 언제나 메시지의 경계다 — 인터럽트 후 이어 말하면 그 앞까지가 한 덩어리 (#66)
-    this.closeStream(sessionId)
+    this.journal.close(sessionId)
     const seq = this.store.nextSeq(sessionId)
     this.store.appendMessages([
       {
@@ -2246,7 +2133,7 @@ export class SessionManager {
 
     const old = this.handles.get(sessionId)
     if (old) {
-      this.closeStream(sessionId) // 진행 중이던 메시지는 여기까지가 전부다 — 남기고 색인한다 (#66)
+      this.journal.close(sessionId) // 진행 중이던 메시지는 여기까지가 전부다 — 남기고 색인한다 (#66)
       await old.dispose().catch(() => {})
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
@@ -2868,7 +2755,7 @@ export class SessionManager {
   async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
     const h = this.handles.get(sessionId)
     if (h) {
-      this.closeStream(sessionId) // 죽는 프로세스의 마지막 말을 남긴다 (#66)
+      this.journal.close(sessionId) // 죽는 프로세스의 마지막 말을 남긴다 (#66)
       await h.dispose().catch(() => {})
       // dispose가 **끝난 뒤에** 찍는다 — 내려가는 프로세스의 마지막 flush까지 표식 안쪽에 들어오게
       this.stampExternalSynced(sessionId)
@@ -3734,7 +3621,7 @@ export class SessionManager {
   async disposeAll(): Promise<void> {
     this.watchers.close()
     // 진행 중이던 메시지들을 지금 모습대로 남긴다 — 종료가 마지막 2초를 삼키면 안 된다 (#66)
-    for (const id of [...this.streams.keys()]) this.closeStream(id)
+    this.journal.closeAll()
     // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
     await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
     // dispose가 끝난 뒤에 찍는다 (stampExternalSynced 주석). 크래시에는 안 찍는다 —

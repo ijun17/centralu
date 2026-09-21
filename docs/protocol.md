@@ -5,7 +5,7 @@
 ## 1. Transport layer
 
 - WebSocket, 1 text frame = 1 JSON message.
-- Handshake immediately after connecting: `{ type: 'hello', token, protocolVersion }` → on mismatch, close immediately (with an error code). The token is generated when the host starts; in dev it is passed through an environment variable.
+- Handshake immediately after connecting: `{ kind: 'hello', token, protocolVersion, afterSeq?, streamEpoch? }` → on mismatch, close immediately (with an error code). The token is generated when the host starts; in dev it is passed through an environment variable.
 - Two kinds, by direction: **RPC** (request/response, UI→host) and the **event stream** (host→UI, one-way push).
 
 ```ts
@@ -16,8 +16,12 @@ type RpcRes  = { kind: 'res';   id: string; ok: true; result: unknown }
 type Push    = { kind: 'event'; seq: number; sessionId?: string; event: NormalizedEvent }
 ```
 
-- `seq` is a monotonically increasing number assigned by the host. On reconnect, `subscribe({ afterSeq })` replays what was missed — **the key device that stops a reconnect being a loss of state.**
-- The host keeps recent events in a ring buffer (+ the store). If afterSeq is outside the buffer it sends `resync_required` and the UI reloads the snapshot.
+- `seq` increases within one host lifetime, identified by `streamEpoch`. A reconnect includes both `afterSeq` and the epoch received in `hello_ok`. Protocol 1 clients without an epoch can still connect; a positive cursor without a matching epoch requires a snapshot, never replay from an unrelated lifetime.
+- The host retains 2,000 events in an O(1) append ring. An expired/future cursor, a different/missing epoch for a positive cursor, or a replay exceeding the outbound byte budget produces `hello_ok { resyncRequired: true, currentSeq, streamEpoch }` **without partial replay**. The client resets its cursor to that watermark and reloads snapshots. The complete replay burst (including WebSocket framing) is budgeted before acknowledgement so oversized history cannot cause an endless reconnect loop.
+- Clients become ready only after authenticated `hello_ok`, suppress duplicate event sequence numbers, and cancel obsolete handshake/reconnect timers. Sent calls whose responses were lost have an **unknown outcome** and are rejected, not automatically replayed. Inspect authoritative host state before retrying a mutation.
+- Per connection, the host defaults to a 10-second handshake deadline, 32 MiB incoming frames/outbound buffering and 64 in-flight RPCs; at most 128 sockets are admitted. The client admits at most 256 pending calls and 32 MiB of queued frames. Oversized live responses/events disconnect that observer rather than blocking host execution. These are transport bounds, not a total process-memory quota.
+- Ownership is local: a dedicated SQLite database holds a lifetime `BEGIN EXCLUSIVE` transaction in DELETE journal mode; `host.lock` is diagnostic metadata. Legacy live PID locks are respected, and process death releases the SQLite lock. This is not a distributed lease, network-filesystem support, or multi-host failover.
+- Remote UI, host discovery/installation and multi-host client storage remain separate product decisions in [#82](https://github.com/ijun17/centralu/issues/82). These recovery contracts do not introduce remote mode.
 
 ## 2. NormalizedEvent (product spec §6.2, made concrete)
 

@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { migrateLegacyDataDir } from './data-dir.js'
@@ -44,9 +44,13 @@ const { values } = parseArgs({
 let movedNote: string | null = null
 
 const token = values.token ?? process.env.CC_HOST_TOKEN ?? randomBytes(16).toString('hex')
-const dbPath = values.memory
+const dbPath = values.memory || values.db === ':memory:'
   ? ':memory:'
-  : (values.db ?? defaultDbPath())
+  : (values.db ? resolve(values.db) : defaultDbPath())
+if (dbPath !== ':memory:') {
+  mkdirSync(dirname(dbPath), { recursive: true })
+  process.env.CC_DATA_DIR = dirname(dbPath)
+}
 
 /**
  * 데이터 폴더.
@@ -103,7 +107,7 @@ if (pathResult.source !== 'unchanged') {
 const lock = acquireInstanceLock(dbPath)
 if (!lock.ok) {
   console.error(
-    `[agent-host] Another Centralu is already using this data (pid ${lock.heldByPid}).\n` +
+    `[agent-host] Cannot acquire local host ownership: ${lock.reason}${lock.heldByPid ? ` (pid ${lock.heldByPid})` : ''}.\n` +
       `  Two hosts on the same folder will desync session lists.\n` +
       `  Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).`,
   )
@@ -218,7 +222,10 @@ process.on('uncaughtException', (err) => {
   void shutdown()
 })
 
+let shuttingDown = false
 const shutdown = async () => {
+  if (shuttingDown) return
+  shuttingDown = true
   updates.stop()
   /*
    * **PTY를 먼저 끊는다.** 예전엔 mgr.disposeAll()을 await한 뒤였는데, Tauri 수퍼바이저가
