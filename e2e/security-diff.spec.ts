@@ -175,3 +175,38 @@ test('newline-dense commit diff is virtualized without a lossy row cap', async (
   })
   await expect(diffView).toContainText('row-37235')
 })
+
+/**
+ * 사이드바에서 파일을 고른 사람도 ⌘A로 전체를 복사한다 (#118).
+ *
+ * 위 시험은 복사 전에 diff 칸을 **클릭**한다. 그래서 포커스가 칸에 있는 경우만 덮었고,
+ * 실제로 사람이 하는 일 — 증거 사이드바에서 파일을 고르고 곧바로 ⌘A — 은 한 번도 지나가지
+ * 않았다. 그 경로에서는 포커스가 사이드바 버튼에 남아 ⌘A가 문서로 갔고, 칸에 걸린 copy
+ * 리스너가 마운트된 행만 담은 채 기본 동작까지 막아 37,236행이 60행이 됐다.
+ */
+test('사이드바에서 고른 뒤 바로 ⌘A를 눌러도 전체가 복사된다 (#118)', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await setup(page)
+  await page.evaluate((diff) => {
+    const mock = window.__mock
+    if (!mock) throw new Error('mock platform is required')
+    mock.gitState.files = [{ path: 'src/bomb.ts', staged: false, status: 'M' }]
+    mock.gitState.diffs['src/bomb.ts'] = diff
+  }, hostileDiff())
+  await newSession(page)
+
+  // 칸을 클릭하지 않는다 — 사이드바에서 고르는 것이 전부다
+  await page.getByTestId('evidence-file-src/bomb.ts').click()
+  const diffView = page.getByTestId('diff-view')
+  await expect(diffView).toBeVisible()
+  await expect(diffView).toContainText('row-00000')
+
+  await page.keyboard.press('ControlOrMeta+a')
+  const copied = await diffView.locator('.overflow-auto').evaluate((root) => {
+    const clipboardData = new DataTransfer()
+    root.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData }))
+    return clipboardData.getData('text/plain')
+  })
+  expect(copied.split('\n').length).toBe(hostileDiff().split('\n').length)
+  expect(copied).toBe(hostileDiff())
+})
