@@ -274,6 +274,9 @@ function Body() {
  * 대신 **긴급함은 밝기가 나른다**: 승인·오류가 하나라도 있으면 순백(beacon), 응답대기만
  * 있으면 회색. 순백은 나를 **막고 있는 것**의 몫이라는 규칙은 그대로다.
  */
+/** 바의 모서리 여백. 오른쪽 `pr-4`와 같은 값이고, 왼쪽 패딩의 바닥이기도 하다 */
+const EDGE_PADDING = 16
+
 function TopBar() {
   const counts = useCounts()
   const toggleInbox = useStore((s) => s.toggleInbox)
@@ -305,7 +308,14 @@ function TopBar() {
   return (
     <DragRegion
       className="flex h-9 shrink-0 items-center gap-4 border-b border-edge bg-pit pr-4"
-      style={{ paddingLeft: controlsInset }}
+      /*
+       * 신호등이 없는 곳에서는 inset이 0이다 (웹·목이 그렇게 보고한다 — 비켜설 버튼이
+       * 없으니 맞는 값이다). 그런데 그대로 쓰면 왼쪽 여백이 통째로 사라져서 이름이 창
+       * 모서리에 붙는다. 오른쪽은 pr-4인데 왼쪽만 맨몸이라 바가 기운 것처럼 보였다
+       * (도그푸딩에서 지적됨). 그래서 **바닥을 둔다** — 비켜설 것이 있으면 그만큼
+       * 비키고, 없으면 다른 모서리와 같은 여백을 쓴다.
+       */
+      style={{ paddingLeft: Math.max(controlsInset, EDGE_PADDING) }}
       testId="app-header"
     >
       <span
