@@ -7927,3 +7927,38 @@ test('돌고 있는 칸의 테두리가 파일·깃 화면 위로 새어 나오�
   expect(topAtRing.found).toBe(true)
   expect(topAtRing.inOverlay).toBe(true)
 })
+
+/**
+ * 긴 오류 문장이 대화에 가로 스크롤을 만들지 않는다 (#107 후속).
+ *
+ * 구분선 라벨은 "여기서 대화가 압축됨" 같은 짧은 글을 담으려고 만들어졌고 `shrink-0`이
+ * 맞는 값이었다. 실패한 턴을 화면에 올리면서 토큰 만료 같은 긴 문장이 같은 자리에 실렸고,
+ * 그 줄이 칸을 밀어내 대화 전체가 옆으로 밀렸다 (도그푸딩 지적). 사람이 읽으라고 띄운
+ * 문장이 화면 밖에 있으면 띄운 의미가 없다.
+ *
+ * 재는 것은 클래스 이름이 아니라 **폭**이다. 스크롤이 생겼는지는 그것만이 답한다.
+ */
+test('긴 오류 문장이 대화를 옆으로 밀지 않는다', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
+
+  const long =
+    'Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.'
+  await page.evaluate(
+    ([sid, message]: [string, string]) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'error', sessionId: sid, error: { code: 'internal', message, retryable: false } })
+    },
+    [id, long] as [string, string],
+  )
+
+  const mark = page.getByTestId('msg-mark').last()
+  await expect(mark).toContainText('refresh token was revoked')
+
+  const overflow = await page.getByTestId('chat-stream').evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }))
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+})

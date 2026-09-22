@@ -2238,10 +2238,22 @@ const ChatRow = memo(function ChatRow({ item, projectRoot }: { item: ChatItem; p
     )
   }
   if (item.kind === 'mark') {
+    /*
+     * 라벨이 **줄어들고 접힌다.**
+     *
+     * 이 줄은 "여기서 대화가 압축됨" 같은 **짧은 구분선 라벨**을 위해 만들어졌고, 그래서
+     * `shrink-0`이 맞는 값이었다. 그런데 실패한 턴을 화면에 올리면서(#107) 오류 문장이
+     * 같은 자리에 실렸다 — "Your access token could not be refreshed because your refresh
+     * token was revoked…" 한 줄이 칸을 밀어내 **대화 전체에 가로 스크롤이 생겼다**
+     * (도그푸딩 지적). 사람이 읽어야 할 문장이 화면 밖으로 나가 있으면 띄운 의미가 없다.
+     *
+     * 양옆 선은 `flex-1`이라 라벨이 차지하고 남은 만큼만 그려진다 — 라벨이 여러 줄이 돼도
+     * 가운데 정렬이 유지되고, 짧은 라벨의 모양은 예전 그대로다.
+     */
     return (
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
         <span className="h-px flex-1 bg-edge" />
-        <span className="readout shrink-0 text-[10px] text-slate">{item.text}</span>
+        <span className="readout min-w-0 break-words text-center text-[10px] text-slate">{item.text}</span>
         <span className="h-px flex-1 bg-edge" />
       </div>
     )
