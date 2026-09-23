@@ -27,7 +27,7 @@ because it is the only part of a PR that says where to go looking themselves.
 pnpm install
 
 # browser dev — one shell so the per-launch token is shared without printing it
-CC_HOST_TOKEN="$(openssl rand -hex 16)"
+CC_HOST_TOKEN="$(node -e 'console.log(require("node:crypto").randomBytes(16).toString("hex"))')"
 CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
 HOST_PID=$!
 trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
@@ -53,6 +53,12 @@ you arrange by hand survives one.
 Nothing in the scene is special-cased in the UI: it is built through the same ports the
 app calls and the same events the host sends, so a screen that looks right here is not
 being propped up by the demo.
+
+The token comes from Node rather than `openssl` because Node is already required here and
+`openssl` is not. That matters more than it looks: an empty `CC_HOST_TOKEN` does not stop the
+host, it makes the host invent a random one, and the only place that token is ever printed is
+the handshake the line above sends to `/dev/null`. The result is a host running on a secret
+nobody knows and a browser reporting "Host token is required", which names the wrong cause.
 
 Do not use a fixed token such as `dev-token`, and do not paste real launch tokens into
 issues, logs, screenshots, or test artifacts. The command above discards the host's
