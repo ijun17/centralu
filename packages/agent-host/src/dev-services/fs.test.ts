@@ -356,3 +356,58 @@ describe('resolveExisting — 셸에 넘길 절대 경로', () => {
     await expect(resolveExisting(root, '../..')).rejects.toThrow(/outside the project/)
   })
 })
+
+/**
+ * **검사한 문자열이 곧 사용되는 문자열이어야 한다** (#119).
+ *
+ * 가드는 `..`를 조각으로 남긴 채 걸었고, 심볼릭 링크를 따라간 뒤에 부모로 올라갔다.
+ * 실제 syscall이 쓰는 경로는 `safeJoin`이 `resolve()`로 먼저 접어 만든다. 링크의 대상이
+ * 링크 자신보다 깊으면 둘이 갈라져서, 가드는 안쪽을 보고 허락하는데 열리는 곳은 바깥이었다.
+ *
+ * 네 경로를 모두 본다. 읽기만 새는 것이 아니라 **쓰기와 감시도** 샜기 때문이다.
+ */
+describe('링크 뒤의 .. 는 가드와 syscall을 갈라놓지 못한다 (#119)', () => {
+  let outside = ''
+
+  beforeEach(() => {
+    outside = realpathSync(mkdtempSync(join(tmpdir(), 'cc-outside-')))
+    extraDirs.push(outside)
+    writeFileSync(join(outside, 'SECRET.txt'), '바깥')
+    // 링크의 대상이 링크 자신보다 깊다 — 이 차이가 두 경로를 갈라놓았다
+    mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
+    // 가드가 걸어가 보게 될 미끼. 이름이 바깥 링크와 같아야 한다
+    mkdirSync(join(root, 'sub', 'evil'))
+    symlinkSync(join(root, 'sub', 'deep'), join(root, 'link'))
+    symlinkSync(outside, join(root, 'evil'))
+  })
+
+  it('나열하지 못한다', async () => {
+    await expect(listDir(root, 'link/../evil')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('읽지 못한다', async () => {
+    await expect(readTextFile(root, 'link/../evil/SECRET.txt')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('그 안에 만들지 못한다', async () => {
+    await expect(importFile(root, 'link/../evil', 'planted.txt', Buffer.from('x'))).rejects.toThrow(
+      /outside the project/i,
+    )
+  })
+
+  it('프로젝트 파일을 그리로 옮기지 못한다', async () => {
+    writeFileSync(join(root, 'mine.txt'), '내 것')
+    await expect(moveEntry(root, 'mine.txt', 'link/../evil')).rejects.toThrow(/outside the project/i)
+    expect(readFileSync(join(root, 'mine.txt'), 'utf8')).toBe('내 것')
+  })
+
+  it('접고 나서도 루트 밖으로 나가는 경로는 그대로 막는다', async () => {
+    await expect(listDir(root, '../')).rejects.toThrow(/outside the project/i)
+    await expect(listDir(root, 'sub/../../')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('안쪽을 도는 .. 는 평소처럼 통한다', async () => {
+    writeFileSync(join(root, 'a.txt'), '안')
+    await expect(readTextFile(root, 'sub/../a.txt')).resolves.toBeTruthy()
+  })
+})

@@ -130,3 +130,25 @@ describe('git path containment', () => {
     await expect(gitStage(d, ['../outside.txt'])).rejects.toThrow(/outside the project/i)
   })
 })
+
+/**
+ * git 경로도 같은 갈라짐에 샜다 (#119).
+ *
+ * `assertLexicalGitPath`는 `..`를 접은 문자열을 git에 넘기고, `assertCanonicalGitPath`는
+ * 접지 않은 문자열을 검사했다. 링크의 대상이 링크 자신보다 깊으면 둘이 갈라져서, 검사는
+ * 프로젝트 안을 보고 통과하는데 git은 바깥 파일을 읽어 그 내용을 diff 본문으로 돌려줬다.
+ */
+describe('링크 뒤의 .. 로 바깥 파일의 내용을 보지 못한다 (#119)', () => {
+  it('diff가 거부된다', async () => {
+    const { d } = repo()
+    const outside = mkdtempSync(join(tmpdir(), 'cc-git-outside-'))
+    dirs.push(outside)
+    writeFileSync(join(outside, 'secret.txt'), 'OUTSIDE SECRET')
+    execFileSync('mkdir', ['-p', join(d, 'sub', 'deep')])
+    execFileSync('mkdir', ['-p', join(d, 'sub', 'evil')])
+    symlinkSync(join(d, 'sub', 'deep'), join(d, 'link'))
+    symlinkSync(outside, join(d, 'evil'))
+
+    await expect(gitDiff(d, 'link/../evil/secret.txt')).rejects.toThrow(/outside the project/i)
+  })
+})
