@@ -615,6 +615,18 @@ const Composer = memo(function Composer({
    */
   framed?: boolean
 }) {
+  /**
+   * 열린 질문이 **정확히 하나**인가 (#125).
+   *
+   * 불리언으로 좁혀서 구독한다 — 질문 배열을 그대로 구독하면 매번 새 참조가 와서, 이
+   * 부품이 굳이 피하려고 만든 재렌더를 도로 부른다. 값이 바뀌는 때는 질문이 열리고 닫힐
+   * 때뿐이라 스토어의 send가 쓰는 판정과 같은 조건을 그대로 쓴다.
+   */
+  const answeringOne = useStore((s) => {
+    const open = s.sessions[sessionId]?.pendingQuestions ?? []
+    return open.length === 1 && open[0]!.questions.length === 1
+  })
+
   /*
    * 세션에서 **여기 정말로 필요한 것만** 집는다.
    *
@@ -1062,7 +1074,12 @@ const Composer = memo(function Composer({
               void takeFiles(files)
             }
           }}
-          placeholder="Type a message"
+          /*
+           * 질문이 열려 있으면 **여기 친 글이 그 질문의 답으로 간다** (#125). 그 사실을
+           * 누르기 전에 알려야 한다 — 예전에는 아무 말 없이 질문을 버렸고, 사람은 자기가
+           * 무엇을 없앴는지조차 몰랐다.
+           */
+          placeholder={answeringOne ? 'Type your answer to the question' : 'Type a message'}
           data-testid="prompt-input"
         />
         {/*

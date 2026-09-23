@@ -2581,6 +2581,30 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async send(sessionId, text, attachments) {
+    /*
+     * **질문이 열려 있으면 입력창의 글은 새 턴이 아니라 그 질문의 답이다.**
+     *
+     * 예전에는 이 자리가 pendingQuestions를 보지 않았다. 그래서 카드가 떠 있는 동안 글을
+     * 보내면 진행 중이던 턴이 끊기고, 답을 못 받은 AskUserQuestion이 **거절된 도구 사용**으로
+     * 정리됐다 — 카드는 이유 없이 사라지고 턴은 error_during_execution으로 깨졌다
+     * (실사고 2026-09-23: 사람이 "질문 다시 해줄래?"라고 쳤을 뿐인데 질문이 없어졌다).
+     *
+     * 막는 대신 뜻을 살린다. 보기가 마음에 안 들어 직접 쓰는 것은 자연스러운 행동이고,
+     * 카드에도 "Other — write your own" 자리가 이미 있다. 손짓과 의미가 이미 맞는다.
+     *
+     * **질문이 정확히 하나일 때만** 이렇게 한다. 한 요청에 질문이 여럿이면 카드가 전부
+     * 답하게 하는데(반만 보내면 모델이 나머지를 지어낸다), 글 한 줄이 그중 어느 것의 답인지
+     * 알 방법이 없다. 첨부가 있을 때도 비켜선다 — 답으로 보내면 첨부가 버려진다.
+     */
+    const open = get().sessions[sessionId]?.pendingQuestions ?? []
+    const only = open.length === 1 && open[0]!.questions.length === 1 ? open[0]! : null
+    if (only && !attachments?.length && text.trim()) {
+      await get().answerQuestion(sessionId, only.requestId, [
+        { question: only.questions[0]!.question, answers: [text.trim()] },
+      ])
+      return
+    }
+
     const seq = ++chatSeq
     /*
      * 보낸 즉시 '작업 중'으로 표시한다.
