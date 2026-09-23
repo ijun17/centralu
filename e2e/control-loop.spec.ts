@@ -7962,3 +7962,28 @@ test('긴 오류 문장이 대화를 옆으로 밀지 않는다', async ({ page 
   }))
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
 })
+
+/**
+ * 질문이 열려 있을 때 입력창에 친 글은 **그 질문의 답**이 된다 (#125).
+ *
+ * 실사고 2026-09-23: 카드가 떠 있는 동안 "질문 다시 해줄래?"라고 쳤더니 질문이 이유 없이
+ * 사라지고 턴이 error_during_execution으로 깨졌다. 저장된 tool_result에는 클로드 코드가
+ * 도구 사용을 거절당했을 때 내보내는 문구가 그대로 남아 있었다. 입력을 막는 대신, 카드에
+ * 이미 있는 "Other — write your own"과 같은 뜻으로 받아 준다.
+ */
+test('질문이 열려 있으면 입력창에 친 글이 그 답으로 간다 (#125)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+  await expect(page.getByTestId('question-card')).toBeVisible()
+
+  // 무엇이 일어날지 누르기 전에 알려 준다
+  await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /answer to the question/i)
+
+  await page.getByTestId('prompt-input').fill('질문 다시 해줄래?')
+  await page.getByTestId('prompt-input').press('Enter')
+
+  // 목은 받은 답을 그대로 되돌려 준다 — 거절됐다면 이 줄이 없다
+  await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 질문 다시 해줄래?')
+  await expect(page.getByTestId('question-card')).toHaveCount(0)
+})
