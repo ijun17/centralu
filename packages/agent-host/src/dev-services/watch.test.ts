@@ -153,3 +153,25 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     expect(w.setWatched('p1', root, rels)).toBe(MAX_WATCHED_DIRS)
   })
 })
+
+/**
+ * 감시도 같은 갈라짐에 샜다 (#119).
+ *
+ * `..`를 접지 않고 걸으면 가드는 링크를 따라간 뒤 부모로 올라가고, 실제로 감시가 걸리는
+ * 경로는 `safeJoin`이 먼저 접어 만든 것이었다. 프로젝트 밖 디렉토리에 살아 있는 watcher가
+ * 붙는다는 뜻이고, 그것은 남의 폴더에서 일어나는 일을 우리가 듣고 있다는 뜻이다.
+ */
+describe('링크 뒤의 .. 로는 바깥을 감시하지 못한다 (#119)', () => {
+  it('세운 감시가 없다', () => {
+    const root = tmp()
+    const outside = tmp()
+    mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
+    mkdirSync(join(root, 'sub', 'evil'))
+    symlinkSync(join(root, 'sub', 'deep'), join(root, 'link'))
+    symlinkSync(outside, join(root, 'evil'))
+
+    const w = makeWatcher(() => {})
+    watchers.push(w)
+    expect(w.setWatched('p', root, ['link/../evil'])).toBe(0)
+  })
+})
