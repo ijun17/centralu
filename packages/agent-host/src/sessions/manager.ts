@@ -165,6 +165,19 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
   )
 }
 
+/**
+ * 보고 틀의 한 줄짜리 칸에 남의 문자열을 끼울 때 (#120).
+ *
+ * 세션 이름은 첫 마디에서 자동으로 붙고 프로젝트 이름도 우리가 쓴 글이 아니다.
+ * 줄바꿈 하나면 `세션: …` 한 줄이 여러 줄이 되어 `사람:` 같은 가짜 칸을 틀 안에
+ * 그려 넣을 수 있다. 어댑터 턴은 이제 깨우기로 바뀌지만, 이 틀은 기록과 화면에도
+ * 그대로 남는다 — 틀의 모양은 틀을 쓰는 쪽이 지킨다.
+ */
+function frameField(value: string): string {
+  const flat = value.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').trim()
+  return flat.length > 120 ? flat.slice(0, 120) + '…' : flat
+}
+
 function payloadHasFrom(payload: unknown): boolean {
   return payload !== null && typeof payload === 'object' && 'from' in payload
 }
@@ -1905,26 +1918,27 @@ export class SessionManager {
     if (!target || !this.meta.has(orchestratorId)) return
 
     /*
-     * 저장/UI에는 예전처럼 식별 정보와 마지막 응답 미리보기를 남긴다. 다만 send()가
-     * 출처 있는 낮은 권한 메시지를 도구 달린 대상에게 보낼 때 어댑터 입력만 본문 없는
-     * 깨우기로 바꾼다. 즉 raw 보고는 기록/화면 provenance이고, vendor 턴은 신뢰 경계다.
+     * 저장/UI에는 예전처럼 식별 정보와 마지막 응답 미리보기를 남긴다. 어댑터 입력은
+     * deliver(relayed)가 본문 없는 깨우기로 바꾼다 — 보고하는 쪽이 매니저든 조율자든
+     * 마찬가지다 (#120). 즉 raw 보고는 기록/화면 provenance이고, vendor 턴은 신뢰 경계다.
      */
     const project = target.projectId
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(사라진 프로젝트)')
       : '(없음)'
     const preview = this.previewOf(sessionId, 600)
     try {
-      await this.send(
+      await this.deliver(
         orchestratorId,
         `[Centralu] 지시한 일이 끝났습니다.\n` +
-          `세션: ${target.name}\n` +
+          `세션: ${frameField(target.name)}\n` +
           `id: ${sessionId}\n` +
-          `프로젝트: ${project}\n\n` +
+          `프로젝트: ${frameField(project)}\n\n` +
           `마지막 응답:\n${preview || '(내용 없음)'}\n\n` +
           `더 필요하면 read_session으로 그 세션의 최근 대화를 읽을 수 있습니다.`,
         undefined,
-        // 보고도 사람 말이 아니다 (FR-11) — 보고한 워커 세션을 출처로 단다
+        // 보고도 사람 말이 아니다 (FR-11) — 보고한 세션을 출처로 단다
         { sessionId, name: target.name },
+        true,
       )
     } catch {
       // 오케스트레이터가 잠들었거나 지워졌을 수 있다 — 보고 하나 때문에 앱이 흔들리면 안 된다
@@ -2180,6 +2194,25 @@ export class SessionManager {
      */
     from?: { sessionId: string; name: string },
   ): Promise<void> {
+    return this.deliver(sessionId, text, attachments, from, false)
+  }
+
+  /**
+   * send()의 몸통 — **지시인지 전달인지**를 한 자리 더 받는다 (#120).
+   *
+   * 게이트가 발신자 프로필만 보던 동안, 매니저·조율자의 보고는 그냥 지나갔다.
+   * 프로필이 답하는 것은 "이 말을 지시로 믿어도 되는가"지 "이 말이 남의 말인가"가
+   * 아니기 때문이다. 보고는 **누가 옮기든 남의 말**이라, 옮기는 자리에서 표시한다.
+   * 남이 부를 수 있는 send()에는 이 자리를 열지 않는다 — 실수로 켤 수 있으면 경계가 아니다.
+   */
+  private async deliver(
+    sessionId: string,
+    text: string,
+    attachments: Attachment[] | undefined,
+    from: { sessionId: string; name: string } | undefined,
+    /** 남의 대화를 옮겨 담은 본문인가 (보고 경로). 지시는 false — 원문이어야 한다 */
+    relayed: boolean,
+  ): Promise<void> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -2223,12 +2256,14 @@ export class SessionManager {
      */
     this.emit({ type: 'user_message', sessionId, seq, text, ...(from ? { from } : {}) })
     /*
-     * 출처가 있는 낮은 권한 메시지를 도구 달린 대상에게 보낼 때만 vendor 어댑터 입력을
-     * sourceSessionId 깨우기로 바꾼다. 도구 프로필끼리의 지시와 일반 워커 지시는 원문이어야 한다.
-     * raw provenance는 저장/UI에 남고, 보고 본문은 read_session 관찰 데이터로만 읽힌다.
+     * vendor 어댑터 입력만 sourceSessionId 깨우기로 바꾸는 자리 — 두 갈래다.
+     *  - 옮겨 담은 본문(relayed): 발신자가 누구든 남의 말이다. 조건 없이 바꾼다.
+     *  - 출처 있는 낮은 권한 지시: 도구 달린 대상에게 갈 때만 바꾼다.
+     * 도구 프로필끼리의 지시와 일반 워커 지시는 원문이어야 한다 (#90).
+     * raw provenance는 저장/UI에 남고, 옮겨진 본문은 read_session 관찰 데이터로만 읽힌다.
      */
     const adapterText =
-      from && this.toolProfileOf(sessionId) && !this.toolProfileOf(from.sessionId)
+      from && (relayed || (this.toolProfileOf(sessionId) && !this.toolProfileOf(from.sessionId)))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
