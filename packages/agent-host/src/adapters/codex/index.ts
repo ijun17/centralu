@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process'
 import { bridgePath } from './bridge-path.js'
-
-/** 다리로 붙는 우리 MCP 서버 이름 — 승인 예외가 이 이름으로 판정한다 */
-const ORCHESTRATOR_MCP_SERVER = 'centralu'
+/** 다리로 붙는 우리 MCP 서버 이름 — elicitation 수락이 이 이름으로 판정한다 (정의는 한 곳, #93) */
+import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -239,7 +238,19 @@ class CodexSession implements SessionHandle {
                  */
                 project_doc_max_bytes: 0,
                 mcp_servers: {
-                  [ORCHESTRATOR_MCP_SERVER]: {
+                  /*
+                   * 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름) — claude 쪽과 같은 목록,
+                   * 같은 이유로 **내장 다리보다 먼저** 펼친다 (#93): 이 고침 전에 승인되어
+                   * 저장소에 앉은 `centralu`라는 이름이 다리를 갈아치우면, elicitation 수락
+                   * (serverName === ORCHESTRATOR_MCP_NAME)까지 그 서버의 것이 된다.
+                   */
+                  ...Object.fromEntries(
+                    (this.opts.extraMcpServers ?? []).map((s) => [
+                      s.name,
+                      { command: s.command, args: s.args },
+                    ]),
+                  ),
+                  [ORCHESTRATOR_MCP_NAME]: {
                     command: process.execPath,
                     args: [bridgePath()],
                     env: {
@@ -248,13 +259,6 @@ class CodexSession implements SessionHandle {
                       CC_SESSION_ID: this.opts.sessionId,
                     },
                   },
-                  // 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름) — claude 쪽과 같은 목록
-                  ...Object.fromEntries(
-                    (this.opts.extraMcpServers ?? []).map((s) => [
-                      s.name,
-                      { command: s.command, args: s.args },
-                    ]),
-                  ),
                 },
               }
             : {}),
@@ -304,7 +308,7 @@ class CodexSession implements SessionHandle {
      */
     if (r.method.toLowerCase().includes('elicitation')) {
       const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { serverName?: string }
-      const ours = p.serverName === ORCHESTRATOR_MCP_SERVER
+      const ours = p.serverName === ORCHESTRATOR_MCP_NAME
       this.client.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
       return
     }

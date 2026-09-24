@@ -9,6 +9,47 @@ function trustedJsonText(value: string): string {
 }
 
 /**
+ * 오케스트레이터 MCP 서버의 이름.
+ *
+ * **화면에 보이는 이름이고, 동시에 신뢰의 열쇠다** — 도구 호출 카드에
+ * `mcp__centralu__list_sessions`처럼 뜨고, claude 어댑터의 승인 예외와 codex의
+ * elicitation 수락이 둘 다 이 이름으로 판정한다.
+ *
+ * 도구 정의 옆에 두는 이유: 전에는 claude·codex 어댑터에 리터럴이 한 벌씩 있었고,
+ * 정작 제안된 서버 이름을 검사해야 하는 매니저는 어느 쪽도 가져올 수 없었다
+ * (어댑터를 임포트하면 SDK가 딸려 온다). 열쇠가 여러 벌이면 한 벌만 고치는
+ * 사고가 난다 — 여기 한 번 적고 셋이 가져다 쓴다 (#93).
+ */
+export const ORCHESTRATOR_MCP_NAME = 'centralu'
+
+/**
+ * 제안된 MCP 서버 이름이 쓸 수 있는 이름인가 (#93). 어겼으면 사람이 읽을 이유를, 괜찮으면 null.
+ *
+ * **이름이 들어오는 자리에서 막는다.** 승인된 서버의 이름은 곧 도구 접두어가 되고,
+ * 도구 접두어는 승인 예외의 판정 기준이다. 실측한 두 구멍:
+ *
+ *   centralu      인프로세스 오케스트레이터 서버를 **통째로 갈아치웠다**
+ *                 (승인된 서버가 내장 항목 뒤에 펼쳐진다 — 같은 열쇠가 남의 것이 된다)
+ *   centralu__pw  도구 이름이 `mcp__centralu__pw__*`가 되어 접두 검사를 통과했다
+ *                 → canUseTool을 아예 건너뛰었다
+ *
+ * 그래서 두 겹이다. 밑줄을 뺀 글자 규칙은 `__`를 만들 수 없게 하고(둘째 구멍),
+ * 예약어 검사는 이름 자체를 못 가져가게 한다(첫째 구멍). 예약어를 먼저 보는 것은
+ * 나중에 글자 규칙을 느슨하게 고쳐도 이 판정만은 남아 있으라는 뜻이다.
+ */
+export function mcpServerNameError(name: string): string | null {
+  if (name.trim().toLowerCase().startsWith(ORCHESTRATOR_MCP_NAME)) {
+    return `"${ORCHESTRATOR_MCP_NAME}"로 시작하는 이름은 이 앱이 쓰는 이름입니다 — 다른 이름으로 제안하세요`
+  }
+  // 밑줄이 빠진 것이 핵심이다: MCP 도구 이름의 칸막이가 `__`라, 이름에 밑줄을
+  // 허용하면 서버 하나가 남의 이름 뒤에 칸을 하나 더 붙일 수 있다
+  if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) {
+    return '이름은 소문자·숫자·하이픈으로 32자 이내여야 합니다 (밑줄은 도구 이름의 칸막이라 쓸 수 없습니다)'
+  }
+  return null
+}
+
+/**
  * 오케스트레이터 도구의 **유일한 정의**.
  *
  * 도구를 붙이는 길이 어댑터마다 다르다:
@@ -156,7 +197,11 @@ export const ORCHESTRATOR_TOOLS = [
       '이 도구는 아무것도 설치하지 않는다 (propose 규칙). 사람이 승인하면 앱이 서버를 등록하고 ' +
       '이 세션을 재시작한다 — 재시작 후 도구가 바로 보인다.',
     schema: z.object({
-      name: z.string().describe('서버 이름 (예: playwright). 도구 접두어가 된다'),
+      /*
+       * 글자 규칙은 여기 적어 두기만 한다 — 판정은 mcpServerNameError 한 곳이다 (#93).
+       * 스키마에 regex를 또 박으면 규칙이 두 벌이 되고, 느슨한 쪽이 곧 구멍이다.
+       */
+      name: z.string().describe('서버 이름 (예: playwright) — 소문자·숫자·하이픈 32자 이내. 도구 접두어가 된다'),
       command: z.string().describe('실행 명령 (예: npx)'),
       args: z.array(z.string()).default([]).describe('명령 인자 (예: ["-y", "@playwright/mcp@latest"])'),
       why: z.string().optional().describe('무엇을 하려고 필요한지 한 마디 — 사람이 승인 여부를 판단할 근거'),

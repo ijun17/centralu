@@ -79,6 +79,24 @@ function parseQuestions(input: unknown): Question[] {
 }
 
 /**
+ * 이 도구가 **우리 인프로세스 서버의** 도구인가 (승인 예외의 판정).
+ *
+ * MCP 도구 이름은 `mcp__<서버>__<도구>`이고 칸막이가 `__`다. 그래서 접두 검사
+ * (`startsWith('mcp__centralu__')`)는 서버 이름 자체를 보지 못한다 —
+ * `centralu__pw`라는 이름의 서버가 내놓는 `mcp__centralu__pw__navigate`도 통과했고,
+ * 그 도구는 canUseTool을 통째로 건너뛰었다 (실측, #93).
+ *
+ * 칸을 세어 **서버 이름 전체**로 판정한다. 우리 도구 이름에는 `__`가 없으므로
+ * (list_sessions·propose_mcp_server… 전부 홑밑줄) 칸은 정확히 셋이다.
+ * 이름 쪽에서 이미 막지만(mcpServerNameError), 신뢰를 내주는 자리는 남의 검사를
+ * 믿지 않고 자기 힘으로 옳아야 한다.
+ */
+function isOrchestratorTool(toolName: string): boolean {
+  const parts = toolName.split('__')
+  return parts.length === 3 && parts[0] === 'mcp' && parts[1] === ORCHESTRATOR_MCP_NAME
+}
+
+/**
  * 프리셋 → SDK 권한 옵션.
  *
  * **normal은 값을 보내지 않는다.** 이 앱은 사용자 설정·훅·CLAUDE.md를 전부 로드하면서
@@ -171,10 +189,15 @@ class ClaudeSession implements SessionHandle {
         ...(this.opts.orchestratorTools
           ? {
               mcpServers: {
-                [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId),
                 /*
                  * 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름). stdio로 띄운다 —
                  * npx류 명령은 첫 실행에서 스스로 설치되므로 별도 설치 단계가 없다.
+                 *
+                 * **내장 서버보다 먼저 펼친다** (#93). 이름은 제안 시점에 막지만
+                 * (mcpServerNameError), 이 고침 전에 승인되어 저장소에 이미 앉아 있는
+                 * 항목은 그 검사를 거치지 않았다. 순서가 뒤였을 때 `centralu`라는 이름
+                 * 하나가 인프로세스 오케스트레이터를 통째로 갈아치웠다 — 이제 같은
+                 * 항목이 들어와도 내장 항목이 덮어써서, 최악이 "그 서버가 안 붙는다"다.
                  */
                 ...Object.fromEntries(
                   (this.opts.extraMcpServers ?? []).map((s) => [
@@ -182,6 +205,7 @@ class ClaudeSession implements SessionHandle {
                     { type: 'stdio' as const, command: s.command, args: s.args },
                   ]),
                 ),
+                [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId),
               },
               /*
                * **파일에서 지시를 읽지 않는다.**
@@ -228,7 +252,7 @@ class ClaudeSession implements SessionHandle {
                  * 실측에서 이걸 안 하면 목록 한 번 읽는 데도 승인 창이 떠서
                  * 오케스트레이터가 첫 도구에서 멈춰 섰다.
                  */
-                if (toolName.startsWith(`mcp__${ORCHESTRATOR_MCP_NAME}__`)) {
+                if (isOrchestratorTool(toolName)) {
                   return { behavior: 'allow' as const, updatedInput: toolInput }
                 }
 

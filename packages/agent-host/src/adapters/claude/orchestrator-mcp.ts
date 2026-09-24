@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { OrchestratorTools } from '../contract.js'
 import {
   MANAGER_INSTRUCTIONS,
+  ORCHESTRATOR_MCP_NAME,
   ORCHESTRATOR_INSTRUCTIONS,
   SCOPED_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
@@ -25,14 +26,11 @@ import type { ToolProfile } from '../../apps/contract.js'
  * SDK 타입은 이 파일 밖으로 나가지 않는다 (anti-corruption).
  */
 
-/** 서버 이름. 승인 예외가 이 이름으로 판정하므로 한 곳에서만 정한다 */
 /**
- * 오케스트레이터에게 붙는 MCP 서버 이름.
- *
- * **화면에 보이는 이름이다** — 도구 호출 카드에 `mcp__centralu__list_sessions`처럼 뜬다.
- * 그래서 앱 이름과 어긋나면 사용자가 "이건 뭐지"를 겪는다.
+ * 서버 이름은 도구 정의 옆에서 온다 (sessions/orchestrator-tools.ts) — 승인 예외도,
+ * 제안된 이름을 막는 검사도 같은 글자를 봐야 한다 (#93).
  */
-export const ORCHESTRATOR_MCP_NAME = 'centralu'
+export { ORCHESTRATOR_MCP_NAME }
 
 export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile = 'orchestrator', sessionId?: string) {
   return createSdkMcpServer({
