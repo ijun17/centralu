@@ -228,11 +228,20 @@ export class MockPlatform implements Platform {
     commits: GitCommit[]
     branches: GitBranch[]
     dirty: string[]
+    /**
+     * 잘렸다고 알릴 diff의 키 (경로 또는 sha).
+     *
+     * 실물 host는 상한(400,000자)을 넘으면 앞부분만 주고 truncated를 세운다. 목이 늘
+     * false를 주는 동안에는 "잘림 안내가 안 뜬다"는 시험이 **깨질 수가 없었다** (#121).
+     * 길이로 흉내내지 않고 키로 받는 이유: 시험이 400KB짜리 문자열을 만들지 않고도
+     * 그 상태를 그릴 수 있어야 한다.
+     */
+    truncated: string[]
     /** git이 무시하는 것들 (#76) — 셋업 창이 복사 후보로 내미는 목록 */
     ignored: { path: string; bytes: number | null }[]
     lastCommitMessage?: string
     pushed: boolean
-  } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], ignored: [], pushed: false }
+  } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], truncated: [], ignored: [], pushed: false }
 
   readonly savedAttachments: Attachment[] = []
   readonly sentAttachments: Attachment[] = []
@@ -455,14 +464,14 @@ export class MockPlatform implements Platform {
     status: async (_projectId: string) => [...this.gitState.files],
     diff: async (_projectId: string, path: string, _staged?: boolean): Promise<GitDiff> => ({
       diff: this.gitState.diffs[path] ?? '',
-      truncated: false,
+      truncated: this.gitState.truncated.includes(path),
       binary: false,
     }),
     log: async (_projectId: string, limit = 50) => this.gitState.commits.slice(0, limit),
     commitDetail: async (_projectId: string, sha: string) => ({
       files: [`file-${sha}.ts`],
       diff: this.gitState.diffs[sha] ?? '',
-      truncated: false,
+      truncated: this.gitState.truncated.includes(sha),
     }),
     branches: async (_projectId: string) => [...this.gitState.branches],
     ignoredEntries: async (_projectId: string) => [...this.gitState.ignored],
