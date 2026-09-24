@@ -4,47 +4,11 @@ import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { caretAt, selectedText, type Caret } from '../viewer/copy.js'
+import { diffFileLabel, diffPlaceAt, renderableDiffRows, type DiffPlace } from './diff.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
-type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
-type DiffRow = { readonly kind: DiffRowKind; readonly marker: string; readonly body: string }
 
 const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open in your IDE to see the rest.'
-
-function toDiffRow(line: string): DiffRow {
-  const kind: DiffRowKind = line.startsWith('diff --git ')
-    ? 'file'
-    : line.startsWith('+') && !line.startsWith('+++')
-      ? 'add'
-      : line.startsWith('-') && !line.startsWith('---')
-        ? 'del'
-        : line.startsWith('@@')
-          ? 'hunk'
-          : 'ctx'
-  const marked = kind === 'add' || kind === 'del'
-  // The clipboard gets the ASCII marker. The screen gets the typographic one, below.
-  return { kind, marker: marked ? line.charAt(0) : '', body: marked ? line.slice(1) : line }
-}
-
-function renderableDiffRows(diff: string): readonly DiffRow[] {
-  return diff.split('\n').map(toDiffRow)
-}
-
-function diffFileLabel(line: string): string {
-  const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line)
-  if (!m) return line
-  const before = m[1] ?? ''
-  const after = m[2] ?? ''
-  return before === after ? after : `${before} → ${after}`
-}
-
-function currentDiffFile(rows: readonly DiffRow[], firstVisible: number): string | null {
-  for (let i = Math.min(firstVisible, rows.length - 1); i >= 0; i--) {
-    const row = rows[i]
-    if (row?.kind === 'file') return diffFileLabel(row.body)
-  }
-  return null
-}
 
 /**
  * 깃 패널 (FR-4, B-2~B-6).
@@ -155,7 +119,11 @@ function Changes({
         path={selected?.path}
         data={diff}
         emptyHint="Pick a file from the Changes list on the right"
-        onOpenInIde={async (line) => {
+        /*
+         * 작업 diff는 파일 하나다 — 어느 파일인지는 diff 안의 `diff --git`이 아니라
+         * 눌러서 들어온 그 파일이 정답이다. 그래서 `file`은 안 쓰고 `line`만 받는다.
+         */
+        onOpenInIde={async ({ line }) => {
           if (selected) {
             try {
               const { path } = await platform.fs.resolve(projectId, selected.path)
@@ -196,7 +164,8 @@ function DiffView({
   data: { diff: string; truncated: boolean; binary: boolean } | null
   /** 아무것도 안 고른 채 열렸을 때 — 목록이 사이드바에 있으니 그쪽을 가리켜야 한다 */
   emptyHint?: string
-  onOpenInIde: (line?: number) => Promise<void>
+  /** 지금 화면 맨 위가 가리키는 자리 — 어느 파일의 몇 번째 줄을 열어야 하는지 */
+  onOpenInIde: (target: { file: string | null; line?: number }) => Promise<void>
   onOpenViewer?: () => void
 }) {
   const diffText = data?.diff ?? ''
@@ -255,8 +224,14 @@ function DiffView({
           !root.contains(selection.anchorNode) ||
           !root.contains(selection.focusNode))
       if (!wholeDiff.current && spansOutside) return
+      /*
+       * 잘렸다는 사실은 화면의 안내문(`diff-truncation`)이 말한다 — **클립보드에는 넣지
+       * 않는다.** 뷰어(CodeViewer)는 넣는다: 파일 본문은 사람이 읽고, 한 줄 더 붙어도
+       * 읽는 데 지장이 없다. diff는 `git apply`가 읽는다. 파서에게 사람 문장을 건네면
+       * 그 자리에서 깨진다 — 반쪽 patch보다 나쁜 건 깨진 patch다 (#122).
+       */
       const payload = wholeDiff.current
-        ? diffText + (data?.truncated ? `\n${DIFF_TRUNCATED_MESSAGE}` : '')
+        ? diffText
         : selectedText({ selection, root, lines: copyLines, lastAnchor: anchor.current })
       if (payload === null) return
       event.preventDefault()
@@ -287,7 +262,12 @@ function DiffView({
     overscan: 24,
   })
   const virtualRows = virtualizer.getVirtualItems()
-  const currentFile = currentDiffFile(rows, virtualizer.range?.startIndex ?? virtualRows[0]?.index ?? 0)
+  /*
+   * 맨 위에 보이는 행 하나가 두 가지를 정한다: 밴드에 쓸 파일 이름과, "Open in IDE"가
+   * 데려갈 자리. 같은 계산을 두 번 하지 않는다 — 두 번 하면 밴드가 가리키는 파일과
+   * IDE가 여는 파일이 어긋날 수 있고, 그게 바로 이 칸이 없애려던 종류의 거짓말이다.
+   */
+  const place: DiffPlace = diffPlaceAt(rows, virtualizer.range?.startIndex ?? virtualRows[0]?.index ?? 0)
 
   if (!path) {
     return (
@@ -328,15 +308,25 @@ function DiffView({
           )}
           <button
             className="text-[11px] text-slate hover:text-chalk"
-            onClick={() => void onOpenInIde()}
+            onClick={() => void onOpenInIde({ file: place.file, line: place.line })}
             data-testid="open-in-ide"
           >
             Open in IDE
           </button>
         </span>
       </header>
+      {/*
+       * `tabIndex={0}`은 여기서는 맞다 — 뷰어(CodeViewer)의 -1과 다른 판단이다.
+       * 이 칸은 **가로로도 세로로도 스크롤된다**. -1이면 마우스를 쓰지 않는 사람은
+       * 칸 안으로 들어갈 길이 없어, 압축된 한 줄의 오른쪽 끝을 영영 못 본다.
+       * 대신 Tab이 이름 없는 `<div>`에 떨어지지 않게 region으로 이름을 붙인다.
+       * 이름을 `Diff`로만 두는 것도 이유가 있다: 파일 이름은 바로 위 헤더가 이미
+       * 말하고, 여기서 또 말하면 같은 이름을 두 번 읽는다 (아래 밴드와 같은 문제).
+       */}
       <div
         ref={scrollRef}
+        role="region"
+        aria-label="Diff"
         className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[1.5]"
         tabIndex={0}
         onMouseDown={() => scrollRef.current?.focus()}
@@ -348,12 +338,22 @@ function DiffView({
         }}
         onScroll={() => { if (wholeDiff.current) paintSelection() }}
       >
-        {currentFile && (
+        {place.label && (
+          /*
+           * `left-0`이 없으면 세로로만 붙어 있다: 가로로 1,500px 밀면 밴드도 같이
+           * -1,500px로 밀려 나간다 (재 봄, #122). 압축된 한 줄의 오른쪽을 보러 가는
+           * 순간 어느 파일인지 말해 주던 띠가 사라지는 것 — sticky는 두 축 다 걸어야 한다.
+           *
+           * `aria-hidden`: 이건 목록 안 `diff --git` 행을 **눈으로** 따라가는 장치다.
+           * 화면에서는 그 행 위에 겹쳐 앉아 하나로 보이지만, 붙이지 않으면 스크린
+           * 리더는 같은 파일 이름을 두 번 읽는다. 진짜 내용은 목록 안의 그 행이다.
+           */
           <div
-            className="sticky top-0 z-20 border-b border-edge bg-panel px-3 py-1"
+            className="sticky left-0 top-0 z-20 border-b border-edge bg-panel px-3 py-1"
             data-testid="diff-current-file-band"
+            aria-hidden="true"
           >
-            <span className="readout text-[11px] text-chalk">{currentFile}</span>
+            <span className="readout text-[11px] text-chalk">{place.label}</span>
           </div>
         )}
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
@@ -376,7 +376,7 @@ function DiffView({
                   data-diff="file"
                   data-line={i}
                   data-testid="diff-file-band"
-                  className="absolute left-0 top-0 w-full border-b border-edge bg-panel px-3 py-1"
+                  className="absolute left-0 top-0 w-max min-w-full border-b border-edge bg-panel px-3 py-1"
                   style={{ transform: `translateY(${v.start}px)` }}
                 >
                   <span data-code className="readout text-[11px] text-chalk">
@@ -392,7 +392,13 @@ function DiffView({
                 ref={virtualizer.measureElement}
                 data-diff={kind}
                 data-line={i}
-                className={`absolute left-0 top-0 w-full ${
+                /*
+                 * `w-full`이면 행의 너비가 **보이는 폭**이라, 가로로 밀면 초록·빨강 배경이
+                 * 왼쪽으로 빠져나가고 오른쪽 절반은 무색이 된다 — 색이 승인 판단을 훑게
+                 * 해 주는 장치인데 정작 긴 줄에서 사라진다. `w-max`로 내용만큼 넓히고
+                 * `min-w-full`로 짧은 줄도 끝까지 칠한다.
+                 */
+                className={`absolute left-0 top-0 w-max min-w-full ${
                   kind === 'add'
                     ? 'bg-add-bg text-add'
                     : kind === 'del'
@@ -406,7 +412,11 @@ function DiffView({
                 <span className="inline-block w-4 select-none text-center opacity-70">
                   {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
                 </span>
-                <span data-code>{body}</span>
+                {/* 들여쓰기는 diff에서 정보다 — 기본 `white-space: normal`은 9칸과 8칸을
+                    같은 자리에 그렸다 (#122). 뷰어(CodeViewer)도 같은 이유로 whitespace-pre. */}
+                <span data-code className="whitespace-pre">
+                  {body}
+                </span>
               </div>
             )
           })}
@@ -436,6 +446,7 @@ function History({
   pick: number
 }) {
   const platform = usePlatform()
+  const setToast = useStore((s) => s.setToast)
   const [detail, setDetail] = useState<{
     sha: string
     files: string[]
@@ -459,7 +470,27 @@ function History({
         path={detail ? `${detail.files.length} files` : undefined}
         data={detail ? { diff: detail.diff, truncated: detail.truncated, binary: false } : null}
         emptyHint="Pick a commit from the History list on the right"
-        onOpenInIde={async () => {}}
+        /*
+         * 여기 있던 `async () => {}` 때문에 커밋 화면의 버튼은 눌러도 아무 일이 없었다 —
+         * 죽은 버튼은 없는 버튼보다 나쁘다 (#122).
+         *
+         * 커밋 diff는 파일이 여럿이라 "어느 파일"을 diff 자신이 말해 줘야 한다: 밴드가
+         * 가리키는 그 파일이다. 여는 것은 **작업 트리의 그 파일**이다 — IDE는 특정 sha의
+         * blob을 열 수 없다. 줄 번호도 커밋의 새 쪽 기준이라 그 뒤 수정이 있었으면
+         * 어긋날 수 있지만, 1번 줄로 데려다 놓는 것보다는 가깝다.
+         */
+        onOpenInIde={async ({ file, line }) => {
+          if (!file) {
+            setToast('Could not tell which file this line belongs to')
+            return
+          }
+          try {
+            const { path } = await platform.fs.resolve(projectId, file)
+            await platform.system.openInIde(path, line)
+          } catch (e) {
+            setToast(`Could not open in IDE: ${(e as Error).message}`)
+          }
+        }}
       />
     </div>
   )
