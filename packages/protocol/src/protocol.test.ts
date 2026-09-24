@@ -2,13 +2,17 @@
  * 골든 테스트 (M1 플랜 T1-1). 여기 픽스처는 "이 버전이 파싱할 수 있어야 하는 메시지"의 고정 목록이다.
  * 스키마를 바꿀 때 이 파일이 깨지면 = 하위 호환 파괴. 필드 추가는 여기를 깨지 않아야 한다 (docs/protocol.md §4).
  */
+import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
+  ATTACHMENT_MAX_BASE64,
+  handoffFile,
   NormalizedEvent,
   PROTOCOL_VERSION,
   parseClientFrame,
   parseEventLenient,
   parseServerFrame,
+  RpcMethods,
   ToolDescriptor,
   ToolName,
   ToolStatus,
@@ -208,5 +212,49 @@ describe('tool presentation metadata', () => {
     const detected = { name: 'claude', installed: true, loggedIn: true, detail: 'v2.0.0' }
     expect(ToolStatus.safeParse({ ...descriptor, ...detected }).success).toBe(true)
     expect(ToolStatus.safeParse(detected).success).toBe(false)
+  })
+})
+
+/**
+ * A session id is an identifier, not a path (#94).
+ *
+ * Two commands turn it straight into one: `attachments.save` makes the directory it names, and
+ * `agents.deleteSession` removes that directory recursively *without first looking the session
+ * up*. Measured before this schema existed, `{ sessionId: '../../Documents' }` answered
+ * `{ ok: true }` and the directory two levels above the data folder was gone. The refusal has to
+ * live here because this is the one place every caller of every command passes through.
+ */
+describe('SessionId', () => {
+  const del = RpcMethods['agents.deleteSession'].params
+  const save = RpcMethods['attachments.save'].params
+
+  it('refuses an id that is a path', () => {
+    expect(del.safeParse({ sessionId: '../../Documents' }).success).toBe(false)
+    expect(del.safeParse({ sessionId: 'a/b' }).success).toBe(false)
+    expect(del.safeParse({ sessionId: '..' }).success).toBe(false)
+    // A leading dot is refused outright, which is what makes `..` unspellable rather than
+    // merely caught — there is no second rule to keep in step with this one.
+    expect(del.safeParse({ sessionId: '.hidden' }).success).toBe(false)
+    expect(del.safeParse({ sessionId: '' }).success).toBe(false)
+  })
+
+  it('refuses a path as the name of a handoff note', () => {
+    // `.centralu/handoff/<id>.md` is the other place the id becomes a file name.
+    expect(() => handoffFile('../../../.ssh/authorized_keys')).toThrow(/Not a session id/)
+  })
+
+  it('accepts the ids we actually mint', () => {
+    // Guard against a regex so tight it refuses the app's own traffic: host ids are UUIDs, and
+    // tests and fixtures use short readable ones.
+    expect(del.safeParse({ sessionId: randomUUID() }).success).toBe(true)
+    expect(del.safeParse({ sessionId: 's1' }).success).toBe(true)
+    expect(del.safeParse({ sessionId: 'ho-s1' }).success).toBe(true)
+    expect(handoffFile('ho-s1')).toBe('.centralu/handoff/ho-s1.md')
+  })
+
+  it('refuses an attachment bigger than the cap', () => {
+    const ok = { sessionId: 's1', name: 'a.png', mime: 'image/png' }
+    expect(save.safeParse({ ...ok, dataBase64: 'AAAA' }).success).toBe(true)
+    expect(save.safeParse({ ...ok, dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64 + 1) }).success).toBe(false)
   })
 })

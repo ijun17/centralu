@@ -1,5 +1,39 @@
 import { z } from 'zod'
 
+/**
+ * 세션 id — 우리가 만든 불투명한 식별자다 (`randomUUID()`).
+ *
+ * **모양을 프로토콜에 못박는 이유는 이 값이 경로 조각이 되기 때문이다** (#94).
+ * 첨부 폴더(`<데이터>/attachments/<id>/`)와 인수인계 노트(`.centralu/handoff/<id>.md`)가
+ * 이 문자열을 그대로 디렉토리·파일 이름으로 쓴다. `z.string()`이던 시절
+ * `agents.deleteSession`에 `"../../Documents"`를 보내면 `{ ok: true }`를 돌려주면서
+ * 데이터 폴더 두 단계 위의 그 폴더를 `recursive: true`로 지웠고, `attachments.save`는
+ * 같은 방식으로 아무 경로에 아무 확장자로 파일을 만들었다. 둘 다 실측했다.
+ *
+ * 그래서 묻는 것은 "이 경로가 밖으로 나가는가"가 아니라 **"애초에 조각 하나인가"**다.
+ * 구분자도, `.`으로 시작하는 이름도 통과하지 못하므로 `..`는 표현조차 되지 않는다 —
+ * 밖으로 나가는 경로를 걸러내는 것보다 강하고, 읽는 사람이 한 줄로 확인할 수 있다.
+ * (같은 논리가 `dev-services/fs.ts`의 `baseName`에 이미 있다: 이름이 들어올 자리에서는
+ * 봉쇄를 검사하는 대신 이름이 아닌 것을 거절한다.)
+ *
+ * 128자 상한은 id가 아닌 것을 한 번 더 거르기 위한 것이다 — UUID는 36자다.
+ */
+const SESSION_ID_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/
+
+export const SessionId = z.string().regex(SESSION_ID_RE, 'Not a session id')
+export type SessionId = z.infer<typeof SessionId>
+
+/**
+ * 같은 판정을, zod가 닿지 않는 곳에서.
+ *
+ * 경계에서 한 번 거르는 것이 본진이고(docs/protocol.md §4), 이건 경로를 **만드는 쪽**이
+ * 스스로 거는 2차 방어선이다. 경로를 만드는 함수는 프로토콜을 거치지 않고도 불릴 수
+ * 있고(내부 호출·앞으로 생길 호출자), 그때 이 함수가 없으면 #94가 그대로 돌아온다.
+ */
+export function isSessionId(value: string): boolean {
+  return SESSION_ID_RE.test(value)
+}
+
 /** 세션 상태 (product-spec FR-12). 긴급도는 core/session이 판정한다. */
 export const SessionState = z.enum(['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error'])
 export type SessionState = z.infer<typeof SessionState>

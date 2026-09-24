@@ -1,6 +1,6 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import type { Attachment } from '@cc/protocol'
+import { isSessionId, type Attachment } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
 
 /**
@@ -11,6 +11,28 @@ import { dataRoot } from '../data-dir.js'
  */
 // **함수다.** 모듈 로드 시점에 정하면 host가 데이터 폴더를 고정하기 전의 값이 박힌다
 const root = () => join(dataRoot(), 'attachments')
+
+/**
+ * 세션 폴더 — 여기서 id는 **조각 하나**여야 한다 (#94).
+ *
+ * 이 파일이 세션 id를 디렉토리 이름으로 쓰는 유일한 곳이고, 그 디렉토리는 통째로
+ * 지워진다. `"../../Documents"`를 받았을 때 `rm(..., { recursive: true })`가 실제로
+ * 홈의 그 폴더를 지웠다. 프로토콜이 이미 경계에서 같은 것을 거르지만(`SessionId`),
+ * 경로를 만드는 쪽이 스스로도 확인한다 — 이 함수들은 RPC를 거치지 않고도 불린다
+ * (`saveAttachment(m.id, 'agent-image', …)`가 그렇고, 앞으로 생길 호출자도 그렇다).
+ *
+ * `path-guard`를 쓰지 않는 이유: 그것은 "여러 조각짜리 상대 경로가 루트 안에
+ * 머무는가"를 심볼릭 링크까지 따라가며 답하고, 그러려면 루트가 이미 디스크에 있어야
+ * 한다 — 첨부 루트는 이 호출 안에서 처음 만들어지고, 비우는 쪽은 루트가 생기기 전에도
+ * 돈다. 그리고 여기서 물어야 할 것은 봉쇄가 아니라 **"이게 애초에 id인가"**다.
+ * 조각이 하나뿐이면 나갈 경로가 표현되지 않으므로 봉쇄 검사보다 강하다.
+ */
+function sessionDir(sessionId: string): string {
+  if (!isSessionId(sessionId)) {
+    throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
+  }
+  return join(root(), sessionId)
+}
 
 const EXT: Record<string, string> = {
   'image/png': '.png',
@@ -25,7 +47,7 @@ export async function saveAttachment(
   mime: string,
   dataBase64: string,
 ): Promise<Attachment> {
-  const dir = join(root(), sessionId)
+  const dir = sessionDir(sessionId)
   await mkdir(dir, { recursive: true })
   const ext = extname(name) || EXT[mime] || ''
   const file = join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`)
@@ -36,7 +58,7 @@ export async function saveAttachment(
 
 /** 세션 아카이브·삭제 시 함께 정리 */
 export async function clearAttachments(sessionId: string): Promise<void> {
-  await rm(join(root(), sessionId), { recursive: true, force: true })
+  await rm(sessionDir(sessionId), { recursive: true, force: true })
 }
 
 /** 총량 상한 — 이미지가 영속되면서(#40) 무한히 쌓일 수 있게 됐다. 사용자 결정: 500MB */

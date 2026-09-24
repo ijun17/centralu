@@ -18,6 +18,8 @@ import {
   QuestionAnswer,
   SessionActivity,
   SessionGoal,
+  SessionId,
+  isSessionId,
   SessionState,
   TokenUsage,
   ToolName,
@@ -46,6 +48,8 @@ export const HANDOFF_DIR = '.centralu/handoff'
  * 한쪽의 청소가 다른 쪽이 아직 읽지 않은 글을 치우는 것도 같은 뿌리다.
  */
 export function handoffFile(sessionId: string): string {
+  // id가 곧 파일 이름이다 — 조각 하나가 아니면 이 경로는 우리가 뜻한 자리가 아니다 (#94)
+  if (!isSessionId(sessionId)) throw new Error(`Not a session id: ${sessionId}`)
   return wireJoin(HANDOFF_DIR, `${sessionId}.md`)
 }
 
@@ -78,7 +82,7 @@ export const CreateSessionParams = z.object({
        * 있어야 host가 "아직 주인이 있는 노트"와 고아를 구별할 수 있다. 옛 프레임과
        * 기록 모드 밖의 호출을 위해 optional이다: 없으면 그 노트는 아무도 주장하지 않는다.
        */
-      fromSessionId: z.string().optional(),
+      fromSessionId: SessionId.optional(),
     })
     .optional(),
   resumeExternalId: z.string().optional(),
@@ -120,7 +124,7 @@ export type CreateSessionParams = z.infer<typeof CreateSessionParams>
  * 타입이 "없다"고 말하는 필드가 실제로는 흐르고 있었다.
  */
 export const UpdateSettingsParams = z.object({
-  sessionId: z.string(),
+  sessionId: SessionId,
   model: z.string().nullable().optional(),
   /** 추론 강도. 모델마다 지원 단계가 다르므로 문자열 그대로 나른다 */
   effort: z.string().nullable().optional(),
@@ -452,15 +456,26 @@ export const StoredMessage = z.object({
 })
 export type StoredMessage = z.infer<typeof StoredMessage>
 
+/**
+ * 첨부 하나의 상한 (#94) — base64 글자 수로 센다. 원본 32MiB가 이 길이가 된다.
+ *
+ * 상한이 없던 자리다. 총량은 `sweepAttachments`가 500MB로 잡지만 그 청소는 이 길로
+ * 들어온 파일을 보지 않으므로, 한 번의 호출이 디스크를 채우는 것을 막는 것은 여기뿐이다.
+ * 게다가 문자열은 파일이 되기 전에 host의 메모리에 통째로 올라간다 — 거절은 쓰기 전에
+ * 일어나야 의미가 있다. 32MiB는 붙여넣는 스크린샷(수 MB)보다 넉넉히 크고, 한 번에
+ * 호스트를 눕힐 만큼 크지는 않은 자리로 골랐다.
+ */
+export const ATTACHMENT_MAX_BASE64 = Math.ceil((32 * 1048576) / 3) * 4
+
 export const RpcMethods = {
   'agents.createSession': { params: CreateSessionParams, result: SessionInfo },
   'agents.send': {
-    params: z.object({ sessionId: z.string(), text: z.string(), attachments: z.array(Attachment).optional() }),
+    params: z.object({ sessionId: SessionId, text: z.string(), attachments: z.array(Attachment).optional() }),
     result: z.object({ ok: z.literal(true) }),
   },
   'agents.respondApproval': {
     params: z.object({
-      sessionId: z.string(),
+      sessionId: SessionId,
       requestId: z.string(),
       decision: ApprovalDecision,
       scope: ApprovalScope.optional(),
@@ -477,13 +492,13 @@ export const RpcMethods = {
    */
   'agents.answerQuestion': {
     params: z.object({
-      sessionId: z.string(),
+      sessionId: SessionId,
       requestId: z.string(),
       answers: z.array(QuestionAnswer),
     }),
     result: z.object({ ok: z.literal(true) }),
   },
-  'agents.interrupt': { params: z.object({ sessionId: z.string() }), result: z.object({ ok: z.literal(true) }) },
+  'agents.interrupt': { params: z.object({ sessionId: SessionId }), result: z.object({ ok: z.literal(true) }) },
   /**
    * 세션을 완전히 지운다 — 대화 기록·첨부까지 사라진다.
    *
@@ -493,7 +508,7 @@ export const RpcMethods = {
    */
   'agents.deleteSession': {
     params: z.object({
-      sessionId: z.string(),
+      sessionId: SessionId,
       /**
        * 워크트리 세션일 때만 의미가 있다. **기본은 남기는 것이다** —
        * 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다.
@@ -569,7 +584,7 @@ export const RpcMethods = {
    */
   'agents.exportHandoffRecord': {
     params: z.object({
-      sessionId: z.string(),
+      sessionId: SessionId,
       /** 후임자가 될 도구 — 기록 헤더의 `codex → claude`. 모르면 생략한다 */
       toTool: ToolName.optional(),
     }),
@@ -591,7 +606,7 @@ export const RpcMethods = {
     result: SessionInfo,
   },
   'agents.worktreeStatus': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({ sessionId: SessionId }),
     result: z
       .object({ path: z.string(), branch: z.string(), dirty: z.boolean(), changedFiles: z.number() })
       .nullable(),
@@ -601,11 +616,11 @@ export const RpcMethods = {
    * 도구가 이상해졌을 때 세션을 새로 만들지 않고 프로세스만 갈아 끼우는 길.
    */
   'agents.restartSession': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({ sessionId: SessionId }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
   'agents.resumeSession': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({ sessionId: SessionId }),
     result: z.object({
       session: SessionInfo,
       resumed: z.boolean(),
@@ -624,7 +639,7 @@ export const RpcMethods = {
    * 유일한 길이다. 원본은 건드리지 않고 사본을 만들어 이 세션이 그쪽을 가리키게 한다.
    */
   'agents.forkConversation': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({ sessionId: SessionId }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
   /**
@@ -635,7 +650,7 @@ export const RpcMethods = {
    * 결과가 다른 일을 같은 문으로 부르면 부르는 쪽이 그 차이를 모른 채 쓴다.
    */
   'agents.switchTool': {
-    params: z.object({ sessionId: z.string(), tool: ToolName }),
+    params: z.object({ sessionId: SessionId, tool: ToolName }),
     result: SessionInfo,
   },
   /** 모델·권한을 대화 도중에 바꾼다 (다음 턴부터 적용) */
@@ -699,7 +714,12 @@ export const RpcMethods = {
   },
   /** 붙여넣은 이미지를 host가 파일로 저장한다 (base64를 DB에 넣지 않기 위해) */
   'attachments.save': {
-    params: z.object({ sessionId: z.string(), name: z.string(), mime: z.string(), dataBase64: z.string() }),
+    params: z.object({
+      sessionId: SessionId,
+      name: z.string(),
+      mime: z.string(),
+      dataBase64: z.string().max(ATTACHMENT_MAX_BASE64, 'This attachment is too large'),
+    }),
     result: Attachment,
   },
   'fs.listDir': {
@@ -897,11 +917,11 @@ export const RpcMethods = {
   },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
-    params: z.object({ sessionId: z.string().optional() }),
+    params: z.object({ sessionId: SessionId.optional() }),
     result: z.array(z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() })),
   },
   'orchestrator.tool': {
-    params: z.object({ sessionId: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) }),
+    params: z.object({ sessionId: SessionId, name: z.string(), args: z.record(z.string(), z.unknown()) }),
     result: z.object({ text: z.string(), isError: z.boolean().optional() }),
   },
   'grid.get': { params: z.object({}), result: z.array(z.string()) },
@@ -913,7 +933,7 @@ export const RpcMethods = {
   'projects.gitStatus': { params: z.object({ projectId: z.string() }), result: ProjectInfo },
   'sessions.list': { params: z.object({}), result: z.array(SessionInfo) },
   'sessions.rename': {
-    params: z.object({ sessionId: z.string(), name: z.string() }),
+    params: z.object({ sessionId: SessionId, name: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /*
@@ -922,11 +942,11 @@ export const RpcMethods = {
    * 워크트리 매니저(#69)다 — 역할은 고르는 것이 아니라 관계에서 나온다.
    */
   'sessions.markRead': {
-    params: z.object({ sessionId: z.string(), seq: z.number() }),
+    params: z.object({ sessionId: SessionId, seq: z.number() }),
     result: z.object({ ok: z.literal(true) }),
   },
   'messages.load': {
-    params: z.object({ sessionId: z.string(), limit: z.number().default(200), beforeSeq: z.number().optional() }),
+    params: z.object({ sessionId: SessionId, limit: z.number().default(200), beforeSeq: z.number().optional() }),
     result: z.array(StoredMessage),
   },
   /**
@@ -944,7 +964,7 @@ export const RpcMethods = {
    * UI는 이걸 구분해서 '없음'과 '불러오는 중'을 다르게 보여준다.
    */
   'agents.commands': {
-    params: z.object({ sessionId: z.string() }),
+    params: z.object({ sessionId: SessionId }),
     result: z.object({ ready: z.boolean(), commands: z.array(CommandInfo) }),
   },
   /**
