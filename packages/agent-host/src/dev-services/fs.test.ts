@@ -1,8 +1,28 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { baseName, importFile, listDir, moveEntry, readTextFile, resolveExisting, safeJoin } from './fs.js'
+import {
+  baseName,
+  dropEscapingLinks,
+  importFile,
+  listDir,
+  moveEntry,
+  prepareCopyTarget,
+  readTextFile,
+  resolveExisting,
+  safeJoin,
+} from './fs.js'
 
 /**
  * 파일을 **바꾸는** 쪽의 검사 (#18, #19).
@@ -409,5 +429,45 @@ describe('링크 뒤의 .. 는 가드와 syscall을 갈라놓지 못한다 (#119
   it('안쪽을 도는 .. 는 평소처럼 통한다', async () => {
     writeFileSync(join(root, 'a.txt'), '안')
     await expect(readTextFile(root, 'sub/../a.txt')).resolves.toBeTruthy()
+  })
+})
+
+/**
+ * #95: 워크트리 프로비저닝이 복사를 끝낸 뒤 남는 링크들.
+ *
+ * 여기서 정하는 경계는 하나다 — **밖을 가리키면 창문, 안을 가리키면 그냥 링크.**
+ */
+describe('복사된 나무에 남은 링크', () => {
+  it('끊어진 링크도 가리키는 글자로 판정한다 — 대상이 나중에 생기면 그때 창문이 된다', async () => {
+    const outside = outsideDir()
+    symlinkSync(join(outside, 'not-yet'), join(root, 'later'))
+    symlinkSync('also-not-yet', join(root, 'inside-later'))
+
+    expect(await dropEscapingLinks(root, root)).toEqual(['later'])
+    expect(() => lstatSync(join(root, 'later'))).toThrow()
+    // 안쪽을 가리키는 끊어진 링크는 그대로 둔다 — 대상이 이 나무 안에 생길 수도 있다
+    expect(lstatSync(join(root, 'inside-later')).isSymbolicLink()).toBe(true)
+  })
+
+  it('링크 안으로는 들어가지 않는다 — 순환에 걸리지 않는다', async () => {
+    mkdirSync(join(root, 'a'))
+    symlinkSync(join(root, 'a'), join(root, 'a', 'self'))
+
+    await expect(dropEscapingLinks(root, root)).resolves.toEqual([])
+  })
+
+  it('목적지의 부모가 링크면 만들지도, 쓰지도 않는다', async () => {
+    const outside = outsideDir()
+    symlinkSync(outside, join(root, 'out'))
+
+    await expect(prepareCopyTarget(root, 'out/app.env')).rejects.toThrow(/outside the project/i)
+    expect(existsSync(join(outside, 'app.env'))).toBe(false)
+  })
+
+  it('없는 부모는 만들어 준다 — 목록에 `sub/.env`를 적는 것은 평범한 일이다', async () => {
+    const dst = await prepareCopyTarget(root, 'sub/deeper/.env')
+
+    expect(dst).toBe(join(root, 'sub', 'deeper', '.env'))
+    expect(existsSync(join(root, 'sub', 'deeper'))).toBe(true)
   })
 })

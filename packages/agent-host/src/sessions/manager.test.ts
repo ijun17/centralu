@@ -1,7 +1,18 @@
 /** T3-3 완료 기준: 인메모리 어댑터 목으로 RPC 통합 검증 */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName, Attachment } from '@cc/protocol'
@@ -2118,6 +2129,102 @@ describe('워크트리 세션', () => {
 
     expect(existsSync(join(s.worktree!.path, '..', 'outside-secret.txt'))).toBe(false)
     expect(existsSync(join(s.worktree!.path, 'outside-secret.txt'))).toBe(false)
+  })
+
+  /*
+   * #95: 이탈 판정이 문자열 비교였다. `.env`가 밖을 가리키는 심볼릭 링크여도 글자로는
+   * 프로젝트 안이라 통과했고, `cp -Rc`가 링크를 링크째 옮겨 워크트리에 창문을 남겼다.
+   * 에이전트에게는 자기 나무 안의 평범한 `.env`로 보인다.
+   */
+  it('밖을 가리키는 링크는 복사되지 않는다 — 글자가 아니라 풀어 본 자리로 판정한다 (#95)', async () => {
+    const secret = join(root, 'id_rsa')
+    writeFileSync(secret, 'ssh-private-key\n')
+    symlinkSync(secret, join(repo, '.env'))
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/planted',
+    })) as SessionInfo
+
+    // 링크도, 링크가 데려온 내용도 워크트리에 없어야 한다
+    expect(existsSync(join(s.worktree!.path, '.env'))).toBe(false)
+    expect(() => lstatSync(join(s.worktree!.path, '.env'))).toThrow()
+  })
+
+  it('디렉토리 안에 숨은 밖으로 난 링크도 워크트리에 남지 않는다 (#95)', async () => {
+    const outside = join(root, 'outside')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'id_rsa'), 'ssh-private-key\n')
+    mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
+    writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
+    symlinkSync(outside, join(repo, 'vendor', 'leak'))
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/planted-deep',
+    })) as SessionInfo
+
+    // 나무는 건너오되, 창문만 닫힌다 — 하나 이상하다고 node_modules 전체를 버리지는 않는다
+    expect(readFileSync(join(s.worktree!.path, 'vendor', 'deep', 'blob.bin'), 'utf8')).toBe('payload\n')
+    expect(() => lstatSync(join(s.worktree!.path, 'vendor', 'leak'))).toThrow()
+  })
+
+  it('프로젝트 안을 가리키던 링크는 파일로 도착한다 — 원본 저장소로 난 창문이 아니라 (#95)', async () => {
+    mkdirSync(join(repo, 'secrets'))
+    writeFileSync(join(repo, 'secrets', 'real.env'), 'SECRET=1\n')
+    symlinkSync(join(repo, 'secrets', 'real.env'), join(repo, '.env'))
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/deref',
+    })) as SessionInfo
+
+    const copied = join(s.worktree!.path, '.env')
+    expect(lstatSync(copied).isSymbolicLink()).toBe(false)
+    expect(readFileSync(copied, 'utf8')).toBe('SECRET=1\n')
+    // 격리의 증거: 워크트리에서 고쳐도 원본이 안 움직인다
+    writeFileSync(copied, 'SECRET=2\n')
+    expect(readFileSync(join(repo, 'secrets', 'real.env'), 'utf8')).toBe('SECRET=1\n')
+  })
+
+  it('pnpm 심볼릭 숲은 링크째 건너온다 — 안을 가리키는 링크까지 지우면 node_modules가 못 쓰게 된다 (#95)', async () => {
+    const inner = join(repo, 'node_modules', '.pnpm', 'pkg@1.0.0', 'node_modules', 'pkg')
+    mkdirSync(inner, { recursive: true })
+    writeFileSync(join(inner, 'index.js'), 'module.exports = 1\n')
+    symlinkSync(join('.pnpm', 'pkg@1.0.0', 'node_modules', 'pkg'), join(repo, 'node_modules', 'pkg'))
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pnpm',
+    })) as SessionInfo
+
+    const farmed = join(s.worktree!.path, 'node_modules', 'pkg')
+    expect(lstatSync(farmed).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(farmed, 'index.js'), 'utf8')).toBe('module.exports = 1\n')
+    // 링크가 원본 저장소가 아니라 **이 워크트리 안**을 가리켜야 격리가 유지된다
+    expect(realpathSync(farmed).startsWith(realpathSync(s.worktree!.path))).toBe(true)
+  })
+
+  it('워크트리 쪽 링크를 밟고 밖에 쓰지 않는다 — 목적지도 한 칸씩 확인한다 (#95)', async () => {
+    // 저장소가 심볼릭 링크를 추적한다: 새 워크트리는 그것을 링크째 체크아웃한다
+    const outside = join(root, 'elsewhere')
+    mkdirSync(outside)
+    symlinkSync(outside, join(repo, 'out'))
+    execFileSync('git', ['add', '.'], { cwd: repo })
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'link'], { cwd: repo })
+    // 프로젝트 쪽에서는 같은 이름이 진짜 디렉토리다 — 복사 원본은 멀쩡히 프로젝트 안이다
+    rmSync(join(repo, 'out'))
+    mkdirSync(join(repo, 'out'))
+    writeFileSync(join(repo, 'out', 'app.env'), 'SECRET=1\n')
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['out/app.env'] })
+
+    const s = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/dst-link',
+    })) as SessionInfo
+
+    expect(s.worktree).not.toBeNull()
+    // 비밀이 워크트리 밖 디렉토리에 떨어지면 안 된다
+    expect(existsSync(join(outside, 'app.env'))).toBe(false)
   })
 
   it('병합 감지 (#69): 줄기에 들어간 브랜치만 merged가 되고, 갓 만든 브랜치는 아니다', async () => {

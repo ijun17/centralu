@@ -7,8 +7,8 @@ import { buildHandoffRecord } from './handoff-record.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import type {
@@ -66,7 +66,17 @@ import {
   gitWorktreeDirty,
   gitWorktreeRemove,
 } from '../dev-services/git.js'
-import { copyTree, importFile, listDir, moveEntry, readTextFile, resolveExisting } from '../dev-services/fs.js'
+import {
+  copyTree,
+  dropEscapingLinks,
+  importFile,
+  listDir,
+  moveEntry,
+  prepareCopyTarget,
+  readTextFile,
+  resolveExisting,
+} from '../dev-services/fs.js'
+import { isMissingPathError } from '../dev-services/path-guard.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -2637,21 +2647,40 @@ export class SessionManager {
     if (!setup) return
 
     for (const f of setup.copyFiles) {
-      const src = resolve(projectCwd, f)
-      // 경로 이탈 차단 — 목록은 프로젝트 안의 상대 경로만 뜻한다 (fs 포트와 같은 규칙)
-      if (!src.startsWith(resolve(projectCwd) + '/')) {
-        console.error(`[worktree] copy refused (outside project): ${f}`)
-        continue
-      }
-      if (!existsSync(src)) {
+      /*
+       * 경로 이탈 차단 — 목록은 프로젝트 안의 상대 경로만 뜻한다. 예전 주석은 "fs 포트와 같은
+       * 규칙"이라고 적혀 있었지만 실제로는 문자열 비교였다(#95): `.env`가 밖을 가리키는
+       * 심볼릭 링크여도 글자로는 프로젝트 안이라 통과했고, `cp -Rc`가 링크를 링크째 복사해
+       * 워크트리에 `~/.ssh`로 난 창문을 남겼다(실측). 이제 정말 같은 함수를 부른다 — 조각마다
+       * lstat으로 걸어가 링크를 풀고, realpath한 루트 안인지 확인한다.
+       *
+       * 돌아오는 것은 **실체의 경로**다. 그래서 프로젝트 안을 가리키던 `.env` 링크는 워크트리에
+       * 파일로 도착한다 — 원본 저장소로 난 창문이 아니라. 워크트리 격리가 링크 하나로 깨지면
+       * 이 기능이 있는 이유가 없다.
+       */
+      let src: string
+      try {
+        src = await resolveExisting(projectCwd, f)
+      } catch (err) {
         // 없는 파일은 건너뛰되 흔적을 남긴다 — .env가 안 왔는데 조용하면 한참 뒤에 발견된다
-        console.error(`[worktree] copy skipped (missing): ${f}`)
+        if (isMissingPathError(err)) console.error(`[worktree] copy skipped (missing): ${f}`)
+        else console.error(`[worktree] copy refused: ${f} — ${(err as Error).message}`)
         continue
       }
-      const dst = join(worktree.path, f)
-      mkdirSync(dirname(dst), { recursive: true })
+
+      let dst: string
+      try {
+        dst = await prepareCopyTarget(worktree.path, f)
+      } catch (err) {
+        console.error(`[worktree] copy refused (bad target): ${f} — ${(err as Error).message}`)
+        continue
+      }
       // clone 우선 (#76) — 8.5GB target이 4초·10MB로 건너온다 (실측). 안 되면 일반 복사
       await copyTree(src, dst)
+      // 나무 안쪽의 링크는 복사가 끝난 뒤에 본다 — 남기는 것과 지우는 것의 경계는 dropEscapingLinks에
+      for (const gone of await dropEscapingLinks(worktree.path, dst)) {
+        console.error(`[worktree] link dropped (points outside the worktree): ${gone}`)
+      }
     }
 
     if (!setup.command) return
