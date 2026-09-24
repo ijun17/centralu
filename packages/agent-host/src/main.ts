@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { migrateLegacyDataDir } from './data-dir.js'
-import { HostServer } from './transport/server.js'
+import { HostServer, parseAllowedOrigins } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
 import { Store } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
@@ -159,6 +159,8 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
+  // origin 허용목록의 탈출구 — 거부 로그가 여기에 넣을 값을 그대로 알려준다
+  allowedOrigins: parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS),
   onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns),
 })
 
