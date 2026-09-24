@@ -17,10 +17,13 @@ remain the deterministic authorization boundaries.
 
 ## Local transport
 
-The host listens on loopback and requires a nonempty token. Browser/WebView connections
-must additionally match the explicit origin allowlist. A client without an Origin header
-still needs the token; Origin is a browser defense, not native-client identity. Literal
-`Origin: null` is rejected. Development tokens should be generated per launch and shared
+The host listens on loopback and requires a token that is not blank — whitespace-only is
+refused at construction, matching the trim the browser entry point already applies.
+Browser/WebView connections must additionally match the explicit origin allowlist, which
+`CC_HOST_ALLOWED_ORIGINS` (comma-separated) replaces when set. A client without an Origin
+header still needs the token; Origin is a browser defense, not native-client identity.
+Literal `Origin: null` is rejected. A rejected upgrade is logged by the host, because the
+browser does not hand the 403 to the page. Development tokens should be generated per launch and shared
 only with the intended local client. Mock/demo modes do not connect to the host.
 
 ## Project files and native handoff

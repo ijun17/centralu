@@ -27,7 +27,8 @@ because it is the only part of a PR that says where to go looking themselves.
 pnpm install
 
 # browser dev — one shell so the per-launch token is shared without printing it
-CC_HOST_TOKEN="$(node -e 'console.log(require("node:crypto").randomBytes(16).toString("hex"))')"
+CC_HOST_TOKEN="$(node -e 'console.log(require("node:crypto").randomBytes(16).toString("hex"))')" || exit 1
+[ -n "$CC_HOST_TOKEN" ] || exit 1
 CC_HOST_TOKEN="$CC_HOST_TOKEN" pnpm host --port 5175 >/dev/null &
 HOST_PID=$!
 trap 'kill "$HOST_PID" 2>/dev/null || true' EXIT
@@ -55,10 +56,15 @@ app calls and the same events the host sends, so a screen that looks right here 
 being propped up by the demo.
 
 The token comes from Node rather than `openssl` because Node is already required here and
-`openssl` is not. That matters more than it looks: an empty `CC_HOST_TOKEN` does not stop the
-host, it makes the host invent a random one, and the only place that token is ever printed is
-the handshake the line above sends to `/dev/null`. The result is a host running on a secret
-nobody knows and a browser reporting "Host token is required", which names the wrong cause.
+`openssl` is not. The two `|| exit 1` guards matter more than they look: an empty
+`CC_HOST_TOKEN` does not stop the host, it makes the host invent a random one, and the only
+place that token is ever printed is the handshake the line above sends to `/dev/null`. The
+result would be a host running on a secret nobody knows and a browser reporting "Host token
+is required", which names the wrong cause. The guards stop the shell at the generator
+instead. They are two lines rather than one because a failed command substitution and an
+empty-but-successful one are different failures: `node` missing gives the first, a `node`
+that prints nothing gives the second. A token that is only whitespace is refused by the
+host itself, so that one does not need a guard here.
 
 Do not use a fixed token such as `dev-token`, and do not paste real launch tokens into
 issues, logs, screenshots, or test artifacts. The command above discards the host's

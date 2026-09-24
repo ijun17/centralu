@@ -25,6 +25,27 @@ export const DEFAULT_ALLOWED_ORIGINS = [
   'tauri://localhost',
 ] as const
 
+/**
+ * `CC_HOST_ALLOWED_ORIGINS` (쉼표 구분) → allowedOrigins 오버라이드.
+ *
+ * 기본 목록은 우리가 아는 dev 포트와 Tauri WebView뿐이다. 그 밖의 주소에서 붙어야 할 때
+ * — 다른 포트로 vite를 띄웠거나, 리버스 프록시 뒤에서 열어봤거나 — 지금까지는 host를
+ * 고쳐 다시 빌드하는 것 말고 방법이 없었다. 게다가 막혔다는 사실이 화면에는
+ * `Disconnected`로만 보여서, 탈출구가 없다는 것조차 알기 어려웠다.
+ *
+ * **빈 값은 오버라이드가 아니라 "설정 안 함"이다.** 빈 문자열이나 쉼표뿐인 값을 그대로
+ * 통과시키면 허용목록이 공집합인 host가 되어 아무도 못 붙는다 — 오타 하나의 대가로는
+ * 너무 크고, 환경변수가 실수로 비는 일은 흔하다. 항목별 공백도 같은 이유로 버린다:
+ * 빈 문자열은 originAllowed에서 "Origin 헤더 없음"과 같은 뜻이라 목록에 있으면 안 된다.
+ */
+export function parseAllowedOrigins(raw: string | undefined): string[] | undefined {
+  const parsed = raw
+    ?.split(',')
+    .map((o) => o.trim())
+    .filter((o) => o !== '')
+  return parsed?.length ? parsed : undefined
+}
+
 export type HostServerOptions = {
   port: number
   token: string
@@ -41,9 +62,30 @@ export class HostServer {
   private clients = new Set<WebSocket>()
   private listenError: ((err: Error) => void) | null = null
   private readonly allowedOrigins: ReadonlySet<string>
+  /**
+   * 이미 적어 준 거부 origin — 같은 문장을 5초마다 반복하지 않으려고 (아래 verifyClient).
+   *
+   * **상한이 있다.** 이 집합의 열쇠는 요청이 보낸 Origin 헤더, 즉 바깥에서 고르는 값이다.
+   * 무한히 담으면 loopback에 붙을 수 있는 쪽이 매번 다른 Origin으로 두드려 host의 메모리를
+   * 늘릴 수 있다 — 토큰도 필요 없다(같은 자리에서 종료 멈춤도 그랬다). 서로 다른 origin이
+   * 64개를 넘길 만큼 나올 일은 정상 사용에서는 없으므로, 넘으면 비우고 다시 센다.
+   * 잃는 것은 "이 origin은 이미 적었다"는 기억뿐이라 최악이 로그 한 줄 더 남는 것이다.
+   */
+  private readonly loggedRejections = new Set<string>()
+  private static readonly MAX_LOGGED_REJECTIONS = 64
 
   constructor(private opts: HostServerOptions) {
-    if (!opts.token) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
+    /*
+     * 공백뿐인 토큰은 **자격증명이 아니다** — 브라우저가 이미 그렇게 판정한다.
+     *
+     * apps/web/src/bootstrap.ts의 browserHostOptions는 VITE_HOST_TOKEN을 trim한 뒤
+     * 비면 MissingHostTokenError를 던진다. 여기서 trim 없이 `!opts.token`만 보면
+     * `CC_HOST_TOKEN=" "` 하나로 양쪽 판정이 갈린다: host는 " "를 정상 토큰으로 받아
+     * 몇 번만 찍어보면 맞는 비밀로 돌고, UI는 ''를 보내므로 아예 붙지 못한다.
+     * 실제로 재현했다 — host는 listen까지 갔고, UI는 MissingHostTokenError를 던졌다.
+     * 두 쪽이 같은 규칙을 쓰게 맞춘다.
+     */
+    if (!opts.token.trim()) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
     this.http = createServer((req, res) => {
       const hit = opts.onHttp?.(new URL(req.url ?? '/', 'http://x').pathname)
@@ -58,7 +100,33 @@ export class HostServer {
     this.wss = new WebSocketServer({
       server: this.http,
       verifyClient: (info, done) => {
-        done(this.originAllowed(info.req.headers.origin), 403, 'forbidden origin')
+        const origin = info.req.headers.origin
+        const ok = this.originAllowed(origin)
+        /*
+         * 거부를 **적는다**. 브라우저는 업그레이드 403을 페이지 스크립트에 넘겨주지
+         * 않으므로 화면에는 그냥 `Disconnected`가 뜨고 재시도만 돈다 — "host가 꺼져
+         * 있다"와 구별이 안 된다. host 로그에도 아무것도 없으면 어디서 막혔는지
+         * 알아낼 방법이 사람에게 남지 않는다. 거부당한 origin을 그대로 찍어야
+         * CC_HOST_ALLOWED_ORIGINS에 무엇을 넣어야 하는지가 그 한 줄에서 나온다.
+         *
+         * **origin당 한 번만 적는다.** 막힌 UI는 포기하지 않는다 — rpc-client의 백오프는
+         * 5초에서 멈추므로(web/rpc-client.ts) 계속 켜 두면 똑같은 문장이 시간당 700줄
+         * 넘게 쌓인다. 버그 신고에 붙이라고 안내하는 바로 그 host.log다. 두 번째 줄부터는
+         * 새로 알려주는 것이 없으니 첫 줄만 남긴다.
+         */
+        if (!ok) {
+          const key = origin ?? ''
+          if (!this.loggedRejections.has(key)) {
+            if (this.loggedRejections.size >= HostServer.MAX_LOGGED_REJECTIONS) this.loggedRejections.clear()
+            this.loggedRejections.add(key)
+            console.error(
+              `[agent-host] origin rejected: ${origin ?? '(none)'} — ` +
+                `allowed: ${[...this.allowedOrigins].join(', ')}. ` +
+                `To add one: CC_HOST_ALLOWED_ORIGINS='${origin ?? ''}'`,
+            )
+          }
+        }
+        done(ok, 403, 'forbidden origin')
       },
     })
     this.wss.on('connection', (ws) => this.onConnection(ws))
@@ -66,6 +134,21 @@ export class HostServer {
     this.wss.on('error', (err) => this.listenError?.(err))
   }
 
+  /**
+   * origin 경계 (docs/security-boundaries.md).
+   *
+   * **Origin이 없거나 빈 것을 통과시키는 것은 실수가 아니라 결정이다.** 브라우저는
+   * 교차 출처 요청에 Origin을 반드시 붙이므로, 헤더가 아예 없는 연결은 브라우저가
+   * 아니다 — 네이티브 클라이언트(Tauri WebView가 아닌 경로, 테스트의 ws 클라이언트,
+   * curl)다. 그런 쪽은 origin으로 막을 수 있는 대상이 아니고, 어차피 loopback
+   * 바인딩 + 토큰 핸드셰이크가 막는다. 여기서 없는 Origin을 거부하면 막히는 것은
+   * 공격자가 아니라 우리 자신의 테스트와 사이드카뿐이다.
+   *
+   * 반면 문자열 `'null'`은 **있는 Origin이다.** sandbox iframe이나 file:// 페이지가
+   * 실제로 보내는 값이라 없는 것과 같이 취급하면 안 된다 — 그래서 명시적으로 막는다.
+   * server.test.ts가 origin 10종을 찌른다 — 허용목록 7개 전부, Origin 없음,
+   * `http://evil.example`, 문자열 `'null'`. 동작은 문서와 일치한다.
+   */
   private originAllowed(origin: string | undefined): boolean {
     if (origin === undefined || origin === '') return true
     if (origin === 'null') return false
@@ -101,8 +184,23 @@ export class HostServer {
     })
   }
 
+  /**
+   * 닫기.
+   *
+   * **`this.clients`가 아니라 `wss.clients`를 순회한다.** 앞의 집합은 hello를 통과한
+   * 소켓만 담는다 — 방송 대상이라서 그렇다. 그런데 업그레이드는 됐지만 아직 인증 전인
+   * 소켓도 http 서버 입장에서는 살아 있는 연결이라, 안 닫으면 `http.close()`의 콜백이
+   * 영영 안 온다.
+   *
+   * 테스트 얘기가 아니다 — 실측했다. 붙기만 하고 hello를 안 보낸 소켓 **하나**가 있을 때
+   * `this.clients`판 close()는 5초를 기다려도 안 끝났고(그대로 두면 영영), `wss.clients`판은
+   * 2ms에 끝났다. 즉 host 종료를 막는 데 인증도 필요 없다. 같은 것이 테스트에서는 훅
+   * 타임아웃으로 나타난다: origin 검사를 일부러 무력화해 두 소켓을 열린 채로 남기면
+   * `afterEach`가 각각 10초씩 걸려 파일이 644ms에서 20.54s가 됐고, 이 줄을 고치자
+   * 같은 조건에서 617ms로 돌아왔다.
+   */
   async close(): Promise<void> {
-    for (const c of this.clients) c.close()
+    for (const c of this.wss.clients) c.close()
     await new Promise<void>((r) => this.wss.close(() => r()))
     await new Promise<void>((r) => this.http.close(() => r()))
   }
