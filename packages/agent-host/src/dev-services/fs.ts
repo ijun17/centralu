@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { lstat, open, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
-import { basename, extname, relative, resolve, sep } from 'node:path'
+import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
 
@@ -345,4 +345,82 @@ export async function copyTree(src: string, dst: string): Promise<void> {
   }
   const { cpSync } = await import('node:fs')
   cpSync(src, dst, { recursive: true })
+}
+
+/**
+ * 복사본이 놓일 자리를 만들고 그 절대 경로를 돌려준다 — **한 칸씩 가드에 물어보면서**.
+ *
+ * `mkdirSync(dirname(dst), { recursive: true })`는 도중의 심볼릭 링크를 말없이 따라간다.
+ * 워크트리가 체크아웃한 추적 파일 중에 `logs -> /어딘가`가 있으면, `logs/.env`를 복사해
+ * 달라는 요청이 남의 디렉토리에 사용자의 비밀을 쓴다. 통째로 만들지 않고 한 칸 만들 때마다
+ * 물어보면 링크를 만나는 그 자리에서 멈춘다 — 밖에 빈 디렉토리 하나도 남기지 않는다.
+ */
+export async function prepareCopyTarget(root: string, rel: string): Promise<string> {
+  const parts = relative(resolve(root), resolve(root, rel || '.')).split(sep).filter((part) => part.length > 0)
+  for (let i = 1; i < parts.length; i++) {
+    const branch = parts.slice(0, i).join(sep)
+    if (!(await assertCreatePath(root, branch)).exists) await mkdir(join(root, branch))
+  }
+  await assertCreatePath(root, parts.join(sep))
+  return join(root, ...parts)
+}
+
+/**
+ * 갓 복사된 나무에서 **워크트리 밖을 가리키는 심볼릭 링크만** 골라 지운다. 지운 것들을 돌려준다.
+ *
+ * 왜 링크를 남기는가: pnpm의 node_modules는 심볼릭 링크 숲이다(이 저장소 기준 1,368개).
+ * 전부 따라가 실체로 펴면 용량이 폭발하고 순환 링크에 걸리며, 무엇보다 pnpm이 아는 모양이
+ * 아니게 된다. 링크를 통째로 거절하면 이 기능의 제일 흔한 쓰임(node_modules 가져오기)이
+ * 그냥 못 쓰게 된다. 그 링크들은 상대 경로로 자기 나무 안을 가리키므로, 워크트리의 같은
+ * 자리에 놓이면 워크트리 안을 가리킨다 — 그대로가 맞는 답이다.
+ *
+ * 왜 밖을 가리키는 것만 지우는가: 그것이 에이전트의 눈에 자기 나무 안의 평범한 파일로
+ * 보이는 창문이다(#95). 항목 하나가 이상하다고 나무 전체를 거절하면 사용자는 node_modules
+ * 없는 작업대를 받는데, 그건 링크 하나 빠진 작업대보다 나쁘다. 그래서 창문만 닫고 남긴다.
+ *
+ * 읽기 자체는 싸다 — 위 숲 전체를 훑는 데 177ms(실측), 같은 나무를 복사하는 4초 옆에서.
+ * 링크 안으로는 들어가지 않는다: 순환에 걸리지 않고, 같은 나무를 두 번 걷지도 않는다.
+ */
+export async function dropEscapingLinks(root: string, start: string): Promise<string[]> {
+  const rootReal = await realpath(root)
+  const startReal = await realpath(start)
+  if (!staysInside(rootReal, startReal)) throw new UnsafePathError('Path is outside the project')
+
+  const removed: string[] = []
+  const stack = [startReal]
+  while (stack.length > 0) {
+    const dir = stack.pop() as string
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      continue // 파일 하나를 복사한 경우(ENOTDIR)와 그새 사라진 경우 — 둘 다 볼 것이 없다
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name)
+      if (entry.isSymbolicLink()) {
+        if (await linkStaysInside(rootReal, abs)) continue
+        await rm(abs, { force: true })
+        removed.push(relative(rootReal, abs))
+      } else if (entry.isDirectory()) {
+        stack.push(abs)
+      }
+    }
+  }
+  return removed
+}
+
+async function linkStaysInside(rootReal: string, link: string): Promise<boolean> {
+  /*
+   * 끊어진 링크는 realpath가 못 푼다. 그래도 글자만 보고 판단한다 — 지금 대상이 없다는 것은
+   * 지금 못 읽는다는 뜻일 뿐이고, `~/.ssh/id_rsa`를 가리키는 링크는 그 파일이 생기는 순간
+   * 창문이 된다.
+   */
+  const target = await realpath(link).catch(async () => resolve(dirname(link), await readlink(link)))
+  return staysInside(rootReal, target)
+}
+
+function staysInside(rootReal: string, candidate: string): boolean {
+  const rel = relative(rootReal, candidate)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
