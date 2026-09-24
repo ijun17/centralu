@@ -544,6 +544,31 @@ describe('세션 삭제', () => {
     expect(mgr.listSessions().find((x) => x.id === s.id)).toBeUndefined()
     expect((await rpc('messages.load', { sessionId: s.id, limit: 100 })) as unknown[]).toHaveLength(0)
   })
+
+  /**
+   * 경계가 id가 아닌 것을 들여보내지 않는다 (#94).
+   *
+   * 삭제는 세션이 **있는지 보지 않고** 첨부 정리까지 간다 — 그래서 고치기 전에는
+   * `'../../Documents'` 하나로 `{ ok: true }`를 받으면서 데이터 폴더 두 단계 위의
+   * 폴더가 통째로 사라졌다. 여기서 재는 것은 "지우지 않았다"가 아니라
+   * **"들어오지도 못했다"**다: 세션 조회보다 앞선 자리에서 끝나야 한다.
+   */
+  it('세션 id가 경로 조각이 아니면 삭제 요청이 경계에서 끝난다 (#94)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cc-del94-'))
+    const before = process.env.CC_DATA_DIR
+    process.env.CC_DATA_DIR = join(root, 'data')
+    const victim = join(root, 'Documents')
+    mkdirSync(victim, { recursive: true })
+    writeFileSync(join(victim, 'taxes.txt'), '중요')
+    try {
+      await expect(rpc('agents.deleteSession', { sessionId: '../../Documents' })).rejects.toThrow()
+      expect(readdirSync(victim)).toEqual(['taxes.txt'])
+    } finally {
+      if (before === undefined) delete process.env.CC_DATA_DIR
+      else process.env.CC_DATA_DIR = before
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('에이전트 재시작', () => {
