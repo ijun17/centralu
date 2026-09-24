@@ -3,7 +3,7 @@ import { App, useStore } from '@cc/ui'
 import { createWebPlatform } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
-import { browserHostOptions, isMockMode } from './bootstrap.js'
+import { startPlatform } from './bootstrap.js'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
@@ -24,14 +24,11 @@ if (!rootElement) throw new Error('Root element #root not found')
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')
 const root = createRoot(rootElement)
-let platform: Platform | null = null
-let startupError: Error | null = null
-
-try {
-  platform = isMockMode(location.search) ? seedMock() : createWebPlatform(browserHostOptions(import.meta.env))
-} catch (error) {
-  startupError = error instanceof Error ? error : new Error(String(error))
-}
+/* 실패도 **그려야 하는 화면**이다 — 던지면 빈 페이지가 남는다. 울타리는 bootstrap에 있다 */
+const started = startPlatform<Platform>(location.search, import.meta.env, {
+  mock: seedMock,
+  host: createWebPlatform,
+})
 
 function seedMock(): Platform {
   const mock = createMockPlatform()
@@ -40,13 +37,13 @@ function seedMock(): Platform {
   return mock
 }
 
-if (startupError) {
+if (started.error) {
   root.render(
     <main className="flex min-h-screen items-center justify-center bg-base p-6 text-chalk">
       <section className="max-w-xl rounded-xl border border-edge bg-panel p-5 shadow-panel" role="alert" data-testid="startup-error">
         <p className="readout text-[11px] uppercase tracking-[0.2em] text-ash">Centralu startup blocked</p>
         <h1 className="mt-2 text-lg font-semibold">Host token is required</h1>
-        <p className="mt-2 text-sm text-slate">{startupError.message}</p>
+        <p className="mt-2 text-sm text-slate">{started.error.message}</p>
         <p className="mt-3 text-xs text-slate">Use ?mock=1 or ?demo for browser-only mock mode, or launch the UI through the host so VITE_HOST_TOKEN is set.</p>
       </section>
     </main>,
@@ -58,8 +55,8 @@ if (startupError) {
    */
   if (demo !== null) {
     const { seedDemo, isDemoScene } = await import('@cc/platform/mock/demo')
-    await seedDemo(platform as never, isDemoScene(demo) ? demo : 'focus')
+    await seedDemo(started.platform as never, isDemoScene(demo) ? demo : 'focus')
   }
 
-  root.render(<App platform={platform!} />)
+  root.render(<App platform={started.platform} />)
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitDiff, gitStage, gitStatusFiles } from './git.js'
@@ -20,6 +20,41 @@ const repo = () => {
   git('config', 'user.name', 'test')
   return { d, git }
 }
+
+/**
+ * git이 **정말로 받은 인자**를 적어 둔다 — PATH 앞에 껍데기 git을 놓고 진짜 git으로 넘긴다.
+ *
+ * execFile을 가로채지 않는 이유: 가로채면 진짜 git이 돌지 않아, 같은 시험이 결과까지
+ * 확인하던 힘을 잃는다. 여기서는 진짜 git이 그대로 돌고 줄만 복사된다.
+ */
+function recordGitArgv(): { calls: () => string[][]; restore: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'cc-git-argv-'))
+  dirs.push(dir)
+  const log = join(dir, 'argv.log')
+  const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
+  const shim = join(dir, 'bin')
+  mkdirSync(shim)
+  writeFileSync(
+    join(shim, 'git'),
+    `#!/bin/sh\nprintf '%s\\036' "$@" >> "${log}"\nprintf '\\n' >> "${log}"\nexec "${real}" "$@"\n`,
+  )
+  chmodSync(join(shim, 'git'), 0o755)
+  writeFileSync(log, '')
+
+  const previousPath = process.env.PATH
+  process.env.PATH = `${shim}:${previousPath ?? ''}`
+  return {
+    calls: () =>
+      readFileSync(log, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('\u001e').slice(0, -1)),
+    restore: () => {
+      process.env.PATH = previousPath
+    },
+  }
+}
+
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
@@ -76,10 +111,28 @@ describe('git path containment', () => {
     const name = '--output=owned.patch'
     writeFileSync(join(d, name), 'content\n')
 
-    const diff = await gitDiff(d, name)
-    expect(diff.diff).toContain('content')
-    await expect(gitStage(d, [name])).resolves.toBeUndefined()
-    expect(await gitStatusFiles(d)).toEqual([{ path: name, staged: true, status: 'A' }])
+    const argv = recordGitArgv()
+    try {
+      const diff = await gitDiff(d, name)
+      expect(diff.diff).toContain('content')
+      await expect(gitStage(d, [name])).resolves.toBeUndefined()
+      expect(await gitStatusFiles(d)).toEqual([{ path: name, staged: true, status: 'A' }])
+    } finally {
+      argv.restore()
+    }
+
+    /*
+     * 결과만 보면 세 개의 `--` 중 하나만 지켜진다: `:(literal)` 접두가 붙는 자리에서는
+     * 인자가 이미 `:`로 시작해 git이 옵션으로 읽을 일이 없고, 반대로 `--`가 있으면
+     * 접두가 없어도 통과한다. 두 겹이 서로를 가려 주므로 **하나를 지워도 초록이었다**
+     * (#121). 그래서 결과가 아니라 git이 실제로 받은 줄을 본다.
+     */
+    const carrying = argv.calls().filter((args) => args.some((a) => a.includes('owned.patch')))
+    expect(carrying.length).toBeGreaterThan(0)
+    for (const args of carrying) {
+      expect(args.indexOf('--')).toBeGreaterThanOrEqual(0)
+      expect(args.indexOf('--')).toBeLessThan(args.findIndex((a) => a.includes('owned.patch')))
+    }
   })
 
   it('rejects symlinked no-index diff paths whose target leaves the project', async () => {
