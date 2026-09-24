@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
-import { profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
+import { mcpServerNameError, profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { HOST_APPS } from '../apps/registry.js'
@@ -3272,9 +3272,13 @@ export class SessionManager {
        * 여기서 바로 설치하면 read_session으로 들어온 주입 한 줄이 프로세스가 된다.
        */
       proposeMcpServer: async (spec) => {
-        if (!/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(spec.name)) {
-          return { ok: false, error: '이름은 영숫자·하이픈·밑줄 32자 이내여야 합니다' }
-        }
+        /*
+         * 이름 규칙은 스킬 쪽(바로 아래)과 **일부러 다르다** (#93). 스킬 이름은 역할
+         * 프롬프트의 소제목으로만 쓰이지만, MCP 서버 이름은 도구 접두어가 되고
+         * 그 접두어가 승인 예외의 판정 기준이다 — 같은 글자라도 값이 다르다.
+         */
+        const nameError = mcpServerNameError(spec.name)
+        if (nameError) return { ok: false, error: nameError }
         const installed = this.mcpServers().some((s) => s.name === spec.name)
         if (installed) return { ok: false, error: `"${spec.name}"은 이미 설치되어 있습니다` }
         const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
