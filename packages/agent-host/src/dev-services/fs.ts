@@ -168,6 +168,18 @@ export async function resolveExisting(root: string, rel: string): Promise<string
   const rootReal = await realpath(root)
   const expected = await assertExistingPath(root, rel)
   const canonical = await realpath(abs)
+  /*
+   * **이 줄은 어떤 테스트도 보지 못한다** — 지우고 전체를 돌려도 1,284개가 전부 통과한다
+   * (실측). 죽은 줄이어서가 아니라, 덮는 구간이 시험으로 열 수 없는 곳이기 때문이다:
+   * 바로 위 assertExistingPath가 조각마다 걸으며 이미 봉쇄를 확인했으므로, 그 확인과
+   * 이 realpath 사이에 **파일 시스템이 바뀐 경우**에만 여기서 걸린다.
+   *
+   * 아래 dev/ino 비교가 같은 경쟁을 더 정확히 잡지만, 그것은 "같은 파일인가"를 묻고
+   * 이것은 "안에 있는가"를 묻는다. 둘은 다른 질문이라 남겨 둔다.
+   *
+   * 시험이 없다는 이유로 지우지 말 것 (#86). 실패할 수 없는 시험은 지웠지만(#121),
+   * 볼 수 없는 방어선은 다른 이야기다.
+   */
   safeJoin(rootReal, relative(rootReal, canonical))
   const current = await lstat(canonical)
   if (current.isSymbolicLink() || current.dev !== expected.dev || current.ino !== expected.ino) {
