@@ -565,6 +565,8 @@ Shipped during M2.5 so far, driven by real use: the orchestrator redesign (FR-11
 user-message banner, and the standing-render fix measured in §7.1. Of the original M3 list, the orchestrator
 and the worktree option are done; the weekly cost dashboard remains open (FR-9).
 
+**2026-09-25: M4 (apps) is under way beside M2.5** — see M4 below.
+
 ### M0 ✓ — technical verification spike (short)
 
 - One Claude Agent SDK session streaming E2E from Tauri + a Node sidecar
@@ -613,6 +615,38 @@ This is the one point where a human judges (decided 2026-08-15, see plans/m1.5-p
 - Weekly usage **cost** dashboard (FR-9 — the limit-window view shipped earlier; the cost view is what remains)
 - ~~Orchestrator session~~ (completed 2026-08-25 during M2.5, redesigned — see FR-11)
 - ~~Worktree option~~ (completed 2026-08-19 — FR-2's lower-priority option), per-project default presets, ~~performance tuning~~ (§7.1 measured 2026-08-26)
+
+### M4 (in progress) — apps: the place a tool is built is the place it is used (detail in [plans/apps-plan.md](plans/apps-plan.md))
+
+Its own milestone after M3, which stays as it is (decided 2026-09-25). The goal: an agent builds a tool for the work at hand
+**together with its screen**; the person presses it where it was made and asks for a change in the same place; agents call
+the same tool as a function. One tool, not a screen and a function built twice. It is judged by dogfooding at the end of C:
+a tool built before but left unused because of installs and setup is rebuilt this way, and a non-developer opens it without
+being told how.
+
+Apps are MCP servers and their screens are MCP Apps views, standard as far as the standard goes — what the code does is in
+[apps.md](apps.md).
+
+In:
+
+- **A. Runtime** — the manifest; apps in the project (`.centralu/apps/`, committed with the repository) or the user folder;
+  started when first needed, stopped when idle; one call path with tool visibility and run records; attached to Claude and
+  Codex sessions; approved MCP servers absorbed as apps; one list with the built-in apps; project trust, shared with #92
+- **B. Views** — inline under the tool card that called it (the standard's own place, where apps built for other hosts work),
+  pinned in the main area (the host calls the app's home tool), the sandbox proxy with an opaque origin, change notifications
+  to open views, a skeleton while starting and the reason when it fails, a runs panel
+- **C. Build loop** — the New app button and `create_app`; a builder session per app; `check`, so the builder tests its own
+  app instead of the person; a restart when the builder's turn ends; a "fix it here" bar under the view; errors handed to the
+  builder only by the person's click
+- **D. Broker** — an app asks, through the host, for the person's agent, another app's tools or host data; capability approval
+  on first use; limits on chains and rates; cancellation and records that follow the chain
+
+Light: **E. Handing over, the local half** — snapshots for apps outside git, a confirmation screen when importing, a
+`centralu://` deep link. An app committed with the project is already shared with the team.
+
+Out: the team server (permissions, distribution, central run records — the paid boundary); an app marketplace; apps waking
+up by themselves (timers, watchers — the broker refuses a call that no run started); also a process sandbox for app servers,
+handing the builder a capture of the view, and moving the control app to the new format.
 
 ---
 
