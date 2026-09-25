@@ -1244,9 +1244,19 @@ export class SessionManager {
    * 중복 없이 맞춰진다. 못 찾으면 아무것도 붙이지 않는다:
    * 어긋난 채 두는 것이 같은 말을 두 번 쌓는 것보다 낫다.
    */
-  private async syncImportedHistory(info: SessionInfo, adapter: AgentAdapter, cwd: string): Promise<number> {
+  private async syncImportedHistory(info: SessionInfo, adapter: AgentAdapter): Promise<number> {
     const externalId = info.externalId ?? info.importedFrom
     if (!adapter.readExternalHistory || !externalId) return 0
+    /*
+     * **어디서 읽을지는 세션이 정한다** (M4 P-6). 부르는 쪽이 `project.path`를 넘기던 시절에는
+     * 아래 목록 조회만 세션의 실제 cwd로 묻고, 기록은 프로젝트 경로에서 읽었다 — 한 함수 안에서
+     * 열쇠가 둘이었다. Claude는 기록을 세션이 실제로 돈 cwd 아래에 둔다. SDK 0.3.263으로 잰 값:
+     * 워크트리 세션은 프로젝트 경로로 물어도 SDK가 `git worktree list`로 뒤져 찾아 줬지만(2건),
+     * 그 저장소의 워크트리가 아닌 폴더에서 태어난 세션은 0건이었다. M4에서 사용자 폴더 앱을
+     * 만드는 세션이 그런 세션이다. 이제 cwd는 인자로 받지 않는다 — 여기서 한 번 정하고
+     * 목록과 기록이 같은 값을 쓴다.
+     */
+    const cwd = this.cwdFor(info)
 
     /*
      * **바뀌지 않은 기록은 다시 읽지 않는다.**
@@ -1269,10 +1279,9 @@ export class SessionManager {
      * `listExternalSessions`가 없는 어댑터는 시각을 모르므로 예전처럼 매번 읽는다 —
      * **모르면 건너뛰지 않는다**(이 파일의 다른 선택 기능들과 같은 degrade 방향).
      */
-    /* `cwd`(프로젝트 경로)가 아니라 `cwdFor`로 묻는다 — 바로 앞 externalGone이 그 열쇠로
-       캐시를 채웠기 때문이다. 여기서 다른 열쇠를 쓰면 아끼려던 목록 조회를 한 번 더 낸다
-       (워크트리 세션은 두 경로가 다르다). 목록에 없으면 시각을 모르니 예전처럼 읽는다. */
-    const changedAt = (await this.externalIndexOf(info.tool, this.cwdFor(info)))?.get(externalId) ?? null
+    /* 바로 앞 externalGone이 같은 열쇠(`cwdFor`)로 캐시를 채웠다 — 다른 열쇠를 쓰면 아끼려던
+       목록 조회를 한 번 더 낸다. 목록에 없으면 시각을 모르니 예전처럼 읽는다. */
+    const changedAt = (await this.externalIndexOf(info.tool, cwd))?.get(externalId) ?? null
     const key = externalSyncedKey(info.id)
     if (changedAt !== null && changedAt <= Number(this.store.appSetting(key) ?? '-1')) return 0
     /* 읽어낸 지점을 남긴다. 붙일 것이 없었어도 남긴다 — "읽었다"와 "새 것이 있었다"는
@@ -1623,7 +1632,7 @@ export class SessionManager {
       if (project) {
         // 따라잡기가 멈춰도 세션은 이미 살아 있다 — 붙잡지 말고 다음 기회에 맡긴다
         const tCatchupFrom = Date.now()
-        added = await withTimeout(this.syncImportedHistory(m, adapter, project.path), 10_000, 'History catch-up').catch(() => 0)
+        added = await withTimeout(this.syncImportedHistory(m, adapter), 10_000, 'History catch-up').catch(() => 0)
         tCatchup = Date.now() - tCatchupFrom
         if (added > 0) this.emit({ type: 'history_synced', sessionId, added })
       }
