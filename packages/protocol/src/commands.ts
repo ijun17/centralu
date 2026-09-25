@@ -905,6 +905,50 @@ export const RpcMethods = {
    * 다리는 판단을 하지 않는다 — 이름과 인자만 넘기고 규칙은 전부 host에 남는다.
    */
   /**
+   * 앱 화면을 띄울 주소 (M4 B-3). host가 샌드박스 프록시의 주소를 만들어 준다. 그 주소의
+   * 길은 실행마다 새로 만든 비밀 칸 뒤에 있어서, 주소를 아는 쪽만 화면을 띄운다. 비밀은
+   * 이 답으로만 나간다(WebSocket 토큰으로 이미 인증된 쪽).
+   *
+   * 화면 인스턴스는 도구 호출 한 번이 만든다. 어느 앱의 화면인지는 인스턴스가 정하고,
+   * `appId`·`projectId`는 대조만 한다. `hostOrigin`은 부르는 화면의 출처(`location.origin`)다.
+   * WebSocket과 같은 허용 목록에 있어야 하고, 프록시는 그 출처와만 메시지를 주고받는다.
+   */
+  'apps.viewFrame': {
+    params: z.object({
+      appId: AppId,
+      projectId: z.string().nullable().default(null),
+      instanceId: z.string(),
+      hostOrigin: z.string(),
+    }),
+    result: z.object({
+      url: z.string(),
+      allow: z.string(),
+      sandbox: z.object({
+        csp: z.object({
+          connectDomains: z.array(z.string()),
+          resourceDomains: z.array(z.string()),
+          frameDomains: z.array(z.string()),
+          baseUriDomains: z.array(z.string()),
+        }),
+        permissions: z.record(z.string(), z.object({})),
+      }),
+    }),
+  },
+  /**
+   * 화면이 자기 앱의 리소스를 읽는다 (M4 B-3, 브리지의 `onreadresource`). 답은 MCP
+   * `resources/read`의 결과 그대로다. 규격의 모양은 화면과 앱이 아는 것이고, 이 층은 운반만 한다.
+   * `instanceId`를 주면 그 화면의 앱과 같아야 한다.
+   */
+  'apps.readResource': {
+    params: z.object({
+      appId: AppId,
+      projectId: z.string().nullable().default(null),
+      uri: z.string(),
+      instanceId: z.string().optional(),
+    }),
+    result: z.looseObject({ contents: z.array(z.looseObject({ uri: z.string() })) }),
+  },
+  /**
    * 앱 상태 (#81). 앱마다 JSON 문서 하나 + 켜짐 여부 — 앱별 프로토콜을 만들지 않는다.
    * 문서의 의미는 앱만 알고, 코어·프로토콜은 운반만 한다.
    */

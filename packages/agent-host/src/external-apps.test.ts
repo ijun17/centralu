@@ -43,7 +43,7 @@ beforeEach(() => {
   const mgr = new SessionManager(store, adapters, () => {})
   rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
   rt.refresh()
-  rpc = createRpcHandler(mgr, adapters, undefined, undefined, undefined, rt)
+  rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
 })
 
 afterEach(async () => {

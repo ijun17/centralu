@@ -210,7 +210,7 @@ describe('RPC와 프로젝트 삭제', () => {
       runs: storeRunLedger(store),
     })
     rt.refresh()
-    const rpc = createRpcHandler(mgr, adapters, undefined, undefined, undefined, rt)
+    const rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
     await rpc('apps.invoke', { appId: 'notes', projectId: id, name: 'echo', args: { text: 'via rpc' } })
 
     const listed = (await rpc('apps.runs', { appId: 'notes', projectId: id })) as AppRun[]
