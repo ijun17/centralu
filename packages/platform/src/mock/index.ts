@@ -48,6 +48,7 @@ import type {
   ConnectionState,
   FsEntry,
   FsFile,
+  InlineViewKept,
   InlineViewReopened,
   Platform,
   PreferencesPort,
@@ -137,7 +138,15 @@ export class MockPlatform implements Platform {
       const rec = this.inlineRecords.get(key)
       if (event.phase === 'open' && event.instanceId) {
         this.inlineInstances.set(event.instanceId, { sessionId: event.sessionId, appId: event.appId, projectId: event.projectId })
-        this.inlineRecords.set(key, { appId: event.appId, projectId: event.projectId, tool: event.tool, toolInput: event.toolInput ?? {} })
+        this.inlineRecords.set(key, {
+          appId: event.appId,
+          projectId: event.projectId,
+          tool: event.tool,
+          toolInput: event.toolInput ?? {},
+          instanceId: event.instanceId,
+        })
+      } else if (event.phase === 'closed' && rec) {
+        rec.instanceId = null
       } else if (event.phase === 'result' && rec) {
         if (event.kept === false) this.inlineRecords.delete(key)
         else rec.toolResult = event.toolResult as AppToolResult
@@ -218,6 +227,24 @@ export class MockPlatform implements Platform {
                           event.type === 'message_image'
                           ? ('image' as const)
                           : null
+        /*
+         * 대화 안 앱 화면 (M4 B-1) — 실물처럼 열림과 거절만, 본문 없이 남긴다(manager.persistMessage). 다시 연
+         * 화면이 이것으로 자리표시를 세운다.
+         */
+        if (event.type === 'app_view' && (event.phase === 'open' || event.phase === 'rejected')) {
+          const seq = (this.messages.get(s.id)?.length ?? 0) + 1
+          const { type, sessionId, callId, appId, projectId, tool, phase, reason } = event
+          this.pushMessage({
+            sessionId: s.id,
+            seq,
+            role: 'system',
+            kind: 'app_view',
+            payload: { type, sessionId, callId, appId, projectId, tool, phase, ...(reason ? { reason } : {}) },
+            ts: this.now(),
+          })
+          s.lastSeq = seq
+          out = { ...event, seq } as NormalizedEvent
+        }
         if (kind) {
           const seq = (this.messages.get(s.id)?.length ?? 0) + 1
           this.pushMessage({
@@ -651,6 +678,8 @@ export class MockPlatform implements Platform {
     },
     closeView: async (instanceId: string) => {
       this.closedViews.push(instanceId)
+      // 대화 안 화면이었으면 그 기록의 인스턴스도 닫힌다 — host처럼 기록(입력·결말)은 남는다
+      for (const rec of this.inlineRecords.values()) if (rec.instanceId === instanceId) rec.instanceId = null
     },
     /**
      * 대화 안 화면의 말 (M4 B-1). 실물처럼: 그 대화에 열린 대화 안 화면의 인스턴스만 받고, 대화에는 앱이 보낸
@@ -673,6 +702,18 @@ export class MockPlatform implements Platform {
      * 인스턴스와 돌려준다. 인스턴스는 시험이 꽂은 쪽(진짜 ViewHost)이 짓는다. 들고 있지 않으면 host와 같은
      * 말로 거절한다. 상한은 목이 지키지 않는다 — 그것은 host의 일이고, 그 시험은 agent-host에 있다.
      */
+    /** 실물처럼: 이 대화에서 들고 있는 화면, 본문 없이. 목은 결말이 너무 큰 것을 이미 버렸다(`kept: false`로 온 결말) */
+    inlineViews: async (sessionId: string): Promise<InlineViewKept[]> =>
+      [...this.inlineRecords.entries()]
+        .filter(([key]) => key.startsWith(`${sessionId} `))
+        .map(([key, rec]) => ({
+          callId: key.slice(sessionId.length + 1),
+          appId: rec.appId,
+          projectId: rec.projectId,
+          tool: rec.tool,
+          kept: true,
+          instanceId: rec.instanceId,
+        })),
     reopenInlineView: async (sessionId: string, callId: string): Promise<InlineViewReopened> => {
       this.reopenedViews.push({ sessionId, callId })
       const rec = this.inlineRecords.get(`${sessionId} ${callId}`)
@@ -681,6 +722,7 @@ export class MockPlatform implements Platform {
         ? await this.inlineInstanceProvider(rec.appId, rec.projectId)
         : `mock-inline-${++this.idc}`
       this.inlineInstances.set(instanceId, { sessionId, appId: rec.appId, projectId: rec.projectId })
+      rec.instanceId = instanceId
       return {
         instanceId,
         appId: rec.appId,
@@ -737,7 +779,16 @@ export class MockPlatform implements Platform {
   /** 대화 안 화면의 입력과 결말 — host처럼 들고 있다가 다시 열 때 돌려준다. 열쇠는 `세션 카드` */
   readonly inlineRecords = new Map<
     string,
-    { appId: string; projectId: string | null; tool: string; toolInput: Record<string, unknown>; toolResult?: AppToolResult; cancelled?: string }
+    {
+      appId: string
+      projectId: string | null
+      tool: string
+      toolInput: Record<string, unknown>
+      toolResult?: AppToolResult
+      cancelled?: string
+      /** 열린 인스턴스 — 닫히면 null (기록은 남는다) */
+      instanceId: string | null
+    }
   >()
   /** 다시 연 화면 — "Reopen"이 host에 닿았는지를 시험이 본다 */
   readonly reopenedViews: { sessionId: string; callId: string }[] = []

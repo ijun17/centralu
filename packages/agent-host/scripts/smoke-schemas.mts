@@ -144,6 +144,8 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   // 없는 앱에도 답한다 — 만드는 세션은 null, 오류 묶음은 빈 목록 (M4 C-2·C-6)
   'apps.builder': { appId: 'no-such-app', projectId: P },
   'apps.errors': { appId: 'no-such-app', projectId: P },
+  // 화면을 연 적 없는 대화 — 들고 있는 화면이 없다 (M4 B-1)
+  'apps.inlineViews': { sessionId: S },
 }
 
 /** 부를 수 없는 것과 그 이유 — 조용히 빼면 "다 봤다"로 읽힌다 */

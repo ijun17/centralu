@@ -179,6 +179,17 @@ export class InlineViews {
     }
   }
 
+  /**
+   * 한 대화에서 들고 있는 화면 (RPC `apps.inlineViews`) — 다시 연 UI가 지난 카드의 자리표시에 "Reopen"을 줄지
+   * 정하는 근거다(`kept`). 열린 인스턴스도 알린다: 다시 연 UI는 그 인스턴스를 모르므로(입력·결과를 다시 보낼
+   * 프레임이 없다) 닫아서 앱을 놓고, 사람이 원하면 다시 연다. 본문은 싣지 않는다 — 다시 열 때 온다.
+   */
+  list(sessionId: string): { callId: string; appId: string; projectId: string | null; tool: string; kept: boolean; instanceId: string | null }[] {
+    return [...(this.bySession.get(sessionId)?.values() ?? [])]
+      .sort((a, b) => a.openedAt - b.openedAt)
+      .map((v) => ({ callId: v.callId, appId: v.ref.appId, projectId: v.ref.projectId, tool: v.tool, kept: v.kept, instanceId: v.instanceId }))
+  }
+
   /** 이 인스턴스가 어느 세션의 어느 카드 화면인가 — 대화 안 화면이 아니면 null */
   owner(instanceId: string): { sessionId: string; callId: string; ref: AppRef } | null {
     const v = this.byInstance.get(instanceId)

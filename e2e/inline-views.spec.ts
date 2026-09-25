@@ -331,3 +331,67 @@ test('다시 열 수 없는 화면은 이유를 말하고 Reopen을 거둔다 �
   await expect(inline.getByTestId('inline-view-reopen')).toHaveCount(0)
   await expect(inline.getByTestId('inline-view-open-app')).toBeVisible()
 })
+
+/**
+ * UI를 다시 연 뒤 (M4 B-1). 기록에는 카드와 "그 아래에 어느 앱의 화면이 섰다"만 남는다 — 입력도 결과도 없다.
+ * 그래서 지난 카드에는 프레임을 다시 그리지 않고 자리표시가 선다. host가 그 호출을 아직 들고 있으면
+ * "Reopen"이 도구를 다시 부르지 않고 연다. host가 다시 떠서 들고 있지 않으면 "Open app"(고정 화면)만 남는다.
+ *
+ * 다시 여는 것은 control-loop.spec.ts와 같은 방식으로 흉내 낸다: 메모리의 대화를 비우고 저장소에서 다시 읽는다.
+ * 목은 host처럼 카드와 앱 화면 줄을 저장하고, 호출의 입력과 결과는 따로(메모리에) 들고 있다.
+ */
+async function reopenUi(page: Page, sid: string) {
+  await page.evaluate((id) => {
+    const store = (window as any).__store
+    store.setState({ chat: { ...store.getState().chat, [id]: undefined }, inlineViews: {} })
+    return store.getState().loadHistory(id)
+  }, sid)
+}
+
+test('다시 연 UI: 지난 카드에는 자리표시가 서고(프레임 없이), host가 들고 있으면 Reopen이 입력과 결과로 다시 연다', async ({ page }) => {
+  const { pid, sid } = await sessionWithApp(page)
+  await emit(page, toolCall(sid, 'toolu_past', 'mcp__app-viewer__show'))
+  const first = await openInline(page, pid, sid, 'toolu_past', { q: 'yesterday' })
+  await emit(page, {
+    type: 'app_view', sessionId: sid, callId: 'toolu_past', appId: 'viewer', projectId: pid, tool: 'show', phase: 'result',
+    toolResult: { content: [{ type: 'text', text: 'rain' }], structuredContent: { forecast: 'rain' } }, kept: true,
+  })
+  await expect(rowOf(page, 'toolu_past').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+
+  await reopenUi(page, sid)
+  // 카드는 기록에서 돌아오고, 그 아래에는 프레임이 아니라 자리표시다
+  await expect(rowOf(page, 'toolu_past').getByTestId('tool-card')).toBeVisible()
+  const past = rowOf(page, 'toolu_past').getByTestId('inline-view')
+  await expect(past.getByTestId('inline-view-placeholder')).toContainText("Viewer's view is closed")
+  await expect(past.getByTestId('app-frame')).toHaveCount(0)
+  await expect(past.getByTestId('inline-view-open-app')).toBeVisible()
+  // 다시 연 UI는 열린 채 남은 인스턴스를 모른다 — 닫아서 앱을 놓는다
+  await expect.poll(() => closedViews(page)).toEqual([first])
+
+  await past.getByTestId('inline-view-reopen').click()
+  await expect(past.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  const v = viewIn(past)
+  expect(await logged(v, 'tool-input')).toEqual({ q: 'yesterday' })
+  expect(await logged(v, 'tool-result')).toEqual({ forecast: 'rain' })
+})
+
+test('다시 연 UI: host가 들고 있지 않으면(다시 떴다) Reopen 없이 Open app만 — 누르면 고정 화면이 열린다. 거절은 이유로 남는다', async ({ page }) => {
+  const { pid, sid } = await sessionWithApp(page)
+  await emit(page, toolCall(sid, 'toolu_gone', 'mcp__app-viewer__show'))
+  await openInline(page, pid, sid, 'toolu_gone', { q: 'x' })
+  await emit(page, toolCall(sid, 'toolu_spoof', 'mcp__app-viewer__spoof'))
+  await emit(page, { type: 'app_view', sessionId: sid, callId: 'toolu_spoof', appId: 'viewer', projectId: pid, tool: 'spoof', phase: 'rejected', reason: 'This app does not serve ui://other/main' })
+  // host가 다시 떴다 — 메모리에 들고 있던 입력과 결과가 없다
+  await page.evaluate(() => (window as any).__mock.inlineRecords.clear())
+
+  await reopenUi(page, sid)
+  const past = rowOf(page, 'toolu_gone').getByTestId('inline-view')
+  await expect(past.getByTestId('inline-view-placeholder')).toContainText("Viewer's view is closed")
+  await expect(past.getByTestId('inline-view-reopen')).toHaveCount(0)
+  await expect(rowOf(page, 'toolu_spoof').getByTestId('inline-view-rejected')).toHaveText(
+    'This view was not shown: This app does not serve ui://other/main',
+  )
+
+  await past.getByTestId('inline-view-open-app').click()
+  await expect(page.getByTestId(`pinned-app-${pid}/viewer`).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+})

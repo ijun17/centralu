@@ -466,3 +466,28 @@ describe('상한과 다시 열기', () => {
     await expect(rpc('apps.inlineReopen', { sessionId, callId: 'x1' })).rejects.toThrow('This app was removed')
   })
 })
+
+/**
+ * 다시 연 UI (M4 B-1). 대화 기록에는 "이 카드 아래에 어느 앱의 화면이 섰다"만 남는다(본문 없이). 다시 연 UI는
+ * host에 들고 있는 화면을 묻고(`apps.inlineViews`), 들고 있는 것에만 "Reopen"을 준다. 열린 채 남은 인스턴스는
+ * 그 UI가 모르는 프레임이라 닫아서 앱을 놓는다.
+ */
+describe('다시 연 UI가 묻는 목록', () => {
+  it('들고 있는 화면을 연 순서대로, 열린 인스턴스와 함께 알린다 — 본문은 싣지 않는다', async () => {
+    const { sessionId, apps } = await start(60_000, { keptCallMax: 2_000 })
+    await apps.call('app-viewer', 'show', { q: 'a' }, { callId: 'l1' })
+    await apps.call('app-viewer', 'show_big', { bytes: 5_000 }, { callId: 'l2' })
+    await until(appViews, (v) => v.filter((e) => e.phase === 'result').length === 2)
+    const l1 = appViews().find((e) => e.callId === 'l1' && e.phase === 'open')!.instanceId!
+    await rpc('apps.closeView', { instanceId: l1 })
+    const l2 = appViews().find((e) => e.callId === 'l2' && e.phase === 'open')!.instanceId!
+
+    expect(await rpc('apps.inlineViews', { sessionId })).toEqual([
+      { callId: 'l1', appId: 'viewer', projectId, tool: 'show', kept: true, instanceId: null },
+      { callId: 'l2', appId: 'viewer', projectId, tool: 'show_big', kept: false, instanceId: l2 },
+    ])
+    // 다른 대화에는 아무것도 없다
+    const other = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(await rpc('apps.inlineViews', { sessionId: other.id })).toEqual([])
+  })
+})

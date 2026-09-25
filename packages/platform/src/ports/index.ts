@@ -550,6 +550,16 @@ export type InlineViewReopened = {
   cancelled?: string
 }
 
+/** host가 들고 있는 대화 안 화면 하나 (M4 B-1) — 본문 없이 */
+export type InlineViewKept = {
+  callId: string
+  appId: AppId
+  projectId: string | null
+  tool: string
+  kept: boolean
+  instanceId: string | null
+}
+
 /** MCP `resources/read`의 답 모양 */
 export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
 
@@ -599,6 +609,11 @@ export interface AppsPort {
    * 들고 있던 입력·결말을 돌려준다. 들고 있지 않으면 이유와 함께 실패한다(그때는 앱을 여는 길만 남는다).
    */
   reopenInlineView(sessionId: string, callId: string): Promise<InlineViewReopened>
+  /**
+   * 한 대화에서 host가 들고 있는 대화 안 화면 (M4 B-1) — 다시 연 UI가 지난 카드의 자리표시를 세울 때 묻는다.
+   * `kept`면 다시 열 수 있고, `instanceId`가 있으면 열린 채 남은 인스턴스다(다시 연 UI는 닫아서 앱을 놓는다).
+   */
+  inlineViews(sessionId: string): Promise<InlineViewKept[]>
   /**
    * 앱을 다시 시작할 수 있게 한다 (M4 B-6의 "Restart") — 연속 실패와 이유를 지우고, 떠 있으면 내린다.
    * **띄우지는 않는다**: 다음에 부르는 쪽(다시 여는 화면)이 띄운다.
