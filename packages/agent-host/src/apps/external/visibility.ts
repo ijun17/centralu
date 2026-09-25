@@ -20,11 +20,11 @@ export const DEFAULT_VISIBILITY: readonly Audience[] = ['model', 'app']
 export function visibilityOf(tool: Tool): { ok: true; visibility: Audience[] } | { ok: false; error: string } {
   const ui = (tool._meta as { ui?: unknown } | undefined)?.ui
   if (ui === undefined) return { ok: true, visibility: [...DEFAULT_VISIBILITY] }
-  if (ui === null || typeof ui !== 'object') return { ok: false, error: `${tool.name}: _meta.ui는 객체여야 합니다` }
+  if (ui === null || typeof ui !== 'object') return { ok: false, error: `${tool.name}: _meta.ui must be an object` }
   const v = (ui as { visibility?: unknown }).visibility
   if (v === undefined) return { ok: true, visibility: [...DEFAULT_VISIBILITY] }
   if (!Array.isArray(v) || !v.every((x) => x === 'model' || x === 'app')) {
-    return { ok: false, error: `${tool.name}: _meta.ui.visibility는 "model"·"app"의 배열이어야 합니다 (받은 값: ${JSON.stringify(v)})` }
+    return { ok: false, error: `${tool.name}: _meta.ui.visibility must be a list of "model" and "app" (got ${JSON.stringify(v)})` }
   }
   return { ok: true, visibility: [...new Set(v as Audience[])] }
 }

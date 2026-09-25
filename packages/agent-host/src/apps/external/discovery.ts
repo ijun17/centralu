@@ -77,7 +77,7 @@ export function scanApps(root: string, rel: string, ancestors: readonly string[]
       if (!assertExistingPathSync(root, folderRel).isDirectory()) continue
     } catch (err) {
       if (isMissingPathError(err)) continue // 읽는 사이에 사라졌다
-      apps.push(invalid(e.name, dir, '앱 폴더가 뿌리 밖을 가리키는 링크입니다 — 링크를 따라가지 않습니다'))
+      apps.push(invalid(e.name, dir, 'the app folder is a link that points outside its root — Centralu does not follow it'))
       continue
     }
     apps.push(readApp(root, folderRel, e.name, dir))
@@ -111,15 +111,15 @@ function readApp(root: string, folderRel: string, folder: string, dir: string): 
   let text: string
   try {
     if (!assertExistingPathSync(root, manifestRel).isFile()) {
-      return invalid(folder, dir, `${MANIFEST_FILE}가 파일이 아닙니다`)
+      return invalid(folder, dir, `${MANIFEST_FILE} is not a file`)
     }
     text = readCapped(join(root, manifestRel))
   } catch (err) {
     if (isMissingPathError(err) || isFsMissing(err)) {
       // 만드는 중인 폴더일 수 있다 — 숨기지 않고 무엇이 빠졌는지 말한다
-      return invalid(folder, dir, `${MANIFEST_FILE}가 없습니다`)
+      return invalid(folder, dir, `there is no ${MANIFEST_FILE}`)
     }
-    return invalid(folder, dir, `${MANIFEST_FILE}를 읽지 못했습니다: ${(err as Error).message}`)
+    return invalid(folder, dir, `could not read ${MANIFEST_FILE}: ${(err as Error).message}`)
   }
   const hash = createHash('sha256').update(text).digest('hex')
   const parsed = parseManifest(text)
@@ -131,7 +131,7 @@ function readApp(root: string, folderRel: string, folder: string, dir: string): 
   if (parsed.manifest.id !== folder) {
     return {
       folder, dir, hash, manifest: null, warnings: parsed.warnings,
-      error: `폴더 이름(${folder})과 매니페스트의 id(${parsed.manifest.id})가 다릅니다 — 폴더 이름이 곧 id입니다`,
+      error: `the folder name (${folder}) and the manifest's id (${parsed.manifest.id}) differ — the folder name is the app's id`,
     }
   }
   return { folder, dir, hash, manifest: parsed.manifest, error: null, warnings: parsed.warnings }
@@ -147,7 +147,7 @@ function readCapped(path: string): string {
   try {
     const size = fstatSync(fd).size
     if (size > MAX_MANIFEST_BYTES) {
-      throw new Error(`${MAX_MANIFEST_BYTES}바이트를 넘습니다 (${size}바이트)`)
+      throw new Error(`it is over ${MAX_MANIFEST_BYTES} bytes (${size} bytes)`)
     }
     const buf = Buffer.alloc(size)
     let off = 0

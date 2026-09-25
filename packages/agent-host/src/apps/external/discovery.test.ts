@@ -71,10 +71,10 @@ describe('발견', () => {
     writeFileSync(join(apps, 'stray-file.txt'), 'not an app')
     rt.refresh()
 
-    expect(byId('broken')).toMatchObject({ status: 'invalid', error: expect.stringContaining('JSON이 아닙니다') })
-    expect(byId('renamed')).toMatchObject({ status: 'invalid', error: expect.stringContaining('폴더 이름(renamed)') })
-    expect(byId('control')).toMatchObject({ status: 'invalid', error: expect.stringContaining('내장 앱의 이름') })
-    expect(byId('half-made')).toMatchObject({ status: 'invalid', error: expect.stringContaining(`${MANIFEST_FILE}가 없습니다`) })
+    expect(byId('broken')).toMatchObject({ status: 'invalid', error: expect.stringContaining('is not JSON') })
+    expect(byId('renamed')).toMatchObject({ status: 'invalid', error: expect.stringContaining('the folder name (renamed)') })
+    expect(byId('control')).toMatchObject({ status: 'invalid', error: expect.stringContaining('the name of a built-in app') })
+    expect(byId('half-made')).toMatchObject({ status: 'invalid', error: expect.stringContaining(`there is no ${MANIFEST_FILE}`) })
     expect(rt.list().map((a) => a.appId).sort()).toEqual(['broken', 'control', 'half-made', 'renamed'])
   })
 
@@ -86,7 +86,7 @@ describe('발견', () => {
     symlinkSync(join(outside, 'escapee'), join(apps, 'escapee'), 'dir')
     rt.refresh()
 
-    expect(byId('escapee')).toMatchObject({ status: 'invalid', error: expect.stringContaining('링크') })
+    expect(byId('escapee')).toMatchObject({ status: 'invalid', error: expect.stringContaining('a link that points outside its root') })
     expect(byId('escapee')?.name).toBeNull()
   })
 

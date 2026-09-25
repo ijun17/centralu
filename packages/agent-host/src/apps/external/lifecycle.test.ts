@@ -107,7 +107,7 @@ describe('처음 필요할 때 뜬다', () => {
     trusted = false
     plant('notes')
     make()
-    await expect(rt.tools(ref('notes'))).rejects.toThrow(/신뢰하지 않은 프로젝트/)
+    await expect(rt.tools(ref('notes'))).rejects.toThrow(/project is not trusted/)
     expect(starts('notes')).toHaveLength(0)
     expect(status('notes')).toBe('untrusted')
   })
@@ -168,7 +168,7 @@ describe('크래시', () => {
     expect(info.error).toContain('fixture: cannot open the thing it needs')
 
     // 멈춘 앱은 더 띄우지 않는다
-    await expect(rt.tools(ref('broken'))).rejects.toThrow(/3번 연달아 실패해 멈췄습니다/)
+    await expect(rt.tools(ref('broken'))).rejects.toThrow(/stopped after failing 3 times in a row/)
     expect(starts('broken')).toHaveLength(3)
 
     // 다시 시작하면 셈이 지워지고, 다음 필요가 띄운다

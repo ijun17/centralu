@@ -67,7 +67,7 @@ serveStdio(() => {
   return server
 })`
 
-const problems = (text: string) => text.split('\n').filter((l) => l.startsWith('- 문제'))
+const problems = (text: string) => text.split('\n').filter((l) => l.startsWith('- problem'))
 
 describe('템플릿 그대로는 통과한다', () => {
   it('매니페스트·도구·화면 모두 문제 없음 — 도구마다 무엇인지와 화면의 크기를 말한다', async () => {
@@ -75,12 +75,12 @@ describe('템플릿 그대로는 통과한다', () => {
     const r = await make().check(ref('counter'))
     expect(problems(r.text)).toEqual([])
     expect(r.ok).toBe(true)
-    expect(r.text).toMatch(/^check p1\/counter: 통과/)
-    expect(r.text).toContain('show — 읽기, model+app, 화면 ui://counter/index.html')
-    expect(r.text).toContain('increment — 바꿈, model+app')
-    expect(r.text).toContain('reset — 바꿈, app')
-    expect(r.text).toMatch(/화면 ui:\/\/counter\/index\.html: \d{4,}자/)
-    expect(r.text).toMatch(/프로세스: pid \d+, (modern|legacy) \(.+\), 지금 파일로 다시 띄움/)
+    expect(r.text).toMatch(/^check p1\/counter: passed/)
+    expect(r.text).toContain('show — reads, model+app, screen ui://counter/index.html')
+    expect(r.text).toContain('increment — changes, model+app')
+    expect(r.text).toContain('reset — changes, app')
+    expect(r.text).toMatch(/Screen ui:\/\/counter\/index\.html: \d{4,} characters/)
+    expect(r.text).toMatch(/Process: pid \d+, (modern|legacy) \(.+\), restarted from the files on disk/)
     // 점검 뒤 앱은 보통의 떠 있는 앱이다 — 도구도 그대로 부른다
     expect(status('counter')).toBe('running')
     const out = await rt.call(ref('counter'), 'increment', { by: 1 }, { kind: 'session', sessionId: 's1' })
@@ -94,7 +94,7 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     const r = await make().check(ref('names'))
     expect(r.ok).toBe(false)
     expect(problems(r.text)).toEqual([
-      '- 문제 [도구 save__draft] 도구 이름에 "__"를 쓸 수 없습니다 (세션에서 도구 이름의 칸막이입니다): save__draft — Centralu가 이 도구를 빼서 아무도 부를 수 없습니다',
+      '- problem [tool save__draft] a tool name cannot contain "__" (it separates names in a session\'s tool names): save__draft — Centralu drops this tool, so nobody can call it',
     ])
   })
 
@@ -102,9 +102,10 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     app('annot', serverWith(`centralu.tool(server, 'save', { description: 'Save the note', inputSchema: z.object({ text: z.string() }) }, async () => ({ content: [] }))`))
     const r = await make().check(ref('annot'))
     expect(problems(r.text)).toEqual([
-      '- 문제 [도구 save] annotations.readOnlyHint가 없습니다 — 읽기만 하면 `readOnlyHint: true`, 무엇이든 바꾸면 `readOnlyHint: false`를 적으세요. 없으면 바꾸는 도구로 다뤄져 세션이 부를 때마다 묻고, Codex의 auto 프리셋은 부르지 않으며, 부를 때마다 이 앱의 열린 화면이 모두 다시 읽습니다',
+      '- problem [tool save] annotations.readOnlyHint is missing — write `readOnlyHint: true` if the tool only reads, `readOnlyHint: false` if it changes anything. ' +
+        "Without it the tool counts as one that changes things: a session asks before every call, Codex's auto preset does not call it, and every call makes all of this app's open screens read again",
     ])
-    expect(r.text).toContain('save — readOnlyHint 없음, model+app')
+    expect(r.text).toContain('save — no readOnlyHint, model+app')
   })
 
   it('home에 화면이 없다 / home이 화면에 닫혀 있다 / home이 목록에 없다', async () => {
@@ -113,20 +114,20 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     app('lost-home', serverWith(''), (m) => (m.home = 'open'))
     const r = make()
     expect(problems((await r.check(ref('nohome-ui'))).text)).toEqual([
-      '- 문제 [home (show)] home 도구에 화면이 없습니다 — `_meta: { ui: { resourceUri: "ui://…" } }`를 달고 그 리소스를 `centralu.uiResource`로 등록하세요',
+      '- problem [home (show)] the home tool has no screen — add `_meta: { ui: { resourceUri: "ui://…" } }` and register that resource with `centralu.uiResource`',
     ])
     expect(problems((await r.check(ref('hidden-home'))).text)).toEqual([
-      '- 문제 [home (show)] home 도구가 화면에 열려 있지 않습니다 (visibility: ["model"]) — 앱을 열 때 Centralu는 화면의 자리에서 home을 부릅니다',
+      '- problem [home (show)] the home tool is not open to the screen (visibility: ["model"]) — when the app opens, Centralu calls home from the screen\'s side',
     ])
     expect(problems((await r.check(ref('lost-home'))).text)).toEqual([
-      '- 문제 [home (open)] centralu.app.json의 home이 가리키는 도구가 도구 목록에 없습니다 — 사이드바에서 앱을 열 수 없습니다',
+      '- problem [home (open)] the tool centralu.app.json names as home is not in the tool list — the app cannot be opened from the sidebar',
     ])
   })
 
   it('공개 범위의 모양이 틀렸다', async () => {
     app('vis', serverWith(`centralu.tool(server, 'peek', { description: 'Peek', annotations: { readOnlyHint: true }, _meta: { ui: { visibility: 'app' } } }, async () => ({ content: [] }))`))
     expect(problems((await make().check(ref('vis'))).text)).toEqual([
-      '- 문제 [도구 peek] peek: _meta.ui.visibility는 "model"·"app"의 배열이어야 합니다 (받은 값: "app") — Centralu가 이 도구를 뺍니다',
+      '- problem [tool peek] peek: _meta.ui.visibility must be a list of "model" and "app" (got "app") — Centralu drops this tool',
     ])
   })
 
@@ -138,10 +139,10 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
   server.registerResource('raw', 'ui://x/raw.html', { mimeType: 'text/html' }, async () => ({ contents: [{ uri: 'ui://x/raw.html', mimeType: 'text/html', text: '<script src="centralu:mcp-app.js"></script>' }] }))`))
     const found = problems((await make().check(ref('screens'))).text)
     expect(found).toHaveLength(4)
-    expect(found[0]).toBe('- 문제 [도구 web] web: _meta.ui.resourceUri must be a ui:// URI (got "https://example.com/app") — 화면으로 뜨지 않습니다')
-    expect(found[1]).toMatch(/^- 문제 \[화면 ui:\/\/x\/missing\.html\] 읽지 못했습니다: .*missing\.html/)
-    expect(found[2]).toBe('- 문제 [화면 ui://x/raw.html] mimeType이 "text/html"입니다 — 화면은 "text/html;profile=mcp-app"이어야 합니다 (centralu.uiResource가 맞춰 줍니다)')
-    expect(found[3]).toBe('- 문제 [화면 ui://x/raw.html] <script src="centralu:mcp-app.js">가 그대로 남았습니다 — 이 화면에는 브리지가 없어 도구를 부를 수 없습니다. centralu.uiResource로 등록하세요')
+    expect(found[0]).toBe('- problem [tool web] web: _meta.ui.resourceUri must be a ui:// URI (got "https://example.com/app") — it will not open as a screen')
+    expect(found[1]).toMatch(/^- problem \[screen ui:\/\/x\/missing\.html\] could not be read: .*missing\.html/)
+    expect(found[2]).toBe('- problem [screen ui://x/raw.html] its mimeType is "text/html" — a screen must be "text/html;profile=mcp-app" (centralu.uiResource sets it)')
+    expect(found[3]).toBe('- problem [screen ui://x/raw.html] <script src="centralu:mcp-app.js"> is still in the page — this screen has no bridge, so it cannot call tools. Register it with centralu.uiResource')
   })
 
   it('매니페스트가 틀렸다 — 띄우지 않고 이유를 말한다', async () => {
@@ -151,16 +152,16 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     })
     const r = await make().check(ref('manifest'))
     expect(problems(r.text)).toEqual([
-      '- 문제 [centralu.app.json] 폴더 이름(manifest)과 매니페스트의 id(other)가 다릅니다 — 폴더 이름이 곧 id입니다',
+      "- problem [centralu.app.json] the folder name (manifest) and the manifest's id (other) differ — the folder name is the app's id",
     ])
-    expect(r.text).toContain('- 주의 [centralu.app.json] 모르는 필드는 무시합니다: extra')
+    expect(r.text).toContain('- warning [centralu.app.json] unknown field, ignored: extra')
   })
 
   it('서버가 뜨지 못한다 — 이유와 표준에러가 보고서에 있다', async () => {
     app('broken', `serveStdio(() => { throw new Error('forgot to define the tools') })`)
     const r = await make().check(ref('broken'))
     expect(r.ok).toBe(false)
-    expect(problems(r.text)[0]).toMatch(/^- 문제 \[시작\] /)
+    expect(problems(r.text)[0]).toMatch(/^- problem \[start\] /)
     expect(r.text).toContain('forgot to define the tools')
     expect(r.text).toContain('the server could not start')
   })
@@ -206,8 +207,8 @@ describe('점검은 앱을 이상한 상태로 두지 않는다', () => {
     expect(out.status).toBe('ok')
     const held = Number(resultText(out.result!).replace('held pid ', ''))
     const rep = await report
-    expect(rep.text).toContain('added — 읽기, model+app')
-    expect(rep.text).toContain('지금 파일로 다시 띄움')
+    expect(rep.text).toContain('added — reads, model+app')
+    expect(rep.text).toContain('restarted from the files on disk')
     expect(rep.text).not.toContain(`pid ${held},`)
   })
 
@@ -225,8 +226,10 @@ describe('점검은 앱을 이상한 상태로 두지 않는다', () => {
     const call = r.call(ref('slow'), 'hold', {}, { kind: 'session', sessionId: 's1' })
     await until(() => (r as unknown as { openRuns: Map<string, unknown> }).openRuns.size, (n) => n === 1)
     const rep = await r.check(ref('slow'))
-    expect(rep.text).toContain('- 참고: 호출 1개가 200ms 넘게 도는 중이라 다시 띄우지 않았습니다 — 떠 있던 프로세스를 봤습니다(고친 코드가 아닐 수 있습니다)')
-    expect(rep.text).toContain('떠 있던 것')
+    expect(rep.text).toContain(
+      '- note: 1 call was still running after 200 ms, so the app was not restarted — this report is about the process that was already running, which may not have your latest code',
+    )
+    expect(rep.text).toContain('the process that was already running')
     writeFileSync(gate, '')
     expect((await call).status).toBe('ok')
     expect(existsSync(gate)).toBe(true)

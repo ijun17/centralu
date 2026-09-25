@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult, ListResourcesResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
-import type { AppReview, ExternalAppInfo } from '@cc/protocol'
-import { proposedMcpServerNameError } from '../contract.js'
+import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
 import { BROKER_KEEPALIVE_MS, RUN_META, serveBroker } from './broker.js'
@@ -293,6 +292,17 @@ export type SentErrorBundle = AppErrorBundle & { sentAt: number | null }
 
 /** 보낸 묶음의 열쇠 — 한 앱에서 묶음은 (종류, 때)로 하나다. 표준에러를 다시 담아 갈아 끼워져도 같은 열쇠다 */
 const sentKey = (holdKey: string, b: Pick<AppErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
+
+/**
+ * 새 앱 id가 걸린 까닭을 에이전트와 사람이 읽을 말로 (C-1b). 판정은 한 벌이다(`newAppIdProblem`, @cc/protocol) — 말만 여기서
+ * 붙인다. 새 앱 창은 같은 판정에 자기 말을 붙이지만(`appIdHint`), 오케스트레이터의 `create_app`은 이 말을 그대로 읽는다.
+ */
+const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
+  shape: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
+  reserved: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself`,
+  'server-prefix': `ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions — pick another`,
+  builtin: 'that is the id of a built-in app — pick another',
+}
 
 /** 부를 수 없는 앱 — 이유가 곧 메시지다 */
 export class AppUnavailableError extends Error {
@@ -702,22 +712,22 @@ export class ExternalApps {
     }
 
     // 앱에 보내기 전에 끝나는 판정 — 프로세스를 띄울 필요도 없다
-    if (!e.manifest) return done('rejected', null, `매니페스트가 틀린 앱입니다: ${e.error}`)
-    if (!e.scope.trusted) return done('rejected', null, '신뢰하지 않은 프로젝트의 앱은 부르지 않습니다')
+    if (!e.manifest) return done('rejected', null, `This app's manifest is invalid: ${e.error}`)
+    if (!e.scope.trusted) return done('rejected', null, "This app's project is not trusted, so Centralu does not call its apps")
     const held = this.held(e)
     if (held) return done('rejected', null, held)
-    if (e.life.gaveUp) return done('rejected', null, `${this.timing.maxFailures}번 연달아 실패해 멈춘 앱입니다`)
+    if (e.life.gaveUp) return done('rejected', null, `This app stopped after failing ${this.timing.maxFailures} times in a row`)
     let parent: OpenRun | null = null
     if (caller.kind === 'app') {
       parent = this.openRuns.get(caller.parentRunId) ?? null
-      if (!parent) return done('rejected', null, `부모 실행이 열려 있지 않습니다: ${caller.parentRunId}`)
+      if (!parent) return done('rejected', null, `The run that asked for this call is not open: ${caller.parentRunId}`)
     }
-    if (opts.signal?.aborted) return done('cancelled', null, '부르기 전에 취소됐습니다')
+    if (opts.signal?.aborted) return done('cancelled', null, 'Cancelled before the call was sent')
 
     try {
       return await this.use(e, async (proc) => {
         const found = e.life.tools?.find((t) => t.tool.name === name)
-        if (!found) return done('rejected', null, `그런 도구가 없습니다: ${name}`)
+        if (!found) return done('rejected', null, `This app has no tool named ${name}`)
         /*
          * 화면은 `app` 도구만, 에이전트와 다른 앱은 `model` 도구만. 세션은 애초에 `model` 도구만
          * 목록으로 받지만(A-5), 이름을 알면 부를 수 있다 — 목록에서 숨기는 것과 호출을 막는 것은
@@ -725,7 +735,7 @@ export class ExternalApps {
          */
         const need: Audience = caller.kind === 'view' ? 'app' : 'model'
         if (!found.visibility.includes(need)) {
-          return done('rejected', null, `${name}은(는) ${need === 'app' ? '화면' : '에이전트'}에게 열린 도구가 아닙니다 (visibility: ${JSON.stringify(found.visibility)})`)
+          return done('rejected', null, `${name} is not open to ${need === 'app' ? 'views' : 'agents'} (visibility: ${JSON.stringify(found.visibility)})`)
         }
 
         const upstream = [opts.signal, parent?.abort.signal].filter((x): x is AbortSignal => !!x)
@@ -733,7 +743,7 @@ export class ExternalApps {
          * 앱이 뜨는 동안 취소됐으면 보내지 않는다. 실측: 뜨는 중에 취소된 호출이 5초짜리 도구를
          * 끝까지 돌렸다 — 이미 선 신호에 붙인 리스너는 영영 불리지 않는다.
          */
-        if (upstream.some((sig) => sig.aborted)) return done('cancelled', null, '앱이 뜨는 동안 취소됐습니다')
+        if (upstream.some((sig) => sig.aborted)) return done('cancelled', null, 'Cancelled while the app was starting')
         const abort = new AbortController()
         const onUp = () => abort.abort(new Error('the caller cancelled this call'))
         for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
@@ -752,9 +762,9 @@ export class ExternalApps {
             { name, arguments: args, _meta: { [RUN_META]: runId } },
             { signal: abort.signal, timeout: this.timing.callTimeoutMs, resetTimeoutOnProgress: true, onprogress: () => {} },
           )
-          return result.isError ? done('error', result, resultText(result) || '도구가 실패를 돌려줬습니다') : done('ok', result, null)
+          return result.isError ? done('error', result, resultText(result) || 'The tool returned an error with no text') : done('ok', result, null)
         } catch (err) {
-          if (abort.signal.aborted) return done('cancelled', null, '부른 쪽이 취소했습니다')
+          if (abort.signal.aborted) return done('cancelled', null, 'The caller cancelled this call')
           return done('error', null, (err as Error).message)
         } finally {
           this.openRuns.delete(runId)
@@ -883,8 +893,8 @@ export class ExternalApps {
    * **띄우지는 않는다** — 처음 필요할 때 뜬다.
    */
   installUserApp(spec: { id: string; name: string; description: string; server: { command: string; args: string[] } }): ExternalAppInfo {
-    if (this.disposed) throw new AppUnavailableError('앱 런타임이 내려갔습니다')
-    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}"는 내장 앱의 이름입니다 — 다른 이름을 쓰세요`)
+    if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
+    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}" is the name of a built-in app — use another name`)
     const text = JSON.stringify(
       {
         manifestVersion: MANIFEST_VERSION,
@@ -898,7 +908,7 @@ export class ExternalApps {
       2,
     )
     const parsed = parseManifest(text)
-    if (!parsed.ok) throw new AppUnavailableError(`앱으로 만들 수 없습니다 — ${parsed.error}`)
+    if (!parsed.ok) throw new AppUnavailableError(`This cannot become an app — ${parsed.error}`)
 
     this.rescanUser()
     const ref: AppRef = { projectId: null, appId: spec.id }
@@ -910,7 +920,7 @@ export class ExternalApps {
         held?.manifest?.server.command === spec.server.command &&
         JSON.stringify(held.manifest.server.args) === JSON.stringify(spec.server.args)
       if (held && same) return this.info(held)
-      throw new AppUnavailableError(`사용자 폴더에 "${spec.id}" 앱이 이미 있습니다 — 다른 이름을 쓰거나 그 앱을 먼저 지우세요`)
+      throw new AppUnavailableError(`Your user folder already has an app "${spec.id}" — use another name, or remove that app first`)
     }
 
     mkdirSync(parent, { recursive: true })
@@ -921,11 +931,11 @@ export class ExternalApps {
       renameSync(staging, dir)
     } catch (err) {
       rmSync(staging, { recursive: true, force: true })
-      throw new AppUnavailableError(`앱 폴더를 쓰지 못했습니다: ${(err as Error).message}`)
+      throw new AppUnavailableError(`Could not write the app folder: ${(err as Error).message}`)
     }
     this.rescanUser()
     const made = this.find(ref)
-    if (!made) throw new AppUnavailableError(`앱 폴더를 썼지만 발견되지 않았습니다: ${dir}`)
+    if (!made) throw new AppUnavailableError(`The app folder was written, but discovery did not find it: ${dir}`)
     return this.info(made)
   }
 
@@ -959,21 +969,21 @@ export class ExternalApps {
     else this.refresh()
     const e = this.find(ref)
     if (!e) {
-      findings.push({ level: 'problem', where: '앱', message: '그런 앱이 없습니다 — 앱 폴더가 지워졌거나 이름이 바뀌었습니다' })
+      findings.push({ level: 'problem', where: 'app', message: 'there is no such app — its folder was removed or renamed' })
       return report(null)
     }
     for (const w of e.warnings) findings.push({ level: 'warning', where: 'centralu.app.json', message: w })
     if (!e.manifest) {
-      findings.push({ level: 'problem', where: 'centralu.app.json', message: e.error ?? '매니페스트가 틀렸습니다' })
+      findings.push({ level: 'problem', where: 'centralu.app.json', message: e.error ?? 'the manifest is invalid' })
       return report(null)
     }
     if (!e.scope.trusted) {
-      findings.push({ level: 'problem', where: '신뢰', message: '신뢰하지 않은 프로젝트의 앱이라 띄우지 않습니다 — 프로젝트를 신뢰하면 점검할 수 있습니다' })
+      findings.push({ level: 'problem', where: 'trust', message: "this app's project is not trusted, so the app does not start — trust the project to check it" })
       return report(null)
     }
     const held = this.held(e)
     if (held) {
-      findings.push({ level: 'problem', where: '확인', message: held })
+      findings.push({ level: 'problem', where: 'review', message: held })
       return report(null)
     }
 
@@ -990,8 +1000,11 @@ export class ExternalApps {
       }
       const busy = e.life.inflight
       if (!(await this.drain(e, this.timing.checkDrainMs))) {
-        const limit = this.timing.checkDrainMs >= 1000 ? `${Math.round(this.timing.checkDrainMs / 1000)}초` : `${this.timing.checkDrainMs}ms`
-        notes.push(`호출 ${busy}개가 ${limit} 넘게 도는 중이라 다시 띄우지 않았습니다 — 떠 있던 프로세스를 봤습니다(고친 코드가 아닐 수 있습니다)`)
+        const limit = this.timing.checkDrainMs >= 1000 ? `${Math.round(this.timing.checkDrainMs / 1000)} s` : `${this.timing.checkDrainMs} ms`
+        notes.push(
+          `${busy} call${busy === 1 ? ' was' : 's were'} still running after ${limit}, so the app was not restarted — ` +
+            'this report is about the process that was already running, which may not have your latest code',
+        )
         break
       }
     }
@@ -1016,12 +1029,12 @@ export class ExternalApps {
           findings.push(...s.findings)
           screens.push({ uri, chars: s.chars })
         }
-        procLine = `pid ${proc.child.pid}, ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()}), ${restarted ? '지금 파일로 다시 띄움' : '떠 있던 것'}`
+        procLine = `pid ${proc.child.pid}, ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()}), ${restarted ? 'restarted from the files on disk' : 'the process that was already running'}`
         stderr = proc.log.tail() || null
       })
     } catch (err) {
       // 뜨지 못했다 — 이유에 표준에러 끝부분이 이미 들어 있다(AppProcess.start)
-      findings.push({ level: 'problem', where: '시작', message: (err as Error).message })
+      findings.push({ level: 'problem', where: 'start', message: (err as Error).message })
     }
     return report(stderr)
   }
@@ -1033,7 +1046,7 @@ export class ExternalApps {
    *   사용자 폴더 앱   `<데이터 폴더>/apps/<id>/` — 여러 프로젝트에서 쓰는 것 (`projectId: null`)
    *
    * 거절하는 것 셋, 모두 폴더가 생기기 전에:
-   *   - **이름**: 제안된 MCP 서버와 같은 규칙(`proposedMcpServerNameError` — #93의 글자·`centralu` 예약에 `app-`
+   *   - **이름**: 제안된 MCP 서버와 같은 규칙(`newAppIdProblem` — #93의 글자·`centralu` 예약에 `app-`
    *     머리 금지). 발견은 `app-` 머리의 id도 읽지만(손으로 만든 앱), 새로 만드는 앱에 `app-app-notes`라는
    *     서버 이름을 줄 까닭이 없다. 내장 앱의 id도 안 된다.
    *   - **신뢰하지 않은 프로젝트**: 만든 앱은 이 기계에서 도는 코드이고, 신뢰하지 않은 프로젝트의 앱은 뜨지 않는다
@@ -1046,21 +1059,20 @@ export class ExternalApps {
    * 않을 수 있다. **띄우지는 않는다** — 처음 필요할 때 뜬다.
    */
   createApp(spec: { projectId: string | null; id: string; name: string; description?: string }): ExternalAppInfo {
-    if (this.disposed) throw new AppUnavailableError('앱 런타임이 내려갔습니다')
-    const idError = proposedMcpServerNameError(spec.id)
-    if (idError) throw new AppUnavailableError(`앱 id로 쓸 수 없습니다 ("${spec.id}") — ${idError}`)
-    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}"는 내장 앱의 이름입니다 — 다른 id를 쓰세요`)
+    if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
+    const idProblem = newAppIdProblem(spec.id, this.deps.reservedIds)
+    if (idProblem) throw new AppUnavailableError(`"${spec.id}" cannot be an app id — ${APP_ID_PROBLEM[idProblem]}`)
     const name = oneLine(spec.name)
-    if (!name) throw new AppUnavailableError('앱 이름이 비어 있습니다')
+    if (!name) throw new AppUnavailableError('The app needs a name')
     const description = oneLine(spec.description ?? '') || `${name} (a Centralu app)`
 
     // 신뢰는 부를 때마다 정본(저장소)에서 읽는다 — 런타임의 범위 사본이 아니라
     let root = this.deps.dataRoot
     if (spec.projectId !== null) {
       const project = this.deps.projects().find((p) => p.id === spec.projectId)
-      if (!project) throw new AppUnavailableError(`그런 프로젝트가 없습니다: ${spec.projectId}`)
+      if (!project) throw new AppUnavailableError(`There is no such project: ${spec.projectId}`)
       if (!project.trusted) {
-        throw new AppUnavailableError('신뢰하지 않은 프로젝트에는 앱을 만들지 않습니다 — 앱은 이 기계에서 도는 코드라, 프로젝트를 먼저 신뢰해야 뜹니다')
+        throw new AppUnavailableError('Centralu does not make apps in a project it does not trust — an app is code that runs on this machine, so trust the project first')
       }
       root = project.path
     }
@@ -1072,7 +1084,7 @@ export class ExternalApps {
     const parts = spec.projectId === null ? USER_APPS_PARTS : PROJECT_APPS_PARTS
     const dir = join(root, ...parts, spec.id)
     if (this.find(ref) || existsSync(dir)) {
-      throw new AppUnavailableError(`"${spec.id}" 앱이 이미 있습니다 (${dir}) — 다른 id를 쓰세요`)
+      throw new AppUnavailableError(`An app "${spec.id}" already exists (${dir}) — use another id`)
     }
 
     let staging: string | null = null
@@ -1084,12 +1096,12 @@ export class ExternalApps {
       staging = null
     } catch (err) {
       if (staging) rmSync(staging, { recursive: true, force: true })
-      throw new AppUnavailableError(`앱 폴더를 만들지 못했습니다: ${(err as Error).message}`)
+      throw new AppUnavailableError(`Could not make the app folder: ${(err as Error).message}`)
     }
     mkdirSync(this.dataDirOf(ref), { recursive: true })
     this.rescan(key)
     const made = this.find(ref)
-    if (!made) throw new AppUnavailableError(`앱 폴더를 만들었지만 발견되지 않았습니다: ${dir}`)
+    if (!made) throw new AppUnavailableError(`The app folder was made, but discovery did not find it: ${dir}`)
     return this.info(made)
   }
 
@@ -1106,7 +1118,7 @@ export class ExternalApps {
    */
   removeUserApp(ref: AppRef): void {
     if (ref.projectId !== null) {
-      throw new AppUnavailableError('프로젝트 앱은 저장소의 파일입니다 — 저장소에서 지우세요')
+      throw new AppUnavailableError("A project app is part of the project's repository — remove it there")
     }
     this.rescanUser()
     const e = this.require(ref)
@@ -1166,7 +1178,7 @@ export class ExternalApps {
 
   /** 가져올 준비 — 대기실로 옮겨 담고 사람이 볼 것을 돌려준다. 아직 아무것도 들어오지 않았다 */
   prepareImport(source: string): Promise<{ token: string; review: AppReview }> {
-    if (this.disposed) throw new AppUnavailableError('앱 런타임이 내려갔습니다')
+    if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
     return this.handover.prepare(source)
   }
 
@@ -1174,7 +1186,7 @@ export class ExternalApps {
   commitImport(token: string, opts: { enable: boolean; reviewKey?: string }): ExternalAppInfo {
     const id = this.handover.commit(token, opts)
     const made = this.find({ projectId: null, appId: id })
-    if (!made) throw new AppUnavailableError(`앱을 들였지만 발견되지 않았습니다: ${id}`)
+    if (!made) throw new AppUnavailableError(`The app was brought in, but discovery did not find it: ${id}`)
     return this.info(made)
   }
 
@@ -1374,16 +1386,16 @@ export class ExternalApps {
    */
   private ensureRunning(e: AppEntry): Promise<AppProcess> {
     const L = e.life
-    if (!e.manifest) throw new AppUnavailableError(`앱을 띄울 수 없습니다 — 매니페스트가 틀렸습니다: ${e.error}`)
+    if (!e.manifest) throw new AppUnavailableError(`The app cannot start — its manifest is invalid: ${e.error}`)
     if (!e.scope.trusted) {
-      throw new AppUnavailableError('신뢰하지 않은 프로젝트의 앱은 띄우지 않습니다 — 프로젝트를 신뢰하면 뜹니다')
+      throw new AppUnavailableError("This app's project is not trusted, so the app does not start — trust the project and it will")
     }
     // 가져온 앱은 사람이 보고 켜기 전에 뜨지 않는다 (E-3) — 부를 때마다 본다: 켠 뒤 server·uses가 바뀌면 다음 기동부터 막힌다
     const held = this.held(e)
     if (held) throw new AppUnavailableError(held)
     if (L.gaveUp) {
       throw new AppUnavailableError(
-        `${this.timing.maxFailures}번 연달아 실패해 멈췄습니다 — 고친 뒤 다시 시작하세요.\n${L.lastError ?? ''}`,
+        `The app stopped after failing ${this.timing.maxFailures} times in a row — fix it, then restart it.\n${L.lastError ?? ''}`,
       )
     }
     if (L.proc?.alive) return Promise.resolve(L.proc)
@@ -1393,7 +1405,7 @@ export class ExternalApps {
     const p = (async () => {
       const wait = L.retryAt - Date.now()
       if (wait > 0) await new Promise((r) => setTimeout(r, wait))
-      if (L.epoch !== epoch || this.disposed) throw new AppUnavailableError('앱이 바뀌거나 내려가서 기동을 그만뒀습니다')
+      if (L.epoch !== epoch || this.disposed) throw new AppUnavailableError('The app changed or was stopped, so this start was abandoned')
       const usedPrior = L.verdict !== undefined
       const pipeId = ++this.pipeSeq
       /*
@@ -1427,7 +1439,7 @@ export class ExternalApps {
       if (L.epoch !== epoch || this.disposed) {
         this.remember(proc)
         void proc.stop(this.timing.graceMs)
-        throw new AppUnavailableError('앱이 바뀌거나 내려가서 기동을 그만뒀습니다')
+        throw new AppUnavailableError('The app changed or was stopped, so this start was abandoned')
       }
       this.remember(proc)
       L.verdict = proc.verdict() ?? L.verdict
@@ -1455,7 +1467,7 @@ export class ExternalApps {
     const kept: AppTool[] = []
     const warnings: string[] = []
     const drop = (why: string) => {
-      warnings.push(`도구를 뺐습니다 — ${why}`)
+      warnings.push(`a tool was dropped — ${why}`)
       proc.log.note(`tool dropped: ${why}`)
     }
     for (const t of proc.tools) {
@@ -1472,7 +1484,7 @@ export class ExternalApps {
       kept.push({ tool: t, visibility: vis.visibility })
     }
     if (e.manifest?.home && !kept.some((t) => t.tool.name === e.manifest?.home)) {
-      warnings.push(`home 도구(${e.manifest.home})가 도구 목록에 없습니다`)
+      warnings.push(`the home tool (${e.manifest.home}) is not in the tool list`)
     }
     // 세션이 보는 것(에이전트 도구)이 달라졌을 때만 알린다 — 화면 전용 도구의 변화는 세션과 무관하다
     const forModel = (list: AppTool[] | null) =>
@@ -1634,7 +1646,7 @@ export class ExternalApps {
   /** 경로의 한 칸이 되는 범위 이름. 프로젝트 id는 UUID다 — 아니면 경로에 쓰지 않는다 */
   private scopeDir(ref: AppRef): string {
     if (ref.projectId === null) return USER_SCOPE
-    if (!/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`경로에 쓸 수 없는 프로젝트 id: ${ref.projectId}`)
+    if (!/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`This project id cannot be used in a path: ${ref.projectId}`)
     return ref.projectId
   }
 
@@ -1650,7 +1662,7 @@ export class ExternalApps {
 
   private require(ref: AppRef): AppEntry {
     const e = this.find(ref)
-    if (!e) throw new AppUnavailableError(`그런 앱이 없습니다: ${ref.projectId ?? 'user'}/${ref.appId}`)
+    if (!e) throw new AppUnavailableError(`There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`)
     return e
   }
 
@@ -1760,7 +1772,7 @@ export class ExternalApps {
     let { manifest, error } = found
     if (manifest && this.deps.reservedIds.includes(manifest.id)) {
       // 내장 앱과 같은 id면 `apps.invoke`가 어느 쪽을 부를지 갈린다 — 먼저 선 쪽이 이긴다
-      error = `"${manifest.id}"는 내장 앱의 이름입니다 — 다른 id를 쓰세요`
+      error = `"${manifest.id}" is the name of a built-in app — use another id`
       manifest = null
     }
     return {

@@ -51,10 +51,10 @@ const RUN_STATUS_SPEC: AppToolSpec = {
   name: RUN_STATUS_TOOL,
   title: 'Run status',
   description:
-    '이 앱에 부른 호출이 오래 걸려 "아직 도는 중"과 실행 id(run_…)를 먼저 받았다면, 그 id로 지금 상태와 끝났을 때의 결과를 본다. 호출을 다시 부르지 말고 이것으로 확인한다.',
+    'If a call to this app took long and you got "still running" with a run id (run_…) first, pass that id here to see its state now and its result once it has finished. Check with this instead of calling the tool again.',
   inputSchema: {
     type: 'object',
-    properties: { run_id: { type: 'string', description: '먼저 받은 실행 id (run_로 시작한다)' } },
+    properties: { run_id: { type: 'string', description: 'The run id you got first (it starts with run_)' } },
     required: ['run_id'],
   },
   annotations: { title: 'Run status', readOnlyHint: true, openWorldHint: false },
@@ -137,7 +137,7 @@ export class SessionAppsHub {
    */
   forSession(sessionId: string): SessionApps {
     const a = this.live.get(sessionId)
-    if (!a) throw Object.assign(new Error(`이 세션은 지금 앱을 부를 수 없습니다 (실행 중이 아닙니다): ${sessionId}`), { code: 'session_not_found' })
+    if (!a) throw Object.assign(new Error(`This session cannot call apps right now (it is not running): ${sessionId}`), { code: 'session_not_found' })
     return a
   }
 
@@ -283,7 +283,7 @@ class Attachment implements SessionApps {
 
   async tools(server: string): Promise<AppToolSpec[]> {
     const hit = this.find(server)
-    if (!hit) throw new Error(`이 세션에 붙은 앱이 아닙니다: ${server}`)
+    if (!hit) throw new Error(`This app is not attached to this session: ${server}`)
     const known = this.hub.rt.knownTools(hit.ref, 'model')
     if (known) return withRunStatus(known.map(toSpec))
     /*
@@ -316,7 +316,7 @@ class Attachment implements SessionApps {
   ): Promise<AppToolResult> {
     const hit = this.find(server)
     // 붙지 않은 앱은 런타임까지 가지 않는다 — 이 세션이 부를 수 있는 앱은 결정 4가 정한 것뿐이다
-    if (!hit) return failure(`이 세션에 붙은 앱이 아닙니다: ${server}`)
+    if (!hit) return failure(`This app is not attached to this session: ${server}`)
     if (tool === RUN_STATUS_TOOL) return this.runStatus(hit, args)
 
     /*
@@ -372,8 +372,8 @@ class Attachment implements SessionApps {
         {
           type: 'text',
           text:
-            `이 호출은 아직 도는 중입니다 (${seconds}초를 넘겼습니다). 실행 id: ${runId}\n` +
-            `호출은 멈추지 않고 계속됩니다. 다시 부르지 말고, 같은 서버의 ${RUN_STATUS_TOOL} 도구에 run_id로 이 id를 넘겨 결과를 확인하세요.`,
+            `This call is still running (past ${seconds} s). Run id: ${runId}\n` +
+            `The call has not stopped and carries on. Do not call it again: pass this id as run_id to the ${RUN_STATUS_TOOL} tool of the same server to get its result.`,
         },
       ],
       isError: false,
@@ -390,13 +390,13 @@ class Attachment implements SessionApps {
    */
   private runStatus(hit: Hit, args: Record<string, unknown>): AppToolResult {
     const runId = typeof args.run_id === 'string' ? args.run_id.trim() : ''
-    if (!runId) return failure(`${RUN_STATUS_TOOL}: run_id가 필요합니다`)
+    if (!runId) return failure(`${RUN_STATUS_TOOL} needs a run_id`)
     const d = this.hub.detached.get(runId)
     if (d && d.sessionId === this.session.id && d.server === hit.server) {
       if (!d.outcome) {
         const seconds = Math.round((Date.now() - d.startedAt) / 1000)
         return {
-          content: [{ type: 'text', text: `실행 ${runId}은(는) 아직 도는 중입니다 (${seconds}초째). 조금 뒤에 다시 확인하세요.` }],
+          content: [{ type: 'text', text: `Run ${runId} is still running (${seconds} s so far). Check again a little later.` }],
           isError: false,
           structuredContent: { runId, status: 'running' },
         }
@@ -404,16 +404,16 @@ class Attachment implements SessionApps {
       const o = d.outcome
       const done = toResult(o)
       return {
-        content: [{ type: 'text', text: `실행 ${runId}이(가) 끝났습니다 (${o.status}, ${Math.round(o.durationMs / 1000)}초). 결과:` }, ...done.content],
+        content: [{ type: 'text', text: `Run ${runId} has finished (${o.status}, ${Math.round(o.durationMs / 1000)} s). Its result:` }, ...done.content],
         isError: done.isError,
         structuredContent: { runId, status: o.status, ...(done.structuredContent ? { result: done.structuredContent } : {}) },
       }
     }
     const row = this.hub.rt.runs(hit.ref, 500).find((r) => r.id === runId && r.callerKind === 'session' && r.callerSessionId === this.session.id)
-    if (!row) return failure(`모르는 실행 id입니다: ${runId} — 이 세션이 이 앱에 부른 실행만 볼 수 있습니다`)
+    if (!row) return failure(`Unknown run id: ${runId} — a session can see only the runs it started on this app`)
     const why = row.error ? ` — ${row.error}` : ''
     return {
-      content: [{ type: 'text', text: `실행 ${runId}: ${row.status}${why}${row.status === 'running' ? '' : ' (결과 본문은 남아 있지 않습니다)'}` }],
+      content: [{ type: 'text', text: `Run ${runId}: ${row.status}${why}${row.status === 'running' ? '' : ' (its result is no longer kept)'}` }],
       isError: row.status !== 'ok' && row.status !== 'running',
       structuredContent: { runId, status: row.status },
     }
@@ -584,8 +584,8 @@ export function toResult(o: AppCallOutcome): AppToolResult {
       ...(o.result.structuredContent ? { structuredContent: o.result.structuredContent as Record<string, unknown> } : {}),
     }
   }
-  const what = o.status === 'cancelled' ? '취소됐습니다' : o.status === 'rejected' ? '거절됐습니다' : '실패했습니다'
-  return failure(`앱 호출이 ${what} — ${o.error ?? '이유를 받지 못했습니다'}`)
+  const what = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
+  return failure(`The app call ${what} — ${o.error ?? 'no reason was given'}`)
 }
 
 function failure(text: string): AppToolResult {

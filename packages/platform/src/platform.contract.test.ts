@@ -626,7 +626,7 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
       expect(JSON.stringify(refused.content)).toContain('visibility')
 
       // 화면은 내장 앱의 문(projectId 없는 apps.invoke)으로 들어가지 못한다 — 사용자 폴더에 control은 없다
-      await expect(platform.apps.callTool('control', 'control_notify', { text: 'x' })).rejects.toThrow(/그런 앱이 없습니다: user\/control/)
+      await expect(platform.apps.callTool('control', 'control_notify', { text: 'x' })).rejects.toThrow(/There is no such app: user\/control/)
 
       // 이 화면이 낸 바뀜은 이 화면의 인스턴스를 주인으로 돌아온다 — 방송이 web의 검사를 지나 떨어지지 않는다
       await waitFor(() => heard.some((e) => e.type === 'external_app_state_changed'))
@@ -685,7 +685,7 @@ describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
       await waitFor(async () => (await platform.apps.list()).some((a) => a.appId === 'helper'))
       await platform.apps.remove('helper', null)
       expect((await platform.apps.list()).map((a) => a.appId)).toEqual(['notes'])
-      await expect(platform.apps.remove('notes', project.id)).rejects.toThrow(/저장소/)
+      await expect(platform.apps.remove('notes', project.id)).rejects.toThrow(/part of the project's repository/)
     } finally {
       off()
       await platform.dispose()
@@ -800,7 +800,7 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
       expect(made.builder).toMatchObject({ appId: 'notes', projectId: project.id, name: 'Notes · builder', tool: 'claude' })
       expect((await platform.apps.builder('notes', project.id))?.id).toBe(made.builder!.id)
       expect((await platform.apps.createBuilder('notes', project.id)).id).toBe(made.builder!.id)
-      await expect(platform.apps.create({ projectId: project.id, id: 'notes', name: 'Again' })).rejects.toThrow(/"notes" 앱이 이미 있습니다/)
+      await expect(platform.apps.create({ projectId: project.id, id: 'notes', name: 'Again' })).rejects.toThrow(/An app "notes" already exists/)
       expect(await platform.apps.builder('ghost', project.id)).toBeNull()
 
       // "여기를 고쳐 줘" (C-5) — 만드는 세션의 에이전트가 host의 머리말을 단 말을 받는다(메아리 어댑터가 되돌려 준다)

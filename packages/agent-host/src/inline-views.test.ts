@@ -241,7 +241,7 @@ describe('화면이 달린 도구를 부르면 카드 아래에 화면이 선다
       ['toolu_H', 'open'],
       ['toolu_H', 'cancelled'],
     ])
-    expect(appViews()[1]!.reason).toMatch(/취소/)
+    expect(appViews()[1]!.reason).toMatch(/cancel/)
   })
 })
 

@@ -73,8 +73,8 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(latest!.at).toBeGreaterThanOrEqual(t0)
     expect(latest!.message).not.toContain('--- stderr') // 이유와 표준에러는 따로 싣는다
     expect(latest!.stderr.join('\n')).toContain('forgot to define the tools')
-    expect(latest!.text).toMatch(/^앱 App broken \(p1\/broken\): 앱이 뜨지 못했습니다 \(\d{4}-/)
-    expect(latest!.text).toContain('표준에러 (마지막 줄들):')
+    expect(latest!.text).toMatch(/^App App broken \(p1\/broken\): the app could not start \(\d{4}-/)
+    expect(latest!.text).toContain('stderr (last lines):')
   })
 
   it('맨 위에서 던지고 끝났다 — 끝난 모양이 이유다', async () => {
@@ -96,7 +96,7 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     const latest = await until(() => r.errors(ref('thrower')).latest, (b) => !!b && b.stderr.some((l) => l.includes('server.mjs:')))
     expect(latest).toMatchObject({ kind: 'tool', tool: 'save', args: '{"text":"hello"}', runId: out.runId, message: 'cannot save: hello' })
     expect(latest!.stderr.join('\n')).toContain('[thrower] tool save threw: Error: cannot save: hello')
-    expect(latest!.text).toContain('도구: save\n인자: {"text":"hello"}')
+    expect(latest!.text).toContain('Tool: save\nArguments: {"text":"hello"}')
   })
 
   it('호출 중에 죽었다 — 도구의 실패와 프로세스의 끝이 둘 다 남고, 최근 것이 끝이다', async () => {

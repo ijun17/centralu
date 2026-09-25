@@ -209,7 +209,7 @@ describe('부르기', () => {
     for (const server of ['app-other', 'app-helper']) {
       const out = await a.call(server, 'echo', { text: 'x' })
       expect(out.isError).toBe(true)
-      expect(JSON.stringify(out.content)).toContain('이 세션에 붙은 앱이 아닙니다')
+      expect(JSON.stringify(out.content)).toContain('This app is not attached to this session')
     }
     expect(w.rt.runs({ projectId: 'p2', appId: 'other' })).toEqual([])
     expect(w.rt.runs({ projectId: null, appId: 'helper' })).toEqual([])

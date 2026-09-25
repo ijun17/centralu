@@ -108,23 +108,23 @@ describe('apps.create', () => {
 
   it('신뢰하지 않은 프로젝트에는 만들지 않는다 — 폴더도 생기지 않는다', async () => {
     await rpc('projects.setTrusted', { projectId, trusted: false })
-    await expect(create({ projectId, id: 'notes', name: 'Notes' })).rejects.toThrow(/신뢰하지 않은 프로젝트에는 앱을 만들지 않습니다/)
+    await expect(create({ projectId, id: 'notes', name: 'Notes' })).rejects.toThrow(/does not make apps in a project it does not trust/)
     expect(existsSync(join(repo, '.centralu'))).toBe(false)
   })
 
   it('쓸 수 없는 이름은 거절한다 — centralu·app- 머리, 밑줄, 대문자, 내장 앱의 id', async () => {
     const refused: Record<string, RegExp> = {
-      'centralu-tools': /"centralu"로 시작하는 이름은/,
-      'app-notes': /"app-"로 시작하는 이름은/,
-      'my_app': /소문자·숫자·하이픈으로 32자 이내/,
-      'a__b': /소문자·숫자·하이픈으로 32자 이내/,
-      Notes: /소문자·숫자·하이픈으로 32자 이내/,
-      control: /내장 앱의 이름입니다/,
+      'centralu-tools': /ids starting with "centralu" belong to Centralu itself/,
+      'app-notes': /ids starting with "app-" are how apps attach to sessions/,
+      'my_app': /lowercase letters, digits and hyphens \(up to 32\)/,
+      'a__b': /lowercase letters, digits and hyphens \(up to 32\)/,
+      Notes: /lowercase letters, digits and hyphens \(up to 32\)/,
+      control: /that is the id of a built-in app/,
     }
     for (const [id, why] of Object.entries(refused)) {
       await expect(create({ projectId, id, name: 'X' }), id).rejects.toThrow(why)
     }
-    await expect(create({ projectId, id: 'ok', name: '  \n ' })).rejects.toThrow(/앱 이름이 비어 있습니다/)
+    await expect(create({ projectId, id: 'ok', name: '  \n ' })).rejects.toThrow(/The app needs a name/)
     expect(existsSync(appsDir()) ? readdirSync(appsDir()) : []).toEqual([])
   })
 
@@ -133,20 +133,20 @@ describe('apps.create', () => {
     mkdirSync(join(appsDir(), 'draft'))
     writeFileSync(join(appsDir(), 'draft', 'half-written.txt'), 'someone is working here')
     rt.refresh()
-    await expect(create({ projectId, id: 'notes', name: 'Notes' })).rejects.toThrow(/"notes" 앱이 이미 있습니다/)
-    await expect(create({ projectId, id: 'draft', name: 'Draft' })).rejects.toThrow(/"draft" 앱이 이미 있습니다/)
+    await expect(create({ projectId, id: 'notes', name: 'Notes' })).rejects.toThrow(/An app "notes" already exists/)
+    await expect(create({ projectId, id: 'draft', name: 'Draft' })).rejects.toThrow(/An app "draft" already exists/)
     expect(JSON.parse(readFileSync(join(appsDir(), 'notes', 'centralu.app.json'), 'utf8')).server.args).toEqual(['mine.mjs'])
     expect(readdirSync(join(appsDir(), 'draft'))).toEqual(['half-written.txt'])
     // 같은 id를 두 번 만들어도 두 번째는 거절된다
     await create({ projectId: null, id: 'once', name: 'Once' })
-    await expect(create({ projectId: null, id: 'once', name: 'Once' })).rejects.toThrow(/"once" 앱이 이미 있습니다/)
+    await expect(create({ projectId: null, id: 'once', name: 'Once' })).rejects.toThrow(/An app "once" already exists/)
   })
 
   it('프로젝트의 .centralu가 저장소 밖을 가리키는 링크면 만들지 않는다 — 밖에 아무것도 쓰지 않는다', async () => {
     const outside = join(root, 'outside')
     mkdirSync(outside)
     symlinkSync(outside, join(repo, '.centralu'))
-    await expect(create({ projectId, id: 'escape', name: 'Escape' })).rejects.toThrow(/앱 폴더를 만들지 못했습니다/)
+    await expect(create({ projectId, id: 'escape', name: 'Escape' })).rejects.toThrow(/Could not make the app folder/)
     expect(readdirSync(outside)).toEqual([])
   })
 })
@@ -165,13 +165,13 @@ describe('create_app (오케스트레이터)', () => {
 
     const again = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(again).toMatchObject({ isError: true })
-    expect(again.text).toContain('만들지 못했습니다 — "board" 앱이 이미 있습니다')
+    expect(again.text).toContain('만들지 못했습니다 — An app "board" already exists')
     const nowhere = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'x', name: 'X', project: 'no-such-project' })
     expect(nowhere.text).toBe('만들지 못했습니다 — 그런 프로젝트가 없습니다: no-such-project')
 
     await rpc('projects.setTrusted', { projectId, trusted: false })
     const untrusted = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'later', name: 'Later', project: projectId })
-    expect(untrusted.text).toContain('신뢰하지 않은 프로젝트에는 앱을 만들지 않습니다')
+    expect(untrusted.text).toContain('does not make apps in a project it does not trust')
   })
 
   it('오케스트레이터만 쓴다 — 매니저·조율 세션의 묶음에는 없다', () => {
