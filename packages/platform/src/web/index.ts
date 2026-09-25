@@ -325,6 +325,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.restart', { appId, projectId })
       },
       runs: (appId, projectId, limit) => rpc.call('apps.runs', { appId, projectId, limit }),
+      remove: async (appId, projectId) => {
+        await rpc.call('apps.remove', { appId, projectId })
+      },
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

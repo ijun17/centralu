@@ -584,6 +584,11 @@ export interface AppsPort {
    * 인자는 요약만 온다. 폴더가 사라진 앱의 기록도 읽힌다.
    */
   runs(appId: AppId, projectId: string | null, limit?: number): Promise<AppRun[]>
+  /**
+   * 사용자 폴더의 앱을 지운다 (M4 A-7) — 폴더는 데이터 폴더의 `app-trash/`로 옮겨지고, 실행 기록은
+   * 남는다. 프로젝트 앱은 host가 거절한다(저장소의 파일이라 거두는 자리는 git이다).
+   */
+  remove(appId: AppId, projectId: string | null): Promise<void>
 }
 
 /**
