@@ -176,8 +176,8 @@ describe('실패한 입력은 최근 20건만 원문으로', () => {
 
 describe('기동에서의 정리', () => {
   const row = (id: string, createdAt: number, status = 'ok') => ({
-    id, projectId: 'p1', appId: 'notes', tool: 'echo', callerKind: 'view', callerSessionId: null, parentRunId: null,
-    status, durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt,
+    id, projectId: 'p1', appId: 'notes', kind: 'tool', tool: 'echo', callerKind: 'view', callerSessionId: null, parentRunId: null,
+    status, durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt, sessionId: null,
   })
 
   it('30일이 지난 기록과 그 원문은 걷히고, 그 안의 것은 남는다', () => {

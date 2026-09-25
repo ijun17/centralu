@@ -49,16 +49,22 @@ export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs =
  * 메모리에 사는 실행 기록 — 저장소를 임포트할 수 없는 이 층의 시험이 쓴다(`host-app-runtime-physics-only`는 시험 파일에도
  * 걸린다). 저장소 쪽 이음새(`storeRunLedger`)는 코어 쪽 시험이 진짜 저장소로 본다.
  */
-export function memoryLedger(): RunLedger & { rows: AppRunRow[] } {
+export function memoryLedger(): RunLedger & { rows: AppRunRow[]; failures: { runId: string; args: string; result: string | null }[] } {
   const rows: AppRunRow[] = []
+  const failures: { runId: string; args: string; result: string | null }[] = []
   return {
     rows,
+    failures,
     begin: (r) => void rows.push({ ...r }),
     end: (id, e) => {
       const r = rows.find((x) => x.id === id)
       if (r) Object.assign(r, e)
     },
-    keepFailure: () => {},
+    link: (id, sessionId) => {
+      const r = rows.find((x) => x.id === id)
+      if (r) r.sessionId = sessionId
+    },
+    keepFailure: (f) => void failures.push({ runId: f.runId, args: f.args, result: f.result }),
     list: (projectId, appId, limit): AppRunListed[] =>
       rows
         .filter((r) => r.appId === appId && r.projectId === projectId)

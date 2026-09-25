@@ -187,6 +187,10 @@ export async function startPublicAppsHost(
       const row = rows.get(id)
       if (row) Object.assign(row, end)
     },
+    link: (id, sessionId) => {
+      const row = rows.get(id)
+      if (row) row.sessionId = sessionId
+    },
     keepFailure: () => {},
     list: (projectId, appId, limit) =>
       [...rows.values()]

@@ -342,11 +342,13 @@ export class ExternalApps {
       {
         has: (ref) => this.find(ref) !== undefined,
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
+        redactor: (ref) => redactor(this.secrets.all(this.appKey(ref))),
         origin: (runId) => this.chainOrigin(runId),
         call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
       },
       deps.permissions ?? memoryCapabilityBook(),
       () => this.timing.capabilityQuestionMs,
+      deps.runs ?? null,
     )
     this.secrets = new SecretStore(deps.dataRoot)
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
@@ -595,6 +597,8 @@ export class ExternalApps {
       id: runId,
       projectId: e.ref.projectId,
       appId: e.ref.appId,
+      kind: 'tool',
+      sessionId: null,
       tool: name,
       callerKind: caller.kind,
       callerSessionId: caller.kind === 'session' ? caller.sessionId : null,
@@ -1451,6 +1455,7 @@ export class ExternalApps {
               return run && run.entry === e && run.pipeId === pipeId ? run.abort.signal : null
             },
             note,
+            refused: (tool, args, why) => this.desk.refused({ ref: e.ref, name: m.name, manifest: m }, tool, args, why),
           },
           /*
            * 부탁한 앱은 이 파이프의 앱이고, 매니페스트는 **이 프로세스가 뜰 때 읽은 것**이다. 그 사이 매니페스트가 바뀌었으면

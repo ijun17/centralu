@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
 import { z } from 'zod'
@@ -14,6 +15,7 @@ import {
 } from './capabilities.js'
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
+import { FAILURES_KEPT, describeArgs, type AppRunRow, type RunLedger } from './runs.js'
 
 /**
  * 중개 창구 (M4 D) — 앱이 fd 3으로 부탁한 것을 푸는 **한 자리**.
@@ -63,6 +65,8 @@ export type DeskApps = {
   has(ref: AppRef): boolean
   /** 사람이 읽는 앱 이름 — 매니페스트의 `name`, 없으면 id */
   name(ref: AppRef): string
+  /** 이 앱의 저장된 비밀을 가리는 함수 — 기록(D-6)에 남기는 인자·이유는 도구 호출의 기록과 같은 규칙으로 가린다 */
+  redactor(ref: AppRef): (text: string) => string
   /**
    * 이 실행이 속한 사슬을 **누가 시작했나** (D-4) — 부모를 따라 올라가 앱이 아닌 첫 호출자. 세션이면 그 세션에, 화면이면
    * 그 앱의 고정 화면에 물음이 선다. 사슬을 더는 따라갈 수 없으면(부모가 이미 끝났다) null이다.
@@ -102,7 +106,15 @@ export type BrokerHost = {
    * 새 세션에 부탁을 보내고 턴이 끝나기를 기다린다. 신호가 서면 세션을 멈춘다(인터럽트). 도구를 쓸 수 없으면(설치·로그인)
    * 이유를 담아 던진다 — 그 이유가 곧 앱이 받는 말이다.
    */
-  runAgent(req: AgentRunRequest, ctx: { signal: AbortSignal; progress(message: string): void }): Promise<AgentRunResult>
+  runAgent(
+    req: AgentRunRequest,
+    ctx: {
+      signal: AbortSignal
+      progress(message: string): void
+      /** 세션이 서는 순간 한 번 — 기록(D-6)이 도는 동안에도 그 세션으로 건너갈 수 있게 */
+      onSession(sessionId: string): void
+    },
+  ): Promise<AgentRunResult>
   /**
    * host 데이터 하나를 읽는다 (D-3). 창구가 이름(닫힌 목록)과 선언을 확인한 뒤에 부른다. 범위는 앱이 정한다: 프로젝트 앱은 그
    * 프로젝트, 사용자 폴더 앱은 사용자 전체. 줄 수 없으면(사용자 폴더 앱의 git.status) 이유를 담아 던진다.
@@ -171,8 +183,94 @@ function humanDuration(ms: number): string {
 
 const NOT_DECLARED = 'this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so'
 
-const say = (text: string): CallToolResult => ({ content: [{ type: 'text', text }] })
-const refuse = (text: string): CallToolResult => ({ content: [{ type: 'text', text }], isError: true })
+/**
+ * 창구의 답 하나 — 앱에 돌려줄 결과와, 기록(D-6)에 남길 결말. 거절(`rejected`)은 정책이 막은 것(선언 밖, 사람이 허락하지 않았다,
+ * 한도)이고, 실패(`error`)는 부탁이 틀렸거나 풀다가 잘못된 것(빈 글, 틀린 스키마, 에이전트의 실패)이다. 기록 판은 둘을 다른
+ * 말로 보인다(refused / failed) — 앱을 고치는 사람에게 "막혔다"와 "틀렸다"는 다른 일이다.
+ *
+ * `delegated`는 call_app이 부른 앱에 닿은 것이다. 그 앱의 실행 줄(호출자 app, 부모 = 이 부탁을 일으킨 실행)이 곧 이 부탁의
+ * 기록이다 — 같은 일을 두 줄로 적지 않는다.
+ */
+type Answer = { status: 'ok' | 'error' | 'rejected' | 'delegated'; result: CallToolResult }
+
+const say = (text: string): Answer => ({ status: 'ok', result: { content: [{ type: 'text', text }] } })
+const refuse = (text: string): Answer => ({ status: 'rejected', result: { content: [{ type: 'text', text }], isError: true } })
+const fail = (text: string): Answer => ({ status: 'error', result: { content: [{ type: 'text', text }], isError: true } })
+const firstText = (r: CallToolResult): string => r.content.find((c): c is { type: 'text'; text: string } => c.type === 'text')?.text ?? ''
+
+/**
+ * 중개 부탁 하나의 기록 줄 (D-6) — 부탁한 앱의 `broker` 줄, 부모는 부탁을 일으킨 실행. 도구 호출의 줄과 같은 표에 같은 규칙
+ * (인자는 가린 요약과 해시, 실패만 원문)으로 남는다. 그래서 한 앱의 기록을 뿌리부터 따라 내려가면 "화면이 누른 도구 → 앱이
+ * 부탁한 에이전트"가 한 사슬로 읽힌다.
+ *
+ * 줄은 처음 필요할 때 선다(`open`) — run_agent·host_data는 부탁이 들어오자마자(에이전트는 몇 분을 돈다, 도는 줄이 보여야
+ * 한다), call_app은 부른 앱에 닿지 못하고 끝날 때만(닿으면 그 앱의 줄이 기록이다).
+ */
+class BrokerRow {
+  readonly id = `run_${randomUUID()}`
+  private readonly t0 = Date.now()
+  private described: ReturnType<typeof describeArgs> | null = null
+  private closed = false
+
+  constructor(
+    private ledger: RunLedger | null,
+    private app: AppRef,
+    private tool: BrokerToolName,
+    private args: Record<string, unknown>,
+    private parentRunId: string | null,
+    private redact: (text: string) => string,
+  ) {}
+
+  open(): void {
+    if (this.described || !this.ledger) return
+    this.described = describeArgs(this.args, this.redact)
+    this.ledger.begin({
+      id: this.id,
+      projectId: this.app.projectId,
+      appId: this.app.appId,
+      kind: 'broker',
+      tool: this.tool,
+      // 부탁한 쪽은 이 앱이다 — 사슬을 누가 시작했는지는 부모를 따라 올라가면 나온다
+      callerKind: 'app',
+      callerSessionId: null,
+      parentRunId: this.parentRunId,
+      status: 'running',
+      durationMs: null,
+      argsDigest: this.described.digest,
+      argsSummary: this.described.summary,
+      error: null,
+      createdAt: this.t0,
+      sessionId: null,
+    })
+  }
+
+  /** 이 부탁이 세운 에이전트 세션을 잇는다 — 세션이 서는 순간, 끝나기 전에 */
+  link(sessionId: string): void {
+    this.open()
+    this.ledger?.link(this.id, sessionId)
+  }
+
+  close(status: Exclude<AppRunRow['status'], 'running'>, error: string | null, result: CallToolResult | null = null): void {
+    if (this.closed || !this.ledger) return
+    this.closed = true
+    this.open()
+    this.ledger.end(this.id, { status, durationMs: Date.now() - this.t0, error: error === null ? null : this.redact(error) })
+    // 실패한 부탁의 입력(글·스키마)은 앱을 고치는 에이전트가 봐야 한다 — 도구 호출과 같은 규칙으로, 최근 것만
+    if (status === 'error') {
+      this.ledger.keepFailure(
+        {
+          runId: this.id,
+          projectId: this.app.projectId,
+          appId: this.app.appId,
+          args: this.described!.json,
+          result: result ? this.redact(JSON.stringify(result)) : null,
+          createdAt: this.t0,
+        },
+        FAILURES_KEPT,
+      )
+    }
+  }
+}
 
 /**
  * 부탁한 도구와 선언을 맞춰 본다 (D-1). `true`는 사람의 기본 에이전트만, 목록은 목록에 적힌 도구만.
@@ -210,6 +308,8 @@ export class BrokerDesk {
     private book: CapabilityBook,
     /** 사람의 답을 기다리는 상한 (런타임의 timing — 시험이 줄인다) */
     private questionMs: () => number,
+    /** 부탁마다 한 줄을 남길 자리 (D-6) — 런타임의 실행 기록과 같은 것. 없으면 남기지 않는다 */
+    private ledger: RunLedger | null = null,
   ) {}
 
   /**
@@ -223,24 +323,39 @@ export class BrokerDesk {
     this.host = host
   }
 
+  /**
+   * 부탁 하나를 끝까지 — 그리고 **어떻게 끝났든 한 줄을 남긴다** (D-6). 거절도, 실패도, 취소도. 부탁한 앱을 만드는 사람이 기록
+   * 판에서 "왜 에이전트가 안 돌았나"를 읽는 자리이고, 사람이 "이 앱이 내 이름으로 무엇을 시켰나"를 읽는 자리다.
+   */
   async handle(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
-    switch (tool) {
-      case 'run_agent':
-        return this.runAgent(app, args, call)
-      case 'call_app':
-        return this.callApp(app, args, call)
-      case 'host_data':
-        return this.hostData(app, args, call)
+    const row = new BrokerRow(this.ledger, app.ref, tool, args, call.parentRunId, this.apps.redactor(app.ref))
+    if (tool !== 'call_app') row.open()
+    try {
+      const a =
+        tool === 'run_agent' ? await this.runAgent(app, args, call, row) : tool === 'call_app' ? await this.callApp(app, args, call) : await this.hostData(app, args, call)
+      if (a.status !== 'delegated') row.close(a.status, a.status === 'ok' ? null : firstText(a.result), a.status === 'error' ? a.result : null)
+      return a.result
+    } catch (e) {
+      row.close(call.signal.aborted ? 'cancelled' : 'error', (e as Error).message)
+      throw e
     }
+  }
+
+  /**
+   * 문지기가 받지 않은 부탁도 한 줄이다 (D-6) — 실행 id가 없거나, 이 앱에 열려 있지 않은 id를 내밀었다. 부모는 없다: 내민 id를
+   * 부모로 적으면 앱이 지어낸 id로 남의 사슬에 줄을 끼워 넣을 수 있다. 내민 id는 이유 안에만 남는다.
+   */
+  refused(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, why: string): void {
+    new BrokerRow(this.ledger, app.ref, tool, args, null, this.apps.redactor(app.ref)).close('rejected', why)
   }
 
   /**
    * `host_data` (D-3) — 닫힌 목록의 이름, 그리고 매니페스트가 `uses.host`에 적은 것만. 둘 다 기본은 거절이다: 목록 밖의 이름은
    * 없는 능력이고, 적지 않은 이름은 쓰지 않겠다고 한 능력이다. 답은 JSON 하나다(`structuredContent`와 같은 글).
    */
-  private async hostData(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
+  private async hostData(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<Answer> {
     const parsed = HostDataArgs.safeParse(raw)
-    if (!parsed.success) return refuse(`host_data: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
+    if (!parsed.success) return fail(`host_data: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
     const { name } = parsed.data
     if (!isHostCapability(name)) {
       return refuse(`host_data: Centralu has no host capability "${name}" — it can give: ${HOST_CAPABILITIES.join(', ')}`)
@@ -254,7 +369,7 @@ export class BrokerDesk {
     const denied = await this.permit('host_data', app, { kind: 'host', name }, hostCapabilityText(name, app.ref.projectId === null ? 'user' : 'project'), call)
     if (denied) return denied
     const data = await host.hostData(name, app.ref)
-    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
+    return { status: 'ok', result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data } }
   }
 
   /**
@@ -264,13 +379,13 @@ export class BrokerDesk {
    * Codex는 디코딩을 묶는다) 여기서 한 번 더 같은 스키마로 검증한다. 앱은 이 답을 믿고 자기 상태에 쓴다 — 도구의 약속이
    * 아니라 우리가 확인한 것을 넘긴다.
    */
-  private async runAgent(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
+  private async runAgent(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall, row: BrokerRow): Promise<Answer> {
     const parsed = RunAgentArgs.safeParse(raw)
-    if (!parsed.success) return refuse(`run_agent: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
+    if (!parsed.success) return fail(`run_agent: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
     const { prompt, tool: requested, schema } = parsed.data
-    if (!prompt.trim()) return refuse('run_agent needs a prompt')
+    if (!prompt.trim()) return fail('run_agent needs a prompt')
     if (prompt.length > AGENT_PROMPT_MAX_CHARS) {
-      return refuse(`run_agent: the prompt is ${prompt.length} characters, over the ${AGENT_PROMPT_MAX_CHARS} limit — pass large material as a file the agent can read`)
+      return fail(`run_agent: the prompt is ${prompt.length} characters, over the ${AGENT_PROMPT_MAX_CHARS} limit — pass large material as a file the agent can read`)
     }
     // 선언이 먼저다 — 선언하지 않은 앱은 host가 무엇을 빌려줄 수 있든 같은 이유로 거절된다
     const declared = app.manifest.uses.agent
@@ -283,7 +398,7 @@ export class BrokerDesk {
     let check: ((value: unknown) => string | null) | null = null
     if (schema) {
       const problem = this.schemaProblem(schema)
-      if (problem) return refuse(`run_agent: ${problem}`)
+      if (problem) return fail(`run_agent: ${problem}`)
       const validate = this.schemas.getValidator(schema as never)
       check = (value) => {
         const r = validate(value)
@@ -294,19 +409,22 @@ export class BrokerDesk {
     const denied = await this.permit('run_agent', app, { kind: 'agent', tool: picked.tool }, `run an agent (${host.agentLabel(picked.tool)}) in a new session`, call)
     if (denied) return denied
 
-    const r = await host.runAgent({ app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) }, { signal: call.signal, progress: call.progress })
+    const r = await host.runAgent(
+      { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) },
+      { signal: call.signal, progress: call.progress, onSession: (id) => row.link(id) },
+    )
     if (!check) return say(r.text)
 
     const structured = r.output !== undefined ? r.output : parseJsonAnswer(r.text)
     const problem = structured === undefined ? 'the answer is not JSON' : check(structured)
     if (problem) {
       const seen = r.output !== undefined ? JSON.stringify(r.output) : r.text
-      return refuse(
+      return fail(
         `run_agent: the agent's answer does not match the schema (${problem}). ` +
           `The answer was: ${seen.length > 2000 ? `${seen.slice(0, 2000)}…` : seen || '(empty)'}`,
       )
     }
-    return { content: [{ type: 'text', text: JSON.stringify(structured) }], structuredContent: structured as Record<string, unknown> }
+    return { status: 'ok', result: { content: [{ type: 'text', text: JSON.stringify(structured) }], structuredContent: structured as Record<string, unknown> } }
   }
 
   /**
@@ -316,9 +434,9 @@ export class BrokerDesk {
    * 거절), 신뢰·멈춘 앱의 거절, 실행 id, 기록이 다른 호출과 똑같이 일어나고, 부모 실행이 끝나거나 취소되면 이 호출도
    * 취소된다. 부른 앱의 답은 그대로 돌려준다 — 실패를 답했으면 실패인 채로.
    */
-  private async callApp(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
+  private async callApp(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<Answer> {
     const parsed = CallAppArgs.safeParse(raw)
-    if (!parsed.success) return refuse(`call_app: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
+    if (!parsed.success) return fail(`call_app: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
     const { app: id, tool, args } = parsed.data
     const listed = app.manifest.uses.apps ?? []
     if (!listed.includes(id)) {
@@ -329,7 +447,7 @@ export class BrokerDesk {
     }
     const target = resolveCallTarget(app.ref, id, (r) => this.apps.has(r))
     if (!target) {
-      return refuse(
+      return fail(
         app.ref.projectId === null
           ? `call_app: there is no app "${id}" in your user folder — an app from the user folder can call only other apps there`
           : `call_app: there is no app "${id}" in this project or in your user folder`,
@@ -339,10 +457,10 @@ export class BrokerDesk {
     const denied = await this.permit('call_app', app, { kind: 'app', target }, `call the app "${this.apps.name(target)}"${where}`, call)
     if (denied) return denied
     const o = await this.apps.call(target, tool, args ?? {}, { kind: 'app', parentRunId: call.parentRunId }, { signal: call.signal })
-    // 부른 앱이 답했다 — 답을 그대로(실패를 답했으면 실패인 채로)
-    if (o.result) return o.status === 'ok' ? o.result : { ...o.result, isError: true }
+    // 여기부터의 기록은 부른 앱의 줄이다 (`Answer`의 delegated). 부른 앱이 답했으면 그 답을 그대로(실패를 답했으면 실패인 채로)
+    if (o.result) return { status: 'delegated', result: o.status === 'ok' ? o.result : { ...o.result, isError: true } }
     const how = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
-    return refuse(`call_app: ${id}.${tool} ${how} — ${o.error ?? 'no reason was given'}`)
+    return { status: 'delegated', result: { content: [{ type: 'text', text: `call_app: ${id}.${tool} ${how} — ${o.error ?? 'no reason was given'}` }], isError: true } }
   }
 
   /**
@@ -356,7 +474,7 @@ export class BrokerDesk {
    * 기다리는 동안 앱의 호출은 살아 있다(중개 통로의 진행 알림, `broker.ts`). 사람이 답하지 않고 상한(5분)이 지나면 거절로
    * 닫되 **기억하지 않는다** — 답이 아니다. 다음에 쓰려 할 때 다시 묻는다.
    */
-  private async permit(tool: BrokerToolName, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<CallToolResult | null> {
+  private async permit(tool: BrokerToolName, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<Answer | null> {
     const key = capabilityKey(capability)
     const stamp = usesStamp(app.manifest.uses)
     const known = this.book.get(app.ref, key)

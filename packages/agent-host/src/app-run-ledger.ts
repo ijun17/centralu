@@ -12,6 +12,7 @@ export function storeRunLedger(store: Store): RunLedger {
   return {
     begin: (r) => store.beginAppRun(r),
     end: (id, e) => store.endAppRun(id, e),
+    link: (id, sessionId) => store.linkAppRunSession(id, sessionId),
     keepFailure: (f, keep) => store.keepAppRunFailure(f, keep),
     list: (projectId, appId, limit) => store.listAppRuns(projectId, appId, limit),
     prune: (before) => store.pruneAppRuns(before),

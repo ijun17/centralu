@@ -154,6 +154,12 @@ export const AppRun = z.object({
   id: z.string(),
   projectId: z.string().nullable(),
   appId: AppId,
+  /**
+   * 무엇의 기록인가 (M4 D-6) — `tool`은 이 앱의 도구가 불린 것, `broker`는 이 앱이 Centralu에 부탁한 것(`tool`이 중개 도구의
+   * 이름: run_agent, call_app, host_data). 한 앱의 기록에는 그 아래의 사슬(부른 다른 앱의 줄, 부탁한 에이전트의 줄)도 함께
+   * 실린다 — `parentRunId`로 잇는다.
+   */
+  kind: z.enum(['tool', 'broker']),
   tool: z.string(),
   callerKind: z.enum(['view', 'session', 'app']),
   callerSessionId: z.string().nullable(),
@@ -164,6 +170,8 @@ export const AppRun = z.object({
   argsSummary: z.string(),
   error: z.string().nullable(),
   createdAt: z.number(),
+  /** run_agent가 세운 에이전트 세션 (M4 D-6) — 기록 판이 그 세션으로 건너가는 자리. 세션이 서기 전과 다른 줄은 null */
+  sessionId: z.string().nullable(),
   failure: z.object({ args: z.string(), result: z.string().nullable() }).nullable(),
 })
 export type AppRun = z.infer<typeof AppRun>

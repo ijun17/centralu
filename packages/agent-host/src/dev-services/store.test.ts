@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 36
+const LATEST_SCHEMA = 37
 
 function seeded() {
   const s = new Store()
@@ -1349,5 +1349,64 @@ describe('앱의 능력에 사람이 한 답 (M4 D-4)', () => {
     s.deleteProject('p1')
     expect(s.listAppPermissions('p1/notes')).toEqual([])
     expect(s.listAppPermissions('_user/timer')).toHaveLength(1)
+  })
+})
+
+/**
+ * 실행 기록의 사슬 (M4 D-6) — 앱이 중개에 부탁한 것도 한 줄(`kind: broker`)이고, 한 앱의 기록을 읽으면 그 아래의 사슬(부른 다른
+ * 앱의 줄, 부탁한 에이전트의 줄)이 함께 온다. 기록 판 하나에서 "화면이 누른 것 → 다른 앱 → 에이전트"가 읽혀야 한다.
+ */
+describe('실행 기록의 사슬 (M4 D-6)', () => {
+  const t0 = 1_760_000_000_000
+  let seq = 0
+  const put = (s: Store, id: string, appId: string, parentRunId: string | null, over: Record<string, unknown> = {}) =>
+    s.beginAppRun({
+      id, projectId: 'p1', appId, kind: 'tool', tool: 't', callerKind: parentRunId ? 'app' : 'view', callerSessionId: null, parentRunId,
+      status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: t0 + seq++, sessionId: null, ...over,
+    })
+
+  it('한 앱의 기록에는 그 아래의 사슬이 함께 실린다 — 한도는 뿌리의 수이고, 다른 앱의 기록에서는 불린 줄이 뿌리다', () => {
+    const s = new Store()
+    put(s, 'a1', 'notes', null) // 화면이 notes를 불렀다
+    put(s, 'a1-ask', 'notes', 'a1', { kind: 'broker', tool: 'run_agent', callerKind: 'app', sessionId: 's-9' }) // notes가 에이전트를 부탁했다
+    put(s, 'b1', 'helper', 'a1') // notes가 helper를 불렀다
+    put(s, 'b1-ask', 'helper', 'b1', { kind: 'broker', tool: 'run_agent', callerKind: 'app', sessionId: 's-10' }) // helper가 에이전트를 부탁했다
+    put(s, 'a2', 'notes', null)
+    put(s, 'c1', 'other', null) // 상관없는 앱
+    put(s, 'lonely', 'notes', null, { kind: 'broker', tool: 'host_data', callerKind: 'app', status: 'rejected' }) // 열린 실행 없이 부탁했다
+
+    const ids = (appId: string, limit: number) => s.listAppRuns('p1', appId, limit).map((r) => r.id)
+    expect(ids('notes', 10)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
+    // 한도는 뿌리의 수다 — 사슬 아래의 줄이 뿌리를 밀어내지 않는다
+    expect(ids('notes', 2)).toEqual(['lonely', 'a2'])
+    expect(ids('notes', 3)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
+    // helper의 기록에서는 notes가 부른 줄이 뿌리다 — 그 부모(notes의 줄)는 helper의 것이 아니다
+    expect(ids('helper', 10)).toEqual(['b1-ask', 'b1'])
+    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b1-ask')).toMatchObject({ appId: 'helper', kind: 'broker', parentRunId: 'b1', sessionId: 's-10' })
+
+    s.linkAppRunSession('a1', 's-1')
+    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a1')?.sessionId).toBe('s-1')
+  })
+
+  it('v36의 기록은 모두 도구 호출의 줄로 올라온다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v37-'))
+    const file = join(dir, 'store.db')
+    const old = new Database(file)
+    old.exec(`CREATE TABLE app_runs (
+      id TEXT PRIMARY KEY, project_id TEXT, app_id TEXT NOT NULL, tool TEXT NOT NULL, caller_kind TEXT NOT NULL,
+      caller_session_id TEXT, parent_run_id TEXT, status TEXT NOT NULL, duration_ms INTEGER, args_digest TEXT NOT NULL,
+      args_summary TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE app_run_failures (run_id TEXT PRIMARY KEY, project_id TEXT, app_id TEXT NOT NULL, args TEXT NOT NULL, result TEXT, created_at INTEGER NOT NULL);`)
+    old.prepare(`INSERT INTO app_runs VALUES ('r1', 'p1', 'notes', 'echo', 'view', NULL, NULL, 'ok', 3, 'd', '{}', NULL, 1)`).run()
+    old.pragma('user_version = 36')
+    old.close()
+
+    const s = new Store(file)
+    expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+    expect(s.listAppRuns('p1', 'notes', 10)).toEqual([
+      expect.objectContaining({ id: 'r1', kind: 'tool', sessionId: null, tool: 'echo', status: 'ok' }),
+    ])
+    s.close()
+    rmSync(dir, { recursive: true, force: true })
   })
 })
