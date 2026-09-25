@@ -98,6 +98,8 @@ export class MockPlatform implements Platform {
   badge = 0
   /** 테스트용: projects.gitStatus를 몇 번 물었나 — 디바운스가 도는지 보는 눈 (이슈 #41) */
   gitStatusCalls = 0
+  /** 신뢰를 켜고 끈 기록 — "묻기만 하고 보내지 않았다"를 시험이 본다 (M4) */
+  readonly trustCalls: { projectId: string; trusted: boolean }[] = []
 
   constructor(opts: MockOptions = {}) {
     this.now = opts.now ?? (() => Date.now())
@@ -1212,10 +1214,33 @@ export class MockPlatform implements Platform {
         commands: [],
         worktreeSetup: null,
         worktreeManager: null,
+        // 새로 등록한 프로젝트는 신뢰하지 않은 채로 시작한다 — 실물과 같다 (M4, 결정 3)
+        trusted: false,
         git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
       this.projectsList.push(info)
       return info
+    },
+    /**
+     * 신뢰 (M4). 실물처럼 그 프로젝트의 앱 목록이 따라간다: 런타임은 신뢰가 바뀌면 다시 훑고,
+     * 신뢰하지 않은 프로젝트의 앱은 `untrusted`로, 신뢰하면 쉬는 앱(`stopped`)으로 선다. 목이 이것을
+     * 빠뜨리면 E2E는 "신뢰하기"를 눌러도 앱이 막힌 채로 남는 화면을 초록으로 통과시킨다.
+     */
+    setTrusted: async (projectId: string, trusted: boolean) => {
+      const at = this.projectsList.findIndex((x) => x.id === projectId)
+      if (at === -1) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+      // 새 객체로 바꿔 끼운다 — `add`가 돌려준 객체를 화면이 그대로 들고 있어서, 고쳐 쓰면 전선을
+      // 건너지 않은 값이 화면에 새어 든다(실물의 답은 늘 새 객체다)
+      this.projectsList[at] = { ...this.projectsList[at]!, trusted }
+      this.trustCalls.push({ projectId, trusted })
+      const mine = this.externalAppList.filter((a) => a.projectId === projectId)
+      if (mine.length === 0) return
+      for (const a of mine) {
+        a.trusted = trusted
+        if (!trusted && a.status !== 'invalid') Object.assign(a, { status: 'untrusted', error: null })
+        else if (trusted && a.status === 'untrusted') a.status = 'stopped'
+      }
+      this.emit({ type: 'external_apps_changed' })
     },
     list: async () => this.projectsList.map((p) => this.withGit(p)),
     gitStatus: async (projectId: string) => {

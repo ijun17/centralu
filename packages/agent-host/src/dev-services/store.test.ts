@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 34
+const LATEST_SCHEMA = 35
 
 function seeded() {
   const s = new Store()
@@ -1249,39 +1249,76 @@ describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
 })
 
 /**
- * v33 (M4 A-2): 프로젝트 신뢰.
+ * v33 (M4 A-2): 프로젝트 신뢰의 칸, v35: 이미 등록된 프로젝트는 신뢰한다.
  *
- * 앱이 없던 시절에 등록한 프로젝트는 "이 저장소의 코드를 돌려도 되는가"에 답한 적이 없다.
- * 없는 답을 "예"로 채우면 조용한 허락이 된다 — 옛 행은 신뢰하지 않음으로 올라와야 한다.
+ * v33은 옛 행을 "아니오"로 두었다. v35가 그것을 기존 행에 한해 뒤집는다: 그 프로젝트들은 사람이
+ * 골라 에이전트를 돌려 온 폴더이고, 신뢰는 #92(프로젝트 설정 존중)도 함께 정한다. 업데이트 하나가
+ * 아무 말 없이 그 설정을 무시하기 시작하면 안 된다. 새로 등록하는 프로젝트는 여전히 "아니오"로 시작한다.
  */
-describe('v33 이관 — 프로젝트 신뢰는 기본이 "아니오"다', () => {
-  it('옛 DB의 프로젝트는 신뢰하지 않은 채로 올라오고, 켠 신뢰는 재시작을 넘긴다', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v33-'))
-    const file = join(dir, 'store.db')
+describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 프로젝트만 신뢰', () => {
+  const oldProjects = (file: string, version: number, cols = '', rows: string[] = ["('p1','/tmp/p1','p1',1)"]) => {
     const old = new Database(file)
     old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
       default_tool TEXT NOT NULL DEFAULT 'claude', default_models TEXT,
-      sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, commands TEXT NOT NULL DEFAULT '[]');`)
-    old.prepare(`INSERT INTO projects (id, path, name, created_at) VALUES ('p1','/tmp/p1','p1',1)`).run()
-    old.pragma('user_version = 32')
+      sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, commands TEXT NOT NULL DEFAULT '[]'${cols});`)
+    for (const r of rows) old.prepare(`INSERT INTO projects (id, path, name, created_at) VALUES ${r}`).run()
+    old.pragma(`user_version = ${version}`)
     old.close()
+  }
+
+  it('v32의 프로젝트는 칸을 얻고 신뢰한 채로 올라온다 — 끈 신뢰는 재시작을 넘긴다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v33-'))
+    const file = join(dir, 'store.db')
+    oldProjects(file, 32)
 
     const s = new Store(file)
-    expect(s.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
-    expect(s.setProjectTrusted('p1', true)).toBe(true)
+    expect(s.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
+    expect(s.setProjectTrusted('p1', false)).toBe(true)
     // 없는 프로젝트에는 조용히 성공하지 않는다
     expect(s.setProjectTrusted('nope', true)).toBe(false)
     s.close()
 
     const reopened = new Store(file)
-    expect(reopened.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
+    expect(reopened.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
     reopened.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('새로 등록한 프로젝트도 신뢰하지 않은 채로 시작한다', () => {
+  it('v34의 프로젝트는 신뢰를 끈 채였어도 신뢰하고, 이관 뒤에 등록한 프로젝트는 아니오로 시작한다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v35-'))
+    const file = join(dir, 'store.db')
+    oldProjects(file, 34, ', trusted INTEGER NOT NULL DEFAULT 0', ["('p1','/tmp/p1','p1',1)", "('p2','/tmp/p2','p2',2)"])
+
+    const s = new Store(file)
+    expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
+      ['p1', true],
+      ['p2', true],
+    ])
+    // 화면에 가는 모양에도 실린다 — 신뢰 토글이 이 값을 보여 준다
+    expect(s.listProjects().map((p) => [p.id, p.trusted])).toEqual([
+      ['p1', true],
+      ['p2', true],
+    ])
+    s.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    s.setProjectTrusted('p2', false)
+    s.close()
+
+    // 다시 열어도 이관은 다시 돌지 않는다 — 사람이 끈 신뢰와 새 프로젝트의 "아니오"가 남는다
+    const reopened = new Store(file)
+    expect(reopened.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
+      ['p1', true],
+      ['p2', false],
+      ['p3', false],
+    ])
+    reopened.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('새 DB에서 등록한 프로젝트는 신뢰하지 않은 채로 시작한다', () => {
     const s = new Store()
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     expect(s.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
+    expect(s.listProjects()[0]?.trusted).toBe(false)
   })
 })

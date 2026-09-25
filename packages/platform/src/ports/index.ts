@@ -184,6 +184,11 @@ export interface ProjectPort {
   /** 워크트리 프로비저닝 설정 저장 (#69). null이면 지운다 */
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
   /**
+   * 이 프로젝트를 신뢰한다/그만둔다 (M4, 결정 3). 신뢰하면 이 프로젝트의 앱이 돌고 프로젝트 설정이
+   * 존중된다. 끄면 그 앱들이 바로 내려간다. 앱 목록의 변화는 `external_apps_changed`로 따로 온다.
+   */
+  setTrusted(projectId: string, trusted: boolean): Promise<void>
+  /**
    * 워크트리 매니저 자리를 만든다 (#76). 이미 있으면 그 자리를 주고 줄기만 새로 적는다.
    * baseBranch는 부르는 쪽이 정한다 — 기본값을 아래에서 지어내면 틀린 줄기가 조용히 박힌다.
    */

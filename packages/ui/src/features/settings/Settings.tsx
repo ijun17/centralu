@@ -397,9 +397,14 @@ function AppsSettings() {
   )
 }
 
-/** 외부 앱 한 줄 — 무엇이고, 지금 어떤가, 왜 그런가 */
+/**
+ * 외부 앱 한 줄 — 무엇이고, 지금 어떤가, 왜 그런가. 신뢰하지 않은 프로젝트의 앱에는 그 자리에서
+ * 신뢰하는 단추가 있다. 이유만 읽히고 할 일을 찾으러 프로젝트 메뉴까지 가야 하면, 이유를 보여 준
+ * 보람이 절반이다.
+ */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
+  const trustProject = useStore((s) => s.setProjectTrusted)
   return (
     <li className="rounded border border-edge bg-panel px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
       <div className="flex items-center gap-2 text-[12px] text-chalk">
@@ -416,6 +421,16 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ash" data-testid="external-app-reason">
           {status.reason}
         </p>
+      )}
+      {app.info.status === 'untrusted' && app.projectId && (
+        <button
+          type="button"
+          className="mt-1.5 rounded border border-edge bg-void px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          onClick={() => void trustProject(app.projectId!, true)}
+          data-testid="external-app-trust"
+        >
+          Trust this project
+        </button>
       )}
     </li>
   )

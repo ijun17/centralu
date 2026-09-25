@@ -400,6 +400,12 @@ export const ProjectInfo = z.object({
    * "매니저 시작"을 내민다. baseBranch가 워크트리가 갈라지는 곳이자 병합 판정의 기준이다.
    */
   worktreeManager: z.object({ sessionId: z.string(), baseBranch: z.string() }).nullable().default(null),
+  /**
+   * 이 프로젝트의 코드를 이 기계에서 돌려도 되는가 (M4, 플랜 결정 3) — 앱이 뜨고 프로젝트 설정이
+   * 존중되는가를 한 칸이 정한다. 새로 등록한 프로젝트는 "아니오"로 시작한다(`projects.setTrusted`).
+   * 없으면 "아니오"로 읽는다: 신뢰를 모르는 옛 host의 답을 "예"로 채우면 조용한 허락이 된다.
+   */
+  trusted: z.boolean().default(false),
   git: z
     .object({
       branch: z.string(),

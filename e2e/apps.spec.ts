@@ -94,3 +94,53 @@ test('설정의 앱 목록: 내장 앱과 외부 앱이 한 목록에 서고, �
   await expect(notes.getByTestId('external-app-reason')).toHaveText('exited before it was ready (code 3)')
   await expect(broken).toHaveCount(0)
 })
+
+const trustCalls = (page: Page) => page.evaluate(() => (window as any).__mock.trustCalls as { projectId: string; trusted: boolean }[])
+
+test('프로젝트를 등록하면 신뢰를 한 번 묻는다 — "나중에"는 아무것도 보내지 않고, 프로젝트 메뉴에서 켜고 끈다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  const pid = await addProject(page, '/tmp/alpha')
+  const ask = page.getByTestId('trust-ask-alpha')
+  await expect(ask).toBeVisible()
+  await expect(ask).toContainText("Trusting lets this project's apps run and its settings apply")
+
+  await page.getByTestId('trust-ask-no-alpha').click()
+  await expect(ask).toHaveCount(0)
+  expect(await trustCalls(page)).toEqual([])
+
+  // 한 번 물었으면 끝이다 — 그 뒤로는 메뉴에서
+  await page.getByTestId('project-menu-alpha').click()
+  await expect(page.getByTestId('toggle-trust-alpha')).toHaveText('Trust this project')
+  await page.getByTestId('toggle-trust-alpha').click()
+  await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
+  await page.getByTestId('project-menu-alpha').click()
+  await expect(page.getByTestId('toggle-trust-alpha')).toHaveText('Stop trusting this project')
+  await page.getByTestId('toggle-trust-alpha').click()
+  await expect.poll(() => trustCalls(page)).toEqual([
+    { projectId: pid, trusted: true },
+    { projectId: pid, trusted: false },
+  ])
+
+  // 다른 프로젝트: 묻는 자리에서 곧바로 신뢰한다
+  const beta = await addProject(page, '/tmp/beta')
+  await page.getByTestId('trust-ask-yes-beta').click()
+  await expect(page.getByTestId('trust-ask-beta')).toHaveCount(0)
+  await expect.poll(async () => (await trustCalls(page)).at(-1)).toEqual({ projectId: beta, trusted: true })
+})
+
+test('신뢰하지 않은 프로젝트의 앱은 이유와 함께 서고, 그 자리에서 한 번에 신뢰할 수 있다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  const pid = await addProject(page, '/tmp/alpha')
+  await page.getByTestId('trust-ask-no-alpha').click()
+  await setApps(page, [app('notes', pid, { trusted: false, status: 'untrusted' })])
+  await openAppsSettings(page)
+
+  const row = page.getByTestId(`external-app-${pid}/notes`)
+  await expect(row.getByTestId('external-app-status')).toHaveText('Not trusted')
+  await expect(row.getByTestId('external-app-reason')).toHaveText("This project isn't trusted, so its apps don't run.")
+  await row.getByTestId('external-app-trust').click()
+  await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
+  // host가 다시 훑고 방송한다 — 앱은 쉬는 앱(stopped)이 되고, 신뢰하기 단추는 사라진다
+  await expect(row.getByTestId('external-app-status')).toHaveText('Stopped')
+  await expect(row.getByTestId('external-app-trust')).toHaveCount(0)
+})

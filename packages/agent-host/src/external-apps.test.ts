@@ -54,12 +54,16 @@ afterEach(async () => {
 describe('외부 앱 RPC — 신뢰', () => {
   it('등록한 프로젝트의 앱은 신뢰하지 않은 채로 목록에 서고, 신뢰를 켜고 끄는 대로 따라간다', async () => {
     expect(await list()).toEqual([])
-    const { id } = (await rpc('projects.add', { path: projRoot })) as { id: string }
+    const { id, trusted } = (await rpc('projects.add', { path: projRoot })) as { id: string; trusted: boolean }
+    // 화면이 신뢰를 물을지 정하는 값이다 — 새로 등록한 프로젝트는 "아니오"로 온다
+    expect(trusted).toBe(false)
 
     expect((await list()).filter((a) => a.appId === 'notes').map((a) => [a.appId, a.projectId, a.status])).toEqual([['notes', id, 'untrusted']])
 
     await rpc('projects.setTrusted', { projectId: id, trusted: true })
     expect(store.projectRoots()[0]?.trusted).toBe(true)
+    // 프로젝트 메뉴의 신뢰 토글이 읽는 값 — 목록에도 실린다
+    expect(((await rpc('projects.list', {})) as { id: string; trusted: boolean }[]).map((p) => [p.id, p.trusted])).toEqual([[id, true]])
     expect((await list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')
 
     await rpc('projects.setTrusted', { projectId: id, trusted: false })
