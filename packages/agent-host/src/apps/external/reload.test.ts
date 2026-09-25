@@ -233,6 +233,43 @@ describe('매니페스트가 바뀌어도 진행 중인 호출은 끝까지 간�
 })
 
 /**
+ * 턴 안의 매니페스트 바뀜 (C-4) — 실측: 만드는 세션의 턴(10:09:55–10:11:09) 가운데 10:10:45에 매니페스트가 바뀌자 앱이 "stopping:
+ * manifest changed"로 내려갔고, 화면이 비었다가 반쯤 고친 코드로 다시 열렸다. 매니페스트도 폴더의 다른 파일처럼 턴 끝에 한 번이다.
+ */
+describe('턴 안에서 매니페스트가 바뀌어도 턴 끝에 한 번이다', () => {
+  const log = () => readFileSync(join(dataRoot, 'app-logs', 'p1', `${ID}.log`), 'utf8')
+  const count = (re: RegExp) => (log().match(re) ?? []).length
+  const description = () => rt.list().find((a) => a.appId === ID)?.description
+
+  it('턴 안에서는 옛 매니페스트의 앱이 그대로 돈다 — 턴이 끝나면 한 번 내리고, 새 매니페스트로 한 번 띄운다', async () => {
+    plant()
+    make()
+    await rt.tools(ref)
+    const before = await pid()
+    busy = true
+    const mf = join(projRoot, '.centralu', 'apps', ID, 'centralu.app.json')
+    writeFileSync(mf, readFileSync(mf, 'utf8').replace('"description": "counter"', '"description": "counter, renamed"'))
+    rt.refresh() // 감시가 부르는 훑기
+    await sleep(700) // 조용해지기(400ms)를 넘겨도
+    expect(await pid()).toBe(before)
+    expect(description()).toBe('counter')
+    expect(count(/stopping: manifest changed/g)).toBe(0)
+
+    busy = false
+    // 턴 끝과 상태 변화가 잇달아 와도 한 번이다
+    rt.builderTurnEnded(ref)
+    rt.builderTurnEnded(ref)
+    await until(description, (d) => d === 'counter, renamed')
+    // 부르지 않아도 뜬다 — 만드는 세션의 도구 목록을 새 매니페스트의 앱으로 간다
+    await until(status, (s) => s === 'running')
+    expect(await pid()).not.toBe(before)
+    await sleep(300)
+    expect(count(/stopping: manifest changed/g)).toBe(1)
+    expect(count(/starting: /g)).toBe(2)
+  })
+})
+
+/**
  * 목록의 `codeStamp` (C-4, 화면 쪽) — 열린 화면이 "내 HTML은 옛 코드다"를 아는 열쇠. 떠 오른 프로세스의 코드가 바뀔 때만
  * 바뀐다: 같은 코드로 다시 뜬 것(죽었다 살아남, 다시 시작)과 못 뜬 새 코드는 바꾸지 않는다 — 그때 화면을 다시 열면
  * 달라질 것이 없거나 실패만 보인다. 화면이 되풀이해 다시 열리지 않게 하는 것이 이 구별이다.

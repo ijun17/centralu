@@ -137,7 +137,7 @@ either to act.
 | Crash | Nothing restarts it by itself; the next need does, not earlier than 1 s, then 2 s after. The third consecutive failure stops the app (`failed`) with its reason, until Restart, `check`, a changed manifest, or its builder's turn ending with the folder changed (§8). An app that ran 60 s before dying starts the count again | Retrying forever hides a broken app |
 | Stop | stdin and fd 3 closed together; after 2 s the whole process tree is terminated (SIGTERM, then SIGKILL). The app's process group is signalled even after a clean exit | Spike S-5: closing stdin alone left Node and Python apps running |
 | Host shutdown | Every app stopped with a 1 s grace, without waiting for SIGKILL | Tauri gives the host 3 s |
-| Manifest changed | A new entry replaces the old one; the old process stops **after its calls in progress finish** | Editing a file must not cut someone's call |
+| Manifest changed | A new entry replaces the old one; the old process stops **after its calls in progress finish**. While the app's builder is in a turn, the change waits for the turn's end (§8); `check` reads it at once | Editing a file must not cut someone's call, and a half-edited manifest must not restart the app under the person |
 
 The app's environment is the host's **minus** every `CC_*` and `CENTRALU_*` variable (the host's
 WebSocket token is among them, and with it an app could call every RPC), plus the declared secrets,
@@ -398,8 +398,10 @@ and "Send to builder".
   quiet), the host fingerprints the app folder: contents for files up to 1 MiB, size and time above
   that, dot-files and `node_modules` skipped, at most 2000 files and 8 levels. If it differs from
   what the running process started from, the app restarts **after its calls in progress finish**,
-  even if it was stopped, so the builder's tool list is fresh. Edits with no builder turn (an
-  editor) reload a running app after 2 s of quiet. Claude sessions see changed tools from their next
+  even if it was stopped, so the builder's tool list is fresh. The manifest follows the same
+  rule: a change to it during the turn is read at the turn's end, when the app stops once and starts
+  once on the new manifest; until then the old process keeps answering on the old one. Edits with
+  no builder turn (an editor) reload a running app after 2 s of quiet. Claude sessions see changed tools from their next
   turn, Codex sessions from their next thread. Open views are told the app changed, and reopen on
   the new code (§6.3).
 - **Error bundle**: the host keeps each app's last 10 errors (a failed start, an unexpected exit, a
