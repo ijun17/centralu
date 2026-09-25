@@ -15,6 +15,7 @@ const toInfo = (h: TerminalHandle) => ({
 })
 import type { UpdateService } from './updates.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
+import { openHomeView } from './app-home-view.js'
 import { HOST_APPS } from './apps/registry.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
@@ -248,6 +249,14 @@ export function createRpcHandler(
     'apps.viewFrame': async (p) => {
       const { appId, projectId, instanceId, hostOrigin } = RpcMethods['apps.viewFrame'].params.parse(p)
       return requireViews().frame({ app: { appId, projectId }, instanceId, hostOrigin })
+    },
+    'apps.openView': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.openView'].params.parse(p)
+      return openHomeView(requireExternalApps(), requireViews(), { appId, projectId })
+    },
+    'apps.closeView': async (p) => {
+      requireViews().close(RpcMethods['apps.closeView'].params.parse(p).instanceId)
+      return { ok: true as const }
     },
     'apps.readResource': async (p) => {
       const { appId, projectId, uri, instanceId } = RpcMethods['apps.readResource'].params.parse(p)

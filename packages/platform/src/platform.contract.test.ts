@@ -672,3 +672,68 @@ describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
     }
   })
 })
+
+/**
+ * 고정 화면 (M4 B-2) — web 구현의 `openView`·`closeView`가 진짜 host, 진짜 런타임, 진짜 앱 프로세스를
+ * 지난다. 연 인스턴스는 `viewFrame`으로 열리고, 닫으면 더 열리지 않는다.
+ */
+describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
+  it('home이 부른 결과와 인스턴스가 오고, 화면이 없는 home은 이유로 거절되며, 닫은 인스턴스는 더 열리지 않는다', async () => {
+    const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-home-')))
+    const projRoot = join(fixture, 'proj')
+    mkdirSync(join(fixture, 'data'))
+    const server0 = {
+      command: process.execPath,
+      args: [fileURLToPath(new URL('../../agent-host/src/apps/external/test-fixtures/app.mjs', import.meta.url)), '--mode', 'view'],
+    }
+    plantApp(join(projRoot, ...PROJECT_APPS), 'slider', { server: server0, home: 'home' })
+    plantApp(join(projRoot, ...PROJECT_APPS), 'plain', { server: server0, home: 'no_screen' })
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const project = await mgr.addProject(projRoot)
+    mgr.setProjectTrusted(project.id, true)
+    const rt = new ExternalApps({
+      projects: () => store.projectRoots(),
+      dataRoot: join(fixture, 'data'),
+      reservedIds: ['control'],
+      timing: { graceMs: 1_000, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    })
+    rt.refresh()
+    let port: number | null = null
+    const secret = 'contract-home-secret-0123456789abcdefgh'
+    const views = new ViewHost({
+      secret,
+      allowedOrigins: ['http://127.0.0.1:5174'],
+      source: runtimeViewSource(rt),
+      ports: new OriginPorts({ load: () => null, save: () => {} }, { log: () => {} }),
+      hostPort: () => port,
+      log: () => {},
+    })
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt, views }), http: { secret, routes: views.routes } })
+    port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    const hostOrigin = 'http://127.0.0.1:5174'
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+
+      const v = await platform.apps.openView('slider', project.id)
+      expect(v).toMatchObject({ tool: 'home', resourceUri: 'ui://fixture/main', toolInput: {}, toolResult: { structuredContent: { interval: 5 } } })
+      const frame = await platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })
+      expect(frame.url).toContain(`/${secret}/views/${v.instanceId}/`)
+
+      await expect(platform.apps.openView('plain', project.id)).rejects.toThrow('declares no _meta.ui.resourceUri')
+
+      await platform.apps.closeView(v.instanceId)
+      await expect(platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })).rejects.toThrow(/not open/)
+    } finally {
+      await platform.dispose()
+      await mgr.disposeAll()
+      await views.dispose()
+      await rt.dispose()
+      await server.close()
+      store.close()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+})

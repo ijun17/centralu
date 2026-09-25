@@ -15,6 +15,7 @@ import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
 import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
+import { PinnedApps } from '../features/pinned-app/PinnedApps.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
@@ -225,7 +226,11 @@ function Body() {
     taking one more lane out of it drops the panel below its minimum width, which reproduces
     by our own hand the very thing that got the grid shelved (§5.4).
   */
-  const hasEvidenceLane = view !== 'orchestrator' && view !== 'grid'
+  /*
+    고정 화면(M4 B-2)에도 증거 레인이 없다. 앱이 그 자리 전체이고, 앱의 기록 패널이 옆에 선다.
+    거기에 레인을 하나 더 세우면 화면이 사이드바만 한 폭으로 줄어든다.
+  */
+  const hasEvidenceLane = view !== 'orchestrator' && view !== 'grid' && view !== 'app'
 
   return (
     // relative: 알림 카드가 이 안에 떠야 한다. 앱 전체에 걸면 상단 바와 승인 배너를
@@ -255,7 +260,12 @@ function Body() {
         가로 스크롤된다 (도그푸딩에서 나온 버그의 진짜 원인).
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1">
-        {view === 'orchestrator' ? <OrchestratorView /> : view === 'grid' ? <GridView /> : <SessionView />}
+        {view === 'orchestrator' ? <OrchestratorView /> : view === 'grid' ? <GridView /> : view === 'app' ? null : <SessionView />}
+        {/*
+          고정 화면(M4 B-2)은 늘 이 자리에서 그려지고, 다른 것을 볼 때는 숨기만 한다. iframe은
+          DOM에서 떼는 순간 문서를 잃는다. 그러면 세션에 갔다 돌아올 때마다 앱이 처음부터 다시 뜬다.
+        */}
+        <PinnedApps />
         <Overlay />
       </div>
       {hasEvidenceLane && <EvidencePanel />}

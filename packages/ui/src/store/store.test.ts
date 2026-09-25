@@ -60,6 +60,8 @@ beforeEach(() => {
     externalAppChanges: {},
     externalApps: [],
     trustAsk: null,
+    pinnedViews: [],
+    focusedApp: null,
   })
 })
 
@@ -1136,6 +1138,89 @@ describe('프로젝트 신뢰 (M4)', () => {
     await useStore.getState().setProjectTrusted(p.id, false)
     expect(useStore.getState().projects[p.id]?.trusted).toBe(false)
     await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('untrusted'))
+  })
+})
+
+/**
+ * 고정 화면 (M4 B-2): 연 화면은 포커스가 옮겨 가도 산다. 인스턴스는 host가 home을 불러 한 번 만들고,
+ * 닫을 때 놓는다. 여는 사이에 닫혔으면 막 연 인스턴스도 놓는다 — 놓지 않으면 아무도 보지 않는 화면이
+ * 앱을 영영 붙든다.
+ */
+describe('고정 화면 (M4 B-2)', () => {
+  const live = async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('pin-s1', sessionInfo('pin-s1'))
+    mock.externalAppList = [appInfo('slider')]
+    await useStore.getState().attach(mock)
+    useStore.setState({ pinnedViews: [], focusedApp: null })
+    return mock
+  }
+  const pinned = () => useStore.getState().pinnedViews
+
+  it('열면 자리가 서고, 세션을 보러 가도 자리는 그대로이며, 다시 열어도 새로 만들지 않는다', async () => {
+    const mock = await live()
+    useStore.getState().openApp('p1', 'slider')
+    expect(useStore.getState()).toMatchObject({ view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' }, focusedProjectId: 'p1' })
+    await useStore.getState().startPinnedView('p1/slider')
+    const opened = pinned()[0]
+    expect(opened).toMatchObject({ key: 'p1/slider', phase: 'open', instanceId: expect.stringMatching(/^mock-view-/) })
+
+    useStore.getState().focusSession('pin-s1')
+    expect(useStore.getState().view).toBe('focus')
+    expect(pinned()).toEqual([opened])
+
+    useStore.getState().openApp('p1', 'slider')
+    await useStore.getState().startPinnedView('p1/slider')
+    expect(pinned()).toEqual([opened])
+    expect(mock.openedViews).toEqual([{ appId: 'slider', projectId: 'p1' }])
+  })
+
+  it('닫으면 인스턴스를 놓고 자리를 지우며, 보던 세션으로 돌아간다', async () => {
+    const mock = await live()
+    useStore.getState().focusSession('pin-s1')
+    useStore.getState().openApp('p1', 'slider')
+    await useStore.getState().startPinnedView('p1/slider')
+    const id = pinned()[0]!.instanceId
+
+    useStore.getState().closeApp('p1/slider')
+    expect(mock.closedViews).toEqual([id])
+    expect(pinned()).toEqual([])
+    expect(useStore.getState()).toMatchObject({ view: 'focus', focusedApp: null, focusedSessionId: 'pin-s1' })
+  })
+
+  it('여는 사이에 닫았으면 막 연 인스턴스도 놓는다', async () => {
+    const mock = await live()
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    mock.openViewProvider = async () => {
+      await gate
+      return { instanceId: 'late-view', tool: 'home', resourceUri: 'ui://slider/main', toolInput: {}, toolResult: { content: [] }, runId: 'r' }
+    }
+    useStore.getState().openApp('p1', 'slider')
+    const opening = useStore.getState().startPinnedView('p1/slider')
+    expect(pinned()[0]?.phase).toBe('opening')
+    useStore.getState().closeApp('p1/slider')
+    release()
+    await opening
+    expect(mock.closedViews).toEqual(['late-view'])
+    expect(pinned()).toEqual([])
+  })
+
+  it('보던 고정 화면이 되살아난다 — 목록에 없는 앱이면 포커스 뷰에 남는다', async () => {
+    const mock = new MockPlatform()
+    mock.externalAppList = [appInfo('slider')]
+    mock.workspaceSnapshot = { view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } }
+    useStore.setState({ pinnedViews: [], focusedApp: null })
+    await useStore.getState().attach(mock)
+    expect(useStore.getState()).toMatchObject({ view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } })
+    expect(pinned().map((p) => p.key)).toEqual(['p1/slider'])
+
+    const gone = new MockPlatform()
+    gone.workspaceSnapshot = { view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } }
+    useStore.setState({ pinnedViews: [], focusedApp: null, view: 'focus' })
+    await useStore.getState().attach(gone)
+    expect(useStore.getState().view).toBe('focus')
+    expect(pinned()).toEqual([])
   })
 })
 

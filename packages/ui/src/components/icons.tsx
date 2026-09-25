@@ -46,6 +46,20 @@ export function CrownIcon({ size = 13 }: { size?: number }) {
   )
 }
 
+/**
+ * 앱 — 창 하나에 조작면 하나 (M4 B-2). 사이드바에서 앱 줄은 세션 줄과 나란히 서므로, 세션의 도구
+ * 글자 칩과 **형태로** 갈라져야 한다(팔레트 규칙: 종류는 형태로, 긴급도는 밝기로).
+ */
+export function AppIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="1.8" y="2.3" width="12.4" height="11.4" rx="2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M1.8 5.8h12.4" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="4.2" y="8" width="3.2" height="3.2" rx="0.6" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function CloseIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
