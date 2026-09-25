@@ -590,3 +590,37 @@ test.describe('B-4: 고정 화면의 ui/message', () => {
     await expect(said.getByTestId('msg-user-from-app')).toHaveText('Slider app ⤷')
   })
 })
+
+test.describe('오래 걸리는 화면의 호출 — 진행 알림으로 살려 둔다', () => {
+  test('70초 걸리는 도구가 화면에서 끝난다 — 20초마다 진행 알림이 가 화면의 60초 시계를 다시 세고, 끝나면 멈춘다', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.clock.install()
+    await page.goto('/?mock=1')
+    await page.evaluate(() => {
+      const w = window as any
+      w.__mock.viewFrameProvider = (a: string, i: string, o: unknown) => w.__viewFrame(a, i, o)
+      w.__mock.openViewProvider = (a: string, p: string | null) => w.__openView(a, p)
+      // 오래 걸리는 도구 — host가 앱을 기다리는 동안(승인, 느린 일) 화면은 답을 기다린다
+      w.__mock.appToolHandler = (_a: string, tool: string) =>
+        tool === 'slow'
+          ? new Promise((r) => setTimeout(() => r({ content: [{ type: 'text', text: 'done' }], structuredContent: { done: true } }), 70_000))
+          : { content: [{ type: 'text', text: 'ok' }], structuredContent: {} }
+    })
+    const pid = await addProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { name: 'Slider', status: 'running' })])
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const v = viewOf(page, `${pid}/slider`)
+    await expect(v.locator('li[data-k="connected"]')).toHaveCount(1)
+
+    await v.locator('#slow').click()
+    // 시계를 5초씩 민다 — 사이마다 프레임 사이의 메시지가 오간다
+    for (let t = 0; t < 75_000; t += 5_000) await page.clock.runFor(5_000)
+    await expect(v.locator('li[data-k="slow-result"]')).toHaveText('slow-result {"done":true}')
+    await expect(v.locator('li[data-k="slow-error"]')).toHaveCount(0)
+    await expect(v.locator('li[data-k="progress"]')).toHaveCount(3)
+    await expect(v.locator('li[data-k="progress-wire"]')).toHaveCount(3)
+    // 끝난 호출에는 더 보내지 않는다 — 선에서 센다(끝난 요청의 알림은 화면의 처리기에 닿지 않으니)
+    for (let t = 0; t < 45_000; t += 5_000) await page.clock.runFor(5_000)
+    await expect(v.locator('li[data-k="progress-wire"]')).toHaveCount(3)
+  })
+})

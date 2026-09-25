@@ -52,6 +52,7 @@ ${opts.marker ? `<p id="marker" data-testid="marker">${opts.marker}</p>` : ''}
   <button id="msg">msg</button>
   <button id="read">read</button>
   <button id="grow">grow</button>
+  <button id="slow">slow</button>
 </div>
 <ul id="log" data-testid="log"></ul>
 <div id="spacer"></div>
@@ -85,6 +86,10 @@ on('bad-link', async () => log('bad-link-result', await app.openLink({ url: 'jav
 on('msg', async () => log('msg-result', await app.sendMessage({ role: 'user', content: [{ type: 'text', text: 'hello from the view' }] })))
 on('read', async () => log('read-result', (await app.readServerResource({ uri: 'ui://fixture/data' })).contents))
 on('grow', async () => { document.getElementById('spacer').style.height = '600px' })
+// 선에 온 진행 알림 전부 — SDK는 끝난 요청의 알림을 처리기에 넘기지 않는다. 호스트가 멈췄는지는 선에서 센다
+window.addEventListener('message', (e) => { if (e.data && e.data.method === 'notifications/progress') log('progress-wire', e.data.params) })
+// 오래 걸리는 도구 — ext-apps가 켜 둔 대로 진행 알림에 시계를 다시 센다(onprogress만 우리 것으로 갈아 적는다)
+on('slow', async () => log('slow-result', (await app.callServerTool({ name: 'slow', arguments: {} }, { onprogress: (p) => log('progress', p) })).structuredContent))
 await app.connect()
 log('connected', { origin: self.origin, href: location.href, referrer: document.referrer, hostContext: app.getHostContext(), hostCapabilities: app.getHostCapabilities() })
 </script></body></html>`
