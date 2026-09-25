@@ -52,12 +52,13 @@ export { resourceUriOf } from './visibility.js'
  * 누가 불렀나 (플랜 "호출 경로는 하나다") — 셋이다.
  *
  *   view     앱의 화면. v1 플랜은 이것을 "사람"이라 적었는데 틀렸다 — 화면은 앱의 코드라서
- *            아무도 누르지 않아도 도구를 부를 수 있다
+ *            아무도 누르지 않아도 도구를 부를 수 있다. 어느 화면인지(`instanceId`)는 "바뀌었다"의
+ *            주인으로만 쓴다 — 그 화면은 자기가 낸 바뀜을 다시 듣지 않는다(B-5)
  *   session  세션의 에이전트 (A-5가 붙인다)
  *   app      다른 앱의 중개 호출 (D-2) — 부모 실행 id로 사슬이 이어진다
  */
 export type AppCaller =
-  | { kind: 'view' }
+  | { kind: 'view'; instanceId?: string }
   | { kind: 'session'; sessionId: string }
   | { kind: 'app'; parentRunId: string }
 
@@ -154,10 +155,11 @@ export type ExternalAppsDeps = {
   /** 앱 프로세스가 물려받을 환경 (기본 process.env) — host 자신의 변수는 걸러진다 */
   env?: NodeJS.ProcessEnv
   /**
-   * 앱의 도구 호출이 끝났다(앱에 닿은 호출만 — 거절은 아무것도 바꾸지 않았다). 열린 화면이
-   * 같은 값을 보게 하는 신호다(플랜 "열린 화면이 같은 값을 보는 법"). host가 방송으로 옮긴다.
+   * 앱의 도구 호출이 끝났다(앱에 닿은 호출만 — 거절은 아무것도 바꾸지 않았다. 읽기만 하는 도구도 마찬가지다). 열린
+   * 화면이 같은 값을 보게 하는 신호다(플랜 "열린 화면이 같은 값을 보는 법"). host가 방송으로 옮긴다.
+   * `cause`는 그 호출을 한 쪽이다 — 앱이 다시 떠서 바뀐 것처럼 호출이 아니면 없다(모든 화면이 듣는다).
    */
-  emitChanged?: (ref: AppRef) => void
+  emitChanged?: (ref: AppRef, cause?: AppCaller | null) => void
   /** 중개 서버 도구의 몸통 (D가 채운다). 없으면 "아직 없다"는 자리표시가 선다 */
   broker?: BrokerImpls
   /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
@@ -473,6 +475,13 @@ export class ExternalApps {
     })
     /** 앱에 실제로 보냈는가 — "바뀌었다"는 앱에 닿은 호출만 알린다 (거절·뜨는 중 취소·기동 실패는 아무것도 바꾸지 않았다) */
     let sent = false
+    /*
+     * 읽기만 하는 도구인가(`readOnlyHint: true`) — 읽기는 아무것도 바꾸지 않았으니 "바뀌었다"도 알리지 않는다.
+     * 실측(65acb43): 템플릿 화면은 알림마다 `show`를 다시 부르는데 그 `show`가 또 알림을 내서, 화면 하나가 초당
+     * 약 700번 `show`를 불렀다(1초에 실행 기록 618줄, 3초에 2035줄). 주석이 없는 도구는 MCP의 기본값대로 바꿀 수
+     * 있는 도구로 친다 — 틀린 쪽이 "안 알림"이면 화면이 낡은 값을 보여 준다.
+     */
+    let readOnly = false
     /** 이 호출을 받은 프로세스 — 실패했을 때 그 프로세스의 표준에러를 오류 묶음에 싣는다 (C-6) */
     let callee: AppProcess | null = null
     const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
@@ -500,7 +509,7 @@ export class ExternalApps {
           )
         }
       }
-      if (sent) this.deps.emitChanged?.(e.ref)
+      if (sent && !readOnly) this.deps.emitChanged?.(e.ref, caller)
       return { runId, status, result, error, durationMs }
     }
 
@@ -540,6 +549,7 @@ export class ExternalApps {
         for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
         this.openRuns.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, abort })
         sent = true
+        readOnly = found.tool.annotations?.readOnlyHint === true
         callee = proc
         try {
           const result = await proc.client.callTool(

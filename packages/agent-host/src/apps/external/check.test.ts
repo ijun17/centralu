@@ -102,7 +102,7 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     app('annot', serverWith(`centralu.tool(server, 'save', { description: 'Save the note', inputSchema: z.object({ text: z.string() }) }, async () => ({ content: [] }))`))
     const r = await make().check(ref('annot'))
     expect(problems(r.text)).toEqual([
-      '- 문제 [도구 save] annotations.readOnlyHint가 없습니다 — 읽기만 하면 `readOnlyHint: true`, 무엇이든 바꾸면 `readOnlyHint: false`를 적으세요. 없으면 바꾸는 도구로 다뤄져 세션이 부를 때마다 묻고, Codex의 auto 프리셋은 부르지 않습니다',
+      '- 문제 [도구 save] annotations.readOnlyHint가 없습니다 — 읽기만 하면 `readOnlyHint: true`, 무엇이든 바꾸면 `readOnlyHint: false`를 적으세요. 없으면 바꾸는 도구로 다뤄져 세션이 부를 때마다 묻고, Codex의 auto 프리셋은 부르지 않으며, 부를 때마다 이 앱의 열린 화면이 모두 다시 읽습니다',
     ])
     expect(r.text).toContain('save — readOnlyHint 없음, model+app')
   })

@@ -307,9 +307,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
 
         `projectId`는 늘 싣는다(사용자 폴더 앱이면 null). 싣지 않으면 host는 이것을 사람이 내장
         앱을 부른 것으로 읽는다. 화면은 외부 앱의 코드라서 그 문으로 들어가면 안 된다.
+        `instanceId`는 이 호출이 낸 "바뀌었다"의 주인이 된다 — 그 화면만 그 알림을 건너뛴다(B-5).
       */
       callTool: async (appId, tool, args, from) =>
-        viewToolResult(await rpc.call('apps.invoke', { appId, name: tool, args, projectId: from?.projectId ?? null })),
+        viewToolResult(await rpc.call('apps.invoke', { appId, name: tool, args, projectId: from?.projectId ?? null, instanceId: from?.instanceId })),
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
       list: () => rpc.call('apps.list', {}),

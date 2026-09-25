@@ -21,6 +21,8 @@ let dataRoot = ''
 let projRoot = ''
 let appLogs = ''
 let changed: AppRef[] = []
+/** 알림마다 그 바뀜을 낸 호출의 주인 — `changed`와 같은 순서 */
+let causes: (AppCaller | null)[] = []
 let rt: ExternalApps
 
 type Rec = { t: string; pid: number; runId?: string | null; mode?: string; text?: string }
@@ -50,7 +52,10 @@ const make = (broker?: BrokerImpls) => {
     dataRoot,
     reservedIds: [],
     timing: { idleMs: 60_000, graceMs: 1_000, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
-    emitChanged: (r) => changed.push(r),
+    emitChanged: (r, cause) => {
+      changed.push(r)
+      causes.push(cause ?? null)
+    },
     ...(broker ? { broker } : {}),
   })
   rt.refresh()
@@ -64,6 +69,7 @@ beforeEach(() => {
   appLogs = join(fixture, 'fixture-logs')
   for (const d of [dataRoot, projRoot, appLogs]) mkdirSync(d)
   changed = []
+  causes = []
   plant('notes')
 })
 
@@ -125,6 +131,26 @@ describe('결말과 "바뀌었다" 알림', () => {
     const failed = await rt.call(ref('notes'), 'fail', {}, VIEW)
     expect(failed).toMatchObject({ status: 'error', error: 'the thing failed' })
     expect(changed).toHaveLength(2)
+  })
+
+  /*
+   * 읽기는 아무것도 바꾸지 않았다. 실측(65acb43): 템플릿 화면은 알림마다 읽기 도구(`show`)를 다시 부르는데, 그
+   * 읽기가 또 알림을 내서 화면 하나가 초당 약 700번 `show`를 불렀다(3초에 실행 기록 2035줄).
+   */
+  it('읽기만 하는 도구(readOnlyHint: true)는 알리지 않고, 주석이 없는 도구는 부른 쪽을 주인으로 알린다', async () => {
+    plantApp(join(projRoot, ...PROJECT_APPS), 'board', { server: { command: process.execPath, args: [FIXTURE, '--mode', 'attach'] } })
+    make()
+    const board = ref('board')
+    const frame: AppCaller = { kind: 'view', instanceId: 'frame-1' }
+    // peek은 readOnlyHint: true — 앱에 닿아 답했지만 아무것도 바꾸지 않았다
+    expect((await rt.call(board, 'peek', {}, frame)).status).toBe('ok')
+    expect((await rt.call(board, 'peek', {}, SESSION)).status).toBe('ok')
+    expect(changed).toEqual([])
+    // poke에는 readOnlyHint가 없다 — MCP의 기본값대로 바꿀 수 있는 도구로 친다
+    expect((await rt.call(board, 'poke', { to: 1 }, frame)).status).toBe('ok')
+    expect((await rt.call(board, 'poke', { to: 2 }, SESSION)).status).toBe('ok')
+    expect(changed).toEqual([board, board])
+    expect(causes).toEqual([frame, SESSION])
   })
 
   it('앱에 보내기 전에 끝난 호출(뜨는 동안 취소)은 알리지 않는다 — 아무것도 바뀌지 않았다', async () => {

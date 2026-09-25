@@ -48,6 +48,16 @@ const persistedSeq = { seq: z.number().optional() }
  */
 export const APP_VIEWS_LIVE_PER_SESSION = 3
 
+/**
+ * 외부 앱의 "바뀌었다"를 낸 호출의 주인 (M4 B-5) — host 런타임의 호출자(`AppCaller`) 모양 그대로다. 화면이 부른
+ * 것이면 그 화면의 인스턴스 id가 실린다. 그 화면은 자기가 낸 바뀜을 다시 듣지 않는다 — 답으로 이미 받았다.
+ *
+ * 모양을 좁게 묶지 않는다. 부르는 쪽의 종류가 늘었을 때 이 칸 때문에 이벤트가 검사에서 떨어지면, 열린 화면이
+ * 갱신을 영영 받지 못한다. 받는 쪽이 읽는 것은 `view`의 `instanceId` 하나다.
+ */
+export const AppChangeCause = z.looseObject({ kind: z.string(), instanceId: z.string().optional() })
+export type AppChangeCause = z.infer<typeof AppChangeCause>
+
 export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, ...persistedSeq, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
   /**
@@ -370,9 +380,17 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * 이름을 나눈 이유: 내장 앱의 그 이벤트를 받으면 UI는 `apps.state(appId)`를 다시 읽는다.
    * 같은 이름을 쓰면 외부 앱의 호출마다 쓸모없는 왕복이 하나씩 생기고, 내장 앱의 상태 칸에
    * 외부 앱 id가 섞인다. 앱은 (프로젝트, id)로 하나라 프로젝트도 싣는다 — null은 사용자 폴더 앱.
-   * 앱에 닿지 않은 호출(거절)에는 오지 않는다: 아무것도 바뀌지 않았다.
+   * 앱에 닿지 않은 호출(거절)과 읽기만 하는 도구(`readOnlyHint: true`)의 호출에는 오지 않는다: 아무것도 바뀌지
+   * 않았다. host는 앱마다 250ms씩 모아 보낸다(한 앱에 초당 4번까지). `cause`는 모은 호출이 모두 한 주인의
+   * 것일 때만 실린다 — 섞였으면 빠진다(모두가 듣는다).
    */
-  z.object({ ...appScoped, type: z.literal('external_app_state_changed'), appId: AppId, projectId: z.string().nullable() }),
+  z.object({
+    ...appScoped,
+    type: z.literal('external_app_state_changed'),
+    appId: AppId,
+    projectId: z.string().nullable(),
+    cause: AppChangeCause.optional(),
+  }),
   /**
    * 외부 앱 목록이 달라졌다 (M4 A-8) — 앱이 생기거나 사라지거나 고쳐졌고, 프로젝트 신뢰가
    * 바뀌었고, 앱이 뜨거나 내리거나 실패했다. 같은 거칠기다: 싣는 것이 없고, 받은 쪽이

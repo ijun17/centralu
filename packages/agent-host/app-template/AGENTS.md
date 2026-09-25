@@ -24,7 +24,10 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
    `centralu.agent()` needs.
 4. **Annotate every tool**: `annotations: { readOnlyHint: true }` if it only reads,
    `readOnlyHint: false` if it changes anything. Read-only tools run without asking the person;
-   the others follow the session's approval setting.
+   the others follow the session's approval setting. The same hint decides refreshes: every call to
+   a tool that is not `readOnlyHint: true` tells this app's open screens to read again (rule 8). A
+   read tool left unannotated costs a refresh cycle each time it is called, and screens that re-read
+   with it keep refreshing each other.
 5. **Visibility**: by default a tool is visible to agents and to the screen. A tool only the screen
    should call gets `_meta: { ui: { visibility: ['app'] } }`; one only agents should call gets
    `['model']`.
@@ -36,9 +39,10 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
    (or any file under `centralu.dataDir`). **Never write files into this folder** — a project app's
    folder is committed to git and shared with the team. The screen may not use browser storage
    (it runs in an isolated frame).
-8. **The screen re-reads, it does not remember.** When anyone calls one of this app's tools,
-   Centralu sends open screens `centralu/notifications/changed`; the template's screen then calls
-   `show` again. Keep that handler.
+8. **The screen re-reads, it does not remember.** When anyone calls one of this app's tools that
+   is not `readOnlyHint: true`, Centralu sends open screens `centralu/notifications/changed` (the
+   screen that made the call does not get it: it already has the answer); the template's screen
+   then calls `show` again. Keep that handler, and keep `show` read-only.
 9. **stdout is the MCP channel.** `console.log` is redirected to stderr for you; never write to
    `process.stdout` yourself. stderr is shown to the person when the app fails.
 10. **Asking the agent**: inside a tool handler, `await centralu.agent('prompt', { schema })`

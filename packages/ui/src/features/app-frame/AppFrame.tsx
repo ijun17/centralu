@@ -58,7 +58,8 @@ export type AppFrameProps = {
    * 주지 않으면 스토어의 그 앱 카운터를 쓴다(`externalAppChanges`). host는 앱에 닿은 호출이
    * 끝날 때마다 `external_app_state_changed`를 알리고, 스토어가 (프로젝트, 앱)마다 센다(플랜
    * "열린 화면이 같은 값을 보는 법"). 그래서 어느 부모가 이 화면을 띄우든 배선 없이 갱신을
-   * 받는다. 값을 주는 부모는 그 신호를 스스로 정한다.
+   * 받는다. 이 화면 자신이 낸 바뀜은 알리지 않는다(`externalAppChangedBy`). 값을 주는 부모는
+   * 그 신호를 스스로 정한다 — 그때는 주인을 모르므로 바뀔 때마다 알린다.
    */
   changeSignal?: number
   /**
@@ -184,7 +185,9 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const platform = usePlatform()
   const scale = TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
   const heard = useStore((s) => s.externalAppChanges[externalAppKey(projectId, appId)])
+  const heardBy = useStore((s) => s.externalAppChangedBy[externalAppKey(projectId, appId)] ?? null)
   const signal = changeSignal ?? heard
+  const by = changeSignal === undefined ? heardBy : null
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<AppBridge | null>(null)
@@ -369,10 +372,18 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b || signal === undefined) return
-    if (sent.current.change === signal) return
+    const last = sent.current.change
+    if (last === signal) return
     sent.current.change = signal
+    /*
+     * 이 화면이 낸 바뀜은 알리지 않는다 — 호출의 답으로 이미 받았다. 알리면 화면은 다시 읽고, 그 읽기가 또 바뀜을
+     * 내면 고리가 된다. 실측(65acb43): 템플릿 화면 하나가 초당 약 700번 `show`를 불렀다. 건너뛰는 것은 카운터가
+     * **딱 하나** 올랐고 그 하나가 이 인스턴스의 것일 때뿐이다. 둘 이상 올랐으면(한 번의 렌더에 몰렸다) 그 사이에
+     * 남의 바뀜이 섞였을 수 있어 알린다 — 틀린 쪽이 "한 번 더 읽음"이어야 한다. 낡은 값을 보여 주면 안 된다.
+     */
+    if (by === instanceId && signal === (last ?? 0) + 1) return
     void b.notification({ method: CHANGED_NOTIFICATION, params: {} })
-  }, [phase, signal])
+  }, [phase, signal, by, instanceId])
 
   useImperativeHandle(
     ref,
