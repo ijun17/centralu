@@ -325,6 +325,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.viewMessage', { sessionId, instanceId, text })
       },
       // 결과는 앱이 준 MCP 결과 그대로다 — openView와 같이 옮기기만 한다
+      inlineViews: (sessionId) => rpc.call('apps.inlineViews', { sessionId }),
       reopenInlineView: async (sessionId, callId) => {
         const { toolResult, ...v } = await rpc.call('apps.inlineReopen', { sessionId, callId })
         return { ...v, ...(toolResult ? { toolResult: toolResult as AppToolResult } : {}) }

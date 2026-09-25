@@ -4,7 +4,7 @@ import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { externalAppKey, messagesToChat, useStore } from './store.js'
+import { externalAppKey, inlineViewsFromHistory, messagesToChat, useStore } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -1922,5 +1922,44 @@ describe('기록보다 먼저 온 이벤트', () => {
     const chat = useStore.getState().chat['d']!
     expect(chat.map((i) => (i as { text?: string }).text)).toContain('지금 쓰는 중')
     expect(useStore.getState().history['d']).toBeDefined()
+  })
+})
+
+/**
+ * 대화 안 앱 화면의 자리 복원 (M4 B-1). 기록에는 본문 없이 "이 카드 아래에 어느 앱의 화면이 섰다(또는
+ * 거절됐다)"만 있다 — 다시 연 UI는 그 카드에 자리표시를 세운다. 다시 열 수 있는지는 host에 묻기 전까지
+ * 모른다(kept: false). 기록의 앱 화면 줄은 대화의 줄(ChatItem)이 되지 않는다.
+ */
+describe('inlineViewsFromHistory — 지난 카드의 앱 화면 자리', () => {
+  const row = (seq: number, payload: Record<string, unknown>) =>
+    ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'app_view' as const, payload, ts: 0 })
+  const call = (seq: number, callId: string) =>
+    ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'tool_call' as const, payload: { type: 'tool_call', callId, summary: { tool: 'mcp__app-viewer__show', title: 'show', readOnly: false, paths: [] } }, ts: 0 })
+
+  it('열림은 다시 열 수 있는지 모르는 자리표시로, 거절은 이유만 있는 자리표시로 — 같은 카드면 나중 줄이 이긴다', () => {
+    const msgs = [
+      call(1, 'c-open'),
+      row(2, { type: 'app_view', callId: 'c-open', appId: 'viewer', projectId: 'p1', tool: 'show', phase: 'open' }),
+      call(3, 'c-spoof'),
+      row(4, { type: 'app_view', callId: 'c-spoof', appId: 'viewer', projectId: null, tool: 'spoof', phase: 'rejected', reason: 'This app does not serve ui://other/main' }),
+      call(5, 'c-late'),
+      row(6, { type: 'app_view', callId: 'c-late', appId: 'viewer', projectId: 'p1', tool: 'show', phase: 'open' }),
+      row(7, { type: 'app_view', callId: 'c-late', appId: 'viewer', projectId: 'p1', tool: 'show', phase: 'rejected', reason: "This call's result points at ui://other/main" }),
+      // 모양이 틀린 줄은 버린다
+      row(8, { type: 'app_view', phase: 'open' }),
+    ]
+    expect(inlineViewsFromHistory(msgs)).toEqual({
+      'c-open': { callId: 'c-open', appId: 'viewer', projectId: 'p1', tool: 'show', state: 'parked', instanceId: null, kept: false, liveAt: 0 },
+      'c-spoof': {
+        callId: 'c-spoof', appId: 'viewer', projectId: null, tool: 'spoof', state: 'parked', instanceId: null, kept: false, liveAt: 0,
+        rejected: 'This app does not serve ui://other/main', reason: 'This app does not serve ui://other/main',
+      },
+      'c-late': {
+        callId: 'c-late', appId: 'viewer', projectId: 'p1', tool: 'show', state: 'parked', instanceId: null, kept: false, liveAt: 0,
+        rejected: "This call's result points at ui://other/main", reason: "This call's result points at ui://other/main",
+      },
+    })
+    // 대화의 줄은 카드 셋뿐이다 — 앱 화면의 기록은 줄이 되지 않는다
+    expect(messagesToChat(msgs).map((i) => i.kind)).toEqual(['tool', 'tool', 'tool'])
   })
 })

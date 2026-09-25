@@ -268,6 +268,8 @@ export function createRpcHandler(
       if (!inlineViews) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
       return inlineViews.reopen(sessionId, callId)
     },
+    // 앱 런타임이 없는 host는 들고 있는 화면도 없다 — 다시 연 UI는 모두 "앱 열기"만 보인다
+    'apps.inlineViews': async (p) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
     'apps.viewMessage': async (p) => {
       const { sessionId, instanceId, text } = RpcMethods['apps.viewMessage'].params.parse(p)
       // 앱과 세션은 인스턴스가 정한다 — 부른 쪽이 댄 세션은 대조만 한다 (#93·#94)

@@ -2262,6 +2262,8 @@ export const useStore = create<AppState>((set, get) => ({
         // force면 갈아 끼운다 — 밖에서 이어간 대화를 따라잡을 때 쓴다
         // 비어 있는 자리는 지킬 것이 없다 — 기록을 읽는 사이 대화 아닌 이벤트만 왔던 경우다
         chat: { ...s.chat, [sessionId]: force || !s.chat[sessionId]?.length ? items : s.chat[sessionId]! },
+        // 지난 카드의 앱 화면 자리 (M4 B-1) — 이 UI가 이미 아는 화면(살아 있는 것)은 그대로 둔다
+        inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
         history: {
           ...s.history,
           [sessionId]: {
@@ -2273,7 +2275,9 @@ export const useStore = create<AppState>((set, get) => ({
       }))
     } catch {
       // 기록을 못 불러와도 새 대화는 가능하므로 조용히 넘어간다
+      return
     }
+    await syncInlineViews(get, set, sessionId)
   },
 
   async loadOlder(sessionId) {
@@ -2287,6 +2291,7 @@ export const useStore = create<AppState>((set, get) => ({
       bumpSeqAbove(older)
       set((s) => ({
         chat: { ...s.chat, [sessionId]: [...older, ...(s.chat[sessionId] ?? [])] },
+        inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
         history: {
           ...s.history,
           [sessionId]: {
@@ -4274,6 +4279,86 @@ export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): s
 export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
   return `The agent could not finish this turn — ${e.error.message}`
 }
+
+/**
+ * 대화 기록에서 대화 안 앱 화면의 자리 (M4 B-1). 기록에는 "이 카드 아래에 어느 앱의 화면이 섰다(또는 거절됐다)"만
+ * 있다 — 입력도 결과도 없다. 그래서 지난 카드에는 자리표시만 선다. 다시 열 수 있는지(`kept`)는 host에 묻기
+ * 전까지 모른다: host가 다시 떴다면 들고 있던 것이 없다. 같은 카드에 열림과 거절이 함께 있으면(결과가 남의
+ * 화면을 가리켰다) 나중 줄인 거절이 이긴다.
+ */
+export function inlineViewsFromHistory(msgs: StoredMessage[]): Record<string, InlineView> {
+  const out: Record<string, InlineView> = {}
+  for (const m of msgs) {
+    if (m.kind !== 'app_view') continue
+    const p = m.payload as { callId?: unknown; appId?: unknown; projectId?: unknown; tool?: unknown; phase?: unknown; reason?: unknown }
+    if (typeof p?.callId !== 'string' || typeof p.appId !== 'string') continue
+    const base: InlineView = {
+      callId: p.callId,
+      appId: p.appId,
+      projectId: typeof p.projectId === 'string' ? p.projectId : null,
+      tool: typeof p.tool === 'string' ? p.tool : '',
+      state: 'parked',
+      instanceId: null,
+      kept: false,
+      liveAt: 0,
+    }
+    const reason = typeof p.reason === 'string' ? p.reason : undefined
+    out[p.callId] = p.phase === 'rejected' ? { ...base, rejected: reason ?? 'This view was refused', reason } : base
+  }
+  return out
+}
+
+/** 기록에서 읽은 자리를 더한다 — 이 UI가 이미 아는 카드(살아 있거나 이 UI가 접은 것)는 건드리지 않는다 */
+function mergeInlineHistory(
+  all: Record<string, Record<string, InlineView>>,
+  sessionId: string,
+  past: Record<string, InlineView>,
+): Record<string, Record<string, InlineView>> {
+  if (Object.keys(past).length === 0) return all
+  return { ...all, [sessionId]: { ...past, ...all[sessionId] } }
+}
+
+/**
+ * host에 이 대화에서 들고 있는 화면을 묻고 자리표시를 맞춘다 (M4 B-1, `apps.inlineViews`).
+ *
+ * 들고 있는 카드는 "Reopen"을 얻고, 버려진 카드는 잃는다. 열린 채 남은 인스턴스 중 이 UI가 그리고 있지 않은
+ * 것은 닫는다 — 다시 연 UI는 그 프레임을 모르고(보낼 입력·결과가 없다), 닫지 않으면 그 인스턴스가 앱을 계속
+ * 붙든다. 사람이 원하면 Reopen이 새로 연다. 묻지 못하면(옛 host) 자리표시는 앱을 여는 길만 준다.
+ */
+async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void, sessionId: string): Promise<void> {
+  const platform = get().platform
+  if (!platform) return
+  let kept: Awaited<ReturnType<typeof platform.apps.inlineViews>>
+  try {
+    kept = await platform.apps.inlineViews(sessionId)
+  } catch {
+    return
+  }
+  if (kept.length === 0) return
+  set((s) => {
+    const mine = { ...s.inlineViews[sessionId] }
+    for (const k of kept) {
+      const cur = mine[k.callId]
+      if (cur && cur.state !== 'parked') continue
+      mine[k.callId] = {
+        ...(cur ?? { callId: k.callId, appId: k.appId, projectId: k.projectId, tool: k.tool, state: 'parked' as const, instanceId: null, liveAt: 0 }),
+        kept: k.kept && !cur?.rejected,
+      }
+    }
+    return { inlineViews: { ...s.inlineViews, [sessionId]: mine } }
+  })
+  for (const k of kept) {
+    if (!k.instanceId || releasedOrphans.has(k.instanceId)) continue
+    const cur = get().inlineViews[sessionId]?.[k.callId]
+    if (cur && cur.state !== 'parked' && cur.instanceId === k.instanceId) continue
+    // 기록을 두 번 읽는 사이(앞의 닫기가 host에 닿기 전) 같은 인스턴스를 두 번 닫지 않는다 — 인스턴스 id는 다시 쓰이지 않는다
+    releasedOrphans.add(k.instanceId)
+    void platform.apps.closeView(k.instanceId).catch(() => {})
+  }
+}
+
+/** 다시 연 UI가 닫은, 열린 채 남았던 인스턴스 (syncInlineViews) */
+const releasedOrphans = new Set<string>()
 
 /** 메시지 복원 (재시작·세션 전환 시) */
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {

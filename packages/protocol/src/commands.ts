@@ -995,6 +995,25 @@ export const RpcMethods = {
     }),
   },
   /**
+   * 한 대화에서 host가 들고 있는 대화 안 화면 (M4 B-1) — 다시 연 UI가 지난 카드의 자리표시를 세울 때 묻는다.
+   * `kept`면 "Reopen"이 도구를 다시 부르지 않고 그 화면을 연다. `instanceId`가 있으면 아직 열린 인스턴스다 —
+   * 다시 연 UI는 그 프레임을 모르므로 닫아서 앱을 놓는다. 본문(입력·결과)은 싣지 않는다. host가 다시 떴으면
+   * 빈 목록이다(들고 있던 것은 메모리에만 있었다).
+   */
+  'apps.inlineViews': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.array(
+      z.object({
+        callId: z.string(),
+        appId: AppId,
+        projectId: z.string().nullable(),
+        tool: z.string(),
+        kept: z.boolean(),
+        instanceId: z.string().nullable(),
+      }),
+    ),
+  },
+  /**
    * 대화 안 앱 화면의 `ui/message` (M4 B-1·B-4) — 사람이 읽고 보내기로 고른 뒤에만 UI가 부른다.
    *
    * 보낼 곳은 **그 화면이 선 대화**다. 앱과 세션은 인스턴스가 정한다: `sessionId`는 대조만 하고, 대화 안
