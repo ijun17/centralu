@@ -576,6 +576,18 @@ export type NewAppSpec = { projectId: string | null; id: string; name: string; d
 export type AppCreated = { app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }
 
 /**
+ * 앱에서 만드는 세션에게 하는 말 (M4 C-5). `instanceId`는 사람이 보던 고정 화면이다 — host가 그 인스턴스로 어느 화면에서
+ * 왔는지를 머리말에 적는다. 첨부는 만드는 세션의 id로 먼저 저장한 것이다(입력창과 같은 길).
+ */
+export type BuilderAsk = {
+  appId: AppId
+  projectId: string | null
+  text: string
+  attachments?: Attachment[]
+  instanceId?: string
+}
+
+/**
  * 앱 상태 창구 (#81) — 앱마다 JSON 문서 하나 + 켜짐 여부. 앱별 포트를 만들지 않는다:
  * 문서의 의미는 앱만 알고, 이 창구는 운반만 한다.
  */
@@ -650,6 +662,12 @@ export interface AppsPort {
   builder(appId: AppId, projectId: string | null): Promise<SessionInfo | null>
   /** 그 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다 */
   createBuilder(appId: AppId, projectId: string | null, tool?: ToolName): Promise<SessionInfo>
+  /**
+   * "여기를 고쳐 줘" (M4 C-5) — 앱 화면 아래 입력줄의 말을 그 앱의 만드는 세션에 보낸다. host가 어느 앱의 어느 화면에서
+   * 왔는지, 앱이 멈췄거나 마지막 실행이 실패했으면 그 사실을 머리말로 붙인다. 만드는 세션이 없으면 거절한다.
+   * @returns 말이 간 만드는 세션
+   */
+  askBuilder(req: BuilderAsk): Promise<{ sessionId: string }>
 }
 
 /**

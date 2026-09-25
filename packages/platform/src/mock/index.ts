@@ -2,6 +2,7 @@ import type {
   AdapterCapabilities,
   AppRun,
   Attachment,
+  BuilderRequestFacts,
   PermissionPreset,
   GitBranch,
   GitCommit,
@@ -28,6 +29,7 @@ import type {
 } from '@cc/protocol'
 import {
   APP_VERSION,
+  builderRequestFrame,
   handoffFile,
   newAppIdProblem,
   isNewerVersion,
@@ -43,6 +45,7 @@ import type {
   AlertKind,
   AppCallOrigin,
   AppCreated,
+  BuilderAsk,
   AppHomeView,
   AppResourceResult,
   AppToolResult,
@@ -675,15 +678,19 @@ export class MockPlatform implements Platform {
      */
     openView: async (appId: string, projectId: string | null): Promise<AppHomeView> => {
       this.openedViews.push({ appId, projectId })
-      if (this.openViewProvider) return this.openViewProvider(appId, projectId)
-      return {
-        instanceId: `mock-view-${++this.idc}`,
-        tool: 'home',
-        resourceUri: `ui://${appId}/home`,
-        toolInput: {},
-        toolResult: { content: [{ type: 'text', text: 'mock home' }] },
-        runId: `mock-run-${this.idc}`,
-      }
+      const v: AppHomeView = this.openViewProvider
+        ? await this.openViewProvider(appId, projectId)
+        : {
+            instanceId: `mock-view-${++this.idc}`,
+            tool: 'home',
+            resourceUri: `ui://${appId}/home`,
+            toolInput: {},
+            toolResult: { content: [{ type: 'text', text: 'mock home' }] },
+            runId: `mock-run-${this.idc}`,
+          }
+      // host의 ViewHost처럼 인스턴스가 어느 앱의 어느 화면인지 들고 있다 — "이 화면에서 왔다"는 이것으로 대조한다
+      this.pinnedInstances.set(v.instanceId, { appId, projectId, uri: v.resourceUri })
+      return v
     },
     closeView: async (instanceId: string) => {
       this.closedViews.push(instanceId)
@@ -872,9 +879,56 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       return structuredClone(info)
     },
+    /**
+     * "여기를 고쳐 줘" (M4 C-5). 실물(builder-requests.ts)처럼: 같은 말로 거절하고, 머리말은 **같은 함수**
+     * (protocol의 `builderRequestFrame`)로 목이 아는 사실에서 짓는다 — 앱 목록(이름·멈춤), 인스턴스(화면), 실행 기록
+     * (시험이 채운 `appRuns`의 맨 앞). 그렇게 지은 말이 만드는 세션의 대화에 사람의 말로 선다.
+     */
+    askBuilder: async (req: BuilderAsk): Promise<{ sessionId: string }> => {
+      this.builderAsks.push(structuredClone(req))
+      const text = req.text.trim()
+      if (!text && !req.attachments?.length) throw new Error('Write what to change, or attach a screenshot')
+      const info = this.externalAppList.find((a) => a.appId === req.appId && a.projectId === req.projectId)
+      if (!info) throw new Error('This app no longer exists')
+      const builderId = this.appBuilders.get(`${req.projectId ?? '_user'}/${req.appId}`)
+      if (!builderId || !this.sessions.has(builderId)) throw new Error('This app has no builder session yet. Start one, then ask again')
+      const facts: BuilderRequestFacts = {
+        app: { appId: info.appId, name: info.name ?? info.appId },
+        screen: null,
+        stopped: info.status === 'crashed' || info.status === 'failed' ? { status: info.status, reason: info.error } : null,
+        latestRun: null,
+      }
+      if (req.instanceId) {
+        const inst = this.pinnedInstances.get(req.instanceId)
+        if (!inst || inst.appId !== req.appId || inst.projectId !== req.projectId) {
+          throw new Error("That view is not open for this app. Reopen the app's view and ask again")
+        }
+        facts.screen = { tool: info.home ?? '(no home tool)', resourceUri: inst.uri }
+      }
+      const last = this.appRuns.get(`${req.projectId ?? '_user'}/${req.appId}`)?.[0]
+      if (last && last.status !== 'ok') facts.latestRun = { tool: last.tool, callerKind: last.callerKind, status: last.status, error: last.error }
+      this.deliverToBuilder(builderId, builderRequestFrame(facts, text), req.attachments)
+      return { sessionId: builderId }
+    },
   }
   /** "New app" 창이 host에 보낸 것 — 창이 무엇을 골랐는지(id·이름·도구)를 시험이 본다 */
   readonly createdApps: NewAppSpec[] = []
+  /** 고정 화면의 인스턴스 → 그 앱과 화면 (`openView`가 적는다). host의 ViewHost가 인스턴스로 아는 것과 같다 */
+  readonly pinnedInstances = new Map<string, { appId: string; projectId: string | null; uri: string }>()
+  /** 앱 화면 아래 입력줄이 host에 보낸 것 (M4 C-5) — 무엇을, 어느 화면에서, 무엇을 붙여 보냈는지를 시험이 본다 */
+  readonly builderAsks: BuilderAsk[] = []
+  /**
+   * 만드는 세션에 말을 넣는다 — host의 `deliver`처럼: 기록에 남기고, 첨부는 경로째 싣고, 화면에는 `user_message`로
+   * 알린다(host가 넣은 말은 UI가 그려 두지 않았다). 받은 세션은 일을 시작한다.
+   */
+  private deliverToBuilder(sessionId: string, text: string, attachments?: Attachment[]): void {
+    const s = this.sessions.get(sessionId)
+    if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    s.live = true
+    // emit이 host처럼 기록에 남기고 seq를 매긴다 (sendViewMessage와 같은 길)
+    this.emit({ type: 'user_message', sessionId, seq: (this.messages.get(sessionId)?.length ?? 0) + 1, text, ...(attachments?.length ? { attachments } : {}) })
+    this.emit({ type: 'state_change', sessionId, state: 'working' })
+  }
   /** 앱 → 만드는 세션 (M4 C-2). 열쇠는 `(프로젝트 ?? _user)/앱` — 실물의 명부(APP_BUILDERS_KEY)와 같은 모양 */
   readonly appBuilders = new Map<string, string>()
   /** 다시 시작한 앱 — Restart 단추가 host에 닿았는지를 시험이 본다 */

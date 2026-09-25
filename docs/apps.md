@@ -305,8 +305,8 @@ another host has not been tested.
 ## 8. The build loop
 
 The first promise of apps is that the place a tool is built is the place it is used and changed.
-The host side exists (#155). In the UI, New app is here (below); the "fix it here" bar under a view
-and "Send to builder" are arriving.
+The host side exists (#155). In the UI, New app and the "fix it here" bar under a view are here
+(below); "Send to builder" is arriving.
 
 - **Making an app**: the orchestrator's `create_app` and the RPC `apps.create` (the New app button's
   call) go through one function. Everything is refused **before a folder exists**: an id failing the
@@ -324,6 +324,14 @@ and "Send to builder" are arriving.
   is missing or logged out is named with its fix, and Create waits. An untrusted project gets a
   "Trust this project" button in the dialog. On success the app is listed, its pinned view opens,
   and its builder session stands in the sidebar.
+- **Fix it here**: a thin input under a pinned view. What the person types goes to the app's
+  builder (`apps.askBuilder`), with a pasted screenshot attached the composer's way. The host puts a
+  one-line `[Centralu]` header in front, built from what it knows rather than what the caller says:
+  the app, the screen the person was looking at (from the view instance), a stopped app's reason,
+  and the latest run if it did not end ok (`builderRequestFrame` in `@cc/protocol`, so the mock
+  writes the same text). The person wrote the rest, so it goes through as an instruction, not
+  quoted. The person stays on the app: the builder's conversation opens beside the view
+  ("Builder"), not in place of it. An app without a builder offers "Start builder" instead.
 - **Template** (`packages/agent-host/app-template/`): starts with `node server.mjs` alone, with no
   install and no `package.json`. One runtime file, `runtime/centralu-app-runtime.mjs` (626.5 KiB,
   built reproducibly from pinned MIT packages by `scripts/build-app-runtime.mjs` and marked generated
@@ -466,7 +474,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver an inline view's message once the person agreed |
 | `apps.runs`, `apps.errors` | Run records; the latest error bundles |
 | `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
-| `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check` | The build loop (§8) |
+| `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder` | The build loop (§8) |
 | `apps.sessionTools`, `apps.sessionCall` | Used by the Codex bridge |
 | `projects.setTrusted` | Trust (§3) |
 
@@ -483,6 +491,5 @@ cancelled, closed or refused; stored without bodies, so a reopened UI can draw p
 - An open view keeps its old HTML after a reload until it is opened again.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
-- The rest of the build loop's UI (the fix-it bar, Send to builder) and the broker's tools are
-  arriving.
+- "Send to builder" and the broker's tools are arriving.
 - The Codex path is unverified by a run (§9.2). fd 3 on Windows is untested (spike S-5).

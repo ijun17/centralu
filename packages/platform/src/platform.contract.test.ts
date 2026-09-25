@@ -777,7 +777,7 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
  * 거절은 host의 말 그대로 온다("New app" 창이 그 말을 보인다).
  */
 describe('Platform 계약: 새 앱 (web + 실 host)', () => {
-  it('앱과 만드는 세션이 오고, 그 앱의 만드는 세션으로 찾아지며, 이미 있는 id는 host의 말로 거절된다', async () => {
+  it('앱과 만드는 세션이 오고, 그 앱의 만드는 세션으로 찾아지며, 이미 있는 id는 host의 말로 거절되고, 입력줄의 말이 그 세션에 닿는다', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-newapp-')))
     const projRoot = join(fixture, 'proj')
     mkdirSync(projRoot)
@@ -802,6 +802,17 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
       expect((await platform.apps.createBuilder('notes', project.id)).id).toBe(made.builder!.id)
       await expect(platform.apps.create({ projectId: project.id, id: 'notes', name: 'Again' })).rejects.toThrow(/"notes" 앱이 이미 있습니다/)
       expect(await platform.apps.builder('ghost', project.id)).toBeNull()
+
+      // "여기를 고쳐 줘" (C-5) — 만드는 세션의 에이전트가 host의 머리말을 단 말을 받는다(메아리 어댑터가 되돌려 준다)
+      const heard: string[] = []
+      const off = platform.agents.subscribe((e) => {
+        if (e.type === 'message_delta' && e.sessionId === made.builder!.id) heard.push(e.text)
+      })
+      expect(await platform.apps.askBuilder({ appId: 'notes', projectId: project.id, text: 'Add a reset button' })).toEqual({ sessionId: made.builder!.id })
+      await waitFor(() => heard.length > 0)
+      off()
+      expect(heard).toEqual(['echo:[Centralu] The person wrote this in the app "Notes" (app-notes) that you build.\nAdd a reset button'])
+      await expect(platform.apps.askBuilder({ appId: 'ghost', projectId: project.id, text: 'hi' })).rejects.toThrow('This app no longer exists')
     } finally {
       await platform.dispose()
       await mgr.disposeAll()
