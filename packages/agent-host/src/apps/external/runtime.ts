@@ -5,9 +5,10 @@ import type { CallToolResult, PriorDiscovery, ReadResourceResult, Tool } from '@
 import type { ExternalAppInfo } from '@cc/protocol'
 import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
-import { AppProcess, type SpawnSpec } from './app-process.js'
+import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
+import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
@@ -39,6 +40,8 @@ export type AppRef = { projectId: string | null; appId: string }
 
 /** 점검 보고서의 모양도 이 문으로 나간다 (C-3) */
 export type { AppCheckReport, CheckFinding } from './check.js'
+/** 오류 묶음의 모양 (C-6) */
+export type { AppErrorBundle } from './errors.js'
 
 /** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
 export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'
@@ -239,6 +242,12 @@ type AppEntry = {
   life: Life
 }
 
+/**
+ * 도구 실패 뒤 표준에러를 한 번 더 옮겨 담기까지 (C-6). 앱이 던진 스택은 표준에러로, 실패 답은 표준출력으로 가서
+ * 도착 순서가 정해져 있지 않다. 같은 기계의 파이프라 몇 밀리초면 둘 다 온다.
+ */
+const STDERR_SETTLE_MS = 150
+
 /** 부를 수 없는 앱 — 이유가 곧 메시지다 */
 export class AppUnavailableError extends Error {
   readonly code = 'internal'
@@ -268,6 +277,8 @@ export class ExternalApps {
   private quietTimers = new Map<string, NodeJS.Timeout>()
   /** 진행 중인 반영 — 겹쳐 부르면 같은 것을 기다린다 */
   private reloading = new Map<string, Promise<boolean>>()
+  /** 앱 이름(holdKey)마다 최근 오류 묶음, 최근 것부터 (C-6) — 매니페스트가 바뀌어 칸이 새로 서도 이어진다 */
+  private errorLog = new Map<string, AppErrorBundle[]>()
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -280,6 +291,36 @@ export class ExternalApps {
     const settled = deps.runs?.settleUnfinished('the host stopped before this call finished') ?? 0
     const pruned = deps.runs?.prune(Date.now() - RUN_RETENTION_MS) ?? 0
     if (settled || pruned) console.error(`[apps] run records: ${settled} unfinished closed, ${pruned} past retention removed`)
+  }
+
+  /**
+   * 한 앱의 최근 오류 묶음 (M4 C-6) — 뜨지 못함·예고 없는 종료·도구 실패. `latest`가 "만드는 세션에 보내기"가 보낼
+   * 것이다. **보내지는 않는다** — 사람이 누를 때 UI가 이것을 읽어 보낸다(errors.ts 주석).
+   */
+  errors(ref: AppRef): { latest: AppErrorBundle | null; recent: AppErrorBundle[] } {
+    const recent = [...(this.errorLog.get(this.holdKey(ref)) ?? [])]
+    return { latest: recent[0] ?? null, recent }
+  }
+
+  /**
+   * 오류 묶음 하나를 적는다. 도구 실패는 앱의 답이 표준에러보다 먼저 올 수 있어서(파이프가 둘이다 — 던진 스택은
+   * 표준에러로, 실패 답은 표준출력으로 간다), 그 프로세스의 표준에러를 조금 뒤에 한 번 더 옮겨 담는다.
+   */
+  private recordError(e: AppEntry, b: Omit<AppErrorBundle, 'text'>, proc: AppProcess | null = null): void {
+    const key = this.holdKey(e.ref)
+    const app = `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`
+    const list = this.errorLog.get(key) ?? []
+    let bundle = errorBundle(app, proc ? { ...b, stderr: proc.log.tailLines() } : b)
+    list.unshift(bundle)
+    if (list.length > ERRORS_KEPT) list.length = ERRORS_KEPT
+    this.errorLog.set(key, list)
+    if (!proc) return
+    setTimeout(() => {
+      const i = list.indexOf(bundle)
+      if (i < 0) return
+      bundle = errorBundle(app, { ...b, stderr: proc.log.tailLines() })
+      list[i] = bundle
+    }, STDERR_SETTLE_MS).unref()
   }
 
   /** 한 앱의 실행 기록, 최근 것부터 (B-7) — 폴더가 사라진 앱의 기록도 읽힌다 */
@@ -430,7 +471,21 @@ export class ExternalApps {
     })
     /** 앱에 실제로 보냈는가 — "바뀌었다"는 앱에 닿은 호출만 알린다 (거절·뜨는 중 취소·기동 실패는 아무것도 바꾸지 않았다) */
     let sent = false
+    /** 이 호출을 받은 프로세스 — 실패했을 때 그 프로세스의 표준에러를 오류 묶음에 싣는다 (C-6) */
+    let callee: AppProcess | null = null
     const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
+      /*
+       * 앱에 닿은 호출이 실패했다 (C-6) — 앱의 잘못일 수 있는 것만 적는다. 거절은 정책이고, 뜨지 못한 것은
+       * 기동 쪽이 따로 적었다. 인자는 기록과 같은 규칙으로 가린다 — 이 묶음은 만드는 세션의 프롬프트가 될 수 있다.
+       */
+      if (status === 'error' && sent) {
+        const hide = this.deps.runs ? redact : redactor(this.secrets.all(this.appKey(e.ref)))
+        this.recordError(
+          e,
+          { kind: 'tool', at: Date.now(), message: hide(error ?? '').split('\n')[0]!, stderr: [], tool: name, args: (described ?? describeArgs(args, hide)).summary, runId },
+          callee,
+        )
+      }
       const durationMs = Date.now() - t0
       const ledger = this.deps.runs
       if (ledger && described) {
@@ -483,6 +538,7 @@ export class ExternalApps {
         for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
         this.openRuns.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, abort })
         sent = true
+        callee = proc
         try {
           const result = await proc.client.callTool(
             { name, arguments: args, _meta: { [RUN_META]: runId } },
@@ -1016,6 +1072,16 @@ export class ExternalApps {
           // 기억한 세대로 붙다가 실패했다면 그 기억이 틀렸을 수 있다 — 다음엔 다시 묻는다
           if (usedPrior) L.verdict = undefined
           this.fail(e, (err as Error).message)
+          const started = err instanceof AppStartError ? err : null
+          this.recordError(e, {
+            kind: 'start',
+            at: Date.now(),
+            message: started?.head ?? (err as Error).message.split('\n')[0]!,
+            stderr: started?.stderr ?? [],
+            tool: null,
+            args: null,
+            runId: null,
+          })
         }
         throw new AppUnavailableError((err as Error).message)
       }
@@ -1109,6 +1175,7 @@ export class ExternalApps {
     // 오래 잘 돌다 죽었다면 연속 실패가 아니다 — 새로 센다
     if (Date.now() - proc.startedAt >= this.timing.stableMs) L.failures = 0
     this.fail(e, reason)
+    this.recordError(e, { kind: 'crash', at: Date.now(), message: reason.split('\n')[0]!, stderr: proc.log.tailLines(), tool: null, args: null, runId: null })
     // 파이프·로그를 정리하고, 그룹에 남은 자손이 있으면 거둔다
     void proc.stop(0)
     // 떠 있던 앱이 예고 없이 죽었다 — 화면 앞의 사람이 이유를 봐야 한다 (A-8, B-6)

@@ -41,6 +41,20 @@ export type SpawnSpec = {
 
 export type ExitInfo = { code: number | null; signal: string | null; error: string | null }
 
+/**
+ * 뜨지 못했다 — 사람이 읽을 이유(`message`: 머리 + 표준에러 끝부분)와 함께, 그 둘을 **따로도** 싣는다 (C-6).
+ * 오류 묶음이 "무엇이 났나"와 "앱이 무엇을 찍었나"를 나눠 보여 주려면 글을 다시 쪼개지 않아도 되어야 한다.
+ */
+export class AppStartError extends Error {
+  constructor(
+    message: string,
+    readonly head: string,
+    readonly stderr: string[],
+  ) {
+    super(message)
+  }
+}
+
 export class AppProcess {
   readonly startedAt = Date.now()
   readonly client: Client
@@ -133,8 +147,9 @@ export class AppProcess {
       await proc.waitExit(250)
       const head = proc.exit ? `exited before it was ready (${describeExit(proc.exit)})` : (e as Error).message
       const reason = proc.reason(head)
+      const stderr = proc.log.tailLines()
       await proc.stop(0)
-      throw new Error(reason)
+      throw new AppStartError(reason, head, stderr)
     }
   }
 
@@ -287,6 +302,11 @@ class AppLog {
 
   tail(): string {
     return this.recent.join('\n')
+  }
+
+  /** 표준에러의 마지막 줄들(가린 뒤) — 사본이다. 오류 묶음(C-6)이 그 순간의 것을 들고 간다 */
+  tailLines(): string[] {
+    return [...this.recent]
   }
 
   close(): void {

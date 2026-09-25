@@ -12,6 +12,7 @@ import {
   GitDiff,
   ExternalSession,
   ExternalAppInfo,
+  AppErrorBundle,
   AppRun,
   UsageSnapshot,
   GitFileStatus,
@@ -1088,6 +1089,14 @@ export const RpcMethods = {
    * 그 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다(앱마다 하나). 손으로 만든 앱이나 만드는
    * 세션을 지운 앱에 쓴다. 신뢰하지 않은 프로젝트의 앱은 거절한다(그 앱은 뜨지 않아 시험할 수 없다).
    */
+  /**
+   * 외부 앱 하나의 최근 오류 묶음 (M4 C-6) — `latest`가 "만드는 세션에 보내기"가 보낼 것이다. host가 기동한 뒤의
+   * 것만 든다(메모리에 산다). 오래 남는 것은 실행 기록(`apps.runs`)의 몫이다.
+   */
+  'apps.errors': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: z.object({ latest: AppErrorBundle.nullable(), recent: z.array(AppErrorBundle) }),
+  },
   'apps.createBuilder': {
     params: z.object({ appId: AppId, projectId: z.string().nullable(), tool: ToolName.optional() }),
     result: SessionInfo,
