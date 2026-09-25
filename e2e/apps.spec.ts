@@ -122,6 +122,16 @@ test('프로젝트를 등록하면 신뢰를 한 번 묻는다 — "나중에"�
     { projectId: pid, trusted: false },
   ])
 
+  // 돌고 있는 세션이 없으니 덧붙일 말도 없다
+  await expect(page.getByTestId('toast')).toHaveCount(0)
+  // 세션이 돌고 있으면: 바꾼 신뢰는 그 세션이 다시 시작하거나 이어질 때 적용된다고 한 줄로 말한다
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('new-session-alpha').click()
+  await page.getByTestId('create-session-confirm').click()
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('toggle-trust-alpha').click()
+  await expect(page.getByTestId('toast')).toHaveText('Running sessions here pick up the new trust when they restart or resume.')
+
   // 다른 프로젝트: 묻는 자리에서 곧바로 신뢰한다
   const beta = await addProject(page, '/tmp/beta')
   await page.getByTestId('trust-ask-yes-beta').click()

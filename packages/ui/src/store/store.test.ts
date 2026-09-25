@@ -1127,6 +1127,20 @@ describe('프로젝트 신뢰 (M4)', () => {
     expect(useStore.getState().trustAsk).toBeNull()
   })
 
+  it('돌고 있는 세션이 있을 때만, 바꾼 신뢰는 그 세션이 다시 시작하거나 이어질 때 적용된다고 한 줄로 말한다', async () => {
+    const mock = new MockPlatform()
+    const busy = await mock.projects.add('/tmp/trust-busy')
+    mock.sessions.set('trust-live', sessionInfo('trust-live', { projectId: busy.id, live: true }))
+    await useStore.getState().attach(mock)
+    const quiet = await useStore.getState().addProject('/tmp/trust-quiet')
+
+    await useStore.getState().setProjectTrusted(quiet.id, true)
+    expect(useStore.getState().toast).toBeNull()
+
+    await useStore.getState().setProjectTrusted(busy.id, true)
+    expect(useStore.getState().toast).toBe('Running sessions here pick up the new trust when they restart or resume.')
+  })
+
   it('신뢰를 끄면 그 프로젝트의 앱 목록이 방송을 따라 막힌다', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
