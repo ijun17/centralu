@@ -160,6 +160,8 @@ const externalApps = new ExternalApps({
   runs: storeRunLedger(store),
   // 앱에 닿은 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (UI 스토어가 AppFrame의 changeSignal로 옮긴다)
   emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
+  // 앱 폴더가 바뀌어도 만드는 세션이 턴 안이면 턴 끝까지 기다린다 (C-4) — 턴의 끝은 매니저가 런타임에 알린다
+  builderBusy: (ref) => mgr.builderBusy(ref),
 })
 externalApps.refresh()
 // 앱의 자리와 상태가 바뀌었다 (A-8) — 사이드바와 고정 화면이 apps.list를 다시 읽는다

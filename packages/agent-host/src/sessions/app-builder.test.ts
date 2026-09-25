@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,6 +9,7 @@ import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
+import { until } from '../apps/external/test-helpers.js'
 import { SessionManager } from './manager.js'
 
 /**
@@ -37,13 +38,16 @@ class FakeAdapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
   }
   seen: CreateSessionOpts[] = []
+  /** 세션마다 받은 이벤트 입구 — 테스트가 도구 대신 턴을 흘린다 */
+  sinks = new Map<string, EventSink>()
   fail = false
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
-  async createSession(opts: CreateSessionOpts, _emit: EventSink) {
+  async createSession(opts: CreateSessionOpts, emit: EventSink) {
     if (this.fail) throw new Error(`${this.tool} is not logged in`)
     this.seen.push(opts)
+    this.sinks.set(opts.sessionId, emit)
     return new Handle(opts.sessionId)
   }
   last(): CreateSessionOpts {
@@ -81,7 +85,14 @@ beforeEach(async () => {
   ])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'] })
+  rt = new ExternalApps({
+    projects: () => store.projectRoots(),
+    dataRoot,
+    reservedIds: ['control'],
+    // host의 main과 같은 이음새 (C-4) — 만드는 세션이 턴 안인지는 매니저가 안다
+    builderBusy: (ref) => mgr.builderBusy(ref),
+    timing: { turnEndDebounceMs: 50, reloadQuietMs: 300 },
+  })
   rt.refresh()
   mgr.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
@@ -243,5 +254,34 @@ describe('만드는 세션은 자기 앱을 시험한다 (C-3)', () => {
     const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     expect(mgr.toolProfileOf(worker.id)).toBeNull()
     expect(claude.last().toolProfile).toBeUndefined()
+  })
+})
+
+describe('만드는 세션의 턴 끝에 앱이 다시 뜬다 (C-4)', () => {
+  it('턴 안에서 고친 것은 기다렸다가, 턴이 끝나면(turn_complete) 새 코드로 띄운다', async () => {
+    const { app, builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    const ref = { projectId, appId: 'notes' }
+    await rt.tools(ref)
+    const emit = claude.sinks.get(builder!.id)!
+    emit({ type: 'state_change', sessionId: builder!.id, state: 'working' })
+    expect(mgr.builderBusy(ref)).toBe(true)
+    const server = join(app.dir, 'server.mjs')
+    writeFileSync(
+      server,
+      readFileSync(server, 'utf8').replace(
+        '  return server\n})',
+        "  centralu.tool(server, 'added', { description: 'New', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))\n  return server\n})",
+      ),
+    )
+    rt.refresh()
+    await new Promise((r) => setTimeout(r, 600))
+    expect(rt.knownTools(ref)!.map((t) => t.name)).not.toContain('added')
+    // 승인을 기다리는 것도 턴 안이다
+    emit({ type: 'approval_request', sessionId: builder!.id, requestId: 'r1', detail: { kind: 'command', command: 'ls' } } as never)
+    expect(mgr.builderBusy(ref)).toBe(true)
+    emit({ type: 'state_change', sessionId: builder!.id, state: 'working' })
+    emit({ type: 'turn_complete', sessionId: builder!.id })
+    expect(mgr.builderBusy(ref)).toBe(false)
+    await until(() => rt.knownTools(ref)?.map((t) => t.name) ?? [], (names) => names.includes('added'))
   })
 })
