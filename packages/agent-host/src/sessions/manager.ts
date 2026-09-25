@@ -21,6 +21,7 @@ import type {
   Attachment,
   ApprovalScope,
   CreateSessionParams,
+  ExternalAppInfo,
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
@@ -3374,7 +3375,35 @@ export class SessionManager {
         this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals))
         return { ok: true }
       },
+
+      // 새 앱 (M4 C-1b) — 프로젝트는 이름이나 id로 가리킨다(create_session과 같다). 규칙은 런타임의 문이 정한다
+      createApp: async (spec) => {
+        let projectId: string | null = null
+        if (spec.project) {
+          const project = this.store.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
+          if (!project) return { ok: false, error: `그런 프로젝트가 없습니다: ${spec.project}` }
+          projectId = project.id
+        }
+        try {
+          const { app } = await this.createApp({ projectId, id: spec.id, name: spec.name, description: spec.description })
+          return { ok: true, appId: app.appId, projectId: app.projectId, dir: app.dir }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      },
     }
+  }
+
+  /**
+   * 새 앱 (M4 C-1b) — `apps.create`와 오케스트레이터의 `create_app`이 지나는 한 길.
+   *
+   * 이름·신뢰·이미 있는 id의 판정은 런타임의 문(`ExternalApps.createApp`)이 한다. 여기서 한 번 더 적으면
+   * 규칙이 두 벌이 되고, 느슨한 쪽이 곧 구멍이다(#93).
+   */
+  async createApp(params: { projectId: string | null; id: string; name: string; description?: string }): Promise<{ app: ExternalAppInfo }> {
+    const rt = this.appsHub?.rt
+    if (!rt) throw Object.assign(new Error('External apps are unavailable — there is nowhere to make an app'), { code: 'internal' })
+    return { app: rt.createApp(params) }
   }
 
   /** 사람의 승인을 기다리는 MCP 서버 제안들 */

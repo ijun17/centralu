@@ -160,6 +160,20 @@ export type OrchestratorTools = {
    * 자가 저작이 승인 없이 남으면 주입된 텍스트가 곧 영구 권한이 된다.
    */
   proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
+  /**
+   * 새 앱을 템플릿으로 만든다 (M4 C-1b) — 오케스트레이터 전용. "새 앱" 버튼(`apps.create`)과 같은 길이다.
+   *
+   * propose가 아니라 power인 이유: 만드는 것은 **템플릿의 사본**이다 — 저장소에 이미 있는 코드도, 사람이
+   * 고르지 않은 명령도 싣지 않는다. 앱은 신뢰한 프로젝트(와 사용자 폴더)에만 생기고, 이미 있는 id는
+   * 덮어쓰지 않는다. 지우기는 여전히 사람의 일이다(프로젝트 앱은 git, 사용자 폴더 앱은 `apps.remove`).
+   */
+  createApp(spec: {
+    /** 프로젝트 이름 또는 id. 없으면 사용자 폴더 앱 */
+    project?: string
+    id: string
+    name: string
+    description?: string
+  }): Promise<{ ok: boolean; error?: string; appId?: string; projectId?: string | null; dir?: string }>
 }
 
 /**

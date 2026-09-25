@@ -17,6 +17,9 @@ import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } fr
 
 export const PROJECT_APPS_REL = '.centralu/apps'
 export const USER_APPS_REL = 'apps'
+/** 같은 자리를 경로의 칸으로 — 폴더를 만드는 쪽(`createApp`)이 한 칸씩 가드를 지나며 만든다 */
+export const PROJECT_APPS_PARTS = ['.centralu', 'apps'] as const
+export const USER_APPS_PARTS = ['apps'] as const
 
 export type ScannedApp = {
   /** 폴더 이름. 매니페스트가 맞으면 id와 같다(아래 규칙) */

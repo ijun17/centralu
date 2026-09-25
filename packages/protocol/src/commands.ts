@@ -1054,6 +1054,22 @@ export const RpcMethods = {
     params: z.object({ appId: AppId, projectId: z.string().nullable() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /**
+   * 새 앱을 템플릿으로 만든다 (M4 C-1b) — "새 앱" 버튼이 부른다. 오케스트레이터의 `create_app`과 같은 문이다.
+   * `projectId`가 있으면 그 프로젝트의 `.centralu/apps/<id>/`에(신뢰한 프로젝트만), null이면 사용자 폴더에 만든다.
+   * `id`는 폴더 이름이자 세션에서 `app-<id>`가 된다: 소문자·숫자·하이픈 32자 이내, `centralu`·`app-`로 시작 금지.
+   * 이미 있는 id·신뢰하지 않은 프로젝트·틀린 이름은 이유와 함께 실패하고 아무것도 만들지 않는다.
+   * 앱은 띄우지 않는다 — 처음 필요할 때 뜬다.
+   */
+  'apps.create': {
+    params: z.object({
+      projectId: z.string().nullable(),
+      id: z.string(),
+      name: z.string(),
+      description: z.string().optional(),
+    }),
+    result: z.object({ app: ExternalAppInfo }),
+  },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: SessionId.optional() }),
