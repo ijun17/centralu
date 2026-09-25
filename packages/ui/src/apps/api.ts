@@ -77,7 +77,14 @@ export function markRead(sessionId: string): void {
   appHost().markRead(sessionId)
 }
 
-/** 자기 네임스페이스의 문서 교체 — 다른 앱의 문서는 타입이 막는다 (AppId 유니온) */
+/**
+ * 자기 네임스페이스의 문서 교체.
+ *
+ * 다른 앱의 문서를 막아 주던 것은 AppId 합집합이었는데, 그 합집합은 M4 P-1에서 열렸다 —
+ * 원래도 멤버가 하나뿐이라 막은 것은 "남의 앱"이 아니라 오타였다. 컴파일된 앱은 자기 id를
+ * 리터럴로 적는다. M4의 외부 앱은 이 문을 지나지 않는다 — 화면이 iframe에서 돌고, 어느
+ * 앱인지는 메시지를 보낸 프레임으로 호스트가 정한다(docs/plans/apps-plan.md "호출 경로는 하나다").
+ */
 export function setAppState(id: AppId, doc: unknown): void {
   appHost().setAppState(id, doc)
 }

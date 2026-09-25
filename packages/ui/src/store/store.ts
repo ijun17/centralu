@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_UI_PREFERENCES, handoffFile, SessionInfo } from '@cc/protocol'
 import type {
+  AppId,
   ToolStatus,
   Attachment,
   CommandRunInfo,
@@ -382,15 +383,15 @@ export type AppState = {
    * 앱 상태 (#81) — 앱마다 {문서, 켜짐}. 스토어는 앱 목록을 모른다(순환 금지):
    * 항목은 앱의 useAppState가 처음 쓸 때(ensure) 또는 방송(app_state_changed)으로 생긴다.
    */
-  apps: Record<string, { doc: unknown; enabled: boolean }>
+  apps: Record<AppId, { doc: unknown; enabled: boolean }>
   /** 앱 레일 슬롯의 폭 (#81) — 슬롯의 기하는 코어의 것이고(내용만 앱의 것), 보는 방식이라 워크스페이스에 실린다 */
   railWidth: number
   setRailWidth(px: number): void
-  ensureAppState(appId: string): Promise<void>
-  refreshAppState(appId: string): Promise<void>
-  setAppDoc(appId: string, doc: unknown): Promise<void>
-  invokeAppTool(appId: string, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
-  setAppEnabled(appId: string, enabled: boolean): Promise<void>
+  ensureAppState(appId: AppId): Promise<void>
+  refreshAppState(appId: AppId): Promise<void>
+  setAppDoc(appId: AppId, doc: unknown): Promise<void>
+  invokeAppTool(appId: AppId, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
+  setAppEnabled(appId: AppId, enabled: boolean): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /** 오케스트레이터의 스킬 제안 (#71) — 같은 제안→원클릭 승인 레일 */
   skillProposals: { name: string; content: string; why?: string }[]
@@ -1164,7 +1165,7 @@ export const useStore = create<AppState>((set, get) => ({
   newSessionBranch: '',
   worktreeProposals: [],
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
-  apps: {} as Record<string, { doc: unknown; enabled: boolean }>,
+  apps: {} as Record<AppId, { doc: unknown; enabled: boolean }>,
   railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},

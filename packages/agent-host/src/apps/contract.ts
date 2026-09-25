@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { NormalizedEvent } from '@cc/protocol'
+import type { AppId, NormalizedEvent } from '@cc/protocol'
 
 /*
  * 런타임의 중심 타입 셋은 **여기서 태어난다** (#97).
@@ -56,7 +56,8 @@ export type HostAppContext = {
 }
 
 export type HostAppModule = {
-  id: string
+  /** UI 절반과 같은 열린 문자열 (M4 P-1) — 외부 앱도 같은 명부에 서야 한다 */
+  id: AppId
   tools?: {
     /** 어느 묶음이 이 도구들을 보는가 — 워커는 어떤 경우에도 아니다 */
     profiles: readonly ToolProfile[]

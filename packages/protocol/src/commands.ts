@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { wireJoin } from './paths.js'
 import {
   AdapterCapabilities,
+  AppId,
   ApprovalDecision,
   ApprovalDetail,
   ApprovalScope,
@@ -253,7 +254,7 @@ export const SessionInfo = z.object({
    *
    * 앱이 스스로 적을 수 없다: 값은 도구를 부른 앱의 등록 id에서 온다.
    */
-  appId: z.string().nullable().default(null),
+  appId: AppId.nullable().default(null),
   /**
    * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위(보통).
    *
@@ -896,11 +897,11 @@ export const RpcMethods = {
    * 문서의 의미는 앱만 알고, 코어·프로토콜은 운반만 한다.
    */
   'apps.state': {
-    params: z.object({ appId: z.string() }),
+    params: z.object({ appId: AppId }),
     result: z.object({ doc: z.unknown().nullable(), enabled: z.boolean() }),
   },
   'apps.setState': {
-    params: z.object({ appId: z.string(), doc: z.unknown() }),
+    params: z.object({ appId: AppId, doc: z.unknown() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -908,11 +909,11 @@ export const RpcMethods = {
    * 프로필 판정 대신 "그 앱의 도구인가"만 본다. caller.sessionId=null이 곧 사람이다.
    */
   'apps.invoke': {
-    params: z.object({ appId: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) }),
+    params: z.object({ appId: AppId, name: z.string(), args: z.record(z.string(), z.unknown()) }),
     result: z.object({ text: z.string(), isError: z.boolean().optional() }),
   },
   'apps.setEnabled': {
-    params: z.object({ appId: z.string(), enabled: z.boolean() }),
+    params: z.object({ appId: AppId, enabled: z.boolean() }),
     result: z.object({ ok: z.literal(true) }),
   },
   'orchestrator.tools': {
