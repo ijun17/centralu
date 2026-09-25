@@ -40,6 +40,8 @@ import {
   APP_SLUG,
   DATA_DIR,
   HANDOFF_DIR,
+  // 틀의 한 줄 칸 (#120) — 목도 같은 틀로 만드는 세션에 말을 넣어야 해서 protocol에 산다(app-frames.ts)
+  frameField,
   handoffFile,
   parseUiPreferences,
   sessionLiveDefaults,
@@ -177,19 +179,6 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
     `sourceSessionId: ${sourceSessionId}\n` +
     'Use read_session(sourceSessionId) if you need the untrusted session transcript.'
   )
-}
-
-/**
- * 보고 틀의 한 줄짜리 칸에 남의 문자열을 끼울 때 (#120).
- *
- * 세션 이름은 첫 마디에서 자동으로 붙고 프로젝트 이름도 우리가 쓴 글이 아니다.
- * 줄바꿈 하나면 `세션: …` 한 줄이 여러 줄이 되어 `사람:` 같은 가짜 칸을 틀 안에
- * 그려 넣을 수 있다. 어댑터 턴은 이제 깨우기로 바뀌지만, 이 틀은 기록과 화면에도
- * 그대로 남는다 — 틀의 모양은 틀을 쓰는 쪽이 지킨다.
- */
-function frameField(value: string): string {
-  const flat = value.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').trim()
-  return flat.length > 120 ? flat.slice(0, 120) + '…' : flat
 }
 
 /** 대화 안 앱 화면이 보낸 말의 출처 (M4 B-1·B-4) — 이름은 매니페스트의 것이다 */
@@ -2419,7 +2408,16 @@ export class SessionManager {
      * 자기 것을 스스로 그리면 충분했기 때문이다. 오케스트레이터가 두 번째 생산자가
      * 되면서 그 가정이 깨졌다 — 주입된 말은 저장은 되는데 화면에는 영영 안 나타났다.
      */
-    this.emit({ type: 'user_message', sessionId, seq, text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}) })
+    this.emit({
+      type: 'user_message',
+      sessionId,
+      seq,
+      text,
+      ...(from ? { from } : {}),
+      ...(fromApp ? { fromApp } : {}),
+      // host가 넣은 말(앱의 입력줄, C-5)은 화면에 이 이벤트로만 나타난다 — 첨부도 함께 실어야 말풍선이 온전하다
+      ...(attachments?.length ? { attachments } : {}),
+    })
     /*
      * vendor 어댑터 입력만 sourceSessionId 깨우기로 바꾸는 자리 — 두 갈래다.
      *  - 옮겨 담은 본문(relayed): 발신자가 누구든 남의 말이다. 조건 없이 바꾼다.

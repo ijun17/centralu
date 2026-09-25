@@ -136,6 +136,15 @@ export class ViewHost {
   }
 
   /**
+   * 열린 인스턴스의 앱과 화면 — 없으면(닫혔거나 모르는 id) null. 부르는 쪽이 댄 앱이 아니라 **인스턴스가** 정한 것이다:
+   * "이 화면에서 왔다"는 말(C-5의 머리말, B-4의 고정 화면 메시지)은 이것으로 대조한다(#93·#94).
+   */
+  describe(instanceId: string): { app: AppRef; uri: string } | null {
+    const inst = this.instances.get(instanceId)
+    return inst ? { app: { ...inst.app }, uri: inst.uri } : null
+  }
+
+  /**
    * UI가 화면을 띄울 주소 (RPC `apps.viewFrame`).
    *
    * **앱은 인스턴스가 정한다.** 부르는 쪽이 준 `app`은 인스턴스의 앱과 대조만 한다. 다르면

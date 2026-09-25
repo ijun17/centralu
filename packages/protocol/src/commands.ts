@@ -1160,6 +1160,23 @@ export const RpcMethods = {
     result: SessionInfo,
   },
   /**
+   * "여기를 고쳐 줘" (M4 C-5) — 앱 화면 아래 입력줄에서 사람이 쓴 말을 그 앱의 만드는 세션에 보낸다. 사람은 앱을 떠나지
+   * 않는다. host가 머리말을 붙인다: 어느 앱의 어느 화면에서 왔는지(`instanceId` — 사람이 보던 고정 화면. 그 앱의 열린
+   * 인스턴스여야 한다), 앱이 멈춰 있거나 마지막 실행이 실패했으면 그 사실(protocol의 `builderRequestFrame`). 쓴 것은
+   * 사람이라 본문은 지시로 간다. 첨부는 입력창과 같은 길로 먼저 저장한 것이다(`attachments.save`에 만드는 세션의 id).
+   * 만드는 세션이 없으면 거절한다 — 먼저 세운다(`apps.createBuilder`).
+   */
+  'apps.askBuilder': {
+    params: z.object({
+      appId: AppId,
+      projectId: z.string().nullable(),
+      text: z.string().max(64_000),
+      attachments: z.array(Attachment).optional(),
+      instanceId: z.string().optional(),
+    }),
+    result: z.object({ sessionId: SessionId }),
+  },
+  /**
    * 앱을 점검한다 (M4 C-3) — 만드는 세션의 `check`와 같은 판정이다. 지금 파일로 앱을 다시 띄우고(진행 중인 호출은
    * 기다린다), 도구 목록과 도구가 가리키는 화면을 실제로 읽어, 매니페스트·도구 이름·공개 범위·주석·home의 문제를
    * 돌려준다. `text`는 에이전트에게 보내도 되는 한 덩어리 글이다. 멈춘 앱도 다시 띄워 본다(다시 시작과 같다).

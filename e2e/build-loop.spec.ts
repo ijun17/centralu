@@ -216,3 +216,101 @@ test.describe('C-1: 새 앱', () => {
     expect(await createdApps(page)).toEqual([{ projectId: null, id: 'daily-log', name: 'Daily log', tool: 'claude' }])
   })
 })
+
+/** 만드는 세션이 선 앱 하나를 host가 만든 것처럼 — 목의 `apps.create`가 목록 방송과 session_created를 낸다 */
+async function madeApp(page: Page, pid: string | null, id: string, name: string): Promise<string> {
+  const made = await page.evaluate(
+    ({ p, i, n }) => (window as any).__mock.apps.create({ projectId: p, id: i, name: n, tool: 'claude' }),
+    { p: pid, i: id, n: name },
+  )
+  return made.builder.id as string
+}
+
+/** 사람이 스크린샷을 붙여 넣는다 — 진짜 클립보드 대신 붙여넣기 이벤트에 파일을 싣는다 */
+const pasteShot = (page: Page, testId: string, name = 'shot.png') =>
+  page.getByTestId(testId).evaluate((el, n) => {
+    const data = new DataTransfer()
+    data.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], n, { type: 'image/png' }))
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  }, name)
+
+test.describe('C-5: 여기를 고쳐 줘', () => {
+  test('앱 아래 입력줄의 말이 스크린샷과 함께 만드는 세션에 머리말을 달고 가고, 사람은 앱을 떠나지 않는다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    const builderId = await madeApp(page, pid, 'notes', 'Team notes')
+    // 마지막 실행이 실패했다 — 머리말이 그 사실을 싣는다
+    await page.evaluate(
+      ({ key, p }) =>
+        (window as any).__mock.appRuns.set(key, [
+          {
+            id: 'r1', projectId: p, appId: 'notes', tool: 'reset', callerKind: 'view', callerSessionId: null, parentRunId: null,
+            status: 'error', durationMs: 4, argsDigest: 'd', argsSummary: '{}', error: 'TypeError: count is undefined\n    at server.mjs:40', createdAt: Date.now(), failure: null,
+          },
+        ]),
+      { key: `${pid}/notes`, p: pid },
+    )
+    await page.getByTestId(`app-row-${pid}/notes`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const instanceId = await page.evaluate(() => (window as any).__store.getState().pinnedViews[0].instanceId as string)
+
+    const input = pinned.getByTestId('fix-bar-input')
+    await expect(input).toHaveAttribute('placeholder', 'Ask Team notes · builder to change this app…')
+    await pasteShot(page, 'fix-bar-input')
+    await expect(pinned.getByTestId('fix-bar-attachments')).toContainText('shot.png')
+    await input.fill('The reset button does nothing')
+    await input.press('Enter')
+
+    // host에 간 것: 이 앱, 사람이 쓴 그대로, 붙인 스크린샷(저장된 경로), 보던 화면의 인스턴스
+    const asks = await page.evaluate(() => (window as any).__mock.builderAsks)
+    expect(asks).toEqual([
+      {
+        appId: 'notes',
+        projectId: pid,
+        text: 'The reset button does nothing',
+        attachments: [{ kind: 'image', path: '/tmp/att/shot.png', name: 'shot.png', mime: 'image/png', bytes: expect.any(Number) }],
+        instanceId,
+      },
+    ])
+    await expect(input).toHaveValue('')
+    await expect(pinned.getByTestId('fix-bar-attachments')).toHaveCount(0)
+    await expect(pinned.getByTestId('fix-bar-sent')).toContainText('Sent to Team notes · builder.')
+    // 사람은 앱을 떠나지 않았다 — 같은 화면, 같은 인스턴스
+    expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('app')
+    await expect(pinned).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__store.getState().pinnedViews[0].instanceId)).toBe(instanceId)
+
+    // 만드는 세션의 대화를 옆에 연다 — 머리말을 단 사람의 말과 스크린샷이 거기 있다
+    await pinned.getByTestId('fix-bar-show-builder').click()
+    const pane = pinned.getByTestId('builder-pane')
+    await expect(pinned.getByTestId('pinned-builder-toggle')).toHaveAttribute('aria-pressed', 'true')
+    await expect(pane.getByTestId('session-name')).toHaveText('Team notes · builder')
+    const said = pane.getByTestId('msg-user').filter({ hasText: 'The reset button does nothing' })
+    await expect(said).toContainText(
+      '[Centralu] The person wrote this in the app "Team notes" (app-notes) that you build, looking at its screen ui://notes/main (tool "show"). ' +
+        'Its latest run, reset from its view, failed: TypeError: count is undefined.\nThe reset button does nothing',
+    )
+    await expect(said.getByTestId('msg-user-attachment')).toContainText('shot.png')
+    expect(await page.evaluate((id) => (window as any).__store.getState().sessions[id].state, builderId)).toBe('working')
+    // 판은 닫을 수 있고, 닫아도 화면은 그대로다
+    await pinned.getByTestId('pinned-builder-toggle').click()
+    await expect(pane).toHaveCount(0)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  })
+
+  test('만드는 세션이 없는 앱은 입력줄 대신 그 사실과 세우는 단추를 두고, 세우면 입력줄이 선다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { name: 'Slider' })])
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect(pinned.getByTestId('fix-bar-no-builder')).toContainText('Slider has no builder session')
+    await expect(pinned.getByTestId('fix-bar-input')).toHaveCount(0)
+    await expect(pinned.getByTestId('pinned-builder-toggle')).toHaveCount(0)
+
+    await pinned.getByTestId('fix-bar-start-builder').click()
+    await expect(pinned.getByTestId('fix-bar-input')).toBeVisible()
+    await expect(pinned.getByTestId('pinned-builder-toggle')).toBeVisible()
+    expect(await sessionsOfApp(page, 'slider')).toEqual([{ id: expect.any(String), name: 'Slider · builder', tool: 'claude', projectId: pid }])
+  })
+})

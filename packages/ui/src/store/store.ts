@@ -4258,7 +4258,15 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (idx === -1)
         return [
           ...items,
-          { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}), ...(e.fromApp ? { fromApp: e.fromApp } : {}) },
+          {
+            kind: 'user',
+            seq: ++chatSeq,
+            text: e.text,
+            ...(e.from ? { from: e.from } : {}),
+            ...(e.fromApp ? { fromApp: e.fromApp } : {}),
+            // host가 넣은 말의 첨부 (M4 C-5) — 경로와 이름뿐이다. 이미지 바이트는 기록을 다시 읽을 때 온다
+            ...(e.attachments?.length ? { attachments: e.attachments } : {}),
+          },
         ]
       return items.map((it, i) =>
         i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it,

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AppId,
   ApprovalDecision,
+  Attachment,
   ApprovalDetail,
   ProtocolError,
   Question,
@@ -134,6 +135,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      * (#120과 같은 규칙: 남의 글은 옮기는 자리에서 표시한다). 세션이 아니라서 `from`과 따로 둔다.
      */
     fromApp: z.object({ appId: z.string(), projectId: z.string().nullable(), name: z.string() }).optional(),
+    /*
+     * 함께 실어 보낸 첨부 (M4 C-5). UI가 보낸 말은 화면이 이미 첨부째 그려 두어서 필요 없었다. 앱 화면 아래 입력줄의
+     * 말처럼 host가 넣은 말은 이 이벤트가 화면에 나타나는 유일한 길이라, 없으면 붙여 넣은 스크린샷이 기록을 다시 읽기
+     * 전까지 말풍선에서 빠진다. 경로와 이름만 — 이미지 바이트는 기록을 읽을 때 host가 다시 싣는다.
+     */
+    attachments: z.array(Attachment).optional(),
   }),
   z.object({ ...base, ...persistedSeq, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
   z.object({

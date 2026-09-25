@@ -5,6 +5,9 @@ import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-fram
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { RunsPanel } from './RunsPanel.jsx'
 import { MessageAsk, messageText, type MessageAskState } from './MessageAsk.jsx'
+import { BuilderPane } from './BuilderPane.jsx'
+import { FixBar } from './FixBar.jsx'
+import { useAppBuilder } from './useAppBuilder.js'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -44,6 +47,9 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
   // 기록 판(B-7)은 화면마다 따로 연다 — 한 앱의 기록을 보던 사람이 다른 앱으로 가면 그 앱의 화면이 먼저다
   const [runsOpen, setRunsOpen] = useState(false)
+  // 만드는 세션 (C-5) — 아래 입력줄이 말을 보내는 곳이고, 그 대화를 화면 옆에 여닫는다(BuilderPane)
+  const builder = useAppBuilder(pv.projectId, pv.appId)
+  const [builderOpen, setBuilderOpen] = useState(false)
 
   /*
    * 화면의 `ui/message` (B-4) — 어느 세션으로 보낼지 묻는다(MessageAsk). 사람이 고르기 전에는 아무것도
@@ -157,9 +163,23 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
             {app.status.label}
           </span>
         )}
+        {builder.id && (
+          <button
+            type="button"
+            className={`ml-auto rounded px-2 py-0.5 text-[11px] transition-colors ${
+              builderOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
+            }`}
+            aria-pressed={builderOpen}
+            onClick={() => setBuilderOpen((v) => !v)}
+            data-testid="pinned-builder-toggle"
+            title="The builder session's conversation, beside this app"
+          >
+            Builder
+          </button>
+        )}
         <button
           type="button"
-          className={`ml-auto rounded px-2 py-0.5 text-[11px] transition-colors ${
+          className={`${builder.id ? '' : 'ml-auto '}rounded px-2 py-0.5 text-[11px] transition-colors ${
             runsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
           }`}
           aria-pressed={runsOpen}
@@ -186,8 +206,11 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
           <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
+          <FixBar app={app} pv={pv} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
         </div>
+        {/* 보일 때만 그린다 — 숨은 동안 같은 세션을 포커스 뷰가 그리면 한 대화가 두 칸에 선다 */}
+        {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
         {runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
       </div>
     </section>
