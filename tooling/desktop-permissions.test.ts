@@ -181,3 +181,67 @@ describe('창 권한의 경계 (S-2)', () => {
     expect(CALLER_DIRS.map((d) => d.replace(/\/src$/, '')).sort()).toEqual(users.sort())
   })
 })
+
+/**
+ * 플러그인이 여는 권한 (#186, M4 E-4). 앱 명령의 권한은 위에서 화면이 부르는 명령과 맞춰 본다. 플러그인의 권한은 그렇게 맞춰 볼
+ * 호출 자리가 없어서(웹뷰의 `@tauri-apps/plugin-*`가 부른다), 준 것을 여기 **이름으로** 적는다. 플러그인을 더하거나 권한을 넓히는
+ * 일은 이 목록을 고치는 일이다 — 딥링크 플러그인처럼 웹뷰에 스킴 등록 같은 명령을 여는 것이 조용히 들어오지 않게.
+ */
+describe('플러그인 권한 (#186)', () => {
+  it('준 플러그인 권한은 이 목록뿐이다', () => {
+    const granted = capabilities()
+      .flatMap(([, c]) => c.permissions.map(idOf))
+      .filter((id) => !isAppPermission(id))
+      .sort()
+    expect(granted).toEqual(
+      [
+        'core:default',
+        'core:window:allow-start-dragging',
+        'core:window:allow-set-focus',
+        'core:window:allow-show',
+        'core:window:allow-unminimize',
+        'notification:default',
+        'global-shortcut:allow-register',
+        'global-shortcut:allow-unregister',
+        'global-shortcut:allow-is-registered',
+        'dialog:default',
+        'opener:default',
+      ].sort(),
+    )
+  })
+})
+
+/**
+ * 앱 링크 `centralu://app?url=…` (M4 E-4). 스킴은 Info.plist에 하나 등록하고, 링크는 OS의 열기 이벤트(`RunEvent::Opened`)로
+ * 받는다. 딥링크 플러그인을 쓰지 않는다: 같은 이벤트를 받는 데 플러그인은 웹뷰에 명령을 더 연다. 웹뷰에 더한 것은 쌓인 링크를
+ * 꺼내는 앱 명령 하나(`take_app_links`)이고, 그 권한은 위의 시험들이 다른 명령과 똑같이 맞춰 본다.
+ */
+describe('앱 링크 (M4 E-4)', () => {
+  it('등록한 URL 스킴은 centralu 하나뿐이다', () => {
+    const plist = read(`${TAURI}/Info.plist`).replace(/<!--[\s\S]*?-->/g, '')
+    const lists = [...plist.matchAll(/<key>CFBundleURLSchemes<\/key>\s*<array>([\s\S]*?)<\/array>/g)]
+    const schemes = lists.flatMap((m) => [...m[1]!.matchAll(/<string>([^<]*)<\/string>/g)].map((s) => s[1]))
+    expect(schemes).toEqual(['centralu'])
+    // 설정 파일에서 따로 plist를 가리키면 이 파일이 아닌 것이 합쳐진다 — 이 시험이 보는 것이 번들에 들어가는 것이어야 한다
+    for (const conf of ['tauri.conf.json', 'tauri.linux.conf.json']) {
+      const c = JSON.parse(read(`${TAURI}/${conf}`)) as { bundle?: { macOS?: { infoPlist?: unknown } }; plugins?: Record<string, unknown> }
+      expect(c.bundle?.macOS?.infoPlist, conf).toBeUndefined()
+      expect(c.plugins?.['deep-link'], conf).toBeUndefined()
+    }
+  })
+
+  it('딥링크 플러그인이 없다 — 의존에도, 권한에도', () => {
+    expect(stripRustComments(read(`${TAURI}/Cargo.toml`).replace(/#[^\n]*/g, ''))).not.toMatch(/tauri-plugin-deep-link/)
+    for (const dir of ['apps/desktop', 'packages/platform']) {
+      expect(read(`${dir}/package.json`), dir).not.toMatch(/plugin-deep-link/)
+    }
+    for (const [f, c] of capabilities()) expect(c.permissions.map(idOf).filter((id) => id.startsWith('deep-link:')), f).toEqual([])
+  })
+
+  it('링크를 꺼내는 명령이 등록되어 있고, 화면이 그것을 부르며, 권한은 창 main에만 있다', () => {
+    expect(registered()).toContain('take_app_links')
+    expect(calledFromUi()).toContain('take_app_links')
+    const granting = capabilities().filter(([, c]) => c.permissions.map(idOf).includes('allow-take-app-links'))
+    expect(granting.map(([, c]) => c.windows)).toEqual([['main']])
+  })
+})

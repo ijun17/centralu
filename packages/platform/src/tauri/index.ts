@@ -137,6 +137,27 @@ class TauriSystemPort implements SystemPort {
   async startWindowDrag(): Promise<void> {
     await getCurrentWindow().startDragging()
   }
+
+  /**
+   * 앱 링크 (M4 E-4). 셸이 OS의 열기 이벤트로 받은 링크를 쌓아 두고 `app-link`로 부른다 — 그 부름은 "꺼내 가라"일 뿐이고 링크는
+   * `take_app_links`로 꺼낸다(꺼낸 것은 셸에서 비워진다). 구독하자마자 한 번 꺼낸다: 링크로 앱이 켜졌으면 웹뷰가 뜨기 전에 온 링크가
+   * 이미 쌓여 있다.
+   */
+  onAppLink(cb: (link: string) => void): () => void {
+    let alive = true
+    const drain = () =>
+      void invoke<string[]>('take_app_links')
+        .then((links) => {
+          if (alive) for (const l of links) cb(l)
+        })
+        .catch(() => {})
+    const un = listen('app-link', drain)
+    drain()
+    return () => {
+      alive = false
+      void un.then((f) => f())
+    }
+  }
 }
 
 /**

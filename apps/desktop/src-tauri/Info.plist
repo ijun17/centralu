@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  앱 링크 (M4 E-4) — `centralu://app?url=…`를 이 앱이 받는다. Tauri 번들러가 이 파일을 번들의 Info.plist에 합친다
+  (tauri-utils `MacConfig::info_plist`: "Tauri also looks for a Info.plist file in the same directory as the Tauri configuration file").
+  스킴은 하나뿐이다. 링크는 OS가 Apple Event로 건네고 lib.rs의 `RunEvent::Opened`가 받는다 — 딥링크 플러그인을 쓰지 않는다.
+  tooling/desktop-permissions.test.ts가 이 목록을 지킨다.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>app.centralu</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>centralu</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

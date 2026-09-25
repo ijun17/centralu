@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { nextWaitingSession } from '@cc/core'
+import { parseAppLink } from '@cc/protocol'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
 import { useShortcut } from './shortcut.js'
@@ -44,6 +45,21 @@ export function App({ platform }: { platform: Platform }) {
   useEffect(() => {
     void attach(platform)
   }, [platform, attach])
+
+  /*
+   * 앱 링크 (M4 E-4) — OS가 건넨 `centralu://app?url=…`. 모양이 맞으면 가져오기 창을 그 출처로 연다. 창은 사람이 Review를 누르기 전에는
+   * 아무것도 읽거나 내려받지 않는다: 링크를 누른 것은 사람이지만 링크를 지은 것은 남이다. 모양이 틀린 링크는 무엇이 틀렸는지 한 줄로
+   * 말하고 아무것도 열지 않는다.
+   */
+  useEffect(
+    () =>
+      platform.system.onAppLink((link) => {
+        const parsed = parseAppLink(link)
+        if (parsed.ok) useStore.getState().openImport(parsed.source, true)
+        else useStore.getState().setToast(`Ignored a link Centralu cannot open: ${parsed.error}`)
+      }),
+    [platform],
+  )
 
   /*
    * 전체 글자 크기 (설정 → Appearance, 5단계).

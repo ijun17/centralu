@@ -33,6 +33,7 @@ fn main() {
             "window_controls_inset",
             "shortcut_keys",
             "quit_app",
+            "take_app_links",
         ]),
     ))
     .expect("failed to run tauri-build");

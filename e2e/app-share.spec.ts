@@ -345,3 +345,41 @@ test.describe('판 (E-1)', () => {
     await expect(pinned.getByTestId('version-restore')).toHaveCount(0)
   })
 })
+
+test.describe('앱 링크 (E-4)', () => {
+  const openLink = (page: Page, link: string) => page.evaluate((l) => (window as any).__mock.openAppLink(l), link)
+
+  test('OS가 건넨 centralu://app?url= 링크는 가져오기 창을 그 출처로 열고, Review를 누르기 전에는 host에 아무것도 가지 않는다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    const source = 'https://example.com/team/notes.zip'
+    await page.evaluate(([s, r]) => (window as any).__mock.importSources.set(s, r), [source, review({ source })] as const)
+    await openLink(page, `centralu://app?url=${encodeURIComponent(source)}`)
+
+    const dialog = page.getByTestId('import-app-dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByTestId('import-from-link')).toContainText('Nothing is read or downloaded until you choose Review')
+    await expect(dialog.getByTestId('import-source')).toHaveValue(source)
+    // 링크가 창을 열었을 뿐이다 — 내려받기(준비)는 사람이 누른 뒤에만
+    await page.waitForTimeout(300)
+    expect(await mockList<string[]>(page, 'importPrepares')).toEqual([])
+
+    await dialog.getByTestId('import-review').click()
+    await expect(dialog.getByTestId('review-source')).toHaveText(`From ${source}`)
+    expect(await mockList<string[]>(page, 'importPrepares')).toEqual([source])
+    await dialog.getByTestId('import-enable').click()
+    await expect(page.getByTestId('pinned-app-_user/notes')).toBeVisible()
+  })
+
+  test('모양이 틀린 링크는 창을 열지 않고 이유를 한 줄로 말한다 — http·경로·다른 자리', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await openLink(page, `centralu://app?url=${encodeURIComponent('http://example.com/a.zip')}`)
+    await expect(page.getByTestId('toast')).toHaveText(
+      'Ignored a link Centralu cannot open: Only https links and files on this machine can be imported: http://example.com/a.zip',
+    )
+    await expect(page.getByTestId('import-app-dialog')).toHaveCount(0)
+    await openLink(page, 'centralu://settings?url=https://example.com/a.zip')
+    await expect(page.getByTestId('toast')).toHaveText('Ignored a link Centralu cannot open: Centralu links open apps: centralu://app?url=…')
+    await expect(page.getByTestId('import-app-dialog')).toHaveCount(0)
+    expect(await mockList<string[]>(page, 'importPrepares')).toEqual([])
+  })
+})
