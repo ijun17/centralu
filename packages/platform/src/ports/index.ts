@@ -530,8 +530,9 @@ export interface AppsPort {
    */
   viewFrame(appId: AppId, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }): Promise<AppViewFrame>
   /**
-   * 화면이 부르는 앱 도구 (브리지의 `oncalltool`). 답은 MCP 결과 그대로라 화면에 바로 돌려준다.
-   * 공개 범위(`app`만)와 기록은 host의 중개가 맡는다.
+   * 화면이 부르는 앱 도구 (브리지의 `oncalltool`). 답은 앱이 준 MCP 결과 그대로다
+   * (`structuredContent`·`isError`·`_meta` 포함). 앱에 닿지 못했으면 host가 적은 이유를 담은
+   * `isError` 결과다. 공개 범위(`app`만)와 기록은 host의 중개가 맡는다.
    */
   callTool(appId: AppId, tool: string, args: Record<string, unknown>, from?: AppCallOrigin): Promise<AppToolResult>
   /** 화면이 자기 앱의 리소스를 읽는다 (브리지의 `onreadresource`) */

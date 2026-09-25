@@ -8,11 +8,14 @@
  *         "몇 번 떴나", "어떤 메서드가 왔나", "어떤 환경을 받았나"를 센다 — host의 말이
  *         아니라 앱이 실제로 겪은 것을 본다.
  * --mode  normal | crash-on-start | ignore-eof | grandchild | hold-fd3 | flood-stderr
- *         | secret-to-stderr | bad-tool-name | mediation
+ *         | secret-to-stderr | bad-tool-name | mediation | view
  *
  * `mediation`은 A-4를 위한 도구 묶음을 연다: 공개 범위가 다른 도구들, 받은 실행 id를 돌려주는
  * 도구, 취소를 기다리는 도구, 실패·죽는 도구, 그리고 fd 3의 중개를 부르는 도구. 중개 클라이언트는
  * 템플릿 도우미의 모양 그대로다(S-5): fd 3 소켓을 unref하고, 받은 실행 id를 되돌려 붙인다.
+ *
+ * `view`는 화면(B-3)이 받는 모양을 시험한다: 상태를 서버에 두는 앱(간격 하나), 결과의
+ * `structuredContent`·`isError`·`_meta`, CSP를 선언한 `ui://` 문서.
  */
 import { appendFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -151,6 +154,37 @@ serveStdio(() => {
     )
     server.registerResource('view', 'ui://fixture/view', { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({
       contents: [{ uri: uri.href, mimeType: 'text/html;profile=mcp-app', text: '<p>fixture view</p>' }],
+    }))
+  }
+  if (MODE === 'view') {
+    let interval = 5
+    const state = () => ({
+      content: [{ type: 'text', text: `interval ${interval}` }],
+      structuredContent: { interval },
+      _meta: { 'fixture/served-by': process.pid },
+    })
+    server.registerTool('get_interval', { description: 'Reads the interval' }, async () => state())
+    server.registerTool(
+      'set_interval',
+      { description: 'Sets the interval', inputSchema: z.object({ seconds: z.number() }) },
+      async ({ seconds }) => {
+        if (seconds <= 0) {
+          return { content: [{ type: 'text', text: 'seconds must be positive' }], structuredContent: { field: 'seconds', got: seconds }, isError: true }
+        }
+        interval = seconds
+        return state()
+      },
+    )
+    server.registerTool('agent_only', { description: 'Only for agents', _meta: { ui: { visibility: ['model'] } } }, async () => say('agent_only ran'))
+    server.registerResource('main', 'ui://fixture/main', { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: 'text/html;profile=mcp-app',
+          text: `<!doctype html><p id="served">view from app process ${process.pid}</p>`,
+          _meta: { ui: { csp: { connectDomains: ['https://api.fixture.test'] } } },
+        },
+      ],
     }))
   }
   if (MODE === 'bad-tool-name') {

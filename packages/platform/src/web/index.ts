@@ -9,7 +9,17 @@ import type {
   QuestionAnswer,
   UpdateSettingsParams,
 } from '@cc/protocol'
-import type { AgentPort, AlertKind, ConnectionState, Platform, ProjectPort, SystemPort, Unsubscribe, WorkspaceSnapshot } from '../ports/index.js'
+import type {
+  AgentPort,
+  AlertKind,
+  AppToolResult,
+  ConnectionState,
+  Platform,
+  ProjectPort,
+  SystemPort,
+  Unsubscribe,
+  WorkspaceSnapshot,
+} from '../ports/index.js'
 import { RpcClient } from './rpc-client.js'
 
 /**
@@ -248,6 +258,20 @@ class WebSystemPort implements SystemPort {
 const NO_DESKTOP_TRASH = 'A browser has no trash — use the desktop app to delete files'
 const NO_DESKTOP_REVEAL = 'A browser cannot open a file manager — use the desktop app'
 
+/**
+ * `apps.invoke`의 답 → 화면이 받을 MCP 결과.
+ *
+ * 앱이 답했으면 그 답을 **그대로** 준다. `structuredContent`, `isError`, `_meta`까지 화면의 것이다
+ * (규격: 화면은 도구 결과를 받는다). 글로 줄여 감싸면 상태를 `structuredContent`로 읽는 화면이
+ * 빈손이 된다. 앱에 닿지 못한 호출(host의 거절, 뜨지 못함, 취소)에는 앱의 답이 없다. 그때는
+ * host가 적은 이유를 실패한 도구 결과로 준다. 화면의 SDK는 던진 오류가 아니라 결과로 받는다.
+ */
+function viewToolResult(r: { text: string; isError?: boolean; result?: unknown }): AppToolResult {
+  const raw = r.result
+  if (raw && typeof raw === 'object' && Array.isArray((raw as { content?: unknown }).content)) return raw as AppToolResult
+  return { content: [{ type: 'text', text: r.text }], isError: true }
+}
+
 export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const url = new URL(opts.hostUrl ?? 'ws://127.0.0.1:5175')
   const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
@@ -276,16 +300,13 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       /*
         화면의 도구 호출은 사람의 호출과 **같은 문**(`apps.invoke`)으로 간다. 내장 앱과 외부
         앱이 한 경로를 지나고, 공개 범위와 기록은 host의 중개가 한 번에 맡는다(플랜 "호출
-        경로는 하나다", 런타임 브랜치와 합의).
+        경로는 하나다").
 
-        이 브랜치의 `apps.invoke`는 아직 글자(`text`)만 돌려주므로 MCP 결과로 감싼다. 런타임
-        브랜치는 `projectId`를 받고 원래 결과(`result`)를 함께 돌려준다. 합칠 때 여기서
-        `projectId`를 넘기고 `result`를 먼저 쓴다.
+        `projectId`는 늘 싣는다(사용자 폴더 앱이면 null). 싣지 않으면 host는 이것을 사람이 내장
+        앱을 부른 것으로 읽는다. 화면은 외부 앱의 코드라서 그 문으로 들어가면 안 된다.
       */
-      callTool: async (appId, tool, args) => {
-        const r = await rpc.call('apps.invoke', { appId, name: tool, args })
-        return { content: [{ type: 'text', text: r.text }], ...(r.isError ? { isError: true } : {}) }
-      },
+      callTool: async (appId, tool, args, from) =>
+        viewToolResult(await rpc.call('apps.invoke', { appId, name: tool, args, projectId: from?.projectId ?? null })),
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
     },

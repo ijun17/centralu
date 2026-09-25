@@ -80,6 +80,25 @@ describe('매니페스트', () => {
     }
   })
 
+  it('view.origin은 opaque가 기본이고, app을 요청할 수 있으며, 모르는 값은 거절한다', () => {
+    const none = parse({})
+    expect(none.ok && none.manifest.view).toBeUndefined()
+    const empty = parse({ view: {} })
+    expect(empty.ok && empty.manifest.view).toEqual({ origin: 'opaque' })
+    const app = parse({ view: { origin: 'app' } })
+    expect(app.ok && app.manifest.view).toEqual({ origin: 'app' })
+    // 오타는 기본값으로 조용히 읽히지 않는다 — 앱이 서지 않고 이유가 칸 이름과 함께 나온다
+    for (const origin of ['per-app', 'App', true, null]) {
+      const r = parse({ view: { origin } })
+      expect(r.ok, String(origin)).toBe(false)
+      if (!r.ok) expect(r.error).toMatch(/^view\.origin: /)
+    }
+    // 모르는 필드는 여느 칸처럼 경고만
+    const extra = parse({ view: { origin: 'app', pinned: true } })
+    expect(extra.ok).toBe(true)
+    expect(extra.warnings).toEqual(['모르는 필드는 무시합니다: view.pinned'])
+  })
+
   it('uses.apps의 id도 같은 이름 규칙을 따른다', () => {
     expect(parse({ uses: { apps: ['other-app'] } }).ok).toBe(true)
     expect(parse({ uses: { apps: ['Other_App'] } }).ok).toBe(false)

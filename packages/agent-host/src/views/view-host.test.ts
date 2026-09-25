@@ -1,15 +1,16 @@
 /**
  * 앱 화면 호스팅 (M4 B-3a) — 진짜 HostServer 위에서.
  *
- * 앱 런타임은 이 브랜치에 없으므로 `ViewSource`는 시험 대역이다. 대역이 돌려주는 것은 MCP
- * `resources/read`의 답 모양 그대로다. 브라우저에서 실제로 뜨는지는 e2e(app-frame.spec.ts)가 본다.
+ * 여기서 `ViewSource`는 시험 대역이다. 대역이 돌려주는 것은 MCP `resources/read`의 답 모양
+ * 그대로다. 진짜 런타임과 앱 프로세스를 맞댄 이음새는 `app-views.test.ts`가 보고, 브라우저에서
+ * 실제로 뜨는지는 e2e(app-frame.spec.ts)가 본다.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { request } from 'node:http'
 import { HostServer } from '../transport/server.js'
 import { OriginPorts, type PortBook } from './origin-ports.js'
 import { PROXY_SCRIPT, PROXY_SCRIPT_HASH } from './proxy-page.js'
-import { ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
+import { MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, type ViewSource } from './view-host.js'
 import { VIEW_MIME_TYPE } from './view-document.js'
 import { createHash } from 'node:crypto'
 
@@ -249,5 +250,57 @@ describe('ViewHost — 앱별 출처', () => {
     const i2 = second.views.open(NOTES, 'ui://notes/board')
     const cfg2 = pageConfig((await get((await second.views.frame({ app: NOTES, instanceId: i2.instanceId, hostOrigin: HOST_ORIGIN })).url)).body)
     expect(cfg2.appOrigin).toBe(cfg1.appOrigin)
+  })
+})
+
+describe('ViewHost — 열린 화면은 앱을 붙든다', () => {
+  /**
+   * 붙든 수를 앱마다 센다. 놓는 함수는 불릴 때마다 센다 — 런타임의 retainView는 두 번째 놓기를
+   * 무시하지만, 한 번만 놓는 것은 ViewHost 자신이 지켜야 한다(다른 ViewSource도 올 수 있다).
+   */
+  function holdingSource() {
+    const held = new Map<string, number>()
+    const bump = (app: AppRef, by: number) => held.set(ViewHost.originKey(app), (held.get(ViewHost.originKey(app)) ?? 0) + by)
+    const source: ViewSource = {
+      readResource: async (_a, uri) => ({ contents: [{ uri, mimeType: VIEW_MIME_TYPE, text: 'x' }] }),
+      retain(app) {
+        if (app.appId === 'ghost') throw new Error('그런 앱이 없습니다')
+        bump(app, 1)
+        return () => void bump(app, -1)
+      },
+    }
+    return { source, held }
+  }
+
+  it('열면 붙들고, 닫으면 놓는다 — 두 번 닫아도 한 번만 놓는다', async () => {
+    const { source, held } = holdingSource()
+    const { views: v } = await start(source)
+    const a = v.open(NOTES, 'ui://notes/board')
+    const b = v.open(NOTES, 'ui://notes/board')
+    expect(held.get('p1/notes')).toBe(2)
+    v.close(a.instanceId)
+    v.close(a.instanceId)
+    expect(held.get('p1/notes')).toBe(1)
+    v.close(b.instanceId)
+    expect(held.get('p1/notes')).toBe(0)
+  })
+
+  it('없는 앱이면 열리지 않고 인스턴스도 생기지 않는다', async () => {
+    const { source } = holdingSource()
+    const { views: v } = await start(source)
+    expect(() => v.open({ projectId: 'p1', appId: 'ghost' }, 'ui://ghost/main')).toThrow(/그런 앱이 없습니다/)
+    expect((v as unknown as { instances: Map<string, unknown> }).instances.size).toBe(0)
+  })
+
+  it('상한에 밀려난 화면과 끝날 때 남은 화면도 놓는다', async () => {
+    const { source, held } = holdingSource()
+    const { views: v } = await start(source)
+    v.open(OTHER, 'ui://other/main')
+    for (let i = 0; i < MAX_INSTANCES; i++) v.open(NOTES, 'ui://notes/board')
+    // 가장 오래된 것(other)이 밀려났다
+    expect(held.get('p1/other')).toBe(0)
+    expect(held.get('p1/notes')).toBe(MAX_INSTANCES)
+    await v.dispose()
+    expect(held.get('p1/notes')).toBe(0)
   })
 })

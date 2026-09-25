@@ -4,7 +4,7 @@ import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { messagesToChat, useStore } from './store.js'
+import { externalAppKey, messagesToChat, useStore } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -57,6 +57,7 @@ beforeEach(() => {
     toast: null,
     commandRuns: {},
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
+    externalAppChanges: {},
   })
 })
 
@@ -1012,6 +1013,29 @@ describe('앱 상태 (#81)', () => {
     await useStore.getState().setAppEnabled('control', false)
     expect(useStore.getState().apps['control']?.enabled).toBe(false)
     expect(mock.appDisabled.has('control')).toBe(true)
+  })
+})
+
+/**
+ * 외부 앱의 "바뀌었다" (M4 B-5): 스토어는 (프로젝트, 앱)마다 세기만 한다. 다시 읽는 것은 열린
+ * 화면이 자기 상태 도구로 한다. 그래서 내장 앱처럼 apps.state를 부르지 않는다.
+ */
+describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
+  it('방송이 그 (프로젝트, 앱)의 카운터만 올리고, 내장 앱의 상태를 다시 읽지 않는다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const reads = vi.spyOn(mock.apps, 'state')
+
+    mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
+    mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
+    mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: null } as NormalizedEvent)
+    await vi.waitFor(() => expect(useStore.getState().externalAppChanges[externalAppKey(null, 'notes')]).toBe(1))
+
+    expect(useStore.getState().externalAppChanges).toEqual({ 'p1/notes': 2, '_user/notes': 1 })
+    // 두 프로젝트의 notes는 다른 앱이다 — 열쇠가 섞이지 않는다
+    expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
+    expect(reads).not.toHaveBeenCalled()
+    expect(useStore.getState().apps['notes']).toBeUndefined()
   })
 })
 

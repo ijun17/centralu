@@ -589,10 +589,15 @@ export class MockPlatform implements Platform {
       if (!this.viewFrameProvider) throw new Error('This app view is not open')
       return this.viewFrameProvider(appId, instanceId, opts)
     },
-    /** 화면의 도구 호출 — 적어 두고, 시험이 꽂은 답을 준다. 기본 답은 부른 것을 되돌려 준다 */
+    /**
+     * 화면의 도구 호출 — 적어 두고, 시험이 꽂은 답을 준다. 기본 답은 부른 것을 되돌려 준다.
+     * web과 같은 약속을 지킨다. projectId는 늘 실리고(없으면 null, 내장 앱의 문으로 새지 않는다),
+     * 답은 앱이 준 MCP 결과 모양 그대로다(`apps.invoke`의 `result`).
+     */
     callTool: async (appId: string, tool: string, args: Record<string, unknown>, from?: AppCallOrigin) => {
-      this.appToolCalls.push({ appId, tool, args, from: from ?? {} })
-      if (this.appToolHandler) return this.appToolHandler(appId, tool, args, from ?? {})
+      const origin: AppCallOrigin = { ...from, projectId: from?.projectId ?? null }
+      this.appToolCalls.push({ appId, tool, args, from: origin })
+      if (this.appToolHandler) return this.appToolHandler(appId, tool, args, origin)
       return { content: [{ type: 'text', text: `mock: ${tool}` }], structuredContent: { appId, tool, args } }
     },
     readResource: async (appId: string, uri: string, from?: AppCallOrigin) => {

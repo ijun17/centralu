@@ -81,6 +81,15 @@ const secretNameField = z.string().superRefine((name, ctx) => {
 const CSP_KEYS = ['connectDomains', 'resourceDomains', 'frameDomains', 'baseUriDomains'] as const
 const cspField = z.object(Object.fromEntries(CSP_KEYS.map((k) => [k, z.array(z.string()).optional()])))
 
+/**
+ * 화면의 출처 방식 (B-3, 스파이크 S-1·S-8). `opaque`가 기본이다 — 안쪽 프레임에 출처가 없어서
+ * 앱끼리 브라우저 저장소가 섞이지 않는다. `app`은 앱마다 고정된 포트의 진짜 출처를 달라는
+ * **요청**이다. 브라우저 저장소나 blob 워커가 없으면 깨지는 앱(공개 앱 86개 중 5개, 지도 타일을
+ * 못 받은 map-server)을 위한 문이다. 값은 ViewHost의 `OriginMode`와 같은 두 낱말이다.
+ */
+export const VIEW_ORIGINS = ['opaque', 'app'] as const
+const VIEW_KEYS = ['origin'] as const
+
 const USES_KEYS = ['agent', 'apps', 'host'] as const
 const SERVER_KEYS = ['command', 'args'] as const
 
@@ -123,6 +132,14 @@ const ManifestSchema = z.object({
   /** 이름만 적는다. 값은 사용자 기계에만 있다(런타임의 비밀 파일) */
   secrets: z.array(secretNameField).optional(),
   csp: cspField.optional(),
+  /**
+   * 화면을 어떻게 띄울지 (B-3). 없으면 불투명 출처다.
+   *
+   * 모르는 **값**은 거절한다(모르는 필드는 경고만 하는 것과 다르다). `"orgin": "app"` 같은 오타는
+   * 경고로 남지만, `"origin": "per-app"`을 조용히 기본값으로 읽으면 작성자는 저장소가 왜 안 되는지
+   * 알 길이 없다. 뜻을 모르는 값으로 앱을 띄우지 않는다는 manifestVersion의 규칙과 같은 쪽이다.
+   */
+  view: z.object({ origin: z.enum(VIEW_ORIGINS).default('opaque') }).optional(),
 })
 
 export type AppManifest = z.infer<typeof ManifestSchema>
@@ -170,6 +187,7 @@ function unknownFields(raw: Record<string, unknown>): string[] {
   check(raw.server, SERVER_KEYS, 'server.')
   check(raw.uses, USES_KEYS, 'uses.')
   check(raw.csp, CSP_KEYS, 'csp.')
+  check(raw.view, VIEW_KEYS, 'view.')
   return out
 }
 

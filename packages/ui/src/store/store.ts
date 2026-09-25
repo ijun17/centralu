@@ -153,6 +153,14 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
   return Math.min(max, Math.max(Math.round(minReal / zoom), Math.round(Math.min(px, available))))
 }
 
+/**
+ * 외부 앱 하나의 열쇠. 앱은 (프로젝트, id)로 하나다. 두 프로젝트의 `notes`는 다른 앱이다.
+ * `_user`는 사용자 폴더 앱이다. host의 범위 이름과 같고, 프로젝트 id(UUID)와 겹치지 않는다.
+ */
+export function externalAppKey(projectId: string | null | undefined, appId: string): string {
+  return `${projectId ?? '_user'}/${appId}`
+}
+
 /** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
 export function useTextZoom(): number {
   return TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
@@ -388,6 +396,13 @@ export type AppState = {
    * 항목은 앱의 useAppState가 처음 쓸 때(ensure) 또는 방송(app_state_changed)으로 생긴다.
    */
   apps: Record<AppId, { doc: unknown; enabled: boolean }>
+  /**
+   * 외부 앱마다 "상태가 바뀌었다"를 들은 횟수 (M4 B-5). 열쇠는 `externalAppKey`다. 값의 크기에는
+   * 뜻이 없고, **바뀌었다는 사실**만 뜻이 있다. 열린 AppFrame이 이 값을 `changeSignal`로 받아
+   * 화면에 `centralu/notifications/changed`를 보낸다. 앱이 목록에 없어도 센다. 스토어는 외부 앱
+   * 목록을 모르고, 목록을 기다리다 신호를 놓치는 쪽이 더 나쁘다.
+   */
+  externalAppChanges: Record<string, number>
   /** 앱 레일 슬롯의 폭 (#81) — 슬롯의 기하는 코어의 것이고(내용만 앱의 것), 보는 방식이라 워크스페이스에 실린다 */
   railWidth: number
   setRailWidth(px: number): void
@@ -1170,6 +1185,7 @@ export const useStore = create<AppState>((set, get) => ({
   worktreeProposals: [],
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
   apps: {} as Record<AppId, { doc: unknown; enabled: boolean }>,
+  externalAppChanges: {},
   railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
@@ -1546,6 +1562,17 @@ export const useStore = create<AppState>((set, get) => ({
     // 앱 문서가 바뀌었다 (#81) — 일부러 거친 이벤트라 무엇이 바뀌었는지는 다시 읽는다
     if (e.type === 'app_state_changed') {
       void get().refreshAppState(e.appId)
+      return
+    }
+
+    /*
+     * 외부 앱의 도구 호출이 끝났다 (M4 A-4 → B-5). 여기서는 다시 읽지 않는다. 외부 앱의 상태는
+     * 앱 프로세스에 살고, 다시 읽는 것은 열린 화면이 자기 상태 도구로 한다. 스토어는 세기만 하고,
+     * 그 앱의 열린 AppFrame들이 이 수의 변화를 알림 하나로 바꾼다.
+     */
+    if (e.type === 'external_app_state_changed') {
+      const key = externalAppKey(e.projectId, e.appId)
+      set((s) => ({ externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 } }))
       return
     }
 

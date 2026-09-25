@@ -14,6 +14,7 @@ import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
 import { ExternalApps } from './apps/external/runtime.js'
 import { storeRunLedger } from './app-run-ledger.js'
+import { runtimeViewSource } from './app-view-source.js'
 import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -156,7 +157,7 @@ const externalApps = new ExternalApps({
   reservedIds: HOST_APPS.map((a) => a.id),
   // 실행 기록 (A-6) — 런타임이 선언한 모양을 저장소가 채운다. 런타임은 Store를 모른다
   runs: storeRunLedger(store),
-  // 앱에 닿은 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (B-5가 화면으로 옮긴다)
+  // 앱에 닿은 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (UI 스토어가 AppFrame의 changeSignal로 옮긴다)
   emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
 })
 externalApps.refresh()
@@ -186,16 +187,16 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
 // 앱 화면의 프록시도 같은 목록을 쓴다: 화면을 띄울 수 있는 부모는 WebSocket에 붙을 수 있는 쪽뿐이다
 const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) ?? [...DEFAULT_ALLOWED_ORIGINS]
 /*
- * 앱 화면 호스팅 (M4 B-3). 문서를 읽는 쪽(앱 런타임의 readResource)은 아직 잇지 않았다. 그래서
- * source가 null이고, 화면 요청은 이유와 함께 실패한다. 앱별 출처의 포트 배정표는 app_settings에
- * 산다. 표는 줄지 않는다(origin-ports.ts). 한 번 준 포트를 다른 앱에 주면 그 앱이 남의 브라우저
- * 저장소를 읽는다.
+ * 앱 화면 호스팅 (M4 B-3). 문서는 외부 앱 런타임이 앱에서 읽고, 출처 방식은 매니페스트의
+ * `view.origin`이 정하며, 열린 화면은 앱을 쉬는 앱으로 내리지 않게 붙든다(app-view-source.ts).
+ * 앱별 출처의 포트 배정표는 app_settings에 산다. 표는 줄지 않는다(origin-ports.ts). 한 번 준
+ * 포트를 다른 앱에 주면 그 앱이 남의 브라우저 저장소를 읽는다.
  */
 const VIEW_PORTS_KEY = 'apps.viewPorts'
 const views = new ViewHost({
   secret: httpSecret,
   allowedOrigins,
-  source: null,
+  source: runtimeViewSource(externalApps),
   ports: new OriginPorts({
     load: () => {
       const raw = store.appSetting(VIEW_PORTS_KEY)

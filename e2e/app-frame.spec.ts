@@ -359,8 +359,9 @@ test('앱별 출처 방식: 자기 포트의 진짜 출처를 받고, 저장소�
 
 /**
  * 열린 화면이 같은 값을 보는 법 (M4 B-3d, 플랜 "열린 화면이 같은 값을 보는 법"). 앱의 도구
- * 호출이 끝날 때마다 host가 "바뀌었다"를 알리고, 부모가 그것을 `changeSignal`로 넘긴다.
- * 표준 밖의 확장이라, 받지 않는 화면에는 아무 일도 없어야 한다.
+ * 호출이 끝날 때마다 host가 "바뀌었다"를 알린다. 여기서는 부모가 `changeSignal`을 직접 넘겨
+ * 알림의 규칙만 본다(신호의 출처는 아래 시험). 표준 밖의 확장이라, 받지 않는 화면에는 아무 일도
+ * 없어야 한다.
  */
 test('상태가 바뀌었다는 신호는 초기화 뒤 값이 바뀔 때마다 한 번씩 centralu/notifications/changed로 간다', async ({ page }) => {
   const idA = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
@@ -390,6 +391,39 @@ test('상태가 바뀌었다는 신호는 초기화 뒤 값이 바뀔 때마다 
   await b.locator('#call').click()
   await entry(b, 'call-result')
   await expect(b.locator('li[data-k="notification"]')).toHaveCount(0)
+})
+
+/**
+ * 위 신호의 출처 (B-5): host의 방송 `external_app_state_changed { appId, projectId }` → 스토어가
+ * (프로젝트, 앱)마다 센다 → `changeSignal`을 받지 않은 AppFrame이 그 수를 쓴다. 부모 배선이 없는
+ * 화면도 갱신을 받는다. 앱은 (프로젝트, id)로 하나라 다른 프로젝트의 같은 이름 앱은 남이다.
+ */
+test('host의 external_app_state_changed가 스토어를 지나 그 앱의 열린 화면에만 알림으로 간다', async ({ page }) => {
+  const idA = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+  const idB = fx.open({ projectId: 'p2', appId: 'fixture' }, 'ui://fixture/main')
+  const idC = fx.open({ projectId: 'p1', appId: 'other' }, 'ui://other/main')
+  // changeSignal을 주지 않는다
+  await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: idA })
+  await mount(page, 'b', { appId: 'fixture', projectId: 'p2', instanceId: idB })
+  await mount(page, 'c', { appId: 'other', projectId: 'p1', instanceId: idC })
+  const hostSays = (appId: string, projectId: string | null) =>
+    page.evaluate((e) => (window as any).__mock.emit({ type: 'external_app_state_changed', ...e }), { appId, projectId })
+
+  await hostSays('fixture', 'p1')
+  expect(await entry(view(page, 'a'), 'notification')).toEqual({ method: 'centralu/notifications/changed', params: {} })
+  await hostSays('fixture', 'p1')
+  await expect(view(page, 'a').locator('li[data-k="notification"]')).toHaveCount(2)
+  // 사용자 폴더의 fixture도 남이다
+  await hostSays('fixture', null)
+
+  // 왕복 하나를 기준점으로 삼는다: 그 전에 부친 알림이 있었다면 결과보다 먼저 도착했을 것이다
+  for (const key of ['b', 'c']) {
+    const v = view(page, key)
+    await v.locator('#call').click()
+    await entry(v, 'call-result')
+    await expect(v.locator('li[data-k="notification"]')).toHaveCount(0)
+  }
+  await expect(view(page, 'a').locator('li[data-k="notification"]')).toHaveCount(2)
 })
 
 test('확장 알림을 모르는 화면은 그냥 지나간다', async ({ page }) => {
