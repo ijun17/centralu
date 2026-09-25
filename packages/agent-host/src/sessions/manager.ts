@@ -3601,8 +3601,8 @@ export class SessionManager {
     return (await this.requireAppsHub().forSession(sessionId).tools(server)) as Record<string, unknown>[]
   }
 
-  async callAppForSession(sessionId: string, server: string, name: string, args: Record<string, unknown>) {
-    return this.requireAppsHub().forSession(sessionId).call(server, name, args)
+  async callAppForSession(sessionId: string, server: string, name: string, args: Record<string, unknown>, waitMs?: number) {
+    return this.requireAppsHub().forSession(sessionId).call(server, name, args, { waitMs })
   }
 
   private requireAppsHub(): SessionAppsHub {

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -59,11 +59,13 @@ let server: HostServer
 let port = 0
 let projectId = ''
 let bridges: ChildProcessWithoutNullStreams[] = []
+/** `hold` 도구를 풀어 주는 문 파일 */
+let gate = ''
 
 /** 다리 하나를 띄우고 Codex처럼 말을 건다 */
-function bridge(sessionId: string, appServer: string) {
+function bridge(sessionId: string, appServer: string, env: Record<string, string> = {}) {
   const child = spawn(process.execPath, [bridgePath()], {
-    env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_HOST_TOKEN: TOKEN, CC_SESSION_ID: sessionId, CC_APP_SERVER: appServer },
+    env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_HOST_TOKEN: TOKEN, CC_SESSION_ID: sessionId, CC_APP_SERVER: appServer, ...env },
   })
   bridges.push(child)
   const got: { id?: number; result?: Record<string, unknown>; error?: { message: string } }[] = []
@@ -92,7 +94,8 @@ beforeEach(async () => {
   process.env.CC_DATA_DIR = dataRoot
   mkdirSync(proj)
   mkdirSync(dataRoot)
-  plantApp(join(proj, ...PROJECT_APPS), 'notes', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
+  gate = join(root, 'notes.gate')
+  plantApp(join(proj, ...PROJECT_APPS), 'notes', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach', '--gate', gate] } })
   plantApp(join(dataRoot, 'apps'), 'helper', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
 
   store = new Store()
@@ -159,5 +162,31 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
     const out = await request('tools/call', { name: 'peek', arguments: {} })
     expect(out.result).toMatchObject({ isError: true })
     expect(JSON.stringify(out.result)).toContain('실행 중이 아닙니다')
+  })
+})
+
+/**
+ * 오래 걸리는 호출을 다리째 본다. 제품의 값(240초)은 가짜 시계로 host 쪽에서 본다(long-calls.test.ts).
+ * 여기서는 다리가 나르는 값을 1초로 줄여 **진짜 시계로** 끝에서 끝을 돈다: Codex 자리 → 다리 →
+ * host의 세션 문 → 먼저 돌려주기 → run_status.
+ */
+describe('앱 다리 — 오래 걸리는 호출', () => {
+  it('다리가 나른 대기 시간을 넘기면 실행 id가 먼저 오고, run_status로 결과를 이어서 받는다', async () => {
+    const s = await worker()
+    const { request } = bridge(s.id, 'app-notes', { CC_APP_WAIT_MS: '1000' })
+    await request('initialize', {})
+    const first = await request('tools/call', { name: 'hold', arguments: {} })
+    const runId = (first.result as { structuredContent: { runId: string; status: string } }).structuredContent.runId
+    expect(first.result).toMatchObject({ isError: false, structuredContent: { status: 'running' } })
+    expect(runId).toMatch(/^run_/)
+
+    const running = await request('tools/call', { name: 'run_status', arguments: { run_id: runId } })
+    expect(running.result).toMatchObject({ structuredContent: { runId, status: 'running' } })
+
+    writeFileSync(gate, '')
+    await until(() => rt.runs({ projectId, appId: 'notes' }).find((r) => r.id === runId)?.status, (st) => st === 'ok', 10_000)
+    const done = await request('tools/call', { name: 'run_status', arguments: { run_id: runId } })
+    expect(done.result).toMatchObject({ isError: false, structuredContent: { runId, status: 'ok' } })
+    expect(JSON.stringify(done.result)).toContain('released')
   })
 })

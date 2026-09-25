@@ -136,8 +136,8 @@ describe('도구 목록', () => {
     a.onChange(() => heard++)
     const tools = await a.tools('app-notes')
     const names = tools.map((t) => t.name).sort()
-    // app_only는 화면 전용이다 — 에이전트의 목록에 오르지 않는다
-    expect(names).toEqual(['echo', 'hold', 'peek', 'poke'])
+    // app_only는 화면 전용이다 — 에이전트의 목록에 오르지 않는다. run_status는 host가 더한 도구다
+    expect(names).toEqual(['echo', 'hold', 'peek', 'poke', 'run_status'])
     expect(tools.find((t) => t.name === 'peek')).toMatchObject({
       title: 'Peek',
       description: 'Reads the value without changing anything',

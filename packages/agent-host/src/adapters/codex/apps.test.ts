@@ -102,6 +102,8 @@ describe('thread/start — 앱마다 다리 하나', () => {
       env: { CC_HOST_URL: BRIDGE.url, CC_HOST_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-s1', CC_APP_SERVER: 'app-notes' },
       tool_timeout_sec: 300,
     })
+    // 오래 걸리는 호출은 Codex의 300초 상한보다 먼저(240초) 실행 id로 돌려받는다 — 값은 다리가 host로 나른다
+    expect((servers['app-notes']!.env as Record<string, string>).CC_APP_WAIT_MS).toBe('240000')
     // 워커다 — 오케스트레이터의 다리도, 문서 막기도 없다
     expect(servers).not.toHaveProperty('centralu')
     expect(threadConfig(c, 'thread/start')).not.toHaveProperty('project_doc_max_bytes')
@@ -124,8 +126,8 @@ describe('thread/start — 앱마다 다리 하나', () => {
         default_tools_approval_mode: mode,
         tools: { peek: { approval_mode: 'approve' } },
       })
-      // 읽기 전용이 아닌 도구는 도구별 칸이 없다 — 프리셋의 방식을 따른다
-      expect(Object.keys(mcpServers(c)!['app-notes']!.tools as object)).toEqual(['peek'])
+      // 읽기 전용이 아닌 도구는 도구별 칸이 없다 — 프리셋의 방식을 따른다. run_status는 host의 읽기 전용 도구다
+      expect(Object.keys(mcpServers(c)!['app-notes']!.tools as object).sort()).toEqual(['peek', 'run_status'])
     })
   }
 })

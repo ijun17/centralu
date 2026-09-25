@@ -306,8 +306,8 @@ export function createRpcHandler(
       return { tools: await mgr.appSessionTools(sessionId, server) }
     },
     'apps.sessionCall': async (p) => {
-      const { sessionId, server, name, args } = RpcMethods['apps.sessionCall'].params.parse(p)
-      return mgr.callAppForSession(sessionId, server, name, args)
+      const { sessionId, server, name, args, waitMs } = RpcMethods['apps.sessionCall'].params.parse(p)
+      return mgr.callAppForSession(sessionId, server, name, args, waitMs)
     },
     'grid.get': async () => mgr.grid(),
     'grid.set': async (p) =>

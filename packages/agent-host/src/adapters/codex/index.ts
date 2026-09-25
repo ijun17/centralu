@@ -83,6 +83,12 @@ const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt
  */
 export const CODEX_TOOL_TIMEOUT_SEC = 300
 /**
+ * 앱 호출이 이보다 오래 걸리면 실행 id와 "아직 도는 중"을 먼저 돌려준다 (플랜 "오래 걸리는 호출").
+ * 위 상한보다 60초 짧다 — 다리와 host 사이의 왕복과 Codex 쪽 처리가 그 안에 들어가야 "아직 도는
+ * 중"이 시간 초과보다 먼저 모델에게 닿는다. 결과는 각 앱 서버의 `run_status`로 이어서 본다.
+ */
+export const APP_CALL_WAIT_MS = 240_000
+/**
  * 앱 다리가 뜨고 도구 목록을 내놓기까지의 상한. 스레드를 띄우기 전에 목록을 미리 읽어 두므로
  * (mcpConfig) 보통은 즉시다. 목록을 모르는 앱은 host가 앱을 띄워 읽는 동안(최대 15초) 기다린다.
  */
@@ -331,7 +337,13 @@ class CodexSession implements SessionHandle {
         servers[a.server] = {
           command: process.execPath,
           args: [bridgePath()],
-          env: { CC_HOST_URL: bridge.url, CC_HOST_TOKEN: bridge.token, CC_SESSION_ID: this.opts.sessionId, CC_APP_SERVER: a.server },
+          env: {
+            CC_HOST_URL: bridge.url,
+            CC_HOST_TOKEN: bridge.token,
+            CC_SESSION_ID: this.opts.sessionId,
+            CC_APP_SERVER: a.server,
+            CC_APP_WAIT_MS: String(APP_CALL_WAIT_MS),
+          },
           default_tools_approval_mode: APP_APPROVAL_MODE[this.opts.permissionPreset],
           // 읽기 전용이라고 앱이 말한 도구는 어느 프리셋에서도 묻지 않는다 (결정 5)
           tools: Object.fromEntries(

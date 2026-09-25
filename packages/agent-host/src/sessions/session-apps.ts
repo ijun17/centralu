@@ -29,6 +29,37 @@ export type AppSessionKey = { id: string; kind: SessionKind; projectId: string |
  */
 export const TOOL_LIST_WAIT_MS = 15_000
 
+/**
+ * 먼저 돌려준 실행의 결말을 들고 있는 시간 (A-5 "오래 걸리는 호출"). 에이전트는 보통 몇 분 안에
+ * `run_status`로 다시 묻는다. 이보다 오래된 것은 결과 본문 없이 기록(상태·이유)으로만 답한다.
+ */
+export const DETACHED_KEEP_MS = 60 * 60_000
+/** 세션 하나가 들고 있을 수 있는 먼저 돌려준 실행의 수 — 넘치면 오래된 끝난 것부터 버린다 */
+const DETACHED_PER_SESSION = 50
+
+/**
+ * 모든 앱 대리 서버에 host가 더하는 도구 (A-5) — 먼저 돌려받은 호출의 상태와 결과를 본다.
+ *
+ * 읽기만 한다(`readOnlyHint`) — 그래서 어느 프리셋에서도 묻지 않는다(결정 5). 앱에 같은 이름의
+ * 도구가 있으면 host의 것이 이긴다: 오래 걸리는 호출을 이어서 볼 길이 앱마다 달라지면 안 된다.
+ */
+export const RUN_STATUS_TOOL = 'run_status'
+const RUN_STATUS_SPEC: AppToolSpec = {
+  name: RUN_STATUS_TOOL,
+  title: 'Run status',
+  description:
+    '이 앱에 부른 호출이 오래 걸려 "아직 도는 중"과 실행 id(run_…)를 먼저 받았다면, 그 id로 지금 상태와 끝났을 때의 결과를 본다. 호출을 다시 부르지 말고 이것으로 확인한다.',
+  inputSchema: {
+    type: 'object',
+    properties: { run_id: { type: 'string', description: '먼저 받은 실행 id (run_로 시작한다)' } },
+    required: ['run_id'],
+  },
+  annotations: { title: 'Run status', readOnlyHint: true, openWorldHint: false },
+}
+
+/** 먼저 돌려준 실행 하나 — 결말이 오면 채운다 */
+type Detached = { sessionId: string; server: string; startedAt: number; outcome: AppCallOutcome | null }
+
 /** 세션에 붙을 수 없는 앱의 상태 (결정 4) — 틀린 매니페스트, 신뢰하지 않은 프로젝트, 연달아 실패해 멈춤 */
 const UNUSABLE = new Set(['invalid', 'untrusted', 'failed'])
 
@@ -37,6 +68,11 @@ type Hit = { ref: AppRef; server: string }
 export class SessionAppsHub {
   /** 세션 id → 지금 살아 있는 핸들의 붙이기. 핸들을 갈아 끼우면 새 것이 자리를 잇는다 */
   private live = new Map<string, Attachment>()
+  /**
+   * 실행 id → 먼저 돌려준 실행. **핸들이 아니라 hub에 둔다** — 세션이 다시 떠도(재개·재시작)
+   * 같은 세션의 에이전트는 같은 id로 이어서 물을 수 있어야 한다.
+   */
+  readonly detached = new Map<string, Detached>()
   private stopListening: () => void
 
   constructor(
@@ -91,6 +127,19 @@ export class SessionAppsHub {
       .sort((x, y) => x.server.localeCompare(y.server))
   }
 
+  /** @internal 먼저 돌려준 실행을 적는다 — 적을 때마다 오래된 것을 걷는다 */
+  remember(runId: string, d: Detached): void {
+    const now = Date.now()
+    for (const [id, x] of this.detached) {
+      if (x.outcome && now - x.startedAt > DETACHED_KEEP_MS) this.detached.delete(id)
+    }
+    const mine = [...this.detached].filter(([, x]) => x.sessionId === d.sessionId)
+    for (const [id, x] of mine.slice(0, Math.max(0, mine.length - DETACHED_PER_SESSION + 1))) {
+      if (x.outcome) this.detached.delete(id)
+    }
+    this.detached.set(runId, d)
+  }
+
   dispose(): void {
     this.stopListening()
     for (const a of [...this.live.values()]) a.close()
@@ -115,7 +164,7 @@ class Attachment implements SessionApps {
     if (this.closed) return []
     return this.hub.refsFor(this.session).map(({ ref, server }) => {
       const known = this.hub.rt.knownTools(ref, 'model')
-      return { server, appId: ref.appId, tools: known ? known.map(toSpec) : null }
+      return { server, appId: ref.appId, tools: known ? withRunStatus(known.map(toSpec)) : null }
     })
   }
 
@@ -143,7 +192,7 @@ class Attachment implements SessionApps {
     const hit = this.find(server)
     if (!hit) throw new Error(`이 세션에 붙은 앱이 아닙니다: ${server}`)
     const known = this.hub.rt.knownTools(hit.ref, 'model')
-    if (known) return known.map(toSpec)
+    if (known) return withRunStatus(known.map(toSpec))
     /*
      * 처음 필요한 순간이다 — 앱을 띄워 목록을 읽는다. 상한을 넘기거나 뜨지 못하면 빈 목록으로
      * 붙이고 그 이유를 남긴다. 뜨는 일 자체는 계속되고, 목록이 읽히면 런타임이 알린다.
@@ -157,26 +206,107 @@ class Attachment implements SessionApps {
           timer = setTimeout(() => reject(new Error(`did not list its tools within ${Math.round(waitMs / 1000)}s`)), waitMs)
         }),
       ])
-      return listed.map(toSpec)
+      return withRunStatus(listed.map(toSpec))
     } catch (err) {
       console.error(`[apps] ${server} attached with no tools for now: ${(err as Error).message.split('\n')[0]}`)
-      return []
+      return withRunStatus([])
     } finally {
       clearTimeout(timer)
     }
   }
 
-  async call(server: string, tool: string, args: Record<string, unknown>, opts: { signal?: AbortSignal } = {}): Promise<AppToolResult> {
+  async call(
+    server: string,
+    tool: string,
+    args: Record<string, unknown>,
+    opts: { signal?: AbortSignal; waitMs?: number } = {},
+  ): Promise<AppToolResult> {
     const hit = this.find(server)
     // 붙지 않은 앱은 런타임까지 가지 않는다 — 이 세션이 부를 수 있는 앱은 결정 4가 정한 것뿐이다
     if (!hit) return failure(`이 세션에 붙은 앱이 아닙니다: ${server}`)
-    const outcome = await this.hub.rt.call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: opts.signal })
-    return toResult(outcome)
+    if (tool === RUN_STATUS_TOOL) return this.runStatus(hit, args)
+
+    let runId: string | null = null
+    const pending = this.hub.rt
+      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: opts.signal, onRun: (id) => (runId = id) })
+      // 앱이 부르는 사이에 사라졌다(폴더가 지워짐) — 던지지 않고 실패한 호출로 돌려준다
+      .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
+    if (!opts.waitMs) return toResult(await pending)
+
+    /*
+     * **상한이 있는 쪽의 호출** (플랜 "오래 걸리는 호출"). Codex는 MCP 도구 호출을 300초에 끊는다.
+     * 그 전에(240초) 실행 id와 "아직 도는 중"을 먼저 돌려주고, 호출은 그대로 둔다 — 결과는 앱
+     * 화면과 기록에 남고, 에이전트는 `run_status`로 이어서 본다. 끊기게 두면 앱의 일은 계속되는데
+     * 에이전트는 결과를 받을 길을 잃는다.
+     */
+    let timer: NodeJS.Timeout | undefined
+    const first = await Promise.race([
+      pending.then((o) => ({ o })),
+      new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), opts.waitMs))),
+    ])
+    clearTimeout(timer)
+    if (first) return toResult(first.o)
+    const entry: Detached = { sessionId: this.session.id, server, startedAt: Date.now() - opts.waitMs, outcome: null }
+    this.hub.remember(runId!, entry)
+    void pending.then((o) => (entry.outcome = o))
+    const seconds = Math.round(opts.waitMs / 1000)
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `이 호출은 아직 도는 중입니다 (${seconds}초를 넘겼습니다). 실행 id: ${runId}\n` +
+            `호출은 멈추지 않고 계속됩니다. 다시 부르지 말고, 같은 서버의 ${RUN_STATUS_TOOL} 도구에 run_id로 이 id를 넘겨 결과를 확인하세요.`,
+        },
+      ],
+      isError: false,
+      structuredContent: { runId, status: 'running' },
+    }
+  }
+
+  /**
+   * `run_status` — 이 세션이 **이 앱에** 부른 실행만 본다. 다른 세션이나 화면의 실행은 결과가 그
+   * 쪽의 것이라 보이지 않는다(실행 id를 알아도).
+   *
+   * 먼저 돌려준 실행은 결과 본문까지, 그 밖의 실행(제때 끝났거나 오래전 것)은 기록이 아는 상태와
+   * 이유까지만 답한다 — 기록은 결과 본문을 남기지 않는다(A-6: 인자도 요약만 남긴다).
+   */
+  private runStatus(hit: Hit, args: Record<string, unknown>): AppToolResult {
+    const runId = typeof args.run_id === 'string' ? args.run_id.trim() : ''
+    if (!runId) return failure(`${RUN_STATUS_TOOL}: run_id가 필요합니다`)
+    const d = this.hub.detached.get(runId)
+    if (d && d.sessionId === this.session.id && d.server === hit.server) {
+      if (!d.outcome) {
+        const seconds = Math.round((Date.now() - d.startedAt) / 1000)
+        return {
+          content: [{ type: 'text', text: `실행 ${runId}은(는) 아직 도는 중입니다 (${seconds}초째). 조금 뒤에 다시 확인하세요.` }],
+          isError: false,
+          structuredContent: { runId, status: 'running' },
+        }
+      }
+      const o = d.outcome
+      const done = toResult(o)
+      return {
+        content: [{ type: 'text', text: `실행 ${runId}이(가) 끝났습니다 (${o.status}, ${Math.round(o.durationMs / 1000)}초). 결과:` }, ...done.content],
+        isError: done.isError,
+        structuredContent: { runId, status: o.status, ...(done.structuredContent ? { result: done.structuredContent } : {}) },
+      }
+    }
+    const row = this.hub.rt.runs(hit.ref, 500).find((r) => r.id === runId && r.callerKind === 'session' && r.callerSessionId === this.session.id)
+    if (!row) return failure(`모르는 실행 id입니다: ${runId} — 이 세션이 이 앱에 부른 실행만 볼 수 있습니다`)
+    const why = row.error ? ` — ${row.error}` : ''
+    return {
+      content: [{ type: 'text', text: `실행 ${runId}: ${row.status}${why}${row.status === 'running' ? '' : ' (결과 본문은 남아 있지 않습니다)'}` }],
+      isError: row.status !== 'ok' && row.status !== 'running',
+      structuredContent: { runId, status: row.status },
+    }
   }
 
   readOnly(server: string, tool: string): boolean {
     const hit = this.find(server)
     if (!hit) return false
+    // host가 더한 도구 — 상태를 읽기만 한다
+    if (tool === RUN_STATUS_TOOL) return true
     /*
      * 앱을 띄우지 않고 이미 읽은 목록만 본다. 승인 콜백은 모델이 **이미 본** 목록의 도구를 두고
      * 불리므로, 목록을 모르는 채로 불렸다면 그 도구는 모델이 우리 목록에서 고른 것이 아니다 —
@@ -205,6 +335,11 @@ class Attachment implements SessionApps {
 }
 
 type RuntimeTool = Awaited<ReturnType<ExternalApps['tools']>>[number]
+
+/** 앱의 도구 목록에 host의 `run_status`를 더한다 — 같은 이름의 앱 도구는 가린다(RUN_STATUS_SPEC 참고) */
+function withRunStatus(tools: AppToolSpec[]): AppToolSpec[] {
+  return [...tools.filter((t) => t.name !== RUN_STATUS_TOOL), RUN_STATUS_SPEC]
+}
 
 /** 런타임의 도구(MCP `Tool`) → 세션에 내놓는 모양. outputSchema는 뺀다(아래) */
 function toSpec(t: RuntimeTool): AppToolSpec {
