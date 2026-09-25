@@ -973,6 +973,17 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * 대화 안 앱 화면의 `ui/message` (M4 B-1·B-4) — 사람이 읽고 보내기로 고른 뒤에만 UI가 부른다.
+   *
+   * 보낼 곳은 **그 화면이 선 대화**다. 앱과 세션은 인스턴스가 정한다: `sessionId`는 대조만 하고, 대화 안
+   * 화면의 인스턴스가 아니거나 다른 대화의 것이면 거절한다(#93·#94: 검증한 것이 곧 쓰는 것). 대화에는
+   * 앱이 보낸 말로 남고(`user_message.fromApp`), 에이전트에게는 host가 "앱의 글"로 감싼 모양이 간다.
+   */
+  'apps.viewMessage': {
+    params: z.object({ sessionId: SessionId, instanceId: z.string(), text: z.string().min(1).max(64_000) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * 화면이 자기 앱의 리소스를 읽는다 (M4 B-3, 브리지의 `onreadresource`). 답은 MCP
    * `resources/read`의 결과 그대로다. 규격의 모양은 화면과 앱이 아는 것이고, 이 층은 운반만 한다.
    * `instanceId`를 주면 그 화면의 앱과 같아야 한다.

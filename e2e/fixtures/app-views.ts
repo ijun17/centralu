@@ -64,6 +64,7 @@ const log = (k, v) => {
 const app = new App({ name: 'fixture', version: '1.0.0' }, {}, { autoResize: true })
 app.ontoolinput = (p) => log('tool-input', p.arguments)
 app.ontoolresult = (p) => log('tool-result', p.structuredContent ?? p.content)
+app.ontoolcancelled = (p) => log('tool-cancelled', p.reason ?? null)
 app.onhostcontextchanged = (p) => log('host-context-changed', p)
 // 실제 앱이 teardown에서 하는 일: 저장하고 답한다. 저장이 목에 닿으면 화면이 요청을 받은 것이다
 app.onteardown = ${opts.hangTeardown ? '() => new Promise(() => {})' : "async () => { await app.callServerTool({ name: 'save-on-teardown', arguments: {} }); log('teardown', {}); return {} }"}

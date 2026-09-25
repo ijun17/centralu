@@ -183,6 +183,58 @@ export type PinnedView = {
   error: string | null
 }
 
+/**
+ * 대화 안 앱 화면 하나 (M4 B-1) — 도구 호출 카드 하나 아래에 서는 화면. 수명은 host의 `app_view` 이벤트가
+ * 정한다(열림 → 결과·취소 → 닫힘).
+ *
+ *   live      host가 인스턴스를 열어 두었다. 카드가 화면에 있으면 프레임을 그린다
+ *   closing   host가 인스턴스를 닫았다(앱이 사라짐, 신뢰를 잃음, 사칭). 그려진 프레임은 teardown을 보낸 뒤
+ *             자리표시로 접는다 — 규격: 화면을 내리기 **전에** 알린다
+ *   parked    자리표시만 선다. 이유(`reason`)를 말하고, 앱을 여는 길을 준다
+ */
+export type InlineView = {
+  callId: string
+  appId: string
+  projectId: string | null
+  tool: string
+  state: 'live' | 'closing' | 'parked'
+  instanceId: string | null
+  toolInput?: Record<string, unknown>
+  toolResult?: AppToolResult
+  /** 답 없이 끝났다 — 화면은 tool-result 대신 이 이유로 tool-cancelled를 받는다 */
+  cancelled?: string
+  /** 화면을 열지 않았다(사칭 차단) — 그 이유. 이런 화면은 다시 열 길을 주지 않는다 */
+  rejected?: string
+  /** 왜 자리표시로 접혔나 */
+  reason?: string
+}
+
+/** host의 `app_view` 이벤트 하나를 세션의 화면 기록에 반영한다 */
+export function applyAppView(views: Record<string, InlineView> | undefined, e: Extract<NormalizedEvent, { type: 'app_view' }>): Record<string, InlineView> {
+  const cur = views?.[e.callId]
+  const base = { callId: e.callId, appId: e.appId, projectId: e.projectId, tool: e.tool }
+  const put = (v: InlineView) => ({ ...views, [e.callId]: v })
+  switch (e.phase) {
+    case 'open':
+      return put({ ...base, state: 'live', instanceId: e.instanceId ?? null, toolInput: e.toolInput })
+    case 'result':
+      return cur ? put({ ...cur, toolResult: e.toolResult as AppToolResult | undefined }) : (views ?? {})
+    case 'cancelled':
+      return cur ? put({ ...cur, cancelled: e.reason ?? 'The call ended without an answer' }) : (views ?? {})
+    case 'rejected':
+      // 열린 화면을 닫고 거절한 경우(결과가 남의 화면을 가리켰다)면 프레임이 teardown을 받은 뒤 접힌다
+      return put({
+        ...(cur ?? { ...base, instanceId: null }),
+        state: cur?.state === 'live' ? 'closing' : 'parked',
+        rejected: e.reason ?? 'This view was refused',
+        reason: e.reason,
+      })
+    case 'closed':
+      if (!cur) return views ?? {}
+      return put({ ...cur, state: cur.state === 'live' ? 'closing' : cur.state, reason: e.reason ?? cur.reason })
+  }
+}
+
 /** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
 export function useTextZoom(): number {
   return TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
@@ -204,6 +256,8 @@ export type ChatItem =
       attachments?: ChatAttachment[]
       pending?: boolean
       from?: { sessionId: string; name: string }
+      /** 대화 안 앱 화면이 보낸 말 (M4 B-1) — 사람이 보내기로 골랐지만 쓴 것은 앱이다 */
+      fromApp?: { appId: string; projectId: string | null; name: string }
     }
   | { kind: 'assistant'; seq: number; text: string }
   /** 추론 요약 (#58). codex만 텍스트를 준다 — claude의 생각은 세션의 thinkingTokens로만 보인다 */
@@ -852,6 +906,21 @@ export type AppState = {
   focusedApp: { projectId: string | null; appId: string } | null
   /** 연 고정 화면들, 연 순서대로. 보이지 않는 것도 산다(`PinnedView`) */
   pinnedViews: PinnedView[]
+  /**
+   * 대화 안 앱 화면 (M4 B-1) — 세션 → (카드 id → 화면). 카드(`chat`)와 따로 둔다: 화면의 수명은 host의
+   * `app_view`가 정하고, 대화 기록을 다시 읽어도(loadHistory) 살아 있는 화면이 사라지면 안 된다.
+   */
+  inlineViews: Record<string, Record<string, InlineView>>
+  /**
+   * 대화 안 화면을 자리표시로 접는다. 인스턴스가 열려 있었으면 host에 닫으라고 한다(앱을 놓는다). 부르는
+   * 쪽이 먼저 AppFrame의 teardown을 부른다.
+   */
+  parkInlineView(sessionId: string, callId: string, reason?: string): void
+  /**
+   * 대화 안 화면의 말을 그 대화로 보낸다 (M4 B-1·B-4) — 사람이 확인한 뒤에만 부른다.
+   * @returns 보냈는가 — 실패는 토스트로 말한다
+   */
+  sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<boolean>
   /** 앱을 고정 화면으로 연다 — 처음이면 자리를 만들고, 이미 열려 있으면 그 화면으로 간다 */
   openApp(projectId: string | null, appId: string): void
   /** 자리의 인스턴스를 연다 (host가 home을 부른다). 열 수 있는 앱일 때 화면이 부른다 */
@@ -1281,6 +1350,7 @@ export const useStore = create<AppState>((set, get) => ({
   view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
   focusedApp: null as { projectId: string | null; appId: string } | null,
   pinnedViews: [] as PinnedView[],
+  inlineViews: {} as Record<string, Record<string, InlineView>>,
   gridPanels: [] as string[],
   orchestratorId: null as string | null,
   orchestratorWaking: false,
@@ -1850,6 +1920,15 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
+    /*
+     * 대화 안 앱 화면 (M4 B-1). 카드와 따로 산다 — 화면은 카드의 id로 제 자리를 찾는다. 세션이 아직 등록
+     * 전이어도 적어 둔다: 카드가 그려지는 순간 그 아래에 선다.
+     */
+    if (e.type === 'app_view') {
+      set((s) => ({ inlineViews: { ...s.inlineViews, [sessionId]: applyAppView(s.inlineViews[sessionId], e) } }))
+      return
+    }
+
     // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
     if (e.type === 'session_deleted') {
       set((s) => {
@@ -1860,6 +1939,8 @@ export const useStore = create<AppState>((set, get) => ({
         return {
           sessions,
           chat,
+          // 그 대화의 화면도 함께 — host가 인스턴스를 이미 닫았다
+          inlineViews: omitKey(s.inlineViews, sessionId),
           // 읽던 자리도 세션과 함께 사라진다 — 같은 id가 다시 날 일은 없다 (#61)
           scrollAnchor: omitKey(s.scrollAnchor, sessionId),
           focusedSessionId: s.focusedSessionId === sessionId ? null : s.focusedSessionId,
@@ -3408,6 +3489,32 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
+  parkInlineView(sessionId, callId, reason) {
+    const v = get().inlineViews[sessionId]?.[callId]
+    if (!v || v.state === 'parked') return
+    // host가 이미 닫은 것(closing)은 다시 닫지 않는다 — 우리가 내리는 것만 host에 알린다
+    const close = v.state === 'live' ? v.instanceId : null
+    set((s) => ({
+      inlineViews: {
+        ...s.inlineViews,
+        [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...v, state: 'parked', instanceId: null, reason: reason ?? v.reason } },
+      },
+    }))
+    if (close) void get().platform?.apps.closeView(close).catch(() => {})
+  },
+
+  async sendViewMessage(sessionId, instanceId, text) {
+    const platform = get().platform
+    if (!platform) return false
+    try {
+      await platform.apps.sendViewMessage(sessionId, instanceId, text)
+      return true
+    } catch (e) {
+      set({ toast: `Could not send the app's message: ${(e as Error).message}` })
+      return false
+    }
+  },
+
   openApp(projectId, appId) {
     const key = externalAppKey(projectId, appId)
     set((s) => ({
@@ -3995,9 +4102,13 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * 보낸 것이 달라 확정이 안 맞물리고 두 번째 말풍선이 붙었다 (코덱스에서 발견).
        * 지금은 첨부가 별도 필드라 text가 곧 원문이다 — 이 동일성이 이 대조의 전제다.
        */
-      const idx = e.from ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      // 앱이 보낸 말(M4 B-1)도 사람 말의 확정 대조에서 뺀다 — 출처 표식이 사람 말풍선에 흡수되면 안 된다
+      const idx = e.from || e.fromApp ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
       if (idx === -1)
-        return [...items, { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}) }]
+        return [
+          ...items,
+          { kind: 'user', seq: ++chatSeq, text: e.text, ...(e.from ? { from: e.from } : {}), ...(e.fromApp ? { fromApp: e.fromApp } : {}) },
+        ]
       return items.map((it, i) =>
         i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it,
       )
@@ -4067,6 +4178,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       const p = m.payload as {
         text?: string
         from?: { sessionId: string; name: string }
+        fromApp?: { appId: string; projectId: string | null; name: string }
         attachments?: ChatAttachment[]
       }
       items.push({
@@ -4074,6 +4186,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
         seq: m.seq,
         text: String(p?.text ?? ''),
         ...(p?.from ? { from: p.from } : {}),
+        ...(p?.fromApp ? { fromApp: p.fromApp } : {}),
         // 첨부 복원 — 이미지 바이트(data)는 host가 loadMessages에서 파일을 읽어 실어 준다
         ...(p?.attachments?.length ? { attachments: p.attachments } : {}),
       })

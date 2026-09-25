@@ -13,6 +13,7 @@ import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { Markdown } from './Markdown.jsx'
+import { InlineViewSlot } from './InlineView.jsx'
 import { RunMenu } from './RunMenu.jsx'
 import { CommandRunnerOverlay } from './CommandRunner.jsx'
 import { SessionSettings } from './SessionSettings.jsx'
@@ -1613,7 +1614,9 @@ function ChatStream({
     pinned?.kind === 'user' && pinnedText
       ? pinned.from
         ? `${pinned.from.name} ⤷ ${pinnedText}`
-        : pinnedText
+        : pinned.fromApp
+          ? `${pinned.fromApp.name} app ⤷ ${pinnedText}`
+          : pinnedText
       : null
 
   // 접힘이 기본 — 다른 턴으로 넘어가면 펼침 상태를 끌고 가지 않는다
@@ -1884,7 +1887,7 @@ function ChatStream({
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} />
+            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} sessionId={sessionId} />
           </div>
         ))}
       </div>
@@ -2176,7 +2179,7 @@ function DormantNote({ sessionId }: { sessionId: string }) {
  * 화면을 채운 상태에서 그건 마크다운 재파싱 여러 번이다 (실측: 2.7 렌더/글자).
  * Markdown 자체는 이미 memo지만, 그 위의 껍데기가 매번 새로 도는 것은 못 막는다.
  */
-const ChatRow = memo(function ChatRow({ item, projectRoot }: { item: ChatItem; projectRoot: string | null }) {
+const ChatRow = memo(function ChatRow({ item, projectRoot, sessionId }: { item: ChatItem; projectRoot: string | null; sessionId: string }) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
@@ -2188,6 +2191,15 @@ const ChatRow = memo(function ChatRow({ item, projectRoot }: { item: ChatItem; p
         {item.from && (
           <div className="text-[11px] text-ash" data-testid="msg-user-from">
             {item.from.name} ⤷
+          </div>
+        )}
+        {/*
+          대화 안 앱 화면이 보낸 말 (M4 B-1). 사람이 보내기로 골랐지만 쓴 것은 앱이다 — 시켜서 들어온 말과
+          같은 모양(점선 테두리, 출처 한 줄)으로, 출처가 세션이 아니라 앱이라고 적는다.
+        */}
+        {item.fromApp && (
+          <div className="text-[11px] text-ash" data-testid="msg-user-from-app">
+            {item.fromApp.name} app ⤷
           </div>
         )}
         {/*
@@ -2217,7 +2229,7 @@ const ChatRow = memo(function ChatRow({ item, projectRoot }: { item: ChatItem; p
         {(item.text || !item.attachments?.length) && (
           <div
             className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border bg-graphite px-3 py-2 text-chalk ${
-              item.from ? 'border-dashed border-ash/50' : 'border-slate/40'
+              item.from || item.fromApp ? 'border-dashed border-ash/50' : 'border-slate/40'
             }`}
           >
             {item.text}
@@ -2298,7 +2310,13 @@ const ChatRow = memo(function ChatRow({ item, projectRoot }: { item: ChatItem; p
   if (/propose_project$/.test(item.tool)) return <ProjectProposalRow item={item} />
   // 매니저의 워크트리 제안 (#69) — 같은 원칙: 가리키고, 값(브랜치 이름)은 창에 미리 채워진다
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
-  return <ToolCard item={item} />
+  return (
+    <>
+      <ToolCard item={item} />
+      {/* 이 호출이 연 앱 화면 (M4 B-1) — 카드의 id로 제 화면을 찾는다. 없으면 아무것도 그리지 않는다 */}
+      {item.callId && <InlineViewSlot sessionId={sessionId} callId={item.callId} />}
+    </>
+  )
 })
 
 /**

@@ -127,6 +127,10 @@ export class MockPlatform implements Platform {
   /** 테스트가 이벤트를 주입하는 통로 */
   emit(event: NormalizedEvent): void {
     let out = event
+    // 대화 안 화면의 인스턴스는 host가 그 대화의 것으로 기억한다 — 목도 그 기억을 든다 (apps.viewMessage)
+    if (event.type === 'app_view' && event.phase === 'open' && event.instanceId) {
+      this.inlineInstances.set(event.instanceId, { sessionId: event.sessionId, appId: event.appId, projectId: event.projectId })
+    }
     if (event.sessionId) {
       const s = this.sessions.get(event.sessionId)
       if (s) {
@@ -632,6 +636,22 @@ export class MockPlatform implements Platform {
       this.closedViews.push(instanceId)
     },
     /**
+     * 대화 안 화면의 말 (M4 B-1). 실물처럼: 그 대화에 열린 대화 안 화면의 인스턴스만 받고, 대화에는 앱이 보낸
+     * 말(`fromApp`)로 남긴다. 에이전트가 받는 감싼 모양은 host의 일이라(manager의 appMessageFrame) 여기서는
+     * 받은 것을 적어 두기만 한다.
+     */
+    sendViewMessage: async (sessionId: string, instanceId: string, text: string) => {
+      const owner = this.inlineInstances.get(instanceId)
+      if (!owner || owner.sessionId !== sessionId) throw new Error('This app view is not open in that conversation')
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      const name = this.externalAppList.find((a) => a.appId === owner.appId && a.projectId === owner.projectId)?.name ?? owner.appId
+      const fromApp = { appId: owner.appId, projectId: owner.projectId, name }
+      this.viewMessages.push({ sessionId, instanceId, text })
+      this.emit({ type: 'user_message', sessionId, seq: (this.messages.get(sessionId)?.length ?? 0) + 1, text, fromApp })
+      this.emit({ type: 'state_change', sessionId, state: 'working' })
+    },
+    /**
      * 실물처럼: 멈췄거나 죽었던 앱의 이유를 지우고 쉬는 앱(`stopped`)으로 세운 뒤 목록 방송을 한다.
      * 띄우지는 않는다 — 다음에 여는 화면이 띄운다.
      */
@@ -670,6 +690,10 @@ export class MockPlatform implements Platform {
   /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */
   readonly openedViews: { appId: string; projectId: string | null }[] = []
   readonly closedViews: string[] = []
+  /** 대화 안 화면의 인스턴스 → 그 대화와 앱 (M4 B-1) — `app_view`의 open을 방송할 때 적는다 */
+  readonly inlineInstances = new Map<string, { sessionId: string; appId: string; projectId: string | null }>()
+  /** 대화 안 화면이 대화에 보낸 말 — 사람이 확인한 뒤에만 여기 닿는지를 시험이 본다 */
+  readonly viewMessages: { sessionId: string; instanceId: string; text: string }[] = []
   openViewProvider: ((appId: string, projectId: string | null) => Promise<AppHomeView>) | null = null
   /** 발견된 외부 앱 (M4 A-8) — 시험이 `setExternalApps`로 채운다. 목의 발견은 이 배열이다 */
   externalAppList: ExternalAppInfo[] = []

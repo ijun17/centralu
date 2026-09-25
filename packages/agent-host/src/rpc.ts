@@ -263,6 +263,17 @@ export function createRpcHandler(
       if (!inlineViews?.close(instanceId)) requireViews().close(instanceId)
       return { ok: true as const }
     },
+    'apps.viewMessage': async (p) => {
+      const { sessionId, instanceId, text } = RpcMethods['apps.viewMessage'].params.parse(p)
+      // 앱과 세션은 인스턴스가 정한다 — 부른 쪽이 댄 세션은 대조만 한다 (#93·#94)
+      const owner = inlineViews?.owner(instanceId) ?? null
+      if (!owner || owner.sessionId !== sessionId) {
+        throw Object.assign(new Error('This app view is not open in that conversation'), { code: 'internal' })
+      }
+      const name = externalApps?.list().find((a) => a.appId === owner.ref.appId && a.projectId === owner.ref.projectId)?.name
+      await mgr.sendFromApp(sessionId, text, { appId: owner.ref.appId, projectId: owner.ref.projectId, name: name ?? owner.ref.appId })
+      return { ok: true as const }
+    },
     'apps.readResource': async (p) => {
       const { appId, projectId, uri, instanceId } = RpcMethods['apps.readResource'].params.parse(p)
       // 답의 모양은 화면과 앱이 아는 것이다. 여기서는 봉투가 깨지지 않을 만큼만 본다
