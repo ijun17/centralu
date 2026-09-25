@@ -1218,6 +1218,75 @@ describe('밖에서 이어간 대화를 따라잡는다', () => {
 })
 
 /**
+ * 대화 기록을 **그 대화가 태어난 cwd 아래에** 두는 도구 (M4 P-6).
+ *
+ * Claude가 그렇다: 기록은 `~/.claude/projects/<cwd를 -로 바꾼 이름>/<id>.jsonl`에 있고,
+ * `getSessionMessages(id, { dir })`는 그 `dir`에서 찾는다. 이 가짜는 딱 그것만 흉내 낸다.
+ * SDK에는 덤이 하나 더 있다 — 거기서 못 찾으면 `dir`에서 `git worktree list`를 돌려 같은
+ * 저장소의 다른 워크트리까지 뒤진다. 그 덤은 흉내 내지 않는다: 워크트리 세션이 그 덤 덕에
+ * 우연히 찾아지던 것을 이 테스트가 "된다"로 읽으면 안 되기 때문이다.
+ */
+class CwdFiledAdapter extends FakeAdapter {
+  /** 대화 id → 그 대화가 태어난 cwd (도구가 기록을 두는 자리) */
+  filedAt = new Map<string, string>()
+  toolHistory: { role: 'user' | 'assistant'; text: string }[] = []
+  /** 따라잡기가 어느 디렉토리에 물었나 */
+  readFrom: string[] = []
+  override async createSession(opts: CreateSessionOpts, emit: EventSink) {
+    const h = await super.createSession(opts, emit)
+    if (h.externalId && !this.filedAt.has(h.externalId)) this.filedAt.set(h.externalId, opts.cwd)
+    return h
+  }
+  async readExternalHistory(externalId: string, cwd: string) {
+    this.readFrom.push(cwd)
+    return this.filedAt.get(externalId) === cwd ? this.toolHistory : []
+  }
+}
+
+/**
+ * cwd가 프로젝트 경로와 다른 세션의 따라잡기 (M4 P-6).
+ *
+ * 깨울 때의 따라잡기가 기록을 **프로젝트 경로**로 찾았다. 같은 함수 안의 목록 조회는 이미
+ * 세션의 실제 cwd(`cwdFor`)로 묻고 있었는데, 정작 기록을 읽는 줄만 다른 열쇠를 썼다.
+ * 설치된 SDK(0.3.263)로 잰 값: 프로젝트 경로로 물으면 워크트리 세션은 2건(위 덤으로 찾음),
+ * 그 저장소의 워크트리가 아닌 폴더에서 태어난 세션은 **0건**이다. M4에서 사용자 폴더 앱을
+ * 만드는 세션의 cwd가 바로 그런 폴더다 — 터미널에서 이어간 말이 화면에 영영 안 온다.
+ */
+describe('cwd가 프로젝트 경로와 다른 세션도 따라잡는다 (M4 P-6)', () => {
+  it('프로젝트 밖 폴더에서 태어난 세션은 그 폴더의 기록에서 따라잡는다', async () => {
+    const a = new CwdFiledAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const m = new SessionManager(store, adapters, (e) => events.push(e))
+    const call = createRpcHandler(m, adapters)
+    const projectDir = mkdtempSync(join(tmpdir(), 'cc-p6-project-'))
+    const appDir = mkdtempSync(join(tmpdir(), 'cc-p6-app-'))
+    try {
+      const p = (await call('projects.add', { path: projectDir })) as { id: string }
+      const s = (await call('agents.createSession', { projectId: p.id, cwd: appDir, tool: 'claude' })) as { id: string }
+      await m.disposeAll() // 잠들었다 (host 재시작과 같은 상태)
+
+      // 그 사이 터미널에서 이 대화를 이어갔다 — 기록은 세션이 태어난 폴더 아래에 쌓였다
+      a.toolHistory = [
+        { role: 'user', text: '터미널에서 한 말' },
+        { role: 'assistant', text: '터미널 답' },
+      ]
+      await m.resumeSession(s.id)
+
+      const texts = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as { payload: { text?: string } }[])
+        .map((r) => r.payload.text)
+        .filter(Boolean)
+      expect(texts).toEqual(['터미널에서 한 말', '터미널 답'])
+      expect(events.some((e) => e.type === 'history_synced' && e.sessionId === s.id)).toBe(true)
+      // 찾은 자리가 곧 물은 자리다 — 프로젝트 경로에는 한 번도 묻지 않았다
+      expect(a.readFrom).toEqual([appDir])
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(appDir, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
  * Claude는 external id를 system/init로 **비동기로** 준다.
  * 그래서 세션을 만들고 말을 걸기 전에 새로고침하면 아직 없다
  * (도그푸딩: "세션 식별자를 불러오지 못했습니다").
@@ -2006,6 +2075,31 @@ describe('워크트리 세션', () => {
     // 여기서 프로젝트 경로로 떨어지면 격리가 조용히 풀린다 — 사용자는 여전히 격리된 줄 안다
     expect(adapter.lastCwd).toBe(path)
     expect(adapter.lastCwd).not.toBe(repo)
+  })
+
+  /*
+   * 따라잡기도 같은 워크트리에서 읽는다 (M4 P-6). 실제 SDK는 프로젝트 경로로 물어도
+   * `git worktree list`를 돌려 이 기록을 찾아 준다(0.3.263 실측) — 그래서 오늘 사용자 눈에는
+   * 안 보이던 어긋남이다. 그 덤에 기대지 않는다: 덤이 없는 가짜로 "세션의 cwd로 묻는다"를 잰다.
+   */
+  it('깨울 때의 따라잡기도 워크트리의 기록에서 읽는다', async () => {
+    const a = new CwdFiledAdapter()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+    const first = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    first.prLookup = async () => null
+    const s = (await createRpcHandler(first, adapters)('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
+    })) as SessionInfo
+    await first.disposeAll()
+
+    a.toolHistory = [{ role: 'user', text: '워크트리 터미널에서 한 말' }]
+    const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    restarted.prLookup = async () => null
+    await restarted.resumeSession(s.id)
+
+    const texts = store.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
+    expect(texts).toContain('워크트리 터미널에서 한 말')
+    expect(a.readFrom).toEqual([s.worktree!.path])
   })
 
   it('host를 재시작해도 워크트리를 기억한다', async () => {
