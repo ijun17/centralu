@@ -29,6 +29,7 @@
     "allow-focus-window",
     "allow-window-controls-inset",
     "allow-shortcut-keys",
-    "allow-quit-app"
+    "allow-quit-app",
+    "allow-take-app-links"
   ]
 }

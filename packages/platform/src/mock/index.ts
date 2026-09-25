@@ -106,6 +106,12 @@ export class MockPlatform implements Platform {
   nextPickedFile: string | null = '/tmp/picked.zip'
   /** 파일 피커가 무엇을 걸러 달라고 받았나 */
   readonly pickedFileAsks: { title: string; extensions: string[] }[] = []
+  /** 앱 링크를 듣는 쪽 (M4 E-4) — `openAppLink`가 OS처럼 건넨다 */
+  private readonly appLinkListeners = new Set<(link: string) => void>()
+  /** OS가 이 앱에 링크를 건넨 것처럼 (M4 E-4, e2e가 부른다) — 셸이 거르지 않은 날것 그대로 넘긴다 */
+  openAppLink(link: string): void {
+    for (const l of this.appLinkListeners) l(link)
+  }
   /** 소개 화면에서 고른 오케스트레이터 도구 (#63) — 실물은 app_settings에 적는다 */
   orchestratorTool: ToolName = 'claude'
   /** 테스트용: 재개 불가로 만들 세션들 */
@@ -2121,6 +2127,10 @@ export class MockPlatform implements Platform {
     pickFile: async (opts: { title: string; extensions: string[] }) => {
       this.pickedFileAsks.push(opts)
       return this.nextPickedFile
+    },
+    onAppLink: (cb: (link: string) => void) => {
+      this.appLinkListeners.add(cb)
+      return () => void this.appLinkListeners.delete(cb)
     },
   }
 

@@ -285,6 +285,12 @@ export interface SystemPort {
    */
   pickFile(opts: { title: string; extensions: string[] }): Promise<string | null>
   /**
+   * OS가 이 앱에 건넨 앱 링크(`centralu://app?url=…`, M4 E-4)를 듣는다. 앱이 링크로 처음 켜졌을 때 이미 와 있던 링크도 구독하는 순간
+   * 한 번 받는다. 링크는 남이 지은 글이라 받은 쪽이 판정한다(`parseAppLink`). 링크를 받지 않는 구현(웹)은 아무것도 부르지 않는다.
+   * @returns 구독을 푼다
+   */
+  onAppLink(cb: (link: string) => void): () => void
+  /**
    * 지금부터 창을 끈다 (타이틀바를 숨겼으므로 우리가 손잡이를 만들어야 한다).
    * data-tauri-drag-region만으로는 부족하다 — 그 속성은 **mousedown 타깃 자신**에
    * 있어야 해서, 헤더 안의 글자를 잡으면 죽는다. 실제로 "가끔만 된다"로 나타났다.

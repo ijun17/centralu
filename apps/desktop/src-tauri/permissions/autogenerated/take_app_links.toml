@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-take-app-links"
+description = "Enables the take_app_links command without any pre-configured scope."
+commands.allow = ["take_app_links"]
+
+[[permission]]
+identifier = "deny-take-app-links"
+description = "Denies the take_app_links command without any pre-configured scope."
+commands.deny = ["take_app_links"]

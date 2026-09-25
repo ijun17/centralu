@@ -391,6 +391,90 @@ fn quit_app(app: AppHandle, approved: State<QuitApproved>) {
 /** 종료 확인 플래그 — 모달의 "Quit"만이 이것을 세운다 */
 struct QuitApproved(std::sync::Arc<std::sync::atomic::AtomicBool>);
 
+/**
+ * 앱 링크 (M4 E-4) — `centralu://app?url=…`.
+ *
+ * macOS는 등록한 스킴(Info.plist의 CFBundleURLTypes)의 링크를 앱에 Apple Event로 건네고, Tauri는 그것을 `RunEvent::Opened`로
+ * 준다. 딥링크 플러그인을 쓰지 않는 이유: 같은 이벤트를 받는 데 플러그인은 웹뷰에 명령을 더 연다(스킴을 실행 중에 등록하는 것까지).
+ * 여기 더하는 명령은 쌓인 링크를 꺼내는 것 하나다.
+ *
+ * 링크는 남이 지은 글이다. 여기서는 모양만 거른다 — 스킴이 `centralu`이고 길이가 상한 안인 것, 많아야 몇 개. 무엇을 열지의 판정은
+ * 화면(`parseAppLink`)이, 무엇을 읽고 내려받을지는 host(`classifySource`)가, 그리고 그 전에 사람이 확인 창에서 누른다.
+ *
+ * 쌓아 두는 이유: 링크로 앱이 처음 켜질 때는 웹뷰가 듣기 전에 링크가 온다. 그래서 이벤트(`app-link`)는 "꺼내 가라"는 초인종일
+ * 뿐이고 링크는 `take_app_links`로 꺼낸다 — 한 링크가 이벤트와 꺼내기로 두 번 가지 않는다.
+ */
+const APP_LINK_MAX_CHARS: usize = 4096;
+const APP_LINKS_KEPT: usize = 8;
+
+#[derive(Default)]
+struct AppLinks(std::sync::Mutex<Vec<String>>);
+
+/** 받을 모양인가 — `centralu:`로 시작하고(대소문자 무시) 상한 안의 길이 */
+fn accept_app_link(url: &str) -> Option<String> {
+    if url.len() > APP_LINK_MAX_CHARS {
+        return None;
+    }
+    let scheme = url.get(..9)?;
+    if !scheme.eq_ignore_ascii_case("centralu:") {
+        return None;
+    }
+    Some(url.to_string())
+}
+
+/** 쌓인 앱 링크를 꺼낸다 — 꺼낸 것은 비운다(한 번만 간다) */
+#[tauri::command]
+fn take_app_links(links: State<'_, AppLinks>) -> Vec<String> {
+    let mut held = links.0.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *held)
+}
+
+/** OS가 건넨 링크를 받는다 — 거르고, 쌓고, 웹뷰를 깨우고, 창을 앞으로 (링크를 누른 사람은 확인 창을 봐야 한다) */
+#[cfg(target_os = "macos")]
+fn receive_app_links<'a>(app: &AppHandle, urls: impl Iterator<Item = &'a str>) {
+    let mut took = false;
+    {
+        let state = app.state::<AppLinks>();
+        let mut held = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        for u in urls {
+            if let Some(link) = accept_app_link(u) {
+                if held.len() < APP_LINKS_KEPT {
+                    held.push(link);
+                    took = true;
+                }
+            }
+        }
+    }
+    if !took {
+        return;
+    }
+    let _ = app.emit("app-link", ());
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod app_link_tests {
+    use super::accept_app_link;
+
+    #[test]
+    fn only_centralu_links_under_the_cap() {
+        assert_eq!(
+            accept_app_link("centralu://app?url=https://example.com/a.zip").as_deref(),
+            Some("centralu://app?url=https://example.com/a.zip")
+        );
+        assert!(accept_app_link("CENTRALU://app?url=x").is_some());
+        for bad in ["https://example.com/a.zip", "file:///etc/passwd", "centralux://app", "central", ""] {
+            assert_eq!(accept_app_link(bad), None, "{bad}");
+        }
+        let long = format!("centralu://app?url=https://example.com/{}", "a".repeat(4096));
+        assert_eq!(accept_app_link(&long), None);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[cfg(target_os = "macos")]
 mod traffic_lights;
@@ -406,6 +490,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(supervisor.clone())
         .manage(QuitApproved(quit_approved.clone()))
+        .manage(AppLinks::default())
         // 명령을 더하면 build.rs의 목록과 capabilities/default.json의 `allow-<명령>`도 같이
         // 더한다. 권한이 없는 명령은 메인 창에서도 거절된다 (#143).
         .invoke_handler(tauri::generate_handler![
@@ -420,7 +505,8 @@ pub fn run() {
             focus_window,
             window_controls_inset,
             shortcut_keys,
-            quit_app
+            quit_app,
+            take_app_links
         ])
         /*
          * ⌘W·빨간 단추 = 창 닫기. 창 하나짜리 앱이라 닫기는 곧 종료다 — 즉시 닫는
@@ -455,6 +541,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Tauri 앱을 생성하지 못했습니다")
         .run(move |app, event| {
+            // 앱 링크 (M4 E-4) — OS가 건넨 `centralu://` 링크. 앱이 이 링크로 처음 켜진 때도 여기로 온다
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Opened { urls } = &event {
+                receive_app_links(app, urls.iter().map(|u| u.as_str()));
+                return;
+            }
             /*
              * 종료 관문 (도그푸딩 2026-09-04). 사람이 모달에서 확인하기 전에는 종료를
              * 막고 웹뷰에 묻는다 — quit_app만이 플래그를 세우므로, 그 뒤에 다시 도착하는
