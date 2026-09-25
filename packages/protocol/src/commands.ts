@@ -1067,8 +1067,30 @@ export const RpcMethods = {
       id: z.string(),
       name: z.string(),
       description: z.string().optional(),
+      /** 만드는 세션의 도구 (C-2). 없으면 프로젝트의 기본 도구(사용자 폴더 앱은 오케스트레이터의 도구) */
+      tool: ToolName.optional(),
     }),
-    result: z.object({ app: ExternalAppInfo }),
+    /**
+     * 앱을 만들면 그 앱의 만드는 세션도 선다 (C-2). 세션이 서지 못해도 앱은 남는다 — `builder`가 null이고
+     * `builderError`가 이유다. 그때는 `apps.createBuilder`로 다시 세운다.
+     */
+    result: z.object({ app: ExternalAppInfo, builder: SessionInfo.nullable(), builderError: z.string().optional() }),
+  },
+  /**
+   * 그 앱의 만드는 세션 (M4 C-2) — "앱 X의 만드는 세션 열기". 없으면(세우지 않았거나 지웠으면) null이다.
+   * 프로젝트 앱의 만드는 세션은 cwd가 프로젝트 뿌리이고, 사용자 폴더 앱의 것은 앱 폴더다.
+   */
+  'apps.builder': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: SessionInfo.nullable(),
+  },
+  /**
+   * 그 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다(앱마다 하나). 손으로 만든 앱이나 만드는
+   * 세션을 지운 앱에 쓴다. 신뢰하지 않은 프로젝트의 앱은 거절한다(그 앱은 뜨지 않아 시험할 수 없다).
+   */
+  'apps.createBuilder': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable(), tool: ToolName.optional() }),
+    result: SessionInfo,
   },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */

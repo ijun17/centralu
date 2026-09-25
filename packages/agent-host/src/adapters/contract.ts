@@ -173,7 +173,18 @@ export type OrchestratorTools = {
     id: string
     name: string
     description?: string
-  }): Promise<{ ok: boolean; error?: string; appId?: string; projectId?: string | null; dir?: string }>
+    /** 만드는 세션의 도구 (C-2). 없으면 프로젝트의 기본 도구 */
+    tool?: ToolName
+  }): Promise<{
+    ok: boolean
+    error?: string
+    appId?: string
+    projectId?: string | null
+    dir?: string
+    /** 함께 선 만드는 세션 (C-2) — 서지 못했으면 없고 `builderError`가 이유다 */
+    builder?: { sessionId: string; name: string }
+    builderError?: string
+  }>
 }
 
 /**
