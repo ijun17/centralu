@@ -75,10 +75,23 @@ function embedJson(value: unknown): string {
     .replace(/\u2029/g, '\\u2029')
 }
 
+/**
+ * 프록시 페이지의 색 체계 — 호스트 화면과 같아야 한다(UI의 `html { color-scheme: dark }`, AppFrame이 화면에 넘기는 `theme: 'dark'`).
+ *
+ * 프록시를 싣는 iframe은 호스트 문서의 `dark`를 물려받는다. iframe과 그 안 문서의 색 체계가 다르면 Chromium은 안 문서의 바탕을
+ * **불투명하게** 칠한다(CSS Color Adjustment: 어두운 곳에 박힌 밝은 문서가 읽히게 하려는 규칙). 색 체계를 말하지 않은 프록시는 밝은
+ * 문서라 흰 캔버스가 앱 화면 전체를 덮었고, 호스트의 밝은 글자색을 쓰는 템플릿 화면은 흰 바탕 위에서 읽히지 않았다. 같은 체계를
+ * 말하면 투명하다 — 안쪽 프레임도 `dark`를 물려받으므로, 받은 테마로 색 체계를 말하는 앱 화면(ext-apps의 `applyDocumentTheme`, 우리
+ * 템플릿)도 투명하게 호스트의 바탕 위에 선다. 말하지 않는 앱은 Chromium이 제 밝은 캔버스를 깔아 준다(검은 기본 글자가 읽힌다).
+ * WKWebView는 하위 프레임을 늘 투명하게 두므로 Tauri에서는 보이는 것이 바뀌지 않는다 — 이 페이지에는 iframe 말고 그릴 것이 없다.
+ */
+const HOST_COLOR_SCHEME = 'dark'
+
 export function proxyPageHtml(config: ProxyPageConfig): string {
   return [
     '<!doctype html>',
     '<html><head><meta charset="utf-8"><title>app view</title>',
+    `<meta name="color-scheme" content="${HOST_COLOR_SCHEME}">`,
     '<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style>',
     '</head><body>',
     `<script type="application/json" id="cc-view-config">${embedJson(config)}</script>`,
