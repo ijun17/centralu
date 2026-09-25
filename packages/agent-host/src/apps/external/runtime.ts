@@ -347,10 +347,18 @@ export class ExternalApps {
     name: string,
     args: Record<string, unknown>,
     caller: AppCaller,
-    opts: { signal?: AbortSignal } = {},
+    opts: {
+      signal?: AbortSignal
+      /**
+       * 실행 id가 정해지는 순간 한 번 불린다 — 결말을 기다리지 않고 id를 먼저 알아야 하는 쪽이 쓴다
+       * (A-5의 "오래 걸리는 호출": Codex의 상한 전에 "아직 도는 중, 실행 id는 …"을 먼저 돌려준다).
+       */
+      onRun?: (runId: string) => void
+    } = {},
   ): Promise<AppCallOutcome> {
     const e = this.require(ref)
     const runId = `run_${randomUUID()}`
+    opts.onRun?.(runId)
     const t0 = Date.now()
     /*
      * 기록은 호출이 들어온 순간 `running`으로 한 줄, 끝날 때 결말로 고친다 — 거절도 한 줄이다.

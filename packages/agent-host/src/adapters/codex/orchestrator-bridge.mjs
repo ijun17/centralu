@@ -31,11 +31,17 @@ const URL_ = process.env.CC_HOST_URL
 const TOKEN = process.env.CC_HOST_TOKEN
 const SESSION_ID = process.env.CC_SESSION_ID
 const APP_SERVER = process.env.CC_APP_SERVER || null
+/**
+ * 이보다 오래 걸리는 앱 호출은 host가 실행 id와 "아직 도는 중"을 먼저 돌려준다 (M4 A-5 "오래 걸리는
+ * 호출"). 값은 어댑터가 Codex의 상한 옆에서 정해 넘긴다 — 다리는 나르기만 한다.
+ */
+const APP_WAIT_MS = Number(process.env.CC_APP_WAIT_MS) || undefined
 
 /**
  * 앱 도구 호출 하나를 기다리는 상한. Codex 쪽 상한(`tool_timeout_sec` 300초 — 어댑터가 명시한다)
  * 보다 짧아야 다리가 먼저 이유를 말한다. 다리가 먼저 끊으면 모델은 "다리가 기다리다 그만뒀다"를
- * 읽고, Codex가 먼저 끊으면 이유 없는 시간 초과만 남는다.
+ * 읽고, Codex가 먼저 끊으면 이유 없는 시간 초과만 남는다. host가 먼저 돌려주는 때(APP_WAIT_MS)보다는
+ * 길어야 한다 — 그래야 "아직 도는 중"이 다리를 지나 모델에게 닿는다.
  */
 const APP_CALL_TIMEOUT_MS = 280_000
 
@@ -150,7 +156,7 @@ async function handleApp(id, method, params) {
     try {
       const r = await rpc(
         'apps.sessionCall',
-        { sessionId: SESSION_ID, server: APP_SERVER, name: params?.name, args: params?.arguments ?? {} },
+        { sessionId: SESSION_ID, server: APP_SERVER, name: params?.name, args: params?.arguments ?? {}, ...(APP_WAIT_MS ? { waitMs: APP_WAIT_MS } : {}) },
         APP_CALL_TIMEOUT_MS,
       )
       return ok(id, r)

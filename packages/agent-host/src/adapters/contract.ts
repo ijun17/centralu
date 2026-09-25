@@ -219,8 +219,14 @@ export type SessionApps = {
   onChange(listener: () => void): () => void
   /** 한 앱의 에이전트 도구. 모르면 앱을 띄워 알아낸다(기다리는 시간에 상한이 있다) */
   tools(server: string): Promise<AppToolSpec[]>
-  /** 앱 도구를 부른다 — 호출자는 이 세션이다. 붙지 않은 앱·없는 도구는 거절 결과로 돌아온다 */
-  call(server: string, tool: string, args: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<AppToolResult>
+  /**
+   * 앱 도구를 부른다 — 호출자는 이 세션이다. 붙지 않은 앱·없는 도구는 거절 결과로 돌아온다.
+   *
+   * `waitMs`를 주면 그보다 오래 걸리는 호출은 **실행 id와 "아직 도는 중"을 먼저 돌려준다** — 호출은
+   * 멈추지 않고, 결과는 각 앱 서버의 `run_status` 도구로 이어서 본다. 바깥에 호출 상한이 있는
+   * 도구(Codex 300초)가 쓴다. 상한이 사실상 없는 쪽(Claude의 인프로세스 서버)은 주지 않고 기다린다.
+   */
+  call(server: string, tool: string, args: Record<string, unknown>, opts?: { signal?: AbortSignal; waitMs?: number }): Promise<AppToolResult>
   /**
    * 이 도구가 읽기 전용이라고 앱이 말했나(`readOnlyHint: true`) — 승인 판정(결정 5)의 근거.
    * 붙은 앱의, 이미 읽은 에이전트 도구 목록만 본다. 모르면 false다(묻는 쪽으로 기운다).

@@ -272,3 +272,46 @@ describe('앱 도구의 승인 — 읽기 전용 × 프리셋', () => {
     expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
   })
 })
+
+/**
+ * 오래 걸리는 호출 — Claude의 인프로세스 서버는 호출 상한이 사실상 없다(SDK 기본 약 28시간, sdk.d.ts
+ * `createSdkMcpServer`). 그래서 먼저 돌려주지 않고 기다린다. `run_status`는 그래도 목록에 있다 —
+ * 두 도구가 같은 목록을 본다.
+ */
+describe('오래 걸리는 호출 — Claude는 기다린다', () => {
+  it('run_status가 목록에 읽기 전용으로 오르고, 승인 없이 불린다', async () => {
+    await start(WORKER, { permissionPreset: 'safe' })
+    const { request } = await connect('app-notes')
+    const { tools } = (await request('tools/list')) as { tools: { name: string; annotations?: Record<string, unknown> }[] }
+    expect(tools.find((t) => t.name === 'run_status')?.annotations).toMatchObject({ readOnlyHint: true })
+    const canUseTool = captured.options?.canUseTool as (n: string, i: Record<string, unknown>) => Promise<unknown>
+    expect(await canUseTool('mcp__app-notes__run_status', { run_id: 'run_x' })).toEqual({ behavior: 'allow', updatedInput: { run_id: 'run_x' } })
+  })
+
+  it('240초가 지나도 "아직 도는 중"으로 먼저 돌려주지 않는다 — 끝날 때 결과가 온다', async () => {
+    await start(WORKER)
+    const { request, sent } = await connect('app-notes')
+    await request('tools/list')
+    const realSetTimeout = globalThis.setTimeout
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      // CLI처럼 호출을 보낸다 — 답은 sent에 온다
+      const pipe = (servers()['app-notes'] as unknown as { instance: { server: { transport: { onmessage(m: unknown): void } } } }).instance.server.transport
+      pipe.onmessage({ jsonrpc: '2.0', id: 900, method: 'tools/call', params: { name: 'hold', arguments: {} } })
+      const deadline = performance.now() + 15_000
+      while (!w.records('notes').some((r) => r.t === 'holding')) {
+        if (performance.now() > deadline) throw new Error('the app never started holding')
+        await new Promise((r) => realSetTimeout(r, 10))
+      }
+      // 240초도, Codex의 300초도 넘긴다. 10분에는 런타임의 host → 앱 울타리(callTimeoutMs)가 선다
+      await vi.advanceTimersByTimeAsync(6 * 60_000)
+      expect(sent.find((m) => m.id === 900)).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(w.gate('notes'), '')
+    const answer = await kit.until(() => sent.find((m) => m.id === 900), (m) => m !== undefined, 10_000)
+    expect(answer!.result).toMatchObject({ content: [{ type: 'text', text: 'released' }], isError: false })
+  })
+})

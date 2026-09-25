@@ -1033,9 +1033,18 @@ export const RpcMethods = {
   /**
    * 세션의 에이전트가 붙은 앱의 도구를 부른다 (M4 A-5) — 다리가 부른다. 호출자는 그 세션이고,
    * 런타임의 단 하나의 길을 지난다(공개 범위·실행 id·기록). 결과는 MCP `CallToolResult`의 모양이다.
+   *
+   * `waitMs`: 이보다 오래 걸리면 실행 id와 "아직 도는 중"을 먼저 돌려준다(호출은 계속된다).
+   * 바깥에 상한이 있는 도구(Codex 300초)의 다리가 그 상한보다 짧게 싣는다.
    */
   'apps.sessionCall': {
-    params: z.object({ sessionId: SessionId, server: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) }),
+    params: z.object({
+      sessionId: SessionId,
+      server: z.string(),
+      name: z.string(),
+      args: z.record(z.string(), z.unknown()),
+      waitMs: z.number().int().min(1_000).max(3_600_000).optional(),
+    }),
     result: z.object({
       content: z.array(z.unknown()),
       isError: z.boolean().optional(),
