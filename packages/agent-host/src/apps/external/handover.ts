@@ -22,6 +22,8 @@ import {
 } from './imports.js'
 import type { AppManifest } from './manifest.js'
 import { ensureDirInside } from './scaffold.js'
+import { folderFingerprint } from './fingerprint.js'
+import { AppVersions, VERSIONS_REL, type Snapshot } from './versions.js'
 
 /**
  * 건네기의 host 쪽 (M4 E) — 밖에서 가져온 앱의 대기실과 사람의 확인.
@@ -65,6 +67,8 @@ const CHANGED = 'This app changed what it runs or what it uses since you enabled
 
 export class AppHandover {
   private book: ImportBook
+  /** git 밖의 앱(사용자 폴더 앱)의 판 (E-1) */
+  private versions: AppVersions
   private staged = new Map<string, Staged>()
   private limits: ImportLimits
   private stagingRoot: string
@@ -74,6 +78,7 @@ export class AppHandover {
     private opts: HandoverOptions = {},
   ) {
     this.book = new ImportBook(host.dataRoot)
+    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, '_user'))
     this.limits = { ...IMPORT_LIMITS, ...opts.limits }
     this.stagingRoot = join(host.dataRoot, STAGING_REL)
     // 지난 host가 남긴 대기실 — 들이지 않은 것이라 버린다(다시 가져오면 된다)
@@ -150,6 +155,8 @@ export class AppHandover {
     renameSync(s.appDir, dir)
     this.book.mark(id, dir, s.review.source)
     if (opts.enable) this.book.confirm(id, manifest)
+    // 들어온 그대로를 첫 판으로 떠 둔다 (E-1) — 만드는 세션이 고치다 망가뜨려도 가져온 판으로 돌아갈 수 있다
+    this.snapshot(id, dir, 'imported')
     this.cancel(token)
     this.host.rescanUser()
     return id
@@ -200,6 +207,40 @@ export class AppHandover {
     if (reviewKey(app.manifest) !== key) throw new ImportRefused('This app changed since you reviewed it. Review it again')
     this.book.confirm(appId, app.manifest)
     this.host.changed()
+  }
+
+  // ── 판 (E-1) ──────────────────────────────────────────────────────────────────
+
+  /**
+   * 사용자 폴더 앱의 지금 코드를 판으로 떠 둔다 — 같은 지문의 판이 있으면 아무것도 하지 않는다. **실패는 던지지 않는다**: 판을 못 뜬
+   * 것이 앱이 뜨는 것을 막으면 안 된다. 까닭은 host의 로그에 남긴다.
+   */
+  snapshot(appId: string, dir: string, reason: string, stamp?: string): Snapshot | null {
+    try {
+      return this.versions.capture(appId, dir, reason, stamp)
+    } catch (e) {
+      console.error(`[apps] could not keep a version of user/${appId}: ${(e as Error).message}`)
+      return null
+    }
+  }
+
+  /** 한 앱의 판, 최근 것부터 — 지금 폴더의 지문과 같은 판에 `current`가 선다 */
+  versionsOf(appId: string, dir: string): (Snapshot & { current: boolean })[] {
+    const now = folderFingerprint(dir)
+    return this.versions.list(appId).map((s) => ({ ...s, current: s.stamp === now }))
+  }
+
+  /**
+   * 판 하나를 앱 폴더에 되쓴다 — 되쓰기 전에 지금 폴더를 판으로 떠 둔다(되돌리기도 되돌릴 수 있게). 다시 띄우는 것은 부른 쪽(런타임)이
+   * 한다: 진행 중인 호출과 반영의 규칙이 거기 있다.
+   */
+  restore(appId: string, id: string, dir: string): Snapshot {
+    this.snapshot(appId, dir, 'before restore')
+    try {
+      return this.versions.restore(appId, id, dir)
+    } catch (e) {
+      throw new ImportRefused((e as Error).message)
+    }
   }
 
   /** 앱이 사용자 폴더에서 치워졌다 — 표시도 걷는다 */

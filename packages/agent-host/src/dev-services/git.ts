@@ -191,6 +191,31 @@ export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
     })
 }
 
+/**
+ * 한 경로를 건드린 커밋 (M4 E-1) — 프로젝트 앱의 판은 git이라, 그 앱 폴더(`.centralu/apps/<id>`)의 최근 커밋을 보인다. 경로는 `--` 뒤에
+ * 따로 넘긴다(옵션으로 읽히지 않게). 이름이 바뀐 폴더의 옛 커밋까지 따라가지는 않는다(`--follow`는 파일 하나에만 된다).
+ */
+export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<{ repo: boolean; commits: GitCommit[] }> {
+  if (!(await isRepo(cwd))) return { repo: false, commits: [] }
+  const SEP = '\x1f'
+  let stdout: string
+  try {
+    stdout = await git(cwd, ['log', '--topo-order', `-n${limit}`, `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`, '--', assertLexicalGitPath(cwd, rel)])
+  } catch {
+    return { repo: true, commits: [] } // 커밋이 하나도 없는 저장소
+  }
+  return {
+    repo: true,
+    commits: stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [sha = '', shortSha = '', subject = '', author = '', when = '0', parents = ''] = line.split(SEP)
+        return { sha, shortSha, subject, author, when: Number(when) * 1000, parents: parents.split(' ').filter(Boolean) }
+      }),
+  }
+}
+
 export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }> {
   if (!(await isRepo(cwd))) return { files: [], diff: '', truncated: false }
   const files = (await git(cwd, ['show', '--pretty=format:', '--name-only', sha])).split('\n').filter(Boolean)

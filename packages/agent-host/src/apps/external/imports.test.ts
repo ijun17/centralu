@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AppReview, ExternalAppInfo } from '@cc/protocol'
+import { AppReview, ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { STAGING_REL, type HandoverOptions } from './handover.js'
@@ -114,6 +114,8 @@ describe('들이기 전에 사람이 볼 것', () => {
       { path: '.env', why: 'hidden' },
     ])
     expect(review.reviewKey).toMatch(/^[0-9a-f]{64}$/)
+    // RPC의 답이 될 모양 그대로다
+    expect(AppReview.safeParse(review).success).toBe(true)
     // 준비는 들이는 것이 아니다 — 목록에 없고, 사용자 폴더에도 없다
     expect(info('notes')).toBeUndefined()
     expect(userApps()).toEqual([])
@@ -148,6 +150,7 @@ describe('가져온 앱은 꺼진 채 들어오고, 사람이 켜기 전에는 �
     const dir = plantSource('notes-src', 'notes', {}, { server: { command: process.execPath, args: [APP, '--env', 'API_KEY'] } })
     const { app, review } = await importApp(dir)
     expect(app).toMatchObject({ appId: 'notes', projectId: null, status: 'unconfirmed', imported: { source: dir, confirmedAt: null } })
+    expect(ExternalAppInfo.safeParse(app).success).toBe(true)
     expect(app.error).toContain('not enabled yet')
 
     const refused = await rt.call(userRef('notes'), 'env', {}, { kind: 'view' })

@@ -19,6 +19,7 @@ import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffol
 import { SecretStore, redactor, secretValueProblem } from './secrets.js'
 import type { AppRef } from './ref.js'
 import { AppHandover, type HandoverOptions } from './handover.js'
+import type { Snapshot } from './versions.js'
 import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
 /**
@@ -1194,6 +1195,33 @@ export class ExternalApps {
     return this.info(this.require(ref))
   }
 
+  // ── 건네기: 판 (E-1) ────────────────────────────────────────────────────────────
+
+  /** git 밖의 앱의 판 — 사용자 폴더 앱만(프로젝트 앱의 판은 git이고, 그것은 host의 코어가 읽는다) */
+  snapshots(ref: AppRef): (Snapshot & { current: boolean })[] {
+    if (ref.projectId !== null) throw new AppUnavailableError('Project apps are versioned by git')
+    this.rescanUser()
+    return this.handover.versionsOf(ref.appId, this.require(ref).dir)
+  }
+
+  /**
+   * 판 하나로 되돌린다 — 지금 코드를 판으로 떠 둔 뒤 되쓰고, 사람이 고른 코드라 연달아 실패한 셈을 지우고, **그 코드로 다시 띄운다**
+   * (한 번이라도 떴던 앱이면. 진행 중인 호출은 끝나기를 기다린다 — 반영과 같은 길이다). 매니페스트까지 바뀌었으면 새 칸이 서고
+   * 옛 프로세스는 호출을 마친 뒤 내려간다. 가져온 앱의 판이 다른 server·uses를 가졌으면 그 칸은 다시 확인을 기다린다.
+   */
+  restoreVersion(ref: AppRef, id: string): ExternalAppInfo {
+    if (ref.projectId !== null) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
+    this.rescanUser()
+    const before = this.require(ref)
+    this.handover.restore(ref.appId, id, before.dir)
+    this.rescanUser()
+    const e = this.require(ref)
+    Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+    void this.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
+    this.appsChanged()
+    return this.info(e)
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     this.watchers.close()
@@ -1373,6 +1401,8 @@ export class ExternalApps {
        * 떴으면 한 번 더 잰다: 뜨면서 제 폴더에 무언가 쓰는 앱을 "바뀌었다"로 읽어 끝없이 다시 띄우지 않게.
        */
       L.stamp = folderFingerprint(e.dir)
+      // git 밖의 앱은 이제 돌 코드를 판으로 떠 둔다 (E-1) — 같은 코드면 아무것도 하지 않는다. 판을 못 떠도 앱은 뜬다
+      if (e.ref.projectId === null) this.handover.snapshot(e.ref.appId, e.dir, 'started', L.stamp)
       let proc: AppProcess
       try {
         proc = await AppProcess.start(this.spawnSpec(e, pipeId))

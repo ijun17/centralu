@@ -1,9 +1,11 @@
+import { relative } from 'node:path'
 import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
 import type { CommandRunner } from './dev-services/commands.js'
 import { findStrays, stopStrays } from './dev-services/strays.js'
+import { gitLogPath } from './dev-services/git.js'
 
 /** 내부 핸들 → 프로토콜 모양 (history는 그때그때 스냅샷으로 뜬다) */
 const toInfo = (h: TerminalHandle) => ({
@@ -361,6 +363,24 @@ export function createRpcHandler(
     'apps.enable': async (p) => {
       const { appId, projectId, reviewKey } = RpcMethods['apps.enable'].params.parse(p)
       return requireExternalApps().enableApp({ appId, projectId }, reviewKey)
+    },
+    /*
+     * 앱의 판 (M4 E-1). 사용자 폴더 앱은 런타임이 떠 둔 스냅샷이고, 프로젝트 앱은 git이다 — 그 앱 폴더를 건드린 최근 커밋을 여기(코어)서
+     * 읽는다. 런타임은 git을 모른다(`host-app-runtime-physics-only`): 판을 무엇으로 두는지가 앱의 자리에 따라 갈리는 것은 코어의 판단이다.
+     */
+    'apps.versions': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.versions'].params.parse(p)
+      const apps = requireExternalApps()
+      if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, ...s }) => s) }
+      const project = (await mgr.listProjects()).find((x) => x.id === projectId)
+      const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
+      if (!project || !app) throw Object.assign(new Error(`그런 앱이 없습니다: ${projectId}/${appId}`), { code: 'internal' })
+      const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
+      return { kind: 'git' as const, repo, commits }
+    },
+    'apps.restoreVersion': async (p) => {
+      const { appId, projectId, id } = RpcMethods['apps.restoreVersion'].params.parse(p)
+      return requireExternalApps().restoreVersion({ appId, projectId }, id)
     },
     'apps.create': async (p) => mgr.createApp(RpcMethods['apps.create'].params.parse(p)),
     'apps.builder': async (p) => {

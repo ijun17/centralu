@@ -7,6 +7,7 @@ import type {
   AppQuestion,
   AppReview,
   AppRun,
+  AppVersions,
   ApprovalDecision,
   ApprovalScope,
   Attachment,
@@ -721,6 +722,16 @@ export interface AppsPort {
   review(appId: AppId, projectId: string | null): Promise<AppReview>
   /** 가져온 앱을 켠다 — `reviewKey`는 사람이 본 창의 열쇠다. 그 사이 매니페스트가 바뀌었으면 host가 거절한다 */
   enable(appId: AppId, projectId: string | null, reviewKey: string): Promise<ExternalAppInfo>
+  /**
+   * 앱의 판 (M4 E-1) — 사용자 폴더 앱은 host가 떠 둔 스냅샷(최근 것부터, 지금 코드와 같은 판에 `current`), 프로젝트 앱은 그 앱 폴더를
+   * 건드린 최근 커밋(git이 판이다, 읽기만 한다).
+   */
+  versions(appId: AppId, projectId: string | null): Promise<AppVersions>
+  /**
+   * 사용자 폴더 앱을 떠 둔 판으로 되돌린다 (M4 E-1) — host가 지금 코드를 판으로 떠 둔 뒤 되쓰고 그 코드로 다시 띄운다. 프로젝트 앱은
+   * host가 거절한다(되돌리는 자리는 git이다).
+   */
+  restoreVersion(appId: AppId, projectId: string | null, id: string): Promise<ExternalAppInfo>
 }
 
 /**

@@ -516,6 +516,29 @@ export const GitCommit = z.object({
 export type GitCommit = z.infer<typeof GitCommit>
 
 /**
+ * 앱의 판 (M4 E-1). git 밖의 앱(사용자 폴더 앱, 가져온 앱 포함)은 host가 코드가 바뀌어 뜰 때마다 떠 둔 스냅샷이고(최근 5벌), 프로젝트
+ * 앱은 git이 판이라 그 앱 폴더를 건드린 최근 커밋이다(읽기만 한다 — 되돌리기는 git으로 한다).
+ *
+ * 스냅샷의 `current`는 지금 앱 폴더의 코드가 그 판과 같다는 뜻이다(폴더 지문이 같다). `reason`은 떠 둔 까닭이다: `started`(그 코드로
+ * 떴다), `imported`(들어온 그대로), `before restore`(되돌리기 직전의 코드).
+ */
+export const AppSnapshot = z.object({
+  id: z.string(),
+  at: z.number(),
+  files: z.number(),
+  bytes: z.number(),
+  reason: z.string(),
+  current: z.boolean(),
+})
+export type AppSnapshot = z.infer<typeof AppSnapshot>
+
+export const AppVersions = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('snapshots'), snapshots: z.array(AppSnapshot) }),
+  z.object({ kind: z.literal('git'), repo: z.boolean(), commits: z.array(GitCommit) }),
+])
+export type AppVersions = z.infer<typeof AppVersions>
+
+/**
  * 고를 수 있는 모델 한 종류.
  *
  * **목록을 우리가 적지 않는다.** 도구가 공식 API로 알려주는 것을 그대로 나른다
