@@ -71,6 +71,47 @@ export type RunLedger = {
 }
 
 /**
+ * 기록이 바뀐 것을 알리는 기록 (M4 D-6) — 줄이 서고(`begin`), 세션이 이어지고(`link`), 끝날 때(`end`), **그 줄이 보이는 기록 판의
+ * 앱마다** `announce`를 부른다. 한 앱의 기록 판은 그 앱의 줄과 그 아래의 사슬을 싣는다(`listAppRuns`) — 그래서 줄 하나는 제 앱과,
+ * 부모를 따라 올라간 사슬 위의 앱들의 판에 보인다.
+ *
+ * 줄마다 그 앱들을 **줄이 설 때** 정해 들고 있는다. 부모는 그때 열려 있다(열린 실행 아래에만 줄이 선다 — 부모가 없는 거절의 줄은
+ * 제 앱뿐이다). 끝날 때 다시 따라 올라가지 않는 이유: 부모가 먼저 끝났으면 사슬이 끊겨 위의 판이 이 줄의 끝을 못 듣는다.
+ *
+ * "바뀌었다"(`emitChanged`)와 다른 신호인 이유: 그쪽은 앱 안의 값이 바뀌었다는 뜻이라 열린 화면이 다시 읽는다. 읽기 전용 도구의
+ * 호출은 그것을 내지 않는다(내면 화면의 다시 읽기가 고리가 된다, #190). 그런데 읽기 전용 도구도 에이전트를 부탁해 몇 분짜리 사슬을
+ * 세울 수 있다 — 기록 판은 그것을 들어야 하고, 화면은 듣지 않아야 한다.
+ */
+export function announcingLedger(inner: RunLedger, announce: (app: { projectId: string | null; appId: string }) => void): RunLedger {
+  type App = { projectId: string | null; appId: string }
+  const open = new Map<string, App[]>()
+  const tell = (apps: readonly App[] | undefined) => {
+    for (const a of apps ?? []) announce(a)
+  }
+  return {
+    ...inner,
+    begin(row) {
+      inner.begin(row)
+      const apps: App[] = [{ projectId: row.projectId, appId: row.appId }]
+      for (const up of row.parentRunId ? (open.get(row.parentRunId) ?? []) : []) {
+        if (!apps.some((a) => a.projectId === up.projectId && a.appId === up.appId)) apps.push(up)
+      }
+      open.set(row.id, apps)
+      tell(apps)
+    },
+    link(id, sessionId) {
+      inner.link(id, sessionId)
+      tell(open.get(id))
+    },
+    end(id, e) {
+      inner.end(id, e)
+      tell(open.get(id))
+      open.delete(id)
+    },
+  }
+}
+
+/**
  * 키 순서를 고정한 JSON. 같은 인자가 키 순서만 달라 다른 해시가 되면 "같은 입력으로 또
  * 실패했다"를 셀 수 없다.
  */

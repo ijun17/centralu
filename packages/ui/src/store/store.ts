@@ -641,6 +641,11 @@ export type AppState = {
    */
   externalAppChangedBy: Record<string, string | null>
   /**
+   * 외부 앱마다 "기록 판에 보이는 줄이 서거나 끝났다"를 들은 횟수 (M4 D-6, `external_app_runs_changed`). 열쇠는 `externalAppKey`다.
+   * 기록 판(RunsPanel)만 듣는다 — 화면에는 가지 않는다. 읽기 전용 도구의 호출과 그것이 세운 사슬도 여기로 온다.
+   */
+  externalAppRunChanges: Record<string, number>
+  /**
    * 발견된 외부 앱과 그 상태 (M4 A-8) — host의 `apps.list` 사본이다. 정본은 host다: 여기서 고치지
    * 않고, `external_apps_changed`가 오면 통째로 다시 읽는다. 내장 앱(`APPS`)과 합친 한 목록은
    * `app-catalog.ts`가 만든다. 스토어는 여전히 내장 앱 명부를 모른다(순환 금지).
@@ -1693,6 +1698,7 @@ export const useStore = create<AppState>((set, get) => ({
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
   apps: {} as Record<AppId, { doc: unknown; enabled: boolean }>,
   externalAppChanges: {},
+  externalAppRunChanges: {},
   externalAppChangedBy: {},
   externalApps: [] as ExternalAppInfo[],
   appQuestions: [] as AppQuestion[],
@@ -2112,6 +2118,13 @@ export const useStore = create<AppState>((set, get) => ({
         externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 },
         externalAppChangedBy: { ...s.externalAppChangedBy, [key]: by },
       }))
+      return
+    }
+
+    // 외부 앱의 기록이 바뀌었다 (M4 D-6) — 세기만 한다. 그 앱의 기록 판이 이 수의 변화로 다시 읽는다. 화면은 이것을 듣지 않는다
+    if (e.type === 'external_app_runs_changed') {
+      const key = externalAppKey(e.projectId, e.appId)
+      set((s) => ({ externalAppRunChanges: { ...s.externalAppRunChanges, [key]: (s.externalAppRunChanges[key] ?? 0) + 1 } }))
       return
     }
 

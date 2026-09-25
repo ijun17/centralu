@@ -207,8 +207,11 @@ agent reads its whole context again on every call and that is the use the person
 - Shown beside a pinned view (the Runs panel): time, tool, caller (with the session's name), status,
   duration, and the reason of a failure. Reading one app's runs returns its rows **and the chain
   under them** (the other apps it called, the requests it and they made), and the panel indents each
-  row under the one that caused it, jumps to an agent's session ("Open session"), and re-reads every
-  2 s while a row is still running. Above the list: the answers the person gave to this app's
+  row under the one that caused it, jumps to an agent's session ("Open session"), and re-reads
+  whenever a row it shows begins, gets its agent session, or ends: the host announces that per app
+  (`external_app_runs_changed`, coalesced like §6.3's notification) for every row of the app and of
+  the chain under it, a read-only tool's call and the agent run it asked for included. Open views do
+  not hear it; they still get no "changed" for a read-only call (§6.3). Above the list: the answers the person gave to this app's
   capability questions (forgettable), and its agent use over the last day and 30 days (runs,
   duration, tokens).
 
@@ -580,7 +583,8 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `projects.setTrusted` | Trust (§3) |
 
 Events: `external_apps_changed` (the list or an app's status changed: read `apps.list` again),
-`external_app_state_changed` (§6.3), `external_app_questions_changed` (a capability question
+`external_app_state_changed` (§6.3), `external_app_runs_changed` (a row this app's Runs panel shows
+began or ended: read `apps.runs` again, §5.2), `external_app_questions_changed` (a capability question
 opened or closed: read `apps.questions` again), and `app_view` (an inline view opened, got its
 result, was cancelled, closed or refused; stored without bodies, so a reopened UI can draw
 placeholders). A capability question a session's chain raised is that session's

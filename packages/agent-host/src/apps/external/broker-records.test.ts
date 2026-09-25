@@ -173,3 +173,62 @@ describe('문지기가 받지 않은 부탁도 한 줄이다 — 부모 없이',
     expect(ledger.rows.filter((r) => r.parentRunId === otherRun).map((r) => r.appId)).toEqual(['other'])
   })
 })
+
+/**
+ * 기록 판의 신호 (D-6) — 실측: 앱을 만든 에이전트가 `summarize`에 `readOnlyHint: true`를 달았고, 그 아래 25초짜리 `run_agent`
+ * 사슬이 사람이 Refresh를 누를 때까지 기록 판에 보이지 않았다. 읽기 전용 도구의 호출은 "바뀌었다"를 내지 않는다(#190) — 기록 판이
+ * 그 신호에 기대고 있었다. 기록의 줄마다 따로 알리되, 화면이 듣는 "바뀌었다"는 여전히 내지 않는다.
+ */
+describe('기록 판의 신호 — 읽기 전용 도구가 세운 사슬도 기록 판에 닿고, 화면은 깨우지 않는다', () => {
+  it('사슬이 도는 동안 그 줄들이 보이는 판마다 알리고(부른 앱의 판까지), 끝나면 또 알린다 — "바뀌었다"는 하나도 없다', async () => {
+    plant('notes', { apps: ['other'] })
+    plant('other', { agent: true })
+    const runsChanged: string[] = []
+    const changed: string[] = []
+    let release!: () => void
+    rt = new ExternalApps({
+      projects: () => [{ id: 'p1', path: join(root, 'p1'), trusted: true }],
+      dataRoot: join(root, 'data'),
+      reservedIds: [],
+      runs: ledger,
+      emitRunsChanged: (r) => runsChanged.push(r.appId),
+      emitChanged: (r) => changed.push(r.appId),
+      timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    })
+    rt.refresh()
+    rt.attachBrokerHost(
+      fakeBrokerHost({
+        runAgent: async (_req, ctx) => {
+          ctx.onSession('s-agent')
+          await new Promise<void>((r) => (release = r))
+          return { sessionId: 's-agent', text: 'summed up' }
+        },
+      }),
+    )
+    // notes의 읽기 전용 도구 → other의 읽기 전용 도구 → 에이전트
+    const pending = rt.call(
+      ref('notes'),
+      'ask_broker_read',
+      { mode: 'run', tool: 'call_app', args: { app: 'other', tool: 'ask_broker_read', args: { mode: 'run', tool: 'run_agent' } } },
+      SESSION,
+    )
+    await until(brokerRows, (l) => l.length === 1 && l[0]!.sessionId === 's-agent')
+    // 에이전트가 도는 동안: 세 줄(notes, other, 에이전트) 모두 notes의 판에 보인다 — 알림이 이미 그 판에 갔다
+    expect(ledger.rows.map((r) => [r.appId, r.kind, r.status])).toEqual([
+      ['notes', 'tool', 'running'],
+      ['other', 'tool', 'running'],
+      ['other', 'broker', 'running'],
+    ])
+    expect(runsChanged.filter((a) => a === 'notes').length).toBeGreaterThanOrEqual(4) // 제 줄, other의 줄, 에이전트 줄이 서고 세션이 이어졌다
+    expect(runsChanged.filter((a) => a === 'other').length).toBeGreaterThanOrEqual(3)
+    const whileRunning = runsChanged.length
+
+    release()
+    const out = await pending
+    expect(out.status).toBe('ok')
+    // 끝난 세 줄도 알린다 — 에이전트 줄은 두 판에, other의 줄은 두 판에, notes의 줄은 제 판에
+    expect(runsChanged.length - whileRunning).toBe(5)
+    // 읽기 전용 도구만 불렸다 — 화면을 깨우는 신호는 하나도 없다
+    expect(changed).toEqual([])
+  })
+})

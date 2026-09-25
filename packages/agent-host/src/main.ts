@@ -18,7 +18,7 @@ import { storeRunLedger } from './app-run-ledger.js'
 import { storePermissionBook } from './app-permission-book.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { onExternalAppListChanged } from './app-list-events.js'
-import { broadcastAppChanges } from './app-change-events.js'
+import { broadcastAppChanges, broadcastAppRuns } from './app-change-events.js'
 import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -157,6 +157,8 @@ const mgr = new SessionManager(
  */
 // 앱의 "바뀌었다"는 앱마다 모아서 방송한다 — 열린 화면의 다시 읽기가 고리가 되어도 한 앱에 초당 4번까지 (app-change-events.ts)
 const appChanges = broadcastAppChanges((e) => server.broadcast(e))
+// 기록 판의 신호는 따로 모은다 — 읽기 전용 도구가 세운 사슬도 알리되 화면은 깨우지 않는다 (app-change-events.ts)
+const appRunChanges = broadcastAppRuns((e) => server.broadcast(e))
 const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
@@ -167,6 +169,8 @@ const externalApps = new ExternalApps({
   permissions: storePermissionBook(store),
   // 앱에 닿은, 읽기 전용이 아닌 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (UI 스토어가 AppFrame의 changeSignal로 옮긴다)
   emitChanged: appChanges.emit,
+  // 기록 판에 보이는 줄이 서거나 끝날 때마다 — 기록 판이 다시 읽을 신호 (UI 스토어가 RunsPanel로 옮긴다)
+  emitRunsChanged: appRunChanges.emit,
   // 앱 폴더가 바뀌어도 만드는 세션이 턴 안이면 턴 끝까지 기다린다 (C-4) — 턴의 끝은 매니저가 런타임에 알린다
   builderBusy: (ref) => mgr.builderBusy(ref),
 })

@@ -86,8 +86,8 @@ describe('공개 범위 — 양쪽 방향', () => {
   it('에이전트용 목록에는 model 도구만, 화면용에는 app 도구만 오른다', async () => {
     make()
     const names = async (a?: 'model' | 'app') => (await rt.tools(ref('notes'), a)).map((t) => t.name).sort()
-    expect(await names('model')).toEqual(['ask_broker', 'crash', 'echo', 'fail', 'model_only', 'slow', 'whoami'])
-    expect(await names('app')).toEqual(['app_only', 'ask_broker', 'crash', 'echo', 'fail', 'slow', 'whoami'])
+    expect(await names('model')).toEqual(['ask_broker', 'ask_broker_read', 'crash', 'echo', 'fail', 'model_only', 'slow', 'whoami'])
+    expect(await names('app')).toEqual(['app_only', 'ask_broker', 'ask_broker_read', 'crash', 'echo', 'fail', 'slow', 'whoami'])
   })
 
   it('화면은 model 전용 도구를 못 부르고, 세션은 app 전용 도구를 못 부른다 — 앱에 닿지도 않는다', async () => {
