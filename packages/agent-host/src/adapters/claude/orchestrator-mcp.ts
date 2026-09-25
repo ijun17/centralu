@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { OrchestratorTools } from '../contract.js'
 import {
+  BUILDER_INSTRUCTIONS,
   MANAGER_INSTRUCTIONS,
   ORCHESTRATOR_MCP_NAME,
   ORCHESTRATOR_INSTRUCTIONS,
@@ -47,7 +48,10 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
      */
     alwaysLoad: true,
     instructions:
-      profile === 'manager' ? MANAGER_INSTRUCTIONS : profile === 'scoped' ? SCOPED_INSTRUCTIONS : ORCHESTRATOR_INSTRUCTIONS,
+      profile === 'manager' ? MANAGER_INSTRUCTIONS
+      : profile === 'scoped' ? SCOPED_INSTRUCTIONS
+      : profile === 'builder' ? BUILDER_INSTRUCTIONS
+      : ORCHESTRATOR_INSTRUCTIONS,
     // 묶음이 허용하는 것만 노출한다 (#69) — 실행 쪽도 같은 판정을 한 번 더 한다.
     // 앱 도구(#81)도 같은 목록에 합류한다: 실행은 어차피 runOrchestratorTool이 명부로 라우팅한다
     tools: [

@@ -7,6 +7,7 @@ import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, type SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
+import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
@@ -34,6 +35,9 @@ import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 const USER_SCOPE = '_user'
 
 export type AppRef = { projectId: string | null; appId: string }
+
+/** 점검 보고서의 모양도 이 문으로 나간다 (C-3) */
+export type { AppCheckReport, CheckFinding } from './check.js'
 
 /** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
 export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'
@@ -96,6 +100,11 @@ export type RuntimeTiming = {
   callTimeoutMs: number
   /** 앱별 로그 파일 한 세대의 크기 */
   logMaxBytes: number
+  /**
+   * 점검(C-3)이 진행 중인 호출이 끝나기를 기다리는 상한. 넘으면 다시 띄우지 않고 떠 있는 프로세스를 본다 —
+   * 호출을 끊지 않는다는 약속이 점검보다 앞선다.
+   */
+  checkDrainMs: number
 }
 
 export const DEFAULT_TIMING: RuntimeTiming = {
@@ -114,6 +123,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   connectTimeoutMs: 30_000,
   callTimeoutMs: 10 * 60_000,
   logMaxBytes: 1024 * 1024,
+  checkDrainMs: 30_000,
 }
 
 export type ExternalAppsDeps = {
@@ -163,6 +173,8 @@ type Life = {
    */
   epoch: number
   inflight: number
+  /** inflight가 0이 되기를 기다리는 쪽 — 점검(C-3)은 진행 중인 호출을 끊지 않고 기다린 뒤 다시 띄운다 */
+  idleWaiters: (() => void)[]
   idle: NodeJS.Timeout | null
   /** 지금 프로세스의 도구 목록(이름·공개 범위 규칙을 통과한 것)과, 걸러 낸 이유 */
   tools: AppTool[] | null
@@ -609,6 +621,98 @@ export class ExternalApps {
   }
 
   /**
+   * 앱을 점검한다 (M4 C-3) — 만드는 세션의 `check`와 `apps.check`가 부른다. 만드는 에이전트가 사람 대신 자기 앱을
+   * 시험하는 자리다.
+   *
+   *   1. 다시 훑는다 — 방금 고친 매니페스트를 발견과 같은 판정(`parseManifest`)으로 읽는다
+   *   2. **지금 파일로** 다시 띄운다 — 떠 있던 프로세스는 옛 코드일 수 있다. 진행 중인 호출은 끊지 않는다:
+   *      끝나기를 기다리고(`checkDrainMs`), 넘으면 떠 있는 것을 보고 그렇다고 적는다
+   *   3. 도구 목록을 **실제로** 부른다 — S-6에서 깨진 서버도 프로세스는 살아 있었다
+   *   4. 도구가 가리키는 `ui://` 화면을 하나씩 읽는다
+   *   5. 이름·공개 범위·주석·home의 문제를 판정한다(`check.ts`)
+   *
+   * **앱을 이상한 상태로 두지 않는다.** 멈춘(failed) 앱도 점검은 다시 띄워 본다 — 사람이 "다시 시작"을 누른
+   * 것과 같다(연속 실패를 지운다). 그래서 점검을 되풀이해도 앱이 멈춤으로 밀려나지 않는다: 못 뜨면 그 한 번의
+   * 실패(crashed)와 이유가 남고, 뜨면 보통의 떠 있는 앱이 된다(쉬면 내려간다). 점검은 도구를 부르지 않으므로
+   * 실행 기록에 줄을 남기지 않는다.
+   */
+  async check(ref: AppRef): Promise<AppCheckReport> {
+    const label = `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
+    const findings: CheckFinding[] = []
+    const notes: string[] = []
+    let tools: CheckedTool[] = []
+    const screens: { uri: string; chars: number }[] = []
+    let procLine: string | null = null
+    const report = (stderr: string | null) => formatReport(label, { findings, tools, screens }, { process: procLine, notes, stderr })
+
+    const key = ref.projectId ?? USER_SCOPE
+    if (this.scopes.has(key)) this.rescan(key)
+    else this.refresh()
+    const e = this.find(ref)
+    if (!e) {
+      findings.push({ level: 'problem', where: '앱', message: '그런 앱이 없습니다 — 앱 폴더가 지워졌거나 이름이 바뀌었습니다' })
+      return report(null)
+    }
+    for (const w of e.warnings) findings.push({ level: 'warning', where: 'centralu.app.json', message: w })
+    if (!e.manifest) {
+      findings.push({ level: 'problem', where: 'centralu.app.json', message: e.error ?? '매니페스트가 틀렸습니다' })
+      return report(null)
+    }
+    if (!e.scope.trusted) {
+      findings.push({ level: 'problem', where: '신뢰', message: '신뢰하지 않은 프로젝트의 앱이라 띄우지 않습니다 — 프로젝트를 신뢰하면 점검할 수 있습니다' })
+      return report(null)
+    }
+
+    // 지금 파일로 다시 띄운다 — 호출이 끝난 **바로 그 틱에** 내린다(drain 주석)
+    let restarted = false
+    for (;;) {
+      if (e.life.inflight === 0) {
+        const wasStopped = e.life.gaveUp
+        void this.halt(e, 'check: starting again from the files on disk')
+        Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+        if (wasStopped) this.appsChanged()
+        restarted = true
+        break
+      }
+      const busy = e.life.inflight
+      if (!(await this.drain(e, this.timing.checkDrainMs))) {
+        const limit = this.timing.checkDrainMs >= 1000 ? `${Math.round(this.timing.checkDrainMs / 1000)}초` : `${this.timing.checkDrainMs}ms`
+        notes.push(`호출 ${busy}개가 ${limit} 넘게 도는 중이라 다시 띄우지 않았습니다 — 떠 있던 프로세스를 봤습니다(고친 코드가 아닐 수 있습니다)`)
+        break
+      }
+    }
+
+    let stderr: string | null = null
+    try {
+      await this.use(e, async (proc) => {
+        const listed = await proc.client.listTools(undefined, { timeout: this.timing.connectTimeoutMs })
+        proc.tools = listed.tools
+        this.readTools(e, proc)
+        const t = checkTools(e.manifest!, listed.tools)
+        findings.push(...t.findings)
+        tools = t.tools
+        for (const uri of t.screens) {
+          let read: ReadResourceResult | Error
+          try {
+            read = await proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs })
+          } catch (err) {
+            read = err as Error
+          }
+          const s = checkScreen(uri, read)
+          findings.push(...s.findings)
+          screens.push({ uri, chars: s.chars })
+        }
+        procLine = `pid ${proc.child.pid}, ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()}), ${restarted ? '지금 파일로 다시 띄움' : '떠 있던 것'}`
+        stderr = proc.log.tail() || null
+      })
+    } catch (err) {
+      // 뜨지 못했다 — 이유에 표준에러 끝부분이 이미 들어 있다(AppProcess.start)
+      findings.push({ level: 'problem', where: '시작', message: (err as Error).message })
+    }
+    return report(stderr)
+  }
+
+  /**
    * 새 앱을 템플릿으로 만든다 (M4 C-1b) — "새 앱"(`apps.create`)과 오케스트레이터의 `create_app`이 같은 문을 쓴다.
    *
    *   프로젝트 앱     `<프로젝트>/.centralu/apps/<id>/` — 저장소에 커밋되어 팀과 나뉜다 (결정 1의 기본)
@@ -729,8 +833,29 @@ export class ExternalApps {
       return await fn(await this.ensureRunning(e))
     } finally {
       e.life.inflight -= 1
+      if (e.life.inflight === 0) for (const w of e.life.idleWaiters.splice(0)) w()
       this.armIdle(e)
     }
+  }
+
+  /**
+   * 진행 중인 호출이 다 끝날 때까지 기다린다 — `ms` 안에 끝나면 true. 돌려받은 뒤 **같은 틱에** 내려야 한다:
+   * 한 번 양보하면 그 사이에 들어온 호출이 다시 inflight를 올린다(부르는 쪽이 while로 다시 본다).
+   */
+  private drain(e: AppEntry, ms: number): Promise<boolean> {
+    if (e.life.inflight === 0) return Promise.resolve(true)
+    return new Promise((resolve) => {
+      const waiter = () => {
+        clearTimeout(t)
+        resolve(true)
+      }
+      const t = setTimeout(() => {
+        e.life.idleWaiters = e.life.idleWaiters.filter((w) => w !== waiter)
+        resolve(false)
+      }, ms)
+      t.unref()
+      e.life.idleWaiters.push(waiter)
+    })
   }
 
   /**
@@ -1078,6 +1203,7 @@ export class ExternalApps {
         verdict: undefined,
         epoch: 0,
         inflight: 0,
+        idleWaiters: [],
         idle: null,
         tools: null,
         toolWarnings: [],

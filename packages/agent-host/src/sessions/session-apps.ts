@@ -16,8 +16,11 @@ import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runt
  * 이 파일도 그 문만 쓴다.
  */
 
-/** 붙일 앱을 정하는 데 필요한 세션의 모양 — 이것이 결정 4가 보는 전부다 */
-export type AppSessionKey = { id: string; kind: SessionKind; projectId: string | null }
+/**
+ * 붙일 앱을 정하는 데 필요한 세션의 모양 — 이것이 결정 4가 보는 전부다. `builderOf`는 그 세션이 만드는 앱이다
+ * (M4 C-3): 만드는 세션은 자기 앱을 늘 받는다.
+ */
+export type AppSessionKey = { id: string; kind: SessionKind; projectId: string | null; builderOf?: AppRef | null }
 
 /**
  * 도구 목록을 모르는 앱을 띄워 알아낼 때 기다리는 상한.
@@ -114,6 +117,8 @@ export class SessionAppsHub {
    *   프로젝트의 세션        그 프로젝트의 앱 — 신뢰한 프로젝트일 때만. 워크트리 세션도 같은
    *                        프로젝트 id를 가지므로 뿌리의 앱을 받는다(A-2: 인스턴스는 프로젝트당 하나)
    *   그 밖(프로젝트 없음)   없음
+   *   만드는 세션 (C-3)       위에 더해 **자기 앱** — 사용자 폴더 앱의 만드는 세션은 프로젝트가 없어 위 규칙으로는
+   *                        아무것도 받지 못한다. 자기가 만드는 앱의 도구를 불러 보는 것이 그 세션의 일이다
    *
    * 신뢰는 런타임의 상태(`untrusted`)로 읽는다 — 정본은 저장소 하나고 런타임이 그것을 부를
    * 때마다 읽는다. 여기에 사본을 두면 신뢰를 끈 뒤에도 사본이 "예"라고 답한다.
@@ -122,7 +127,11 @@ export class SessionAppsHub {
     return this.rt
       .list()
       .filter((a) => !UNUSABLE.has(a.status))
-      .filter((a) => (session.kind === 'orchestrator' ? a.projectId === null : session.projectId !== null && a.projectId === session.projectId))
+      .filter(
+        (a) =>
+          (session.kind === 'orchestrator' ? a.projectId === null : session.projectId !== null && a.projectId === session.projectId) ||
+          (session.builderOf?.appId === a.appId && session.builderOf.projectId === a.projectId),
+      )
       .map((a) => ({ ref: { projectId: a.projectId, appId: a.appId }, server: appMcpServerName(a.appId) }))
       .sort((x, y) => x.server.localeCompare(y.server))
   }

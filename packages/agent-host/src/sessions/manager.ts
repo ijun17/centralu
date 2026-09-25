@@ -5,7 +5,7 @@ import { proposedMcpServerNameError, profileAllows, registerAppTools, runOrchest
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
-import type { AppRef, ExternalApps } from '../apps/external/runtime.js'
+import type { AppCheckReport, AppRef, ExternalApps } from '../apps/external/runtime.js'
 import { builderRole } from './app-builder.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
@@ -1166,15 +1166,21 @@ export class SessionManager {
           orchestratorTools:
             info.kind === 'orchestrator' ? this.orchestratorToolsFor(id)
             : info.kind === 'coordinator' ? this.orchestratorToolsFor(id, undefined, info.scopeSessionIds ?? [])
+            // 만드는 세션 (M4 C-3): 자기 앱의 check 하나 — 묶음(builder)이 나머지를 막는다
+            : params.builderOf ? this.orchestratorToolsFor(id)
             : undefined,
-          toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : info.kind === 'coordinator' ? 'scoped' : undefined,
+          toolProfile:
+            info.kind === 'orchestrator' ? 'orchestrator'
+            : info.kind === 'coordinator' ? 'scoped'
+            : params.builderOf ? 'builder'
+            : undefined,
           systemPromptAppend:
             info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt()
             // 조율 세션(#80·#81)과 만드는 세션(M4 C-2)의 역할은 창조 시 박제된 roleAppend가 전부다
             : (info.roleAppend ?? undefined),
           // host로 돌아오는 길 — 오케스트레이터 도구의 다리와, 외부 앱의 다리(M4 A-5)가 쓴다
           orchestratorBridge:
-            info.kind === 'orchestrator' || info.kind === 'coordinator' || apps ? (this.endpoint?.() ?? undefined) : undefined,
+            info.kind === 'orchestrator' || info.kind === 'coordinator' || params.builderOf || apps ? (this.endpoint?.() ?? undefined) : undefined,
           // 사람이 승인한 MCP 서버는 사용자 폴더의 앱으로 여기 실린다 (M4 A-7, 결정 4)
           apps,
         },
@@ -1595,6 +1601,8 @@ export class SessionManager {
 
     // 외부 앱 (M4 A-5) — 되살릴 때도 결정 4를 **지금** 다시 본다(그 사이에 앱이 오고 갔을 수 있다)
     const apps = this.appsFor(m)
+    // 만드는 세션이면 자기 앱의 check를 받는다 (C-3) — 명부를 지금 다시 본다(그 사이에 다른 세션이 이었을 수 있다)
+    const builds = this.builderRefOf(m) !== null
     try {
       const creating = adapter.createSession(
         {
@@ -1626,13 +1634,16 @@ export class SessionManager {
               ? this.orchestratorToolsFor(sessionId)
               : m.kind === 'coordinator'
                 ? this.orchestratorToolsFor(sessionId, undefined, m.scopeSessionIds ?? [])
-                : // 워크트리 매니저 (#69): 자식이 있으면 매니저다 — 자식만 보는 도구를 받는다
-                  this.isWorktreeManager(sessionId)
-                  ? this.orchestratorToolsFor(sessionId, sessionId)
-                  : undefined,
+                : builds
+                  ? this.orchestratorToolsFor(sessionId)
+                  : // 워크트리 매니저 (#69): 자식이 있으면 매니저다 — 자식만 보는 도구를 받는다
+                    this.isWorktreeManager(sessionId)
+                    ? this.orchestratorToolsFor(sessionId, sessionId)
+                    : undefined,
           toolProfile:
             m.kind === 'orchestrator' ? 'orchestrator'
             : m.kind === 'coordinator' ? 'scoped'
+            : builds ? 'builder'
             : this.isWorktreeManager(sessionId) ? 'manager' : undefined,
           /*
            * 여기가 **기억을 넘기는 자리**다. 도구를 바꾸면 externalId가 끊겨서
@@ -1647,7 +1658,7 @@ export class SessionManager {
               : // 박제된 역할문 재적용 — 조율 세션은 앱이 꺼져 있어도, 만드는 세션(C-2)은 앱이 깨져 있어도 그대로다
                 (m.roleAppend ?? undefined),
           orchestratorBridge:
-            m.kind === 'orchestrator' || m.kind === 'coordinator' || this.isWorktreeManager(sessionId) || apps
+            m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || this.isWorktreeManager(sessionId) || apps
               ? (this.endpoint?.() ?? undefined)
               : undefined,
           // 승인된 MCP 서버는 사용자 폴더의 앱이다 — 오케스트레이터는 그 앱들을 여기서 받는다 (M4 A-7)
@@ -3395,6 +3406,15 @@ export class SessionManager {
         return { ok: true }
       },
 
+      // 자기 앱의 점검 (C-3) — 어느 앱인지는 부른 세션이 정한다. 만드는 세션이 아니면(명부가 바뀌었으면) 거절한다
+      checkApp: async () => {
+        const self = this.meta.get(orchestratorId)
+        const ref = self ? this.builderRefOf(self) : null
+        if (!ref) return { ok: false, text: '이 세션은 어떤 앱의 만드는 세션도 아닙니다 — 점검할 앱이 없습니다' }
+        const r = await this.checkApp(ref)
+        return { ok: r.ok, text: r.text }
+      },
+
       // 새 앱 (M4 C-1b) — 프로젝트는 이름이나 id로 가리킨다(create_session과 같다). 규칙은 런타임의 문이 정한다
       createApp: async (spec) => {
         let projectId: string | null = null
@@ -3501,6 +3521,22 @@ export class SessionManager {
     // 이름은 사람이 읽을 이 세션의 뜻이다 — 자동 이름이 덮지 않게 사람이 정한 이름 취급 (FR-18)
     this.rename(info.id, `${app.name ?? app.appId} · builder`)
     return this.meta.get(info.id)!
+  }
+
+  /** 이 세션이 만드는 앱 — 만드는 세션이 아니면 null. 띄우기 전(메타에 서기 전)에도 물을 수 있게 세션의 모양을 받는다 */
+  private builderRefOf(m: Pick<SessionInfo, 'id' | 'appId' | 'projectId'>): AppRef | null {
+    if (!m.appId) return null
+    const ref: AppRef = { projectId: m.projectId, appId: m.appId }
+    return this.builderMap()[builderKey(ref)] === m.id ? ref : null
+  }
+
+  /**
+   * 앱을 점검한다 (M4 C-3) — `apps.check`와 만드는 세션의 `check`가 부른다. 판정은 런타임의 문이 한다.
+   */
+  async checkApp(ref: AppRef): Promise<AppCheckReport> {
+    const rt = this.appsHub?.rt
+    if (!rt) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    return rt.check(ref)
   }
 
   private builderMap(): Record<string, string> {
@@ -3866,8 +3902,9 @@ export class SessionManager {
   }
 
   /** 핸들 하나를 위한 앱 붙이기 — 어댑터에 넘기고, 핸들을 닫는 어댑터가 함께 닫는다 */
-  private appsFor(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId'>): SessionApps | undefined {
-    return this.appsHub?.attach({ id: m.id, kind: m.kind, projectId: m.projectId }) ?? undefined
+  private appsFor(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): SessionApps | undefined {
+    // 만드는 세션은 자기 앱을 받는다 (C-3) — 사용자 폴더 앱은 결정 4로는 오케스트레이터에게만 가므로 여기서 더한다
+    return this.appsHub?.attach({ id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.builderRefOf(m) }) ?? undefined
   }
 
   /**
@@ -3880,6 +3917,8 @@ export class SessionManager {
     if (!m) return null
     if (m.kind === 'orchestrator') return 'orchestrator'
     if (m.kind === 'coordinator') return 'scoped'
+    // 만드는 세션 (M4 C-3) — 매니저보다 먼저다: 그 세션이 받은 묶음(check)과 다리가 묻는 묶음이 같아야 한다
+    if (this.builderRefOf(m)) return 'builder'
     return this.isWorktreeManager(sessionId) ? 'manager' : null
   }
 

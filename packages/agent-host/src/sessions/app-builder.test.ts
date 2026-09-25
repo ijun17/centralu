@@ -17,8 +17,11 @@ import { SessionManager } from './manager.js'
  */
 
 class Handle implements SessionHandle {
-  externalId = 'ext-1'
-  constructor(readonly sessionId: string) {}
+  // 세션마다 다른 대화 — 같으면 되살릴 때 "그 대화는 다른 세션이 쥐고 있다"로 막힌다
+  readonly externalId: string
+  constructor(readonly sessionId: string) {
+    this.externalId = `ext-${sessionId}`
+  }
   send() {}
   respondApproval() {
     return false
@@ -185,5 +188,60 @@ describe('그 앱의 만드는 세션으로 찾아진다', () => {
     const r = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: projectId })
     const b = (await rpc('apps.builder', { appId: 'board', projectId })) as SessionInfo
     expect(r.text).toContain(`만드는 세션: Board · builder [${b.id}] — 무엇을 만들지 send_to_session으로 그 세션에 시키세요`)
+  })
+})
+
+describe('만드는 세션은 자기 앱을 시험한다 (C-3)', () => {
+  const servers = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server)
+
+  it('프로젝트 앱의 만드는 세션: 프로젝트의 앱이 붙고, 도구 묶음은 check 하나다', async () => {
+    plantApp(join(repo, ...PROJECT_APPS), 'other', { server: { command: 'node', args: ['server.mjs'] } })
+    rt.refresh()
+    const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    const o = claude.last()
+    expect(servers(o)).toEqual(['app-notes', 'app-other'])
+    expect(o.toolProfile).toBe('builder')
+    expect(o.orchestratorTools).toBeDefined()
+    expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
+    expect(mgr.toolProfileOf(builder!.id)).toBe('builder')
+    // 다리(Codex)가 묻는 목록도 같은 묶음이다
+    const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
+    expect(tools.map((t) => t.name)).toEqual(['check'])
+    await expect(mgr.runOrchestratorTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/이 세션의 도구가 아닙니다: list_sessions/)
+  })
+
+  it('사용자 폴더 앱의 만드는 세션: 자기 앱만 붙는다 (다른 사용자 폴더 앱은 오케스트레이터의 것)', async () => {
+    await create({ projectId: null, id: 'helper', name: 'Helper' })
+    const { builder } = await create({ projectId: null, id: 'timer', name: 'Timer' })
+    expect(servers(claude.last())).toEqual(['app-timer'])
+    // 되살려도 같다
+    claude.seen = []
+    expect((await mgr.restartSession(builder!.id)).resumed).toBe(true)
+    expect(servers(claude.last())).toEqual(['app-timer'])
+    expect(claude.last().toolProfile).toBe('builder')
+    // 붙은 앱의 도구를 진짜로 부른다 — 템플릿의 increment
+    const out = await claude.last().apps!.call('app-timer', 'increment', { by: 2 })
+    expect(out.structuredContent).toEqual({ count: 2 })
+  })
+
+  it('check는 자기 앱을 점검한 보고서를 돌려준다 — 세션이 고르지 않는다', async () => {
+    const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    const viaSession = await mgr.runOrchestratorTool(builder!.id, 'check', { app: 'someone-else' })
+    expect(viaSession.isError).toBeFalsy()
+    expect(viaSession.text).toMatch(new RegExp(`^check ${projectId.slice(0, 8)}/notes: 통과`))
+    // 다리(Codex) 경로도 같은 문이다
+    const viaBridge = (await rpc('orchestrator.tool', { sessionId: builder!.id, name: 'check', args: {} })) as { text: string }
+    expect(viaBridge.text).toContain('show — 읽기, model+app, 화면 ui://notes/index.html')
+    // 화면(UI)이 부르는 apps.check도 같은 판정이다
+    const viaRpc = (await rpc('apps.check', { appId: 'notes', projectId })) as { ok: boolean; findings: unknown[] }
+    expect(viaRpc).toMatchObject({ ok: true, findings: [] })
+  })
+
+  it('오케스트레이터와 보통 세션에는 check가 없다', async () => {
+    const orch = await mgr.orchestrator()
+    expect(((await rpc('orchestrator.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
+    const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(mgr.toolProfileOf(worker.id)).toBeNull()
+    expect(claude.last().toolProfile).toBeUndefined()
   })
 })
