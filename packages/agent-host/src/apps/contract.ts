@@ -140,3 +140,21 @@ export function mcpServerNameError(name: string): string | null {
   return null
 }
 
+/**
+ * 사람에게 **제안되는** MCP 서버 이름의 판정 — 위 규칙에 `app-` 머리 금지를 더한다 (M4 A-5).
+ *
+ * 앱 id에는 이 머리를 막지 않는다(`app-store`라는 앱은 `app-app-store`로 붙어 겹치지 않는다).
+ * 막는 것은 제안된 서버다: 승인된 `app-notes` 서버는 앱 `notes`의 대리 서버와 같은 칸에 들어간다.
+ * 어댑터는 앱을 뒤에 펼쳐 앱이 이기게 하지만, 그러면 사람이 승인한 서버가 말없이 사라진다. 그리고
+ * `app-` 이름의 도구는 앱의 읽기 전용 주석으로 승인을 건너뛸 수 있는 칸이다 — 그 칸의 주인은
+ * 런타임이 아는 앱뿐이어야 한다. 그래서 이름이 들어오는 자리에서 막는다.
+ */
+export function proposedMcpServerNameError(name: string): string | null {
+  const base = mcpServerNameError(name)
+  if (base) return base
+  if (name.startsWith(APP_MCP_PREFIX)) {
+    return `"${APP_MCP_PREFIX}"로 시작하는 이름은 외부 앱이 세션에 붙는 이름입니다 — 다른 이름으로 제안하세요`
+  }
+  return null
+}
+

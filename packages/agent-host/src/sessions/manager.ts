@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
 import { dedupeNearbyHits, windowAround } from './snippet.js'
-import { mcpServerNameError, profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
+import { proposedMcpServerNameError, profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
@@ -3311,8 +3311,9 @@ export class SessionManager {
          * 이름 규칙은 스킬 쪽(바로 아래)과 **일부러 다르다** (#93). 스킬 이름은 역할
          * 프롬프트의 소제목으로만 쓰이지만, MCP 서버 이름은 도구 접두어가 되고
          * 그 접두어가 승인 예외의 판정 기준이다 — 같은 글자라도 값이 다르다.
+         * `app-` 머리는 외부 앱의 자리라 여기서 막는다 (M4 A-5, proposedMcpServerNameError).
          */
-        const nameError = mcpServerNameError(spec.name)
+        const nameError = proposedMcpServerNameError(spec.name)
         if (nameError) return { ok: false, error: nameError }
         const installed = this.mcpServers().some((s) => s.name === spec.name)
         if (installed) return { ok: false, error: `"${spec.name}"은 이미 설치되어 있습니다` }

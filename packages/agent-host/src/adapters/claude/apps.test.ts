@@ -221,3 +221,50 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
     expect(tools.map((t) => t.name)).toContain('added_later')
   })
 })
+
+/**
+ * 앱 도구의 승인 (결정 5): 읽기 전용 주석이 있는 도구는 묻지 않고, 나머지는 세션 프리셋을 따른다.
+ * 판정은 붙은 앱이 **실제로 말한** 주석으로 한다 — 이름이 `app-`로 시작한다고 믿어 주지 않는다.
+ */
+describe('앱 도구의 승인 — 읽기 전용 × 프리셋', () => {
+  /** 실제 승인 콜백. 200ms 안에 답이 없으면 사람에게 물은 것이다 (승인 카드가 떴다) */
+  async function decide(toolName: string): Promise<unknown> {
+    const canUseTool = captured.options?.canUseTool as ((n: string, i: Record<string, unknown>) => Promise<unknown>) | undefined
+    expect(typeof canUseTool).toBe('function')
+    return Promise.race([canUseTool!(toolName, { to: 1 }), new Promise((r) => setTimeout(() => r('asked-the-human'), 200))])
+  }
+  const ALLOW = { behavior: 'allow', updatedInput: { to: 1 } }
+
+  for (const preset of ['safe', 'normal'] as const) {
+    it(`${preset}: 읽기 전용 도구는 묻지 않고, 나머지 앱 도구는 사람에게 묻는다`, async () => {
+      const h = await start(WORKER, { permissionPreset: preset })
+      // 모델이 목록을 받은 뒤의 상황 — CLI가 tools/list를 부른 것과 같다
+      await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-notes')
+
+      expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
+      expect(await decide('mcp__app-notes__poke')).toBe('asked-the-human')
+      // 주석이 없는 도구도 읽기 전용이 아니다
+      expect(await decide('mcp__app-notes__echo')).toBe('asked-the-human')
+    })
+  }
+
+  it('auto: 앱 도구를 포함해 아무것도 묻지 않는다 (콜백 없이 bypassPermissions)', async () => {
+    await start(WORKER, { permissionPreset: 'auto' })
+    expect(captured.options?.canUseTool).toBeUndefined()
+    expect(captured.options?.permissionMode).toBe('bypassPermissions')
+  })
+
+  it('이름만 앱을 흉내 내는 도구는 통과하지 못한다 — 붙지 않은 앱, 모르는 목록, 칸을 더 붙인 이름', async () => {
+    await start(WORKER, { permissionPreset: 'normal' })
+    // 목록을 아직 모른다 — 모델이 우리 목록에서 고른 도구가 아니다
+    expect(await decide('mcp__app-notes__peek')).toBe('asked-the-human')
+    await w.rt.tools({ projectId: 'p1', appId: 'notes' })
+    // 다른 프로젝트의 앱은 이 세션에 붙지 않았다 (읽기 전용 도구가 있어도)
+    await w.rt.tools({ projectId: 'p2', appId: 'other' }).catch(() => {})
+    expect(await decide('mcp__app-other__peek')).toBe('asked-the-human')
+    // 칸을 하나 더 붙여 남의 서버 이름 뒤에 숨은 도구
+    expect(await decide('mcp__app-notes__peek__x')).toBe('asked-the-human')
+    // 이제 목록을 안다 — 같은 이름이 통과한다
+    expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
+  })
+})

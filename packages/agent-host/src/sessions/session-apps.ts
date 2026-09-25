@@ -163,6 +163,18 @@ class Attachment implements SessionApps {
     return toResult(outcome)
   }
 
+  readOnly(server: string, tool: string): boolean {
+    const hit = this.find(server)
+    if (!hit) return false
+    /*
+     * 앱을 띄우지 않고 이미 읽은 목록만 본다. 승인 콜백은 모델이 **이미 본** 목록의 도구를 두고
+     * 불리므로, 목록을 모르는 채로 불렸다면 그 도구는 모델이 우리 목록에서 고른 것이 아니다 —
+     * 그때는 묻는다.
+     */
+    const found = this.hub.rt.knownTools(hit.ref, 'model')?.find((t) => t.name === tool)
+    return found?.annotations?.readOnlyHint === true
+  }
+
   close(): void {
     if (this.closed) return
     this.closed = true
