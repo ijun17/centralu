@@ -146,6 +146,29 @@ test('신뢰하지 않은 프로젝트의 앱은 이유와 함께 서고, 그 �
   await expect(row.getByTestId('external-app-trust')).toHaveCount(0)
 })
 
+test('사용자 폴더의 앱은 목록에서 한 번 물은 뒤 지운다 — 취소하면 아무것도 안 가고, 프로젝트 앱에는 지우기가 없다', async ({ page }) => {
+  await page.goto('/?mock=1')
+  const pid = await addProject(page, '/tmp/alpha')
+  // 승인한 MCP 서버는 화면 없는 사용자 폴더 앱이 된다(A-7)
+  await setApps(page, [app('notes', pid), app('github-mcp', null, { name: 'github-mcp', home: null, description: 'Approved MCP server' })])
+  await openAppsSettings(page)
+  const removed = () => page.evaluate(() => (window as any).__mock.removedApps as string[])
+
+  await expect(page.getByTestId(`external-app-${pid}/notes`).getByTestId('external-app-remove')).toHaveCount(0)
+  const row = page.getByTestId('external-app-_user/github-mcp')
+  await row.getByTestId('external-app-remove').click()
+  await expect(row.getByTestId('external-app-remove-confirm')).toContainText('Its folder moves to the app trash')
+  await row.getByTestId('external-app-remove-cancel').click()
+  await expect(row.getByTestId('external-app-remove-confirm')).toHaveCount(0)
+  expect(await removed()).toEqual([])
+
+  await row.getByTestId('external-app-remove').click()
+  await row.getByTestId('external-app-remove-yes').click()
+  await expect.poll(removed).toEqual(['github-mcp'])
+  // host가 목록을 다시 방송한다 — 줄이 사라진다
+  await expect(row).toHaveCount(0)
+})
+
 /*
  * 고정 화면 (M4 B-2). 목의 `apps.openView`에 진짜 ViewHost를 꽂는다(app-frame.spec.ts와 같은 시험대):
  * 여는 것은 이 워커가 띄운 HostServer·ViewHost의 인스턴스이고, 화면은 공식 ext-apps `App`으로 만든

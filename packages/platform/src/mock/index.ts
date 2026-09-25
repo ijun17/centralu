@@ -635,6 +635,15 @@ export class MockPlatform implements Platform {
      * 실물처럼: 멈췄거나 죽었던 앱의 이유를 지우고 쉬는 앱(`stopped`)으로 세운 뒤 목록 방송을 한다.
      * 띄우지는 않는다 — 다음에 여는 화면이 띄운다.
      */
+    /** 실물처럼: 사용자 폴더 앱만 지우고(프로젝트 앱은 거절), 목록 방송을 한다 */
+    remove: async (appId: string, projectId: string | null) => {
+      if (projectId !== null) throw new Error('프로젝트 앱은 저장소의 파일입니다 — 저장소에서 지우세요')
+      const at = this.externalAppList.findIndex((a) => a.appId === appId && a.projectId === null)
+      if (at === -1) throw new Error(`그런 앱이 없습니다: user/${appId}`)
+      this.externalAppList.splice(at, 1)
+      this.removedApps.push(appId)
+      this.emit({ type: 'external_apps_changed' })
+    },
     runs: async (appId: string, projectId: string | null, limit = 100): Promise<AppRun[]> => {
       this.appRunReads++
       return structuredClone((this.appRuns.get(`${projectId ?? '_user'}/${appId}`) ?? []).slice(0, limit))
@@ -656,6 +665,8 @@ export class MockPlatform implements Platform {
   readonly appRuns = new Map<string, AppRun[]>()
   /** 기록을 몇 번 읽었나 — "바뀌었다"가 오면 다시 읽는지를 시험이 본다 */
   appRunReads = 0
+  /** 지운 사용자 폴더 앱 — 확인을 거친 뒤에만 host에 닿는지를 시험이 본다 */
+  readonly removedApps: string[] = []
   /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */
   readonly openedViews: { appId: string; projectId: string | null }[] = []
   readonly closedViews: string[] = []

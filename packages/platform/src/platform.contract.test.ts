@@ -662,6 +662,14 @@ describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
       rt.refresh()
       await waitFor(() => heard.includes('external_apps_changed'))
       expect((await platform.apps.list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')
+
+      // 사용자 폴더 앱은 지울 수 있고(A-7), 프로젝트 앱은 host가 거절한다
+      plantApp(join(fixture, 'data', 'apps'), 'helper')
+      rt.refresh()
+      await waitFor(async () => (await platform.apps.list()).some((a) => a.appId === 'helper'))
+      await platform.apps.remove('helper', null)
+      expect((await platform.apps.list()).map((a) => a.appId)).toEqual(['notes'])
+      await expect(platform.apps.remove('notes', project.id)).rejects.toThrow(/저장소/)
     } finally {
       off()
       await platform.dispose()

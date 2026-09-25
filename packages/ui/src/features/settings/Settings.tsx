@@ -401,10 +401,17 @@ function AppsSettings() {
  * 외부 앱 한 줄 — 무엇이고, 지금 어떤가, 왜 그런가. 신뢰하지 않은 프로젝트의 앱에는 그 자리에서
  * 신뢰하는 단추가 있다. 이유만 읽히고 할 일을 찾으러 프로젝트 메뉴까지 가야 하면, 이유를 보여 준
  * 보람이 절반이다.
+ *
+ * 사용자 폴더의 앱은 여기서 지운다 (M4 A-7). 승인한 MCP 서버가 화면 없는 앱이 되면서, 예전 명부에는
+ * 없던 "거두기"가 이 한 줄이 된다. 되돌리기 어려운 일이라 한 번 묻는다. 무엇이 남고 무엇이 사라지는지를
+ * 같은 자리에서 말한다. 프로젝트 앱에는 단추가 없다 — 저장소의 파일이라 거두는 자리는 git이고, host도
+ * 거절한다.
  */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
   const trustProject = useStore((s) => s.setProjectTrusted)
+  const removeUserApp = useStore((s) => s.removeUserApp)
+  const [confirming, setConfirming] = useState(false)
   return (
     <li className="rounded border border-edge bg-panel px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
       <div className="flex items-center gap-2 text-[12px] text-chalk">
@@ -432,6 +439,41 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           Trust this project
         </button>
       )}
+      {app.projectId === null &&
+        (confirming ? (
+          <div className="mt-2 rounded border border-edge bg-void px-2.5 py-2" data-testid="external-app-remove-confirm">
+            <p className="text-[11px] leading-relaxed text-ash">
+              Remove {app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.
+            </p>
+            <div className="mt-1.5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-chalk"
+                onClick={() => setConfirming(false)}
+                data-testid="external-app-remove-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded border border-edge bg-panel px-2 py-0.5 text-[11px] text-chalk transition-colors hover:text-beacon"
+                onClick={() => void removeUserApp(app.appId).then((ok) => ok || setConfirming(false))}
+                data-testid="external-app-remove-yes"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-1.5 rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-beacon"
+            onClick={() => setConfirming(true)}
+            data-testid="external-app-remove"
+          >
+            Remove…
+          </button>
+        ))}
     </li>
   )
 }

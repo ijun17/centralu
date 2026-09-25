@@ -432,6 +432,11 @@ export type AppState = {
    */
   externalApps: ExternalAppInfo[]
   refreshExternalApps(): Promise<void>
+  /**
+   * 사용자 폴더의 앱을 지운다 (M4 A-7). 목록은 host의 방송으로 따라온다. 부르는 쪽이 먼저 확인을 받는다.
+   * @returns 지웠는가 — 실패는 토스트로 말한다
+   */
+  removeUserApp(appId: string): Promise<boolean>
   /** 앱 레일 슬롯의 폭 (#81) — 슬롯의 기하는 코어의 것이고(내용만 앱의 것), 보는 방식이라 워크스페이스에 실린다 */
   railWidth: number
   setRailWidth(px: number): void
@@ -2958,6 +2963,18 @@ export const useStore = create<AppState>((set, get) => ({
     if (clamped === get().railWidth) return
     set({ railWidth: clamped })
     get().saveWorkspace()
+  },
+
+  async removeUserApp(appId) {
+    const platform = get().platform
+    if (!platform) return false
+    try {
+      await platform.apps.remove(appId, null)
+      return true
+    } catch (e) {
+      set({ toast: `Could not remove the app: ${(e as Error).message}` })
+      return false
+    }
   },
 
   async refreshExternalApps() {
