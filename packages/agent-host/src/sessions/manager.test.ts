@@ -202,6 +202,40 @@ describe('프로젝트', () => {
   })
 })
 
+/**
+ * 프로젝트 신뢰가 세션에 닿는 때 (M4 결정 3, #92).
+ *
+ * 저장소의 파일(.claude/, .codex/)은 도구 프로세스가 뜰 때 한 번 읽힌다. 그래서 매니저는 **세션을 띄우는
+ * 순간의** 신뢰를 넘기고, 신뢰를 바꿔도 도는 프로세스를 갈아 끼우지 않는다 — 다음에 다시 뜰 때 받는다.
+ */
+describe('프로젝트 신뢰 → 세션 (#92)', () => {
+  it('세션은 뜰 때의 신뢰를 받고, 신뢰가 바뀌면 다음에 다시 뜰 때(재시작) 바뀐 값을 받는다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    // 새로 등록한 프로젝트는 신뢰하지 않은 것이다 (v33의 기본값)
+    expect(adapter.lastOpts?.projectTrusted).toBe(false)
+    const first = adapter.last
+
+    await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
+    // 도는 세션은 그대로다 — 프로세스를 갈아 끼우지 않았다
+    expect(adapter.last).toBe(first)
+
+    await rpc('agents.restartSession', { sessionId: s.id })
+    expect(adapter.last).not.toBe(first)
+    expect(adapter.lastOpts?.projectTrusted).toBe(true)
+
+    // 거두는 것도 같은 길이다
+    await rpc('projects.setTrusted', { projectId: p.id, trusted: false })
+    await rpc('agents.restartSession', { sessionId: s.id })
+    expect(adapter.lastOpts?.projectTrusted).toBe(false)
+  })
+
+  it('프로젝트가 없는 세션(오케스트레이터)은 신뢰하지 않은 것으로 뜬다 — 그 폴더는 워커가 쓸 수 있는 자리다', async () => {
+    await mgr.orchestrator()
+    expect(adapter.lastOpts?.projectTrusted).toBe(false)
+  })
+})
+
 describe('세션 수명주기', () => {
   /*
    * host가 죽으면 세션 프로세스도 함께 죽는다. 그런데 DB에는 마지막 상태가 남아 있어서

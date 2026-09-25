@@ -64,7 +64,8 @@ async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) 
   state.instances.length = 0
   events = []
   handle = await new CodexAdapter().createSession(
-    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', apps: hub.attach(key), orchestratorBridge: BRIDGE, ...over },
+    // 프로젝트의 앱은 신뢰한 프로젝트에만 붙는다(결정 4) — 매니저가 넘기는 것과 같게 그 세션은 신뢰한 프로젝트의 것이다
+    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), orchestratorBridge: BRIDGE, ...over },
     (e) => events.push(e),
   )
   return state.instances[0]!
@@ -104,7 +105,7 @@ describe('thread/start — 앱마다 다리 하나', () => {
     })
     // 오래 걸리는 호출은 Codex의 300초 상한보다 먼저(240초) 실행 id로 돌려받는다 — 값은 다리가 host로 나른다
     expect((servers['app-notes']!.env as Record<string, string>).CC_APP_WAIT_MS).toBe('240000')
-    // 워커다 — 오케스트레이터의 다리도, 문서 막기도 없다
+    // 신뢰한 프로젝트의 워커다 — 오케스트레이터의 다리도, 문서 막기도 없다
     expect(servers).not.toHaveProperty('centralu')
     expect(threadConfig(c, 'thread/start')).not.toHaveProperty('project_doc_max_bytes')
   })

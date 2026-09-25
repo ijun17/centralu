@@ -15,6 +15,26 @@ JSON framing prevents ambiguous transcript-line assembly; it does **not** make t
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
 
+## Repository configuration and project trust
+
+A project the user has not marked trusted cannot change how its sessions ask for approval
+(#92). Claude sessions load only the user's own settings (`settingSources: ['user']`), so
+the repository's `.claude/` settings, local settings, hooks, commands and `CLAUDE.md` do
+not apply. Codex threads are started with the project's paths marked `untrusted` for that
+thread only, and `project_doc_max_bytes = 0`. That keeps the repository's `.codex/config.toml`,
+hooks, exec rules and `AGENTS.md` out, and it stops Codex from persisting the folder as
+trusted in `~/.codex/config.toml` on first use. The user's own settings in `~/.claude` and
+`~/.codex` still decide under the `normal` preset. The orchestrator reads no settings files.
+
+Limits:
+
+- Trust is read when a session's tool process starts. Changing it affects running sessions
+  at their next restart or resume.
+- Codex still loads repository skills (`.codex/skills`, `.agents/skills`) in untrusted
+  folders. They are instructions only; whatever they lead the model to do still passes approval.
+- The Codex behaviour is verified from Codex source and the installed binary's strings, not
+  by a logged-in run.
+
 ## Local transport
 
 The host listens on loopback and requires a token that is not blank — whitespace-only is

@@ -2,9 +2,9 @@ import { execFile } from 'node:child_process'
 import { bridgePath } from './bridge-path.js'
 /** 다리로 붙는 우리 MCP 서버 이름 — elicitation 수락이 이 이름으로 판정한다 (정의는 한 곳, #93) */
 import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { CLIENT_INFO } from '@cc/protocol'
 import type {
@@ -46,10 +46,72 @@ const exec = promisify(execFile)
  * 'workspace-write'로 못박고 있었다. 사용자가 config.toml에 danger-full-access를
  * 적어 두었어도 작업 폴더 밖은 막혀 있었다는 뜻이다 — 묻지도 않고 실패한다.
  */
+/*
+ * "내 설정"은 사용자의 `~/.codex/config.toml`이다 — 저장소의 `.codex/config.toml`은 프로젝트를 신뢰했을
+ * 때만 여기에 끼어든다(repoFilesConfig, #92).
+ */
 function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown> {
   if (preset === 'safe') return { approvalPolicy: 'untrusted', sandbox: 'workspace-write' } // 모든 것을 묻는다
   if (preset === 'auto') return { approvalPolicy: 'never', sandbox: 'workspace-write' } // 묻지 않는다
   return {} // 내 설정을 따른다
+}
+
+/**
+ * 저장소의 파일이 이 스레드를 바꾸지 못하게 한다 (M4 결정 3, #92) — 신뢰하지 않은 프로젝트와, 프로젝트가
+ * 없는 세션(오케스트레이터·조율 세션: 그 폴더는 워커가 쓸 수 있는 자리다). Claude의 `settingSources: ['user']`에
+ * 대응한다. 신뢰한 프로젝트에서는 아무것도 싣지 않는다 — 지금까지와 같다.
+ *
+ * Codex에도 프로젝트 신뢰가 따로 있다(`~/.codex/config.toml`의 `projects."<경로>".trust_level`). 신뢰하지
+ * 않은 폴더에서 Codex는 저장소의 `.codex/config.toml`(승인 정책·샌드박스·MCP 서버를 바꿀 수 있다), 훅,
+ * 실행 규칙(exec policy)을 불러오되 끈다. 문제는 **정해지지 않은** 폴더다: `thread/start`가 cwd를 받았고
+ * 신뢰가 비어 있고 샌드박스가 그 폴더에 쓸 수 있으면, app-server가 그 폴더를 **신뢰한다고 사용자 설정
+ * 파일에 적어 버린다**(codex 소스 app-server `thread_processor.rs`의 `set_project_trust_level(…, Trusted)`).
+ * 그래서 이 앱으로 연 저장소는 Codex 쪽에서는 모두 신뢰된 폴더가 되어 있었다.
+ *
+ * 스레드마다 넘기는 `config`는 CLI의 `-c`와 같은 층(SessionFlags)에 앉고, 신뢰 판정은 그 층까지 합친
+ * 설정에서 `projects`를 읽는다(codex 소스 config `loader/mod.rs`의 `project_trust_context`). 그래서 이
+ * 스레드에서만 그 폴더를 "untrusted"로 적으면:
+ *   - 저장소의 `.codex/config.toml`·훅·실행 규칙이 꺼진 층으로 남는다 (`disabled_reason_for_decision`)
+ *   - 신뢰가 정해져 있으므로 app-server가 신뢰를 적어 넣지 않는다 (위 자동 신뢰는 `trust_level.is_none()`일 때만)
+ *   - AGENTS.md를 읽지 않는다 (`agents_md.rs`: `active_project.is_untrusted()`면 건너뛴다)
+ * 판정은 폴더마다 **그 폴더의 열쇠를 먼저** 본다(`decision_for_dir`) — cwd에서 뿌리까지의 조상 전부를
+ * 적는다. 사용자가 조상 하나를 신뢰해 두었어도 그 칸이 이기지 못한다. 경로는 적힌 그대로와 실제 경로
+ * (심볼릭 링크를 푼 것) 둘 다 적는다 — Codex가 두 철자를 모두 찾는다(`normalized_project_trust_keys`).
+ *
+ * `project_doc_max_bytes: 0`도 함께 싣는다. AGENTS.md를 신뢰로 거르는 줄이 설치된 0.153.4에 있는지는
+ * 바이너리로 확인하지 못했다. 이 키는 오케스트레이터에서 실측으로 확인한 길이다(심어 둔 AGENTS.md를 따르던
+ * 것이 멈췄다). 사용자 자신의 `~/.codex/AGENTS.md`는 다른 길로 읽혀 그대로 남는다.
+ *
+ * 남는 것: 저장소의 스킬(`.codex/skills`, `.agents/skills`)은 신뢰와 무관하게 읽힌다("skills still load" —
+ * 0.153.4 바이너리의 경고 문구). 스레드 단위로 저장소 범위의 스킬만 끄는 키는 없다(`skills.include_instructions`는
+ * 사용자의 스킬까지 끈다). 스킬은 지시문일 뿐이라, 스킬을 따라 모델이 하려는 일은 여전히 승인을 지난다.
+ *
+ * **소스와 바이너리로만 확인했다** (Codex가 로그아웃 상태라 실행으로 재지 못했다): 키와 판정은 codex 소스
+ * (main 75e0e0a, 2026-09-25)에서 읽었고, 설치된 0.153.4 바이너리에 같은 문구가 있음을 확인했다 —
+ * "failed to persist trusted project state for", "is marked as untrusted in the effective configuration",
+ * "Project-local config, hooks, and exec policies are disabled … but skills still load".
+ */
+export function repoFilesConfig(opts: Pick<CreateSessionOpts, 'cwd' | 'projectTrusted'>): Record<string, unknown> {
+  if (opts.projectTrusted === true) return {}
+  const keys = new Set<string>()
+  for (const start of [resolve(opts.cwd), realPathOr(opts.cwd)]) {
+    for (let dir = start; ; dir = dirname(dir)) {
+      keys.add(dir)
+      if (dirname(dir) === dir) break
+    }
+  }
+  return {
+    project_doc_max_bytes: 0,
+    projects: Object.fromEntries([...keys].map((k) => [k, { trust_level: 'untrusted' }])),
+  }
+}
+
+function realPathOr(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return resolve(path)
+  }
 }
 
 /**
@@ -216,6 +278,8 @@ class CodexSession implements SessionHandle {
              * 앱은 재개가 곧 "다음 스레드 시작"이다 — 스레드가 도는 동안 붙은 앱은 여기서 붙는다.
              */
             ...(await this.mcpConfig()),
+            // 저장소의 파일은 신뢰한 프로젝트에서만 이 스레드에 닿는다 — 재개에도 같은 판정이다 (#92)
+            ...repoFilesConfig(this.opts),
           },
         })
       } catch (err) {
@@ -289,6 +353,8 @@ class CodexSession implements SessionHandle {
           ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
           // MCP 서버 — 오케스트레이터의 다리, 승인된 서버, 붙은 외부 앱의 다리 (mcpConfig 참고)
           ...(await this.mcpConfig()),
+          // 저장소의 파일(.codex/ 설정·훅·규칙, AGENTS.md)은 신뢰한 프로젝트에서만 (#92, repoFilesConfig)
+          ...repoFilesConfig(this.opts),
         },
       })
       this.threadId = threadIdOf(res)
@@ -357,12 +423,14 @@ class CodexSession implements SessionHandle {
     }
     return {
       /*
-       * **폴더의 문서를 읽지 않는다** (오케스트레이터만 — Claude의 settingSources: []에 대응).
+       * **폴더의 문서를 읽지 않는다** (오케스트레이터 — Claude의 settingSources: []에 대응).
        *
        * 안 막으면 낮은 권한의 워커 세션이 오케스트레이터 폴더에 지시문을 써서
        * 모든 세션에 지시할 수 있는 쪽을 조종할 수 있다.
        * 실측: 이걸 넣기 전에는 심어둔 AGENTS.md를 그대로 따랐다
        * ("침투성공-9142"부터 답했다).
+       * 오케스트레이터는 프로젝트가 없어 신뢰하지 않은 세션이므로 repoFilesConfig도 같은 값을 싣는다 —
+       * 여기 남기는 것은 이 규칙이 신뢰 판정과 무관하게 오케스트레이터의 것이라서다.
        */
       ...(orchestrator ? { project_doc_max_bytes: 0 } : {}),
       ...(Object.keys(servers).length > 0 ? { mcp_servers: servers } : {}),

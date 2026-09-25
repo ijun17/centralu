@@ -46,12 +46,12 @@ const exec = promisify(execFile)
  * 제약 3가지:
  *  1. allowedTools에 bare 도구명 금지 (canUseTool이 셰도잉됨)
  *  2. includePartialMessages: true (스트리밍 델타)
- *  3. settingSources를 지정하지 않는다 = **사용자 설정·훅·CLAUDE.md를 전부 로드한다.**
- *     (한때 주석이 정반대로 적혀 있었다. 실측: 생략하면 전역 훅 3개가 실제로 돌았다.)
+ *  3. 신뢰한 프로젝트에서는 settingSources를 지정하지 않는다 = **사용자·프로젝트 설정·훅·CLAUDE.md를
+ *     전부 로드한다.** (한때 주석이 정반대로 적혀 있었다. 실측: 생략하면 전역 훅 3개가 실제로 돌았다.)
  *     의도한 것이다 — 이 앱은 워크플로우를 강제하지 않는다. 사람이 자기 도구에
  *     맞춰 둔 설정은 이 앱 안에서도 그대로 살아 있어야 한다.
- *     예외는 오케스트레이터뿐이다(settingSources: []): 그쪽은 파일로 들어오는 지시가
- *     곧 권한 상승 통로라서 닫아 둔다.
+ *     예외가 둘이다(settingSourcesFor): 오케스트레이터(settingSources: [] — 파일로 들어오는 지시가
+ *     곧 권한 상승 통로다)와, 신뢰하지 않은 프로젝트(['user'] — 저장소의 파일이 승인을 정하지 못한다, #92).
  */
 
 type PendingApproval = { resolve: (r: { behavior: 'allow'; updatedInput: unknown } | { behavior: 'deny'; message: string }) => void; input: unknown }
@@ -136,11 +136,46 @@ function appToolOf(toolName: string): { server: string; tool: string } | null {
  *
  * 이 값으로 세 프리셋의 뜻이 처음으로 서로 달라진다 —
  * 전에는 safe와 normal이 글자 그대로 같은 동작이었다.
+ *
+ * **"내 설정"이 누구의 설정인가는 여기서 정하지 않는다** — 어느 파일을 읽을지(settingSourcesFor)가
+ * 정한다. 신뢰하지 않은 프로젝트에서 normal은 사용자 설정만 따른다(#92, 아래 표).
  */
 function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string, unknown> {
   if (preset === 'auto') return { permissionMode: 'bypassPermissions' } // 무조건 통과
   if (preset === 'safe') return { permissionMode: 'default' } // 내 설정과 무관하게 항상 묻는다
   return { resolvePermissionModeInCli: true } // 내 설정을 따른다
+}
+
+/**
+ * 어느 설정 파일을 읽는가 (M4 결정 3, #92) — **저장소에 커밋된 파일이 승인을 정하지 못하게 한다.**
+ *
+ *   오케스트레이터 도구를 받는 세션   []        아무 파일도 안 읽는다 (아래 query 옵션의 주석)
+ *   신뢰한 프로젝트                  생략      사용자·프로젝트·로컬 전부 — CLI의 기본 그대로
+ *   신뢰하지 않은 프로젝트            ['user']  사용자 설정만 (~/.claude)
+ *
+ * 저장소의 `.claude/`는 우리 승인 카드를 끌 수 있었다. 실측(probe-project-trust.mts, CLI 2.1.282,
+ * SDK 0.3.263, 받아 온 저장소 흉내로 임시 폴더에 심고 `touch`를 시킴. 사용자 설정은 손대지 않았다):
+ *
+ *   심은 것                          프리셋  생략(전부 읽음)         ['user']
+ *   settings.json의 permissions.allow safe   콜백 불림               콜백 불림
+ *   settings.local.json의 allow        safe   **안 불림**             콜백 불림
+ *   settings.json의 PreToolUse 훅(allow) safe **안 불림**, 훅 돎      콜백 불림, 훅 안 돎
+ *   같은 훅                            normal 안 불림                 안 불림 ← 사용자 설정(bypass)이 정했다
+ *   CLAUDE.md · .claude/commands        -     읽힘 · 목록에 뜸         안 읽힘 · 안 뜸
+ *
+ * 커밋된 settings.json의 allow 규칙은 CLI가 이미 따르지 않았다. 구멍은 settings.local.json(보통 git에서
+ * 빠지지만 커밋할 수 있다)과 훅이었고, **safe에서도** 카드를 껐다. 훅은 그 자체로 임의 명령이기도 하다.
+ *
+ * 신뢰하지 않은 프로젝트에서 normal이 `resolvePermissionModeInCli`를 그대로 보내는 이유: 결정 3이 끄는
+ * 것은 저장소의 파일이지 사람 자신의 선택이 아니다. 사용자가 ~/.claude에 bypass를 걸어 두었으면 그것이
+ * 이긴다(마지막 줄) — 그 사람이 모든 자리에서 그렇게 하기로 한 것이다. 신뢰하지 않은 폴더에서 사용자의
+ * defaultMode까지 덮어 'default'로 묻게 하면 이 앱이 워크플로우를 강제하는 것이 된다. 어디서나 카드를
+ * 원하는 사람에게는 safe가 있다.
+ */
+function settingSourcesFor(opts: Pick<CreateSessionOpts, 'orchestratorTools' | 'projectTrusted'>): Record<string, unknown> {
+  if (opts.orchestratorTools) return { settingSources: [] }
+  if (opts.projectTrusted === true) return {}
+  return { settingSources: ['user'] }
 }
 
 class ClaudeSession implements SessionHandle {
@@ -230,25 +265,25 @@ class ClaudeSession implements SessionHandle {
         includePartialMessages: true,
         // MCP 서버 — 오케스트레이터의 도구, 사람이 승인한 서버, 붙은 외부 앱 (mcpServers() 참고)
         ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
+        /*
+         * 읽을 설정 파일 (settingSourcesFor) — 오케스트레이터는 **파일에서 지시를 읽지 않는다.**
+         *
+         * 워커 세션은 자기 프로젝트에만 권한이 있지만 파일은 쓸 수 있다.
+         * 그 세션이 오케스트레이터 폴더에 지시문을 써 넣으면, 모든 세션에
+         * 지시할 수 있는 오케스트레이터가 그걸 자기 지시로 읽는다 —
+         * 낮은 권한에서 높은 권한으로 넘어가는 길이다.
+         *
+         * 실측값 (probe):
+         *   생략        CLAUDE.md 읽음 · 사용자 전역 훅 3개 실행
+         *   ['project'] CLAUDE.md 읽음 · 훅 0개
+         *   []          아무것도 안 읽음      ← 관제탑에는 이것뿐이다
+         *
+         * 역할은 아래 systemPrompt로 직접 주입한다. 파일을 거치지 않으므로
+         * 도중에 누구도 바꿔 쓸 수 없다. 워커는 프로젝트의 신뢰가 정한다(#92).
+         */
+        ...settingSourcesFor(this.opts),
         ...(this.opts.orchestratorTools
           ? {
-              /*
-               * **파일에서 지시를 읽지 않는다.**
-               *
-               * 워커 세션은 자기 프로젝트에만 권한이 있지만 파일은 쓸 수 있다.
-               * 그 세션이 오케스트레이터 폴더에 지시문을 써 넣으면, 모든 세션에
-               * 지시할 수 있는 오케스트레이터가 그걸 자기 지시로 읽는다 —
-               * 낮은 권한에서 높은 권한으로 넘어가는 길이다.
-               *
-               * 실측값 (probe):
-               *   생략        CLAUDE.md 읽음 · 사용자 전역 훅 3개 실행
-               *   ['project'] CLAUDE.md 읽음 · 훅 0개
-               *   []          아무것도 안 읽음      ← 관제탑에는 이것뿐이다
-               *
-               * 역할은 아래 systemPrompt로 직접 주입한다. 파일을 거치지 않으므로
-               * 도중에 누구도 바꿔 쓸 수 없다.
-               */
-              settingSources: [] as never,
               /*
                * 역할은 파일이 아니라 여기서 보증한다. AGENTS.md는 사람이 고칠 수 있고
                * 고쳐야 하는 파일이라, 지워지면 안 되는 것을 거기 두면 안 된다.
