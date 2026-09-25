@@ -424,6 +424,17 @@ export const ToolSummary = z.object({
 })
 export type ToolSummary = z.infer<typeof ToolSummary>
 
+/**
+ * 도구가 알려 준 토큰 (`usage_update`). 입력의 세 칸은 **겹치지 않는다** — Anthropic API의 셈과 같다:
+ *
+ *   inputTokens          캐시에서 오지 않은 입력
+ *   cacheReadTokens      캐시에서 읽은 입력
+ *   cacheCreationTokens  캐시에 쓴 입력
+ *
+ * 그래서 모델이 읽은 입력 전부는 셋의 합이다. Codex는 캐시에서 온 입력을 입력 **안에** 세어 알려 주므로 어댑터가 빼서 이
+ * 모양으로 맞춘다(`codex/normalize.ts`). 두 도구가 같은 뜻으로 싣지 않으면 합을 내는 쪽(앱이 부탁한 에이전트의 기록, M4 D-5)이
+ * 도구마다 다른 수를 적는다.
+ */
 export const TokenUsage = z.object({
   inputTokens: z.number(),
   outputTokens: z.number(),

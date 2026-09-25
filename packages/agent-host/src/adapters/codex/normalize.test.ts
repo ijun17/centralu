@@ -252,7 +252,8 @@ describe('상태·계기판', () => {
       },
       contextWindow: 1_000_000,
     })
-    expect(out[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 80 } })
+    // Codex counts the 80 cached tokens inside its 100 input tokens; the protocol keeps them apart (TokenUsage)
+    expect(out[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: 20, outputTokens: 20, cacheReadTokens: 80 } })
     expect(out[1]).toMatchObject({ type: 'context_update', used: 120, window: 1_000_000, exactness: 'exact' })
   })
 
