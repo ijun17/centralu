@@ -18,21 +18,32 @@ import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { HOST_APPS } from './apps/registry.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
+import type { ViewHost } from './views/view-host.js'
 import type { ToolName } from '@cc/protocol'
 
-/** RPC 라우팅. 파라미터는 경계에서 1회만 검증한다 (docs/protocol.md §4) */
-export function createRpcHandler(
-  mgr: SessionManager,
-  adapters: Map<ToolName, AgentAdapter>,
-  terminals?: TerminalService,
-  updates?: UpdateService,
-  commands?: CommandRunner,
+/**
+ * host가 가진 선택 서비스들. 없으면 그 기능이 없는 host다(시험은 필요한 것만 넣는다).
+ * 이름으로 받는다 — 뒤에 붙는 서비스가 늘 때마다 `undefined`를 세어 넣는 자리가 생기지 않게.
+ */
+export type RpcServices = {
+  terminals?: TerminalService
+  updates?: UpdateService
+  commands?: CommandRunner
   /**
    * 외부 앱 런타임 (M4 A). 다른 서비스처럼 선택이다 — 없으면 외부 앱이 없는 host다.
    * 프로젝트가 늘고 줄거나 신뢰가 바뀌면 **이 문이** 런타임에 다시 훑으라고 말한다:
    * 매니저는 런타임을 모르고(코어는 앱을 모른다), 런타임은 매니저를 모른다.
    */
-  externalApps?: ExternalApps,
+  externalApps?: ExternalApps
+  /** 앱 화면 호스팅 (M4 B-3) — 샌드박스 프록시의 주소와 화면이 읽는 리소스 */
+  views?: ViewHost
+}
+
+/** RPC 라우팅. 파라미터는 경계에서 1회만 검증한다 (docs/protocol.md §4) */
+export function createRpcHandler(
+  mgr: SessionManager,
+  adapters: Map<ToolName, AgentAdapter>,
+  { terminals, updates, commands, externalApps, views }: RpcServices = {},
 ) {
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
@@ -45,6 +56,10 @@ export function createRpcHandler(
   const requireExternalApps = (): ExternalApps => {
     if (!externalApps) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
     return externalApps
+  }
+  const requireViews = (): ViewHost => {
+    if (!views) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
+    return views
   }
   const requireUpdates = (): UpdateService => {
     if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
@@ -229,6 +244,15 @@ export function createRpcHandler(
     'orchestrator.configure': async (p) => {
       mgr.configureOrchestrator(RpcMethods['orchestrator.configure'].params.parse(p).tool)
       return { ok: true as const }
+    },
+    'apps.viewFrame': async (p) => {
+      const { appId, projectId, instanceId, hostOrigin } = RpcMethods['apps.viewFrame'].params.parse(p)
+      return requireViews().frame({ app: { appId, projectId }, instanceId, hostOrigin })
+    },
+    'apps.readResource': async (p) => {
+      const { appId, projectId, uri, instanceId } = RpcMethods['apps.readResource'].params.parse(p)
+      // 답의 모양은 화면과 앱이 아는 것이다. 여기서는 봉투가 깨지지 않을 만큼만 본다
+      return RpcMethods['apps.readResource'].result.parse(await requireViews().readResource({ appId, projectId }, uri, instanceId))
     },
     'apps.state': async (p) => {
       const { appId } = RpcMethods['apps.state'].params.parse(p)

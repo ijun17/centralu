@@ -5,7 +5,9 @@ import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
-import { HostServer, parseAllowedOrigins } from './transport/server.js'
+import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
+import { ViewHost } from './views/view-host.js'
+import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
 import { Store } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
@@ -180,14 +182,41 @@ const updates = new UpdateService((status) => server.broadcast({ type: 'update_s
   readAuto: () => store.appSetting(AUTO_UPDATE_CHECK_KEY) !== 'false',
   writeAuto: (enabled) => store.setAppSetting(AUTO_UPDATE_CHECK_KEY, String(enabled)),
 })
+// origin 허용목록의 탈출구 — 거부 로그가 여기에 넣을 값을 그대로 알려준다.
+// 앱 화면의 프록시도 같은 목록을 쓴다: 화면을 띄울 수 있는 부모는 WebSocket에 붙을 수 있는 쪽뿐이다
+const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) ?? [...DEFAULT_ALLOWED_ORIGINS]
+/*
+ * 앱 화면 호스팅 (M4 B-3). 문서를 읽는 쪽(앱 런타임의 readResource)은 아직 잇지 않았다. 그래서
+ * source가 null이고, 화면 요청은 이유와 함께 실패한다. 앱별 출처의 포트 배정표는 app_settings에
+ * 산다. 표는 줄지 않는다(origin-ports.ts). 한 번 준 포트를 다른 앱에 주면 그 앱이 남의 브라우저
+ * 저장소를 읽는다.
+ */
+const VIEW_PORTS_KEY = 'apps.viewPorts'
+const views = new ViewHost({
+  secret: httpSecret,
+  allowedOrigins,
+  source: null,
+  ports: new OriginPorts({
+    load: () => {
+      const raw = store.appSetting(VIEW_PORTS_KEY)
+      if (!raw) return null
+      try {
+        return JSON.parse(raw) as PortBook
+      } catch {
+        return null
+      }
+    },
+    save: (book) => store.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
+  }),
+  hostPort: () => port ?? null,
+})
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
-  // origin 허용목록의 탈출구 — 거부 로그가 여기에 넣을 값을 그대로 알려준다
-  allowedOrigins: parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS),
-  onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns, externalApps),
-  // 모든 HTTP 길은 이 비밀 뒤에 있다. 지금은 길이 하나도 없어서 비밀이 맞아도 404다
-  http: { secret: httpSecret, routes: [] },
+  allowedOrigins,
+  onRpc: createRpcHandler(mgr, adapters, { terminals, updates, commands: commandRuns, externalApps, views }),
+  // 모든 HTTP 길은 이 비밀 뒤에 있다 (transport/http.ts)
+  http: { secret: httpSecret, routes: views.routes },
 })
 
 let port: number
@@ -263,6 +292,7 @@ const shutdown = async () => {
   const appsDown = externalApps.dispose()
   await mgr.disposeAll()
   await appsDown
+  await views.dispose()
   await server.close()
   store.close()
   // 왜 끝났는지가 다음 조사의 첫 줄이 된다 — 조용히 사라지지 않는다

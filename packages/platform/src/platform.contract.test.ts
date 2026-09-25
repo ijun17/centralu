@@ -80,7 +80,7 @@ async function makeWeb(): Promise<Harness> {
   const server = new HostServer({
     port: 0,
     token: 'contract',
-    onRpc: createRpcHandler(mgr, adapters, undefined, updates),
+    onRpc: createRpcHandler(mgr, adapters, { updates }),
   })
   const port = await server.listen()
   const platform = createWebPlatform({
