@@ -59,6 +59,12 @@ const RESERVED_ENV_PREFIXES = ['CENTRALU_', 'CC_'] as const
 /** `uses.host`의 능력 이름 — 어휘는 D-3이 정한다. 지금은 모양만 본다 */
 const HOST_CAPABILITY = /^[a-z][a-z0-9_.-]{0,63}$/
 
+/**
+ * `uses.agent`에 적는 도구 이름 (M4 D-1) — 어댑터의 이름(`claude`, `codex`)과 같은 모양이다. 어느 도구가 실제로 있는지는
+ * 매니페스트가 알 수 없다(기계마다 다르다). 그래서 모양만 보고, 없는 도구는 부탁할 때 이유와 함께 거절한다.
+ */
+const AGENT_TOOL = /^[a-z][a-z0-9-]{0,31}$/
+
 const appIdField = z.string().superRefine((id, ctx) => {
   const err = mcpServerNameError(id)
   if (err) ctx.addIssue({ code: 'custom', message: err })
@@ -118,7 +124,21 @@ const ManifestSchema = z.object({
    */
   uses: z
     .object({
-      agent: z.boolean().optional(),
+      /**
+       * 에이전트를 부탁할 수 있나 (D-1). `true`는 "사람의 기본 에이전트"다 — 프로젝트 앱이면 그 프로젝트의 기본 도구,
+       * 사용자 폴더 앱이면 오케스트레이터의 도구. 도구를 골라 부탁하려면 목록으로 적는다(`["codex"]`): 목록에 없는 도구는
+       * 거절한다. 선언이 좁을수록 사람이 허락할 것도 좁다(D-4는 도구마다 묻는다).
+       */
+      agent: z
+        .union([
+          z.boolean(),
+          z.array(
+            z.string().superRefine((t, ctx) => {
+              if (!AGENT_TOOL.test(t)) ctx.addIssue({ code: 'custom', message: `에이전트 도구 이름의 모양이 아닙니다 (예: "claude", "codex"): ${t}` })
+            }),
+          ),
+        ])
+        .optional(),
       apps: z.array(appIdField).optional(),
       host: z
         .array(

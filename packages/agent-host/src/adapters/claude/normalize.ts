@@ -424,13 +424,20 @@ export function normalizeMessage(
       })
     }
     if (str(m.subtype) !== 'success' || m.is_error === true) {
+      /*
+       * 실패한 결말에는 `result`가 없고 `errors`(글의 목록)가 있다(sdk.d.ts SDKResultError). 둘 다 비었으면 끝난 방식의 이름이라도
+       * 싣는다 — 앱이 부탁한 에이전트(M4 D-1)가 구조화 출력을 끝내 못 맞추면(`error_max_structured_output_retries`) 그 이름이
+       * 앱이 받는 유일한 이유다.
+       */
+      const errors = Array.isArray(m.errors) ? m.errors.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
       out.push({
         type: 'error',
         sessionId,
-        error: { code: 'internal', message: str(m.result, `Turn failed: ${str(m.subtype)}`), retryable: true },
+        error: { code: 'internal', message: str(m.result) || errors.join('\n') || `Turn failed: ${str(m.subtype)}`, retryable: true },
       })
     } else {
-      out.push({ type: 'turn_complete', sessionId })
+      // 스키마로 답한 턴의 답 (M4 D-1) — 글로는 오지 않고 여기에만 있다(protocol의 turn_complete 주석)
+      out.push(m.structured_output === undefined ? { type: 'turn_complete', sessionId } : { type: 'turn_complete', sessionId, output: m.structured_output })
     }
     return out
   }

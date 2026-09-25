@@ -7,7 +7,7 @@
  *   centralu.tool(server, name, config, handler)   register a tool; the handler runs inside the
  *                                                  incoming call's run (id, cancel signal)
  *   centralu.uiResource(server, name, uri, htmlUrl) serve a screen as an MCP App resource
- *   centralu.agent(prompt, { schema })             ask Centralu's agent (over fd 3)
+ *   centralu.agent(prompt, { schema, tool })       ask Centralu's agent (over fd 3)
  *   centralu.callApp(app, tool, args)              call another app's tool (over fd 3)
  *   centralu.readJson / writeJson                  state files in the app's data folder
  *   centralu.dataDir                               CENTRALU_APP_DATA (outside the app folder)
@@ -54,11 +54,27 @@ function textOf(result) {
   return (result?.content ?? []).map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n')
 }
 
+/**
+ * While a broker call waits (an agent run takes minutes), Centralu keeps it alive with progress
+ * notifications. The same beat is passed up on the tool call this app is handling, when its caller
+ * sent a progress token: Centralu's call to this app has a deadline of its own, and without the beat
+ * it would give up on this app while the agent is still working.
+ */
+function relay(run) {
+  return (message) => {
+    if (run.progressToken === undefined || !run.notify) return
+    run.beats = (run.beats ?? 0) + 1
+    run
+      .notify({ method: 'notifications/progress', params: { progressToken: run.progressToken, progress: run.beats, ...(message ? { message } : {}) } })
+      .catch(() => {})
+  }
+}
+
 async function askBroker(what, tool, args) {
   const run = currentRun(what)
   let result
   try {
-    result = await callBroker(tool, args, run.runId, run.signal)
+    result = await callBroker(tool, args, run.runId, run.signal, relay(run))
   } catch (e) {
     throw new BrokerError(`${what} failed: ${e.message}`)
   }
@@ -92,7 +108,12 @@ export const centralu = {
     const run = (...a) => {
       // with an input schema the SDK calls (args, ctx); without one it calls (ctx)
       const ctx = hasInput ? a[1] : a[0]
-      const store = { runId: ctx?.mcpReq?._meta?.[RUN_META] ?? null, signal: ctx?.mcpReq?.signal }
+      const store = {
+        runId: ctx?.mcpReq?._meta?.[RUN_META] ?? null,
+        signal: ctx?.mcpReq?.signal,
+        progressToken: ctx?.mcpReq?._meta?.progressToken,
+        notify: ctx?.mcpReq?.notify,
+      }
       return runs.run(store, async () => {
         try {
           return await handler(...a)
@@ -124,13 +145,16 @@ export const centralu = {
   },
 
   /**
-   * Asks the agent of the person using Centralu. With `schema` (a JSON Schema object) the answer is
-   * JSON of that shape; without it, text. Only inside a tool handler. Throws a CentraluError that says
-   * what Centralu answered (for example that the capability is not available yet).
+   * Asks the agent of the person using Centralu, in a new session under this app, and returns its
+   * final answer. With `schema` (a JSON Schema whose top level is an object) the answer is JSON of
+   * that shape, checked by Centralu; without it, text. `tool` picks an agent by name ("claude",
+   * "codex") when the manifest lists it in "uses": { "agent": [...] }; without it, the person's
+   * default agent. The manifest must declare "uses": { "agent": true } (or the list). Only inside a
+   * tool handler. Throws a CentraluError that says what Centralu answered.
    */
-  async agent(prompt, { schema } = {}) {
+  async agent(prompt, { schema, tool } = {}) {
     if (typeof prompt !== 'string' || !prompt.trim()) throw new BrokerError('centralu.agent() needs a prompt')
-    const r = await askBroker('centralu.agent()', 'run_agent', { prompt, ...(schema ? { schema } : {}) })
+    const r = await askBroker('centralu.agent()', 'run_agent', { prompt, ...(schema ? { schema } : {}), ...(tool ? { tool } : {}) })
     return r.structuredContent ?? textOf(r)
   },
 

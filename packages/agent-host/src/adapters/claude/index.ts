@@ -302,6 +302,13 @@ class ClaudeSession implements SessionHandle {
             }
           : {}),
         ...permissionOptionsFor(preset),
+        /*
+         * 앱이 스키마를 주고 부탁한 에이전트 (M4 D-1). 질의 단위 옵션이라 세션을 시작할 때만 줄 수 있다. 실측(SDK 0.3.263,
+         * CLI 2.1.282, haiku): CLI가 `StructuredOutput` 도구를 더하고, 모델이 글로 먼저 답하면 "[structured-output-enforce]"
+         * 메시지로 그 도구를 부르게 한다. 그 도구는 canUseTool을 지나지 않았다(승인 카드가 뜨지 않는다). 답은
+         * `result.structured_output`에 온다 — 정규화기가 `turn_complete.output`으로 옮긴다.
+         */
+        ...(this.opts.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: this.opts.outputSchema } } : {}),
         resume: this.opts.resumeExternalId,
         // allowedTools는 절대 설정하지 않는다 (M0: canUseTool 셰도잉)
         canUseTool:

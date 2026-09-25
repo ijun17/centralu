@@ -133,13 +133,24 @@ serveStdio(() => {
       log({ t: aborted ? 'aborted' : 'finished', runId: ctx.mcpReq._meta?.[RUN_META] ?? null })
       return say(aborted ? 'aborted' : 'finished')
     })
+    /*
+     * 중개를 부르는 도구. `args`를 주면 그대로 싣고(없으면 도구마다 정해 둔 인자), `timeoutMs`를 주면 그 상한에 진행 알림이
+     * 오면 다시 세게 한다(`resetTimeoutOnProgress`) — host가 기다리는 부탁을 살려 두는지 본다. 결과는 글 한 줄과 함께
+     * `structuredContent`에 중개의 답을 그대로 싣는다(isError·text·structured).
+     */
     server.registerTool(
       'ask_broker',
       {
         description: 'Calls the host broker on fd 3',
-        inputSchema: z.object({ mode: z.enum(['run', 'run-nosignal', 'run-detached', 'none', 'given']), runId: z.string().optional(), tool: z.string().optional() }),
+        inputSchema: z.object({
+          mode: z.enum(['run', 'run-nosignal', 'run-detached', 'none', 'given']),
+          runId: z.string().optional(),
+          tool: z.string().optional(),
+          args: z.record(z.string(), z.unknown()).optional(),
+          timeoutMs: z.number().optional(),
+        }),
       },
-      async ({ mode, runId, tool }, ctx) => {
+      async ({ mode, runId, tool, args: given, timeoutMs }, ctx) => {
         const own = ctx.mcpReq._meta?.[RUN_META]
         const meta = mode === 'none' ? {} : { [RUN_META]: mode === 'given' ? runId : own }
         const c = await broker()
@@ -147,18 +158,26 @@ serveStdio(() => {
         if (mode === 'run-detached') {
           // 부탁이 중개에 닿을 만큼만 기다리고, 결과는 기다리지 않고 답한다 — 부탁한 일이
           // 부탁한 실행보다 오래 살려고 하는 앱
-          void c.callTool({ name, arguments: { prompt: 'fire and forget' }, _meta: meta }).catch(() => {})
+          void c.callTool({ name, arguments: given ?? { prompt: 'fire and forget' }, _meta: meta }).catch(() => {})
           await new Promise((r) => setTimeout(r, 150))
           return say('detached')
         }
-        const args = { run_agent: { prompt: 'summarize this' }, call_app: { app: 'other', tool: 'echo' }, host_data: { query: 'sessions' } }[name]
+        const args = given ?? { run_agent: { prompt: 'summarize this' }, call_app: { app: 'other', tool: 'echo' }, host_data: { query: 'sessions' } }[name]
         const r = await c.callTool(
           { name, arguments: args, _meta: meta },
-          mode === 'run' ? { signal: ctx.mcpReq.signal } : {},
+          {
+            ...(mode === 'run' ? { signal: ctx.mcpReq.signal } : {}),
+            ...(timeoutMs
+              ? { timeout: timeoutMs, resetTimeoutOnProgress: true, onprogress: (p) => log({ t: 'broker-progress', message: p.message ?? null }) }
+              : {}),
+          },
         )
         const text = r.content?.map((x) => x.text).join(' ') ?? ''
         log({ t: 'broker-answer', mode, text, isError: !!r.isError })
-        return say(`broker isError=${!!r.isError}: ${text}`)
+        return {
+          content: [{ type: 'text', text: `broker isError=${!!r.isError}: ${text}` }],
+          structuredContent: { isError: !!r.isError, text, structured: r.structuredContent ?? null },
+        }
       },
     )
     server.registerResource('view', 'ui://fixture/view', { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({

@@ -16,9 +16,8 @@ import { z } from 'zod'
  * 받아 주는 조건은 하나다: **이 파이프의 앱에 지금 열려 있는 실행 id.** 없으면(앱이 스스로
  * 깨어난 경우 — v1 범위 밖) 거절하고, 남의 id나 지어낸 id도 거절한다.
  *
- * 도구 셋(`run_agent`, `call_app`, `host_data`)의 실제 몸통은 D의 일이다. 지금은 "아직 없다"를
- * 분명히 말하는 자리표시로 서서, 파이프·실행 id·취소가 이어져 있는지를 시험할 수 있게 한다.
- * 몸통은 `BrokerImpls`로 주입된다 — D가 채울 자리이자 테스트가 느린 몸통을 끼우는 자리다.
+ * 이 파일은 **문지기와 통로**만이다. 받아 준 부탁을 무엇으로 푸는지(선언·능력 승인·폭주 막기·기록, 그리고 도구마다의
+ * 몸통)는 런타임의 창구(`desk.ts`)가 정한다 — 하나의 `BrokerHandler`로 넘긴다.
  */
 
 /** 실행 id가 실리는 `_meta` 키. host→앱 호출과 앱→중개 호출이 같은 키를 쓴다 */
@@ -27,16 +26,31 @@ export const RUN_META = 'centralu/runId'
 export const BROKER_TOOLS = ['run_agent', 'call_app', 'host_data'] as const
 export type BrokerToolName = (typeof BROKER_TOOLS)[number]
 
-/** 중개 호출을 부른 실행 — 몸통이 사슬을 이어 붙이는 데 쓴다 */
+/**
+ * 기다리는 중개 호출에 보내는 진행 알림의 간격.
+ *
+ * 앱의 클라이언트는 한 요청의 답을 무한히 기다리지 않는다 — MCP SDK의 기본 상한은 60초이고, 템플릿의 도우미도 말이 없는
+ * 채 60초가 지나면 포기한다(`app-runtime/src/broker.mjs`). 에이전트 실행은 그보다 길고(실측: haiku로 한 문장 답에 4.0초,
+ * 스키마를 준 답에 5.6초 — 도구를 쓰는 일은 몇 분이다), 능력 승인은 사람을 5분까지 기다린다(D-4). 10초마다 한 번이면
+ * 60초 상한 안에 여섯 번 닿는다 — 몇 번 늦어도 끊기지 않는다.
+ */
+export const BROKER_KEEPALIVE_MS = 10_000
+
+/** 중개 호출을 부른 실행 — 창구가 사슬을 이어 붙이는 데 쓴다 */
 export type BrokerCall = {
   /** 이 중개 호출을 일으킨 host→앱 호출의 실행 id */
   parentRunId: string
   /** 앱이 취소했거나, 부모 실행이 끝나거나 취소되면 선다 */
   signal: AbortSignal
+  /**
+   * 기다리는 앱에 지금 무슨 일인지 한 줄을 보낸다(진행 알림) — 앱이 진행 토큰을 실었을 때만 닿는다. 살려 두는 알림은
+   * 이 통로가 알아서 보내므로(`BROKER_KEEPALIVE_MS`) 몸통은 "사람의 답을 기다린다"처럼 알릴 것이 있을 때만 부른다.
+   */
+  progress(message: string): void
 }
 
-export type BrokerImpl = (args: Record<string, unknown>, call: BrokerCall) => Promise<CallToolResult>
-export type BrokerImpls = Partial<Record<BrokerToolName, BrokerImpl>>
+/** 받아 준 중개 호출을 푸는 창구 하나 — 어느 도구든 이 한 자리로 들어온다 */
+export type BrokerHandler = (tool: BrokerToolName, args: Record<string, unknown>, call: BrokerCall) => Promise<CallToolResult>
 
 /** 파이프 하나의 문지기가 묻는 것 — "이 id가 지금 이 앱에 열려 있나" */
 export type BrokerAdmission = {
@@ -48,8 +62,14 @@ export type BrokerAdmission = {
 
 const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<z.ZodRawShape> }> = {
   run_agent: {
-    description: '부른 세션의 에이전트에게 일을 맡긴다 (D-1)',
-    input: z.object({ prompt: z.string(), tool: z.string().optional(), schema: z.unknown().optional() }),
+    description:
+      '이 앱을 쓰는 사람의 에이전트에게 일을 맡기고 마지막 답을 받는다 (D-1). 요청마다 새 세션이 이 앱 아래에 선다. schema(JSON Schema, 뿌리는 객체)를 주면 그 모양의 JSON이 structuredContent로 온다',
+    input: z.object({
+      prompt: z.string(),
+      /** 매니페스트의 `uses.agent`가 허락한 도구 이름. 없으면 사람의 기본 에이전트 */
+      tool: z.string().optional(),
+      schema: z.record(z.string(), z.unknown()).optional(),
+    }),
   },
   call_app: {
     description: '다른 앱의 model 도구를 부른다 (D-2)',
@@ -64,20 +84,22 @@ const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<
 
 const text = (t: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) })
 
-const notYet = (tool: BrokerToolName): BrokerImpl => async () =>
-  text(`${tool} is not available yet — the broker's tools arrive with Centralu M4 section D`, true)
-
 /**
  * fd 3 위에 중개 서버를 연다. 돌려받은 함수로 닫는다.
  *
  * host 쪽은 SDK의 전송을 그대로 쓴다(S-5: 추가 코드 0줄) — `serveStdio`가 두 세대를 다 받는다.
  */
-export function serveBroker(fd3: Socket, admission: BrokerAdmission, impls: BrokerImpls = {}): () => void {
-  const handle = serveStdio(
+export function serveBroker(
+  fd3: Socket,
+  admission: BrokerAdmission,
+  handle: BrokerHandler,
+  opts: { keepaliveMs?: number } = {},
+): () => void {
+  const keepaliveMs = opts.keepaliveMs ?? BROKER_KEEPALIVE_MS
+  const serve = serveStdio(
     () => {
       const server = new McpServer({ name: `${CLIENT_INFO.name}-broker`, version: CLIENT_INFO.version }, { capabilities: { tools: {} } })
       for (const tool of BROKER_TOOLS) {
-        const impl = impls[tool] ?? notYet(tool)
         server.registerTool(tool, { description: schemas[tool].description, inputSchema: schemas[tool].input }, async (args, ctx) => {
           const presented = ctx.mcpReq._meta?.[RUN_META]
           if (typeof presented !== 'string' || presented.length === 0) {
@@ -95,11 +117,28 @@ export function serveBroker(fd3: Socket, admission: BrokerAdmission, impls: Brok
            * 앱이어도 아래 일이 부모보다 오래 살지 않게 둘을 묶는다.
            */
           const signal = AbortSignal.any([ctx.mcpReq.signal, runSignal])
+          /*
+           * 기다리는 동안 앱을 살려 둔다 — 앱이 진행 토큰을 실었을 때만(규격: 토큰이 없으면 진행 알림을 보내지 않는다).
+           * 값은 보낼 때마다 오른다(규격: progress는 늘어야 한다). 끝나면 멈춘다 — 답 뒤에 오는 알림은 받는 쪽이 모르는 토큰이다.
+           */
+          const token = ctx.mcpReq._meta?.progressToken
+          let beat = 0
+          const progress = (message?: string) => {
+            if (token === undefined || signal.aborted) return
+            beat += 1
+            void ctx.mcpReq
+              .notify({ method: 'notifications/progress', params: { progressToken: token, progress: beat, ...(message ? { message } : {}) } })
+              .catch(() => {})
+          }
+          const timer = token === undefined ? null : setInterval(() => progress(), keepaliveMs)
+          timer?.unref()
           try {
-            return await impl(args as Record<string, unknown>, { parentRunId: presented, signal })
+            return await handle(tool, args as Record<string, unknown>, { parentRunId: presented, signal, progress })
           } catch (e) {
             if (signal.aborted) return text(`cancelled: ${tool} under ${presented}`, true)
             return text(`${tool} failed: ${(e as Error).message}`, true)
+          } finally {
+            if (timer) clearInterval(timer)
           }
         })
       }
@@ -107,5 +146,5 @@ export function serveBroker(fd3: Socket, admission: BrokerAdmission, impls: Brok
     },
     { transport: new StdioServerTransport(fd3, fd3), onerror: (e) => admission.note(`broker error: ${e.message}`) },
   )
-  return () => void handle.close().catch(() => {})
+  return () => void serve.close().catch(() => {})
 }

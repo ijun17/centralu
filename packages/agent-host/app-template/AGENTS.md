@@ -45,11 +45,17 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
    then calls `show` again. Keep that handler, and keep `show` read-only.
 9. **stdout is the MCP channel.** `console.log` is redirected to stderr for you; never write to
    `process.stdout` yourself. stderr is shown to the person when the app fails.
-10. **Asking the agent**: inside a tool handler, `await centralu.agent('prompt', { schema })`
-    returns text (or JSON of the JSON Schema `schema`). Declare `"uses": { "agent": true }` in the
-    manifest. `await centralu.callApp('other-app', 'tool', args)` calls another app's tool (declare it
-    in `uses.apps`). Both throw an error that says what Centralu answered — until Centralu turns these
-    on, the answer is that they are not available yet.
+10. **Asking the agent**: inside a tool handler, `await centralu.agent('prompt', { schema, tool })`
+    asks the agent of the person using Centralu. Each call runs in a new session under this app
+    (the person can read it), with the `normal` approval setting, and returns the agent's final
+    answer: text, or with `schema` (a JSON Schema whose top level is an object) JSON of that shape,
+    checked by Centralu. Declare `"uses": { "agent": true }` in the manifest for the person's
+    default agent, or a list such as `["codex"]` to pick one with `tool`. The prompt reaches the
+    agent marked as written by this app, not by the person, so say plainly what you need. A run
+    takes seconds to minutes; the helper keeps the call alive while it waits.
+    `await centralu.callApp('other-app', 'tool', args)` calls another app's tool (declare it in
+    `uses.apps`) — until Centralu turns that on, the answer is that it is not available yet. Both
+    throw an error that says what Centralu answered.
 
 ## Checking your work
 

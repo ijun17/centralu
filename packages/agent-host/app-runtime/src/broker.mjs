@@ -10,6 +10,13 @@
  * HTTP and OAuth code the pipe never uses (about 280 KiB of the vendored runtime, measured in the
  * S-6 spike). It speaks the 2025-11-25 handshake, which Centralu's broker accepts.
  *
+ * Waiting. An agent run takes minutes and a permission question waits for the person (up to 5
+ * minutes), so a broker call has no fixed deadline. Instead every request carries a progress token,
+ * and Centralu sends a progress notification every 10 seconds while it works. A request fails only
+ * if Centralu says nothing for IDLE_MS (the pipe or the host is gone), or if it runs past
+ * MAX_TOTAL_MS in all. Each progress notification is also handed to the caller, which passes it up
+ * to whoever called this app (`centralu.mjs`), so that call does not time out either.
+ *
  * Shutdown contract (S-5): the socket is `unref`ed, so the pipe alone never keeps the app alive,
  * and it is closed when stdin ends, which is Centralu's "stop now" signal.
  */
@@ -17,6 +24,14 @@ import net from 'node:net'
 
 export const RUN_META = 'centralu/runId'
 const PROTOCOL_VERSION = '2025-11-25'
+
+/**
+ * Six missed 10-second beats: Centralu is not just busy, it is gone. Centralu's own tests shorten it
+ * through CENTRALU_BROKER_IDLE_MS; Centralu never passes CENTRALU_* variables on to an app.
+ */
+export const IDLE_MS = Number(process.env.CENTRALU_BROKER_IDLE_MS) || 60_000
+/** One broker call may take an hour at most — longer than any agent run meant for one tool call */
+export const MAX_TOTAL_MS = 60 * 60_000
 
 export class BrokerError extends Error {
   constructor(message) {
@@ -45,7 +60,7 @@ function open() {
   let closedWith = null
   const failAll = (why) => {
     closedWith = why
-    for (const p of pending.values()) p.reject(new BrokerError(why))
+    for (const p of pending.values()) p.fail(new BrokerError(why))
     pending.clear()
   }
   sock.setEncoding('utf8')
@@ -62,9 +77,14 @@ function open() {
       } catch {
         continue
       }
+      if (msg.method === 'notifications/progress') {
+        pending.get(msg.params?.progressToken)?.progress(msg.params?.message)
+        continue
+      }
       if (msg.id === undefined || !pending.has(msg.id)) continue
       const p = pending.get(msg.id)
       pending.delete(msg.id)
+      p.settle()
       if (msg.error) p.reject(new BrokerError(`Centralu refused ${p.method}: ${msg.error.message ?? JSON.stringify(msg.error)}`))
       else p.resolve(msg.result)
     }
@@ -74,18 +94,52 @@ function open() {
   process.stdin.once('end', () => sock.destroy())
 
   const send = (msg) => sock.write(`${JSON.stringify({ jsonrpc: '2.0', ...msg })}\n`)
-  const request = (method, params, signal) =>
+  const request = (method, params, { signal, onProgress } = {}) =>
     new Promise((resolve, reject) => {
       if (closedWith) return reject(new BrokerError(closedWith))
       const id = nextId++
-      pending.set(id, { resolve, reject, method })
-      send({ id, method, params })
+      const started = Date.now()
+      // what the person reads when this fails: the broker tool's name, not the JSON-RPC method
+      const what = method === 'tools/call' && typeof params?.name === 'string' ? params.name : method
+      let idle = null
+      let total = null
+      const cleanup = () => {
+        clearTimeout(idle)
+        clearTimeout(total)
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const giveUp = (why) => {
+        if (!pending.delete(id)) return
+        cleanup()
+        send({ method: 'notifications/cancelled', params: { requestId: id, reason: why } })
+        reject(new BrokerError(why))
+      }
+      const armIdle = () => {
+        clearTimeout(idle)
+        idle = setTimeout(() => giveUp(`Centralu said nothing about ${what} for ${IDLE_MS / 1000}s`), IDLE_MS)
+        idle.unref?.()
+      }
+      const onAbort = () => giveUp(`${what} was cancelled because the tool call that asked was cancelled`)
+      pending.set(id, {
+        method: what,
+        resolve,
+        reject,
+        settle: cleanup,
+        fail: (err) => {
+          cleanup()
+          reject(err)
+        },
+        progress: (message) => {
+          armIdle()
+          onProgress?.(message)
+        },
+      })
+      armIdle()
+      total = setTimeout(() => giveUp(`${what} ran past ${MAX_TOTAL_MS / 60_000} minutes (started ${new Date(started).toISOString()})`), MAX_TOTAL_MS)
+      total.unref?.()
+      const withToken = params && typeof params === 'object' ? { ...params, _meta: { ...params._meta, progressToken: id } } : params
+      send({ id, method, params: withToken })
       if (signal) {
-        const onAbort = () => {
-          if (!pending.delete(id)) return
-          send({ method: 'notifications/cancelled', params: { requestId: id, reason: 'the tool call that asked was cancelled' } })
-          reject(new BrokerError(`${method} was cancelled`))
-        }
         if (signal.aborted) onAbort()
         else signal.addEventListener('abort', onAbort, { once: true })
       }
@@ -105,10 +159,11 @@ function open() {
 
 /**
  * Calls one broker tool on behalf of the run `runId`. Resolves with the MCP tool result, or throws a
- * BrokerError whose message says what Centralu answered.
+ * BrokerError whose message says what Centralu answered. `onProgress(message?)` is called for each
+ * progress notification Centralu sends while it works.
  */
-export async function callBroker(tool, args, runId, signal) {
+export async function callBroker(tool, args, runId, signal, onProgress) {
   const c = open()
   await c.ready
-  return c.request('tools/call', { name: tool, arguments: args, _meta: { [RUN_META]: runId } }, signal)
+  return c.request('tools/call', { name: tool, arguments: args, _meta: { [RUN_META]: runId } }, { signal, onProgress })
 }
