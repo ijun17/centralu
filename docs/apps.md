@@ -493,7 +493,9 @@ gate happens in one place, the broker desk (`desk.ts`).
 - **`run_agent { prompt, tool?, schema? }`.** Each request starts a new, visible session under the
   app: a project app's in its project (working folder: the project root), a user-folder app's like
   a coordinator (no project, the orchestrator's empty folder). The preset is always `normal`,
-  whatever the calling session runs with. The tool is `tool` if declared, else the default (the
+  whatever the calling session runs with. Settings files: a project app's agent follows the
+  project's trust like a worker; a user-folder app's agent reads only the person's own settings,
+  never the orchestrator folder's files. The tool is `tool` if declared, else the default (the
   project's default tool; for a user-folder app, the orchestrator's). A tool that is not installed
   or not logged in is refused before a session is created, in the tool's words. The prompt reaches
   the agent framed as the app's text (security-boundaries.md, "Text an app sends"). The request
