@@ -59,7 +59,7 @@ visibility is not read as the default: the side that is wrong stays closed.
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
 | Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9) | Through git. Centralu has no button for it |
-| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects | The orchestrator | Settings > Apps, after one confirmation. The folder moves to `<data folder>/app-trash/`; runs, data and secrets stay |
+| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator | Settings > Apps, after one confirmation. The folder moves to `<data folder>/app-trash/`; runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
   of the folder, but the app runs once per project and worktree sessions use the root's app.
@@ -80,8 +80,16 @@ app wrote there while running would reach the whole team.
 - **Secrets**: the manifest holds names only. Values live on this machine, in
   `<data folder>/app-secrets.json` (mode 0600, written through a temporary file created 0600). An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
-  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles. There is no
-  screen or RPC for entering a value yet; the store exists (`secrets.ts`).
+  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles.
+  A person enters them in the **Secrets** panel beside the pinned view (its button says how many
+  are missing) or in the app's row in Settings > Apps: Set, Replace, Clear. Both call
+  `apps.setSecret`, which takes only a name the manifest declares, refuses an empty value, and
+  never sends a value back: the app list carries, per declared name, only whether one is set
+  (`secrets: [{ name, set }]`), because the list goes out on every broadcast. The field is a
+  password field that forgets what it sent. An app receives its environment when it starts, so a
+  running app is stopped once its calls in progress finish and the next need starts it with the
+  new value; a stopped app's failure count is cleared, since a missing key is the usual reason it
+  could not start (`app-secrets.test.ts`).
 - **Logs**: the app's stderr goes to `<data folder>/app-logs/<project id | _user>/<id>.log`, redacted,
   1 MiB with one older generation (`.1`).
 
@@ -111,8 +119,10 @@ either to act.
   the names until their next thread, but every call is checked again and refused. Repository
   settings follow at a session's next restart or resume, and the UI says so when sessions are
   running.
-- **User-folder apps** are trusted: the person put them there. Importing an app from elsewhere,
-  which is to be confirmed separately (plan E-3), does not exist yet.
+- **User-folder apps** are trusted: the person put them there. An app **imported** from elsewhere
+  is someone else's code, so it gets its own confirmation: it arrives turned off and runs only
+  after the person has seen what it runs (§12). A project app that arrives with `git pull` is
+  governed by the project's trust above; it gets no second gate.
 
 ## 4. Lifecycle
 
@@ -133,8 +143,9 @@ The app's environment is the host's **minus** every `CC_*` and `CENTRALU_*` vari
 WebSocket token is among them, and with it an app could call every RPC), plus the declared secrets,
 `CENTRALU_APP_ID` and `CENTRALU_APP_DATA`. Its working directory is its folder.
 
-Status in the list: `invalid`, `untrusted`, `stopped`, `starting`, `running`, `crashed` (the last
-start or run failed; the next need retries), `failed` (stopped after three).
+Status in the list: `invalid`, `untrusted`, `unconfirmed` (an imported app the person has not
+enabled, or whose `server` or `uses` changed since, §12), `stopped`, `starting`, `running`,
+`crashed` (the last start or run failed; the next need retries), `failed` (stopped after three).
 
 ## 5. One call path
 
@@ -557,6 +568,10 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.usage` | One app's agent use over the last day and 30 days |
 | `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
+| `apps.setSecret` | Set, replace or clear one declared secret (§2); the value is never returned |
+| `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | Stage an import and return the review; bring it in, turned off or enabled with the review's key; drop the staging (§12) |
+| `apps.review`, `apps.enable` | The review of an imported app waiting for the person; enable it with that review's key (§12) |
+| `apps.versions`, `apps.restoreVersion` | Kept versions of a user-folder app, or the git commits that touched a project app; restore a kept version (§12) |
 | `apps.sessionTools`, `apps.sessionCall` | Used by the Codex bridge |
 | `projects.setTrusted` | Trust (§3) |
 
@@ -567,9 +582,111 @@ result, was cancelled, closed or refused; stored without bodies, so a reopened U
 placeholders). A capability question a session's chain raised is that session's
 `approval_request` with `detail.kind: "capability"`.
 
-## 12. Not there yet
+## 12. Handing apps over: import, versions, links
 
-- Secrets can be declared but not entered (no screen or RPC yet).
+Plan section E, the local half (decision 9): an app can be brought in from a folder, a zip or a
+link, and an app outside git keeps versions to go back to. Sharing through a team server is the
+next plan. Code: `apps/external/handover.ts` (staging, confirmation, versions), `imports.ts` and
+`zip.ts` (reading a source), `import-book.ts` (the marks), `versions.ts`; UI
+`features/app-share/`.
+
+### 12.1 Import (E-3)
+
+"Import" on the **Your apps** group opens one dialog for a folder, a `.zip` file, or an https
+link to a `.zip`. It takes two steps.
+
+1. **Review.** `apps.importPrepare` copies the source into a staging folder in the data folder
+   (`app-staging/`, which discovery never scans, so nothing there can start or attach), judges it,
+   and returns what the person sees before anything is in: the command and its arguments (what it
+   runs, as the person), what it declares in `uses` (run your agent, call other apps, read Centralu
+   data), the secrets it wants, whether it has a screen, and every file with its size, plus what
+   was not copied and why. A download goes to a temporary folder first and is removed afterwards.
+2. **Bring it in.** "Import" moves it to `<data folder>/apps/<id>/` **turned off** (`unconfirmed`).
+   "Import and enable" does the same and confirms at once, sending back the key of the review the
+   person just saw; the host re-reads the staged manifest and refuses a key that does not match
+   it. Closing the dialog drops the staging; staging also expires after 30 minutes and is cleared
+   when the host starts. The app lands in the list and its pinned view opens.
+
+An imported app that is not enabled is treated like an untrusted project's app: it never starts,
+it is not attached to any session, every call to it is refused, `check` reports it, and no builder
+session is made for it. Its pinned view shows the same review with **Enable**; Settings > Apps
+says where it came from and offers "Review and enable…".
+
+**The confirmation is the host's.** It is kept in `<data folder>/app-imports.json` (0600), outside
+the app folder, so the app's own code cannot write "confirmed" and an archive cannot arrive with
+it. It is bound to the folder's inode, so a different folder later created with the same id is not
+covered, and removing the app forgets it. It records a hash of the manifest's `server` (command and
+arguments) and `uses`; the runtime compares it at every call, start and status. If either changes
+later (an editor, the builder, a restored version), the app is `unconfirmed` again ("Needs
+review"), and the review shows what it ran and asked for when it was enabled. Other fields, and the
+code itself, do not ask again: the confirmation is about what runs and what it may ask for, not a
+review of every edit.
+
+What is refused before anything lands (`imports.test.ts`):
+
+| Refused | Why |
+|---|---|
+| An id already in the user folder (even an invalid folder), a built-in id, an id failing the #93 rule or starting with `app-` | Same rule as a new app. Nothing is overwritten |
+| A link inside a folder that points outside it | Links are not followed; the refusal names the link and its target. Links pointing inside are not copied and are listed |
+| A zip entry with `..`, an absolute path, a drive letter, a backslash, an empty segment or a control character | Zip slip. Files are written only under paths built from checked segments, and each is checked again to be inside the staging folder |
+| A zip link entry pointing outside the archive; an entry that inflates past its declared size (inflation stops there) or fails its checksum; two entries that differ only in case or Unicode form; a file and a folder with the same name; encrypted, split or ZIP64 archives | The list the person saw must be the files that are written |
+| More than 2,000 files, 64 MiB in all, 16 MiB in one file, 16 levels, or a `.zip` over 32 MiB | An app is small; the caps keep a mistake or a bomb from filling the disk |
+| A source that is not an absolute path, a `file:` URL of this machine, or an `https:` URL; https with a user or password in it; a loopback, link-local or unspecified host | Only local files and https. Redirects are followed by hand, at most five, and each target is checked again |
+
+**Names starting with a dot are not copied** (`.git`, `.env`, and `.claude/` and `.codex/` among
+them): a user-folder app's builder works in the app folder and reads settings there, so an
+archive could otherwise bring hooks that run before anyone confirmed anything. The folder
+fingerprint does not count dot-names as code either.
+
+### 12.2 Versions (E-1)
+
+A **project app** is versioned by git: the Versions panel beside its pinned view lists the recent
+commits that touched `.centralu/apps/<id>` (read by the host core with `git log -- <folder>`;
+`repo: false` outside a repository). It is read-only; going back is done with git.
+
+A **user-folder app** (imported ones included) has no git, so the host keeps copies. Each time the
+app starts on code it has not kept yet, and when an app is imported, its folder is copied to
+`<data folder>/app-versions/_user/<id>/`; the five newest stay. The copy covers exactly what the
+folder fingerprint covers (one walk, `walkCode`: no dot-names, no `node_modules`), so a version's
+fingerprint is the code stamp the list already carries, and the panel marks the version equal to
+the code on disk as **current**. The same code starting again (after idling or a crash) adds
+nothing.
+
+"Restore previous version" (the version just before the current one), or Restore on any row,
+asks once, then `apps.restoreVersion`: the current files are kept as a version first, so a restore
+can be undone; the chosen version is written back (code files it does not hold are removed;
+dot-names and `node_modules` are left alone, and large files get their times back so the
+fingerprint matches); the failure count is cleared; and the app restarts on the restored code
+through the same path as a builder's turn end, after its calls in progress, so open views reopen on
+it (§6.3). An imported app restored to a version with a different `server` or `uses` is asked about
+again (§12.1). Project apps are refused.
+
+### 12.3 App links (E-4)
+
+`centralu://app?url=<url>` opens the import dialog of §12.1 with the source filled in and a line
+saying a link asked for it. The dialog reads and downloads nothing until the person presses Review;
+from there it is an ordinary import, turned off unless the person enables it.
+
+- **macOS**: the bundle registers the `centralu` scheme in its Info.plist
+  (`apps/desktop/src-tauri/Info.plist`, merged by Tauri's bundler), and the shell receives links
+  through the platform's own open event (`RunEvent::Opened`), not the deep-link plugin, which would
+  open more commands to the webview. The shell keeps links whose scheme is `centralu` and whose
+  length is under 4,096 (at most eight at a time), brings the window forward and rings `app-link`;
+  the webview takes them with `take_app_links`, so a link that starts the app is not lost and none
+  arrives twice.
+- **The link is someone else's text.** `parseAppLink` (`@cc/protocol`) accepts only
+  `centralu://app` with exactly one `url`, and that url only https (without a user or password) or
+  a `file:` URL of this machine. Anything else is a one-line notice and no dialog. The host judges
+  the source again by its own rules when Review is pressed.
+- **Manual check** (a scheme is routed only to a registered app bundle, so `tauri dev` cannot
+  receive links): build the app, open it once so LaunchServices registers it, then run
+  `open 'centralu://app?url=file:///path/to/app.zip'` and, for a download,
+  `open 'centralu://app?url=https%3A%2F%2Fexample.com%2Fapp.zip'`. The import dialog should come to
+  the front with the source filled in, and nothing should be read before Review.
+- Linux and Windows receive no links yet.
+
+## 13. Not there yet
+
 - The manifest's `csp` field is not read; the per-app origin is chosen only in the manifest.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
@@ -578,3 +695,7 @@ placeholders). A capability question a session's chain raised is that session's
   (spike S-5).
 - The broker answers only while the app handles a call: an app cannot ask by itself (a timer, a
   watcher). The host data list has two names.
+- Export (plan E-2) and sharing through a team server are not built: an app is shared by sending
+  its folder or a zip of it, or by committing a project app.
+- App links arrive on macOS only, and have been exercised by hand, not in CI (§12.3). An https
+  host given by name is not checked for resolving to a private address.

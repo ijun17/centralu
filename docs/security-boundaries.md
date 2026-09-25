@@ -129,8 +129,10 @@ the server (out of scope for M4). So for a server the boundary is **whether it r
 then who may call it:
 
 - A project's apps start only in a trusted project (previous section). A cloned repository's
-  `.centralu/apps/` does nothing until the user trusts the project. User-folder apps, approved MCP
-  servers included, are trusted because the user put them there.
+  `.centralu/apps/` does nothing until the user trusts the project, and an app that arrives later
+  with `git pull` is governed by that same trust: there is no second gate for it. User-folder apps,
+  approved MCP servers included, are trusted because the user put them there. An app **imported**
+  into the user folder from elsewhere is not: see "Imported apps and app links" below.
 - The host withholds its own environment: every `CC_*` and `CENTRALU_*` variable is removed (the
   WebSocket token is one; with it an app could call every RPC). The app receives its declared
   secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`runtime.ts` `spawnSpec`; test "데이터
@@ -138,7 +140,13 @@ then who may call it:
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
   run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
   `app-process.ts` `AppLog`; test "표준에러는 앱별 로그로 가고, 비밀 값은 이름으로 가려진다").
-  Arguments are hashed only after redaction.
+  Arguments are hashed only after redaction. The person enters values through `apps.setSecret`,
+  which accepts only names the manifest declares and never returns a value: the app list carries
+  only whether each declared name is set, and refusals never quote the value. A test looks for the
+  value, as a string, in the app log, run records, kept failures, error bundles, the list,
+  broadcasts, the host console and the RPC replies, with an app that leaks it on purpose
+  (`app-secrets.test.ts` "앱이 값을 표준에러·실패 문구·인자로 흘려도 …"). In the UI the field is a
+  password field that is emptied once sent (`e2e/app-share.spec.ts`).
 - Every call goes through the host, which enforces tool visibility in both directions: views reach
   only `app` tools, agents only `model` tools, and a refused call never reaches the app
   (`runtime.ts` `call`; `mediation.test.ts` "화면은 model 전용 도구를 못 부르고, 세션은 app 전용
@@ -194,6 +202,66 @@ Limits:
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message.
 - fd 3 on Windows is untested (spike S-5).
+
+## Imported apps and app links
+
+An app imported from a folder, a zip or an https link (plan E-3, [apps.md](apps.md) §12) is someone
+else's code that will run as the user. It gets its own confirmation, separate from project trust.
+
+- **Nothing runs before the person has seen what runs.** The source is copied into a staging folder
+  the discovery never scans, and the review (the command and its arguments, what `uses` declares,
+  the secrets it wants, every file) is shown before anything is in. An imported app arrives turned
+  off (`unconfirmed`): it never starts, is never attached to a session, every call is refused, and
+  no builder session is made for it. The runtime checks this at every call, start, `check` and
+  status, not only when it is listed (`runtime.ts` `held`; `imports.test.ts` "들인 앱은
+  unconfirmed로 서고 …"; `session-apps.test.ts` "가져온 앱은 사람이 켜기 전에는 …").
+- **The confirmation is held by the host and bound to what was seen.** It lives in
+  `app-imports.json` (0600) in the data folder, not in the app folder, so neither the app's code nor
+  an archive can supply it. It is bound to the folder's inode and records a hash of the manifest's
+  `server` and `uses`. Enabling sends back the key of the review the person saw, and the host
+  compares it with the manifest at that moment, so what was reviewed is what is enabled. A later
+  change to `server` or `uses` (an editor, the builder, a restored version) asks again
+  (`import-book.ts`, `handover.ts`; "명령이 바뀌면 호출이 막히고 …", "확인 창을 본 뒤에 바뀌었으면 …").
+- **Reading the source.** Links inside a folder are not followed: one pointing outside refuses the
+  import, one pointing inside is not copied. Files are opened without following a final link, after
+  the path guard has checked the parents. Zip entries are judged before anything is written: no
+  `..`, absolute paths, drive letters, backslashes, empty segments or control characters (zip
+  slip), no link entry leaving the archive, no entry inflating past its declared size (inflation
+  stops there), matching checksums, no names that collide on a case-insensitive disk, no
+  encrypted, split or ZIP64 archives. There are caps on files (2,000), bytes (64 MiB, 16 MiB per
+  file), depth (16) and the archive (32 MiB). Every file is written under a path built from checked
+  segments and checked again to be inside the staging folder (`imports.ts`, `zip.ts`;
+  `imports.test.ts` "zip이 밖에 쓰지 못한다", "폴더 안의 링크가 밖을 가리키면 …", "상한 …").
+- **Dot-names are not copied.** A user-folder app's builder works in the app folder and reads the
+  settings there (decision 3 trusts that folder), so `.claude/` or `.codex/` inside an archive
+  would be hooks and settings nobody confirmed. `.git`, `.env` and the rest are left out too.
+- **Downloads.** Only `https:`; no user or password in the URL; loopback, link-local (cloud
+  metadata lives there) and unspecified hosts are refused. Redirects are followed by hand, at most
+  five, and every target is checked again, so an https link cannot bounce to http or to this
+  machine. The body is capped by its declared length and again while it streams; it goes to a
+  temporary folder that is removed afterwards, and the result is judged like a local zip.
+- **App links** (`centralu://app?url=…`, E-4) are text someone else wrote. The macOS shell accepts
+  only the `centralu` scheme under a length cap, a few at a time, and passes them to the page,
+  which accepts only `centralu://app` with one `url` that is https or a file of this machine
+  (`parseAppLink`). A link only fills in the import dialog: nothing is read or downloaded until the
+  person presses Review, and then the host judges the source again with its own rules. The shell
+  receives links through the platform's open event rather than the deep-link plugin, which would
+  open more commands to the page; the one command added, `take_app_links`, is granted like the
+  others (next sections).
+
+Limits:
+
+- The confirmation covers what an app runs and what it may ask Centralu for, not its code. Once
+  enabled, an app's code can change without asking again, as a user-folder app's can; that is what
+  enabling means.
+- An https host given by name is not resolved and checked: a name that resolves to a private
+  address is fetched. The request happens only after the person presses Review on that address.
+- Hardlinks in a source folder are copied as the files they are; pathname checks cannot tell where
+  an inode came from (the same limit as "Project files and native handoff"). Same-user races
+  between checking a file and opening it remain.
+- If `app-imports.json` cannot be read, it is moved aside and the marks are lost: imported apps
+  are then treated as the user's own until they are imported again. The host logs this.
+- App links have been exercised by hand on a built app, not in CI, and are received on macOS only.
 
 ## App views
 
@@ -296,12 +364,16 @@ invoke key stood in the way. Remote origins, a loopback app frame among them, we
 (tauri ≥ 2.11.1).
 
 Now `apps/desktop/src-tauri/build.rs` declares an app manifest, which creates a permission per
-command (`allow-<command>`), and `capabilities/default.json` grants the 12 commands **only to the
+command (`allow-<command>`), and `capabilities/default.json` grants the 13 commands **only to the
 window `main` on local origins**: no `remote`, no wildcard window. The granted set is exactly what
 the frontend calls. `tooling/desktop-permissions.test.ts` holds the manifest, the `invoke_handler`,
-the grants and the call sites to each other, and fails on `remote` or a wildcard.
+the grants and the call sites to each other, and fails on `remote` or a wildcard. Plugin
+permissions have no call site to hold them to, so the test names every one that is granted: adding
+a plugin, or widening one, is a change to that list. It also holds the app-link setup (M4 E-4) to
+one URL scheme, `centralu`, and no deep-link plugin.
 
-Measured on a real Tauri instance (#186): all 12 answer from the main page, in dev and in a
+Measured on a real Tauri instance (#186, when there were 12; `take_app_links` came with app links,
+M4 E-4, and has not been measured this way): all 12 answer from the main page, in dev and in a
 `tauri://localhost` debug build. From an app frame holding a leaked invoke key, 60 of 60 calls were
 refused by the permission check and none reached a handler.
 
