@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  AppRun,
   Attachment,
   PermissionPreset,
   GitBranch,
@@ -634,6 +635,10 @@ export class MockPlatform implements Platform {
      * 실물처럼: 멈췄거나 죽었던 앱의 이유를 지우고 쉬는 앱(`stopped`)으로 세운 뒤 목록 방송을 한다.
      * 띄우지는 않는다 — 다음에 여는 화면이 띄운다.
      */
+    runs: async (appId: string, projectId: string | null, limit = 100): Promise<AppRun[]> => {
+      this.appRunReads++
+      return structuredClone((this.appRuns.get(`${projectId ?? '_user'}/${appId}`) ?? []).slice(0, limit))
+    },
     restart: async (appId: string, projectId: string | null) => {
       this.restarts.push({ appId, projectId })
       const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
@@ -644,6 +649,13 @@ export class MockPlatform implements Platform {
   }
   /** 다시 시작한 앱 — Restart 단추가 host에 닿았는지를 시험이 본다 */
   readonly restarts: { appId: string; projectId: string | null }[] = []
+  /**
+   * 실행 기록 (M4 B-7) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다(최근 것부터). host처럼 읽기만
+   * 하고 만들지 않는다: 기록을 만드는 것은 런타임의 단 하나의 길이고, 그 시험은 agent-host에 있다.
+   */
+  readonly appRuns = new Map<string, AppRun[]>()
+  /** 기록을 몇 번 읽었나 — "바뀌었다"가 오면 다시 읽는지를 시험이 본다 */
+  appRunReads = 0
   /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */
   readonly openedViews: { appId: string; projectId: string | null }[] = []
   readonly closedViews: string[] = []

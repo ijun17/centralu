@@ -152,7 +152,7 @@ test('신뢰하지 않은 프로젝트의 앱은 이유와 함께 서고, 그 �
  * 시험용 앱이다. host가 home을 부르는 일은 agent-host의 app-home-view.test.ts가 진짜 앱으로 본다.
  * 여기서는 그 답을 받은 UI가 무엇을 하는지를 본다.
  */
-test.describe('고정 화면 (B-2, B-6)', () => {
+test.describe('고정 화면 (B-2, B-6, B-7)', () => {
   let fx: FixtureHost
   test.beforeAll(async () => {
     fx = await startFixtureHost({
@@ -434,6 +434,67 @@ test.describe('고정 화면 (B-2, B-6)', () => {
     await failed.getByTestId('pinned-restart').click()
     await expect.poll(() => restarts(page)).toEqual([{ appId: 'slider', projectId: pid }])
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  })
+
+  test('B-7: 기록 판은 최근 실행을 시간·도구·부른 쪽·결말·걸린 시간으로 보이고, 실패는 표시되며, 호출이 끝나면 다시 읽는다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid)])
+    // 부른 세션의 이름이 줄에 서는지 보려고 세션 하나를 만든다
+    await page.getByTestId('project-menu-alpha').click()
+    await page.getByTestId('new-session-alpha').click()
+    await page.getByTestId('create-session-confirm').click()
+    const session = await page.evaluate(() => {
+      const st = (window as any).__store.getState()
+      return { id: st.focusedSessionId as string, name: st.sessions[st.focusedSessionId].name as string }
+    })
+    const t0 = Date.UTC(2026, 8, 25, 3, 4, 5)
+    const mk = (id: string, tool: string, callerKind: string, status: string, durationMs: number | null, error: string | null, at: number, sid: string | null = null) => ({
+      id, projectId: pid, appId: 'slider', tool, callerKind, callerSessionId: sid, parentRunId: null, status, durationMs,
+      argsDigest: 'd', argsSummary: '{}', error, createdAt: at, failure: null,
+    })
+    const runs = [
+      mk('r4', 'agent_only', 'view', 'rejected', 0, 'agent_only is not open to views (visibility: ["model"])', t0),
+      mk('r3', 'crash', 'session', 'error', 5, 'exited (code 7)', t0 - 1000, session.id),
+      mk('r2', 'set_interval', 'app', 'ok', 1500, null, t0 - 2000),
+      mk('r1', 'home', 'view', 'ok', 42, null, t0 - 3000),
+    ]
+    await page.evaluate(({ key, runs }) => (window as any).__mock.appRuns.set(key, runs), { key: `${pid}/slider`, runs })
+
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await pinned.getByTestId('pinned-runs-toggle').click()
+    await expect(pinned.getByTestId('pinned-runs-toggle')).toHaveAttribute('aria-pressed', 'true')
+    const rows = pinned.getByTestId('runs-panel').getByTestId('run-row')
+    await expect(rows).toHaveCount(4)
+    await expect(rows.getByTestId('run-tool')).toHaveText(['agent_only', 'crash', 'set_interval', 'home'])
+    await expect(rows.getByTestId('run-status')).toHaveText(['refused', 'failed', 'ok', 'ok'])
+    await expect(rows.getByTestId('run-caller')).toHaveText(['View', `Session · ${session.name}`, 'App', 'View'])
+    await expect(rows.getByTestId('run-duration')).toHaveText(['0 ms', '5 ms', '1.5 s', '42 ms'])
+    await expect(rows.nth(0).getByTestId('run-time')).toHaveAttribute('datetime', new Date(t0).toISOString())
+    // 실패만 표시된다 — 이유 한 줄과 함께
+    await expect(rows.nth(0)).toHaveAttribute('data-failed', 'true')
+    await expect(rows.nth(1)).toHaveAttribute('data-failed', 'true')
+    await expect(rows.nth(2)).not.toHaveAttribute('data-failed', 'true')
+    await expect(rows.nth(1).getByTestId('run-error')).toHaveText('exited (code 7)')
+    await expect(rows.nth(2).getByTestId('run-error')).toHaveCount(0)
+
+    // 이 앱에 닿은 호출이 끝났다 — 판이 다시 읽는다
+    await page.evaluate(
+      ({ key, extra }) => {
+        const m = (window as any).__mock
+        m.appRuns.set(key, [extra, ...m.appRuns.get(key)])
+        m.emit({ type: 'external_app_state_changed', appId: 'slider', projectId: extra.projectId })
+      },
+      { key: `${pid}/slider`, extra: mk('r5', 'get_interval', 'view', 'ok', 3, null, t0 + 1000) },
+    )
+    await expect(rows).toHaveCount(5)
+    await expect(rows.nth(0).getByTestId('run-tool')).toHaveText('get_interval')
+
+    // 판을 닫아도 화면은 그대로다 — 같은 문서
+    await pinned.getByTestId('pinned-runs-toggle').click()
+    await expect(pinned.getByTestId('runs-panel')).toHaveCount(0)
+    await expect(viewOf(page, `${pid}/slider`).locator('li[data-k="connected"]')).toHaveCount(1)
   })
 
   test('사용자 폴더의 앱은 프로젝트 밖에 자기 무리가 있다', async ({ page }) => {

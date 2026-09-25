@@ -19,6 +19,7 @@ import { ExternalApps } from '../../agent-host/src/apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../../agent-host/src/apps/external/test-helpers.js'
 import { runtimeViewSource } from '../../agent-host/src/app-view-source.js'
 import { onExternalAppListChanged } from '../../agent-host/src/app-list-events.js'
+import { storeRunLedger } from '../../agent-host/src/app-run-ledger.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
 import { APP_VERSION } from '@cc/protocol'
@@ -697,6 +698,7 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
       projects: () => store.projectRoots(),
       dataRoot: join(fixture, 'data'),
       reservedIds: ['control'],
+      runs: storeRunLedger(store),
       timing: { graceMs: 1_000, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
     })
     rt.refresh()
@@ -721,6 +723,8 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
       expect(v).toMatchObject({ tool: 'home', resourceUri: 'ui://fixture/main', toolInput: {}, toolResult: { structuredContent: { interval: 5 } } })
       const frame = await platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })
       expect(frame.url).toContain(`/${secret}/views/${v.instanceId}/`)
+      // 기록 판(B-7)이 읽는 것 — host의 기록에 "화면이 home을 불렀다"가 있다
+      expect((await platform.apps.runs('slider', project.id)).map((r) => [r.id, r.tool, r.callerKind, r.status])).toEqual([[v.runId, 'home', 'view', 'ok']])
 
       await expect(platform.apps.openView('plain', project.id)).rejects.toThrow('declares no _meta.ui.resourceUri')
 
