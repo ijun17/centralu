@@ -20,15 +20,30 @@ const CONTENT_MAX_BYTES = 1024 * 1024
 const MAX_FILES = 2_000
 const MAX_DEPTH = 8
 
-export function folderFingerprint(dir: string): string {
-  const h = createHash('sha256')
+/**
+ * 지문이 재는 것을 걷는다 — 지문과 스냅샷(E-1, `versions.ts`)이 **같은 걸음**을 쓴다. 스냅샷이 담는 파일과 지문이 재는 파일이 다르면,
+ * 되돌린 뒤의 지문이 그 스냅샷의 지문과 맞지 않아 "지금 이 판"을 가리킬 수 없다.
+ *
+ * 건너뛰는 것·상한은 위 머리말 그대로다. 링크는 파일도 폴더도 아니라서 걷지 않는다(`Dirent`는 링크를 따라가지 않는다).
+ */
+export type CodeVisit = {
+  /** 못 읽은 폴더 — 사라진 폴더와 있는 폴더가 같은 모양이 되지 않게 지문은 이것도 잰다 */
+  unreadable(rel: string): void
+  dir(rel: string): void
+  /** 파일 하나 (앱 폴더 기준 상대 경로) */
+  file(rel: string): void
+  /** 파일 수 상한을 넘었다 — 그 폴더의 나머지는 건너뛴다 */
+  more(): void
+}
+
+export function walkCode(dir: string, v: CodeVisit): void {
   let files = 0
   const walk = (rel: string, depth: number): void => {
     let entries: Dirent[]
     try {
       entries = readdirSync(rel ? join(dir, rel) : dir, { withFileTypes: true })
     } catch {
-      h.update(`!${rel}\n`) // 못 읽은 것도 모양이다 — 사라진 폴더와 있는 폴더가 같은 지문이 되지 않게
+      v.unreadable(rel)
       return
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
@@ -36,15 +51,28 @@ export function folderFingerprint(dir: string): string {
       if (e.name.startsWith('.') || e.name === 'node_modules') continue
       const r = rel ? `${rel}/${e.name}` : e.name
       if (e.isDirectory()) {
-        h.update(`d ${r}\n`)
+        v.dir(r)
         if (depth < MAX_DEPTH) walk(r, depth + 1)
         continue
       }
       if (!e.isFile()) continue
       if (++files > MAX_FILES) {
-        h.update('…more files\n')
+        v.more()
         return
       }
+      v.file(r)
+    }
+  }
+  walk('', 0)
+}
+
+export function folderFingerprint(dir: string): string {
+  const h = createHash('sha256')
+  walkCode(dir, {
+    unreadable: (rel) => void h.update(`!${rel}\n`), // 못 읽은 것도 모양이다 — 사라진 폴더와 있는 폴더가 같은 지문이 되지 않게
+    dir: (r) => void h.update(`d ${r}\n`),
+    more: () => void h.update('…more files\n'),
+    file: (r) => {
       try {
         const path = join(dir, r)
         const st = statSync(path)
@@ -53,8 +81,7 @@ export function folderFingerprint(dir: string): string {
       } catch {
         h.update(`? ${r}\n`) // 재는 사이에 사라졌다
       }
-    }
-  }
-  walk('', 0)
+    },
+  })
   return h.digest('hex')
 }

@@ -276,3 +276,72 @@ test.describe('가져오기 (E-3)', () => {
     await expect(gate).toBeVisible()
   })
 })
+
+test.describe('판 (E-1)', () => {
+  const snap = (id: string, at: number, reason: string, current = false) => ({ id, at, files: 4, bytes: 2048, reason, current })
+
+  test('사용자 폴더 앱: 떠 둔 판이 보이고, "Restore previous version"은 한 번 물은 뒤 지금 판의 바로 앞 판을 되돌린다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(
+      (v) => (window as any).__mock.appVersions.set('_user/notes', v),
+      { kind: 'snapshots', snapshots: [snap('s3', 3_000_000, 'started', true), snap('s2', 2_000_000, 'started'), snap('s1', 1_000_000, 'imported')] },
+    )
+    await setApps(page, [app('notes', null, { name: 'Notes' })])
+    await page.getByTestId('app-row-_user/notes').click()
+    const pinned = page.getByTestId('pinned-app-_user/notes')
+    await pinned.getByTestId('pinned-versions-toggle').click()
+    const panel = pinned.getByTestId('versions-panel')
+    await expect(panel.getByTestId('version-row')).toHaveCount(3)
+    await expect(panel.getByTestId('version-row').first().getByTestId('version-current')).toHaveText('current')
+    await expect(panel.getByTestId('version-row').nth(2)).toContainText('As imported')
+
+    const restored = () => page.evaluate(() => (window as any).__mock.restoredVersions as { appId: string; id: string }[])
+    await panel.getByTestId('versions-restore-previous').click()
+    await expect(panel.getByTestId('versions-confirm')).toContainText('The current files are kept as a version first')
+    // 묻는 동안에는 아무것도 가지 않는다 — 취소하면 그대로다
+    await panel.getByTestId('versions-confirm-cancel').click()
+    expect(await restored()).toEqual([])
+
+    await panel.getByTestId('versions-restore-previous').click()
+    await panel.getByTestId('versions-confirm-yes').click()
+    await expect.poll(restored).toEqual([{ appId: 'notes', id: 's2' }])
+    // 되돌린 판이 지금 판이 된다
+    await expect(panel.getByTestId('version-row').nth(1).getByTestId('version-current')).toHaveText('current')
+    // 더 오래된 판도 줄마다 되돌릴 수 있다
+    await panel.getByTestId('version-row').nth(2).getByTestId('version-restore').click()
+    await panel.getByTestId('versions-confirm-yes').click()
+    await expect.poll(restored).toEqual([
+      { appId: 'notes', id: 's2' },
+      { appId: 'notes', id: 's1' },
+    ])
+  })
+
+  test('프로젝트 앱: git이 판이라 그 앱을 건드린 커밋만 읽기로 보이고, 되돌리는 단추가 없다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
+    await page.getByTestId('add-project').click()
+    const pid = await page.evaluate(() => (Object.values((window as any).__store.getState().projects) as { id: string }[])[0]!.id)
+    await page.getByTestId('trust-ask-yes-alpha').click()
+    await page.evaluate(
+      ([p, v]) => (window as any).__mock.appVersions.set(`${p}/notes`, v),
+      [
+        pid,
+        {
+          kind: 'git',
+          repo: true,
+          commits: [{ sha: 'b'.repeat(40), shortSha: 'bbbbbbb', subject: 'Tweak the notes app', author: 'Ann', when: 2_000_000, parents: ['a'.repeat(40)] }],
+        },
+      ] as const,
+    )
+    await setApps(page, [app('notes', pid, { name: 'Notes' })])
+    await page.getByTestId(`app-row-${pid}/notes`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
+    await pinned.getByTestId('pinned-versions-toggle').click()
+    const history = pinned.getByTestId('versions-git')
+    await expect(history).toContainText('git keeps its versions')
+    await expect(history.getByTestId('version-commit')).toHaveCount(1)
+    await expect(history.getByTestId('version-commit')).toContainText('Tweak the notes app')
+    await expect(pinned.getByTestId('versions-restore-previous')).toHaveCount(0)
+    await expect(pinned.getByTestId('version-restore')).toHaveCount(0)
+  })
+})

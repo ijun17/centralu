@@ -18,6 +18,7 @@ import {
   AppQuestion,
   AppRun,
   AppReview,
+  AppVersions,
   UsageSnapshot,
   GitFileStatus,
   ModelOption,
@@ -1285,6 +1286,23 @@ export const RpcMethods = {
    */
   'apps.enable': {
     params: z.object({ appId: AppId, projectId: z.string().nullable(), reviewKey: z.string() }),
+    result: ExternalAppInfo,
+  },
+  /**
+   * 앱의 판 (M4 E-1) — 사용자 폴더 앱이면 host가 떠 둔 스냅샷(최근 것부터, 지금 코드와 같은 판에 `current`), 프로젝트 앱이면 그 앱
+   * 폴더를 건드린 최근 커밋(git이 판이다, 읽기만 한다). 저장소가 아니면 `repo: false`에 빈 목록이다.
+   */
+  'apps.versions': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: AppVersions,
+  },
+  /**
+   * 사용자 폴더 앱을 떠 둔 판으로 되돌린다 (M4 E-1). 되쓰기 전에 지금 코드를 판으로 떠 두고(되돌리기도 되돌릴 수 있다), 판의 파일을
+   * 되쓴 뒤 앱을 그 코드로 다시 띄운다 — 진행 중인 호출은 끝나기를 기다린다. 열린 화면은 새 코드로 다시 열린다(`codeStamp`).
+   * 가져온 앱의 판이 다른 `server`·`uses`를 가졌으면 다시 묻는다. 프로젝트 앱은 거절한다 — 되돌리는 자리는 git이다.
+   */
+  'apps.restoreVersion': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable(), id: z.string() }),
     result: ExternalAppInfo,
   },
   'orchestrator.tools': {

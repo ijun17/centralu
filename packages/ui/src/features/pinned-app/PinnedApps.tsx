@@ -13,6 +13,7 @@ import { UpdatedCue } from './UpdatedCue.jsx'
 import { CapabilityAsk } from './CapabilityAsk.jsx'
 import { SecretsPanel, missingSecrets } from './AppSecrets.jsx'
 import { ReviewAndEnable } from '../app-share/ReviewAndEnable.jsx'
+import { VersionsPanel } from '../app-share/VersionsPanel.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -54,6 +55,8 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   const [runsOpen, setRunsOpen] = useState(false)
   // 비밀 판 (M4 E) — 선언한 비밀이 있는 앱에만 선다. 빈 것이 있으면 머리글의 단추가 그 수를 말한다
   const [secretsOpen, setSecretsOpen] = useState(false)
+  // 판 (M4 E-1) — 사용자 폴더 앱은 떠 둔 스냅샷과 되돌리기, 프로젝트 앱은 git의 커밋(읽기만)
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const missing = missingSecrets(app)
   // 만드는 세션 (C-5) — 아래 입력줄이 말을 보내는 곳이고, 그 대화를 화면 옆에 여닫는다(BuilderPane)
   const builder = useAppBuilder(pv.projectId, pv.appId)
@@ -248,6 +251,20 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
             {missing ? `Secrets · ${missing} missing` : 'Secrets'}
           </button>
         )}
+        {app && (
+          <button
+            type="button"
+            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              versionsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
+            }`}
+            aria-pressed={versionsOpen}
+            onClick={() => setVersionsOpen((v) => !v)}
+            data-testid="pinned-versions-toggle"
+            title={app.projectId ? 'Commits that touched this app (git keeps its versions)' : 'Earlier versions of this app, and a way back to them'}
+          >
+            Versions
+          </button>
+        )}
         <button
           type="button"
           className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
@@ -274,6 +291,7 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
         {runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
         {secretsOpen && app && <SecretsPanel app={app} />}
+        {versionsOpen && app && <VersionsPanel app={app} />}
       </div>
     </section>
   )

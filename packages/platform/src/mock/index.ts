@@ -3,6 +3,7 @@ import type {
   AppUsage,
   AppQuestion,
   AppReview,
+  AppVersions,
   AdapterCapabilities,
   AppErrorBundle,
   AppRun,
@@ -1064,6 +1065,26 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'external_apps_changed' })
       return structuredClone(a)
     },
+    /**
+     * 앱의 판 (M4 E-1) — 시험이 `appVersions`에 채운다. 채우지 않았으면 host처럼: 사용자 폴더 앱은 빈 스냅샷 목록, 프로젝트 앱은 빈
+     * 커밋 목록이다. 되돌리기는 실물처럼 프로젝트 앱을 거절하고, 고른 판이 지금 판이 되며 목록 방송을 한다.
+     */
+    versions: async (appId: string, projectId: string | null): Promise<AppVersions> => {
+      const v = this.appVersions.get(`${projectId ?? '_user'}/${appId}`)
+      if (v) return structuredClone(v)
+      return projectId === null ? { kind: 'snapshots', snapshots: [] } : { kind: 'git', repo: true, commits: [] }
+    },
+    restoreVersion: async (appId: string, projectId: string | null, id: string): Promise<ExternalAppInfo> => {
+      if (projectId !== null) throw new Error("A project app's versions are its git history; restore it with git")
+      const key = `_user/${appId}`
+      const v = this.appVersions.get(key)
+      const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === null)
+      if (!a || !v || v.kind !== 'snapshots' || !v.snapshots.some((s) => s.id === id)) throw new Error('That version is no longer kept')
+      for (const s of v.snapshots) s.current = s.id === id
+      this.restoredVersions.push({ appId, id })
+      this.emit({ type: 'external_apps_changed' })
+      return structuredClone(a)
+    },
   }
   /** host에 닿은 비밀 넣기·지우기 (M4 E) — 무엇이 어느 앱의 어느 이름으로 갔는지를 시험이 본다 */
   readonly secretWrites: { appId: string; projectId: string | null; name: string; value: string | null }[] = []
@@ -1079,6 +1100,10 @@ export class MockPlatform implements Platform {
   readonly importCommits: { token: string; enable: boolean; appId: string }[] = []
   readonly importCancels: string[] = []
   readonly enabledApps: string[] = []
+  /** 앱의 판 (M4 E-1) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다: 판을 뜨는 것은 런타임이다 */
+  readonly appVersions = new Map<string, AppVersions>()
+  /** 되돌리기가 host에 닿은 것 — 확인을 거친 뒤에만 닿는지를 시험이 본다 */
+  readonly restoredVersions: { appId: string; id: string }[] = []
   /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
   /**

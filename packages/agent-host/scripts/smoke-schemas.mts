@@ -184,6 +184,8 @@ const SKIP: Record<string, string> = {
   'apps.importCommit': '준비한 가져오기의 토큰이 필요 — 사용자 폴더에 앱을 들인다 (같은 시험이 관통)',
   'apps.review': '가져온 앱이 필요 (같은 시험이 관통)',
   'apps.enable': '가져온 앱과 그 확인 창의 열쇠가 필요 (같은 시험이 관통)',
+  'apps.versions': '외부 앱이 필요 — 사용자 폴더 앱은 스냅샷, 프로젝트 앱은 git (app-versions.test.ts가 진짜 저장소로 관통)',
+  'apps.restoreVersion': '떠 둔 판이 있는 사용자 폴더 앱이 필요 — 앱 폴더를 되쓴다 (apps/external/versions.test.ts가 관통)',
 }
 
 const ok: string[] = []

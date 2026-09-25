@@ -368,6 +368,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
       review: (appId, projectId) => rpc.call('apps.review', { appId, projectId }),
       enable: (appId, projectId, reviewKey) => rpc.call('apps.enable', { appId, projectId, reviewKey }),
+      versions: (appId, projectId) => rpc.call('apps.versions', { appId, projectId }),
+      restoreVersion: (appId, projectId, id) => rpc.call('apps.restoreVersion', { appId, projectId, id }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
