@@ -58,6 +58,7 @@ beforeEach(() => {
     commandRuns: {},
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
     externalAppChanges: {},
+    externalAppChangedBy: {},
     externalApps: [],
     trustAsk: null,
     pinnedViews: [],
@@ -1040,6 +1041,25 @@ describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
     expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
     expect(reads).not.toHaveBeenCalled()
     expect(useStore.getState().apps['notes']).toBeUndefined()
+  })
+
+  it('카운터 곁에 그 바뀜을 낸 화면 인스턴스를 둔다 — 화면이 낸 것일 때만, 세션·앱·주인 없음이면 null', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const key = externalAppKey('p1', 'notes')
+    const say = (cause?: Record<string, unknown>) =>
+      mock.emit({ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1', ...(cause ? { cause } : {}) } as NormalizedEvent)
+    const seen = () => [useStore.getState().externalAppChanges[key], useStore.getState().externalAppChangedBy[key]]
+
+    say({ kind: 'view', instanceId: 'frame-a' })
+    await vi.waitFor(() => expect(seen()).toEqual([1, 'frame-a']))
+    say({ kind: 'session', sessionId: 's1' })
+    await vi.waitFor(() => expect(seen()).toEqual([2, null]))
+    say({ kind: 'view', instanceId: 'frame-b' })
+    await vi.waitFor(() => expect(seen()).toEqual([3, 'frame-b']))
+    // 주인이 없는 바뀜(앱이 다시 떴다, host가 섞인 것을 모았다) — 모두가 듣는다
+    say()
+    await vi.waitFor(() => expect(seen()).toEqual([4, null]))
   })
 })
 

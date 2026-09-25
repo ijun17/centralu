@@ -17,7 +17,8 @@ serveStdio(() => {
 
   centralu.uiResource(server, 'main-screen', UI, new URL('./ui/index.html', import.meta.url))
 
-  // The home tool (centralu.app.json "home"): Centralu calls it to open the app's screen.
+  // The home tool (centralu.app.json "home"): Centralu calls it to open the app's screen. It only reads,
+  // so it says readOnlyHint: true — the screen calls it on every refresh, and a read must not trigger one.
   centralu.tool(
     server,
     'show',

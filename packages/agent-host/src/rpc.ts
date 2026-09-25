@@ -296,10 +296,12 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'apps.invoke': async (p) => {
-      const { appId, name, args, projectId } = RpcMethods['apps.invoke'].params.parse(p)
+      const { appId, name, args, projectId, instanceId } = RpcMethods['apps.invoke'].params.parse(p)
       // 내장 명부가 먼저다 — 외부 앱은 내장 앱의 id를 가져갈 수 없으므로(발견이 막는다) 갈림이 겹치지 않는다
       if (projectId === undefined && HOST_APPS.some((a) => a.id === appId)) return mgr.invokeAppTool(appId, name, args)
-      const out = await requireExternalApps().call({ appId, projectId: projectId ?? null }, name, args, { kind: 'view' })
+      // 인스턴스는 "바뀌었다"의 주인으로만 쓴다 — 그 화면이 자기가 낸 바뀜을 다시 듣지 않게(B-5). 권한과는 무관하다
+      const caller = { kind: 'view' as const, ...(instanceId ? { instanceId } : {}) }
+      const out = await requireExternalApps().call({ appId, projectId: projectId ?? null }, name, args, caller)
       return {
         text: out.result ? resultText(out.result) : (out.error ?? ''),
         isError: out.status !== 'ok',

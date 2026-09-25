@@ -62,7 +62,7 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
         problem(
           where,
           'annotations.readOnlyHint가 없습니다 — 읽기만 하면 `readOnlyHint: true`, 무엇이든 바꾸면 `readOnlyHint: false`를 적으세요. ' +
-            '없으면 바꾸는 도구로 다뤄져 세션이 부를 때마다 묻고, Codex의 auto 프리셋은 부르지 않습니다',
+            '없으면 바꾸는 도구로 다뤄져 세션이 부를 때마다 묻고, Codex의 auto 프리셋은 부르지 않으며, 부를 때마다 이 앱의 열린 화면이 모두 다시 읽습니다',
         ),
       )
     } else if (readOnly && ann?.destructiveHint === true) {

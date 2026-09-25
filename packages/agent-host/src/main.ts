@@ -17,6 +17,7 @@ import { ExternalApps } from './apps/external/runtime.js'
 import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { onExternalAppListChanged } from './app-list-events.js'
+import { broadcastAppChanges } from './app-change-events.js'
 import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -153,14 +154,16 @@ const mgr = new SessionManager(
  * (성능 예산: 앱 5개가 깔려 있어도 아무것도 안 할 때 앱 프로세스 0개).
  * 데이터 폴더는 위 defaultDbPath가 CC_DATA_DIR로 고정한 그 폴더다 — dev와 배포가 갈린다.
  */
+// 앱의 "바뀌었다"는 앱마다 모아서 방송한다 — 열린 화면의 다시 읽기가 고리가 되어도 한 앱에 초당 4번까지 (app-change-events.ts)
+const appChanges = broadcastAppChanges((e) => server.broadcast(e))
 const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
   reservedIds: HOST_APPS.map((a) => a.id),
   // 실행 기록 (A-6) — 런타임이 선언한 모양을 저장소가 채운다. 런타임은 Store를 모른다
   runs: storeRunLedger(store),
-  // 앱에 닿은 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (UI 스토어가 AppFrame의 changeSignal로 옮긴다)
-  emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
+  // 앱에 닿은, 읽기 전용이 아닌 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (UI 스토어가 AppFrame의 changeSignal로 옮긴다)
+  emitChanged: appChanges.emit,
   // 앱 폴더가 바뀌어도 만드는 세션이 턴 안이면 턴 끝까지 기다린다 (C-4) — 턴의 끝은 매니저가 런타임에 알린다
   builderBusy: (ref) => mgr.builderBusy(ref),
 })
@@ -306,6 +309,7 @@ const shutdown = async () => {
   const appsDown = externalApps.dispose()
   await mgr.disposeAll()
   await appsDown
+  appChanges.dispose()
   inlineViews.dispose()
   await views.dispose()
   await server.close()

@@ -19,6 +19,7 @@ import { ExternalApps } from '../../agent-host/src/apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../../agent-host/src/apps/external/test-helpers.js'
 import { runtimeViewSource } from '../../agent-host/src/app-view-source.js'
 import { onExternalAppListChanged } from '../../agent-host/src/app-list-events.js'
+import { broadcastAppChanges } from '../../agent-host/src/app-change-events.js'
 import { storeRunLedger } from '../../agent-host/src/app-run-ledger.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
@@ -558,6 +559,8 @@ describe('Platform 계약: 앱 화면 (web + 실 host)', () => {
 /**
  * 화면의 도구 호출 (M4 B-4 `oncalltool`) — web 구현 → `apps.invoke` → 외부 앱 런타임 → 진짜 앱
  * 프로세스(런타임 픽스처의 `view` 모드). 화면이 받는 것은 앱이 준 MCP 결과 그대로여야 한다.
+ * 그 호출이 낸 "바뀌었다"는 main.ts와 같은 이음새(`broadcastAppChanges`)로 방송되어, 부른 화면의 인스턴스를
+ * 주인으로 싣고 돌아온다(B-5) — 그 화면만 그 알림을 건너뛴다.
  */
 describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', () => {
   it('앱의 답이 structuredContent·isError·_meta까지 그대로 오고, 앱에 닿지 못한 호출은 이유가 담긴 isError다', async () => {
@@ -575,11 +578,13 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
     const project = await mgr.addProject(projRoot)
     mgr.setProjectTrusted(project.id, true)
+    const changes = broadcastAppChanges((e) => server.broadcast(e))
     const rt = new ExternalApps({
       projects: () => store.projectRoots(),
       dataRoot: join(fixture, 'data'),
       reservedIds: ['control'],
       timing: { graceMs: 1_000, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+      emitChanged: changes.emit,
     })
     rt.refresh()
     let port: number | null = null
@@ -594,7 +599,9 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt, views }) })
     port = await server.listen()
     const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
-    const from = { projectId: project.id }
+    const from = { projectId: project.id, instanceId: 'frame-contract' }
+    const heard: NormalizedEvent[] = []
+    const off = platform.agents.subscribe((e) => void heard.push(e))
     try {
       await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
 
@@ -620,7 +627,16 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
 
       // 화면은 내장 앱의 문(projectId 없는 apps.invoke)으로 들어가지 못한다 — 사용자 폴더에 control은 없다
       await expect(platform.apps.callTool('control', 'control_notify', { text: 'x' })).rejects.toThrow(/그런 앱이 없습니다: user\/control/)
+
+      // 이 화면이 낸 바뀜은 이 화면의 인스턴스를 주인으로 돌아온다 — 방송이 web의 검사를 지나 떨어지지 않는다
+      await waitFor(() => heard.some((e) => e.type === 'external_app_state_changed'))
+      const changed = heard.filter((e) => e.type === 'external_app_state_changed')
+      for (const e of changed) {
+        expect(e).toEqual({ type: 'external_app_state_changed', appId: 'slider', projectId: project.id, cause: { kind: 'view', instanceId: 'frame-contract' } })
+      }
     } finally {
+      off()
+      changes.dispose()
       await platform.dispose()
       await mgr.disposeAll()
       await views.dispose()

@@ -1070,6 +1070,8 @@ export const RpcMethods = {
       name: z.string(),
       args: z.record(z.string(), z.unknown()),
       projectId: z.string().nullable().optional(),
+      /** 부른 화면의 인스턴스 — 이 호출이 낸 "바뀌었다"(`external_app_state_changed.cause`)를 그 화면만 건너뛴다 */
+      instanceId: z.string().optional(),
     }),
     result: z.object({
       text: z.string(),

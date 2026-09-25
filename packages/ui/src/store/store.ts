@@ -523,6 +523,11 @@ export type AppState = {
    */
   externalAppChanges: Record<string, number>
   /**
+   * 그 앱의 카운터를 마지막으로 올린 바뀜을 낸 화면 인스턴스 — 화면이 부른 호출이 낸 것일 때만, 아니면 null
+   * (`external_app_state_changed.cause`). AppFrame은 카운터가 딱 하나 올랐고 그 하나가 자기 것이면 알리지 않는다.
+   */
+  externalAppChangedBy: Record<string, string | null>
+  /**
    * 발견된 외부 앱과 그 상태 (M4 A-8) — host의 `apps.list` 사본이다. 정본은 host다: 여기서 고치지
    * 않고, `external_apps_changed`가 오면 통째로 다시 읽는다. 내장 앱(`APPS`)과 합친 한 목록은
    * `app-catalog.ts`가 만든다. 스토어는 여전히 내장 앱 명부를 모른다(순환 금지).
@@ -1405,6 +1410,7 @@ export const useStore = create<AppState>((set, get) => ({
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
   apps: {} as Record<AppId, { doc: unknown; enabled: boolean }>,
   externalAppChanges: {},
+  externalAppChangedBy: {},
   externalApps: [] as ExternalAppInfo[],
   railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
@@ -1813,7 +1819,11 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'external_app_state_changed') {
       const key = externalAppKey(e.projectId, e.appId)
-      set((s) => ({ externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 } }))
+      const by = e.cause?.kind === 'view' ? (e.cause.instanceId ?? null) : null
+      set((s) => ({
+        externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 },
+        externalAppChangedBy: { ...s.externalAppChangedBy, [key]: by },
+      }))
       return
     }
 

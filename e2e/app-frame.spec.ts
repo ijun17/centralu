@@ -426,6 +426,51 @@ test('host의 external_app_state_changed가 스토어를 지나 그 앱의 열�
   await expect(view(page, 'a').locator('li[data-k="notification"]')).toHaveCount(2)
 })
 
+/**
+ * 화면은 자기가 낸 바뀜을 다시 듣지 않는다 (B-5). host는 그 바뀜을 낸 호출의 주인(`cause`)을 싣고, 스토어가
+ * 카운터 곁에 둔다. 실측(65acb43): 이것이 없을 때 템플릿 화면 하나가 초당 약 700번 `show`를 불렀다 — 알림마다
+ * 다시 읽고, 그 읽기가 또 알림을 냈다. 같은 앱의 다른 화면은 그 바뀜을 받아야 한다(그것이 알림의 쓸모다).
+ */
+test('화면은 자기 인스턴스가 낸 바뀜을 알림으로 받지 않고, 같은 앱의 다른 화면은 받는다 — 몰려 온 남의 바뀜도 잃지 않는다', async ({ page }) => {
+  const idA = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+  const idB = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+  await mount(page, 'a', { appId: 'fixture', projectId: 'p1', instanceId: idA })
+  await mount(page, 'b', { appId: 'fixture', projectId: 'p1', instanceId: idB })
+  const a = view(page, 'a')
+  const b = view(page, 'b')
+  const heard = (v: FrameLocator) => v.locator('li[data-k="notification"]')
+  const change = (cause?: Record<string, unknown>) => ({ type: 'external_app_state_changed', appId: 'fixture', projectId: 'p1', ...(cause ? { cause } : {}) })
+  const hostSays = (...events: Record<string, unknown>[]) =>
+    page.evaluate((es) => es.forEach((e) => (window as any).__mock.emit(e)), events)
+  /** 왕복 하나를 기준점으로 삼는다: 그 전에 부친 알림이 있었다면 결과보다 먼저 도착했을 것이다 */
+  const roundTrip = async (v: FrameLocator, nth: number) => {
+    await v.locator('#call').click()
+    await entry(v, 'call-result', nth)
+  }
+
+  // a가 낸 바뀜 — b만 듣는다
+  await hostSays(change({ kind: 'view', instanceId: idA }))
+  await expect(heard(b)).toHaveCount(1)
+  await roundTrip(a, 0)
+  await expect(heard(a)).toHaveCount(0)
+  // b가 낸 바뀜 — a만 듣는다
+  await hostSays(change({ kind: 'view', instanceId: idB }))
+  await expect(heard(a)).toHaveCount(1)
+  await roundTrip(b, 0)
+  await expect(heard(b)).toHaveCount(1)
+  // 세션이 낸 바뀜, 주인이 없는 바뀜(host가 섞인 것을 모았다) — 둘 다 듣는다
+  await hostSays(change({ kind: 'session', sessionId: 's1' }))
+  await expect(heard(a)).toHaveCount(2)
+  await expect(heard(b)).toHaveCount(2)
+  await hostSays(change())
+  await expect(heard(a)).toHaveCount(3)
+  await expect(heard(b)).toHaveCount(3)
+  // 한 번에 몰려 온 둘 — b의 것 다음에 a의 것. 마지막 주인이 a여도 a는 b의 바뀜을 들어야 한다
+  await hostSays(change({ kind: 'view', instanceId: idB }), change({ kind: 'view', instanceId: idA }))
+  await expect(heard(a)).toHaveCount(4)
+  await expect(heard(b)).toHaveCount(4)
+})
+
 test('확장 알림을 모르는 화면은 그냥 지나간다', async ({ page }) => {
   const id = fx.open({ projectId: null, appId: 'plain' }, 'ui://plain/main')
   await mount(page, 'p', { appId: 'plain', projectId: null, instanceId: id, changeSignal: 1 })
