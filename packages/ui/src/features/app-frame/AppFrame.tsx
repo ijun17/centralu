@@ -56,8 +56,12 @@ export type AppFrameProps = {
    * 받는다. 값을 주는 부모는 그 신호를 스스로 정한다.
    */
   changeSignal?: number
-  /** 화면이 대화에 보내는 말(`ui/message`). 없으면 거절로 답한다. 어디로 보낼지는 부모가 정한다 */
-  onMessage?: (message: AppFrameMessage) => void | Promise<void>
+  /**
+   * 화면이 대화에 보내는 말(`ui/message`). 없으면 거절로 답한다. 어디로 보낼지는 부모가 정한다.
+   * `false`를 돌려주면 거절로 답한다 — 고정 화면은 사람에게 어느 세션으로 보낼지 묻고, 사람이 취소하면
+   * 화면에 "보내지 않았다"를 알려야 한다(B-4). 조용히 성공으로 답하면 화면은 보냈다고 믿는다.
+   */
+  onMessage?: (message: AppFrameMessage) => void | boolean | Promise<void | boolean>
   /**
    * 고정 화면(B-2): 화면이 놓인 자리를 채운다. 높이는 화면(`size-changed`)이 아니라 자리가 정하고,
    * 화면에는 그 크기를 고정 크기로 알린다(`containerDimensions: { height, width }`). 넘치는 내용은
@@ -259,8 +263,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       bridge.onmessage = async (params) => {
         const deliver = onMessageRef.current
         if (!deliver) return { isError: true }
-        await deliver({ role: params.role, content: params.content })
-        return {}
+        const delivered = await deliver({ role: params.role, content: params.content })
+        return delivered === false ? { isError: true } : {}
       }
       // 기록 보기(B-7)가 생기기 전까지 화면의 로그는 받기만 한다
       bridge.onloggingmessage = () => {}
