@@ -61,6 +61,16 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   // 만드는 세션 (C-5) — 아래 입력줄이 말을 보내는 곳이고, 그 대화를 화면 옆에 여닫는다(BuilderPane)
   const builder = useAppBuilder(pv.projectId, pv.appId)
   const [builderOpen, setBuilderOpen] = useState(false)
+  // 옆에 연 만드는 세션의 대화는 화면에 있는 세션이다 — 그 턴 끝은 카드가 아니라 바람이다(`isOnScreen`)
+  const setBuilderPane = useStore((s) => s.setBuilderPane)
+  const paneSession = builderOpen && visible && builder.id ? builder.id : null
+  useEffect(() => {
+    if (!paneSession) return
+    setBuilderPane(paneSession)
+    return () => {
+      if (useStore.getState().builderPaneSessionId === paneSession) setBuilderPane(null)
+    }
+  }, [paneSession, setBuilderPane])
   /*
    * 이 앱의 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 먼저 온 것부터 하나씩. 목록 자체를 고르고 여기서 거른다: 고르는 함수가
    * 매번 새 배열을 돌려주면 스토어가 바뀔 때마다 새 값으로 읽힌다.

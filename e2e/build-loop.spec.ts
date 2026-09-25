@@ -342,6 +342,36 @@ const builderSaid = (page: Page, id: string) =>
     id,
   )
 
+/*
+ * 끝난 턴의 카드 (M4 C-5) — 카드는 오른쪽 위에 서서 걷을 때까지 남고, 고정 화면에서는 머리의 Builder·Runs·닫기와 Runs의 Refresh를
+ * 가려 누름을 가로챘다. 앱을 고치는 동안 떠 있던 카드 대부분은 옆에 열어 둔 만드는 세션의 것이었다 — 사람이 보고 있는 대화다.
+ */
+test('고정 화면 옆에 대화를 연 만드는 세션의 턴 끝은 카드가 아니라 바람이다 — 닫혀 있으면 카드다', async ({ page }) => {
+  const pid = await addProject(page, '/tmp/alpha')
+  const builderId = await madeApp(page, pid, 'notes', 'Team notes')
+  await page.evaluate(() => (window as any).__store.getState().setAppFocused(true))
+  const finish = () =>
+    page.evaluate(async (sid) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'state_change', sessionId: sid, state: 'working' })
+      await new Promise((r) => setTimeout(r, 50))
+      m.emit({ type: 'turn_complete', sessionId: sid })
+    }, builderId)
+  await page.getByTestId(`app-row-${pid}/notes`).click()
+  const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
+  await pinned.getByTestId('pinned-builder-toggle').click()
+  await expect(pinned.getByTestId('pinned-builder-toggle')).toHaveAttribute('aria-pressed', 'true')
+
+  await finish()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().completion?.sessionId)).toBe(builderId)
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+
+  // 대화를 닫았다 — 이제 보이지 않는 세션이다
+  await pinned.getByTestId('pinned-builder-toggle').click()
+  await finish()
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+})
+
 test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
   test('앱이 죽으면 묶음의 끝이 화면 아래에 서고, 저절로는 아무것도 가지 않으며, Send to builder는 한 번 보낸다', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')

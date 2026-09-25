@@ -820,6 +820,12 @@ export type AppState = {
   focusSession(id: string | null, opts?: { preferGrid?: boolean }): void
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
+  /**
+   * 보이는 고정 화면 옆에 대화가 열린 만드는 세션 (M4 C-5, BuilderPane) — 화면에 있는 세션이다(`isOnScreen`). 그 세션의 턴 끝은
+   * 카드가 아니라 바람이다. 고정 화면이 열고, 닫거나 가려지면 null로 둔다.
+   */
+  builderPaneSessionId: string | null
+  setBuilderPane(sessionId: string | null): void
   /** 알림 카드를 걷는다 (×를 누르거나, 그 세션을 보게 됐거나) */
   dismissNotices(sessionIds: string[]): void
   /**
@@ -1717,6 +1723,7 @@ export const useStore = create<AppState>((set, get) => ({
   inlineViews: {} as Record<string, Record<string, InlineView>>,
   inlineFramesVersion: 0,
   gridPanels: [] as string[],
+  builderPaneSessionId: null,
   orchestratorId: null as string | null,
   orchestratorWaking: false,
   introSeen: false,
@@ -2057,6 +2064,10 @@ export const useStore = create<AppState>((set, get) => ({
       .catch(() => {})
   },
 
+  setBuilderPane(sessionId) {
+    if (get().builderPaneSessionId !== sessionId) set({ builderPaneSessionId: sessionId })
+  },
+
   setAppFocused(focused) {
     /*
      * **Only the false→true edge.** `onVisibility` fires once at mount while `appFocused`
@@ -2221,6 +2232,7 @@ export const useStore = create<AppState>((set, get) => ({
           focusedSessionId: s.focusedSessionId,
           orchestratorId: s.orchestratorId,
           gridPanels: s.gridPanels,
+          builderPaneSessionId: s.builderPaneSessionId,
         })
       if (seen) {
         set({ completion: { sessionId, at: Date.now() } })

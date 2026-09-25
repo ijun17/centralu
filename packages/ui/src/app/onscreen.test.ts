@@ -19,6 +19,12 @@ describe('바람은 화면에 있는 세션이 끝났을 때만 분다', () => {
     expect(isOnScreen('grid', 'a', ctx)).toBe(false)
   })
 
+  it('고정 화면 — 옆에 대화가 열린 만드는 세션 하나 (M4 C-5)', () => {
+    expect(isOnScreen('app', 'builder', { ...ctx, builderPaneSessionId: 'builder' })).toBe(true)
+    expect(isOnScreen('app', 'a', { ...ctx, builderPaneSessionId: 'builder' })).toBe(false)
+    expect(isOnScreen('app', 'builder', ctx)).toBe(false)
+  })
+
   /*
    * 이게 요점이다. 세션이 열 개면 화면 밖 완료도 열 번이고,
    * 그때마다 화면을 쓸면 읽고 있던 것을 방해한다 — 그건 알림의 몫이다.
