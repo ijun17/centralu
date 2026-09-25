@@ -458,6 +458,8 @@ class CodexSession implements SessionHandle {
     if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)
     if (n.method === 'turn/completed' || n.method === 'turn/failed') this.turnId = null
 
+    this.noteAppCall(n)
+
     // compact/review가 끝나는 자리 — 그동안 쌓인 메시지가 있으면 이제 내보낸다
     if (n.method === 'turn/completed' && this.blockingTurn) {
       this.blockingTurn = false
@@ -475,6 +477,26 @@ class CodexSession implements SessionHandle {
       }
       this.emit(e)
     }
+  }
+
+  /**
+   * 붙은 앱의 도구 호출이 시작되고 끝나는 것을 붙이기에 알린다 (M4 B-1 — 대화 안 화면의 카드 짝짓기).
+   *
+   * 다리로 들어오는 호출은 카드 id(`item.id`)를 모른다 — Codex가 MCP 요청에 그 id를 싣는다는 근거를
+   * 찾지 못했다. 그래서 여기서 본 "카드 X가 서버 S의 도구 T를 인자 A로 부른다"를 적어 두고, 붙이기가
+   * 뒤이어 온 호출과 짝짓는다. 끝난 카드(거절 포함)는 짝짓기에서 뺀다. 다른 스레드(자식 에이전트)의
+   * 알림은 위에서 이미 걸렀다 — 자식의 호출은 부모의 카드가 아니다.
+   */
+  private noteAppCall(n: { method: string; params?: unknown }): void {
+    const apps = this.opts.apps
+    if (!apps || (n.method !== 'item/started' && n.method !== 'item/completed')) return
+    const item = (n.params as { item?: Record<string, unknown> } | undefined)?.item
+    if (!item || item.type !== 'mcpToolCall' || typeof item.id !== 'string') return
+    if (n.method === 'item/completed') return apps.callEnded(item.id)
+    const server = typeof item.server === 'string' ? item.server : ''
+    const tool = typeof item.tool === 'string' ? item.tool : ''
+    if (!this.appServers.has(server) || !tool) return
+    apps.noteCall(item.id, server, tool, item.arguments ?? (item.invocation as { arguments?: unknown } | undefined)?.arguments ?? {})
   }
 
   private onServerRequest(r: { id: number | string; method: string; params?: unknown }): void {

@@ -30,7 +30,8 @@ beforeEach(() => {
   w.plant('p2', 'other')
   w.plant('user', 'helper')
   w.rt.refresh()
-  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000 })
+  // 짝을 못 찾은 호출(B-1)을 오래 기다리지 않게 — 제품의 값은 5초다
+  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 300 })
 })
 
 afterEach(async () => {
@@ -204,5 +205,69 @@ describe('부르기', () => {
     const out = await a.call('app-notes', 'echo', { text: 'x' })
     expect(out.isError).toBe(true)
     expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })).toEqual([])
+  })
+})
+
+/**
+ * 호출과 대화 카드의 짝 (M4 B-1). 대화 안 화면은 그 호출의 카드 아래에 선다 — 어느 카드인지를 붙이기가
+ * 정한다. 어댑터가 id를 주면 그것이고, 아니면 어댑터가 본 호출 시작(`noteCall`)과 (서버, 도구, 인자)로
+ * 먼저 온 순서대로 짝짓는다. 두 알림은 다른 길(Codex의 표준 출력, 다리의 WebSocket)로 오므로 어느 쪽이
+ * 먼저여도 맞아야 한다.
+ */
+describe('카드 id 짝짓기 (B-1)', () => {
+  const heard = () => {
+    const calls: { tool: string; callId: Promise<string | null> }[] = []
+    hub.onCall((c) => calls.push({ tool: c.tool, callId: c.callId }))
+    return calls
+  }
+
+  it('어댑터가 준 id가 곧 카드다', async () => {
+    const calls = heard()
+    const a = hub.attach(worker('p1'))
+    await a.call('app-notes', 'poke', { to: 1 }, { callId: 'toolu_1' })
+    expect(await calls[0]!.callId).toBe('toolu_1')
+  })
+
+  it('어댑터가 먼저 본 호출 시작과 짝짓는다 — 인자의 키 순서와 문자열·객체 모양은 가리지 않는다', async () => {
+    const calls = heard()
+    const a = hub.attach(worker('p1'))
+    a.noteCall('item-1', 'app-notes', 'poke', '{"to":2,"x":{"b":1,"a":2}}')
+    a.noteCall('item-2', 'app-notes', 'poke', { to: 3 })
+    await a.call('app-notes', 'poke', { to: 3 })
+    await a.call('app-notes', 'poke', { x: { a: 2, b: 1 }, to: 2 })
+    expect(await Promise.all(calls.map((c) => c.callId))).toEqual(['item-2', 'item-1'])
+  })
+
+  it('호출이 먼저 와도 뒤이어 온 호출 시작과 짝짓는다', async () => {
+    const calls = heard()
+    const a = hub.attach(worker('p1'))
+    const p = a.call('app-notes', 'poke', { to: 4 })
+    await kit.until(() => calls.length, (n) => n === 1)
+    a.noteCall('item-4', 'app-notes', 'poke', { to: 4 })
+    await p
+    expect(await calls[0]!.callId).toBe('item-4')
+  })
+
+  it('끝난 카드(승인에서 거절된 호출)는 짝짓기에서 빠진다 — 같은 인자로 다시 부른 호출이 옛 카드에 붙지 않는다', async () => {
+    const calls = heard()
+    const a = hub.attach(worker('p1'))
+    a.noteCall('denied', 'app-notes', 'poke', { to: 5 })
+    a.callEnded('denied')
+    a.noteCall('retry', 'app-notes', 'poke', { to: 5 })
+    await a.call('app-notes', 'poke', { to: 5 })
+    expect(await calls[0]!.callId).toBe('retry')
+  })
+
+  it('짝이 끝내 오지 않으면 null이다 — 호출은 그대로 끝난다', async () => {
+    hub.dispose()
+    hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 100 })
+    const calls = heard()
+    const a = hub.attach(worker('p1'))
+    // 다른 도구·다른 인자의 시작은 이 호출의 짝이 아니다
+    a.noteCall('item-x', 'app-notes', 'peek', {})
+    a.noteCall('item-y', 'app-notes', 'poke', { to: 99 })
+    const out = await a.call('app-notes', 'poke', { to: 6 })
+    expect(out.isError).toBe(false)
+    expect(await calls[0]!.callId).toBeNull()
   })
 })

@@ -56,6 +56,12 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
   // 시켜서 들어온 말의 출처 (FR-11)
   { type: 'user_message', sessionId: 's1', seq: 13, text: '릴리즈 노트 정리', from: { sessionId: 'orc-1', name: '지휘 세션' } },
+  // 대화 안 앱 화면 (M4 B-1) — 열림(입력), 결과, 취소, 거절, 닫힘
+  { type: 'app_view', sessionId: 's1', seq: 16, callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'open', instanceId: 'i-1', toolInput: { q: 'x' } },
+  { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'result', toolResult: { content: [{ type: 'text', text: 'ok' }], structuredContent: { n: 1 } }, kept: true },
+  { type: 'app_view', sessionId: 's1', callId: 'toolu_2', appId: 'slider', projectId: null, tool: 'show', phase: 'cancelled', reason: 'the caller cancelled this call' },
+  { type: 'app_view', sessionId: 's1', seq: 17, callId: 'toolu_3', appId: 'slider', projectId: 'p1', tool: 'spoof', phase: 'rejected', reason: 'This app does not serve ui://other/main' },
+  { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'closed', reason: 'This app was removed' },
   // 추론 (#58 실측): codex는 요약 텍스트, claude는 토큰 추정치만 — 그래서 둘 다 optional
   { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**경로 제약을 검토 중**' },
   { type: 'reasoning_delta', sessionId: 's1', estTokens: 150 },

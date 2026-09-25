@@ -63,6 +63,37 @@ const RUN_STATUS_SPEC: AppToolSpec = {
 /** 먼저 돌려준 실행 하나 — 결말이 오면 채운다 */
 type Detached = { sessionId: string; server: string; startedAt: number; outcome: AppCallOutcome | null }
 
+/**
+ * 카드 id 짝짓기 (M4 B-1) — 어댑터가 본 호출 시작과 다리로 들어온 호출이 서로를 기다리는 시간.
+ * 같은 host 안의 두 길(어댑터의 표준 출력, 다리의 WebSocket)이라 보통 몇 ms 안에 만난다. 넘기면
+ * 그 호출에는 대화 안 화면이 서지 않는다(호출 자체는 그대로 돈다).
+ */
+export const CALL_JOIN_WAIT_MS = 5_000
+/** 짝을 못 만난 채 적어 둔 호출 시작을 들고 있는 시간과 수 — 넘치면 오래된 것부터 버린다 */
+const NOTED_KEEP_MS = 60_000
+const NOTED_MAX = 64
+
+type Noted = { callId: string; server: string; tool: string; args: string; at: number }
+type Waiter = { server: string; tool: string; args: string; resolve: (callId: string | null) => void; timer: NodeJS.Timeout }
+
+/**
+ * 세션의 에이전트가 앱 도구를 부른 한 번 (M4 B-1) — 대화 안 화면이 듣는다.
+ *
+ * 부르는 순간에 알린다(결말을 기다리지 않는다). 화면은 호출이 시작될 때 tool-input을, 끝날 때
+ * tool-result를 받는다 — 규격의 순서가 곧 이 두 약속의 순서다.
+ */
+export type SessionAppCall = {
+  sessionId: string
+  ref: AppRef
+  server: string
+  tool: string
+  args: Record<string, unknown>
+  /** 대화의 도구 카드 id — 어댑터가 알려 줬거나 짝지은 것. 끝내 못 찾으면 null */
+  callId: Promise<string | null>
+  /** 호출의 결말 (먼저 돌려준 호출이어도 진짜 결말이다) */
+  outcome: Promise<AppCallOutcome>
+}
+
 /** 세션에 붙을 수 없는 앱의 상태 (결정 4) — 틀린 매니페스트, 신뢰하지 않은 프로젝트, 연달아 실패해 멈춤 */
 const UNUSABLE = new Set(['invalid', 'untrusted', 'failed'])
 
@@ -77,10 +108,12 @@ export class SessionAppsHub {
    */
   readonly detached = new Map<string, Detached>()
   private stopListening: () => void
+  private callListeners = new Set<(c: SessionAppCall) => void>()
+  private goneListeners = new Set<(sessionId: string) => void>()
 
   constructor(
     readonly rt: ExternalApps,
-    readonly opts: { toolListWaitMs?: number } = {},
+    readonly opts: { toolListWaitMs?: number; callJoinWaitMs?: number } = {},
   ) {
     this.stopListening = rt.onAppsChanged(() => {
       for (const a of [...this.live.values()]) a.recheck()
@@ -103,6 +136,43 @@ export class SessionAppsHub {
     const a = this.live.get(sessionId)
     if (!a) throw Object.assign(new Error(`이 세션은 지금 앱을 부를 수 없습니다 (실행 중이 아닙니다): ${sessionId}`), { code: 'session_not_found' })
     return a
+  }
+
+  /**
+   * 세션의 앱 호출을 듣는다 (M4 B-1). 대화 안 화면이 여기서 "화면이 달린 도구인가"를 보고 화면을 연다.
+   * 이 층은 화면을 모른다 — 알리기만 한다.
+   */
+  onCall(listener: (c: SessionAppCall) => void): () => void {
+    this.callListeners.add(listener)
+    return () => void this.callListeners.delete(listener)
+  }
+
+  /** 세션이 **지워졌다** (잠든 것과 다르다 — 잠든 세션은 다시 깬다). 그 세션의 화면을 걷는 신호다 */
+  onSessionGone(listener: (sessionId: string) => void): () => void {
+    this.goneListeners.add(listener)
+    return () => void this.goneListeners.delete(listener)
+  }
+
+  /** 매니저가 세션을 지울 때 부른다 */
+  sessionGone(sessionId: string): void {
+    for (const l of [...this.goneListeners]) {
+      try {
+        l(sessionId)
+      } catch (err) {
+        console.error(`[apps] session-gone listener failed:`, err)
+      }
+    }
+  }
+
+  /** @internal 붙이기가 호출 하나를 알린다 — 듣는 쪽의 실패는 호출을 막지 않는다 */
+  announce(c: SessionAppCall): void {
+    for (const l of [...this.callListeners]) {
+      try {
+        l(c)
+      } catch (err) {
+        console.error(`[apps] session-call listener failed:`, err)
+      }
+    }
   }
 
   /** @internal 닫힌 붙이기가 자리를 비운다 — 이미 새 핸들이 이었으면 건드리지 않는다 */
@@ -151,6 +221,8 @@ export class SessionAppsHub {
 
   dispose(): void {
     this.stopListening()
+    this.callListeners.clear()
+    this.goneListeners.clear()
     for (const a of [...this.live.values()]) a.close()
   }
 }
@@ -167,6 +239,9 @@ class Attachment implements SessionApps {
   /** 마지막으로 알린(또는 처음 본) 모양 — 같으면 알리지 않는다 */
   private seen: string
   private closed = false
+  /** 카드 id 짝짓기 (B-1) — 어댑터가 본 호출 시작, 그리고 짝을 기다리는 호출 */
+  private noted: Noted[] = []
+  private waiters: Waiter[] = []
 
   constructor(
     private hub: SessionAppsHub,
@@ -234,7 +309,7 @@ class Attachment implements SessionApps {
     server: string,
     tool: string,
     args: Record<string, unknown>,
-    opts: { signal?: AbortSignal; waitMs?: number } = {},
+    opts: { signal?: AbortSignal; waitMs?: number; callId?: string } = {},
   ): Promise<AppToolResult> {
     const hit = this.find(server)
     // 붙지 않은 앱은 런타임까지 가지 않는다 — 이 세션이 부를 수 있는 앱은 결정 4가 정한 것뿐이다
@@ -260,6 +335,16 @@ class Attachment implements SessionApps {
         this.inflight.delete(abort)
         opts.signal?.removeEventListener('abort', onUp)
       })
+    // 대화 안 화면(B-1)이 듣는다 — 짝짓기는 모든 호출이 한다: 적어 둔 시작을 호출마다 소비해야 남은 것이 엉뚱한 호출과 짝지어지지 않는다
+    this.hub.announce({
+      sessionId: this.session.id,
+      ref: hit.ref,
+      server,
+      tool,
+      args,
+      callId: this.joinCall(server, tool, args, opts.callId),
+      outcome: pending,
+    })
     if (!opts.waitMs) return toResult(await pending)
 
     /*
@@ -349,12 +434,77 @@ class Attachment implements SessionApps {
     for (const abort of [...this.inflight]) abort.abort()
   }
 
+  noteCall(callId: string, server: string, tool: string, args: unknown): void {
+    if (this.closed || !callId) return
+    const key = argsKey(args)
+    // 다리가 먼저 왔다 — 기다리던 호출이 곧 이 카드다
+    const w = this.waiters.findIndex((x) => x.server === server && x.tool === tool && x.args === key)
+    if (w !== -1) {
+      const [waiter] = this.waiters.splice(w, 1)
+      clearTimeout(waiter!.timer)
+      waiter!.resolve(callId)
+      return
+    }
+    this.pruneNoted()
+    this.noted.push({ callId, server, tool, args: key, at: Date.now() })
+    if (this.noted.length > NOTED_MAX) this.noted.shift()
+  }
+
+  callEnded(callId: string): void {
+    this.noted = this.noted.filter((n) => n.callId !== callId)
+  }
+
+  /**
+   * 이 호출의 카드 id (B-1).
+   *
+   * **어댑터가 id를 알려 주면 그것이 답이다** — 에이전트의 MCP 클라이언트가 요청에 실어 보낸 id라서
+   * 짝짓기가 필요 없다. 같은 id로 적어 둔 시작은 버린다(두 길이 모두 알린 경우). 없으면 적어 둔 시작
+   * 중 (서버, 도구, 인자)가 같은 가장 오래된 것이다. 아직 없으면 잠깐 기다린다 — 어댑터의 알림이
+   * 다리의 호출보다 늦게 도착할 수 있다.
+   */
+  private joinCall(server: string, tool: string, args: Record<string, unknown>, explicit?: string): Promise<string | null> {
+    if (explicit) {
+      this.callEnded(explicit)
+      return Promise.resolve(explicit)
+    }
+    const key = argsKey(args)
+    this.pruneNoted()
+    const i = this.noted.findIndex((n) => n.server === server && n.tool === tool && n.args === key)
+    if (i !== -1) return Promise.resolve(this.noted.splice(i, 1)[0]!.callId)
+    if (this.closed) return Promise.resolve(null)
+    const waitMs = this.hub.opts.callJoinWaitMs ?? CALL_JOIN_WAIT_MS
+    return new Promise((resolve) => {
+      const waiter: Waiter = {
+        server,
+        tool,
+        args: key,
+        resolve,
+        timer: setTimeout(() => {
+          this.waiters = this.waiters.filter((x) => x !== waiter)
+          resolve(null)
+        }, waitMs),
+      }
+      waiter.timer.unref?.()
+      this.waiters.push(waiter)
+    })
+  }
+
+  private pruneNoted(): void {
+    const cutoff = Date.now() - NOTED_KEEP_MS
+    if (this.noted.length && this.noted[0]!.at < cutoff) this.noted = this.noted.filter((n) => n.at >= cutoff)
+  }
+
   close(): void {
     if (this.closed) return
     this.closed = true
     // 닫힌 핸들의 호출은 받을 곳이 없다 — 먼저 돌려준 것까지 멈춘다
     this.cancelAll()
     this.listeners.clear()
+    this.noted = []
+    for (const w of this.waiters.splice(0)) {
+      clearTimeout(w.timer)
+      w.resolve(null)
+    }
     this.hub.release(this)
   }
 
@@ -370,6 +520,35 @@ class Attachment implements SessionApps {
 }
 
 type RuntimeTool = Awaited<ReturnType<ExternalApps['tools']>>[number]
+
+/**
+ * 인자의 비교 열쇠 — 키 순서를 가리지 않는 JSON. 어댑터가 본 인자는 문자열(Codex `item.arguments`)일
+ * 수도, 객체일 수도 있다. 문자열이면 풀어서 같은 모양으로 맞춘다.
+ */
+function argsKey(args: unknown): string {
+  let v = args
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v) as unknown
+    } catch {
+      return v as string
+    }
+  }
+  return stable(v ?? {})
+}
+
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    return `{${Object.keys(o)
+      .sort()
+      .filter((k) => o[k] !== undefined)
+      .map((k) => `${JSON.stringify(k)}:${stable(o[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(v) ?? 'null'
+}
 
 /** 앱의 도구 목록에 host의 `run_status`를 더한다 — 같은 이름의 앱 도구는 가린다(RUN_STATUS_SPEC 참고) */
 function withRunStatus(tools: AppToolSpec[]): AppToolSpec[] {

@@ -38,8 +38,16 @@ type LowLevelServer = {
 const ListTools = z.object({ method: z.literal('tools/list'), params: z.optional(z.looseObject({})) })
 const CallTool = z.object({
   method: z.literal('tools/call'),
-  params: z.looseObject({ name: z.string(), arguments: z.optional(z.record(z.string(), z.unknown())) }),
+  params: z.looseObject({ name: z.string(), arguments: z.optional(z.record(z.string(), z.unknown())), _meta: z.optional(z.looseObject({})) }),
 })
+
+/**
+ * Claude Code가 MCP 도구 호출에 싣는 카드 id의 자리 (M4 B-1). 설치된 CLI(에이전트 SDK 0.3.263에 딸린
+ * 바이너리)의 MCP 도구 래퍼가 `callTool({ name, arguments, _meta: { "claudecode/toolUseId": <tool_use id> } })`로
+ * 부른다(실측: 바이너리 문자열). 그 id가 어댑터의 `tool_call` callId(`tool_use` 블록의 id)와 같다 — 그래서
+ * 대화 안 화면이 짝짓기 없이 제 카드를 안다. 없으면(다른 CLI) 붙이기가 어댑터의 알림으로 짝짓는다.
+ */
+export const CLAUDE_TOOL_USE_META = 'claudecode/toolUseId'
 
 export type AppProxy = {
   /** SDK에 넘길 설정 (`mcpServers[이름]`) — 같은 앱이 붙어 있는 동안은 같은 객체다 */
@@ -62,9 +70,10 @@ export function appProxy(apps: SessionApps, server: string): AppProxy {
     tools: await apps.tools(server).catch(() => []),
   }))
   low.setRequestHandler(CallTool, async (request, extra) => {
-    const { name, arguments: args } = request.params as { name: string; arguments?: Record<string, unknown> }
+    const { name, arguments: args, _meta } = request.params as { name: string; arguments?: Record<string, unknown>; _meta?: Record<string, unknown> }
+    const toolUseId = _meta?.[CLAUDE_TOOL_USE_META]
     // CLI가 호출을 취소하면(notifications/cancelled) extra.signal이 선다 — 그대로 앱 호출까지 간다
-    return apps.call(server, name, args ?? {}, { signal: extra?.signal })
+    return apps.call(server, name, args ?? {}, { signal: extra?.signal, ...(typeof toolUseId === 'string' && toolUseId ? { callId: toolUseId } : {}) })
   })
   return {
     config,

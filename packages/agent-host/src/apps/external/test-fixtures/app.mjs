@@ -21,6 +21,10 @@
  * `view`는 화면(B-3)이 받는 모양을 시험한다: 상태를 서버에 두는 앱(간격 하나), 결과의
  * `structuredContent`·`isError`·`_meta`, CSP를 선언한 `ui://` 문서. 고정 화면(B-2)의 home 후보들도
  * 여기 있다(`home`, `no_screen`, `agent_home`, `bad_home`, `failing_home`).
+ *
+ * `inline`은 대화 안 화면(B-1)을 위한 묶음이다: 자기 화면(`ui://<앱 id>/main`)을 선언한 에이전트 도구
+ * (`show`, 문이 열릴 때까지 붙드는 `hold_view`), 화면 없는 도구(`plain`), 남의 화면을 대는 도구
+ * (`spoof`는 선언에서, `spoof_result`는 결과에서 `ui://other/main`을 가리킨다).
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -237,6 +241,36 @@ serveStdio(() => {
     const extraFrom = arg('extra-from')
     const extra = extraFrom && existsSync(extraFrom) ? JSON.parse(readFileSync(extraFrom, 'utf8')) : []
     for (const name of extra) server.registerTool(name, { description: `Extra tool ${name}` }, async () => say(`${name} ran`))
+  }
+  if (MODE === 'inline') {
+    const own = `ui://${process.env.CENTRALU_APP_ID}/main`
+    const ui = (resourceUri) => ({ _meta: { ui: { resourceUri } } })
+    server.registerTool('show', { description: 'Shows a result in its view', inputSchema: z.object({ q: z.string() }), ...ui(own) }, async ({ q }) => ({
+      content: [{ type: 'text', text: `shown ${q}` }],
+      structuredContent: { q, by: process.env.CENTRALU_APP_ID },
+    }))
+    server.registerTool('plain', { description: 'A tool with no view' }, async () => say('plain ran'))
+    server.registerTool('hold_view', { description: 'A view tool that holds until the gate or a cancel', ...ui(own) }, async (ctx) => {
+      const gate = arg('gate')
+      const signal = ctx.mcpReq.signal
+      log({ t: 'holding', runId: ctx.mcpReq._meta?.[RUN_META] ?? null })
+      const aborted = await new Promise((resolve) => {
+        const poll = setInterval(() => {
+          if (gate && existsSync(gate)) (clearInterval(poll), resolve(false))
+        }, 20)
+        signal.addEventListener('abort', () => (clearInterval(poll), resolve(true)), { once: true })
+      })
+      log({ t: aborted ? 'aborted' : 'released' })
+      return say(aborted ? 'aborted' : 'released')
+    })
+    server.registerTool('spoof', { description: "Declares another app's screen", ...ui('ui://other/main') }, async () => say('spoofed'))
+    server.registerTool('spoof_result', { description: "Its result points at another app's screen", ...ui(own) }, async () => ({
+      content: [{ type: 'text', text: 'spoofed in the result' }],
+      _meta: { ui: { resourceUri: 'ui://other/main' } },
+    }))
+    server.registerResource('main', own, { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({
+      contents: [{ uri: uri.href, mimeType: 'text/html;profile=mcp-app', text: `<!doctype html><p>${process.env.CENTRALU_APP_ID} view</p>` }],
+    }))
   }
   if (MODE === 'bad-tool-name') {
     server.registerTool('sneaky__tool', { description: 'A tool whose name has the separator' }, async () => ({

@@ -1857,6 +1857,8 @@ export class SessionManager {
      * 지운 세션이 물려받았던 노트(전임자의 이름)도 같은 한 번에 걸린다.
      */
     if (m?.projectId) await this.sweepOrphanHandoffNotes(m.projectId).catch(() => {})
+    // 이 세션의 대화 안 앱 화면(M4 B-1)을 걷는다 — 붙들던 앱을 놓는다. 잠든 세션과 달리 돌아올 대화가 없다
+    this.appsHub?.sessionGone(sessionId)
     this.emit({ type: 'session_deleted', sessionId })
   }
 
@@ -2193,6 +2195,11 @@ export class SessionManager {
        * 마커로 박아 두면 전사(그리고 인수인계 기록)에 그 순간이 남는다.
        */
       : e.type === 'error' ? 'marker'
+      /*
+       * 대화 안 앱 화면 (M4 B-1): 이 카드 아래에 어느 앱의 화면이 섰는지(또는 거절됐는지)만 남긴다.
+       * 결과·취소·닫힘은 그 화면이 살아 있는 동안의 일이라 남기지 않는다.
+       */
+      : e.type === 'app_view' && (e.phase === 'open' || e.phase === 'rejected') ? 'app_view'
       : null
     const boundary =
       kind !== null ||
@@ -2202,7 +2209,16 @@ export class SessionManager {
     if (boundary) this.closeStream(m.id)
     if (!kind) return null
     const seq = this.store.nextSeq(m.id)
-    const msg: StoredMessage = { sessionId: m.id, seq, role: 'system', kind, payload: e, ts: Date.now() }
+    /*
+     * 앱 화면의 기록에는 **본문을 싣지 않는다** — 도구 입력은 앱에 넘긴 값 그대로라 무엇이 들었는지
+     * 모른다. 앱 실행 기록(A-6)이 인자를 요약만 남기는 것과 같은 이유다. 인스턴스 id도 이 host가 끝나면
+     * 뜻이 없다.
+     */
+    const payload =
+      e.type === 'app_view'
+        ? { type: e.type, sessionId: e.sessionId, callId: e.callId, appId: e.appId, projectId: e.projectId, tool: e.tool, phase: e.phase, ...(e.reason ? { reason: e.reason } : {}) }
+        : e
+    const msg: StoredMessage = { sessionId: m.id, seq, role: 'system', kind, payload, ts: Date.now() }
     this.store.appendMessages([msg])
     m.lastSeq = seq
     return seq
@@ -3898,9 +3914,9 @@ export class SessionManager {
    * 생성자 인자가 아니라 따로 받는 이유: 런타임과 매니저는 서로를 모른 채 host(main.ts)가
    * 이어 준다. 매니저가 없는 host의 테스트도, 런타임이 없는 매니저의 테스트도 그대로 돈다.
    */
-  useExternalApps(rt: ExternalApps): void {
+  useExternalApps(rt: ExternalApps, opts?: ConstructorParameters<typeof SessionAppsHub>[1]): void {
     this.appsHub?.dispose()
-    this.appsHub = new SessionAppsHub(rt)
+    this.appsHub = new SessionAppsHub(rt, opts)
     // 예전에 승인된 MCP 서버를 앱으로 옮긴다 (A-7) — 세션이 뜨기 전이라, 오케스트레이터가 처음부터 받는다
     this.migrateApprovedMcpServers(rt)
   }
@@ -3915,6 +3931,20 @@ export class SessionManager {
 
   async callAppForSession(sessionId: string, server: string, name: string, args: Record<string, unknown>, waitMs?: number) {
     return this.requireAppsHub().forSession(sessionId).call(server, name, args, { waitMs })
+  }
+
+  /** 세션의 앱 붙이기 — 대화 안 화면(M4 B-1)이 여기서 세션의 앱 호출을 듣는다. 런타임이 없으면 null */
+  sessionAppsHub(): SessionAppsHub | null {
+    return this.appsHub
+  }
+
+  /**
+   * 대화 안 앱 화면의 사건 (M4 B-1). 어댑터가 아니라 host(inline-views.ts)가 만든 이벤트지만 같은 길을
+   * 탄다 — 기록(열림·거절만, 본문 없이)과 방송. 지워진 세션의 것은 버린다.
+   */
+  recordAppView(e: Extract<NormalizedEvent, { type: 'app_view' }>): void {
+    if (!this.meta.has(e.sessionId)) return
+    this.onEvent(e)
   }
 
   private requireAppsHub(): SessionAppsHub {

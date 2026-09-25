@@ -382,6 +382,7 @@ class ClaudeSession implements SessionHandle {
         for await (const msg of q) {
           const m = msg as { type?: string; session_id?: string; subtype?: string }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
+          this.noteAppCalls(msg)
           for (const e of this.stream.push(msg)) this.emit(e)
           // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
           if (m.type === 'result') void this.reportContext(q)
@@ -410,6 +411,27 @@ class ClaudeSession implements SessionHandle {
         })
       }
     })()
+  }
+
+  /**
+   * 붙은 앱의 도구를 부르는 `tool_use`를 붙이기에 적는다 (M4 B-1 — 대화 안 화면의 카드 짝짓기).
+   *
+   * 보통은 필요 없다: CLI가 호출에 카드 id를 실어 보낸다(app-proxy.ts `CLAUDE_TOOL_USE_META`). 그 자리가
+   * 바뀐 CLI에서도 화면이 제 카드를 찾도록 Codex와 같은 짝짓기를 뒤에 둔다. 결과(`tool_result`)가 온
+   * 카드는 짝짓기에서 뺀다 — 승인에서 거절된 호출은 앱까지 오지 않는다.
+   */
+  private noteAppCalls(msg: unknown): void {
+    const apps = this.opts.apps
+    const m = msg as { type?: string; message?: { content?: unknown } }
+    if (!apps || (m.type !== 'assistant' && m.type !== 'user') || !Array.isArray(m.message?.content)) return
+    for (const b of m.message.content as { type?: string; id?: unknown; name?: unknown; input?: unknown; tool_use_id?: unknown }[]) {
+      if (b?.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string') {
+        const t = appToolOf(b.name)
+        if (t && this.appProxies.has(t.server)) apps.noteCall(b.id, t.server, t.tool, b.input ?? {})
+      } else if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+        apps.callEnded(b.tool_use_id)
+      }
+    }
   }
 
   send(text: string): void {

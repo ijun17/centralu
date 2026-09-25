@@ -460,7 +460,11 @@ export const StoredMessage = z.object({
   sessionId: z.string(),
   seq: z.number(),
   role: z.enum(['user', 'assistant', 'system']),
-  kind: z.enum(['text', 'tool_call', 'tool_result', 'approval', 'marker', 'image', 'reasoning']),
+  /*
+   * `app_view`: 이 도구 카드 아래에 어느 앱의 화면이 섰다(또는 거절됐다)는 사실 (M4 B-1). 본문은 없다 —
+   * 다시 연 UI가 그 자리에 자리표시를 세우는 근거다(events.ts의 `app_view`).
+   */
+  kind: z.enum(['text', 'tool_call', 'tool_result', 'approval', 'marker', 'image', 'reasoning', 'app_view']),
   payload: z.unknown(),
   ts: z.number(),
 })

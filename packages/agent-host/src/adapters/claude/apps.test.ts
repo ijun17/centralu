@@ -20,6 +20,9 @@ type Sent = { jsonrpc: '2.0'; id?: number; method?: string; result?: Record<stri
 const captured = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
   setCalls: [] as Record<string, unknown>[],
+  /** CLI가 내보낼 메시지 — 시험이 넣으면 스트림이 흘린다 (대화 안 화면의 짝짓기, B-1) */
+  feed: [] as unknown[],
+  wake: null as (() => void) | null,
 }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
@@ -27,9 +30,16 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
   query: (args: { options: Record<string, unknown> }) => {
     captured.options = args.options
     return {
-      // eslint-disable-next-line require-yield -- 옵션과 서버 집합만 보면 되므로 스트림은 조용하다
+      // 시험이 넣은 메시지만 흘리고, 없으면 조용히 기다린다
       async *[Symbol.asyncIterator]() {
-        await new Promise<void>(() => {})
+        for (;;) {
+          const next = captured.feed.shift()
+          if (next !== undefined) {
+            yield next
+            continue
+          }
+          await new Promise<void>((r) => (captured.wake = r))
+        }
       },
       interrupt: async () => {},
       supportedCommands: async () => [],
@@ -91,12 +101,15 @@ async function connect(server: string) {
 beforeEach(() => {
   captured.options = null
   captured.setCalls = []
+  captured.feed = []
+  captured.wake = null
   w = attachWorld(kit)
   w.plant('p1', 'notes')
   w.plant('p1', 'tasks')
   w.plant('user', 'helper')
   w.rt.refresh()
-  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000 })
+  // 짝을 못 찾은 호출(B-1)을 오래 기다리지 않게 — 제품의 값은 5초다
+  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 300 })
 })
 
 afterEach(async () => {
@@ -147,6 +160,48 @@ describe('앱마다 인프로세스 대리 서버', () => {
     const refused = await request('tools/call', { name: 'app_only', arguments: {} })
     expect(refused).toMatchObject({ isError: true })
     expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })[0]).toMatchObject({ tool: 'app_only', status: 'rejected', callerKind: 'session' })
+  })
+})
+
+/**
+ * 대화 안 화면의 카드 (M4 B-1). Claude Code는 MCP 도구 호출에 그 도구 사용의 id를 싣는다
+ * (`_meta["claudecode/toolUseId"]`, 설치된 CLI 바이너리에서 확인). 그 id가 대화의 `tool_call` callId다.
+ */
+describe('대화 안 화면의 카드 id — Claude', () => {
+  const heard = () => {
+    const ids: Promise<string | null>[] = []
+    hub.onCall((c) => ids.push(c.callId))
+    return ids
+  }
+
+  it('CLI가 tools/call에 실은 도구 사용 id가 그 호출의 카드 id가 된다', async () => {
+    const ids = heard()
+    await start(WORKER)
+    const { request } = await connect('app-notes')
+    await request('tools/call', { name: 'poke', arguments: { to: 1 }, _meta: { 'claudecode/toolUseId': 'toolu_01ABC', progressToken: 3 } })
+    expect(ids).toHaveLength(1)
+    expect(await ids[0]).toBe('toolu_01ABC')
+  })
+
+  it('id가 실려 오지 않으면 스트림의 tool_use와 짝짓는다 — 결과가 온 카드는 짝이 되지 않는다', async () => {
+    const ids = heard()
+    await start(WORKER)
+    const { request } = await connect('app-notes')
+    const toolUse = (id: string, to: number) => ({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'mcp__app-notes__poke', input: { to } }] },
+    })
+    // 승인에서 거절된 호출: tool_use 뒤에 곧바로 그 결과(거절)가 온다
+    captured.feed.push(toolUse('toolu_denied', 2), {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_denied', is_error: true, content: 'denied' }] },
+    })
+    captured.feed.push(toolUse('toolu_ok', 2))
+    captured.wake?.()
+    await kit.until(() => captured.feed.length, (n) => n === 0)
+    await new Promise((r) => setTimeout(r, 20))
+    await request('tools/call', { name: 'poke', arguments: { to: 2 } })
+    expect(await ids[0]).toBe('toolu_ok')
   })
 })
 
