@@ -20,9 +20,8 @@
  * **MIT만 받는다.** 앱 폴더는 사용자의 저장소에 커밋되고 팀에 나뉜다 — 그 안에 든 제3자 코드의 조건이
  * 사용자의 저장소 조건이 된다. MIT가 아닌 것이 끼어들면 멈추고 이름을 댄다.
  */
-import { build } from 'esbuild'
+import { build, version as esbuildVersion } from 'esbuild'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,31 +58,70 @@ function fail(msg) {
   process.exit(1)
 }
 
+const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'))
+
 /**
- * `from` 폴더에서 Node가 찾는 대로 패키지 폴더를 찾는다. `require.resolve('<이름>/package.json')`은
- * 쓸 수 없다 — package.json을 exports에 싣지 않은 패키지(ext-apps)가 있다.
+ * `from` 패키지가 들인 `name`의 폴더 — **들이는 쪽의 자리만** 본다: `from` 안의 node_modules와, `from`을 담은
+ * node_modules(pnpm은 들인 것을 그 옆에 링크한다 — `.pnpm/<패키지>@<판>/node_modules/`). 워크스페이스 패키지인
+ * agent-host는 자기 node_modules뿐이다. esbuild가 import를 푸는 자리도 여기다 — 가져오는 파일에서 위로 올라가다
+ * 처음 닿는 곳.
+ *
+ * 그 밖은 보지 않는다: 조상 폴더의 node_modules, NODE_PATH, 전역 폴더. 거기서만 찾히는 것은 설치의 우연(pnpm이
+ * 숨겨 끌어올린 `node_modules/.pnpm/node_modules`)이거나 이 기계의 사정이다. `require.resolve('<이름>/package.json')`도
+ * 쓰지 않는다 — package.json을 exports에 싣지 않은 패키지(ext-apps)가 있다.
  */
-function findPackage(name, from) {
-  for (const dir of createRequire(join(from, 'package.json')).resolve.paths(name) ?? []) {
-    if (existsSync(join(dir, name, 'package.json'))) return realpathSync(join(dir, name))
-  }
+function dependencyOf(from, name) {
+  const places = [join(from, 'node_modules')]
+  const holder = from === PKG ? -1 : from.lastIndexOf(`${sep}node_modules${sep}`)
+  if (holder >= 0) places.push(from.slice(0, holder + `${sep}node_modules`.length))
+  for (const dir of places) if (existsSync(join(dir, name, 'package.json'))) return realpathSync(join(dir, name))
   return null
 }
 
-/** 설치된 판이 PINS와 같은가 — 다르면 멈춘다 */
+/**
+ * 설치된 판이 PINS와 같은가 — 다르면 멈춘다.
+ *
+ * **묶이는 그것을 본다.** agent-host에서 시작해 들인 것을 따라가며(dependencies·peerDependencies, agent-host는
+ * devDependencies까지) PINS의 패키지를 **들이는 쪽의 자리에서** 찾는다(dependencyOf). 들이는 쪽이 여럿이면 모두
+ * 본다 — core는 server·client·ext-apps가 들이고, 그 가운데 한 곳이라도 다른 판이면 그 판도 묶인다. 들인다고 적었는데
+ * 그 옆에 없으면(선택 peer가 아니면) 멈춘다: esbuild가 끌어올린 자리에서 무엇이든 가져갈 것이기 때문이다.
+ *
+ * 예전에는 `createRequire(agent-host).resolve.paths()`를 차례로 돌며 처음 찾힌 것 하나를 읽었다. 그 목록은 조상
+ * 폴더 다음에 NODE_PATH와 전역 폴더까지 돈다. pnpm이 띄운 vitest는 NODE_PATH에 끌어올린 폴더를 싣고, 이 검사를
+ * 부르는 테스트(app-template.test.ts)의 자식이 그것을 물려받는다. agent-host는 core를 직접 들이지 않으므로 그
+ * 자리에 닿았고, 다른 워크스페이스 패키지가 core 2.0.0을 들이자 검사는 2.0.0을 읽고 멈췄다 — 묶이는 것은 server
+ * 옆의 2.1.0인데(m4-docs 실측, 2026-09-25). 끌어올림은 설치의 우연이라, 거기에 기댄 판정은 워크스페이스의 다른
+ * 곳이 바뀔 때마다 뒤집힌다.
+ *
+ * esbuild는 묶이는 것이 아니라 묶는 도구다 — 지금 이 스크립트가 부르는 그것에게 판을 묻는다.
+ */
 function checkPins() {
   const wrong = []
-  // client·core는 agent-host가 직접 들이지 않을 수 있다 — 그것을 쓰는 패키지(ext-apps·server) 쪽에서 찾는다
-  const lookIn = [PKG, findPackage('@modelcontextprotocol/ext-apps', PKG), findPackage('@modelcontextprotocol/server', PKG)].filter(Boolean)
-  for (const [name, want] of Object.entries(PINS)) {
-    const dir = lookIn.map((from) => findPackage(name, from)).find(Boolean)
-    if (!dir) {
-      wrong.push(`${name}: not installed`)
-      continue
+  if (esbuildVersion !== PINS.esbuild) wrong.push(`esbuild: installed ${esbuildVersion}, pinned ${PINS.esbuild}`)
+  const reached = new Set()
+  const walked = new Set([PKG])
+  const queue = [PKG]
+  while (queue.length > 0) {
+    const from = queue.shift()
+    const pj = readJson(join(from, 'package.json'))
+    const declared = { ...pj.peerDependencies, ...pj.dependencies, ...(from === PKG ? pj.devDependencies : {}) }
+    for (const name of Object.keys(declared)) {
+      if (!(name in PINS) || name === 'esbuild') continue
+      const dir = dependencyOf(from, name)
+      if (!dir) {
+        if (!pj.peerDependenciesMeta?.[name]?.optional) wrong.push(`${name}: ${pj.name} depends on it, but it is not installed beside ${pj.name}`)
+        continue
+      }
+      reached.add(name)
+      const got = readJson(join(dir, 'package.json')).version
+      if (got !== PINS[name]) wrong.push(`${name}: installed ${got} beside ${pj.name}, pinned ${PINS[name]}`)
+      if (!walked.has(dir)) {
+        walked.add(dir)
+        queue.push(dir)
+      }
     }
-    const got = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version
-    if (got !== want) wrong.push(`${name}: installed ${got}, pinned ${want}`)
   }
+  for (const name of Object.keys(PINS)) if (name !== 'esbuild' && !reached.has(name)) wrong.push(`${name}: not installed`)
   if (wrong.length) fail(`installed versions differ from PINS — update PINS on purpose, not by accident:\n  ${wrong.join('\n  ')}`)
 }
 
