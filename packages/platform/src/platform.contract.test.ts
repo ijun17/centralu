@@ -18,6 +18,7 @@ import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
 import { ExternalApps } from '../../agent-host/src/apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../../agent-host/src/apps/external/test-helpers.js'
 import { runtimeViewSource } from '../../agent-host/src/app-view-source.js'
+import { onExternalAppListChanged } from '../../agent-host/src/app-list-events.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
 import { APP_VERSION } from '@cc/protocol'
@@ -622,6 +623,48 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
       await platform.dispose()
       await mgr.disposeAll()
       await views.dispose()
+      await rt.dispose()
+      await server.close()
+      store.close()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * 외부 앱 목록 (M4 A-8) — web 구현의 `apps.list`와 `external_apps_changed`가 진짜 host와 진짜 런타임을
+ * 지난다. main.ts가 쓰는 이음새(`onExternalAppListChanged`)를 그대로 끼운다.
+ */
+describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
+  it('목록은 이유와 함께 오고, 신뢰가 바뀌면 방송이 오며 그때 다시 읽은 목록이 새 상태다', async () => {
+    const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-applist-')))
+    const projRoot = join(fixture, 'proj')
+    mkdirSync(join(fixture, 'data'))
+    plantApp(join(projRoot, ...PROJECT_APPS), 'notes')
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const project = await mgr.addProject(projRoot)
+    const rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
+    rt.refresh()
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
+    onExternalAppListChanged(rt, () => server.broadcast({ type: 'external_apps_changed' }))
+    const port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    const heard: string[] = []
+    const off = platform.agents.subscribe((e) => void heard.push(e.type))
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+      expect((await platform.apps.list()).map((a) => [a.appId, a.projectId, a.status])).toEqual([['notes', project.id, 'untrusted']])
+
+      mgr.setProjectTrusted(project.id, true)
+      rt.refresh()
+      await waitFor(() => heard.includes('external_apps_changed'))
+      expect((await platform.apps.list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')
+    } finally {
+      off()
+      await platform.dispose()
+      await mgr.disposeAll()
       await rt.dispose()
       await server.close()
       store.close()

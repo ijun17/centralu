@@ -309,6 +309,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         viewToolResult(await rpc.call('apps.invoke', { appId, name: tool, args, projectId: from?.projectId ?? null })),
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
+      list: () => rpc.call('apps.list', {}),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

@@ -311,6 +311,12 @@ export class ExternalApps {
    * 앱이 멈춤(연달아 실패)과 다시 시작, 다시 읽은 도구 목록이 달라짐. **무엇이** 바뀌었는지는
    * 싣지 않는다 — 받는 쪽은 `list()`와 `knownTools()`를 다시 읽는다(#81의 "알림 하나와 다시
    * 읽기"와 같은 방식이다). 한 틱에 몰린 변화는 한 번으로 모은다.
+   *
+   * 앱의 수명(뜨는 중, 떴다, 쉬어서 내렸다, 죽었다)에도 알린다 (A-8). 사이드바와 고정 화면이
+   * `list()`의 상태를 보여 주므로, 그 상태가 바뀌는 자리는 모두 여기를 지나야 한다. 세션 쪽은
+   * 자기가 보는 모양(붙은 앱과 도구)을 비교해 같으면 아무것도 하지 않으므로, 알림이 늘어도
+   * 할 일은 늘지 않는다. 알림을 둘로 나누지 않은 이유: 목록을 바꾸는 자리가 두 알림 중 하나만
+   * 부르는 날, 그 변화는 한쪽 받는 이에게만 닿는다.
    */
   onAppsChanged(listener: () => void): () => void {
     this.appsListeners.add(listener)
@@ -504,10 +510,10 @@ export class ExternalApps {
   async restart(ref: AppRef): Promise<void> {
     const e = this.require(ref)
     await this.halt(e, 'restart requested')
-    const wasStopped = e.life.gaveUp
     Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
-    // 멈췄던 앱은 세션에서 떨어져 있었다 — 다시 붙을 수 있게 알린다
-    if (wasStopped) this.appsChanged()
+    // 멈췄던 앱은 세션에서 떨어져 있었다 — 다시 붙을 수 있게 알린다. 죽었던(crashed) 앱도 이유가
+    // 지워져 목록의 상태가 바뀐다(A-8)
+    this.appsChanged()
   }
 
   /**
@@ -685,10 +691,13 @@ export class ExternalApps {
       return proc
     })()
     L.starting = p
-    p.then(
-      () => void (L.starting === p && (L.starting = null)),
-      () => void (L.starting === p && (L.starting = null)),
-    )
+    // 뜨는 중(starting)도, 뜬 뒤(running)와 못 뜬 뒤(crashed·failed)도 목록이 말하는 상태다 (A-8)
+    this.appsChanged()
+    const settled = () => {
+      if (L.starting === p) L.starting = null
+      this.appsChanged()
+    }
+    p.then(settled, settled)
     return p
   }
 
@@ -760,6 +769,8 @@ export class ExternalApps {
     this.fail(e, reason)
     // 파이프·로그를 정리하고, 그룹에 남은 자손이 있으면 거둔다
     void proc.stop(0)
+    // 떠 있던 앱이 예고 없이 죽었다 — 화면 앞의 사람이 이유를 봐야 한다 (A-8, B-6)
+    this.appsChanged()
   }
 
   /** 내린다 — 쉬어서, 바뀌어서, 신뢰를 잃어서, host가 끝나서 */
@@ -771,6 +782,8 @@ export class ExternalApps {
     L.proc = null
     L.tools = null
     if (!proc) return
+    // 떠 있던 것이 내려간다 — 목록에서는 이 순간 running이 아니다 (A-8)
+    this.appsChanged()
     proc.log.note(`stopping: ${why}`)
     await proc.stop(opts.graceMs ?? this.timing.graceMs, { awaitKill: opts.awaitKill })
   }

@@ -6,6 +6,7 @@ import type {
   Attachment,
   CreateSessionParams,
   CommandInfo,
+  ExternalAppInfo,
   ExternalSession,
   UpdateSettingsParams,
   GitBranch,
@@ -537,6 +538,11 @@ export interface AppsPort {
   callTool(appId: AppId, tool: string, args: Record<string, unknown>, from?: AppCallOrigin): Promise<AppToolResult>
   /** 화면이 자기 앱의 리소스를 읽는다 (브리지의 `onreadresource`) */
   readResource(appId: AppId, uri: string, from?: AppCallOrigin): Promise<AppResourceResult>
+  /**
+   * 발견된 외부 앱 전부와 그 상태 (M4 A-8). 신뢰하지 않은 프로젝트의 앱과 깨진 앱도 이유와 함께
+   * 온다. 목록이 달라지면 host가 `external_apps_changed`를 방송하고, 받은 쪽이 이것을 다시 부른다.
+   */
+  list(): Promise<ExternalAppInfo[]>
 }
 
 /**
