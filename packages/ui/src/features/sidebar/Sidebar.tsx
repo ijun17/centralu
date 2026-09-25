@@ -468,6 +468,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [managerDialog, setManagerDialog] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  // 방금 등록해서 신뢰를 묻는 중인가 (M4, 결정 3) — 한 번만 묻고, 답하면 걷힌다
+  const askingTrust = useStore((s) => s.trustAsk === projectId)
+  const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   /** 메뉴가 매달릴 자리 — 누른 버튼이다 (사이드바 모서리가 아니라) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
   const [deleting, setDeleting] = useState(false)
@@ -569,10 +572,13 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             onClose={() => setMenuOpen(false)}
             onNewSession={() => openNewSession(projectId)}
             onStartManager={() => setManagerDialog(true)}
+            onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
             onDelete={() => setDeleting(true)}
           />
         )}
       </header>
+
+      {askingTrust && <TrustAsk project={project} />}
 
       <ul className="mt-1.5">
         {orderAsTree(sessions).map(({ s, nested, managerOfLive }) => {
@@ -773,6 +779,52 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         />
       )}
     </section>
+  )
+}
+
+/**
+ * 등록할 때 한 번 묻는 신뢰 (M4, 결정 3).
+ *
+ * 모달이 아니라 그 프로젝트 줄 아래에 선다. 등록 직후에는 새 세션 창이 곧바로 뜨는 길(오케스트레이터의
+ * 폴더 고르기)이 있어서, 창 위에 창을 얹으면 둘 다 반쯤만 읽힌다. 여기 서 있으면 세션 창을 닫고 와도
+ * 질문이 그대로 있다. 답하지 않은 프로젝트는 신뢰하지 않은 채로 남는다 — 모르는 사이에 켜지는
+ * 쪽이 아니라 모르는 사이에 꺼져 있는 쪽이 안전하다.
+ *
+ * 말은 하는 일 그대로 적는다: 신뢰하면 이 프로젝트의 앱이 돌고 프로젝트 설정이 적용된다.
+ */
+function TrustAsk({ project }: { project: ProjectInfo }) {
+  const answer = useStore((s) => s.answerTrustAsk)
+  return (
+    <div
+      className="mx-3 mt-2 rounded border border-edge bg-panel px-2.5 py-2"
+      role="group"
+      aria-label={`Trust ${project.name}?`}
+      data-testid={`trust-ask-${project.name}`}
+    >
+      <p className="text-[12px] text-chalk">Trust this project?</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ash">
+        Trusting lets this project&apos;s apps run and its settings apply. Trust it only if you trust the code in this
+        folder.
+      </p>
+      <div className="mt-2 flex justify-end gap-2">
+        <button
+          type="button"
+          className="rounded px-2 py-0.5 text-[11px] text-slate transition-colors hover:text-chalk"
+          onClick={() => void answer(false)}
+          data-testid={`trust-ask-no-${project.name}`}
+        >
+          Not now
+        </button>
+        <button
+          type="button"
+          className="rounded border border-edge bg-void px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          onClick={() => void answer(true)}
+          data-testid={`trust-ask-yes-${project.name}`}
+        >
+          Trust
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -1144,6 +1196,7 @@ function ProjectMenu({
   onClose,
   onNewSession,
   onStartManager,
+  onToggleTrust,
   onDelete,
 }: {
   project: ProjectInfo
@@ -1151,6 +1204,7 @@ function ProjectMenu({
   onClose: () => void
   onNewSession: () => void
   onStartManager: () => void
+  onToggleTrust: () => void
   onDelete: () => void
 }) {
   const pick = (fn: () => void) => () => {
@@ -1171,6 +1225,16 @@ function ProjectMenu({
           testId={`start-worktree-manager-${project.name}`}
         />
       )}
+      {/*
+        신뢰 (M4, 결정 3). 등록할 때 한 번 묻고, 그 뒤로는 여기서 바꾼다. 켜고 끄는 한 줄이지
+        확인 창이 아니다: 끄는 쪽은 앱을 내리고 설정을 무시하는 안전한 방향이고, 켜는 쪽은 사람이
+        메뉴를 열고 이름을 읽고 누른 것이다.
+      */}
+      <ActionRow
+        label={project.trusted ? 'Stop trusting this project' : 'Trust this project'}
+        onClick={pick(onToggleTrust)}
+        testId={`toggle-trust-${project.name}`}
+      />
       <div className="my-1 border-t border-edge" />
       <ActionRow
         label="Delete project…"
@@ -1413,6 +1477,9 @@ function ProjectDetail({ project }: { project: ProjectInfo }) {
   return (
     <span className="block" data-testid={`project-detail-${project.name}`}>
       <span className="readout block truncate text-slate">{project.path}</span>
+      <span className="mt-1 block" data-testid={`project-trust-${project.name}`}>
+        {project.trusted ? 'Trusted — its apps can run' : "Not trusted — its apps don't run"}
+      </span>
       <span className="mt-1 block">
         {project.git?.denied ? (
           // '저장소 아님'으로 표시하면 사용자가 엉뚱한 결론을 낸다 — 할 일은 권한 부여다

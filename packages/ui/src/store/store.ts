@@ -639,6 +639,16 @@ export type AppState = {
 
   addProject(path: string): Promise<ProjectInfo>
   /**
+   * 방금 등록한, 아직 신뢰를 묻는 중인 프로젝트 (M4, 결정 3). 등록할 때 **한 번** 묻는다 — 답하거나
+   * 넘기면 걷힌다. 묻는 동안 아무것도 막지 않는다(사이드바의 그 프로젝트 아래에 선다): 등록 직후에는
+   * 새 세션 창이 곧바로 뜨는 길도 있어서, 창 위에 창을 얹으면 둘 다 반쯤만 읽힌다. 답하지 않은
+   * 프로젝트는 신뢰하지 않은 채로 남고, 프로젝트 메뉴에서 언제든 바꾼다.
+   */
+  trustAsk: string | null
+  answerTrustAsk(trust: boolean): Promise<void>
+  /** 신뢰를 켜고 끈다. 앱 목록은 host의 방송(external_apps_changed)으로 따라온다 */
+  setProjectTrusted(projectId: string, trusted: boolean): Promise<void>
+  /**
    * Delete a project — the record here, and optionally the folder on disk.
    *
    * Two calls, in this order and not the other: the trash first, the record second. The
@@ -1217,6 +1227,7 @@ export const useStore = create<AppState>((set, get) => ({
   orchestratorWaking: false,
   introSeen: false,
   addProjectHint: false,
+  trustAsk: null as string | null,
   panelSplit: 0.5,
   panelWidth: PANEL_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
@@ -2327,8 +2338,34 @@ export const useStore = create<AppState>((set, get) => ({
   async addProject(path) {
     const p = await get().platform!.projects.add(path)
     // 가리키던 문으로 들어왔으니 불을 끈다 (#63) — 지나간 안내가 남아 반짝이면 잔소리다
-    set((s) => ({ projects: { ...s.projects, [p.id]: p }, addProjectHint: false }))
+    set((s) => ({
+      projects: { ...s.projects, [p.id]: p },
+      addProjectHint: false,
+      // 이미 신뢰한 프로젝트(같은 폴더를 다시 골랐다)에는 다시 묻지 않는다
+      trustAsk: p.trusted ? s.trustAsk : p.id,
+    }))
     return p
+  },
+
+  async answerTrustAsk(trust) {
+    const id = get().trustAsk
+    if (!id) return
+    set({ trustAsk: null })
+    if (trust) await get().setProjectTrusted(id, true)
+  },
+
+  async setProjectTrusted(projectId, trusted) {
+    const platform = get().platform
+    if (!platform || !get().projects[projectId]) return
+    try {
+      await platform.projects.setTrusted(projectId, trusted)
+      set((s) => {
+        const p = s.projects[projectId]
+        return p ? { projects: { ...s.projects, [projectId]: { ...p, trusted } } } : {}
+      })
+    } catch (e) {
+      set({ toast: `Could not change trust: ${(e as Error).message}` })
+    }
   },
 
   async deleteProject(projectId, deleteFiles) {
@@ -2366,6 +2403,7 @@ export const useStore = create<AppState>((set, get) => ({
         focusedProjectId: s.focusedProjectId === projectId ? null : s.focusedProjectId,
         focusedSessionId:
           s.focusedSessionId && doomed.includes(s.focusedSessionId) ? null : s.focusedSessionId,
+        trustAsk: s.trustAsk === projectId ? null : s.trustAsk,
       }
     })
   },

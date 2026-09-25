@@ -768,6 +768,8 @@ export class SessionManager {
     const stored = row?.defaultTool
     return {
       id, path, name: basename(path), defaultTool: stored === 'codex' ? 'codex' : 'claude',
+      // 신뢰 (M4, 결정 3) — 앱 런타임과 같은 칸을 읽는다. 화면의 신뢰 토글이 이 값을 보여 준다
+      trusted: row?.trusted ?? false,
       // 도구별 기본 모델·강도 (#107) — commands·worktreeSetup처럼 JSON이라 따로 읽는다
       defaultModels: this.store.projectToolDefaults(id),
       // Saved shell commands ride along with the project so the Run menu never has a

@@ -746,6 +746,8 @@ export class Store {
          * 채우는 것은 조용한 허락이다. 잃는 것은 앱을 처음 켤 때의 클릭 한 번이다.
          *
          * 칸 하나로 앱과 #92(프로젝트 설정 존중)를 함께 정한다 — 결정 3이 둘을 한 질문으로 묶었다.
+         *
+         * (기존 행에 대한 이 판단은 v35가 뒤집었다. 새로 등록하는 프로젝트의 "아니오"는 그대로다.)
          */
         run: () => {
           const cols = this.db.pragma('table_info(projects)') as { name: string }[]
@@ -799,6 +801,27 @@ export class Store {
               created_at INTEGER NOT NULL
             );
           `)
+        },
+      },
+      {
+        to: 35,
+        /**
+         * 이미 등록된 프로젝트는 신뢰한다 (M4, v33의 기본값을 기존 행에 한해 뒤집는다).
+         *
+         * v33은 "등록할 때 이 질문에 답한 적이 없다"며 옛 행을 신뢰하지 않음으로 두었다. 틀린 곳은
+         * 그 질문이 **지금 막 생겼다**는 점이다. 이 행들은 사람이 직접 고른 폴더이고, 그 안에서
+         * 에이전트를 몇 주씩 돌려 왔다. 신뢰는 앱만이 아니라 #92(프로젝트 설정 존중)도 함께
+         * 정한다(결정 3). 그래서 옛 행을 "아니오"로 두면, 업데이트 하나가 아무 말 없이 이 프로젝트들의
+         * `.claude/` 설정을 무시하기 시작한다. 사람은 자기가 한 적 없는 선택의 결과만 보게 된다.
+         *
+         * 이 뒤로 등록하는 프로젝트는 여전히 "아니오"로 시작하고, 등록하는 순간 한 번 묻는다(UI).
+         * 새로 받아 온 저장소를 여는 것만으로 그 안의 코드가 돌면 안 된다는 v33의 이유는 그대로다.
+         *
+         * **한 번만 돈다.** 이 스텝이 매번 돌면 사람이 끈 신뢰를 다음 기동이 다시 켠다. 러너는 지난
+         * 스텝을 다시 돌지 않고(user_version), 새 DB는 이 스텝이 돌 때 프로젝트가 0개라 아무것도 안 한다.
+         */
+        run: () => {
+          this.db.exec(`UPDATE projects SET trusted = 1`)
         },
       },
     ]
@@ -1011,11 +1034,13 @@ export class Store {
    * moment the field was added.
    */
   listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
-    return this.db
+    const rows = this.db
       .prepare(
-        `SELECT id, path, name, default_tool as defaultTool FROM projects ORDER BY sidebar_order, created_at`,
+        `SELECT id, path, name, default_tool as defaultTool, trusted FROM projects ORDER BY sidebar_order, created_at`,
       )
-      .all() as Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[]
+      .all() as (Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels' | 'trusted'> & { trusted: number })[]
+    // SQLite에는 불리언이 없다 — 0/1을 그대로 흘리면 화면의 `if (p.trusted)`는 맞아도 스키마 검사가 틀린다
+    return rows.map((r) => ({ ...r, trusted: r.trusted === 1 }))
   }
 
   /**

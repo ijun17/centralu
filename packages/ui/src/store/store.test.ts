@@ -59,6 +59,7 @@ beforeEach(() => {
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
     externalAppChanges: {},
     externalApps: [],
+    trustAsk: null,
   })
 })
 
@@ -1094,6 +1095,47 @@ describe('외부 앱 목록 (M4 A-8)', () => {
     mock.setConnectionState('disconnected')
     mock.setConnectionState('connected')
     await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('failed'))
+  })
+})
+
+/**
+ * 신뢰 (M4, 결정 3): 등록할 때 **한 번** 묻고, 답하지 않으면 아무것도 보내지 않는다. 이미 신뢰한
+ * 프로젝트를 다시 골랐을 때는 묻지 않는다.
+ */
+describe('프로젝트 신뢰 (M4)', () => {
+  it('새로 등록한 프로젝트에 한 번 묻는다 — "나중에"는 아무것도 보내지 않고, "신뢰"는 보내고 화면에 적는다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const p = await useStore.getState().addProject('/tmp/trust-a')
+    expect(useStore.getState().trustAsk).toBe(p.id)
+
+    await useStore.getState().answerTrustAsk(false)
+    expect(useStore.getState().trustAsk).toBeNull()
+    expect(mock.trustCalls).toEqual([])
+    expect(useStore.getState().projects[p.id]?.trusted).toBe(false)
+
+    const q = await useStore.getState().addProject('/tmp/trust-b')
+    await useStore.getState().answerTrustAsk(true)
+    expect(mock.trustCalls).toEqual([{ projectId: q.id, trusted: true }])
+    expect(useStore.getState().projects[q.id]?.trusted).toBe(true)
+    expect(useStore.getState().trustAsk).toBeNull()
+
+    // 같은 폴더를 다시 골랐다 — 이미 신뢰했으니 다시 묻지 않는다
+    await useStore.getState().addProject('/tmp/trust-b')
+    expect(useStore.getState().trustAsk).toBeNull()
+  })
+
+  it('신뢰를 끄면 그 프로젝트의 앱 목록이 방송을 따라 막힌다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const p = await useStore.getState().addProject('/tmp/trust-c')
+    await useStore.getState().setProjectTrusted(p.id, true)
+    mock.setExternalApps([appInfo('notes', { projectId: p.id })])
+    await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('stopped'))
+
+    await useStore.getState().setProjectTrusted(p.id, false)
+    expect(useStore.getState().projects[p.id]?.trusted).toBe(false)
+    await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('untrusted'))
   })
 })
 
