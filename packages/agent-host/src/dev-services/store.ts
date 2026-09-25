@@ -732,6 +732,28 @@ export class Store {
           }
         },
       },
+      {
+        to: 33,
+        /**
+         * 프로젝트 신뢰 (M4 A-2, 플랜 결정 3) — "이 저장소의 코드를 이 기계에서 돌려도 되는가".
+         *
+         * 프로젝트 앱은 저장소에 커밋되어 팀과 나뉜다. 받아 온 저장소를 여는 것만으로 그 안의
+         * `server.command`가 사용자 권한으로 돌면, 저장소를 여는 일이 곧 남의 코드를 실행하는
+         * 일이 된다. 그래서 앱은 신뢰한 프로젝트에서만 뜬다(발견과 목록은 신뢰와 무관하다).
+         *
+         * **기존 프로젝트의 기본값은 "신뢰하지 않음"이다.** 지금까지 등록한 프로젝트는 앱이
+         * 없던 시절에 등록됐다 — 그때의 등록은 이 질문에 답한 적이 없다. 없는 답을 "예"로
+         * 채우는 것은 조용한 허락이다. 잃는 것은 앱을 처음 켤 때의 클릭 한 번이다.
+         *
+         * 칸 하나로 앱과 #92(프로젝트 설정 존중)를 함께 정한다 — 결정 3이 둘을 한 질문으로 묶었다.
+         */
+        run: () => {
+          const cols = this.db.pragma('table_info(projects)') as { name: string }[]
+          if (!cols.some((c) => c.name === 'trusted')) {
+            this.db.exec(`ALTER TABLE projects ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0`)
+          }
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1082,6 +1104,25 @@ export class Store {
   setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
     const all = { ...this.projectToolDefaults(projectId), [tool]: d }
     this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(all), projectId)
+  }
+
+  /**
+   * 앱 런타임이 보는 프로젝트 — 뿌리 경로와 신뢰 (M4 A-2).
+   *
+   * 워크트리는 여기에 없다. 워크트리는 프로젝트가 아니라 프로젝트의 사본이고, 사본마다
+   * 앱 인스턴스가 서면 같은 앱이 데이터 폴더 하나를 두고 여럿이 돈다 — 앱은 등록된
+   * 뿌리에서만 읽는다(플랜 A-2).
+   */
+  projectRoots(): { id: string; path: string; trusted: boolean }[] {
+    const rows = this.db
+      .prepare(`SELECT id, path, trusted FROM projects ORDER BY sidebar_order, created_at`)
+      .all() as { id: string; path: string; trusted: number }[]
+    return rows.map((r) => ({ id: r.id, path: r.path, trusted: r.trusted === 1 }))
+  }
+
+  /** @returns 그 프로젝트가 있었는가 — 없는 id에 조용히 성공하지 않는다 */
+  setProjectTrusted(projectId: string, trusted: boolean): boolean {
+    return this.db.prepare(`UPDATE projects SET trusted = ? WHERE id = ?`).run(trusted ? 1 : 0, projectId).changes > 0
   }
 
   findProjectByPath(path: string): { id: string } | undefined {
