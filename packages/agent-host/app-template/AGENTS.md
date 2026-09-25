@@ -58,8 +58,13 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
     content, else text). Declare the app in `"uses": { "apps": ["other-app"] }`. Only tools open to
     agents (visibility `model`) can be called. A project app reaches apps of its own project first,
     then apps in the person's user folder; an app in the user folder reaches only user-folder apps.
+12. **Reading Centralu's data**: inside a tool handler, `await centralu.host('sessions.list')` or
+    `await centralu.host('git.status')` returns JSON. These two names are the whole list; declare
+    each one you use in `"uses": { "host": [...] }`. `sessions.list` gives this project's sessions
+    (the names shown in the sidebar and their states, never the conversations); `git.status` gives this project's branch and changed
+    files (project apps only).
 
-Both throw an error that says what Centralu answered.
+All three throw an error that says what Centralu answered.
 
 ## Checking your work
 

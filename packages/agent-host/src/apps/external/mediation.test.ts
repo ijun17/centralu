@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, resultText, type AgentRunRequest, type AppCaller, type AppRef, type BrokerHost } from './runtime.js'
-import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
+import { PROJECT_APPS, fakeBrokerHost, plantApp, until } from './test-helpers.js'
 
 /**
  * 중개 (M4 A-4) — 앱 도구를 부르는 단 하나의 길과, 앱이 밖으로 부탁하는 fd 3.
@@ -47,10 +47,8 @@ const VIEW: AppCaller = { kind: 'view' }
 const SESSION: AppCaller = { kind: 'session', sessionId: 's1' }
 
 /** 에이전트 몸통만 갈아 끼운 host (D-1의 자리) — 세션 대신 시험이 주는 함수가 부탁을 받는다 */
-const agentHost = (runAgent: (req: AgentRunRequest, ctx: { signal: AbortSignal }) => Promise<{ text: string }>): BrokerHost => ({
-  defaultAgentTool: () => 'claude',
-  runAgent: async (req, ctx) => ({ sessionId: 'fake-session', ...(await runAgent(req, ctx)) }),
-})
+const agentHost = (runAgent: (req: AgentRunRequest, ctx: { signal: AbortSignal }) => Promise<{ text: string }>): BrokerHost =>
+  fakeBrokerHost({ runAgent: async (req, ctx) => ({ sessionId: 'fake-session', ...(await runAgent(req, ctx)) }) })
 
 const make = (host?: BrokerHost) => {
   rt = new ExternalApps({
@@ -225,7 +223,7 @@ describe('중개 서버 (fd 3)', () => {
     const text = await brokerAnswer('notes', { mode: 'run' })
     expect(text).toBe('broker isError=true: run_agent refused: this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so')
     expect(await brokerAnswer('notes', { mode: 'run', tool: 'call_app' })).toContain('call_app refused: "other" is not in this app\'s "uses.apps"')
-    expect(await brokerAnswer('notes', { mode: 'run', tool: 'host_data' })).toContain('host_data is not available yet')
+    expect(await brokerAnswer('notes', { mode: 'run', tool: 'host_data' })).toContain('host_data refused: "sessions.list" is not in this app\'s "uses.host"')
   })
 
   it('실행 id 없는 중개 호출은 거절한다 (앱이 스스로 깨어난 경우)', async () => {

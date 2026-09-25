@@ -1,89 +1,22 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AppToolResult, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
-import { storeRunLedger } from '../app-run-ledger.js'
-import { ExternalApps } from '../apps/external/runtime.js'
+import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { AppToolResult } from '../adapters/contract.js'
+import type { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
-import { Store } from '../dev-services/store.js'
-import { createRpcHandler } from '../rpc.js'
+import type { Store } from '../dev-services/store.js'
+import type { createRpcHandler } from '../rpc.js'
 import { finalAnswer } from './app-agents.js'
-import { SessionManager, appMessageFrame } from './manager.js'
-import { FIXTURE_APP } from './session-apps.test-helpers.js'
+import { brokerSaid, brokerWorld, type BrokerWorld, type FakeAdapter } from './app-broker.test-helpers.js'
+import { appMessageFrame, type SessionManager } from './manager.js'
 
 /**
  * 앱이 부탁한 에이전트 (M4 D-1) — 세션의 에이전트가 앱 도구를 부르고, 그 앱이 fd 3으로 `run_agent`를 부탁하고, host가 새
  * 세션을 세워 답을 돌려주는 길 전체. 진짜 매니저·런타임·앱 프로세스(픽스처)·실행 기록. 어댑터만 가짜다: 받은 옵션을 적고,
- * 시험이 정한 대로 에이전트의 답을 흘린다.
+ * 시험이 정한 대로 에이전트의 답을 흘린다(`app-broker.test-helpers.ts`).
  */
 
-class Handle implements SessionHandle {
-  readonly externalId: string
-  readonly sent: string[] = []
-  interrupted = false
-  disposed = false
-  constructor(
-    readonly sessionId: string,
-    readonly opts: CreateSessionOpts,
-    readonly emit: EventSink,
-    private onSend: (h: Handle, text: string) => void,
-  ) {
-    this.externalId = `ext-${sessionId}`
-  }
-  send(text: string) {
-    this.sent.push(text)
-    // 도구는 나중에 답한다 — 같은 틱에 답하면 실제로는 없는 순서를 시험하게 된다
-    setTimeout(() => this.onSend(this, text), 5)
-  }
-  respondApproval() {
-    return false
-  }
-  /** Claude 어댑터처럼: 멈추면 이 세션이 부른 앱 호출을 모두 취소한다 */
-  interrupt() {
-    this.interrupted = true
-    this.opts.apps?.cancelAll()
-  }
-  async dispose() {
-    this.disposed = true
-  }
-  say(text: string) {
-    this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
-  }
-  done(output?: unknown) {
-    this.emit(output === undefined ? { type: 'turn_complete', sessionId: this.sessionId } : { type: 'turn_complete', sessionId: this.sessionId, output })
-  }
-}
-
-class FakeAdapter implements AgentAdapter {
-  descriptor: AgentAdapter['descriptor']
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
-  }
-  loggedIn = true
-  /** 에이전트가 받은 말에 어떻게 답하나 — 기본은 아무 말도 없다(시험이 정한다) */
-  onSend: (h: Handle, text: string) => void = () => {}
-  handles = new Map<string, Handle>()
-  opened: CreateSessionOpts[] = []
-  constructor(readonly tool: ToolName, label: string) {
-    this.descriptor = { name: tool, label, mark: label[0]!, install: 'x', login: `${tool} login` }
-  }
-  async detect() {
-    return this.loggedIn
-      ? { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
-      : { tool: this.tool, installed: true, loggedIn: false, detail: `Not logged in — run \`${this.tool} login\`` }
-  }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) {
-    this.opened.push(opts)
-    const h = new Handle(opts.sessionId, opts, emit, (hh, t) => this.onSend(hh, t))
-    this.handles.set(opts.sessionId, h)
-    return h
-  }
-}
-
-let root = ''
+let w: BrokerWorld
 let repo = ''
 let dataRoot = ''
 let store: Store
@@ -95,58 +28,18 @@ let rpc: ReturnType<typeof createRpcHandler>
 let events: NormalizedEvent[] = []
 let projectId = ''
 
-const plant = (where: 'project' | 'user', id: string, uses: Record<string, unknown>) =>
-  plantApp(where === 'project' ? join(repo, ...PROJECT_APPS) : join(dataRoot, 'apps'), id, {
-    server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'mediation'] },
-    uses,
-  })
-
-/** 세션의 에이전트가 붙은 앱의 `ask_broker`를 부른다 — 에이전트가 앱 도구를 부르는 그 길(A-5) */
-const callFromSession = (session: SessionInfo, server: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult> => {
-  const opts = (session.tool === 'codex' ? codex : claude).opened.find((o) => o.sessionId === session.id)!
-  return opts.apps!.call(server, 'ask_broker', { mode: 'run', ...args }, signal ? { signal } : {})
-}
-const brokerSaid = (r: AppToolResult) => r.structuredContent as { isError: boolean; text: string; structured: unknown }
-
-/** 앱이 세운 에이전트 세션들 (부른 세션은 빼고) */
-const agentSessions = () => mgr.listSessions().filter((s) => s.appId !== null)
+const plant = (where: 'project' | 'user', id: string, uses: Record<string, unknown>) => w.plant(where, id, uses)
+const callFromSession = (session: SessionInfo, server: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult> =>
+  w.callFromSession(session, server, args, signal)
+const agentSessions = () => w.agentSessions()
 
 beforeEach(async () => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-agents-')))
-  repo = join(root, 'repo')
-  dataRoot = join(root, 'data')
-  process.env.CC_DATA_DIR = dataRoot
-  mkdirSync(dataRoot)
-  execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
-  store = new Store()
-  claude = new FakeAdapter('claude', 'Claude Code')
-  codex = new FakeAdapter('codex', 'Codex')
-  const adapters = new Map<ToolName, AgentAdapter>([
-    ['claude', claude],
-    ['codex', codex],
-  ])
-  events = []
-  mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
-  mgr.prLookup = async () => null
-  rt = new ExternalApps({
-    projects: () => store.projectRoots(),
-    dataRoot,
-    reservedIds: ['control'],
-    runs: storeRunLedger(store),
-    timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
-  })
-  rt.refresh()
-  mgr.useExternalApps(rt)
-  rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
-  projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
-  await rpc('projects.setTrusted', { projectId, trusted: true })
+  w = await brokerWorld({ plantApp, PROJECT_APPS })
+  ;({ repo, dataRoot, store, rt, claude, codex, mgr, rpc, events, projectId } = w)
 })
 
 afterEach(async () => {
-  await mgr.disposeAll()
-  await rt.dispose()
-  store.close()
-  rmSync(root, { recursive: true, force: true })
+  await w.dispose()
 })
 
 describe('run_agent — 부탁마다 새 세션, 그 앱의 것으로', () => {

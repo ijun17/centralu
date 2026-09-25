@@ -76,9 +76,10 @@ const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<
     input: z.object({ app: z.string(), tool: z.string(), args: z.record(z.string(), z.unknown()).optional() }),
   },
   host_data: {
-    // 모양은 D-3이 정한다(uses.host의 어휘) — 지금은 파이프가 이어졌는지만 본다
-    description: '호스트 데이터를 읽는다 (D-3, uses.host에 선언한 것만)',
-    input: z.object({ query: z.string() }),
+    description:
+      'host의 데이터를 읽는다 (D-3) — name은 닫힌 목록(sessions.list, git.status) 가운데 이 앱이 uses.host에 선언한 것. 모두 읽기 전용이다',
+    // 이름은 여기서 열거로 막지 않는다 — 모르는 이름에 SDK의 입력 오류 대신 창구가 줄 수 있는 목록을 말한다
+    input: z.object({ name: z.string(), args: z.record(z.string(), z.unknown()).optional() }),
   },
 }
 
