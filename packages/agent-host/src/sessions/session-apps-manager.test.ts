@@ -77,7 +77,7 @@ beforeEach(async () => {
   store = new Store()
   adapter = new CapturingAdapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  mgr = new SessionManager(store, adapters, () => {}, undefined, join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'] })
   mgr.useExternalApps(rt)
@@ -99,6 +99,8 @@ describe('매니저가 넘기는 앱 (결정 4)', () => {
     expect(servers(o)).toEqual(['app-notes'])
     expect(o.orchestratorTools).toBeUndefined()
     expect(o.toolProfile).toBeUndefined()
+    // host로 돌아오는 길은 받는다 — Codex의 앱 다리가 이 주소로 돌아온다
+    expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
   })
 
   it('워크트리 세션은 워크트리에서 뜨되, 프로젝트 뿌리의 앱을 받는다', async () => {

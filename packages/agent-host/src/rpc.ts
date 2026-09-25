@@ -301,6 +301,14 @@ export function createRpcHandler(
       const { sessionId, name, args } = RpcMethods['orchestrator.tool'].params.parse(p)
       return mgr.runOrchestratorTool(sessionId, name, args)
     },
+    'apps.sessionTools': async (p) => {
+      const { sessionId, server } = RpcMethods['apps.sessionTools'].params.parse(p)
+      return { tools: await mgr.appSessionTools(sessionId, server) }
+    },
+    'apps.sessionCall': async (p) => {
+      const { sessionId, server, name, args } = RpcMethods['apps.sessionCall'].params.parse(p)
+      return mgr.callAppForSession(sessionId, server, name, args)
+    },
     'grid.get': async () => mgr.grid(),
     'grid.set': async (p) =>
       mgr.setGridView(RpcMethods['grid.set'].params.parse(p).sessionIds),

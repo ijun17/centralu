@@ -10,6 +10,7 @@ import { CLIENT_INFO } from '@cc/protocol'
 import type {
   AdapterCapabilities,
   ApprovalDecision,
+  ApprovalDetail,
   ApprovalScope,
   PermissionPreset,
   ToolDescriptor,
@@ -51,6 +52,42 @@ function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown>
   return {} // 내 설정을 따른다
 }
 
+/**
+ * 외부 앱 서버의 도구 승인 방식 (M4 결정 5) — 세션 프리셋 → Codex의 서버별 `default_tools_approval_mode`.
+ *
+ *   auto    approve  묻지 않는다. 우리 auto는 `approvalPolicy: never`라서, 이 값을 적지 않으면
+ *                    Codex가 주석 없는 MCP 도구를 **스스로 거부한다** ("requires approval, but
+ *                    approval policy is never")
+ *   normal  writes   읽기 전용 주석이 없는 도구만 묻는다 — Claude 쪽 판정과 같은 기준
+ *   safe    prompt   전부 묻는다. 읽기 전용 도구는 도구별 `approve`로 따로 푼다(appBridgeConfig)
+ *
+ * **소스로만 확인했다** (Codex가 로그아웃 상태라 실행으로 재지 못했다, 플랜 S-3·S-7): 값의 어휘는
+ * 설치된 0.153.4의 생성 타입(`AppToolApproval = "auto" | "prompt" | "writes" | "approve"`)과
+ * 바이너리의 설정 필드 이름(`default_tools_approval_mode`, 도구별 `tools.<이름>.approval_mode`)으로,
+ * 각 값의 뜻은 codex 소스(`core/src/mcp_tool_call.rs`의 requires_mcp_tool_approval_for_mode)로 읽었다.
+ *
+ * normal의 함정 하나: normal은 사용자의 config.toml을 따르므로(permissionOptionsFor), 사용자가
+ * `approval_policy = "never"`를 적어 두었다면 `writes`가 물어야 할 도구를 Codex가 거부한다.
+ * 우리는 사용자 설정을 읽지 않는다 — 그 조합에서는 쓰기 도구가 거절로 돌아온다.
+ */
+const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt'> = {
+  auto: 'approve',
+  normal: 'writes',
+  safe: 'prompt',
+}
+
+/**
+ * MCP 도구 호출 하나의 상한 — Codex의 코드 기본값(0.145부터 300초)을 **적어서** 고정한다.
+ * 기본값에 기대면 Codex가 값을 바꾸는 날 오래 걸리는 호출의 처리(240초에 먼저 돌려주기)가
+ * 조용히 어긋난다. 필드 이름(`tool_timeout_sec`)은 바이너리와 소스로만 확인했다.
+ */
+export const CODEX_TOOL_TIMEOUT_SEC = 300
+/**
+ * 앱 다리가 뜨고 도구 목록을 내놓기까지의 상한. 스레드를 띄우기 전에 목록을 미리 읽어 두므로
+ * (mcpConfig) 보통은 즉시다. 목록을 모르는 앱은 host가 앱을 띄워 읽는 동안(최대 15초) 기다린다.
+ */
+const APP_STARTUP_TIMEOUT_SEC = 30
+
 /** 재개를 사람 앞에서 기다려 주는 시간 — 잠금 오류("active writer")는 이 안에 온다 (실측 ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
 /** 배경 재개의 상한 — 매니저의 단계 제한(150s)과 같은 값. 이걸 넘기면 걸린 것이다 */
@@ -75,6 +112,13 @@ class CodexSession implements SessionHandle {
   private turnId: string | null = null
   /** 우리 requestId → Codex 서버 요청 id */
   private approvals = new Map<string, number | string>()
+  /**
+   * 앱 도구 승인으로 띄운 카드 (M4 A-5) — 답의 모양이 다르다(`{ decision }`이 아니라 elicitation의
+   * `{ action }`). 이 집합에 있는 requestId만 elicitation으로 답한다.
+   */
+  private elicitations = new Set<string>()
+  /** 이 스레드에 다리로 실은 앱 서버 — 그 이름의 elicitation만 우리 카드로 간다 */
+  private appServers = new Set<string>()
   private reqCounter = 0
   private alwaysAllow = new Set<string>()
   /**
@@ -155,6 +199,17 @@ class CodexSession implements SessionHandle {
             model_reasoning_summary: 'auto',
             ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
             ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
+            /*
+             * MCP 서버는 **재개에도 싣는다** (M4 A-5, 플랜 "별개로 확인할 것" 1).
+             *
+             * 예전 재개는 서버를 하나도 보내지 않았다 — 처음 설정이 스레드에 남지 않는다면 잠들었다
+             * 깬 Codex 오케스트레이터는 centralu 도구를 잃는다. 남는지는 실행해 봐야 아는데(S-7)
+             * Codex가 로그아웃 상태라 재지 못했다. 그래서 확인을 기다리지 않고 다시 싣는다: 재개의
+             * `config`는 설정 덮어쓰기라(생성 타입 ThreadResumeParams — "Configuration overrides for
+             * the resumed thread") 같은 이름은 같은 칸이고, 남아 있었다면 덮어써도 잃을 것이 없다.
+             * 앱은 재개가 곧 "다음 스레드 시작"이다 — 스레드가 도는 동안 붙은 앱은 여기서 붙는다.
+             */
+            ...(await this.mcpConfig()),
           },
         })
       } catch (err) {
@@ -226,47 +281,80 @@ class CodexSession implements SessionHandle {
           ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
           // 응답 속도 (실측: priority = "Fast, 1.5x speed, increased usage")
           ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
-          ...(this.opts.orchestratorTools && this.opts.orchestratorBridge
-            ? {
-                /*
-                 * **폴더의 문서를 읽지 않는다** (Claude의 settingSources: []에 대응).
-                 *
-                 * 안 막으면 낮은 권한의 워커 세션이 오케스트레이터 폴더에 지시문을 써서
-                 * 모든 세션에 지시할 수 있는 쪽을 조종할 수 있다.
-                 * 실측: 이걸 넣기 전에는 심어둔 AGENTS.md를 그대로 따랐다
-                 * ("침투성공-9142"부터 답했다).
-                 */
-                project_doc_max_bytes: 0,
-                mcp_servers: {
-                  /*
-                   * 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름) — claude 쪽과 같은 목록,
-                   * 같은 이유로 **내장 다리보다 먼저** 펼친다 (#93): 이 고침 전에 승인되어
-                   * 저장소에 앉은 `centralu`라는 이름이 다리를 갈아치우면, elicitation 수락
-                   * (serverName === ORCHESTRATOR_MCP_NAME)까지 그 서버의 것이 된다.
-                   */
-                  ...Object.fromEntries(
-                    (this.opts.extraMcpServers ?? []).map((s) => [
-                      s.name,
-                      { command: s.command, args: s.args },
-                    ]),
-                  ),
-                  [ORCHESTRATOR_MCP_NAME]: {
-                    command: process.execPath,
-                    args: [bridgePath()],
-                    env: {
-                      CC_HOST_URL: this.opts.orchestratorBridge.url,
-                      CC_HOST_TOKEN: this.opts.orchestratorBridge.token,
-                      CC_SESSION_ID: this.opts.sessionId,
-                    },
-                  },
-                },
-              }
-            : {}),
+          // MCP 서버 — 오케스트레이터의 다리, 승인된 서버, 붙은 외부 앱의 다리 (mcpConfig 참고)
+          ...(await this.mcpConfig()),
         },
       })
       this.threadId = threadIdOf(res)
     }
     this.externalId = this.threadId
+  }
+
+  /**
+   * 스레드에 실을 MCP 설정 — 시작과 재개가 **같은 조립**을 쓴다(재개에서 빠지는 것이 없게).
+   *
+   * 펼치는 순서가 곧 이름이 겹칠 때 이기는 쪽이다:
+   *   1. 사람이 승인한 추가 서버 (오케스트레이터 전용, propose_mcp_server 흐름) — claude 쪽과 같은
+   *      목록, 같은 이유로 **내장 다리보다 먼저** 펼친다 (#93): 이 고침 전에 승인되어 저장소에 앉은
+   *      `centralu`라는 이름이 다리를 갈아치우면, elicitation 수락(serverName === ORCHESTRATOR_MCP_NAME)
+   *      까지 그 서버의 것이 된다.
+   *   2. 오케스트레이터 도구의 다리 (FR-11)
+   *   3. 외부 앱의 다리 (M4 A-5) — 앱마다 하나. **붙은 앱이 있는 세션에만** 생긴다: 대부분의 세션은
+   *      다리 프로세스를 하나도 띄우지 않는다.
+   *
+   * 앱 다리는 Codex가 띄우는 stdio 프로세스다(플랜 S-3의 셋 중 하나). HTTP(`url`)는 0.147.0에서
+   * 요청이 한 건도 오지 않았고 0.153.4에서는 재지 못했다. 다리는 오케스트레이터와 같은 파일이다
+   * (`CC_APP_SERVER`로 갈린다).
+   */
+  private async mcpConfig(): Promise<Record<string, unknown>> {
+    const bridge = this.opts.orchestratorBridge
+    const servers: Record<string, unknown> = {}
+    const orchestrator = !!(this.opts.orchestratorTools && bridge)
+    if (orchestrator) {
+      for (const s of this.opts.extraMcpServers ?? []) servers[s.name] = { command: s.command, args: s.args }
+      servers[ORCHESTRATOR_MCP_NAME] = {
+        command: process.execPath,
+        args: [bridgePath()],
+        env: { CC_HOST_URL: bridge!.url, CC_HOST_TOKEN: bridge!.token, CC_SESSION_ID: this.opts.sessionId },
+      }
+    }
+    const apps = this.opts.apps
+    const attached = apps?.current() ?? []
+    this.appServers = new Set()
+    if (apps && bridge && attached.length > 0) {
+      /*
+       * 도구 목록을 먼저 읽는다 — 읽기 전용 도구를 도구별로 적어야 safe에서도 그 도구를 묻지 않는다.
+       * 모르는 앱은 여기서 띄워 읽는다(상한 있음). 붙은 앱이 없는 세션은 이 줄을 지나지 않는다.
+       */
+      const lists = await Promise.all(attached.map((a) => (a.tools ? Promise.resolve(a.tools) : apps.tools(a.server))))
+      attached.forEach((a, i) => {
+        servers[a.server] = {
+          command: process.execPath,
+          args: [bridgePath()],
+          env: { CC_HOST_URL: bridge.url, CC_HOST_TOKEN: bridge.token, CC_SESSION_ID: this.opts.sessionId, CC_APP_SERVER: a.server },
+          default_tools_approval_mode: APP_APPROVAL_MODE[this.opts.permissionPreset],
+          // 읽기 전용이라고 앱이 말한 도구는 어느 프리셋에서도 묻지 않는다 (결정 5)
+          tools: Object.fromEntries(
+            (lists[i] ?? []).filter((t) => t.annotations?.readOnlyHint === true).map((t) => [t.name, { approval_mode: 'approve' }]),
+          ),
+          tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC,
+          startup_timeout_sec: APP_STARTUP_TIMEOUT_SEC,
+        }
+        this.appServers.add(a.server)
+      })
+    }
+    return {
+      /*
+       * **폴더의 문서를 읽지 않는다** (오케스트레이터만 — Claude의 settingSources: []에 대응).
+       *
+       * 안 막으면 낮은 권한의 워커 세션이 오케스트레이터 폴더에 지시문을 써서
+       * 모든 세션에 지시할 수 있는 쪽을 조종할 수 있다.
+       * 실측: 이걸 넣기 전에는 심어둔 AGENTS.md를 그대로 따랐다
+       * ("침투성공-9142"부터 답했다).
+       */
+      ...(orchestrator ? { project_doc_max_bytes: 0 } : {}),
+      ...(Object.keys(servers).length > 0 ? { mcp_servers: servers } : {}),
+    }
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
@@ -324,7 +412,30 @@ class CodexSession implements SessionHandle {
      * 조용히 승낙하면 그건 사용자를 대신해 결정하는 것이다.
      */
     if (r.method.toLowerCase().includes('elicitation')) {
-      const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { serverName?: string }
+      const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as {
+        serverName?: string
+        message?: unknown
+        _meta?: unknown
+      }
+      /*
+       * **붙인 앱의 도구 승인은 우리 승인 카드로 간다** (M4 A-5, 결정 5).
+       *
+       * Codex는 MCP 도구를 쓸지 이 elicitation으로 묻고, 그것이 도구 승인이라는 표시를
+       * `_meta`에 싣는다. 예전처럼 거절하면 앱 도구는 Codex에서 한 번도 돌지 못한다(플랜
+       * "별개로 확인할 것" 2와 같은 모양). 카드로 보내는 것은 **이 스레드에 우리가 실은 앱 서버**의
+       * **도구 승인**뿐이다 — 이름이 `app-`로 시작하는 남의 서버(사용자의 config.toml)도, 도구
+       * 승인이 아닌 elicitation(입력 양식)도 예전처럼 거절한다.
+       *
+       * 소스로만 확인했다(로그아웃, S-3): 0.153.4 바이너리의 문자열은 `codex_approval_kind`,
+       * 지금의 codex 소스는 `codex/approval_kind`다 — 둘 다 읽는다.
+       */
+      if (typeof p.serverName === 'string' && this.appServers.has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
+        const requestId = `codex-req-${++this.reqCounter}`
+        this.approvals.set(requestId, r.id)
+        this.elicitations.add(requestId)
+        this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
+        return
+      }
       const ours = p.serverName === ORCHESTRATOR_MCP_NAME
       this.client.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
       return
@@ -550,6 +661,20 @@ class CodexSession implements SessionHandle {
     if (serverId === undefined) return false
     this.approvals.delete(requestId)
 
+    if (this.elicitations.delete(requestId)) {
+      /*
+       * 앱 도구 승인의 답 (M4 A-5). `always`는 Codex에게 "이 세션 동안 기억하라"로 넘긴다
+       * (`_meta.persist: "session"` → ApprovedForSession). 소스로만 확인했다(로그아웃, S-3):
+       * codex `parse_mcp_tool_approval_elicitation_response`가 accept와 이 값을 읽는다.
+       */
+      this.client.respond(serverId, {
+        action: decision === 'deny' ? 'decline' : 'accept',
+        content: null,
+        _meta: decision === 'always' ? { persist: 'session' } : null,
+      })
+      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
+      return true
+    }
     if (decision === 'always' && matcher) this.alwaysAllow.add(matcher)
     this.client.respond(serverId, { decision: toCodexDecision(decision) })
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
@@ -642,6 +767,8 @@ class CodexSession implements SessionHandle {
   /** 매달린 승인을 말없이 놓지 않는다 (claude 어댑터와 같은 이유 — 화면이 카드를 붙든 채 막힌다) */
   async dispose(): Promise<void> {
     this.closed = true
+    // 앱 붙이기는 핸들과 함께 닫힌다 — 새 핸들은 자기 것을 받는다
+    this.opts.apps?.close()
     for (const requestId of this.approvals.keys()) {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     }
@@ -666,6 +793,25 @@ class CodexSession implements SessionHandle {
     }
     await this.client.dispose()
   }
+}
+
+/** elicitation의 `_meta`가 말하는 승인 종류 — 0.153.4는 `codex_approval_kind`, 지금 소스는 `codex/approval_kind` */
+function approvalKindOf(meta: unknown): string | null {
+  if (typeof meta !== 'object' || meta === null) return null
+  const m = meta as Record<string, unknown>
+  const kind = m.codex_approval_kind ?? m['codex/approval_kind']
+  return typeof kind === 'string' ? kind : null
+}
+
+/**
+ * 앱 도구 승인 카드의 내용 — 어느 앱의 무슨 도구를 어떤 인자로. Codex가 싣는 `_meta`의 도구
+ * 제목(`tool_title`)과 인자(`tool_params`)를 쓰고, 없으면 Codex의 문장(`message`)으로 물러난다.
+ */
+function appApprovalDetail(server: string, message: unknown, meta: unknown): ApprovalDetail {
+  const m = (typeof meta === 'object' && meta !== null ? meta : {}) as Record<string, unknown>
+  const title = typeof m.tool_title === 'string' && m.tool_title ? m.tool_title : typeof message === 'string' ? message : ''
+  const params = m.tool_params === undefined ? '' : ` ${JSON.stringify(m.tool_params).slice(0, 1000)}`
+  return { kind: 'other', raw: `${server} · ${title}${params}` }
 }
 
 /** `{turn: {id}}` — turn/started 알림과 turn/start 응답이 같은 모양으로 준다 */

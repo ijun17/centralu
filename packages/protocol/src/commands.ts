@@ -1021,6 +1021,27 @@ export const RpcMethods = {
     params: z.object({ sessionId: SessionId, name: z.string(), args: z.record(z.string(), z.unknown()) }),
     result: z.object({ text: z.string(), isError: z.boolean().optional() }),
   },
+  /**
+   * 세션에 붙은 외부 앱 하나의 에이전트 도구 (M4 A-5) — 인프로세스로 못 붙이는 어댑터의 다리가
+   * 부른다. 모양은 MCP `Tool` 그대로다(다리는 받은 것을 그대로 내놓는다). 그 세션에 붙지 않은
+   * 앱이면 거절한다.
+   */
+  'apps.sessionTools': {
+    params: z.object({ sessionId: SessionId, server: z.string() }),
+    result: z.object({ tools: z.array(z.record(z.string(), z.unknown())) }),
+  },
+  /**
+   * 세션의 에이전트가 붙은 앱의 도구를 부른다 (M4 A-5) — 다리가 부른다. 호출자는 그 세션이고,
+   * 런타임의 단 하나의 길을 지난다(공개 범위·실행 id·기록). 결과는 MCP `CallToolResult`의 모양이다.
+   */
+  'apps.sessionCall': {
+    params: z.object({ sessionId: SessionId, server: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) }),
+    result: z.object({
+      content: z.array(z.unknown()),
+      isError: z.boolean().optional(),
+      structuredContent: z.record(z.string(), z.unknown()).optional(),
+    }),
+  },
   'grid.get': { params: z.object({}), result: z.array(z.string()) },
   'grid.set': {
     params: z.object({ sessionIds: z.array(z.string()) }),
