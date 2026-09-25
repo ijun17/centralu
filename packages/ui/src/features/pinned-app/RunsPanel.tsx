@@ -10,11 +10,11 @@ import { externalAppKey, useStore } from '../../store/store.js'
  * 에이전트가 부른 것, 다른 앱이 중개로 부른 것이 같은 한 길을 지나 한 줄씩 남는다. 앱을 쓰는 사람이
  * "방금 누른 것이 정말 앱에 닿았나", "에이전트가 이 앱으로 무엇을 했나"를 앱을 떠나지 않고 본다.
  *
- * 다시 읽는 때: 판을 열 때, 이 앱에 닿은 호출이 끝날 때마다(`external_app_state_changed`의 카운터),
- * 그리고 사람이 누를 때. 거절된 호출(앱에 닿지 않았다)과 읽기 전용 도구의 호출(아무것도 바꾸지 않았다)에는
- * 그 신호가 없으므로 손으로 다시 읽는 길을 둔다.
- * 도는 줄이 있는 동안은 몇 초마다 다시 읽는다(M4 D-6) — 앱이 부탁한 에이전트는 몇 분을 돌고, 그동안 끝나는 신호는
- * 오지 않는다(부탁을 일으킨 호출이 끝나야 온다).
+ * 다시 읽는 때: 판을 열 때, 이 판에 보이는 줄이 서거나 세션이 이어지거나 끝날 때마다(`external_app_runs_changed`의 카운터),
+ * 그리고 사람이 누를 때. 그 신호는 host가 기록의 모든 줄에서 낸다 — 거절된 호출도, 읽기 전용 도구의 호출과 그것이 세운 사슬도
+ * (앱이 부탁한 에이전트는 몇 분을 돈다). 화면이 듣는 "바뀌었다"(`external_app_state_changed`)에 기대던 동안에는 읽기 전용 도구가
+ * 세운 사슬이 Refresh를 누를 때까지 보이지 않았다: 그 신호는 읽기 전용 도구의 호출에 오지 않는다(#190), 그리고 몇 초마다 다시
+ * 읽기는 판이 이미 들고 있는 줄이 돌 때만 돌았다.
  * 실패(앱이 실패를 답했다, host가 거절했다)는 줄 왼쪽의 밝은 선과 이유 한 줄로 드러난다. 밝기는 막힌
  * 것의 몫이라는 팔레트 규칙 그대로다.
  *
@@ -23,7 +23,7 @@ import { externalAppKey, useStore } from '../../store/store.js'
  */
 export function RunsPanel({ appId, projectId }: { appId: string; projectId: string | null }) {
   const platform = usePlatform()
-  const changed = useStore((s) => s.externalAppChanges[externalAppKey(projectId, appId)] ?? 0)
+  const changed = useStore((s) => s.externalAppRunChanges[externalAppKey(projectId, appId)] ?? 0)
   const sessions = useStore((s) => s.sessions)
   const apps = useStore((s) => s.externalApps)
   const focusSession = useStore((s) => s.focusSession)
@@ -44,14 +44,8 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
       alive = false
     }
   }, [platform, appId, projectId])
-  // `changed`가 바뀔 때마다 — 앱에 닿은 호출이 끝났다
+  // `changed`가 바뀔 때마다 — 이 판에 보이는 줄이 서거나 끝났다
   useEffect(() => load(), [load, changed])
-  const running = runs?.some((r) => r.status === 'running') ?? false
-  useEffect(() => {
-    if (!running) return
-    const t = setInterval(() => void load(), RUNNING_POLL_MS)
-    return () => clearInterval(t)
-  }, [running, load])
   const nameOf = (r: AppRun) => apps.find((a) => a.appId === r.appId && a.projectId === r.projectId)?.name ?? r.appId
 
   return (
@@ -100,7 +94,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
  * 여기서 잊는다(Forget). 잊으면 다음에 그 능력을 쓰려 할 때 다시 묻는다. 매니페스트의 `uses`가 바뀐 뒤의 옛 답은 더 쓰이지
  * 않는다 — "outdated"로 보인다.
  *
- * 다시 읽는 때: 판을 열 때, 이 앱에 닿은 호출이 끝날 때(답한 뒤 앱이 이어서 일을 마치면 온다), 화면의 물음이 바뀔 때, 잊은 뒤.
+ * 다시 읽는 때: 판을 열 때, 이 판의 기록이 바뀔 때(답한 부탁의 줄은 곧 세션을 잇거나 거절로 끝난다), 화면의 물음이 바뀔 때, 잊은 뒤.
  */
 function Permissions({ appId, projectId, changed }: { appId: string; projectId: string | null; changed: number }) {
   const platform = usePlatform()
@@ -212,9 +206,6 @@ function tokenCount(n: number): string {
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(1)}M`
 }
-
-/** 도는 줄이 있는 동안 다시 읽는 간격 — 에이전트의 세션이 서고 끝나는 것이 판에 늦지 않게 */
-const RUNNING_POLL_MS = 2_000
 
 /**
  * 기록을 사슬로 편다 (M4 D-6) — host는 이 앱의 줄과 그 아래의 사슬을 한 목록(최근 것부터)으로 준다. 부모가 목록에 있는 줄은

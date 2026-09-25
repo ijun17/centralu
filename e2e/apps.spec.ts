@@ -512,12 +512,12 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
     await expect(rows.nth(1).getByTestId('run-error')).toHaveText('exited (code 7)')
     await expect(rows.nth(2).getByTestId('run-error')).toHaveCount(0)
 
-    // 이 앱에 닿은 호출이 끝났다 — 판이 다시 읽는다
+    // 이 앱의 기록에 줄이 섰다 — host의 기록 신호에 판이 다시 읽는다
     await page.evaluate(
       ({ key, extra }) => {
         const m = (window as any).__mock
         m.appRuns.set(key, [extra, ...m.appRuns.get(key)])
-        m.emit({ type: 'external_app_state_changed', appId: 'slider', projectId: extra.projectId })
+        m.emit({ type: 'external_app_runs_changed', appId: 'slider', projectId: extra.projectId })
       },
       { key: `${pid}/slider`, extra: mk('r5', 'get_interval', 'view', 'ok', 3, null, t0 + 1000) },
     )
@@ -570,11 +570,15 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
     await expect(rows.nth(3).getByTestId('run-status')).toHaveText('running')
     await expect(pinned.getByTestId('run-open-session')).toHaveCount(0)
 
-    // 에이전트의 세션이 서고 일이 끝났다 — 아무 방송이 없어도 도는 줄이 있는 동안 판이 다시 읽는다
-    await page.evaluate(({ key, runs }) => (window as any).__mock.appRuns.set(key, runs), {
-      key: `${pid}/slider`,
-      runs: chain({ status: 'ok', durationMs: 4200, sessionId: agentSession }),
-    })
+    // 에이전트의 세션이 서고 일이 끝났다 — host가 그 줄의 끝을 기록 신호로 알리고, 판이 다시 읽는다
+    await page.evaluate(
+      ({ key, runs, pid }) => {
+        const m = (window as any).__mock
+        m.appRuns.set(key, runs)
+        m.emit({ type: 'external_app_runs_changed', appId: 'slider', projectId: pid })
+      },
+      { key: `${pid}/slider`, runs: chain({ status: 'ok', durationMs: 4200, sessionId: agentSession }), pid },
+    )
     await expect(rows.nth(3).getByTestId('run-status')).toHaveText('ok')
     await expect(rows.nth(3).getByTestId('run-duration')).toHaveText('4.2 s')
     const open = rows.nth(3).getByTestId('run-open-session')

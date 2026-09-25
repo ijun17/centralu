@@ -152,10 +152,10 @@ serveStdio(() => {
      * 오면 다시 세게 한다(`resetTimeoutOnProgress`) — host가 기다리는 부탁을 살려 두는지 본다. 결과는 글 한 줄과 함께
      * `structuredContent`에 중개의 답을 그대로 싣는다(isError·text·structured).
      */
-    server.registerTool(
-      'ask_broker',
+    const askBroker = (name, config) => server.registerTool(
+      name,
       {
-        description: 'Calls the host broker on fd 3',
+        ...config,
         inputSchema: z.object({
           mode: z.enum(['run', 'run-nosignal', 'run-detached', 'none', 'given']),
           runId: z.string().optional(),
@@ -194,6 +194,9 @@ serveStdio(() => {
         }
       },
     )
+    askBroker('ask_broker', { description: 'Calls the host broker on fd 3' })
+    // 같은 일을 하는 읽기 전용 도구 — 읽기만 하는 도구도 에이전트를 부탁해 사슬을 세울 수 있다 (기록 판의 신호, M4 D-6)
+    askBroker('ask_broker_read', { description: 'Calls the host broker on fd 3, and changes nothing itself', annotations: { readOnlyHint: true } })
     server.registerResource('view', 'ui://fixture/view', { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({
       contents: [{ uri: uri.href, mimeType: 'text/html;profile=mcp-app', text: '<p>fixture view</p>' }],
     }))

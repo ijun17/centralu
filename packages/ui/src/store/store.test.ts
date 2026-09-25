@@ -72,6 +72,7 @@ beforeEach(() => {
     commandRuns: {},
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
     externalAppChanges: {},
+    externalAppRunChanges: {},
     externalAppChangedBy: {},
     externalApps: [],
     trustAsk: null,
@@ -1322,6 +1323,16 @@ describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
     expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
     expect(reads).not.toHaveBeenCalled()
     expect(useStore.getState().apps['notes']).toBeUndefined()
+  })
+
+  it('기록의 신호(M4 D-6)는 기록 판의 카운터만 올린다 — 화면이 듣는 카운터는 그대로다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.emit({ type: 'external_app_runs_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
+    mock.emit({ type: 'external_app_runs_changed', appId: 'notes', projectId: null } as NormalizedEvent)
+    await vi.waitFor(() => expect(useStore.getState().externalAppRunChanges).toEqual({ 'p1/notes': 1, '_user/notes': 1 }))
+    // 읽기 전용 도구의 사슬도 이 신호로 온다 — 화면을 깨우면 #190의 고리가 돌아온다
+    expect(useStore.getState().externalAppChanges).toEqual({})
   })
 
   it('카운터 곁에 그 바뀜을 낸 화면 인스턴스를 둔다 — 화면이 낸 것일 때만, 세션·앱·주인 없음이면 null', async () => {

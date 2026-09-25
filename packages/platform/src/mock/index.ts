@@ -789,6 +789,7 @@ export class MockPlatform implements Platform {
     },
     runs: async (appId: string, projectId: string | null, limit = 100): Promise<AppRun[]> => {
       this.appRunReads++
+      if (this.appRunsProvider) return structuredClone(await this.appRunsProvider(appId, projectId, limit))
       return structuredClone((this.appRuns.get(`${projectId ?? '_user'}/${appId}`) ?? []).slice(0, limit))
     },
     restart: async (appId: string, projectId: string | null) => {
@@ -1178,6 +1179,8 @@ export class MockPlatform implements Platform {
   readonly appRuns = new Map<string, AppRun[]>()
   /** 기록을 몇 번 읽었나 — "바뀌었다"가 오면 다시 읽는지를 시험이 본다 */
   appRunReads = 0
+  /** 있으면 기록을 여기서 읽는다 — 시험이 진짜 런타임의 기록(`ExternalApps.runs`)을 꽂는다 */
+  appRunsProvider: ((appId: string, projectId: string | null, limit: number) => AppRun[] | Promise<AppRun[]>) | null = null
   /** 지운 사용자 폴더 앱 — 확인을 거친 뒤에만 host에 닿는지를 시험이 본다 */
   readonly removedApps: string[] = []
   /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */

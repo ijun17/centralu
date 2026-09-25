@@ -13,7 +13,7 @@ import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
-import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
+import { FAILURES_KEPT, RUN_RETENTION_MS, announcingLedger, describeArgs, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
 import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
 import { SecretStore, redactor, secretValueProblem } from './secrets.js'
 import type { AppRef } from './ref.js'
@@ -186,6 +186,11 @@ export type ExternalAppsDeps = {
   /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
   runs?: RunLedger
   /**
+   * 이 앱의 기록 판에 보이는 줄이 서거나, 세션이 이어지거나, 끝났다 (D-6) — 기록 판이 다시 읽을 신호다. host가 앱마다 모아 방송한다.
+   * 읽기 전용 도구의 호출과 그 아래의 사슬도 알린다: 화면을 깨우는 `emitChanged`와 따로다(`announcingLedger` 주석).
+   */
+  emitRunsChanged?: (ref: AppRef) => void
+  /**
    * 능력 승인의 답을 둘 자리 (D-4) — host가 저장소로 채운다. 없으면 메모리에 둔다: host가 떠 있는 동안은 한 번 묻는다는
    * 약속이 서고, 다시 뜨면 다시 묻는다.
    */
@@ -357,6 +362,9 @@ export class ExternalApps {
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
+    // 기록의 모든 줄은 이 한 자리를 지난다 — 도구 호출의 줄도(`call`), 중개 부탁의 줄도(창구). 그래서 기록 판의 신호도 여기서 한 번이다
+    const notify = deps.emitRunsChanged
+    if (deps.runs && notify) this.deps = { ...deps, runs: announcingLedger(deps.runs, notify) }
     this.desk = new BrokerDesk(
       {
         has: (ref) => this.find(ref) !== undefined,
@@ -368,7 +376,7 @@ export class ExternalApps {
       },
       deps.permissions ?? memoryCapabilityBook(),
       () => ({ questionMs: this.timing.capabilityQuestionMs, agentRateWindowMs: this.timing.agentRateWindowMs }),
-      deps.runs ?? null,
+      this.deps.runs ?? null,
     )
     this.secrets = new SecretStore(deps.dataRoot)
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)

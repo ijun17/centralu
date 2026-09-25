@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
-import { APP_CHANGE_WINDOW_MS, broadcastAppChanges } from '../packages/agent-host/src/app-change-events.js'
+import { APP_CHANGE_WINDOW_MS, broadcastAppChanges, broadcastAppRuns } from '../packages/agent-host/src/app-change-events.js'
 import { openHomeView } from '../packages/agent-host/src/app-home-view.js'
 import { storeRunLedger } from '../packages/agent-host/src/app-run-ledger.js'
 import { runtimeViewSource } from '../packages/agent-host/src/app-view-source.js'
@@ -41,10 +41,13 @@ type Harness = {
   list(): unknown[]
   /** 세션의 에이전트가 `show`를 부른 것처럼 — 그 카드 아래에 대화 안 화면이 선다 */
   agentShows(sessionId: string, callId: string): Promise<void>
+  /** 세션의 에이전트가 읽기 전용 `summarize`를 부른 것처럼 — 앱이 에이전트를 부탁하고, 그 에이전트는 `releaseAgent`까지 돈다 */
+  agentSummarizes(sessionId: string): Promise<unknown>
+  releaseAgent(): void
   close(): Promise<void>
 }
 
-async function startHost(page: Page, projectId: string, opts: { unannotatedShow?: boolean } = {}): Promise<Harness> {
+async function startHost(page: Page, projectId: string, opts: { unannotatedShow?: boolean; summarize?: boolean } = {}): Promise<Harness> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-e2e-change-loop-')))
   const projRoot = join(root, 'proj')
   const dataRoot = join(root, 'data')
@@ -60,20 +63,52 @@ async function startHost(page: Page, projectId: string, opts: { unannotatedShow?
     if (src.split(line).length !== 2) throw new Error('the template changed: show should carry readOnlyHint: true exactly once')
     writeFileSync(file, src.replace(line, ''))
   }
+  if (opts.summarize) {
+    /*
+     * 실측 그대로의 앱 — 만드는 에이전트가 `summarize`를 읽기 전용으로 달았고, 그 도구가 사람의 에이전트를 부탁한다(M4 D-1).
+     * 읽기 전용 도구의 호출은 "바뀌었다"를 내지 않는다(#190).
+     */
+    const file = join(dir, 'server.mjs')
+    const end = '  return server\n})'
+    const src = readFileSync(file, 'utf8')
+    if (src.split(end).length !== 2) throw new Error('the template changed: server.mjs should end its factory with `return server` once')
+    const tool = `  centralu.tool(server, 'summarize', { description: 'Sum up the count', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => ({
+    content: [{ type: 'text', text: String(await centralu.agent('Sum up the count ' + state.count)) }],
+  }))
+`
+    writeFileSync(file, src.replace(end, tool + end))
+    const mf = join(dir, 'centralu.app.json')
+    writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), uses: { agent: true } }, null, 2))
+  }
 
   const store = new Store()
   // host의 방송 → 목의 emit. 시험이 끝나 페이지가 닫힌 뒤에 온 것은 버린다
   const toPage = (e: unknown) => void page.evaluate((ev) => (window as any).__mock.emit(ev), e).catch(() => {})
   const changes = broadcastAppChanges(toPage)
+  const runChanges = broadcastAppRuns(toPage)
   const rt = new ExternalApps({
     projects: () => [{ id: projectId, path: projRoot, trusted: true }],
     dataRoot,
     reservedIds: [],
     runs: storeRunLedger(store),
     emitChanged: changes.emit,
+    emitRunsChanged: runChanges.emit,
     timing: { idleMs: 60_000, graceMs: 1_000, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
+  // 앱이 부탁한 에이전트 — 사람이 곧바로 허락했고, 시험이 놓을 때까지 돈다
+  let release: () => void = () => {}
+  rt.attachBrokerHost({
+    defaultAgentTool: () => 'claude',
+    agentLabel: () => 'Claude Code',
+    askCapability: async () => 'allow',
+    hostData: () => Promise.reject(new Error('not part of this test')),
+    runAgent: async (_req, ctx) => {
+      ctx.onSession('s-agent')
+      await new Promise<void>((r) => (release = r))
+      return { sessionId: 's-agent', text: 'The count is small.' }
+    },
+  })
   const secret = `e2e-${Math.random().toString(36).slice(2)}-${'x'.repeat(40)}`.replace(/[^A-Za-z0-9_-]/g, 'x')
   let port: number | null = null
   const views = new ViewHost({
@@ -104,8 +139,11 @@ async function startHost(page: Page, projectId: string, opts: { unannotatedShow?
       return out.result ?? { content: [{ type: 'text', text: out.error ?? '' }], isError: true }
     },
   )
+  // 기록 판은 진짜 런타임의 기록을 읽는다(rpc.ts의 apps.runs)
+  await page.exposeFunction('__loopRuns', (appId: string, pid: string | null, limit: number) => rt.runs({ appId, projectId: pid }, limit))
   await page.evaluate(() => {
     const w = window as any
+    w.__mock.appRunsProvider = (a: string, p: string | null, l: number) => w.__loopRuns(a, p, l)
     w.__mock.viewFrameProvider = (a: string, i: string, o: unknown) => w.__loopFrame(a, i, o)
     w.__mock.openViewProvider = (a: string, p: string | null) => w.__loopOpenView(a, p)
     w.__mock.appToolHandler = (a: string, t: string, args: unknown, from: unknown) => w.__loopCall(a, t, args, from)
@@ -119,8 +157,12 @@ async function startHost(page: Page, projectId: string, opts: { unannotatedShow?
       const session = hub.attach({ id: sessionId, kind: 'worker', projectId })
       await session.call(`app-${APP}`, 'show', {}, { callId })
     },
+    agentSummarizes: (sessionId) => rt.call(ref, 'summarize', {}, { kind: 'session', sessionId }),
+    releaseAgent: () => release(),
     close: async () => {
+      release()
       changes.dispose()
+      runChanges.dispose()
       inline.dispose()
       hub.dispose()
       await rt.dispose()
@@ -244,4 +286,32 @@ test('읽기 도구에 readOnlyHint를 빠뜨린 앱도 두 화면이 서로를 
    * 3초면 (3000/250 + 1) × 2 = 26번이 끝이다. 실측은 22~24번. 막는 것이 없으면 두 화면이 서로를 수천 번 깨운다.
    */
   expect(more).toBeLessThanOrEqual((WATCH_MS / APP_CHANGE_WINDOW_MS + 1) * 2)
+})
+
+test('읽기 전용 도구가 세운 에이전트 사슬이 누르지 않아도 기록 판에 서고, 열린 화면은 깨우지 않는다', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { pid, sid } = await projectAndSession(page)
+  host = await startHost(page, pid, { summarize: true })
+  await page.evaluate((l) => (window as any).__mock.setExternalApps(l), host.list())
+  const pinned = await openPinned(page, pid)
+  const view = page.getByTestId(`pinned-app-${pid}/${APP}`)
+  await view.getByTestId('pinned-runs-toggle').click()
+  const rows = view.getByTestId('runs-panel').getByTestId('run-row')
+  // 여는 두 번의 show(home, 화면의 첫 읽기) — 도는 줄은 없다
+  await expect(rows.getByTestId('run-tool')).toHaveText(['show', 'show'])
+  const shown = await viewShows(page, pinned)
+
+  const summarized = host.agentSummarizes(sid)
+  // Refresh를 누르지 않는다 — 에이전트가 도는 동안 사슬이 판에 선다
+  await expect(rows.getByTestId('run-tool')).toHaveText(['summarize', 'run_agent', 'show', 'show'])
+  await expect(rows.nth(1).getByTestId('run-status')).toHaveText('running')
+  await expect(rows.nth(1).getByTestId('run-caller')).toHaveText(`Asked by Counter`)
+
+  host.releaseAgent()
+  await summarized
+  await expect(rows.nth(0).getByTestId('run-status')).toHaveText('ok')
+  await expect(rows.nth(1).getByTestId('run-status')).toHaveText('ok')
+  // 읽기만 했다 — 열린 화면은 방송 창 둘만큼 더 기다려도 다시 읽지 않았다
+  await page.waitForTimeout(APP_CHANGE_WINDOW_MS * 2)
+  expect(await viewShows(page, pinned)).toBe(shown)
 })

@@ -407,6 +407,14 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     cause: AppChangeCause.optional(),
   }),
   /**
+   * 외부 앱의 기록 판에 보이는 줄이 서거나 끝났다 (M4 D-6) — 그 앱의 줄, 또는 그 앱의 줄 아래 사슬의 줄(부른 다른 앱, 부탁한
+   * 에이전트). 같은 거칠기다: 받은 쪽이 `apps.runs`를 다시 읽는다. host는 앱마다 250ms씩 모아 보낸다.
+   *
+   * `external_app_state_changed`와 나눈 이유: 그쪽은 열린 **화면**이 다시 읽을 신호라 읽기 전용 도구의 호출에는 오지 않는다(#190 —
+   * 오면 화면의 다시 읽기가 고리가 된다). 그런데 읽기 전용 도구도 몇 분짜리 에이전트 사슬을 세운다. 이것은 기록 판만 듣는다.
+   */
+  z.object({ ...appScoped, type: z.literal('external_app_runs_changed'), appId: AppId, projectId: z.string().nullable() }),
+  /**
    * 외부 앱 목록이 달라졌다 (M4 A-8) — 앱이 생기거나 사라지거나 고쳐졌고, 프로젝트 신뢰가
    * 바뀌었고, 앱이 뜨거나 내리거나 실패했다. 같은 거칠기다: 싣는 것이 없고, 받은 쪽이
    * `apps.list`를 다시 읽는다. 사이드바의 앱 줄과 고정 화면의 "뜨는 중·멈춤·이유"가 이것을 따른다.

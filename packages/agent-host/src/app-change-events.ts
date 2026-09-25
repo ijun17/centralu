@@ -52,4 +52,31 @@ export function broadcastAppChanges(send: (e: AppChanged) => void, windowMs = AP
   }
 }
 
+type AppRunsChanged = Extract<NormalizedEvent, { type: 'external_app_runs_changed' }>
+
+/**
+ * 외부 앱의 기록이 바뀌었다는 방송 (M4 D-6) — 런타임의 `emitRunsChanged`를 앱마다 같은 창으로 모아 `external_app_runs_changed`로 낸다.
+ * 화면을 깨우지 않는 신호다: 기록 판만 듣는다. 모으는 까닭은 위와 같다 — 초당 몇십 번 부르는 화면이 있어도 한 앱의 방송은 초당
+ * 4번이고, host의 이벤트 기록(링 버퍼)을 밀어내지 않는다.
+ */
+export function broadcastAppRuns(send: (e: AppRunsChanged) => void, windowMs = APP_CHANGE_WINDOW_MS) {
+  const pending = new Map<string, NodeJS.Timeout>()
+  return {
+    emit(ref: AppRef): void {
+      const key = JSON.stringify([ref.projectId, ref.appId])
+      if (pending.has(key)) return
+      const timer = setTimeout(() => {
+        pending.delete(key)
+        send({ type: 'external_app_runs_changed', appId: ref.appId, projectId: ref.projectId })
+      }, windowMs)
+      timer.unref()
+      pending.set(key, timer)
+    },
+    dispose(): void {
+      for (const t of pending.values()) clearTimeout(t)
+      pending.clear()
+    },
+  }
+}
+
 const sameCause = (a: AppCaller | null, b: AppCaller | null): boolean => a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b)
