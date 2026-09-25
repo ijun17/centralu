@@ -482,8 +482,8 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
     })
     const t0 = Date.UTC(2026, 8, 25, 3, 4, 5)
     const mk = (id: string, tool: string, callerKind: string, status: string, durationMs: number | null, error: string | null, at: number, sid: string | null = null) => ({
-      id, projectId: pid, appId: 'slider', tool, callerKind, callerSessionId: sid, parentRunId: null, status, durationMs,
-      argsDigest: 'd', argsSummary: '{}', error, createdAt: at, failure: null,
+      id, projectId: pid, appId: 'slider', kind: 'tool', tool, callerKind, callerSessionId: sid, parentRunId: null, status, durationMs,
+      argsDigest: 'd', argsSummary: '{}', error, createdAt: at, sessionId: null, failure: null,
     })
     const runs = [
       mk('r4', 'agent_only', 'view', 'rejected', 0, 'agent_only is not open to views (visibility: ["model"])', t0),
@@ -528,6 +528,64 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
     await pinned.getByTestId('pinned-runs-toggle').click()
     await expect(pinned.getByTestId('runs-panel')).toHaveCount(0)
     await expect(viewOf(page, `${pid}/slider`).locator('li[data-k="connected"]')).toHaveCount(1)
+  })
+
+  test('D-6: 기록 판은 사슬로 선다 — 부른 다른 앱의 줄과 부탁의 줄이 들여 쓰이고, 에이전트를 부탁한 줄에서 그 세션으로 건너간다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid), app('helper', pid)])
+    // 앱이 부탁한 에이전트 세션 — 목에서는 보통 세션 하나로 선다
+    await page.getByTestId('project-menu-alpha').click()
+    await page.getByTestId('new-session-alpha').click()
+    await page.getByTestId('create-session-confirm').click()
+    const agentSession = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+    const t0 = Date.UTC(2026, 8, 25, 3, 4, 5)
+    const mk = (id: string, appId: string, kind: 'tool' | 'broker', tool: string, parentRunId: string | null, at: number, over: Record<string, unknown> = {}) => ({
+      id, projectId: pid, appId, kind, tool, callerKind: kind === 'broker' || parentRunId ? 'app' : 'view', callerSessionId: null, parentRunId,
+      status: 'ok', durationMs: 10, argsDigest: 'd', argsSummary: '{}', error: null, createdAt: at, sessionId: null, failure: null, ...over,
+    })
+    // host가 주는 모양 그대로 — 이 앱의 줄과 그 아래의 사슬, 최근 것부터. 에이전트는 아직 돌고 세션은 서기 전이다
+    const chain = (agent: Record<string, unknown>) => [
+      mk('ask', 'slider', 'broker', 'run_agent', 'r1', t0 + 300, agent),
+      mk('h-ask', 'helper', 'broker', 'host_data', 'h1', t0 + 250, { status: 'rejected', error: 'host_data refused: "git.status" is not in this app\'s "uses.host"' }),
+      mk('h1', 'helper', 'tool', 'lookup', 'r1', t0 + 200),
+      mk('r1', 'slider', 'tool', 'summarize', null, t0 + 100),
+    ]
+    await page.evaluate(({ key, runs }) => (window as any).__mock.appRuns.set(key, runs), { key: `${pid}/slider`, runs: chain({ status: 'running', durationMs: null }) })
+
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await pinned.getByTestId('pinned-runs-toggle').click()
+    const rows = pinned.getByTestId('runs-panel').getByTestId('run-row')
+    // 맨 위의 줄 아래에 일어난 순서대로 — 다른 앱의 줄, 그 앱의 부탁, 이 앱의 부탁
+    await expect(rows.getByTestId('run-tool')).toHaveText(['summarize', 'App helper · lookup', 'host_data', 'run_agent'])
+    await expect(rows.getByTestId('run-caller')).toHaveText(['View', 'App', 'Asked by App helper', 'Asked by App slider'])
+    expect(await rows.evaluateAll((els) => els.map((e) => [e.getAttribute('data-depth'), e.getAttribute('data-kind')]))).toEqual([
+      ['0', 'tool'],
+      ['1', 'tool'],
+      ['2', 'broker'],
+      ['1', 'broker'],
+    ])
+    await expect(rows.nth(2).getByTestId('run-status')).toHaveText('refused')
+    await expect(rows.nth(2).getByTestId('run-error')).toContainText('host_data refused')
+    await expect(rows.nth(3).getByTestId('run-status')).toHaveText('running')
+    await expect(pinned.getByTestId('run-open-session')).toHaveCount(0)
+
+    // 에이전트의 세션이 서고 일이 끝났다 — 아무 방송이 없어도 도는 줄이 있는 동안 판이 다시 읽는다
+    await page.evaluate(({ key, runs }) => (window as any).__mock.appRuns.set(key, runs), {
+      key: `${pid}/slider`,
+      runs: chain({ status: 'ok', durationMs: 4200, sessionId: agentSession }),
+    })
+    await expect(rows.nth(3).getByTestId('run-status')).toHaveText('ok')
+    await expect(rows.nth(3).getByTestId('run-duration')).toHaveText('4.2 s')
+    const open = rows.nth(3).getByTestId('run-open-session')
+    await expect(open).toHaveText('Open session')
+    await expect(pinned.getByTestId('run-open-session')).toHaveCount(1)
+
+    await open.click()
+    await expect.poll(() => page.evaluate(() => {
+      const st = (window as any).__store.getState()
+      return [st.view, st.focusedSessionId]
+    })).toEqual(['focus', agentSession])
   })
 
   /** 세션이 받은 사람의 말 — 목이 host처럼 적어 둔 것 */

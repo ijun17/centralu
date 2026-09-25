@@ -3901,7 +3901,10 @@ export class SessionManager {
    * 취소(부탁한 호출이 취소되거나 사슬 위쪽이 멈췄다)는 그 세션을 인터럽트한다. 사람이 그 세션에서 직접 멈추거나 지워도
    * 기다림이 이유와 함께 끝난다.
    */
-  async runAppAgent(req: AgentRunRequest, ctx: { signal: AbortSignal; progress(message: string): void }): Promise<AgentRunResult> {
+  async runAppAgent(
+    req: AgentRunRequest,
+    ctx: { signal: AbortSignal; progress(message: string): void; onSession?(sessionId: string): void },
+  ): Promise<AgentRunResult> {
     const adapter = this.adapters.get(req.tool)
     if (!adapter) throw new Error(`${req.tool} is not an agent this Centralu has, so ${req.appName}'s request cannot run`)
     // 로그인하지 않은 도구로 세션을 세우면 첫 턴에서야 알 수 있다 — 세우기 전에 묻고, 도구의 말로 이유를 돌려준다
@@ -3928,6 +3931,8 @@ export class SessionManager {
       appAgent: req.schema ? { outputSchema: req.schema } : {},
     })
     const id = info.id
+    // 기록(D-6)의 줄이 이 세션을 가리킨다 — 도는 동안에도 기록 판에서 이 세션으로 건너갈 수 있게
+    ctx.onSession?.(id)
     // 같은 앱의 부탁이 여럿이면 이름이 같아진다 — 시각을 붙여 목록에서 가른다. 이름은 앱의 글에서 짓지 않는다(남의 글이다)
     this.rename(id, `${req.appName} · agent ${new Date().toTimeString().slice(0, 5)}`)
     const wait = new AgentRunWait(

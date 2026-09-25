@@ -58,6 +58,8 @@ export type BrokerAdmission = {
   openRun(runId: string): AbortSignal | null
   /** 거절을 앱별 로그에 남긴다 — 만드는 에이전트가 왜 막혔는지 읽는 자리다 */
   note(line: string): void
+  /** 받지 않은 부탁을 실행 기록에도 남긴다 (D-6) — 거절도 한 줄이다. 사람이 앱의 기록 판에서 읽는 자리다 */
+  refused(tool: BrokerToolName, args: Record<string, unknown>, why: string): void
 }
 
 const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<z.ZodRawShape> }> = {
@@ -104,13 +106,19 @@ export function serveBroker(
         server.registerTool(tool, { description: schemas[tool].description, inputSchema: schemas[tool].input }, async (args, ctx) => {
           const presented = ctx.mcpReq._meta?.[RUN_META]
           if (typeof presented !== 'string' || presented.length === 0) {
+            const why = 'rejected: a broker call must carry the run id of the call being handled (an app waking up by itself is out of scope)'
             admission.note(`broker rejected ${tool}: no run id`)
-            return text('rejected: a broker call must carry the run id of the call being handled (an app waking up by itself is out of scope)', true)
+            admission.refused(tool, args as Record<string, unknown>, why)
+            return text(why, true)
           }
           const runSignal = admission.openRun(presented)
           if (!runSignal) {
-            admission.note(`broker rejected ${tool}: ${presented} is not an open run of this app`)
-            return text(`rejected: ${presented} is not an open run of this app`, true)
+            // 내민 id는 앱이 지어낸 글일 수 있다 — 이유에 싣되 길이를 자른다
+            const shown = presented.length > 80 ? `${presented.slice(0, 80)}…` : presented
+            const why = `rejected: ${shown} is not an open run of this app`
+            admission.note(`broker rejected ${tool}: ${shown} is not an open run of this app`)
+            admission.refused(tool, args as Record<string, unknown>, why)
+            return text(why, true)
           }
           /*
            * 취소는 두 길로 온다: 앱이 자기 중개 호출을 취소하거나(notifications/cancelled →

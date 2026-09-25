@@ -851,6 +851,26 @@ export class Store {
           `)
         },
       },
+      {
+        to: 37,
+        /**
+         * 실행 기록이 사슬이 된다 (M4 D-6) — 앱이 fd 3으로 부탁한 것(중개)도 한 줄씩, 부탁을 일으킨 실행의 아래에.
+         *
+         *   kind        `tool`은 앱의 도구가 불린 것, `broker`는 앱이 중개에 부탁한 것. 옛 줄은 모두 도구 호출이었다
+         *   session_id  run_agent가 세운 에이전트 세션 — 기록 판이 그 세션으로 건너가는 자리
+         *
+         * 부모 칸(`parent_run_id`)에 색인을 단다: 기록 판은 한 앱의 줄에서 **아래로** 사슬을 따라 내려가 읽는다(재귀 질의).
+         * 색인이 없으면 한 단계마다 표 전체를 훑는다.
+         */
+        run: () => {
+          const cols = this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]
+          // 표가 없는 DB는 v34를 거치지 않고 버전만 적힌 것이다(이관 시험이 만드는 옛 DB) — 고칠 표가 없다
+          if (cols.length === 0) return
+          if (!cols.some((c) => c.name === 'kind')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'tool'`)
+          if (!cols.some((c) => c.name === 'session_id')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN session_id TEXT`)
+          this.db.exec(`CREATE INDEX IF NOT EXISTS idx_app_runs_parent ON app_runs(parent_run_id)`)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1885,14 +1905,19 @@ export class Store {
   beginAppRun(r: AppRunRecord): void {
     this.db
       .prepare(
-        `INSERT INTO app_runs (id, project_id, app_id, tool, caller_kind, caller_session_id, parent_run_id,
-                               status, duration_ms, args_digest, args_summary, error, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO app_runs (id, project_id, app_id, kind, tool, caller_kind, caller_session_id, parent_run_id,
+                               status, duration_ms, args_digest, args_summary, error, created_at, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        r.id, r.projectId, r.appId, r.tool, r.callerKind, r.callerSessionId, r.parentRunId,
-        r.status, r.durationMs, r.argsDigest, r.argsSummary, r.error, r.createdAt,
+        r.id, r.projectId, r.appId, r.kind, r.tool, r.callerKind, r.callerSessionId, r.parentRunId,
+        r.status, r.durationMs, r.argsDigest, r.argsSummary, r.error, r.createdAt, r.sessionId,
       )
+  }
+
+  /** 도는 run_agent 줄에 그 부탁이 세운 세션을 잇는다 (M4 D-6) */
+  linkAppRunSession(id: string, sessionId: string): void {
+    this.db.prepare(`UPDATE app_runs SET session_id = ? WHERE id = ?`).run(sessionId, id)
   }
 
   endAppRun(id: string, end: { status: string; durationMs: number; error: string | null }): void {
@@ -1919,20 +1944,47 @@ export class Store {
     tx()
   }
 
-  /** 한 앱의 실행 기록, 최근 것부터. 원문이 남아 있는 실패는 원문과 함께 */
+  /**
+   * 한 앱의 실행 기록, 최근 것부터 — **그 아래의 사슬까지** (M4 D-6). 원문이 남아 있는 실패는 원문과 함께.
+   *
+   * 뿌리는 이 앱의 줄 가운데 부모가 이 앱의 줄이 아닌 것이다(화면·세션이 불렀거나, 다른 앱이 불렀거나, 열린 실행 없이
+   * 부탁했다). `limit`은 뿌리의 수다. 그 아래로 부모를 따라 내려가며 모두 싣는다 — 이 앱이 부른 다른 앱의 줄, 그 앱이
+   * 부탁한 에이전트의 줄까지. 그래야 기록 판 하나에서 "화면이 누른 것 → 다른 앱 → 에이전트"가 한 사슬로 읽힌다.
+   * 사슬 아래의 줄은 `CHAIN_ROWS_MAX`까지만 — 한 호출 안에서 부탁을 끝없이 거듭하는 앱이 판을 붙잡지 못하게.
+   */
   listAppRuns(projectId: string | null, appId: string, limit: number): (AppRunRecord & { failure: { args: string; result: string | null } | null })[] {
     const rows = this.db
       .prepare(
-        `SELECT r.id, r.project_id as projectId, r.app_id as appId, r.tool, r.caller_kind as callerKind,
+        `WITH RECURSIVE
+           roots(id) AS (
+             SELECT r.id FROM app_runs r
+             WHERE r.app_id = ? AND r.project_id IS ?
+               AND NOT EXISTS (SELECT 1 FROM app_runs p WHERE p.id = r.parent_run_id AND p.app_id = r.app_id AND p.project_id IS r.project_id)
+             ORDER BY r.created_at DESC, r.rowid DESC LIMIT ?
+           ),
+           chain(id) AS (
+             SELECT id FROM roots
+             UNION
+             SELECT c.id FROM app_runs c JOIN chain ON c.parent_run_id = chain.id
+           )
+         SELECT r.id, r.project_id as projectId, r.app_id as appId, r.kind, r.tool, r.caller_kind as callerKind,
                 r.caller_session_id as callerSessionId, r.parent_run_id as parentRunId, r.status,
                 r.duration_ms as durationMs, r.args_digest as argsDigest, r.args_summary as argsSummary,
-                r.error, r.created_at as createdAt, f.args as failureArgs, f.result as failureResult
+                r.error, r.created_at as createdAt, r.session_id as sessionId, f.args as failureArgs, f.result as failureResult,
+                r.rowid as seq, r.id IN (SELECT id FROM roots) as isRoot
          FROM app_runs r LEFT JOIN app_run_failures f ON f.run_id = r.id
-         WHERE r.app_id = ? AND r.project_id IS ?
-         ORDER BY r.created_at DESC, r.rowid DESC LIMIT ?`,
+         WHERE r.id IN (SELECT id FROM chain)
+         ORDER BY isRoot DESC, r.created_at DESC, r.rowid DESC LIMIT ?`,
       )
-      .all(appId, projectId, limit) as (AppRunRecord & { failureArgs: string | null; failureResult: string | null })[]
-    return rows.map(({ failureArgs, failureResult, ...r }) => ({
+      .all(appId, projectId, limit, limit + CHAIN_ROWS_MAX) as (AppRunRecord & {
+      failureArgs: string | null
+      failureResult: string | null
+      seq: number
+      isRoot: number
+    })[]
+    // 뿌리를 먼저 채운 것은 자르는 순서일 뿐이다 — 돌려주는 것은 시간순(최근 것부터)이다
+    rows.sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq)
+    return rows.map(({ failureArgs, failureResult, seq: _seq, isRoot: _isRoot, ...r }) => ({
       ...r,
       failure: failureArgs === null ? null : { args: failureArgs, result: failureResult },
     }))
@@ -1991,11 +2043,15 @@ export class Store {
 /** app_permissions 한 줄 — 런타임의 `CapabilityDecision`과 같은 모양이다 (구조로 맞물린다, M4 D-4) */
 export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }
 
+/** 기록 판이 한 앱의 뿌리 아래로 싣는 사슬 줄의 상한 (M4 D-6, `listAppRuns`) */
+const CHAIN_ROWS_MAX = 500
+
 /** app_runs 한 줄 — 런타임의 `AppRunRow`와 같은 모양이다 (구조로 맞물린다) */
 export type AppRunRecord = {
   id: string
   projectId: string | null
   appId: string
+  kind: string
   tool: string
   callerKind: string
   callerSessionId: string | null
@@ -2006,6 +2062,7 @@ export type AppRunRecord = {
   argsSummary: string
   error: string | null
   createdAt: number
+  sessionId: string | null
 }
 
 /** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */

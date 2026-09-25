@@ -19,6 +19,11 @@ export type AppRunRow = {
   id: string
   projectId: string | null
   appId: string
+  /**
+   * 무엇의 기록인가 (M4 D-6) — `tool`은 이 앱의 도구가 불린 것, `broker`는 이 앱이 fd 3으로 **부탁한** 것(`tool`이 중개 도구의
+   * 이름이다: run_agent, call_app, host_data). 앱의 도구 이름이 중개 도구와 같을 수 있어 이름만으로는 가를 수 없다.
+   */
+  kind: 'tool' | 'broker'
   tool: string
   callerKind: 'view' | 'session' | 'app'
   callerSessionId: string | null
@@ -29,18 +34,23 @@ export type AppRunRow = {
   argsSummary: string
   error: string | null
   createdAt: number
+  /** 이 부탁이 세운 에이전트 세션 (run_agent의 줄) — 사슬에서 그 세션으로 건너가는 자리다 */
+  sessionId: string | null
 }
 
 /** 읽어 온 한 줄 — 저장소는 글자로 돌려준다(열린 문자열), 모양은 프로토콜이 가린다 */
-export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status'> & {
+export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status' | 'kind'> & {
   callerKind: string
   status: string
+  kind: string
   failure: { args: string; result: string | null } | null
 }
 
 export type RunLedger = {
   begin(row: AppRunRow): void
   end(id: string, end: { status: AppRunRow['status']; durationMs: number; error: string | null }): void
+  /** 도는 중인 줄에 에이전트 세션을 잇는다 (D-6) — 세션이 서는 순간, 끝나기 전에 */
+  link(id: string, sessionId: string): void
   keepFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void
   list(projectId: string | null, appId: string, limit: number): AppRunListed[]
   prune(before: number): number
