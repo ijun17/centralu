@@ -239,6 +239,29 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
     expect(u).toMatchObject({ tokens: { outputTokens: 186, costUsd: 0.0078 } })
   })
 
+  /*
+   * 턴 하나에 모델이 여럿이다 (M4 D-5). 실측(앱이 부탁한 에이전트, 실제 Claude): 기록 판이 실행마다 "1.1k tokens"를 보였고 줄은
+   * 1108/13과 1038/16이었는데, CLI 기록에서 본 모델(Opus)은 출력 200·363에 캐시 입력 24k–80k를 썼다. modelUsage의 첫 칸이 제목을
+   * 짓는 작은 모델이었다. 모양은 그 실행 그대로다 — 작은 모델이 먼저 온다.
+   */
+  it('usage는 modelUsage의 모든 모델을 더한다 — 작은 모델이 먼저 와도 본 모델의 몫이 빠지지 않는다', () => {
+    const u = n({
+      ...RESULT,
+      total_cost_usd: 0.4163,
+      modelUsage: {
+        'claude-haiku-4-5-20251001': {
+          inputTokens: 1108, outputTokens: 13, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+          webSearchRequests: 0, costUSD: 0.0012, contextWindow: 200000, maxOutputTokens: 32000,
+        },
+        'claude-opus-4-7': {
+          inputTokens: 9, outputTokens: 363, cacheReadInputTokens: 80412, cacheCreationInputTokens: 4213,
+          webSearchRequests: 0, costUSD: 0.4151, contextWindow: 200000, maxOutputTokens: 32000,
+        },
+      },
+    }).find((e) => e.type === 'usage_update')
+    expect(u).toMatchObject({ tokens: { inputTokens: 1117, outputTokens: 376, cacheReadTokens: 80412, cacheCreationTokens: 4213, costUsd: 0.4163 } })
+  })
+
   it('성공이면 turn_complete로 끝난다', () => {
     expect(n(RESULT).at(-1)).toEqual({ type: 'turn_complete', sessionId: SID })
   })

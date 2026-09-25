@@ -378,7 +378,11 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const window =
         num(usageObj.modelContextWindow) ?? num(p.contextWindow) ?? num(usageObj.contextWindow)
       const events: NormalizedEvent[] = [
-        { type: 'usage_update', sessionId, tokens: { inputTokens: input, outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
+        /*
+         * Codex counts cached input inside `inputTokens` (its `totalTokens` is input + output). The protocol's
+         * TokenUsage keeps the two apart, as Anthropic does, so the uncached part is what goes in `inputTokens`.
+         */
+        { type: 'usage_update', sessionId, tokens: { inputTokens: Math.max(0, input - cached), outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
       ]
       const occupied = num(lastTurn.totalTokens)
       if (window && occupied !== undefined && occupied <= window) {

@@ -400,8 +400,8 @@ export function normalizeMessage(
 
   if (type === 'result') {
     const modelUsage = (m.modelUsage ?? {}) as Record<string, Json>
-    const first = Object.values(modelUsage)[0]
-    if (first) {
+    const models = Object.values(modelUsage)
+    if (models.length > 0) {
       /*
        * 컨텍스트 사용량은 여기서 계산하지 않는다.
        *
@@ -411,14 +411,21 @@ export function normalizeMessage(
        * 지금 창에 무엇이 들어 있는지는 SDK의 getContextUsage()가 알고 있고,
        * 어댑터가 턴이 끝날 때 그걸 물어서 context_update를 낸다.
        */
+      /*
+       * **모든 모델을 더한다.** modelUsage는 모델마다 한 칸이고(sdk.d.ts: 본 루프·서브에이전트·압축 같은 내부 호출까지, 토큰과
+       * 비용을 셀 때 쓰라는 칸), 턴 하나에 모델이 여럿이다 — 제목을 짓거나 도구 결과를 줄이는 작은 모델이 본 모델보다 먼저 올 수
+       * 있다. 첫 칸만 읽던 동안, 앱이 부탁한 에이전트의 실행이 "1.1k tokens"로 적혔다: 기록 줄은 1108/13과 1038/16이었는데
+       * CLI 기록에서 본 모델(Opus)은 출력만 200·363에 캐시 입력 24k–80k를 썼다. 적힌 것은 작은 모델의 몫이었다.
+       */
+      const sum = (field: string) => models.reduce((n, u) => n + Number(u[field] ?? 0), 0)
       out.push({
         type: 'usage_update',
         sessionId,
         tokens: {
-          inputTokens: Number(first.inputTokens ?? 0),
-          outputTokens: Number(first.outputTokens ?? 0),
-          cacheReadTokens: Number(first.cacheReadInputTokens ?? 0),
-          cacheCreationTokens: Number(first.cacheCreationInputTokens ?? 0),
+          inputTokens: sum('inputTokens'),
+          outputTokens: sum('outputTokens'),
+          cacheReadTokens: sum('cacheReadInputTokens'),
+          cacheCreationTokens: sum('cacheCreationInputTokens'),
           costUsd: typeof m.total_cost_usd === 'number' ? m.total_cost_usd : undefined,
         },
       })

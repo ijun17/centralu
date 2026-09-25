@@ -193,7 +193,9 @@ Table `app_runs` (store v34): id, project, app, tool, caller kind, caller sessio
 status (`running`, then `ok`, `error`, `cancelled` or `rejected`), duration, time, error. Since v37
 a row also has a kind, `tool` (a call to this app's tool) or `broker` (a request this app made
 through the broker, §10), and the agent session a `run_agent` request started; since v38 the tokens
-that agent reported.
+that agent reported. Those tokens are everything the run's models read and wrote, summed over every
+model the run used: input counts cached input too (read from or written to the cache), because an
+agent reads its whole context again on every call and that is the use the person shares with the app.
 
 - Arguments are never stored whole. Secrets are redacted first; the canonical JSON (keys sorted)
   then becomes a 200-character summary and a SHA-256 digest. Hashing after redaction matters: the
