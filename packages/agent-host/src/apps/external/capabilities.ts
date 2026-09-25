@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
+import type { AppRef } from './ref.js'
+import { canonicalJson } from './runs.js'
 
 /**
  * 앱이 host에게서 읽을 수 있는 데이터 — **닫힌 목록** (M4 D-3, #97 셋째 항목의 "능력 모델"을 외부 앱 쪽에서 푼다).
@@ -34,5 +37,76 @@ export function hostCapabilityText(name: HostCapability, scope: 'project' | 'use
         : 'read the list of all your sessions (the names you see in the sidebar and their states, not the conversations)'
     case 'git.status':
       return "read this project's git branch and changed files"
+  }
+}
+
+/**
+ * 앱이 쓰려는 능력 하나 (M4 D-4) — 사람에게 묻고 답을 기억하는 단위.
+ *
+ *   agent  에이전트를 부탁한다 — 도구마다 따로(Claude를 허락했다고 Codex까지 허락한 것이 아니다)
+ *   app    다른 앱을 부른다 — 부를 앱마다 따로. 앱은 (범위, id)라 범위까지 적는다: 같은 id의 앱이 프로젝트에 새로 생기면
+ *          부르는 대상이 바뀐 것이고(resolveCallTarget), 사람이 허락한 것은 그 앱이 아니다
+ *   host   host 데이터를 읽는다 — 이름마다 따로
+ */
+export type Capability =
+  | { kind: 'agent'; tool: string }
+  | { kind: 'app'; target: AppRef }
+  | { kind: 'host'; name: HostCapability }
+
+/** 기억의 열쇠 — 한 앱 안에서 능력 하나를 가리킨다 */
+export function capabilityKey(c: Capability): string {
+  switch (c.kind) {
+    case 'agent':
+      return `agent:${c.tool}`
+    case 'app':
+      return `app:${c.target.projectId ?? '_user'}/${c.target.appId}`
+    case 'host':
+      return `host:${c.name}`
+  }
+}
+
+/**
+ * 매니페스트의 선언(`uses`)의 지문 — 답은 이 지문과 함께 기억되고, 지문이 달라지면 다시 묻는다(플랜 D-4). 선언 전체를
+ * 본다: 어느 칸이 바뀌었든 앱을 만든 쪽이 앱이 무엇을 쓰는지 다시 말한 것이고, 사람도 다시 볼 까닭이 있다. 키 순서가
+ * 달라도 같은 선언은 같은 지문이다(`canonicalJson`).
+ */
+export function usesStamp(uses: unknown): string {
+  return createHash('sha256').update(canonicalJson(uses ?? {})).digest('hex')
+}
+
+/** 기억된 답 하나 */
+export type CapabilityDecision = {
+  capability: string
+  /** 물을 때 사람에게 보인 말 — 목록에서 그대로 다시 보인다 */
+  text: string
+  decision: 'allow' | 'deny'
+  /** 답할 때의 선언 지문 (`usesStamp`) */
+  stamp: string
+  decidedAt: number
+}
+
+/**
+ * 답을 둘 자리 — 런타임은 모양만 선언하고 host가 저장소로 채운다(`RunLedger`와 같은 뒤집기, main.ts). 없으면 메모리에
+ * 둔다(`memoryCapabilityBook`) — host가 떠 있는 동안은 한 번 묻는다는 약속이 선다.
+ */
+export type CapabilityBook = {
+  get(app: AppRef, capability: string): CapabilityDecision | null
+  put(app: AppRef, d: CapabilityDecision): void
+  forget(app: AppRef, capability: string): void
+  list(app: AppRef): CapabilityDecision[]
+}
+
+export function memoryCapabilityBook(): CapabilityBook {
+  const key = (app: AppRef) => `${app.projectId ?? '_user'}/${app.appId}`
+  const rows = new Map<string, Map<string, CapabilityDecision>>()
+  return {
+    get: (app, capability) => rows.get(key(app))?.get(capability) ?? null,
+    put: (app, d) => {
+      const m = rows.get(key(app)) ?? new Map<string, CapabilityDecision>()
+      m.set(d.capability, { ...d })
+      rows.set(key(app), m)
+    },
+    forget: (app, capability) => void rows.get(key(app))?.delete(capability),
+    list: (app) => [...(rows.get(key(app))?.values() ?? [])].map((d) => ({ ...d })),
   }
 }

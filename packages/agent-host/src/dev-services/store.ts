@@ -824,6 +824,33 @@ export class Store {
           this.db.exec(`UPDATE projects SET trusted = 1`)
         },
       },
+      {
+        to: 36,
+        /**
+         * 앱의 능력에 사람이 한 답 (M4 D-4) — "처음 쓸 때 한 번 묻는다"의 기억.
+         *
+         * 앱은 (프로젝트, id)로 하나라 `app_key`(`<프로젝트 id | _user>/<앱 id>`)를 열쇠로 쓴다. project_id를 열쇠에 넣지 않는
+         * 이유: 사용자 폴더 앱은 null인데 SQLite의 PRIMARY KEY는 NULL끼리를 서로 다른 값으로 쳐서, 같은 앱의 같은 능력이 두
+         * 줄이 될 수 있다. project_id는 프로젝트를 지울 때 함께 걷으려고 따로 둔다.
+         *
+         * `uses_stamp`은 답할 때의 매니페스트 선언(`uses`)의 지문이다 — 지문이 달라지면 이 답은 쓰이지 않고 다시 묻는다.
+         * `text`는 물을 때 사람에게 보인 말이다. 기억된 답의 목록(기록 판)이 그 말로 다시 보여 준다.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS app_permissions (
+              app_key    TEXT NOT NULL,
+              project_id TEXT,
+              capability TEXT NOT NULL,
+              text       TEXT NOT NULL,
+              decision   TEXT NOT NULL,
+              uses_stamp TEXT NOT NULL,
+              decided_at INTEGER NOT NULL,
+              PRIMARY KEY (app_key, capability)
+            );
+          `)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1482,6 +1509,8 @@ export class Store {
       // 그 프로젝트 앱의 실행 기록도 이 앱의 기록이다 (M4 A-6)
       this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM app_runs WHERE project_id = ?`).run(projectId)
+      // 그 프로젝트 앱의 능력에 한 답도 (M4 D-4) — 같은 경로에 다시 등록해도 새 프로젝트다(id가 다르다)
+      this.db.prepare(`DELETE FROM app_permissions WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
     })
     tx()
@@ -1926,7 +1955,41 @@ export class Store {
   settleUnfinishedAppRuns(error: string): number {
     return this.db.prepare(`UPDATE app_runs SET status = 'error', error = ? WHERE status = 'running'`).run(error).changes
   }
+
+  // ── 앱의 능력에 사람이 한 답 (M4 D-4) — 런타임의 `CapabilityBook`을 이 저장소가 채운다 ──
+
+  getAppPermission(appKey: string, capability: string): AppPermissionRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT capability, text, decision, uses_stamp as stamp, decided_at as decidedAt FROM app_permissions WHERE app_key = ? AND capability = ?`,
+      )
+      .get(appKey, capability) as AppPermissionRecord | undefined
+    return row ?? null
+  }
+
+  putAppPermission(appKey: string, projectId: string | null, r: AppPermissionRecord): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO app_permissions (app_key, project_id, capability, text, decision, uses_stamp, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(appKey, projectId, r.capability, r.text, r.decision, r.stamp, r.decidedAt)
+  }
+
+  forgetAppPermission(appKey: string, capability: string): void {
+    this.db.prepare(`DELETE FROM app_permissions WHERE app_key = ? AND capability = ?`).run(appKey, capability)
+  }
+
+  listAppPermissions(appKey: string): AppPermissionRecord[] {
+    return this.db
+      .prepare(
+        `SELECT capability, text, decision, uses_stamp as stamp, decided_at as decidedAt FROM app_permissions WHERE app_key = ? ORDER BY decided_at DESC`,
+      )
+      .all(appKey) as AppPermissionRecord[]
+  }
 }
+
+/** app_permissions 한 줄 — 런타임의 `CapabilityDecision`과 같은 모양이다 (구조로 맞물린다, M4 D-4) */
+export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }
 
 /** app_runs 한 줄 — 런타임의 `AppRunRow`와 같은 모양이다 (구조로 맞물린다) */
 export type AppRunRecord = {

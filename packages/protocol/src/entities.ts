@@ -175,6 +175,37 @@ export type AppRun = z.infer<typeof AppRun>
  *
  * 인자는 요약만, 비밀 값은 표준에러·이유·인자 어디에서나 `[redacted:이름]`으로 선다(실행 기록과 같은 규칙).
  */
+/**
+ * 앱이 능력을 처음 쓰려 할 때의 물음 (M4 D-4) — **화면에서 시작된** 사슬의 것. 세션에서 시작된 사슬의 물음은 그 세션의
+ * 승인 카드(`ApprovalDetail`의 `capability`)로 서고 여기 없다.
+ *
+ * `origin`은 사슬을 시작한 화면의 앱이다 — 물음은 그 앱의 고정 화면에 서고, 사이드바의 그 앱 줄이 "답을 기다린다"를
+ * 보인다. 능력을 쓰려는 앱(`app`)은 그 앱이 부른 다른 앱일 수 있다. `expiresAt`이 지나면 host가 거절로 닫는다.
+ */
+export const AppQuestion = z.object({
+  id: z.string(),
+  app: z.object({ appId: AppId, projectId: z.string().nullable(), name: z.string() }),
+  capability: z.string(),
+  text: z.string(),
+  origin: z.object({ appId: AppId, projectId: z.string().nullable() }),
+  askedAt: z.number(),
+  expiresAt: z.number(),
+})
+export type AppQuestion = z.infer<typeof AppQuestion>
+
+/**
+ * 한 앱에 대해 기억된 답 (M4 D-4). `current`가 false면 매니페스트의 `uses`가 그 뒤에 바뀌었다 — 그 답은 더 쓰이지 않고,
+ * 다음에 그 능력을 쓰려 할 때 다시 묻는다.
+ */
+export const AppPermission = z.object({
+  capability: z.string(),
+  text: z.string(),
+  decision: z.enum(['allow', 'deny']),
+  decidedAt: z.number(),
+  current: z.boolean(),
+})
+export type AppPermission = z.infer<typeof AppPermission>
+
 export const AppErrorBundle = z.object({
   kind: z.enum(['start', 'crash', 'tool']),
   at: z.number(),
@@ -246,8 +277,12 @@ export const ApprovalScope = z.enum(['session', 'project'])
 export type ApprovalScope = z.infer<typeof ApprovalScope>
 
 /**
- * 승인 요청 상세. 어댑터가 도구별 원시 형식을 이 3종으로 정규화한다.
+ * 승인 요청 상세. 어댑터가 도구별 원시 형식을 앞의 3종으로 정규화한다.
  * core/approval은 kind만 보고 배너 제자리 승인 가능 여부를 판정한다 (FR-3).
+ *
+ * `capability`는 어댑터가 아니라 **host가** 세우는 카드다 (M4 D-4) — 이 세션이 부른 앱이 능력(에이전트 실행, 다른 앱,
+ * host 데이터)을 처음 쓰려 한다. 답은 이 앱과 이 능력에 대해 기억된다(매니페스트의 `uses`가 바뀌면 다시 묻는다).
+ * 그래서 "항상 허용"이 없다: 허용도 거절도 한 번의 답으로 기억된다.
  */
 export const ApprovalDetail = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command'), command: z.string(), cwd: z.string() }),
@@ -258,6 +293,15 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     multi: z.boolean().default(false),
   }),
   z.object({ kind: z.literal('other'), raw: z.string() }),
+  z.object({
+    kind: z.literal('capability'),
+    /** 능력을 쓰려는 앱 — 이름은 매니페스트의 것 */
+    app: z.object({ appId: AppId, projectId: z.string().nullable(), name: z.string() }),
+    /** 능력의 이름 — `agent:<도구>`, `app:<범위>/<앱>`, `host:<이름>` */
+    capability: z.string(),
+    /** 사람이 읽을 한 줄 — 무엇을 하려는가 ("run an agent (Claude Code) in a new session") */
+    text: z.string(),
+  }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>
 

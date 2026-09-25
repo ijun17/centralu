@@ -150,8 +150,9 @@ export const centralu = {
    * final answer. With `schema` (a JSON Schema whose top level is an object) the answer is JSON of
    * that shape, checked by Centralu; without it, text. `tool` picks an agent by name ("claude",
    * "codex") when the manifest lists it in "uses": { "agent": [...] }; without it, the person's
-   * default agent. The manifest must declare "uses": { "agent": true } (or the list). Only inside a
-   * tool handler. Throws a CentraluError that says what Centralu answered.
+   * default agent. The manifest must declare "uses": { "agent": true } (or the list), and the person
+   * is asked once before the app's first run on each tool. Only inside a tool handler. Throws a
+   * CentraluError that says what Centralu answered.
    */
   async agent(prompt, { schema, tool } = {}) {
     if (typeof prompt !== 'string' || !prompt.trim()) throw new BrokerError('centralu.agent() needs a prompt')

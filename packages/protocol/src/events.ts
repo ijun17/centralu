@@ -417,6 +417,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('external_apps_changed') }),
   /**
+   * 화면에서 시작된 사슬의 능력 물음이 생기거나 닫혔다 (M4 D-4). 같은 거칠기다: 싣는 것이 없고, 받은 쪽이
+   * `apps.questions`를 다시 읽는다. 세션에서 시작된 사슬의 물음은 그 세션의 `approval_request`로 온다.
+   */
+  z.object({ ...appScoped, type: z.literal('external_app_questions_changed') }),
+  /**
    * 감시 중인 디렉토리에서 뭔가 바뀌었다 (#34 — Finder·터미널·에이전트, 출처 불문).
    *
    * 세션이 아니라 **프로젝트**의 사건이라 `update_status`와 같은 길(appScoped)을 탄다.

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, handoffFile, SessionInfo } from '@cc/protocol'
 import type {
   AppId,
+  AppQuestion,
   ToolStatus,
   Attachment,
   CommandRunInfo,
@@ -632,6 +633,17 @@ export type AppState = {
    */
   externalApps: ExternalAppInfo[]
   refreshExternalApps(): Promise<void>
+  /**
+   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — host의 `apps.questions` 사본. `external_app_questions_changed`가 오면, 그리고
+   * 다시 붙을 때 통째로 다시 읽는다. 물음은 사슬을 시작한 앱(`origin`)의 고정 화면에 서고, 사이드바의 그 앱 줄이 표시를 단다.
+   * 세션에서 시작된 사슬의 물음은 그 세션의 승인 카드라 여기 없다.
+   */
+  appQuestions: AppQuestion[]
+  /** 물음이 바뀐 횟수 — 기억된 답을 보이는 곳(기록 판)이 다시 읽을 신호다 */
+  appQuestionsVersion: number
+  refreshAppQuestions(): Promise<void>
+  /** 능력 물음에 답한다 — 실패(이미 닫힌 물음)는 토스트로 말하고 목록을 다시 읽는다 */
+  answerAppQuestion(questionId: string, decision: 'allow' | 'deny'): Promise<void>
   /**
    * 사용자 폴더의 앱을 지운다 (M4 A-7). 목록은 host의 방송으로 따라온다. 부르는 쪽이 먼저 확인을 받는다.
    * @returns 지웠는가 — 실패는 토스트로 말한다
@@ -1527,6 +1539,8 @@ export const useStore = create<AppState>((set, get) => ({
   externalAppChanges: {},
   externalAppChangedBy: {},
   externalApps: [] as ExternalAppInfo[],
+  appQuestions: [] as AppQuestion[],
+  appQuestionsVersion: 0,
   railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
@@ -1709,6 +1723,8 @@ export const useStore = create<AppState>((set, get) => ({
 
     // 앱을 껐다 켜도 승인 대기 중인 제안은 host에 남아 있다 — 카드가 다시 서야 한다
     void get().refreshMcpProposals()
+    // 능력 물음도 host에 남아 있다 (M4 D-4) — 답을 기다리는 앱의 호출이 거기 매달려 있다
+    void get().refreshAppQuestions()
     void get().refreshSkillProposals()
 
     /*
@@ -1945,6 +1961,12 @@ export const useStore = create<AppState>((set, get) => ({
     // 외부 앱의 자리와 상태가 바뀌었다 (M4 A-8) — 무엇이 바뀌었는지는 싣지 않으므로 통째로 다시 읽는다
     if (e.type === 'external_apps_changed') {
       void get().refreshExternalApps()
+      return
+    }
+
+    // 능력 물음이 생기거나 닫혔다 (M4 D-4) — 같은 거칠기, 통째로 다시 읽는다
+    if (e.type === 'external_app_questions_changed') {
+      void get().refreshAppQuestions()
       return
     }
 
@@ -3304,6 +3326,29 @@ export const useStore = create<AppState>((set, get) => ({
     return externalAppsReading
   },
 
+  async refreshAppQuestions() {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const appQuestions = await platform.apps.questions()
+      set((s) => ({ appQuestions, appQuestionsVersion: s.appQuestionsVersion + 1 }))
+    } catch {
+      // 못 읽으면 옛 목록을 둔다 — 다음 방송이나 재연결이 다시 읽는다
+    }
+  },
+
+  async answerAppQuestion(questionId, decision) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.apps.answerQuestion(questionId, decision)
+    } catch (e) {
+      set({ toast: (e as Error).message || 'Could not answer the question' })
+    }
+    // 답했든 못 했든(이미 닫혔다) host가 아는 목록으로 맞춘다 — 답한 물음이 화면에 남지 않게
+    await get().refreshAppQuestions()
+  },
+
   async ensureAppState(appId) {
     if (get().apps[appId]) return
     await get().refreshAppState(appId)
@@ -4041,6 +4086,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (!s.platform) return
     // 끊긴 사이의 방송은 다시 오지 않는다 — 앱 목록(A-8)도 host가 지금 아는 것으로 맞춘다
     void get().refreshExternalApps()
+    void get().refreshAppQuestions()
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live)
 
@@ -4380,6 +4426,11 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       return items.map((it, i) => (i === real ? { ...target, live } : it))
     }
     case 'approval_request':
+      /*
+       * 같은 카드가 다시 선다 — host가 능력 물음(M4 D-4)의 카드를, 그것을 가렸던 다른 카드가 닫힌 뒤 다시 세울 때다. 대화에는
+       * 이미 한 줄이 있다: 두 줄로 그리지 않는다.
+       */
+      if (items.some((it) => it.kind === 'approval' && it.requestId === e.requestId && it.decision === undefined)) return items
       return [
         ...items,
         {
@@ -4391,7 +4442,9 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
               ? e.detail.command
               : e.detail.kind === 'file_edit'
                 ? e.detail.path
-                : e.detail.raw,
+                : e.detail.kind === 'capability'
+                  ? `${e.detail.app.name} wants to ${e.detail.text}`
+                  : e.detail.raw,
         },
       ]
     case 'approval_resolved':

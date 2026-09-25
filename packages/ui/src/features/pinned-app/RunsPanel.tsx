@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppRun } from '@cc/protocol'
+import type { AppPermission, AppRun } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { externalAppKey, useStore } from '../../store/store.js'
 
@@ -54,6 +54,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <Permissions appId={appId} projectId={projectId} changed={changed} />
         {error && (
           <p className="px-3 py-2 text-[11px] text-ash" role="alert">
             Could not read runs: {error}
@@ -67,6 +68,65 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
         </ol>
       </div>
     </aside>
+  )
+}
+
+/**
+ * 이 앱에 대해 기억된 능력의 답 (M4 D-4) — 사람이 한 번 답한 것이 여기 남는다. 잘못 누른 거절도, 이제는 거두고 싶은 허락도
+ * 여기서 잊는다(Forget). 잊으면 다음에 그 능력을 쓰려 할 때 다시 묻는다. 매니페스트의 `uses`가 바뀐 뒤의 옛 답은 더 쓰이지
+ * 않는다 — "outdated"로 보인다.
+ *
+ * 다시 읽는 때: 판을 열 때, 이 앱에 닿은 호출이 끝날 때(답한 뒤 앱이 이어서 일을 마치면 온다), 화면의 물음이 바뀔 때, 잊은 뒤.
+ */
+function Permissions({ appId, projectId, changed }: { appId: string; projectId: string | null; changed: number }) {
+  const platform = usePlatform()
+  const asked = useStore((s) => s.appQuestionsVersion)
+  const setToast = useStore((s) => s.setToast)
+  const [list, setList] = useState<AppPermission[] | null>(null)
+  const [again, setAgain] = useState(0)
+  useEffect(() => {
+    let alive = true
+    platform.apps
+      .permissions(appId, projectId)
+      .then((l) => alive && setList(l))
+      .catch(() => alive && setList([]))
+    return () => {
+      alive = false
+    }
+  }, [platform, appId, projectId, changed, asked, again])
+  const forget = async (p: AppPermission) => {
+    try {
+      await platform.apps.forgetPermission(appId, projectId, p.capability)
+    } catch (e) {
+      setToast(`Could not forget: ${(e as Error).message}`)
+    }
+    setAgain((n) => n + 1)
+  }
+  if (!list || list.length === 0) return null
+  return (
+    <section className="border-b border-edge px-3 py-2" data-testid="runs-permissions">
+      <p className="readout text-[10px] uppercase text-slate">Permissions</p>
+      <ul className="mt-1 space-y-1">
+        {list.map((p) => (
+          <li key={p.capability} className="flex items-baseline gap-2 text-[11px]" data-testid="permission-row" data-capability={p.capability} data-decision={p.decision}>
+            <span className={`min-w-0 flex-1 break-words ${p.current ? 'text-ash' : 'text-slate line-through'}`} title={p.capability}>
+              {p.text}
+            </span>
+            <span className={`readout shrink-0 ${p.decision === 'deny' ? 'text-chalk' : 'text-slate'}`} data-testid="permission-decision">
+              {p.current ? (p.decision === 'allow' ? 'allowed' : 'denied') : 'outdated'}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded px-1 text-[10px] text-slate transition-colors hover:text-chalk"
+              onClick={() => void forget(p)}
+              data-testid="permission-forget"
+            >
+              Forget
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

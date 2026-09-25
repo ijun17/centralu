@@ -2,6 +2,8 @@ import type {
   AdapterCapabilities,
   AppErrorBundle,
   AppId,
+  AppPermission,
+  AppQuestion,
   AppRun,
   ApprovalDecision,
   ApprovalScope,
@@ -679,6 +681,18 @@ export interface AppsPort {
    * host가 거절한다).
    */
   sendError(appId: AppId, projectId: string | null, at: number): Promise<{ sessionId: string }>
+  /**
+   * 화면에서 시작된 사슬의 능력 물음 가운데 답을 기다리는 것 (M4 D-4). 고정 화면이 그 앱의 물음을 그리고 사이드바의 앱 줄이
+   * "답을 기다린다"를 보인다. host가 `external_app_questions_changed`를 방송하면 다시 읽는다. 세션에서 시작된 사슬의 물음은
+   * 그 세션의 승인 카드(`capability`)라 여기 없다.
+   */
+  questions(): Promise<AppQuestion[]>
+  /** 능력 물음에 답한다 (M4 D-4) — 답은 그 앱과 그 능력에 대해 기억된다. 닫힌 물음이면 host가 거절한다 */
+  answerQuestion(questionId: string, decision: 'allow' | 'deny'): Promise<void>
+  /** 한 앱에 대해 기억된 능력의 답 (M4 D-4) */
+  permissions(appId: AppId, projectId: string | null): Promise<AppPermission[]>
+  /** 기억된 답 하나를 잊는다 (M4 D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
+  forgetPermission(appId: AppId, projectId: string | null, capability: string): Promise<void>
 }
 
 /**

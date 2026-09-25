@@ -13,6 +13,8 @@ import {
   ExternalSession,
   ExternalAppInfo,
   AppErrorBundle,
+  AppPermission,
+  AppQuestion,
   AppRun,
   UsageSnapshot,
   GitFileStatus,
@@ -1156,6 +1158,29 @@ export const RpcMethods = {
   'apps.errors': {
     params: z.object({ appId: AppId, projectId: z.string().nullable() }),
     result: z.object({ latest: AppErrorBundle.nullable(), recent: z.array(AppErrorBundle) }),
+  },
+  /**
+   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 아직 답을 기다리는 것. 고정 화면과 사이드바가 그린다. 세션에서 시작된 사슬의
+   * 물음은 그 세션의 승인 카드라 여기 없다. `external_app_questions_changed`가 오면 다시 읽는다.
+   */
+  'apps.questions': { params: z.object({}), result: z.array(AppQuestion) },
+  /**
+   * 능력 물음에 답한다 (M4 D-4). 답은 그 앱과 그 능력에 대해 기억된다 — 허용도 거절도(`apps.permissions`에서 잊을 수 있다).
+   * 이미 닫힌 물음(시간이 지났다, 부탁이 취소됐다)이면 거절된다.
+   */
+  'apps.answerQuestion': {
+    params: z.object({ questionId: z.string(), decision: z.enum(['allow', 'deny']) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** 한 앱에 대해 기억된 능력의 답 (M4 D-4) — 기록 판(B-7) 옆에서 보이고 잊을 수 있다 */
+  'apps.permissions': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: z.array(AppPermission),
+  },
+  /** 기억된 답 하나를 잊는다 (M4 D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
+  'apps.forgetPermission': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable(), capability: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
   },
   'apps.createBuilder': {
     params: z.object({ appId: AppId, projectId: z.string().nullable(), tool: ToolName.optional() }),

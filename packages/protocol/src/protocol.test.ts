@@ -25,6 +25,13 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'approval_request', sessionId: 's1', requestId: 'r1', detail: { kind: 'command', command: 'npm run build', cwd: '/p' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r2', detail: { kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r3', detail: { kind: 'other', raw: '{}' } },
+  // 능력 물음의 카드 (M4 D-4) — host가 세운다
+  {
+    type: 'approval_request',
+    sessionId: 's1',
+    requestId: 'cap-1',
+    detail: { kind: 'capability', app: { appId: 'notes', projectId: 'p1', name: 'Notes' }, capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' },
+  },
   { type: 'approval_resolved', sessionId: 's1', requestId: 'r1', decision: 'allow' },
   {
     type: 'question_request',
@@ -44,6 +51,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   },
   { type: 'question_resolved', sessionId: 's1', requestId: 'q1' },
   { type: 'turn_complete', sessionId: 's1' },
+  // 스키마로 답한 턴 (M4 D-1)
+  { type: 'turn_complete', sessionId: 's1', output: { summary: 'short' } },
   { type: 'state_change', sessionId: 's1', state: 'waiting_input' },
   { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.01 } },
   { type: 'context_update', sessionId: 's1', used: 1000, window: 200000, exactness: 'exact' },
@@ -107,6 +116,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1', cause: { kind: 'broker', via: 'x' } },
   // 외부 앱 목록이 달라졌다 (M4 A-8) — 싣는 것이 없다. 받은 쪽이 apps.list를 다시 읽는다
   { type: 'external_apps_changed' },
+  { type: 'external_app_questions_changed' },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
   // 골 통지 (2026-09-07) — 두 도구의 합집합 모양과 걷힘(null) 양쪽 다 골든이다
   {

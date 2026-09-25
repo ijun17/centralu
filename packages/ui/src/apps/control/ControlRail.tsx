@@ -261,7 +261,9 @@ function TurnRow({ id, waitingMs, unread, s }: { id: string; waitingMs: number; 
               ? `$ ${approval.detail.command}`
               : approval.detail.kind === 'file_edit'
                 ? approval.detail.path
-                : 'approval requested'}
+                : approval.detail.kind === 'capability'
+                  ? `${approval.detail.app.name} wants to ${approval.detail.text}`
+                  : 'approval requested'}
           </p>
           {/* diff는 줄에서 판단의 재료다 — 세션을 열지 않고 승인하려면 무엇이 바뀌는지 보여야 한다 */}
           {approval.detail.kind === 'file_edit' && showDiff && (

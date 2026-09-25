@@ -5,7 +5,7 @@ import { proposedMcpServerNameError, profileAllows, registerAppTools, runOrchest
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
-import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, ExternalApps, HostCapability } from '../apps/external/runtime.js'
+import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, CapabilityQuestion, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { builderRole } from './app-builder.js'
 import { HOST_APPS } from '../apps/registry.js'
@@ -16,6 +16,8 @@ import { existsSync, statSync } from 'node:fs'
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import type {
+  AppQuestion,
+  ApprovalDetail,
   ModelOption,
   ApprovalDecision,
   CommandInfo,
@@ -354,6 +356,16 @@ export class SessionManager {
    * 취소되면 빠진다. 끝난 뒤의 세션은 보통 세션처럼 목록에 남는다(보관 기능은 폐기됐다 — `runAppAgent` 주석).
    */
   private agentRuns = new Map<string, AgentRunWait>()
+  /**
+   * 세션의 승인 카드로 선 능력 물음 (M4 D-4) — requestId → 물음. 어댑터의 카드와 같은 자리(세션의 `pendingApproval`)를 쓰므로,
+   * 어댑터의 카드가 떠 있으면 그것이 닫힌 뒤에 세운다(`raiseCapabilityAsks`). 답(`respondApproval`)은 어댑터에 가지 않고 여기서
+   * 끝난다.
+   */
+  private capabilityAsks = new Map<string, { requestId: string; sessionId: string; detail: Extract<ApprovalDetail, { kind: 'capability' }>; shown: boolean; resolve: (d: 'allow' | 'deny' | null) => void }>()
+  /**
+   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 그 앱의 고정 화면과 사이드바의 앱 줄이 그린다(`apps.questions`). id → 물음.
+   */
+  private appQuestions = new Map<string, { question: AppQuestion; resolve: (d: 'allow' | 'deny' | null) => void }>()
 
   constructor(
     private store: Store,
@@ -1902,6 +1914,12 @@ export class SessionManager {
       agentRun.deleted = true
       agentRun.fail(new Error('the person deleted the agent session before it answered'))
     }
+    // 이 세션에 선 능력 물음은 답할 자리가 사라졌다 (D-4) — 답 없이 끝낸다(창구는 기억하지 않고 거절한다)
+    for (const ask of [...this.capabilityAsks.values()]) {
+      if (ask.sessionId !== sessionId) continue
+      this.capabilityAsks.delete(ask.requestId)
+      ask.resolve(null)
+    }
     const handle = this.handles.get(sessionId)
     if (handle) {
       await handle.dispose().catch(() => {})
@@ -2100,6 +2118,8 @@ export class SessionManager {
     if (e.type === 'turn_complete' && e.sessionId) void this.reportBackIfAwaited(e.sessionId)
     // 앱이 답을 기다리는 세션이다 (M4 D-1) — 저장한 **뒤에** 알린다: 기다리는 쪽이 저장소에서 마지막 답을 읽는다
     if (e.sessionId) this.agentRuns.get(e.sessionId)?.onEvent(e)
+    // 카드 자리가 비었다 — 기다리던 능력 물음이 있으면 세운다 (D-4). 어댑터의 카드가 닫힌 뒤, 또는 우리 카드를 가렸던 카드가 닫힌 뒤
+    if (e.type === 'approval_resolved' && e.sessionId) this.raiseCapabilityAsks(e.sessionId)
   }
 
   /**
@@ -2603,6 +2623,21 @@ export class SessionManager {
     matcher?: string,
   ): void {
     const m = this.meta.get(sessionId)
+
+    // 능력 물음의 카드다 (M4 D-4) — 어댑터가 모르는 카드라 여기서 끝낸다. "항상 허용"은 허용이다(답은 어차피 기억된다)
+    const ask = this.capabilityAsks.get(requestId)
+    if (ask && ask.sessionId === sessionId) {
+      this.capabilityAsks.delete(requestId)
+      const answer = decision === 'deny' ? 'deny' : 'allow'
+      this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
+      ask.resolve(answer)
+      // 에이전트는 아직 그 도구 호출 안에 있다 — 다른 물음이 없으면 다시 일하는 중이다
+      const after = this.meta.get(sessionId)
+      if (after?.state === 'waiting_approval' && !after.pendingApproval && after.pendingQuestions.length === 0) {
+        this.onEvent({ type: 'state_change', sessionId, state: 'working' })
+      }
+      return
+    }
 
     /*
      * **닿았는지를 먼저 본다.** 닿지 않았으면 규칙도 남기지 않는다 —
@@ -3711,7 +3746,96 @@ export class SessionManager {
       defaultAgentTool: (projectId) => this.defaultToolFor(projectId),
       runAgent: (req, ctx) => this.runAppAgent(req, ctx),
       hostData: (name, app) => this.appHostData(name, app),
+      agentLabel: (tool) => this.adapters.get(tool)?.descriptor.label ?? tool,
+      askCapability: (q, signal) => this.askCapability(q, signal),
     }
+  }
+
+  /**
+   * 능력 물음을 사람 앞에 세운다 (M4 D-4) — **사슬이 시작된 자리에.**
+   *
+   *   세션에서 시작됐다  그 세션의 승인 카드. 사람은 그 세션의 에이전트가 앱을 부른 것을 보고 있고(또는 인박스가 부른다),
+   *                    답을 기다리는 동안 그 세션은 승인 대기다 — 어댑터의 카드와 같은 신호등·인박스·알림을 탄다
+   *   화면에서 시작됐다  그 앱의 고정 화면 위의 물음(`apps.questions`)과 사이드바 앱 줄의 표시. 화면은 앱의 코드라 세션이
+   *                    없다 — 사람이 누른 그 화면이 답할 자리다
+   *
+   * 세션이 사라졌으면(지웠다) 화면의 물음으로 물러난다 — 부탁한 앱의 자리에 선다. 신호가 서면(시간이 지났다, 취소됐다) 카드나
+   * 물음을 거두고 null로 끝낸다.
+   */
+  private askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
+    return new Promise((resolve) => {
+      if (signal.aborted) return resolve(null)
+      const app = { appId: q.app.appId, projectId: q.app.projectId, name: q.appName }
+      if (q.origin.kind === 'session' && this.meta.has(q.origin.sessionId)) {
+        const requestId = `cap-${randomUUID()}`
+        const ask = {
+          requestId,
+          sessionId: q.origin.sessionId,
+          detail: { kind: 'capability' as const, app, capability: q.capability, text: q.text },
+          shown: false,
+          resolve,
+        }
+        this.capabilityAsks.set(requestId, ask)
+        signal.addEventListener('abort', () => {
+          if (!this.capabilityAsks.delete(requestId)) return
+          // 떠 있는 카드면 닫는다 — 답할 곳이 없는 카드를 남기지 않는다
+          const m = this.meta.get(ask.sessionId)
+          if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
+          resolve(null)
+        }, { once: true })
+        this.raiseCapabilityAsks(ask.sessionId)
+        return
+      }
+      const origin = q.origin.kind === 'view' ? q.origin.app : q.app
+      const id = `q-${randomUUID()}`
+      this.appQuestions.set(id, {
+        question: { id, app, capability: q.capability, text: q.text, origin: { appId: origin.appId, projectId: origin.projectId }, askedAt: Date.now(), expiresAt: q.expiresAt },
+        resolve,
+      })
+      this.emit({ type: 'external_app_questions_changed' })
+      signal.addEventListener('abort', () => {
+        if (!this.appQuestions.delete(id)) return
+        this.emit({ type: 'external_app_questions_changed' })
+        resolve(null)
+      }, { once: true })
+    })
+  }
+
+  /**
+   * 이 세션의 카드 자리가 비어 있으면 기다리는 능력 물음 하나를 세운다 (M4 D-4). 세션의 승인 카드는 한 번에 하나라
+   * (`pendingApproval`), 어댑터의 카드가 떠 있는 동안은 기다렸다가 그것이 닫히면 선다. 어댑터의 카드가 우리 카드를 가렸다가
+   * 닫히면 우리 카드를 **다시** 세운다 — 그때는 기록을 한 번 더 남기지 않는다(대화에 같은 카드가 두 줄이 되지 않게).
+   */
+  private raiseCapabilityAsks(sessionId: string): void {
+    const m = this.meta.get(sessionId)
+    if (!m || m.pendingApproval) return
+    const next = [...this.capabilityAsks.values()].find((a) => a.sessionId === sessionId)
+    if (!next) return
+    const e = { type: 'approval_request' as const, sessionId, requestId: next.requestId, detail: next.detail }
+    if (!next.shown) {
+      next.shown = true
+      this.onEvent(e)
+      return
+    }
+    this.applyStateHint(e, m)
+    this.store.upsertSession(m)
+    this.emit(e)
+  }
+
+  /** 화면에서 시작된 사슬의 능력 물음 가운데 답을 기다리는 것 (M4 D-4) */
+  appQuestionList(): AppQuestion[] {
+    return [...this.appQuestions.values()].map((x) => ({ ...x.question })).sort((a, b) => a.askedAt - b.askedAt)
+  }
+
+  /** 능력 물음에 답한다 (M4 D-4) — 닫힌 물음이면 이유와 함께 거절한다 */
+  answerAppQuestion(questionId: string, decision: 'allow' | 'deny'): void {
+    const q = this.appQuestions.get(questionId)
+    if (!q) {
+      throw Object.assign(new Error('That question is no longer open — it timed out, or the app stopped waiting'), { code: 'internal' })
+    }
+    this.appQuestions.delete(questionId)
+    this.emit({ type: 'external_app_questions_changed' })
+    q.resolve(decision)
   }
 
   /**
@@ -4546,6 +4670,10 @@ export class SessionManager {
     this.watchers.close()
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is shutting down'))
+    for (const ask of [...this.capabilityAsks.values()]) ask.resolve(null)
+    this.capabilityAsks.clear()
+    for (const q of [...this.appQuestions.values()]) q.resolve(null)
+    this.appQuestions.clear()
     this.appsHub?.dispose()
     // 진행 중이던 메시지들을 지금 모습대로 남긴다 — 종료가 마지막 2초를 삼키면 안 된다 (#66)
     for (const id of [...this.streams.keys()]) this.closeStream(id)
