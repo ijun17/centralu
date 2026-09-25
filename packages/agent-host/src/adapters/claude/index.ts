@@ -561,6 +561,11 @@ class ClaudeSession implements SessionHandle {
    *      스트리밍 입력 모드라 이 메서드를 쓸 수 있다.
    */
   interrupt(): void {
+    /*
+     * 이 세션이 부른 앱 호출도 멈춘다 (M4 A-5). CLI가 턴을 끊으며 도구 호출에 취소를 보내는지는
+     * SDK가 약속하지 않는다 — 우리가 직접 끊는다. 취소는 런타임이 앱과 그 아래 일까지 전한다.
+     */
+    this.opts.apps?.cancelAll()
     for (const [id, p] of this.pending) {
       p.resolve({ behavior: 'deny', message: 'Stopped by user' })
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })

@@ -315,3 +315,37 @@ describe('오래 걸리는 호출 — Claude는 기다린다', () => {
     expect(answer!.result).toMatchObject({ content: [{ type: 'text', text: 'released' }], isError: false })
   })
 })
+
+/**
+ * 세션을 멈추거나 닫으면 그 세션의 앱 호출이 멈춘다 (M4 A-5). CLI가 턴을 끊으며 도구 호출에
+ * 취소를 보내는지는 SDK가 약속하지 않는다 — 가짜 query의 interrupt는 아무것도 하지 않으므로,
+ * 여기서 멈춘다면 어댑터가 직접 끊은 것이다.
+ */
+describe('멈추면 앱 호출도 멈춘다 — Claude', () => {
+  async function holdViaCli() {
+    const { request, sent } = await connect('app-notes')
+    await request('tools/list')
+    const pipe = (servers()['app-notes'] as unknown as { instance: { server: { transport: { onmessage(m: unknown): void } } } }).instance.server.transport
+    pipe.onmessage({ jsonrpc: '2.0', id: 700, method: 'tools/call', params: { name: 'hold', arguments: {} } })
+    await kit.until(() => w.records('notes').some((r) => r.t === 'holding'), Boolean)
+    return sent
+  }
+
+  it('interrupt는 도는 앱 호출을 취소한다 — 앱이 취소를 받고 CLI는 실패로 받는다', async () => {
+    const h = await start(WORKER)
+    const sent = await holdViaCli()
+    h.interrupt()
+    const answer = await kit.until(() => sent.find((m) => m.id === 700), (m) => m !== undefined)
+    expect(answer!.result).toMatchObject({ isError: true })
+    await kit.until(() => w.records('notes').some((r) => r.t === 'aborted'), Boolean)
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })[0]).toMatchObject({ tool: 'hold', status: 'cancelled' })
+  })
+
+  it('dispose도 도는 앱 호출을 취소한다', async () => {
+    const h = await start(WORKER)
+    await holdViaCli()
+    await h.dispose()
+    handle = null
+    await kit.until(() => w.records('notes').some((r) => r.t === 'aborted'), Boolean)
+  })
+})

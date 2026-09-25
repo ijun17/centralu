@@ -152,3 +152,63 @@ describe('run_status가 보여 주는 것', () => {
     expect(unknown.isError).toBe(true)
   })
 })
+
+/**
+ * 세션을 멈추거나 닫으면 그 세션이 부른 앱 호출이 멈춘다 (M4 A-5) — 취소는 런타임이 앱에
+ * `notifications/cancelled`로 전하고(A-4), 앱이 부탁한 아래 일까지 부모 신호로 이어진다.
+ * 앱이 취소를 받았는지는 앱이 스스로 적은 기록('aborted')으로 본다.
+ */
+describe('세션을 멈추면 그 세션의 앱 호출이 멈춘다', () => {
+  const holding = () => kit.until(() => w.records('notes').filter((r) => r.t === 'holding').length, (n) => n > 0)
+  const aborted = () => kit.until(() => w.records('notes').some((r) => r.t === 'aborted'), Boolean)
+
+  it('cancelAll은 도는 호출을 취소한다 — 앱이 취소를 받고, 기록은 cancelled', async () => {
+    const a = hub.attach(WORKER)
+    const p = a.call('app-notes', 'hold', {})
+    await holding()
+    a.cancelAll()
+    const r = await p
+    expect(r.isError).toBe(true)
+    expect(text(r)).toContain('취소')
+    await aborted()
+    expect(w.rt.runs(NOTES)[0]).toMatchObject({ tool: 'hold', status: 'cancelled', callerSessionId: WORKER.id })
+  })
+
+  it('먼저 돌려준 호출도 멈춘다 — run_status가 cancelled를 말한다', async () => {
+    const a = hub.attach(WORKER)
+    const { runId } = await detach(a)
+    a.cancelAll()
+    await aborted()
+    let seen: AppToolResult | null = null
+    await kit.until(
+      () => seen,
+      () => {
+        void a.call('app-notes', 'run_status', { run_id: runId }).then((x) => (seen = x))
+        return (seen?.structuredContent as { status?: string } | undefined)?.status === 'cancelled'
+      },
+    )
+    expect(seen!.isError).toBe(true)
+  })
+
+  it('핸들을 닫아도(close) 멈춘다', async () => {
+    const a = hub.attach(WORKER)
+    const p = a.call('app-notes', 'hold', {})
+    await holding()
+    a.close()
+    expect((await p).isError).toBe(true)
+    await aborted()
+  })
+
+  it('다른 세션의 호출은 건드리지 않는다', async () => {
+    const mine = hub.attach(WORKER)
+    const other = hub.attach({ id: 'long-s2', kind: 'worker', projectId: 'p1' })
+    const theirs = other.call('app-notes', 'hold', {})
+    await holding()
+    mine.cancelAll()
+    // 남의 호출은 계속 돈다 — 문을 열어 끝내면 제 결과를 받는다
+    await new Promise((r) => setTimeout(r, 200))
+    expect(w.records('notes').some((r) => r.t === 'aborted')).toBe(false)
+    writeFileSync(w.gate('notes'), '')
+    expect(text(await theirs)).toBe('released')
+  })
+})

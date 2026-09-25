@@ -149,6 +149,12 @@ export class SessionAppsHub {
 /** 핸들 하나의 붙이기 — 어댑터가 보는 `SessionApps`의 구현 */
 class Attachment implements SessionApps {
   private listeners = new Set<() => void>()
+  /**
+   * 이 핸들이 부른, 아직 끝나지 않은 호출 (먼저 돌려준 것 포함). 세션을 멈추거나 핸들을 닫으면
+   * 여기 있는 것을 모두 취소한다 — 취소는 런타임이 앱(notifications/cancelled)과 그 아래 중개
+   * 일까지 전한다(A-4의 부모 신호).
+   */
+  private inflight = new Set<AbortController>()
   /** 마지막으로 알린(또는 처음 본) 모양 — 같으면 알리지 않는다 */
   private seen: string
   private closed = false
@@ -226,11 +232,25 @@ class Attachment implements SessionApps {
     if (!hit) return failure(`이 세션에 붙은 앱이 아닙니다: ${server}`)
     if (tool === RUN_STATUS_TOOL) return this.runStatus(hit, args)
 
+    /*
+     * 호출마다 취소 손잡이 하나 — 부른 쪽의 신호(CLI의 notifications/cancelled)와 이 세션의 멈춤
+     * (cancelAll) 둘 중 먼저 오는 것이 당긴다. 먼저 돌려준 호출도 끝날 때까지 여기 남는다.
+     */
+    const abort = new AbortController()
+    const onUp = () => abort.abort()
+    if (opts.signal?.aborted) abort.abort()
+    else opts.signal?.addEventListener('abort', onUp, { once: true })
+    this.inflight.add(abort)
+
     let runId: string | null = null
     const pending = this.hub.rt
-      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: opts.signal, onRun: (id) => (runId = id) })
+      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id) })
       // 앱이 부르는 사이에 사라졌다(폴더가 지워짐) — 던지지 않고 실패한 호출로 돌려준다
       .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
+      .finally(() => {
+        this.inflight.delete(abort)
+        opts.signal?.removeEventListener('abort', onUp)
+      })
     if (!opts.waitMs) return toResult(await pending)
 
     /*
@@ -316,9 +336,15 @@ class Attachment implements SessionApps {
     return found?.annotations?.readOnlyHint === true
   }
 
+  cancelAll(): void {
+    for (const abort of [...this.inflight]) abort.abort()
+  }
+
   close(): void {
     if (this.closed) return
     this.closed = true
+    // 닫힌 핸들의 호출은 받을 곳이 없다 — 먼저 돌려준 것까지 멈춘다
+    this.cancelAll()
     this.listeners.clear()
     this.hub.release(this)
   }

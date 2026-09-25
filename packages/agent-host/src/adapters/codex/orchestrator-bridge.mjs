@@ -164,7 +164,7 @@ async function handleApp(id, method, params) {
       return ok(id, { content: [{ type: 'text', text: `앱 도구를 실행하지 못했습니다 — ${e.message}` }], isError: true })
     }
   }
-  // 알림(notifications/cancelled 등)에는 답할 것이 없다
+  // 알림(notifications/cancelled 등)에는 답할 것이 없다 — 세션을 멈추면 host가 그 세션의 앱 호출을 직접 끊는다
   if (id !== undefined) err(id, `지원하지 않는 메서드: ${method}`)
 }
 
