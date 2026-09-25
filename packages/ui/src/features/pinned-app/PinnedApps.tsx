@@ -1,8 +1,9 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { externalAppKey, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle } from '../app-frame/AppFrame.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
+import { RunsPanel } from './RunsPanel.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -40,6 +41,8 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   const close = useStore((s) => s.closeApp)
   const setToast = useStore((s) => s.setToast)
   const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
+  // 기록 판(B-7)은 화면마다 따로 연다 — 한 앱의 기록을 보던 사람이 다른 앱으로 가면 그 앱의 화면이 먼저다
+  const [runsOpen, setRunsOpen] = useState(false)
 
   const canOpen = !!app && !!app.info.home && app.status.runnable
   useEffect(() => {
@@ -112,7 +115,19 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
         )}
         <button
           type="button"
-          className="ml-auto flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
+          className={`ml-auto rounded px-2 py-0.5 text-[11px] transition-colors ${
+            runsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
+          }`}
+          aria-pressed={runsOpen}
+          onClick={() => setRunsOpen((v) => !v)}
+          data-testid="pinned-runs-toggle"
+          title="Recent runs of this app — who called which tool, and how it ended"
+        >
+          Runs
+        </button>
+        <button
+          type="button"
+          className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
           aria-label={`Close ${app?.title ?? pv.appId}`}
           onClick={() => void onClose()}
           data-testid="pinned-close"
@@ -120,8 +135,15 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
           <CloseIcon />
         </button>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col p-2">
-        <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} />
+      {/*
+        화면 칸은 늘 이 줄의 첫 자식이다. 판을 여닫아도 React가 화면 칸을 새로 만들지 않는다 — 새로 만들면
+        iframe이 떨어져 문서를 잃는다(이 파일 머리말).
+      */}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
+          <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} />
+        </div>
+        {runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
       </div>
     </section>
   )

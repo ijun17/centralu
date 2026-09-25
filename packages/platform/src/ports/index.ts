@@ -1,6 +1,7 @@
 import type {
   AdapterCapabilities,
   AppId,
+  AppRun,
   ApprovalDecision,
   ApprovalScope,
   Attachment,
@@ -578,6 +579,11 @@ export interface AppsPort {
    * **띄우지는 않는다**: 다음에 부르는 쪽(다시 여는 화면)이 띄운다.
    */
   restart(appId: AppId, projectId: string | null): Promise<void>
+  /**
+   * 한 앱의 실행 기록, 최근 것부터 (M4 B-7) — 누가(화면·세션·앱) 어느 도구를 불렀고 어떻게 끝났나.
+   * 인자는 요약만 온다. 폴더가 사라진 앱의 기록도 읽힌다.
+   */
+  runs(appId: AppId, projectId: string | null, limit?: number): Promise<AppRun[]>
 }
 
 /**
