@@ -244,6 +244,46 @@ describe('종료 규칙 (S-5)', () => {
     await until(() => alive(grandchild), (a) => a === false)
   })
 
+  it('스스로 끝난 앱이 남긴, SIGTERM을 무시하는 손주도 유예 뒤 SIGKILL로 거둔다 — 고아가 남지 않는다', async () => {
+    plant('parent', 'stubborn-grandchild')
+    make()
+    await rt.tools(ref('parent'))
+    const pid = starts('parent')[0]!.pid
+    // 손주가 처리기를 단 뒤에야 적힌다 — 그 전에 쏘면 이 시험이 보려는 것(버티는 손주)이 아니다
+    const grandchild = (await until(() => records('parent').find((r) => r.t === 'grandchild'), (r) => r !== undefined))!.grandchild!
+    try {
+      await rt.restart(ref('parent'))
+      expect(alive(pid)).toBe(false)
+      expect(hostLog('parent')).not.toContain('did not exit within')
+      // 첫 발(SIGTERM)은 버텼다 — 이 시험이 두 번째 발을 보고 있다는 증거
+      await new Promise((r) => setTimeout(r, 500))
+      expect(alive(grandchild)).toBe(true)
+      await until(() => alive(grandchild), (a) => a === false, 6_000)
+    } finally {
+      if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
+    }
+    // 시험의 상한이 기다림(6초)보다 길어야 finally가 돈다 — 짧으면 실패한 날 손주가 고아로 남는다
+  }, 15_000)
+
+  it('host가 끝날 때(dispose) 칸이 바뀌어 호출을 마치기를 기다리던 옛 프로세스도 내려간다', async () => {
+    plant('keeper', 'attach')
+    make()
+    const first = rt.call(ref('keeper'), 'hold', {}, { kind: 'session', sessionId: 's1' })
+    await until(() => records('keeper').some((r) => r.t === 'holding'), (x) => x)
+    const pid = starts('keeper')[0]!.pid
+    try {
+      // 매니페스트가 바뀐다 — 새 칸이 서고, 옛 프로세스는 붙든 호출을 마치기를 기다린다(어느 칸에도 없다)
+      plant('keeper', 'attach', { description: 'a changed description' })
+      rt.refresh()
+      expect(alive(pid)).toBe(true)
+      await rt.dispose()
+      await until(() => alive(pid), (a) => a === false, 6_000)
+      expect((await first).status).not.toBe('ok')
+    } finally {
+      if (alive(pid)) process.kill(-pid, 'SIGKILL')
+    }
+  }, 15_000)
+
   it('host가 끝날 때(dispose) 떠 있던 앱이 전부 내려간다', async () => {
     plant('a1')
     plant('a2', 'ignore-eof')

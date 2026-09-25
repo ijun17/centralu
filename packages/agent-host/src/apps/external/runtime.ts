@@ -307,6 +307,13 @@ export class ExternalApps {
    */
   private errorsSent = new Map<string, number>()
   /**
+   * 이 런타임이 띄운 프로세스 전부 — 아직 끝나지 않은 것. 칸(`Life.proc`)이 들고 있는 것만이 아니다: 매니페스트가 바뀌어
+   * 새 칸이 선 뒤 호출을 마치기를 기다리는 옛 프로세스(`haltWhenDrained`), 점검·반영이 내리는 중인 프로세스는 어느 칸에도
+   * 없다. `dispose`는 칸이 아니라 이 목록을 끝낸다 — 칸만 끝내면 그런 프로세스가 host가 끝난 뒤 launchd 아래 고아로
+   * 남는다(점검·반영 시험을 뒤집어 돌린 뒤 픽스처 앱 셋이 그렇게 남아 있었다).
+   */
+  private spawned = new Set<AppProcess>()
+  /**
    * 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리. 앱끼리의 호출(D-2)은 이 런타임의 단 하나의 길(`call`)로 간다.
    */
   private desk = new BrokerDesk({
@@ -1016,7 +1023,12 @@ export class ExternalApps {
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
     // 종료 예산(Tauri 3초) 안에서 — 유예를 줄이고, SIGKILL까지 기다리지는 않는다
-    await Promise.allSettled(all.map((e) => this.halt(e, 'host shutting down', { graceMs: 1_000, awaitKill: false })))
+    await Promise.allSettled([
+      ...all.map((e) => this.halt(e, 'host shutting down', { graceMs: 1_000, awaitKill: false })),
+      // 어느 칸에도 없는 프로세스까지 (`spawned` 주석) — 이미 내리는 중이면 그 내림을 기다린다(stop은 한 번만 돈다)
+      ...[...this.spawned].map((p) => p.stop(1_000, { awaitKill: false })),
+    ])
+    this.spawned.clear()
   }
 
   // ── 반영 (C-4) ─────────────────────────────────────────────────────────────────
@@ -1198,9 +1210,11 @@ export class ExternalApps {
         throw new AppUnavailableError((err as Error).message)
       }
       if (L.epoch !== epoch || this.disposed) {
+        this.remember(proc)
         void proc.stop(this.timing.graceMs)
         throw new AppUnavailableError('앱이 바뀌거나 내려가서 기동을 그만뒀습니다')
       }
+      this.remember(proc)
       L.verdict = proc.verdict() ?? L.verdict
       L.stamp = folderFingerprint(e.dir)
       L.loaded = L.stamp
@@ -1293,6 +1307,12 @@ export class ExternalApps {
     void proc.stop(0)
     // 떠 있던 앱이 예고 없이 죽었다 — 화면 앞의 사람이 이유를 봐야 한다 (A-8, B-6)
     this.appsChanged()
+  }
+
+  /** 띄운 프로세스를 적는다 — 적을 때마다 이미 끝난 것은 걷는다(목록이 host의 수명 동안 자라지 않게) */
+  private remember(proc: AppProcess): void {
+    for (const p of this.spawned) if (!p.alive) this.spawned.delete(p)
+    this.spawned.add(proc)
   }
 
   /** 내린다 — 쉬어서, 바뀌어서, 신뢰를 잃어서, host가 끝나서 */
