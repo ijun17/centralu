@@ -202,6 +202,9 @@ function payloadText(payload: unknown): string {
   return typeof text === 'string' ? text : String(text ?? '')
 }
 
+/** 턴 안인가 — 답을 만드는 중이거나 승인을 기다리는 중. 그 밖(입력 대기·쉼·한도·오류)은 턴이 끝난 것이다 (C-4) */
+const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
+
 /** 만드는 세션 명부의 열쇠 (APP_BUILDERS_KEY) — 앱은 (프로젝트, id)로 하나다 */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
 
@@ -1970,7 +1973,16 @@ export class SessionManager {
         if (handle?.externalId && m.externalId !== handle.externalId) {
           m.externalId = handle.externalId
         }
+        const wasBusy = inTurn(m.state)
         this.applyStateHint(e, m)
+        /*
+         * 만드는 세션의 턴이 끝났다 (M4 C-4) — 그 앱을 지금 파일로 다시 띄울 때다. 앱 폴더가 바뀔 때마다가 아니라
+         * 여기서 한 번: 턴 안의 앱은 반쯤 고친 코드다. 판단(바뀌었나, 호출이 도는 중인가)은 런타임이 한다.
+         */
+        if (wasBusy && !inTurn(m.state)) {
+          const ref = this.builderRefOf(m)
+          if (ref) this.appsHub?.rt.builderTurnEnded(ref)
+        }
         seq = this.persistMessage(e, m)
         // 이미지는 파일로 영속된다 (#40 2차) — 비동기라 여기서 seq를 받지 않는다
         if (e.type === 'message_image') void this.persistImage(e, m)
@@ -3521,6 +3533,15 @@ export class SessionManager {
     // 이름은 사람이 읽을 이 세션의 뜻이다 — 자동 이름이 덮지 않게 사람이 정한 이름 취급 (FR-18)
     this.rename(info.id, `${app.name ?? app.appId} · builder`)
     return this.meta.get(info.id)!
+  }
+
+  /**
+   * 이 앱의 만드는 세션이 지금 턴 안에 있나 (M4 C-4) — 런타임이 앱 폴더의 변화를 바로 반영할지, 턴 끝을 기다릴지
+   * 정하는 데 묻는다(`ExternalAppsDeps.builderBusy`). 승인을 기다리는 동안도 턴 안이다.
+   */
+  builderBusy(ref: AppRef): boolean {
+    const b = this.builderOf(ref)
+    return !!b && inTurn(b.state)
   }
 
   /** 이 세션이 만드는 앱 — 만드는 세션이 아니면 null. 띄우기 전(메타에 서기 전)에도 물을 수 있게 세션의 모양을 받는다 */

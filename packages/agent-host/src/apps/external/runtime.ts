@@ -8,6 +8,7 @@ import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, type SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
+import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
@@ -105,6 +106,13 @@ export type RuntimeTiming = {
    * 호출을 끊지 않는다는 약속이 점검보다 앞선다.
    */
   checkDrainMs: number
+  /**
+   * 만드는 세션이 없거나 쉬고 있을 때, 앱 폴더의 마지막 변화 뒤 이만큼 조용하면 다시 띄운다 (C-4). 편집기의 저장
+   * 여러 번이 한 번의 재시작이 된다.
+   */
+  reloadQuietMs: number
+  /** 만드는 세션의 턴 끝 알림을 모으는 시간 (C-4) — 턴 끝과 상태 변화가 잇달아 와도 한 번 다시 띄운다 */
+  turnEndDebounceMs: number
 }
 
 export const DEFAULT_TIMING: RuntimeTiming = {
@@ -124,6 +132,8 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   callTimeoutMs: 10 * 60_000,
   logMaxBytes: 1024 * 1024,
   checkDrainMs: 30_000,
+  reloadQuietMs: 2_000,
+  turnEndDebounceMs: 300,
 }
 
 export type ExternalAppsDeps = {
@@ -149,6 +159,11 @@ export type ExternalAppsDeps = {
   runs?: RunLedger
   /** 새 앱을 펼칠 템플릿 폴더 (C-1). 기본은 제품이 싣고 다니는 것(`appTemplateDir`) */
   templateDir?: string
+  /**
+   * 이 앱의 만드는 세션이 지금 턴 안에 있나 (C-4) — host가 세션 상태로 채운다. 있으면 앱 폴더가 바뀌어도 바로
+   * 다시 띄우지 않고 턴 끝(`builderTurnEnded`)을 기다린다. 없으면(편집기에서 고쳤다) 조용해지기를 기다린다.
+   */
+  builderBusy?: (ref: AppRef) => boolean
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
@@ -175,6 +190,11 @@ type Life = {
   inflight: number
   /** inflight가 0이 되기를 기다리는 쪽 — 점검(C-3)은 진행 중인 호출을 끊지 않고 기다린 뒤 다시 띄운다 */
   idleWaiters: (() => void)[]
+  /**
+   * 마지막으로 띄운 프로세스가 본 앱 폴더의 지문 (C-4) — 한 번도 띄우지 않았으면 null. 반영은 지금 폴더와 이것을
+   * 대 보고, 다르면 다시 띄운다. 프로세스가 내려가도 남는다: 쉬다 내려간 뒤에 고친 것도 "바뀌었다"다.
+   */
+  stamp: string | null
   idle: NodeJS.Timeout | null
   /** 지금 프로세스의 도구 목록(이름·공개 범위 규칙을 통과한 것)과, 걸러 낸 이유 */
   tools: AppTool[] | null
@@ -243,6 +263,11 @@ export class ExternalApps {
   /** `onAppsChanged` 구독자와, 이번 틱에 알림이 이미 잡혀 있는가 */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
+  /** 반영의 시계 (C-4) — 앱 이름(holdKey)마다. 매니페스트가 바뀌어 칸이 새로 서도 이어진다 */
+  private turnEndTimers = new Map<string, NodeJS.Timeout>()
+  private quietTimers = new Map<string, NodeJS.Timeout>()
+  /** 진행 중인 반영 — 겹쳐 부르면 같은 것을 기다린다 */
+  private reloading = new Map<string, Promise<boolean>>()
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -816,11 +841,103 @@ export class ExternalApps {
   async dispose(): Promise<void> {
     this.disposed = true
     this.watchers.close()
+    for (const t of [...this.turnEndTimers.values(), ...this.quietTimers.values()]) clearTimeout(t)
+    this.turnEndTimers.clear()
+    this.quietTimers.clear()
     this.appsListeners.clear()
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
     // 종료 예산(Tauri 3초) 안에서 — 유예를 줄이고, SIGKILL까지 기다리지는 않는다
     await Promise.allSettled(all.map((e) => this.halt(e, 'host shutting down', { graceMs: 1_000, awaitKill: false })))
+  }
+
+  // ── 반영 (C-4) ─────────────────────────────────────────────────────────────────
+
+  /**
+   * 이 앱의 만드는 세션의 턴이 끝났다 (M4 C-4) — host가 세션 상태로 알린다.
+   *
+   * 앱 폴더가 바뀔 때마다 다시 띄우지 않는다: 만드는 에이전트는 한 턴에 파일 여러 개를 여러 번 고치고, 그 사이의
+   * 앱은 반쯤 고친 코드다. 턴이 끝나야 한 덩어리의 수정이 끝난 것이고, 그것을 아는 것은 세션 상태를 보는 host뿐이다.
+   * 알림은 짧게 모은다(턴 끝과 상태 변화가 잇달아 온다) — 한 턴에 한 번 다시 띄운다.
+   *
+   * 턴 끝에는 지금 폴더를 **직접 잰다**(지문). 감시 이벤트를 몇 개 놓쳤든 답이 맞다. 앱이 쉬다 내려가 있어도 바뀌었으면
+   * 띄운다 — 만드는 세션의 도구 목록을 새 코드로 갈아야 한다.
+   */
+  builderTurnEnded(ref: AppRef): void {
+    if (this.disposed) return
+    const key = this.holdKey(ref)
+    clearTimeout(this.turnEndTimers.get(key))
+    const t = setTimeout(() => {
+      this.turnEndTimers.delete(key)
+      void this.reloadIfChanged(ref, { startIfStopped: true, why: "the builder's turn ended and the app folder changed" })
+    }, this.timing.turnEndDebounceMs)
+    t.unref()
+    this.turnEndTimers.set(key, t)
+  }
+
+  /**
+   * 앱 폴더가 바뀐 것을 훑기가 보았다 (C-4). 만드는 세션이 턴 안에 있으면 아무것도 하지 않는다 — 턴 끝이 반영한다.
+   * 없거나 쉬고 있으면(편집기에서 고쳤다) 마지막 변화 뒤 조용해지기를 기다렸다가, 그때도 만드는 세션이 턴 밖이면
+   * 반영한다. 이 길은 떠 있는 앱만 다시 띄운다 — 아무도 쓰지 않는 앱을 편집 때문에 깨우지 않는다(성능 예산).
+   */
+  private folderChanged(e: AppEntry): void {
+    if (this.deps.builderBusy?.(e.ref)) return
+    const key = this.holdKey(e.ref)
+    clearTimeout(this.quietTimers.get(key))
+    const ref = e.ref
+    const t = setTimeout(() => {
+      this.quietTimers.delete(key)
+      if (this.deps.builderBusy?.(ref)) return
+      void this.reloadIfChanged(ref, { startIfStopped: false, why: 'the app folder changed and stayed quiet' })
+    }, this.timing.reloadQuietMs)
+    t.unref()
+    this.quietTimers.set(key, t)
+  }
+
+  /**
+   * 폴더가 마지막으로 띄운 때와 다르면 지금 파일로 다시 띄운다 — 다시 띄웠으면 true.
+   *
+   * **진행 중인 호출은 끊지 않는다.** 끝날 때까지 기다린다(상한 없이 — 끊는 것이 더 나쁘다). 끝난 바로 그 틱에 내린다
+   * (`drain` 주석). 폴더가 바뀌었다는 것은 작성자가 무언가 고쳤다는 뜻이라, 연달아 실패해 멈춘 앱도 다시 기회를
+   * 얻는다(셈을 지운다). 다시 띄우면 도구 목록을 새로 읽고, 에이전트 도구가 달라졌으면 세션이 알림을 받는다
+   * (Claude는 곧바로, Codex는 다음 스레드부터 — A-5 그대로). 열린 화면에도 "바뀌었다"를 보낸다.
+   */
+  private reloadIfChanged(ref: AppRef, opts: { startIfStopped: boolean; why: string }): Promise<boolean> {
+    const key = this.holdKey(ref)
+    const running = this.reloading.get(key)
+    if (running) return running
+    const p = (async () => {
+      const e = this.find(ref)
+      if (!e || !e.manifest || !e.scope.trusted || this.disposed) return false
+      const L = e.life
+      if (L.stamp === null || folderFingerprint(e.dir) === L.stamp) return false
+      if (!opts.startIfStopped && !L.proc?.alive) return false
+      while (L.inflight > 0) await this.drain(e, 60_000)
+      // 기다리는 사이에 매니페스트가 바뀌어 칸이 갈렸거나 내려갔다 — 새 칸은 제 길로 뜬다
+      if (this.find(ref) !== e || this.disposed) return false
+      const pid = L.proc?.child.pid
+      L.proc?.log.note(`reloading: ${opts.why}`)
+      void this.halt(e, opts.why)
+      Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+      this.appsChanged()
+      try {
+        await this.use(e, async () => {})
+        console.error(`[apps] ${this.label(ref)} reloaded (${opts.why})${pid ? `, was pid ${pid}` : ''}`)
+        this.deps.emitChanged?.(ref)
+      } catch (err) {
+        // 못 떴다 — 이유는 목록(crashed)과 오류 묶음에 남는다. 만드는 세션의 check가 그 이유를 읽는다
+        console.error(`[apps] ${this.label(ref)} reload failed: ${(err as Error).message.split('\n')[0]}`)
+      }
+      return true
+    })().finally(() => this.reloading.delete(key))
+    this.reloading.set(key, p)
+    return p
+  }
+
+  /** 진행 중인 호출을 마친 뒤에 내린다 — 바뀐 매니페스트로 칸이 갈렸을 때 옛 칸의 프로세스를 거두는 길 */
+  private async haltWhenDrained(e: AppEntry, why: string): Promise<void> {
+    while (e.life.inflight > 0) await this.drain(e, 60_000)
+    await this.halt(e, why)
   }
 
   // ── 수명 ──────────────────────────────────────────────────────────────────────
@@ -886,6 +1003,11 @@ export class ExternalApps {
       if (L.epoch !== epoch || this.disposed) throw new AppUnavailableError('앱이 바뀌거나 내려가서 기동을 그만뒀습니다')
       const usedPrior = L.verdict !== undefined
       const pipeId = ++this.pipeSeq
+      /*
+       * 띄우기 **전에** 지문을 잰다 (C-4) — 못 뜬 앱도 "이 코드로 한 번 떠 봤다"가 남아야, 고친 뒤 턴 끝이 다시 띄운다.
+       * 떴으면 한 번 더 잰다: 뜨면서 제 폴더에 무언가 쓰는 앱을 "바뀌었다"로 읽어 끝없이 다시 띄우지 않게.
+       */
+      L.stamp = folderFingerprint(e.dir)
       let proc: AppProcess
       try {
         proc = await AppProcess.start(this.spawnSpec(e, pipeId))
@@ -902,6 +1024,7 @@ export class ExternalApps {
         throw new AppUnavailableError('앱이 바뀌거나 내려가서 기동을 그만뒀습니다')
       }
       L.verdict = proc.verdict() ?? L.verdict
+      L.stamp = folderFingerprint(e.dir)
       L.proc = proc
       L.pipeId = pipeId
       L.lastError = null
@@ -1161,10 +1284,15 @@ export class ExternalApps {
         prev.scope = scope
         // 신뢰를 잃은 프로젝트의 앱은 바로 내린다 — 목록에는 남는다
         if (!scope.trusted) void this.halt(prev, 'project is no longer trusted')
+        // 매니페스트 밖(server.mjs, 화면…)이 바뀌었나 (C-4) — 한 번이라도 띄운 앱만 잰다
+        else if (prev.life.stamp !== null && folderFingerprint(prev.dir) !== prev.life.stamp) this.folderChanged(prev)
         continue
       }
-      // 매니페스트가 바뀌었다 — 옛 명령으로 뜬 프로세스는 내리고, 셈과 기억한 세대도 새로 시작한다
-      if (prev) void this.halt(prev, 'manifest changed')
+      /*
+       * 매니페스트가 바뀌었다 — 옛 명령으로 뜬 프로세스는 내리고, 셈과 기억한 세대도 새로 시작한다. 새 호출은 새 칸이
+       * 받는다. 옛 프로세스는 **진행 중인 호출을 마친 뒤에** 내린다(C-4): 파일을 고쳤다고 누군가의 호출이 끊기면 안 된다.
+       */
+      if (prev) void this.haltWhenDrained(prev, 'manifest changed')
       held.apps.set(found.folder, this.entry(scope, found))
       changed = true
     }
@@ -1204,6 +1332,7 @@ export class ExternalApps {
         epoch: 0,
         inflight: 0,
         idleWaiters: [],
+        stamp: null,
         idle: null,
         tools: null,
         toolWarnings: [],

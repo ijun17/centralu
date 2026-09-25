@@ -31,5 +31,7 @@ export function builderRole(app: ExternalAppInfo, cwd: string): string {
 - stdout은 MCP 통로다. 로그는 console.error로.
 - 앱 밖의 파일은 사람이 따로 시키지 않았으면 고치지 않는다.
 - 고친 뒤에는 centralu 서버의 **check**를 부른다. 앱을 실제로 띄워 도구 목록과 화면을 읽고 문제를 알려 준다.
-  사람에게 시험을 맡기지 않는다. 이 세션에는 네 앱의 도구도 붙어 있다(app-${app.appId}) — 불러서 동작을 확인한다.`
+  사람에게 시험을 맡기지 않는다. 이 세션에는 네 앱의 도구도 붙어 있다(app-${app.appId}) — 불러서 동작을 확인한다.
+- 앱은 네 턴이 끝날 때 한 번 다시 뜬다(앱 폴더가 바뀌었으면, 진행 중인 호출이 끝난 뒤에). 턴 안에서 바로 확인하려면 check를 부른다 —
+  check는 지금 파일로 다시 띄워 본다. 붙은 도구 목록은 Claude는 다음 턴부터, Codex는 다음 스레드부터 바뀐다.`
 }

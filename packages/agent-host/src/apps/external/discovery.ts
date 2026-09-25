@@ -83,7 +83,27 @@ export function scanApps(root: string, rel: string, ancestors: readonly string[]
     apps.push(readApp(root, folderRel, e.name, dir))
   }
   apps.sort((a, b) => a.folder.localeCompare(b.folder))
-  return { apps, watch: [rel, ...apps.map((a) => `${rel}/${a.folder}`)] }
+  return { apps, watch: [rel, ...apps.flatMap((a) => [`${rel}/${a.folder}`, ...subfoldersOf(root, `${rel}/${a.folder}`)])] }
+}
+
+/** 앱 폴더 하나에서 감시할 하위 폴더의 상한 — 감시는 프로젝트당 256개(`MAX_WATCHED_DIRS`)를 나눠 쓴다 */
+const SUBFOLDERS_WATCHED = 8
+
+/**
+ * 앱 폴더 바로 아래의 폴더들 (C-4) — `ui/`처럼 코드가 사는 자리. 감시는 재귀가 아니라서(`DirWatchers`), 이것을
+ * 보지 않으면 편집기에서 `ui/index.html`을 고친 것을 모른다. 한 칸 아래까지만 본다: 더 깊은 변화는 만드는 세션의
+ * 턴 끝이 지문으로 잡는다(`fingerprint.ts`). 점으로 시작하는 폴더와 `node_modules`는 앱의 코드가 아니다.
+ */
+function subfoldersOf(root: string, appRel: string): string[] {
+  try {
+    return readdirSync(join(root, appRel), { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules')
+      .map((d) => `${appRel}/${d.name}`)
+      .sort()
+      .slice(0, SUBFOLDERS_WATCHED)
+  } catch {
+    return []
+  }
 }
 
 function readApp(root: string, folderRel: string, folder: string, dir: string): ScannedApp {
