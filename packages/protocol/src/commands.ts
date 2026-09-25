@@ -11,6 +11,7 @@ import {
   GitCommit,
   GitDiff,
   ExternalSession,
+  ExternalAppInfo,
   UsageSnapshot,
   GitFileStatus,
   ModelOption,
@@ -807,6 +808,16 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * 이 프로젝트의 코드를 이 기계에서 돌려도 되는가 (M4 A-2, 플랜 결정 3).
+   *
+   * 기본은 "아니오"다 — 받아 온 저장소를 여는 것만으로 그 안의 앱 서버가 사용자 권한으로
+   * 돌면 안 된다. 끄면 그 프로젝트의 앱이 바로 내려간다.
+   */
+  'projects.setTrusted': {
+    params: z.object({ projectId: z.string(), trusted: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * 사이드바 순서 바꾸기. **전체 순서를 통째로 받는다** —
    * "이걸 저기로" 식으로 주고받으면 목록이 그 사이 바뀌었을 때 어긋난다.
    */
@@ -916,6 +927,12 @@ export const RpcMethods = {
     params: z.object({ appId: AppId, enabled: z.boolean() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /**
+   * 발견된 외부 앱 (M4 A-2) — 프로젝트 앱과 사용자 폴더 앱. 신뢰하지 않은 프로젝트의 앱과
+   * 매니페스트가 깨진 앱도 이유(`status`·`error`)와 함께 실린다: 숨기면 왜 안 뜨는지
+   * 물을 곳이 없다. 내장 앱은 여기 없다(내장 명부는 컴파일된 것이다, A-8이 합친다).
+   */
+  'apps.list': { params: z.object({}), result: z.array(ExternalAppInfo) },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: SessionId.optional() }),

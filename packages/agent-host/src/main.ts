@@ -4,12 +4,14 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
-import { migrateLegacyDataDir } from './data-dir.js'
+import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { HostServer, parseAllowedOrigins } from './transport/server.js'
 import { SessionManager } from './sessions/manager.js'
 import { Store } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
+import { ExternalApps } from './apps/external/runtime.js'
+import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
@@ -134,6 +136,17 @@ const mgr = new SessionManager(
   // 워크트리는 데이터 폴더 옆에 만든다 — dev와 배포 앱이 서로의 워크트리를 안 건드린다
   join(dirname(dbPath), 'worktrees'),
 )
+/*
+ * 외부 앱 런타임 (M4 A). 기동에서는 **훑기만 한다** — 앱 프로세스는 처음 필요할 때 뜬다
+ * (성능 예산: 앱 5개가 깔려 있어도 아무것도 안 할 때 앱 프로세스 0개).
+ * 데이터 폴더는 위 defaultDbPath가 CC_DATA_DIR로 고정한 그 폴더다 — dev와 배포가 갈린다.
+ */
+const externalApps = new ExternalApps({
+  projects: () => store.projectRoots(),
+  dataRoot: dataRoot(),
+  reservedIds: HOST_APPS.map((a) => a.id),
+})
+externalApps.refresh()
 const terminals = new TerminalService((f) => server.pushTerminal(f))
 // 자주 쓰는 명령어 실행기 (#60) — 출력은 터미널과 같은 프레임 레인을 탄다
 const commandRuns = new CommandRunner((f) => server.pushTerminal(f))
@@ -161,7 +174,7 @@ const server: HostServer = new HostServer({
   token,
   // origin 허용목록의 탈출구 — 거부 로그가 여기에 넣을 값을 그대로 알려준다
   allowedOrigins: parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS),
-  onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns),
+  onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns, externalApps),
 })
 
 let port: number
@@ -233,6 +246,7 @@ const shutdown = async () => {
    */
   terminals.disposeAll()
   commandRuns.disposeAll()
+  externalApps.dispose()
   await mgr.disposeAll()
   await server.close()
   store.close()

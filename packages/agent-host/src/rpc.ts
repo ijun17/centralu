@@ -14,6 +14,7 @@ const toInfo = (h: TerminalHandle) => ({
   alive: h.alive,
 })
 import type { UpdateService } from './updates.js'
+import type { ExternalApps } from './apps/external/runtime.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
@@ -25,6 +26,12 @@ export function createRpcHandler(
   terminals?: TerminalService,
   updates?: UpdateService,
   commands?: CommandRunner,
+  /**
+   * 외부 앱 런타임 (M4 A). 다른 서비스처럼 선택이다 — 없으면 외부 앱이 없는 host다.
+   * 프로젝트가 늘고 줄거나 신뢰가 바뀌면 **이 문이** 런타임에 다시 훑으라고 말한다:
+   * 매니저는 런타임을 모르고(코어는 앱을 모른다), 런타임은 매니저를 모른다.
+   */
+  externalApps?: ExternalApps,
 ) {
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
@@ -207,7 +214,11 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'workspace.load': async () => mgr.loadWorkspace(),
-    'projects.add': async (p) => mgr.addProject(RpcMethods['projects.add'].params.parse(p).path),
+    'projects.add': async (p) => {
+      const info = await mgr.addProject(RpcMethods['projects.add'].params.parse(p).path)
+      externalApps?.refresh()
+      return info
+    },
     'orchestrator.get': async () => mgr.orchestrator(),
     'orchestrator.peek': async () => mgr.orchestratorPeek(),
     'orchestrator.configure': async (p) => {
@@ -232,6 +243,7 @@ export function createRpcHandler(
       mgr.setAppEnabled(appId, enabled)
       return { ok: true as const }
     },
+    'apps.list': async () => externalApps?.list() ?? [],
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
       // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)
@@ -253,6 +265,13 @@ export function createRpcHandler(
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
     'projects.delete': async (p) => {
       await mgr.deleteProject(RpcMethods['projects.delete'].params.parse(p).projectId)
+      externalApps?.refresh()
+      return { ok: true as const }
+    },
+    'projects.setTrusted': async (p) => {
+      const { projectId, trusted } = RpcMethods['projects.setTrusted'].params.parse(p)
+      mgr.setProjectTrusted(projectId, trusted)
+      externalApps?.refresh()
       return { ok: true as const }
     },
     'projects.setCommands': async (p) => {

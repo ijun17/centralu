@@ -723,6 +723,16 @@ export class SessionManager {
     this.store.deleteProject(projectId)
   }
 
+  /**
+   * 프로젝트 신뢰 (M4 A-2, 플랜 결정 3). 앱 런타임은 저장소에서 매번 읽으므로 여기서는
+   * 적기만 한다 — 다시 훑으라고 말하는 것은 RPC 문이다(런타임은 이 층이 모른다).
+   */
+  setProjectTrusted(projectId: string, trusted: boolean): void {
+    if (!this.store.setProjectTrusted(projectId, trusted)) {
+      throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    }
+  }
+
   private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
     const git = await gitSummary(path)
     /*

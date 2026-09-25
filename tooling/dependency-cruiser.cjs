@@ -47,15 +47,40 @@ module.exports = {
       severity: 'error',
       // contract.ts가 오케스트레이터에서 타입을 빌려 오던 예외는 #97에서 사라졌다 —
       // 그 타입들은 이제 contract.ts가 정의하고 오케스트레이터가 가져다 쓴다
-      from: { path: '^packages/agent-host/src/apps/' },
+      from: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/external/'] },
       to: { path: '^packages/agent-host/src/(sessions|dev-services|adapters)/' },
+    },
+    /*
+     * 외부 앱 런타임 (M4 A)은 손님이 아니라 **손님을 태우는 층**이라 규칙이 하나 다르다.
+     * 외부 앱은 폴더와 프로세스라서, 런타임은 터미널·명령 실행기가 이미 지키는 OS의 약속
+     * 몇 가지를 똑같이 지켜야 한다: 폴더 감시(watch), 뿌리 밖으로 새지 않는 경로(path-guard).
+     * 그것들을 두 벌 만들면 "트리를 어떻게 죽이나"가 두 벌이 되는 사고가 되풀이된다.
+     *
+     * 그래서 허용은 **이름으로 좁힌다** — 제품의 뜻이 없는 물리 모듈만. 세션·어댑터는 여전히
+     * 금지다(세션은 런타임의 호출자 중 하나다, #97). 저장소(store)도 금지다: 런타임은 필요한
+     * 것을 `ExternalAppsDeps`로 선언하고 host가 채운다. 내장 앱(control)은 이 예외를 받지 않는다.
+     */
+    {
+      name: 'host-app-runtime-physics-only',
+      comment: '외부 앱 런타임이 코어에서 가져올 수 있는 것은 이름을 댄 물리 모듈뿐 (M4 A)',
+      severity: 'error',
+      from: { path: '^packages/agent-host/src/apps/external/' },
+      to: {
+        path: '^packages/agent-host/src/(sessions|dev-services|adapters)/',
+        pathNot: ['^packages/agent-host/src/dev-services/(watch|path-guard)\\.ts$'],
+      },
     },
     {
       name: 'host-core-blind-to-apps',
-      comment: 'host 코어가 앱에서 가져올 수 있는 것은 registry·contract뿐 (#81)',
+      comment: 'host 코어가 앱에서 가져올 수 있는 것은 registry·contract와 외부 앱 런타임의 문뿐 (#81, M4 A)',
       severity: 'error',
       from: { path: '^packages/agent-host/src', pathNot: ['^packages/agent-host/src/apps/'] },
-      to: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/(registry|contract)\\.ts$'] },
+      // external/runtime.ts는 외부 앱 런타임이 코어에 여는 **단 하나의 문**이다 — 그 뒤의
+      // 발견·프로세스·중개는 코어가 모른다. registry가 내장 앱의 한 줄인 것과 같은 자리다
+      to: {
+        path: '^packages/agent-host/src/apps/',
+        pathNot: ['^packages/agent-host/src/apps/(registry|contract)\\.ts$', '^packages/agent-host/src/apps/external/runtime\\.ts$'],
+      },
     },
     {
       name: 'core-no-io',

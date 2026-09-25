@@ -97,6 +97,36 @@ export const AppId = z.string()
 export type AppId = z.infer<typeof AppId>
 
 /**
+ * 외부 앱의 상태 (M4 A).
+ *
+ *   invalid     매니페스트가 없거나 틀렸다 — `error`가 이유다
+ *   untrusted   신뢰하지 않은 프로젝트의 앱이다. 발견되고 목록에 서지만 **뜨지 않는다**
+ *   stopped     띄울 수 있지만 지금은 내려가 있다 (처음 필요할 때 뜬다)
+ */
+export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'stopped'])
+export type ExternalAppStatus = z.infer<typeof ExternalAppStatus>
+
+/**
+ * 발견된 외부 앱 하나 (M4 A-2). 인스턴스는 (프로젝트, id)마다 하나다 — 같은 id가 두
+ * 프로젝트에 있으면 둘은 다른 앱이다. `projectId: null`은 사용자 폴더 앱이다.
+ */
+export const ExternalAppInfo = z.object({
+  appId: AppId,
+  projectId: z.string().nullable(),
+  /** 앱 폴더의 절대 경로 (native path — 화면은 보여 주기만 한다) */
+  dir: z.string(),
+  name: z.string().nullable(),
+  version: z.string().nullable(),
+  description: z.string().nullable(),
+  home: z.string().nullable(),
+  trusted: z.boolean(),
+  status: ExternalAppStatus,
+  error: z.string().nullable(),
+  warnings: z.array(z.string()),
+})
+export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
+
+/**
  * Everything a screen needs to *present* a tool: its name, its mark, and the two
  * commands that fix a tool that isn't ready.
  *

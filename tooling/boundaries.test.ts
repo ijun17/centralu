@@ -121,6 +121,38 @@ describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
   }
 })
 
+/**
+ * The external app runtime (M4 A) is the one part of `apps/` allowed into `dev-services/`, and
+ * only by name: folder watching and path containment are promises the terminal and the command
+ * runner already keep, and a second copy of "how we contain a path" is how the two drift apart.
+ * Everything else stays out — sessions and adapters are callers of the runtime, and the store is
+ * reached through the `ExternalAppsDeps` the host supplies.
+ *
+ * dependency-cruiser enforces the same list (`host-app-runtime-physics-only`); this is the copy
+ * that runs with the tests, so a widening has to be made twice, on purpose.
+ */
+describe('외부 앱 런타임은 이름을 댄 물리 모듈만 빌린다', () => {
+  const sources = sourcesUnder(join(ROOT, 'packages/agent-host/src/apps/external/'))
+  const PHYSICS = /(^|\/)dev-services\/(watch|path-guard)\.js$/
+
+  it('읽을 소스가 있다', () => {
+    expect(sources.length).toBeGreaterThan(0)
+  })
+
+  it('세션·어댑터는 아예, dev-services는 허용 목록만', () => {
+    const offenders = sources.flatMap(({ file, code }) =>
+      importsOf(code)
+        .filter(
+          (spec) =>
+            /(^|\/)(sessions|adapters)(\/|$)/.test(spec) ||
+            (/(^|\/)dev-services\//.test(spec) && !PHYSICS.test(spec)),
+        )
+        .map((spec) => `${file} → ${spec}`),
+    )
+    expect(offenders).toEqual([])
+  })
+})
+
 describe('ui 레이어 경계', () => {
   it('platform 구현체 import를 거부한다', async () => {
     const msgs = await lint(

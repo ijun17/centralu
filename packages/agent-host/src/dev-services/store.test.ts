@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 32
+const LATEST_SCHEMA = 33
 
 function seeded() {
   const s = new Store()
@@ -1245,5 +1245,43 @@ describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
     })
     reopened.close()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * v33 (M4 A-2): 프로젝트 신뢰.
+ *
+ * 앱이 없던 시절에 등록한 프로젝트는 "이 저장소의 코드를 돌려도 되는가"에 답한 적이 없다.
+ * 없는 답을 "예"로 채우면 조용한 허락이 된다 — 옛 행은 신뢰하지 않음으로 올라와야 한다.
+ */
+describe('v33 이관 — 프로젝트 신뢰는 기본이 "아니오"다', () => {
+  it('옛 DB의 프로젝트는 신뢰하지 않은 채로 올라오고, 켠 신뢰는 재시작을 넘긴다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v33-'))
+    const file = join(dir, 'store.db')
+    const old = new Database(file)
+    old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      default_tool TEXT NOT NULL DEFAULT 'claude', default_models TEXT,
+      sidebar_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, commands TEXT NOT NULL DEFAULT '[]');`)
+    old.prepare(`INSERT INTO projects (id, path, name, created_at) VALUES ('p1','/tmp/p1','p1',1)`).run()
+    old.pragma('user_version = 32')
+    old.close()
+
+    const s = new Store(file)
+    expect(s.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
+    expect(s.setProjectTrusted('p1', true)).toBe(true)
+    // 없는 프로젝트에는 조용히 성공하지 않는다
+    expect(s.setProjectTrusted('nope', true)).toBe(false)
+    s.close()
+
+    const reopened = new Store(file)
+    expect(reopened.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
+    reopened.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('새로 등록한 프로젝트도 신뢰하지 않은 채로 시작한다', () => {
+    const s = new Store()
+    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    expect(s.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
   })
 })
