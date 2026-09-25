@@ -253,6 +253,18 @@ export type CreateSessionOpts = {
   /** 응답 속도 (codex의 service_tier). 지원 티어는 모델 목록(ModelOption.tiers)이 말한다 */
   serviceTier?: string
   permissionPreset: PermissionPreset
+  /**
+   * 이 세션의 프로젝트를 사람이 신뢰했나 (M4 결정 3, #92) — **저장소의 파일이 이 세션을 바꿀 수 있는가.**
+   *
+   * 신뢰하지 않았으면 저장소에 커밋된 도구 설정이 이 세션에 닿지 않는다: Claude는 `.claude/`의 설정·훅·
+   * 명령과 CLAUDE.md를, Codex는 `.codex/`의 설정·훅·규칙과 AGENTS.md를 읽지 않는다. 사용자 자신의 설정
+   * (`~/.claude`, `~/.codex`)은 그대로 산다 — 결정 3이 끄는 것은 저장소의 몫뿐이다.
+   *
+   * **없으면 신뢰하지 않은 것이다.** 프로젝트가 없는 세션(오케스트레이터·조율 세션)도 여기 든다 — 그
+   * 폴더는 워커가 쓸 수 있는 자리다. 매니저가 세션을 띄울 때(만들기·깨우기)마다 저장소에서 읽어 넘긴다:
+   * 신뢰가 바뀌면 도는 세션은 다음에 다시 뜰 때 바뀐 값을 받는다.
+   */
+  projectTrusted?: boolean
   resumeExternalId?: string
   /** 주어지면 이 세션은 앱 도구를 받는다 — 어댑터가 자기 방식으로 붙인다 */
   orchestratorTools?: OrchestratorTools

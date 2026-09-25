@@ -740,6 +740,16 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 이 프로젝트를 신뢰하나 (결정 3, #92) — 세션을 띄울 때 어댑터에 넘긴다. 프로젝트가 없으면 아니다.
+   *
+   * 앱 런타임처럼 부를 때마다 저장소에서 읽는다. 사본을 들고 있으면 신뢰를 끈 뒤에도 사본이 "예"라고 답한다.
+   */
+  private projectTrusted(projectId: string | null): boolean {
+    if (!projectId) return false
+    return this.store.projectRoots().some((p) => p.id === projectId && p.trusted)
+  }
+
   private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
     const git = await gitSummary(path)
     /*
@@ -1119,6 +1129,8 @@ export class SessionManager {
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
+          // 저장소의 파일이 이 세션을 바꿀 수 있는가 (결정 3, #92) — 띄우는 이 순간의 신뢰
+          projectTrusted: this.projectTrusted(info.projectId),
           // 오케스트레이터는 전부, 워크트리 매니저(#69)는 부분집합을 받는다.
           // 갓 만든 세션은 자식이 없으므로 여기서 매니저일 수 없다 — 매니저가 되는 것은
           // 첫 자식이 붙은 뒤 다음에 깰 때다 (wake 쪽 조건이 그 승격의 실제다).
@@ -1565,6 +1577,11 @@ export class SessionManager {
           serviceTier: m.serviceTier ?? undefined,
           permissionPreset: m.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
+          /*
+           * 신뢰는 **깨울 때마다 다시 읽는다** (결정 3, #92). 신뢰를 바꿔도 도는 세션의 도구 프로세스는
+           * 이미 파일을 읽은 뒤라 그대로다 — 다음에 다시 뜰 때(재시작·재개) 바뀐 값을 받는다.
+           */
+          projectTrusted: this.projectTrusted(m.projectId),
           /*
            * **도구와 역할은 되살릴 때도 따라와야 한다.**
            *

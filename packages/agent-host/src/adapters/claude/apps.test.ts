@@ -53,7 +53,8 @@ const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { t
 
 async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
   handle = await new ClaudeAdapter().createSession(
-    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', apps: hub.attach(key), ...over },
+    // 프로젝트의 앱은 신뢰한 프로젝트에만 붙는다(결정 4) — 매니저가 넘기는 것과 같게 그 세션은 신뢰한 프로젝트의 것이다
+    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), ...over },
     () => {},
   )
   return handle
@@ -110,7 +111,7 @@ describe('앱마다 인프로세스 대리 서버', () => {
     await start(WORKER)
     expect(Object.keys(servers()).sort()).toEqual(['app-notes', 'app-tasks'])
     expect(servers()['app-notes']).toMatchObject({ type: 'sdk', name: 'app-notes' })
-    // 오케스트레이터만 파일의 지시를 닫는다 — 앱이 붙었다고 워커의 설정 로드가 바뀌지 않는다
+    // 오케스트레이터만 파일의 지시를 닫는다 — 앱이 붙었다고 (신뢰한 프로젝트) 워커의 설정 로드가 바뀌지 않는다
     expect(captured.options).not.toHaveProperty('settingSources')
   })
 
