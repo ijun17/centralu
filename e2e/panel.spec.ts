@@ -382,9 +382,10 @@ test('로그인 안 된 도구는 도넛이 없다', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
+    const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
     m.detected = [
-      { tool: 'claude', installed: true, loggedIn: true, detail: 'mock 2.1.0' },
-      { tool: 'codex', installed: true, loggedIn: false, detail: 'not logged in' },
+      as('claude', { installed: true, loggedIn: true, detail: 'mock 2.1.0' }),
+      as('codex', { installed: true, loggedIn: false, detail: 'not logged in' }),
     ]
   })
   await expect(page.getByTestId('intro')).toBeVisible()
@@ -402,7 +403,8 @@ test('로그인 안 된 도구는 도넛이 없다', async ({ page }) => {
    */
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
-    m.detected = [{ tool: 'claude', installed: true, loggedIn: false, detail: 'not logged in' }]
+    const claude = m.detected.find((t: any) => t.name === 'claude')
+    m.detected = [{ ...claude, installed: true, loggedIn: false, detail: 'not logged in' }]
   })
   // 닫고(첫 클릭) 다시 열면(둘째) 그때 다시 묻는다 — 닫기는 아무것도 안 물어본다
   await page.getByTestId('usage-donut-claude').click()
