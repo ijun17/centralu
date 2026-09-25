@@ -102,8 +102,12 @@ export type AppId = z.infer<typeof AppId>
  *   invalid     매니페스트가 없거나 틀렸다 — `error`가 이유다
  *   untrusted   신뢰하지 않은 프로젝트의 앱이다. 발견되고 목록에 서지만 **뜨지 않는다**
  *   stopped     띄울 수 있지만 지금은 내려가 있다 (처음 필요할 때 뜬다)
+ *   starting    뜨는 중 — 프로세스가 떠서 도구 목록을 말할 때까지
+ *   running     떠 있다
+ *   crashed     마지막 기동이나 실행이 실패했다 (`error`에 이유). 다음 필요가 백오프 뒤 다시 띄운다
+ *   failed      연달아 실패해 멈췄다 — `apps.restart` 전까지 뜨지 않는다
  */
-export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'stopped'])
+export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'stopped', 'starting', 'running', 'crashed', 'failed'])
 export type ExternalAppStatus = z.infer<typeof ExternalAppStatus>
 
 /**

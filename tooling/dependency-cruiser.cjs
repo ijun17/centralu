@@ -53,7 +53,8 @@ module.exports = {
     /*
      * 외부 앱 런타임 (M4 A)은 손님이 아니라 **손님을 태우는 층**이라 규칙이 하나 다르다.
      * 외부 앱은 폴더와 프로세스라서, 런타임은 터미널·명령 실행기가 이미 지키는 OS의 약속
-     * 몇 가지를 똑같이 지켜야 한다: 폴더 감시(watch), 뿌리 밖으로 새지 않는 경로(path-guard).
+     * 몇 가지를 똑같이 지켜야 한다: 폴더 감시(watch), 뿌리 밖으로 새지 않는 경로(path-guard),
+     * 자손까지 끝내는 종료(kill-tree).
      * 그것들을 두 벌 만들면 "트리를 어떻게 죽이나"가 두 벌이 되는 사고가 되풀이된다.
      *
      * 그래서 허용은 **이름으로 좁힌다** — 제품의 뜻이 없는 물리 모듈만. 세션·어댑터는 여전히
@@ -67,7 +68,7 @@ module.exports = {
       from: { path: '^packages/agent-host/src/apps/external/' },
       to: {
         path: '^packages/agent-host/src/(sessions|dev-services|adapters)/',
-        pathNot: ['^packages/agent-host/src/dev-services/(watch|path-guard)\\.ts$'],
+        pathNot: ['^packages/agent-host/src/dev-services/(watch|path-guard|kill-tree)\\.ts$'],
       },
     },
     {

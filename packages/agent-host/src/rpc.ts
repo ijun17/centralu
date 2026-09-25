@@ -41,6 +41,10 @@ export function createRpcHandler(
     if (!commands) throw Object.assign(new Error('Command runs are unavailable'), { code: 'internal' })
     return commands
   }
+  const requireExternalApps = (): ExternalApps => {
+    if (!externalApps) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    return externalApps
+  }
   const requireUpdates = (): UpdateService => {
     if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
     return updates
@@ -244,6 +248,11 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'apps.list': async () => externalApps?.list() ?? [],
+    'apps.restart': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.restart'].params.parse(p)
+      await requireExternalApps().restart({ appId, projectId })
+      return { ok: true as const }
+    },
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
       // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)

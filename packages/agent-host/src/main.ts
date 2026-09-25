@@ -246,8 +246,10 @@ const shutdown = async () => {
    */
   terminals.disposeAll()
   commandRuns.disposeAll()
-  externalApps.dispose()
+  // 앱 프로세스는 세션 정리와 **나란히** 내린다 — 유예(1초)를 세션 정리 시간 안에 겹쳐 쓴다
+  const appsDown = externalApps.dispose()
   await mgr.disposeAll()
+  await appsDown
   await server.close()
   store.close()
   // 왜 끝났는지가 다음 조사의 첫 줄이 된다 — 조용히 사라지지 않는다
