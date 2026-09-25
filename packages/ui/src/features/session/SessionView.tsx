@@ -219,7 +219,11 @@ export function SessionPane({
   }, [fold])
 
   const loadHistory = useStore((s) => s.loadHistory)
-  const loaded = useStore((s) => !!s.chat[sessionId])
+  /*
+   * 읽었다 = 기록 커서가 있다 (#79). 대화 줄이 있다는 것으로 보던 동안, 이벤트가 먼저 와서 줄이 생긴 세션을
+   * 그리드 칸에서만 보면 기록을 한 번도 읽지 않았다 — 커서가 없으니 'Load earlier messages'도 서지 않았다.
+   */
+  const loaded = useStore((s) => !!s.history[sessionId])
   useEffect(() => {
     if (!loaded) void loadHistory(sessionId)
   }, [sessionId, loaded, loadHistory])
