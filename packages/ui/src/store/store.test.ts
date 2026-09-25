@@ -1466,3 +1466,136 @@ describe('명령 실행 장부 (#60 → 터미널 패널 이관)', () => {
     expect(r.exitCode).toBe(130)
   })
 })
+
+
+/**
+ * 기록을 읽기 전에 대화 아닌 이벤트가 먼저 오면 (도그푸딩 2026-09-25).
+ *
+ * 앱을 다시 켜자 11,550줄짜리 세션이 통째로 비어 보였다. host가 세션을 재개하며 보낸
+ * 상태·사용량 이벤트가, 사용자가 그 세션을 누르기 전에 `chat[id] = []`를 만들었고,
+ * 포커스는 그 빈 배열을 "이미 읽었다"로 읽어 기록을 부르지 않았다. 오류도 없었다.
+ */
+describe('기록보다 먼저 온 이벤트', () => {
+  const many = (id: string, n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      sessionId: id, seq: i + 1, role: 'user' as const, kind: 'text' as const,
+      payload: { text: `줄 ${i + 1}` }, ts: i + 1,
+    }))
+  const quiet = [
+    ['state_change', { type: 'state_change', state: 'idle' }],
+    ['context_usage', { type: 'context_usage', used: 111693, window: 1000000, exactness: 'exact' }],
+  ] as const
+
+  it.each(quiet)('%s가 먼저 와도, 그 세션을 누르면 기록이 보인다', async (_name, ev) => {
+    const mock = new MockPlatform()
+    mock.sessions.set('a', sessionInfo('a'))
+    mock.sessions.set('b', sessionInfo('b'))
+    mock.messages.set('b', many('b', 50))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('a')
+
+    mock.emit({ sessionId: 'b', ...ev } as unknown as NormalizedEvent)
+    useStore.getState().focusSession('b')
+
+    await vi.waitFor(() => expect(useStore.getState().chat['b']).toHaveLength(50))
+    expect(useStore.getState().history['b']?.more).toBe(false)
+  })
+
+  it('기록을 읽는 사이에 대화 아닌 이벤트가 끼어도 기록을 버리지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('c', sessionInfo('c'))
+    mock.messages.set('c', many('c', 30))
+    await useStore.getState().attach(mock)
+
+    // 기록 요청이 나간 뒤, 응답이 오기 전에 이벤트가 도착하도록 응답을 붙잡는다
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mock.agents.loadMessages.bind(mock.agents)
+    mock.agents.loadMessages = async (...args: Parameters<typeof real>) => {
+      await gate
+      return real(...args)
+    }
+
+    const loading = useStore.getState().loadHistory('c')
+    mock.emit({ sessionId: 'c', type: 'state_change', state: 'idle' } as unknown as NormalizedEvent)
+    release()
+    await loading
+
+    expect(useStore.getState().chat['c']).toHaveLength(30)
+  })
+
+  /*
+   * 근본 고침은 이쪽이다: 대화가 아닌 이벤트는 자리를 만들지 않는다. `chat[id]`가 없다는
+   * 것은 저장소 전체에서 "아직 안 읽었다"로 쓰인다(포커스, 세션 생성). 아래 두 방어선이
+   * 로딩을 막아 주므로, 이 약속은 따로 걸지 않으면 깨져도 아무도 모른다.
+   */
+  it.each(quiet)('%s는 아직 안 읽은 세션에 빈 자리를 만들지 않는다', async (_name, ev) => {
+    const mock = new MockPlatform()
+    mock.sessions.set('g', sessionInfo('g'))
+    await useStore.getState().attach(mock)
+
+    mock.emit({ sessionId: 'g', ...ev } as unknown as NormalizedEvent)
+
+    expect(useStore.getState().chat['g']).toBeUndefined()
+    // 상태는 그대로 반영된다 — 자리를 안 만든다고 이벤트를 버리는 것이 아니다
+    expect(useStore.getState().sessions['g']).toBeDefined()
+  })
+
+  /*
+   * 아래 둘은 이벤트와 **무관하게** 규칙 자체를 건다: 빈 자리는 읽지 않은 것과 같다.
+   * 빈 배열을 만드는 길은 이벤트만이 아니다(낙관적으로 그린 줄을 되돌리는 filter도
+   * 비울 수 있다). 위 시험들은 이벤트 쪽 고침이 막아 버려서 이 두 방어선을 보지 못한다.
+   */
+  it('빈 자리에 커서도 없는 세션을 누르면 기록을 부른다 — 빈 자리가 어디서 왔든', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('a', sessionInfo('a'))
+    mock.sessions.set('e', sessionInfo('e'))
+    mock.messages.set('e', many('e', 20))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('a')
+
+    useStore.setState((s) => ({ chat: { ...s.chat, e: [] } }))
+    useStore.getState().focusSession('e')
+
+    await vi.waitFor(() => expect(useStore.getState().chat['e']).toHaveLength(20))
+  })
+
+  it('기록이 도착했을 때 자리가 비어 있으면 기록으로 채운다 — 빈 자리가 어디서 왔든', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('f', sessionInfo('f'))
+    mock.messages.set('f', many('f', 25))
+    await useStore.getState().attach(mock)
+
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mock.agents.loadMessages.bind(mock.agents)
+    mock.agents.loadMessages = async (...args: Parameters<typeof real>) => {
+      await gate
+      return real(...args)
+    }
+    const loading = useStore.getState().loadHistory('f')
+    useStore.setState((s) => ({ chat: { ...s.chat, f: [] } }))
+    release()
+    await loading
+
+    expect(useStore.getState().chat['f']).toHaveLength(25)
+  })
+
+  it('화면에 줄이 이미 있으면 여전히 갈아 끼우지 않는다 (09-09의 약속)', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('a', sessionInfo('a'))
+    mock.sessions.set('d', sessionInfo('d'))
+    mock.messages.set('d', many('d', 40))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('a')
+
+    // 스트리밍 중인 말이 먼저 왔다 — 이건 지우면 안 되는 줄이다
+    mock.emit(delta('d', '지금 쓰는 중'))
+    useStore.getState().focusSession('d')
+    await new Promise((r) => setTimeout(r, 20))
+
+    const chat = useStore.getState().chat['d']!
+    expect(chat.map((i) => (i as { text?: string }).text)).toContain('지금 쓰는 중')
+    expect(useStore.getState().history['d']).toBeDefined()
+  })
+})
