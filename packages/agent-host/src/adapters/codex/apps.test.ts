@@ -220,3 +220,30 @@ describe('elicitation — 앱 도구 승인은 우리 카드로, 나머지는 �
     expect(c.responses).toContainEqual({ id: 41, payload: { action: 'accept', content: null, _meta: null } })
   })
 })
+
+/**
+ * 세션을 멈추면 다리로 들어온 앱 호출이 멈춘다 (M4 A-5) — **턴이 없어도.** 240초를 넘겨 먼저
+ * 돌려준 호출은 턴이 끝난 뒤에도 돈다. 다리는 판단하지 않으므로 host의 어댑터가 끊는다.
+ * 다리의 호출은 host의 세션 문(`forSession`)으로 들어온다 — 여기서도 그 문으로 부른다.
+ */
+describe('멈추면 앱 호출도 멈춘다 — Codex', () => {
+  it('interrupt는 도는 턴이 없어도 이 세션의 앱 호출을 취소한다', async () => {
+    const c = await start(WORKER)
+    const p = hub.forSession(WORKER.id).call('app-notes', 'hold', {})
+    await kit.until(() => w.records('notes').some((r) => r.t === 'holding'), Boolean)
+    handle!.interrupt()
+    expect((await p).isError).toBe(true)
+    await kit.until(() => w.records('notes').some((r) => r.t === 'aborted'), Boolean)
+    // 턴이 없었으므로 Codex에는 아무것도 보내지 않았다 — 멈춘 것은 host다
+    expect(c.requests.some((r) => r.method === 'turn/interrupt')).toBe(false)
+  })
+
+  it('dispose도 이 세션의 앱 호출을 취소한다', async () => {
+    await start(WORKER)
+    const p = hub.forSession(WORKER.id).call('app-notes', 'hold', {})
+    await kit.until(() => w.records('notes').some((r) => r.t === 'holding'), Boolean)
+    await handle!.dispose()
+    handle = null
+    expect((await p).isError).toBe(true)
+  })
+})

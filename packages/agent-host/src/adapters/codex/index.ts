@@ -728,6 +728,12 @@ class CodexSession implements SessionHandle {
   }
 
   interrupt(): void {
+    /*
+     * 이 세션이 부른 앱 호출을 멈춘다 (M4 A-5) — **턴이 없어도.** 240초를 넘겨 먼저 돌려준 호출은
+     * 턴이 끝난 뒤에도 돈다. 사람이 멈춤을 누른 세션의 일이 뒤에서 계속 돌면 안 된다.
+     * 다리는 판단하지 않으므로 여기(host)가 끊는다. 취소는 런타임이 앱과 그 아래 일까지 전한다.
+     */
+    this.opts.apps?.cancelAll()
     // 도는 턴이 없으면 멈출 것도 없다 (턴이 막 끝난 뒤의 스톱이 이 자리다)
     if (!this.threadId || !this.turnId) return
     // 실패를 삼키면 "멈췄겠지" 하고 기다리게 된다 — 안 멈췄으면 안 멈췄다고 말한다
