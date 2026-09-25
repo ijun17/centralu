@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  AppId,
   ApprovalDecision,
   ApprovalDetail,
   ProtocolError,
@@ -310,7 +311,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * 받은 쪽이 apps.state로 다시 읽는다. 앱마다 이벤트 모양을 만들면
    * 프로토콜이 앱을 알게 된다.
    */
-  z.object({ ...appScoped, type: z.literal('app_state_changed'), appId: z.string() }),
+  z.object({ ...appScoped, type: z.literal('app_state_changed'), appId: AppId }),
   /**
    * 감시 중인 디렉토리에서 뭔가 바뀌었다 (#34 — Finder·터미널·에이전트, 출처 불문).
    *

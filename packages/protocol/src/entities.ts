@@ -82,6 +82,21 @@ export const ToolName = z.string().min(1)
 export type ToolName = z.infer<typeof ToolName>
 
 /**
+ * 앱의 식별자 — 닫힌 목록이 아니라 열린 문자열이다 (M4 P-1).
+ *
+ * UI는 이것을 `'control'` 하나짜리 합집합으로 들고 있었다. 컴파일된 앱이 하나뿐일 때는
+ * 참이었지만, 실행 중에 발견되는 앱(M4의 외부 앱)은 빌드 시점에 이름을 알 수 없다 —
+ * 닫힌 합집합으로는 그런 앱을 명부에 세울 자리가 타입에 없다. 위 `ToolName`을 연 것(#74)과
+ * 같은 일이다: 어떤 앱이 있는지는 호스트가 아는 사실이고, 컴파일러가 아는 사실이 아니다.
+ *
+ * 전선은 처음부터 열려 있었다(`apps.*`의 appId는 `z.string()`이었다). 닫혀 있던 것은 UI의
+ * 타입뿐이라, 여기서 글자·길이 규칙을 더하지 않는다 — 지금 받는 값을 그대로 받아야 동작이
+ * 같다. 외부 앱 id의 글자 규칙은 매니페스트를 검증하는 자리(A-1)가 정한다.
+ */
+export const AppId = z.string()
+export type AppId = z.infer<typeof AppId>
+
+/**
  * Everything a screen needs to *present* a tool: its name, its mark, and the two
  * commands that fix a tool that isn't ready.
  *
