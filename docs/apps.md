@@ -260,6 +260,18 @@ capabilities.
 
 This is how a slider the person has open moves when an agent calls the tool behind it.
 
+**When the app itself comes back on new code** (the builder's turn end, `check`, Restart after an
+edit), a notification is not enough: the view's HTML is the old app's. The app list carries the
+code the running process loaded (`codeStamp`, part of the folder fingerprint; unchanged by a
+crash-and-restart of the same code, and by new code that failed to start). Each open view
+remembers the stamp it opened on, and when the list says otherwise the UI reopens it: a pinned
+view in place with a fresh `home` call, an inline view with its stored input and result (no tool
+call again, even while its conversation is hidden). "Updated" stands in quiet text for a moment.
+Only a new stamp reopens a view, never the notification above, which would let a reopened view's
+first read cause the next reopen. A view reopens on its own at most 3 times a minute, because an
+app that writes into its own folder would otherwise restart and reopen forever. After that it
+shows "Changed · Reload" and waits for the person.
+
 ### 6.4 How a view is hosted
 
 A summary; the reasoning is in security-boundaries.md, "App views".
@@ -365,8 +377,8 @@ and "Send to builder".
   what the running process started from, the app restarts **after its calls in progress finish**,
   even if it was stopped, so the builder's tool list is fresh. Edits with no builder turn (an
   editor) reload a running app after 2 s of quiet. Claude sessions see changed tools from their next
-  turn, Codex sessions from their next thread. Open views are told the app changed; a view keeps its
-  old HTML until it is opened again.
+  turn, Codex sessions from their next thread. Open views are told the app changed, and reopen on
+  the new code (§6.3).
 - **Error bundle**: the host keeps each app's last 10 errors (a failed start, an unexpected exit, a
   tool call that reached the app and failed) with the kind, time, message, tool, redacted argument
   summary, run id, and the app's last 20 stderr lines. `apps.errors` returns them. They live in
@@ -494,7 +506,6 @@ cancelled, closed or refused; stored without bodies, so a reopened UI can draw p
 - The manifest's `csp` field is not read; the per-app origin is chosen only in the manifest.
 - A pinned view's message reaches the chosen session as ordinary text, where an inline view's is
   framed as the app's text (security-boundaries.md, "Text an app sends").
-- An open view keeps its old HTML after a reload until it is opened again.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
 - The broker's tools are arriving.

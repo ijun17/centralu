@@ -202,6 +202,11 @@ type Life = {
    * 대 보고, 다르면 다시 띄운다. 프로세스가 내려가도 남는다: 쉬다 내려간 뒤에 고친 것도 "바뀌었다"다.
    */
   stamp: string | null
+  /**
+   * 마지막으로 **떠 오른** 프로세스가 읽은 지문 (C-4) — 목록의 `codeStamp`. `stamp`와 달리 못 뜬 기동에는 바뀌지 않는다:
+   * 열린 화면은 떠 있는 코드와 대조해 옛 HTML인지를 가린다. 못 뜬 새 코드로 화면을 다시 열면 보이는 것은 실패뿐이다.
+   */
+  loaded: string | null
   idle: NodeJS.Timeout | null
   /** 지금 프로세스의 도구 목록(이름·공개 범위 규칙을 통과한 것)과, 걸러 낸 이유 */
   tools: AppTool[] | null
@@ -1169,6 +1174,7 @@ export class ExternalApps {
       }
       L.verdict = proc.verdict() ?? L.verdict
       L.stamp = folderFingerprint(e.dir)
+      L.loaded = L.stamp
       L.proc = proc
       L.pipeId = pipeId
       L.lastError = null
@@ -1397,6 +1403,8 @@ export class ExternalApps {
       status: this.status(e),
       error: e.error ?? e.life.lastError,
       warnings: [...e.warnings, ...e.life.toolWarnings],
+      // 지문 전체는 쓸모가 없다 — 대조만 하는 열쇠라 앞 16자면 충분하다
+      ...(e.life.loaded ? { codeStamp: e.life.loaded.slice(0, 16) } : {}),
       ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
     }
   }
@@ -1480,6 +1488,7 @@ export class ExternalApps {
         inflight: 0,
         idleWaiters: [],
         stamp: null,
+        loaded: null,
         idle: null,
         tools: null,
         toolWarnings: [],

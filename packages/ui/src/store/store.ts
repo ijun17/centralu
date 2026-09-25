@@ -181,6 +181,15 @@ export type PinnedView = {
   toolInput: Record<string, unknown> | undefined
   toolResult: AppToolResult | undefined
   error: string | null
+  /**
+   * 이 인스턴스를 열 때 떠 있던 앱의 코드 (`ExternalAppInfo.codeStamp`, M4 C-4). 목록의 값이 이것과 달라지면 이 화면의
+   * HTML은 옛 코드다 — 다시 연다(`followAppCode`). 열 때 몰랐으면 null이고, 처음 알게 된 값을 그대로 받는다.
+   */
+  codeStamp?: string | null
+  /** 새 코드로 다시 연 때 — 머리글의 "Updated"가 잠깐 선다 */
+  updatedAt?: number | null
+  /** 코드가 또 바뀌었는데 저절로 다시 열지 않았다(짧은 사이에 너무 자주 바뀌었다) — 사람이 누르면 다시 연다 */
+  stale?: boolean
 }
 
 /**
@@ -216,6 +225,12 @@ export type InlineView = {
   kept: boolean
   /** 살아난 순서 — 상한은 가장 오래 살아 있던 화면부터 접는다(다시 열면 새 번호) */
   liveAt: number
+  /** 살아난 때 떠 있던 앱의 코드 — 고정 화면의 그것과 같은 뜻이다 (`PinnedView.codeStamp`, M4 C-4) */
+  codeStamp?: string | null
+  /** 새 코드로 다시 연 때 — 제목 줄의 "Updated"가 잠깐 선다 */
+  updatedAt?: number
+  /** 코드가 또 바뀌었는데 저절로 다시 열지 않았다 — 사람이 누르면 다시 연다 */
+  stale?: boolean
 }
 
 /** 살아난 순서를 매기는 수 — 세션을 가리지 않고 늘기만 한다 */
@@ -276,6 +291,89 @@ export function registerInlineFrame(sessionId: string, callId: string, frame: In
 /** 이 카드의 화면이 지금 프레임으로 그려져 있나 */
 export function inlineFrameShown(sessionId: string, callId: string): boolean {
   return inlineFrames.has(inlineFrameKey(sessionId, callId))
+}
+
+/**
+ * 지금 그려진 고정 화면의 프레임 (M4 C-4) — 대화 안 화면의 손잡이와 같은 까닭이다. 앱이 새 코드로 다시 뜨면 스토어가 그
+ * 화면을 다시 연다(`reloadPinnedView`). 내리기 **전에** teardown을 보내야 하는데(규격), 프레임은 DOM의 것이라 화면이
+ * 올리고 내린다.
+ */
+const pinnedFrames = new Map<string, InlineFrame>()
+
+export function registerPinnedFrame(key: string, frame: InlineFrame): () => void {
+  pinnedFrames.set(key, frame)
+  return () => {
+    if (pinnedFrames.get(key) === frame) pinnedFrames.delete(key)
+  }
+}
+
+/**
+ * 한 화면이 새 코드를 따라 **저절로** 다시 열리는 상한 (M4 C-4) — 이 시간 안에 이만큼. 넘으면 다시 열지 않고 "바뀌었다"만
+ * 표시해 사람이 누르게 한다. 까닭은 `followAppCode`의 주석에.
+ */
+export const AUTO_RELOADS = 3
+export const AUTO_RELOAD_WINDOW_MS = 60_000
+const autoReloads = new Map<string, number[]>()
+
+function allowAutoReload(key: string, now = Date.now()): boolean {
+  const recent = (autoReloads.get(key) ?? []).filter((t) => now - t < AUTO_RELOAD_WINDOW_MS)
+  const ok = recent.length < AUTO_RELOADS
+  if (ok) recent.push(now)
+  autoReloads.set(key, recent)
+  return ok
+}
+
+/** 목록이 말하는 그 앱의 지금 코드 — 모르면(한 번도 뜨지 않았다, 옛 host) null */
+function codeStampOf(apps: readonly ExternalAppInfo[], projectId: string | null, appId: string): string | null {
+  return apps.find((a) => a.appId === appId && a.projectId === projectId)?.codeStamp ?? null
+}
+
+/**
+ * 앱이 새 코드로 다시 떴다 — 그 앱의 열린 화면을 다시 연다 (M4 C-4). 목록을 다시 읽을 때마다 돈다.
+ *
+ * 만드는 세션의 턴이 끝나면 host가 앱을 새 코드로 다시 띄운다. 그런데 열린 화면의 HTML은 연 때의 것이라, 앱은 바뀌었는데
+ * 사람 앞의 화면은 옛 것이다. 판정은 **지문의 변화 하나**다: 화면이 열릴 때 떠 있던 코드(`codeStamp`)와 지금 목록의 코드가
+ * 다르면 옛 HTML이다. 같은 코드로 다시 뜬 앱(죽었다 살아남, 다시 시작)은 지문이 같아 아무것도 하지 않는다. 화면이 열릴 때
+ * 지문을 몰랐으면(앱이 그 순간 처음 떴다) 처음 알게 된 값을 받기만 한다.
+ *
+ * "바뀌었다" 알림(`external_app_state_changed`)으로는 다시 열지 않는다. 그것은 앱 안의 값이 바뀌었다는 뜻이고 화면이 제
+ * 상태 도구로 다시 읽는다 — 거기에 다시 열기를 걸면, 다시 연 화면의 첫 호출이 또 알림을 부르는 고리가 된다.
+ *
+ * 그래도 앱이 쉬지 않고 새 코드로 다시 뜰 수 있다 — 제 폴더에 쓰는 앱이면 다시 연 화면의 home 호출이 폴더를 바꾸고, host가
+ * 그것을 반영해 또 다시 띄운다. 그래서 한 화면이 저절로 다시 열리는 수를 묶는다(1분에 세 번). 넘으면 "바뀌었다"만
+ * 표시하고 사람이 누를 때 연다 — 고리는 사람의 손에서 끊긴다.
+ */
+function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): void {
+  const { externalApps, pinnedViews, inlineViews } = get()
+  for (const pv of pinnedViews) {
+    if (pv.phase !== 'open' || !pv.instanceId) continue
+    const now = codeStampOf(externalApps, pv.projectId, pv.appId)
+    if ((pv.codeStamp ?? null) === null) {
+      if (now !== null) set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === pv.key ? { ...p, codeStamp: now } : p)) }))
+      continue
+    }
+    if (now === pv.codeStamp || pv.stale) continue
+    if (allowAutoReload(`pinned\n${pv.key}`)) void get().reloadPinnedView(pv.key)
+    else set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === pv.key ? { ...p, stale: true } : p)) }))
+  }
+  for (const [sessionId, views] of Object.entries(inlineViews)) {
+    for (const v of Object.values(views)) {
+      if (v.state !== 'live' || !v.instanceId) continue
+      const now = codeStampOf(externalApps, v.projectId, v.appId)
+      const patch = (next: Partial<InlineView>) =>
+        set((s) => {
+          const cur = s.inlineViews[sessionId]?.[v.callId]
+          return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [v.callId]: { ...cur, ...next } } } } : {}
+        })
+      if ((v.codeStamp ?? null) === null) {
+        if (now !== null) patch({ codeStamp: now })
+        continue
+      }
+      if (now === v.codeStamp || v.stale) continue
+      if (allowAutoReload(`inline\n${sessionId}\n${v.callId}`)) void get().reloadInlineView(sessionId, v.callId)
+      else patch({ stale: true })
+    }
+  }
 }
 
 /** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
@@ -994,6 +1092,17 @@ export type AppState = {
    * 다시 연다(home을 새로 부른다).
    */
   restartApp(key: string): Promise<void>
+  /**
+   * 고정 화면을 앱의 새 코드로 다시 연다 (M4 C-4) — 자리는 그대로(같은 줄, 같은 포커스), 인스턴스만 새로. 그려진 프레임에
+   * teardown을 먼저 보내고, 옛 인스턴스를 놓고, 화면이 다시 연다(home을 새 코드로 부른다). 코드가 바뀐 것을 스토어가
+   * 알아챘을 때(`followAppCode`)와 사람이 "Reload"를 누를 때 부른다.
+   */
+  reloadPinnedView(key: string): Promise<void>
+  /**
+   * 대화 안 화면을 앱의 새 코드로 다시 연다 (M4 C-4) — teardown 뒤 접고, host가 들고 있던 그 호출의 입력과 결말로 새
+   * 인스턴스를 연다(도구를 다시 부르지 않는다). host가 들고 있지 않으면 접힌 채로 둔다.
+   */
+  reloadInlineView(sessionId: string, callId: string): Promise<void>
   /**
    * 새 앱을 만든다 (M4 C-1, "New app" 창) — host가 템플릿을 펼치고 만드는 세션을 세운다. 만들면 앱이 목록에 서고,
    * 그 앱의 고정 화면이 열리고, 만드는 세션이 사이드바에 선다. host가 거절하면 그 말 그대로 던진다(창이 보인다).
@@ -2014,7 +2123,15 @@ export const useStore = create<AppState>((set, get) => ({
       if ((e.phase === 'closed' || e.phase === 'rejected') && was?.state === 'live') {
         void get().closeInlineView(sessionId, e.callId, e.reason ?? 'This view was closed')
       }
-      if (e.phase === 'open') capInlineViews(get, sessionId, e.callId)
+      if (e.phase === 'open') {
+        // 이 화면이 연 코드 (C-4) — 목록의 지문이 이것과 달라지면 옛 HTML이다(followAppCode)
+        const codeStamp = codeStampOf(get().externalApps, e.projectId, e.appId)
+        set((s) => {
+          const cur = s.inlineViews[sessionId]?.[e.callId]
+          return cur?.state === 'live' ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [e.callId]: { ...cur, codeStamp } } } } : {}
+        })
+        capInlineViews(get, sessionId, e.callId)
+      }
       return
     }
 
@@ -3174,6 +3291,8 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           const externalApps = await platform.apps.list()
           set({ externalApps })
+          // 앱이 새 코드로 다시 떴으면 그 앱의 열린 화면을 다시 연다 (M4 C-4)
+          followAppCode(get, set)
         } catch {
           // 못 읽으면 옛 목록을 둔다 — 다음 방송이나 재연결이 다시 읽는다
         }
@@ -3621,6 +3740,8 @@ export const useStore = create<AppState>((set, get) => ({
         cancelled: r.cancelled ?? now?.cancelled,
         reason: undefined,
         liveAt: ++inlineLiveSeq,
+        // 새 인스턴스가 여는 코드 (C-4) — 목록의 지문이 이것과 달라지면 다시 연다
+        codeStamp: codeStampOf(get().externalApps, v.projectId, v.appId),
       })
       capInlineViews(get, sessionId, callId)
     } catch (e) {
@@ -3678,7 +3799,9 @@ export const useStore = create<AppState>((set, get) => ({
         void platform.apps.closeView(v.instanceId).catch(() => {})
         return
       }
-      patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult }))
+      // 이 인스턴스가 연 코드 — 목록의 지문이 이것과 달라지면 옛 HTML이다(followAppCode)
+      const codeStamp = codeStampOf(get().externalApps, pv.projectId, pv.appId)
+      patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult, codeStamp }))
     } catch (e) {
       if (get().pinnedViews.find((p) => p.key === key)?.phase === 'opening') {
         patch((p) => ({ ...p, phase: 'failed', error: (e as Error).message }))
@@ -3692,7 +3815,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (pv.instanceId) void get().platform?.apps.closeView(pv.instanceId).catch(() => {})
     set((s) => ({
       pinnedViews: s.pinnedViews.map((p) =>
-        p.key === key ? { ...p, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null } : p,
+        p.key === key ? { ...p, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: null } : p,
       ),
     }))
   },
@@ -3725,13 +3848,49 @@ export const useStore = create<AppState>((set, get) => ({
      * host의 restart보다 먼저 닿는다. 그러면 막 띄운 앱을 restart가 내리고, 열기는 "앱이 내려가서 기동을
      * 그만뒀다"로 실패한다. 다시 여는 것은 restart가 끝난 뒤다.
      */
-    patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null }))
+    // "Updated"는 새 코드로 다시 연 화면의 말이다 — 사람이 다시 시작한 화면에 옛 소식을 다시 붙이지 않는다
+    patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: null }))
     try {
       await platform.apps.restart(pv.appId, pv.projectId)
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
     } catch (e) {
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))
     }
+  },
+
+  async reloadPinnedView(key) {
+    const platform = get().platform
+    const pv = get().pinnedViews.find((p) => p.key === key)
+    if (!platform || !pv || pv.phase !== 'open' || !pv.instanceId) return
+    const instanceId = pv.instanceId
+    // 내리기 전에 알린다(규격) — 화면은 이 사이에 저장하거나 정리한다
+    await pinnedFrames.get(key)?.teardown().catch(() => {})
+    // 그사이 닫혔거나 다른 길(다시 시작, 신뢰를 잃음)이 먼저 내렸다 — 그 길의 일이다
+    if (get().pinnedViews.find((p) => p.key === key)?.instanceId !== instanceId) return
+    void platform.apps.closeView(instanceId).catch(() => {})
+    // idle로 두면 화면이 다시 연다(열 수 있는 앱이면) — 같은 자리, 새 인스턴스. 새 지문은 열린 뒤에 받는다
+    set((s) => ({
+      pinnedViews: s.pinnedViews.map((p) =>
+        p.key === key
+          ? { ...p, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: Date.now() }
+          : p,
+      ),
+    }))
+  },
+
+  async reloadInlineView(sessionId, callId) {
+    const v = get().inlineViews[sessionId]?.[callId]
+    if (!v || v.state !== 'live') return
+    // host가 입력과 결말을 들고 있지 않으면 다시 열 수 없다 — 옛 HTML을 두지 않고 접는다(앱을 여는 길은 남는다)
+    if (!v.kept) return get().closeInlineView(sessionId, callId, 'Closed because the app now runs new code')
+    await get().closeInlineView(sessionId, callId, "Reopening with the app's new code")
+    await get().reopenInlineView(sessionId, callId)
+    set((s) => {
+      const cur = s.inlineViews[sessionId]?.[callId]
+      return cur?.state === 'live'
+        ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, stale: false, updatedAt: Date.now() } } } }
+        : {}
+    })
   },
 
   async createApp(spec) {

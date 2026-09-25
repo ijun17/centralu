@@ -3,6 +3,7 @@ import { registerInlineFrame, useStore, type InlineView as InlineViewState } fro
 import { useExternalApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { messageText } from '../pinned-app/MessageAsk.jsx'
+import { UpdatedCue } from '../pinned-app/UpdatedCue.jsx'
 import { AppIcon } from '../../components/icons.jsx'
 
 /**
@@ -46,6 +47,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
   const reopen = useStore((s) => s.reopenInlineView)
   const openApp = useStore((s) => s.openApp)
   const sendViewMessage = useStore((s) => s.sendViewMessage)
+  const reload = useStore((s) => s.reloadInlineView)
   const callId = view.callId
 
   const showFrame = (view.state === 'live' || view.state === 'closing') && view.instanceId !== null
@@ -126,6 +128,19 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
         <span className="truncate text-ash" data-testid="inline-view-title">
           {title}
         </span>
+        {/* 새 코드로 다시 열었다 (M4 C-4) — 고정 화면과 같은 한 마디. 너무 자주 바뀌었으면 사람이 누른다 */}
+        {view.state === 'live' && view.updatedAt && <UpdatedCue key={view.updatedAt} at={view.updatedAt} testId="inline-view-updated" />}
+        {view.state === 'live' && view.stale && (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 py-0.5 text-ash transition-colors hover:bg-graphite/60 hover:text-chalk"
+            onClick={() => void reload(sessionId, callId)}
+            title="The app now runs new code. It changed several times in a row, so this view was not reopened on its own"
+            data-testid="inline-view-stale"
+          >
+            Changed · Reload
+          </button>
+        )}
         {app?.info.home && !view.rejected && (
           <button
             type="button"

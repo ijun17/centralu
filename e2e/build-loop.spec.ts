@@ -428,3 +428,131 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     expect(await errorSends(page)).toEqual([])
   })
 })
+
+const emit = (page: Page, e: Record<string, unknown>) => page.evaluate((ev) => (window as any).__mock.emit(ev), e)
+const toolCall = (sid: string, callId: string, tool: string) => ({
+  type: 'tool_call',
+  sessionId: sid,
+  callId,
+  summary: { tool, title: callId, readOnly: false, paths: [] },
+})
+/** 그 카드가 선 대화의 줄 — 카드와 화면은 한 줄에 산다 */
+const rowOf = (page: Page, callId: string) => page.locator('[data-index]').filter({ has: page.getByTestId('tool-card').filter({ hasText: callId }) })
+const viewIn = (scope: ReturnType<Page['getByTestId']>): FrameLocator =>
+  scope.getByTestId('app-frame-iframe').contentFrame().locator('iframe').contentFrame()
+async function logged(v: FrameLocator, k: string): Promise<unknown> {
+  const li = v.locator(`li[data-k="${k}"]`).first()
+  await expect(li).toBeVisible()
+  return JSON.parse(((await li.textContent()) ?? '').slice(k.length + 1))
+}
+const openedViews = (page: Page) => page.evaluate(() => ((window as any).__mock.openedViews as unknown[]).length)
+const reopenedViews = (page: Page) => page.evaluate(() => (window as any).__mock.reopenedViews as { sessionId: string; callId: string }[])
+const closedViews = (page: Page) => page.evaluate(() => (window as any).__mock.closedViews as string[])
+const pinnedInstance = (page: Page) => page.evaluate(() => (window as any).__store.getState().pinnedViews[0]?.instanceId as string | null)
+/** 그 인스턴스의 화면이 teardown을 받은 횟수 — 시험 앱은 받으면 저장 도구를 부르고 답한다 */
+const teardownsOf = (page: Page, instanceId: string) =>
+  page.evaluate(
+    (id) => ((window as any).__mock.appToolCalls as { tool: string; from: { instanceId?: string } }[]).filter((c) => c.tool === 'save-on-teardown' && c.from.instanceId === id).length,
+    instanceId,
+  )
+
+test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로', () => {
+  const DOC = 'reloader ui://reloader/main'
+  const version = (page: Page, pid: string, v: string, status: AppInfo['status'] = 'running') => {
+    docs[DOC] = { html: fixtureViewHtml({ marker: v }) }
+    return setApps(page, [app('reloader', pid, { name: 'Reloader', status, codeStamp: `code-${v}` })])
+  }
+
+  /** 세션 하나와 그 대화 안의 화면 하나 — 입력과 결과를 host처럼 들고 있다 */
+  async function inlineView(page: Page, pid: string): Promise<{ sid: string; first: string }> {
+    await page.getByTestId('project-menu-alpha').click()
+    await page.getByTestId('new-session-alpha').click()
+    await page.getByTestId('create-session-confirm').click()
+    const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+    await emit(page, toolCall(sid, 'toolu_r', 'mcp__app-reloader__show'))
+    const first = fx.open({ projectId: pid, appId: 'reloader' }, 'ui://reloader/main')
+    await emit(page, { type: 'app_view', sessionId: sid, callId: 'toolu_r', appId: 'reloader', projectId: pid, tool: 'show', phase: 'open', instanceId: first, toolInput: { q: 'weather' } })
+    await emit(page, {
+      type: 'app_view', sessionId: sid, callId: 'toolu_r', appId: 'reloader', projectId: pid, tool: 'show', phase: 'result',
+      toolResult: { content: [{ type: 'text', text: 'sunny' }], structuredContent: { forecast: 'sunny' } }, kept: true,
+    })
+    await expect(viewIn(rowOf(page, 'toolu_r').getByTestId('inline-view')).locator('#marker')).toHaveText('v1')
+    return { sid, first }
+  }
+
+  test('고정 화면은 제자리에서 새 HTML로, 대화 안 화면은 들고 있던 입력과 결과로 다시 열리고, "Updated"가 잠깐 선다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await version(page, pid, 'v1')
+    const { sid, first: firstInline } = await inlineView(page, pid)
+    await page.getByTestId(`app-row-${pid}/reloader`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/reloader`)
+    await expect(viewOf(page, `${pid}/reloader`).locator('#marker')).toHaveText('v1')
+    const firstPinned = (await pinnedInstance(page))!
+    await expect(pinned.getByTestId('pinned-updated')).toHaveCount(0)
+
+    // 만드는 세션의 턴이 끝났다 — 앱이 새 코드로 다시 떴다
+    await version(page, pid, 'v2')
+
+    // 고정 화면: 같은 자리(같은 앱을 보고 있다), 새 인스턴스, 새 HTML — 옛 화면은 teardown을 받고 놓였다
+    await expect(viewOf(page, `${pid}/reloader`).locator('#marker')).toHaveText('v2')
+    await expect(pinned.getByTestId('pinned-updated')).toHaveText('Updated')
+    expect(await pinnedInstance(page)).not.toBe(firstPinned)
+    expect(await teardownsOf(page, firstPinned)).toBe(1)
+    expect(await closedViews(page)).toContain(firstPinned)
+    expect(await page.evaluate(() => (window as any).__store.getState().focusedApp)).toEqual({ projectId: pid, appId: 'reloader' })
+    expect(await openedViews(page)).toBe(2)
+
+    // 대화 안 화면: 가려져 있던 동안에도 다시 열렸다 — 도구를 다시 부르지 않고, 들고 있던 입력과 결과로
+    await expect.poll(() => reopenedViews(page)).toEqual([{ sessionId: sid, callId: 'toolu_r' }])
+    expect(await closedViews(page)).toContain(firstInline)
+    await page.getByTestId(`session-row-${sid}`).click()
+    const again = rowOf(page, 'toolu_r').getByTestId('inline-view')
+    await expect(viewIn(again).locator('#marker')).toHaveText('v2')
+    expect(await logged(viewIn(again), 'tool-input')).toEqual({ q: 'weather' })
+    expect(await logged(viewIn(again), 'tool-result')).toEqual({ forecast: 'sunny' })
+    await expect(again.getByTestId('inline-view-updated')).toHaveText('Updated')
+  })
+
+  test('같은 코드로 다시 뜬 앱과 "바뀌었다" 알림에는 다시 열지 않고, 새 코드로 너무 자주 뜨면 세 번 뒤에 멈추고 사람에게 맡긴다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await version(page, pid, 'v1')
+    const { sid } = await inlineView(page, pid)
+    await page.getByTestId(`app-row-${pid}/reloader`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/reloader`)
+    const marker = viewOf(page, `${pid}/reloader`).locator('#marker')
+    await expect(marker).toHaveText('v1')
+
+    // 죽었다가 같은 코드로 살아났다, 그리고 앱 안의 값이 바뀌었다는 알림 — 다시 열 까닭이 아니다
+    await version(page, pid, 'v1', 'crashed')
+    await version(page, pid, 'v1', 'running')
+    for (let i = 0; i < 3; i++) await emit(page, { type: 'external_app_state_changed', appId: 'reloader', projectId: pid })
+    await page.waitForTimeout(500)
+    expect(await openedViews(page)).toBe(1)
+    expect(await reopenedViews(page)).toEqual([])
+
+    // 새 코드로 세 번 — 세 번 다 다시 연다
+    for (const [i, v] of ['v2', 'v3', 'v4'].entries()) {
+      await version(page, pid, v)
+      await expect(marker).toHaveText(v)
+      expect(await openedViews(page)).toBe(i + 2)
+      await expect.poll(async () => (await reopenedViews(page)).length).toBe(i + 1)
+    }
+    // 1분 안의 넷째 — 저절로 열지 않는다. 바뀌었다는 표시와 다시 여는 단추만
+    await version(page, pid, 'v5')
+    await expect(pinned.getByTestId('pinned-stale')).toHaveText('Changed · Reload')
+    await expect
+      .poll(() => page.evaluate(({ s }) => (window as any).__store.getState().inlineViews[s].toolu_r.stale as boolean | undefined, { s: sid }))
+      .toBe(true)
+    await page.waitForTimeout(500)
+    expect(await openedViews(page)).toBe(4)
+    expect(await reopenedViews(page)).toHaveLength(3)
+    await expect(marker).toHaveText('v4')
+
+    // 사람이 누르면 연다 — 한 번, 그리고 그 뒤로 조용하다
+    await pinned.getByTestId('pinned-stale').click()
+    await expect(marker).toHaveText('v5')
+    await expect(pinned.getByTestId('pinned-stale')).toHaveCount(0)
+    await page.waitForTimeout(500)
+    expect(await openedViews(page)).toBe(5)
+  })
+})

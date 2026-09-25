@@ -34,12 +34,14 @@ let bundle: string | null = null
 
 /**
  * 시험용 앱 화면. 받은 것은 모두 `#log`에 한 줄씩 적는다(시험이 프레임 안을 읽는다).
- * 단추는 화면이 host에 부탁할 수 있는 것을 하나씩 해 본다.
+ * 단추는 화면이 host에 부탁할 수 있는 것을 하나씩 해 본다. `marker`는 이 HTML이 어느 판인지 화면에 적는다 —
+ * 앱이 새 코드로 다시 뜬 뒤 화면이 새 HTML을 읽었는지를 시험이 본다(M4 C-4).
  */
-export function fixtureViewHtml(opts: { hangTeardown?: boolean; ignoreNotifications?: boolean } = {}): string {
+export function fixtureViewHtml(opts: { hangTeardown?: boolean; ignoreNotifications?: boolean; marker?: string } = {}): string {
   bundle ??= extAppsInline()
   return `<!doctype html><html><head><meta charset="utf-8"><title>fixture view</title></head>
 <body style="margin:0;padding:8px;font:12px sans-serif;background:#fff;color:#000">
+${opts.marker ? `<p id="marker" data-testid="marker">${opts.marker}</p>` : ''}
 <div>
   <button id="call">call</button>
   <button id="spoof">spoof</button>
