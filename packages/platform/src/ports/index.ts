@@ -483,6 +483,38 @@ export interface CommandRunPort {
 }
 
 /**
+ * 앱 화면 하나를 띄울 곳 (M4 B-3). host가 만든다. `url`에는 실행마다 바뀌는 비밀 칸이 들어
+ * 있다. 로그나 화면에 적지 않는다.
+ */
+export type AppViewFrame = {
+  url: string
+  /** 바깥 iframe의 `allow` — 앱이 선언하고 host가 받아들인 기능만 */
+  allow: string
+  /** host가 받아들인 CSP 도메인과 권한. 화면에 `hostCapabilities.sandbox`로 알려 준다 */
+  sandbox: {
+    csp: { connectDomains: string[]; resourceDomains: string[]; frameDomains: string[]; baseUriDomains: string[] }
+    permissions: Record<string, object>
+  }
+}
+
+/**
+ * 화면이 부른 호출이 **어느 화면에서** 왔는가. 앱은 (프로젝트, id)로 정해지므로 projectId를
+ * 함께 싣는다(`null`은 사용자 폴더 앱). instanceId가 있으면 host가 그 화면의 앱과 대조한다.
+ */
+export type AppCallOrigin = { projectId?: string | null; instanceId?: string }
+
+/** MCP `tools/call`의 답 모양 (규격 그대로 — 이 층은 운반만 한다) */
+export type AppToolResult = {
+  content: Record<string, unknown>[]
+  structuredContent?: Record<string, unknown>
+  isError?: boolean
+  _meta?: Record<string, unknown>
+}
+
+/** MCP `resources/read`의 답 모양 */
+export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
+
+/**
  * 앱 상태 창구 (#81) — 앱마다 JSON 문서 하나 + 켜짐 여부. 앱별 포트를 만들지 않는다:
  * 문서의 의미는 앱만 알고, 이 창구는 운반만 한다.
  */
@@ -492,6 +524,18 @@ export interface AppsPort {
   setEnabled(appId: AppId, enabled: boolean): Promise<void>
   /** 사람이 앱 도구를 직접 부른다 (#81) — 업무 만들기 등. 사람은 프로필 판정을 안 받는다 */
   invoke(appId: AppId, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
+  /**
+   * 앱 화면을 띄울 주소 (M4 B-3). `hostOrigin`은 부르는 화면의 출처(`location.origin`)다.
+   * 샌드박스 프록시는 그 출처와만 메시지를 주고받는다.
+   */
+  viewFrame(appId: AppId, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }): Promise<AppViewFrame>
+  /**
+   * 화면이 부르는 앱 도구 (브리지의 `oncalltool`). 답은 MCP 결과 그대로라 화면에 바로 돌려준다.
+   * 공개 범위(`app`만)와 기록은 host의 중개가 맡는다.
+   */
+  callTool(appId: AppId, tool: string, args: Record<string, unknown>, from?: AppCallOrigin): Promise<AppToolResult>
+  /** 화면이 자기 앱의 리소스를 읽는다 (브리지의 `onreadresource`) */
+  readResource(appId: AppId, uri: string, from?: AppCallOrigin): Promise<AppResourceResult>
 }
 
 /**

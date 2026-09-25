@@ -12,6 +12,8 @@ import { SessionManager } from '../../agent-host/src/sessions/manager.js'
 import { Store } from '../../agent-host/src/dev-services/store.js'
 import { createRpcHandler } from '../../agent-host/src/rpc.js'
 import { UpdateService } from '../../agent-host/src/updates.js'
+import { ViewHost } from '../../agent-host/src/views/view-host.js'
+import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
 import { APP_VERSION } from '@cc/protocol'
@@ -484,5 +486,70 @@ describe('Platform 계약: 경로 구분자 (#47)', () => {
     )
     // 그리고 안쪽은 그대로 받는다 — 거절이 전부를 막는 것이면 규칙이 아니라 고장이다
     expect((await mock.fs.importFile(p.id, '', 'ok.txt', btoa('x'))).path).toBe('ok.txt')
+  })
+})
+
+/**
+ * 앱 화면의 세 문 (M4 B-3) — web 구현이 host의 RPC에 그대로 잇는지.
+ *
+ * 목과 같은 스위트를 돌릴 수 없는 자리다. 목에는 화면 주소를 지을 host가 없다(e2e는 진짜
+ * ViewHost를 목에 꽂아 쓴다). 그래서 web 구현만 진짜 host와 ViewHost에 붙여 본다. 문서를 읽는
+ * 쪽(ViewSource)만 대역이다.
+ */
+describe('Platform 계약: 앱 화면 (web + 실 host)', () => {
+  it('열린 화면은 비밀 경로의 주소를 받고, 리소스와 도구가 host로 간다', async () => {
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const secret = 'contract-view-secret-0123456789abcdefgh'
+    let port: number | null = null
+    const reads: string[] = []
+    const views = new ViewHost({
+      secret,
+      allowedOrigins: ['http://127.0.0.1:5174'],
+      source: {
+        async readResource(app, uri) {
+          reads.push(`${app.projectId}/${app.appId} ${uri}`)
+          return { contents: [{ uri, mimeType: 'text/html;profile=mcp-app', text: '<p>v</p>' }] }
+        },
+      },
+      ports: new OriginPorts({ load: () => null, save: () => {} }, { log: () => {} }),
+      hostPort: () => port,
+      log: () => {},
+    })
+    const server = new HostServer({
+      port: 0,
+      token: 'contract',
+      onRpc: createRpcHandler(mgr, adapters, { views }),
+      http: { secret, routes: views.routes },
+    })
+    port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+      const { instanceId } = views.open({ projectId: 'p1', appId: 'notes' }, 'ui://notes/board')
+
+      const frame = await platform.apps.viewFrame('notes', instanceId, { projectId: 'p1', hostOrigin: 'http://127.0.0.1:5174' })
+      expect(frame.url.startsWith(`http://127.0.0.1:${port}/${secret}/views/${instanceId}/?`)).toBe(true)
+      expect(frame.sandbox.csp.connectDomains).toEqual([])
+      // 앱 이름이나 프로젝트가 다르면 같은 인스턴스라도 열리지 않는다
+      await expect(platform.apps.viewFrame('other', instanceId, { projectId: 'p1', hostOrigin: 'http://127.0.0.1:5174' })).rejects.toThrow(/not open/)
+      await expect(platform.apps.viewFrame('notes', instanceId, { hostOrigin: 'http://127.0.0.1:5174' })).rejects.toThrow(/not open/)
+
+      const res = await platform.apps.readResource('notes', 'ui://notes/data', { projectId: 'p1', instanceId })
+      expect(res.contents[0]).toMatchObject({ uri: 'ui://notes/data', text: '<p>v</p>' })
+      expect(reads.at(-1)).toBe('p1/notes ui://notes/data')
+
+      // 도구 호출은 사람의 호출과 같은 문(apps.invoke)으로 가고, 답은 MCP 결과 모양이다
+      const r = await platform.apps.callTool('control', 'control_create_task', { title: 42 })
+      expect(r.isError).toBe(true)
+      expect(r.content[0]).toMatchObject({ type: 'text' })
+    } finally {
+      await platform.dispose()
+      await mgr.disposeAll()
+      await views.dispose()
+      await server.close()
+      store.close()
+    }
   })
 })

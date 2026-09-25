@@ -38,6 +38,10 @@ import {
 import type {
   AgentPort,
   AlertKind,
+  AppCallOrigin,
+  AppResourceResult,
+  AppToolResult,
+  AppViewFrame,
   ConnectionState,
   FsEntry,
   FsFile,
@@ -576,8 +580,40 @@ export class MockPlatform implements Platform {
       }
       return { text: `mock: ${name}` }
     },
+    /**
+     * 앱 화면 (M4 B-3). 목에는 host가 없어서 주소를 지을 수 없다. 시험이 진짜 host의 프록시를
+     * 띄우고 여기에 주소를 주는 함수를 꽂는다(e2e/app-frame.spec.ts). 꽂지 않으면 화면이 없는
+     * 것이다.
+     */
+    viewFrame: async (appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => {
+      if (!this.viewFrameProvider) throw new Error('This app view is not open')
+      return this.viewFrameProvider(appId, instanceId, opts)
+    },
+    /** 화면의 도구 호출 — 적어 두고, 시험이 꽂은 답을 준다. 기본 답은 부른 것을 되돌려 준다 */
+    callTool: async (appId: string, tool: string, args: Record<string, unknown>, from?: AppCallOrigin) => {
+      this.appToolCalls.push({ appId, tool, args, from: from ?? {} })
+      if (this.appToolHandler) return this.appToolHandler(appId, tool, args, from ?? {})
+      return { content: [{ type: 'text', text: `mock: ${tool}` }], structuredContent: { appId, tool, args } }
+    },
+    readResource: async (appId: string, uri: string, from?: AppCallOrigin) => {
+      this.appResourceReads.push({ appId, uri, from: from ?? {} })
+      const found = this.appResources.get(`${appId} ${uri}`)
+      if (!found) throw new Error(`No resource ${uri} in app ${appId}`)
+      return found
+    },
   }
   lastInvoke: { appId: string; name: string; args: Record<string, unknown> } | null = null
+  /** 화면 주소를 짓는 쪽 (시험이 꽂는다) */
+  viewFrameProvider:
+    | ((appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => Promise<AppViewFrame>)
+    | null = null
+  /** 화면이 부른 도구 — 무엇이 어느 앱 이름으로 나갔는지를 시험이 본다 */
+  readonly appToolCalls: { appId: string; tool: string; args: Record<string, unknown>; from: AppCallOrigin }[] = []
+  appToolHandler: ((appId: string, tool: string, args: Record<string, unknown>, from: AppCallOrigin) => AppToolResult | Promise<AppToolResult>) | null =
+    null
+  /** `${appId} ${uri}` → 읽기 결과 */
+  readonly appResources = new Map<string, AppResourceResult>()
+  readonly appResourceReads: { appId: string; uri: string; from: AppCallOrigin }[] = []
 
   /** 도구 감지 결과 — 테스트가 "로그인 안 된 도구"를 만들 수 있게 밖에 둔다 */
   detected: ToolStatus[] = [

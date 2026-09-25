@@ -270,6 +270,24 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.setEnabled', { appId, enabled })
       },
       invoke: (appId, name, args) => rpc.call('apps.invoke', { appId, name, args }),
+      // 앱 화면 (M4 B-3). 주소도 비밀도 host가 만든다 — 이쪽은 부르는 화면의 출처만 알린다
+      viewFrame: (appId, instanceId, { projectId = null, hostOrigin }) =>
+        rpc.call('apps.viewFrame', { appId, projectId, instanceId, hostOrigin }),
+      /*
+        화면의 도구 호출은 사람의 호출과 **같은 문**(`apps.invoke`)으로 간다. 내장 앱과 외부
+        앱이 한 경로를 지나고, 공개 범위와 기록은 host의 중개가 한 번에 맡는다(플랜 "호출
+        경로는 하나다", 런타임 브랜치와 합의).
+
+        이 브랜치의 `apps.invoke`는 아직 글자(`text`)만 돌려주므로 MCP 결과로 감싼다. 런타임
+        브랜치는 `projectId`를 받고 원래 결과(`result`)를 함께 돌려준다. 합칠 때 여기서
+        `projectId`를 넘기고 `result`를 먼저 쓴다.
+      */
+      callTool: async (appId, tool, args) => {
+        const r = await rpc.call('apps.invoke', { appId, name: tool, args })
+        return { content: [{ type: 'text', text: r.text }], ...(r.isError ? { isError: true } : {}) }
+      },
+      readResource: (appId, uri, from) =>
+        rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),
