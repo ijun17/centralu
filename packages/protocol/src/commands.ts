@@ -1234,6 +1234,20 @@ export const RpcMethods = {
       findings: z.array(z.object({ level: z.enum(['problem', 'warning']), where: z.string(), message: z.string() })),
     }),
   },
+  /**
+   * 앱의 비밀 값 하나를 넣거나 바꾸거나(`value`) 지운다(`null`) (M4 E, 비밀 칸). 값은 이 기계의 0600 파일에만 산다 — 답에도,
+   * 목록에도, 로그와 실행 기록에도 싣지 않는다(목록은 이름마다 있음·없음만 말한다, `ExternalAppInfo.secrets`). 넣는 것은
+   * 매니페스트가 선언한 이름만이다. 떠 있는 앱은 진행 중인 호출을 마친 뒤 내려가고, 다음에 필요할 때 새 값으로 뜬다.
+   */
+  'apps.setSecret': {
+    params: z.object({
+      appId: AppId,
+      projectId: z.string().nullable(),
+      name: z.string(),
+      value: z.string().max(16 * 1024).nullable(),
+    }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: SessionId.optional() }),

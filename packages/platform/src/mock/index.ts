@@ -977,7 +977,26 @@ export class MockPlatform implements Platform {
           month: { runs: 0, durationMs: 0, tokens: null },
         },
       ),
+    /**
+     * 비밀 (M4 E). 실물(`ExternalApps.updateSecret`)처럼: 선언한 이름(목록의 `secrets`)만 넣고, 빈 값은 같은 말로 거절하며,
+     * 목록에는 있음·없음만 싣고 방송한다. 지우기는 이름을 가리지 않는다. 받은 값은 시험이 볼 수 있게 `secretWrites`에 적는다 —
+     * 화면(DOM)에 값이 남지 않는지는 시험이 따로 본다.
+     */
+    setSecret: async (appId: string, projectId: string | null, name: string, value: string | null): Promise<void> => {
+      const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      if (!a) throw new Error(`그런 앱이 없습니다: ${projectId ?? 'user'}/${appId}`)
+      const slot = a.secrets?.find((s) => s.name === name)
+      if (value !== null) {
+        if (!slot) throw new Error(`This app does not declare a secret named ${name}`)
+        if (value.length === 0) throw new Error('Enter a value, or clear the secret instead')
+      }
+      this.secretWrites.push({ appId, projectId, name, value })
+      if (slot) slot.set = value !== null
+      this.emit({ type: 'external_apps_changed' })
+    },
   }
+  /** host에 닿은 비밀 넣기·지우기 (M4 E) — 무엇이 어느 앱의 어느 이름으로 갔는지를 시험이 본다 */
+  readonly secretWrites: { appId: string; projectId: string | null; name: string; value: string | null }[] = []
   /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
   /**

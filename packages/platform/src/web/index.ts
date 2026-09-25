@@ -353,6 +353,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.forgetPermission', { appId, projectId, capability })
       },
       usage: (appId, projectId) => rpc.call('apps.usage', { appId, projectId }),
+      setSecret: async (appId, projectId, name, value) => {
+        await rpc.call('apps.setSecret', { appId, projectId, name, value })
+      },
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

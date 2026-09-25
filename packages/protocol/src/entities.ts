@@ -141,6 +141,11 @@ export const ExternalAppInfo = z.object({
    * 내지 않는다(내면 화면이 다시 읽다 또 실패하는 고리가 된다).
    */
   lastErrorAt: z.number().optional(),
+  /**
+   * 매니페스트가 선언한 비밀과, 이 기계에 값이 들어 있는가 (M4 E, 비밀 칸) — 선언이 없으면 없다. **값은 여기 오지 않는다**:
+   * 목록은 방송마다 다시 읽히는 것이라, 화면이 보일 것(빈 칸이 있다)만 싣는다. 값을 넣고 지우는 문은 `apps.setSecret`이다.
+   */
+  secrets: z.array(z.object({ name: z.string(), set: z.boolean() })).optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 

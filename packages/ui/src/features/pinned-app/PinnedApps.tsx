@@ -11,6 +11,7 @@ import { FixBar } from './FixBar.jsx'
 import { useAppBuilder } from './useAppBuilder.js'
 import { UpdatedCue } from './UpdatedCue.jsx'
 import { CapabilityAsk } from './CapabilityAsk.jsx'
+import { SecretsPanel, missingSecrets } from './AppSecrets.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -50,6 +51,9 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
   // 기록 판(B-7)은 화면마다 따로 연다 — 한 앱의 기록을 보던 사람이 다른 앱으로 가면 그 앱의 화면이 먼저다
   const [runsOpen, setRunsOpen] = useState(false)
+  // 비밀 판 (M4 E) — 선언한 비밀이 있는 앱에만 선다. 빈 것이 있으면 머리글의 단추가 그 수를 말한다
+  const [secretsOpen, setSecretsOpen] = useState(false)
+  const missing = missingSecrets(app)
   // 만드는 세션 (C-5) — 아래 입력줄이 말을 보내는 곳이고, 그 대화를 화면 옆에 여닫는다(BuilderPane)
   const builder = useAppBuilder(pv.projectId, pv.appId)
   const [builderOpen, setBuilderOpen] = useState(false)
@@ -228,6 +232,20 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
         >
           Runs
         </button>
+        {!!app?.info.secrets?.length && (
+          <button
+            type="button"
+            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              secretsOpen ? 'bg-graphite text-chalk' : `${missing ? 'text-chalk' : 'text-slate'} hover:bg-graphite/50 hover:text-chalk`
+            }`}
+            aria-pressed={secretsOpen}
+            onClick={() => setSecretsOpen((v) => !v)}
+            data-testid="pinned-secrets-toggle"
+            title="The secrets this app declares — which are set, and a place to set them"
+          >
+            {missing ? `Secrets · ${missing} missing` : 'Secrets'}
+          </button>
+        )}
         <button
           type="button"
           className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
@@ -253,6 +271,7 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
         {/* 보일 때만 그린다 — 숨은 동안 같은 세션을 포커스 뷰가 그리면 한 대화가 두 칸에 선다 */}
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
         {runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
+        {secretsOpen && app && <SecretsPanel app={app} />}
       </div>
     </section>
   )

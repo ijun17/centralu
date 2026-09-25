@@ -696,6 +696,12 @@ export interface AppsPort {
   forgetPermission(appId: AppId, projectId: string | null, capability: string): Promise<void>
   /** 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 지난 하루와 30일 */
   usage(appId: AppId, projectId: string | null): Promise<AppUsage>
+  /**
+   * 앱의 비밀 값 하나를 넣거나 바꾸거나(`value`) 지운다(`null`) (M4 E). 값은 host의 0600 파일에만 산다 — 이 답에도 목록에도
+   * 오지 않는다. 목록(`list`)은 선언한 이름마다 있음·없음만 말한다. 넣는 것은 매니페스트가 선언한 이름만이고, 떠 있는 앱은
+   * 다음에 필요할 때 새 값으로 뜬다.
+   */
+  setSecret(appId: AppId, projectId: string | null, name: string, value: string | null): Promise<void>
 }
 
 /**
