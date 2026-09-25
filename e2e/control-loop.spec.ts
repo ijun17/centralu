@@ -2801,6 +2801,83 @@ test('옛 대화는 버튼 클릭으로도 이어붙는다', async ({ page }) =>
   await expect(page.getByTestId('load-older')).toBeHidden()
 })
 
+/*
+ * 이벤트가 화면보다 먼저 온 세션 (#79). host가 뒤에서 만든 세션(앱이 부탁한 에이전트)은 사람이 열기 전에 일을
+ * 마친다. 그리드 칸으로만 봐도 기록이 서야 하고('이전 대화'로 가는 길이 있어야 한다), 처음 열었을 때 같은
+ * 줄이 두 번 보이면 안 된다 — 실측(2026-09-25)에서는 프롬프트와 Read·Write 카드가 두 번 보였다.
+ */
+test('이벤트가 먼저 온 세션: 그리드 칸에서도 옛 대화로 가는 길이 서고, 처음 열어도 한 줄씩이다 (#79)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  // host가 뒤에서 두 세션을 만든다 — UI는 session_created로만 안다
+  const [g, f] = await page.evaluate(async (): Promise<[string, string]> => {
+    const m = (window as any).__mock
+    const project = Object.values((window as any).__store.getState().projects)[0] as { id: string; path: string }
+    const made: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const info = await m.agents.createSession({ projectId: project.id, cwd: project.path, tool: 'claude' })
+      m.emit({ type: 'session_created', sessionId: info.id, session: info })
+      made.push(info.id)
+    }
+    return [made[0]!, made[1]!]
+  })
+  await page.evaluate(
+    ({ g, f }) => {
+      const m = (window as any).__mock
+      // 칸에만 올릴 세션: 저장된 250줄, 그리고 열기 전에 온 답 하나
+      m.messages.set(
+        g,
+        Array.from({ length: 250 }, (_, i) => ({
+          sessionId: g, seq: i + 1, role: 'user', kind: 'text', payload: { text: `기록 ${i + 1}` }, ts: Date.now(),
+        })),
+      )
+      m.emit({ type: 'message_delta', sessionId: g, role: 'assistant', text: '열기 전에 온 답' })
+      // 앱이 부탁한 에이전트: 부탁 → Read → Write → 답, 모두 사람이 열기 전에
+      m.emit({ type: 'user_message', sessionId: f, seq: 0, text: 'Make a note', fromApp: { appId: 'notes', projectId: null, name: 'Notes' } })
+      m.emit({ type: 'tool_call', sessionId: f, callId: 'r', summary: { tool: 'Read', title: 'Read note.md', readOnly: true, paths: [] } })
+      m.emit({ type: 'tool_result', sessionId: f, callId: 'r', ok: true, summary: 'empty' })
+      m.emit({ type: 'tool_call', sessionId: f, callId: 'w', summary: { tool: 'Write', title: 'Write note.md', readOnly: false, paths: [] } })
+      m.emit({ type: 'tool_result', sessionId: f, callId: 'w', ok: true, summary: 'written' })
+      m.emit({ type: 'message_delta', sessionId: f, role: 'assistant', text: 'Noted.' })
+      m.emit({ type: 'turn_complete', sessionId: f })
+    },
+    { g, f },
+  )
+
+  // 그리드 칸으로만 본다 — 포커스하지 않는다
+  await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, g])
+  await page.getByTestId('grid-button').click()
+  const cell = page.getByTestId(`grid-panel-${g}`)
+  await expect(cell.getByTestId('chat-stream')).toContainText('열기 전에 온 답')
+  await expect(cell.getByTestId('load-older')).toBeVisible()
+  // 끝까지 거슬러 읽으면 저장된 줄이 빠짐없이 한 번씩, 순서대로다
+  await expect
+    .poll(() =>
+      page.evaluate(async (id) => {
+        const store = (window as any).__store
+        await store.getState().loadOlder(id)
+        return store.getState().history[id].more
+      }, g),
+    )
+    .toBe(false)
+  const texts = await page.evaluate((id) => (window as any).__store.getState().chat[id].map((c: { text: string }) => c.text), g)
+  expect(texts).toEqual([...Array.from({ length: 250 }, (_, i) => `기록 ${i + 1}`), '열기 전에 온 답'])
+
+  // 앱이 부탁한 에이전트의 세션을 사이드바에서 처음 연다
+  await page.getByTestId(`session-row-${f}`).click()
+  const stream = page.getByTestId('chat-stream')
+  await expect(stream).toContainText('Noted.')
+  await expect
+    .poll(() => page.evaluate((id) => (window as any).__store.getState().history[id], f))
+    .toMatchObject({ loading: false, more: false })
+  await expect(page.getByTestId('load-older')).toBeHidden()
+  await expect(stream.getByTestId('msg-user').filter({ hasText: 'Make a note' })).toHaveCount(1)
+  await expect(stream.getByTestId('tool-card').filter({ hasText: 'Read note.md' })).toHaveCount(1)
+  await expect(stream.getByTestId('tool-card').filter({ hasText: 'Write note.md' })).toHaveCount(1)
+})
+
 /**
  * 대화가 뭉개져 보이던 문제 (도그푸딩 4차).
  * 저장된 기록의 seq와 실시간 항목의 seq가 따로 세어져 React key가 겹쳤고,
@@ -5164,7 +5241,8 @@ test('한 번도 들어가 본 적 없는 세션도 그리드에서 대화가 �
       },
     ])
     const store = (window as any).__store
-    store.setState({ chat: {}, focusedSessionId: null })
+    // 막 켠 앱에는 대화도 기록 커서도 없다 — 칸은 커서가 있는지로 "읽었다"를 가른다 (#79)
+    store.setState({ chat: {}, history: {}, focusedSessionId: null })
   }, id)
 
   // 사이드바를 거치지 않고 곧바로 그리드에 올린다
