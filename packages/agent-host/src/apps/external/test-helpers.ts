@@ -78,8 +78,11 @@ export function fakeBrokerHost(over: Partial<BrokerHost>): BrokerHost {
   const never = (what: string) => () => Promise.reject(new Error(`${what} is not part of this test`))
   return {
     defaultAgentTool: () => 'claude',
+    agentLabel: (tool) => (tool === 'claude' ? 'Claude Code' : tool),
     runAgent: never('runAgent'),
     hostData: never('hostData'),
+    // 묻지 않는 시험은 사람이 곧바로 허락한 것으로 친다 — 묻는 것을 보는 시험은 이 자리를 갈아 끼운다
+    askCapability: async () => 'allow',
     ...over,
   }
 }

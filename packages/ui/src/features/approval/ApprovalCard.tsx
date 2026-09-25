@@ -35,6 +35,8 @@ export function ApprovalCard({
         covered: approvalCardCovered(st, sessionId),
       })
       if (!action) return
+      // 능력 물음(M4 D-4)에는 "항상 허용"이 없다 — 답이 어차피 기억된다. a는 이 카드에서 아무 일도 하지 않는다
+      if (detail.kind === 'capability' && action.decision === 'always') return
       void respond(sessionId, requestId, action.decision, action.scope)
       if (action.decision === 'always') {
         setToast(`Always allow in ${action.scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
@@ -44,6 +46,16 @@ export function ApprovalCard({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [sessionId, requestId, detail, respond, setToast])
+
+  if (detail.kind === 'capability') {
+    return (
+      <PermissionCard
+        appName={detail.app.name}
+        text={detail.text}
+        onAnswer={(decision) => void respond(sessionId, requestId, decision)}
+      />
+    )
+  }
 
   return (
     <div
@@ -81,6 +93,48 @@ export function ApprovalCard({
         <span className="ml-auto text-[10px] text-slate">
           <Kbd alt /> <Kbd>a</Kbd> whole project
         </span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 앱의 능력 물음 카드 (M4 D-4) — 승인 카드와 같은 모양(왼쪽 레일, 머리말, y/n 단추)이다. 세션 안에서는 ApprovalCard가,
+ * 앱의 고정 화면에서는 CapabilityAsk가 이 카드를 세운다. 같은 물음이 어디에 서든 같은 얼굴이어야 사람이 같은 것으로 읽는다.
+ *
+ * "항상 허용"이 없다: 허용도 거절도 한 번의 답으로 기억된다. 되돌리는 자리(기록 판의 Permissions)를 카드가 말한다.
+ */
+export function PermissionCard({
+  appName,
+  text,
+  onAnswer,
+  testId = 'approval-card',
+}: {
+  appName: string
+  text: string
+  onAnswer: (decision: 'allow' | 'deny') => void
+  testId?: string
+}) {
+  return (
+    <div
+      className="overflow-hidden rounded border border-edge border-l-2 border-l-beacon bg-panel"
+      data-testid={testId}
+      data-kind="capability"
+    >
+      <div className="flex items-center gap-2 px-3 pt-2.5">
+        <span className="beacon text-[10px] font-medium">Awaiting approval</span>
+        <span className="text-[11px] text-slate">An app asks for a permission, and waits</span>
+      </div>
+      <p className="mt-2 px-3 text-[13px] leading-relaxed text-chalk" data-testid="approval-detail">
+        {appName} wants to {text}.
+      </p>
+      <p className="mt-1 px-3 text-[11px] leading-relaxed text-slate">
+        Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it uses. You can
+        change it later under Runs → Permissions.
+      </p>
+      <div className="mt-3 flex items-center gap-1.5 border-t border-edge bg-void/40 px-3 py-2">
+        <ActionKey k="y" label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
+        <ActionKey k="n" label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
       </div>
     </div>
   )
@@ -168,6 +222,7 @@ export function approvalKeyAction(
 export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'command') return `${d.command}\n${d.cwd}`
   if (d.kind === 'file_edit') return `${d.path}\n\n${d.diffPreview}`
+  if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
   return d.raw
 }
 

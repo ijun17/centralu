@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 35
+const LATEST_SCHEMA = 36
 
 function seeded() {
   const s = new Store()
@@ -1320,5 +1320,34 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     expect(s.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
     expect(s.listProjects()[0]?.trusted).toBe(false)
+  })
+})
+
+describe('앱의 능력에 사람이 한 답 (M4 D-4)', () => {
+  const allow = (capability: string, at: number) => ({ capability, text: `do ${capability}`, decision: 'allow' as const, stamp: 'stamp-1', decidedAt: at })
+
+  it('앱과 능력마다 한 줄 — 다시 답하면 덮고, 잊으면 지우고, 사용자 폴더 앱도 한 줄이다', () => {
+    const s = new Store()
+    s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
+    s.putAppPermission('p1/notes', 'p1', { ...allow('agent:claude', 2), decision: 'deny' })
+    s.putAppPermission('p1/notes', 'p1', allow('host:git.status', 3))
+    // project_id가 null이어도 같은 열쇠는 한 줄이다 — PRIMARY KEY에 null을 넣지 않은 까닭
+    s.putAppPermission('_user/timer', null, allow('agent:claude', 4))
+    s.putAppPermission('_user/timer', null, allow('agent:claude', 5))
+    expect(s.getAppPermission('p1/notes', 'agent:claude')).toEqual({ ...allow('agent:claude', 2), decision: 'deny' })
+    expect(s.listAppPermissions('p1/notes').map((r) => r.capability)).toEqual(['host:git.status', 'agent:claude'])
+    expect(s.listAppPermissions('_user/timer')).toEqual([allow('agent:claude', 5)])
+    s.forgetAppPermission('p1/notes', 'host:git.status')
+    expect(s.getAppPermission('p1/notes', 'host:git.status')).toBeNull()
+  })
+
+  it('프로젝트를 지우면 그 프로젝트 앱의 답도 걷는다 — 사용자 폴더 앱의 답은 남는다', () => {
+    const s = new Store()
+    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
+    s.putAppPermission('_user/timer', null, allow('agent:claude', 2))
+    s.deleteProject('p1')
+    expect(s.listAppPermissions('p1/notes')).toEqual([])
+    expect(s.listAppPermissions('_user/timer')).toHaveLength(1)
   })
 })

@@ -352,6 +352,22 @@ export function createRpcHandler(
       const r = await mgr.checkApp({ appId, projectId })
       return { ok: r.ok, text: r.text, findings: r.findings }
     },
+    // 능력 물음 (M4 D-4) — 화면에서 시작된 사슬의 것. 세션에서 시작된 것은 그 세션의 승인 카드로 `agents.respondApproval`에 온다
+    'apps.questions': async () => mgr.appQuestionList(),
+    'apps.answerQuestion': async (p) => {
+      const { questionId, decision } = RpcMethods['apps.answerQuestion'].params.parse(p)
+      mgr.answerAppQuestion(questionId, decision)
+      return { ok: true as const }
+    },
+    'apps.permissions': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.permissions'].params.parse(p)
+      return requireExternalApps().permissions({ appId, projectId })
+    },
+    'apps.forgetPermission': async (p) => {
+      const { appId, projectId, capability } = RpcMethods['apps.forgetPermission'].params.parse(p)
+      requireExternalApps().forgetPermission({ appId, projectId }, capability)
+      return { ok: true as const }
+    },
     'apps.createBuilder': async (p) => {
       const { appId, projectId, tool } = RpcMethods['apps.createBuilder'].params.parse(p)
       return mgr.createAppBuilder({ appId, projectId }, tool)

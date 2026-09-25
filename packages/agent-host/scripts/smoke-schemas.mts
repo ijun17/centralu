@@ -146,6 +146,10 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'apps.errors': { appId: 'no-such-app', projectId: P },
   // 화면을 연 적 없는 대화 — 들고 있는 화면이 없다 (M4 B-1)
   'apps.inlineViews': { sessionId: S },
+  // 능력 물음과 기억된 답 (M4 D-4) — 묻고 있는 것이 없고, 없는 앱에는 기억된 답이 없다(빈 목록). 잊기는 없는 것을 잊어도 된다
+  'apps.questions': {},
+  'apps.permissions': { appId: 'no-such-app', projectId: P },
+  'apps.forgetPermission': { appId: 'no-such-app', projectId: P, capability: 'agent:claude' },
 }
 
 /** 부를 수 없는 것과 그 이유 — 조용히 빼면 "다 봤다"로 읽힌다 */
@@ -171,6 +175,7 @@ const SKIP: Record<string, string> = {
   'apps.inlineReopen': '접힌 대화 안 화면이 필요 — 같은 시험이 관통(상한과 다시 열기)',
   'apps.askBuilder': '앱의 만드는 세션(진짜 에이전트)에 말을 넣는다 (builder-requests.test.ts·platform.contract.test.ts가 관통)',
   'apps.sendError': '앱의 오류 묶음과 만드는 세션(진짜 에이전트)이 필요 — builder-requests.test.ts가 관통',
+  'apps.answerQuestion': '화면에서 시작된 사슬의 능력 물음이 떠 있어야 함 (sessions/app-capabilities.test.ts가 진짜 앱으로 관통)',
 }
 
 const ok: string[] = []

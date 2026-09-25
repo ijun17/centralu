@@ -7,7 +7,8 @@ import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
 import { BROKER_KEEPALIVE_MS, RUN_META, serveBroker } from './broker.js'
-import { BrokerDesk, type BrokerHost } from './desk.js'
+import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityOrigin } from './desk.js'
+import { memoryCapabilityBook, type CapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
 import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
@@ -45,7 +46,9 @@ export type { AppCheckReport, CheckFinding } from './check.js'
 /** 오류 묶음의 모양 (C-6) */
 export type { AppErrorBundle } from './errors.js'
 /** 중개의 몸통 가운데 host의 코어가 채우는 것 (D) — 매니저가 `attachBrokerHost`로 준다 */
-export type { AgentRunRequest, AgentRunResult, BrokerHost } from './desk.js'
+export type { AgentRunRequest, AgentRunResult, BrokerHost, CapabilityOrigin, CapabilityQuestion, CapabilityDecisionListed } from './desk.js'
+/** 능력 승인의 답을 둘 자리 (D-4) — host가 저장소로 채운다(`app-permission-book.ts`) */
+export type { CapabilityBook, CapabilityDecision } from './capabilities.js'
 /** host 데이터의 닫힌 목록 (D-3) — 매니저가 이름마다 무엇을 줄지 채운다 */
 export { HOST_CAPABILITIES, type HostCapability } from './capabilities.js'
 
@@ -127,6 +130,12 @@ export type RuntimeTiming = {
   turnEndDebounceMs: number
   /** 기다리는 중개 호출에 살려 두는 진행 알림을 보내는 간격 (D) — `broker.ts`의 BROKER_KEEPALIVE_MS 주석 */
   brokerKeepaliveMs: number
+  /**
+   * 능력 승인(D-4)에 사람의 답을 기다리는 상한. 넘으면 거절로 닫는다(기억하지 않는다). 5분인 이유: 물음은 사람이 보는 자리(세션의
+   * 카드, 앱의 고정 화면)에 서지만 사람이 늘 거기 있지는 않다. 그동안 부탁한 앱의 호출과 그 위의 사슬이 모두 붙들린다 — 더
+   * 길면 사람이 떠난 자리에서 호출이 쌓이고, 더 짧으면 화면을 옮겨 다니는 사람이 답하기 전에 닫힌다.
+   */
+  capabilityQuestionMs: number
 }
 
 export const DEFAULT_TIMING: RuntimeTiming = {
@@ -149,6 +158,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   reloadQuietMs: 2_000,
   turnEndDebounceMs: 300,
   brokerKeepaliveMs: BROKER_KEEPALIVE_MS,
+  capabilityQuestionMs: 5 * 60_000,
 }
 
 export type ExternalAppsDeps = {
@@ -171,6 +181,11 @@ export type ExternalAppsDeps = {
   emitChanged?: (ref: AppRef, cause?: AppCaller | null) => void
   /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
   runs?: RunLedger
+  /**
+   * 능력 승인의 답을 둘 자리 (D-4) — host가 저장소로 채운다. 없으면 메모리에 둔다: host가 떠 있는 동안은 한 번 묻는다는
+   * 약속이 서고, 다시 뜨면 다시 묻는다.
+   */
+  permissions?: CapabilityBook
   /** 새 앱을 펼칠 템플릿 폴더 (C-1). 기본은 제품이 싣고 다니는 것(`appTemplateDir`) */
   templateDir?: string
   /**
@@ -241,6 +256,8 @@ type OpenRun = {
   entry: AppEntry
   pipeId: number
   tool: string
+  /** 누가 불렀나 — 사슬을 따라 올라가 누가 시작했는지 찾는 근거다 (D-4의 물음이 설 자리) */
+  caller: AppCaller
   /** 호출이 끝나거나 취소되면 선다 — 이 실행 아래의 중개 일이 함께 멈춘다 */
   abort: AbortController
 }
@@ -315,14 +332,22 @@ export class ExternalApps {
   private spawned = new Set<AppProcess>()
   /**
    * 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리. 앱끼리의 호출(D-2)은 이 런타임의 단 하나의 길(`call`)로 간다.
+   * 생성자에서 세운다 — 답을 둘 자리(`deps.permissions`)와 기다림의 상한(`timing`)이 그때 정해진다.
    */
-  private desk = new BrokerDesk({
-    has: (ref) => this.find(ref) !== undefined,
-    call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
-  })
+  private desk: BrokerDesk
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
+    this.desk = new BrokerDesk(
+      {
+        has: (ref) => this.find(ref) !== undefined,
+        name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
+        origin: (runId) => this.chainOrigin(runId),
+        call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
+      },
+      deps.permissions ?? memoryCapabilityBook(),
+      () => this.timing.capabilityQuestionMs,
+    )
     this.secrets = new SecretStore(deps.dataRoot)
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
     /*
@@ -406,6 +431,33 @@ export class ExternalApps {
    */
   attachBrokerHost(host: BrokerHost | null): void {
     this.desk.attach(host)
+  }
+
+  /**
+   * 한 앱에 대해 기억된 능력의 답 (D-4) — 최근 것부터. `current`는 지금 매니페스트의 `uses`로 답한 것인가: 아니면 더 쓰이지
+   * 않는다. 매니페스트가 틀렸거나 앱이 사라졌으면 모두 current가 아니다.
+   */
+  permissions(ref: AppRef): CapabilityDecisionListed[] {
+    const m = this.find(ref)?.manifest
+    return this.desk.permissions(ref, m ? m.uses : null)
+  }
+
+  /** 기억된 답 하나를 잊는다 (D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
+  forgetPermission(ref: AppRef, capability: string): void {
+    this.desk.forgetPermission(ref, capability)
+  }
+
+  /**
+   * 이 실행의 사슬을 누가 시작했나 (D-4) — 부모를 따라 올라가 앱이 아닌 첫 호출자. 화면이면 그 화면의 앱이 답이다(물음이 그
+   * 고정 화면에 선다). 중간의 부모가 이미 끝났으면 따라갈 수 없다 — null.
+   */
+  private chainOrigin(runId: string): CapabilityOrigin | null {
+    let run = this.openRuns.get(runId)
+    for (let hops = 0; run && run.caller.kind === 'app' && hops < 32; hops++) run = this.openRuns.get(run.caller.parentRunId)
+    if (!run) return null
+    if (run.caller.kind === 'session') return { kind: 'session', sessionId: run.caller.sessionId }
+    if (run.caller.kind === 'view') return { kind: 'view', app: run.entry.ref }
+    return null
   }
 
   /** 한 앱의 실행 기록, 최근 것부터 (B-7) — 폴더가 사라진 앱의 기록도 읽힌다 */
@@ -628,7 +680,7 @@ export class ExternalApps {
         const abort = new AbortController()
         const onUp = () => abort.abort(new Error('the caller cancelled this call'))
         for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
-        this.openRuns.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, abort })
+        this.openRuns.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, caller, abort })
         sent = true
         readOnly = found.tool.annotations?.readOnlyHint === true
         callee = proc

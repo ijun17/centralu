@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppRef } from './runtime.js'
-import { PROJECT_APPS, memoryLedger, plantApp, until } from './test-helpers.js'
+import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
 
 /**
  * 앱끼리 부르기 (M4 D-2) — 앱이 fd 3으로 `call_app`을 부탁하면 창구가 선언(`uses.apps`)과 범위를 보고, 런타임의 한 길로
@@ -57,6 +57,8 @@ beforeEach(() => {
     runs: memoryLedger(),
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
+  // 능력 승인(D-4)은 이 시험의 일이 아니다 — 사람이 곧바로 허락하는 host (묻는 것은 capabilities.test.ts가 본다)
+  rt.attachBrokerHost(fakeBrokerHost({}))
 })
 
 afterEach(async () => {

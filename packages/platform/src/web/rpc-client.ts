@@ -49,6 +49,15 @@ const LONG_CALLS = new Set<string>([
   'agents.exportHandoffRecord', // 수백 MB 롤아웃을 스캔할 수 있다 (#78)
 ])
 
+/**
+ * 화면이 부르는 앱 도구(`apps.invoke`)의 예산 (M4 D-4). 그 호출은 사람을 기다릴 수 있다 — 앱이 능력을 처음 쓰려 하면 host가
+ * 그 앱의 고정 화면에 묻고 답을 5분까지 기다린다(runtime의 capabilityQuestionMs). 그 뒤에 에이전트가 몇 분 돌 수도 있다.
+ * 30초 기본값이면 사람이 읽고 답하는 사이에 화면의 호출이 먼저 끊겨, 답을 눌러도 화면은 이미 실패를 받은 뒤다.
+ * 15분: 물음의 상한(5분)에 host → 앱 호출의 상한(10분, 진행 알림으로 다시 센다)을 더한 값이다. 화면 쪽의 기다림은
+ * AppFrame이 진행 알림으로 살려 둔다.
+ */
+const APP_CALL_TIMEOUT_MS = 15 * 60_000
+
 export class RpcClient {
   private ws: WebSocket | null = null
   private pending = new Map<string, Pending>()
@@ -260,7 +269,7 @@ export class RpcClient {
       const timer = setTimeout(() => {
         if (!this.take(id)) return
         reject(Object.assign(new Error(`RPC timed out: ${method}`), { code: 'timeout', retryable: true }))
-      }, this.opts.callTimeoutMs ?? (LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
+      }, this.opts.callTimeoutMs ?? (method === 'apps.invoke' ? APP_CALL_TIMEOUT_MS : LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
       const sent = this.ws?.readyState === 1
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, sent })
       if (sent) this.ws!.send(frame)

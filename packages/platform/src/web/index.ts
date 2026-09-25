@@ -344,6 +344,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       askBuilder: (req) => rpc.call('apps.askBuilder', req),
       errors: (appId, projectId) => rpc.call('apps.errors', { appId, projectId }),
       sendError: (appId, projectId, at) => rpc.call('apps.sendError', { appId, projectId, at }),
+      questions: () => rpc.call('apps.questions', {}),
+      answerQuestion: async (questionId, decision) => {
+        await rpc.call('apps.answerQuestion', { questionId, decision })
+      },
+      permissions: (appId, projectId) => rpc.call('apps.permissions', { appId, projectId }),
+      forgetPermission: async (appId, projectId, capability) => {
+        await rpc.call('apps.forgetPermission', { appId, projectId, capability })
+      },
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

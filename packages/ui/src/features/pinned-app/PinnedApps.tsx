@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { externalAppKey, registerPinnedFrame, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
@@ -10,6 +10,7 @@ import { ErrorTail } from './ErrorTail.jsx'
 import { FixBar } from './FixBar.jsx'
 import { useAppBuilder } from './useAppBuilder.js'
 import { UpdatedCue } from './UpdatedCue.jsx'
+import { CapabilityAsk } from './CapabilityAsk.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -52,6 +53,15 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   // 만드는 세션 (C-5) — 아래 입력줄이 말을 보내는 곳이고, 그 대화를 화면 옆에 여닫는다(BuilderPane)
   const builder = useAppBuilder(pv.projectId, pv.appId)
   const [builderOpen, setBuilderOpen] = useState(false)
+  /*
+   * 이 앱의 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 먼저 온 것부터 하나씩. 목록 자체를 고르고 여기서 거른다: 고르는 함수가
+   * 매번 새 배열을 돌려주면 스토어가 바뀔 때마다 새 값으로 읽힌다.
+   */
+  const questions = useStore((s) => s.appQuestions)
+  const asking = useMemo(
+    () => questions.find((q) => q.origin.appId === pv.appId && (q.origin.projectId ?? null) === (pv.projectId ?? null)) ?? null,
+    [questions, pv.appId, pv.projectId],
+  )
 
   /*
    * 화면의 `ui/message` (B-4) — 어느 세션으로 보낼지 묻는다(MessageAsk). 사람이 고르기 전에는 아무것도
@@ -238,6 +248,7 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
           <ErrorTail app={app} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           <FixBar app={app} pv={pv} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
+          {asking && <CapabilityAsk question={asking} visible={visible} />}
         </div>
         {/* 보일 때만 그린다 — 숨은 동안 같은 세션을 포커스 뷰가 그리면 한 대화가 두 칸에 선다 */}
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}

@@ -1,4 +1,6 @@
 import type {
+  AppPermission,
+  AppQuestion,
   AdapterCapabilities,
   AppErrorBundle,
   AppRun,
@@ -948,6 +950,24 @@ export class MockPlatform implements Platform {
       this.deliverToBuilder(builderId, builderErrorFrame({ appId, name: info.name ?? appId }, bundle.text))
       return { sessionId: builderId }
     },
+    // 능력 물음 (M4 D-4) — 실물처럼: 목록을 읽고, 답하면 목록에서 빼고 방송한다. 닫힌 물음이면 거절한다
+    questions: async (): Promise<AppQuestion[]> => structuredClone(this.appQuestionList),
+    answerQuestion: async (questionId: string, decision: 'allow' | 'deny') => {
+      const at = this.appQuestionList.findIndex((q) => q.id === questionId)
+      if (at === -1) throw new Error('That question is no longer open — it timed out, or the app stopped waiting')
+      this.appQuestionList.splice(at, 1)
+      this.answeredQuestions.push({ questionId, decision })
+      this.emit({ type: 'external_app_questions_changed' })
+      this.questionWaiters.get(questionId)?.(decision)
+      this.questionWaiters.delete(questionId)
+    },
+    permissions: async (appId: string, projectId: string | null): Promise<AppPermission[]> =>
+      structuredClone(this.appPermissions.get(`${projectId ?? '_user'}/${appId}`) ?? []),
+    forgetPermission: async (appId: string, projectId: string | null, capability: string) => {
+      const key = `${projectId ?? '_user'}/${appId}`
+      this.appPermissions.set(key, (this.appPermissions.get(key) ?? []).filter((p) => p.capability !== capability))
+      this.forgottenPermissions.push({ appId, projectId, capability })
+    },
   }
   /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
@@ -988,6 +1008,24 @@ export class MockPlatform implements Platform {
   }
   /** 앱 → 만드는 세션 (M4 C-2). 열쇠는 `(프로젝트 ?? _user)/앱` — 실물의 명부(APP_BUILDERS_KEY)와 같은 모양 */
   readonly appBuilders = new Map<string, string>()
+  /**
+   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 시험이 `askAppQuestion`으로 세운다. host처럼 방송하고, 답이 오면 그 물음을
+   * 기다리던 쪽(시험이 꽂은 `appToolHandler`)을 푼다. 그래서 "답하면 멈춰 있던 화면의 호출이 이어진다"를 실제 길로 본다.
+   */
+  appQuestionList: AppQuestion[] = []
+  readonly answeredQuestions: { questionId: string; decision: 'allow' | 'deny' }[] = []
+  private questionWaiters = new Map<string, (d: 'allow' | 'deny') => void>()
+  /** 기억된 답 (M4 D-4) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다 */
+  readonly appPermissions = new Map<string, AppPermission[]>()
+  readonly forgottenPermissions: { appId: string; projectId: string | null; capability: string }[] = []
+  /** 시나리오 헬퍼: host가 능력 물음을 세운다 — 답이 오면 풀리는 약속을 돌려준다 (Playwright에서 사용) */
+  askAppQuestion(q: AppQuestion): Promise<'allow' | 'deny'> {
+    this.appQuestionList.push(structuredClone(q))
+    this.emit({ type: 'external_app_questions_changed' })
+    return new Promise((resolve) => this.questionWaiters.set(q.id, resolve))
+  }
+  /** 승인 카드에 한 답 — 어느 카드에 무엇을 눌렀는지를 시험이 본다 */
+  readonly approvalAnswers: { sessionId: string; requestId: string; decision: ApprovalDecision }[] = []
   /** 다시 시작한 앱 — Restart 단추가 host에 닿았는지를 시험이 본다 */
   readonly restarts: { appId: string; projectId: string | null }[] = []
   /**
@@ -1290,7 +1328,21 @@ export class MockPlatform implements Platform {
       decision: ApprovalDecision,
       _scope?: ApprovalScope,
     ) => {
+      this.approvalAnswers.push({ sessionId, requestId, decision })
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
+      /*
+       * 능력 물음의 카드(M4 D-4, host가 `cap-`로 세운다)는 어댑터의 카드가 아니다 — host가 답을 받으면 기다리던 앱의 호출이
+       * 이어지고, 에이전트는 그 도구의 결과를 받아 턴을 마친다. 목은 그 이어짐을 흉내 낸다.
+       */
+      if (requestId.startsWith('cap-')) {
+        this.emit({ type: 'state_change', sessionId, state: 'working' })
+        this.emit({
+          type: 'message_delta',
+          sessionId,
+          role: 'assistant',
+          text: decision === 'deny' ? 'The app was not allowed to go on.' : 'The app went on and finished.',
+        })
+      }
       this.emit({ type: 'turn_complete', sessionId })
     },
     answerQuestion: async (sessionId: string, requestId: string, answers: QuestionAnswer[]) => {

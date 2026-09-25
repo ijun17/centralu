@@ -828,7 +828,12 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
   const active = useStore(
     (s) => s.view === 'app' && s.focusedApp?.appId === app.appId && (s.focusedApp?.projectId ?? null) === app.projectId,
   )
-  const hint = APP_HINT[app.info.status]
+  /*
+   * 이 앱의 화면에서 시작된 사슬이 사람의 답을 기다린다 (M4 D-4) — 고정 화면을 보고 있지 않아도 여기서 보인다. 누르면 그
+   * 화면이 열리고 물음이 거기 서 있다. 밝은 말로 적는다: 막힌 것의 몫이다(팔레트 규칙).
+   */
+  const asking = useStore((s) => s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId))
+  const hint = asking ? 'asks you' : APP_HINT[app.info.status]
   return (
     <li className="relative">
       <button
@@ -849,8 +854,9 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         <span className="truncate">{app.title}</span>
         {hint && (
           <span
-            className={`readout ml-auto shrink-0 text-[10px] ${app.status.tone === 'alert' ? 'text-chalk' : 'text-slate'}`}
+            className={`readout ml-auto shrink-0 text-[10px] ${asking || app.status.tone === 'alert' ? 'text-chalk' : 'text-slate'}`}
             data-testid="app-row-hint"
+            data-asking={asking || undefined}
           >
             {hint}
           </span>

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AppToolResult, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import { storePermissionBook } from '../app-permission-book.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps, type RuntimeTiming } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
@@ -95,6 +96,11 @@ export type BrokerWorld = {
   rpc: ReturnType<typeof createRpcHandler>
   events: NormalizedEvent[]
   projectId: string
+  /**
+   * 능력 물음의 카드(M4 D-4)에 사람 대신 답한다 — 기본은 허락이다(묻는 것 자체를 보지 않는 시험). null이면 아무도 답하지 않고,
+   * 시험이 카드를 보고 직접 답한다.
+   */
+  answerCapabilities: 'allow' | 'deny' | null
   /** 픽스처 앱(`--mode mediation`)을 심는다 — 프로젝트(`repo`) 또는 사용자 폴더에, 매니페스트의 `uses`와 함께 */
   plant(where: 'project' | 'user', id: string, uses: Record<string, unknown>): string
   /** 세션의 에이전트가 붙은 앱의 `ask_broker`를 부른다 — 에이전트가 앱 도구를 부르는 그 길(A-5) */
@@ -122,13 +128,30 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
     ['codex', codex],
   ])
   const events: NormalizedEvent[] = []
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  // eslint-disable-next-line prefer-const -- 세계(w)는 매니저를 만든 뒤에 선다. 방송을 받는 함수가 그 뒤의 w를 읽는다
+  let w: BrokerWorld
+  const onEvent = (e: NormalizedEvent) => {
+    events.push(e)
+    // 사람 대신 답한다 — 실제 사람처럼 카드가 선 **뒤에** (같은 틱에 답하면 실제로는 없는 순서를 시험하게 된다)
+    if (e.type === 'approval_request' && e.detail.kind === 'capability' && w?.answerCapabilities) {
+      const answer = w.answerCapabilities
+      setTimeout(() => {
+        try {
+          w.mgr.respondApproval(e.sessionId, e.requestId, answer)
+        } catch {
+          // 그새 닫힌 카드다
+        }
+      }, 5)
+    }
+  }
+  const mgr = new SessionManager(store, adapters, onEvent, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   const rt = new ExternalApps({
     projects: () => store.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
     runs: storeRunLedger(store),
+    permissions: storePermissionBook(store),
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, ...timing },
   })
   rt.refresh()
@@ -136,7 +159,8 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   const rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   const projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
-  const w: BrokerWorld = {
+  w = {
+    answerCapabilities: 'allow',
     root,
     repo,
     dataRoot,

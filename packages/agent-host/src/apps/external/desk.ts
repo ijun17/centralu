@@ -2,7 +2,16 @@ import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
 import { z } from 'zod'
 import type { BrokerCall, BrokerToolName } from './broker.js'
-import { HOST_CAPABILITIES, isHostCapability, type HostCapability } from './capabilities.js'
+import {
+  HOST_CAPABILITIES,
+  capabilityKey,
+  hostCapabilityText,
+  isHostCapability,
+  usesStamp,
+  type Capability,
+  type CapabilityBook,
+  type HostCapability,
+} from './capabilities.js'
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
 
@@ -52,6 +61,13 @@ export type AgentRunResult = {
 export type DeskApps = {
   /** 이 이름의 앱이 목록에 있나 — 틀린 매니페스트·신뢰하지 않은 프로젝트의 앱도 있다(부르면 그 이유로 거절된다) */
   has(ref: AppRef): boolean
+  /** 사람이 읽는 앱 이름 — 매니페스트의 `name`, 없으면 id */
+  name(ref: AppRef): string
+  /**
+   * 이 실행이 속한 사슬을 **누가 시작했나** (D-4) — 부모를 따라 올라가 앱이 아닌 첫 호출자. 세션이면 그 세션에, 화면이면
+   * 그 앱의 고정 화면에 물음이 선다. 사슬을 더는 따라갈 수 없으면(부모가 이미 끝났다) null이다.
+   */
+  origin(runId: string): CapabilityOrigin | null
   call(
     ref: AppRef,
     tool: string,
@@ -59,6 +75,23 @@ export type DeskApps = {
     caller: { kind: 'app'; parentRunId: string },
     opts: { signal: AbortSignal },
   ): Promise<{ status: string; result: CallToolResult | null; error: string | null }>
+}
+
+/** 물음이 설 자리 — 사슬을 시작한 세션, 또는 사슬을 시작한 화면의 앱 */
+export type CapabilityOrigin = { kind: 'session'; sessionId: string } | { kind: 'view'; app: AppRef }
+
+/** 사람에게 묻는 것 하나 (D-4) — 창구가 만들어 host에 넘긴다 */
+export type CapabilityQuestion = {
+  /** 능력을 쓰려는 앱 */
+  app: AppRef
+  appName: string
+  /** 기억의 열쇠 (`capabilityKey`) */
+  capability: string
+  /** 무엇을 하려는가 — "run an agent (Claude Code) in a new session" */
+  text: string
+  origin: CapabilityOrigin
+  /** 이때까지 답이 없으면 창구가 거절로 닫는다 */
+  expiresAt: number
 }
 
 /** 중개의 몸통 가운데 host의 코어가 채우는 것 */
@@ -75,6 +108,13 @@ export type BrokerHost = {
    * 프로젝트, 사용자 폴더 앱은 사용자 전체. 줄 수 없으면(사용자 폴더 앱의 git.status) 이유를 담아 던진다.
    */
   hostData(name: HostCapability, app: AppRef): Promise<Record<string, unknown>>
+  /** 에이전트 도구의 사람이 읽는 이름 — 물음에 적는다("Claude Code") */
+  agentLabel(tool: string): string
+  /**
+   * 사람에게 묻는다 (D-4) — 세션에서 시작된 사슬이면 그 세션의 승인 카드로, 화면에서 시작된 사슬이면 그 앱의 고정 화면에.
+   * 신호가 서면(시간이 지났다, 부탁이 취소됐다) 물음을 거두고 null로 끝낸다. 답을 기억하는 것은 창구의 일이다.
+   */
+  askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null>
 }
 
 /**
@@ -113,6 +153,22 @@ const RunAgentArgs = z.object({
   schema: z.record(z.string(), z.unknown()).optional(),
 })
 
+/** 기억된 답 하나의 보이는 모양 (`apps.permissions`) */
+export type CapabilityDecisionListed = { capability: string; text: string; decision: 'allow' | 'deny'; decidedAt: number; current: boolean }
+
+/** 거절의 이유 — 앱의 결과에도 앱의 표준에러에도 이 말이 간다. 되돌리는 길까지 적는다 */
+function deniedText(tool: BrokerToolName, appName: string, text: string): string {
+  return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
+}
+
+/** 사람이 읽을 길이 — "5 minutes", "1 second" */
+function humanDuration(ms: number): string {
+  const s = Math.max(1, Math.round(ms / 1000))
+  if (s < 60) return `${s} second${s === 1 ? '' : 's'}`
+  const m = Math.round(s / 60)
+  return `${m} minute${m === 1 ? '' : 's'}`
+}
+
 const NOT_DECLARED = 'this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so'
 
 const say = (text: string): CallToolResult => ({ content: [{ type: 'text', text }] })
@@ -143,8 +199,18 @@ export function pickAgentTool(declared: boolean | string[] | undefined, requeste
 
 export class BrokerDesk {
   private host: BrokerHost | null = null
+  /**
+   * 지금 사람에게 묻고 있는 것 — (앱, 능력)마다 하나. 같은 앱의 부탁 둘이 같은 능력을 동시에 쓰려 하면 물음은 하나만 선다
+   * (둘째는 첫째의 답을 기다린다). 기다리는 쪽이 모두 떠나거나 시간이 지나면 물음을 거둔다.
+   */
+  private asking = new Map<string, { answer: Promise<'allow' | 'deny' | null>; waiters: number; withdraw: AbortController; timedOut: boolean }>()
 
-  constructor(private apps: DeskApps) {}
+  constructor(
+    private apps: DeskApps,
+    private book: CapabilityBook,
+    /** 사람의 답을 기다리는 상한 (런타임의 timing — 시험이 줄인다) */
+    private questionMs: () => number,
+  ) {}
 
   /**
    * 답을 검증하는 JSON Schema 엔진 — MCP 서버 SDK가 도구의 outputSchema를 검증할 때 쓰는 것과 같은 것(ajv, 방언은
@@ -164,7 +230,7 @@ export class BrokerDesk {
       case 'call_app':
         return this.callApp(app, args, call)
       case 'host_data':
-        return this.hostData(app, args)
+        return this.hostData(app, args, call)
     }
   }
 
@@ -172,7 +238,7 @@ export class BrokerDesk {
    * `host_data` (D-3) — 닫힌 목록의 이름, 그리고 매니페스트가 `uses.host`에 적은 것만. 둘 다 기본은 거절이다: 목록 밖의 이름은
    * 없는 능력이고, 적지 않은 이름은 쓰지 않겠다고 한 능력이다. 답은 JSON 하나다(`structuredContent`와 같은 글).
    */
-  private async hostData(app: DeskApp, raw: Record<string, unknown>): Promise<CallToolResult> {
+  private async hostData(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
     const parsed = HostDataArgs.safeParse(raw)
     if (!parsed.success) return refuse(`host_data: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
     const { name } = parsed.data
@@ -185,6 +251,8 @@ export class BrokerDesk {
     }
     const host = this.host
     if (!host) return refuse('host_data is unavailable: this Centralu has no host data to give')
+    const denied = await this.permit('host_data', app, { kind: 'host', name }, hostCapabilityText(name, app.ref.projectId === null ? 'user' : 'project'), call)
+    if (denied) return denied
     const data = await host.hostData(name, app.ref)
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
   }
@@ -222,6 +290,9 @@ export class BrokerDesk {
         return r.valid ? null : r.errorMessage
       }
     }
+
+    const denied = await this.permit('run_agent', app, { kind: 'agent', tool: picked.tool }, `run an agent (${host.agentLabel(picked.tool)}) in a new session`, call)
+    if (denied) return denied
 
     const r = await host.runAgent({ app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) }, { signal: call.signal, progress: call.progress })
     if (!check) return say(r.text)
@@ -264,11 +335,110 @@ export class BrokerDesk {
           : `call_app: there is no app "${id}" in this project or in your user folder`,
       )
     }
+    const where = target.projectId === null && app.ref.projectId !== null ? ' from your user folder' : ''
+    const denied = await this.permit('call_app', app, { kind: 'app', target }, `call the app "${this.apps.name(target)}"${where}`, call)
+    if (denied) return denied
     const o = await this.apps.call(target, tool, args ?? {}, { kind: 'app', parentRunId: call.parentRunId }, { signal: call.signal })
     // 부른 앱이 답했다 — 답을 그대로(실패를 답했으면 실패인 채로)
     if (o.result) return o.status === 'ok' ? o.result : { ...o.result, isError: true }
     const how = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
     return refuse(`call_app: ${id}.${tool} ${how} — ${o.error ?? 'no reason was given'}`)
+  }
+
+  /**
+   * 능력 승인 (D-4) — 선언을 지난 부탁이 그 능력을 **처음** 쓸 때 사람에게 한 번 묻는다. 거절이면 앱에 돌려줄 결과를, 허락이면
+   * null을 준다.
+   *
+   * 답은 (앱, 능력)마다 기억된다 — 허락도 거절도. 사람이 한 번 답한 것을 다시 묻지 않는다는 약속이고, 잘못 누른 답은 기록 판의
+   * 목록에서 잊을 수 있다(`apps.forgetPermission`). 매니페스트의 `uses`가 바뀌면 지문이 달라져 기억한 답은 쓰이지 않는다 —
+   * 앱을 만든 쪽이 무엇을 쓸지 다시 말했으니 사람도 다시 본다.
+   *
+   * 기다리는 동안 앱의 호출은 살아 있다(중개 통로의 진행 알림, `broker.ts`). 사람이 답하지 않고 상한(5분)이 지나면 거절로
+   * 닫되 **기억하지 않는다** — 답이 아니다. 다음에 쓰려 할 때 다시 묻는다.
+   */
+  private async permit(tool: BrokerToolName, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<CallToolResult | null> {
+    const key = capabilityKey(capability)
+    const stamp = usesStamp(app.manifest.uses)
+    const known = this.book.get(app.ref, key)
+    if (known && known.stamp === stamp) return known.decision === 'allow' ? null : refuse(deniedText(tool, app.name, text))
+    const host = this.host
+    if (!host) return refuse('the broker is unavailable: there is no one to ask for permission')
+
+    const slot = `${app.ref.projectId ?? '_user'}/${app.ref.appId} ${key}`
+    let q = this.asking.get(slot)
+    if (!q) {
+      const withdraw = new AbortController()
+      const expiresAt = Date.now() + this.questionMs()
+      const entry = {
+        answer: host.askCapability(
+          { app: app.ref, appName: app.name, capability: key, text, origin: this.apps.origin(call.parentRunId) ?? { kind: 'view', app: app.ref }, expiresAt },
+          withdraw.signal,
+        ),
+        waiters: 0,
+        withdraw,
+        timedOut: false,
+      }
+      const timer = setTimeout(() => {
+        entry.timedOut = true
+        withdraw.abort()
+      }, expiresAt - Date.now())
+      timer.unref?.()
+      void entry.answer.finally(() => {
+        clearTimeout(timer)
+        if (this.asking.get(slot) === entry) this.asking.delete(slot)
+      })
+      this.asking.set(slot, entry)
+      q = entry
+    }
+    const asked = q
+    asked.waiters += 1
+    call.progress(`waiting for the person to allow ${app.name} to ${text}`)
+    let left = false
+    const leave = () => {
+      if (left) return
+      left = true
+      asked.waiters -= 1
+      // 기다리는 쪽이 모두 떠났다 — 물을 까닭이 없다
+      if (asked.waiters === 0) asked.withdraw.abort()
+    }
+    call.signal.addEventListener('abort', leave, { once: true })
+    let answer: 'allow' | 'deny' | null
+    try {
+      answer = await Promise.race([
+        asked.answer,
+        new Promise<null>((resolve) => (call.signal.aborted ? resolve(null) : call.signal.addEventListener('abort', () => resolve(null), { once: true }))),
+      ])
+    } finally {
+      call.signal.removeEventListener('abort', leave)
+      leave()
+    }
+    if (call.signal.aborted) throw new Error('cancelled while waiting for the person')
+    if (answer === null) {
+      return refuse(
+        asked.timedOut
+          ? `${tool} refused: the person did not answer within ${humanDuration(this.questionMs())} whether ${app.name} may ${text}. Nothing was remembered — Centralu asks again next time.`
+          : `${tool} refused: the question to the person was withdrawn before an answer`,
+      )
+    }
+    // 답이 둘 이상의 기다림에 닿아도 기억은 한 번이면 된다 — 같은 값을 다시 적어도 해가 없다
+    this.book.put(app.ref, { capability: key, text, decision: answer, stamp, decidedAt: Date.now() })
+    return answer === 'allow' ? null : refuse(deniedText(tool, app.name, text))
+  }
+
+  /**
+   * 한 앱에 대해 기억된 답 (D-4) — 기록 판이 보이고 잊게 한다. `current`는 지금 매니페스트의 선언과 같은 지문으로 답한 것인가다:
+   * 아니면 그 답은 더 쓰이지 않는다(다시 묻는다).
+   */
+  permissions(ref: AppRef, manifestUses: unknown | null): (CapabilityDecisionListed)[] {
+    const stamp = manifestUses === null ? null : usesStamp(manifestUses)
+    return this.book
+      .list(ref)
+      .sort((a, b) => b.decidedAt - a.decidedAt)
+      .map((d) => ({ capability: d.capability, text: d.text, decision: d.decision, decidedAt: d.decidedAt, current: d.stamp === stamp }))
+  }
+
+  forgetPermission(ref: AppRef, capability: string): void {
+    this.book.forget(ref, capability)
   }
 
   /**
