@@ -157,10 +157,14 @@ then who may call it:
   started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
   requests never run (`desk.ts`; `capabilities.test.ts`, `app-capabilities.test.ts`,
   `host-data.test.ts`, `call-app.test.ts`).
-- An agent an app asks for runs in a new session the person can see, with the `normal` preset
-  whatever the calling session uses, with no apps attached, and receives the prompt framed as the
-  app's text ("Text an app sends"; `app-agents.test.ts` "자동으로 도는 세션이 불러도 에이전트는
-  normal로 서고, 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다"). Its settings files
+- An agent an app asks for runs in a new session the person can see, with the `safe` preset
+  whatever the calling session uses and whatever the person's own settings say, with no apps
+  attached, and receives the prompt framed as the app's text ("Text an app sends";
+  `app-agents.test.ts` "자동으로 도는 세션이 불러도 에이전트는 safe로 서고(사람의 전역 bypass도
+  앱의 지시에는 건너가지 않는다), 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다").
+  A person's global bypass is trust in their own instructions, not in instructions an app wrote,
+  which may carry text the app fetched from elsewhere. Reads still run without asking; writes and
+  commands stop at an approval card in that session. Its settings files
   follow the project's trust like a worker's; a user-folder app's agent, which runs in the
   orchestrator's folder, reads only the person's own settings, never that folder's files
   (`settingFilesFor`; `setting-files.test.ts`).
@@ -185,9 +189,8 @@ Limits:
   transforms (encodes, splits), are not caught.
 - Visibility decides who may call a tool, not what the tool does.
 - A permission is per capability, not per request: once an app may run an agent, the app decides
-  what to ask it. `normal` takes its approval mode from the person's own settings, so the agent's
-  steps ask the person exactly as far as those settings make any session ask (none, with a global
-  bypass). Its session is there to read.
+  what to ask it. The agent's writes and commands still stop at an approval card (`safe`), but
+  what it may read is whatever its session can read.
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message.
 - fd 3 on Windows is untested (spike S-5).

@@ -3940,11 +3940,24 @@ export class SessionManager {
     }
     if (ctx.signal.aborted) throw new Error('the request was cancelled before the agent started')
 
+    /*
+     * **프리셋은 `safe`다** — 부른 세션과도, 사람의 전역 설정과도 무관하게.
+     *
+     * 처음에는 `normal`이었다(플랜 결정 6: 부른 세션의 `auto`를 물려받지 않게). 그런데 `normal`은
+     * 승인 방식을 사람의 `~/.claude`에서 가져온다. 전역 bypass를 쓰는 사람에게는 앱이 부른 에이전트가
+     * 승인 카드 없이 무엇이든 하게 된다 — 결정 6이 막으려던 바로 그 길이다. 이 프롬프트는 사람이 쓰지
+     * 않았다. 앱의 코드가 보냈고, 앱이 밖에서 가져온 데이터가 섞일 수 있다(프롬프트 주입의 통로).
+     * 전역 bypass는 사람이 **자기 지시**를 믿는다는 선택이지 앱이 쓴 지시까지 믿는다는 선택이 아니다.
+     * (#92에서 사용자 설정을 존중한 것과 다른 경우다 — 거기서는 지시하는 이가 여전히 사람이었다.)
+     *
+     * `safe`에서도 읽기는 묻지 않는다. 요약·조회 같은 요청은 그대로 돌고, 쓰기와 명령 실행만 이 앱 아래
+     * 세션에 승인 카드로 선다 — 사람이 볼 수 있는 자리다.
+     */
     const info = await this.createSession({
       projectId: req.app.projectId,
       cwd,
       tool: req.tool,
-      permissionPreset: 'normal',
+      permissionPreset: 'safe',
       appId: req.app.appId,
       appAgent: req.schema ? { outputSchema: req.schema } : {},
     })
