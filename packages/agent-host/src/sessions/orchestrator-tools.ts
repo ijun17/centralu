@@ -188,6 +188,7 @@ export const ORCHESTRATOR_TOOLS = [
       name: z.string().describe('사람에게 보일 이름 (예: 리소스 검색)'),
       project: z.string().optional().describe('프로젝트 이름 또는 id. 생략하면 사용자 폴더 앱'),
       description: z.string().optional().describe('무엇을 하는 앱인지 한 줄'),
+      tool: ToolName.optional().describe('만드는 세션의 도구. 생략하면 프로젝트의 기본 도구'),
     }),
   },
 ] as const
@@ -449,15 +450,24 @@ export async function runOrchestratorTool(
       name: String(args.name ?? '').trim(),
       project: typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined,
       description: typeof args.description === 'string' ? args.description : undefined,
+      tool: ToolName.safeParse(args.tool).data,
     }
     if (!spec.id || !spec.name) return { text: 'id와 name을 주세요 — 폴더 이름과 사람에게 보일 이름이 있어야 앱이 선다.', isError: true }
     const r = await tools.createApp(spec)
     if (!r.ok) return { text: `만들지 못했습니다 — ${r.error}`, isError: true }
     const where = r.projectId === null ? '사용자 폴더' : '프로젝트'
+    /*
+     * 다음 일은 만드는 세션의 몫이다 — 오케스트레이터가 앱 코드를 쓰지 않는다(손이 없다). 무엇을 만들지를 그
+     * 세션에 넘기라고 말한다. 세션이 서지 못했으면 그 이유를 그대로 싣는다.
+     */
+    const next = r.builder
+      ? `만드는 세션: ${r.builder.name} [${r.builder.sessionId}] — 무엇을 만들지 send_to_session으로 그 세션에 시키세요(사람이 말한 요구를 그대로).`
+      : `만드는 세션은 서지 못했습니다: ${r.builderError ?? '이유를 받지 못했습니다'} — 사람에게 알리세요.`
     return {
       text:
         `"${spec.name}" 앱을 만들었습니다 (${where}, id ${r.appId}): ${r.dir}\n` +
-        `템플릿 그대로의 앱(카운터)입니다. 세션에서는 app-${r.appId} 서버로 붙습니다. 앱은 처음 필요할 때 뜹니다.`,
+        `템플릿 그대로의 앱(카운터)입니다. 세션에서는 app-${r.appId} 서버로 붙습니다. 앱은 처음 필요할 때 뜹니다.\n` +
+        next,
     }
   }
 

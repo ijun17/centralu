@@ -5,7 +5,8 @@ import { proposedMcpServerNameError, profileAllows, registerAppTools, runOrchest
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
-import type { ExternalApps } from '../apps/external/runtime.js'
+import type { AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { builderRole } from './app-builder.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
@@ -201,6 +202,9 @@ function payloadText(payload: unknown): string {
   return typeof text === 'string' ? text : String(text ?? '')
 }
 
+/** 만드는 세션 명부의 열쇠 (APP_BUILDERS_KEY) — 앱은 (프로젝트, id)로 하나다 */
+const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
+
 /** 앱 설명 한 칸 — 매니페스트의 상한(2000자) 안에서, 명령이 길어도 앱이 틀린 앱이 되지 않게 */
 const clampLine = (text: string): string => (text.length > 500 ? `${text.slice(0, 499)}…` : text)
 
@@ -211,6 +215,15 @@ const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
  * (migrateApprovedMcpServers)만 읽는다 — 어댑터에 실리지 않는다.
  */
 const LEGACY_MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
+
+/**
+ * 앱마다 만드는 세션 하나 (M4 C-2) — `<프로젝트 id | _user>/<앱 id>` → 세션 id. app_settings의 JSON 한 칸이다.
+ *
+ * 세션 행에 칸을 더하지 않은 이유: 세션의 `appId`는 "이 앱이 가진 세션"이라 만드는 세션 말고도 선다(D-1의 앱이 부른
+ * 에이전트 세션이 같은 칸을 쓴다). "그 앱의 만드는 세션"은 앱 쪽에서 하나를 가리키는 관계이고, 가리킨 세션이
+ * 지워지면 조용히 무효가 되면 된다(`builderOf`가 세션을 확인한다). 스키마를 옮길 일도 없다.
+ */
+const APP_BUILDERS_KEY = 'apps.builders'
 
 /** 오케스트레이터 스킬 (#71) — 파일이 아니라 DB에 산다 (워커는 파일은 쓰지만 DB는 못 쓴다) */
 const SKILL_PROPOSALS_KEY = 'orchestrator_skill_proposals'
@@ -1006,6 +1019,11 @@ export class SessionManager {
       roleAppend?: string
       /** 이 세션을 만든 앱 (#81). 앱이 아니라 **앱 문맥의 바인딩**이 채운다 */
       appId?: string | null
+      /**
+       * 이 세션이 그 앱의 **만드는 세션**이다 (M4 C-2) — `createAppBuilder`만 채운다. 어댑터를 띄우기 **전에**
+       * 적는다: 붙일 앱과 도구 묶음(C-3)이 띄우는 그 순간 이 관계를 본다.
+       */
+      builderOf?: AppRef
     },
   ): Promise<SessionInfo> {
     const adapter = this.adapters.get(params.tool)
@@ -1130,6 +1148,7 @@ export class SessionManager {
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
     // 목록에는 보이지만 말을 걸 수 없는 '유령 세션'이 DB에 남는다 (실측으로 확인).
     let handle: SessionHandle
+    if (params.builderOf) this.setBuilder(params.builderOf, id)
     // 외부 앱 (M4 A-5) — 워커도 받는다. 핸들이 서지 못하면 아래 catch가 닫는다
     const apps = this.appsFor(info)
     try {
@@ -1151,9 +1170,8 @@ export class SessionManager {
           toolProfile: info.kind === 'orchestrator' ? 'orchestrator' : info.kind === 'coordinator' ? 'scoped' : undefined,
           systemPromptAppend:
             info.kind === 'orchestrator' ? ORCHESTRATOR_ROLE + this.skillsPrompt()
-            // 조율 세션의 역할은 창조 시 박제된 roleAppend가 전부다 (#80·#81 — 내용은 앱의 것)
-            : info.kind === 'coordinator' ? (info.roleAppend ?? undefined)
-            : undefined,
+            // 조율 세션(#80·#81)과 만드는 세션(M4 C-2)의 역할은 창조 시 박제된 roleAppend가 전부다
+            : (info.roleAppend ?? undefined),
           // host로 돌아오는 길 — 오케스트레이터 도구의 다리와, 외부 앱의 다리(M4 A-5)가 쓴다
           orchestratorBridge:
             info.kind === 'orchestrator' || info.kind === 'coordinator' || apps ? (this.endpoint?.() ?? undefined) : undefined,
@@ -1164,6 +1182,8 @@ export class SessionManager {
       )
     } catch (err) {
       apps?.close()
+      // 서지 못한 세션은 만드는 세션이 아니다 — 앱이 가리키는 곳을 비운다
+      if (params.builderOf) this.setBuilder(params.builderOf, null, id)
       // 어댑터가 실패하면 방금 만든 워크트리는 아무도 안 쓴다 — 고아 디렉토리를 남기지 않는다.
       // (여기서 실패한 세션은 저장조차 되지 않으므로, 안 지우면 되찾을 방법이 없다)
       if (worktree) {
@@ -1624,9 +1644,8 @@ export class SessionManager {
             m.kind === 'orchestrator'
               ? // 스킬(#71)은 언제나, 기억 인수인계는 새 프로세스일 때만 (기존 규칙 그대로)
                 ORCHESTRATOR_ROLE + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
-              : m.kind === 'coordinator'
-                ? (m.roleAppend ?? undefined) // 박제된 역할문 재적용 — 앱이 꺼져 있어도 그대로다
-                : undefined,
+              : // 박제된 역할문 재적용 — 조율 세션은 앱이 꺼져 있어도, 만드는 세션(C-2)은 앱이 깨져 있어도 그대로다
+                (m.roleAppend ?? undefined),
           orchestratorBridge:
             m.kind === 'orchestrator' || m.kind === 'coordinator' || this.isWorktreeManager(sessionId) || apps
               ? (this.endpoint?.() ?? undefined)
@@ -3385,8 +3404,15 @@ export class SessionManager {
           projectId = project.id
         }
         try {
-          const { app } = await this.createApp({ projectId, id: spec.id, name: spec.name, description: spec.description })
-          return { ok: true, appId: app.appId, projectId: app.projectId, dir: app.dir }
+          const { app, builder, builderError } = await this.createApp({ projectId, id: spec.id, name: spec.name, description: spec.description, tool: spec.tool })
+          return {
+            ok: true,
+            appId: app.appId,
+            projectId: app.projectId,
+            dir: app.dir,
+            ...(builder ? { builder: { sessionId: builder.id, name: builder.name } } : {}),
+            ...(builderError ? { builderError } : {}),
+          }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }
@@ -3400,10 +3426,104 @@ export class SessionManager {
    * 이름·신뢰·이미 있는 id의 판정은 런타임의 문(`ExternalApps.createApp`)이 한다. 여기서 한 번 더 적으면
    * 규칙이 두 벌이 되고, 느슨한 쪽이 곧 구멍이다(#93).
    */
-  async createApp(params: { projectId: string | null; id: string; name: string; description?: string }): Promise<{ app: ExternalAppInfo }> {
+  async createApp(params: {
+    projectId: string | null
+    id: string
+    name: string
+    description?: string
+    tool?: ToolName
+  }): Promise<{ app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }> {
     const rt = this.appsHub?.rt
     if (!rt) throw Object.assign(new Error('External apps are unavailable — there is nowhere to make an app'), { code: 'internal' })
-    return { app: rt.createApp(params) }
+    const app = rt.createApp(params)
+    /*
+     * 앱을 만들면 만드는 세션도 선다 (C-2). 세션이 서지 못해도(도구가 없거나 로그인 전) **앱은 남는다** — 폴더는
+     * 이미 생겼고 되물릴 까닭이 없다. 이유를 함께 돌려주고, 나중에 `apps.createBuilder`로 다시 세운다.
+     */
+    try {
+      return { app, builder: await this.createAppBuilder({ projectId: app.projectId, appId: app.appId }, params.tool) }
+    } catch (e) {
+      return { app, builder: null, builderError: (e as Error).message }
+    }
+  }
+
+  /**
+   * 그 앱의 만드는 세션 (M4 C-2) — 없으면 null. "앱 X의 만드는 세션 열기"가 이것을 묻는다.
+   *
+   * 명부는 가리키기만 한다. 가리킨 세션이 지워졌으면 없는 것이고, 세션의 앱 칸·프로젝트가 이 앱과 다르면(손댄
+   * 명부) 그 세션을 이 앱의 것으로 내주지 않는다 — 판정의 정본은 세션 행이다.
+   */
+  builderOf(ref: AppRef): SessionInfo | null {
+    const id = this.builderMap()[builderKey(ref)]
+    const m = id ? this.meta.get(id) : undefined
+    if (!m || m.appId !== ref.appId || m.projectId !== ref.projectId) return null
+    return m
+  }
+
+  /**
+   * 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다(앱마다 하나).
+   *
+   *   프로젝트 앱     cwd = **프로젝트 뿌리**. 인수인계 노트·파일 링크·기록 따라잡기가 모두 프로젝트 뿌리를 가정한다 —
+   *                  앱 폴더를 cwd로 하면 그것들이 깨진다(플랜 C-2). 앱의 자리와 규칙은 역할문으로 알려 준다.
+   *   사용자 폴더 앱   cwd = 앱 폴더. 기댈 프로젝트가 없다(P-6이 먼저 이런 세션을 받게 해 두었다).
+   *
+   * 도구는 부른 쪽이 고르고, 안 고르면 프로젝트의 기본 도구(사용자 폴더 앱은 오케스트레이터의 도구)다. 세션의 앱
+   * 칸(`appId`)이 그 앱이다 — 사이드바에서 앱 아래에 선다. 프리셋은 `normal`: 앱 코드를 고치는 세션이 사람 몰래
+   * 쓰지 않는다. 신뢰하지 않은 프로젝트의 앱에는 세우지 않는다 — 그 앱은 뜨지 않으니 만들어도 시험할 수 없다.
+   */
+  async createAppBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
+    const existing = this.builderOf(ref)
+    if (existing) return existing
+    const rt = this.appsHub?.rt
+    if (!rt) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    const app = rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+    if (!app) throw Object.assign(new Error(`그런 앱이 없습니다: ${ref.projectId ?? 'user'}/${ref.appId}`), { code: 'internal' })
+    if (!app.trusted) {
+      throw Object.assign(new Error('신뢰하지 않은 프로젝트의 앱에는 만드는 세션을 두지 않습니다 — 프로젝트를 신뢰하면 앱이 뜨고 시험할 수 있습니다'), { code: 'internal' })
+    }
+    let cwd = app.dir
+    let fallback: ToolName = this.store.appSetting('orchestrator_tool') === 'codex' && this.adapters.has('codex') ? 'codex' : this.firstTool()
+    if (ref.projectId !== null) {
+      const project = this.store.listProjects().find((p) => p.id === ref.projectId)
+      if (!project) throw Object.assign(new Error(`Project not found: ${ref.projectId}`), { code: 'internal' })
+      cwd = project.path
+      fallback = project.defaultTool ?? this.firstTool()
+    }
+    const info = await this.createSession({
+      projectId: ref.projectId,
+      cwd,
+      tool: tool ?? fallback,
+      permissionPreset: 'normal',
+      roleAppend: builderRole(app, cwd),
+      appId: ref.appId,
+      builderOf: ref,
+    })
+    // 이름은 사람이 읽을 이 세션의 뜻이다 — 자동 이름이 덮지 않게 사람이 정한 이름 취급 (FR-18)
+    this.rename(info.id, `${app.name ?? app.appId} · builder`)
+    return this.meta.get(info.id)!
+  }
+
+  private builderMap(): Record<string, string> {
+    try {
+      const raw = this.store.appSetting(APP_BUILDERS_KEY)
+      const map = raw ? (JSON.parse(raw) as unknown) : {}
+      return map && typeof map === 'object' && !Array.isArray(map) ? (map as Record<string, string>) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  /** 앱이 가리키는 만드는 세션을 적는다. `sessionId`가 null이면 지운다 — `only`를 주면 그 세션을 가리킬 때만 */
+  private setBuilder(ref: AppRef, sessionId: string | null, only?: string): void {
+    const map = this.builderMap()
+    const key = builderKey(ref)
+    if (sessionId === null) {
+      if (only !== undefined && map[key] !== only) return
+      delete map[key]
+    } else {
+      map[key] = sessionId
+    }
+    this.store.setAppSetting(APP_BUILDERS_KEY, JSON.stringify(map))
   }
 
   /** 사람의 승인을 기다리는 MCP 서버 제안들 */

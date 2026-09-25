@@ -306,6 +306,14 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'apps.create': async (p) => mgr.createApp(RpcMethods['apps.create'].params.parse(p)),
+    'apps.builder': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.builder'].params.parse(p)
+      return mgr.builderOf({ appId, projectId })
+    },
+    'apps.createBuilder': async (p) => {
+      const { appId, projectId, tool } = RpcMethods['apps.createBuilder'].params.parse(p)
+      return mgr.createAppBuilder({ appId, projectId }, tool)
+    },
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
       // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)
