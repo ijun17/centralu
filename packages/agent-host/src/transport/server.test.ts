@@ -1,8 +1,10 @@
 /** WS 서버 왕복 + 재연결 복원 (T3-1 통합) */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
+import { request, type IncomingHttpHeaders } from 'node:http'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins } from './server.js'
+import { sameSecret, type HttpRoute } from './http.js'
 
 const TOKEN = 'test-token'
 let server: HostServer | null = null
@@ -405,5 +407,231 @@ describe('재연결 복원 (docs/protocol.md §1)', () => {
     ])
     a.ws.close()
     b.ws.close()
+  })
+})
+
+/**
+ * 같은 포트의 HTTP 길 (M4 P-2). 앱 화면의 샌드박스 프록시가 이 포트로 서빙된다. 루프백에
+ * 붙는 누구나(같은 기계의 프로그램, 브라우저로 연 아무 웹 페이지) 두드릴 수 있는 문이라
+ * **모든 길이 비밀 칸 뒤에 있다**. 비밀이 없거나 틀리면 길이 없는 것과 같은 404가 나간다.
+ */
+describe('HTTP 길 (M4 P-2)', () => {
+  const SECRET = 'S'.repeat(20) + 'ecret-for-the-http-gate-01'
+
+  type Seen = { method: string; path: string; query: Record<string, string>; probe?: string; params: readonly string[] }
+
+  async function startHttp(routes: HttpRoute[]) {
+    server = new HostServer({ port: 0, token: TOKEN, onRpc: async () => ({ ok: true }), http: { secret: SECRET, routes } })
+    return server.listen()
+  }
+
+  /** 경로를 **그대로** 보낸다 — fetch는 `..`와 `//`를 미리 접어 버려서 공격 모양을 못 만든다 */
+  function raw(port: number, method: string, path: string, headers: Record<string, string> = {}) {
+    return new Promise<{ status: number; body: string; headers: IncomingHttpHeaders }>((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, method, path, headers }, (res) => {
+        let body = ''
+        res.on('data', (d) => (body += d))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  }
+
+  function echoRoutes(seen: Seen[]): HttpRoute[] {
+    return [
+      {
+        method: 'GET',
+        path: '/echo',
+        handle: (r) => {
+          seen.push({ method: r.method, path: r.path, query: Object.fromEntries(r.query), probe: r.headers['x-probe'] as string | undefined, params: r.params })
+          return { status: 200, headers: { 'Content-Type': 'text/plain' }, body: 'echo' }
+        },
+      },
+      {
+        method: 'POST',
+        path: '/echo',
+        handle: () => ({ status: 200, body: 'posted' }),
+      },
+      {
+        method: 'GET',
+        path: /\/items\/([a-z]+)\/(\d+)/,
+        handle: (r) => {
+          seen.push({ method: r.method, path: r.path, query: {}, params: r.params })
+          return { status: 200, body: `item ${r.params[0]} ${r.params[1]}` }
+        },
+      },
+      {
+        method: 'GET',
+        path: '/slow',
+        // 비동기 답: 처리기가 기다리는 동안 응답이 열려 있어야 한다
+        handle: async () => {
+          await new Promise((r) => setTimeout(r, 30))
+          return { status: 200, body: 'late' }
+        },
+      },
+      { method: 'GET', path: '/nothing-here', handle: () => null },
+      {
+        method: 'GET',
+        path: '/boom',
+        handle: () => {
+          throw new Error('ENOENT: /Users/someone/.centralu/secret-file')
+        },
+      },
+    ]
+  }
+
+  it('길은 메서드·경로·쿼리·헤더를 받고, 비동기로 답한다', async () => {
+    // Given: a host with gated routes.
+    const seen: Seen[] = []
+    const port = await startHttp(echoRoutes(seen))
+
+    // When: requests carry the secret, a query and a header.
+    const echo = await raw(port, 'GET', `/${SECRET}/echo?x=1&y=two`, { 'x-probe': 'hello' })
+    const posted = await raw(port, 'POST', `/${SECRET}/echo`)
+    const item = await raw(port, 'GET', `/${SECRET}/items/abc/42`)
+    const late = await raw(port, 'GET', `/${SECRET}/slow`)
+
+    // Then: the route sees everything, without the secret segment, and async answers arrive.
+    expect(echo).toMatchObject({ status: 200, body: 'echo' })
+    expect(posted).toMatchObject({ status: 200, body: 'posted' })
+    expect(item).toMatchObject({ status: 200, body: 'item abc 42' })
+    expect(late).toMatchObject({ status: 200, body: 'late' })
+    expect(seen[0]).toEqual({ method: 'GET', path: '/echo', query: { x: '1', y: 'two' }, probe: 'hello', params: [] })
+    expect(seen[1]).toMatchObject({ path: '/items/abc/42', params: ['abc', '42'] })
+  })
+
+  it('메서드가 다르거나 경로가 전체로 맞지 않으면 404다', async () => {
+    const port = await startHttp(echoRoutes([]))
+
+    // 같은 경로, 다른 메서드 / 정규식 길의 접두사·접미사 / 처리기가 null을 준 경우
+    for (const [method, path] of [
+      ['DELETE', '/echo'],
+      ['HEAD', '/echo'],
+      ['GET', '/items/abc/42/more'],
+      ['GET', '/x/items/abc/42'],
+      ['GET', '/items/ABC/42'],
+      ['GET', '/nothing-here'],
+    ] as const) {
+      const r = await raw(port, method, `/${SECRET}${path}`)
+      expect({ method, path, status: r.status }).toEqual({ method, path, status: 404 })
+    }
+  })
+
+  it('처리기가 던지면 500이고, 이유는 응답에 싣지 않는다', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const port = await startHttp(echoRoutes([]))
+      const r = await raw(port, 'GET', `/${SECRET}/boom`)
+      expect(r.status).toBe(500)
+      expect(r.body).toBe('internal error')
+      expect(r.body).not.toContain('ENOENT')
+      // host 로그에는 남지만 비밀(URL)은 적지 않는다
+      const logged = spy.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).toContain('ENOENT')
+      expect(logged).not.toContain(SECRET)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  /**
+   * 비밀 없이 닿는 것이 **아무것도 없어야** 한다. 길이 있는 경로, 없는 경로, 비밀과 한 글자
+   * 다른 값, 비밀의 접두사, 비밀을 둘째 칸에 둔 것, 인코딩·`..`로 비튼 것까지 모두 같은
+   * 404여야 한다. 상태만이 아니라 본문과 헤더까지 같아야 "비밀이 틀렸다"와 "길이 없다"가
+   * 구별되지 않는다.
+   */
+  it('비밀 없이 닿는 것은 404뿐이고, 틀린 비밀과 없는 길이 구별되지 않는다', async () => {
+    const seen: Seen[] = []
+    const port = await startHttp(echoRoutes(seen))
+    const wrong = SECRET.slice(0, -1) + (SECRET.endsWith('1') ? '2' : '1')
+    const paths = [
+      '/',
+      '/echo',
+      '/items/abc/42',
+      '/slow',
+      '/favicon.ico',
+      `/${wrong}/echo`,
+      `/${SECRET.slice(0, -1)}/echo`,
+      `/${SECRET}x/echo`,
+      `/${SECRET.toLowerCase()}/echo`,
+      `/x/${SECRET}/echo`,
+      `//${SECRET}/echo`,
+      `/%2F${SECRET}/echo`,
+      `/${encodeURIComponent(SECRET).replace('S', '%53')}/echo`,
+      `/x/../echo`,
+      `/${wrong}/../echo`,
+      `/echo?secret=${SECRET}`,
+    ]
+    const answers = new Set<string>()
+    for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) {
+      for (const path of paths) {
+        const r = await raw(port, method, path, { 'x-secret': SECRET, authorization: `Bearer ${SECRET}` })
+        answers.add(JSON.stringify({ status: r.status, body: r.body, type: r.headers['content-type'] }))
+      }
+    }
+    // 길이 없는 것과 비교: 비밀은 맞지만 없는 길
+    const noRoute = await raw(port, 'GET', `/${SECRET}/no-such-route`)
+    answers.add(JSON.stringify({ status: noRoute.status, body: noRoute.body, type: noRoute.headers['content-type'] }))
+
+    expect([...answers]).toEqual([JSON.stringify({ status: 404, body: 'not found', type: 'text/plain; charset=utf-8' })])
+    // 처리기는 한 번도 불리지 않았다
+    expect(seen).toEqual([])
+  })
+
+  it('모든 응답이 referrer를 끊는다 — 비밀이 경로에 있어서 화면이 물려받으면 안 된다', async () => {
+    const port = await startHttp(echoRoutes([]))
+    for (const path of [`/${SECRET}/echo`, '/echo', `/${SECRET}/nope`]) {
+      const r = await raw(port, 'GET', path)
+      expect(r.headers['referrer-policy']).toBe('no-referrer')
+      expect(r.headers['cache-control']).toBe('no-store')
+    }
+  })
+
+  it('게이트가 없으면 모든 HTTP 요청이 404다 (예전 기본과 같다)', async () => {
+    const { port } = await start()
+    for (const path of ['/', '/echo', `/${SECRET}/echo`]) expect((await raw(port, 'GET', path)).status).toBe(404)
+  })
+
+  it.each(['', 'short-secret', 'x'.repeat(31), `${'y'.repeat(40)}/slash`, `${'z'.repeat(40)} space`])(
+    '비밀값 %j는 거절한다 — 짧거나 URL 한 칸에 설 수 없다',
+    (secret) => {
+      expect(() => new HostServer({ port: 0, token: TOKEN, onRpc: async () => ({ ok: true }), http: { secret, routes: [] } })).toThrow(/secret/i)
+    },
+  )
+
+  it('HTTP 길이 있어도 WebSocket의 origin·토큰 규칙은 그대로다', async () => {
+    const port = await startHttp(echoRoutes([]))
+
+    const good = connect(port, 'http://127.0.0.1:5174')
+    await good.open()
+    good.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await good.wait(() => good.frames.length > 0)
+    expect(good.frames[0]).toMatchObject({ kind: 'hello_ok' })
+    good.ws.close()
+
+    for (const origin of ['http://evil.example', 'null']) {
+      const bad = connect(port, origin)
+      const observed = await new Promise<string>((resolve) => {
+        bad.ws.on('open', () => resolve('opened'))
+        bad.ws.on('error', (err) => resolve(err.message))
+      })
+      expect(observed).toContain('Unexpected server response')
+      bad.ws.close()
+    }
+
+    const wrongToken = connect(port)
+    await wrongToken.open()
+    wrongToken.send({ kind: 'hello', token: 'wrong', protocolVersion: PROTOCOL_VERSION })
+    expect(await wrongToken.closed()).toBe(4001)
+  })
+})
+
+describe('sameSecret', () => {
+  it('같은 값만 참이다 — 길이가 달라도 먼저 빠져나가지 않는다', () => {
+    expect(sameSecret('abc', 'abc')).toBe(true)
+    expect(sameSecret('abc', 'abd')).toBe(false)
+    expect(sameSecret('ab', 'abc')).toBe(false)
+    expect(sameSecret('', 'abc')).toBe(false)
   })
 })
