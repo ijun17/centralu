@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { AppToolCaller, ToolOutput, ToolProfile } from '../apps/contract.js'
-import { appGuide, APP_GUIDE_TOPICS } from './app-guide.js'
+import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
 function trustedJsonText(value: string): string {
   return JSON.stringify(value)
@@ -64,7 +64,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'list_sessions',
     description:
-      '이 앱이 관리하는 세션 목록 (프로젝트·상태·마지막 한 줄). 오케스트레이터 자신과 보관된 세션은 빠진다.',
+      '이 앱이 관리하는 세션 목록 (프로젝트·상태·마지막 한 줄). 부르는 세션 자신은 빠지고, 시야가 좁은 자리(매니저·반장)에는 자기 시야 안의 세션만 보인다.',
     schema: z.object({}),
   },
   {
@@ -161,7 +161,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'propose_worktree_session',
     description:
-      '워크트리 브랜치 세션을 **사람에게 제안한다** (#69). 브랜치 이름을 미리 채운 새 세션 창이 준비되고, 사이드바의 + 버튼에 불이 켜진다 — 만드는 것은 사람이 그 창에서 한다. 이 도구는 아무것도 만들지 않는다 (propose_project와 같은 규칙).',
+      '워크트리 브랜치 세션을 **사람에게 제안한다** (#69). 브랜치 이름을 미리 채운 새 세션 창이 준비되고, 사이드바의 그 프로젝트 줄 ⋯ 버튼에 불이 켜진다 — 만드는 것은 사람이 그 메뉴의 New session 창에서 한다. 이 도구는 아무것도 만들지 않는다 (propose_project와 같은 규칙).',
     schema: z.object({
       branch: z.string().describe('제안할 브랜치 이름. 작업 내용이 읽히는 이름으로 (예: feat/login-fix)'),
       reason: z.string().optional().describe('무슨 작업을 위한 브랜치인지 한 마디'),
@@ -404,7 +404,7 @@ export async function runOrchestratorTool(
     if (!branch) return { text: 'branch를 주세요 — 제안할 브랜치 이름이 있어야 창을 채웁니다.', isError: true }
     return {
       text:
-        `"${branch}" 브랜치 세션을 제안했습니다. 사이드바 +에 불이 켜지고, 사람이 열면 이름이 채워진 창이 뜹니다 — ` +
+        `"${branch}" 브랜치 세션을 제안했습니다. 사이드바의 프로젝트 ⋯ 버튼에 불이 켜지고, 사람이 New session을 열면 이름이 채워진 창이 뜹니다 — ` +
         '만드는 것도, 이름을 고치는 것도 사람 몫입니다.',
     }
   }
@@ -460,8 +460,8 @@ export async function runOrchestratorTool(
   }
 
   if (name === 'app_guide') {
-    // 정적 내용이라 매니저를 거치지 않는다 — 빌드에 내장된 글이 곧 능력의 전부다 (#30)
-    return appGuide(typeof args.topic === 'string' ? args.topic : undefined)
+    // 매니저를 거치지 않는다 — 빌드에 내장된 글과 도구 명부가 곧 안내의 전부다 (#30, M4 P-4)
+    return appGuide(typeof args.topic === 'string' ? args.topic : undefined, guideSeats())
   }
 
   if (name === 'update_session_settings') {
@@ -575,6 +575,22 @@ export function profileAllows(profile: ToolProfile, name: string): boolean {
 /** 지금 켜져 있고 이 묶음에 허용된 앱 도구들 — MCP·다리·스키마가 같은 목록을 쓴다 */
 export function appToolEntries(profile: ToolProfile): AppToolEntry[] {
   return appTools.filter((t) => t.enabled() && t.profiles.includes(profile))
+}
+
+/**
+ * 이 묶음이 **지금** 부를 수 있는 도구들 — 노출(orchestratorToolSchemas)과 같은 판정이다.
+ * 안내서가 자리마다 무엇을 할 수 있는지 말할 때 이것을 쓴다 (M4 P-4): 목록을 손으로 적으면
+ * 도구가 늘고 줄 때마다 안내서가 뒤처진다.
+ */
+function toolsFor(profile: ToolProfile): GuideTool[] {
+  return [
+    ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)),
+    ...appToolEntries(profile),
+  ].map((t) => ({ name: t.name, description: t.description }))
+}
+
+function guideSeats(): GuideSeats {
+  return { orchestrator: toolsFor('orchestrator'), manager: toolsFor('manager'), scoped: toolsFor('scoped') }
 }
 
 export function orchestratorToolSchemas(
