@@ -41,7 +41,7 @@ type NormalizedEvent =
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
   | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated 스냅샷
-  | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리
+  | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리 · #98: 서브에이전트의 걸음 (띄운 Agent 호출에)
   // 사람이 답해야 하는 것
   | { type: 'approval_request'; sessionId, requestId, detail: ApprovalDetail }
   | { type: 'approval_resolved';sessionId, requestId, decision }

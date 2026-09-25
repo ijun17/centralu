@@ -40,7 +40,7 @@ type NormalizedEvent =
   // in-turn progress (display-only, never persisted)
   | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated snapshot
-  | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail
+  | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail; #98: a subagent's steps, on the Agent call that spawned it
   // things a person must answer
   | { type: 'approval_request'; sessionId, requestId, detail: ApprovalDetail }
   | { type: 'approval_resolved';sessionId, requestId, decision }

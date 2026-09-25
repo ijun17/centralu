@@ -24,7 +24,68 @@ export function toolSummary(name: string, input: Json): ToolSummary {
   else if (name.endsWith('propose_project')) title = str(input.reason, name)
   // 제안 카드가 브랜치 이름을 미리 채우는 유일한 운반로다 (#69) — 제목에 싣는다
   else if (name.endsWith('propose_worktree_session')) title = str(input.branch, name)
+  /*
+   * 에이전트 카드의 제목은 맡긴 일이다 (#98). 이름만 있던 동안 카드는 전부 "Agent Agent"였고,
+   * 에이전트 셋을 나란히 띄우면 어느 카드가 무엇인지 알 길이 없었다 (도그푸딩 세션: 셋 다 같은 줄).
+   */
+  else if (name === 'Agent' || name === 'Task') title = str(input.description, name)
   return { tool: name, title, readOnly: READ_ONLY.has(name), paths }
+}
+
+/**
+ * 서브에이전트의 걸음 한 줄 — 그 에이전트 카드의 실행 중 출력에 붙는다 (#98).
+ *
+ * 부모의 카드와 같은 제목 규칙(toolSummary)을 쓰되 도구 이름을 앞에 붙인다: Bash의 제목은
+ * 명령 전문이라 이름이 없으면 무엇을 했는지가 아니라 무엇을 쳤는지만 남는다.
+ * 여러 줄 명령(heredoc)은 첫 줄만 — 카드의 꼬리는 세 줄이라 명령 하나가 통째로 차지한다.
+ */
+function stepLine(s: ToolSummary): string {
+  const lines = s.title.split('\n')
+  const first = lines[0] ?? ''
+  const head = first.slice(0, 200) + (lines.length > 1 || first.length > 200 ? ' …' : '')
+  return head === s.tool || head.startsWith(`${s.tool}:`) ? head : `${s.tool}: ${head}`
+}
+
+/** "34 tool uses · 2m 13s" — 에이전트 카드의 결과 머리 (#98) */
+function agentStats(toolUses: unknown, durationMs: unknown, status?: string): string {
+  const parts: string[] = []
+  if (status && status !== 'completed') parts.push(status)
+  if (typeof toolUses === 'number') parts.push(`${toolUses} tool use${toolUses === 1 ? '' : 's'}`)
+  if (typeof durationMs === 'number') {
+    const s = Math.round(durationMs / 1000)
+    parts.push(s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`)
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * 에이전트 카드의 결과 본문 — 걸음 수와 보고서 머리.
+ *
+ * 카드 결과는 어느 도구든 300자에서 자른다(아래 tool_result). 에이전트의 보고서는
+ * 수만 자가 예사라(도그푸딩: 15~24KB) 카드에는 머리만 오르고, 전문은 부모가 받아
+ * 자기 말로 옮긴다 — 카드가 전문을 그리면 그게 곧 "답이 두 번 보인다"다.
+ */
+function agentReport(report: string, stats: string): string {
+  return (stats ? `${stats}\n\n${report}` : report).slice(0, 300)
+}
+
+/**
+ * 이 user 메시지가 **백그라운드 에이전트를 띄운 결과**인가 (#98).
+ *
+ * 실측(probe-subagent-stream.mts): 띄우는 순간 Agent 호출의 tool_result가 바로 오고,
+ * 본문은 모델에게 하는 말이다 — "Async agent launched successfully. (This tool result is
+ * internal metadata — never quote or paste any part of it … into a user-facing reply.)".
+ * 에이전트가 실제로 끝나는 것은 한참 뒤의 system/task_notification이다.
+ * 판정은 tool_use_result의 모양(sdk-tools.d.ts AgentOutput)으로 한다: status가
+ * 'async_launched'이고 agentId가 있는 것은 에이전트뿐이다 (워크플로는 taskId를 싣는다).
+ * 결과 블록이 정확히 하나일 때만 — tool_use_result는 메시지에 하나라 블록이 여럿이면
+ * 어느 블록의 것인지 모른다.
+ */
+function backgroundLaunch(m: Json): string | null {
+  const r = (m.tool_use_result ?? {}) as Json
+  if (str(r.status) !== 'async_launched' || !str(r.agentId)) return null
+  const blocks = (((m.message as Json | undefined)?.content ?? []) as Json[]).filter((b) => str(b.type) === 'tool_result')
+  return blocks.length === 1 ? str(blocks[0]?.tool_use_id) || null : null
 }
 
 /** 승인 요청을 배너 판정 가능한 3종으로 정규화 (core/approval이 kind만 보고 판단) */
@@ -62,6 +123,38 @@ export function normalizeMessage(
   const m = msg as Json
   const type = str(m.type)
   const out: NormalizedEvent[] = []
+
+  /*
+   * 서브에이전트의 메시지는 부모의 대화가 아니다 (#98).
+   *
+   * Agent 도구로 띄운 서브에이전트의 assistant·user 메시지는 부모의 스트림으로 섞여 오고,
+   * 그것을 띄운 호출의 id를 parent_tool_use_id에 싣는다 (sdk.d.ts SDKAssistantMessage:
+   * "parent_tool_use_id is non-null when the message was produced inside a subagent started
+   * by that tool_use"). 이 필드를 한 번도 안 봐서, 서브에이전트의 도구 호출은 부모가 글을
+   * 쓰는 도중 그 자리에 박혔고(낱말 한가운데 — `남았` / Bash / `는지`), 보고서 전문
+   * (15~24KB)은 부모의 답변으로 한 번, 부모의 요약으로 또 한 번 보였다.
+   *
+   * **글은 오지 않을 것이라 믿지 않는다.** SDK 문서는 forwardSubagentText를 켜야 글이
+   * 온다고 하지만, 실측(CLI 2.1.282, 옵션 없음)에서 서브에이전트의 마지막 글이 그대로
+   * 왔다. 부모 대화에서는 무엇이든 버리고, 도구 호출만 **그것을 띄운 카드의 실행 중
+   * 출력**으로 돌린다 — 누가 했는지는 callId가 말한다. 대화에 줄을 새로 세우지 않으므로
+   * 부모의 문단도 더는 잘리지 않는다. 사용량도 버린다: 서브에이전트의 토큰이 부모의
+   * 사용량 칸을 덮어쓰고 있었다.
+   *
+   * 파일은 예외다 — 서브에이전트가 고친 파일도 이 세션의 작업 폴더에서 바뀐 파일이라
+   * 충돌 감지·하이라이트(FR-2, FR-5)에는 그대로 알린다.
+   */
+  const parent = str(m.parent_tool_use_id)
+  if (parent && (type === 'assistant' || type === 'user' || type === 'stream_event')) {
+    if (type !== 'assistant') return out
+    for (const block of ((m.message as Json | undefined)?.content ?? []) as Json[]) {
+      if (str(block.type) !== 'tool_use') continue
+      const s = toolSummary(str(block.name), (block.input ?? {}) as Json)
+      out.push({ type: 'tool_output_delta', sessionId, callId: parent, text: `${stepLine(s)}\n` })
+      if (s.paths.length) out.push({ type: 'files_touched', sessionId, paths: s.paths })
+    }
+    return out
+  }
 
   /*
    * 지금 무엇을 하는 중인가.
@@ -205,6 +298,30 @@ export function normalizeMessage(
 
   if (type === 'user') {
     const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
+    /*
+     * 백그라운드 에이전트를 띄운 결과는 **결과가 아니다** (#98). 여기서 카드를 닫으면
+     * 카드에는 모델에게만 하라는 말("never quote…")이 결과로 오르고, 에이전트가 정말로
+     * 일하는 동안 카드는 이미 끝난 것처럼 보인다. 카드를 열어 둔 채 사실만 한 줄 남기고,
+     * 끝났을 때 task_notification이 닫는다 (ClaudeStreamNormalizer).
+     */
+    const launched = backgroundLaunch(m)
+    if (launched) return [{ type: 'tool_output_delta', sessionId, callId: launched, text: 'Running in the background\n' }]
+    /*
+     * 포그라운드 에이전트의 결과는 tool_use_result에서 그린다 — SDK가 그러라고 한다
+     * (sdk.d.ts: "For the Agent/Task tool the completed shape is the subagent's final report
+     * without the model-directed agentId/usage trailer, plus run totals — render from it
+     * instead of parsing the tool_result text."). 본문을 그대로 쓰면 카드에는
+     * "[Subagent hand-back] The text below is…"로 시작하는 JSON이 오른다 (실측).
+     */
+    const agent = (m.tool_use_result ?? {}) as Json
+    const agentDone =
+      str(agent.status) === 'completed' && str(agent.agentId) && Array.isArray(agent.content) &&
+      content.filter((b) => str(b.type) === 'tool_result').length === 1
+        ? agentReport(
+            (agent.content as Json[]).map((b) => str(b.text)).join('\n'),
+            agentStats(agent.totalToolUseCount, agent.totalDurationMs),
+          )
+        : null
     for (const block of content) {
       if (str(block.type) === 'tool_result') {
         const c = block.content
@@ -213,7 +330,7 @@ export function normalizeMessage(
           sessionId,
           callId: str(block.tool_use_id),
           ok: block.is_error !== true,
-          summary: (typeof c === 'string' ? c : JSON.stringify(c ?? '')).slice(0, 300),
+          summary: agentDone ?? (typeof c === 'string' ? c : JSON.stringify(c ?? '')).slice(0, 300),
         })
         /*
          * 도구 결과에 실려 온 이미지 (#40). 스크린샷을 찍거나 이미지 파일을 Read하면
@@ -319,4 +436,89 @@ export function normalizeMessage(
   }
 
   return out
+}
+
+/**
+ * 부모의 스트림 하나를 따라가며 정규화한다 — 메시지 하나만 봐서는 판단이 안 서는 것들의 기억.
+ *
+ * 둘 다 예전엔 어댑터 루프에 있었거나 아예 없었다:
+ *
+ *  1. **본문이 델타로 이미 나갔는가** (textStreamed, normalizeMessage의 opts 참고).
+ *     assistant 메시지가 올 때마다 내려가는 표식인데, 서브에이전트의 assistant도
+ *     그 "assistant"로 세고 있었다 (#98). 서브에이전트의 메시지가 부모의 마지막 델타와
+ *     부모의 본문 사이에 끼면 표식이 부모의 본문 앞에서 먼저 내려가, **부모의 글 전체가
+ *     한 번 더 붙었다.** 이제 부모의 메시지만 센다.
+ *
+ *  2. **띄워 둔 백그라운드 에이전트** (#98). 띄운 순간의 tool_result로는 카드를 닫지
+ *     않는다(backgroundLaunch). 끝났다는 소식은 system/task_notification으로 오고
+ *     (실측: tool_use_id·status·summary·usage{tool_uses, duration_ms}) 그때 닫는다.
+ *     열어 둔 카드만 닫는다 — 통지는 부모가 직접 띄운 백그라운드 Bash에도, 서브에이전트
+ *     안의 Bash(owned_by_subagent)에도 오는데(실측), 그 카드들은 이미 제 결과로 닫혀 있다.
+ *
+ *     **부모가 글을 쓰는 도중이면 닫기를 미룬다.** 에이전트 셋을 나란히 띄우면 하나가
+ *     끝나는 순간 부모는 다른 하나의 소식을 받아 적고 있기 예사다(도그푸딩 세션).
+ *     tool_result는 저장 쪽에서 글 덩어리의 경계라(manager persistMessage) 그 자리에서
+ *     내면 부모의 문단이 행 둘로 갈린다 — 화면은 이어 붙여 그리지만 인수인계 기록과
+ *     미리보기는 행을 읽는다. 부모가 내지 않은 사건으로 부모의 글이 잘리지 않게,
+ *     그 덩어리가 닫히는 assistant 메시지 뒤로 보낸다.
+ */
+export class ClaudeStreamNormalizer {
+  private textStreamed = false
+  private readonly background = new Set<string>()
+  /** 부모의 글 덩어리가 닫히기를 기다리는 에이전트 카드 닫기 */
+  private deferred: NormalizedEvent[] = []
+
+  constructor(private readonly sessionId: string) {}
+
+  push(msg: unknown): NormalizedEvent[] {
+    const m = msg as Json
+    const type = str(m.type)
+    const subagent = str(m.parent_tool_use_id) !== ''
+
+    if (type === 'system' && str(m.subtype) === 'task_notification') {
+      const callId = str(m.tool_use_id)
+      if (!this.background.delete(callId)) return []
+      const status = str(m.status, 'completed')
+      const usage = (m.usage ?? {}) as Json
+      const done: NormalizedEvent = {
+        type: 'tool_result',
+        sessionId: this.sessionId,
+        callId,
+        ok: status === 'completed',
+        summary: agentReport(str(m.summary), agentStats(usage.tool_uses, usage.duration_ms, status)),
+      }
+      if (!this.textStreamed) return [done]
+      this.deferred.push(done)
+      return []
+    }
+
+    if (type === 'user' && !subagent) {
+      const launched = backgroundLaunch(m)
+      if (launched) this.background.add(launched)
+    }
+
+    const events = normalizeMessage(msg, this.sessionId, { textStreamed: this.textStreamed })
+    if (subagent) return events
+    if (type === 'stream_event' && events.some((e) => e.type === 'message_delta')) this.textStreamed = true
+    // assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다
+    if (type === 'assistant') this.textStreamed = false
+    // 덩어리가 닫혔다(또는 본문 없이 턴이 끝났다) — 미뤄 둔 카드 닫기를 이제 낸다
+    if ((type === 'assistant' || type === 'result') && this.deferred.length > 0) events.push(...this.deferred.splice(0))
+    return events
+  }
+
+  /**
+   * 아직 돌아오지 않은 에이전트의 카드를 **말없이 열어 두지 않는다.**
+   *
+   * 백그라운드 에이전트는 CLI 프로세스 안에서 돈다(task_type 'local_agent') — 프로세스를
+   * 닫거나 잃으면 함께 사라지고, 통지는 영영 오지 않는다. 그대로 두면 카드는 "아직 일하는
+   * 중"으로 남는다. 승인·질문 카드를 dispose에서 놓아주는 것과 같은 규칙이다.
+   */
+  release(why: string): NormalizedEvent[] {
+    // 돌아왔지만 부모의 글이 닫히기를 기다리던 것은 제 결과로 닫는다 — 이미 끝난 일이다
+    const out: NormalizedEvent[] = this.deferred.splice(0)
+    for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
+    this.background.clear()
+    return out
+  }
 }

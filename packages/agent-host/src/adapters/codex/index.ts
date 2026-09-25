@@ -270,6 +270,23 @@ class CodexSession implements SessionHandle {
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
+    /*
+     * **다른 스레드의 알림은 이 세션의 것이 아니다** (#98의 codex 쪽).
+     *
+     * 모델이 spawn_agent로 띄운 자식 에이전트는 별도 스레드이고, app-server는 새 스레드가
+     * 생길 때마다 초기화된 모든 연결에 그 스레드의 리스너를 붙인다 (codex 소스
+     * app-server/src/lib.rs → try_attach_thread_listener; 새 스레드 알림은 spawn.rs의
+     * notify_thread_created에서만 나간다). 그래서 자식의 알림이 threadId만 달리 달고
+     * 이 연결로 온다. 거르지 않으면 자식의 도구 호출과 글이 부모의 대화에 박히고,
+     * 자식의 turn/started가 스톱의 과녁(turnId)을 가로채고, 자식의 turn/completed가
+     * 부모를 "끝났다"로 돌린다 — 그래서 이 검사는 turnId 기록보다 먼저 온다.
+     *
+     * 서버 **요청**(승인)은 거르지 않는다(onServerRequest) — 자식이 묻는 승인에 아무도
+     * 답하지 않으면 자식이 멈춘다. 스레드를 아직 모르는 동안(thread/start 응답 전)은
+     * 자식이 있을 수 없으므로 통과시킨다.
+     */
+    const from = (n.params as { threadId?: unknown } | undefined)?.threadId
+    if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) return
     // 어느 턴이 도는지 (Turn.id — generated/v2/Turn.ts). 끝나면 지운다: 끝난 턴을
     // 멈추려 들면 서버가 거절하고, 그 거절이 "안 멈췄다"는 거짓 신호가 된다
     if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)

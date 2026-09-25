@@ -29,7 +29,7 @@ import { readUsage, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
-import { approvalDetail, normalizeMessage } from './normalize.js'
+import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 
 const exec = promisify(execFile)
 
@@ -135,12 +135,15 @@ class ClaudeSession implements SessionHandle {
   /** 자동 승인 매처. 세션 시작 시 저장된 규칙을 주입받고, 'always' 응답으로 늘어난다 */
   private alwaysAllow = new Set<string>()
   private reqCounter = 0
+  private readonly stream: ClaudeStreamNormalizer
 
   constructor(
     readonly sessionId: string,
     private opts: CreateSessionOpts,
     private emit: EventSink,
-  ) {}
+  ) {
+    this.stream = new ClaudeStreamNormalizer(sessionId)
+  }
 
   async start(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- async generator 안에서 인스턴스 접근 필요
@@ -295,20 +298,15 @@ class ClaudeSession implements SessionHandle {
     void (async () => {
       try {
         /*
-         * 이 assistant 메시지의 본문이 델타로 이미 나갔는지 센다.
-         * /usage 같은 로컬 합성 응답은 델타가 0개라(실측), 이 표식이 없으면 normalize가
-         * 통짜 본문을 낼지 판단할 수 없다 — 내면 보통 턴에서 두 번 붙고, 안 내면
-         * 로컬 응답이 영영 안 보인다.
+         * 메시지 하나로는 판단이 안 서는 것(본문이 델타로 이미 나갔는가, 띄워 둔
+         * 백그라운드 에이전트)은 정규화기가 기억한다 — ClaudeStreamNormalizer 참고.
+         * /usage 같은 로컬 합성 응답은 델타가 0개라(실측), 그 기억이 없으면 통짜 본문을
+         * 낼지 판단할 수 없다 — 내면 보통 턴에서 두 번 붙고, 안 내면 영영 안 보인다.
          */
-        let textStreamed = false
         for await (const msg of q) {
           const m = msg as { type?: string; session_id?: string; subtype?: string }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
-          const events = normalizeMessage(msg, this.sessionId, { textStreamed })
-          for (const e of events) this.emit(e)
-          if (m.type === 'stream_event' && events.some((e) => e.type === 'message_delta')) textStreamed = true
-          // assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다
-          if (m.type === 'assistant') textStreamed = false
+          for (const e of this.stream.push(msg)) this.emit(e)
           // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
           if (m.type === 'result') void this.reportContext(q)
         }
@@ -320,6 +318,7 @@ class ClaudeSession implements SessionHandle {
          * codex 어댑터가 onExit(expected=false)에서 하는 것과 같은 신호를 올린다.
          */
         if (!this.closed) {
+          this.releaseAgents('The session process ended before this agent reported back')
           this.emit({
             type: 'error',
             sessionId: this.sessionId,
@@ -327,6 +326,7 @@ class ClaudeSession implements SessionHandle {
           })
         }
       } catch (err) {
+        this.releaseAgents('The session process ended before this agent reported back')
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
@@ -506,6 +506,12 @@ class ClaudeSession implements SessionHandle {
     }
     this.pending.clear()
     this.releaseQuestions('Session closed')
+    this.releaseAgents('The session closed before this agent reported back')
+  }
+
+  /** 띄워 둔 백그라운드 에이전트의 카드를 닫는다 — 프로세스와 함께 사라졌으므로 통지는 안 온다 (#98) */
+  private releaseAgents(why: string): void {
+    for (const e of this.stream.release(why)) this.emit(e)
   }
 
   /** 답을 기다리던 선택지를 놓아준다 — 승인과 같은 이유로 **말없이 놓지 않는다** */

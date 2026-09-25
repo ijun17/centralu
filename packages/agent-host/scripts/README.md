@@ -41,3 +41,4 @@ pnpm perf:idle           # 유휴 성능 (host 프로세스만, §7.1 목표 대
 |---|---|
 | `probe-askuserquestion.mts` | AskUserQuestion을 실제로 어떻게 받아 답하는가 → `adapters/claude/index.ts`가 이 결과를 따른다 |
 | `probe-permission-mode.mts` | 권한 모드가 전역 설정을 세션 단위로 덮어쓸 수 있는가 (M0의 최우선 전제) |
+| `probe-subagent-stream.mts` | 서브에이전트의 메시지가 부모 스트림에 어떻게 섞여 오는가 (#98) → `adapters/claude/normalize.ts`가 parent_tool_use_id로 가르고, 백그라운드 에이전트 카드를 task_notification으로 닫는다 |
