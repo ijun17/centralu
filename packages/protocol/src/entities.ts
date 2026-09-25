@@ -131,6 +131,30 @@ export const ExternalAppInfo = z.object({
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 
 /**
+ * 외부 앱의 실행 한 번 (M4 A-6) — 누가(화면·세션·앱) 어느 도구를 불렀고 어떻게 끝났나.
+ *
+ * 인자는 **요약과 해시만** 싣는다. 원문은 실패한 호출 중 최근 몇 건만 `failure`로 남는다
+ * (앱을 고치는 에이전트가 실패한 입력을 봐야 해서). 비밀 값은 어디에나 `[redacted:이름]`으로 선다.
+ */
+export const AppRun = z.object({
+  id: z.string(),
+  projectId: z.string().nullable(),
+  appId: AppId,
+  tool: z.string(),
+  callerKind: z.enum(['view', 'session', 'app']),
+  callerSessionId: z.string().nullable(),
+  parentRunId: z.string().nullable(),
+  status: z.enum(['running', 'ok', 'error', 'cancelled', 'rejected']),
+  durationMs: z.number().nullable(),
+  argsDigest: z.string(),
+  argsSummary: z.string(),
+  error: z.string().nullable(),
+  createdAt: z.number(),
+  failure: z.object({ args: z.string(), result: z.string().nullable() }).nullable(),
+})
+export type AppRun = z.infer<typeof AppRun>
+
+/**
  * Everything a screen needs to *present* a tool: its name, its mark, and the two
  * commands that fix a tool that isn't ready.
  *

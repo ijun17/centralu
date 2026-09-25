@@ -754,6 +754,53 @@ export class Store {
           }
         },
       },
+      {
+        to: 34,
+        /**
+         * 외부 앱의 실행 기록 (M4 A-6) — "누가 무엇을 실행했는지 남긴다"의 로컬 절반.
+         *
+         * 에이전트가 부른 것은 그 세션의 대화에 남지만, 화면이 부른 것과 앱끼리 부른 것은 아무
+         * 데도 남지 않았다(플랜 "지금 무엇이 막고 있나"). 모든 호출이 지나는 한 자리(중개)가
+         * 여기에 한 줄씩 적는다.
+         *
+         * 플랜의 칸에 셋을 더했다:
+         *   project_id    앱 id는 범위(프로젝트·사용자 폴더) 안에서만 하나다 — 두 프로젝트의 `notes`는
+         *                 다른 앱이다. null은 사용자 폴더 앱
+         *   args_summary  인자는 요약과 해시만 남긴다 — 해시만으로는 사람이 읽을 것이 없다
+         *   error         거절·실패의 이유. 기록 화면(B-7)이 "왜"를 보여 줄 자리다
+         *
+         * 인자 원문은 여기 없다. **최근 실패 몇 건만** 옆 표에 원문을 남긴다(비밀은 가린 채) —
+         * 앱을 고치는 에이전트는 실패한 입력을 봐야 하지만, 모든 호출의 원문을 쌓을 이유는 없다.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS app_runs (
+              id                TEXT PRIMARY KEY,
+              project_id        TEXT,
+              app_id            TEXT NOT NULL,
+              tool              TEXT NOT NULL,
+              caller_kind       TEXT NOT NULL,
+              caller_session_id TEXT,
+              parent_run_id     TEXT,
+              status            TEXT NOT NULL,
+              duration_ms       INTEGER,
+              args_digest       TEXT NOT NULL,
+              args_summary      TEXT NOT NULL,
+              error             TEXT,
+              created_at        INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_app_runs_app ON app_runs(app_id, project_id, created_at);
+            CREATE TABLE IF NOT EXISTS app_run_failures (
+              run_id     TEXT PRIMARY KEY,
+              project_id TEXT,
+              app_id     TEXT NOT NULL,
+              args       TEXT NOT NULL,
+              result     TEXT,
+              created_at INTEGER NOT NULL
+            );
+          `)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1407,6 +1454,9 @@ export class Store {
       this.db.prepare(`DELETE FROM approval_rules WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM usage_facts WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM commit_sessions WHERE project_id = ?`).run(projectId)
+      // 그 프로젝트 앱의 실행 기록도 이 앱의 기록이다 (M4 A-6)
+      this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ?`).run(projectId)
+      this.db.prepare(`DELETE FROM app_runs WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
     })
     tx()
@@ -1767,6 +1817,102 @@ export class Store {
   deleteApprovalRule(id: number): void {
     this.db.prepare(`DELETE FROM approval_rules WHERE id = ?`).run(id)
   }
+
+  // ── 외부 앱 실행 기록 (M4 A-6) — 앱 런타임의 `RunLedger`를 이 저장소가 채운다 ──
+  //
+  // 런타임은 이 클래스를 임포트하지 않는다. 필요한 모양(RunLedger)을 런타임이 선언하고,
+  // main.ts가 이 메서드들을 그 모양으로 넘긴다 (#97의 뒤집기).
+
+  beginAppRun(r: AppRunRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO app_runs (id, project_id, app_id, tool, caller_kind, caller_session_id, parent_run_id,
+                               status, duration_ms, args_digest, args_summary, error, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        r.id, r.projectId, r.appId, r.tool, r.callerKind, r.callerSessionId, r.parentRunId,
+        r.status, r.durationMs, r.argsDigest, r.argsSummary, r.error, r.createdAt,
+      )
+  }
+
+  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null }): void {
+    this.db.prepare(`UPDATE app_runs SET status = ?, duration_ms = ?, error = ? WHERE id = ?`).run(end.status, end.durationMs, end.error, id)
+  }
+
+  /**
+   * 실패 원문을 남기고, 그 앱의 원문은 **최근 `keep`건만** 둔다. 원문은 크고 드물게 읽힌다 —
+   * 만드는 에이전트가 고치는 데 필요한 것은 마지막 몇 번의 실패다.
+   */
+  keepAppRunFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void {
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(`INSERT OR REPLACE INTO app_run_failures (run_id, project_id, app_id, args, result, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(f.runId, f.projectId, f.appId, f.args, f.result, f.createdAt)
+      this.db
+        .prepare(
+          `DELETE FROM app_run_failures WHERE app_id = ? AND project_id IS ? AND run_id NOT IN (
+             SELECT run_id FROM app_run_failures WHERE app_id = ? AND project_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?
+           )`,
+        )
+        .run(f.appId, f.projectId, f.appId, f.projectId, keep)
+    })
+    tx()
+  }
+
+  /** 한 앱의 실행 기록, 최근 것부터. 원문이 남아 있는 실패는 원문과 함께 */
+  listAppRuns(projectId: string | null, appId: string, limit: number): (AppRunRecord & { failure: { args: string; result: string | null } | null })[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.project_id as projectId, r.app_id as appId, r.tool, r.caller_kind as callerKind,
+                r.caller_session_id as callerSessionId, r.parent_run_id as parentRunId, r.status,
+                r.duration_ms as durationMs, r.args_digest as argsDigest, r.args_summary as argsSummary,
+                r.error, r.created_at as createdAt, f.args as failureArgs, f.result as failureResult
+         FROM app_runs r LEFT JOIN app_run_failures f ON f.run_id = r.id
+         WHERE r.app_id = ? AND r.project_id IS ?
+         ORDER BY r.created_at DESC, r.rowid DESC LIMIT ?`,
+      )
+      .all(appId, projectId, limit) as (AppRunRecord & { failureArgs: string | null; failureResult: string | null })[]
+    return rows.map(({ failureArgs, failureResult, ...r }) => ({
+      ...r,
+      failure: failureArgs === null ? null : { args: failureArgs, result: failureResult },
+    }))
+  }
+
+  /** 보관 기간 밖의 기록을 걷는다. @returns 지운 실행 수 */
+  pruneAppRuns(before: number): number {
+    const tx = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM app_run_failures WHERE created_at < ?`).run(before)
+      return this.db.prepare(`DELETE FROM app_runs WHERE created_at < ?`).run(before).changes
+    })
+    return tx()
+  }
+
+  /**
+   * 끝을 못 본 실행을 닫는다 (기동에 한 번). host가 죽으면 앱 프로세스도 입력이 닫혀 끝난다 —
+   * `running`으로 남은 행은 영원히 달리는 중으로 보인다. 세션 상태를 기동에 바로잡는 것과
+   * 같은 이유다(`manager.ts`의 LIVE_ONLY): 살아 있는 상태는 프로세스가 있어야만 참이다.
+   */
+  settleUnfinishedAppRuns(error: string): number {
+    return this.db.prepare(`UPDATE app_runs SET status = 'error', error = ? WHERE status = 'running'`).run(error).changes
+  }
+}
+
+/** app_runs 한 줄 — 런타임의 `AppRunRow`와 같은 모양이다 (구조로 맞물린다) */
+export type AppRunRecord = {
+  id: string
+  projectId: string | null
+  appId: string
+  tool: string
+  callerKind: string
+  callerSessionId: string | null
+  parentRunId: string | null
+  status: string
+  durationMs: number | null
+  argsDigest: string
+  argsSummary: string
+  error: string | null
+  createdAt: number
 }
 
 /** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */

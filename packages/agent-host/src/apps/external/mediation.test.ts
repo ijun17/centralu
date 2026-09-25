@@ -38,7 +38,7 @@ const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })
 /** 그 앱에 지금 열려 있는 실행의 id — 호출이 앱에 보내질 때까지 기다린다 (런타임 내부를 엿본다) */
 const openRunOf = (appId: string) =>
   until(
-    () => [...(rt as unknown as { runs: Map<string, { entry: { ref: AppRef } }> }).runs].find(([, r]) => r.entry.ref.appId === appId)?.[0],
+    () => [...(rt as unknown as { openRuns: Map<string, { entry: { ref: AppRef } }> }).openRuns].find(([, r]) => r.entry.ref.appId === appId)?.[0],
     (id) => id !== undefined,
   ) as Promise<string>
 const VIEW: AppCaller = { kind: 'view' }
@@ -125,6 +125,15 @@ describe('결말과 "바뀌었다" 알림', () => {
     const failed = await rt.call(ref('notes'), 'fail', {}, VIEW)
     expect(failed).toMatchObject({ status: 'error', error: 'the thing failed' })
     expect(changed).toHaveLength(2)
+  })
+
+  it('앱에 보내기 전에 끝난 호출(뜨는 동안 취소)은 알리지 않는다 — 아무것도 바뀌지 않았다', async () => {
+    make()
+    const ac = new AbortController()
+    const p = rt.call(ref('notes'), 'slow', {}, SESSION, { signal: ac.signal })
+    ac.abort()
+    expect((await p).status).toBe('cancelled')
+    expect(changed).toEqual([])
   })
 
   it('호출 중에 앱이 죽으면 error로 끝나고, 그 죽음은 크래시로 센다', async () => {
