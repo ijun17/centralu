@@ -562,6 +562,10 @@ gate happens in one place, the broker desk (`desk.ts`).
   tool handler asks in one line. They pass the broker's progress up to the call they serve, so a long
   agent run does not time it out, and give up only when Centralu says nothing for 60 s or the request
   runs past 60 minutes. Outside a tool handler, or with no fd 3, they throw an error that says why.
+  A progress message the broker sends ("waiting for the person to allow …", "waiting for the person
+  to approve a step in …") travels up with it: when a session's agent made the call, the host shows
+  the message as live output under that call's tool card (Claude and Codex alike). A view's own call
+  does not get the message yet; its keep-alive (§9.3) is unchanged.
 
 ## 11. RPCs and events
 

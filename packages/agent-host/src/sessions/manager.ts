@@ -4360,6 +4360,14 @@ export class SessionManager {
   useExternalApps(rt: ExternalApps, opts?: ConstructorParameters<typeof SessionAppsHub>[1]): void {
     this.appsHub?.dispose()
     this.appsHub = new SessionAppsHub(rt, opts)
+    /*
+     * 세션의 앱 호출이 보낸 진행의 말 (M4 D) — "사람이 세션 X에서 승인하기를 기다린다" 같은 한 줄을 그 호출의 도구 카드에 실행 중
+     * 출력으로 붙인다(`tool_output_delta`: 기록하지 않는 표시 조각이다). 앱이 부탁한 에이전트가 사람을 기다리는 동안, 부른 세션의
+     * 카드는 그것 말고는 "도는 중"밖에 말하지 않는다.
+     */
+    this.appsHub.onCallProgress((p) => {
+      if (this.meta.has(p.sessionId)) this.onEvent({ type: 'tool_output_delta', sessionId: p.sessionId, callId: p.callId, text: `${p.message}\n` })
+    })
     // 중개의 몸통 가운데 세션이 하는 일 (M4 D) — 런타임은 세션을 모르므로 여기서 채운다
     rt.attachBrokerHost(this.brokerHost())
     // 예전에 승인된 MCP 서버를 앱으로 옮긴다 (A-7) — 세션이 뜨기 전이라, 오케스트레이터가 처음부터 받는다
