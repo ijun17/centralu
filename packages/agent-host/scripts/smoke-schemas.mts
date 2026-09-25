@@ -154,6 +154,8 @@ const SKIP: Record<string, string> = {
   'terminal.create': '위에서 이미 불러 대조함',
   'terminal.close': '맨 끝에서 따로 부른다',
   'commands.run': '슬래시 명령 실행 — 부작용',
+  'apps.sessionTools': 'Codex 다리 전용 — 외부 앱이 붙은 살아 있는 세션이 필요 (adapters/codex/apps.test.ts가 다리째 관통)',
+  'apps.sessionCall': 'Codex 다리 전용 — apps.sessionTools와 같은 이유',
 }
 
 const ok: string[] = []

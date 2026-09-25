@@ -1132,8 +1132,9 @@ export class SessionManager {
             // 조율 세션의 역할은 창조 시 박제된 roleAppend가 전부다 (#80·#81 — 내용은 앱의 것)
             : info.kind === 'coordinator' ? (info.roleAppend ?? undefined)
             : undefined,
+          // host로 돌아오는 길 — 오케스트레이터 도구의 다리와, 외부 앱의 다리(M4 A-5)가 쓴다
           orchestratorBridge:
-            info.kind === 'orchestrator' || info.kind === 'coordinator' ? (this.endpoint?.() ?? undefined) : undefined,
+            info.kind === 'orchestrator' || info.kind === 'coordinator' || apps ? (this.endpoint?.() ?? undefined) : undefined,
           // 사람이 승인한 MCP 서버 (propose_mcp_server → 승인 → 재시작의 결과가 여기서 실린다)
           extraMcpServers: info.kind === 'orchestrator' ? this.mcpServers() : undefined,
           apps,
@@ -1601,7 +1602,7 @@ export class SessionManager {
                 ? (m.roleAppend ?? undefined) // 박제된 역할문 재적용 — 앱이 꺼져 있어도 그대로다
                 : undefined,
           orchestratorBridge:
-            m.kind === 'orchestrator' || m.kind === 'coordinator' || this.isWorktreeManager(sessionId)
+            m.kind === 'orchestrator' || m.kind === 'coordinator' || this.isWorktreeManager(sessionId) || apps
               ? (this.endpoint?.() ?? undefined)
               : undefined,
           // 승인된 MCP 서버는 재시작(=이 길)에서 실려야 "승인 → 재시작 → 바로 사용"이 성립한다
@@ -3590,6 +3591,23 @@ export class SessionManager {
   useExternalApps(rt: ExternalApps): void {
     this.appsHub?.dispose()
     this.appsHub = new SessionAppsHub(rt)
+  }
+
+  /**
+   * 다리가 부르는 앱 도구 목록·호출 (M4 A-5, Codex 경로). 세션의 **살아 있는 핸들이 받은** 붙이기가
+   * 답한다 — 결정 4도, 호출자(그 세션)도, 기록도 Claude의 인프로세스 경로와 같은 자리를 지난다.
+   */
+  async appSessionTools(sessionId: string, server: string): Promise<Record<string, unknown>[]> {
+    return (await this.requireAppsHub().forSession(sessionId).tools(server)) as Record<string, unknown>[]
+  }
+
+  async callAppForSession(sessionId: string, server: string, name: string, args: Record<string, unknown>) {
+    return this.requireAppsHub().forSession(sessionId).call(server, name, args)
+  }
+
+  private requireAppsHub(): SessionAppsHub {
+    if (!this.appsHub) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    return this.appsHub
   }
 
   /** 핸들 하나를 위한 앱 붙이기 — 어댑터에 넘기고, 핸들을 닫는 어댑터가 함께 닫는다 */

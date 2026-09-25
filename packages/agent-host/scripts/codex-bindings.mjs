@@ -60,6 +60,7 @@ const groups = [
   ['serverRequests', '서버 요청(승인)'],
   ['approvalDecisions', '승인 결정값'],
   ['approvalPolicies', '승인 정책값'],
+  ['mcpToolApprovalModes', 'MCP 도구 승인 방식'],
 ]
 
 const missing = []

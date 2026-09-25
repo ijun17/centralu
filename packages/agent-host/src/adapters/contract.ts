@@ -274,6 +274,8 @@ export type CreateSessionOpts = {
    *
    * Claude는 필요 없다(함수가 그대로 도구가 된다). Codex는 스레드별 config로
    * stdio 서버만 물릴 수 있어서 별도 프로세스가 뜨고, 그 프로세스가 이 주소로 돌아온다.
+   * 오케스트레이터 도구의 다리와 외부 앱의 다리(M4 A-5)가 같은 길을 쓴다 — 이름은 먼저 생긴
+   * 쪽을 따랐다.
    */
   orchestratorBridge?: { url: string; token: string }
 }

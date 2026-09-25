@@ -90,7 +90,17 @@
   ],
   "serverRequests": [
     "item/commandExecution/requestApproval",
-    "item/fileChange/requestApproval"
+    "item/fileChange/requestApproval",
+    "mcpServer/elicitation/request"
+  ],
+  "_mcpToolApprovalModesComment": [
+    "외부 앱 다리의 default_tools_approval_mode·도구별 approval_mode에 싣는 값 (M4 A-5, index.ts APP_APPROVAL_MODE).",
+    "생성 타입 AppToolApproval에서 온 어휘다 — 사라지면 앱 도구의 승인이 조용히 기본값으로 돌아간다."
+  ],
+  "mcpToolApprovalModes": [
+    "approve",
+    "writes",
+    "prompt"
   ],
   "approvalDecisions": [
     "accept",

@@ -55,6 +55,17 @@ export class SessionAppsHub {
     return a
   }
 
+  /**
+   * 다리(인프로세스로 못 붙이는 어댑터 — Codex)가 들어오는 문. 다리는 별도 프로세스라 세션 id와
+   * 서버 이름만 들고 온다 — 그 세션의 **지금 살아 있는 핸들의** 붙이기가 답한다. 살아 있는 핸들이
+   * 없으면(세션이 잠들었거나 닫혔으면) 거절한다: 핸들 없는 세션의 이름으로 앱을 부를 수는 없다.
+   */
+  forSession(sessionId: string): SessionApps {
+    const a = this.live.get(sessionId)
+    if (!a) throw Object.assign(new Error(`이 세션은 지금 앱을 부를 수 없습니다 (실행 중이 아닙니다): ${sessionId}`), { code: 'session_not_found' })
+    return a
+  }
+
   /** @internal 닫힌 붙이기가 자리를 비운다 — 이미 새 핸들이 이었으면 건드리지 않는다 */
   release(a: Attachment): void {
     if (this.live.get(a.session.id) === a) this.live.delete(a.session.id)
