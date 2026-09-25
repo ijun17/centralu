@@ -20,6 +20,7 @@ import { HOST_APPS } from './apps/registry.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
+import type { InlineViews } from './inline-views.js'
 import type { ToolName } from '@cc/protocol'
 
 /**
@@ -38,13 +39,15 @@ export type RpcServices = {
   externalApps?: ExternalApps
   /** 앱 화면 호스팅 (M4 B-3) — 샌드박스 프록시의 주소와 화면이 읽는 리소스 */
   views?: ViewHost
+  /** 대화 안 앱 화면 (M4 B-1) — 세션의 앱 호출이 연 인스턴스. 닫기가 이쪽의 기록도 고친다 */
+  inlineViews?: InlineViews
 }
 
 /** RPC 라우팅. 파라미터는 경계에서 1회만 검증한다 (docs/protocol.md §4) */
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews }: RpcServices = {},
 ) {
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
@@ -255,7 +258,9 @@ export function createRpcHandler(
       return openHomeView(requireExternalApps(), requireViews(), { appId, projectId })
     },
     'apps.closeView': async (p) => {
-      requireViews().close(RpcMethods['apps.closeView'].params.parse(p).instanceId)
+      const { instanceId } = RpcMethods['apps.closeView'].params.parse(p)
+      // 대화 안 화면이면 그쪽이 닫는다(자기 기록과 함께). 아니면 고정 화면이다
+      if (!inlineViews?.close(instanceId)) requireViews().close(instanceId)
       return { ok: true as const }
     },
     'apps.readResource': async (p) => {

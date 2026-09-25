@@ -21,6 +21,8 @@ type Fake = {
   requests: Req[]
   responses: { id: number | string; payload: unknown }[]
   trigger(r: { id: number | string; method: string; params?: unknown }): void
+  /** app-server의 알림을 흉내 낸다 (item/started 등) */
+  note(n: { method: string; params?: unknown }): void
 }
 
 const state = vi.hoisted(() => ({ instances: [] as Fake[] }))
@@ -29,8 +31,11 @@ vi.mock('./client.js', () => ({
   CodexClient: class {
     requests: Req[] = []
     responses: { id: number | string; payload: unknown }[] = []
-    constructor(private handlers: { onServerRequest: (r: unknown) => void }) {
+    constructor(private handlers: { onServerRequest: (r: unknown) => void; onNotification: (n: unknown) => void }) {
       state.instances.push(this as unknown as Fake)
+    }
+    note(n: unknown) {
+      this.handlers.onNotification(n)
     }
     request(method: string, params: Record<string, unknown> = {}) {
       this.requests.push({ method, params })
@@ -82,7 +87,8 @@ beforeEach(() => {
   w.plant('p2', 'other')
   w.plant('user', 'helper')
   w.rt.refresh()
-  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000 })
+  // 짝을 못 찾은 호출(B-1)을 오래 기다리지 않게 — 제품의 값은 5초다
+  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 300 })
 })
 
 afterEach(async () => {
@@ -246,5 +252,41 @@ describe('멈추면 앱 호출도 멈춘다 — Codex', () => {
     await handle!.dispose()
     handle = null
     expect((await p).isError).toBe(true)
+  })
+})
+
+/**
+ * 대화 안 화면의 카드 (M4 B-1) — Codex. 다리로 들어오는 호출은 카드 id를 모른다. 어댑터가 본
+ * `item/started`(mcpToolCall: id·server·tool·arguments)가 붙이기에 적히고, 다리의 호출이 그것과 짝지어진다.
+ */
+describe('대화 안 화면의 카드 id — Codex', () => {
+  const mcpItem = (id: string, server: string, tool: string, args: unknown, status = 'inProgress') => ({
+    threadId: 'thread-1',
+    item: { type: 'mcpToolCall', id, server, tool, arguments: args, status },
+  })
+
+  it('item/started의 mcpToolCall이 다리로 들어온 호출의 카드가 된다', async () => {
+    const ids: Promise<string | null>[] = []
+    hub.onCall((c) => ids.push(c.callId))
+    const c = await start(WORKER)
+    c.note({ method: 'item/started', params: mcpItem('call_7', 'app-notes', 'poke', { to: 7 }) })
+    await hub.forSession(WORKER.id).call('app-notes', 'poke', { to: 7 })
+    expect(await ids[0]).toBe('call_7')
+  })
+
+  it('끝난 카드는 짝이 되지 않고, 붙이지 않은 서버와 다른 스레드의 호출은 적지 않는다', async () => {
+    const ids: Promise<string | null>[] = []
+    hub.dispose()
+    hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 150 })
+    hub.onCall((c) => ids.push(c.callId))
+    const c = await start(WORKER)
+    // 승인에서 거절된 호출 — 시작하고 곧바로 끝난다
+    c.note({ method: 'item/started', params: mcpItem('call_denied', 'app-notes', 'poke', { to: 8 }) })
+    c.note({ method: 'item/completed', params: mcpItem('call_denied', 'app-notes', 'poke', { to: 8 }, 'failed') })
+    // 자식 스레드의 호출, 우리가 싣지 않은 서버의 호출
+    c.note({ method: 'item/started', params: { ...mcpItem('call_child', 'app-notes', 'poke', { to: 8 }), threadId: 'thread-child' } })
+    c.note({ method: 'item/started', params: mcpItem('call_other', 'app-other', 'poke', { to: 8 }) })
+    await hub.forSession(WORKER.id).call('app-notes', 'poke', { to: 8 })
+    expect(await ids[0]).toBeNull()
   })
 })

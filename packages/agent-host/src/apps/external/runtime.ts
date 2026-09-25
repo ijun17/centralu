@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CallToolResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
+import type { CallToolResult, ListResourcesResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
@@ -45,6 +45,8 @@ export type { AppErrorBundle } from './errors.js'
 
 /** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
 export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'
+/** 도구가 선언한 화면을 읽는 규칙도 이 문으로 나간다 — 대화 안 화면(B-1)이 고정 화면과 같은 판정을 쓴다 */
+export { resourceUriOf } from './visibility.js'
 
 /**
  * 누가 불렀나 (플랜 "호출 경로는 하나다") — 셋이다.
@@ -568,6 +570,26 @@ export class ExternalApps {
   async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
     const e = this.require(ref)
     return this.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
+  }
+
+  /**
+   * 앱이 내놓은 리소스 목록 (MCP `resources/list`, 쪽 넘김까지) — 대화 안 화면(B-1)이 도구가 선언한
+   * `ui://`가 **이 앱의 것인지** 보는 근거다(플랜 "사칭 차단"). 읽기와 같은 규칙으로 앱을 띄운다.
+   * 쪽은 몇 개까지만 넘긴다 — 끝없이 다음 쪽을 주는 앱이 host를 붙잡지 못하게.
+   */
+  async listResources(ref: AppRef, maxPages = 20): Promise<ListResourcesResult['resources']> {
+    const e = this.require(ref)
+    return this.use(e, async (proc) => {
+      const out: ListResourcesResult['resources'] = []
+      let cursor: string | undefined
+      for (let page = 0; page < maxPages; page++) {
+        const r = await proc.client.listResources(cursor ? { cursor } : {}, { timeout: this.timing.connectTimeoutMs })
+        out.push(...r.resources)
+        cursor = r.nextCursor
+        if (!cursor) break
+      }
+      return out
+    })
   }
 
   /**

@@ -120,6 +120,37 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     ok: z.boolean(),
     summary: z.string().default(''),
   }),
+  /**
+   * 대화 안 앱 화면 (M4 B-1) — 세션의 에이전트가 **화면이 달린** 앱 도구를 불렀다. 그 호출 카드
+   * (`callId`, 어댑터의 `tool_call`과 같은 id) 아래에 화면이 선다.
+   *
+   *   open       host가 화면 인스턴스를 열었다. `instanceId`와 도구 입력(`toolInput`)이 실린다
+   *   result     호출이 끝났다. 앱의 답 그대로(`toolResult`) — 화면의 tool-result가 된다
+   *   cancelled  답 없이 끝났다(취소·거절·앱이 못 뜸). `reason`이 화면의 tool-cancelled가 된다
+   *   rejected   화면을 열지 않았다 — 도구가 선언한 화면이 그 앱의 것이 아니다(사칭 차단). 이유가 실린다
+   *   closed     host가 인스턴스를 닫았다(상한, 앱이 사라짐, 신뢰를 잃음). 화면은 teardown 뒤 자리표시로 접힌다
+   *
+   * `kept`는 result·cancelled에 실린다: host가 입력과 결과를 들고 있어 **도구를 다시 부르지 않고**
+   * 화면을 다시 열 수 있는가(`apps.inlineReopen`). 결과가 너무 크면 들고 있지 않는다.
+   *
+   * 기록에는 open과 rejected만 남는다(`seq`) — 본문(입력·결과) 없이 "이 카드에는 어느 앱의 화면이
+   * 있었다"는 사실만. 다시 연 UI는 그것으로 자리표시를 세운다. 결과 본문은 host의 메모리에만 있다.
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('app_view'),
+    callId: z.string(),
+    appId: AppId,
+    projectId: z.string().nullable(),
+    tool: z.string(),
+    phase: z.enum(['open', 'result', 'cancelled', 'rejected', 'closed']),
+    instanceId: z.string().optional(),
+    toolInput: z.record(z.string(), z.unknown()).optional(),
+    toolResult: z.looseObject({ content: z.array(z.unknown()) }).optional(),
+    reason: z.string().optional(),
+    kept: z.boolean().optional(),
+  }),
   z.object({ ...base, ...persistedSeq, type: z.literal('approval_request'), requestId: z.string(), detail: ApprovalDetail }),
   z.object({
     ...base,

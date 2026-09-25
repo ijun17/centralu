@@ -256,7 +256,35 @@ export type SessionApps = {
    * 멈추지 않고, 결과는 각 앱 서버의 `run_status` 도구로 이어서 본다. 바깥에 호출 상한이 있는
    * 도구(Codex 300초)가 쓴다. 상한이 사실상 없는 쪽(Claude의 인프로세스 서버)은 주지 않고 기다린다.
    */
-  call(server: string, tool: string, args: Record<string, unknown>, opts?: { signal?: AbortSignal; waitMs?: number }): Promise<AppToolResult>
+  call(
+    server: string,
+    tool: string,
+    args: Record<string, unknown>,
+    opts?: {
+      signal?: AbortSignal
+      waitMs?: number
+      /**
+       * 이 호출의 대화 카드 id (어댑터의 `tool_call` callId) — **에이전트의 MCP 클라이언트가 알려 줄 때만**
+       * 준다(Claude Code: `_meta["claudecode/toolUseId"]`). 대화 안 화면(B-1)이 어느 카드 아래에 설지가
+       * 이것으로 정해진다. 없으면 `noteCall`로 적어 둔 것과 짝을 짓는다.
+       */
+      callId?: string
+    },
+  ): Promise<AppToolResult>
+  /**
+   * 에이전트가 붙은 앱의 도구를 부르기 **시작했다**고 어댑터가 제 이벤트 흐름에서 봤다 (M4 B-1).
+   *
+   * 다리를 거치는 호출(Codex)은 카드 id를 들고 오지 않는다 — Codex는 MCP 요청에 그 id를 싣지 않는다
+   * (싣는다는 근거를 찾지 못했다). 그래서 어댑터가 본 "카드 X가 서버 S의 도구 T를 인자 A로 부른다"를
+   * 적어 두고, 뒤이어 들어오는 호출과 (서버, 도구, 인자)로 먼저 온 순서대로 짝짓는다. 어느 쪽이 먼저
+   * 도착해도 된다 — 짝이 오면 그때 맞춘다.
+   */
+  noteCall(callId: string, server: string, tool: string, args: unknown): void
+  /**
+   * 그 카드의 호출이 끝났다(성공·실패·거절). 아직 짝을 못 지은 기록이면 버린다 — 승인에서 거절된 호출은
+   * 앱까지 오지 않으므로, 남겨 두면 뒤에 같은 인자로 다시 부른 호출이 옛 카드와 짝지어진다.
+   */
+  callEnded(callId: string): void
   /**
    * 이 도구가 읽기 전용이라고 앱이 말했나(`readOnlyHint: true`) — 승인 판정(결정 5)의 근거.
    * 붙은 앱의, 이미 읽은 에이전트 도구 목록만 본다. 모르면 false다(묻는 쪽으로 기운다).

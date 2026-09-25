@@ -7,6 +7,7 @@ import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { ViewHost } from './views/view-host.js'
+import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
 import { Store } from './dev-services/store.js'
@@ -218,11 +219,16 @@ const views = new ViewHost({
   }),
   hostPort: () => port ?? null,
 })
+/*
+ * 대화 안 앱 화면 (M4 B-1). 세션의 에이전트가 화면이 달린 앱 도구를 부르면 그 카드 아래에 화면을 연다.
+ * 매니저의 붙이기에서 호출을 듣고, 이벤트는 매니저의 기록·방송 길로 낸다(inline-views.ts).
+ */
+const inlineViews = attachInlineViews(mgr, externalApps, views)
 const server: HostServer = new HostServer({
   port: Number(values.port),
   token,
   allowedOrigins,
-  onRpc: createRpcHandler(mgr, adapters, { terminals, updates, commands: commandRuns, externalApps, views }),
+  onRpc: createRpcHandler(mgr, adapters, { terminals, updates, commands: commandRuns, externalApps, views, inlineViews }),
   // 모든 HTTP 길은 이 비밀 뒤에 있다 (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
 })
@@ -300,6 +306,7 @@ const shutdown = async () => {
   const appsDown = externalApps.dispose()
   await mgr.disposeAll()
   await appsDown
+  inlineViews.dispose()
   await views.dispose()
   await server.close()
   store.close()
