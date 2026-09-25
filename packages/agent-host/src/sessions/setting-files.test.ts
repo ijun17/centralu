@@ -233,9 +233,11 @@ describe.each(['claude', 'codex'] as const)('%s — 세션의 종류가 설정 �
   it.each(Object.keys(FILES) as Kind[])('%s: 만들 때와, 신뢰 × 프리셋마다 다시 깨울 때', async (kind) => {
     const id = await MAKE[kind](tool)
     await settle()
-    const seen = [launched(tool, id, 'normal')]
+    // 앱이 부른 에이전트는 safe로 선다 — 사람의 전역 bypass도 앱의 지시에는 건너가지 않는다(runAppAgent)
+    const born: PermissionPreset = kind === 'project-app agent' || kind === 'user-folder-app agent' ? 'safe' : 'normal'
+    const seen = [launched(tool, id, born)]
     // 매니저는 자리가 먼저 서고 처음 깨울 때 새로 뜬다 — 나머지는 만들 때 새로 뜬다
-    const want = [expected(tool, kind, trustedNow(), 'normal', 'new')]
+    const want = [expected(tool, kind, trustedNow(), born, 'new')]
     for (const trusted of [false, true]) {
       await rpc('projects.setTrusted', { projectId, trusted })
       for (const preset of PRESETS) {

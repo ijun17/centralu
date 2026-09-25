@@ -43,7 +43,7 @@ afterEach(async () => {
 })
 
 describe('run_agent — 부탁마다 새 세션, 그 앱의 것으로', () => {
-  it('자동으로 도는 세션이 불러도 에이전트는 normal로 서고, 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다', async () => {
+  it('자동으로 도는 세션이 불러도 에이전트는 safe로 서고(사람의 전역 bypass도 앱의 지시에는 건너가지 않는다), 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
@@ -56,11 +56,11 @@ describe('run_agent — 부탁마다 새 세션, 그 앱의 것으로', () => {
     expect(r).toEqual({ isError: false, text: 'The notes say hello.', structured: null })
 
     const [agent] = agentSessions()
-    expect(agent).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', permissionPreset: 'normal', state: 'idle', live: false, autoNamed: false })
+    expect(agent).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', permissionPreset: 'safe', state: 'idle', live: false, autoNamed: false })
     expect(agent!.name).toMatch(/^App notes · agent \d\d:\d\d$/)
     const opts = claude.opened.find((o) => o.sessionId === agent!.id)!
     // 프로젝트 뿌리에서, 도구 묶음도 앱도 없이 — 앱의 에이전트는 앱이 맡긴 글 하나를 풀 뿐이다
-    expect([opts.cwd, opts.permissionPreset, opts.apps, opts.orchestratorTools, opts.outputSchema]).toEqual([repo, 'normal', undefined, undefined, undefined])
+    expect([opts.cwd, opts.permissionPreset, opts.apps, opts.orchestratorTools, opts.outputSchema]).toEqual([repo, 'safe', undefined, undefined, undefined])
     // 에이전트가 받은 글 = 대화에 남은 글. 사람의 말이 아니라 앱의 부탁으로 적혀 있다
     const h = claude.handles.get(agent!.id)!
     expect(h.sent).toHaveLength(1)
@@ -145,7 +145,7 @@ describe('run_agent — 부탁마다 새 세션, 그 앱의 것으로', () => {
     const r = brokerSaid(await callFromSession(orchestrator, 'app-timer', { args: { prompt: 'x' } }))
     expect(r).toEqual({ isError: false, text: 'Done.', structured: null })
     const agent = agentSessions()[0]!
-    expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'normal' })
+    expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'safe' })
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.cwd).toBe(join(dataRoot, 'orchestrator'))
   })
 
