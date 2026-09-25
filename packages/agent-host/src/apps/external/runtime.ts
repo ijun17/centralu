@@ -16,7 +16,7 @@ import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, s
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
 import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
-import { SecretStore, redactor } from './secrets.js'
+import { SecretStore, redactor, secretValueProblem } from './secrets.js'
 import type { AppRef } from './ref.js'
 import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
@@ -1100,6 +1100,36 @@ export class ExternalApps {
     this.secrets.set(this.appKey(ref), name, value)
   }
 
+  /**
+   * 사람이 비밀 값을 넣거나 바꾸거나 지운다 (M4 E, 비밀 칸) — `apps.setSecret`의 몸통.
+   *
+   * 넣는 것은 **매니페스트가 선언한 이름만**이다. 선언하지 않은 이름은 앱이 받지 못하니(`forApp`) 넣어도 아무 일이 없고,
+   * 사람은 "넣었는데 왜 안 되나"를 묻게 된다. 지우기는 이름을 가리지 않는다 — 선언에서 빠진 이름의 값도 치울 수 있어야 한다.
+   * **어떤 문구에도 값을 싣지 않는다**: 거절은 RPC 오류로 화면까지 간다.
+   *
+   * 떠 있는 앱은 **진행 중인 호출을 마친 뒤** 내린다 — 다음 필요가 새 값으로 띄운다(앱은 환경을 뜰 때 한 번 받는다). 멈춘 앱의
+   * 셈도 지운다: 키가 없어 연달아 못 떴던 앱에게 값을 넣는 것은 사람이 고친 것이다(다시 시작과 같다).
+   */
+  updateSecret(ref: AppRef, name: string, value: string | null): void {
+    const e = this.require(ref)
+    if (value !== null) {
+      if (!e.manifest) throw new AppUnavailableError(`This app's manifest is invalid: ${e.error ?? 'unknown error'}`)
+      if (!(e.manifest.secrets ?? []).includes(name)) throw new AppUnavailableError(`This app does not declare a secret named ${name}`)
+      const problem = secretValueProblem(value)
+      if (problem) throw new AppUnavailableError(problem)
+    }
+    this.secrets.set(this.appKey(ref), name, value)
+    const L = e.life
+    const fresh = () => {
+      if (!L.proc && !L.starting) Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+      this.appsChanged()
+    }
+    if (L.proc || L.starting) void this.haltWhenDrained(e, 'a secret changed; the next need starts it with the new value').then(fresh)
+    else fresh()
+    // 목록의 "있음·없음"은 지금 바뀌었다 — 내리기를 기다리지 않고 알린다
+    this.appsChanged()
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     this.watchers.close()
@@ -1548,7 +1578,16 @@ export class ExternalApps {
       // 지문 전체는 쓸모가 없다 — 대조만 하는 열쇠라 앞 16자면 충분하다
       ...(e.life.loaded ? { codeStamp: e.life.loaded.slice(0, 16) } : {}),
       ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
+      ...this.secretSlots(e),
     }
+  }
+
+  /** 선언한 비밀마다 값이 들어 있는가 (E, 비밀 칸) — 이름과 있음·없음만. 선언이 없으면 칸도 없다 */
+  private secretSlots(e: AppEntry): Pick<ExternalAppInfo, 'secrets'> {
+    const declared = e.manifest?.secrets ?? []
+    if (declared.length === 0) return {}
+    const stored = this.secrets.names(this.appKey(e.ref))
+    return { secrets: declared.map((name) => ({ name, set: stored.has(name) })) }
   }
 
   private status(e: AppEntry): ExternalAppInfo['status'] {

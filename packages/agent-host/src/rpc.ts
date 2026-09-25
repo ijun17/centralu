@@ -338,6 +338,12 @@ export function createRpcHandler(
       requireExternalApps().removeUserApp({ appId, projectId })
       return { ok: true as const }
     },
+    'apps.setSecret': async (p) => {
+      // 값은 여기서 런타임으로 곧장 간다 — 이 층은 값을 적지도, 되돌려 주지도 않는다
+      const { appId, projectId, name, value } = RpcMethods['apps.setSecret'].params.parse(p)
+      requireExternalApps().updateSecret({ appId, projectId }, name, value)
+      return { ok: true as const }
+    },
     'apps.create': async (p) => mgr.createApp(RpcMethods['apps.create'].params.parse(p)),
     'apps.builder': async (p) => {
       const { appId, projectId } = RpcMethods['apps.builder'].params.parse(p)

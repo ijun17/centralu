@@ -29,6 +29,14 @@ export class SecretStore {
     return { ...(this.read()[appKey] ?? {}) }
   }
 
+  /**
+   * 이 앱에 값이 저장된 이름들 — **값은 싣지 않는다.** 앱 목록이 "어느 비밀이 비어 있나"를 보이는 자리다(E, 비밀 칸).
+   * 목록은 방송마다 다시 읽히므로, 값이 든 객체를 목록 쪽으로 넘기지 않는 것을 모양으로 막는다.
+   */
+  names(appKey: string): Set<string> {
+    return new Set(Object.keys(this.read()[appKey] ?? {}))
+  }
+
   /** 앱에 넘길 값 — 매니페스트가 선언한 이름만 */
   forApp(appKey: string, declared: readonly string[]): Record<string, string> {
     const stored = this.read()[appKey] ?? {}
@@ -70,6 +78,25 @@ export class SecretStore {
       return {}
     }
   }
+}
+
+/**
+ * 사람이 넣는 값 하나의 상한 (E, 비밀 칸). API 키·토큰은 수백 자, PEM 키도 몇 KiB다. 환경 변수로 넘기는 값이라
+ * 커지면 앱이 뜨는 명령줄 환경 전체가 커진다.
+ */
+export const SECRET_VALUE_MAX_CHARS = 16 * 1024
+
+/**
+ * 넣으려는 값의 문제 — 없으면 null. **문구에 값을 싣지 않는다**: 이 문구는 RPC의 오류로 화면까지 간다.
+ *
+ * 빈 값은 받지 않는다. 지우기는 `null`이 따로 있고, 빈 문자열을 "넣었다"로 두면 목록은 "있음"이라 말하는데
+ * 앱은 빈 변수를 받아 "키가 없다"로 실패한다. NUL은 환경 변수에 실을 수 없다(spawn이 거절한다).
+ */
+export function secretValueProblem(value: string): string | null {
+  if (value.length === 0) return 'Enter a value, or clear the secret instead'
+  if (value.length > SECRET_VALUE_MAX_CHARS) return `A secret can be at most ${SECRET_VALUE_MAX_CHARS} characters`
+  if (value.includes('\0')) return 'A secret cannot contain a NUL character'
+  return null
 }
 
 /**

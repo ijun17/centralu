@@ -177,6 +177,7 @@ const SKIP: Record<string, string> = {
   'apps.askBuilder': '앱의 만드는 세션(진짜 에이전트)에 말을 넣는다 (builder-requests.test.ts·platform.contract.test.ts가 관통)',
   'apps.sendError': '앱의 오류 묶음과 만드는 세션(진짜 에이전트)이 필요 — builder-requests.test.ts가 관통',
   'apps.answerQuestion': '화면에서 시작된 사슬의 능력 물음이 떠 있어야 함 (sessions/app-capabilities.test.ts가 진짜 앱으로 관통)',
+  'apps.setSecret': '비밀을 선언한 앱이 필요 — 비밀 값을 이 기계에 쓴다 (app-secrets.test.ts가 진짜 앱으로 관통)',
 }
 
 const ok: string[] = []

@@ -9,6 +9,7 @@ import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 
 type Rule = { id: number; scope: string; matcher: string; decision: string; createdAt: number }
 
@@ -439,6 +440,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           Trust this project
         </button>
       )}
+      <SecretsLine app={app} />
       {app.projectId === null &&
         (confirming ? (
           <div className="mt-2 rounded border border-edge bg-void px-2.5 py-2" data-testid="external-app-remove-confirm">
@@ -475,6 +477,35 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           </button>
         ))}
     </li>
+  )
+}
+
+/**
+ * 앱 줄 안의 비밀 (M4 E) — 선언한 비밀이 있는 앱에만 선다. 접혀 있을 때도 빈 것의 수를 말한다: 키가 빠져 뜨지 못하는 앱을
+ * 설정에서 찾는 사람은, 줄을 펼치기 전에 무엇이 빠졌는지부터 봐야 한다. 칸은 고정 화면의 판과 같은 것이다(`AppSecrets`).
+ */
+function SecretsLine({ app }: { app: ExternalCatalogApp }) {
+  const [open, setOpen] = useState(false)
+  const count = app.info.secrets?.length ?? 0
+  if (count === 0) return null
+  const missing = missingSecrets(app)
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        className={`rounded px-1 py-0.5 text-[11px] transition-colors hover:text-chalk ${missing ? 'text-chalk' : 'text-slate'}`}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        data-testid="external-app-secrets-toggle"
+      >
+        {missing ? `Secrets · ${missing} of ${count} missing` : `Secrets · ${count} set`}
+      </button>
+      {open && (
+        <div className="mt-1.5">
+          <AppSecrets app={app} />
+        </div>
+      )}
+    </div>
   )
 }
 

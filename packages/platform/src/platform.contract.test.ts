@@ -838,3 +838,53 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
     }
   })
 })
+
+/**
+ * 앱의 비밀 (M4 E) — web 구현의 `setSecret`이 진짜 host와 진짜 런타임을 지난다. 목록은 이름마다 있음·없음만 싣고(값은 없다), 넣으면
+ * 방송이 온다. 거절은 host의 말 그대로 온다 — 비밀 칸이 그 말을 보인다.
+ */
+describe('Platform 계약: 앱의 비밀 (web + 실 host)', () => {
+  it('넣으면 목록이 "있음"으로 바뀌어 방송되고, 값은 목록에 없으며, 선언하지 않은 이름은 host의 말로 거절된다', async () => {
+    const VALUE = 'contract-secret-value-42'
+    const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-secrets-')))
+    const projRoot = join(fixture, 'proj')
+    mkdirSync(join(fixture, 'data'))
+    plantApp(join(projRoot, ...PROJECT_APPS), 'keys', { secrets: ['API_KEY'] })
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const project = await mgr.addProject(projRoot)
+    mgr.setProjectTrusted(project.id, true)
+    const rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
+    rt.refresh()
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
+    onExternalAppListChanged(rt, () => server.broadcast({ type: 'external_apps_changed' }))
+    const port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    const heard: string[] = []
+    const off = platform.agents.subscribe((e) => void heard.push(e.type))
+    const slots = async () => (await platform.apps.list()).find((a) => a.appId === 'keys')?.secrets
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+      expect(await slots()).toEqual([{ name: 'API_KEY', set: false }])
+
+      await platform.apps.setSecret('keys', project.id, 'API_KEY', VALUE)
+      await waitFor(() => heard.includes('external_apps_changed'))
+      expect(await slots()).toEqual([{ name: 'API_KEY', set: true }])
+      expect(JSON.stringify(await platform.apps.list())).not.toContain(VALUE)
+
+      await expect(platform.apps.setSecret('keys', project.id, 'NOPE', VALUE)).rejects.toThrow('This app does not declare a secret named NOPE')
+      await expect(platform.apps.setSecret('keys', project.id, 'API_KEY', '')).rejects.toThrow('Enter a value, or clear the secret instead')
+      await platform.apps.setSecret('keys', project.id, 'API_KEY', null)
+      expect(await slots()).toEqual([{ name: 'API_KEY', set: false }])
+    } finally {
+      off()
+      await platform.dispose()
+      await mgr.disposeAll()
+      await rt.dispose()
+      await server.close()
+      store.close()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+})
