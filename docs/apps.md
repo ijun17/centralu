@@ -360,11 +360,13 @@ and "Send to builder".
   because hand-off notes, file links and history catch-up all assume it; a user-folder app's builder
   works in the app folder. The app's rules come as the session's role text, fixed when it is made.
   Preset `normal`. Tool: the project's default, or the orchestrator's for a user-folder app. It is
-  attached to its own app's tools, and gets one more tool, `check`. Like a coordinator session, it
-  carries Centralu's own tools, so it reads no instruction or settings files even in a trusted
-  project: a Claude builder reads neither the project's `.claude/` and `CLAUDE.md` nor the person's
-  `~/.claude` (`settingSources: []`), so the person's own settings, a global bypass included, do not
-  apply to it; a Codex builder does not read `AGENTS.md`.
+  attached to its own app's tools, and gets one more tool, `check`. Carrying Centralu's own tools
+  does not change which files it reads (#152): like any other session of its project, a Claude
+  builder in a trusted project loads the project's `.claude/` and `CLAUDE.md` and the person's
+  `~/.claude`, a global bypass included, and a Codex builder reads `AGENTS.md`. Once the project's
+  trust is withdrawn, it reads only the person's own settings from its next start. A user-folder
+  app's builder counts as trusted, since that folder is the person's own (decision 3). Only the
+  orchestrator and coordinators read no settings files.
 - **`check`**: reads the manifest again; restarts the app **from the files on disk** (waiting up to
   30 s for calls in progress; past that it inspects the running process and says so); calls
   `tools/list` for real; reads every `ui://` screen the tools point at (MIME type, not empty, bridge

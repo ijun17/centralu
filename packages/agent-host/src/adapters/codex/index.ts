@@ -57,9 +57,11 @@ function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown>
 }
 
 /**
- * 저장소의 파일이 이 스레드를 바꾸지 못하게 한다 (M4 결정 3, #92) — 신뢰하지 않은 프로젝트와, 프로젝트가
- * 없는 세션(오케스트레이터·조율 세션: 그 폴더는 워커가 쓸 수 있는 자리다). Claude의 `settingSources: ['user']`에
- * 대응한다. 신뢰한 프로젝트에서는 아무것도 싣지 않는다 — 지금까지와 같다.
+ * 저장소의 파일이 이 스레드를 바꾸지 못하게 한다 (M4 결정 3, #92·#152) — 신뢰하지 않은 프로젝트와, 파일을 하나도
+ * 읽지 않는 세션(`noSettingFiles`: 오케스트레이터·조율 세션 — 그 폴더는 워커가 쓸 수 있는 자리다). Claude의
+ * `settingSources: ['user']`·`[]`에 대응한다. 신뢰한 폴더(신뢰한 프로젝트, 사용자 폴더 앱)에서는 아무것도 싣지
+ * 않는다 — 지금까지와 같다. 어느 쪽인지는 매니저가 세션의 종류와 프로젝트로 정해서 넘긴다: 도구를 받는지로 가르지
+ * 않는다(워크트리 매니저와 만드는 세션도 도구를 받지만 프로젝트의 세션이다).
  *
  * Codex에도 프로젝트 신뢰가 따로 있다(`~/.codex/config.toml`의 `projects."<경로>".trust_level`). 신뢰하지
  * 않은 폴더에서 Codex는 저장소의 `.codex/config.toml`(승인 정책·샌드박스·MCP 서버를 바꿀 수 있다), 훅,
@@ -91,8 +93,8 @@ function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown>
  * "failed to persist trusted project state for", "is marked as untrusted in the effective configuration",
  * "Project-local config, hooks, and exec policies are disabled … but skills still load".
  */
-export function repoFilesConfig(opts: Pick<CreateSessionOpts, 'cwd' | 'projectTrusted'>): Record<string, unknown> {
-  if (opts.projectTrusted === true) return {}
+export function repoFilesConfig(opts: Pick<CreateSessionOpts, 'cwd' | 'projectTrusted' | 'noSettingFiles'>): Record<string, unknown> {
+  if (opts.projectTrusted === true && !opts.noSettingFiles) return {}
   const keys = new Set<string>()
   for (const start of [resolve(opts.cwd), realPathOr(opts.cwd)]) {
     for (let dir = start; ; dir = dirname(dir)) {
@@ -419,20 +421,15 @@ class CodexSession implements SessionHandle {
         this.appServers.add(a.server)
       })
     }
-    return {
-      /*
-       * **폴더의 문서를 읽지 않는다** (오케스트레이터 — Claude의 settingSources: []에 대응).
-       *
-       * 안 막으면 낮은 권한의 워커 세션이 오케스트레이터 폴더에 지시문을 써서
-       * 모든 세션에 지시할 수 있는 쪽을 조종할 수 있다.
-       * 실측: 이걸 넣기 전에는 심어둔 AGENTS.md를 그대로 따랐다
-       * ("침투성공-9142"부터 답했다).
-       * 오케스트레이터는 프로젝트가 없어 신뢰하지 않은 세션이므로 repoFilesConfig도 같은 값을 싣는다 —
-       * 여기 남기는 것은 이 규칙이 신뢰 판정과 무관하게 오케스트레이터의 것이라서다.
-       */
-      ...(orchestrator ? { project_doc_max_bytes: 0 } : {}),
-      ...(Object.keys(servers).length > 0 ? { mcp_servers: servers } : {}),
-    }
+    /*
+     * 폴더의 문서(AGENTS.md)를 읽을지는 여기서 정하지 않는다 — repoFilesConfig가 세션이 무엇인가로 정한다.
+     *
+     * 예전에는 오케스트레이터 도구의 다리가 있으면 여기서 `project_doc_max_bytes: 0`을 실었다. 오케스트레이터가
+     * 심어 둔 AGENTS.md를 그대로 따랐기 때문이다(실측: "침투성공-9142"부터 답했다). 그런데 워크트리 매니저와 만드는
+     * 세션도 이 다리를 받아서, 신뢰한 프로젝트에서도 AGENTS.md를 잃었다(#152). 오케스트레이터·조율 세션의 규칙은
+     * 그대로다 — `noSettingFiles`로 와서 repoFilesConfig가 같은 값을 싣는다.
+     */
+    return Object.keys(servers).length > 0 ? { mcp_servers: servers } : {}
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
