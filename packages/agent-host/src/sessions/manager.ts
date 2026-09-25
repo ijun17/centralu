@@ -3604,7 +3604,7 @@ export class SessionManager {
       checkApp: async () => {
         const self = this.meta.get(orchestratorId)
         const ref = self ? this.builderRefOf(self) : null
-        if (!ref) return { ok: false, text: '이 세션은 어떤 앱의 만드는 세션도 아닙니다 — 점검할 앱이 없습니다' }
+        if (!ref) return { ok: false, text: 'This session is not the builder of any app, so there is no app to check' }
         const r = await this.checkApp(ref)
         return { ok: r.ok, text: r.text }
       },
@@ -3691,9 +3691,9 @@ export class SessionManager {
     const rt = this.appsHub?.rt
     if (!rt) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
     const app = rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
-    if (!app) throw Object.assign(new Error(`그런 앱이 없습니다: ${ref.projectId ?? 'user'}/${ref.appId}`), { code: 'internal' })
+    if (!app) throw Object.assign(new Error(`There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`), { code: 'internal' })
     if (!app.trusted) {
-      throw Object.assign(new Error('신뢰하지 않은 프로젝트의 앱에는 만드는 세션을 두지 않습니다 — 프로젝트를 신뢰하면 앱이 뜨고 시험할 수 있습니다'), { code: 'internal' })
+      throw Object.assign(new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested'), { code: 'internal' })
     }
     /*
      * 사람이 켜지 않은 가져온 앱 (E-3) — 만드는 세션은 그 앱 폴더에서 일하고 그 앱의 도구를 받는다. 확인 전의 코드를 에이전트가

@@ -181,7 +181,7 @@ describe('apps.openView', () => {
     await start()
     const opened = vi.spyOn(views, 'open')
 
-    await expect(openView('slider')).rejects.toThrow(/신뢰하지 않은 프로젝트/)
+    await expect(openView('slider')).rejects.toThrow(/project is not trusted/)
     expect(opened).not.toHaveBeenCalled()
     expect(homeCalls('slider')).toBe(0)
   })

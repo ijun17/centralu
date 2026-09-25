@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { mcpServerNameError } from '../contract.js'
+import { APP_ID_MAX_LENGTH, RESERVED_NAME_PREFIX, serverNameProblem } from '@cc/protocol'
 import { HOST_CAPABILITIES, isHostCapability } from './capabilities.js'
 
 /**
@@ -42,8 +42,8 @@ export const MAX_MANIFEST_BYTES = 64 * 1024
  * 목록을 읽는 자리(런타임)와 매니페스트의 `home`이 함께 쓴다.
  */
 export function toolNameError(name: string): string | null {
-  if (name.length === 0) return '도구 이름이 비어 있습니다'
-  if (name.includes('__')) return `도구 이름에 "__"를 쓸 수 없습니다 (세션에서 도구 이름의 칸막이입니다): ${name}`
+  if (name.length === 0) return 'a tool name is empty'
+  if (name.includes('__')) return `a tool name cannot contain "__" (it separates names in a session's tool names): ${name}`
   return null
 }
 
@@ -71,8 +71,15 @@ const HOST_CAPABILITY = /^[a-z][a-z0-9_.-]{0,63}$/
 const AGENT_TOOL = /^[a-z][a-z0-9-]{0,31}$/
 
 const appIdField = z.string().superRefine((id, ctx) => {
-  const err = mcpServerNameError(id)
-  if (err) ctx.addIssue({ code: 'custom', message: err })
+  // 판정은 한 벌(`serverNameProblem`, #93)이고 말만 여기서 붙인다 — 이 말은 앱 목록의 까닭과 check의 보고서로 사람과 만드는 에이전트가 읽는다
+  const problem = serverNameProblem(id)
+  if (problem === 'reserved') ctx.addIssue({ code: 'custom', message: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself` })
+  if (problem === 'shape') {
+    ctx.addIssue({
+      code: 'custom',
+      message: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
+    })
+  }
 })
 
 const toolNameField = z.string().superRefine((name, ctx) => {
@@ -82,9 +89,9 @@ const toolNameField = z.string().superRefine((name, ctx) => {
 
 const secretNameField = z.string().superRefine((name, ctx) => {
   if (!SECRET_NAME.test(name)) {
-    ctx.addIssue({ code: 'custom', message: `비밀 이름은 환경 변수 이름이어야 합니다 (대문자·숫자·밑줄): ${name}` })
+    ctx.addIssue({ code: 'custom', message: `a secret name must be an environment variable name (capital letters, digits and underscores): ${name}` })
   } else if (RESERVED_ENV_PREFIXES.some((p) => name.startsWith(p))) {
-    ctx.addIssue({ code: 'custom', message: `${RESERVED_ENV_PREFIXES.join('·')}로 시작하는 이름은 Centralu가 씁니다: ${name}` })
+    ctx.addIssue({ code: 'custom', message: `names starting with ${RESERVED_ENV_PREFIXES.join(' or ')} are Centralu's own: ${name}` })
   }
 })
 
@@ -109,7 +116,7 @@ const ManifestSchema = z.object({
     if (v !== MANIFEST_VERSION) {
       ctx.addIssue({
         code: 'custom',
-        message: `이 Centralu는 manifestVersion ${MANIFEST_VERSION}만 읽습니다 (받은 값: ${v}) — Centralu를 올리거나 앱을 만든 쪽과 판을 맞추세요`,
+        message: `this Centralu reads manifestVersion ${MANIFEST_VERSION} only (got ${v}) — update Centralu, or ask whoever made the app for a version this Centralu reads`,
       })
     }
   }),
@@ -139,7 +146,7 @@ const ManifestSchema = z.object({
           z.boolean(),
           z.array(
             z.string().superRefine((t, ctx) => {
-              if (!AGENT_TOOL.test(t)) ctx.addIssue({ code: 'custom', message: `에이전트 도구 이름의 모양이 아닙니다 (예: "claude", "codex"): ${t}` })
+              if (!AGENT_TOOL.test(t)) ctx.addIssue({ code: 'custom', message: `not the shape of an agent tool name (for example "claude", "codex"): ${t}` })
             }),
           ),
         ])
@@ -148,7 +155,7 @@ const ManifestSchema = z.object({
       host: z
         .array(
           z.string().superRefine((h, ctx) => {
-            if (!HOST_CAPABILITY.test(h)) ctx.addIssue({ code: 'custom', message: `호스트 능력 이름의 모양이 아닙니다: ${h}` })
+            if (!HOST_CAPABILITY.test(h)) ctx.addIssue({ code: 'custom', message: `not the shape of a host capability name: ${h}` })
           }),
         )
         .optional(),
@@ -185,10 +192,10 @@ export function parseManifest(text: string): ManifestResult {
   try {
     raw = JSON.parse(text)
   } catch (e) {
-    return { ok: false, error: `${MANIFEST_FILE}가 JSON이 아닙니다: ${(e as Error).message}`, warnings: [] }
+    return { ok: false, error: `${MANIFEST_FILE} is not JSON: ${(e as Error).message}`, warnings: [] }
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: `${MANIFEST_FILE}는 객체여야 합니다`, warnings: [] }
+    return { ok: false, error: `${MANIFEST_FILE} must be a JSON object`, warnings: [] }
   }
   const warnings = unknownFields(raw as Record<string, unknown>)
   const parsed = ManifestSchema.safeParse(raw, { reportInput: true })
@@ -196,7 +203,7 @@ export function parseManifest(text: string): ManifestResult {
     return { ok: false, error: parsed.error.issues.map(describeIssue).join('; '), warnings }
   }
   for (const h of parsed.data.uses.host ?? []) {
-    if (!isHostCapability(h)) warnings.push(`uses.host: Centralu가 모르는 능력입니다 — "${h}". 줄 수 있는 것: ${HOST_CAPABILITIES.join(', ')} (부탁하면 거절됩니다)`)
+    if (!isHostCapability(h)) warnings.push(`uses.host: Centralu has no capability "${h}" — it can give: ${HOST_CAPABILITIES.join(', ')} (asking for it is refused)`)
   }
   return { ok: true, manifest: parsed.data, warnings }
 }
@@ -208,7 +215,7 @@ function unknownFields(raw: Record<string, unknown>): string[] {
   const check = (obj: unknown, known: readonly string[], prefix: string) => {
     if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return
     for (const k of Object.keys(obj)) {
-      if (!known.includes(k)) out.push(`모르는 필드는 무시합니다: ${prefix}${k}`)
+      if (!known.includes(k)) out.push(`unknown field, ignored: ${prefix}${k}`)
     }
   }
   check(raw, TOP_KEYS, '')
@@ -221,7 +228,7 @@ function unknownFields(raw: Record<string, unknown>): string[] {
 
 /** 사람과 만드는 에이전트가 읽을 한 줄 — 어느 칸이 왜 틀렸는가 */
 function describeIssue(issue: z.core.$ZodIssue): string {
-  const path = issue.path.map(String).join('.') || '(전체)'
-  if (issue.code === 'invalid_type' && issue.input === undefined) return `${path}: 빠졌습니다`
+  const path = issue.path.map(String).join('.') || '(the whole file)'
+  if (issue.code === 'invalid_type' && issue.input === undefined) return `${path}: missing`
   return `${path}: ${issue.message}`
 }

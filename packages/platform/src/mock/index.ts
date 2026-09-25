@@ -780,9 +780,9 @@ export class MockPlatform implements Platform {
      */
     /** 실물처럼: 사용자 폴더 앱만 지우고(프로젝트 앱은 거절), 목록 방송을 한다 */
     remove: async (appId: string, projectId: string | null) => {
-      if (projectId !== null) throw new Error('프로젝트 앱은 저장소의 파일입니다 — 저장소에서 지우세요')
+      if (projectId !== null) throw new Error("A project app is part of the project's repository — remove it there")
       const at = this.externalAppList.findIndex((a) => a.appId === appId && a.projectId === null)
-      if (at === -1) throw new Error(`그런 앱이 없습니다: user/${appId}`)
+      if (at === -1) throw new Error(`There is no such app: user/${appId}`)
       this.externalAppList.splice(at, 1)
       this.removedApps.push(appId)
       this.emit({ type: 'external_apps_changed' })
@@ -794,7 +794,7 @@ export class MockPlatform implements Platform {
     restart: async (appId: string, projectId: string | null) => {
       this.restarts.push({ appId, projectId })
       const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
-      if (!a) throw new Error(`그런 앱이 없습니다: ${projectId ?? 'user'}/${appId}`)
+      if (!a) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
       if (a.status === 'failed' || a.status === 'crashed' || a.status === 'running') Object.assign(a, { status: 'stopped', error: null })
       this.emit({ type: 'external_apps_changed' })
     },
@@ -806,21 +806,21 @@ export class MockPlatform implements Platform {
     create: async (spec: NewAppSpec): Promise<AppCreated> => {
       this.createdApps.push(structuredClone(spec))
       const idProblem = newAppIdProblem(spec.id)
-      if (idProblem) throw new Error(`앱 id로 쓸 수 없습니다 ("${spec.id}") — ${idProblem}`)
-      if (MOCK_BUILTIN_APPS.includes(spec.id)) throw new Error(`"${spec.id}"는 내장 앱의 이름입니다 — 다른 id를 쓰세요`)
+      if (idProblem) throw new Error(`"${spec.id}" cannot be an app id — ${idProblem}`)
+      if (MOCK_BUILTIN_APPS.includes(spec.id)) throw new Error(`"${spec.id}" cannot be an app id — that is the id of a built-in app — pick another`)
       const name = spec.name.replace(/\s+/g, ' ').trim()
-      if (!name) throw new Error('앱 이름이 비어 있습니다')
+      if (!name) throw new Error('The app needs a name')
       let dir = `/mock/data/apps/${spec.id}`
       if (spec.projectId !== null) {
         const project = this.projectsList.find((p) => p.id === spec.projectId)
-        if (!project) throw new Error(`그런 프로젝트가 없습니다: ${spec.projectId}`)
+        if (!project) throw new Error(`There is no such project: ${spec.projectId}`)
         if (!project.trusted) {
-          throw new Error('신뢰하지 않은 프로젝트에는 앱을 만들지 않습니다 — 앱은 이 기계에서 도는 코드라, 프로젝트를 먼저 신뢰해야 뜹니다')
+          throw new Error('Centralu does not make apps in a project it does not trust — an app is code that runs on this machine, so trust the project first')
         }
         dir = `${project.path}/.centralu/apps/${spec.id}`
       }
       if (this.externalAppList.some((a) => a.appId === spec.id && a.projectId === spec.projectId)) {
-        throw new Error(`"${spec.id}" 앱이 이미 있습니다 (${dir}) — 다른 id를 쓰세요`)
+        throw new Error(`An app "${spec.id}" already exists (${dir}) — use another id`)
       }
       const app: ExternalAppInfo = {
         appId: spec.id,
@@ -859,9 +859,9 @@ export class MockPlatform implements Platform {
       const have = this.appBuilders.get(key)
       if (have && this.sessions.has(have)) return structuredClone(this.sessions.get(have)!)
       const app = this.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
-      if (!app) throw new Error(`그런 앱이 없습니다: ${projectId ?? 'user'}/${appId}`)
+      if (!app) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
       if (!app.trusted) {
-        throw new Error('신뢰하지 않은 프로젝트의 앱에는 만드는 세션을 두지 않습니다 — 프로젝트를 신뢰하면 앱이 뜨고 시험할 수 있습니다')
+        throw new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
       }
       const project = projectId ? this.projectsList.find((p) => p.id === projectId) : undefined
       const chosen = tool ?? (project ? project.defaultTool : this.orchestratorTool) ?? 'claude'
@@ -996,7 +996,7 @@ export class MockPlatform implements Platform {
      */
     setSecret: async (appId: string, projectId: string | null, name: string, value: string | null): Promise<void> => {
       const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
-      if (!a) throw new Error(`그런 앱이 없습니다: ${projectId ?? 'user'}/${appId}`)
+      if (!a) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
       const slot = a.secrets?.find((s) => s.name === name)
       if (value !== null) {
         if (!slot) throw new Error(`This app does not declare a secret named ${name}`)

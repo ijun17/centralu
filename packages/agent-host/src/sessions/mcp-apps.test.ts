@@ -258,7 +258,7 @@ describe('지우기 (apps.remove, A-7)', () => {
     // 도구 이름을 아는 쪽(다음 스레드를 기다리는 Codex)이 불러도 거절된다
     const late = await apps.call('app-echoer', 'poke', { to: 1 })
     expect(late.isError).toBe(true)
-    expect(JSON.stringify(late.content)).toContain('붙은 앱이 아닙니다')
+    expect(JSON.stringify(late.content)).toContain('not attached to this session')
     // 지운 앱의 기록은 남는다
     expect(rt.runs({ projectId: null, appId: 'echoer' })).toEqual([expect.objectContaining({ tool: 'peek', callerSessionId: orc.id })])
     // 같은 이름을 다시 제안할 수 있다
@@ -270,7 +270,7 @@ describe('지우기 (apps.remove, A-7)', () => {
     connect()
     plantApp(join(repo, ...PROJECT_APPS), 'notes', { server: SERVER })
     const projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
-    await expect(rpc('apps.remove', { appId: 'notes', projectId })).rejects.toThrow(/저장소/)
+    await expect(rpc('apps.remove', { appId: 'notes', projectId })).rejects.toThrow(/part of the project's repository/)
     expect(existsSync(join(repo, ...PROJECT_APPS, 'notes'))).toBe(true)
     expect(rt.list().map((a) => a.appId)).toEqual(['notes'])
   })

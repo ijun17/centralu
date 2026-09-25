@@ -82,7 +82,7 @@ describe('240초 — 먼저 돌려주고, 호출은 계속된다', () => {
 
     const running = await a.call('app-notes', 'run_status', { run_id: runId })
     expect(running).toMatchObject({ isError: false, structuredContent: { runId, status: 'running' } })
-    expect(text(running)).toContain('아직 도는 중')
+    expect(text(running)).toContain('still running')
 
     writeFileSync(w.gate('notes'), '')
     let done: AppToolResult | null = null
@@ -136,7 +136,7 @@ describe('run_status가 보여 주는 것', () => {
     const other = hub.attach({ id: 'long-s2', kind: 'worker', projectId: 'p1' })
     const r = await other.call('app-notes', 'run_status', { run_id: runId })
     expect(r.isError).toBe(true)
-    expect(text(r)).toContain('모르는 실행 id')
+    expect(text(r)).toContain('Unknown run id')
     writeFileSync(w.gate('notes'), '')
   })
 
@@ -146,7 +146,7 @@ describe('run_status가 보여 주는 것', () => {
     const runId = w.rt.runs(NOTES)[0]!.id
     const r = await a.call('app-notes', 'run_status', { run_id: runId })
     expect(r).toMatchObject({ isError: false, structuredContent: { runId, status: 'ok' } })
-    expect(text(r)).toContain('결과 본문은 남아 있지 않습니다')
+    expect(text(r)).toContain('its result is no longer kept')
 
     const unknown = await a.call('app-notes', 'run_status', { run_id: 'run_nope' })
     expect(unknown.isError).toBe(true)
@@ -169,7 +169,7 @@ describe('세션을 멈추면 그 세션의 앱 호출이 멈춘다', () => {
     a.cancelAll()
     const r = await p
     expect(r.isError).toBe(true)
-    expect(text(r)).toContain('취소')
+    expect(text(r)).toContain('cancelled')
     await aborted()
     expect(w.rt.runs(NOTES)[0]).toMatchObject({ tool: 'hold', status: 'cancelled', callerSessionId: WORKER.id })
   })

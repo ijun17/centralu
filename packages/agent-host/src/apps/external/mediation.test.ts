@@ -109,7 +109,7 @@ describe('공개 범위 — 양쪽 방향', () => {
     make()
     const out = await rt.call(ref('notes'), 'bad_visibility', {}, VIEW)
     expect(out).toMatchObject({ status: 'rejected' })
-    expect(out.error).toContain('그런 도구가 없습니다')
+    expect(out.error).toContain('This app has no tool named')
     expect(rt.list()[0]!.warnings.join('\n')).toContain('bad_visibility')
   })
 })
@@ -207,7 +207,7 @@ describe('취소', () => {
     make()
     const out = await rt.call(ref('notes'), 'echo', { text: 'x' }, { kind: 'app', parentRunId: 'run_nope' })
     expect(out).toMatchObject({ status: 'rejected' })
-    expect(out.error).toContain('부모 실행이 열려 있지 않습니다')
+    expect(out.error).toContain('The run that asked for this call is not open')
   })
 })
 

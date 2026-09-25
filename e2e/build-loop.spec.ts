@@ -166,7 +166,7 @@ test.describe('C-1: 새 앱', () => {
     // 이미 있는 id는 host가 안다 — 거절의 말을 그대로 보인다
     await dialog.getByTestId('new-app-id').fill('notes')
     await dialog.getByTestId('new-app-create').click()
-    await expect(dialog.getByTestId('new-app-error')).toHaveText('"notes" 앱이 이미 있습니다 (/tmp/alpha/.centralu/apps/notes) — 다른 id를 쓰세요')
+    await expect(dialog.getByTestId('new-app-error')).toHaveText('An app "notes" already exists (/tmp/alpha/.centralu/apps/notes) — use another id')
     await expect(dialog).toBeVisible()
     expect(await createdApps(page)).toEqual([{ projectId: pid, id: 'notes', name: 'Store', tool: 'claude' }])
     expect(await sessionsOfApp(page, 'notes')).toEqual([])

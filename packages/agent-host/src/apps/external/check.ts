@@ -45,15 +45,15 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
   const findings: CheckFinding[] = []
   const summaries: CheckedTool[] = []
   const screens = new Set<string>()
-  if (tools.length === 0) findings.push(warning('도구 목록', '도구가 하나도 없습니다 — 에이전트도 화면도 부를 것이 없습니다'))
+  if (tools.length === 0) findings.push(warning('tool list', 'the app lists no tools — neither agents nor its screen have anything to call'))
 
   for (const t of tools) {
-    const where = `도구 ${t.name}`
+    const where = `tool ${t.name}`
     const nameError = toolNameError(t.name)
-    if (nameError) findings.push(problem(where, `${nameError} — Centralu가 이 도구를 빼서 아무도 부를 수 없습니다`))
+    if (nameError) findings.push(problem(where, `${nameError} — Centralu drops this tool, so nobody can call it`))
     const vis = visibilityOf(t)
-    if (!vis.ok) findings.push(problem(where, `${vis.error} — Centralu가 이 도구를 뺍니다`))
-    else if (vis.visibility.length === 0) findings.push(warning(where, '_meta.ui.visibility가 빈 배열이라 에이전트도 화면도 부를 수 없습니다'))
+    if (!vis.ok) findings.push(problem(where, `${vis.error} — Centralu drops this tool`))
+    else if (vis.visibility.length === 0) findings.push(warning(where, '_meta.ui.visibility is an empty list, so neither agents nor the screen can call it'))
 
     const ann = t.annotations
     const readOnly = typeof ann?.readOnlyHint === 'boolean' ? ann.readOnlyHint : null
@@ -61,18 +61,19 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
       findings.push(
         problem(
           where,
-          'annotations.readOnlyHint가 없습니다 — 읽기만 하면 `readOnlyHint: true`, 무엇이든 바꾸면 `readOnlyHint: false`를 적으세요. ' +
-            '없으면 바꾸는 도구로 다뤄져 세션이 부를 때마다 묻고, Codex의 auto 프리셋은 부르지 않으며, 부를 때마다 이 앱의 열린 화면이 모두 다시 읽습니다',
+          'annotations.readOnlyHint is missing — write `readOnlyHint: true` if the tool only reads, `readOnlyHint: false` if it changes anything. ' +
+            "Without it the tool counts as one that changes things: a session asks before every call, Codex's auto preset does not call it, " +
+            "and every call makes all of this app's open screens read again",
         ),
       )
     } else if (readOnly && ann?.destructiveHint === true) {
-      findings.push(warning(where, 'readOnlyHint: true인데 destructiveHint: true입니다 — 둘 중 하나가 틀렸습니다'))
+      findings.push(warning(where, 'readOnlyHint: true together with destructiveHint: true — one of them is wrong'))
     }
-    if (!t.description?.trim()) findings.push(warning(where, 'description이 없습니다 — 에이전트는 설명을 보고 도구를 고릅니다'))
+    if (!t.description?.trim()) findings.push(warning(where, 'no description — agents pick a tool by reading its description'))
 
     // 고정 화면을 여는 쪽(`homeView`)과 같은 판정이다 — 점검이 통과시킨 선언을 화면이 거절하면 안 된다
     const ui = resourceUriOf(t)
-    if (ui.error) findings.push(problem(where, `${ui.error} — 화면으로 뜨지 않습니다`))
+    if (ui.error) findings.push(problem(where, `${ui.error} — it will not open as a screen`))
     if (ui.uri) screens.add(ui.uri)
     summaries.push({ name: t.name, visibility: vis.ok ? vis.visibility : [], readOnly, screen: ui.uri })
   }
@@ -81,14 +82,14 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
     const where = `home (${manifest.home})`
     const home = tools.find((t) => t.name === manifest.home)
     if (!home) {
-      findings.push(problem(where, `centralu.app.json의 home이 가리키는 도구가 도구 목록에 없습니다 — 사이드바에서 앱을 열 수 없습니다`))
+      findings.push(problem(where, 'the tool centralu.app.json names as home is not in the tool list — the app cannot be opened from the sidebar'))
     } else {
       if (resourceUriOf(home).uri === null) {
-        findings.push(problem(where, 'home 도구에 화면이 없습니다 — `_meta: { ui: { resourceUri: "ui://…" } }`를 달고 그 리소스를 `centralu.uiResource`로 등록하세요'))
+        findings.push(problem(where, 'the home tool has no screen — add `_meta: { ui: { resourceUri: "ui://…" } }` and register that resource with `centralu.uiResource`'))
       }
       const vis = visibilityOf(home)
       if (vis.ok && !vis.visibility.includes('app')) {
-        findings.push(problem(where, `home 도구가 화면에 열려 있지 않습니다 (visibility: ${JSON.stringify(vis.visibility)}) — 앱을 열 때 Centralu는 화면의 자리에서 home을 부릅니다`))
+        findings.push(problem(where, `the home tool is not open to the screen (visibility: ${JSON.stringify(vis.visibility)}) — when the app opens, Centralu calls home from the screen's side`))
       }
     }
   }
@@ -97,22 +98,22 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
 
 /** 화면 리소스 하나의 판정 — 읽은 결과 또는 읽다 난 오류 */
 export function checkScreen(uri: string, read: ReadResourceResult | Error): { findings: CheckFinding[]; chars: number } {
-  const where = `화면 ${uri}`
-  if (read instanceof Error) return { findings: [problem(where, `읽지 못했습니다: ${read.message.split('\n')[0]}`)], chars: 0 }
+  const where = `screen ${uri}`
+  if (read instanceof Error) return { findings: [problem(where, `could not be read: ${read.message.split('\n')[0]}`)], chars: 0 }
   const content = read.contents.find((c) => c.uri === uri) ?? read.contents[0]
-  if (!content) return { findings: [problem(where, '읽었지만 내용이 비어 있습니다 (contents가 없습니다)')], chars: 0 }
+  if (!content) return { findings: [problem(where, 'it was read but came back empty (no contents)')], chars: 0 }
   const findings: CheckFinding[] = []
   if (content.mimeType !== UI_MIME) {
-    findings.push(problem(where, `mimeType이 ${JSON.stringify(content.mimeType ?? null)}입니다 — 화면은 "${UI_MIME}"이어야 합니다 (centralu.uiResource가 맞춰 줍니다)`))
+    findings.push(problem(where, `its mimeType is ${JSON.stringify(content.mimeType ?? null)} — a screen must be "${UI_MIME}" (centralu.uiResource sets it)`))
   }
   const text = 'text' in content && typeof content.text === 'string' ? content.text : null
   if (text === null) {
-    findings.push(warning(where, 'HTML이 글이 아니라 blob으로 왔습니다 — Centralu의 템플릿은 글로 냅니다'))
+    findings.push(warning(where, "the HTML came as a blob, not as text — Centralu's template sends text"))
     return { findings, chars: 0 }
   }
-  if (!text.trim()) findings.push(problem(where, 'HTML이 비어 있습니다'))
+  if (!text.trim()) findings.push(problem(where, 'the HTML is empty'))
   if (text.includes(BRIDGE_TAG)) {
-    findings.push(problem(where, `<script src="${BRIDGE_TAG}">가 그대로 남았습니다 — 이 화면에는 브리지가 없어 도구를 부를 수 없습니다. centralu.uiResource로 등록하세요`))
+    findings.push(problem(where, `<script src="${BRIDGE_TAG}"> is still in the page — this screen has no bridge, so it cannot call tools. Register it with centralu.uiResource`))
   }
   return { findings, chars: text.length }
 }
@@ -127,23 +128,24 @@ export function formatReport(
   const warnings = r.findings.filter((f) => f.level === 'warning')
   const ok = problems.length === 0
   const lines: string[] = []
+  const count = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`
   lines.push(
     ok
-      ? `check ${label}: 통과${warnings.length ? ` (주의 ${warnings.length}개)` : ''}`
-      : `check ${label}: 문제 ${problems.length}개${warnings.length ? `, 주의 ${warnings.length}개` : ''} — 고친 뒤 다시 check를 부르세요`,
+      ? `check ${label}: passed${warnings.length ? ` (${count(warnings.length, 'warning')})` : ''}`
+      : `check ${label}: ${count(problems.length, 'problem')}${warnings.length ? `, ${count(warnings.length, 'warning')}` : ''} — fix them, then call check again`,
   )
-  for (const f of [...problems, ...warnings]) lines.push(`- ${f.level === 'problem' ? '문제' : '주의'} [${f.where}] ${f.message}`)
-  for (const n of context.notes) lines.push(`- 참고: ${n}`)
+  for (const f of [...problems, ...warnings]) lines.push(`- ${f.level} [${f.where}] ${f.message}`)
+  for (const n of context.notes) lines.push(`- note: ${n}`)
   if (r.tools.length) {
-    lines.push('도구:')
+    lines.push('Tools:')
     for (const t of r.tools) {
-      const kind = t.readOnly === true ? '읽기' : t.readOnly === false ? '바꿈' : 'readOnlyHint 없음'
-      const who = t.visibility.join('+') || '아무도'
-      lines.push(`  ${t.name} — ${kind}, ${who}${t.screen ? `, 화면 ${t.screen}` : ''}`)
+      const kind = t.readOnly === true ? 'reads' : t.readOnly === false ? 'changes' : 'no readOnlyHint'
+      const who = t.visibility.join('+') || 'nobody'
+      lines.push(`  ${t.name} — ${kind}, ${who}${t.screen ? `, screen ${t.screen}` : ''}`)
     }
   }
-  for (const s of r.screens) lines.push(`화면 ${s.uri}: ${s.chars}자`)
-  if (context.process) lines.push(`프로세스: ${context.process}`)
-  if (!ok && context.stderr) lines.push(`앱의 표준에러 (마지막 줄들):\n${context.stderr}`)
+  for (const s of r.screens) lines.push(`Screen ${s.uri}: ${count(s.chars, 'character')}`)
+  if (context.process) lines.push(`Process: ${context.process}`)
+  if (!ok && context.stderr) lines.push(`The app's stderr (last lines):\n${context.stderr}`)
   return { ok, ...r, text: lines.join('\n') }
 }

@@ -197,8 +197,8 @@ describe('그 앱의 만드는 세션으로 찾아진다', () => {
     await rpc('projects.setTrusted', { projectId, trusted: false })
     plantApp(join(repo, ...PROJECT_APPS), 'other', { server: { command: 'node', args: ['server.mjs'] } })
     rt.refresh()
-    await expect(rpc('apps.createBuilder', { appId: 'other', projectId })).rejects.toThrow(/신뢰하지 않은 프로젝트의 앱에는 만드는 세션을 두지 않습니다/)
-    await expect(rpc('apps.createBuilder', { appId: 'ghost', projectId })).rejects.toThrow(/그런 앱이 없습니다/)
+    await expect(rpc('apps.createBuilder', { appId: 'other', projectId })).rejects.toThrow(/does not give a builder to an app in a project it does not trust/)
+    await expect(rpc('apps.createBuilder', { appId: 'ghost', projectId })).rejects.toThrow(/There is no such app/)
   })
 
   it('create_app은 만든 세션을 알려 주며 다음 일을 그 세션에 넘기라고 한다', async () => {
@@ -246,10 +246,10 @@ describe('만드는 세션은 자기 앱을 시험한다 (C-3)', () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
     const viaSession = await mgr.runOrchestratorTool(builder!.id, 'check', { app: 'someone-else' })
     expect(viaSession.isError).toBeFalsy()
-    expect(viaSession.text).toMatch(new RegExp(`^check ${projectId.slice(0, 8)}/notes: 통과`))
+    expect(viaSession.text).toMatch(new RegExp(`^check ${projectId.slice(0, 8)}/notes: passed`))
     // 다리(Codex) 경로도 같은 문이다
     const viaBridge = (await rpc('orchestrator.tool', { sessionId: builder!.id, name: 'check', args: {} })) as { text: string }
-    expect(viaBridge.text).toContain('show — 읽기, model+app, 화면 ui://notes/index.html')
+    expect(viaBridge.text).toContain('show — reads, model+app, screen ui://notes/index.html')
     // 화면(UI)이 부르는 apps.check도 같은 판정이다
     const viaRpc = (await rpc('apps.check', { appId: 'notes', projectId })) as { ok: boolean; findings: unknown[] }
     expect(viaRpc).toMatchObject({ ok: true, findings: [] })
@@ -302,7 +302,7 @@ describe('오류는 만드는 세션에 저절로 가지 않는다 (C-6)', () =>
     expect(out.status).toBe('error')
     const errors = RpcMethods['apps.errors'].result.parse(await rpc('apps.errors', { appId: 'notes', projectId }))
     expect(errors.latest).toMatchObject({ kind: 'tool', tool: 'increment', args: '{"by":1}', message: 'increment is broken' })
-    expect(errors.latest!.text).toContain('앱 Notes (')
+    expect(errors.latest!.text).toContain('App Notes (')
     await new Promise((r) => setTimeout(r, 300))
     expect(claude.handles.get(builder!.id)!.sent).toEqual([])
   })

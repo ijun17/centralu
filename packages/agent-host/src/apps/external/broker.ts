@@ -65,7 +65,7 @@ export type BrokerAdmission = {
 const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<z.ZodRawShape> }> = {
   run_agent: {
     description:
-      '이 앱을 쓰는 사람의 에이전트에게 일을 맡기고 마지막 답을 받는다 (D-1). 요청마다 새 세션이 이 앱 아래에 선다. schema(JSON Schema, 뿌리는 객체)를 주면 그 모양의 JSON이 structuredContent로 온다',
+      'Ask the agent of the person using this app, and get its final answer. Each request runs in a new session under this app. With schema (a JSON Schema whose top level is an object) the answer comes as JSON of that shape in structuredContent',
     input: z.object({
       prompt: z.string(),
       /** 매니페스트의 `uses.agent`가 허락한 도구 이름. 없으면 사람의 기본 에이전트 */
@@ -74,12 +74,12 @@ const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<
     }),
   },
   call_app: {
-    description: '다른 앱의 model 도구를 부른다 (D-2)',
+    description: "Call a tool of another app that this app's manifest lists in uses.apps (its tools open to agents only)",
     input: z.object({ app: z.string(), tool: z.string(), args: z.record(z.string(), z.unknown()).optional() }),
   },
   host_data: {
     description:
-      'host의 데이터를 읽는다 (D-3) — name은 닫힌 목록(sessions.list, git.status) 가운데 이 앱이 uses.host에 선언한 것. 모두 읽기 전용이다',
+      "Read Centralu's own data by name — a closed list (sessions.list, git.status), only the names this app declares in uses.host. All of it is read-only",
     // 이름은 여기서 열거로 막지 않는다 — 모르는 이름에 SDK의 입력 오류 대신 창구가 줄 수 있는 목록을 말한다
     input: z.object({ name: z.string(), args: z.record(z.string(), z.unknown()).optional() }),
   },

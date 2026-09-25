@@ -32,17 +32,17 @@ export type AppErrorBundle = {
 export const ERRORS_KEPT = 10
 
 const KIND_LABEL: Record<AppErrorKind, string> = {
-  start: '앱이 뜨지 못했습니다',
-  crash: '앱 프로세스가 끝났습니다',
-  tool: '도구 호출이 실패했습니다',
+  start: 'the app could not start',
+  crash: "the app's process ended",
+  tool: 'a tool call failed',
 }
 
 export function errorBundle(app: string, b: Omit<AppErrorBundle, 'text'>): AppErrorBundle {
-  const lines = [`앱 ${app}: ${KIND_LABEL[b.kind]} (${new Date(b.at).toISOString()})`]
-  if (b.tool) lines.push(`도구: ${b.tool}`)
-  if (b.args !== null) lines.push(`인자: ${b.args}`)
-  if (b.runId) lines.push(`실행 id: ${b.runId}`)
-  lines.push(`이유: ${b.message}`)
-  lines.push(b.stderr.length ? `표준에러 (마지막 줄들):\n${b.stderr.join('\n')}` : '표준에러: (아무것도 찍지 않았습니다)')
+  const lines = [`App ${app}: ${KIND_LABEL[b.kind]} (${new Date(b.at).toISOString()})`]
+  if (b.tool) lines.push(`Tool: ${b.tool}`)
+  if (b.args !== null) lines.push(`Arguments: ${b.args}`)
+  if (b.runId) lines.push(`Run id: ${b.runId}`)
+  lines.push(`Reason: ${b.message}`)
+  lines.push(b.stderr.length ? `stderr (last lines):\n${b.stderr.join('\n')}` : 'stderr: (the app printed nothing)')
   return { ...b, text: lines.join('\n') }
 }

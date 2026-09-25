@@ -374,7 +374,7 @@ export function createRpcHandler(
       if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, ...s }) => s) }
       const project = (await mgr.listProjects()).find((x) => x.id === projectId)
       const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
-      if (!project || !app) throw Object.assign(new Error(`그런 앱이 없습니다: ${projectId}/${appId}`), { code: 'internal' })
+      if (!project || !app) throw Object.assign(new Error(`There is no such app: ${projectId}/${appId}`), { code: 'internal' })
       const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
       return { kind: 'git' as const, repo, commits }
     },

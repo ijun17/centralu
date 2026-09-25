@@ -150,7 +150,7 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
     const { request } = bridge(s.id, 'app-helper')
     await request('initialize', {})
     const list = await request('tools/list')
-    expect(list.error?.message).toContain('이 세션에 붙은 앱이 아닙니다')
+    expect(list.error?.message).toContain('This app is not attached to this session')
     const out = await request('tools/call', { name: 'peek', arguments: {} })
     expect(out.result).toMatchObject({ isError: true })
     expect(rt.runs({ projectId: null, appId: 'helper' })).toEqual([])
@@ -161,7 +161,7 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
     await request('initialize', {})
     const out = await request('tools/call', { name: 'peek', arguments: {} })
     expect(out.result).toMatchObject({ isError: true })
-    expect(JSON.stringify(out.result)).toContain('실행 중이 아닙니다')
+    expect(JSON.stringify(out.result)).toContain('it is not running')
   })
 })
 

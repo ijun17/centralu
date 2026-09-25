@@ -45,10 +45,10 @@ describe('매니페스트', () => {
     })
     expect(r.ok).toBe(true)
     expect(r.warnings).toEqual([
-      '모르는 필드는 무시합니다: futureField',
-      '모르는 필드는 무시합니다: server.cwd',
-      '모르는 필드는 무시합니다: uses.clipboard',
-      '모르는 필드는 무시합니다: csp.scriptDomains',
+      'unknown field, ignored: futureField',
+      'unknown field, ignored: server.cwd',
+      'unknown field, ignored: uses.clipboard',
+      'unknown field, ignored: csp.scriptDomains',
     ])
   })
 
@@ -56,14 +56,14 @@ describe('매니페스트', () => {
     const r = parseManifest(JSON.stringify({ ...base, name: undefined, version: 3 }))
     expect(r.ok).toBe(false)
     if (r.ok) return
-    expect(r.error).toContain('name: 빠졌습니다')
-    expect(r.error).toMatch(/version: (?!빠졌습니다)/)
+    expect(r.error).toContain('name: missing')
+    expect(r.error).toMatch(/version: (?!missing)/)
   })
 
   it('모르는 manifestVersion은 읽지 않는다 — 뜻이 바뀐 필드를 옛 뜻으로 실행하지 않게', () => {
     const r = parse({ manifestVersion: MANIFEST_VERSION + 1 })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('Centralu를 올리거나')
+    if (!r.ok) expect(r.error).toContain('update Centralu')
   })
 
   it('home은 도구 이름 규칙을 따른다 (`__` 금지)', () => {
@@ -96,7 +96,7 @@ describe('매니페스트', () => {
     // 모르는 필드는 여느 칸처럼 경고만
     const extra = parse({ view: { origin: 'app', pinned: true } })
     expect(extra.ok).toBe(true)
-    expect(extra.warnings).toEqual(['모르는 필드는 무시합니다: view.pinned'])
+    expect(extra.warnings).toEqual(['unknown field, ignored: view.pinned'])
   })
 
   it('uses.agent는 true 또는 도구 이름의 목록이다 (D-1)', () => {
@@ -104,7 +104,7 @@ describe('매니페스트', () => {
     expect(parse({ uses: { agent: ['claude', 'codex'] } }).ok).toBe(true)
     const bad = parse({ uses: { agent: ['Claude Code'] } })
     expect(bad.ok).toBe(false)
-    if (!bad.ok) expect(bad.error).toContain('에이전트 도구 이름의 모양이 아닙니다')
+    if (!bad.ok) expect(bad.error).toContain('not the shape of an agent tool name')
   })
 
   it('uses.host는 닫힌 목록이다 — 모르는 이름은 경고(부탁하면 거절), 모양이 틀린 이름은 오류 (D-3)', () => {
@@ -112,7 +112,7 @@ describe('매니페스트', () => {
     expect(known).toMatchObject({ ok: true, warnings: [] })
     const unknown = parse({ uses: { host: ['git.stat'] } })
     expect(unknown.ok).toBe(true)
-    expect(unknown.warnings).toEqual(['uses.host: Centralu가 모르는 능력입니다 — "git.stat". 줄 수 있는 것: sessions.list, git.status (부탁하면 거절됩니다)'])
+    expect(unknown.warnings).toEqual(['uses.host: Centralu has no capability "git.stat" — it can give: sessions.list, git.status (asking for it is refused)'])
     expect(parse({ uses: { host: ['Git Status'] } }).ok).toBe(false)
   })
 
@@ -124,7 +124,7 @@ describe('매니페스트', () => {
   it('JSON이 아니거나 객체가 아니면 그 이유를 말한다', () => {
     const a = parseManifest('{ nope')
     expect(a.ok).toBe(false)
-    if (!a.ok) expect(a.error).toContain('JSON이 아닙니다')
+    if (!a.ok) expect(a.error).toContain('is not JSON')
     const b = parseManifest('[]')
     expect(b.ok).toBe(false)
   })

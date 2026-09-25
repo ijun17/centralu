@@ -95,7 +95,7 @@ describe('call_app — 적은 앱의 에이전트용 도구만', () => {
     rt.refresh()
     const { broker } = await askCallApp(ref('p1', 'notes'), { app: 'other', tool: 'app_only' })
     expect(broker!.isError).toBe(true)
-    expect(broker!.text).toMatch(/^call_app: other\.app_only was refused — app_only은\(는\) 에이전트에게 열린 도구가 아닙니다/)
+    expect(broker!.text).toMatch(/^call_app: other\.app_only was refused — app_only is not open to agents/)
     expect((await askCallApp(ref('p1', 'notes'), { app: 'other', tool: 'model_only' })).broker).toMatchObject({ isError: false, text: 'model_only ran' })
   })
 })

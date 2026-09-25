@@ -140,7 +140,7 @@ describe('화면 문서는 런타임이 앱에서 읽은 것이다', () => {
 
   it('없는 앱의 화면은 열리지 않는다', async () => {
     await start()
-    expect(() => views.open(ref('ghost'), 'ui://ghost/main')).toThrow(/그런 앱이 없습니다/)
+    expect(() => views.open(ref('ghost'), 'ui://ghost/main')).toThrow(/There is no such app/)
   })
 })
 

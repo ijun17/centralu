@@ -21,7 +21,7 @@ export function deriveAppId(name: string): string {
 }
 
 /**
- * 판정에 걸린 까닭을 창 앞의 사람에게 — host의 말(에이전트와 로그를 위한 한국어)과 판정은 같고 말만 다르다.
+ * 판정에 걸린 까닭을 창 앞의 사람에게 — host의 말(에이전트가 읽는 `create_app`의 거절)과 판정은 같고 말만 다르다.
  * 빈 id는 따로 말한다: 규칙을 어긴 것이 아니라 아직 적지 않은 것이다.
  */
 export function appIdHint(id: string, problem: NewAppIdProblem): string {
