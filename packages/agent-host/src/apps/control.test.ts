@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { NormalizedEvent } from '@cc/protocol'
+import type { ControlDoc, NormalizedEvent } from '@cc/protocol'
 import type { HostAppContext } from './contract.js'
-import { controlHostApp, type ControlDoc } from './control.js'
+import { controlHostApp } from './control.js'
 
 /**
  * 선언형 감시 (#80 체크포인트 v1) — 관찰은 물리, 규칙은 이 앱의 의견.
@@ -37,11 +37,11 @@ describe('관제 앱 감시 (#80)', () => {
 
     controlHostApp.observe!(ctx, toolCall('s1', 'git commit -m "x"'))
 
-    const doc = kv.get('doc') as ControlDoc
-    expect(doc.notifies).toHaveLength(1)
-    expect(doc.notifies[0]).toMatchObject({ sessionId: 's1', priority: 'high' })
-    expect(doc.notifies[0]!.text).toContain('git commit')
-    expect(doc.notifies[0]!.text).toContain('작업 세션')
+    const notifies = (kv.get('doc') as ControlDoc).notifies ?? []
+    expect(notifies).toHaveLength(1)
+    expect(notifies[0]).toMatchObject({ sessionId: 's1', priority: 'high' })
+    expect(notifies[0]!.text).toContain('git commit')
+    expect(notifies[0]!.text).toContain('작업 세션')
     expect(changedCount()).toBe(1)
   })
 
@@ -76,5 +76,39 @@ describe('관제 앱 감시 (#80)', () => {
     controlHostApp.observe!(ctx, { type: 'turn_complete', sessionId: 's1' } as NormalizedEvent)
 
     expect(changedCount()).toBe(0)
+  })
+})
+
+/**
+ * 알림 칸이 없는 문서 (M4 P-5에서 드러남).
+ *
+ * 이 문서의 모양은 호스트와 UI에 한 벌씩 있었고, 둘이 달랐다: 호스트는 `notifies`를 필수로,
+ * UI는 선택으로 적었다. 실제로 저장되는 것은 UI 쪽 모양이다 — 문서가 아직 없을 때(새로 설치한
+ * 뒤 알림이 한 번도 안 선 상태) UI는 `{ ...(doc ?? {}), metrics }`처럼 **알림 칸 없이** 쓴다.
+ * 레일에서 한 줄 답을 한 번 하거나(판정 카운터), 설정에서 반장 도구나 감시를 정하면 그렇게 된다.
+ * 호스트는 그 문서를 받아 `doc.notifies.push`에서 넘어졌다.
+ */
+describe('알림 칸이 없는 문서 — UI가 먼저 쓴 문서', () => {
+  it('판정 카운터만 적힌 문서에도 control_notify가 알림을 올린다', async () => {
+    const { ctx, kv } = fakeCtx({ metrics: { inlineReplies: 1 } })
+
+    const r = await controlHostApp.tools!.run(ctx, 'control_notify', { text: '사람이 봐야 합니다' }, {
+      sessionId: 'orc',
+      profile: 'orchestrator',
+    })
+
+    expect(r.isError).toBeFalsy()
+    const doc = kv.get('doc') as ControlDoc
+    expect(doc.notifies).toHaveLength(1)
+    expect(doc.metrics).toEqual({ inlineReplies: 1 }) // 남의 칸은 그대로다
+  })
+
+  it('감시만 적힌 문서에서도 감시가 걸리면 알림이 선다', () => {
+    const { ctx, kv, changedCount } = fakeCtx({ watches: [{ id: 'w1', pattern: 'git commit' }] })
+
+    controlHostApp.observe!(ctx, toolCall('s1', 'git commit -m "x"'))
+
+    expect((kv.get('doc') as ControlDoc).notifies).toHaveLength(1)
+    expect(changedCount()).toBe(1)
   })
 })

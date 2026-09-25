@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react'
+// 문서의 모양은 호스트 절반과 같은 한 벌이다 (M4 P-5) — 전에는 여기와 agent-host의
+// apps/control.ts에 따로 적혀 있었고, `notifies`의 필수 여부가 서로 달랐다.
+import type { ControlDoc } from '@cc/protocol'
 import {
   answerQuestion,
   focusSession,
@@ -27,30 +30,16 @@ import {
  * 세션은 멈추지 않으므로, 끼어들 타이밍은 대기 목록이 아니라 서사에서 읽힌다.
  */
 
-type Notify = { id: string; text: string; sessionId?: string; priority?: 'high' | 'normal'; ts: number }
-export type ControlWatch = { id: string; pattern: string; sessionId?: string }
-export type ControlTask = {
-  id: string
-  title: string
-  goal: string
-  members: string[]
-  coordinatorId: string
-  status: 'active' | 'done'
-  createdAt: number
-}
-export type ForemanSettings = { tool: 'claude' | 'codex'; model?: string; effort?: string }
-export type ControlDoc = {
-  notifies?: Notify[]
-  metrics?: Record<string, number>
-  watches?: ControlWatch[]
-  tasks?: ControlTask[]
-  foreman?: ForemanSettings
-}
-
 /**
  * 판정 카운터 (#80: "계속 쓰는가"는 감이 아니라 숫자) — 줄 안 즉답과 레일 경유
- * 진입을 센다. 같은 문서를 host(notify 추가)와 나눠 쓰므로 이론상 마지막-쓰기-승리
- * 경합이 있다 — 둘 다 드물어 창이 몇 ms고, 잃는 것은 카운트 1이지 데이터가 아니다.
+ * 진입을 센다.
+ *
+ * 알려진 경합: 이 문서는 host와 나눠 쓰고, 양쪽 모두 문서 **전체를** 읽고-고치고-통째로
+ * 쓴다. 늦게 쓴 쪽이 먼저 쓴 쪽의 칸을 되돌린다. 전에는 "잃는 것은 카운트 1"이라고
+ * 적었는데 그보다 넓다 — UI가 옛 사본으로 쓰면 그 사이 host가 올린 알림이나 업무가
+ * 사라지고, host의 control_create_task는 반장 세션을 띄우는 await 동안 옛 사본을 쥐고
+ * 있어 창이 ms가 아니라 초 단위다(M4 P-5에서 다시 읽음). 고치려면 통째 쓰기 대신 칸 단위
+ * 갱신이나 판본 비교가 필요해서, 여기서는 적어만 둔다.
  */
 export function bumpMetric(doc: ControlDoc | null, key: 'inlineReplies' | 'railOpens'): void {
   const metrics = { ...(doc?.metrics ?? {}) }

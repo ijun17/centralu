@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { setAppState, useAppState, useSessionSummaries } from '../api.js'
-import type { ControlDoc } from './ControlRail.jsx'
+import type { ControlDoc, ForemanSettings } from '@cc/protocol'
 
 /**
  * 관제 앱 설정 (#81) — 판정 숫자와 선언형 감시(체크포인트 v1)의 자리.
@@ -16,8 +16,8 @@ export function ControlSettings() {
   const [target, setTarget] = useState('')
   const m = doc?.metrics ?? {}
   const watches = doc?.watches ?? []
-  const foreman = doc?.foreman ?? { tool: 'claude' as const, effort: 'high' }
-  const saveForeman = (f: { tool: 'claude' | 'codex'; model?: string; effort?: string }) =>
+  const foreman: ForemanSettings = doc?.foreman ?? { tool: 'claude', effort: 'high' }
+  const saveForeman = (f: ForemanSettings) =>
     setAppState('control', { ...(doc ?? {}), foreman: f })
 
   const add = () => {
@@ -54,7 +54,7 @@ export function ControlSettings() {
         <select
           className="shrink-0 rounded border border-edge bg-panel px-1 py-1 text-[11px] text-ash focus:outline-none"
           value={foreman.tool}
-          onChange={(e) => saveForeman({ ...foreman, tool: e.target.value as 'claude' | 'codex' })}
+          onChange={(e) => saveForeman({ ...foreman, tool: e.target.value })}
           data-testid="foreman-tool"
         >
           <option value="claude">Claude Code</option>

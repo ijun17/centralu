@@ -1,5 +1,8 @@
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
+// 문서의 모양은 UI 절반과 같은 한 벌이다 (M4 P-5) — 전에는 여기 따로 적혀 있었고 `notifies`가
+// 필수였다. UI가 알림 칸 없이 쓴 문서를 믿고 읽다가 넘어졌다. 이제 모든 칸이 선택이다.
+import type { ControlDoc, ControlNotify, ControlTask } from '@cc/protocol'
 import type { HostAppModule, HostAppContext, AppToolCaller, ToolOutput } from './contract.js'
 
 /**
@@ -13,44 +16,6 @@ import type { HostAppModule, HostAppContext, AppToolCaller, ToolOutput } from '.
 
 /** 알림 보관 상한 — 사람이 안 지운 옛 알림이 문서를 무한히 불리면 안 된다 */
 const NOTIFY_CAP = 50
-
-export type ControlNotify = {
-  id: string
-  text: string
-  sessionId?: string
-  priority?: 'high' | 'normal'
-  ts: number
-}
-
-/**
- * 선언형 감시 (#80 체크포인트 v1 — 알림만, 멈춤 없음).
- *
- * bypass로 도는 세션은 도중에 멈출 수 없다 — 승인 요청은 도구 쪽 권한 모드가
- * 만드는 것이라서. 그래서 v1의 계약은 "지켜봐 주고, 걸리면 즉시 부른다"다.
- */
-export type ControlWatch = { id: string; pattern: string; sessionId?: string }
-
-/** 업무 — 세션 여럿 + 반장(조율 세션) 하나 + 보드 하나. 완료돼도 지우지 않는다(재소집 가능) */
-export type ControlTask = {
-  id: string
-  title: string
-  goal: string
-  members: string[]
-  coordinatorId: string
-  status: 'active' | 'done'
-  createdAt: number
-}
-
-/** 반장 스폰 설정 — 걸러듣는 판단력이 필요해 저가 모델 금지 (사용자 결정: opus/terra high급) */
-export type ForemanSettings = { tool: 'claude' | 'codex'; model?: string; effort?: string }
-
-export type ControlDoc = {
-  notifies: ControlNotify[]
-  metrics?: Record<string, number>
-  watches?: ControlWatch[]
-  tasks?: ControlTask[]
-  foreman?: ForemanSettings
-}
 
 /**
  * 반장의 역할문 — 창조 시 세션 행에 박제된다 (코어 손잡이 ②).
@@ -97,9 +62,10 @@ function readDoc(ctx: HostAppContext): ControlDoc {
   return ctx.kv.get<ControlDoc>('doc') ?? { notifies: [] }
 }
 
+/** 알림 칸이 없는 문서(UI가 먼저 쓴 것)에도 붙인다 — 칸이 없다는 것은 알림이 0개라는 뜻이다 */
 function pushNotify(doc: ControlDoc, n: Omit<ControlNotify, 'id' | 'ts'>): void {
-  doc.notifies.push({ id: randomUUID(), ts: Date.now(), ...n })
-  if (doc.notifies.length > NOTIFY_CAP) doc.notifies = doc.notifies.slice(-NOTIFY_CAP)
+  const all = [...(doc.notifies ?? []), { id: randomUUID(), ts: Date.now(), ...n }]
+  doc.notifies = all.length > NOTIFY_CAP ? all.slice(-NOTIFY_CAP) : all
 }
 
 /** 보드 접근 판정 — 그 업무의 반장이거나 사람(null)만. 남의 업무 보드는 남의 것이다 */
