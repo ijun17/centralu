@@ -813,6 +813,21 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
       off()
       expect(heard).toEqual(['echo:[Centralu] The person wrote this in the app "Notes" (app-notes) that you build.\nAdd a reset button'])
       await expect(platform.apps.askBuilder({ appId: 'ghost', projectId: project.id, text: 'hi' })).rejects.toThrow('This app no longer exists')
+
+      // 오류 묶음 (C-6) — 화면이 부른 도구가 실패하면 host가 묶음을 들고, 사람이 누르면 한 번 간다
+      await platform.apps.callTool('notes', 'increment', { by: 'many' }, { projectId: project.id })
+      const { latest } = await platform.apps.errors('notes', project.id)
+      expect(latest).toMatchObject({ kind: 'tool', tool: 'increment', sentAt: null })
+      heard.length = 0
+      const off2 = platform.agents.subscribe((e) => {
+        if (e.type === 'message_delta' && e.sessionId === made.builder!.id) heard.push(e.text)
+      })
+      expect(await platform.apps.sendError('notes', project.id, latest!.at)).toEqual({ sessionId: made.builder!.id })
+      await waitFor(() => heard.length > 0)
+      off2()
+      expect(heard[0]).toMatch(/^echo:\[Centralu\] The person sent you this error report from the app "Notes" \(app-notes\)/)
+      expect((await platform.apps.errors('notes', project.id)).latest?.sentAt).toEqual(expect.any(Number))
+      await expect(platform.apps.sendError('notes', project.id, latest!.at)).rejects.toThrow('This error was already sent to the builder')
     } finally {
       await platform.dispose()
       await mgr.disposeAll()

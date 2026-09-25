@@ -314,3 +314,117 @@ test.describe('C-5: 여기를 고쳐 줘', () => {
     expect(await sessionsOfApp(page, 'slider')).toEqual([{ id: expect.any(String), name: 'Slider · builder', tool: 'claude', projectId: pid }])
   })
 })
+
+/** host가 들고 있는 오류 묶음 하나 — 시험이 목에 심는다(최근 것부터) */
+function bundle(over: Record<string, unknown> = {}) {
+  const stderr = Array.from({ length: 12 }, (_, i) => `stderr line ${i + 1}`)
+  return {
+    kind: 'crash',
+    at: Date.now(),
+    message: 'exited (code 7)',
+    stderr,
+    tool: null,
+    args: null,
+    runId: null,
+    text: `앱 Team notes (alpha/notes): 앱 프로세스가 끝났습니다 (2026-09-25T00:00:00.000Z)\n이유: exited (code 7)\n표준에러 (마지막 줄들):\n${stderr.join('\n')}`,
+    ...over,
+  }
+}
+const setErrors = (page: Page, key: string, list: unknown[]) =>
+  page.evaluate(({ k, l }) => (window as any).__mock.appErrors.set(k, l), { k: key, l: list })
+const errorSends = (page: Page) => page.evaluate(() => (window as any).__mock.errorSends as unknown[])
+const builderSaid = (page: Page, id: string) =>
+  page.evaluate(
+    (sid) =>
+      (((window as any).__mock.messages.get(sid) ?? []) as { role: string; payload: { text?: string } }[])
+        .filter((m) => m.role === 'user')
+        .map((m) => m.payload.text),
+    id,
+  )
+
+test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
+  test('앱이 죽으면 묶음의 끝이 화면 아래에 서고, 저절로는 아무것도 가지 않으며, Send to builder는 한 번 보낸다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    const builderId = await madeApp(page, pid, 'notes', 'Team notes')
+    await page.getByTestId(`app-row-${pid}/notes`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect(pinned.getByTestId('error-tail')).toHaveCount(0)
+
+    // 떠 있던 앱이 죽었다 — host가 묶음을 들고, 목록이 이유와 함께 바뀐다
+    const crash = bundle()
+    await setErrors(page, `${pid}/notes`, [crash])
+    await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'crashed', error: 'exited (code 7)' })])
+    const tail = pinned.getByTestId('error-tail')
+    await expect(tail.getByTestId('error-tail-title')).toHaveText('The app stopped')
+    await expect(tail.getByTestId('error-tail-message')).toHaveText('exited (code 7)')
+    // 끝부분만 — 마지막 여덟 줄
+    await expect(tail.getByTestId('error-tail-stderr')).toHaveText(Array.from({ length: 8 }, (_, i) => `stderr line ${i + 5}`).join('\n'))
+
+    // 저절로는 가지 않는다 — 다시 읽어도(앱의 상태가 또 바뀌었다)
+    const reads = await page.evaluate(() => (window as any).__mock.errorReads as number)
+    await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'failed', error: 'exited (code 7)' })])
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(reads)
+    await expect(tail.getByTestId('error-tail-send')).toBeVisible()
+    expect(await errorSends(page)).toEqual([])
+    expect(await builderSaid(page, builderId)).toEqual([])
+
+    // 보내는 동안 한 번 더 눌러도 한 번이다 — host의 답을 붙들어 두고, 두 번째 누름을 곧바로 쏜다
+    await page.evaluate(() => {
+      const w = window as any
+      w.__mock.sendErrorGate = new Promise<void>((r) => (w.__releaseSend = r))
+    })
+    await tail.getByTestId('error-tail-send').click()
+    await expect(tail.getByTestId('error-tail-send')).toHaveText('Sending…')
+    await tail.getByTestId('error-tail-send').dispatchEvent('click')
+    await page.evaluate(() => (window as any).__releaseSend())
+    await expect(tail.getByTestId('error-tail-sent')).toContainText('Sent to the builder.')
+    await expect(tail.getByTestId('error-tail-send')).toHaveCount(0)
+    expect(await errorSends(page)).toEqual([{ appId: 'notes', projectId: pid, at: crash.at }])
+    // 에이전트에게는 앱의 출력이 인용 안에 갇힌 채로 간다
+    const said = await builderSaid(page, builderId)
+    expect(said).toHaveLength(1)
+    expect(said[0]).toContain('[Centralu] The person sent you this error report from the app "Team notes" (app-notes) that you build.')
+    expect(said[0]).toContain('\n> 이유: exited (code 7)\n')
+    expect(said[0]).toContain('\n> stderr line 12')
+
+    // 다시 읽어도 다시 가지 않는다 — 보냈다는 것은 host가 든다(sentAt)
+    const after = await page.evaluate(() => (window as any).__mock.errorReads as number)
+    await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'crashed', error: 'exited (code 7)' })])
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(after)
+    await expect(tail.getByTestId('error-tail-sent')).toBeVisible()
+    expect(await errorSends(page)).toHaveLength(1)
+    expect(await builderSaid(page, builderId)).toHaveLength(1)
+  })
+
+  test('도는 앱에서는 이 화면을 연 뒤의 도구 실패만 선다 — 걷으면 그 묶음은 다시 서지 않는다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await madeApp(page, pid, 'notes', 'Team notes')
+    // 어제의 실패 — 앱은 지금 멀쩡하다
+    await setErrors(page, `${pid}/notes`, [bundle({ kind: 'tool', tool: 'save', message: 'old failure', at: Date.now() - 86_400_000 })])
+    await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'running' })])
+    await page.getByTestId(`app-row-${pid}/notes`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(0)
+    await expect(pinned.getByTestId('error-tail')).toHaveCount(0)
+
+    // 화면에서 누른 읽기 전용 도구가 던졌다 — 그 호출은 "바뀌었다"를 내지 않는다. host가 묶음을 들면 목록의 lastErrorAt이 바뀐다
+    await page.evaluate(
+      ({ p, b }) => (window as any).__mock.recordAppError('notes', p, b),
+      { p: pid, b: bundle({ kind: 'tool', tool: 'get_interval', message: 'TypeError: seconds is undefined', at: Date.now() }) },
+    )
+    const tail = pinned.getByTestId('error-tail')
+    await expect(tail.getByTestId('error-tail-title')).toHaveText('get_interval failed')
+    await expect(tail.getByTestId('error-tail-message')).toHaveText('TypeError: seconds is undefined')
+
+    await tail.getByTestId('error-tail-dismiss').click()
+    await expect(tail).toHaveCount(0)
+    // 다시 읽어도 걷은 묶음은 다시 서지 않는다
+    const reads = await page.evaluate(() => (window as any).__mock.errorReads as number)
+    await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'stopped' })])
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.errorReads as number)).toBeGreaterThan(reads)
+    await expect(tail).toHaveCount(0)
+    expect(await errorSends(page)).toEqual([])
+  })
+})

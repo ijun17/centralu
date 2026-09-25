@@ -148,3 +148,54 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(recent.at(-1)!.message).toBe('failure 3')
   })
 })
+
+describe('만드는 세션에 보낸 묶음 (C-6)', () => {
+  it('보냈다는 표시는 한 번만 서고, 표준에러를 다시 담아 묶음이 갈아 끼워져도 남으며, 지우면 다시 보낼 수 있다', async () => {
+    // 답 뒤에 표준에러가 한 줄 더 온다 — 묶음이 그 줄을 다시 담아 **새 객체로 갈아 끼워지는** 길을 반드시 지나게
+    app('thrower', tools(`centralu.tool(server, 'save', { description: 'Save', annotations: { readOnlyHint: false } }, async () => {
+    setTimeout(() => console.error('written after the reply'), 30)
+    throw new Error('cannot save')
+  })`))
+    const r = make()
+    await r.call(ref('thrower'), 'save', {}, SESSION)
+    const at = r.errors(ref('thrower')).latest!.at
+    expect(r.errors(ref('thrower')).latest?.sentAt).toBeNull()
+    // 실패 바로 뒤 — 표준에러를 다시 담는 150ms 전에 보낸다
+    expect(r.markErrorSent(ref('thrower'), at)).toMatchObject({ kind: 'tool', at })
+    expect(r.markErrorSent(ref('thrower'), at)).toBe('sent')
+    await new Promise((res) => setTimeout(res, 300))
+    expect(r.errors(ref('thrower')).latest).toMatchObject({ at, sentAt: expect.any(Number) })
+    expect(r.errors(ref('thrower')).latest!.stderr.join('\n')).toContain('written after the reply')
+    r.unmarkErrorSent(ref('thrower'), at)
+    expect(r.errors(ref('thrower')).latest?.sentAt).toBeNull()
+    expect(r.markErrorSent(ref('thrower'), at + 1)).toBeNull()
+  })
+})
+
+describe('목록의 lastErrorAt (C-6)', () => {
+  it('읽기 전용 도구가 던져도 목록의 마지막 오류 때가 바뀌고 목록을 듣는 쪽이 깨어난다 — "바뀌었다"는 내지 않는다', async () => {
+    app('reader', tools(`centralu.tool(server, 'get', { description: 'Read', annotations: { readOnlyHint: true } }, async () => {
+    throw new Error('cannot read')
+  })`))
+    const changed: unknown[] = []
+    rt = new ExternalApps({
+      projects: () => [{ id: 'p1', path: projRoot, trusted: true }],
+      dataRoot,
+      reservedIds: [],
+      emitChanged: (ref) => changed.push(ref),
+      timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, maxFailures: 5, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    })
+    rt.refresh()
+    await rt.tools(ref('reader'))
+    const info = () => rt.list().find((a) => a.appId === 'reader')!
+    expect(info().lastErrorAt).toBeUndefined()
+    let heard = 0
+    rt.onAppsChanged(() => void heard++)
+
+    const out = await rt.call(ref('reader'), 'get', {}, SESSION)
+    expect(out.status).toBe('error')
+    await until(() => heard, (n) => n > 0)
+    expect(info().lastErrorAt).toBe(rt.errors(ref('reader')).latest!.at)
+    expect(changed).toEqual([])
+  })
+})
