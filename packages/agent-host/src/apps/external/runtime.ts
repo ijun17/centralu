@@ -965,7 +965,8 @@ export class ExternalApps {
     const report = (stderr: string | null) => formatReport(label, { findings, tools, screens }, { process: procLine, notes, stderr })
 
     const key = ref.projectId ?? USER_SCOPE
-    if (this.scopes.has(key)) this.rescan(key)
+    // 점검은 지금 파일을 읽으라는 부탁이다 — 턴 안이라 미뤄 둔 매니페스트의 바뀜도 지금 읽는다 (C-4, `rescan`의 `now`)
+    if (this.scopes.has(key)) this.rescan(key, { now: ref.appId })
     else this.refresh()
     const e = this.find(ref)
     if (!e) {
@@ -1131,8 +1132,8 @@ export class ExternalApps {
   }
 
   /** 사용자 폴더를 지금 다시 훑는다 — 한 번도 훑지 않았으면(기동 전) 전부 훑는다 */
-  private rescanUser(): void {
-    if (this.scopes.has(USER_SCOPE)) this.rescan(USER_SCOPE)
+  private rescanUser(opts: { now?: string } = {}): void {
+    if (this.scopes.has(USER_SCOPE)) this.rescan(USER_SCOPE, opts)
     else this.refresh()
   }
 
@@ -1226,7 +1227,8 @@ export class ExternalApps {
     this.rescanUser()
     const before = this.require(ref)
     this.handover.restore(ref.appId, id, before.dir)
-    this.rescanUser()
+    // 사람이 고른 판이다 — 만드는 세션이 턴 안이어도 그 판의 매니페스트를 지금 읽는다
+    this.rescanUser({ now: ref.appId })
     const e = this.require(ref)
     Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
     void this.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
@@ -1271,6 +1273,19 @@ export class ExternalApps {
     clearTimeout(this.turnEndTimers.get(key))
     const t = setTimeout(() => {
       this.turnEndTimers.delete(key)
+      /*
+       * 턴 안에서 미뤄 둔 매니페스트의 바뀜을 지금 읽는다(`rescan`의 `now`). 감시가 그 바뀜을 놓쳤어도 여기서 읽힌다. 칸이 새로
+       * 섰으면 옛 프로세스는 호출을 마친 뒤 내려가고(`haltWhenDrained`), 새 칸을 새 매니페스트로 **한 번** 띄운다 — 폴더만 바뀐
+       * 때와 같이, 한 번이라도 떴던 앱이면 내려가 있었어도 띄운다(만드는 세션의 도구 목록을 간다).
+       */
+      const before = this.find(ref)
+      const scopeKey = ref.projectId ?? USER_SCOPE
+      if (this.scopes.has(scopeKey) && !this.disposed) this.rescan(scopeKey, { now: ref.appId })
+      const after = this.find(ref)
+      if (before && after && after !== before) {
+        if (before.life.stamp !== null) void this.startNewManifest(after, "the builder's turn ended and the manifest changed")
+        return
+      }
       void this.reloadIfChanged(ref, { startIfStopped: true, why: "the builder's turn ended and the app folder changed" })
     }, this.timing.turnEndDebounceMs)
     t.unref()
@@ -1340,6 +1355,22 @@ export class ExternalApps {
   private async haltWhenDrained(e: AppEntry, why: string): Promise<void> {
     while (e.life.inflight > 0) await this.drain(e, 60_000)
     await this.halt(e, why)
+  }
+
+  /**
+   * 새 매니페스트로 선 칸을 띄운다 (C-4) — 만드는 세션의 턴 끝에 미뤄 둔 매니페스트를 읽어 칸이 갈렸을 때. 옛 프로세스는
+   * `rescan`이 호출을 마친 뒤 내린다. 띄웠으면 열린 화면에 "바뀌었다"를 보낸다(`reloadIfChanged`와 같다).
+   */
+  private async startNewManifest(e: AppEntry, why: string): Promise<void> {
+    if (!e.manifest || !e.scope.trusted || this.held(e) || this.disposed) return
+    try {
+      await this.use(e, async () => {})
+      console.error(`[apps] ${this.label(e.ref)} started on its new manifest (${why})`)
+      this.deps.emitChanged?.(e.ref)
+    } catch (err) {
+      // 못 떴다 — 이유는 목록(crashed)과 오류 묶음에 남는다. 만드는 세션의 check가 그 이유를 읽는다
+      console.error(`[apps] ${this.label(e.ref)} did not start on its new manifest: ${(err as Error).message.split('\n')[0]}`)
+    }
   }
 
   // ── 수명 ──────────────────────────────────────────────────────────────────────
@@ -1727,7 +1758,11 @@ export class ExternalApps {
     return 'stopped'
   }
 
-  private rescan(key: string): void {
+  /**
+   * 한 범위를 다시 훑는다. `now`는 매니페스트의 바뀜을 **지금** 읽을 앱의 id다 — 만드는 세션의 턴 끝, 점검, 사람이 고른 판.
+   * 그 밖의 훑기(감시, `refresh`)는 만드는 세션이 턴 안에 있는 앱의 매니페스트 바뀜을 턴 끝으로 미룬다(아래 주석).
+   */
+  private rescan(key: string, opts: { now?: string } = {}): void {
     const held = this.scopes.get(key)
     if (!held || this.disposed) return
     const { scope } = held
@@ -1754,7 +1789,19 @@ export class ExternalApps {
        * 매니페스트가 바뀌었다 — 옛 명령으로 뜬 프로세스는 내리고, 셈과 기억한 세대도 새로 시작한다. 새 호출은 새 칸이
        * 받는다. 옛 프로세스는 **진행 중인 호출을 마친 뒤에** 내린다(C-4): 파일을 고쳤다고 누군가의 호출이 끊기면 안 된다.
        */
-      if (prev) void this.haltWhenDrained(prev, 'manifest changed')
+      if (prev) {
+        /*
+         * **만드는 세션이 턴 안이면 턴 끝까지 미룬다** (C-4). 반쯤 고친 매니페스트로 칸을 갈면 옛 프로세스가 내려가고, 열린 화면은
+         * 목록의 바뀐 코드를 보고 다시 열려 반쯤 고친 코드를 띄운다(실측: 턴 10:09:55–10:11:09 가운데 10:10:45에 "stopping:
+         * manifest changed", 화면이 비었다가 고치던 코드로 다시 열렸다). 그동안은 옛 칸이 옛 매니페스트와 옛 프로세스로 부름을
+         * 받는다. 턴 끝(`builderTurnEnded`)이 `now`로 다시 훑어 한 번에 간다. 신뢰를 잃는 것은 미루지 않는다.
+         */
+        if (opts.now !== found.folder && scope.trusted && prev.scope.trusted && this.deps.builderBusy?.(prev.ref)) {
+          prev.scope = scope
+          continue
+        }
+        void this.haltWhenDrained(prev, 'manifest changed')
+      }
       held.apps.set(found.folder, this.entry(scope, found))
       changed = true
     }
