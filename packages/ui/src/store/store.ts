@@ -1736,7 +1736,17 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     const next = applyEvent(cur, e, Date.now())
-    const chat = appendChat(get().chat[sessionId] ?? [], e)
+    /*
+     * `chat[id]`가 **없다**는 것은 "아직 기록을 안 읽었다"는 뜻이다 — 포커스가 그걸 보고
+     * 기록을 부른다. 그런데 대화가 아닌 이벤트(상태 변화·컨텍스트 사용량 등)도 여기로 와서
+     * `[]`를 써 넣으면, 그 세션은 "읽었는데 비어 있다"가 되어 **기록을 영영 안 부른다.**
+     * 도그푸딩 2026-09-25: 11,550줄짜리 세션이 앱을 다시 켠 뒤 통째로 비어 보였다.
+     * host가 재개하면서 보낸 이벤트가 사용자가 그 세션을 누르기 전에 도착한 것이다.
+     * 그래서 보탤 대화가 없고 자리도 없던 세션에는 자리를 만들지 않는다.
+     */
+    const had = get().chat[sessionId]
+    const appended = appendChat(had ?? [], e)
+    const chat = had === undefined && appended.length === 0 ? undefined : appended
     /*
      * 프로젝트 제안 (#63)은 **가리키는 것**으로 끝난다.
      *
@@ -1782,7 +1792,7 @@ export const useStore = create<AppState>((set, get) => ({
       const sessions = { ...st.sessions, [sessionId]: withSeq }
       return {
         sessions,
-        chat: { ...st.chat, [sessionId]: chat },
+        chat: chat === undefined ? st.chat : { ...st.chat, [sessionId]: chat },
         // A turn begins because an event arrived — this is where its start instant is
         // recorded, so the elapsed line survives remounting (issue #23)
         workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
@@ -1919,7 +1929,12 @@ export const useStore = create<AppState>((set, get) => ({
     void get().markRead(id)
     // 아직 안 읽어온 세션이면 저장된 대화를 불러온다 (host 재시작 후에도 기록은 남는다)
     const cur = get()
-    if (!cur.chat[id]) void get().loadHistory(id)
+    /*
+     * 비어 있는 자리도 "안 읽었다"로 본다. 아래 커서 맞추기(09-09)는 화면에 줄이 **있을 때**의
+     * 답이다 — 줄이 없으면 커서가 0이 되어 '이전 대화' 버튼조차 뜨지 않는다. 갈아 끼워서
+     * 잃을 것(스트리밍 중인 말, 낙관적으로 그린 프롬프트)도 없다.
+     */
+    if (!cur.chat[id]?.length && !cur.history[id]) void get().loadHistory(id)
     else if (!cur.history[id]) {
       /*
        * chat은 있는데 **커서가 없는** 세션 (도그푸딩 2026-09-09: "위에 대화가 안 불러와져").
@@ -1949,7 +1964,8 @@ export const useStore = create<AppState>((set, get) => ({
       bumpSeqAbove(items)
       set((s) => ({
         // force면 갈아 끼운다 — 밖에서 이어간 대화를 따라잡을 때 쓴다
-        chat: { ...s.chat, [sessionId]: force ? items : (s.chat[sessionId] ?? items) },
+        // 비어 있는 자리는 지킬 것이 없다 — 기록을 읽는 사이 대화 아닌 이벤트만 왔던 경우다
+        chat: { ...s.chat, [sessionId]: force || !s.chat[sessionId]?.length ? items : s.chat[sessionId]! },
         history: {
           ...s.history,
           [sessionId]: {
