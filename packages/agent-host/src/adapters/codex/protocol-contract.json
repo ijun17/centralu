@@ -31,7 +31,8 @@
       "send": [
         "threadId",
         "input",
-        "effort"
+        "effort",
+        "outputSchema"
       ]
     },
     "turn/interrupt": {

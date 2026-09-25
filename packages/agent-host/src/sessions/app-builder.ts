@@ -30,6 +30,7 @@ export function builderRole(app: ExternalAppInfo, cwd: string): string {
   화면만 부를 도구는 _meta.ui.visibility: ['app']. 화면이 달린 도구는 _meta.ui.resourceUri, home 도구는 반드시 화면을 단다.
 - 상태는 서버에 두고 데이터 폴더에 저장한다(centralu.readJson/writeJson). 앱 폴더에는 파일을 쓰지 않는다.
 - stdout은 MCP 통로다. 로그는 console.error로.
+- 사람의 에이전트에게 일을 맡기려면(centralu.agent) 매니페스트에 "uses": { "agent": true }를 적는다. 선언하지 않은 부탁은 Centralu가 거절한다.
 - 앱 밖의 파일은 사람이 따로 시키지 않았으면 고치지 않는다.
 - 고친 뒤에는 centralu 서버의 **check**를 부른다. 앱을 실제로 띄워 도구 목록과 화면을 읽고 문제를 알려 준다.
   사람에게 시험을 맡기지 않는다. 이 세션에는 네 앱의 도구도 붙어 있다(app-${app.appId}) — 불러서 동작을 확인한다.

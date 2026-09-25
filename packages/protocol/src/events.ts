@@ -227,7 +227,15 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     path: z.string().optional(),
     note: z.string().optional(),
   }),
-  z.object({ ...base, type: z.literal('turn_complete') }),
+  /**
+   * 턴이 끝났다.
+   *
+   * `output`은 이 턴이 **스키마로 답했을 때만** 실린다 (M4 D-1, 앱이 부탁한 에이전트의 `schema`). Claude는 구조화
+   * 출력을 대화의 글이 아니라 턴의 결말(`result.structured_output`)로만 준다 — 실측(SDK 0.3.263, CLI 2.1.282): 모델이
+   * 먼저 "Red and yellow."라고 글로 답하고, CLI가 도구를 부르라고 다시 시킨 뒤에야 `StructuredOutput` 도구로 JSON을
+   * 냈다. 그래서 마지막 글만 읽어서는 답을 얻을 수 없다. Codex는 마지막 메시지 자체가 그 JSON이라 싣지 않는다.
+   */
+  z.object({ ...base, type: z.literal('turn_complete'), output: z.unknown().optional() }),
   z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
   z.object({ ...base, type: z.literal('usage_update'), tokens: TokenUsage }),
   z.object({

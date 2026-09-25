@@ -247,6 +247,23 @@ describe('result 메시지 (usage·컨텍스트·완료)', () => {
     const out = n({ ...RESULT, subtype: 'error_max_turns', is_error: true, result: '최대 턴 초과' })
     expect(out.at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: '최대 턴 초과' } })
   })
+
+  /*
+   * 스키마로 답한 턴 (M4 D-1, 앱이 부탁한 에이전트). 픽스처는 실측한 결말이다(SDK 0.3.263, CLI 2.1.282, haiku): 모델이 글로
+   * "Red and yellow."라고 먼저 답했고, 구조화 출력은 이 결말에만 있었다 — `result`는 그 JSON의 글, `structured_output`은 값.
+   */
+  it('구조화 출력은 turn_complete.output으로 옮긴다 — 글에는 없다', () => {
+    const out = n({ ...RESULT, result: '{"colors":["red","yellow"]}', structured_output: { colors: ['red', 'yellow'] } })
+    expect(out.at(-1)).toEqual({ type: 'turn_complete', sessionId: SID, output: { colors: ['red', 'yellow'] } })
+  })
+
+  it('구조화 출력을 끝내 못 맞추면 error다 — 빈 답으로 끝나지 않고, 이유가 있으면 그 이유를 싣는다', () => {
+    // 실패한 결말의 모양(sdk.d.ts SDKResultError): result가 없고 errors가 있다
+    const bare = n({ ...RESULT, subtype: 'error_max_structured_output_retries', is_error: true, errors: [] })
+    expect(bare.at(-1)).toMatchObject({ type: 'error', error: { message: 'Turn failed: error_max_structured_output_retries' } })
+    const said = n({ ...RESULT, subtype: 'error_max_structured_output_retries', is_error: true, errors: ['output did not match the schema'] })
+    expect(said.at(-1)).toMatchObject({ type: 'error', error: { message: 'output did not match the schema' } })
+  })
 })
 
 /*

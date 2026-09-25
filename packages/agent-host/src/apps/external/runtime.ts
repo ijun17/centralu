@@ -6,7 +6,8 @@ import type { ExternalAppInfo } from '@cc/protocol'
 import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
-import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
+import { BROKER_KEEPALIVE_MS, RUN_META, serveBroker } from './broker.js'
+import { BrokerDesk, type BrokerHost } from './desk.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
 import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
@@ -15,6 +16,7 @@ import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type App
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
 import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
 import { SecretStore, redactor } from './secrets.js'
+import type { AppRef } from './ref.js'
 import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
 /**
@@ -36,12 +38,14 @@ import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
  */
 const USER_SCOPE = '_user'
 
-export type AppRef = { projectId: string | null; appId: string }
+export type { AppRef } from './ref.js'
 
 /** 점검 보고서의 모양도 이 문으로 나간다 (C-3) */
 export type { AppCheckReport, CheckFinding } from './check.js'
 /** 오류 묶음의 모양 (C-6) */
 export type { AppErrorBundle } from './errors.js'
+/** 중개의 몸통 가운데 host의 코어가 채우는 것 (D) — 매니저가 `attachBrokerHost`로 준다 */
+export type { AgentRunRequest, AgentRunResult, BrokerHost } from './desk.js'
 
 /** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
 export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'
@@ -119,6 +123,8 @@ export type RuntimeTiming = {
   reloadQuietMs: number
   /** 만드는 세션의 턴 끝 알림을 모으는 시간 (C-4) — 턴 끝과 상태 변화가 잇달아 와도 한 번 다시 띄운다 */
   turnEndDebounceMs: number
+  /** 기다리는 중개 호출에 살려 두는 진행 알림을 보내는 간격 (D) — `broker.ts`의 BROKER_KEEPALIVE_MS 주석 */
+  brokerKeepaliveMs: number
 }
 
 export const DEFAULT_TIMING: RuntimeTiming = {
@@ -140,6 +146,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   checkDrainMs: 30_000,
   reloadQuietMs: 2_000,
   turnEndDebounceMs: 300,
+  brokerKeepaliveMs: BROKER_KEEPALIVE_MS,
 }
 
 export type ExternalAppsDeps = {
@@ -160,8 +167,6 @@ export type ExternalAppsDeps = {
    * `cause`는 그 호출을 한 쪽이다 — 앱이 다시 떠서 바뀐 것처럼 호출이 아니면 없다(모든 화면이 듣는다).
    */
   emitChanged?: (ref: AppRef, cause?: AppCaller | null) => void
-  /** 중개 서버 도구의 몸통 (D가 채운다). 없으면 "아직 없다"는 자리표시가 선다 */
-  broker?: BrokerImpls
   /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
   runs?: RunLedger
   /** 새 앱을 펼칠 템플릿 폴더 (C-1). 기본은 제품이 싣고 다니는 것(`appTemplateDir`) */
@@ -299,6 +304,8 @@ export class ExternalApps {
    * 다시 옮겨 담으며 **새 객체로 갈아 끼워진다**(recordError) — 묶음에 적은 표시는 그때 사라진다.
    */
   private errorsSent = new Map<string, number>()
+  /** 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리 */
+  private desk = new BrokerDesk()
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -376,6 +383,15 @@ export class ExternalApps {
       bundle = errorBundle(app, { ...b, stderr: proc.log.tailLines() })
       list[i] = bundle
     }, STDERR_SETTLE_MS).unref()
+  }
+
+  /**
+   * 중개의 몸통 가운데 host의 코어가 할 일(에이전트 세션)을 받는다 (D). 매니저가 런타임을 받을 때 부른다
+   * (`SessionManager.useExternalApps`) — host의 main과 테스트가 같은 이음새를 쓴다. null이면 비운다: 그 뒤의 부탁은
+   * "빌려줄 에이전트가 없다"로 거절된다.
+   */
+  attachBrokerHost(host: BrokerHost | null): void {
+    this.desk.attach(host)
   }
 
   /** 한 앱의 실행 기록, 최근 것부터 (B-7) — 폴더가 사라진 앱의 기록도 읽힌다 */
@@ -603,9 +619,15 @@ export class ExternalApps {
         readOnly = found.tool.annotations?.readOnlyHint === true
         callee = proc
         try {
+          /*
+           * `onprogress`를 주는 이유: MCP SDK는 이것이 있을 때만 요청에 진행 토큰을 싣는다(client의 request — 토큰 없이는
+           * 앱이 진행 알림을 보낼 수 없다). 그래서 `resetTimeoutOnProgress`는 지금까지 아무것도 하지 않았다. 앱이 에이전트를
+           * 부탁하고 기다리는 동안(D-1, 몇 분이 걸린다) 템플릿의 도우미가 그 기다림을 이 호출의 진행으로 올려 보내야 이
+           * 호출이 `callTimeoutMs`에 끊기지 않는다. 받은 알림 자체는 쓰지 않는다 — 살아 있다는 뜻이면 된다.
+           */
           const result = await proc.client.callTool(
             { name, arguments: args, _meta: { [RUN_META]: runId } },
-            { signal: abort.signal, timeout: this.timing.callTimeoutMs, resetTimeoutOnProgress: true },
+            { signal: abort.signal, timeout: this.timing.callTimeoutMs, resetTimeoutOnProgress: true, onprogress: () => {} },
           )
           return result.isError ? done('error', result, resultText(result) || '도구가 실패를 돌려줬습니다') : done('ok', result, null)
         } catch (err) {
@@ -1351,7 +1373,12 @@ export class ExternalApps {
             },
             note,
           },
-          this.deps.broker,
+          /*
+           * 부탁한 앱은 이 파이프의 앱이고, 매니페스트는 **이 프로세스가 뜰 때 읽은 것**이다. 그 사이 매니페스트가 바뀌었으면
+           * 새 칸이 서고 이 프로세스는 호출을 마친 뒤 내려간다 — 도는 동안은 자기가 뜬 선언대로 부탁한다(검증한 것이 곧 쓰는 것).
+           */
+          (tool, args, call) => this.desk.handle({ ref: e.ref, name: m.name, manifest: m }, tool, args, call),
+          { keepaliveMs: this.timing.brokerKeepaliveMs },
         ),
     }
   }

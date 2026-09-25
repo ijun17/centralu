@@ -350,6 +350,14 @@ export type CreateSessionOpts = {
    */
   apps?: SessionApps
   /**
+   * 이 세션의 답이 따라야 할 JSON 스키마 (M4 D-1 — 앱이 `schema`를 주고 부탁한 에이전트). 뿌리는 객체다.
+   *
+   * 두 도구가 받는 자리가 다르다: Claude는 **질의를 시작할 때만** 받는다(`outputFormat`, 질의 단위). Codex는 **턴마다**
+   * 받는다(`turn/start`의 `outputSchema`). 그래서 앱의 부탁은 요청마다 새 세션이 받는다 — 도는 세션의 형식을 중간에
+   * 바꿀 수 없다. 스키마로 답한 턴은 `turn_complete.output`으로 온다(Claude) — Codex는 마지막 메시지가 그 JSON이다.
+   */
+  outputSchema?: Record<string, unknown>
+  /**
    * 받는 도구 묶음 (#69). 'orchestrator'는 전부, 'manager'는 워크트리 매니저의
    * 부분집합(제안·조회·지시)이다. orchestratorTools가 있을 때만 뜻이 있다.
    * 노출과 실행 양쪽이 같은 판정(profileAllows)을 쓴다 — 노출만 좁히면

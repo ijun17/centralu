@@ -708,6 +708,7 @@ class CodexSession implements SessionHandle {
                * 문서화한 자리다. 세션을 다시 띄우지 않고 바꿀 수 있어서 이쪽이 더 싸다.
                */
               ...(this.opts.effort ? { effort: this.opts.effort } : {}),
+              ...this.outputSchemaParam(),
             })
             // 응답에도 턴이 실려 온다 — 알림보다 먼저 도착하는 경우까지 덮는다 (스톱의 과녁)
             .then((res) => {
@@ -734,6 +735,7 @@ class CodexSession implements SessionHandle {
         threadId: this.threadId,
         input,
         ...(this.opts.effort ? { effort: this.opts.effort } : {}),
+        ...this.outputSchemaParam(),
       })
       .then((res) => {
         this.turnId ??= turnIdOf(res)
@@ -745,6 +747,16 @@ class CodexSession implements SessionHandle {
           error: { code: 'internal', message: e.message, retryable: true },
         })
       })
+  }
+
+  /**
+   * 앱이 스키마를 주고 부탁한 에이전트의 턴 (M4 D-1). Codex는 스키마를 **턴마다** 받는다 — 설치된 0.153.4의 생성 타입
+   * `TurnStartParams.outputSchema`("Optional JSON Schema used to constrain the final assistant message for this turn").
+   * 그래서 이 세션의 모든 턴에 싣는다: 한 번 빠지면 그 턴의 마지막 메시지는 스키마 밖의 글이 된다. 답은 마지막 메시지
+   * 자체다 — 매니저가 그 글을 JSON으로 읽고 검증한다. 로그아웃 상태라 실행으로 재지 못했다(생성 타입으로만 확인).
+   */
+  private outputSchemaParam(): Record<string, unknown> {
+    return this.opts.outputSchema ? { outputSchema: this.opts.outputSchema } : {}
   }
 
   respondApproval(

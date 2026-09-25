@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { BrokerImpls } from './broker.js'
-import { ExternalApps, resultText, type AppCaller, type AppRef } from './runtime.js'
+import { ExternalApps, resultText, type AgentRunRequest, type AppCaller, type AppRef, type BrokerHost } from './runtime.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
 
 /**
@@ -32,9 +31,10 @@ const records = (id: string): Rec[] => {
   return readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Rec)
 }
 
-const plant = (id: string) =>
+const plant = (id: string, over: Record<string, unknown> = {}) =>
   plantApp(join(projRoot, ...PROJECT_APPS), id, {
     server: { command: process.execPath, args: [FIXTURE, '--log', join(appLogs, `${id}.jsonl`), '--mode', 'mediation'] },
+    ...over,
   })
 const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })
 /** 그 앱에 지금 열려 있는 실행의 id — 호출이 앱에 보내질 때까지 기다린다 (런타임 내부를 엿본다) */
@@ -46,7 +46,13 @@ const openRunOf = (appId: string) =>
 const VIEW: AppCaller = { kind: 'view' }
 const SESSION: AppCaller = { kind: 'session', sessionId: 's1' }
 
-const make = (broker?: BrokerImpls) => {
+/** 에이전트 몸통만 갈아 끼운 host (D-1의 자리) — 세션 대신 시험이 주는 함수가 부탁을 받는다 */
+const agentHost = (runAgent: (req: AgentRunRequest, ctx: { signal: AbortSignal }) => Promise<{ text: string }>): BrokerHost => ({
+  defaultAgentTool: () => 'claude',
+  runAgent: async (req, ctx) => ({ sessionId: 'fake-session', ...(await runAgent(req, ctx)) }),
+})
+
+const make = (host?: BrokerHost) => {
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: projRoot, trusted: true }],
     dataRoot,
@@ -56,9 +62,9 @@ const make = (broker?: BrokerImpls) => {
       changed.push(r)
       causes.push(cause ?? null)
     },
-    ...(broker ? { broker } : {}),
   })
   rt.refresh()
+  if (host) rt.attachBrokerHost(host)
   return rt
 }
 
@@ -214,10 +220,10 @@ describe('중개 서버 (fd 3)', () => {
     return resultText(out.result!)
   }
 
-  it('자기 실행 id를 붙인 중개 호출은 받아 준다 — 도구는 아직 "없다"고 분명히 답한다', async () => {
+  it('자기 실행 id를 붙인 중개 호출은 받아 준다 — 선언하지 않은 부탁은 창구가 이유와 함께 거절한다', async () => {
     make()
     const text = await brokerAnswer('notes', { mode: 'run' })
-    expect(text).toBe("broker isError=true: run_agent is not available yet — the broker's tools arrive with Centralu M4 section D")
+    expect(text).toBe('broker isError=true: run_agent refused: this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so')
     for (const tool of ['call_app', 'host_data']) {
       expect(await brokerAnswer('notes', { mode: 'run', tool })).toContain(`${tool} is not available yet`)
     }
@@ -249,17 +255,21 @@ describe('중개 서버 (fd 3)', () => {
   it('부모 실행이 취소되면 그 아래 중개 일도 취소된다 — 앱이 신호를 넘기지 않아도', async () => {
     let sawAbort = false
     let started = false
-    make({
-      run_agent: (_args, call) =>
-        new Promise((resolve, reject) => {
-          started = true
-          call.signal.addEventListener('abort', () => {
-            sawAbort = true
-            reject(new Error('aborted'))
-          })
-          void resolve
-        }),
-    })
+    rmSync(join(projRoot, ...PROJECT_APPS, 'notes'), { recursive: true })
+    plant('notes', { uses: { agent: true } })
+    make(
+      agentHost(
+        (_req, ctx) =>
+          new Promise((resolve, reject) => {
+            started = true
+            ctx.signal.addEventListener('abort', () => {
+              sawAbort = true
+              reject(new Error('aborted'))
+            })
+            void resolve
+          }),
+      ),
+    )
     const ac = new AbortController()
     const p = rt.call(ref('notes'), 'ask_broker', { mode: 'run-nosignal' }, SESSION, { signal: ac.signal })
     await until(() => started, (x) => x)
@@ -273,16 +283,20 @@ describe('실행이 끝나면 그 아래 중개 일도 끝난다', () => {
   it('앱이 중개 호출을 기다리지 않고 답해도, 실행이 닫히는 순간 그 일은 취소된다', async () => {
     let started = false
     let sawAbort = false
-    make({
-      run_agent: (_args, call) =>
-        new Promise((_resolve, reject) => {
-          started = true
-          call.signal.addEventListener('abort', () => {
-            sawAbort = true
-            reject(new Error('aborted'))
-          })
-        }),
-    })
+    rmSync(join(projRoot, ...PROJECT_APPS, 'notes'), { recursive: true })
+    plant('notes', { uses: { agent: true } })
+    make(
+      agentHost(
+        (_req, ctx) =>
+          new Promise((_resolve, reject) => {
+            started = true
+            ctx.signal.addEventListener('abort', () => {
+              sawAbort = true
+              reject(new Error('aborted'))
+            })
+          }),
+      ),
+    )
     const out = await rt.call(ref('notes'), 'ask_broker', { mode: 'run-detached' }, SESSION)
     expect(out.status).toBe('ok')
     await until(() => started, (x) => x)

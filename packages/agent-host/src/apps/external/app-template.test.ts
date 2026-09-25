@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { serveBroker } from './broker.js'
-import { ExternalApps, resultText, type AppRef } from './runtime.js'
+import { serveBroker, type BrokerHandler } from './broker.js'
+import { ExternalApps, resultText, type AgentRunRequest, type AppRef, type BrokerHost } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { StreamTransport } from './stream-transport.js'
 import { until } from './test-helpers.js'
@@ -199,7 +199,7 @@ describe('도우미', () => {
     expect([ping.status, resultText(ping.result!)]).toEqual(['ok', 'pong'])
   })
 
-  it('centralu.agent는 중개가 아직 없다는 답을 그대로 올린다 — 도구의 실패 결과와 표준에러 둘 다에', async () => {
+  it('centralu.agent는 창구의 거절을 그대로 올린다 — 도구의 실패 결과와 표준에러 둘 다에 (선언하지 않은 앱)', async () => {
     const dir = scaffold('asker')
     writeFileSync(
       join(dir, 'server.mjs'),
@@ -216,12 +216,139 @@ describe('도우미', () => {
     const out = await r.call(ref('asker'), 'summarize', { text: 'hello' }, { kind: 'session', sessionId: 's1' })
     expect(out.status).toBe('error')
     expect(resultText(out.result!)).toBe(
-      "centralu.agent() failed: run_agent is not available yet — the broker's tools arrive with Centralu M4 section D",
+      'centralu.agent() failed: run_agent refused: this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so',
     )
     const other = await r.call(ref('asker'), 'ask_other', {}, { kind: 'session', sessionId: 's1' })
     expect(resultText(other.result!)).toContain('centralu.callApp("other", "echo") failed: call_app is not available yet')
     const log = readFileSync(join(dataRoot, 'app-logs', 'p1', 'asker.log'), 'utf8')
-    expect(log).toContain('[centralu] centralu.agent() failed: run_agent is not available yet')
+    expect(log).toContain('[centralu] centralu.agent() failed: run_agent refused: this app did not declare')
+  })
+})
+
+/**
+ * 에이전트를 부탁하는 도우미 (M4 D-1) — 템플릿의 `centralu.agent()`가 창구까지 가는 길. 몸통(세션)은 host의 코어의
+ * 일이라 여기서는 가짜 host가 받는다. 세션 쪽은 sessions/app-agents.test.ts가 진짜 매니저로 본다.
+ */
+describe('centralu.agent (D-1)', () => {
+  const asker = (id: string, uses: unknown) => {
+    const dir = scaffold(id)
+    const manifest = JSON.parse(readFileSync(join(dir, 'centralu.app.json'), 'utf8'))
+    writeFileSync(join(dir, 'centralu.app.json'), JSON.stringify({ ...manifest, uses }, null, 2))
+    writeFileSync(
+      join(dir, 'server.mjs'),
+      serverUsing(`serveStdio(() => {
+  const server = new McpServer({ name: '${id}', version: '0' }, { capabilities: { tools: {} } })
+  centralu.tool(server, 'summarize', { description: 'Summarize', inputSchema: z.object({ text: z.string(), tool: z.string().optional(), schema: z.boolean().optional() }), annotations: { readOnlyHint: true } },
+    async ({ text, tool, schema }) => {
+      const answer = await centralu.agent('summarize: ' + text, { ...(tool ? { tool } : {}), ...(schema ? { schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } } : {}) })
+      return typeof answer === 'string' ? { content: [{ type: 'text', text: answer }] } : { content: [{ type: 'text', text: 'json' }], structuredContent: answer }
+    })
+  return server
+})`),
+    )
+    return dir
+  }
+
+  it('선언한 앱의 부탁은 host의 에이전트에 닿고, 스키마를 주면 검증된 JSON이 structuredContent로 돌아온다', async () => {
+    asker('asker', { agent: true })
+    const seen: AgentRunRequest[] = []
+    const r = runtime()
+    const host: BrokerHost = {
+      defaultAgentTool: () => 'claude',
+      runAgent: async (req) => {
+        seen.push(req)
+        return req.schema ? { sessionId: 's-agent', text: 'Here you go.', output: { summary: 'short' } } : { sessionId: 's-agent', text: 'A short summary.' }
+      },
+    }
+    r.attachBrokerHost(host)
+    const plain = await r.call(ref('asker'), 'summarize', { text: 'hello' }, { kind: 'session', sessionId: 's1' })
+    expect([plain.status, resultText(plain.result!)]).toEqual(['ok', 'A short summary.'])
+    const json = await r.call(ref('asker'), 'summarize', { text: 'hello', schema: true }, { kind: 'session', sessionId: 's1' })
+    expect([json.status, json.result!.structuredContent]).toEqual(['ok', { summary: 'short' }])
+    expect(seen.map((q) => [q.app, q.appName, q.tool, q.prompt, q.schema ?? null])).toEqual([
+      [ref('asker'), 'Counter', 'claude', 'summarize: hello', null],
+      [ref('asker'), 'Counter', 'claude', 'summarize: hello', { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] }],
+    ])
+  })
+
+  it('스키마에 맞지 않는 답은 앱에 넘기지 않는다 — 이유와 받은 답을 말한다', async () => {
+    asker('asker', { agent: true })
+    const r = runtime()
+    r.attachBrokerHost({ defaultAgentTool: () => 'claude', runAgent: async () => ({ sessionId: 's', text: '', output: { summary: 42 } }) })
+    const out = await r.call(ref('asker'), 'summarize', { text: 'x', schema: true }, { kind: 'session', sessionId: 's1' })
+    expect(out.status).toBe('error')
+    expect(resultText(out.result!)).toContain("centralu.agent() failed: run_agent: the agent's answer does not match the schema")
+    expect(resultText(out.result!)).toContain('The answer was: {"summary":42}')
+  })
+
+  it('도구는 선언이 허락한 것만 — true는 기본 에이전트만, 목록은 목록에 적힌 것만', async () => {
+    asker('any', { agent: true })
+    asker('listed', { agent: ['codex'] })
+    const tools: string[] = []
+    const r = runtime()
+    r.attachBrokerHost({ defaultAgentTool: () => 'claude', runAgent: async (req) => (tools.push(req.tool), { sessionId: 's', text: `ran on ${req.tool}` }) })
+    const s1 = { kind: 'session' as const, sessionId: 's1' }
+    const byName = await r.call(ref('any'), 'summarize', { text: 'x', tool: 'codex' }, s1)
+    expect(resultText(byName.result!)).toContain('run_agent refused: this app declared "agent": true, which lets it use the person\'s default agent (claude) only')
+    expect(resultText((await r.call(ref('listed'), 'summarize', { text: 'x', tool: 'codex' }, s1)).result!)).toBe('ran on codex')
+    // 목록에 기본 도구(claude)가 없으면 도구를 안 적은 부탁은 목록의 첫 도구로 — 선언 밖으로 나가지 않는다
+    expect(resultText((await r.call(ref('listed'), 'summarize', { text: 'x' }, s1)).result!)).toBe('ran on codex')
+    const outside = await r.call(ref('listed'), 'summarize', { text: 'x', tool: 'claude' }, s1)
+    expect(resultText(outside.result!)).toContain('run_agent refused: claude is not in this app\'s "uses.agent" (codex)')
+    expect(tools).toEqual(['codex', 'codex'])
+  })
+
+  /**
+   * 오래 걸리는 부탁 — 도우미는 말없이 IDLE_MS가 지나면 포기한다. host의 살려 두는 알림이 그 시계를 다시 세우고, 도우미는 같은
+   * 박동을 자기가 처리 중인 호출의 진행으로 올려 보낸다(그래야 host → 앱 호출도 끊기지 않는다). 시험은 IDLE_MS를 줄인다.
+   */
+  const longRun = async (keepaliveMs: number) => {
+    const dir = asker('waiter', { agent: true })
+    const child = spawn('node', ['server.mjs'], {
+      cwd: dir,
+      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      env: { PATH: process.env.PATH!, CENTRALU_BROKER_IDLE_MS: '400' },
+    })
+    const fd3 = child.stdio[3] as Socket
+    const slow: BrokerHandler = () => new Promise((resolve) => setTimeout(() => resolve({ content: [{ type: 'text', text: 'finally done' }] }), 1_200))
+    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {} }, slow, { keepaliveMs })
+    const relayed: unknown[] = []
+    try {
+      const c = new Client({ name: 'host', version: '0' }, { versionNegotiation: { mode: 'auto' } })
+      await c.connect(new StreamTransport(child.stdout!, child.stdin!, { pid: child.pid ?? null }))
+      const r = await c.callTool(
+        { name: 'summarize', arguments: { text: 'long' }, _meta: { 'centralu/runId': 'run_test' } },
+        { onprogress: (p) => relayed.push(p) },
+      )
+      return { text: resultText(r as never), relayed }
+    } finally {
+      closeBroker()
+      fd3.destroy()
+      child.kill('SIGKILL')
+    }
+  }
+
+  it('host가 박동을 보내는 동안은 상한을 넘겨도 기다리고, 그 박동을 부른 쪽으로 올려 보낸다', async () => {
+    const { text, relayed } = await longRun(100)
+    expect(text).toBe('finally done')
+    expect(relayed.length).toBeGreaterThan(3)
+  })
+
+  it('host → 앱 호출도 상한을 넘겨 산다 — 도우미가 올려 보낸 박동이 host의 시계를 다시 세운다', async () => {
+    asker('asker', { agent: true })
+    // host가 앱에 보내는 호출의 상한을 0.8초로 줄이고, 에이전트는 2초 걸린다
+    const r = runtime({ callTimeoutMs: 800, brokerKeepaliveMs: 100 })
+    r.attachBrokerHost({
+      defaultAgentTool: () => 'claude',
+      runAgent: () => new Promise((resolve) => setTimeout(() => resolve({ sessionId: 's', text: 'slow but done' }), 2_000)),
+    })
+    const out = await r.call(ref('asker'), 'summarize', { text: 'x' }, { kind: 'session', sessionId: 's1' })
+    expect([out.status, out.error, out.result && resultText(out.result)]).toEqual(['ok', null, 'slow but done'])
+  })
+
+  it('host가 말이 없으면 도우미는 상한에서 포기하고 이유를 말한다', async () => {
+    const { text } = await longRun(60_000)
+    expect(text).toMatch(/^centralu\.agent\(\) failed: Centralu said nothing about run_agent for 0\.4s/)
   })
 })
 
@@ -233,23 +360,24 @@ describe('끝내기 약속 (S-5)', () => {
       serverUsing(`serveStdio(() => {
   const server = new McpServer({ name: 'closer', version: '0' }, { capabilities: { tools: {} } })
   centralu.tool(server, 'ask', { description: 'Ask', annotations: { readOnlyHint: true } }, async () => {
-    try { await centralu.agent('x') } catch (e) { return { content: [{ type: 'text', text: e.message }] } }
-    return { content: [{ type: 'text', text: 'no error?' }] }
+    try { return { content: [{ type: 'text', text: String(await centralu.agent('x')) }] } } catch (e) { return { content: [{ type: 'text', text: e.message }] } }
   })
   return server
 })`),
     )
     const child = spawn('node', ['server.mjs'], { cwd: dir, stdio: ['pipe', 'pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH! } })
     const fd3 = child.stdio[3] as Socket
-    // fd 3 위에는 host의 진짜 중개 서버 — 어느 실행 id든 열려 있다고 답한다
-    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {} })
+    // fd 3 위에는 host의 진짜 중개 서버 — 어느 실행 id든 열려 있다고 답하고, 창구는 한 줄로 답한다
+    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {} }, async () => ({
+      content: [{ type: 'text', text: 'the agent answered' }],
+    }))
     let exited = false
     child.on('exit', () => (exited = true))
     try {
       const c = new Client({ name: 'host', version: '0' }, { versionNegotiation: { mode: 'auto' } })
       await c.connect(new StreamTransport(child.stdout!, child.stdin!, { pid: child.pid ?? null }))
       const r = await c.callTool({ name: 'ask', arguments: {}, _meta: { 'centralu/runId': 'run_test' } })
-      expect(resultText(r as never)).toContain('run_agent is not available yet')
+      expect(resultText(r as never)).toBe('the agent answered')
 
       // 표준 입력만 닫는다 — fd 3은 host 쪽에서 열어 둔 채로
       child.stdin!.end()
