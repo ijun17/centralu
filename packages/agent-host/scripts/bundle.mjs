@@ -75,6 +75,15 @@ cpSync(
   join(ROOT, 'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs'),
   join(OUT, 'codex-orchestrator-bridge.mjs'),
 )
+/*
+ * 앱 템플릿 (M4 C-1) — 새 앱을 만들 때 펼치는 틀. `scaffold.ts`가 산출물 옆(`app-template/`)에서 찾는다.
+ *
+ * 런타임(`runtime/`)은 커밋된 생성물이다. **싣기 전에 소스와 바이트까지 같은지 본다** — 런타임 소스를
+ * 고치고 다시 만들기를 잊은 채 배포하면, 그 뒤로 만드는 모든 앱이 옛 런타임을 받는다. 앱 폴더에
+ * 커밋되는 파일이라 나중에 조용히 고칠 길도 없다.
+ */
+execFileSync(process.execPath, [join(ROOT, 'packages/agent-host/scripts/build-app-runtime.mjs'), '--check'], { stdio: 'inherit' })
+cpSync(join(ROOT, 'packages/agent-host/app-template'), join(OUT, 'app-template'), { recursive: true })
 
 // 3) 네이티브 애드온 — 이 플랫폼 prebuild만 골라 담는다 (26MB 전체 복사 회피)
 const pkgJson = require.resolve('better-sqlite3/package.json')

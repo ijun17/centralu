@@ -15,6 +15,10 @@ module.exports = {
           // codex가 `node <경로>`로 **직접 띄우는** 다리다. 임포트가 없는 것이 정상이고,
           // 경로는 bridge-path.ts가 런타임에 찾고 bundle.mjs가 번들에 복사한다
           'adapters/codex/orchestrator-bridge\\.mjs$',
+          // 앱 런타임의 화면 쪽 입구 — esbuild가 묶어 앱 템플릿의 runtime/mcp-app.js로 낸다 (build-app-runtime.mjs)
+          'agent-host/app-runtime/src/view\\.mjs$',
+          // 앱 템플릿의 파일은 **앱 폴더로 복사되어** 쓰인다 (scaffold.ts). 템플릿 안에서는 아무도 임포트하지 않는다
+          'agent-host/app-template/',
         ],
       },
       to: {},
@@ -116,7 +120,8 @@ module.exports = {
     doNotFollow: { path: 'node_modules' },
     // src-tauri/target·resources는 Rust·번들 산출물이라 파싱 대상이 아니다 (M2에서 생김)
     exclude: {
-      path: '(spike|dist|node_modules|src-tauri/(target|gen|resources)|adapters/codex/generated|\\.test\\.tsx?$)',
+      // app-template/runtime: 압축된 생성물이라 읽을 것이 없다 (scripts/build-app-runtime.mjs)
+      path: '(spike|dist|node_modules|src-tauri/(target|gen|resources)|adapters/codex/generated|app-template/runtime|\\.test\\.tsx?$)',
     },
     tsConfig: { fileName: 'tsconfig.json' },
     /*

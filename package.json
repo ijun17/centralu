@@ -21,6 +21,7 @@
     "smoke": "node packages/agent-host/scripts/smoke.mjs",
     "smoke:resume": "node packages/agent-host/scripts/smoke-resume.mjs",
     "bundle:host": "node packages/agent-host/scripts/bundle.mjs",
+    "build:app-runtime": "node packages/agent-host/scripts/build-app-runtime.mjs",
     "codex:bindings": "node packages/agent-host/scripts/codex-bindings.mjs",
     "drift:claude": "node scripts/claude-sdk-drift.mjs",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
