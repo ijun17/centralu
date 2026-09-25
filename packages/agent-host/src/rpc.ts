@@ -310,6 +310,10 @@ export function createRpcHandler(
       const { appId, projectId } = RpcMethods['apps.builder'].params.parse(p)
       return mgr.builderOf({ appId, projectId })
     },
+    'apps.errors': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.errors'].params.parse(p)
+      return requireExternalApps().errors({ appId, projectId })
+    },
     'apps.check': async (p) => {
       const { appId, projectId } = RpcMethods['apps.check'].params.parse(p)
       const r = await mgr.checkApp({ appId, projectId })

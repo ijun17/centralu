@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
+import { RpcMethods, type AdapterCapabilities, type ExternalAppInfo, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
@@ -20,10 +20,14 @@ import { SessionManager } from './manager.js'
 class Handle implements SessionHandle {
   // 세션마다 다른 대화 — 같으면 되살릴 때 "그 대화는 다른 세션이 쥐고 있다"로 막힌다
   readonly externalId: string
+  /** 이 세션의 에이전트에게 간 말 — 아무도 보내지 않았으면 비어 있다 */
+  readonly sent: string[] = []
   constructor(readonly sessionId: string) {
     this.externalId = `ext-${sessionId}`
   }
-  send() {}
+  send(text: string) {
+    this.sent.push(text)
+  }
   respondApproval() {
     return false
   }
@@ -40,6 +44,7 @@ class FakeAdapter implements AgentAdapter {
   seen: CreateSessionOpts[] = []
   /** 세션마다 받은 이벤트 입구 — 테스트가 도구 대신 턴을 흘린다 */
   sinks = new Map<string, EventSink>()
+  handles = new Map<string, Handle>()
   fail = false
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
@@ -48,7 +53,9 @@ class FakeAdapter implements AgentAdapter {
     if (this.fail) throw new Error(`${this.tool} is not logged in`)
     this.seen.push(opts)
     this.sinks.set(opts.sessionId, emit)
-    return new Handle(opts.sessionId)
+    const h = new Handle(opts.sessionId)
+    this.handles.set(opts.sessionId, h)
+    return h
   }
   last(): CreateSessionOpts {
     return this.seen.at(-1)!
@@ -283,5 +290,20 @@ describe('만드는 세션의 턴 끝에 앱이 다시 뜬다 (C-4)', () => {
     emit({ type: 'turn_complete', sessionId: builder!.id })
     expect(mgr.builderBusy(ref)).toBe(false)
     await until(() => rt.knownTools(ref)?.map((t) => t.name) ?? [], (names) => names.includes('added'))
+  })
+})
+
+describe('오류는 만드는 세션에 저절로 가지 않는다 (C-6)', () => {
+  it('앱의 도구가 실패해도 만드는 세션에는 아무것도 가지 않는다 — 묶음은 apps.errors가 준다', async () => {
+    const { app, builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    const server = join(app.dir, 'server.mjs')
+    writeFileSync(server, readFileSync(server, 'utf8').replace('      state.count += by\n', "      throw new Error('increment is broken')\n"))
+    const out = await rt.call({ projectId, appId: 'notes' }, 'increment', { by: 1 }, { kind: 'view' })
+    expect(out.status).toBe('error')
+    const errors = RpcMethods['apps.errors'].result.parse(await rpc('apps.errors', { appId: 'notes', projectId }))
+    expect(errors.latest).toMatchObject({ kind: 'tool', tool: 'increment', args: '{"by":1}', message: 'increment is broken' })
+    expect(errors.latest!.text).toContain('앱 Notes (')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(claude.handles.get(builder!.id)!.sent).toEqual([])
   })
 })

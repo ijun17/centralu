@@ -155,6 +155,27 @@ export const AppRun = z.object({
 export type AppRun = z.infer<typeof AppRun>
 
 /**
+ * 외부 앱의 오류 묶음 (M4 C-6) — 앱이 뜨지 못했거나(start), 예고 없이 끝났거나(crash), 도구 호출이 실패했을 때(tool)
+ * 그 순간을 한 덩어리로 든다. 앱 화면이 "만드는 세션에 보내기"를 내밀 때 쓴다. host는 **보내지 않는다** — 사람이
+ * 누르면 UI가 `text`를 만드는 세션에 보낸다.
+ *
+ * 인자는 요약만, 비밀 값은 표준에러·이유·인자 어디에서나 `[redacted:이름]`으로 선다(실행 기록과 같은 규칙).
+ */
+export const AppErrorBundle = z.object({
+  kind: z.enum(['start', 'crash', 'tool']),
+  at: z.number(),
+  message: z.string(),
+  /** 앱의 표준에러 마지막 줄들 */
+  stderr: z.array(z.string()),
+  tool: z.string().nullable(),
+  args: z.string().nullable(),
+  runId: z.string().nullable(),
+  /** 만드는 세션에 그대로 보낼 수 있는 글 */
+  text: z.string(),
+})
+export type AppErrorBundle = z.infer<typeof AppErrorBundle>
+
+/**
  * Everything a screen needs to *present* a tool: its name, its mark, and the two
  * commands that fix a tool that isn't ready.
  *
