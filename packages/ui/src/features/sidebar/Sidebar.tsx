@@ -4,12 +4,14 @@ import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
+import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { APPS } from '../../apps/registry.js'
 import { WorktreeManagerDialog } from '../project/WorktreeManagerDialog.jsx'
 import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, CrownIcon, DotsIcon, PlusIcon } from '../../components/icons.jsx'
 import { useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import type { ExternalAppStatus } from '@cc/protocol'
@@ -470,6 +472,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   // 매니저의 워크트리 제안이 이 프로젝트를 가리키는가 (#69) — + 버튼이 밝아진다
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [managerDialog, setManagerDialog] = useState(false)
+  // 새 앱 창 (M4 C-1) — 새 세션 창처럼 프로젝트 줄의 메뉴에서 연다
+  const [newAppOpen, setNewAppOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   // 방금 등록해서 신뢰를 묻는 중인가 (M4, 결정 3) — 한 번만 묻고, 답하면 걷힌다
   const askingTrust = useStore((s) => s.trustAsk === projectId)
@@ -576,6 +580,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             anchorEl={menuAnchor.current}
             onClose={() => setMenuOpen(false)}
             onNewSession={() => openNewSession(projectId)}
+            onNewApp={() => setNewAppOpen(true)}
             onStartManager={() => setManagerDialog(true)}
             onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
             onDelete={() => setDeleting(true)}
@@ -747,6 +752,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       <AppRows apps={projectApps} testId={`project-apps-${project.name}`} />
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
+      {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}
       {managerDialog && (
         <WorktreeManagerDialog projectId={projectId} onClose={() => setManagerDialog(false)} />
       )}
@@ -856,19 +862,31 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
 
 /**
  * 사용자 폴더의 앱 (M4 B-2, 결정 1) — 여러 프로젝트에서 쓰는 앱이라 어느 프로젝트 아래에도 서지 않고
- * 자기 무리를 갖는다. 프로젝트 블록과 같은 모양의 머리글이다. 앱이 없으면 무리도 없다.
+ * 자기 무리를 갖는다. 프로젝트 블록과 같은 모양의 머리글이다.
+ *
+ * **앱이 없어도 무리는 선다 (M4 C-1).** 예전에는 앱이 없으면 무리도 없었는데, 그러면 첫 사용자 폴더 앱을 만들
+ * 자리가 없다 — "New app"이 이 머리글에 있기 때문이다. 비어 있을 때는 머리글 한 줄뿐이고 글자는 물러나 있다
+ * (배경 정보의 밝기). 버튼은 늘 보인다: 빈 무리에서 누를 것이 그것 하나라, 호버에 숨기면 무리가 왜 있는지 모른다.
  */
 function UserApps() {
   const apps = useUserApps()
-  if (apps.length === 0) return null
+  const [newAppOpen, setNewAppOpen] = useState(false)
   return (
     <section className="border-b border-edge/70 py-2.5" data-testid="user-apps">
-      <header className="px-3">
-        <span className="text-[13px] font-medium tracking-tight text-chalk">Your apps</span>
+      <header className="flex items-center gap-2 px-3">
+        <span className={`text-[13px] font-medium tracking-tight ${apps.length ? 'text-chalk' : 'text-slate'}`}>Your apps</span>
+        <span className="-my-1 ml-auto shrink-0">
+          <IconButton label="New app for every project" onClick={() => setNewAppOpen(true)} testId="user-apps-new" align="right">
+            <PlusIcon size={13} />
+          </IconButton>
+        </span>
       </header>
-      <div className="mt-1.5">
-        <AppRows apps={apps} testId="user-apps-list" />
-      </div>
+      {apps.length > 0 && (
+        <div className="mt-1.5">
+          <AppRows apps={apps} testId="user-apps-list" />
+        </div>
+      )}
+      {newAppOpen && <NewAppDialog projectId={null} onClose={() => setNewAppOpen(false)} />}
     </section>
   )
 }
@@ -1286,6 +1304,7 @@ function ProjectMenu({
   anchorEl,
   onClose,
   onNewSession,
+  onNewApp,
   onStartManager,
   onToggleTrust,
   onDelete,
@@ -1294,6 +1313,7 @@ function ProjectMenu({
   anchorEl: HTMLElement | null
   onClose: () => void
   onNewSession: () => void
+  onNewApp: () => void
   onStartManager: () => void
   onToggleTrust: () => void
   onDelete: () => void
@@ -1305,6 +1325,11 @@ function ProjectMenu({
   return (
     <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
+      {/*
+        새 앱 (M4 C-1) — 새 세션 바로 아래. 둘 다 "이 프로젝트에 무엇을 하나 더"라서 같은 무리다. 신뢰하지 않은
+        프로젝트에서도 나온다: 창이 까닭을 말하고 그 자리에서 신뢰하게 한다(메뉴에서 줄이 사라지면 왜 없는지 물을 곳이 없다).
+      */}
+      <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />
       {/*
         매니저 자리를 **먼저** 만드는 문 (#76). 저장소이면서 아직 자리가 없을 때만 나온다 —
         만들고 나면 그 자리는 세션 목록에 줄로 서 있으므로, 같은 일을 하는 문이 둘이 되지 않는다.

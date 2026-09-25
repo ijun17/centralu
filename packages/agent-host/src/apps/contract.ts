@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import type { AppId, NormalizedEvent, ToolName } from '@cc/protocol'
+import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNameProblem } from '@cc/protocol'
 
 /*
  * 런타임의 중심 타입 셋은 **여기서 태어난다** (#97).
@@ -102,8 +103,12 @@ export type HostAppModule = {
  * 외부 앱의 id가 같은 규칙을 따라야 하는데(세션에 붙는 서버 이름이 `app-<id>`다),
  * 앱 런타임은 sessions 층을 임포트할 수 없다 — 규칙이 승객(오케스트레이터)에게 있으면
  * 런타임이 규칙을 두 벌 갖게 된다. #97이 중심 타입을 이 파일로 옮긴 것과 같은 방향이다.
+ *
+ * **값과 판정은 `@cc/protocol`의 `app-id.ts`로 한 번 더 옮겼다 (M4 C-1).** "새 앱" 창이 이름에서 id를 지어
+ * 만들기 전에 판정해야 하는데, UI가 닿는 곳은 그 패키지뿐이다. 여기서는 host의 이름을 붙이고, 에이전트와 로그가
+ * 읽을 이유를 붙인다 — 판정은 창과 한 벌이다.
  */
-export const ORCHESTRATOR_MCP_NAME = 'centralu'
+export const ORCHESTRATOR_MCP_NAME = RESERVED_NAME_PREFIX
 
 /**
  * 제안된 MCP 서버 이름이 쓸 수 있는 이름인가 (#93). 어겼으면 사람이 읽을 이유를, 괜찮으면 null.
@@ -127,20 +132,20 @@ export const ORCHESTRATOR_MCP_NAME = 'centralu'
  * 머리를 따로 두는 이유: 앱 id와 제안된 MCP 서버 이름은 같은 글자 규칙(아래)을 따르므로,
  * 앱을 `notes` 그대로 붙이면 사람이 승인한 `notes` 서버와 같은 칸을 두고 다툰다.
  */
-export const APP_MCP_PREFIX = 'app-'
+export const APP_MCP_PREFIX = APP_SERVER_PREFIX
 
 export const appMcpServerName = (appId: string): string => `${APP_MCP_PREFIX}${appId}`
 
 export function mcpServerNameError(name: string): string | null {
-  if (name.trim().toLowerCase().startsWith(ORCHESTRATOR_MCP_NAME)) {
-    return `"${ORCHESTRATOR_MCP_NAME}"로 시작하는 이름은 이 앱이 쓰는 이름입니다 — 다른 이름으로 제안하세요`
+  // 예약어가 먼저다 — 판정의 순서는 protocol의 serverNameProblem이 지킨다
+  switch (serverNameProblem(name)) {
+    case 'reserved':
+      return `"${ORCHESTRATOR_MCP_NAME}"로 시작하는 이름은 이 앱이 쓰는 이름입니다 — 다른 이름으로 제안하세요`
+    case 'shape':
+      return '이름은 소문자·숫자·하이픈으로 32자 이내여야 합니다 (밑줄은 도구 이름의 칸막이라 쓸 수 없습니다)'
+    case null:
+      return null
   }
-  // 밑줄이 빠진 것이 핵심이다: MCP 도구 이름의 칸막이가 `__`라, 이름에 밑줄을
-  // 허용하면 서버 하나가 남의 이름 뒤에 칸을 하나 더 붙일 수 있다
-  if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) {
-    return '이름은 소문자·숫자·하이픈으로 32자 이내여야 합니다 (밑줄은 도구 이름의 칸막이라 쓸 수 없습니다)'
-  }
-  return null
 }
 
 /**
@@ -155,7 +160,7 @@ export function mcpServerNameError(name: string): string | null {
 export function proposedMcpServerNameError(name: string): string | null {
   const base = mcpServerNameError(name)
   if (base) return base
-  if (name.startsWith(APP_MCP_PREFIX)) {
+  if (newAppIdProblem(name) === 'server-prefix') {
     return `"${APP_MCP_PREFIX}"로 시작하는 이름은 외부 앱이 세션에 붙는 이름입니다 — 다른 이름으로 제안하세요`
   }
   return null

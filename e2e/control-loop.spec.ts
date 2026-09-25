@@ -948,7 +948,12 @@ test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ 
  * 메뉴인지 화면이 말해 주지 않았다. 아래에 자리가 없으면 위로 뒤집는다.
  */
 test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면 위로 뒤집는다', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  /*
+    프로젝트가 셋인 것은 뒤집힌 메뉴가 **위에 온전히 들어갈 자리** 때문이다. 메뉴에 "New app…"이 서면서(M4 C-1)
+    메뉴가 한 줄 길어졌고, 둘째 프로젝트의 버튼 위로는 그 메뉴가 들어가지 않는다(위 가장자리에 붙어 버튼을 덮는다).
+    이 시험이 보는 것은 뒤집기이지 둘째 줄의 좌표가 아니다 — 위에 자리가 있는 셋째 줄로 잰다.
+  */
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta', '/tmp/gamma'] })
 
   const geometry = async (name: string) => {
     await page.getByTestId(`project-header-${name}`).hover()
@@ -997,9 +1002,9 @@ test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면
     기준을 정한다.
   */
   await page.setViewportSize({ width: 1200, height: 240 })
-  const beta = await geometry('beta')
-  expect(beta.m.y + beta.m.height).toBeLessThanOrEqual(beta.b.y) // 버튼 위로 갔다
-  expect(beta.m.y).toBeGreaterThanOrEqual(0)
+  const gamma = await geometry('gamma')
+  expect(gamma.m.y + gamma.m.height).toBeLessThanOrEqual(gamma.b.y) // 버튼 위로 갔다
+  expect(gamma.m.y).toBeGreaterThanOrEqual(0)
 })
 
 /*

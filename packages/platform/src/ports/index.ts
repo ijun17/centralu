@@ -564,6 +564,18 @@ export type InlineViewKept = {
 export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
 
 /**
+ * 새 앱 하나 (M4 C-1) — `projectId`가 null이면 사용자 폴더 앱이다. `tool`은 만드는 세션의 도구이고, 없으면 host가
+ * 고른다(프로젝트의 기본 도구, 사용자 폴더 앱은 오케스트레이터의 도구).
+ */
+export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string; tool?: ToolName }
+
+/**
+ * 만든 앱과 그 만드는 세션. 세션이 서지 못했으면(도구가 없거나 로그인 전) `builder`가 null이고 `builderError`가 이유다 —
+ * 앱은 이미 만들어졌다.
+ */
+export type AppCreated = { app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }
+
+/**
  * 앱 상태 창구 (#81) — 앱마다 JSON 문서 하나 + 켜짐 여부. 앱별 포트를 만들지 않는다:
  * 문서의 의미는 앱만 알고, 이 창구는 운반만 한다.
  */
@@ -629,6 +641,15 @@ export interface AppsPort {
    * 남는다. 프로젝트 앱은 host가 거절한다(저장소의 파일이라 거두는 자리는 git이다).
    */
   remove(appId: AppId, projectId: string | null): Promise<void>
+  /**
+   * 새 앱을 템플릿으로 만든다 (M4 C-1) — "New app" 창이 부른다. 오케스트레이터의 `create_app`과 같은 문이다. 이름·신뢰·
+   * 이미 있는 id는 host가 판정하고, 거절하면 그 이유가 오류의 메시지다(창은 그대로 보인다). 앱은 띄우지 않는다.
+   */
+  create(spec: NewAppSpec): Promise<AppCreated>
+  /** 그 앱의 만드는 세션 (M4 C-2) — 없으면(세우지 않았거나 지웠으면) null */
+  builder(appId: AppId, projectId: string | null): Promise<SessionInfo | null>
+  /** 그 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다 */
+  createBuilder(appId: AppId, projectId: string | null, tool?: ToolName): Promise<SessionInfo>
 }
 
 /**
