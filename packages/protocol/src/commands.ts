@@ -14,6 +14,7 @@ import {
   ExternalAppInfo,
   AppErrorBundle,
   AppPermission,
+  AppUsage,
   AppQuestion,
   AppRun,
   UsageSnapshot,
@@ -1181,6 +1182,14 @@ export const RpcMethods = {
   'apps.forgetPermission': {
     params: z.object({ appId: AppId, projectId: z.string().nullable(), capability: z.string() }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 몇 번, 얼마나 오래, 토큰을 얼마나. 기록 판이 읽는다. 폴더가 사라진 앱도 기록이
+   * 남아 있는 동안은 읽힌다.
+   */
+  'apps.usage': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: AppUsage,
   },
   'apps.createBuilder': {
     params: z.object({ appId: AppId, projectId: z.string().nullable(), tool: ToolName.optional() }),

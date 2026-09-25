@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppPermission, AppRun } from '@cc/protocol'
+import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { externalAppKey, useStore } from '../../store/store.js'
 
@@ -69,6 +69,7 @@ export function RunsPanel({ appId, projectId }: { appId: string; projectId: stri
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Permissions appId={appId} projectId={projectId} changed={changed} />
+        <AgentUseSection appId={appId} projectId={projectId} runs={runs} />
         {error && (
           <p className="px-3 py-2 text-[11px] text-ash" role="alert">
             Could not read runs: {error}
@@ -151,6 +152,65 @@ function Permissions({ appId, projectId, changed }: { appId: string; projectId: 
       </ul>
     </section>
   )
+}
+
+/**
+ * 이 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 지난 하루와 30일 동안 몇 번, 얼마나 오래, 토큰을 얼마나. 앱은 사람의 에이전트를
+ * 빌려 쓴다 — 그 몫이 앱마다 여기 보인다. 고리에 빠진 앱은 이 숫자가 먼저 말한다. 에이전트를 부탁한 적이 없는 앱에는 서지 않는다.
+ *
+ * 다시 읽는 때: 기록을 다시 읽을 때마다(`runs`가 바뀐다) — 에이전트의 줄이 끝나면 쓰임도 바뀐다.
+ */
+function AgentUseSection({ appId, projectId, runs }: { appId: string; projectId: string | null; runs: AppRun[] | null }) {
+  const platform = usePlatform()
+  const [use, setUse] = useState<AppUsage | null>(null)
+  useEffect(() => {
+    let alive = true
+    platform.apps
+      .usage(appId, projectId)
+      .then((u) => alive && setUse(u))
+      .catch(() => alive && setUse(null))
+    return () => {
+      alive = false
+    }
+  }, [platform, appId, projectId, runs])
+  if (!use || use.month.runs === 0) return null
+  return (
+    <section className="border-b border-edge px-3 py-2" data-testid="runs-agent-use">
+      <p className="readout text-[10px] uppercase text-slate">Agent use</p>
+      <dl className="mt-1 space-y-0.5 text-[11px]">
+        <UseLine label="24 h" use={use.day} testId="agent-use-day" />
+        <UseLine label="30 days" use={use.month} testId="agent-use-month" />
+      </dl>
+    </section>
+  )
+}
+
+function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId: string }) {
+  const parts = [`${use.runs} ${use.runs === 1 ? 'run' : 'runs'}`, longDuration(use.durationMs)]
+  if (use.tokens) parts.push(`${tokenCount(use.tokens.input + use.tokens.output)} tokens`)
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt className="readout w-12 shrink-0 text-slate">{label}</dt>
+      <dd className="min-w-0 truncate text-ash" data-testid={testId} title={use.tokens ? `in ${use.tokens.input} · out ${use.tokens.output}` : undefined}>
+        {parts.join(' · ')}
+      </dd>
+    </div>
+  )
+}
+
+/** 합한 시간 — "42 s", "3m 20s", "2h 5m" */
+function longDuration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s} s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+}
+
+/** 토큰 수 — "850", "12.4k", "3.1M" */
+function tokenCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 /** 도는 줄이 있는 동안 다시 읽는 간격 — 에이전트의 세션이 서고 끝나는 것이 판에 늦지 않게 */
@@ -258,6 +318,11 @@ function RunRow({
         <span className="truncate" data-testid="run-caller">
           {caller}
         </span>
+        {run.tokens && (
+          <span className="readout shrink-0" data-testid="run-tokens" title={`in ${run.tokens.input} · out ${run.tokens.output}`}>
+            {tokenCount(run.tokens.input + run.tokens.output)} tokens
+          </span>
+        )}
         {onOpenSession && (
           <button
             type="button"

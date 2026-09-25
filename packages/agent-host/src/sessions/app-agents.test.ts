@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import { RpcMethods, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { AppToolResult } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
@@ -147,6 +147,30 @@ describe('run_agent — 부탁마다 새 세션, 그 앱의 것으로', () => {
     const agent = agentSessions()[0]!
     expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'normal' })
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.cwd).toBe(join(dataRoot, 'orchestrator'))
+  })
+
+  it('에이전트가 쓴 토큰은 부탁의 기록 줄에 남고, 앱마다 더해 읽힌다 (D-5, apps.usage)', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    claude.onSend = (h) => {
+      // Claude는 턴의 결말 바로 앞에 세션 누적을 싣는다(result의 modelUsage) — 그 앞의 메시지마다의 값은 덮인다
+      h.emit({ type: 'usage_update', sessionId: h.sessionId, tokens: { inputTokens: 40, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 } })
+      h.say('Done.')
+      h.emit({ type: 'usage_update', sessionId: h.sessionId, tokens: { inputTokens: 1_200, outputTokens: 80, cacheReadTokens: 900, cacheCreationTokens: 0 } })
+      h.done()
+    }
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+
+    const runs = RpcMethods['apps.runs'].result.parse(await rpc('apps.runs', { appId: 'notes', projectId }))
+    expect(runs.find((r) => r.kind === 'broker')).toMatchObject({ tool: 'run_agent', status: 'ok', tokens: { input: 1_200, output: 80 }, sessionId: agentSessions()[0]!.id })
+    const use = RpcMethods['apps.usage'].result.parse(await rpc('apps.usage', { appId: 'notes', projectId }))
+    expect(use.day).toMatchObject({ runs: 1, tokens: { input: 1_200, output: 80 } })
+    expect(use.month).toEqual(use.day)
+    expect(await rpc('apps.usage', { appId: 'nobody', projectId })).toEqual({
+      day: { runs: 0, durationMs: 0, tokens: null },
+      month: { runs: 0, durationMs: 0, tokens: null },
+    })
   })
 })
 

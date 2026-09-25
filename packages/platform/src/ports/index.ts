@@ -3,6 +3,7 @@ import type {
   AppErrorBundle,
   AppId,
   AppPermission,
+  AppUsage,
   AppQuestion,
   AppRun,
   ApprovalDecision,
@@ -693,6 +694,8 @@ export interface AppsPort {
   permissions(appId: AppId, projectId: string | null): Promise<AppPermission[]>
   /** 기억된 답 하나를 잊는다 (M4 D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
   forgetPermission(appId: AppId, projectId: string | null, capability: string): Promise<void>
+  /** 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 지난 하루와 30일 */
+  usage(appId: AppId, projectId: string | null): Promise<AppUsage>
 }
 
 /**

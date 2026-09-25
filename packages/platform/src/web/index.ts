@@ -352,6 +352,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       forgetPermission: async (appId, projectId, capability) => {
         await rpc.call('apps.forgetPermission', { appId, projectId, capability })
       },
+      usage: (appId, projectId) => rpc.call('apps.usage', { appId, projectId }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

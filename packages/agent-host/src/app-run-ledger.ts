@@ -15,6 +15,7 @@ export function storeRunLedger(store: Store): RunLedger {
     link: (id, sessionId) => store.linkAppRunSession(id, sessionId),
     keepFailure: (f, keep) => store.keepAppRunFailure(f, keep),
     list: (projectId, appId, limit) => store.listAppRuns(projectId, appId, limit),
+    agentUse: (projectId, appId, since) => store.appAgentUse(projectId, appId, since),
     prune: (before) => store.pruneAppRuns(before),
     settleUnfinished: (error) => store.settleUnfinishedAppRuns(error),
   }

@@ -15,7 +15,7 @@ import {
 } from './capabilities.js'
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
-import { FAILURES_KEPT, describeArgs, type AppRunRow, type RunLedger } from './runs.js'
+import { FAILURES_KEPT, describeArgs, type AgentTokens, type AppRunRow, type RunLedger } from './runs.js'
 
 /**
  * 중개 창구 (M4 D) — 앱이 fd 3으로 부탁한 것을 푸는 **한 자리**.
@@ -68,6 +68,10 @@ export type DeskApps = {
   /** 이 앱의 저장된 비밀을 가리는 함수 — 기록(D-6)에 남기는 인자·이유는 도구 호출의 기록과 같은 규칙으로 가린다 */
   redactor(ref: AppRef): (text: string) => string
   /**
+   * 이 실행까지의 사슬 (D-5) — 사슬을 시작한 호출부터 이 실행까지, 앱의 도구 호출 하나가 한 칸. 폭주 막기가 깊이와 되풀이를 본다.
+   */
+  chain(runId: string): { ref: AppRef; tool: string }[]
+  /**
    * 이 실행이 속한 사슬을 **누가 시작했나** (D-4) — 부모를 따라 올라가 앱이 아닌 첫 호출자. 세션이면 그 세션에, 화면이면
    * 그 앱의 고정 화면에 물음이 선다. 사슬을 더는 따라갈 수 없으면(부모가 이미 끝났다) null이다.
    */
@@ -113,6 +117,8 @@ export type BrokerHost = {
       progress(message: string): void
       /** 세션이 서는 순간 한 번 — 기록(D-6)이 도는 동안에도 그 세션으로 건너갈 수 있게 */
       onSession(sessionId: string): void
+      /** 도구가 알려 준 이 실행의 토큰(누적) — 알려 줄 때마다. 마지막 것이 기록에 남는다 (D-5) */
+      onUsage(tokens: AgentTokens): void
     },
   ): Promise<AgentRunResult>
   /**
@@ -136,6 +142,24 @@ export type BrokerHost = {
 export const AGENT_PROMPT_MAX_CHARS = 200_000
 /** 스키마의 상한 — 답의 모양 하나를 적는 데 64KiB면 넉넉하다. 더 큰 것은 스키마가 아니라 자료다 */
 export const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
+
+/**
+ * 폭주 막기 (M4 D-5) — 앱은 코드이고, 코드의 고리는 사람이 보기 전에 수백 번 돈다. 앱끼리 서로 부르거나 에이전트를 끝없이
+ * 세우면 사람의 기계와 사용량이 쓰인다. 그래서 중개가 세는 것:
+ *
+ *   사슬의 깊이   한 사슬에 앱 호출은 3칸까지 — 화면(또는 세션)이 부른 앱이 1칸, 그 앱이 부른 앱이 2칸, 그 앱이 부른 앱이 3칸.
+ *                "화면의 앱 → 일을 맡는 앱 → 자료를 주는 앱"이 우리가 그리는 가장 긴 조합이다. 그보다 깊은 사슬은 설계보다
+ *                고리일 때가 많고, 칸마다 에이전트를 세우고 사람의 호출을 붙잡을 수 있다. 상수라 늘리기 쉽다
+ *   되풀이       한 사슬 위에 같은 (앱, 도구)가 다시 서면 거절한다 — A.t → B.x → A.t는 깊이에 닿기 전에 고리다
+ *   에이전트     한 앱에 동시에 하나, 1분에 다섯. 실측: 가장 짧은 실행(haiku로 한 문장 답)이 4.0초, 스키마를 준 답이 5.6초 —
+ *                하나씩 차례로 돌려도 1분에 11~15번이 한계다. 다섯이면 짧은 부탁 몇 개를 몰아서 해도 닿지 않고, 고리는
+ *                1분에 다섯(한 시간에 300)에서 멈추며, 거절이 기록 판에 이유와 함께 선다. 일이 많으면 한 부탁에 모으라고 말한다
+ *
+ * 둘째 에이전트를 줄 세우지 않고 거절하는 이유: 줄은 보이지 않는 기다림이다. 앱의 호출이 몇 분씩 말없이 붙잡히고, 고리는
+ * 줄을 쌓는다. 거절은 곧바로 이유와 함께 앱에 닿는다 — 앱이 끝나기를 기다렸다 다시 부탁하면 된다.
+ */
+export const CHAIN_DEPTH_MAX = 3
+export const AGENT_RUNS_PER_WINDOW = 5
 
 const CallAppArgs = z.object({
   app: z.string(),
@@ -172,6 +196,9 @@ export type CapabilityDecisionListed = { capability: string; text: string; decis
 function deniedText(tool: BrokerToolName, appName: string, text: string): string {
   return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
 }
+
+/** 앱 하나의 자리 이름 — 폭주 막기가 앱마다 센다 */
+const slotOf = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
 
 /** 사람이 읽을 길이 — "5 minutes", "1 second" */
 function humanDuration(ms: number): string {
@@ -250,11 +277,14 @@ class BrokerRow {
     this.ledger?.link(this.id, sessionId)
   }
 
+  /** 에이전트가 쓴 토큰 — 도구가 알려 줄 때마다 덮는다(누적값이다). 닫을 때 적는다 */
+  used: AgentTokens | null = null
+
   close(status: Exclude<AppRunRow['status'], 'running'>, error: string | null, result: CallToolResult | null = null): void {
     if (this.closed || !this.ledger) return
     this.closed = true
     this.open()
-    this.ledger.end(this.id, { status, durationMs: Date.now() - this.t0, error: error === null ? null : this.redact(error) })
+    this.ledger.end(this.id, { status, durationMs: Date.now() - this.t0, error: error === null ? null : this.redact(error), tokens: this.used })
     // 실패한 부탁의 입력(글·스키마)은 앱을 고치는 에이전트가 봐야 한다 — 도구 호출과 같은 규칙으로, 최근 것만
     if (status === 'error') {
       this.ledger.keepFailure(
@@ -302,15 +332,23 @@ export class BrokerDesk {
    * (둘째는 첫째의 답을 기다린다). 기다리는 쪽이 모두 떠나거나 시간이 지나면 물음을 거둔다.
    */
   private asking = new Map<string, { answer: Promise<'allow' | 'deny' | null>; waiters: number; withdraw: AbortController; timedOut: boolean }>()
+  /** 앱마다 지금 도는 에이전트가 선 때 (D-5) — 앱 하나에 하나 */
+  private agentsRunning = new Map<string, number>()
+  /** 앱마다 최근 창 안에 에이전트를 세운 때들 (D-5) */
+  private agentStarts = new Map<string, number[]>()
 
   constructor(
     private apps: DeskApps,
     private book: CapabilityBook,
-    /** 사람의 답을 기다리는 상한 (런타임의 timing — 시험이 줄인다) */
-    private questionMs: () => number,
+    /** 사람의 답을 기다리는 상한과 에이전트를 세는 창 (런타임의 timing — 시험이 줄인다) */
+    private timing: () => { questionMs: number; agentRateWindowMs: number },
     /** 부탁마다 한 줄을 남길 자리 (D-6) — 런타임의 실행 기록과 같은 것. 없으면 남기지 않는다 */
     private ledger: RunLedger | null = null,
   ) {}
+
+  private questionMs(): number {
+    return this.timing().questionMs
+  }
 
   /**
    * 답을 검증하는 JSON Schema 엔진 — MCP 서버 SDK가 도구의 outputSchema를 검증할 때 쓰는 것과 같은 것(ajv, 방언은
@@ -409,10 +447,35 @@ export class BrokerDesk {
     const denied = await this.permit('run_agent', app, { kind: 'agent', tool: picked.tool }, `run an agent (${host.agentLabel(picked.tool)}) in a new session`, call)
     if (denied) return denied
 
-    const r = await host.runAgent(
-      { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) },
-      { signal: call.signal, progress: call.progress, onSession: (id) => row.link(id) },
-    )
+    // 폭주 막기 (D-5) — 세고 자리를 잡는 사이에 기다림이 없다: 같은 앱의 부탁 둘이 함께 들어와도 하나만 지난다
+    const key = slotOf(app.ref)
+    const since = this.agentsRunning.get(key)
+    if (since !== undefined) {
+      return refuse(
+        `run_agent refused: ${app.name} already has an agent running (started ${humanDuration(Date.now() - since)} ago) — ` +
+          'Centralu runs one agent per app at a time. Ask again when it has finished.',
+      )
+    }
+    const windowMs = this.timing().agentRateWindowMs
+    const now = Date.now()
+    const recent = (this.agentStarts.get(key) ?? []).filter((t) => t > now - windowMs)
+    if (recent.length >= AGENT_RUNS_PER_WINDOW) {
+      return refuse(
+        `run_agent refused: ${app.name} started ${recent.length} agents within ${humanDuration(windowMs)}, the most Centralu allows — ` +
+          `ask again in ${humanDuration(recent[0]! + windowMs - now)}, or put more of the work into one prompt`,
+      )
+    }
+    this.agentStarts.set(key, [...recent, now])
+    this.agentsRunning.set(key, now)
+    let r: AgentRunResult
+    try {
+      r = await host.runAgent(
+        { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) },
+        { signal: call.signal, progress: call.progress, onSession: (id) => row.link(id), onUsage: (t) => (row.used = t) },
+      )
+    } finally {
+      this.agentsRunning.delete(key)
+    }
     if (!check) return say(r.text)
 
     const structured = r.output !== undefined ? r.output : parseJsonAnswer(r.text)
@@ -451,6 +514,18 @@ export class BrokerDesk {
         app.ref.projectId === null
           ? `call_app: there is no app "${id}" in your user folder — an app from the user folder can call only other apps there`
           : `call_app: there is no app "${id}" in this project or in your user folder`,
+      )
+    }
+    // 폭주 막기 (D-5) — 사람에게 묻기 전에: 어차피 거절될 부탁으로 사람을 부르지 않는다
+    const path = this.apps.chain(call.parentRunId)
+    const shown = [...path, { ref: target, tool }].map((p) => `${p.ref.appId}.${p.tool}`).join(' → ')
+    if (path.some((p) => p.ref.appId === target.appId && p.ref.projectId === target.projectId && p.tool === tool)) {
+      return refuse(`call_app refused: ${id}.${tool} is already running in this chain (${shown}) — calling it again would go round in a loop`)
+    }
+    if (path.length >= CHAIN_DEPTH_MAX) {
+      return refuse(
+        `call_app refused: this chain would be ${path.length + 1} app calls deep (${shown}) — ` +
+          `Centralu stops a chain at ${CHAIN_DEPTH_MAX} so apps cannot call each other without end`,
       )
     }
     const where = target.projectId === null && app.ref.projectId !== null ? ' from your user folder' : ''

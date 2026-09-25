@@ -368,6 +368,10 @@ export function createRpcHandler(
       requireExternalApps().forgetPermission({ appId, projectId }, capability)
       return { ok: true as const }
     },
+    'apps.usage': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.usage'].params.parse(p)
+      return requireExternalApps().agentUse({ appId, projectId })
+    },
     'apps.createBuilder': async (p) => {
       const { appId, projectId, tool } = RpcMethods['apps.createBuilder'].params.parse(p)
       return mgr.createAppBuilder({ appId, projectId }, tool)
