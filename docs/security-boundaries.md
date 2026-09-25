@@ -160,7 +160,10 @@ then who may call it:
 - An agent an app asks for runs in a new session the person can see, with the `normal` preset
   whatever the calling session uses, with no apps attached, and receives the prompt framed as the
   app's text ("Text an app sends"; `app-agents.test.ts` "자동으로 도는 세션이 불러도 에이전트는
-  normal로 서고, 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다").
+  normal로 서고, 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다"). Its settings files
+  follow the project's trust like a worker's; a user-folder app's agent, which runs in the
+  orchestrator's folder, reads only the person's own settings, never that folder's files
+  (`settingFilesFor`; `setting-files.test.ts`).
 - Runaway limits: a chain holds at most 3 app calls and never calls the same app tool again on its
   own path, and an app runs one agent at a time and at most 5 a minute. Every request, refusals
   included, is a run record under the call that caused it (`limits.test.ts`,
@@ -182,8 +185,9 @@ Limits:
   transforms (encodes, splits), are not caught.
 - Visibility decides who may call a tool, not what the tool does.
 - A permission is per capability, not per request: once an app may run an agent, the app decides
-  what to ask it. The agent's own writes still ask the person (`normal`), and its session is there
-  to read.
+  what to ask it. `normal` takes its approval mode from the person's own settings, so the agent's
+  steps ask the person exactly as far as those settings make any session ask (none, with a global
+  bypass). Its session is there to read.
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message.
 - fd 3 on Windows is untested (spike S-5).

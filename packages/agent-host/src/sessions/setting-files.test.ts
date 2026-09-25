@@ -16,8 +16,10 @@ import { SessionManager } from './manager.js'
  * 세션마다 도구가 받는 설정 파일 (M4 결정 3, #92·#152) — 종류 × 프로젝트 신뢰 × 프리셋, 만들 때와 깨울 때.
  *
  *   오케스트레이터·조율 세션                  아무 파일도 (Claude `settingSources: []`, Codex는 저장소 층을 끈다)
- *   워커·매니저·프로젝트 앱의 만드는 세션     그 프로젝트의 신뢰 그대로
+ *   워커·매니저·프로젝트 앱의 만드는 세션,    그 프로젝트의 신뢰 그대로
+ *   프로젝트 앱이 부탁한 에이전트(D-1)
  *   사용자 폴더 앱의 만드는 세션              신뢰 — 그 폴더는 사용자 자신의 것이다
+ *   사용자 폴더 앱이 부탁한 에이전트(D-1)     사람 자신의 설정만 — 글은 앱이 썼고, 폴더(orchestratorHome)는 워커가 쓸 수 있다
  *
  * 진짜 매니저가 진짜 어댑터를 띄운다. 도구만 흉내다: Claude는 SDK의 `query`가, Codex는 app-server 클라이언트가
  * 받은 것을 적는다 — 이 테스트가 보는 것은 "도구가 무엇을 받았나"다. 그 값으로 CLI가 무엇을 읽는지는
@@ -80,6 +82,7 @@ function offline(a: AgentAdapter): AgentAdapter {
 
 let root = ''
 let repo = ''
+let adapters: Map<ToolName, AgentAdapter>
 let store: Store
 let rt: ExternalApps
 let mgr: SessionManager
@@ -96,7 +99,7 @@ beforeEach(async () => {
   mkdirSync(dataRoot)
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   store = new Store()
-  const adapters = new Map<ToolName, AgentAdapter>([
+  adapters = new Map<ToolName, AgentAdapter>([
     ['claude', offline(new ClaudeAdapter())],
     ['codex', offline(new CodexAdapter())],
   ])
@@ -115,7 +118,15 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-type Kind = 'orchestrator' | 'coordinator' | 'worker' | 'manager' | 'project-app builder' | 'user-folder-app builder'
+type Kind =
+  | 'orchestrator'
+  | 'coordinator'
+  | 'worker'
+  | 'manager'
+  | 'project-app builder'
+  | 'user-folder-app builder'
+  | 'project-app agent'
+  | 'user-folder-app agent'
 type Files = 'none' | 'user' | 'all'
 type Created = { app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }
 
@@ -127,6 +138,8 @@ const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
   manager: (t) => (t ? 'all' : 'user'),
   'project-app builder': (t) => (t ? 'all' : 'user'),
   'user-folder-app builder': () => 'all',
+  'project-app agent': (t) => (t ? 'all' : 'user'),
+  'user-folder-app agent': () => 'user',
 }
 
 /** 그 종류의 세션을 제품이 세우는 길로 세운다 — 도구가 처음 뜨는 것까지 */
@@ -154,6 +167,26 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   },
   'user-folder-app builder': async (tool) =>
     ((await rpc('apps.create', { projectId: null, id: 'timer', name: 'Timer', tool })) as Created).builder!.id,
+  'project-app agent': (tool) => appAgent(tool, projectId, 'notes'),
+  'user-folder-app agent': (tool) => appAgent(tool, null, 'timer'),
+}
+
+/**
+ * 앱이 부탁한 에이전트 (M4 D-1) — 중개 창구가 부르는 그 문(`runAppAgent`)으로 세운다. 세션이 서는 순간 id를 받고, 턴은
+ * 끝나지 않는다(가짜 도구는 답하지 않는다) — 여기서 보는 것은 띄울 때 받은 것이다. 도구가 깔렸고 로그인했다고 답하게
+ * 한다: 이 기계의 Codex는 로그인하지 않았고, 이 시험이 보는 것은 로그인이 아니다.
+ */
+async function appAgent(tool: ToolName, appProjectId: string | null, appId: string): Promise<string> {
+  const adapter = adapters.get(tool)!
+  adapter.detect = async () => ({ tool, installed: true, loggedIn: true, detail: 'test' })
+  return new Promise<string>((resolve, reject) => {
+    mgr
+      .runAppAgent(
+        { app: { projectId: appProjectId, appId }, appName: `App ${appId}`, tool, prompt: 'look around' },
+        { signal: new AbortController().signal, progress: () => {}, onSession: resolve },
+      )
+      .catch(reject)
+  })
 }
 
 const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']

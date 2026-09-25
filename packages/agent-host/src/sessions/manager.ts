@@ -840,7 +840,9 @@ export class SessionManager {
    *   오케스트레이터·조율 세션                    아무 파일도 — 프로젝트가 없고, 그 폴더(orchestratorHome)는 워커가
    *                                              쓸 수 있는 자리다. 파일로 들어오는 지시가 곧 권한 상승 통로다
    *   사용자 폴더 앱의 만드는 세션                신뢰 — 그 폴더는 사용자 자신의 것이다 (결정 3: 사용자 폴더 앱은 신뢰)
-   *   워커·매니저·프로젝트 앱의 만드는 세션       그 프로젝트의 신뢰 그대로 (#152의 워커와 같다)
+   *   사용자 폴더 앱이 부탁한 에이전트 (D-1)     사람 자신의 설정만 — 아래 주석
+   *   워커·매니저·프로젝트 앱의 만드는 세션,     그 프로젝트의 신뢰 그대로 (#152의 워커와 같다)
+   *   프로젝트 앱이 부탁한 에이전트 (D-1)
    *
    * **도구를 받는지로 가르지 않는다.** 예전에는 어댑터가 "오케스트레이터 도구가 있으면 아무 파일도"로 갈랐는데,
    * 워크트리 매니저(#69)와 만드는 세션(C-3)도 그 도구를 받는다. 신뢰한 프로젝트의 만드는 세션이 CLAUDE.md도,
@@ -854,6 +856,17 @@ export class SessionManager {
   ): Pick<CreateSessionOpts, 'projectTrusted' | 'noSettingFiles'> {
     if (m.kind === 'orchestrator' || m.kind === 'coordinator') return { projectTrusted: false, noSettingFiles: true }
     if (m.projectId === null && this.builderRefOf(m)) return { projectTrusted: true }
+    /*
+     * 사용자 폴더 앱이 부탁한 에이전트 (M4 D-1) — 사람 자신의 설정(~/.claude, ~/.codex)만 받고 폴더의 파일은 받지 않는다.
+     *
+     * 그 세션의 글은 사람이 아니라 앱이 썼다. 자리는 조율 세션처럼 오케스트레이터의 빈 폴더(orchestratorHome)인데, 그 폴더는
+     * 워커가 쓸 수 있다 — 거기 놓인 CLAUDE.md·설정을 받으면, 앱의 글로 도는 에이전트가 남이 써 둔 지시를 권한처럼 받는다.
+     * 만드는 세션을 신뢰하는 이유(그 폴더는 사람이 앱을 짓는 사람 자신의 폴더다)는 여기 없다: 이 세션의 폴더는 앱의 것도
+     * 사람의 것도 아니다. 그렇다고 아무 파일도 안 주면(조율 세션처럼) 사람이 모든 에이전트에 건 자기 규칙(승인·금지 목록)이
+     * 앱이 부탁한 에이전트에만 빠진다 — 사람이 모르는 사이에 더 느슨해지는 쪽이다. 프로젝트 앱의 것은 워커처럼 그 프로젝트의
+     * 신뢰를 따른다(아래): 그 세션은 프로젝트 안에서 돌고, 프로젝트의 설정을 받을지는 사람이 신뢰로 이미 정했다.
+     */
+    if (m.projectId === null && this.isAppAgentSession(m)) return { projectTrusted: false }
     return { projectTrusted: this.projectTrusted(m.projectId) }
   }
 
