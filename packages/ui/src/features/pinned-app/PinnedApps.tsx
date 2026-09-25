@@ -83,6 +83,12 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
     await frame.current?.teardown()
     close(pv.key)
   }
+  // 다시 시작도 화면을 내리는 길이다 — teardown을 먼저 보낸다
+  const restart = useStore((s) => s.restartApp)
+  const onRestart = async () => {
+    await frame.current?.teardown()
+    await restart(pv.key)
+  }
 
   return (
     <section
@@ -115,31 +121,67 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
         </button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col p-2">
-        <Body app={app} pv={pv} frame={frame} />
+        <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} />
       </div>
     </section>
   )
 }
 
-function Body({ app, pv, frame }: { app: ExternalCatalogApp | undefined; pv: PinnedView; frame: React.RefObject<AppFrameHandle | null> }) {
+function Body({
+  app,
+  pv,
+  frame,
+  onRestart,
+}: {
+  app: ExternalCatalogApp | undefined
+  pv: PinnedView
+  frame: React.RefObject<AppFrameHandle | null>
+  onRestart: () => void
+}) {
   const trust = useStore((s) => s.setProjectTrusted)
+  const title = app?.title ?? pv.appId
   /*
    * 인스턴스가 열려 있는 동안은 **무슨 일이 있어도 프레임을 그린다.** 앱이 막히거나 사라지면 위의 효과가
    * teardown을 보내고 자리를 되돌린다. 그 전에 여기서 안내문으로 갈아 끼우면 React가 iframe을 먼저 떼어,
    * teardown이 닿을 창이 없어진다(AppFrame의 약속: 떼기 전에 부른다).
+   *
+   * 떠 있던 앱이 죽었으면(B-6) 프레임 위에 이유와 "Restart"를 세운다. 프레임은 남긴다 — 앱은 다음 부름에
+   * 스스로 다시 뜨고(crashed), 사람이 보던 화면의 내용도 아직 거기 있다. 멈춘 앱(failed)은 스스로 다시
+   * 뜨지 않으므로 이 단추가 유일한 길이다.
    */
   if (pv.phase === 'open' && pv.instanceId) {
+    const down = app?.info.status === 'crashed' || app?.info.status === 'failed'
     return (
-      <AppFrame
-        ref={frame}
-        fill
-        appId={pv.appId}
-        projectId={pv.projectId}
-        instanceId={pv.instanceId}
-        toolInput={pv.toolInput}
-        toolResult={pv.toolResult}
-        className="flex min-h-0 flex-1 flex-col"
-      />
+      <>
+        {down && (
+          <div
+            className="mb-2 flex items-start gap-3 rounded-md border border-edge bg-panel px-3 py-2 text-[12px]"
+            role="alert"
+            data-testid="pinned-crashed"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-chalk">{app?.info.status === 'failed' ? 'This app stopped after failing repeatedly.' : 'This app stopped.'}</p>
+              {app?.status.reason && (
+                <p className="mt-0.5 whitespace-pre-wrap break-words text-ash" data-testid="pinned-reason">
+                  {app.status.reason}
+                </p>
+              )}
+            </div>
+            <RestartButton onClick={onRestart} />
+          </div>
+        )}
+        <AppFrame
+          ref={frame}
+          fill
+          appId={pv.appId}
+          projectId={pv.projectId}
+          instanceId={pv.instanceId}
+          toolInput={pv.toolInput}
+          toolResult={pv.toolResult}
+          loading={<Skeleton label={`Opening ${title}…`} />}
+          className="flex min-h-0 flex-1 flex-col"
+        />
+      </>
     )
   }
   if (!app) return null
@@ -167,6 +209,17 @@ function Body({ app, pv, frame }: { app: ExternalCatalogApp | undefined; pv: Pin
       </Notice>
     )
   }
+  // 멈춘 앱(연달아 못 떴다) — 스스로 다시 뜨지 않는다. 이유와 다시 시작하는 길을 함께 준다
+  if (app.info.status === 'failed') {
+    return (
+      <Notice testId="pinned-failed" title="This app stopped after failing repeatedly.">
+        <span className="whitespace-pre-wrap break-words" data-testid="pinned-reason">
+          {app.status.reason}
+        </span>
+        <RestartButton onClick={onRestart} className="mt-3" />
+      </Notice>
+    )
+  }
   if (!app.status.runnable) {
     return (
       <Notice testId="pinned-blocked" title={app.status.label}>
@@ -182,10 +235,53 @@ function Body({ app, pv, frame }: { app: ExternalCatalogApp | undefined; pv: Pin
         <span className="whitespace-pre-wrap break-words" data-testid="pinned-reason">
           {pv.error}
         </span>
+        <RestartButton onClick={onRestart} className="mt-3" />
       </Notice>
     )
   }
-  return <div className="px-3 py-2 text-[12px] text-ash" data-testid="pinned-opening">Opening {app.title}…</div>
+  const label =
+    pv.phase === 'restarting' ? `Restarting ${title}…` : app.info.status === 'running' ? `Opening ${title}…` : `Starting ${title}…`
+  return <Skeleton label={label} />
+}
+
+function RestartButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      className={`shrink-0 rounded border border-edge bg-void px-3 py-1 text-[12px] text-chalk transition-colors hover:border-graphite ${className}`}
+      onClick={onClick}
+      data-testid="pinned-restart"
+    >
+      Restart
+    </button>
+  )
+}
+
+/**
+ * 앱이 뜨는 동안의 자리 (B-6). 2026-09-14 결정: 비동기는 스켈레톤만 잘하면 된다.
+ *
+ * 앱은 처음 필요할 때 뜬다. 그래서 쉬던 앱을 여는 순간이 곧 프로세스가 뜨는 순간이다(성능 예산: 스켈레톤은
+ * 즉시, 첫 화면은 2초 안). 빈 영역이나 한 줄짜리 "Loading"은 멈춘 것과 구별되지 않는다. 화면이 설 자리의
+ * 모양을 먼저 보이고, 무엇을 기다리는지는 한 줄로 말한다(뜨는 중인지, 여는 중인지, 다시 시작하는 중인지).
+ * 조용한 색만 쓴다 — 기다림은 사람을 부르는 신호가 아니다(팔레트 규칙).
+ */
+function Skeleton({ label }: { label: string }) {
+  return (
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-3 rounded-md border border-edge bg-panel p-4"
+      role="status"
+      aria-live="polite"
+      data-testid="pinned-skeleton"
+    >
+      <p className="text-[12px] text-ash" data-testid="pinned-skeleton-label">
+        {label}
+      </p>
+      <div className="h-3 w-1/3 animate-pulse rounded bg-graphite/60" />
+      <div className="h-24 animate-pulse rounded bg-graphite/40" />
+      <div className="h-3 w-2/3 animate-pulse rounded bg-graphite/40" />
+      <div className="h-3 w-1/2 animate-pulse rounded bg-graphite/40" />
+    </div>
+  )
 }
 
 function Notice({ testId, title, children }: { testId: string; title: string; children?: ReactNode }) {

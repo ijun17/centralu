@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppBridge, McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-bridge'
 import { APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult } from '@cc/platform/ports'
@@ -65,6 +65,11 @@ export type AppFrameProps = {
    * 정하면 짧은 앱은 영역 위쪽에 띠로 남고 긴 앱은 영역 밖으로 나간다.
    */
   fill?: boolean
+  /**
+   * 화면이 뜨는 동안 기본 한 줄("Loading app view…") 대신 보일 것 — 고정 화면의 스켈레톤(B-6). 프레임
+   * 위를 덮는다. 프레임은 그 아래에서 계속 뜨고, 화면이 초기화되는 순간 걷힌다.
+   */
+  loading?: ReactNode
   className?: string
 }
 
@@ -159,7 +164,7 @@ type Phase = 'loading' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
-  { appId, projectId = null, instanceId, toolInput, toolResult, changeSignal, onMessage, fill = false, className },
+  { appId, projectId = null, instanceId, toolInput, toolResult, changeSignal, onMessage, fill = false, loading, className },
   ref,
 ) {
   const platform = usePlatform()
@@ -375,12 +380,17 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   )
 
   return (
-    <div ref={boxRef} className={className} data-testid="app-frame" data-phase={phase}>
-      {phase === 'loading' && (
-        <div className="px-3 py-2 text-[12px] text-ash" data-testid="app-frame-loading">
-          Loading app view…
-        </div>
-      )}
+    <div ref={boxRef} className={`${className ?? ''} ${loading ? 'relative' : ''}`} data-testid="app-frame" data-phase={phase}>
+      {phase === 'loading' &&
+        (loading ? (
+          <div className="absolute inset-0 z-10 flex" data-testid="app-frame-loading">
+            {loading}
+          </div>
+        ) : (
+          <div className="px-3 py-2 text-[12px] text-ash" data-testid="app-frame-loading">
+            Loading app view…
+          </div>
+        ))}
       {phase === 'error' && (
         <div className="rounded-md border border-edge bg-panel px-3 py-2 text-[12px] text-ash" role="alert" data-testid="app-frame-error">
           This app view could not be shown: {error}

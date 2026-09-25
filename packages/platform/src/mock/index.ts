@@ -630,7 +630,20 @@ export class MockPlatform implements Platform {
     closeView: async (instanceId: string) => {
       this.closedViews.push(instanceId)
     },
+    /**
+     * 실물처럼: 멈췄거나 죽었던 앱의 이유를 지우고 쉬는 앱(`stopped`)으로 세운 뒤 목록 방송을 한다.
+     * 띄우지는 않는다 — 다음에 여는 화면이 띄운다.
+     */
+    restart: async (appId: string, projectId: string | null) => {
+      this.restarts.push({ appId, projectId })
+      const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      if (!a) throw new Error(`그런 앱이 없습니다: ${projectId ?? 'user'}/${appId}`)
+      if (a.status === 'failed' || a.status === 'crashed' || a.status === 'running') Object.assign(a, { status: 'stopped', error: null })
+      this.emit({ type: 'external_apps_changed' })
+    },
   }
+  /** 다시 시작한 앱 — Restart 단추가 host에 닿았는지를 시험이 본다 */
+  readonly restarts: { appId: string; projectId: string | null }[] = []
   /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */
   readonly openedViews: { appId: string; projectId: string | null }[] = []
   readonly closedViews: string[] = []
