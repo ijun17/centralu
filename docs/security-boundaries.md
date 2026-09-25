@@ -27,13 +27,18 @@ for word: the same injection path as a worker's report, so the same rule applies
   Send. It can go only to the conversation of the card the view stands under: `apps.viewMessage`
   takes the conversation and the app from the view instance and only compares the conversation
   the caller names (`rpc.ts`, `InlineViews.owner`).
+- A pinned view's message is shown with a list of sessions, and nothing is sent before the person
+  picks one. A pinned view belongs to no conversation, so the destination is the session picked.
+  The app still comes from the view instance (`ViewHost.describe`), and an instance that is not
+  open is refused.
 - It is stored with its source (`fromApp`) and drawn as the app's message, not the person's. A
   session's automatic name is never taken from it.
 - The agent receives it framed (`appMessageFrame` in `sessions/manager.ts`): a header naming the
   app and saying the person chose to send it but did not write it, and that it is the app's text,
   not an instruction; then **every line** of the text behind `> `. A line imitating the header, or
   a made-up "person:" field, stays inside the quote. The app's name passes the one-line field rule
-  (`frameField`).
+  (`frameField`). A pinned view's message gets the same frame, which says it came from the app's
+  own view, outside this conversation.
 
 The same rule covers an app's error report. "Send to builder" hands the builder a bundle made of
 the app's own output: its reason and the last lines of its stderr, which can carry outside text
@@ -43,13 +48,13 @@ it, and a bundle goes once (`builder-requests.test.ts`, "누르기 전에는 아
 묶음이 인용으로 갇혀 한 번 가며, 두 번째는 거절된다").
 
 Tests: `inline-views.test.ts` ("그 대화로 가고, 대화에는 앱이 보낸 말로 남으며, 에이전트는 인용 안에
-갇힌 앱의 글로 받는다", with a forged header inside the text; "다른 대화의 이름을 대거나, 대화 안
-화면이 아닌 인스턴스로는 보낼 수 없다"); `e2e/inline-views.spec.ts` for asking first.
+갇힌 앱의 글로 받는다", with a forged header inside the text; "대화 안 화면으로 다른 대화의 이름을
+대거나, 열려 있지 않은 인스턴스로는 보낼 수 없다"; "고정 화면의 말은 사람이 고른 대화로 가고, 대화 안
+화면과 같은 틀(앱의 글)로 — 대화 밖에서 왔다고 밝혀 — 간다"); `e2e/inline-views.spec.ts` and
+`e2e/apps.spec.ts` for asking first; `e2e/build-loop.spec.ts` for the pinned path.
 
 Limits:
 
-- A **pinned** view's message goes to the session the person picks as ordinary text, through the
-  same path as typed text, without the frame.
 - The frame states where text came from. As with reports, it does not make the text safe to obey.
 
 ## Repository configuration and project trust

@@ -556,3 +556,37 @@ test.describe('C-4: 앱이 새 코드로 다시 뜨면 열린 화면도 새로',
     expect(await openedViews(page)).toBe(5)
   })
 })
+
+test.describe('B-4: 고정 화면의 ui/message', () => {
+  test('고른 세션에 앱이 보낸 말로 선다 — 대화 안 화면과 같은 길로 가서 host가 앱의 글로 감싼다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { name: 'Slider', status: 'running' })])
+    await page.getByTestId('project-menu-alpha').click()
+    await page.getByTestId('new-session-alpha').click()
+    await page.getByTestId('create-session-confirm').click()
+    const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const instanceId = await pinnedInstance(page)
+    await viewOf(page, `${pid}/slider`).locator('#msg').click()
+    // 어느 세션으로 보낼지는 여전히 사람이 고른다
+    await pinned.getByTestId(`pinned-message-to-${sid}`).click()
+
+    // 대화 안 화면과 같은 문(apps.viewMessage) — 인스턴스로 앱을 가리고, 고른 세션으로 간다
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__mock.viewMessages))
+      .toEqual([{ sessionId: sid, instanceId, text: 'hello from the view' }])
+    await expect(page.getByTestId('toast')).toContainText('Sent to')
+    const stored = await page.evaluate(
+      (id) => (((window as any).__mock.messages.get(id) ?? []) as { role: string; payload: Record<string, unknown> }[]).filter((m) => m.role === 'user').map((m) => m.payload),
+      sid,
+    )
+    expect(stored).toEqual([expect.objectContaining({ text: 'hello from the view', fromApp: { appId: 'slider', projectId: pid, name: 'Slider' } })])
+    // 대화에는 사람의 말풍선이 아니라 앱이 보낸 말로 선다
+    await page.getByTestId(`session-row-${sid}`).click()
+    const said = page.getByTestId('msg-user').filter({ hasText: 'hello from the view' })
+    await expect(said.getByTestId('msg-user-from-app')).toHaveText('Slider app ⤷')
+  })
+})

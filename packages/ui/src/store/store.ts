@@ -1071,7 +1071,8 @@ export type AppState = {
    */
   reopenInlineView(sessionId: string, callId: string): Promise<void>
   /**
-   * 대화 안 화면의 말을 그 대화로 보낸다 (M4 B-1·B-4) — 사람이 확인한 뒤에만 부른다.
+   * 앱 화면의 말을 대화로 보낸다 (M4 B-1·B-4) — 사람이 확인한 뒤에만 부른다. 대화 안 화면은 그 대화로, 고정 화면은 사람이
+   * 고른 대화로. 어느 쪽이든 앱이 보낸 말로 남고 에이전트는 host가 감싼 앱의 글을 받는다.
    * @returns 보냈는가 — 실패는 토스트로 말한다
    */
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<boolean>

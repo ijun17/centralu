@@ -273,13 +273,20 @@ export function createRpcHandler(
     'apps.inlineViews': async (p) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
     'apps.viewMessage': async (p) => {
       const { sessionId, instanceId, text } = RpcMethods['apps.viewMessage'].params.parse(p)
-      // 앱과 세션은 인스턴스가 정한다 — 부른 쪽이 댄 세션은 대조만 한다 (#93·#94)
+      /*
+       * 앱은 **인스턴스가** 정한다 — 부른 쪽이 댄 것은 대조만 한다 (#93·#94).
+       *   대화 안 화면  보낼 곳도 인스턴스가 정한다(그 화면이 선 대화). 다른 대화를 대면 거절한다
+       *   고정 화면     대화에 속하지 않는다 — 보낼 곳은 사람이 고른 대화다(UI가 묻고, 고른 뒤에만 부른다)
+       * 어느 쪽이든 같은 길(sendFromApp)을 지나 같은 틀(앱의 글)로 간다 — 고정 화면의 말이 사람의 말로 새지 않게.
+       */
       const owner = inlineViews?.owner(instanceId) ?? null
-      if (!owner || owner.sessionId !== sessionId) {
+      if (owner && owner.sessionId !== sessionId) {
         throw Object.assign(new Error('This app view is not open in that conversation'), { code: 'internal' })
       }
-      const name = externalApps?.list().find((a) => a.appId === owner.ref.appId && a.projectId === owner.ref.projectId)?.name
-      await mgr.sendFromApp(sessionId, text, { appId: owner.ref.appId, projectId: owner.ref.projectId, name: name ?? owner.ref.appId })
+      const ref = owner?.ref ?? views?.describe(instanceId)?.app ?? null
+      if (!ref) throw Object.assign(new Error('This app view is not open'), { code: 'internal' })
+      const name = externalApps?.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)?.name
+      await mgr.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
       return { ok: true as const }
     },
     'apps.readResource': async (p) => {
