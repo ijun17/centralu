@@ -1,4 +1,4 @@
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { query, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 
 /**
  * SDK Query 중 우리가 쓰는 부분만.
@@ -11,6 +11,12 @@ type QueryHandle = AsyncIterable<unknown> &
     /** 진행 중인 턴을 끊는다. 스트리밍 입력 모드에서만 쓸 수 있다 — 우리가 쓰는 모드가 그렇다 */
     interrupt(): Promise<unknown>
     supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
+    /**
+     * 동적으로 붙인 MCP 서버의 집합을 **통째로 바꾼다** (sdk.d.ts). 처음 `mcpServers`로 넘긴
+     * 인프로세스 서버도 이 집합에 들어 있다(설치된 0.3.263의 sdk.mjs: 초기 SDK 서버가 같은
+     * 맵에 앉는다) — 그래서 부를 때마다 오케스트레이터 서버까지 전부 실어야 한다.
+     */
+    setMcpServers(servers: Record<string, McpServerConfig>): Promise<{ added: string[]; removed: string[]; errors: Record<string, string> }>
   }
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -27,6 +33,7 @@ import { whichTool } from '../../env-path.js'
 import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
 import { readUsage, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
+import { appProxy, type AppProxy } from './app-proxy.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
@@ -136,6 +143,17 @@ class ClaudeSession implements SessionHandle {
   private alwaysAllow = new Set<string>()
   private reqCounter = 0
   private readonly stream: ClaudeStreamNormalizer
+  /**
+   * 붙어 있는 앱의 대리 서버 (M4 A-5) — 서버 이름 → 대리 서버와, 마지막으로 본 도구 목록.
+   * 같은 앱이 붙어 있는 동안은 같은 객체를 다시 싣는다: SDK는 이미 연결된 이름이면 새 객체를
+   * 무시하고(sdk.mjs `setMcpServers`), 다른 객체로 바꾸려면 떼었다 다시 붙여야 한다.
+   */
+  private appProxies = new Map<string, { proxy: AppProxy; tools: string }>()
+  /** 오케스트레이터의 인프로세스 서버 — 처음 넘긴 그 객체를 서버 집합을 바꿀 때마다 다시 싣는다 */
+  private orchestratorServer: ReturnType<typeof orchestratorMcp> | null = null
+  /** 서버 집합 바꾸기를 한 줄로 세운다 — 앞선 것이 끝나기 전에 뒤의 것이 끼지 않게 */
+  private serversSync: Promise<unknown> = Promise.resolve()
+  private stopAppWatch: (() => void) | null = null
 
   constructor(
     readonly sessionId: string,
@@ -149,6 +167,18 @@ class ClaudeSession implements SessionHandle {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- async generator 안에서 인스턴스 접근 필요
     const self = this
     const preset = this.opts.permissionPreset
+
+    /*
+     * 외부 앱 (M4 A-5) — 앱마다 대리 서버 하나. 지금 붙은 것을 싣고, 앱이 오고 가거나 도구가
+     * 바뀌면 세션을 다시 띄우지 않고 따라간다(syncApps).
+     */
+    for (const a of this.opts.apps?.current() ?? []) {
+      this.appProxies.set(a.server, { proxy: appProxy(this.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
+    }
+    if (this.opts.orchestratorTools) {
+      this.orchestratorServer = orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId)
+    }
+    const servers = this.mcpServers()
 
     async function* input() {
       while (!self.closed) {
@@ -184,32 +214,10 @@ class ClaudeSession implements SessionHandle {
          */
         effort: this.opts.effort as never,
         includePartialMessages: true,
-        /*
-         * 오케스트레이터에게만 도구를 준다 (FR-11).
-         * 인프로세스 MCP라 별도 프로세스가 없고, 이 도구들이 볼 수 있는 것은
-         * 매니저가 넘겨준 것뿐이다 — 이 앱이 관리하는 세션 밖으로 나갈 방법이 없다.
-         */
+        // MCP 서버 — 오케스트레이터의 도구, 사람이 승인한 서버, 붙은 외부 앱 (mcpServers() 참고)
+        ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
         ...(this.opts.orchestratorTools
           ? {
-              mcpServers: {
-                /*
-                 * 사람이 승인한 추가 MCP 서버 (propose_mcp_server 흐름). stdio로 띄운다 —
-                 * npx류 명령은 첫 실행에서 스스로 설치되므로 별도 설치 단계가 없다.
-                 *
-                 * **내장 서버보다 먼저 펼친다** (#93). 이름은 제안 시점에 막지만
-                 * (mcpServerNameError), 이 고침 전에 승인되어 저장소에 이미 앉아 있는
-                 * 항목은 그 검사를 거치지 않았다. 순서가 뒤였을 때 `centralu`라는 이름
-                 * 하나가 인프로세스 오케스트레이터를 통째로 갈아치웠다 — 이제 같은
-                 * 항목이 들어와도 내장 항목이 덮어써서, 최악이 "그 서버가 안 붙는다"다.
-                 */
-                ...Object.fromEntries(
-                  (this.opts.extraMcpServers ?? []).map((s) => [
-                    s.name,
-                    { type: 'stdio' as const, command: s.command, args: s.args },
-                  ]),
-                ),
-                [ORCHESTRATOR_MCP_NAME]: orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId),
-              },
               /*
                * **파일에서 지시를 읽지 않는다.**
                *
@@ -294,6 +302,9 @@ class ClaudeSession implements SessionHandle {
               },
       },
     }))
+
+    // 앱이 오고 가면 서버 집합을, 도구가 바뀌면 그 서버의 목록을 따라간다 — 세션을 다시 띄우지 않는다
+    this.stopAppWatch = this.opts.apps?.onChange(() => this.syncApps()) ?? null
 
     void (async () => {
       try {
@@ -412,6 +423,75 @@ class ClaudeSession implements SessionHandle {
    *
    * 실패해도 조용히 넘어간다 — 게이지가 잠깐 안 보이는 것이 대화를 막는 것보다 낫다.
    */
+  /**
+   * 이 세션의 MCP 서버 전부 — 처음 띄울 때도, 집합을 바꿀 때도 이 한 곳에서 조립한다.
+   *
+   * 펼치는 순서가 곧 이름이 겹칠 때 이기는 쪽이다:
+   *   1. 사람이 승인한 추가 서버 (오케스트레이터 전용, propose_mcp_server 흐름). stdio로 띄운다 —
+   *      npx류 명령은 첫 실행에서 스스로 설치되므로 별도 설치 단계가 없다.
+   *      **내장 서버보다 먼저 펼친다** (#93). 이름은 제안 시점에 막지만(mcpServerNameError), 이
+   *      고침 전에 승인되어 저장소에 앉은 항목은 그 검사를 거치지 않았다. 순서가 뒤였을 때
+   *      `centralu`라는 이름 하나가 인프로세스 오케스트레이터를 통째로 갈아치웠다.
+   *   2. 오케스트레이터의 도구 (FR-11) — 인프로세스라 별도 프로세스가 없고, 이 도구들이 볼 수
+   *      있는 것은 매니저가 넘겨준 것뿐이다.
+   *   3. 외부 앱의 대리 서버 (M4 A-5) — `app-<id>`. 승인된 서버가 같은 이름을 들고 와도 앱이 이긴다.
+   *
+   * 집합을 바꿀 때(`setMcpServers`) 1·2를 빼면 SDK가 그것들을 **떼어 낸다** — 그 호출은 동적으로
+   * 붙인 서버 전부를 넘긴 것으로 바꾼다. 그래서 언제나 전부를 싣는다.
+   */
+  private mcpServers(): Record<string, McpServerConfig> {
+    return {
+      ...(this.opts.orchestratorTools
+        ? Object.fromEntries(
+            (this.opts.extraMcpServers ?? []).map((s) => [s.name, { type: 'stdio' as const, command: s.command, args: s.args }]),
+          )
+        : {}),
+      ...(this.orchestratorServer ? { [ORCHESTRATOR_MCP_NAME]: this.orchestratorServer } : {}),
+      ...Object.fromEntries([...this.appProxies].map(([name, { proxy }]) => [name, proxy.config])),
+    }
+  }
+
+  /**
+   * 붙은 앱이 바뀌었다 (M4 A-5) — 재시작 없이 따라간다.
+   *
+   *   앱이 오고 감(신뢰가 뒤집힘 포함)   `setMcpServers`로 집합을 바꾼다. 새 도구는 다음 턴부터 보인다
+   *   붙은 앱의 도구가 바뀜              그 대리 서버가 `tools/list_changed`를 보낸다 — 서버는 그대로
+   */
+  private syncApps(): void {
+    const apps = this.opts.apps
+    if (!apps || this.closed) return
+    const now = apps.current()
+    const want = new Set(now.map((a) => a.server))
+    let setChanged = false
+    for (const name of [...this.appProxies.keys()]) {
+      if (want.has(name)) continue
+      this.appProxies.delete(name)
+      setChanged = true
+    }
+    for (const a of now) {
+      const tools = JSON.stringify(a.tools)
+      const held = this.appProxies.get(a.server)
+      if (!held) {
+        // 떼었다 다시 붙는 앱도 새 대리 서버로 온다 — SDK가 뗀 서버는 다시 연결할 수 없다
+        this.appProxies.set(a.server, { proxy: appProxy(apps, a.server), tools })
+        setChanged = true
+      } else if (held.tools !== tools) {
+        held.tools = tools
+        held.proxy.toolsChanged()
+      }
+    }
+    if (!setChanged || !this.query) return
+    const q = this.query
+    const servers = this.mcpServers()
+    this.serversSync = this.serversSync
+      .then(() => q.setMcpServers(servers))
+      .then((r) => {
+        const errors = Object.entries(r?.errors ?? {})
+        if (errors.length) console.error(`[claude] ${this.sessionId.slice(0, 8)} app servers failed to attach:`, errors)
+      })
+      .catch((err: Error) => console.error(`[claude] ${this.sessionId.slice(0, 8)} could not update app servers: ${err.message}`))
+  }
+
   /** 슬래시 명령 목록 (SDK 공개 API) */
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     if (!this.query) throw new Error('Session is not ready yet')
@@ -481,6 +561,9 @@ class ClaudeSession implements SessionHandle {
   async dispose(): Promise<void> {
     this.closed = true
     this.notify?.()
+    // 앱 붙이기는 핸들과 함께 닫힌다 — 새 핸들은 자기 것을 받는다
+    this.stopAppWatch?.()
+    this.opts.apps?.close()
     /*
      * 큐에 남은 메시지도 같은 규칙이다 (codex 어댑터의 compact 큐와 대칭 — 2026-09-02
      * 유실 사고 후 맞춤). generator가 closed를 보고 빠져나가면 여기 남은 건 아무도

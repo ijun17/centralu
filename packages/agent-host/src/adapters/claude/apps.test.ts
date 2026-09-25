@@ -1,0 +1,223 @@
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as kit from '../../apps/external/test-helpers.js'
+import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
+import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
+import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
+
+/**
+ * Claude 세션에 붙은 외부 앱 (M4 A-5) — 앱마다 인프로세스 대리 서버.
+ *
+ * 가짜는 `query` 하나다: CLI를 띄우지 않고 SDK에 넘긴 옵션과 `setMcpServers` 호출을 적는다.
+ * 대리 서버는 **진짜** `createSdkMcpServer`로 만들어지고, 테스트가 CLI 자리에 서서 JSON-RPC를
+ * 직접 보낸다 — 앱 쪽은 진짜 런타임과 진짜 앱 프로세스(픽스처)다. 그래서 "CLI가 부른 도구가
+ * 런타임의 한 길을 세션 호출자로 지나 기록된다"를 끝에서 끝까지 본다.
+ */
+
+type Sent = { jsonrpc: '2.0'; id?: number; method?: string; result?: Record<string, unknown>; error?: unknown }
+
+const captured = vi.hoisted(() => ({
+  options: null as Record<string, unknown> | null,
+  setCalls: [] as Record<string, unknown>[],
+}))
+
+vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
+  ...(await importActual<typeof import('@anthropic-ai/claude-agent-sdk')>()),
+  query: (args: { options: Record<string, unknown> }) => {
+    captured.options = args.options
+    return {
+      // eslint-disable-next-line require-yield -- 옵션과 서버 집합만 보면 되므로 스트림은 조용하다
+      async *[Symbol.asyncIterator]() {
+        await new Promise<void>(() => {})
+      },
+      interrupt: async () => {},
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+      setMcpServers: async (servers: Record<string, unknown>) => {
+        captured.setCalls.push(servers)
+        return { added: [], removed: [], errors: {} }
+      },
+    }
+  },
+}))
+
+const { ClaudeAdapter } = await import('./index.js')
+
+let w: AttachWorld
+let hub: SessionAppsHub
+let handle: SessionHandle | null = null
+
+const WORKER: AppSessionKey = { id: 'claude-s1', kind: 'worker', projectId: 'p1' }
+const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { type?: string; name?: string; instance?: unknown }>
+
+async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
+  handle = await new ClaudeAdapter().createSession(
+    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', apps: hub.attach(key), ...over },
+    () => {},
+  )
+  return handle
+}
+
+/** 대리 서버에 CLI처럼 붙는다 — SDK의 v1 서버가 받는 전송의 모양 그대로 */
+async function connect(server: string) {
+  const sent: Sent[] = []
+  const pipe = {
+    onmessage: undefined as ((m: unknown) => void) | undefined,
+    onclose: undefined as (() => void) | undefined,
+    onerror: undefined as ((e: Error) => void) | undefined,
+    async start() {},
+    async send(m: Sent) {
+      sent.push(m)
+    },
+    async close() {},
+  }
+  const cfg = servers()[server] as { instance: { connect(t: unknown): Promise<void> } }
+  await cfg.instance.connect(pipe)
+  let id = 0
+  const request = async (method: string, params: Record<string, unknown> = {}) => {
+    const my = ++id
+    pipe.onmessage!({ jsonrpc: '2.0', id: my, method, params })
+    const res = await kit.until(() => sent.find((m) => m.id === my), (m) => m !== undefined, 15_000)
+    if (res!.error) throw new Error(JSON.stringify(res!.error))
+    return res!.result!
+  }
+  await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-cli', version: '0' } })
+  pipe.onmessage!({ jsonrpc: '2.0', method: 'notifications/initialized' })
+  return { request, sent }
+}
+
+beforeEach(() => {
+  captured.options = null
+  captured.setCalls = []
+  w = attachWorld(kit)
+  w.plant('p1', 'notes')
+  w.plant('p1', 'tasks')
+  w.plant('user', 'helper')
+  w.rt.refresh()
+  hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000 })
+})
+
+afterEach(async () => {
+  await handle?.dispose()
+  handle = null
+  hub.dispose()
+  await w.dispose()
+})
+
+describe('앱마다 인프로세스 대리 서버', () => {
+  it('붙은 앱마다 app-<id> 서버가 실리고, 일반 워커는 여전히 사용자 설정을 읽는다', async () => {
+    await start(WORKER)
+    expect(Object.keys(servers()).sort()).toEqual(['app-notes', 'app-tasks'])
+    expect(servers()['app-notes']).toMatchObject({ type: 'sdk', name: 'app-notes' })
+    // 오케스트레이터만 파일의 지시를 닫는다 — 앱이 붙었다고 워커의 설정 로드가 바뀌지 않는다
+    expect(captured.options).not.toHaveProperty('settingSources')
+  })
+
+  it('CLI의 tools/list는 에이전트 도구만 받는다 — 설명·주석·스키마는 앱이 말한 그대로', async () => {
+    await start(WORKER)
+    const { request } = await connect('app-notes')
+    const { tools } = (await request('tools/list')) as { tools: Record<string, unknown>[] }
+    const names = tools.map((t) => t.name)
+    expect(names).not.toContain('app_only')
+    expect(names).toEqual(expect.arrayContaining(['echo', 'peek', 'poke']))
+    expect(tools.find((t) => t.name === 'peek')).toMatchObject({
+      title: 'Peek',
+      description: 'Reads the value without changing anything',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    })
+    expect(tools.find((t) => t.name === 'poke')?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: { to: { type: 'number', description: 'the new value' } },
+      required: ['to'],
+    })
+  })
+
+  it('CLI의 tools/call은 런타임의 한 길을 세션 호출자로 지나 기록된다', async () => {
+    await start(WORKER)
+    const { request } = await connect('app-notes')
+    const out = await request('tools/call', { name: 'poke', arguments: { to: 7 } })
+    expect(out).toMatchObject({ content: [{ type: 'text', text: 'poked 7' }], isError: false })
+
+    const runs = w.rt.runs({ projectId: 'p1', appId: 'notes' })
+    expect(runs.map((r) => [r.tool, r.callerKind, r.callerSessionId, r.status])).toEqual([['poke', 'session', 'claude-s1', 'ok']])
+
+    // 화면 전용 도구는 이름을 알아도 거절된다 — 거절도 한 줄이다
+    const refused = await request('tools/call', { name: 'app_only', arguments: {} })
+    expect(refused).toMatchObject({ isError: true })
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })[0]).toMatchObject({ tool: 'app_only', status: 'rejected', callerKind: 'session' })
+  })
+})
+
+describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
+  const last = () => captured.setCalls.at(-1) ?? null
+
+  it('앱이 생기면 새 집합으로 setMcpServers를 부른다 — 이미 붙은 서버는 같은 객체로', async () => {
+    await start(WORKER)
+    const notes = servers()['app-notes']
+    w.plant('p1', 'fresh')
+    await kit.until(() => last(), (s) => s !== null && 'app-fresh' in s)
+    expect(Object.keys(last()!).sort()).toEqual(['app-fresh', 'app-notes', 'app-tasks'])
+    // 같은 객체여야 SDK가 연결을 그대로 둔다 — 새 객체면 무시되거나(같은 이름) 끊겼다 다시 붙는다
+    expect(last()!['app-notes']).toBe(notes)
+  })
+
+  it('앱이 사라지면 그 서버를 뺀 집합으로 부른다', async () => {
+    await start(WORKER)
+    rmSync(join(w.roots.p1, '.centralu', 'apps', 'tasks'), { recursive: true, force: true })
+    await kit.until(() => last(), (s) => s !== null)
+    expect(Object.keys(last()!)).toEqual(['app-notes'])
+  })
+
+  it('신뢰가 뒤집히면 앱이 모두 떨어지고, 되돌리면 새 대리 서버로 다시 붙는다', async () => {
+    await start(WORKER)
+    const before = servers()['app-notes']
+    w.trust.p1 = false
+    w.rt.refresh()
+    await kit.until(() => captured.setCalls.length, (n) => n === 1)
+    expect(last()).toEqual({})
+
+    w.trust.p1 = true
+    w.rt.refresh()
+    await kit.until(() => captured.setCalls.length, (n) => n === 2)
+    expect(Object.keys(last()!).sort()).toEqual(['app-notes', 'app-tasks'])
+    // SDK가 뗀 서버는 다시 연결할 수 없다 — 다시 붙는 앱은 새 객체다
+    expect(last()!['app-notes']).not.toBe(before)
+  })
+
+  it('오케스트레이터의 집합 바꾸기에는 centralu와 승인된 서버가 처음 그대로 함께 실린다', async () => {
+    const tools = {} as OrchestratorTools
+    await start({ id: 'orch-1', kind: 'orchestrator', projectId: null }, {
+      orchestratorTools: tools,
+      toolProfile: 'orchestrator',
+      extraMcpServers: [{ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] }],
+    })
+    const centralu = servers()['centralu']
+    expect(Object.keys(servers()).sort()).toEqual(['app-helper', 'centralu', 'playwright'])
+
+    w.plant('user', 'second')
+    await kit.until(() => last(), (s) => s !== null && 'app-second' in s)
+    expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu', 'playwright'])
+    // 빠뜨리면 SDK가 오케스트레이터 서버를 떼어 낸다 — 같은 객체가 그대로 실려야 한다
+    expect(last()!['centralu']).toBe(centralu)
+  })
+
+  it('붙은 앱의 도구만 바뀌면 서버를 갈지 않고 tools/list_changed를 보낸다', async () => {
+    const extra = join(w.root, 'extra.json')
+    w.plant('p1', 'grows', ['--mode', 'attach', '--extra-from', extra])
+    w.rt.refresh()
+    await start(WORKER)
+    const { request, sent } = await connect('app-grows')
+    await request('tools/list')
+
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(extra, JSON.stringify(['added_later']))
+    await w.rt.restart({ projectId: 'p1', appId: 'grows' })
+    await w.rt.tools({ projectId: 'p1', appId: 'grows' }, 'model')
+
+    await kit.until(() => sent.filter((m) => m.method === 'notifications/tools/list_changed').length, (n) => n > 0)
+    expect(captured.setCalls).toEqual([])
+    const { tools } = (await request('tools/list')) as { tools: { name: string }[] }
+    expect(tools.map((t) => t.name)).toContain('added_later')
+  })
+})
