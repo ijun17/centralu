@@ -141,6 +141,9 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'approvals.deleteRule': { id: 999999 },
   // 보내기만 하고 응답 형태만 본다 (턴 완주는 smoke.mjs가 한다)
   'agents.send': { sessionId: S, text: 'hi' },
+  // 없는 앱에도 답한다 — 만드는 세션은 null, 오류 묶음은 빈 목록 (M4 C-2·C-6)
+  'apps.builder': { appId: 'no-such-app', projectId: P },
+  'apps.errors': { appId: 'no-such-app', projectId: P },
 }
 
 /** 부를 수 없는 것과 그 이유 — 조용히 빼면 "다 봤다"로 읽힌다 */
@@ -159,6 +162,9 @@ const SKIP: Record<string, string> = {
   'apps.remove': '파괴적 — 사용자 폴더 앱을 옮겨 버린다 (sessions/mcp-apps.test.ts가 관통)',
   'apps.openView': '신뢰한 프로젝트에 home이 있는 외부 앱이 필요 (app-home-view.test.ts가 진짜 앱으로 관통)',
   'apps.closeView': 'apps.openView가 연 인스턴스가 필요 — 같은 시험이 관통',
+  'apps.create': '앱 폴더와 만드는 세션(진짜 에이전트)을 만든다 (sessions/create-app.test.ts·app-builder.test.ts가 관통)',
+  'apps.createBuilder': '만드는 세션(진짜 에이전트)을 띄운다 — apps.create와 같은 이유',
+  'apps.check': '앱을 실제로 띄운다 — 템플릿 앱이 필요 (apps/external/check.test.ts가 관통)',
 }
 
 const ok: string[] = []
