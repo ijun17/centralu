@@ -1781,6 +1781,11 @@ export class Store {
       .run(key, value)
   }
 
+  /** 설정을 지운다 — 다시 읽으면 "한 번도 쓴 적 없음"(null)이다. 다 옮긴 옛 키를 걷는 자리 (M4 A-7) */
+  deleteAppSetting(key: string): void {
+    this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)
+  }
+
   addApprovalRule(r: {
     scope: string
     projectId?: string

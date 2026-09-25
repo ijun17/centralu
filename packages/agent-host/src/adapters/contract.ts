@@ -272,13 +272,12 @@ export type CreateSessionOpts = {
    * 이 세션에 붙는 외부 앱 (M4 A-5). 내장 앱 도구(`orchestratorTools`)와는 따로다 — 일반
    * 워커도 받는다(결정 4는 외부 앱에 한해 #81의 "워커에게는 도구가 없다"를 바꾼다).
    */
-  apps?: SessionApps
-  /**
-   * 사람이 승인한 추가 MCP 서버 (오케스트레이터 전용). propose_mcp_server →
-   * 승인 → 재시작의 결과가 여기로 온다. 어댑터는 이 목록을 자기 MCP 설정에
-   * 그대로 병기한다 — 등록은 앱이, 실행 여부는 이 목록이 전부다.
+  /*
+   * 사람이 승인한 MCP 서버(propose_mcp_server)는 여기 따로 오지 않는다 — 사용자 폴더의 앱이 되어 `apps`로
+   * 온다(M4 A-7). 예전의 `extraMcpServers`는 그 서버를 어댑터 설정에 날것으로 실어서, 호출이 중개도
+   * 기록도 지나지 않았다.
    */
-  extraMcpServers?: { name: string; command: string; args: string[] }[]
+  apps?: SessionApps
   /**
    * 받는 도구 묶음 (#69). 'orchestrator'는 전부, 'manager'는 워크트리 매니저의
    * 부분집합(제안·조회·지시)이다. orchestratorTools가 있을 때만 뜻이 있다.

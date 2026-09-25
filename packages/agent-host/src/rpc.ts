@@ -291,6 +291,11 @@ export function createRpcHandler(
       await requireExternalApps().restart({ appId, projectId })
       return { ok: true as const }
     },
+    'apps.remove': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.remove'].params.parse(p)
+      requireExternalApps().removeUserApp({ appId, projectId })
+      return { ok: true as const }
+    },
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
       // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)

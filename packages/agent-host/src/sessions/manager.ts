@@ -200,9 +200,16 @@ function payloadText(payload: unknown): string {
   return typeof text === 'string' ? text : String(text ?? '')
 }
 
-/** 오케스트레이터 MCP 제안/승인 목록이 사는 app_setting 키 (propose_mcp_server 흐름) */
+/** 앱 설명 한 칸 — 매니페스트의 상한(2000자) 안에서, 명령이 길어도 앱이 틀린 앱이 되지 않게 */
+const clampLine = (text: string): string => (text.length > 500 ? `${text.slice(0, 499)}…` : text)
+
+/** 오케스트레이터 MCP 제안 목록이 사는 app_setting 키 (propose_mcp_server 흐름) */
 const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
-const MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
+/**
+ * 승인된 MCP 서버의 **옛** 명부 (M4 A-7 이전). 지금 승인된 서버는 사용자 폴더의 앱이고, 이 키는 옮기기
+ * (migrateApprovedMcpServers)만 읽는다 — 어댑터에 실리지 않는다.
+ */
+const LEGACY_MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
 
 /** 오케스트레이터 스킬 (#71) — 파일이 아니라 DB에 산다 (워커는 파일은 쓰지만 DB는 못 쓴다) */
 const SKILL_PROPOSALS_KEY = 'orchestrator_skill_proposals'
@@ -1147,8 +1154,7 @@ export class SessionManager {
           // host로 돌아오는 길 — 오케스트레이터 도구의 다리와, 외부 앱의 다리(M4 A-5)가 쓴다
           orchestratorBridge:
             info.kind === 'orchestrator' || info.kind === 'coordinator' || apps ? (this.endpoint?.() ?? undefined) : undefined,
-          // 사람이 승인한 MCP 서버 (propose_mcp_server → 승인 → 재시작의 결과가 여기서 실린다)
-          extraMcpServers: info.kind === 'orchestrator' ? this.mcpServers() : undefined,
+          // 사람이 승인한 MCP 서버는 사용자 폴더의 앱으로 여기 실린다 (M4 A-7, 결정 4)
           apps,
         },
         (e) => this.onEvent(e),
@@ -1622,8 +1628,7 @@ export class SessionManager {
             m.kind === 'orchestrator' || m.kind === 'coordinator' || this.isWorktreeManager(sessionId) || apps
               ? (this.endpoint?.() ?? undefined)
               : undefined,
-          // 승인된 MCP 서버는 재시작(=이 길)에서 실려야 "승인 → 재시작 → 바로 사용"이 성립한다
-          extraMcpServers: m.kind === 'orchestrator' ? this.mcpServers() : undefined,
+          // 승인된 MCP 서버는 사용자 폴더의 앱이다 — 오케스트레이터는 그 앱들을 여기서 받는다 (M4 A-7)
           apps,
         },
         (e) => this.onEvent(e),
@@ -3333,8 +3338,14 @@ export class SessionManager {
          */
         const nameError = proposedMcpServerNameError(spec.name)
         if (nameError) return { ok: false, error: nameError }
-        const installed = this.mcpServers().some((s) => s.name === spec.name)
-        if (installed) return { ok: false, error: `"${spec.name}"은 이미 설치되어 있습니다` }
+        /*
+         * 승인되면 사용자 폴더의 앱 `<name>`이 된다 (M4 A-7). 그래서 이름은 앱 id와 같은 칸을 쓴다 —
+         * 내장 앱의 id도, 이미 있는 사용자 앱의 id도 가져갈 수 없다. 덮어쓰기가 곧 명령 바꿔치기다.
+         */
+        if (HOST_APPS.some((a) => a.id === spec.name)) {
+          return { ok: false, error: `"${spec.name}"은 내장 앱의 이름입니다 — 다른 이름으로 제안하세요` }
+        }
+        if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}"은 이미 설치되어 있습니다` }
         const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
         proposals.push({ name: spec.name, command: spec.command, args: spec.args, why: spec.why })
         this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
@@ -3374,14 +3385,66 @@ export class SessionManager {
     }
   }
 
-  /** 승인되어 오케스트레이터에 붙는 MCP 서버들 */
-  mcpServers(): { name: string; command: string; args: string[] }[] {
+  /** 사용자 폴더에 이 id의 앱이 있나 — 승인된 MCP 서버의 자리다 (틀린 매니페스트도 자리는 차지한다) */
+  private userAppExists(id: string): boolean {
+    return !!this.appsHub?.rt.list().some((a) => a.projectId === null && a.appId === id)
+  }
+
+  /**
+   * 옛 명부의 승인된 MCP 서버 (M4 A-7 이전) — 옮기기만 읽는다.
+   * 모양이 틀린 항목은 여기서 걸러진다: 무엇을 띄울지 모르는 항목은 옮길 것이 없다.
+   */
+  private legacyMcpServers(): { name: string; command: string; args: string[] }[] {
     try {
-      const raw = this.store.appSetting(MCP_SERVERS_KEY)
-      return raw ? (JSON.parse(raw) as ReturnType<SessionManager['mcpServers']>) : []
+      const raw = this.store.appSetting(LEGACY_MCP_SERVERS_KEY)
+      const list = raw ? (JSON.parse(raw) as unknown) : []
+      if (!Array.isArray(list)) return []
+      return list.filter(
+        (x): x is { name: string; command: string; args: string[] } =>
+          !!x && typeof x.name === 'string' && typeof x.command === 'string' && Array.isArray(x.args) && x.args.every((a: unknown) => typeof a === 'string'),
+      )
     } catch {
       return []
     }
+  }
+
+  /**
+   * 예전에 승인된 MCP 서버를 사용자 폴더 앱으로 옮긴다 (M4 A-7) — 런타임을 받을 때(기동) 한 번 돈다.
+   *
+   * **몇 번 돌아도 같다.** 항목마다 `installUserApp`을 부르고, 그 함수는 같은 서버의 앱이 이미 있으면
+   * 그대로 돌려준다 — 옮기다 끊겨 다음 기동에 다시 돌아도 앱이 둘 생기지 않고, 이미 옮긴 앱을 다시 쓰지
+   * 않는다.
+   *
+   * **옛 키는 옮기기에 성공한 항목만 걷는다.** 옮기지 못한 항목은 키에 남고, 기동할 때마다 다시 시도하며
+   * 이유를 로그에 남긴다. 그런 항목은 둘이다: 이름이 앱 id가 될 수 없는 것(#93 이전에 승인된 `centralu`
+   * 같은 것 — 그 이름은 어차피 내장 서버에 가려 한 번도 돌지 못했다), 같은 id의 다른 앱이 이미 있는 것
+   * (사람이 만든 앱을 덮어쓰지 않는다). 남은 항목은 어디에도 실리지 않는다 — 어댑터는 이 키를 더 읽지
+   * 않는다. 다 옮기면 키를 지운다.
+   */
+  private migrateApprovedMcpServers(rt: ExternalApps): void {
+    const legacy = this.legacyMcpServers()
+    if (legacy.length === 0) {
+      if (this.store.appSetting(LEGACY_MCP_SERVERS_KEY) !== null) this.store.deleteAppSetting(LEGACY_MCP_SERVERS_KEY)
+      return
+    }
+    const left: typeof legacy = []
+    for (const s of legacy) {
+      try {
+        rt.installUserApp({
+          id: s.name,
+          name: s.name,
+          description: clampLine(`예전에 승인된 MCP 서버 (propose_mcp_server): ${[s.command, ...s.args].join(' ')}`),
+          server: { command: s.command, args: s.args },
+        })
+      } catch (err) {
+        left.push(s)
+        console.error(`[apps] approved MCP server "${s.name}" was not moved into an app: ${(err as Error).message}`)
+      }
+    }
+    if (left.length === 0) this.store.deleteAppSetting(LEGACY_MCP_SERVERS_KEY)
+    else this.store.setAppSetting(LEGACY_MCP_SERVERS_KEY, JSON.stringify(left))
+    const moved = legacy.length - left.length
+    if (moved > 0) console.error(`[apps] ${moved} approved MCP server(s) moved into user-folder apps`)
   }
 
   /** 사람의 승인을 기다리는 스킬 제안들 (#71) */
@@ -3451,19 +3514,41 @@ export class SessionManager {
 
   /**
    * 제안에 대한 사람의 답 (도그푸딩 요청 b안 — 제안 → 원클릭 승인 → 앱이 설치+재시작).
-   * 승인이면 서버 목록에 올리고 **오케스트레이터를 재시작한다** — 재시작은 resume이라
-   * 대화는 이어지고, 다음 기동의 어댑터 설정에 서버가 실려 도구가 바로 보인다.
+   *
+   * 승인이면 그 서버를 **사용자 폴더의 화면 없는 앱**으로 만든다 (M4 A-7, 결정 8). 앱이 되면 호출이
+   * 중개(공개 범위·실행 기록)를 지나고, 처음 필요할 때 뜨고 쉬면 내려가고, 목록에서 지울 수 있다
+   * (`apps.remove`). 사용자 폴더 앱은 오케스트레이터에 붙는다(결정 4) — 예전에 승인된 서버가 붙던 자리다.
+   * 세션에서 서버 이름은 `app-<name>`이다.
+   *
+   * 그리고 **오케스트레이터를 재시작한다** — 재시작은 resume이라 대화는 이어진다. Claude는 재시작 없이도
+   * 서버 집합이 바뀌지만(setMcpServers), Codex는 스레드를 새로 띄울 때만 서버를 받는다. 승인한 사람이
+   * 기다리는 것은 "이제 쓸 수 있음"이라 도구와 무관하게 같은 길로 간다.
+   *
+   * 앱을 만들지 못하면 제안을 남긴다 — 사람이 이유를 보고 거절할 수 있다.
    */
   async resolveMcpProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
     const proposals = this.mcpProposals()
     const hit = proposals.find((p) => p.name === name)
     if (!hit) return { ok: false, error: `No pending proposal named "${name}"` }
-    this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
-    if (!approve) return { ok: true }
+    const dropProposal = () => this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+    if (!approve) {
+      dropProposal()
+      return { ok: true }
+    }
 
-    const servers = this.mcpServers().filter((s) => s.name !== name)
-    servers.push({ name: hit.name, command: hit.command, args: hit.args })
-    this.store.setAppSetting(MCP_SERVERS_KEY, JSON.stringify(servers))
+    const rt = this.appsHub?.rt
+    if (!rt) return { ok: false, error: 'External apps are unavailable — the approved server has nowhere to run' }
+    try {
+      rt.installUserApp({
+        id: hit.name,
+        name: hit.name,
+        description: clampLine(hit.why?.trim() || `사람이 승인한 MCP 서버 (propose_mcp_server): ${[hit.command, ...hit.args].join(' ')}`),
+        server: { command: hit.command, args: hit.args },
+      })
+    } catch (err) {
+      return { ok: false, error: `Could not install "${name}" as an app: ${(err as Error).message}` }
+    }
+    dropProposal()
 
     // 도는 중이어도 갈아 끼운다 — 승인한 사람이 기다리는 것은 "이제 쓸 수 있음"이다
     await this.restartOrchestrator()
@@ -3608,6 +3693,8 @@ export class SessionManager {
   useExternalApps(rt: ExternalApps): void {
     this.appsHub?.dispose()
     this.appsHub = new SessionAppsHub(rt)
+    // 예전에 승인된 MCP 서버를 앱으로 옮긴다 (A-7) — 세션이 뜨기 전이라, 오케스트레이터가 처음부터 받는다
+    this.migrateApprovedMcpServers(rt)
   }
 
   /**

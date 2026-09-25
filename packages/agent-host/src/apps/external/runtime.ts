@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { ExternalAppInfo } from '@cc/protocol'
@@ -7,7 +7,7 @@ import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, type SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
 import { PROJECT_APPS_REL, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
-import { toolNameError, type AppManifest } from './manifest.js'
+import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
 import { SecretStore, redactor } from './secrets.js'
 import { visibilityOf, type Audience } from './visibility.js'
@@ -508,6 +508,100 @@ export class ExternalApps {
     Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
     // 멈췄던 앱은 세션에서 떨어져 있었다 — 다시 붙을 수 있게 알린다
     if (wasStopped) this.appsChanged()
+  }
+
+  /**
+   * 사용자 폴더에 화면 없는 앱을 하나 만든다 (M4 A-7, 결정 8) — 사람이 승인한 MCP 서버가 앱이 되는 자리.
+   *
+   * 승인한 서버가 따로 된 명부(app_settings)에 살면 승인 흐름도 붙이는 길도 둘이 된다. 그 서버의 호출은
+   * 중개를 지나지 않았고, 기록되지 않았고, 목록에서 지울 수도 없었다. 앱이 되면 다른 앱과 같은 한 길
+   * (공개 범위·실행 기록·처음 필요할 때 띄우기·쉬면 내리기)을 탄다. 사용자 폴더 앱이라 오케스트레이터에
+   * 붙는다(결정 4 — 예전에 승인된 서버가 붙던 자리와 같다).
+   *
+   * 판정은 발견과 같은 한 벌이다: 매니페스트를 만들어 `parseManifest`에 읽혀 본 뒤에 쓴다(id 규칙 #93도
+   * 거기 있다). 내장 앱의 id는 가져갈 수 없다. **같은 id의 앱이 이미 있으면** — 같은 서버면 그 앱을
+   * 그대로 돌려주고(다시 불러도 같다: 옮기기가 중간에 끊겼다 다시 돌 때), 다르면 거절한다(사람이 만든
+   * 앱을 덮어쓰지 않는다).
+   *
+   * 쓰는 방법: 점으로 시작하는 임시 폴더(발견이 건너뛴다)에 쓰고 이름을 바꾼다 — 반쯤 쓴 매니페스트를
+   * 발견이 "틀린 앱"으로 읽는 순간이 없다. 쓴 뒤 바로 다시 훑는다: 사용자 쪽은 `apps/`가 없을 때 아무것도
+   * 감시하지 않으므로(데이터 폴더 자체를 보면 store.db가 쓰일 때마다 깨어난다) 첫 앱은 감시가 못 본다.
+   * **띄우지는 않는다** — 처음 필요할 때 뜬다.
+   */
+  installUserApp(spec: { id: string; name: string; description: string; server: { command: string; args: string[] } }): ExternalAppInfo {
+    if (this.disposed) throw new AppUnavailableError('앱 런타임이 내려갔습니다')
+    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}"는 내장 앱의 이름입니다 — 다른 이름을 쓰세요`)
+    const text = JSON.stringify(
+      {
+        manifestVersion: MANIFEST_VERSION,
+        id: spec.id,
+        name: spec.name,
+        version: '1.0.0',
+        description: spec.description,
+        server: { command: spec.server.command, args: spec.server.args },
+      },
+      null,
+      2,
+    )
+    const parsed = parseManifest(text)
+    if (!parsed.ok) throw new AppUnavailableError(`앱으로 만들 수 없습니다 — ${parsed.error}`)
+
+    this.rescanUser()
+    const ref: AppRef = { projectId: null, appId: spec.id }
+    const parent = join(this.deps.dataRoot, USER_APPS_REL)
+    const dir = join(parent, spec.id)
+    const held = this.find(ref)
+    if (held || existsSync(dir)) {
+      const same =
+        held?.manifest?.server.command === spec.server.command &&
+        JSON.stringify(held.manifest.server.args) === JSON.stringify(spec.server.args)
+      if (held && same) return this.info(held)
+      throw new AppUnavailableError(`사용자 폴더에 "${spec.id}" 앱이 이미 있습니다 — 다른 이름을 쓰거나 그 앱을 먼저 지우세요`)
+    }
+
+    mkdirSync(parent, { recursive: true })
+    const staging = join(parent, `.${spec.id}.${randomUUID()}`)
+    mkdirSync(staging)
+    try {
+      writeFileSync(join(staging, MANIFEST_FILE), text + '\n')
+      renameSync(staging, dir)
+    } catch (err) {
+      rmSync(staging, { recursive: true, force: true })
+      throw new AppUnavailableError(`앱 폴더를 쓰지 못했습니다: ${(err as Error).message}`)
+    }
+    this.rescanUser()
+    const made = this.find(ref)
+    if (!made) throw new AppUnavailableError(`앱 폴더를 썼지만 발견되지 않았습니다: ${dir}`)
+    return this.info(made)
+  }
+
+  /**
+   * 사용자 폴더의 앱을 지운다 (M4 A-7) — 승인한 MCP 서버를 목록에서 거두는 길이다(예전 명부에는 없었다).
+   *
+   * 폴더는 버리지 않고 데이터 폴더의 `app-trash/`로 옮긴다: 손으로 만든 앱일 수도 있고, 되돌릴 길이 있는
+   * 편이 낫다. 실행 기록·데이터 폴더·비밀은 남는다(기록은 지운 앱의 것도 읽힌다 — `runs`).
+   * **프로젝트 앱은 지우지 않는다** — 저장소의 파일이라 거두는 자리는 git이다.
+   *
+   * 옮긴 뒤 바로 다시 훑는다: 떠 있던 프로세스가 내려가고, 붙어 있던 세션이 떼어 낸다(appsChanged).
+   * Claude 세션은 재시작 없이 서버 집합에서 빠지고, Codex 스레드는 다음 스레드까지 도구 이름이 남지만
+   * 부르면 "붙은 앱이 아니다"로 거절된다(세션 붙이기가 부를 때마다 다시 본다).
+   */
+  removeUserApp(ref: AppRef): void {
+    if (ref.projectId !== null) {
+      throw new AppUnavailableError('프로젝트 앱은 저장소의 파일입니다 — 저장소에서 지우세요')
+    }
+    this.rescanUser()
+    const e = this.require(ref)
+    const trash = join(this.deps.dataRoot, 'app-trash')
+    mkdirSync(trash, { recursive: true })
+    renameSync(e.dir, join(trash, `${ref.appId}-${Date.now()}`))
+    this.rescanUser()
+  }
+
+  /** 사용자 폴더를 지금 다시 훑는다 — 한 번도 훑지 않았으면(기동 전) 전부 훑는다 */
+  private rescanUser(): void {
+    if (this.scopes.has(USER_SCOPE)) this.rescan(USER_SCOPE)
+    else this.refresh()
   }
 
   /** 비밀 값을 적는다(`null`이면 지운다). 떠 있는 앱은 다음 기동부터 받는다 */

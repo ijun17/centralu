@@ -160,8 +160,8 @@ export const ORCHESTRATOR_TOOLS = [
     name: 'propose_mcp_server',
     description:
       'MCP 서버 설치를 **사람에게 제안한다** — 브라우저 자동화(Playwright) 같은 능력이 필요할 때. ' +
-      '이 도구는 아무것도 설치하지 않는다 (propose 규칙). 사람이 승인하면 앱이 서버를 등록하고 ' +
-      '이 세션을 재시작한다 — 재시작 후 도구가 바로 보인다.',
+      '이 도구는 아무것도 설치하지 않는다 (propose 규칙). 사람이 승인하면 그 서버가 사용자 폴더의 앱이 되고 ' +
+      '이 세션을 재시작한다 — 재시작 후 도구가 `app-<name>` 서버 아래에 보인다.',
     schema: z.object({
       /*
        * 글자 규칙은 여기 적어 두기만 한다 — 판정은 mcpServerNameError 한 곳이다 (#93).
@@ -420,7 +420,7 @@ export async function runOrchestratorTool(
     return {
       text:
         `"${spec.name}" MCP 서버를 제안했습니다. 화면에 승인 카드가 떴고, 사람이 승인하면 ` +
-        '앱이 서버를 등록하고 이 세션을 재시작합니다 — 재시작하면 대화는 이어지고 새 도구가 보입니다. ' +
+        `그 서버가 사용자 폴더의 앱이 되고 이 세션을 재시작합니다 — 재시작하면 대화는 이어지고 새 도구가 app-${spec.name} 서버 아래에 보입니다. ` +
         '승인 전까지는 설치되지 않습니다.',
     }
   }
