@@ -82,6 +82,9 @@ type Waiter = { server: string; tool: string; args: string; resolve: (callId: st
  * 부르는 순간에 알린다(결말을 기다리지 않는다). 화면은 호출이 시작될 때 tool-input을, 끝날 때
  * tool-result를 받는다 — 규격의 순서가 곧 이 두 약속의 순서다.
  */
+/** 세션의 앱 호출이 보낸 진행의 말 — 어느 대화의 어느 카드인지와 그 한 줄 */
+export type SessionAppProgress = { sessionId: string; callId: string; message: string }
+
 export type SessionAppCall = {
   sessionId: string
   ref: AppRef
@@ -112,6 +115,7 @@ export class SessionAppsHub {
   readonly detached = new Map<string, Detached>()
   private stopListening: () => void
   private callListeners = new Set<(c: SessionAppCall) => void>()
+  private progressListeners = new Set<(p: SessionAppProgress) => void>()
   private goneListeners = new Set<(sessionId: string) => void>()
 
   constructor(
@@ -148,6 +152,26 @@ export class SessionAppsHub {
   onCall(listener: (c: SessionAppCall) => void): () => void {
     this.callListeners.add(listener)
     return () => void this.callListeners.delete(listener)
+  }
+
+  /**
+   * 세션의 앱 호출이 보낸 진행의 말을 듣는다 (M4 D) — 앱이 중개에서 받은 "사람을 기다린다" 같은 한 줄. 매니저가 그 세션의 도구 카드에
+   * 실행 중 출력으로 붙인다. 이 층은 대화를 모른다 — 알리기만 한다.
+   */
+  onCallProgress(listener: (p: SessionAppProgress) => void): () => void {
+    this.progressListeners.add(listener)
+    return () => void this.progressListeners.delete(listener)
+  }
+
+  /** @internal 붙이기가 진행의 말 하나를 알린다 */
+  progress(p: SessionAppProgress): void {
+    for (const l of [...this.progressListeners]) {
+      try {
+        l(p)
+      } catch (err) {
+        console.error(`[apps] session-call progress listener failed:`, err)
+      }
+    }
   }
 
   /** 세션이 **지워졌다** (잠든 것과 다르다 — 잠든 세션은 다시 깬다). 그 세션의 화면을 걷는 신호다 */
@@ -330,8 +354,16 @@ class Attachment implements SessionApps {
     this.inflight.add(abort)
 
     let runId: string | null = null
+    /** 이 호출의 대화 카드 — 아래에서 짝짓는다. 진행의 말은 호출이 앱에 간 뒤에 오므로 그때는 서 있다 */
+    let card: Promise<string | null> | null = null
+    const sessionId = this.session.id
+    const onProgress = (message: string) =>
+      void card?.then((callId) => {
+        // 카드가 없는 호출(Claude 서브에이전트의 호출 등)은 붙일 자리가 없다 — 호출 자체는 그대로 돈다
+        if (callId) this.hub.progress({ sessionId, callId, message })
+      })
     const pending = this.hub.rt
-      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id) })
+      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress })
       // 앱이 부르는 사이에 사라졌다(폴더가 지워짐) — 던지지 않고 실패한 호출로 돌려준다
       .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
       .finally(() => {
@@ -345,7 +377,7 @@ class Attachment implements SessionApps {
       server,
       tool,
       args,
-      callId: this.joinCall(server, tool, args, opts.callId),
+      callId: (card = this.joinCall(server, tool, args, opts.callId)),
       outcome: pending,
     })
     if (!opts.waitMs) return toResult(await pending)

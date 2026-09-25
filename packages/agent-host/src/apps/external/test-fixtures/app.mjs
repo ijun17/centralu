@@ -162,9 +162,11 @@ serveStdio(() => {
           tool: z.string().optional(),
           args: z.record(z.string(), z.unknown()).optional(),
           timeoutMs: z.number().optional(),
+          // 중개가 보낸 진행의 말을 이 호출로 올려 보낸다 — 템플릿의 도우미(`centralu.agent`)가 하는 일
+          relay: z.boolean().optional(),
         }),
       },
-      async ({ mode, runId, tool, args: given, timeoutMs }, ctx) => {
+      async ({ mode, runId, tool, args: given, timeoutMs, relay }, ctx) => {
         const own = ctx.mcpReq._meta?.[RUN_META]
         const meta = mode === 'none' ? {} : { [RUN_META]: mode === 'given' ? runId : own }
         const c = await broker()
@@ -177,13 +179,21 @@ serveStdio(() => {
           return say('detached')
         }
         const args = given ?? { run_agent: { prompt: 'summarize this' }, call_app: { app: 'other', tool: 'echo' }, host_data: { name: 'sessions.list' } }[name]
+        const upToken = ctx.mcpReq._meta?.progressToken
+        let beats = 0
+        const up = (p) => {
+          if (!relay || upToken === undefined || !p.message) return
+          void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: upToken, progress: ++beats, message: p.message } }).catch(() => {})
+        }
         const r = await c.callTool(
           { name, arguments: args, _meta: meta },
           {
             ...(mode === 'run' ? { signal: ctx.mcpReq.signal } : {}),
             ...(timeoutMs
-              ? { timeout: timeoutMs, resetTimeoutOnProgress: true, onprogress: (p) => log({ t: 'broker-progress', message: p.message ?? null }) }
-              : {}),
+              ? { timeout: timeoutMs, resetTimeoutOnProgress: true, onprogress: (p) => (log({ t: 'broker-progress', message: p.message ?? null }), up(p)) }
+              : relay
+                ? { onprogress: up }
+                : {}),
           },
         )
         const text = r.content?.map((x) => x.text).join(' ') ?? ''

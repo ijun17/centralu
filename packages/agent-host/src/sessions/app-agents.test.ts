@@ -153,6 +153,34 @@ describe('run_agent — 부탁마다 새 세션, 그 앱의 것으로', () => {
    * 기록의 입력은 모델이 읽은 입력 전부다 — 캐시에서 읽고 쓴 것까지(TokenUsage의 세 칸은 겹치지 않는다). 에이전트는 부를 때마다
    * 문맥을 다시 읽는다: 캐시를 빼던 동안 25k–80k를 읽은 실행이 1k로 적혔다.
    */
+  /*
+   * 진행의 말 (M4 D) — 앱이 부탁한 에이전트가 사람의 승인을 기다리면 중개가 앱에 "기다린다"를 보내고, 앱(템플릿의 도우미)이 그것을
+   * 제 호출로 올려 보낸다. host는 그 말을 버리고 있었다(`onprogress: () => {}`) — 부른 세션의 카드는 "도는 중"밖에 말하지 않았다.
+   */
+  it('에이전트가 사람의 승인을 기다리는 동안, 앱을 부른 세션의 도구 카드에 무엇을 기다리는지가 선다', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    let agent: { emit: (e: NormalizedEvent) => void; sessionId: string; done: () => void } | null = null
+    claude.onSend = (h) => {
+      agent = h
+      h.emit({ type: 'approval_request', sessionId: h.sessionId, requestId: 'req-write', detail: { kind: 'command', command: 'touch notes.md', cwd: repo } })
+    }
+    const opts = claude.opened.find((o) => o.sessionId === caller.id)!
+    const call = opts.apps!.call('app-notes', 'ask_broker', { mode: 'run', relay: true, args: { prompt: 'Write the notes down.' } }, { callId: 'toolu_notes' })
+    const said = () =>
+      events.filter((e): e is Extract<NormalizedEvent, { type: 'tool_output_delta' }> => e.type === 'tool_output_delta' && e.sessionId === caller.id)
+    // 먼저 능력 물음(이 세상은 곧바로 허락한다), 그다음 에이전트 세션의 승인 — 둘 다 그 호출의 카드에 선다
+    await until(said, (l) => l.length >= 2)
+    const name = agentSessions()[0]!.name
+    expect(said().map((e) => [e.callId, e.text])).toEqual([
+      ['toolu_notes', 'waiting for the person to allow App notes to run an agent (Claude Code) in a new session\n'],
+      ['toolu_notes', `waiting for the person to approve a step in "${name}"\n`],
+    ])
+    agent!.done()
+    expect(brokerSaid(await call).isError).toBe(false)
+  })
+
   it('에이전트가 쓴 토큰은 부탁의 기록 줄에 남고, 앱마다 더해 읽힌다 (D-5, apps.usage)', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()

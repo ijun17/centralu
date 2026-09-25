@@ -659,6 +659,11 @@ export class ExternalApps {
        * (A-5의 "오래 걸리는 호출": Codex의 상한 전에 "아직 도는 중, 실행 id는 …"을 먼저 돌려준다).
        */
       onRun?: (runId: string) => void
+      /**
+       * 앱이 이 호출에 보낸 진행 알림의 말 (D) — "사람이 세션 X에서 승인하기를 기다린다"처럼 중개가 앱에 보낸 한 줄을 템플릿의 도우미가
+       * 이 호출로 올려 보낸다. 부른 쪽이 보일 수 있는 자리로 옮긴다(세션의 도구 카드). 말 없는 살려 두기 알림은 넘기지 않는다.
+       */
+      onProgress?: (message: string) => void
     } = {},
   ): Promise<AppCallOutcome> {
     const e = this.require(ref)
@@ -787,11 +792,19 @@ export class ExternalApps {
            * `onprogress`를 주는 이유: MCP SDK는 이것이 있을 때만 요청에 진행 토큰을 싣는다(client의 request — 토큰 없이는
            * 앱이 진행 알림을 보낼 수 없다). 그래서 `resetTimeoutOnProgress`는 지금까지 아무것도 하지 않았다. 앱이 에이전트를
            * 부탁하고 기다리는 동안(D-1, 몇 분이 걸린다) 템플릿의 도우미가 그 기다림을 이 호출의 진행으로 올려 보내야 이
-           * 호출이 `callTimeoutMs`에 끊기지 않는다. 받은 알림 자체는 쓰지 않는다 — 살아 있다는 뜻이면 된다.
+           * 호출이 `callTimeoutMs`에 끊기지 않는다. 알림에 말이 실려 있으면 부른 쪽에 넘긴다(`onProgress`) — 앱이 사람을 기다리는 동안
+           * 부른 세션의 카드가 "무엇을 기다리는지"를 말한다. 전에는 여기서 버려져 아무 데도 닿지 않았다.
            */
           const result = await proc.client.callTool(
             { name, arguments: args, _meta: { [RUN_META]: runId } },
-            { signal: abort.signal, timeout: this.timing.callTimeoutMs, resetTimeoutOnProgress: true, onprogress: () => {} },
+            {
+              signal: abort.signal,
+              timeout: this.timing.callTimeoutMs,
+              resetTimeoutOnProgress: true,
+              onprogress: (p) => {
+                if (typeof p.message === 'string' && p.message.trim()) opts.onProgress?.(p.message)
+              },
+            },
           )
           return result.isError ? done('error', result, resultText(result) || 'The tool returned an error with no text') : done('ok', result, null)
         } catch (err) {
