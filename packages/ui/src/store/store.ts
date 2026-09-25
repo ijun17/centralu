@@ -672,7 +672,14 @@ export type AppState = {
    */
   trustAsk: string | null
   answerTrustAsk(trust: boolean): Promise<void>
-  /** 신뢰를 켜고 끈다. 앱 목록은 host의 방송(external_apps_changed)으로 따라온다 */
+  /**
+   * 신뢰를 켜고 끈다. 앱 목록은 host의 방송(external_apps_changed)으로 따라온다.
+   *
+   * 이미 돌고 있는 세션은 신뢰를 세션이 설 때 받는다(#92, 매니저의 `projectTrusted`) — 바꾼 신뢰는 그
+   * 세션이 다시 시작하거나 이어질 때부터 적용된다. 그 사실을 **돌고 있는 세션이 있을 때만** 한 줄로
+   * 말한다. 없을 때 말하면 뜻 없는 경고가 되고, 있을 때 말하지 않으면 사람은 신뢰를 끈 순간 그
+   * 세션들도 바뀌었다고 믿는다.
+   */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void>
   /**
    * Delete a project — the record here, and optionally the folder on disk.
@@ -2427,6 +2434,8 @@ export const useStore = create<AppState>((set, get) => ({
         const p = s.projects[projectId]
         return p ? { projects: { ...s.projects, [projectId]: { ...p, trusted } } } : {}
       })
+      const running = Object.values(get().sessions).some((x) => x.projectId === projectId && x.live)
+      if (running) set({ toast: 'Running sessions here pick up the new trust when they restart or resume.' })
     } catch (e) {
       set({ toast: `Could not change trust: ${(e as Error).message}` })
     }
