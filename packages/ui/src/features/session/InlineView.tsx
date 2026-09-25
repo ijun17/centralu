@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useStore, type InlineView as InlineViewState } from '../../store/store.js'
+import { registerInlineFrame, useStore, type InlineView as InlineViewState } from '../../store/store.js'
 import { useExternalApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { messageText } from '../pinned-app/MessageAsk.jsx'
@@ -18,39 +18,61 @@ import { AppIcon } from '../../components/icons.jsx'
  * 모양을 받는다(#120과 같은 규칙).
  *
  * "Pin"은 그 앱의 고정 화면(B-2)을 연다 — 같은 앱을 대화 밖에서 계속 쓰는 길이다.
+ *
+ * **가상 스크롤** (플랜: 벗어나기 전에 teardown을 보내고 정지 이미지를 남긴다). 대화 목록은 화면 밖으로 멀리
+ * 나간 줄을 DOM에서 뗀다 — 떼는 순간 iframe의 창도 사라져, 그 뒤에 보낸 teardown은 닿지 않는다. 그래서
+ * 프레임이 그려진 줄은 목록이 떼지 않고 붙들어 두고(`registerInlineFrame`), 뗄 때가 된 줄에는 `leaving`을
+ * 준다. 화면은 그때 teardown을 보내고 자리표시로 접힌다 — 그다음에야 줄이 떨어진다. 자리표시의
+ * "Reopen"은 도구를 다시 부르지 않고 host가 들고 있던 입력과 결과로 새 화면을 연다.
+ *
+ * 대화 자체가 바뀌거나 가려질 때(다른 세션, 고정 화면으로 이동)는 목록이 통째로 내려가 붙들 수 없다 —
+ * 그때는 AppFrame의 마지막 시도(내려가며 teardown을 부친다)가 전부이고, 화면은 살아 있는 채로 남아 돌아오면
+ * 다시 그려진다(같은 인스턴스, 입력과 결과를 다시 받는다).
  */
-export function InlineViewSlot({ sessionId, callId }: { sessionId: string; callId: string }) {
+export function InlineViewSlot({ sessionId, callId, leaving = false }: { sessionId: string; callId: string; leaving?: boolean }) {
   const view = useStore((s) => s.inlineViews[sessionId]?.[callId])
   if (!view) return null
   // 세션이 바뀌면 같은 줄이 다른 대화의 카드를 그릴 수 있다 — 화면의 상태를 섞지 않게 열쇠로 가른다
-  return <InlineViewBody key={`${sessionId}:${callId}`} sessionId={sessionId} view={view} />
+  return <InlineViewBody key={`${sessionId}:${callId}`} sessionId={sessionId} view={view} leaving={leaving} />
 }
 
 type Ask = { text: string; dropped: number; resolve: (sent: boolean) => void }
 
-function InlineViewBody({ sessionId, view }: { sessionId: string; view: InlineViewState }) {
+function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view: InlineViewState; leaving: boolean }) {
   const app = useExternalApp(view.projectId, view.appId)
   const title = app?.title ?? view.appId
   const frame = useRef<AppFrameHandle>(null)
-  const park = useStore((s) => s.parkInlineView)
+  const close = useStore((s) => s.closeInlineView)
+  const reopen = useStore((s) => s.reopenInlineView)
   const openApp = useStore((s) => s.openApp)
   const sendViewMessage = useStore((s) => s.sendViewMessage)
+  const callId = view.callId
 
+  const showFrame = (view.state === 'live' || view.state === 'closing') && view.instanceId !== null
   /*
-   * host가 인스턴스를 닫았다(앱이 사라짐, 신뢰를 잃음, 사칭) — 프레임에 teardown을 보낸 뒤 접는다.
-   * 프레임이 그려진 적이 없으면(카드가 화면 밖이었다) teardown은 곧바로 'not-connected'로 돌아온다.
+   * 프레임이 그려진 동안 스토어에 손잡이를 올린다 — 누가 접든(스크롤, 상한, host의 닫힘) teardown이 이 손잡이로
+   * 먼저 간다. 목록은 손잡이가 있는 줄을 떼지 않는다.
    */
   useEffect(() => {
-    if (view.state !== 'closing') return
-    let alive = true
-    void (async () => {
-      await frame.current?.teardown()
-      if (alive) park(sessionId, view.callId)
-    })()
-    return () => {
-      alive = false
-    }
-  }, [view.state, sessionId, view.callId, park])
+    if (!showFrame) return
+    return registerInlineFrame(sessionId, callId, {
+      teardown: () => frame.current?.teardown() ?? Promise.resolve('not-connected'),
+    })
+  }, [showFrame, sessionId, callId])
+
+  // 목록이 이 줄을 뗄 때가 됐다 — teardown을 보내고 접는다. 접히면 손잡이가 내려가고 그때 줄이 떨어진다
+  useEffect(() => {
+    if (leaving && view.state === 'live' && showFrame) void close(sessionId, callId, 'Closed when it scrolled out of view')
+  }, [leaving, view.state, showFrame, close, sessionId, callId])
+
+  /*
+   * 프레임을 띄우지 못했다 — 인스턴스가 이미 닫혔거나(host가 다시 떴다) 문서를 못 읽었다. 깨진 프레임을 두지
+   * 않고 자리표시로 접는다. host가 들고 있으면 "Reopen"이 새 인스턴스로 다시 연다.
+   */
+  const onFailed = useCallback(
+    (message: string) => void close(sessionId, callId, `This view could not be shown: ${message}`),
+    [close, sessionId, callId],
+  )
 
   /*
    * 화면의 `ui/message`. 먼저 온 물음이 남아 있으면 그것은 거절로 닫는다(고정 화면·링크 확인과 같은 규칙).
@@ -90,7 +112,6 @@ function InlineViewBody({ sessionId, view }: { sessionId: string; view: InlineVi
   }, [view.state, settleAsk])
   useEffect(() => () => settleAsk(false), [settleAsk])
 
-  const showFrame = (view.state === 'live' || view.state === 'closing') && view.instanceId !== null
   return (
     <div
       className="mt-1.5 rounded border border-edge bg-panel/60"
@@ -129,9 +150,16 @@ function InlineViewBody({ sessionId, view }: { sessionId: string; view: InlineVi
             toolResult={view.toolResult}
             toolCancelled={view.toolResult === undefined ? view.cancelled : undefined}
             onMessage={onMessage}
+            onFailed={onFailed}
           />
         ) : (
-          <Placeholder view={view} title={title} canOpen={!!app?.info.home} onOpen={() => openApp(view.projectId, view.appId)} />
+          <Placeholder
+            view={view}
+            title={title}
+            canOpen={!!app?.info.home}
+            onOpen={() => openApp(view.projectId, view.appId)}
+            onReopen={() => void reopen(sessionId, callId)}
+          />
         )}
         {ask && (
           <div className="mt-1.5 rounded-md border border-edge bg-pit px-3 py-2 text-[12px]" role="dialog" data-testid="inline-view-ask">
@@ -175,18 +203,21 @@ function InlineViewBody({ sessionId, view }: { sessionId: string; view: InlineVi
 
 /**
  * 화면이 없는 자리 (플랜: 벗어난 화면은 정지 이미지를 남긴다). 불투명 출처의 화면은 찍을 수 없어서
- * 그림 대신 한 줄이다 — 어느 앱의 화면이었고 왜 접혔는지, 그리고 할 수 있는 일.
+ * 그림 대신 한 줄이다 — 어느 앱의 화면이었고 왜 접혔는지, 그리고 할 수 있는 일: host가 이 호출을 들고
+ * 있으면 "Reopen"(도구를 다시 부르지 않는다), 앱에 홈 화면이 있으면 "Open app"(고정 화면).
  */
 function Placeholder({
   view,
   title,
   canOpen,
   onOpen,
+  onReopen,
 }: {
   view: InlineViewState
   title: string
   canOpen: boolean
   onOpen: () => void
+  onReopen: () => void
 }) {
   if (view.rejected) {
     return (
@@ -201,10 +232,21 @@ function Placeholder({
         {title}&apos;s view is closed
         {view.reason && <span className="text-slate" data-testid="inline-view-reason"> · {view.reason}</span>}
       </p>
-      {canOpen && (
+      {view.kept && (
         <button
           type="button"
           className="shrink-0 rounded border border-edge bg-void px-2.5 py-0.5 text-chalk transition-colors hover:border-graphite"
+          onClick={onReopen}
+          title="Show this call's view again, with the same input and result. The tool is not called again."
+          data-testid="inline-view-reopen"
+        >
+          Reopen
+        </button>
+      )}
+      {canOpen && (
+        <button
+          type="button"
+          className="shrink-0 rounded px-2 py-0.5 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
           onClick={onOpen}
           data-testid="inline-view-open-app"
         >

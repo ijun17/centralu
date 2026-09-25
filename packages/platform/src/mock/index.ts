@@ -48,6 +48,7 @@ import type {
   ConnectionState,
   FsEntry,
   FsFile,
+  InlineViewReopened,
   Platform,
   PreferencesPort,
   ProjectPort,
@@ -127,9 +128,25 @@ export class MockPlatform implements Platform {
   /** 테스트가 이벤트를 주입하는 통로 */
   emit(event: NormalizedEvent): void {
     let out = event
-    // 대화 안 화면의 인스턴스는 host가 그 대화의 것으로 기억한다 — 목도 그 기억을 든다 (apps.viewMessage)
-    if (event.type === 'app_view' && event.phase === 'open' && event.instanceId) {
-      this.inlineInstances.set(event.instanceId, { sessionId: event.sessionId, appId: event.appId, projectId: event.projectId })
+    /*
+     * 대화 안 화면 (M4 B-1). host처럼: 인스턴스를 그 대화의 것으로 기억하고(apps.viewMessage), 다시 열 때 돌려줄
+     * 입력과 결말을 들고 있는다(apps.inlineReopen). 결말이 `kept: false`로 오면 host가 버린 것이다 — 목도 버린다.
+     */
+    if (event.type === 'app_view') {
+      const key = `${event.sessionId} ${event.callId}`
+      const rec = this.inlineRecords.get(key)
+      if (event.phase === 'open' && event.instanceId) {
+        this.inlineInstances.set(event.instanceId, { sessionId: event.sessionId, appId: event.appId, projectId: event.projectId })
+        this.inlineRecords.set(key, { appId: event.appId, projectId: event.projectId, tool: event.tool, toolInput: event.toolInput ?? {} })
+      } else if (event.phase === 'result' && rec) {
+        if (event.kept === false) this.inlineRecords.delete(key)
+        else rec.toolResult = event.toolResult as AppToolResult
+      } else if (event.phase === 'cancelled' && rec) {
+        if (event.kept === false) this.inlineRecords.delete(key)
+        else rec.cancelled = event.reason ?? ''
+      } else if (event.phase === 'rejected') {
+        this.inlineRecords.delete(key)
+      }
     }
     if (event.sessionId) {
       const s = this.sessions.get(event.sessionId)
@@ -652,6 +669,29 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'state_change', sessionId, state: 'working' })
     },
     /**
+     * 접은 대화 안 화면을 다시 연다 (M4 B-1). 실물처럼: 도구를 다시 부르지 않고 들고 있던 입력·결말을 새
+     * 인스턴스와 돌려준다. 인스턴스는 시험이 꽂은 쪽(진짜 ViewHost)이 짓는다. 들고 있지 않으면 host와 같은
+     * 말로 거절한다. 상한은 목이 지키지 않는다 — 그것은 host의 일이고, 그 시험은 agent-host에 있다.
+     */
+    reopenInlineView: async (sessionId: string, callId: string): Promise<InlineViewReopened> => {
+      this.reopenedViews.push({ sessionId, callId })
+      const rec = this.inlineRecords.get(`${sessionId} ${callId}`)
+      if (!rec) throw new Error("This view's result is no longer kept. Open the app instead")
+      const instanceId = this.inlineInstanceProvider
+        ? await this.inlineInstanceProvider(rec.appId, rec.projectId)
+        : `mock-inline-${++this.idc}`
+      this.inlineInstances.set(instanceId, { sessionId, appId: rec.appId, projectId: rec.projectId })
+      return {
+        instanceId,
+        appId: rec.appId,
+        projectId: rec.projectId,
+        tool: rec.tool,
+        toolInput: rec.toolInput,
+        ...(rec.toolResult ? { toolResult: rec.toolResult } : {}),
+        ...(rec.cancelled !== undefined ? { cancelled: rec.cancelled } : {}),
+      }
+    },
+    /**
      * 실물처럼: 멈췄거나 죽었던 앱의 이유를 지우고 쉬는 앱(`stopped`)으로 세운 뒤 목록 방송을 한다.
      * 띄우지는 않는다 — 다음에 여는 화면이 띄운다.
      */
@@ -694,6 +734,15 @@ export class MockPlatform implements Platform {
   readonly inlineInstances = new Map<string, { sessionId: string; appId: string; projectId: string | null }>()
   /** 대화 안 화면이 대화에 보낸 말 — 사람이 확인한 뒤에만 여기 닿는지를 시험이 본다 */
   readonly viewMessages: { sessionId: string; instanceId: string; text: string }[] = []
+  /** 대화 안 화면의 입력과 결말 — host처럼 들고 있다가 다시 열 때 돌려준다. 열쇠는 `세션 카드` */
+  readonly inlineRecords = new Map<
+    string,
+    { appId: string; projectId: string | null; tool: string; toolInput: Record<string, unknown>; toolResult?: AppToolResult; cancelled?: string }
+  >()
+  /** 다시 연 화면 — "Reopen"이 host에 닿았는지를 시험이 본다 */
+  readonly reopenedViews: { sessionId: string; callId: string }[] = []
+  /** 다시 열 때 새 인스턴스를 짓는 쪽 (시험이 진짜 ViewHost를 꽂는다) */
+  inlineInstanceProvider: ((appId: string, projectId: string | null) => string | Promise<string>) | null = null
   openViewProvider: ((appId: string, projectId: string | null) => Promise<AppHomeView>) | null = null
   /** 발견된 외부 앱 (M4 A-8) — 시험이 `setExternalApps`로 채운다. 목의 발견은 이 배열이다 */
   externalAppList: ExternalAppInfo[] = []

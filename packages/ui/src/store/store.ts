@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DEFAULT_UI_PREFERENCES, handoffFile, SessionInfo } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, handoffFile, SessionInfo } from '@cc/protocol'
 import type {
   AppId,
   ToolStatus,
@@ -188,9 +188,11 @@ export type PinnedView = {
  * 정한다(열림 → 결과·취소 → 닫힘).
  *
  *   live      host가 인스턴스를 열어 두었다. 카드가 화면에 있으면 프레임을 그린다
- *   closing   host가 인스턴스를 닫았다(앱이 사라짐, 신뢰를 잃음, 사칭). 그려진 프레임은 teardown을 보낸 뒤
- *             자리표시로 접는다 — 규격: 화면을 내리기 **전에** 알린다
- *   parked    자리표시만 선다. 이유(`reason`)를 말하고, 앱을 여는 길을 준다
+ *   closing   접는 중이다 — 그려진 프레임에 teardown을 보내고 답을 기다린다(규격: 내리기 **전에** 알린다)
+ *   parked    자리표시만 선다. 왜 접혔는지(`reason`)와 할 수 있는 일(다시 열기, 앱 열기)을 말한다
+ *
+ * 접는 길은 하나다(`closeInlineView`): 가상 스크롤에서 벗어남, 살아 있는 화면의 상한, host가 닫음(앱이
+ * 사라짐·신뢰를 잃음·사칭), 프레임을 띄우지 못함. 누가 접든 teardown이 먼저다.
  */
 export type InlineView = {
   callId: string
@@ -207,32 +209,73 @@ export type InlineView = {
   rejected?: string
   /** 왜 자리표시로 접혔나 */
   reason?: string
+  /**
+   * host가 이 호출의 입력과 결말을 들고 있어 **도구를 다시 부르지 않고** 다시 열 수 있는가. host가 결말에
+   * 싣는다(`kept`). 다시 열기가 거절되면 false가 되고, 그때 자리표시는 앱을 여는 길만 준다.
+   */
+  kept: boolean
+  /** 살아난 순서 — 상한은 가장 오래 살아 있던 화면부터 접는다(다시 열면 새 번호) */
+  liveAt: number
 }
 
-/** host의 `app_view` 이벤트 하나를 세션의 화면 기록에 반영한다 */
+/** 살아난 순서를 매기는 수 — 세션을 가리지 않고 늘기만 한다 */
+let inlineLiveSeq = 0
+
+/**
+ * host의 `app_view` 이벤트 하나를 세션의 화면 기록에 반영한다. 살아 있는 화면을 **닫는** 사건(closed,
+ * 열린 화면의 rejected)은 여기서 다루지 않는다 — teardown이 먼저라 스토어의 접는 길(`closeInlineView`)로 간다.
+ */
 export function applyAppView(views: Record<string, InlineView> | undefined, e: Extract<NormalizedEvent, { type: 'app_view' }>): Record<string, InlineView> {
   const cur = views?.[e.callId]
   const base = { callId: e.callId, appId: e.appId, projectId: e.projectId, tool: e.tool }
   const put = (v: InlineView) => ({ ...views, [e.callId]: v })
   switch (e.phase) {
     case 'open':
-      return put({ ...base, state: 'live', instanceId: e.instanceId ?? null, toolInput: e.toolInput })
+      return put({ ...base, state: 'live', instanceId: e.instanceId ?? null, toolInput: e.toolInput, kept: true, liveAt: ++inlineLiveSeq })
     case 'result':
-      return cur ? put({ ...cur, toolResult: e.toolResult as AppToolResult | undefined }) : (views ?? {})
+      return cur ? put({ ...cur, toolResult: e.toolResult as AppToolResult | undefined, kept: e.kept ?? cur.kept }) : (views ?? {})
     case 'cancelled':
-      return cur ? put({ ...cur, cancelled: e.reason ?? 'The call ended without an answer' }) : (views ?? {})
+      return cur ? put({ ...cur, cancelled: e.reason ?? 'The call ended without an answer', kept: e.kept ?? cur.kept }) : (views ?? {})
     case 'rejected':
-      // 열린 화면을 닫고 거절한 경우(결과가 남의 화면을 가리켰다)면 프레임이 teardown을 받은 뒤 접힌다
       return put({
-        ...(cur ?? { ...base, instanceId: null }),
-        state: cur?.state === 'live' ? 'closing' : 'parked',
+        ...(cur ?? { ...base, instanceId: null, liveAt: 0 }),
+        state: cur?.state === 'live' || cur?.state === 'closing' ? cur.state : 'parked',
         rejected: e.reason ?? 'This view was refused',
         reason: e.reason,
+        kept: false,
       })
     case 'closed':
-      if (!cur) return views ?? {}
-      return put({ ...cur, state: cur.state === 'live' ? 'closing' : cur.state, reason: e.reason ?? cur.reason })
+      // 이미 접혔거나 접는 중이다 — 이유만 적어 둔다(살아 있으면 스토어가 접는다)
+      return cur && cur.state !== 'live' ? put({ ...cur, reason: cur.reason ?? e.reason }) : (views ?? {})
   }
+}
+
+/**
+ * 지금 그려진 대화 안 화면의 프레임 (M4 B-1) — 접기 전에 teardown을 보낼 손잡이.
+ *
+ * 화면(InlineView)이 프레임을 그리는 동안 여기 올리고, 내리면 뺀다. 스토어는 이것으로 접기 전에
+ * teardown을 보내고, 대화 목록은 이것으로 "그려진 화면이 있는 줄"을 안다 — 가상 스크롤이 그 줄을 떼기
+ * 전에 붙들어 두는 근거다. 프레임은 DOM의 것이라 스토어의 상태에 두지 않는다. 바뀔 때마다 수 하나
+ * (`inlineFramesVersion`)만 올려 목록이 다시 그리게 한다.
+ */
+export type InlineFrame = { teardown(): Promise<unknown> }
+const inlineFrames = new Map<string, InlineFrame>()
+const inlineFrameKey = (sessionId: string, callId: string) => `${sessionId}\n${callId}`
+
+export function registerInlineFrame(sessionId: string, callId: string, frame: InlineFrame): () => void {
+  const key = inlineFrameKey(sessionId, callId)
+  inlineFrames.set(key, frame)
+  useStore.setState((s) => ({ inlineFramesVersion: s.inlineFramesVersion + 1 }))
+  return () => {
+    if (inlineFrames.get(key) !== frame) return
+    inlineFrames.delete(key)
+    useStore.setState((s) => ({ inlineFramesVersion: s.inlineFramesVersion + 1 }))
+  }
+}
+
+/** 이 카드의 화면이 지금 프레임으로 그려져 있나 */
+export function inlineFrameShown(sessionId: string, callId: string): boolean {
+  return inlineFrames.has(inlineFrameKey(sessionId, callId))
 }
 
 /** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
@@ -911,11 +954,19 @@ export type AppState = {
    * `app_view`가 정하고, 대화 기록을 다시 읽어도(loadHistory) 살아 있는 화면이 사라지면 안 된다.
    */
   inlineViews: Record<string, Record<string, InlineView>>
+  /** 그려진 대화 안 화면의 프레임이 오고 갈 때마다 오른다 — 값에는 뜻이 없다(`registerInlineFrame`) */
+  inlineFramesVersion: number
   /**
-   * 대화 안 화면을 자리표시로 접는다. 인스턴스가 열려 있었으면 host에 닫으라고 한다(앱을 놓는다). 부르는
-   * 쪽이 먼저 AppFrame의 teardown을 부른다.
+   * 대화 안 화면을 접는다 — **접는 단 하나의 길**. 살아 있는 화면만 접는다(두 번 불러도 한 번이다). 그려진
+   * 프레임이 있으면 teardown을 먼저 보내고 답을 기다린 뒤, 자리표시로 바꾸고 host에 인스턴스를 닫으라고
+   * 한다(앱을 놓는다. host가 먼저 닫았으면 그 닫기는 아무 일도 하지 않는다).
    */
-  parkInlineView(sessionId: string, callId: string, reason?: string): void
+  closeInlineView(sessionId: string, callId: string, reason: string): Promise<void>
+  /**
+   * 접힌 화면을 다시 연다 — 도구를 다시 부르지 않는다. host가 새 인스턴스와 들고 있던 입력·결말을 돌려주면
+   * 화면이 규격대로 다시 받는다. 못 열면 이유를 자리표시에 남기고 다시 열기를 거둔다.
+   */
+  reopenInlineView(sessionId: string, callId: string): Promise<void>
   /**
    * 대화 안 화면의 말을 그 대화로 보낸다 (M4 B-1·B-4) — 사람이 확인한 뒤에만 부른다.
    * @returns 보냈는가 — 실패는 토스트로 말한다
@@ -991,6 +1042,22 @@ function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
 }
 
 let chatSeq = 0
+
+/**
+ * 한 대화의 살아 있는 화면을 상한(`APP_VIEWS_LIVE_PER_SESSION`) 안에 둔다 — 가장 오래 살아 있던 것부터 접는다.
+ * 방금 살아난 화면은 접지 않는다. host도 같은 수를 지키므로 대개 같은 화면을 두 쪽이 함께 접는다 — 접는
+ * 길이 하나라서(살아 있는 화면만 접는다) 두 번 접히지 않는다.
+ */
+function capInlineViews(get: () => AppState, sessionId: string, keep: string): void {
+  const live = Object.values(get().inlineViews[sessionId] ?? {})
+    .filter((v) => v.state === 'live')
+    .sort((a, b) => a.liveAt - b.liveAt)
+  const over = live.length - APP_VIEWS_LIVE_PER_SESSION
+  for (const v of live.slice(0, Math.max(0, over))) {
+    if (v.callId === keep) continue
+    void get().closeInlineView(sessionId, v.callId, `Only the ${APP_VIEWS_LIVE_PER_SESSION} most recent app views in a conversation stay open`)
+  }
+}
 
 /**
  * 이 프로젝트가 이 도구를 위해 기억해 둔 모델·강도 중, **그 도구가 아직 받아 주는 것**만 (#107).
@@ -1351,6 +1418,7 @@ export const useStore = create<AppState>((set, get) => ({
   focusedApp: null as { projectId: string | null; appId: string } | null,
   pinnedViews: [] as PinnedView[],
   inlineViews: {} as Record<string, Record<string, InlineView>>,
+  inlineFramesVersion: 0,
   gridPanels: [] as string[],
   orchestratorId: null as string | null,
   orchestratorWaking: false,
@@ -1925,7 +1993,13 @@ export const useStore = create<AppState>((set, get) => ({
      * 전이어도 적어 둔다: 카드가 그려지는 순간 그 아래에 선다.
      */
     if (e.type === 'app_view') {
+      const was = get().inlineViews[sessionId]?.[e.callId]
       set((s) => ({ inlineViews: { ...s.inlineViews, [sessionId]: applyAppView(s.inlineViews[sessionId], e) } }))
+      // host가 살아 있는 화면을 닫았다 — teardown을 보낸 뒤 접는다
+      if ((e.phase === 'closed' || e.phase === 'rejected') && was?.state === 'live') {
+        void get().closeInlineView(sessionId, e.callId, e.reason ?? 'This view was closed')
+      }
+      if (e.phase === 'open') capInlineViews(get, sessionId, e.callId)
       return
     }
 
@@ -3489,18 +3563,49 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
-  parkInlineView(sessionId, callId, reason) {
+  async closeInlineView(sessionId, callId, reason) {
     const v = get().inlineViews[sessionId]?.[callId]
-    if (!v || v.state === 'parked') return
-    // host가 이미 닫은 것(closing)은 다시 닫지 않는다 — 우리가 내리는 것만 host에 알린다
-    const close = v.state === 'live' ? v.instanceId : null
-    set((s) => ({
-      inlineViews: {
-        ...s.inlineViews,
-        [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...v, state: 'parked', instanceId: null, reason: reason ?? v.reason } },
-      },
-    }))
-    if (close) void get().platform?.apps.closeView(close).catch(() => {})
+    if (!v || v.state !== 'live') return
+    const patch = (next: Partial<InlineView>) =>
+      set((s) => {
+        const cur = s.inlineViews[sessionId]?.[callId]
+        return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
+      })
+    // 접는 중 — 프레임은 teardown의 답이 올 때까지 그대로 선다. 이 사이에 온 두 번째 접기는 위에서 돌아간다
+    patch({ state: 'closing', reason })
+    await inlineFrames.get(inlineFrameKey(sessionId, callId))?.teardown().catch(() => {})
+    // 그사이 세션이 지워졌거나(화면째 사라짐) 다른 길이 이미 접었다
+    if (get().inlineViews[sessionId]?.[callId]?.state !== 'closing') return
+    patch({ state: 'parked', instanceId: null })
+    if (v.instanceId) void get().platform?.apps.closeView(v.instanceId).catch(() => {})
+  },
+
+  async reopenInlineView(sessionId, callId) {
+    const platform = get().platform
+    const v = get().inlineViews[sessionId]?.[callId]
+    if (!platform || !v || v.state !== 'parked' || v.rejected || !v.kept) return
+    const patch = (next: Partial<InlineView>) =>
+      set((s) => {
+        const cur = s.inlineViews[sessionId]?.[callId]
+        return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
+      })
+    try {
+      const r = await platform.apps.reopenInlineView(sessionId, callId)
+      // 다시 여는 사이에 온 결말(아직 돌던 호출)이 있으면 그것이 더 새것이다
+      const now = get().inlineViews[sessionId]?.[callId]
+      patch({
+        state: 'live',
+        instanceId: r.instanceId,
+        toolInput: r.toolInput,
+        toolResult: r.toolResult ?? now?.toolResult,
+        cancelled: r.cancelled ?? now?.cancelled,
+        reason: undefined,
+        liveAt: ++inlineLiveSeq,
+      })
+      capInlineViews(get, sessionId, callId)
+    } catch (e) {
+      patch({ kept: false, reason: (e as Error).message })
+    }
   },
 
   async sendViewMessage(sessionId, instanceId, text) {

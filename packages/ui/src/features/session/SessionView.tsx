@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent, ReactNode, Ref, RefObject } from 'react'
-import { useVirtualizer } from '@tanstack/react-virtual'
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
-import { EMPTY_DRAFT, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
+import { EMPTY_DRAFT, inlineFrameShown, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
@@ -1269,11 +1269,33 @@ function ChatStream({
   // 바닥이 아닌 자리는 줄(seq)로 남는다 (#61) — 픽셀이 아니라 줄이라야 측정을 넘어 살아남는다
   const setScrollAnchor = useStore((s) => s.setScrollAnchor)
 
+  /*
+   * 대화 안 앱 화면이 그려진 줄은 떼지 않는다 (M4 B-1). 가상 스크롤은 멀리 벗어난 줄을 DOM에서 떼는데,
+   * 그 줄에 앱 화면(iframe)이 있으면 떼는 순간 창이 사라져 teardown이 닿지 않는다. 그래서 그런 줄은
+   * 원래 범위 밖으로 나가도 붙들어 두고(아래 rangeExtractor), 그 줄에 `leaving`을 준다 — 화면이
+   * teardown을 보내고 자리표시로 접히면 손잡이가 내려가고(inlineFramesVersion), 그때 줄이 떨어진다.
+   */
+  const inlineFramesVersion = useStore((s) => s.inlineFramesVersion)
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const base = defaultRangeExtractor(range)
+      if (inlineFramesVersion === 0) return base
+      const first = base[0] ?? 0
+      const last = base[base.length - 1] ?? -1
+      const held: number[] = []
+      chat.forEach((item, i) => {
+        if ((i < first || i > last) && item.kind === 'tool' && item.callId && inlineFrameShown(sessionId, item.callId)) held.push(i)
+      })
+      return held.length ? [...base, ...held].sort((a, b) => a - b) : base
+    },
+    [chat, sessionId, inlineFramesVersion],
+  )
   const virtualizer = useVirtualizer({
     count: chat.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 64,
-    overscan: 12,
+    overscan: CHAT_OVERSCAN,
+    rangeExtractor,
     /*
      * 높이 측정을 다음 프레임으로 미룬다.
      *
@@ -1887,7 +1909,7 @@ function ChatStream({
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} sessionId={sessionId} />
+            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
           </div>
         ))}
       </div>
@@ -2179,7 +2201,30 @@ function DormantNote({ sessionId }: { sessionId: string }) {
  * 화면을 채운 상태에서 그건 마크다운 재파싱 여러 번이다 (실측: 2.7 렌더/글자).
  * Markdown 자체는 이미 memo지만, 그 위의 껍데기가 매번 새로 도는 것은 못 막는다.
  */
-const ChatRow = memo(function ChatRow({ item, projectRoot, sessionId }: { item: ChatItem; projectRoot: string | null; sessionId: string }) {
+/** 대화 목록이 화면 밖에 미리 그려 두는 줄 수 (양쪽) */
+const CHAT_OVERSCAN = 12
+
+/**
+ * 이 줄이 원래 범위(보이는 줄 + 미리 그리는 줄) 밖인가 — 앱 화면이 있어 붙들어 둔 줄만 이렇게 그려진다.
+ * 그 화면은 teardown을 보내고 접힌다(M4 B-1, 위 rangeExtractor).
+ */
+function isLeaving(range: { startIndex: number; endIndex: number } | null, index: number): boolean {
+  if (!range) return false
+  return index < range.startIndex - CHAT_OVERSCAN || index > range.endIndex + CHAT_OVERSCAN
+}
+
+const ChatRow = memo(function ChatRow({
+  item,
+  projectRoot,
+  sessionId,
+  leaving = false,
+}: {
+  item: ChatItem
+  projectRoot: string | null
+  sessionId: string
+  /** 목록이 떼려는 줄이다 — 앱 화면이 있으면 teardown을 보내고 접는다 (M4 B-1) */
+  leaving?: boolean
+}) {
   if (item.kind === 'user') {
     return (
       <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
@@ -2314,7 +2359,7 @@ const ChatRow = memo(function ChatRow({ item, projectRoot, sessionId }: { item: 
     <>
       <ToolCard item={item} />
       {/* 이 호출이 연 앱 화면 (M4 B-1) — 카드의 id로 제 화면을 찾는다. 없으면 아무것도 그리지 않는다 */}
-      {item.callId && <InlineViewSlot sessionId={sessionId} callId={item.callId} />}
+      {item.callId && <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />}
     </>
   )
 })
