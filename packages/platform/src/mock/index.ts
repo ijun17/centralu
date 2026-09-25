@@ -2,6 +2,7 @@ import type {
   AppPermission,
   AppUsage,
   AppQuestion,
+  AppReview,
   AdapterCapabilities,
   AppErrorBundle,
   AppRun,
@@ -100,6 +101,10 @@ export class MockPlatform implements Platform {
 
   /** 테스트용: 디렉토리 피커가 돌려줄 값 */
   nextPickedDirectory: string | null = '/tmp/picked'
+  /** 파일 피커가 돌려줄 값 (M4 E-3 — 가져올 .zip). null이면 사람이 취소한 것이다 */
+  nextPickedFile: string | null = '/tmp/picked.zip'
+  /** 파일 피커가 무엇을 걸러 달라고 받았나 */
+  readonly pickedFileAsks: { title: string; extensions: string[] }[] = []
   /** 소개 화면에서 고른 오케스트레이터 도구 (#63) — 실물은 app_settings에 적는다 */
   orchestratorTool: ToolName = 'claude'
   /** 테스트용: 재개 불가로 만들 세션들 */
@@ -994,9 +999,86 @@ export class MockPlatform implements Platform {
       if (slot) slot.set = value !== null
       this.emit({ type: 'external_apps_changed' })
     },
+    /**
+     * 가져오기 (M4 E-3). 목에는 파일 시스템이 없다 — 시험이 출처마다 host가 돌려줄 확인 창(`importSources`)이나 거절의 말
+     * (`importRefusals`)을 꽂는다. 실물(`AppHandover`)처럼: 준비는 들이는 것이 아니고(목록에 없다), 들이면 꺼진 채(`unconfirmed`)로
+     * 서며, "들이며 켜기"와 켜기는 사람이 본 창의 열쇠일 때만 받는다. 거절의 말은 host의 말 그대로다.
+     */
+    importPrepare: async (source: string): Promise<{ token: string; review: AppReview }> => {
+      this.importPrepares.push(source)
+      const refusal = this.importRefusals.get(source)
+      if (refusal) throw new Error(refusal)
+      const review = this.importSources.get(source)
+      if (!review) throw new Error(`Nothing to import at ${source}`)
+      if (this.externalAppList.some((a) => a.appId === review.appId && a.projectId === null)) {
+        throw new Error(`An app with the id "${review.appId}" is already in your apps. Remove it first, or change the id in its manifest`)
+      }
+      const token = `mock-import-${++this.idc}`
+      this.stagedImports.set(token, structuredClone(review))
+      return { token, review: structuredClone(review) }
+    },
+    importCommit: async (token: string, opts: { enable: boolean; reviewKey?: string }): Promise<ExternalAppInfo> => {
+      const review = this.stagedImports.get(token)
+      if (!review) throw new Error('This import is no longer waiting (it was cancelled, or 30 minutes passed). Review it again')
+      if (opts.enable && opts.reviewKey !== review.reviewKey) throw new Error('What would be enabled is not what you reviewed. Review it again')
+      this.stagedImports.delete(token)
+      const at = this.now()
+      const app: ExternalAppInfo = {
+        appId: review.appId,
+        projectId: null,
+        dir: `/mock/data/apps/${review.appId}`,
+        name: review.name,
+        version: review.version,
+        description: review.description,
+        home: review.home,
+        trusted: true,
+        status: opts.enable ? 'stopped' : 'unconfirmed',
+        error: opts.enable ? null : 'This app was imported and is not enabled yet. Review what it runs, then enable it',
+        warnings: [],
+        imported: { source: review.source, at, confirmedAt: opts.enable ? at : null },
+        ...(review.secrets.length ? { secrets: review.secrets.map((name) => ({ name, set: false })) } : {}),
+      }
+      this.externalAppList.push(app)
+      this.appReviews.set(`_user/${review.appId}`, review)
+      this.importCommits.push({ token, enable: opts.enable, appId: review.appId })
+      this.emit({ type: 'external_apps_changed' })
+      return structuredClone(app)
+    },
+    importCancel: async (token: string): Promise<void> => {
+      this.stagedImports.delete(token)
+      this.importCancels.push(token)
+    },
+    review: async (appId: string, projectId: string | null): Promise<AppReview> => {
+      const r = this.appReviews.get(`${projectId ?? '_user'}/${appId}`)
+      if (!r) throw new Error(`No app named "${appId}" in your apps`)
+      return structuredClone(r)
+    },
+    enable: async (appId: string, projectId: string | null, reviewKey: string): Promise<ExternalAppInfo> => {
+      const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      const r = this.appReviews.get(`${projectId ?? '_user'}/${appId}`)
+      if (!a) throw new Error(`No app named "${appId}" in your apps`)
+      if (!a.imported || !r) throw new Error('This app was not imported, so it needs no enabling')
+      if (r.reviewKey !== reviewKey) throw new Error('This app changed since you reviewed it. Review it again')
+      Object.assign(a, { status: 'stopped', error: null, imported: { ...a.imported, confirmedAt: this.now() } })
+      this.enabledApps.push(appId)
+      this.emit({ type: 'external_apps_changed' })
+      return structuredClone(a)
+    },
   }
   /** host에 닿은 비밀 넣기·지우기 (M4 E) — 무엇이 어느 앱의 어느 이름으로 갔는지를 시험이 본다 */
   readonly secretWrites: { appId: string; projectId: string | null; name: string; value: string | null }[] = []
+  /** 가져올 출처 → host가 돌려줄 확인 창 (M4 E-3). 시험이 꽂는다 — 목은 폴더와 zip을 읽지 않는다 */
+  readonly importSources = new Map<string, AppReview>()
+  /** 출처 → host의 거절의 말 (M4 E-3) — 창이 그 말을 그대로 보이는지를 시험이 본다 */
+  readonly importRefusals = new Map<string, string>()
+  /** 준비된 가져오기(토큰 → 확인 창)와, 들인 앱의 확인 창 (`(프로젝트 ?? _user)/앱`) */
+  private readonly stagedImports = new Map<string, AppReview>()
+  readonly appReviews = new Map<string, AppReview>()
+  /** host에 닿은 것 — 준비한 출처, 들인 것(켰는가), 그만둔 것, 켠 앱 */
+  readonly importPrepares: string[] = []
+  readonly importCommits: { token: string; enable: boolean; appId: string }[] = []
+  readonly importCancels: string[] = []
+  readonly enabledApps: string[] = []
   /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
   /**
@@ -2011,6 +2093,10 @@ export class MockPlatform implements Platform {
       this.windowDrags++
     },
     pickDirectory: async () => this.nextPickedDirectory,
+    pickFile: async (opts: { title: string; extensions: string[] }) => {
+      this.pickedFileAsks.push(opts)
+      return this.nextPickedFile
+    },
   }
 
   /** 창 끌기가 몇 번 시작됐나 (Playwright에서 확인) */

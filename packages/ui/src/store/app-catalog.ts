@@ -77,6 +77,17 @@ export function appStatus(info: ExternalAppInfo): AppStatusView {
       return { label: 'Failed', reason: info.error ?? 'It failed to start several times in a row.', runnable: false, tone: 'alert' }
     case 'untrusted':
       return { label: 'Not trusted', reason: UNTRUSTED_REASON, runnable: false, tone: 'quiet' }
+    case 'unconfirmed':
+      /*
+       * 가져온 앱이 사람의 확인을 기다린다 (M4 E-3) — 처음 들어와 아직 켜지 않았거나, 켠 뒤 무엇을 돌리는지(server)나 무엇을
+       * 쓰겠다는지(uses)가 바뀌었다. 둘 다 사람이 보고 켜야 풀린다. 이유는 host의 말이다.
+       */
+      return {
+        label: info.imported?.confirmedAt ? 'Needs review' : 'Not enabled',
+        reason: info.error ?? 'This app was imported and is not enabled yet.',
+        runnable: false,
+        tone: 'alert',
+      }
     case 'invalid':
       return { label: 'Invalid', reason: info.error ?? 'The app manifest could not be read.', runnable: false, tone: 'alert' }
   }

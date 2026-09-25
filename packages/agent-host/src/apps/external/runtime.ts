@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult, ListResourcesResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
-import type { ExternalAppInfo } from '@cc/protocol'
+import type { AppReview, ExternalAppInfo } from '@cc/protocol'
 import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
@@ -18,6 +18,7 @@ import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AgentUse, type AppR
 import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
 import { SecretStore, redactor, secretValueProblem } from './secrets.js'
 import type { AppRef } from './ref.js'
+import { AppHandover, type HandoverOptions } from './handover.js'
 import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
 /**
@@ -196,6 +197,8 @@ export type ExternalAppsDeps = {
    * 다시 띄우지 않고 턴 끝(`builderTurnEnded`)을 기다린다. 없으면(편집기에서 고쳤다) 조용해지기를 기다린다.
    */
   builderBusy?: (ref: AppRef) => boolean
+  /** 건네기(E)의 상한과 내려받기 — 시험이 줄이고 가짜를 꽂는다. 없으면 제품의 값이다 */
+  handover?: HandoverOptions
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
@@ -338,6 +341,8 @@ export class ExternalApps {
    * 생성자에서 세운다 — 답을 둘 자리(`deps.permissions`)와 기다림의 상한(`timing`)이 그때 정해진다.
    */
   private desk: BrokerDesk
+  /** 건네기 (E) — 가져온 앱의 대기실과 사람의 확인(`handover.ts`) */
+  private handover: AppHandover
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -363,6 +368,20 @@ export class ExternalApps {
     const settled = deps.runs?.settleUnfinished('the host stopped before this call finished') ?? 0
     const pruned = deps.runs?.prune(Date.now() - RUN_RETENTION_MS) ?? 0
     if (settled || pruned) console.error(`[apps] run records: ${settled} unfinished closed, ${pruned} past retention removed`)
+    // 건네기 (E) — 가져온 앱의 대기실과 확인. 런타임은 확인을 기다리는 앱을 띄우지 않는다(`held`)
+    this.handover = new AppHandover(
+      {
+        dataRoot: deps.dataRoot,
+        reservedIds: deps.reservedIds,
+        rescanUser: () => this.rescanUser(),
+        userApp: (appId) => {
+          const e = this.find({ projectId: null, appId })
+          return e ? { dir: e.dir, manifest: e.manifest } : null
+        },
+        changed: () => this.appsChanged(),
+      },
+      deps.handover,
+    )
   }
 
   /**
@@ -684,6 +703,8 @@ export class ExternalApps {
     // 앱에 보내기 전에 끝나는 판정 — 프로세스를 띄울 필요도 없다
     if (!e.manifest) return done('rejected', null, `매니페스트가 틀린 앱입니다: ${e.error}`)
     if (!e.scope.trusted) return done('rejected', null, '신뢰하지 않은 프로젝트의 앱은 부르지 않습니다')
+    const held = this.held(e)
+    if (held) return done('rejected', null, held)
     if (e.life.gaveUp) return done('rejected', null, `${this.timing.maxFailures}번 연달아 실패해 멈춘 앱입니다`)
     let parent: OpenRun | null = null
     if (caller.kind === 'app') {
@@ -949,6 +970,11 @@ export class ExternalApps {
       findings.push({ level: 'problem', where: '신뢰', message: '신뢰하지 않은 프로젝트의 앱이라 띄우지 않습니다 — 프로젝트를 신뢰하면 점검할 수 있습니다' })
       return report(null)
     }
+    const held = this.held(e)
+    if (held) {
+      findings.push({ level: 'problem', where: '확인', message: held })
+      return report(null)
+    }
 
     // 지금 파일로 다시 띄운다 — 호출이 끝난 **바로 그 틱에** 내린다(drain 주석)
     let restarted = false
@@ -1086,6 +1112,8 @@ export class ExternalApps {
     const trash = join(this.deps.dataRoot, 'app-trash')
     mkdirSync(trash, { recursive: true })
     renameSync(e.dir, join(trash, `${ref.appId}-${Date.now()}`))
+    // 가져온 앱의 표시도 걷는다 (E-3) — 휴지통에서 되살린 폴더는 사람이 손으로 옮긴 것이다(결정 3: 사용자 폴더 앱은 신뢰)
+    this.handover.forget(ref.appId)
     this.rescanUser()
   }
 
@@ -1130,9 +1158,46 @@ export class ExternalApps {
     this.appsChanged()
   }
 
+  // ── 건네기: 가져오기 (E-3) ──────────────────────────────────────────────────────
+  //
+  // 몸통은 `handover.ts`에 있다. 여기서는 사람의 말로 된 거절을 RPC의 오류로 옮기고, 들인 앱의 목록 모양을 돌려준다. 가져온 앱이
+  // 확인 전에 뜨지 않게 막는 자리는 호출·기동·점검·상태가 공통으로 묻는 `held` 하나다.
+
+  /** 가져올 준비 — 대기실로 옮겨 담고 사람이 볼 것을 돌려준다. 아직 아무것도 들어오지 않았다 */
+  prepareImport(source: string): Promise<{ token: string; review: AppReview }> {
+    if (this.disposed) throw new AppUnavailableError('앱 런타임이 내려갔습니다')
+    return this.handover.prepare(source)
+  }
+
+  /** 대기실의 앱을 사용자 폴더로 들인다 — 꺼진 채로, `enable`이면 사람이 본 열쇠로 확인까지 적는다. **띄우지는 않는다** */
+  commitImport(token: string, opts: { enable: boolean; reviewKey?: string }): ExternalAppInfo {
+    const id = this.handover.commit(token, opts)
+    const made = this.find({ projectId: null, appId: id })
+    if (!made) throw new AppUnavailableError(`앱을 들였지만 발견되지 않았습니다: ${id}`)
+    return this.info(made)
+  }
+
+  cancelImport(token: string): void {
+    this.handover.cancel(token)
+  }
+
+  /** 들어온 앱의 확인 창 — 사용자 폴더의 앱만(프로젝트 앱은 프로젝트 신뢰를 따른다, 결정 3) */
+  reviewApp(ref: AppRef): AppReview {
+    if (ref.projectId !== null) throw new AppUnavailableError("A project's apps follow the project's trust; there is nothing to review here")
+    return this.handover.review(ref.appId)
+  }
+
+  /** 가져온 앱을 켠다 — 사람이 본 확인 창의 열쇠가 지금의 매니페스트와 같을 때만 */
+  enableApp(ref: AppRef, key: string): ExternalAppInfo {
+    if (ref.projectId !== null) throw new AppUnavailableError("A project's apps follow the project's trust; they are not enabled one by one")
+    this.handover.enable(ref.appId, key)
+    return this.info(this.require(ref))
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     this.watchers.close()
+    this.handover.dispose()
     for (const t of [...this.turnEndTimers.values(), ...this.quietTimers.values()]) clearTimeout(t)
     this.turnEndTimers.clear()
     this.quietTimers.clear()
@@ -1285,6 +1350,9 @@ export class ExternalApps {
     if (!e.scope.trusted) {
       throw new AppUnavailableError('신뢰하지 않은 프로젝트의 앱은 띄우지 않습니다 — 프로젝트를 신뢰하면 뜹니다')
     }
+    // 가져온 앱은 사람이 보고 켜기 전에 뜨지 않는다 (E-3) — 부를 때마다 본다: 켠 뒤 server·uses가 바뀌면 다음 기동부터 막힌다
+    const held = this.held(e)
+    if (held) throw new AppUnavailableError(held)
     if (L.gaveUp) {
       throw new AppUnavailableError(
         `${this.timing.maxFailures}번 연달아 실패해 멈췄습니다 — 고친 뒤 다시 시작하세요.\n${L.lastError ?? ''}`,
@@ -1573,13 +1641,28 @@ export class ExternalApps {
       home: m?.home ?? null,
       trusted: e.scope.trusted,
       status: this.status(e),
-      error: e.error ?? e.life.lastError,
+      error: e.error ?? this.held(e) ?? e.life.lastError,
       warnings: [...e.warnings, ...e.life.toolWarnings],
       // 지문 전체는 쓸모가 없다 — 대조만 하는 열쇠라 앞 16자면 충분하다
       ...(e.life.loaded ? { codeStamp: e.life.loaded.slice(0, 16) } : {}),
       ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
       ...this.secretSlots(e),
+      ...this.importMark(e),
     }
+  }
+
+  /**
+   * 가져온 앱이 사람의 확인을 기다리나 (E-3) — 그 까닭, 아니면 null. 사용자 폴더 앱만 가져온 앱일 수 있다(프로젝트 앱은 프로젝트
+   * 신뢰가 정한다, 결정 3). 부를 때마다 표시와 지금의 매니페스트를 대 본다(`AppHandover.gate`).
+   */
+  private held(e: AppEntry): string | null {
+    return e.ref.projectId === null && e.manifest ? this.handover.gate(e.ref.appId, e.dir, e.manifest) : null
+  }
+
+  /** 목록에 실을 가져온 앱의 표시 (E-3) — 가져온 앱이 아니면 칸이 없다 */
+  private importMark(e: AppEntry): Pick<ExternalAppInfo, 'imported'> {
+    const imported = e.ref.projectId === null ? this.handover.imported(e.ref.appId, e.dir) : undefined
+    return imported ? { imported } : {}
   }
 
   /** 선언한 비밀마다 값이 들어 있는가 (E, 비밀 칸) — 이름과 있음·없음만. 선언이 없으면 칸도 없다 */
@@ -1593,6 +1676,7 @@ export class ExternalApps {
   private status(e: AppEntry): ExternalAppInfo['status'] {
     if (!e.manifest) return 'invalid'
     if (!e.scope.trusted) return 'untrusted'
+    if (this.held(e)) return 'unconfirmed'
     const L = e.life
     if (L.gaveUp) return 'failed'
     if (L.proc?.alive) return 'running'

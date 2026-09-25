@@ -12,7 +12,7 @@ import { useIsProjectSelected, useSelectedSessionId, useSessionsOf, useToolMeta,
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { AppIcon, CrownIcon, DotsIcon, PlusIcon } from '../../components/icons.jsx'
+import { AppIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
 import { useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
@@ -809,6 +809,8 @@ const APP_HINT: Partial<Record<ExternalAppStatus, string>> = {
   failed: 'failed',
   untrusted: 'not trusted',
   invalid: 'invalid',
+  // 가져온 앱이 사람의 확인을 기다린다 (M4 E-3) — 열면 확인 창이 선다
+  unconfirmed: 'not enabled',
 }
 
 function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string }) {
@@ -877,11 +879,18 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
 function UserApps() {
   const apps = useUserApps()
   const [newAppOpen, setNewAppOpen] = useState(false)
+  // 가져오기 (M4 E-3) — 창은 앱 전체에 하나다(딥링크도 같은 창을 연다), 그래서 스토어가 연다
+  const openImport = useStore((s) => s.openImport)
   return (
     <section className="border-b border-edge/70 py-2.5" data-testid="user-apps">
       <header className="flex items-center gap-2 px-3">
         <span className={`text-[13px] font-medium tracking-tight ${apps.length ? 'text-chalk' : 'text-slate'}`}>Your apps</span>
         <span className="-my-1 ml-auto shrink-0">
+          <IconButton label="Import an app from a folder, a .zip, or a link" onClick={() => openImport()} testId="user-apps-import" align="right">
+            <ImportIcon size={13} />
+          </IconButton>
+        </span>
+        <span className="-my-1 shrink-0">
           <IconButton label="New app for every project" onClick={() => setNewAppOpen(true)} testId="user-apps-new" align="right">
             <PlusIcon size={13} />
           </IconButton>

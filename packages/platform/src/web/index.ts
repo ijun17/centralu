@@ -249,6 +249,10 @@ class WebSystemPort implements SystemPort {
     // 브라우저에는 디렉토리 피커가 없다 — dev 전용 폴백
     return window.prompt('Enter the full path of the project directory', '')
   }
+  async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
+    // 디렉토리 피커와 같은 폴백 — 브라우저의 파일 선택은 경로를 주지 않는다(host가 읽을 경로가 필요하다)
+    return window.prompt(`${opts.title} — enter the full path (${opts.extensions.map((e) => `.${e}`).join(', ')})`, '')
+  }
   async openInIde(_path: string, _line?: number) {
     /* Tauri에서만 (capability로 UI가 비활성) */
   }
@@ -356,6 +360,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       setSecret: async (appId, projectId, name, value) => {
         await rpc.call('apps.setSecret', { appId, projectId, name, value })
       },
+      importPrepare: (source) => rpc.call('apps.importPrepare', { source }),
+      importCommit: (token, { enable, reviewKey }) =>
+        rpc.call('apps.importCommit', { token, enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }),
+      importCancel: async (token) => {
+        await rpc.call('apps.importCancel', { token })
+      },
+      review: (appId, projectId) => rpc.call('apps.review', { appId, projectId }),
+      enable: (appId, projectId, reviewKey) => rpc.call('apps.enable', { appId, projectId, reviewKey }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

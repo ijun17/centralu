@@ -128,6 +128,12 @@ class TauriSystemPort implements SystemPort {
     return pickDirectory()
   }
 
+  /** 파일 하나 (M4 E-3 — 가져올 .zip). 다이얼로그 플러그인의 `open`이라 권한은 이미 준 `dialog:default` 그대로다 */
+  async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
+    const picked = await openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] })
+    return typeof picked === 'string' ? picked : null
+  }
+
   async startWindowDrag(): Promise<void> {
     await getCurrentWindow().startDragging()
   }

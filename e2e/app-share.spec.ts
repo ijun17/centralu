@@ -21,6 +21,7 @@ type AppInfo = {
   error: string | null
   warnings: string[]
   secrets?: { name: string; set: boolean }[]
+  imported?: { source: string; at: number; confirmedAt: number | null }
 }
 
 function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {}): AppInfo {
@@ -130,5 +131,148 @@ test.describe('비밀 칸 (E)', () => {
     await slot.getByTestId('secret-save').click()
     await expect(toggle).toHaveText('Secrets · 1 set')
     expect(await everythingOnScreen(page)).not.toContain(VALUE)
+  })
+})
+
+/** host가 돌려줄 확인 창 — 목의 `importSources`에 꽂는다 */
+function review(over: Record<string, unknown> = {}) {
+  return {
+    appId: 'notes',
+    name: 'Notes',
+    version: '1.2.0',
+    description: 'Shared notes for the team.',
+    server: { command: 'node', args: ['server.mjs', '--port', '3'] },
+    uses: { agent: true, apps: ['other'] },
+    secrets: ['API_KEY'],
+    home: 'show',
+    viewOrigin: 'opaque',
+    files: [
+      { path: 'centralu.app.json', bytes: 420 },
+      { path: 'server.mjs', bytes: 2048 },
+      { path: 'ui/index.html', bytes: 900 },
+    ],
+    totalBytes: 3368,
+    skipped: [{ path: '.claude/', why: 'hidden' }],
+    warnings: [],
+    reviewKey: 'k'.repeat(64),
+    source: '/tmp/notes.zip',
+    changed: null,
+    ...over,
+  }
+}
+
+const mockList = <T,>(page: Page, name: string) => page.evaluate((n) => (window as any).__mock[n] as T, name)
+
+test.describe('가져오기 (E-3)', () => {
+  test('출처를 고르고 Review를 누르면 무엇을 돌리는지·무엇을 쓰는지·비밀·파일이 보이고, "Import and enable"은 들이며 켜서 앱을 연다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())
+    await page.getByTestId('user-apps-import').click()
+    const dialog = page.getByTestId('import-app-dialog')
+    await expect(dialog).toBeVisible()
+    // Review를 누르기 전에는 host에 아무것도 가지 않는다
+    await dialog.getByTestId('import-source').fill('/tmp/notes.zip')
+    expect(await mockList<string[]>(page, 'importPrepares')).toEqual([])
+    await dialog.getByTestId('import-review').click()
+
+    const details = dialog.getByTestId('app-review')
+    await expect(details.getByTestId('review-command')).toHaveText('node server.mjs --port 3')
+    await expect(details.getByTestId('review-uses')).toContainText('Run your default agent in a new session')
+    await expect(details.getByTestId('review-uses')).toContainText('Call other apps: other')
+    await expect(details.getByTestId('review-secrets')).toContainText('API_KEY')
+    await expect(details.getByTestId('review-file-list')).toContainText('server.mjs')
+    await expect(details.getByTestId('review-file-list')).toContainText('ui/index.html')
+    await expect(details.getByTestId('review-skipped')).toHaveText('Not copied: .claude/ (hidden)')
+    await expect(details.getByTestId('review-source')).toHaveText('From /tmp/notes.zip')
+    // 아직 들어온 것이 아니다
+    expect(await mockList<unknown[]>(page, 'importCommits')).toEqual([])
+    await expect(page.getByTestId('app-row-_user/notes')).toHaveCount(0)
+
+    await dialog.getByTestId('import-enable').click()
+    await expect(dialog).toHaveCount(0)
+    expect(await mockList<unknown[]>(page, 'importCommits')).toEqual([{ token: expect.any(String), enable: true, appId: 'notes' }])
+    // 켰으니 앱이 열린다 — host가 home을 부른다
+    await expect(page.getByTestId('pinned-app-_user/notes')).toBeVisible()
+    await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: null }])
+  })
+
+  test('"Import"는 꺼진 채 들인다 — 줄은 "not enabled"이고 고정 화면은 확인을 보이며, Enable을 누르면 그 자리에서 앱이 뜬다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())
+    await page.getByTestId('user-apps-import').click()
+    const dialog = page.getByTestId('import-app-dialog')
+    await dialog.getByTestId('import-source').fill('/tmp/notes.zip')
+    await dialog.getByTestId('import-review').click()
+    await dialog.getByTestId('import-commit').click()
+    await expect(dialog).toHaveCount(0)
+
+    await expect(page.getByTestId('app-row-_user/notes').getByTestId('app-row-hint')).toHaveText('not enabled')
+    const pinned = page.getByTestId('pinned-app-_user/notes')
+    const gate = pinned.getByTestId('pinned-review')
+    await expect(gate.getByTestId('pinned-review-title')).toHaveText('This app was imported. Review it before it runs.')
+    await expect(gate.getByTestId('review-command')).toHaveText('node server.mjs --port 3')
+    // 켜기 전에는 부르지 않는다 — home도
+    expect(await mockList<unknown[]>(page, 'openedViews')).toEqual([])
+
+    await gate.getByTestId('pinned-enable').click()
+    await expect.poll(() => mockList<string[]>(page, 'enabledApps')).toEqual(['notes'])
+    await expect(pinned.getByTestId('pinned-review')).toHaveCount(0)
+    await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: null }])
+    await expect(page.getByTestId('app-row-_user/notes').getByTestId('app-row-hint')).toHaveCount(0)
+  })
+
+  test('host의 거절은 창에 그 말 그대로 서고 아무것도 들이지 않으며, 창을 닫으면 대기실을 치운다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(() => {
+      const m = (window as any).__mock
+      m.importRefusals.set('/tmp/evil.zip', "An entry's path leaves the archive or is malformed: ../evil.txt")
+    })
+    await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())
+    await page.getByTestId('user-apps-import').click()
+    const dialog = page.getByTestId('import-app-dialog')
+    await dialog.getByTestId('import-source').fill('/tmp/evil.zip')
+    await dialog.getByTestId('import-review').click()
+    await expect(dialog.getByTestId('import-error')).toHaveText("An entry's path leaves the archive or is malformed: ../evil.txt")
+    await expect(dialog.getByTestId('app-review')).toHaveCount(0)
+
+    // 준비까지 한 것을 닫으면 host의 대기실이 치워진다
+    await dialog.getByTestId('import-source').fill('/tmp/notes.zip')
+    await dialog.getByTestId('import-review').click()
+    await expect(dialog.getByTestId('app-review')).toBeVisible()
+    await dialog.getByTestId('import-cancel').click()
+    await expect(dialog).toHaveCount(0)
+    await expect.poll(() => mockList<string[]>(page, 'importCancels')).toHaveLength(1)
+    expect(await mockList<unknown[]>(page, 'importCommits')).toEqual([])
+  })
+
+  test('켠 뒤 바뀐 앱은 다시 묻고, 무엇을 돌리던 앱이었는지를 보인다', async ({ page }) => {
+    await page.goto('/?mock=1')
+    const changed = review({
+      server: { command: 'node', args: ['server.mjs', '--port', '4'] },
+      changed: { server: true, uses: false, was: { server: { command: 'node', args: ['server.mjs', '--port', '3'] }, uses: { agent: true, apps: ['other'] } } },
+    })
+    await page.evaluate((r) => (window as any).__mock.appReviews.set('_user/notes', r), changed)
+    await setApps(page, [
+      app('notes', null, {
+        name: 'Notes',
+        status: 'unconfirmed',
+        error: 'This app changed what it runs or what it uses since you enabled it. Review it and enable it again',
+        imported: { source: '/tmp/notes.zip', at: 1, confirmedAt: 2 },
+      } as Partial<AppInfo>),
+    ])
+    await page.getByTestId('app-row-_user/notes').click()
+    const gate = page.getByTestId('pinned-app-_user/notes').getByTestId('pinned-review')
+    await expect(gate.getByTestId('pinned-review-title')).toHaveText('This app changed. Review it before it runs again.')
+    await expect(gate.getByTestId('review-changed')).toContainText('It used to run node server.mjs --port 3')
+    await expect(gate.getByTestId('review-command')).toHaveText('node server.mjs --port 4')
+    // 설정의 줄은 어디서 왔는지와 확인으로 가는 길을 준다
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-tab-apps').click()
+    const row = page.getByTestId('external-app-_user/notes')
+    await expect(row.getByTestId('external-app-status')).toHaveText('Needs review')
+    await expect(row.getByTestId('external-app-imported')).toHaveText('Imported from /tmp/notes.zip')
+    await row.getByTestId('external-app-review').click()
+    await expect(page.getByTestId('settings')).toHaveCount(0)
+    await expect(gate).toBeVisible()
   })
 })

@@ -146,6 +146,8 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'apps.errors': { appId: 'no-such-app', projectId: P },
   // 화면을 연 적 없는 대화 — 들고 있는 화면이 없다 (M4 B-1)
   'apps.inlineViews': { sessionId: S },
+  // 없는 가져오기를 그만둔다 — 조용히 지나간다 (M4 E-3)
+  'apps.importCancel': { token: 'no-such-import' },
   // 능력 물음과 기억된 답 (M4 D-4) — 묻고 있는 것이 없고, 없는 앱에는 기억된 답이 없다(빈 목록). 잊기는 없는 것을 잊어도 된다
   'apps.questions': {},
   'apps.permissions': { appId: 'no-such-app', projectId: P },
@@ -178,6 +180,10 @@ const SKIP: Record<string, string> = {
   'apps.sendError': '앱의 오류 묶음과 만드는 세션(진짜 에이전트)이 필요 — builder-requests.test.ts가 관통',
   'apps.answerQuestion': '화면에서 시작된 사슬의 능력 물음이 떠 있어야 함 (sessions/app-capabilities.test.ts가 진짜 앱으로 관통)',
   'apps.setSecret': '비밀을 선언한 앱이 필요 — 비밀 값을 이 기계에 쓴다 (app-secrets.test.ts가 진짜 앱으로 관통)',
+  'apps.importPrepare': '가져올 폴더나 zip이 필요 — 데이터 폴더의 대기실에 쓴다 (apps/external/imports.test.ts·platform.contract.test.ts가 관통)',
+  'apps.importCommit': '준비한 가져오기의 토큰이 필요 — 사용자 폴더에 앱을 들인다 (같은 시험이 관통)',
+  'apps.review': '가져온 앱이 필요 (같은 시험이 관통)',
+  'apps.enable': '가져온 앱과 그 확인 창의 열쇠가 필요 (같은 시험이 관통)',
 }
 
 const ok: string[] = []

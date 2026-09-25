@@ -106,8 +106,10 @@ export type AppId = z.infer<typeof AppId>
  *   running     떠 있다
  *   crashed     마지막 기동이나 실행이 실패했다 (`error`에 이유). 다음 필요가 백오프 뒤 다시 띄운다
  *   failed      연달아 실패해 멈췄다 — `apps.restart` 전까지 뜨지 않는다
+ *   unconfirmed 밖에서 가져온 앱인데 사람이 아직 켜지 않았거나, 켠 뒤 `server`·`uses`가 바뀌었다 (M4 E-3). `untrusted`처럼
+ *               **뜨지 않고** 세션에 붙지 않으며 모든 호출이 거절된다 — 사람이 `apps.review`로 보고 `apps.enable`로 켤 때까지
  */
-export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'stopped', 'starting', 'running', 'crashed', 'failed'])
+export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'unconfirmed', 'stopped', 'starting', 'running', 'crashed', 'failed'])
 export type ExternalAppStatus = z.infer<typeof ExternalAppStatus>
 
 /**
@@ -146,8 +148,57 @@ export const ExternalAppInfo = z.object({
    * 목록은 방송마다 다시 읽히는 것이라, 화면이 보일 것(빈 칸이 있다)만 싣는다. 값을 넣고 지우는 문은 `apps.setSecret`이다.
    */
   secrets: z.array(z.object({ name: z.string(), set: z.boolean() })).optional(),
+  /**
+   * 밖에서 가져온 사용자 폴더 앱이면 그 표시 (M4 E-3) — 어디서 왔나, 언제, 사람이 켠 때(켜지 않았으면 null). 표시는 host가 앱
+   * 폴더 밖에 든다. 켜지 않았거나 켠 뒤 `server`·`uses`가 바뀌었으면 상태가 `unconfirmed`다.
+   */
+  imported: z.object({ source: z.string(), at: z.number(), confirmedAt: z.number().nullable() }).optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
+
+/**
+ * 켜기 전에 사람이 보는 것 (M4 E-3) — 가져올 앱(또는 다시 물어야 하는 가져온 앱)이 **무엇을 돌리는지**(`server`), **무엇을 쓰겠다는지**
+ * (`uses`), 어떤 비밀을 원하는지, 어떤 파일이 들어오는지. 옮기지 않은 것(점으로 시작하는 이름, 링크)도 이유와 함께 적는다.
+ *
+ * `reviewKey`는 켜기가 묶이는 것(server와 uses)의 열쇠다. 켤 때 이것을 그대로 돌려보내고, host는 **그때의** 매니페스트와 대 본다 —
+ * 사람이 본 것과 켜지는 것이 같아야 한다. `changed`는 다시 묻는 것일 때 켠 뒤 무엇이 바뀌었는지다(처음 가져오는 것이면 null).
+ */
+/** 매니페스트의 `uses` — 앱이 쓰겠다고 선언한 능력(M4 D). `agent`는 `true`(사람의 기본 에이전트)거나 도구 이름의 목록이다 */
+export const AppUses = z.object({
+  agent: z.union([z.boolean(), z.array(z.string())]).optional(),
+  apps: z.array(z.string()).optional(),
+  host: z.array(z.string()).optional(),
+})
+export type AppUses = z.infer<typeof AppUses>
+
+export const AppReview = z.object({
+  appId: AppId,
+  name: z.string(),
+  version: z.string(),
+  description: z.string(),
+  server: z.object({ command: z.string(), args: z.array(z.string()) }),
+  uses: AppUses,
+  secrets: z.array(z.string()),
+  home: z.string().nullable(),
+  viewOrigin: z.enum(['opaque', 'app']),
+  files: z.array(z.object({ path: z.string(), bytes: z.number() })),
+  totalBytes: z.number(),
+  skipped: z.array(z.object({ path: z.string(), why: z.string() })),
+  warnings: z.array(z.string()),
+  reviewKey: z.string(),
+  source: z.string(),
+  changed: z
+    .object({
+      server: z.boolean(),
+      uses: z.boolean(),
+      was: z.object({
+        server: z.object({ command: z.string(), args: z.array(z.string()) }),
+        uses: AppUses,
+      }),
+    })
+    .nullable(),
+})
+export type AppReview = z.infer<typeof AppReview>
 
 /**
  * 외부 앱의 실행 한 번 (M4 A-6) — 누가(화면·세션·앱) 어느 도구를 불렀고 어떻게 끝났나.

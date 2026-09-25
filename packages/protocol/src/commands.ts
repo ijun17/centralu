@@ -17,6 +17,7 @@ import {
   AppUsage,
   AppQuestion,
   AppRun,
+  AppReview,
   UsageSnapshot,
   GitFileStatus,
   ModelOption,
@@ -1247,6 +1248,44 @@ export const RpcMethods = {
       value: z.string().max(16 * 1024).nullable(),
     }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 앱을 가져올 준비 (M4 E-3) — 이 기계의 폴더나 .zip(경로 또는 `file:` 주소), 또는 https 주소의 .zip을 host의 대기실로 옮겨 담고,
+   * 사람이 볼 것(`review`)을 돌려준다. **아직 들어온 것이 아니다**: 대기실은 발견이 훑지 않는 자리라 아무것도 뜨지 않는다. 링크가
+   * 폴더 밖을 가리키거나, 이름이 밖으로 새거나(zip slip), 상한을 넘거나, id가 규칙에 맞지 않거나 이미 있으면 이유와 함께 실패하고
+   * 대기실을 치운다. 들어오게 하는 것은 `apps.importCommit`, 그만두는 것은 `apps.importCancel`이다(대기실은 30분 뒤 스스로 치워진다).
+   */
+  'apps.importPrepare': {
+    params: z.object({ source: z.string().max(4096) }),
+    result: z.object({ token: z.string(), review: AppReview }),
+  },
+  /**
+   * 대기실의 앱을 사용자 폴더로 들인다 (M4 E-3). 가져온 앱은 **꺼진 채**(`unconfirmed`) 들어온다. `enable`이면 들인 뒤 사람의 확인을
+   * 적는다 — 그때 `reviewKey`는 준비할 때 받은 그 열쇠여야 한다(사람이 본 것이 켜지는 것이다). 그 사이 같은 id가 생겼으면 거절한다.
+   */
+  'apps.importCommit': {
+    params: z.object({ token: z.string(), enable: z.boolean().default(false), reviewKey: z.string().optional() }),
+    result: ExternalAppInfo,
+  },
+  'apps.importCancel': {
+    params: z.object({ token: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * 들어온 앱을 다시 본다 (M4 E-3) — 켜지 않은 가져온 앱, 또는 켠 뒤 `server`·`uses`가 바뀌어 다시 물어야 하는 앱의 확인 창이 읽는다.
+   * 다시 묻는 것이면 `changed`가 켠 때의 선언을 싣는다. 사용자 폴더의 앱만 받는다(프로젝트 앱은 프로젝트 신뢰를 따른다).
+   */
+  'apps.review': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: AppReview,
+  },
+  /**
+   * 가져온 앱을 켠다 (M4 E-3) — host가 이 앱의 확인을 적는다. `reviewKey`는 사람이 본 확인 창의 열쇠이고, host는 지금의 매니페스트와
+   * 대 본다: 그 사이 바뀌었으면 거절한다(다시 보고 켠다). 가져온 앱이 아니면 거절한다 — 켤 것이 없다.
+   */
+  'apps.enable': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable(), reviewKey: z.string() }),
+    result: ExternalAppInfo,
   },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */

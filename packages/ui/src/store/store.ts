@@ -834,6 +834,13 @@ export type AppState = {
   togglePalette(open?: boolean): void
   toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
+  /**
+   * 앱 가져오기 창 (M4 E-3) — 사이드바의 Import와 딥링크(E-4)가 연다. `source`는 창에 미리 채울 출처(딥링크의 주소)이고, `fromLink`면
+   * 창이 "링크가 연 것"임을 말한다. 창은 사람이 Review를 누르기 전에는 아무것도 읽거나 내려받지 않는다.
+   */
+  importDialog: { source: string; fromLink: boolean; at: number } | null
+  openImport(source?: string, fromLink?: boolean): void
+  closeImport(): void
   /** `/model` GUI 커맨드 — 그 세션의 설정 메뉴(모델·강도·권한)를 연다 */
   requestSettingsMenu(sessionId: string): void
   /** 지금 확인한다 (설정의 버튼). 실패는 화면에 남되 던지지 않는다 */
@@ -1576,6 +1583,7 @@ export const useStore = create<AppState>((set, get) => ({
   usageOpen: false,
   settingsOpen: false,
   notifyPolicy: DEFAULT_NOTIFY_POLICY,
+  importDialog: null as { source: string; fromLink: boolean; at: number } | null,
   update: null,
   prefs: DEFAULT_UI_PREFERENCES,
 
@@ -2548,6 +2556,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
   toggleSettings(open) {
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))
+  },
+  openImport(source = '', fromLink = false) {
+    // `at`이 있어야 열린 창에 새 링크가 와도 창이 그 링크로 다시 선다(같은 창을 두 번 여는 요청)
+    set({ importDialog: { source, fromLink, at: Date.now() }, settingsOpen: false })
+  },
+  closeImport() {
+    set({ importDialog: null })
   },
   requestSettingsMenu(sessionId) {
     set({ settingsMenuRequest: { sessionId, at: Date.now() } })

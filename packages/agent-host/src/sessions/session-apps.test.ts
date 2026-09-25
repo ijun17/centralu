@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MANIFEST_FILE } from '../apps/external/manifest.js'
 import * as kit from '../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
-import { attachWorld, type AttachWorld } from './session-apps.test-helpers.js'
+import { FIXTURE_APP, attachWorld, type AttachWorld } from './session-apps.test-helpers.js'
 
 /**
  * 어느 세션이 어느 앱을 받는가 (M4 A-5, 결정 4) — 진짜 런타임과 진짜 앱 프로세스로 본다.
@@ -69,6 +69,23 @@ describe('결정 4 — 붙는 앱', () => {
     await w.rt.restart({ projectId: 'p1', appId: 'broken' })
     await kit.until(() => heard, (n) => n > 1)
     expect(a.current().map((x) => x.server)).toEqual(['app-broken', 'app-notes'])
+  })
+
+  it('가져온 앱은 사람이 켜기 전에는 오케스트레이터에 붙지 않고, 이름으로 불러도 막히며, 켜면 붙는다 (M4 E-3)', async () => {
+    const source = kit.plantApp(join(w.root, 'src'), 'imp', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
+    const { token, review } = await w.rt.prepareImport(source)
+    w.rt.commitImport(token, { enable: false })
+    const a = hub.attach(ORCH)
+    expect(a.current().map((x) => x.server)).toEqual(['app-helper'])
+    // Codex 스레드처럼 옛 이름을 들고 있어도 — 부를 때마다 런타임이 다시 막는다
+    const refused = await w.rt.call({ projectId: null, appId: 'imp' }, 'peek', {}, { kind: 'session', sessionId: 'o1' })
+    expect(refused).toMatchObject({ status: 'rejected', error: expect.stringContaining('not enabled yet') })
+
+    let heard = 0
+    a.onChange(() => heard++)
+    w.rt.enableApp({ projectId: null, appId: 'imp' }, review.reviewKey)
+    await kit.until(() => heard, (n) => n > 0)
+    expect(a.current().map((x) => x.server)).toEqual(['app-helper', 'app-imp'])
   })
 })
 

@@ -344,6 +344,24 @@ export function createRpcHandler(
       requireExternalApps().updateSecret({ appId, projectId }, name, value)
       return { ok: true as const }
     },
+    // 가져오기 (M4 E-3) — 준비(대기실) → 사람이 본다 → 들이기(꺼진 채로, 원하면 확인까지). 판정은 모두 런타임의 건네기가 한다
+    'apps.importPrepare': async (p) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
+    'apps.importCommit': async (p) => {
+      const { token, enable, reviewKey } = RpcMethods['apps.importCommit'].params.parse(p)
+      return requireExternalApps().commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) })
+    },
+    'apps.importCancel': async (p) => {
+      requireExternalApps().cancelImport(RpcMethods['apps.importCancel'].params.parse(p).token)
+      return { ok: true as const }
+    },
+    'apps.review': async (p) => {
+      const { appId, projectId } = RpcMethods['apps.review'].params.parse(p)
+      return requireExternalApps().reviewApp({ appId, projectId })
+    },
+    'apps.enable': async (p) => {
+      const { appId, projectId, reviewKey } = RpcMethods['apps.enable'].params.parse(p)
+      return requireExternalApps().enableApp({ appId, projectId }, reviewKey)
+    },
     'apps.create': async (p) => mgr.createApp(RpcMethods['apps.create'].params.parse(p)),
     'apps.builder': async (p) => {
       const { appId, projectId } = RpcMethods['apps.builder'].params.parse(p)

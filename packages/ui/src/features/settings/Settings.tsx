@@ -411,6 +411,8 @@ function AppsSettings() {
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
   const trustProject = useStore((s) => s.setProjectTrusted)
+  const toggleSettings = useStore((s) => s.toggleSettings)
+  const openApp = useStore((s) => s.openApp)
   const removeUserApp = useStore((s) => s.removeUserApp)
   const [confirming, setConfirming] = useState(false)
   return (
@@ -438,6 +440,25 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           data-testid="external-app-trust"
         >
           Trust this project
+        </button>
+      )}
+      {/* 가져온 앱 (M4 E-3) — 어디서 왔는지, 그리고 사람의 확인을 기다리면 그 확인으로 가는 길 */}
+      {app.info.imported && (
+        <p className="mt-1 break-words text-[11px] text-slate" data-testid="external-app-imported">
+          Imported from {app.info.imported.source}
+        </p>
+      )}
+      {app.info.status === 'unconfirmed' && (
+        <button
+          type="button"
+          className="mt-1.5 rounded border border-edge bg-void px-2 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+          onClick={() => {
+            toggleSettings(false)
+            openApp(app.projectId, app.appId)
+          }}
+          data-testid="external-app-review"
+        >
+          Review and enable…
         </button>
       )}
       <SecretsLine app={app} />

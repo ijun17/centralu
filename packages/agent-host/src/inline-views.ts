@@ -396,6 +396,8 @@ export class InlineViews {
     const info = this.deps.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
     if (!info) return 'This app was removed'
     if (info.status === 'untrusted') return "This app's project is no longer trusted"
+    // 가져온 앱이 확인을 기다린다 (E-3) — 켠 뒤 무엇을 돌리는지가 바뀌었으면 화면의 HTML도 사람이 다시 보기 전의 코드다
+    if (info.status === 'unconfirmed') return info.error ?? 'This imported app is not enabled'
     if (info.status === 'invalid') return `This app's manifest is invalid: ${info.error ?? 'unknown error'}`
     return null
   }

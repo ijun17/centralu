@@ -3695,6 +3695,13 @@ export class SessionManager {
     if (!app.trusted) {
       throw Object.assign(new Error('신뢰하지 않은 프로젝트의 앱에는 만드는 세션을 두지 않습니다 — 프로젝트를 신뢰하면 앱이 뜨고 시험할 수 있습니다'), { code: 'internal' })
     }
+    /*
+     * 사람이 켜지 않은 가져온 앱 (E-3) — 만드는 세션은 그 앱 폴더에서 일하고 그 앱의 도구를 받는다. 확인 전의 코드를 에이전트가
+     * 먼저 만지게 두지 않는다: 켜는 것이 먼저다.
+     */
+    if (app.status === 'unconfirmed') {
+      throw Object.assign(new Error(`${app.error ?? 'This imported app is not enabled'}. Enable it before starting its builder`), { code: 'internal' })
+    }
     let cwd = app.dir
     const fallback = this.defaultToolFor(ref.projectId)
     if (ref.projectId !== null) {

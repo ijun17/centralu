@@ -20,6 +20,7 @@ import { Inbox } from '../features/inbox/Inbox.jsx'
 import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
 import { Settings } from '../features/settings/Settings.jsx'
+import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
@@ -168,6 +169,7 @@ export function App({ platform }: { platform: Platform }) {
           <Body />
           <CommandPalette />
           <Settings />
+          <ImportAppDialog />
           <Gust />
           <Toast />
           <GlobalKeys />
