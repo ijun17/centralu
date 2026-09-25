@@ -19,7 +19,8 @@
  * 템플릿 도우미의 모양 그대로다(S-5): fd 3 소켓을 unref하고, 받은 실행 id를 되돌려 붙인다.
  *
  * `view`는 화면(B-3)이 받는 모양을 시험한다: 상태를 서버에 두는 앱(간격 하나), 결과의
- * `structuredContent`·`isError`·`_meta`, CSP를 선언한 `ui://` 문서.
+ * `structuredContent`·`isError`·`_meta`, CSP를 선언한 `ui://` 문서. 고정 화면(B-2)의 home 후보들도
+ * 여기 있다(`home`, `no_screen`, `agent_home`, `bad_home`, `failing_home`).
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -180,6 +181,22 @@ serveStdio(() => {
       },
     )
     server.registerTool('agent_only', { description: 'Only for agents', _meta: { ui: { visibility: ['model'] } } }, async () => say('agent_only ran'))
+    // 고정 화면(B-2)의 home 후보들: 화면을 선언한 도구, 화면이 없는 도구, 에이전트에게만 열린 화면 도구,
+    // ui://가 아닌 곳을 가리키는 도구. home은 부를 때마다 적는다 — host가 정말 불렀는지를 시험이 센다
+    server.registerTool('home', { description: 'Opens the slider', _meta: { ui: { resourceUri: 'ui://fixture/main' } } }, async (ctx) => {
+      log({ t: 'home', runId: ctx.mcpReq._meta?.[RUN_META] ?? null })
+      return state()
+    })
+    server.registerTool('no_screen', { description: 'A tool with no view' }, async () => state())
+    server.registerTool(
+      'agent_home',
+      { description: 'A view only agents may open', _meta: { ui: { resourceUri: 'ui://fixture/main', visibility: ['model'] } } },
+      async () => state(),
+    )
+    server.registerTool('bad_home', { description: 'Points its view outside ui://', _meta: { ui: { resourceUri: 'https://evil.test/view' } } }, async () => state())
+    server.registerTool('failing_home', { description: 'Answers with a failure', _meta: { ui: { resourceUri: 'ui://fixture/main' } } }, async () =>
+      say('the slider is not ready', true),
+    )
     server.registerResource('main', 'ui://fixture/main', { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({
       contents: [
         {

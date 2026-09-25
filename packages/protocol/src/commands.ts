@@ -941,6 +941,33 @@ export const RpcMethods = {
     }),
   },
   /**
+   * 고정 화면을 연다 (M4 B-2). host가 매니페스트의 `home` 도구를 **화면 호출자로** 부르고(단 하나의
+   * 길: 공개 범위·실행 기록), 그 도구가 선언한 `_meta.ui.resourceUri`로 화면 인스턴스를 연다. 답에는
+   * AppFrame이 받을 것이 다 있다: 인스턴스, 그 호출의 입력과 결과(규격의 tool-input·tool-result).
+   *
+   * `home`이 없거나, 그 도구가 화면을 선언하지 않았거나, 앱에 닿지 못했으면(신뢰·기동 실패) 이유와
+   * 함께 실패하고 인스턴스를 남기지 않는다. 앱이 실패를 답했으면 연다 — 실패를 그리는 것도 화면이다.
+   */
+  'apps.openView': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: z.object({
+      instanceId: z.string(),
+      tool: z.string(),
+      resourceUri: z.string(),
+      toolInput: z.record(z.string(), z.unknown()),
+      toolResult: z.looseObject({ content: z.array(z.record(z.string(), z.unknown())) }),
+      runId: z.string(),
+    }),
+  },
+  /**
+   * 고정 화면을 닫는다 (M4 B-2). 인스턴스가 붙들던 앱을 놓는다 — 열린 화면이 없으면 쉬는 앱으로
+   * 세어 내린다(A-3). 이미 닫힌 인스턴스는 조용히 지나간다(닫기는 두 번 와도 같은 결과다).
+   */
+  'apps.closeView': {
+    params: z.object({ instanceId: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * 화면이 자기 앱의 리소스를 읽는다 (M4 B-3, 브리지의 `onreadresource`). 답은 MCP
    * `resources/read`의 결과 그대로다. 규격의 모양은 화면과 앱이 아는 것이고, 이 층은 운반만 한다.
    * `instanceId`를 주면 그 화면의 앱과 같아야 한다.

@@ -10,7 +10,9 @@ import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { useIsProjectSelected, useSelectedSessionId, useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { CrownIcon, DotsIcon, PlusIcon } from '../../components/icons.jsx'
+import { AppIcon, CrownIcon, DotsIcon, PlusIcon } from '../../components/icons.jsx'
+import { useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
@@ -158,6 +160,7 @@ export function Sidebar() {
       ) : (
         ids.map((id) => <ProjectBlock key={id} projectId={id} />)
       )}
+      <UserApps />
       {/*
         **누르는 곳과 나타나는 곳이 같아야 한다** (이슈 #4).
         예전엔 상단 바 오른쪽 끝에 있었다 — 화면 반대편을 눌러 놓고, 결과는
@@ -470,6 +473,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const [menuOpen, setMenuOpen] = useState(false)
   // 방금 등록해서 신뢰를 묻는 중인가 (M4, 결정 3) — 한 번만 묻고, 답하면 걷힌다
   const askingTrust = useStore((s) => s.trustAsk === projectId)
+  // 이 프로젝트의 앱 (M4 B-2) — 세션 아래에 같은 줄 모양으로 선다
+  const projectApps = useProjectApps(projectId)
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   /** 메뉴가 매달릴 자리 — 누른 버튼이다 (사이드바 모서리가 아니라) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
@@ -739,6 +744,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           )
         })}
       </ul>
+      <AppRows apps={projectApps} testId={`project-apps-${project.name}`} />
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {managerDialog && (
@@ -778,6 +784,91 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           }}
         />
       )}
+    </section>
+  )
+}
+
+/**
+ * 앱 줄 (M4 B-2) — 세션 줄과 같은 모양, 같은 자리. 누르면 고정 화면으로 연다.
+ *
+ * 세션과 앱이 한 목록에 서도 섞여 읽히지 않게, 표식은 **형태**로 가른다(세션은 도구 글자 칩, 앱은 창
+ * 그림). 상태는 오른쪽 끝의 한 단어뿐이고, 평소(쉬는 중·떠 있음)에는 아무것도 적지 않는다. 앱은 처음
+ * 필요할 때 뜨고 쉬면 내려가므로 "stopped"는 고장이 아니라 보통이다. 늘 적혀 있으면 정작 봐야 할
+ * 한 단어(failed)가 묻힌다. 열 수 없는 앱(신뢰하지 않음·깨짐·멈춤)은 표식을 흐리게 하고, 이유는
+ * 줄에 머물면 보인다.
+ */
+const APP_HINT: Partial<Record<ExternalAppStatus, string>> = {
+  starting: 'starting',
+  crashed: 'crashed',
+  failed: 'failed',
+  untrusted: 'not trusted',
+  invalid: 'invalid',
+}
+
+function AppRows({ apps, testId }: { apps: ExternalCatalogApp[]; testId: string }) {
+  if (apps.length === 0) return null
+  return (
+    <ul data-testid={testId}>
+      {apps.map((a) => (
+        <AppRow key={a.key} app={a} />
+      ))}
+    </ul>
+  )
+}
+
+function AppRow({ app }: { app: ExternalCatalogApp }) {
+  const openApp = useStore((s) => s.openApp)
+  // 세션 줄과 같은 규칙: 지금 그 화면을 **보고 있을 때만** 밝다(selectors의 useSelectedSessionId)
+  const active = useStore(
+    (s) => s.view === 'app' && s.focusedApp?.appId === app.appId && (s.focusedApp?.projectId ?? null) === app.projectId,
+  )
+  const hint = APP_HINT[app.info.status]
+  return (
+    <li className="relative">
+      <button
+        type="button"
+        onClick={() => openApp(app.projectId, app.appId)}
+        data-testid={`app-row-${app.key}`}
+        data-status={app.info.status}
+        aria-current={active ? 'page' : undefined}
+        title={app.status.reason ?? app.info.description ?? undefined}
+        className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-[13px] transition-colors ${
+          active ? 'border-l-ash bg-graphite/40 text-chalk' : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+        }`}
+      >
+        {/* 도구 칩(17px)과 같은 폭 — 세션 이름과 앱 이름이 같은 세로줄에서 시작한다 */}
+        <span className={`flex size-[17px] shrink-0 items-center justify-center ${app.status.runnable ? '' : 'opacity-50'}`}>
+          <AppIcon />
+        </span>
+        <span className="truncate">{app.title}</span>
+        {hint && (
+          <span
+            className={`readout ml-auto shrink-0 text-[10px] ${app.status.tone === 'alert' ? 'text-chalk' : 'text-slate'}`}
+            data-testid="app-row-hint"
+          >
+            {hint}
+          </span>
+        )}
+      </button>
+    </li>
+  )
+}
+
+/**
+ * 사용자 폴더의 앱 (M4 B-2, 결정 1) — 여러 프로젝트에서 쓰는 앱이라 어느 프로젝트 아래에도 서지 않고
+ * 자기 무리를 갖는다. 프로젝트 블록과 같은 모양의 머리글이다. 앱이 없으면 무리도 없다.
+ */
+function UserApps() {
+  const apps = useUserApps()
+  if (apps.length === 0) return null
+  return (
+    <section className="border-b border-edge/70 py-2.5" data-testid="user-apps">
+      <header className="px-3">
+        <span className="text-[13px] font-medium tracking-tight text-chalk">Your apps</span>
+      </header>
+      <div className="mt-1.5">
+        <AppRows apps={apps} testId="user-apps-list" />
+      </div>
     </section>
   )
 }

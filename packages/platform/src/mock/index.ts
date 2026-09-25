@@ -40,6 +40,7 @@ import type {
   AgentPort,
   AlertKind,
   AppCallOrigin,
+  AppHomeView,
   AppResourceResult,
   AppToolResult,
   AppViewFrame,
@@ -610,7 +611,30 @@ export class MockPlatform implements Platform {
       return found
     },
     list: async (): Promise<ExternalAppInfo[]> => structuredClone(this.externalAppList),
+    /**
+     * 고정 화면 (M4 B-2). 목에는 앱 프로세스도 ViewHost도 없다. 시험이 진짜 ViewHost의 인스턴스를 여는
+     * 함수를 꽂는다(e2e/apps.spec.ts). 꽂지 않으면 부른 것만 적고 빈 결과의 인스턴스를 지어 준다.
+     */
+    openView: async (appId: string, projectId: string | null): Promise<AppHomeView> => {
+      this.openedViews.push({ appId, projectId })
+      if (this.openViewProvider) return this.openViewProvider(appId, projectId)
+      return {
+        instanceId: `mock-view-${++this.idc}`,
+        tool: 'home',
+        resourceUri: `ui://${appId}/home`,
+        toolInput: {},
+        toolResult: { content: [{ type: 'text', text: 'mock home' }] },
+        runId: `mock-run-${this.idc}`,
+      }
+    },
+    closeView: async (instanceId: string) => {
+      this.closedViews.push(instanceId)
+    },
   }
+  /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */
+  readonly openedViews: { appId: string; projectId: string | null }[] = []
+  readonly closedViews: string[] = []
+  openViewProvider: ((appId: string, projectId: string | null) => Promise<AppHomeView>) | null = null
   /** 발견된 외부 앱 (M4 A-8) — 시험이 `setExternalApps`로 채운다. 목의 발견은 이 배열이다 */
   externalAppList: ExternalAppInfo[] = []
   /** host가 하는 대로: 목록을 바꾸고 `external_apps_changed`를 방송한다 */

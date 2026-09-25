@@ -11,7 +11,7 @@
  *
  * "지금 보고 있는 것이 끝났다"는 사실 하나만 몸으로 알려주는 게 이 애니메이션의 몫이다.
  */
-export type View = 'focus' | 'grid' | 'orchestrator'
+export type View = 'focus' | 'grid' | 'orchestrator' | 'app'
 
 export type Onscreen = {
   focusedSessionId: string | null
@@ -22,6 +22,8 @@ export type Onscreen = {
 export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolean {
   if (view === 'focus') return ctx.focusedSessionId === sessionId
   if (view === 'orchestrator') return ctx.orchestratorId === sessionId
+  // 고정 화면(M4 B-2)이 메인 영역을 차지하고 있다 — 어느 세션의 대화도 보이지 않는다
+  if (view === 'app') return false
   // 그리드는 여러 개가 동시에 보인다 — 그중 하나만 끝나도 화면에서 끝난 것이다
   return ctx.gridPanels.includes(sessionId)
 }

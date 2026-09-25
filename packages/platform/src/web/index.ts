@@ -313,6 +313,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
       list: () => rpc.call('apps.list', {}),
+      // 답의 결과는 앱이 준 MCP 결과 그대로다 — 모양은 화면과 앱이 아는 것이라 여기서는 옮기기만 한다
+      openView: async (appId, projectId) => {
+        const v = await rpc.call('apps.openView', { appId, projectId })
+        return { ...v, toolResult: v.toolResult as AppToolResult }
+      },
+      closeView: async (instanceId) => {
+        await rpc.call('apps.closeView', { instanceId })
+      },
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

@@ -28,3 +28,19 @@ export function visibilityOf(tool: Tool): { ok: true; visibility: Audience[] } |
   }
   return { ok: true, visibility: [...new Set(v as Audience[])] }
 }
+
+/**
+ * 도구가 선언한 화면 (MCP Apps `_meta.ui.resourceUri`, 옛 모양 `_meta["ui/resourceUri"]`) — B-2.
+ *
+ * 새 모양이 있으면 그것이 이긴다(ext-apps `getToolUiResourceUri`와 같은 순서). `ui://`가 아닌 값은
+ * 화면이 아니라 **틀린 선언**이다. 없는 것과 같게 읽으면 작성자는 왜 화면이 안 뜨는지 알 길이 없다.
+ */
+export function resourceUriOf(tool: Tool): { uri: string | null; error: string | null } {
+  const meta = tool._meta as { ui?: { resourceUri?: unknown }; 'ui/resourceUri'?: unknown } | undefined
+  const raw = meta?.ui?.resourceUri ?? meta?.['ui/resourceUri']
+  if (raw === undefined) return { uri: null, error: null }
+  if (typeof raw !== 'string' || !raw.startsWith('ui://')) {
+    return { uri: null, error: `${tool.name}: _meta.ui.resourceUri must be a ui:// URI (got ${JSON.stringify(raw)})` }
+  }
+  return { uri: raw, error: null }
+}

@@ -10,7 +10,7 @@ import { PROJECT_APPS_REL, USER_APPS_REL, scanApps, type ScannedApp } from './di
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
 import { SecretStore, redactor } from './secrets.js'
-import { visibilityOf, type Audience } from './visibility.js'
+import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
 /**
  * 외부 앱 런타임 (M4 A) — **코어가 외부 앱에 대해 아는 문은 이 파일 하나다.**
@@ -493,6 +493,29 @@ export class ExternalApps {
       const now = this.find(ref)
       if (now) this.armIdle(now)
     }
+  }
+
+  /**
+   * 고정 화면을 여는 도구와 그 화면 (B-2) — 매니페스트의 `home`과, 그 도구가 선언한
+   * `_meta.ui.resourceUri`. 도구 목록을 알아야 해서 앱이 내려가 있으면 **여기서 띄운다**.
+   *
+   * 화면을 선언하지 않은 도구는 받지 않는다. 고정 화면은 도구 호출에서 태어나는 화면이고(플랜 "화면이
+   * 뜨는 두 자리"), 화면이 없는 도구를 부르면 결과만 남고 띄울 것이 없다. 그때 호출부터 해 버리면
+   * 사람은 아무것도 안 뜬 채로 앱의 상태만 바뀐 것을 보게 된다. 그래서 부르기 **전에** 거절한다.
+   * 이유는 화면에 그대로 보이므로 사람의 말로 적는다.
+   */
+  async homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
+    const e = this.require(ref)
+    if (!e.manifest) throw new AppUnavailableError(`This app's manifest is invalid: ${e.error ?? 'unknown error'}`)
+    const home = e.manifest.home
+    if (!home) throw new AppUnavailableError('This app has no screen: its manifest names no home tool')
+    const all = await this.use(e, async () => e.life.tools ?? [])
+    const found = all.find((t) => t.tool.name === home)
+    if (!found) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" is not in its tool list`)
+    const ui = resourceUriOf(found.tool)
+    if (ui.error) throw new AppUnavailableError(`This app's screen is declared wrong: ${ui.error}`)
+    if (!ui.uri) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" declares no _meta.ui.resourceUri`)
+    return { tool: home, resourceUri: ui.uri }
   }
 
   /**

@@ -58,6 +58,13 @@ export type AppFrameProps = {
   changeSignal?: number
   /** 화면이 대화에 보내는 말(`ui/message`). 없으면 거절로 답한다. 어디로 보낼지는 부모가 정한다 */
   onMessage?: (message: AppFrameMessage) => void | Promise<void>
+  /**
+   * 고정 화면(B-2): 화면이 놓인 자리를 채운다. 높이는 화면(`size-changed`)이 아니라 자리가 정하고,
+   * 화면에는 그 크기를 고정 크기로 알린다(`containerDimensions: { height, width }`). 넘치는 내용은
+   * 화면 안에서 스크롤된다. 대화 안 화면은 내용만큼 자라지만, 메인 영역을 차지한 화면이 제 키를
+   * 정하면 짧은 앱은 영역 위쪽에 띠로 남고 긴 앱은 영역 밖으로 나간다.
+   */
+  fill?: boolean
   className?: string
 }
 
@@ -123,14 +130,14 @@ function styleVariables(el: Element | null): Record<string, string> {
  * 100px 상자가 200 장치 픽셀, 안쪽 devicePixelRatio 2). 그래서 규격의 글꼴 크기 변수를 배율만큼
  * 키워 보내면 두 번 커진다.
  */
-function hostContext(scale: number, el: Element | null): McpUiHostContext {
+function hostContext(scale: number, el: Element | null, fill = false): McpUiHostContext {
   const variables = styleVariables(el)
   return {
     theme: 'dark',
     platform: 'desktop',
     displayMode: 'inline',
     availableDisplayModes: ['inline'],
-    containerDimensions: { maxHeight: MAX_HEIGHT },
+    containerDimensions: fill ? fillDimensions(el) : { maxHeight: MAX_HEIGHT },
     locale: navigator.language,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     ...(Object.keys(variables).length ? { styles: { variables: variables as never } } : {}),
@@ -138,11 +145,21 @@ function hostContext(scale: number, el: Element | null): McpUiHostContext {
   }
 }
 
+/**
+ * 채우는 화면의 크기. 숨겨진 자리(다른 것을 보는 동안의 고정 화면, `display: none`)는 0이다 —
+ * 0을 알리면 화면이 자기를 접는다. 그때는 모른다고 말한다(`maxHeight`만).
+ */
+function fillDimensions(el: Element | null): McpUiHostContext['containerDimensions'] {
+  const h = el?.clientHeight ?? 0
+  const w = el?.clientWidth ?? 0
+  return h > 0 && w > 0 ? { height: h, width: w } : { maxHeight: MAX_HEIGHT }
+}
+
 type Phase = 'loading' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
-  { appId, projectId = null, instanceId, toolInput, toolResult, changeSignal, onMessage, className },
+  { appId, projectId = null, instanceId, toolInput, toolResult, changeSignal, onMessage, fill = false, className },
   ref,
 ) {
   const platform = usePlatform()
@@ -162,6 +179,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   onMessageRef.current = onMessage
   const scaleRef = useRef(scale)
   scaleRef.current = scale
+  const fillRef = useRef(fill)
+  fillRef.current = fill
   const sent = useRef({ input: false, result: false, change: undefined as number | undefined })
   const changeRef = useRef(signal)
   changeRef.current = signal
@@ -213,7 +232,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           sandbox: { csp: frame.sandbox.csp, permissions: frame.sandbox.permissions },
           experimental: { [CHANGED_NOTIFICATION]: {} },
         },
-        { hostContext: hostContext(scaleRef.current, boxRef.current) },
+        { hostContext: hostContext(scaleRef.current, boxRef.current, fillRef.current) },
       )
       const from = { projectId, instanceId }
       // 앱은 이 컴포넌트의 것이다 — params에 무엇이 실려 와도 appId는 여기서 정한다
@@ -228,6 +247,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         return {}
       }
       bridge.onsizechange = ({ height: h }) => {
+        // 채우는 화면의 키는 자리가 정한다 — 화면이 알려 온 키로 자리를 바꾸지 않는다
+        if (fillRef.current) return
         if (typeof h === 'number' && Number.isFinite(h)) setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(h))))
       }
       bridge.onmessage = async (params) => {
@@ -241,7 +262,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       bridge.oninitialized = () => {
         if (cancelled || !bridge) return
         // 연결과 초기화 사이에 글자 크기가 바뀌었으면 여기서 따라잡는다 (바뀐 칸만 나간다)
-        bridge.setHostContext(hostContext(scaleRef.current, boxRef.current))
+        bridge.setHostContext(hostContext(scaleRef.current, boxRef.current, fillRef.current))
         sent.current.change = changeRef.current
         setPhase('ready')
       }
@@ -304,8 +325,21 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b) return
-    b.setHostContext(hostContext(scale, boxRef.current))
-  }, [phase, scale])
+    b.setHostContext(hostContext(scale, boxRef.current, fill))
+  }, [phase, scale, fill])
+
+  /*
+   * 채우는 화면은 자리의 크기가 바뀔 때마다 알린다(창 크기, 사이드바 폭, 기록 패널 열고 닫기).
+   * 숨겨졌다가 다시 보일 때도 여기로 온다 — 숨은 동안의 0은 알리지 않으므로(fillDimensions),
+   * 보이는 순간의 크기가 다음 알림이 된다.
+   */
+  useEffect(() => {
+    const box = boxRef.current
+    if (!fill || phase !== 'ready' || !box || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => bridgeRef.current?.setHostContext(hostContext(scaleRef.current, box, true)))
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [fill, phase])
 
   // B-3d: 앱의 상태가 바뀌었다 — 초기화 뒤, 값이 달라질 때마다 한 번
   useEffect(() => {
@@ -357,8 +391,11 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         title={`${appId} view`}
         sandbox={PROXY_SANDBOX}
         data-testid="app-frame-iframe"
-        className="block w-full rounded-md border border-edge"
-        style={{ height, display: phase === 'ready' || phase === 'loading' ? 'block' : 'none' }}
+        className={`block w-full rounded-md border border-edge ${fill ? 'min-h-0 flex-1' : ''}`}
+        style={{
+          ...(fill ? {} : { height }),
+          display: phase === 'ready' || phase === 'loading' ? 'block' : 'none',
+        }}
       />
       {linkAsk && (
         <div className="mt-1 flex items-center gap-2 rounded-md border border-edge bg-panel px-3 py-2 text-[12px] text-chalk" data-testid="app-frame-link-ask">

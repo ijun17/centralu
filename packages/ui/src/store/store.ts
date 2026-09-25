@@ -33,7 +33,7 @@ import {
   rename as renamePure,
   type SessionSummary,
 } from '@cc/core'
-import type { ConnectionState, Platform } from '@cc/platform/ports'
+import type { AppToolResult, ConnectionState, Platform } from '@cc/platform/ports'
 import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 
@@ -160,6 +160,26 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
  */
 export function externalAppKey(projectId: string | null | undefined, appId: string): string {
   return `${projectId ?? '_user'}/${appId}`
+}
+
+/**
+ * 고정 화면 하나 (M4 B-2) — 사이드바에서 연 앱. **포커스가 옮겨 가도 산다**: 세션을 보러 갔다가 돌아와도
+ * 같은 인스턴스(같은 문서, 같은 화면 상태)다. 닫거나 앱이 사라져야 내려간다.
+ *
+ *   idle     아직 열지 않았다(또는 앱이 멈춰서 다시 열기를 기다린다). 열 수 있는 앱이면 화면이 연다
+ *   opening  host가 home을 부르는 중 — 앱이 뜨는 시간이 여기 든다
+ *   open     인스턴스가 섰다
+ *   failed   열지 못했다 — `error`가 이유다
+ */
+export type PinnedView = {
+  key: string
+  projectId: string | null
+  appId: string
+  phase: 'idle' | 'opening' | 'open' | 'failed'
+  instanceId: string | null
+  toolInput: Record<string, unknown> | undefined
+  toolResult: AppToolResult | undefined
+  error: string | null
 }
 
 /** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
@@ -811,7 +831,25 @@ export type AppState = {
    *   grid         그리드 — 눈으로 관제
    *   orchestrator 오케스트레이터 — 말로 관제
    */
-  view: 'focus' | 'grid' | 'orchestrator'
+  view: 'focus' | 'grid' | 'orchestrator' | 'app'
+  /**
+   * 고정 화면으로 보는 앱 (M4 B-2). `view`가 'app'일 때만 화면에 선다. 다른 것을 보러 가도 지우지 않는다 —
+   * 사이드바의 앱 줄을 다시 누르는 것과 되살리기가 같은 자리로 돌아온다.
+   */
+  focusedApp: { projectId: string | null; appId: string } | null
+  /** 연 고정 화면들, 연 순서대로. 보이지 않는 것도 산다(`PinnedView`) */
+  pinnedViews: PinnedView[]
+  /** 앱을 고정 화면으로 연다 — 처음이면 자리를 만들고, 이미 열려 있으면 그 화면으로 간다 */
+  openApp(projectId: string | null, appId: string): void
+  /** 자리의 인스턴스를 연다 (host가 home을 부른다). 열 수 있는 앱일 때 화면이 부른다 */
+  startPinnedView(key: string): Promise<void>
+  /**
+   * 인스턴스를 놓고 자리를 idle로 되돌린다 — 앱이 더 돌 수 없게 됐을 때(신뢰를 잃었다). 부르는 쪽이
+   * 먼저 AppFrame의 teardown을 부른다. 다시 돌 수 있게 되면 화면이 다시 연다.
+   */
+  releasePinnedView(key: string): void
+  /** 고정 화면을 닫는다 — 부르는 쪽이 먼저 teardown을 부른다. 보던 것이면 포커스 뷰로 돌아간다 */
+  closeApp(key: string): void
   /** 오케스트레이터 세션 id (아직 만든 적 없으면 null — 화면은 빈 대화 + 추천 질문) */
   orchestratorId: string | null
   /** 첫 질문으로 세션을 만드는 중 (#63) — 빈 화면이 죽은 척하지 않게 하는 표시 */
@@ -1221,7 +1259,9 @@ export const useStore = create<AppState>((set, get) => ({
   wakeLocked: {},
   panelOpen: true,
   panelLayout: defaultLayout(),
-  view: 'focus' as const,
+  view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
+  focusedApp: null as { projectId: string | null; appId: string } | null,
+  pinnedViews: [] as PinnedView[],
   gridPanels: [] as string[],
   orchestratorId: null as string | null,
   orchestratorWaking: false,
@@ -1433,6 +1473,17 @@ export const useStore = create<AppState>((set, get) => ({
         const savedView = (snap as { view?: unknown }).view
         if (savedView === 'grid') set({ view: 'grid' })
         else if (savedView === 'orchestrator') void get().openOrchestrator()
+        else if (savedView === 'app') {
+          /*
+           * 고정 화면으로 보던 앱 (B-2). 목록은 위의 첫 스냅샷에 이미 실려 있다 — 없는 앱(폴더가
+           * 사라졌다, 프로젝트를 지웠다)이면 되살리지 않고 포커스 뷰에 남는다. 열면 host가 home을
+           * 부른다: 보던 자리로 돌아오는 값이 앱 프로세스 하나다.
+           */
+          const app = snap.focusedApp
+          if (app && get().externalApps.some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
+            get().openApp(app.projectId, app.appId)
+          }
+        }
         /*
          * Layout prefs come back even when the focused session is gone (#20). They used
          * to sit inside the session check above, so a snapshot whose session had been
@@ -1527,6 +1578,7 @@ export const useStore = create<AppState>((set, get) => ({
       .save({
         focusedSessionId: s.focusedSessionId,
         view: s.view,
+        focusedApp: s.focusedApp,
         panelOpen: s.panelOpen,
         // The single-tab field predates the arrangement (#20). It keeps carrying the
         // top group's active tab so an older build reading this snapshot still lands
@@ -3320,6 +3372,79 @@ export const useStore = create<AppState>((set, get) => ({
      * 대화를 강요하지 않겠다는 이 온보딩의 전제와 정면으로 어긋난다.
      */
     set({ view, introSeen: true })
+    get().saveWorkspace()
+  },
+
+  openApp(projectId, appId) {
+    const key = externalAppKey(projectId, appId)
+    set((s) => ({
+      view: 'app',
+      focusedApp: { projectId, appId },
+      // 고른 것은 보여야 한다(focusSession과 같은 규칙) — 덮어 둔 넓은 표면은 걷는다
+      overlay: null,
+      // 화면을 골랐다 = 소개를 지나왔다 (setView와 같은 이유, #63)
+      introSeen: true,
+      ...(projectId ? { focusedProjectId: projectId } : {}),
+      pinnedViews: s.pinnedViews.some((p) => p.key === key)
+        ? s.pinnedViews
+        : [
+            ...s.pinnedViews,
+            { key, projectId, appId, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
+          ],
+    }))
+    get().saveWorkspace()
+  },
+
+  async startPinnedView(key) {
+    const platform = get().platform
+    const pv = get().pinnedViews.find((p) => p.key === key)
+    if (!platform || !pv || pv.phase !== 'idle') return
+    const patch = (fn: (p: PinnedView) => PinnedView) =>
+      set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === key ? fn(p) : p)) }))
+    patch((p) => ({ ...p, phase: 'opening', error: null }))
+    try {
+      const v = await platform.apps.openView(pv.appId, pv.projectId)
+      /*
+       * 여는 사이에 닫혔거나(자리가 없다) 앱이 막혀 다시 idle이 됐다. 막 연 인스턴스는 쓸 곳이
+       * 없다 — 놓지 않으면 아무도 보지 않는 화면이 앱을 영영 붙든다(쉬는 앱 내리기가 멈춘다).
+       */
+      const now = get().pinnedViews.find((p) => p.key === key)
+      if (!now || now.phase !== 'opening') {
+        void platform.apps.closeView(v.instanceId).catch(() => {})
+        return
+      }
+      patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult }))
+    } catch (e) {
+      if (get().pinnedViews.find((p) => p.key === key)?.phase === 'opening') {
+        patch((p) => ({ ...p, phase: 'failed', error: (e as Error).message }))
+      }
+    }
+  },
+
+  releasePinnedView(key) {
+    const pv = get().pinnedViews.find((p) => p.key === key)
+    if (!pv) return
+    if (pv.instanceId) void get().platform?.apps.closeView(pv.instanceId).catch(() => {})
+    set((s) => ({
+      pinnedViews: s.pinnedViews.map((p) =>
+        p.key === key ? { ...p, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null } : p,
+      ),
+    }))
+  },
+
+  closeApp(key) {
+    const pv = get().pinnedViews.find((p) => p.key === key)
+    if (!pv) return
+    if (pv.instanceId) void get().platform?.apps.closeView(pv.instanceId).catch(() => {})
+    set((s) => {
+      const focused = !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) === key
+      return {
+        pinnedViews: s.pinnedViews.filter((p) => p.key !== key),
+        ...(focused ? { focusedApp: null } : {}),
+        // 보던 화면을 닫았다 — 그 전에 보던 세션(focusedSessionId는 그대로다)으로 돌아간다
+        ...(focused && s.view === 'app' ? { view: 'focus' as const } : {}),
+      }
+    })
     get().saveWorkspace()
   },
 

@@ -371,6 +371,11 @@ export type WorkspaceSnapshot = {
    * forgetting. Loosely typed like panelLayout: a snapshot is a file, the UI validates.
    */
   view?: string
+  /**
+   * 고정 화면으로 보던 앱 (M4 B-2) — `view`가 'app'일 때 무엇을 보던 중이었나. 앱은 (프로젝트, id)로
+   * 하나다. 되살릴 때 그 앱이 목록에 없으면(폴더가 사라졌다) 조용히 넘긴다.
+   */
+  focusedApp?: { projectId: string | null; appId: string } | null
   /** 증거 패널(깃·파일)이 열려 있었는가 */
   panelOpen?: boolean
   /** What the evidence panel was showing — pre-#20 single-tab field, kept for old snapshots/builds */
@@ -517,6 +522,19 @@ export type AppToolResult = {
   _meta?: Record<string, unknown>
 }
 
+/**
+ * 고정 화면 하나 (M4 B-2) — host가 `home` 도구를 부르고 연 화면 인스턴스와, AppFrame이 규격대로
+ * 보낼 그 호출의 입력(tool-input)과 결과(tool-result).
+ */
+export type AppHomeView = {
+  instanceId: string
+  tool: string
+  resourceUri: string
+  toolInput: Record<string, unknown>
+  toolResult: AppToolResult
+  runId: string
+}
+
 /** MCP `resources/read`의 답 모양 */
 export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
 
@@ -548,6 +566,13 @@ export interface AppsPort {
    * 온다. 목록이 달라지면 host가 `external_apps_changed`를 방송하고, 받은 쪽이 이것을 다시 부른다.
    */
   list(): Promise<ExternalAppInfo[]>
+  /**
+   * 고정 화면을 연다 (M4 B-2) — host가 매니페스트의 `home`을 화면 호출자로 부르고 인스턴스를 연다.
+   * home이 없거나 화면을 선언하지 않았거나 앱에 닿지 못했으면 이유와 함께 실패한다.
+   */
+  openView(appId: AppId, projectId: string | null): Promise<AppHomeView>
+  /** 고정 화면을 닫는다 — 붙들던 앱을 놓는다. 이미 닫혔으면 조용히 지나간다 */
+  closeView(instanceId: string): Promise<void>
 }
 
 /**
