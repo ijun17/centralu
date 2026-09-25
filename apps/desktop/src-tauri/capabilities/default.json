@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: dragging, notifications, global shortcuts, dialogs, opening files",
+  "description": "Main window, local pages only: our own commands, dragging, notifications, global shortcuts, dialogs, opening files",
   "windows": [
     "main"
   ],
+  "local": true,
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -16,6 +17,18 @@
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
     "dialog:default",
-    "opener:default"
+    "opener:default",
+    "allow-host-info",
+    "allow-host-error",
+    "allow-set-badge",
+    "allow-alert",
+    "allow-open-in-ide",
+    "allow-reveal-path",
+    "allow-trash-path",
+    "allow-file-manager-name",
+    "allow-focus-window",
+    "allow-window-controls-inset",
+    "allow-shortcut-keys",
+    "allow-quit-app"
   ]
 }

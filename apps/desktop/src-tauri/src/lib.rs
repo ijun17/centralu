@@ -116,7 +116,7 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
 ///
 /// 여기서 플러그인의 **JS 커맨드가 아니라 러스트 함수**를 부르기 때문에
 /// `opener:allow-reveal-item-in-dir` 권한은 필요 없다. 웹뷰가 부르는 것은 이 앱의
-/// 커맨드이고, 앱 자신의 커맨드는 capability 목록을 타지 않는다.
+/// 커맨드이고, 그 권한은 `allow-reveal-path` 하나다 (build.rs, capabilities/default.json).
 ///
 /// 오류는 **이유만** 돌려준다. 무엇을 하려다 실패했는지는 화면 쪽이 이미 알고 있어서
 /// ("Could not show a.ts: …") 여기서 한 번 더 붙이면 같은 말이 두 번 나온다.
@@ -406,6 +406,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(supervisor.clone())
         .manage(QuitApproved(quit_approved.clone()))
+        // 명령을 더하면 build.rs의 목록과 capabilities/default.json의 `allow-<명령>`도 같이
+        // 더한다. 권한이 없는 명령은 메인 창에서도 거절된다 (#143).
         .invoke_handler(tauri::generate_handler![
             host_info,
             host_error,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 
 /**
- * 데스크톱 창의 CSP와 권한 (M4 B-3b, 스파이크 S-1·S-2).
+ * 데스크톱 창의 CSP (M4 B-3b, 스파이크 S-1).
  *
  * 앱 화면은 루프백의 샌드박스 프록시(`http://127.0.0.1:<host 포트>`)를 iframe으로 띄운다.
  * 원래 CSP에는 `frame-src`가 없어 `default-src 'self'`로 떨어졌고, 프록시 프레임이 막혔다
@@ -13,9 +13,8 @@ import { readdirSync, readFileSync } from 'node:fs'
  * **이보다 넓히지 않는다.** `*`나 `http:`를 열면 앱 화면이 아닌 아무 페이지도 우리 창 안에
  * 뜬다. `localhost`도 열지 않는다. 같은 루프백이지만 우리 프록시는 그 이름으로 주소를 만들지 않는다.
  *
- * S-2의 규칙도 여기서 지킨다. Tauri는 `remote` 권한이 덮는 출처에 IPC 자격을 준다. 그래서
- * 127.0.0.1(또는 localhost)을 덮는 `remote` 권한을 두지 않는다. 그런 권한이 생기면 앱 화면
- * 프레임이 우리 명령을 부를 수 있다.
+ * 권한 쪽 규칙(S-2: `remote` 권한을 두지 않는다, 우리 명령은 창 `main`의 로컬 출처에만)은
+ * desktop-permissions.test.ts가 지킨다.
  */
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
@@ -47,18 +46,5 @@ describe('데스크톱 CSP', () => {
 
   it('우리 화면의 스크립트는 여전히 우리 것뿐이다', () => {
     expect(csp().get('script-src')).toEqual(["'self'"])
-  })
-})
-
-describe('데스크톱 권한 (S-2)', () => {
-  it('루프백을 덮는 remote 권한이 없다 — 있으면 앱 화면 프레임이 우리 명령을 부른다', () => {
-    const dir = 'apps/desktop/src-tauri/capabilities'
-    const files = readdirSync(new URL(`../${dir}`, import.meta.url)).filter((f) => f.endsWith('.json'))
-    expect(files.length).toBeGreaterThan(0)
-    for (const f of files) {
-      const cap = JSON.parse(read(`${dir}/${f}`)) as { remote?: { urls?: string[] } }
-      const urls = cap.remote?.urls ?? []
-      expect(urls.filter((u) => /127\.0\.0\.1|localhost|\[::1\]|\*/.test(u)), f).toEqual([])
-    }
   })
 })
