@@ -46,7 +46,7 @@ import {
   parseUiPreferences,
   sessionLiveDefaults,
 } from '@cc/protocol'
-import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
   gitSummary,
@@ -800,6 +800,29 @@ export class SessionManager {
     return this.store.projectRoots().some((p) => p.id === projectId && p.trusted)
   }
 
+  /**
+   * 이 세션에 닿는 설정 파일 (M4 결정 3, #92·#152) — 세션이 **무엇인가**로 정한다. 만들 때와 깨울 때가 이 한 곳을 쓴다.
+   *
+   *   오케스트레이터·조율 세션                    아무 파일도 — 프로젝트가 없고, 그 폴더(orchestratorHome)는 워커가
+   *                                              쓸 수 있는 자리다. 파일로 들어오는 지시가 곧 권한 상승 통로다
+   *   사용자 폴더 앱의 만드는 세션                신뢰 — 그 폴더는 사용자 자신의 것이다 (결정 3: 사용자 폴더 앱은 신뢰)
+   *   워커·매니저·프로젝트 앱의 만드는 세션       그 프로젝트의 신뢰 그대로 (#152의 워커와 같다)
+   *
+   * **도구를 받는지로 가르지 않는다.** 예전에는 어댑터가 "오케스트레이터 도구가 있으면 아무 파일도"로 갈랐는데,
+   * 워크트리 매니저(#69)와 만드는 세션(C-3)도 그 도구를 받는다. 신뢰한 프로젝트의 만드는 세션이 CLAUDE.md도,
+   * 사용자 자신의 ~/.claude(전역 bypass)도 읽지 못해서 사람이 다른 모든 자리에서 끈 승인 카드를 띄웠다.
+   *
+   * 만드는 세션인지는 명부(builderRefOf)로 본다 — 도구 묶음(`builder`)을 정하는 판정과 같다. 밖에서 가져온 앱이
+   * 생기면(아직 없다) 그 앱은 확인하기 전까지 신뢰하지 않는다(결정 3) — 그때 여기서 가른다.
+   */
+  private settingFilesFor(
+    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>,
+  ): Pick<CreateSessionOpts, 'projectTrusted' | 'noSettingFiles'> {
+    if (m.kind === 'orchestrator' || m.kind === 'coordinator') return { projectTrusted: false, noSettingFiles: true }
+    if (m.projectId === null && this.builderRefOf(m)) return { projectTrusted: true }
+    return { projectTrusted: this.projectTrusted(m.projectId) }
+  }
+
   private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
     const git = await gitSummary(path)
     /*
@@ -1187,8 +1210,9 @@ export class SessionManager {
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
-          // 저장소의 파일이 이 세션을 바꿀 수 있는가 (결정 3, #92) — 띄우는 이 순간의 신뢰
-          projectTrusted: this.projectTrusted(info.projectId),
+          // 어느 설정 파일이 이 세션에 닿는가 (결정 3, #92·#152) — 세션이 무엇인가와 띄우는 이 순간의 신뢰.
+          // 만드는 세션이면 명부가 위에서 이미 이 세션을 가리킨다(setBuilder)
+          ...this.settingFilesFor(info),
           // 오케스트레이터는 전부, 워크트리 매니저(#69)는 부분집합을 받는다.
           // 갓 만든 세션은 자식이 없으므로 여기서 매니저일 수 없다 — 매니저가 되는 것은
           // 첫 자식이 붙은 뒤 다음에 깰 때다 (wake 쪽 조건이 그 승격의 실제다).
@@ -1645,9 +1669,10 @@ export class SessionManager {
           resumeExternalId: resumeId ?? undefined,
           /*
            * 신뢰는 **깨울 때마다 다시 읽는다** (결정 3, #92). 신뢰를 바꿔도 도는 세션의 도구 프로세스는
-           * 이미 파일을 읽은 뒤라 그대로다 — 다음에 다시 뜰 때(재시작·재개) 바뀐 값을 받는다.
+           * 이미 파일을 읽은 뒤라 그대로다 — 다음에 다시 뜰 때(재시작·재개) 바뀐 값을 받는다. 무엇을 믿는지는
+           * 만들 때와 같은 판정이다(settingFilesFor) — 매니저로 깨어나는 세션도, 만드는 세션도 여기서 같은 답을 받는다.
            */
-          projectTrusted: this.projectTrusted(m.projectId),
+          ...this.settingFilesFor(m),
           /*
            * **도구와 역할은 되살릴 때도 따라와야 한다.**
            *

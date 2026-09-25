@@ -177,16 +177,36 @@ describe('어댑터가 CLI에 넘기는 설정 파일과 권한 (#92)', () => {
     })
   }
 
-  it('오케스트레이터 도구를 받는 세션은 신뢰와 무관하게 아무 파일도 읽지 않는다 (settingSources: [])', async () => {
-    const tools = {} as OrchestratorTools
-    for (const projectTrusted of [true, false]) {
-      const h = await new ClaudeAdapter().createSession(
-        { sessionId: 'o', cwd: root, permissionPreset: 'normal', projectTrusted, orchestratorTools: tools },
-        () => {},
-      )
-      await h.dispose()
+  for (const preset of ['safe', 'normal', 'auto'] as const) {
+    it(`${preset}: 아무 파일도 읽지 않는 세션(noSettingFiles — 오케스트레이터·조율 세션)은 신뢰와 무관하게 [] — 권한 옵션은 같다`, async () => {
+      for (const projectTrusted of [true, false, undefined]) {
+        const h = await new ClaudeAdapter().createSession(
+          { sessionId: 'o', cwd: root, permissionPreset: preset, projectTrusted, noSettingFiles: true, orchestratorTools: {} as OrchestratorTools, toolProfile: 'orchestrator' },
+          () => {},
+        )
+        await h.dispose()
+      }
+      expect(state.options.map((o) => o.settingSources)).toEqual([[], [], []])
+      for (const o of state.options) expect(o).toMatchObject(PERMISSION[preset])
+    })
+  }
+
+  /*
+   * 도구를 받는다는 것만으로는 파일을 끄지 않는다 (#152). 워크트리 매니저와 만드는 세션도 오케스트레이터 도구를
+   * 받지만 프로젝트의 세션이다 — 예전에는 도구가 곧 []여서, 신뢰한 프로젝트의 만드는 세션이 CLAUDE.md도 사용자의
+   * ~/.claude(전역 bypass)도 읽지 못했다.
+   */
+  it('도구를 받는 프로젝트의 세션(매니저·만드는 세션)은 도구가 없는 워커처럼 신뢰를 따른다', async () => {
+    for (const toolProfile of ['manager', 'builder'] as const) {
+      for (const projectTrusted of [true, false]) {
+        const h = await new ClaudeAdapter().createSession(
+          { sessionId: 'b', cwd: root, permissionPreset: 'normal', projectTrusted, orchestratorTools: {} as OrchestratorTools, toolProfile },
+          () => {},
+        )
+        await h.dispose()
+      }
     }
-    expect(state.options.map((o) => o.settingSources)).toEqual([[], []])
+    expect(state.options.map((o) => ('settingSources' in o ? o.settingSources : 'all'))).toEqual(['all', ['user'], 'all', ['user']])
   })
 })
 

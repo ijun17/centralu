@@ -108,4 +108,44 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
     expect(config.project_doc_max_bytes).toBe(0)
     expect(config.mcp_servers).toBeDefined() // 한 덩어리로 합쳐졌다 — 서로를 덮지 않는다
   })
+
+  const BRIDGE = { orchestratorTools: {} as OrchestratorTools, orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' } }
+
+  it('아무 파일도 읽지 않는 세션(noSettingFiles — 오케스트레이터·조율 세션)은 신뢰라고 넘어와도 저장소 층을 끈다 — 시작·재개 모두', async () => {
+    await start('normal', true, { ...BRIDGE, noSettingFiles: true, toolProfile: 'orchestrator' })
+    await start('normal', true, { ...BRIDGE, noSettingFiles: true, toolProfile: 'scoped', resumeExternalId: 'ext-1' })
+    for (const method of ['thread/start', 'thread/resume']) {
+      expect(configOf(method).projects).toMatchObject({ [cwd]: { trust_level: 'untrusted' } })
+      expect(configOf(method).project_doc_max_bytes).toBe(0)
+    }
+  })
+
+  /*
+   * 다리(오케스트레이터 도구)를 받는다는 것만으로는 AGENTS.md를 끄지 않는다 (#152). 예전에는 다리가 있으면
+   * `project_doc_max_bytes: 0`을 실어서, 신뢰한 프로젝트의 매니저와 만드는 세션이 AGENTS.md를 잃었다.
+   */
+  it('다리를 받는 프로젝트의 세션(매니저·만드는 세션)은 워커처럼 신뢰를 따른다 — 시작·재개 모두', async () => {
+    const seen: string[] = []
+    for (const toolProfile of ['manager', 'builder'] as const) {
+      for (const projectTrusted of [true, false]) {
+        for (const resumeExternalId of [undefined, 'ext-1']) {
+          state.requests.length = 0
+          await start('normal', projectTrusted, { ...BRIDGE, toolProfile, resumeExternalId })
+          const config = configOf(resumeExternalId ? 'thread/resume' : 'thread/start')
+          seen.push(`${toolProfile} trusted=${projectTrusted} ${resumeExternalId ? 'resume' : 'start'}: doc=${config.project_doc_max_bytes ?? 'read'} projects=${config.projects ? 'untrusted' : 'untouched'}`)
+          expect(config.mcp_servers).toBeDefined()
+        }
+      }
+    }
+    expect(seen).toEqual([
+      'manager trusted=true start: doc=read projects=untouched',
+      'manager trusted=true resume: doc=read projects=untouched',
+      'manager trusted=false start: doc=0 projects=untrusted',
+      'manager trusted=false resume: doc=0 projects=untrusted',
+      'builder trusted=true start: doc=read projects=untouched',
+      'builder trusted=true resume: doc=read projects=untouched',
+      'builder trusted=false start: doc=0 projects=untrusted',
+      'builder trusted=false resume: doc=0 projects=untrusted',
+    ])
+  })
 })

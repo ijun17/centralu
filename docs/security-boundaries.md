@@ -66,9 +66,14 @@ not apply. Codex threads are started with the project's paths marked `untrusted`
 thread only, and `project_doc_max_bytes = 0`. That keeps the repository's `.codex/config.toml`,
 hooks, exec rules and `AGENTS.md` out, and it stops Codex from persisting the folder as
 trusted in `~/.codex/config.toml` on first use. The user's own settings in `~/.claude` and
-`~/.codex` still decide under the `normal` preset. Sessions that carry Centralu's own tools read
-no settings files, trusted or not: the orchestrator, coordinators, and app builders (in Claude,
-`settingSources: []`, which leaves out `~/.claude` too; in Codex, `project_doc_max_bytes = 0`).
+`~/.codex` still decide under the `normal` preset. What a session reads follows from what the
+session is, not from whether it carries Centralu's own tools (#152). Only the orchestrator and
+coordinators read no settings files, trusted or not: they belong to no project and work in a folder
+other sessions can write to (in Claude, `settingSources: []`, which leaves out `~/.claude` too; in
+Codex, their folder is marked `untrusted` and `project_doc_max_bytes = 0`, while `~/.codex` still
+loads). Worktree managers and the builders of project apps follow their project's trust like any
+worker. The builder of a user-folder app counts as trusted, because that folder is the user's own
+(decision 3).
 
 The same switch decides whether the project's apps may run (M4 decision 3; [apps.md](apps.md) §3).
 An untrusted project's apps are discovered and listed with the reason, but never started, never
