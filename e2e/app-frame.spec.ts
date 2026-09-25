@@ -23,6 +23,7 @@ test.beforeAll(async () => {
     'hang ui://hang/main': { html: fixtureViewHtml({ hangTeardown: true }) },
     'fixture-port ui://fixture-port/main': { html: fixtureViewHtml() },
     'other-port ui://other-port/main': { html: fixtureViewHtml() },
+    'plain ui://plain/main': { html: fixtureViewHtml({ ignoreNotifications: true }) },
   })
 })
 
@@ -354,6 +355,55 @@ test('앱별 출처 방식: 자기 포트의 진짜 출처를 받고, 저장소�
   await mount(page, 'a2', { appId: 'fixture-port', projectId: 'p1', instanceId: idA2 })
   expect(((await entry(view(page, 'a2'), 'connected')) as { origin: string }).origin).toBe(a.origin)
   expect(await (await innerFrame(page, 'a2')).evaluate(() => localStorage.getItem('who'))).toBe('fixture-port')
+})
+
+/**
+ * 열린 화면이 같은 값을 보는 법 (M4 B-3d, 플랜 "열린 화면이 같은 값을 보는 법"). 앱의 도구
+ * 호출이 끝날 때마다 host가 "바뀌었다"를 알리고, 부모가 그것을 `changeSignal`로 넘긴다.
+ * 표준 밖의 확장이라, 받지 않는 화면에는 아무 일도 없어야 한다.
+ */
+test('상태가 바뀌었다는 신호는 초기화 뒤 값이 바뀔 때마다 한 번씩 centralu/notifications/changed로 간다', async ({ page }) => {
+  const idA = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
+  const idB = fx.open({ projectId: null, appId: 'other' }, 'ui://other/main')
+  await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: idA, changeSignal: 5 })
+  await mount(page, 'b', { appId: 'other', projectId: null, instanceId: idB, changeSignal: 1 })
+  const a = view(page, 'a')
+  const b = view(page, 'b')
+  // 화면은 이 확장을 쓸 수 있다는 것을 host 능력에서 안다
+  expect(((await entry(a, 'connected')) as { hostCapabilities: { experimental: object } }).hostCapabilities.experimental).toEqual({
+    'centralu/notifications/changed': {},
+  })
+
+  // 연 순간의 값은 알리지 않는다 — 화면은 초기화하면서 이미 새로 읽는다. 왕복 하나를 기준점으로
+  // 삼는다: 그 전에 부친 알림이 있었다면 결과보다 먼저 도착했을 것이다
+  await a.locator('#call').click()
+  await entry(a, 'call-result')
+  await expect(a.locator('li[data-k="notification"]')).toHaveCount(0)
+
+  await page.evaluate(() => (window as any).__appFrame.update('a', { changeSignal: 6 }))
+  expect(await entry(a, 'notification')).toEqual({ method: 'centralu/notifications/changed', params: {} })
+  // 같은 값은 다시 알리지 않고, 새 값은 한 번 더
+  await page.evaluate(() => (window as any).__appFrame.update('a', { changeSignal: 6 }))
+  await page.evaluate(() => (window as any).__appFrame.update('a', { changeSignal: 7 }))
+  await expect(a.locator('li[data-k="notification"]')).toHaveCount(2)
+  // 다른 앱의 화면에는 가지 않는다
+  await b.locator('#call').click()
+  await entry(b, 'call-result')
+  await expect(b.locator('li[data-k="notification"]')).toHaveCount(0)
+})
+
+test('확장 알림을 모르는 화면은 그냥 지나간다', async ({ page }) => {
+  const id = fx.open({ projectId: null, appId: 'plain' }, 'ui://plain/main')
+  await mount(page, 'p', { appId: 'plain', projectId: null, instanceId: id, changeSignal: 1 })
+  const v = view(page, 'p')
+  await entry(v, 'connected')
+  await page.evaluate(() => (window as any).__appFrame.update('p', { changeSignal: 2 }))
+  await page.evaluate(() => (window as any).__appFrame.update('p', { changeSignal: 3 }))
+  // 알림 뒤에도 화면은 멀쩡히 호출하고 답을 받는다
+  await v.locator('#call').click()
+  expect(await entry(v, 'call-result')).toMatchObject({ appId: 'plain' })
+  await expect(v.locator('li[data-k="notification"]')).toHaveCount(0)
+  await expect(v.locator('li[data-k$="-error"]')).toHaveCount(0)
 })
 
 test('열리지 않은 화면은 이유와 함께 실패한다', async ({ page }) => {

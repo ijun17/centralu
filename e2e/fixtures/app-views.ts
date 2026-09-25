@@ -36,7 +36,7 @@ let bundle: string | null = null
  * 시험용 앱 화면. 받은 것은 모두 `#log`에 한 줄씩 적는다(시험이 프레임 안을 읽는다).
  * 단추는 화면이 host에 부탁할 수 있는 것을 하나씩 해 본다.
  */
-export function fixtureViewHtml(opts: { hangTeardown?: boolean } = {}): string {
+export function fixtureViewHtml(opts: { hangTeardown?: boolean; ignoreNotifications?: boolean } = {}): string {
   bundle ??= extAppsInline()
   return `<!doctype html><html><head><meta charset="utf-8"><title>fixture view</title></head>
 <body style="margin:0;padding:8px;font:12px sans-serif;background:#fff;color:#000">
@@ -67,7 +67,8 @@ app.ontoolresult = (p) => log('tool-result', p.structuredContent ?? p.content)
 app.onhostcontextchanged = (p) => log('host-context-changed', p)
 // 실제 앱이 teardown에서 하는 일: 저장하고 답한다. 저장이 목에 닿으면 화면이 요청을 받은 것이다
 app.onteardown = ${opts.hangTeardown ? '() => new Promise(() => {})' : "async () => { await app.callServerTool({ name: 'save-on-teardown', arguments: {} }); log('teardown', {}); return {} }"}
-app.fallbackNotificationHandler = async (n) => log('notification', { method: n.method, params: n.params })
+// 우리 템플릿이 하는 일: 모르는 알림을 받아 본다. 다른 호스트용 앱은 이 줄이 없다(ignoreNotifications)
+${opts.ignoreNotifications ? '' : "app.fallbackNotificationHandler = async (n) => log('notification', { method: n.method, params: n.params })"}
 const on = (id, fn) => document.getElementById(id).addEventListener('click', () => fn().catch((e) => log(id + '-error', String(e && e.message || e))))
 on('call', async () => log('call-result', (await app.callServerTool({ name: 'increment', arguments: { by: 2 } })).structuredContent))
 // 메시지 안에 다른 앱을 적어 본다 — params와 _meta 양쪽에
@@ -82,7 +83,7 @@ on('msg', async () => log('msg-result', await app.sendMessage({ role: 'user', co
 on('read', async () => log('read-result', (await app.readServerResource({ uri: 'ui://fixture/data' })).contents))
 on('grow', async () => { document.getElementById('spacer').style.height = '600px' })
 await app.connect()
-log('connected', { origin: self.origin, href: location.href, referrer: document.referrer, hostContext: app.getHostContext() })
+log('connected', { origin: self.origin, href: location.href, referrer: document.referrer, hostContext: app.getHostContext(), hostCapabilities: app.getHostCapabilities() })
 </script></body></html>`
 }
 

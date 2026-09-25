@@ -46,10 +46,19 @@ export type AppFrameProps = {
   toolInput?: Record<string, unknown>
   /** 그 호출의 결과. 끝나면 규격대로 한 번 보낸다 (tool-input 다음에) */
   toolResult?: AppToolResult
+  /**
+   * "이 앱의 상태가 바뀌었다" (B-3d). 값이 바뀔 때마다 화면에 우리 확장 알림
+   * `centralu/notifications/changed`를 보낸다. 어디서 오는지는 부모가 정한다(앱의 도구 호출이
+   * 끝날 때마다 host가 알린다, 플랜 "열린 화면이 같은 값을 보는 법").
+   */
+  changeSignal?: number
   /** 화면이 대화에 보내는 말(`ui/message`). 없으면 거절로 답한다. 어디로 보낼지는 부모가 정한다 */
   onMessage?: (message: AppFrameMessage) => void | Promise<void>
   className?: string
 }
+
+/** 우리 확장 알림. 표준 밖이라 우리 템플릿이 아닌 화면은 받지 않고 지나간다 */
+export const CHANGED_NOTIFICATION = 'centralu/notifications/changed'
 
 /**
  * teardown 답을 기다리는 시간. 규격은 "답을 기다려야 한다(SHOULD)"라고만 적는다. 화면은 이
@@ -129,7 +138,7 @@ type Phase = 'loading' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
-  { appId, projectId = null, instanceId, toolInput, toolResult, onMessage, className },
+  { appId, projectId = null, instanceId, toolInput, toolResult, changeSignal, onMessage, className },
   ref,
 ) {
   const platform = usePlatform()
@@ -147,7 +156,9 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   onMessageRef.current = onMessage
   const scaleRef = useRef(scale)
   scaleRef.current = scale
-  const sent = useRef({ input: false, result: false })
+  const sent = useRef({ input: false, result: false, change: undefined as number | undefined })
+  const changeRef = useRef(changeSignal)
+  changeRef.current = changeSignal
 
   /** 링크는 사람이 확인한 뒤 연다. 먼저 온 질문이 남아 있으면 그것은 거절로 닫는다 */
   const linkAskRef = useRef<LinkAsk | null>(null)
@@ -173,7 +184,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     if (!iframe) return
     let cancelled = false
     let bridge: AppBridge | null = null
-    sent.current = { input: false, result: false }
+    sent.current = { input: false, result: false, change: changeRef.current }
     setPhase('loading')
     setError(null)
 
@@ -194,6 +205,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           logging: {},
           ...(onMessageRef.current ? { message: { text: {} } } : {}),
           sandbox: { csp: frame.sandbox.csp, permissions: frame.sandbox.permissions },
+          experimental: { [CHANGED_NOTIFICATION]: {} },
         },
         { hostContext: hostContext(scaleRef.current, boxRef.current) },
       )
@@ -224,6 +236,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         if (cancelled || !bridge) return
         // 연결과 초기화 사이에 글자 크기가 바뀌었으면 여기서 따라잡는다 (바뀐 칸만 나간다)
         bridge.setHostContext(hostContext(scaleRef.current, boxRef.current))
+        sent.current.change = changeRef.current
         setPhase('ready')
       }
       await bridge.connect(new PostMessageTransport(iframe.contentWindow!, iframe.contentWindow!))
@@ -287,6 +300,15 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     if (phase !== 'ready' || !b) return
     b.setHostContext(hostContext(scale, boxRef.current))
   }, [phase, scale])
+
+  // B-3d: 앱의 상태가 바뀌었다 — 초기화 뒤, 값이 달라질 때마다 한 번
+  useEffect(() => {
+    const b = bridgeRef.current
+    if (phase !== 'ready' || !b || changeSignal === undefined) return
+    if (sent.current.change === changeSignal) return
+    sent.current.change = changeSignal
+    void b.notification({ method: CHANGED_NOTIFICATION, params: {} })
+  }, [phase, changeSignal])
 
   useImperativeHandle(
     ref,
