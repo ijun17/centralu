@@ -8,7 +8,11 @@
  *         "몇 번 떴나", "어떤 메서드가 왔나", "어떤 환경을 받았나"를 센다 — host의 말이
  *         아니라 앱이 실제로 겪은 것을 본다.
  * --mode  normal | crash-on-start | ignore-eof | grandchild | hold-fd3 | flood-stderr
- *         | secret-to-stderr | bad-tool-name | mediation | view
+ *         | secret-to-stderr | bad-tool-name | mediation | view | attach
+ *
+ * `attach`는 A-5(세션에 붙이기)를 위한 묶음이다: 주석이 다른 도구들(읽기 전용 `peek`, 바꾸는
+ * `poke`), 화면 전용 도구, 문(`--gate <파일>`)이 생길 때까지 붙드는 `hold`, 그리고 기동할 때
+ * `--extra-from <파일>`에 적힌 이름들로 더하는 도구(도구 목록이 바뀌는 앱).
  *
  * `mediation`은 A-4를 위한 도구 묶음을 연다: 공개 범위가 다른 도구들, 받은 실행 id를 돌려주는
  * 도구, 취소를 기다리는 도구, 실패·죽는 도구, 그리고 fd 3의 중개를 부르는 도구. 중개 클라이언트는
@@ -17,7 +21,7 @@
  * `view`는 화면(B-3)이 받는 모양을 시험한다: 상태를 서버에 두는 앱(간격 하나), 결과의
  * `structuredContent`·`isError`·`_meta`, CSP를 선언한 `ui://` 문서.
  */
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { Client } from '@modelcontextprotocol/client'
@@ -186,6 +190,36 @@ serveStdio(() => {
         },
       ],
     }))
+  }
+  if (MODE === 'attach') {
+    server.registerTool(
+      'peek',
+      { title: 'Peek', description: 'Reads the value without changing anything', annotations: { readOnlyHint: true, openWorldHint: false } },
+      async () => say('peeked'),
+    )
+    server.registerTool(
+      'poke',
+      { description: 'Changes the value', inputSchema: z.object({ to: z.number().describe('the new value') }), annotations: { destructiveHint: false } },
+      async ({ to }) => say(`poked ${to}`),
+    )
+    server.registerTool('app_only', { description: 'Only for views', _meta: { ui: { visibility: ['app'] } } }, async () => say('app_only ran'))
+    server.registerTool('hold', { description: 'Holds until the gate file exists or the call is cancelled' }, async (ctx) => {
+      const gate = arg('gate')
+      const signal = ctx.mcpReq.signal
+      const runId = ctx.mcpReq._meta?.[RUN_META] ?? null
+      log({ t: 'holding', runId })
+      const aborted = await new Promise((resolve) => {
+        const poll = setInterval(() => {
+          if (gate && existsSync(gate)) (clearInterval(poll), resolve(false))
+        }, 20)
+        signal.addEventListener('abort', () => (clearInterval(poll), resolve(true)), { once: true })
+      })
+      log({ t: aborted ? 'aborted' : 'released', runId })
+      return say(aborted ? 'aborted' : 'released')
+    })
+    const extraFrom = arg('extra-from')
+    const extra = extraFrom && existsSync(extraFrom) ? JSON.parse(readFileSync(extraFrom, 'utf8')) : []
+    for (const name of extra) server.registerTool(name, { description: `Extra tool ${name}` }, async () => say(`${name} ran`))
   }
   if (MODE === 'bad-tool-name') {
     server.registerTool('sneaky__tool', { description: 'A tool whose name has the separator' }, async () => ({

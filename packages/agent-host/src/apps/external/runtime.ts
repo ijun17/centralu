@@ -164,6 +164,15 @@ type Life = {
   tools: AppTool[] | null
   toolWarnings: string[]
   /**
+   * 마지막으로 읽은 도구 목록 — `tools`와 달리 **프로세스가 내려가도 남는다** (A-5).
+   *
+   * 세션에 앱을 붙이려면 도구 목록이 있어야 하는데, 목록을 알려면 앱을 띄워야 한다. 세션이 뜰
+   * 때마다 붙은 앱을 전부 띄우면 "아무것도 안 할 때 앱 프로세스 0개"(성능 예산)가 세션 하나에
+   * 깨진다. 한 번 읽은 목록은 기억해 두고, 앱이 다시 뜰 때 새로 읽어 바뀌었으면 알린다.
+   * 매니페스트가 바뀌면 항목이 새로 서므로 옛 목록은 함께 사라진다.
+   */
+  known: AppTool[] | null
+  /**
    * 지금 프로세스의 파이프 번호. 열린 실행은 자기가 태어난 파이프 번호를 들고 있고, 중개는
    * 같은 번호의 실행만 받는다 — 앱이 다시 떠도 죽은 프로세스의 실행 id가 새 파이프에서 통하지 않는다.
    */
@@ -215,6 +224,9 @@ export class ExternalApps {
    */
   private viewHolds = new Map<string, number>()
   private pipeSeq = 0
+  /** `onAppsChanged` 구독자와, 이번 틱에 알림이 이미 잡혀 있는가 */
+  private appsListeners = new Set<() => void>()
+  private appsNotePending = false
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -278,6 +290,48 @@ export class ExternalApps {
     const e = this.require(ref)
     const all = await this.use(e, async () => e.life.tools ?? [])
     return all.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
+  }
+
+  /**
+   * 마지막으로 읽은 도구 목록 — **앱을 띄우지 않는다.** 한 번도 읽은 적이 없으면 null이다.
+   *
+   * 세션에 붙이는 쪽(A-5)이 먼저 이것을 보고, 없을 때만 `tools()`로 띄운다. 앱이 내려가 있어도
+   * 목록은 남아 있으므로, 세션이 뜰 때마다 앱 프로세스가 뜨지 않는다.
+   */
+  knownTools(ref: AppRef, audience?: Audience): Tool[] | null {
+    const known = this.require(ref).life.known
+    if (!known) return null
+    return known.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
+  }
+
+  /**
+   * 앱 목록이나 어떤 앱의 에이전트 도구가 바뀌었을 수 있다 (A-5) — 세션에 붙은 앱을 다시 셀 때다.
+   *
+   * 알리는 때: 앱 폴더가 생기거나 사라지거나 매니페스트가 바뀜, 프로젝트가 늘고 줆, 신뢰가 바뀜,
+   * 앱이 멈춤(연달아 실패)과 다시 시작, 다시 읽은 도구 목록이 달라짐. **무엇이** 바뀌었는지는
+   * 싣지 않는다 — 받는 쪽은 `list()`와 `knownTools()`를 다시 읽는다(#81의 "알림 하나와 다시
+   * 읽기"와 같은 방식이다). 한 틱에 몰린 변화는 한 번으로 모은다.
+   */
+  onAppsChanged(listener: () => void): () => void {
+    this.appsListeners.add(listener)
+    return () => void this.appsListeners.delete(listener)
+  }
+
+  private appsChanged(): void {
+    if (this.appsNotePending || this.disposed) return
+    this.appsNotePending = true
+    queueMicrotask(() => {
+      this.appsNotePending = false
+      if (this.disposed) return
+      for (const l of [...this.appsListeners]) {
+        try {
+          l()
+        } catch (err) {
+          // 받는 쪽 하나의 실패가 다른 세션의 갱신을 막지 않는다
+          console.error('[apps] apps-changed listener failed:', err)
+        }
+      }
+    })
   }
 
   /**
@@ -442,7 +496,10 @@ export class ExternalApps {
   async restart(ref: AppRef): Promise<void> {
     const e = this.require(ref)
     await this.halt(e, 'restart requested')
+    const wasStopped = e.life.gaveUp
     Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
+    // 멈췄던 앱은 세션에서 떨어져 있었다 — 다시 붙을 수 있게 알린다
+    if (wasStopped) this.appsChanged()
   }
 
   /** 비밀 값을 적는다(`null`이면 지운다). 떠 있는 앱은 다음 기동부터 받는다 */
@@ -453,6 +510,7 @@ export class ExternalApps {
   async dispose(): Promise<void> {
     this.disposed = true
     this.watchers.close()
+    this.appsListeners.clear()
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
     // 종료 예산(Tauri 3초) 안에서 — 유예를 줄이고, SIGKILL까지 기다리지는 않는다
@@ -555,8 +613,14 @@ export class ExternalApps {
     if (e.manifest?.home && !kept.some((t) => t.tool.name === e.manifest?.home)) {
       warnings.push(`home 도구(${e.manifest.home})가 도구 목록에 없습니다`)
     }
+    // 세션이 보는 것(에이전트 도구)이 달라졌을 때만 알린다 — 화면 전용 도구의 변화는 세션과 무관하다
+    const forModel = (list: AppTool[] | null) =>
+      list === null ? null : JSON.stringify(list.filter((t) => t.visibility.includes('model')).map((t) => t.tool))
+    const before = forModel(e.life.known)
     e.life.tools = kept
+    e.life.known = kept
     e.life.toolWarnings = warnings
+    if (forModel(kept) !== before) this.appsChanged()
   }
 
   /**
@@ -574,6 +638,8 @@ export class ExternalApps {
     const where = this.label(e.ref)
     if (L.failures >= this.timing.maxFailures) {
       L.gaveUp = true
+      // 멈춘 앱은 세션에 붙지 않는다(결정 4) — 붙어 있던 세션이 떼어 내도록 알린다
+      this.appsChanged()
       console.error(`[apps] ${where} stopped after ${L.failures} consecutive failures: ${reason.split('\n')[0]}`)
     } else {
       L.retryAt = Date.now() + this.timing.backoffBaseMs * 2 ** (L.failures - 1)
@@ -746,10 +812,13 @@ export class ExternalApps {
         ? scanApps(scope.root, USER_APPS_REL, [])
         : scanApps(scope.root, PROJECT_APPS_REL, ['', '.centralu'])
     const seen = new Set<string>()
+    /** 세션에 붙는 앱의 집합이 달라질 수 있는 변화가 있었나 (A-5) */
+    let changed = false
     for (const found of result.apps) {
       seen.add(found.folder)
       const prev = held.apps.get(found.folder)
       if (prev && prev.found.hash === found.hash && prev.found.error === found.error) {
+        if (prev.scope.trusted !== scope.trusted) changed = true
         prev.scope = scope
         // 신뢰를 잃은 프로젝트의 앱은 바로 내린다 — 목록에는 남는다
         if (!scope.trusted) void this.halt(prev, 'project is no longer trusted')
@@ -758,13 +827,16 @@ export class ExternalApps {
       // 매니페스트가 바뀌었다 — 옛 명령으로 뜬 프로세스는 내리고, 셈과 기억한 세대도 새로 시작한다
       if (prev) void this.halt(prev, 'manifest changed')
       held.apps.set(found.folder, this.entry(scope, found))
+      changed = true
     }
     for (const [id, e] of [...held.apps]) {
       if (seen.has(id)) continue
       held.apps.delete(id)
       void this.halt(e, 'app folder removed')
+      changed = true
     }
     this.watchers.setWatched(key, scope.root, result.watch)
+    if (changed) this.appsChanged()
   }
 
   private entry(scope: Scope, found: ScannedApp): AppEntry {
@@ -795,6 +867,7 @@ export class ExternalApps {
         idle: null,
         tools: null,
         toolWarnings: [],
+        known: null,
         pipeId: 0,
       },
     }
@@ -805,6 +878,7 @@ export class ExternalApps {
     this.watchers.setWatched(key, held?.scope.root ?? join(this.deps.dataRoot, USER_APPS_REL), [])
     this.scopes.delete(key)
     for (const e of held?.apps.values() ?? []) void this.halt(e, 'project removed')
+    if (held?.apps.size) this.appsChanged()
   }
 }
 

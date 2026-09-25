@@ -4,6 +4,8 @@ import { dedupeNearbyHits, windowAround } from './snippet.js'
 import { mcpServerNameError, profileAllows, registerAppTools, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
+import { SessionAppsHub } from './session-apps.js'
+import type { ExternalApps } from '../apps/external/runtime.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
@@ -40,7 +42,7 @@ import {
   parseUiPreferences,
   sessionLiveDefaults,
 } from '@cc/protocol'
-import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
   gitSummary,
@@ -275,6 +277,11 @@ export class SessionManager {
     string,
     Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   >()
+  /**
+   * 세션에 외부 앱을 붙이는 자리 (M4 A-5). 런타임이 없는 host(테스트 대부분)에서는 null이고,
+   * 그때 세션은 앱을 받지 않는다 — 다른 서비스처럼 선택이다.
+   */
+  private appsHub: SessionAppsHub | null = null
 
   constructor(
     private store: Store,
@@ -1103,6 +1110,8 @@ export class SessionManager {
     // **어댑터가 성공한 뒤에 저장한다.** 먼저 저장하면 어댑터가 실패했을 때
     // 목록에는 보이지만 말을 걸 수 없는 '유령 세션'이 DB에 남는다 (실측으로 확인).
     let handle: SessionHandle
+    // 외부 앱 (M4 A-5) — 워커도 받는다. 핸들이 서지 못하면 아래 catch가 닫는다
+    const apps = this.appsFor(info)
     try {
       handle = await adapter.createSession(
         {
@@ -1127,10 +1136,12 @@ export class SessionManager {
             info.kind === 'orchestrator' || info.kind === 'coordinator' ? (this.endpoint?.() ?? undefined) : undefined,
           // 사람이 승인한 MCP 서버 (propose_mcp_server → 승인 → 재시작의 결과가 여기서 실린다)
           extraMcpServers: info.kind === 'orchestrator' ? this.mcpServers() : undefined,
+          apps,
         },
         (e) => this.onEvent(e),
       )
     } catch (err) {
+      apps?.close()
       // 어댑터가 실패하면 방금 만든 워크트리는 아무도 안 쓴다 — 고아 디렉토리를 남기지 않는다.
       // (여기서 실패한 세션은 저장조차 되지 않으므로, 안 지우면 되찾을 방법이 없다)
       if (worktree) {
@@ -1540,6 +1551,8 @@ export class SessionManager {
       return { session: m, resumed: false, reason: externalMissingReason(this.toolLabel(m.tool), cwd) }
     }
 
+    // 외부 앱 (M4 A-5) — 되살릴 때도 결정 4를 **지금** 다시 본다(그 사이에 앱이 오고 갔을 수 있다)
+    const apps = this.appsFor(m)
     try {
       const creating = adapter.createSession(
         {
@@ -1593,6 +1606,7 @@ export class SessionManager {
               : undefined,
           // 승인된 MCP 서버는 재시작(=이 길)에서 실려야 "승인 → 재시작 → 바로 사용"이 성립한다
           extraMcpServers: m.kind === 'orchestrator' ? this.mcpServers() : undefined,
+          apps,
         },
         (e) => this.onEvent(e),
       )
@@ -1614,6 +1628,8 @@ export class SessionManager {
       const tStartFrom = Date.now()
       const handle = await withTimeout(creating, 150_000, `Starting ${m.tool}`).catch((err) => {
         void creating.then((h) => h.dispose()).catch(() => {})
+        // 서지 못한 핸들의 붙이기다 — 늦게 도착한 핸들은 위에서 닫히며 함께 닫는다
+        apps?.close()
         throw err
       })
       const tStart = Date.now() - tStartFrom
@@ -3565,6 +3581,22 @@ export class SessionManager {
   }
 
   /**
+   * 외부 앱 런타임을 받는다 (M4 A-5) — 이 뒤로 뜨는 세션은 결정 4에 맞는 앱을 받는다.
+   *
+   * 생성자 인자가 아니라 따로 받는 이유: 런타임과 매니저는 서로를 모른 채 host(main.ts)가
+   * 이어 준다. 매니저가 없는 host의 테스트도, 런타임이 없는 매니저의 테스트도 그대로 돈다.
+   */
+  useExternalApps(rt: ExternalApps): void {
+    this.appsHub?.dispose()
+    this.appsHub = new SessionAppsHub(rt)
+  }
+
+  /** 핸들 하나를 위한 앱 붙이기 — 어댑터에 넘기고, 핸들을 닫는 어댑터가 함께 닫는다 */
+  private appsFor(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId'>): SessionApps | undefined {
+    return this.appsHub?.attach({ id: m.id, kind: m.kind, projectId: m.projectId }) ?? undefined
+  }
+
+  /**
    * 이 세션이 받는 도구 묶음 (#69). null이면 도구 없음.
    * 매니저 판정은 관계 하나다: 워크트리 자식이 있으면 매니저다 (아카이브된 자식 포함 —
    * 도구는 위험하지 않고, 입양으로 선 매니저가 자식을 정리한 뒤에도 제안은 할 수 있어야 한다).
@@ -3857,6 +3889,7 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     this.watchers.close()
+    this.appsHub?.dispose()
     // 진행 중이던 메시지들을 지금 모습대로 남긴다 — 종료가 마지막 2초를 삼키면 안 된다 (#66)
     for (const id of [...this.streams.keys()]) this.closeStream(id)
     // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
