@@ -152,7 +152,7 @@ test('신뢰하지 않은 프로젝트의 앱은 이유와 함께 서고, 그 �
  * 시험용 앱이다. host가 home을 부르는 일은 agent-host의 app-home-view.test.ts가 진짜 앱으로 본다.
  * 여기서는 그 답을 받은 UI가 무엇을 하는지를 본다.
  */
-test.describe('고정 화면 (B-2, B-6, B-7)', () => {
+test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
   let fx: FixtureHost
   test.beforeAll(async () => {
     fx = await startFixtureHost({
@@ -495,6 +495,60 @@ test.describe('고정 화면 (B-2, B-6, B-7)', () => {
     await pinned.getByTestId('pinned-runs-toggle').click()
     await expect(pinned.getByTestId('runs-panel')).toHaveCount(0)
     await expect(viewOf(page, `${pid}/slider`).locator('li[data-k="connected"]')).toHaveCount(1)
+  })
+
+  /** 세션이 받은 사람의 말 — 목이 host처럼 적어 둔 것 */
+  const sentTo = (page: Page, sid: string) =>
+    page.evaluate(
+      (id) =>
+        (((window as any).__mock.messages.get(id) ?? []) as { role: string; payload: { text?: string } }[])
+          .filter((m) => m.role === 'user')
+          .map((m) => m.payload.text),
+      sid,
+    )
+  /** 화면이 적은 줄 — n번째 */
+  const logged = async (v: FrameLocator, k: string, nth = 0) => {
+    const li = v.locator(`li[data-k="${k}"]`).nth(nth)
+    await expect(li).toBeVisible()
+    return JSON.parse(((await li.textContent()) ?? '').slice(k.length + 1))
+  }
+
+  test('B-4: 고정 화면의 ui/message는 어느 세션으로 보낼지 묻고, 고르기 전에는 아무것도 보내지 않으며, 취소하면 화면은 거절을 받는다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { name: 'Slider' })])
+    await page.getByTestId('project-menu-alpha').click()
+    await page.getByTestId('new-session-alpha').click()
+    await page.getByTestId('create-session-confirm').click()
+    const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+    const name = await page.evaluate((id) => (window as any).__store.getState().sessions[id].name as string, sid)
+
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const v = viewOf(page, `${pid}/slider`)
+
+    await v.locator('#msg').click()
+    const ask = pinned.getByTestId('pinned-message-ask')
+    await expect(ask).toContainText('Slider wants to send this to a session:')
+    await expect(ask.getByTestId('pinned-message-text')).toHaveText('hello from the view')
+    await expect(ask.getByTestId(`pinned-message-to-${sid}`)).toContainText(name)
+    // 물었을 뿐이다 — 화면의 요청은 기다리고, 세션에는 아무것도 가지 않았다
+    await expect(v.locator('li[data-k="msg-result"]')).toHaveCount(0)
+    expect(await sentTo(page, sid)).toEqual([])
+
+    await ask.getByTestId('pinned-message-cancel').click()
+    await expect(ask).toHaveCount(0)
+    expect(await logged(v, 'msg-result')).toEqual({ isError: true })
+    expect(await sentTo(page, sid)).toEqual([])
+
+    // 다시 — 이번에는 고른다
+    await v.locator('#msg').click()
+    await pinned.getByTestId(`pinned-message-to-${sid}`).click()
+    await expect.poll(() => sentTo(page, sid)).toEqual(['hello from the view'])
+    expect(await logged(v, 'msg-result', 1)).toEqual({})
+    await expect(page.getByTestId('toast')).toContainText('Sent to')
+    // 사람은 앱을 떠나지 않는다 — 보냈다고 세션으로 끌려가지 않는다
+    await expect(pinned).toBeVisible()
   })
 
   test('사용자 폴더의 앱은 프로젝트 밖에 자기 무리가 있다', async ({ page }) => {

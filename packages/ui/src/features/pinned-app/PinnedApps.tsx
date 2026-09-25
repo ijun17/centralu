@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { externalAppKey, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
-import { AppFrame, type AppFrameHandle } from '../app-frame/AppFrame.jsx'
+import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { RunsPanel } from './RunsPanel.jsx'
+import { MessageAsk, messageText, type MessageAskState } from './MessageAsk.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -43,6 +44,49 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
   // 기록 판(B-7)은 화면마다 따로 연다 — 한 앱의 기록을 보던 사람이 다른 앱으로 가면 그 앱의 화면이 먼저다
   const [runsOpen, setRunsOpen] = useState(false)
+
+  /*
+   * 화면의 `ui/message` (B-4) — 어느 세션으로 보낼지 묻는다(MessageAsk). 사람이 고르기 전에는 아무것도
+   * 보내지 않고, 화면의 요청은 답을 기다린다. 먼저 온 물음이 남아 있으면 그것은 거절로 닫는다(링크
+   * 확인과 같은 규칙, AppFrame). 글이 한 조각도 없는 말은 묻지 않고 거절한다 — 보낼 것이 없다.
+   */
+  const send = useStore((s) => s.send)
+  const [ask, setAsk] = useState<MessageAskState | null>(null)
+  const askRef = useRef<MessageAskState | null>(null)
+  const settleAsk = useCallback((sent: boolean) => {
+    const a = askRef.current
+    askRef.current = null
+    setAsk(null)
+    a?.resolve(sent)
+    return a
+  }, [])
+  const onMessage = useCallback(
+    (m: AppFrameMessage) =>
+      new Promise<boolean>((resolve) => {
+        const { text, dropped } = messageText(m.content)
+        if (!text) return resolve(false)
+        askRef.current?.resolve(false)
+        const next = { text, dropped, resolve }
+        askRef.current = next
+        setAsk(next)
+      }),
+    [],
+  )
+  const answer = async (sessionId: string | null) => {
+    if (!sessionId) return void settleAsk(false)
+    const a = askRef.current
+    if (!a) return
+    askRef.current = null
+    setAsk(null)
+    await send(sessionId, a.text)
+    setToast(`Sent to ${useStore.getState().sessions[sessionId]?.name ?? 'the session'}`)
+    a.resolve(true)
+  }
+  // 화면이 내려가면(닫기·다시 시작·신뢰를 잃음) 묻던 것도 거절로 닫는다 — 답할 화면이 없다
+  useEffect(() => {
+    if (pv.phase !== 'open') settleAsk(false)
+  }, [pv.phase, settleAsk])
+  useEffect(() => () => void settleAsk(false), [settleAsk])
 
   const canOpen = !!app && !!app.info.home && app.status.runnable
   useEffect(() => {
@@ -140,8 +184,9 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
         iframe이 떨어져 문서를 잃는다(이 파일 머리말).
       */}
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
-          <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} />
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
+          <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
+          {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
         </div>
         {runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
       </div>
@@ -154,11 +199,13 @@ function Body({
   pv,
   frame,
   onRestart,
+  onMessage,
 }: {
   app: ExternalCatalogApp | undefined
   pv: PinnedView
   frame: React.RefObject<AppFrameHandle | null>
   onRestart: () => void
+  onMessage: (m: AppFrameMessage) => Promise<boolean>
 }) {
   const trust = useStore((s) => s.setProjectTrusted)
   const title = app?.title ?? pv.appId
@@ -200,6 +247,7 @@ function Body({
           instanceId={pv.instanceId}
           toolInput={pv.toolInput}
           toolResult={pv.toolResult}
+          onMessage={onMessage}
           loading={<Skeleton label={`Opening ${title}…`} />}
           className="flex min-h-0 flex-1 flex-col"
         />
