@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { AppId, NormalizedEvent } from '@cc/protocol'
+import type { AppId, NormalizedEvent, ToolName } from '@cc/protocol'
 
 /*
  * 런타임의 중심 타입 셋은 **여기서 태어난다** (#97).
@@ -48,7 +48,8 @@ export type HostAppContext = {
       name: string
       memberSessionIds: string[]
       roleAppend: string
-      tool: 'claude' | 'codex'
+      /** 열린 이름(#74) — 받는 쪽(manager.createCoordinator)이 원래 ToolName이었다 */
+      tool: ToolName
       model?: string
       effort?: string
     }): Promise<{ id: string; name: string }>
