@@ -427,6 +427,45 @@ test.describe('C-6: 오류가 만드는 쪽에 닿는다', () => {
     await expect(tail).toHaveCount(0)
     expect(await errorSends(page)).toEqual([])
   })
+
+  /*
+   * 사람이 거절한 능력 때문에 멈춘 호출 (M4 D-4) — 실측: 사람이 Deny를 누른 능력 때문에 멈춘 도구가 스택과 "Send to builder"를 단 앱의
+   * 오류로 섰다. host는 그 묶음에 사람의 결정을 싣는다(`denied`). 화면은 그 결정으로 말하고, 되돌리는 자리를 가리킨다.
+   */
+  test('사람이 거절한 능력 때문에 멈춘 도구는 오류가 아니라 그 결정으로 선다 — Send to builder 없이 Runs의 Forget을 가리킨다', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await madeApp(page, pid, 'notes', 'Team notes')
+    await page.getByTestId(`app-row-${pid}/notes`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const denied = { appId: 'notes', projectId: pid, name: 'Team notes', capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' }
+    await page.evaluate(
+      ({ p, b }) => (window as any).__mock.recordAppError('notes', p, b),
+      {
+        p: pid,
+        b: bundle({
+          kind: 'tool', tool: 'summarize', at: Date.now(), denied,
+          message: 'centralu.agent() failed: run_agent refused: the person did not allow Team notes to run an agent (Claude Code) in a new session.',
+          stderr: ['[notes] tool summarize threw: CentraluError: centralu.agent() failed: run_agent refused', '    at askBroker (runtime/centralu-app-runtime.mjs:1:1)'],
+        }),
+      },
+    )
+    const tail = pinned.getByTestId('error-tail')
+    await expect(tail).toHaveAttribute('data-denied', 'true')
+    await expect(tail.getByTestId('error-tail-title')).toHaveText('summarize stopped: you did not allow it')
+    await expect(tail.getByTestId('error-tail-denied')).toHaveText(
+      'You did not allow Team notes to run an agent (Claude Code) in a new session. This is your decision, not a bug in the app. ' +
+        'To change it, open Runs, find it under Permissions and choose Forget. Centralu asks again the next time.',
+    )
+    // 앱의 버그가 아니다 — 스택도, 만드는 세션에 보내기도 없다
+    await expect(tail.getByTestId('error-tail-stderr')).toHaveCount(0)
+    await expect(tail.getByTestId('error-tail-send')).toHaveCount(0)
+    // 되돌리는 자리를 연다
+    await expect(pinned.getByTestId('runs-panel')).toHaveCount(0)
+    await tail.getByTestId('error-tail-open-runs').click()
+    await expect(pinned.getByTestId('runs-panel')).toBeVisible()
+    expect(await errorSends(page)).toEqual([])
+  })
 })
 
 const emit = (page: Page, e: Record<string, unknown>) => page.evaluate((ev) => (window as any).__mock.emit(ev), e)

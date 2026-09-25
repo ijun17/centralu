@@ -295,6 +295,15 @@ export const AppErrorBundle = z.object({
   tool: z.string().nullable(),
   args: z.string().nullable(),
   runId: z.string().nullable(),
+  /**
+   * 이 실패가 사람의 결정에서 왔다 (M4 D-4) — 이 호출이나 그 아래 사슬의 부탁(에이전트·다른 앱·host 데이터)을 사람이 거절했다.
+   * 화면은 앱의 오류가 아니라 그 결정으로 말하고 "만드는 세션에 보내기"를 내밀지 않는다. 되돌리는 자리는 `app`의 기록 판이다
+   * (Permissions → Forget). 옛 host의 답에는 없다 — 없으면 null.
+   */
+  denied: z
+    .object({ appId: AppId, projectId: z.string().nullable(), name: z.string(), capability: z.string(), text: z.string() })
+    .nullable()
+    .default(null),
   /** 만드는 세션에 그대로 보낼 수 있는 글 */
   text: z.string(),
   /**

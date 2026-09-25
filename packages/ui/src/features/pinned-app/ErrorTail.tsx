@@ -33,10 +33,13 @@ export function ErrorTail({
   app,
   builder,
   onShowBuilder,
+  onShowRuns,
 }: {
   app: ExternalCatalogApp | undefined
   builder: AppBuilder
   onShowBuilder: () => void
+  /** 이 앱의 기록 판을 연다 — 사람이 거절한 능력을 잊는 자리(Permissions → Forget)가 거기 있다 */
+  onShowRuns: () => void
 }) {
   const platform = usePlatform()
   const appId = app?.appId
@@ -83,6 +86,55 @@ export function ErrorTail({
     }
   }
   const tail = bundle.stderr.slice(-TAIL_LINES)
+
+  /*
+   * 사람이 거절한 능력 때문에 멈춘 호출 (M4 D-4) — 앱의 버그가 아니라 사람의 결정이다. 스택도 "Send to builder"도 내밀지 않는다: 보내면
+   * 만드는 에이전트가 멀쩡한 코드를 "고친다". 무엇을 거절했는지와 되돌리는 자리(그 앱의 기록 판의 Permissions → Forget)를 말한다.
+   * 옛 host의 묶음에는 이 칸이 없다 — 없으면 보통의 실패다.
+   */
+  const denied = bundle.denied ?? null
+  if (denied) {
+    const here = denied.appId === app.appId && (denied.projectId ?? null) === (app.projectId ?? null)
+    return (
+      <section
+        className="mt-2 shrink-0 rounded border border-edge bg-panel px-3 py-2 text-[12px]"
+        role="status"
+        data-testid="error-tail"
+        data-kind={bundle.kind}
+        data-denied="true"
+      >
+        <header className="flex items-center gap-2">
+          <span className="min-w-0 truncate text-chalk" data-testid="error-tail-title">
+            {`${bundle.tool ?? 'A tool'} stopped: you did not allow it`}
+          </span>
+          <time className="readout shrink-0 text-[10px] text-slate" dateTime={new Date(bundle.at).toISOString()}>
+            {new Date(bundle.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </time>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            {here && (
+              <button
+                type="button"
+                className="rounded border border-edge bg-void px-2.5 py-0.5 text-[11px] text-chalk transition-colors hover:border-graphite"
+                onClick={onShowRuns}
+                data-testid="error-tail-open-runs"
+              >
+                Open Runs
+              </button>
+            )}
+            <IconButton label="Hide this note" onClick={() => setDismissed(bundle.at)} testId="error-tail-dismiss" align="right">
+              <CloseIcon size={12} />
+            </IconButton>
+          </span>
+        </header>
+        <p className="mt-1 whitespace-pre-wrap break-words text-ash" data-testid="error-tail-denied">
+          {`You did not allow ${denied.name} to ${denied.text}. This is your decision, not a bug in the app. `}
+          {here
+            ? 'To change it, open Runs, find it under Permissions and choose Forget. Centralu asks again the next time.'
+            : `To change it, open ${denied.name}'s Runs, find it under Permissions and choose Forget. Centralu asks again the next time.`}
+        </p>
+      </section>
+    )
+  }
 
   return (
     <section className="mt-2 shrink-0 rounded border border-edge bg-panel px-3 py-2 text-[12px]" role="alert" data-testid="error-tail" data-kind={bundle.kind}>

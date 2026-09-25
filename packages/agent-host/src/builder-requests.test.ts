@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -228,5 +228,44 @@ describe('apps.sendError', () => {
     expect((await errorsOf('notes')).latest?.sentAt).toBeNull()
     mgr.send = send
     await expect(rpc('apps.sendError', { appId: 'notes', projectId, at: latest!.at })).resolves.toEqual({ sessionId: again.id })
+  })
+  /*
+   * 사람이 거절한 능력 때문에 멈춘 호출은 앱의 버그가 아니다 (M4 D-4) — 만드는 에이전트에게 가면 멀쩡한 코드를 "고친다". 화면은 보내기를
+   * 내밀지 않고, host도 받지 않는다. 사람이 고정 화면의 물음에 Deny를 누르는 길 그대로다.
+   */
+  it('사람이 거절한 능력 때문에 멈춘 호출의 묶음은 보내지 않는다 — 그 결정을 말하고, 보낸 것으로 적지도 않는다', async () => {
+    const builder = await create('notes', 'Team notes')
+    const dir = join(repo, ...PROJECT_APPS, 'notes')
+    const server = join(dir, 'server.mjs')
+    writeFileSync(
+      server,
+      readFileSync(server, 'utf8').replace(
+        '  return server\n})',
+        `  centralu.tool(server, 'summarize', { description: 'Sum up', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => ({
+    content: [{ type: 'text', text: String(await centralu.agent('sum up')) }],
+  }))
+  return server
+})`,
+      ),
+    )
+    const mf = join(dir, 'centralu.app.json')
+    writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), uses: { agent: true } }))
+    rt.refresh()
+    const call = rpc('apps.invoke', { appId: 'notes', projectId, name: 'summarize', args: {} })
+    // 화면이 시작한 사슬이다 — 물음은 고정 화면에 선다
+    let asked: { id: string }[] = []
+    for (let i = 0; i < 200 && asked.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 25))
+      asked = (await rpc('apps.questions', {})) as { id: string }[]
+    }
+    await rpc('apps.answerQuestion', { questionId: asked[0]!.id, decision: 'deny' })
+    await call
+    const { latest } = await errorsOf('notes')
+    expect(latest).toMatchObject({ kind: 'tool', tool: 'summarize', denied: { appId: 'notes', name: 'Team notes', capability: 'agent:claude' } })
+    await expect(rpc('apps.sendError', { appId: 'notes', projectId, at: latest!.at })).rejects.toThrow(
+      'This stopped because you did not allow Team notes to run an agent (Claude Code) in a new session; nothing in the app is broken, so it is not sent to the builder',
+    )
+    expect(toAgent.get(builder.id)).toBeUndefined()
+    expect((await errorsOf('notes')).latest?.sentAt).toBeNull()
   })
 })

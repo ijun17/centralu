@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
-import { until } from './test-helpers.js'
+import { fakeBrokerHost, until } from './test-helpers.js'
 
 /**
  * 오류가 만드는 쪽에 닿는다 — host의 절반 (M4 C-6). 앱이 뜨지 못함·죽음·도구 실패를 앱마다 묶어 두고, 물으면
@@ -197,5 +197,53 @@ describe('목록의 lastErrorAt (C-6)', () => {
     await until(() => heard, (n) => n > 0)
     expect(info().lastErrorAt).toBe(rt.errors(ref('reader')).latest!.at)
     expect(changed).toEqual([])
+  })
+})
+
+/**
+ * 사람이 거절한 능력 (D-4) — 실측: 사람이 Deny를 누른(또는 기억된 거절) 능력 때문에 멈춘 도구가 고정 화면 아래에 스택과
+ * "Send to builder"를 단 앱의 오류로 섰다. 그런데 host는 알고 있다: 그 실행 아래 중개 줄이 사람의 답으로 `refused`다. 묶음에 그
+ * 결정을 싣는다 — 화면이 그렇게 말하고, 만드는 세션에는 가지 않는다(builder-requests.test.ts).
+ */
+describe('사람이 거절한 능력 때문에 멈춘 호출은 앱의 버그가 아니다', () => {
+  it('Deny를 누른 것도, 기억된 거절도, 그 앱을 부른 앱의 실패도 그 결정을 싣는다 — 진짜 버그는 그대로다', async () => {
+    const summarize = `centralu.tool(server, 'summarize', { description: 'Sum up', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => ({
+    content: [{ type: 'text', text: String(await centralu.agent('sum up')) }],
+  }))`
+    app('notes', tools(summarize), (m) => (m.uses = { agent: true }))
+    app(
+      'board',
+      tools(`centralu.tool(server, 'digest', { description: 'Digest', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => ({
+    content: [{ type: 'text', text: String(await centralu.callApp('notes', 'summarize')) }],
+  }))
+  centralu.tool(server, 'save', { description: 'Save', inputSchema: z.object({}), annotations: { readOnlyHint: false } }, async () => {
+    throw new Error('disk full')
+  })`),
+      (m) => (m.uses = { apps: ['notes'] }),
+    )
+    const r = make()
+    const asked: string[] = []
+    // 사람은 에이전트를 거절하고, board가 notes를 부르는 것은 허락한다
+    r.attachBrokerHost(fakeBrokerHost({ askCapability: async (q) => (asked.push(q.capability), q.capability.startsWith('agent:') ? 'deny' : 'allow') }))
+    const denied = { appId: 'notes', projectId: 'p1', name: 'App notes', capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' }
+
+    const first = await r.call(ref('notes'), 'summarize', {}, SESSION)
+    expect(first.status).toBe('error')
+    expect(r.errors(ref('notes')).latest).toMatchObject({ kind: 'tool', tool: 'summarize', runId: first.runId, denied })
+
+    // 기억된 거절 — 다시 묻지 않고, 같은 결정이다
+    const again = await r.call(ref('notes'), 'summarize', {}, SESSION)
+    expect(asked).toEqual(['agent:claude'])
+    expect(r.errors(ref('notes')).latest).toMatchObject({ runId: again.runId, denied })
+
+    // notes를 부른 board의 실패도 까닭은 그 거절이다
+    const nested = await r.call(ref('board'), 'digest', {}, SESSION)
+    expect(nested.status).toBe('error')
+    expect(r.errors(ref('board')).latest).toMatchObject({ tool: 'digest', runId: nested.runId, denied })
+
+    // 진짜 버그는 오늘처럼 — 결정이 실리지 않는다
+    const bug = await r.call(ref('board'), 'save', {}, SESSION)
+    expect(bug.status).toBe('error')
+    expect(r.errors(ref('board')).latest).toMatchObject({ tool: 'save', runId: bug.runId, denied: null })
   })
 })

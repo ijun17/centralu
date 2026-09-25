@@ -24,6 +24,12 @@ export type AppErrorBundle = {
   /** 그 호출의 인자 요약 — 비밀은 이름으로 가린다 (도구 오류만) */
   args: string | null
   runId: string | null
+  /**
+   * 이 실패가 사람의 결정에서 왔다 (D-4) — 이 호출(또는 그 아래 사슬)의 부탁을 사람이 거절했다. 앱의 버그가 아니므로 화면은 오류로
+   * 보이지 않고 그 결정으로 말한다(되돌리는 자리는 그 앱의 기록 판: Permissions → Forget). 만드는 세션에도 보내지 않는다 — 보내면
+   * 만드는 에이전트가 멀쩡한 코드를 "고친다". 도구 실패의 묶음에만 선다.
+   */
+  denied: { appId: string; projectId: string | null; name: string; capability: string; text: string } | null
   /** 만드는 세션에 그대로 보낼 수 있는 글 */
   text: string
 }
@@ -37,12 +43,14 @@ const KIND_LABEL: Record<AppErrorKind, string> = {
   tool: 'a tool call failed',
 }
 
-export function errorBundle(app: string, b: Omit<AppErrorBundle, 'text'>): AppErrorBundle {
+export function errorBundle(app: string, input: Omit<AppErrorBundle, 'text' | 'denied'> & { denied?: AppErrorBundle['denied'] }): AppErrorBundle {
+  const b = { ...input, denied: input.denied ?? null }
   const lines = [`App ${app}: ${KIND_LABEL[b.kind]} (${new Date(b.at).toISOString()})`]
   if (b.tool) lines.push(`Tool: ${b.tool}`)
   if (b.args !== null) lines.push(`Arguments: ${b.args}`)
   if (b.runId) lines.push(`Run id: ${b.runId}`)
   lines.push(`Reason: ${b.message}`)
+  if (b.denied) lines.push(`The person denied this: ${b.denied.name} may not ${b.denied.text}`)
   lines.push(b.stderr.length ? `stderr (last lines):\n${b.stderr.join('\n')}` : 'stderr: (the app printed nothing)')
   return { ...b, text: lines.join('\n') }
 }

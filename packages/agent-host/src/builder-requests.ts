@@ -90,6 +90,14 @@ export async function sendErrorToBuilder(deps: BuilderRequestDeps, ref: AppRef, 
   const bundle = deps.apps.markErrorSent(ref, at)
   if (bundle === 'sent') refuse('This error was already sent to the builder')
   if (!bundle) refuse('This error is no longer kept. If it happens again, send the new one')
+  /*
+   * 사람이 거절한 능력 때문에 멈춘 호출은 앱의 버그가 아니다 (M4 D-4) — 만드는 에이전트에게 가면 멀쩡한 코드를 "고친다". 화면은
+   * 이 묶음에 보내기를 내밀지 않고, 여기서도 막는다.
+   */
+  if (bundle.denied) {
+    deps.apps.unmarkErrorSent(ref, at)
+    refuse(`This stopped because you did not allow ${bundle.denied.name} to ${bundle.denied.text}; nothing in the app is broken, so it is not sent to the builder`)
+  }
   try {
     await deps.send(builder.id, builderErrorFrame({ appId: info.appId, name: info.name ?? info.appId }, bundle.text))
   } catch (err) {

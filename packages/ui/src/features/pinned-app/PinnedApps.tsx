@@ -282,7 +282,7 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
           <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
-          <ErrorTail app={app} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
+          <ErrorTail app={app} builder={builder} onShowBuilder={() => setBuilderOpen(true)} onShowRuns={() => setRunsOpen(true)} />
           <FixBar app={app} pv={pv} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
           {asking && <CapabilityAsk question={asking} visible={visible} />}
