@@ -114,6 +114,36 @@ const PROXY_SANDBOX = 'allow-scripts allow-same-origin allow-forms'
 const OPENABLE = /^(https?:|mailto:)/i
 
 /**
+ * 화면이 부른 도구가 도는 동안 화면에 보내는 진행 알림의 간격 (플랜 "오래 걸리는 호출": 호스트는 기다리는 동안 화면에
+ * 진행 알림을 보내 호출을 살려 둔다).
+ *
+ * 화면의 SDK는 요청 하나를 60초 뒤에 버린다(MCP TS SDK의 기본 제한). ext-apps의 `callServerTool`은 진행 알림이 오면
+ * 그 시계를 다시 세도록 켜 둔다(`resetTimeoutOnProgress`). 그런데 host는 그 60초 너머까지 호출을 계속 돌린다 — 승인을
+ * 기다리는 동안(능력 승인은 몇 분이 될 수 있다), 느린 도구가 도는 동안. 알림이 없으면 화면은 호출을 버리고 실패를 그리는데
+ * 앱은 그 일을 끝내고 결과는 갈 곳이 없다. 60초 안에 세 번 — 하나쯤 늦어도 시계가 넘어가지 않는 간격이다.
+ */
+export const CALL_HEARTBEAT_MS = 20_000
+
+/**
+ * 도는 호출 하나를 살려 둔다 — 멈추는 함수를 돌려준다. 화면이 진행 토큰을 싣지 않았으면 살려 둘 것이 없다: 그 화면의 SDK는
+ * 진행 알림을 받을 자리를 열지 않았고(토큰은 `onprogress`를 건 요청에만 실린다), 받지 않는 알림은 시계를 다시 세지 않는다.
+ * 알림의 `progress`는 늘기만 한다(규격: 진행 값은 알림마다 커져야 한다).
+ */
+function keepAlive(bridge: AppBridge, token: string | number | undefined, beats: Set<ReturnType<typeof setInterval>>): () => void {
+  if (token === undefined) return () => {}
+  let progress = 0
+  const t = setInterval(() => {
+    progress += 1
+    void bridge.notification({ method: 'notifications/progress', params: { progressToken: token, progress } }).catch(() => {})
+  }, CALL_HEARTBEAT_MS)
+  beats.add(t)
+  return () => {
+    clearInterval(t)
+    beats.delete(t)
+  }
+}
+
+/**
  * 우리 색과 글꼴을 규격의 변수 이름으로 넘긴다. 값은 화면이 놓인 자리에서 **읽는다.** 대화
  * 레인은 바닥색을 한 단계 올려 두었다(styles/index.css `[data-testid='session-view']`).
  * 적어 두면 자리마다 틀린 색이 된다.
@@ -206,6 +236,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const fillRef = useRef(fill)
   fillRef.current = fill
   const sent = useRef({ input: false, result: false, change: undefined as number | undefined })
+  /** 도는 호출마다 진행 알림의 시계 (`keepAlive`) — 화면이 내려가면(정리, teardown) 함께 멈춘다 */
+  const beats = useRef(new Set<ReturnType<typeof setInterval>>())
   const changeRef = useRef(signal)
   changeRef.current = signal
 
@@ -259,9 +291,16 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         { hostContext: hostContext(scaleRef.current, boxRef.current, fillRef.current) },
       )
       const from = { projectId, instanceId }
+      const live = bridge
       // 앱은 이 컴포넌트의 것이다 — params에 무엇이 실려 와도 appId는 여기서 정한다
-      bridge.oncalltool = async (params) =>
-        (await platform.apps.callTool(appId, params.name, params.arguments ?? {}, from)) as never
+      bridge.oncalltool = async (params) => {
+        const stop = keepAlive(live, params._meta?.progressToken, beats.current)
+        try {
+          return (await platform.apps.callTool(appId, params.name, params.arguments ?? {}, from)) as never
+        } finally {
+          stop()
+        }
+      }
       bridge.onreadresource = async (params) => (await platform.apps.readResource(appId, params.uri, from)) as never
       bridge.onopenlink = async ({ url }) => {
         if (typeof url !== 'string' || !OPENABLE.test(url)) return { isError: true }
@@ -308,10 +347,13 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       onFailedRef.current?.(message)
     })
 
+    const heartbeats = beats.current
     return () => {
       cancelled = true
       bridgeRef.current = null
       if (bridge) void bridge.close()
+      for (const t of heartbeats) clearInterval(t)
+      heartbeats.clear()
       settleLink(false)
     }
   }, [platform, appId, projectId, instanceId, askToOpen, settleLink])
@@ -400,6 +442,9 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         }
         bridgeRef.current = null
         void b.close()
+        // 내려간 화면에 진행 알림을 보낼 까닭이 없다 — 도는 호출의 결말은 기록(실행 기록)에 남는다
+        for (const t of beats.current) clearInterval(t)
+        beats.current.clear()
         // 화면을 내린다 — 부모가 곧 떼더라도 그 사이에 화면이 더 말하지 않게
         iframeRef.current?.removeAttribute('src')
         setPhase('closed')

@@ -451,6 +451,12 @@ so with `approval_policy = "never"` there, Codex refuses an app's write tools.
   result reaches the view and the run record, and the agent follows it with `run_status`: read-only,
   limited to this session's runs of this app, results kept for 1 hour and 50 per session. Claude
   sessions simply wait.
+- A view's own call is held by the view's SDK for 60 s (the MCP TS SDK's request timeout), unless
+  progress arrives: ext-apps' `callServerTool` resets that clock on each progress notification.
+  While a view's call is pending, the UI sends `notifications/progress` for the request's progress
+  token every 20 s, and stops when the call settles or the view goes away. So a slow tool, or a
+  wait for approval, does not make the view give up on a call the app is still running. A request
+  sent without a progress token gets none (its SDK would not listen).
 - Stopping or closing a session cancels every app call it started, including those that returned
   early. The app receives `notifications/cancelled`, and, through the run id, whatever the app had
   asked the broker for is cancelled too.
