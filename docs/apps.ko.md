@@ -151,7 +151,7 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 - 세션으로 갔다 돌아와도 같은 문서다(숨길 뿐 내리지 않는다). 화면이 사라지는 모든 길은 teardown을 먼저 보낸다. Centralu를 다시 켜면 보고 있던 앱이 다시 열린다(호스트가 `home`을 다시 부른다).
 - 앱이 뜨는 동안에는 스켈레톤, 실패하면 이유와 Restart를 보인다. Restart는 호스트가 앱을 내린 뒤에 다시 연다.
 - Runs 패널(§5.2)이 옆에 열린다.
-- 고정 화면의 **`ui/message`**는 어느 세션으로 보낼지 사람에게 묻는다. 고르기 전에는 아무것도 가지 않고, 취소하면 화면에 보내지 않았다고 알린다.
+- 고정 화면의 **`ui/message`**는 어느 세션으로 보낼지 사람에게 묻는다. 고르기 전에는 아무것도 가지 않고, 취소하면 화면에 보내지 않았다고 알린다. 고르면 대화 안 화면과 같은 길(`apps.viewMessage`)로 간다: 앱이 보낸 말로 남고, 에이전트에게는 그 대화 밖에서 왔다고 밝힌 앱의 글로 감싸 간다.
 
 ### 6.3 열린 화면을 최신으로 두기 (우리 확장)
 
@@ -263,7 +263,7 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 | `apps.invoke` | 화면의 도구 호출(`projectId`가 없으면 내장 앱의 호출) |
 | `apps.viewFrame`, `apps.readResource` | 화면 인스턴스의 프레임 주소, 프레임의 앱의 리소스 |
 | `apps.openView`, `apps.closeView` | 고정 화면 열기(`home`을 부른다), 화면 인스턴스 닫기 |
-| `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | 대화가 아직 들고 있는 대화 안 화면, 다시 부르지 않고 다시 열기, 사람이 동의한 대화 안 화면의 말 보내기 |
+| `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | 대화가 아직 들고 있는 대화 안 화면, 다시 부르지 않고 다시 열기, 사람이 동의한 화면의 말 보내기(대화 안 화면은 그 대화로, 고정 화면은 고른 세션으로) |
 | `apps.runs`, `apps.errors` | 실행 기록, 최근 오류 묶음 |
 | `apps.restart`, `apps.remove` | 멈춘 앱의 실패를 지우고 내리기(다음 필요가 띄운다), 사용자 폴더 앱 지우기 |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | 만들기 루프(§8) |
@@ -276,7 +276,6 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 
 - 비밀은 선언할 수 있지만 값을 넣을 수 없다(화면도 RPC도 아직 없다).
 - 매니페스트의 `csp` 필드는 읽지 않는다. 앱별 출처는 매니페스트로만 고른다.
-- 고정 화면의 말은 고른 세션에 보통의 글로 간다. 대화 안 화면의 말은 앱의 글로 감싸서 간다(security-boundaries.md의 "Text an app sends").
 - 사칭 검사는 리소스 템플릿을 받지 않는다. Claude 하위 에이전트의 앱 호출에는 대화 안 화면이 서지 않는다.
 - 중개의 도구는 오는 중이다.
 - Codex 경로는 실행으로 확인하지 않았다(§9.2). Windows에서의 fd 3은 시험하지 않았다(스파이크 S-5).

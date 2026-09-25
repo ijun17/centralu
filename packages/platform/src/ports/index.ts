@@ -624,9 +624,9 @@ export interface AppsPort {
   /** 고정 화면을 닫는다 — 붙들던 앱을 놓는다. 이미 닫혔으면 조용히 지나간다 */
   closeView(instanceId: string): Promise<void>
   /**
-   * 대화 안 화면의 `ui/message`를 그 대화로 보낸다 (M4 B-1·B-4) — **사람이 확인한 뒤에만** 부른다.
-   * 앱과 대화는 host가 인스턴스로 가린다. 대화에는 앱이 보낸 말(`user_message.fromApp`)로 남고,
-   * 에이전트는 앱의 글로 감싼 모양을 받는다. 그 대화의 화면이 아니면 host가 거절한다.
+   * 앱 화면의 `ui/message`를 대화로 보낸다 (M4 B-1·B-4) — **사람이 확인한 뒤에만** 부른다. 앱은 host가 인스턴스로
+   * 가린다. 대화 안 화면이면 그 화면이 선 대화로만(아니면 host가 거절한다), 고정 화면이면 사람이 고른 대화로 간다.
+   * 대화에는 앱이 보낸 말(`user_message.fromApp`)로 남고, 에이전트는 앱의 글로 감싼 모양을 받는다.
    */
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<void>
   /**

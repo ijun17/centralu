@@ -705,13 +705,16 @@ export class MockPlatform implements Platform {
       for (const rec of this.inlineRecords.values()) if (rec.instanceId === instanceId) rec.instanceId = null
     },
     /**
-     * 대화 안 화면의 말 (M4 B-1). 실물처럼: 그 대화에 열린 대화 안 화면의 인스턴스만 받고, 대화에는 앱이 보낸
-     * 말(`fromApp`)로 남긴다. 에이전트가 받는 감싼 모양은 host의 일이라(manager의 appMessageFrame) 여기서는
+     * 앱 화면의 말 (M4 B-1·B-4). 실물처럼: 대화 안 화면은 그 대화의 것만, 고정 화면은 사람이 고른 대화로 받고, 대화에는
+     * 앱이 보낸 말(`fromApp`)로 남긴다. 에이전트가 받는 감싼 모양은 host의 일이라(manager의 appMessageFrame) 여기서는
      * 받은 것을 적어 두기만 한다.
      */
     sendViewMessage: async (sessionId: string, instanceId: string, text: string) => {
-      const owner = this.inlineInstances.get(instanceId)
-      if (!owner || owner.sessionId !== sessionId) throw new Error('This app view is not open in that conversation')
+      // 실물처럼: 대화 안 화면은 그 대화로만, 고정 화면은 사람이 고른 대화로 (앱은 인스턴스가 정한다)
+      const inline = this.inlineInstances.get(instanceId)
+      if (inline && inline.sessionId !== sessionId) throw new Error('This app view is not open in that conversation')
+      const owner = inline ?? this.pinnedInstances.get(instanceId)
+      if (!owner) throw new Error('This app view is not open')
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       const name = this.externalAppList.find((a) => a.appId === owner.appId && a.projectId === owner.projectId)?.name ?? owner.appId

@@ -241,7 +241,9 @@ call.
   host has stopped the app before opening again.
 - The Runs panel (§5.2) opens beside the view.
 - **`ui/message`** from a pinned view asks the person which session to send it to. Nothing is sent
-  before a choice, and cancelling tells the view it was not sent.
+  before a choice, and cancelling tells the view it was not sent. Once picked, it goes the inline
+  view's way (`apps.viewMessage`): stored as the app's message, and framed as the app's text for the
+  agent, saying it came from outside that conversation.
 
 ### 6.3 Keeping open views current (Centralu extension)
 
@@ -489,7 +491,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.invoke` | A view's tool call (a built-in app's call when `projectId` is absent) |
 | `apps.viewFrame`, `apps.readResource` | The frame address of a view instance; a resource of the frame's own app |
 | `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`); close any view instance |
-| `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver an inline view's message once the person agreed |
+| `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver a view's message once the person agreed (an inline view's to its conversation, a pinned view's to the session picked) |
 | `apps.runs`, `apps.errors` | Run records; the latest error bundles |
 | `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
@@ -504,8 +506,6 @@ cancelled, closed or refused; stored without bodies, so a reopened UI can draw p
 
 - Secrets can be declared but not entered (no screen or RPC yet).
 - The manifest's `csp` field is not read; the per-app origin is chosen only in the manifest.
-- A pinned view's message reaches the chosen session as ordinary text, where an inline view's is
-  framed as the app's text (security-boundaries.md, "Text an app sends").
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
 - The broker's tools are arriving.

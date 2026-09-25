@@ -58,7 +58,7 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
    * 보내지 않고, 화면의 요청은 답을 기다린다. 먼저 온 물음이 남아 있으면 그것은 거절로 닫는다(링크
    * 확인과 같은 규칙, AppFrame). 글이 한 조각도 없는 말은 묻지 않고 거절한다 — 보낼 것이 없다.
    */
-  const send = useStore((s) => s.send)
+  const sendViewMessage = useStore((s) => s.sendViewMessage)
   const [ask, setAsk] = useState<MessageAskState | null>(null)
   const askRef = useRef<MessageAskState | null>(null)
   const settleAsk = useCallback((sent: boolean) => {
@@ -86,9 +86,13 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
     if (!a) return
     askRef.current = null
     setAsk(null)
-    await send(sessionId, a.text)
-    setToast(`Sent to ${useStore.getState().sessions[sessionId]?.name ?? 'the session'}`)
-    a.resolve(true)
+    /*
+     * 대화 안 화면과 **같은 길**로 보낸다 (`apps.viewMessage`) — 고른 대화에는 앱이 보낸 말로 남고, 에이전트는 host가
+     * "앱의 글"로 감싼 모양을 받는다. 사람의 말(`send`)로 보내면 앱의 글이 사람의 지시로 둔갑한다. 틀은 host가 짓는다.
+     */
+    const sent = pv.instanceId ? await sendViewMessage(sessionId, pv.instanceId, a.text) : false
+    if (sent) setToast(`Sent to ${useStore.getState().sessions[sessionId]?.name ?? 'the session'}`)
+    a.resolve(sent)
   }
   // 화면이 내려가면(닫기·다시 시작·신뢰를 잃음) 묻던 것도 거절로 닫는다 — 답할 화면이 없다
   useEffect(() => {
