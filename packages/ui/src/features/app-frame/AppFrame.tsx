@@ -47,6 +47,11 @@ export type AppFrameProps = {
   /** 그 호출의 결과. 끝나면 규격대로 한 번 보낸다 (tool-input 다음에) */
   toolResult?: AppToolResult
   /**
+   * 그 호출이 답 없이 끝났다 — 취소, 거절, 앱이 못 뜸 (M4 B-1). 결과 대신 이 이유로 규격의 tool-cancelled를
+   * 한 번 보낸다(tool-input 다음에). 결과와 취소는 둘 중 먼저 온 하나만 간다.
+   */
+  toolCancelled?: string
+  /**
    * "이 앱의 상태가 바뀌었다" (B-3d). 값이 바뀔 때마다 화면에 우리 확장 알림
    * `centralu/notifications/changed`를 보낸다.
    *
@@ -168,7 +173,7 @@ type Phase = 'loading' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
-  { appId, projectId = null, instanceId, toolInput, toolResult, changeSignal, onMessage, fill = false, loading, className },
+  { appId, projectId = null, instanceId, toolInput, toolResult, toolCancelled, changeSignal, onMessage, fill = false, loading, className },
   ref,
 ) {
   const platform = usePlatform()
@@ -312,7 +317,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     [],
   )
 
-  // tool-input은 한 번, tool-result는 그다음에 한 번 (규격: 결과 전에 입력이 반드시 먼저)
+  // tool-input은 한 번, tool-result(또는 tool-cancelled)는 그다음에 한 번 (규격: 결과 전에 입력이 반드시 먼저)
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b) return
@@ -320,15 +325,16 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       sent.current.input = true
       void b.sendToolInput({ arguments: toolInput })
     }
-    if (toolResult !== undefined && !sent.current.result) {
+    if ((toolResult !== undefined || toolCancelled !== undefined) && !sent.current.result) {
       if (!sent.current.input) {
         sent.current.input = true
         void b.sendToolInput({ arguments: {} })
       }
       sent.current.result = true
-      void b.sendToolResult(toolResult as never)
+      if (toolResult !== undefined) void b.sendToolResult(toolResult as never)
+      else void b.sendToolCancelled({ reason: toolCancelled })
     }
-  }, [phase, toolInput, toolResult])
+  }, [phase, toolInput, toolResult, toolCancelled])
 
   // 글자 크기가 바뀌면 host-context-changed (setHostContext가 바뀐 칸만 보낸다)
   useEffect(() => {

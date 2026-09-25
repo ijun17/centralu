@@ -56,6 +56,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
   // 시켜서 들어온 말의 출처 (FR-11)
   { type: 'user_message', sessionId: 's1', seq: 13, text: '릴리즈 노트 정리', from: { sessionId: 'orc-1', name: '지휘 세션' } },
+  // 대화 안 앱 화면이 보낸 말 (M4 B-1·B-4) — 사람이 보냈지만 쓴 것은 앱이다
+  { type: 'user_message', sessionId: 's1', seq: 15, text: 'Show details for row 3', fromApp: { appId: 'slider', projectId: 'p1', name: 'Slider' } },
   // 대화 안 앱 화면 (M4 B-1) — 열림(입력), 결과, 취소, 거절, 닫힘
   { type: 'app_view', sessionId: 's1', seq: 16, callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'open', instanceId: 'i-1', toolInput: { q: 'x' } },
   { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'result', toolResult: { content: [{ type: 'text', text: 'ok' }], structuredContent: { n: 1 } }, kept: true },

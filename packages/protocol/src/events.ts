@@ -110,6 +110,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      * 화면은 이 값으로 "시켜서 들어온 말"을 사람 말과 다르게 그린다.
      */
     from: z.object({ sessionId: z.string(), name: z.string() }).optional(),
+    /*
+     * 대화 안 앱 화면이 보낸 말 (M4 B-1·B-4). 사람이 읽고 보내기로 골랐지만 **쓴 것은 앱이다** —
+     * 화면은 이 값으로 사람 말과 다르게 그린다. 에이전트에게는 host가 "앱의 글"로 감싼 모양이 간다
+     * (#120과 같은 규칙: 남의 글은 옮기는 자리에서 표시한다). 세션이 아니라서 `from`과 따로 둔다.
+     */
+    fromApp: z.object({ appId: z.string(), projectId: z.string().nullable(), name: z.string() }).optional(),
   }),
   z.object({ ...base, ...persistedSeq, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
   z.object({
