@@ -382,7 +382,7 @@ export function useTextZoom(): number {
   return TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
 }
 
-export type ChatItem =
+export type ChatItem = (
   /**
    * pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다.
    * from: 사람이 아니라 다른 세션이 시킨 말 (FR-11 — 오케스트레이터 지시·워커 보고).
@@ -427,6 +427,20 @@ export type ChatItem =
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
   /** 대화의 경계 표식 (압축 지점 등). 대화가 아니라 대화에 대한 사실이다 */
   | { kind: 'mark'; seq: number; text: string }
+) & {
+  /**
+   * host가 이 줄을 저장하며 매긴 **세션 내 번호** (store의 messages.seq, #79).
+   *
+   * `seq`와 다른 번호다. `seq`는 React 키이고, 실시간 항목은 전 세션 공용 `chatSeq`에서 받는다.
+   * 기록 커서(`history.oldestSeq`)와 기록·실시간 합치기는 **이 번호로만** 한다. 렌더 키가 커서로
+   * 새어 들어가면 `loadOlder`가 엉뚱한 자리부터 읽는다: 앱이 부탁한 에이전트의 세션을 처음 열자
+   * 저장된 8줄 세션에 커서 48이 서서, 대화 전체가 한 번 더 붙었다 (실측 2026-09-25).
+   *
+   * 저장되지 않는 줄(`message_image`처럼 이벤트에 번호가 없는 것, 확인 전의 낙관적 말)에는 없다.
+   * 합친 메시지는 첫 조각의 번호다 — host의 loadMessages와 같은 규칙이다.
+   */
+  storedSeq?: number
+}
 
 export type AppState = {
   platform: Platform | null
@@ -803,7 +817,12 @@ export type AppState = {
   setAppFocused(focused: boolean): void
   /** 알림 카드를 걷는다 (×를 누르거나, 그 세션을 보게 됐거나) */
   dismissNotices(sessionIds: string[]): void
-  loadHistory(sessionId: string, force?: boolean): Promise<void>
+  /**
+   * 최신 기록 한 페이지를 읽어 화면의 대화와 합치고 커서를 세운다 (#79, mergePage). 처음 여는 세션도,
+   * 밖에서 이어간 대화를 따라잡는 다시 읽기(history_synced)도, 빈 구간을 메우는 재동기화도 같은 길이다 —
+   * 예전에는 다시 읽기만 갈아 끼우는 force가 따로 있었다. 이제 페이지 구간은 언제나 기록이 정본이다.
+   */
+  loadHistory(sessionId: string): Promise<void>
   /** 더 오래된 대화를 앞에 붙인다 (압축 이전 대화를 읽기 위한 길) */
   loadOlder(sessionId: string): Promise<void>
   saveWorkspace(): void
@@ -1371,6 +1390,136 @@ function trackWorkingSince(
 /** 저장소에서 들여온 항목보다 항상 큰 번호를 쓰도록 밀어 올린다 */
 function bumpSeqAbove(items: { seq: number }[]): void {
   for (const it of items) if (it.seq > chatSeq) chatSeq = it.seq
+}
+
+/**
+ * 기록에서 읽은 줄이 화면에 이미 있는 키와 부딪히면 새 키를 준다 (#79).
+ *
+ * 기록의 키는 저장 번호고, 실시간 항목의 키는 `chatSeq`에서 온다. 이벤트가 기록보다 먼저 온 세션에서는
+ * 실시간 키(예: 31)가 아직 안 읽은 저장 번호(31번 줄)와 같을 수 있다. 같은 키가 둘이면 가상 스크롤이 두 줄을
+ * 한 자리에 겹쳐 그린다(위 `chatSeq` 주석). 바꾸는 쪽은 언제나 새로 들어오는 기록 줄이다 — 화면에 있던 줄의
+ * 키가 바뀌면 그 줄이 다시 그려지고, 읽던 자리(`scrollAnchor`)가 그 키를 잃는다.
+ * 부르기 전에 `bumpSeqAbove`로 올려 두었으므로 새 키는 어느 저장 번호와도 겹치지 않는다.
+ */
+function rekeyAgainst(incoming: ChatItem[], taken: Set<number>): ChatItem[] {
+  return incoming.map((it) => (taken.has(it.seq) ? { ...it, seq: ++chatSeq } : it))
+}
+
+/**
+ * 기록의 줄이 화면의 줄과 같은 말일 때 둘을 하나로 (#79). 모양은 기록의 것, 키와 화면에만 있는 것
+ * (도구의 실행 중 출력, 확인 표식)은 화면의 것이다.
+ *
+ * 흐르는 중인 말은 예외다: host는 본문을 몇 백 ms마다 내려 쓰므로, 화면의 말이 기록의 본문을 이어 가고
+ * 있으면 화면 쪽이 더 길다 — 그때는 화면의 것을 둔다. 이어 가지 않으면(첫 연결이 말의 뒷부분만 재생했다)
+ * 기록이 온전한 쪽이다.
+ */
+function settle(live: ChatItem, row: ChatItem): ChatItem {
+  if ((live.kind === 'assistant' || live.kind === 'reasoning') && row.kind === live.kind && live.text.startsWith(row.text)) {
+    return live
+  }
+  return {
+    ...live,
+    ...row,
+    seq: live.seq,
+    ...(live.kind === 'user' && live.pending ? { pending: false } : {}),
+  } as ChatItem
+}
+
+/**
+ * 번호 없는 화면의 줄이 기록의 이 줄을 먼저 그린 것인가 — 내용으로 가린다 (#79).
+ *
+ * 번호가 없는 줄은 셋이다: 확인 전의 말(목은 확인을 보내지 않는다), 이미지(host가 파일을 쓴 **뒤에** 번호를
+ * 매겨 이벤트에는 번호가 없다), 오류(스키마가 번호를 지운다, #161). 셋 다 host의 저장소에는 있다.
+ */
+function sameLine(live: ChatItem, row: ChatItem): boolean {
+  if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && live.text === row.text
+  if (live.kind === 'image' && row.kind === 'image') return !!live.data && live.mime === row.mime && live.data === row.data
+  if (live.kind === 'mark' && row.kind === 'mark') return live.text === row.text
+  return false
+}
+
+/**
+ * 최신 기록 페이지를 화면의 대화와 합친다 (#79) — 줄은 저장 번호(`storedSeq`)로만 맞춘다.
+ *
+ * 예전에는 화면에 줄이 있으면 페이지를 버리고 커서만 페이지에서 세웠다. 그러면 버린 페이지와 화면 사이가
+ * 비었고(`loadOlder`는 커서 위만 읽는다), 커서를 화면 맨 위의 렌더 키에서 세운 길은 같은 대화를 한 번 더 붙였다.
+ *
+ * 페이지는 host가 읽은 순간의 마지막 N개고, 그 구간(첫 줄–끝 줄)은 **페이지가 정본이다.**
+ *  - 페이지와 같은 번호의 화면 줄은 하나로 합친다(`settle`) — 두 번 서지 않고, 화면의 키를 지킨다.
+ *  - 페이지보다 오래된 화면 줄(첫 연결이 재생한 옛 조각)은 버린다. 남기면 페이지 위에 이어지지 않는 줄이
+ *    떠서, 커서를 어디에 세워도 가운데가 비거나 두 번 선다. 버린 줄은 `loadOlder`가 제자리로 데려온다.
+ *  - 승인 줄은 기록에서 그려지지 않는다(`messagesToChat`) — 구간 안이어도 번호 자리에 남긴다.
+ *  - 구간 안의 번호 없는 줄은 페이지가 이미 들고 있다(`sameLine`의 셋).
+ * 구간 뒤의 화면 줄은 꼬리로 그대로 붙는다 — 흐르는 중인 말과 막 보낸 말이 여기 있다. 꼬리 머리의 번호 없는
+ * 줄은 페이지 끝의 짝 없는 줄과 내용이 같으면 하나로 친다: 번호가 없을 뿐 저장소에는 이미 적혀 있다.
+ */
+function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): ChatItem[] {
+  if (rows.length === 0) return have
+  const first = rows[0]!.seq
+  const last = rows[rows.length - 1]!.seq
+  const at = new Map<number, number>()
+  page.forEach((p, i) => {
+    if (p.storedSeq !== undefined) at.set(p.storedSeq, i)
+  })
+  const out = [...page]
+  /** 화면의 줄을 받아 그 키를 물려받은 페이지 자리 */
+  const adopted = new Set<number>()
+  const approvals: ChatItem[] = []
+
+  let cut = -1
+  have.forEach((it, i) => {
+    if (it.storedSeq !== undefined && it.storedSeq <= last) cut = i
+  })
+  for (const it of have.slice(0, cut + 1)) {
+    const n = it.storedSeq
+    if (n === undefined || n < first) continue
+    const i = at.get(n)
+    if (i !== undefined) {
+      if (!adopted.has(i)) out[i] = settle(it, page[i]!)
+      adopted.add(i)
+    } else if (it.kind === 'approval') approvals.push(it)
+  }
+
+  const tail: ChatItem[] = []
+  let from = adopted.size ? Math.max(...adopted) + 1 : 0
+  let head = true
+  for (const it of have.slice(cut + 1)) {
+    if (it.storedSeq !== undefined) head = false
+    if (head) {
+      let i = from
+      while (i < page.length && (adopted.has(i) || !sameLine(it, page[i]!))) i++
+      if (i < page.length) {
+        out[i] = settle(it, page[i]!)
+        adopted.add(i)
+        from = i + 1
+        continue
+      }
+    }
+    tail.push(it)
+  }
+
+  // 새로 들어온 기록 줄만 키를 바꾼다 (rekeyAgainst) — 화면에서 온 줄의 키는 그대로다
+  const screen = new Set([...[...adopted].map((i) => out[i]!.seq), ...approvals.map((a) => a.seq), ...tail.map((t) => t.seq)])
+  out.forEach((it, i) => {
+    if (!adopted.has(i)) out[i] = rekeyAgainst([it], screen)[0]!
+  })
+
+  const body: ChatItem[] = []
+  for (const it of out) {
+    while (approvals.length && it.storedSeq !== undefined && approvals[0]!.storedSeq! < it.storedSeq) body.push(approvals.shift()!)
+    body.push(it)
+  }
+  return [...body, ...approvals, ...tail]
+}
+
+/**
+ * 더 오래된 페이지를 앞에 붙인다 (#79). 화면에 이미 있는 번호의 줄은 다시 붙이지 않고, 화면의 키와
+ * 부딪히는 줄은 새 키를 받는다(`rekeyAgainst`).
+ */
+function prependPage(have: ChatItem[], older: ChatItem[]): ChatItem[] {
+  const held = new Set(have.flatMap((it) => (it.storedSeq === undefined ? [] : [it.storedSeq])))
+  const fresh = older.filter((it) => it.storedSeq === undefined || !held.has(it.storedSeq))
+  return [...rekeyAgainst(fresh, new Set(have.map((it) => it.seq))), ...have]
 }
 
 /** 첨부 상한. 이보다 크면 base64 변환과 WS 전송 양쪽에서 앱이 눈에 띄게 멈춘다 */
@@ -1987,7 +2136,7 @@ export const useStore = create<AppState>((set, get) => ({
      * 이벤트로 한 줄씩 재생하면 우리가 이미 아는 부분과 섞일 수 있다.
      */
     if (e.type === 'history_synced') {
-      void get().loadHistory(sessionId, true)
+      void get().loadHistory(sessionId)
       return
     }
 
@@ -2365,22 +2514,30 @@ export const useStore = create<AppState>((set, get) => ({
     if (prev && prev !== id) {
       const items = get().chat[prev]
       if (items && items.length > WINDOW_SIZE) {
-        const kept = items.slice(-WINDOW_SIZE)
         /*
          * **창을 줄이면 커서도 함께 옮긴다** (도그푸딩 2026-09-09: "위에 대화가 안 불러와져").
          *
          * 예전에는 chat만 잘랐다. 그러면 화면의 맨 위는 방금 자른 자리인데 커서(oldestSeq)는
          * 예전 그대로라, '이전 대화 불러오기'가 **화면과 안 이어지는 구간**을 앞에 붙였다 —
-         * 잘려 나간 사이가 영영 안 보인다. 자른 자리가 곧 새 커서고, 잘랐다는 것은 곧
-         * 더 있다는 뜻이므로 more는 참이다.
+         * 잘려 나간 사이가 영영 안 보인다. 자른 자리가 곧 새 커서다.
+         *
+         * 커서는 맨 위 줄의 **저장 번호**다 (#79). 렌더 키를 쓰던 동안, 남긴 50줄의 맨 위가 실시간 줄이면
+         * 커서가 전 세션 공용 번호를 받았다. 번호 없는 줄(이미지·확인 전의 말)에서는 창을 시작하지 않는다 —
+         * 세울 번호가 없고, 그 줄은 저장소에 있어 `loadOlder`가 다시 데려온다. 번호 있는 줄이 하나도 없으면
+         * 자르지 않는다: 커서 없이 자르면 잘린 사이로 갈 길이 없다.
          */
-        set((s) => ({
-          chat: { ...s.chat, [prev]: kept },
-          history: {
-            ...s.history,
-            [prev]: { oldestSeq: kept[0]?.seq ?? 0, more: true, loading: false },
-          },
-        }))
+        let top = items.length - WINDOW_SIZE
+        while (top < items.length && items[top]!.storedSeq === undefined) top++
+        const cursor = items[top]?.storedSeq
+        if (cursor !== undefined) {
+          set((s) => ({
+            chat: { ...s.chat, [prev]: items.slice(top) },
+            history: {
+              ...s.history,
+              [prev]: { oldestSeq: cursor, more: cursor > 1, loading: false },
+            },
+          }))
+        }
       }
     }
 
@@ -2389,32 +2546,20 @@ export const useStore = create<AppState>((set, get) => ({
     // 아직 안 읽어온 세션이면 저장된 대화를 불러온다 (host 재시작 후에도 기록은 남는다)
     const cur = get()
     /*
-     * 비어 있는 자리도 "안 읽었다"로 본다. 아래 커서 맞추기(09-09)는 화면에 줄이 **있을 때**의
-     * 답이다 — 줄이 없으면 커서가 0이 되어 '이전 대화' 버튼조차 뜨지 않는다. 갈아 끼워서
-     * 잃을 것(스트리밍 중인 말, 낙관적으로 그린 프롬프트)도 없다.
+     * "읽었다"는 **커서가 있다**는 뜻이다 (#79). 대화 줄이 있다고 읽은 것이 아니다 — 이벤트가 화면보다
+     * 먼저 오면(앱이 부탁한 에이전트처럼 host가 뒤에서 만든 세션, 첫 연결이 재생한 이벤트) 줄만 생긴다.
+     *
+     * 예전(09-09)에는 그런 세션의 커서를 화면 맨 위 줄에서 세웠다. 다시 읽으면 스트리밍 중인 말이나
+     * 낙관적으로 그린 첫 프롬프트가 지워질 수 있어서였다. 그런데 그 번호는 렌더 키였다: 저장된 8줄 세션에
+     * 커서 48이 서서 '이전 대화'가 대화 전체를 한 번 더 붙였고(실측 2026-09-25), 키가 저장 번호보다
+     * 작으면 가운데가 통째로 빠졌다. 이제 `loadHistory`가 화면의 줄을 지우지 않고 기록과 합치므로
+     * (mergePage) 언제나 읽는다.
      */
-    if (!cur.chat[id]?.length && !cur.history[id]) void get().loadHistory(id)
-    else if (!cur.history[id]) {
-      /*
-       * chat은 있는데 **커서가 없는** 세션 (도그푸딩 2026-09-09: "위에 대화가 안 불러와져").
-       *
-       * 이벤트가 화면보다 먼저 오면 chat만 생긴다 — 그때 커서가 없어서 '이전 대화
-       * 불러오기'가 아예 안 떴다. 화면에는 최근 몇 줄뿐인데 위로 갈 길이 없는 상태다.
-       *
-       * 커서는 **화면의 맨 위**에 맞춘다. 저장소에서 다시 읽어 갈아 끼우면 그 순간
-       * 스트리밍 중이던 말이나 낙관적으로 그린 첫 프롬프트가 지워질 수 있다 —
-       * 화면을 건드리지 않고 커서만 화면에 맞추는 편이 잃는 것이 없다.
-       * seq 1이 맨 위면 더 위는 없다: 그때는 버튼도 안 뜬다.
-       */
-      const top = cur.chat[id]?.[0]?.seq ?? 0
-      set((s) => ({
-        history: { ...s.history, [id]: { oldestSeq: top, more: top > 1, loading: false } },
-      }))
-    }
+    if (!cur.history[id]) void get().loadHistory(id)
     void get().wake(id)
   },
 
-  async loadHistory(sessionId, force = false) {
+  async loadHistory(sessionId) {
     const platform = get().platform
     if (!platform) return
     try {
@@ -2422,9 +2567,13 @@ export const useStore = create<AppState>((set, get) => ({
       const items = messagesToChat(msgs)
       bumpSeqAbove(items)
       set((s) => ({
-        // force면 갈아 끼운다 — 밖에서 이어간 대화를 따라잡을 때 쓴다
-        // 비어 있는 자리는 지킬 것이 없다 — 기록을 읽는 사이 대화 아닌 이벤트만 왔던 경우다
-        chat: { ...s.chat, [sessionId]: force || !s.chat[sessionId]?.length ? items : s.chat[sessionId]! },
+        /*
+         * 화면의 줄은 버리지 않고 기록과 합친다 (#79, mergePage). 예전에는 줄이 있으면 페이지를 버렸다 —
+         * 커서는 버린 페이지에서 세우면서. 다시 읽기(밖에서 이어간 대화 따라잡기, 빈 구간 메우기)도 같은 길이다:
+         * 페이지 구간은 기록이 정본이고, 그 뒤에 흐르는 말만 화면의 것이다.
+         * 커서는 합친 결과의 맨 위 저장 번호, 곧 페이지의 첫 줄이다 — 그보다 오래된 화면 줄은 합치며 버렸다.
+         */
+        chat: { ...s.chat, [sessionId]: mergePage(s.chat[sessionId] ?? [], items, msgs) },
         // 지난 카드의 앱 화면 자리 (M4 B-1) — 이 UI가 이미 아는 화면(살아 있는 것)은 그대로 둔다
         inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
         history: {
@@ -2453,7 +2602,7 @@ export const useStore = create<AppState>((set, get) => ({
       const older = messagesToChat(msgs)
       bumpSeqAbove(older)
       set((s) => ({
-        chat: { ...s.chat, [sessionId]: [...older, ...(s.chat[sessionId] ?? [])] },
+        chat: { ...s.chat, [sessionId]: prependPage(s.chat[sessionId] ?? [], older) },
         inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
         history: {
           ...s.history,
@@ -4188,7 +4337,7 @@ export const useStore = create<AppState>((set, get) => ({
 
     // 재동기화: 빈 구간의 이벤트는 다시 오지 않는다 — 보던 대화를 저장소의 진실로 갈아 끼운다
     const focused = get().focusedSessionId
-    if (resync && focused) void get().loadHistory(focused, true)
+    if (resync && focused) void get().loadHistory(focused)
 
     // 끊기기 직전에 돌고 있었는데 새 host가 모르는 프로세스만 되살린다
     const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
@@ -4373,6 +4522,20 @@ function ownerOf(items: ChatItem[], callId: string, fallback: 'oldest' | 'latest
   return -1
 }
 
+/** host가 실어 보낸 저장 번호를 항목에 싣는다 (#79) — 없으면 싣지 않는다 */
+const stored = (seq: number | undefined): { storedSeq?: number } => (seq === undefined ? {} : { storedSeq: seq })
+
+/**
+ * 이 저장 번호의 줄을 이미 들고 있나 (#79).
+ *
+ * 기록 페이지가 먼저 도착하고 같은 줄의 이벤트가 뒤따르면(보관해 둔 이벤트의 재생) 같은 말이 두 번 선다.
+ * 저장 번호가 같으면 같은 줄이다. 줄 하나가 항목 하나인 이벤트에만 쓴다. 스트리밍 조각은 한 번호가
+ * 여러 번 오는 것이 정상이라 여기서 거르지 않는다.
+ */
+function holds(items: ChatItem[], seq: number | undefined): boolean {
+  return seq !== undefined && items.some((i) => i.storedSeq === seq)
+}
+
 /** 이벤트를 대화 아이템으로 (스트리밍 델타는 마지막 assistant 항목에 append) */
 function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
@@ -4380,9 +4543,10 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       const last = items[items.length - 1]
       if (last?.kind === 'assistant') {
         const copy = items.slice(0, -1)
-        return [...copy, { ...last, text: last.text + e.text }]
+        // 번호 없이 시작한 말(저장되지 않는 빈 조각이 먼저 왔다)은 처음 알게 된 번호를 받는다
+        return [...copy, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) }]
       }
-      return [...items, { kind: 'assistant', seq: ++chatSeq, text: e.text }]
+      return [...items, { kind: 'assistant', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
     case 'reasoning_delta': {
       // 텍스트 없는 조각(claude의 토큰 추정)은 대화가 아니라 세션 상태(thinkingTokens)다
@@ -4392,14 +4556,16 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
         const copy = items.slice(0, -1)
         return [...copy, { ...last, text: last.text + e.text }]
       }
-      return [...items, { kind: 'reasoning', seq: ++chatSeq, text: e.text }]
+      return [...items, { kind: 'reasoning', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
     case 'tool_call':
+      if (holds(items, e.seq)) return items
       return [
         ...items,
         {
           kind: 'tool',
           seq: ++chatSeq,
+          ...stored(e.seq),
           tool: e.summary.tool,
           title: e.summary.title,
           readOnly: e.summary.readOnly,
@@ -4446,11 +4612,13 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * 이미 한 줄이 있다: 두 줄로 그리지 않는다.
        */
       if (items.some((it) => it.kind === 'approval' && it.requestId === e.requestId && it.decision === undefined)) return items
+      if (holds(items, e.seq)) return items
       return [
         ...items,
         {
           kind: 'approval',
           seq: ++chatSeq,
+          ...stored(e.seq),
           requestId: e.requestId,
           summary:
             e.detail.kind === 'command'
@@ -4482,6 +4650,8 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * 지금은 첨부가 별도 필드라 text가 곧 원문이다 — 이 동일성이 이 대조의 전제다.
        */
       // 앱이 보낸 말(M4 B-1)도 사람 말의 확정 대조에서 뺀다 — 출처 표식이 사람 말풍선에 흡수되면 안 된다
+      // 기록과 합치며 이미 확정된 말이다 (#79) — 기록 페이지가 이 이벤트보다 먼저 왔다
+      if (holds(items, e.seq)) return items
       const idx = e.from || e.fromApp ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
       if (idx === -1)
         return [
@@ -4489,6 +4659,7 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
           {
             kind: 'user',
             seq: ++chatSeq,
+            storedSeq: e.seq,
             text: e.text,
             ...(e.from ? { from: e.from } : {}),
             ...(e.fromApp ? { fromApp: e.fromApp } : {}),
@@ -4497,7 +4668,7 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
           },
         ]
       return items.map((it, i) =>
-        i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false } : it,
+        i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false, storedSeq: e.seq } : it,
       )
     }
     case 'history_synced':
@@ -4506,10 +4677,12 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'compaction':
       // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
       // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다
-      return [...items, { kind: 'mark', seq: ++chatSeq, text: compactionText(e) }]
+      if (holds(items, e.seq)) return items
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: compactionText(e) }]
     case 'handoff':
       // 이 세션이 어디서 왔는지 (#102). 노트 원문은 저장된 payload에만 있다 — 여기는 한 줄이다
-      return [...items, { kind: 'mark', seq: ++chatSeq, text: handoffText(e) }]
+      if (holds(items, e.seq)) return items
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: handoffText(e) }]
     /*
      * 실패한 턴도 대화에 남는다 (#107).
      *
@@ -4651,6 +4824,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       items.push({
         kind: 'user',
         seq: m.seq,
+        storedSeq: m.seq,
         text: String(p?.text ?? ''),
         ...(p?.from ? { from: p.from } : {}),
         ...(p?.fromApp ? { fromApp: p.fromApp } : {}),
@@ -4661,13 +4835,13 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       const e = m.payload as { text?: string }
       const last = items[items.length - 1]
       if (last?.kind === 'assistant') last.text += e.text ?? ''
-      else items.push({ kind: 'assistant', seq: m.seq, text: e.text ?? '' })
+      else items.push({ kind: 'assistant', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'reasoning') {
       // 델타 행들을 한 덩어리로 (assistant와 같은 규칙)
       const e = m.payload as { text?: string }
       const last = items[items.length - 1]
       if (last?.kind === 'reasoning') last.text += e.text ?? ''
-      else items.push({ kind: 'reasoning', seq: m.seq, text: e.text ?? '' })
+      else items.push({ kind: 'reasoning', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
       // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
       const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' }>
@@ -4675,13 +4849,14 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
         e.type === 'handoff' ? handoffText(e)
         : e.type === 'error' ? errorText(e)
         : compactionText(e)
-      items.push({ kind: 'mark', seq: m.seq, text })
+      items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, text })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as { callId?: string; summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary)
         items.push({
           kind: 'tool',
           seq: m.seq,
+          storedSeq: m.seq,
           tool: e.summary.tool,
           title: e.summary.title,
           readOnly: e.summary.readOnly,
@@ -4711,6 +4886,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       items.push({
         kind: 'image',
         seq: m.seq,
+        storedSeq: m.seq,
         mime: e.mime ?? '',
         data: e.data ?? '',
         path: e.path,

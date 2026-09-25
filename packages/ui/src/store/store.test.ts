@@ -4,7 +4,7 @@ import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { externalAppKey, inlineViewsFromHistory, messagesToChat, registerPinnedFrame, useStore } from './store.js'
+import { externalAppKey, inlineViewsFromHistory, messagesToChat, registerPinnedFrame, useStore, type ChatItem } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -33,6 +33,20 @@ function sessionInfo(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
 
 const delta = (sessionId: string, text: string) =>
   ({ sessionId, type: 'message_delta', role: 'assistant', text }) as NormalizedEvent
+
+/** 대화 한 줄을 사람이 읽는 글로 — 도구는 제목, 이미지는 종류 */
+const line = (i: ChatItem): string =>
+  i.kind === 'tool' ? i.title : i.kind === 'image' ? `image:${i.mime}` : i.kind === 'approval' ? i.summary : i.text
+
+/**
+ * 사람이 할 수 있는 만큼 거슬러 읽는다 — 기록이 선 뒤 '이전 대화'를 더 없을 때까지 (#79).
+ * 커서가 틀리면 여기서 드러난다: 가운데가 빠지거나(커서가 너무 낮다) 같은 줄이 두 번 붙는다(너무 높다).
+ */
+async function readAll(id: string): Promise<string[]> {
+  await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
+  for (let i = 0; i < 50 && useStore.getState().history[id]!.more; i++) await useStore.getState().loadOlder(id)
+  return useStore.getState().chat[id]!.map(line)
+}
 
 beforeEach(() => {
   useStore.setState({
@@ -120,7 +134,7 @@ describe('resync_required 소비 (U3)', () => {
 
     const spy = vi.spyOn(useStore.getState(), 'loadHistory')
     mock.setConnectionState('resync_required')
-    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('u3-s3', true))
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('u3-s3'))
   })
 })
 
@@ -157,7 +171,11 @@ describe('기록 커서', () => {
     expect(info.more).toBe(true)
   })
 
-  it('이벤트로만 생긴 대화에도 커서를 세운다 — 없으면 위로 갈 길이 없다', async () => {
+  /*
+   * 예전 단언은 `oldestSeq === chat[0].seq`였다. 결함이 있는 채로 통과했다: 그 seq가 렌더 키라서
+   * 커서가 화면과 "같은 자리"여도 `loadOlder`는 엉뚱한 곳부터 읽었다 (#79). 그래서 결과를 본다.
+   */
+  it('이벤트로만 생긴 대화도 끝까지 거슬러 읽으면 저장된 줄이 빠짐없이 한 번씩 있다', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('h3', sessionInfo('h3'))
     mock.messages.set('h3', many('h3', 120))
@@ -170,9 +188,272 @@ describe('기록 커서', () => {
 
     await useStore.getState().focusSession('h3')
 
-    await vi.waitFor(() => expect(useStore.getState().history['h3']?.more).toBe(true))
-    const chat = useStore.getState().chat['h3']!
-    expect(useStore.getState().history['h3']!.oldestSeq).toBe(chat[0]!.seq)
+    expect(await readAll('h3')).toEqual([...Array.from({ length: 120 }, (_, i) => `줄 ${i + 1}`), '먼저 온 말'])
+  })
+})
+
+/**
+ * 기록 커서는 저장 번호로만 선다 (#79).
+ *
+ * 실시간 줄의 `seq`는 전 세션 공용 렌더 키고, 기록에서 읽은 줄의 `seq`는 host가 세션마다 매긴 번호다.
+ * 이벤트가 화면보다 먼저 온 세션에서 커서가 렌더 키를 받으면: 키가 저장 번호보다 작으면 가운데가 빠지고(A),
+ * 크면 최신 페이지가 한 번 더 붙는다(A2). 기록을 읽는 사이 이벤트가 오면 받아 온 페이지를 버렸다(B).
+ * 실측(2026-09-25): 앱이 부탁한 에이전트의 세션을 처음 열자 프롬프트와 Read·Write 카드가 두 번 보였다.
+ */
+describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
+  const rows = (id: string, n: number, from = 1) =>
+    Array.from({ length: n }, (_, i) => ({
+      sessionId: id, seq: from + i, role: 'user' as const, kind: 'text' as const,
+      payload: { text: `L${from + i}` }, ts: from + i,
+    }))
+  const L = (n: number) => Array.from({ length: n }, (_, i) => `L${i + 1}`)
+
+  /** 다른 세션의 큰 기록을 먼저 읽는다 — 렌더 키가 저장 번호보다 훨씬 커진다 (실측의 조건) */
+  async function openBigFirst(mock: MockPlatform, id: string) {
+    mock.sessions.set(id, sessionInfo(id))
+    mock.messages.set(id, rows(id, 1000))
+    useStore.getState().focusSession(id)
+    await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
+  }
+
+  it.each([
+    ['첫 페이지', 50],
+    ['더 오래된 페이지', 200],
+  ])('A: 렌더 키가 저장 번호보다 작아도 가운데가 빠지지 않는다 — 키가 %s의 번호와 겹쳐도 보던 줄의 키는 그대로다', async (_where, over) => {
+    const mock = new MockPlatform()
+    mock.sessions.set('a79-probe', sessionInfo('a79-probe'))
+    mock.sessions.set('a79', sessionInfo('a79'))
+    await useStore.getState().attach(mock)
+    // 다음 렌더 키가 몇인지 재고, 그보다 200줄 긴 세션을 만든다 — 키가 저장 번호의 한가운데에 떨어진다
+    mock.emit({ sessionId: 'a79-probe', type: 'tool_call', callId: 'p', summary: { tool: 'Read', title: 'probe', readOnly: true } } as never)
+    const n = useStore.getState().chat['a79-probe']![0]!.seq + over
+    mock.messages.set('a79', rows('a79', n))
+
+    mock.emit(delta('a79', 'LIVE-D'))
+    const key = useStore.getState().chat['a79']![0]!.seq
+    expect(key).toBeLessThan(n) // 조건이 섰다: 키가 저장 번호 안쪽이다
+    useStore.getState().focusSession('a79')
+
+    expect(await readAll('a79')).toEqual([...L(n), 'LIVE-D'])
+    const chat = useStore.getState().chat['a79']!
+    // 합치며 화면의 줄은 다시 그려지지 않는다(키가 같다) — 같은 번호의 저장된 줄이 비켜 간다
+    expect(chat.find((i) => line(i) === 'LIVE-D')!.seq).toBe(key)
+    expect(new Set(chat.map((i) => i.seq)).size).toBe(chat.length)
+  })
+
+  it('A2: 렌더 키가 저장 번호보다 커도 최신 페이지가 두 번 붙지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('a2-79', sessionInfo('a2-79'))
+    mock.messages.set('a2-79', rows('a2-79', 20))
+    await useStore.getState().attach(mock)
+    await openBigFirst(mock, 'a2-big')
+
+    mock.emit(delta('a2-79', 'LIVE-S'))
+    expect(useStore.getState().chat['a2-79']![0]!.seq).toBeGreaterThan(21)
+    useStore.getState().focusSession('a2-79')
+
+    expect(await readAll('a2-79')).toEqual([...L(20), 'LIVE-S'])
+  })
+
+  it('B: 기록을 읽는 사이 도착한 말이 받아 온 페이지를 버리게 하지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('b79', sessionInfo('b79'))
+    mock.messages.set('b79', rows('b79', 250))
+    await useStore.getState().attach(mock)
+
+    // host처럼: 요청을 받은 순간의 페이지를 읽고, 답은 그 뒤에 온 이벤트보다 늦게 도착한다
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mock.agents.loadMessages.bind(mock.agents)
+    mock.agents.loadMessages = async (...args: Parameters<typeof real>) => {
+      const page = real(...args)
+      await gate
+      return page
+    }
+    useStore.getState().focusSession('b79')
+    mock.emit(delta('b79', 'LIVE'))
+    release()
+    mock.agents.loadMessages = real
+
+    expect(await readAll('b79')).toEqual([...L(250), 'LIVE'])
+  })
+
+  it('앱이 부탁한 에이전트의 세션: 뒤에서 만들어져 일을 마친 뒤 처음 열어도 한 번씩만 보인다 (실측 재현)', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    await openBigFirst(mock, 'app79-big')
+
+    // host가 뒤에서 세션을 만들고(D-1), 앱의 부탁이 첫 말로 들어가 에이전트가 읽고 쓰고 답한다
+    const info = sessionInfo('app79', { appId: 'notes' })
+    mock.sessions.set('app79', info)
+    mock.emit({ type: 'session_created', sessionId: 'app79', session: info } as never)
+    const fromApp = { appId: 'notes', projectId: 'p1', name: 'Notes' }
+    mock.emit({ type: 'user_message', sessionId: 'app79', seq: 0, text: 'Make a note', fromApp } as never)
+    mock.emit({ type: 'tool_call', sessionId: 'app79', callId: 'r', summary: { tool: 'Read', title: 'Read note.md', readOnly: true } } as never)
+    mock.emit({ type: 'tool_result', sessionId: 'app79', callId: 'r', ok: true, summary: 'empty' } as never)
+    mock.emit({ type: 'tool_call', sessionId: 'app79', callId: 'w', summary: { tool: 'Write', title: 'Write note.md', readOnly: false } } as never)
+    mock.emit({ type: 'tool_result', sessionId: 'app79', callId: 'w', ok: true, summary: 'written' } as never)
+    mock.emit(delta('app79', 'Done.'))
+    mock.emit({ type: 'turn_complete', sessionId: 'app79' } as never)
+    expect(useStore.getState().history['app79']).toBeUndefined()
+    const key = useStore.getState().chat['app79']!.find((i) => line(i) === 'Write note.md')!.seq
+
+    useStore.getState().focusSession('app79')
+
+    expect(await readAll('app79')).toEqual(['Make a note', 'Read note.md', 'Write note.md', 'Done.'])
+    // 보던 카드는 기록과 합쳐져도 같은 키다 — 다시 그려지지 않고, 읽던 자리(scrollAnchor)가 그 키로 남는다
+    const write = useStore.getState().chat['app79']!.find((i) => line(i) === 'Write note.md')
+    expect(write).toMatchObject({ seq: key, result: 'written', ok: true })
+  })
+
+  it('첫 연결이 재생한 이벤트가 페이지와 겹쳐도 한 번씩, 제자리에 선다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('r79', sessionInfo('r79'))
+    const approval = { type: 'approval_request', sessionId: 'r79', seq: 30, requestId: 'old', detail: { kind: 'command', command: 'old command' } }
+    const resolved = { type: 'approval_resolved', sessionId: 'r79', seq: 31, requestId: 'old', decision: 'allow' }
+    const stored = rows('r79', 150).map((r) =>
+      r.seq === 148 || r.seq === 150 ? { ...r, role: 'assistant' as const, payload: { text: `L${r.seq}` } }
+      : r.seq === 30 || r.seq === 31 ? { ...r, role: 'system' as const, kind: 'approval' as const, payload: r.seq === 30 ? approval : resolved }
+      : r,
+    )
+    mock.messages.set('r79', stored as never)
+
+    // 새로 붙은 UI에 host가 버퍼를 재생한다 — 세션을 등록하기 전이라 보관됐다가 attach에서 재생된다.
+    // 오래된 말(21), 페이지 안의 말들, 앞부분이 버퍼 밖으로 밀려난 마지막 답('150'만 남았다)
+    // 기록은 승인 줄을 그리지 않는다 — 페이지보다 오래된 승인은 제자리를 찾을 수 없으니 남지 않는다
+    const replay = [
+      { type: 'user_message', sessionId: 'r79', seq: 21, text: 'L21' },
+      approval,
+      resolved,
+      { type: 'message_delta', sessionId: 'r79', seq: 148, role: 'assistant', text: 'L148' },
+      { type: 'user_message', sessionId: 'r79', seq: 149, text: 'L149' },
+      { type: 'message_delta', sessionId: 'r79', seq: 150, role: 'assistant', text: '150' },
+    ]
+    for (const e of replay) useStore.getState().dispatchEvent(e as NormalizedEvent)
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().chat['r79']!.map(line)).toEqual(['L21', 'old command', 'L148', 'L149', '150'])
+
+    useStore.getState().focusSession('r79')
+
+    expect(await readAll('r79')).toEqual(L(150).filter((t) => t !== 'L30' && t !== 'L31'))
+  })
+
+  it('기록이 먼저 섰고 같은 줄의 이벤트가 뒤따라도 두 번 그리지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('q79', sessionInfo('q79'))
+    mock.messages.set('q79', [
+      ...rows('q79', 8),
+      { sessionId: 'q79', seq: 9, role: 'system', kind: 'tool_call', payload: { callId: 'c9', summary: { tool: 'Read', title: 'T9', readOnly: true } }, ts: 9 },
+      { sessionId: 'q79', seq: 10, role: 'system', kind: 'marker', payload: { type: 'compaction', sessionId: 'q79', failed: false }, ts: 10 },
+    ])
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('q79')
+    await vi.waitFor(() => expect(useStore.getState().history['q79']).toBeDefined())
+
+    // 보관돼 있던 같은 줄의 이벤트가 페이지보다 늦게 재생됐다
+    for (const e of [
+      { type: 'user_message', sessionId: 'q79', seq: 8, text: 'L8' },
+      { type: 'tool_call', sessionId: 'q79', seq: 9, callId: 'c9', summary: { tool: 'Read', title: 'T9', readOnly: true } },
+      { type: 'compaction', sessionId: 'q79', seq: 10, failed: false },
+    ]) useStore.getState().dispatchEvent(e as NormalizedEvent)
+
+    expect(useStore.getState().chat['q79']!.map(line)).toEqual([...L(8), 'T9', 'Earlier messages were compacted here'])
+  })
+
+  it('흐르는 중인 말은 기록과 합쳐도 잘리지 않는다 — 화면 쪽이 저장된 본문보다 길다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('s79', sessionInfo('s79'))
+    mock.messages.set('s79', rows('s79', 10))
+    await useStore.getState().attach(mock)
+    mock.emit(delta('s79', 'Hel'))
+
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mock.agents.loadMessages.bind(mock.agents)
+    mock.agents.loadMessages = async (...args: Parameters<typeof real>) => {
+      const page = real(...args)
+      await gate
+      return page
+    }
+    useStore.getState().focusSession('s79')
+    // 페이지를 읽은 뒤에 도착한 조각 — 저장소의 그 말은 아직 'Hel'이다
+    mock.emit(delta('s79', 'lo'))
+    release()
+    mock.agents.loadMessages = real
+
+    expect(await readAll('s79')).toEqual([...L(10), 'Hello'])
+  })
+
+  it('번호 없는 꼬리(보낸 말·이미지·오류)는 기록에 이미 있으면 한 번만, 승인 줄은 제자리에 남는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('e79', sessionInfo('e79'))
+    mock.sessions.set('e79-other', sessionInfo('e79-other'))
+    mock.messages.set('e79', rows('e79', 5))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('e79-other')
+
+    // 이 세션을 열기 전에: 승인을 거친 명령, 사람이 보낸 말(목은 확인을 보내지 않는다 — 번호가 없다),
+    // 에이전트의 이미지(이벤트에는 번호가 없다), 실패한 턴(스키마가 번호를 지운다, #161)
+    mock.emit({ type: 'approval_request', sessionId: 'e79', requestId: 'q1', detail: { kind: 'command', command: 'rm -rf build' } } as never)
+    mock.emit({ type: 'approval_resolved', sessionId: 'e79', requestId: 'q1', decision: 'allow' } as never)
+    await useStore.getState().send('e79', 'Hi')
+    mock.emit({ type: 'message_image', sessionId: 'e79', mime: 'image/png', data: 'aWJs' } as never)
+    const error = { type: 'error', sessionId: 'e79', error: { code: 'internal', message: 'boom', retryable: false } }
+    mock.messages.get('e79')!.push({ sessionId: 'e79', seq: 10, role: 'system', kind: 'marker', payload: error, ts: 10 })
+    useStore.getState().dispatchEvent(error as NormalizedEvent)
+    expect(useStore.getState().chat['e79']!.map((i) => i.storedSeq)).toEqual([6, undefined, undefined, undefined])
+
+    useStore.getState().focusSession('e79')
+
+    expect(await readAll('e79')).toEqual([
+      ...L(5), 'rm -rf build', 'Hi', 'image:image/png', 'The agent could not finish this turn — boom',
+    ])
+  })
+
+  it('불러오기로 복원한 세션도 끝까지 거슬러 읽으면 한 번씩이다 — 화면에 있는 번호는 다시 붙이지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.externalHistory.set('ext-79', Array.from({ length: 150 }, (_, i) => ({ role: 'user' as const, text: `L${i + 1}` })))
+    await useStore.getState().attach(mock)
+    const p = await useStore.getState().addProject('/tmp/imp79')
+    const info = await useStore.getState().createSession(p.id, { resumeExternalId: 'ext-79', importHistory: true })
+
+    expect(await readAll(info.id)).toEqual(L(150))
+  })
+
+  it('번호 없는 빈 조각으로 시작한 말도 뒤따른 조각의 저장 번호를 받는다 — 합칠 때 두 번 서지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('d79', sessionInfo('d79'))
+    mock.messages.set('d79', rows('d79', 3))
+    await useStore.getState().attach(mock)
+
+    // host는 빈 조각을 저장하지 않고 번호 없이 보낸다(codex 끝의 ""). 그 뒤 조각이 4번 줄을 시작한다
+    useStore.getState().dispatchEvent(delta('d79', ''))
+    mock.emit(delta('d79', 'Answer'))
+    useStore.getState().focusSession('d79')
+
+    expect(await readAll('d79')).toEqual([...L(3), 'Answer'])
+  })
+
+  it('창을 자를 때 맨 위가 실시간 줄이어도 커서는 저장 번호다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('t79', sessionInfo('t79'))
+    mock.sessions.set('t79-other', sessionInfo('t79-other'))
+    mock.messages.set('t79', rows('t79', 120))
+    await useStore.getState().attach(mock)
+    await openBigFirst(mock, 't79-big')
+    useStore.getState().focusSession('t79')
+    await vi.waitFor(() => expect(useStore.getState().history['t79']).toBeDefined())
+
+    // 보는 동안 도구 호출 60개가 이어진다 — 떠날 때 남는 50줄이 모두 실시간 줄이다
+    for (let i = 121; i <= 180; i++) {
+      mock.emit({ sessionId: 't79', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+    }
+    useStore.getState().focusSession('t79-other')
+    expect(useStore.getState().chat['t79']).toHaveLength(50)
+    expect(useStore.getState().history['t79']!.oldestSeq).toBe(131)
+
+    useStore.getState().focusSession('t79')
+    expect(await readAll('t79')).toEqual(L(180))
   })
 })
 
@@ -817,7 +1098,7 @@ describe('messagesToChat — 이미지 행 (#40 2차)', () => {
         payload: { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/a.png' },
       },
     ])
-    expect(items).toEqual([{ kind: 'image', seq: 1, mime: 'image/png', data: 'aWJs', path: '/tmp/a.png', note: undefined }])
+    expect(items).toEqual([{ kind: 'image', seq: 1, storedSeq: 1, mime: 'image/png', data: 'aWJs', path: '/tmp/a.png', note: undefined }])
   })
 
   it('정리된 이미지는 이유를 들고 되살아난다 — 조용한 공백이 아니다', () => {
@@ -843,8 +1124,8 @@ describe('messagesToChat — 추론 행', () => {
       payload: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: '답' },
     }])
     expect(items).toEqual([
-      { kind: 'reasoning', seq: 1, text: '**경로 검토**' },
-      { kind: 'assistant', seq: 3, text: '답' },
+      { kind: 'reasoning', seq: 1, storedSeq: 1, text: '**경로 검토**' },
+      { kind: 'assistant', seq: 3, storedSeq: 3, text: '답' },
     ])
   })
 })
@@ -1926,7 +2207,7 @@ describe('기록보다 먼저 온 이벤트', () => {
     expect(useStore.getState().chat['f']).toHaveLength(25)
   })
 
-  it('화면에 줄이 이미 있으면 여전히 갈아 끼우지 않는다 (09-09의 약속)', async () => {
+  it('화면에 줄이 이미 있어도 기록과 합칠 뿐 지우지 않는다 (09-09의 약속, #79)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('a', sessionInfo('a'))
     mock.sessions.set('d', sessionInfo('d'))
