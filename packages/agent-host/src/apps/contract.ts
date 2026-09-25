@@ -117,6 +117,17 @@ export const ORCHESTRATOR_MCP_NAME = 'centralu'
  * 예약어 검사는 이름 자체를 못 가져가게 한다(첫째 구멍). 예약어를 먼저 보는 것은
  * 나중에 글자 규칙을 느슨하게 고쳐도 이 판정만은 남아 있으라는 뜻이다.
  */
+/**
+ * 외부 앱이 세션에 붙는 서버 이름의 머리 (M4 A-5) — 앱 `notes`는 세션에서 `app-notes`이고,
+ * 도구는 `mcp__app-notes__<도구>`로 뜬다.
+ *
+ * 머리를 따로 두는 이유: 앱 id와 제안된 MCP 서버 이름은 같은 글자 규칙(아래)을 따르므로,
+ * 앱을 `notes` 그대로 붙이면 사람이 승인한 `notes` 서버와 같은 칸을 두고 다툰다.
+ */
+export const APP_MCP_PREFIX = 'app-'
+
+export const appMcpServerName = (appId: string): string => `${APP_MCP_PREFIX}${appId}`
+
 export function mcpServerNameError(name: string): string | null {
   if (name.trim().toLowerCase().startsWith(ORCHESTRATOR_MCP_NAME)) {
     return `"${ORCHESTRATOR_MCP_NAME}"로 시작하는 이름은 이 앱이 쓰는 이름입니다 — 다른 이름으로 제안하세요`

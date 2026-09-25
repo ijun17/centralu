@@ -161,6 +161,8 @@ const externalApps = new ExternalApps({
   emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
 })
 externalApps.refresh()
+// 세션에 앱을 붙인다 (A-5) — 매니저와 런타임은 서로를 모르고, 여기서 이어진다
+mgr.useExternalApps(externalApps)
 const terminals = new TerminalService((f) => server.pushTerminal(f))
 // 자주 쓰는 명령어 실행기 (#60) — 출력은 터미널과 같은 프레임 레인을 탄다
 const commandRuns = new CommandRunner((f) => server.pushTerminal(f))

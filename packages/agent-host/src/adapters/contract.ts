@@ -162,6 +162,69 @@ export type OrchestratorTools = {
   proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
 }
 
+/**
+ * 세션에 붙은 외부 앱의 도구 하나 — MCP `Tool`의 모양 그대로다(outputSchema만 뺀다).
+ *
+ * 설명과 주석(`annotations`)을 **그대로** 나른다. 모델이 도구를 고르는 근거가 설명이고,
+ * 승인을 건너뛸지(읽기 전용) 정하는 근거가 주석이다 — 어느 쪽을 다듬어도 앱이 말한 것과 다른
+ * 도구가 된다.
+ */
+export type AppToolSpec = {
+  name: string
+  title?: string
+  description?: string
+  inputSchema: Record<string, unknown>
+  annotations?: {
+    title?: string
+    readOnlyHint?: boolean
+    destructiveHint?: boolean
+    idempotentHint?: boolean
+    openWorldHint?: boolean
+  }
+  _meta?: Record<string, unknown>
+}
+
+/** 앱 도구 호출의 결과 — MCP `CallToolResult`의 모양. 실패도 던지지 않고 `isError`로 돌아온다 */
+export type AppToolResult = {
+  content: unknown[]
+  isError?: boolean
+  structuredContent?: Record<string, unknown>
+}
+
+/** 지금 이 세션에 붙어 있는 앱 하나 */
+export type AttachedApp = {
+  /** 세션에서 쓰는 서버 이름 (`app-<id>`) */
+  server: string
+  appId: string
+  /**
+   * 이미 아는 도구 목록 — 한 번도 읽은 적이 없으면 null이다. null이어도 앱은 붙는다:
+   * `tools()`가 필요할 때 앱을 띄워 알아낸다.
+   */
+  tools: AppToolSpec[] | null
+}
+
+/**
+ * 이 세션에 붙은 외부 앱 (M4 A-5) — 어댑터가 자기 방식으로 붙인다.
+ *
+ *   Claude  앱마다 인프로세스 대리 서버. 앱이 오고 가면 재시작 없이 서버 집합을 바꾼다
+ *   Codex   앱마다 stdio 다리. 스레드를 시작·재개할 때만 붙는다(실행 중에 더할 길이 없다)
+ *
+ * **어느 앱이 붙는지는 여기서 정하지 않는다** — 매니저가 세션의 종류와 프로젝트로 정해서
+ * 넘긴다(결정 4). 어댑터가 받는 것은 이미 걸러진 목록과, 모든 호출이 지나는 한 길(`call`)이다.
+ * 핸들 하나에 하나다: 핸들을 닫으면 `close()`로 함께 닫는다.
+ */
+export type SessionApps = {
+  current(): AttachedApp[]
+  /** 붙은 앱이나 그 도구가 바뀌었을 수 있다 — `current()`를 다시 읽을 때다. 돌려받은 함수로 끊는다 */
+  onChange(listener: () => void): () => void
+  /** 한 앱의 에이전트 도구. 모르면 앱을 띄워 알아낸다(기다리는 시간에 상한이 있다) */
+  tools(server: string): Promise<AppToolSpec[]>
+  /** 앱 도구를 부른다 — 호출자는 이 세션이다. 붙지 않은 앱·없는 도구는 거절 결과로 돌아온다 */
+  call(server: string, tool: string, args: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<AppToolResult>
+  /** 핸들이 닫힌다 — 구독을 끊는다 */
+  close(): void
+}
+
 export type CreateSessionOpts = {
   sessionId: string
   cwd: string
@@ -176,6 +239,11 @@ export type CreateSessionOpts = {
   resumeExternalId?: string
   /** 주어지면 이 세션은 앱 도구를 받는다 — 어댑터가 자기 방식으로 붙인다 */
   orchestratorTools?: OrchestratorTools
+  /**
+   * 이 세션에 붙는 외부 앱 (M4 A-5). 내장 앱 도구(`orchestratorTools`)와는 따로다 — 일반
+   * 워커도 받는다(결정 4는 외부 앱에 한해 #81의 "워커에게는 도구가 없다"를 바꾼다).
+   */
+  apps?: SessionApps
   /**
    * 사람이 승인한 추가 MCP 서버 (오케스트레이터 전용). propose_mcp_server →
    * 승인 → 재시작의 결과가 여기로 온다. 어댑터는 이 목록을 자기 MCP 설정에
