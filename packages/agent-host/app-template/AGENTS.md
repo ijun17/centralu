@@ -53,9 +53,13 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
     default agent, or a list such as `["codex"]` to pick one with `tool`. The prompt reaches the
     agent marked as written by this app, not by the person, so say plainly what you need. A run
     takes seconds to minutes; the helper keeps the call alive while it waits.
-    `await centralu.callApp('other-app', 'tool', args)` calls another app's tool (declare it in
-    `uses.apps`) — until Centralu turns that on, the answer is that it is not available yet. Both
-    throw an error that says what Centralu answered.
+11. **Calling another app**: inside a tool handler, `await centralu.callApp('other-app', 'tool', args)`
+    calls a tool of another app and returns its answer (JSON if the tool returns structured
+    content, else text). Declare the app in `"uses": { "apps": ["other-app"] }`. Only tools open to
+    agents (visibility `model`) can be called. A project app reaches apps of its own project first,
+    then apps in the person's user folder; an app in the user folder reaches only user-folder apps.
+
+Both throw an error that says what Centralu answered.
 
 ## Checking your work
 

@@ -219,7 +219,7 @@ describe('도우미', () => {
       'centralu.agent() failed: run_agent refused: this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so',
     )
     const other = await r.call(ref('asker'), 'ask_other', {}, { kind: 'session', sessionId: 's1' })
-    expect(resultText(other.result!)).toContain('centralu.callApp("other", "echo") failed: call_app is not available yet')
+    expect(resultText(other.result!)).toContain('centralu.callApp("other", "echo") failed: call_app refused: "other" is not in this app\'s "uses.apps"')
     const log = readFileSync(join(dataRoot, 'app-logs', 'p1', 'asker.log'), 'utf8')
     expect(log).toContain('[centralu] centralu.agent() failed: run_agent refused: this app did not declare')
   })

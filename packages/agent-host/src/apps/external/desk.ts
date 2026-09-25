@@ -44,6 +44,22 @@ export type AgentRunResult = {
   output?: unknown
 }
 
+/**
+ * 창구가 런타임에게 묻는 것 — 앱 목록과, 앱 도구를 부르는 단 하나의 길(`ExternalApps.call`). 창구가 런타임의 속을 들여다보지
+ * 않게 이 둘만 받는다: 앱끼리의 호출(D-2)도 화면·세션의 호출과 같은 길(공개 범위·실행 id·취소·기록)을 지나야 한다.
+ */
+export type DeskApps = {
+  /** 이 이름의 앱이 목록에 있나 — 틀린 매니페스트·신뢰하지 않은 프로젝트의 앱도 있다(부르면 그 이유로 거절된다) */
+  has(ref: AppRef): boolean
+  call(
+    ref: AppRef,
+    tool: string,
+    args: Record<string, unknown>,
+    caller: { kind: 'app'; parentRunId: string },
+    opts: { signal: AbortSignal },
+  ): Promise<{ status: string; result: CallToolResult | null; error: string | null }>
+}
+
 /** 중개의 몸통 가운데 host의 코어가 채우는 것 */
 export type BrokerHost = {
   /** 이 범위의 기본 에이전트 도구 — 프로젝트 앱이면 그 프로젝트의 기본 도구, 사용자 폴더 앱이면 오케스트레이터의 도구 */
@@ -62,6 +78,26 @@ export type BrokerHost = {
 export const AGENT_PROMPT_MAX_CHARS = 200_000
 /** 스키마의 상한 — 답의 모양 하나를 적는 데 64KiB면 넉넉하다. 더 큰 것은 스키마가 아니라 자료다 */
 export const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
+
+const CallAppArgs = z.object({
+  app: z.string(),
+  tool: z.string(),
+  args: z.record(z.string(), z.unknown()).optional(),
+})
+
+/**
+ * 앱이 부르는 다른 앱의 이름 → 앱 (D-2). 세션이 앱을 받는 규칙(결정 4)과 같은 모양이다: 프로젝트 앱은 **자기 프로젝트의
+ * 앱을 먼저**, 없으면 사용자 폴더의 앱을 부른다. 사용자 폴더 앱은 사용자 폴더의 앱만 부른다 — 어느 프로젝트에도 속하지
+ * 않으므로 한 프로젝트의 앱을 고를 근거가 없다. 다른 프로젝트의 앱은 이름이 같아도 닿지 않는다(프로젝트마다 신뢰가 다르다).
+ */
+export function resolveCallTarget(asker: AppRef, id: string, has: (ref: AppRef) => boolean): AppRef | null {
+  if (asker.projectId !== null) {
+    const same = { projectId: asker.projectId, appId: id }
+    if (has(same)) return same
+  }
+  const user = { projectId: null, appId: id }
+  return has(user) ? user : null
+}
 
 const RunAgentArgs = z.object({
   prompt: z.string(),
@@ -99,6 +135,9 @@ export function pickAgentTool(declared: boolean | string[] | undefined, requeste
 
 export class BrokerDesk {
   private host: BrokerHost | null = null
+
+  constructor(private apps: DeskApps) {}
+
   /**
    * 답을 검증하는 JSON Schema 엔진 — MCP 서버 SDK가 도구의 outputSchema를 검증할 때 쓰는 것과 같은 것(ajv, 방언은
    * `$schema`로 고른다). 저장소에 새 의존을 들이지 않는다.
@@ -114,6 +153,8 @@ export class BrokerDesk {
     switch (tool) {
       case 'run_agent':
         return this.runAgent(app, args, call)
+      case 'call_app':
+        return this.callApp(app, args, call)
       default:
         return refuse(`${tool} is not available yet — the broker's tools arrive with Centralu M4 section D`)
     }
@@ -166,6 +207,39 @@ export class BrokerDesk {
       )
     }
     return { content: [{ type: 'text', text: JSON.stringify(structured) }], structuredContent: structured as Record<string, unknown> }
+  }
+
+  /**
+   * `call_app` (D-2) — `uses.apps`에 적은 앱의 에이전트용(`model`) 도구만, 세션과 같은 범위 규칙으로.
+   *
+   * 부르는 것은 런타임의 한 길이다(호출자 `app`, 부모 = 이 부탁을 일으킨 실행). 그래서 공개 범위 검사(화면 전용 도구는
+   * 거절), 신뢰·멈춘 앱의 거절, 실행 id, 기록이 다른 호출과 똑같이 일어나고, 부모 실행이 끝나거나 취소되면 이 호출도
+   * 취소된다. 부른 앱의 답은 그대로 돌려준다 — 실패를 답했으면 실패인 채로.
+   */
+  private async callApp(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
+    const parsed = CallAppArgs.safeParse(raw)
+    if (!parsed.success) return refuse(`call_app: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
+    const { app: id, tool, args } = parsed.data
+    const listed = app.manifest.uses.apps ?? []
+    if (!listed.includes(id)) {
+      return refuse(
+        `call_app refused: "${id}" is not in this app's "uses.apps"${listed.length ? ` (${listed.join(', ')})` : ''} — ` +
+          'an app may call only the apps its manifest lists',
+      )
+    }
+    const target = resolveCallTarget(app.ref, id, (r) => this.apps.has(r))
+    if (!target) {
+      return refuse(
+        app.ref.projectId === null
+          ? `call_app: there is no app "${id}" in your user folder — an app from the user folder can call only other apps there`
+          : `call_app: there is no app "${id}" in this project or in your user folder`,
+      )
+    }
+    const o = await this.apps.call(target, tool, args ?? {}, { kind: 'app', parentRunId: call.parentRunId }, { signal: call.signal })
+    // 부른 앱이 답했다 — 답을 그대로(실패를 답했으면 실패인 채로)
+    if (o.result) return o.status === 'ok' ? o.result : { ...o.result, isError: true }
+    const how = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
+    return refuse(`call_app: ${id}.${tool} ${how} — ${o.error ?? 'no reason was given'}`)
   }
 
   /**

@@ -158,7 +158,12 @@ export const centralu = {
     return r.structuredContent ?? textOf(r)
   },
 
-  /** Calls a tool of another app this app declared in `uses.apps`. Only inside a tool handler. */
+  /**
+   * Calls a tool of another app this app declared in `uses.apps`, and returns its structured content
+   * or its text. Only the other app's tools open to agents (visibility `model`). A project app finds
+   * the app in its own project first, then in the person's user folder; a user-folder app only in the
+   * user folder. Only inside a tool handler.
+   */
   async callApp(app, tool, args = {}) {
     const r = await askBroker(`centralu.callApp(${JSON.stringify(app)}, ${JSON.stringify(tool)})`, 'call_app', { app, tool, args })
     return r.structuredContent ?? textOf(r)
