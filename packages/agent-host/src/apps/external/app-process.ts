@@ -4,7 +4,7 @@ import type { Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client'
 import { CLIENT_INFO } from '@cc/protocol'
-import { KILL_GRACE_MS, stopTree } from '../../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
 import { rotateIfLarge } from '../../log-file.js'
 import { StreamTransport } from './stream-transport.js'
 
@@ -176,8 +176,9 @@ export class AppProcess {
    * (kill-tree — 터미널·명령 실행기와 같은 방법).
    *
    * 스스로 끝났어도 그 그룹에 남은 자손이 있을 수 있다(앱이 띄운 도우미). 앱의 그룹은 우리가
-   * 만들어 준 것이라(detached) 그룹째 한 번 더 쏜다. 그룹에 누가 남아 있는 동안 그 번호는
-   * 재사용되지 않으므로, 끝난 직후의 이 한 발은 남의 그룹에 닿지 않는다.
+   * 만들어 준 것이라(detached) 그룹째 거둔다 — 다른 종료 길과 같은 두 발(SIGTERM, 유예 뒤 남은 것에
+   * SIGKILL, kill-tree의 `stopGroup`). 예전에는 SIGTERM 한 발뿐이라, 그것을 무시하는 도우미가 launchd
+   * 아래 고아로 남았다. 그룹에 누가 남아 있는 동안 그 번호는 재사용되지 않으므로 남의 그룹에 닿지 않는다.
    */
   stop(graceMs: number, opts: { awaitKill?: boolean } = {}): Promise<void> {
     if (this.stopping) return this.stopping
@@ -233,12 +234,8 @@ export class AppProcess {
 
   private signalOwnGroup(): void {
     const pid = this.child.pid
-    if (process.platform === 'win32' || typeof pid !== 'number' || pid <= 1) return
-    try {
-      process.kill(-pid, 'SIGTERM')
-    } catch {
-      // ESRCH — 그룹에 남은 것이 없다. 흔한 경우다
-    }
+    if (typeof pid !== 'number') return
+    stopGroup(pid, KILL_GRACE_MS)
   }
 }
 

@@ -185,6 +185,42 @@ export function stopTree(handle: KillablePty, graceMs: number, alive: () => bool
   t.unref?.()
 }
 
+/**
+ * 우두머리가 **이미 스스로 끝난** 그룹을 거둔다 — 두 발, stopTree와 같은 규칙으로.
+ *
+ * stopTree는 root에서 트리를 훑는다. 그런데 root가 먼저 끝났으면 ps에 root가 없어 과녁이 비고(killTargets의 "이미
+ * 죽었다"), 그 자손은 init에 입양되어 root 아래에도 없다 — 스스로 잘 끝난 앱(M4 A-3)이 남긴 도우미가 바로 그 자리다.
+ * 그래서 그룹 번호로 찾는다: 앱은 자기 그룹의 우두머리로 뜨고(detached), 그룹에 누가 남아 있는 동안 그 번호는 pid로
+ * 재사용되지 않는다(POSIX) — 그룹째 쏘아도 남의 프로세스에 닿지 않는다.
+ *
+ * 첫 발(SIGTERM) 때의 그룹 명단을 들고 가서, 유예 뒤 **아직 남은 것**과 그들이 새로 띄운 자손에 SIGKILL을 쏜다(survivorTargets).
+ * SIGTERM을 무시하는 도우미가 launchd 아래 고아로 남던 자리다. ps를 못 읽으면 예전처럼 그룹째 쏜다.
+ */
+export function stopGroup(pgid: number, graceMs: number): void {
+  if (process.platform === 'win32' || !Number.isInteger(pgid) || pgid <= 1) return
+  const rows = snapshot()
+  const members = rows.filter((r) => r.pgid === pgid)
+  if (rows.length > 0 && members.length === 0) return // 그룹이 비었다 — 흔한 경우다
+  if (members.some((r) => r.pid === process.pid)) return // 우리 그룹 — 여기서 죽으면 정리가 끊긴다
+  try {
+    process.kill(-pgid, 'SIGTERM')
+  } catch {
+    return // 그 사이에 비었다
+  }
+  const t = setTimeout(() => {
+    const now = snapshot()
+    const targets = now.length > 0 ? survivorTargets(now, members, process.pid) : [pgid]
+    for (const g of targets) {
+      try {
+        process.kill(-g, 'SIGKILL')
+      } catch {
+        // 그 그룹은 그새 비었다 — 나머지는 계속 쏜다
+      }
+    }
+  }, graceMs)
+  t.unref?.()
+}
+
 /** stopTree의 두 번째 발 */
 function finish(handle: KillablePty, first: ProcRow[], rootOurs: boolean): void {
   /*

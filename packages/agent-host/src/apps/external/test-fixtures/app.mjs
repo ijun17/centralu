@@ -7,7 +7,7 @@
  * --log   이 프로세스가 본 것을 한 줄에 하나씩 JSON으로 남긴다. 테스트는 이 파일로
  *         "몇 번 떴나", "어떤 메서드가 왔나", "어떤 환경을 받았나"를 센다 — host의 말이
  *         아니라 앱이 실제로 겪은 것을 본다.
- * --mode  normal | crash-on-start | ignore-eof | grandchild | hold-fd3 | flood-stderr
+ * --mode  normal | crash-on-start | ignore-eof | grandchild | stubborn-grandchild | hold-fd3 | flood-stderr
  *         | secret-to-stderr | bad-tool-name | mediation | view | attach
  *
  * `attach`는 A-5(세션에 붙이기)를 위한 묶음이다: 주석이 다른 도구들(읽기 전용 `peek`, 바꾸는
@@ -67,6 +67,20 @@ if (MODE === 'hold-fd3') {
   const sock = new net.Socket({ fd: 3, readable: true, writable: true })
   sock.on('end', () => sock.end())
   sock.on('error', () => {})
+}
+if (MODE === 'stubborn-grandchild') {
+  /*
+   * SIGTERM을 무시하는 손주 — 앱 자신은 입력이 닫히면 잘 끝나지만, 그룹째 받은 SIGTERM을 이 손주는 버틴다.
+   * 처리기를 단 **뒤에야** 적는다: 실측으로, 뜨는 중인(ps의 R) 손주는 처리기를 달기 전에 SIGTERM을 받고 죽었다.
+   */
+  const kid = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+  kid.stdout.once('data', () => {
+    log({ t: 'grandchild', grandchild: kid.pid })
+    kid.stdout.destroy()
+    kid.unref()
+  })
 }
 if (MODE === 'ignore-eof' || MODE === 'grandchild') {
   // 같은 그룹의 손주 — host가 트리째 끝내지 않으면 고아로 남는다
