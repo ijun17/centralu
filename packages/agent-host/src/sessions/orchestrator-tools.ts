@@ -173,6 +173,23 @@ export const ORCHESTRATOR_TOOLS = [
       why: z.string().optional().describe('무엇을 하려고 필요한지 한 마디 — 사람이 승인 여부를 판단할 근거'),
     }),
   },
+  {
+    name: 'create_app',
+    description:
+      '새 앱(Centralu 앱)을 템플릿으로 만든다 (M4) — 사람이 "…하는 도구·화면을 만들어 줘"라고 하면 쓴다. 앱은 사람이 화면으로 누르고 ' +
+      '에이전트가 같은 도구를 함수로 부르는 작은 MCP 서버다. project를 주면 그 프로젝트 안(`.centralu/apps/<id>/`, 저장소에 커밋되어 ' +
+      '팀과 나뉜다)에, 주지 않으면 사용자 폴더(여러 프로젝트에서 쓰는 앱)에 만든다. 신뢰한 프로젝트에만 만들 수 있고, 이미 있는 id는 ' +
+      '덮어쓰지 않는다. 지우기는 사람 몫이다.',
+    schema: z.object({
+      /*
+       * 글자 규칙은 적어 두기만 한다 — 판정은 런타임의 문(`createApp`) 한 곳이다 (#93).
+       */
+      id: z.string().describe('앱 id (예: resource-search) — 소문자·숫자·하이픈 32자 이내, centralu·app-로 시작 금지. 폴더 이름이자 세션의 서버 이름 app-<id>가 된다'),
+      name: z.string().describe('사람에게 보일 이름 (예: 리소스 검색)'),
+      project: z.string().optional().describe('프로젝트 이름 또는 id. 생략하면 사용자 폴더 앱'),
+      description: z.string().optional().describe('무엇을 하는 앱인지 한 줄'),
+    }),
+  },
 ] as const
 
 export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
@@ -253,6 +270,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   '보고만으로 부족하면 read_session으로 그 세션의 대화를 직접 읽는다.',
   '시킬 세션이 마땅치 않으면 create_session으로 새로 만든다 — 지우기는 사람 몫이다.',
   '프로젝트를 만드는 방법을 물으면 propose_project로 사이드바의 Add project를 짚어 준다 — 등록은 사람이 한다.',
+  '사람이 "…하는 도구·화면을 만들어 줘"라고 하면 create_app으로 앱을 만든다 — 사람이 누르는 화면과 에이전트가 부르는 도구가 한 앱이다.',
   '브라우저 자동화 같은 새 능력이 필요하면 propose_mcp_server로 **제안한다** — 사람이 승인하면 앱이 설치하고 너를 재시작해 준다. 재시작해도 대화는 이어진다.',
   '같은 부탁을 반복해서 받거나 이 사용자 고유의 일하는 방식을 발견하면 propose_skill로 절차를 **제안한다** — 승인된 스킬은 네 역할에 늘 실린다.',
   '앱에 대한 질문에 답을 모르면 짐작하지 말고 GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues',
@@ -422,6 +440,24 @@ export async function runOrchestratorTool(
         `"${spec.name}" MCP 서버를 제안했습니다. 화면에 승인 카드가 떴고, 사람이 승인하면 ` +
         `그 서버가 사용자 폴더의 앱이 되고 이 세션을 재시작합니다 — 재시작하면 대화는 이어지고 새 도구가 app-${spec.name} 서버 아래에 보입니다. ` +
         '승인 전까지는 설치되지 않습니다.',
+    }
+  }
+
+  if (name === 'create_app') {
+    const spec = {
+      id: String(args.id ?? '').trim(),
+      name: String(args.name ?? '').trim(),
+      project: typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined,
+      description: typeof args.description === 'string' ? args.description : undefined,
+    }
+    if (!spec.id || !spec.name) return { text: 'id와 name을 주세요 — 폴더 이름과 사람에게 보일 이름이 있어야 앱이 선다.', isError: true }
+    const r = await tools.createApp(spec)
+    if (!r.ok) return { text: `만들지 못했습니다 — ${r.error}`, isError: true }
+    const where = r.projectId === null ? '사용자 폴더' : '프로젝트'
+    return {
+      text:
+        `"${spec.name}" 앱을 만들었습니다 (${where}, id ${r.appId}): ${r.dir}\n` +
+        `템플릿 그대로의 앱(카운터)입니다. 세션에서는 app-${r.appId} 서버로 붙습니다. 앱은 처음 필요할 때 뜹니다.`,
     }
   }
 

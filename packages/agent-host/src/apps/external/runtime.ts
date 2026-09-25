@@ -3,12 +3,14 @@ import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:f
 import { join } from 'node:path'
 import type { CallToolResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { ExternalAppInfo } from '@cc/protocol'
+import { proposedMcpServerNameError } from '../contract.js'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, type SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
-import { PROJECT_APPS_REL, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
+import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
+import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
 import { SecretStore, redactor } from './secrets.js'
 import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
@@ -135,6 +137,8 @@ export type ExternalAppsDeps = {
   broker?: BrokerImpls
   /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
   runs?: RunLedger
+  /** 새 앱을 펼칠 템플릿 폴더 (C-1). 기본은 제품이 싣고 다니는 것(`appTemplateDir`) */
+  templateDir?: string
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
@@ -605,6 +609,73 @@ export class ExternalApps {
   }
 
   /**
+   * 새 앱을 템플릿으로 만든다 (M4 C-1b) — "새 앱"(`apps.create`)과 오케스트레이터의 `create_app`이 같은 문을 쓴다.
+   *
+   *   프로젝트 앱     `<프로젝트>/.centralu/apps/<id>/` — 저장소에 커밋되어 팀과 나뉜다 (결정 1의 기본)
+   *   사용자 폴더 앱   `<데이터 폴더>/apps/<id>/` — 여러 프로젝트에서 쓰는 것 (`projectId: null`)
+   *
+   * 거절하는 것 셋, 모두 폴더가 생기기 전에:
+   *   - **이름**: 제안된 MCP 서버와 같은 규칙(`proposedMcpServerNameError` — #93의 글자·`centralu` 예약에 `app-`
+   *     머리 금지). 발견은 `app-` 머리의 id도 읽지만(손으로 만든 앱), 새로 만드는 앱에 `app-app-notes`라는
+   *     서버 이름을 줄 까닭이 없다. 내장 앱의 id도 안 된다.
+   *   - **신뢰하지 않은 프로젝트**: 만든 앱은 이 기계에서 도는 코드이고, 신뢰하지 않은 프로젝트의 앱은 뜨지 않는다
+   *     (결정 3). 만들 수는 있는데 뜨지 않는 앱은 만드는 세션을 헛돌게 한다.
+   *   - **이미 있는 id**: 틀린 매니페스트로 서 있는 폴더라도 사람이나 에이전트의 것이다 — 덮어쓰지 않는다.
+   *
+   * 쓰는 방법은 `installUserApp`과 같다: 점으로 시작하는 임시 폴더에 펼치고 이름을 바꾼다(발견이 반쯤 쓴 앱을
+   * 보지 않는다). 부모 폴더는 한 칸씩 경로 가드를 지나며 만든다(`ensureDirInside` — `.centralu`가 밖을
+   * 가리키는 링크면 멈춘다). 데이터 폴더도 지금 만든다. 쓴 뒤 바로 다시 훑는다 — 감시가 아직 그 자리를 보지
+   * 않을 수 있다. **띄우지는 않는다** — 처음 필요할 때 뜬다.
+   */
+  createApp(spec: { projectId: string | null; id: string; name: string; description?: string }): ExternalAppInfo {
+    if (this.disposed) throw new AppUnavailableError('앱 런타임이 내려갔습니다')
+    const idError = proposedMcpServerNameError(spec.id)
+    if (idError) throw new AppUnavailableError(`앱 id로 쓸 수 없습니다 ("${spec.id}") — ${idError}`)
+    if (this.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}"는 내장 앱의 이름입니다 — 다른 id를 쓰세요`)
+    const name = oneLine(spec.name)
+    if (!name) throw new AppUnavailableError('앱 이름이 비어 있습니다')
+    const description = oneLine(spec.description ?? '') || `${name} (a Centralu app)`
+
+    // 신뢰는 부를 때마다 정본(저장소)에서 읽는다 — 런타임의 범위 사본이 아니라
+    let root = this.deps.dataRoot
+    if (spec.projectId !== null) {
+      const project = this.deps.projects().find((p) => p.id === spec.projectId)
+      if (!project) throw new AppUnavailableError(`그런 프로젝트가 없습니다: ${spec.projectId}`)
+      if (!project.trusted) {
+        throw new AppUnavailableError('신뢰하지 않은 프로젝트에는 앱을 만들지 않습니다 — 앱은 이 기계에서 도는 코드라, 프로젝트를 먼저 신뢰해야 뜹니다')
+      }
+      root = project.path
+    }
+    const key = spec.projectId ?? USER_SCOPE
+    if (this.scopes.has(key)) this.rescan(key)
+    else this.refresh()
+
+    const ref: AppRef = { projectId: spec.projectId, appId: spec.id }
+    const parts = spec.projectId === null ? USER_APPS_PARTS : PROJECT_APPS_PARTS
+    const dir = join(root, ...parts, spec.id)
+    if (this.find(ref) || existsSync(dir)) {
+      throw new AppUnavailableError(`"${spec.id}" 앱이 이미 있습니다 (${dir}) — 다른 id를 쓰세요`)
+    }
+
+    let staging: string | null = null
+    try {
+      const parent = ensureDirInside(root, parts)
+      staging = join(parent, `.${spec.id}.${randomUUID()}`)
+      scaffoldApp(this.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
+      renameSync(staging, dir)
+      staging = null
+    } catch (err) {
+      if (staging) rmSync(staging, { recursive: true, force: true })
+      throw new AppUnavailableError(`앱 폴더를 만들지 못했습니다: ${(err as Error).message}`)
+    }
+    mkdirSync(this.dataDirOf(ref), { recursive: true })
+    this.rescan(key)
+    const made = this.find(ref)
+    if (!made) throw new AppUnavailableError(`앱 폴더를 만들었지만 발견되지 않았습니다: ${dir}`)
+    return this.info(made)
+  }
+
+  /**
    * 사용자 폴더의 앱을 지운다 (M4 A-7) — 승인한 MCP 서버를 목록에서 거두는 길이다(예전 명부에는 없었다).
    *
    * 폴더는 버리지 않고 데이터 폴더의 `app-trash/`로 옮긴다: 손으로 만든 앱일 수도 있고, 되돌릴 길이 있는
@@ -848,7 +919,7 @@ export class ExternalApps {
   private spawnSpec(e: AppEntry, pipeId: number): SpawnSpec {
     const m = e.manifest!
     const scopeDir = this.scopeDir(e.ref)
-    const dataDir = join(this.deps.dataRoot, 'app-data', scopeDir, e.ref.appId)
+    const dataDir = this.dataDirOf(e.ref)
     mkdirSync(dataDir, { recursive: true })
     const appKey = this.appKey(e.ref)
     const secrets = this.secrets.forApp(appKey, m.secrets ?? [])
@@ -884,6 +955,11 @@ export class ExternalApps {
           this.deps.broker,
         ),
     }
+  }
+
+  /** 앱의 데이터 폴더 — 앱 폴더 밖이다(플랜 "데이터와 비밀"). 앱은 `CENTRALU_APP_DATA`로 받는다 */
+  private dataDirOf(ref: AppRef): string {
+    return join(this.deps.dataRoot, 'app-data', this.scopeDir(ref), ref.appId)
   }
 
   /** 경로의 한 칸이 되는 범위 이름. 프로젝트 id는 UUID다 — 아니면 경로에 쓰지 않는다 */

@@ -37,9 +37,10 @@ const REQUIRED = [MANIFEST_FILE, 'server.mjs', join(VERBATIM_DIR, 'centralu-app-
  * 번들된 배포 앱은 산출물 옆에서 찾는다(`scripts/bundle.mjs`가 복사한다).
  */
 export function appTemplateDir(): string {
+  // 번들 쪽이 먼저다 — 배포 앱은 자기 옆의 템플릿만 믿는다(위로 세 칸에 무엇이 있든)
   const candidates = [
-    new URL('../../../app-template/', import.meta.url), // 소스 트리 (src/apps/external → packages/agent-host)
     new URL('./app-template/', import.meta.url), // 번들 산출물 레이아웃 (resources/host/main.mjs 옆)
+    new URL('../../../app-template/', import.meta.url), // 소스 트리 (src/apps/external → packages/agent-host)
   ].map((u) => fileURLToPath(u))
   const found = candidates.find((d) => REQUIRED.every((f) => existsSync(join(d, f))))
   if (!found) throw new Error(`app template not found (or its runtime is missing): ${candidates.join(', ')}`)
