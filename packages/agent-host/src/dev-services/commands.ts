@@ -73,7 +73,8 @@ export class CommandRunner {
    * SIGTERM으로 정중히, 유예 안에 안 죽으면 SIGKILL.
    *
    * 트리를 어떻게 찾는지는 kill-tree.ts에 있다 — 터미널 탭도 같은 문제를 갖고 있어
-   * 한 군데서 푼다. onExit이 오면 e.pty가 비므로 `alive`로 두 번째 발을 막는다.
+   * 한 군데서 푼다. onExit이 오면 e.pty가 비고, 그러면 두 번째 발은 셸 자신(거둬진 번호)을
+   * 빼고 **버틴 자손만** 쏜다 (#149).
    */
   private stopEntry(e: Entry): void {
     const handle = e.pty
