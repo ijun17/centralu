@@ -5,6 +5,7 @@ import type {
   AppPermission,
   AppUsage,
   AppQuestion,
+  AppReview,
   AppRun,
   ApprovalDecision,
   ApprovalScope,
@@ -277,6 +278,11 @@ export interface SystemPort {
   openInIde(path: string, line?: number): Promise<void>
   /** 디렉토리 선택. 데스크톱은 네이티브 피커, 웹 dev는 경로 입력으로 폴백한다 (FR-19) */
   pickDirectory(): Promise<string | null>
+  /**
+   * 파일 하나를 고른다 (M4 E-3 — 가져올 .zip). 데스크톱은 네이티브 피커(확장자로 거른다), 웹 dev는 경로 입력으로 폴백한다.
+   * 고른 경로는 host가 다시 판정한다 — 피커의 거르기는 편의일 뿐이다.
+   */
+  pickFile(opts: { title: string; extensions: string[] }): Promise<string | null>
   /**
    * 지금부터 창을 끈다 (타이틀바를 숨겼으므로 우리가 손잡이를 만들어야 한다).
    * data-tauri-drag-region만으로는 부족하다 — 그 속성은 **mousedown 타깃 자신**에
@@ -702,6 +708,19 @@ export interface AppsPort {
    * 다음에 필요할 때 새 값으로 뜬다.
    */
   setSecret(appId: AppId, projectId: string | null, name: string, value: string | null): Promise<void>
+  /**
+   * 앱을 가져올 준비 (M4 E-3) — host가 출처(이 기계의 폴더나 .zip, 또는 https의 .zip)를 대기실로 옮겨 담고 사람이 볼 것을 돌려준다.
+   * **아직 들어온 것이 아니다.** 거절(밖을 가리키는 링크, zip slip, 상한, 겹치는 id)은 host의 말 그대로 던진다.
+   */
+  importPrepare(source: string): Promise<{ token: string; review: AppReview }>
+  /** 대기실의 앱을 들인다 — 꺼진 채로. `enable`이면 사람이 본 창의 열쇠(`reviewKey`)로 확인까지 적는다. 띄우지는 않는다 */
+  importCommit(token: string, opts: { enable: boolean; reviewKey?: string }): Promise<ExternalAppInfo>
+  /** 가져오기를 그만둔다 — 대기실을 치운다 */
+  importCancel(token: string): Promise<void>
+  /** 들어온 앱의 확인 창 (M4 E-3) — 켜지 않은 가져온 앱, 또는 켠 뒤 `server`·`uses`가 바뀐 앱. 바뀐 것이면 `changed`가 켠 때의 선언이다 */
+  review(appId: AppId, projectId: string | null): Promise<AppReview>
+  /** 가져온 앱을 켠다 — `reviewKey`는 사람이 본 창의 열쇠다. 그 사이 매니페스트가 바뀌었으면 host가 거절한다 */
+  enable(appId: AppId, projectId: string | null, reviewKey: string): Promise<ExternalAppInfo>
 }
 
 /**

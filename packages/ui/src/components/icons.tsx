@@ -216,3 +216,16 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
     </svg>
   )
 }
+
+/**
+ * 가져오기 — 쟁반으로 내려오는 화살표 (M4 E-3). "새 앱"(+)과 나란히 서므로 **형태로** 갈라진다: 만드는 것은 더하기, 들여오는 것은
+ * 내려받기의 모양이다.
+ */
+export function ImportIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M8 2.5v7M5 6.8 8 9.8l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M2.8 10.5v1.6c0 .8.6 1.4 1.4 1.4h7.6c.8 0 1.4-.6 1.4-1.4v-1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}

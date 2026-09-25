@@ -12,6 +12,7 @@ import { useAppBuilder } from './useAppBuilder.js'
 import { UpdatedCue } from './UpdatedCue.jsx'
 import { CapabilityAsk } from './CapabilityAsk.jsx'
 import { SecretsPanel, missingSecrets } from './AppSecrets.jsx'
+import { ReviewAndEnable } from '../app-share/ReviewAndEnable.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -133,7 +134,8 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
    * 신뢰를 잃었거나 매니페스트가 깨졌다 — 앱이 더 돌 수 없다. 화면(앱의 HTML)도 그 프로젝트의 코드라서
    * 함께 내린다. 자리는 남기고 idle로 돌린다: 다시 신뢰하면 이 자리에서 다시 연다.
    */
-  const blocked = app?.info.status === 'untrusted' || app?.info.status === 'invalid'
+  // 가져온 앱이 다시 확인을 기다려도(M4 E-3) 같다 — 켠 뒤 무엇을 돌리는지가 바뀌었으면 화면의 HTML도 사람이 보기 전의 코드다
+  const blocked = app?.info.status === 'untrusted' || app?.info.status === 'invalid' || app?.info.status === 'unconfirmed'
   useEffect(() => {
     if (!blocked || pv.phase !== 'open') return
     let alive = true
@@ -338,6 +340,8 @@ function Body({
     )
   }
   if (!app) return null
+  // 사람의 확인을 기다리는 가져온 앱 (M4 E-3) — 화면이 있든 없든 확인이 먼저다. 켜면 이 자리에서 앱이 열린다
+  if (app.info.status === 'unconfirmed') return <ReviewAndEnable app={app} />
   if (!app.info.home) {
     return (
       <Notice testId="pinned-no-screen" title="This app has no screen.">

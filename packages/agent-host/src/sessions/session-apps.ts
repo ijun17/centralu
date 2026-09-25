@@ -94,8 +94,11 @@ export type SessionAppCall = {
   outcome: Promise<AppCallOutcome>
 }
 
-/** 세션에 붙을 수 없는 앱의 상태 (결정 4) — 틀린 매니페스트, 신뢰하지 않은 프로젝트, 연달아 실패해 멈춤 */
-const UNUSABLE = new Set(['invalid', 'untrusted', 'failed'])
+/**
+ * 세션에 붙을 수 없는 앱의 상태 (결정 4) — 틀린 매니페스트, 신뢰하지 않은 프로젝트, 연달아 실패해 멈춤, 그리고 사람이 아직 켜지
+ * 않은 가져온 앱(M4 E-3). 붙이지 않아도 부를 때마다 런타임이 다시 막는다(Codex 스레드에 남은 이름).
+ */
+const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 type Hit = { ref: AppRef; server: string }
 

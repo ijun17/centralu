@@ -888,3 +888,44 @@ describe('Platform 계약: 앱의 비밀 (web + 실 host)', () => {
     }
   })
 })
+
+/**
+ * 가져오기 (M4 E-3) — web 구현의 `importPrepare`·`importCommit`·`review`·`enable`이 진짜 host와 진짜 런타임을 지난다. 들인 앱은 꺼진
+ * 채(`unconfirmed`) 목록에 서고, 사람이 본 열쇠로 켜면 보통의 사용자 폴더 앱이 된다. 거절은 host의 말 그대로 온다.
+ */
+describe('Platform 계약: 앱 가져오기 (web + 실 host)', () => {
+  it('준비는 들이는 것이 아니고, 들이면 꺼진 채 서며, 확인 창의 열쇠로 켜진다 — 다른 열쇠는 host의 말로 거절된다', async () => {
+    const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-import-')))
+    mkdirSync(join(fixture, 'data'))
+    const source = plantApp(join(fixture, 'src'), 'notes', { uses: { agent: true } })
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
+    rt.refresh()
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
+    const port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+      const { token, review } = await platform.apps.importPrepare(source)
+      expect(review).toMatchObject({ appId: 'notes', uses: { agent: true }, source, changed: null })
+      expect(await platform.apps.list()).toEqual([])
+
+      const app = await platform.apps.importCommit(token, { enable: false })
+      expect(app).toMatchObject({ appId: 'notes', projectId: null, status: 'unconfirmed', imported: { source, confirmedAt: null } })
+      expect((await platform.apps.review('notes', null)).reviewKey).toBe(review.reviewKey)
+      await expect(platform.apps.enable('notes', null, 'nope')).rejects.toThrow('This app changed since you reviewed it. Review it again')
+      expect(await platform.apps.enable('notes', null, review.reviewKey)).toMatchObject({ status: 'stopped', imported: { confirmedAt: expect.any(Number) } })
+      await expect(platform.apps.importPrepare(source)).rejects.toThrow('An app with the id "notes" is already in your apps')
+      await expect(platform.apps.importPrepare('http://example.com/a.zip')).rejects.toThrow('Only folders and .zip files on this machine, or https links, can be imported')
+    } finally {
+      await platform.dispose()
+      await mgr.disposeAll()
+      await rt.dispose()
+      await server.close()
+      store.close()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+})
