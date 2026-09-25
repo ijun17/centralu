@@ -19,6 +19,7 @@
 | [platform-abstraction.ko.md](platform-abstraction.ko.md) | Platform 포트 — 웹으로 개발한 것이 Tauri 앱이 되는 방법. 구현 매트릭스와 이를 강제하는 lint 규칙 | architecture |
 | [protocol.ko.md](protocol.ko.md) | UI ↔ agent host 메시지: 스키마와 버전 규칙 | architecture |
 | [agent-host.ko.md](agent-host.ko.md) | Node 사이드카의 내부: AgentAdapter, 그리고 새 툴을 추가하는 방법 | protocol |
+| [apps.ko.md](apps.ko.md) | 앱(M4): 매니페스트, 앱이 사는 자리, 신뢰, 수명, 하나의 호출 경로, 대화 안 화면과 고정 화면 그리고 무엇이 표준인가, 만들기 루프, 세션에 붙이기, 중개 | agent-host |
 | [state-management.ko.md](state-management.ko.md) | 프런트엔드 상태: 이벤트 → store → selector, 영속화와 복원 | architecture, protocol |
 | [releasing.ko.md](releasing.ko.md) | 버전이 사용자에게 도달하는 방법: npm 패키지 구성, CI, 배포 절차 | — |
 | [commit-conventions.ko.md](commit-conventions.ko.md) | Conventional Commit 형식, 허용 타입, 커밋 경계 | — |
