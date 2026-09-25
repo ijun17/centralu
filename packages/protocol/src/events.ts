@@ -83,6 +83,10 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * 기록하지 않는다 — 이건 "지금 뭐가 나오고 있나"를 보여주는 표시 전용 조각이다.
    * (실측: 첫 조각은 스트림이 붙기 전에 소비될 수 있다 — 완전한 사본이 아니라
    * 살아 있다는 증거로 취급할 것.)
+   *
+   * 서브에이전트의 걸음도 이 길로 온다 (#98): callId는 그것을 띄운 Agent 호출이고,
+   * text는 걸음마다 한 줄이다. 부모의 대화에 줄을 세우지 않고 그 카드에만 붙는다 —
+   * 받는 쪽은 callId로 주인을 찾아야 한다 (자리로 찾으면 열린 남의 카드에 붙는다).
    */
   z.object({ ...base, type: z.literal('tool_output_delta'), callId: z.string(), text: z.string() }),
   /**

@@ -183,13 +183,17 @@ export type ChatItem =
    * data가 비어 있으면 note가 이유를 말한다 (실패는 보이게).
    */
   | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
-  /** live: 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오면 버린다 — 전체는 result에 있다 */
+  /**
+   * live: 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오면 버린다 — 전체는 result에 있다.
+   * callId: 결과·출력이 제 줄을 찾는 이름 (#98) — 없으면 옛 자리 규칙을 쓴다 (ownerOf).
+   */
   | {
       kind: 'tool'
       seq: number
       tool: string
       title: string
       readOnly: boolean
+      callId?: string
       result?: string
       ok?: boolean
       live?: string
@@ -3568,6 +3572,32 @@ function detachAll(): void {
   for (const off of subscriptions.splice(0)) off()
 }
 
+/**
+ * 이 결과·실행 중 출력의 **주인인 도구 줄** (#98).
+ *
+ * callId로 찾는다. 예전엔 자리로 찾았다 — 결과는 "열려 있는 가장 오래된 줄", 실행 중
+ * 출력은 "열려 있는 마지막 줄". 줄이 callId를 들고 있지 않아서였고, 한 번에 하나씩
+ * 열리는 동안에는 자리가 곧 주인이었다. 백그라운드 에이전트의 카드는 그렇지 않다:
+ * 부모가 다른 도구를 쓰는 내내 열려 있으므로, 자리 규칙은 **부모의 Bash 결과를 에이전트
+ * 카드에 붙이고** 에이전트의 걸음은 부모의 열린 Bash 카드로 보낸다 — 이슈가 말한
+ * "누가 했는지 모르게 섞인다"가 화면 쪽에서 다시 생긴다.
+ *
+ * callId를 가진 줄은 제 것만 받는다. 옛 자리 규칙은 callId가 없는 줄끼리만 쓴다 —
+ * 호출·결과를 따로 들고 오는 오래된 픽스처와 같은 모양을 위해서다. 실측: 저장소의
+ * tool_call 44,140행(claude 28,517 · codex 15,623)에서 한 세션 안에 callId가 겹친 적은
+ * 한 번도 없다 (2026-09-25).
+ */
+function ownerOf(items: ChatItem[], callId: string, fallback: 'oldest' | 'latest'): number {
+  if (callId) {
+    const mine = items.findIndex((i) => i.kind === 'tool' && i.callId === callId)
+    if (mine !== -1) return mine
+  }
+  const open = (i: ChatItem | undefined) => i?.kind === 'tool' && i.callId === undefined && i.result === undefined
+  if (fallback === 'oldest') return items.findIndex(open)
+  for (let i = items.length - 1; i >= 0; i--) if (open(items[i])) return i
+  return -1
+}
+
 /** 이벤트를 대화 아이템으로 (스트리밍 델타는 마지막 assistant 항목에 append) */
 function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
@@ -3598,6 +3628,7 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
           tool: e.summary.tool,
           title: e.summary.title,
           readOnly: e.summary.readOnly,
+          ...(e.callId ? { callId: e.callId } : {}),
         },
       ]
     case 'message_image':
@@ -3607,15 +3638,12 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       ]
     case 'tool_result': {
       /*
-       * 결과는 **가장 오래 열려 있는** 도구 줄에 붙는다 (2026-09-12).
-       *
-       * 예전엔 마지막 열린 줄을 찾았다. 한 번에 하나만 열려 있는 동안에는 두 규칙이 같은
-       * 줄을 가리키므로 아무 차이가 없었지만, 호출 둘이 연달아 열리면(claude의 병렬 호출)
-       * 마지막-우선은 두 결과를 **서로 바꿔** 붙인다 — 도구가 뱉은 순서가 곧 호출 순서이기
-       * 때문이다. 복원(messagesToChat)도 같은 규칙을 쓴다: 같은 화면이 두 길에서 서로 다른
-       * 짝을 짓는 일이 없어야 한다.
+       * 결과는 **제 호출의 줄**에 붙는다 (#98 — ownerOf). callId가 없는 줄끼리는
+       * 가장 오래 열려 있는 줄이다 (2026-09-12): 마지막-우선은 연달아 열린 두 호출의
+       * 결과를 서로 바꿔 붙였다. 복원(messagesToChat)도 같은 규칙을 쓴다 — 같은 화면이
+       * 두 길에서 서로 다른 짝을 짓는 일이 없어야 한다.
        */
-      const real = items.findIndex((i) => i.kind === 'tool' && i.result === undefined)
+      const real = ownerOf(items, e.callId, 'oldest')
       if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
       // live는 여기서 버린다 — 완주한 출력 전체가 result로 왔으므로 조각은 역할이 끝났다
@@ -3624,15 +3652,16 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       )
     }
     /*
-     * 실행 중 출력 (#58). tool_result와 같은 규칙으로 "열려 있는 마지막 도구 줄"에 단다 —
-     * codex의 itemId를 ChatItem이 들고 있지 않아서이기도 하고, 열린 호출이 동시에 여럿인
-     * 경우가 실측된 적도 없다. 꼬리만 남긴다: 보여줄 것은 "지금 뭐가 나오나"지 전문이 아니다.
+     * 실행 중 출력 (#58). 제 호출의 줄에 단다 (ownerOf) — 열린 호출이 동시에 여럿인 경우가
+     * 실제로 생겼다: 백그라운드 에이전트의 카드는 부모가 다른 도구를 쓰는 동안에도 열려
+     * 있고, 그 에이전트의 걸음이 이 길로 온다 (#98). 이미 닫힌 줄에는 달지 않는다 —
+     * 결과가 전체를 들고 왔다. 꼬리만 남긴다: 보여줄 것은 "지금 뭐가 나오나"지 전문이 아니다.
      */
     case 'tool_output_delta': {
-      const idx = [...items].reverse().findIndex((i) => i.kind === 'tool' && i.result === undefined)
-      if (idx === -1) return items
-      const real = items.length - 1 - idx
+      const real = ownerOf(items, e.callId, 'latest')
+      if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
+      if (target.result !== undefined) return items
       const live = ((target.live ?? '') + e.text).slice(-4000)
       return items.map((it, i) => (i === real ? { ...target, live } : it))
     }
@@ -3772,7 +3801,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
         : compactionText(e)
       items.push({ kind: 'mark', seq: m.seq, text })
     } else if (m.kind === 'tool_call') {
-      const e = m.payload as { summary?: { tool: string; title: string; readOnly: boolean } }
+      const e = m.payload as { callId?: string; summary?: { tool: string; title: string; readOnly: boolean } }
       if (e.summary)
         items.push({
           kind: 'tool',
@@ -3780,6 +3809,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
           tool: e.summary.tool,
           title: e.summary.title,
           readOnly: e.summary.readOnly,
+          ...(e.callId ? { callId: e.callId } : {}),
         })
     } else if (m.kind === 'tool_result') {
       /*
@@ -3788,20 +3818,17 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
        * host는 tool_call과 tool_result를 각각 한 행으로 남기는데 여기엔 tool_call 분기만
        * 있었다. 그래서 세션을 다시 열면 카드는 제목만 남고 출력이 통째로 사라졌다 —
        * 라이브로 보고 있던 사람에게만 보이는 화면이었던 셈이다. 붙이는 규칙은 라이브
-       * (appendChat)와 같다: **아직 결과가 없는 가장 오래된 도구 줄**에 붙인다 — 도구가
-       * 뱉은 순서가 곧 호출 순서라서, 호출 둘이 연달아 열려도 짝이 안 바뀐다.
+       * (appendChat)와 같다: **제 호출의 줄**(ownerOf, #98) — callId가 없는 옛 모양끼리는
+       * 아직 결과가 없는 가장 오래된 줄이다.
        *
        * 짝을 못 찾으면(페이지 경계로 tool_call이 이 묶음 밖에 있을 때) 조용히 버린다 —
-       * 주인 없는 출력을 대화에 새 줄로 세우면 없던 말이 생긴다.
+       * 주인 없는 출력을 대화에 새 줄로 세우면 없던 말이 생긴다. 남의 열린 카드에 붙여도
+       * 없던 말이 생긴다: 자리 규칙이 그 자리에 있던 백그라운드 에이전트 카드를 집었다.
        */
-      const e = m.payload as { summary?: string; ok?: boolean }
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i]
-        if (it?.kind !== 'tool' || it.result !== undefined) continue
-        const filled: Extract<ChatItem, { kind: 'tool' }> = { ...it, result: e.summary ?? '', ok: e.ok }
-        items[i] = filled
-        break
-      }
+      const e = m.payload as { callId?: string; summary?: string; ok?: boolean }
+      const i = ownerOf(items, e.callId ?? '', 'oldest')
+      const it = items[i]
+      if (it?.kind === 'tool') items[i] = { ...it, result: e.summary ?? '', ok: e.ok }
     } else if (m.kind === 'image') {
       // 이미지는 영속된다 (#40 2차) — host가 파일에서 바이트를 다시 실어 보낸다
       const e = m.payload as { mime?: string; data?: string; path?: string; note?: string }

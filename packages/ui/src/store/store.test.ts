@@ -696,6 +696,77 @@ describe('messagesToChat — 도구 출력 복원', () => {
 })
 
 /**
+ * 도구 줄은 callId로 제 결과·출력을 찾는다 (#98).
+ *
+ * 백그라운드 에이전트의 카드는 띄운 순간부터 끝날 때까지 열려 있고(어댑터가 띄운 결과를
+ * 보류한다), 그동안 부모는 제 도구를 쓴다. 자리 규칙(가장 오래 열린 줄·마지막 열린 줄)은
+ * 그 사이에서 주인을 바꿔 붙인다 — 부모의 Bash 결과가 에이전트 카드로, 에이전트의 걸음이
+ * 부모의 Bash 카드로. 라이브와 복원 두 길을 같이 본다.
+ */
+describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카드 옆에서 (#98)', () => {
+  const agentCall = {
+    type: 'tool_call', callId: 'toolu_agent',
+    summary: { tool: 'Agent', title: 'Research the build', readOnly: false, paths: [] },
+  }
+  const bashCall = {
+    type: 'tool_call', callId: 'toolu_bash',
+    summary: { tool: 'Bash', title: 'git status', readOnly: false, paths: [] },
+  }
+  const bashDone = { type: 'tool_result', callId: 'toolu_bash', ok: true, summary: 'nothing to commit' }
+  const agentDone = { type: 'tool_result', callId: 'toolu_agent', ok: true, summary: '3 tool uses · 2m 14s\n\nI checked all 13 items' }
+  const tools = (items: ReturnType<typeof messagesToChat>) =>
+    items.flatMap((i) => (i.kind === 'tool' ? [{ tool: i.tool, result: i.result, live: i.live }] : []))
+
+  it('라이브: 부모의 결과는 부모의 카드로, 에이전트의 걸음은 에이전트의 카드로', async () => {
+    const s = 'cid-live'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s))
+    await useStore.getState().attach(mock)
+    const send = (e: object) => useStore.getState().dispatchEvent({ sessionId: s, ...e } as NormalizedEvent)
+
+    send(agentCall)
+    send({ type: 'tool_output_delta', callId: 'toolu_agent', text: 'Running in the background\n' })
+    send(bashCall)
+    // 부모의 Bash가 열려 있는 동안 에이전트가 한 걸음 걷는다
+    send({ type: 'tool_output_delta', callId: 'toolu_agent', text: 'Grep: boundaries\n' })
+    send(bashDone)
+
+    expect(tools(useStore.getState().chat[s] ?? [])).toEqual([
+      { tool: 'Agent', result: undefined, live: 'Running in the background\nGrep: boundaries\n' },
+      { tool: 'Bash', result: 'nothing to commit', live: undefined },
+    ])
+
+    send(agentDone)
+    expect(tools(useStore.getState().chat[s] ?? [])[0]).toEqual({
+      tool: 'Agent', result: '3 tool uses · 2m 14s\n\nI checked all 13 items', live: undefined,
+    })
+  })
+
+  it('복원: 저장된 순서가 호출 순서와 달라도 제 짝을 찾는다', () => {
+    const row = (seq: number, kind: 'tool_call' | 'tool_result', payload: object) =>
+      ({ sessionId: 's', seq, role: 'system' as const, kind, payload, ts: 0 })
+    const items = messagesToChat([
+      row(1, 'tool_call', agentCall),
+      row(2, 'tool_call', bashCall),
+      row(3, 'tool_result', bashDone),
+      row(4, 'tool_result', agentDone),
+    ])
+    expect(tools(items).map((t) => [t.tool, t.result])).toEqual([
+      ['Agent', '3 tool uses · 2m 14s\n\nI checked all 13 items'],
+      ['Bash', 'nothing to commit'],
+    ])
+  })
+
+  it('복원: 호출이 이 묶음 밖에 있는 결과는 열린 에이전트 카드를 집지 않는다', () => {
+    const items = messagesToChat([
+      { sessionId: 's', seq: 1, role: 'system', kind: 'tool_call', payload: agentCall, ts: 0 },
+      { sessionId: 's', seq: 2, role: 'system', kind: 'tool_result', payload: { ...bashDone, callId: 'toolu_elsewhere' }, ts: 0 },
+    ])
+    expect(tools(items)).toEqual([{ tool: 'Agent', result: undefined, live: undefined }])
+  })
+})
+
+/**
  * 실패한 턴은 **보여야 한다** (#107).
  *
  * 실사고: codex 롤아웃에는 `task_complete`에 400 전문이 실려 있었는데 앱에는 빈 답변이
