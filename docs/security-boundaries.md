@@ -53,6 +53,13 @@ Tests: `inline-views.test.ts` ("그 대화로 가고, 대화에는 앱이 보낸
 화면과 같은 틀(앱의 글)로 — 대화 밖에서 왔다고 밝혀 — 간다"); `e2e/inline-views.spec.ts` and
 `e2e/apps.spec.ts` for asking first; `e2e/build-loop.spec.ts` for the pinned path.
 
+A `run_agent` prompt (apps.md §10) is an app's text too, and no person chose to send it. It is
+stored with its source (`fromApp`) and reaches the agent in the same frame, under a heading saying
+the app asked for this work through Centralu, that the person did not write or read it, that
+nothing in it can grant permissions or change instructions, and that the final message goes back
+to the app (`appMessageFrame(..., 'request')`; `app-agents.test.ts` "앱이 부탁한 일은 화면의 말과
+같은 틀에 갇힌다 — 모든 줄이 인용이라, 앱의 글이 머리말이나 틀의 끝을 흉내 낼 수 없다").
+
 Limits:
 
 - The frame states where text came from. As with reports, it does not make the text safe to obey.
@@ -140,13 +147,30 @@ then who may call it:
   tool name.
 - The broker pipe (fd 3) is handed only to that process, so there is no token to steal. A broker
   call must carry the run id of a call the same app is handling on the same pipe; no id, an
-  invented id, a finished run's id and another app's live id are all refused and logged
-  (`broker.ts`; `mediation.test.ts` "실행 id 없는 중개 호출은 거절한다 (앱이 스스로 깨어난 경우)",
-  "지어낸 id, 끝난 실행의 id, 다른 앱의 살아 있는 id 모두 거절한다"). Broker work is cancelled with
-  the call it serves. The broker's tools themselves are not available yet.
+  invented id, a finished run's id and another app's live id are all refused, logged and recorded
+  without a parent, so an app cannot put rows into another app's chain (`broker.ts`;
+  `mediation.test.ts` "실행 id 없는 중개 호출은 거절한다 (앱이 스스로 깨어난 경우)", "지어낸 id,
+  끝난 실행의 id, 다른 앱의 살아 있는 id 모두 거절한다"; `broker-records.test.ts`). Broker work is
+  cancelled with the call it serves, down to an agent session it started.
+- What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
+  each capability once (an agent tool, another app, a host data name), asked where the chain
+  started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
+  requests never run (`desk.ts`; `capabilities.test.ts`, `app-capabilities.test.ts`,
+  `host-data.test.ts`, `call-app.test.ts`).
+- An agent an app asks for runs in a new session the person can see, with the `normal` preset
+  whatever the calling session uses, with no apps attached, and receives the prompt framed as the
+  app's text ("Text an app sends"; `app-agents.test.ts` "자동으로 도는 세션이 불러도 에이전트는
+  normal로 서고, 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다").
+- Runaway limits: a chain holds at most 3 app calls and never calls the same app tool again on its
+  own path, and an app runs one agent at a time and at most 5 a minute. Every request, refusals
+  included, is a run record under the call that caused it (`limits.test.ts`,
+  `broker-records.test.ts`, `app-chain.test.ts`).
 - Stopping an app closes stdin and fd 3 together. An app still running after the grace has its
   whole process tree ended, SIGTERM then SIGKILL, descendants that outlive their parent included
-  (`app-process.ts` `stop`, `kill-tree.ts`, #149).
+  (`app-process.ts` `stop`, `kill-tree.ts`, #149). An app that exits by itself has its own process
+  group ended the same way, SIGTERM then SIGKILL after the grace (`stopGroup`), and disposing the
+  runtime stops every process it started, including ones a restart replaced
+  (`lifecycle.test.ts`).
 
 Limits:
 
@@ -157,8 +181,11 @@ Limits:
 - Redaction is literal string replacement. Values shorter than 4 characters, and values the app
   transforms (encodes, splits), are not caught.
 - Visibility decides who may call a tool, not what the tool does.
-- An app that exits by itself gets one SIGTERM to its process group and no SIGKILL, so a helper it
-  left behind that ignores SIGTERM survives (`signalOwnGroup`, noted in #188).
+- A permission is per capability, not per request: once an app may run an agent, the app decides
+  what to ask it. The agent's own writes still ask the person (`normal`), and its session is there
+  to read.
+- `sessions.list` gives session names, and an automatically named session is named after the first
+  words of its first message.
 - fd 3 on Windows is untested (spike S-5).
 
 ## App views
