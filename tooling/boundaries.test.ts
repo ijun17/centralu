@@ -123,8 +123,9 @@ describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
 
 /**
  * The external app runtime (M4 A) is the one part of `apps/` allowed into `dev-services/`, and
- * only by name: folder watching and path containment are promises the terminal and the command
- * runner already keep, and a second copy of "how we contain a path" is how the two drift apart.
+ * only by name: folder watching, path containment and killing a process tree are promises the
+ * terminal and the command runner already keep, and a second copy of "how we kill a tree" is how
+ * the two drift apart.
  * Everything else stays out — sessions and adapters are callers of the runtime, and the store is
  * reached through the `ExternalAppsDeps` the host supplies.
  *
@@ -133,7 +134,7 @@ describe('앱 런타임은 자기가 태우는 것을 모른다', () => {
  */
 describe('외부 앱 런타임은 이름을 댄 물리 모듈만 빌린다', () => {
   const sources = sourcesUnder(join(ROOT, 'packages/agent-host/src/apps/external/'))
-  const PHYSICS = /(^|\/)dev-services\/(watch|path-guard)\.js$/
+  const PHYSICS = /(^|\/)dev-services\/(watch|path-guard|kill-tree)\.js$/
 
   it('읽을 소스가 있다', () => {
     expect(sources.length).toBeGreaterThan(0)

@@ -933,6 +933,14 @@ export const RpcMethods = {
    * 물을 곳이 없다. 내장 앱은 여기 없다(내장 명부는 컴파일된 것이다, A-8이 합친다).
    */
   'apps.list': { params: z.object({}), result: z.array(ExternalAppInfo) },
+  /**
+   * 멈춘(`failed`) 외부 앱을 다시 띄울 수 있게 한다 — 연속 실패를 지우고, 떠 있으면 내린다.
+   * **띄우지는 않는다**: 다음에 부르는 쪽이 띄운다(처음 필요할 때 뜬다는 원칙 그대로).
+   */
+  'apps.restart': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: SessionId.optional() }),

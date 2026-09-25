@@ -64,6 +64,12 @@ describe('외부 앱 RPC — 신뢰', () => {
     expect(await list()).toEqual([])
   })
 
+  it('apps.restart는 발견된 앱에만 닿는다 — 없는 앱은 이름과 함께 거절한다', async () => {
+    const { id } = (await rpc('projects.add', { path: projRoot })) as { id: string }
+    await expect(rpc('apps.restart', { appId: 'notes', projectId: id })).resolves.toEqual({ ok: true })
+    await expect(rpc('apps.restart', { appId: 'ghost', projectId: id })).rejects.toThrow(/그런 앱이 없습니다: .*\/ghost/)
+  })
+
   it('없는 프로젝트의 신뢰는 조용히 성공하지 않는다', async () => {
     await expect(rpc('projects.setTrusted', { projectId: 'nope', trusted: true })).rejects.toThrow(/Project not found/)
   })
