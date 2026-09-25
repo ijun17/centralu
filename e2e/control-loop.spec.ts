@@ -4337,7 +4337,7 @@ test('에이전트가 보낸 이미지가 대화에 그려진다 — 실패는 �
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
-    return store.getState().loadHistory(sid, true)
+    return store.getState().loadHistory(sid)
   }, id)
   await expect(img).toBeVisible()
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
@@ -5664,7 +5664,7 @@ test('오케스트레이터가 시킨 말에는 출처 라벨이 붙고, 복원�
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
-    return store.getState().loadHistory(sid, true)
+    return store.getState().loadHistory(sid)
   }, id)
   await expect(page.getByTestId('msg-user-from')).toContainText('지휘 세션')
 })
@@ -5716,7 +5716,7 @@ test('codex 추론 요약이 회색 블록으로 보이고 복원해도 남는�
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
-    return store.getState().loadHistory(sid, true)
+    return store.getState().loadHistory(sid)
   }, id)
   await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
 })
@@ -7460,7 +7460,7 @@ test('보낸 이미지는 말풍선에 실물로 보이고 눌러 확대된다',
   // 저장소에서 다시 불러도 썸네일이 되살아난다 — host가 파일에서 바이트를 다시 싣는 규칙 (재시작과 같은 길)
   await page.evaluate(async () => {
     const store = (window as any).__store.getState()
-    await store.loadHistory(store.focusedSessionId, true)
+    await store.loadHistory(store.focusedSessionId)
   })
   await expect(page.getByTestId('msg-user-attachment').locator('img')).toBeVisible()
 })
