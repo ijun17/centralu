@@ -39,6 +39,12 @@ beforeAll(() => {
   execFileSync('pnpm', ['exec', 'vite', 'build', '--outDir', outDir, '--emptyOutDir'], {
     cwd: join(ROOT, 'apps/web'),
     stdio: 'pipe',
+    /*
+     * 배포되는 빌드를 잰다. vitest는 NODE_ENV=test를 걸고 자식 프로세스가 그것을 물려받는다.
+     * 그러면 vite가 React의 개발용 빌드를 싣는다. 실측(988713e): 같은 소스가 test로는 1,468,860B,
+     * production으로는 1,160,527B였다. 아래 예산은 사람에게 가는 크기를 재야 한다.
+     */
+    env: { ...process.env, NODE_ENV: 'production' },
   })
   const assets = join(outDir, 'assets')
   // CSS 청크가 여러 개일 수 있다 — 하나만 검사하면 지연 로드 청크가 게이트를 빠져나간다
@@ -140,7 +146,9 @@ describe('번들 회귀 (C-3 결정: 뷰어에 편집기 엔진을 넣지 않는
   })
 
   it('앱 전체 JS가 1.5MB를 넘지 않는다', () => {
-    // 지금 ~300KB. 이 선을 넘으면 무거운 의존이 들어온 것이니 근거를 남기고 올려라.
+    // 배포 빌드로 1.31MB (M4 B-3c 기준, 지연 로드 청크 포함). 988713e에서 1.16MB였고, 앱 화면의
+    // 브리지(ext-apps app-bridge, 화면을 처음 열 때 불러오는 138KB)가 더해졌다.
+    // 이 선을 넘으면 무거운 의존이 들어온 것이니 근거를 남기고 올려라.
     expect(jsBytes).toBeLessThan(1_500_000)
   })
 })
