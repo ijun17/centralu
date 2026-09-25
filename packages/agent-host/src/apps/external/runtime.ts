@@ -1,12 +1,15 @@
+import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { PriorDiscovery, Tool } from '@modelcontextprotocol/client'
+import type { CallToolResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, type SpawnSpec } from './app-process.js'
+import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
 import { PROJECT_APPS_REL, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { toolNameError, type AppManifest } from './manifest.js'
 import { SecretStore, redactor } from './secrets.js'
+import { visibilityOf, type Audience } from './visibility.js'
 
 /**
  * 외부 앱 런타임 (M4 A) — **코어가 외부 앱에 대해 아는 문은 이 파일 하나다.**
@@ -30,6 +33,39 @@ const USER_SCOPE = '_user'
 export type AppRef = { projectId: string | null; appId: string }
 
 /**
+ * 누가 불렀나 (플랜 "호출 경로는 하나다") — 셋이다.
+ *
+ *   view     앱의 화면. v1 플랜은 이것을 "사람"이라 적었는데 틀렸다 — 화면은 앱의 코드라서
+ *            아무도 누르지 않아도 도구를 부를 수 있다
+ *   session  세션의 에이전트 (A-5가 붙인다)
+ *   app      다른 앱의 중개 호출 (D-2) — 부모 실행 id로 사슬이 이어진다
+ */
+export type AppCaller =
+  | { kind: 'view' }
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'app'; parentRunId: string }
+
+export type AppRunStatus = 'ok' | 'error' | 'cancelled' | 'rejected'
+
+/**
+ * 호출 하나의 결말. **정책의 거절은 던지지 않고 돌려준다** — 거절도 기록되는 결말이고
+ * (A-6), 부른 쪽(RPC·세션 대리 서버)은 그것을 "실패한 도구 호출"로 옮겨 주기만 하면 된다.
+ *
+ *   ok         앱이 답했다
+ *   error      앱이 실패를 답했거나(isError), 뜨지 못했거나, 호출 중에 죽었다
+ *   cancelled  부른 쪽이 취소했다 — 앱에는 notifications/cancelled가 갔다
+ *   rejected   host가 앱에 보내지 않았다 (공개 범위·신뢰·없는 도구·멈춘 앱·열려 있지 않은 부모)
+ */
+export type AppCallOutcome = {
+  runId: string
+  status: AppRunStatus
+  /** 앱의 답 그대로 (화면의 AppBridge가 받는 모양) — 답이 없었으면 null */
+  result: CallToolResult | null
+  error: string | null
+  durationMs: number
+}
+
+/**
  * 수명의 숫자들. 기본값이 제품의 값이고, 테스트는 줄여서 쓴다.
  */
 export type RuntimeTiming = {
@@ -47,6 +83,11 @@ export type RuntimeTiming = {
   probeTimeoutMs: number
   /** 연결과 첫 도구 목록 각각의 상한 */
   connectTimeoutMs: number
+  /**
+   * host → 앱 도구 호출 하나의 상한. 앱이 진행 알림을 보내면 다시 센다. 부르는 쪽마다 제 상한이
+   * 따로 있다(Codex 300초, 화면 60초 — 플랜 "오래 걸리는 호출"); 이것은 그 바깥의 울타리다.
+   */
+  callTimeoutMs: number
   /** 앱별 로그 파일 한 세대의 크기 */
   logMaxBytes: number
 }
@@ -65,6 +106,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
    */
   probeTimeoutMs: 10_000,
   connectTimeoutMs: 30_000,
+  callTimeoutMs: 10 * 60_000,
   logMaxBytes: 1024 * 1024,
 }
 
@@ -80,6 +122,13 @@ export type ExternalAppsDeps = {
   timing?: Partial<RuntimeTiming>
   /** 앱 프로세스가 물려받을 환경 (기본 process.env) — host 자신의 변수는 걸러진다 */
   env?: NodeJS.ProcessEnv
+  /**
+   * 앱의 도구 호출이 끝났다(앱에 닿은 호출만 — 거절은 아무것도 바꾸지 않았다). 열린 화면이
+   * 같은 값을 보게 하는 신호다(플랜 "열린 화면이 같은 값을 보는 법"). host가 방송으로 옮긴다.
+   */
+  emitChanged?: (ref: AppRef) => void
+  /** 중개 서버 도구의 몸통 (D가 채운다). 없으면 "아직 없다"는 자리표시가 선다 */
+  broker?: BrokerImpls
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
@@ -106,9 +155,25 @@ type Life = {
   inflight: number
   views: number
   idle: NodeJS.Timeout | null
-  /** 지금 프로세스의 도구 목록(이름 규칙을 통과한 것)과, 걸러 낸 이유 */
-  tools: Tool[] | null
+  /** 지금 프로세스의 도구 목록(이름·공개 범위 규칙을 통과한 것)과, 걸러 낸 이유 */
+  tools: AppTool[] | null
   toolWarnings: string[]
+  /**
+   * 지금 프로세스의 파이프 번호. 열린 실행은 자기가 태어난 파이프 번호를 들고 있고, 중개는
+   * 같은 번호의 실행만 받는다 — 앱이 다시 떠도 죽은 프로세스의 실행 id가 새 파이프에서 통하지 않는다.
+   */
+  pipeId: number
+}
+
+type AppTool = { tool: Tool; visibility: Audience[] }
+
+/** 지금 열려 있는 host → 앱 호출 */
+type OpenRun = {
+  entry: AppEntry
+  pipeId: number
+  tool: string
+  /** 호출이 끝나거나 취소되면 선다 — 이 실행 아래의 중개 일이 함께 멈춘다 */
+  abort: AbortController
 }
 
 type AppEntry = {
@@ -136,6 +201,9 @@ export class ExternalApps {
   private disposed = false
   private timing: RuntimeTiming
   private secrets: SecretStore
+  /** 실행 id → 열린 실행. 중개의 문지기가 여기에 묻는다 */
+  private runs = new Map<string, OpenRun>()
+  private pipeSeq = 0
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -183,9 +251,94 @@ export class ExternalApps {
    * 이름에 `__`가 있는 도구는 여기서 빠진다(A-1 `toolNameError`). 목록을 읽는 자리가 곧
    * 막는 자리다: 이 목록이 세션에 붙는 목록(A-5)과 화면이 부르는 도구의 정본이 된다.
    */
-  async tools(ref: AppRef): Promise<Tool[]> {
+  async tools(ref: AppRef, audience?: Audience): Promise<Tool[]> {
     const e = this.require(ref)
-    return this.use(e, async () => e.life.tools ?? [])
+    const all = await this.use(e, async () => e.life.tools ?? [])
+    return all.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
+  }
+
+  /**
+   * 앱 도구를 부르는 **단 하나의 길** (M4 A-4).
+   *
+   * 화면이 부른 것(`apps.invoke`)도, 세션의 대리 서버가 부른 것(A-5)도, 다른 앱이 중개로 부른
+   * 것(D-2)도 여기로 들어온다. 그래서 공개 범위 검사, 실행 id 발급, 취소, "바뀌었다" 알림,
+   * 기록(A-6)이 호출마다 한 번씩, 같은 코드로 일어난다 — 경로가 둘이면 그중 하나는 언젠가
+   * 검사를 빠뜨린다.
+   */
+  async call(
+    ref: AppRef,
+    name: string,
+    args: Record<string, unknown>,
+    caller: AppCaller,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<AppCallOutcome> {
+    const e = this.require(ref)
+    const runId = `run_${randomUUID()}`
+    const t0 = Date.now()
+    const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
+      if (status !== 'rejected') this.deps.emitChanged?.(e.ref)
+      return { runId, status, result, error, durationMs: Date.now() - t0 }
+    }
+
+    // 앱에 보내기 전에 끝나는 판정 — 프로세스를 띄울 필요도 없다
+    if (!e.manifest) return done('rejected', null, `매니페스트가 틀린 앱입니다: ${e.error}`)
+    if (!e.scope.trusted) return done('rejected', null, '신뢰하지 않은 프로젝트의 앱은 부르지 않습니다')
+    if (e.life.gaveUp) return done('rejected', null, `${this.timing.maxFailures}번 연달아 실패해 멈춘 앱입니다`)
+    let parent: OpenRun | null = null
+    if (caller.kind === 'app') {
+      parent = this.runs.get(caller.parentRunId) ?? null
+      if (!parent) return done('rejected', null, `부모 실행이 열려 있지 않습니다: ${caller.parentRunId}`)
+    }
+    if (opts.signal?.aborted) return done('cancelled', null, '부르기 전에 취소됐습니다')
+
+    try {
+      return await this.use(e, async (proc) => {
+        const found = e.life.tools?.find((t) => t.tool.name === name)
+        if (!found) return done('rejected', null, `그런 도구가 없습니다: ${name}`)
+        /*
+         * 화면은 `app` 도구만, 에이전트와 다른 앱은 `model` 도구만. 세션은 애초에 `model` 도구만
+         * 목록으로 받지만(A-5), 이름을 알면 부를 수 있다 — 목록에서 숨기는 것과 호출을 막는 것은
+         * 다른 일이고, 막는 것은 여기서 한다.
+         */
+        const need: Audience = caller.kind === 'view' ? 'app' : 'model'
+        if (!found.visibility.includes(need)) {
+          return done('rejected', null, `${name}은(는) ${need === 'app' ? '화면' : '에이전트'}에게 열린 도구가 아닙니다 (visibility: ${JSON.stringify(found.visibility)})`)
+        }
+
+        const abort = new AbortController()
+        const upstream = [opts.signal, parent?.abort.signal].filter((x): x is AbortSignal => !!x)
+        const onUp = () => abort.abort(new Error('the caller cancelled this call'))
+        for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
+        this.runs.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, abort })
+        try {
+          const result = await proc.client.callTool(
+            { name, arguments: args, _meta: { [RUN_META]: runId } },
+            { signal: abort.signal, timeout: this.timing.callTimeoutMs, resetTimeoutOnProgress: true },
+          )
+          return result.isError ? done('error', result, resultText(result) || '도구가 실패를 돌려줬습니다') : done('ok', result, null)
+        } catch (err) {
+          if (abort.signal.aborted) return done('cancelled', null, '부른 쪽이 취소했습니다')
+          return done('error', null, (err as Error).message)
+        } finally {
+          this.runs.delete(runId)
+          // 실행이 끝나면 그 아래의 중개 일도 끝난다 — 앱이 기다리지 않고 답했어도 아래가 남지 않게
+          abort.abort()
+          for (const sig of upstream) sig.removeEventListener('abort', onUp)
+        }
+      })
+    } catch (err) {
+      // 뜨지 못했다(기동 실패·백오프 중 바뀜) — 앱에 닿지 못했지만 정책의 거절은 아니다
+      return done('error', null, (err as Error).message)
+    }
+  }
+
+  /**
+   * 앱의 리소스를 읽는다 — 화면이 자기 `ui://` 문서와 리소스를 읽는 길(B-3·B-4의 `onreadresource`).
+   * 도구 호출이 아니라 실행 기록은 남기지 않지만, 앱을 띄우는 규칙(신뢰·처음 필요할 때)은 같다.
+   */
+  async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
+    const e = this.require(ref)
+    return this.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
   }
 
   /**
@@ -270,9 +423,10 @@ export class ExternalApps {
       if (wait > 0) await new Promise((r) => setTimeout(r, wait))
       if (L.epoch !== epoch || this.disposed) throw new AppUnavailableError('앱이 바뀌거나 내려가서 기동을 그만뒀습니다')
       const usedPrior = L.verdict !== undefined
+      const pipeId = ++this.pipeSeq
       let proc: AppProcess
       try {
-        proc = await AppProcess.start(this.spawnSpec(e))
+        proc = await AppProcess.start(this.spawnSpec(e, pipeId))
       } catch (err) {
         if (L.epoch === epoch) {
           // 기억한 세대로 붙다가 실패했다면 그 기억이 틀렸을 수 있다 — 다음엔 다시 묻는다
@@ -287,6 +441,7 @@ export class ExternalApps {
       }
       L.verdict = proc.verdict() ?? L.verdict
       L.proc = proc
+      L.pipeId = pipeId
       L.lastError = null
       this.readTools(e, proc)
       proc.onUnexpectedExit = (reason) => this.crashed(e, proc, reason)
@@ -301,18 +456,26 @@ export class ExternalApps {
   }
 
   private readTools(e: AppEntry, proc: AppProcess): void {
-    const kept: Tool[] = []
+    const kept: AppTool[] = []
     const warnings: string[] = []
+    const drop = (why: string) => {
+      warnings.push(`도구를 뺐습니다 — ${why}`)
+      proc.log.note(`tool dropped: ${why}`)
+    }
     for (const t of proc.tools) {
       const err = toolNameError(t.name)
       if (err) {
-        warnings.push(`도구를 뺐습니다 — ${err}`)
-        proc.log.note(`tool dropped: ${err}`)
-      } else {
-        kept.push(t)
+        drop(err)
+        continue
       }
+      const vis = visibilityOf(t)
+      if (!vis.ok) {
+        drop(vis.error)
+        continue
+      }
+      kept.push({ tool: t, visibility: vis.visibility })
     }
-    if (e.manifest?.home && !kept.some((t) => t.name === e.manifest?.home)) {
+    if (e.manifest?.home && !kept.some((t) => t.tool.name === e.manifest?.home)) {
       warnings.push(`home 도구(${e.manifest.home})가 도구 목록에 없습니다`)
     }
     e.life.tools = kept
@@ -392,7 +555,7 @@ export class ExternalApps {
    * 받지 않는 것: host 자신의 변수(`CC_*`). 그중에는 host WebSocket 토큰(`CC_HOST_TOKEN`)이
    * 있다 — 앱에 넘기면 앱이 host의 모든 RPC를 부를 수 있다.
    */
-  private spawnSpec(e: AppEntry): SpawnSpec {
+  private spawnSpec(e: AppEntry, pipeId: number): SpawnSpec {
     const m = e.manifest!
     const scopeDir = this.scopeDir(e.ref)
     const dataDir = join(this.deps.dataRoot, 'app-data', scopeDir, e.ref.appId)
@@ -417,6 +580,19 @@ export class ExternalApps {
       prior: e.life.verdict,
       probeTimeoutMs: this.timing.probeTimeoutMs,
       connectTimeoutMs: this.timing.connectTimeoutMs,
+      serveFd3: (fd3, note) =>
+        serveBroker(
+          fd3,
+          {
+            // 이 파이프의 앱, 이 파이프에서 열린 실행만 — 남의 id도 죽은 프로세스의 id도 통하지 않는다
+            openRun: (runId) => {
+              const run = this.runs.get(runId)
+              return run && run.entry === e && run.pipeId === pipeId ? run.abort.signal : null
+            },
+            note,
+          },
+          this.deps.broker,
+        ),
     }
   }
 
@@ -530,6 +706,7 @@ export class ExternalApps {
         idle: null,
         tools: null,
         toolWarnings: [],
+        pipeId: 0,
       },
     }
   }
@@ -540,4 +717,11 @@ export class ExternalApps {
     this.scopes.delete(key)
     for (const e of held?.apps.values() ?? []) void this.halt(e, 'project removed')
   }
+}
+
+/** 결과의 글 부분을 이어 붙인다 — 사람이 읽을 한 줄(RPC의 `text`)과 실패의 이유가 된다 */
+export function resultText(result: CallToolResult): string {
+  return result.content
+    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
+    .join('\n')
 }

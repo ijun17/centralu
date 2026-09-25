@@ -32,6 +32,11 @@ export type SpawnSpec = {
   prior?: PriorDiscovery
   probeTimeoutMs: number
   connectTimeoutMs: number
+  /**
+   * fd 3에 중개 서버를 연다 — 띄우자마자, 연결보다 먼저. 앱이 첫 도구 호출에서 바로 중개를
+   * 부를 수 있어야 하기 때문이다. 돌려받은 함수로 닫는다(종료 규칙과 함께).
+   */
+  serveFd3?: (fd3: Socket, note: (line: string) => void) => () => void
 }
 
 export type ExitInfo = { code: number | null; signal: string | null; error: string | null }
@@ -47,6 +52,7 @@ export class AppProcess {
 
   private stopping: Promise<void> | null = null
   private exitWaiters: (() => void)[] = []
+  private closeFd3Server: (() => void) | null = null
 
   private constructor(
     readonly child: ChildProcess,
@@ -113,6 +119,7 @@ export class AppProcess {
       detached: true,
     })
     const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs)
+    if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
     try {
       await proc.connect(spec)
       log.note(`ready: pid ${child.pid} era ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()})${spec.prior ? ' via cached verdict' : ''}`)
@@ -161,6 +168,7 @@ export class AppProcess {
     if (this.stopping) return this.stopping
     this.stopping = (async () => {
       void this.client.close().catch(() => {})
+      this.closeFd3Server?.()
       this.child.stdin?.end()
       this.fd3?.end()
       if (this.alive && !(await this.waitExit(graceMs))) {

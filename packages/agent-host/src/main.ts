@@ -145,6 +145,8 @@ const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
   reservedIds: HOST_APPS.map((a) => a.id),
+  // 앱에 닿은 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (B-5가 화면으로 옮긴다)
+  emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
 })
 externalApps.refresh()
 const terminals = new TerminalService((f) => server.pushTerminal(f))

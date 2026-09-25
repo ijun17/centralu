@@ -317,6 +317,18 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('app_state_changed'), appId: AppId }),
   /**
+   * 외부 앱의 도구 호출이 끝났다 (M4 A-4) — `app_state_changed`와 같은 뜻, 같은 거칠기다:
+   * 무엇이 바뀌었는지는 싣지 않고, 받은 쪽이 다시 읽는다. 외부 앱의 상태는 앱 프로세스에
+   * 살아서, "다시 읽는다"는 apps.state가 아니라 그 앱의 상태 도구를 다시 부르는 것이다
+   * (화면에는 `centralu/notifications/changed`로 옮겨진다, B-5).
+   *
+   * 이름을 나눈 이유: 내장 앱의 그 이벤트를 받으면 UI는 `apps.state(appId)`를 다시 읽는다.
+   * 같은 이름을 쓰면 외부 앱의 호출마다 쓸모없는 왕복이 하나씩 생기고, 내장 앱의 상태 칸에
+   * 외부 앱 id가 섞인다. 앱은 (프로젝트, id)로 하나라 프로젝트도 싣는다 — null은 사용자 폴더 앱.
+   * 앱에 닿지 않은 호출(거절)에는 오지 않는다: 아무것도 바뀌지 않았다.
+   */
+  z.object({ ...appScoped, type: z.literal('external_app_state_changed'), appId: AppId, projectId: z.string().nullable() }),
+  /**
    * 감시 중인 디렉토리에서 뭔가 바뀌었다 (#34 — Finder·터미널·에이전트, 출처 불문).
    *
    * 세션이 아니라 **프로젝트**의 사건이라 `update_status`와 같은 길(appScoped)을 탄다.
