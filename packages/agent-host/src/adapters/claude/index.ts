@@ -34,6 +34,7 @@ import { deleteClaudeSession, listClaudeSessions, readClaudeHistory } from './hi
 import { readUsage, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
+import { APP_MCP_PREFIX } from '../../apps/contract.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
@@ -101,6 +102,19 @@ function parseQuestions(input: unknown): Question[] {
 function isOrchestratorTool(toolName: string): boolean {
   const parts = toolName.split('__')
   return parts.length === 3 && parts[0] === 'mcp' && parts[1] === ORCHESTRATOR_MCP_NAME
+}
+
+/**
+ * 이 도구가 외부 앱 대리 서버의 도구라면 그 서버와 도구 이름 (M4 A-5) — `mcp__app-<id>__<도구>`.
+ *
+ * 위와 같은 이유로 칸을 센다. 앱 id에는 밑줄이 없고 앱의 도구 이름에는 `__`가 없으므로
+ * (manifest.ts의 두 규칙) 우리 것이면 칸이 정확히 셋이다. 이름만으로 무엇을 내주지는 않는다 —
+ * 읽기 전용인지는 붙은 앱의 목록에 묻는다(`SessionApps.readOnly`).
+ */
+function appToolOf(toolName: string): { server: string; tool: string } | null {
+  const parts = toolName.split('__')
+  if (parts.length !== 3 || parts[0] !== 'mcp' || !parts[1]!.startsWith(APP_MCP_PREFIX)) return null
+  return { server: parts[1]!, tool: parts[2]! }
 }
 
 /**
@@ -264,6 +278,22 @@ class ClaudeSession implements SessionHandle {
                  * 오케스트레이터가 첫 도구에서 멈춰 섰다.
                  */
                 if (isOrchestratorTool(toolName)) {
+                  return { behavior: 'allow' as const, updatedInput: toolInput }
+                }
+
+                /*
+                 * **읽기만 하는 앱 도구는 묻지 않는다** (M4 결정 5).
+                 *
+                 * 기준은 앱이 도구에 단 주석(`readOnlyHint: true`)이고, 판정은 이름이 아니라 붙은
+                 * 앱의 목록이 한다 — `app-`로 시작하는 서버라고 믿어 주지 않는다(#93의 교훈).
+                 * 나머지 앱 도구는 아래의 보통 승인 카드로 간다: safe는 언제나, normal은 이
+                 * 콜백이 불리면 묻는다. auto는 이 콜백 자체가 없다(bypassPermissions).
+                 * Codex의 `writes` 방식과 같은 기준이라 두 도구가 같게 움직인다.
+                 *
+                 * centralu의 예외와는 따로다 — 그 예외는 넓히지 않는다.
+                 */
+                const appTool = appToolOf(toolName)
+                if (appTool && self.opts.apps?.readOnly(appTool.server, appTool.tool)) {
                   return { behavior: 'allow' as const, updatedInput: toolInput }
                 }
 

@@ -221,6 +221,11 @@ export type SessionApps = {
   tools(server: string): Promise<AppToolSpec[]>
   /** 앱 도구를 부른다 — 호출자는 이 세션이다. 붙지 않은 앱·없는 도구는 거절 결과로 돌아온다 */
   call(server: string, tool: string, args: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<AppToolResult>
+  /**
+   * 이 도구가 읽기 전용이라고 앱이 말했나(`readOnlyHint: true`) — 승인 판정(결정 5)의 근거.
+   * 붙은 앱의, 이미 읽은 에이전트 도구 목록만 본다. 모르면 false다(묻는 쪽으로 기운다).
+   */
+  readOnly(server: string, tool: string): boolean
   /** 핸들이 닫힌다 — 구독을 끊는다 */
   close(): void
 }

@@ -115,6 +115,24 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
   })
 
   /*
+   * `app-<id>`는 외부 앱이 세션에 붙는 이름이다 (M4 A-5). 승인된 `app-notes` 서버는 앱 notes의
+   * 대리 서버와 같은 칸에 들어가 한쪽이 사라지고, 그 칸의 도구는 앱의 읽기 전용 주석으로
+   * 승인을 건너뛸 수 있다 — 칸의 주인은 런타임이 아는 앱뿐이어야 한다.
+   */
+  it('app-로 시작하는 이름의 제안도 거절된다 — 외부 앱의 자리다', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
+      name: 'app-notes',
+      command: 'npx',
+      args: ['-y', 'whatever'],
+    })
+
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('app-')
+    expect(mgr.mcpProposals()).toEqual([])
+  })
+
+  /*
    * 승인 예외는 남의 검사를 믿지 않는다. 이름 쪽이 뚫렸다고 가정하고,
    * 위조된 도구 이름을 콜백에 직접 들이민다.
    */

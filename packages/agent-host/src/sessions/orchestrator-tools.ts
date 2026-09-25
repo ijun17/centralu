@@ -13,7 +13,7 @@ function trustedJsonText(value: string): string {
  * 규칙을 따르고(`app-<id>`가 세션에 붙는 서버 이름이 된다), 런타임은 이 층(sessions)을
  * 임포트할 수 없다. 기존 소비자(어댑터 둘·매니저)는 여기서 그대로 가져간다.
  */
-export { ORCHESTRATOR_MCP_NAME, mcpServerNameError } from '../apps/contract.js'
+export { ORCHESTRATOR_MCP_NAME, mcpServerNameError, proposedMcpServerNameError } from '../apps/contract.js'
 
 /**
  * 오케스트레이터 도구의 **유일한 정의**.
