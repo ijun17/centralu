@@ -21,6 +21,7 @@ export function Notices() {
   const focusedSessionId = useStore((s) => s.focusedSessionId)
   const orchestratorId = useStore((s) => s.orchestratorId)
   const gridPanels = useStore((s) => s.gridPanels)
+  const builderPaneSessionId = useStore((s) => s.builderPaneSessionId)
 
   /*
    * 보게 된 것은 더 알릴 이유가 없다.
@@ -38,10 +39,10 @@ export function Notices() {
     if (!appFocused) return
     dismiss(
       notices
-        .filter((n) => isOnScreen(view, n.sessionId, { focusedSessionId, orchestratorId, gridPanels }))
+        .filter((n) => isOnScreen(view, n.sessionId, { focusedSessionId, orchestratorId, gridPanels, builderPaneSessionId }))
         .map((n) => n.sessionId),
     )
-  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridPanels, dismiss])
+  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridPanels, builderPaneSessionId, dismiss])
 
   if (notices.length === 0) return null
 

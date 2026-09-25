@@ -17,13 +17,19 @@ export type Onscreen = {
   focusedSessionId: string | null
   orchestratorId: string | null
   gridPanels: readonly string[]
+  /** 보이는 고정 화면(M4 B-2) 옆에 대화가 열린 만드는 세션 (BuilderPane) — 없으면 null */
+  builderPaneSessionId?: string | null
 }
 
 export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolean {
   if (view === 'focus') return ctx.focusedSessionId === sessionId
   if (view === 'orchestrator') return ctx.orchestratorId === sessionId
-  // 고정 화면(M4 B-2)이 메인 영역을 차지하고 있다 — 어느 세션의 대화도 보이지 않는다
-  if (view === 'app') return false
+  /*
+   * 고정 화면(M4 B-2)이 메인 영역을 차지한다 — 보이는 대화는 화면 옆에 연 만드는 세션의 것(BuilderPane) 하나뿐이다. 그것까지 "안
+   * 보인다"로 치던 동안, 앱을 고치는 사람이 옆에서 지켜보는 그 세션의 턴이 끝날 때마다 "Finished" 카드(와 소리)가 떴고, 카드는 고정
+   * 화면 머리의 Builder·Runs·닫기와 Runs의 Refresh 위에 서서 누름을 가로챘다(카드는 걷을 때까지 남는다).
+   */
+  if (view === 'app') return !!ctx.builderPaneSessionId && ctx.builderPaneSessionId === sessionId
   // 그리드는 여러 개가 동시에 보인다 — 그중 하나만 끝나도 화면에서 끝난 것이다
   return ctx.gridPanels.includes(sessionId)
 }
