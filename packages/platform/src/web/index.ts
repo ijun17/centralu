@@ -342,6 +342,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       builder: (appId, projectId) => rpc.call('apps.builder', { appId, projectId }),
       createBuilder: (appId, projectId, tool) => rpc.call('apps.createBuilder', { appId, projectId, ...(tool ? { tool } : {}) }),
       askBuilder: (req) => rpc.call('apps.askBuilder', req),
+      errors: (appId, projectId) => rpc.call('apps.errors', { appId, projectId }),
+      sendError: (appId, projectId, at) => rpc.call('apps.sendError', { appId, projectId, at }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

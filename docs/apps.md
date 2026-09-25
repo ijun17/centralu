@@ -305,8 +305,8 @@ another host has not been tested.
 ## 8. The build loop
 
 The first promise of apps is that the place a tool is built is the place it is used and changed.
-The host side exists (#155). In the UI, New app and the "fix it here" bar under a view are here
-(below); "Send to builder" is arriving.
+The host side exists (#155), and so does the UI side: New app, the "fix it here" bar under a view,
+and "Send to builder".
 
 - **Making an app**: the orchestrator's `create_app` and the RPC `apps.create` (the New app button's
   call) go through one function. Everything is refused **before a folder exists**: an id failing the
@@ -372,7 +372,13 @@ The host side exists (#155). In the UI, New app and the "fix it here" bar under 
   summary, run id, and the app's last 20 stderr lines. `apps.errors` returns them. They live in
   memory; run records are the durable part. **Nothing sends them to the builder by itself**: an
   agent fixing and breaking an app in a loop behind the person's back is what this prevents. Sending
-  is a person's click ("Send to builder", arriving).
+  is a person's click: under a pinned view, the latest bundle's title, message and last 8 stderr
+  lines stand with "Send to builder" (`apps.sendError`) while the app is stopped, or for a tool
+  failure since the view opened. A bundle goes once. The host marks it sent before sending
+  (`sentAt`, removed again if the send fails) and refuses a second send. The builder gets it with
+  every line quoted (`builderErrorFrame`), since stderr can carry outside text. The app list
+  carries the latest bundle's time (`lastErrorAt`), and recording one announces the list. That is
+  how the screen hears of a read-only tool's failure: reads send no "changed" (§6.3).
 
 ## 9. Attaching apps to sessions
 
@@ -474,7 +480,7 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver an inline view's message once the person agreed |
 | `apps.runs`, `apps.errors` | Run records; the latest error bundles |
 | `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
-| `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder` | The build loop (§8) |
+| `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
 | `apps.sessionTools`, `apps.sessionCall` | Used by the Codex bridge |
 | `projects.setTrusted` | Trust (§3) |
 
@@ -491,5 +497,5 @@ cancelled, closed or refused; stored without bodies, so a reopened UI can draw p
 - An open view keeps its old HTML after a reload until it is opened again.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
-- "Send to builder" and the broker's tools are arriving.
+- The broker's tools are arriving.
 - The Codex path is unverified by a run (§9.2). fd 3 on Windows is untested (spike S-5).

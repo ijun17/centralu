@@ -1,4 +1,4 @@
-import { builderRequestFrame, type Attachment, type BuilderRequestFacts, type BuilderRunFact, type SessionInfo } from '@cc/protocol'
+import { builderErrorFrame, builderRequestFrame, type Attachment, type BuilderRequestFacts, type BuilderRunFact, type SessionInfo } from '@cc/protocol'
 import type { AppRef, ExternalApps } from './apps/external/runtime.js'
 import type { ViewHost } from './views/view-host.js'
 
@@ -72,4 +72,29 @@ function notOk(run: { tool: string; callerKind: string; status: string; error: s
     status: run.status as BuilderRunFact['status'],
     error: run.error,
   }
+}
+
+/**
+ * 오류 묶음 하나를 그 앱의 만드는 세션에 보낸다 (M4 C-6) — RPC `apps.sendError`의 몸통. 사람이 "Send to builder"를 누를
+ * 때만 온다. host는 스스로 보내지 않는다(에이전트가 사람 모르게 고치고 깨뜨리기를 되풀이하지 않게, 플랜 C-6).
+ *
+ * **한 묶음은 한 번만 간다.** 보내기 전에 런타임에 "보냈다"를 적고(두 번 눌러도, 두 창에서 눌러도 하나만 지나간다),
+ * 보내다 실패하면 지운다 — 못 간 묶음을 보낸 것으로 남기지 않는다. 에이전트에게는 앱의 출력을 인용으로 가둔 모양
+ * (`builderErrorFrame`)이 간다: 표준에러는 앱이 옮겨 온 밖의 글을 담을 수 있다.
+ */
+export async function sendErrorToBuilder(deps: BuilderRequestDeps, ref: AppRef, at: number): Promise<{ sessionId: string }> {
+  const info = deps.apps.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+  if (!info) refuse('This app no longer exists')
+  const builder = deps.builderOf(ref)
+  if (!builder) refuse('This app has no builder session yet. Start one, then send the error')
+  const bundle = deps.apps.markErrorSent(ref, at)
+  if (bundle === 'sent') refuse('This error was already sent to the builder')
+  if (!bundle) refuse('This error is no longer kept. If it happens again, send the new one')
+  try {
+    await deps.send(builder.id, builderErrorFrame({ appId: info.appId, name: info.name ?? info.appId }, bundle.text))
+  } catch (err) {
+    deps.apps.unmarkErrorSent(ref, at)
+    throw err
+  }
+  return { sessionId: builder.id }
 }

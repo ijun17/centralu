@@ -1166,6 +1166,15 @@ export const RpcMethods = {
    * 사람이라 본문은 지시로 간다. 첨부는 입력창과 같은 길로 먼저 저장한 것이다(`attachments.save`에 만드는 세션의 id).
    * 만드는 세션이 없으면 거절한다 — 먼저 세운다(`apps.createBuilder`).
    */
+  /**
+   * 오류 묶음 하나를 그 앱의 만드는 세션에 보낸다 (M4 C-6) — 사람이 "Send to builder"를 누를 때만 UI가 부른다. host는
+   * 스스로 보내지 않는다. 묶음은 `at`으로 가리킨다(`apps.errors`의 그 묶음). 한 묶음은 한 번만 간다 — 이미 보냈으면
+   * 거절한다. 에이전트에게는 앱의 출력을 인용으로 가둔 모양(protocol의 `builderErrorFrame`)이 간다.
+   */
+  'apps.sendError': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable(), at: z.number() }),
+    result: z.object({ sessionId: SessionId }),
+  },
   'apps.askBuilder': {
     params: z.object({
       appId: AppId,

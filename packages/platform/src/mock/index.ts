@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  AppErrorBundle,
   AppRun,
   Attachment,
   BuilderRequestFacts,
@@ -29,6 +30,7 @@ import type {
 } from '@cc/protocol'
 import {
   APP_VERSION,
+  builderErrorFrame,
   builderRequestFrame,
   handoffFile,
   newAppIdProblem,
@@ -671,7 +673,12 @@ export class MockPlatform implements Platform {
       if (!found) throw new Error(`No resource ${uri} in app ${appId}`)
       return found
     },
-    list: async (): Promise<ExternalAppInfo[]> => structuredClone(this.externalAppList),
+    // host처럼 가장 최근 오류 묶음의 때를 싣는다 (M4 C-6) — 목의 묶음은 시험이 든다(appErrors)
+    list: async (): Promise<ExternalAppInfo[]> =>
+      structuredClone(this.externalAppList).map((a) => {
+        const at = this.appErrors.get(`${a.projectId ?? '_user'}/${a.appId}`)?.[0]?.at
+        return at === undefined ? a : { ...a, lastErrorAt: at }
+      }),
     /**
      * 고정 화면 (M4 B-2). 목에는 앱 프로세스도 ViewHost도 없다. 시험이 진짜 ViewHost의 인스턴스를 여는
      * 함수를 꽂는다(e2e/apps.spec.ts). 꽂지 않으면 부른 것만 적고 빈 결과의 인스턴스를 지어 준다.
@@ -910,7 +917,54 @@ export class MockPlatform implements Platform {
       this.deliverToBuilder(builderId, builderRequestFrame(facts, text), req.attachments)
       return { sessionId: builderId }
     },
+    /** 오류 묶음 (M4 C-6) — 시험이 `appErrors`에 채운다(최근 것부터). 보낸 묶음에는 host처럼 `sentAt`이 붙는다 */
+    errors: async (appId: string, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {
+      this.errorReads++
+      const key = `${projectId ?? '_user'}/${appId}`
+      const recent = (this.appErrors.get(key) ?? []).map((b) => ({ ...structuredClone(b), sentAt: this.errorsSent.get(`${key}\n${b.kind}\n${b.at}`) ?? null }))
+      return { latest: recent[0] ?? null, recent }
+    },
+    /**
+     * 오류 묶음을 만드는 세션에 보낸다 (M4 C-6). 실물(builder-requests.ts)처럼: 같은 말로 거절하고, 한 묶음은 한 번만
+     * 보내며(적는 것이 먼저다), 에이전트에게 가는 모양은 **같은 함수**(`builderErrorFrame`)로 짓는다.
+     */
+    sendError: async (appId: string, projectId: string | null, at: number): Promise<{ sessionId: string }> => {
+      this.errorSends.push({ appId, projectId, at })
+      // 시험이 "보내는 중"을 붙들 수 있게 — 그동안 화면이 두 번째 누름을 받는지 본다
+      if (this.sendErrorGate) await this.sendErrorGate
+      const key = `${projectId ?? '_user'}/${appId}`
+      const info = this.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
+      if (!info) throw new Error('This app no longer exists')
+      const builderId = this.appBuilders.get(key)
+      if (!builderId || !this.sessions.has(builderId)) throw new Error('This app has no builder session yet. Start one, then send the error')
+      const bundle = (this.appErrors.get(key) ?? []).find((b) => b.at === at)
+      if (!bundle) throw new Error('This error is no longer kept. If it happens again, send the new one')
+      const sentKey = `${key}\n${bundle.kind}\n${bundle.at}`
+      if (this.errorsSent.has(sentKey)) throw new Error('This error was already sent to the builder')
+      this.errorsSent.set(sentKey, this.now())
+      this.deliverToBuilder(builderId, builderErrorFrame({ appId, name: info.name ?? appId }, bundle.text))
+      return { sessionId: builderId }
+    },
   }
+  /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
+  readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
+  /**
+   * host가 오류 묶음을 새로 든 것처럼 — 맨 앞에 넣고 목록 방송을 한다(목록의 `lastErrorAt`이 바뀐다). 실물의 런타임이
+   * 묶음을 적을 때 하는 일과 같다: 읽기 전용 도구의 실패는 "바뀌었다"를 내지 않으니 이것이 화면의 유일한 신호다.
+   */
+  recordAppError(appId: string, projectId: string | null, bundle: Omit<AppErrorBundle, 'sentAt'>): void {
+    const key = `${projectId ?? '_user'}/${appId}`
+    this.appErrors.set(key, [bundle, ...(this.appErrors.get(key) ?? [])])
+    this.emit({ type: 'external_apps_changed' })
+  }
+  /** 보낸 묶음 → 보낸 때 — host처럼 한 번만 */
+  private readonly errorsSent = new Map<string, number>()
+  /** "Send to builder"가 host에 닿은 것 — 누르기 전에는 비어 있고, 한 번 누르면 하나다 */
+  readonly errorSends: { appId: string; projectId: string | null; at: number }[] = []
+  /** 오류 묶음을 몇 번 읽었나 — "바뀌었다"가 오면 다시 읽는지를 시험이 본다 */
+  errorReads = 0
+  /** 있으면 sendError가 이것을 기다린다 — 보내는 동안의 화면을 시험이 본다 */
+  sendErrorGate: Promise<void> | null = null
   /** "New app" 창이 host에 보낸 것 — 창이 무엇을 골랐는지(id·이름·도구)를 시험이 본다 */
   readonly createdApps: NewAppSpec[] = []
   /** 고정 화면의 인스턴스 → 그 앱과 화면 (`openView`가 적는다). host의 ViewHost가 인스턴스로 아는 것과 같다 */

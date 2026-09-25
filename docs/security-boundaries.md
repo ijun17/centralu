@@ -35,6 +35,13 @@ for word: the same injection path as a worker's report, so the same rule applies
   a made-up "person:" field, stays inside the quote. The app's name passes the one-line field rule
   (`frameField`).
 
+The same rule covers an app's error report. "Send to builder" hands the builder a bundle made of
+the app's own output: its reason and the last lines of its stderr, which can carry outside text
+too. It goes with a header saying the person sent a report Centralu built from the app's output,
+and every line behind `> ` (`builderErrorFrame` in `@cc/protocol`). Only a person's click sends
+it, and a bundle goes once (`builder-requests.test.ts`, "누르기 전에는 아무것도 가지 않고, 누르면 그
+묶음이 인용으로 갇혀 한 번 가며, 두 번째는 거절된다").
+
 Tests: `inline-views.test.ts` ("그 대화로 가고, 대화에는 앱이 보낸 말로 남으며, 에이전트는 인용 안에
 갇힌 앱의 글로 받는다", with a forged header inside the text; "다른 대화의 이름을 대거나, 대화 안
 화면이 아닌 인스턴스로는 보낼 수 없다"); `e2e/inline-views.spec.ts` for asking first.

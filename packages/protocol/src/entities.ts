@@ -127,6 +127,12 @@ export const ExternalAppInfo = z.object({
   status: ExternalAppStatus,
   error: z.string().nullable(),
   warnings: z.array(z.string()),
+  /**
+   * 이 앱의 가장 최근 오류 묶음의 때 (`apps.errors`의 `latest.at`, M4 C-6) — host가 뜬 뒤 오류가 없었으면 없다. 화면의
+   * 오류 줄은 이것이 바뀌면 묶음을 다시 읽는다. "바뀌었다" 알림으로는 알 수 없다: 읽기 전용 도구의 실패는 그 알림을
+   * 내지 않는다(내면 화면이 다시 읽다 또 실패하는 고리가 된다).
+   */
+  lastErrorAt: z.number().optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 
@@ -172,6 +178,11 @@ export const AppErrorBundle = z.object({
   runId: z.string().nullable(),
   /** 만드는 세션에 그대로 보낼 수 있는 글 */
   text: z.string(),
+  /**
+   * 사람이 이 묶음을 만드는 세션에 보낸 때 — 보내지 않았으면 null (C-6). 한 묶음은 **한 번만** 간다: host가 적고 두 번째를
+   * 거절한다. 화면은 이것으로 "보냈다"를 그린다(다시 연 화면, 다른 창에서도 같다). 옛 host의 답에는 없다 — 없으면 null.
+   */
+  sentAt: z.number().nullable().default(null),
 })
 export type AppErrorBundle = z.infer<typeof AppErrorBundle>
 

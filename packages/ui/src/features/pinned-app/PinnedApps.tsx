@@ -6,6 +6,7 @@ import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { RunsPanel } from './RunsPanel.jsx'
 import { MessageAsk, messageText, type MessageAskState } from './MessageAsk.jsx'
 import { BuilderPane } from './BuilderPane.jsx'
+import { ErrorTail } from './ErrorTail.jsx'
 import { FixBar } from './FixBar.jsx'
 import { useAppBuilder } from './useAppBuilder.js'
 
@@ -206,6 +207,7 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
           <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
+          <ErrorTail app={app} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           <FixBar app={app} pv={pv} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
         </div>

@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  AppErrorBundle,
   AppId,
   AppRun,
   ApprovalDecision,
@@ -668,6 +669,16 @@ export interface AppsPort {
    * @returns 말이 간 만드는 세션
    */
   askBuilder(req: BuilderAsk): Promise<{ sessionId: string }>
+  /**
+   * 한 앱의 최근 오류 묶음 (M4 C-6) — 앱이 뜨지 못했거나, 죽었거나, 도구가 실패한 순간. `latest`가 화면이 보이는 것이다.
+   * 만드는 세션에 보낸 묶음에는 `sentAt`이 붙는다.
+   */
+  errors(appId: AppId, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }>
+  /**
+   * 오류 묶음 하나(`at`)를 그 앱의 만드는 세션에 보낸다 (M4 C-6) — **사람이 누를 때만.** 한 묶음은 한 번만 간다(두 번째는
+   * host가 거절한다).
+   */
+  sendError(appId: AppId, projectId: string | null, at: number): Promise<{ sessionId: string }>
 }
 
 /**

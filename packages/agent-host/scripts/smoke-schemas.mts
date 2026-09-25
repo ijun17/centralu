@@ -170,6 +170,7 @@ const SKIP: Record<string, string> = {
   'apps.viewMessage': '세션이 부른 화면 달린 앱 도구의 열린 대화 안 화면이 필요 (inline-views.test.ts가 진짜 앱으로 관통)',
   'apps.inlineReopen': '접힌 대화 안 화면이 필요 — 같은 시험이 관통(상한과 다시 열기)',
   'apps.askBuilder': '앱의 만드는 세션(진짜 에이전트)에 말을 넣는다 (builder-requests.test.ts·platform.contract.test.ts가 관통)',
+  'apps.sendError': '앱의 오류 묶음과 만드는 세션(진짜 에이전트)이 필요 — builder-requests.test.ts가 관통',
 }
 
 const ok: string[] = []

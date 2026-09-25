@@ -16,7 +16,7 @@ const toInfo = (h: TerminalHandle) => ({
 import type { UpdateService } from './updates.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
-import { askBuilder } from './builder-requests.js'
+import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
 import { HOST_APPS } from './apps/registry.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
@@ -348,6 +348,14 @@ export function createRpcHandler(
     'apps.createBuilder': async (p) => {
       const { appId, projectId, tool } = RpcMethods['apps.createBuilder'].params.parse(p)
       return mgr.createAppBuilder({ appId, projectId }, tool)
+    },
+    'apps.sendError': async (p) => {
+      const { appId, projectId, at } = RpcMethods['apps.sendError'].params.parse(p)
+      return sendErrorToBuilder(
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { appId, projectId },
+        at,
+      )
     },
     'apps.askBuilder': async (p) => {
       const { appId, projectId, text, attachments, instanceId } = RpcMethods['apps.askBuilder'].params.parse(p)

@@ -252,6 +252,12 @@ type AppEntry = {
  */
 const STDERR_SETTLE_MS = 150
 
+/** 물으면 답하는 오류 묶음 — 만드는 세션에 보냈으면 그 때가 붙는다 (C-6) */
+export type SentErrorBundle = AppErrorBundle & { sentAt: number | null }
+
+/** 보낸 묶음의 열쇠 — 한 앱에서 묶음은 (종류, 때)로 하나다. 표준에러를 다시 담아 갈아 끼워져도 같은 열쇠다 */
+const sentKey = (holdKey: string, b: Pick<AppErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
+
 /** 부를 수 없는 앱 — 이유가 곧 메시지다 */
 export class AppUnavailableError extends Error {
   readonly code = 'internal'
@@ -283,6 +289,11 @@ export class ExternalApps {
   private reloading = new Map<string, Promise<boolean>>()
   /** 앱 이름(holdKey)마다 최근 오류 묶음, 최근 것부터 (C-6) — 매니페스트가 바뀌어 칸이 새로 서도 이어진다 */
   private errorLog = new Map<string, AppErrorBundle[]>()
+  /**
+   * 만드는 세션에 보낸 묶음 → 보낸 때 (C-6). 묶음에 적지 않고 따로 드는 이유: 도구 실패의 묶음은 표준에러를 조금 뒤에
+   * 다시 옮겨 담으며 **새 객체로 갈아 끼워진다**(recordError) — 묶음에 적은 표시는 그때 사라진다.
+   */
+  private errorsSent = new Map<string, number>()
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -301,9 +312,38 @@ export class ExternalApps {
    * 한 앱의 최근 오류 묶음 (M4 C-6) — 뜨지 못함·예고 없는 종료·도구 실패. `latest`가 "만드는 세션에 보내기"가 보낼
    * 것이다. **보내지는 않는다** — 사람이 누를 때 UI가 이것을 읽어 보낸다(errors.ts 주석).
    */
-  errors(ref: AppRef): { latest: AppErrorBundle | null; recent: AppErrorBundle[] } {
-    const recent = [...(this.errorLog.get(this.holdKey(ref)) ?? [])]
+  errors(ref: AppRef): { latest: SentErrorBundle | null; recent: SentErrorBundle[] } {
+    const key = this.holdKey(ref)
+    const recent = (this.errorLog.get(key) ?? []).map((b) => ({ ...b, sentAt: this.errorsSent.get(sentKey(key, b)) ?? null }))
     return { latest: recent[0] ?? null, recent }
+  }
+
+  /**
+   * 묶음 하나를 만드는 세션에 보낸다고 적는다 (C-6) — **한 번만.** 보낼 묶음을 돌려주고, 이미 보냈으면 'sent', 들고 있지
+   * 않으면(오래돼 밀려났다, host가 다시 떴다) null. 적는 것이 보내기보다 먼저다: 사람이 두 번 눌러도, 두 창에서 눌러도
+   * 한 번만 간다. 보내다 실패하면 부른 쪽이 `unmarkErrorSent`로 되돌린다 — 못 간 묶음을 "보냈다"로 남기지 않는다.
+   *
+   * 보내는 일은 여기서 하지 않는다. 런타임은 묶음을 모으고 물으면 답할 뿐이고(errors.ts), 보내는 쪽은 사람이 누른 RPC다.
+   */
+  markErrorSent(ref: AppRef, at: number): AppErrorBundle | 'sent' | null {
+    const key = this.holdKey(ref)
+    const list = this.errorLog.get(key) ?? []
+    const b = list.find((x) => x.at === at)
+    if (!b) return null
+    const k = sentKey(key, b)
+    if (this.errorsSent.has(k)) return 'sent'
+    // 목록에서 밀려난 묶음의 표시는 걷는다 — 표시가 묶음보다 오래 살 까닭이 없다
+    for (const old of [...this.errorsSent.keys()]) {
+      if (old.startsWith(`${key}\n`) && !list.some((x) => sentKey(key, x) === old)) this.errorsSent.delete(old)
+    }
+    this.errorsSent.set(k, Date.now())
+    return b
+  }
+
+  unmarkErrorSent(ref: AppRef, at: number): void {
+    const key = this.holdKey(ref)
+    const b = (this.errorLog.get(key) ?? []).find((x) => x.at === at)
+    if (b) this.errorsSent.delete(sentKey(key, b))
   }
 
   /**
@@ -318,6 +358,12 @@ export class ExternalApps {
     list.unshift(bundle)
     if (list.length > ERRORS_KEPT) list.length = ERRORS_KEPT
     this.errorLog.set(key, list)
+    /*
+     * 목록이 말하는 "마지막 오류의 때"가 바뀌었다 — 화면(오류 줄)은 그것을 보고 묶음을 다시 읽는다. "바뀌었다"
+     * (emitChanged)에 기대지 않는 이유: 읽기 전용 도구의 호출은 그것을 내지 않는다(내면 화면이 다시 읽다가 또
+     * 실패하는 고리가 된다). 뜨지 못함·죽음은 상태가 바뀌며 이미 알렸지만, 도구 실패는 이것이 유일한 신호다.
+     */
+    this.appsChanged()
     if (!proc) return
     setTimeout(() => {
       const i = list.indexOf(bundle)
@@ -1338,6 +1384,7 @@ export class ExternalApps {
 
   private info(e: AppEntry): ExternalAppInfo {
     const m = e.manifest
+    const lastErrorAt = this.errorLog.get(this.holdKey(e.ref))?.[0]?.at
     return {
       appId: e.ref.appId,
       projectId: e.ref.projectId,
@@ -1350,6 +1397,7 @@ export class ExternalApps {
       status: this.status(e),
       error: e.error ?? e.life.lastError,
       warnings: [...e.warnings, ...e.life.toolWarnings],
+      ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
     }
   }
 
