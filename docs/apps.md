@@ -142,7 +142,7 @@ start or run failed; the next need retries), `failed` (stopped after three).
 view (iframe) ─ apps.invoke ──────────────────────────┐
 session agent ─ app-<id> proxy (Claude: in-process;   │
                 Codex: stdio bridge) ─────────────────┼─▶ ExternalApps.call ─▶ app process
-another app ─── broker on fd 3 (arriving, §10) ────────┘          │
+another app ─── broker on fd 3 (call_app, §10) ────────┘          │
                                                                   ├─ run record (app_runs)
                                                                   └─ "changed" to open views (§6.3)
 ```
@@ -179,7 +179,10 @@ screen), or both, the default.
 ### 5.2 Run records
 
 Table `app_runs` (store v34): id, project, app, tool, caller kind, caller session, parent run,
-status (`running`, then `ok`, `error`, `cancelled` or `rejected`), duration, time, error.
+status (`running`, then `ok`, `error`, `cancelled` or `rejected`), duration, time, error. Since v37
+a row also has a kind, `tool` (a call to this app's tool) or `broker` (a request this app made
+through the broker, §10), and the agent session a `run_agent` request started; since v38 the tokens
+that agent reported.
 
 - Arguments are never stored whole. Secrets are redacted first; the canonical JSON (keys sorted)
   then becomes a 200-character summary and a SHA-256 digest. Hashing after redaction matters: the
@@ -189,7 +192,12 @@ status (`running`, then `ok`, `error`, `cancelled` or `rejected`), duration, tim
 - Kept 30 days, pruned when the host starts. A row left `running` because the host died is closed
   at the next start.
 - Shown beside a pinned view (the Runs panel): time, tool, caller (with the session's name), status,
-  duration, and the reason of a failure. Agent usage per app is not shown yet.
+  duration, and the reason of a failure. Reading one app's runs returns its rows **and the chain
+  under them** (the other apps it called, the requests it and they made), and the panel indents each
+  row under the one that caused it, jumps to an agent's session ("Open session"), and re-reads every
+  2 s while a row is still running. Above the list: the answers the person gave to this app's
+  capability questions (forgettable), and its agent use over the last day and 30 days (runs,
+  duration, tokens).
 
 ## 6. Where a view appears
 
@@ -461,7 +469,8 @@ so with `approval_policy = "never"` there, Codex refuses an app's write tools.
   sent without a progress token gets none (its SDK would not listen).
 - Stopping or closing a session cancels every app call it started, including those that returned
   early. The app receives `notifications/cancelled`, and, through the run id, whatever the app had
-  asked the broker for is cancelled too.
+  asked the broker for is cancelled too, down the chain: another app's call it made, and an agent
+  session it started, which is interrupted.
 
 ## 10. The broker: agents, other apps, host data
 
@@ -470,24 +479,62 @@ through a **broker**. The host starts every app with a fourth pipe, fd 3. On it 
 server and the app its client. Only the process holding the pipe can call, so there is no token,
 and the pipe says which app is calling (spike S-5).
 
-What exists:
+A request passes, in order: the gate (run id), the manifest's declaration, the person's permission,
+the runaway limits, then the work, and it leaves a run record however it ends. All of it after the
+gate happens in one place, the broker desk (`desk.ts`).
 
 - **Admission by run id.** Every call the host sends an app carries `_meta["centralu/runId"]`. A
   broker call must carry the run id of a call **that app is handling now, on that same pipe**. A call
   without a run id (an app waking up by itself, out of scope), with an invented id, with a finished
-  run's id or another app's id is refused, and the refusal goes to the app's log.
-- **Chaining.** A broker call is cancelled when the app cancels it, or when the call it serves ends
-  or is cancelled, even if the app never passes the signal on. In the runtime, a call made by
-  another app is recorded with caller `app` and its parent run id, and cancelling the parent cancels
-  it.
-- **Template helpers.** `centralu.agent(prompt, { schema })` and `centralu.callApp(app, tool, args)`
-  carry the current run id for the author (AsyncLocalStorage), so a tool handler asks in one line.
-  Outside a tool handler, or with no fd 3, they throw an error that says why.
-
-**Arriving** (section D of the plan): the broker's tools, `run_agent`, `call_app` and `host_data`,
-are registered but answer "not available yet" today, and so do the helpers. Approving a capability
-declared in `uses`, and the limits on chains and rates, come with them. This section will describe
-them once they exist.
+  run's id or another app's id is refused, and the refusal goes to the app's log and its runs.
+- **Declared in `uses`.** The manifest says what the app may ask for: `"agent": true` (the person's
+  default agent) or a list of tools (`["codex"]`), `"apps": [ids]`, `"host": [names]`. Anything
+  undeclared is refused before anything runs. Declaring is not permission.
+- **`run_agent { prompt, tool?, schema? }`.** Each request starts a new, visible session under the
+  app: a project app's in its project (working folder: the project root), a user-folder app's like
+  a coordinator (no project, the orchestrator's empty folder). The preset is always `normal`,
+  whatever the calling session runs with. The tool is `tool` if declared, else the default (the
+  project's default tool; for a user-folder app, the orchestrator's). A tool that is not installed
+  or not logged in is refused before a session is created, in the tool's words. The prompt reaches
+  the agent framed as the app's text (security-boundaries.md, "Text an app sends"). The request
+  waits for the turn and returns the final answer: the agent's text after its last tool call. With
+  `schema` (a JSON Schema whose top level is an object), Claude receives it as `outputFormat` when
+  the query starts and Codex as the turn's `outputSchema`; the host validates the answer against
+  the same schema and returns it as `structuredContent`. A finished session is left `idle` in the
+  list (archiving was retired, FR-20), so it does not wait in the inbox; an agent session gets no
+  apps.
+- **`call_app { app, tool, args }`.** Only apps listed in `uses.apps` and only their `model` tools,
+  through `ExternalApps.call` with caller `app` and the parent run id (§5): visibility, trust, the
+  record, the change notification (the cause is the asking run) and cancellation are the same as
+  for any other caller. A project app reaches its own project's app of that id first, then the user
+  folder's; a user-folder app reaches only user-folder apps.
+- **`host_data { name }`.** A closed list, read-only, deny by default: `sessions.list` (the names
+  shown in the sidebar and each session's kind, tool, state and times, never the conversations; the
+  project's sessions for a project app, every session for a user-folder app) and `git.status` (the
+  project's branch and changed files; project apps only). Only names declared in `uses.host`.
+- **Asked once.** The first time an app uses a capability (an agent tool, another app, a host name),
+  the person is asked where the chain started: on the approval card of the session whose agent
+  started it, or on the app's pinned view (with a mark on its sidebar row) when a view started it.
+  The answer, allow or deny, is kept per app and capability in the store, used until the manifest's
+  `uses` changes, and listed in the Runs panel, where it can be forgotten. While the person decides
+  (up to 5 minutes; no answer is a refusal that is not remembered), the request is kept alive with a
+  progress notification every 10 s.
+- **Runaway limits.** A chain holds at most 3 app calls (the view's or session's app is the first),
+  and the same app tool cannot be called again inside its own chain; both are checked before the
+  person is asked. An app runs one agent at a time (a second request is refused, not queued) and at
+  most 5 a minute.
+- **Records and cancellation.** Every request is a run record (kind `broker`) under the run that
+  caused it, however it ends: done, failed (with its input kept like other failures), refused,
+  cancelled. Requests the gate did not admit are recorded with no parent: the id they presented
+  could belong to another app's chain. A `call_app` that reaches the other app is recorded by that
+  app's own row. A request is cancelled when the app cancels it or when the call it serves ends or is
+  cancelled, even if the app never passes the signal on; a cancelled `run_agent` interrupts its
+  session.
+- **Template helpers.** `centralu.agent(prompt, { schema, tool })`, `centralu.callApp(app, tool,
+  args)` and `centralu.host(name)` carry the current run id for the author (AsyncLocalStorage), so a
+  tool handler asks in one line. They pass the broker's progress up to the call they serve, so a long
+  agent run does not time it out, and give up only when Centralu says nothing for 60 s or the request
+  runs past 60 minutes. Outside a tool handler, or with no fd 3, they throw an error that says why.
 
 ## 11. RPCs and events
 
@@ -500,15 +547,21 @@ The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
 | `apps.viewFrame`, `apps.readResource` | The frame address of a view instance; a resource of the frame's own app |
 | `apps.openView`, `apps.closeView` | Open a pinned view (calls `home`); close any view instance |
 | `apps.inlineViews`, `apps.inlineReopen`, `apps.viewMessage` | The inline views a conversation still holds; reopen one without calling again; deliver a view's message once the person agreed (an inline view's to its conversation, a pinned view's to the session picked) |
-| `apps.runs`, `apps.errors` | Run records; the latest error bundles |
+| `apps.runs`, `apps.errors` | Run records with their chains; the latest error bundles |
+| `apps.questions`, `apps.answerQuestion` | Capability questions waiting on a pinned view (chains a view started); answer one |
+| `apps.permissions`, `apps.forgetPermission` | The answers kept for one app; forget one |
+| `apps.usage` | One app's agent use over the last day and 30 days |
 | `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
 | `apps.sessionTools`, `apps.sessionCall` | Used by the Codex bridge |
 | `projects.setTrusted` | Trust (§3) |
 
 Events: `external_apps_changed` (the list or an app's status changed: read `apps.list` again),
-`external_app_state_changed` (§6.3), and `app_view` (an inline view opened, got its result, was
-cancelled, closed or refused; stored without bodies, so a reopened UI can draw placeholders).
+`external_app_state_changed` (§6.3), `external_app_questions_changed` (a capability question
+opened or closed: read `apps.questions` again), and `app_view` (an inline view opened, got its
+result, was cancelled, closed or refused; stored without bodies, so a reopened UI can draw
+placeholders). A capability question a session's chain raised is that session's
+`approval_request` with `detail.kind: "capability"`.
 
 ## 12. Not there yet
 
@@ -516,5 +569,8 @@ cancelled, closed or refused; stored without bodies, so a reopened UI can draw p
 - The manifest's `csp` field is not read; the per-app origin is chosen only in the manifest.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
-- The broker's tools are arriving.
-- The Codex path is unverified by a run (§9.2). fd 3 on Windows is untested (spike S-5).
+- The Codex path is unverified by a run (§9.2), and so is `run_agent` on Codex (its `outputSchema`
+  is checked against the app-server protocol and a fake adapter only). fd 3 on Windows is untested
+  (spike S-5).
+- The broker answers only while the app handles a call: an app cannot ask by itself (a timer, a
+  watcher). The host data list has two names.
