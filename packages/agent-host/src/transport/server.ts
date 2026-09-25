@@ -8,6 +8,7 @@ import {
   parseClientFrame,
 } from '@cc/protocol'
 import { EventLog } from './event-log.js'
+import { createHttpHandler, type HttpGate } from './http.js'
 
 /**
  * WS 서버 (docs/protocol.md §1). dev/prod 동일 — Tauri는 이 프로세스를 spawn만 한다.
@@ -51,8 +52,11 @@ export type HostServerOptions = {
   token: string
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
-  /** 정적 페이지 서빙 (dev에서 브라우저 접속용, 선택) */
-  onHttp?: (path: string) => { body: string | Buffer; contentType: string } | null
+  /**
+   * 같은 포트의 HTTP 길 (M4 P-2). 모든 길이 실행마다 새로 만든 비밀 칸 뒤에 있다(http.ts).
+   * 없으면 모든 HTTP 요청이 404다. WebSocket 업그레이드는 이것과 무관하게 아래 규칙을 따른다.
+   */
+  http?: HttpGate
 }
 
 export class HostServer {
@@ -87,16 +91,7 @@ export class HostServer {
      */
     if (!opts.token.trim()) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
-    this.http = createServer((req, res) => {
-      const hit = opts.onHttp?.(new URL(req.url ?? '/', 'http://x').pathname)
-      if (!hit) {
-        res.writeHead(404)
-        res.end('not found')
-        return
-      }
-      res.writeHead(200, { 'content-type': hit.contentType })
-      res.end(hit.body)
-    })
+    this.http = createServer(createHttpHandler(opts.http))
     this.wss = new WebSocketServer({
       server: this.http,
       verifyClient: (info, done) => {

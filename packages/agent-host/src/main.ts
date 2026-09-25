@@ -47,6 +47,12 @@ const { values } = parseArgs({
 let movedNote: string | null = null
 
 const token = values.token || process.env.CC_HOST_TOKEN || randomBytes(16).toString('hex')
+/*
+ * HTTP 길의 비밀 (M4 P-2). WebSocket 토큰과 **다른 값**이다. 이 값은 iframe 주소의 한 칸이
+ * 되어 URL로 돌아다니므로, 새어도 RPC 문이 열리지 않아야 한다. 밖에서 정할 방법을 두지
+ * 않는다. 주소는 host가 RPC 답으로 만들어 주므로 아무도 이 값을 미리 알 필요가 없다.
+ */
+const httpSecret = randomBytes(32).toString('base64url')
 const dbPath = values.memory
   ? ':memory:'
   : (values.db ?? defaultDbPath())
@@ -180,6 +186,8 @@ const server: HostServer = new HostServer({
   // origin 허용목록의 탈출구 — 거부 로그가 여기에 넣을 값을 그대로 알려준다
   allowedOrigins: parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS),
   onRpc: createRpcHandler(mgr, adapters, terminals, updates, commandRuns, externalApps),
+  // 모든 HTTP 길은 이 비밀 뒤에 있다. 지금은 길이 하나도 없어서 비밀이 맞아도 404다
+  http: { secret: httpSecret, routes: [] },
 })
 
 let port: number
