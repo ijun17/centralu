@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { externalAppKey, useStore, type PinnedView } from '../../store/store.js'
+import { externalAppKey, registerPinnedFrame, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
@@ -9,6 +9,7 @@ import { BuilderPane } from './BuilderPane.jsx'
 import { ErrorTail } from './ErrorTail.jsx'
 import { FixBar } from './FixBar.jsx'
 import { useAppBuilder } from './useAppBuilder.js'
+import { UpdatedCue } from './UpdatedCue.jsx'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -95,6 +96,16 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
   }, [pv.phase, settleAsk])
   useEffect(() => () => void settleAsk(false), [settleAsk])
 
+  /*
+   * 그려진 프레임을 스토어에 올린다 (C-4) — 앱이 새 코드로 다시 뜨면 스토어가 이 화면을 다시 여는데(reloadPinnedView),
+   * 그 전에 이 손잡이로 teardown을 보낸다.
+   */
+  useEffect(() => {
+    if (pv.phase !== 'open' || !pv.instanceId) return
+    return registerPinnedFrame(pv.key, { teardown: () => frame.current?.teardown() ?? Promise.resolve('not-connected') })
+  }, [pv.phase, pv.instanceId, pv.key])
+  const reload = useStore((s) => s.reloadPinnedView)
+
   const canOpen = !!app && !!app.info.home && app.status.runnable
   useEffect(() => {
     if (canOpen && pv.phase === 'idle') void start(pv.key)
@@ -163,6 +174,19 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
           <span className="readout shrink-0 text-[10px] text-slate" data-testid="pinned-status">
             {app.status.label}
           </span>
+        )}
+        {/* 새 코드로 다시 열었다 (C-4) — 잠깐 서는 한 마디. 너무 자주 바뀌어 저절로 열지 않았으면 사람이 누른다 */}
+        {pv.phase === 'open' && pv.updatedAt && <UpdatedCue key={pv.updatedAt} at={pv.updatedAt} testId="pinned-updated" />}
+        {pv.phase === 'open' && pv.stale && (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
+            onClick={() => void reload(pv.key)}
+            title="The app now runs new code. It changed several times in a row, so this view was not reopened on its own"
+            data-testid="pinned-stale"
+          >
+            Changed · Reload
+          </button>
         )}
         {builder.id && (
           <button

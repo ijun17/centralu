@@ -4,7 +4,7 @@ import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { externalAppKey, inlineViewsFromHistory, messagesToChat, useStore } from './store.js'
+import { externalAppKey, inlineViewsFromHistory, messagesToChat, registerPinnedFrame, useStore } from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -1981,5 +1981,45 @@ describe('inlineViewsFromHistory — 지난 카드의 앱 화면 자리', () => 
     })
     // 대화의 줄은 카드 셋뿐이다 — 앱 화면의 기록은 줄이 되지 않는다
     expect(messagesToChat(msgs).map((i) => i.kind)).toEqual(['tool', 'tool', 'tool'])
+  })
+})
+
+/**
+ * 새 코드를 따라 다시 연다 (M4 C-4). 판정은 목록의 지문(`codeStamp`) 하나다 — 화면을 열 때 떠 있던 코드와 달라지면 옛 HTML
+ * 이다. 열 때 몰랐으면(앱이 그 순간 처음 떴다) 처음 알게 된 값을 받기만 한다: 그것을 변화로 읽으면 막 연 화면을 한 번 더
+ * 연다.
+ */
+describe('새 코드를 따라 다시 연다 (M4 C-4)', () => {
+  const pinned = () => useStore.getState().pinnedViews
+
+  it('열 때 지문을 모르면 받기만 하고, 그 뒤 지문이 바뀌면 teardown 뒤 같은 자리를 새로 연다', async () => {
+    const mock = new MockPlatform()
+    mock.externalAppList = [appInfo('slider', { status: 'running' })]
+    await useStore.getState().attach(mock)
+    useStore.setState({ pinnedViews: [], focusedApp: null })
+    useStore.getState().openApp('p1', 'slider')
+    await useStore.getState().startPinnedView('p1/slider')
+    const first = pinned()[0]!
+    expect(first).toMatchObject({ phase: 'open', codeStamp: null })
+    const teardown = vi.fn(async () => 'answered')
+    registerPinnedFrame('p1/slider', { teardown })
+
+    mock.setExternalApps([appInfo('slider', { status: 'running', codeStamp: 'aaaa' })])
+    await vi.waitFor(() => expect(pinned()[0]?.codeStamp).toBe('aaaa'))
+    expect(teardown).not.toHaveBeenCalled()
+    expect(mock.closedViews).toEqual([])
+
+    mock.setExternalApps([appInfo('slider', { status: 'running', codeStamp: 'bbbb' })])
+    await vi.waitFor(() => expect(pinned()[0]?.phase).toBe('idle'))
+    expect(teardown).toHaveBeenCalledTimes(1)
+    expect(mock.closedViews).toEqual([first.instanceId])
+    expect(pinned()).toEqual([expect.objectContaining({ key: 'p1/slider', instanceId: null, codeStamp: null, updatedAt: expect.any(Number) })])
+    expect(useStore.getState().focusedApp).toEqual({ projectId: 'p1', appId: 'slider' })
+    // 화면이 다시 열면 새 지문을 받는다 — 그 뒤로는 같은 지문이라 조용하다
+    await useStore.getState().startPinnedView('p1/slider')
+    expect(pinned()[0]).toMatchObject({ phase: 'open', codeStamp: 'bbbb', updatedAt: expect.any(Number) })
+    // 사람이 다시 시작한 화면에는 "Updated"가 서지 않는다 — 그 말은 새 코드로 다시 연 화면의 것이다
+    await useStore.getState().restartApp('p1/slider')
+    expect(pinned()[0]).toMatchObject({ updatedAt: null, codeStamp: null })
   })
 })

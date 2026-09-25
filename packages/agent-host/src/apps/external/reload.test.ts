@@ -231,3 +231,60 @@ describe('매니페스트가 바뀌어도 진행 중인 호출은 끝까지 간�
     expect(existsSync(gate())).toBe(true)
   })
 })
+
+/**
+ * 목록의 `codeStamp` (C-4, 화면 쪽) — 열린 화면이 "내 HTML은 옛 코드다"를 아는 열쇠. 떠 오른 프로세스의 코드가 바뀔 때만
+ * 바뀐다: 같은 코드로 다시 뜬 것(죽었다 살아남, 다시 시작)과 못 뜬 새 코드는 바꾸지 않는다 — 그때 화면을 다시 열면
+ * 달라질 것이 없거나 실패만 보인다. 화면이 되풀이해 다시 열리지 않게 하는 것이 이 구별이다.
+ */
+describe('목록의 codeStamp — 떠 있는 코드의 지문', () => {
+  const stamp = () => rt.list().find((a) => a.appId === ID)?.codeStamp
+
+  it('뜨기 전에는 없고, 같은 코드로 다시 떠도 그대로이며, 새 코드로 다시 뜨면(턴 끝, check) 바뀐다', async () => {
+    plant()
+    make()
+    expect(stamp()).toBeUndefined()
+    await rt.tools(ref)
+    const first = stamp()
+    expect(first).toMatch(/^[0-9a-f]{16}$/)
+
+    // 죽었다가 다음 부름에 살아난다 — 같은 코드다
+    const before = await pid()
+    process.kill(before, 'SIGKILL')
+    await until(status, (s) => s === 'crashed')
+    expect(await pid()).not.toBe(before)
+    expect(stamp()).toBe(first)
+    // 사람이 다시 시작했다 — 역시 같은 코드다
+    await rt.restart(ref)
+    await pid()
+    expect(stamp()).toBe(first)
+
+    // 만드는 세션의 턴 끝에 새 코드로 다시 뜬다
+    busy = true
+    addTool('added')
+    rt.refresh()
+    busy = false
+    rt.builderTurnEnded(ref)
+    await until(known, (names) => names.includes('added'))
+    const second = stamp()
+    expect(second).toMatch(/^[0-9a-f]{16}$/)
+    expect(second).not.toBe(first)
+
+    // 턴 안의 check는 지금 파일로 띄운다 — 턴 끝을 기다리지 않고 바뀐다(턴 끝은 그때 할 일이 없다)
+    busy = true
+    addTool('checked')
+    await rt.check(ref)
+    expect(stamp()).not.toBe(second)
+  })
+
+  it('못 뜬 새 코드는 지문을 바꾸지 않는다 — 떠 있던 코드가 아니다', async () => {
+    plant()
+    make()
+    await rt.tools(ref)
+    const first = stamp()
+    addTools(`  throw new Error('half-written tool')`)
+    rt.builderTurnEnded(ref)
+    await until(status, (s) => s === 'crashed')
+    expect(stamp()).toBe(first)
+  })
+})
