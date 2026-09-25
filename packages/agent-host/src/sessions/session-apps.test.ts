@@ -77,12 +77,19 @@ describe('붙은 앱의 집합이 바뀌면 듣는다', () => {
     let heard = 0
     a.onChange(() => heard++)
 
+    /*
+     * 다시 훑기는 폴더 감시가 부르는 것과 같은 함수(rescan)다. 감시의 fs 이벤트를 기다리지 않고
+     * 직접 훑는다 — 병렬 실행에서 macOS의 fs 이벤트가 몇 초씩 늦는 것을 실측했고, 감시 자체는
+     * 발견 테스트(discovery.test.ts)가 본다. 여기서 보는 것은 "훑어서 바뀌었으면 알린다"다.
+     */
     w.plant('p1', 'fresh')
+    w.rt.refresh()
     await kit.until(() => a.current().map((x) => x.server), (s) => s.includes('app-fresh'))
     expect(heard).toBeGreaterThan(0)
 
     const before = heard
     rmSync(join(w.roots.p1, '.centralu', 'apps', 'fresh'), { recursive: true, force: true })
+    w.rt.refresh()
     await kit.until(() => a.current().map((x) => x.server), (s) => !s.includes('app-fresh'))
     expect(heard).toBeGreaterThan(before)
   })
@@ -112,6 +119,7 @@ describe('붙은 앱의 집합이 바뀌면 듣는다', () => {
     o.onChange(() => heardO++)
 
     w.plant('user', 'second')
+    w.rt.refresh()
     await kit.until(() => heardO, (n) => n > 0)
     expect(heardA).toBe(0)
   })

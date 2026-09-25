@@ -155,7 +155,9 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
   it('앱이 생기면 새 집합으로 setMcpServers를 부른다 — 이미 붙은 서버는 같은 객체로', async () => {
     await start(WORKER)
     const notes = servers()['app-notes']
+    // 폴더 감시가 부르는 다시 훑기를 직접 부른다 (fs 이벤트의 늦음을 기다리지 않는다 — session-apps.test.ts 참고)
     w.plant('p1', 'fresh')
+    w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && 'app-fresh' in s)
     expect(Object.keys(last()!).sort()).toEqual(['app-fresh', 'app-notes', 'app-tasks'])
     // 같은 객체여야 SDK가 연결을 그대로 둔다 — 새 객체면 무시되거나(같은 이름) 끊겼다 다시 붙는다
@@ -165,6 +167,7 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
   it('앱이 사라지면 그 서버를 뺀 집합으로 부른다', async () => {
     await start(WORKER)
     rmSync(join(w.roots.p1, '.centralu', 'apps', 'tasks'), { recursive: true, force: true })
+    w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null)
     expect(Object.keys(last()!)).toEqual(['app-notes'])
   })
@@ -196,6 +199,7 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
     expect(Object.keys(servers()).sort()).toEqual(['app-helper', 'centralu', 'playwright'])
 
     w.plant('user', 'second')
+    w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && 'app-second' in s)
     expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu', 'playwright'])
     // 빠뜨리면 SDK가 오케스트레이터 서버를 떼어 낸다 — 같은 객체가 그대로 실려야 한다
