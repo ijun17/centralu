@@ -1206,6 +1206,37 @@ describe('고정 화면 (M4 B-2)', () => {
     expect(pinned()).toEqual([])
   })
 
+  it('Restart는 옛 인스턴스를 놓고, host가 다시 시작을 마친 **뒤에야** 다시 연다 (B-6)', async () => {
+    const mock = await live()
+    useStore.getState().openApp('p1', 'slider')
+    await useStore.getState().startPinnedView('p1/slider')
+    const old = pinned()[0]!.instanceId
+    const order: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    vi.spyOn(mock.apps, 'restart').mockImplementation(async () => {
+      order.push('restart:begin')
+      await gate
+      order.push('restart:end')
+    })
+    const realOpen = mock.apps.openView
+    vi.spyOn(mock.apps, 'openView').mockImplementation(async (appId, projectId) => {
+      order.push('open')
+      return realOpen(appId, projectId)
+    })
+
+    const restarting = useStore.getState().restartApp('p1/slider')
+    expect(mock.closedViews).toEqual([old])
+    // 화면의 효과가 지금 열려고 해도(열 수 있는 앱이다) 열리지 않는다 — restart가 막 띄운 앱을 내린다
+    await useStore.getState().startPinnedView('p1/slider')
+    release()
+    await restarting
+    expect(pinned()[0]?.phase).toBe('idle')
+    await useStore.getState().startPinnedView('p1/slider')
+    expect(order).toEqual(['restart:begin', 'restart:end', 'open'])
+    expect(pinned()[0]).toMatchObject({ phase: 'open', instanceId: expect.not.stringMatching(old!) })
+  })
+
   it('보던 고정 화면이 되살아난다 — 목록에 없는 앱이면 포커스 뷰에 남는다', async () => {
     const mock = new MockPlatform()
     mock.externalAppList = [appInfo('slider')]

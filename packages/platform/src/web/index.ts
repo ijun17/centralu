@@ -321,6 +321,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       closeView: async (instanceId) => {
         await rpc.call('apps.closeView', { instanceId })
       },
+      restart: async (appId, projectId) => {
+        await rpc.call('apps.restart', { appId, projectId })
+      },
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

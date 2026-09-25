@@ -573,6 +573,11 @@ export interface AppsPort {
   openView(appId: AppId, projectId: string | null): Promise<AppHomeView>
   /** 고정 화면을 닫는다 — 붙들던 앱을 놓는다. 이미 닫혔으면 조용히 지나간다 */
   closeView(instanceId: string): Promise<void>
+  /**
+   * 앱을 다시 시작할 수 있게 한다 (M4 B-6의 "Restart") — 연속 실패와 이유를 지우고, 떠 있으면 내린다.
+   * **띄우지는 않는다**: 다음에 부르는 쪽(다시 여는 화면)이 띄운다.
+   */
+  restart(appId: AppId, projectId: string | null): Promise<void>
 }
 
 /**

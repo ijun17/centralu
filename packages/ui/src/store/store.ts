@@ -166,16 +166,17 @@ export function externalAppKey(projectId: string | null | undefined, appId: stri
  * 고정 화면 하나 (M4 B-2) — 사이드바에서 연 앱. **포커스가 옮겨 가도 산다**: 세션을 보러 갔다가 돌아와도
  * 같은 인스턴스(같은 문서, 같은 화면 상태)다. 닫거나 앱이 사라져야 내려간다.
  *
- *   idle     아직 열지 않았다(또는 앱이 멈춰서 다시 열기를 기다린다). 열 수 있는 앱이면 화면이 연다
- *   opening  host가 home을 부르는 중 — 앱이 뜨는 시간이 여기 든다
- *   open     인스턴스가 섰다
- *   failed   열지 못했다 — `error`가 이유다
+ *   idle        아직 열지 않았다(또는 앱이 멈춰서 다시 열기를 기다린다). 열 수 있는 앱이면 화면이 연다
+ *   opening     host가 home을 부르는 중 — 앱이 뜨는 시간이 여기 든다
+ *   open        인스턴스가 섰다
+ *   failed      열지 못했다 — `error`가 이유다
+ *   restarting  사람이 "Restart"를 눌렀다 — host가 앱을 내리고 셈을 지우는 중. 끝나면 idle로 가서 다시 연다
  */
 export type PinnedView = {
   key: string
   projectId: string | null
   appId: string
-  phase: 'idle' | 'opening' | 'open' | 'failed'
+  phase: 'idle' | 'opening' | 'open' | 'failed' | 'restarting'
   instanceId: string | null
   toolInput: Record<string, unknown> | undefined
   toolResult: AppToolResult | undefined
@@ -850,6 +851,12 @@ export type AppState = {
   releasePinnedView(key: string): void
   /** 고정 화면을 닫는다 — 부르는 쪽이 먼저 teardown을 부른다. 보던 것이면 포커스 뷰로 돌아간다 */
   closeApp(key: string): void
+  /**
+   * 앱을 다시 시작하고 화면을 새로 연다 (M4 B-6) — 죽었거나 멈춘 앱, 열지 못한 화면의 "Restart".
+   * 부르는 쪽이 먼저 teardown을 부른다. 옛 인스턴스를 놓고, host가 앱을 내리고 셈을 지운 **뒤에**
+   * 다시 연다(home을 새로 부른다).
+   */
+  restartApp(key: string): Promise<void>
   /** 오케스트레이터 세션 id (아직 만든 적 없으면 null — 화면은 빈 대화 + 추천 질문) */
   orchestratorId: string | null
   /** 첫 질문으로 세션을 만드는 중 (#63) — 빈 화면이 죽은 척하지 않게 하는 표시 */
@@ -3446,6 +3453,27 @@ export const useStore = create<AppState>((set, get) => ({
       }
     })
     get().saveWorkspace()
+  },
+
+  async restartApp(key) {
+    const platform = get().platform
+    const pv = get().pinnedViews.find((p) => p.key === key)
+    if (!platform || !pv) return
+    const patch = (fn: (p: PinnedView) => PinnedView) =>
+      set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === key ? fn(p) : p)) }))
+    if (pv.instanceId) void platform.apps.closeView(pv.instanceId).catch(() => {})
+    /*
+     * idle이 아니라 restarting으로 둔다. idle이면 화면이 곧바로 다시 열고(열 수 있는 앱이면), 그 열기가
+     * host의 restart보다 먼저 닿는다. 그러면 막 띄운 앱을 restart가 내리고, 열기는 "앱이 내려가서 기동을
+     * 그만뒀다"로 실패한다. 다시 여는 것은 restart가 끝난 뒤다.
+     */
+    patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null }))
+    try {
+      await platform.apps.restart(pv.appId, pv.projectId)
+      patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
+    } catch (e) {
+      patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))
+    }
   },
 
   async openOrchestrator() {

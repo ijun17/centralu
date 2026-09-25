@@ -152,7 +152,7 @@ test('신뢰하지 않은 프로젝트의 앱은 이유와 함께 서고, 그 �
  * 시험용 앱이다. host가 home을 부르는 일은 agent-host의 app-home-view.test.ts가 진짜 앱으로 본다.
  * 여기서는 그 답을 받은 UI가 무엇을 하는지를 본다.
  */
-test.describe('고정 화면 (B-2)', () => {
+test.describe('고정 화면 (B-2, B-6)', () => {
   let fx: FixtureHost
   test.beforeAll(async () => {
     fx = await startFixtureHost({
@@ -332,6 +332,108 @@ test.describe('고정 화면 (B-2)', () => {
     await expect.poll(() => teardowns(page)).toBe(1)
     await expect.poll(() => closed(page)).toEqual([instanceId])
     await expect(page.getByTestId('toast')).toContainText('is no longer available')
+  })
+
+  const restarts = (page: Page) => page.evaluate(() => (window as any).__mock.restarts as { appId: string; projectId: string | null }[])
+  const instanceOf = (page: Page) => page.evaluate(() => (window as any).__store.getState().pinnedViews[0]?.instanceId as string | null)
+
+  test('B-6: 앱이 뜨는 동안 스켈레톤이 서고, 화면이 뜨는 동안에도 덮고 있다가, 초기화되면 걷힌다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { name: 'Slider', status: 'stopped' })])
+    // host가 home을 부르는 동안(앱 프로세스가 뜨는 시간), 그리고 프록시가 화면을 싣는 동안을 붙든다
+    await page.evaluate(() => {
+      const w = window as any
+      w.__openGate = new Promise((r) => (w.__openRelease = r))
+      w.__frameGate = new Promise((r) => (w.__frameRelease = r))
+      const open = w.__mock.openViewProvider
+      const frame = w.__mock.viewFrameProvider
+      w.__mock.openViewProvider = async (a: string, p: string | null) => (await w.__openGate, open(a, p))
+      w.__mock.viewFrameProvider = async (a: string, i: string, o: unknown) => (await w.__frameGate, frame(a, i, o))
+    })
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('pinned-skeleton-label')).toHaveText('Starting Slider…')
+    // host가 뜨는 중이라고 방송한다 — 같은 스켈레톤, 같은 말
+    await setApps(page, [app('slider', pid, { name: 'Slider', status: 'starting' })])
+    await expect(pinned.getByTestId('pinned-skeleton')).toBeVisible()
+
+    await setApps(page, [app('slider', pid, { name: 'Slider', status: 'running' })])
+    await page.evaluate(() => (window as any).__openRelease())
+    // 인스턴스는 섰고 프레임이 뜨는 중이다 — 스켈레톤이 프레임을 덮는다
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'loading')
+    await expect(pinned.getByTestId('app-frame-loading').getByTestId('pinned-skeleton-label')).toHaveText('Opening Slider…')
+
+    await page.evaluate(() => (window as any).__frameRelease())
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect(pinned.getByTestId('pinned-skeleton')).toHaveCount(0)
+  })
+
+  test('B-6: 연달아 못 뜬 앱은 이유와 Restart를 보이고, 누르면 다시 시작한 뒤에 화면을 연다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { status: 'failed', error: 'exited before it was ready (code 3)\nfixture: cannot open the thing it needs' })])
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    const failed = pinned.getByTestId('pinned-failed')
+    await expect(failed).toContainText('This app stopped after failing repeatedly.')
+    await expect(failed.getByTestId('pinned-reason')).toContainText('fixture: cannot open the thing it needs')
+    // 멈춘 앱은 스스로 다시 뜨지 않는다 — 누르기 전에는 부르지도 않는다
+    expect(await opened(page)).toEqual([])
+
+    await failed.getByTestId('pinned-restart').click()
+    await expect.poll(() => restarts(page)).toEqual([{ appId: 'slider', projectId: pid }])
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    expect(await opened(page)).toEqual([{ appId: 'slider', projectId: pid }])
+  })
+
+  test('B-6: 떠 있던 앱이 죽으면 화면 위에 이유와 Restart가 서고, 누르면 teardown 뒤 새 인스턴스로 다시 연다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid, { status: 'running' })])
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const first = await instanceOf(page)
+
+    await setApps(page, [app('slider', pid, { status: 'crashed', error: 'exited (code 7)' })])
+    const banner = pinned.getByTestId('pinned-crashed')
+    await expect(banner).toContainText('This app stopped.')
+    await expect(banner.getByTestId('pinned-reason')).toHaveText('exited (code 7)')
+    // 화면은 남는다 — 사람이 보던 내용이 아직 거기 있다
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect(page.getByTestId(`app-row-${pid}/slider`).getByTestId('app-row-hint')).toHaveText('crashed')
+
+    await banner.getByTestId('pinned-restart').click()
+    await expect.poll(() => teardowns(page)).toBe(1)
+    await expect.poll(() => closed(page)).toEqual([first])
+    await expect.poll(() => restarts(page)).toEqual([{ appId: 'slider', projectId: pid }])
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    await expect(pinned.getByTestId('pinned-crashed')).toHaveCount(0)
+    expect(await opened(page)).toHaveLength(2)
+    expect(await instanceOf(page)).not.toBe(first)
+  })
+
+  test('B-6: 화면을 열지 못하면 host가 말한 이유와 Restart가 선다', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid)])
+    await page.evaluate(() => {
+      const w = window as any
+      const open = w.__mock.openViewProvider
+      let first = true
+      w.__mock.openViewProvider = async (a: string, p: string | null) => {
+        if (first) {
+          first = false
+          throw new Error('exited before it was ready (code 3)')
+        }
+        return open(a, p)
+      }
+    })
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    const failed = pinned.getByTestId('pinned-open-failed')
+    await expect(failed.getByTestId('pinned-reason')).toContainText('exited before it was ready (code 3)')
+
+    await failed.getByTestId('pinned-restart').click()
+    await expect.poll(() => restarts(page)).toEqual([{ appId: 'slider', projectId: pid }])
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
   })
 
   test('사용자 폴더의 앱은 프로젝트 밖에 자기 무리가 있다', async ({ page }) => {

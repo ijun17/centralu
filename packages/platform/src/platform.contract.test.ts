@@ -726,6 +726,12 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
 
       await platform.apps.closeView(v.instanceId)
       await expect(platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })).rejects.toThrow(/not open/)
+
+      // Restart(B-6)는 host의 apps.restart로 간다 — 떠 있던 앱은 내려가고, 없는 앱은 이름과 함께 거절된다
+      expect(rt.list().find((a) => a.appId === 'slider')?.status).toBe('running')
+      await platform.apps.restart('slider', project.id)
+      expect(rt.list().find((a) => a.appId === 'slider')?.status).toBe('stopped')
+      await expect(platform.apps.restart('ghost', project.id)).rejects.toThrow(/ghost/)
     } finally {
       await platform.dispose()
       await mgr.disposeAll()
