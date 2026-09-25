@@ -224,9 +224,8 @@ describe('중개 서버 (fd 3)', () => {
     make()
     const text = await brokerAnswer('notes', { mode: 'run' })
     expect(text).toBe('broker isError=true: run_agent refused: this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so')
-    for (const tool of ['call_app', 'host_data']) {
-      expect(await brokerAnswer('notes', { mode: 'run', tool })).toContain(`${tool} is not available yet`)
-    }
+    expect(await brokerAnswer('notes', { mode: 'run', tool: 'call_app' })).toContain('call_app refused: "other" is not in this app\'s "uses.apps"')
+    expect(await brokerAnswer('notes', { mode: 'run', tool: 'host_data' })).toContain('host_data is not available yet')
   })
 
   it('실행 id 없는 중개 호출은 거절한다 (앱이 스스로 깨어난 경우)', async () => {

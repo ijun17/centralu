@@ -304,8 +304,13 @@ export class ExternalApps {
    * 다시 옮겨 담으며 **새 객체로 갈아 끼워진다**(recordError) — 묶음에 적은 표시는 그때 사라진다.
    */
   private errorsSent = new Map<string, number>()
-  /** 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리 */
-  private desk = new BrokerDesk()
+  /**
+   * 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리. 앱끼리의 호출(D-2)은 이 런타임의 단 하나의 길(`call`)로 간다.
+   */
+  private desk = new BrokerDesk({
+    has: (ref) => this.find(ref) !== undefined,
+    call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
+  })
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
