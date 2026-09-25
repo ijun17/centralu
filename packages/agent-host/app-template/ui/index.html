@@ -51,6 +51,13 @@
       }
       const reread = () => call('show')
 
+      // Match the host's theme (MCP Apps host context). The page's colors, and the backdrop a browser
+      // paints behind a frame whose color scheme differs from its host's, then agree with Centralu's.
+      const theme = (ctx) => {
+        if (ctx?.theme) document.documentElement.style.colorScheme = ctx.theme
+      }
+      app.onhostcontextchanged = theme
+
       app.ontoolresult = (params) => show(params)
       // Centralu's own notification (not part of the MCP Apps standard): the app's state changed.
       app.fallbackNotificationHandler = async (n) => {
@@ -58,7 +65,10 @@
       }
       $('increment').onclick = () => call('increment', { by: 1 })
       $('reset').onclick = () => call('reset')
-      app.connect().then(reread)
+      app.connect().then(() => {
+        theme(app.getHostContext())
+        return reread()
+      })
     </script>
   </body>
 </html>

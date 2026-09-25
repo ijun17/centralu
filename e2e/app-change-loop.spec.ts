@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { inflateSync } from 'node:zlib'
 import { join } from 'node:path'
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { APP_CHANGE_WINDOW_MS, broadcastAppChanges, broadcastAppRuns } from '../packages/agent-host/src/app-change-events.js'
@@ -314,4 +315,45 @@ test('읽기 전용 도구가 세운 에이전트 사슬이 누르지 않아도 
   // 읽기만 했다 — 열린 화면은 방송 창 둘만큼 더 기다려도 다시 읽지 않았다
   await page.waitForTimeout(APP_CHANGE_WINDOW_MS * 2)
   expect(await viewShows(page, pinned)).toBe(shown)
+})
+
+/**
+ * 화면 한 점의 색 — 1×1 스크린샷(PNG)을 직접 푼다. 한 줄짜리 IDAT: 거르개 바이트 하나 뒤에 R, G, B(, A).
+ */
+async function pixel(page: Page, x: number, y: number): Promise<[number, number, number]> {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 } })
+  const idat: Buffer[] = []
+  for (let at = 8; at < png.length; ) {
+    const len = png.readUInt32BE(at)
+    const type = png.toString('ascii', at + 4, at + 8)
+    if (type === 'IDAT') idat.push(png.subarray(at + 8, at + 8 + len))
+    at += 12 + len
+  }
+  const raw = inflateSync(Buffer.concat(idat))
+  return [raw[1]!, raw[2]!, raw[3]!]
+}
+
+/*
+ * 앱 화면의 바탕 (M4 B-3) — 호스트 화면은 `color-scheme: dark`이고 그 iframe도 그것을 물려받는다. 프록시 페이지와 앱 페이지가 색
+ * 체계를 말하지 않으면 Chromium은 iframe과 그 문서의 색 체계가 다르다고 보고 문서 바탕을 불투명하게 칠한다(밝은 체계라 흰색).
+ * 템플릿 화면의 글자는 밝은 색이라 흰 바탕 위에서 읽히지 않았다. WKWebView(Tauri)는 하위 프레임을 늘 투명하게 둬서 드러나지 않는다.
+ */
+test('템플릿 앱의 화면은 Chromium에서도 호스트의 어두운 바탕 위에 투명하게 선다 — 흰 캔버스를 칠하지 않는다', async ({ page }) => {
+  test.setTimeout(60_000)
+  const { pid } = await projectAndSession(page)
+  host = await startHost(page, pid)
+  await page.evaluate((l) => (window as any).__mock.setExternalApps(l), host.list())
+  await openPinned(page, pid)
+  const frame = page.getByTestId(`pinned-app-${pid}/${APP}`).getByTestId('app-frame-iframe')
+  const box = (await frame.boundingBox())!
+  // 템플릿 화면에 글자도 단추도 없는 자리(프레임의 오른쪽 아래)와, 그 바로 바깥의 호스트 바탕(고정 화면의 여백)
+  const y = Math.round(box.y + box.height - 12)
+  const inside = await pixel(page, Math.round(box.x + box.width - 12), y)
+  const outside = await pixel(page, Math.round(box.x - 4), y)
+  expect(Math.max(...outside), `host rgb(${outside.join(', ')})`).toBeLessThan(80)
+  // 투명하다 — Chromium의 흰 캔버스도, 따로 칠한 어두운 캔버스도 아니고 호스트의 바탕 그대로다
+  expect(inside, `frame rgb(${inside.join(', ')}), host rgb(${outside.join(', ')})`).toEqual(outside)
+  // 앱 페이지는 받은 호스트 테마를 제 색 체계로 말한다
+  const inner = pinnedView(page, pid)
+  await expect.poll(() => inner.locator('html').evaluate((el) => getComputedStyle(el).colorScheme)).toBe('dark')
 })

@@ -323,7 +323,12 @@ A summary; the reasoning is in security-boundaries.md, "App views".
   area.
 - **Host context**: dark theme, `displayMode: "inline"`, our colours and fonts under the standard's
   CSS variable names, locale, time zone, and `centralu.fontScale` (reported only: the UI's own zoom
-  already scales the frame).
+  already scales the frame). The proxy page declares the same color scheme as the host (`dark`),
+  and the template's page sets its own from the theme it receives, as ext-apps'
+  `applyDocumentTheme` does. With matching schemes a view is transparent on Centralu's background in
+  Chromium too; Chromium paints an opaque backdrop behind a frame whose document declares a
+  different scheme (white for one that declares none, which is right for an app with dark default
+  text). WKWebView keeps subframes transparent either way.
 
 ## 7. What is standard and what is Centralu's
 
