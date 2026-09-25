@@ -258,6 +258,10 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'apps.list': async () => externalApps?.list() ?? [],
+    'apps.runs': async (p) => {
+      const { appId, projectId, limit } = RpcMethods['apps.runs'].params.parse(p)
+      return requireExternalApps().runs({ appId, projectId }, limit)
+    },
     'apps.restart': async (p) => {
       const { appId, projectId } = RpcMethods['apps.restart'].params.parse(p)
       await requireExternalApps().restart({ appId, projectId })

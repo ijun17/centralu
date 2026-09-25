@@ -11,6 +11,7 @@ import { Store } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
 import { ExternalApps } from './apps/external/runtime.js'
+import { storeRunLedger } from './app-run-ledger.js'
 import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -145,6 +146,8 @@ const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
   reservedIds: HOST_APPS.map((a) => a.id),
+  // 실행 기록 (A-6) — 런타임이 선언한 모양을 저장소가 채운다. 런타임은 Store를 모른다
+  runs: storeRunLedger(store),
   // 앱에 닿은 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (B-5가 화면으로 옮긴다)
   emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
 })

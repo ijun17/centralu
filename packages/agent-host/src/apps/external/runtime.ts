@@ -8,6 +8,7 @@ import { AppProcess, type SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker, type BrokerImpls } from './broker.js'
 import { PROJECT_APPS_REL, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { toolNameError, type AppManifest } from './manifest.js'
+import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
 import { SecretStore, redactor } from './secrets.js'
 import { visibilityOf, type Audience } from './visibility.js'
 
@@ -31,6 +32,9 @@ import { visibilityOf, type Audience } from './visibility.js'
 const USER_SCOPE = '_user'
 
 export type AppRef = { projectId: string | null; appId: string }
+
+/** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
+export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'
 
 /**
  * 누가 불렀나 (플랜 "호출 경로는 하나다") — 셋이다.
@@ -129,6 +133,8 @@ export type ExternalAppsDeps = {
   emitChanged?: (ref: AppRef) => void
   /** 중개 서버 도구의 몸통 (D가 채운다). 없으면 "아직 없다"는 자리표시가 선다 */
   broker?: BrokerImpls
+  /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
+  runs?: RunLedger
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
@@ -202,13 +208,25 @@ export class ExternalApps {
   private timing: RuntimeTiming
   private secrets: SecretStore
   /** 실행 id → 열린 실행. 중개의 문지기가 여기에 묻는다 */
-  private runs = new Map<string, OpenRun>()
+  private openRuns = new Map<string, OpenRun>()
   private pipeSeq = 0
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
     this.secrets = new SecretStore(deps.dataRoot)
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
+    /*
+     * 기동에 한 번: 끝을 못 본 실행을 닫고, 보관 기간 밖을 걷는다. 지금이 안전한 순간이다 —
+     * 이 host가 연 실행은 아직 하나도 없다.
+     */
+    const settled = deps.runs?.settleUnfinished('the host stopped before this call finished') ?? 0
+    const pruned = deps.runs?.prune(Date.now() - RUN_RETENTION_MS) ?? 0
+    if (settled || pruned) console.error(`[apps] run records: ${settled} unfinished closed, ${pruned} past retention removed`)
+  }
+
+  /** 한 앱의 실행 기록, 최근 것부터 (B-7) — 폴더가 사라진 앱의 기록도 읽힌다 */
+  runs(ref: AppRef, limit = 100): AppRunListed[] {
+    return this.deps.runs?.list(ref.projectId, ref.appId, limit) ?? []
   }
 
   /**
@@ -275,9 +293,44 @@ export class ExternalApps {
     const e = this.require(ref)
     const runId = `run_${randomUUID()}`
     const t0 = Date.now()
+    /*
+     * 기록은 호출이 들어온 순간 `running`으로 한 줄, 끝날 때 결말로 고친다 — 거절도 한 줄이다.
+     * 가리는 값은 이 앱에 저장된 비밀 전부다: 인자·결과·실패 이유 어디에 섞여 들어와도 이름만 남는다.
+     */
+    const redact = this.deps.runs ? redactor(this.secrets.all(this.appKey(e.ref))) : (t: string) => t
+    const described = this.deps.runs ? describeArgs(args, redact) : null
+    this.deps.runs?.begin({
+      id: runId,
+      projectId: e.ref.projectId,
+      appId: e.ref.appId,
+      tool: name,
+      callerKind: caller.kind,
+      callerSessionId: caller.kind === 'session' ? caller.sessionId : null,
+      parentRunId: caller.kind === 'app' ? caller.parentRunId : null,
+      status: 'running',
+      durationMs: null,
+      argsDigest: described?.digest ?? '',
+      argsSummary: described?.summary ?? '',
+      error: null,
+      createdAt: t0,
+    })
+    /** 앱에 실제로 보냈는가 — "바뀌었다"는 앱에 닿은 호출만 알린다 (거절·뜨는 중 취소·기동 실패는 아무것도 바꾸지 않았다) */
+    let sent = false
     const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
-      if (status !== 'rejected') this.deps.emitChanged?.(e.ref)
-      return { runId, status, result, error, durationMs: Date.now() - t0 }
+      const durationMs = Date.now() - t0
+      const ledger = this.deps.runs
+      if (ledger && described) {
+        ledger.end(runId, { status, durationMs, error: error === null ? null : redact(error) })
+        // 실패한 입력은 만드는 에이전트가 고치는 데 필요하다 — 최근 것만, 가린 채로
+        if (status === 'error') {
+          ledger.keepFailure(
+            { runId, projectId: e.ref.projectId, appId: e.ref.appId, args: described.json, result: result ? redact(JSON.stringify(result)) : null, createdAt: t0 },
+            FAILURES_KEPT,
+          )
+        }
+      }
+      if (sent) this.deps.emitChanged?.(e.ref)
+      return { runId, status, result, error, durationMs }
     }
 
     // 앱에 보내기 전에 끝나는 판정 — 프로세스를 띄울 필요도 없다
@@ -286,7 +339,7 @@ export class ExternalApps {
     if (e.life.gaveUp) return done('rejected', null, `${this.timing.maxFailures}번 연달아 실패해 멈춘 앱입니다`)
     let parent: OpenRun | null = null
     if (caller.kind === 'app') {
-      parent = this.runs.get(caller.parentRunId) ?? null
+      parent = this.openRuns.get(caller.parentRunId) ?? null
       if (!parent) return done('rejected', null, `부모 실행이 열려 있지 않습니다: ${caller.parentRunId}`)
     }
     if (opts.signal?.aborted) return done('cancelled', null, '부르기 전에 취소됐습니다')
@@ -305,11 +358,17 @@ export class ExternalApps {
           return done('rejected', null, `${name}은(는) ${need === 'app' ? '화면' : '에이전트'}에게 열린 도구가 아닙니다 (visibility: ${JSON.stringify(found.visibility)})`)
         }
 
-        const abort = new AbortController()
         const upstream = [opts.signal, parent?.abort.signal].filter((x): x is AbortSignal => !!x)
+        /*
+         * 앱이 뜨는 동안 취소됐으면 보내지 않는다. 실측: 뜨는 중에 취소된 호출이 5초짜리 도구를
+         * 끝까지 돌렸다 — 이미 선 신호에 붙인 리스너는 영영 불리지 않는다.
+         */
+        if (upstream.some((sig) => sig.aborted)) return done('cancelled', null, '앱이 뜨는 동안 취소됐습니다')
+        const abort = new AbortController()
         const onUp = () => abort.abort(new Error('the caller cancelled this call'))
         for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
-        this.runs.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, abort })
+        this.openRuns.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, abort })
+        sent = true
         try {
           const result = await proc.client.callTool(
             { name, arguments: args, _meta: { [RUN_META]: runId } },
@@ -320,7 +379,7 @@ export class ExternalApps {
           if (abort.signal.aborted) return done('cancelled', null, '부른 쪽이 취소했습니다')
           return done('error', null, (err as Error).message)
         } finally {
-          this.runs.delete(runId)
+          this.openRuns.delete(runId)
           // 실행이 끝나면 그 아래의 중개 일도 끝난다 — 앱이 기다리지 않고 답했어도 아래가 남지 않게
           abort.abort()
           for (const sig of upstream) sig.removeEventListener('abort', onUp)
@@ -586,7 +645,7 @@ export class ExternalApps {
           {
             // 이 파이프의 앱, 이 파이프에서 열린 실행만 — 남의 id도 죽은 프로세스의 id도 통하지 않는다
             openRun: (runId) => {
-              const run = this.runs.get(runId)
+              const run = this.openRuns.get(runId)
               return run && run.entry === e && run.pipeId === pipeId ? run.abort.signal : null
             },
             note,

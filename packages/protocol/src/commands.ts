@@ -12,6 +12,7 @@ import {
   GitDiff,
   ExternalSession,
   ExternalAppInfo,
+  AppRun,
   UsageSnapshot,
   GitFileStatus,
   ModelOption,
@@ -958,6 +959,11 @@ export const RpcMethods = {
    * 멈춘(`failed`) 외부 앱을 다시 띄울 수 있게 한다 — 연속 실패를 지우고, 떠 있으면 내린다.
    * **띄우지는 않는다**: 다음에 부르는 쪽이 띄운다(처음 필요할 때 뜬다는 원칙 그대로).
    */
+  /** 외부 앱 하나의 실행 기록, 최근 것부터 (M4 A-6 — 기록 화면 B-7이 읽는다) */
+  'apps.runs': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable(), limit: z.number().int().min(1).max(500).default(100) }),
+    result: z.array(AppRun),
+  },
   'apps.restart': {
     params: z.object({ appId: AppId, projectId: z.string().nullable() }),
     result: z.object({ ok: z.literal(true) }),
