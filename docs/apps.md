@@ -305,8 +305,8 @@ another host has not been tested.
 ## 8. The build loop
 
 The first promise of apps is that the place a tool is built is the place it is used and changed.
-The host side exists (#155). The UI side is arriving: the New app button, the "fix it here" bar
-under a view, and "Send to builder".
+The host side exists (#155). In the UI, New app is here (below); the "fix it here" bar under a view
+and "Send to builder" are arriving.
 
 - **Making an app**: the orchestrator's `create_app` and the RPC `apps.create` (the New app button's
   call) go through one function. Everything is refused **before a folder exists**: an id failing the
@@ -315,6 +315,15 @@ under a view, and "Send to builder".
   `.centralu` link pointing outside the project stops it). The template is expanded into a hidden
   folder, which discovery skips, then renamed into place. The data folder is created. Nothing is
   started.
+- **New app** (the UI's door to the same function): "New app…" in each project's menu, and a + on
+  the "Your apps" group, which now always stands so the first user-folder app has somewhere to be
+  made. The dialog asks for a name and the agent that builds it. It derives the id from the name
+  (editable) and judges it by the host's own rule, which lives in `@cc/protocol` (`app-id.ts`) so
+  both halves share one copy. What only the host can know (an existing id, trust, the template)
+  comes back as the host's refusal, shown word for word. The picked agent is always sent. One that
+  is missing or logged out is named with its fix, and Create waits. An untrusted project gets a
+  "Trust this project" button in the dialog. On success the app is listed, its pinned view opens,
+  and its builder session stands in the sidebar.
 - **Template** (`packages/agent-host/app-template/`): starts with `node server.mjs` alone, with no
   install and no `package.json`. One runtime file, `runtime/centralu-app-runtime.mjs` (626.5 KiB,
   built reproducibly from pinned MIT packages by `scripts/build-app-runtime.mjs` and marked generated
@@ -474,6 +483,6 @@ cancelled, closed or refused; stored without bodies, so a reopened UI can draw p
 - An open view keeps its old HTML after a reload until it is opened again.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
-- The UI half of the build loop (New app, the fix-it bar, Send to builder) and the broker's tools
-  are arriving.
+- The rest of the build loop's UI (the fix-it bar, Send to builder) and the broker's tools are
+  arriving.
 - The Codex path is unverified by a run (§9.2). fd 3 on Windows is untested (spike S-5).

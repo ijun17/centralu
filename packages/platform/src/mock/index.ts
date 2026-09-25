@@ -29,6 +29,7 @@ import type {
 import {
   APP_VERSION,
   handoffFile,
+  newAppIdProblem,
   isNewerVersion,
   parseUiPreferences,
   osPathBaseName,
@@ -41,6 +42,7 @@ import type {
   AgentPort,
   AlertKind,
   AppCallOrigin,
+  AppCreated,
   AppHomeView,
   AppResourceResult,
   AppToolResult,
@@ -50,6 +52,7 @@ import type {
   FsFile,
   InlineViewKept,
   InlineViewReopened,
+  NewAppSpec,
   Platform,
   PreferencesPort,
   ProjectPort,
@@ -64,6 +67,12 @@ import type {
  * 인메모리 구현 (docs/platform-abstraction.md §6).
  * 테스트·Playwright는 이걸 쓴다 — 모킹 라이브러리로 포트를 즉석 모킹하지 않는다 (계약이 흩어지므로).
  */
+
+/**
+ * 내장 앱의 id — host의 `reservedIds`(HOST_APPS)와 같은 목록이다. 외부 앱은 이 이름을 가져갈 수 없다(`apps.invoke`가
+ * 어느 쪽을 부를지 갈린다). 목은 host의 명부를 임포트할 수 없어 한 줄로 적는다.
+ */
+const MOCK_BUILTIN_APPS: readonly string[] = ['control']
 
 export type MockOptions = {
   /** 결정적 시각 — 대기 경과 시간 테스트용 */
@@ -757,7 +766,117 @@ export class MockPlatform implements Platform {
       if (a.status === 'failed' || a.status === 'crashed' || a.status === 'running') Object.assign(a, { status: 'stopped', error: null })
       this.emit({ type: 'external_apps_changed' })
     },
+    /**
+     * 새 앱 (M4 C-1). 실물(`ExternalApps.createApp` → `SessionManager.createAppBuilder`)처럼: 같은 판정(protocol의
+     * `newAppIdProblem`, 내장 앱 id, 신뢰, 이미 있는 id)으로 거절하고 — 거절의 말은 host의 말 그대로다, 창이 그것을
+     * 그대로 보이는지를 시험이 본다 — 목록에 세운 뒤 방송하고, 만드는 세션을 세운다. 세션이 서지 못해도 앱은 남는다.
+     */
+    create: async (spec: NewAppSpec): Promise<AppCreated> => {
+      this.createdApps.push(structuredClone(spec))
+      const idProblem = newAppIdProblem(spec.id)
+      if (idProblem) throw new Error(`앱 id로 쓸 수 없습니다 ("${spec.id}") — ${idProblem}`)
+      if (MOCK_BUILTIN_APPS.includes(spec.id)) throw new Error(`"${spec.id}"는 내장 앱의 이름입니다 — 다른 id를 쓰세요`)
+      const name = spec.name.replace(/\s+/g, ' ').trim()
+      if (!name) throw new Error('앱 이름이 비어 있습니다')
+      let dir = `/mock/data/apps/${spec.id}`
+      if (spec.projectId !== null) {
+        const project = this.projectsList.find((p) => p.id === spec.projectId)
+        if (!project) throw new Error(`그런 프로젝트가 없습니다: ${spec.projectId}`)
+        if (!project.trusted) {
+          throw new Error('신뢰하지 않은 프로젝트에는 앱을 만들지 않습니다 — 앱은 이 기계에서 도는 코드라, 프로젝트를 먼저 신뢰해야 뜹니다')
+        }
+        dir = `${project.path}/.centralu/apps/${spec.id}`
+      }
+      if (this.externalAppList.some((a) => a.appId === spec.id && a.projectId === spec.projectId)) {
+        throw new Error(`"${spec.id}" 앱이 이미 있습니다 (${dir}) — 다른 id를 쓰세요`)
+      }
+      const app: ExternalAppInfo = {
+        appId: spec.id,
+        projectId: spec.projectId,
+        dir,
+        name,
+        version: '0.1.0',
+        description: spec.description?.replace(/\s+/g, ' ').trim() || `${name} (a Centralu app)`,
+        // 템플릿의 home 도구 — 실물 템플릿과 같은 이름이다(app-template/centralu.app.json)
+        home: 'show',
+        trusted: true,
+        status: 'stopped',
+        error: null,
+        warnings: [],
+      }
+      this.externalAppList.push(app)
+      this.emit({ type: 'external_apps_changed' })
+      try {
+        return { app: structuredClone(app), builder: await this.apps.createBuilder(spec.id, spec.projectId, spec.tool) }
+      } catch (e) {
+        return { app: structuredClone(app), builder: null, builderError: (e as Error).message }
+      }
+    },
+    builder: async (appId: string, projectId: string | null): Promise<SessionInfo | null> => {
+      const id = this.appBuilders.get(`${projectId ?? '_user'}/${appId}`)
+      const s = id ? this.sessions.get(id) : undefined
+      return s ? structuredClone(s) : null
+    },
+    /**
+     * 만드는 세션 (M4 C-2). 실물처럼: 앱마다 하나(있으면 그것), 신뢰하지 않은 앱에는 세우지 않고, 도구를 안 고르면
+     * 프로젝트의 기본 도구(사용자 폴더 앱은 오케스트레이터의 도구). 그 도구가 없거나 로그인 전이면 세션이 서지 못한다.
+     * 이름은 "<앱> · builder"로 사람이 정한 이름이고, 세션의 앱 칸이 그 앱이다. 만들면 `session_created`를 방송한다.
+     */
+    createBuilder: async (appId: string, projectId: string | null, tool?: ToolName): Promise<SessionInfo> => {
+      const key = `${projectId ?? '_user'}/${appId}`
+      const have = this.appBuilders.get(key)
+      if (have && this.sessions.has(have)) return structuredClone(this.sessions.get(have)!)
+      const app = this.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
+      if (!app) throw new Error(`그런 앱이 없습니다: ${projectId ?? 'user'}/${appId}`)
+      if (!app.trusted) {
+        throw new Error('신뢰하지 않은 프로젝트의 앱에는 만드는 세션을 두지 않습니다 — 프로젝트를 신뢰하면 앱이 뜨고 시험할 수 있습니다')
+      }
+      const project = projectId ? this.projectsList.find((p) => p.id === projectId) : undefined
+      const chosen = tool ?? (project ? project.defaultTool : this.orchestratorTool) ?? 'claude'
+      const detected = this.detected.find((t) => t.name === chosen)
+      if (!detected?.installed || !detected.loggedIn) {
+        throw new Error(`Could not start ${chosen} session: ${detected?.detail ?? `${chosen} is not installed`}`)
+      }
+      const id = `mock-session-${++this.idc}`
+      const info: SessionInfo = {
+        id,
+        projectId,
+        kind: 'worker',
+        tool: chosen,
+        externalId: `ext-${id}`,
+        name: `${app.name ?? appId} · builder`,
+        autoNamed: false,
+        state: 'idle',
+        lastReadSeq: 0,
+        lastSeq: 0,
+        createdAt: this.now(),
+        waitingSince: null,
+        live: true,
+        model: null,
+        effort: null,
+        verbosity: null,
+        serviceTier: null,
+        permissionPreset: 'normal',
+        importedFrom: null,
+        worktree: null,
+        parentSessionId: null,
+        scopeSessionIds: null,
+        roleAppend: `(mock builder role for ${appId})`,
+        appId,
+        ...sessionLiveDefaults(),
+      }
+      this.sessions.set(id, info)
+      this.appBuilders.set(key, id)
+      // 실물과 같은 규칙: 세션을 만드는 것이 그 프로젝트의 기본 도구를 정한다 (manager.createSession)
+      if (project) project.defaultTool = chosen
+      this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
+      return structuredClone(info)
+    },
   }
+  /** "New app" 창이 host에 보낸 것 — 창이 무엇을 골랐는지(id·이름·도구)를 시험이 본다 */
+  readonly createdApps: NewAppSpec[] = []
+  /** 앱 → 만드는 세션 (M4 C-2). 열쇠는 `(프로젝트 ?? _user)/앱` — 실물의 명부(APP_BUILDERS_KEY)와 같은 모양 */
+  readonly appBuilders = new Map<string, string>()
   /** 다시 시작한 앱 — Restart 단추가 host에 닿았는지를 시험이 본다 */
   readonly restarts: { appId: string; projectId: string | null }[] = []
   /**

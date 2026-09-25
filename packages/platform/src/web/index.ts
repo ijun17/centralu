@@ -338,6 +338,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       remove: async (appId, projectId) => {
         await rpc.call('apps.remove', { appId, projectId })
       },
+      create: (spec) => rpc.call('apps.create', spec),
+      builder: (appId, projectId) => rpc.call('apps.builder', { appId, projectId }),
+      createBuilder: (appId, projectId, tool) => rpc.call('apps.createBuilder', { appId, projectId, ...(tool ? { tool } : {}) }),
     },
     projects: new WebProjectPort(rpc),
     system: new WebSystemPort(),

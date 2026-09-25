@@ -771,3 +771,44 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
     }
   })
 })
+
+/**
+ * 새 앱 (M4 C-1) — web 구현의 `create`·`builder`·`createBuilder`가 진짜 host, 진짜 런타임, 진짜 템플릿을 지난다.
+ * 거절은 host의 말 그대로 온다("New app" 창이 그 말을 보인다).
+ */
+describe('Platform 계약: 새 앱 (web + 실 host)', () => {
+  it('앱과 만드는 세션이 오고, 그 앱의 만드는 세션으로 찾아지며, 이미 있는 id는 host의 말로 거절된다', async () => {
+    const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-newapp-')))
+    const projRoot = join(fixture, 'proj')
+    mkdirSync(projRoot)
+    mkdirSync(join(fixture, 'data'))
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const project = await mgr.addProject(projRoot)
+    mgr.setProjectTrusted(project.id, true)
+    const rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
+    rt.refresh()
+    mgr.useExternalApps(rt)
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
+    const port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+      const made = await platform.apps.create({ projectId: project.id, id: 'notes', name: 'Notes', tool: 'claude' })
+      expect(made.app).toMatchObject({ appId: 'notes', projectId: project.id, name: 'Notes', home: 'show', status: 'stopped' })
+      expect(made.builder).toMatchObject({ appId: 'notes', projectId: project.id, name: 'Notes · builder', tool: 'claude' })
+      expect((await platform.apps.builder('notes', project.id))?.id).toBe(made.builder!.id)
+      expect((await platform.apps.createBuilder('notes', project.id)).id).toBe(made.builder!.id)
+      await expect(platform.apps.create({ projectId: project.id, id: 'notes', name: 'Again' })).rejects.toThrow(/"notes" 앱이 이미 있습니다/)
+      expect(await platform.apps.builder('ghost', project.id)).toBeNull()
+    } finally {
+      await platform.dispose()
+      await mgr.disposeAll()
+      await rt.dispose()
+      await server.close()
+      store.close()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+})

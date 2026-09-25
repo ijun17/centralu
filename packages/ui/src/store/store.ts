@@ -33,7 +33,7 @@ import {
   rename as renamePure,
   type SessionSummary,
 } from '@cc/core'
-import type { AppToolResult, ConnectionState, Platform } from '@cc/platform/ports'
+import type { AppCreated, AppToolResult, ConnectionState, NewAppSpec, Platform } from '@cc/platform/ports'
 import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 
@@ -994,6 +994,11 @@ export type AppState = {
    * 다시 연다(home을 새로 부른다).
    */
   restartApp(key: string): Promise<void>
+  /**
+   * 새 앱을 만든다 (M4 C-1, "New app" 창) — host가 템플릿을 펼치고 만드는 세션을 세운다. 만들면 앱이 목록에 서고,
+   * 그 앱의 고정 화면이 열리고, 만드는 세션이 사이드바에 선다. host가 거절하면 그 말 그대로 던진다(창이 보인다).
+   */
+  createApp(spec: NewAppSpec): Promise<AppCreated>
   /** 오케스트레이터 세션 id (아직 만든 적 없으면 null — 화면은 빈 대화 + 추천 질문) */
   orchestratorId: string | null
   /** 첫 질문으로 세션을 만드는 중 (#63) — 빈 화면이 죽은 척하지 않게 하는 표시 */
@@ -3727,6 +3732,32 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))
     }
+  },
+
+  async createApp(spec) {
+    const platform = get().platform
+    if (!platform) throw new Error('Not connected to the host')
+    // 거절은 그대로 던진다 — host의 말이 곧 이유다(이미 있는 id, 신뢰하지 않은 프로젝트). 창이 그 말을 보인다
+    const made = await platform.apps.create(spec)
+    const { app, builder } = made
+    /*
+     * 목록에 곧바로 세운다. host도 목록 방송(external_apps_changed)을 보내지만, 그것을 기다리면 창이 닫힌 뒤 한동안
+     * 사이드바에 줄이 없고 고정 화면은 "앱이 없다"를 본다(고정 화면은 목록에 있는 앱만 연다). 방송이 오면 통째로
+     * 다시 읽으므로 여기서 세운 줄은 그 답으로 바뀐다.
+     */
+    set((s) => ({
+      externalApps: s.externalApps.some((a) => a.appId === app.appId && a.projectId === app.projectId)
+        ? s.externalApps
+        : [...s.externalApps, app],
+    }))
+    void get().refreshExternalApps()
+    // 만드는 세션도 같은 까닭으로 곧바로 등록한다 — host의 session_created와 같은 길이라 두 번 와도 한 번이다
+    if (builder) get().dispatchEvent({ type: 'session_created', sessionId: builder.id, session: builder })
+    get().openApp(app.projectId, app.appId)
+    if (!builder) {
+      set({ toast: `${app.name ?? app.appId} was made, but its builder session could not start: ${made.builderError ?? 'unknown reason'}` })
+    }
+    return made
   },
 
   async openOrchestrator() {
