@@ -1092,6 +1092,19 @@ export const RpcMethods = {
     params: z.object({ appId: AppId, projectId: z.string().nullable(), tool: ToolName.optional() }),
     result: SessionInfo,
   },
+  /**
+   * 앱을 점검한다 (M4 C-3) — 만드는 세션의 `check`와 같은 판정이다. 지금 파일로 앱을 다시 띄우고(진행 중인 호출은
+   * 기다린다), 도구 목록과 도구가 가리키는 화면을 실제로 읽어, 매니페스트·도구 이름·공개 범위·주석·home의 문제를
+   * 돌려준다. `text`는 에이전트에게 보내도 되는 한 덩어리 글이다. 멈춘 앱도 다시 띄워 본다(다시 시작과 같다).
+   */
+  'apps.check': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: z.object({
+      ok: z.boolean(),
+      text: z.string(),
+      findings: z.array(z.object({ level: z.enum(['problem', 'warning']), where: z.string(), message: z.string() })),
+    }),
+  },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: SessionId.optional() }),

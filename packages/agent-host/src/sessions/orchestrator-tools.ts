@@ -174,6 +174,14 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
+    name: 'check',
+    description:
+      '네가 만드는 앱을 점검한다 (M4 C-3) — 고친 뒤에 부른다. 지금 파일로 앱을 다시 띄우고, 도구 목록을 실제로 부르고, ' +
+      '도구가 가리키는 화면(ui://)을 읽고, 매니페스트·도구 이름(__ 금지)·공개 범위·readOnlyHint·home의 화면을 본다. ' +
+      '문제와 앱의 표준에러를 글로 돌려준다. 진행 중인 호출은 끊지 않는다(끝나기를 기다린다).',
+    schema: z.object({}),
+  },
+  {
     name: 'create_app',
     description:
       '새 앱(Centralu 앱)을 템플릿으로 만든다 (M4) — 사람이 "…하는 도구·화면을 만들어 줘"라고 하면 쓴다. 앱은 사람이 화면으로 누르고 ' +
@@ -217,6 +225,19 @@ export const MANAGER_TOOL_NAMES = [
  * 매니저의 문맥에서만 안전하게 판단된다. 하드 게이트가 있어도 시야는 좁게 둔다.
  */
 const MANAGER_ONLY_TOOL_NAMES = ['delete_worktree_session'] as const satisfies readonly OrchestratorToolName[]
+
+/**
+ * 앱의 만드는 세션의 도구 (M4 C-3) — 자기 앱의 점검 하나. 오케스트레이터에게는 없다: 점검은 앱을 띄워 코드를
+ * 돌리는 일이고, 어느 앱인지를 부른 세션이 정해야(그 세션이 만드는 앱) 이름으로 남의 앱을 띄울 길이 없다.
+ */
+export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly OrchestratorToolName[]
+
+/** 만드는 세션의 MCP 안내 — 역할(앱의 자리와 규칙)은 roleAppend가 입힌다 */
+export const BUILDER_INSTRUCTIONS = [
+  '너는 Centralu 앱 하나를 만드는 세션이다. 이 서버의 check가 네 앱을 점검한다.',
+  '앱 파일을 고친 뒤에는 check를 불러 결과를 확인한다 — 사람에게 시험을 맡기지 않는다.',
+  '문제가 있으면 고치고 다시 check를 부른다. 통과하면 무엇을 바꿨는지 사람에게 한 줄로 말한다.',
+].join('\n')
 
 /** 매니저에게 주는 안내 — 워크트리 관리 컨텍스트 (#69 설계의 3층 규칙 포함) */
 export const MANAGER_INSTRUCTIONS = [
@@ -444,6 +465,12 @@ export async function runOrchestratorTool(
     }
   }
 
+  if (name === 'check') {
+    // 결과는 에이전트가 읽을 보고서다. 문제가 있어도 도구 호출 자체는 성공이다 — 판정은 글이 말한다
+    const r = await tools.checkApp()
+    return { text: r.text }
+  }
+
   if (name === 'create_app') {
     const spec = {
       id: String(args.id ?? '').trim(),
@@ -579,8 +606,11 @@ function appToolFor(name: string): AppToolEntry | undefined {
 export function profileAllows(profile: ToolProfile, name: string): boolean {
   const app = appToolFor(name)
   if (app) return app.profiles.includes(profile)
-  if (profile === 'orchestrator') return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name)
+  if (profile === 'orchestrator') {
+    return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name) && !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
+  }
   if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)
+  if (profile === 'builder') return (BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   return (MANAGER_TOOL_NAMES as readonly string[]).includes(name)
 }
 

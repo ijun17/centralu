@@ -10,8 +10,11 @@ import type { AppId, NormalizedEvent, ToolName } from '@cc/protocol'
  * 않는다. 오케스트레이터는 런타임의 호출자 중 하나지 주인이 아니다.
  */
 
-/** 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합 */
-export type ToolProfile = 'orchestrator' | 'manager' | 'scoped'
+/**
+ * 세션이 받는 도구 묶음 (#69). 오케스트레이터는 전부, 워크트리 매니저는 부분집합, 조율 세션은 시야 안의 셋,
+ * 앱의 만드는 세션(M4 C-3)은 자기 앱을 점검하는 `check` 하나.
+ */
+export type ToolProfile = 'orchestrator' | 'manager' | 'scoped' | 'builder'
 
 /** 앱 도구를 부른 주체 — sessionId=null은 사람(UI)이다. 앱이 자기 권한 판정에 쓴다 */
 export type AppToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }

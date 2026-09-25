@@ -161,6 +161,11 @@ export type OrchestratorTools = {
    */
   proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
   /**
+   * 자기 앱을 점검한다 (M4 C-3) — 만드는 세션 전용. 어느 앱인지는 부른 세션이 정한다(그 세션이 만드는 앱):
+   * 이름을 받지 않으므로 남의 앱을 띄워 볼 길이 없다. `text`는 에이전트가 읽을 보고서다.
+   */
+  checkApp(): Promise<{ ok: boolean; text: string }>
+  /**
    * 새 앱을 템플릿으로 만든다 (M4 C-1b) — 오케스트레이터 전용. "새 앱" 버튼(`apps.create`)과 같은 길이다.
    *
    * propose가 아니라 power인 이유: 만드는 것은 **템플릿의 사본**이다 — 저장소에 이미 있는 코드도, 사람이
@@ -309,7 +314,7 @@ export type CreateSessionOpts = {
    * 노출과 실행 양쪽이 같은 판정(profileAllows)을 쓴다 — 노출만 좁히면
    * 이름을 아는 쪽이 그냥 부른다.
    */
-  toolProfile?: 'orchestrator' | 'manager' | 'scoped'
+  toolProfile?: 'orchestrator' | 'manager' | 'scoped' | 'builder'
   /**
    * 앱이 보증하는 역할 설명. 도구의 기본 프롬프트에 **덧붙인다**.
    *
