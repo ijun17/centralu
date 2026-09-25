@@ -536,6 +536,20 @@ export type AppHomeView = {
   runId: string
 }
 
+/**
+ * 다시 연 대화 안 화면 (M4 B-1) — 새 인스턴스와, AppFrame이 규격대로 다시 보낼 그 호출의 입력과 결말.
+ * 결과(`toolResult`)와 취소(`cancelled`)는 둘 중 하나이거나(끝났다), 둘 다 없다(아직 돈다).
+ */
+export type InlineViewReopened = {
+  instanceId: string
+  appId: AppId
+  projectId: string | null
+  tool: string
+  toolInput: Record<string, unknown>
+  toolResult?: AppToolResult
+  cancelled?: string
+}
+
 /** MCP `resources/read`의 답 모양 */
 export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
 
@@ -580,6 +594,11 @@ export interface AppsPort {
    * 에이전트는 앱의 글로 감싼 모양을 받는다. 그 대화의 화면이 아니면 host가 거절한다.
    */
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<void>
+  /**
+   * 접었던 대화 안 화면을 다시 연다 (M4 B-1의 "Reopen") — 도구를 다시 부르지 않는다. host가 새 인스턴스와
+   * 들고 있던 입력·결말을 돌려준다. 들고 있지 않으면 이유와 함께 실패한다(그때는 앱을 여는 길만 남는다).
+   */
+  reopenInlineView(sessionId: string, callId: string): Promise<InlineViewReopened>
   /**
    * 앱을 다시 시작할 수 있게 한다 (M4 B-6의 "Restart") — 연속 실패와 이유를 지우고, 떠 있으면 내린다.
    * **띄우지는 않는다**: 다음에 부르는 쪽(다시 여는 화면)이 띄운다.

@@ -973,6 +973,28 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * 접었던 대화 안 화면을 다시 연다 (M4 B-1) — 가상 스크롤에서 벗어났거나 상한에 밀려 자리표시가 된 화면의
+   * "Reopen". **도구를 다시 부르지 않는다**: host가 새 인스턴스를 열고, 들고 있던 그 호출의 입력과 결말(결과
+   * 또는 취소 이유)을 돌려준다 — AppFrame이 규격대로 다시 보낸다. 호출이 아직 돌고 있으면 결말 없이 오고,
+   * 끝나면 `app_view`의 result·cancelled가 평소처럼 온다.
+   *
+   * host는 입력과 결과를 메모리에만, 크기를 묶어 들고 있다(inline-views.ts). 들고 있지 않으면(너무 컸다,
+   * 오래돼서 버렸다, host가 다시 떴다) 이유와 함께 실패하고, 자리표시는 앱을 여는 길만 준다. 열면 한 대화의
+   * 살아 있는 화면 상한이 다시 걸린다 — 가장 오래 열린 다른 화면이 `closed`로 닫힐 수 있다.
+   */
+  'apps.inlineReopen': {
+    params: z.object({ sessionId: SessionId, callId: z.string() }),
+    result: z.object({
+      instanceId: z.string(),
+      appId: AppId,
+      projectId: z.string().nullable(),
+      tool: z.string(),
+      toolInput: z.record(z.string(), z.unknown()),
+      toolResult: z.looseObject({ content: z.array(z.unknown()) }).optional(),
+      cancelled: z.string().optional(),
+    }),
+  },
+  /**
    * 대화 안 앱 화면의 `ui/message` (M4 B-1·B-4) — 사람이 읽고 보내기로 고른 뒤에만 UI가 부른다.
    *
    * 보낼 곳은 **그 화면이 선 대화**다. 앱과 세션은 인스턴스가 정한다: `sessionId`는 대조만 하고, 대화 안

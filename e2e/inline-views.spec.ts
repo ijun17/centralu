@@ -66,11 +66,14 @@ test.beforeEach(async ({ page }) => {
       runId: `run-${instanceId}`,
     }
   })
+  // 다시 열기(Reopen)도 같은 ViewHost에서 새 인스턴스를 연다 — 입력과 결과는 목이 host처럼 들고 있던 것이다
+  await page.exposeFunction('__openInline', (appId: string, projectId: string | null) => fx.open({ projectId, appId }, `ui://${appId}/main`))
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const w = window as any
     w.__mock.viewFrameProvider = (a: string, i: string, o: unknown) => w.__viewFrame(a, i, o)
     w.__mock.openViewProvider = (a: string, p: string | null) => w.__openView(a, p)
+    w.__mock.inlineInstanceProvider = (a: string, p: string | null) => w.__openInline(a, p)
   })
 })
 
@@ -221,4 +224,110 @@ test('host가 화면을 닫으면 teardown을 보낸 뒤 이유와 함께 자리
   await expect(refused.getByTestId('inline-view-rejected')).toHaveText('This view was not shown: This app does not serve ui://other/main')
   await expect(refused.getByTestId('inline-view-pin')).toHaveCount(0)
   await expect(refused.getByTestId('app-frame')).toHaveCount(0)
+})
+
+const teardowns = (page: Page) =>
+  page.evaluate(() => ((window as any).__mock.appToolCalls as { tool: string }[]).filter((c) => c.tool === 'save-on-teardown').length)
+const closedViews = (page: Page) => page.evaluate(() => (window as any).__mock.closedViews as string[])
+const viewState = (page: Page, sid: string, callId: string) =>
+  page.evaluate(({ s, c }) => {
+    const v = (window as any).__store.getState().inlineViews[s]?.[c]
+    return v ? { state: v.state as string, reason: (v.reason ?? null) as string | null, instanceId: v.instanceId as string | null } : null
+  }, { s: sid, c: callId })
+/** 대화 목록의 스크롤 칸 — 줄이 absolute로 얹힌 상자의 조상 중 스크롤되는 것 */
+const scrollChat = (page: Page, to: 'top' | 'bottom') =>
+  page.evaluate((where) => {
+    const row = document.querySelector('[data-index]') as HTMLElement | null
+    let el: HTMLElement | null = row
+    while (el && !(el.scrollHeight > el.clientHeight && /(auto|scroll)/.test(getComputedStyle(el).overflowY))) el = el.parentElement
+    if (!el) throw new Error('no scrolling chat')
+    el.scrollTop = where === 'top' ? 0 : el.scrollHeight
+  }, to)
+
+test('스크롤로 멀리 벗어난 화면은 teardown을 보낸 뒤 자리표시로 접히고, Reopen은 들고 있던 입력과 결과로 다시 연다', async ({ page }) => {
+  const { pid, sid } = await sessionWithApp(page)
+  await emit(page, toolCall(sid, 'toolu_1', 'mcp__app-viewer__show'))
+  const first = await openInline(page, pid, sid, 'toolu_1', { q: 'weather' })
+  const result = { content: [{ type: 'text', text: 'sunny' }], structuredContent: { forecast: 'sunny' } }
+  await emit(page, { type: 'app_view', sessionId: sid, callId: 'toolu_1', appId: 'viewer', projectId: pid, tool: 'show', phase: 'result', toolResult: result, kept: true })
+  const inline = rowOf(page, 'toolu_1').getByTestId('inline-view')
+  expect(await logged(viewIn(inline), 'tool-result')).toEqual({ forecast: 'sunny' })
+
+  // 대화가 길어져 그 줄이 멀리 위로 밀려난다(바닥을 따라간다)
+  for (let i = 0; i < 60; i++) await emit(page, toolCall(sid, `toolu_more_${i}`, 'Read'))
+  await scrollChat(page, 'bottom')
+  await expect.poll(() => viewState(page, sid, 'toolu_1')).toEqual({ state: 'parked', reason: 'Closed when it scrolled out of view', instanceId: null })
+  // teardown을 먼저 보냈고(화면이 받아 저장했다), 인스턴스는 host에 닫으라고 했다
+  expect(await teardowns(page)).toBe(1)
+  expect(await closedViews(page)).toEqual([first])
+  await expect(page.getByTestId('inline-view')).toHaveCount(0)
+
+  // 돌아가면 자리표시가 서 있다
+  await scrollChat(page, 'top')
+  const placeholder = rowOf(page, 'toolu_1').getByTestId('inline-view-placeholder')
+  await expect(placeholder).toContainText("Viewer's view is closed · Closed when it scrolled out of view")
+  await placeholder.getByTestId('inline-view-reopen').click()
+  const again = rowOf(page, 'toolu_1').getByTestId('inline-view')
+  await expect(again.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  expect(await page.evaluate(() => (window as any).__mock.reopenedViews)).toEqual([{ sessionId: sid, callId: 'toolu_1' }])
+  const reopened = await viewState(page, sid, 'toolu_1')
+  expect(reopened?.state).toBe('live')
+  expect(reopened?.instanceId).not.toBe(first)
+  // 새 화면이 같은 입력과 결과를 규격의 순서대로 받는다 — 도구는 다시 불리지 않았다
+  const v = viewIn(again)
+  expect(await logged(v, 'tool-input')).toEqual({ q: 'weather' })
+  expect(await logged(v, 'tool-result')).toEqual({ forecast: 'sunny' })
+  expect((await keys(v)).filter((k) => k.startsWith('tool-'))).toEqual(['tool-input', 'tool-result'])
+})
+
+test('한 대화에 살아 있는 화면은 셋까지다 — 넷째가 열리면 가장 오래된 화면이 teardown 뒤 자리표시로 접힌다', async ({ page }) => {
+  const { pid, sid } = await sessionWithApp(page)
+  const ids: Record<string, string> = {}
+  for (const c of ['c1', 'c2', 'c3']) {
+    await emit(page, toolCall(sid, c, 'mcp__app-viewer__show'))
+    ids[c] = await openInline(page, pid, sid, c, { q: c })
+    await expect(rowOf(page, c).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  }
+  expect(await teardowns(page)).toBe(0)
+  await emit(page, toolCall(sid, 'c4', 'mcp__app-viewer__show'))
+  ids.c4 = await openInline(page, pid, sid, 'c4', { q: 'c4' })
+
+  const oldest = rowOf(page, 'c1').getByTestId('inline-view')
+  await expect(oldest.getByTestId('inline-view-placeholder')).toContainText('Only the 3 most recent app views in a conversation stay open')
+  expect(await teardowns(page)).toBe(1)
+  expect(await closedViews(page)).toEqual([ids.c1])
+  for (const c of ['c2', 'c3', 'c4']) await expect(rowOf(page, c).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.getByTestId('app-frame')).toHaveCount(3)
+})
+
+test('인스턴스를 잃은 화면(host가 다시 떴다)은 깨진 프레임 대신 자리표시로 접히고, Reopen이 되살린다', async ({ page }) => {
+  const { pid, sid } = await sessionWithApp(page)
+  await emit(page, toolCall(sid, 'toolu_lost', 'mcp__app-viewer__show'))
+  // host가 모르는 인스턴스 — 다시 뜬 host에는 옛 인스턴스가 없다
+  await emit(page, {
+    type: 'app_view', sessionId: sid, callId: 'toolu_lost', appId: 'viewer', projectId: pid, tool: 'show', phase: 'open',
+    instanceId: 'gone-instance-0000000000', toolInput: { q: 'again' },
+  })
+  const inline = rowOf(page, 'toolu_lost').getByTestId('inline-view')
+  await expect(inline.getByTestId('inline-view-placeholder')).toContainText('This view could not be shown: This app view is not open')
+  await expect(inline.getByTestId('app-frame-error')).toHaveCount(0)
+  await inline.getByTestId('inline-view-reopen').click()
+  await expect(inline.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+  expect(await logged(viewIn(inline), 'tool-input')).toEqual({ q: 'again' })
+})
+
+test('다시 열 수 없는 화면은 이유를 말하고 Reopen을 거둔다 — 앱을 여는 길은 남는다', async ({ page }) => {
+  const { pid, sid } = await sessionWithApp(page)
+  await emit(page, toolCall(sid, 'toolu_big', 'mcp__app-viewer__show'))
+  await openInline(page, pid, sid, 'toolu_big', {})
+  // host가 결과를 들고 있지 않다(너무 컸다)
+  await emit(page, {
+    type: 'app_view', sessionId: sid, callId: 'toolu_big', appId: 'viewer', projectId: pid, tool: 'show', phase: 'result',
+    toolResult: { content: [{ type: 'text', text: 'huge' }] }, kept: false,
+  })
+  await emit(page, { type: 'app_view', sessionId: sid, callId: 'toolu_big', appId: 'viewer', projectId: pid, tool: 'show', phase: 'closed', reason: 'This app was removed' })
+  const inline = rowOf(page, 'toolu_big').getByTestId('inline-view')
+  await expect(inline.getByTestId('inline-view-placeholder')).toBeVisible()
+  await expect(inline.getByTestId('inline-view-reopen')).toHaveCount(0)
+  await expect(inline.getByTestId('inline-view-open-app')).toBeVisible()
 })

@@ -263,6 +263,11 @@ export function createRpcHandler(
       if (!inlineViews?.close(instanceId)) requireViews().close(instanceId)
       return { ok: true as const }
     },
+    'apps.inlineReopen': async (p) => {
+      const { sessionId, callId } = RpcMethods['apps.inlineReopen'].params.parse(p)
+      if (!inlineViews) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
+      return inlineViews.reopen(sessionId, callId)
+    },
     'apps.viewMessage': async (p) => {
       const { sessionId, instanceId, text } = RpcMethods['apps.viewMessage'].params.parse(p)
       // 앱과 세션은 인스턴스가 정한다 — 부른 쪽이 댄 세션은 대조만 한다 (#93·#94)

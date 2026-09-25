@@ -40,6 +40,14 @@ const appScoped = { sessionId: z.string().optional() }
  */
 const persistedSeq = { seq: z.number().optional() }
 
+/**
+ * 한 대화에서 동시에 살아 있는 앱 화면의 수 (M4 B-1, 플랜 "살아 있는 대화 안 화면은 최근 몇 개로 제한한다").
+ * 넘치면 가장 오래 살아 있던 화면이 teardown 뒤 자리표시로 접힌다. host(인스턴스와 그것이 붙드는 앱)와
+ * UI(그려진 프레임)가 같은 수를 지킨다 — 한쪽만 지키면 다른 쪽에서 새어 나간다(UI가 없어도 host는 앱을
+ * 놓아야 하고, host의 알림이 늦어도 UI는 프레임을 줄여야 한다).
+ */
+export const APP_VIEWS_LIVE_PER_SESSION = 3
+
 export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...base, ...persistedSeq, type: z.literal('message_delta'), role: z.enum(['assistant']), text: z.string() }),
   /**

@@ -5,11 +5,12 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from './adapters/contract.js'
+import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { ExternalApps } from './apps/external/runtime.js'
 import { PROJECT_APPS, plantApp, until } from './apps/external/test-helpers.js'
 import { Store } from './dev-services/store.js'
-import { attachInlineViews, type InlineViews } from './inline-views.js'
+import { attachInlineViews, type InlineLimits, type InlineViews } from './inline-views.js'
 import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
 import { FIXTURE_APP } from './sessions/session-apps.test-helpers.js'
@@ -80,7 +81,7 @@ function plant(id: string) {
   })
 }
 
-async function start(idleMs = 60_000) {
+async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFailures = 3) {
   const dataRoot = join(root, 'data')
   store = new Store()
   const adapter = new CapturingAdapter()
@@ -91,8 +92,10 @@ async function start(idleMs = 60_000) {
     projects: () => store.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
+    // 실행 기록(A-6) — "다시 열기는 도구를 다시 부르지 않는다"를 앱에 닿은 호출의 줄 수로 본다
+    runs: storeRunLedger(store),
     watchFlushMs: 40,
-    timing: { idleMs, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    timing: { idleMs, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, maxFailures },
   })
   // 짝을 못 찾은 호출을 오래 기다리지 않게 — 제품의 값은 5초다
   mgr.useExternalApps(rt, { callJoinWaitMs: 300 })
@@ -105,7 +108,7 @@ async function start(idleMs = 60_000) {
     hostPort: () => 1,
     log: () => {},
   })
-  inline = attachInlineViews(mgr, rt, views, (line) => logged.push(line))
+  inline = attachInlineViews(mgr, rt, views, { log: (line) => logged.push(line), limits })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt, views, inlineViews: inline })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
@@ -342,5 +345,124 @@ describe('화면이 대화에 보내는 말', () => {
     await expect(rpc('apps.viewMessage', { sessionId, instanceId: pinned, text: 'hi' })).rejects.toThrow(/not open in that conversation/)
     expect(sentToAgent.get(sessionId)).toBeUndefined()
     expect(sentToAgent.get(other.id)).toBeUndefined()
+  })
+})
+
+/**
+ * 살아 있는 화면의 상한과 다시 열기 (M4 B-1). 한 대화에서 동시에 열어 두는 화면은 최근 몇 개뿐이다 —
+ * 넘치면 가장 오래 열린 것을 닫는다(앱을 놓는다). 접힌 화면은 **도구를 다시 부르지 않고** 다시 연다:
+ * host가 들고 있던 입력과 결말을 새 인스턴스와 함께 돌려준다. 들고 있는 것은 크기를 묶는다.
+ */
+describe('상한과 다시 열기', () => {
+  const opened = (callId: string) => appViews().find((e) => e.callId === callId && e.phase === 'open')!.instanceId!
+  async function show(apps: Awaited<ReturnType<typeof start>>['apps'], callId: string, q = callId) {
+    await apps.call('app-viewer', 'show', { q }, { callId })
+    await until(appViews, (v) => v.some((e) => e.callId === callId && e.phase === 'result'))
+  }
+  const runsOf = () => rt.runs({ projectId, appId: 'viewer' }).length
+
+  it('넷째 화면이 열리면 가장 오래 열린 화면을 닫고 알린다 — 나머지 셋은 열려 있다', async () => {
+    const { apps } = await start()
+    for (const id of ['v1', 'v2', 'v3']) await show(apps, id)
+    expect(appViews().filter((e) => e.phase === 'closed')).toEqual([])
+    await show(apps, 'v4')
+    expect(appViews().filter((e) => e.phase === 'closed')).toEqual([
+      expect.objectContaining({ callId: 'v1', phase: 'closed', reason: 'Only the 3 most recent app views in a conversation stay open' }),
+    ])
+    await expect(frame(opened('v1'))).rejects.toThrow(/not open/)
+    for (const id of ['v2', 'v3', 'v4']) await expect(frame(opened(id))).resolves.toBeTruthy()
+  })
+
+  it('접은 화면을 다시 열면 새 인스턴스와 들고 있던 입력·결과가 온다 — 도구는 다시 불리지 않는다', async () => {
+    const { sessionId, apps } = await start()
+    await show(apps, 'r1', 'weather')
+    const first = opened('r1')
+    // UI가 접었다(스크롤로 벗어남)
+    await rpc('apps.closeView', { instanceId: first })
+    await expect(frame(first)).rejects.toThrow(/not open/)
+    const before = runsOf()
+    expect(before).toBe(1)
+
+    const again = (await rpc('apps.inlineReopen', { sessionId, callId: 'r1' })) as { instanceId: string }
+    expect(again).toMatchObject({
+      appId: 'viewer', projectId, tool: 'show', toolInput: { q: 'weather' },
+      toolResult: { content: [{ type: 'text', text: 'shown weather' }], structuredContent: { q: 'weather', by: 'viewer' } },
+    })
+    expect(again.instanceId).not.toBe(first)
+    await expect(frame(again.instanceId)).resolves.toBeTruthy()
+    expect(runsOf()).toBe(before)
+    // 다시 연 화면도 이 대화의 화면이다 — 그 화면의 말은 이 대화로 간다
+    expect(inline.owner(again.instanceId)).toMatchObject({ sessionId, callId: 'r1' })
+  })
+
+  it('다시 연 화면도 상한을 지킨다 — 가장 오래 열린 다른 화면이 닫힌다', async () => {
+    const { sessionId, apps } = await start()
+    for (const id of ['a', 'b', 'c']) await show(apps, id)
+    await rpc('apps.closeView', { instanceId: opened('a') })
+    await show(apps, 'd')
+    expect(appViews().filter((e) => e.phase === 'closed')).toEqual([])
+    await rpc('apps.inlineReopen', { sessionId, callId: 'a' })
+    expect(appViews().filter((e) => e.phase === 'closed').map((e) => e.callId)).toEqual(['b'])
+  })
+
+  it('결과가 너무 크면 들고 있지 않는다 — 결말에 그렇다고 싣고, 다시 열기는 이유와 함께 거절한다', async () => {
+    const { sessionId, apps } = await start(60_000, { keptCallMax: 2_000 })
+    await apps.call('app-viewer', 'show_big', { bytes: 5_000 }, { callId: 'big' })
+    await apps.call('app-viewer', 'show_big', { bytes: 100 }, { callId: 'small' })
+    await until(appViews, (v) => v.filter((e) => e.phase === 'result').length === 2)
+    expect(appViews().filter((e) => e.phase === 'result').map((e) => [e.callId, e.kept])).toEqual([
+      ['big', false],
+      ['small', true],
+    ])
+    await rpc('apps.closeView', { instanceId: opened('big') })
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'big' })).rejects.toThrow("This view's result is no longer kept. Open the app instead")
+  })
+
+  it('한 대화가 들고 있는 호출 수를 넘기면 가장 오래 접힌 것부터 버린다', async () => {
+    const { sessionId, apps } = await start(60_000, { keptPerSession: 2 })
+    for (const id of ['k1', 'k2']) {
+      await show(apps, id)
+      await rpc('apps.closeView', { instanceId: opened(id) })
+    }
+    await show(apps, 'k3')
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'k1' })).rejects.toThrow(/no longer kept/)
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'k2' })).resolves.toMatchObject({ toolInput: { q: 'k2' } })
+  })
+
+  it('host 전체가 들고 있는 크기를 넘기면 어느 대화든 가장 오래 접힌 것부터 버린다 — 열린 화면의 것은 버리지 않는다', async () => {
+    const { sessionId, apps } = await start(60_000, { keptTotalMax: 1_500 })
+    await apps.call('app-viewer', 'show_big', { bytes: 700 }, { callId: 'old' })
+    await until(appViews, (v) => v.some((e) => e.callId === 'old' && e.phase === 'result'))
+    await rpc('apps.closeView', { instanceId: opened('old') })
+    await apps.call('app-viewer', 'show_big', { bytes: 700 }, { callId: 'new' })
+    await until(appViews, (v) => v.some((e) => e.callId === 'new' && e.phase === 'result'))
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'old' })).rejects.toThrow(/no longer kept/)
+    // 열려 있는 화면의 것은 남는다 — 이미 연 인스턴스를 그대로 돌려준다
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'new' })).resolves.toMatchObject({ instanceId: opened('new') })
+  })
+
+  it('연달아 실패해 멈춘 앱의 화면은 다시 열지 않는다 — 부를 곳이 없다', async () => {
+    const { sessionId, apps } = await start(60_000, {}, 1)
+    await show(apps, 'f1')
+    await rpc('apps.closeView', { instanceId: opened('f1') })
+    // 고쳐 쓴 앱이 뜨자마자 죽는다 — 한 번에 멈추게 해 두었다
+    plantApp(join(repo, ...PROJECT_APPS), 'viewer', {
+      server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'crash-on-start', '--log', join(logs, 'viewer.jsonl')] },
+    })
+    rt.refresh()
+    await expect(rt.tools({ projectId, appId: 'viewer' })).rejects.toThrow()
+    expect(rt.list().find((a) => a.appId === 'viewer')?.status).toBe('failed')
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'f1' })).rejects.toThrow(
+      'This app stopped after failing repeatedly. Restart it, then reopen this view',
+    )
+  })
+
+  it('앱이 사라졌으면 다시 열지 않는다', async () => {
+    const { sessionId, apps } = await start()
+    await show(apps, 'x1')
+    await rpc('apps.closeView', { instanceId: opened('x1') })
+    rmSync(join(repo, ...PROJECT_APPS, 'viewer'), { recursive: true, force: true })
+    rt.refresh()
+    await expect(rpc('apps.inlineReopen', { sessionId, callId: 'x1' })).rejects.toThrow('This app was removed')
   })
 })

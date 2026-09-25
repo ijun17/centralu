@@ -23,8 +23,8 @@
  * 여기 있다(`home`, `no_screen`, `agent_home`, `bad_home`, `failing_home`).
  *
  * `inline`은 대화 안 화면(B-1)을 위한 묶음이다: 자기 화면(`ui://<앱 id>/main`)을 선언한 에이전트 도구
- * (`show`, 문이 열릴 때까지 붙드는 `hold_view`), 화면 없는 도구(`plain`), 남의 화면을 대는 도구
- * (`spoof`는 선언에서, `spoof_result`는 결과에서 `ui://other/main`을 가리킨다).
+ * (`show`, 결과의 크기를 고르는 `show_big`, 문이 열릴 때까지 붙드는 `hold_view`), 화면 없는 도구(`plain`),
+ * 남의 화면을 대는 도구(`spoof`는 선언에서, `spoof_result`는 결과에서 `ui://other/main`을 가리킨다).
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -250,6 +250,9 @@ serveStdio(() => {
       structuredContent: { q, by: process.env.CENTRALU_APP_ID },
     }))
     server.registerTool('plain', { description: 'A tool with no view' }, async () => say('plain ran'))
+    server.registerTool('show_big', { description: 'Shows a result of a given size', inputSchema: z.object({ bytes: z.number() }), ...ui(own) }, async ({ bytes }) =>
+      say('x'.repeat(bytes)),
+    )
     server.registerTool('hold_view', { description: 'A view tool that holds until the gate or a cancel', ...ui(own) }, async (ctx) => {
       const gate = arg('gate')
       const signal = ctx.mcpReq.signal

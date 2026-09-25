@@ -165,6 +165,8 @@ const SKIP: Record<string, string> = {
   'apps.create': '앱 폴더와 만드는 세션(진짜 에이전트)을 만든다 (sessions/create-app.test.ts·app-builder.test.ts가 관통)',
   'apps.createBuilder': '만드는 세션(진짜 에이전트)을 띄운다 — apps.create와 같은 이유',
   'apps.check': '앱을 실제로 띄운다 — 템플릿 앱이 필요 (apps/external/check.test.ts가 관통)',
+  'apps.viewMessage': '세션이 부른 화면 달린 앱 도구의 열린 대화 안 화면이 필요 (inline-views.test.ts가 진짜 앱으로 관통)',
+  'apps.inlineReopen': '접힌 대화 안 화면이 필요 — 같은 시험이 관통(상한과 다시 열기)',
 }
 
 const ok: string[] = []

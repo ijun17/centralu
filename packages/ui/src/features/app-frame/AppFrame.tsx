@@ -75,6 +75,11 @@ export type AppFrameProps = {
    */
   fill?: boolean
   /**
+   * 화면을 띄우지 못했다(주소를 받지 못함 — 인스턴스가 이미 닫혔거나 host가 다시 떴다). 주면 부모가 그 자리를
+   * 정한다: 대화 안 화면(B-1)은 깨진 프레임 대신 자리표시로 접는다. 주지 않으면 이 부품이 이유를 그린다.
+   */
+  onFailed?: (message: string) => void
+  /**
    * 화면이 뜨는 동안 기본 한 줄("Loading app view…") 대신 보일 것 — 고정 화면의 스켈레톤(B-6). 프레임
    * 위를 덮는다. 프레임은 그 아래에서 계속 뜨고, 화면이 초기화되는 순간 걷힌다.
    */
@@ -173,7 +178,7 @@ type Phase = 'loading' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
-  { appId, projectId = null, instanceId, toolInput, toolResult, toolCancelled, changeSignal, onMessage, fill = false, loading, className },
+  { appId, projectId = null, instanceId, toolInput, toolResult, toolCancelled, changeSignal, onMessage, onFailed, fill = false, loading, className },
   ref,
 ) {
   const platform = usePlatform()
@@ -191,6 +196,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   // 브리지 처리기는 한 번 걸고 오래 산다 — 바뀌는 값은 ref로 읽는다
   const onMessageRef = useRef(onMessage)
   onMessageRef.current = onMessage
+  const onFailedRef = useRef(onFailed)
+  onFailedRef.current = onFailed
   const scaleRef = useRef(scale)
   scaleRef.current = scale
   const fillRef = useRef(fill)
@@ -292,8 +299,10 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       iframe.src = frame.url
     })().catch((e: unknown) => {
       if (cancelled) return
-      setError(e instanceof Error ? e.message : String(e))
+      const message = e instanceof Error ? e.message : String(e)
+      setError(message)
       setPhase('error')
+      onFailedRef.current?.(message)
     })
 
     return () => {
@@ -401,7 +410,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
             Loading app view…
           </div>
         ))}
-      {phase === 'error' && (
+      {phase === 'error' && !onFailed && (
         <div className="rounded-md border border-edge bg-panel px-3 py-2 text-[12px] text-ash" role="alert" data-testid="app-frame-error">
           This app view could not be shown: {error}
         </div>
