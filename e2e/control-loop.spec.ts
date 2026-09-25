@@ -806,10 +806,13 @@ test('소개 화면: 카드가 곧 도구 감지 표시다 — 안 깔림과 로
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
-    m.agents.detect = async () => [
-      { tool: 'claude', installed: false, loggedIn: false, detail: 'not installed' },
-      { tool: 'codex', installed: true, loggedIn: false, detail: 'codex-cli 0.147' },
+    // 목의 도구 설명(이름, 표시 이름, 설치·로그인 명령)은 그대로 두고 상태만 바꾼다
+    const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
+    const list = [
+      as('claude', { installed: false, loggedIn: false, detail: 'not installed' }),
+      as('codex', { installed: true, loggedIn: false, detail: 'codex-cli 0.147' }),
     ]
+    m.agents.detect = async () => list
   })
   await page.getByTestId('redetect').click()
   // 진단은 한눈에 — 비활성 카드는 "Not connected"라고 말한다 (어둡고, 눌리지 않는다)
@@ -827,10 +830,12 @@ test('소개 화면: 하나만 준비돼 있으면 막지 않는다 — 그 카�
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
-    m.agents.detect = async () => [
-      { tool: 'claude', installed: true, loggedIn: false, detail: '2.1.223 · login required' },
-      { tool: 'codex', installed: true, loggedIn: true, detail: 'codex-cli 0.147' },
+    const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
+    const list = [
+      as('claude', { installed: true, loggedIn: false, detail: '2.1.223 · login required' }),
+      as('codex', { installed: true, loggedIn: true, detail: 'codex-cli 0.147' }),
     ]
+    m.agents.detect = async () => list
   })
   await page.getByTestId('redetect').click()
   // 로그인 안 된 claude에게 시킬 일은 '설치'가 아니라 '로그인'이다
@@ -1060,10 +1065,13 @@ test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더
 test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무 반응 없던 문제)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
-    ;(window as any).__mock.agents.detect = async () => [
-      { tool: 'claude', installed: false, loggedIn: false, detail: 'claude CLI not found' },
-      { tool: 'codex', installed: true, loggedIn: true, detail: 'codex 0.147' },
+    const m = (window as any).__mock
+    const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
+    const list = [
+      as('claude', { installed: false, loggedIn: false, detail: 'claude CLI not found' }),
+      as('codex', { installed: true, loggedIn: true, detail: 'codex 0.147' }),
     ]
+    m.agents.detect = async () => list
   })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
@@ -1084,11 +1092,14 @@ test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무
 test('로그인 안 된 도구는 설치 안 된 도구와 다르게 말한다 (#11)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
-    ;(window as any).__mock.agents.detect = async () => [
+    const m = (window as any).__mock
+    const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
+    const list = [
       // #11 이전에는 claude가 이 상태로 잡히지 않아 이 분기에 닿을 수 없었다
-      { tool: 'claude', installed: true, loggedIn: false, detail: 'claude 2.1.223 · login required' },
-      { tool: 'codex', installed: false, loggedIn: false, detail: 'codex CLI not found' },
+      as('claude', { installed: true, loggedIn: false, detail: 'claude 2.1.223 · login required' }),
+      as('codex', { installed: false, loggedIn: false, detail: 'codex CLI not found' }),
     ]
+    m.agents.detect = async () => list
   })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
