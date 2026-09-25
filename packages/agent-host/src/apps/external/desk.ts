@@ -106,6 +106,11 @@ export type CapabilityQuestion = {
   /** 무엇을 하려는가 — "run an agent (Claude Code) in a new session" */
   text: string
   origin: CapabilityOrigin
+  /**
+   * 물은 때. 만료와 **같은 시계 읽기**에서 나온다 — 받는 쪽이 따로 `Date.now()`를 읽으면 그 사이 흐른 1ms만큼
+   * "5분짜리 물음"이 4분 59.999초가 된다(시험이 가끔 그것을 봤다).
+   */
+  askedAt: number
   /** 이때까지 답이 없으면 창구가 거절로 닫는다 */
   expiresAt: number
 }
@@ -573,10 +578,11 @@ export class BrokerDesk {
     let q = this.asking.get(slot)
     if (!q) {
       const withdraw = new AbortController()
-      const expiresAt = Date.now() + this.questionMs()
+      const askedAt = Date.now()
+      const expiresAt = askedAt + this.questionMs()
       const entry = {
         answer: host.askCapability(
-          { app: app.ref, appName: app.name, capability: key, text, origin: this.apps.origin(call.parentRunId) ?? { kind: 'view', app: app.ref }, expiresAt },
+          { app: app.ref, appName: app.name, capability: key, text, origin: this.apps.origin(call.parentRunId) ?? { kind: 'view', app: app.ref }, askedAt, expiresAt },
           withdraw.signal,
         ),
         waiters: 0,

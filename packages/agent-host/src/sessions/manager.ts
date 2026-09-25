@@ -3809,7 +3809,7 @@ export class SessionManager {
       const origin = q.origin.kind === 'view' ? q.origin.app : q.app
       const id = `q-${randomUUID()}`
       this.appQuestions.set(id, {
-        question: { id, app, capability: q.capability, text: q.text, origin: { appId: origin.appId, projectId: origin.projectId }, askedAt: Date.now(), expiresAt: q.expiresAt },
+        question: { id, app, capability: q.capability, text: q.text, origin: { appId: origin.appId, projectId: origin.projectId }, askedAt: q.askedAt, expiresAt: q.expiresAt },
         resolve,
       })
       this.emit({ type: 'external_app_questions_changed' })
