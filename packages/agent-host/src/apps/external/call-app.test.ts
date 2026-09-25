@@ -150,3 +150,30 @@ describe('call_app — 취소는 사슬을 따라 내려간다', () => {
     await until(() => rt.runs(ref('p1', 'other'))[0]?.status, (s) => s === 'cancelled')
   })
 })
+
+describe('call_app — 부른 앱의 "바뀌었다"', () => {
+  it('부른 앱의 바꾸는 도구는 그 앱의 열린 화면에 알리고, 주인은 부탁한 실행(호출자 app)이다 — 읽기만 하는 도구는 알리지 않는다', async () => {
+    plant('p1', 'notes', { apps: ['board'] })
+    // board의 peek은 readOnlyHint: true, poke에는 주석이 없다(바꾸는 도구로 친다)
+    plantApp(join(roots.p1, ...PROJECT_APPS), 'board', { server: { command: process.execPath, args: [FIXTURE, '--mode', 'attach'] } })
+    await rt.dispose()
+    const changed: { ref: AppRef; cause: unknown }[] = []
+    rt = new ExternalApps({
+      projects: () => [{ id: 'p1', path: roots.p1, trusted: true }],
+      dataRoot,
+      reservedIds: [],
+      runs: memoryLedger(),
+      timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+      emitChanged: (r, cause) => changed.push({ ref: r, cause: cause ?? null }),
+    })
+    rt.refresh()
+    rt.attachBrokerHost(fakeBrokerHost({}))
+    const board = () => changed.filter((c) => c.ref.appId === 'board')
+
+    expect((await askCallApp(ref('p1', 'notes'), { app: 'board', tool: 'peek' })).broker?.isError).toBe(false)
+    expect(board()).toEqual([])
+    const poke = await askCallApp(ref('p1', 'notes'), { app: 'board', tool: 'poke', args: { to: 3 } })
+    expect(poke.broker?.isError).toBe(false)
+    expect(board()).toEqual([{ ref: ref('p1', 'board'), cause: { kind: 'app', parentRunId: poke.outcome.runId } }])
+  })
+})
