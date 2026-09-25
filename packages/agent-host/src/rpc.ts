@@ -14,7 +14,8 @@ const toInfo = (h: TerminalHandle) => ({
   alive: h.alive,
 })
 import type { UpdateService } from './updates.js'
-import type { ExternalApps } from './apps/external/runtime.js'
+import { resultText, type ExternalApps } from './apps/external/runtime.js'
+import { HOST_APPS } from './apps/registry.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ToolName } from '@cc/protocol'
@@ -239,8 +240,17 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'apps.invoke': async (p) => {
-      const { appId, name, args } = RpcMethods['apps.invoke'].params.parse(p)
-      return mgr.invokeAppTool(appId, name, args)
+      const { appId, name, args, projectId } = RpcMethods['apps.invoke'].params.parse(p)
+      // 내장 명부가 먼저다 — 외부 앱은 내장 앱의 id를 가져갈 수 없으므로(발견이 막는다) 갈림이 겹치지 않는다
+      if (projectId === undefined && HOST_APPS.some((a) => a.id === appId)) return mgr.invokeAppTool(appId, name, args)
+      const out = await requireExternalApps().call({ appId, projectId: projectId ?? null }, name, args, { kind: 'view' })
+      return {
+        text: out.result ? resultText(out.result) : (out.error ?? ''),
+        isError: out.status !== 'ok',
+        status: out.status,
+        runId: out.runId,
+        result: out.result ?? undefined,
+      }
     },
     'apps.setEnabled': async (p) => {
       const { appId, enabled } = RpcMethods['apps.setEnabled'].params.parse(p)

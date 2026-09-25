@@ -916,12 +916,33 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 사람이 앱 도구를 직접 부른다 (#81) — UI의 업무 만들기 등. 사람은 최상위 권한이라
-   * 프로필 판정 대신 "그 앱의 도구인가"만 본다. caller.sessionId=null이 곧 사람이다.
+   * 화면이 앱 도구를 부른다 — **내장 앱과 외부 앱이 같은 문을 쓴다** (#81, M4 A-4).
+   *
+   * 내장 앱(`projectId`가 없고 그 id가 내장 명부에 있을 때): 사람이 부른 것으로 친다 — 프로필
+   * 판정 대신 "그 앱의 도구인가"만 본다. caller.sessionId=null이 곧 사람이다.
+   *
+   * 외부 앱: 앱은 (프로젝트, id)로 하나라 `projectId`로 가른다(null = 사용자 폴더 앱). 호출자는
+   * **화면**으로 기록되고, 화면에 열린(`visibility`에 `app`이 있는) 도구만 부를 수 있다.
+   * `result`는 앱의 답 그대로다(화면의 AppBridge가 받는 모양). `status`가 `rejected`면 host가
+   * 앱에 보내지 않은 것이다 — 이유는 `text`에 있다.
+   *
+   * 문을 따로 만들지 않은 이유: 부르는 쪽(화면)에게 내장과 외부는 같은 일이다. 문이 둘이면
+   * UI가 어느 쪽인지 알아야 하고, 그 갈림은 host만 아는 사실이다.
    */
   'apps.invoke': {
-    params: z.object({ appId: AppId, name: z.string(), args: z.record(z.string(), z.unknown()) }),
-    result: z.object({ text: z.string(), isError: z.boolean().optional() }),
+    params: z.object({
+      appId: AppId,
+      name: z.string(),
+      args: z.record(z.string(), z.unknown()),
+      projectId: z.string().nullable().optional(),
+    }),
+    result: z.object({
+      text: z.string(),
+      isError: z.boolean().optional(),
+      status: z.enum(['ok', 'error', 'cancelled', 'rejected']).optional(),
+      runId: z.string().optional(),
+      result: z.unknown().optional(),
+    }),
   },
   'apps.setEnabled': {
     params: z.object({ appId: AppId, enabled: z.boolean() }),
