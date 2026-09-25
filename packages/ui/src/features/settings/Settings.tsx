@@ -8,6 +8,7 @@ import { useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { APPS } from '../../apps/registry.js'
+import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
 type Rule = { id: number; scope: string; matcher: string; decision: string; createdAt: number }
 
@@ -326,14 +327,20 @@ export function Settings() {
 /**
  * 앱 목록 (#81) — 명부(registry)의 앱마다 토글 한 줄 + 앱이 가져온 설정 패널.
  * 끄기는 지우기가 아니다: 상태는 남고 화면·도구만 물러난다 — 실험 기능의 예의.
+ *
+ * 외부 앱(M4 A-8)도 같은 목록에 선다. 명부는 하나다(`app-catalog.ts`): 내장 앱은 켜고 끄는 줄,
+ * 외부 앱은 범위(프로젝트·사용자 폴더)마다 상태와 이유가 있는 줄이다. 신뢰하지 않은 프로젝트의
+ * 앱과 깨진 앱도 숨기지 않는다. 숨기면 왜 안 뜨는지 물을 곳이 없다.
  */
 function AppsSettings() {
-  const apps = useStore((s) => s.apps)
+  const catalog = useAppCatalog()
+  const projects = useStore((s) => s.projects)
   const ensure = useStore((s) => s.ensureAppState)
   const setEnabled = useStore((s) => s.setAppEnabled)
   useEffect(() => {
     for (const a of APPS) void ensure(a.id)
   }, [ensure])
+  const projectIds = Object.keys(catalog.byProject)
   return (
     <section data-testid="settings-apps">
       <p className="text-[11px] leading-relaxed text-slate">
@@ -341,30 +348,76 @@ function AppsSettings() {
         its data stays until the app itself is removed.
       </p>
       <ul className="mt-3 space-y-2">
-        {APPS.map((a) => {
-          const enabled = apps[a.id]?.enabled ?? true
-          return (
-            <li key={a.id} className="rounded border border-edge bg-panel px-3 py-2">
-              <label className="flex cursor-pointer items-center gap-2 text-[12px] text-chalk" data-testid={`app-toggle-${a.id}`}>
-                <input
-                  type="checkbox"
-                  className="accent-ash"
-                  checked={enabled}
-                  onChange={(e) => void setEnabled(a.id, e.target.checked)}
-                />
-                <span>{a.title}</span>
-                <span className="readout ml-auto text-[10px] text-slate">{a.id}</span>
-              </label>
-              {enabled && a.settingsPanel && (
-                <div className="mt-2 border-t border-edge pt-2">
-                  <a.settingsPanel />
-                </div>
-              )}
-            </li>
-          )
-        })}
+        {catalog.builtin.map(({ module: a, enabled }) => (
+          <li key={a.id} className="rounded border border-edge bg-panel px-3 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-chalk" data-testid={`app-toggle-${a.id}`}>
+              <input
+                type="checkbox"
+                className="accent-ash"
+                checked={enabled}
+                onChange={(e) => void setEnabled(a.id, e.target.checked)}
+              />
+              <span>{a.title}</span>
+              <span className="readout ml-auto text-[10px] text-slate">{a.id}</span>
+            </label>
+            {enabled && a.settingsPanel && (
+              <div className="mt-2 border-t border-edge pt-2">
+                <a.settingsPanel />
+              </div>
+            )}
+          </li>
+        ))}
       </ul>
+      {catalog.external.length > 0 && (
+        <div className="mt-5 border-t border-edge pt-3" data-testid="settings-external-apps">
+          {projectIds.map((pid) => (
+            <div key={pid} className="mb-4">
+              {/* 지운 프로젝트의 앱은 host가 목록에서 뺀다. 이름을 못 찾는 순간은 목록이 따라오기 전의 한 틱뿐이다 */}
+              <p className="readout text-[10px] uppercase text-slate">{projects[pid]?.name ?? 'Project'}</p>
+              <ul className="mt-2 space-y-2">
+                {catalog.byProject[pid]!.map((a) => (
+                  <ExternalAppRow key={a.key} app={a} />
+                ))}
+              </ul>
+            </div>
+          ))}
+          {catalog.user.length > 0 && (
+            <div>
+              <p className="readout text-[10px] uppercase text-slate">Your apps</p>
+              <ul className="mt-2 space-y-2">
+                {catalog.user.map((a) => (
+                  <ExternalAppRow key={a.key} app={a} />
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </section>
+  )
+}
+
+/** 외부 앱 한 줄 — 무엇이고, 지금 어떤가, 왜 그런가 */
+function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
+  const { status } = app
+  return (
+    <li className="rounded border border-edge bg-panel px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
+      <div className="flex items-center gap-2 text-[12px] text-chalk">
+        <span className="truncate">{app.title}</span>
+        <span className="readout text-[10px] text-slate">{app.appId}</span>
+        <span
+          className={`readout ml-auto shrink-0 text-[10px] ${status.tone === 'alert' ? 'text-chalk' : 'text-slate'}`}
+          data-testid="external-app-status"
+        >
+          {status.label}
+        </span>
+      </div>
+      {status.reason && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ash" data-testid="external-app-reason">
+          {status.reason}
+        </p>
+      )}
+    </li>
   )
 }
 

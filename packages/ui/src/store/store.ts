@@ -5,6 +5,7 @@ import type {
   ToolStatus,
   Attachment,
   CommandRunInfo,
+  ExternalAppInfo,
   NormalizedEvent,
   SavedCommand,
   PermissionPreset,
@@ -403,6 +404,13 @@ export type AppState = {
    * 목록을 모르고, 목록을 기다리다 신호를 놓치는 쪽이 더 나쁘다.
    */
   externalAppChanges: Record<string, number>
+  /**
+   * 발견된 외부 앱과 그 상태 (M4 A-8) — host의 `apps.list` 사본이다. 정본은 host다: 여기서 고치지
+   * 않고, `external_apps_changed`가 오면 통째로 다시 읽는다. 내장 앱(`APPS`)과 합친 한 목록은
+   * `app-catalog.ts`가 만든다. 스토어는 여전히 내장 앱 명부를 모른다(순환 금지).
+   */
+  externalApps: ExternalAppInfo[]
+  refreshExternalApps(): Promise<void>
   /** 앱 레일 슬롯의 폭 (#81) — 슬롯의 기하는 코어의 것이고(내용만 앱의 것), 보는 방식이라 워크스페이스에 실린다 */
   railWidth: number
   setRailWidth(px: number): void
@@ -1056,6 +1064,14 @@ const WINDOW_SIZE = 50
 const pendingEvents = new Map<string, NormalizedEvent[]>()
 
 /**
+ * 외부 앱 목록 다시 읽기의 줄 (M4 A-8). 읽는 중에 또 "바뀌었다"가 오면, 끝난 뒤 한 번 더 읽는다.
+ * 겹쳐 읽으면 늦게 떠난 답이 먼저 도착할 수 있고, 그러면 옛 목록이 새 목록을 덮는다. 앱이 뜨는
+ * 동안에는 방송이 연달아 오므로(뜨는 중 → 떴다) 실제로 겹친다.
+ */
+let externalAppsReading: Promise<void> | null = null
+let externalAppsAgain = false
+
+/**
  * How long a project's git refresh waits for the next trigger before it runs (issue #41).
  *
  * The triggers arrive in bursts, not singly: three sessions in one project finishing
@@ -1186,6 +1202,7 @@ export const useStore = create<AppState>((set, get) => ({
   mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
   apps: {} as Record<AppId, { doc: unknown; enabled: boolean }>,
   externalAppChanges: {},
+  externalApps: [] as ExternalAppInfo[],
   railWidth: RAIL_DEFAULT,
   skillProposals: [] as { name: string; content: string; why?: string }[],
   history: {},
@@ -1277,7 +1294,7 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
-    const [projects, sessions, gridPanels, tools, prefs] = await Promise.all([
+    const [projects, sessions, gridPanels, tools, prefs, externalApps] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
       // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
@@ -1295,6 +1312,9 @@ export const useStore = create<AppState>((set, get) => ({
         것은 그 설정이 하는 일보다 훨씬 나쁘다.
       */
       platform.prefs.load().catch(() => DEFAULT_UI_PREFERENCES),
+      // 외부 앱 목록(A-8)도 첫 화면과 함께 온다 — 사이드바의 앱 줄이 뒤늦게 튀어나오지 않게.
+      // 못 읽어도 앱은 뜬다: 앱 줄이 비어 보일 뿐이고, 다음 방송이 다시 읽는다
+      platform.apps.list().catch(() => [] as ExternalAppInfo[]),
     ])
     const known: Record<string, SessionSummary> = Object.fromEntries(
       sessions.map((s) => [
@@ -1351,6 +1371,7 @@ export const useStore = create<AppState>((set, get) => ({
       gridPanels,
       tools,
       prefs,
+      externalApps,
       connection: 'connected',
     }))
 
@@ -1573,6 +1594,12 @@ export const useStore = create<AppState>((set, get) => ({
     if (e.type === 'external_app_state_changed') {
       const key = externalAppKey(e.projectId, e.appId)
       set((s) => ({ externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 } }))
+      return
+    }
+
+    // 외부 앱의 자리와 상태가 바뀌었다 (M4 A-8) — 무엇이 바뀌었는지는 싣지 않으므로 통째로 다시 읽는다
+    if (e.type === 'external_apps_changed') {
+      void get().refreshExternalApps()
       return
     }
 
@@ -2836,6 +2863,29 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
+  async refreshExternalApps() {
+    const platform = get().platform
+    if (!platform) return
+    if (externalAppsReading) {
+      externalAppsAgain = true
+      return externalAppsReading
+    }
+    externalAppsReading = (async () => {
+      do {
+        externalAppsAgain = false
+        try {
+          const externalApps = await platform.apps.list()
+          set({ externalApps })
+        } catch {
+          // 못 읽으면 옛 목록을 둔다 — 다음 방송이나 재연결이 다시 읽는다
+        }
+      } while (externalAppsAgain)
+    })().finally(() => {
+      externalAppsReading = null
+    })
+    return externalAppsReading
+  },
+
   async ensureAppState(appId) {
     if (get().apps[appId]) return
     await get().refreshAppState(appId)
@@ -3354,6 +3404,8 @@ export const useStore = create<AppState>((set, get) => ({
   async recoverAfterReconnect(resync = false) {
     const s = get()
     if (!s.platform) return
+    // 끊긴 사이의 방송은 다시 오지 않는다 — 앱 목록(A-8)도 host가 지금 아는 것으로 맞춘다
+    void get().refreshExternalApps()
 
     const wasLive = Object.values(s.sessions).filter((x) => x.live)
 

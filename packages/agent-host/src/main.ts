@@ -15,6 +15,7 @@ import { createRpcHandler } from './rpc.js'
 import { ExternalApps } from './apps/external/runtime.js'
 import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
+import { onExternalAppListChanged } from './app-list-events.js'
 import { HOST_APPS } from './apps/registry.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
@@ -161,6 +162,8 @@ const externalApps = new ExternalApps({
   emitChanged: (ref) => server.broadcast({ type: 'external_app_state_changed', appId: ref.appId, projectId: ref.projectId }),
 })
 externalApps.refresh()
+// 앱의 자리와 상태가 바뀌었다 (A-8) — 사이드바와 고정 화면이 apps.list를 다시 읽는다
+onExternalAppListChanged(externalApps, () => server.broadcast({ type: 'external_apps_changed' }))
 // 세션에 앱을 붙인다 (A-5) — 매니저와 런타임은 서로를 모르고, 여기서 이어진다
 mgr.useExternalApps(externalApps)
 const terminals = new TerminalService((f) => server.pushTerminal(f))

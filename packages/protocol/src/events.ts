@@ -329,6 +329,16 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('external_app_state_changed'), appId: AppId, projectId: z.string().nullable() }),
   /**
+   * 외부 앱 목록이 달라졌다 (M4 A-8) — 앱이 생기거나 사라지거나 고쳐졌고, 프로젝트 신뢰가
+   * 바뀌었고, 앱이 뜨거나 내리거나 실패했다. 같은 거칠기다: 싣는 것이 없고, 받은 쪽이
+   * `apps.list`를 다시 읽는다. 사이드바의 앱 줄과 고정 화면의 "뜨는 중·멈춤·이유"가 이것을 따른다.
+   *
+   * `external_app_state_changed`와 나눈 이유: 그쪽은 **앱 안의 값**이 바뀌었다는 뜻이라 열린
+   * 화면이 다시 읽고, 이쪽은 **앱의 자리와 상태**가 바뀌었다는 뜻이라 목록이 다시 읽는다.
+   * 도구 호출 하나마다 목록을 다시 읽을 까닭이 없다.
+   */
+  z.object({ ...appScoped, type: z.literal('external_apps_changed') }),
+  /**
    * 감시 중인 디렉토리에서 뭔가 바뀌었다 (#34 — Finder·터미널·에이전트, 출처 불문).
    *
    * 세션이 아니라 **프로젝트**의 사건이라 `update_status`와 같은 길(appScoped)을 탄다.

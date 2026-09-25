@@ -10,6 +10,7 @@ import type {
   ApprovalDetail,
   ApprovalScope,
   CreateSessionParams,
+  ExternalAppInfo,
   ExternalSession,
   NormalizedEvent,
   ProjectInfo,
@@ -606,6 +607,14 @@ export class MockPlatform implements Platform {
       if (!found) throw new Error(`No resource ${uri} in app ${appId}`)
       return found
     },
+    list: async (): Promise<ExternalAppInfo[]> => structuredClone(this.externalAppList),
+  }
+  /** 발견된 외부 앱 (M4 A-8) — 시험이 `setExternalApps`로 채운다. 목의 발견은 이 배열이다 */
+  externalAppList: ExternalAppInfo[] = []
+  /** host가 하는 대로: 목록을 바꾸고 `external_apps_changed`를 방송한다 */
+  setExternalApps(list: ExternalAppInfo[]): void {
+    this.externalAppList = structuredClone(list)
+    this.emit({ type: 'external_apps_changed' })
   }
   lastInvoke: { appId: string; name: string; args: Record<string, unknown> } | null = null
   /** 화면 주소를 짓는 쪽 (시험이 꽂는다) */

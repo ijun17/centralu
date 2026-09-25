@@ -94,6 +94,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // 외부 앱의 호출이 끝났다 (M4 A-4) — 앱은 (프로젝트, id)로 하나라 둘 다 싣는다. null은 사용자 폴더 앱
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' },
   { type: 'external_app_state_changed', appId: 'timer', projectId: null },
+  // 외부 앱 목록이 달라졌다 (M4 A-8) — 싣는 것이 없다. 받은 쪽이 apps.list를 다시 읽는다
+  { type: 'external_apps_changed' },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
   // 골 통지 (2026-09-07) — 두 도구의 합집합 모양과 걷힘(null) 양쪽 다 골든이다
   {

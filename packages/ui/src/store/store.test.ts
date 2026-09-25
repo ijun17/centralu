@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { ExternalAppInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
@@ -58,6 +58,7 @@ beforeEach(() => {
     commandRuns: {},
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
     externalAppChanges: {},
+    externalApps: [],
   })
 })
 
@@ -1036,6 +1037,63 @@ describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
     expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
     expect(reads).not.toHaveBeenCalled()
     expect(useStore.getState().apps['notes']).toBeUndefined()
+  })
+})
+
+/** 발견된 외부 앱 하나 (host의 `apps.list` 한 줄) */
+function appInfo(appId: string, over: Partial<ExternalAppInfo> = {}): ExternalAppInfo {
+  return {
+    appId, projectId: 'p1', dir: `/tmp/p1/.centralu/apps/${appId}`, name: `App ${appId}`, version: '0.1.0',
+    description: null, home: 'home', trusted: true, status: 'stopped', error: null, warnings: [], ...over,
+  }
+}
+
+/**
+ * 외부 앱 목록 (M4 A-8): 스토어는 host의 `apps.list` 사본을 든다. 방송(`external_apps_changed`)은
+ * 무엇이 바뀌었는지 싣지 않으므로 통째로 다시 읽는다. 앱이 뜰 때는 방송이 연달아 오므로(뜨는 중 →
+ * 떴다) 읽기가 겹친다. 겹친 읽기가 옛 목록으로 새 목록을 덮으면, 사이드바는 떠 있는 앱을 "뜨는 중"으로
+ * 영영 보여 준다.
+ */
+describe('외부 앱 목록 (M4 A-8)', () => {
+  it('처음 붙을 때 읽고, 방송이 올 때마다 다시 읽는다', async () => {
+    const mock = new MockPlatform()
+    mock.externalAppList = [appInfo('notes')]
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().externalApps.map((a) => a.appId)).toEqual(['notes'])
+
+    mock.setExternalApps([appInfo('notes', { status: 'running' }), appInfo('timer', { projectId: null })])
+    await vi.waitFor(() => expect(useStore.getState().externalApps).toHaveLength(2))
+    expect(useStore.getState().externalApps[0]?.status).toBe('running')
+  })
+
+  it('읽는 중에 또 방송이 오면 끝난 뒤 한 번 더 읽는다 — 마지막 목록이 남는다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const list = vi.spyOn(mock.apps, 'list')
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    // 첫 읽기는 그 순간의 목록(뜨는 중)을 들고 늦게 돌아온다
+    list.mockImplementationOnce(async () => {
+      const snap = structuredClone(mock.externalAppList)
+      await gate
+      return snap
+    })
+
+    mock.setExternalApps([appInfo('notes', { status: 'starting' })])
+    mock.setExternalApps([appInfo('notes', { status: 'running' })])
+    release()
+
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('running'))
+  })
+
+  it('다시 붙으면(끊긴 사이의 방송은 다시 오지 않는다) 목록을 다시 읽는다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.externalAppList = [appInfo('notes', { status: 'failed', error: 'boom' })]
+    mock.setConnectionState('disconnected')
+    mock.setConnectionState('connected')
+    await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('failed'))
   })
 })
 
