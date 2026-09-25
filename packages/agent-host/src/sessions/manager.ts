@@ -5,7 +5,7 @@ import { proposedMcpServerNameError, profileAllows, registerAppTools, runOrchest
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { SessionAppsHub } from './session-apps.js'
-import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
+import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { builderRole } from './app-builder.js'
 import { HOST_APPS } from '../apps/registry.js'
@@ -3710,6 +3710,48 @@ export class SessionManager {
     return {
       defaultAgentTool: (projectId) => this.defaultToolFor(projectId),
       runAgent: (req, ctx) => this.runAppAgent(req, ctx),
+      hostData: (name, app) => this.appHostData(name, app),
+    }
+  }
+
+  /**
+   * host 데이터 하나 (M4 D-3) — 창구가 이름(닫힌 목록)과 선언을 확인한 뒤에 부른다. 무엇을 얼마나 주는지는 이름마다 여기서
+   * 정한다(`capabilities.ts`의 목록 주석). 대화 내용은 어느 이름으로도 나가지 않는다: 세션 목록에는 미리보기도 없다 —
+   * 대화에는 사람이 붙여 넣은 비밀과 다른 프로젝트의 사정이 섞이고, 앱은 팀과 나뉘는 코드다.
+   */
+  private async appHostData(name: HostCapability, app: AppRef): Promise<Record<string, unknown>> {
+    switch (name) {
+      case 'sessions.list': {
+        const projects = new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+        // 프로젝트 앱은 그 프로젝트의 세션만, 사용자 폴더 앱은 모두(사용자 폴더 앱은 오케스트레이터의 것이다 — 결정 4)
+        const sessions = this.listSessions()
+          .filter((s) => app.projectId === null || s.projectId === app.projectId)
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            project: s.projectId ? (projects.get(s.projectId) ?? null) : null,
+            kind: s.kind,
+            tool: s.tool,
+            state: s.state,
+            live: s.live,
+            createdAt: s.createdAt,
+            waitingSince: s.waitingSince,
+            branch: s.worktree?.branch ?? null,
+            appId: s.appId,
+          }))
+        return { sessions }
+      }
+      case 'git.status': {
+        if (app.projectId === null) {
+          throw new Error('git.status needs a project — this app lives in your user folder, so there is no project to read')
+        }
+        const project = this.store.listProjects().find((p) => p.id === app.projectId)
+        if (!project) throw new Error('the project of this app is gone')
+        const summary = await gitSummary(project.path)
+        if (summary.denied) throw new Error("Centralu cannot read this project's folder (the system denied access)")
+        if (!summary.isRepo) return { isRepo: false, branch: null, changedFiles: 0, files: [] }
+        return { isRepo: true, branch: summary.branch, changedFiles: summary.changedFiles, files: await gitStatusFiles(project.path) }
+      }
     }
   }
 

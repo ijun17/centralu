@@ -46,6 +46,8 @@ export type { AppCheckReport, CheckFinding } from './check.js'
 export type { AppErrorBundle } from './errors.js'
 /** 중개의 몸통 가운데 host의 코어가 채우는 것 (D) — 매니저가 `attachBrokerHost`로 준다 */
 export type { AgentRunRequest, AgentRunResult, BrokerHost } from './desk.js'
+/** host 데이터의 닫힌 목록 (D-3) — 매니저가 이름마다 무엇을 줄지 채운다 */
+export { HOST_CAPABILITIES, type HostCapability } from './capabilities.js'
 
 /** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
 export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'

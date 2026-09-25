@@ -11,7 +11,7 @@ import { serveBroker, type BrokerHandler } from './broker.js'
 import { ExternalApps, resultText, type AgentRunRequest, type AppRef, type BrokerHost } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { StreamTransport } from './stream-transport.js'
-import { until } from './test-helpers.js'
+import { fakeBrokerHost, until } from './test-helpers.js'
 
 /**
  * 앱 템플릿과 그 런타임 (M4 C-1) — 템플릿으로 펼친 앱을 **진짜 `node`로** 띄워 본다.
@@ -253,13 +253,12 @@ describe('centralu.agent (D-1)', () => {
     asker('asker', { agent: true })
     const seen: AgentRunRequest[] = []
     const r = runtime()
-    const host: BrokerHost = {
-      defaultAgentTool: () => 'claude',
+    const host: BrokerHost = fakeBrokerHost({
       runAgent: async (req) => {
         seen.push(req)
         return req.schema ? { sessionId: 's-agent', text: 'Here you go.', output: { summary: 'short' } } : { sessionId: 's-agent', text: 'A short summary.' }
       },
-    }
+    })
     r.attachBrokerHost(host)
     const plain = await r.call(ref('asker'), 'summarize', { text: 'hello' }, { kind: 'session', sessionId: 's1' })
     expect([plain.status, resultText(plain.result!)]).toEqual(['ok', 'A short summary.'])
@@ -274,7 +273,7 @@ describe('centralu.agent (D-1)', () => {
   it('스키마에 맞지 않는 답은 앱에 넘기지 않는다 — 이유와 받은 답을 말한다', async () => {
     asker('asker', { agent: true })
     const r = runtime()
-    r.attachBrokerHost({ defaultAgentTool: () => 'claude', runAgent: async () => ({ sessionId: 's', text: '', output: { summary: 42 } }) })
+    r.attachBrokerHost(fakeBrokerHost({ runAgent: async () => ({ sessionId: 's', text: '', output: { summary: 42 } }) }))
     const out = await r.call(ref('asker'), 'summarize', { text: 'x', schema: true }, { kind: 'session', sessionId: 's1' })
     expect(out.status).toBe('error')
     expect(resultText(out.result!)).toContain("centralu.agent() failed: run_agent: the agent's answer does not match the schema")
@@ -286,7 +285,7 @@ describe('centralu.agent (D-1)', () => {
     asker('listed', { agent: ['codex'] })
     const tools: string[] = []
     const r = runtime()
-    r.attachBrokerHost({ defaultAgentTool: () => 'claude', runAgent: async (req) => (tools.push(req.tool), { sessionId: 's', text: `ran on ${req.tool}` }) })
+    r.attachBrokerHost(fakeBrokerHost({ runAgent: async (req) => (tools.push(req.tool), { sessionId: 's', text: `ran on ${req.tool}` }) }))
     const s1 = { kind: 'session' as const, sessionId: 's1' }
     const byName = await r.call(ref('any'), 'summarize', { text: 'x', tool: 'codex' }, s1)
     expect(resultText(byName.result!)).toContain('run_agent refused: this app declared "agent": true, which lets it use the person\'s default agent (claude) only')
@@ -338,10 +337,9 @@ describe('centralu.agent (D-1)', () => {
     asker('asker', { agent: true })
     // host가 앱에 보내는 호출의 상한을 0.8초로 줄이고, 에이전트는 2초 걸린다
     const r = runtime({ callTimeoutMs: 800, brokerKeepaliveMs: 100 })
-    r.attachBrokerHost({
-      defaultAgentTool: () => 'claude',
-      runAgent: () => new Promise((resolve) => setTimeout(() => resolve({ sessionId: 's', text: 'slow but done' }), 2_000)),
-    })
+    r.attachBrokerHost(
+      fakeBrokerHost({ runAgent: () => new Promise((resolve) => setTimeout(() => resolve({ sessionId: 's', text: 'slow but done' }), 2_000)) }),
+    )
     const out = await r.call(ref('asker'), 'summarize', { text: 'x' }, { kind: 'session', sessionId: 's1' })
     expect([out.status, out.error, out.result && resultText(out.result)]).toEqual(['ok', null, 'slow but done'])
   })

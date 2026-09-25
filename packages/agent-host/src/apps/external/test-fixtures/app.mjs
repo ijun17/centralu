@@ -162,7 +162,7 @@ serveStdio(() => {
           await new Promise((r) => setTimeout(r, 150))
           return say('detached')
         }
-        const args = given ?? { run_agent: { prompt: 'summarize this' }, call_app: { app: 'other', tool: 'echo' }, host_data: { query: 'sessions' } }[name]
+        const args = given ?? { run_agent: { prompt: 'summarize this' }, call_app: { app: 'other', tool: 'echo' }, host_data: { name: 'sessions.list' } }[name]
         const r = await c.callTool(
           { name, arguments: args, _meta: meta },
           {

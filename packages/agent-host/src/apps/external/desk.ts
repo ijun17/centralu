@@ -2,6 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
 import { z } from 'zod'
 import type { BrokerCall, BrokerToolName } from './broker.js'
+import { HOST_CAPABILITIES, isHostCapability, type HostCapability } from './capabilities.js'
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
 
@@ -69,6 +70,11 @@ export type BrokerHost = {
    * 이유를 담아 던진다 — 그 이유가 곧 앱이 받는 말이다.
    */
   runAgent(req: AgentRunRequest, ctx: { signal: AbortSignal; progress(message: string): void }): Promise<AgentRunResult>
+  /**
+   * host 데이터 하나를 읽는다 (D-3). 창구가 이름(닫힌 목록)과 선언을 확인한 뒤에 부른다. 범위는 앱이 정한다: 프로젝트 앱은 그
+   * 프로젝트, 사용자 폴더 앱은 사용자 전체. 줄 수 없으면(사용자 폴더 앱의 git.status) 이유를 담아 던진다.
+   */
+  hostData(name: HostCapability, app: AppRef): Promise<Record<string, unknown>>
 }
 
 /**
@@ -98,6 +104,8 @@ export function resolveCallTarget(asker: AppRef, id: string, has: (ref: AppRef) 
   const user = { projectId: null, appId: id }
   return has(user) ? user : null
 }
+
+const HostDataArgs = z.object({ name: z.string(), args: z.record(z.string(), z.unknown()).optional() })
 
 const RunAgentArgs = z.object({
   prompt: z.string(),
@@ -155,9 +163,30 @@ export class BrokerDesk {
         return this.runAgent(app, args, call)
       case 'call_app':
         return this.callApp(app, args, call)
-      default:
-        return refuse(`${tool} is not available yet — the broker's tools arrive with Centralu M4 section D`)
+      case 'host_data':
+        return this.hostData(app, args)
     }
+  }
+
+  /**
+   * `host_data` (D-3) — 닫힌 목록의 이름, 그리고 매니페스트가 `uses.host`에 적은 것만. 둘 다 기본은 거절이다: 목록 밖의 이름은
+   * 없는 능력이고, 적지 않은 이름은 쓰지 않겠다고 한 능력이다. 답은 JSON 하나다(`structuredContent`와 같은 글).
+   */
+  private async hostData(app: DeskApp, raw: Record<string, unknown>): Promise<CallToolResult> {
+    const parsed = HostDataArgs.safeParse(raw)
+    if (!parsed.success) return refuse(`host_data: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
+    const { name } = parsed.data
+    if (!isHostCapability(name)) {
+      return refuse(`host_data: Centralu has no host capability "${name}" — it can give: ${HOST_CAPABILITIES.join(', ')}`)
+    }
+    const declared = app.manifest.uses.host ?? []
+    if (!declared.includes(name)) {
+      return refuse(`host_data refused: "${name}" is not in this app's "uses.host" — declare it in centralu.app.json: "uses": { "host": ["${name}"] }`)
+    }
+    const host = this.host
+    if (!host) return refuse('host_data is unavailable: this Centralu has no host data to give')
+    const data = await host.hostData(name, app.ref)
+    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
   }
 
   /**

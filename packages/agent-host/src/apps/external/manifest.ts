@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { mcpServerNameError } from '../contract.js'
+import { HOST_CAPABILITIES, isHostCapability } from './capabilities.js'
 
 /**
  * 외부 앱의 매니페스트 `centralu.app.json` (M4 A-1).
@@ -56,7 +57,11 @@ export function toolNameError(name: string): string | null {
 const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/
 const RESERVED_ENV_PREFIXES = ['CENTRALU_', 'CC_'] as const
 
-/** `uses.host`의 능력 이름 — 어휘는 D-3이 정한다. 지금은 모양만 본다 */
+/**
+ * `uses.host`의 능력 이름의 모양. 어휘(닫힌 목록)는 `capabilities.ts`가 정한다 — 모양이 틀린 이름은 매니페스트의 오류이고,
+ * 모양은 맞는데 모르는 이름은 경고다(`parseManifest`): 새 Centralu가 더한 능력을 옛 Centralu가 만나면 앱 전체를 멈추기보다
+ * 그 능력만 거절하는 편이 맞다(모르는 필드를 경고만 하는 것과 같은 이유).
+ */
 const HOST_CAPABILITY = /^[a-z][a-z0-9_.-]{0,63}$/
 
 /**
@@ -189,6 +194,9 @@ export function parseManifest(text: string): ManifestResult {
   const parsed = ManifestSchema.safeParse(raw, { reportInput: true })
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues.map(describeIssue).join('; '), warnings }
+  }
+  for (const h of parsed.data.uses.host ?? []) {
+    if (!isHostCapability(h)) warnings.push(`uses.host: Centralu가 모르는 능력입니다 — "${h}". 줄 수 있는 것: ${HOST_CAPABILITIES.join(', ')} (부탁하면 거절됩니다)`)
   }
   return { ok: true, manifest: parsed.data, warnings }
 }

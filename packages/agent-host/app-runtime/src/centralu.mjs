@@ -9,6 +9,7 @@
  *   centralu.uiResource(server, name, uri, htmlUrl) serve a screen as an MCP App resource
  *   centralu.agent(prompt, { schema, tool })       ask Centralu's agent (over fd 3)
  *   centralu.callApp(app, tool, args)              call another app's tool (over fd 3)
+ *   centralu.host(name)                            read Centralu data declared in uses.host (over fd 3)
  *   centralu.readJson / writeJson                  state files in the app's data folder
  *   centralu.dataDir                               CENTRALU_APP_DATA (outside the app folder)
  */
@@ -167,6 +168,17 @@ export const centralu = {
   async callApp(app, tool, args = {}) {
     const r = await askBroker(`centralu.callApp(${JSON.stringify(app)}, ${JSON.stringify(tool)})`, 'call_app', { app, tool, args })
     return r.structuredContent ?? textOf(r)
+  },
+
+  /**
+   * Reads one piece of Centralu's own data, by name, as JSON. The names are a closed list:
+   * "sessions.list" (this project's sessions, or all of them for a user-folder app: the names shown in
+   * the sidebar and their states, never the conversations) and "git.status" (this project's branch and changed files; project apps
+   * only). Declare each one in "uses": { "host": [...] }. Only inside a tool handler.
+   */
+  async host(name) {
+    const r = await askBroker(`centralu.host(${JSON.stringify(name)})`, 'host_data', { name })
+    return r.structuredContent ?? JSON.parse(textOf(r))
   },
 
   /** Reads `<data folder>/<file>` as JSON, or `fallback` if the file does not exist yet. */

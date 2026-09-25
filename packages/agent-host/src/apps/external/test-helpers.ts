@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import type { AppRunListed, AppRunRow, RunLedger } from './runs.js'
+import type { BrokerHost } from './desk.js'
 
 /**
  * 외부 앱 테스트가 함께 쓰는 손 — 앱 폴더를 심고, 조건이 설 때까지 기다린다.
@@ -66,5 +67,19 @@ export function memoryLedger(): RunLedger & { rows: AppRunRow[] } {
         .map((r) => ({ ...r, failure: null })),
     prune: () => 0,
     settleUnfinished: () => 0,
+  }
+}
+
+/**
+ * 시험이 쓰는 host의 몸통(D) — 시험이 준 것만 채우고 나머지는 "이 시험에서는 부르지 않는다"로 던진다. 부르지 않을 몸통을
+ * 조용히 성공시키면, 부르지 말아야 할 때 불린 것을 시험이 못 본다.
+ */
+export function fakeBrokerHost(over: Partial<BrokerHost>): BrokerHost {
+  const never = (what: string) => () => Promise.reject(new Error(`${what} is not part of this test`))
+  return {
+    defaultAgentTool: () => 'claude',
+    runAgent: never('runAgent'),
+    hostData: never('hostData'),
+    ...over,
   }
 }

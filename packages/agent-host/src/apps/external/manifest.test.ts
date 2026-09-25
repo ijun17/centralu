@@ -99,6 +99,23 @@ describe('매니페스트', () => {
     expect(extra.warnings).toEqual(['모르는 필드는 무시합니다: view.pinned'])
   })
 
+  it('uses.agent는 true 또는 도구 이름의 목록이다 (D-1)', () => {
+    expect(parse({ uses: { agent: true } }).ok).toBe(true)
+    expect(parse({ uses: { agent: ['claude', 'codex'] } }).ok).toBe(true)
+    const bad = parse({ uses: { agent: ['Claude Code'] } })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.error).toContain('에이전트 도구 이름의 모양이 아닙니다')
+  })
+
+  it('uses.host는 닫힌 목록이다 — 모르는 이름은 경고(부탁하면 거절), 모양이 틀린 이름은 오류 (D-3)', () => {
+    const known = parse({ uses: { host: ['sessions.list', 'git.status'] } })
+    expect(known).toMatchObject({ ok: true, warnings: [] })
+    const unknown = parse({ uses: { host: ['git.stat'] } })
+    expect(unknown.ok).toBe(true)
+    expect(unknown.warnings).toEqual(['uses.host: Centralu가 모르는 능력입니다 — "git.stat". 줄 수 있는 것: sessions.list, git.status (부탁하면 거절됩니다)'])
+    expect(parse({ uses: { host: ['Git Status'] } }).ok).toBe(false)
+  })
+
   it('uses.apps의 id도 같은 이름 규칙을 따른다', () => {
     expect(parse({ uses: { apps: ['other-app'] } }).ok).toBe(true)
     expect(parse({ uses: { apps: ['Other_App'] } }).ok).toBe(false)
