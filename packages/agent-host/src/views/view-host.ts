@@ -28,12 +28,17 @@ export type AppRef = { projectId: string | null; appId: string }
  */
 export type OriginMode = 'opaque' | 'app'
 
-/** 앱 런타임이 채우는 쪽 */
+/** 앱 런타임이 채우는 쪽 (host에서는 app-view-source.ts가 런타임에 잇는다) */
 export interface ViewSource {
   /** MCP `resources/read`의 답을 그대로. 앱을 처음 필요할 때 띄우는 것도 저쪽의 일이다 */
   readResource(app: AppRef, uri: string): Promise<unknown>
   /** 없으면 불투명이다. 매니페스트나 가져오기가 정할 일이라 여기서는 기본만 둔다 */
   originMode?(app: AppRef): OriginMode
+  /**
+   * 화면 하나가 앱을 붙든다. 열린 화면이 있는 앱은 쉬는 앱으로 내리지 않는다(A-3). 돌려받은
+   * 함수가 놓는다. 앱이 없으면 던진다 — 없는 앱의 화면은 열리지 않는다.
+   */
+  retain?(app: AppRef): () => void
 }
 
 export type ViewFrame = {
@@ -45,7 +50,14 @@ export type ViewFrame = {
   sandbox: { csp: Required<ViewCspDomains>; permissions: ViewPermissions }
 }
 
-type Instance = { id: string; app: AppRef; uri: string; doc: ViewDocument | null }
+type Instance = {
+  id: string
+  app: AppRef
+  uri: string
+  doc: ViewDocument | null
+  /** 런타임에 붙든 것을 놓는다. 인스턴스가 사라지는 모든 길(닫기, 상한 밀어내기, 종료)이 부른다 */
+  release: (() => void) | null
+}
 
 export type ViewHostOptions = {
   /** host 포트의 HTTP 비밀 (transport/http.ts). 앱별 출처의 비밀도 여기서 파생한다 */
@@ -65,7 +77,7 @@ export type ViewHostOptions = {
  * 것부터 버린다. 버린 인스턴스의 화면은 다시 열 때 404를 받는다. 대화 안에서 살아 있는 화면은
  * 최근 몇 개뿐이라(플랜 "화면이 뜨는 두 자리") 이 수에 닿을 일이 드물다.
  */
-const MAX_INSTANCES = 1000
+export const MAX_INSTANCES = 1000
 
 const INSTANCE_ID = /^[A-Za-z0-9_-]{16,64}$/
 
@@ -101,18 +113,26 @@ export class ViewHost {
     return `${app.projectId ?? '_user'}/${app.appId}`
   }
 
+  /**
+   * 화면 인스턴스를 연다. 열려 있는 동안 앱은 쉬는 앱이 아니다(플랜 A-3: 열린 화면도 진행 중인
+   * 호출도 없을 때만 내린다). 사람이 화면을 열어 두고 몇 분 손대지 않았다고 앱을 내리면, 다음
+   * 누름은 앱이 다시 뜨기를 기다려야 한다.
+   */
   open(app: AppRef, uri: string): { instanceId: string } {
+    const ref = { projectId: app.projectId ?? null, appId: app.appId }
+    // 붙드는 것이 먼저다. 없는 앱이면 여기서 던지고, 인스턴스는 생기지 않는다
+    const release = this.opts.source?.retain?.(ref) ?? null
     const id = randomBytes(16).toString('base64url')
     if (this.instances.size >= MAX_INSTANCES) {
       const oldest = this.instances.keys().next().value
-      if (oldest !== undefined) this.instances.delete(oldest)
+      if (oldest !== undefined) this.drop(oldest)
     }
-    this.instances.set(id, { id, app: { projectId: app.projectId ?? null, appId: app.appId }, uri, doc: null })
+    this.instances.set(id, { id, app: ref, uri, doc: null, release })
     return { instanceId: id }
   }
 
   close(instanceId: string): void {
-    this.instances.delete(instanceId)
+    this.drop(instanceId)
   }
 
   /**
@@ -169,6 +189,7 @@ export class ViewHost {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    for (const id of [...this.instances.keys()]) this.drop(id)
     const servers = await Promise.allSettled([...this.origins.values()])
     this.origins.clear()
     await Promise.all(
@@ -181,6 +202,14 @@ export class ViewHost {
           : undefined,
       ),
     )
+  }
+
+  /** 인스턴스를 지우고 붙든 앱을 놓는다. 두 번 불러도 한 번만 놓는다 */
+  private drop(instanceId: string): void {
+    const inst = this.instances.get(instanceId)
+    if (!inst) return
+    this.instances.delete(instanceId)
+    inst.release?.()
   }
 
   private source(): ViewSource {

@@ -3,7 +3,7 @@ import type { AppBridge, McpUiHostContext } from '@modelcontextprotocol/ext-apps
 import { APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
-import { TEXT_SCALES, useStore } from '../../store/store.js'
+import { TEXT_SCALES, externalAppKey, useStore } from '../../store/store.js'
 
 /**
  * 앱 화면 한 장 (M4 B-3c, 스파이크 S-1 `harness/src/host.ts`).
@@ -48,8 +48,12 @@ export type AppFrameProps = {
   toolResult?: AppToolResult
   /**
    * "이 앱의 상태가 바뀌었다" (B-3d). 값이 바뀔 때마다 화면에 우리 확장 알림
-   * `centralu/notifications/changed`를 보낸다. 어디서 오는지는 부모가 정한다(앱의 도구 호출이
-   * 끝날 때마다 host가 알린다, 플랜 "열린 화면이 같은 값을 보는 법").
+   * `centralu/notifications/changed`를 보낸다.
+   *
+   * 주지 않으면 스토어의 그 앱 카운터를 쓴다(`externalAppChanges`). host는 앱에 닿은 호출이
+   * 끝날 때마다 `external_app_state_changed`를 알리고, 스토어가 (프로젝트, 앱)마다 센다(플랜
+   * "열린 화면이 같은 값을 보는 법"). 그래서 어느 부모가 이 화면을 띄우든 배선 없이 갱신을
+   * 받는다. 값을 주는 부모는 그 신호를 스스로 정한다.
    */
   changeSignal?: number
   /** 화면이 대화에 보내는 말(`ui/message`). 없으면 거절로 답한다. 어디로 보낼지는 부모가 정한다 */
@@ -143,6 +147,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
 ) {
   const platform = usePlatform()
   const scale = TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
+  const heard = useStore((s) => s.externalAppChanges[externalAppKey(projectId, appId)])
+  const signal = changeSignal ?? heard
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<AppBridge | null>(null)
@@ -157,8 +163,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const scaleRef = useRef(scale)
   scaleRef.current = scale
   const sent = useRef({ input: false, result: false, change: undefined as number | undefined })
-  const changeRef = useRef(changeSignal)
-  changeRef.current = changeSignal
+  const changeRef = useRef(signal)
+  changeRef.current = signal
 
   /** 링크는 사람이 확인한 뒤 연다. 먼저 온 질문이 남아 있으면 그것은 거절로 닫는다 */
   const linkAskRef = useRef<LinkAsk | null>(null)
@@ -304,11 +310,11 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   // B-3d: 앱의 상태가 바뀌었다 — 초기화 뒤, 값이 달라질 때마다 한 번
   useEffect(() => {
     const b = bridgeRef.current
-    if (phase !== 'ready' || !b || changeSignal === undefined) return
-    if (sent.current.change === changeSignal) return
-    sent.current.change = changeSignal
+    if (phase !== 'ready' || !b || signal === undefined) return
+    if (sent.current.change === signal) return
+    sent.current.change = signal
     void b.notification({ method: CHANGED_NOTIFICATION, params: {} })
-  }, [phase, changeSignal])
+  }, [phase, signal])
 
   useImperativeHandle(
     ref,

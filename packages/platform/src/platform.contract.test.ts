@@ -3,9 +3,10 @@
  * 구현이 갈라지면 여기서 잡힌다 — Tauri 구현이 추가되면 세 번째 항목으로 넣는다.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, posix, win32 } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
 import { HostServer } from '../../agent-host/src/transport/server.js'
 import { SessionManager } from '../../agent-host/src/sessions/manager.js'
@@ -14,6 +15,9 @@ import { createRpcHandler } from '../../agent-host/src/rpc.js'
 import { UpdateService } from '../../agent-host/src/updates.js'
 import { ViewHost } from '../../agent-host/src/views/view-host.js'
 import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
+import { ExternalApps } from '../../agent-host/src/apps/external/runtime.js'
+import { PROJECT_APPS, plantApp } from '../../agent-host/src/apps/external/test-helpers.js'
+import { runtimeViewSource } from '../../agent-host/src/app-view-source.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
 import { APP_VERSION } from '@cc/protocol'
@@ -539,17 +543,89 @@ describe('Platform 계약: 앱 화면 (web + 실 host)', () => {
       const res = await platform.apps.readResource('notes', 'ui://notes/data', { projectId: 'p1', instanceId })
       expect(res.contents[0]).toMatchObject({ uri: 'ui://notes/data', text: '<p>v</p>' })
       expect(reads.at(-1)).toBe('p1/notes ui://notes/data')
-
-      // 도구 호출은 사람의 호출과 같은 문(apps.invoke)으로 가고, 답은 MCP 결과 모양이다
-      const r = await platform.apps.callTool('control', 'control_create_task', { title: 42 })
-      expect(r.isError).toBe(true)
-      expect(r.content[0]).toMatchObject({ type: 'text' })
     } finally {
       await platform.dispose()
       await mgr.disposeAll()
       await views.dispose()
       await server.close()
       store.close()
+    }
+  })
+})
+
+/**
+ * 화면의 도구 호출 (M4 B-4 `oncalltool`) — web 구현 → `apps.invoke` → 외부 앱 런타임 → 진짜 앱
+ * 프로세스(런타임 픽스처의 `view` 모드). 화면이 받는 것은 앱이 준 MCP 결과 그대로여야 한다.
+ */
+describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', () => {
+  it('앱의 답이 structuredContent·isError·_meta까지 그대로 오고, 앱에 닿지 못한 호출은 이유가 담긴 isError다', async () => {
+    const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-apps-')))
+    const projRoot = join(fixture, 'proj')
+    mkdirSync(join(fixture, 'data'))
+    plantApp(join(projRoot, ...PROJECT_APPS), 'slider', {
+      server: {
+        command: process.execPath,
+        args: [fileURLToPath(new URL('../../agent-host/src/apps/external/test-fixtures/app.mjs', import.meta.url)), '--mode', 'view'],
+      },
+    })
+    const store = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    const project = await mgr.addProject(projRoot)
+    mgr.setProjectTrusted(project.id, true)
+    const rt = new ExternalApps({
+      projects: () => store.projectRoots(),
+      dataRoot: join(fixture, 'data'),
+      reservedIds: ['control'],
+      timing: { graceMs: 1_000, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    })
+    rt.refresh()
+    let port: number | null = null
+    const views = new ViewHost({
+      secret: 'contract-app-secret-0123456789abcdefgh',
+      allowedOrigins: ['http://127.0.0.1:5174'],
+      source: runtimeViewSource(rt),
+      ports: new OriginPorts({ load: () => null, save: () => {} }, { log: () => {} }),
+      hostPort: () => port,
+      log: () => {},
+    })
+    const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt, views }) })
+    port = await server.listen()
+    const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
+    const from = { projectId: project.id }
+    try {
+      await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
+
+      const ok = await platform.apps.callTool('slider', 'set_interval', { seconds: 9 }, from)
+      expect(ok).toMatchObject({
+        content: [{ type: 'text', text: 'interval 9' }],
+        structuredContent: { interval: 9 },
+        _meta: { 'fixture/served-by': expect.any(Number) },
+      })
+      expect(ok.isError).toBeFalsy()
+      // 상태는 앱 프로세스에 산다 — 다음 읽기가 같은 값을 본다
+      expect((await platform.apps.callTool('slider', 'get_interval', {}, from)).structuredContent).toEqual({ interval: 9 })
+
+      // 앱이 실패로 답했다 — 실패의 구조도 화면의 것이다
+      const failed = await platform.apps.callTool('slider', 'set_interval', { seconds: -1 }, from)
+      expect(failed).toMatchObject({ isError: true, structuredContent: { field: 'seconds', got: -1 }, content: [{ type: 'text', text: 'seconds must be positive' }] })
+
+      // host가 앱에 보내지 않았다(화면에 열리지 않은 도구) — 이유가 결과로 온다
+      const refused = await platform.apps.callTool('slider', 'agent_only', {}, from)
+      expect(refused.isError).toBe(true)
+      expect(refused.structuredContent).toBeUndefined()
+      expect(JSON.stringify(refused.content)).toContain('visibility')
+
+      // 화면은 내장 앱의 문(projectId 없는 apps.invoke)으로 들어가지 못한다 — 사용자 폴더에 control은 없다
+      await expect(platform.apps.callTool('control', 'control_notify', { text: 'x' })).rejects.toThrow(/그런 앱이 없습니다: user\/control/)
+    } finally {
+      await platform.dispose()
+      await mgr.disposeAll()
+      await views.dispose()
+      await rt.dispose()
+      await server.close()
+      store.close()
+      rmSync(fixture, { recursive: true, force: true })
     }
   })
 })

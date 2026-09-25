@@ -13,6 +13,9 @@ import '../../../../packages/ui/src/styles/index.css'
  * 띄우고, `window.__viewFrame`으로 그 `frame()`을 꽂는다. 그래서 프록시·CSP·비밀 경로는 모두
  * 실물이다.
  *
+ * 스토어는 앱과 같은 길(`attach`)로 목의 이벤트 흐름에 붙는다. 그래서 host의 방송(목의
+ * `emit`)이 스토어를 지나 AppFrame에 닿는 배선도 실물이다.
+ *
  * 개발 서버에서만 뜬다. `vite build`의 입력은 index.html 하나라 배포물에 들어가지 않는다.
  */
 
@@ -40,6 +43,7 @@ mock.viewFrameProvider = (appId, instanceId, opts) => {
   if (!window.__viewFrame) throw new Error('No view host is attached to this harness')
   return window.__viewFrame(appId, instanceId, opts)
 }
+void useStore.getState().attach(mock)
 
 let frames: Mounted[] = []
 const listeners = new Set<() => void>()

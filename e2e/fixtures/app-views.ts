@@ -8,8 +8,8 @@ import { VIEW_MIME_TYPE } from '../../packages/agent-host/src/views/view-documen
 /**
  * 앱 화면 e2e의 host 쪽 (M4 B-3).
  *
- * 앱 런타임은 이 브랜치에 없다. 그래서 문서를 읽는 쪽(`ViewSource`)만 대역이고, 나머지는
- * 진짜 host 코드다. 같은 비밀 게이트의 HostServer, 같은 ViewHost(프록시 페이지, CSP, 앱별
+ * 문서를 읽는 쪽(`ViewSource`)만 대역이고(앱 프로세스를 띄우지 않으려고. 런타임과의 이음새는
+ * agent-host의 app-views.test.ts가 진짜 앱으로 본다), 나머지는 진짜 host 코드다. 같은 비밀 게이트의 HostServer, 같은 ViewHost(프록시 페이지, CSP, 앱별
  * 출처 포트)를 쓴다. 화면 HTML은 공식 ext-apps 2.x의 `App`을 쓰는 작은 앱이다. 번들을 그대로
  * 안에 싣는다. 규격의 기본 CSP는 바깥 스크립트를 막으므로 실제 앱도 이렇게 한 파일로 온다(S-6).
  */

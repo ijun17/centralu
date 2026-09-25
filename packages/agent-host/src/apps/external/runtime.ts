@@ -159,7 +159,6 @@ type Life = {
    */
   epoch: number
   inflight: number
-  views: number
   idle: NodeJS.Timeout | null
   /** 지금 프로세스의 도구 목록(이름·공개 범위 규칙을 통과한 것)과, 걸러 낸 이유 */
   tools: AppTool[] | null
@@ -209,6 +208,12 @@ export class ExternalApps {
   private secrets: SecretStore
   /** 실행 id → 열린 실행. 중개의 문지기가 여기에 묻는다 */
   private openRuns = new Map<string, OpenRun>()
+  /**
+   * (범위, 앱 id) → 열린 화면 수. 앱 칸(AppEntry)이 아니라 이름에 묶는다: 매니페스트가 바뀌면
+   * 칸은 새로 서지만 사람 앞의 화면은 그대로 열려 있다. 칸에 두면 새 칸은 화면을 0개로 알고,
+   * 화면이 열린 앱을 쉬는 앱으로 내린다.
+   */
+  private viewHolds = new Map<string, number>()
   private pipeSeq = 0
 
   constructor(private deps: ExternalAppsDeps) {
@@ -401,20 +406,33 @@ export class ExternalApps {
   }
 
   /**
-   * 화면 하나가 이 앱을 붙들고 있다 (B가 부른다). 열린 화면이 있는 동안은 쉬는 앱으로
-   * 치지 않는다 — 돌려받은 함수를 부르면 놓는다.
+   * 화면 하나가 이 앱을 붙들고 있다 (ViewHost의 open이 부른다). 열린 화면이 있는 동안은 쉬는
+   * 앱으로 치지 않는다 — 돌려받은 함수를 부르면 놓는다(close).
    */
   retainView(ref: AppRef): () => void {
     const e = this.require(ref)
-    e.life.views += 1
+    const key = this.holdKey(e.ref)
+    this.viewHolds.set(key, (this.viewHolds.get(key) ?? 0) + 1)
     this.clearIdle(e)
     let released = false
     return () => {
       if (released) return
       released = true
-      e.life.views -= 1
-      this.armIdle(e)
+      const left = (this.viewHolds.get(key) ?? 1) - 1
+      if (left > 0) this.viewHolds.set(key, left)
+      else this.viewHolds.delete(key)
+      // 붙들 때의 칸이 아니라 **지금의** 칸 — 그사이 매니페스트가 바뀌었으면 새 칸이 쉬기 시작한다
+      const now = this.find(ref)
+      if (now) this.armIdle(now)
     }
+  }
+
+  /**
+   * 화면의 출처 방식 (B-3) — 매니페스트의 `view.origin`. 앱이 없거나 매니페스트가 틀렸으면
+   * 불투명이다: 모르는 앱에 진짜 출처(저장소가 남는 포트)를 내주지 않는다.
+   */
+  viewOrigin(ref: AppRef): 'opaque' | 'app' {
+    return this.find(ref)?.manifest?.view?.origin ?? 'opaque'
   }
 
   /**
@@ -592,12 +610,21 @@ export class ExternalApps {
   private armIdle(e: AppEntry): void {
     this.clearIdle(e)
     const L = e.life
-    if (L.inflight > 0 || L.views > 0 || !L.proc) return
+    if (L.inflight > 0 || this.viewsOf(e) > 0 || !L.proc) return
     L.idle = setTimeout(() => {
       L.idle = null
-      if (L.inflight === 0 && L.views === 0) void this.halt(e, `idle for ${this.timing.idleMs}ms`)
+      if (L.inflight === 0 && this.viewsOf(e) === 0) void this.halt(e, `idle for ${this.timing.idleMs}ms`)
     }, this.timing.idleMs)
     L.idle.unref()
+  }
+
+  private viewsOf(e: AppEntry): number {
+    return this.viewHolds.get(this.holdKey(e.ref)) ?? 0
+  }
+
+  /** 열린 화면의 열쇠. 경로에 쓰지 않으므로 프로젝트 id의 모양을 따지지 않는다(scopeDir와 다르다) */
+  private holdKey(ref: AppRef): string {
+    return `${ref.projectId ?? USER_SCOPE}/${ref.appId}`
   }
 
   private clearIdle(e: AppEntry): void {
@@ -673,9 +700,13 @@ export class ExternalApps {
   // ── 발견 ──────────────────────────────────────────────────────────────────────
 
   private require(ref: AppRef): AppEntry {
-    const e = this.scopes.get(ref.projectId ?? USER_SCOPE)?.apps.get(ref.appId)
+    const e = this.find(ref)
     if (!e) throw new AppUnavailableError(`그런 앱이 없습니다: ${ref.projectId ?? 'user'}/${ref.appId}`)
     return e
+  }
+
+  private find(ref: AppRef): AppEntry | undefined {
+    return this.scopes.get(ref.projectId ?? USER_SCOPE)?.apps.get(ref.appId)
   }
 
   private info(e: AppEntry): ExternalAppInfo {
@@ -761,7 +792,6 @@ export class ExternalApps {
         verdict: undefined,
         epoch: 0,
         inflight: 0,
-        views: 0,
         idle: null,
         tools: null,
         toolWarnings: [],
