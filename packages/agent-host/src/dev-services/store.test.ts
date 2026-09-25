@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 37
+const LATEST_SCHEMA = 38
 
 function seeded() {
   const s = new Store()
@@ -1406,6 +1406,59 @@ describe('실행 기록의 사슬 (M4 D-6)', () => {
     expect(s.listAppRuns('p1', 'notes', 10)).toEqual([
       expect.objectContaining({ id: 'r1', kind: 'tool', sessionId: null, tool: 'echo', status: 'ok' }),
     ])
+    s.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — run_agent 줄의 토큰과, 앱마다·기간마다 더한 값.
+ */
+describe('앱이 부탁한 에이전트의 쓰임 (M4 D-5)', () => {
+  const t0 = 1_760_000_000_000
+  const row = (id: string, over: Record<string, unknown>) => ({
+    id, projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'app', callerSessionId: null, parentRunId: 'r0',
+    status: 'running', durationMs: null, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: t0, sessionId: null, ...over,
+  })
+
+  it('세션이 선 run_agent 줄만 센다 — 시간과 토큰을 더하고, 토큰을 알려 주지 않은 실행은 토큰에서만 빠진다', () => {
+    const s = new Store()
+    s.beginAppRun(row('old', { createdAt: t0 - 10_000, sessionId: 's0' }))
+    s.endAppRun('old', { status: 'ok', durationMs: 7_000, error: null, tokens: { input: 5_000, output: 500 } })
+    s.beginAppRun(row('a', { sessionId: 's1' }))
+    s.endAppRun('a', { status: 'ok', durationMs: 4_000, error: null, tokens: { input: 1_200, output: 80 } })
+    s.beginAppRun(row('b', { sessionId: 's2', createdAt: t0 + 1 }))
+    s.endAppRun('b', { status: 'cancelled', durationMs: 2_500, error: 'stopped', tokens: null })
+    s.beginAppRun(row('running', { sessionId: 's3', createdAt: t0 + 2 }))
+    // 세우지 못한 부탁, 다른 부탁, 다른 앱의 에이전트
+    s.beginAppRun(row('refused', { status: 'rejected', createdAt: t0 + 3 }))
+    s.beginAppRun(row('data', { tool: 'host_data', sessionId: null, createdAt: t0 + 4 }))
+    s.beginAppRun(row('other', { appId: 'other', sessionId: 's9', createdAt: t0 + 5 }))
+
+    expect(s.appAgentUse('p1', 'notes', t0)).toEqual({ runs: 3, durationMs: 6_500, tokens: { input: 1_200, output: 80 } })
+    expect(s.appAgentUse('p1', 'notes', t0 - 60_000)).toEqual({ runs: 4, durationMs: 13_500, tokens: { input: 6_200, output: 580 } })
+    expect(s.appAgentUse('p1', 'nobody', 0)).toEqual({ runs: 0, durationMs: 0, tokens: null })
+    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a')?.tokens).toEqual({ input: 1_200, output: 80 })
+    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b')?.tokens).toBeNull()
+  })
+
+  it('v37의 기록에는 토큰의 칸이 생기고 옛 줄은 비어 있다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v38-'))
+    const file = join(dir, 'store.db')
+    const old = new Database(file)
+    old.exec(`CREATE TABLE app_runs (
+      id TEXT PRIMARY KEY, project_id TEXT, app_id TEXT NOT NULL, tool TEXT NOT NULL, caller_kind TEXT NOT NULL,
+      caller_session_id TEXT, parent_run_id TEXT, status TEXT NOT NULL, duration_ms INTEGER, args_digest TEXT NOT NULL,
+      args_summary TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'tool', session_id TEXT);
+      CREATE TABLE app_run_failures (run_id TEXT PRIMARY KEY, project_id TEXT, app_id TEXT NOT NULL, args TEXT NOT NULL, result TEXT, created_at INTEGER NOT NULL);`)
+    old.prepare(`INSERT INTO app_runs VALUES ('r1', 'p1', 'notes', 'run_agent', 'app', NULL, 'r0', 'ok', 3, 'd', '{}', NULL, 1, 'broker', 's1')`).run()
+    old.pragma('user_version = 37')
+    old.close()
+
+    const s = new Store(file)
+    expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+    expect(s.listAppRuns('p1', 'notes', 10)).toEqual([expect.objectContaining({ id: 'r1', kind: 'broker', sessionId: 's1', tokens: null })])
+    expect(s.appAgentUse('p1', 'notes', 0)).toEqual({ runs: 1, durationMs: 3, tokens: null })
     s.close()
     rmSync(dir, { recursive: true, force: true })
   })

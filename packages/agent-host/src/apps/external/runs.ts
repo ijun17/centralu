@@ -38,21 +38,34 @@ export type AppRunRow = {
   sessionId: string | null
 }
 
+/** 에이전트가 쓴 토큰 (M4 D-5) — 도구가 알려 준 만큼. 도구가 말하지 않았으면 줄에 없다(null) */
+export type AgentTokens = { input: number; output: number }
+
 /** 읽어 온 한 줄 — 저장소는 글자로 돌려준다(열린 문자열), 모양은 프로토콜이 가린다 */
 export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status' | 'kind'> & {
   callerKind: string
   status: string
   kind: string
+  /** run_agent 줄의 토큰 (D-5) */
+  tokens: AgentTokens | null
   failure: { args: string; result: string | null } | null
 }
 
+/**
+ * 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 한 기간 동안 **실제로 선** 에이전트 실행(세션이 선 run_agent 줄)의 수, 걸린 시간의
+ * 합, 토큰의 합. 거절된 부탁은 에이전트를 세우지 않았으므로 세지 않는다. 토큰은 알려 준 실행의 것만 더한다 — 하나도 없으면 null.
+ */
+export type AgentUse = { runs: number; durationMs: number; tokens: AgentTokens | null }
+
 export type RunLedger = {
   begin(row: AppRunRow): void
-  end(id: string, end: { status: AppRunRow['status']; durationMs: number; error: string | null }): void
+  end(id: string, end: { status: AppRunRow['status']; durationMs: number; error: string | null; tokens?: AgentTokens | null }): void
   /** 도는 중인 줄에 에이전트 세션을 잇는다 (D-6) — 세션이 서는 순간, 끝나기 전에 */
   link(id: string, sessionId: string): void
   keepFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void
   list(projectId: string | null, appId: string, limit: number): AppRunListed[]
+  /** 이 앱이 `since` 뒤로 부탁한 에이전트의 쓰임 (D-5) */
+  agentUse(projectId: string | null, appId: string, since: number): AgentUse
   prune(before: number): number
   settleUnfinished(error: string): number
 }

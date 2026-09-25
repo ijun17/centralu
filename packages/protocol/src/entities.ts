@@ -172,6 +172,8 @@ export const AppRun = z.object({
   createdAt: z.number(),
   /** run_agent가 세운 에이전트 세션 (M4 D-6) — 기록 판이 그 세션으로 건너가는 자리. 세션이 서기 전과 다른 줄은 null */
   sessionId: z.string().nullable(),
+  /** run_agent 줄의 토큰 (M4 D-5) — 도구가 알려 준 입력·출력. 다른 줄, 그리고 도구가 말하지 않은 실행은 null */
+  tokens: z.object({ input: z.number(), output: z.number() }).nullable(),
   failure: z.object({ args: z.string(), result: z.string().nullable() }).nullable(),
 })
 export type AppRun = z.infer<typeof AppRun>
@@ -213,6 +215,20 @@ export const AppPermission = z.object({
   current: z.boolean(),
 })
 export type AppPermission = z.infer<typeof AppPermission>
+
+/** 한 기간 동안 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 실제로 선 실행만(거절된 부탁은 세우지 않았다) */
+export const AgentUse = z.object({
+  runs: z.number(),
+  /** 끝난 실행이 걸린 시간의 합 — 도는 실행은 수에만 든다 */
+  durationMs: z.number(),
+  /** 도구가 알려 준 실행의 토큰 합. 하나도 알려 주지 않았으면 null */
+  tokens: z.object({ input: z.number(), output: z.number() }).nullable(),
+})
+export type AgentUse = z.infer<typeof AgentUse>
+
+/** 한 앱의 에이전트 쓰임 (M4 D-5) — 지난 하루와 기록이 남는 30일 */
+export const AppUsage = z.object({ day: AgentUse, month: AgentUse })
+export type AppUsage = z.infer<typeof AppUsage>
 
 export const AppErrorBundle = z.object({
   kind: z.enum(['start', 'crash', 'tool']),

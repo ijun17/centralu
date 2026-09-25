@@ -161,11 +161,12 @@ describe('기다림', () => {
   })
 
   it('같은 능력을 동시에 쓰려는 부탁 둘에는 물음이 하나만 선다', async () => {
-    plant('notes', { agent: true })
+    // host 데이터로 본다 — 에이전트는 한 앱에 하나씩만 돌아(D-5) 둘째가 물음 뒤에 거절된다
+    plant('notes', { host: ['sessions.list'] })
     autoAnswer = null
     make()
-    const a = ask('notes', 'run_agent', { prompt: 'a' })
-    const b = ask('notes', 'run_agent', { prompt: 'b' })
+    const a = ask('notes', 'host_data', { name: 'sessions.list' })
+    const b = ask('notes', 'host_data', { name: 'sessions.list' })
     await until(() => asked.length, (n) => n === 1)
     await new Promise((r) => setTimeout(r, 300))
     expect(asked).toHaveLength(1)

@@ -871,6 +871,19 @@ export class Store {
           this.db.exec(`CREATE INDEX IF NOT EXISTS idx_app_runs_parent ON app_runs(parent_run_id)`)
         },
       },
+      {
+        to: 38,
+        /**
+         * 앱이 부탁한 에이전트가 쓴 토큰 (M4 D-5) — run_agent 줄에 도구가 알려 준 입력·출력 토큰을 적는다. 기록 판이 앱마다
+         * "에이전트를 몇 번, 얼마나 오래, 얼마나 썼나"를 이 표에서 더한다(`appAgentUse`). 다른 줄과 옛 줄은 null이다.
+         */
+        run: () => {
+          const cols = this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]
+          if (cols.length === 0) return
+          if (!cols.some((c) => c.name === 'tokens_in')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN tokens_in INTEGER`)
+          if (!cols.some((c) => c.name === 'tokens_out')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN tokens_out INTEGER`)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1920,8 +1933,26 @@ export class Store {
     this.db.prepare(`UPDATE app_runs SET session_id = ? WHERE id = ?`).run(sessionId, id)
   }
 
-  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null }): void {
-    this.db.prepare(`UPDATE app_runs SET status = ?, duration_ms = ?, error = ? WHERE id = ?`).run(end.status, end.durationMs, end.error, id)
+  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null; tokens?: { input: number; output: number } | null }): void {
+    this.db
+      .prepare(`UPDATE app_runs SET status = ?, duration_ms = ?, error = ?, tokens_in = ?, tokens_out = ? WHERE id = ?`)
+      .run(end.status, end.durationMs, end.error, end.tokens?.input ?? null, end.tokens?.output ?? null, id)
+  }
+
+  /**
+   * 한 앱이 `since` 뒤로 부탁한 에이전트의 쓰임 (M4 D-5) — 세션이 선 run_agent 줄만(거절된 부탁은 에이전트를 세우지 않았다).
+   * 도는 중인 줄은 수에 들고 시간에는 아직 없다.
+   */
+  appAgentUse(projectId: string | null, appId: string, since: number): { runs: number; durationMs: number; tokens: { input: number; output: number } | null } {
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) as runs, COALESCE(SUM(duration_ms), 0) as durationMs, COUNT(tokens_in) as counted,
+                COALESCE(SUM(tokens_in), 0) as input, COALESCE(SUM(tokens_out), 0) as output
+         FROM app_runs
+         WHERE app_id = ? AND project_id IS ? AND kind = 'broker' AND tool = 'run_agent' AND session_id IS NOT NULL AND created_at >= ?`,
+      )
+      .get(appId, projectId, since) as { runs: number; durationMs: number; counted: number; input: number; output: number }
+    return { runs: r.runs, durationMs: r.durationMs, tokens: r.counted > 0 ? { input: r.input, output: r.output } : null }
   }
 
   /**
@@ -1952,7 +1983,11 @@ export class Store {
    * 부탁한 에이전트의 줄까지. 그래야 기록 판 하나에서 "화면이 누른 것 → 다른 앱 → 에이전트"가 한 사슬로 읽힌다.
    * 사슬 아래의 줄은 `CHAIN_ROWS_MAX`까지만 — 한 호출 안에서 부탁을 끝없이 거듭하는 앱이 판을 붙잡지 못하게.
    */
-  listAppRuns(projectId: string | null, appId: string, limit: number): (AppRunRecord & { failure: { args: string; result: string | null } | null })[] {
+  listAppRuns(
+    projectId: string | null,
+    appId: string,
+    limit: number,
+  ): (AppRunRecord & { tokens: { input: number; output: number } | null; failure: { args: string; result: string | null } | null })[] {
     const rows = this.db
       .prepare(
         `WITH RECURSIVE
@@ -1970,13 +2005,16 @@ export class Store {
          SELECT r.id, r.project_id as projectId, r.app_id as appId, r.kind, r.tool, r.caller_kind as callerKind,
                 r.caller_session_id as callerSessionId, r.parent_run_id as parentRunId, r.status,
                 r.duration_ms as durationMs, r.args_digest as argsDigest, r.args_summary as argsSummary,
-                r.error, r.created_at as createdAt, r.session_id as sessionId, f.args as failureArgs, f.result as failureResult,
+                r.error, r.created_at as createdAt, r.session_id as sessionId, r.tokens_in as tokensIn, r.tokens_out as tokensOut,
+                f.args as failureArgs, f.result as failureResult,
                 r.rowid as seq, r.id IN (SELECT id FROM roots) as isRoot
          FROM app_runs r LEFT JOIN app_run_failures f ON f.run_id = r.id
          WHERE r.id IN (SELECT id FROM chain)
          ORDER BY isRoot DESC, r.created_at DESC, r.rowid DESC LIMIT ?`,
       )
       .all(appId, projectId, limit, limit + CHAIN_ROWS_MAX) as (AppRunRecord & {
+      tokensIn: number | null
+      tokensOut: number | null
       failureArgs: string | null
       failureResult: string | null
       seq: number
@@ -1984,8 +2022,9 @@ export class Store {
     })[]
     // 뿌리를 먼저 채운 것은 자르는 순서일 뿐이다 — 돌려주는 것은 시간순(최근 것부터)이다
     rows.sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq)
-    return rows.map(({ failureArgs, failureResult, seq: _seq, isRoot: _isRoot, ...r }) => ({
+    return rows.map(({ failureArgs, failureResult, tokensIn, tokensOut, seq: _seq, isRoot: _isRoot, ...r }) => ({
       ...r,
+      tokens: tokensIn === null ? null : { input: tokensIn, output: tokensOut ?? 0 },
       failure: failureArgs === null ? null : { args: failureArgs, result: failureResult },
     }))
   }

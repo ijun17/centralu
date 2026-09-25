@@ -3903,7 +3903,12 @@ export class SessionManager {
    */
   async runAppAgent(
     req: AgentRunRequest,
-    ctx: { signal: AbortSignal; progress(message: string): void; onSession?(sessionId: string): void },
+    ctx: {
+      signal: AbortSignal
+      progress(message: string): void
+      onSession?(sessionId: string): void
+      onUsage?(tokens: { input: number; output: number }): void
+    },
   ): Promise<AgentRunResult> {
     const adapter = this.adapters.get(req.tool)
     if (!adapter) throw new Error(`${req.tool} is not an agent this Centralu has, so ${req.appName}'s request cannot run`)
@@ -3938,6 +3943,8 @@ export class SessionManager {
     const wait = new AgentRunWait(
       (message) => ctx.progress(message),
       () => this.meta.get(id)?.name ?? 'the agent session',
+      // 쓴 토큰은 부탁의 기록 줄에 남는다 — 기록 판이 앱마다 더해 보인다 (D-5)
+      (tokens) => ctx.onUsage?.(tokens),
     )
     this.agentRuns.set(id, wait)
     const onAbort = () => {

@@ -8,7 +8,7 @@ import { chainRuns } from './RunsPanel.jsx'
 
 const run = (id: string, createdAt: number, parentRunId: string | null = null): AppRun => ({
   id, projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: parentRunId ? 'app' : 'view', callerSessionId: null, parentRunId,
-  status: 'ok', durationMs: 1, argsDigest: 'd', argsSummary: '{}', error: null, createdAt, sessionId: null, failure: null,
+  status: 'ok', durationMs: 1, argsDigest: 'd', argsSummary: '{}', error: null, createdAt, sessionId: null, tokens: null, failure: null,
 })
 
 describe('사슬로 편다', () => {

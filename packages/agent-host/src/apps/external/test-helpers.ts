@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
-import type { AppRunListed, AppRunRow, RunLedger } from './runs.js'
+import type { AgentTokens, AppRunListed, AppRunRow, RunLedger } from './runs.js'
 import type { BrokerHost } from './desk.js'
 
 /**
@@ -52,13 +52,15 @@ export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs =
 export function memoryLedger(): RunLedger & { rows: AppRunRow[]; failures: { runId: string; args: string; result: string | null }[] } {
   const rows: AppRunRow[] = []
   const failures: { runId: string; args: string; result: string | null }[] = []
+  const tokens = new Map<string, AgentTokens>()
   return {
     rows,
     failures,
     begin: (r) => void rows.push({ ...r }),
-    end: (id, e) => {
+    end: (id, { tokens: t, ...e }) => {
       const r = rows.find((x) => x.id === id)
       if (r) Object.assign(r, e)
+      if (t) tokens.set(id, t)
     },
     link: (id, sessionId) => {
       const r = rows.find((x) => x.id === id)
@@ -70,7 +72,16 @@ export function memoryLedger(): RunLedger & { rows: AppRunRow[]; failures: { run
         .filter((r) => r.appId === appId && r.projectId === projectId)
         .reverse()
         .slice(0, limit)
-        .map((r) => ({ ...r, failure: null })),
+        .map((r) => ({ ...r, tokens: tokens.get(r.id) ?? null, failure: null })),
+    agentUse: (projectId, appId, since) => {
+      const ran = rows.filter((r) => r.appId === appId && r.projectId === projectId && r.kind === 'broker' && r.tool === 'run_agent' && r.sessionId && r.createdAt >= since)
+      const counted = ran.map((r) => tokens.get(r.id)).filter((t) => !!t)
+      return {
+        runs: ran.length,
+        durationMs: ran.reduce((n, r) => n + (r.durationMs ?? 0), 0),
+        tokens: counted.length ? { input: counted.reduce((n, t) => n + t.input, 0), output: counted.reduce((n, t) => n + t.output, 0) } : null,
+      }
+    },
     prune: () => 0,
     settleUnfinished: () => 0,
   }

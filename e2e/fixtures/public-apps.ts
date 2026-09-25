@@ -197,7 +197,9 @@ export async function startPublicAppsHost(
         .filter((r) => r.projectId === projectId && r.appId === appId)
         .reverse()
         .slice(0, limit)
-        .map((r) => ({ ...r, failure: null })),
+        .map((r) => ({ ...r, tokens: null, failure: null })),
+    // 이 시험의 앱은 에이전트를 부탁하지 않는다
+    agentUse: () => ({ runs: 0, durationMs: 0, tokens: null }),
     prune: () => 0,
     settleUnfinished: () => 0,
   }

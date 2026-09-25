@@ -36,8 +36,10 @@ export function finalAnswer(messages: readonly StoredMessage[]): string {
  *   error           턴이 실패했다(도구가 죽은 것 포함)
  *   limit_reached   사용량 한도 — 기다려도 이 턴은 풀리지 않는다
  *   승인·질문        사람을 기다린다 — 앱에 한 줄 알린다(앱이 멈춘 것이 아니라 사람을 기다린다는 것)
+ *   usage_update    쓴 토큰(D-5) — 결말과 상관없이 넘긴다. Claude는 턴의 결말 바로 앞에 세션 누적을 싣고(`result`의
+ *                   modelUsage), Codex는 스레드 누적을 싣는다. 부탁마다 새 세션이라 마지막 값이 곧 이 부탁의 몫이다
  *
- * 한 번 정해지면 그 뒤의 이벤트는 보지 않는다.
+ * 한 번 정해지면 그 뒤의 이벤트는 보지 않는다(토큰만 빼고).
  */
 export class AgentRunWait {
   /** 사람이 그 세션의 턴을 멈췄다 (`SessionManager.interrupt`) */
@@ -51,6 +53,7 @@ export class AgentRunWait {
   constructor(
     private notify: (message: string) => void,
     private sessionName: () => string,
+    private onUsage: (tokens: { input: number; output: number }) => void = () => {},
   ) {
     this.done = new Promise((resolve, reject) => (this.settle = { resolve, reject }))
     // 기다리는 쪽이 붙기 전에 실패해도 처리되지 않은 거절로 새지 않게
@@ -58,6 +61,7 @@ export class AgentRunWait {
   }
 
   onEvent(e: NormalizedEvent): void {
+    if (e.type === 'usage_update') return this.onUsage({ input: e.tokens.inputTokens, output: e.tokens.outputTokens })
     if (this.settled) return
     switch (e.type) {
       case 'turn_complete':

@@ -150,6 +150,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'apps.questions': {},
   'apps.permissions': { appId: 'no-such-app', projectId: P },
   'apps.forgetPermission': { appId: 'no-such-app', projectId: P, capability: 'agent:claude' },
+  'apps.usage': { appId: 'no-such-app', projectId: P },
 }
 
 /** 부를 수 없는 것과 그 이유 — 조용히 빼면 "다 봤다"로 읽힌다 */

@@ -14,7 +14,7 @@ import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
-import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AppRunListed, type RunLedger } from './runs.js'
+import { FAILURES_KEPT, RUN_RETENTION_MS, describeArgs, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
 import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
 import { SecretStore, redactor } from './secrets.js'
 import type { AppRef } from './ref.js'
@@ -53,7 +53,7 @@ export type { CapabilityBook, CapabilityDecision } from './capabilities.js'
 export { HOST_CAPABILITIES, type HostCapability } from './capabilities.js'
 
 /** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
-export type { RunLedger, AppRunRow, AppRunListed } from './runs.js'
+export type { RunLedger, AppRunRow, AppRunListed, AgentTokens, AgentUse } from './runs.js'
 /** 도구가 선언한 화면을 읽는 규칙도 이 문으로 나간다 — 대화 안 화면(B-1)이 고정 화면과 같은 판정을 쓴다 */
 export { resourceUriOf } from './visibility.js'
 
@@ -136,6 +136,8 @@ export type RuntimeTiming = {
    * 길면 사람이 떠난 자리에서 호출이 쌓이고, 더 짧으면 화면을 옮겨 다니는 사람이 답하기 전에 닫힌다.
    */
   capabilityQuestionMs: number
+  /** 한 앱이 에이전트를 몇 번 세웠나를 세는 창 (D-5, `AGENT_RUNS_PER_WINDOW`) — 1분. 시험이 줄인다 */
+  agentRateWindowMs: number
 }
 
 export const DEFAULT_TIMING: RuntimeTiming = {
@@ -159,6 +161,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   turnEndDebounceMs: 300,
   brokerKeepaliveMs: BROKER_KEEPALIVE_MS,
   capabilityQuestionMs: 5 * 60_000,
+  agentRateWindowMs: 60_000,
 }
 
 export type ExternalAppsDeps = {
@@ -344,10 +347,11 @@ export class ExternalApps {
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
         redactor: (ref) => redactor(this.secrets.all(this.appKey(ref))),
         origin: (runId) => this.chainOrigin(runId),
+        chain: (runId) => this.chainOf(runId),
         call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
       },
       deps.permissions ?? memoryCapabilityBook(),
-      () => this.timing.capabilityQuestionMs,
+      () => ({ questionMs: this.timing.capabilityQuestionMs, agentRateWindowMs: this.timing.agentRateWindowMs }),
       deps.runs ?? null,
     )
     this.secrets = new SecretStore(deps.dataRoot)
@@ -447,6 +451,33 @@ export class ExternalApps {
   /** 기억된 답 하나를 잊는다 (D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
   forgetPermission(ref: AppRef, capability: string): void {
     this.desk.forgetPermission(ref, capability)
+  }
+
+  /**
+   * 이 실행까지의 사슬 (D-5) — 사슬을 시작한 호출부터 이 실행까지의 (앱, 도구). 열린 실행만 따라간다: 아래의 호출은 부모가
+   * 열려 있는 동안에만 산다(부모가 끝나면 취소된다), 그래서 도는 부탁의 사슬은 끊기지 않는다.
+   */
+  private chainOf(runId: string): { ref: AppRef; tool: string }[] {
+    const path: { ref: AppRef; tool: string }[] = []
+    let run = this.openRuns.get(runId)
+    for (let hops = 0; run && hops < 32; hops++) {
+      path.unshift({ ref: run.entry.ref, tool: run.tool })
+      run = run.caller.kind === 'app' ? this.openRuns.get(run.caller.parentRunId) : undefined
+    }
+    return path
+  }
+
+  /**
+   * 한 앱이 부탁한 에이전트의 쓰임 (D-5) — 지난 하루와 기록이 남는 30일. 기록 판이 읽는다(`apps.usage`).
+   */
+  agentUse(ref: AppRef): { day: AgentUse; month: AgentUse } {
+    const now = Date.now()
+    const none = { runs: 0, durationMs: 0, tokens: null }
+    const ledger = this.deps.runs
+    return {
+      day: ledger?.agentUse(ref.projectId, ref.appId, now - 24 * 60 * 60 * 1000) ?? none,
+      month: ledger?.agentUse(ref.projectId, ref.appId, now - RUN_RETENTION_MS) ?? none,
+    }
   }
 
   /**

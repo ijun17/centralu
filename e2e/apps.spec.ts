@@ -588,6 +588,40 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
     })).toEqual(['focus', agentSession])
   })
 
+  test('D-5: 기록 판은 이 앱이 부탁한 에이전트의 쓰임을 보인다 — 지난 하루와 30일, 그리고 줄마다의 토큰', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid)])
+    const t0 = Date.UTC(2026, 8, 25, 3, 4, 5)
+    const row = {
+      id: 'ask', projectId: pid, appId: 'slider', kind: 'broker', tool: 'run_agent', callerKind: 'app', callerSessionId: null, parentRunId: null,
+      status: 'ok', durationMs: 4200, argsDigest: 'd', argsSummary: '{}', error: null, createdAt: t0, sessionId: null, tokens: { input: 1200, output: 80 }, failure: null,
+    }
+    await page.evaluate(({ key, runs }) => (window as any).__mock.appRuns.set(key, runs), { key: `${pid}/slider`, runs: [row] })
+
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await pinned.getByTestId('pinned-runs-toggle').click()
+    const panel = pinned.getByTestId('runs-panel')
+    await expect(panel.getByTestId('run-row')).toHaveCount(1)
+    await expect(panel.getByTestId('run-tokens')).toHaveText('1.3k tokens')
+    await expect(panel.getByTestId('run-tokens')).toHaveAttribute('title', 'in 1200 · out 80')
+    // 에이전트를 부탁한 적이 없다고 host가 말하면 쓰임의 칸은 서지 않는다
+    await expect(panel.getByTestId('runs-agent-use')).toHaveCount(0)
+
+    await page.evaluate(
+      ({ key }) =>
+        (window as any).__mock.appUsage.set(key, {
+          day: { runs: 2, durationMs: 65_000, tokens: { input: 12_000, output: 400 } },
+          month: { runs: 41, durationMs: 1_325_000, tokens: { input: 1_200_000, output: 90_000 } },
+        }),
+      { key: `${pid}/slider` },
+    )
+    await panel.getByTestId('runs-refresh').click()
+    const use = panel.getByTestId('runs-agent-use')
+    await expect(use.getByTestId('agent-use-day')).toHaveText('2 runs · 1m 5s · 12.4k tokens')
+    await expect(use.getByTestId('agent-use-month')).toHaveText('41 runs · 22m 5s · 1.3M tokens')
+  })
+
   /** 세션이 받은 사람의 말 — 목이 host처럼 적어 둔 것 */
   const sentTo = (page: Page, sid: string) =>
     page.evaluate(

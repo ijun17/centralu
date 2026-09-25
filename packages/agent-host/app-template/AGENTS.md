@@ -52,12 +52,15 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
     checked by Centralu. Declare `"uses": { "agent": true }` in the manifest for the person's
     default agent, or a list such as `["codex"]` to pick one with `tool`. The prompt reaches the
     agent marked as written by this app, not by the person, so say plainly what you need. A run
-    takes seconds to minutes; the helper keeps the call alive while it waits.
+    takes seconds to minutes; the helper keeps the call alive while it waits. An app runs one agent
+    at a time and at most 5 a minute: put a batch of work into one prompt instead of a loop.
 11. **Calling another app**: inside a tool handler, `await centralu.callApp('other-app', 'tool', args)`
     calls a tool of another app and returns its answer (JSON if the tool returns structured
     content, else text). Declare the app in `"uses": { "apps": ["other-app"] }`. Only tools open to
     agents (visibility `model`) can be called. A project app reaches apps of its own project first,
     then apps in the person's user folder; an app in the user folder reaches only user-folder apps.
+    A chain of apps calling apps stops at 3 calls deep, and an app tool already in the chain cannot
+    be called again from inside it.
 12. **Reading Centralu's data**: inside a tool handler, `await centralu.host('sessions.list')` or
     `await centralu.host('git.status')` returns JSON. These two names are the whole list; declare
     each one you use in `"uses": { "host": [...] }`. `sessions.list` gives this project's sessions

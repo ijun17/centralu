@@ -1,5 +1,6 @@
 import type {
   AppPermission,
+  AppUsage,
   AppQuestion,
   AdapterCapabilities,
   AppErrorBundle,
@@ -968,6 +969,14 @@ export class MockPlatform implements Platform {
       this.appPermissions.set(key, (this.appPermissions.get(key) ?? []).filter((p) => p.capability !== capability))
       this.forgottenPermissions.push({ appId, projectId, capability })
     },
+    // 에이전트의 쓰임 (M4 D-5) — 시험이 채운다. 없으면 host처럼 0이다
+    usage: async (appId: string, projectId: string | null): Promise<AppUsage> =>
+      structuredClone(
+        this.appUsage.get(`${projectId ?? '_user'}/${appId}`) ?? {
+          day: { runs: 0, durationMs: 0, tokens: null },
+          month: { runs: 0, durationMs: 0, tokens: null },
+        },
+      ),
   }
   /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
@@ -1017,6 +1026,8 @@ export class MockPlatform implements Platform {
   private questionWaiters = new Map<string, (d: 'allow' | 'deny') => void>()
   /** 기억된 답 (M4 D-4) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다 */
   readonly appPermissions = new Map<string, AppPermission[]>()
+  /** 에이전트의 쓰임 (M4 D-5) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다 */
+  readonly appUsage = new Map<string, AppUsage>()
   readonly forgottenPermissions: { appId: string; projectId: string | null; capability: string }[] = []
   /** 시나리오 헬퍼: host가 능력 물음을 세운다 — 답이 오면 풀리는 약속을 돌려준다 (Playwright에서 사용) */
   askAppQuestion(q: AppQuestion): Promise<'allow' | 'deny'> {
