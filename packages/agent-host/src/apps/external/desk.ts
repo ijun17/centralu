@@ -76,6 +76,11 @@ export type DeskApps = {
    * 그 앱의 고정 화면에 물음이 선다. 사슬을 더는 따라갈 수 없으면(부모가 이미 끝났다) null이다.
    */
   origin(runId: string): CapabilityOrigin | null
+  /**
+   * 사람이 이 실행의 부탁을 거절했다 (D-4) — 그 자리에서 Deny를 눌렀거나, 기억된 거절이다. 부탁한 앱의 도구가 그 때문에 실패하면
+   * 그 실패는 앱의 버그가 아니라 사람의 결정이다: 런타임이 오류 묶음에 적어 화면이 그렇게 말하게 한다(C-6과 나란히).
+   */
+  denied(runId: string, denial: CapabilityDenial): void
   call(
     ref: AppRef,
     tool: string,
@@ -84,6 +89,9 @@ export type DeskApps = {
     opts: { signal: AbortSignal },
   ): Promise<{ status: string; result: CallToolResult | null; error: string | null }>
 }
+
+/** 사람이 거절한 능력 하나 — 어느 앱이 무엇을 하려 했나(물음에 적은 말 그대로). 되돌리는 자리는 그 앱의 기록 판이다 */
+export type CapabilityDenial = { app: AppRef; name: string; capability: string; text: string }
 
 /** 물음이 설 자리 — 사슬을 시작한 세션, 또는 사슬을 시작한 화면의 앱 */
 export type CapabilityOrigin = { kind: 'session'; sessionId: string } | { kind: 'view'; app: AppRef }
@@ -553,7 +561,11 @@ export class BrokerDesk {
     const key = capabilityKey(capability)
     const stamp = usesStamp(app.manifest.uses)
     const known = this.book.get(app.ref, key)
-    if (known && known.stamp === stamp) return known.decision === 'allow' ? null : refuse(deniedText(tool, app.name, text))
+    const denied = (): Answer => {
+      this.apps.denied(call.parentRunId, { app: app.ref, name: app.name, capability: key, text })
+      return refuse(deniedText(tool, app.name, text))
+    }
+    if (known && known.stamp === stamp) return known.decision === 'allow' ? null : denied()
     const host = this.host
     if (!host) return refuse('the broker is unavailable: there is no one to ask for permission')
 
@@ -615,7 +627,7 @@ export class BrokerDesk {
     }
     // 답이 둘 이상의 기다림에 닿아도 기억은 한 번이면 된다 — 같은 값을 다시 적어도 해가 없다
     this.book.put(app.ref, { capability: key, text, decision: answer, stamp, decidedAt: Date.now() })
-    return answer === 'allow' ? null : refuse(deniedText(tool, app.name, text))
+    return answer === 'allow' ? null : denied()
   }
 
   /**

@@ -420,7 +420,12 @@ and "Send to builder".
   (`sentAt`, removed again if the send fails) and refuses a second send. The builder gets it with
   every line quoted (`builderErrorFrame`), since stderr can carry outside text. The app list
   carries the latest bundle's time (`lastErrorAt`), and recording one announces the list. That is
-  how the screen hears of a read-only tool's failure: reads send no "changed" (§6.3).
+  how the screen hears of a read-only tool's failure: reads send no "changed" (§6.3). A tool call
+  that failed because the person denied a capability somewhere in its chain (a Deny, or a denial
+  kept from before, §10) is not an app bug: its bundle carries that decision (`denied`: which app,
+  what it asked for), the view says the person did not allow it and points to Runs, Permissions,
+  Forget, with no stack and no "Send to builder", and `apps.sendError` refuses it. A call from
+  another app that failed for that reason carries the same decision.
 
 ## 9. Attaching apps to sessions
 

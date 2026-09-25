@@ -6,7 +6,7 @@ import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdPro
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
 import { BROKER_KEEPALIVE_MS, RUN_META, serveBroker } from './broker.js'
-import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityOrigin } from './desk.js'
+import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityDenial, type CapabilityOrigin } from './desk.js'
 import { memoryCapabilityBook, type CapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
 import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
@@ -353,6 +353,12 @@ export class ExternalApps {
    */
   private spawned = new Set<AppProcess>()
   /**
+   * 열린 실행 → 그 실행(또는 그 아래 사슬)의 부탁을 사람이 거절한 것 (D-4) — 창구가 적는다. 그 실행이 실패로 끝나면 그 실패의 오류
+   * 묶음에 싣고(앱의 버그가 아니라 사람의 결정이다), 앱이 부른 실행이면 부모에게 넘긴다: A가 부른 B의 부탁이 거절되어 B가 실패하고
+   * 그래서 A가 실패했으면, A의 화면이 말할 까닭도 그 거절이다. 실행이 끝나면 걷는다.
+   */
+  private denials = new Map<string, CapabilityDenial>()
+  /**
    * 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리. 앱끼리의 호출(D-2)은 이 런타임의 단 하나의 길(`call`)로 간다.
    * 생성자에서 세운다 — 답을 둘 자리(`deps.permissions`)와 기다림의 상한(`timing`)이 그때 정해진다.
    */
@@ -372,6 +378,9 @@ export class ExternalApps {
         redactor: (ref) => redactor(this.secrets.all(this.appKey(ref))),
         origin: (runId) => this.chainOrigin(runId),
         chain: (runId) => this.chainOf(runId),
+        denied: (runId, d) => {
+          if (this.openRuns.has(runId) && !this.denials.has(runId)) this.denials.set(runId, d)
+        },
         call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
       },
       deps.permissions ?? memoryCapabilityBook(),
@@ -445,7 +454,7 @@ export class ExternalApps {
    * 오류 묶음 하나를 적는다. 도구 실패는 앱의 답이 표준에러보다 먼저 올 수 있어서(파이프가 둘이다 — 던진 스택은
    * 표준에러로, 실패 답은 표준출력으로 간다), 그 프로세스의 표준에러를 조금 뒤에 한 번 더 옮겨 담는다.
    */
-  private recordError(e: AppEntry, b: Omit<AppErrorBundle, 'text'>, proc: AppProcess | null = null): void {
+  private recordError(e: AppEntry, b: Omit<AppErrorBundle, 'text' | 'denied'> & { denied?: AppErrorBundle['denied'] }, proc: AppProcess | null = null): void {
     const key = this.holdKey(e.ref)
     const app = `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`
     const list = this.errorLog.get(key) ?? []
@@ -691,6 +700,11 @@ export class ExternalApps {
     /** 이 호출을 받은 프로세스 — 실패했을 때 그 프로세스의 표준에러를 오류 묶음에 싣는다 (C-6) */
     let callee: AppProcess | null = null
     const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
+      const denial = this.denials.get(runId) ?? null
+      this.denials.delete(runId)
+      if (denial && status !== 'ok' && caller.kind === 'app' && this.openRuns.has(caller.parentRunId) && !this.denials.has(caller.parentRunId)) {
+        this.denials.set(caller.parentRunId, denial)
+      }
       /*
        * 앱에 닿은 호출이 실패했다 (C-6) — 앱의 잘못일 수 있는 것만 적는다. 거절은 정책이고, 뜨지 못한 것은
        * 기동 쪽이 따로 적었다. 인자는 기록과 같은 규칙으로 가린다 — 이 묶음은 만드는 세션의 프롬프트가 될 수 있다.
@@ -699,7 +713,16 @@ export class ExternalApps {
         const hide = this.deps.runs ? redact : redactor(this.secrets.all(this.appKey(e.ref)))
         this.recordError(
           e,
-          { kind: 'tool', at: Date.now(), message: hide(error ?? '').split('\n')[0]!, stderr: [], tool: name, args: (described ?? describeArgs(args, hide)).summary, runId },
+          {
+            kind: 'tool',
+            at: Date.now(),
+            message: hide(error ?? '').split('\n')[0]!,
+            stderr: [],
+            tool: name,
+            args: (described ?? describeArgs(args, hide)).summary,
+            runId,
+            denied: denial && { appId: denial.app.appId, projectId: denial.app.projectId, name: denial.name, capability: denial.capability, text: denial.text },
+          },
           callee,
         )
       }
