@@ -263,7 +263,7 @@ class ClaudeSession implements SessionHandle {
          */
         effort: this.opts.effort as never,
         includePartialMessages: true,
-        // MCP 서버 — 오케스트레이터의 도구, 사람이 승인한 서버, 붙은 외부 앱 (mcpServers() 참고)
+        // MCP 서버 — 오케스트레이터의 도구와 붙은 외부 앱(승인된 MCP 서버 포함) (mcpServers() 참고)
         ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
         /*
          * 읽을 설정 파일 (settingSourcesFor) — 오케스트레이터는 **파일에서 지시를 읽지 않는다.**
@@ -491,26 +491,18 @@ class ClaudeSession implements SessionHandle {
   /**
    * 이 세션의 MCP 서버 전부 — 처음 띄울 때도, 집합을 바꿀 때도 이 한 곳에서 조립한다.
    *
-   * 펼치는 순서가 곧 이름이 겹칠 때 이기는 쪽이다:
-   *   1. 사람이 승인한 추가 서버 (오케스트레이터 전용, propose_mcp_server 흐름). stdio로 띄운다 —
-   *      npx류 명령은 첫 실행에서 스스로 설치되므로 별도 설치 단계가 없다.
-   *      **내장 서버보다 먼저 펼친다** (#93). 이름은 제안 시점에 막지만(mcpServerNameError), 이
-   *      고침 전에 승인되어 저장소에 앉은 항목은 그 검사를 거치지 않았다. 순서가 뒤였을 때
-   *      `centralu`라는 이름 하나가 인프로세스 오케스트레이터를 통째로 갈아치웠다.
-   *   2. 오케스트레이터의 도구 (FR-11) — 인프로세스라 별도 프로세스가 없고, 이 도구들이 볼 수
-   *      있는 것은 매니저가 넘겨준 것뿐이다.
-   *   3. 외부 앱의 대리 서버 (M4 A-5) — `app-<id>`. 승인된 서버가 같은 이름을 들고 와도 앱이 이긴다.
+   * 둘이다. 둘 다 인프로세스라 별도 프로세스가 없다:
+   *   1. 오케스트레이터의 도구 (FR-11) — 이 도구들이 볼 수 있는 것은 매니저가 넘겨준 것뿐이다.
+   *   2. 외부 앱의 대리 서버 (M4 A-5) — `app-<id>`. 사람이 승인한 MCP 서버(propose_mcp_server)도
+   *      사용자 폴더의 앱이 되어 여기로 온다(A-7). 예전에는 그 서버를 stdio 항목으로 날것으로 실었다 —
+   *      호출이 중개도 기록도 지나지 않았고, `centralu`라는 이름 하나가 인프로세스 오케스트레이터를
+   *      갈아치울 수 있었다(#93). 이제 날것으로 싣는 서버는 없다.
    *
-   * 집합을 바꿀 때(`setMcpServers`) 1·2를 빼면 SDK가 그것들을 **떼어 낸다** — 그 호출은 동적으로
+   * 집합을 바꿀 때(`setMcpServers`) 1을 빼면 SDK가 그것을 **떼어 낸다** — 그 호출은 동적으로
    * 붙인 서버 전부를 넘긴 것으로 바꾼다. 그래서 언제나 전부를 싣는다.
    */
   private mcpServers(): Record<string, McpServerConfig> {
     return {
-      ...(this.opts.orchestratorTools
-        ? Object.fromEntries(
-            (this.opts.extraMcpServers ?? []).map((s) => [s.name, { type: 'stdio' as const, command: s.command, args: s.args }]),
-          )
-        : {}),
       ...(this.orchestratorServer ? { [ORCHESTRATOR_MCP_NAME]: this.orchestratorServer } : {}),
       ...Object.fromEntries([...this.appProxies].map(([name, { proxy }]) => [name, proxy.config])),
     }

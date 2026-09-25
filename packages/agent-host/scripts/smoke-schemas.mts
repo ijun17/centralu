@@ -156,6 +156,7 @@ const SKIP: Record<string, string> = {
   'commands.run': '슬래시 명령 실행 — 부작용',
   'apps.sessionTools': 'Codex 다리 전용 — 외부 앱이 붙은 살아 있는 세션이 필요 (adapters/codex/apps.test.ts가 다리째 관통)',
   'apps.sessionCall': 'Codex 다리 전용 — apps.sessionTools와 같은 이유',
+  'apps.remove': '파괴적 — 사용자 폴더 앱을 옮겨 버린다 (sessions/mcp-apps.test.ts가 관통)',
 }
 
 const ok: string[] = []

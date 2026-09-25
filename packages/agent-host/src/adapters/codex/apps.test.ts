@@ -141,17 +141,17 @@ describe('thread/resume — 재개에도 서버를 다시 싣는다', () => {
     expect(mcpServers(c, 'thread/resume')!['app-notes']).toMatchObject({ default_tools_approval_mode: 'writes' })
   })
 
-  it('오케스트레이터의 재개에는 centralu와 승인된 서버, 문서 막기가 함께 실린다', async () => {
+  // 승인된 MCP 서버는 사용자 폴더의 앱(app-helper 자리)으로 온다 — 날것으로 실리는 서버는 없다 (A-7)
+  it('오케스트레이터의 재개에는 centralu와 사용자 폴더 앱의 다리, 문서 막기가 함께 실린다', async () => {
     const c = await start(ORCH, {
       resumeExternalId: 'thread-o',
       orchestratorTools: {} as OrchestratorTools,
       toolProfile: 'orchestrator',
-      extraMcpServers: [{ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] }],
     })
     await (handle as unknown as { ready: Promise<void> }).ready
     const config = threadConfig(c, 'thread/resume')
     expect(config.project_doc_max_bytes).toBe(0)
-    expect(Object.keys(mcpServers(c, 'thread/resume')!).sort()).toEqual(['app-helper', 'centralu', 'playwright'])
+    expect(Object.keys(mcpServers(c, 'thread/resume')!).sort()).toEqual(['app-helper', 'centralu'])
     expect(mcpServers(c, 'thread/resume')!['centralu']).toMatchObject({
       command: process.execPath,
       args: [bridgePath()],

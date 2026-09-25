@@ -189,20 +189,23 @@ describe('붙은 앱이 바뀌면 재시작 없이 따라간다', () => {
     expect(last()!['app-notes']).not.toBe(before)
   })
 
-  it('오케스트레이터의 집합 바꾸기에는 centralu와 승인된 서버가 처음 그대로 함께 실린다', async () => {
+  /*
+   * 사람이 승인한 MCP 서버도 사용자 폴더의 앱이다(A-7) — 여기서 `second`가 승인 직후의 그 앱이다.
+   * 날것으로 실리는 서버는 없고, 집합에는 centralu와 앱 대리 서버만 있다.
+   */
+  it('오케스트레이터의 집합 바꾸기에는 centralu가 처음 그대로, 사용자 폴더 앱과 함께 실린다', async () => {
     const tools = {} as OrchestratorTools
     await start({ id: 'orch-1', kind: 'orchestrator', projectId: null }, {
       orchestratorTools: tools,
       toolProfile: 'orchestrator',
-      extraMcpServers: [{ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] }],
     })
     const centralu = servers()['centralu']
-    expect(Object.keys(servers()).sort()).toEqual(['app-helper', 'centralu', 'playwright'])
+    expect(Object.keys(servers()).sort()).toEqual(['app-helper', 'centralu'])
 
     w.plant('user', 'second')
     w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && 'app-second' in s)
-    expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu', 'playwright'])
+    expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu'])
     // 빠뜨리면 SDK가 오케스트레이터 서버를 떼어 낸다 — 같은 객체가 그대로 실려야 한다
     expect(last()!['centralu']).toBe(centralu)
   })

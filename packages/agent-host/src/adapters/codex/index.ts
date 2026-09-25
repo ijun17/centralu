@@ -351,7 +351,7 @@ class CodexSession implements SessionHandle {
           ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
           // 응답 속도 (실측: priority = "Fast, 1.5x speed, increased usage")
           ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
-          // MCP 서버 — 오케스트레이터의 다리, 승인된 서버, 붙은 외부 앱의 다리 (mcpConfig 참고)
+          // MCP 서버 — 오케스트레이터의 다리와 붙은 외부 앱의 다리(승인된 MCP 서버 포함) (mcpConfig 참고)
           ...(await this.mcpConfig()),
           // 저장소의 파일(.codex/ 설정·훅·규칙, AGENTS.md)은 신뢰한 프로젝트에서만 (#92, repoFilesConfig)
           ...repoFilesConfig(this.opts),
@@ -365,14 +365,13 @@ class CodexSession implements SessionHandle {
   /**
    * 스레드에 실을 MCP 설정 — 시작과 재개가 **같은 조립**을 쓴다(재개에서 빠지는 것이 없게).
    *
-   * 펼치는 순서가 곧 이름이 겹칠 때 이기는 쪽이다:
-   *   1. 사람이 승인한 추가 서버 (오케스트레이터 전용, propose_mcp_server 흐름) — claude 쪽과 같은
-   *      목록, 같은 이유로 **내장 다리보다 먼저** 펼친다 (#93): 이 고침 전에 승인되어 저장소에 앉은
-   *      `centralu`라는 이름이 다리를 갈아치우면, elicitation 수락(serverName === ORCHESTRATOR_MCP_NAME)
-   *      까지 그 서버의 것이 된다.
-   *   2. 오케스트레이터 도구의 다리 (FR-11)
-   *   3. 외부 앱의 다리 (M4 A-5) — 앱마다 하나. **붙은 앱이 있는 세션에만** 생긴다: 대부분의 세션은
-   *      다리 프로세스를 하나도 띄우지 않는다.
+   * 둘이다:
+   *   1. 오케스트레이터 도구의 다리 (FR-11)
+   *   2. 외부 앱의 다리 (M4 A-5) — 앱마다 하나. **붙은 앱이 있는 세션에만** 생긴다: 대부분의 세션은
+   *      다리 프로세스를 하나도 띄우지 않는다. 사람이 승인한 MCP 서버(propose_mcp_server)도 사용자
+   *      폴더의 앱이 되어 여기로 온다(A-7). 예전에는 그 서버를 날것으로 실었는데, Codex가 그 서버의
+   *      도구를 쓸지 묻는 elicitation을 우리가 거절해서(`ours`만 수락) 한 번도 돌지 못했을 가능성이
+   *      높았다(플랜 "별개로 확인할 것" 2). 앱 다리의 도구 승인은 우리 승인 카드로 간다.
    *
    * 앱 다리는 Codex가 띄우는 stdio 프로세스다(플랜 S-3의 셋 중 하나). HTTP(`url`)는 0.147.0에서
    * 요청이 한 건도 오지 않았고 0.153.4에서는 재지 못했다. 다리는 오케스트레이터와 같은 파일이다
@@ -383,7 +382,6 @@ class CodexSession implements SessionHandle {
     const servers: Record<string, unknown> = {}
     const orchestrator = !!(this.opts.orchestratorTools && bridge)
     if (orchestrator) {
-      for (const s of this.opts.extraMcpServers ?? []) servers[s.name] = { command: s.command, args: s.args }
       servers[ORCHESTRATOR_MCP_NAME] = {
         command: process.execPath,
         args: [bridgePath()],

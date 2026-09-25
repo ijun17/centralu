@@ -83,9 +83,8 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
     })
 
     expect(r.isError).toBe(true)
+    // 승인 카드가 뜨지 않으므로 승인할 것도 없다
     expect(mgr.mcpProposals()).toEqual([])
-    // 승인 카드가 뜨지 않으므로 승인할 것도 없다 — 서버 목록은 비어 있다
-    expect(mgr.mcpServers()).toEqual([])
     expect(servers()['centralu']).toEqual({ type: 'sdk', name: 'centralu' })
   })
 
@@ -171,18 +170,21 @@ describe('오케스트레이터의 이름은 제안할 수 없다 (#93)', () => 
   })
 
   /*
-   * 이 고침 전에 승인되어 저장소에 앉은 항목은 이름 검사를 거치지 않았다.
-   * 그 항목이 살아 돌아와도 내장 서버를 밀어내지는 못해야 한다 —
-   * 펼치는 순서가 그 보장을 진다.
+   * 이 고침 전에 승인되어 저장소에 앉은 항목은 이름 검사를 거치지 않았다. 예전에는 펼치는 순서가
+   * 내장 서버를 지켰다. 이제는 옛 명부의 어느 항목도 SDK 설정에 **날것으로 실리지 않는다** (M4 A-7) —
+   * 승인된 서버는 사용자 폴더의 앱이 되어 `app-<id>` 대리 서버로만 온다(옮기기는 sessions/mcp-apps.test.ts).
    */
-  it('이미 저장된 centralu 항목도 내장 서버를 밀어내지 못한다 (고침 이전에 승인된 것)', async () => {
+  it('옛 명부의 항목(centralu 포함)은 날것으로 실리지 않는다 — 집합에는 인프로세스 centralu뿐이다', async () => {
     store.setAppSetting(
       'orchestrator_mcp_servers',
-      JSON.stringify([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }]),
+      JSON.stringify([
+        { name: 'centralu', command: 'npx', args: ['-y', 'whatever'] },
+        { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
+      ]),
     )
 
     await mgr.orchestrator()
 
-    expect(servers()['centralu']).toEqual({ type: 'sdk', name: 'centralu' })
+    expect(servers()).toEqual({ centralu: { type: 'sdk', name: 'centralu' } })
   })
 })

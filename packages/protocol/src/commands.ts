@@ -1012,6 +1012,15 @@ export const RpcMethods = {
     params: z.object({ appId: AppId, projectId: z.string().nullable() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /**
+   * 사용자 폴더의 외부 앱을 지운다 (M4 A-7) — 승인한 MCP 서버(화면 없는 앱)를 거두는 길. 폴더는 데이터
+   * 폴더의 `app-trash/`로 옮겨지고, 붙어 있던 세션에서 떨어진다. 프로젝트 앱(`projectId`가 있는 것)은
+   * 거절한다 — 저장소의 파일이라 거두는 자리는 git이다. 목록은 `apps.list`의 `projectId: null`인 앱이다.
+   */
+  'apps.remove': {
+    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'orchestrator.tools': {
     /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
     params: z.object({ sessionId: SessionId.optional() }),
