@@ -434,3 +434,63 @@ describe('턴 도중에 바꾼 설정은 턴이 끝나면 적용된다 (#164)', 
     expect(claude.last.opts.effort).toBe('high')
   })
 })
+
+/*
+ * 목록 밖의 오래된 대화 (#165). 깨우기 전의 "도구에 아직 있나" 확인은 도구가 준 최신 200개만 봤다 — 201번째보다
+ * 오래된 대화는 파일이 멀쩡해도 "기록이 없다"로 막혔고, 다시 눌러도 같은 200개가 돌아왔다.
+ */
+describe('도구의 목록이 가득 차면 목록에 없다고 없는 것이 아니다 (#165)', () => {
+  class Listing extends Adapter {
+    rows: { externalId: string; updatedAt: number }[] = []
+    failWith: string | null = null
+    async listExternalSessions(_cwd: string, limit: number) {
+      return this.rows.slice(0, limit).map((r) => ({ ...r, title: r.externalId, messageCount: 1 }))
+    }
+    override async createSession(opts: CreateSessionOpts, emit: EventSink) {
+      if (this.failWith && opts.resumeExternalId) throw new Error(this.failWith)
+      return super.createSession(opts, emit)
+    }
+  }
+  let listing: Listing
+
+  beforeEach(() => {
+    listing = new Listing('claude')
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', listing]])
+    mgr = new SessionManager(store, adapters, (e) => events.push(e))
+    rpc = createRpcHandler(mgr, adapters)
+  })
+
+  /** 이 세션의 대화(ext-1)보다 새 대화 n개 */
+  const newer = (n: number) => Array.from({ length: n }, (_, i) => ({ externalId: `newer-${i}`, updatedAt: 1_000_000 - i }))
+
+  it('더 새로운 대화 250개 뒤의 대화도 깨운다', async () => {
+    const id = await newSession()
+    await mgr.disposeAll()
+    listing.rows = newer(250)
+
+    const r = (await rpc('agents.resumeSession', { sessionId: id })) as { resumed: boolean; reason?: string }
+    expect(r.reason).toBeUndefined()
+    expect(r.resumed).toBe(true)
+  })
+
+  it('목록이 다 온 것이면 지금처럼 "기록이 없다"고 말한다', async () => {
+    const id = await newSession()
+    await mgr.disposeAll()
+    listing.rows = newer(3)
+
+    const r = (await rpc('agents.resumeSession', { sessionId: id })) as { resumed: boolean; reason?: string }
+    expect(r.resumed).toBe(false)
+    expect(r.reason).toMatch(/has no record of this conversation/)
+  })
+
+  it('이어가기가 다른 이유로 실패하면 목록이 가득 찼어도 진짜 오류를 돌려준다', async () => {
+    const id = await newSession()
+    await mgr.disposeAll()
+    listing.rows = newer(250)
+    listing.failWith = 'API Error: 529 overloaded'
+
+    const r = (await rpc('agents.resumeSession', { sessionId: id })) as { resumed: boolean; reason?: string }
+    expect(r.resumed).toBe(false)
+    expect(r.reason).toContain('529 overloaded')
+  })
+})

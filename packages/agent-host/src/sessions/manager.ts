@@ -251,6 +251,9 @@ function payloadText(payload: unknown): string {
 /** 턴 안인가 — 답을 만드는 중이거나 승인을 기다리는 중. 그 밖(입력 대기·쉼·한도·오류)은 턴이 끝난 것이다 (C-4) */
 const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
 
+/** 깨우기 전에 도구에게 받는 대화 목록의 길이 — 이만큼 받았으면 목록이 잘렸을 수 있다 (externalGone) */
+const EXTERNAL_LIST_LIMIT = 200
+
 /** 만드는 세션 명부의 열쇠 (APP_BUILDERS_KEY) — 앱은 (프로젝트, id)로 하나다 */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
 
@@ -331,7 +334,7 @@ export class SessionManager {
    * `updatedAt`도 같이 주고(ExternalSessionSummary), 그걸 버리는 바람에 바로 뒤에서
    * "밖에서 바뀐 게 있나"를 **대화를 통째로 다시 읽어서** 물었다. 이미 산 답이었다.
    */
-  private externalIndex = new Map<string, { ids: Map<string, number>; at: number }>()
+  private externalIndex = new Map<string, { ids: Map<string, number>; complete: boolean; at: number }>()
   /** 사용량 캐시 — 모달을 여닫을 때마다 도구를 띄우지 않는다 */
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
   /** 끝나면 알려달라고 부탁받은 세션 → 알릴 오케스트레이터 (한 번 알리면 지운다) */
@@ -1478,7 +1481,7 @@ export class SessionManager {
      */
     /* 바로 앞 externalGone이 같은 열쇠(`cwdFor`)로 캐시를 채웠다 — 다른 열쇠를 쓰면 아끼려던
        목록 조회를 한 번 더 낸다. 목록에 없으면 시각을 모르니 예전처럼 읽는다. */
-    const changedAt = (await this.externalIndexOf(info.tool, cwd))?.get(externalId) ?? null
+    const changedAt = (await this.externalIndexOf(info.tool, cwd))?.ids.get(externalId) ?? null
     const key = externalSyncedKey(info.id)
     if (changedAt !== null && changedAt <= Number(this.store.appSetting(key) ?? '-1')) return 0
     /* 읽어낸 지점을 남긴다. 붙일 것이 없었어도 남긴다 — "읽었다"와 "새 것이 있었다"는
@@ -2930,10 +2933,17 @@ export class SessionManager {
   private async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
     const id = m.externalId ?? m.importedFrom
     if (!id) return false
-    const ids = await this.externalIndexOf(m.tool, cwd)
-    if (!ids) return false // 확인 못 했으면 막지 않는다
+    const index = await this.externalIndexOf(m.tool, cwd)
+    if (!index) return false // 확인 못 했으면 막지 않는다
+    const { ids, complete } = index
     // 이어받은 원본이 살아 있으면 그것도 인정한다 (resume이 새 id를 발급했을 수 있다)
-    return !ids.has(id) && !(m.importedFrom && ids.has(m.importedFrom))
+    if (ids.has(id) || (m.importedFrom && ids.has(m.importedFrom))) return false
+    /*
+     * **목록이 가득 찼으면 "없다"가 아니라 "모른다"다** (#165). 목록은 최신 EXTERNAL_LIST_LIMIT개뿐이라, 같은 폴더에서
+     * 대화를 많이 한 사람의 오래된 대화는 파일이 멀쩡한데도 "기록이 없다"로 막혔다(다시 눌러도 같은 200개가 온다).
+     * Codex는 스레드를 지우지 않고, Claude의 목록은 같은 저장소의 워크트리 대화까지 합쳐 센다.
+     */
+    return complete
   }
 
   /**
@@ -2944,18 +2954,21 @@ export class SessionManager {
    * 목록을 못 받았으면 `null`이다: **모르는 것과 없는 것을 섞지 않는다.**
    * 부르는 쪽 둘 다 모를 때는 아무것도 막지 않는 쪽으로 간다.
    */
-  private async externalIndexOf(tool: ToolName, cwd: string): Promise<Map<string, number> | null> {
+  private async externalIndexOf(
+    tool: ToolName,
+    cwd: string,
+  ): Promise<{ ids: Map<string, number>; /** 목록이 잘리지 않았다 — 여기 없으면 정말 없다 */ complete: boolean } | null> {
     const adapter = this.adapters.get(tool)
     if (!adapter?.listExternalSessions) return null
 
     const key = `${tool}:${cwd}`
     const cached = this.externalIndex.get(key)
-    if (cached && Date.now() - cached.at < 30_000) return cached.ids
+    if (cached && Date.now() - cached.at < 30_000) return cached
     try {
-      const rows = await adapter.listExternalSessions(cwd, 200)
-      const ids = new Map(rows.map((r) => [r.externalId, r.updatedAt]))
-      this.externalIndex.set(key, { ids, at: Date.now() })
-      return ids
+      const rows = await adapter.listExternalSessions(cwd, EXTERNAL_LIST_LIMIT)
+      const index = { ids: new Map(rows.map((r) => [r.externalId, r.updatedAt])), complete: rows.length < EXTERNAL_LIST_LIMIT }
+      this.externalIndex.set(key, { ...index, at: Date.now() })
+      return index
     } catch {
       return null
     }
