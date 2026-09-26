@@ -2418,3 +2418,34 @@ describe('설정 변경 토스트 (#164)', () => {
     expect(useStore.getState().toast).toBe(toast)
   })
 })
+
+/*
+ * "항상 허용"의 알림은 실제로 보낸 매처로 (#170). 예전에는 카드가 따로 문구를 지어서, 매처가 없는 종류(`other`)에도
+ * "Always allow in this session: other"라고 알렸다 — 아무 규칙도 남지 않았는데.
+ */
+describe('항상 허용 알림 (#170)', () => {
+  async function answerAlways(detail: Record<string, unknown>, scope: 'session' | 'project' = 'session') {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'safe' })
+    const spy = vi.spyOn(platform.agents, 'respondApproval').mockResolvedValue(undefined as never)
+    useStore.setState({
+      platform,
+      sessions: { [s.id]: { ...s, pendingApproval: { requestId: 'r1', detail } } as never },
+    })
+    await useStore.getState().respondApproval(s.id, 'r1', 'always', scope)
+    return { matcher: spy.mock.calls[0]?.[4], toast: useStore.getState().toast }
+  }
+
+  it('파일 편집은 그 경로를 보내고, 그 경로로 알린다', async () => {
+    const r = await answerAlways({ kind: 'file_edit', path: '/x/a.ts', diffPreview: '', multi: false }, 'project')
+    expect(r.matcher).toBe('/x/a.ts')
+    expect(r.toast).toBe('Always allow in this project: /x/a.ts')
+  })
+
+  it('매처가 없는 종류는 규칙이 생겼다고 알리지 않는다', async () => {
+    const r = await answerAlways({ kind: 'other', raw: 'mcp__x__y {}' })
+    expect(r.matcher).toBeUndefined()
+    expect(r.toast).not.toContain('Always allow in')
+    expect(r.toast).toContain('Allowed once')
+  })
+})
