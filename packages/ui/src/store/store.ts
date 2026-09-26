@@ -3573,6 +3573,17 @@ export const useStore = create<AppState>((set, get) => ({
   async setAppDoc(appId, doc) {
     const platform = get().platform
     if (!platform) return
+    /*
+     * 아직 읽지 못한 문서 위에는 쓰지 않는다 (#178). 사본이 없으면 `useAppState`는 null을 주고, 앱은
+     * 그 위에 고친 칸 하나만 담아 보낸다 — host는 받은 값으로 문서를 통째로 바꾸므로, 레일의 줄 하나를
+     * 누른 것으로 업무·감시·반장 설정·알림이 모두 `{ metrics }` 하나로 바뀌었다. 첫 읽기가 실패하면
+     * 이 상태가 계속된다. 쓰기는 버리고 다시 읽기를 건다: 지표 하나는 잃어도 되고, 설정은 읽힌 뒤
+     * 다시 하면 된다. 읽었는데 문서가 정말 비어 있는 것(처음 쓰는 앱)과는 항목의 유무로 갈린다.
+     */
+    if (!get().apps[appId]) {
+      void get().refreshAppState(appId)
+      return
+    }
     // 화면 먼저, 저장은 뒤따라 — 방송(app_state_changed)이 어차피 진실로 맞춘다
     set((s) => ({ apps: { ...s.apps, [appId]: { enabled: s.apps[appId]?.enabled ?? true, doc } } }))
     try {

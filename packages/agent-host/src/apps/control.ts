@@ -175,11 +175,18 @@ export const controlHostApp: HostAppModule = {
           effort: foreman.effort ?? 'high',
         })
         ctx.kv.set(`board:${taskId}`, BOARD_TEMPLATE(title, goal, members.map((m) => ctx.sessionSummary(m)?.name ?? m)))
-        doc.tasks = [
-          ...(doc.tasks ?? []),
+        /*
+         * 기다린 **뒤에** 문서를 다시 읽는다 (#178). 반장 세션을 띄우는 await는 Codex에서 app-server가
+         * 준비될 때까지라 초 단위다. 그 사이 다른 세션의 알림, 감시 적중, 사람이 지운 알림, 동시에 만든
+         * 다른 업무가 문서에 들어오는데, 위에서 읽은 사본으로 통째로 쓰면 그것들이 전부 되돌아갔다.
+         * 이 도구가 문서에 더하는 것은 업무 한 줄뿐이니, 지금의 문서 위에 그 한 줄만 얹는다.
+         */
+        const fresh = readDoc(ctx)
+        fresh.tasks = [
+          ...(fresh.tasks ?? []),
           { id: taskId, title, goal, members, coordinatorId: coordinator.id, status: 'active', createdAt: Date.now() },
         ]
-        ctx.kv.set('doc', doc)
+        ctx.kv.set('doc', fresh)
         ctx.emitChanged()
         return {
           text:

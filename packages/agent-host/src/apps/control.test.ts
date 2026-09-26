@@ -112,3 +112,44 @@ describe('알림 칸이 없는 문서 — UI가 먼저 쓴 문서', () => {
     expect(changedCount()).toBe(1)
   })
 })
+
+/**
+ * 반장을 기다리는 동안 들어온 것이 남는다 (#178). 매니저의 kv처럼 JSON으로 저장하고 읽을 때마다
+ * 새로 푼다 — 같은 객체를 돌려주는 kv로는 옛 사본과 지금의 문서가 구별되지 않는다.
+ */
+describe('업무 만들기와 문서 쓰기의 경합 (#178)', () => {
+  it('반장을 기다리는 동안 들어온 알림·지우기·다른 업무가 덮이지 않는다', async () => {
+    const kv = new Map<string, string>()
+    kv.set('doc', JSON.stringify({ notifies: [{ id: 'old', text: 'old notice', ts: 1 }] } satisfies ControlDoc))
+    const gates: (() => void)[] = []
+    let made = 0
+    const ctx: HostAppContext = {
+      kv: {
+        get: <T,>(k: string) => (kv.has(k) ? (JSON.parse(kv.get(k)!) as T) : null),
+        set: (k, v) => void kv.set(k, JSON.stringify(v)),
+      },
+      sessionSummary: (id) => (id === 's1' ? { name: '작업 세션', state: 'working', projectId: 'p1' } : null),
+      emitChanged: () => {},
+      sessions: {
+        // Codex 반장은 app-server가 준비될 때까지 기다린다 — 그 창을 시험이 쥔다
+        createCoordinator: () => new Promise((done) => gates.push(() => done({ id: `coord-${++made}`, name: '반장' }))),
+      },
+    }
+    const orch = { sessionId: 'orch', profile: 'orchestrator' as const }
+    const run = controlHostApp.tools!.run
+    const task = (title: string) => run(ctx, 'control_create_task', { title, goal: '', memberSessionIds: ['s1'] }, orch)
+
+    const a = task('A')
+    const b = task('B')
+    await run(ctx, 'control_notify', { text: 'blocked on CI', sessionId: 's1' }, { sessionId: 's1', profile: 'manager' })
+    // 사람이 레일에서 옛 알림을 지웠다 (apps.setState는 문서를 통째로 바꾼다)
+    const now = ctx.kv.get<ControlDoc>('doc')!
+    ctx.kv.set('doc', { ...now, notifies: (now.notifies ?? []).filter((n) => n.id !== 'old') })
+    for (const open of gates.splice(0)) open()
+    await Promise.all([a, b])
+
+    const doc = ctx.kv.get<ControlDoc>('doc')!
+    expect((doc.tasks ?? []).map((t) => t.title).sort()).toEqual(['A', 'B'])
+    expect((doc.notifies ?? []).map((n) => n.text)).toEqual(['blocked on CI'])
+  })
+})
