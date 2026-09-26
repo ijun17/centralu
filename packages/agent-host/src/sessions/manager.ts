@@ -3240,7 +3240,15 @@ export class SessionManager {
   }
 
   /** 설정 화면에서 규칙을 보고 지울 수 있어야 한다 (FR-3: 결과를 보이게 한다) */
-  listApprovalRules(): { id: number; scope: 'session' | 'project'; matcher: string; decision: string; createdAt: number }[] {
+  listApprovalRules(): {
+    id: number
+    scope: 'session' | 'project'
+    matcher: string
+    decision: string
+    createdAt: number
+    projectId: string | null
+    sessionId: string | null
+  }[] {
     return this.store
       .listApprovalRules()
       .filter((r) => r.matcher)
@@ -3250,6 +3258,9 @@ export class SessionManager {
         matcher: r.matcher,
         decision: r.decision,
         createdAt: r.createdAt,
+        // 어느 프로젝트·세션의 규칙인지 설정 화면이 말할 수 있게 싣는다 (#183)
+        projectId: r.projectId,
+        sessionId: r.sessionId,
       }))
   }
 

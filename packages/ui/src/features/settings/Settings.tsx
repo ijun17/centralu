@@ -11,7 +11,39 @@ import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 
-type Rule = { id: number; scope: string; matcher: string; decision: string; createdAt: number }
+type Rule = {
+  id: number
+  scope: string
+  matcher: string
+  decision: string
+  createdAt: number
+  projectId?: string | null
+  sessionId?: string | null
+}
+
+/**
+ * 규칙의 주인 이름 (#183). 매처·범위·날짜만 있던 동안, 두 프로젝트에서 같은 명령에 '항상 허용'을
+ * 누르면 똑같은 줄 둘이 생겨 어느 것이 어느 프로젝트의 것인지 알 수 없었다. 세션 범위 규칙은
+ * 세션 이름을 쓴다. 이미 지운 프로젝트·세션의 규칙은 그렇다고 적는다 — 빈칸이면 또 구별이 안 된다.
+ */
+function RuleOwner({ rule }: { rule: Rule }) {
+  const name = useStore((s) =>
+    rule.scope === 'project'
+      ? rule.projectId
+        ? (s.projects[rule.projectId]?.name ?? null)
+        : null
+      : rule.sessionId
+        ? (s.sessions[rule.sessionId]?.name ?? null)
+        : null,
+  )
+  const known = rule.scope === 'project' ? rule.projectId : rule.sessionId
+  if (!known) return null
+  return (
+    <span className="min-w-0 truncate text-[10px] text-ash" data-testid={`rule-owner-${rule.id}`}>
+      {name ?? (rule.scope === 'project' ? 'removed project' : 'removed session')}
+    </span>
+  )
+}
 
 /**
  * FR-17 단축키 표 — 설정에서 보고 확인할 수 있어야 한다.
@@ -246,6 +278,7 @@ export function Settings() {
                         <span className="shrink-0 text-[10px] text-slate">
                           {r.scope === 'project' ? 'Project' : 'Session'}
                         </span>
+                        <RuleOwner rule={r} />
                         <span className="readout ml-auto shrink-0 text-[10px] text-slate">
                           {new Date(r.createdAt).toLocaleDateString('en-US')}
                         </span>

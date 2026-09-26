@@ -425,7 +425,18 @@ export interface SearchPort {
 }
 
 export interface ApprovalRulesPort {
-  list(): Promise<{ id: number; scope: string; matcher: string; decision: string; createdAt: number }[]>
+  list(): Promise<
+    {
+      id: number
+      scope: string
+      matcher: string
+      decision: string
+      createdAt: number
+      /** 규칙의 주인 — 프로젝트 범위면 projectId, 세션 범위면 sessionId (#183) */
+      projectId?: string | null
+      sessionId?: string | null
+    }[]
+  >
   remove(id: number): Promise<void>
 }
 
