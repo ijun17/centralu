@@ -1590,6 +1590,26 @@ test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, 
   await expect(page.getByTestId('session-name')).toContainText('auth 리팩터링')
 })
 
+/** 세션이 없는 프로젝트도 팔레트에서 고르면 그 프로젝트로 간다 (#183) — 예전에는 팔레트만 닫혔다 */
+test('커맨드 팔레트: 세션 없는 프로젝트를 고르면 그 프로젝트로 간다 (#183)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await newSession(page, 'alpha', '작업')
+
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('beta')
+  await page.getByTestId('palette-item-project').click()
+
+  await expect(page.getByTestId('command-palette')).toBeHidden()
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const st = (window as any).__store.getState()
+        return st.projects[st.focusedProjectId]?.name ?? null
+      }),
+    )
+    .toBe('beta')
+})
+
 /**
  * 상단 바는 계기판이다 — 지시문이 아니라 상태를 말한다 (이슈 #33).
  *
