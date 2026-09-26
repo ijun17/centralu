@@ -1573,6 +1573,38 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
   return [...body, ...approvals, ...tail]
 }
 
+/**
+ * 입력창의 글이 열린 질문에 무엇이 되는가 (#125, #174) — 입력창의 안내문과 `send`가 **같은 판정**을 쓴다. 판정이
+ * 둘로 갈라져 있던 동안(안내문은 첨부를 보지 않았다) 파일을 붙인 사람에게 "답을 쓰라"고 해 놓고 글은 새 턴으로 갔다.
+ *
+ *  - `answer`: 질문이 정확히 하나이고 첨부가 없다 — 글은 그 질문의 답이다.
+ *  - `drops`: 질문이 열려 있지만 글이 답이 될 수 없다. 한 요청에 질문이 여럿이면 카드가 전부 답하게 하는데 글 한 줄이
+ *    그중 어느 것의 답인지 알 수 없고, 답은 첨부를 실을 자리가 없다. 보내면 새 턴이 되고 질문은 버려진다.
+ *  - `none`: 열린 질문이 없다.
+ */
+export function composerTarget(open: SessionSummary['pendingQuestions'], hasAttachments: boolean): 'answer' | 'drops' | 'none' {
+  if (open.length === 0) return 'none'
+  return open.length === 1 && open[0]!.questions.length === 1 && !hasAttachments ? 'answer' : 'drops'
+}
+
+/** 새 턴에 밀려 버려진 질문을 대화에 남기는 한 줄 (#174) */
+export function droppedQuestionsText(questions: string[]): string {
+  const quoted = questions.map((q) => `"${q}"`).join(', ')
+  return questions.length === 1
+    ? `Question dropped — this message started a new turn instead of answering ${quoted}`
+    : `Questions dropped — this message started a new turn instead of answering ${quoted}`
+}
+
+/**
+ * 에이전트에게 인수인계 노트를 부탁할 수 없게 막는 카드 (#174) — 없으면 null. 스토어의 `handoffSession`과 사이드바의
+ * 확인 창이 같은 판정을 쓴다.
+ */
+export function handoffBlockedBy(s: Pick<SessionSummary, 'pendingQuestions' | 'pendingApproval'>): 'question' | 'approval' | null {
+  if (s.pendingQuestions.length > 0) return 'question'
+  if (s.pendingApproval) return 'approval'
+  return null
+}
+
 /** 보냈는지 모르는 말 (#173) — 말풍선의 렌더 키 → 되돌릴 때 필요한 것. 다시 붙은 뒤 저장소에서 가린다 */
 type UnsureSend = { sessionId: string; text: string; attachments?: ChatAttachment[]; prevState?: SessionSummary['state'] }
 const unsureSends = new Map<number, UnsureSend>()
@@ -3423,13 +3455,20 @@ export const useStore = create<AppState>((set, get) => ({
      * 알 방법이 없다. 첨부가 있을 때도 비켜선다 — 답으로 보내면 첨부가 버려진다.
      */
     const open = get().sessions[sessionId]?.pendingQuestions ?? []
-    const only = open.length === 1 && open[0]!.questions.length === 1 ? open[0]! : null
-    if (only && !attachments?.length && text.trim()) {
+    const target = composerTarget(open, !!attachments?.length)
+    if (target === 'answer' && text.trim()) {
+      const only = open[0]!
       await get().answerQuestion(sessionId, only.requestId, [
         { question: only.questions[0]!.question, answers: [text.trim()] },
       ])
       return
     }
+    /*
+     * 글이 답이 될 수 없는데 질문이 열려 있다 (#174) — 보내면 새 턴이 되고, 답을 못 받은 질문은 거절된 도구 사용으로
+     * 정리되어 카드가 사라진다. 입력창의 안내문이 보내기 전에 이것을 말하고(`composerTarget`), 보낸 뒤에는 무엇이
+     * 버려졌는지 대화에 한 줄 남긴다 — 카드가 설명 없이 사라지면 사람은 질문이 있었다는 것조차 다시 찾을 수 없다.
+     */
+    const dropped = target === 'drops' ? open.flatMap((q) => q.questions.map((x) => x.question)) : []
 
     const seq = ++chatSeq
     /*
@@ -3478,6 +3517,14 @@ export const useStore = create<AppState>((set, get) => ({
         text,
         attachments?.map(({ data: _, ...a }) => a),
       )
+      if (dropped.length) {
+        const mark: ChatItem = { kind: 'mark', seq: ++chatSeq, text: droppedQuestionsText(dropped) }
+        set((s) => {
+          const items = s.chat[sessionId] ?? []
+          const at = items.findIndex((i) => i.seq === seq)
+          return at < 0 ? {} : { chat: { ...s.chat, [sessionId]: [...items.slice(0, at), mark, ...items.slice(at)] } }
+        })
+      }
       // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
       set(
         ifSessionStill(sessionId, (s, cur) => ({
@@ -3814,6 +3861,17 @@ export const useStore = create<AppState>((set, get) => ({
     )
     if (session.worktree || liveKids.length > 0) {
       set({ toast: 'Worktree sessions cannot hand off yet — merge or delete them first' })
+      return
+    }
+    /*
+     * 에이전트에게 노트를 부탁하는 길은 **카드가 떠 있으면 시작하지 않는다** (#174). 부탁은 보통의 말로 가는데, 질문이
+     * 하나 열려 있으면 그 말이 질문의 답이 되어(`send`) 에이전트는 "Which DB?"의 답으로 인수인계 요청문을 받았다 —
+     * 에이전트에게 간 답은 되돌릴 수 없다. 질문이 여럿이거나 승인이 떠 있으면 새 턴이 되어 카드가 버려진다.
+     * 기록 모드는 에이전트에게 묻지 않으므로 그대로 간다. 사이드바의 확인 창도 같은 조건을 본다(`handoffBlockedBy`).
+     */
+    const blocked = mode === 'agent' ? handoffBlockedBy(session) : null
+    if (blocked) {
+      set({ toast: `Answer the open ${blocked} first, or hand off from the record` })
       return
     }
     handoffInFlight.add(sessionId)

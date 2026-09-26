@@ -8171,3 +8171,47 @@ test('질문이 열려 있으면 입력창에 친 글이 그 답으로 간다 (#
   await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 질문 다시 해줄래?')
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
+
+/**
+ * #125의 나머지 (#174): 글이 답이 될 수 없으면(질문이 여럿이거나 첨부가 있음) 보내기 전에 입력창이 그렇다고 말하고,
+ * 보내서 질문이 버려지면 대화에 한 줄 남는다. 안내문이 첨부를 보지 않던 동안, 파일을 붙이면 "답을 쓰라"는 안내 아래에서
+ * 글이 새 턴으로 가 질문이 조용히 버려졌다.
+ */
+test('질문이 하나라도 파일을 붙이면 글이 답이 될 수 없다고 입력창이 먼저 말한다 (#174)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+  await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /answer to the question/i)
+
+  // 파일을 붙이면 답이 될 수 없다 — 안내문이 바로 바뀐다
+  await page.getByTestId('attach-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('x') })
+  await expect(page.getByTestId('attachment-list')).toContainText('notes.txt')
+  await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /drops the question card/i)
+})
+
+test('질문이 여럿이면 보낸 글은 새 턴이 되고, 무엇이 버려졌는지 대화에 한 줄 남는다 (#174)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q2', questions: QUESTIONS })
+  await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /drops the question card/i)
+
+  await page.getByTestId('prompt-input').fill('알아서 해줘')
+  await page.getByTestId('prompt-input').press('Enter')
+  await expect(page.getByTestId('chat-stream')).toContainText('Questions dropped')
+  await expect(page.getByTestId('chat-stream')).toContainText('"점심 뭐 먹을까?", "음료는?"')
+})
+
+test('질문이 열린 세션은 에이전트에게 인수인계 노트를 부탁할 수 없고, 기록 모드는 된다 (#174)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q3', questions: [QUESTIONS[0]] })
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`handoff-session-${id}`).click()
+  await expect(page.getByTestId('handoff-blocked')).toContainText('waiting on a question')
+  await expect(page.getByTestId('confirm-handoff-yes')).toBeDisabled()
+  await page.getByTestId('handoff-mode-record').click()
+  await expect(page.getByTestId('handoff-blocked')).toHaveCount(0)
+  await expect(page.getByTestId('confirm-handoff-yes')).toBeEnabled()
+})
