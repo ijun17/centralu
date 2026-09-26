@@ -9,6 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -150,6 +151,21 @@ describe('listDir — 저장소가 아닌 프로젝트', () => {
     expect(entries).toHaveLength(names.length)
     // 저장소가 아니니 무시되는 것도 없다 — 못 물어봤다고 전부 무시로 칠하면 트리가 빈다
     expect(entries.every((e) => !e.ignored)).toBe(true)
+  })
+})
+
+describe('listDir — 한글 이름의 무시 판정 (#176)', () => {
+  /**
+   * `check-ignore`의 줄 단위 출력은 한글 이름을 `"\355\254\264…"`로 감싸 돌려준다. 받은 줄을
+   * 이름과 맞춰 보면 한글 파일만 어긋나서, 무시된 한글 파일이 흐리게 표시되지 않았다.
+   */
+  it('무시된 한글 파일도 무시로 표시된다', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: root })
+    writeFileSync(join(root, '.gitignore'), '무시됨.log\nascii.log\n')
+    for (const n of ['무시됨.log', 'ascii.log', '한글파일.md']) writeFileSync(join(root, n), '')
+
+    const ignored = Object.fromEntries((await listDir(root, '')).map((e) => [e.name.normalize('NFC'), e.ignored]))
+    expect(ignored).toMatchObject({ '무시됨.log': true, 'ascii.log': true, '한글파일.md': false })
   })
 })
 
