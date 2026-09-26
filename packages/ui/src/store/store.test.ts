@@ -650,14 +650,15 @@ describe('첫 프롬프트 이중 그리기 방지', () => {
     const p = await useStore.getState().addProject('/tmp/ip')
     const info = await useStore.getState().createSession(p.id, { initialPrompt: '첫 지시' })
 
-    // host도 첫 프롬프트를 저장하고 알린다 (manager.createSession의 user_message)
+    // host도 첫 프롬프트를 저장하고 알린다 (manager.createSession의 user_message) — 목도 응답 전에 알린다(#172).
+    // 같은 확인이 한 번 더 와도(재연결의 재생) 두 번 그리지 않는다
     useStore
       .getState()
       .dispatchEvent({ type: 'user_message', sessionId: info.id, seq: 1, text: '첫 지시' } as NormalizedEvent)
 
     const users = useStore.getState().chat[info.id]!.filter((i) => i.kind === 'user')
     expect(users).toHaveLength(1)
-    expect((users[0] as { pending?: boolean }).pending).toBe(false)
+    expect((users[0] as { pending?: boolean }).pending).toBeFalsy()
   })
 })
 
@@ -2498,5 +2499,40 @@ describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
     await useStore.getState().respondApproval(id, 'r1', 'allow')
     expect(spy).toHaveBeenCalledTimes(2)
     expect(useStore.getState().approvalsInFlight).toEqual({})
+  })
+})
+
+/*
+ * #172: host는 세션을 만들며 `session_created`·`handoff`·`user_message`를 응답보다 먼저 방송한다. 화면은 앞의 것으로
+ * 세션을 등록하고 뒤의 둘을 대화에 붙이는데, 돌아온 응답이 대화를 pending 첫 프롬프트 하나로 덮어써 마커가 사라졌다.
+ * 기록을 읽으면 마커가 돌아오며 첫 프롬프트가 두 번 섰다. 목도 이제 host와 같은 순서로 방송한다.
+ */
+describe('인수인계로 태어난 세션의 첫 화면 (#172)', () => {
+  it('마커 하나와 첫 프롬프트 하나가 서고, 기록을 거슬러 읽어도 그대로다', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho172')
+    await useStore.getState().attach(mock)
+    // 기록 페이지는 한 번 왕복 늦게 온다 — 기록과의 합치기(#197)가 응답이 덮어쓴 자리를 가리기 전의 화면을 본다
+    const load = mock.agents.loadMessages.bind(mock.agents)
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    vi.spyOn(mock.agents, 'loadMessages').mockImplementation(async (...a) => {
+      await gate
+      return load(...a)
+    })
+
+    const info = await useStore.getState().createSession(proj.id, {
+      initialPrompt: 'OPENING',
+      handoff: { from: 'Old', note: 'note', fromSessionId: 'old-172' },
+    })
+    const now = () => useStore.getState().chat[info.id] ?? []
+    expect(now().map(line)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING'])
+    // 첫 프롬프트는 확정된 줄이다 — pending으로 남으면 나중에 같은 문장의 말을 흡수한다
+    expect(now().find((i) => i.kind === 'user' && i.pending)).toBeUndefined()
+
+    release()
+    expect(await readAll(info.id)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING', ...now().slice(2).map(line)])
+    expect(now().filter((i) => i.kind === 'user' && i.text === 'OPENING')).toHaveLength(1)
+    expect(now().filter((i) => i.kind === 'mark')).toHaveLength(1)
   })
 })

@@ -1396,6 +1396,12 @@ export class MockPlatform implements Platform {
       // 실물과 같은 규칙: 마지막에 고른 도구가 그 프로젝트의 기본값이 된다 (manager.createSession)
       const owner = this.projectsList.find((p) => p.id === params.projectId)
       if (owner) owner.defaultTool = params.tool
+      /*
+       * 실물과 같은 순서 (#172): host는 세션을 만들면 `session_created`를 먼저 방송하고, 그 뒤에 인수인계 마커와 첫
+       * 프롬프트를 방송한 다음에야 응답한다. 목이 이것을 빼먹는 동안 이벤트는 등록 전에 도착해 보관됐다가 응답 뒤에
+       * 재생되어, 응답이 화면의 대화를 덮어쓰는 결함이 목 위에서만 가려졌다.
+       */
+      this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       // 불러오기: 이전 대화를 이미 읽은 상태로 복원한다 (host의 importHistory와 같은 규칙)
       if (params.importHistory && params.resumeExternalId) {
         const history = this.externalHistory.get(params.resumeExternalId) ?? []
@@ -1435,7 +1441,19 @@ export class MockPlatform implements Platform {
         info.lastSeq = seq
         this.emit({ type: 'handoff', sessionId: id, seq, from })
       }
-      if (params.initialPrompt) await this.agents.send(id, params.initialPrompt)
+      if (params.initialPrompt) {
+        /*
+         * 실물과 같은 규칙 (#172): 첫 프롬프트는 기록에 남고 `user_message`로 방송된 뒤에 응답이 간다. 보통의 `send`는
+         * 확인을 보내지 않으므로(목의 약속) 여기서는 host처럼 직접 알린다 — emit이 기록에 남기고 번호를 매긴다.
+         */
+        this.emit({ type: 'user_message', sessionId: id, seq: (this.messages.get(id)?.length ?? 0) + 1, text: params.initialPrompt })
+        info.lastReadSeq = info.lastSeq
+        if (info.autoNamed && info.name === 'New session') {
+          info.name = params.initialPrompt.slice(0, 40)
+          this.emit({ type: 'session_title', sessionId: id, title: info.name, auto: true })
+        }
+        this.emit({ type: 'state_change', sessionId: id, state: 'working' })
+      }
       return info
     },
     saveAttachment: async (_sessionId: string, name: string, mime: string, dataBase64: string) => {
