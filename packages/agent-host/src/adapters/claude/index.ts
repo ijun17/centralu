@@ -375,8 +375,17 @@ class ClaudeSession implements SessionHandle {
                   })
                 }
                 const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
-                const key = detail.kind === 'command' ? detail.command : `${toolName}:${detail.kind}`
-                if (self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
+                /*
+                 * 규칙의 열쇠 — 명령은 명령 전문, 파일 편집은 **그 경로**다 (#170). 화면이 "항상 허용"에 싣는 매처가 그렇고
+                 * (명령은 core의 suggestMatcher, 편집은 detail.path), Codex 어댑터가 같은 규칙으로 찾는다. 예전에는 편집을
+                 * `Edit:file_edit`로 찾아서, 경로로 저장된 규칙이 영영 맞지 않았다 — 같은 파일을 다시 고칠 때마다 물었다.
+                 * 그 밖의 종류(`other`)에는 열쇠가 없다: "항상"이 무엇을 뜻할지 아직 정하지 않았다.
+                 */
+                const key =
+                  detail.kind === 'command' ? detail.command
+                  : detail.kind === 'file_edit' && detail.path !== '?' ? detail.path
+                  : ''
+                if (key && self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
 
                 const requestId = `req-${++self.reqCounter}`
                 self.emit({ type: 'approval_request', sessionId: self.sessionId, requestId, detail })

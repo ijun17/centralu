@@ -3478,6 +3478,17 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
       /*
+       * 무엇이 기억됐는지는 **실제로 보낸 매처**로 말한다 (#170). 예전에는 카드가 따로 문구를 지어서, 매처가 없는
+       * 종류(`other`)에도 "Always allow in this session: other"라고 알렸다 — 어댑터도 저장소도 아무것도 남기지 않았는데.
+       */
+      if (decision === 'always') {
+        set({
+          toast: matcher
+            ? `Always allow in ${scope === 'project' ? 'this project' : 'this session'}: ${matcher}`
+            : 'Allowed once — this kind of request cannot be always-allowed yet',
+        })
+      }
+      /*
        * Letting an edit or a command through means the tree is **about to** move (issue #41).
        *
        * Waiting for `turn_complete` alone would freeze the count for as long as the turn

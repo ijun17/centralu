@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
-import { suggestMatcher } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { letterOf } from '../../app/keys.js'
@@ -21,7 +20,6 @@ export function ApprovalCard({
   detail: ApprovalDetail
 }) {
   const respond = useStore((s) => s.respondApproval)
-  const setToast = useStore((s) => s.setToast)
   const sc = useShortcut()
 
   useEffect(() => {
@@ -37,15 +35,13 @@ export function ApprovalCard({
       if (!action) return
       // 능력 물음(M4 D-4)에는 "항상 허용"이 없다 — 답이 어차피 기억된다. a는 이 카드에서 아무 일도 하지 않는다
       if (detail.kind === 'capability' && action.decision === 'always') return
+      // "항상 허용"의 알림은 스토어가 보낸 매처로 띄운다 (#170)
       void respond(sessionId, requestId, action.decision, action.scope)
-      if (action.decision === 'always') {
-        setToast(`Always allow in ${action.scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
-      }
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sessionId, requestId, detail, respond, setToast])
+  }, [sessionId, requestId, detail, respond])
 
   if (detail.kind === 'capability') {
     return (
@@ -84,11 +80,7 @@ export function ApprovalCard({
           label="Always allow"
           testId="approve-always"
           title={`Hold ${sc('alt')} and click to apply to the whole project`}
-          onClick={(alt) => {
-            const scope = alt ? 'project' : 'session'
-            void respond(sessionId, requestId, 'always', scope)
-            setToast(`Always allow in ${scope === 'project' ? 'this project' : 'this session'}: ${matcherOf(detail)}`)
-          }}
+          onClick={(alt) => void respond(sessionId, requestId, 'always', alt ? 'project' : 'session')}
         />
         <span className="ml-auto text-[10px] text-slate">
           <Kbd alt /> <Kbd>a</Kbd> whole project
@@ -226,6 +218,3 @@ export function detailText(d: ApprovalDetail): string {
   return d.raw
 }
 
-export function matcherOf(d: ApprovalDetail): string {
-  return d.kind === 'command' ? suggestMatcher(d.command) : d.kind === 'file_edit' ? d.path : 'other'
-}
