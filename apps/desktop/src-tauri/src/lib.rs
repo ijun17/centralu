@@ -59,6 +59,13 @@ fn host_error(sup: State<'_, Supervisor>) -> Option<String> {
     sup.last_error()
 }
 
+/// 실패 화면의 Retry (#184). 포기한 수퍼바이저를 다시 돌린다 — 웹뷰만 다시 읽어서는 host가
+/// 다시 뜨지 않는다. 아직 돌고 있으면 아무것도 하지 않는다(곧 답이 온다).
+#[tauri::command]
+fn restart_host(app: AppHandle, sup: State<'_, Supervisor>) -> bool {
+    sup.restart(app)
+}
+
 /// 독 아이콘 뱃지 (FR-12 ④단계 표시 계층).
 /// 0이면 지운다 — 처리할 게 없는데 숫자가 남아 있으면 신호가 아니라 소음이다.
 #[tauri::command]
@@ -499,6 +506,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             host_info,
             host_error,
+            restart_host,
             set_badge,
             alert,
             open_in_ide,

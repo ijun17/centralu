@@ -37,6 +37,9 @@ struct Inner {
     info: Option<HostInfo>,
     status_text: Option<String>,
     shutting_down: bool,
+    /// 감시 스레드가 돌고 있다. 다시 시작(#184)이 스레드를 둘 띄우지 않게 하는 표시다 —
+    /// 둘이 같은 데이터 폴더로 host를 번갈아 띄우면 서로의 잠금에 막힌다.
+    running: bool,
     /// host가 죽기 전에 남긴 마지막 말들 (도그푸딩: 설치본이 "Starting…"에 영원히
     /// 멈춰 보였는데, 진짜 이유 — 다른 인스턴스가 데이터를 쥐고 있음 — 는 host가
     /// stdout에 또박또박 말하고 있었다. 말은 있었는데 화면까지 오지 않았다.)
@@ -72,6 +75,46 @@ impl Supervisor {
 
     /// host를 띄우고 감시 스레드를 건다. 실패해도 앱은 계속 뜬다 (UI가 상태를 보여준다).
     pub fn start(&self, app: AppHandle) {
+        if self.claim(false) {
+            self.watch(app);
+        }
+    }
+
+    /**
+     * 포기한 뒤에 다시 시작한다 (#184 — 실패 화면의 Retry).
+     *
+     * 예전 Retry는 웹뷰만 다시 읽었다. 감시 스레드는 `Failed`를 낸 뒤 끝나 있고 `start`를
+     * 부르는 곳은 setup 하나뿐이라, 사람이 원인을 고친 뒤에도(다른 창을 닫았거나 Node를
+     * 깔았거나) 30초를 기다린 끝에 옛 문장이 다시 떴다. 강제 종료 말고는 풀 길이 없었다.
+     *
+     * 아직 돌고 있으면(백오프 중) 아무것도 하지 않는다 — 그 스레드가 곧 답을 낸다.
+     * 돌기 시작했으면 true.
+     */
+    pub fn restart(&self, app: AppHandle) -> bool {
+        if !self.claim(true) {
+            return false;
+        }
+        self.watch(app);
+        true
+    }
+
+    /// 감시 스레드를 띄울 자격을 얻는다. 이미 돌거나 앱이 끝나는 중이면 false.
+    /// `forget_error`면 옛 실패 문장을 비운다 — 새 시도가 옛 이유로 곧바로 실패해 보이지 않게.
+    fn claim(&self, forget_error: bool) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        if inner.running || inner.shutting_down {
+            return false;
+        }
+        inner.running = true;
+        if forget_error {
+            inner.status_text = None;
+        }
+        true
+    }
+
+    fn watch(&self, app: AppHandle) {
         let me = self.clone();
         // 배포 빌드에서는 번들된 host가 리소스 디렉토리에 들어 있다 (F-0).
         //
@@ -90,6 +133,8 @@ impl Supervisor {
                 .filter(|p| p.exists())
         };
         thread::spawn(move || {
+            // 어느 자리로 끝나든 돌던 표시를 내린다 — 그래야 Retry가 다시 띄울 수 있다
+            let _running = Running(me.clone());
             // Node가 없으면 몇 번을 다시 걸어도 결과가 같다 — 백오프 5회를 돌며
             // 원인 없는 실패를 쌓는 대신 지금 바로, 무엇이 없는지 말한다.
             if bundled.is_some() && std::env::var("CC_HOST_CMD").is_err() {
@@ -299,6 +344,17 @@ impl Supervisor {
     }
 }
 
+/// 감시 스레드가 끝날 때 `running`을 내린다. `return`이 네 군데라 Drop에 맡긴다.
+struct Running(Supervisor);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.0.inner.lock() {
+            inner.running = false;
+        }
+    }
+}
+
 fn emit(app: &AppHandle, status: HostStatus) {
     let _ = app.emit("host-status", status);
 }
@@ -405,9 +461,10 @@ const UPGRADE_NODE_HINT: &str = "배포판의 패키지 관리자";
 /// host 번들의 esbuild target이 node22다 — 그 아래에서는 문법부터 깨진다.
 const MIN_NODE_MAJOR: u32 = 22;
 
-/// Node 탐색은 로그인 셸을 통째로 띄우므로 1초 안팎이 든다. 프로세스가 사는 동안
-/// PATH가 달라질 일은 없으니 한 번만 묻는다 (재시작 루프가 매번 부른다).
-static NODE: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::new();
+/// Node 탐색은 로그인 셸을 통째로 띄우므로 1초 안팎이 든다. 재시작 루프가 매번 부르므로
+/// 찾은 것은 기억한다. **못 찾은 것은 기억하지 않는다** (#184) — 앱을 켠 뒤 Node를 깔고
+/// Retry를 누른 사람에게 옛 "찾지 못했습니다"를 다시 보여주면 안 된다.
+static NODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// 배포 빌드가 host를 실행할 Node의 **절대 경로**를 찾는다.
 ///
@@ -418,8 +475,19 @@ static NODE: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::
 /// claude·codex CLI 탐색에서 이미 같은 문제를 겪고 로그인 셸에게 묻도록 고쳤는데
 /// (`packages/agent-host/src/env-path.ts`), node만 옛 방식으로 남아 있었다.
 fn resolve_node() -> Result<String, String> {
-    NODE.get_or_init(|| pick_node(probe_login_shell(), fallback_node_paths()))
-        .clone()
+    remember_found(&NODE, || pick_node(probe_login_shell(), fallback_node_paths()))
+}
+
+/// 찾은 것만 기억한다. 못 찾았으면 다음에 다시 묻는다.
+fn remember_found(
+    cache: &std::sync::OnceLock<String>,
+    probe: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    if let Some(found) = cache.get() {
+        return Ok(found.clone());
+    }
+    let found = probe()?;
+    Ok(cache.get_or_init(|| found).clone())
 }
 
 /// 어느 것을 고를지의 규칙만 따로 뗀 것 — 셸도 파일시스템도 없이 시험할 수 있게.
@@ -599,6 +667,46 @@ fn workspace_root() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Retry가 포기한 수퍼바이저를 다시 띄울 수 있고, 돌고 있는 것을 겹쳐 띄우지 않는다 (#184)
+    #[test]
+    fn a_supervisor_that_gave_up_can_be_claimed_again() {
+        let sup = Supervisor::new();
+        assert!(sup.claim(false), "처음 시작");
+        assert!(!sup.claim(true), "감시 스레드가 도는 동안은 겹쳐 띄우지 않는다");
+
+        // 감시 스레드가 Failed를 내고 끝났다
+        sup.set_error("agent-host가 종료되었습니다 (code Some(1))");
+        drop(Running(sup.clone()));
+
+        assert!(sup.claim(true), "끝난 뒤에는 다시 띄운다");
+        assert_eq!(sup.last_error(), None, "새 시도가 옛 이유로 곧바로 실패해 보이면 안 된다");
+    }
+
+    #[test]
+    fn no_restart_while_the_app_is_quitting() {
+        let sup = Supervisor::new();
+        sup.shutdown();
+        assert!(!sup.claim(true));
+    }
+
+    /// 앱을 켠 뒤 Node를 깔고 Retry를 누르면 새로 찾아야 한다 (#184)
+    #[test]
+    fn a_missing_node_is_not_remembered_but_a_found_one_is() {
+        let cache = std::sync::OnceLock::new();
+        assert_eq!(
+            remember_found(&cache, || Err("Node.js를 찾지 못했습니다".into())),
+            Err("Node.js를 찾지 못했습니다".to_string())
+        );
+        assert_eq!(
+            remember_found(&cache, || Ok("/opt/homebrew/bin/node".into())),
+            Ok("/opt/homebrew/bin/node".to_string())
+        );
+        assert_eq!(
+            remember_found(&cache, || panic!("찾은 것은 다시 묻지 않는다")),
+            Ok("/opt/homebrew/bin/node".to_string())
+        );
+    }
 
     #[test]
     fn picks_the_marked_line_only() {

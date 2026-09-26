@@ -23,6 +23,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "host_info",
             "host_error",
+            "restart_host",
             "set_badge",
             "alert",
             "open_in_ide",

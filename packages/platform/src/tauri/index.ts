@@ -29,22 +29,29 @@ type HostStatus =
  * **순서가 중요하다:** 이벤트를 먼저 구독하고 그다음 현재 상태를 묻는다.
  * 반대로 하면 그 사이에 준비가 끝났을 때 신호를 놓쳐 타임아웃까지 멈춘다
  * (host가 1초 만에 뜨게 되면서 실제로 겪었다). 폴링까지 두어 삼중으로 막는다.
+ *
+ * 폴링은 **실패도** 묻는다 (#184). 수퍼바이저는 포기할 때만 실패 문장을 남기므로(다시
+ * 시작하면 비운다), 문장이 있으면 곧 답이다. 예전에는 `failed` 이벤트를 놓치면 — Retry로
+ * 다시 띄운 수퍼바이저가 웹뷰가 듣기 전에 곧바로 포기하면 — 30초를 다 기다렸다.
  */
 async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
   return new Promise<HostInfo>((resolve, reject) => {
     let done = false
-    const finish = (info: HostInfo) => {
-      if (done) return
+    const stop = () => {
       done = true
       clearTimeout(timer)
       clearInterval(poll)
+      // 다시 시도할 때마다 구독이 쌓이지 않게 푼다
+      void unlisten.then((f) => f()).catch(() => {})
+    }
+    const finish = (info: HostInfo) => {
+      if (done) return
+      stop()
       resolve(info)
     }
     const fail = (message: string) => {
       if (done) return
-      done = true
-      clearTimeout(timer)
-      clearInterval(poll)
+      stop()
       reject(new Error(message))
     }
 
@@ -55,25 +62,56 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
     }, timeoutMs)
 
     // ① 먼저 구독한다
-    void listen<HostStatus>('host-status', (e) => {
+    const unlisten = listen<HostStatus>('host-status', (e) => {
       const p = e.payload
       if (typeof p !== 'object' || p === null) return
       if (p.state === 'ready') finish({ port: p.port, token: p.token })
       else if (p.state === 'failed') fail(p.message)
     })
 
-    // ② 이미 준비돼 있었는지 확인한다 (구독 전에 끝난 경우)
-    void invoke<HostInfo | null>('host_info')
-      .then((info) => info?.token && finish(info))
-      .catch(() => {})
-
-    // ③ 이벤트를 놓쳐도 결국 붙는다
-    const poll = setInterval(() => {
+    // ② 이미 준비돼 있었는지(또는 이미 포기했는지) 확인한다 (구독 전에 끝난 경우)
+    const check = () => {
       void invoke<HostInfo | null>('host_info')
         .then((info) => info?.token && finish(info))
         .catch(() => {})
-    }, 400)
+      void invoke<string | null>('host_error')
+        .then((err) => err && fail(err))
+        .catch(() => {})
+    }
+    check()
+
+    // ③ 이벤트를 놓쳐도 결국 붙는다
+    const poll = setInterval(check, 400)
   })
+}
+
+/**
+ * 포기한 수퍼바이저를 다시 돌린다 (#184 — 실패 화면의 Retry). 웹뷰만 다시 읽어서는 host가
+ * 다시 뜨지 않는다. 돌기 시작했으면 true, 이미 돌고 있었으면 false(곧 답이 온다).
+ */
+export async function restartHost(): Promise<boolean> {
+  return invoke<boolean>('restart_host')
+}
+
+/**
+ * 종료 요청(`quit-requested`)의 받는 곳 (#184). **첫 렌더 전에** 한 번 건다.
+ *
+ * 셸은 ⌘Q·메뉴의 Quit·창 닫기를 모두 붙잡고 웹뷰에 이 이벤트를 보낸다. 예전에는 듣는 곳이
+ * 앱 화면(종료 모달) 하나뿐이라, host를 기다리는 화면과 기동 실패 화면에서는 이벤트가 받는
+ * 곳 없이 사라졌다 — Dock의 종료와 강제 종료 말고는 끌 길이 없었다.
+ *
+ * 물을 곳(모달)이 서 있으면 그쪽에 넘기고, 없으면 물을 것이 없으므로 바로 끈다.
+ * @returns 물을 곳을 세우고(함수) 내리는(null) 손잡이
+ */
+export function listenForQuit(): (ask: (() => void) | null) => void {
+  let ask: (() => void) | null = null
+  void listen('quit-requested', () => {
+    if (ask) ask()
+    else void invoke('quit_app')
+  })
+  return (next) => {
+    ask = next
+  }
 }
 
 /** 내보내는 것은 시험을 위해서다 — 러스트 커맨드와의 이음매를 웹뷰 없이 본다 */
