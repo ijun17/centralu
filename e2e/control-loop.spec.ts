@@ -1371,6 +1371,18 @@ test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ pa
 
   await page.getByTestId('viewer-search').fill('줄 42 ')
   await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
+
+  // Enter·⇧Enter로 일치 사이를 옮겨 다닌다 — 화면 밖의 일치도 데려온다 (#183)
+  const search = page.getByTestId('viewer-search')
+  await search.fill('줄 2999 ')
+  await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
+  await search.fill('9 내용')
+  await search.press('Enter')
+  await expect(page.getByTestId('viewer-match-count')).toHaveText('1/300')
+  await expect(page.locator('[data-current-match]')).toContainText('줄 9 내용')
+  await search.press('Shift+Enter')
+  await expect(page.getByTestId('viewer-match-count')).toHaveText('300/300')
+  await expect(page.locator('[data-current-match]')).toContainText('줄 2999 내용')
 })
 
 /**
