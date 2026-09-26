@@ -1489,7 +1489,8 @@ function settle(live: ChatItem, row: ChatItem): ChatItem {
  * 번호 없는 화면의 줄이 기록의 이 줄을 먼저 그린 것인가 — 내용으로 가린다 (#79).
  *
  * 번호가 없는 줄은 셋이다: 확인 전의 말(목은 확인을 보내지 않는다), 이미지(host가 파일을 쓴 **뒤에** 번호를
- * 매겨 이벤트에는 번호가 없다), 오류(스키마가 번호를 지운다, #161). 셋 다 host의 저장소에는 있다.
+ * 매겨 이벤트에는 번호가 없다), 오류(목은 오류를 기록하지 않아 번호를 싣지 않는다 — host의 오류는 #161부터 번호를
+ * 싣는다). 셋 다 host의 저장소에는 있다.
  */
 function sameLine(live: ChatItem, row: ChatItem): boolean {
   if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && live.text === row.text
@@ -4833,7 +4834,9 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
      * 시작하면 회복되지만, 그때도 사람은 여전히 이유를 모른다.
      */
     case 'error':
-      return [...items, { kind: 'mark', seq: ++chatSeq, text: errorText(e) }]
+      // 세션의 오류는 마커 행으로 기록되고 그 번호를 싣는다 (#161) — 다른 기록 줄처럼 번호로 맞춘다
+      if (holds(items, e.seq)) return items
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: errorText(e) }]
     default:
       return items
   }

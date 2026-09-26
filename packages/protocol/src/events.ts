@@ -438,7 +438,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * 실으면 셋 중 한 플랫폼에서만 맞는 말이 된다. 다시 읽기는 어차피 한 번의 listDir다.
    */
   z.object({ ...appScoped, type: z.literal('fs_changed'), projectId: z.string(), dirs: z.array(z.string()) }),
-  z.object({ ...appScoped, type: z.literal('error'), error: ProtocolError }),
+  /**
+   * 오류 — 세션의 것이면 host가 마커 행으로 기록한다(#107). 그래서 `persistedSeq`를 싣는다 (#161): 빠져 있던 동안 zod가
+   * `seq`를 지워, 오류로 끝난 세션은 화면의 `lastSeq`가 한 칸 뒤처졌고 다시 켜면 본 적 있는 세션에 안읽음 점이 떴다.
+   */
+  z.object({ ...appScoped, ...persistedSeq, type: z.literal('error'), error: ProtocolError }),
 ])
 export type NormalizedEvent = z.infer<typeof NormalizedEvent>
 
