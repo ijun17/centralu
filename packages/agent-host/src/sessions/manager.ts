@@ -49,7 +49,7 @@ import {
   parseUiPreferences,
   sessionLiveDefaults,
 } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import {
   gitSummary,
@@ -1255,6 +1255,7 @@ export class SessionManager {
     if (params.builderOf) this.setBuilder(params.builderOf, id)
     // 외부 앱 (M4 A-5) — 워커도 받는다. 핸들이 서지 못하면 아래 catch가 닫는다
     const apps = this.appsFor(info)
+    const from = this.handleSink()
     try {
       handle = await adapter.createSession(
         {
@@ -1291,8 +1292,9 @@ export class SessionManager {
           // 앱이 스키마를 주고 부탁한 답 (M4 D-1) — Claude는 이 세션의 질의에, Codex는 이 세션의 모든 턴에 싣는다
           ...(params.appAgent?.outputSchema ? { outputSchema: params.appAgent.outputSchema } : {}),
         },
-        (e) => this.onEvent(e),
+        from.sink,
       )
+      from.own(handle)
     } catch (err) {
       apps?.close()
       // 서지 못한 세션은 만드는 세션이 아니다 — 앱이 가리키는 곳을 비운다
@@ -1718,6 +1720,7 @@ export class SessionManager {
     const apps = this.appsFor(m)
     // 만드는 세션이면 자기 앱의 check를 받는다 (C-3) — 명부를 지금 다시 본다(그 사이에 다른 세션이 이었을 수 있다)
     const builds = this.builderRefOf(m) !== null
+    const from = this.handleSink()
     try {
       const creating = adapter.createSession(
         {
@@ -1780,7 +1783,7 @@ export class SessionManager {
           // 승인된 MCP 서버는 사용자 폴더의 앱이다 — 오케스트레이터는 그 앱들을 여기서 받는다 (M4 A-7)
           apps,
         },
-        (e) => this.onEvent(e),
+        from.sink,
       )
       /*
        * **여기가 상한 없이 기다리던 자리다** — 그리고 그 대기가 이 함수의 유일한
@@ -1799,12 +1802,13 @@ export class SessionManager {
        */
       const tStartFrom = Date.now()
       const handle = await withTimeout(creating, 150_000, `Starting ${m.tool}`).catch((err) => {
-        void creating.then((h) => h.dispose()).catch(() => {})
+        void creating.then((h) => (from.own(h), h.dispose())).catch(() => {})
         // 서지 못한 핸들의 붙이기다 — 늦게 도착한 핸들은 위에서 닫히며 함께 닫는다
         apps?.close()
         throw err
       })
       const tStart = Date.now() - tStartFrom
+      from.own(handle)
       this.handles.set(sessionId, handle)
       this.running.set(sessionId, {
         model: m.model,
@@ -2090,9 +2094,45 @@ export class SessionManager {
     return this.handles.has(sessionId)
   }
 
+  /**
+   * 어댑터에 넘길 이벤트 받이 — **어느 핸들이 보냈는지를 싣는다** (#157).
+   *
+   * 예전에는 모든 핸들이 같은 콜백을 받아서, 매니저는 세션 id만 보고 "그 순간 등록된 핸들"의 말로 읽었다.
+   * 설정을 바꿔 프로세스를 갈아 끼우면 옛 핸들의 늦은 말(끝나 가는 턴의 글, 늦은 adapter_crashed)이 새
+   * 핸들의 것으로 들어갔고, 늦은 크래시는 방금 띄운 새 프로세스를 걷어 냈다. 핸들이 서기 전(`own` 전)의 말은
+   * 누구의 것인지 아직 모르므로 지금처럼 받는다.
+   */
+  private handleSink(): { sink: EventSink; own: (h: SessionHandle) => void } {
+    let handle: SessionHandle | null = null
+    return {
+      sink: (e) => this.onEvent(e, handle),
+      own: (h) => {
+        handle = h
+      },
+    }
+  }
+
   /** 이벤트 수신 → 메타 갱신 → 메시지 영속화 → 전파 */
-  private onEvent(raw: NormalizedEvent): void {
+  private onEvent(raw: NormalizedEvent, from: SessionHandle | null = null): void {
     const e = raw.type === 'files_touched' ? this.projectRelative(raw) : raw
+    /*
+     * **내려놓은 핸들의 말은 받지 않는다** (#157) — 그 세션에 지금 등록된 핸들이 아니면 버린다. 크래시 분기를
+     * 타지 않고(새 핸들을 닫지 않는다), 끝나 가던 턴의 글과 turn_complete도 기록하지 않는다.
+     *
+     * 화면에 떠 있는 것을 닫는 말만 예외다 — 핸들이 닫히며 놓아주는 승인·질문 카드와 에이전트 카드. 이것까지
+     * 버리면 카드가 영영 남는다(dispose의 주석). 매니저는 그 말이 나오는 dispose를 핸들을 걷기 **전에**
+     * 부르므로 닫을 때의 다른 말(보내지 못한 메시지 안내)은 등록된 핸들의 말로 들어온다.
+     */
+    if (
+      from &&
+      e.sessionId &&
+      this.handles.get(e.sessionId) !== from &&
+      e.type !== 'approval_resolved' &&
+      e.type !== 'question_resolved' &&
+      e.type !== 'tool_result'
+    ) {
+      return
+    }
     let seq: number | null = null
     if (e.sessionId) {
       const m = this.meta.get(e.sessionId)
@@ -2128,9 +2168,10 @@ export class SessionManager {
       if (e.type === 'error' && e.error.code === 'adapter_crashed') {
         const dead = this.handles.get(e.sessionId)
         if (dead) {
+          // 걷기 전에 닫는다 — 닫으며 내는 말(보내지 못한 메시지 안내)이 등록된 핸들의 말로 들어오게 (#157)
+          void dead.dispose().catch(() => {})
           this.handles.delete(e.sessionId)
           this.running.delete(e.sessionId)
-          void dead.dispose().catch(() => {})
         }
       }
     }
@@ -4073,9 +4114,11 @@ export class SessionManager {
     const h = this.handles.get(sessionId)
     if (h) {
       this.closeStream(sessionId)
+      // 걷기 전에 닫는다 — 닫으며 내는 말이 등록된 핸들의 말로 들어오게 (onEvent의 #157 가드)
+      const closing = h.dispose().catch(() => {})
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
-      await h.dispose().catch(() => {})
+      await closing
     }
     if (!this.meta.has(sessionId)) return
     this.onEvent({ type: 'state_change', sessionId, state: 'idle', reason: 'app_agent_finished' })

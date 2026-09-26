@@ -48,6 +48,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
           await new Promise(() => {}) // 세션은 살아 있다
         },
         interrupt: async () => {},
+        close: () => {},
         supportedCommands: async () => [],
         getContextUsage: async () => undefined,
         setMcpServers: async () => ({ added: [], removed: [], errors: {} }),

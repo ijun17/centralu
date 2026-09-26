@@ -11,6 +11,8 @@ type QueryHandle = AsyncIterable<unknown> &
     /** 진행 중인 턴을 끊는다. 스트리밍 입력 모드에서만 쓸 수 있다 — 우리가 쓰는 모드가 그렇다 */
     interrupt(): Promise<unknown>
     supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
+    /** 질의를 닫고 CLI 프로세스를 끝낸다 (sdk.d.ts) — dispose가 부른다 (#157) */
+    close(): void
     /**
      * 동적으로 붙인 MCP 서버의 집합을 **통째로 바꾼다** (sdk.d.ts). 처음 `mcpServers`로 넘긴
      * 인프로세스 서버도 이 집합에 들어 있다(설치된 0.3.263의 sdk.mjs: 초기 SDK 서버가 같은
@@ -252,8 +254,8 @@ class ClaudeSession implements SessionHandle {
       }
     }
 
-    // 사용량은 계정의 성질이지만 SDK는 Query에만 그 메서드를 둔다 — 최근 질의를 빌려 쓴다
-    const q: QueryHandle = (ClaudeAdapter.lastQuery = this.query = query({
+    // 사용량은 계정의 성질이지만 SDK는 Query에만 그 메서드를 둔다 — 살아 있는 질의를 빌려 쓴다 (liveQueries)
+    const q: QueryHandle = (this.query = query({
       prompt: input(),
       options: {
         cwd: this.opts.cwd,
@@ -382,6 +384,7 @@ class ClaudeSession implements SessionHandle {
               },
       },
     }))
+    ClaudeAdapter.liveQueries.add(q)
 
     // 앱이 오고 가면 서버 집합을, 도구가 바뀌면 그 서버의 목록을 따라간다 — 세션을 다시 띄우지 않는다
     this.stopAppWatch = this.opts.apps?.onChange(() => this.syncApps()) ?? null
@@ -395,6 +398,12 @@ class ClaudeSession implements SessionHandle {
          * 낼지 판단할 수 없다 — 내면 보통 턴에서 두 번 붙고, 안 내면 영영 안 보인다.
          */
         for await (const msg of q) {
+          /*
+           * **닫은 뒤에 온 말은 받지 않는다** (#157). dispose가 프로세스를 끝내도 이미 읽어 둔 메시지가
+           * 몇 개 더 나올 수 있다 — 끝나 가던 턴의 글과 result다. 그 세션 자리에는 이미 새 프로세스가
+           * 앉아 있을 수 있으므로, 옛 턴의 끝이 새 프로세스의 기록으로 들어가면 안 된다.
+           */
+          if (this.closed) break
           const m = msg as { type?: string; session_id?: string; subtype?: string }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
           this.noteAppCalls(msg)
@@ -409,6 +418,7 @@ class ClaudeSession implements SessionHandle {
          * 그때 아무 말도 안 올리면 화면은 영원히 '작업 중'이고 다음 말은 허공으로 간다 —
          * codex 어댑터가 onExit(expected=false)에서 하는 것과 같은 신호를 올린다.
          */
+        ClaudeAdapter.liveQueries.delete(q)
         if (!this.closed) {
           this.releaseAgents('The session process ended before this agent reported back')
           this.emit({
@@ -418,6 +428,14 @@ class ClaudeSession implements SessionHandle {
           })
         }
       } catch (err) {
+        ClaudeAdapter.liveQueries.delete(q)
+        /*
+         * **우리가 닫은 프로세스의 예외는 크래시가 아니다** (#157). 위의 정상 종료 분기와 같은 규칙이다.
+         * 멈춘 턴(마지막 result가 error_during_execution) 뒤에 설정을 바꾸면 옛 CLI는 오류 result를 안은 채
+         * 끝나고, SDK는 그것을 "Claude Code returned an error result: …"로 바꿔 던진다. 예전에는 그 예외가
+         * adapter_crashed로 올라가 매니저가 방금 새로 띄운 프로세스를 죽은 것으로 여겨 닫았다.
+         */
+        if (this.closed) return
         this.releaseAgents('The session process ended before this agent reported back')
         this.emit({
           type: 'error',
@@ -689,6 +707,16 @@ class ClaudeSession implements SessionHandle {
     this.pending.clear()
     this.releaseQuestions('Session closed')
     this.releaseAgents('The session closed before this agent reported back')
+    /*
+     * **프로세스를 끝낸다** (#157). 예전에는 입력 제너레이터만 끝냈다 — SDK가 CLI의 stdin을 닫을 뿐이고, CLI는
+     * 돌던 턴을 마저 돌았다(auto에서는 묻는 일이 없으니 남은 도구 호출까지). 갈아 끼운 세션에서는 옛 프로세스와
+     * 새 프로세스가 한 대화에 함께 쓰고 있었던 셈이다. `close()`는 stdin을 닫고 끝나지 않으면 SIGTERM을 보낸다
+     * (sdk.d.ts "Close the query and terminate the underlying process"). 사용량 창구도 여기서 거둔다.
+     */
+    if (this.query) {
+      ClaudeAdapter.liveQueries.delete(this.query)
+      this.query.close()
+    }
   }
 
   /** 띄워 둔 백그라운드 에이전트의 카드를 닫는다 — 프로세스와 함께 사라졌으므로 통지는 안 온다 (#98) */
@@ -766,8 +794,19 @@ export class ClaudeAdapter implements AgentAdapter {
    * 사용량은 **계정**의 성질인데 SDK는 세션(Query)에만 그 메서드를 준다.
    * 그래서 살아 있는 질의 하나를 빌려 쓴다 — 어느 세션에 묻든 답은 같다.
    */
-  /** 사용량·모델 목록은 계정의 성질인데 SDK는 둘 다 Query에만 둔다 — 최근 질의를 빌려 쓴다 */
-  static lastQuery: (UsageQuery & ModelQuery) | null = null
+  /**
+   * 사용량·모델 목록은 계정의 성질인데 SDK는 둘 다 Query에만 둔다 — 살아 있는 질의를 빌려 쓴다.
+   *
+   * **살아 있는 것만 담는다** (#157). 예전에는 마지막으로 시작한 질의 하나를 들고 있다가 그 세션이 닫히거나
+   * 죽어도 놓지 않아서, 더 오래된 세션이 살아 있는데도 죽은 질의에 물었다. 넣은 차례가 곧 시작한 차례다.
+   */
+  static readonly liveQueries = new Set<UsageQuery & ModelQuery>()
+  /** 가장 최근에 시작해 아직 살아 있는 질의 */
+  static get lastQuery(): (UsageQuery & ModelQuery) | null {
+    let last: (UsageQuery & ModelQuery) | null = null
+    for (const q of ClaudeAdapter.liveQueries) last = q
+    return last
+  }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 검증: 전역 bypass를 세션 단위로 덮어쓸 수 있음
     contextUsage: 'exact',

@@ -27,6 +27,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
         await new Promise<void>(() => {})
       },
       interrupt: async () => {},
+      close: () => {},
       supportedCommands: async () => [],
       getContextUsage: async () => undefined,
     }
