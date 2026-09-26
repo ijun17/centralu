@@ -6,6 +6,7 @@ import type { SavedCommand } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
+import { useOpenLayer } from '../../components/Modal.jsx'
 import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
 import { useStore } from '../../store/store.js'
 
@@ -50,6 +51,8 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
   /** 닫힘 애니메이션 중 — 내려온 길로 도로 올라간 뒤에야 onClose로 unmount한다 */
   const [leaving, setLeaving] = useState(false)
   const leave = useCallback(() => setLeaving(true), [])
+  // 칸을 덮는 층이다 — 떠 있는 동안 그 아래 승인 카드가 y/n/a를 받지 않는다 (#158)
+  useOpenLayer()
 
   // reduced-motion이면 animationend가 안 온다 — 타이머가 unmount를 보증한다 (설정 메뉴와 같은 규칙)
   useEffect(() => {

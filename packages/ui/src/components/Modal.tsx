@@ -1,5 +1,19 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useStore } from '../store/store.js'
+
+/**
+ * 화면을 덮는 층 하나가 떠 있는 동안 스토어의 `openLayers`를 올린다 (#158).
+ *
+ * 창의 열림은 대개 그 창을 띄운 컴포넌트의 지역 상태라, 전역 키(승인 카드의 y/n/a)는 창이 떠 있는지 알 길이 없었다.
+ * `Modal`이 스스로 세므로 새 창은 따로 신경 쓰지 않아도 포함된다. `Modal`을 쓰지 않는 층(명령 창)은 이 훅을 직접 부른다.
+ */
+export function useOpenLayer(): void {
+  useEffect(() => {
+    useStore.setState((s) => ({ openLayers: s.openLayers + 1 }))
+    return () => useStore.setState((s) => ({ openLayers: Math.max(0, s.openLayers - 1) }))
+  }, [])
+}
 
 /**
  * 모달 껍데기.
@@ -25,6 +39,7 @@ export function Modal({
   /** 위쪽에 붙일지 가운데 둘지. 목록형은 위가 편하다 */
   align?: 'center' | 'top'
 }) {
+  useOpenLayer()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return

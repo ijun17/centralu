@@ -20,6 +20,8 @@ export function ApprovalCard({
   detail: ApprovalDetail
 }) {
   const respond = useStore((s) => s.respondApproval)
+  // 응답이 돌아오는 중에는 단추도 누를 수 없다 — 두 번째 응답이 실행된 명령을 거부로 적는다 (#158)
+  const busy = useStore((s) => !!s.approvalsInFlight[requestId])
   const sc = useShortcut()
 
   useEffect(() => {
@@ -73,12 +75,13 @@ export function ApprovalCard({
       </pre>
 
       <div className="mt-3 flex items-center gap-1.5 border-t border-edge bg-void/40 px-3 py-2">
-        <ActionKey k="y" label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" />
-        <ActionKey k="n" label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" />
+        <ActionKey k="y" label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k="n" label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
         <ActionKey
           k="a"
           label="Always allow"
           testId="approve-always"
+          disabled={busy}
           title={`Hold ${sc('alt')} and click to apply to the whole project`}
           onClick={(alt) => void respond(sessionId, requestId, 'always', alt ? 'project' : 'session')}
         />
@@ -138,17 +141,20 @@ function ActionKey({
   onClick,
   testId,
   title,
+  disabled,
 }: {
   k: string
   label: string
   onClick: (alt: boolean) => void
   testId: string
   title?: string
+  disabled?: boolean
 }) {
   return (
     <button
-      className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-ash transition-colors hover:bg-graphite hover:text-chalk"
+      className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-ash transition-colors hover:bg-graphite hover:text-chalk disabled:opacity-50"
       onClick={(e) => onClick(e.altKey)}
+      disabled={disabled}
       data-testid={testId}
       title={title}
     >
@@ -176,10 +182,13 @@ export function approvalCardCovered(
     paletteOpen: boolean
     overlay: unknown
     focusedSessionId: string | null
+    /** 지역 상태로 열리는 창(삭제 확인, 새 세션, 이미지 확대, 명령 창…)의 수 — `Modal`이 스스로 센다 (#158) */
+    openLayers: number
   },
   sessionId: string,
 ): boolean {
   return (
+    st.openLayers > 0 ||
     st.inboxOpen ||
     st.usageOpen ||
     st.settingsOpen ||
@@ -198,10 +207,15 @@ export function approvalCardCovered(
  * 입력창에 타이핑 중이거나 카드가 모달·오버레이 뒤에 가려져 있어도 받지 않는다.
  */
 export function approvalKeyAction(
-  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> & { repeat?: boolean },
   ctx: { typing: boolean; covered: boolean },
 ): ApprovalKeyAction | null {
   if (e.metaKey || e.ctrlKey || e.shiftKey) return null
+  /*
+   * 눌린 채 반복되는 키는 승인이 아니다 (#158). y를 누르고 있으면 첫 응답 뒤에 다음 카드가 뜨는 순간 그 카드도
+   * 사람이 읽기 전에 허용됐다.
+   */
+  if (e.repeat) return null
   if (ctx.typing || ctx.covered) return null
   // 글자는 자판이 아니라 **뜻**으로 읽는다 — ⌥가 붙거나 한글 자판이면 `key`는 다른 글자다 (app/keys.ts)
   const k = letterOf(e)

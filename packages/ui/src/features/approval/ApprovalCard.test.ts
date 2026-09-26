@@ -69,6 +69,13 @@ describe('approvalKeyAction — 전역 y/n/a가 승인이 되는 조건 (U6)', (
     expect(approvalKeyAction(key('a', { altKey: true }), { typing: false, covered: true })).toBeNull()
   })
 
+  /** #158: y를 누른 채로 두면 첫 응답 뒤에 뜬 다음 카드도 사람이 읽기 전에 허용됐다 */
+  it('눌린 채 반복되는 키는 승인이 아니다', () => {
+    expect(approvalKeyAction({ ...key('y'), repeat: true }, FREE)).toBeNull()
+    expect(approvalKeyAction({ ...key('a', { altKey: true, code: 'KeyA' }), repeat: true }, FREE)).toBeNull()
+    expect(approvalKeyAction({ ...key('y'), repeat: false }, FREE)).toEqual({ decision: 'allow' })
+  })
+
   it('승인과 무관한 키는 그대로 지나간다', () => {
     expect(approvalKeyAction(key('x'), FREE)).toBeNull()
     expect(approvalKeyAction(key('Escape'), FREE)).toBeNull()
@@ -83,7 +90,7 @@ describe('approvalKeyAction — 전역 y/n/a가 승인이 되는 조건 (U6)', (
 describe('approvalCardCovered — 어느 카드가 키를 받는가', () => {
   const open = {
     inboxOpen: false, usageOpen: false, settingsOpen: false, paletteOpen: false,
-    overlay: null as unknown, focusedSessionId: 's1',
+    overlay: null as unknown, focusedSessionId: 's1', openLayers: 0,
   }
 
   it('포커스된 세션의 카드만 키를 받는다', () => {
@@ -101,5 +108,14 @@ describe('approvalCardCovered — 어느 카드가 키를 받는가', () => {
     expect(approvalCardCovered({ ...open, settingsOpen: true }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, paletteOpen: true }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, overlay: { kind: 'viewer' } }, 's1')).toBe(true)
+  })
+
+  /*
+   * #158: "Delete this session?"·새 세션·이미지 확대·명령 창은 지역 상태로 열려 스토어의 다섯 값에 드러나지 않는다.
+   * 그 창에서 확인하려고 누른 y가 창 뒤에 가려진 명령을 허용했다. 이런 창은 `Modal`(명령 창은 직접)이 `openLayers`로 센다.
+   */
+  it('지역 상태로 열린 창이 하나라도 떠 있으면 포커스된 카드도 받지 않는다', () => {
+    expect(approvalCardCovered({ ...open, openLayers: 1 }, 's1')).toBe(true)
+    expect(approvalCardCovered({ ...open, openLayers: 2 }, 's1')).toBe(true)
   })
 })

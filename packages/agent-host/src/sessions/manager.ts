@@ -377,6 +377,13 @@ export class SessionManager {
    */
   private capabilityAsks = new Map<string, { requestId: string; sessionId: string; detail: Extract<ApprovalDetail, { kind: 'capability' }>; shown: boolean; resolve: (d: 'allow' | 'deny' | null) => void }>()
   /**
+   * 어댑터에 닿은 승인 응답의 requestId (#158) — 요청 id → 세션 id. 같은 요청에 두 번째 응답이 오면(키 두 번, 카드와 레일이
+   * 한꺼번에) 어댑터는 그 요청을 이미 모르므로 `false`를 돌려준다. 그것을 '프로세스가 갈아 끼워졌다'로 읽으면 방금 실행된
+   * 명령에 `deny`를 방송하고 기록에도 남긴다 — 허용된 명령이 거부로 보인다. 여기 있는 요청은 이미 답한 것이므로 조용히 둔다.
+   * 오래된 것부터 버린다(요청 id는 다시 쓰이지 않으므로 최근 것만 기억하면 된다).
+   */
+  private answeredApprovals = new Map<string, string>()
+  /**
    * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 그 앱의 고정 화면과 사이드바의 앱 줄이 그린다(`apps.questions`). id → 물음.
    */
   private appQuestions = new Map<string, { question: AppQuestion; resolve: (d: 'allow' | 'deny' | null) => void }>()
@@ -2817,6 +2824,13 @@ export class SessionManager {
      * 실행되지도 않은 명령을 '항상 허용'으로 기억해 두면 다음에 조용히 통과한다.
      */
     const landed = this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
+
+    // 이미 답한 요청에 온 두 번째 응답이다 — 첫 응답이 이미 닿았으니 거부를 방송하지도, 실패로 알리지도 않는다 (#158)
+    if (!landed && this.answeredApprovals.get(requestId) === sessionId) return
+    if (landed) {
+      this.answeredApprovals.set(requestId, sessionId)
+      if (this.answeredApprovals.size > 256) this.answeredApprovals.delete(this.answeredApprovals.keys().next().value!)
+    }
 
     if (!landed) {
       /*
