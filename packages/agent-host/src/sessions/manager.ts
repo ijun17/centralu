@@ -347,6 +347,11 @@ export class SessionManager {
     Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   >()
   /**
+   * 지우거나 도구를 바꾸려고 깨우기가 끝나기를 기다리는 세션 → 그 이유 (#163). 그 깨우기는 핸들을 앉히지 않고
+   * 물러난다 — 기다리는 쪽이 먼저 온 요청이다. 깨우기에 합류해 기다리던 send도 보내지 않는다.
+   */
+  private leaving = new Map<string, string>()
+  /**
    * 세션에 외부 앱을 붙이는 자리 (M4 A-5). 런타임이 없는 host(테스트 대부분)에서는 null이고,
    * 그때 세션은 앱을 받지 않는다 — 다른 서비스처럼 선택이다.
    */
@@ -1634,7 +1639,8 @@ export class SessionManager {
     // 이미 살아 있으면 그대로 쓴다 (중복 프로세스를 만들지 않는다)
     if (this.handles.has(sessionId)) return { session: m, resumed: true }
 
-    const adapter = this.adapters.get(m.tool)
+    const tool = m.tool
+    const adapter = this.adapters.get(tool)
     if (!adapter) return { session: m, resumed: false, reason: `No adapter for ${m.tool}` }
     if (!adapter.capabilities.resume) return { session: m, resumed: false, reason: `${m.tool} does not support resume` }
     /*
@@ -1821,6 +1827,22 @@ export class SessionManager {
       })
       const tStart = Date.now() - tStartFrom
       from.own(handle)
+      /*
+       * **기다린 사이에 세션이 지워졌거나 도구가 바뀌었으면 이 핸들은 쓸 자리가 없다** (#163). 예전에는 확인 없이
+       * 핸들을 넣고 행을 다시 썼다 — 지운 세션이 저장소에 되살아나 다음 기동에 목록으로 돌아왔고, 프로세스는
+       * host가 꺼질 때까지 돌았다(Codex면 스레드의 쓰기 잠금을 쥔 채). 도구를 바꾼 세션에서는 옛 도구의 프로세스가
+       * 살아 남아 말을 받았고, 옛 도구의 대화 id가 새 도구의 자리에 적혔다.
+       */
+      const leaving =
+        this.leaving.get(sessionId) ??
+        (!this.meta.has(sessionId) ? 'The session was deleted while waking'
+        : m.tool !== tool ? 'The session switched tools while waking'
+        : null)
+      if (leaving) {
+        // 닫히기를 기다린다 — 지우는 쪽이 이어서 도구 쪽 대화를 지운다(Codex는 도는 동안 잠금을 쥔다)
+        await handle.dispose().catch(() => {})
+        return { session: m, resumed: false, reason: leaving }
+      }
       this.handles.set(sessionId, handle)
       this.running.set(sessionId, launched)
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
@@ -1909,6 +1931,18 @@ export class SessionManager {
     return this.resumeSession(sessionId)
   }
 
+  /** 진행 중인 깨우기를 물리고 끝나기를 기다린다 (leaving) — 지우기와 도구 바꾸기가 먼저 부른다 (#163) */
+  private async untilWakeWithdrawn(sessionId: string, why: string): Promise<void> {
+    const waking = this.resuming.get(sessionId)
+    if (!waking) return
+    this.leaving.set(sessionId, why)
+    try {
+      await waking.catch(() => {})
+    } finally {
+      this.leaving.delete(sessionId)
+    }
+  }
+
   /** 세션을 완전히 지운다 (프로세스 종료 + 기록·첨부 삭제) */
   /**
    * @param deleteWorktree 워크트리까지 지울지. **기본은 남기는 것이다** — 에이전트가 몇 시간
@@ -1936,6 +1970,12 @@ export class SessionManager {
         { code: 'internal' },
       )
     }
+    /*
+     * 깨우는 중이면 그 깨우기를 물리고 끝나기를 기다린다 (#163). 예전에는 기다리지 않아서, 깨우기가 지운 세션에 핸들을
+     * 앉히고 행을 다시 썼다 — 지운 세션이 다음 기동에 돌아왔고, 깨우기가 send에서 시작됐다면 에이전트가 방금 보낸
+     * 말을 실행했다. 도구 쪽 대화를 지울 때(deleteExternal) 깨어나던 Codex 프로세스가 잠금을 쥐고 있기도 했다.
+     */
+    await this.untilWakeWithdrawn(sessionId, 'The session was deleted while waking')
     // 행이 곧 지워지므로 마지막 flush는 의미가 없다 — 추적만 걷는다 (#66)
     this.streams.delete(sessionId)
     // 앱이 답을 기다리던 세션이다 (M4 D-1) — 기다림을 이유와 함께 끝낸다. 안 끝내면 앱의 호출이 답 없이 매달린다
@@ -2703,6 +2743,12 @@ export class SessionManager {
      // (이벤트로 들어온 줄이 meta를 거치지 않는 길이 있다), 한 줄만 어긋나도
      // 가드가 "잃어버렸다"로 읽어서 방금 바꾼 세션이 안 깨어난다
     this.store.setAppSetting(freshStartKey(m.id), String(this.store.loadMessages(m.id, 1)[0]?.seq ?? 0))
+    /*
+     * 방송하는 상태를 meta에도 적는다 (#163). 예전에는 idle만 방송하고 meta는 working인 채 저장해서, 다시 연결한
+     * 화면과 오케스트레이터의 list_sessions가 끊긴 턴을 "작업 중"으로 봤다(설정 도구는 그 세션을 거절했다).
+     */
+    m.state = 'idle'
+    m.waitingSince = null
     this.store.upsertSession(m)
     this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
 
@@ -4654,17 +4700,21 @@ export class SessionManager {
           } else if (pr) {
             // headOid는 게이트(#76 하드 게이트)의 재료지 칩의 재료가 아니다 — 프로토콜 모양만 싣는다
             const chip = { number: pr.number, state: pr.state, url: pr.url }
-            if (JSON.stringify(chip) !== JSON.stringify(m.worktreePr)) {
-              this.meta.set(m.id, { ...this.meta.get(m.id)!, worktreePr: chip })
+            // 기다린 사이에 지워졌으면 적지 않는다 (#163) — 예전에는 id 없는 행을 meta에 되살렸다
+            if (this.meta.get(m.id) === m && JSON.stringify(chip) !== JSON.stringify(m.worktreePr)) {
+              m.worktreePr = chip
               this.emit({ type: 'worktree_pr', sessionId: m.id, pr: chip })
             }
           }
           if (pr && pr !== 'unavailable' && pr.state === 'merged') merged = true
         }
       }
-      if (!merged) continue
-      const next = { ...this.meta.get(m.id)!, worktreeMerged: true }
-      this.meta.set(m.id, next)
+      /*
+       * 기다린 사이에 지워졌으면 건너뛴다 (#163). 적을 때는 **그 자리에서 고친다** — 새 객체로 갈아 끼우면 같은 세션을
+       * 붙들고 기다리던 다른 길(깨우기)이 옛 객체에 쓰고 저장한다.
+       */
+      if (!merged || this.meta.get(m.id) !== m) continue
+      m.worktreeMerged = true
       this.emit({ type: 'worktree_merged', sessionId: m.id })
       console.error(`[worktree] branch merged into trunk: ${m.worktree.branch} (${m.id.slice(0, 8)})`)
     }

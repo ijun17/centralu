@@ -1231,6 +1231,23 @@ function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
   return next
 }
 
+/**
+ * RPC를 기다린 **뒤에** 세션 하나를 고치는 set (#163) — 그 사이에 session_deleted가 왔으면 아무것도 바꾸지 않는다.
+ *
+ * 예전에는 기다린 뒤의 set이 `{ ...s.sessions[id]!, … }`로 펼쳤다. 기다리는 사이에 세션이 지워지면 필드가 거의 없는
+ * 행(`{"live":true}`)이 되살아났고, 모든 세션을 도는 코드가 깨졌다(`s.touchedPaths is not iterable`). 기다린 뒤의
+ * 세션 고치기는 모두 이 문을 지난다 — 다음에 더해지는 자리도 같은 규칙을 받게.
+ */
+function ifSessionStill(
+  sessionId: string,
+  patch: (st: AppState, cur: AppState['sessions'][string]) => Partial<AppState>,
+): (st: AppState) => Partial<AppState> {
+  return (st) => {
+    const cur = st.sessions[sessionId]
+    return cur ? patch(st, cur) : {}
+  }
+}
+
 let chatSeq = 0
 
 /**
@@ -2377,6 +2394,16 @@ export const useStore = create<AppState>((set, get) => ({
           inlineViews: omitKey(s.inlineViews, sessionId),
           // 읽던 자리도 세션과 함께 사라진다 — 같은 id가 다시 날 일은 없다 (#61)
           scrollAnchor: omitKey(s.scrollAnchor, sessionId),
+          /*
+           * 세션별로 든 것은 전부 함께 간다 (#163). 알림 카드가 남으면 누를 때 없는 세션에 초점이 가서
+           * "Select a project or session"이 뜬다. 나머지(기록 커서·초안·깨우기 오류)는 아무도 읽지 않는 짐이다.
+           */
+          notices: s.notices.filter((n) => n.sessionId !== sessionId),
+          history: omitKey(s.history, sessionId),
+          drafts: omitKey(s.drafts, sessionId),
+          stickToBottom: omitKey(s.stickToBottom, sessionId),
+          wakeError: omitKey(s.wakeError, sessionId),
+          wakeLocked: omitKey(s.wakeLocked, sessionId),
           focusedSessionId: s.focusedSessionId === sessionId ? null : s.focusedSessionId,
         }
       })
@@ -3370,14 +3397,14 @@ export const useStore = create<AppState>((set, get) => ({
         attachments?.map(({ data: _, ...a }) => a),
       )
       // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
-      set((s) => ({
-        sessions: s.sessions[sessionId]?.live
-          ? s.sessions
-          : { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: true } },
-        wakeError: omitKey(s.wakeError, sessionId),
-        // 보내졌다는 건 잠금이 풀렸다는 뜻이다 — 갈림길을 계속 내밀 이유가 없다
-        wakeLocked: omitKey(s.wakeLocked, sessionId),
-      }))
+      set(
+        ifSessionStill(sessionId, (s, cur) => ({
+          sessions: cur.live ? s.sessions : { ...s.sessions, [sessionId]: { ...cur, live: true } },
+          wakeError: omitKey(s.wakeError, sessionId),
+          // 보내졌다는 건 잠금이 풀렸다는 뜻이다 — 갈림길을 계속 내밀 이유가 없다
+          wakeLocked: omitKey(s.wakeLocked, sessionId),
+        })),
+      )
     } catch (err) {
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
@@ -3420,10 +3447,12 @@ export const useStore = create<AppState>((set, get) => ({
     if (!platform) return false
     try {
       const res = await platform.agents.resumeSession(sessionId)
-      set((s) => ({
-        sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: res.resumed } },
-        toast: res.resumed ? null : `Could not resume: ${res.reason ?? 'unknown reason'}`,
-      }))
+      set(
+        ifSessionStill(sessionId, (s, cur) => ({
+          sessions: { ...s.sessions, [sessionId]: { ...cur, live: res.resumed } },
+          toast: res.resumed ? null : `Could not resume: ${res.reason ?? 'unknown reason'}`,
+        })),
+      )
       return res.resumed
     } catch (err) {
       set({ toast: `Could not resume: ${(err as Error).message}` })
@@ -3883,11 +3912,11 @@ export const useStore = create<AppState>((set, get) => ({
     if (!platform) return
     try {
       const info = await platform.agents.updateSettings(sessionId, s)
-      set((st) => ({
+      set(ifSessionStill(sessionId, (st, cur) => ({
         sessions: {
           ...st.sessions,
           [sessionId]: {
-            ...st.sessions[sessionId]!,
+            ...cur,
             model: info.model,
             effort: info.effort,
             verbosity: info.verbosity,
@@ -3896,7 +3925,7 @@ export const useStore = create<AppState>((set, get) => ({
             worktree: info.worktree,
           },
         },
-      }))
+      })))
       /*
        * 무엇을 바꿨는지 그대로 말한다. 예전에는 model 아니면 전부 "Perms:"라고 했다 —
        * effort를 바꿔도 "Perms: normal"이 떠서, 방금 한 일과 화면의 말이 달랐다.
@@ -4422,21 +4451,25 @@ export const useStore = create<AppState>((set, get) => ({
     set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
     try {
       const res = await s.platform.agents.resumeSession(sessionId)
-      set((st) => ({
-        sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
-        wakeError: res.resumed
-          ? omitKey(st.wakeError, sessionId)
-          : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
-        wakeLocked:
-          res.resumed || !res.lockedElsewhere
-            ? omitKey(st.wakeLocked, sessionId)
-            : { ...st.wakeLocked, [sessionId]: true },
-      }))
+      set(
+        ifSessionStill(sessionId, (st, cur) => ({
+          sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
+          wakeError: res.resumed
+            ? omitKey(st.wakeError, sessionId)
+            : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
+          wakeLocked:
+            res.resumed || !res.lockedElsewhere
+              ? omitKey(st.wakeLocked, sessionId)
+              : { ...st.wakeLocked, [sessionId]: true },
+        })),
+      )
     } catch (e) {
-      set((st) => ({
-        wakeError: { ...st.wakeError, [sessionId]: (e as Error).message },
-        wakeLocked: omitKey(st.wakeLocked, sessionId),
-      }))
+      set(
+        ifSessionStill(sessionId, (st) => ({
+          wakeError: { ...st.wakeError, [sessionId]: (e as Error).message },
+          wakeLocked: omitKey(st.wakeLocked, sessionId),
+        })),
+      )
     } finally {
       set((st) => {
         const next = { ...st.resuming }
@@ -4452,8 +4485,8 @@ export const useStore = create<AppState>((set, get) => ({
     set((st) => ({ resuming: { ...st.resuming, [sessionId]: true } }))
     try {
       const res = await s.platform.agents.forkConversation(sessionId)
-      set((st) => ({
-        sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId]!, live: res.resumed } },
+      set(ifSessionStill(sessionId, (st, cur) => ({
+        sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
         wakeError: res.resumed
           ? omitKey(st.wakeError, sessionId)
           : { ...st.wakeError, [sessionId]: res.reason ?? '' },
@@ -4462,7 +4495,7 @@ export const useStore = create<AppState>((set, get) => ({
         toast: res.resumed
           ? 'Continuing in a forked conversation — the original is untouched'
           : `Could not fork: ${res.reason ?? 'unknown reason'}`,
-      }))
+      })))
     } catch (e) {
       set({ toast: `Could not fork: ${(e as Error).message}` })
     } finally {
@@ -4499,13 +4532,15 @@ export const useStore = create<AppState>((set, get) => ({
     })
     try {
       const r = await platform.agents.restartSession(sessionId)
-      set((s) => ({
-        sessions: { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, live: r.resumed } },
-        wakeError: r.resumed
-          ? omitKey(s.wakeError, sessionId)
-          : { ...s.wakeError, [sessionId]: r.reason ?? '' },
-        toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
-      }))
+      set(
+        ifSessionStill(sessionId, (s, cur) => ({
+          sessions: { ...s.sessions, [sessionId]: { ...cur, live: r.resumed } },
+          wakeError: r.resumed
+            ? omitKey(s.wakeError, sessionId)
+            : { ...s.wakeError, [sessionId]: r.reason ?? '' },
+          toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
+        })),
+      )
       return r.resumed
     } catch (e) {
       // 던져서 끝나면 자물쇠가 영영 안 풀린다 — 버튼이 죽은 채로 남는다
@@ -4536,16 +4571,14 @@ export const useStore = create<AppState>((set, get) => ({
       set({ toast: `Could not rename: ${(e as Error).message}` })
       return
     }
-    set((s) => ({ sessions: { ...s.sessions, [sessionId]: renamePure(s.sessions[sessionId]!, next) } }))
+    set(ifSessionStill(sessionId, (s, cur) => ({ sessions: { ...s.sessions, [sessionId]: renamePure(cur, next) } })))
   },
 
   async markRead(sessionId) {
     const s = get().sessions[sessionId]
     if (!s || s.lastReadSeq >= s.lastSeq) return
     await get().platform!.agents.markRead(sessionId, s.lastSeq)
-    set((st) => ({
-      sessions: { ...st.sessions, [sessionId]: markReadPure(st.sessions[sessionId]!, s.lastSeq) },
-    }))
+    set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
   },
 }))
 
