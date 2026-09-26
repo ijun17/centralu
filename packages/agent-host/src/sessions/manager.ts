@@ -2148,6 +2148,8 @@ export class SessionManager {
       return
     }
     let seq: number | null = null
+    /** 이 이벤트로 턴이 끝났다 — 끝난 방식(완료·오류·중단·한도)은 이 이벤트가 말한다 */
+    let endedTurn = false
     if (e.sessionId) {
       const m = this.meta.get(e.sessionId)
       if (m) {
@@ -2162,6 +2164,7 @@ export class SessionManager {
          * 여기서 한 번: 턴 안의 앱은 반쯤 고친 코드다. 판단(바뀌었나, 호출이 도는 중인가)은 런타임이 한다.
          */
         if (wasBusy && !inTurn(m.state)) {
+          endedTurn = true
           const ref = this.builderRefOf(m)
           if (ref) this.appsHub?.rt.builderTurnEnded(ref)
         }
@@ -2191,7 +2194,12 @@ export class SessionManager {
     }
     // 기록으로 남은 이벤트에는 매긴 세션 내 seq를 실어 보낸다 — UI 안읽음 추적의 기준
     this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
-    if (e.type === 'turn_complete' && e.sessionId) void this.reportBackIfAwaited(e.sessionId)
+    /*
+     * 보고는 **턴이 어떻게 끝나든** 한다 (#166). 예전에는 turn_complete에서만 표식을 소비했는데, 두 어댑터는
+     * 실패한 턴에 turn_complete를 내지 않는다(함께 내면 상태가 "입력 대기"로 끝나 실패를 가린다). 그래서 실패한
+     * 일은 보고되지 않았고, 표식이 남아 나중의 관계없는 턴이 "끝났습니다"로 보고됐다.
+     */
+    if (endedTurn && e.sessionId) void this.reportBackIfAwaited(e.sessionId, e)
     // 앱이 답을 기다리는 세션이다 (M4 D-1) — 저장한 **뒤에** 알린다: 기다리는 쪽이 저장소에서 마지막 답을 읽는다
     if (e.sessionId) this.agentRuns.get(e.sessionId)?.onEvent(e)
     // 카드 자리가 비었다 — 기다리던 능력 물음이 있으면 세운다 (D-4). 어댑터의 카드가 닫힌 뒤, 또는 우리 카드를 가렸던 카드가 닫힌 뒤
@@ -2209,7 +2217,7 @@ export class SessionManager {
    *  - 한 번 알리면 표식을 지운다. 그래야 그 세션이 이후 스스로 도는 턴마다
    *    오케스트레이터를 깨우지 않는다 — 그건 서로 깨우는 고리가 된다
    */
-  private async reportBackIfAwaited(sessionId: string): Promise<void> {
+  private async reportBackIfAwaited(sessionId: string, ending: NormalizedEvent): Promise<void> {
     const orchestratorId = this.awaitingReport.get(sessionId)
     if (!orchestratorId) return
     this.awaitingReport.delete(sessionId)
@@ -2226,13 +2234,24 @@ export class SessionManager {
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(사라진 프로젝트)')
       : '(없음)'
     const preview = this.previewOf(sessionId, 600)
+    /*
+     * 끝난 방식을 첫 줄에 적는다 (#166) — 실패한 일을 "끝났습니다"로 적으면 사람도 오케스트레이터도 끝난 일로 읽는다.
+     * 실패면 오류 문장을 함께 싣는다. 오류는 에이전트의 마지막 응답이 아니라서 미리보기에는 없다.
+     */
+    const outcome =
+      ending.type === 'error' ? `[Centralu] 지시한 일이 실패했습니다.\n`
+      : ending.type === 'limit_reached' ? `[Centralu] 지시한 일이 사용 한도에 걸려 멈췄습니다.\n`
+      : ending.type === 'turn_complete' ? `[Centralu] 지시한 일이 끝났습니다.\n`
+      : `[Centralu] 지시한 일이 끝나기 전에 멈췄습니다.\n`
+    const failure = ending.type === 'error' ? `오류: ${ending.error.message.slice(0, 600)}\n\n` : ''
     try {
       await this.deliver(
         orchestratorId,
-        `[Centralu] 지시한 일이 끝났습니다.\n` +
+        outcome +
           `세션: ${frameField(target.name)}\n` +
           `id: ${sessionId}\n` +
           `프로젝트: ${frameField(project)}\n\n` +
+          failure +
           `마지막 응답:\n${preview || '(내용 없음)'}\n\n` +
           `더 필요하면 read_session으로 그 세션의 최근 대화를 읽을 수 있습니다.`,
         undefined,
@@ -3595,6 +3614,8 @@ export class SessionManager {
           })
           // 부탁받았을 때만 되돌아온다 — 기본은 조용하다
           if (reportBack) this.awaitingReport.set(sessionId, orchestratorId)
+          // 부탁 없이 다시 시키면 이 오케스트레이터의 이전 부탁을 지운다 — 새 지시가 그것을 대신한다 (#166)
+          else if (this.awaitingReport.get(sessionId) === orchestratorId) this.awaitingReport.delete(sessionId)
           return { ok: true }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
