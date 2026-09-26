@@ -7003,6 +7003,39 @@ test('스테이징과 브랜치 전환도 사이드바에 알린다 — 푸시�
 })
 
 /**
+ * 깃 탭의 세 자리 (#160).
+ *
+ * 전부 커밋해 목록이 비는 순간 Push가 함께 사라졌고, 패널의 목록은 에이전트가 만진 파일 수가
+ * 바뀔 때만 다시 읽어서 터미널 커밋·Bash 커밋·같은 파일의 재편집·창 복귀를 놓쳤고, 일부만
+ * 스테이징한 파일은 Changed에서 눌러도 스테이징된 diff가 열렸다.
+ */
+test('깃 탭: 깨끗해도 Push가 남고, 창 복귀에 목록을 다시 읽고, 눌린 무리의 diff를 연다 (#160)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+
+  await expect(page.getByTestId('evidence-clean')).toBeVisible()
+  await expect(page.getByTestId('evidence-push')).toBeVisible()
+
+  // 앱 밖에서 한 파일의 일부만 스테이징했다 — 에이전트가 만진 파일 수는 그대로다
+  await page.evaluate(() => {
+    const store = (window as any).__store.getState()
+    store.setAppFocused(false)
+    ;(window as any).__mock.gitState.files = [
+      { path: 'a.ts', staged: true, status: 'M' },
+      { path: 'a.ts', staged: false, status: 'M' },
+    ]
+    store.setAppFocused(true)
+  })
+  const changed = page.getByTestId('evidence-group-changed').getByTestId('evidence-file-a.ts')
+  await expect(changed).toBeVisible()
+
+  await changed.click()
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mock.gitDiffCalls.at(-1)))
+    .toEqual({ path: 'a.ts', staged: false })
+})
+
+/**
  * Nothing in the app watches the filesystem, so work done **outside** it — a commit typed
  * into a terminal, a rebase, a `git clean` — is invisible until we come back and ask (#41).
  * Returning to the window is that moment, and it is the only signal we get for it.

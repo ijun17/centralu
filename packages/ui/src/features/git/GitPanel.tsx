@@ -23,12 +23,14 @@ const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open i
 export function GitPanel({
   projectId,
   initialPath,
+  initialStaged,
   initialSha,
   initialSub,
   pick,
 }: {
   projectId: string
   initialPath?: string | null
+  initialStaged?: boolean
   initialSha?: string | null
   initialSub?: SubTab
   pick: number
@@ -43,7 +45,9 @@ export function GitPanel({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="git-panel">
-      {sub === 'changes' && <Changes projectId={projectId} initialPath={initialPath} pick={pick} />}
+      {sub === 'changes' && (
+        <Changes projectId={projectId} initialPath={initialPath} initialStaged={initialStaged} pick={pick} />
+      )}
       {sub === 'history' && <History projectId={projectId} initialSha={initialSha} pick={pick} />}
       {sub === 'branches' && <Branches projectId={projectId} />}
     </section>
@@ -61,10 +65,12 @@ export function GitPanel({
 function Changes({
   projectId,
   initialPath,
+  initialStaged,
   pick,
 }: {
   projectId: string
   initialPath?: string | null
+  initialStaged?: boolean
   pick: number
 }) {
   const platform = usePlatform()
@@ -104,14 +110,21 @@ function Changes({
       .status(projectId)
       .then((files) => {
         if (!alive) return
-        const hit = files.find((f) => f.path === initialPath)
+        /*
+         * 경로만으로 고르면 안 된다 (#160). 일부만 스테이징한 파일(MM)은 Staged와 Changed에
+         * 다 있고 host는 스테이징된 쪽을 먼저 준다 — Changed에서 눌러도 스테이징된 diff가
+         * 같은 파일 이름 아래 열렸다. 눌린 무리를 함께 맞춘다.
+         */
+        const hit = files.find(
+          (f) => f.path === initialPath && (initialStaged === undefined || f.staged === initialStaged),
+        )
         if (hit) void openDiff(hit)
       })
       .catch(() => {})
     return () => {
       alive = false
     }
-  }, [pick, initialPath, platform, projectId, openDiff])
+  }, [pick, initialPath, initialStaged, platform, projectId, openDiff])
 
   return (
     <div className="flex min-h-0 flex-1">

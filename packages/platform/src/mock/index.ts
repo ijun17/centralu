@@ -131,6 +131,8 @@ export class MockPlatform implements Platform {
   badge = 0
   /** 테스트용: projects.gitStatus를 몇 번 물었나 — 디바운스가 도는지 보는 눈 (이슈 #41) */
   gitStatusCalls = 0
+  /** 테스트용: 어느 diff를 물었나 — 일부만 스테이징한 파일에서 무리가 맞는지 보는 눈 (#160) */
+  readonly gitDiffCalls: { path: string; staged: boolean }[] = []
   /** 신뢰를 켜고 끈 기록 — "묻기만 하고 보내지 않았다"를 시험이 본다 (M4) */
   readonly trustCalls: { projectId: string; trusted: boolean }[] = []
 
@@ -548,11 +550,14 @@ export class MockPlatform implements Platform {
 
   readonly git = {
     status: async (_projectId: string) => [...this.gitState.files],
-    diff: async (_projectId: string, path: string, _staged?: boolean): Promise<GitDiff> => ({
-      diff: this.gitState.diffs[path] ?? '',
-      truncated: this.gitState.truncated.includes(path),
-      binary: false,
-    }),
+    diff: async (_projectId: string, path: string, staged?: boolean): Promise<GitDiff> => {
+      this.gitDiffCalls.push({ path, staged: staged ?? false })
+      return {
+        diff: this.gitState.diffs[path] ?? '',
+        truncated: this.gitState.truncated.includes(path),
+        binary: false,
+      }
+    },
     log: async (_projectId: string, limit = 50) => this.gitState.commits.slice(0, limit),
     commitDetail: async (_projectId: string, sha: string) => ({
       files: [`file-${sha}.ts`],

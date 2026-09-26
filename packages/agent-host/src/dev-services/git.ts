@@ -222,11 +222,18 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
   }
 }
 
-/** 커밋 하나의 파일과 diff. `sha` 앞의 `--end-of-options`는 `-`로 시작하는 값이 옵션으로 읽히지 않게 한다 (#175) */
+/**
+ * 커밋 하나의 파일과 diff. `sha` 앞의 `--end-of-options`는 `-`로 시작하는 값이 옵션으로 읽히지 않게 한다 (#175).
+ *
+ * 병합 커밋은 첫 부모와의 차이를 보인다(`--diff-merges=first-parent`, #160). 기본값인 결합 diff는
+ * 충돌 없이 병합된 커밋에서 비어 있어서, 그런 병합은 모두 `0 files`에 빈 diff로 보였다.
+ * 첫 부모와의 차이가 곧 "이 병합이 이 브랜치에 들여온 것"이다.
+ */
 export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }> {
   if (!(await isRepo(cwd))) return { files: [], diff: '', truncated: false }
-  const files = (await git(cwd, ['show', '--pretty=format:', '--name-only', '--end-of-options', sha])).split('\n').filter(Boolean)
-  const raw = await git(cwd, ['show', '--no-color', '--pretty=format:', '--end-of-options', sha])
+  const show = ['show', '--diff-merges=first-parent', '--pretty=format:']
+  const files = (await git(cwd, [...show, '--name-only', '--end-of-options', sha])).split('\n').filter(Boolean)
+  const raw = await git(cwd, [...show, '--no-color', '--end-of-options', sha])
   const max = 400_000
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
@@ -399,10 +406,17 @@ export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: str
   }
 }
 
-/** git의 원문 오류를 그대로 보여준다 — 요약하면 사용자가 다음 행동을 못 정한다 */
+/**
+ * git의 원문 오류를 그대로 보여준다 — 요약하면 사용자가 다음 행동을 못 정한다.
+ *
+ * 표준에러가 비었으면 표준출력을 본다 (#160). `git commit`은 커밋할 것이 없을 때 그 이유
+ * ("nothing to commit")를 표준출력에 쓴다 — 그래서 토스트에는 `Command failed: git commit -m …`만
+ * 떴다. 에이전트가 Bash로 먼저 커밋해 버린 뒤 패널에서 Commit을 누르면 정확히 이렇게 된다.
+ */
 function cleanGitError(e: unknown): string {
-  const err = e as { stderr?: string; message?: string }
-  return (err.stderr || err.message || 'Unknown error').trim().split('\n').slice(0, 6).join('\n')
+  const err = e as { stderr?: string; stdout?: string; message?: string }
+  const text = err.stderr?.trim() || err.stdout?.trim() || err.message || 'Unknown error'
+  return text.trim().split('\n').slice(0, 6).join('\n')
 }
 
 /*

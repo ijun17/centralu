@@ -654,7 +654,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
   const togglePanel = useStore((s) => s.togglePanel)
   const platform = usePlatform()
   const sc = useShortcut()
-  const touched = useTouchedCount(projectId)
+  const touched = useGitRefreshKey(projectId)
   const [count, setCount] = useState<number | null>(null)
   // 패널을 접어도 "명령이 돌고 있다"는 사실은 접히면 안 된다 (#60 이관의 이유)
   const running = useStore((s) => Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running))
@@ -738,7 +738,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
    */
   const gitStage = useStore((s) => s.gitStage)
   const gitCommit = useStore((s) => s.gitCommit)
-  const touched = useTouchedCount(projectId)
+  const touched = useGitRefreshKey(projectId)
   const [files, setFiles] = useState<GitFileStatus[] | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -839,47 +839,53 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
               }}
             />
           </div>
-
-          {/* 커밋은 좁은 곳에서도 되어야 한다 — 확인하고 바로 마무리하는 흐름이 끊기면 안 된다 */}
-          <div className="border-t border-edge px-3 py-2">
-            <input
-              className="w-full rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
-              placeholder="Commit message"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              data-testid="evidence-commit-message"
-            />
-            <div className="mt-1.5 flex gap-1.5">
-              <button
-                className="flex-1 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
-                disabled={busy || !message.trim() || staged.length === 0}
-                data-testid="evidence-commit"
-                onClick={() =>
-                  void run(async () => {
-                    const r = await gitCommit(projectId, message.trim())
-                    setToast(r.ok ? 'Committed' : (r.message ?? 'Commit failed'))
-                    if (r.ok) setMessage('')
-                  })
-                }
-              >
-                Commit
-              </button>
-              <button
-                className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
-                disabled={busy}
-                data-testid="evidence-push"
-                onClick={() =>
-                  void run(async () => {
-                    const r = await platform.git.push(projectId)
-                    setToast(r.ok ? 'Pushed' : (r.message ?? 'Push failed'))
-                  })
-                }
-              >
-                Push
-              </button>
-            </div>
-          </div>
         </>
+      )}
+      {!denied && files !== null && (
+        /*
+         * 커밋은 좁은 곳에서도 되어야 한다 — 확인하고 바로 마무리하는 흐름이 끊기면 안 된다.
+         * 목록이 비어도 이 칸은 남는다 (#160). 커밋과 푸시를 따로 하는 가장 흔한 순서에서, 전부
+         * 커밋해 "No changes"가 되는 순간 Push가 함께 사라졌다 — 방금 만든 커밋을 올릴 길이
+         * 앱 안에 없었다.
+         */
+        <div className="mt-auto border-t border-edge px-3 py-2">
+          <input
+            className="w-full rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
+            placeholder="Commit message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            data-testid="evidence-commit-message"
+          />
+          <div className="mt-1.5 flex gap-1.5">
+            <button
+              className="flex-1 rounded border border-edge bg-panel px-2 py-1 text-[11px] text-chalk transition-colors hover:border-graphite disabled:opacity-40"
+              disabled={busy || !message.trim() || staged.length === 0}
+              data-testid="evidence-commit"
+              onClick={() =>
+                void run(async () => {
+                  const r = await gitCommit(projectId, message.trim())
+                  setToast(r.ok ? 'Committed' : (r.message ?? 'Commit failed'))
+                  if (r.ok) setMessage('')
+                })
+              }
+            >
+              Commit
+            </button>
+            <button
+              className="rounded border border-edge px-2 py-1 text-[11px] text-ash transition-colors hover:border-graphite hover:text-chalk disabled:opacity-40"
+              disabled={busy}
+              data-testid="evidence-push"
+              onClick={() =>
+                void run(async () => {
+                  const r = await platform.git.push(projectId)
+                  setToast(r.ok ? 'Pushed' : (r.message ?? 'Push failed'))
+                })
+              }
+            >
+              Push
+            </button>
+          </div>
+        </div>
       )}
     </section>
   )
@@ -895,7 +901,7 @@ function ChangeGroup({
 }: {
   title: string
   files: GitFileStatus[]
-  onOpen: (path: string) => void
+  onOpen: (path: string, staged: boolean) => void
   busy: boolean
   action: { id: 'stage' | 'unstage'; one: string; all: string; run: (paths: string[]) => Promise<void> }
 }) {
@@ -919,7 +925,7 @@ function ChangeGroup({
           <ChangeRow
             key={f.path}
             file={f}
-            onOpen={() => onOpen(f.path)}
+            onOpen={() => onOpen(f.path, f.staged)}
             busy={busy}
             actionId={action.id}
             actionLabel={action.one}
@@ -995,7 +1001,7 @@ function ChangeRow({
 function CommitHistory({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const openCommit = useStore((s) => s.openCommit)
-  const touched = useTouchedCount(projectId)
+  const touched = useGitRefreshKey(projectId)
   const [commits, setCommits] = useState<GitCommit[] | null>(null)
 
   useEffect(() => {
@@ -1093,13 +1099,22 @@ function statusMark(status: GitFileStatus['status']): string {
   return status === '?' ? 'A' : status.toUpperCase()
 }
 
-/** 에이전트가 만진 파일 수 — 목록을 다시 읽을 시점을 아는 신호 */
-function useTouchedCount(projectId: string): number {
-  return useStore((s) => {
+/**
+ * 목록을 다시 읽을 시점을 아는 신호 — 둘을 합친다.
+ *
+ * 에이전트가 만진 파일 수는 턴 **도중**의 첫 편집을 알린다. 그것만으로는 모자랐다 (#160):
+ * Bash의 `git commit`, 터미널에서 친 명령, 이미 만진 파일의 재편집은 이 수를 바꾸지 않는다.
+ * 그래서 사이드바의 요약을 다시 읽게 하는 신호(턴 종료, 창 복귀, 승인, 브랜치 전환)가
+ * 올리는 `gitEpoch`도 함께 본다.
+ */
+function useGitRefreshKey(projectId: string): string {
+  const touched = useStore((s) => {
     let n = 0
     for (const sess of Object.values(s.sessions)) {
       if (sess.projectId === projectId) n += sess.touchedPaths.length
     }
     return n
   })
+  const epoch = useStore((s) => s.gitEpoch[projectId] ?? 0)
+  return `${touched}:${epoch}`
 }
