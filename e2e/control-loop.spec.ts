@@ -1223,11 +1223,15 @@ test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 �
     m.gitState.branches = [
       { name: 'main', current: true, remote: false },
       { name: 'feature/x', current: false, remote: false },
+      { name: 'origin/main', current: false, remote: true },
     ]
     m.gitState.dirty = ['src/a.ts']
   })
   await newSession(page, 'alpha', '작업')
   await page.getByTestId('evidence-branch').click()
+  // 칸은 host가 준 remote로 나뉜다 — 이름의 `/`로는 로컬 feature/x와 원격 origin/main을 못 가른다 (#175)
+  await expect(page.getByTestId('branches-remote').getByTestId('branch-origin/main')).toBeVisible()
+  await expect(page.getByTestId('branches-local').getByTestId('branch-feature/x')).toBeVisible()
   await page.getByTestId('branch-feature/x').click()
 
   await expect(page.getByTestId('checkout-warning')).toContainText('src/a.ts')

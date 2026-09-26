@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitDiff, gitStage, gitStatusFiles } from './git.js'
+import { gitBranches, gitCheckout, gitDiff, gitStage, gitStatusFiles } from './git.js'
 
 /**
  * porcelain v2 파싱은 실제 git 출력으로 확인한다 — 흉내낸 문자열로는
@@ -203,5 +203,59 @@ describe('링크 뒤의 .. 로 바깥 파일의 내용을 보지 못한다 (#119
     symlinkSync(outside, join(d, 'evil'))
 
     await expect(gitDiff(d, 'link/../evil/secret.txt')).rejects.toThrow(/outside the project/i)
+  })
+})
+
+/**
+ * 브랜치 목록과 전환 (#175) — `origin`이 있는 진짜 저장소로 본다. 짧은 이름(`refname:short`)은
+ * 원격 브랜치에 `remotes/`를 붙이지 않아서, 이름만 보고는 `origin/main`과 `feature/login`을
+ * 가를 수 없었다.
+ */
+describe('branches with a remote (#175)', () => {
+  const withOrigin = () => {
+    const { d: upstream, git: up } = repo()
+    up('checkout', '-q', '-b', 'main')
+    writeFileSync(join(upstream, 'f.txt'), 'original\n')
+    up('add', '.')
+    up('commit', '-q', '-m', 'init')
+    up('branch', 'release')
+    const d = mkdtempSync(join(tmpdir(), 'cc-git-clone-'))
+    dirs.push(d)
+    execFileSync('git', ['clone', '-q', upstream, d])
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: d }).toString()
+    git('config', 'user.email', 'test@test')
+    git('config', 'user.name', 'test')
+    git('branch', 'feature/login')
+    return { d, git }
+  }
+
+  it('sorts local and remote by the full ref, and drops the remote HEAD alias', async () => {
+    const { d } = withOrigin()
+    const list = await gitBranches(d)
+    expect(list.map((b) => [b.name, b.remote])).toEqual([
+      ['feature/login', false],
+      ['main', false],
+      ['origin/main', true],
+      ['origin/release', true],
+    ])
+    expect(list.find((b) => b.name === 'main')).toMatchObject({ current: true, upstream: 'origin/main' })
+  })
+
+  it('picking a remote branch makes a tracking branch instead of detaching HEAD', async () => {
+    const { d, git } = withOrigin()
+    await expect(gitCheckout(d, 'origin/release')).resolves.toEqual({ ok: true, conflicts: [] })
+    expect(git('symbolic-ref', '--short', 'HEAD').trim()).toBe('release')
+    expect(git('rev-parse', '--abbrev-ref', 'release@{upstream}').trim()).toBe('origin/release')
+  })
+
+  it('a branch named like an option is switched to, not run as one', async () => {
+    const { d, git } = withOrigin()
+    git('update-ref', 'refs/heads/-f', 'HEAD')
+    writeFileSync(join(d, 'f.txt'), 'unsaved agent work\n')
+    expect((await gitBranches(d)).map((b) => b.name)).toContain('-f')
+
+    await expect(gitCheckout(d, '-f')).resolves.toEqual({ ok: true, conflicts: [] })
+    expect(readFileSync(join(d, 'f.txt'), 'utf8')).toBe('unsaved agent work\n')
+    expect(git('symbolic-ref', '--short', 'HEAD').trim()).toBe('-f')
   })
 })
