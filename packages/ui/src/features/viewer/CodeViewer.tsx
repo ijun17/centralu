@@ -119,6 +119,14 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     lines.forEach((l, i) => l.toLowerCase().includes(q) && hit.add(i))
     return hit
   }, [lines, query])
+  /*
+   * 검색 결과 사이를 옮겨 다닌다 (#183). 강조와 개수만 있던 동안, 목록이 가상화되어 있어 화면 밖의
+   * 일치는 사람이 스크롤해서 찾아야 했다. Enter는 다음, ⇧Enter는 이전 — 끝에서는 반대쪽 끝으로
+   * 돈다. 몇 번째인지는 검색어나 파일이 바뀌면 처음부터다.
+   */
+  const matchLines = useMemo(() => [...matches], [matches])
+  const [matchAt, setMatchAt] = useState(-1)
+  useEffect(() => setMatchAt(-1), [matchLines])
 
   const virtualizer = useVirtualizer({
     count: lines.length,
@@ -137,6 +145,14 @@ export function CodeViewer({ projectId }: { projectId: string }) {
    * names (stale reading, truncated file) and a jump past the end should land at the end
    * rather than nowhere.
    */
+  const stepMatch = (dir: 1 | -1) => {
+    const n = matchLines.length
+    if (n === 0) return
+    const next = matchAt < 0 ? (dir === 1 ? 0 : n - 1) : (matchAt + dir + n) % n
+    setMatchAt(next)
+    virtualizer.scrollToIndex(matchLines[next]!, { align: 'center' })
+  }
+
   useEffect(() => {
     if (!file || !jump || jump.path !== path) return
     clearViewerJump()
@@ -266,11 +282,16 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               placeholder="Search in file"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                e.preventDefault()
+                stepMatch(e.shiftKey ? -1 : 1)
+              }}
               data-testid="viewer-search"
             />
             {query && (
               <span className="readout text-[10px] text-slate" data-testid="viewer-match-count">
-                {matches.size} lines
+                {matchAt >= 0 ? `${matchAt + 1}/${matchLines.length}` : `${matches.size} lines`}
               </span>
             )}
           </>
@@ -386,8 +407,13 @@ export function CodeViewer({ projectId }: { projectId: string }) {
                 key={v.key}
                 data-line={v.index}
                 data-landed={v.index === landedIndex || undefined}
+                data-current-match={(matchAt >= 0 && v.index === matchLines[matchAt]) || undefined}
                 className={`absolute left-0 flex w-full ${
-                  matches.has(v.index) || v.index === landedIndex ? 'bg-graphite/50' : ''
+                  matchAt >= 0 && v.index === matchLines[matchAt]
+                    ? 'bg-graphite'
+                    : matches.has(v.index) || v.index === landedIndex
+                      ? 'bg-graphite/50'
+                      : ''
                 }`}
                 style={{ top: `${v.start}px`, height: `${v.size}px` }}
               >
