@@ -121,6 +121,8 @@ describe('갈아 끼운 프로세스의 늦은 말 (#157)', () => {
     const id = await newSession()
     const old = claude.last
     old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '옛 턴의 앞부분' })
+    // 사람이 턴을 멈췄다 (이슈의 순서: Stop → 설정 변경)
+    old.emit({ type: 'state_change', sessionId: id, state: 'waiting_input', reason: 'interrupted' })
 
     // 설정을 바꾸면 프로세스를 갈아 끼운다
     await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })
@@ -387,5 +389,48 @@ describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
     await mgr.refreshMergedWorktrees(p.id)
     expect(mgr.listSessions().every((x) => typeof x.id === 'string')).toBe(true)
     expect(internals.meta.has(s.id)).toBe(false)
+  })
+})
+
+/*
+ * 턴 도중의 설정 변경 (#164). 두 어댑터 모두 실시간 반영이 없어서 설정이 바뀌면 곧바로 프로세스를 갈아 끼웠다 — 도는
+ * 턴이 사라졌는데 화면은 "(from next turn)"이라고 말했다.
+ */
+describe('턴 도중에 바꾼 설정은 턴이 끝나면 적용된다 (#164)', () => {
+  it('working이면 프로세스를 내리지 않고, 턴이 끝나면 새 설정으로 갈아 끼운다', async () => {
+    const id = await newSession()
+    const running = claude.last
+    await rpc('agents.send', { sessionId: id, text: '긴 일' })
+
+    const r = (await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })) as { applied?: string }
+    expect(r.applied).toBe('after_turn')
+    expect(running.disposed).toBe(false)
+    expect(claude.last).toBe(running)
+
+    running.emit({ type: 'turn_complete', sessionId: id })
+    await until(() => claude.last !== running)
+    expect(running.disposed).toBe(true)
+    expect(claude.last.opts.effort).toBe('high')
+  })
+
+  it('승인을 기다리는 턴도 끊지 않는다 — 턴이 오류로 끝나도 그때 적용한다', async () => {
+    const id = await newSession('safe')
+    const running = claude.last
+    running.emit({ type: 'approval_request', sessionId: id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
+
+    const r = (await rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'auto' })) as { applied?: string }
+    expect(r.applied).toBe('after_turn')
+    expect(running.disposed).toBe(false)
+
+    running.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: 'API Error: 500', retryable: true } })
+    await until(() => claude.last !== running)
+    expect(claude.last.opts.permissionPreset).toBe('auto')
+  })
+
+  it('쉬는 세션은 지금 갈아 끼우고 그렇다고 답한다', async () => {
+    const id = await newSession()
+    const r = (await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })) as { applied?: string }
+    expect(r.applied).toBe('restarted')
+    expect(claude.last.opts.effort).toBe('high')
   })
 })

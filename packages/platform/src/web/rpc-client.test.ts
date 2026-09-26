@@ -206,3 +206,32 @@ describe('RpcClient 끊김 시 in-flight 거절 (U1)', () => {
     rpc.close()
   })
 })
+
+/*
+ * 되살리기로 끝나는 RPC는 긴 예산을 받는다 (#164). 되살리기는 프로세스 시작에만 150초까지 쓰는데(매니저의 단계 제한),
+ * 이 다섯은 목록에 없어서 30초에 끊겼다 — host는 설정을 적용하고 다시 띄웠는데 화면은 실패를 띄웠다.
+ */
+describe('RpcClient — 되살리기로 끝나는 호출의 예산 (#164)', () => {
+  const RESUMING = [
+    'agents.updateSettings',
+    'agents.forkConversation',
+    'agents.resolveMcpProposal',
+    'agents.resolveSkillProposal',
+    'agents.deleteOrchestratorSkill',
+  ] as const
+
+  it.each(RESUMING)('%s는 30초에 끊기지 않고 180초에 끊긴다', async (method) => {
+    const rpc = makeClient()
+    rpc.connect()
+    FakeWebSocket.last.open()
+    let settled = false
+    const call = (rpc.call as (m: string, p: unknown) => Promise<unknown>)(method, {})
+    const assertion = expect(call.finally(() => (settled = true))).rejects.toMatchObject({ code: 'timeout' })
+
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(150_000)
+    await assertion
+    rpc.close()
+  })
+})

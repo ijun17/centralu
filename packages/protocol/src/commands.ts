@@ -306,6 +306,18 @@ export const SessionInfo = z.object({
 export type SessionInfo = z.infer<typeof SessionInfo>
 
 /**
+ * 설정 변경이 도는 프로세스에 언제 닿았나 (#164) — 화면이 "무엇이 일어났는지"를 그대로 말하게.
+ *
+ *   restarted    도구 프로세스를 지금 갈아 끼웠다 (쉬는 세션)
+ *   after_turn   도는 턴을 끊지 않는다 — 이 턴이 끝나면 갈아 끼운다 (working·waiting_approval)
+ *   saved        저장만 했다 — 도는 프로세스가 없거나(깨울 때 이 값으로 뜬다) 이미 같은 값으로 돈다
+ */
+export const SettingsApplied = z.enum(['restarted', 'after_turn', 'saved'])
+export type SettingsApplied = z.infer<typeof SettingsApplied>
+export const UpdateSettingsResult = SessionInfo.extend({ applied: SettingsApplied.optional() })
+export type UpdateSettingsResult = z.infer<typeof UpdateSettingsResult>
+
+/**
  * 살아-있는-동안 필드들의 초기값. 저장소 행이나 새 세션에서 SessionInfo를 조립할 때 쓴다 —
  * 손으로 나열하면 필드가 늘 때 한 곳이 빠진 채 컴파일이 지나간다.
  */
@@ -675,7 +687,7 @@ export const RpcMethods = {
   /** 모델·권한을 대화 도중에 바꾼다 (다음 턴부터 적용) */
   'agents.updateSettings': {
     params: UpdateSettingsParams,
-    result: SessionInfo,
+    result: UpdateSettingsResult,
   },
   /**
    * 이 프로젝트 디렉토리에서 도구가 보관 중인 이전 세션 (FR-10 확장).

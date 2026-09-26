@@ -16,6 +16,7 @@ import type {
   ExternalAppInfo,
   ExternalSession,
   UpdateSettingsParams,
+  UpdateSettingsResult,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -147,7 +148,7 @@ export interface AgentPort {
    * 모델·권한·추론 강도를 대화 도중에 바꾼다 (FR-7).
    * 항목은 프로토콜이 정한다 — 여기 다시 적으면 늦게 추가된 필드가 조용히 빠진다.
    */
-  updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<SessionInfo>
+  updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<UpdateSettingsResult>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
   listSessions(): Promise<SessionInfo[]>

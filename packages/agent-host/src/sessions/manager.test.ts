@@ -2949,20 +2949,25 @@ describe('오케스트레이터 앱 안내서와 설정 (#30)', () => {
     expect((ev as { effort: string | null }).effort).toBe('high')
   })
 
-  it('update_session_settings — 작업 중인 세션은 거절한다 (재시작이 턴을 죽인다)', async () => {
+  /*
+   * 예전에는 거절했다 — 적용이 곧 재시작이라 진행 중인 턴을 죽였다(waiting_approval은 놓쳤다). 이제 사람의 길과 같이
+   * 턴이 끝날 때로 미룬다 (#164).
+   */
+  it('update_session_settings — 작업 중인 세션은 턴을 끊지 않고, 턴이 끝나면 적용한다 (#164)', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
     })) as { id: string }
     const orc = await mgr.orchestrator()
-    const internals = mgr as unknown as { meta: Map<string, { state: string }> }
-    internals.meta.get(s.id)!.state = 'working'
+    const worker = adapter.handleOf(s.id)!
+    worker.emitDelta('일하는 중')
 
     const r = await mgr.runOrchestratorTool(orc.id, 'update_session_settings', {
       sessionId: s.id, effort: 'low',
     })
-    expect(r.isError).toBe(true)
-    expect(r.text).toContain('작업 중')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('턴이 끝나면')
+    expect(worker.disposed).toBe(false)
   })
 
   /*

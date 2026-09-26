@@ -47,6 +47,15 @@ const LONG_CALLS = new Set<string>([
   'agents.createSession', // resumeExternalId로 이전 대화를 이어받을 때
   'agents.restartSession', // 프로세스를 갈아 끼우고 다시 되살린다
   'agents.exportHandoffRecord', // 수백 MB 롤아웃을 스캔할 수 있다 (#78)
+  /*
+   * 끝에서 되살리기까지 가는 호출들 (#164) — 여기 없던 동안 큰 대화에서 host는 적용하고 다시 띄웠는데 화면은
+   * "RPC timed out"을 띄웠다(적용된 것을 실패로 알았다). 되살리기로 끝나는 RPC를 더하면 여기에도 더한다.
+   */
+  'agents.updateSettings', // 쉬는 세션의 설정이 바뀌면 프로세스를 갈아 끼운다 (restartSession)
+  'agents.forkConversation', // 갈라진 사본으로 되살린다
+  'agents.resolveMcpProposal', // 승인하면 오케스트레이터를 다시 띄운다
+  'agents.resolveSkillProposal', // 같다
+  'agents.deleteOrchestratorSkill', // 같다
 ])
 
 /**

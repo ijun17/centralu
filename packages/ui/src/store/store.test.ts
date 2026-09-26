@@ -2399,3 +2399,22 @@ describe('기다리는 사이에 지워진 세션은 되살아나지 않는다 (
     ])
   })
 })
+
+/*
+ * 설정 변경 토스트는 host가 실제로 한 일을 말한다 (#164). 예전에는 늘 "(from next turn)"이었다.
+ */
+describe('설정 변경 토스트 (#164)', () => {
+  it.each([
+    ['after_turn', 'Effort: high (applies when this turn ends)'],
+    ['restarted', 'Effort: high (agent restarted)'],
+    ['saved', 'Effort: high (from next turn)'],
+  ] as const)('%s → %s', async (applied, toast) => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    vi.spyOn(platform.agents, 'updateSettings').mockResolvedValue({ ...s, effort: 'high', applied })
+    useStore.setState({ platform, sessions: { [s.id]: { ...s } as never } })
+
+    await useStore.getState().updateSessionSettings(s.id, { effort: 'high' })
+    expect(useStore.getState().toast).toBe(toast)
+  })
+})
