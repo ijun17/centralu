@@ -312,10 +312,14 @@ describe('앱 도구의 승인 — 읽기 전용 × 프리셋', () => {
     })
   }
 
-  it('auto: 앱 도구를 포함해 아무것도 묻지 않는다 (콜백 없이 bypassPermissions)', async () => {
+  /*
+   * auto는 bypassPermissions라 앱 도구가 콜백에 오지 않는다. 콜백은 선택지(AskUserQuestion) 때문에 넘기고(#171), 설정 파일의
+   * ask 규칙에 걸려 콜백에 온 요청은 콜백이 없던 예전처럼 거절한다 — 사람에게 묻지도, 대신 허용하지도 않는다.
+   */
+  it('auto: 앱 도구를 포함해 아무것도 묻지 않는다 (bypassPermissions — 콜백에 와도 카드 없이 거절)', async () => {
     await start(WORKER, { permissionPreset: 'auto' })
-    expect(captured.options?.canUseTool).toBeUndefined()
     expect(captured.options?.permissionMode).toBe('bypassPermissions')
+    expect(await decide('mcp__app-notes__echo')).toMatchObject({ behavior: 'deny' })
   })
 
   it('이름만 앱을 흉내 내는 도구는 통과하지 못한다 — 붙지 않은 앱, 모르는 목록, 칸을 더 붙인 이름', async () => {

@@ -315,84 +315,101 @@ class ClaudeSession implements SessionHandle {
         ...(this.opts.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: this.opts.outputSchema } } : {}),
         resume: this.opts.resumeExternalId,
         // allowedTools는 절대 설정하지 않는다 (M0: canUseTool 셰도잉)
-        canUseTool:
-          preset === 'auto'
-            ? undefined
-            : async (toolName: string, toolInput: Record<string, unknown>) => {
-                /*
-                 * **우리 도구는 우리가 보증한다.**
-                 *
-                 * 오케스트레이터의 centralu 도구는 이 앱이 관리하는 세션 밖으로
-                 * 나갈 수 없고(매니저만 본다), 진짜 위험한 일 — 대상 세션이 무엇을
-                 * 실행하는가 — 은 **그 세션의 권한 설정이 그대로 가른다.**
-                 * 여기서 또 물으면 승인이 두 겹이 되고, "한 창에서 지시한다"는
-                 * 이 기능의 존재 이유가 사라진다.
-                 *
-                 * 실측에서 이걸 안 하면 목록 한 번 읽는 데도 승인 창이 떠서
-                 * 오케스트레이터가 첫 도구에서 멈춰 섰다.
-                 */
-                if (isOrchestratorTool(toolName)) {
-                  return { behavior: 'allow' as const, updatedInput: toolInput }
-                }
+        /*
+         * **auto에도 콜백을 넘긴다** (#171). 예전에는 auto에서 넘기지 않아서 AskUserQuestion이 사람에게 닿지 않았다 —
+         * 선택지 카드가 뜨지 않았고 모델은 답 없이 나아갔다. 실측(probe-auto-callback.mts, CLI 2.1.282, SDK 0.3.263,
+         * haiku, 임시 폴더, 2026-09-27) — bypassPermissions에 콜백을 넘기면:
+         *
+         *   AskUserQuestion                      콜백에 온다 (bypass보다 먼저 묻는 도구다)
+         *   보통 Bash                             안 온다 — bypass가 그대로 통과시킨다
+         *   설정 파일의 ask 규칙에 걸린 Bash       콜백에 온다 → allow로 답하면 실행된다
+         *   같은 요청, 콜백 없음(예전의 auto)      거절 — "Claude requested permissions to use Bash, but you haven't granted it yet."
+         *
+         * 그래서 auto의 콜백은 선택지만 받고 **나머지는 예전처럼 거절한다.** 여기서 허용하면 신뢰한 프로젝트의
+         * `.claude/settings.json`에 적힌 ask 규칙을 우리 콜백이 대신 허용하게 된다 — 저장소의 파일이 승인을 정하지
+         * 못하게 한 #92와 반대 방향이다. (SDK는 이 조합에 CLAUDE_SDK_CAN_USE_TOOL_SHADOWED 경고를 한 줄 남긴다.)
+         */
+        canUseTool: async (toolName: string, toolInput: Record<string, unknown>) => {
+          if (preset === 'auto' && toolName !== 'AskUserQuestion') {
+            return {
+            behavior: 'deny' as const,
+            message: `Permission to use ${toolName} was not granted (a settings "ask" rule matched; the auto preset does not ask)`,
+          }
+          }
+          /*
+           * **우리 도구는 우리가 보증한다.**
+           *
+           * 오케스트레이터의 centralu 도구는 이 앱이 관리하는 세션 밖으로
+           * 나갈 수 없고(매니저만 본다), 진짜 위험한 일 — 대상 세션이 무엇을
+           * 실행하는가 — 은 **그 세션의 권한 설정이 그대로 가른다.**
+           * 여기서 또 물으면 승인이 두 겹이 되고, "한 창에서 지시한다"는
+           * 이 기능의 존재 이유가 사라진다.
+           *
+           * 실측에서 이걸 안 하면 목록 한 번 읽는 데도 승인 창이 떠서
+           * 오케스트레이터가 첫 도구에서 멈춰 섰다.
+           */
+          if (isOrchestratorTool(toolName)) {
+            return { behavior: 'allow' as const, updatedInput: toolInput }
+          }
 
-                /*
-                 * **읽기만 하는 앱 도구는 묻지 않는다** (M4 결정 5).
-                 *
-                 * 기준은 앱이 도구에 단 주석(`readOnlyHint: true`)이고, 판정은 이름이 아니라 붙은
-                 * 앱의 목록이 한다 — `app-`로 시작하는 서버라고 믿어 주지 않는다(#93의 교훈).
-                 * 나머지 앱 도구는 아래의 보통 승인 카드로 간다: safe는 언제나, normal은 이
-                 * 콜백이 불리면 묻는다. auto는 이 콜백 자체가 없다(bypassPermissions).
-                 * Codex의 `writes` 방식과 같은 기준이라 두 도구가 같게 움직인다.
-                 *
-                 * centralu의 예외와는 따로다 — 그 예외는 넓히지 않는다.
-                 */
-                const appTool = appToolOf(toolName)
-                if (appTool && self.opts.apps?.readOnly(appTool.server, appTool.tool)) {
-                  return { behavior: 'allow' as const, updatedInput: toolInput }
-                }
+          /*
+           * **읽기만 하는 앱 도구는 묻지 않는다** (M4 결정 5).
+           *
+           * 기준은 앱이 도구에 단 주석(`readOnlyHint: true`)이고, 판정은 이름이 아니라 붙은
+           * 앱의 목록이 한다 — `app-`로 시작하는 서버라고 믿어 주지 않는다(#93의 교훈).
+           * 나머지 앱 도구는 아래의 보통 승인 카드로 간다: safe는 언제나, normal은 이
+           * 콜백이 불리면 묻는다. auto에서는 이 콜백에 오지 않는다(bypassPermissions가 통과시킨다 — 위 실측).
+           * Codex의 `writes` 방식과 같은 기준이라 두 도구가 같게 움직인다.
+           *
+           * centralu의 예외와는 따로다 — 그 예외는 넓히지 않는다.
+           */
+          const appTool = appToolOf(toolName)
+          if (appTool && self.opts.apps?.readOnly(appTool.server, appTool.tool)) {
+            return { behavior: 'allow' as const, updatedInput: toolInput }
+          }
 
-                /*
-                 * **선택지는 승인이 아니라 질문이다** (FR: AskUserQuestion).
-                 *
-                 * 실측으로 길을 찾았다 (probe-askuserquestion.mts):
-                 *   canUseTool로 온다        ✅ 인자(질문·선택지)가 통째로 들어온다
-                 *   onUserDialog로 온다      ❌ 종류를 선언해도 한 번도 안 불렸다
-                 *   그냥 실행시키면          → "The user did not answer the questions."
-                 *
-                 * 그래서 여기서 가로채 사람에게 묻고, 답을 **deny의 message로 돌려준다.**
-                 * 이상해 보이지만 그 message가 곧 이 도구의 결과로 모델에게 간다 —
-                 * 실측에서 모델은 "사용자는 라면을 골랐습니다"라고 정확히 읽었다.
-                 * allow로 보내면 CLI가 자기 화면을 띄우려다 실패하고 답 없이 끝난다.
-                 */
-                if (toolName === 'AskUserQuestion') {
-                  const questions = parseQuestions(toolInput)
-                  // 질문 형태가 아니면 우리가 그릴 수 없다 — 삼키지 말고 평소대로 흘린다
-                  if (questions.length === 0) return { behavior: 'allow' as const, updatedInput: toolInput }
-                  const requestId = `q-${++self.reqCounter}`
-                  self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
-                  return new Promise((resolve) => {
-                    self.questions.set(requestId, resolve as (r: unknown) => void)
-                  })
-                }
-                const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
-                /*
-                 * 규칙의 열쇠 — 명령은 명령 전문, 파일 편집은 **그 경로**다 (#170). 화면이 "항상 허용"에 싣는 매처가 그렇고
-                 * (명령은 core의 suggestMatcher, 편집은 detail.path), Codex 어댑터가 같은 규칙으로 찾는다. 예전에는 편집을
-                 * `Edit:file_edit`로 찾아서, 경로로 저장된 규칙이 영영 맞지 않았다 — 같은 파일을 다시 고칠 때마다 물었다.
-                 * 그 밖의 종류(`other`)에는 열쇠가 없다: "항상"이 무엇을 뜻할지 아직 정하지 않았다.
-                 */
-                const key =
-                  detail.kind === 'command' ? detail.command
-                  : detail.kind === 'file_edit' && detail.path !== '?' ? detail.path
-                  : ''
-                if (key && self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
+          /*
+           * **선택지는 승인이 아니라 질문이다** (FR: AskUserQuestion).
+           *
+           * 실측으로 길을 찾았다 (probe-askuserquestion.mts):
+           *   canUseTool로 온다        ✅ 인자(질문·선택지)가 통째로 들어온다
+           *   onUserDialog로 온다      ❌ 종류를 선언해도 한 번도 안 불렸다
+           *   그냥 실행시키면          → "The user did not answer the questions."
+           *
+           * 그래서 여기서 가로채 사람에게 묻고, 답을 **deny의 message로 돌려준다.**
+           * 이상해 보이지만 그 message가 곧 이 도구의 결과로 모델에게 간다 —
+           * 실측에서 모델은 "사용자는 라면을 골랐습니다"라고 정확히 읽었다.
+           * allow로 보내면 CLI가 자기 화면을 띄우려다 실패하고 답 없이 끝난다.
+           */
+          if (toolName === 'AskUserQuestion') {
+            const questions = parseQuestions(toolInput)
+            // 질문 형태가 아니면 우리가 그릴 수 없다 — 삼키지 말고 평소대로 흘린다
+            if (questions.length === 0) return { behavior: 'allow' as const, updatedInput: toolInput }
+            const requestId = `q-${++self.reqCounter}`
+            self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
+            return new Promise((resolve) => {
+              self.questions.set(requestId, resolve as (r: unknown) => void)
+            })
+          }
+          const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
+          /*
+           * 규칙의 열쇠 — 명령은 명령 전문, 파일 편집은 **그 경로**다 (#170). 화면이 "항상 허용"에 싣는 매처가 그렇고
+           * (명령은 core의 suggestMatcher, 편집은 detail.path), Codex 어댑터가 같은 규칙으로 찾는다. 예전에는 편집을
+           * `Edit:file_edit`로 찾아서, 경로로 저장된 규칙이 영영 맞지 않았다 — 같은 파일을 다시 고칠 때마다 물었다.
+           * 그 밖의 종류(`other`)에는 열쇠가 없다: "항상"이 무엇을 뜻할지 아직 정하지 않았다.
+           */
+          const key =
+            detail.kind === 'command' ? detail.command
+            : detail.kind === 'file_edit' && detail.path !== '?' ? detail.path
+            : ''
+          if (key && self.isAlwaysAllowed(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
 
-                const requestId = `req-${++self.reqCounter}`
-                self.emit({ type: 'approval_request', sessionId: self.sessionId, requestId, detail })
-                return new Promise((resolve) => {
-                  self.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })
-                })
-              },
+          const requestId = `req-${++self.reqCounter}`
+          self.emit({ type: 'approval_request', sessionId: self.sessionId, requestId, detail })
+          return new Promise((resolve) => {
+            self.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })
+          })
+        },
       },
     }))
     ClaudeAdapter.liveQueries.add(q)
