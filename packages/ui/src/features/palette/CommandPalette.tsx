@@ -22,6 +22,7 @@ export function CommandPalette() {
   const sessions = useStore((s) => s.sessions)
   const projects = useStore((s) => s.projects)
   const focusSession = useStore((s) => s.focusSession)
+  const focusProject = useStore((s) => s.focusProject)
   const openGit = useStore((s) => s.openGit)
   const togglePanel = useStore((s) => s.togglePanel)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -138,11 +139,13 @@ export function CommandPalette() {
         focusSession(item.kind === 'session' ? item.id : item.sessionId)
       } else if (item.kind === 'project') {
         const first = Object.values(sessions).find((s) => s.projectId === item.id)
+        // 세션이 없는 프로젝트도 고를 수 있어야 한다 (#183) — 예전에는 팔레트만 닫히고 화면이 그대로였다
         if (first) focusSession(first.id)
+        else focusProject(item.id)
       } else item.run()
       toggle(false)
     },
-    [focusSession, sessions, toggle],
+    [focusSession, focusProject, sessions, toggle],
   )
 
   useEffect(() => {
