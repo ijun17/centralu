@@ -40,6 +40,8 @@ class Adapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
   }
   created: Handle[] = []
+  /** createSession이 받은 옵션, 멈추기 **전에** 적는다 — 깨우기가 옵션을 넘긴 순간을 테스트가 안다 */
+  asked: CreateSessionOpts[] = []
   /** 켜 두면 createSession이 `release()`를 부를 때까지 멈춘다 — 깨우는 중인 창 */
   gate: Promise<void> | null = null
   private open: (() => void) | null = null
@@ -58,6 +60,7 @@ class Adapter implements AgentAdapter {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
+    this.asked.push(opts)
     if (this.gate) await this.gate
     const h = new Handle(opts.sessionId, opts, emit)
     if (opts.resumeExternalId) h.externalId = opts.resumeExternalId
@@ -89,6 +92,12 @@ async function newSession(preset: 'safe' | 'normal' | 'auto' = 'normal'): Promis
     id: string
   }
   return s.id
+}
+
+/** 조건이 설 때까지 이벤트 루프를 돌린다 — 매니저의 await 사슬이 가짜 어댑터에 닿기를 기다린다 */
+async function until(ok: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 1))
+  expect(ok()).toBe(true)
 }
 
 const texts = (sessionId: string) =>
@@ -137,5 +146,48 @@ describe('갈아 끼운 프로세스의 늦은 말 (#157)', () => {
     old.emit({ type: 'approval_resolved', sessionId: id, requestId: 'r1', decision: 'deny' })
 
     expect(mgr.listSessions().find((s) => s.id === id)!.pendingApproval ?? null).toBe(null)
+  })
+})
+
+/*
+ * 깨우는 동안 바꾼 설정 (#162). 깨우기는 설정을 읽어 프로세스에 넘긴 뒤 프로세스를 기다린다 — 큰 Codex 대화는
+ * 십수 초다. 그 사이에 권한을 safe로 바꾸면 화면과 저장소는 safe인데 프로세스는 auto로 돌았고, safe를 다시
+ * 골라도 매니저의 기록(running)이 이미 safe라 아무 일도 없었다.
+ */
+describe('깨우는 중·재시작 중에 바꾼 설정은 프로세스에 닿는다 (#162)', () => {
+  it('잠든 auto 세션을 깨우는 동안 safe로 바꾸면, 결국 safe로 뜬 프로세스가 남는다', async () => {
+    const id = await newSession('auto')
+    await mgr.disposeAll() // 잠든 세션 (host 재시작과 같은 상태)
+    claude.hold()
+    const asked = claude.asked.length
+    const waking = rpc('agents.resumeSession', { sessionId: id })
+    await until(() => claude.asked.length > asked)
+    expect(claude.asked.at(-1)!.permissionPreset).toBe('auto') // 깨우기는 이미 auto를 넘겼다
+
+    const changing = rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'safe' })
+    claude.release()
+    await waking
+    await changing
+
+    expect(mgr.isLive(id)).toBe(true)
+    expect(claude.last.disposed).toBe(false)
+    expect(claude.last.opts.permissionPreset).toBe('safe')
+  })
+
+  it('재시작이 도는 동안 온 두 번째 변경도 프로세스에 닿는다', async () => {
+    const id = await newSession('auto')
+    claude.hold()
+    const asked = claude.asked.length
+    const first = rpc('agents.updateSettings', { sessionId: id, effort: 'high' })
+    await until(() => claude.asked.length > asked)
+
+    const second = rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'safe' })
+    claude.release()
+    await first
+    await second
+
+    expect(mgr.isLive(id)).toBe(true)
+    expect(claude.last.disposed).toBe(false)
+    expect(claude.last.opts).toMatchObject({ effort: 'high', permissionPreset: 'safe' })
   })
 })
