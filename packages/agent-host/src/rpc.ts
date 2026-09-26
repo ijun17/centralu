@@ -463,7 +463,25 @@ export function createRpcHandler(
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
     'projects.delete': async (p) => {
-      await mgr.deleteProject(RpcMethods['projects.delete'].params.parse(p).projectId)
+      const { projectId } = RpcMethods['projects.delete'].params.parse(p)
+      /*
+       * 그 프로젝트의 터미널과 Run 메뉴 실행도 같이 끝낸다 (#177). 둘 다 경로를 키로 쓰고
+       * 매니저는 이들을 모르므로 이 문이 한다. 경로는 행이 지워지기 **전에** 읽는다 —
+       * 지운 뒤에는 cwdOfProject가 Project not found를 던져, 화면도 여기도 그 프로세스에
+       * 닿을 길이 없다(앱을 끌 때까지 포트를 쥔 채 남던 자리다). 삭제가 실패하면 프로젝트가
+       * 남으므로 그 터미널도 남긴다.
+       */
+      let cwd: string | null = null
+      try {
+        cwd = mgr.cwdOfProject(projectId)
+      } catch {
+        // 없는 프로젝트다 — 정리할 것도 없다
+      }
+      await mgr.deleteProject(projectId)
+      if (cwd !== null) {
+        terminals?.closeCwd(cwd)
+        commands?.stopCwd(cwd)
+      }
       externalApps?.refresh()
       return { ok: true as const }
     },
