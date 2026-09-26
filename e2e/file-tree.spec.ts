@@ -232,3 +232,25 @@ test('만진 파일 표시는 이 프로젝트의 세션이 만진 것에만 붙
   await expect(page.getByTestId('file-b.ts').getByTitle('Edited by agent')).toBeVisible()
   await expect(page.getByTestId('file-a.ts').getByTitle('Edited by agent')).toHaveCount(0)
 })
+
+/**
+ * 글자를 키워도 메뉴는 누른 자리에 뜨고 창 안에 있다 (#183). 클릭 좌표는 확대가 곱해진 화면 px인데
+ * fixed 길이에는 확대가 또 곱해져서, 확대 1.25에서 메뉴가 오른쪽 아래로 밀렸고 창 오른쪽 끝에서는
+ * 통째로 창 밖에 놓였다.
+ */
+test('확대한 글자에서도 우클릭 메뉴가 누른 자리에, 창 안에 뜬다 (#183)', async ({ page }) => {
+  await setup(page)
+  await seedTree(page, { '': [{ name: 'a.ts' }] })
+  await openTree(page)
+  await page.evaluate(() => (window as any).__store.setState({ textScale: 4 }))
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-zoom').trim())).toBe('1.25')
+
+  const row = (await page.getByTestId('file-a.ts').boundingBox())!
+  const at = { x: row.x + row.width - 10, y: row.y + row.height / 2 }
+  await page.mouse.click(at.x, at.y, { button: 'right' })
+  const menu = (await page.getByTestId('file-menu').boundingBox())!
+  const viewport = page.viewportSize()!
+
+  expect(menu.x + menu.width).toBeLessThanOrEqual(viewport.width)
+  expect(Math.abs(menu.y - at.y)).toBeLessThanOrEqual(4)
+})
