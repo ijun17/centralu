@@ -278,6 +278,14 @@ export interface SystemPort {
   alert(kind: AlertKind, sound: boolean): Promise<void>
   setBadge(count: number): Promise<void>
   openInIde(path: string, line?: number): Promise<void>
+  /**
+   * http(s) 주소를 OS의 기본 브라우저로 연다 (#159). 터미널 링크와 앱 화면의 링크가 쓴다.
+   *
+   * `window.open`을 부르는 쪽마다 두지 않는 이유: 데스크톱 웹뷰(WKWebView)에서는 그것이
+   * 아무것도 열지 않는다. 새 창 처리기가 없으면 wry가 요청을 버리고, 오류도 나지 않는다.
+   * 주소 검사(http(s)만)는 부르는 쪽이 이미 했다. 못 열었으면 던진다.
+   */
+  openUrl(url: string): Promise<void>
   /** 디렉토리 선택. 데스크톱은 네이티브 피커, 웹 dev는 경로 입력으로 폴백한다 (FR-19) */
   pickDirectory(): Promise<string | null>
   /**

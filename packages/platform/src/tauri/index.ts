@@ -76,7 +76,8 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
   })
 }
 
-class TauriSystemPort implements SystemPort {
+/** 내보내는 것은 시험을 위해서다 — 러스트 커맨드와의 이음매를 웹뷰 없이 본다 */
+export class TauriSystemPort implements SystemPort {
   private granted: boolean | null = null
 
   private warned = false
@@ -121,7 +122,17 @@ class TauriSystemPort implements SystemPort {
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
-    await invoke('open_in_ide', { path, line })
+    // 러스트의 Err(String)이 그대로 오면 화면에 "Could not open in IDE: undefined"가 뜬다 (#159)
+    await invoke('open_in_ide', { path, line }).catch(rethrowAsError)
+  }
+
+  /**
+   * opener 플러그인의 명령을 직접 부른다 — `@tauri-apps/plugin-opener`의 `openUrl`이 부르는
+   * 바로 그 명령이고, 권한은 이미 준 `opener:default`(http·https 주소)다. 플러그인의 JS
+   * 꾸러미를 이 패키지에 들이지 않으려고 이름으로 부른다.
+   */
+  async openUrl(url: string): Promise<void> {
+    await invoke('plugin:opener|open_url', { url }).catch(rethrowAsError)
   }
 
   async pickDirectory(): Promise<string | null> {

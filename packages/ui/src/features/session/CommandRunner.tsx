@@ -331,7 +331,11 @@ function LogView({ projectId, command, runId }: { projectId: string; command: st
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    const links = registerTerminalHttpLinks(term)
+    const links = registerTerminalHttpLinks(term, (url) => {
+      void platform.system
+        .openUrl(url)
+        .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
+    })
 
     const lastDims = { cols: 0, rows: 0 }
     const syncSize = () => {

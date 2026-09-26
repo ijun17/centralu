@@ -256,6 +256,10 @@ class WebSystemPort implements SystemPort {
   async openInIde(_path: string, _line?: number) {
     /* Tauri에서만 (capability로 UI가 비활성) */
   }
+  async openUrl(url: string) {
+    // 브라우저에서는 이것이 곧 바깥 열기다 — 새 탭이라 이 앱의 작업을 건드리지 않는다
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
   onAppLink(_cb: (link: string) => void): () => void {
     // 브라우저에는 이 앱에 링크를 건네는 OS가 없다 (M4 E-4) — 데스크톱에서만 온다
     return () => {}

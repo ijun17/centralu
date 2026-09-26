@@ -46,7 +46,7 @@ export function isTerminalLinkActivation(event: Pick<MouseEvent, 'metaKey' | 'ct
  * 자체의 code-unit과 터미널 cell 수가 같으며, 범위의 끝도 xterm이 기대하는 inclusive
  * 1-based 좌표(`start + length`)로 바꾼다.
  */
-export function registerTerminalHttpLinks(term: Terminal) {
+export function registerTerminalHttpLinks(term: Terminal, openUrl: (url: string) => void) {
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
       const line = term.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true) ?? ''
@@ -61,8 +61,10 @@ export function registerTerminalHttpLinks(term: Terminal) {
           activate(event) {
             if (!isTerminalLinkActivation(event)) return
             event.preventDefault()
-            // URL은 위에서 http(s)로 검증했다. 새 창으로 열어 앱의 현재 작업을 건드리지 않는다.
-            window.open(found.text, '_blank', 'noopener,noreferrer')
+            // URL은 위에서 http(s)로 검증했다. 바깥 브라우저로 열어 앱의 현재 작업을 건드리지 않는다.
+            // window.open을 직접 부르면 데스크톱 웹뷰에서는 아무것도 열리지 않는다 (#159) —
+            // 여는 길은 플랫폼 포트가 안다.
+            openUrl(found.text)
           },
           hover() {
             term.element?.setAttribute('title', 'Open link with Command/Ctrl-click')

@@ -305,8 +305,13 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       bridge.onopenlink = async ({ url }) => {
         if (typeof url !== 'string' || !OPENABLE.test(url)) return { isError: true }
         if (!(await askToOpen(url))) return { isError: true }
-        // 이미 있는 바깥 열기 길과 같다(components/terminalLinks.ts). 앱 안에서 이동하면 세션이 날아간다
-        window.open(url, '_blank', 'noopener,noreferrer')
+        // 터미널 링크와 같은 바깥 열기 길이다(플랫폼 포트). 앱 안에서 이동하면 세션이 날아간다.
+        // 못 열었으면 앱에도 실패로 답한다 — 예전에는 데스크톱에서 아무것도 안 열리고도 성공({})이 갔다 (#159)
+        try {
+          await platform.system.openUrl(url)
+        } catch {
+          return { isError: true }
+        }
         return {}
       }
       bridge.onsizechange = ({ height: h }) => {
