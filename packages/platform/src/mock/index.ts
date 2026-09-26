@@ -128,6 +128,8 @@ export class MockPlatform implements Platform {
   readonly skillList: { name: string; content: string }[] = []
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
+  /** 바깥 브라우저로 연 주소들 (#159) — 터미널·앱 화면의 링크가 이 문을 지났는지 테스트가 본다 */
+  readonly openedUrls: string[] = []
   badge = 0
   /** 테스트용: projects.gitStatus를 몇 번 물었나 — 디바운스가 도는지 보는 눈 (이슈 #41) */
   gitStatusCalls = 0
@@ -2140,6 +2142,9 @@ export class MockPlatform implements Platform {
     },
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })
+    },
+    openUrl: async (url: string) => {
+      this.openedUrls.push(url)
     },
     startWindowDrag: async () => {
       // 창을 끈 횟수 — "칸을 옮기려 했는데 앱 창이 움직였다"를 테스트가 볼 수 있어야 한다

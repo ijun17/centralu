@@ -159,12 +159,15 @@ test('다른 앱을 적은 메시지는 호출의 앱을 바꾸지 못한다', a
   expect(JSON.stringify(seen)).not.toContain('stolen')
 })
 
-test('링크는 사람이 확인한 뒤 바깥에서 열고, http(s)·mailto가 아니면 묻지도 않고 거절한다', async ({ page, context }) => {
-  const opened: string[] = []
-  await context.route('https://example.test/**', (r) => {
-    opened.push(r.request().url())
-    return r.fulfill({ contentType: 'text/html', body: '<p>external</p>' })
-  })
+/*
+ * 링크는 플랫폼의 바깥 열기(system.openUrl)로 간다 (#159). 예전에는 AppFrame이 window.open을 직접 불렀고,
+ * 여기(Chromium)서는 새 페이지가 떠서 초록이었지만 데스크톱 웹뷰(WKWebView)에서는 아무것도 열리지 않았다.
+ * 그래서 새 페이지가 뜨는지가 아니라 **포트에 닿았는지**를 보고, 웹뷰가 스스로 창을 띄우지 않았는지도 본다.
+ */
+test('링크는 사람이 확인한 뒤 플랫폼의 바깥 열기로 열고, http(s)·mailto가 아니면 묻지도 않고 거절한다', async ({ page, context }) => {
+  const popups: string[] = []
+  context.on('page', (p) => popups.push(p.url()))
+  const openedUrls = () => page.evaluate(() => (window as any).__mock.openedUrls as string[])
   const id = fx.open({ projectId: null, appId: 'fixture' }, 'ui://fixture/main')
   await mount(page, 'a', { appId: 'fixture', projectId: null, instanceId: id })
   const v = view(page, 'a')
@@ -177,14 +180,13 @@ test('링크는 사람이 확인한 뒤 바깥에서 열고, http(s)·mailto가 
   await expect(page.getByTestId('app-frame-link-ask')).toContainText('https://example.test/docs?from=view')
   await page.getByTestId('app-frame-link-cancel').click()
   expect(await entry(v, 'link-result')).toEqual({ isError: true })
-  expect(opened).toEqual([])
+  expect(await openedUrls()).toEqual([])
 
   await v.locator('#link').click()
-  const popup = context.waitForEvent('page')
   await page.getByTestId('app-frame-link-open').click()
-  await (await popup).waitForLoadState()
   expect(await entry(v, 'link-result', 1)).toEqual({})
-  expect(opened).toEqual(['https://example.test/docs?from=view'])
+  expect(await openedUrls()).toEqual(['https://example.test/docs?from=view'])
+  expect(popups).toEqual([])
 })
 
 test('ui/message는 부모가 준 콜백으로 간다', async ({ page }) => {

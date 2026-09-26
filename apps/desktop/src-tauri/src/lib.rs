@@ -3,6 +3,7 @@
 //! 여기서 하는 일은 셋뿐이다: 사이드카 감독, OS 통합(알림·뱃지·단축키·IDE 열기), 창 관리.
 //! 대화·상태·화면은 전부 웹뷰 쪽에 있다 (docs/architecture.md §4).
 
+mod ide;
 mod path_safety;
 mod sidecar;
 
@@ -99,12 +100,14 @@ fn open_in_ide(path: String, line: Option<u32>) -> Result<(), String> {
     };
     // Only an IDE is allowed here. Falling back to the OS generic opener can execute
     // attacker-authored files instead of editing them; reveal_path is the safe file-manager path.
-    std::process::Command::new("code")
+    // 이름만 주면 설치본에서는 찾지 못한다 — GUI 앱의 PATH에는 `code`가 없다 (ide.rs, #159)
+    let code = ide::find_code()?;
+    std::process::Command::new(&code)
         .arg("-g")
         .arg(&target)
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("VS Code에서 파일을 열지 못했습니다: {e}"))
+        .map_err(|e| format!("{}: {e}", code.display()))
 }
 
 /// 파일 관리자에서 그 파일을 보여준다 (#19의 "Open in Finder").

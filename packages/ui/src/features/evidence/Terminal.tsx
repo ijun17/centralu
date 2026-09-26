@@ -182,7 +182,11 @@ function CommandLog({ projectId, command, runId }: { projectId: string; command:
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    const links = registerTerminalHttpLinks(term)
+    const links = registerTerminalHttpLinks(term, (url) => {
+      void platform.system
+        .openUrl(url)
+        .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
+    })
 
     const lastDims = { cols: 0, rows: 0 }
     const syncSize = () => {
@@ -297,7 +301,11 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(el)
-    const links = registerTerminalHttpLinks(term)
+    const links = registerTerminalHttpLinks(term, (url) => {
+      void platform.system
+        .openUrl(url)
+        .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
+    })
     termRef.current = term
 
     const safeFit = () => {
