@@ -15,6 +15,7 @@ import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   baseName,
+  copyTree,
   dropEscapingLinks,
   importFile,
   listDir,
@@ -166,6 +167,30 @@ describe('listDir — 한글 이름의 무시 판정 (#176)', () => {
 
     const ignored = Object.fromEntries((await listDir(root, '')).map((e) => [e.name.normalize('NFC'), e.ignored]))
     expect(ignored).toMatchObject({ '무시됨.log': true, 'ascii.log': true, '한글파일.md': false })
+  })
+})
+
+describe('copyTree — clone이 도중에 멈춘 뒤의 일반 복사 (#167)', () => {
+  /**
+   * `cp -Rc`는 실패하기 전에 일부를 이미 만들어 둔다. 그 위에 일반 복사를 하면 먼저 건너온
+   * 디렉토리 링크를 덮어쓰려다 죽어서, 대체 경로가 대체가 되지 못했다.
+   */
+  it('반쯤 된 결과를 지우고 처음부터 복사한다', async () => {
+    const src = join(root, 'src')
+    mkdirSync(join(src, 'pkg'), { recursive: true })
+    writeFileSync(join(src, 'pkg', 'index.js'), 'module.exports = 1\n')
+    symlinkSync('pkg', join(src, 'alias'))
+    const dst = join(root, 'dst')
+    // clone이 링크와 폴더까지 만들어 놓고 실패한 모양
+    const halfClone = async () => {
+      mkdirSync(join(dst, 'pkg'), { recursive: true })
+      symlinkSync('pkg', join(dst, 'alias'))
+      return false
+    }
+
+    await copyTree(src, dst, halfClone)
+    expect(readFileSync(join(dst, 'alias', 'index.js'), 'utf8')).toBe('module.exports = 1\n')
+    expect(lstatSync(join(dst, 'alias')).isSymbolicLink()).toBe(true)
   })
 })
 

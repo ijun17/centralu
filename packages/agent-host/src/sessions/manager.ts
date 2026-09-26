@@ -1301,6 +1301,13 @@ export class SessionManager {
       // (여기서 실패한 세션은 저장조차 되지 않으므로, 안 지우면 되찾을 방법이 없다)
       if (worktree) {
         await gitWorktreeRemove(params.cwd, worktree.path, true).catch(() => {})
+        /*
+         * 브랜치도 함께 지운다 (#167). 워크트리를 만들 때 `-b`로 함께 만든 브랜치라, 디렉토리만
+         * 지우면 같은 이름으로 다시 만들 때 "already exists"로 막히고, 이름을 안 정했으면
+         * 실패할 때마다 `centralu/…`가 하나씩 쌓였다. `-b`는 같은 이름이 이미 있으면 실패하므로
+         * 여기까지 온 브랜치는 이 호출이 방금 만든 것이고, 커밋도 하나 없다.
+         */
+        await gitBranchDelete(params.cwd, worktree.branch).catch(() => {})
       }
       const msg = (err as Error).message
       throw Object.assign(new Error(`Could not start ${params.tool} session: ${msg}`), { code: 'internal' })
@@ -2957,10 +2964,25 @@ export class SessionManager {
         console.error(`[worktree] copy refused (bad target): ${f} — ${(err as Error).message}`)
         continue
       }
-      // clone 우선 (#76) — 8.5GB target이 4초·10MB로 건너온다 (실측). 안 되면 일반 복사
-      await copyTree(src, dst)
-      // 나무 안쪽의 링크는 복사가 끝난 뒤에 본다 — 남기는 것과 지우는 것의 경계는 dropEscapingLinks에
-      for (const gone of await dropEscapingLinks(worktree.path, dst)) {
+      /*
+       * 복사 하나가 실패해도 세션 생성은 계속한다 (#167) — 위 머리주석의 약속이다. 예전에는 이
+       * 자리가 try 밖이라, 읽을 수 없는 파일 하나가 든 node_modules가 예외를 createSession 밖으로
+       * 던졌고, 그 경로는 실패 정리보다 앞이라 워크트리와 브랜치가 주인 없이 남았다.
+       */
+      try {
+        // clone 우선 (#76) — 8.5GB target이 4초·10MB로 건너온다 (실측). 안 되면 일반 복사
+        await copyTree(src, dst)
+      } catch (err) {
+        console.error(`[worktree] copy failed: ${f} — ${(err as Error).message}`)
+      }
+      // 나무 안쪽의 링크는 복사가 끝난 뒤에 본다 — 남기는 것과 지우는 것의 경계는 dropEscapingLinks에.
+      // 복사가 도중에 멈췄어도 이미 건너온 링크는 본다 — 반쯤 온 나무에도 창문은 있을 수 있다.
+      // 아무것도 못 건너왔으면 볼 것이 없다(그 밖의 거절은 그대로 던진다)
+      const landed = await dropEscapingLinks(worktree.path, dst).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return []
+        throw err
+      })
+      for (const gone of landed) {
         console.error(`[worktree] link dropped (points outside the worktree): ${gone}`)
       }
     }

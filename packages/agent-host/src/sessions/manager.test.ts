@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -2167,6 +2168,46 @@ describe('워크트리 세션', () => {
     // 세션은 저장조차 안 됐으므로, 여기 남으면 아무도 못 찾는 고아가 된다
     const left = existsSync(join(wtRoot, project.id)) ? readdirSync(join(wtRoot, project.id)) : []
     expect(left).toEqual([])
+  })
+
+  it('도구가 못 뜨면 브랜치도 남기지 않는다 — 고친 뒤 같은 이름으로 다시 만든다 (#167)', async () => {
+    const branches = () =>
+      execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
+    adapter.failCreate = 'claude is not installed'
+    const named = { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-login' }
+    await expect(wtRpc('agents.createSession', named)).rejects.toThrow(/not installed/)
+    // 이름을 안 정한 쪽은 실패할 때마다 centralu/…가 하나씩 쌓였다
+    await expect(create(true)).rejects.toThrow(/not installed/)
+    expect(branches()).toEqual(['main'])
+
+    adapter.failCreate = null
+    const s = (await wtRpc('agents.createSession', named)) as SessionInfo
+    expect(s.worktree?.branch).toBe('feat-login')
+  })
+
+  it('복사할 나무에 읽을 수 없는 파일이 있어도 세션은 선다 — 복사 실패는 기록만 한다 (#167)', async () => {
+    const nm = join(repo, 'node_modules')
+    mkdirSync(join(nm, 'pkg'), { recursive: true })
+    writeFileSync(join(nm, 'pkg', 'index.js'), 'module.exports = 1\n')
+    symlinkSync('pkg', join(nm, 'alias'))
+    mkdirSync(join(nm, 'zzz'))
+    writeFileSync(join(nm, 'zzz', 'secret'), 'x')
+    chmodSync(join(nm, 'zzz', 'secret'), 0o000)
+    writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const s = (await wtRpc('agents.createSession', {
+        projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-x',
+      })) as SessionInfo
+      expect(wtMgr.listSessions().some((x) => x.id === s.id)).toBe(true)
+      // 복사가 정말 실패한 경우를 본 것이다 — 조용히 성공한 복사로는 이 시험이 아무것도 말하지 않는다
+      expect(logged.mock.calls.some(([line]) => String(line).startsWith('[worktree] copy failed: node_modules'))).toBe(true)
+    } finally {
+      logged.mockRestore()
+      chmodSync(join(nm, 'zzz', 'secret'), 0o644)
+    }
   })
 
   it('워크트리 세션은 태어나는 순간부터 매니저 아래에 선다 (#69)', async () => {

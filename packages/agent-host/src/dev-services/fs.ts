@@ -350,18 +350,36 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
  * 전부 같은 처리를 한다: **조용히 일반 복사로 돌아간다.** 여기서 실패를 던지면 복사
  * 하나 때문에 세션 생성이 막히는데, 그건 이 기능이 막으려던 바로 그 상황이다.
  */
-export async function copyTree(src: string, dst: string): Promise<void> {
-  if (process.platform === 'darwin') {
-    const cloned = await new Promise<boolean>((done) => {
-      // -c는 clonefile을 요구한다 (되면 쓰고 안 되면 실패한다 — 조용히 복사로 눕지 않는다)
-      const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore' })
-      p.on('error', () => done(false))
-      p.on('close', (code) => done(code === 0))
-    })
-    if (cloned) return
-  }
+export async function copyTree(
+  src: string,
+  dst: string,
+  clone: (src: string, dst: string) => Promise<boolean> = cloneTree,
+): Promise<void> {
+  const existed = await lstat(dst).then(
+    () => true,
+    () => false,
+  )
+  if (await clone(src, dst)) return
+  /*
+   * `cp`는 실패하기 전에 이미 일부를 만들어 둔다 (#167). 그 위에 일반 복사를 하면, 먼저 건너온
+   * 디렉토리 링크를 덮어쓰려다 `ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY`로 죽었다 — 대체 경로가
+   * 대체가 되지 못했다. 그래서 반쯤 된 결과를 지우고 처음부터 복사한다. 복사 전부터 있던
+   * 자리는 우리 것이 아니므로 건드리지 않는다.
+   */
+  if (!existed) await rm(dst, { recursive: true, force: true })
   const { cpSync } = await import('node:fs')
   cpSync(src, dst, { recursive: true })
+}
+
+/** macOS의 clonefile 복사. 안 되는 자리(다른 볼륨, APFS 아님, macOS 아님)에서는 false */
+async function cloneTree(src: string, dst: string): Promise<boolean> {
+  if (process.platform !== 'darwin') return false
+  return new Promise<boolean>((done) => {
+    // -c는 clonefile을 요구한다 (되면 쓰고 안 되면 실패한다 — 조용히 복사로 눕지 않는다)
+    const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore' })
+    p.on('error', () => done(false))
+    p.on('close', (code) => done(code === 0))
+  })
 }
 
 /**
