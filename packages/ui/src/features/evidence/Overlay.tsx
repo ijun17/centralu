@@ -72,6 +72,7 @@ export function Overlay() {
         <GitPanel
           projectId={projectId}
           initialPath={overlay.path}
+          initialStaged={overlay.staged}
           initialSha={overlay.sha}
           initialSub={overlay.sub}
           pick={overlay.pick}

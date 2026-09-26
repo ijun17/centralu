@@ -59,6 +59,8 @@ export type Overlay =
   | {
       kind: 'git'
       path?: string | null
+      /** 어느 무리에서 눌렀나 — 일부만 스테이징한 파일은 두 무리에 다 있다 (#160) */
+      staged?: boolean
       sha?: string | null
       sub?: 'changes' | 'history' | 'branches'
       pick: number
@@ -446,6 +448,13 @@ export type AppState = {
   platform: Platform | null
   connection: ConnectionState
   projects: Record<string, ProjectInfo>
+  /**
+   * 프로젝트마다 "작업 트리가 움직였을지 모른다"를 들은 횟수 (#160). `refreshProjectGit`이
+   * 실제로 물으러 갈 때마다 하나 오른다. 증거 패널의 변경 목록·기록·접힌 띠는 목록을 스스로
+   * 들고 있어서 `project.git`(사이드바의 요약)만 고치는 새로 읽기를 듣지 못했다 — 이 숫자를
+   * 구독해서 턴 종료, 창 복귀, 승인, 브랜치 전환에 함께 다시 읽는다.
+   */
+  gitEpoch: Record<string, number>
   sessions: Record<string, SessionSummary>
   /**
    * Which agent tools this machine has, as the host reports them.
@@ -853,8 +862,11 @@ export type AppState = {
   openFile(path: string): void
   /** 대화 속 파일 링크의 우클릭 — 지금 보는 세션의 프로젝트에서 Finder로 보여준다 */
   revealFile(path: string): Promise<void>
-  /** 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다 */
-  openGit(path?: string): void
+  /**
+   * 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다.
+   * staged는 어느 쪽 diff인지다 — 안 주면 그 경로의 첫 항목을 편다
+   */
+  openGit(path?: string, staged?: boolean): void
   /** 커밋 하나를 넓은 곳에서 펼친다 (340px에서 diff는 못 읽는다) */
   openCommit(sha: string): void
   /** 브랜치 전환 화면 */
@@ -1681,6 +1693,7 @@ export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',
   projects: {},
+  gitEpoch: {},
   sessions: {},
   tools: [] as ToolStatus[],
   chat: {},
@@ -2703,9 +2716,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  openGit(path) {
+  openGit(path, staged) {
     // 탭을 적어 보낸다 — 기록을 보던 중에 변경 파일을 누르면 변경으로 돌아와야 한다
-    set((s) => ({ overlay: { kind: 'git', path: path ?? null, sub: 'changes', pick: nextPick(s.overlay) } }))
+    set((s) => ({ overlay: { kind: 'git', path: path ?? null, staged, sub: 'changes', pick: nextPick(s.overlay) } }))
   },
 
   openCommit(sha) {
@@ -2996,6 +3009,9 @@ export const useStore = create<AppState>((set, get) => ({
         // The project can be gone by the time the window closes (removed, or a reconnect
         // rebuilt the list). Measuring a folder nobody is showing helps no one.
         if (!platform || !get().projects[projectId]) return
+        // 패널이 들고 있는 목록도 같은 순간에 다시 읽게 한다 (#160). 요약이 같아도 올린다 —
+        // 같은 파일을 다시 고치면 변경 수는 그대로인데 내용은 바뀌었다
+        set((s) => ({ gitEpoch: { ...s.gitEpoch, [projectId]: (s.gitEpoch[projectId] ?? 0) + 1 } }))
         void platform.projects
           .gitStatus(projectId)
           .then(({ git }) =>

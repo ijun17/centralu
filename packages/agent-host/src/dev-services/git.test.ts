@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitBranches, gitCheckout, gitDiff, gitStage, gitStatusFiles } from './git.js'
+import { gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles } from './git.js'
 
 /**
  * porcelain v2 파싱은 실제 git 출력으로 확인한다 — 흉내낸 문자열로는
@@ -275,5 +275,40 @@ describe('Korean file names in git output (#176)', () => {
 
     const { diff } = await gitDiff(d, '한글파일.md')
     expect(diff.split('\n')[0]).toBe('diff --git a/한글파일.md b/한글파일.md')
+  })
+})
+
+describe('commit detail and commit errors (#160)', () => {
+  it('a clean merge shows what it brought in from the merged branch', async () => {
+    const { d, git } = repo()
+    git('checkout', '-q', '-b', 'main')
+    writeFileSync(join(d, 'a.txt'), 'a\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+    git('checkout', '-q', '-b', 'side')
+    writeFileSync(join(d, 'b.txt'), 'b\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'side')
+    git('checkout', '-q', 'main')
+    writeFileSync(join(d, 'c.txt'), 'c\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'main moves on')
+    git('merge', '-q', '--no-edit', 'side')
+    const merge = git('rev-parse', 'HEAD').toString().trim()
+
+    const detail = await gitCommitDetail(d, merge)
+    expect(detail.files).toEqual(['b.txt'])
+    expect(detail.diff).toContain('+++ b/b.txt')
+  })
+
+  it('a commit with nothing to commit says why', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'a.txt'), 'a\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+
+    const r = await gitCommit(d, 'my message')
+    expect(r.ok).toBe(false)
+    expect(r.message).toMatch(/nothing to commit/)
   })
 })
