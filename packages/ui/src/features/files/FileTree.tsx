@@ -494,6 +494,13 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
   }, [close])
 
   const { target } = state
+  /*
+   * 레이아웃 px로 환산해서 놓는다 (#183) — 사이드바 메뉴(RowMenu)와 같은 규칙이다. 클릭 좌표와 창
+   * 크기는 확대(--text-zoom)가 곱해진 화면 px인데, 여기 적는 left/top은 확대된 루트 안의 길이라
+   * 그릴 때 확대가 한 번 더 곱해진다. 그대로 쓰면 확대 1.25에서 메뉴가 클릭한 자리보다 오른쪽
+   * 아래에 떴고, 창 오른쪽 끝 근처에서는 창 밖으로 나갔다.
+   */
+  const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
   return (
     <div
       ref={rootRef}
@@ -501,7 +508,10 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
       data-testid="file-menu"
       className="fixed z-40 w-56 overflow-hidden rounded border border-edge bg-panel shadow-[0_12px_32px_-8px_rgb(0_0_0/0.9)]"
       // 화면 끝에서 열면 메뉴가 창 밖으로 나간다 — 안쪽으로 당긴다
-      style={{ left: Math.min(state.x, window.innerWidth - 232), top: Math.min(state.y, window.innerHeight - 76) }}
+      style={{
+        left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
+        top: Math.min(state.y / zoom, window.innerHeight / zoom - 76),
+      }}
     >
       <button
         type="button"
