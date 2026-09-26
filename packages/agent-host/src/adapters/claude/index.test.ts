@@ -7,19 +7,35 @@ import type { NormalizedEvent } from '@cc/protocol'
  * 여기서는 SDK를 조종 가능한 가짜로 갈아 끼워 그 경계만 본다 —
  * 진짜 CLI를 띄우면 죽는 시점을 테스트가 정할 수 없다.
  */
-const control = vi.hoisted(() => ({ endStream: () => {} }))
+const control = vi.hoisted(() => ({
+  endStream: () => {},
+  failStream: (_err: Error) => {},
+  /** 만든 질의들, 만든 차례로 — close가 불렸는지와 사용량 창구가 어느 것인지를 본다 */
+  queries: [] as { closed: boolean }[],
+}))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: () => ({
-    // eslint-disable-next-line require-yield -- 아무것도 내놓지 않고 끝나는 스트림이 바로 시험 대상이다
-    async *[Symbol.asyncIterator]() {
-      // 테스트가 시키면 예외 없이 끝난다 (프로세스가 사라진 모양)
-      await new Promise<void>((r) => (control.endStream = r))
-    },
-    interrupt: async () => {},
-    supportedCommands: async () => [],
-    getContextUsage: async () => undefined,
-  }),
+  query: () => {
+    const q = {
+      closed: false,
+      // eslint-disable-next-line require-yield -- 아무것도 내놓지 않고 끝나는 스트림이 바로 시험 대상이다
+      async *[Symbol.asyncIterator]() {
+        // 테스트가 시키면 예외 없이 끝나거나(프로세스가 사라진 모양) 던진다(SDK가 오류 result를 예외로 바꾼 모양)
+        await new Promise<void>((resolve, reject) => {
+          control.endStream = resolve
+          control.failStream = reject
+        })
+      },
+      interrupt: async () => {},
+      close: () => {
+        q.closed = true
+      },
+      supportedCommands: async () => [],
+      getContextUsage: async () => undefined,
+    }
+    control.queries.push(q)
+    return q
+  },
 }))
 
 const { ClaudeAdapter } = await import('./index.js')
@@ -60,6 +76,43 @@ describe('claude 스트림이 예고 없이 끝날 때', () => {
     await tick()
 
     expect(events.some((e) => e.type === 'error')).toBe(false)
+  })
+
+  /*
+   * 갈아 끼운 세션의 옛 프로세스 (#157). 멈춘 턴 뒤에 설정을 바꾸면 옛 CLI는 오류 result를 안은 채 끝나고,
+   * SDK는 그것을 예외로 바꿔 던진다. 그 예외가 adapter_crashed로 올라가면 매니저가 새 프로세스를 닫는다.
+   * 그리고 입력만 끝내면 CLI는 돌던 턴을 마저 돈다 — dispose는 프로세스를 끝내야 한다.
+   */
+  it('닫은 뒤 스트림이 예외로 끝나도 크래시를 올리지 않고, 닫을 때 프로세스를 끝낸다 (#157)', async () => {
+    const events: NormalizedEvent[] = []
+    const adapter = new ClaudeAdapter()
+    const handle = await adapter.createSession(
+      { sessionId: 's4', cwd: '/tmp', permissionPreset: 'auto' },
+      (e) => events.push(e),
+    )
+    const q = control.queries.at(-1)!
+
+    await handle.dispose()
+    expect(q.closed).toBe(true)
+    control.failStream(new Error('Claude Code returned an error result: [ede_diagnostic] result_type=user'))
+    await tick()
+
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+  })
+
+  it('사용량 창구는 살아 있는 질의만 빌린다 — 닫힌 세션의 질의를 붙들지 않는다 (#157)', async () => {
+    const adapter = new ClaudeAdapter()
+    const older = await adapter.createSession({ sessionId: 's5', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+    const qOlder = control.queries.at(-1)!
+    const newer = await adapter.createSession({ sessionId: 's6', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+    const qNewer = control.queries.at(-1)!
+    expect(ClaudeAdapter.lastQuery).toBe(qNewer)
+
+    // 가장 최근 세션이 닫혀도 더 오래된 세션이 살아 있으면 그 질의에 묻는다
+    await newer.dispose()
+    expect(ClaudeAdapter.lastQuery).toBe(qOlder)
+    await older.dispose()
+    expect([...ClaudeAdapter.liveQueries]).not.toContain(qOlder)
   })
 
   /*
