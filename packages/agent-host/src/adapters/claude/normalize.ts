@@ -33,6 +33,16 @@ export function toolSummary(name: string, input: Json): ToolSummary {
 }
 
 /**
+ * `files_touched`로 알릴 경로 — 파일을 **바꾼** 도구의 것만 (#185).
+ *
+ * `toolSummary`의 `paths`에는 Read의 경로도 들어 있다(인계 기록이 "무엇을 봤나"로 쓴다). 그것을
+ * 그대로 내보내면 에이전트가 읽기만 한 파일에도 트리의 "Edited by agent"가 붙는다.
+ */
+function editedPaths(s: ToolSummary): string[] {
+  return FILE_EDIT_TOOLS.has(s.tool) ? s.paths : []
+}
+
+/**
  * 서브에이전트의 걸음 한 줄 — 그 에이전트 카드의 실행 중 출력에 붙는다 (#98).
  *
  * 부모의 카드와 같은 제목 규칙(toolSummary)을 쓰되 도구 이름을 앞에 붙인다: Bash의 제목은
@@ -151,7 +161,8 @@ export function normalizeMessage(
       if (str(block.type) !== 'tool_use') continue
       const s = toolSummary(str(block.name), (block.input ?? {}) as Json)
       out.push({ type: 'tool_output_delta', sessionId, callId: parent, text: `${stepLine(s)}\n` })
-      if (s.paths.length) out.push({ type: 'files_touched', sessionId, paths: s.paths })
+      const edited = editedPaths(s)
+      if (edited.length) out.push({ type: 'files_touched', sessionId, paths: edited })
     }
     return out
   }
@@ -275,7 +286,7 @@ export function normalizeMessage(
         const name = str(block.name)
         const input = (block.input ?? {}) as Json
         out.push({ type: 'tool_call', sessionId, callId: str(block.id), summary: toolSummary(name, input) })
-        const paths = toolSummary(name, input).paths
+        const paths = editedPaths(toolSummary(name, input))
         if (paths.length) out.push({ type: 'files_touched', sessionId, paths })
       }
     }

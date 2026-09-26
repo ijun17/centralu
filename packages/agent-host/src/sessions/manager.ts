@@ -11,7 +11,7 @@ import { builderRole } from './app-builder.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
@@ -2091,7 +2091,8 @@ export class SessionManager {
   }
 
   /** 이벤트 수신 → 메타 갱신 → 메시지 영속화 → 전파 */
-  private onEvent(e: NormalizedEvent): void {
+  private onEvent(raw: NormalizedEvent): void {
+    const e = raw.type === 'files_touched' ? this.projectRelative(raw) : raw
     let seq: number | null = null
     if (e.sessionId) {
       const m = this.meta.get(e.sessionId)
@@ -3108,6 +3109,34 @@ export class SessionManager {
     await rm(path, { force: true })
     await writeFile(path, text, 'utf8')
     return { text, path }
+  }
+
+  /**
+   * 만진 파일을 프로젝트 기준 상대 경로로 바꾼다 (#185).
+   *
+   * 도구는 절대 경로를 준다(Claude의 `file_path`, Codex의 `fileChange`). 파일 트리의 항목은 프로젝트
+   * 기준 상대 경로라, 그대로 두면 "Edited by agent" 표시가 한 번도 맞지 않았다. 상대 경로로 온 것은
+   * 세션이 도는 폴더를 기준으로 읽는다. 프로젝트 밖의 경로(워크트리 세션의 파일, 홈의 설정 파일)는
+   * 버린다 — 프로젝트 트리에는 그 파일이 없고, 같은 상대 경로의 다른 파일에 표시가 붙으면 거짓이다.
+   */
+  private projectRelative(e: Extract<NormalizedEvent, { type: 'files_touched' }>): NormalizedEvent {
+    const m = this.meta.get(e.sessionId)
+    let root: string
+    try {
+      if (!m?.projectId) return { ...e, paths: [] }
+      root = this.cwdOf(m.projectId)
+    } catch {
+      return { ...e, paths: [] }
+    }
+    const base = this.cwdFor(m)
+    const paths = new Set<string>()
+    for (const p of e.paths) {
+      const rel = relative(root, resolve(base, p))
+      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue
+      // git과 화면은 POSIX 구분자로 말한다 (#47) — 트리 항목의 경로도 그렇다
+      paths.add(rel.replaceAll(sep, '/'))
+    }
+    return { ...e, paths: [...paths] }
   }
 
   private cwdOf(projectId: string | null): string {

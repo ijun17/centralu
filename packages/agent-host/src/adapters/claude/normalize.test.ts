@@ -116,6 +116,14 @@ describe('도구 호출 (스파이크 실제 형태)', () => {
     expect(out[1]).toMatchObject({ type: 'files_touched', paths: ['/tmp/hello.txt'] })
   })
 
+  it('Read는 만진 파일이 아니다 — files_touched를 내지 않는다 (#185)', () => {
+    const out = n({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'tu3', name: 'Read', input: { file_path: '/repo/src/a.ts' } }] },
+    })
+    expect(out.map((e) => e.type)).toEqual(['tool_call'])
+  })
+
   it('조회성 도구는 readOnly로 표시된다 (카드 접힘 정책)', () => {
     expect(toolSummary('Read', { file_path: '/a.ts' }).readOnly).toBe(true)
     expect(toolSummary('Bash', { command: 'ls' }).readOnly).toBe(false)
