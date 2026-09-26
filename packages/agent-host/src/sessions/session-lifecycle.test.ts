@@ -191,3 +191,65 @@ describe('깨우는 중·재시작 중에 바꾼 설정은 프로세스에 닿�
     expect(claude.last.opts).toMatchObject({ effort: 'high', permissionPreset: 'safe' })
   })
 })
+
+/*
+ * 오케스트레이터가 부탁한 보고 (#166). 두 어댑터는 실패한 턴에 turn_complete를 내지 않고 error만 낸다 — 그래서
+ * turn_complete에서만 보고하던 매니저는 실패를 보고하지 않았고, 남은 표식이 나중의 관계없는 턴을 "끝났습니다"로
+ * 보고했다.
+ */
+describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const handleOf = (id: string) => claude.created.filter((h) => h.sessionId === id).at(-1)!
+
+  async function setup() {
+    const worker = await newSession()
+    const orc = await mgr.orchestrator()
+    const tools = claude.asked.find((o) => o.sessionId === orc.id)!.orchestratorTools!
+    /** 오케스트레이터 대화에 저장된 보고들 — 화면과 기록이 읽는 본문이다 */
+    const reports = () =>
+      store
+        .loadMessages(orc.id, 100)
+        .map((r) => r.payload as { text?: string; from?: { sessionId: string } })
+        .filter((p) => p.from?.sessionId === worker)
+        .map((p) => p.text ?? '')
+    return { worker, tools, w: handleOf(worker), reports }
+  }
+
+  it('실패한 턴은 실패 보고를 한 번 보내고, 뒤의 관계없는 턴은 보고하지 않는다', async () => {
+    const { worker, tools, w, reports } = await setup()
+    await tools.sendToSession(worker, '빌드를 고쳐 줘', true)
+    w.emit({ type: 'error', sessionId: worker, error: { code: 'internal', message: 'API Error: 400 bad model', retryable: true } })
+    await tick()
+
+    expect(reports()).toHaveLength(1)
+    expect(reports()[0]).toContain('실패했습니다')
+    expect(reports()[0]).toContain('API Error: 400 bad model')
+    expect(reports()[0]).not.toContain('끝났습니다')
+
+    // 사람이 직접 말을 건 턴과, 부탁 없이 시킨 턴은 보고하지 않는다
+    await rpc('agents.send', { sessionId: worker, text: '직접 묻는 말' })
+    w.emit({ type: 'turn_complete', sessionId: worker })
+    await tools.sendToSession(worker, '조용히 해 줘', false)
+    w.emit({ type: 'turn_complete', sessionId: worker })
+    await tick()
+    expect(reports()).toHaveLength(1)
+  })
+
+  it('부탁 없이 다시 시키면 이전 부탁은 지워진다 — 새 지시가 그것을 대신한다', async () => {
+    const { worker, tools, w, reports } = await setup()
+    await tools.sendToSession(worker, '끝나면 알려줘', true)
+    await tools.sendToSession(worker, '아니, 이걸 대신 해 줘', false)
+    w.emit({ type: 'turn_complete', sessionId: worker })
+    await tick()
+    expect(reports()).toEqual([])
+  })
+
+  it('끝난 턴은 지금처럼 "끝났습니다"로 보고한다', async () => {
+    const { worker, tools, w, reports } = await setup()
+    await tools.sendToSession(worker, '끝나면 알려줘', true)
+    w.emit({ type: 'turn_complete', sessionId: worker })
+    await tick()
+    expect(reports()).toHaveLength(1)
+    expect(reports()[0]).toContain('끝났습니다')
+  })
+})
