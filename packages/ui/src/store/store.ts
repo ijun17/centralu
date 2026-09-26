@@ -3941,7 +3941,15 @@ export const useStore = create<AppState>((set, get) => ({
               : s.serviceTier !== undefined
                 ? `Speed: ${info.serviceTier ?? 'default'}`
                 : `Perms: ${info.permissionPreset}`
-      set({ toast: `${changed} (from next turn)` })
+      /*
+       * 언제 닿는지도 실제로 일어난 대로 말한다 (#164). 예전에는 늘 "(from next turn)"이었는데, host는 턴 도중에도
+       * 그 자리에서 프로세스를 갈아 끼워 도는 턴을 잃었다. 이제 host가 무엇을 했는지 돌려준다.
+       */
+      const when =
+        info.applied === 'restarted' ? 'agent restarted'
+        : info.applied === 'after_turn' ? 'applies when this turn ends'
+        : 'from next turn'
+      set({ toast: `${changed} (${when})` })
     } catch (e) {
       set({ toast: `Could not change settings: ${(e as Error).message}` })
     }

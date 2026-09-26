@@ -125,7 +125,7 @@ export type OrchestratorTools = {
   updateSessionSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null },
-  ): Promise<{ ok: boolean; error?: string }>
+  ): Promise<{ ok: boolean; error?: string; /** 도는 턴이 끝나면 적용된다 (#164) */ deferred?: boolean }>
   recall(
     query: string,
     limit?: number,

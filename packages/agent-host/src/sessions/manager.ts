@@ -38,6 +38,7 @@ import type {
   ToolName,
   UiPreferences,
   UiPreferencesPatch,
+  SettingsApplied,
 } from '@cc/protocol'
 import {
   APP_SLUG,
@@ -351,6 +352,11 @@ export class SessionManager {
    * 물러난다 — 기다리는 쪽이 먼저 온 요청이다. 깨우기에 합류해 기다리던 send도 보내지 않는다.
    */
   private leaving = new Map<string, string>()
+  /**
+   * 턴 도중에 설정이 바뀐 세션 — 그 턴이 끝나면 프로세스를 갈아 끼운다 (#164). 예전에는 그 자리에서 갈아 끼워서
+   * 도는 턴이 사라졌는데(Codex는 app-server를 닫는다), 화면은 "다음 턴부터"라고 말했다.
+   */
+  private restartAfterTurn = new Set<string>()
   /**
    * 세션에 외부 앱을 붙이는 자리 (M4 A-5). 런타임이 없는 host(테스트 대부분)에서는 null이고,
    * 그때 세션은 앱을 받지 않는다 — 다른 서비스처럼 선택이다.
@@ -2023,6 +2029,7 @@ export class SessionManager {
       await gitWorktreeRemove(this.cwdOf(m.projectId), m.worktree.path, true).catch(() => {})
     }
     this.running.delete(sessionId)
+    this.restartAfterTurn.delete(sessionId)
     this.meta.delete(sessionId)
     this.store.deleteSession(sessionId)
     await clearAttachments(sessionId).catch(() => {})
@@ -2080,7 +2087,7 @@ export class SessionManager {
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
-  ): Promise<SessionInfo> {
+  ): Promise<SessionInfo & { applied: SettingsApplied }> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -2118,14 +2125,7 @@ export class SessionManager {
     handle?.updateSettings?.(s)
 
     // 비교 기준은 화면값(meta)이 아니라 **돌고 있는 프로세스의 설정**이다
-    const live = this.running.get(sessionId)
-    const drifted =
-      !!live &&
-      (live.model !== m.model ||
-        live.effort !== m.effort ||
-        live.verbosity !== m.verbosity ||
-        live.serviceTier !== m.serviceTier ||
-        live.permissionPreset !== m.permissionPreset)
+    const drifted = this.settingsDrifted(sessionId)
 
     /**
      * 권한·모델은 도구 프로세스를 **띄울 때 고정된다**.
@@ -2136,11 +2136,36 @@ export class SessionManager {
      * 어댑터가 실시간 반영을 지원하지 않으면 **프로세스를 갈아 끼운다.**
      * resume으로 이어지므로 대화는 끊기지 않는다. 조용히 무시하는 것보다 낫다.
      */
+    let applied: SettingsApplied = 'saved'
     if (drifted && handle && !handle.updateSettings) {
-      await this.restartSession(sessionId)
+      /*
+       * **도는 턴은 끊지 않는다** (#164) — 저장만 하고 턴이 끝날 때(완료·오류·중단) 갈아 끼운다(onEvent). 사람이 보는
+       * 말("다음 턴부터")과 실제가 같아진다. 오케스트레이터의 설정 도구도 이 길을 탄다.
+       */
+      if (inTurn(m.state)) {
+        this.restartAfterTurn.add(sessionId)
+        applied = 'after_turn'
+      } else {
+        applied = (await this.restartSession(sessionId)).resumed ? 'restarted' : 'saved'
+      }
     }
 
-    return { ...m, live: this.handles.has(sessionId) }
+    return { ...m, live: this.handles.has(sessionId), applied }
+  }
+
+  /** 도는 프로세스가 받은 설정(running)이 지금의 설정(meta)과 다른가 — 도는 프로세스가 없으면 아니다 */
+  private settingsDrifted(sessionId: string): boolean {
+    const m = this.meta.get(sessionId)
+    const live = this.running.get(sessionId)
+    return (
+      !!m &&
+      !!live &&
+      (live.model !== m.model ||
+        live.effort !== m.effort ||
+        live.verbosity !== m.verbosity ||
+        live.serviceTier !== m.serviceTier ||
+        live.permissionPreset !== m.permissionPreset)
+    )
   }
 
   /** 프로세스가 살아 있는 세션 (UI가 "이어갈 수 있는지"를 아는 근거) */
@@ -2244,6 +2269,10 @@ export class SessionManager {
     if (e.sessionId) this.agentRuns.get(e.sessionId)?.onEvent(e)
     // 카드 자리가 비었다 — 기다리던 능력 물음이 있으면 세운다 (D-4). 어댑터의 카드가 닫힌 뒤, 또는 우리 카드를 가렸던 카드가 닫힌 뒤
     if (e.type === 'approval_resolved' && e.sessionId) this.raiseCapabilityAsks(e.sessionId)
+    // 턴 도중에 바뀐 설정을 이제 적용한다 (#164) — 그 사이에 되돌렸으면 어긋남이 없어 아무 일도 없다
+    if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId) && this.settingsDrifted(e.sessionId) && this.handles.has(e.sessionId)) {
+      void this.restartSession(e.sessionId).catch(() => {})
+    }
   }
 
   /**
@@ -3420,6 +3449,8 @@ export class SessionManager {
    * 도구가 먹통이 됐을 때 세션을 새로 만들면 대화가 끊긴다 — 프로세스만 갈아 끼운다.
    */
   async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    // 미뤄 둔 설정 적용(#164)도 이 재시작이 한다
+    this.restartAfterTurn.delete(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
       this.closeStream(sessionId) // 죽는 프로세스의 마지막 말을 남긴다 (#66)
@@ -3485,10 +3516,10 @@ export class SessionManager {
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
-        if (target.state === 'working') {
-          // 적용에는 재시작이 필요하다 (drift 경로) — 진행 중인 턴을 도구 호출이 죽이면 안 된다
-          return { ok: false, error: `작업 중인 세션입니다: ${target.name} — 끝난 뒤에 바꾸세요` }
-        }
+        /*
+         * 도는 턴은 막지 않는다 (#164) — 예전에는 적용이 곧 재시작이라 진행 중인 턴을 죽였고, 그래서 working을 거절했다
+         * (waiting_approval은 놓쳤다). 이제 updateSettings가 턴이 끝날 때로 미루므로 사람의 길과 같은 규칙이다.
+         */
         try {
           const info = await this.updateSettings(sessionId, s)
           /*
@@ -3504,7 +3535,7 @@ export class SessionManager {
             verbosity: info.verbosity,
             serviceTier: info.serviceTier,
           })
-          return { ok: true }
+          return { ok: true, ...(info.applied === 'after_turn' ? { deferred: true } : {}) }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }

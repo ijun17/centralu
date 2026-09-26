@@ -511,7 +511,9 @@ export async function runOrchestratorTool(
     })
     return {
       text: r.ok
-        ? `바꿨습니다: ${args.sessionId} — 화면에도 알렸습니다` // 흔적 없는 변경 금지 (#30)
+        ? r.deferred
+          ? `바꿨습니다: ${args.sessionId} — 지금 도는 턴이 끝나면 적용됩니다. 화면에도 알렸습니다` // 턴을 끊지 않는다 (#164)
+          : `바꿨습니다: ${args.sessionId} — 화면에도 알렸습니다` // 흔적 없는 변경 금지 (#30)
         : `바꾸지 못했습니다 — ${r.error}`,
       isError: !r.ok,
     }
