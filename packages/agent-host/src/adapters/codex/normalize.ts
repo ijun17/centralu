@@ -449,14 +449,23 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     case 'thread/goal/cleared':
       return [{ type: 'goal', sessionId, goal: null }]
 
-    case 'error':
-      return [
-        {
-          type: 'error',
-          sessionId,
-          error: { code: 'internal', message: str(obj(p.error).message) || str(p.message) || 'Unknown error', retryable: true },
-        },
-      ]
+    /*
+     * `error` 알림은 `{ error, willRetry, threadId, turnId }`다(생성 바인딩 ErrorNotification, codex-cli 0.153.4). 두 경우는
+     * 실패 표식으로 남기지 않는다 (#168):
+     *  - **다시 시도하는 오류**(willRetry) — 재연결처럼 Codex가 스스로 이어 간다. 표식으로 남기면 턴이 성공해도
+     *    "이 턴을 끝내지 못했다"가 대화에 남는다. 끝내 실패하면 아래 turn/completed(failed)가 말한다. host.log에만 남긴다.
+     *  - **턴에 딸린 오류** — 그 턴은 같은 문장을 실은 turn/completed(failed)로 끝난다. 둘 다 내면 표식이 두 줄이다
+     *    (실측: 토큰 갱신 실패 한 번이 같은 초에 같은 문장 두 줄로 세 번 남았다). 턴의 결말 쪽을 기준으로 삼는다.
+     */
+    case 'error': {
+      const message = str(obj(p.error).message) || str(p.message) || 'Unknown error'
+      if (p.willRetry === true) {
+        console.error(`[codex] ${sessionId.slice(0, 8)} retrying after: ${message}`)
+        return []
+      }
+      if (str(p.turnId)) return []
+      return [{ type: 'error', sessionId, error: { code: 'internal', message, retryable: true } }]
+    }
 
     default:
       return []

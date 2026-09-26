@@ -204,6 +204,15 @@ class CodexSession implements SessionHandle {
   private pendingInputs: string[] = []
   /** 조종 불가 턴(compact/review)이 도는 중 — 그 턴은 우리가 시작했으므로 우리가 안다 */
   private blockingTurn = false
+  /**
+   * 보낸 말의 수와, 스레드가 서기 전에 누른 Stop이 거둔 말의 수 (#168).
+   *
+   * 재개가 끝나기 전에는 멈출 턴이 없다(threadId·turnId가 없다). 예전의 Stop은 그때 아무것도 하지 않았고, ready
+   * 뒤에 줄 서 있던 말이 재개가 끝나자 turn/start로 나갔다 — 사람이 멈춘 뒤에 턴이 시작됐다. 이제 그 Stop은 그때까지
+   * 보낸 말을 거둔다. 그 뒤에 보낸 말은 그대로 간다.
+   */
+  private sendsIssued = 0
+  private sendsStopped = 0
   /** 스레드 준비 완료 — 생성 시점에 await해 externalId를 확보한다 */
   readonly ready: Promise<void>
 
@@ -580,8 +589,11 @@ class CodexSession implements SessionHandle {
   }
 
   send(text: string): void {
+    const nth = ++this.sendsIssued
     void this.ready
       .then(() => {
+        // 스레드가 서기 전에 누른 Stop이 이 말을 거뒀다 (sendsStopped) — 보내지 않는다
+        if (nth <= this.sendsStopped) return
         if (!this.threadId) throw new Error('Thread is not ready')
         /*
          * compact/review가 도는 동안은 보내지 않고 쌓는다 — pendingInputs 주석의 실측이
@@ -831,6 +843,15 @@ class CodexSession implements SessionHandle {
      * 다리는 판단하지 않으므로 여기(host)가 끊는다. 취소는 런타임이 앱과 그 아래 일까지 전한다.
      */
     this.opts.apps?.cancelAll()
+    /*
+     * 스레드가 아직 서지 않았다(지연 재개 중) — 줄 서 있는 말을 거두고 입력 대기로 돌린다 (#168, sendsStopped).
+     * 턴이 시작된 적이 없으니 turn/completed(interrupted)도 오지 않는다 — 상태는 여기서 돌린다.
+     */
+    if (!this.threadId && this.sendsIssued > this.sendsStopped) {
+      this.sendsStopped = this.sendsIssued
+      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+      return
+    }
     // 도는 턴이 없으면 멈출 것도 없다 (턴이 막 끝난 뒤의 스톱이 이 자리다)
     if (!this.threadId || !this.turnId) return
     // 실패를 삼키면 "멈췄겠지" 하고 기다리게 된다 — 안 멈췄으면 안 멈췄다고 말한다

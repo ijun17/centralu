@@ -489,11 +489,24 @@ export function normalizeMessage(
  */
 export class ClaudeStreamNormalizer {
   private textStreamed = false
+  /**
+   * 우리가 턴을 끊었다 — 그 뒤 처음 오는 result가 끊긴 턴의 결말이다 (#168).
+   *
+   * CLI는 끊긴 턴을 `error_during_execution` result로 닫는다. 그것을 여느 실패처럼 error로 내면 사람이 멈춘 턴이
+   * "Turn failed: error_during_execution" 표식과 error 상태로 남는다. 상태는 interrupt()가 이미 입력 대기로
+   * 돌려 두었으므로 그 결말은 아무것도 내지 않는다. 다른 이유의 `error_during_execution`은 지금처럼 실패다.
+   */
+  private stopping = false
   private readonly background = new Set<string>()
   /** 부모의 글 덩어리가 닫히기를 기다리는 에이전트 카드 닫기 */
   private deferred: NormalizedEvent[] = []
 
   constructor(private readonly sessionId: string) {}
+
+  /** 어댑터가 턴을 끊었다 (위 stopping) */
+  stopped(): void {
+    this.stopping = true
+  }
 
   push(msg: unknown): NormalizedEvent[] {
     const m = msg as Json
@@ -522,11 +535,19 @@ export class ClaudeStreamNormalizer {
       if (launched) this.background.add(launched)
     }
 
-    const events = normalizeMessage(msg, this.sessionId, { textStreamed: this.textStreamed })
+    let events = normalizeMessage(msg, this.sessionId, { textStreamed: this.textStreamed })
     if (subagent) return events
     if (type === 'stream_event' && events.some((e) => e.type === 'message_delta')) this.textStreamed = true
-    // assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다
-    if (type === 'assistant') this.textStreamed = false
+    /*
+     * assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다. **result도 끝이다** (#168): 글을 쓰는
+     * 도중에 멈추면 그 덩어리의 assistant 메시지가 오지 않아서, 표식이 켜진 채 다음 턴으로 넘어가 델타 없이 오는
+     * 통짜 응답(/usage 같은 로컬 응답, CLI가 합성한 API 오류)을 버렸다.
+     */
+    if (type === 'assistant' || type === 'result') this.textStreamed = false
+    if (type === 'result' && this.stopping) {
+      this.stopping = false
+      if (str(m.subtype) === 'error_during_execution') events = events.filter((e) => e.type !== 'error')
+    }
     // 덩어리가 닫혔다(또는 본문 없이 턴이 끝났다) — 미뤄 둔 카드 닫기를 이제 낸다
     if ((type === 'assistant' || type === 'result') && this.deferred.length > 0) events.push(...this.deferred.splice(0))
     return events

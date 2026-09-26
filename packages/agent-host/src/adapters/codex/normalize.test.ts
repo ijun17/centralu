@@ -236,6 +236,29 @@ describe('상태·계기판', () => {
     ])
   })
 
+  /*
+   * 실패한 턴은 `error` 알림과 turn/completed(failed)를 둘 다 받는다 (#168). 실측(DB 사본): 토큰 갱신 실패 하나가 같은
+   * 초에 같은 문장 두 줄로 세 번 남았다. 턴의 결말을 기준으로 한 줄만 남긴다. 다시 시도하는 오류는 표식이 아니다.
+   */
+  it('실패한 턴의 표식은 한 줄이다 — 턴에 딸린 error 알림은 turn/completed(failed)에 맡긴다 (#168)', () => {
+    const error = { message: 'Your access token could not be refreshed', codexErrorInfo: null, additionalDetails: null, misalignment: null }
+    const failed = [
+      ...n('error', { error, willRetry: false, threadId: 'th', turnId: 'turn-9' }),
+      ...n('turn/completed', { threadId: 'th', turn: { id: 'turn-9', items: [], status: 'failed', error } }),
+    ]
+    expect(failed.filter((e) => e.type === 'error')).toHaveLength(1)
+    // 턴 밖의 오류는 맡길 결말이 없다 — 그대로 낸다
+    expect(n('error', { error, willRetry: false, threadId: 'th', turnId: '' })).toHaveLength(1)
+  })
+
+  it('Codex가 다시 시도하는 오류(willRetry)는 실패 표식으로 남지 않는다 (#168)', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = { message: 'stream disconnected before completion; retrying 1/5', codexErrorInfo: null, additionalDetails: null, misalignment: null }
+    expect(n('error', { error, willRetry: true, threadId: 'th', turnId: '' })).toEqual([])
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('retrying after'))
+    spy.mockRestore()
+  })
+
   it('중단된 턴은 실패가 아니다 — 사람이 멈춘 것이고 대화는 계속된다', () => {
     expect(n('turn/completed', { turn: { id: 't', status: 'interrupted', error: null } })).toEqual([
       { type: 'turn_complete', sessionId: S },

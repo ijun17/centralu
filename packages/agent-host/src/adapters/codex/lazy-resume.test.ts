@@ -84,6 +84,29 @@ describe('codex 지연 재개 — 클로드처럼', () => {
     expect(events.some((e) => e.type === 'error')).toBe(false)
   })
 
+  /*
+   * 재개가 끝나기 전에는 멈출 턴이 없다 (#168). 예전의 Stop은 아무것도 하지 않았고, 줄 서 있던 말이 재개가 끝나자
+   * turn/start로 나갔다 — 사람이 멈춘 뒤에 턴이 시작됐다.
+   */
+  it('재개가 끝나기 전에 누른 Stop은 줄 서 있던 말을 거두고, 그 뒤의 말은 보낸다 (#168)', { timeout: 10_000 }, async () => {
+    state.hang.add('thread/resume')
+    const events: NormalizedEvent[] = []
+    const h = await new CodexAdapter().createSession(
+      { sessionId: 's4', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'big-thread' },
+      (e) => events.push(e),
+    )
+    h.send('깨기 전에 보낸 말')
+    h.interrupt()
+    expect(events).toContainEqual({ type: 'state_change', sessionId: 's4', state: 'waiting_input', reason: 'interrupted' })
+    h.send('멈춘 뒤에 보낸 말')
+
+    state.resolvers.get('thread/resume')!({ thread: { id: 'big-thread' } })
+    await tick()
+    await tick()
+    const turns = state.requests.filter((r) => r.method === 'turn/start').map((r) => r.params?.input)
+    expect(turns).toEqual([[{ type: 'text', text: '멈춘 뒤에 보낸 말' }]])
+  })
+
   it('잠금 오류는 3초 창 안에서 그대로 던진다 — 갈림길 UI가 산다', async () => {
     state.fail.set('thread/resume', 'thread abc already has an active writer')
     const adapter = new CodexAdapter()

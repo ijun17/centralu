@@ -192,6 +192,8 @@ class ClaudeSession implements SessionHandle {
   private queue: string[] = []
   private notify: (() => void) | null = null
   private closed = false
+  /** 보낸 말의 턴이 아직 result로 닫히지 않았다 — 중단을 표시할지 가른다 (interrupt 참고) */
+  private turnOpen = false
   /** 답을 기다리는 선택지들. 승인과 달리 **여러 장이 동시에 떠 있을 수 있다** */
   private questions = new Map<string, (r: unknown) => void>()
   private pending = new Map<string, PendingApproval>()
@@ -407,6 +409,7 @@ class ClaudeSession implements SessionHandle {
           const m = msg as { type?: string; session_id?: string; subtype?: string }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
           this.noteAppCalls(msg)
+          if (m.type === 'result') this.turnOpen = false
           for (const e of this.stream.push(msg)) this.emit(e)
           // 턴이 끝나면 지금 창에 무엇이 들어 있는지 묻는다 (FR-14)
           if (m.type === 'result') void this.reportContext(q)
@@ -486,6 +489,7 @@ class ClaudeSession implements SessionHandle {
       return
     }
     this.queue.push(text)
+    this.turnOpen = true
     this.notify?.()
     this.notify = null
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
@@ -654,6 +658,11 @@ class ClaudeSession implements SessionHandle {
     }
     this.pending.clear()
     this.releaseQuestions('Stopped by user')
+    /*
+     * 끊긴 턴의 결말(error_during_execution)은 실패가 아니라 중단이다 (#168, 정규화기의 stopping). **도는 턴이
+     * 있을 때만** 표시한다 — 쉬는 세션에서 누른 Stop이 표시를 남기면 다음 턴의 진짜 실패를 삼킨다.
+     */
+    if (this.turnOpen) this.stream.stopped()
 
     void this.query?.interrupt().catch((err: Error) => {
       // 못 끊었으면 그렇다고 말한다. 멈춘 줄 알고 기다리게 두는 게 제일 나쁘다.
