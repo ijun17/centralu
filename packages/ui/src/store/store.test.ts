@@ -1301,6 +1301,27 @@ describe('앱 상태 (#81)', () => {
     expect(useStore.getState().apps['control']?.enabled).toBe(false)
     expect(mock.appDisabled.has('control')).toBe(true)
   })
+
+  /*
+   * 읽지 못한 문서 위에 쓰지 않는다 (#178). 첫 읽기가 실패하면 레일의 `doc`은 null이고, 줄 하나를
+   * 누르면 `{ metrics }`만 든 문서가 host로 가서 업무·감시·알림을 통째로 덮었다.
+   */
+  it('문서를 아직 못 읽었으면 setAppDoc은 쓰지 않고 다시 읽는다 (#178)', async () => {
+    useStore.setState({ apps: {} })
+    const mock = new MockPlatform()
+    const full = { tasks: [{ id: 't1', title: 'T' }], watches: [{ id: 'w', pattern: 'git push' }], metrics: { inlineReplies: 7 } }
+    mock.appDocs.set('control', full)
+    await useStore.getState().attach(mock)
+    const read = vi.spyOn(mock.apps, 'state').mockRejectedValueOnce(new Error('offline'))
+    await useStore.getState().ensureAppState('control')
+    expect(useStore.getState().apps['control']).toBeUndefined()
+
+    await useStore.getState().setAppDoc('control', { metrics: { inlineReplies: 1 } })
+    expect(mock.appDocs.get('control')).toEqual(full)
+    // 버린 대신 다시 읽기를 걸었다 — 다음 쓰기는 진짜 문서 위에서 한다
+    await vi.waitFor(() => expect(useStore.getState().apps['control']?.doc).toEqual(full))
+    expect(read).toHaveBeenCalledTimes(2)
+  })
 })
 
 /**
