@@ -21,7 +21,7 @@ import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomple
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
-import { isComposerSendKey } from './composerKeys.js'
+import { composingKey, isComposerSendKey } from './composerKeys.js'
 import { appendPath, isFileDrag, readDragPath } from '../files/dragPath.js'
 import { anchorAt, decideFollow, isAtBottom, MOVED_UP_SLACK, shouldFollowAgain } from './scroll.js'
 
@@ -1072,8 +1072,8 @@ const Composer = memo(function Composer({
                 Both are read because `isComposing` is the standard signal and some browsers
                 report the key itself as `Process` instead.
               */
-            const composingKey = e.nativeEvent.isComposing || e.key === 'Process'
-            if (!composingKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            const composing = composingKey({ key: e.key, isComposing: e.nativeEvent.isComposing })
+            if (!composing && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
               if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
                 e.preventDefault()
                 return
@@ -1081,13 +1081,13 @@ const Composer = memo(function Composer({
             }
             /*
                 무엇이 보내기인가는 설정이 정한다 (composerKeys.ts). 여기서 직접 따지지
-                않는 이유는 위 조합 판정(composingKey)과 엮인 경우의 수가 브라우저 없이
+                않는 이유는 위 조합 판정(composing)과 엮인 경우의 수가 브라우저 없이
                 시험할 수 있는 자리에 있어야 해서다.
 
                 켠 사람에게 맨 Enter는 여기서 아무 일도 하지 않는다 — 가로채지 않으므로
                 textarea가 평소대로 줄을 바꾼다. 그것이 이 설정의 전부다.
               */
-            const sendKey = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing: composingKey }
+            const sendKey = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(sendKey, sendWithModifierEnter)) {
               e.preventDefault()
               e.currentTarget.form?.requestSubmit()

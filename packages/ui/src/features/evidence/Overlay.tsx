@@ -39,11 +39,18 @@ export function Overlay() {
     return sess ? sess.projectId : s.focusedProjectId
   })
 
-  // esc로 걷는다. 입력창에서 눌러도 걷혀야 한다 — 덮인 채로 갇히면 안 된다
+  /*
+   * esc로 걷는다. 입력창에서 눌러도 걷혀야 한다 — 덮인 채로 갇히면 안 된다.
+   *
+   * **단, 이 층이 맨 위이고 키가 이 층 쪽에서 왔을 때만이다** (#181). 창의 캡처 단계에서 가로채면 모든 요소보다 먼저
+   * 받으므로, 옆에 그대로 보이는 증거 패널의 터미널(vim·less)에 Esc가 가지 않고 오버레이가 닫혔다. 위에 뜬 설정 창·
+   * 모달의 Esc도 먼저 가로채, 가려진 오버레이가 닫히고 설정 창은 한 번 더 눌러야 닫혔다.
+   */
   useEffect(() => {
     if (!overlay) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (!overlayTakesEscape(useStore.getState(), e.target)) return
       e.preventDefault()
       e.stopPropagation()
       close()
@@ -83,3 +90,17 @@ export function Overlay() {
     </div>
   )
 }
+
+/**
+ * 오버레이가 이 Esc를 받는가 (#181). 위에 다른 층(모달·명령 창·설정·팔레트·인박스·사용량)이 떠 있으면 그 층의 것이고,
+ * 오버레이 옆의 증거 패널에서 온 키는 그 패널의 것이다(터미널의 Esc).
+ */
+export function overlayTakesEscape(
+  st: { openLayers: number; settingsOpen: boolean; paletteOpen: boolean; inboxOpen: boolean; usageOpen: boolean },
+  target: EventTarget | null,
+): boolean {
+  if (st.openLayers > 0 || st.settingsOpen || st.paletteOpen || st.inboxOpen || st.usageOpen) return false
+  const el = target as Element | null
+  return !(el && typeof el.closest === 'function' && el.closest('[data-testid="evidence-panel"]'))
+}
+

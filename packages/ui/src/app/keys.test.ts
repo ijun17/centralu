@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { letterOf } from './keys.js'
+import { confirmKeyAction, isTextEntry, letterOf } from './keys.js'
 
 /** 실제 KeyboardEvent에서 이 함수가 보는 두 필드만 */
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
@@ -50,5 +50,47 @@ describe('letterOf', () => {
     expect(letterOf(ev('1', 'Digit1'))).toBeNull()
     expect(letterOf(ev('!', 'Digit1'))).toBeNull()
     expect(letterOf(ev('Escape', 'Escape'))).toBeNull()
+  })
+})
+
+/** #181: 키가 사람이 보고 있는 대상에만 간다 */
+describe('isTextEntry — 글을 받는 칸 안의 화살표·Enter는 그 칸의 것이다 (#181)', () => {
+  const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, isContentEditable: false, ...extra }) as unknown as EventTarget
+
+  it('입력칸·글상자·select·contenteditable은 글을 받는다', () => {
+    expect(isTextEntry(el('INPUT', { type: 'text' }))).toBe(true)
+    expect(isTextEntry(el('INPUT', { type: 'search' }))).toBe(true)
+    expect(isTextEntry(el('TEXTAREA'))).toBe(true)
+    expect(isTextEntry(el('SELECT'))).toBe(true)
+    expect(isTextEntry(el('DIV', { isContentEditable: true }))).toBe(true)
+  })
+
+  it('단추·체크박스·빈 곳은 글을 받지 않는다 — 목록 고르기가 그대로 된다', () => {
+    expect(isTextEntry(el('BUTTON'))).toBe(false)
+    expect(isTextEntry(el('INPUT', { type: 'checkbox' }))).toBe(false)
+    expect(isTextEntry(el('FORM'))).toBe(false)
+    expect(isTextEntry(null)).toBe(false)
+  })
+})
+
+describe('confirmKeyAction — 종료 확인 창의 Enter·Esc (#181)', () => {
+  const k = (key: string, over: Partial<{ isComposing: boolean; onButton: boolean }> = {}) => ({
+    key, isComposing: false, onButton: false, ...over,
+  })
+
+  it('창 위의 Enter는 확인, Esc는 취소다', () => {
+    expect(confirmKeyAction(k('Enter'))).toBe('confirm')
+    expect(confirmKeyAction(k('Escape'))).toBe('cancel')
+    expect(confirmKeyAction(k('a'))).toBeNull()
+  })
+
+  it('단추 위의 Enter는 그 단추의 것이다 — Cancel에서 누른 Enter가 앱을 끄면 안 된다', () => {
+    expect(confirmKeyAction(k('Enter', { onButton: true }))).toBeNull()
+  })
+
+  it('조합 중인 키는 아무것도 아니다 — 조합을 끝내려는 Enter, 취소하려는 Esc', () => {
+    expect(confirmKeyAction(k('Enter', { isComposing: true }))).toBeNull()
+    expect(confirmKeyAction(k('Escape', { isComposing: true }))).toBeNull()
+    expect(confirmKeyAction(k('Process'))).toBeNull()
   })
 })

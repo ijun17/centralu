@@ -7,6 +7,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useOpenLayer } from '../../components/Modal.jsx'
+import { isPlainEnter } from './composerKeys.js'
 import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
 import { useStore } from '../../store/store.js'
 
@@ -177,7 +178,9 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                       className="w-full rounded border border-edge bg-panel px-1 py-0.5 text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none"
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') rename(c.command, (e.target as HTMLInputElement).value)
+                        // 조합을 끝내는 Enter는 저장이 아니다 (#181) — 한글 별칭의 마지막 음절이 빠졌다
+                        if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing }))
+                          rename(c.command, (e.target as HTMLInputElement).value)
                         // Esc는 위의 창 리스너가 renaming만 걷는다
                       }}
                       onBlur={(e) => renaming === c.command && rename(c.command, e.target.value)}
@@ -241,7 +244,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') add()
+                if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing })) add()
               }}
               placeholder="Command, e.g. pnpm dev"
               data-testid="run-add-input"
@@ -251,7 +254,7 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') add()
+                if (isPlainEnter({ key: e.key, isComposing: e.nativeEvent.isComposing })) add()
               }}
               placeholder="Name (optional)"
               data-testid="run-add-name"
