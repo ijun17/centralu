@@ -400,6 +400,26 @@ describe('승인·읽음·메시지', () => {
     )
   })
 
+  /*
+   * #158: 카드에서 y를 두 번(또는 카드와 레일에서 한 번씩) 누르면 두 번째 응답이 host에 닿을 때 어댑터는 그 요청을 이미
+   * 모른다. 그것을 '프로세스가 갈아 끼워졌다'로 읽어 deny를 방송하면, 방금 실행된 명령이 화면과 기록에서 거부로 보인다.
+   */
+  it('이미 닿은 승인에 두 번째 응답이 오면 거부를 방송하지 않고 조용히 둔다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('agents.respondApproval', { sessionId: s.id, requestId: 'r1', decision: 'allow' })
+    // 어댑터는 답한 요청을 대기 맵에서 지운다 — 같은 id의 두 번째 응답에는 false를 돌려준다
+    adapter.last!.dropApprovals()
+    await rpc('agents.respondApproval', { sessionId: s.id, requestId: 'r1', decision: 'allow' })
+
+    const resolved = events.filter((e) => e.type === 'approval_resolved' && e.requestId === 'r1')
+    expect(resolved).toEqual([expect.objectContaining({ decision: 'allow' })])
+    // 한 번도 닿지 않은 요청은 여전히 사라진 요청이다
+    await expect(
+      rpc('agents.respondApproval', { sessionId: s.id, requestId: 'r2', decision: 'allow' }),
+    ).rejects.toMatchObject({ code: 'approval_gone' })
+  })
+
   it("사라진 승인은 '항상 허용' 규칙을 남기지 않는다", async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

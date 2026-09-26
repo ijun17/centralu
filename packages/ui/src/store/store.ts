@@ -794,6 +794,17 @@ export type AppState = {
    */
   viewerProjectId: string | null
   paletteOpen: boolean
+  /**
+   * 지금 떠 있는 창의 수 (#158) — `Modal`과 명령 창처럼 화면을 덮는 층이 뜰 때 올리고 닫힐 때 내린다(`useOpenLayer`).
+   * 창의 열림은 대개 그 컴포넌트의 지역 상태라 스토어가 따로 알 길이 없다. 승인 카드의 y/n/a가 이 값을 보지 않으면
+   * "Delete this session?" 창에서 확인하려고 누른 y가 그 뒤에 가려진 명령을 허용했다.
+   */
+  openLayers: number
+  /**
+   * 응답을 보내고 아직 답을 받지 못한 승인 요청 (#158) — requestId → true. 첫 응답의 결과가 화면에 닿기 전에 같은
+   * 카드에 두 번째 입력(키 두 번, 카드와 레일)이 들어오면 두 번째 응답이 '사라진 요청'이 되어 실행된 명령을 거부로 적었다.
+   */
+  approvalsInFlight: Record<string, true>
   /** 사용량 모달 (FR-9) */
   usageOpen: boolean
   settingsOpen: boolean
@@ -1781,6 +1792,8 @@ export const useStore = create<AppState>((set, get) => ({
   viewerPath: null,
   viewerProjectId: null,
   paletteOpen: false,
+  openLayers: 0,
+  approvalsInFlight: {} as Record<string, true>,
   settingsMenuRequest: null as { sessionId: string; at: number } | null,
   usageOpen: false,
   settingsOpen: false,
@@ -3463,6 +3476,13 @@ export const useStore = create<AppState>((set, get) => ({
   async respondApproval(sessionId, requestId, decision, scope) {
     // '항상 허용'의 패턴은 core가 계산한다 (host는 core를 모르므로 여기서 실어 보낸다)
     const pending = get().sessions[sessionId]?.pendingApproval
+    /*
+     * 한 요청에는 한 번만 답한다 (#158). 이미 보낸 응답이 돌아오는 중이거나, 그 결과로 카드가 이미 걷혔으면 다시 보내지
+     * 않는다. 카드는 `approval_resolved`가 반영되고 React가 다시 그릴 때까지 리스너를 들고 있어서, 그 사이의 두 번째 y가
+     * host에서 '사라진 요청'이 되어 방금 실행된 명령을 Denied로 적었다. 카드의 키·단추와 관제 레일이 모두 여기를 지난다.
+     */
+    if (get().approvalsInFlight[requestId] || pending?.requestId !== requestId) return
+    set((s) => ({ approvalsInFlight: { ...s.approvalsInFlight, [requestId]: true } }))
     const matcher =
       decision === 'always' && pending
         ? pending.detail.kind === 'command'
@@ -3504,6 +3524,12 @@ export const useStore = create<AppState>((set, get) => ({
       if (changing && projectId) get().refreshProjectGit(projectId)
     } catch (e) {
       set({ toast: (e as Error).message || '승인을 전달하지 못했습니다' })
+    } finally {
+      // 실패했으면 다시 누를 수 있어야 한다. 성공했으면 카드가 이미 걷혔으므로 위의 `pendingApproval` 검사가 막는다
+      set((s) => {
+        const { [requestId]: _done, ...rest } = s.approvalsInFlight
+        return { approvalsInFlight: rest }
+      })
     }
   },
 

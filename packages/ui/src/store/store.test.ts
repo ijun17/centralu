@@ -69,6 +69,7 @@ beforeEach(() => {
     wakeLocked: {},
     notices: [],
     toast: null,
+    approvalsInFlight: {},
     commandRuns: {},
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
     externalAppChanges: {},
@@ -2447,5 +2448,55 @@ describe('항상 허용 알림 (#170)', () => {
     expect(r.matcher).toBeUndefined()
     expect(r.toast).not.toContain('Always allow in')
     expect(r.toast).toContain('Allowed once')
+  })
+})
+
+/*
+ * #158: 첫 응답의 결과가 화면에 닿기 전에 같은 카드에 두 번째 입력이 들어오면, 두 번째 응답이 host에서 '사라진 요청'이
+ * 되어 방금 실행된 명령을 Denied로 적었다. 한 요청에는 한 번만 보낸다.
+ */
+describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
+  async function pendingCard() {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'safe' })
+    useStore.setState({
+      platform,
+      sessions: {
+        [s.id]: { ...s, pendingApproval: { requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/tmp' } } } as never,
+      },
+    })
+    return { platform, id: s.id }
+  }
+
+  it('응답이 돌아오기 전의 두 번째 입력은 보내지 않는다', async () => {
+    const { platform, id } = await pendingCard()
+    const finish: (() => void)[] = []
+    const spy = vi
+      .spyOn(platform.agents, 'respondApproval')
+      .mockImplementation(() => new Promise<void>((r) => void finish.push(r)))
+    const first = useStore.getState().respondApproval(id, 'r1', 'allow')
+    const second = useStore.getState().respondApproval(id, 'r1', 'deny')
+    finish.forEach((f) => f())
+    await Promise.all([first, second])
+    expect(spy.mock.calls.map((c) => c[2])).toEqual(['allow'])
+  })
+
+  it('카드가 이미 걷힌 요청에는 보내지 않는다', async () => {
+    const { platform, id } = await pendingCard()
+    const spy = vi.spyOn(platform.agents, 'respondApproval').mockResolvedValue(undefined as never)
+    useStore.setState((st) => ({ sessions: { ...st.sessions, [id]: { ...st.sessions[id]!, pendingApproval: null } } }))
+    await useStore.getState().respondApproval(id, 'r1', 'allow')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('전송이 실패하면 다시 누를 수 있다', async () => {
+    const { platform, id } = await pendingCard()
+    const spy = vi.spyOn(platform.agents, 'respondApproval').mockRejectedValueOnce(new Error('Connection lost'))
+    await useStore.getState().respondApproval(id, 'r1', 'allow')
+    expect(useStore.getState().toast).toBe('Connection lost')
+    spy.mockResolvedValue(undefined as never)
+    await useStore.getState().respondApproval(id, 'r1', 'allow')
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(useStore.getState().approvalsInFlight).toEqual({})
   })
 })
