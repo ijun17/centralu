@@ -805,6 +805,11 @@ export type AppState = {
    * 카드에 두 번째 입력(키 두 번, 카드와 레일)이 들어오면 두 번째 응답이 '사라진 요청'이 되어 실행된 명령을 거부로 적었다.
    */
   approvalsInFlight: Record<string, true>
+  /**
+   * 세션마다 올라가는 중인 첨부의 수 (#180). 칩은 host에 저장이 끝난 뒤에야 초안에 들어가는데, 그 사이에 보내면 글만
+   * 나가고 늦게 끝난 칩은 비워진 다음 초안에 붙어 다음 말에 실렸다. 입력창은 이 값이 0보다 크면 보내지 않는다.
+   */
+  uploading: Record<string, number>
   /** 사용량 모달 (FR-9) */
   usageOpen: boolean
   settingsOpen: boolean
@@ -1055,7 +1060,8 @@ export type AppState = {
     decision: 'allow' | 'deny' | 'always',
     scope?: 'session' | 'project',
   ): Promise<void>
-  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
+  /** 답이 host에 닿았나 — false면 토스트를 띄웠다 (입력창에서 온 답은 send가 글을 되돌린다, #180) */
+  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<boolean>
   interrupt(sessionId: string): Promise<void>
   /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
   /** 에이전트만 재시작한다 (대화는 그대로) */
@@ -1218,7 +1224,8 @@ export type AppState = {
    * 오케스트레이터에게 묻는다. **세션이 없으면 이 순간 만들어진다** — 추천 질문 카드와
    * 빈 화면의 입력창이 둘 다 이 문으로 들어온다 (#63).
    */
-  askOrchestrator(text: string): Promise<void>
+  /** 첫 마디가 오케스트레이터에게 갔나 — false면 태어나지 못했다(부른 쪽이 글을 되돌린다, #180) */
+  askOrchestrator(text: string): Promise<boolean>
   /** 소개 화면 통과 (#63): 도구 선택을 host에 적고, 오케스트레이터 화면으로 간다 */
   completeIntro(tool: ToolName): Promise<void>
   setGridPanels(sessionIds: string[]): Promise<void>
@@ -1626,14 +1633,7 @@ function unsend(
       s.sessions[u.sessionId] && u.prevState
         ? { ...s.sessions, [u.sessionId]: { ...s.sessions[u.sessionId]!, state: u.prevState } }
         : s.sessions
-    const cur = s.drafts[u.sessionId] ?? EMPTY_DRAFT
-    const drafts = {
-      ...s.drafts,
-      [u.sessionId]: {
-        text: cur.text ? `${u.text}\n${cur.text}` : u.text,
-        attachments: [...(u.attachments ?? []), ...cur.attachments],
-      },
-    }
+    const drafts = draftsWith(s.drafts, u.sessionId, u.text, u.attachments)
     return {
       chat: { ...s.chat, [u.sessionId]: (s.chat[u.sessionId] ?? []).filter((i) => i.seq !== u.seq) },
       drafts,
@@ -1644,6 +1644,27 @@ function unsend(
       toast: `Could not send: ${reason}`,
     }
   })
+}
+
+/** 보내지 못한 글과 첨부를 그 세션의 초안 앞에 잇는다 — 그 사이 새로 쓴 글은 덮지 않는다(순서상 실패한 말이 먼저다) */
+function draftsWith(drafts: Record<string, Draft>, sessionId: string, text: string, attachments?: ChatAttachment[]): Record<string, Draft> {
+  const cur = drafts[sessionId] ?? EMPTY_DRAFT
+  return {
+    ...drafts,
+    [sessionId]: {
+      text: cur.text ? `${text}\n${cur.text}` : text,
+      attachments: [...(attachments ?? []), ...cur.attachments],
+    },
+  }
+}
+
+function restoreDraft(
+  set: (fn: (s: AppState) => Partial<AppState>) => void,
+  sessionId: string,
+  text: string,
+  attachments?: ChatAttachment[],
+): void {
+  set((s) => (s.sessions[sessionId] ? { drafts: draftsWith(s.drafts, sessionId, text, attachments) } : {}))
 }
 
 /**
@@ -1900,6 +1921,7 @@ export const useStore = create<AppState>((set, get) => ({
   paletteOpen: false,
   openLayers: 0,
   approvalsInFlight: {} as Record<string, true>,
+  uploading: {} as Record<string, number>,
   settingsMenuRequest: null as { sessionId: string; at: number } | null,
   usageOpen: false,
   settingsOpen: false,
@@ -3076,7 +3098,11 @@ export const useStore = create<AppState>((set, get) => ({
       })
       get().focusSession(info.id)
     } catch (e) {
-      set({ toast: `Could not start the worktree manager: ${(e as Error).message}` })
+      /*
+       * 실패는 **부른 창에 돌려준다** (#180). 여기서 토스트로 바꿔 삼키던 동안 창의 `catch`에는 닿지 않아 창이 닫혔다 —
+       * 적은 브랜치와 이유가 함께 사라지고, 토스트는 2.5초 뒤 걷혔다. 창이 그 이유를 제 안에 남긴다.
+       */
+      throw new Error(`Could not start the worktree manager: ${(e as Error).message}`)
     }
   },
 
@@ -3421,6 +3447,13 @@ export const useStore = create<AppState>((set, get) => ({
       set({ toast: `${file.name} is too large (max ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB)` })
       return null
     }
+    const count = (d: number) =>
+      set((s) => {
+        const n = (s.uploading[sessionId] ?? 0) + d
+        const { [sessionId]: _was, ...rest } = s.uploading
+        return { uploading: n > 0 ? { ...rest, [sessionId]: n } : rest }
+      })
+    count(1)
     try {
       const buf = await file.arrayBuffer()
       const b64 = toBase64(new Uint8Array(buf))
@@ -3435,6 +3468,8 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ toast: `Could not attach: ${(e as Error).message}` })
       return null
+    } finally {
+      count(-1)
     }
   },
 
@@ -3458,9 +3493,16 @@ export const useStore = create<AppState>((set, get) => ({
     const target = composerTarget(open, !!attachments?.length)
     if (target === 'answer' && text.trim()) {
       const only = open[0]!
-      await get().answerQuestion(sessionId, only.requestId, [
+      const landed = await get().answerQuestion(sessionId, only.requestId, [
         { question: only.questions[0]!.question, answers: [text.trim()] },
       ])
+      /*
+       * 닿지 않은 답은 입력창으로 되돌린다 (#180) — 보통 전송과 같은 규칙이다. 입력창은 보내는 순간 비워지고, 답은
+       * 대화에 말풍선으로 남지 않아 ↑ 되불러오기로도 꺼낼 수 없다. 질문이 이미 사라졌으면(host가 갈아 끼워짐) 카드도
+       * 함께 걷히므로, 되돌리지 않으면 쓴 글이 어디에도 없다. 되돌리기는 아무것도 다시 보내지 않는다 — 답이 사실은
+       * 닿았다면 카드가 걷힌 것을 보고 사람이 지우면 된다.
+       */
+      if (!landed) restoreDraft(set, sessionId, text, attachments)
       return
     }
     /*
@@ -3636,8 +3678,10 @@ export const useStore = create<AppState>((set, get) => ({
   async answerQuestion(sessionId, requestId, answers) {
     try {
       await get().platform!.agents.answerQuestion(sessionId, requestId, answers)
+      return true
     } catch (e) {
       set({ toast: (e as Error).message || '답을 전달하지 못했습니다' })
+      return false
     }
   },
 
@@ -4413,7 +4457,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   async askOrchestrator(text) {
     const platform = get().platform
-    if (!platform) return
+    if (!platform) return false
     let id = get().orchestratorId
     if (!id) {
       // 첫 질문이 곧 탄생이다 (#63) — 카드를 누른 순간에만 프로세스가 뜬다
@@ -4431,12 +4475,14 @@ export const useStore = create<AppState>((set, get) => ({
         id = info.id
       } catch (e) {
         set({ toast: `Could not start the orchestrator: ${(e as Error).message}` })
-        return
+        return false
       } finally {
         set({ orchestratorWaking: false })
       }
     }
+    // 여기부터의 실패는 send가 글을 입력창(이제 진짜 세션의 초안)으로 되돌린다
     await get().send(id, text)
+    return true
   },
 
   async completeIntro(tool) {

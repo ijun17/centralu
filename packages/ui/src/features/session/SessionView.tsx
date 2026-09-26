@@ -732,6 +732,11 @@ const Composer = memo(function Composer({
   const fileRef = useRef<HTMLInputElement>(null)
   const attachFile = useStore((s) => s.attachFile)
   /*
+   * 올라가는 중인 첨부 (#180). 칩은 host에 저장이 끝나야 초안에 들어온다 — 그 전에 보내면 글만 나가고, 늦게 끝난 칩이
+   * 비워진 다음 초안에 붙어 다음 말에 실렸다. 올라가는 동안은 보내지 않고, 무엇을 기다리는지 목록에 보인다.
+   */
+  const uploading = useStore((s) => s.uploading[sessionId] ?? 0)
+  /*
    * 입력창 높이는 **값에서** 나온다.
    *
    * 예전엔 onChange에서 직접 style.height를 만졌는데, 그러면 타이핑으로 값이 바뀔 때만
@@ -914,6 +919,7 @@ const Composer = memo(function Composer({
         e.preventDefault()
         const t = text.trim()
         if (!t && attachments.length === 0) return
+        if (uploading > 0) return
         /*
           GUI 커맨드 (2026-09-07): `/usage` 같은 이름은 세션에 보낼 응답이 프로토콜에
           없다 — 엔터가 메시지 대신 앱 화면을 연다. 첨부가 있으면 가로채지 않는다:
@@ -937,8 +943,16 @@ const Composer = memo(function Composer({
         void send(sessionId, t, attachments)
       }}
     >
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || uploading > 0) && (
         <ul className="mb-1.5 flex flex-wrap gap-1.5" data-testid="attachment-list">
+          {uploading > 0 && (
+            <li
+              className="flex items-center gap-1.5 rounded border border-dashed border-edge px-2 py-1 text-[11px] text-slate"
+              data-testid="attachment-uploading"
+            >
+              Attaching {uploading === 1 ? 'a file' : `${uploading} files`}…
+            </li>
+          )}
           {attachments.map((a, i) => (
             <li
               key={`${a.path}-${i}`}
@@ -1112,7 +1126,16 @@ const Composer = memo(function Composer({
           multiple
           className="hidden"
           data-testid="attach-input"
-          onChange={(e) => void takeFiles(e.target.files)}
+          onChange={(e) => {
+            /*
+             * 고른 파일을 먼저 떠 두고 칸을 비운다 (#180). 값이 남아 있으면 같은 파일을 다시 골랐을 때 브라우저가
+             * `change`를 보내지 않아, 칩을 지우고(또는 보낸 뒤) 같은 파일을 다시 붙일 수 없었다. `files`는 살아 있는
+             * 목록이라 값을 비우면 함께 비워지므로 배열로 옮긴 뒤에 비운다.
+             */
+            const files = Array.from(e.currentTarget.files ?? [])
+            e.currentTarget.value = ''
+            void takeFiles(files)
+          }}
         />
         <IconButton
           label="Attach file"
@@ -1131,7 +1154,7 @@ const Composer = memo(function Composer({
             무엇을 눌러야 하는지 알 길이 없다. `⌘`인지 `Ctrl`인지는 자판이 답한다.
           */
           label={`Send (${sendWithModifierEnter ? sc('mod', 'Enter') : 'Enter'})`}
-          disabled={!text.trim() && attachments.length === 0}
+          disabled={(!text.trim() && attachments.length === 0) || uploading > 0}
           testId="send"
           placement="top"
           align="right"

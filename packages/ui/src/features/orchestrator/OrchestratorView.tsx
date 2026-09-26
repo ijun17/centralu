@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
+import { isComposerSendKey } from '../session/composerKeys.js'
 import { APPS } from '../../apps/registry.js'
 import { RAIL_DEFAULT, RAIL_MAX, RAIL_MIN } from '../../store/store.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
@@ -281,13 +282,20 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
 function OrchestratorEmpty() {
   const askOrchestrator = useStore((s) => s.askOrchestrator)
   const waking = useStore((s) => s.orchestratorWaking)
+  const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const [text, setText] = useState('')
 
   const submit = () => {
     const t = text.trim()
     if (!t || waking) return
     setText('')
-    void askOrchestrator(t)
+    /*
+     * 태어나지 못했으면 첫 질문을 되돌린다 (#180). 태어난 뒤의 전송 실패는 send가 진짜 세션의 초안으로 되돌리지만,
+     * 태어나기 전의 실패는 send까지 가지 않아 글이 어디에도 없었다. 그 사이 새로 친 글은 덮지 않고 뒤에 둔다.
+     */
+    void askOrchestrator(t).then((ok) => {
+      if (!ok) setText((cur) => (cur ? `${t}\n${cur}` : t))
+    })
   }
 
   return (
@@ -303,7 +311,10 @@ function OrchestratorEmpty() {
           disabled={waking}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // 세션 입력창과 같은 판정 (#180) — ⌘Enter로 보내기를 켠 사람에게 맨 Enter는 줄바꿈이고, 조합 중인 Enter는 보내지 않는다
+            const composing = e.nativeEvent.isComposing || e.key === 'Process'
+            const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
+            if (isComposerSendKey(key, sendWithModifierEnter)) {
               e.preventDefault()
               submit()
             }
