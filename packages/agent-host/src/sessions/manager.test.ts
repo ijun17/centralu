@@ -17,7 +17,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName, Attachment } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
@@ -431,6 +431,39 @@ describe('승인·읽음·메시지', () => {
 
     // 실행되지도 않은 명령을 항상 허용으로 기억해 두면 다음에 조용히 통과한다
     expect(await rpc('approvals.rules', {})).toEqual([])
+  })
+
+  /*
+   * #161: host는 기록으로 남긴 이벤트에 세션 내 seq를 실어 방송한다. 그 이벤트의 스키마가 `seq`를 펼치지 않으면 zod가
+   * 조용히 지워, 화면의 lastSeq가 뒤처지고 다시 켜면 본 세션에 안읽음 점이 뜬다(`error`가 그랬다). 기록되는 종류를
+   * 모두 흘려 보고, seq가 붙어 나간 이벤트는 하나도 빠짐없이 파싱 뒤에도 seq를 지니는지 본다.
+   */
+  it('기록으로 남아 seq가 붙어 나가는 이벤트는 종류마다 스키마를 지나도 seq를 잃지 않는다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    await rpc('agents.send', { sessionId: s.id, text: 'hi' })
+    const h = adapter.last!
+    const raw = (e: Record<string, unknown>) =>
+      (h as unknown as { emit: (e: NormalizedEvent) => void }).emit({ sessionId: s.id, ...e } as NormalizedEvent)
+    raw({ type: 'reasoning_delta', text: 'thinking' })
+    h.emitToolCall('Bash', 'ls')
+    raw({ type: 'tool_result', callId: 'c-2', ok: true, summary: 'ok' })
+    h.emitApproval('r-seq')
+    raw({ type: 'approval_resolved', requestId: 'r-seq', decision: 'allow' })
+    raw({ type: 'compaction', failed: false })
+    raw({ type: 'app_view', callId: 'c-2', appId: 'notes', projectId: null, tool: 'home', phase: 'open' })
+    h.emitError('400 bad request')
+
+    const stamped = events.filter((e) => typeof (e as { seq?: unknown }).seq === 'number')
+    const kinds = new Set(stamped.map((e) => e.type))
+    // 빈 시험이 아니다 — 기록되는 종류가 실제로 seq를 달고 나갔다
+    for (const k of ['user_message', 'message_delta', 'reasoning_delta', 'tool_call', 'tool_result', 'approval_request', 'approval_resolved', 'compaction', 'app_view', 'error']) {
+      expect(kinds, k).toContain(k)
+    }
+    for (const e of stamped) {
+      const parsed = NormalizedEventSchema.parse(e) as { seq?: number }
+      expect(parsed.seq, e.type).toBe((e as { seq: number }).seq)
+    }
   })
 
   it('메시지가 영속화되고 다시 로드된다', async () => {

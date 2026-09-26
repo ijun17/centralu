@@ -228,16 +228,23 @@ export function SessionPane({
     if (!loaded) void loadHistory(sessionId)
   }, [sessionId, loaded, loadHistory])
 
-  // 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core)
+  /*
+   * 읽음 처리: 스크롤 최신 도달 ∥ 포커스 3초 (판정은 core).
+   *
+   * **앱이 앞에 있을 때만 센다** (#161). 예전에는 `focused: true`를 늘 넘겨, 다른 창 뒤에서 끝난 턴도 3초 뒤 읽음이
+   * 되었다 — 사람은 결과를 보지 않았는데 안읽음이 꺼지고 인박스 순서에서도 밀렸다. "본다"는 `turn_complete`의 알림과
+   * `Notices`가 쓰는 기준(`appFocused` && 화면에 있음)과 같아야 한다. 앱으로 돌아오면 `appFocused`가 바뀌어 3초를 다시 센다.
+   */
+  const appFocused = useStore((s) => s.appFocused)
   useEffect(() => {
-    if (!session) return
+    if (!session || !appFocused) return
     const t = setTimeout(() => {
       const el = scrollRef.current
       const atBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight < 40 : true
-      if (shouldMarkRead({ focused: true, atBottom, focusedForMs: 3000 })) void markRead(session.id)
+      if (shouldMarkRead({ focused: useStore.getState().appFocused, atBottom, focusedForMs: 3000 })) void markRead(session.id)
     }, 3000)
     return () => clearTimeout(t)
-  }, [session, chat.length, markRead])
+  }, [session, chat.length, markRead, appFocused])
 
   // 세션이 사라지는 순간(삭제·아카이브)에도 그리려 하지 않는다
   if (!session) return null
