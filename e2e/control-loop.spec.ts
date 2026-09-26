@@ -8215,3 +8215,76 @@ test('질문이 열린 세션은 에이전트에게 인수인계 노트를 부�
   await expect(page.getByTestId('handoff-blocked')).toHaveCount(0)
   await expect(page.getByTestId('confirm-handoff-yes')).toBeEnabled()
 })
+
+/**
+ * 보내는 길이 실패하거나 경주해도 사람이 쓴 것은 남는다 (#180).
+ */
+test('오케스트레이터가 태어나지 못하면 첫 질문이 입력창으로 돌아온다 (#180)', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.orchestrator = async () => {
+      throw new Error('no tool')
+    }
+  })
+  await page.getByTestId('orchestrator-input').fill('what is running?')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  await expect(page.getByTestId('orchestrator-input')).toHaveValue('what is running?')
+})
+
+test('⌘Enter로 보내기를 켜면 오케스트레이터의 첫 입력창도 맨 Enter로 보내지 않는다 (#180)', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => {
+    const st = (window as any).__store
+    st.setState({ prefs: { ...st.getState().prefs, sendWithModifierEnter: true } })
+  })
+  await page.getByTestId('orchestrator-input').fill('not yet')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  await page.waitForTimeout(200)
+  await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeNull()
+})
+
+test('워크트리 매니저를 못 만들면 창이 남아 이유를 말한다 (#180)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.projects.createWorktreeManager = async () => {
+      throw new Error('not a git repository')
+    }
+  })
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('start-worktree-manager-alpha').click()
+  await page.getByTestId('worktree-manager-confirm').click()
+  await expect(page.getByTestId('worktree-manager-dialog')).toContainText('not a git repository')
+  await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
+})
+
+test('첨부가 올라가는 동안에는 보내지 않고, 끝나면 글과 함께 간다 (#180)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const w = window as any
+    const save = w.__mock.agents.saveAttachment
+    w.__release = null
+    w.__mock.agents.saveAttachment = async (...a: unknown[]) => {
+      await new Promise<void>((r) => (w.__release = r))
+      return save(...a)
+    }
+  })
+  await page.getByTestId('attach-input').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from('png') })
+  // 고른 파일은 떠 두고 칸은 비운다 — 같은 파일을 다시 골라도 change가 온다
+  await expect(page.getByTestId('attach-input')).toHaveValue('')
+  await expect(page.getByTestId('attachment-uploading')).toBeVisible()
+
+  await page.getByTestId('prompt-input').fill('이것 좀 봐줘')
+  await page.getByTestId('prompt-input').press('Enter')
+  await expect(page.getByTestId('send')).toBeDisabled()
+  await expect(page.getByTestId('prompt-input')).toHaveValue('이것 좀 봐줘')
+  expect(await page.evaluate(() => (window as any).__mock.sentAttachments.length)).toBe(0)
+
+  await page.evaluate(() => (window as any).__release())
+  await expect(page.getByTestId('attachment-list')).toContainText('shot.png')
+  await page.getByTestId('prompt-input').press('Enter')
+  await expect(page.getByTestId('msg-user').last()).toContainText('shot.png')
+  expect(await page.evaluate(() => (window as any).__mock.sentAttachments.map((a: { name: string }) => a.name))).toEqual(['shot.png'])
+})
+

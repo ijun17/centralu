@@ -2678,3 +2678,59 @@ describe('열린 질문과 입력창 (#174)', () => {
     expect(useStore.getState().toast).toBe('Answer the open question first, or hand off from the record')
   })
 })
+
+/*
+ * #180: 보내는 길이 실패하거나 경주하면 사람이 쓴 것이 사라졌다.
+ */
+describe('실패한 전송이 쓴 것을 돌려준다 (#180)', () => {
+  it('질문의 답으로 보낸 글은 닿지 않으면 입력창으로 돌아온다', async () => {
+    const mock = new MockPlatform()
+    const open = [{ requestId: 'r1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'pg', description: '' }], multiSelect: false }] }]
+    mock.sessions.set('a180', sessionInfo('a180', { state: 'waiting_approval', pendingQuestions: open as never }))
+    await useStore.getState().attach(mock)
+    useStore.getState().setDraft('a180', { text: 'typed after', attachments: [] })
+    vi.spyOn(mock.agents, 'answerQuestion').mockRejectedValueOnce(
+      Object.assign(new Error('그 질문은 이미 사라졌습니다'), { code: 'question_gone' }),
+    )
+    await useStore.getState().send('a180', 'sqlite please')
+    expect(useStore.getState().drafts['a180']!.text).toBe('sqlite please\ntyped after')
+    expect(useStore.getState().toast).toBe('그 질문은 이미 사라졌습니다')
+  })
+
+  it('오케스트레이터가 태어나지 못하면 첫 질문이 갔다고 말하지 않는다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    vi.spyOn(mock.agents, 'orchestrator').mockRejectedValueOnce(new Error('no tool'))
+    expect(await useStore.getState().askOrchestrator('first question')).toBe(false)
+    expect(useStore.getState().toast).toBe('Could not start the orchestrator: no tool')
+  })
+
+  it('워크트리 매니저를 못 만들면 부른 창에 실패를 돌려준다', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/wm180')
+    await useStore.getState().attach(mock)
+    vi.spyOn(mock.projects, 'createWorktreeManager').mockRejectedValueOnce(new Error('not a git repository'))
+    await expect(useStore.getState().createWorktreeManager(proj.id, 'main')).rejects.toThrow(
+      'Could not start the worktree manager: not a git repository',
+    )
+  })
+
+  it('올라가는 동안의 첨부를 센다 — 입력창은 그동안 보내지 않는다', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('u180', sessionInfo('u180'))
+    await useStore.getState().attach(mock)
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const save = mock.agents.saveAttachment.bind(mock.agents)
+    vi.spyOn(mock.agents, 'saveAttachment').mockImplementationOnce(async (...a) => {
+      await gate
+      return save(...a)
+    })
+    const file = new File(['x'], 'shot.png', { type: 'image/png' })
+    const up = useStore.getState().attachFile('u180', file)
+    await vi.waitFor(() => expect(useStore.getState().uploading['u180']).toBe(1))
+    release()
+    expect(await up).toMatchObject({ name: 'shot.png' })
+    expect(useStore.getState().uploading['u180']).toBeUndefined()
+  })
+})
