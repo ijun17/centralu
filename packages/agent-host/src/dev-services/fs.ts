@@ -202,9 +202,14 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
    * is already `/` and this replacement does nothing, which is the whole reason it was missing.
    */
   const rel = relative(root, dir).replaceAll(sep, '/')
-  const input = names.map((n) => wireJoin(rel, n)).join('\n')
+  /*
+   * 입력과 출력 모두 NUL로 나눈다(`-z`, #176). 줄 단위 출력은 `core.quotePath`에 따라 한글 이름을
+   * `"\355\225\234…"`로 감싸 돌려주어, 아래에서 원래 이름과 맞지 않았다 — 무시된 한글 파일이
+   * 흐리게 표시되지 않았다. `-z`에서는 git이 받은 문자열을 인용 없이 그대로 돌려준다.
+   */
+  const input = names.map((n) => wireJoin(rel, n)).join('\0')
   const stdout = await new Promise<string>((resolveOut) => {
-    const child = spawn('git', ['check-ignore', '--stdin'], { cwd: root })
+    const child = spawn('git', ['check-ignore', '--stdin', '-z'], { cwd: root })
     let out = ''
     child.stdout.on('data', (d) => (out += String(d)))
     child.on('error', () => resolveOut(''))
@@ -234,8 +239,8 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
     child.stdin.end(input)
   })
   const set = new Set<string>()
-  for (const line of stdout.split('\n')) {
-    const name = wireBaseName(line.trim())
+  for (const path of stdout.split('\0')) {
+    const name = wireBaseName(path)
     if (name) set.add(name)
   }
   return set

@@ -259,3 +259,21 @@ describe('branches with a remote (#175)', () => {
     expect(git('symbolic-ref', '--short', 'HEAD').trim()).toBe('-f')
   })
 })
+
+/**
+ * 한글 이름이 diff 머리줄에 그대로 나온다 (#176). `core.quotePath` 기본값이면 git은
+ * `diff --git "a/\355\225\234…" "b/…"`로 감싸서, 화면의 이름표가 머리줄 원문이 되고 파일로
+ * 가는 클릭이 경로를 잃었다.
+ */
+describe('Korean file names in git output (#176)', () => {
+  it('the diff header carries the name as written', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, '한글파일.md'), 'v1\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+    writeFileSync(join(d, '한글파일.md'), 'v2\n')
+
+    const { diff } = await gitDiff(d, '한글파일.md')
+    expect(diff.split('\n')[0]).toBe('diff --git a/한글파일.md b/한글파일.md')
+  })
+})

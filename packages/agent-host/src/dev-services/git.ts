@@ -26,8 +26,14 @@ export type GitBranch = { name: string; current: boolean; remote: boolean; upstr
 
 const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
 
+/**
+ * 모든 호출에 `core.quotePath=false`를 준다 (#176). 기본값(켜짐)이면 git은 0x80 이상의 바이트가
+ * 든 경로를 `"\355\225\234…"`처럼 따옴표와 8진 이스케이프로 감싸 내보낸다 — 한글 파일 이름이
+ * diff 머리줄과 `--name-only`에서 그렇게 나와, 화면의 이름표가 깨지고 파일로 가는 클릭이
+ * 경로를 잃었다. 끄면 원래 이름이 그대로 온다(따옴표·역슬래시·제어 문자만 여전히 인용된다).
+ */
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec('git', args, { cwd, ...OK })
+  const { stdout } = await exec('git', ['-c', 'core.quotePath=false', ...args], { cwd, ...OK })
   return stdout
 }
 

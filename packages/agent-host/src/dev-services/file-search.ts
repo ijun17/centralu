@@ -35,13 +35,18 @@ export function invalidateFileIndex(root?: string): void {
 
 async function gitFiles(root: string): Promise<string[] | null> {
   try {
-    // 추적 중인 파일 + 무시되지 않은 새 파일 = 사람이 열 만한 것 전부
-    const { stdout } = await exec('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    /*
+     * 추적 중인 파일 + 무시되지 않은 새 파일 = 사람이 열 만한 것 전부.
+     * `-z`로 받는다 (#176): 줄 단위 출력은 `core.quotePath`에 따라 한글 이름을
+     * `"\355\225\234…"`로 감싸서, `@한글`이 아무것도 못 찾고 고른 경로는 없는 파일이었다.
+     * `-z`는 인용 없이 이름 그대로 NUL로 나눠 준다.
+     */
+    const { stdout } = await exec('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
       cwd: root,
       maxBuffer: 32 * 1024 * 1024,
       timeout: 10_000,
     })
-    const files = stdout.split('\n').filter(Boolean)
+    const files = stdout.split('\0').filter(Boolean)
     return files.length > 0 ? files.slice(0, MAX_FILES) : null
   } catch {
     return null
@@ -68,7 +73,10 @@ async function walk(root: string): Promise<string[]> {
         if (SKIP.has(e.name) || depth >= WALK_DEPTH) continue
         queue.push({ dir: join(dir, e.name), depth: depth + 1 })
       } else {
-        out.push(relative(root, join(dir, e.name)))
+        // macOS 파일 시스템은 한글 이름을 NFD(자모 분리)로 돌려줄 때가 있다. 입력기가 치는 검색어는
+        // NFC라 부분 문자열 비교가 맞지 않는다 (#176). git 저장소는 git이 NFC로 돌려주므로
+        // 이 문제가 없다(`core.precomposeUnicode`) — 걸을 때도 같은 모양으로 맞춘다.
+        out.push(relative(root, join(dir, e.name)).normalize('NFC'))
         if (out.length >= MAX_FILES) break
       }
     }
@@ -141,7 +149,8 @@ function subsequenceScore(haystack: string, needle: string): number | null {
 
 export async function searchFiles(root: string, query: string, limit = 20): Promise<FileHit[]> {
   const files = await indexOf(root)
-  const q = query.trim()
+  // 목록은 NFC로 맞춰 두었다 — 검색어도 같은 모양이어야 한글이 비교된다 (#176)
+  const q = query.trim().normalize('NFC')
 
   // 빈 질의는 '최근 느낌'을 낼 수 없으니 얕은 것부터 보여준다
   const scored: { path: string; s: number }[] = []
