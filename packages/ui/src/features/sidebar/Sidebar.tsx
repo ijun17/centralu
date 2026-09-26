@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useStore } from '../../store/store.js'
+import { handoffBlockedBy, useStore } from '../../store/store.js'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { APPS } from '../../apps/registry.js'
@@ -782,6 +782,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? s.state === 'error' || !!s.limit : false
           })()}
+          // 카드가 떠 있으면 에이전트에게 부탁하는 길은 막힌다 — 부탁이 질문의 답으로 갔다 (#174, 스토어와 같은 판정)
+          blocked={(() => {
+            const s = sessions.find((x) => x.id === handingOff)
+            return s ? handoffBlockedBy(s) : null
+          })()}
           onCancel={() => setHandingOff(null)}
           onConfirm={(tool, deleteOld, mode) => {
             // 창은 닫고 진행은 세션 안에서 보인다 — 인수인계 요청과 글이 그대로 대화에 남는다
@@ -967,6 +972,7 @@ function ConfirmHandoff({
   name,
   tool,
   dead,
+  blocked,
   onConfirm,
   onCancel,
 }: {
@@ -974,6 +980,8 @@ function ConfirmHandoff({
   tool: ToolName
   /** 에러·한도로 응답 불능인 세션 (#78) — 기본값 셋(모드·대상·삭제)이 통째로 뒤집힌다 */
   dead: boolean
+  /** 떠 있는 카드 (#174) — 있으면 에이전트에게 부탁할 수 없다. 기록 모드는 묻지 않으므로 그대로 된다 */
+  blocked: 'question' | 'approval' | null
   onConfirm: (tool: ToolName, deleteOld: boolean, mode: 'agent' | 'record') => void
   onCancel: () => void
 }) {
@@ -1026,6 +1034,13 @@ function ConfirmHandoff({
             ? 'This session writes a handoff note to a file in the project, then a fresh session starts by reading it.'
             : 'The app builds the note from its stored conversation — this session is not asked. Use this when the agent cannot respond (outage, limits).'}
         </p>
+        {mode === 'agent' && blocked && (
+          <p className="mt-2 text-[11px] leading-relaxed text-beacon" data-testid="handoff-blocked">
+            This session is waiting on {blocked === 'question' ? 'a question' : 'an approval'}. Asking for a note now would
+            {blocked === 'question' ? ' answer the question with the handoff request' : ' drop the approval card'} —
+            answer it first, or build the note from the record.
+          </p>
+        )}
 
         {/* 받는 에이전트 — 다른 도구를 고르면 모델·강도 같은 도구별 설정은 물려주지 않는다 */}
         <p className="mt-3 text-[10px] uppercase text-slate">Hand off to</p>
@@ -1084,12 +1099,13 @@ function ConfirmHandoff({
             Cancel
           </button>
           <button
-            className={`rounded border px-3 py-1 text-[12px] transition-colors ${
+            className={`rounded border px-3 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               deleteOld
                 ? 'border-del/40 bg-del-bg text-del hover:border-del/70'
                 : 'border-edge bg-panel text-chalk hover:border-graphite'
             }`}
             onClick={() => onConfirm(heirTool, deleteOld, mode)}
+            disabled={mode === 'agent' && !!blocked}
             data-testid="confirm-handoff-yes"
           >
             Hand off

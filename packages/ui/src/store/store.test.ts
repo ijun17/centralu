@@ -4,7 +4,16 @@ import { handoffFile, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
 import { MockPlatform } from '@cc/platform/mock'
-import { externalAppKey, inlineViewsFromHistory, messagesToChat, registerPinnedFrame, useStore, type ChatItem } from './store.js'
+import {
+  composerTarget,
+  droppedQuestionsText,
+  externalAppKey,
+  inlineViewsFromHistory,
+  messagesToChat,
+  registerPinnedFrame,
+  useStore,
+  type ChatItem,
+} from './store.js'
 
 /**
  * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
@@ -2609,5 +2618,63 @@ describe('끊기는 순간 보낸 말 (#173)', () => {
     const st = useStore.getState()
     expect(st.chat['cl-1']!.map(line)).toEqual([])
     expect(st.toast).toBe('Could not send: Connection lost')
+  })
+})
+
+/*
+ * #174 (#125의 나머지): 글이 질문의 답이 될 수 없을 때(질문이 여럿이거나 첨부가 있음) 보내면 새 턴이 되고 질문은
+ * 버려진다. 안내문은 첨부를 보지 않아 "답을 쓰라"고 한 채 글을 새 턴으로 보냈고, 카드는 설명 없이 사라졌다.
+ * 질문이 열린 세션을 인수인계하면 부탁문이 그 질문의 답으로 갔다.
+ */
+describe('열린 질문과 입력창 (#174)', () => {
+  const q = (requestId: string, ...questions: string[]) => ({
+    requestId,
+    questions: questions.map((question) => ({ question, header: 'h', options: [{ label: 'a', description: '' }], multiSelect: false })),
+  })
+
+  it('안내문과 전송은 같은 판정을 쓴다 — 첨부가 있으면 답이 아니다', () => {
+    expect(composerTarget([], false)).toBe('none')
+    expect(composerTarget([q('r1', 'Which DB?')], false)).toBe('answer')
+    expect(composerTarget([q('r1', 'Which DB?')], true)).toBe('drops')
+    expect(composerTarget([q('r1', 'Which DB?', 'Which port?')], false)).toBe('drops')
+    expect(composerTarget([q('r1', 'Which DB?'), q('r2', 'Which port?')], false)).toBe('drops')
+  })
+
+  async function withQuestions(...open: ReturnType<typeof q>[]) {
+    const mock = new MockPlatform()
+    mock.sessions.set('q174', sessionInfo('q174', { state: 'waiting_approval', pendingQuestions: open as never }))
+    await useStore.getState().attach(mock)
+    const sent = vi.spyOn(mock.agents, 'send')
+    const answered = vi.spyOn(mock.agents, 'answerQuestion')
+    return { mock, sent, answered }
+  }
+
+  it('질문이 여럿이면 글은 새 턴으로 가고, 무엇이 버려졌는지 말풍선 앞에 한 줄 남는다', async () => {
+    const { sent, answered } = await withQuestions(q('r1', 'Which DB?', 'Which port?'))
+    await useStore.getState().send('q174', 'just do it')
+    expect(answered).not.toHaveBeenCalled()
+    expect(sent).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().chat['q174']!.map(line)).toEqual([droppedQuestionsText(['Which DB?', 'Which port?']), 'just do it'])
+  })
+
+  it('질문이 하나라도 첨부가 있으면 같은 길이다', async () => {
+    const { sent, answered } = await withQuestions(q('r1', 'Which DB?'))
+    await useStore.getState().send('q174', 'see this', [{ kind: 'file', path: '/tmp/a.txt', name: 'a.txt', mime: 'text/plain', bytes: 1 }])
+    expect(answered).not.toHaveBeenCalled()
+    expect(sent).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().chat['q174']!.map(line)).toEqual([droppedQuestionsText(['Which DB?']), 'see this'])
+  })
+
+  it('질문이 열린 세션에 노트를 부탁하지 않는다 — 부탁문이 그 질문의 답이 된다', async () => {
+    const { mock, sent, answered } = await withQuestions(q('r1', 'Which DB?'))
+    const proj = await mock.projects.add('/tmp/q174')
+    useStore.setState((st) => ({
+      projects: { ...st.projects, [proj.id]: proj },
+      sessions: { ...st.sessions, q174: { ...st.sessions.q174!, projectId: proj.id } },
+    }))
+    await useStore.getState().handoffSession('q174')
+    expect(answered).not.toHaveBeenCalled()
+    expect(sent).not.toHaveBeenCalled()
+    expect(useStore.getState().toast).toBe('Answer the open question first, or hand off from the record')
   })
 })

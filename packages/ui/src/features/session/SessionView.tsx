@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, use
 import type { DragEvent, ReactNode, Ref, RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { shouldMarkRead, type SessionSummary } from '@cc/core'
-import { EMPTY_DRAFT, inlineFrameShown, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
+import { EMPTY_DRAFT, composerTarget, inlineFrameShown, useStore, type ChatAttachment, type ChatItem, type Draft } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { ApprovalCard } from '../approval/ApprovalCard.jsx'
@@ -44,6 +44,7 @@ type ComposerDrop = { accept: (dt: DataTransfer) => Promise<boolean> }
 
 /** 셀렉터가 매번 새 배열을 만들면 zustand 스냅샷이 불안정해져 무한 리렌더가 난다 */
 const EMPTY_CHAT: ChatItem[] = []
+const EMPTY_QUESTIONS: SessionSummary['pendingQuestions'] = []
 
 /**
  * 대화창이 열리자마자 바닥에 자리 잡는 데 쓸 프레임 수 (#31).
@@ -628,16 +629,15 @@ const Composer = memo(function Composer({
   framed?: boolean
 }) {
   /**
-   * 열린 질문이 **정확히 하나**인가 (#125).
+   * 입력창의 글이 열린 질문에 무엇이 되는가 (#125, #174).
    *
-   * 불리언으로 좁혀서 구독한다 — 질문 배열을 그대로 구독하면 매번 새 참조가 와서, 이
-   * 부품이 굳이 피하려고 만든 재렌더를 도로 부른다. 값이 바뀌는 때는 질문이 열리고 닫힐
-   * 때뿐이라 스토어의 send가 쓰는 판정과 같은 조건을 그대로 쓴다.
+   * 문자열로 좁혀서 구독한다 — 질문 배열을 그대로 구독하면 매번 새 참조가 와서, 이
+   * 부품이 굳이 피하려고 만든 재렌더를 도로 부른다. 판정은 스토어의 send가 쓰는 것 그대로다(`composerTarget`):
+   * 첨부를 보지 않던 동안, 파일을 붙이면 "답을 쓰라"는 안내 아래에서 글이 새 턴으로 가 질문이 버려졌다.
    */
-  const answeringOne = useStore((s) => {
-    const open = s.sessions[sessionId]?.pendingQuestions ?? []
-    return open.length === 1 && open[0]!.questions.length === 1
-  })
+  const target = useStore((s) =>
+    composerTarget(s.sessions[sessionId]?.pendingQuestions ?? EMPTY_QUESTIONS, (s.drafts[sessionId]?.attachments.length ?? 0) > 0),
+  )
 
   /*
    * 세션에서 **여기 정말로 필요한 것만** 집는다.
@@ -1091,7 +1091,13 @@ const Composer = memo(function Composer({
            * 누르기 전에 알려야 한다 — 예전에는 아무 말 없이 질문을 버렸고, 사람은 자기가
            * 무엇을 없앴는지조차 몰랐다.
            */
-          placeholder={answeringOne ? 'Type your answer to the question' : 'Type a message'}
+          placeholder={
+            target === 'answer'
+              ? 'Type your answer to the question'
+              : target === 'drops'
+                ? 'Sending starts a new turn and drops the question card — answer on the card instead'
+                : 'Type a message'
+          }
           data-testid="prompt-input"
         />
         {/*
