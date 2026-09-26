@@ -1894,6 +1894,27 @@ test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await expect(page.getByTestId('rules-empty')).toBeVisible()
 })
 
+/** 두 프로젝트의 같은 규칙이 똑같은 줄로 보이지 않는다 — 줄마다 주인을 적는다 (#183) */
+test('설정: 승인 규칙 줄은 어느 프로젝트·세션의 것인지 보여 준다 (#183)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await newSession(page, 'alpha', '작업')
+  await page.evaluate(() => {
+    const st = (window as any).__store.getState()
+    const id = (name: string) => Object.values(st.projects as Record<string, any>).find((p) => p.name === name)!.id
+    ;(window as any).__mock.rulesList = [
+      { id: 1, scope: 'project', matcher: 'pnpm test', decision: 'allow', createdAt: 1, projectId: id('alpha'), sessionId: null },
+      { id: 2, scope: 'project', matcher: 'pnpm test', decision: 'allow', createdAt: 2, projectId: id('beta'), sessionId: null },
+      { id: 3, scope: 'session', matcher: 'git push', decision: 'allow', createdAt: 3, projectId: null, sessionId: st.focusedSessionId },
+    ]
+    st.toggleSettings(true)
+  })
+  await page.getByTestId('settings-tab-permissions').click()
+
+  await expect(page.getByTestId('rule-owner-1')).toHaveText('alpha')
+  await expect(page.getByTestId('rule-owner-2')).toHaveText('beta')
+  await expect(page.getByTestId('rule-owner-3')).toHaveText('작업')
+})
+
 test('설정: 알림 정책을 끄면 저장된다 (E-5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')

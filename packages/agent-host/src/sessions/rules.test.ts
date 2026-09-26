@@ -44,6 +44,8 @@ describe('승인 규칙 영속 (C-2)', () => {
     // id·createdAt은 설정 화면이 규칙을 지우고 언제 만들었는지 보여주는 데 쓴다 (E-4)
     expect(mgr.listApprovalRules()).toMatchObject([{ scope: 'session', matcher: 'npm test*', decision: 'allow' }])
     expect(mgr.listApprovalRules()[0]!.id).toBeGreaterThan(0)
+    // 어느 세션의 규칙인지 싣는다 — 설정 화면이 줄마다 주인을 적는다 (#183)
+    expect(mgr.listApprovalRules()[0]).toMatchObject({ sessionId: session.id, projectId: null })
   })
 
   it('매처가 없으면 저장하지 않는다 (빈 규칙은 무용지물이므로)', async () => {

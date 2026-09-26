@@ -345,7 +345,15 @@ export class MockPlatform implements Platform {
 
   /** 테스트용 검색·규칙 상태 */
   searchResults: { sessionId: string; seq: number; snippet: string }[] = []
-  rulesList: { id: number; scope: string; matcher: string; decision: string; createdAt: number }[] = []
+  rulesList: {
+    id: number
+    scope: string
+    matcher: string
+    decision: string
+    createdAt: number
+    projectId?: string | null
+    sessionId?: string | null
+  }[] = []
 
   readonly search = {
     messages: async (query: string) => this.searchResults.filter((r) => r.snippet.includes(query)),

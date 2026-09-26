@@ -1548,6 +1548,9 @@ export const RpcMethods = {
         matcher: z.string(),
         decision: z.string(),
         createdAt: z.number(),
+        /** 어느 프로젝트·세션의 규칙인가 — 두 프로젝트의 같은 규칙이 설정에서 똑같은 줄로 보였다 (#183) */
+        projectId: z.string().nullable().default(null),
+        sessionId: z.string().nullable().default(null),
       }),
     ),
   },
