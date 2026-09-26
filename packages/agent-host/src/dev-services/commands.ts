@@ -107,6 +107,19 @@ export class CommandRunner {
     if (e) this.stopEntry(e)
   }
 
+  /**
+   * 프로젝트가 사라질 때 그 디렉토리의 실행을 모두 멈추고 잊는다 (#177). Stop과 같은
+   * 트리 킬이다. 기록까지 버리는 것은 같은 폴더를 다시 추가했을 때 지우기 전의 실행이
+   * 목록에 되살아나지 않게 하려는 것이다.
+   */
+  stopCwd(cwd: string): void {
+    for (const [key, e] of this.entries) {
+      if (e.cwd !== cwd) continue
+      this.stopEntry(e)
+      this.entries.delete(key)
+    }
+  }
+
   /** 그 디렉토리에서 실행된 적 있는 명령들의 상태 (목록의 뱃지용 — 로그는 뺀다) */
   state(cwd: string): Omit<CommandRun, 'history'>[] {
     const out: Omit<CommandRun, 'history'>[] = []

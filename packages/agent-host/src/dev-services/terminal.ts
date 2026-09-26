@@ -128,10 +128,18 @@ export class TerminalService {
     return this.toHandle(e)
   }
 
-  /** 프로젝트가 사라질 때 정리 */
+  /**
+   * 프로젝트가 사라질 때 그 디렉토리의 터미널을 모두 닫는다 (#177). 기록도 버린다 —
+   * 같은 폴더를 다시 추가했을 때 지우기 전의 터미널이 살아 나오면 안 된다.
+   *
+   * Stop 단추와 같은 규칙으로 끝낸다: 트리에 SIGTERM, 유예 뒤 버틴 것에 SIGKILL. 데브
+   * 서버가 포트와 잠금 파일을 스스로 놓을 틈을 준다. 앱 종료(disposeAll)와 달리 호스트는
+   * 계속 살아 있으니 두 번째 발을 쏠 시간이 있다.
+   */
   closeCwd(cwd: string): void {
     for (const e of this.byCwd.get(cwd) ?? []) {
-      if (e.pty) killTree(e.pty, 'SIGKILL')
+      const handle = e.pty
+      if (handle) stopTree(handle, KILL_GRACE_MS, () => e.pty === handle)
       this.byId.delete(e.id)
     }
     this.byCwd.delete(cwd)
