@@ -235,3 +235,90 @@ describe('RpcClient — 되살리기로 끝나는 호출의 예산 (#164)', () =
     rpc.close()
   })
 })
+
+/*
+ * #173: 재생의 출발점. 처음 만난 host는 버퍼를 통째로 재생하는데 그것은 화면이 붙기 전에 끝난 일이다(끝난 턴마다
+ * "done" 카드가 섰다). 같은 주소로 다시 뜬 host에 옛 번호를 들고 붙으면 아무것도 재생받지 못했다.
+ */
+describe('RpcClient — 재생의 출발점 (#173)', () => {
+  const ev = (seq: number) => ({
+    kind: 'event',
+    seq,
+    event: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: `e${seq}` },
+  })
+  const hellos = (ws: FakeWebSocket) =>
+    ws.sent.map((s) => JSON.parse(s) as { kind: string; afterSeq?: number }).filter((f) => f.kind === 'hello')
+
+  function connected() {
+    const rpc = makeClient()
+    const got: string[] = []
+    const conn: string[] = []
+    rpc.onEvent((e) => got.push((e as { text: string }).text))
+    rpc.onConnectionChange((s) => conn.push(s))
+    rpc.connect()
+    FakeWebSocket.last.open()
+    return { rpc, got, conn }
+  }
+
+  it('처음 만난 host가 재생하는 옛 이벤트는 넘기지 않고, 그 뒤의 것부터 넘긴다', () => {
+    const { rpc, got, conn } = connected()
+    const ws = FakeWebSocket.last
+    expect(hellos(ws)[0]!.afterSeq).toBeUndefined()
+    ws.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 3 })
+    for (const n of [1, 2, 3, 4]) ws.receive(ev(n))
+    expect(got).toEqual(['e4'])
+    // 처음 만났으니 다시 읽을 것도 없다 — 화면은 방금 목록과 저장소에서 시작했다
+    expect(conn).not.toContain('resync_required')
+
+    // 다음 재연결은 받은 데까지를 말하고, 그 뒤의 재생은 놓친 것이므로 넘긴다
+    ws.drop()
+    vi.advanceTimersByTime(1000)
+    const ws2 = FakeWebSocket.last
+    ws2.open()
+    expect(hellos(ws2)[0]!.afterSeq).toBe(4)
+    ws2.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 5 })
+    ws2.receive(ev(5))
+    expect(got).toEqual(['e4', 'e5'])
+    rpc.close()
+  })
+
+  it('host가 같은 주소로 다시 떠 번호가 작아졌으면 재동기화를 알리고 새 번호로 내려앉는다', () => {
+    const { rpc, got, conn } = connected()
+    const ws = FakeWebSocket.last
+    ws.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 0 })
+    for (let n = 1; n <= 50; n++) ws.receive(ev(n))
+
+    ws.drop()
+    vi.advanceTimersByTime(1000)
+    const ws2 = FakeWebSocket.last
+    ws2.open()
+    expect(hellos(ws2)[0]!.afterSeq).toBe(50)
+    // 새 host는 이벤트 셋까지만 매겼다
+    ws2.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 3 })
+    expect(conn.filter((s) => s === 'resync_required')).toHaveLength(1)
+    ws2.receive(ev(4))
+    expect(got[got.length - 1]).toBe('e4')
+
+    // 그다음 끊김에서는 새 host의 번호로 재생을 청한다 — 옛 50이 아니라
+    ws2.drop()
+    vi.advanceTimersByTime(1000)
+    const ws3 = FakeWebSocket.last
+    ws3.open()
+    expect(hellos(ws3)[0]!.afterSeq).toBe(4)
+    rpc.close()
+  })
+
+  it('새 host로 옮겨 붙은 첫 만남은 재생을 넘기지 않되, 화면이 든 것을 다시 읽으라고 알린다', () => {
+    const { rpc, got, conn } = connected()
+    FakeWebSocket.last.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 0 })
+    rpc.updateEndpoint('ws://127.0.0.1:2/', 't2')
+    const ws2 = FakeWebSocket.last
+    ws2.open()
+    ws2.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 2 })
+    ws2.receive(ev(1))
+    ws2.receive(ev(2))
+    expect(got).toEqual([])
+    expect(conn).toContain('resync_required')
+    rpc.close()
+  })
+})

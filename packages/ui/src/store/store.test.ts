@@ -138,6 +138,34 @@ describe('resync_required 소비 (U3)', () => {
     mock.setConnectionState('resync_required')
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('u3-s3'))
   })
+
+  /*
+   * #173: 재동기화가 포커스된 세션만 다시 읽던 동안, 다른 세션의 대화는 빈 구간을 품은 채 남았고 나중에 열어도 커서가
+   * 있어 다시 읽지 않았다 — 앱을 다시 켜기 전까지 채워지지 않았다.
+   */
+  it('재동기화는 대화를 든 다른 세션의 빈 구간도 저장소에서 메운다', async () => {
+    const mock = new MockPlatform()
+    const rows = (id: string, from: number, to: number) =>
+      Array.from({ length: to - from + 1 }, (_, i) => ({
+        sessionId: id, seq: from + i, role: 'user' as const, kind: 'text' as const, payload: { text: `L${from + i}` }, ts: from + i,
+      }))
+    mock.sessions.set('u3-f', sessionInfo('u3-f', { lastSeq: 5, lastReadSeq: 5 }))
+    mock.sessions.set('u3-g', sessionInfo('u3-g', { lastSeq: 5, lastReadSeq: 5 }))
+    mock.messages.set('u3-f', rows('u3-f', 1, 5))
+    mock.messages.set('u3-g', rows('u3-g', 1, 5))
+    await useStore.getState().attach(mock)
+    await useStore.getState().loadHistory('u3-g')
+    useStore.getState().focusSession('u3-f')
+    await vi.waitFor(() => expect(useStore.getState().history['u3-f']).toBeDefined())
+    expect(useStore.getState().chat['u3-g']!.map(line)).toEqual(['L1', 'L2', 'L3', 'L4', 'L5'])
+
+    // 끊긴 사이 g에 세 줄이 저장됐고, host는 그 이벤트를 재생해 줄 수 없다
+    mock.messages.get('u3-g')!.push(...rows('u3-g', 6, 8))
+    mock.setConnectionState('resync_required')
+    await vi.waitFor(() =>
+      expect(useStore.getState().chat['u3-g']!.map(line)).toEqual(['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8']),
+    )
+  })
 })
 
 /**
@@ -2534,5 +2562,52 @@ describe('인수인계로 태어난 세션의 첫 화면 (#172)', () => {
     expect(await readAll(info.id)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING', ...now().slice(2).map(line)])
     expect(now().filter((i) => i.kind === 'user' && i.text === 'OPENING')).toHaveLength(1)
     expect(now().filter((i) => i.kind === 'mark')).toHaveLength(1)
+  })
+})
+
+/*
+ * #173: 소켓이 끊기면 클라이언트는 답을 못 받은 `agents.send`를 `connection_lost`로 거절한다. host는 그 말을 이미 받았을
+ * 수 있는데, 화면은 실패 토스트를 띄우고 글을 입력창으로 되돌렸다 — 사람이 다시 보내면 같은 지시가 두 번 간다.
+ */
+describe('끊기는 순간 보낸 말 (#173)', () => {
+  async function sendingWhenTheLineDrops(delivered: boolean) {
+    const mock = new MockPlatform()
+    mock.sessions.set('cl-1', sessionInfo('cl-1'))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('cl-1')
+    await vi.waitFor(() => expect(useStore.getState().history['cl-1']).toBeDefined())
+    vi.spyOn(mock.agents, 'send').mockImplementationOnce(async (sessionId, text) => {
+      // host가 받아 저장했다면 저장소에 있다 — 확인(user_message)은 끊긴 소켓과 함께 사라졌다
+      if (delivered) mock.messages.set(sessionId, [{ sessionId, seq: 1, role: 'user', kind: 'text', payload: { text }, ts: 1 }])
+      mock.setConnectionState('disconnected')
+      throw Object.assign(new Error('Connection lost'), { code: 'connection_lost', retryable: true })
+    })
+    await useStore.getState().send('cl-1', 'DO THE THING')
+    return mock
+  }
+
+  it('host가 받은 말은 다시 붙은 뒤 확정되고, 실패로 알리지도 글을 되돌리지도 않는다', async () => {
+    const mock = await sendingWhenTheLineDrops(true)
+    // 끊긴 동안은 모른다 — 말풍선은 남고 입력창은 비어 있다
+    expect(useStore.getState().chat['cl-1']!.map(line)).toEqual(['DO THE THING'])
+    expect(useStore.getState().drafts['cl-1']?.text ?? '').toBe('')
+
+    mock.setConnectionState('connected')
+    await vi.waitFor(() => expect(useStore.getState().chat['cl-1']![0]).toMatchObject({ storedSeq: 1 }))
+    await new Promise((r) => setTimeout(r, 0))
+    const st = useStore.getState()
+    expect(st.chat['cl-1']!.map(line)).toEqual(['DO THE THING'])
+    expect(st.chat['cl-1']![0]).not.toMatchObject({ pending: true })
+    expect(st.drafts['cl-1']?.text ?? '').toBe('')
+    expect(st.toast ?? '').not.toContain('Could not send')
+  })
+
+  it('host가 받지 못한 말은 다시 붙은 뒤에 글을 입력창으로 되돌리고 실패를 알린다', async () => {
+    const mock = await sendingWhenTheLineDrops(false)
+    mock.setConnectionState('connected')
+    await vi.waitFor(() => expect(useStore.getState().drafts['cl-1']?.text).toBe('DO THE THING'))
+    const st = useStore.getState()
+    expect(st.chat['cl-1']!.map(line)).toEqual([])
+    expect(st.toast).toBe('Could not send: Connection lost')
   })
 })

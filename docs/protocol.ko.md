@@ -19,7 +19,10 @@ type Push    = { kind: 'event'; seq: number; sessionId?: string; event: Normaliz
 ```
 
 - `seq`는 호스트가 부여하는 단조 증가 번호다. 재연결 시 `subscribe({ afterSeq })`로 놓친 것을 재생한다 — **재연결이 상태 손실이 되지 않게 하는 핵심 장치다.**
-- 호스트는 최근 이벤트를 링 버퍼(+ 스토어)에 보관한다. afterSeq가 버퍼 밖이면 `resync_required`를 보내고, UI는 스냅샷을 다시 로드한다.
+- 호스트는 최근 이벤트를 링 버퍼(+ 스토어)에 보관한다. afterSeq가 버퍼 밖이면 `resync_required`를 보내고, UI는 스냅샷을 다시 로드한다: 세션 목록과, 대화를 든 세션 전부의 저장된 대화다 (#173).
+- `afterSeq` 없는 hello는 첫 만남이다. 호스트는 여전히 버퍼를 재생하지만 클라이언트는 그 이벤트를 새 사건으로 넘기지 않는다 — 이 페이지가 붙기 전에 끝난 일이고, 세션 목록과 저장된 대화가 출발점이다. 그 전에 다른 호스트와 이야기하던 클라이언트(데스크톱이 새 포트로 옮겨 붙음)면 `resync_required`를 올려 UI가 든 것을 다시 읽게 한다.
+- 호스트의 `currentSeq`보다 큰 `afterSeq`는 호스트가 같은 주소로 다시 떠 번호를 1부터 다시 매긴다는 뜻이다(웹·개발 모드). 호스트는 `resyncRequired: true`로 답하고, 클라이언트는 자기 `lastSeq`를 호스트의 `currentSeq`로 내려 이후의 재연결이 새 번호로 청하게 한다.
+- `connection_lost`로 거절된 RPC도 호스트에 닿았을 수 있다. UI는 보낸 말을 pending으로 남겨 두고, 다시 붙은 뒤 저장된 대화를 확인한 다음에야 보내지 못한 글로 되돌린다 (#173).
 
 ## 2. NormalizedEvent (product spec §6.2의 구체화)
 

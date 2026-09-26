@@ -1573,6 +1573,65 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
   return [...body, ...approvals, ...tail]
 }
 
+/** 보냈는지 모르는 말 (#173) — 말풍선의 렌더 키 → 되돌릴 때 필요한 것. 다시 붙은 뒤 저장소에서 가린다 */
+type UnsureSend = { sessionId: string; text: string; attachments?: ChatAttachment[]; prevState?: SessionSummary['state'] }
+const unsureSends = new Map<number, UnsureSend>()
+
+/**
+ * 보내지 못한 말을 되돌린다 — 말풍선을 걷고, 쓴 글과 첨부를 입력창으로, '작업 중'을 그 전 상태로.
+ *
+ * 쓴 글은 입력창으로 되돌린다. 입력창은 보내는 순간 비워지는데(#38), 말풍선을 걷어내기만 하면 문장이 **어디에도
+ * 없다** — 토스트는 실패를 알리지만 글을 돌려주지는 못한다. 실패가 오기 전에 새로 쓴 글이 있으면 덮지 않고 앞에
+ * 잇는다: 순서상 실패한 말이 먼저 쓴 말이다.
+ */
+function unsend(
+  set: (fn: (s: AppState) => Partial<AppState>) => void,
+  u: UnsureSend & { seq: number },
+  reason: string,
+): void {
+  set((s) => {
+    const sessions =
+      s.sessions[u.sessionId] && u.prevState
+        ? { ...s.sessions, [u.sessionId]: { ...s.sessions[u.sessionId]!, state: u.prevState } }
+        : s.sessions
+    const cur = s.drafts[u.sessionId] ?? EMPTY_DRAFT
+    const drafts = {
+      ...s.drafts,
+      [u.sessionId]: {
+        text: cur.text ? `${u.text}\n${cur.text}` : u.text,
+        attachments: [...(u.attachments ?? []), ...cur.attachments],
+      },
+    }
+    return {
+      chat: { ...s.chat, [u.sessionId]: (s.chat[u.sessionId] ?? []).filter((i) => i.seq !== u.seq) },
+      drafts,
+      // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
+      sessions,
+      // ...and the clock we started above stops with it, so a later turn cannot inherit it
+      workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
+      toast: `Could not send: ${reason}`,
+    }
+  })
+}
+
+/**
+ * 다시 붙은 뒤 보냈는지 모르는 말을 가린다 (#173). 저장소의 최신 페이지와 합치면(mergePage) host가 받은 말은 같은
+ * 문장의 저장 줄로 확정된다 — 재연결의 재생이 먼저 `user_message`로 확정했을 수도 있다. 그래도 pending이면 host는
+ * 받지 못했다: 그때 되돌린다. 기록을 읽지 못해도 되돌린다 — 확인하지 못한 말을 보낸 것으로 둘 수는 없다.
+ *
+ * 남는 틈: host가 잠든 세션을 되살리는 중이라 아직 저장하지 않았으면 여기서 되돌린 뒤에 그 말이 도착한다.
+ */
+async function settleUnsureSends(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): Promise<void> {
+  const mine = [...unsureSends].filter(([, u]) => get().sessions[u.sessionId])
+  for (const [seq] of [...unsureSends]) if (!mine.some(([s]) => s === seq)) unsureSends.delete(seq)
+  for (const id of new Set(mine.map(([, u]) => u.sessionId))) await get().loadHistory(id)
+  for (const [seq, u] of mine) {
+    unsureSends.delete(seq)
+    const item = get().chat[u.sessionId]?.find((i) => i.seq === seq)
+    if (item?.kind === 'user' && item.pending) unsend(set, { ...u, seq }, 'Connection lost')
+  }
+}
+
 /**
  * 새 세션의 대화에 첫 프롬프트를 세운다 (#172) — **덮어쓰지 않는다.**
  *
@@ -3429,39 +3488,22 @@ export const useStore = create<AppState>((set, get) => ({
         })),
       )
     } catch (err) {
+      const e = err as Error & { code?: string }
+      /*
+       * **보냈는지 모른다** (#173). 소켓이 끊기면 클라이언트는 답을 못 받은 호출을 `connection_lost`로 거절하는데,
+       * host는 그 요청을 이미 받아 저장하고 방송했을 수 있다(잠든 세션을 되살리는 동안 끊기면 흔히 그렇다). 그것을 실패로
+       * 알리고 글을 되돌리면 사람은 다시 보내고, 같은 지시가 두 번 간다. 말풍선을 pending으로 남겨 두고, 다시 붙은 뒤
+       * 저장소에서 확인한다(`settleUnsureSends`) — 확정되면 보낸 것이고, 없으면 그때 되돌린다.
+       */
+      if (e.code === 'connection_lost') {
+        unsureSends.set(seq, { sessionId, text, attachments, prevState })
+        set({ toast: 'Connection lost while sending — checking whether it arrived once reconnected' })
+        return
+      }
       // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
       // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
-      set((s) => {
-        const sessions =
-          s.sessions[sessionId] && prevState
-            ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: prevState } }
-            : s.sessions
-        /*
-         * 쓴 글은 입력창으로 되돌린다. 입력창은 보내는 순간 비워지는데(#38), 말풍선을
-         * 걷어내기만 하면 문장이 **어디에도 없다** — 토스트는 실패를 알리지만 글을
-         * 돌려주지는 못한다. 실패가 오기 전에 새로 쓴 글이 있으면 덮지 않고 앞에
-         * 잇는다: 순서상 실패한 말이 먼저 쓴 말이다.
-         */
-        const cur = s.drafts[sessionId] ?? EMPTY_DRAFT
-        const drafts = {
-          ...s.drafts,
-          [sessionId]: {
-            text: cur.text ? `${text}\n${cur.text}` : text,
-            attachments: [...(attachments ?? []), ...cur.attachments],
-          },
-        }
-        return {
-          chat: { ...s.chat, [sessionId]: (s.chat[sessionId] ?? []).filter((i) => i.seq !== seq) },
-          drafts,
-          // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
-          sessions,
-          // ...and the clock we started above stops with it, so a later turn cannot inherit it
-          workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
-        }
-      })
-      const e = err as Error & { code?: string }
       // host가 알아서 되살린 뒤 보낸다 — 여기까지 왔다면 되살리기 자체가 실패한 것이다
-      set({ toast: `Could not send: ${e.message}` })
+      unsend(set, { seq, sessionId, text, attachments, prevState }, e.message)
     }
   },
 
@@ -4395,6 +4437,8 @@ export const useStore = create<AppState>((set, get) => ({
   async recoverAfterReconnect(resync = false) {
     const s = get()
     if (!s.platform) return
+    // 끊기는 순간 보내던 말이 host에 닿았는지 가린다 (#173)
+    void settleUnsureSends(get, set)
     // 끊긴 사이의 방송은 다시 오지 않는다 — 앱 목록(A-8)도 host가 지금 아는 것으로 맞춘다
     void get().refreshExternalApps()
     void get().refreshAppQuestions()
@@ -4482,9 +4526,19 @@ export const useStore = create<AppState>((set, get) => ({
     // 병합으로 처음 등록된 세션이 있으면, 등록 전에 도착해 보관해 둔 이벤트를 재생한다
     replayPendingEvents(get)
 
-    // 재동기화: 빈 구간의 이벤트는 다시 오지 않는다 — 보던 대화를 저장소의 진실로 갈아 끼운다
+    /*
+     * 재동기화: 빈 구간의 이벤트는 다시 오지 않는다 — 화면이 든 대화를 저장소의 진실과 합친다(mergePage가 구간을 메운다).
+     *
+     * **보던 대화 하나가 아니라 대화를 든 세션 전부다** (#173). 예전에는 포커스된 세션만 다시 읽어, 다른 세션의 대화는
+     * 빈 구간을 품은 채 남았다. 그 세션을 나중에 열어도 커서가 이미 있어 기록을 다시 읽지 않으므로, 빈 구간은 앱을 다시
+     * 켜기 전까지 채워지지 않았다. 재동기화는 드문 일이라 세션마다 한 페이지를 읽는 값은 치를 만하다.
+     */
     const focused = get().focusedSessionId
-    if (resync && focused) void get().loadHistory(focused)
+    if (resync) {
+      const holding = new Set(Object.keys(get().chat))
+      if (focused) holding.add(focused)
+      for (const id of holding) if (get().sessions[id]) void get().loadHistory(id)
+    }
 
     // 끊기기 직전에 돌고 있었는데 새 host가 모르는 프로세스만 되살린다
     const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
