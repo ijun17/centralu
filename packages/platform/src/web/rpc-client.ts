@@ -76,6 +76,16 @@ export class RpcClient {
   private connHandlers = new Set<(s: ConnectionState) => void>()
   private nextId = 1
   private lastSeq = 0
+  /**
+   * 이번 hello에 `afterSeq`를 싣지 않았다 — 이 host와 처음 만난다 (#173). 그런 hello에 host는 버퍼를 통째로 재생하는데,
+   * 그것은 화면이 붙기 전에 이미 끝난 일이다. 받은 대로 넘기면 페이지를 새로 열 때마다 끝난 턴마다 "done" 카드가 서고
+   * 소리가 났고, 옛 조각이 대화를 만들었다. 처음 만난 host에서는 목록과 저장소(스냅샷)가 출발점이다.
+   */
+  private firstContact = false
+  /** 처음 만난 host가 재생하는 옛 이벤트의 끝 번호 — 여기까지는 새 사건으로 넘기지 않는다 */
+  private replayedUpTo = 0
+  /** 한 번이라도 host와 인사를 마쳤다 — 그 뒤의 첫 만남(새 host)은 화면이 든 것을 다시 읽어야 한다 */
+  private greeted = false
   private attempt = 0
   private closed = false
   private queue: { id: string; frame: string }[] = []
@@ -129,6 +139,7 @@ export class RpcClient {
 
     ws.onopen = () => {
       this.attempt = 0
+      this.firstContact = this.lastSeq === 0
       ws.send(
         JSON.stringify({
           kind: 'hello',
@@ -184,11 +195,33 @@ export class RpcClient {
     const frame = parsed.data
 
     if ('kind' in frame && frame.kind === 'hello_ok') {
+      const greeted = this.greeted
+      this.greeted = true
+      if (this.firstContact) {
+        // 처음 만난 host의 재생은 새 사건이 아니다 — 번호만 따라잡는다. 화면이 이미 무언가를 들고 있었다면(새 host로
+        // 옮겨 붙었다) 그것은 다시 읽어야 한다
+        this.replayedUpTo = frame.currentSeq
+        this.lastSeq = frame.currentSeq
+        if (greeted) this.emitConn('resync_required')
+        return
+      }
+      this.replayedUpTo = 0
+      /*
+       * host의 번호가 우리가 받은 것보다 작다 — host가 같은 주소로 다시 떴다 (#173). 옛 번호를 계속 들고 있으면
+       * `Math.max` 때문에 값이 내려가지 않아, 새 host의 번호가 옛 값을 넘을 때까지 끊길 때마다 아무것도 재생받지
+       * 못한다. 새 host의 번호로 내려앉고, 놓친 것은 스냅샷에서 다시 읽는다.
+       */
+      if (frame.currentSeq < this.lastSeq) {
+        this.lastSeq = frame.currentSeq
+        this.emitConn('resync_required')
+        return
+      }
       if (frame.resyncRequired) this.emitConn('resync_required')
       return
     }
     if (frame.kind === 'event') {
       this.lastSeq = Math.max(this.lastSeq, frame.seq)
+      if (frame.seq <= this.replayedUpTo) return
       for (const h of this.eventHandlers) h(frame.event)
       return
     }
