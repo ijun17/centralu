@@ -787,6 +787,12 @@ export type AppState = {
   notices: Notice[]
   /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
   viewerPath: string | null
+  /**
+   * 그 파일이 어느 프로젝트의 것인가 — 연 쪽이 말했을 때만 (#182). 그리드의 파일 링크는 자기 칸의
+   * 프로젝트를 싣는다. 포커스된 세션에서 고르면, 버튼 클릭이 포커스를 옮기지 않는 WKWebView에서
+   * 옆 칸의 링크가 포커스된 칸의 프로젝트에서 같은 상대 경로를 열었다. null이면 예전처럼 포커스를 따른다
+   */
+  viewerProjectId: string | null
   paletteOpen: boolean
   /** 사용량 모달 (FR-9) */
   usageOpen: boolean
@@ -858,10 +864,13 @@ export type AppState = {
   setPanelSplit(share: number): void
   setPanelWidth(px: number): void
   setSidebarWidth(px: number): void
-  /** 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점) */
-  openFile(path: string): void
-  /** 대화 속 파일 링크의 우클릭 — 지금 보는 세션의 프로젝트에서 Finder로 보여준다 */
-  revealFile(path: string): Promise<void>
+  /**
+   * 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점).
+   * projectId를 주면 그 프로젝트의 파일이다 — 안 주면 포커스된 세션의 프로젝트
+   */
+  openFile(path: string, projectId?: string | null): void
+  /** 대화 속 파일 링크의 우클릭 — 링크가 속한 프로젝트(안 주면 지금 보는 세션의 프로젝트)에서 Finder로 보여준다 */
+  revealFile(path: string, projectId?: string | null): Promise<void>
   /**
    * 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다.
    * staged는 어느 쪽 diff인지다 — 안 주면 그 경로의 첫 항목을 편다
@@ -1753,6 +1762,7 @@ export const useStore = create<AppState>((set, get) => ({
   completion: null as { sessionId: string; at: number } | null,
   notices: [] as Notice[],
   viewerPath: null,
+  viewerProjectId: null,
   paletteOpen: false,
   settingsMenuRequest: null as { sessionId: string; at: number } | null,
   usageOpen: false,
@@ -2493,6 +2503,7 @@ export const useStore = create<AppState>((set, get) => ({
       // 온보딩이 오케스트레이터 뷰를 먼저 열면서(#63) 이 조합이 실제로 생겼다 (e2e가 잡았다)
       view: 'focus',
       viewerPath: null,
+  viewerProjectId: null,
       overlay: null,
     }))
     get().saveWorkspace()
@@ -2696,17 +2707,17 @@ export const useStore = create<AppState>((set, get) => ({
     get().saveWorkspace()
   },
 
-  openFile(path) {
-    set({ viewerPath: path, overlay: { kind: 'viewer' } })
+  openFile(path, projectId) {
+    set({ viewerPath: path, viewerProjectId: projectId ?? null, overlay: { kind: 'viewer' } })
   },
 
   /*
    * 우클릭의 Finder 열기. 경로는 파일 링크와 같은 자격(지금 보는 세션의 프로젝트 상대)으로
    * 들어오고, 파일 트리의 reveal과 같은 포트를 지난다 — 실패는 트리와 같은 문장으로 시끄럽다.
    */
-  async revealFile(path) {
+  async revealFile(path, from) {
     const s = get()
-    const projectId = s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null
+    const projectId = from ?? (s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null)
     if (!projectId || !s.platform) return
     try {
       const res = await s.platform.fs.reveal(projectId, path)

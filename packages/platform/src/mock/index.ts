@@ -131,6 +131,8 @@ export class MockPlatform implements Platform {
   badge = 0
   /** 테스트용: projects.gitStatus를 몇 번 물었나 — 디바운스가 도는지 보는 눈 (이슈 #41) */
   gitStatusCalls = 0
+  /** 테스트용: 어느 프로젝트에서 파일을 읽고 보여줬나 — 그리드의 옆 칸 링크가 제 프로젝트로 가는지 보는 눈 (#182) */
+  readonly fileOps: { op: 'read' | 'reveal'; projectId: string; path: string }[] = []
   /** 테스트용: 어느 diff를 물었나 — 일부만 스테이징한 파일에서 무리가 맞는지 보는 눈 (#160) */
   readonly gitDiffCalls: { path: string; staged: boolean }[] = []
   /** 신뢰를 켜고 끈 기록 — "묻기만 하고 보내지 않았다"를 시험이 본다 (M4) */
@@ -466,12 +468,15 @@ export class MockPlatform implements Platform {
       this.watchedDirs.set(projectId, [...paths])
       return { watched: paths.length }
     },
-    readFile: async (_projectId: string, path: string): Promise<FsFile> => ({
-      text: this.fsState.files[path] ?? '',
-      truncated: false,
-      binary: false,
-      bytes: (this.fsState.files[path] ?? '').length,
-    }),
+    readFile: async (projectId: string, path: string): Promise<FsFile> => {
+      this.fileOps.push({ op: 'read', projectId, path })
+      return {
+        text: this.fsState.files[path] ?? '',
+        truncated: false,
+        binary: false,
+        bytes: (this.fsState.files[path] ?? '').length,
+      }
+    },
     resolve: async (_projectId: string, path: string) => {
       this.requireInside(path)
       return { path: `/mock-project/${path}` }
@@ -541,9 +546,10 @@ export class MockPlatform implements Platform {
       this.trashed.push(path)
       return { supported: true }
     },
-    reveal: async (_projectId: string, path: string) => {
+    reveal: async (projectId: string, path: string) => {
       this.requireInside(path)
       this.revealed.push(path)
+      this.fileOps.push({ op: 'reveal', projectId, path })
       return { supported: true }
     },
   }

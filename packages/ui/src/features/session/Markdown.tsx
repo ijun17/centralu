@@ -20,9 +20,12 @@ import { parseFileRef, type FileRef } from './filePath.js'
 export const Markdown = memo(function Markdown({
   text,
   projectRoot,
+  projectId = null,
 }: {
   text: string
   projectRoot: string | null
+  /** 링크가 여는 파일의 프로젝트 — projectRoot의 주인이다 (#182) */
+  projectId?: string | null
 }) {
   return (
     <div className="cc-md max-w-[80ch] text-chalk/90" data-testid="markdown">
@@ -40,7 +43,7 @@ export const Markdown = memo(function Markdown({
            */
           a: ({ node: _node, href, children, ...props }) => {
             const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
-            if (ref) return <FileLink refInfo={ref}>{children}</FileLink>
+            if (ref) return <FileLink refInfo={ref} projectId={projectId}>{children}</FileLink>
             if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
               return (
                 <a {...props} href={href} target="_blank" rel="noreferrer noopener">
@@ -73,7 +76,7 @@ export const Markdown = memo(function Markdown({
             const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null
             if (!ref) return <code {...props}>{children}</code>
             return (
-              <FileLink refInfo={ref}>
+              <FileLink refInfo={ref} projectId={projectId}>
                 <code>{children}</code>
               </FileLink>
             )
@@ -100,7 +103,20 @@ function tryDecode(href: string): string {
  * 클릭은 읽기 전용 뷰어(#39), 우클릭은 Finder다. 우클릭이 메뉴가 아니라 바로 여는
  * 이유: 항목이 하나뿐인 메뉴는 손만 느리게 한다 (파일 트리는 항목이 여럿이라 메뉴가 맞다).
  */
-function FileLink({ refInfo, children }: { refInfo: FileRef; children: ReactNode }) {
+/*
+ * 링크는 자기 프로젝트를 싣고 연다 (#182). 경로는 이 칸 세션의 프로젝트 기준 상대 경로라, 뷰어가
+ * 포커스된 세션에서 프로젝트를 고르면 그리드의 옆 칸 링크가 다른 프로젝트의 같은 경로를 열었다 —
+ * WKWebView는 버튼 클릭에 포커스를 주지 않아 칸의 onFocusCapture가 포커스를 옮기지 못한다.
+ */
+function FileLink({
+  refInfo,
+  projectId,
+  children,
+}: {
+  refInfo: FileRef
+  projectId: string | null
+  children: ReactNode
+}) {
   const openFile = useStore((s) => s.openFile)
   const revealFile = useStore((s) => s.revealFile)
   return (
@@ -113,11 +129,11 @@ function FileLink({ refInfo, children }: { refInfo: FileRef; children: ReactNode
         // The line goes first: by the time `openFile` renders the viewer, the
         // row it should land on has to already be waiting for it.
         if (refInfo.line !== null) requestViewerJump(refInfo.path, refInfo.line)
-        openFile(refInfo.path)
+        openFile(refInfo.path, projectId)
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        void revealFile(refInfo.path)
+        void revealFile(refInfo.path, projectId)
       }}
     >
       {children}

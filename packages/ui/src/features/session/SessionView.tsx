@@ -1260,6 +1260,8 @@ function ChatStream({
    */
   bottomPad?: number
 }) {
+  // 파일 링크가 이 칸의 프로젝트에서 열리게 (#182) — 포커스된 세션의 것이 아니라
+  const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? null)
   /*
    * "Was I at the bottom" is the session's fact, not this component's (issue #31).
    *
@@ -1913,7 +1915,7 @@ function ChatStream({
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''}`}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
+            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
           </div>
         ))}
       </div>
@@ -2220,11 +2222,14 @@ function isLeaving(range: { startIndex: number; endIndex: number } | null, index
 const ChatRow = memo(function ChatRow({
   item,
   projectRoot,
+  projectId = null,
   sessionId,
   leaving = false,
 }: {
   item: ChatItem
   projectRoot: string | null
+  /** projectRoot의 주인 — 파일 링크가 이 칸의 프로젝트에서 열리게 (#182) */
+  projectId?: string | null
   sessionId: string
   /** 목록이 떼려는 줄이다 — 앱 화면이 있으면 teardown을 보내고 접는다 (M4 B-1) */
   leaving?: boolean
@@ -2290,7 +2295,7 @@ const ChatRow = memo(function ChatRow({
   if (item.kind === 'assistant') {
     return (
       <div className="min-w-0" data-testid="msg-assistant">
-        <Markdown text={item.text} projectRoot={projectRoot} />
+        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
       </div>
     )
   }
@@ -2302,7 +2307,7 @@ const ChatRow = memo(function ChatRow({
      */
     return (
       <div className="min-w-0 text-[13px] text-ash [&_strong]:text-ash" data-testid="msg-reasoning">
-        <Markdown text={item.text} projectRoot={projectRoot} />
+        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
       </div>
     )
   }

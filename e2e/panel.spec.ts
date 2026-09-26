@@ -890,6 +890,50 @@ test('명령어 창: 지우기는 실행과 다른 과녁이다 — 지웠는데
 })
 
 /**
+ * 그리드 칸의 파일 링크가 **그 칸의 프로젝트**에서 여는가 (#182).
+ *
+ * WKWebView는 버튼 클릭에 포커스를 주지 않아서, 옆 칸의 링크를 눌러도 포커스는 원래 칸에 남는다.
+ * 뷰어가 포커스된 세션에서 프로젝트를 고르면 같은 상대 경로의 **다른** 파일이 조용히 열렸다.
+ * Chromium은 클릭에 포커스를 주므로(칸의 onFocusCapture가 먼저 돈다) 클릭은 이벤트로만 보낸다.
+ */
+test('그리드: 파일 링크는 누른 칸의 프로젝트에서 열린다 — 포커스된 칸이 아니라 (#182)', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(async () => {
+    await (window as never as { __store: any }).__store.getState().addProject('/tmp/beta')
+  })
+  const alpha = await newSession(page, 'alpha', 'claude', '알파 작업')
+  const beta = await newSession(page, 'beta', 'claude', '베타 작업')
+  await page.evaluate((sid: string) => {
+    ;(window as never as { __mock: any }).__mock.emit({
+      type: 'message_delta', sessionId: sid, role: 'assistant', text: 'Look at `src/index.ts`.',
+    })
+  }, beta)
+  await page.evaluate(
+    (id: string) => (window as never as { __store: any }).__store.getState().focusSession(id),
+    alpha,
+  )
+  await openGrid(page, [alpha, beta])
+  const betaProject = await page.evaluate(
+    (id: string) => (window as never as { __store: any }).__store.getState().sessions[id].projectId,
+    beta,
+  )
+  const link = page.getByTestId(`grid-panel-${beta}`).getByTestId('file-link')
+  await expect(link).toBeVisible()
+
+  await link.dispatchEvent('click')
+  await expect(page.getByTestId('code-viewer')).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => (window as never as { __mock: any }).__mock.fileOps.filter((o: any) => o.op === 'read').at(-1)))
+    .toEqual({ op: 'read', projectId: betaProject, path: 'src/index.ts' })
+
+  await page.keyboard.press('Escape')
+  await link.dispatchEvent('contextmenu')
+  await expect
+    .poll(() => page.evaluate(() => (window as never as { __mock: any }).__mock.fileOps.filter((o: any) => o.op === 'reveal').at(-1)))
+    .toEqual({ op: 'reveal', projectId: betaProject, path: 'src/index.ts' })
+})
+
+/**
  * 그리드 칸의 실행 버튼이 **그 칸의 프로젝트**로 보내는가.
  *
  * 화면에 보이는 터미널을 기준으로 삼았다면 여기서 갈린다: 그리드에는 증거 레인이 아예
