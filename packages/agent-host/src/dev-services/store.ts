@@ -1500,14 +1500,37 @@ export class Store {
     return out
   }
 
-  deleteSession(sessionId: string): void {
-    const tx = this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM messages_fts WHERE session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(sessionId)
+  /**
+   * 세션을 지운다 — **조각으로 나눠 지우고, 조각 사이에 이벤트 루프를 놓아준다** (#179).
+   *
+   * 예전에는 한 트랜잭션이었다. better-sqlite3는 동기라, 실제 DB 복사본의 가장 큰 세션
+   * (메시지 57,729 · 색인 32,323행) 하나를 지우는 동안 호스트가 2.9초 멈췄다 — 다른 세션의
+   * 스트리밍도 RPC 답도 그만큼 밀렸다. 비용의 대부분은 trigram 색인을 고치는 데 든다.
+   * 조각으로 나눈 뒤 같은 복사본에서 가장 긴 멈춤은 84ms다(전체는 4.1초로 늘지만 그동안
+   * 이벤트 루프가 231번 돈다).
+   *
+   * 조각마다 메시지와 **그 메시지의 색인 행을 같이** 지운다(색인 rowid = 메시지 rowid).
+   * 그래서 중간에 끊겨도 남은 메시지는 제 색인을 그대로 갖고, 지운 메시지의 색인만
+   * 남는 일은 없다 — 지운 말이 검색에 나오는 것이 가장 나쁜 어긋남이다. 세션 행과
+   * 규칙은 **마지막 조각과 같은 트랜잭션에서** 지운다: 끊기면 세션이 목록에 남아 다시
+   * 지울 수 있고, 세션 없이 메시지만 남는 자리는 생기지 않는다.
+   */
+  async deleteSession(sessionId: string, chunk = DELETE_CHUNK): Promise<void> {
+    const pick = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? LIMIT ?`)
+    const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
+    const dropMsg = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
+    const step = this.db.transaction((): boolean => {
+      const rows = pick.all(sessionId, chunk) as { rowid: number }[]
+      for (const { rowid } of rows) {
+        dropFts.run(rowid)
+        dropMsg.run(rowid)
+      }
+      if (rows.length === chunk) return false
       this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId)
+      return true
     })
-    tx()
+    while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   /**
@@ -1576,10 +1599,12 @@ export class Store {
     const fts = this.db.prepare(
       `INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
     )
-    const dropFts = this.db.prepare(
-      `INSERT INTO messages_fts (messages_fts, rowid, body) VALUES ('delete', ?, ?)`,
-    )
-    const bodyAt = this.db.prepare(`SELECT body FROM messages_fts WHERE rowid = ?`)
+    /*
+     * rowid로 지운다. FTS5의 `'delete'` 명령은 contentless·external content 표에서만 쓸 수
+     * 있는데 messages_fts는 본문을 직접 들고 있는 보통 표라, 그 명령은 언제나
+     * `SQL logic error`로 실패하고 같은 묶음의 다른 메시지까지 되돌렸다 (#179).
+     */
+    const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     const tx = this.db.transaction((rows: StoredMessage[]) => {
       for (const m of rows) {
         const payload = JSON.stringify(m.payload)
@@ -1591,8 +1616,7 @@ export class Store {
           fts.run(rid, body, m.sessionId, m.seq)
         } else {
           // 본문이 사라진 자리는 색인에서도 걷는다 (안 그러면 옛 본문이 계속 검색된다)
-          const old = (bodyAt.get(rid) as { body: string } | undefined)?.body
-          if (old !== undefined) dropFts.run(rid, old)
+          dropFts.run(rid)
         }
       }
     })
@@ -2114,6 +2138,13 @@ function continuesRun(older: StoredMessage, newer: StoredMessage): boolean {
   if (older.role !== 'assistant') return false
   return older.kind === 'text' || older.kind === 'reasoning'
 }
+
+/**
+ * 세션 삭제의 한 조각 (#179). 실제 DB에서 색인 행 하나를 걷는 데 약 0.064ms가 들어
+ * (27,887행에 1,774ms) 250행이면 한 조각이 보통 20ms 안쪽이다. 더 잘게 자르면 커밋 수가
+ * 늘어 전체 시간이 길어진다.
+ */
+const DELETE_CHUNK = 250
 
 function extractText(payload: string): string {
   try {

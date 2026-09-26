@@ -269,6 +269,62 @@ describe('마이그레이션 (E-0)', () => {
     s.close()
   })
 
+  /*
+   * 본문이 사라진 자리를 색인에서 걷는 문장이 FTS5의 'delete' 명령이었다. 그 명령은
+   * contentless·external content 표에서만 쓸 수 있어 언제나 SQL logic error로 실패했고,
+   * 같은 묶음의 다른 메시지까지 되돌렸다 (#179).
+   */
+  it('색인된 자리를 본문 없이 다시 써도 묶음이 살고 옛 본문은 검색되지 않는다', () => {
+    const s = seeded()
+    const at = { sessionId: 's1', role: 'assistant' as const, kind: 'text' as const, ts: 0 }
+    s.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
+    expect(s.searchMessages('hello').length).toBe(1)
+    s.appendMessages([
+      { ...at, seq: 2, role: 'user', payload: { text: '새로 온 말' } },
+      { ...at, seq: 1, payload: { type: 'tool' } },
+    ])
+    expect(s.loadMessages('s1').map((m) => m.seq)).toEqual([1, 2])
+    expect(s.loadMessages('s1')[0]!.payload).toEqual({ type: 'tool' })
+    expect(s.searchMessages('hello').length).toBe(0)
+    expect(s.searchMessages('새로 온').length).toBe(1)
+    s.close()
+  })
+
+  /*
+   * 큰 세션 하나를 한 트랜잭션으로 지우면 호스트가 2초 가까이 멈췄다 (#179, 실제 DB의
+   * 메시지 49,710건 세션에서 1.96초). 조각 사이에 이벤트 루프가 돌아야 하고, 어느 조각
+   * 사이에서 멈춰 보아도 남은 메시지와 색인이 서로 맞아야 한다.
+   */
+  it('세션 삭제는 조각 사이에 이벤트 루프를 놓아주고, 어느 사이에서 보아도 색인이 메시지와 맞는다', async () => {
+    const s = seeded()
+    const n = 1000
+    s.appendMessages(
+      Array.from({ length: n }, (_, i) => ({
+        // 사람의 말은 이어 붙지 않는다 — loadMessages의 개수가 곧 행의 개수다
+        sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const,
+        payload: { text: `은하수 ${i}` }, ts: i,
+      })),
+    )
+    const seen: { messages: number; hits: number }[] = []
+    let deleting = true
+    const look = () => {
+      if (!deleting) return
+      seen.push({ messages: s.loadMessages('s1', n).length, hits: s.searchMessages('은하수', n).length })
+      setImmediate(look)
+    }
+    setImmediate(look)
+    await s.deleteSession('s1', 100)
+    deleting = false
+    // 한 번에 끝났다면 look은 한 번도 돌지 못한다
+    expect(seen.length).toBeGreaterThanOrEqual(5)
+    for (const at of seen) expect(at.hits).toBe(at.messages)
+    expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
+    expect(s.listSessions().map((x) => x.id)).not.toContain('s1')
+    expect(s.loadMessages('s1')).toEqual([])
+    expect(s.searchMessages('은하수').length).toBe(0)
+    s.close()
+  })
+
   it('본문 전체를 돌려준다 — 자르는 일은 부르는 쪽이 한다', () => {
     const s = seeded()
     const long = `${'앞'.repeat(300)}은하수${'뒤'.repeat(300)}`
@@ -452,10 +508,10 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
     s.close()
   })
 
-  it('세션을 지우면 배치에서도 빠진다 — 없는 것을 그리려 하면 안 된다', () => {
+  it('세션을 지우면 배치에서도 빠진다 — 없는 것을 그리려 하면 안 된다', async () => {
     const s = seeded()
     s.setGridView(['s1'])
-    s.deleteSession('s1')
+    await s.deleteSession('s1')
     expect(s.listGridView()).toEqual([])
     s.close()
   })

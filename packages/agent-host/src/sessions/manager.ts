@@ -2034,7 +2034,7 @@ export class SessionManager {
     this.running.delete(sessionId)
     this.restartAfterTurn.delete(sessionId)
     this.meta.delete(sessionId)
-    this.store.deleteSession(sessionId)
+    await this.store.deleteSession(sessionId)
     await clearAttachments(sessionId).catch(() => {})
     /*
      * 이 세션과 함께 쓸모가 끝난 인수인계 노트를 걷는다 (#106). 행이 사라진 **뒤**에
