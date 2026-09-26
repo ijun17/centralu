@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restart-host"
+description = "Enables the restart_host command without any pre-configured scope."
+commands.allow = ["restart_host"]
+
+[[permission]]
+identifier = "deny-restart-host"
+description = "Denies the restart_host command without any pre-configured scope."
+commands.deny = ["restart_host"]

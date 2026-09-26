@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeSync } from 'node:fs'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { dataRoot, migrateLegacyDataDir } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -24,7 +24,7 @@ import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
-import { acquireInstanceLock } from './dev-services/instance-lock.js'
+import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
 /**
@@ -118,11 +118,20 @@ if (pathResult.source !== 'unchanged') {
  */
 const lock = acquireInstanceLock(dbPath)
 if (!lock.ok) {
-  console.error(
-    `[agent-host] Another Centralu is already using this data (pid ${lock.heldByPid}).\n` +
-      `  Two hosts on the same folder will desync session lists.\n` +
-      `  Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).`,
-  )
+  const message = lockConflictMessage(lock.heldByPid, lock.lockPath)
+  console.error(message)
+  /*
+   * 표준출력에도 쓴다 (#184). 데스크톱 수퍼바이저는 host의 표준출력만 읽는다(ready 줄의 자리).
+   * 표준에러로만 말하면 이 문장은 host.log에만 남고, 잠금 충돌을 곧바로 알리려고 둔
+   * 수퍼바이저의 분기("already using this data")는 한 번도 타지 못한 채 백오프 여섯 번 뒤
+   * "종료되었습니다 (code 1)"만 화면에 떴다. 동기로 쓴다 — 바로 process.exit인데, macOS에서
+   * 파이프로 가는 stdout은 비동기라 그냥 write하면 문장이 닿기 전에 끝날 수 있다.
+   */
+  try {
+    writeSync(1, `${message}\n`)
+  } catch {
+    // 표준출력이 닫혀 있어도 표준에러(host.log)에는 남았다
+  }
   process.exit(1)
 }
 /*

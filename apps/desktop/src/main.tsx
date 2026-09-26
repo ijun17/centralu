@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '@cc/ui'
-import { createTauriPlatform, focusWindow } from '@cc/platform/tauri'
+import { createTauriPlatform, focusWindow, listenForQuit, restartHost, type HostStatus } from '@cc/platform/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import '../../../packages/ui/src/styles/index.css'
@@ -12,16 +12,34 @@ import '../../../packages/ui/src/styles/index.css'
  */
 const root = createRoot(document.getElementById('root')!)
 
-// **먼저 무언가를 그린다.** host를 기다리는 동안 아무것도 렌더하지 않으면
-// 빈 검은 창이 뜨고, 그건 고장으로 보인다 (도그푸딩에서 지적됨).
-root.render(<Starting />)
+// 종료 요청은 **무엇보다 먼저** 듣는다 (#184). host를 기다리는 화면과 기동 실패 화면에는
+// 물을 모달이 없으므로 바로 끄고, 앱 화면이 서면 그 모달이 물음을 넘겨받는다.
+const setQuitAsker = listenForQuit()
 
-createTauriPlatform()
-  .then(async (platform) => {
-    root.render(<DesktopRoot platform={platform} />)
-    await registerGlobalShortcut()
-  })
-  .catch((err: Error) => root.render(<StartupFailure message={err.message} />))
+boot()
+
+function boot() {
+  // **먼저 무언가를 그린다.** host를 기다리는 동안 아무것도 렌더하지 않으면
+  // 빈 검은 창이 뜨고, 그건 고장으로 보인다 (도그푸딩에서 지적됨).
+  root.render(<Starting />)
+  createTauriPlatform()
+    .then(async (platform) => {
+      root.render(<DesktopRoot platform={platform} />)
+      await registerGlobalShortcut()
+    })
+    .catch((err: Error) => root.render(<StartupFailure message={err.message} onRetry={retry} />))
+}
+
+/**
+ * 실패 화면의 Retry (#184). 예전에는 `location.reload()`라 웹뷰만 다시 읽었고, 이미 포기한
+ * 수퍼바이저는 다시 돌지 않아 30초 뒤 같은 문장이 떴다. 수퍼바이저를 다시 돌리고 처음처럼 기다린다.
+ */
+function retry() {
+  root.render(<Starting />)
+  void restartHost()
+    .catch(() => false)
+    .then(boot)
+}
 
 /**
  * ⌘Q·⌘W 즉시 종료 방지 (도그푸딩 2026-09-04) — 데스크톱만의 관심사라 여기 산다.
@@ -56,7 +74,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
   }, [alsoStop, strays, platform])
 
   useEffect(() => {
-    const un = listen('quit-requested', () => {
+    setQuitAsker(() => {
       setAskQuit(true)
       setAlsoStop(false)
       void platform.processes
@@ -66,8 +84,25 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
       // 최소화된 채 ⌘Q면 모달이 안 보여 "종료가 안 되는 앱"이 된다 — 물을 때는 얼굴을 보인다
       void focusWindow()
     })
-    return () => void un.then((f) => f())
+    return () => setQuitAsker(null)
   }, [platform.processes])
+
+  /*
+   * 앱이 뜬 뒤에 host가 재시작 한도를 넘겨 포기한 경우 (#184). 예전에는 이 신호를 아무도 받지
+   * 않아 상단 바가 Connecting/Disconnected에 머물고, host가 남긴 이유는 화면 어디에도 없었다.
+   * 기동 실패 화면과 같은 문장과 Retry를 앱 위에 띄운다. 다시 뜨면(ready) 내린다 — 새 주소로
+   * 갈아타는 일은 플랫폼의 onEndpointChange가 이미 한다.
+   */
+  const [hostFailure, setHostFailure] = useState<string | null>(null)
+  useEffect(() => {
+    const un = listen<HostStatus>('host-status', (e) => {
+      const p = e.payload
+      if (typeof p !== 'object' || p === null) return
+      if (p.state === 'failed') setHostFailure(p.message)
+      else if (p.state === 'ready') setHostFailure(null)
+    })
+    return () => void un.then((f) => f())
+  }, [])
   useEffect(() => {
     if (!askQuit) return
     const onKey = (e: KeyboardEvent) => {
@@ -86,6 +121,18 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
   return (
     <>
       <App platform={platform} />
+      {hostFailure !== null && (
+        <div className="fixed inset-0 z-40 bg-void/95" data-testid="host-failed">
+          <StartupFailure
+            message={hostFailure}
+            title="The agent host stopped"
+            onRetry={() => {
+              setHostFailure(null)
+              void restartHost().catch(() => false)
+            }}
+          />
+        </div>
+      )}
       {askQuit && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -164,10 +211,18 @@ function Starting() {
 }
 
 /** host가 뜨지 않으면 앱이 빈 화면으로 남지 않게, 무엇이 잘못됐는지 보여준다 */
-function StartupFailure({ message }: { message: string }) {
+function StartupFailure({
+  message,
+  onRetry,
+  title = 'Could not start the agent host',
+}: {
+  message: string
+  onRetry: () => void
+  title?: string
+}) {
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 bg-void px-8 text-center">
-      <p className="text-[13px] text-chalk">Could not start the agent host</p>
+      <p className="text-[13px] text-chalk">{title}</p>
       {/* 사이드카가 준 문장은 여러 줄이다 (무엇이 없는지, 어디를 찾아봤는지) — 줄을 살려서 보여준다 */}
       <p className="max-w-md whitespace-pre-line font-mono text-[11px] leading-relaxed text-ash">{message}</p>
       <p className="max-w-md text-[11px] leading-relaxed text-slate">
@@ -175,7 +230,7 @@ function StartupFailure({ message }: { message: string }) {
       </p>
       <button
         className="mt-1 rounded border border-edge bg-panel px-3 py-1 text-[12px] text-chalk hover:border-graphite"
-        onClick={() => location.reload()}
+        onClick={onRetry}
       >
         Retry
       </button>
