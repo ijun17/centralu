@@ -32,6 +32,8 @@ export function Overlay() {
   const overlay = useStore((s) => s.overlay)
   const close = useStore((s) => s.closeOverlay)
   const projectId = useStore((s) => {
+    // 연 쪽이 프로젝트를 말했으면 그것이 답이다 — 그리드의 옆 칸 링크 (#182)
+    if (s.overlay?.kind === 'viewer' && s.viewerProjectId) return s.viewerProjectId
     // 프로젝트 없는 세션(반장)은 직전 프로젝트로 폴백하지 않는다 — EvidencePanel과 같은 규칙
     const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
     return sess ? sess.projectId : s.focusedProjectId
