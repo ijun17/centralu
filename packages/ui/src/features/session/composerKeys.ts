@@ -41,3 +41,18 @@ export function isComposerSendKey(e: ComposerKey, sendWithModifierEnter: boolean
   if (sendWithModifierEnter) return e.metaKey || e.ctrlKey
   return !e.shiftKey
 }
+
+/**
+ * 이 키가 IME 조합에 속하는가 (#181) — 엔진에 따라 `isComposing`으로 알리기도 하고 `key: 'Process'`로만 알리기도 한다.
+ * 조합을 끝내는 Enter를 제출로 읽으면 마지막 음절이 빠진 채 저장되거나 조합 중인 음절이 칸에 남는다. Enter를 받는
+ * 입력칸은 모두 이 판정을 지난다 — 세션 입력창만 알고 명령 창은 모르던 동안 한 앱 안에서 규칙이 둘이었다.
+ */
+export function composingKey(e: { key: string; isComposing: boolean }): boolean {
+  return e.isComposing || e.key === 'Process'
+}
+
+/** 조합이 아닌 맨 Enter인가 (#181) — 한 줄 입력칸의 "적은 것을 저장한다" */
+export function isPlainEnter(e: { key: string; isComposing: boolean }): boolean {
+  return e.key === 'Enter' && !composingKey(e)
+}
+

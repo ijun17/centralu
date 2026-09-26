@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ExternalSession, GitBranch, ToolName, ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 
@@ -260,7 +261,12 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
            * ⌘N → ↓↓ → ↵ 로 이어가기가 끝나야 한다. 이미 열린 대화는 건너뛴다:
            * 그 줄의 클릭은 '이동+닫기'라 화살표로 지나가다 창이 닫히면 안 된다.
            */
-          if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && past.status === 'ok') {
+          /*
+           * **입력칸 안의 화살표는 그 칸의 것이다** (#181). 폼 전체에 걸린 이 처리가 대상을 보지 않던 동안, Branch 칸에서
+           * 커서를 옮기려고 누른 ↓가 지난 대화를 조용히 골랐고(버튼이 Start → Load), 이어서 누른 Enter는 새 대화가
+           * 아니라 그 대화를 이어 붙였다. From 칸의 후보 목록(datalist)도 ↓로 열리지 않았다.
+           */
+          if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && past.status === 'ok' && !isTextEntry(e.target)) {
             e.preventDefault()
             const rows: (ExternalSession | null)[] = [null, ...past.sessions.filter((s) => !s.importedAs)]
             const at = rows.findIndex((r) => (r?.externalId ?? null) === (resume?.externalId ?? null))

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from '@cc/ui'
+import { App, confirmKeyAction } from '@cc/ui'
 import { createTauriPlatform, focusWindow, listenForQuit, restartHost, type HostStatus } from '@cc/platform/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
@@ -103,20 +103,44 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
     })
     return () => void un.then((f) => f())
   }, [])
+  const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!askQuit) return
+    /*
+     * 뜰 때 포커스를 창으로 옮긴다 (#181). 창은 포커스를 가져가지 않아 포커스가 창 아래 앱에 남았고, Tab은 창 아래의
+     * 요소들을 먼저 지나갔다. 창 안에 가두고, 닫히면 원래 자리로 돌려준다.
+     */
+    const before = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      // Enter = 종료, Esc = 계속 — 모달이 떠 있는 동안 앱의 다른 단축키를 먹지 않게 캡처 단계에서 끊는다
-      if (e.key === 'Escape') {
+      // 모달이 떠 있는 동안 앱의 다른 단축키를 먹지 않게 캡처 단계에서 끊는다
+      if (e.key === 'Tab') {
+        const box = dialogRef.current
+        if (!box) return
+        const stops = [...box.querySelectorAll<HTMLElement>('button, input')].filter((x) => !x.hasAttribute('disabled'))
+        if (stops.length === 0) return
+        const at = stops.indexOf(document.activeElement as HTMLElement)
+        e.preventDefault()
         e.stopPropagation()
-        setAskQuit(false)
-      } else if (e.key === 'Enter') {
-        e.stopPropagation()
-        void quit()
+        const next = at < 0 ? (e.shiftKey ? stops.length - 1 : 0) : (at + (e.shiftKey ? -1 : 1) + stops.length) % stops.length
+        stops[next]!.focus()
+        return
       }
+      /*
+       * Enter = 종료, Esc = 계속 — 단, 조합 중인 키와 단추 위의 Enter는 빼고 (#181, `confirmKeyAction`). 포커스가 어디
+       * 있든 Enter를 종료로 읽던 동안, Tab으로 Cancel에 가서 누른 Enter도 앱을 껐다.
+       */
+      const onButton = (e.target as HTMLElement | null)?.tagName === 'BUTTON'
+      const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, onButton })
+      if (e.key === 'Enter' || e.key === 'Escape') e.stopPropagation()
+      if (action === 'cancel') setAskQuit(false)
+      else if (action === 'confirm') void quit()
     }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      if (before && document.contains(before)) before.focus()
+    }
   }, [askQuit, quit])
   return (
     <>
@@ -140,7 +164,12 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
           onClick={() => setAskQuit(false)}
         >
           <div
-            className="w-[360px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
+            ref={dialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quit Centralu?"
+            className="w-[360px] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)] focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-[13px] text-chalk">Quit Centralu?</p>

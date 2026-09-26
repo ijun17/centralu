@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isComposerSendKey, type ComposerKey } from './composerKeys.js'
+import { isComposerSendKey, isPlainEnter, type ComposerKey } from './composerKeys.js'
 
 /**
  * 설정이 꺼진 쪽은 **예전과 한 글자도 달라지면 안 되고**, 켠 쪽은 Enter를 절대
@@ -68,5 +68,15 @@ describe('isComposerSendKey — Enter가 아닌 키', () => {
   it('어느 설정에서도 관여하지 않는다', () => {
     expect(isComposerSendKey(key({ key: 'a' }), false)).toBe(false)
     expect(isComposerSendKey(key({ key: 'a', metaKey: true }), true)).toBe(false)
+  })
+})
+
+/** #181: 명령 창의 Enter 셋이 조합 상태를 보지 않았다 — 한글 별칭의 마지막 음절이 빠졌다 */
+describe('isPlainEnter — 한 줄 입력칸의 저장 키 (#181)', () => {
+  it('조합이 아닌 Enter만 저장이다', () => {
+    expect(isPlainEnter({ key: 'Enter', isComposing: false })).toBe(true)
+    expect(isPlainEnter({ key: 'Enter', isComposing: true })).toBe(false)
+    expect(isPlainEnter({ key: 'Process', isComposing: false })).toBe(false)
+    expect(isPlainEnter({ key: 'a', isComposing: false })).toBe(false)
   })
 })

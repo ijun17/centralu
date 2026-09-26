@@ -29,3 +29,31 @@ export function letterOf(e: Pick<KeyboardEvent, 'key' | 'code'>): string | null 
   const spot = /^Key([A-Z])$/.exec(e.code)
   return spot ? spot[1]!.toLowerCase() : null
 }
+
+/**
+ * 글을 받는 칸인가 (#181) — 그 칸 안의 화살표·Enter는 칸의 것이다. 체크박스·단추 같은 input은 글을 받지 않는다.
+ */
+export function isTextEntry(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el || typeof el.tagName !== 'string') return false
+  if (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true
+  if (el.tagName !== 'INPUT') return false
+  const type = ((el as HTMLInputElement).type || 'text').toLowerCase()
+  return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type)
+}
+
+/**
+ * 확인 창(종료 확인)에서 키 하나가 무엇인가 (#181) — 순수 함수라 브라우저 없이 시험한다.
+ *
+ *  - 조합 중인 키는 아무것도 아니다. 한글을 쓰다가 창이 떴을 때 조합을 끝내려고 누른 Enter가 앱을 껐고, 조합을
+ *    취소하려는 Esc가 창을 닫았다.
+ *  - 단추 위의 Enter는 그 단추의 것이다 — Tab으로 Cancel에 가서 누른 Enter가 종료가 되면 안 된다(단추가 스스로 눌린다).
+ *  - 그 밖의 Enter는 확인, Esc는 취소다.
+ */
+export function confirmKeyAction(e: { key: string; isComposing: boolean; onButton: boolean }): 'confirm' | 'cancel' | null {
+  if (e.isComposing || e.key === 'Process') return null
+  if (e.key === 'Escape') return 'cancel'
+  if (e.key === 'Enter' && !e.onButton) return 'confirm'
+  return null
+}
+

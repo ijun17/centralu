@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
-import { isComposerSendKey } from '../session/composerKeys.js'
+import { composingKey, isComposerSendKey } from '../session/composerKeys.js'
 import { APPS } from '../../apps/registry.js'
 import { RAIL_DEFAULT, RAIL_MAX, RAIL_MIN } from '../../store/store.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
@@ -312,7 +312,7 @@ function OrchestratorEmpty() {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // 세션 입력창과 같은 판정 (#180) — ⌘Enter로 보내기를 켠 사람에게 맨 Enter는 줄바꿈이고, 조합 중인 Enter는 보내지 않는다
-            const composing = e.nativeEvent.isComposing || e.key === 'Process'
+            const composing = composingKey({ key: e.key, isComposing: e.nativeEvent.isComposing })
             const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(key, sendWithModifierEnter)) {
               e.preventDefault()
