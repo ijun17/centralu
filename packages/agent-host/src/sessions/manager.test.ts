@@ -43,6 +43,8 @@ class FakeHandle implements SessionHandle {
     return true
   }
   interrupt() {}
+  /** 파일을 만졌다고 알린다 — 도구가 주는 그대로(절대 경로 등) */
+  emitTouched(paths: string[]) { this.emit({ type: 'files_touched', sessionId: this.sessionId, paths }) }
   /** 턴이 끝났다고 알린다 (보고 되돌아오기 테스트용) */
   finishTurn() { this.emit({ type: 'turn_complete', sessionId: this.sessionId }) }
   /** 스트리밍 조각 하나 (실제 저장 형태를 그대로 재현한다) */
@@ -2052,6 +2054,25 @@ describe('살아-있는-동안 사실이 목록에 실린다', () => {
  * 진짜 git 저장소와 임시 워크트리 뿌리를 세워서 본다 — 가짜로는 이 기능이 지켜야 할 것
  * (**격리가 조용히 풀리지 않는다**)을 확인할 수 없다.
  */
+/**
+ * 만진 파일은 프로젝트 기준 상대 경로로 나간다 (#185). 도구는 절대 경로를 주고 파일 트리는 상대
+ * 경로라서, 트리의 "Edited by agent" 표시가 한 번도 맞지 않았다.
+ */
+describe('만진 파일의 경로 (#185)', () => {
+  it('프로젝트 안은 상대 경로로 바꾸고, 밖은 버린다', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    events.length = 0
+    adapter.handleOf(s.id)!.emitTouched([
+      join(p.path, 'src', 'a.ts'),
+      'src/b.ts', // 상대 경로는 세션이 도는 폴더 기준이다
+      join(p.path, '..', 'elsewhere.ts'),
+      '/etc/hosts',
+    ])
+    expect(events.find((e) => e.type === 'files_touched')).toMatchObject({ paths: ['src/a.ts', 'src/b.ts'] })
+  })
+})
+
 describe('워크트리 세션', () => {
   let root = ''
   let repo = ''

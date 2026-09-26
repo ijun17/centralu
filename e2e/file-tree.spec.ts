@@ -210,3 +210,25 @@ test('입력창에 놓으면 예전처럼 경로가 문장에 들어간다', asy
   // 옮긴 것이 아니라 가리킨 것이다 — 파일은 그대로 있어야 한다
   await expect(page.getByTestId('file-a.ts')).toBeVisible()
 })
+
+/**
+ * "Edited by agent" 표시는 이 프로젝트의 세션이 만진 파일에만 붙는다 (#185). 경로는 프로젝트 기준이라,
+ * 모든 프로젝트의 세션을 한 집합에 모으면 다른 프로젝트의 같은 이름 경로에도 붙었다.
+ */
+test('만진 파일 표시는 이 프로젝트의 세션이 만진 것에만 붙는다 (#185)', async ({ page }) => {
+  await setup(page)
+  await seedTree(page, { '': [{ name: 'a.ts' }, { name: 'b.ts' }] })
+  await openTree(page)
+  await page.evaluate(() => {
+    const w = window as any
+    const st = w.__store.getState()
+    const sid = st.focusedSessionId
+    w.__mock.emit({ type: 'files_touched', sessionId: sid, paths: ['b.ts'] })
+    // 다른 프로젝트의 세션이 같은 이름의 경로를 만졌다
+    const other = { ...st.sessions[sid], id: 'other-project-session', projectId: 'other-project', touchedPaths: ['a.ts'] }
+    w.__store.setState({ sessions: { ...w.__store.getState().sessions, [other.id]: other } })
+  })
+
+  await expect(page.getByTestId('file-b.ts').getByTitle('Edited by agent')).toBeVisible()
+  await expect(page.getByTestId('file-a.ts').getByTitle('Edited by agent')).toHaveCount(0)
+})

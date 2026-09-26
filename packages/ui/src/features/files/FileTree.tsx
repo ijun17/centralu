@@ -419,8 +419,8 @@ function DirRow({
 function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
   const openFile = useStore((s) => s.openFile)
   const current = useStore((s) => s.viewerPath)
-  const touched = useTouched()
-  const { openMenu } = useTree()
+  const { openMenu, projectId } = useTree()
+  const touched = useTouched(projectId)
 
   return (
     <li>
@@ -443,7 +443,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
         <FileKind name={entry.name} />
         <span className="truncate">{entry.name}</span>
         {/* 에이전트가 방금 만진 파일 (FR-5) — 색이 아니라 기호로 */}
-        {touched.includes(entry.path) && (
+        {touched.has(entry.path) && (
           <span className="ml-auto shrink-0 text-[9px] text-slate" title="Edited by agent">
             ◆
           </span>
@@ -561,12 +561,18 @@ function FileKind({ name }: { name: string }) {
   )
 }
 
-/** 파생 계산은 훅에서 memo화한다 (셀렉터가 새 배열을 만들면 무한 리렌더) */
-function useTouched(): string[] {
+/**
+ * 파생 계산은 훅에서 memo화한다 (셀렉터가 새 배열을 만들면 무한 리렌더).
+ * 이 트리의 프로젝트에 속한 세션만 모은다 (#185) — 경로는 프로젝트 기준이라, 다른 프로젝트의
+ * 세션이 만진 같은 이름의 경로에 표시가 붙으면 안 된다.
+ */
+function useTouched(projectId: string): Set<string> {
   const sessions = useStore((s) => s.sessions)
   return useMemo(() => {
     const set = new Set<string>()
-    for (const s of Object.values(sessions)) for (const p of s.touchedPaths) set.add(p)
-    return [...set]
-  }, [sessions])
+    for (const s of Object.values(sessions)) {
+      if (s.projectId === projectId) for (const p of s.touchedPaths) set.add(p)
+    }
+    return set
+  }, [sessions, projectId])
 }
