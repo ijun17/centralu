@@ -532,8 +532,10 @@ function Branches({ projectId }: { projectId: string }) {
     } else setToast(res.message ?? 'Could not switch')
   }
 
-  const local = (branches ?? []).filter((b) => !b.name.startsWith('remotes/'))
-  const remote = (branches ?? []).filter((b) => b.name.startsWith('remotes/'))
+  // 나누는 기준은 host가 전체 참조 이름으로 정한 `remote`다 (#175). 이름을 다시 읽으면
+  // `origin/main`과 `feature/login`을 가를 수 없다 — 둘 다 짧은 이름에 `/`가 있다.
+  const local = (branches ?? []).filter((b) => !b.remote)
+  const remote = (branches ?? []).filter((b) => b.remote)
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="git-branches">
@@ -581,7 +583,7 @@ function BranchList({
 }) {
   if (branches.length === 0) return null
   return (
-    <div className="border-b border-edge/60">
+    <div className="border-b border-edge/60" data-testid={`branches-${title.toLowerCase()}`}>
       <h3 className="px-2.5 py-1.5 text-[10px] uppercase text-slate">{title}</h3>
       <ul>
         {branches.map((b) => (
@@ -594,7 +596,7 @@ function BranchList({
               data-testid={`branch-${b.name}`}
             >
               <span className="w-2.5 shrink-0 text-center text-[9px] text-slate">{b.current ? '●' : ''}</span>
-              <span className="truncate">{b.name.replace(/^remotes\//, '')}</span>
+              <span className="truncate">{b.name}</span>
               {b.upstream && (
                 <span className="readout ml-auto shrink-0 text-[10px] text-slate">→ {b.upstream}</span>
               )}

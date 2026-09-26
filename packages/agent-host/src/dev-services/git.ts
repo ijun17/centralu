@@ -216,10 +216,11 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
   }
 }
 
+/** 커밋 하나의 파일과 diff. `sha` 앞의 `--end-of-options`는 `-`로 시작하는 값이 옵션으로 읽히지 않게 한다 (#175) */
 export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }> {
   if (!(await isRepo(cwd))) return { files: [], diff: '', truncated: false }
-  const files = (await git(cwd, ['show', '--pretty=format:', '--name-only', sha])).split('\n').filter(Boolean)
-  const raw = await git(cwd, ['show', '--no-color', '--pretty=format:', sha])
+  const files = (await git(cwd, ['show', '--pretty=format:', '--name-only', '--end-of-options', sha])).split('\n').filter(Boolean)
+  const raw = await git(cwd, ['show', '--no-color', '--pretty=format:', '--end-of-options', sha])
   const max = 400_000
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
@@ -304,31 +305,43 @@ export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path
     .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0))
 }
 
+/**
+ * 브랜치 목록. 원격인지는 **전체 참조 이름**의 접두사로 가른다 (#175).
+ *
+ * 예전에는 `%(refname:short)`를 받아 이름에 `/`가 있으면 원격으로 쳤다. 그런데 짧은 이름은
+ * `origin/main`에 `remotes/`를 붙이지 않고, `refs/remotes/origin/HEAD`를 그냥 `origin`으로
+ * 줄인다 — 그래서 원격 브랜치는 로컬 칸에 섞이고, `origin`은 로컬 브랜치 행세를 하고,
+ * `feature/login` 같은 로컬 브랜치는 원격으로 빠졌다. 전체 이름(`refs/heads/…`,
+ * `refs/remotes/…`)은 줄이지 않으므로 접두사가 곧 답이다. 원격의 `HEAD`는 브랜치가 아니라
+ * 기본 브랜치를 가리키는 별칭이라 뺀다. detached HEAD 줄처럼 참조가 아닌 줄도 뺀다 —
+ * 그 줄을 브랜치로 알면 푸시가 "(HEAD detached at …)"라는 이름으로 upstream을 만들려 든다.
+ */
 export async function gitBranches(cwd: string): Promise<GitBranch[]> {
   if (!(await isRepo(cwd))) return []
-  const stdout = await git(cwd, [
-    'branch',
-    '--all',
-    '--format=%(refname:short)\x1f%(HEAD)\x1f%(upstream:short)',
-  ])
-  return stdout
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [name = '', head = '', upstream = ''] = line.split('\x1f')
-      return {
-        name,
-        current: head.trim() === '*',
-        remote: name.startsWith('remotes/') || name.includes('/'),
-        upstream: upstream || undefined,
-      }
-    })
-    .filter((b) => !b.name.endsWith('/HEAD'))
+  const stdout = await git(cwd, ['branch', '--all', '--format=%(refname)\x1f%(HEAD)\x1f%(upstream:short)'])
+  const out: GitBranch[] = []
+  for (const line of stdout.split('\n')) {
+    const [ref = '', head = '', upstream = ''] = line.split('\x1f')
+    const remote = ref.startsWith('refs/remotes/')
+    if (!remote && !ref.startsWith('refs/heads/')) continue
+    const name = ref.slice(remote ? 'refs/remotes/'.length : 'refs/heads/'.length)
+    if (remote && name.endsWith('/HEAD')) continue
+    out.push({ name, current: head.trim() === '*', remote, upstream: upstream || undefined })
+  }
+  return out
 }
 
 /**
  * 체크아웃. 더티 상태여도 **막지 않고** 결과를 먼저 보여준다 (제품 철학: 막지 말고 보이게).
  * dryRun이면 무엇이 충돌하는지만 알려준다.
+ *
+ * `checkout`이 아니라 `switch`를 쓴다 (#175). `checkout origin/release`는 오류 없이 HEAD를
+ * 떼어 놓아서 "전환했다"는 토스트 뒤에 어느 브랜치에도 속하지 않는 커밋이 쌓였고,
+ * `checkout <이름>`은 그 이름의 브랜치가 없고 같은 이름의 파일이 있으면 파일의 변경을
+ * 버리는 명령으로 바뀐다. `switch`는 브랜치만 받고, `--detach` 없이는 HEAD를 떼지 않는다.
+ * 원격 브랜치를 고르면 그것을 따라가는 로컬 브랜치를 만들어 옮긴다(`--track`) — 같은 이름의
+ * 로컬 브랜치가 이미 있으면 git이 거절하고, 그 원문이 그대로 사람에게 간다.
+ * 이름 앞의 `--end-of-options`는 `-f` 같은 이름이 옵션으로 읽혀 변경을 버리지 않게 한다.
  */
 export async function gitCheckout(
   cwd: string,
@@ -341,7 +354,9 @@ export async function gitCheckout(
     return { ok: dirty.length === 0, conflicts: [...new Set(dirty)] }
   }
   try {
-    await git(cwd, ['checkout', branch.replace(/^remotes\/[^/]+\//, '')])
+    const local = await gitRevParse(cwd, `refs/heads/${branch}`)
+    const remote = !local && (await gitRevParse(cwd, `refs/remotes/${branch}`))
+    await git(cwd, ['switch', ...(remote ? ['--track'] : []), '--end-of-options', branch])
     return { ok: true, conflicts: [] }
   } catch (e) {
     return { ok: false, conflicts: [], message: cleanGitError(e) }
