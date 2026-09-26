@@ -1574,6 +1574,20 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
 }
 
 /**
+ * 새 세션의 대화에 첫 프롬프트를 세운다 (#172) — **덮어쓰지 않는다.**
+ *
+ * host는 세션을 만들며 `session_created`·`handoff`·`user_message`를 응답보다 먼저 방송한다. 화면은 앞의 것으로 세션을
+ * 등록하므로 뒤의 둘은 이미 이 대화에 붙어 있다. 예전에는 응답이 대화를 pending 첫 프롬프트 하나로 덮어써 인수인계
+ * 마커가 사라졌고, 확정할 이벤트가 이미 지나간 pending 줄이 남아 기록을 읽을 때 같은 프롬프트가 두 번 섰다.
+ * 같은 문장이 이미 붙어 있으면 새로 세우지 않고, 없으면 있는 줄 뒤에 붙인다(이벤트가 응답 뒤에 오면 이 줄을 확정한다).
+ */
+function withOpeningPrompt(chat: Record<string, ChatItem[]>, id: string, text: string): Record<string, ChatItem[]> {
+  const have = chat[id] ?? []
+  if (have.some((it) => it.kind === 'user' && it.text === text)) return chat
+  return { ...chat, [id]: [...have, { kind: 'user', seq: ++chatSeq, text, pending: true }] }
+}
+
+/**
  * 더 오래된 페이지를 앞에 붙인다 (#79). 화면에 이미 있는 번호의 줄은 다시 붙이지 않고, 화면의 키와
  * 부딪히는 줄은 새 키를 받는다(`rekeyAgainst`).
  */
@@ -3283,12 +3297,7 @@ export const useStore = create<AppState>((set, get) => ({
       // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
       // pending을 세우는 이유: host도 첫 프롬프트를 저장하고 user_message로 알린다 —
       // 이 표식이 없으면 재생된 그 이벤트가 같은 말을 한 번 더 그린다 (send()와 같은 규칙)
-      chat: opts?.initialPrompt
-        ? {
-            ...s.chat,
-            [info.id]: [{ kind: 'user', seq: ++chatSeq, text: opts.initialPrompt, pending: true }],
-          }
-        : s.chat,
+      chat: opts?.initialPrompt ? withOpeningPrompt(s.chat, info.id, opts.initialPrompt) : s.chat,
     }))
     /*
      * focusedSessionId를 직접 세우지 않고 focusSession을 거친다 — "고른 세션은 보여야
