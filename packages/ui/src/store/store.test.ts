@@ -2336,3 +2336,66 @@ describe('새 코드를 따라 다시 연다 (M4 C-4)', () => {
     expect(pinned()[0]).toMatchObject({ updatedAt: null, codeStamp: null })
   })
 })
+
+/**
+ * 기다리는 사이에 지워진 세션 (#163). RPC를 기다린 뒤의 set이 `{ ...s.sessions[id]!, … }`로 펼쳐서, 그 사이에
+ * session_deleted가 오면 필드가 거의 없는 행을 되살렸다 — 모든 세션을 도는 코드가 그 행에서 깨졌다.
+ */
+describe('기다리는 사이에 지워진 세션은 되살아나지 않는다 (#163)', () => {
+  function stalled<T>() {
+    let resolve!: (v: T) => void
+    const p = new Promise<T>((r) => (resolve = r))
+    return { p, resolve }
+  }
+
+  it('깨우는 사이에 지워지면 깨우기의 답이 행을 다시 만들지 않는다', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    const wake = stalled<{ session: SessionInfo; resumed: boolean; reason?: string }>()
+    vi.spyOn(platform.agents, 'resumeSession').mockReturnValue(wake.p as never)
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: false } as never } })
+
+    const waking = useStore.getState().wake(s.id)
+    useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: s.id } as NormalizedEvent)
+    wake.resolve({ session: s, resumed: false, reason: 'The session was deleted while waking' })
+    await waking
+
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+    expect(useStore.getState().wakeError[s.id]).toBeUndefined()
+  })
+
+  it('읽음 표시를 기다리는 사이에 지워져도 던지지 않고 행을 만들지 않는다', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    const mark = stalled<void>()
+    vi.spyOn(platform.agents, 'markRead').mockReturnValue(mark.p as never)
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, lastSeq: 5, lastReadSeq: 0 } as never } })
+
+    const marking = useStore.getState().markRead(s.id)
+    useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: s.id } as NormalizedEvent)
+    mark.resolve()
+    await marking
+
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+  })
+
+  it('지운 세션의 알림 카드와 세션별 짐도 함께 사라진다', () => {
+    const id = 'del-163'
+    useStore.setState({
+      sessions: { [id]: { ...sessionInfo(id) } as never },
+      notices: [{ sessionId: id, kind: 'done', name: id, at: 1 }, { sessionId: 'other', kind: 'done', name: 'other', at: 2 }],
+      history: { [id]: { oldestSeq: 1, more: false, loading: false } },
+      drafts: { [id]: { text: '쓰던 글' } as never },
+      stickToBottom: { [id]: true },
+      wakeError: { [id]: 'x' },
+      wakeLocked: { [id]: true },
+    })
+    useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: id } as NormalizedEvent)
+
+    const st = useStore.getState()
+    expect(st.notices.map((n) => n.sessionId)).toEqual(['other'])
+    expect([st.history[id], st.drafts[id], st.stickToBottom[id], st.wakeError[id], st.wakeLocked[id]]).toEqual([
+      undefined, undefined, undefined, undefined, undefined,
+    ])
+  })
+})

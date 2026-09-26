@@ -20,6 +20,7 @@ class Handle implements SessionHandle {
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
     readonly emit: EventSink,
+    private readonly onDispose: () => void = () => {},
   ) {}
   send(text: string) {
     this.sent.push(text)
@@ -31,6 +32,7 @@ class Handle implements SessionHandle {
   interrupt() {}
   async dispose() {
     this.disposed = true
+    this.onDispose()
   }
 }
 
@@ -40,6 +42,8 @@ class Adapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false,
   }
   created: Handle[] = []
+  /** 이어 가는 대화를 쥔 프로세스 — 뜨기 시작한 순간부터 닫힐 때까지 (Codex의 쓰기 잠금 흉내) */
+  locked = new Set<string>()
   /** createSession이 받은 옵션, 멈추기 **전에** 적는다 — 깨우기가 옵션을 넘긴 순간을 테스트가 안다 */
   asked: CreateSessionOpts[] = []
   /** 켜 두면 createSession이 `release()`를 부를 때까지 멈춘다 — 깨우는 중인 창 */
@@ -53,16 +57,25 @@ class Adapter implements AgentAdapter {
     this.gate = null
     this.open?.()
   }
+  async deleteExternalConversation(externalId: string) {
+    if (this.locked.has(externalId)) throw new Error('thread already has an active writer')
+  }
   get last() {
     return this.created.at(-1)!
   }
+  /** 켜 두면 detect가 `openDetect()`까지 멈춘다 — 도구 바꾸기가 확인하는 사이의 창 */
+  detectGate: Promise<void> | null = null
+  openDetect: (() => void) | null = null
   async detect() {
+    if (this.detectGate) await this.detectGate
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     this.asked.push(opts)
+    const holds = opts.resumeExternalId
+    if (holds) this.locked.add(holds)
     if (this.gate) await this.gate
-    const h = new Handle(opts.sessionId, opts, emit)
+    const h = new Handle(opts.sessionId, opts, emit, () => holds && this.locked.delete(holds))
     if (opts.resumeExternalId) h.externalId = opts.resumeExternalId
     this.created.push(h)
     return h
@@ -251,5 +264,128 @@ describe('보고는 턴이 어떻게 끝나든 한 번 간다 (#166)', () => {
     await tick()
     expect(reports()).toHaveLength(1)
     expect(reports()[0]).toContain('끝났습니다')
+  })
+})
+
+/*
+ * 기다린 사이에 지워지거나 도구가 바뀐 세션 (#163). 깨우기는 프로세스를 기다린 뒤 세션이 아직 있는지, 아직 같은
+ * 도구인지 보지 않고 핸들을 앉히고 행을 다시 썼다.
+ */
+describe('깨우는 사이에 지우거나 도구를 바꾸면 (#163)', () => {
+  async function sleeping() {
+    const id = await newSession()
+    await mgr.disposeAll()
+    return id
+  }
+  const listed = () => store.listSessions().map((x) => x.id)
+
+  it('깨우는 도중에 지운 세션은 되살아나지 않고, 막 뜬 프로세스는 닫힌다', async () => {
+    const id = await sleeping()
+    claude.hold()
+    const asked = claude.asked.length
+    const waking = rpc('agents.resumeSession', { sessionId: id }) as Promise<{ resumed: boolean }>
+    await until(() => claude.asked.length > asked)
+    const deleting = rpc('agents.deleteSession', { sessionId: id })
+    claude.release()
+    expect((await waking).resumed).toBe(false)
+    await deleting
+
+    expect(listed()).not.toContain(id)
+    expect(claude.last.disposed).toBe(true)
+    expect(mgr.isLive(id)).toBe(false)
+    // host를 다시 켜도 돌아오지 않는다
+    const again = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), () => {})
+    expect(again.listSessions().map((x) => x.id)).not.toContain(id)
+  })
+
+  it('도구 쪽 대화까지 지울 때는 깨어나던 프로세스가 닫힌 뒤에 지운다 — 잠금에 막히지 않는다', async () => {
+    const id = await sleeping()
+    claude.hold()
+    const asked = claude.asked.length
+    const waking = rpc('agents.resumeSession', { sessionId: id })
+    await until(() => claude.asked.length > asked)
+    const deleting = rpc('agents.deleteSession', { sessionId: id, deleteExternal: true })
+    claude.release()
+    await waking
+    await deleting
+
+    expect(listed()).not.toContain(id)
+  })
+
+  it('깨우기가 send에서 시작됐으면, 지운 세션의 에이전트는 그 말을 받지 않는다', async () => {
+    const id = await sleeping()
+    claude.hold()
+    const asked = claude.asked.length
+    const sending = rpc('agents.send', { sessionId: id, text: 'rm the old build dir' })
+    const failed = sending.then(() => null, (e: Error) => e)
+    await until(() => claude.asked.length > asked)
+    const deleting = rpc('agents.deleteSession', { sessionId: id })
+    claude.release()
+    await deleting
+
+    expect(await failed).toBeInstanceOf(Error)
+    expect(claude.last.sent).toEqual([])
+    expect(listed()).not.toContain(id)
+  })
+
+  it('깨우는 도중에 도구를 바꾸면 옛 도구의 프로세스가 남지 않는다', async () => {
+    const id = await sleeping()
+    claude.hold()
+    const asked = claude.asked.length
+    const waking = rpc('agents.resumeSession', { sessionId: id }) as Promise<{ resumed: boolean }>
+    await until(() => claude.asked.length > asked)
+    const switching = rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
+    claude.release()
+    await waking
+    await switching
+
+    expect(claude.last.disposed).toBe(true)
+    expect(mgr.isLive(id)).toBe(false)
+    const m = mgr.listSessions().find((x) => x.id === id)!
+    expect(m.tool).toBe('codex')
+    expect(m.externalId).toBe(null)
+  })
+
+  it('도구 바꾸기가 확인하는 사이에 시작된 깨우기도 옛 도구의 핸들을 앉히지 않는다', async () => {
+    const id = await sleeping()
+    codex.detectGate = new Promise((r) => (codex.openDetect = r))
+    const switching = rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
+    claude.hold()
+    const asked = claude.asked.length
+    const waking = rpc('agents.resumeSession', { sessionId: id }) as Promise<{ resumed: boolean }>
+    await until(() => claude.asked.length > asked) // 깨우기는 아직 claude로 뜬다
+    codex.openDetect!()
+    await switching
+    claude.release()
+
+    expect((await waking).resumed).toBe(false)
+    expect(claude.last.disposed).toBe(true)
+    expect(mgr.isLive(id)).toBe(false)
+    expect(mgr.listSessions().find((x) => x.id === id)!.externalId).toBe(null)
+  })
+
+  it('턴 도중에 도구를 바꾸면 meta와 저장소도 idle이다 — 방송만 idle이 아니다', async () => {
+    const id = await newSession()
+    await rpc('agents.send', { sessionId: id, text: '긴 일' })
+    expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('working')
+
+    await rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
+    expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('idle')
+    expect(store.listSessions().find((x) => x.id === id)!.state).toBe('idle')
+  })
+
+  it('PR을 확인하는 사이에 지운 워크트리 세션은 id 없는 행으로 남지 않는다', async () => {
+    const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    const internals = mgr as unknown as { meta: Map<string, { worktree: unknown }> }
+    internals.meta.get(s.id)!.worktree = { path: tmpdir(), branch: 'centralu/x', base: 'main' }
+    mgr.prLookup = async () => {
+      await rpc('agents.deleteSession', { sessionId: s.id })
+      return { number: 7, state: 'merged', url: 'u', headOid: 'abc' }
+    }
+
+    await mgr.refreshMergedWorktrees(p.id)
+    expect(mgr.listSessions().every((x) => typeof x.id === 'string')).toBe(true)
+    expect(internals.meta.has(s.id)).toBe(false)
   })
 })
