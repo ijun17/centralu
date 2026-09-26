@@ -1721,16 +1721,28 @@ export class SessionManager {
     // 만드는 세션이면 자기 앱의 check를 받는다 (C-3) — 명부를 지금 다시 본다(그 사이에 다른 세션이 이었을 수 있다)
     const builds = this.builderRefOf(m) !== null
     const from = this.handleSink()
+    /*
+     * **프로세스가 받는 설정을 여기서 한 번 읽는다** (#162). 아래에서 프로세스를 기다리는 동안 사람이 설정을
+     * 바꾸면 m이 바뀐다 — 기다린 뒤에 m을 다시 읽어 running을 채우면, running은 프로세스가 받은 값이 아니라
+     * 바뀐 값을 적고, updateSettings의 비교가 어긋남을 영영 못 찾는다(safe를 골랐는데 auto로 돈다).
+     */
+    const launched = {
+      model: m.model,
+      effort: m.effort,
+      verbosity: m.verbosity,
+      serviceTier: m.serviceTier,
+      permissionPreset: m.permissionPreset,
+    }
     try {
       const creating = adapter.createSession(
         {
           sessionId,
           cwd,
-          model: m.model ?? undefined,
-          effort: m.effort ?? undefined,
-          verbosity: m.verbosity ?? undefined,
-          serviceTier: m.serviceTier ?? undefined,
-          permissionPreset: m.permissionPreset,
+          model: launched.model ?? undefined,
+          effort: launched.effort ?? undefined,
+          verbosity: launched.verbosity ?? undefined,
+          serviceTier: launched.serviceTier ?? undefined,
+          permissionPreset: launched.permissionPreset,
           resumeExternalId: resumeId ?? undefined,
           /*
            * 신뢰는 **깨울 때마다 다시 읽는다** (결정 3, #92). 신뢰를 바꿔도 도는 세션의 도구 프로세스는
@@ -1810,13 +1822,7 @@ export class SessionManager {
       const tStart = Date.now() - tStartFrom
       from.own(handle)
       this.handles.set(sessionId, handle)
-      this.running.set(sessionId, {
-        model: m.model,
-        effort: m.effort,
-        verbosity: m.verbosity,
-        serviceTier: m.serviceTier,
-        permissionPreset: m.permissionPreset,
-      })
+      this.running.set(sessionId, launched)
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // 이제야 식별자가 잡혔을 수 있다 — 다음 재개를 위해 남긴다
       if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
@@ -2059,6 +2065,14 @@ export class SessionManager {
     if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
       this.store.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
     }
+
+    /*
+     * **깨우는 중이면 깨어나기를 기다린 뒤 비교한다** (#162). 그동안에는 핸들이 없어서 아래 비교가 아무것도
+     * 하지 않았고, 깨어난 프로세스는 바뀌기 전의 값으로 돌았다 — 화면은 safe, 프로세스는 auto. 재시작 도중에
+     * 온 두 번째 변경도 같은 창에 떨어진다(restartSession이 핸들을 걷고 되살리는 사이). 저장은 위에서 이미
+     * 했으므로 기다리다 이 호출이 끊겨도 다음에 뜰 때는 새 값으로 뜬다.
+     */
+    await this.resuming.get(sessionId)?.catch(() => {})
 
     const handle = this.handles.get(sessionId)
     handle?.updateSettings?.(s)
