@@ -2663,10 +2663,15 @@ export const useStore = create<AppState>((set, get) => ({
 
   /** 프로젝트만 선택 — 세션을 고르지 않아도 깃·파일·뷰어를 볼 수 있다 */
   focusProject(id) {
-    set((s) => ({
+    set(() => ({
       focusedProjectId: id,
-      // 다른 프로젝트를 고르면 세션 포커스는 놓는다 (섞이면 어느 프로젝트를 보는지 헷갈린다)
-      focusedSessionId: s.sessions[s.focusedSessionId ?? '']?.projectId === id ? s.focusedSessionId : null,
+      /*
+       * 프로젝트를 고르면 **언제나** 세션 포커스를 놓는다 — 프로젝트 화면을 보려고 누른 것이다.
+       * 예전에는 다른 프로젝트를 고를 때만 놓았다. 그래서 같은 프로젝트의 세션을 보다가 그 프로젝트 이름을
+       * 누르면 세션이 그대로 남아 아무 일도 안 일어난 것처럼 보였다(사용자 제보 2026-09-28). 부르는 곳은
+       * 사이드바의 이름과, 세션이 없는 프로젝트를 고른 팔레트뿐이다 — 둘 다 프로젝트 화면을 원한다.
+       */
+      focusedSessionId: null,
       // 프로젝트 화면은 포커스 레인에만 있다 — 고른 것은 보여야 한다 (focusSession과 같은 규칙).
       // 온보딩이 오케스트레이터 뷰를 먼저 열면서(#63) 이 조합이 실제로 생겼다 (e2e가 잡았다)
       view: 'focus',

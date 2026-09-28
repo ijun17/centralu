@@ -2108,6 +2108,24 @@ test('host가 이미 준비된 뒤에 붙어도 기동한다 (회귀: 이벤트�
   await expect(page.getByText('Could not start the agent host')).toHaveCount(0)
 })
 
+test('같은 프로젝트의 세션을 보다가 프로젝트 이름을 누르면 프로젝트 화면으로 간다 (사용자 제보 2026-09-28)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await newSession(page, 'alpha', '작업')
+  await expect(page.getByTestId('prompt-input')).toBeVisible()
+  await expect(page.getByTestId('project-view')).toHaveCount(0)
+
+  // 같은 프로젝트의 이름 — 예전에는 세션이 그대로 남았다
+  await page.getByTestId('project-header-alpha').click()
+  await expect(page.getByTestId('project-view')).toBeVisible()
+  await expect(page.getByTestId('project-view-name')).toHaveText('alpha')
+
+  // 세션으로 돌아갔다가 다른 프로젝트로 가는 길은 예전부터 됐다 — 그대로인지 함께 본다
+  await page.getByTestId('project-alpha').locator('[data-testid^="session-row-"]').first().click()
+  await expect(page.getByTestId('project-view')).toHaveCount(0)
+  await page.getByTestId('project-header-beta').click()
+  await expect(page.getByTestId('project-view-name')).toHaveText('beta')
+})
+
 test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (도그푸딩: 어디서 보는지 못 찾음)', async ({
   page,
 }) => {

@@ -91,6 +91,32 @@ beforeEach(() => {
   })
 })
 
+describe('프로젝트 고르기', () => {
+  it('같은 프로젝트의 세션을 보다가 그 프로젝트를 고르면 세션을 놓고 프로젝트 화면으로 간다', () => {
+    useStore.setState({
+      projects: { p1: { id: 'p1', path: '/tmp/p1', name: 'p1' } as never, p2: { id: 'p2', path: '/tmp/p2', name: 'p2' } as never },
+      sessions: { 'pf-s1': { ...sessionInfo('pf-s1') } as never },
+      focusedProjectId: 'p1',
+      focusedSessionId: 'pf-s1',
+      view: 'focus',
+    })
+    useStore.getState().focusProject('p1')
+    expect(useStore.getState()).toMatchObject({ focusedProjectId: 'p1', focusedSessionId: null, view: 'focus' })
+  })
+
+  it('그리드에서 고른 칸의 프로젝트를 골라도 프로젝트 화면이 뜬다', () => {
+    useStore.setState({
+      projects: { p1: { id: 'p1', path: '/tmp/p1', name: 'p1' } as never },
+      sessions: { 'pf-s2': { ...sessionInfo('pf-s2') } as never },
+      focusedProjectId: 'p1',
+      focusedSessionId: 'pf-s2',
+      view: 'grid',
+    })
+    useStore.getState().focusProject('p1')
+    expect(useStore.getState()).toMatchObject({ focusedProjectId: 'p1', focusedSessionId: null, view: 'focus' })
+  })
+})
+
 describe('세션 등록 전에 도착한 이벤트 (U2)', () => {
   it('attach가 목록을 등록하면 보관해 둔 이벤트가 재생된다 — 앱을 켜기 전부터 돌던 세션', async () => {
     const mock = new MockPlatform()
