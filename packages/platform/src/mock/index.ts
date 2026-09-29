@@ -37,7 +37,6 @@ import {
   APP_VERSION,
   builderErrorFrame,
   builderRequestFrame,
-  handoffFile,
   newAppIdProblem,
   isNewerVersion,
   parseUiPreferences,
@@ -435,6 +434,15 @@ export class MockPlatform implements Platform {
       delete this.fsState.files[file]
     }
     return { entries, files }
+  }
+
+  /** host의 데이터 폴더에 놓인 인수인계 노트 (#142) — 경로 → 글. 프로젝트 파일(fsState)과 섞지 않는다 */
+  handoffNotes = new Map<string, string>()
+
+  private placeHandoffNote(s: SessionInfo, text: string): string {
+    const path = `/mock-data/handoff/${s.projectId}/${s.id}.md`
+    this.handoffNotes.set(path, text)
+    return path
   }
 
   /**
@@ -1666,16 +1674,40 @@ export class MockPlatform implements Platform {
     },
     /**
      * 죽은-에이전트 인수인계 기록 (#78) — 실물처럼 세션 이름이 실린 결정적 텍스트를 준다.
-     * 실물과 같이 **파일까지 놓는다** (#102): 두 모드가 한 경로로 모이는 것이 이 기능의
-     * 계약이라, 목이 파일을 빼먹으면 UI 흐름이 목에서만 성립한다.
+     * 실물과 같이 **노트 자리에 놓는다** (#102, #142): 두 모드가 한 자리로 모이는 것이 이 기능의
+     * 계약이다. 자리는 host의 데이터 폴더라 목의 프로젝트 파일(fsState)에는 놓지 않는다.
      */
     exportHandoffRecord: async (sessionId: string, toTool?: ToolName) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
       const text = `# CentralU Handoff Record (automatic)\n\npredecessor "${s.name}" (${s.tool}${toTool ? ` → ${toTool}` : ''}) — mock record for ${sessionId}`
-      const path = handoffFile(sessionId)
-      this.placeFile(path, text)
-      return { text, path }
+      return { text, path: this.placeHandoffNote(s, text) }
+    },
+    /**
+     * 살아 있는 인수인계의 노트 (#142) — 실물과 같은 규칙: afterSeq 뒤 첫 사람 말이 부탁이고, 그 뒤 다음 사람 말
+     * 앞의 **마지막** assistant 글이 노트다. 목은 델타 하나가 행 하나라 이어진 조각을 합쳐서 본다(실물의
+     * loadMessagesFrom이 하는 일).
+     */
+    exportHandoffNote: async (sessionId: string, afterSeq: number) => {
+      const s = this.sessions.get(sessionId)
+      if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      if (s.state === 'working' || s.state === 'waiting_approval') return null
+      let note = ''
+      let prevAssistant = false
+      let asked = false
+      for (const r of this.messages.get(sessionId) ?? []) {
+        if (r.seq <= afterSeq) continue
+        if (r.role === 'user') {
+          if (asked) break
+          asked = true
+          continue
+        }
+        const text = asked && r.role === 'assistant' && r.kind === 'text' ? ((r.payload as { text?: string }).text ?? '') : null
+        if (text !== null) note = prevAssistant ? note + text : text
+        prevAssistant = text !== null
+      }
+      note = note.trim()
+      return note ? { text: note, path: this.placeHandoffNote(s, note) } : null
     },
     /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
     worktreeStatus: async (sessionId: string) => {

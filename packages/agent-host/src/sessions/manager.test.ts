@@ -3502,12 +3502,12 @@ describe('죽은-에이전트 인수인계 기록 (#78)', () => {
     expect(out.text).toContain('[user] 컴팩트 뒤 질문')
     expect(out.text).toContain('[104] Bash ls')
     /*
-     * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 경로라야
+     * **글은 파일로 나간다** (#102). 에이전트에게 받는 모드와 같은 자리라야
      * 후임자가 받는 첫 메시지가 두 모드에서 같아진다 — 그 수렴이 이 기능의 계약이다.
      * 경로는 **넘기는 세션마다** 갈린다 (#104): 한 프로젝트에 인수인계가 둘이면
-     * 이름이 하나인 파일은 서로를 덮는다.
+     * 이름이 하나인 파일은 서로를 덮는다. 자리는 데이터 폴더다 (#142).
      */
-    expect(out.path).toBe(join(p.path, '.centralu', 'handoff', `${s.id}.md`))
+    expect(out.path).toBe(join(process.env.CC_DATA_DIR!, 'handoff', p.id, `${s.id}.md`))
     expect(readFileSync(out.path, 'utf8')).toBe(out.text)
     expect(out.text.split('\n')[0]).toBe(`# Handoff · ${s.name} · codex → claude`)
 
@@ -3872,20 +3872,34 @@ describe('실패한 턴은 기록에 남는다 (#107)', () => {
  * 후임자의 첫 턴 완료(#102) → 읽는 이와 경주할 수 없는 두 순간(세션 삭제·기동).
  */
 describe('인수인계 노트는 읽는 이와 경주하지 않는다 (#106)', () => {
-  const HANDOFF = '.centralu/handoff'
   let dir: string
-  const note = (id: string) => join(dir, HANDOFF, `${id}.md`)
+  let data: string
+  let prevData: string | undefined
+  let pid = ''
+  // 노트는 데이터 폴더에 산다 (#142) — 테스트마다 자기 데이터 폴더를 쓴다
+  const note = (id: string) => join(data, 'handoff', pid, `${id}.md`)
   const placeNote = (id: string, text = '이어서 하세요') => {
-    mkdirSync(join(dir, HANDOFF), { recursive: true })
+    mkdirSync(join(data, 'handoff', pid), { recursive: true })
     writeFileSync(note(id), text)
   }
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'cc-handoff-'))
+    data = mkdtempSync(join(tmpdir(), 'cc-handoff-data-'))
+    prevData = process.env.CC_DATA_DIR
+    process.env.CC_DATA_DIR = data
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => {
+    process.env.CC_DATA_DIR = prevData
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(data, { recursive: true, force: true })
+  })
 
-  const project = () => rpc('projects.add', { path: dir }) as Promise<{ id: string; path: string }>
+  const project = async () => {
+    const p = (await rpc('projects.add', { path: dir })) as { id: string; path: string }
+    pid = p.id
+    return p
+  }
 
   it('전임자를 지워도 후임자의 노트는 남는다 — 삭제는 인수인계의 마지막 걸음이다', async () => {
     const p = await project()
@@ -3929,6 +3943,112 @@ describe('인수인계 노트는 읽는 이와 경주하지 않는다 (#106)', (
     expect(reborn.listSessions().length).toBeGreaterThan(0)
 
     // 빈 디렉토리는 남긴다 (#104) — 폴더를 통째로 가져가면 그 사이에 시작된 인수인계가 딸려 간다
-    expect(existsSync(join(dir, HANDOFF))).toBe(true)
+    expect(existsSync(join(data, 'handoff', p.id))).toBe(true)
+  })
+})
+
+/**
+ * 인수인계 노트는 사용자 저장소 밖에 산다 (#142).
+ *
+ * 예전 자리 `<프로젝트>/.centralu/handoff/`는 사용자 저장소라 git에서 무시되지 않았고, 청소가 그 폴더를 믿었다:
+ * 저장소에 `.centralu/handoff -> ..`를 커밋해 두면 host가 뜰 때마다 저장소 루트의 `*.md`를 지웠다(실측 — README.md,
+ * CHANGELOG.md가 휴지통도 거치지 않고 사라졌다). 이제 노트는 데이터 폴더에 있고 host는 옛 자리를 읽지도 쓰지도
+ * 치우지도 않는다. 옛 자리에 이미 놓인 노트도 건드리지 않는다 — 옛 후임 세션이 그 경로를 들고 있다.
+ */
+describe('인수인계 노트는 데이터 폴더에 산다 (#142)', () => {
+  let repo: string
+  let outside: string
+  let data: string
+  let prevData: string | undefined
+
+  beforeEach(() => {
+    data = mkdtempSync(join(tmpdir(), 'cc-142-data-'))
+    prevData = process.env.CC_DATA_DIR
+    process.env.CC_DATA_DIR = data
+    // 진짜 저장소 — README.md와, 저장소 루트를 가리키는 `.centralu/handoff` 링크를 커밋해 둔다
+    repo = realpathSync(mkdtempSync(join(tmpdir(), 'cc-142-repo-')))
+    outside = realpathSync(mkdtempSync(join(tmpdir(), 'cc-142-outside-')))
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'pipe' })
+    git('init', '-q')
+    writeFileSync(join(repo, 'README.md'), '# 사용자의 README\n')
+    writeFileSync(join(repo, 'CHANGELOG.md'), '# 사용자의 변경 기록\n')
+    mkdirSync(join(repo, '.centralu'))
+    symlinkSync('..', join(repo, '.centralu', 'handoff'))
+    git('add', '-A')
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init')
+    writeFileSync(join(outside, 'NOTES.md'), '저장소 밖의 글')
+  })
+  afterEach(() => {
+    process.env.CC_DATA_DIR = prevData
+    for (const d of [repo, outside, data]) rmSync(d, { recursive: true, force: true })
+  })
+
+  const status = () => execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' })
+  const repoFiles = () => ['README.md', 'CHANGELOG.md'].map((f) => existsSync(join(repo, f)))
+
+  it('기동 청소와 세션 삭제가 링크를 따라 사용자 저장소의 파일을 지우지 않는다', async () => {
+    const p = (await rpc('projects.add', { path: repo })) as { id: string }
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
+    // 옛 청소가 지우던 모양 그대로다: 세션 id가 아닌 이름의 `*.md` — 저장소 루트에도, 링크가 가리킬 저장소 밖에도
+    const orphan = join(data, 'handoff', p.id, 'gone-session.md')
+    mkdirSync(join(data, 'handoff', p.id), { recursive: true })
+    writeFileSync(orphan, '주인 없는 글')
+
+    // 재기동 — 기동 청소가 도는 순간이다. 데이터 폴더의 고아가 걷히는 것으로 청소가 돌았음을 안다
+    new SessionManager(store, new Map([['claude', adapter as AgentAdapter]]), () => {})
+    await vi.waitFor(() => expect(existsSync(orphan)).toBe(false))
+    expect(repoFiles()).toEqual([true, true])
+
+    // 세션 삭제도 청소를 부른다 — 링크가 저장소 밖을 가리켜도 마찬가지다
+    rmSync(join(repo, '.centralu', 'handoff'))
+    symlinkSync(outside, join(repo, '.centralu', 'handoff'))
+    await mgr.deleteSession(s.id)
+    expect(repoFiles()).toEqual([true, true])
+    expect(readdirSync(outside)).toEqual(['NOTES.md'])
+  })
+
+  it('기록 모드와 에이전트 모드가 같은 자리(데이터 폴더)에 쓰고, 저장소에는 아무것도 쓰지 않는다', async () => {
+    const p = (await rpc('projects.add', { path: repo })) as { id: string }
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
+    const expected = join(data, 'handoff', p.id, `${s.id}.md`)
+
+    // 기록 모드: host가 원문으로 만든다
+    const record = (await rpc('agents.exportHandoffRecord', { sessionId: s.id, toTool: 'codex' })) as { text: string; path: string }
+    expect(record.path).toBe(expected)
+    expect(readFileSync(expected, 'utf8')).toBe(record.text)
+
+    // 에이전트 모드: 부탁 직전의 자리를 기억하고 부탁한다. 에이전트는 파일을 쓰지 않고 답한다
+    const before = store.loadMessages(s.id, 1).at(-1)?.seq ?? 0
+    await rpc('agents.send', { sessionId: s.id, text: '인수인계 노트를 답으로 써 주세요' })
+    const h = adapter.handleOf(s.id)!
+    h.emitToolCall('Bash', 'git status') // 먼저 상태를 살핀다 — 그 앞의 말은 노트가 아니다
+    // 턴이 도는 동안은 "아직"이다 — 그때의 마지막 글은 중간 보고일 수 있다
+    expect(await rpc('agents.exportHandoffNote', { sessionId: s.id, afterSeq: before })).toBeNull()
+    h.emitDelta('# 1. 프로젝트와 목표\n에이전트가 답으로 쓴 노트')
+    h.finishTurn()
+    const got = (await rpc('agents.exportHandoffNote', { sessionId: s.id, afterSeq: before })) as { text: string; path: string }
+    expect(got).toEqual({ text: '# 1. 프로젝트와 목표\n에이전트가 답으로 쓴 노트', path: expected })
+    expect(readFileSync(expected, 'utf8')).toBe(got.text)
+
+    // 사용자 저장소는 그대로다 — 추적되지 않는 파일 하나 없다
+    expect(status()).toBe('')
+    expect(readdirSync(repo).sort()).toEqual(['.centralu', '.git', 'CHANGELOG.md', 'README.md'])
+  })
+
+  it('후임자는 노트 폴더를 읽을 수 있게 받는다 — 만들 때도 깨어날 때도, 물려받은 세션만', async () => {
+    const p = (await rpc('projects.add', { path: repo })) as { id: string }
+    const dying = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(adapter.lastOpts?.readableDirs).toBeUndefined() // 물려받지 않은 세션은 아무것도 더 받지 않는다
+    const heir = (await rpc('agents.createSession', {
+      projectId: p.id, cwd: repo, tool: 'claude',
+      handoff: { from: dying.name, note: '노트', fromSessionId: dying.id },
+    })) as SessionInfo
+    expect(adapter.lastOpts?.readableDirs).toEqual([join(data, 'handoff', p.id)])
+
+    // 재기동 뒤 깨어날 때도 다시 받는다 — 첫 메시지가 여전히 그 경로를 가리킨다
+    const reborn = new SessionManager(store, new Map([['claude', adapter as AgentAdapter]]), () => {})
+    await reborn.resumeSession(heir.id)
+    expect(adapter.lastOpts?.sessionId).toBe(heir.id)
+    expect(adapter.lastOpts?.readableDirs).toEqual([join(data, 'handoff', p.id)])
   })
 })

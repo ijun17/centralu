@@ -149,3 +149,28 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
     ])
   })
 })
+
+/*
+ * 물려받은 인수인계 노트 (#142) — Codex는 노트 폴더를 받아도 **아무것도 바꾸지 않는다.** 생성 타입(codex-cli 0.153.4
+ * `SandboxPolicy`)의 readOnly·workspaceWrite 어느 쪽에도 읽기 범위가 없다 — 막히는 것은 쓰기 뿌리(`writableRoots`)
+ * 밖의 쓰기뿐이라 데이터 폴더의 노트는 이미 읽힌다. 샌드박스를 건드리면 오히려 사용자의 설정(normal)을 덮는다.
+ * 로그아웃 상태라 실제 스레드로는 확인하지 못했다 — 여기서 보는 것은 "보낸 것이 같다"이다.
+ */
+describe('물려받은 노트의 폴더 (#142)', () => {
+  for (const preset of ['safe', 'normal', 'auto'] as const) {
+    it(`${preset}: readableDirs를 받아도 스레드와 턴에 보내는 것이 같다 — 쓰기 뿌리도 샌드박스도 넓히지 않는다`, async () => {
+      const sent = async (extra: Record<string, unknown>) => {
+        state.requests.length = 0
+        const h = await start(preset, true, extra)
+        h.send('노트를 읽어 주세요')
+        await vi.waitFor(() => expect(paramsOf('turn/start')).toBeDefined())
+        await h.dispose()
+        return state.requests.map((r) => ({ method: r.method, params: JSON.stringify(r.params) }))
+      }
+      const plain = await sent({})
+      const heir = await sent({ readableDirs: [join(cwd, 'data', 'handoff', 'p1')] })
+      expect(heir).toEqual(plain)
+      expect(JSON.stringify(heir)).not.toMatch(/writableRoots|sandboxPolicy|handoff/)
+    })
+  }
+})

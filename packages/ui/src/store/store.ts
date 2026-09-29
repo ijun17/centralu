@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, handoffFile, SessionInfo } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION, DEFAULT_UI_PREFERENCES, SessionInfo } from '@cc/protocol'
 import type {
   AppId,
   AppQuestion,
@@ -1336,27 +1336,22 @@ async function usableDefaults(
 const handoffInFlight = new Set<string>()
 
 /**
- * 인수인계 글이 놓이는 파일. 경로는 프로토콜이 짓는다 (#102, #104) — 에이전트가 쓰는 모드와
- * host가 쓰는 기록 모드가 **같은 경로**로 모여야 후임자의 첫 메시지가 같아지기 때문이다.
- * 여기서 다시 내보내는 것은 테스트·e2e가 이 경로로 인수인계를 식별해서다.
- */
-export { handoffFile }
-
-/**
  * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
  * 넘어가야 한다는 지적). 죽는 세션만이 전체 맥락을 갖고 있으므로 글은 그쪽이 쓴다.
  *
- * **대화가 아니라 파일로 받는다** (도그푸딩 2차 지적). 처음에는 답변 텍스트를 화면
- * 대화에서 긁었는데, 스트리밍 조각·직전 턴의 잔여 출력이 섞일 수 있는 자리라
- * "잘린 것 아니냐"는 불안을 만들었다. 파일은 에이전트가 쓴 바이트가 그대로 온다 —
- * 섞일 것도 잘릴 것도 없다.
+ * **노트는 답으로 받고, 파일은 host가 놓는다** (#142). 예전에는 에이전트가 프로젝트 안
+ * `.centralu/handoff/`에 직접 썼다. 노트가 사용자 저장소 밖(데이터 폴더)으로 나가면서
+ * 직접 쓰기는 두 도구 모두에게 권한을 더 줘야 하는 일이 됐다 — 그래서 에이전트는 답만 하고,
+ * host가 그 턴이 끝난 뒤 **저장소에 남은 답**을 파일로 놓는다(`agents.exportHandoffNote`).
+ * 도그푸딩 2차 지적(화면 대화에서 긁은 답에 스트리밍 조각·직전 턴의 잔여 출력이 섞였다)은
+ * 그대로 피한다: 화면이 아니라 host의 기록에서, 이 부탁 뒤의 답만, 턴이 끝난 뒤에 읽는다.
  *
  * e2e·테스트가 이 문구로 인수인계 메시지를 식별하므로 export한다.
  */
-export function handoffPrompt(path: string): string {
-  return `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor, and save it as a file: create or overwrite \`${path}\`, relative to the project root (create the directory if it is not there). When the file is written, reply with one short line saying so — the note itself goes in the file, not in your reply.
+export function handoffPrompt(): string {
+  return `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor. Your final message in this turn is the note: the app saves that message to a file and hands the file to your successor. Do not write the note to a file yourself, and do not add a preamble or a closing line around it — whatever your final message says is the note.
 
-The note is the only thing your successor receives, so make it self-contained — never reference "the conversation above". It is a file, not a chat message: **length is not a constraint**. Write with the density of a compaction summary, not the brevity of a reply — when in doubt, include it. If your context contains compaction summaries of earlier phases, transcribe their operational content (state, decisions, tips, conventions) rather than re-summarizing it — every re-summarization loses another layer.
+The note is the only thing your successor receives, so make it self-contained — never reference "the conversation above". It is saved as a file, not read as a chat message: **length is not a constraint**. Write with the density of a compaction summary, not the brevity of a reply — when in doubt, include it. If your context contains compaction summaries of earlier phases, transcribe their operational content (state, decisions, tips, conventions) rather than re-summarizing it — every re-summarization loses another layer.
 
 Cover, in this order:
 1. Project & goal — what this project is and what we are working toward.
@@ -1391,8 +1386,10 @@ function notePreview(note: string): string {
  * 예전에는 노트 전문이 그대로 첫 메시지였다. 그런데 위 프롬프트는 전임자에게
  * "파일이니 길이는 제약이 아니다"라고 말한다 — 길수록 충실한 노트가 되고, 충실할수록
  * 후임자가 받는 한 통의 메시지가 커졌다 (실측: 긴 세션을 codex에 넘기자 도착하자마자
- * 에러). 파일은 원래 프로젝트 루트에 있고 후임자의 cwd가 그곳이므로, 첫 메시지는
- * 경로만 가리키면 된다 — 그제서야 길이는 선언이 아니라 사실로 제약이 아니게 된다.
+ * 에러). 파일은 host가 놓은 자리에 있으므로, 첫 메시지는 경로만 가리키면 된다 — 그제서야
+ * 길이는 선언이 아니라 사실로 제약이 아니게 된다. 그 자리는 프로젝트 밖(데이터 폴더, #142)이라
+ * 경로는 절대 경로다. 후임자가 묻지 않고 읽을 수 있게 host가 그 폴더를 열어 준다
+ * (Claude의 추가 작업 폴더 — Codex는 읽기를 막지 않는다).
  *
  * 미리보기를 함께 싣는 이유: 대화 기록만 읽는 사람도 무슨 일이 있었는지는 알아야 한다.
  * 조각으로 읽거나 grep해도 된다고 **명시**하는 이유: 그 말이 없으면 에이전트는 파일을
@@ -1400,7 +1397,7 @@ function notePreview(note: string): string {
  */
 function handoffOpening(predecessor: string, note: string, path: string): string {
   return [
-    `You are taking over from a session named "${predecessor}". It wrote a handoff note for you and it is on disk, relative to the project root: \`${path}\`. Read it before anything else.`,
+    `You are taking over from a session named "${predecessor}". It wrote a handoff note for you and it is on disk, outside the project folder: \`${path}\`. Read it before anything else.`,
     '',
     'The note can be long. Read it in pieces (head, tail, byte offsets) or grep it for what you need — you do not have to pull the whole file into one turn.',
     '',
@@ -3986,24 +3983,14 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
     handoffInFlight.add(sessionId)
-    /*
-     * 이 인수인계의 파일 — 넘기는 세션의 id로 짓는다 (#104). 후임자의 id로 지을 수 없다:
-     * 글은 후임자가 태어나기 전에 놓이고, 자리를 아는 것은 전임자와 host뿐이다.
-     */
-    const notePath = handoffFile(sessionId)
     try {
       /*
-       * **묻기 전에 그 자리를 비운다** (#104). 아래 대기 루프는 "파일이 있고 비어 있지
-       * 않다"만 볼 뿐, 그것이 방금 부탁해서 놓인 글인지는 알지 못한다 — 지난 인수인계가
-       * 실패하고 남긴 파일은 그래서 갓 쓴 노트로 배달됐다 (조용하고, 재시작을 견디고,
-       * 내용까지 그럴듯하다). 남은 것을 탐지하는 대신 **없앤다**.
-       *
-       * 실패는 삼킨다: 대부분은 "그런 파일 없음"이고, 그것이야말로 바라던 상태다.
-       * 두 모드 모두 여기를 지난다 — 기록 모드의 host 쓰기도 빈 자리 위에서 시작한다.
+       * 노트 자리는 host가 짓고 host가 쓴다 (#142) — 데이터 폴더의 `handoff/<프로젝트 id>/<넘기는 세션 id>.md`.
+       * 예전에는 여기서 프로젝트 안의 그 자리를 먼저 비웠다(#104: 지난 실패가 남긴 파일이 갓 쓴 노트로 배달됐다).
+       * 이제 파일은 host가 이 인수인계의 글로 **덮어쓰고 나서야** 경로를 돌려주므로, 남은 파일을 읽을 길이 없다.
        */
-      await s.platform.fs.trash(session.projectId!, notePath).catch(() => {})
-
       let note = ''
+      let notePath = ''
       if (mode === 'record') {
         /*
          * 기록 모드 (#78): 에이전트에게 **아무것도 묻지 않는다** — 이 모드가 존재하는
@@ -4013,7 +4000,9 @@ export const useStore = create<AppState>((set, get) => ({
          * host는 그것을 에이전트 모드와 **같은 파일**에 써 놓는다 (#102) — 생산자만
          * 다르고 후임자가 받는 첫 메시지는 두 모드에서 같다. 돌려받은 text는 미리보기용이다.
          */
-        note = (await s.platform.agents.exportHandoffRecord(sessionId, heirTool)).text
+        const record = await s.platform.agents.exportHandoffRecord(sessionId, heirTool)
+        note = record.text
+        notePath = record.path
       } else {
       /*
        * 돌고 있는 턴이 있으면 **끝나기를 기다린 뒤** 부탁한다 (실측: 메아 인수인계 —
@@ -4028,7 +4017,14 @@ export const useStore = create<AppState>((set, get) => ({
       }
       if (!get().sessions[sessionId]) throw new Error('the session disappeared')
 
-      const prompt = handoffPrompt(notePath)
+      const prompt = handoffPrompt()
+      /*
+       * 부탁을 보내기 직전의 마지막 기록 — host는 그 뒤의 첫 사람 말을 이 부탁으로, 그 뒤의 답을 노트로 읽는다.
+       * 지난 인수인계가 실패해 같은 부탁과 그 답이 대화에 남아 있어도 그것은 이 자리 앞이다. 자리는 host의 기록에
+       * 묻는다: 화면의 lastSeq는 보낸 말의 확정(user_message)이 오기 전에는 그 말을 세지 않아 뒤처질 수 있고, 뒤처진
+       * 자리 뒤의 첫 사람 말은 이 부탁이 아니다.
+       */
+      const before = (await s.platform.agents.loadMessages(sessionId, 1)).at(-1)?.seq ?? 0
       await get().send(sessionId, prompt)
       // 전송 실패는 입력창 복원 경로로 흘러 프롬프트가 초안에 남는다 — 사람이 쓴 글이 아니니 걷는다
       if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === prompt)) {
@@ -4037,11 +4033,12 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       /*
-       * **파일이 놓이기를 기다린다** — 대화에서 긁지 않는다 (실측: 돌던 턴의 잔여
-       * 출력이 글 머리에 섞여 "잘린 것"으로 읽혔다). 턴이 끝난 뒤 파일을 읽으면
-       * 에이전트가 쓴 바이트가 그대로다. 파일이 안 놓이면 아무것도 지우지 않는다.
+       * **턴이 끝나기를 기다렸다가 host에게 노트를 받는다** (#142) — 화면 대화에서 긁지 않는다 (실측: 돌던
+       * 턴의 잔여 출력이 글 머리에 섞여 "잘린 것"으로 읽혔다). host는 부탁한 말 뒤의 마지막 답을
+       * 자기 기록에서 읽어 파일로 놓는다. 턴이 아직 돌거나 답이 없으면 null — 다시 묻는다.
+       * 답이 안 오면 아무것도 지우지 않는다.
        *
-       * 읽은 내용은 후임자에게 통째로 보내지 않는다 (#102) — 미리보기를 뽑고, 원문은
+       * 받은 글은 후임자에게 통째로 보내지 않는다 (#102) — 미리보기를 뽑고, 원문은
        * 기록에 박아 둔다. 전임자가 사라지면 이 글은 다시 만들 수 없기 때문이다.
        */
       const deadline = Date.now() + 10 * 60_000
@@ -4051,20 +4048,14 @@ export const useStore = create<AppState>((set, get) => ({
         const cur = st.sessions[sessionId]
         if (!cur) throw new Error('the session disappeared while writing the note')
         if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${notePath}`)
+        if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
         if (st.connection !== 'connected') continue // 끊긴 동안은 판단하지 않는다
         if (cur.state === 'working' || cur.state === 'waiting_approval') continue
-        try {
-          const f = await s.platform.fs.readFile(session.projectId!, notePath)
-          // 잘려 온 파일도 미리보기로는 충분하지만, 기록에 반쪽짜리 원본을 박을 수는 없다
-          if (f.truncated) throw new Error(`${notePath} is too large for the app to read in one piece`)
-          if (!f.binary && f.text.trim()) {
-            note = f.text.trim()
-            break
-          }
-        } catch (err) {
-          if ((err as Error).message.includes('too large')) throw err
-          // 아직 없다 — 계속 기다린다 (턴이 끝났는데도 영영 안 놓이면 위 시한이 끊는다)
+        const got = await s.platform.agents.exportHandoffNote(sessionId, before).catch(() => null)
+        if (got) {
+          note = got.text
+          notePath = got.path
+          break
         }
       }
       }
@@ -4116,8 +4107,8 @@ export const useStore = create<AppState>((set, get) => ({
        *
        * "읽었는가"는 우리가 관찰할 수 있는 사실이 아니다. 그래서 턴에 매다는 방식 자체를
        * 버리고, 읽는 이와 경주할 수 없는 두 순간(세션 삭제·기동)을 host에게 맡긴다
-       * (manager.sweepOrphanHandoffNotes). 파일 하나를 남겨 두는 값은 0이다 —
-       * `.centralu/handoff/`는 이미 .gitignore에 걸려 있다.
+       * (manager.sweepOrphanHandoffNotes). 파일 하나를 남겨 두는 값은 0에 가깝다 —
+       * 노트는 사용자 저장소가 아니라 데이터 폴더에 있다 (#142).
        */
 
       if (deleteOld) {

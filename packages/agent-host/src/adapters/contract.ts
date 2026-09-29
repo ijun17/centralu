@@ -336,6 +336,18 @@ export type CreateSessionOpts = {
    * 세션이라 `projectTrusted`를 따른다.
    */
   noSettingFiles?: boolean
+  /**
+   * 작업 폴더 밖에서 **읽어야 하는** 폴더 (#142) — 지금은 물려받은 인수인계 노트가 든 폴더 하나다.
+   *
+   * 노트는 데이터 폴더(`<데이터>/handoff/<프로젝트 id>/`)에 있고 후임자의 cwd는 프로젝트다. 두 도구가 다르다:
+   *  - Claude는 작업 폴더 밖 읽기를 **묻는다**. 실측(SDK 0.3.263 동봉 CLI 2.1.263, haiku, permissionMode 'default',
+   *    2026-09-29): 밖의 파일을 Read하자 canUseTool이 `Read`로 불렸다(= 승인 카드). 같은 폴더를
+   *    `additionalDirectories`로 주자 콜백 없이 읽었다. 그래서 Claude는 이 값을 `additionalDirectories`로 받는다.
+   *  - Codex는 읽기를 막지 않는다. 생성 타입(codex-cli 0.153.4 `SandboxPolicy`)의 샌드박스는 readOnly·
+   *    workspaceWrite 어느 쪽도 읽기 범위를 갖지 않는다 — 막는 것은 쓰기 뿌리(`writableRoots`)뿐이다. 그래서
+   *    Codex는 이 값을 쓰지 않는다: 스레드의 샌드박스를 건드리면 오히려 사용자의 설정을 덮는다.
+   */
+  readableDirs?: string[]
   resumeExternalId?: string
   /** 주어지면 이 세션은 앱 도구를 받는다 — 어댑터가 자기 방식으로 붙인다 */
   orchestratorTools?: OrchestratorTools

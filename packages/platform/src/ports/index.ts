@@ -104,9 +104,15 @@ export interface AgentPort {
   worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
   /**
    * 죽은-에이전트 인수인계 기록 (#78) — 그 세션의 도구를 부르지 않고 host가 만든다.
-   * host가 `handoffFile(sessionId)`에 써 놓고 경로를 준다 (#102, #104); text는 미리보기용이다.
+   * host가 데이터 폴더의 노트 자리에 써 놓고 절대 경로를 준다 (#102, #142); text는 미리보기용이다.
    */
   exportHandoffRecord(sessionId: string, toTool?: ToolName): Promise<{ text: string; path: string }>
+  /**
+   * 살아 있는 인수인계의 노트 (#142) — afterSeq(부탁 직전의 마지막 seq) 뒤 첫 사람 말이 부탁이고, 그 뒤 에이전트의
+   * 마지막 답을 host가 같은 자리에 놓는다.
+   * null은 "아직"이다: 턴이 돌고 있거나 답이 없다.
+   */
+  exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null>
   /** 오케스트레이터의 MCP 서버 제안 목록 (propose_mcp_server → 승인 대기 중인 것들) */
   mcpProposals(): Promise<{ proposals: { name: string; command: string; args: string[]; why?: string }[] }>
   /** 제안에 대한 사람의 답 — 승인이면 앱이 등록하고 오케스트레이터를 재시작한다 */

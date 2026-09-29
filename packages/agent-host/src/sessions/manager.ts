@@ -11,9 +11,8 @@ import { builderRole } from './app-builder.js'
 import { HOST_APPS } from '../apps/registry.js'
 import type { HostAppContext } from '../apps/contract.js'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import type {
   AppQuestion,
@@ -43,10 +42,8 @@ import type {
 import {
   APP_SLUG,
   DATA_DIR,
-  HANDOFF_DIR,
   // 틀의 한 줄 칸 (#120) — 목도 같은 틀로 만드는 세션에 말을 넣어야 해서 protocol에 산다(app-frames.ts)
   frameField,
-  handoffFile,
   parseUiPreferences,
   sessionLiveDefaults,
 } from '@cc/protocol'
@@ -89,6 +86,7 @@ import {
 import { isMissingPathError } from '../dev-services/path-guard.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
+import { handoffNoteDir, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 
 /**
@@ -1287,6 +1285,8 @@ export class SessionManager {
           // 어느 설정 파일이 이 세션에 닿는가 (결정 3, #92·#152) — 세션이 무엇인가와 띄우는 이 순간의 신뢰.
           // 만드는 세션이면 명부가 위에서 이미 이 세션을 가리킨다(setBuilder)
           ...this.settingFilesFor(info),
+          // 물려받은 노트를 묻지 않고 읽는다 (#142). 마커는 아직 없다 — 이 세션이 뜬 뒤에 박힌다
+          ...this.handoffReadDirs(params.projectId, !!params.handoff?.fromSessionId),
           // 오케스트레이터는 전부, 워크트리 매니저(#69)는 부분집합을 받는다.
           // 갓 만든 세션은 자식이 없으므로 여기서 매니저일 수 없다 — 매니저가 되는 것은
           // 첫 자식이 붙은 뒤 다음에 깰 때다 (wake 쪽 조건이 그 승격의 실제다).
@@ -1772,6 +1772,8 @@ export class SessionManager {
            * 만들 때와 같은 판정이다(settingFilesFor) — 매니저로 깨어나는 세션도, 만드는 세션도 여기서 같은 답을 받는다.
            */
           ...this.settingFilesFor(m),
+          // 물려받은 노트는 깨어난 뒤에도 다시 읽을 수 있어야 한다 (#142) — 첫 메시지가 여전히 그 경로를 가리킨다
+          ...this.handoffReadDirs(m.projectId, this.store.inheritsHandoff(sessionId)),
           /*
            * **도구와 역할은 되살릴 때도 따라와야 한다.**
            *
@@ -2055,6 +2057,19 @@ export class SessionManager {
   }
 
   /**
+   * 후임자가 읽을 노트 폴더 (#142) — 인수인계를 물려받은 프로젝트 세션만, 그 프로젝트의 폴더 하나만 받는다.
+   * 어댑터가 자기 방식으로 쓴다(`CreateSessionOpts.readableDirs`: Claude만 쓰고 Codex는 읽기를 막지 않는다).
+   */
+  private handoffReadDirs(projectId: string | null | undefined, inherits: boolean): Pick<CreateSessionOpts, 'readableDirs'> {
+    if (!inherits || !projectId) return {}
+    try {
+      return { readableDirs: [handoffNoteDir(projectId)] }
+    } catch {
+      return {} // id가 아닌 프로젝트 id — 폴더를 열어 줄 자리가 없다. 노트는 물어서 읽는다
+    }
+  }
+
+  /**
    * 주인 없는 인수인계 노트를 지운다 (#106).
    *
    * **턴 경계에서는 치우지 않는다.** #102가 `createSession` 직후에서 후임자의 첫 턴
@@ -2064,30 +2079,15 @@ export class SessionManager {
    * 수 있는 사실이 아니므로, 턴에 매다는 방식 자체를 버린다.
    *
    * 남은 두 순간은 읽는 이와 경주할 수 없다 — 세션이 사라질 때(그 세션은 더 읽지
-   * 않는다)와 기동할 때(진행 중인 인수인계가 없다). 남겨 두는 값은 파일 하나이고
-   * `.centralu/handoff/`는 이미 .gitignore에 걸려 있다.
+   * 않는다)와 기동할 때(진행 중인 인수인계가 없다). 남겨 두는 값은 데이터 폴더의 파일 하나다.
    *
-   * **빈 디렉토리는 남긴다** (#104) — 폴더를 통째로 가져가는 청소는 그 사이에 시작된
-   * 인수인계의 글을 함께 데려간다. 방금 없앤 경주를 청소가 다시 만드는 셈이다.
+   * **청소하는 곳은 데이터 폴더뿐이다** (#142). 예전에는 등록된 프로젝트마다 `<프로젝트>/.centralu/handoff`를
+   * 읽고 지웠는데, 그 폴더는 사용자 저장소의 것이라 링크 하나로 저장소 루트나 저장소 밖을 가리킬 수 있었다
+   * (실측: 기동 청소가 README.md를 지웠다). 옛 자리의 노트는 이제 우리 것이 아니다 — 보지 않는다.
    */
   private async sweepOrphanHandoffNotes(projectId?: string): Promise<void> {
     const claimed = this.store.handoffPredecessors()
-    const projects = this.store.listProjects().filter((p) => !projectId || p.id === projectId)
-    for (const p of projects) {
-      const dir = join(p.path, HANDOFF_DIR)
-      let names: string[]
-      try {
-        names = await readdir(dir)
-      } catch {
-        continue // 인수인계를 한 적 없는 프로젝트 — 지울 것도 없다
-      }
-      for (const name of names) {
-        if (!name.endsWith('.md')) continue
-        const owner = name.slice(0, -'.md'.length)
-        if (this.meta.has(owner) || claimed.has(owner)) continue
-        await rm(join(dir, name), { force: true }).catch(() => {})
-      }
-    }
+    await sweepHandoffNotes((owner) => this.meta.has(owner) || claimed.has(owner), projectId)
   }
 
   /**
@@ -3259,13 +3259,14 @@ export class SessionManager {
    * 원문 전부와, (codex라면) 롤아웃 파일의 마지막 컴팩트 요약뿐이다. 어느 쪽의
    * 실패도 기록 생성을 막지 않는다 — 요약이 없으면 빌더가 원문 압축으로 물러난다.
    *
-   * **글은 파일로 나간다** (#102). 에이전트가 직접 쓰는 모드와 같은 경로에 쓰는 것이
-   * 핵심이다: 생산자만 다르고 후임자가 받는 첫 메시지는 같아진다. text도 함께
+   * **글은 파일로 나간다** (#102). 에이전트에게 받는 모드(exportHandoffNote)와 같은 자리에 쓰는 것이
+   * 핵심이다: 재료만 다르고 후임자가 받는 첫 메시지는 같아진다. text도 함께
    * 돌려주는 것은 부르는 쪽이 첫 줄 몇 개를 미리보기로 뽑기 위해서다.
    */
   async exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }> {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m.projectId) throw Object.assign(new Error('Only project sessions can hand off'), { code: 'internal' })
     const rows = this.store.loadMessages(sessionId, 1_000_000)
     // 피벗 = 마지막 **성공한** 컴팩트 마커 — 실패한 컴팩트는 아무것도 접지 않았다
     let pivotSeq: number | null = null
@@ -3278,13 +3279,43 @@ export class SessionManager {
       ? ((await this.adapters.get(m.tool)?.lastCompactSummary?.(externalId).catch(() => null)) ?? null)
       : null
     const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq })
-    // 프로젝트 루트 기준으로 놓는다 — 후임자의 cwd가 거기고, UI의 fs 호출도 같은 기준으로 푼다
-    const path = join(this.cwdOf(m.projectId), handoffFile(sessionId))
-    await mkdir(dirname(path), { recursive: true })
-    // 있던 것부터 걷는다 (#104) — 심볼릭 링크가 남아 있으면 쓰기가 그 링크를 따라 프로젝트 밖에 쓴다
-    await rm(path, { force: true })
-    await writeFile(path, text, 'utf8')
-    return { text, path }
+    // 데이터 폴더에 놓는다 (#142) — 사용자 저장소에는 아무것도 쓰지 않는다
+    return { text, path: await writeHandoffNote(m.projectId, sessionId, text) }
+  }
+
+  /**
+   * 살아 있는 인수인계의 노트 (#142) — 에이전트가 **답으로** 준 글을 host가 파일로 놓는다.
+   *
+   * 예전에는 에이전트가 `<프로젝트>/.centralu/handoff/<id>.md`에 직접 썼다. 노트가 저장소 밖(데이터 폴더)으로
+   * 나가면서 그 쓰기는 권한을 더 달라는 일이 됐다: Claude는 작업 폴더 밖 쓰기를 묻고, Codex의 workspace-write
+   * 샌드박스는 쓰기 뿌리 밖을 막는다 — 그 뿌리를 넓히는 `turn/start.sandboxPolicy`는 "이 턴과 **이후 턴**"에
+   * 걸리고 사용자의 샌드박스 설정을 통째로 갈아 끼운다. 그래서 에이전트에게는 아무 권한도 더 주지 않고,
+   * 쓰기는 이미 데이터 폴더를 쓰는 host가 한다.
+   *
+   * **답은 저장소에서 읽는다** — 화면이 모은 스트리밍 조각이 아니다 (파일로 받게 된 까닭이 거기 섞인 조각이었다).
+   * afterSeq는 부탁을 보내기 직전의 마지막 seq다. 그 뒤의 첫 사람 말이 부탁이고, 그 뒤 다음 사람 말 앞의
+   * **마지막** assistant 글이 노트다: 에이전트가 먼저 상태를 살피며 한 말과 도구 호출은 그 앞에 있고, 부탁 앞의
+   * 글(돌던 턴의 보고, 지난 인수인계의 답)은 셈에 들지 않는다. 턴이 아직 돌면 null이다 — 그때의 마지막 글은
+   * 노트가 아니라 중간 보고일 수 있다.
+   */
+  async exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null> {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m.projectId) throw Object.assign(new Error('Only project sessions can hand off'), { code: 'internal' })
+    if (inTurn(m.state)) return null
+    let note = ''
+    let asked = false
+    for (const r of this.store.loadMessagesFrom(sessionId, afterSeq, 1_000_000)) {
+      if (r.role === 'user') {
+        if (asked) break // 부탁 뒤에 온 사람 말부터는 이 부탁의 답이 아니다
+        asked = true
+        continue
+      }
+      if (asked && r.role === 'assistant' && r.kind === 'text') note = (r.payload as { text?: string }).text ?? ''
+    }
+    note = note.trim()
+    if (!note) return null
+    return { text: note, path: await writeHandoffNote(m.projectId, sessionId, note) }
   }
 
   /**

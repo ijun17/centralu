@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   ATTACHMENT_MAX_BASE64,
-  handoffFile,
   NormalizedEvent,
   PROTOCOL_VERSION,
   parseClientFrame,
@@ -267,18 +266,12 @@ describe('SessionId', () => {
     expect(del.safeParse({ sessionId: '' }).success).toBe(false)
   })
 
-  it('refuses a path as the name of a handoff note', () => {
-    // `.centralu/handoff/<id>.md` is the other place the id becomes a file name.
-    expect(() => handoffFile('../../../.ssh/authorized_keys')).toThrow(/Not a session id/)
-  })
-
   it('accepts the ids we actually mint', () => {
     // Guard against a regex so tight it refuses the app's own traffic: host ids are UUIDs, and
     // tests and fixtures use short readable ones.
     expect(del.safeParse({ sessionId: randomUUID() }).success).toBe(true)
     expect(del.safeParse({ sessionId: 's1' }).success).toBe(true)
     expect(del.safeParse({ sessionId: 'ho-s1' }).success).toBe(true)
-    expect(handoffFile('ho-s1')).toBe('.centralu/handoff/ho-s1.md')
   })
 
   it('refuses an attachment bigger than the cap', () => {

@@ -2110,12 +2110,11 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   // 인수인계 요청이 대화에 보통 메시지로 들어간다
   await expect(page.getByTestId('chat-stream')).toContainText('handoff note')
 
-  // 죽는 세션이 글을 **파일로** 남긴다 (mock에는 모델이 없으니 손으로 흉내낸다).
-  // 자리는 넘기는 세션마다 갈린다 (#104) — 목의 placeFile이 실물처럼 올라가는 길까지 세운다.
+  // 죽는 세션이 글을 **답으로** 쓴다 (mock에는 모델이 없으니 손으로 흉내낸다). 파일은 host가 데이터 폴더에
+  // 놓는다 (#142) — 사용자 저장소에는 아무것도 쓰지 않는다. 자리는 넘기는 세션마다 갈린다 (#104).
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
-    m.placeFile(`.centralu/handoff/${sid}.md`, '후계자 노트: 여기까지 했다')
-    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '파일에 남겼습니다.' })
+    m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '후계자 노트: 여기까지 했다' })
     m.emit({ type: 'turn_complete', sessionId: sid })
     m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
   }, id)
@@ -2127,6 +2126,8 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toContain(id)
   // 새 세션의 첫 메시지가 그 글이다
   await expect(page.getByTestId('chat-stream')).toContainText('후계자 노트')
+  expect(await page.evaluate(() => [...(window as any).__mock.handoffNotes.values()])).toEqual(['후계자 노트: 여기까지 했다'])
+  expect(await page.evaluate(() => Object.keys((window as any).__mock.fsState.files).filter((p) => p.includes('handoff')))).toEqual([])
 })
 
 /*

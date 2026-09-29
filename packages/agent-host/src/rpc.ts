@@ -105,6 +105,10 @@ export function createRpcHandler(
       const { sessionId, toTool } = RpcMethods['agents.exportHandoffRecord'].params.parse(p)
       return mgr.exportHandoffRecord(sessionId, toTool)
     },
+    'agents.exportHandoffNote': async (p) => {
+      const { sessionId, afterSeq } = RpcMethods['agents.exportHandoffNote'].params.parse(p)
+      return mgr.exportHandoffNote(sessionId, afterSeq)
+    },
     'agents.createCoordinator': async (p) => {
       const params = RpcMethods['agents.createCoordinator'].params.parse(p)
       return mgr.createCoordinator(params)

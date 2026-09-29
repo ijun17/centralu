@@ -260,3 +260,18 @@ describe('저장소에 심은 .claude/가 승인 카드를 끄는가 (#92, 흉�
     expect(state.verdicts).toEqual(['rule-allowed', 'mode-allowed', 'ask'])
   })
 })
+
+/*
+ * 물려받은 인수인계 노트 (#142) — 노트는 데이터 폴더에 있고 후임자의 cwd는 프로젝트다. Claude는 작업 폴더 밖 읽기를
+ * 묻는다(실측은 CreateSessionOpts.readableDirs). 그 폴더만 추가 작업 폴더로 준다 — 받지 않은 세션에는 아무것도 없다.
+ */
+describe('물려받은 노트의 폴더 (#142)', () => {
+  it('readableDirs는 additionalDirectories로 가고, 없으면 키도 없다', async () => {
+    const notes = join(root, 'data', 'handoff', 'p1')
+    await (await new ClaudeAdapter().createSession({ sessionId: 's', cwd: root, permissionPreset: 'safe', readableDirs: [notes] }, () => {})).dispose()
+    await (await new ClaudeAdapter().createSession({ sessionId: 's', cwd: root, permissionPreset: 'safe' }, () => {})).dispose()
+    const [heir, plain] = state.options
+    expect(heir!.additionalDirectories).toEqual([notes])
+    expect('additionalDirectories' in plain!).toBe(false)
+  })
+})

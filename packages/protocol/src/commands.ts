@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { wireJoin } from './paths.js'
 import {
   AdapterCapabilities,
   AppId,
@@ -28,7 +27,6 @@ import {
   SessionActivity,
   SessionGoal,
   SessionId,
-  isSessionId,
   SessionState,
   TokenUsage,
   ToolName,
@@ -39,28 +37,6 @@ import {
 } from './entities.js'
 
 /** UI → host RPC. 포트 인터페이스(platform/ports)와 1:1 대응 (docs/protocol.md §3) */
-
-/** 인수인계 글이 모이는 디렉토리 (프로젝트 루트 기준, #104) — 파일마다 저장소 루트에 눕지 않게 */
-export const HANDOFF_DIR = '.centralu/handoff'
-
-/**
- * 인수인계 글이 놓이는 파일 — **넘기는 세션마다 하나** (#102, #104).
- *
- * **양쪽 끝이 같은 경로를 알아야 한다.** 살아 있는 인수인계는 죽는 에이전트가 이 파일을
- * 쓰고(프롬프트가 이 경로를 부른다), 기록 모드는 host가 같은 자리에 쓴다. 두 생산자가
- * 한 경로로 모이기 때문에 후임자의 첫 메시지가 모드와 무관하게 같아진다 —
- * 그래서 이 경로는 UI의 것이 아니라 프로토콜의 것이다.
- *
- * **이름이 세션 id인 이유** (#104): 한 프로젝트에서 세션 여럿을 동시에 돌리는 것이 이 앱의
- * 존재 이유라, 이름이 하나면 동시에 도는 두 인수인계가 같은 자리를 놓고 덮어쓴다 —
- * 마지막에 쓴 쪽이 이기고, 기다리던 쪽은 **모양이 맞고 내용이 틀린** 노트를 조용히 받는다.
- * 한쪽의 청소가 다른 쪽이 아직 읽지 않은 글을 치우는 것도 같은 뿌리다.
- */
-export function handoffFile(sessionId: string): string {
-  // id가 곧 파일 이름이다 — 조각 하나가 아니면 이 경로는 우리가 뜻한 자리가 아니다 (#94)
-  if (!isSessionId(sessionId)) throw new Error(`Not a session id: ${sessionId}`)
-  return wireJoin(HANDOFF_DIR, `${sessionId}.md`)
-}
 
 export const CreateSessionParams = z.object({
   projectId: z.string(),
@@ -86,10 +62,11 @@ export const CreateSessionParams = z.object({
       from: z.string(),
       note: z.string(),
       /**
-       * 전임 세션의 id (#106). 이름과 달리 이것은 **파일의 이름**이다 —
-       * `handoffFile(fromSessionId)`이 후임자가 읽으라고 받은 바로 그 경로라, 이 값이
-       * 있어야 host가 "아직 주인이 있는 노트"와 고아를 구별할 수 있다. 옛 프레임과
-       * 기록 모드 밖의 호출을 위해 optional이다: 없으면 그 노트는 아무도 주장하지 않는다.
+       * 전임 세션의 id (#106). 이름과 달리 이것은 **파일의 이름**이다 — 노트는
+       * `<데이터>/handoff/<프로젝트 id>/<전임 세션 id>.md`에 있고(#142), 이 값이
+       * 있어야 host가 "아직 주인이 있는 노트"와 고아를 구별하고, 후임자에게 그 폴더를
+       * 읽을 수 있게 열어 준다. 옛 프레임과 인수인계 밖의 호출을 위해 optional이다:
+       * 없으면 그 노트는 아무도 주장하지 않는다.
        */
       fromSessionId: SessionId.optional(),
     })
@@ -608,10 +585,11 @@ export const RpcMethods = {
    * 죽은-에이전트 인수인계 기록 (#78). 그 세션의 도구를 부르지 않고 host가
    * 저장소 원문(+codex 롤아웃의 컴팩트 요약)으로 만든다.
    *
-   * **결과는 파일이다** (#102): host가 `handoffFile(sessionId)`에 써 놓고 그 경로를
-   * 돌려준다 — 에이전트가 직접 쓰는 모드와 **같은 경로**라, 후임자가 받는 첫 메시지는
-   * 두 모드에서 글자 하나 다르지 않다. text도 함께 돌려주는 것은 부르는 쪽이 첫
-   * 메시지에 넣을 짧은 미리보기를 뽑기 위해서다.
+   * **결과는 파일이다** (#102): host가 데이터 폴더의 노트 자리(`<데이터>/handoff/<프로젝트 id>/
+   * <세션 id>.md`, #142)에 써 놓고 그 절대 경로를 돌려준다 — 에이전트에게 받는 모드
+   * (`agents.exportHandoffNote`)와 **같은 자리**라, 후임자가 받는 첫 메시지는 두 모드에서
+   * 모양이 같다. text도 함께 돌려주는 것은 부르는 쪽이 첫 메시지에 넣을 짧은 미리보기를
+   * 뽑기 위해서다. 사용자 저장소에는 아무것도 쓰지 않는다.
    */
   'agents.exportHandoffRecord': {
     params: z.object({
@@ -620,6 +598,18 @@ export const RpcMethods = {
       toTool: ToolName.optional(),
     }),
     result: z.object({ text: z.string(), path: z.string() }),
+  },
+  /**
+   * 살아 있는 인수인계의 노트 (#142) — 에이전트가 **답으로** 쓴 노트를 host가 기록 모드와 같은 자리에 놓는다.
+   *
+   * 에이전트는 파일을 쓰지 않는다: 노트 자리가 저장소 밖이라 직접 쓰게 하면 두 도구 모두 권한을 더 줘야 한다.
+   * afterSeq는 부탁을 보내기 직전의 마지막 seq다 — 그 뒤 첫 사람 말이 부탁이고, 그 뒤 다음 사람 말 앞의
+   * 마지막 답이 노트다.
+   * **null은 "아직"이다**: 턴이 돌고 있거나 답이 없다. 부르는 쪽은 기다렸다가 다시 묻는다.
+   */
+  'agents.exportHandoffNote': {
+    params: z.object({ sessionId: SessionId, afterSeq: z.number().int().nonnegative() }),
+    result: z.object({ text: z.string(), path: z.string() }).nullable(),
   },
   /**
    * 시야가 잘린 조율 세션을 만든다 (#80·#81 물리). 의견(업무·반장)은 앱의 것이고,

@@ -4,7 +4,7 @@ import { z } from 'zod'
  * 세션 id — 우리가 만든 불투명한 식별자다 (`randomUUID()`).
  *
  * **모양을 프로토콜에 못박는 이유는 이 값이 경로 조각이 되기 때문이다** (#94).
- * 첨부 폴더(`<데이터>/attachments/<id>/`)와 인수인계 노트(`.centralu/handoff/<id>.md`)가
+ * 첨부 폴더(`<데이터>/attachments/<id>/`)와 인수인계 노트(`<데이터>/handoff/<프로젝트 id>/<id>.md`)가
  * 이 문자열을 그대로 디렉토리·파일 이름으로 쓴다. `z.string()`이던 시절
  * `agents.deleteSession`에 `"../../Documents"`를 보내면 `{ ok: true }`를 돌려주면서
  * 데이터 폴더 두 단계 위의 그 폴더를 `recursive: true`로 지웠고, `attachments.save`는

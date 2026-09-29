@@ -1501,6 +1501,24 @@ export class Store {
   }
 
   /**
+   * 이 세션이 인수인계를 물려받았는가 (#142) — 깨울 때 노트 폴더를 읽을 수 있게 다시 열어 주려고 묻는다.
+   * 판정은 위와 같다: `fromSessionId`가 실린 handoff 마커. 마커는 세션마다 몇 개뿐이라 그것만 읽는다.
+   */
+  inheritsHandoff(sessionId: string): boolean {
+    const rows = this.db
+      .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
+      .all(sessionId) as { payload: string }[]
+    return rows.some((r) => {
+      try {
+        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
+        return p.type === 'handoff' && typeof p.fromSessionId === 'string' && !!p.fromSessionId
+      } catch {
+        return false
+      }
+    })
+  }
+
+  /**
    * 세션을 지운다 — **조각으로 나눠 지우고, 조각 사이에 이벤트 루프를 놓아준다** (#179).
    *
    * 예전에는 한 트랜잭션이었다. better-sqlite3는 동기라, 실제 DB 복사본의 가장 큰 세션

@@ -294,6 +294,8 @@ class ClaudeSession implements SessionHandle {
          * 안 받든(워커) 프로젝트의 신뢰가 정한다(#92·#152).
          */
         ...settingSourcesFor(this.opts),
+        // 작업 폴더 밖에서 읽을 폴더 (#142 — 물려받은 인수인계 노트). 없으면 묻는다(실측은 CreateSessionOpts.readableDirs)
+        ...(this.opts.readableDirs?.length ? { additionalDirectories: this.opts.readableDirs } : {}),
         ...(this.opts.orchestratorTools
           ? {
               /*

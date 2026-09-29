@@ -386,7 +386,7 @@ and "Send to builder".
   stderr, source maps.
 - **Builder session**: every app gets one when it is made (`apps.builder`, `apps.createBuilder`;
   failing to make it does not undo the app). A project app's builder works in the **project root**,
-  because hand-off notes, file links and history catch-up all assume it; a user-folder app's builder
+  because file links and history catch-up assume it; a user-folder app's builder
   works in the app folder. The app's rules come as the session's role text, fixed when it is made.
   Preset `normal`. Tool: the project's default, or the orchestrator's for a user-folder app. It is
   attached to its own app's tools, and gets one more tool, `check`. Carrying Centralu's own tools
