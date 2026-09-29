@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
+import { GIT_DIFF_MAX_CHARS } from '../packages/agent-host/src/dev-services/git.js'
 
 /**
- * 실물 host의 diff 상한 (`gitDiff`/`gitCommitDetail`, packages/agent-host/src/dev-services/git.ts).
- * 이름은 400KiB라고 불렀지만 host가 재는 것은 **문자 수**이고 값은 400,000이다.
+ * 실물 host의 diff 상한 (`gitDiff`/`gitCommitDetail`) — host가 내보내는 그 값이다(#134). 재는 것은 **문자 수**다.
  */
-const HOST_DIFF_MAX_CHARS = 400_000
-/* 한 줄이 11자(`+row-00000` + 줄바꿈)라, 상한 바로 아래에서 가장 험한 입력이 이만큼이다 */
-const HOSTILE_DIFF_ROWS = 36_363
+const HOST_DIFF_MAX_CHARS = GIT_DIFF_MAX_CHARS
+/* 한 줄이 11자(`+row-00000` + 줄바꿈)라, 상한 바로 아래에서 가장 험한 입력이 이만큼이다 (상한 400,000이면 36,363줄) */
+const HOSTILE_DIFF_ROWS = Math.floor(HOST_DIFF_MAX_CHARS / 11)
 const HOSTILE_LAST_ROW = `row-${String(HOSTILE_DIFF_ROWS - 1).padStart(5, '0')}`
 const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open in your IDE to see the rest.'
 

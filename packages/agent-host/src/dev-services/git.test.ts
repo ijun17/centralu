@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles } from './git.js'
 
 /**
  * porcelain v2 파싱은 실제 git 출력으로 확인한다 — 흉내낸 문자열로는
@@ -104,6 +104,16 @@ describe('git path containment', () => {
     writeFileSync(join(d, 'outside.txt'), 'outside\n')
 
     await expect(gitDiff(sub, '../outside.txt')).rejects.toThrow(/outside the project/i)
+  })
+
+  it('names the project root as the root, not as outside the project (#134)', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'tracked.txt'), 'base\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'init')
+    for (const root of ['.', d, 'sub/..']) {
+      await expect(gitDiff(d, root)).rejects.toThrow('Path is the project root, not a file in it')
+    }
   })
 
   it('treats option-looking filenames as paths when diffing and staging', async () => {
@@ -310,5 +320,34 @@ describe('commit detail and commit errors (#160)', () => {
     const r = await gitCommit(d, 'my message')
     expect(r.ok).toBe(false)
     expect(r.message).toMatch(/nothing to commit/)
+  })
+})
+
+/*
+ * #134: 상한은 문자 수다(이름이 `maxChars`인 이유). 두 자리(`gitDiff`, `gitCommitDetail`)가 같은 이름의 값 하나를 쓴다.
+ */
+describe('the diff cap counts characters and is one named value (#134)', () => {
+  it('maxChars cuts at that many characters even when the bytes are several times more', async () => {
+    const { d } = repo()
+    writeFileSync(join(d, '한글.txt'), '가나다라마바사아자차카타파하\n'.repeat(200))
+    const { diff, truncated } = await gitDiff(d, '한글.txt', { maxChars: 1_000 })
+    expect(truncated).toBe(true)
+    expect(diff.length).toBe(1_000)
+    expect(Buffer.byteLength(diff, 'utf8')).toBeGreaterThan(2_000) // 바이트로 셌다면 여기서 잘렸다
+  })
+
+  it('both the working diff and the commit diff stop at GIT_DIFF_MAX_CHARS', async () => {
+    const { d, git } = repo()
+    const big = Array.from({ length: 40_000 }, (_, i) => `line-${String(i).padStart(6, '0')}`).join('\n') + '\n'
+    writeFileSync(join(d, 'big.txt'), big)
+    const working = await gitDiff(d, 'big.txt')
+    expect(working).toMatchObject({ truncated: true })
+    expect(working.diff.length).toBe(GIT_DIFF_MAX_CHARS)
+    git('add', '.')
+    git('commit', '-q', '-m', 'big')
+    const sha = git('rev-parse', 'HEAD').toString().trim()
+    const detail = await gitCommitDetail(d, sha)
+    expect(detail.truncated).toBe(true)
+    expect(detail.diff.length).toBe(GIT_DIFF_MAX_CHARS)
   })
 })

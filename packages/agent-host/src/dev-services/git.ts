@@ -118,7 +118,12 @@ function assertLexicalGitPath(cwd: string, path: string): string {
   const root = resolve(cwd)
   const target = isAbsolute(path) ? resolve(path) : resolve(root, path)
   const rel = relative(root, target)
-  if (rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return rel
+  /*
+   * 루트 자신은 밖이 아니다 (#134) — 거절은 하되(여기 오는 것은 파일 하나의 경로다) 이유를 바로 말한다.
+   * 예전에는 루트도 "outside the project"라고 해서 읽는 사람이 원인을 엉뚱한 곳에서 찾았다.
+   */
+  if (rel === '') throw Object.assign(new Error('Path is the project root, not a file in it'), { code: 'internal' })
+  if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return rel
   throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
 }
 
@@ -137,11 +142,21 @@ function literalPathspec(path: string): string {
   return `:(literal)${path}`
 }
 
+/**
+ * diff 상한 — **문자 수**다, 바이트가 아니다 (#134). `String.length`로 재고 자르므로 세는 것은 UTF-16 코드 단위고,
+ * 한글이나 이모지가 섞이면 실제 바이트는 이 값의 몇 배가 된다. 예전 이름(`maxBytes`)은 코드가 지키지 않는 약속을
+ * 했다. 바이트로 세면 사람이 보던 diff의 길이가 줄어들어서, 동작은 두고 이름이 하는 일을 말하게 했다(사용자 결정).
+ *
+ * `gitDiff`와 `gitCommitDetail`이 같은 값을 쓴다 — 두 자리에 숫자를 따로 박아 두면 한쪽만 바뀐다. e2e가 이 상한에
+ * 맞춘 고정물을 만들 때도 숫자를 다시 적지 않고 이것을 가져간다.
+ */
+export const GIT_DIFF_MAX_CHARS = 400_000
+
 /** 파일 diff. 큰 diff는 앞부분만 — 화면은 어차피 가상 스크롤로 자른다 */
 export async function gitDiff(
   cwd: string,
   path: string,
-  opts: { staged?: boolean; maxBytes?: number } = {},
+  opts: { staged?: boolean; maxChars?: number } = {},
 ): Promise<{ diff: string; truncated: boolean; binary: boolean }> {
   if (!(await isRepo(cwd))) return { diff: '', truncated: false, binary: false }
   const safePath = await assertCanonicalGitPath(cwd, path)
@@ -166,7 +181,7 @@ export async function gitDiff(
   }
 
   const binary = /^Binary files /m.test(stdout) || stdout.includes('\0')
-  const max = opts.maxBytes ?? 400_000
+  const max = opts.maxChars ?? GIT_DIFF_MAX_CHARS
   const truncated = stdout.length > max
   return { diff: binary ? '' : truncated ? stdout.slice(0, max) : stdout, truncated, binary }
 }
@@ -234,7 +249,7 @@ export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files
   const show = ['show', '--diff-merges=first-parent', '--pretty=format:']
   const files = (await git(cwd, [...show, '--name-only', '--end-of-options', sha])).split('\n').filter(Boolean)
   const raw = await git(cwd, [...show, '--no-color', '--end-of-options', sha])
-  const max = 400_000
+  const max = GIT_DIFF_MAX_CHARS
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
 
