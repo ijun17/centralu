@@ -11,6 +11,7 @@ import {
   handoffPrompt,
   inlineViewsFromHistory,
   messagesToChat,
+  projectScreenSessions,
   registerPinnedFrame,
   useStore,
   type ChatItem,
@@ -89,6 +90,7 @@ beforeEach(() => {
     expandedDirs: {},
     showIgnored: true,
     foldedProjects: [],
+    projectPanels: {},
     focusedSessionId: null,
     focusedProjectId: null,
     view: 'focus',
@@ -245,6 +247,97 @@ describe('사이드바 접기 (#205)', () => {
     await useStore.getState().deleteProject(a.id, false)
 
     expect(useStore.getState().foldedProjects).toEqual([])
+  })
+})
+
+/*
+ * The project screen's arrangement (#203): per project, in the workspace snapshot, next to the fold. The panels are
+ * derived from what the project has; only the order the person dragged and what they hid are kept.
+ */
+describe('project screen arrangement (#203)', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const stored = (mock: MockPlatform) =>
+    (mock.workspaceSnapshot as { projectPanels?: Record<string, unknown> } | null)?.projectPanels
+
+  it('is written to the snapshot per project and read back on the next launch', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/arr-a')
+    const b = await mock.projects.add('/tmp/arr-b')
+    await useStore.getState().attach(mock)
+
+    useStore.getState().arrangeProject(a.id, { order: ['session:x', 'session:y'], hidden: ['app:z'] })
+    await tick()
+    expect(stored(mock)).toEqual({ [a.id]: { order: ['session:x', 'session:y'], hidden: ['app:z'] } })
+    expect(stored(mock)?.[b.id]).toBeUndefined()
+
+    useStore.setState({ projectPanels: {} })
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().projectPanels).toEqual({ [a.id]: { order: ['session:x', 'session:y'], hidden: ['app:z'] } })
+  })
+
+  it('no save made while restoring writes an empty arrangement over the stored one', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/arr-restore')
+    mock.sessions.set('arr-r1', sessionInfo('arr-r1', { projectId: a.id }))
+    const saved = { [a.id]: { order: ['session:arr-r1'], hidden: [] } }
+    mock.workspaceSnapshot = { focusedSessionId: 'arr-r1', projectPanels: saved } as never
+    // Restoring the focused session saves the snapshot; a crash right after must not find the arrangement gone
+    const written: unknown[] = []
+    const save = mock.workspace.save
+    mock.workspace.save = async (snap) => {
+      written.push((snap as { projectPanels?: unknown }).projectPanels)
+      return save(snap)
+    }
+
+    await useStore.getState().attach(mock)
+    await tick()
+
+    expect(useStore.getState().focusedSessionId).toBe('arr-r1')
+    expect(written.length).toBeGreaterThan(0)
+    expect(written.every((w) => JSON.stringify(w) === JSON.stringify(saved))).toBe(true)
+  })
+
+  it('leaves with its project', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/arr-gone')
+    const b = await mock.projects.add('/tmp/arr-stays')
+    await useStore.getState().attach(mock)
+    useStore.getState().arrangeProject(a.id, { order: ['session:x'], hidden: [] })
+    useStore.getState().arrangeProject(b.id, { order: ['session:y'], hidden: [] })
+
+    await useStore.getState().deleteProject(a.id, false)
+    await tick()
+
+    expect(Object.keys(useStore.getState().projectPanels)).toEqual([b.id])
+    expect(Object.keys(stored(mock) ?? {})).toEqual([b.id])
+  })
+
+  it('the project screen puts its sessions on screen, less the hidden ones, and only while no session is picked', () => {
+    useStore.setState({
+      projects: { p1: { id: 'p1', path: '/tmp/p1', name: 'p1' } as never, p2: { id: 'p2', path: '/tmp/p2', name: 'p2' } as never },
+      sessions: {
+        s1: { ...sessionInfo('s1', { projectId: 'p1' }) } as never,
+        s2: { ...sessionInfo('s2', { projectId: 'p1' }) } as never,
+        s3: { ...sessionInfo('s3', { projectId: 'p2' }) } as never,
+      },
+      projectPanels: { p1: { order: [], hidden: ['session:s2'] } },
+      focusedProjectId: 'p1',
+      focusedSessionId: null,
+      view: 'focus',
+    })
+    expect(projectScreenSessions(useStore.getState())).toEqual(['s1'])
+    useStore.setState({ focusedSessionId: 's1' })
+    expect(projectScreenSessions(useStore.getState())).toEqual([])
+    useStore.setState({ focusedSessionId: null, view: 'grid' })
+    expect(projectScreenSessions(useStore.getState())).toEqual([])
+  })
+
+  it('an app the project screen shows gets a pinned view without leaving the screen, and one entry however often it asks', () => {
+    useStore.setState({ view: 'focus', focusedSessionId: null, focusedProjectId: 'p1' })
+    useStore.getState().ensurePinnedView('p1', 'slider')
+    useStore.getState().ensurePinnedView('p1', 'slider')
+    expect(useStore.getState().pinnedViews.map((p) => p.key)).toEqual(['p1/slider'])
+    expect(useStore.getState()).toMatchObject({ view: 'focus', focusedApp: null })
   })
 })
 

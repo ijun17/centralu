@@ -25,6 +25,14 @@ describe('바람은 화면에 있는 세션이 끝났을 때만 분다', () => {
     expect(isOnScreen('app', 'builder', ctx)).toBe(false)
   })
 
+  it('the project screen — every session it shows, and only while no session is picked (#203)', () => {
+    const screen = { ...ctx, focusedSessionId: null, projectScreen: ['p1', 'p2'] }
+    expect(isOnScreen('focus', 'p2', screen)).toBe(true)
+    expect(isOnScreen('focus', 'a', screen)).toBe(false)
+    // A picked session is the focus view, and the project's other sessions are off screen
+    expect(isOnScreen('focus', 'p2', { ...screen, focusedSessionId: 'p1' })).toBe(false)
+  })
+
   /*
    * 이게 요점이다. 세션이 열 개면 화면 밖 완료도 열 번이고,
    * 그때마다 화면을 쓸면 읽고 있던 것을 방해한다 — 그건 알림의 몫이다.

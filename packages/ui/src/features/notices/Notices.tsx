@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useStore, type Notice } from '../../store/store.js'
+import { projectScreenSessions, useStore, type Notice } from '../../store/store.js'
 import { isOnScreen } from '../../app/onscreen.js'
 
 /**
@@ -22,6 +22,8 @@ export function Notices() {
   const orchestratorId = useStore((s) => s.orchestratorId)
   const gridPanels = useStore((s) => s.gridPanels)
   const builderPaneSessionId = useStore((s) => s.builderPaneSessionId)
+  // Joined into one string: a selector that returns a new array on every call never settles
+  const projectScreen = useStore((s) => projectScreenSessions(s).join(' '))
 
   /*
    * 보게 된 것은 더 알릴 이유가 없다.
@@ -39,10 +41,18 @@ export function Notices() {
     if (!appFocused) return
     dismiss(
       notices
-        .filter((n) => isOnScreen(view, n.sessionId, { focusedSessionId, orchestratorId, gridPanels, builderPaneSessionId }))
+        .filter((n) =>
+          isOnScreen(view, n.sessionId, {
+            focusedSessionId,
+            orchestratorId,
+            gridPanels,
+            builderPaneSessionId,
+            projectScreen: projectScreen ? projectScreen.split(' ') : [],
+          }),
+        )
         .map((n) => n.sessionId),
     )
-  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridPanels, builderPaneSessionId, dismiss])
+  }, [notices, appFocused, view, focusedSessionId, orchestratorId, gridPanels, builderPaneSessionId, projectScreen, dismiss])
 
   if (notices.length === 0) return null
 

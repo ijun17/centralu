@@ -32,6 +32,10 @@ import {
   initialSession,
   markRead as markReadPure,
   rename as renamePure,
+  appPanelId,
+  sanitizeArrangements,
+  sessionPanelId,
+  type ProjectArrangement,
   type SessionSummary,
 } from '@cc/core'
 import type { AppCreated, AppToolResult, ConnectionState, NewAppSpec, Platform } from '@cc/platform/ports'
@@ -769,6 +773,20 @@ export type AppState = {
   /** 이 프로젝트만 펴고 나머지는 모두 접는다 (#205) — 하나에 집중할 때 한 번에 */
   foldOtherProjects(projectId: string): void
   /**
+   * What the person did to each project's screen (#203): the order they dragged its panels into and
+   * the panels they hid. The panels themselves are derived from what the project has (`arrangePanels`).
+   *
+   * Kept in the workspace snapshot, next to the fold above, rather than in a host table like the
+   * grid's `grid_panels`. It is a way of looking at a project that only this UI reads and writes;
+   * the host acts on none of it. Its ids are sessions *and* apps, which a table keyed to the
+   * sessions table could not hold without its own cleanup rules for apps. And what the grid's
+   * table buys — dropping a panel when its session goes — is already given here by deriving the
+   * panels from the session list. Deleting a project drops its entry (`deleteProject`).
+   */
+  projectPanels: Record<string, ProjectArrangement>
+  /** Writes one project's arrangement whole and saves the snapshot */
+  arrangeProject(projectId: string, next: ProjectArrangement): void
+  /**
    * 프로젝트별 명령 실행 상태 — host `commands.state`의 투영 (#60 → 터미널 패널로 이관).
    * 로그 본문은 host 버퍼가 들고, 여기는 뱃지가 읽을 사실(도는가 · 몇 번으로 끝났나)만
    * 든다. 스토어에 있는 이유: "돌고 있다"는 실행 창만의 사정이 아니라 탭 뱃지·접힌
@@ -1189,6 +1207,20 @@ export type AppState = {
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<boolean>
   /** 앱을 고정 화면으로 연다 — 처음이면 자리를 만들고, 이미 열려 있으면 그 화면으로 간다 */
   openApp(projectId: string | null, appId: string): void
+  /**
+   * Gives the app a pinned view without going to it (#203). The project screen shows its apps' pinned views in its
+   * panels, and this is the same entry `openApp` makes — so an app on the project screen and the same app opened from
+   * the sidebar are one instance in one frame, and moving between them keeps the document.
+   */
+  ensurePinnedView(projectId: string | null, appId: string): void
+  /** Closes a pinned view from outside its own header (the project screen's ×) — teardown first, as every way down does */
+  dismissPinnedView(key: string): Promise<void>
+  /**
+   * Leaves the app view without closing the view when the screen it goes back to shows the app anyway: its project's
+   * screen, where the app is a panel (#203). Closing there would tear down the panel's view and open a new one at
+   * once, losing whatever the person had in it. Returns whether it left; if not, the caller closes the view.
+   */
+  leavePinnedView(key: string): boolean
   /** 자리의 인스턴스를 연다 (host가 home을 부른다). 열 수 있는 앱일 때 화면이 부른다 */
   startPinnedView(key: string): Promise<void>
   /**
@@ -1610,6 +1642,59 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
  *    그중 어느 것의 답인지 알 수 없고, 답은 첨부를 실을 자리가 없다. 보내면 새 턴이 되고 질문은 버려진다.
  *  - `none`: 열린 질문이 없다.
  */
+/**
+ * The project whose screen is showing (#203), or null. The project screen is the focus lane with no session
+ * picked: `focusProject` releases the session focus to open it, and picking a session leaves it.
+ */
+export function projectScreenOf(
+  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
+): string | null {
+  const pid = s.view === 'focus' && !s.focusedSessionId ? s.focusedProjectId : null
+  return pid && s.projects[pid] ? pid : null
+}
+
+/**
+ * The sessions the project screen shows right now: every session of the project the person has not hidden. The
+ * trash (#204) needs no rule here — a trashed session is not in `sessions`.
+ */
+export function projectScreenSessions(
+  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'sessions' | 'projectPanels'>,
+): string[] {
+  const pid = projectScreenOf(s)
+  if (!pid) return []
+  const hidden = new Set(s.projectPanels[pid]?.hidden ?? [])
+  return Object.values(s.sessions)
+    .filter((x) => x.projectId === pid && !hidden.has(sessionPanelId(x.id)))
+    .map((x) => x.id)
+}
+
+/**
+ * The apps the project screen shows as panels right now, as pinned view keys (#203). PinnedApps lays exactly these
+ * over their panels, so it and ProjectView must not decide this separately.
+ */
+export function projectScreenAppKeys(
+  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
+): string[] {
+  const pid = projectScreenOf(s)
+  if (!pid) return []
+  const hidden = new Set(s.projectPanels[pid]?.hidden ?? [])
+  return s.externalApps
+    .filter((a) => a.projectId === pid && !hidden.has(appPanelId(a.appId)))
+    .map((a) => externalAppKey(pid, a.appId))
+}
+
+/**
+ * Whether leaving the app view for this pinned view lands on a screen that shows it in a panel (#203): the view is
+ * the one on screen, and the focus lane it goes back to is its project's screen with the app not hidden there.
+ */
+export function returnsToPanel(
+  s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
+  key: string,
+): boolean {
+  if (s.view !== 'app' || !s.focusedApp || externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) !== key) return false
+  return projectScreenAppKeys({ ...s, view: 'focus' }).includes(key)
+}
+
 export function composerTarget(open: SessionSummary['pendingQuestions'], hasAttachments: boolean): 'answer' | 'drops' | 'none' {
   if (open.length === 0) return 'none'
   return open.length === 1 && open[0]!.questions.length === 1 && !hasAttachments ? 'answer' : 'drops'
@@ -1931,6 +2016,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelWidth: PANEL_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
   foldedProjects: [],
+  projectPanels: {} as Record<string, ProjectArrangement>,
   commandRuns: {} as Record<string, Record<string, CommandRunInfo>>,
   overlay: null,
   inboxOpen: false,
@@ -2125,6 +2211,8 @@ export const useStore = create<AppState>((set, get) => ({
         if (Array.isArray(savedFolds)) {
           set({ foldedProjects: savedFolds.filter((id): id is string => typeof id === 'string') })
         }
+        // The project screens' arrangements (#203), first for the same reason as the fold above
+        set({ projectPanels: sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels) })
         if (snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
           /*
            * 되살리기는 펼치지 않는다 (#205). 보던 세션의 프로젝트를 접어 둔 채 껐다면 그 접힘도
@@ -2269,6 +2357,7 @@ export const useStore = create<AppState>((set, get) => ({
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
         foldedProjects: s.foldedProjects,
+        projectPanels: s.projectPanels,
         railWidth: s.railWidth,
         notifyPolicy: s.notifyPolicy,
         showIgnored: s.showIgnored,
@@ -2450,6 +2539,7 @@ export const useStore = create<AppState>((set, get) => ({
           orchestratorId: s.orchestratorId,
           gridPanels: s.gridPanels,
           builderPaneSessionId: s.builderPaneSessionId,
+          projectScreen: projectScreenSessions(s),
         })
       if (seen) {
         set({ completion: { sessionId, at: Date.now() } })
@@ -3105,6 +3195,10 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ foldedProjects: Object.keys(s.projects).filter((id) => id !== projectId) }))
     get().saveWorkspace()
   },
+  arrangeProject(projectId, next) {
+    set((s) => ({ projectPanels: { ...s.projectPanels, [projectId]: next } }))
+    get().saveWorkspace()
+  },
   setFoldComposer(fold) {
     set({ foldComposer: fold })
     get().saveWorkspace()
@@ -3247,8 +3341,11 @@ export const useStore = create<AppState>((set, get) => ({
           s.focusedSessionId && doomed.includes(s.focusedSessionId) ? null : s.focusedSessionId,
         trustAsk: s.trustAsk === projectId ? null : s.trustAsk,
         foldedProjects: s.foldedProjects.filter((id) => id !== projectId),
+        projectPanels: Object.fromEntries(Object.entries(s.projectPanels).filter(([id]) => id !== projectId)),
       }
     })
+    // The fold and the arrangement just dropped live in the snapshot — write it, or the next launch reads them back
+    get().saveWorkspace()
   },
 
   refreshProjectGit(projectId) {
@@ -4367,6 +4464,30 @@ export const useStore = create<AppState>((set, get) => ({
           ],
     }))
     get().saveWorkspace()
+  },
+
+  ensurePinnedView(projectId, appId) {
+    const key = externalAppKey(projectId, appId)
+    if (get().pinnedViews.some((p) => p.key === key)) return
+    set((s) => ({
+      pinnedViews: [
+        ...s.pinnedViews,
+        { key, projectId, appId, phase: 'idle', instanceId: null, toolInput: undefined, toolResult: undefined, error: null },
+      ],
+    }))
+  },
+
+  async dismissPinnedView(key) {
+    await pinnedFrames.get(key)?.teardown().catch(() => {})
+    get().closeApp(key)
+  },
+
+  leavePinnedView(key) {
+    const s = get()
+    if (!returnsToPanel(s, key)) return false
+    set({ view: 'focus', focusedApp: null })
+    get().saveWorkspace()
+    return true
   },
 
   async startPinnedView(key) {

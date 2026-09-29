@@ -19,10 +19,17 @@ export type Onscreen = {
   gridPanels: readonly string[]
   /** 보이는 고정 화면(M4 B-2) 옆에 대화가 열린 만드는 세션 (BuilderPane) — 없으면 null */
   builderPaneSessionId?: string | null
+  /** The sessions the project screen shows (#203), empty when it is not showing (`projectScreenSessions`) */
+  projectScreen?: readonly string[]
 }
 
 export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolean {
-  if (view === 'focus') return ctx.focusedSessionId === sessionId
+  /*
+   * The focus lane with no session picked is the project screen (#203), and it shows every session of its project
+   * as a panel. Answering "not on screen" for them would put a "Finished" card (and a sound) over the very panel the
+   * person is watching finish, the way the builder pane's turns did before `builderPaneSessionId`.
+   */
+  if (view === 'focus') return ctx.focusedSessionId ? ctx.focusedSessionId === sessionId : !!ctx.projectScreen?.includes(sessionId)
   if (view === 'orchestrator') return ctx.orchestratorId === sessionId
   /*
    * 고정 화면(M4 B-2)이 메인 영역을 차지한다 — 보이는 대화는 화면 옆에 연 만드는 세션의 것(BuilderPane) 하나뿐이다. 그것까지 "안
