@@ -1639,8 +1639,8 @@ describe('restoring written text after a send failure', () => {
 })
 
 /**
- * Warming up grid sessions (a dogfooding finding: reviving a large codex thread measured at 7-13
- * seconds). A cost that cannot be reduced is moved to a time nobody is waiting on: sessions parked on
+ * Warming up grid sessions (dogfooding, the Mea session: reviving a large codex thread measured at
+ * 7-13 seconds). A cost that cannot be reduced is moved to a time nobody is waiting on: sessions parked on
  * the grid are woken up in the background as the app comes up. If it fails, the app still comes up,
  * and the failure is left in the same place (`wakeError`) as when woken by a click.
  */
@@ -2233,7 +2233,7 @@ describe('handing off and starting fresh', () => {
     expect([...mock.sessions.values()].filter((r) => r.name === '분기').length).toBe(2)
   })
 
-  it('a running turn\'s report never mixes into the top of the note — the request waits for the turn to end (a measured dogfooding case)', async () => {
+  it('a running turn\'s report never mixes into the top of the note — the request waits for the turn to end (measured in the Mea session)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho4')
     mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: '메아4', state: 'working' }))

@@ -829,7 +829,10 @@ export type AppState = {
    * also a way of viewing, so it is carried in the snapshot.
    */
   panelSplit: number
-  /** Width of the evidence panel (px). Using the terminal makes you want to widen it, so it must be adjustable */
+  /**
+   * Width of the evidence panel (px). Using the terminal makes people want to widen it, so it must be
+   * adjustable
+   */
   panelWidth: number
   /** Width of the session list (px) */
   sidebarWidth: number
@@ -893,8 +896,8 @@ export type AppState = {
    * Things that happened off screen — notification cards that pile up in the top right.
    *
    * **They do not disappear on their own.** An OS banner is dismissed after a few seconds, so
-   * anything that arrived while you were away is already gone by the time you get back. That is the
-   * part a banner cannot cover for this app, so this stays. There are exactly three ways it is
+   * anything that arrived while the person was away is already gone by the time they get back. That
+   * is the part a banner cannot cover for this app, so this stays. There are exactly three ways it is
    * dismissed: seeing that session, clicking the card to go there, or pressing ×.
    *
    * Only one is kept per session. If one busy session filled the screen, the rest would get buried.
@@ -1080,8 +1083,8 @@ export type AppState = {
   /**
    * Creates a worktree manager's slot (#76) — **before** its first branch.
    *
-   * Once created, it takes you there: it exists so you can talk to the thing you just created, so
-   * stopping at just adding a row to the list would leave the job half done.
+   * Once created, it takes the person there: it exists so they can talk to the thing they just
+   * created, so stopping at just adding a row to the list would leave the job half done.
    */
   createWorktreeManager(projectId: string, baseBranch: string): Promise<void>
 
@@ -2505,8 +2508,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     /*
-     * Wakes sessions parked in the grid ahead of time (a dogfooding finding: reviving a large codex
-     * thread measured at 7-13 seconds, and that cost belongs to codex itself, which we cannot
+     * Wakes sessions parked in the grid ahead of time (dogfooding, the Mea session: reviving a large
+     * codex thread measured at 7-13 seconds, and that cost belongs to codex itself, which we cannot
      * reduce. A cost that cannot be reduced can still be **moved to a time nobody is waiting on**).
      * Putting a session on the grid already means it is about to be watched — it needs to already be
      * alive by the time it is clicked.
@@ -2531,8 +2534,8 @@ export const useStore = create<AppState>((set, get) => ({
    * **This must be the only place that writes the snapshot.** The host replaces the layout whole,
    * so the moment a second writer saves a partial snapshot, each erases the other's fields — this
    * actually happened, when `setNotifyPolicy` saved separately with its own list, and the notify
-   * policy and history height were quietly reset by the other save. If you are adding a field, add
-   * it **to this function**.
+   * policy and history height were quietly reset by the other save. A new field has to be
+   * added **to this function**.
    */
   saveWorkspace() {
     const s = get()
@@ -3008,7 +3011,7 @@ export const useStore = create<AppState>((set, get) => ({
        * project screen.
        */
       focusedSessionId: null,
-      // The project screen exists only in the focus lane — what you picked must be shown (the same
+      // The project screen exists only in the focus lane — what the person picked must be shown (the same
       // rule as `focusSession`). This combination actually arose once onboarding started opening the
       // orchestrator view first (#63) (caught by e2e).
       view: 'focus',
@@ -4400,10 +4403,10 @@ export const useStore = create<AppState>((set, get) => ({
         notePath = record.path
       } else {
       /*
-       * If a turn is running, the request **waits for it to finish** first (measured: a handoff where
-       * the prompt merged into (steered) the turn already in progress, so the report of the work just
-       * done ended up glued to the top of the handoff note. Nothing was actually lost, but it read as
-       * "a note with its beginning cut off"). Sending only after the turn boundary makes sure the reply
+       * If a turn is running, the request **waits for it to finish** first (measured in the Mea session: a
+       * handoff where the prompt merged into (steered) the turn already in progress, so the report of the
+       * work just done ended up glued to the top of the handoff note. Nothing was actually lost, but it read
+       * as "a note with its beginning cut off"). Sending only after the turn boundary makes sure the reply
        * that follows is the handoff, whole.
        */
       const quietBy = Date.now() + 10 * 60_000
