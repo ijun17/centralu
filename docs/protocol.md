@@ -81,7 +81,8 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 
 | Group | Methods | Notes |
 |---|---|---|
-| agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2 |
+| agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession` moves the session to the trash (FR-22) |
+| trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty` | the way out of the trash (FR-22). The person's alone: no agent tool or app capability reaches it |
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |

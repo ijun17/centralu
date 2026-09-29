@@ -381,10 +381,66 @@ host test that holds that promise). If the sidebar ever does get crowded — wor
 are the plausible source — the answer belongs where the crowding is (collapsing merged
 children), not in a global hidden state.
 
+**Since 2026-09-30 a hidden-but-kept session exists again: the trash (FR-22, #204).** It is the
+shape retired here, built with what archive lacked. The way out ships with the way in (list, read,
+restore, delete for good, in Settings); deleting is not one keystroke but a dialog that says where
+the session goes and how it comes back; no agent or app can take a session out of the trash or
+delete one for good; and the trash is emptied by nothing but the person.
+
 #### FR-21. Conversation content search
 
 - M1: search session names and projects from the command palette (⌘K).
-- M2: full-text search of conversation **content** (SQLite FTS, archives included) — "where did we talk about that" is guaranteed to come up with 4 sessions over a few days.
+- M2: full-text search of conversation **content** (SQLite FTS) — "where did we talk about that" is guaranteed to come up with 4 sessions over a few days.
+- Sessions in the trash (FR-22) are **not** searched, by the person or by an agent's `recall`: their index rows are dropped when they go to the trash and rebuilt when they come back.
+
+#### FR-22. Session trash (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
+
+Deleting a session moves it to the trash. A conversation leaves this machine only when the person
+deletes it for good in **Settings → Trash**, one at a time or all at once. The reason is the
+owner's: conversations are important data, and one click in the delete dialog used to destroy one
+with no way back.
+
+- **What goes to the trash** is everything deleting used to destroy: the session row, its messages,
+  its approval rules, its commit links (`commit_sessions`), the app runs that point at it (with their
+  token counts), its attachments and its handoff note (`<data>/handoff/<project id>/<session id>.md`).
+  Its search index is the exception — dropped, not kept, which takes it out of every search and
+  frees the larger half of what it took (the index was 71MB of a 137MB store measured for #96).
+- **Files outside the database stay where they are**, and the delete dialog's two choices say what
+  goes with the session when it is deleted for good:
+  - *the tool's conversation file* (Claude JSONL, Codex rollout) stays where the tool keeps it. It is
+    the tool's file in the tool's layout, and only the tool's own delete knows that layout; left in
+    place it is also a second way back (the tool, and **+ → Past conversations**, still have it). If
+    a live session has pulled the same conversation back meanwhile, deleting for good leaves the file.
+  - *the worktree* stays in place and registered with git. Moving a worktree folder leaves git's
+    record pointing at nothing (`git worktree list` calls it prunable, and `prune` or a `gc` then
+    drops the record), and Claude files a conversation by its working directory, so a moved worktree
+    would lose the restored session its own history too.
+- **Out of reach while trashed**: the sidebar, inbox, palette, grid, conversation search (FR-21), the
+  orchestrator's `list_sessions` / `recall` / `read_session`, the apps' `host_data` `sessions.list`,
+  and the approval rules list in Settings. Every store query that reads sessions has to say what it
+  does about the trash; a host test fails on one that does not.
+- **The way back**, in Settings → Trash: each session with its name, project, when it was deleted,
+  its size, and what else goes with it; read it (read-only); restore it; delete it for good; empty
+  the trash. The total size is shown, because nothing empties the trash on its own.
+- **A restored session comes back as it was**: same id, messages, rules, commit links and app runs,
+  its index rebuilt; a live-only state (working, waiting for approval) comes back idle, as after a
+  restart. If its project was deleted meanwhile, restoring registers the folder again under the same
+  project id — so the worktree folder, the handoff notes and the rows kept with the session line up
+  again — or joins that folder if it was added again under a new id. If the folder is gone too,
+  restoring refuses and says where the folder was; the session stays readable in the trash.
+- **Deleting a project moves its sessions to the trash** instead of destroying them — the largest loss
+  one click could cause. Nobody is asked about their tool files or worktrees then, so those stay even
+  when the trash is emptied. The project's own rows (project-scope rules, usage totals, answers given
+  to its apps) go with the project as before.
+- **Nobody but the person deletes for good.** The trash is reached only through the UI's RPC; the
+  agents' tools and the apps' broker have no verb for it. An agent can put a session in the trash (the
+  worktree manager's cleanup of a proven-merged worktree does), never take one out of it.
+- Schema v39 adds `sessions.deleted_at` (NULL for a live session) and `sessions.trash` (JSON: where it
+  came from, and what to remove when it is deleted for good). A trashed session has no `project_id`;
+  its project is in `trash`, which is what lets its project be deleted without the foreign key taking
+  the session with it. Later migrations have to consider rows that belong to a trashed session.
+- Not covered: attachments of a trashed session stay under the same 500MB attachment cap as every
+  attachment, and app runs pointing at it under the app-run retention.
 
 ---
 
@@ -433,7 +489,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 
 - **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
 - **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
-- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme, **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels).
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, theme, **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22).
 
 ### 5.4 Grid view (**experimental**)
 
@@ -517,7 +573,7 @@ interface AgentAdapter {
 ### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
-- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11)
+- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11). `deleted_at` is set while the session is in the trash (FR-22, v39), and every listing filters on it
 - `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. Reads merge legacy per-delta rows, so pre-migration data behaves identically.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation

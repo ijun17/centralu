@@ -200,7 +200,8 @@ Limits:
   what to ask it. The agent's writes and commands still stop at an approval card (`safe`), but
   what it may read is whatever its session can read.
 - `sessions.list` gives session names, and an automatically named session is named after the first
-  words of its first message.
+  words of its first message. It never lists a session in the trash (FR-22), and no app capability or
+  agent tool restores or deletes one for good — only the person, in Settings.
 - fd 3 on Windows is untested (spike S-5).
 
 ## Imported apps and app links

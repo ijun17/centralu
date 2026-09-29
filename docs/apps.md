@@ -542,7 +542,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   folder's; a user-folder app reaches only user-folder apps.
 - **`host_data { name }`.** A closed list, read-only, deny by default: `sessions.list` (the names
   shown in the sidebar and each session's kind, tool, state and times, never the conversations; the
-  project's sessions for a project app, every session for a user-folder app) and `git.status` (the
+  project's sessions for a project app, every session for a user-folder app; never those in the trash, FR-22) and `git.status` (the
   project's branch and changed files; project apps only). Only names declared in `uses.host`.
 - **Asked once.** The first time an app uses a capability (an agent tool, another app, a host name),
   the person is asked where the chain started: on the approval card of the session whose agent
