@@ -680,6 +680,10 @@
  * 가짜 요소가 아니라 **실제 자식**인 이유: 마스크(축 정렬)와 회전(매 프레임)이 한
  * 요소에 있으면 마스크까지 돌아버린다. 마스크는 이 레이어가 쥐고, 그 안에서 ::before
  * 판만 돈다 — 마스크는 자식까지 자르므로 링 밖으로는 아무것도 안 샌다.
+ *
+ * 이 마스크는 **칸이 온전한 픽셀에 설 때만** 네 변을 다 남긴다. 칸의 자리가 소수점이면
+ * WebKit이 마스크를 칸과 다른 픽셀에 맞춰 한 변을 통째로 잃는다 — 그래서 그리드가 칸을
+ * 정수 픽셀에 세운다 (GridView의 wholePixelTracks, #208).
  */
 .cc-orbit-ring-layer {
   position: absolute;
@@ -725,19 +729,39 @@
  * 둘은 이유가 다르고 결과가 같다 — 그래서 선언은 한 벌이다.
  *
  * 그리드와 사이드바는 따로 끈다. 크기도 자리도 달라서 거슬리는 지점이 다르다.
+ *
+ * **그리드 칸의 회색은 덧그린 링이 아니라 칸의 테두리 자체다 (#208).** 멈춘 링은 돌
+ * 판이 없으니 마스크로 도려낼 까닭도 없다. 그런데 마스크를 그대로 두었더니 WebKit이
+ * 소수점 폭의 칸에서 마스크를 칸과 다른 픽셀에 맞춰 한 변이 통째로 사라졌다 (실측:
+ * 1배율, 세 열, 가운데 칸의 오른쪽 변). 칸의 테두리는 브라우저가 칸과 같은 픽셀에
+ * 그리므로 폭이 무엇이든 네 변이 다 선다. 칸 안의 층(접힌 입력창 z-20)은 칸의
+ * overflow-hidden에 잘려 테두리에 닿지 못하고, 칸 밖의 층(파일·깃 화면)은 그대로 칸
+ * 위에 있다 — 링이 z-30으로 지키던 두 가지를 테두리는 자리만으로 지킨다.
  */
 @media (prefers-reduced-motion: reduce) {
-  .cc-orbit::before,
-  .cc-orbit-ring-layer::before {
+  .cc-orbit::before {
     animation: none;
     background: var(--color-ash);
   }
+  .cc-orbit-ring {
+    border-color: var(--color-ash);
+  }
+  .cc-orbit-ring-layer {
+    display: none;
+  }
 }
 
-[data-spin-icon='off'] .cc-orbit::before,
-[data-spin-grid='off'] .cc-orbit-ring-layer::before {
+[data-spin-icon='off'] .cc-orbit::before {
   animation: none;
   background: var(--color-ash);
+}
+
+[data-spin-grid='off'] .cc-orbit-ring {
+  border-color: var(--color-ash);
+}
+
+[data-spin-grid='off'] .cc-orbit-ring-layer {
+  display: none;
 }
 
 /*

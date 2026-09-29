@@ -1838,10 +1838,9 @@ test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ 
 
   // 아무것도 돌지 않는다 — 이게 전력을 아끼는 조건이다
   await expect.poll(spinning).toBe(0)
-  // 그래도 표식은 남는다: 무지개 대신 밝은 회색 한 겹
-  const paint = await ringPaint()
-  expect(paint.image).toBe('none')
-  expect(paint.color).toBe('rgb(144, 144, 144)')
+  // 그래도 표식은 남는다: 무지개 대신 밝은 회색 한 겹 — 덧그린 링이 아니라 칸의 테두리 자체다 (#208)
+  await expect(page.locator('.cc-orbit-ring-layer')).toBeHidden()
+  await expect(panel).toHaveCSS('border-top-color', 'rgb(144, 144, 144)')
   // 칸이 돌고 있다는 사실 자체는 여전히 값으로 읽힌다 (테스트·보조 기술의 자리)
   await expect(panel).toHaveClass(/cc-orbit-ring/)
 
