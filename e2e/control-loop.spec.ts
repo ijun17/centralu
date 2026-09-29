@@ -1,33 +1,35 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 
 /**
- * M1 Phase 5 완료 기준. mock platform(?mock)으로 UI를 구동한다.
- * 핵심은 마지막 "관제 루프" 시나리오 — §1.3의 실제 사용 흐름이 도는지.
+ * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
+ * The core is the final "control loop" scenario — whether the actual usage flow from §1.3 runs.
  */
 
-/** 브라우저 안의 mock을 조작하는 헬퍼 (window.__mock) */
+/** Helper that drives the mock inside the browser (window.__mock) */
 async function setup(page: Page, opts: { projects?: string[] } = {}) {
   await page.goto('/?mock=1')
-  // 처음이면 소개 화면이 먼저다 (#63) — 오케스트레이터가 돌 도구 카드를 하나 고른다
+  // On first run the intro screen comes first (#63) — pick one tool card for the orchestrator to run
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-claude').click()
-  // 카드 클릭은 오케스트레이터 화면(빈 대화 + 추천 질문)으로 이어진다
+  // Clicking the card leads to the orchestrator screen (empty conversation + suggested questions)
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   for (const [i, path] of (opts.projects ?? []).entries()) {
     if (i === 0) {
       /*
-        첫 프로젝트는 빈 오케스트레이터 화면의 **탈출구**로 등록한다 (#63 —
-        대화를 강요하지 않는다). 프로젝트가 0개면 사이드바에 + 버튼이 없기 때문이다.
+        Register the first project as the **escape hatch** from the empty orchestrator screen
+        (#63 — do not force a conversation). With zero projects there is no + button in the sidebar.
       */
       await page.evaluate((p: string) => {
         ;(window as any).__mock.nextPickedDirectory = p
       }, path)
       await page.getByTestId('orchestrator-pick-folder').click()
-      // 첫 등록은 세션 만들기로 곧장 이어진다 — 여기서는 프로젝트만 필요하므로 닫는다
+      // The first registration leads straight into creating a session — here only the project is
+      // needed, so close it
       await page.getByTestId('new-session-dialog').waitFor()
       await page.keyboard.press('Escape')
     } else {
-      // 폴더 선택은 앱 전체에서 네이티브 피커 하나뿐이다 (경로 타이핑 창은 없어졌다)
+      // Folder selection is a single native picker across the whole app (the path-typing dialog is
+      // gone)
       await page.evaluate((p: string) => {
         ;(window as any).__mock.nextPickedDirectory = p
       }, path)
@@ -38,24 +40,25 @@ async function setup(page: Page, opts: { projects?: string[] } = {}) {
 }
 
 async function newSession(page: Page, projectName: string, prompt: string) {
-  // 새 세션은 다이얼로그를 거친다 (FR-7: 도구·모델·권한을 고른다)
+  // A new session goes through a dialog (FR-7: pick the tool, model and permission)
   await page.getByTestId(`project-menu-${projectName}`).click()
   await page.getByTestId(`new-session-${projectName}`).click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
 }
 
 /**
- * 모델·강도·권한·에이전트는 입력창 아래 **메뉴 안에** 있다 (셀렉터 네 개가 아니라).
- * `scope`를 주면 그 칸의 메뉴다 — 그리드는 칸마다 입력창을 갖는다.
+ * The model, effort, permission and agent all live **inside a menu** below the composer (not
+ * four separate selectors). When `scope` is given, it is that panel's menu — the grid gives each
+ * panel its own composer.
  */
 async function pickSetting(page: Page, testId: string, scope?: Locator) {
   const root = scope ?? page
-  // 이미 열려 있으면 그대로 쓴다 — 모델을 고르면 메뉴가 열린 채 남으므로(아래 계약),
-  // 무조건 누르면 토글이 메뉴를 닫아버린다
+  // If it is already open, use it as is — picking a model leaves the menu open (the contract
+  // below), so clicking unconditionally would let the toggle close the menu
   if (!(await root.getByTestId('settings-menu').isVisible())) {
     await root.getByTestId('settings-open').click()
   }
@@ -63,7 +66,7 @@ async function pickSetting(page: Page, testId: string, scope?: Locator) {
   await root.getByTestId(testId).click()
 }
 
-/** mock에 승인 요청을 주입 */
+/** Inject an approval request into the mock */
 async function injectApproval(page: Page, sessionIdx: number, detail: Record<string, unknown>) {
   return page.evaluate(
     ({ idx, d }) => {
@@ -87,49 +90,53 @@ async function emitEvent(page: Page, sessionIdx: number, event: Record<string, u
   )
 }
 
-test('프로젝트 등록 → 사이드바 표시 (T5-2)', async ({ page }) => {
+test('Registering a project shows it in the sidebar (T5-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await expect(page.getByTestId('project-alpha')).toBeVisible()
-  // 브랜치는 이름 아래에 줄을 만들지 않는다 — 물어볼 때(호버) 답한다
+  // The branch does not add a line under the name — it answers only when asked (hover)
   await page.getByTestId('project-header-alpha').hover()
   await expect(page.getByTestId('project-tip-alpha')).toContainText('main')
 })
 
-test('폴더 선택을 취소하면 아무것도 등록되지 않는다', async ({ page }) => {
+test('Canceling the folder picker registers nothing', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = null
   })
   await page.getByTestId('add-project').click()
-  // 창도 없고 오류도 없다 — 고르지 않았다는 것은 실패가 아니다
+  // No dialog and no error — not picking anything is not a failure
   await expect(page.getByTestId('toast')).toHaveCount(0)
   const count = await page.evaluate(() => Object.keys((window as any).__store.getState().projects).length)
   expect(count).toBe(1)
 })
 
 /**
- * 첫 실행 (#63): **오케스트레이터를 먼저 만난다.**
+ * First run (#63): **the person meets the orchestrator first.**
  *
- * 목표는 효율이 아니라 습관이다 — 첫 실행에서 오케스트레이터에게 물어보는 경험을
- * 겪지 않은 사람은 나중에도 누르지 않는다. 소개 화면의 카드가 곧 도구 감지 표시이고,
- * 카드 클릭은 설정만 적는다 (프로세스는 첫 질문에서야 뜬다 — 지연 기동).
+ * The goal is a habit, not efficiency — someone who never has the experience of asking the
+ * orchestrator a question on first run will not click it later either. The cards on the intro
+ * screen double as the tool-detection display, and clicking a card only records the setting
+ * (the process only starts at the first question — lazy startup).
  */
-test('첫 실행: 소개 화면 → 카드 선택 → 빈 오케스트레이터 대화 (세션은 아직 없다)', async ({ page }) => {
+test('First run: intro screen -> pick a card -> empty orchestrator conversation (no session yet)', async ({
+  page,
+}) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
-  // 앱이 무엇인지가 여전히 첫 문장이고, 오케스트레이터의 역할이 눈에 띄게 선다
-  // 한 줄이 전부다 — 이 화면이 파는 것은 "말을 걸 상대가 있다" 하나다
+  // What the app is remains the first sentence, and the orchestrator's role stands out clearly
+  // One line is all there is — what this screen sells is just "there is someone to talk to"
   await expect(page.getByTestId('intro-role')).toContainText('orchestrator')
-  // 소개를 읽는 동안에도 사이드바는 전부 살아 있다 — 흐름을 강요하지 않는다
+  // The sidebar stays fully live even while reading the intro — it does not force the flow
   await expect(page.getByTestId('add-project')).toBeVisible()
   await expect(page.getByTestId('orchestrator-button')).toBeVisible()
   await expect(page.getByTestId('grid-button')).toBeVisible()
-  // 나중에 바꿀 수 있다는 안내가 선택의 부담을 낮춘다
+  // Telling the person they can change this later lowers the weight of the choice
   await expect(page.getByTestId('intro')).toContainText('You can change this later')
 
   await page.getByTestId('intro-card-claude').click()
 
-  // 빈 대화 + 추천 질문 3개 + 탈출구 — 그리고 **세션은 아직 만들어지지 않았다**
+  // An empty conversation + three suggested questions + the escape hatch — and **no session has
+  // been created yet**
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   await expect(page.getByTestId('suggest-create-project')).toBeVisible()
   await expect(page.getByTestId('orchestrator-pick-folder')).toBeVisible()
@@ -137,7 +144,7 @@ test('첫 실행: 소개 화면 → 카드 선택 → 빈 오케스트레이터 
   expect(sessionCount).toBe(0)
 })
 
-test('추천 질문 클릭 = 즉시 전송 — 그 순간에야 오케스트레이터가 태어난다 (#63 지연 기동)', async ({
+test('Clicking a suggested question sends it immediately — only then is the orchestrator born (#63 lazy startup)', async ({
   page,
 }) => {
   await page.goto('/?mock=1')
@@ -147,11 +154,12 @@ test('추천 질문 클릭 = 즉시 전송 — 그 순간에야 오케스트레�
 
   await page.getByTestId('suggest-capabilities').click()
 
-  // 질문이 사용자 메시지로 대화에 선다 (입력창 채우기 같은 중간 단계가 없다)
+  // The question lands in the conversation as a user message (no intermediate step like filling
+  // the composer)
   await expect(page.getByTestId('msg-user').first()).toContainText('What can you do as the orchestrator?')
-  // 카드는 메시지 수의 함수다 — 첫 마디가 생겼으니 사라진다
+  // The card is a function of the message count — now that a first message exists, it disappears
   await expect(page.getByTestId('orchestrator-suggestions')).toHaveCount(0)
-  // 소개 화면에서 고른 도구가 오케스트레이터의 도구다
+  // The tool picked on the intro screen is the orchestrator's tool
   const tool = await page.evaluate(() => {
     const m = (window as any).__mock
     return [...m.sessions.values()].find((s: any) => s.projectId === null)?.tool
@@ -159,45 +167,52 @@ test('추천 질문 클릭 = 즉시 전송 — 그 순간에야 오케스트레�
   expect(tool).toBe('codex')
 })
 
-test('소개 화면에서도 프로젝트를 만들 수 있다 — 사이드바가 함께 선다 (#63)', async ({ page }) => {
+test('A project can be created from the intro screen too — the sidebar appears alongside it (#63)', async ({
+  page,
+}) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
 
-  // 도구 카드를 고르지 않고, 소개를 읽던 자리에서 바로 등록한다
+  // Without picking a tool card, register right from where the intro was being read
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
   })
   await page.getByTestId('add-project').click()
 
-  // 프로젝트가 생기면 처음인 사람이 아니다 — 소개는 물러나고 보통의 앱이 선다
+  // Once a project exists, this is no longer a first-time person — the intro steps back and the
+  // ordinary app appears
   await expect(page.getByTestId('project-alpha')).toBeVisible()
   await expect(page.getByTestId('intro')).toHaveCount(0)
   await expect(page.getByTestId('orchestrator-button')).toBeVisible()
 })
 
 /**
- * 소개를 건너뛰는 길도 열려 있어야 한다 (#63).
+ * A way to skip the intro must also stay open (#63).
  *
- * 한때 소개 옆 사이드바에서 뷰 전환 버튼을 뺐다 — 눌러도 화면이 안 바뀌니
- * 죽은 클릭이라는 이유였다. 진단은 맞고 처방이 틀렸다: 감출 게 아니라 동작하게
- * 하면 된다. 감추면 "대화를 강요하지 않는다"면서 '소개 읽기'를 강요하게 된다.
+ * At one point the view-switch buttons were removed from the sidebar next to the intro — the
+ * reasoning was that clicking them did not change the screen, so they were dead clicks. The
+ * diagnosis was right and the fix was wrong: the answer is not to hide them but to make them
+ * work. Hiding them means forcing "reading the intro" while claiming "we do not force a
+ * conversation".
  */
-test('소개는 건너뛸 수 있다 — 그리드 버튼이 실제로 동작한다 (#63)', async ({ page }) => {
+test('The intro can be skipped — the grid button actually works (#63)', async ({ page }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
 
-  // 도구 카드를 고르지 않고 그리드로 간다
+  // Go to the grid without picking a tool card
   await page.getByTestId('grid-button').click()
 
   await expect(page.getByTestId('grid')).toBeVisible()
   await expect(page.getByTestId('intro')).toHaveCount(0)
 
-  // 지나온 소개는 다시 나오지 않는다 (다시 켜도)
+  // The intro that has already been passed does not come back (even after reloading)
   await page.reload()
   await expect(page.getByTestId('intro')).toHaveCount(0)
 })
 
-test('첫 실행 탈출구: 대화를 강요하지 않는다 — 폴더를 고르면 세션 만들기로 이어진다', async ({ page }) => {
+test('First-run escape hatch: does not force a conversation — picking a folder leads into creating a session', async ({
+  page,
+}) => {
   await page.goto('/?mock=1')
   await page.getByTestId('intro-card-claude').click()
   await page.evaluate(() => {
@@ -205,26 +220,30 @@ test('첫 실행 탈출구: 대화를 강요하지 않는다 — 폴더를 고�
   })
   await page.getByTestId('orchestrator-pick-folder').click()
 
-  // 등록으로 끝나지 않는다 — 다음 걸음(세션 만들기)이 그 프로젝트 자리에서 열린다
+  // It does not stop at registration — the next step (creating a session) opens right there for
+  // that project
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
 /**
- * 제안 (#63): propose_project는 **가리키는 것이 실행의 전부**다.
+ * Proposal (#63): for propose_project, **pointing is the entire action**.
  *
- * 대화 안에 두 번째 폴더 피커를 두면 사이드바의 Add project와 같은 일을 하는 문이
- * 둘이 되고, 처음 보는 사람은 "프로젝트는 오케스트레이터에게 시키는 것"으로 배운다.
- * 문은 앱에 하나여야 하고, 오케스트레이터는 그 문이 어디인지 알려줄 뿐이다.
+ * Putting a second folder picker inside the conversation would create two doors that do the
+ * same thing as the sidebar's Add project, and a first-time person would learn that "a project
+ * is something you ask the orchestrator to do". There must be one door in the app, and the
+ * orchestrator only tells the person where it is.
  */
-test('프로젝트 제안: 대화에는 버튼이 없고, 사이드바의 Add project에 불이 켜진다', async ({ page }) => {
+test('Project proposal: no button in the conversation, but the sidebar Add project lights up', async ({
+  page,
+}) => {
   await page.goto('/?mock=1')
   await page.getByTestId('intro-card-claude').click()
   await page.getByTestId('suggest-create-project').click()
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
 
-  // 불이 켜지기 전에는 평범한 버튼이다
+  // Before it lights up, it is an ordinary button
   await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
 
   await page.evaluate(() => {
@@ -243,13 +262,14 @@ test('프로젝트 제안: 대화에는 버튼이 없고, 사이드바의 Add pr
     })
   })
 
-  // 대화에 남는 것은 위치를 알려주는 한 줄이다 — 누를 것이 아니다
+  // What remains in the conversation is one line pointing to the location — not something to click
   await expect(page.getByTestId('project-proposal')).toContainText('Add project')
   await expect(page.getByTestId('project-proposal').locator('button')).toHaveCount(0)
-  // 그리고 진짜 문에 불이 켜진다
+  // And the real door lights up
   await expect(page.getByTestId('add-project')).toHaveAttribute('data-hint', 'true')
 
-  // 가리킨 문으로 들어가면 불은 꺼진다 — 지나간 안내가 남아 반짝이면 잔소리다
+  // Once the pointed-to door is used, the light turns off — a hint that keeps blinking after it
+  // has done its job is nagging
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = '/tmp/proposed'
   })
@@ -258,13 +278,15 @@ test('프로젝트 제안: 대화에는 버튼이 없고, 사이드바의 Add pr
   await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
 })
 
-test('가리킨 뒤 다른 말을 걸면 불이 꺼진다 — 화제가 옮겨갔다 (#63)', async ({ page }) => {
+test('Starting a different topic after the pointer turns the light off — the subject has moved on (#63)', async ({
+  page,
+}) => {
   await page.goto('/?mock=1')
   await page.getByTestId('intro-card-claude').click()
   await page.getByTestId('suggest-create-project').click()
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
 
-  // 오케스트레이터가 propose_project를 부른 상황을 재현한다
+  // Reproduce the situation where the orchestrator has called propose_project
   await page.evaluate(() => {
     const m = (window as any).__mock
     const orc = [...m.sessions.values()].find((s: any) => s.projectId === null)
@@ -282,22 +304,22 @@ test('가리킨 뒤 다른 말을 걸면 불이 꺼진다 — 화제가 옮겨�
   })
   await expect(page.getByTestId('add-project')).toHaveAttribute('data-hint', 'true')
 
-  // 프로젝트를 만들지 않고 다른 이야기를 시작한다
+  // Start a different conversation without creating the project
   await page.getByTestId('prompt-input').fill('never mind — what can you do?')
   await page.getByTestId('prompt-input').press('Enter')
 
-  // 안내는 여기서 끝난다. 계속 반짝이면 안내가 아니라 잔소리다
+  // The hint ends here. If it keeps blinking, it is nagging, not a hint.
   await expect(page.getByTestId('add-project')).not.toHaveAttribute('data-hint', 'true')
 })
 
 /**
- * 마지막에 고른 도구가 그 프로젝트의 기본값이 된다.
+ * The last tool picked becomes that project's default.
  *
- * default_tool은 프로젝트 생성 시 'claude'로 박힌 뒤 갱신되는 자리가 없었다 —
- * codex를 쓰는 사람은 새 세션을 만들 때마다 **영원히** 필을 다시 눌러야 했다.
- * 설정 항목이 아니라 세션을 만든 행위가 이 사실을 말한다.
+ * default_tool used to be hardcoded to 'claude' at project creation with no place that updated
+ * it afterward — a person using codex had to reselect it **forever**, every time they created a
+ * new session. The act of creating a session records this fact, not a settings field.
  */
-test('앱이 마지막에 쓴 도구를 기억한다 — 다음 세션은 거기서 시작한다', async ({ page }) => {
+test('The app remembers the last tool used — the next session starts from there', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -307,7 +329,8 @@ test('앱이 마지막에 쓴 도구를 기억한다 — 다음 세션은 거기
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 두 번째 창은 codex로 열린다 (aria-pressed가 아니라 실제 생성 파라미터로 확인한다)
+  // The second window opens with codex (checked via the actual creation parameters, not
+  // aria-pressed)
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
@@ -317,26 +340,27 @@ test('앱이 마지막에 쓴 도구를 기억한다 — 다음 세션은 거기
 })
 
 /**
- * 누르는 곳과 나타나는 곳이 붙어 있어야 한다 (이슈 #4).
+ * Where the person clicks and where the result appears must be adjacent (issue #4).
  *
- * 예전엔 상단 바 오른쪽 끝이었다 — 화면 반대편을 눌러 놓고 결과는 왼쪽에서 찾았다.
- * 눈으로만 맞추면 다시 멀어지므로 좌표로 못 박는다.
+ * It used to be at the far right of the top bar — the person clicked one side of the screen and
+ * had to find the result on the other side. Relying on visual judgment alone lets them drift
+ * apart again, so this pins it down with coordinates.
  */
-test('Add project 버튼은 사이드바 안에, 프로젝트 목록 아래에 있다', async ({ page }) => {
+test('The Add project button sits inside the sidebar, below the project list', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const sidebar = (await page.getByTestId('sidebar').boundingBox())!
   const add = (await page.getByTestId('add-project').boundingBox())!
   const project = (await page.getByTestId('project-alpha').boundingBox())!
 
-  // 사이드바 안이다 (상단 바가 아니라)
+  // It is inside the sidebar (not the top bar)
   expect(add.x).toBeGreaterThanOrEqual(sidebar.x - 1)
   expect(add.x + add.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
-  // 새 프로젝트가 붙는 자리(목록 끝) 바로 아래다
+  // Right below where a new project is appended (the end of the list)
   expect(add.y).toBeGreaterThanOrEqual(project.y + project.height - 1)
 })
 
-test('세션 생성 → 대화 스트리밍 렌더 (T5-3)', async ({ page }) => {
+test('Creating a session renders the conversation stream (T5-3)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '안녕하세요')
   await expect(page.getByTestId('msg-user')).toContainText('안녕하세요')
@@ -347,41 +371,66 @@ test('세션 생성 → 대화 스트리밍 렌더 (T5-3)', async ({ page }) => 
 })
 
 /*
- * 사이에 사람의 말이 없는 두 답은 두 덩어리다 (#77). 백그라운드 작업이 끝나 새 턴이 서면 앞의 답에 공백 없이 붙어
- * "…still running.All six reviews are in."으로 보였다. 실시간으로 받아도, 기록에서 다시 그려도 같아야 한다.
+ * Two replies with no human message between them are two separate chunks (#77). When a
+ * background task finished and a new turn started, it used to butt up against the previous
+ * reply with no space, showing as "...still running.All six reviews are in." This must look
+ * the same whether received live or redrawn from the transcript.
  */
-test('사람의 말 없이 이어진 두 답은 두 덩어리로 그려진다 — 실시간도, 기록도 (#77)', async ({ page }) => {
+test('Two replies with no human message between them render as two chunks — live and from the transcript alike (#77)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '리뷰 돌려줘')
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'One review ' })
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'is still running.' })
-  // 턴이 끝나고, 사람의 말 없이 새 턴이 선다
+  // The turn ends, and a new turn starts with no human message
   await emitEvent(page, 0, { type: 'turn_complete' })
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'All six reviews are in.' })
-  await expect(page.getByTestId('msg-assistant')).toHaveText(['One review is still running.', 'All six reviews are in.'])
+  await expect(page.getByTestId('msg-assistant')).toHaveText([
+    'One review is still running.',
+    'All six reviews are in.',
+  ])
 
-  // 기록 끝에 이웃한 두 답이 저장된 세션을 연다 — 기록 가져오기가 답마다 행을 쓴 모양
+  // Open a session where two adjacent replies are stored at the end of the transcript — the shape
+  // produced when history import writes one row per reply
   const id = await page.evaluate(async () => {
     const m = (window as any).__mock
-    const project = Object.values((window as any).__store.getState().projects)[0] as { id: string; path: string }
+    const project = Object.values((window as any).__store.getState().projects)[0] as {
+      id: string
+      path: string
+    }
     const info = await m.agents.createSession({ projectId: project.id, cwd: project.path, tool: 'claude' })
     m.emit({ type: 'session_created', sessionId: info.id, session: info })
-    const row = (seq: number, role: string, text: string) => ({ sessionId: info.id, seq, role, kind: 'text', payload: { text }, ts: Date.now() })
-    m.messages.set(info.id, [row(1, 'user', '가져온 질문'), row(2, 'assistant', 'First imported reply.'), row(3, 'assistant', 'Second imported reply.')])
+    const row = (seq: number, role: string, text: string) => ({
+      sessionId: info.id,
+      seq,
+      role,
+      kind: 'text',
+      payload: { text },
+      ts: Date.now(),
+    })
+    m.messages.set(info.id, [
+      row(1, 'user', '가져온 질문'),
+      row(2, 'assistant', 'First imported reply.'),
+      row(3, 'assistant', 'Second imported reply.'),
+    ])
     return info.id as string
   })
   await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), id)
   await expect(page.getByTestId('msg-user')).toHaveText('가져온 질문')
-  await expect(page.getByTestId('msg-assistant')).toHaveText(['First imported reply.', 'Second imported reply.'])
+  await expect(page.getByTestId('msg-assistant')).toHaveText([
+    'First imported reply.',
+    'Second imported reply.',
+  ])
 })
 
-test('첫 프롬프트가 세션 이름이 된다 (T5-6, FR-18)', async ({ page }) => {
+test('The first prompt becomes the session name (T5-6, FR-18)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'auth 모듈 리팩터링')
   await expect(page.getByTestId('session-name')).toContainText('auth 모듈 리팩터링')
 })
 
-test('도구 카드: 조회성은 접힘, 변경은 펼침 (T5-3)', async ({ page }) => {
+test('Tool card: read-only calls are collapsed, mutating calls are expanded (T5-3)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'x')
   await emitEvent(page, 0, {
@@ -395,7 +444,7 @@ test('도구 카드: 조회성은 접힘, 변경은 펼침 (T5-3)', async ({ pag
     ok: true,
     summary: `첫 줄\n둘째 줄\n셋째 줄\n넷째 줄\n파일 내용 200줄`,
   })
-  // 조회성 도구는 접힌 채로 시작한다 — 맛보기만 보이고 뒷부분은 감춘다
+  // Read-only tools start collapsed — only a preview shows, the rest stays hidden
   await expect(page.getByTestId('tool-card')).toBeVisible()
   await expect(page.getByTestId('tool-card-output')).toContainText('첫 줄')
   await expect(page.getByTestId('tool-card-output')).not.toContainText('파일 내용 200줄')
@@ -403,45 +452,48 @@ test('도구 카드: 조회성은 접힘, 변경은 펼침 (T5-3)', async ({ pag
   await expect(page.getByTestId('tool-card-output')).toContainText('파일 내용 200줄')
 })
 
-test('승인: 카드에서 키보드 y로 허용 (T5-4)', async ({ page }) => {
+test('Approval: pressing y on the card approves it (T5-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'x')
   await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
 
   await expect(page.getByTestId('approval-card')).toBeVisible()
   await expect(page.getByTestId('approval-detail')).toContainText('npm run build')
-  await page.locator('body').click() // 입력창 밖으로 포커스
+  await page.locator('body').click() // Move focus outside the composer
   await page.keyboard.press('y')
   await expect(page.getByTestId('approval-card')).toBeHidden()
 })
 
-test('승인: 항상 허용은 범위를 알려준다 (T5-4)', async ({ page }) => {
+test('Approval: "always allow" states its scope (T5-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'x')
   await injectApproval(page, 0, { kind: 'command', command: 'npm test --watch', cwd: '/tmp/alpha' })
   await page.getByTestId('approve-always').click()
   await expect(page.getByTestId('toast')).toContainText('this session')
-  // 제안은 승인한 명령 그대로다 — 예전의 'npm test*' 식 확장은 rm -rf 계열에서
-  // 승인 범위를 위험하게 넓혔다 (core suggestMatcher 회귀 테스트가 지킨다)
+  // The suggestion is exactly the approved command — the old 'npm test*'-style expansion
+  // dangerously widened the approval scope for commands like rm -rf (guarded by the core
+  // suggestMatcher regression test)
   await expect(page.getByTestId('toast')).toContainText('npm test --watch')
 })
 
 /**
- * 다른 세션의 승인은 **그 세션의 카드에서** 답한다 (사용자 요청 2026-09-10).
+ * An approval from another session is answered **on that session's own card** (requested by the
+ * person, 2026-09-10).
  *
- * 창 맨 위에 띠가 있었다 — 비포커스 세션의 요청을 거기서 바로 허용하는 자리. 뜨고
- * 사라질 때마다 **화면 전체가 밀렸고**(레이아웃 시프트), 읽던 줄과 누르려던 버튼이
- * 같이 움직였다. 띠를 걷어낸 지금, 길은 인박스 하나다: 숫자가 알리고, 누르면 그 세션에
- * 내려앉고, 카드에서 답한다.
+ * There used to be a banner at the top of the window — a place to approve a request from an
+ * unfocused session right there. Every time it appeared or disappeared, **the whole screen
+ * shifted** (layout shift), moving the line being read and the button about to be clicked. Now
+ * that the banner is gone, there is one path: the inbox. The count announces it, clicking lands
+ * on that session, and the card is where the person answers.
  */
-test('다른 세션의 승인은 인박스를 거쳐 그 세션의 카드에서 답한다', async ({ page }) => {
+test('An approval from another session is answered on that session card via the inbox', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // 포커스는 beta
+  await newSession(page, 'beta', 'B작업') // Focus is on beta
 
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
-  // 화면 맨 위에 끼어드는 띠는 없다 — 대신 계기판의 숫자가 늘어난다
+  // No banner interrupts at the top of the screen — instead the dashboard's count goes up
   await expect(page.getByTestId('approval-banner')).toHaveCount(0)
   await page.getByTestId('counter').click()
   await page.locator('[data-testid^="inbox-item-"]').first().click()
@@ -453,10 +505,11 @@ test('다른 세션의 승인은 인박스를 거쳐 그 세션의 카드에서 
 })
 
 /**
- * 목록은 **누른 자리 바로 아래**에 뜬다 (사용자 요청 2026-09-09).
- * 가운데 모달이던 동안에는 숫자를 보고 목록을 여는 한 동작이 눈을 두 번 움직이게 했다.
+ * The list appears **directly below where the person clicked** (requested by the person,
+ * 2026-09-09). While it was a centered modal, the single action of seeing the count and opening
+ * the list made the eyes move twice.
  */
-test('대기 목록은 상단 바 숫자 밑으로 내려온다', async ({ page }) => {
+test('The waiting list drops down below the top-bar count', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'A')
   await emitEvent(page, 0, { type: 'turn_complete' })
@@ -466,8 +519,9 @@ test('대기 목록은 상단 바 숫자 밑으로 내려온다', async ({ page 
   await expect(panel).toBeVisible()
 
   /*
-   * 내려오는 애니메이션(cc-drop)이 끝난 뒤에 잰다 — 도중에 재면 아직 버튼 위에 걸쳐 있다.
-   * poll이 그 자리를 기다린다 (재보고 정한 규칙: 시작 위치가 실제로 버튼 위였다).
+   * Measure only after the drop-down animation (cc-drop) finishes — measuring mid-animation
+   * still catches it hanging over the button. poll() waits it out (a rule set after measuring:
+   * the starting position really was over the button).
    */
   const gap = async () => {
     const c = (await page.getByTestId('counter').boundingBox())!
@@ -476,15 +530,18 @@ test('대기 목록은 상단 바 숫자 밑으로 내려온다', async ({ page 
   }
   await expect.poll(async () => (await gap()).below).toBeGreaterThanOrEqual(0)
   const g = await gap()
-  expect(g.below).toBeLessThan(24) // 붙어 있다 (멀리 떨어진 모달이 아니다)
-  expect(g.dx).toBeLessThan(24) // 왼쪽 모서리가 버튼과 맞는다
+  expect(g.below).toBeLessThan(24) // It is adjacent (not a modal off in the distance)
+  expect(g.dx).toBeLessThan(24) // The left edge lines up with the button
 })
 
 /**
- * 계기판의 숫자는 하나다 (사용자 요청 2026-09-09 — FR-12의 분리 표기를 접었다).
- * 종류는 목록의 줄이 말하고, 상단 바는 **긴급함을 밝기로** 나른다.
+ * The dashboard has a single count (requested by the person, 2026-09-09 — FR-12's separate
+ * counts were dropped). The kind is told by each row in the list, and the top bar conveys
+ * **urgency through brightness**.
  */
-test('전역 카운터는 기다리는 것을 하나로 세고, 밝기로 급한지를 말한다', async ({ page }) => {
+test('The global counter counts everything waiting as one, and brightness signals urgency', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'A')
   await newSession(page, 'alpha', 'B')
@@ -494,11 +551,13 @@ test('전역 카운터는 기다리는 것을 하나로 세고, 밝기로 급한
 
   const count = page.getByTestId('count-waiting')
   await expect(count).toContainText('02')
-  // 승인이 하나라도 있으면 순백 — 순백은 나를 막고 있는 것의 몫이다
+  // Pure white if even one approval is pending — pure white is reserved for what is blocking the person
   await expect(count).toHaveClass(/beacon/)
 })
 
-test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 시나리오)', async ({ page }) => {
+test('Control loop: clearing five waiting items using only the keyboard (T5-5 core scenario)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   for (const [proj, name] of [
     ['alpha', 'A1'],
@@ -510,21 +569,21 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
     await newSession(page, proj, name)
   }
 
-  // 승인 2 + 응답대기 3
+  // 2 approvals + 3 replies waiting
   await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
   await injectApproval(page, 3, { kind: 'command', command: 'pytest', cwd: '/tmp/beta' })
   for (const idx of [1, 2, 4]) await emitEvent(page, idx, { type: 'turn_complete' })
 
   await expect(page.getByTestId('count-waiting')).toContainText('05')
 
-  // 인박스 열기 — 긴급도 순으로 정렬돼 있어야 한다
+  // Open the inbox — it must be sorted by urgency
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()
   const rows = page.locator('[data-testid^="inbox-item-"]')
   await expect(rows).toHaveCount(5)
   await expect(rows.first()).toContainText('Needs approval')
 
-  // 승인 2건을 처리 (Enter로 점프 → y)
+  // Handle the 2 approvals (jump with Enter -> y)
   for (let i = 0; i < 2; i++) {
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('approval-card')).toBeVisible()
@@ -534,17 +593,18 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
     await page.keyboard.press('Meta+i')
   }
   /*
-   * 승인을 다 처리하면 **순백이 내려간다** — 막고 있던 것이 사라졌다는 뜻이다.
-   * 숫자 자체는 여기서 못 박지 않는다: 허용된 세션이 곧바로 다음 답을 기다리게 되면
-   * 그만큼 다시 세어지고, 그건 이 시험이 보려는 사실(급한 것이 남았나)이 아니다.
+   * Once every approval is handled, **the pure white goes away** — meaning whatever was blocking
+   * the person is gone. The exact count is not pinned down here: if an approved session
+   * immediately starts waiting for the next reply, it gets counted again, and that is not the
+   * fact this test is checking (whether anything urgent remains).
    */
   await expect(page.getByTestId('count-waiting')).not.toHaveClass(/beacon/)
 
   /*
-    남은 응답대기 3건은 **답을 해서** 비운다.
-    한때 `d` 한 키로 비울 수 있었는데, 그건 세션을 아카이브하는 것이었고 되돌리는 문이
-    없어서 사람 눈에는 삭제였다 (2026-09-02 폐기). 인박스는 상태의 뷰라, 비우는 방법은
-    상태를 바꾸는 것 하나뿐이다 — 그게 곧 답하기다.
+    Clear the remaining 3 items waiting for a reply by **actually replying**.
+    There used to be a single `d` key that cleared them, but that archived the session with no
+    way back, so to the person it looked like deletion (dropped 2026-09-02). The inbox is a view
+    over state, so the only way to clear it is to change the state — which means replying.
   */
   for (let i = 0; i < 5; i++) {
     const remaining = await page.locator('[data-testid^="inbox-item-"]').count()
@@ -557,14 +617,14 @@ test('관제 루프: 대기 5개를 키보드만으로 비운다 (T5-5 핵심 �
   await expect(page.getByTestId('inbox-empty')).toContainText('Nothing waiting')
 })
 
-test('다음 대기로 이동 단축키는 승인부터 순회한다 (T5-5, FR-17)', async ({ page }) => {
+test('The "jump to next waiting" shortcut cycles through approvals first (T5-5, FR-17)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '응답대기 세션')
   await newSession(page, 'alpha', '승인대기 세션')
   await emitEvent(page, 0, { type: 'turn_complete' })
   await injectApproval(page, 1, { kind: 'command', command: 'x', cwd: '/tmp' })
 
-  // 응답대기 세션에서 출발해도 순회는 긴급도 순서(승인 먼저)를 따른다
+  // Even starting from the reply-waiting session, cycling follows urgency order (approvals first)
   const firstId = await page.evaluate(() => {
     const m = (window as any).__mock
     return [...(m as any).sessions.values()][0].id
@@ -577,16 +637,17 @@ test('다음 대기로 이동 단축키는 승인부터 순회한다 (T5-5, FR-1
   await expect(page.getByTestId('session-name')).toContainText('승인대기 세션')
 })
 
-test('안읽음 표시와 읽음 처리 (T5-6, FR-16)', async ({ page }) => {
+test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // 포커스 = beta
+  await newSession(page, 'beta', 'B작업') // Focus = beta
 
   /*
-    안읽음의 화면 표현은 **이름 밝기 하나다** (점은 지웠다 — 같은 사실을 상태 링·이름과
-    세 번째로 말하는 표식이었다). 테스트는 색 클래스가 아니라 줄의 data-unread를 본다.
+    The on-screen representation of unread is **the name's brightness alone** (the dot was
+    removed — it was a third way of saying the same fact already told by the status ring and the
+    name). The test checks the row's data-unread attribute, not a color class.
   */
-  // 비포커스 세션에 새 내용 → 안읽음
+  // New content in an unfocused session -> unread
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '결과입니다' })
   const sessionId = await page.evaluate(() => {
     const m = (window as any).__mock
@@ -595,33 +656,35 @@ test('안읽음 표시와 읽음 처리 (T5-6, FR-16)', async ({ page }) => {
   const row = page.getByTestId(`session-row-${sessionId}`)
   await expect(row).toHaveAttribute('data-unread', 'true')
 
-  // 포커스하면 읽음 처리 (3초 규칙)
+  // Focusing marks it read (the 3-second rule)
   await row.click()
   await expect(row).not.toHaveAttribute('data-unread', 'true', { timeout: 8000 })
 
   /*
-    **보고 있는 줄은 애초에 안읽음으로 그리지 않는다.**
+    **The row currently being watched is never drawn as unread in the first place.**
 
-    "내가 딴 데 있는 동안 움직였다"가 뜻이므로 눈앞의 대화에 붙으면 소음이다.
-    그리고 실제로 붙어 있었다 — 읽음 처리 타이머가 session 객체에 매여 있어서 턴이
-    도는 내내 3초를 못 채웠다 (도그푸딩: "세션 돌아갈 때 하얀 점").
+    Unread means "this moved while I was elsewhere", so attaching it to the conversation in front
+    of the person is noise. And it really did happen — the read-marking timer was tied to the
+    session object, so it never accumulated the 3 seconds while a turn was running (dogfooding
+    finding: "the white dot while the session is running").
 
-    시간 제한이 그 3초 **아래**여야 한다. 기본값(5초)으로 두면 읽음 타이머가 표식을
-    먼저 끄고 폴링이 그 뒤를 잡아 통과해 버린다 — 실제로 고치기 전 코드에서 통과했다.
-    묻는 것은 "잠깐이라도 켜졌나"이므로 그 3초 안에 본다.
+    The test's time limit must be **below** that 3 seconds. Leaving it at the default (5 seconds)
+    lets the read timer clear the marker first and the poll catch it afterward and pass — that is
+    exactly what happened with the code before the actual fix. What is being asked is "did it turn
+    on even briefly", so this checks within those 3 seconds.
   */
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: '보는 중에 더 왔다' })
   await expect(row).not.toHaveAttribute('data-unread', 'true', { timeout: 1000 })
 })
 
-test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) => {
+test('Context gauge and limit display (FR-14, FR-9)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'x')
 
   /*
-   * 한 턴도 끝나지 않은 세션은 값이 **없다** — 도구는 턴 끝에 한 번 답한다.
-   * '모름'과 '0%'는 다른 말이므로 다르게 보여야 한다: 값이 없는데 0%로 그리면
-   * "아직 하나도 안 썼다"는 거짓말이 된다.
+   * A session where no turn has finished yet has **no value** — the tool reports once per
+   * finished turn. "Unknown" and "0%" are different statements and must look different: drawing
+   * 0% when there is no value would falsely claim "nothing has been used yet".
    */
   await expect(page.getByTestId('context-gauge')).toContainText('—')
   await emitEvent(page, 0, { type: 'context_update', used: 0, window: 200000, exactness: 'exact' })
@@ -635,65 +698,73 @@ test('컨텍스트 게이지와 한도 표시 (FR-14, FR-9)', async ({ page }) =
 })
 
 /**
- * 컨텍스트 눈금이 재시작 뒤 비어 있었다 (이슈 #48).
+ * The context gauge was empty after a restart (issue #48).
  *
- * 읽은 값은 처음부터 옳았다 — 아무도 적어두지 않았을 뿐이라, 다시 켜면 그 세션이
- * **다시 한 턴을 돌기 전까지** 눈금이 비어 있었다. 화면에는 고장 난 계기로 보였다.
+ * The read value was correct from the start — it simply was not persisted anywhere, so on
+ * restart the gauge stayed empty until that session **ran another turn**. On screen it looked
+ * like a broken gauge.
  *
- * 저장은 host의 몫이고 그쪽은 store·manager 테스트가 지킨다. 여기서 지키는 것은 그다음
- * 한 칸이다: 목록에 실려 온 값이 **화면까지 도착하는가**. #37이 정확히 이 한 칸에서
- * 끊겼다 — attach가 목록에서 강도만 집어 오고 나머지는 기본값으로 채웠고, 그래서 DB에는
- * 멀쩡히 있는 값이 화면에서만 사라졌다. 적어두고도 아무도 안 읽으면 같은 버그다.
+ * Persisting it is the host's job, and the store/manager tests guard that side. What is guarded
+ * here is the next step: does the value carried in the list **actually reach the screen**? #37
+ * broke at exactly this step — attach picked only the effort level off the list and filled
+ * everything else with defaults, so a value that was perfectly fine in the DB disappeared only
+ * on screen. Persisting it and having nobody read it back is the same bug.
  */
-test('앱을 다시 켜도 컨텍스트 눈금이 채워져 있다 (#48)', async ({ page }) => {
+test('The context gauge stays filled in after restarting the app (#48)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
   await emitEvent(page, 0, { type: 'context_update', used: 168000, window: 200000, exactness: 'exact' })
   await expect(page.getByTestId('context-gauge')).toContainText('84%')
 
-  // 앱을 다시 켠 것과 같다: 스토어가 목록을 받아 세션 요약을 처음부터 다시 세운다
+  // Equivalent to restarting the app: the store receives the list and rebuilds the session
+  // summary from scratch
   await page.evaluate(async () => {
     const w = window as any
     await w.__store.getState().attach(w.__mock)
   })
 
   await expect(page.getByTestId('context-gauge')).toContainText('84%')
-  // 낡았을지 모른다는 표는 붙이지 않는다 — 눈금은 한 번도 '지금'을 약속한 적이 없다.
-  // 값은 늘 마지막으로 끝난 턴의 것이고, 재시작은 그 간격을 늘릴 뿐이다.
+  // No "this might be stale" marker is attached — the gauge never promised to reflect "right
+  // now". The value is always from the last finished turn, and a restart only widens that gap.
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 84%')
 })
 
-test('메시지 전송 직후에도 인박스 단축키가 동작한다 (회귀: 입력창이 키를 먹던 문제)', async ({ page }) => {
+test('The inbox shortcut works right after sending a message (regression: the composer was swallowing the key)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업 하나')
   await newSession(page, 'alpha', '작업 둘')
   for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
 
-  // 실제 사용 순서: 메시지를 보내면 입력창에 포커스가 남는다. body를 클릭하지 않는다.
+  // Actual usage order: after sending a message, focus stays in the composer. Do not click body.
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()
   await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(2)
 
-  // 커서 이동 키가 본문에 타이핑되면 안 된다
+  // The cursor-movement key must not get typed into the composer
   await page.keyboard.press('j')
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
 
   /*
-    그리고 `d`에는 **아무것도 없어야 한다.** 예전에는 이 키가 세션을 아카이브했고,
-    화면에는 "Dismiss"라고 적혀 있었다 — 대답을 안 하겠다는 뜻으로 누른 키가 세션을
-    목록에서 영영 지웠다. 한 글자 뒤에 되돌릴 수 없는 일을 숨겨두지 않는다.
+    And `d` must **do nothing at all.** It used to archive the session, and the screen read
+    "Dismiss" — a key pressed to mean "I am not answering right now" permanently removed the
+    session from the list. An irreversible action must not hide behind a single letter.
   */
   await page.keyboard.press('d')
   await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(2)
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
 })
 
-test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었는데 기다리게 되던 문제)', async ({ page }) => {
+test('A failed send is not swallowed silently (regression: waiting on a session that had died)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 세션이 사라진 상황을 만든다 (host 재시작 후 복원된 세션과 같은 상태)
+  // Create a situation where the session is gone (the same state as a session restored after a
+  // host restart)
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
@@ -704,15 +775,16 @@ test('전송 실패를 조용히 삼키지 않는다 (회귀: 세션이 죽었�
   await page.getByTestId('send').click()
 
   await expect(page.getByTestId('toast')).toContainText('Could not send')
-  // 보내지 못한 말풍선은 남지 않는다
+  // No bubble is left behind for a message that failed to send
   await expect(page.getByTestId('msg-user').filter({ hasText: '계속 진행해줘' })).toHaveCount(0)
 })
 
-test('잠든 세션은 말을 걸면 알아서 이어진다 (C-1, FR-10)', async ({ page }) => {
+test('A dormant session automatically resumes when spoken to (C-1, FR-10)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // host 재시작 후 상태를 흉내낸다: 프로세스는 없고 기록만 남은 세션
+  // Simulate the state after a host restart: no process, only the transcript remains for the
+  // session
   await page.evaluate(() => {
     const m = (window as any).__mock
     const store = (window as any).__store
@@ -722,19 +794,19 @@ test('잠든 세션은 말을 걸면 알아서 이어진다 (C-1, FR-10)', async
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
 
-  // 막지 않는다. 잠들어 있다는 사실만 알리고 입력은 그대로 열려 있다
+  // It does not block. It only announces that the session is dormant, and input stays open
   await expect(page.getByTestId('dormant-note')).toBeVisible()
   await expect(page.getByTestId('prompt-input')).toBeEnabled()
 
   await page.getByTestId('prompt-input').fill('이어서 해줘')
   await page.getByTestId('send').click()
 
-  // 이어가기 버튼을 누른 적이 없는데 대화가 이어진다
+  // No "resume" button was ever clicked, yet the conversation continues
   await expect(page.getByTestId('chat-stream')).toContainText('이어서 해줘')
   await expect(page.getByTestId('dormant-note')).toBeHidden()
 })
 
-test('정말 이어갈 수 없으면 이유를 알린다 (조용한 실패 금지)', async ({ page }) => {
+test('When resuming truly is not possible, the reason is announced (no silent failure)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -743,7 +815,7 @@ test('정말 이어갈 수 없으면 이유를 알린다 (조용한 실패 금�
     const store = (window as any).__store
     const st = store.getState()
     const id = st.focusedSessionId
-    m.unresumable.add(id) // 재개 불가로 표시
+    m.unresumable.add(id) // Mark it as not resumable
     m.sessions.get(id).live = false
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
@@ -752,15 +824,15 @@ test('정말 이어갈 수 없으면 이유를 알린다 (조용한 실패 금�
   await page.getByTestId('send').click()
 
   await expect(page.getByTestId('toast')).toContainText('Could not resume')
-  // 보내지 못한 말풍선은 남지 않는다
+  // No bubble is left behind for a message that failed to send
   await expect(page.getByTestId('msg-user').filter({ hasText: '이어서 해줘' })).toHaveCount(0)
 })
 
-test('긴 대화는 보이는 것만 그린다 (D-1 가상 스크롤)', async ({ page }) => {
+test('A long conversation renders only what is visible (D-1 virtual scroll)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '긴 작업')
 
-  // 200턴 분량 주입
+  // Inject 200 turns worth
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
@@ -775,22 +847,24 @@ test('긴 대화는 보이는 것만 그린다 (D-1 가상 스크롤)', async ({
     }
   })
 
-  // DOM에 200개가 다 그려지면 가상화가 안 된 것이다
+  // If all 200 are rendered into the DOM, virtualization is not working
   const rendered = await page.locator('[data-testid="chat-stream"] [data-index]').count()
   expect(rendered).toBeGreaterThan(0)
   expect(rendered).toBeLessThan(60)
 })
 
-test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 (D-1)', async ({ page }) => {
+test('Auto-scroll does not interrupt while scrolled up reading (D-1)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  // 세션을 만들기 **전에** 주입하면 존재하지 않는 세션으로 흘러가 화면에는 아무것도
-  // 쌓이지 않는다 — 스크롤할 거리가 없어 시험이 헛돌았다. 만든 뒤에 채운다.
+  // Injecting **before** the session is created sends events to a session that does not exist
+  // yet, so nothing accumulates on screen — there is nothing to scroll and the test spins
+  // uselessly. Fill it in only after creating the session.
   await newSession(page, 'alpha', '긴 작업')
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
-    // 연속 델타는 한 assistant 말풍선으로 합쳐지고, 홑 개행은 마크다운이 한 문단으로
-    // 접는다 — 빈 줄로 문단을 끊어야 실제로 화면이 길어진다
+    // Consecutive deltas merge into one assistant bubble, and a single newline is collapsed into
+    // one paragraph by markdown — only a blank line actually breaks the paragraph and makes the
+    // screen grow taller
     for (let i = 0; i < 100; i++)
       m.emit({
         type: 'message_delta',
@@ -801,15 +875,17 @@ test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 
   })
 
   const stream = page.getByTestId('chat-stream')
-  // "위로 올렸다"가 성립하려면 바닥 슬랙(scroll.ts BOTTOM_SLACK=80px)보다 훨씬 큰
-  // 스크롤 범위가 필요하다 — 안 그러면 맨 위도 "바닥 근처"라 따라가는 게 정답이 되고,
-  // 범위가 0이면 scrollTop이 늘 0이라 통과가 무의미하다
+  // For "scrolled up" to be a meaningful state, the scrollable range must be far larger than the
+  // bottom slack (scroll.ts BOTTOM_SLACK=80px) — otherwise even the very top counts as "near the
+  // bottom" and following it would be correct, and with zero range scrollTop is always 0, making
+  // the check pass vacuously
   await expect.poll(() => stream.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(400)
   await stream.evaluate((el) => {
     el.scrollTop = 0
-  }) // 맨 위로 올려 읽는 중
-  // 가상 스크롤은 올려놓은 직후 항목 실측으로 위치를 살짝 고칠 수 있다 —
-  // 그 보정이 끝나 자리가 멈춘 뒤의 값을 기준으로 삼아야 "새 메시지 때문"만 잰다
+  }) // Scrolled to the very top, reading
+  // Virtual scroll can nudge the position slightly right after scrolling, once it measures the
+  // actual item sizes — the baseline must be taken only after that correction settles, so this
+  // measures the effect of the new message alone
   await expect
     .poll(async () => {
       const now = await stream.evaluate((el) => el.scrollTop)
@@ -819,7 +895,7 @@ test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 
     .toBe(true)
   const before = await stream.evaluate((el) => el.scrollTop)
 
-  // 새 메시지가 도착해도 끌어내리지 않는다
+  // A new message arriving does not pull the scroll back down
   await page.evaluate(() => {
     const m = (window as any).__mock
     const id = [...m.sessions.keys()][0]
@@ -829,13 +905,14 @@ test('위로 올려 읽는 중에는 자동 스크롤이 방해하지 않는다 
   expect(await stream.evaluate((el) => el.scrollTop)).toBe(before)
 })
 
-test('소개 화면: 카드가 곧 도구 감지 표시다 — 안 깔림과 로그인 안 됨은 처방이 다르다 (E-1)', async ({
+test('Intro screen: the card doubles as the tool-detection display — "not installed" and "not logged in" get different remedies (E-1)', async ({
   page,
 }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
-    // 목의 도구 설명(이름, 표시 이름, 설치·로그인 명령)은 그대로 두고 상태만 바꾼다
+    // Keep the mock's tool description (name, display name, install/login commands) as is, only
+    // change the state
     const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
     const list = [
       as('claude', { installed: false, loggedIn: false, detail: 'not installed' }),
@@ -844,18 +921,20 @@ test('소개 화면: 카드가 곧 도구 감지 표시다 — 안 깔림과 로
     m.agents.detect = async () => list
   })
   await page.getByTestId('redetect').click()
-  // 진단은 한눈에 — 비활성 카드는 "Not connected"라고 말한다 (어둡고, 눌리지 않는다)
+  // The diagnosis is visible at a glance — a disabled card says "Not connected" (dimmed, unclickable)
   await expect(page.getByTestId('intro-card-claude-status')).toContainText('Not connected')
   await expect(page.getByTestId('intro-card-claude')).toBeDisabled()
-  // 처방은 상태별로: 안 깔림 → 설치 명령, 로그인 안 됨 → 로그인 명령
+  // The remedy depends on the state: not installed -> install command, not logged in -> login command
   await expect(page.getByTestId('intro-card-claude')).toContainText('npm i -g @anthropic-ai/claude-code')
   await expect(page.getByTestId('intro-card-codex')).toContainText('codex login')
   await expect(page.getByTestId('intro-card-codex')).not.toContainText('npm i -g')
-  // 둘 다 못 쓰니 이때는 정말로 막힌 것이 맞다
+  // With neither usable, being truly blocked here is correct
   await expect(page.getByTestId('intro-blocked')).toBeVisible()
 })
 
-test('소개 화면: 하나만 준비돼 있으면 막지 않는다 — 그 카드로 지나간다 (#11)', async ({ page }) => {
+test('Intro screen: does not block when only one tool is ready — proceed through that card (#11)', async ({
+  page,
+}) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -867,22 +946,22 @@ test('소개 화면: 하나만 준비돼 있으면 막지 않는다 — 그 카�
     m.agents.detect = async () => list
   })
   await page.getByTestId('redetect').click()
-  // 로그인 안 된 claude에게 시킬 일은 '설치'가 아니라 '로그인'이다
+  // What an unauthenticated claude needs is "log in", not "install"
   await expect(page.getByTestId('intro-card-claude')).toContainText('claude auth login')
   await expect(page.getByTestId('intro-card-claude')).not.toContainText('npm i -g')
   await expect(page.getByTestId('intro-card-claude')).toBeDisabled()
   await expect(page.getByTestId('intro-blocked')).toHaveCount(0)
-  // 준비된 카드는 살아 있다 — 클릭하면 앱으로 들어간다
+  // The ready card stays active — clicking it enters the app
   await page.getByTestId('intro-card-codex').click()
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
 })
 
-test('보던 세션으로 돌아온다 (C-3 워크스페이스 스냅샷)', async ({ page }) => {
+test('Returns to the session that was being viewed (C-3 workspace snapshot)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 번째')
   await newSession(page, 'alpha', '두 번째')
 
-  // 첫 번째 세션을 보다가 앱을 껐다고 하자
+  // Say the app was closed while viewing the first session
   const firstId = await page.evaluate(() => {
     const store = (window as any).__store
     const ids = Object.keys(store.getState().sessions)
@@ -892,7 +971,7 @@ test('보던 세션으로 돌아온다 (C-3 워크스페이스 스냅샷)', asyn
   const snapshot = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snapshot?.focusedSessionId).toBe(firstId)
 
-  // 다시 attach하면 (앱 재시작) 그 세션이 열려 있다
+  // Reattaching (an app restart) leaves that session open
   await page.evaluate(async () => {
     const store = (window as any).__store
     const m = (window as any).__mock
@@ -902,7 +981,7 @@ test('보던 세션으로 돌아온다 (C-3 워크스페이스 스냅샷)', asyn
   await expect(page.getByTestId('session-name')).toContainText('첫 번째')
 })
 
-test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async ({ page }) => {
+test('Messages in unfocused sessions are trimmed (D-2 windowing)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '긴 세션')
   await newSession(page, 'alpha', '다른 세션')
@@ -914,7 +993,7 @@ test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async (
     const m = (window as any).__mock
     const store = (window as any).__store
     store.getState().focusSession(id)
-    // 델타는 한 메시지로 합쳐지므로, 항목이 실제로 늘어나는 도구 호출로 채운다
+    // Deltas merge into one message, so fill it with tool calls, which actually add distinct entries
     for (let i = 0; i < 300; i++) {
       m.emit({
         type: 'tool_call',
@@ -928,7 +1007,7 @@ test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async (
   const before = await page.evaluate((id) => (window as any).__store.getState().chat[id].length, longId)
   expect(before).toBeGreaterThan(100)
 
-  // 다른 세션으로 옮기면 메모리에서 잘린다
+  // Switching to another session trims it from memory
   await page.evaluate(() => {
     const store = (window as any).__store
     const ids = Object.keys(store.getState().sessions)
@@ -938,7 +1017,9 @@ test('비포커스 세션의 메시지는 잘라낸다 (D-2 윈도잉)', async (
   expect(after).toBeLessThanOrEqual(50)
 })
 
-test('인박스 10건을 위아래로 훑어도 커서가 목록 밖으로 나가지 않는다 (L4-3 반복 조작)', async ({ page }) => {
+test('Scrubbing up and down through 10 inbox items never pushes the cursor out of the list (L4-3 repeated operation)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `작업 ${i}`)
   await page.evaluate(() => {
@@ -950,10 +1031,11 @@ test('인박스 10건을 위아래로 훑어도 커서가 목록 밖으로 나�
   await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(10)
 
   /*
-    키보드만으로 끝까지 내려갔다 올라온다. 커서가 목록 밖을 가리키면 Enter가 아무
-    세션도 열지 못하고, 그 순간 인박스는 눌러도 안 되는 창이 된다.
-    (예전에는 `d`로 항목을 지워가며 이걸 확인했다 — 그 키는 세션을 아카이브했고,
-     아카이브는 폐기됐다. 커서가 지켜야 할 것은 그대로다.)
+    Go all the way down and back up using only the keyboard. If the cursor ever points outside
+    the list, Enter opens no session, and at that moment the inbox becomes a window that does not
+    respond to input.
+    (This used to be checked by deleting items with `d` — that key archived the session, and
+    archiving has since been dropped. What the cursor must uphold has not changed.)
   */
   for (let i = 0; i < 15; i++) await page.keyboard.press('j')
   for (let i = 0; i < 15; i++) await page.keyboard.press('k')
@@ -962,12 +1044,12 @@ test('인박스 10건을 위아래로 훑어도 커서가 목록 밖으로 나�
   await expect(page.getByTestId('prompt-input')).toBeVisible()
 })
 
-test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ page }) => {
+test('The layout does not break even in a narrow window (L4-4)', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 700 })
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 가로 스크롤이 생기면 무언가 넘친 것이다
+  // If horizontal scroll appears, something overflowed
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
   expect(overflow).toBe(false)
   await expect(page.getByTestId('sidebar')).toBeVisible()
@@ -975,17 +1057,22 @@ test('좁은 창에서도 레이아웃이 깨지지 않는다 (L4-4)', async ({ 
 })
 
 /**
- * 메뉴는 **자기를 부른 버튼 옆에** 뜬다.
+ * The menu appears **right next to the button that opened it**.
  *
- * 예전에는 사이드바 우상단 한 자리에 고정이었다 (positioned 조상이 없어 좌표가 사이드바
- * 기준으로 풀렸다) — 열 번째 프로젝트를 눌렀는데 답이 맨 위에서 나오니, 무엇에 대한
- * 메뉴인지 화면이 말해 주지 않았다. 아래에 자리가 없으면 위로 뒤집는다.
+ * It used to be fixed at one spot in the top right of the sidebar (with no positioned ancestor,
+ * its coordinates resolved relative to the sidebar) — clicking the tenth project produced a
+ * response at the very top, and the screen gave no clue which button the menu belonged to. When
+ * there is no room below, it flips upward.
  */
-test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면 위로 뒤집는다', async ({ page }) => {
+test('The project menu opens below the clicked button, and flips upward when there is no room', async ({
+  page,
+}) => {
   /*
-    프로젝트가 셋인 것은 뒤집힌 메뉴가 **위에 온전히 들어갈 자리** 때문이다. 메뉴에 "New app…"이 서면서(M4 C-1)
-    메뉴가 한 줄 길어졌고, 둘째 프로젝트의 버튼 위로는 그 메뉴가 들어가지 않는다(위 가장자리에 붙어 버튼을 덮는다).
-    이 시험이 보는 것은 뒤집기이지 둘째 줄의 좌표가 아니다 — 위에 자리가 있는 셋째 줄로 잰다.
+    There are three projects because the flipped menu needs **room to fit entirely above**. Once
+    "New app..." was added to the menu (M4 C-1), the menu grew one line taller, and it no longer
+    fits above the second project's button (it hits the top edge and covers the button). What
+    this test checks is the flip itself, not the second row's coordinates — it measures against
+    the third row, which does have room above it.
   */
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta', '/tmp/gamma'] })
 
@@ -1002,17 +1089,18 @@ test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면
   }
 
   const alpha = await geometry('alpha')
-  // 버튼 아래에, 버튼의 오른쪽 끝에 맞춰서
+  // Below the button, aligned with the button's right edge
   expect(alpha.m.y).toBeGreaterThanOrEqual(alpha.b.y + alpha.b.height)
   expect(Math.round(alpha.m.x + alpha.m.width)).toBe(Math.round(alpha.b.x + alpha.b.width))
-  // 그리고 화면 안에 온전히 들어온다
+  // And it fits entirely within the screen
   expect(alpha.m.y + alpha.m.height).toBeLessThanOrEqual(alpha.viewport.height)
 
   /*
-    **확대에서도.** 잰 좌표(확대가 곱해진 화면 px)를 fixed 길이(그릴 때 확대가 또
-    곱해진다)에 그대로 쓰면, 확대 1.1에서 메뉴가 버튼보다 24px 아래·103px 왼쪽에
-    떴다 (실측 — 도그푸딩 "메뉴 위치가 이상해"). 확대 1.0만 재는 테스트는 이 부류를
-    통째로 놓친다. 사용자의 실제 설정이 1.1이다.
+    **Under zoom too.** Using a measured coordinate (screen px already multiplied by zoom)
+    directly as a fixed length (which gets multiplied by zoom again when drawn) put the menu 24px
+    below and 103px to the left of the button at 1.1x zoom (measured — a dogfooding finding: "the
+    menu position looks wrong"). A test that only measures at 1.0x zoom misses this whole class of
+    bug. The person's actual setting is 1.1x.
   */
   await page.evaluate(() => {
     const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
@@ -1022,7 +1110,7 @@ test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면
   const zoomed = await geometry('alpha')
   const gap = zoomed.m.y - (zoomed.b.y + zoomed.b.height)
   expect(gap).toBeGreaterThanOrEqual(2)
-  expect(gap).toBeLessThanOrEqual(8) // 확대가 두 번 곱해지면 여기가 24를 넘는다
+  expect(gap).toBeLessThanOrEqual(8) // If zoom gets multiplied in twice, this exceeds 24
   expect(Math.abs(zoomed.m.x + zoomed.m.width - (zoomed.b.x + zoomed.b.width))).toBeLessThanOrEqual(2)
   await page.evaluate(() => {
     const style = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
@@ -1031,27 +1119,28 @@ test('프로젝트 메뉴는 누른 버튼 아래에 뜨고, 자리가 없으면
   })
 
   /*
-    아래로 펴면 넘치는 자리에서만 뒤집기가 보이고, 그 자리는 창을 낮춰야 생긴다.
-    320px에서는 아직 들어갔다(메뉴 바닥 307.5 < 312) — 뒤집기가 아니라 실측이
-    기준을 정한다.
+    The flip is only visible where opening downward would overflow, and that spot only appears by
+    shrinking the window. At 320px it still fits (menu bottom at 307.5 < 312) — the threshold is
+    set by measurement, not by assuming the flip.
   */
   await page.setViewportSize({ width: 1200, height: 240 })
   const gamma = await geometry('gamma')
-  expect(gamma.m.y + gamma.m.height).toBeLessThanOrEqual(gamma.b.y) // 버튼 위로 갔다
+  expect(gamma.m.y + gamma.m.height).toBeLessThanOrEqual(gamma.b.y) // It went above the button
   expect(gamma.m.y).toBeGreaterThanOrEqual(0)
 })
 
 /*
- * 좁은 사이드바 (도그푸딩: 사이드바를 줄이면 메뉴가 창 왼쪽 밖으로 나가 안 보였다).
- * 메뉴는 버튼의 오른쪽 끝에 맞춰 왼쪽으로 펼쳐지는데, 버튼이 창 왼쪽 근처면
- * 메뉴 폭(192px)이 최소 사이드바(180px)보다 넓어 왼쪽이 잘린다 — 세션 메뉴도
- * 같은 껍데기(RowMenu)를 쓰므로 한쪽만 재면 둘 다 잰 것이다.
+ * A narrow sidebar (dogfooding finding: shrinking the sidebar pushed the menu off the left edge
+ * of the window, out of sight). The menu aligns with the button's right edge and opens leftward,
+ * so when the button sits near the left edge of the window, the menu's width (192px) exceeds the
+ * minimum sidebar width (180px) and gets clipped on the left — the session menu uses the same
+ * shell (RowMenu), so measuring one side effectively measures both.
  */
-test('사이드바가 좁아도 줄 메뉴는 화면 안에 온전히 있다', async ({ page }) => {
+test('A row menu stays fully on screen even when the sidebar is narrow', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '좁은 데서')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
-  await page.evaluate(() => (window as any).__store.getState().setSidebarWidth(0)) // 최소로 접힌다
+  await page.evaluate(() => (window as any).__store.getState().setSidebarWidth(0)) // Collapses to the minimum
 
   await page.getByTestId('project-menu-alpha').click()
   const pm = (await page.getByTestId('project-menu-open-alpha').boundingBox())!
@@ -1063,11 +1152,13 @@ test('사이드바가 좁아도 줄 메뉴는 화면 안에 온전히 있다', a
   expect(sm.x).toBeGreaterThanOrEqual(0)
 })
 
-test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더에서 (M2.5)', async ({ page }) => {
+test('Creating a session: only the tool is picked — model and permission are set after, in the header (M2.5)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
-  // 다이얼로그는 도구와 이어가기만 고른다 — 모델 입력도, 프롬프트 칸도 없다 (#8)
+  // The dialog only lets you pick the tool and resumption — no model input, no prompt field (#8)
   await expect(page.getByTestId('model-input')).toHaveCount(0)
   await expect(page.getByTestId('initial-prompt')).toHaveCount(0)
   await page.getByTestId('tool-option-claude').click()
@@ -1078,12 +1169,12 @@ test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더
   expect(params).toMatchObject({ tool: 'claude' })
   expect(params.initialPrompt).toBeUndefined()
 
-  // 첫 지시는 입력창에서 — 화면에 그대로 남는다
+  // The first instruction goes in the composer — it stays on screen as is
   await page.getByTestId('prompt-input').fill('첫 지시')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('msg-user')).toContainText('첫 지시')
 
-  // 모델·권한은 입력창 아래 설정 메뉴에서 바꾼다
+  // Model and permission are changed in the settings menu below the composer
   await pickSetting(page, 'settings-model-haiku')
   await expect(page.getByTestId('toast')).toContainText('haiku')
   await pickSetting(page, 'settings-preset-safe')
@@ -1091,7 +1182,9 @@ test('세션 생성: 도구만 고른다 — 모델·권한은 만든 뒤 헤더
   expect(sessions[0]).toMatchObject({ model: 'haiku', permissionPreset: 'safe' })
 })
 
-test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무 반응 없던 문제)', async ({ page }) => {
+test('When a tool cannot be used, the reason is shown (M2.5: the start button used to do nothing)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1104,27 +1197,27 @@ test('도구를 못 쓰면 이유를 보여준다 (M2.5: 시작 버튼이 아무
   })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
-  // 쓸 수 있는 쪽이 하나라도 있으면 그쪽으로 열어 준다 (#11) — 벽부터 세우지 않는다
+  // If even one tool is usable, open with that one (#11) — do not put up a wall first
   await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
   await expect(page.getByTestId('tool-blocked')).toHaveCount(0)
 
-  // 그래도 못 쓰는 쪽을 직접 고르면 이유를 적는다 —
-  // 버튼만 죽어 있으면 '아무 동작 안 함'으로 보인다
+  // If the person still picks the unusable one directly, state the reason —
+  // a merely disabled button looks like "nothing happened"
   await page.getByTestId('tool-option-claude').click()
   await expect(page.getByTestId('tool-blocked')).toContainText('not found')
   await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
-  // 쓸 수 있는 도구로 바꾸면 즉시 풀린다
+  // Switching to a usable tool unblocks it immediately
   await page.getByTestId('tool-option-codex').click()
   await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
 })
 
-test('로그인 안 된 도구는 설치 안 된 도구와 다르게 말한다 (#11)', async ({ page }) => {
+test('An unauthenticated tool is described differently from an uninstalled one (#11)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
     const as = (name: string, s: object) => ({ ...m.detected.find((t: any) => t.name === name), ...s })
     const list = [
-      // #11 이전에는 claude가 이 상태로 잡히지 않아 이 분기에 닿을 수 없었다
+      // Before #11, claude was never detected in this state, so this branch was unreachable
       as('claude', { installed: true, loggedIn: false, detail: 'claude 2.1.223 · login required' }),
       as('codex', { installed: false, loggedIn: false, detail: 'codex CLI not found' }),
     ]
@@ -1132,13 +1225,13 @@ test('로그인 안 된 도구는 설치 안 된 도구와 다르게 말한다 (
   })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
-  // 둘 다 못 쓰니 옮겨 앉을 곳이 없다 — 대신 claude에게 시킬 일을 정확히 적는다
+  // With neither usable there is nowhere else to move to — instead, state exactly what claude needs
   await expect(page.getByTestId('tool-blocked')).toContainText('needs a login')
   await expect(page.getByTestId('tool-blocked')).toContainText('claude auth login')
   await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
 })
 
-test('에이전트 응답이 마크다운으로 렌더된다 (M2.5)', async ({ page }) => {
+test('Agent replies render as markdown (M2.5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await emitEvent(page, 0, {
@@ -1152,7 +1245,7 @@ test('에이전트 응답이 마크다운으로 렌더된다 (M2.5)', async ({ p
   await expect(md.locator('pre code')).toContainText('const x = 1')
 })
 
-test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', async ({ page }) => {
+test('The create-session dialog warns about concurrent sessions (FR-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '먼저 시작한 작업')
   await page.getByTestId('project-menu-alpha').click()
@@ -1160,21 +1253,23 @@ test('세션 생성 다이얼로그가 동시 세션을 경고한다 (FR-2)', as
   await expect(page.getByTestId('concurrent-warning')).toContainText('lose')
 })
 
-test('3레인: 증거 패널은 대화와 함께 있고 ⌘B로 접힌다 (B-0)', async ({ page }) => {
+test('3-lane layout: the evidence panel sits alongside the conversation and collapses with ⌘B (B-0)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 깃·파일은 대화를 대신하지 않는다 — 둘이 동시에 보여야 한다
+  // Git and files do not replace the conversation — both must be visible at once
   await expect(page.getByTestId('chat-stream')).toBeVisible()
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
   await expect(page.getByTestId('evidence-project')).toContainText('alpha')
 
   await page.keyboard.press('Meta+b')
   await expect(page.getByTestId('evidence-panel')).toBeHidden()
-  // 패널을 접어도 대화는 그대로다
+  // Collapsing the panel leaves the conversation untouched
   await expect(page.getByTestId('chat-stream')).toBeVisible()
 
-  // 접힌 상태가 스냅샷에 실리고 재시작 후 복원된다
+  // The collapsed state is captured in the snapshot and restored after a restart
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snap?.panelOpen).toBe(false)
 
@@ -1182,7 +1277,9 @@ test('3레인: 증거 패널은 대화와 함께 있고 ⌘B로 접힌다 (B-0)'
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 })
 
-test('깃: diff는 넓게, 목록·스테이징·커밋은 사이드바에서 (B-2, B-6 — 2026-09-07 좌측 열 제거)', async ({ page }) => {
+test('Git: the diff gets the wide area; the list, staging and commit live in the sidebar (B-2, B-6 — left column removed 2026-09-07)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1194,15 +1291,15 @@ test('깃: diff는 넓게, 목록·스테이징·커밋은 사이드바에서 (B
   })
   await newSession(page, 'alpha', '작업')
 
-  // 사이드바에서 파일을 누르면 넓은 diff가 열린다 — 넓은 화면 안에 목록은 없다
+  // Clicking a file in the sidebar opens the wide diff — the wide area has no list in it
   await page.getByTestId('evidence-file-src/a.ts').click()
   await expect(page.getByTestId('diff-view')).toBeVisible()
   await expect(page.getByTestId('git-panel').locator('[data-testid^="git-file-"]')).toHaveCount(0)
-  // 무채색 diff: 색이 아니라 기호와 밝기로 구분한다
+  // The diff is achromatic: distinguished by symbol and brightness, not color
   await expect(page.locator('[data-diff="add"]')).toContainText('새 줄')
   await expect(page.locator('[data-diff="del"]')).toContainText('옛 줄')
 
-  // 스테이징·커밋은 사이드바가 정본이다 (오버레이가 떠 있어도 보인다 — #15)
+  // The sidebar is the source of truth for staging and commit (visible even with an overlay open — #15)
   await page.getByTestId('evidence-stage-all').click()
   await page.getByTestId('evidence-commit-message').fill('테스트 커밋')
   await page.getByTestId('evidence-commit').click()
@@ -1210,7 +1307,7 @@ test('깃: diff는 넓게, 목록·스테이징·커밋은 사이드바에서 (B
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('테스트 커밋')
 })
 
-test('깃 패널: 복사한 diff는 그 diff 그대로다 (#36)', async ({ page }) => {
+test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ page }) => {
   const diff =
     '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-const old = 1\n+const next = 1\n   indented\n unchanged'
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -1245,7 +1342,9 @@ test('깃 패널: 복사한 diff는 그 diff 그대로다 (#36)', async ({ page 
   await expect(page.getByTestId('diff-view')).toContainText('--- a/src/a.ts')
 })
 
-test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 보여준다 (B-4)', async ({ page }) => {
+test('Git panel: checking out with a dirty working tree is not blocked — the result is shown first (B-4)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1258,7 +1357,8 @@ test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 �
   })
   await newSession(page, 'alpha', '작업')
   await page.getByTestId('evidence-branch').click()
-  // 칸은 host가 준 remote로 나뉜다 — 이름의 `/`로는 로컬 feature/x와 원격 origin/main을 못 가른다 (#175)
+  // The panels split by the remote flag the host provides — a `/` in the name cannot distinguish
+  // local feature/x from remote origin/main (#175)
   await expect(page.getByTestId('branches-remote').getByTestId('branch-origin/main')).toBeVisible()
   await expect(page.getByTestId('branches-local').getByTestId('branch-feature/x')).toBeVisible()
   await page.getByTestId('branch-feature/x').click()
@@ -1268,7 +1368,9 @@ test('깃 패널: 더티 상태 체크아웃은 막지 않고 결과를 먼저 �
   await expect(page.getByTestId('toast')).toContainText('Switched')
 })
 
-test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', async ({ page }) => {
+test('The Git tab is disabled when the project is not a git repository (B-1 abnormal path)', async ({
+  page,
+}) => {
   await setup(page)
   await page.evaluate(async () => {
     const store = (window as any).__store
@@ -1289,7 +1391,7 @@ test('git 저장소가 아니면 깃 탭이 비활성 (B-1 비정상 경로)', a
   await expect(page.getByTestId('evidence-not-repo')).toBeVisible()
 })
 
-test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page }) => {
+test('File tree: lazy loading + toggling ignored entries (C-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1306,9 +1408,10 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
   await expect(page.getByTestId('file-tree')).toBeVisible()
 
   /*
-    무시된 항목도 **기본으로 보인다** (이슈 #17). 숨겨 두면 걸러진 것으로 읽히지 않고
-    없는 것으로 읽힌다 — 정작 열어보려던 파일이 추적되지 않는 파일인 경우가 잦다.
-    끄면 사라지고, 그 선택은 남는다 (아래 시험이 그 쪽을 지킨다).
+    Ignored entries are also **visible by default** (issue #17). Hiding them reads not as
+    "filtered out" but as "does not exist" — and the file someone actually opened the tree to
+    find is often the untracked one. Turning it off makes them disappear, and that choice
+    persists (guarded by the test below).
   */
   await expect(page.getByTestId('dir-node_modules')).toBeVisible()
   await page.getByTestId('toggle-ignored').uncheck()
@@ -1316,7 +1419,7 @@ test('파일 트리: lazy 로드 + 무시된 항목 토글 (C-2)', async ({ page
   await page.getByTestId('toggle-ignored').check()
   await expect(page.getByTestId('dir-node_modules')).toBeVisible()
 
-  // 하위는 열어야 읽는다 (lazy)
+  // Children are read only once opened (lazy)
   await expect(page.getByTestId('file-src/a.ts')).toBeHidden()
   await page.getByTestId('dir-src').click()
   await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
@@ -1378,7 +1481,7 @@ test('hiding ignored files is remembered — it is a way of looking, not a per-v
   expect(snap?.showIgnored).toBe(false)
 })
 
-test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ page }) => {
+test('Code viewer: opening a file, search, and large files (C-3, FR-6)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1389,19 +1492,19 @@ test('코드 뷰어: 파일 열기·검색·큰 파일 (C-3, FR-6)', async ({ pa
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-big.ts').click()
 
-  // 파일을 열면 넓은 오버레이가 덮인다
+  // Opening a file covers the screen with a wide overlay
   await expect(page.getByTestId('overlay')).toBeVisible()
   await expect(page.getByTestId('code-viewer')).toBeVisible()
   await expect(page.getByTestId('viewer-path')).toContainText('big.ts')
 
-  // 3000줄이어도 보이는 것만 그린다 (가상 스크롤)
+  // Even with 3000 lines, only what is visible gets rendered (virtual scroll)
   const rendered = await page.locator('[data-testid="code-viewer"] .whitespace-pre').count()
   expect(rendered).toBeLessThan(120)
 
   await page.getByTestId('viewer-search').fill('줄 42 ')
   await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
 
-  // Enter·⇧Enter로 일치 사이를 옮겨 다닌다 — 화면 밖의 일치도 데려온다 (#183)
+  // Enter/Shift+Enter move between matches — bringing off-screen matches into view too (#183)
   const search = page.getByTestId('viewer-search')
   await search.fill('줄 2999 ')
   await expect(page.getByTestId('viewer-match-count')).toContainText('1 line')
@@ -1442,7 +1545,7 @@ async function openBigFile(page: Page, lines: number, opts: { truncated?: boolea
 
 const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText())
 
-test('뷰어 복사: ⌘A는 파일 전체를 준다 (#36)', async ({ page }) => {
+test('Viewer copy: ⌘A gives the whole file (#36)', async ({ page }) => {
   await openBigFile(page, 3000)
 
   // Nobody clicked anything: the code area takes focus when the file opens, which is what
@@ -1456,7 +1559,7 @@ test('뷰어 복사: ⌘A는 파일 전체를 준다 (#36)', async ({ page }) =>
   expect(copied.endsWith('const line2999 = 2999')).toBe(true)
 })
 
-test('뷰어 복사: 안 그려진 줄까지 이어서 복사한다 (#36)', async ({ page }) => {
+test('Viewer copy: copying continues through lines that were never rendered (#36)', async ({ page }) => {
   await openBigFile(page, 3000)
 
   // Drag from line 3 and hold the pointer past the bottom edge so the list autoscrolls —
@@ -1484,7 +1587,7 @@ test('뷰어 복사: 안 그려진 줄까지 이어서 복사한다 (#36)', asyn
   expect(rows.map((r, i) => r === `const line${i + 3} = ${i + 3}`).every(Boolean)).toBe(true)
 })
 
-test('뷰어 복사: 잘린 파일은 잘렸다고 말한다 (#36)', async ({ page }) => {
+test('Viewer copy: a truncated file says it was truncated (#36)', async ({ page }) => {
   await openBigFile(page, 200, { truncated: true })
 
   await page.keyboard.press('Meta+a')
@@ -1497,7 +1600,7 @@ test('뷰어 복사: 잘린 파일은 잘렸다고 말한다 (#36)', async ({ pa
   expect(copied.endsWith('…file is large; showing part of it. Open in your IDE to see the rest.')).toBe(true)
 })
 
-test('뷰어 복사: 검색창의 ⌘A는 그대로다 (#36)', async ({ page }) => {
+test('Viewer copy: ⌘A inside the search box behaves normally (#36)', async ({ page }) => {
   await openBigFile(page, 100)
 
   // The handler is the code area's, not the window's — select-all inside a text field has
@@ -1509,7 +1612,7 @@ test('뷰어 복사: 검색창의 ⌘A는 그대로다 (#36)', async ({ page }) 
   await expect(search).toHaveValue('line2')
 })
 
-/** 압축된 한 줄(4,000자)이 낀 파일 — 뷰어가 가로로 스크롤되는지는 이것으로만 드러난다 (#139) */
+/** A file containing one minified 4,000-character line — this is the only way to reveal whether the viewer scrolls horizontally (#139) */
 async function openMinifiedFile(page: Page) {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
@@ -1528,21 +1631,23 @@ async function openMinifiedFile(page: Page) {
 const VIEWER_SCROLLER = '[data-testid="code-viewer"] .overflow-auto'
 
 /**
- * 뷰어는 가로로도 스크롤된다 — 그래서 키보드로 들어갈 수 있어야 한다 (#139).
- * `tabIndex={-1}`이면 파일을 열 때 한 번 받은 포커스를 잃는 순간 다시 들어갈 길이 없어,
- * 키보드만 쓰는 사람은 긴 줄의 오른쪽 끝에 닿지 못한다.
+ * The viewer also scrolls horizontally — so it must be reachable by keyboard (#139).
+ * With `tabIndex={-1}`, once the focus received when the file opened is lost there is no way
+ * back in, and a keyboard-only person can never reach the right end of a long line.
  */
-test('뷰어: 스크롤 칸은 이름 있는 region이고 Tab으로 닿아 화살표로 민다 (#139)', async ({ page }) => {
+test('Viewer: the scroll area is a named region, reachable by Tab and moved by the arrow keys (#139)', async ({
+  page,
+}) => {
   await openMinifiedFile(page)
 
-  // 측정이 먼저다: 가로 스크롤이 없다면 이 시험은 아무것도 주장하지 않는다
+  // Measure first: if there is no horizontal scroll, this test asserts nothing
   const overflow = await page.evaluate((sel) => {
     const root = document.querySelector<HTMLElement>(sel)!
     return root.scrollWidth - root.clientWidth
   }, VIEWER_SCROLLER)
   expect(overflow).toBeGreaterThan(1_000)
 
-  // 파일을 열 때 받은 포커스는 버리고, 헤더의 마지막 버튼에서 Tab으로 들어간다
+  // Discard the focus received when the file opened, and tab in from the last button in the header
   await page.getByTestId('viewer-open-ide').focus()
   await page.keyboard.press('Tab')
   const focused = await page.evaluate((sel) => {
@@ -1562,11 +1667,14 @@ test('뷰어: 스크롤 칸은 이름 있는 region이고 Tab으로 닿아 화�
     .toBeGreaterThan(0)
 })
 
-/** 행이 `w-full`이면 가로로 민 만큼 배경이 왼쪽으로 끌려 나가 보이는 폭을 못 덮는다 (#139) */
-test('뷰어: 가로로 밀어도 행 배경이 보이는 폭을 덮는다 (#139)', async ({ page }) => {
+/** If a row is `w-full`, scrolling horizontally drags its background left with it, so it no longer covers the visible width (#139) */
+test('Viewer: the row background still covers the visible width even after scrolling horizontally (#139)', async ({
+  page,
+}) => {
   await openMinifiedFile(page)
-  // 짧은 줄(3번 줄)을 일치로 칠해 둔다 — 긴 줄은 `w-max`만으로도 덮지만, 짧은 줄은 보이는 폭에서
-  // 끝나고 줄 번호도 함께 끌려 나갔다 (재 봄: 오른쪽 끝 -1,500, 줄 번호 -848)
+  // Paint the short line (line 3) as a match — a long line is covered by `w-max` alone, but a
+  // short line used to end within the visible width and drag the line number out with it
+  // (measured: right edge at -1,500, line number at -848)
   await page.getByTestId('viewer-search').fill('short')
   await expect(page.locator('[data-line="2"]')).toHaveClass(/bg-graphite/)
 
@@ -1582,17 +1690,17 @@ test('뷰어: 가로로 밀어도 행 배경이 보이는 폭을 덮는다 (#139
     return { scrollLeft: root.scrollLeft, long: box(1), short: box(2), gutterLeft: gutter.left - r.left }
   }, VIEWER_SCROLLER)
 
-  // 가로 스크롤이 실제로 일어나야 이 시험이 무언가를 주장한다
+  // The horizontal scroll must actually happen for this test to assert anything
   expect(seen.scrollLeft).toBe(1_500)
   for (const row of [seen.long, seen.short]) {
     expect(row.left).toBeLessThanOrEqual(1)
     expect(row.right).toBeGreaterThanOrEqual(-1)
   }
-  // 줄 번호는 밀려 나가지 않고 왼쪽에 남는다
+  // The line number does not get dragged out and stays on the left
   expect(Math.abs(seen.gutterLeft)).toBeLessThanOrEqual(1)
 })
 
-test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', async ({ page }) => {
+test('Viewer: a binary file just gets a notice (C-3 abnormal path)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1605,7 +1713,7 @@ test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', a
   await expect(page.getByTestId('viewer-binary')).toContainText('Binary')
 })
 
-test('뷰어: 지원하는 이미지는 원본 바이트로 미리 본다', async ({ page }) => {
+test('Viewer: a supported image is previewed from its raw bytes', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -1634,7 +1742,7 @@ test('뷰어: 지원하는 이미지는 원본 바이트로 미리 본다', asyn
   await expect(page.getByTestId('viewer-search')).toHaveCount(0)
 })
 
-test('뷰어: SVG는 그림과 원문을 전환한다', async ({ page }) => {
+test('Viewer: SVG toggles between the rendered image and raw source', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
   await page.evaluate((text: string) => {
@@ -1661,7 +1769,9 @@ test('뷰어: SVG는 그림과 원문을 전환한다', async ({ page }) => {
   await expect(page.getByTestId('viewer-image')).toBeVisible()
 })
 
-test('첨부: 파일을 붙이면 목록에 뜨고 전송에 실린다 (D, FR-13)', async ({ page }) => {
+test('Attachments: attaching a file shows it in the list and rides along with the send (D, FR-13)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -1678,11 +1788,11 @@ test('첨부: 파일을 붙이면 목록에 뜨고 전송에 실린다 (D, FR-13
   const sent = await page.evaluate(() => (window as any).__mock.sentAttachments)
   expect(sent).toHaveLength(1)
   expect(sent[0].name).toBe('screenshot.png')
-  // 대화창에도 첨부가 표시된다
+  // The attachment also shows up in the conversation
   await expect(page.getByTestId('msg-user').last()).toContainText('screenshot.png')
 })
 
-test('첨부만으로도 보낼 수 있다 (D 비정상 경로: 빈 텍스트)', async ({ page }) => {
+test('Sending with only an attachment and no text works (D abnormal path: empty text)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await expect(page.getByTestId('send')).toBeDisabled()
@@ -1694,7 +1804,9 @@ test('첨부만으로도 보낼 수 있다 (D 비정상 경로: 빈 텍스트)',
   await expect(page.getByTestId('send')).toBeEnabled()
 })
 
-test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, FR-21)', async ({ page }) => {
+test('Command palette ⌘K: searches sessions and conversation content together (E-2, FR-21)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'auth 리팩터링')
   await page.evaluate(() => {
@@ -1714,8 +1826,10 @@ test('커맨드 팔레트 ⌘K: 세션·대화 내용을 함께 찾는다 (E-2, 
   await expect(page.getByTestId('session-name')).toContainText('auth 리팩터링')
 })
 
-/** 세션이 없는 프로젝트도 팔레트에서 고르면 그 프로젝트로 간다 (#183) — 예전에는 팔레트만 닫혔다 */
-test('커맨드 팔레트: 세션 없는 프로젝트를 고르면 그 프로젝트로 간다 (#183)', async ({ page }) => {
+/** Picking a project with no sessions from the palette also navigates to that project (#183) — it used to just close the palette */
+test('Command palette: picking a project with no sessions navigates to that project (#183)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', '작업')
 
@@ -1735,35 +1849,38 @@ test('커맨드 팔레트: 세션 없는 프로젝트를 고르면 그 프로젝
 })
 
 /**
- * 상단 바는 계기판이다 — 지시문이 아니라 상태를 말한다 (이슈 #33).
+ * The top bar is a dashboard — it states status, not instructions (issue #33).
  *
- * ⌘I·⌘⇧A 칩이 대기 숫자 옆에 서서 숫자와 **같은 조건으로** 밝아졌다. 뭔가 나를
- * 기다리는 순간, 즉 바가 할 말이 생기는 유일한 순간에, 밝아지는 것 셋 중 둘이
- * "이 키를 누르세요"였다는 뜻이다.
+ * The ⌘I/⌘⇧A chips used to sit next to the waiting count and light up under **the same
+ * condition** as the count. That meant that at the one moment the bar has something to say —
+ * something is waiting on the person — two out of the three things that lit up said "press this
+ * key".
  *
- * 없앤 것은 **표시**뿐이라 그 둘을 함께 본다: 신호는 숫자가 그대로 맡고, 키는 여전히
- * 듣고, 이름과 키는 팔레트에서 찾을 수 있다 — 유일하게 보이던 언급을 지우는 것이
- * 피해야 할 실패였다.
+ * Only the **display** was removed, so both sides are checked together: the count alone still
+ * carries the signal, the keys still work, and their name and key can be found in the palette —
+ * removing the only visible mention of them would have been the failure to avoid.
  */
-test('상단 바: 단축키 칩 대신 숫자가 신호다 (#33)', async ({ page }) => {
+test('Top bar: the count is the signal, not a shortcut chip (#33)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'A')
   await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
 
-  // 대기가 있어도 바는 키를 광고하지 않는다 — 예전엔 바로 이때 칩이 가장 밝았다
+  // Even with something waiting, the bar does not advertise a key — this used to be exactly when
+  // the chip was brightest
   const bar = page.getByTestId('app-header')
   await expect(bar).toContainText('Waiting for input')
   await expect(bar).not.toContainText('Next item')
   await expect(bar).not.toContainText('List')
 
-  // 밝아지는 일은 숫자가 계속 맡는다 (승인 대기 = 순백)
+  // Lighting up remains the count's job (an approval waiting = pure white)
   await expect(page.getByTestId('count-waiting')).toContainText('01')
   await expect(page.getByTestId('count-waiting')).toHaveClass(/beacon/)
 
   /*
-   * 빛무리는 숫자에만 진다 (사용자 지적 2026-09-12). `beacon`의 text-shadow는 상속되므로
-   * 색만 덮어쓴 이름표가 어두운 글자에 흰 후광을 쓰고 있었다 — 빛나 보이는 게 아니라
-   * 초점이 안 맞아 보인다.
+   * The glow belongs to the number alone (pointed out by the person, 2026-09-12). Because
+   * `beacon`'s text-shadow is inherited, the label — which only overrides color — was wearing a
+   * white halo on its dark text as well. Instead of looking luminous, it just looked out of
+   * focus.
    */
   const halo = await page.getByTestId('count-waiting').evaluate((el) => ({
     label: getComputedStyle(el.firstElementChild!).textShadow,
@@ -1772,32 +1889,35 @@ test('상단 바: 단축키 칩 대신 숫자가 신호다 (#33)', async ({ page
   expect(halo.label).toBe('none')
   expect(halo.value).not.toBe('none')
 
-  // 키 자체는 그대로 듣는다 (FR-17은 안 건드렸다)
+  // The keys themselves still work (FR-17 was left untouched)
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('inbox')).toBeHidden()
 
-  // 이름과 키는 팔레트가 말한다
+  // The palette states the name and the key
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('waiting')
   const actions = page.getByTestId('palette-item-action')
   await expect(actions.filter({ hasText: 'Waiting list' })).toContainText('⌘I')
   await expect(actions.filter({ hasText: 'Jump to next waiting' })).toContainText('⌘⇧A')
 
-  // 키를 모르는 사람은 여기서 그대로 실행한다
+  // Someone who does not know the key can run it right from here
   await actions.filter({ hasText: 'Waiting list' }).click()
   await expect(page.getByTestId('inbox')).toBeVisible()
 })
 
 /**
- * 도는 표식을 끄는 스위치 (사용자 요청 2026-09-13).
+ * A switch to turn off the spinning indicator (requested by the person, 2026-09-13).
  *
- * 취향이 아니라 전력이다 — 쉬지 않는 움직임 하나가 화면을 최대 주사율로 붙든다(실측:
- * 세션 하나가 도는 동안 앱 CPU 7.0% → 2.9%). 끄면 표식이 사라지는 게 아니라 멈춘다:
- * 밝은 회색 한 겹이 남아 "지금 돌고 있다"는 말은 계속한다.
+ * This is about power, not taste — a single ceaseless animation pins the screen to its maximum
+ * refresh rate (measured: app CPU went from 7.0% to 2.9% while one session was working). Turning
+ * it off does not remove the indicator, it stops it: a plain bright-gray layer remains, still
+ * saying "this is currently working".
  */
-test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ page }) => {
+test('Settings: turning off the spinning indicator stops it, leaving only a brightness cue', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
@@ -1808,7 +1928,7 @@ test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ 
   const panel = page.getByTestId(`grid-panel-${id}`)
   await expect(panel).toBeVisible()
 
-  /** 지금 실제로 도는 궤도의 수 — 클래스가 아니라 애니메이션을 센다 */
+  /** The number of orbits actually spinning right now — counts animations, not classes */
   const spinning = () =>
     page.evaluate(
       () =>
@@ -1817,7 +1937,7 @@ test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ 
           .filter((a) => (a as CSSAnimation).animationName === 'cc-orbit-spin' && a.playState === 'running')
           .length,
     )
-  /** 링이 무엇으로 칠해져 있나 (::before는 실제 판이다) */
+  /** What the ring is painted with (::before is the actual layer) */
   const ringPaint = () =>
     page.evaluate(() => {
       const el = document.querySelector('.cc-orbit-ring-layer')!
@@ -1836,15 +1956,16 @@ test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ 
   await page.getByTestId('settings-spin-icon').uncheck()
   await page.keyboard.press('Escape')
 
-  // 아무것도 돌지 않는다 — 이게 전력을 아끼는 조건이다
+  // Nothing is spinning — this is the condition that saves power
   await expect.poll(spinning).toBe(0)
-  // 그래도 표식은 남는다: 무지개 대신 밝은 회색 한 겹 — 덧그린 링이 아니라 칸의 테두리 자체다 (#208)
+  // The indicator still remains: a plain bright-gray layer instead of the rainbow — this is the
+  // panel's own border, not a drawn-on ring (#208)
   await expect(page.locator('.cc-orbit-ring-layer')).toBeHidden()
   await expect(panel).toHaveCSS('border-top-color', 'rgb(144, 144, 144)')
-  // 칸이 돌고 있다는 사실 자체는 여전히 값으로 읽힌다 (테스트·보조 기술의 자리)
+  // The fact that the panel is working is still readable as a value (for tests and assistive technology)
   await expect(panel).toHaveClass(/cc-orbit-ring/)
 
-  // 다시 켜면 돌아온다 — 그리고 재실행에도 남는다 (작업공간 스냅샷)
+  // Turning it back on brings it back — and it survives a restart too (workspace snapshot)
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
@@ -1855,17 +1976,19 @@ test('설정: 도는 표식을 끄면 멈추고, 밝기로 남는다', async ({ 
 })
 
 /*
- * 보내기 키 (설정: Send with ⌘/Ctrl+Enter).
+ * The send key (setting: Send with ⌘/Ctrl+Enter).
  *
- * 순수 판정은 composerKeys.test.ts에 있고, 여기서 보는 것은 그 판정이 **진짜 입력창에
- * 닿아 있는가**다. 값으로는 알 수 없는 것이 둘 있다: 켠 뒤의 맨 Enter가 정말 줄을
- * 바꾸는가(가로채지 않아야 textarea가 한다), 그리고 설정이 화면이 뜨기 전에 도착하는가.
+ * The pure decision logic lives in composerKeys.test.ts; what is checked here is whether that
+ * decision **actually reaches the real composer**. There are two things a unit-level value
+ * cannot tell: whether a plain Enter, once the setting is on, really inserts a newline (the
+ * textarea only does that if nothing intercepts it), and whether the setting arrives before the
+ * screen renders.
  */
-test('보내기 키: 기본값에서는 Enter가 보낸다', async ({ page }) => {
+test('Send key: with the default setting, Enter sends', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 지시')
 
-  // 설정을 한 번도 열지 않은 사람의 입력창이다 — 여기가 달라지면 그게 회귀다
+  // This is the composer for someone who has never opened settings — any change here is a regression
   const input = page.getByTestId('prompt-input')
   await input.fill('그냥 엔터')
   await input.press('Enter')
@@ -1873,7 +1996,7 @@ test('보내기 키: 기본값에서는 Enter가 보낸다', async ({ page }) =>
   await expect(page.getByTestId('msg-user').last()).toContainText('그냥 엔터')
 })
 
-test('보내기 키: 켜면 Enter는 줄을 바꾸고 조합키+Enter가 보낸다', async ({ page }) => {
+test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sends', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 지시')
 
@@ -1885,12 +2008,13 @@ test('보내기 키: 켜면 Enter는 줄을 바꾸고 조합키+Enter가 보낸�
   const input = page.getByTestId('prompt-input')
   await input.fill('첫 줄')
   await input.press('Enter')
-  // 줄이 하나 늘었을 뿐, 아무것도 나가지 않았다
+  // Only a line was added — nothing was sent
   await expect(input).toHaveValue('첫 줄\n')
   await input.pressSequentially('둘째 줄')
   await expect(page.getByTestId('msg-user').filter({ hasText: '첫 줄' })).toHaveCount(0)
 
-  // ⌘(맥)와 Ctrl(그 외)은 한 판정이라 둘 다 보낸다 — 화면은 자기가 어느 자판인지 모른다
+  // ⌘ (on Mac) and Ctrl (elsewhere) are treated as one decision, so both send — the UI does not
+  // know which platform it is on
   await input.press('Meta+Enter')
   await expect(input).toHaveValue('')
   await expect(page.getByTestId('msg-user').last()).toContainText('둘째 줄')
@@ -1900,7 +2024,8 @@ test('보내기 키: 켜면 Enter는 줄을 바꾸고 조합키+Enter가 보낸�
   await expect(input).toHaveValue('')
   await expect(page.getByTestId('msg-user').last()).toContainText('컨트롤로도')
 
-  // 다시 켜도 고른 값이 그대로다 — 설정이 기억되지 않으면 이 기능은 매번 다시 켜야 한다
+  // Reloading keeps the chosen value — if the setting were not remembered, this feature would
+  // have to be re-enabled every time
   await page.reload()
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-appearance').click()
@@ -1908,11 +2033,13 @@ test('보내기 키: 켜면 Enter는 줄을 바꾸고 조합키+Enter가 보낸�
 })
 
 /*
- * 글자 크기(zoom)와 vh의 관계 (도그푸딩: "글자 크기 키우면 세션의 입력창이 안 보이거든").
- * vh는 zoom의 영향을 안 받아서, 확대하면 100vh 셸이 창보다 커져 맨 아래(입력창)가
- * 창 밖으로 밀렸다. 셸을 % 사슬로 바꾼 뒤에는 어느 단계에서든 입력창이 창 안에 있다.
+ * The relationship between text size (zoom) and vh (dogfooding finding: "when I bump up the text
+ * size, the session's composer disappears"). vh is not affected by zoom, so zooming in made the
+ * 100vh shell taller than the window and pushed the bottom (the composer) outside it. After
+ * switching the shell to a chain of percentages, the composer stays inside the window at every
+ * zoom level.
  */
-test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있다', async ({ page }) => {
+test('Settings: the composer stays inside the window even at the maximum text size', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -1924,9 +2051,10 @@ test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있�
   await page.keyboard.press('Escape')
 
   /*
-   * 한 번 재서 단언하면 배율 적용 직후의 레이아웃 정착과 경합한다 — 전체 스위트의
-   * 병렬 부하에서만 간헐적으로 몇 픽셀 넘게 읽혔다 (솔로에서는 통과). 정착할 때까지
-   * 폴링한다: 계약은 "정착한 화면에서 입력창이 창 안"이지 "첫 프레임부터"가 아니다.
+   * Asserting from a single measurement races the layout settling right after the scale is
+   * applied — under the full suite's parallel load it intermittently read a few pixels over
+   * (passed when run alone). Poll until it settles: the contract is "the composer is inside the
+   * window once the layout has settled", not "from the very first frame".
    */
   const viewport = page.viewportSize()!
   const bottomEdge = async () => {
@@ -1934,7 +2062,7 @@ test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있�
     return box ? box.y + box.height : Number.POSITIVE_INFINITY
   }
   await expect.poll(bottomEdge).toBeLessThanOrEqual(viewport.height + 1)
-  // 되돌려도 창 안이다 — 커졌다 작아졌다 하며 자리를 잃지 않는다
+  // Reverting stays inside the window too — growing and shrinking never loses its place
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
@@ -1945,13 +2073,14 @@ test('설정: 글자 크기를 최대로 키워도 입력창이 창 안에 있�
 })
 
 /*
- * 그리드의 열 수는 글자 배율의 영향을 받지 않는다 (도그푸딩: "3에서는 1줄인데 4에서는
- * 2줄이야"). ResizeObserver 측정값은 zoom 좌표라, 실픽셀로 환산하지 않으면 배율을
- * 올릴수록 같은 창이 좁게 측정되어 열이 무너진다. 창 폭 1100은 (사이드바 240을 뺀
- * 그리드 860에서) 두 칸(MIN_PANEL_W=380)이 배율 1에서는 서고 zoom 좌표 그대로면
- * 1.25에서 무너지는(860/1.25=688 < 760), 결함이 갈리는 폭이다.
+ * The grid's column count is not affected by the text scale (dogfooding finding: "it is one row
+ * at scale 3 but two rows at scale 4"). ResizeObserver measurements are in zoom coordinates, so
+ * without converting to real pixels, the same window measures narrower as the scale goes up and
+ * columns collapse. A window width of 1100 (860 for the grid after subtracting the 240 sidebar)
+ * is exactly the width where the bug shows up: two panels (MIN_PANEL_W=380) fit at scale 1, but
+ * using the raw zoom coordinate collapses them at 1.25 (860/1.25=688 < 760).
  */
-test('설정: 글자 크기를 바꿔도 그리드 열 수는 그대로다', async ({ page }) => {
+test("Settings: changing the text size does not change the grid's column count", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 720 })
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '하나')
@@ -1963,7 +2092,8 @@ test('설정: 글자 크기를 바꿔도 그리드 열 수는 그대로다', asy
   })
   await page.getByTestId('grid-button').click()
 
-  // 열 수는 안쪽 display:grid 요소에 있다 — 바깥(data-testid="grid")은 flex 컨테이너다
+  // The column count lives on the inner display:grid element — the outer element
+  // (data-testid="grid") is a flex container
   const colsOf = () =>
     page.evaluate(
       () =>
@@ -1985,7 +2115,7 @@ test('설정: 글자 크기를 바꿔도 그리드 열 수는 그대로다', asy
   expect(await colsOf()).toBe(2)
 })
 
-test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
+test('Settings: viewing and deleting approval rules (E-4)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     ;(window as any).__mock.rulesList = [
@@ -1998,24 +2128,51 @@ test('설정: 승인 규칙을 보고 지운다 (E-4)', async ({ page }) => {
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
 
-  // 규칙은 이제 Permissions 갈래에 있다 — 설정이 한 두루마리에 다 쌓이지 않는다 (이슈 #7)
+  // Rules now live under the Permissions tab — settings are not all stacked into one long scroll (issue #7)
   await page.getByTestId('settings-tab-permissions').click()
   await expect(page.getByTestId('rules-list')).toContainText('npm test*')
   await page.getByTestId('delete-rule-1').click()
   await expect(page.getByTestId('rules-empty')).toBeVisible()
 })
 
-/** 두 프로젝트의 같은 규칙이 똑같은 줄로 보이지 않는다 — 줄마다 주인을 적는다 (#183) */
-test('설정: 승인 규칙 줄은 어느 프로젝트·세션의 것인지 보여 준다 (#183)', async ({ page }) => {
+/** The same rule from two different projects does not look like an identical row — each row states its owner (#183) */
+test('Settings: an approval rule row shows which project or session it belongs to (#183)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
     const st = (window as any).__store.getState()
-    const id = (name: string) => Object.values(st.projects as Record<string, any>).find((p) => p.name === name)!.id
+    const id = (name: string) =>
+      Object.values(st.projects as Record<string, any>).find((p) => p.name === name)!.id
     ;(window as any).__mock.rulesList = [
-      { id: 1, scope: 'project', matcher: 'pnpm test', decision: 'allow', createdAt: 1, projectId: id('alpha'), sessionId: null },
-      { id: 2, scope: 'project', matcher: 'pnpm test', decision: 'allow', createdAt: 2, projectId: id('beta'), sessionId: null },
-      { id: 3, scope: 'session', matcher: 'git push', decision: 'allow', createdAt: 3, projectId: null, sessionId: st.focusedSessionId },
+      {
+        id: 1,
+        scope: 'project',
+        matcher: 'pnpm test',
+        decision: 'allow',
+        createdAt: 1,
+        projectId: id('alpha'),
+        sessionId: null,
+      },
+      {
+        id: 2,
+        scope: 'project',
+        matcher: 'pnpm test',
+        decision: 'allow',
+        createdAt: 2,
+        projectId: id('beta'),
+        sessionId: null,
+      },
+      {
+        id: 3,
+        scope: 'session',
+        matcher: 'git push',
+        decision: 'allow',
+        createdAt: 3,
+        projectId: null,
+        sessionId: st.focusedSessionId,
+      },
     ]
     st.toggleSettings(true)
   })
@@ -2026,7 +2183,7 @@ test('설정: 승인 규칙 줄은 어느 프로젝트·세션의 것인지 보�
   await expect(page.getByTestId('rule-owner-3')).toHaveText('작업')
 })
 
-test('설정: 알림 정책을 끄면 저장된다 (E-5)', async ({ page }) => {
+test('Settings: turning off a notification policy is persisted (E-5)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
@@ -2035,12 +2192,14 @@ test('설정: 알림 정책을 끄면 저장된다 (E-5)', async ({ page }) => {
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snap?.notifyPolicy?.allDone).toBe(false)
 
-  // 단축키 표도 여기서 확인된다 (FR-17) — Shortcuts 갈래에 있다
+  // The shortcuts table is also checked here (FR-17) — it lives under the Shortcuts tab
   await page.getByTestId('settings-tab-shortcuts').click()
   await expect(page.getByTestId('shortcut-list')).toContainText('⌘⇧1~4')
 })
 
-test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 반영)', async ({ page }) => {
+test('A permission denial is explained separately from "not a repository" (F-1, reflecting what was actually measured)', async ({
+  page,
+}) => {
   await setup(page)
   await page.evaluate(async () => {
     const m = (window as any).__mock
@@ -2053,22 +2212,28 @@ test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 
     })
     await (window as any).__store.getState().addProject('/Users/me/Desktop/proj')
   })
-  // 막힌 것은 표식으로 바로 보이고, 무엇을 해야 하는지는 호버로 알려준다
+  // Being blocked shows immediately as a marker, and hovering explains what to do about it
   await expect(page.getByTestId('git-denied-denied')).toBeVisible()
   await page.getByTestId('project-header-denied').hover()
   await expect(page.getByTestId('git-denied')).toContainText('permission')
 })
 
-test('deleting a session: once confirmed it leaves the list and goes to the trash (M2.5, #204)', async ({ page }) => {
+test('deleting a session: once confirmed it leaves the list and goes to the trash (M2.5, #204)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '지울 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
-  // "되돌릴 수 없습니다"는 사실이 아니다 — where it goes, and how it comes back or goes for good
-  await expect(page.getByTestId('delete-trash-note')).toContainText('Chat history and attachments stay in Centralu’s trash')
-  await expect(page.getByTestId('delete-trash-note')).toContainText('Settings → Trash reads it, restores it, or deletes it for good')
+  // "Cannot be undone" is not the truth — where it goes, and how it comes back or goes for good
+  await expect(page.getByTestId('delete-trash-note')).toContainText(
+    'Chat history and attachments stay in Centralu’s trash',
+  )
+  await expect(page.getByTestId('delete-trash-note')).toContainText(
+    'Settings → Trash reads it, restores it, or deletes it for good',
+  )
   await page.getByTestId('confirm-delete-yes').click()
 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
@@ -2076,51 +2241,58 @@ test('deleting a session: once confirmed it leaves the list and goes to the tras
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(0)
   // The default deletes the tool file too (dogfooding asked for it), but only once it is deleted for good; until then it waits
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
-  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
+  expect(
+    await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id),
+  ).toBe(true)
 })
 
 /*
- * 진짜 삭제 (도그푸딩): 기본 삭제는 도구 쪽 대화 원본을 남긴다("되찾을 수 있다"가
- * 안내문의 약속이다). 체크박스를 켜면 그 약속이 같은 자리에서 경고로 바뀌고,
- * 원본까지 지워진다. 안 켜면 원본은 손대지 않는다 — 양쪽 다 실측한다.
+ * Actual deletion (dogfooding finding): the default delete leaves the tool's own conversation
+ * original intact ("this can be recovered" is the notice's promise). Checking the box flips that
+ * same notice into a warning, and the original gets deleted too. Leaving it unchecked never
+ * touches the original — both paths are checked directly.
  */
-test('세션 삭제: 기본은 원본까지 지운다 — 체크를 끄면 도구 쪽에 남는다', async ({ page }) => {
+test("Deleting a session: by default the original is deleted too — unchecking the box leaves it on the tool's side", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '남겨둘 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
-  // 기본: 원본까지 지운다는 경고가 서 있고 체크가 켜져 있다
+  // Default: a warning that the original will be deleted too is shown, and the checkbox is checked
   await expect(page.getByTestId('delete-external-toggle').locator('input')).toBeChecked()
   await expect(page.getByTestId('delete-external-warning')).toContainText('deleted too')
   await expect(page.getByTestId('delete-notice')).toHaveCount(0)
 
-  // 끄면 경고가 같은 자리에서 "도구에는 남는다"로 바뀐다
+  // Unchecking flips the same notice into "stays with the tool"
   await page.getByTestId('delete-external-toggle').locator('input').uncheck()
   await expect(page.getByTestId('delete-external-warning')).toHaveCount(0)
   await expect(page.getByTestId('delete-notice')).toContainText('stays in')
 
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  // 껐으니 원본은 남았다
+  // Unchecked, so the original remains
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
 })
 
 /*
- * 인수인계하고 새로 시작 (도그푸딩): 죽는 세션이 쓴 글이 새 세션의 첫 메시지가 되고,
- * 이름이 이어지고, 기존 세션은 원본까지 지워진다 (since #204: it moves to the trash, and the tool file goes when it is
- * deleted for good). 요청과 글은 대화에 그대로 보인다 —
- * 뒤에서 몰래 하는 단계가 없다.
+ * Handoff and start fresh (dogfooding finding): the note the departing session writes becomes
+ * the new session's first message, the name carries over, and the old session is deleted
+ * including its original (since #204: it moves to the trash, and the tool file goes when it is
+ * deleted for good). The request and the note are both visible in the conversation as they
+ * happen — there is no hidden step behind the scenes.
  */
 test('handoff: the note starts a new session and the old one moves to the trash (#204)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '갈아탈 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   /*
-    첫 턴을 끝내 둔다 — 인수인계는 돌던 턴이 끝나기를 기다린다 (돌던 턴의 출력이
-    글에 섞여 "잘린 것처럼" 읽힌 메아 실측). working 전환을 먼저 확인한다:
-    종료 이벤트가 전송의 working보다 먼저 가면 영영 안 끝난 턴이 된다.
+    Finish the first turn first — a handoff waits for the running turn to finish (measured
+    finding: output from a still-running turn mixed into the note and read as "cut off"). Confirm
+    the transition to working first: if the completion event goes out before the send's working
+    state, the turn never finishes.
   */
   await expect
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
@@ -2134,16 +2306,17 @@ test('handoff: the note starts a new session and the old one moves to the trash 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
   await expect(page.getByTestId('handoff-warning')).toContainText('moves to the trash')
-  // 받는 에이전트는 기본으로 지금 도구가 선택돼 있고, 삭제는 기본으로 켜져 있다
+  // The receiving agent defaults to the current tool, and deletion defaults to on
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
   await page.getByTestId('confirm-handoff-yes').click()
 
-  // 인수인계 요청이 대화에 보통 메시지로 들어간다
+  // The handoff request enters the conversation as an ordinary message
   await expect(page.getByTestId('chat-stream')).toContainText('handoff note')
 
-  // 죽는 세션이 글을 **답으로** 쓴다 (mock에는 모델이 없으니 손으로 흉내낸다). 파일은 host가 데이터 폴더에
-  // 놓는다 (#142) — 사용자 저장소에는 아무것도 쓰지 않는다. 자리는 넘기는 세션마다 갈린다 (#104).
+  // The departing session writes the note **as a reply** (there is no model in the mock, so this
+  // simulates it by hand). The file is placed by the host in the data folder (#142) — nothing is
+  // written to the person's own repository. The location varies per handing-off session (#104).
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
     m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '후계자 노트: 여기까지 했다' })
@@ -2155,33 +2328,47 @@ test('handoff: the note starts a new session and the old one moves to the trash 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0, { timeout: 15_000 })
   const heirId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   await expect(page.getByTestId(`session-row-${heirId}`)).toContainText('갈아탈 세션')
-  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
-  // 새 세션의 첫 메시지가 그 글이다
+  expect(
+    await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id),
+  ).toBe(true)
+  // The new session's first message is that note
   await expect(page.getByTestId('chat-stream')).toContainText('후계자 노트')
-  expect(await page.evaluate(() => [...(window as any).__mock.handoffNotes.values()])).toEqual(['후계자 노트: 여기까지 했다'])
-  expect(await page.evaluate(() => Object.keys((window as any).__mock.fsState.files).filter((p) => p.includes('handoff')))).toEqual([])
+  expect(await page.evaluate(() => [...(window as any).__mock.handoffNotes.values()])).toEqual([
+    '후계자 노트: 여기까지 했다',
+  ])
+  expect(
+    await page.evaluate(() =>
+      Object.keys((window as any).__mock.fsState.files).filter((p) => p.includes('handoff')),
+    ),
+  ).toEqual([])
 })
 
 /*
- * 죽은-에이전트 인수인계 (#78): 서비스가 중단된 세션에게 노트를 부탁할 수 없다.
- * 그 상태를 보면 대화상자의 기본값 셋이 통째로 뒤집힌다 — 모드는 기록으로,
- * 대상은 반대 도구로, 삭제는 해제로. 확인하면 죽은 세션에게 아무것도 묻지 않고
- * host의 기록이 후임자의 첫 메시지가 된다.
+ * Handoff from a dead agent (#78): a session whose service has crashed cannot be asked to write
+ * a note. Seeing that state flips all three dialog defaults at once — mode becomes record, the
+ * target becomes the opposite tool, and deletion becomes off. Confirming asks the dead session
+ * for nothing at all, and the host's record becomes the successor's first message.
  */
-test('죽은 세션의 인수인계: 기록 모드가 미리 서고, 묻지 않고 넘어가며, 원본은 남는다 (#78)', async ({ page }) => {
+test('Handoff from a dead session: record mode is preselected, nothing is asked, and the original remains (#78)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '죽을 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
-  // 세션이 죽는다 — 에러 상태가 곧 "노트를 부탁할 수 없다"는 판정 근거다
+  // The session dies — the error state is exactly the basis for deciding "cannot be asked for a note"
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
-    m.emit({ type: 'error', sessionId: sid, error: { code: 'adapter_crashed', message: 'service down', retryable: false } })
+    m.emit({
+      type: 'error',
+      sessionId: sid,
+      error: { code: 'adapter_crashed', message: 'service down', retryable: false },
+    })
   }, id)
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
 
-  // 기본값 셋이 뒤집혔다: 기록 모드 · 반대 도구 · 삭제 해제
+  // All three defaults are flipped: record mode, the opposite tool, deletion off
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-tool-codex')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()
@@ -2189,17 +2376,21 @@ test('죽은 세션의 인수인계: 기록 모드가 미리 서고, 묻지 않�
 
   await page.getByTestId('confirm-handoff-yes').click()
 
-  // 후임자가 이름을 물려받아 서고, 첫 메시지가 host의 기록이다 — 죽은 세션에겐 아무것도 안 갔다
+  // The successor is created inheriting the name, and its first message is the host's record —
+  // nothing was ever sent to the dead session
   await expect
     .poll(() => page.evaluate(() => (window as any).__mock.sessions.size), { timeout: 15_000 })
     .toBe(2)
   await expect(page.getByTestId('chat-stream')).toContainText('Handoff Record')
-  // 원본은 남는다 — 후임자가 확인될 때까지의 보존이 죽은-모드의 기본이다
+  // The original remains — preserving it until the successor is confirmed is the default for the
+  // dead-agent mode
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(1)
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
 })
 
-test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러도 반응 없어 보이던 문제)', async ({ page }) => {
+test('When session creation fails, the reason stays in the modal (M2.5: used to look like clicking did nothing)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2211,31 +2402,36 @@ test('세션 생성이 실패하면 모달에 이유가 남는다 (M2.5: 눌러�
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
 
-  // 토스트는 사라지지만 이건 남는다
+  // The toast disappears, but this stays
   await expect(page.getByTestId('create-session-error')).toContainText('Could not start')
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
 })
 
-test('host가 이미 준비된 뒤에 붙어도 기동한다 (회귀: 이벤트를 놓쳐 30초 멈추던 문제)', async ({ page }) => {
-  // mock 플랫폼은 즉시 준비되므로, attach가 늦어도 화면이 뜨는지만 본다
+test('Startup works even when attaching after the host is already ready (regression: missing an event used to hang for 30 seconds)', async ({
+  page,
+}) => {
+  // The mock platform is ready instantly, so this only checks that the screen appears even if attach is late
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible({ timeout: 5000 })
-  // 기동 실패 화면이 아니어야 한다
+  // It must not be the "could not start" failure screen
   await expect(page.getByText('Could not start the agent host')).toHaveCount(0)
 })
 
-test('같은 프로젝트의 세션을 보다가 프로젝트 이름을 누르면 프로젝트 화면으로 간다 (사용자 제보 2026-09-28)', async ({ page }) => {
+test('Clicking a project name while viewing one of its sessions opens the project screen (reported by the person, 2026-09-28)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', '작업')
   await expect(page.getByTestId('prompt-input')).toBeVisible()
   await expect(page.getByTestId('project-view')).toHaveCount(0)
 
-  // 같은 프로젝트의 이름 — 예전에는 세션이 그대로 남았다
+  // The same project's name — the session used to stay put
   await page.getByTestId('project-header-alpha').click()
   await expect(page.getByTestId('project-view')).toBeVisible()
   await expect(page.getByTestId('project-view-name')).toHaveText('alpha')
 
-  // 세션으로 돌아갔다가 다른 프로젝트로 가는 길은 예전부터 됐다 — 그대로인지 함께 본다
+  // Going back to a session and then to another project already worked before — this checks it
+  // still does
   await page.getByTestId('project-alpha').locator('[data-testid^="session-row-"]').first().click()
   await expect(page.getByTestId('project-view')).toHaveCount(0)
   await page.getByTestId('project-header-beta').click()
@@ -2243,14 +2439,15 @@ test('같은 프로젝트의 세션을 보다가 프로젝트 이름을 누르�
 })
 
 /*
- * 사이드바 접기 (#205). 접는 문은 이름 줄의 화살표 하나뿐이고, 이름은 여전히 프로젝트 화면을 연다.
- * 접힘은 프로젝트마다 기억되어 다시 켜도 남고, 접힌 줄은 기다리는 세션의 수를 세션 표식과 같은
- * 모양으로 말한다. 인박스처럼 밖에서 그 세션으로 가면 펴진다.
+ * Sidebar folding (#205). The only way to fold is the arrow on the name row, and the name still
+ * opens the project screen. Folding is remembered per project and survives a restart, and a
+ * folded row reports the count of sessions waiting in the same shape as the session marker.
+ * Navigating to that session from outside, as from the inbox, unfolds it.
  */
 const sessionRows = (page: Page, project: string) =>
   page.getByTestId(`project-${project}`).locator('[data-testid^="session-row-"]')
 
-test('사이드바: 화살표로 프로젝트의 세션 줄을 접고 편다 (#205)', async ({ page }) => {
+test("Sidebar: the arrow folds and unfolds a project's session rows (#205)", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', '작업')
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
@@ -2258,7 +2455,7 @@ test('사이드바: 화살표로 프로젝트의 세션 줄을 접고 편다 (#2
   await page.getByTestId('project-fold-alpha').click()
   await expect(sessionRows(page, 'alpha')).toHaveCount(0)
   await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
-  // 이름 줄은 남고, 다른 프로젝트는 그대로다
+  // The name row stays, and the other project is untouched
   await expect(page.getByTestId('project-header-alpha')).toBeVisible()
   await expect(page.getByTestId('project-beta')).not.toHaveAttribute('data-folded', 'true')
 
@@ -2266,24 +2463,25 @@ test('사이드바: 화살표로 프로젝트의 세션 줄을 접고 편다 (#2
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
   await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', 'true')
 
-  // 한 번에 접기 — 메뉴를 연 프로젝트만 펴 두고 나머지를 접는다
+  // Fold all at once — leave only the project whose menu was opened expanded, and fold the rest
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('fold-others-alpha').click()
   await expect(page.getByTestId('project-beta')).toHaveAttribute('data-folded', 'true')
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
 })
 
-test('사이드바: 이름을 누르면 접히지 않고 프로젝트 화면이 열린다 (#205)', async ({ page }) => {
+test('Sidebar: clicking the name opens the project screen instead of folding (#205)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await expect(page.getByTestId('project-view')).toHaveCount(0)
 
-  // 펼친 채로 이름 — 프로젝트 화면이 열리고 줄은 그대로 있다
+  // Expanded, click the name — the project screen opens and the row stays as is
   await page.getByTestId('project-header-alpha').click()
   await expect(page.getByTestId('project-view')).toBeVisible()
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
 
-  // 세션으로 돌아가 접은 뒤 이름 — 여전히 프로젝트 화면이고, 펴지지도 않는다
+  // Go back to the session, fold it, then click the name — still the project screen, and it does
+  // not unfold either
   await sessionRows(page, 'alpha').first().click()
   await expect(page.getByTestId('project-view')).toHaveCount(0)
   await page.getByTestId('project-fold-alpha').click()
@@ -2293,11 +2491,12 @@ test('사이드바: 이름을 누르면 접히지 않고 프로젝트 화면이 
   await expect(sessionRows(page, 'alpha')).toHaveCount(0)
 })
 
-test('사이드바: 접힘은 다시 켜도 남는다 (#205)', async ({ page }) => {
+test('Sidebar: folding survives a restart (#205)', async ({ page }) => {
   /*
-   * 소개를 그리드 버튼으로 건너뛴다 — 오케스트레이터를 깨우지 않아야 목(mock)의 id 셈이 두 번의
-   * 실행에서 같게 간다. 실물 host는 프로젝트 id를 DB에 두어 재시작에도 같고, 목은 다시 켜면
-   * 프로젝트를 잊으므로 같은 폴더를 같은 순서로 다시 등록해 그 id를 되찾는다 (아래에서 확인한다).
+   * Skip the intro with the grid button — not waking the orchestrator keeps the mock's id
+   * counting the same across both runs. The real host keeps project ids in the DB, so they stay
+   * the same across a restart; the mock forgets projects on reload, so this re-registers the
+   * same folder in the same order to recover the same id (checked below).
    */
   const register = async () => {
     await page.evaluate(() => {
@@ -2317,35 +2516,40 @@ test('사이드바: 접힘은 다시 켜도 남는다 (#205)', async ({ page }) 
   expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects)).toEqual([id])
 
   await page.reload()
-  // 같은 프로젝트여야 이 시험이 무언가를 주장한다
+  // This must be the same project for the test to assert anything
   expect(await register()).toBe(id)
   await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
   await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Expand alpha')
 })
 
-test('사이드바: 접힌 프로젝트의 세션이 승인을 기다리면 이름 줄에 표식이 선다 (#205)', async ({ page }) => {
+test("Sidebar: a marker appears on the name row when a folded project's session is waiting for approval (#205)", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // 포커스는 beta
+  await newSession(page, 'beta', 'B작업') // Focus is on beta
   await page.getByTestId('project-fold-alpha').click()
   await expect(sessionRows(page, 'alpha')).toHaveCount(0)
 
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
-  // 세션 줄의 표식과 같은 칩 — 승인은 순백(beacon) 링, 글자 자리에 수
+  // The same chip shape as the session row marker — an approval is a pure-white (beacon) ring,
+  // with a count where the label would be
   const mark = page.getByTestId('fold-summary-alpha').locator('[data-state="waiting_approval"]')
   await expect(mark).toHaveText('1')
   await expect(mark).toHaveAttribute('style', /--color-beacon/)
   await page.getByTestId('fold-summary-alpha').hover()
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
-  // 펼친 프로젝트에는 요약이 없다 — 줄마다 제 표식이 이미 말한다
+  // An expanded project has no summary — each row's own marker already says it
   await expect(page.getByTestId('fold-summary-beta')).toHaveCount(0)
 })
 
-test('사이드바: 인박스에서 접힌 프로젝트의 세션으로 가면 펴진다 (#205)', async ({ page }) => {
+test('Sidebar: navigating from the inbox to a session in a folded project unfolds it (#205)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await newSession(page, 'alpha', 'A작업')
-  await newSession(page, 'beta', 'B작업') // 포커스는 beta
+  await newSession(page, 'beta', 'B작업') // Focus is on beta
   await page.getByTestId('project-fold-alpha').click()
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
@@ -2355,11 +2559,11 @@ test('사이드바: 인박스에서 접힌 프로젝트의 세션으로 가면 �
   await expect(page.getByTestId('approval-card')).toBeVisible()
   await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', 'true')
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
-  // 편 것은 기억한다 — 화살표가 언제나 화면 그대로를 말한다
+  // The unfolded state is remembered — the arrow always reflects exactly what is on screen
   expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects)).toEqual([])
 })
 
-test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (도그푸딩: 어디서 보는지 못 찾음)', async ({
+test("A project's git, files and viewer can be viewed without any session (dogfooding finding: could not find where to look)", async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -2369,27 +2573,28 @@ test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (�
     m.fsState.entries[''] = [{ name: 'README.md', path: 'README.md', isDir: false, ignored: false }]
   })
 
-  // 세션을 만들지 않은 상태에서 프로젝트 이름을 누른다
+  // Click the project name without creating a session
   await page.getByTestId('project-header-alpha').click()
   await expect(page.getByTestId('project-view')).toBeVisible()
 
-  // 세션이 없어도 증거 패널은 프로젝트의 것이므로 그대로 보인다
+  // Even with no session, the evidence panel belongs to the project, so it still shows
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
   await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-README.md')).toBeVisible()
 })
 
-test('창 드래그 영역과 오버스크롤 차단 (M2.5 창 문제)', async ({ page }) => {
+test('Window drag regions and blocked overscroll (M2.5 window issue)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 타이틀바를 숨겼으므로 각 레인의 헤더가 창 이동 손잡이다 (상단바·세션·증거)
-  // 각 레인의 헤더가 창 이동 손잡이다 (상단바·세션·증거).
-  // 속성만으로는 헤더 '안의 글자'를 잡았을 때 죽으므로 mousedown도 함께 받는다
+  // With the title bar hidden, each lane's header is the window-move handle (top bar, session,
+  // evidence)
+  // Each lane's header is the window-move handle (top bar, session, evidence).
+  // The attribute alone breaks when text 'inside' the header is grabbed, so mousedown is also handled
   await expect(page.locator('[data-tauri-drag-region]')).toHaveCount(3)
 
-  // 창 자체는 스크롤되지 않는다 (웹처럼 고무줄로 튕기면 안 된다)
+  // The window itself does not scroll (must not rubber-band like a web page)
   const overscroll = await page.evaluate(() => getComputedStyle(document.body).overscrollBehaviorY)
   expect(overscroll).toBe('none')
   const bodyOverflow = await page.evaluate(() => getComputedStyle(document.body).overflow)
@@ -2397,8 +2602,9 @@ test('창 드래그 영역과 오버스크롤 차단 (M2.5 창 문제)', async (
 })
 
 /**
- * 이전 세션 불러오기 — '+ → 도구 선택 → 이전 대화 목록'.
- * 터미널에서 하던 대화를 이어받지 못하면 이 앱은 '또 하나의 창'이 된다.
+ * Loading a past session — '+ -> pick a tool -> list of past conversations'.
+ * If a conversation started in the terminal cannot be picked up here, this app is just
+ * 'one more window'.
  */
 async function seedPastSessions(
   page: Page,
@@ -2415,7 +2621,7 @@ async function seedPastSessions(
   )
 }
 
-test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({ page }) => {
+test('Picking and loading a past conversation from the create-session modal', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await seedPastSessions(
     page,
@@ -2451,7 +2657,7 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
     },
   )
 
-  // ext-2는 이미 불러와 둔 상태로 만든다 (목이 실제 세션을 보고 판정한다)
+  // Set ext-2 up as already loaded (the mock decides by looking at actual sessions)
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('past-ext-2').click()
@@ -2461,34 +2667,37 @@ test('세션 생성 모달에서 이전 대화를 골라 불러온다', async ({
   await page.getByTestId('project-menu-alpha').click()
 
   await page.getByTestId('new-session-alpha').click()
-  // 기본은 '새 대화' — 불러오기가 기본이 되면 안 된다
+  // The default is 'new conversation' — loading must never be the default
   await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('past-ext-1')).toContainText('어제 하던 리팩터링')
-  // 제목이 '첫 메시지'인 도구(codex)에서도 최신 여부를 알 수 있어야 한다
+  // Even for a tool (codex) whose title is 'the first message', recency must still be visible
   await expect(page.getByTestId('past-ext-1')).toContainText('last 1h ago')
   await expect(page.getByTestId('past-ext-2')).toContainText('Already open')
 
   await page.getByTestId('past-ext-1').click()
-  // 이어가기를 골랐다는 사실은 버튼 라벨이 말한다 (Load ≠ Start) — 별도 안내문은 걷어냈다 (#8)
+  // The button label itself states that resuming was chosen (Load ≠ Start) — a separate notice
+  // was removed (#8)
   await expect(page.getByTestId('create-session-confirm')).toHaveText('Load')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 지난 대화가 화면에 복원된다
+  // The past conversation is restored on screen
   await expect(page.getByTestId('chat-stream')).toContainText('이 모듈 좀 쪼개줘')
   await expect(page.getByTestId('chat-stream')).toContainText('세 파일로 나눴습니다')
 
-  // 이어받을 원본이 host로 전달됐는가
+  // Was the original to resume passed through to the host?
   const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
   expect(params.resumeExternalId).toBe('ext-1')
   expect(params.importHistory).toBe(true)
 
-  // 불러온 대화를 안 읽음으로 그리지 않는다 (이미 읽은 대화다)
+  // A loaded conversation is not drawn as unread (it has already been read)
   const sessionId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()].at(-1))
   await expect(page.getByTestId(`session-row-${sessionId}`)).not.toHaveAttribute('data-unread', 'true')
 })
 
-test('구버전 도구는 목록을 못 줘도 새 세션을 막지 않는다', async ({ page }) => {
+test('An older tool version that cannot list past sessions does not block creating a new one', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await seedPastSessions(page, {
     supported: false,
@@ -2500,17 +2709,17 @@ test('구버전 도구는 목록을 못 줘도 새 세션을 막지 않는다', 
 
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('past-unsupported')).toContainText('update codex')
-  // 이유는 보이되 길은 열려 있어야 한다
+  // The reason is shown, but the path must stay open
   await expect(page.getByTestId('create-session-confirm')).toHaveText('Start')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('그래도 새로 시작')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('chat-stream')).toContainText('그래도 새로 시작')
 })
 
-test('이전 대화가 없으면 없다고 말한다', async ({ page }) => {
+test('When there are no past conversations, it says so', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await seedPastSessions(page, { supported: true, sessions: [] })
   await page.getByTestId('project-menu-alpha').click()
@@ -2519,10 +2728,13 @@ test('이전 대화가 없으면 없다고 말한다', async ({ page }) => {
 })
 
 /**
- * 증거 → 자세히 보기의 연결.
- * 우측은 목록만, 자세히 보는 일은 넓은 오버레이에서 한다 (340px에서 diff는 못 읽는다).
+ * The link between evidence and viewing detail.
+ * The right side only holds lists; viewing detail happens in a wide overlay (a diff is
+ * unreadable at 340px).
  */
-test('변경 파일을 누르면 넓은 오버레이에 diff가 펴지고 esc로 대화가 그대로 돌아온다', async ({ page }) => {
+test('Clicking a changed file opens the diff in a wide overlay, and Escape returns to the untouched conversation', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2534,17 +2746,18 @@ test('변경 파일을 누르면 넓은 오버레이에 diff가 펴지고 esc로
   await expect(page.getByTestId('evidence-change-count')).toHaveText('1')
   await page.getByTestId('evidence-file-src/a.ts').click()
 
-  // 오버레이가 덮이고, 누른 파일의 diff부터 펴진다 (목록을 다시 찾게 하지 않는다)
+  // The overlay covers the screen, opening directly to the diff for the clicked file (no need to
+  // find it again in the list)
   await expect(page.getByTestId('overlay')).toBeVisible()
   await expect(page.getByTestId('diff-view')).toContainText('next()')
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('overlay')).toBeHidden()
-  // 걷으면 대화가 그대로 — 다시 찾아 들어가지 않아도 된다
+  // Closing it leaves the conversation untouched — there is no need to navigate back in
   await expect(page.getByTestId('chat-stream')).toContainText('이 함수 고쳐줘')
 })
 
-test('파일 트리에서 연 파일도 같은 오버레이에 뜬다', async ({ page }) => {
+test('A file opened from the file tree appears in the same overlay', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2573,7 +2786,9 @@ test('파일 트리에서 연 파일도 같은 오버레이에 뜬다', async ({
  * because being uncovered is not the point either: the point is that the loop is now one
  * click long, and Playwright will not click through anything that gets in the way.
  */
-test('오버레이는 대화만 덮는다 — 다음 파일을 여는 손잡이가 남아 있어야 한다', async ({ page }) => {
+test('The overlay covers only the conversation — the handle to open the next file must remain', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2591,7 +2806,7 @@ test('오버레이는 대화만 덮는다 — 다음 파일을 여는 손잡이�
   await expect(page.getByTestId('overlay')).toBeVisible()
   await expect(page.getByTestId('viewer-path')).toContainText('a.ts')
 
-  // 오버레이의 오른쪽 끝이 증거 패널의 왼쪽 끝을 넘지 않는다
+  // The overlay's right edge does not cross the evidence panel's left edge
   const edges = async () => {
     const o = (await page.getByTestId('overlay').boundingBox())!
     const p = (await page.getByTestId('evidence-panel').boundingBox())!
@@ -2600,17 +2815,19 @@ test('오버레이는 대화만 덮는다 — 다음 파일을 여는 손잡이�
   const viewerEdges = await edges()
   expect(viewerEdges.overlayRight).toBeLessThanOrEqual(viewerEdges.panelLeft + 1)
 
-  // esc 없이 트리에서 바로 다음 파일로 — 덮여 있으면 이 클릭이 통하지 않는다
+  // Go straight to the next file in the tree without Escape — if it were covered, this click
+  // would not land
   await page.getByTestId('file-b.ts').click()
   await expect(page.getByTestId('viewer-path')).toContainText('b.ts')
 })
 
 /**
- * 같은 규칙이 diff에도 적용된다 (이슈 #15). 오히려 여기가 더 아프다 — 변경 목록은
- * 하나씩 훑어 내려가는 목록이라, 한 파일을 볼 때마다 목록이 사라지면 그 훑기가 끊긴다.
- * diff는 unified라 좁아진 폭에서도 열은 그대로고 줄 폭만 준다.
+ * The same rule applies to diffs (issue #15). If anything, this hurts more — the change list is
+ * something the person scans one file after another, and if the list disappears every time a
+ * file is viewed, that scan is interrupted. The diff is unified, so a narrower width just shrinks
+ * the line width and keeps the columns intact.
  */
-test('깃 오버레이도 마찬가지다 — 변경 목록을 덮지 않는다', async ({ page }) => {
+test('The Git overlay follows the same rule — it does not cover the change list', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2629,13 +2846,15 @@ test('깃 오버레이도 마찬가지다 — 변경 목록을 덮지 않는다'
   const p = (await page.getByTestId('evidence-panel').boundingBox())!
   expect(o.x + o.width).toBeLessThanOrEqual(p.x + 1)
 
-  // 패널이 살아 있다 — 덮여 있으면 이 클릭들이 오버레이에 가로막힌다
+  // The panel stays alive — if it were covered, these clicks would be blocked by the overlay
   await page.getByTestId('evidence-tab-files').click()
   await page.getByTestId('file-notes.md').click()
   await expect(page.getByTestId('viewer-path')).toContainText('notes.md')
 })
 
-test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 보여야 한다', async ({ page }) => {
+test('Switching sessions clears whatever was overlaid — the new conversation must show first', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2655,8 +2874,10 @@ test('세션을 바꾸면 덮어둔 것은 걷힌다 — 새 대화가 먼저 �
   await expect(page.getByTestId('chat-stream')).toContainText('첫 번째')
 })
 
-/** 증거 패널: 탭으로 갈리고, 접어도 되살릴 길이 남는다 */
-test('증거 패널 탭: 깃은 변경만, 기록은 기록 탭에서 그래프와 함께', async ({ page }) => {
+/** Evidence panel: split by tabs, and collapsing still leaves a way to bring it back */
+test('Evidence panel tabs: Git shows only changes, and History shows the graph in its own tab', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2676,28 +2897,30 @@ test('증거 패널 탭: 깃은 변경만, 기록은 기록 탭에서 그래프�
   })
   await newSession(page, 'alpha', '작업')
 
-  // 깃 탭이 기본 — 변경만 있다. 기록 스트립은 분할(#20)에서 이웃 탭 스트립을 덮어 떠났다
+  // The Git tab is the default — only changes. The history strip was moved off, covering the
+  // neighboring tab strip during the split (#20)
   await expect(page.getByTestId('evidence-git')).toBeVisible()
   await expect(page.getByTestId('evidence-file-src/a.ts')).toBeVisible()
   await expect(page.getByTestId('evidence-tree')).toHaveCount(0)
 
-  // 기록은 기록 탭에서 — 스트립에 살던 레인 그래프도 여기로 이사했다
+  // History lives under the History tab — the lane graph that used to live in the strip moved
+  // here too
   await page.getByTestId('evidence-tab-history').click()
   await expect(page.getByTestId('history-commit-aaa111')).toContainText('첫 커밋')
   await expect(page.getByTestId('history-commit-bbb222')).toContainText('merge')
   await expect(page.getByTestId('commit-graph-aaa111')).toBeVisible()
 
-  // 파일 탭으로 가면 트리만
+  // Switching to the Files tab shows only the tree
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-README.md')).toBeVisible()
   await expect(page.getByTestId('evidence-git')).toBeHidden()
 
-  // 고른 탭은 스냅샷에 실린다
+  // The chosen tab is recorded in the snapshot
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snap?.panelTab).toBe('files')
 })
 
-test('기록에서 커밋을 누르면 넓은 곳에서 펼쳐진다', async ({ page }) => {
+test('Clicking a commit in History opens it in the wide area', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2714,7 +2937,7 @@ test('기록에서 커밋을 누르면 넓은 곳에서 펼쳐진다', async ({ 
   await expect(page.getByTestId('diff-view')).toContainText('새 줄')
 })
 
-test('패널을 접으면 띠가 남고 거기서 다시 편다', async ({ page }) => {
+test('Collapsing the panel leaves a rail, and it re-expands from there', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2728,7 +2951,8 @@ test('패널을 접으면 띠가 남고 거기서 다시 편다', async ({ page 
   await page.getByTestId('evidence-close').click()
   await expect(page.getByTestId('evidence-panel')).toBeHidden()
 
-  // 사라진 것과 접힌 것은 다르다 — 띠가 남고 변경 수는 접힌 채로도 읽힌다
+  // Gone and collapsed are different — the rail stays, and the change count is readable even
+  // while collapsed
   await expect(page.getByTestId('evidence-rail')).toBeVisible()
   await expect(page.getByTestId('evidence-rail-count')).toHaveText('2')
 
@@ -2736,7 +2960,7 @@ test('패널을 접으면 띠가 남고 거기서 다시 편다', async ({ page 
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 })
 
-test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) => {
+test('Staging and committing still work in a narrow panel', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -2744,7 +2968,7 @@ test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) =
   })
   await newSession(page, 'alpha', '작업')
 
-  // 스테이지 전에는 커밋할 수 없다 (올릴 것이 없는데 커밋 버튼이 살아 있으면 거짓말이다)
+  // Commit is disabled before staging (a live commit button with nothing staged would be a lie)
   await page.getByTestId('evidence-commit-message').fill('패널에서 커밋')
   await expect(page.getByTestId('evidence-commit')).toBeDisabled()
 
@@ -2754,8 +2978,10 @@ test('좁은 패널에서도 올리고 커밋할 수 있다', async ({ page }) =
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('패널에서 커밋')
 })
 
-/** M2.6 도그푸딩: 숨김/삭제·재시작·첨부·압축된 옛 대화 */
-test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명히 말한다', async ({ page }) => {
+/** M2.6 dogfooding: hide/delete, restart, attachments, and compacted old conversations */
+test('Deleting removes only our own record — the notice states plainly that it remains with the tool', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '지울 세션')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -2763,9 +2989,10 @@ test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명�
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
 
-  // 기본은 원본까지 지운다 (2b60589) — 그때는 빨간 경고가 선다
+  // By default the original is deleted too (2b60589) — a red warning appears in that case
   await expect(page.getByTestId('delete-external-warning')).toContainText('deleted too')
-  // **남기기로 고르면** 무섭지 않게 말한다 — 실제보다 무섭게 말하면 사람은 정리하지 못하고 목록만 쌓인다
+  // **Choosing to keep it** speaks without alarm — overstating the danger just means the person
+  // never cleans up and the list keeps growing
   await page.getByTestId('delete-external-toggle').locator('input').uncheck()
   await expect(page.getByTestId('delete-notice')).toContainText('stays in Claude Code')
   await expect(page.getByTestId('delete-notice')).toContainText('Past conversations')
@@ -2773,11 +3000,11 @@ test('삭제는 우리 기록만 지운다 — 도구에는 남는다고 분명�
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toBeHidden()
 
-  // 치우기 버튼은 없다 — 삭제 하나만 남겼다
+  // There is no separate "hide" button — only delete remains
   await expect(page.getByTestId(`hide-session-${id}`)).toHaveCount(0)
 })
 
-test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', async ({ page }) => {
+test('Refresh restarts only the agent and keeps the conversation', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '이 대화는 남아야 한다')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -2790,15 +3017,16 @@ test('새로고침은 에이전트만 다시 시작하고 대화는 남긴다', 
 })
 
 /**
- * 재시작은 몇 초짜리 일이다 — 그동안 화면이 조용하면 한 번 더 누르게 되고,
- * **두 번째 누름은 방금 뜬 프로세스를 다시 죽인다.** 고치려고 누른 버튼이
- * 고장을 만드는 자리였다. 도는 아이콘은 장식이 아니라 "받았다"는 응답이다.
+ * A restart takes a few seconds — if the screen stays quiet during that time, the person clicks
+ * again, and **the second click kills the process that just started.** The button pressed to fix
+ * something was the very spot that broke it. The spinning icon is not decoration, it is the
+ * "received" acknowledgment.
  */
-test('재시작하는 동안 아이콘이 돌고 버튼은 다시 눌리지 않는다', async ({ page }) => {
+test('While restarting, the icon spins and the button cannot be pressed again', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 실물처럼 시간이 걸리게 만든다 — 즉시 끝나면 이 버그는 재현되지 않는다
+  // Make it take real time — if it finishes instantly, this bug never reproduces
   await page.evaluate(() => {
     const m = (window as any).__mock
     const real = m.agents.restartSession.bind(m.agents)
@@ -2811,26 +3039,27 @@ test('재시작하는 동안 아이콘이 돌고 버튼은 다시 눌리지 않�
   const button = page.getByTestId('restart-session')
   await button.click()
 
-  // 도는 중이고, 잠겨 있다
+  // It is spinning, and it is locked
   await expect(page.getByTestId('restart-spinning')).toBeVisible()
   await expect(button).toBeDisabled()
 
-  // 그 사이 다시 누르려 해도 두 번째 재시작은 일어나지 않는다
+  // Trying to click again during that time does not trigger a second restart
   await button.click({ force: true })
   await expect(page.getByTestId('toast')).toContainText('Agent restarted')
   const count = await page.evaluate(() => (window as any).__mock.restarted.length)
   expect(count).toBe(1)
 
-  // 끝나면 원래대로 — 다음에 또 고칠 수 있어야 한다
+  // Once finished, it returns to normal — the person must be able to fix it again next time
   await expect(button).toBeEnabled()
   await expect(page.getByTestId('restart-spinning')).toHaveCount(0)
 })
 
-test('드래그해서 떨어뜨려도 첨부된다', async ({ page }) => {
+test('Dragging and dropping also attaches a file', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 웹뷰가 드롭을 가로채지 않는다는 전제 아래, 떨어뜨린 파일이 첨부로 잡히는지
+  // On the assumption that the webview does not intercept the drop, checks whether the dropped
+  // file is captured as an attachment
   const dt = await page.evaluateHandle(() => {
     const data = new DataTransfer()
     data.items.add(new File(['스크린샷 내용'], 'shot.png', { type: 'image/png' }))
@@ -2845,14 +3074,14 @@ test('드래그해서 떨어뜨려도 첨부된다', async ({ page }) => {
 })
 
 /**
- * #116 — 입력창을 **빗맞힌** 드롭이 앱을 덮어쓰던 버그.
+ * #116 — a drop that **missed** the composer used to overwrite the entire app.
  *
- * Tauri가 드롭을 가로채지 않으므로(dragDropEnabled: false) 아무도 안 받은 드롭은 웹뷰의
- * 기본 동작으로 간다: 떨어뜨린 파일로 이동. PDF 한 장이 창을 가득 덮고 돌아올 길은
- * 브라우저 뒤로 가기뿐이었다.
+ * Because Tauri does not intercept drops (dragDropEnabled: false), a drop nobody handles falls
+ * through to the webview's default behavior: navigate to the dropped file. One PDF filled the
+ * whole window, and the only way back was the browser's back button.
  *
- * 진짜 OS 드래그는 자동화할 수 없으므로 DataTransfer를 만들어 직접 쏜다 — 앱이 보는
- * 것(이벤트와 그 위의 types)은 같다.
+ * A real OS drag cannot be automated, so this constructs a DataTransfer and fires it directly —
+ * what the app sees (the event and the types on it) is the same either way.
  */
 const dropFile = (page: Page, name: string, type = 'application/pdf') =>
   page.evaluateHandle(
@@ -2864,18 +3093,22 @@ const dropFile = (page: Page, name: string, type = 'application/pdf') =>
     { n: name, t: type },
   )
 
-test('끌어다 놓기는 창 전체에서 기본이 거부다 — 받는 자리가 없는 곳에서도', async ({ page }) => {
+test('Drag-and-drop defaults to rejection across the whole window — even where there is no drop target', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const before = page.url()
 
   /*
-    첨부 기능과 **따로** 서는 검사다. 여기서 보는 것은 "붙었나"가 아니라 "브라우저가
-    스스로 결정하지 않았나"이고, 그래서 **아무도 받지 않는 자리**를 고른다 —
-    사이드바 바탕과 문서 바탕. 이 자리들이 바로 PDF가 창을 덮던 자리였다.
+    This check stands **separately** from the attachment feature. What is checked here is not
+    "did it attach" but "did the browser refrain from deciding on its own", so it deliberately
+    picks **spots that receive nothing** — the sidebar background and the document background.
+    These are exactly the spots where a PDF used to cover the window.
 
-    preventDefault가 곧 "웹뷰가 이걸 안 연다"이다. 셋 다 봐야 한다: dragover·dragenter가
-    "여기 놓을 수 있다"는 대답이라, 그게 안 막히면 판단이 브라우저 몫으로 넘어간다.
+    preventDefault means "the webview will not open this". All three must be checked: dragover
+    and dragenter are the answer to "can something be dropped here", and if that is not blocked,
+    the decision falls to the browser.
   */
   const floor = await page.evaluate(() => {
     const out: Record<string, boolean[]> = {}
@@ -2893,19 +3126,22 @@ test('끌어다 놓기는 창 전체에서 기본이 거부다 — 받는 자리
   })
   expect(floor).toEqual({ sidebar: [true, true, true], body: [true, true, true] })
 
-  // 그리고 앱은 그 자리에 그대로 있다 — 이 버그의 증상은 "앱이 사라진다"였다
+  // And the app stays exactly where it was — this bug's symptom was "the app disappears"
   expect(page.url()).toBe(before)
 
   /*
-    예외는 하나뿐이고 좁다. **글자 칸 위의 글자**는 편집 동작이라 통과시킨다 —
-    검색창에 고른 글을 끌어다 놓는 일까지 막으면 파일 때문에 만든 바닥이 글자를 쓸어간다.
-    **파일은 글자 칸 위에서도 막는다**: PDF를 검색창에 떨어뜨리는 것도 웹뷰가 파일을 여는 길이다.
+    There is exactly one narrow exception. **Text dropped over a text field** is allowed through,
+    as an editing action — blocking even dragging selected text into a search box would let the
+    floor built for files also sweep away text. **Files are still blocked even over a text
+    field**: dropping a PDF on a search box is just as much a path for the webview to open the
+    file.
   */
   await page.keyboard.press('Meta+k')
   await expect(page.getByTestId('palette-input')).toBeVisible()
   const overInput = await page.evaluate(() => {
-    // 스스로 막지 않는 글자 칸이어야 **전역 바닥**을 잰다. 입력창 폼은 자기 자리를
-    // 이미 preventDefault하므로, 거기서 재면 가드를 지워도 통과해 아무것도 지키지 못한다.
+    // The text field must not preventDefault on its own, so that this measures the **global
+    // floor**. The composer's own form already preventDefaults its own spot, so measuring there
+    // would pass even with the guard removed, proving nothing.
     const el = document.querySelector('[data-testid="palette-input"]')!
     const drag = (kind: 'text' | 'file') => {
       const data = new DataTransfer()
@@ -2922,12 +3158,15 @@ test('끌어다 놓기는 창 전체에서 기본이 거부다 — 받는 자리
   await expect(page.getByTestId('session-view')).toBeVisible()
 })
 
-test('입력창이 아니라 칸 아무 데나 떨어뜨려도 첨부된다', async ({ page }) => {
+test('Dropping anywhere in the panel, not just the composer, still attaches', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 대화 한복판 — 입력창과 겹치지 않는 자리다. 여기가 이 버그가 살던 곳이다
-  await page.getByTestId('chat-stream').dispatchEvent('drop', { dataTransfer: await dropFile(page, 'report.pdf') })
+  // The middle of the conversation — a spot that does not overlap the composer. This is exactly
+  // where this bug lived.
+  await page
+    .getByTestId('chat-stream')
+    .dispatchEvent('drop', { dataTransfer: await dropFile(page, 'report.pdf') })
 
   await expect(page.getByTestId('attachment-list')).toContainText('report.pdf')
   await page.getByTestId('send').click()
@@ -2935,7 +3174,7 @@ test('입력창이 아니라 칸 아무 데나 떨어뜨려도 첨부된다', as
   expect(sent.at(-1).name).toBe('report.pdf')
 })
 
-test('그리드 — 접힌 입력창은 떨어뜨린 그 칸에서 펴진다', async ({ page }) => {
+test('Grid — a collapsed composer expands in the panel it was dropped into', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'a')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -2948,20 +3187,24 @@ test('그리드 — 접힌 입력창은 떨어뜨린 그 칸에서 펴진다', a
   await expect(cell).toBeVisible()
 
   /*
-    기본값이 접힘(foldComposer)이라는 것이 이 버그의 나머지 절반이다 — 받을 수 있는
-    유일한 자리가 대개 화면 밖에 있었다. 첨부가 거기로 들어가면 아무 일도 안 일어난
-    것과 구별되지 않으므로, 붙는 순간 펴져야 한다.
+    The other half of this bug is that the composer defaults to collapsed (foldComposer) — the
+    one spot that can receive a drop was usually off-screen. If an attachment landed there, it
+    would be indistinguishable from nothing happening at all, so it must expand the moment
+    something attaches.
   */
   const shell = cell.getByTestId('composer-shell')
   await expect(shell).not.toHaveAttribute('data-up', 'true')
 
-  // 머리글 — 한 칸 안에서 입력창으로부터 가장 먼 자리
-  await cell.getByTestId('pane-header').dispatchEvent('drop', { dataTransfer: await dropFile(page, 'report.pdf') })
+  // The header — the spot inside the panel farthest from the composer
+  await cell
+    .getByTestId('pane-header')
+    .dispatchEvent('drop', { dataTransfer: await dropFile(page, 'report.pdf') })
 
   await expect(shell).toHaveAttribute('data-up', 'true')
   await expect(cell.getByTestId('attachment-list')).toContainText('report.pdf')
 
-  // 붙는 곳은 **떨어뜨린 칸의 세션**이다 — 포커스된 세션(b)이 아니라
+  // What it attaches to is **the session of the panel it was dropped in** — not the focused
+  // session (b)
   const where = await page.evaluate(() => {
     const drafts = (window as any).__store.getState().drafts
     const out: Record<string, string[]> = {}
@@ -2974,7 +3217,7 @@ test('그리드 — 접힌 입력창은 떨어뜨린 그 칸에서 펴진다', a
   expect(where[b!] ?? []).toEqual([])
 })
 
-test('그리드 — 칸을 받는 자리로 만들어도 세션 순서 바꾸기는 그대로다', async ({ page }) => {
+test('Grid — making the panel a drop target does not break reordering sessions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'a')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -2986,9 +3229,10 @@ test('그리드 — 칸을 받는 자리로 만들어도 세션 순서 바꾸기
   await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
 
   /*
-    파일 드롭과 순서 바꾸기는 이제 **같은 면**에서 끝난다. 칸이 파일만 받는지
-    (types에 Files가 있는 것만) 여기서 확인한다 — 아니면 자리를 바꾸러 온 드롭을
-    칸이 말없이 삼키고, 그건 "가끔 안 움직인다"로만 드러난다.
+    Dropping a file and reordering now end up on **the same surface**. This checks that the
+    panel accepts only files (only when Files is present in types) — otherwise the panel
+    silently swallows a drop meant to reorder, and that only shows up as "it sometimes does not
+    move".
   */
   await page.evaluate(
     ({ from, to }: { from: string; to: string }) => {
@@ -2998,12 +3242,13 @@ test('그리드 — 칸을 받는 자리로 만들어도 세션 순서 바꾸기
       const card = document.querySelector(`[data-testid="grid-panel-${to}"]`)!
       const r = card.getBoundingClientRect()
       /*
-        떨어지는 곳은 칸 **안**이다 — 대화 위. 진짜 드롭이 닿는 자리가 거기라서,
-        이벤트는 세션 화면을 지나 칸으로 올라간다. 카드에 곧장 쏘면 세션 화면을
-        건너뛰어 버려, 정작 확인하려는 "지나보내는가"를 확인하지 못한다.
+        Where it drops is **inside** the panel — over the conversation. That is where a real
+        drop actually lands, so the event bubbles up through the session screen to the panel.
+        Firing directly at the card would skip the session screen and fail to check the very
+        thing being checked: "does it pass the event through".
       */
       const inside = card.querySelector('[data-testid="chat-stream"]')!
-      // 오른쪽 절반 — b의 뒤로 간다
+      // The right half — it goes behind b
       const at = { clientX: r.left + r.width * 0.8, clientY: r.top + 10 }
       const init = { dataTransfer: dt, bubbles: true, cancelable: true, ...at }
       inside.dispatchEvent(new DragEvent('dragover', init))
@@ -3012,17 +3257,15 @@ test('그리드 — 칸을 받는 자리로 만들어도 세션 순서 바꾸기
     { from: a!, to: b! },
   )
 
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels))
-    .toEqual([b, a])
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().gridPanels)).toEqual([b, a])
 })
 
-test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) => {
+test('Old conversation can still be read back through even after compaction', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 저장소에는 250줄이 있고 화면에는 최근 한 페이지(HISTORY_PAGE=100)만 있다
+  // The store holds 250 lines while the screen holds only the most recent page (HISTORY_PAGE=100)
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const rows = Array.from({ length: 250 }, (_, i) => ({
@@ -3035,48 +3278,56 @@ test('압축돼도 옛 대화는 거슬러 읽을 수 있다', async ({ page }) 
     }))
     m.messages.set(sid, rows)
   }, id)
-  // 앱을 다시 열어 그 세션을 펼친 상황 (메모리에 든 대화 없이 저장소에서 읽는다)
+  // Simulates reopening the app and expanding that session (reading from the store with nothing
+  // in memory)
   await page.evaluate((sid) => {
     const store = (window as any).__store
     store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
     return store.getState().loadHistory(sid)
   }, id)
 
-  // 압축 지점은 대화에 표시된다 (모델은 잊었지만 기록은 남아 있다는 사실)
+  // The compaction point is marked in the conversation (the fact that the model forgot, but the
+  // record remains)
   await page.evaluate((sid) => (window as any).__mock.emit({ type: 'compaction', sessionId: sid }), id)
   await expect(page.getByTestId('msg-mark')).toContainText('compacted')
 
-  // 화면에는 최근 한 페이지만 있다 (가상 스크롤이라 실제로 그려지는 건 더 적다)
+  // Only the most recent page is on screen (with virtual scroll, what actually renders is fewer
+  // still)
   const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
-  expect(await page.evaluate(loaded, id)).toBe(101) // 100 + 압축 표식
+  expect(await page.evaluate(loaded, id)).toBe(101) // 100 + the compaction marker
 
-  // 버튼이 아니라 위로 올리면 알아서 이어붙인다. 한 번 불러오면 위치 보정이
-  // 읽던 자리를 지키느라 꼭대기에서 내려오므로(#61), 사람처럼 다시 올린다.
+  // Scrolling up loads more automatically, without a button. Once a page loads, position
+  // correction pulls the view down from the top to preserve the reading spot (#61), so this
+  // scrolls up again like a person would.
   await expect(async () => {
     await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
-    await expect(page.getByTestId('load-older')).toBeHidden({ timeout: 500 }) // 더 거슬러 갈 곳이 없다
+    await expect(page.getByTestId('load-older')).toBeHidden({ timeout: 500 }) // There is nothing further back to load
   }).toPass()
 
-  // 압축으로 모델이 잊은 대화도 우리 기록에는 남아 있다
+  // Even a conversation the model forgot through compaction still remains in our own record
   expect(await page.evaluate(loaded, id)).toBe(251)
   const first = await page.evaluate((sid: string) => (window as any).__store.getState().chat[sid][0].text, id)
   expect(first).toBe('옛 대화 1')
 })
 
 /*
- * 스크롤이 아니라 **클릭으로도** 옛 대화를 불러온다 (도그푸딩 2026-09-04: 실물
- * WKWebView에서 위 스크롤이 옛 페이지를 안 실었다 — 관찰자가 안 깨어나는 환경이
- * 있어도 사람 손은 남아야 한다).
+ * Old conversation also loads by **clicking**, not just scrolling (dogfooding finding,
+ * 2026-09-04: on the actual WKWebView, scrolling up did not load the older page — even in an
+ * environment where the observer does not wake up, a manual way must remain).
  */
-test('옛 대화는 버튼 클릭으로도 이어붙는다', async ({ page }) => {
+test('Older conversation also loads by clicking a button', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const rows = Array.from({ length: 250 }, (_, i) => ({
-      sessionId: sid, seq: i + 1, role: i % 2 ? 'assistant' : 'user', kind: 'text',
-      payload: { text: `옛 대화 ${i + 1}` }, ts: Date.now(),
+      sessionId: sid,
+      seq: i + 1,
+      role: i % 2 ? 'assistant' : 'user',
+      kind: 'text',
+      payload: { text: `옛 대화 ${i + 1}` },
+      ts: Date.now(),
     }))
     m.messages.set(sid, rows)
   }, id)
@@ -3089,15 +3340,16 @@ test('옛 대화는 버튼 클릭으로도 이어붙는다', async ({ page }) =>
   const loaded = (sid: string) => (window as any).__store.getState().chat[sid].length
   expect(await page.evaluate(loaded, id)).toBe(100)
   /*
-   * 위로 올리고 버튼을 누른다 — 스크롤 트리거·IO·클릭 셋 중 무엇이 깨져도
-   * 나머지가 끝까지 데려간다는 계약이다 (100에서 멈추는 "벽"이 그 버그였다).
+   * Scroll up and click the button — the contract is that if any one of the scroll trigger,
+   * IntersectionObserver, or click breaks, the others still carry it through to the end (the
+   * "wall" stopping at 100 was that bug).
    */
   await page.getByTestId('chat-stream').evaluate((el) => el.scrollTo({ top: 0 }))
   /*
-   * 스크롤 트리거가 먼저 한 뭉치를 실어 온다 (100→200) — 그 출렁임이 끝나기 전에
-   * 버튼을 누르면 클릭이 리렌더 사이로 빠진다 (detached-retry 플레이크, 2026-09-06).
-   * 정착을 기다린 뒤 누르면 나머지(200→250)는 온전히 버튼의 몫이다 — 두 경로가
-   * 각자 제 뭉치를 책임졌다는 것까지 이 순서가 증명한다.
+   * The scroll trigger loads the first batch (100->200) — clicking the button before that
+   * settling finishes lets the click fall through a re-render (the detached-retry flake,
+   * 2026-09-06). Clicking only after it settles leaves the rest (200->250) entirely to the
+   * button — this order proves each path is responsible for its own batch.
    */
   await expect.poll(() => page.evaluate(loaded, id)).toBe(200)
   await expect
@@ -3105,24 +3357,31 @@ test('옛 대화는 버튼 클릭으로도 이어붙는다', async ({ page }) =>
     .toBe(false)
   await page.getByTestId('load-older').getByRole('button').click()
   await expect.poll(() => page.evaluate(loaded, id)).toBe(250)
-  // 다 불러오면 버튼도 물러난다
+  // Once everything is loaded, the button retires too
   await expect(page.getByTestId('load-older')).toBeHidden()
 })
 
 /*
- * 이벤트가 화면보다 먼저 온 세션 (#79). host가 뒤에서 만든 세션(앱이 부탁한 에이전트)은 사람이 열기 전에 일을
- * 마친다. 그리드 칸으로만 봐도 기록이 서야 하고('이전 대화'로 가는 길이 있어야 한다), 처음 열었을 때 같은
- * 줄이 두 번 보이면 안 된다 — 실측(2026-09-25)에서는 프롬프트와 Read·Write 카드가 두 번 보였다.
+ * A session whose events arrive before the screen does (#79). A session the host creates behind
+ * the scenes (an agent the app asked for) can finish its work before the person ever opens it.
+ * The transcript must still stand even when only viewed as a grid panel (there must be a path to
+ * "older conversation"), and opening it for the first time must not show the same line twice —
+ * measured (2026-09-25), the prompt and the Read/Write cards each showed up twice.
  */
-test('이벤트가 먼저 온 세션: 그리드 칸에서도 옛 대화로 가는 길이 서고, 처음 열어도 한 줄씩이다 (#79)', async ({ page }) => {
+test('A session whose events arrive first: an older-conversation path stands even in a grid panel, and opening it shows each line only once (#79)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // host가 뒤에서 두 세션을 만든다 — UI는 session_created로만 안다
+  // The host creates two sessions behind the scenes — the UI only learns of it via session_created
   const [g, f] = await page.evaluate(async (): Promise<[string, string]> => {
     const m = (window as any).__mock
-    const project = Object.values((window as any).__store.getState().projects)[0] as { id: string; path: string }
+    const project = Object.values((window as any).__store.getState().projects)[0] as {
+      id: string
+      path: string
+    }
     const made: string[] = []
     for (let i = 0; i < 2; i++) {
       const info = await m.agents.createSession({ projectId: project.id, cwd: project.path, tool: 'claude' })
@@ -3134,19 +3393,40 @@ test('이벤트가 먼저 온 세션: 그리드 칸에서도 옛 대화로 가�
   await page.evaluate(
     ({ g, f }) => {
       const m = (window as any).__mock
-      // 칸에만 올릴 세션: 저장된 250줄, 그리고 열기 전에 온 답 하나
+      // A session shown only in a panel: 250 stored lines, plus one reply that arrived before it was opened
       m.messages.set(
         g,
         Array.from({ length: 250 }, (_, i) => ({
-          sessionId: g, seq: i + 1, role: 'user', kind: 'text', payload: { text: `기록 ${i + 1}` }, ts: Date.now(),
+          sessionId: g,
+          seq: i + 1,
+          role: 'user',
+          kind: 'text',
+          payload: { text: `기록 ${i + 1}` },
+          ts: Date.now(),
         })),
       )
       m.emit({ type: 'message_delta', sessionId: g, role: 'assistant', text: '열기 전에 온 답' })
-      // 앱이 부탁한 에이전트: 부탁 → Read → Write → 답, 모두 사람이 열기 전에
-      m.emit({ type: 'user_message', sessionId: f, seq: 0, text: 'Make a note', fromApp: { appId: 'notes', projectId: null, name: 'Notes' } })
-      m.emit({ type: 'tool_call', sessionId: f, callId: 'r', summary: { tool: 'Read', title: 'Read note.md', readOnly: true, paths: [] } })
+      // An agent the app asked for: request -> Read -> Write -> reply, all before the person ever opened it
+      m.emit({
+        type: 'user_message',
+        sessionId: f,
+        seq: 0,
+        text: 'Make a note',
+        fromApp: { appId: 'notes', projectId: null, name: 'Notes' },
+      })
+      m.emit({
+        type: 'tool_call',
+        sessionId: f,
+        callId: 'r',
+        summary: { tool: 'Read', title: 'Read note.md', readOnly: true, paths: [] },
+      })
       m.emit({ type: 'tool_result', sessionId: f, callId: 'r', ok: true, summary: 'empty' })
-      m.emit({ type: 'tool_call', sessionId: f, callId: 'w', summary: { tool: 'Write', title: 'Write note.md', readOnly: false, paths: [] } })
+      m.emit({
+        type: 'tool_call',
+        sessionId: f,
+        callId: 'w',
+        summary: { tool: 'Write', title: 'Write note.md', readOnly: false, paths: [] },
+      })
       m.emit({ type: 'tool_result', sessionId: f, callId: 'w', ok: true, summary: 'written' })
       m.emit({ type: 'message_delta', sessionId: f, role: 'assistant', text: 'Noted.' })
       m.emit({ type: 'turn_complete', sessionId: f })
@@ -3154,13 +3434,13 @@ test('이벤트가 먼저 온 세션: 그리드 칸에서도 옛 대화로 가�
     { g, f },
   )
 
-  // 그리드 칸으로만 본다 — 포커스하지 않는다
+  // View only through a grid panel — never focus it
   await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids), [a, g])
   await page.getByTestId('grid-button').click()
   const cell = page.getByTestId(`grid-panel-${g}`)
   await expect(cell.getByTestId('chat-stream')).toContainText('열기 전에 온 답')
   await expect(cell.getByTestId('load-older')).toBeVisible()
-  // 끝까지 거슬러 읽으면 저장된 줄이 빠짐없이 한 번씩, 순서대로다
+  // Reading all the way back, every stored line shows exactly once and in order
   await expect
     .poll(() =>
       page.evaluate(async (id) => {
@@ -3170,10 +3450,13 @@ test('이벤트가 먼저 온 세션: 그리드 칸에서도 옛 대화로 가�
       }, g),
     )
     .toBe(false)
-  const texts = await page.evaluate((id) => (window as any).__store.getState().chat[id].map((c: { text: string }) => c.text), g)
+  const texts = await page.evaluate(
+    (id) => (window as any).__store.getState().chat[id].map((c: { text: string }) => c.text),
+    g,
+  )
   expect(texts).toEqual([...Array.from({ length: 250 }, (_, i) => `기록 ${i + 1}`), '열기 전에 온 답'])
 
-  // 앱이 부탁한 에이전트의 세션을 사이드바에서 처음 연다
+  // Open the app-requested agent's session for the first time from the sidebar
   await page.getByTestId(`session-row-${f}`).click()
   const stream = page.getByTestId('chat-stream')
   await expect(stream).toContainText('Noted.')
@@ -3187,16 +3470,19 @@ test('이벤트가 먼저 온 세션: 그리드 칸에서도 옛 대화로 가�
 })
 
 /**
- * 대화가 뭉개져 보이던 문제 (도그푸딩 4차).
- * 저장된 기록의 seq와 실시간 항목의 seq가 따로 세어져 React key가 겹쳤고,
- * 가상 스크롤이 겹친 항목을 같은 자리에 그리면서 글자가 이어붙었다.
+ * The conversation used to render garbled (4th round of dogfooding).
+ * The stored transcript's seq and the live items' seq were counted separately, so React keys
+ * collided, and virtual scroll drew the colliding items on top of each other, running the text
+ * together.
  */
-test('기록을 불러온 세션에 새 말이 붙어도 항목 번호가 겹치지 않는다', async ({ page }) => {
+test('New messages added to a session loaded from history do not collide with existing item numbers', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 저장소에 seq 1..5로 기록이 있는 세션을 새로 펼친다
+  // Open a fresh session whose store already has a transcript with seq 1..5
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const store = (window as any).__store
@@ -3215,7 +3501,7 @@ test('기록을 불러온 세션에 새 말이 붙어도 항목 번호가 겹치
     return store.getState().loadHistory(sid)
   }, id)
 
-  // 그 위에 실시간 대화가 이어진다 (예전에는 여기서 seq가 1부터 다시 셌다)
+  // A live conversation continues on top of that (seq used to restart from 1 here)
   await page.getByTestId('prompt-input').fill('새로 한 말')
   await page.getByTestId('send').click()
   await page.evaluate(
@@ -3235,12 +3521,12 @@ test('기록을 불러온 세션에 새 말이 붙어도 항목 번호가 겹치
   )
   expect(new Set(seqs).size).toBe(seqs.length)
 
-  // 겹치지 않으니 옛 기록과 새 말이 각자 제자리에 보인다
+  // With no collision, the old record and the new message each show in their own place
   await expect(page.getByTestId('chat-stream')).toContainText('기록 5')
   await expect(page.getByTestId('chat-stream')).toContainText('새로 한 말')
 })
 
-test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) => {
+test('Tool cards collapse and expand without an inner scrollbar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -3265,12 +3551,12 @@ test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) 
   const output = page.getByTestId('tool-card-output')
   await expect(output).toBeVisible()
 
-  // 조회성 도구는 접힌 채로 시작하고, 맛보기만 보인다
+  // Read-only tools start collapsed, showing only a preview
   await expect(output).toContainText('출력 1')
   await expect(output).not.toContainText('출력 40')
   await expect(page.getByTestId('tool-card-more')).toContainText('37 more lines')
 
-  // 대화 스크롤을 가로챌 안쪽 스크롤러가 없다
+  // There is no inner scroller to intercept the conversation's scroll
   const scrollable = await output.evaluate((el) => {
     const s = getComputedStyle(el)
     return s.overflowY === 'auto' || s.overflowY === 'scroll' || el.scrollHeight > el.clientHeight + 1
@@ -3284,12 +3570,13 @@ test('도구 카드는 안쪽 스크롤 없이 접고 편다', async ({ page }) 
 })
 
 /**
- * 맛보기는 **보이는 줄**로 센다 (사용자 지적 2026-09-12).
+ * The preview counts by **visible lines** (pointed out by the person, 2026-09-12).
  *
- * 개행 없는 JSON 한 덩어리(리소스 업로드 응답)가 오면 줄 세기로는 1줄이라 아무것도
- * 안 잘리고, 화면에서는 수십 줄로 접혀 접힌 카드가 대화를 통째로 덮었다.
+ * A single blob of JSON with no newlines (a resource-upload response) counted as 1 line by
+ * counting newlines, so nothing got truncated, and on screen it wrapped into dozens of lines,
+ * with the "collapsed" card covering the entire conversation.
  */
-test('개행 없는 한 덩어리도 접히면 세 줄에서 멈춘다', async ({ page }) => {
+test('A single blob with no newlines still stops at three lines when collapsed', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -3302,7 +3589,7 @@ test('개행 없는 한 덩어리도 접히면 세 줄에서 멈춘다', async (
       callId: 'c1',
       summary: { tool: 'mcp__resource__upload', title: 'upload', readOnly: false, paths: [] },
     })
-    // 줄바꿈이 하나도 없는 응답 — 논리적으로 1줄, 화면에서는 수십 줄
+    // A response with not a single newline — logically 1 line, dozens on screen
     const blob = JSON.stringify({
       resourceList: Array.from({ length: 30 }, (_, i) => ({
         ruid: `e0665a7978ed49539afab9544eec53${i}`,
@@ -3321,12 +3608,12 @@ test('개행 없는 한 덩어리도 접히면 세 줄에서 멈춘다', async (
     line: parseFloat(getComputedStyle(el).lineHeight),
     full: el.scrollHeight,
   }))
-  // 세 줄 높이를 넘지 않는다 (1px은 반올림 몫)
+  // Never taller than three lines (1px accounts for rounding)
   expect(collapsed.height).toBeLessThanOrEqual(collapsed.line * 3 + 1)
-  // 접기 전에는 훨씬 길었다는 것도 같이 적어 둔다 — 상한이 진짜 일하고 있다는 증거
+  // Also record that it was far taller before collapsing — proof the cap is actually doing something
   expect(collapsed.full).toBeGreaterThan(collapsed.line * 10)
 
-  // 줄 수로는 "몇 줄 더"를 셀 수 없다 (hidden === 0) — 그래도 펼칠 것이 있다고 말해야 한다
+  // Line counting cannot say "how many more lines" (hidden === 0) — it must still say there is more to expand
   await expect(page.getByTestId('tool-card-more')).toContainText('Show all')
 
   await page.getByTestId('tool-card-more').click()
@@ -3339,10 +3626,10 @@ test('개행 없는 한 덩어리도 접히면 세 줄에서 멈춘다', async (
 })
 
 /**
- * 증거 패널 폭 조절 + 터미널 (M2.7).
- * 터미널의 정체성은 cwd다 — 세션을 바꿔도 같은 터미널이 이어져야 한다.
+ * Resizing the evidence panel + the terminal (M2.7).
+ * A terminal's identity is its cwd — switching sessions must keep the same terminal alive.
  */
-test('증거 패널 폭을 끌어서 조절하고 재시작 후에도 유지한다', async ({ page }) => {
+test('Dragging to resize the evidence panel persists after a restart', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -3359,17 +3646,18 @@ test('증거 패널 폭을 끌어서 조절하고 재시작 후에도 유지한�
   const after = (await panel.boundingBox())!.width
   expect(after).toBeGreaterThan(before + 100)
 
-  // 폭은 스냅샷에 실린다 (다음에 열면 그대로)
+  // The width is captured in the snapshot (unchanged the next time it opens)
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
   expect(snap?.panelWidth).toBeGreaterThan(before + 100)
 
-  // 더블클릭으로 기본값 복귀 — 잘못 끌어놓고 되돌릴 길이 있어야 한다.
-  // 폭이 미끄러지므로(열고 닫힘 전환) 곧바로 재면 중간값이 잡힌다 — 멈출 때까지 기다린다.
+  // Double-click restores the default — there must be a way back after dragging it too far.
+  // The width slides (an open/close transition), so measuring right away catches a mid-animation
+  // value — wait for it to settle.
   await handle.dblclick()
   await expect.poll(async () => (await panel.boundingBox())!.width, { timeout: 2000 }).toBeCloseTo(340, -1)
 })
 
-test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', async ({ page }) => {
+test('A terminal belongs to the project, so it persists across switching sessions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 세션')
   await newSession(page, 'alpha', '두 번째 세션')
@@ -3377,7 +3665,7 @@ test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', 
   await page.getByTestId('evidence-tab-terminal').click()
   await expect(page.getByTestId('evidence-terminal')).toBeVisible()
 
-  // 터미널이 뭔가 출력한 상태를 만든다
+  // Get the terminal into a state where it has output something
   const termId = await page.evaluate(() => {
     const m = (window as any).__mock
     const t = [...m.terminalState.byCwd.values()][0][0]
@@ -3385,7 +3673,7 @@ test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', 
     return t.id
   })
 
-  // 세션을 바꿔도 같은 터미널에 붙는다 (돌려놓은 dev 서버가 죽으면 안 된다)
+  // Switching sessions still attaches to the same terminal (a running dev server must not die)
   const first = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   await page.getByTestId(`session-row-${first}`).click()
   await page.getByTestId('evidence-tab-terminal').click()
@@ -3397,11 +3685,11 @@ test('터미널은 프로젝트의 것이라 세션을 바꿔도 이어진다', 
   })
   expect(sameTerminal).toBe(termId)
 
-  // 다시 붙을 때 지금까지의 출력을 되살린다 (빈 화면이면 터미널이 아니다)
+  // Reattaching restores the output so far (an empty screen would not be a real terminal)
   await expect(page.getByTestId(`terminal-surface-${termId}`)).toContainText('hello from alpha')
 })
 
-test('키보드 입력이 셸로 간다', async ({ page }) => {
+test('Keyboard input goes to the shell', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await page.getByTestId('evidence-tab-terminal').click()
@@ -3419,27 +3707,27 @@ test('키보드 입력이 셸로 간다', async ({ page }) => {
   expect(sent).toContain('\r')
 })
 
-test('사이드바는 프로젝트당 한 줄만 쓴다 (세로 공간)', async ({ page }) => {
+test('The sidebar uses only one row per project (vertical space)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 프로젝트 헤더가 세션 한 줄보다 크게 부풀지 않아야 목록이 밀리지 않는다
+  // The project header must not grow taller than one session row, or the list would be pushed down
   const header = (await page.getByTestId('project-header-alpha').boundingBox())!
   expect(header.height).toBeLessThan(28)
 
-  // 평소에는 배경 정보가 자리를 차지하지 않는다
+  // Background info does not take up space under normal conditions
   await expect(page.getByTestId('project-tip-alpha')).toBeHidden()
   await page.getByTestId('project-header-alpha').hover()
   await expect(page.getByTestId('project-tip-alpha')).toBeVisible()
   await expect(page.getByTestId('project-tip-alpha')).toContainText('/tmp/alpha')
 })
 
-test('터미널을 여러 개 열고 닫는다 (세로로 쌓인다)', async ({ page }) => {
+test('Opening and closing multiple terminals (stacked vertically)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await page.getByTestId('evidence-tab-terminal').click()
 
-  // 처음 열면 하나는 있다 — 빈 화면에 버튼만 있으면 한 단계가 더 든다
+  // One already exists when first opened — an empty screen with just a button would add an extra step
   await expect(page.getByTestId('terminal-stack').locator('[data-testid^="terminal-surface-"]')).toHaveCount(
     1,
   )
@@ -3449,13 +3737,13 @@ test('터미널을 여러 개 열고 닫는다 (세로로 쌓인다)', async ({ 
   const surfaces = page.getByTestId('terminal-stack').locator('[data-testid^="terminal-surface-"]')
   await expect(surfaces).toHaveCount(3)
 
-  // 세로로 쌓인다 (가로가 아니라)
+  // Stacked vertically (not horizontally)
   const first = (await surfaces.nth(0).boundingBox())!
   const second = (await surfaces.nth(1).boundingBox())!
   expect(second.y).toBeGreaterThan(first.y)
   expect(Math.abs(second.x - first.x)).toBeLessThan(2)
 
-  // 가운데를 닫으면 번호가 다시 매겨진다
+  // Closing the middle one renumbers the rest
   const ids = await page.evaluate(() =>
     [...(window as any).__mock.terminalState.byCwd.values()][0].map((t: { id: string }) => t.id),
   )
@@ -3467,11 +3755,11 @@ test('터미널을 여러 개 열고 닫는다 (세로로 쌓인다)', async ({ 
   expect(titles).toEqual(['Terminal 1', 'Terminal 2'])
 })
 
-test('좌우 패널 폭을 조절해도 화면이 옆으로 밀리지 않는다', async ({ page }) => {
+test('Resizing the left and right panels does not push the screen sideways', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 사이드바 폭 조절
+  // Resize the sidebar width
   const sidebar = page.getByTestId('sidebar')
   const before = (await sidebar.boundingBox())!.width
   const handle = page.getByTestId('sidebar-resize')
@@ -3482,7 +3770,7 @@ test('좌우 패널 폭을 조절해도 화면이 옆으로 밀리지 않는다'
   await page.mouse.up()
   expect((await sidebar.boundingBox())!.width).toBeGreaterThan(before + 60)
 
-  // 우측 패널을 최대한 넓혀도 가로 스크롤이 생기면 안 된다
+  // Even maximizing the right panel's width must not create horizontal scroll
   const panelHandle = page.getByTestId('evidence-resize')
   const pb = (await panelHandle.boundingBox())!
   await page.mouse.move(pb.x + 1, pb.y + 200)
@@ -3496,12 +3784,12 @@ test('좌우 패널 폭을 조절해도 화면이 옆으로 밀리지 않는다'
   }))
   expect(overflow.scroll).toBeLessThanOrEqual(overflow.client)
 
-  // 대화 레인이 최소 폭을 지켜서 살아 있다
+  // The conversation lane keeps its minimum width and stays usable
   expect((await page.getByTestId('chat-stream').boundingBox())!.width).toBeGreaterThan(200)
 })
 
-/** 슬래시·@ 자동완성 (M2.8) */
-test('슬래시를 치면 스킬이, @를 치면 파일이 뜬다', async ({ page }) => {
+/** Slash/@ autocomplete (M2.8) */
+test('Typing a slash shows skills, and @ shows files', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -3519,28 +3807,28 @@ test('슬래시를 치면 스킬이, @를 치면 파일이 뜬다', async ({ pag
   })
   await newSession(page, 'alpha', '작업')
 
-  // 슬래시 — 맨 앞에서만
+  // Slash — only at the very start
   await page.getByTestId('prompt-input').fill('/rev')
   await expect(page.getByTestId('autocomplete')).toBeVisible()
   await expect(page.getByTestId('autocomplete-item-0')).toContainText('/review')
   await expect(page.getByTestId('autocomplete-item-0')).toContainText('<path>')
 
-  // Enter로 고르면 입력창에 들어간다
+  // Picking with Enter fills the composer
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('prompt-input')).toHaveValue('/review ')
   await expect(page.getByTestId('autocomplete')).toBeHidden()
 
-  // @ — 파일
+  // @ — files
   await page.getByTestId('prompt-input').fill('이거 봐줘 @Session')
   await expect(page.getByTestId('autocomplete-item-0')).toContainText('SessionView.tsx')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/SessionView.tsx ')
 })
 
-test('스킬을 아직 못 불러왔으면 없다고 하지 않는다', async ({ page }) => {
+test('When skills have not loaded yet, it does not claim there are none', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
-    // 세션을 막 만들면 CLI가 뜨는 중이라 물어볼 수 없다
+    // Right after creating a session, the CLI is still starting up and cannot be queried yet
     ;(window as any).__mock.commandState = { ready: false, commands: [] }
   })
   await newSession(page, 'alpha', '작업')
@@ -3549,7 +3837,7 @@ test('스킬을 아직 못 불러왔으면 없다고 하지 않는다', async ({
   await expect(page.getByTestId('autocomplete-loading')).toContainText('Loading skills')
 })
 
-test('문장 중간의 슬래시는 명령으로 보지 않는다', async ({ page }) => {
+test('A slash in the middle of a sentence is not treated as a command', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     ;(window as any).__mock.commandState = {
@@ -3564,19 +3852,23 @@ test('문장 중간의 슬래시는 명령으로 보지 않는다', async ({ pag
 })
 
 /**
- * 도는 세션이 있어도 이 창의 스크롤은 제자리다 (도그푸딩 2026-09-07: "워크트리를 켜서
- * 길어진 모달에서 스크롤하면 조금 있다가 맨 위로 돌아간다").
+ * Even with a session still running, this window's scroll stays put (dogfooding finding,
+ * 2026-09-07: "when I turn on a worktree and the modal gets longer, scrolling it drifts back to
+ * the top after a moment").
  *
- * 원인은 줄마다 달려 있던 인라인 `ref` 콜백이었다: 정체가 매 렌더마다 달라져 React가
- * 떼었다 붙이는데, 그때마다 고른 줄이 scrollIntoView를 불렀다. 이 창은 스토어를
- * 구독하니 세션 하나만 돌아도 이벤트마다 다시 그려진다 — 그래서 목록이 계속 끌려갔다.
+ * The cause was an inline `ref` callback attached to every row: its identity changed on every
+ * render, so React kept detaching and reattaching it, and each time, the selected row called
+ * scrollIntoView. This window subscribes to the store, so even one session running re-renders it
+ * on every event — which is why the list kept getting pulled back.
  */
-test('세션 이벤트가 흘러도 새 세션 창의 스크롤은 그대로다', async ({ page }) => {
+test("The new-session window's scroll stays put even while session events keep arriving", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await newSession(page, 'alpha', 'work').then(() =>
     page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId),
   )
-  // 목록이 접힌 칸을 넘도록 길게
+  // Long enough for the list to overflow the collapsed panel
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     m.externalSessions = {
@@ -3603,9 +3895,9 @@ test('세션 이벤트가 흘러도 새 세션 창의 스크롤은 그대로다'
     el.scrollTop = el.scrollHeight - el.clientHeight
     return Math.round(el.scrollTop)
   })
-  expect(bottom).toBeGreaterThan(0) // 접힌 칸을 넘겨야 이 시험이 뭔가를 본다
+  expect(bottom).toBeGreaterThan(0) // The test only sees something meaningful once it overflows the collapsed panel
 
-  // 세션이 도는 중 — 이벤트가 창을 다시 그린다
+  // The session is working — events keep re-rendering the window
   for (let i = 0; i < 3; i++) {
     await page.evaluate(
       (sid: string) =>
@@ -3621,7 +3913,7 @@ test('세션 이벤트가 흘러도 새 세션 창의 스크롤은 그대로다'
   await page.waitForTimeout(300)
   await expect.poll(async () => list.evaluate((el) => Math.round(el.scrollTop))).toBe(bottom)
 
-  // 그래도 화살표로 고른 줄은 따라온다 — 고칠 때 잃으면 안 되는 쪽
+  // The arrow-selected row still stays in view — the side that must not be lost while fixing this
   await page.getByTestId('past-new').click()
   await page.keyboard.press('ArrowDown')
   await expect
@@ -3636,7 +3928,9 @@ test('세션 이벤트가 흘러도 새 세션 창의 스크롤은 그대로다'
     .toBe(true)
 })
 
-test('이미 열려 있는 대화를 다시 고르면 새로 만들지 않고 그 세션으로 간다', async ({ page }) => {
+test('Picking an already-open conversation again navigates to that session instead of creating a new one', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -3665,7 +3959,7 @@ test('이미 열려 있는 대화를 다시 고르면 새로 만들지 않고 �
   await page.getByTestId('create-session-confirm').click()
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 다시 열면 '이미 열려 있음'으로 표시되고, 누르면 만들지 않고 이동한다
+  // Opening it again shows "Already open", and clicking it navigates instead of creating
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('past-ext-1')).toContainText('Already open')
@@ -3673,16 +3967,17 @@ test('이미 열려 있는 대화를 다시 고르면 새로 만들지 않고 �
 
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(id)
-  // 세션이 하나 더 생기지 않았다
+  // No extra session was created
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
 })
 
 /**
- * 터미널을 닫으면 남은 것들의 높이가 늘어난다. 그때 **다시 만들어지면 안 된다** —
- * 새로 만든 xterm은 기본 크기로 시작했다가 곧바로 실제 크기로 맞춰지고,
- * 그 resize가 셸의 프롬프트를 다시 그려서 줄이 늘어난 것처럼 보인다.
+ * Closing a terminal makes the remaining ones grow taller. When that happens, they must **not be
+ * recreated** — a freshly created xterm starts at a default size before immediately being
+ * resized to fit, and that resize redraws the shell's prompt, which can look like extra lines
+ * appeared.
  */
-test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 않는다', async ({ page }) => {
+test('Closing one terminal does not recreate the remaining ones', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await page.getByTestId('evidence-tab-terminal').click()
@@ -3693,11 +3988,11 @@ test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 �
   )
   await expect(page.getByTestId(`terminal-surface-${ids[0]}`)).toBeVisible()
 
-  // 살아남을 터미널이 출력을 갖게 한다 — 닫은 뒤 목록을 다시 읽으면
-  // 이 터미널의 history 스냅샷이 달라지고, 그게 재생성을 부르던 조건이다
+  // Give the surviving terminal some output — re-reading the list after closing one changes this
+  // terminal's history snapshot, and that was the condition that triggered recreation
   await page.evaluate((id) => (window as any).__mock.emitTerminal(id, 'dev server running\r\n'), ids[0])
 
-  // 살아남을 터미널의 실제 DOM에 표식을 남긴다
+  // Leave a marker on the actual DOM of the surviving terminal
   await page.evaluate((id) => {
     const el = document.querySelector(`[data-testid="terminal-surface-${id}"] .xterm`) as HTMLElement & {
       __kept?: boolean
@@ -3708,7 +4003,7 @@ test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 �
   await page.getByTestId(`terminal-close-${ids[1]}`).click()
   await expect(page.getByTestId(`terminal-surface-${ids[1]}`)).toHaveCount(0)
 
-  // 같은 DOM 노드가 그대로면 다시 만들어지지 않은 것이다
+  // If the same DOM node is still there, it was never recreated
   const kept = await page.evaluate((id) => {
     const el = document.querySelector(`[data-testid="terminal-surface-${id}"] .xterm`) as
       (HTMLElement & { __kept?: boolean }) | null
@@ -3717,8 +4012,8 @@ test('터미널 하나를 닫아도 남은 터미널은 다시 만들어지지 �
   expect(kept).toBe(true)
 })
 
-/** 사용량 (FR-9) — 구독 한도만 다룬다 */
-test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', async ({ page }) => {
+/** Usage (FR-9) — covers subscription limits only */
+test('Usage modal: a donut per window, and hovering shows the reset time', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   // Focus the project so Usage resolves its tool honestly (project defaultTool),
   // instead of leaning on the hardcoded 'claude' fallback #26 removes. These three
@@ -3755,28 +4050,30 @@ test('사용량 모달: 창마다 도넛, 호버하면 초기화 시각까지', 
   await expect(page.getByTestId('usage-window-session')).toContainText('8%')
   await expect(page.getByTestId('usage-window-weekly_all')).toContainText('93%')
 
-  // 자세한 건 물어볼 때 답한다
+  // Details are answered only when asked
   await page.getByTestId('usage-window-weekly_all').hover()
   await expect(page.getByTestId('usage-tip-weekly_all')).toContainText('reset')
   /*
-   * 그리고 **잘리지 않는다** (도그푸딩: 도넛이 모달 스크롤 상자의 바닥 근처라 absolute
-   * 툴팁은 아래가 잘려 보였다). 잘림의 원인 — 스크롤 상자 안의 absolute — 이 제거됐는지와
-   * (체크박스 테스트와 같은 문법: 크로미움 rect는 잘려도 그대로라 증상 대신 원인을 잰다),
-   * 창 안에 온전히 있는지를 함께 본다.
+   * And it is **not clipped** (dogfooding finding: because the donut sits near the bottom of the
+   * modal's scroll box, an absolutely positioned tooltip looked cut off at the bottom). This
+   * checks both whether the cause of the clipping — absolute positioning inside a scroll box —
+   * has been removed (same idiom as the checkbox test: Chromium's rect stays the same even when
+   * clipped, so this measures the cause rather than the symptom), and whether it fits entirely
+   * within the window.
    */
   const tip = page.getByTestId('usage-tip-weekly_all')
   expect(await tip.evaluate((el) => getComputedStyle(el).position)).toBe('fixed')
   const tb = (await tip.boundingBox())!
   expect(tb.y + tb.height).toBeLessThanOrEqual(page.viewportSize()!.height)
 
-  // 일간을 못 주는 도구면 그 줄을 접는다 (Claude에는 일간 창이 없다)
+  // A tool that cannot provide daily data collapses that row (Claude has no daily window)
   await expect(page.getByTestId('usage-daily')).toHaveCount(0)
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('usage-drop')).toBeHidden()
 })
 
-test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) => {
+test('A tool that provides daily tokens shows them alongside', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   // Focus the project so Usage resolves its tool honestly (project defaultTool),
   // instead of leaning on the hardcoded 'claude' fallback #26 removes. These three
@@ -3799,7 +4096,7 @@ test('일별 토큰을 주는 도구면 함께 보여준다', async ({ page }) =
   await expect(page.getByTestId('usage-daily')).toContainText('Today 9.0M')
 })
 
-test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 않는다)', async ({ page }) => {
+test('When usage cannot be read, the reason is stated (never left as a blank screen)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   // Focus the project so Usage resolves its tool honestly (project defaultTool),
   // instead of leaning on the hardcoded 'claude' fallback #26 removes. These three
@@ -3817,11 +4114,11 @@ test('사용량을 못 읽으면 이유를 말한다 (빈 화면으로 두지 �
 })
 
 /**
- * 모달은 조상의 사정과 무관하게 창 전체를 덮어야 한다.
- * 사이드바에 폭 조절 손잡이를 넣느라 relative를 붙였더니, 그 안에서 열리던
- * 세션 생성 모달이 사이드바 폭 안에 갇혔다 (도그푸딩에서 지적됨).
+ * A modal must cover the entire window regardless of its ancestors' positioning.
+ * Adding `relative` to the sidebar to support its resize handle trapped the create-session
+ * modal, which opened inside it, within the sidebar's width (pointed out during dogfooding).
  */
-test('모달은 사이드바 안에 갇히지 않는다', async ({ page }) => {
+test('A modal is not trapped inside the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const sidebarWidth = (await page.getByTestId('sidebar').boundingBox())!.width
@@ -3829,18 +4126,20 @@ test('모달은 사이드바 안에 갇히지 않는다', async ({ page }) => {
   await page.getByTestId('new-session-alpha').click()
   const dialog = (await page.getByTestId('new-session-dialog').boundingBox())!
   const viewport = page.viewportSize()!
-  // 덮개가 창 전체다 (사이드바 폭이 아니라)
+  // The overlay covers the whole window (not just the sidebar's width)
   expect(dialog.width).toBeGreaterThan(sidebarWidth * 2)
   expect(Math.round(dialog.width)).toBe(viewport.width)
 
-  // body 바로 아래에 붙는다 — 조상 positioning에 휘둘리지 않는다
+  // It attaches directly under body — unaffected by ancestor positioning
   const parentIsBody = await page.evaluate(
     () => document.querySelector('[data-testid="new-session-dialog"]')?.parentElement === document.body,
   )
   expect(parentIsBody).toBe(true)
 })
 
-test('같은 대화를 두 세션이 열지 않는다 (도구가 거부하기 전에 우리가 막는다)', async ({ page }) => {
+test('Two sessions cannot open the same conversation (blocked here before the tool would refuse it)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -3869,7 +4168,7 @@ test('같은 대화를 두 세션이 열지 않는다 (도구가 거부하기 �
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 다시 열면 '이미 열려 있음'이라 새로 만들지 않고 그 세션으로 간다
+  // Opening it again shows "Already open" and navigates to that session instead of creating a new one
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('past-ext-1')).toContainText('Already open')
@@ -3877,10 +4176,11 @@ test('같은 대화를 두 세션이 열지 않는다 (도구가 거부하기 �
 })
 
 /**
- * 긴 대화를 불러오면 **맨 아래(최신)** 가 보여야 한다.
- * 위쪽에 머물면 옛 대화만 보여서 "최신을 안 가져왔다"로 읽힌다 (도그푸딩 지적).
+ * Loading a long conversation must show **the bottom (most recent) part**.
+ * Staying at the top only shows old messages, which reads as "the latest was not fetched"
+ * (pointed out during dogfooding).
  */
-test('불러온 대화는 최신부터 보인다', async ({ page }) => {
+test('A loaded conversation shows the most recent messages first', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -3899,7 +4199,7 @@ test('불러온 대화는 최신부터 보인다', async ({ page }) => {
         },
       ],
     }
-    // 200줄짜리 긴 대화 — 마지막이 가장 최신이다
+    // A 200-line long conversation — the last one is the most recent
     m.externalHistory.set(
       'ext-long',
       Array.from({ length: 200 }, (_, i) => ({
@@ -3916,7 +4216,7 @@ test('불러온 대화는 최신부터 보인다', async ({ page }) => {
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 맨 아래(최신)가 화면에 있어야 한다
+  // The bottom (most recent) must be visible on screen
   await expect(page.getByTestId('chat-stream')).toContainText('가장 최신 메시지')
 
   const atBottom = await page
@@ -3925,12 +4225,12 @@ test('불러온 대화는 최신부터 보인다', async ({ page }) => {
   expect(atBottom).toBe(true)
 })
 
-test('밖에서 이어간 대화가 돌아오면 화면에 붙는다', async ({ page }) => {
+test('A conversation continued externally shows up on screen once it comes back', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // host가 따라잡아 저장소에 넣은 상황을 만든다
+  // Simulate the host catching up and writing it into the store
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const rows = m.messages.get(sid) ?? []
@@ -3956,12 +4256,12 @@ test('밖에서 이어간 대화가 돌아오면 화면에 붙는다', async ({ 
     m.emit({ type: 'history_synced', sessionId: sid, added: 2 })
   }, id)
 
-  // 이벤트를 받으면 화면을 다시 읽는다
+  // Receiving the event makes the screen re-read the store
   await expect(page.getByTestId('chat-stream')).toContainText('터미널에서 한 말')
   await expect(page.getByTestId('chat-stream')).toContainText('터미널 답')
 })
 
-test('긴 URL·경로가 대화창을 가로로 밀지 않는다', async ({ page }) => {
+test('A long URL or path does not push the conversation panel sideways', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -3976,14 +4276,14 @@ test('긴 URL·경로가 대화창을 가로로 밀지 않는다', async ({ page
   )
   await expect(page.getByTestId('msg-assistant').last()).toBeVisible()
 
-  // 대화창이 가로로 스크롤되면 안 된다
+  // The conversation panel must not scroll horizontally
   const stream = await page.getByTestId('chat-stream').evaluate((el) => ({
     scroll: el.scrollWidth,
     client: el.clientWidth,
   }))
   expect(stream.scroll).toBeLessThanOrEqual(stream.client + 1)
 
-  // 창 전체도 마찬가지
+  // The same goes for the whole window
   const page2 = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
     client: document.documentElement.clientWidth,
@@ -3992,15 +4292,18 @@ test('긴 URL·경로가 대화창을 가로로 밀지 않는다', async ({ page
 })
 
 /**
- * 깨우기가 실패하면 "메시지를 보내면 자동으로 이어집니다"는 **사실이 아니게 된다.**
- * 그 상태로 두면 사용자는 왜 안 되는지 알 길이 없다 (도그푸딩 지적).
+ * If waking a session fails, "sending a message automatically resumes it" **stops being true.**
+ * Leaving it that way gives the person no way to know why it is not working (pointed out during
+ * dogfooding).
  */
-test('깨우지 못하면 이유를 그 자리에 적고 다시 시도할 수 있다', async ({ page }) => {
+test('When a session cannot be woken, the reason is shown right there with a way to retry', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 잠든 상태 + 깨울 수 없는 상황을 만든다
+  // Set up a dormant session that also cannot be woken
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const store = (window as any).__store
@@ -4011,23 +4314,24 @@ test('깨우지 못하면 이유를 그 자리에 적고 다시 시도할 수 �
     })
   }, id)
 
-  // 다시 고르면 깨우기를 시도하고, 실패 이유가 남는다
+  // Selecting it again attempts to wake it, and the failure reason remains
   await page.getByTestId('project-header-alpha').click()
   await page.getByTestId(`session-row-${id}`).click()
   await expect(page.getByTestId('dormant-note')).toContainText('Could not resume')
   await expect(page.getByTestId('dormant-note')).toContainText('cannot be resumed')
 
-  // 원인을 고치고 다시 시도하면 살아난다
+  // Fixing the cause and retrying brings it back to life
   await page.evaluate((sid) => (window as any).__mock.unresumable.delete(sid), id)
   await page.getByTestId('dormant-retry').click()
   await expect(page.getByTestId('dormant-note')).toBeHidden()
 })
 
 /**
- * 제목이 비슷한 두 세션을 다른 도구로 착각한 일이 있었다 (도그푸딩).
- * 목록에서 어느 도구인지 보여야 하고, 헤더·사용량도 **그 세션의** 도구를 써야 한다.
+ * Two sessions with similar titles were once mistaken for using different tools (dogfooding
+ * finding). The list must show which tool each one uses, and the header and usage must use
+ * **that session's own** tool as well.
  */
-test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({ page }) => {
+test("The session list and header show each session's own tool", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -4036,7 +4340,7 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
   await page.getByTestId('tool-option-claude').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('클로드 쪽 작업')
   await page.getByTestId('prompt-input').press('Enter')
 
@@ -4046,18 +4350,18 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
   await page.getByTestId('tool-option-codex').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('코덱스 쪽 작업')
   await page.getByTestId('prompt-input').press('Enter')
 
-  // 목록에서 도구가 구분된다
+  // The tool is distinguished in the list
   await expect(page.getByTestId('tool-mark-claude')).toHaveCount(1)
   await expect(page.getByTestId('tool-mark-codex')).toHaveCount(1)
 
   /*
-   * 사용량은 이제 **도구마다 도넛 하나**다 (사용자 요청 2026-09-09) — 어느 도구의
-   * 한도인지 화면이 추론하지 않고 사람이 고른다. 가운데 한 글자가 사이드바 칩과 같아서
-   * 범례 없이 읽힌다.
+   * Usage is now **one donut per tool** (requested by the person, 2026-09-09) — the person picks
+   * which tool's limit to see, rather than the screen guessing. The single letter in the middle
+   * matches the sidebar chip, so it reads without a legend.
    */
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
   await page.getByTestId('usage-donut-codex').click()
@@ -4065,23 +4369,24 @@ test('세션 목록과 헤더가 각 세션의 도구를 보여준다', async ({
 })
 
 /**
- * "지금 로딩이 안떠서 작업 중인지 멈춘 건지 헷갈린다" (도그푸딩).
- * 보낸 순간부터 답이 올 때까지 살아 있다는 표시가 있어야 하고, 거기서 멈출 수 있어야 한다.
+ * "There is no loading indicator right now, so I cannot tell if it is working or stuck"
+ * (dogfooding finding). There must be a live indicator from the moment something is sent until
+ * the reply arrives, and it must be possible to stop from there.
  */
-test('응답을 기다리는 동안 표시가 뜨고 거기서 중지할 수 있다', async ({ page }) => {
+test('An indicator shows while waiting for a response, with a way to stop from there', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('오래 걸리는 일')
   await page.getByTestId('prompt-input').press('Enter')
 
   await page.getByTestId('prompt-input').fill('한참 걸리는 걸 해줘')
   await page.getByTestId('send').click()
 
-  // 보낸 즉시 보인다 — host 응답을 기다리지 않는다
+  // Appears the instant it is sent — it does not wait for the host's response
   await expect(page.getByTestId('activity-row')).toBeVisible()
 
   await page.getByTestId('activity-interrupt').click()
@@ -4089,13 +4394,14 @@ test('응답을 기다리는 동안 표시가 뜨고 거기서 중지할 수 있
 })
 
 /**
- * "컴팩트 할 때 응답 기다리는 거랑 UI가 똑같아서, 응답을 하고 있는 건지
- *  컴팩트 중이라 오래 걸리는 건지 모르겠다" (도그푸딩).
+ * "The UI looks identical during compaction and while waiting for a response, so I cannot tell
+ * whether it is replying or just taking a while to compact" (dogfooding finding).
  *
- * 프로브로 재보니 수동 압축 한 번이 39초였다. 그동안 화면이 '응답 대기'와
- * 한 글자도 다르지 않으면 기다리는 사람에게는 판단할 근거가 없다.
+ * Measured with a probe, one manual compaction took 39 seconds. If the screen does not differ
+ * from "waiting for response" by even one character during that time, the person waiting has no
+ * way to judge what is happening.
  */
-test('압축 중은 응답 대기와 다르게 보인다', async ({ page }) => {
+test('Compacting looks different from waiting for a response', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '시작')
 
@@ -4106,7 +4412,7 @@ test('압축 중은 응답 대기와 다르게 보인다', async ({ page }) => {
   await emitEvent(page, 0, { type: 'activity', activity: 'compacting' })
   await expect(page.getByTestId('activity-label')).toHaveText('Compacting context')
 
-  // 압축이 끝나면 평범한 대기로 돌아온다 — 상태는 내내 working이었다
+  // Once compaction ends, it returns to ordinary waiting — the state was working the whole time
   await emitEvent(page, 0, { type: 'activity', activity: null })
   await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
 })
@@ -4148,10 +4454,10 @@ test('the elapsed count survives a view change — the start instant is what is 
 })
 
 /**
- * 압축 실패는 지금까지 통째로 삼켜졌다 (실측: "Not enough messages to compact.").
- * 컨텍스트가 그대로인데 화면에는 아무 일도 없었던 것처럼 보이면 안 된다.
+ * A failed compaction used to be swallowed entirely (measured: "Not enough messages to
+ * compact."). The context stays unchanged, and the screen must not look as if nothing happened.
  */
-test('압축이 실패하면 대화에 그 사실이 남는다', async ({ page }) => {
+test('A failed compaction leaves that fact visible in the conversation', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '시작')
 
@@ -4160,11 +4466,13 @@ test('압축이 실패하면 대화에 그 사실이 남는다', async ({ page }
 })
 
 /**
- * 깃 탭 — VSCode처럼 스테이지된 것과 아닌 것을 나눠 보여준다.
- * 커밋 직전에 알아야 할 유일한 사실이 "무엇이 실리나"인데,
- * 한 목록에 섞여 있으면 그걸 줄 끝의 작은 꼬리표로 읽어야 했다.
+ * The Git tab — like VSCode, shows staged and unstaged changes separately.
+ * The one fact that matters right before a commit is "what is going in", and mixing everything
+ * into a single list meant reading that off a small tag at the end of each row.
  */
-test('깃 패널이 스테이지됨과 변경됨을 나눠 보여주고 파일 하나씩 올릴 수 있다', async ({ page }) => {
+test('The Git panel separates staged from changed and lets each file be staged individually', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -4178,14 +4486,14 @@ test('깃 패널이 스테이지됨과 변경됨을 나눠 보여주고 파일 �
   await expect(page.getByTestId('evidence-group-staged')).toContainText('src/a.ts')
   await expect(page.getByTestId('evidence-group-changed')).toContainText('src/b.ts')
 
-  // 파일 하나만 올린다 — "이것만 빼고 커밋"을 하려고 터미널로 나가지 않아도 된다
+  // Stage only one file — no need to drop into the terminal just to "commit everything but this"
   await page.getByTestId('evidence-stage-src/b.ts').click({ force: true })
   await expect(page.getByTestId('evidence-group-changed')).toBeHidden()
   await expect(page.getByTestId('evidence-group-staged')).toContainText('src/b.ts')
 })
 
-/** 점만 있으면 목록이지 트리가 아니다 — 갈라짐과 합쳐짐이 선으로 보여야 한다 */
-test('깃 기록이 커밋을 선으로 잇는다', async ({ page }) => {
+/** Dots alone make a list, not a tree — branching and merging must be shown as lines */
+test('Git history connects commits with lines', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -4197,23 +4505,24 @@ test('깃 기록이 커밋을 선으로 잇는다', async ({ page }) => {
     ]
   })
   await newSession(page, 'alpha', '작업')
-  // 그래프는 기록 탭에 산다 — 깃 탭의 스트립은 분할에서 이웃을 덮어 떠났다
+  // The graph lives in the History tab — the Git tab's strip was moved off, covering its neighbor
+  // during the split
   await page.getByTestId('evidence-tab-history').click()
 
-  // 병합 커밋에서 두 갈래가 뻗는다 (직선 하나 + 갈라지는 곡선 하나)
+  // Two branches extend from the merge commit (one straight line + one curving line)
   const merge = page.getByTestId('commit-graph-mmmmmmm')
   await expect(merge).toBeVisible()
   expect(await merge.locator('path').count()).toBeGreaterThan(0)
 
-  // 가지가 본류로 합쳐지므로 뿌리에는 선이 하나만 내려온다
+  // Since the branch merges into the trunk, only one line comes down to the root
   await expect(page.getByTestId('commit-graph-zzzzzzz')).toBeVisible()
 })
 
 /**
- * 세션 표식 하나가 도구와 상태를 같이 말한다.
- * 점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
+ * A single session marker states both the tool and the state.
+ * A separate dot right next to the marker would overlap in reading and blur both.
  */
-test('작업 중인 세션은 표식 테두리가 돈다', async ({ page }) => {
+test('A working session has a spinning marker border', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -4228,25 +4537,30 @@ test('작업 중인 세션은 표식 테두리가 돈다', async ({ page }) => {
 })
 
 /**
- * 모델 목록을 하드코딩하고 있었더니 Fable이 나왔는데 고를 수가 없었다.
- * 이제 도구의 공식 API가 주는 목록을 그대로 보여주고, 강도도 모델에 붙어서 온다.
+ * The model list used to be hardcoded, so when Fable was released it could not be selected.
+ * Now the list comes straight from the tool's official API, and effort levels arrive attached to
+ * each model.
  */
-test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하는 모델에만 뜬다', async ({ page }) => {
+test('The model list comes from what the tool reports, and effort only appears for models that support it', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
   const menu = page.getByTestId('settings-menu')
 
-  // 우리가 적은 목록이 아니라 host가 준 목록이다
+  // Not a list we wrote — the list the host provides
   await page.getByTestId('settings-open').click()
   await expect(menu).toContainText('Fable')
 
   /*
-    모델을 골라도 메뉴는 열린 채다 (도그푸딩 요청) — 강도·속도 묶음이 고른 모델을
-    따라 바뀌므로, 모델을 고른 사람의 일은 보통 아직 안 끝났다. 예전에는 여기서
-    메뉴를 다시 여는 클릭이 줄마다 끼어 있었다 — 그 춤이 곧 불편의 증거였다.
+    Picking a model leaves the menu open (a dogfooding request) — the effort/speed group changes
+    to match the chosen model, so someone who just picked a model is usually not done yet. It
+    used to take a re-opening click after every single row — that dance was itself the evidence
+    of the friction.
   */
-  // 강도를 지원하지 않는 모델에는 강도 묶음이 없다 — 아무 효과 없는 칸을 띄우면 거짓말이다
+  // A model that does not support effort has no effort group — showing a control with no effect
+  // would be a lie
   await menu.getByTestId('settings-model-haiku').click()
   await expect(menu).toBeVisible()
   await expect(menu).not.toContainText('Effort')
@@ -4254,7 +4568,8 @@ test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하
   await menu.getByTestId('settings-model-fable').click()
   await expect(menu).toContainText('Effort')
   await menu.getByTestId('settings-effort-xhigh').click()
-  // 무엇을 골라도 닫히지 않는다 (2026-09-06) — 닫는 길은 바깥 클릭·Esc·토글 셋뿐이다
+  // The menu never closes on selection (2026-09-06) — the only ways to close it are an outside
+  // click, Esc, or the toggle
   await expect(menu).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(menu).toBeHidden()
@@ -4268,14 +4583,17 @@ test('모델 목록은 도구가 알려주는 것을 쓰고, 강도는 지원하
 })
 
 /**
- * 응답 속도 (codex의 service_tier — 실측: gpt-5.4+에 "Fast, 1.5x speed" 하나).
- * 티어를 주는 모델에서만 묶음이 뜨고, 티어 없는 모델로 바꾸면 값도 함께 초기화된다.
+ * Response speed (codex's service_tier — measured: gpt-5.4+ offers exactly one, "Fast, 1.5x
+ * speed"). The group only appears for models that offer a tier, and switching to a model with no
+ * tier resets the value along with it.
  */
-test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세션에 남는다', async ({ page }) => {
+test('Speed (Fast) only appears for models that offer a tier, and the chosen value stays on the session', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 티어는 codex의 것 — codex 세션을 만든다 (세션 메뉴에는 도구 바꾸기가 없다)
+  // Tier belongs to codex — create a codex session (the session menu has no way to switch tools)
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('tool-option-codex').click()
@@ -4283,7 +4601,7 @@ test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   const menu = page.getByTestId('settings-menu')
-  // 모델을 고르면 메뉴가 열린 채라 Speed 묶음이 그 자리에서 이어진다
+  // Picking a model leaves the menu open, so the Speed group appears right there
   await pickSetting(page, 'settings-model-gpt-5.6-terra')
   await expect(menu).toContainText('Speed')
   await menu.getByTestId('settings-tier-priority').click()
@@ -4294,7 +4612,8 @@ test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세
   })
   expect(tier).toBe('priority')
 
-  // 티어 없는 모델로 바꾸면 묶음이 없고 값도 초기화된다 — 지원하지 않는 조합이 조용히 남으면 안 된다
+  // Switching to a model with no tier removes the group and resets the value — an unsupported
+  // combination must not linger silently
   await pickSetting(page, 'settings-model-gpt-5.6-terra-mini')
   await expect(menu).toBeVisible()
   await expect(menu).not.toContainText('Speed')
@@ -4305,8 +4624,8 @@ test('속도(Fast)는 티어를 주는 모델에서만 뜨고, 고른 값이 세
   expect(tier2).toBeNull()
 })
 
-/** 모델을 바꾸면 강도는 초기화된다 — 모델마다 단계가 달라서 옛 값이 남으면 안 된다 */
-test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) => {
+/** Switching models resets effort — the steps differ per model, so the old value must not persist */
+test('Switching models resets the reasoning effort', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -4314,7 +4633,7 @@ test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) =>
   await pickSetting(page, 'settings-effort-max')
   await pickSetting(page, 'settings-model-sonnet')
 
-  // sonnet에는 max가 없다 — 남겨두면 지원하지 않는 조합이 조용히 유지된다
+  // sonnet has no max — leaving it would silently keep an unsupported combination
   const effort = await page.evaluate(() => {
     const s = (window as any).__store.getState()
     return s.sessions[s.focusedSessionId].effort
@@ -4323,14 +4642,15 @@ test('모델을 바꾸면 추론 강도가 초기화된다', async ({ page }) =>
 })
 
 /*
- * 앱을 다시 켜면 설정이 초기화된 것처럼 보였다 (이슈 #37).
+ * Restarting the app made the settings look like they had been reset (issue #37).
  *
- * 저장은 처음부터 멀쩡했다 — DB에도 host 목록에도 고른 값이 그대로 있었다.
- * 초기화된 건 화면이었다: 시작 경로가 목록에서 강도만 집어 오고 모델·권한은
- * 기본값으로 채워서, 입력창 아래 버튼이 "Default · Normal"이라고 말했다.
- * 그래서 여기서는 스토어 값이 아니라 **버튼이 읽어주는 글자**를 본다.
+ * Persistence was fine from the start — the chosen value was intact in both the DB and the
+ * host's list. What got reset was the screen: the startup path picked only the effort level off
+ * the list and filled model and permission with their defaults, so the button under the composer
+ * read "Default · Normal". So this checks **the text the button actually reads**, not the store
+ * value.
  */
-test('앱을 다시 켜도 고른 모델과 권한이 그대로 보인다', async ({ page }) => {
+test('The chosen model and permission stay visible even after restarting the app', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -4340,8 +4660,9 @@ test('앱을 다시 켜도 고른 모델과 권한이 그대로 보인다', asyn
   await expect(page.getByTestId('settings-open')).toHaveText(/Fable · high · Auto/)
 
   /*
-   * 앱을 다시 켠 것과 같다: host(mock)는 그대로 살아 있고, 스토어만 목록을 받아
-   * 세션 요약을 처음부터 다시 세운다 — 재시작이 실제로 도는 경로가 이 attach다.
+   * Equivalent to restarting the app: the host (mock) stays alive, and only the store receives
+   * the list and rebuilds the session summary from scratch — this attach is the actual path a
+   * restart runs through.
    */
   await page.evaluate(async () => {
     const w = window as any
@@ -4351,8 +4672,8 @@ test('앱을 다시 켜도 고른 모델과 권한이 그대로 보인다', asyn
   await expect(page.getByTestId('settings-open')).toHaveText(/Fable · high · Auto/)
 })
 
-/** 펼침 표시는 접힘=오른쪽, 펼침=아래쪽. 같은 글리프를 돌려서 두 상태가 어긋나지 않게 한다 */
-test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', async ({ page }) => {
+/** The expand indicator is collapsed=right, expanded=down. The same glyph rotates, so the two states never drift apart */
+test('The file tree folder arrow changes direction when opened and closed', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -4373,22 +4694,22 @@ test('파일 트리 폴더 화살표가 열고 닫힐 때 방향을 바꾼다', 
 })
 
 /**
- * 상단 바는 macOS 신호등 버튼과 같은 축에 있어야 한다.
+ * The top bar must sit on the same axis as the macOS traffic-light buttons.
  *
- * 버튼 위치는 tauri.conf.json의 trafficLightPosition으로 우리가 정하고,
- * **바 높이와의 관계**는 tooling/styles.test.ts가 검사한다.
- * 여기서는 브라우저가 볼 수 있는 것만 본다: 바 안에서 글자가 가운데인가.
- * 안쪽에 패딩을 더하다 보면 소리 없이 어긋나는데, 그때 여기서 걸린다.
+ * The button position is set by us via trafficLightPosition in tauri.conf.json, and its
+ * **relationship to the bar's height** is checked by tooling/styles.test.ts. What is checked
+ * here is only what the browser can see: whether the title is vertically centered in the bar.
+ * Adding inner padding can silently throw this off, and that is what this test catches.
  */
-test('상단 바 안에서 제목이 세로 가운데에 선다', async ({ page }) => {
+test('The title sits vertically centered inside the top bar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const bar = page.getByTestId('app-header')
   const box = (await bar.boundingBox())!
-  // 아래 테두리 1px까지
+  // Up to the 1px bottom border
   expect(box.height).toBeLessThanOrEqual(37)
   expect(box.y).toBe(0)
 
-  // 글자도 그 안에서 가운데여야 한다 (위아래 여백 차이가 1px 이내)
+  // The text must also be centered within it (top/bottom margin difference within 1px)
   const text = (await page.getByTestId('app-title').boundingBox())!
   const top = text.y - box.y
   const bottom = box.y + box.height - (text.y + text.height)
@@ -4396,10 +4717,11 @@ test('상단 바 안에서 제목이 세로 가운데에 선다', async ({ page 
 })
 
 /**
- * 빈 입력창이 커진 채로 서 있던 문제 (도그푸딩).
- * 높이를 타이핑 이벤트에서만 계산하면, 보낸 뒤 값만 비고 높이는 남는다.
+ * An empty composer used to stay stuck at its grown height (dogfooding finding).
+ * Computing height only on typing events leaves the value empty after sending but keeps the
+ * height.
  */
-test('메시지를 보낸 뒤 입력창 높이가 한 줄로 돌아온다', async ({ page }) => {
+test('The composer height returns to one line after sending a message', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
@@ -4413,22 +4735,27 @@ test('메시지를 보낸 뒤 입력창 높이가 한 줄로 돌아온다', asyn
   await page.getByTestId('send').click()
   await expect(input).toHaveValue('')
 
-  // 값이 비었으면 높이도 한 줄이어야 한다 — 아무것도 안 쳤는데 높은 칸이 남으면 안 된다
+  // If the value is empty, the height must also be one line — a tall box must not linger with nothing typed
   expect((await input.boundingBox())!.height).toBeCloseTo(oneLine, 0)
 })
 
 /**
- * 반대 방향도 값에서 나와야 한다: 자동완성이 긴 경로를 넣으면 칸도 따라 커진다.
+ * The opposite direction must also follow from the value: when autocomplete inserts a long path,
+ * the box grows to match.
  *
- * `fill()`은 input 이벤트를 쏘므로 옛 코드에서도 통과한다 — 그래서 **자동완성으로 고르는
- * 진짜 경로**를 쓴다. 그 길은 React 상태만 바꾸고 DOM 이벤트를 만들지 않는다.
+ * `fill()` fires an input event, so it would pass even with the old code — so this uses **the
+ * real autocomplete-picking path** instead. That path only changes React state and creates no
+ * DOM event.
  */
 /*
- * 골 배지 (2026-09-07 — claude /goal의 active_goal · codex thread/goal/*).
- * 도구가 판정한 골 상태가 헤더에 선다: 바퀴 수·상태 요약, 호버에 조건·미달 사유.
- * 걷히면(달성 포함) 사라진다 — 판정은 도구의 것이고 배지는 통지일 뿐이다.
+ * The goal badge (2026-09-07 — claude /goal's active_goal, codex's thread/goal/*).
+ * The goal status as judged by the tool shows in the header: iteration count and a status
+ * summary, with the condition and shortfall reason on hover. It disappears once cleared
+ * (including on success) — judgment belongs to the tool, and the badge is only a notification.
  */
-test('골이 걸리면 헤더에 배지가 서고, 걷히면 사라진다', async ({ page }) => {
+test('A goal badge appears in the header once a goal is set, and disappears once it is cleared', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -4443,7 +4770,7 @@ test('골이 걸리면 헤더에 배지가 서고, 걷히면 사라진다', asyn
   await expect(page.getByTestId('goal-badge')).toContainText('GOAL · 3')
   await expect(page.getByTestId('goal-badge')).toHaveAttribute('title', /테스트 전부 초록/)
 
-  // codex 어휘(blocked 등)는 그대로 흐른다
+  // codex's vocabulary (blocked, etc.) passes through unchanged
   await page.evaluate((sid: string) => {
     ;(window as any).__store.getState().dispatchEvent({
       type: 'goal',
@@ -4460,16 +4787,19 @@ test('골이 걸리면 헤더에 배지가 서고, 걷히면 사라진다', asyn
 })
 
 /*
- * GUI 슬래시 커맨드 (2026-09-07): `/usage`는 SDK 프로토콜에 응답이 없는 클라이언트
- * 명령이다 — 엔터가 메시지 대신 앱 화면을 연다. 판별은 우리 레지스트리의 몫이고
- * (SDK엔 "클라이언트 명령" 개념이 없다), 가로채기는 어댑터 도달 전이라 도구 무관이다.
+ * GUI slash commands (2026-09-07): `/usage` is a client-side command with no reply in the SDK
+ * protocol — pressing Enter opens an app screen instead of sending a message. Recognizing it is
+ * our own registry's job (the SDK has no concept of a "client command"), and the interception
+ * happens before it ever reaches the adapter, so it is tool-agnostic.
  */
-test('/usage 엔터는 메시지가 아니라 사용량 화면을 연다 — 인자가 붙으면 메시지다', async ({ page }) => {
+test('Pressing Enter on /usage opens the usage screen instead of sending it — with an argument it becomes a message', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 자동완성에 세션 커맨드와 나란히 선다 — 힌트가 출처를 말한다
+  // It appears in autocomplete alongside session commands — the hint states its origin
   await page.getByTestId('prompt-input').fill('/usa')
   await expect(page.getByTestId('autocomplete')).toContainText('/usage')
   await expect(page.getByTestId('autocomplete')).toContainText('opens in app')
@@ -4481,26 +4811,26 @@ test('/usage 엔터는 메시지가 아니라 사용량 화면을 연다 — 인
   await page.getByTestId('prompt-input').fill('/usage')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('usage-drop')).toBeVisible()
-  // 메시지는 나가지 않았고, 입력창은 비었다
+  // No message was sent, and the composer is empty
   expect(await page.evaluate(userCount, id)).toBe(before)
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('usage-drop')).toBeHidden()
 
-  // 이름 뒤에 무언가 있으면 세션에게 말하는 것이다 — 보통 메시지로 나간다
+  // Anything following the name means it is talking to the session — it goes out as an ordinary message
   await page.getByTestId('prompt-input').fill('/usage 지난주 요약해줘')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('usage-drop')).toBeHidden()
   await expect.poll(() => page.evaluate(userCount, id)).toBe(before + 1)
 
-  // /model은 CLI의 그 화면이 이미 여기 있다 — 이 세션의 설정 메뉴가 열린다
+  // /model's CLI screen already exists here — it opens this session's settings menu
   await page.getByTestId('prompt-input').fill('/model')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('settings-menu')).toBeVisible()
   expect(await page.evaluate(userCount, id)).toBe(before + 1)
 })
 
-test('자동완성으로 넣은 값에도 입력창 높이가 따라온다', async ({ page }) => {
+test('The composer height also follows a value inserted by autocomplete', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -4517,68 +4847,74 @@ test('자동완성으로 넣은 값에도 입력창 높이가 따라온다', asy
   const beforePick = (await input.boundingBox())!.height
   await page.keyboard.press('Tab')
 
-  // 고른 순간 값이 길어졌으니 칸도 커져야 한다
+  // Once picked, the value is longer, so the box must grow too
   await expect(input).not.toHaveValue('@a')
   expect((await input.boundingBox())!.height).toBeGreaterThan(beforePick)
 })
 
 /**
- * 긴 응답을 읽는 동안 "이게 뭘 물어본 답이었지"를 위로 되돌아가 찾게 하지 않는다.
- * 가상 스크롤이라 CSS sticky를 못 쓰므로 스크롤 위치로 계산해 얹는다 —
- * 그 계산이 맞는지를 여기서 본다.
+ * While reading a long reply, the person should not have to scroll back up to find "what was
+ * this answering". Because this is a virtual scroll, CSS sticky cannot be used, so the position
+ * is computed from the scroll offset instead — this checks that computation.
  */
-test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는다', async ({ page }) => {
+test("Scrolling pins the current turn's own message to the top", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
   const input = page.getByTestId('prompt-input')
-  // 스크롤이 생길 만큼 길게 — 짧으면 지나갈 것 자체가 없다
+  // Long enough to create scroll — too short and there would be nothing to scroll past
   await input.fill('첫 번째 질문\n' + '내용\n'.repeat(40))
   await page.getByTestId('send').click()
-  // 두 번째도 길게 — 아래 내용이 화면 하나를 넘어야 첫 번째가 '완전히 지나간' 상태가 된다
+  // The second one is long too — the content below must exceed one screen for the first to count
+  // as "fully scrolled past"
   await input.fill('두 번째 질문\n' + '내용\n'.repeat(40))
   await page.getByTestId('send').click()
 
   const stream = page.getByTestId('chat-stream')
 
   /*
-    **먼저 자리를 잡을 때까지 기다린다.** 보낸 직후에는 아직 바닥으로 내려가는 중이라,
-    그 전에 맨 위로 올리면 뒤늦게 도착한 자동 스크롤이 우리를 다시 바닥으로 데려간다 —
-    그러면 "맨 위인데 왜 붙어 있냐"로 보이지만 사실은 맨 위가 아니었다.
-    (전체 스위트에서 간헐적으로 그렇게 실패했다.)
+    **Wait for it to settle first.** Right after sending, it is still animating down to the
+    bottom — scrolling to the top before that finishes lets the belated auto-scroll pull it back
+    down, which would look like "it is at the top, so why is it still pinned" when it was
+    actually never at the top.
+    (This intermittently failed exactly this way under the full suite.)
   */
   await expect
     .poll(async () => stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
     .toBeLessThan(80)
 
   /*
-    맨 위에서는 붙일 것이 없다 (내 메시지가 아직 화면 위로 지나가지 않았다).
+    There is nothing to pin at the top (this own message has not scrolled past the top of the
+    screen yet).
 
-    **기다렸다가 본다.** 가상 스크롤은 줄 높이를 다음 프레임에 재고, 그 측정이
-    끝나야 "무엇이 위로 지나갔나"가 확정된다. 곧바로 단언하면 측정이 끝나기 전
-    한 프레임을 잡아 간헐적으로 실패한다 (전체 스위트에서 실제로 그랬다).
+    **Check only after waiting.** Virtual scroll measures row heights on the next frame, and only
+    once that measurement finishes is "what scrolled past the top" settled. Asserting immediately
+    can catch a frame before that measurement finishes and fail intermittently (this actually
+    happened under the full suite).
   */
   await stream.evaluate((el) => (el.scrollTop = 0))
   await expect(page.getByTestId('sticky-user')).toBeHidden({ timeout: 3000 })
 
   /*
-    아래로 내리면 지나간 내 메시지가 붙는다.
-    어느 것이 붙는지는 "완전히 지나갔는가"로 정해지고 그건 줄 높이에 달렸다 —
-    테스트가 그 산수를 따라 하면 레이아웃이 조금만 바뀌어도 깨진다.
-    여기서 지킬 계약은 둘이다: 맨 위에선 안 뜬다, 내리면 내가 한 말이 뜬다.
+    Scrolling down pins the own message that has scrolled past.
+    Which one gets pinned is decided by "has it fully scrolled past", and that depends on row
+    height — if the test tried to replicate that arithmetic, the smallest layout change would
+    break it. There are two contracts kept here: it does not appear at the top, and it appears
+    once scrolled down past what I said.
   */
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
   await expect(page.getByTestId('sticky-user')).toBeVisible()
   await expect(page.getByTestId('sticky-user')).toContainText(/작업|첫 번째 질문/)
 
   /*
-    **띠는 말풍선과 같은 자리, 같은 폭을 갖는다.**
+    **The banner shares the same position and the same width as the chat bubble.**
 
-    전체 폭이던 시절 도그푸딩에서 "위에 딱 안 붙었다"고 읽혔다. 실측하면 천장과의
-    간격은 0px였고(확대 0.9~1.2 전부), 떨어져 보이게 한 것은 위치가 아니라 모양이었다 —
-    오른쪽 75% 말풍선이 갑자기 좌우 끝까지 뻗으면 내 말이 아니라 머리말 아래 떠 있는
-    도구 띠로 보인다. 그래서 두 가지를 계약으로 남긴다: 오른쪽 끝이 같을 것,
-    75%를 넘지 않을 것. (등장 애니메이션이 끝난 뒤에 잰다 — 도는 동안은 몇 px 아래다.)
+    Back when it was full width, dogfooding read it as "not flush with the top". Measured, the
+    gap from the ceiling was actually 0px (across zoom 0.9-1.2) — what made it look detached was
+    shape, not position. A bubble that normally spans 75% on the right suddenly stretching edge
+    to edge reads not as my own message but as a tool banner floating below the header. So two
+    things are kept as a contract: the right edge matches, and it never exceeds 75%. (Measured
+    only after the entrance animation finishes — while it is still moving it sits a few px lower.)
   */
   await page.evaluate(
     () =>
@@ -4600,10 +4936,11 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
     }
   })
   /*
-    이제 **일부러 6px 떠 있다** (SessionView의 -top-[10px] 주석 — 딱 붙이기는 실제
-    WKWebView의 합성 반올림에 두 번 졌고, 실금을 디자인 간격 안에 삼키는 쪽으로
-    바꿨다). 계약은 "의도한 간격 근처(4~8px)"다 — 0이면 붙이기로 회귀한 것이고,
-    크면 떠내려간 것이다.
+    It now **deliberately sits 6px off** (see SessionView's -top-[10px] comment — pinning it
+    flush lost twice to compositor rounding on the actual WKWebView, so this now folds that
+    hairline gap into the design spacing instead). The contract is "close to the intended gap
+    (4-8px)" — 0 would mean a regression back to flush, and a large value would mean it has
+    drifted away.
   */
   expect(shape.gapFromCeiling).toBeGreaterThanOrEqual(4)
   expect(shape.gapFromCeiling).toBeLessThanOrEqual(8)
@@ -4611,19 +4948,22 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
   expect(shape.widthRatio).toBeLessThanOrEqual(0.76)
 
   /*
-    배너가 말하는 동안 원본은 숨는다 (도그푸딩: "같은 말이 두 번 보인다").
-    배너 자체가 흐름에 자리를 차지해 리스트를 밀어내므로, "완전히 지나갔다"고
-    판정된 원본이 배너 밑으로 되밀려 내려와 보였다. visibility로 숨겨 자리는
-    지키되 눈에는 안 보이게 한다.
+    The original is hidden while the banner speaks for it (dogfooding finding: "the same message
+    shows twice"). Because the banner itself takes up space in the flow and pushes the list down,
+    the original — already judged to have "fully scrolled past" — was pushed back down below the
+    banner and became visible again. Hiding it via visibility keeps its spot in layout while
+    keeping it invisible.
 
-    조금씩 내리며 배너가 '첫 번째 질문'을 잡는 지점을 찾는다 — 그 지점에서는
-    원본 줄이 화면 가장자리(오버스캔)에 아직 렌더되어 있어 둘을 함께 볼 수 있다.
+    This scrolls down little by little to find the point where the banner picks up "the first
+    question" — at that point the original row is still rendered at the screen's edge (overscan),
+    so both can be observed together.
   */
   /*
-    잘게 나눠 내리면 안 된다: 아직 안 잰 줄은 추정 높이로 좌표가 잡혀 있다가
-    화면에 들어오는 순간 실측으로 바뀌며 좌표가 통째로 밀린다 — 그 순간을 폴링이
-    잡으면 "붙었다"가 한 프레임 뒤에 "안 붙었다"로 뒤집힌다 (실제로 그랬다).
-    방금 바닥까지 다녀왔으므로 모든 줄은 실측 완료 — 그 지오메트리로 한 번에 간다.
+    Scrolling in small increments does not work: a row not yet measured is positioned by an
+    estimated height until it enters view, at which point it switches to a measured height and
+    every coordinate below it shifts — if polling catches that moment, "pinned" flips to "not
+    pinned" one frame later (this actually happened). Having just visited the bottom, every row
+    is already measured, so this jumps straight there using that final geometry.
   */
   await stream.evaluate((el) => (el.scrollTop = 0))
   const q1End = await stream.evaluate((el) => {
@@ -4632,12 +4972,17 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
     const y = new DOMMatrixReadOnly(getComputedStyle(row).transform).m42
     return y + row.offsetHeight
   })
-  // +80: 배너가 흐름에 자리를 차지하며 리스트를 제 키만큼 밀어내는 것을 넉넉히 덮는다
+  // +80: comfortably covers the banner taking up space in the flow and pushing the list down by
+  // its own height
   await stream.evaluate((el, y) => (el.scrollTop = y + 80), q1End)
   await expect(page.getByTestId('sticky-user')).toContainText('첫 번째 질문')
-  // 다음 사용자 질문이 배너 자리로 올라오면, 그 질문을 덮기 전에 배너가 위로 물러난다.
-  await expect(page.getByTestId('sticky-user').locator('[data-obscured="true"]')).toHaveClass(/cc-hang-out-up/)
-  // 원본 줄은 화면 가장자리(오버스캔)에 아직 렌더되어 있다 — 렌더는 되지만 보이지 않아야 한다
+  // When the next user question rises to the banner's spot, the banner retreats upward before it
+  // covers that question.
+  await expect(page.getByTestId('sticky-user').locator('[data-obscured="true"]')).toHaveClass(
+    /cc-hang-out-up/,
+  )
+  // The original row is still rendered at the screen's edge (overscan) — rendered but must remain
+  // invisible
   await expect
     .poll(() =>
       stream.evaluate((el) => {
@@ -4649,42 +4994,48 @@ test('스크롤하면 지금 보고 있는 턴의 내 메시지가 위에 붙는
     .toBe('hidden')
 
   /*
-    누르면 펼쳐진다 — 전문은 접힌 줄 위에 **겹쳐서** 나온다. 흐름에서 키를 키우면
-    아래 가상 스크롤 좌표가 통째로 밀리기 때문에, 접힌 줄의 자리는 그대로여야 한다.
+    Clicking it expands — the full text appears **layered on top of** the collapsed row. Growing
+    its height within the flow would shift every virtual-scroll coordinate below it, so the
+    collapsed row's own position must stay exactly where it was.
   */
-  // 다음 사용자 메시지와 만나는 자리에서는 배너가 비키는 것이 새 규칙이다. 펼침은
-  // 충돌이 없는 마지막 사용자 메시지 자리에서 검증한다.
+  // The new rule is that the banner steps aside where it would meet the next user message.
+  // The expand check runs at the last user message, where there is no such collision.
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
   await expect(page.getByTestId('sticky-user')).not.toHaveAttribute('data-obscured', 'true')
   const collapsed = page.getByTestId('sticky-user').getByRole('button').first()
   const collapsedBox = (await collapsed.boundingBox())!
-  // 가상 목록은 스크롤 직후 행을 재배치한다. 이 검사는 클릭 표적의 hit-test가 아니라
-  // 펼침 상태 전환 자체를 보므로, 재배치 중 스크롤을 다시 일으키지 않는 DOM click을 쓴다.
+  // The virtual list repositions rows right after scrolling. Since this checks the expand-state
+  // transition itself, not a hit-test on the click target, it uses a DOM click that will not
+  // trigger another scroll during that repositioning.
   await collapsed.evaluate((el: HTMLButtonElement) => el.click())
   const expanded = page.getByTestId('sticky-user-expanded')
   await expect(expanded).toBeVisible()
-  // 여러 줄이 펼쳐졌고(접힌 한 줄보다 확실히 크다), 접힌 줄의 자리는 안 변했다
+  // Multiple lines expanded (clearly taller than the one collapsed line), and the collapsed row's
+  // position did not change
   expect((await expanded.boundingBox())!.height).toBeGreaterThan(collapsedBox.height * 2)
-  // 정확 일치가 아니라 근사 — WebKit이 같은 줄을 39.125 vs 39.12499237로 답해 플레이크가 났다 (실측 2회)
+  // Approximate, not exact — WebKit reported the same row as 39.125 vs 39.12499237, causing flakes
+  // (measured twice)
   expect((await collapsed.boundingBox())!.height).toBeCloseTo(collapsedBox.height, 1)
-  // 다시 누르면 접힌다
+  // Clicking it again collapses it
   await expanded.click()
   await expect(page.getByTestId('sticky-user-expanded')).toBeHidden()
 })
 
 /**
- * 에이전트가 내놓은 이미지 (#40) — 스크린샷·이미지 Read가 대화에 실제로 보인다.
- * 저장하지 않는다는 결정(표시 전용, 2026-08-24)은 kind 맵(null)이 지키고,
- * 여기서 보는 계약은 둘이다: 이미지는 그려진다, 못 그린 이미지는 조용한 공백이
- * 아니라 이유 있는 상자다.
+ * Images produced by the agent (#40) — screenshots and image Reads actually show up in the
+ * conversation. The decision not to persist them (display-only, 2026-08-24) is upheld by the
+ * kind map (null), and two contracts are checked here: an image renders, and an image that
+ * cannot render is a box with a reason, not a silent blank.
  */
-test('에이전트가 보낸 이미지가 대화에 그려진다 — 실패는 이유를 말한다', async ({ page }) => {
+test('An image sent by the agent renders in the conversation — a failure states its reason', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(
     () => (window as never as { __store: any }).__store.getState().focusedSessionId,
   )
-  // 8×8 픽셀짜리 진짜 PNG — 가짜 문자열이면 "그려졌다"를 잴 수 없다
+  // An actual 8x8 pixel PNG — a fake string would make it impossible to measure "did it render"
   const PNG =
     'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8z8Dwn4EIwESMolGFtFEIAJ2yAhH+Iz4jAAAAAElFTkSuQmCC'
   await page.evaluate(
@@ -4710,14 +5061,15 @@ test('에이전트가 보낸 이미지가 대화에 그려진다 — 실패는 �
   )
   const img = page.getByTestId('msg-image').locator('img')
   await expect(img).toBeVisible()
-  // 실제로 디코드됐는지 본다 — 소스가 깨졌으면 naturalWidth는 0이다
+  // Checks whether it actually decoded — naturalWidth is 0 if the source is broken
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
   await expect(page.getByTestId('msg-image-missing')).toContainText('/tmp/big.png')
 
   /*
-   * 영속 (#40 2차 결정: 표시만 → 남긴다, 총량 500MB). 메모리의 대화를 버리고
-   * 기록에서 강제로 다시 읽어도 이미지가 되살아나야 한다 — 재시작이 걷는 길과 같다.
+   * Persistence (#40's second decision: display-only -> kept, capped at 500MB total). The image
+   * must come back even after discarding the in-memory conversation and force-reading it back
+   * from the transcript — the same path a restart walks.
    */
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
@@ -4729,8 +5081,8 @@ test('에이전트가 보낸 이미지가 대화에 그려진다 — 실패는 �
   await expect(page.getByTestId('msg-image-missing')).toContainText('너무 큽니다')
 })
 
-/** 경로를 외워서 치지 않아도 되게 — 트리에서 끌어다 입력창에 놓는다 */
-test('파일 트리에서 끌어다 놓으면 입력창에 @경로가 들어간다', async ({ page }) => {
+/** So a path never has to be memorized and typed — drag it from the tree and drop it on the composer */
+test('Dragging from the file tree drops an @path into the composer', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -4742,27 +5094,27 @@ test('파일 트리에서 끌어다 놓으면 입력창에 @경로가 들어간�
   await page.getByTestId('prompt-input').fill('이거 봐줘')
   await page.dragAndDrop('[data-testid="file-src/a.ts"]', '[data-testid="input-dropzone"]')
 
-  // 자동완성이 넣는 것과 같은 모양이어야 한다
+  // Must be the same shape autocomplete would insert
   await expect(page.getByTestId('prompt-input')).toHaveValue('이거 봐줘 @src/a.ts ')
 })
 
 /**
- * 같은 델타가 여러 번 적용되던 문제 (도그푸딩: "호호스트가스트가...").
+ * The same delta used to get applied multiple times (dogfooding finding: "hohosthosthost...").
  *
- * attach가 구독을 끊지 않아서, 두 번 붙으면 이벤트가 두 번 적용됐다.
- * 스트리밍 델타는 누적이라 한 번 어긋나면 그 뒤가 전부 어긋난다.
+ * attach never tore down its subscription, so attaching twice applied every event twice.
+ * Streaming deltas accumulate, so one misalignment throws off everything after it.
  */
-test('두 번 붙여도 스트리밍 글자가 곱해지지 않는다', async ({ page }) => {
+test('Streaming text is not duplicated even after attaching twice', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 앱이 다시 붙는 상황(호스트 재연결·재마운트)을 그대로 재현한다
+  // Reproduce exactly the situation of the app reattaching (host reconnect / remount)
   await page.evaluate(async () => {
     const s = (window as any).__store.getState()
     await s.attach(s.platform)
   })
 
-  // 델타를 한 번만 흘린다 — 구독이 겹쳤다면 화면에는 두 번 쌓인다
+  // Emit the delta exactly once — if subscriptions overlapped, it stacks twice on screen
   await page.evaluate(() => {
     const s = (window as any).__store.getState()
     ;(window as any).__mock.emit({
@@ -4778,25 +5130,26 @@ test('두 번 붙여도 스트리밍 글자가 곱해지지 않는다', async ({
 })
 
 /**
- * 바닥에 붙어 있으면 스트리밍 응답을 따라 내려간다.
+ * Staying pinned to the bottom follows a streaming reply down as it grows.
  *
- * 스트리밍은 **항목 수가 안 늘고 마지막 항목이 길어진다.** 그래서 항목 수를
- * 기준으로 삼으면 답이 길어지는 동안 화면이 멈춘다 — 총 높이를 봐야 두 경우가
- * 한 기준으로 묶인다.
+ * Streaming has **a fixed item count with the last item growing.** So using the item count as
+ * the yardstick freezes the screen while the reply grows longer — only the total height brings
+ * both cases under one measure.
  *
- * 주의: 이 테스트는 mock 위에서 **옛 로직으로도 통과한다.** 브라우저의 스크롤
- * 앵커링이 가려주는 것으로 보인다. 그래서 이건 회귀를 잡는 그물이 아니라
- * "따라 내려간다"는 계약을 적어둔 것이다 — 실제 증상은 앱에서 확인해야 한다.
+ * Note: on the mock, this test **also passes with the old, buggy logic.** The browser's scroll
+ * anchoring appears to mask it. So this is not a net that catches the regression — it records
+ * the "follows it down" contract, and the actual symptom has to be confirmed in the real app.
  */
-test('바닥에 있으면 길어지는 응답을 따라 내려간다', async ({ page }) => {
+test('Staying at the bottom follows a growing reply down', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
   const stream = page.getByTestId('chat-stream')
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
 
-  // 항목 하나가 길어지기만 한다 — 개수는 그대로다
-  // 화면을 확실히 넘기도록 충분히 길게 — 안 넘으면 스크롤 자체가 없어 검사가 무의미하다
+  // Only one item keeps growing — the count stays the same
+  // Long enough to reliably overflow the screen — without overflow there is no scroll and the
+  // check means nothing
   for (let i = 0; i < 150; i++) {
     await page.evaluate((n) => {
       const s = (window as any).__store.getState()
@@ -4817,10 +5170,11 @@ test('바닥에 있으면 길어지는 응답을 따라 내려간다', async ({ 
 })
 
 /**
- * 아이콘만 있는 버튼은 **무슨 버튼인지 물어볼 방법**이 있어야 한다.
- * 하나씩 만들면 어떤 건 툴팁이 있고 어떤 건 없는 상태가 된다 — 실제로 그랬다.
+ * An icon-only button must have **some way to ask what it does.**
+ * Building them one at a time leads to some having a tooltip and others not — this actually
+ * happened.
  */
-test('아이콘 버튼은 호버하면 설명이 뜬다', async ({ page }) => {
+test('Hovering an icon button shows its description', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -4830,27 +5184,31 @@ test('아이콘 버튼은 호버하면 설명이 뜬다', async ({ page }) => {
   await page.getByTestId('restart-session').hover()
   await expect(page.getByRole('tooltip')).toContainText('Restart')
 
-  // 마우스뿐 아니라 포커스에도 떠야 한다 — 키보드로만 도는 사람에게도 같은 정보가 필요하다
+  // Must appear on focus too, not just hover — someone navigating by keyboard alone needs the same information
   await page.getByTestId('restart-session').focus()
   await expect(page.getByRole('tooltip')).toBeVisible()
 })
 
 /**
- * 렌더가 터져도 창은 남는다 (도그푸딩 2026-09-07: "오류 생겼다고 하고 빈 화면이 되었어").
+ * The window survives even when rendering blows up (dogfooding finding, 2026-09-07: "it said an
+ * error happened and then the screen went blank").
  *
- * React는 잡아 줄 곳이 없는 예외를 만나면 트리를 통째로 걷어낸다 — 하얀 화면이 남고,
- * 그 화면은 "앱이 죽었다"와 구별되지 않는다. 여기서 깨뜨리는 것은 세션 하나의 모양인데,
- * host가 이상한 것을 보내면 실제로 생길 수 있는 일이라 시험 재료로도 정직하다.
+ * When React hits an exception with nothing to catch it, it tears down the entire tree — leaving
+ * a blank screen indistinguishable from "the app has died". What breaks here is the shape of a
+ * single session, which is an honest choice of test material: it is something that can actually
+ * happen if the host sends something malformed.
  */
-test('화면이 터져도 빈 페이지가 아니라 무슨 일인지가 남는다', async ({ page }) => {
+test('When the screen breaks, it shows what happened instead of a blank page', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
-  const id = await page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
+  const id = await page.evaluate(
+    () => (window as never as { __store: any }).__store.getState().focusedSessionId,
+  )
 
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
     const s = store.getState()
-    // 배열이어야 할 자리가 비면 그리는 쪽에서 던진다
+    // If a spot meant to be an array is empty, the rendering side throws
     store.setState({ sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], touchedPaths: undefined } } })
   }, id)
 
@@ -4859,14 +5217,16 @@ test('화면이 터져도 빈 페이지가 아니라 무슨 일인지가 남는�
 })
 
 /**
- * 끊긴 동안의 오케스트레이터 화면 (도그푸딩 2026-09-07: "디스커넥티드인데 화면은
- * 연결된 것처럼 보이고, 질문을 눌렀더니 오류가 났다").
+ * The orchestrator screen while disconnected (dogfooding finding, 2026-09-07: "it was
+ * disconnected but the screen still looked connected, and clicking a question threw an error").
  *
- * 끊긴 채로 누르면 RPC는 재연결을 기대하고 큐에 쌓여, 30초를 기다린 끝에 실패한다 —
- * 그동안 화면은 "시작하는 중"이라고 사실이 아닌 말을 한다. 못 하는 일은 못 한다고
- * 먼저 말해야 한다.
+ * Clicking while disconnected queues the RPC expecting a reconnect, and it fails only after
+ * waiting 30 seconds — during which the screen falsely claims "starting up". Something that
+ * cannot be done must say so up front.
  */
-test('끊겨 있으면 오케스트레이터 화면이 그렇다고 말한다 — 질문은 눌리지 않는다', async ({ page }) => {
+test('While disconnected, the orchestrator screen says so — questions cannot be clicked', async ({
+  page,
+}) => {
   await setup(page, { projects: [] })
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
   await expect(page.getByTestId('suggest-capabilities')).toBeEnabled()
@@ -4875,28 +5235,29 @@ test('끊겨 있으면 오케스트레이터 화면이 그렇다고 말한다 �
 
   await expect(page.getByTestId('orchestrator-offline')).toBeVisible()
   await expect(page.getByTestId('suggest-capabilities')).toBeDisabled()
-  // 폴더 고르기도 host를 거친다 — 초대만 살려두면 같은 함정이다
+  // Folder picking also goes through the host — leaving only the invitation active would be the
+  // same trap
   await expect(page.getByTestId('orchestrator-pick-folder')).toBeDisabled()
 
-  // 돌아오면 초대도 돌아온다
+  // Once back online, the invitation returns too
   await page.evaluate(() => (window as never as { __mock: any }).__mock.setConnectionState('connected'))
   await expect(page.getByTestId('orchestrator-offline')).toBeHidden()
   await expect(page.getByTestId('suggest-capabilities')).toBeEnabled()
 })
 
 /**
- * host가 죽으면 수퍼바이저가 다시 띄우지만, 새 host는 살아 있던 에이전트를
- * 하나도 모른다 — 프로세스가 함께 죽었기 때문이다. 그래서 화면에는 세션이 전부
- * 잠든 채로 남았고 사람이 하나씩 눌러 깨워야 했다.
- * 무엇이 돌고 있었는지는 UI가 아니까, 그걸 근거로 되살린다.
+ * When the host dies, the supervisor relaunches it, but the new host knows nothing of the agents
+ * that were alive — their processes died along with it. So every session used to sit dormant on
+ * screen, and the person had to click each one to wake it. The UI is the one thing that knows
+ * what was running, so this uses that to bring them back automatically.
  */
-test('끊겼다 돌아오면 돌던 세션이 스스로 되살아난다', async ({ page }) => {
+test('Working sessions revive on their own after a disconnect and reconnect', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // host가 죽었다: 프로세스가 사라지고 연결이 끊긴다
+  // The host died: the process is gone and the connection drops
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     m.sessions.get(sid).live = false
@@ -4906,12 +5267,13 @@ test('끊겼다 돌아오면 돌던 세션이 스스로 되살아난다', async 
     .poll(async () => page.evaluate(() => (window as any).__store.getState().connection))
     .not.toBe('connected')
 
-  // 수퍼바이저가 다시 띄웠다
+  // The supervisor relaunched it
   await page.evaluate(() => (window as any).__mock.setConnectionState('connected'))
 
   /*
-    UI의 live 플래그는 끊긴 뒤에도 낡은 채로 true라 그것만 보면 아무것도 검사하지 못한다.
-    **host 쪽 실제 상태**가 다시 살아났는지를 본다 — 되살리기가 정말 일어났다는 증거다.
+    The UI's live flag stays stale at true even after the disconnect, so checking only that would
+    prove nothing. This checks whether **the host's own actual state** has come back to life —
+    proof that revival really happened.
   */
   await expect
     .poll(async () => page.evaluate((sid) => (window as any).__mock.sessions.get(sid).live, id), {
@@ -4920,8 +5282,8 @@ test('끊겼다 돌아오면 돌던 세션이 스스로 되살아난다', async 
     .toBe(true)
 })
 
-/** 다른 프로젝트의 세션으로 옮기면 파일 트리도 따라가야 한다 */
-test('프로젝트를 바꾸면 파일 트리도 바뀐다', async ({ page }) => {
+/** Moving to a session in a different project must update the file tree too */
+test('Switching projects also switches the file tree', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -4933,7 +5295,7 @@ test('프로젝트를 바꾸면 파일 트리도 바뀐다', async ({ page }) =>
   await page.getByTestId('evidence-tab-files').click()
   await expect(page.getByTestId('file-only-in-alpha.ts')).toBeVisible()
 
-  // 두 번째 프로젝트는 다른 파일을 갖는다
+  // The second project has different files
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [
@@ -4994,10 +5356,11 @@ test('expanded folders follow the project, not the session', async ({ page }) =>
 })
 
 /**
- * 숫자만 있고 단위가 없는 표식은 "이게 뭐지?"가 나온다 (실제로 나왔다).
- * 브라우저 기본 title은 1~2초를 기다려야 떠서, 그 순간에는 없는 것과 같다.
+ * A marker with a bare number and no unit prompts "what is this?" (it actually did). The
+ * browser's default title takes 1-2 seconds to appear, which is as good as not being there in
+ * that moment.
  */
-test('프로젝트 표식은 호버하면 무엇인지 알려준다', async ({ page }) => {
+test('Hovering the project marker explains what it is', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -5006,7 +5369,7 @@ test('프로젝트 표식은 호버하면 무엇인지 알려준다', async ({ p
       { path: 'b.ts', staged: false, status: 'M' },
     ]
   })
-  // 변경 수는 프로젝트 목록에서 온다 — 다시 읽게 한다
+  // The change count comes from the project list — force it to re-read
   await page.evaluate(() => (window as any).__store.getState().refreshProjects?.())
 
   const mark = page.getByTestId('mark-changed-alpha')
@@ -5014,19 +5377,18 @@ test('프로젝트 표식은 호버하면 무엇인지 알려준다', async ({ p
     await mark.hover()
     await expect(page.getByRole('tooltip')).toContainText('uncommitted')
   }
-
 })
 
-/** 사이드바 순서는 사람이 정한다 — 끌어서 옮기고, 다시 켜도 그대로여야 한다 */
+/** The sidebar order is decided by the person — drag to reorder, and it must survive a restart */
 /**
- * 놓일 자리 선은 **경계에 선다** (도그푸딩 2026-09-10: "같은 자리인데 선이 살짝 올라갔다
- * 내려간다").
+ * The drop-position line sits **on the boundary** (dogfooding finding, 2026-09-10: "it is the
+ * same spot but the line jitters up and down slightly").
  *
- * 한 경계는 두 줄이 나눠 갖는다 — 위 줄에겐 '아래쪽', 아래 줄에겐 '위쪽'. 그 둘이 각자의
- * 안쪽에 그려지면 같은 뜻인데 몇 px 어긋난 자리에 뜬다. 여기서 재는 것은 그 두 표현이
- * **같은 픽셀**을 가리키느냐다.
+ * One boundary is shared by two rows — the "bottom" for the row above, the "top" for the row
+ * below. If each is drawn inside its own row, they mean the same thing but appear a few px
+ * apart. What this measures is whether the two representations point to **the same pixel**.
  */
-test('앞 줄의 아래 선과 뒤 줄의 위 선은 같은 자리에 뜬다', async ({ page }) => {
+test("The row above's bottom line and the row below's top line land at the same spot", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -5034,11 +5396,11 @@ test('앞 줄의 아래 선과 뒤 줄의 위 선은 같은 자리에 뜬다', a
     Object.keys((window as never as { __store: any }).__store.getState().sessions),
   )
 
-  /** 그 줄에 dragover를 흘리고, 그때 생기는 선의 화면 y를 잰다 */
+  /** Fires dragover on that row and measures the on-screen y of the line it produces */
   const lineY = async (id: string, half: 'top' | 'bottom') =>
     page.evaluate(
       async ({ sel, half }: { sel: string; half: 'top' | 'bottom' }) => {
-        // 선을 그리는 것은 줄(li)이다 — testid는 그 안의 버튼에 있다
+        // The row (li) is what draws the line — the testid is on the button inside it
         const el = (document.querySelector(sel) as HTMLElement).closest('li') as HTMLElement
         const r = el.getBoundingClientRect()
         const over = () => {
@@ -5054,9 +5416,10 @@ test('앞 줄의 아래 선과 뒤 줄의 위 선은 같은 자리에 뜬다', a
           )
         }
         /*
-         * 선은 React 상태로 붙는다 — **그려질 때까지 기다린다.** 프레임 수를 고정으로 세면
-         * 기계가 바쁠 때 아직 없는 선을 재고 NaN이 된다 (병렬 실행에서 실제로 그랬다).
-         * 진짜 드래그도 dragover를 계속 흘리므로 다시 흘리는 것이 그 상황 그대로다.
+         * The line is attached via React state — **wait until it is actually drawn.** Counting a
+         * fixed number of frames can measure a line that does not exist yet when the machine is
+         * busy and produce NaN (this actually happened under parallel runs). A real drag keeps
+         * firing dragover continuously too, so firing it again here matches that exactly.
          */
         let cs = getComputedStyle(el, '::after')
         for (let i = 0; i < 30 && cs.content === 'none'; i++) {
@@ -5066,14 +5429,15 @@ test('앞 줄의 아래 선과 뒤 줄의 위 선은 같은 자리에 뜬다', a
         }
         if (cs.content !== 'none') {
           const h = parseFloat(cs.height) || 0
-          // 위쪽 선이면 top이 숫자로, 아래쪽 선이면 bottom이 숫자로 온다
+          // For a top line, top comes back numeric; for a bottom line, bottom does
           return cs.top !== 'auto' && cs.top !== ''
             ? r.top + parseFloat(cs.top)
             : r.bottom - parseFloat(cs.bottom) - h
         }
         /*
-         * 선을 어떻게 그리든 **자리**를 잰다 — 그림자로 그리던 시절도 같은 잣대로 재야
-         * "고치면 통과, 되돌리면 실패"가 성립한다 (구현이 아니라 사실을 보는 시험).
+         * Measure the **position** regardless of how the line is drawn — using the same yardstick
+         * even from when it was drawn with a box-shadow is what makes "fixing it passes,
+         * reverting it fails" hold (a test of the fact, not the implementation).
          */
         const inset = /(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+\d/.exec(getComputedStyle(el).boxShadow)
         if (!inset) return Number.NaN
@@ -5088,7 +5452,7 @@ test('앞 줄의 아래 선과 뒤 줄의 위 선은 같은 자리에 뜬다', a
   expect(Math.abs(below - above)).toBeLessThanOrEqual(1)
 })
 
-test('세션을 끌어서 순서를 바꾼다', async ({ page }) => {
+test('Dragging a session reorders it', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -5102,13 +5466,13 @@ test('세션을 끌어서 순서를 바꾼다', async ({ page }) => {
 
   const ids = await page.evaluate(() => Object.keys((window as any).__store.getState().sessions))
   await page.dragAndDrop(`[data-testid="session-row-${ids[1]}"]`, `[data-testid="session-row-${ids[0]}"]`, {
-    targetPosition: { x: 10, y: 2 }, // 위쪽 절반에 놓으면 앞으로 간다
+    targetPosition: { x: 10, y: 2 }, // Dropping on the top half moves it earlier
   })
 
   await expect.poll(order).toEqual(['second', 'first'])
 })
 
-test('프로젝트를 끌어서 순서를 바꾼다', async ({ page }) => {
+test('Dragging a project reorders it', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
 
   const order = async () =>
@@ -5123,17 +5487,18 @@ test('프로젝트를 끌어서 순서를 바꾼다', async ({ page }) => {
 })
 
 /**
- * 사이드바의 + 와 ✕ 는 같은 세로줄에 선다.
+ * The sidebar's + and ✕ align on the same vertical line.
  *
- * 눈으로만 맞추면 한쪽 여백을 고칠 때 다시 어긋난다 — 실제로 4px과 12px로
- * 벌어져 있었다. 오른쪽 끝의 실제 좌표를 재서 못 박는다.
+ * Relying on visual judgment alone lets them drift apart again the next time a margin is
+ * touched — they were actually off by 4px vs 12px at one point. This pins it down by measuring
+ * the actual right-edge coordinates.
  */
-test('사이드바의 프로젝트 메뉴와 삭제 버튼이 같은 세로줄에 선다', async ({ page }) => {
+test("The sidebar's project menu and delete button align on the same vertical line", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 둘 다 호버해야 나타난다 — 프로젝트 줄의 메뉴도 이제 감춰져 있다
+  // Both must be hovered to appear — the project row's menu is now hidden too
   await page.getByTestId('project-header-alpha').hover()
   await page.getByTestId(`session-row-${id}`).hover()
 
@@ -5144,13 +5509,16 @@ test('사이드바의 프로젝트 메뉴와 삭제 버튼이 같은 세로줄�
 })
 
 /**
- * 세션 이름을 사람이 바꾼다 (이슈 #5).
+ * The person can rename a session (issue #5).
  *
- * 자동 이름은 첫 프롬프트를 잘라 쓴다. 재개·불러오기로 만든 세션은 첫 마디가 다 같아서
- * `This session is being continued…`짜리 세션이 목록에 넷씩 나란히 섰다 —
- * 이름으로는 아무것도 못 고르고 본문을 뒤져야 했다.
+ * The automatic name is truncated from the first prompt. Sessions created by resuming or loading
+ * a conversation all share the same first line, so four sessions named `This session is being
+ * continued...` stood side by side in the list — the name told nothing apart, and the only way
+ * to tell them apart was digging into the content.
  */
-test('사이드바에서 세션 이름을 바꾼다 — 그 뒤 자동 이름이 덮지 않는다', async ({ page }) => {
+test('Renaming a session in the sidebar sticks — the automatic name never overwrites it afterward', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'This session is being continued from a previous conversation')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5166,17 +5534,18 @@ test('사이드바에서 세션 이름을 바꾼다 — 그 뒤 자동 이름이
 
   await expect(page.getByTestId(`session-row-${id}`)).toContainText('가드 MCP')
 
-  // 자동 이름이 다시 덮으면 안 된다 — 도구가 제목을 알려와도 사람이 정한 이름이 이긴다
+  // The automatic name must never overwrite it again — even when the tool reports a title, the
+  // person's chosen name wins
   await emitEvent(page, 0, { type: 'session_title', title: 'This session is being continued…', auto: true })
   await expect(page.getByTestId(`session-row-${id}`)).toContainText('가드 MCP')
 })
 
-test('이름 고치다 Escape를 누르면 옛 이름이 그대로다', async ({ page }) => {
+test('Pressing Escape while editing the name leaves the old name unchanged', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '원래 이름')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 이름을 두 번 누르는 것도 같은 입구다 (탭 이름의 관행)
+  // Double-clicking the name is the same entry point too (the usual tab-name convention)
   await page.getByTestId(`session-row-${id}`).dblclick()
   const input = page.getByTestId(`session-name-input-${id}`)
   await input.fill('버린 이름')
@@ -5186,15 +5555,16 @@ test('이름 고치다 Escape를 누르면 옛 이름이 그대로다', async ({
 })
 
 /**
- * **조용한 실패를 만들지 않는다.** 이름 바꾸기가 실패했는데 목록만 새 이름으로
- * 바뀌면, 다음에 목록을 다시 받는 순간 아무 설명 없이 되돌아간다.
+ * **No silent failure.** If a rename fails but the list has already switched to the new name, it
+ * would revert with no explanation the next time the list refreshes.
  */
-test('이름 바꾸기가 실패하면 목록은 그대로 두고 사람에게 알린다', async ({ page }) => {
+test('When a rename fails, the list stays unchanged and the person is told', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '원래 이름')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // host가 거절하는 상황을 만든다 — 세션이 사라진 뒤에 이름을 고치는 것이 실제 경로다
+  // Set up a situation where the host refuses — renaming after the session has disappeared is
+  // the real-world path
   await page.evaluate((sid: string) => {
     ;(window as any).__mock.sessions.delete(sid)
   }, id)
@@ -5208,8 +5578,8 @@ test('이름 바꾸기가 실패하면 목록은 그대로 두고 사람에게 �
   await expect(page.getByTestId(`session-row-${id}`)).toContainText('원래 이름')
 })
 
-/** 입력창의 첨부·보내기도 같은 부품이라 크기와 높이가 같아야 한다 */
-test('입력창의 첨부와 보내기 버튼이 같은 크기·같은 높이다', async ({ page }) => {
+/** The composer's attach and send are the same kind of part, so their size and height must match */
+test("The composer's attach and send buttons share the same size and height", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -5218,17 +5588,18 @@ test('입력창의 첨부와 보내기 버튼이 같은 크기·같은 높이다
 
   expect(Math.abs(attach.width - send.width)).toBeLessThanOrEqual(1)
   expect(Math.abs(attach.height - send.height)).toBeLessThanOrEqual(1)
-  // 아래쪽 끝이 같은 줄에 선다 (입력창이 커져도 나란히 남는다)
+  // Their bottom edges align on the same line (they stay side by side even as the composer grows)
   expect(Math.abs(attach.y + attach.height - (send.y + send.height))).toBeLessThanOrEqual(1)
 })
 
 /**
- * 놓을 자리 표시가 목록을 밀면 안 된다.
+ * The drop-position indicator must not push the list around.
  *
- * border로 그리면 요소가 1px 커져서, 표시가 줄을 옮길 때마다 목록 전체가 밀린다 —
- * 끌고 다니면 딸깍딸깍 튀고, 손이 노리는 지점도 계속 움직인다.
+ * Drawing it with a border grows the element by 1px, so the whole list shifts every time the
+ * indicator moves to a new row — dragging it around makes everything jitter, and the spot the
+ * hand is aiming for keeps moving.
  */
-test('끌어서 옮기는 동안 목록이 밀리지 않는다', async ({ page }) => {
+test('The list does not shift while dragging to reorder', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -5237,7 +5608,7 @@ test('끌어서 옮기는 동안 목록이 밀리지 않는다', async ({ page }
   const rowBox = async () => (await page.getByTestId(`session-row-${ids[1]}`).boundingBox())!
   const before = await rowBox()
 
-  // 놓기 표시가 켜진 상태를 만든다 (dragover만 발생시킨다)
+  // Trigger the drop indicator's on state (just fire a dragover)
   await page.evaluate((id) => {
     const el = document.querySelector(`[data-testid="session-row-${id}"]`)!.parentElement!
     const dt = new DataTransfer()
@@ -5254,28 +5625,29 @@ test('끌어서 옮기는 동안 목록이 밀리지 않는다', async ({ page }
 })
 
 /**
- * 그리드 — 여러 세션을 한 화면에서.
+ * The grid — several sessions on one screen.
  *
- * 사양서 §5.4가 v1에서 보류했던 그리드다. 되살리면서 지킨 것:
- * 패널이 최소 폭 아래로 내려가지 않게 열 수를 폭에서 계산하고,
- * 칸은 포커스 뷰와 **같은 부품**을 써서 설정이 갈라지지 않게 한다.
+ * This is the grid that spec §5.4 held back for v1. What was preserved when bringing it back:
+ * the column count is computed from the width so panels never shrink below the minimum width,
+ * and each panel uses **the same component** as the focus view so their settings never diverge.
  */
-test('세션을 끌어다 놓으면 그리드에 올라간다', async ({ page }) => {
+test('Dragging a session onto the grid button adds it to the grid', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
 
-  // 끌어온 김에 화면까지 열린다 — 열고 다시 끌면 두 번 일이다
+  // Dragging it also opens the grid screen — opening it and then dragging separately would be two steps
   await expect(page.getByTestId('grid')).toBeVisible()
   await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
 
-  // 우측 증거 패널은 없다 (§5.4: 한 레인 더 떼면 패널이 최소 폭 아래로 간다)
+  // There is no right-side evidence panel (§5.4: adding one more lane would push the panel below
+  // its minimum width)
   await expect(page.getByTestId('evidence-panel')).toBeHidden()
 })
 
-test('그리드 칸과 포커스 뷰가 같은 설정을 본다', async ({ page }) => {
+test('A grid panel and the focus view see the same settings', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5283,17 +5655,17 @@ test('그리드 칸과 포커스 뷰가 같은 설정을 본다', async ({ page 
   await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
   await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
 
-  // 그리드 칸에서 모델을 바꾸고
+  // Change the model from the grid panel
   await pickSetting(page, 'settings-model-opus', page.getByTestId(`grid-panel-${id}`))
 
-  // 포커스 뷰로 돌아오면 그대로여야 한다 — 복사본이면 여기서 갈라진다
-  // (나가는 방법은 '다른 것을 고르는 것'이다. 그리드 버튼은 토글이 아니다)
+  // It must stay the same when returning to the focus view — a copy would diverge right here
+  // (the way out is 'picking something else'. The grid button is not a toggle)
   await page.getByTestId(`session-row-${id}`).click()
-  // 지금 값은 메뉴를 열지 않아도 버튼에 적혀 있다
+  // The current value is written on the button without needing to open the menu
   await expect(page.getByTestId('settings-open')).toContainText('Opus')
 })
 
-test('그리드에서 빼도 세션은 사이드바에 남는다', async ({ page }) => {
+test('Removing a session from the grid leaves it in the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5302,23 +5674,25 @@ test('그리드에서 빼도 세션은 사이드바에 남는다', async ({ page
   await page.getByTestId(`grid-remove-${id}`).click()
 
   await expect(page.getByTestId(`grid-panel-${id}`)).toBeHidden()
-  // 화면에서만 내린 것이다 — 세션은 그대로 돌아간다
+  // It only came off the screen — the session keeps running as before
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
 
 /**
- * 그리드 칸에 대화가 쌓여도 입력창은 자리를 지켜야 한다 (도그푸딩).
+ * Even as a conversation piles up in a grid panel, the composer must hold its place (dogfooding
+ * finding).
  *
- * flex 자식의 min-height 기본값은 auto라 내용보다 작아지지 못한다. 그래서 대화가
- * 길어지면 칸이 통째로 늘어나 입력창을 칸 밖으로 밀어냈다 — "쭉 내려가다 멈추고
- * 입력창이 안 나온다"가 그 증상이다. 칸 높이가 정해진 그리드에서 먼저 드러났다.
+ * A flex child's default min-height is auto, so it cannot shrink below its content. As the
+ * conversation grew, the whole panel grew with it and pushed the composer outside the panel —
+ * "it keeps scrolling and stops, and the composer never appears" was the symptom. This surfaced
+ * first in the grid, where panel height is fixed.
  */
-test('그리드 칸은 대화가 길어져도 입력창을 밀어내지 않는다', async ({ page }) => {
+test("A grid panel's composer is not pushed out even as the conversation grows longer", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 칸 높이를 확실히 넘기는 분량
+  // Enough content to reliably exceed the panel's height
   await page.evaluate((sid) => {
     const store = (window as any).__store
     const items = Array.from({ length: 60 }, (_, i) => ({
@@ -5333,17 +5707,19 @@ test('그리드 칸은 대화가 길어져도 입력창을 밀어내지 않는�
   const panel = page.getByTestId(`grid-panel-${id}`)
   await expect(panel).toBeVisible()
 
-  // 입력창이 칸 **안에** 있어야 한다. 보이기만 해서는 부족하다 — 밀려난 것도 '보인다'
+  // The composer must be **inside** the panel. Merely being visible is not enough — something
+  // pushed out of view is still "visible"
   const composer = panel.getByTestId('prompt-input')
   await expect(composer).toBeVisible()
   /*
-   * **자리가 멈춘 뒤에** 잰다 (2026-09-13).
+   * Measure **only after the position settles** (2026-09-13).
    *
-   * 칸이 막 생긴 프레임에서는 카드의 절대 위치가 아직 최종값이 아니다 — 실측하면 한두
-   * 프레임 동안 칸 아래로 10px쯤 내려가 있다가 제자리를 찾는다. 그 프레임을 재고 있었던
-   * 탓에 이 단언은 붙을 때도 있고 떨어질 때도 있었다(같은 코드로 세 번 돌려 세 번 실패,
-   * 한 번 통과). 이 테스트가 말하려는 것은 "대화가 길어도 입력창이 칸 밖으로 밀려나지
-   * 않는다"는 **정착 상태**의 성질이므로, 멈춘 값을 본다.
+   * In the very first frame the panel exists, the card's absolute position is not yet final —
+   * measured, it sits about 10px lower than the panel for a frame or two before settling into
+   * place. Measuring during that frame made this assertion pass sometimes and fail other times
+   * (three runs of the same code failed three times, then passed once). What this test is meant
+   * to state is a property of the **settled state** — "the composer is never pushed outside the
+   * panel even in a long conversation" — so it reads the value only after it stops moving.
    */
   const overflow = async () => {
     const box = (await composer.boundingBox())!
@@ -5354,10 +5730,11 @@ test('그리드 칸은 대화가 길어져도 입력창을 밀어내지 않는�
 })
 
 /**
- * 그리드를 열어둔 채 다른 세션을 골라도 화면이 그대로였다 (도그푸딩).
- * 고른 것은 바뀌었는데 보이는 것이 안 바뀌면, 누른 사람에게는 아무 일도 안 일어난 것이다.
+ * With the grid open, picking a different session left the screen unchanged (dogfooding
+ * finding). If the selection changed but the display did not, then to the person who clicked,
+ * nothing happened.
  */
-test('그리드에서 세션을 고르면 그 세션으로 넘어간다', async ({ page }) => {
+test('Picking a session from the grid navigates to that session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -5372,14 +5749,15 @@ test('그리드에서 세션을 고르면 그 세션으로 넘어간다', async 
 })
 
 /**
- * 칸을 열면 **최신 대화가 먼저** 보여야 한다 (도그푸딩:
- * "스크롤이 아래에서부터 시작하는 게 아니라 위에서부터 시작해서 쭉 내려가다 이상해진다").
+ * Opening a panel must show **the most recent conversation first** (dogfooding finding: "the
+ * scroll does not start at the bottom, it starts at the top and scrolling down gets weird").
  *
- * 원인은 입력창이 밀려난 것과 같았다. 대화 영역이 줄어들지 못하고 내용만큼 늘어나면
- * scrollHeight와 clientHeight가 같아진다 — **스크롤이 아예 성립하지 않는다.**
- * 그래서 두 가지를 함께 본다: 정말 스크롤되는가, 그리고 바닥에 서 있는가.
+ * The cause was the same as the composer being pushed out. If the conversation area cannot
+ * shrink and instead grows with its content, scrollHeight ends up equal to clientHeight —
+ * **there is no scroll to speak of.** So this checks two things together: does it actually
+ * scroll, and is it sitting at the bottom.
  */
-test('그리드 칸을 열면 최신 대화가 먼저 보인다', async ({ page }) => {
+test('Opening a grid panel shows the most recent conversation first', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5405,18 +5783,18 @@ test('그리드 칸을 열면 최신 대화가 먼저 보인다', async ({ page 
       h: el.scrollHeight,
       c: el.clientHeight,
     }))
-  // 칸 안에서 스크롤이 성립해야 한다 (늘어나 버리면 이 둘이 같아진다)
+  // Scroll must be meaningful inside the panel (if it just grows, these two become equal)
   expect(box.h).toBeGreaterThan(box.c)
-  // 그리고 맨 아래에 서 있어야 한다
+  // And it must be sitting at the very bottom
   expect(box.h - box.c - box.top).toBeLessThanOrEqual(40)
 })
 
 /**
- * "아래에 공간이 있어도 안 늘어나서 보기 불편하다" (도그푸딩).
- * 높이를 52vh로 못박아 뒀더니 칸이 하나여도 아래가 비었다.
- * 줄 높이를 minmax(최소, 1fr)로 두면 남는 공간을 칸이 나눠 갖는다.
+ * "It does not grow to fill space below, so it looks awkward" (dogfooding finding).
+ * Pinning the height at 52vh left empty space below even with a single panel.
+ * Setting row height to minmax(minimum, 1fr) lets panels share the remaining space.
  */
-test('그리드 칸은 남는 세로 공간을 채운다', async ({ page }) => {
+test('A grid panel fills the remaining vertical space', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5427,16 +5805,17 @@ test('그리드 칸은 남는 세로 공간을 채운다', async ({ page }) => {
 
   const card = (await panel.boundingBox())!
   const area = (await page.getByTestId('grid').boundingBox())!
-  // 여백(p-2)을 빼면 화면을 거의 다 쓴다 — 아래가 남으면 안 된다
+  // After subtracting the padding (p-2), it uses almost the entire screen — nothing should
+  // remain below
   expect(card.height).toBeGreaterThan(area.height - 24)
 })
 
 /**
- * 그리드는 스크롤하지 않는다.
- * 아래에 더 있을지 모른다면 그건 목록이지 관제탑이 아니다 —
- * 화면에 있는 것이 전부여야 "한눈에 본다"가 성립한다.
+ * The grid does not scroll.
+ * If there might be more below, that makes it a list, not a control tower —
+ * "seeing everything at a glance" only holds if what is on screen is everything there is.
  */
-test('칸이 많아져도 화면에 딱 맞고 스크롤이 생기지 않는다', async ({ page }) => {
+test('Even with many panels, they fit the screen exactly and no scroll appears', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const ids: string[] = []
   for (const name of ['a', 'b', 'c', 'd', 'e']) {
@@ -5453,17 +5832,17 @@ test('칸이 많아져도 화면에 딱 맞고 스크롤이 생기지 않는다'
   }))
   expect(scroll.h).toBeLessThanOrEqual(scroll.c + 1)
 
-  // 마지막 칸까지 화면 안에 들어와 있다
+  // Even the last panel fits entirely within the screen
   const area = (await page.getByTestId('grid').boundingBox())!
   const last = (await page.getByTestId(`grid-panel-${ids[4]}`).boundingBox())!
   expect(last.y + last.height).toBeLessThanOrEqual(area.y + area.height + 1)
 })
 
 /**
- * "대화를 드래그하면 칸이 이동해서 텍스트 선택이 안 된다" (도그푸딩).
- * draggable인 조상이 있으면 브라우저가 그 안의 글자를 못 고르게 한다.
+ * "Dragging the conversation moves the panel instead, so text cannot be selected" (dogfooding
+ * finding). A draggable ancestor stops the browser from letting text inside it be selected.
  */
-test('그리드 칸에서 대화 텍스트를 고를 수 있다', async ({ page }) => {
+test('Conversation text can be selected inside a grid panel', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5481,7 +5860,7 @@ test('그리드 칸에서 대화 텍스트를 고를 수 있다', async ({ page 
   const panel = page.getByTestId(`grid-panel-${id}`)
   await expect(panel).toBeVisible()
 
-  // 끌기 시작을 막는 조상이 없어야 한다
+  // There must be no ancestor that starts a drag
   const draggableAncestor = await panel.getByTestId('chat-stream').evaluate((el) => {
     for (let n: HTMLElement | null = el as HTMLElement; n; n = n.parentElement) {
       if (n.getAttribute('draggable') === 'true') return n.getAttribute('data-testid') ?? 'unknown'
@@ -5492,10 +5871,10 @@ test('그리드 칸에서 대화 텍스트를 고를 수 있다', async ({ page 
 })
 
 /**
- * "세션 패널 탭으로 드래그하면 창 자체가 이동한다" (도그푸딩).
- * 포커스 뷰에서는 머리글이 곧 타이틀바지만, 그리드 칸에서는 아니다.
+ * "Dragging by the session panel's tab moves the entire window" (dogfooding finding).
+ * In the focus view, the header doubles as the title bar, but not in a grid panel.
  */
-test('그리드 칸의 머리글을 끌어도 앱 창이 움직이지 않는다', async ({ page }) => {
+test("Dragging a grid panel's header does not move the app window", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5512,22 +5891,25 @@ test('그리드 칸의 머리글을 끌어도 앱 창이 움직이지 않는다'
   await page.mouse.up()
 
   expect(await page.evaluate(() => (window as any).__mock.windowDrags)).toBe(0)
-  // 대신 칸을 옮기는 손잡이여야 한다
+  // It must instead be the handle for moving the panel
   await expect(header).toHaveAttribute('draggable', 'true')
 })
 
 /**
- * "사이드바에서 직접 세션에 안 들어가면 그리드에서 대화가 안 뜬다" (도그푸딩).
+ * "If I never open the session directly from the sidebar, the conversation never shows up in the
+ * grid" (dogfooding finding).
  *
- * 기록 불러오기가 focusSession에만 매달려 있었다. 포커스 뷰는 고르는 것과 보는 것이
- * 같은 동작이라 티가 안 났지만, 그리드는 **고르지 않고 보는** 화면이다.
+ * Loading history was hooked only into focusSession. In the focus view, selecting and viewing
+ * are the same action, so this never showed — but the grid is a screen you **view without
+ * selecting**.
  */
-test('한 번도 들어가 본 적 없는 세션도 그리드에서 대화가 뜬다', async ({ page }) => {
+test('A session never opened before still shows its conversation in the grid', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 저장소에는 기록이 있고, 화면에는 아직 안 올라온 상태 (앱을 막 켠 세션)
+  // The store has the transcript, but the screen has not loaded it yet (a session right after the
+  // app started)
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     m.messages.set(sid, [
@@ -5549,11 +5931,12 @@ test('한 번도 들어가 본 적 없는 세션도 그리드에서 대화가 �
       },
     ])
     const store = (window as any).__store
-    // 막 켠 앱에는 대화도 기록 커서도 없다 — 칸은 커서가 있는지로 "읽었다"를 가른다 (#79)
+    // A freshly started app has neither the conversation nor a history cursor — the panel
+    // decides "has this been read" by whether a cursor exists (#79)
     store.setState({ chat: {}, history: {}, focusedSessionId: null })
   }, id)
 
-  // 사이드바를 거치지 않고 곧바로 그리드에 올린다
+  // Add it to the grid directly, without going through the sidebar
   await page.evaluate((sid) => (window as any).__store.getState().setGridPanels([sid]), id)
   await page.getByTestId('grid-button').click()
 
@@ -5561,11 +5944,12 @@ test('한 번도 들어가 본 적 없는 세션도 그리드에서 대화가 �
 })
 
 /**
- * 그리드 칸의 '치우기'와 '재시작'이 크기도 높이도 따로 놀았다 (도그푸딩).
- * 치우기만 칸 위에 절대좌표로 얹혀 있었기 때문이다 — 다른 흐름에 있으면 맞을 리가 없다.
- * 같은 줄에 넣으면 맞출 것 자체가 없어진다.
+ * A grid panel's "remove" and "restart" buttons used to differ in both size and height
+ * (dogfooding finding). "Remove" alone was placed on the panel with absolute coordinates —
+ * there was no reason for it to line up with something in a different flow. Putting it in the
+ * same row removes the need to align them at all.
  */
-test('그리드 칸의 재시작과 치우기 버튼이 같은 크기·같은 줄에 선다', async ({ page }) => {
+test("A grid panel's restart and remove buttons share the same size and the same row", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5579,15 +5963,18 @@ test('그리드 칸의 재시작과 치우기 버튼이 같은 크기·같은 �
 
   expect(Math.abs(restart.width - remove.width)).toBeLessThanOrEqual(1)
   expect(Math.abs(restart.height - remove.height)).toBeLessThanOrEqual(1)
-  // 세로 중심이 같은 줄에 선다
+  // Their vertical centers align on the same line
   expect(Math.abs(restart.y + restart.height / 2 - (remove.y + remove.height / 2))).toBeLessThanOrEqual(1)
 })
 
 /**
- * 그리드 버튼은 토글이 아니라 선택이다.
- * 껐다 켜는 스위치로 두면 "이전 화면 위에 잠깐 덮은 것"처럼 읽힌다 — 실제로 그렇게 오해를 샀다.
+ * The grid button is a selection, not a toggle.
+ * Leaving it as an on/off switch reads as "a temporary overlay on top of the previous screen" —
+ * that misreading actually happened.
  */
-test('그리드 버튼은 눌러도 꺼지지 않는다 — 나가려면 다른 것을 고른다', async ({ page }) => {
+test('Clicking the grid button again does not turn it off — leaving requires picking something else', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5595,20 +5982,21 @@ test('그리드 버튼은 눌러도 꺼지지 않는다 — 나가려면 다른 
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // 한 번 더 눌러도 머문다
+  // Clicking it again still stays
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // 나가는 방법은 다른 것을 고르는 것뿐
+  // The only way out is to pick something else
   await page.getByTestId(`session-row-${id}`).click()
   await expect(page.getByTestId('grid')).toBeHidden()
 })
 
 /**
- * "A에 쓰던 글이 B의 입력창에 앉아 있다" — 그대로 보내면 엉뚱한 세션에 간다 (실측 확인).
- * 원인은 쓰다 만 글이 세션이 아니라 화면의 그 자리에 붙어 있던 것.
+ * "What I was typing to A is sitting in B's composer" — sending it as-is would go to the wrong
+ * session (confirmed by measurement). The cause: an unfinished draft was attached to that spot
+ * on screen rather than to the session.
  */
-test('쓰다 만 글은 세션을 따라다니지 않는다', async ({ page }) => {
+test('An unfinished draft does not follow the wrong session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5618,19 +6006,20 @@ test('쓰다 만 글은 세션을 따라다니지 않는다', async ({ page }) =
   await page.getByTestId(`session-row-${a}`).click()
   await page.getByTestId('prompt-input').fill('A에게 하려던 말')
 
-  // B의 입력창은 비어 있어야 한다
+  // B's composer must be empty
   await page.getByTestId(`session-row-${b}`).click()
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
 
-  // A로 돌아오면 쓰던 글이 그대로 있어야 한다
+  // Returning to A, the unfinished draft must still be there
   await page.getByTestId(`session-row-${a}`).click()
   await expect(page.getByTestId('prompt-input')).toHaveValue('A에게 하려던 말')
 })
 
 /**
- * 화면을 갈아 끼우는 그리드에서는 반대 증상이 났다 — 부품이 사라지며 글도 같이 사라졌다.
+ * In the grid, which swaps whole screens in and out, the opposite symptom appeared — the
+ * component unmounted and the draft disappeared along with it.
  */
-test('그리드에서 쓰다 만 글은 화면을 바꿨다 돌아와도 남아 있다', async ({ page }) => {
+test('A draft in the grid survives switching screens and coming back', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5647,10 +6036,11 @@ test('그리드에서 쓰다 만 글은 화면을 바꿨다 돌아와도 남아 
 })
 
 /**
- * "세션 선택했다가 그리드 들어가도 세션 선택한 UI가 남아 있다" (도그푸딩).
- * 화면에 밝은 것이 둘이면 어느 쪽을 보고 있는지 화면이 스스로 모순된다.
+ * "Even after entering the grid, the UI still shows the previously selected session as
+ * selected" (dogfooding finding). With two things lit up at once, the screen contradicts itself
+ * about which one is being viewed.
  */
-test('그리드에 들어가면 사이드바에서 고른 것은 그리드뿐이다', async ({ page }) => {
+test('Entering the grid leaves only the grid marked as selected in the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5662,20 +6052,20 @@ test('그리드에 들어가면 사이드바에서 고른 것은 그리드뿐이
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // 세션 줄은 더 이상 골라진 모양이 아니어야 한다
+  // The session row must no longer look selected
   expect(await row.getAttribute('class')).not.toBe(focusedClass)
   await expect(page.getByTestId('grid-button')).toHaveAttribute('aria-pressed', 'true')
 
-  // 돌아오면 다시 골라진 모양
+  // Returning restores the selected appearance
   await row.click()
   expect(await row.getAttribute('class')).toBe(focusedClass)
 })
 
 /**
- * 도구 카드는 기본으로 접힌다 (도그푸딩: "배시·에딧·MCP 기본값 닫힌 상태로").
- * 몇 번만 써도 대화가 출력으로 뒤덮여 정작 답을 못 읽는다.
+ * Tool cards are collapsed by default (dogfooding: "Bash, Edit, MCP should default to closed").
+ * Even a few uses buries the conversation in output, making the actual reply unreadable.
  */
-test('도구 카드는 배시든 에딧이든 접힌 채로 나온다', async ({ page }) => {
+test('Tool cards appear collapsed whether Bash or Edit', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5695,23 +6085,23 @@ test('도구 카드는 배시든 에딧이든 접힌 채로 나온다', async ({
   const card = page.getByTestId('tool-card').first()
   await expect(card).toBeVisible()
   await expect(card.getByTestId('tool-card-toggle')).toHaveAttribute('aria-expanded', 'false')
-  // 접혀도 무엇을 했는지는 보인다
+  // Even collapsed, what it did remains visible
   await expect(card).toContainText('npm run build')
 
-  // 누르면 펴진다
+  // Clicking expands it
   await card.getByTestId('tool-card-toggle').click()
   await expect(card.getByTestId('tool-card-toggle')).toHaveAttribute('aria-expanded', 'true')
   expect(id).toBeTruthy()
 })
 
 /**
- * 끌 때 어디에 놓일지 보여야 한다 (도그푸딩:
- * "위치 표시자가 안 보여서 탭을 드랍하면 어디에 위치할지 모르겠다").
+ * Where a drag will land must be visible while dragging (dogfooding: "there is no position
+ * indicator, so dropping a tab leaves me unsure where it will go").
  *
- * Playwright의 dragAndDrop은 한 번에 끝나 중간을 못 본다.
- * 그래서 드래그 이벤트를 직접 만들어 **끄는 도중**의 화면을 확인한다.
+ * Playwright's dragAndDrop finishes in one step and skips over the middle, so this fires the
+ * drag events by hand to check the screen **mid-drag**.
  */
-test('칸을 끄는 동안 놓일 자리가 좌우로 표시된다', async ({ page }) => {
+test('The drop position is shown left or right while dragging a panel', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'a')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5722,7 +6112,7 @@ test('칸을 끄는 동안 놓일 자리가 좌우로 표시된다', async ({ pa
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId(`grid-panel-${b}`)).toBeVisible()
 
-  /** 대상 칸의 왼쪽/오른쪽 위에서 dragover를 일으킨다 */
+  /** Fires dragover over the left/right half of the target panel */
   const hover = (side: 'left' | 'right') =>
     page.evaluate(
       ({ from, to, where }: { from: string; to: string; where: string }) => {
@@ -5753,14 +6143,15 @@ test('칸을 끄는 동안 놓일 자리가 좌우로 표시된다', async ({ pa
   await hover('right')
   await expect(page.getByTestId(`grid-panel-${b}`)).toHaveAttribute('data-drop', 'after')
 
-  // 끌고 있는 원본은 흐려져 "이게 움직이는 중"임을 보인다
+  // The original being dragged dims to show "this is what is moving"
   const cls = (await page.getByTestId(`grid-panel-${a}`).getAttribute('class')) ?? ''
   expect(cls).toContain('opacity-40')
 
   /*
-   * 끌리는 그림은 **칸**이어야 한다.
-   * draggable인 요소가 머리글이라 브라우저는 기본적으로 머리글만 찍어 들고 다닌다 —
-   * 칸은 제자리에 있고 얇은 띠만 따라다니니 무엇을 옮기는지 알 수 없다.
+   * The dragged image must be **the panel itself**.
+   * Since the draggable element is the header, the browser by default only lifts the header —
+   * the panel stays put while a thin strip follows the cursor, leaving no clue what is being
+   * moved.
    */
   const lifted = await page.evaluate((from: string) => {
     let captured: string | null = null
@@ -5780,66 +6171,74 @@ test('칸을 끄는 동안 놓일 자리가 좌우로 표시된다', async ({ pa
 })
 
 /**
- * 오케스트레이터 — 말로 관제 (FR-11).
- * 그리드 바로 위에 선다: 둘은 같은 것을 보는 두 방식이다.
+ * The orchestrator — controlling by talking (FR-11).
+ * It sits right above the grid: the two are two ways of viewing the same thing.
  */
-test('오케스트레이터는 그리드 위에 있고 눌러서 연다', async ({ page }) => {
+test('The orchestrator sits above the grid and opens on click', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const orc = page.getByTestId('orchestrator-button')
   const cc = page.getByTestId('grid-button')
   await expect(orc).toBeVisible()
 
-  // 순서: 오케스트레이터가 그리드보다 위
+  // Order: the orchestrator sits above the grid
   const a = (await orc.boundingBox())!
   const b = (await cc.boundingBox())!
   expect(a.y).toBeLessThan(b.y)
 
   await orc.click()
   await expect(orc).toHaveAttribute('aria-pressed', 'true')
-  // 처음 열면 빈 대화가 선다 — 세션은 첫 질문에서야 태어난다 (#63 지연 기동)
+  // Opening it for the first time shows an empty conversation — the session is only born at the
+  // first question (#63 lazy startup)
   await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
   await expect(page.getByTestId('grid')).toBeHidden()
 
-  // 첫 마디가 세션을 만들고, 그 뒤로는 포커스 뷰와 같은 부품이다
+  // The first message creates the session, and from then on it is the same component as the
+  // focus view
   await page.getByTestId('orchestrator-input').fill('hello')
   await page.getByTestId('orchestrator-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()
 })
 
 /**
- * 오케스트레이터는 아직 실험 중이다 (이슈 #1).
+ * The orchestrator is still experimental (issue #1).
  *
- * 표식은 **누르기 전에** 보여야 한다 — 막으려는 피해가 "모른 채 누르는 것"이라
- * 화면 안에 두면 이미 늦는다. 그리고 팔레트 규칙을 어기면 안 된다:
- * 밝히면 그리드보다 급해 보이는 거짓말이 되고, 유채색은 애초에 금지다.
+ * The marker must be visible **before it is clicked** — the harm being prevented is "clicking
+ * without knowing", so putting it inside the screen would already be too late. It also must not
+ * break the palette rule: making it bright would falsely claim more urgency than the grid, and
+ * color is off-limits from the start.
  */
-test('오케스트레이터 버튼은 누르기 전에 실험 중이라고 말한다 — 밝기를 쓰지 않고', async ({ page }) => {
+test('The orchestrator button states it is experimental before it is clicked — without using brightness', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const mark = page.getByTestId('orchestrator-experimental')
   await expect(mark).toBeVisible()
-  // 'Experimental'(경고) → 'Evolving'(정체성) (도그푸딩 2026-09-05): 스킬·MCP·앱을
-  // 스스로 얻는 기능이라 "깨질 수 있음"보다 "자라는 중"이 진실에 가깝다
+  // 'Experimental' (a warning) -> 'Evolving' (an identity) (dogfooding, 2026-09-05): since it is
+  // a feature that picks up skills, MCP servers and apps on its own, "still growing" is closer to
+  // the truth than "might break"
   await expect(mark).toHaveText('Evolving')
 
   const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
   const style = (testId: string, prop: string) =>
     page.getByTestId(testId).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)
 
-  // 무채색이다 (R=G=B) — 이 앱에서 유채색은 diff 본문의 몫이다
+  // It is achromatic (R=G=B) — in this app, color is reserved for diff content
   const markColor = rgb(await style('orchestrator-experimental', 'color'))
   expect(new Set(markColor).size).toBe(1)
 
-  // 라벨보다 **어둡다**. 밝히면 "지금 나를 기다리는 것"의 자리를 훔친다
+  // **Darker** than the label. Making it brighter would steal the spot reserved for "something is
+  // waiting on me right now"
   const labelColor = rgb(await style('orchestrator-button', 'color'))
   expect(markColor[0]!).toBeLessThan(labelColor[0]!)
 
   /*
-   * 이 자리에는 "테두리가 점선이다"가 있었다. 근거는 사이드바를 좁히면 글자가 잘려
-   * 사라지므로 형태가 남아야 한다는 것이었는데, 재보니 글자는 잘리지 않는다 — 배지가
-   * `shrink-0`이라 가장 좁은 폭에서도 그대로다. 그래서 점선을 걷어냈고, 대신 **정말로
-   * 지켜야 하는 것**을 여기서 붙잡는다: 좁혀도 이 말이 화면에 남아 있는가.
+   * There used to be a "dashed border" check here. The reasoning was that narrowing the sidebar
+   * would clip and hide the text, so a shape needed to remain — but measured, the text never
+   * clips: the badge is `shrink-0`, so it stays intact even at the narrowest width. So the dashed
+   * border check was dropped, and this instead holds onto **what actually needs guarding**:
+   * whether this text stays on screen even when narrowed.
    */
   await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSidebarWidth(180))
   await expect(mark).toBeVisible()
@@ -5861,7 +6260,7 @@ test('the grid no longer calls itself experimental — the orchestrator still do
   await expect(page.getByTestId('orchestrator-experimental')).toBeVisible()
 })
 
-test('오케스트레이터를 보는 동안에는 사이드바에서 세션이 골라져 보이지 않는다', async ({ page }) => {
+test('While viewing the orchestrator, no session appears selected in the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -5874,36 +6273,36 @@ test('오케스트레이터를 보는 동안에는 사이드바에서 세션이 
   await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
   expect(await row.getAttribute('class')).not.toBe(selected)
 
-  // 돌아오면 다시 골라진 모양
+  // Returning restores the selected appearance
   await row.click()
   expect(await row.getAttribute('class')).toBe(selected)
 })
 
-test('오케스트레이터 세션은 프로젝트 목록에 끼지 않는다', async ({ page }) => {
+test("The orchestrator's session never joins the project list", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   await page.getByTestId('orchestrator-button').click()
-  // 세션은 첫 마디에서 태어난다 (#63)
+  // The session is born at the first message (#63)
   await page.getByTestId('orchestrator-input').fill('hello')
   await page.getByTestId('orchestrator-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()
 
   const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
   expect(orcId).toBeTruthy()
-  // 프로젝트에 속하지 않으므로 사이드바 어느 프로젝트 밑에도 줄이 없다
+  // Belonging to no project, it has no row under any project in the sidebar
   await expect(page.getByTestId(`session-row-${orcId}`)).toHaveCount(0)
 })
 
 /**
- * 오케스트레이터의 `@`는 파일이 아니라 **세션**을 집는다.
- * 말로만 지목하면 이름을 잘못 짚을 수 있고, 엉뚱한 세션에 일이 가면
- * 그 프로젝트가 실제로 바뀐다.
+ * The orchestrator's `@` picks a **session**, not a file.
+ * Pointing at one by name alone risks picking the wrong name, and sending work to the wrong
+ * session actually changes that project.
  */
-test('오케스트레이터에서 @는 세션을 집는다', async ({ page }) => {
+test('In the orchestrator, @ picks a session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'readme 담당')
   await page.getByTestId('orchestrator-button').click()
-  // 세션은 첫 마디에서 태어난다 (#63)
+  // The session is born at the first message (#63)
   await page.getByTestId('orchestrator-input').fill('hello')
   await page.getByTestId('orchestrator-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()
@@ -5912,35 +6311,37 @@ test('오케스트레이터에서 @는 세션을 집는다', async ({ page }) =>
   const menu = page.getByTestId('autocomplete')
   await expect(menu).toBeVisible()
   await expect(menu).toContainText('readme')
-  // 파일 경로가 아니라 세션 이름이다 — 프로젝트 이름이 힌트로 붙는다
+  // It is a session name, not a file path — the project name is attached as a hint
   await expect(menu).toContainText('alpha')
 })
 
 /**
- * 세션 메뉴에는 **에이전트 바꾸기가 없다** (도그푸딩 판정).
+ * The session menu has **no way to switch agents** (a dogfooding decision).
  *
- * 대화가 이어지지 않으니 거기서의 '바꾸기'는 '새 대화 시작'과 같은 말이었고,
- * 그건 세션 만들기가 이미 더 정직하게 한다. 같은 일을 하는 두 번째 문을 없앤다.
+ * Since the conversation cannot carry over, "switching" there meant the same thing as "starting
+ * a new conversation", and creating a session already does that more honestly. This removes the
+ * second door that did the same thing.
  */
-test('세션 설정 메뉴에서 에이전트는 못 바꾼다 — 새로 만들면 되는 일이다', async ({ page }) => {
+test('The session settings menu cannot switch agents — creating a new one covers that', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
   await page.getByTestId('settings-open').click()
   await expect(page.getByTestId('settings-menu')).toBeVisible()
-  // 모델·권한은 그대로 있다 — 저 둘은 같은 대화를 이어가며 바뀐다
+  // Model and permission remain — those two can change while the conversation continues
   await expect(page.getByTestId('settings-menu')).toContainText('Permissions')
   await expect(page.getByTestId('settings-tool-codex')).toHaveCount(0)
   await expect(page.getByTestId('settings-menu')).not.toContainText('starts a fresh conversation')
 })
 
 /**
- * 남은 예외는 오케스트레이터 하나 — 앱에 하나뿐이라 "다른 도구로 새로 만든다"가
- * 성립하지 않는다. 자리는 앱 설정이고, 확인을 한 번 받는다.
+ * The one remaining exception is the orchestrator — since there is exactly one per app,
+ * "make a new one with a different tool" does not apply. It lives in app settings, and
+ * confirmation is asked once.
  */
-test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({ page }) => {
+test("The orchestrator's agent is switched from settings", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  // 세션을 만들어 둔다 — 살아 있으면 그 자리에서 갈아 끼운다
+  // Create the session first — if it is alive, it is swapped out in place
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('orchestrator-input').fill('hello')
   await page.getByTestId('orchestrator-input').press('Enter')
@@ -5950,7 +6351,7 @@ test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({
   await page.getByTestId('settings-tab-orchestrator').click()
   await expect(page.getByTestId('orchestrator-tool-claude')).toHaveAttribute('aria-checked', 'true')
 
-  // 고르기만 하면 확인 창이 뜬다 — 아직 바뀌지 않는다
+  // Merely selecting it opens a confirmation dialog — nothing changes yet
   await page.getByTestId('orchestrator-tool-codex').click()
   await expect(page.getByTestId('orchestrator-switch-confirm')).toContainText(
     'Details it remembers may be lost',
@@ -5964,14 +6365,15 @@ test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({
     'claude',
   )
 
-  // 확인해야 바뀐다
+  // Confirming is required for the change to take effect
   await page.getByTestId('orchestrator-tool-codex').click()
   await page.getByTestId('orchestrator-switch-confirm-btn').click()
   await expect
     .poll(async () => page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId))
     .toBe('codex')
 
-  // host가 externalId를 끊었는지 (codex에 Claude의 대화 id를 넘기면 엉뚱한 것을 잡는다)
+  // Whether the host cleared externalId (passing Claude's conversation id to codex would grab the
+  // wrong thing)
   const ext = await page.evaluate(
     (s) => [...(window as any).__mock.sessions.values()].find((x: any) => x.id === s)?.externalId,
     orcId,
@@ -5980,22 +6382,23 @@ test('오케스트레이터의 에이전트는 설정에서 바꾼다', async ({
 })
 
 /**
- * **이번 실행에서 열어본 적 없는 오케스트레이터도 갈아 끼울 수 있어야 한다.**
+ * **An orchestrator never opened this run must still be switchable.**
  *
- * 위 시험은 세션을 먼저 연 뒤 설정으로 갔다. 그래서 `orchestratorId`가 늘 채워져 있었고,
- * 앱을 켜고 곧장 설정부터 여는 사람의 자리는 한 번도 지나가지 않았다. 그 자리에서는
- * 값이 null이라 화면이 switchTool 대신 configureOrchestrator로 흘렀는데, 그것은 host가
- * "세션이 생긴 뒤에는 다시 읽지 않는다"고 적어 둔 값이다. 선택은 적히고, 아무도 읽지
- * 않고, 다시 그리면 옛 도구가 도로 올라왔다 (도그푸딩: "바꿔도 코덱스로 돌아온다").
+ * The test above opened the session first and only then went to settings, so `orchestratorId`
+ * was always filled, and the path taken by someone who opens settings right after launching the
+ * app was never exercised. On that path the value is null, so the screen flowed into
+ * configureOrchestrator instead of switchTool — a value the host records as "never read again
+ * once a session exists". The choice got written, nobody read it, and redrawing brought the old
+ * tool right back (dogfooding finding: "switching it still comes back as codex").
  */
-test('설정부터 연 사람도 오케스트레이터의 에이전트를 바꾼다', async ({ page }) => {
+test("Someone who opens settings first can still switch the orchestrator's agent", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('orchestrator-input').fill('hello')
   await page.getByTestId('orchestrator-input').press('Enter')
   const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
 
-  // 앱을 갓 켠 상태를 만든다 — 세션은 남아 있고, 이번 실행에서 연 적은 없다
+  // Simulate a freshly launched app — the session exists but has not been opened this run
   await page.evaluate(() => (window as any).__store.setState({ orchestratorId: null }))
 
   await page.getByTestId('open-settings').click()
@@ -6005,20 +6408,20 @@ test('설정부터 연 사람도 오케스트레이터의 에이전트를 바꾼
   await page.getByTestId('orchestrator-tool-codex').click()
   await page.getByTestId('orchestrator-switch-confirm-btn').click()
 
-  // 선택을 적어 두는 것으로 끝나면 안 된다 — 살아 있는 세션이 실제로 바뀌어야 한다
+  // Recording the choice must not be the end — the live session must actually change
   await expect
     .poll(async () => page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId))
     .toBe('codex')
 })
 
 /**
- * 오케스트레이터가 넣어준 말도 대화창에 나타나야 한다.
+ * A message inserted by the orchestrator must also appear in the conversation.
  *
- * 예전에는 사용자 메시지를 만드는 곳이 UI 하나뿐이라, UI가 자기 것을 스스로 그리는
- * 것으로 충분했다. 오케스트레이터가 두 번째 생산자가 되면서 그 가정이 깨졌다 —
- * 주입된 말은 **저장은 되는데 화면에는 영영 안 나타났다** (앱을 다시 켜야 보였다).
+ * It used to be that the UI was the only place that produced user messages, so it was enough for
+ * the UI to draw its own. Once the orchestrator became a second producer, that assumption broke
+ * — an injected message **was saved but never appeared on screen** (only a restart revealed it).
  */
-test('남이 넣어준 말도 대화창에 뜬다', async ({ page }) => {
+test('A message inserted by someone else also appears in the conversation', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6027,13 +6430,16 @@ test('남이 넣어준 말도 대화창에 뜬다', async ({ page }) => {
 })
 
 /**
- * 시켜서 들어온 말은 출처가 보인다 (FR-11).
+ * A message that came in as an instruction shows its origin (FR-11).
  *
- * 오케스트레이터의 지시는 저장·표시까지는 됐지만 사람 말과 똑같은 말풍선이었다 —
- * "내가 이런 걸 시켰던가?"를 화면이 답하지 못했다. from이 달린 말은
- * 출처 라벨(msg-user-from)을 달고, 재시작이 걷는 복원 경로에서도 라벨이 남아야 한다.
+ * An orchestrator instruction was persisted and displayed, but looked like an identical bubble
+ * to a human message — the screen could not answer "did I actually ask for this?" A message
+ * with a `from` field carries an origin label (msg-user-from), and that label must survive the
+ * restore path a restart walks too.
  */
-test('오케스트레이터가 시킨 말에는 출처 라벨이 붙고, 복원해도 남는다', async ({ page }) => {
+test('A message instructed by the orchestrator carries an origin label, and it survives a restore', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6045,7 +6451,7 @@ test('오케스트레이터가 시킨 말에는 출처 라벨이 붙고, 복원�
   })
   await expect(page.getByTestId('msg-user-from')).toContainText('지휘 세션')
 
-  // 재시작 레그: 메모리의 대화를 버리고 기록에서 강제로 다시 읽는다
+  // Restart leg: discard the in-memory conversation and force-read it back from the transcript
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
@@ -6056,10 +6462,13 @@ test('오케스트레이터가 시킨 말에는 출처 라벨이 붙고, 복원�
 })
 
 /**
- * 텍스트 일치 확정은 내 말끼리만 성립한다 — 사람이 우연히 같은 문장을 pending으로
- * 띄워 둔 순간 오케스트레이터의 지시가 오면, 흡수되어 출처 표식이 조용히 사라진다.
+ * Confirming by text match only holds between one's own messages — if an orchestrator
+ * instruction arrives at the exact moment the person happens to have the same sentence pending,
+ * it would be absorbed and its origin marker would silently disappear.
  */
-test('사람의 같은 문장이 대기 중이어도 시킨 말은 흡수되지 않는다', async ({ page }) => {
+test("An instructed message is not absorbed even when the person's identical sentence is pending", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6072,7 +6481,7 @@ test('사람의 같은 문장이 대기 중이어도 시킨 말은 흡수되지 
     from: { sessionId: 'orc-x', name: '지휘 세션' },
   })
 
-  // 사람 말풍선 + 출처 달린 말풍선, 둘 다 남아야 한다
+  // Both the human bubble and the origin-labeled bubble must remain
   await expect(page.getByTestId('msg-user-from')).toBeVisible()
   const counts = await page.evaluate(() => {
     const st = (window as any).__store.getState()
@@ -6083,12 +6492,12 @@ test('사람의 같은 문장이 대기 중이어도 시킨 말은 흡수되지 
 })
 
 /**
- * 추론이 보인다 (#58 실측 기반).
- * codex는 요약 텍스트가 스트리밍되므로 회색 블록으로 대화에 남고,
- * claude는 본문이 암호화라 "Thinking · ~N tokens" 진행 표시만 가능하다 —
- * 없는 내용을 있는 척하지 않는 것까지가 계약이다.
+ * Reasoning is visible (based on #58's measured findings).
+ * codex streams summary text, so it stays in the conversation as a gray block; claude's content
+ * is encrypted, so only a "Thinking · ~N tokens" progress indicator is possible — not pretending
+ * to show content that does not exist is part of the contract too.
  */
-test('codex 추론 요약이 회색 블록으로 보이고 복원해도 남는다', async ({ page }) => {
+test("codex's reasoning summary shows as a gray block and survives a restore", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6097,7 +6506,7 @@ test('codex 추론 요약이 회색 블록으로 보이고 복원해도 남는�
   await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
   await expect(page.getByTestId('msg-reasoning')).toContainText('최소 횟수 확인')
 
-  // 복원 레그: 메모리의 대화를 버리고 기록에서 강제로 다시 읽는다
+  // Restore leg: discard the in-memory conversation and force-read it back from the transcript
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await page.evaluate((sid: string) => {
     const store = (window as never as { __store: any }).__store
@@ -6107,7 +6516,9 @@ test('codex 추론 요약이 회색 블록으로 보이고 복원해도 남는�
   await expect(page.getByTestId('msg-reasoning')).toContainText('경로 제약을 검토 중')
 })
 
-test('claude의 생각은 양으로 보인다 — Thinking · ~N tokens, 턴이 끝나면 사라진다', async ({ page }) => {
+test("claude's thinking shows as a quantity — Thinking · ~N tokens, and disappears when the turn ends", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6116,7 +6527,7 @@ test('claude의 생각은 양으로 보인다 — Thinking · ~N tokens, 턴이 
   await emitEvent(page, 0, { type: 'reasoning_delta', estTokens: 1000 })
   await expect(page.getByTestId('activity-label')).toContainText('Thinking · ~1.5k tokens')
 
-  // 대화에는 아무것도 남지 않는다 — 내용이 없었으므로
+  // Nothing remains in the conversation — there was never any content
   await expect(page.getByTestId('msg-reasoning')).toHaveCount(0)
 
   await emitEvent(page, 0, { type: 'turn_complete' })
@@ -6124,11 +6535,14 @@ test('claude의 생각은 양으로 보인다 — Thinking · ~N tokens, 턴이 
 })
 
 /**
- * 계획이 보인다 (#58 실측, codex turn/plan/updated).
- * 실측에서 계획은 item으로 안 왔다 — 이 알림을 버리면 codex의 계획 도구 사용이
- * 화면 어디에도 나타나지 않는다. 스냅샷 교체·turn 종료 시 소멸까지가 계약이다.
+ * A plan is visible (measured for #58, codex's turn/plan/updated).
+ * Measured, a plan never arrives as an item — dropping this notification would mean codex's use
+ * of the plan tool never appears anywhere on screen. The contract covers snapshot replacement and
+ * disappearing when the turn ends.
  */
-test('codex 계획이 체크리스트로 보이고, 갱신은 교체이며, 턴이 끝나면 사라진다', async ({ page }) => {
+test("codex's plan shows as a checklist, updates replace the snapshot, and it disappears when the turn ends", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6144,7 +6558,7 @@ test('codex 계획이 체크리스트로 보이고, 갱신은 교체이며, 턴�
   await expect(page.getByTestId('plan-step-0')).toHaveAttribute('data-status', 'inProgress')
   await expect(page.getByTestId('plan-step-1')).toContainText('명령 실행')
 
-  // 갱신은 델타 합성이 아니라 스냅샷 교체다
+  // An update is a full snapshot replacement, not delta merging
   await emitEvent(page, 0, {
     type: 'plan_update',
     steps: [
@@ -6155,17 +6569,19 @@ test('codex 계획이 체크리스트로 보이고, 갱신은 교체이며, 턴�
   await expect(page.getByTestId('plan-step-0')).toHaveAttribute('data-status', 'completed')
   await expect(page.getByTestId('plan-step-1')).toHaveAttribute('data-status', 'inProgress')
 
-  // 진행 표시일 뿐이라 턴이 끝나면 계획도 함께 사라진다 (activity와 같은 수명)
+  // Being only a progress indicator, the plan disappears along with the turn's end (the same
+  // lifetime as activity)
   await emitEvent(page, 0, { type: 'turn_complete' })
   await expect(page.getByTestId('activity-plan')).toHaveCount(0)
 })
 
 /**
- * 실행 중 출력이 보인다 (#58 실측, codex item/commandExecution/outputDelta).
- * 조각의 합은 전체가 아니다(실측: 첫 조각 유실) — 그래서 살아있는 동안은 꼬리만 보여주고,
- * 완료되면 전체를 실은 result가 조각을 대체한다.
+ * Live execution output is visible (measured for #58, codex's item/commandExecution/outputDelta).
+ * The sum of the chunks is not the whole thing (measured: the first chunk gets lost) — so while
+ * running, only the tail is shown, and once complete, a result carrying the full output replaces
+ * the chunks.
  */
-test('실행 중 도구 출력이 꼬리로 흐르고, 완료되면 result로 바뀐다', async ({ page }) => {
+test('Live tool output streams as a tail, and switches to the result once complete', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6183,7 +6599,7 @@ test('실행 중 도구 출력이 꼬리로 흐르고, 완료되면 result로 �
   await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 3\n' })
   await expect(page.getByTestId('tool-card-live')).toContainText('tick 3')
 
-  // 완료: 전체 출력이 result로 오고, 라이브 꼬리는 역할이 끝나 사라진다
+  // Completion: the full output arrives as a result, and the live tail, its job done, disappears
   await emitEvent(page, 0, {
     type: 'tool_result',
     callId: 'exec-1',
@@ -6194,13 +6610,14 @@ test('실행 중 도구 출력이 꼬리로 흐르고, 완료되면 result로 �
   await expect(page.getByTestId('tool-card-output')).toContainText('tick 1')
 })
 
-test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => {
+test('My own sent message does not render twice', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
   await page.getByTestId('prompt-input').fill('같은 말')
   await page.getByTestId('send').click()
-  // host가 "그 말이 더해졌다"고 알려온다 — 이미 그려둔 것이므로 확정만 되어야 한다
+  // The host reports "that message was added" — since it is already drawn, this must only
+  // confirm it
   await emitEvent(page, 0, { type: 'user_message', seq: 992, text: '같은 말' })
 
   const count = await page.evaluate(() => {
@@ -6212,11 +6629,11 @@ test('내가 보낸 말이 두 번 그려지지 않는다', async ({ page }) => 
 })
 
 /**
- * 바람이 **한 번이라도 떴는가**를 촘촘히 본다.
+ * Checks closely whether the gust **ever appeared at all**, even once.
  *
- * `toHaveCount(0)`으로는 못 잡는다 — 그건 자동 재시도라 바람이 떴다가 사라지기만 하면
- * 통과한다("끝내 0"이지 "한 번도 안 뜸"이 아니다). 실제로 이 함정 때문에 트리거 버그를
- * 잡는 테스트가 통과해 버렸다.
+ * `toHaveCount(0)` cannot catch it — that auto-retries, so it passes as soon as the gust appears
+ * and then disappears ("eventually 0", not "never appeared"). This gap actually let a test meant
+ * to catch a trigger bug pass anyway.
  */
 async function blew(page: import('@playwright/test').Page, ms = 900): Promise<boolean> {
   for (let i = 0; i < ms / 50; i++) {
@@ -6227,10 +6644,10 @@ async function blew(page: import('@playwright/test').Page, ms = 900): Promise<bo
 }
 
 /**
- * 응답이 끝나면 화면을 한 번 쓸고 가는 바람.
- * 글자로 "끝났습니다"라고 적는 대신 화면이 한 번 숨을 쉰다.
+ * A gust that sweeps across the screen once a reply finishes.
+ * Instead of writing "done" in text, the screen takes one breath.
  */
-test('보고 있는 세션이 끝나면 바람이 한 번 불고 사라진다', async ({ page }) => {
+test('A gust blows once and disappears when the session being watched finishes', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -6239,58 +6656,68 @@ test('보고 있는 세션이 끝나면 바람이 한 번 불고 사라진다', 
   await expect(page.getByTestId('gust')).toBeVisible()
 
   /*
-   * 지나간 뒤에는 DOM에서 걷는다. 투명한 채로 남겨두면 화면 전체를 덮는 요소가
-   * 항상 하나 떠 있게 된다 — 언젠가 무언가를 가린다.
+   * Once it passes, it is removed from the DOM. Leaving it transparent would leave a
+   * full-screen-covering element sitting there permanently — eventually it would obscure
+   * something.
    */
   await expect(page.getByTestId('gust')).toHaveCount(0, { timeout: 3000 })
 })
 
-test('화면 밖 세션이 끝나면 불지 않는다 — 그건 카드의 몫이다', async ({ page }) => {
+test("A gust does not blow when an off-screen session finishes — that is the card's job", async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
-  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다
+  await newSession(page, 'alpha', 'second') // Watching this one
 
-  // 0번(보고 있지 않은 세션)이 끝난다
+  // Session 0 (not being watched) finishes
   await emitEvent(page, 0, { type: 'turn_complete' })
   expect(await blew(page)).toBe(false)
-  // 지나가는 신호 대신 남는 신호가 온다 — 안 보고 있었으니 지나가면 놓친다
+  // A lingering signal arrives instead of a passing one — since it was not being watched, a
+  // passing signal would be missed
   await expect(page.getByTestId('notice')).toHaveCount(1)
 })
 
 /*
- * 알림 카드 — 자리를 비운 사람을 위한 것.
+ * The notice card — for someone who stepped away.
  *
- * OS 배너는 몇 초 뒤 걷히므로, 정작 자리를 비웠을 때 온 것은 돌아오면 이미 없다.
- * macOS에서는 배너 경로 자체가 죽어 있기까지 하다 (플러그인이 2018년에 deprecated된
- * NSUserNotification을 탄다). 그래서 이 카드가 본진이고, 남는 것이 요점이다.
+ * An OS banner clears after a few seconds, so something that arrived while the person was away
+ * would already be gone by the time they return. On macOS the banner path is even dead outright
+ * (the plugin rides on NSUserNotification, deprecated since 2018). So this card is the real
+ * mechanism, and persisting is the whole point.
  */
 /*
- * 도그푸딩 신고: "지금 카드도 안 보여."
+ * Dogfooding report: "Now even the card does not show up."
  *
- * "보인다"의 판정이 **앱 자체를 보지 않았다.** isOnScreen은 어느 세션이 UI에 떠 있는지만
- * 보므로 앱이 다른 창 뒤에 있어도 참이었다. 그래서 자리를 비운 사이 보고 있던 세션이
- * 끝나면 바람이 빈 방에서 불고 카드는 만들어지지 않았다 — 알림이 가장 필요한 그 경우에
- * 정확히 아무 일도 일어나지 않았다.
+ * The judgment of "is it visible" **never looked at the app itself.** isOnScreen only checks
+ * which session is displayed in the UI, so it stayed true even with the app behind another
+ * window. So if the session being watched finished while the person was away, the gust blew in
+ * an empty room and no card was ever created — in exactly the case a notification is needed
+ * most, exactly nothing happened.
  */
-test('앱이 뒤에 있으면 보고 있던 세션이 끝나도 카드가 남는다', async ({ page }) => {
+test('When the app is in the background, the card persists even if the session being watched finishes', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'work') // 이 세션을 보고 있다
+  await newSession(page, 'alpha', 'work') // Watching this session
 
-  // 다른 앱으로 넘어간다
+  // Switch to another app
   await page.evaluate(() => window.dispatchEvent(new Event('blur')))
 
   await emitEvent(page, 0, { type: 'turn_complete' })
 
-  // 보고 있는 창이 아니므로 바람은 아무도 못 본다 → 남는 신호여야 한다
+  // Not the window being watched, so nobody sees the gust -> it must be a lingering signal
   expect(await blew(page)).toBe(false)
   await expect(page.getByTestId('notice')).toHaveCount(1)
 
-  // 돌아오면 그때 보게 되는 것이므로 걷힌다
+  // Returning means it is being seen then, so it clears
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.getByTestId('notice')).toHaveCount(0)
 })
 
-test('자리를 비운 사이 끝나면 소리로도 부른다 — 전부 끝나기를 기다리지 않는다', async ({ page }) => {
+test('Finishing while away also calls out with a sound — it does not wait for everything to finish', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -6305,14 +6732,14 @@ test('자리를 비운 사이 끝나면 소리로도 부른다 — 전부 끝나
     .toEqual([{ kind: 'done', sound: true }])
 })
 
-test('눈앞에 있으면 카드만 남고 소리는 나지 않는다', async ({ page }) => {
+test('When it is right in front of the person, only the card stays and no sound plays', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
-  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다 → first는 화면 밖
+  await newSession(page, 'alpha', 'second') // Watching this one -> first is off-screen
 
   await emitEvent(page, 0, { type: 'turn_complete' })
 
-  // 못 봤으니 카드는 남는다. 그러나 눈앞에 있는 사람을 소리로 부르는 건 소음이다.
+  // Unseen, so the card stays. But calling with a sound at someone right in front of it is just noise.
   await expect(page.getByTestId('notice')).toHaveCount(1)
   await page.waitForTimeout(300)
   expect(
@@ -6320,7 +6747,7 @@ test('눈앞에 있으면 카드만 남고 소리는 나지 않는다', async ({
   ).toBe(0)
 })
 
-test('카드는 시간이 지나도 스스로 사라지지 않는다', async ({ page }) => {
+test('The card does not disappear on its own over time', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -6328,12 +6755,12 @@ test('카드는 시간이 지나도 스스로 사라지지 않는다', async ({ 
   await emitEvent(page, 0, { type: 'turn_complete' })
   await expect(page.getByTestId('notice')).toHaveCount(1)
 
-  // 토스트는 2.5초에 걷힌다. 그보다 넉넉히 기다려도 이건 남아 있어야 한다.
+  // A toast clears at 2.5 seconds. Even waiting comfortably longer than that, this must remain.
   await page.waitForTimeout(4000)
   await expect(page.getByTestId('notice')).toHaveCount(1)
 })
 
-test('그 세션을 보게 되면 카드가 걷힌다', async ({ page }) => {
+test('The card clears once that session is being viewed', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -6351,7 +6778,7 @@ test('그 세션을 보게 되면 카드가 걷힌다', async ({ page }) => {
   await expect(page.getByTestId('notice')).toHaveCount(0)
 })
 
-test('카드를 누르면 그 세션으로 간다', async ({ page }) => {
+test('Clicking the card navigates to that session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -6367,11 +6794,11 @@ test('카드를 누르면 그 세션으로 간다', async ({ page }) => {
         .focusedSessionId,
   )
   expect(focused).toBe(target)
-  // 갔으면 부를 이유가 없다
+  // Having navigated there, there is no reason to keep calling out
   await expect(page.getByTestId('notice')).toHaveCount(0)
 })
 
-test('×를 누르면 그 세션으로 가지 않고 카드만 걷힌다', async ({ page }) => {
+test('Clicking × clears only the card without navigating to that session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -6392,26 +6819,28 @@ test('×를 누르면 그 세션으로 가지 않고 카드만 걷힌다', async
       (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState()
         .focusedSessionId,
   )
-  // 치우기만 한 것이지 가겠다는 뜻이 아니다
+  // It only dismissed the card — it does not mean navigating there
   expect(after).toBe(before)
 })
 
 /*
- * 바쁜 세션 하나가 카드를 스무 장 만들면 나머지 세션이 화면 밖으로 밀린다 —
- * 그러면 카드가 많아질수록 쓸모가 줄어든다.
+ * If one busy session generates twenty cards, the rest get pushed off screen — so the more
+ * cards there are, the less useful they become.
  */
 /*
- * 소리와 독은 **배너가 죽은 자리를 대신한다.**
+ * Sound and the dock badge **stand in where the banner has died.**
  *
- * 배너 경로(tauri-plugin-notification)는 데스크톱에서 권한 상태를 상수로 돌려주고
- * 전달 실패를 통째로 버려서, 한 통도 못 나가도 앱이 알 수 없었다. 그래서 실제로
- * 나가는 쪽을 테스트가 붙잡는다 — 여기가 조용해지면 자리 비움이 다시 깜깜해진다.
+ * The banner path (tauri-plugin-notification) returns a hardcoded permission state on desktop
+ * and swallows delivery failures entirely, so the app has no way to know even if not a single
+ * notification went out. So this test grabs the side that actually fires — if it ever goes
+ * silent here, being away from the app goes dark again.
  */
-test('승인 대기가 생기면 소리·독으로도 부른다', async ({ page }) => {
+test('A pending approval also calls out with sound and the dock badge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
-  // 알림 정책은 "눈앞에 있으면 알리지 않는다" — 테스트 창은 늘 포커스이므로 그 조건을 연다
+  // The notification policy says "do not notify if it is in front of the person" — since the test
+  // window is always focused, this opens that condition
   await page.evaluate(() => {
     const st = (window as never as { __store: { getState(): Record<string, never> } }).__store.getState()
     const s = st as unknown as { notifyPolicy: Record<string, boolean>; setNotifyPolicy(p: unknown): void }
@@ -6430,24 +6859,26 @@ test('승인 대기가 생기면 소리·독으로도 부른다', async ({ page 
 })
 
 /*
- * 설정은 갈래로 나뉜다 (이슈 #7).
+ * Settings are split into tabs (issue #7).
  *
- * 예전엔 세 묶음이 한 두루마리에 쌓여 있었다. 셋일 땐 읽히지만 설정은 늘 늘어나기만 하고,
- * 여덟이 되는 순간 찾는 것이 스크롤 어딘가에 묻힌다. 갈래는 **사람이 무엇을 찾으러 왔는가**로
- * 나눈다 — 그만 좀 울리게(Notifications), 아까 그 자동 허용 취소(Permissions), 그 키가 뭐였지
- * (Shortcuts). 한 번에 한 갈래만 그리므로, 고르지 않은 갈래는 화면에 없어야 한다.
+ * Three groups used to be stacked into one long scroll. That reads fine at three, but settings
+ * only ever grow, and by eight, finding what you want gets buried somewhere in the scroll. The
+ * tabs are split by **what the person came looking for** — make it stop pinging me
+ * (Notifications), undo that auto-allow from earlier (Permissions), what was that key again
+ * (Shortcuts). Only one tab is rendered at a time, so a tab not selected must not be on screen.
  */
-test('설정은 갈래로 나뉘고 한 번에 한 갈래만 보인다', async ({ page }) => {
+test('Settings are split into tabs, and only one tab shows at a time', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('open-settings').click()
 
-  // 열면 알림부터다 — 가장 자주 오는 용건이다
+  // Opening it starts on Notifications — the most frequent reason to come here
   await expect(page.getByTestId('notify-approval')).toBeVisible()
   await expect(page.getByTestId('shortcut-list')).toBeHidden()
 
   await page.getByTestId('settings-tab-shortcuts').click()
   await expect(page.getByTestId('shortcut-list')).toContainText('⌘K')
-  // 다른 갈래는 접히는 게 아니라 없다 — 안 보이는 채로 남아 있으면 탭이 아니라 장식이다
+  // Other tabs are not collapsed, they are absent — staying invisible in the DOM would make this
+  // decoration, not a tab
   await expect(page.getByTestId('notify-approval')).toBeHidden()
 
   await page.getByTestId('settings-tab-permissions').click()
@@ -6455,20 +6886,21 @@ test('설정은 갈래로 나뉘고 한 번에 한 갈래만 보인다', async (
   await expect(page.getByTestId('shortcut-list')).toBeHidden()
 })
 
-test('설정은 상단 바에서 바로 열린다', async ({ page }) => {
+test('Settings opens directly from the top bar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  // 단축키 표가 이 안에 있다 — 단축키를 알아야만 열 수 있으면 안 된다
+  // The shortcuts table lives inside here — it must not require already knowing a shortcut to open
   await page.getByTestId('open-settings').click()
   await expect(page.getByTestId('settings')).toBeVisible()
 })
 
 /*
- * 설정 메뉴 줄에서 **이름이 설명에 밀려 사라지면 안 된다** (도그푸딩: 권한 묶음에서
- * Normal이 안 보였다). 힌트가 shrink-0이라 좁은 메뉴(w-56)에서 라벨이 0까지
- * 줄어들었다 — 설명은 남고 고를 이름이 사라진 줄이었다. 세 줄 모두 라벨이
- * 잘리지 않았는지를 직접 잰다.
+ * In a settings menu row, **the name must never get squeezed out by the description**
+ * (dogfooding finding: "Normal" was invisible in the permission group). Because the hint is
+ * shrink-0, the label shrank all the way to 0 in the narrow menu (w-56) — a row with the
+ * description intact and the very name to pick gone. This directly measures whether the label
+ * is clipped in all three rows.
  */
-test('권한 프리셋 이름은 설명에 밀려 잘리지 않는다', async ({ page }) => {
+test('Permission preset names are never squeezed out by their descriptions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 지시')
   await page.getByTestId('settings-open').click()
@@ -6481,22 +6913,25 @@ test('권한 프리셋 이름은 설명에 밀려 잘리지 않는다', async ({
 })
 
 /*
- * 체크박스는 우리가 그린다 (도그푸딩: 창이 키를 잃으면 체크의 배경색이 OS 손에서
- * 회색으로 바뀌었다 — accent-color로는 그 비활성 칠을 못 이긴다). 크로미움은
- * macOS의 비활성 칠을 재현하지 못하므로, 여기서는 그 원인 — 그리기를 OS에
- * 맡겼다는 사실 — 이 제거됐는지를 본다.
+ * Checkboxes are drawn by us (dogfooding finding: when the window loses key focus, the check's
+ * background color turned gray under the OS's hand — accent-color cannot override that inactive
+ * paint). Chromium cannot reproduce macOS's inactive paint, so this instead checks whether the
+ * cause — leaving the drawing to the OS — has been removed.
  */
-test('체크박스는 네이티브 그리기를 쓰지 않는다 — 창 활성/비활성이 같은 픽셀이다', async ({ page }) => {
+test('Checkboxes do not use native rendering — active and inactive windows produce the same pixels', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('open-settings').click()
   const box = page.getByTestId('notify-approval')
   await expect(box).toBeVisible()
   expect(await box.evaluate((el) => getComputedStyle(el).appearance)).toBe('none')
-  // 그리기를 가져왔으면 체크 표시도 우리 것이어야 한다 — 없으면 켠 것이 안 보인다
+  // Having taken over the drawing, the checkmark must be ours too — without it, "checked" would
+  // be invisible
   expect(await box.evaluate((el) => getComputedStyle(el, '::after').borderRightWidth)).not.toBe('0px')
 })
 
-test('같은 세션이 여러 번 끝나도 카드는 한 장이다', async ({ page }) => {
+test('The same session finishing multiple times still produces only one card', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -6509,21 +6944,22 @@ test('같은 세션이 여러 번 끝나도 카드는 한 장이다', async ({ p
 })
 
 /*
- * 신고: "세션 창 이동할 때도 막 나고".
+ * Report: "it also blows just from switching session windows".
  *
- * 끝난 것은 아까 한 번이고 그 사이에 끝난 것은 없다. 그런데 그 세션으로 옮겨 가면
- * 바람이 분다 — 바람은 '끝났다'는 사건이 아니라 '끝나 있다'는 값에 걸려 있다.
+ * It finished once earlier, and nothing finished again in between. Yet moving to that session
+ * triggers a gust — the gust was wired to the value "is finished" rather than the event "just
+ * finished".
  */
-test('이미 끝나 있던 세션으로 옮겨 가도 바람이 불지 않는다', async ({ page }) => {
+test('Moving to an already-finished session does not trigger a gust', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
-  await newSession(page, 'alpha', 'second') // 이쪽을 보고 있다
+  await newSession(page, 'alpha', 'second') // Watching this one
 
-  await emitEvent(page, 0, { type: 'turn_complete' }) // 안 보이는 쪽이 끝난다
+  await emitEvent(page, 0, { type: 'turn_complete' }) // The unseen one finishes
   await page.waitForTimeout(200)
   await expect(page.getByTestId('gust')).toHaveCount(0)
 
-  // 끝난 그 세션으로 옮겨 간다 — 새로 끝난 것은 아무것도 없다
+  // Move to that finished session — nothing new has finished
   const moved = await page.evaluate(() => {
     const store = (window as never as { __store: { getState(): Record<string, never> } }).__store
     const st = store.getState() as unknown as {
@@ -6531,27 +6967,28 @@ test('이미 끝나 있던 세션으로 옮겨 가도 바람이 불지 않는다
       focusedSessionId: string
       focusSession(id: string): void
     }
-    // 아까 끝난 그 세션 = 지금 보고 있지 않은 쪽
+    // The session that finished earlier = the one not currently being watched
     const target = Object.values(st.sessions).find((x) => x.id !== st.focusedSessionId)!.id
     st.focusSession(target)
     const after = (store.getState() as unknown as { focusedSessionId: string }).focusedSessionId
     return { target, after }
   })
-  // **옮겨 갔는지 먼저 확인한다** — 안 옮겨 갔으면 "안 불었다"는 아무 의미가 없다
+  // **Confirm the move happened first** — if it never moved, "no gust" proves nothing
   expect(moved.after).toBe(moved.target)
 
   expect(await blew(page)).toBe(false)
 })
 
 /*
- * 그리고 한 번 끝난 것으로 **몇 번이고** 분다 — 오갈 때마다 다시 분다.
+ * And from one completion, it used to blow again and again — blowing anew every time you moved
+ * away and back.
  */
-test('오갔다고 해서 지난 완료가 다시 불지 않는다', async ({ page }) => {
+test('Moving away and back does not make a past completion blow again', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
 
-  await emitEvent(page, 1, { type: 'turn_complete' }) // 보고 있는 쪽이 끝난다 — 여기서 한 번 부는 게 맞다
+  await emitEvent(page, 1, { type: 'turn_complete' }) // The one being watched finishes — blowing once here is correct
   await expect(page.getByTestId('gust')).toBeVisible()
   await expect(page.getByTestId('gust')).toHaveCount(0, { timeout: 3000 })
 
@@ -6564,15 +7001,16 @@ test('오갔다고 해서 지난 완료가 다시 불지 않는다', async ({ pa
 
   await swap(0)
   expect(await blew(page, 300)).toBe(false)
-  await swap(1) // 돌아왔다. 그 사이 끝난 것은 없다
+  await swap(1) // Back again. Nothing finished in between.
   expect(await blew(page, 300)).toBe(false)
 })
 
 /**
- * 에이전트가 내민 선택지 (AskUserQuestion).
+ * A choice the agent presents (AskUserQuestion).
  *
- * 표시만 되고 답이 안 가면 반쪽이다 — 승인 카드가 정확히 그래서 먹통이 됐다.
- * 그래서 매번 **답이 세션까지 갔는지**까지 본다.
+ * Displaying it is only half the job if the answer never goes anywhere — that is exactly how the
+ * approval card once went unresponsive. So every test here also checks **whether the answer
+ * actually reached the session**.
  */
 const QUESTIONS = [
   {
@@ -6595,13 +7033,14 @@ const QUESTIONS = [
   },
 ]
 
-test('선택지를 눌러 답하면 그 답이 세션으로 간다', async ({ page }) => {
+test('Clicking an option to answer sends that answer to the session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
 
   await expect(page.getByTestId('question-card')).toBeVisible()
-  // 설명이 판단 근거다 — 잘리면 이 기능이 죽는다 (실제로 그래서 못 썼다)
+  // The description is the basis for deciding — if it clips, this feature is dead (it actually
+  // went unused for exactly that reason)
   await expect(page.getByTestId('question-card')).toContainText('따뜻하다')
 
   await page.getByTestId('question-option').filter({ hasText: '라면' }).click()
@@ -6611,19 +7050,21 @@ test('선택지를 눌러 답하면 그 답이 세션으로 간다', async ({ pa
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
 
-test('질문이 여러 개면 탭으로 나뉘고, 다 답해야 보낼 수 있다', async ({ page }) => {
+test('Multiple questions split into tabs, and sending requires answering all of them', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: QUESTIONS })
 
-  // 질문이 여럿이면 쌓지 않고 탭이다 (#8) — 두 번째 질문은 제 탭으로 가야 보인다
+  // Multiple questions use tabs, not stacking (#8) — the second question only becomes visible by
+  // switching to its own tab
   await expect(page.getByTestId('question-tabs')).toBeVisible()
   await expect(page.getByTestId('question-card')).not.toContainText('음료는?')
 
-  // 반만 보내면 모델이 나머지를 지어낸다 — 그래서 다 고르기 전엔 잠가 둔다
+  // Sending half-answered lets the model invent the rest — so it stays locked until everything is
+  // picked
   await page.getByTestId('question-option').filter({ hasText: '김밥' }).click()
   await expect(page.getByTestId('question-submit')).toBeDisabled()
-  // 어느 탭이 아직 비었는지는 탭 줄에서 읽힌다 — 그러라고 쌓기를 버린 것이다
+  // Which tab is still empty reads off the tab row — that is exactly why stacking was dropped
   await expect(page.getByTestId('question-tab-0')).toHaveAttribute('data-answered', 'true')
   await expect(page.getByTestId('question-tab-1')).not.toHaveAttribute('data-answered', 'true')
 
@@ -6636,10 +7077,11 @@ test('질문이 여러 개면 탭으로 나뉘고, 다 답해야 보낼 수 있�
 })
 
 /**
- * 탭을 오가는 것은 공짜여야 한다. 숨김이 unmount였다면 옆 질문을 잠깐 보고 온 사이
- * 반쯤 쓴 직접 입력이 사라진다 — 쌓기를 탭으로 바꾸며 새로 생기면 안 되는 유일한 비용이다.
+ * Switching tabs must be free. If hiding meant unmounting, a half-typed custom answer would
+ * vanish after briefly glancing at another question — the one cost that switching from stacking
+ * to tabs must never introduce.
  */
-test('탭을 오가도 고른 것과 쓰던 답이 남는다', async ({ page }) => {
+test('Switching tabs keeps what was picked and what was being typed', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: QUESTIONS })
@@ -6652,11 +7094,12 @@ test('탭을 오가도 고른 것과 쓰던 답이 남는다', async ({ page }) 
 })
 
 /*
- * 도구 스키마가 못 박아 둔 것: "There should be no 'Other' option, that will be
- * provided automatically." 그 자리는 화면이 만들어 주기로 되어 있다.
- * 없으면 사람은 내민 둘 중 하나로만 답할 수 있어 셋째 답이 있을 때 할 말이 없어진다.
+ * What the tool schema pins down: "There should be no 'Other' option, that will be provided
+ * automatically." That slot is the screen's own responsibility to create. Without it, the
+ * person can only answer with one of the two offered choices, leaving nothing to say when a
+ * third answer exists.
  */
-test('기타를 골라 직접 쓴 답도 그대로 간다', async ({ page }) => {
+test('Picking "Other" and typing a custom answer sends exactly that', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
@@ -6668,7 +7111,7 @@ test('기타를 골라 직접 쓴 답도 그대로 간다', async ({ page }) => 
   await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 둘 다 말고 국수')
 })
 
-test('기타를 골라 놓고 비워 두면 보낼 수 없다', async ({ page }) => {
+test('Picking "Other" and leaving it empty cannot be sent', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
@@ -6678,12 +7121,13 @@ test('기타를 골라 놓고 비워 두면 보낼 수 없다', async ({ page })
 })
 
 /**
- * 워크트리 옵션 (FR-2).
+ * The worktree option (FR-2).
  *
- * 스펙의 원칙은 "원본 디렉토리에서 직접 작업"이고 워크트리는 **원하는 사람만** 켠다.
- * 그래서 화면이 지켜야 할 것은 둘이다: 기본은 꺼져 있을 것, 켰으면 그 사실이 보일 것.
+ * The spec's principle is "work directly in the original directory", and a worktree is turned on
+ * only by **the person who wants one**. So the screen has to hold two things: it defaults to
+ * off, and once it is on, that fact must be visible.
  */
-test('워크트리는 기본으로 꺼져 있고, 켜면 세션에 브랜치가 표시된다', async ({ page }) => {
+test('The worktree defaults to off, and turning it on shows the branch on the session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -6695,16 +7139,17 @@ test('워크트리는 기본으로 꺼져 있고, 켜면 세션에 브랜치가 
   await toggle.check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('격리해서 고쳐줘')
   await page.getByTestId('prompt-input').press('Enter')
 
-  // 다른 디렉토리에서 돈다는 사실이 안 보이면 "왜 프로젝트 폴더가 안 바뀌지"를 겪는다
+  // If it stays invisible that this runs in a different directory, the person hits "why isn't my
+  // project folder changing"
   await expect(page.getByTestId('worktree-badge')).toBeVisible()
   await expect(page.getByTestId('worktree-badge')).toContainText('centralu/')
 })
 
-test('워크트리를 안 켠 세션에는 표시가 없다', async ({ page }) => {
+test('A session with the worktree off has no badge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '그냥 여기서 해줘')
 
@@ -6712,10 +7157,11 @@ test('워크트리를 안 켠 세션에는 표시가 없다', async ({ page }) =
 })
 
 /**
- * 워크트리는 **세션과 수명이 다르다.** 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있어
- * 기본은 남기는 쪽이고, 지우려면 사람이 무엇을 잃는지 읽고 직접 켠다.
+ * A worktree's **lifetime differs from the session's.** Hours of an agent's work can be sitting
+ * in it, so the default is to keep it, and deleting it requires the person to read what would be
+ * lost and turn that on themselves.
  */
-test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', async ({ page }) => {
+test('Deleting a worktree session asks first, and deletion requires opting in', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -6724,18 +7170,19 @@ test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', asyn
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // 첫 지시는 모달이 아니라 입력창에서 — 다이얼로그에는 프롬프트 칸이 없다 (#8)
+  // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('격리 세션')
   await page.getByTestId('prompt-input').press('Enter')
 
-  // 커밋 안 된 변경이 있는 상태를 만든다 — 그때 무엇을 잃는지 말해야 한다
+  // Set up uncommitted changes — the dialog must state what would be lost in that case
   await page.evaluate(() => {
     ;(window as any).__mock.mockWorktreeDirty = true
   })
 
   /*
-   * 워크트리 세션은 이제 매니저 아래 들여 그려진다 (#69) — 목록의 첫 줄은 매니저다.
-   * `.first()`로 잡으면 매니저의 삭제를 누르게 되므로, 들여진 줄을 집는다.
+   * Worktree sessions are now drawn nested under a manager (#69) — the first row in the list is
+   * the manager. Grabbing `.first()` would click the manager's own delete, so this picks the
+   * nested row instead.
    */
   await page
     .locator('li[data-nested]')
@@ -6750,11 +7197,11 @@ test('워크트리 세션을 지울 때는 물어보고, 켜야 지운다', asyn
   await expect(panel).toBeVisible()
   await expect(page.getByTestId('worktree-dirty')).toContainText('2')
 
-  // 기본은 끄져 있다 — 지우는 쪽이 기본이면 되돌릴 수 없는 일이 조용히 일어난다
+  // Off by default — if deleting were the default, an irreversible action would happen quietly
   await expect(page.getByTestId('delete-worktree-toggle')).not.toBeChecked()
 })
 
-test('워크트리가 아닌 세션을 지울 때는 워크트리 이야기를 꺼내지 않는다', async ({ page }) => {
+test('Deleting a non-worktree session never mentions worktrees', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '보통 세션')
 
@@ -6772,12 +7219,13 @@ test('워크트리가 아닌 세션을 지울 때는 워크트리 이야기를 �
 })
 
 /**
- * 그리드에서 응답 중인 칸은 **테두리가 돈다.**
+ * In the grid, a panel that is responding has a **spinning border.**
  *
- * 칸이 여럿일 때 머리글의 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다.
- * 그리드는 읽는 화면이 아니라 보는 화면이라, 신호가 칸 전체 크기로 있어야 곁눈에 잡힌다.
+ * With several panels, a small marker in the header alone is too small for the eye to track
+ * which one is working. The grid is a screen to glance at, not read, so the signal has to be the
+ * size of the whole panel to catch peripheral vision.
  */
-test('그리드: 응답 중인 칸만 테두리가 돈다', async ({ page }) => {
+test('Grid: only the responding panel has a spinning border', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫째')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -6790,17 +7238,18 @@ test('그리드: 응답 중인 칸만 테두리가 돈다', async ({ page }) => 
   const panelA = page.getByTestId(`grid-panel-${a}`)
   const panelB = page.getByTestId(`grid-panel-${b}`)
 
-  // 첫 프롬프트로 둘 다 일하는 중이다 — 끝내고 나서 비교한다
+  // Both are working from their first prompt — compare only after they finish
   for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
   await expect(panelA).not.toHaveClass(/cc-orbit-ring/)
   await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
 
-  // a에게만 일을 시킨다
+  // Only give work to a
   await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').fill('오래 걸리는 일')
   await page.getByTestId(`grid-panel-${a}`).getByTestId('send').click()
 
   await expect(panelA).toHaveClass(/cc-orbit-ring/)
-  // 옆 칸까지 돌면 "무엇이 바쁜가"를 못 읽는다 — 신호가 아니라 장식이 된다
+  // If the neighboring panel spins too, "which one is busy" cannot be read — it becomes
+  // decoration, not a signal
   await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
 })
 
@@ -6905,47 +7354,50 @@ test('scrolled up to read, a grid panel does not yank you back down (#31)', asyn
 })
 
 /**
- * #61: 돌아왔을 때 **읽던 자리**여야 한다 — "바닥은 아니었다"만으로는 부족하다.
+ * #61: on returning, it must be **the spot being read** — "it was not the bottom" is not enough.
  *
- * #31이 지킨 것은 "바닥으로 끌어내리지 않는다"까지였다. 그런데 아무것도 남기지
- * 않았으므로 브라우저는 새 요소를 scrollTop 0에서 시작했고, 결과는 매번 **맨 위**였다 —
- * 80턴짜리 대화에서 중간을 읽다 나갔다 오면 처음으로 되돌아가 있었다.
- * 이제 떠날 때 화면 맨 위에 걸친 줄(seq)을 남기고, 돌아오면 그 줄로 되돌아간다.
+ * What #31 guaranteed only went as far as "does not pull you down to the bottom". But since
+ * nothing was preserved, the browser started the new element at scrollTop 0, so the result was
+ * always **the very top** — leaving mid-read in an 80-turn conversation and coming back landed
+ * right at the beginning. Now, on leaving, the row (seq) straddling the top of the screen is
+ * recorded, and returning scrolls back to that row.
  */
-test('읽던 자리로 돌아온다 — 맨 위가 아니라 (#61)', async ({ page }) => {
+test('Returns to the spot being read — not the top (#61)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
   await seedLongChat(page, id)
 
   const stream = page.getByTestId('chat-stream')
-  // 중간쯤으로 올라가 읽는다 (바닥도 꼭대기도 아닌 자리라야 이 버그가 산다)
+  // Scroll up to somewhere in the middle to read (the bug only lives in a spot that is neither
+  // the bottom nor the top)
   await stream.hover()
   await page.mouse.wheel(0, -3000)
   await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
   const before = await stream.evaluate((el) => el.scrollTop)
   expect(before).toBeGreaterThan(200)
 
-  // 화면을 떠났다 돌아온다 (그리드는 칸을 통째로 버리고 다시 만든다)
+  // Leave the screen and come back (the grid discards the panel entirely and rebuilds it)
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
   await page.getByTestId(`session-row-${id}`).click()
   await expect(stream).toBeVisible()
 
-  // 자리를 잡는 동안 중간 위치가 그려지지 않는다 — 재는 동안은 감춘 채로 잰다
+  // The intermediate position is never drawn while settling — it stays hidden while being measured
   await expect(stream).not.toHaveAttribute('data-settling', 'true')
 
-  // 같은 줄 언저리다. 픽셀까지 같기를 요구하지 않는 이유는 줄을 다시 재기 때문 —
-  // 하지만 "맨 위로 돌아갔다"와는 확실히 구별된다
+  // It lands near the same row. Not requiring pixel-exact equality is because rows get
+  // re-measured — but this is clearly distinguishable from "it went back to the top"
   const after = await stream.evaluate((el) => el.scrollTop)
   expect(Math.abs(after - before)).toBeLessThan(120)
 })
 
 /**
- * 같은 일이 그리드 없이도 일어난다 (사용자 지적): 포커스 뷰에서 세션만 바꿔도
- * 같은 컴포넌트가 sessionId만 갈아 끼우므로, 남긴 것이 없으면 자리를 잃는다.
+ * The same thing happens without the grid too (pointed out by the person): even just switching
+ * sessions in the focus view reuses the same component with only sessionId swapped, so without
+ * something preserved, the position is lost.
  */
-test('세션을 바꿨다 돌아와도 읽던 자리다 (#61)', async ({ page }) => {
+test('Switching sessions and returning keeps the spot being read (#61)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -6959,7 +7411,8 @@ test('세션을 바꿨다 돌아와도 읽던 자리다 (#61)', async ({ page })
   await expect.poll(() => distanceFromBottom(stream)).toBeGreaterThan(80)
   const before = await stream.evaluate((el) => el.scrollTop)
 
-  // 옆 세션에 들렀다 온다 — 화면 종류는 그대로이고 sessionId만 바뀐다
+  // Visit a neighboring session and come back — the screen type stays the same, only sessionId
+  // changes
   const b = await page.evaluate(
     (aId: string) => Object.keys((window as any).__store.getState().sessions).find((x) => x !== aId),
     a,
@@ -6972,7 +7425,7 @@ test('세션을 바꿨다 돌아와도 읽던 자리다 (#61)', async ({ page })
   expect(Math.abs(after - before)).toBeLessThan(120)
 })
 
-/** 보내고 대화창에 실제로 붙은 것까지 확인한다 — 기록은 붙은 것에서 나온다 (#38) */
+/** Confirms that sending actually attaches to the conversation — history is drawn from what attached (#38) */
 async function sendMessage(page: Page, body: string) {
   const seen = await page.getByTestId('msg-user').count()
   await page.getByTestId('prompt-input').fill(body)
@@ -6981,9 +7434,10 @@ async function sendMessage(page: Page, body: string) {
 }
 
 /**
- * 화살표로 보낸 말을 되불러온다 (#38).
+ * Arrow keys recall what was sent (#38).
  *
- * 셸이 하는 그대로다. 기록은 따로 저장하지 않는다 — 대화에 이미 내 말이 다 있다.
+ * Exactly like a shell. No separate history is stored — the conversation itself already holds
+ * everything said.
  */
 test('arrow up walks back through what you sent, arrow down walks forward (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -7000,7 +7454,8 @@ test('arrow up walks back through what you sent, arrow down walks forward (#38)'
   await input.press('ArrowUp')
   await expect(input).toHaveValue('첫 프롬프트')
 
-  // 가장 오래된 것에서 더 위로 눌러도 그 자리다 — 커서가 움직이면 "안 먹는다"로 읽힌다
+  // Pressing further up from the oldest entry stays at that entry — if the cursor moved, it reads
+  // as "not registering"
   await input.press('ArrowUp')
   await expect(input).toHaveValue('첫 프롬프트')
 
@@ -7009,9 +7464,10 @@ test('arrow up walks back through what you sent, arrow down walks forward (#38)'
 })
 
 /**
- * 쓰다 만 글은 화살표 한 번에 잃을 수 있는 것이 아니다.
+ * An unfinished draft is not something a single arrow key press can lose.
  *
- * 이 앱이 계속 고쳐 온 종류의 손실이라, 되불러오는 동안 초안은 아예 건드리지 않는다.
+ * This is exactly the kind of loss this app has fixed repeatedly, so the draft is never touched
+ * at all while recalling.
  */
 test('arrow down past the newest gives the unsent draft back (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -7026,7 +7482,7 @@ test('arrow down past the newest gives the unsent draft back (#38)', async ({ pa
   await expect(input).toHaveValue('아직 안 보낸 글')
 })
 
-/** 되불러오기는 지금 이 대화의 것이다 — 남의 말이 내 입력창에 앉으면 그대로 보내진다 */
+/** Recall belongs to the current conversation — if someone else's message sat in my composer it would be sent as-is */
 test('recall does not reach into another session (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'A에게 한 말')
@@ -7038,7 +7494,7 @@ test('recall does not reach into another session (#38)', async ({ page }) => {
   await input.press('ArrowUp')
   await expect(input).toHaveValue('B에게 한 말')
 
-  // 세션을 바꾸면 꺼내둔 것도 따라가지 않는다
+  // Switching sessions does not carry the recalled text along
   await page.getByTestId(`session-row-${a}`).click()
   await expect(input).toHaveValue('')
   await input.click()
@@ -7047,10 +7503,11 @@ test('recall does not reach into another session (#38)', async ({ page }) => {
 })
 
 /**
- * 자동완성이 열려 있는 동안 화살표는 목록의 것이다.
+ * While autocomplete is open, the arrows belong to the list.
  *
- * 둘 다 화살표를 원하는데, 열려 있는 쪽이 이긴다 — 목록을 띄워 놓고 고르는 중에
- * 입력창이 통째로 옛 메시지로 바뀌면 무슨 일이 일어난 건지 알 길이 없다.
+ * Both want the arrows, and whichever is open wins — if the composer swapped to an old message
+ * entirely while a list was open and being navigated, there would be no way to know what just
+ * happened.
  */
 test('the autocomplete list keeps the arrows while it is open (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -7071,7 +7528,7 @@ test('the autocomplete list keeps the arrows while it is open (#38)', async ({ p
   await expect(page.getByTestId('autocomplete-item-0')).toHaveAttribute('aria-selected', 'true')
 
   await input.press('ArrowDown')
-  // 골라진 줄이 옮겨갔고, 입력창은 내가 친 그대로다
+  // The selected row moved, and the composer keeps exactly what was typed
   await expect(page.getByTestId('autocomplete-item-1')).toHaveAttribute('aria-selected', 'true')
   await expect(input).toHaveValue('/re')
 
@@ -7081,10 +7538,10 @@ test('the autocomplete list keeps the arrows while it is open (#38)', async ({ p
 })
 
 /**
- * 여러 줄을 쓰는 중이면 화살표는 먼저 커서의 것이다.
+ * While writing multiple lines, the arrows belong to the caret first.
  *
- * 첫 줄에서 위로, 마지막 줄에서 아래로 — 그때만 기록이 나선다. 손이 이미 알고 있는
- * 규칙이라(셸·devtools) 따로 배울 것이 없다.
+ * Only up from the first line, or down from the last line, brings up history. The hand already
+ * knows this rule (from shells and devtools), so there is nothing new to learn.
  */
 test('in a multi-line draft the arrows move the caret first (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -7093,54 +7550,58 @@ test('in a multi-line draft the arrows move the caret first (#38)', async ({ pag
   const input = page.getByTestId('prompt-input')
   await input.fill('첫 줄\n둘째 줄')
 
-  // 커서는 끝(= 마지막 줄)에 있다 — 위 화살표는 커서를 올린다
+  // The caret sits at the end (= the last line) — up moves the caret
   await input.press('ArrowUp')
   await expect(input).toHaveValue('첫 줄\n둘째 줄')
 
-  // 이제 첫 줄이다 — 여기서 한 번 더 누르면 기록이 온다
+  // Now it is on the first line — pressing once more here brings up history
   await input.press('ArrowUp')
   await expect(input).toHaveValue('보낸 말')
 })
 
 /**
- * 접혀서 여러 줄이 된 한 줄에서도 화살표는 먼저 커서의 것이다 (사용자 지적 2026-09-07).
+ * Even in a single line wrapped into several visual lines, the arrows belong to the caret first
+ * (pointed out by the person, 2026-09-07).
  *
- * 개행은 없지만 눈에는 세 줄이다. 예전엔 개행만 셌기 때문에 어느 줄에서 눌러도 "첫 줄"로
- * 쳐서 기록이 올라왔다 — 쓰던 글이 사라진 것처럼 보인다.
+ * There is no newline, but the eye sees three lines. It used to count only newlines, so pressing
+ * from any line counted as "the first line" and brought up history — the text being written
+ * appeared to vanish.
  */
 test('a long wrapped line moves the caret before it recalls history (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '보낸 말')
 
   const input = page.getByTestId('prompt-input')
-  // 개행 없이 입력창 폭을 몇 번 넘기는 한 줄
+  // A single line, no newlines, wide enough to wrap the composer's width several times
   const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
   await input.fill(long)
 
-  // 접혀서 실제로 여러 줄이 됐는지 먼저 확인한다 — 안 접히면 이 시험은 아무것도 안 본다
+  // First confirm it actually wrapped into multiple lines — without wrapping this test sees nothing
   const rows = await input.evaluate((el: HTMLTextAreaElement) => {
     const lh = parseFloat(getComputedStyle(el).lineHeight) || 16
     return Math.round(el.scrollHeight / lh)
   })
   expect(rows).toBeGreaterThan(1)
 
-  // 커서는 끝(= 접힌 마지막 줄)에 있다 — 위 화살표는 커서를 올린다, 기록이 아니라
+  // The caret sits at the end (= the last wrapped line) — up moves the caret, not history
   await input.press('ArrowUp')
   await expect(input).toHaveValue(long)
   const moved = await input.evaluate((el: HTMLTextAreaElement) => el.selectionStart)
   expect(moved).toBeLessThan(long.length)
 
-  // 맨 위 줄까지 올라가면 그때부터는 기록이다 (몇 번 접혔든 위로 계속 누르면 닿는다)
+  // Once it reaches the very top line, history takes over from there (no matter how many times it
+  // wrapped, pressing up repeatedly reaches it)
   for (let i = 0; i < rows + 1; i++) await input.press('ArrowUp')
   await expect(input).toHaveValue('보낸 말')
 })
 
 /**
- * 조합 중인 화살표는 후보 목록의 키다 (#12).
+ * An arrow key while composing belongs to the candidate list (#12).
  *
- * 한글·일본어·중국어를 치는 사람에게는 방향키가 글자를 고르는 키이기도 하다.
- * 여기서 가로채면 고르던 글자가 통째로 사라진다 — 키보드 이벤트를 직접 만들어
- * 조합 중이라고 말해 준다. 사람 손으로는 재현할 수 없는 상태다.
+ * For someone typing Korean, Japanese, or Chinese, the arrow keys also pick among candidate
+ * characters. Intercepting it here would wipe out the character being chosen entirely — this
+ * constructs the keyboard event by hand to declare composition is in progress, a state that
+ * cannot be reproduced by an actual human hand.
  */
 test('arrows do not recall while an IME is composing (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -7153,16 +7614,16 @@ test('arrows do not recall while an IME is composing (#38)', async ({ page }) =>
   })
   await expect(input).toHaveValue('ㅎ')
 
-  // 조합이 끝나면 같은 키가 기록을 부른다
+  // Once composition ends, the same key brings up history
   await input.press('ArrowUp')
   await expect(input).toHaveValue('보낸 말')
 })
 
 /**
- * 되불러온 글도 친 글과 똑같이 입력창을 키운다.
+ * A recalled message grows the composer exactly like typed text does.
  *
- * 높이는 값에서 나오게 만들어 뒀으므로 새 경로가 하나 늘어도 저절로 따라와야 한다 —
- * "따라올 것이다"와 "따라온다"는 다르므로 재 본다.
+ * Height is derived from the value, so adding one more path should follow automatically — but
+ * "it should follow" and "it does follow" are different claims, so this measures it.
  */
 test('a recalled multi-line message grows the composer (#38)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -7240,14 +7701,14 @@ test('granting a file edit refreshes the project count before the turn ends (#41
   await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
 })
 
-
 /**
- * 좁은 패널의 커밋도 같은 길로 간다 (#49).
+ * A commit from the narrow panel goes through the same path (#49).
  *
- * 이쪽이 더 두드러진다: 이 버튼은 사이드바 **바로 옆**에 있어서, 커밋하고 나면
- * 몇 픽셀 왼쪽의 숫자가 옛 값을 붙들고 있는 것이 한눈에 보였다.
+ * This case stands out even more: the button sits **right next to** the sidebar, so after
+ * committing, the number a few pixels to the left holding onto its old value was visible at a
+ * glance.
  */
-test('좁은 패널에서 커밋해도 사이드바의 변경 수가 따라온다 (#49)', async ({ page }) => {
+test("Committing from the narrow panel still updates the sidebar's changed count (#49)", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -7267,17 +7728,18 @@ test('좁은 패널에서 커밋해도 사이드바의 변경 수가 따라온�
 })
 
 /**
- * 커밋만이 아니라 **저장소를 바꾸는 것 전부**가 알린다 (#49).
+ * Not just commits — **anything that changes the repository** reports in (#49).
  *
- * 스테이징은 대개 숫자를 안 움직이고(porcelain은 올렸든 아니든 경로당 한 줄이다),
- * 브랜치 전환은 숫자가 아니라 **이름**을 바꾼다. 그래서 화면의 숫자로는 둘 다 확인할 수
- * 없다 — 대신 스토어가 다시 재어봤는지를 센다. 어느 쪽이든 무엇이 바뀌었는지 짐작해서
- * 거르는 규칙을 두지 않는 것이 요점이다: 그런 규칙은 조용히 틀린 채로 오래 간다.
+ * Staging usually does not move the count (porcelain shows one line per path whether staged or
+ * not), and switching branches changes the **name**, not the count. So neither can be confirmed
+ * from an on-screen number — instead this counts whether the store re-measured at all. The point
+ * is not to guess what changed and filter based on that in either case: a rule like that stays
+ * silently wrong for a long time.
  *
- * `push`는 일부러 빠져 있다. 사이드바가 보여주는 것(브랜치·변경 수·저장소 여부) 중
- * 어느 것도 움직이지 않으므로, 재는 일은 답이 같을 수밖에 없는 호출이 된다.
+ * `push` is deliberately left out. None of what the sidebar shows (branch, change count, whether
+ * it is a repo) moves, so re-measuring would just be a call guaranteed to return the same answer.
  */
-test('스테이징과 브랜치 전환도 사이드바에 알린다 — 푸시는 아니다 (#49)', async ({ page }) => {
+test('Staging and switching branches notify the sidebar too — push does not (#49)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -7296,10 +7758,11 @@ test('스테이징과 브랜치 전환도 사이드바에 알린다 — 푸시�
 
   await page.getByTestId('evidence-push').click()
   await expect(page.getByTestId('toast')).toContainText('Pushed')
-  // 푸시는 아무것도 안 물어본다 — 위의 한 번 그대로다
+  // Push queries nothing — it stays at the one call from above
   expect(await page.evaluate(() => (window as any).__mock.gitStatusCalls)).toBe(1)
 
-  // 브랜치 진입은 사이드바의 브랜치 버튼 (오버레이 안 탭은 없다, 2026-09-07)
+  // Entering branches goes through the sidebar's branch button (there is no tab inside the
+  // overlay, 2026-09-07)
   await page.getByTestId('evidence-branch').click()
   await page.getByTestId('branch-feature').click()
   await expect(page.getByTestId('toast')).toContainText('Switched to feature')
@@ -7307,20 +7770,23 @@ test('스테이징과 브랜치 전환도 사이드바에 알린다 — 푸시�
 })
 
 /**
- * 깃 탭의 세 자리 (#160).
+ * Three spots in the Git tab (#160).
  *
- * 전부 커밋해 목록이 비는 순간 Push가 함께 사라졌고, 패널의 목록은 에이전트가 만진 파일 수가
- * 바뀔 때만 다시 읽어서 터미널 커밋·Bash 커밋·같은 파일의 재편집·창 복귀를 놓쳤고, 일부만
- * 스테이징한 파일은 Changed에서 눌러도 스테이징된 diff가 열렸다.
+ * The moment everything was committed and the list emptied, Push disappeared along with it; the
+ * panel's list only re-read when the count of files the agent touched changed, missing terminal
+ * commits, Bash commits, re-editing the same file, and returning to the window; and a partially
+ * staged file opened the staged diff even when clicked from Changed.
  */
-test('깃 탭: 깨끗해도 Push가 남고, 창 복귀에 목록을 다시 읽고, 눌린 무리의 diff를 연다 (#160)', async ({ page }) => {
+test('Git tab: Push remains even when clean, the list re-reads on window return, and clicking opens the diff for the clicked group (#160)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
   await expect(page.getByTestId('evidence-clean')).toBeVisible()
   await expect(page.getByTestId('evidence-push')).toBeVisible()
 
-  // 앱 밖에서 한 파일의 일부만 스테이징했다 — 에이전트가 만진 파일 수는 그대로다
+  // Partially staged one file from outside the app — the count of files the agent touched is unchanged
   await page.evaluate(() => {
     const store = (window as any).__store.getState()
     store.setAppFocused(false)
@@ -7363,52 +7829,58 @@ test('returning to the window re-reads every project (#41)', async ({ page }) =>
 })
 
 /**
- * 업데이트: 알리기만 하고, 사람이 누를 때만 설치한다 (이슈 #43).
+ * Updates: only notify, and install only when the person clicks (issue #43).
  *
  * The whole shape of this feature is in one run: a quiet line appears when the registry
  * has something newer, clicking it is the consent, and the app stops at "restart" rather
  * than replacing itself out from under the person. Driven entirely through the mock —
  * `npm i -g` is never run by a test.
  */
-test('새 버전이 있으면 조용한 줄이 뜨고, 눌러야 설치된다 (#43)', async ({ page }) => {
+test('A quiet line appears when a new version exists, and installing requires a click (#43)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  // 아직 아무 소식이 없을 때는 계기판에 줄이 없다 — 할 말이 있을 때만 나타난다
+  // With no news yet, there is no line in the dashboard — it appears only when there is something
+  // to say
   await expect(page.getByTestId('update-line')).toBeHidden()
 
-  // 레지스트리에 새 버전이 올라왔다
+  // A new version has been published to the registry
   await page.evaluate(() => (window as any).__mock.offerUpdate('9.9.9'))
   const line = page.getByTestId('update-line')
   await expect(line).toContainText('9.9.9')
 
-  // 누르는 것이 곧 동의다 — 그전까지 아무 일도 일어나지 않는다
+  // Clicking it is the consent — nothing happens before that
   await line.click()
   /*
-   * 끝나도 **다시 시작하지는 않는다.** 도는 앱을 갈아 끼우는 것은 사람이 정할 일이고,
-   * 이 줄이 그 말을 하는 자리다.
+   * Even once it finishes, it **does not restart on its own.** Swapping out the running app is
+   * the person's call to make, and this line is where it says so.
    */
   await expect(line).toContainText('Restart')
 })
 
 /**
- * 설정에 'Updates'가 생겼다 (이슈 #43 / #7이 열어 둔 네 번째 갈래).
+ * Settings gained an 'Updates' tab (issue #43 / the fourth tab #7 opened up).
  *
- * 자동 확인은 **기본으로 켜져 있다** — 읽기 전용이고 실패를 삼키므로 켜 두어 잃는 것이
- * 없는 반면, 꺼 두면 설정을 한 번도 안 여는 사람이 영원히 옛 버전에 남는다.
- * 끄면 진짜로 안 묻는다는 것까지 여기서 확인한다: 안 그러면 이 체크상자는 장식이다.
+ * Automatic checking is **on by default** — it is read-only and swallows failures, so leaving it
+ * on costs nothing, while leaving it off would strand someone who never opens settings on an old
+ * version forever. This also confirms that turning it off genuinely stops asking: otherwise this
+ * checkbox is decoration.
  */
-test('설정 > Updates: 지금 확인 · 자동 확인 (#43)', async ({ page }) => {
+test('Settings > Updates: check now and automatic checking (#43)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-updates').click()
 
   /*
-   * 지금 도는 것이 무엇인지부터 말한다 — 비교의 한쪽이 안 보이면 나머지도 못 읽는다.
+   * States what is currently running first — without one side of the comparison visible, the
+   * rest cannot be read either.
    *
-   * 버전 문자열을 여기 적어두면 **릴리스마다 이 줄이 빨개진다.** 실제로 그랬다:
-   * 0.1.0-beta.3으로 올린 커밋이 이 줄을 깨뜨렸는데, CI가 릴리스 앞에서 돌리는 것은
-   * `pnpm verify`(단위까지)라 아무도 못 봤다. 확인하려는 것은 버전 번호가 아니라
-   * **번호가 화면에 실려 나온다는 것**이므로, 모양만 본다.
+   * Writing a literal version string here would turn this line red **on every release.** It
+   * actually happened: the commit that bumped to 0.1.0-beta.3 broke this line, and nobody saw it
+   * because what CI runs before a release is `pnpm verify` (up through unit tests only). What is
+   * being confirmed is not the version number but **that a number is carried onto the screen at
+   * all**, so this checks only the shape.
    */
   await expect(page.getByTestId('update-current')).toContainText(/Running \d+\.\d+\.\d+/)
   await expect(page.getByTestId('update-auto')).toBeChecked()
@@ -7419,32 +7891,34 @@ test('설정 > Updates: 지금 확인 · 자동 확인 (#43)', async ({ page }) 
   await page.getByTestId('update-check-now').click()
   await expect(page.getByTestId('update-state')).toContainText('9.9.9')
 
-  // 꺼 두면 레지스트리에 묻지 않는다
+  // With it off, it never asks the registry
   await page.getByTestId('update-auto').uncheck()
   const asked = await page.evaluate(async () => {
     const m = (window as any).__mock
-    m.registryVersion = null // 이제 물어보면 '못 닿음'이 될 것이다
+    m.registryVersion = null // Asking now would come back as "unreachable"
     await (window as any).__store.getState().checkUpdate(false)
     return (window as any).__store.getState().update.latest
   })
-  // 자동 확인이 꺼진 채로 온 자동 호출은 아무 데도 안 갔다 — 알던 답이 그대로 남는다
+  // An automatic call arriving with auto-check turned off went nowhere — the previously known
+  // answer just stays
   expect(asked).toBe('9.9.9')
 })
 
 /**
- * 입력창 포커스가 잠든 세션을 깨운다.
+ * Focusing the composer wakes a dormant session.
  *
- * 사이드바에서 고르면 이미 깨어난다 (focusSession → wake). 그런데 고르지 **않고**
- * 입력창에 닿는 길이 둘 있다 — 그리드 칸, 그리고 재시작이 복원해 준 포커스 세션.
- * 둘 다 보내기 전까지 잠들어 있어서, 재개의 몇 초가 보내기 버튼 뒤에서 흘렀고
- * 슬래시 목록은 디스크 캐시(지워진 플러그인의 명령을 며칠씩 보여주던 그것)로만 답했다.
+ * Selecting it from the sidebar already wakes it (focusSession -> wake). But there are two paths
+ * that reach the composer **without** selecting — a grid panel, and the focused session a
+ * restart restores. Both stayed dormant until sending, so the few seconds of resuming ran hidden
+ * behind the send button, and the slash list only answered from the disk cache (the same one
+ * that kept showing a removed plugin's commands for days).
  */
-test('입력창을 포커스하면 잠든 세션이 깨어난다', async ({ page }) => {
+test('Focusing the composer wakes a dormant session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // 잠든 상태를 만든다 — 앱 재시작이 복원한 포커스 세션이 정확히 이 모양이다
+  // Set up the dormant state — the focused session a restart restores is exactly this shape
   await page.evaluate((sid: string) => {
     const st = (window as any).__store
     const m = (window as any).__mock
@@ -7454,26 +7928,27 @@ test('입력창을 포커스하면 잠든 세션이 깨어난다', async ({ page
     })
   }, id)
 
-  // 헬퍼가 입력창에 포커스를 남겨두므로 한 번 떠났다가 돌아온다 —
-  // 깨우기는 포커스 '이벤트'에 걸려 있어서, 이미 포커스면 focus()가 아무것도 안 쏜다
+  // Since the helper leaves focus in the composer, this leaves and comes back once —
+  // waking is wired to the focus 'event', so if it is already focused, focus() fires nothing
   await page.getByTestId('prompt-input').blur()
   await page.getByTestId('prompt-input').focus()
   await expect
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid].live, id))
     .toBe(true)
-  // 조용히 — 깨어났다는 토스트도, 실패 토스트도 없다
+  // Quietly — no "woke up" toast and no failure toast either
   await expect(page.getByTestId('toast')).toHaveCount(0)
 })
 
 /**
- * 보던 화면이 재시작을 넘어온다 (C-3의 남은 반쪽).
+ * The screen being viewed carries over a restart (the remaining half of C-3).
  *
- * 세션은 돌아오는데 보는 **방식**은 돌아오지 않았다 — 그리드에서 껐는데 포커스 뷰로
- * 켜졌다. 복원 순서(focusSession이 view를 focus로 강제한다)는 단위 테스트가 지키고,
- * 여기는 실제 리로드로 한 바퀴 돈다. mock의 재시작 규칙은 #20의 relaunch 테스트와
- * 같다: localStorage(스냅샷의 대역)만 살아남고, 프로젝트는 다시 등록해야 한다.
+ * The session came back, but the **way** it was viewed did not — closed from the grid, it
+ * reopened in the focus view. The restore order (focusSession forces the view to focus) is
+ * guarded by unit tests; this one runs through an actual reload. The mock's restart rule matches
+ * #20's relaunch test: only localStorage (standing in for the snapshot) survives, and projects
+ * have to be re-registered.
  */
-test('그리드에서 껐다 켜면 그리드로 돌아온다', async ({ page }) => {
+test('Closing and restarting from the grid returns to the grid', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -7481,7 +7956,8 @@ test('그리드에서 껐다 켜면 그리드로 돌아온다', async ({ page })
   await page.getByTestId('grid-button').click()
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // 재시작 — 스냅샷만 살아남는다. 소개 화면은 다시 나오지 않는다 (introSeen도 스냅샷에 남았다)
+  // Restart — only the snapshot survives. The intro screen does not come back (introSeen also
+  // lives in the snapshot)
   await page.goto('/?mock=1')
   await expect(page.getByTestId('add-project')).toBeVisible()
   await expect(page.getByTestId('intro')).toHaveCount(0)
@@ -7490,17 +7966,18 @@ test('그리드에서 껐다 켜면 그리드로 돌아온다', async ({ page })
   }, '/tmp/alpha')
   await page.getByTestId('add-project').click()
 
-  // 프로젝트가 돌아오는 순간, 화면은 포커스 뷰가 아니라 **그리드**여야 한다
+  // The moment the project comes back, the screen must be **the grid**, not the focus view
   await expect(page.getByTestId('grid')).toBeVisible()
 })
 
 /**
- * 세션 트리 (#69): 워크트리 세션은 매니저 아래에 들여 그려진다.
+ * The session tree (#69): worktree sessions are drawn nested under a manager.
  *
- * 계급은 사이드바에만 산다 — 매니저는 자식을 가진 보통 세션이고, 워크트리 세션을
- * 만들면 매니저가 없던 프로젝트에도 매니저 줄이 생긴다 (행만, 프로세스는 없다).
+ * The hierarchy lives only in the sidebar — the manager is an ordinary session with children,
+ * and creating a worktree session adds a manager row even to a project that had none (only a
+ * row, no process).
  */
-test('워크트리 세션은 사이드바에서 매니저 아래에 선다', async ({ page }) => {
+test('Worktree sessions sit nested under the manager in the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -7510,20 +7987,22 @@ test('워크트리 세션은 사이드바에서 매니저 아래에 선다', asy
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 매니저 줄이 생겼고, 워크트리 세션이 그 아래에 들여 그려진다
+  // A manager row was created, and the worktree session is drawn nested under it
   const manager = page.getByText('Worktree manager', { exact: true })
   await expect(manager).toBeVisible()
   const nested = page.locator('li[data-nested]')
   await expect(nested).toHaveCount(1)
 
-  // 매니저 줄의 ⋯ 메뉴에 있다 — 누르면 워크트리가 켜진 채 새 세션 창이 열린다
+  // It lives in the manager row's ⋯ menu — clicking it opens a new session dialog with the
+  // worktree already on
   const mgrRow = page.locator('li', { has: manager })
   await mgrRow.locator('[data-testid^="session-menu-"]').click()
   await mgrRow.locator('[data-testid^="new-worktree-session-"]').click()
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
 
-  // 그 창으로 하나 더 만들면 같은 매니저 아래에 선다 — 매니저는 프로젝트당 하나면 충분하다
+  // Creating one more through that dialog places it under the same manager — one manager per
+  // project is enough
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   await expect(page.locator('li[data-nested]')).toHaveCount(2)
@@ -7531,37 +8010,40 @@ test('워크트리 세션은 사이드바에서 매니저 아래에 선다', asy
 })
 
 /**
- * 매니저를 **먼저** 만든다 (#76).
+ * Creating the manager **first** (#76).
  *
- * 여기서 확인하는 것은 순서다: 자식이 하나도 없는 상태에서 자리가 서고, 그 뒤에 만든
- * 워크트리가 그 자리 아래로 들어간다. 그리고 자리가 생기면 만들기 버튼은 사라진다 —
- * 같은 일을 하는 문이 둘이 되지 않아야 한다.
+ * What is checked here is the order: the slot gets created with zero children, and a worktree
+ * created afterward goes into that slot. And once the slot exists, the "create manager" button
+ * disappears — there must never be two doors doing the same thing.
  */
-test('워크트리 매니저를 먼저 만들면 그 아래로 워크트리가 들어간다', async ({ page }) => {
+test('Creating the worktree manager first places later worktrees under it', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('start-worktree-manager-alpha').click()
-  // 줄기는 현재 브랜치가 채워져 있다 — 짐작을 사람 눈앞에 놓고 확인받는다
+  // The trunk field is filled with the current branch — the guess is put in front of the person
+  // for confirmation
   await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
   await page.getByTestId('worktree-manager-confirm').click()
   await expect(page.getByTestId('worktree-manager-dialog')).toBeHidden()
 
   /*
-    자리가 섰고 — 자식은 하나도 없다. 그리고 만들자마자 그 자리를 열어 준다:
-    방금 만든 상대와 이야기하려고 만드는 것이라, 목록에 줄만 늘고 끝나면 절반이다.
+    The slot exists — with zero children. And the moment it is created, it opens right up: the
+    reason to create it is to talk to the thing just created, so merely adding a row to the list
+    and stopping there is only half the job.
   */
-  // 사이드바로 좁혀서 센다 — 매니저를 열어 둔 상태라 대화창 머리에도 같은 이름이 있다
+  // Scope the count to the sidebar — with the manager open, the same name also appears in the
+  // conversation header
   const sidebar = page.getByTestId('sidebar')
   await expect(sidebar.getByText('Worktree manager', { exact: true })).toHaveCount(1)
   await expect(page.getByTestId('session-name')).toHaveText('Worktree manager')
   await expect(page.locator('li[data-nested]')).toHaveCount(0)
-  // 자리가 생겼으니 만들기 문은 닫힌다 — 메뉴를 열어도 그 줄이 없다
+  // Now that the slot exists, the "create" door closes — that row is gone even with the menu open
   await page.getByTestId('project-menu-alpha').click()
   await expect(page.getByTestId('start-worktree-manager-alpha')).toHaveCount(0)
   await page.keyboard.press('Escape')
 
-  // 이제 만든 워크트리는 먼저 선 자리 아래로 들어간다 — 두 번째 매니저가 생기지 않는다
+  // The worktree created now goes under the slot that already exists — no second manager is created
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
@@ -7571,12 +8053,12 @@ test('워크트리 매니저를 먼저 만들면 그 아래로 워크트리가 �
   await expect(sidebar.getByText('Worktree manager', { exact: true })).toHaveCount(1)
 })
 
-test('프로젝트 헤더의 +로 열면 워크트리는 여전히 꺼져 있다 — 예열은 매니저 줄의 +만 한다', async ({
+test('Opening via the project header + still leaves the worktree off — only the manager row + pre-warms it', async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  // 먼저 매니저 줄의 +로 한 번 열었다 닫는다 — 예열 상태가 새어 남지 않아야 한다
+  // First open once via the manager row's + and close it — the pre-warmed state must not leak
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
@@ -7593,30 +8075,34 @@ test('프로젝트 헤더의 +로 열면 워크트리는 여전히 꺼져 있다
   await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
 })
 
-test('워크트리 브랜치 이름을 정하면 세션 이름이 된다', async ({ page }) => {
+test('Naming the worktree branch becomes the session name', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
 
   await page.getByTestId('new-session-alpha').click()
-  // 브랜치 칸은 워크트리를 켜기 전엔 없다 — 꺼진 옵션의 세부를 미리 펼치지 않는다
+  // The branch field does not exist before the worktree is turned on — details of an off option
+  // are never expanded ahead of time
   await expect(page.getByTestId('worktree-branch-input')).toHaveCount(0)
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('worktree-branch-input').fill('feat/login-fix')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 세션 이름 = 브랜치 이름 — 사이드바의 들여진 줄에 그 이름이 선다
+  // Session name = branch name — that name appears on the nested row in the sidebar
   await expect(page.locator('li[data-nested]').getByText('feat/login-fix')).toBeVisible()
 })
 
 /**
- * 어디서 갈라지는가 (사용자 지적 2026-09-07: "워커 만들 때 어디 브랜치에서 가져올지 정하는 게 없다").
+ * Where it branches from (pointed out by the person, 2026-09-07: "when creating a worker there
+ * is no way to say which branch to base it on").
  *
- * 예전에는 화면 어디에도 없는 사실이었다 — host가 줄기(없으면 HEAD)에서 조용히 갈랐다.
- * 이제 그 기본값이 칸에 적혀 있고, 고칠 수 있다.
+ * It used to be a fact nowhere on screen — the host quietly branched from the trunk (or HEAD if
+ * there was none). Now that default is written in a field, and it can be changed.
  */
-test('워크트리를 켜면 어디서 갈라지는지가 화면에 있고, 바꿔서 보낼 수 있다', async ({ page }) => {
+test('Turning on the worktree shows where it branches from, and it can be changed before sending', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -7628,18 +8114,19 @@ test('워크트리를 켜면 어디서 갈라지는지가 화면에 있고, 바�
 
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
-  // 꺼진 옵션의 세부는 미리 펼치지 않는다 — 브랜치 칸과 같은 규칙
+  // Details of an off option are never expanded ahead of time — the same rule as the branch field
   await expect(page.getByTestId('worktree-base-input')).toHaveCount(0)
   await page.getByTestId('worktree-toggle').locator('input').check()
 
-  // 기본값은 지금까지 조용히 일어나던 일 그대로 (프로젝트의 현재 브랜치)
+  // The default is exactly what used to happen quietly (the project's current branch)
   await expect(page.getByTestId('worktree-base-input')).toHaveValue('main')
 
   await page.getByTestId('worktree-base-input').fill('release')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 고른 것이 실제로 host까지 갔다 — 화면에만 있는 칸이면 아무것도 고친 게 아니다
+  // The choice actually reached the host — a field that exists only on screen would mean nothing
+  // was actually changed
   await expect
     .poll(async () =>
       page.evaluate(() => (window as never as { __mock: any }).__mock.lastCreateParams?.worktreeBase),
@@ -7648,21 +8135,24 @@ test('워크트리를 켜면 어디서 갈라지는지가 화면에 있고, 바�
 })
 
 /**
- * 매니저의 워크트리 제안 (#69) — propose-not-power의 세 번째 사례.
- * 제안 줄이 대화에 남고, + 버튼이 밝아지고, 열면 브랜치 이름이 채워져 있다.
- * 만드는 것은 끝까지 사람이다.
+ * The manager's worktree proposal (#69) — the third case of propose-not-power.
+ * A proposal line stays in the conversation, the + button lights up, and opening it comes with
+ * the branch name already filled in. Creating it remains, to the end, the person's own act.
  */
-test('워크트리 제안: 대화에 줄이 남고, +가 밝아지고, 창에 이름이 채워진다', async ({ page }) => {
+test('Worktree proposal: a line stays in the conversation, + lights up, and the dialog comes pre-filled with the name', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  // 매니저와 자식을 만든다 (매니저 세션은 목록 순서상 0번이 아니라 이름으로 집는다)
+  // Create a manager and a child (the manager session is picked by name, not by list index 0)
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 매니저 세션을 열고, 매니저가 제안했다고 친다 — 브랜치 이름은 제목에 실려 온다
+  // Open the manager session and simulate the manager proposing — the branch name arrives in the
+  // title
   await page.getByText('Worktree manager', { exact: true }).click()
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -7680,18 +8170,19 @@ test('워크트리 제안: 대화에 줄이 남고, +가 밝아지고, 창에 �
     })
   })
 
-  // 대화에 제안 줄 — 도구 카드가 아니라 가리키는 한 줄이다
+  // The proposal line in the conversation — one line that points, not a tool card
   await expect(page.getByTestId('worktree-proposal')).toContainText('feat/proposed-work')
-  // 이 프로젝트의 + 버튼이 밝아진다
+  // This project's + button lights up
   await expect(page.locator('[data-worktree-proposal]')).toHaveCount(1)
 
-  // 그 문을 열면: 워크트리 켜짐 + 브랜치 이름 채워짐
+  // Opening that door: worktree turned on + branch name filled in
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
   await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/proposed-work')
 
-  // 제안은 여는 순간 소비된다 — 닫고 다시 열면 보통의 빈 창이다
+  // The proposal is consumed the moment it is opened — closing and reopening gives an ordinary
+  // empty dialog
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-worktree-proposal]')).toHaveCount(0)
   await page.getByTestId('project-menu-alpha').click()
@@ -7700,31 +8191,32 @@ test('워크트리 제안: 대화에 줄이 남고, +가 밝아지고, 창에 �
 })
 
 /**
- * 워크트리 프로비저닝 (#69) — 첫 사용은 펼쳐진 입력칸, 저장 후엔 접힌 요약.
- * 설정은 만들기 전에 저장된다 (host가 생성 중에 읽어 돌리므로).
+ * Worktree provisioning (#69) — expanded input fields on first use, a collapsed summary after
+ * saving. The setup is persisted before creation (since the host reads and runs it during
+ * creation).
  */
-test('워크트리 셋업: 처음엔 입력칸, 저장 뒤엔 요약으로 접힌다', async ({ page }) => {
+test('Worktree setup: input fields at first, collapsing into a summary once saved', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
 
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
-  // 저장된 설정이 없으니 입력칸이 펼쳐져 있다
+  // With no saved setup, the input fields stay expanded
   await expect(page.getByTestId('worktree-setup-edit')).toBeVisible()
   await page.getByTestId('worktree-setup-command').fill('pnpm install')
   await page.getByTestId('worktree-copy-files').fill('.env.local, .env')
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  // 저장됐다 — 목이 실물과 같은 정규화를 했는지까지 본다
+  // It was saved — this also checks whether the mock normalized it the same way the real thing does
   const saved = await page.evaluate(() => {
     const m = (window as any).__mock
     return m.projectsList?.[0]?.worktreeSetup ?? [...(m.projectsList ?? [])][0]?.worktreeSetup
   })
   expect(saved).toEqual({ command: 'pnpm install', copyFiles: ['.env.local', '.env'] })
 
-  // 다음에 열면 접힌 요약 한 줄 — 누르면 다시 편집할 수 있다
+  // Opening it next time shows one collapsed summary line — clicking it allows editing again
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
@@ -7735,12 +8227,15 @@ test('워크트리 셋업: 처음엔 입력칸, 저장 뒤엔 요약으로 접�
 })
 
 /**
- * 복사 후보 (#76) — 앱은 **짚어만 준다.**
+ * Copy candidates (#76) — the app only **points them out.**
  *
- * "무시된 건 전부 복사"를 기본값으로 삼지 않는 이유가 이 화면에 그대로 있다: 목록에
- * node_modules 637MB가 크기와 함께 서 있고, 누를지는 사람이 정한다.
+ * The reason "copy everything ignored" is never the default is right there on this screen:
+ * node_modules at 637MB sits in the list with its size shown, and whether to click it is for the
+ * person to decide.
  */
-test('워크트리 셋업: gitignored 후보를 짚어 주고, 눌러서 넣고 뺀다', async ({ page }) => {
+test('Worktree setup: gitignored candidates are pointed out, and clicking adds or removes them', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     ;(window as any).__mock.gitState.ignored = [
@@ -7755,16 +8250,17 @@ test('워크트리 셋업: gitignored 후보를 짚어 주고, 눌러서 넣고 
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
 
-  // 크기가 함께 보인다 — 이 목록에서 사람이 하는 판단이 "이건 너무 크다"라서다
+  // The size shows alongside — the judgment a person makes from this list is "this is too big"
   await expect(page.getByTestId('ignored-node_modules/')).toContainText('637MB')
-  // 크기를 못 잰 것도 목록에는 선다 (크기는 거들 뿐이다)
+  // Something whose size could not be measured still appears in the list (the size is only a hint)
   await expect(page.getByTestId('ignored-weird/')).toBeVisible()
 
   await page.getByTestId('ignored-.env.local').click()
   await expect(page.getByTestId('worktree-copy-files')).toHaveValue('.env.local')
   await page.getByTestId('ignored-node_modules/').click()
   await expect(page.getByTestId('worktree-copy-files')).toHaveValue('.env.local, node_modules/')
-  // 다시 누르면 빠진다 — 칸이 여전히 진실이라 손으로 친 것과 갈리지 않는다
+  // Clicking it again removes it — the field remains the source of truth, so it never diverges
+  // from what was typed by hand
   await page.getByTestId('ignored-.env.local').click()
   await expect(page.getByTestId('worktree-copy-files')).toHaveValue('node_modules/')
 
@@ -7774,8 +8270,8 @@ test('워크트리 셋업: gitignored 후보를 짚어 주고, 눌러서 넣고 
   expect(saved).toEqual({ command: '', copyFiles: ['node_modules/'] })
 })
 
-/** 병합 배지 (#69) — 사실의 통지가 배지가 되고, 정리는 사람이 삭제 대화에서 한다 */
-test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', async ({ page }) => {
+/** The merged badge (#69) — reporting the fact becomes a badge, and cleanup is left to the person via the delete dialog */
+test('Merging a branch shows a merged badge on the sidebar row', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -7787,7 +8283,7 @@ test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', as
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveCount(0)
 
-  // host의 감지가 이 이벤트를 흘린다 — 터미널에서 병합해도 같은 길이다
+  // The host's own detection emits this event — merging from the terminal follows the same path
   await page.evaluate(() => {
     const m = (window as any).__mock
     const child = [...m.sessions.values()].find((s: any) => s.worktree)
@@ -7798,8 +8294,8 @@ test('브랜치가 병합되면 사이드바 줄에 merged 배지가 선다', as
   await expect(page.locator('[data-testid^="merged-badge-"]')).toHaveText('merged')
 })
 
-/** PR 칩 (#76 stage 3) — gh가 측정한 PR 상태가 칩이 되고, 병합되면 merged 배지에 자리를 내준다 */
-test('PR이 열리면 PR 칩이 서고, 병합되면 merged 배지가 대신 선다', async ({ page }) => {
+/** The PR chip (#76 stage 3) — the PR state measured by gh becomes a chip, and it yields its spot to the merged badge once merged */
+test('Opening a PR shows a PR chip, and merging replaces it with the merged badge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-menu-alpha').click()
@@ -7810,7 +8306,8 @@ test('PR이 열리면 PR 칩이 서고, 병합되면 merged 배지가 대신 선
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveCount(0)
 
-  // host의 gh 측정이 이 이벤트를 흘린다 — 스쿼시 병합의 사각지대를 메우는 그 신호
+  // The host's gh measurement emits this event — the signal that covers the blind spot of a
+  // squash merge
   await page.evaluate(() => {
     const m = (window as any).__mock
     const child = [...m.sessions.values()].find((s: any) => s.worktree)
@@ -7822,7 +8319,8 @@ test('PR이 열리면 PR 칩이 서고, 병합되면 merged 배지가 대신 선
   })
   await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveText('PR #12')
 
-  // 병합되면 결말은 한 번만 말한다 — merged 배지가 서고 PR 칩은 물러난다
+  // Once merged, the outcome is stated only once — the merged badge appears and the PR chip steps
+  // aside
   await page.evaluate(() => {
     const m = (window as any).__mock
     const child = [...m.sessions.values()].find((s: any) => s.worktree)
@@ -7832,12 +8330,13 @@ test('PR이 열리면 PR 칩이 서고, 병합되면 merged 배지가 대신 선
   await expect(page.locator('[data-testid^="pr-badge-"]')).toHaveCount(0)
 })
 
-/** #75: 첨부를 실은 말은 한 번만 그려진다 — text가 보낸 원문 그대로라 확정이 맞물린다 */
-test('첨부와 함께 보낸 말은 한 번만 그려진다', async ({ page }) => {
+/** #75: a message carrying an attachment renders only once — since text stays exactly as sent, confirmation matches up cleanly */
+test('A message sent with an attachment renders only once', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '첫 인사')
 
-  // 첨부를 실어 보낸다 — 목이 실물 host처럼 원문만 담긴 user_message를 돌려준다
+  // Send with an attachment — the mock echoes back a user_message with just the raw text, the
+  // same as the real host
   await page.evaluate(async () => {
     const store = (window as any).__store.getState()
     const sid = Object.keys(store.sessions).find((id: string) => store.sessions[id].name !== 'Orchestrator')
@@ -7848,16 +8347,16 @@ test('첨부와 함께 보낸 말은 한 번만 그려진다', async ({ page }) 
 
   const bubbles = page.getByText('이 이미지 봐줘')
   await expect(bubbles).toHaveCount(1)
-  // 바이트 없는 첨부는 이름 칩으로 눕는다 — 무엇을 보냈는지는 남는다
+  // An attachment with no bytes lies flat as a name chip — what was sent remains visible
   await expect(page.getByTestId('msg-user-attachment')).toContainText('shot.png')
 })
 
-/** 이미지 첨부는 실물 썸네일로 서고, 누르면 에이전트 이미지와 같은 확대가 열린다 */
-test('보낸 이미지는 말풍선에 실물로 보이고 눌러 확대된다', async ({ page }) => {
+/** An image attachment shows as a real thumbnail, and clicking opens the same zoom as an agent image */
+test('A sent image shows as itself in the bubble and zooms on click', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
 
-  // 진짜 1×1 PNG — 가짜 바이트면 <img>가 깨져 칩으로 눕는 경로를 타 버린다
+  // An actual 1x1 PNG — fake bytes would break the <img> and fall through to the flat-chip path
   const PNG_1PX =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
   await page.getByTestId('attach-input').setInputFiles({
@@ -7876,7 +8375,8 @@ test('보낸 이미지는 말풍선에 실물로 보이고 눌러 확대된다',
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('image-lightbox')).toHaveCount(0)
 
-  // 저장소에서 다시 불러도 썸네일이 되살아난다 — host가 파일에서 바이트를 다시 싣는 규칙 (재시작과 같은 길)
+  // The thumbnail comes back even reloaded from the store — the rule that the host reloads bytes
+  // from the file (the same path as a restart)
   await page.evaluate(async () => {
     const store = (window as any).__store.getState()
     await store.loadHistory(store.focusedSessionId)
@@ -7884,8 +8384,8 @@ test('보낸 이미지는 말풍선에 실물로 보이고 눌러 확대된다',
   await expect(page.getByTestId('msg-user-attachment').locator('img')).toBeVisible()
 })
 
-/** #69 도그푸딩 ③: 제안은 큐다 — 둘을 제안받으면 +를 두 번 열어 둘 다 소비한다 */
-test('워크트리 제안 둘은 창을 두 번 열어 순서대로 채워진다', async ({ page }) => {
+/** #69 dogfooding finding 3: proposals are a queue — receiving two, opening + twice consumes both */
+test('Two worktree proposals fill in order across two dialog openings', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
@@ -7920,25 +8420,28 @@ test('워크트리 제안 둘은 창을 두 번 열어 순서대로 채워진다
   await page.getByTestId('new-session-alpha').click()
   await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/second')
   await page.keyboard.press('Escape')
-  // 큐가 비었다 — 글로우도 꺼지고 다음 창은 보통 창이다
+  // The queue is empty — the glow turns off, and the next dialog is an ordinary one
   await expect(page.locator('[data-worktree-proposal]')).toHaveCount(0)
 })
 
 /**
- * 프로젝트 삭제 (도그푸딩 요청).
+ * Deleting a project (requested during dogfooding).
  *
- * 지키는 것 넷:
- *  1. 메뉴는 **평소에 없다** — 프로젝트 줄을 읽는 데 버튼이 끼어들지 않는다
- *  2. 이름을 정확히 쳐야 삭제가 열린다 — 손이 기억으로 지나갈 수 있는 길을 두지 않는다
- *  3. 파일 체크박스를 켜면 **설명이 경고로 바뀐다** — 무엇이 달라졌는지 같은 자리에서 읽힌다
- *  4. 지우면 프로젝트도 그 세션도 사이드바에서 사라진다
+ * Four things are guarded:
+ *  1. The menu is **absent by default** — no button gets in the way of reading the project row
+ *  2. Deletion only unlocks by typing the exact name — no path lets the hand slip through from memory
+ *  3. Checking the file checkbox **turns the description into a warning** — what changed reads in the same spot
+ *  4. Deleting removes both the project and its sessions from the sidebar
  */
-test('프로젝트 삭제: 이름을 쳐야 열리고, 파일 체크는 경고로 바뀐다', async ({ page }) => {
+test('Deleting a project: unlocks only by typing the name, and the file checkbox turns into a warning', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '무슨 일이든')
 
-  // 1. 메뉴 버튼은 감춰져 있다 (DOM에는 있고 눈에는 없다 — 호버·포커스로 나온다).
-  //    세션을 만드느라 방금 이 버튼을 눌렀으므로 포인터를 먼저 치운다 — 안 그러면 호버가 남아 있다
+  // 1. The menu button stays hidden (present in the DOM, invisible on screen — it appears on
+  //    hover/focus). Since creating the session just clicked this button, move the pointer away
+  //    first — otherwise the hover state lingers
   await page.mouse.move(0, 0)
   const actions = page.getByTestId('project-actions-alpha')
   await expect(actions).toHaveCSS('opacity', '0')
@@ -7948,10 +8451,10 @@ test('프로젝트 삭제: 이름을 쳐야 열리고, 파일 체크는 경고�
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('delete-project-alpha').click()
 
-  // 2. 이름을 치기 전에는 못 지운다
+  // 2. It cannot be deleted before the name is typed
   const confirm = page.getByTestId('delete-project-confirm')
   await expect(confirm).toBeDisabled()
-  // 기본은 "이 앱의 기록만" — 폴더는 그대로다
+  // The default is "only this app's record" — the folder is left untouched
   await expect(page.getByTestId('delete-project-note')).toContainText('folder on disk is left alone')
   await expect(page.getByTestId('delete-project-warning')).toHaveCount(0)
 
@@ -7960,16 +8463,17 @@ test('프로젝트 삭제: 이름을 쳐야 열리고, 파일 체크는 경고�
   await page.getByTestId('delete-project-name-input').fill('alpha')
   await expect(confirm).toBeEnabled()
 
-  // 3. 파일까지 지운다고 켜면 설명이 사라지고 경고가 그 자리에 선다
+  // 3. Turning on "delete files too" removes the description and a warning takes its place
   await page.getByTestId('delete-project-files-toggle').locator('input').check()
   await expect(page.getByTestId('delete-project-note')).toHaveCount(0)
   await expect(page.getByTestId('delete-project-warning')).toContainText('/tmp/alpha')
   await expect(confirm).toHaveText('Delete and trash folder')
-  // 경고는 삭제 팔레트로 선다 (도그푸딩: 위험한 자리는 빨갛게) — diff의 del 색 그대로다
+  // The warning uses the delete palette (dogfooding: dangerous spots are red) — the same color as
+  // a diff's deletion
   await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', 'rgb(43, 21, 23)')
   await expect(confirm).toHaveCSS('color', 'rgb(255, 161, 152)')
 
-  // 4. 지운다 — 프로젝트도 세션도 사라지고, 폴더는 휴지통으로 갔다
+  // 4. Delete it — both the project and its sessions disappear, and the folder went to the trash
   await confirm.click()
   await expect(page.getByTestId('delete-project-dialog')).toBeHidden()
   await expect(page.getByTestId('project-alpha')).toHaveCount(0)
@@ -7977,8 +8481,8 @@ test('프로젝트 삭제: 이름을 쳐야 열리고, 파일 체크는 경고�
   expect(await page.evaluate(() => (window as any).__mock.trashed)).toEqual(['.'])
 })
 
-/** 파일을 안 켜면 폴더는 손대지 않는다 — 기본값이 정말 기본값인지 (경고문이 아니라 동작으로) */
-test('프로젝트 삭제: 파일 체크를 안 하면 폴더는 그대로다', async ({ page }) => {
+/** With the files option off, the folder is left untouched — confirming the default is really the default (through behavior, not just the warning text) */
+test('Deleting a project: leaving the file checkbox off keeps the folder untouched', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await page.getByTestId('project-header-alpha').hover()
@@ -7992,19 +8496,22 @@ test('프로젝트 삭제: 파일 체크를 안 하면 폴더는 그대로다', 
 })
 
 /**
- * 오케스트레이터를 **어느 문으로 들어가든** 오케스트레이터 화면이어야 한다 (도그푸딩 버그).
+ * The orchestrator must be the orchestrator screen **no matter which door it is entered through**
+ * (a dogfooding bug).
  *
- * 사이드바 버튼으로 들어가면 맞았고, 상단 바의 응답 대기 목록으로 들어가면 틀렸다:
- * 오케스트레이터 대화가 세션 화면의 틀 안에서 열려 **오른쪽 증거 레인이 딸려 나왔고**
- * (오케스트레이터에는 볼 저장소가 없다), 사이드바 버튼은 안 눌린 것처럼 보였다.
+ * Entering via the sidebar button worked; entering via the top bar's waiting list did not: the
+ * orchestrator conversation opened inside the session screen's frame, **dragging the right-side
+ * evidence lane along with it** (the orchestrator has no repository to show), and the sidebar
+ * button looked unpressed.
  *
- * 알림 카드도 같은 문(focusSession)을 쓰므로 같이 못 박는다 — 원인이 하나면 증상도
- * 하나로 끝나야 하고, 그 사실은 두 입구를 모두 눌러 봐야만 증명된다.
+ * The notice card uses the same door (focusSession), so this pins that down too — if there is
+ * one cause, there should be only one symptom, and that claim is only proven by clicking through
+ * both entrances.
  */
-test('오케스트레이터는 인박스로 들어가도 오케스트레이터 화면이다', async ({ page }) => {
+test('The orchestrator is still the orchestrator screen when entered via the inbox', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  // 오케스트레이터를 세우고 응답 대기로 만든다
+  // Set up the orchestrator and put it into waiting-for-input
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('orchestrator-input').fill('상태 좀 보여줘')
   await page.getByTestId('orchestrator-input').press('Enter')
@@ -8015,27 +8522,27 @@ test('오케스트레이터는 인박스로 들어가도 오케스트레이터 �
     ;(window as any).__mock.emit({ type: 'state_change', sessionId: id, state: 'waiting_input' })
   }, orc)
 
-  // 다른 데를 보고 있다가 — 세션 화면으로 옮겨 둔다
+  // While looking elsewhere — switch over to the session screen
   await newSession(page, 'alpha', '딴 일')
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 
-  // 상단 바의 응답 대기 목록으로 돌아온다
+  // Come back via the top bar's waiting list
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()
   await page.getByTestId(`inbox-item-${orc}`).click()
 
-  // 증거 레인은 딸려 나오지 않는다 — 오케스트레이터에는 볼 저장소가 없다
+  // The evidence lane does not drag along — the orchestrator has no repository to show
   await expect(page.getByTestId('evidence-panel')).toHaveCount(0)
-  // 그리고 사이드바에서 눌린 것으로 보인다
+  // And it appears pressed in the sidebar
   await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
   expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('orchestrator')
 
   /*
-    두 번째 문: 응답이 끝났다고 알리는 카드 (도그푸딩에서 함께 물은 것).
-    같은 focusSession을 부르므로 원인은 하나지만, "원인이 하나였다"는 것은
-    두 입구를 다 눌러 봐야 사실이 된다.
+    The second door: the card that reports a reply has finished (asked about together during
+    dogfooding). Since it calls the same focusSession, there is one cause, but "there was one
+    cause" only becomes fact by clicking through both entrances.
   */
-  // 다시 세션 화면으로 옮겨 둔다 — 카드는 보고 있지 않은 세션에만 뜬다
+  // Switch back over to the session screen — the card only appears for a session not being watched
   await page.locator('[data-testid^="session-row-"]').first().click()
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
   await page.evaluate((id: string) => {
@@ -8049,14 +8556,18 @@ test('오케스트레이터는 인박스로 들어가도 오케스트레이터 �
 })
 
 /*
- * 관제 레일 (#80·#81) — 사람의 작업대. 내 차례가 줄로 서고, 한 줄짜리 답은
- * 줄 안에서 끝나며, 기계의 알림(control_notify)이 꽂히고, 토글이 흔적 없이 끈다.
+ * The control rail (#80/#81) — the person's workbench. Turns awaiting me line up as rows, a
+ * one-line reply is settled right in the row, machine notifications (control_notify) plug in,
+ * and the toggle turns it off without a trace.
  */
-test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 화면에서 돈다', async ({ page }) => {
+test('Control rail: inline replies for my turn, notifications, and the toggle all work from the orchestrator screen', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '레일 시험')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
-  // 턴을 끝내 세션을 "내 차례"로 — working 확인 후 끝낸다 (이벤트 역전 방지)
+  // End the turn to put the session into "my turn" — end only after confirming working (to avoid
+  // reversing event order)
   await expect
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
     .toBe('working')
@@ -8069,7 +8580,8 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await page.getByTestId('orchestrator-button').click()
   await expect(page.getByTestId('control-rail')).toBeVisible()
 
-  // 내 차례에 줄이 서고, 줄 안 즉답이 세션에 닿는다 — 세션을 열지 않고 기어를 돌린다
+  // A row appears for my turn, and an inline reply in that row reaches the session — turning the
+  // gears without ever opening the session
   await expect(page.getByTestId(`rail-turn-${id}`)).toBeVisible()
   await page.getByTestId(`rail-input-${id}`).fill('이어서 진행해')
   await page.getByTestId(`rail-input-${id}`).press('Enter')
@@ -8077,21 +8589,32 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
     .poll(() => page.evaluate((sid: string) => (window as any).__store.getState().sessions[sid]?.state, id))
     .toBe('working')
 
-  // 진행 중 줄은 **말이 정본, 도구는 보조** — 툴 제목이 서사를 덮으면 맥락이 사라진다
+  // In a running row, **the words are the source of truth, the tool is secondary** — letting a
+  // tool title bury the narrative loses the context
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
     m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: '정렬 문제를 고치는 중입니다' })
-    m.emit({ type: 'tool_call', sessionId: sid, callId: 'c9', summary: { tool: 'Bash', title: 'pnpm verify', readOnly: false, paths: [] } })
+    m.emit({
+      type: 'tool_call',
+      sessionId: sid,
+      callId: 'c9',
+      summary: { tool: 'Bash', title: 'pnpm verify', readOnly: false, paths: [] },
+    })
   }, id)
   await expect(page.getByTestId(`rail-running-${id}`)).toContainText('정렬 문제를 고치는 중입니다')
   await expect(page.getByTestId(`rail-running-${id}`)).toContainText('Bash: pnpm verify')
 
-  // 즉답은 판정 숫자로 남는다 — "계속 쓰는가"는 감이 아니라 숫자다
+  // An inline reply is recorded as a measured count — "is this still being used" is a number, not
+  // a feeling
   await expect
-    .poll(() => page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.metrics ?? {}).inlineReplies ?? 0))
+    .poll(() =>
+      page.evaluate(
+        () => ((window as any).__store.getState().apps['control']?.doc?.metrics ?? {}).inlineReplies ?? 0,
+      ),
+    )
     .toBeGreaterThan(0)
 
-  // 기계의 알림 — 사람이 읽고 지운다
+  // A machine notification — the person reads it and dismisses it
   await page.evaluate(() => {
     void (window as any).__store.getState().setAppDoc('control', {
       notifies: [{ id: 'n1', text: '세션3이 외부 조건에 막혔습니다', priority: 'high', ts: 1 }],
@@ -8101,7 +8624,8 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await page.getByTestId('rail-notify-dismiss-n1').click()
   await expect(page.getByTestId('rail-notify-n1')).toHaveCount(0)
 
-  // 폭 조절 — 왼 모서리 끌기, 더블클릭 = 기본 폭. 보는 방식이라 워크스페이스에 남는다
+  // Resizing — drag the left edge, double-click resets to the default width. Since this is a way
+  // of viewing, it persists in the workspace
   const railBox = async () => (await page.getByTestId('app-rails').boundingBox())!
   const before = (await railBox()).width
   const handle = (await page.getByTestId('rail-resize').boundingBox())!
@@ -8113,20 +8637,25 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
   await page.getByTestId('rail-resize').dblclick()
   expect(Math.abs((await railBox()).width - before)).toBeLessThan(4)
 
-  // 토글 오프 = 레일이 흔적 없이 물러난다 (지워지는 게 아니라)
+  // Toggling off = the rail withdraws without a trace (it is not deleted)
   await page.keyboard.press('Meta+k')
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
   await page.getByTestId('settings-tab-apps').click()
-  // 감시 선언 편집기 (#80 체크포인트 v1) — 패턴이 문서에 남는다 (판정은 host 관찰 훅의 몫)
+  // The watch-declaration editor (#80 checkpoint v1) — the pattern persists in the document
+  // (judging it is the host's observation hook's job)
   await page.getByTestId('watch-pattern').fill('git commit')
   await page.getByTestId('watch-add').click()
   await expect
-    .poll(() => page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length))
+    .poll(() =>
+      page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length),
+    )
     .toBe(1)
   await page.locator('[data-testid^="watch-remove-"]').click()
   await expect
-    .poll(() => page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length))
+    .poll(() =>
+      page.evaluate(() => ((window as any).__store.getState().apps['control']?.doc?.watches ?? []).length),
+    )
     .toBe(0)
 
   await page.getByTestId('app-toggle-control').locator('input').uncheck()
@@ -8135,10 +8664,13 @@ test('관제 레일: 내 차례 즉답·알림·토글이 오케스트레이터 
 })
 
 /*
- * 업무 만들기 (#80 목적 2): 구성원을 고르면 반장이 서고, 사이드바·레일 양쪽에서 닿는다.
- * 생성 로직 본체는 host 앱 도구(유닛이 덮는다) — 여기는 사람 경로의 배선을 확인한다.
+ * Creating a task (#80 purpose 2): picking members creates a coordinator, reachable from both
+ * the sidebar and the rail. The core creation logic lives in the host's app tool (covered by
+ * unit tests) — this checks the wiring of the human path.
  */
-test('업무 만들기: 레일 다이얼로그 → 반장 세션 → 사이드바·레일에 선다', async ({ page }) => {
+test('Creating a task: rail dialog -> coordinator session -> appears in the sidebar and the rail', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '구성원이 될 세션')
   const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
@@ -8151,44 +8683,48 @@ test('업무 만들기: 레일 다이얼로그 → 반장 세션 → 사이드�
   await page.getByTestId('task-create').click()
   await expect(page.getByTestId('new-task-dialog')).toBeHidden()
 
-  // 같은 문(control_create_task)을 지났다 — 사람 경로도 host 도구 하나다
+  // It went through the same door (control_create_task) — the human path is also just one host tool
   const invoke = await page.evaluate(() => (window as any).__mock.lastInvoke)
   expect(invoke.name).toBe('control_create_task')
   expect(invoke.args.memberSessionIds).toEqual([workerId])
 
   /*
-   * 반장은 **자기 앱의 줄에만** 선다 (사용자 요청 2026-09-09). 예전에는 사이드바에도
-   * 같은 것이 이름만 다른 줄로 서서, 업무가 늘면 양쪽이 같이 길어졌다.
+   * The coordinator appears **only in its own app's row** (requested by the person, 2026-09-09).
+   * It used to also show up in the sidebar as the same thing under a different-looking row, so
+   * both grew longer together as tasks piled up.
    */
   await expect(page.getByTestId('rail-tasks')).toContainText('스킬 구현')
   await expect(page.locator('[data-testid^="homeless-row-"]')).toHaveCount(0)
 
-  // 구성원이 이름으로 보인다 (2026-09-06) — 숫자만으로는 어느 세션들의 업무인지 안 읽혔다
+  // Members appear by name (2026-09-06) — a bare count did not say which sessions the task
+  // belonged to
   await expect(page.getByTestId('rail-tasks')).toContainText('구성원이 될 세션')
-  // 칩을 누르면 그 세션으로 간다
+  // Clicking the chip navigates to that session
   await page.locator(`[data-testid^="rail-task-member-"][data-testid$="-${workerId}"]`).click()
   await expect
     .poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId))
     .toBe(workerId)
-  // 반장은 레일의 내 차례/진행 중에는 안 선다 — 메타 층은 Tasks 섹션의 몫
+  // The coordinator does not appear in the rail's "my turn"/"running" rows — the meta layer
+  // belongs to the Tasks section
   await expect(page.locator('[data-testid^="rail-turn-coord"]')).toHaveCount(0)
 })
 
 /**
- * 모델 목록은 **도구의 어휘**다 (도그푸딩 2026-09-09: "클로드 세션인데 코덱스 모델이 떠 있다").
+ * The model list is **a tool's own vocabulary** (dogfooding, 2026-09-09: "this is a claude
+ * session, but codex models are showing").
  *
- * 다른 도구의 목록이 잠깐이라도 남아 있으면 화면이 고를 수 없는 것을 권한다 —
- * 'sonnet'과 'gpt-5.6-terra'는 같은 자리를 가리키는 두 이름이 아니라 서로의 사전에
- * 없는 낱말이다. 목록이 오는 사이에는 **비어 있는 게** 맞다.
+ * Even briefly leaving another tool's list in place offers something the screen cannot actually
+ * pick — 'sonnet' and 'gpt-5.6-terra' are not two names for the same slot, they are words absent
+ * from each other's dictionary. While the new list is loading, being **empty** is correct.
  */
-test('세션을 옮기면 옛 도구의 모델 목록이 남지 않는다', async ({ page }) => {
+test("Switching sessions does not leave the previous tool's model list behind", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'claude 세션')
   const claudeId = await page.evaluate(
     () => (window as never as { __store: any }).__store.getState().focusedSessionId,
   )
 
-  // codex 세션을 하나 만들고 그 메뉴를 열어 목록을 채운다
+  // Create a codex session and open its menu to populate the list
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('tool-option-codex').click()
@@ -8199,9 +8735,10 @@ test('세션을 옮기면 옛 도구의 모델 목록이 남지 않는다', asyn
   await page.keyboard.press('Escape')
 
   /*
-   * 목록을 **테스트가 놓아줄 때까지** 붙잡는다. 지연 시간으로 창을 만들면 그 창이
-   * 다른 기다림(이름 바뀌기)에 먹혀서, 고쳐도 안 고쳐도 통과하는 시험이 된다 — 실제로
-   * 처음에 그랬다. 붙잡았다 놓으면 그 창은 시험이 정한다.
+   * Hold the list **until the test releases it.** Creating a window using a delay lets that
+   * window get swallowed by some other wait (a name changing), turning this into a test that
+   * passes whether or not the fix exists — that actually happened at first. Holding it and
+   * releasing it lets the test decide exactly when that window is.
    */
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __releaseModels?: () => void }
@@ -8218,24 +8755,29 @@ test('세션을 옮기면 옛 도구의 모델 목록이 남지 않는다', asyn
     (id: string) => (window as never as { __store: any }).__store.getState().focusSession(id),
     claudeId,
   )
-  // 화면이 그 세션으로 바뀐 뒤에 연다 — 안 그러면 아직 코덱스 세션의 메뉴를 여는 것이다
+  // Open only after the screen has switched to that session — otherwise this would still be
+  // opening the codex session's menu
   await expect(page.getByTestId('session-name')).toHaveText('claude 세션')
   await page.getByTestId('settings-open').click()
   const menu = page.getByTestId('settings-menu')
   await expect(menu.getByTestId('settings-model-gpt-5.6-terra')).toHaveCount(0)
 
-  // 놓아주면 이 도구의 목록이 선다
+  // Once released, this tool's own list appears
   await page.evaluate(() => (window as never as { __releaseModels?: () => void }).__releaseModels?.())
   await expect(menu.getByTestId('settings-model-haiku')).toBeVisible()
 })
 
 /**
- * 연결됨은 적지 않고, **끊겼을 때만** 말한다 (사용자 요청 2026-09-09).
+ * "Connected" is never written; it speaks up **only when disconnected** (requested by the
+ * person, 2026-09-09).
  *
- * 정상일 때 자리를 차지하는 상태 표시는 계기판이 아니라 장식이다. 다만 끊김은 조용할 수
- * 없다 — 그때는 화면의 나머지가 거짓말이 될 수 있다 (2026-09-07의 오케스트레이터 화면).
+ * A status indicator that takes up space when everything is normal is decoration, not a
+ * dashboard. But a disconnect cannot stay quiet — at that point the rest of the screen can turn
+ * into a lie (the orchestrator screen incident of 2026-09-07).
  */
-test('연결됨은 조용하고, 끊기면 도넛 자리에 그 사실이 선다', async ({ page }) => {
+test('Being connected stays quiet, and a disconnect states itself where the donuts would be', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await expect(page.getByTestId('connection')).toHaveCount(0)
   await expect(page.getByTestId('usage-donuts')).toBeVisible()
@@ -8243,8 +8785,9 @@ test('연결됨은 조용하고, 끊기면 도넛 자리에 그 사실이 선다
   await page.evaluate(() => (window as never as { __mock: any }).__mock.setConnectionState('disconnected'))
 
   /*
-   * host가 없으면 에이전트에 닿을 방법 자체가 없다 — 도넛을 빈 채로 두면 "도구가 하나도
-   * 없다"로 읽히는데 그건 사실이 아니라 **모르는 것**이다. 같은 자리가 이유를 말한다.
+   * With no host, there is simply no way to reach any agent — leaving the donuts empty would
+   * read as "there are no tools at all", which is not the fact, it is **not knowing**. The same
+   * spot states the reason.
    */
   await expect(page.getByTestId('connection')).toContainText('Disconnected')
   await expect(page.getByTestId('usage-donuts')).toHaveCount(0)
@@ -8255,15 +8798,19 @@ test('연결됨은 조용하고, 끊기면 도넛 자리에 그 사실이 선다
 })
 
 /**
- * 앱을 끄면 그 앱의 세션은 사이드바가 받는다 (사용자 요청 2026-09-09).
+ * Turning off an app hands its sessions over to the sidebar (requested by the person,
+ * 2026-09-09).
  *
- * 규칙은 하나다: 뜻을 준 앱이 집이고, 집이 없으면 사이드바가 받는다. 이게 없으면
- * 토글 하나가 세션을 화면에서 지워 버린다 — 말 걸 방법이 사라진다.
+ * There is one rule: the app that gave it meaning is its home, and with no home, the sidebar
+ * takes it in. Without this, a single toggle would wipe a session off the screen entirely —
+ * there would be no way left to talk to it.
  */
-test('관제 앱을 끄면 반장 세션이 사이드바로 내려온다', async ({ page }) => {
+test('Turning off the control app moves the coordinator session down to the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '구성원이 될 세션')
-  const workerId = await page.evaluate(() => [...(window as never as { __mock: any }).__mock.sessions.keys()][0])
+  const workerId = await page.evaluate(
+    () => [...(window as never as { __mock: any }).__mock.sessions.keys()][0],
+  )
 
   await page.getByTestId('orchestrator-button').click()
   await page.getByTestId('rail-new-task').click()
@@ -8272,30 +8819,36 @@ test('관제 앱을 끄면 반장 세션이 사이드바로 내려온다', async
   await page.getByTestId(`task-member-${workerId}`).check()
   await page.getByTestId('task-create').click()
   await expect(page.getByTestId('new-task-dialog')).toBeHidden()
-  // 앱이 켜져 있는 동안은 앱의 줄에만 있다
+  // While the app is on, it lives only in the app's own row
   await expect(page.locator('[data-testid^="homeless-row-"]')).toHaveCount(0)
 
-  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setAppEnabled('control', false))
+  await page.evaluate(() =>
+    (window as never as { __store: any }).__store.getState().setAppEnabled('control', false),
+  )
 
-  // 집이 사라졌으니 사이드바가 받는다 — 이름으로 찾아 열 수 있어야 한다
+  // With its home gone, the sidebar takes it in — it must be findable and openable by name
   await expect(page.getByTestId('homeless-sessions')).toContainText('스킬 구현')
   await page.locator('[data-testid^="homeless-row-"]').first().click()
   await expect(page.getByTestId('session-view')).toBeVisible()
 })
 
 /*
- * 반장 옆에 남의 프로젝트 증거가 서면 안 된다 (도그푸딩 지적 2026-09-06).
+ * Someone else's project evidence must never stand next to a coordinator (a dogfooding finding,
+ * 2026-09-06).
  *
- * 반장은 오케스트레이터 홈에서 프로젝트 없이 돈다 — 그런데 증거 패널이 "직전에 보던
- * 프로젝트"로 폴백해서, 반장을 열면 마지막 프로젝트의 파일·깃 기록이 옆에 섰다.
- * 반장이 그 폴더에서 시작한 것처럼 읽힌다. 폴백은 아무 세션도 안 볼 때의 것이다.
+ * A coordinator runs from the orchestrator's home with no project of its own — yet the evidence
+ * panel fell back to "the project last viewed", so opening a coordinator put the last project's
+ * files and git history right next to it, reading as if the coordinator had started from that
+ * folder. The fallback belongs only to the state of viewing no session at all.
  */
-test('반장 세션을 열면 증거 패널이 비어 선다 — 직전 프로젝트로 폴백하지 않는다', async ({ page }) => {
+test('Opening a coordinator session shows an empty evidence panel — it does not fall back to the last project', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '구성원이 될 세션')
   const workerId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
-  // 알파를 보고 있었다 — 증거 패널이 알파를 그리고 있다
+  // Was viewing alpha — the evidence panel is drawing alpha
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 
   await page.getByTestId('orchestrator-button').click()
@@ -8305,28 +8858,33 @@ test('반장 세션을 열면 증거 패널이 비어 선다 — 직전 프로�
   await page.getByTestId(`task-member-${workerId}`).check()
   await page.getByTestId('task-create').click()
 
-  // 반장을 연다 (업무 줄이 곧 반장이다) — 프로젝트 없는 세션이니 증거 레인 자체가 없어야 한다
+  // Open the coordinator (the task row is the coordinator) — with no project on that session, the
+  // evidence lane itself must not exist
   await page.locator('[data-testid^="rail-task-open-"]').first().click()
   await expect(page.getByTestId('session-view')).toBeVisible()
   await expect(page.getByTestId('evidence-panel')).toHaveCount(0)
   await expect(page.getByTestId('evidence-rail-shell')).toHaveCount(0)
 
-  // 다시 워커(알파)로 오면 증거는 돌아온다 — 없앤 게 아니라 폴백만 걷은 것이다
+  // Returning to the worker (alpha) brings the evidence back — it was not removed, only the
+  // fallback was
   await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), workerId)
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
 })
 
 /**
- * 돌고 있는 칸의 회전 테두리는 **칸의 테두리**다 — 칸 밖의 것을 덮으면 안 된다.
+ * A spinning panel's rotating border is **the panel's own border** — it must never cover
+ * anything outside the panel.
  *
- * 링은 z-30으로 선다. 칸 안에서 접힌 입력창(z-20)이 아랫변을 덮은 적이 있어서 올린 값이다.
- * 그런데 칸이 쌓임 맥락을 만들지 않으면 그 30은 칸 밖에서도 30이라, 파일·깃 화면(z-20)
- * 위로 무지개 한 줄이 그려졌다 (사용자 지적).
+ * The ring sits at z-30, a value raised because the collapsed composer (z-20) inside the panel
+ * once covered its bottom edge. But if the panel does not establish its own stacking context,
+ * that 30 is still 30 outside the panel too, and a rainbow line got drawn over the files/git
+ * screen (z-20) (pointed out by the person).
  *
- * 숫자를 비교하지 않고 **그 픽셀의 맨 위에 무엇이 있는지**를 본다. z 값은 쌓임 맥락마다
- * 뜻이 달라서, 30 > 20이라는 사실만으로는 무엇이 보이는지 알 수 없다.
+ * Rather than comparing numbers, this checks **what actually sits on top of that pixel**. A z
+ * value means something different in every stacking context, so the bare fact that 30 > 20 says
+ * nothing about what is actually visible.
  */
-test('돌고 있는 칸의 테두리가 파일·깃 화면 위로 새어 나오지 않는다', async ({ page }) => {
+test("A spinning panel's border does not leak over the files/git screen", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
@@ -8348,9 +8906,10 @@ test('돌고 있는 칸의 테두리가 파일·깃 화면 위로 새어 나오�
     const ring = document.querySelector('.cc-orbit-ring-layer') as HTMLElement | null
     if (!ring) return { found: false, inOverlay: false }
     /*
-     * 링은 클릭을 통과시키므로(pointer-events: none) 평소에는 hit-test에 잡히지 않는다.
-     * 그대로 물으면 "덮였는가"가 아니라 "클릭이 가는가"를 재게 되어, 링이 화면 위로
-     * 삐져나온 상태에서도 통과한다. 재는 동안만 포인터를 켜서 **그리기 순서**를 묻는다.
+     * The ring lets clicks pass through it (pointer-events: none), so it is normally invisible to
+     * a hit-test. Asking directly would measure "does a click land" instead of "is it covered",
+     * and that passes even while the ring is spilling over the screen. This turns pointer events
+     * on only while measuring, to ask about **paint order** instead.
      */
     const before = ring.style.pointerEvents
     ring.style.pointerEvents = 'auto'
@@ -8364,16 +8923,18 @@ test('돌고 있는 칸의 테두리가 파일·깃 화면 위로 새어 나오�
 })
 
 /**
- * 긴 오류 문장이 대화에 가로 스크롤을 만들지 않는다 (#107 후속).
+ * A long error sentence does not create horizontal scroll in the conversation (#107 follow-up).
  *
- * 구분선 라벨은 "여기서 대화가 압축됨" 같은 짧은 글을 담으려고 만들어졌고 `shrink-0`이
- * 맞는 값이었다. 실패한 턴을 화면에 올리면서 토큰 만료 같은 긴 문장이 같은 자리에 실렸고,
- * 그 줄이 칸을 밀어내 대화 전체가 옆으로 밀렸다 (도그푸딩 지적). 사람이 읽으라고 띄운
- * 문장이 화면 밖에 있으면 띄운 의미가 없다.
+ * The divider label was built to hold short text like "conversation compacted here", and
+ * `shrink-0` was the right value for that. Once failed turns started landing on screen, long
+ * sentences like a token expiring landed in the same spot, and that line pushed the panel wide
+ * enough to shift the whole conversation sideways (a dogfooding finding). A sentence put up for
+ * the person to read is pointless if it sits off screen.
  *
- * 재는 것은 클래스 이름이 아니라 **폭**이다. 스크롤이 생겼는지는 그것만이 답한다.
+ * What is measured is not the class name but **the width**. Only that answers whether scroll
+ * actually appeared.
  */
-test('긴 오류 문장이 대화를 옆으로 밀지 않는다', async ({ page }) => {
+test('A long error sentence does not push the conversation sideways', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
@@ -8399,48 +8960,57 @@ test('긴 오류 문장이 대화를 옆으로 밀지 않는다', async ({ page 
 })
 
 /**
- * 질문이 열려 있을 때 입력창에 친 글은 **그 질문의 답**이 된다 (#125).
+ * While a question is open, whatever is typed into the composer becomes **the answer to that
+ * question** (#125).
  *
- * 실사고 2026-09-23: 카드가 떠 있는 동안 "질문 다시 해줄래?"라고 쳤더니 질문이 이유 없이
- * 사라지고 턴이 error_during_execution으로 깨졌다. 저장된 tool_result에는 클로드 코드가
- * 도구 사용을 거절당했을 때 내보내는 문구가 그대로 남아 있었다. 입력을 막는 대신, 카드에
- * 이미 있는 "Other — write your own"과 같은 뜻으로 받아 준다.
+ * A real incident, 2026-09-23: with the card still open, typing "can you ask that again?" made
+ * the question disappear for no stated reason and broke the turn with error_during_execution. The
+ * stored tool_result still held the exact phrase Claude Code emits when a tool use is refused.
+ * Instead of blocking input, this accepts it as meaning the same thing as the card's own "Other —
+ * write your own".
  */
-test('질문이 열려 있으면 입력창에 친 글이 그 답으로 간다 (#125)', async ({ page }) => {
+test('While a question is open, text typed into the composer becomes its answer (#125)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
   await expect(page.getByTestId('question-card')).toBeVisible()
 
-  // 무엇이 일어날지 누르기 전에 알려 준다
+  // States what will happen before it is submitted
   await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /answer to the question/i)
 
   await page.getByTestId('prompt-input').fill('질문 다시 해줄래?')
   await page.getByTestId('prompt-input').press('Enter')
 
-  // 목은 받은 답을 그대로 되돌려 준다 — 거절됐다면 이 줄이 없다
+  // The mock echoes the received answer back exactly — if it were refused, this line would not exist
   await expect(page.getByTestId('chat-stream')).toContainText('답 받음: 질문 다시 해줄래?')
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
 
 /**
- * #125의 나머지 (#174): 글이 답이 될 수 없으면(질문이 여럿이거나 첨부가 있음) 보내기 전에 입력창이 그렇다고 말하고,
- * 보내서 질문이 버려지면 대화에 한 줄 남는다. 안내문이 첨부를 보지 않던 동안, 파일을 붙이면 "답을 쓰라"는 안내 아래에서
- * 글이 새 턴으로 가 질문이 조용히 버려졌다.
+ * The rest of #125 (#174): when text cannot be the answer (multiple questions, or an attachment
+ * present), the composer says so before it is sent, and if sending drops the question anyway, a
+ * line stays in the conversation. While the hint never checked attachments, attaching a file
+ * under a "write your answer" hint sent the text as a new turn and silently dropped the question.
  */
-test('질문이 하나라도 파일을 붙이면 글이 답이 될 수 없다고 입력창이 먼저 말한다 (#174)', async ({ page }) => {
+test('The composer states first that text cannot answer once any file is attached to a question (#174)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
   await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /answer to the question/i)
 
-  // 파일을 붙이면 답이 될 수 없다 — 안내문이 바로 바뀐다
-  await page.getByTestId('attach-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('x') })
+  // Attaching a file makes it unable to answer — the hint changes immediately
+  await page
+    .getByTestId('attach-input')
+    .setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('x') })
   await expect(page.getByTestId('attachment-list')).toContainText('notes.txt')
   await expect(page.getByTestId('prompt-input')).toHaveAttribute('placeholder', /drops the question card/i)
 })
 
-test('질문이 여럿이면 보낸 글은 새 턴이 되고, 무엇이 버려졌는지 대화에 한 줄 남는다 (#174)', async ({ page }) => {
+test('With multiple questions, sent text becomes a new turn, and a line records what was dropped (#174)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q2', questions: QUESTIONS })
@@ -8452,7 +9022,9 @@ test('질문이 여럿이면 보낸 글은 새 턴이 되고, 무엇이 버려�
   await expect(page.getByTestId('chat-stream')).toContainText('"점심 뭐 먹을까?", "음료는?"')
 })
 
-test('질문이 열린 세션은 에이전트에게 인수인계 노트를 부탁할 수 없고, 기록 모드는 된다 (#174)', async ({ page }) => {
+test('A session with an open question cannot be asked for a handoff note, but record mode still works (#174)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q3', questions: [QUESTIONS[0]] })
@@ -8468,9 +9040,11 @@ test('질문이 열린 세션은 에이전트에게 인수인계 노트를 부�
 })
 
 /**
- * 보내는 길이 실패하거나 경주해도 사람이 쓴 것은 남는다 (#180).
+ * What the person typed survives even if the send path fails or races (#180).
  */
-test('오케스트레이터가 태어나지 못하면 첫 질문이 입력창으로 돌아온다 (#180)', async ({ page }) => {
+test('If the orchestrator fails to come to life, the first question returns to the composer (#180)', async ({
+  page,
+}) => {
   await setup(page)
   await page.evaluate(() => {
     ;(window as any).__mock.agents.orchestrator = async () => {
@@ -8482,7 +9056,9 @@ test('오케스트레이터가 태어나지 못하면 첫 질문이 입력창으
   await expect(page.getByTestId('orchestrator-input')).toHaveValue('what is running?')
 })
 
-test('⌘Enter로 보내기를 켜면 오케스트레이터의 첫 입력창도 맨 Enter로 보내지 않는다 (#180)', async ({ page }) => {
+test("Turning on ⌘Enter to send also keeps the orchestrator's first composer from sending on a plain Enter (#180)", async ({
+  page,
+}) => {
   await setup(page)
   await page.evaluate(() => {
     const st = (window as any).__store
@@ -8495,7 +9071,9 @@ test('⌘Enter로 보내기를 켜면 오케스트레이터의 첫 입력창도 
   expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeNull()
 })
 
-test('워크트리 매니저를 못 만들면 창이 남아 이유를 말한다 (#180)', async ({ page }) => {
+test('If the worktree manager cannot be created, the dialog stays open and states why (#180)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     ;(window as any).__mock.projects.createWorktreeManager = async () => {
@@ -8509,7 +9087,9 @@ test('워크트리 매니저를 못 만들면 창이 남아 이유를 말한다 
   await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
 })
 
-test('첨부가 올라가는 동안에는 보내지 않고, 끝나면 글과 함께 간다 (#180)', async ({ page }) => {
+test('Nothing sends while an attachment is uploading, and it goes out with the text once it finishes (#180)', async ({
+  page,
+}) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '작업')
   await page.evaluate(() => {
@@ -8521,8 +9101,11 @@ test('첨부가 올라가는 동안에는 보내지 않고, 끝나면 글과 함
       return save(...a)
     }
   })
-  await page.getByTestId('attach-input').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from('png') })
-  // 고른 파일은 떠 두고 칸은 비운다 — 같은 파일을 다시 골라도 change가 온다
+  await page
+    .getByTestId('attach-input')
+    .setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from('png') })
+  // Keep the picked file pending and clear the field — picking the same file again still fires a
+  // change event
   await expect(page.getByTestId('attach-input')).toHaveValue('')
   await expect(page.getByTestId('attachment-uploading')).toBeVisible()
 
@@ -8536,6 +9119,7 @@ test('첨부가 올라가는 동안에는 보내지 않고, 끝나면 글과 함
   await expect(page.getByTestId('attachment-list')).toContainText('shot.png')
   await page.getByTestId('prompt-input').press('Enter')
   await expect(page.getByTestId('msg-user').last()).toContainText('shot.png')
-  expect(await page.evaluate(() => (window as any).__mock.sentAttachments.map((a: { name: string }) => a.name))).toEqual(['shot.png'])
+  expect(
+    await page.evaluate(() => (window as any).__mock.sentAttachments.map((a: { name: string }) => a.name)),
+  ).toEqual(['shot.png'])
 })
-
