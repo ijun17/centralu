@@ -114,10 +114,23 @@ inherits PATH from your terminal, so it will never reproduce that class of bug.
   the number that was measured.
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
   should tell you what fell over.
-- New comments and documents are written in English
-  ([#27](https://github.com/ijun17/centralu/issues/27)). Most of the existing ones are
-  Korean; translating one is welcome as long as it keeps the reasoning intact rather
-  than reducing it to a restatement of the code.
+- New comments and documents are written in English — see [Language](#language).
+
+### Language
+
+**English is the language of this repository**, for everything that is written down:
+
+- code comments, test titles and documents
+- commit messages
+- issues, issue comments, pull requests and review comments
+
+The project is open source, and a decision recorded in a language most readers cannot read
+is a decision they cannot check. Most of the existing code comments and several older
+documents are still Korean ([#27](https://github.com/ijun17/centralu/issues/27)).
+Translating one is welcome as long as it keeps the reasoning intact rather than reducing it
+to a restatement of the code. Quote non-English text verbatim when the exact words matter —
+a user-facing string, an error message, a test title under discussion — and say what it
+means next to it.
 
 ### Documentation
 
