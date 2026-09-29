@@ -43,14 +43,16 @@ import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 
 /**
- * 스토어는 배선만 한다 — 상태 변경 로직은 전부 core (docs/state-management.md §2).
- * 명령은 포트로, 상태 갱신은 이벤트 → core 리듀서로만 (CQRS-lite: 낙관적 갱신 없음).
+ * The store only does the wiring — all state-change logic lives in core (docs/state-management.md
+ * §2). Commands go out through ports, and state updates come in only as events routed through the
+ * core reducer (CQRS-lite: no optimistic updates).
  */
 
 /**
- * 대화를 덮는 넓은 표면. null이면 아무것도 덮여 있지 않다.
- *  - viewer: 파일 한 개 (viewerPath)
- *  - git: 변경·기록·브랜치 전체. path를 주면 그 파일의 diff부터 편다
+ * The wide surface that covers the conversation. `null` means nothing is covering it.
+ *  - viewer: a single file (`viewerPath`)
+ *  - git: the whole of changes, history and branches. If `path` is given, it opens that file's
+ *    diff first
  *
  * `pick` counts opens instead of naming one. The wide view now outlives the click that made
  * it — the change list beside it is no longer covered (#15), so it keeps being clicked while
@@ -63,7 +65,7 @@ export type Overlay =
   | {
       kind: 'git'
       path?: string | null
-      /** 어느 무리에서 눌렀나 — 일부만 스테이징한 파일은 두 무리에 다 있다 (#160) */
+      /** Which group was clicked — a partially staged file appears in both groups (#160) */
       staged?: boolean
       sha?: string | null
       sub?: 'changes' | 'history' | 'branches'
@@ -71,7 +73,10 @@ export type Overlay =
     }
   | null
 
-/** 앞서 연 것보다 하나 큰 번호. 깃 밖에서 오면 다시 1부터 — 그 사이 패널은 새로 붙는다 */
+/**
+ * One higher than the last one opened. Coming from outside git resets it to 1 — panels opened
+ * in between are appended fresh.
+ */
 const nextPick = (o: Overlay): number => (o?.kind === 'git' ? o.pick : 0) + 1
 
 /**
@@ -83,34 +88,40 @@ const nextPick = (o: Overlay): number => (o?.kind === 'git' ? o.pick : 0) + 1
 export type { PanelGroup, PanelTab } from './panelLayout.js'
 
 /**
- * 화면 밖에서 일어난 일 하나.
+ * A single thing that happened off screen.
  *
- * `sessionId`가 곧 신원이다 — 같은 세션이 또 끝나면 카드가 늘지 않고 갱신된다.
- * 그래야 바쁜 세션 하나가 나머지를 밀어내지 않고, 카드 수가 세션 수를 넘지 않는다.
+ * `sessionId` is the identity — if the same session finishes again, the card is updated rather
+ * than added. That way one busy session cannot crowd out the rest, and the card count never
+ * exceeds the session count.
  */
 export type Notice = {
   sessionId: string
   kind: 'done' | 'approval' | 'error'
-  /** 그때의 세션 이름 — 나중에 바뀌어도 카드에 적힌 것은 그대로 둔다 */
+  /** The session's name at that moment — kept as written even if the session is renamed later */
   name: string
   at: number
 }
 
 /**
- * 첨부 + 화면용 바이트.
+ * An attachment plus the bytes needed to display it.
  *
- * data는 이미지 썸네일을 그릴 때만 쓴다 — 저장·전송은 경로로만 오간다 (D-1).
- * 보낼 때는 방금 읽은 바이트가 손에 있으니 왕복 없이 채우고, 재시작 후에는
- * host가 loadMessages에서 파일을 다시 실어 준다 (#40의 에이전트 이미지와 같은 규칙).
+ * `data` is used only to render the image thumbnail — storage and transfer always go through the
+ * path (D-1). When sending, the just-read bytes are already at hand, so they are filled in
+ * without a round trip; after a restart, the host supplies the file again from `loadMessages`
+ * (the same rule as the agent images in #40).
  */
 export type ChatAttachment = Attachment & { data?: string }
 
-/** 아직 보내지 않은 것. 글과 첨부는 함께 움직인다 — 한쪽만 세션에 묶으면 반쪽만 고친 게 된다 */
+/** Not yet sent. The text and attachments move together — binding only one to the session leaves
+ * the pair half fixed */
 export type Draft = { text: string; attachments: ChatAttachment[] }
 export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
 
-/** 증거 패널 폭의 한계. 좁으면 경로가, 넓으면 대화가 죽는다 */
-/** 관제 레일 폭 (#81). 하한은 줄 안 즉답(버튼 둘+입력)이 안 부러지는 폭, 상한은 챗을 안 삼키는 폭 */
+/** Limits on the evidence panel's width. Too narrow kills the path; too wide kills the conversation */
+/**
+ * Width of the control rail (#81). The floor is the width at which an inline quick reply (two
+ * buttons plus a composer) does not break; the ceiling is the width that does not swallow the chat.
+ */
 export const RAIL_MIN = 220
 export const RAIL_MAX = 520
 export const RAIL_DEFAULT = 288
@@ -119,41 +130,44 @@ export const PANEL_MIN = 260
 export const PANEL_MAX = 900
 export const PANEL_DEFAULT = 340
 
-/** 세션 목록(관찰 레인) 폭 */
-/** 깃 탭에서 '기록'이 차지할 높이. 나머지는 '변경'이 가져간다 */
+/** Width of the session list (observation lane) */
+/** The height "history" takes up in the git tab. "Changes" gets the rest */
 
 export const SIDEBAR_MIN = 180
 export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 240
 
 /**
- * 전체 글자 크기의 다섯 단계 (가운데가 기본).
+ * The five steps of overall text size (the middle one is the default).
  *
- * 값은 루트의 CSS zoom 배율이다. 글꼴만 키우는 길(rem 전환)은 이 코드베이스의 텍스트가
- * 전부 px 고정(text-[11px]…)이라 전면 개편이 되고, 글자만 커지고 칸이 안 커지면
- * 좁은 그리드 칸에서 줄바꿈이 먼저 무너진다 — 화면 전체가 같은 비율로 커지는 쪽이
- * OS의 디스플레이 배율과 같은 문법이라 예측 가능하다.
+ * The value is the root's CSS zoom factor. The alternative of scaling only the font (switching to
+ * rem) would be a full rewrite, because every bit of text in this codebase is fixed in px
+ * (text-[11px]…), and if only the text grows while the panel does not, line wrapping breaks first
+ * in a narrow grid panel. Scaling the whole screen by the same factor is predictable instead,
+ * because it follows the same rule as the OS's own display scaling.
  */
 export const TEXT_SCALES = [0.85, 0.925, 1, 1.1, 1.25] as const
 export const TEXT_SCALE_DEFAULT = 2
 
 /**
- * 대화 레인이 최소한 지켜야 할 폭.
+ * The minimum width the conversation lane must keep.
  *
- * 이게 없으면 양쪽 패널을 늘렸을 때 가운데가 0으로 눌리다 못해 전체 레이아웃이
- * 창 밖으로 밀려나고, 화면이 통째로 가로 스크롤된다 (도그푸딩에서 실제로 나왔다).
- * 게다가 그 상태에서는 손잡이 위치 계산이 어긋나 끌수록 더 커지는 되먹임이 생긴다.
+ * Without this, stretching both side panels squeezes the center down to zero and beyond, pushing
+ * the whole layout past the window edge so the entire screen scrolls horizontally (this actually
+ * happened during dogfooding). Worse, in that state the handle position calculation goes wrong,
+ * creating feedback where dragging it makes it grow larger still.
  */
 export const CENTER_MIN = 360
 
 /**
- * 창 안에 실제로 들어갈 수 있는 폭으로 자른다.
+ * Clamps to the width that can actually fit inside the window.
  *
- * `zoom`이 필요한 이유 (전체 글자 크기): 레이아웃 폭은 zoom 좌표계인데
- * window.innerWidth는 **실픽셀**이라, 나누지 않으면 배율에서 사용 가능 폭을 부풀려
- * 계산해 레이아웃이 창 밖으로 밀린다. 그리고 최소 폭(min)은 **실픽셀로 고정**한다 —
- * 글자를 키웠다고 패널을 좁힐 수 있는 한계까지 커지면, 좁은 창에서 배율을 올리는
- * 순간 패널이 화면을 다 먹는다 (도그푸딩 요청: 최소 너비는 그대로).
+ * Why `zoom` is needed (for overall text size): the layout width is in zoom coordinates, while
+ * `window.innerWidth` is in **real pixels**. Without dividing by it, the available width gets
+ * inflated at higher zoom and the layout is pushed past the window edge. The minimum width, on
+ * the other hand, is **pinned to real pixels** — if it were allowed to grow with the zoom level up
+ * to the point where the panel could be narrowed, raising the zoom in a narrow window would let
+ * the panel eat the whole screen (per a dogfooding request: the minimum width stays fixed).
  */
 function fitWidth(px: number, minReal: number, max: number, otherLane: number, zoom = 1): number {
   const winW = (typeof window === 'undefined' ? 1280 : window.innerWidth) / zoom
@@ -162,22 +176,26 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
 }
 
 /**
- * 외부 앱 하나의 열쇠. 앱은 (프로젝트, id)로 하나다. 두 프로젝트의 `notes`는 다른 앱이다.
- * `_user`는 사용자 폴더 앱이다. host의 범위 이름과 같고, 프로젝트 id(UUID)와 겹치지 않는다.
+ * The key for one external app. An app is identified by (project, id) — the `notes` app of two
+ * different projects are two different apps. `_user` is the user-folder app; it matches the
+ * host's scope name and never collides with a project id (a UUID).
  */
 export function externalAppKey(projectId: string | null | undefined, appId: string): string {
   return `${projectId ?? '_user'}/${appId}`
 }
 
 /**
- * 고정 화면 하나 (M4 B-2) — 사이드바에서 연 앱. **포커스가 옮겨 가도 산다**: 세션을 보러 갔다가 돌아와도
- * 같은 인스턴스(같은 문서, 같은 화면 상태)다. 닫거나 앱이 사라져야 내려간다.
+ * A single pinned view (M4 B-2) — an app opened from the sidebar. **It survives a focus change**:
+ * going to look at a session and coming back leaves the same instance (same document, same view
+ * state). It only comes down when closed or when the app disappears.
  *
- *   idle        아직 열지 않았다(또는 앱이 멈춰서 다시 열기를 기다린다). 열 수 있는 앱이면 화면이 연다
- *   opening     host가 home을 부르는 중 — 앱이 뜨는 시간이 여기 든다
- *   open        인스턴스가 섰다
- *   failed      열지 못했다 — `error`가 이유다
- *   restarting  사람이 "Restart"를 눌렀다 — host가 앱을 내리고 셈을 지우는 중. 끝나면 idle로 가서 다시 연다
+ *   idle        Not opened yet (or the app has stopped and is waiting to be reopened). If the app
+ *               can still be opened, the view opens.
+ *   opening     The host is calling `home` — this covers the time the app takes to come up.
+ *   open        The instance is up.
+ *   failed      Failed to open — `error` says why.
+ *   restarting  The person pressed "Restart" — the host is tearing the app down and clearing its
+ *               state. When it finishes, it goes to `idle` and reopens.
  */
 export type PinnedView = {
   key: string
@@ -189,26 +207,33 @@ export type PinnedView = {
   toolResult: AppToolResult | undefined
   error: string | null
   /**
-   * 이 인스턴스를 열 때 떠 있던 앱의 코드 (`ExternalAppInfo.codeStamp`, M4 C-4). 목록의 값이 이것과 달라지면 이 화면의
-   * HTML은 옛 코드다 — 다시 연다(`followAppCode`). 열 때 몰랐으면 null이고, 처음 알게 된 값을 그대로 받는다.
+   * The app's code as of when this instance was opened (`ExternalAppInfo.codeStamp`, M4 C-4). If
+   * the value in the app list differs from this, this view's HTML is stale — it is reopened
+   * (`followAppCode`). `null` when unknown at open time; otherwise set to the first value learned.
    */
   codeStamp?: string | null
-  /** 새 코드로 다시 연 때 — 머리글의 "Updated"가 잠깐 선다 */
+  /** When reopened with new code — the "Updated" badge in the header shows briefly */
   updatedAt?: number | null
-  /** 코드가 또 바뀌었는데 저절로 다시 열지 않았다(짧은 사이에 너무 자주 바뀌었다) — 사람이 누르면 다시 연다 */
+  /**
+   * The code changed again but it was not reopened automatically (it changed too often in too
+   * short a span) — the person has to press to reopen it.
+   */
   stale?: boolean
 }
 
 /**
- * 대화 안 앱 화면 하나 (M4 B-1) — 도구 호출 카드 하나 아래에 서는 화면. 수명은 host의 `app_view` 이벤트가
- * 정한다(열림 → 결과·취소 → 닫힘).
+ * A single in-conversation app view (M4 B-1) — a view that sits under a tool-call card. Its
+ * lifetime is set by the host's `app_view` event (open → result/cancelled → closed).
  *
- *   live      host가 인스턴스를 열어 두었다. 카드가 화면에 있으면 프레임을 그린다
- *   closing   접는 중이다 — 그려진 프레임에 teardown을 보내고 답을 기다린다(규격: 내리기 **전에** 알린다)
- *   parked    자리표시만 선다. 왜 접혔는지(`reason`)와 할 수 있는 일(다시 열기, 앱 열기)을 말한다
+ *   live      The host has an instance open. If the card is on screen, its frame is drawn.
+ *   closing   Being closed — teardown is sent to the drawn frame and its answer is awaited (per
+ *             spec, this notice goes out **before** it comes down).
+ *   parked    Only a placeholder stands. It says why it was parked (`reason`) and what can still
+ *             be done (reopen, open the app).
  *
- * 접는 길은 하나다(`closeInlineView`): 가상 스크롤에서 벗어남, 살아 있는 화면의 상한, host가 닫음(앱이
- * 사라짐·신뢰를 잃음·사칭), 프레임을 띄우지 못함. 누가 접든 teardown이 먼저다.
+ * There is exactly one path to closing (`closeInlineView`): falling out of the virtual scroll, the
+ * cap on live views, or the host closing it (the app disappeared, lost trust, or was impersonated),
+ * or the frame failing to mount. Whoever closes it, teardown goes first.
  */
 export type InlineView = {
   callId: string
@@ -219,33 +244,35 @@ export type InlineView = {
   instanceId: string | null
   toolInput?: Record<string, unknown>
   toolResult?: AppToolResult
-  /** 답 없이 끝났다 — 화면은 tool-result 대신 이 이유로 tool-cancelled를 받는다 */
+  /** Ended without an answer — the view gets `tool-cancelled` with this reason instead of `tool-result` */
   cancelled?: string
-  /** 화면을 열지 않았다(사칭 차단) — 그 이유. 이런 화면은 다시 열 길을 주지 않는다 */
+  /** The view was not opened (impersonation blocked) — the reason. Such a view is given no way to reopen */
   rejected?: string
-  /** 왜 자리표시로 접혔나 */
+  /** Why it was parked as a placeholder */
   reason?: string
   /**
-   * host가 이 호출의 입력과 결말을 들고 있어 **도구를 다시 부르지 않고** 다시 열 수 있는가. host가 결말에
-   * 싣는다(`kept`). 다시 열기가 거절되면 false가 되고, 그때 자리표시는 앱을 여는 길만 준다.
+   * Whether the host holds this call's input and outcome so it can reopen **without calling the
+   * tool again**. The host carries this in the outcome (`kept`). If reopening is refused this is
+   * false, and the placeholder then offers only the path to open the app.
    */
   kept: boolean
-  /** 살아난 순서 — 상한은 가장 오래 살아 있던 화면부터 접는다(다시 열면 새 번호) */
+  /** The order in which it came alive — the cap closes the longest-live view first (reopening gets a new number) */
   liveAt: number
-  /** 살아난 때 떠 있던 앱의 코드 — 고정 화면의 그것과 같은 뜻이다 (`PinnedView.codeStamp`, M4 C-4) */
+  /** The app's code as of when it came alive — same meaning as the pinned view's field (`PinnedView.codeStamp`, M4 C-4) */
   codeStamp?: string | null
-  /** 새 코드로 다시 연 때 — 제목 줄의 "Updated"가 잠깐 선다 */
+  /** When reopened with new code — the "Updated" badge on the title line shows briefly */
   updatedAt?: number
-  /** 코드가 또 바뀌었는데 저절로 다시 열지 않았다 — 사람이 누르면 다시 연다 */
+  /** The code changed again but it was not reopened automatically — the person has to press to reopen it */
   stale?: boolean
 }
 
-/** 살아난 순서를 매기는 수 — 세션을 가리지 않고 늘기만 한다 */
+/** The number assigning the order things came alive — it only ever increases, across all sessions */
 let inlineLiveSeq = 0
 
 /**
- * host의 `app_view` 이벤트 하나를 세션의 화면 기록에 반영한다. 살아 있는 화면을 **닫는** 사건(closed,
- * 열린 화면의 rejected)은 여기서 다루지 않는다 — teardown이 먼저라 스토어의 접는 길(`closeInlineView`)로 간다.
+ * Folds one host `app_view` event into a session's view history. Events that **close** a live view
+ * (`closed`, or `rejected` on an already-open view) are not handled here — teardown must go first,
+ * so those go through the store's own closing path (`closeInlineView`).
  */
 export function applyAppView(views: Record<string, InlineView> | undefined, e: Extract<NormalizedEvent, { type: 'app_view' }>): Record<string, InlineView> {
   const cur = views?.[e.callId]
@@ -267,18 +294,20 @@ export function applyAppView(views: Record<string, InlineView> | undefined, e: E
         kept: false,
       })
     case 'closed':
-      // 이미 접혔거나 접는 중이다 — 이유만 적어 둔다(살아 있으면 스토어가 접는다)
+      // Already closing or closed — just record the reason (the store closes it if it is still live)
       return cur && cur.state !== 'live' ? put({ ...cur, reason: cur.reason ?? e.reason }) : (views ?? {})
   }
 }
 
 /**
- * 지금 그려진 대화 안 화면의 프레임 (M4 B-1) — 접기 전에 teardown을 보낼 손잡이.
+ * The frame of the in-conversation view currently drawn (M4 B-1) — a handle for sending teardown
+ * before it closes.
  *
- * 화면(InlineView)이 프레임을 그리는 동안 여기 올리고, 내리면 뺀다. 스토어는 이것으로 접기 전에
- * teardown을 보내고, 대화 목록은 이것으로 "그려진 화면이 있는 줄"을 안다 — 가상 스크롤이 그 줄을 떼기
- * 전에 붙들어 두는 근거다. 프레임은 DOM의 것이라 스토어의 상태에 두지 않는다. 바뀔 때마다 수 하나
- * (`inlineFramesVersion`)만 올려 목록이 다시 그리게 한다.
+ * The view (`InlineView`) registers here while its frame is mounted, and unregisters when it comes
+ * down. The store uses this to send teardown before closing, and the conversation list uses this to
+ * know "this row has a drawn view" — the basis for holding that row before the virtual scroll can
+ * drop it. The frame belongs to the DOM, so it is not kept in the store's state; each change only
+ * bumps a counter (`inlineFramesVersion`) so the list re-renders.
  */
 export type InlineFrame = { teardown(): Promise<unknown> }
 const inlineFrames = new Map<string, InlineFrame>()
@@ -295,15 +324,16 @@ export function registerInlineFrame(sessionId: string, callId: string, frame: In
   }
 }
 
-/** 이 카드의 화면이 지금 프레임으로 그려져 있나 */
+/** Whether this card's view is currently drawn as a frame */
 export function inlineFrameShown(sessionId: string, callId: string): boolean {
   return inlineFrames.has(inlineFrameKey(sessionId, callId))
 }
 
 /**
- * 지금 그려진 고정 화면의 프레임 (M4 C-4) — 대화 안 화면의 손잡이와 같은 까닭이다. 앱이 새 코드로 다시 뜨면 스토어가 그
- * 화면을 다시 연다(`reloadPinnedView`). 내리기 **전에** teardown을 보내야 하는데(규격), 프레임은 DOM의 것이라 화면이
- * 올리고 내린다.
+ * The frame of the pinned view currently drawn (M4 C-4) — the same reason as the in-conversation
+ * view's handle. When the app comes up again with new code, the store reopens that view
+ * (`reloadPinnedView`). Teardown must go out **before** it comes down (per spec), and the frame
+ * belongs to the DOM, so the view is the one that registers and unregisters it.
  */
 const pinnedFrames = new Map<string, InlineFrame>()
 
@@ -315,8 +345,9 @@ export function registerPinnedFrame(key: string, frame: InlineFrame): () => void
 }
 
 /**
- * 한 화면이 새 코드를 따라 **저절로** 다시 열리는 상한 (M4 C-4) — 이 시간 안에 이만큼. 넘으면 다시 열지 않고 "바뀌었다"만
- * 표시해 사람이 누르게 한다. 까닭은 `followAppCode`의 주석에.
+ * The cap on how many times a single view can **automatically** reopen to follow new code (M4 C-4)
+ * — this many within this window. Past the cap it stops reopening automatically and just marks it
+ * "changed" for the person to press. See the comment on `followAppCode` for why.
  */
 export const AUTO_RELOADS = 3
 export const AUTO_RELOAD_WINDOW_MS = 60_000
@@ -330,25 +361,33 @@ function allowAutoReload(key: string, now = Date.now()): boolean {
   return ok
 }
 
-/** 목록이 말하는 그 앱의 지금 코드 — 모르면(한 번도 뜨지 않았다, 옛 host) null */
+/** The app's current code as reported by the list — `null` if unknown (never came up, or an old host) */
 function codeStampOf(apps: readonly ExternalAppInfo[], projectId: string | null, appId: string): string | null {
   return apps.find((a) => a.appId === appId && a.projectId === projectId)?.codeStamp ?? null
 }
 
 /**
- * 앱이 새 코드로 다시 떴다 — 그 앱의 열린 화면을 다시 연다 (M4 C-4). 목록을 다시 읽을 때마다 돈다.
+ * The app came up again with new code — reopen that app's open views (M4 C-4). Runs every time the
+ * list is re-read.
  *
- * 만드는 세션의 턴이 끝나면 host가 앱을 새 코드로 다시 띄운다. 그런데 열린 화면의 HTML은 연 때의 것이라, 앱은 바뀌었는데
- * 사람 앞의 화면은 옛 것이다. 판정은 **지문의 변화 하나**다: 화면이 열릴 때 떠 있던 코드(`codeStamp`)와 지금 목록의 코드가
- * 다르면 옛 HTML이다. 같은 코드로 다시 뜬 앱(죽었다 살아남, 다시 시작)은 지문이 같아 아무것도 하지 않는다. 화면이 열릴 때
- * 지문을 몰랐으면(앱이 그 순간 처음 떴다) 처음 알게 된 값을 받기만 한다.
+ * When a builder session's turn ends, the host brings the app back up with new code. But an open
+ * view's HTML is from when it was opened, so the app has changed while the screen in front of the
+ * person is still the old one. The decision comes down to **a single fingerprint change**: if the
+ * code that was up when the view was opened (`codeStamp`) differs from the list's current code, it is
+ * stale HTML. An app that came back up with the same code (it died and came back, or was restarted)
+ * has the same fingerprint, so nothing happens. If the fingerprint was unknown when the view opened
+ * (the app came up for the first time at that instant), only the first value learned is recorded.
  *
- * "바뀌었다" 알림(`external_app_state_changed`)으로는 다시 열지 않는다. 그것은 앱 안의 값이 바뀌었다는 뜻이고 화면이 제
- * 상태 도구로 다시 읽는다 — 거기에 다시 열기를 걸면, 다시 연 화면의 첫 호출이 또 알림을 부르는 고리가 된다.
+ * A "changed" notification (`external_app_state_changed`) never reopens a view on its own. That
+ * notification means a value inside the app changed, and the view re-reads it through its own state
+ * tool — hooking a reopen onto that would create a loop, where a reopened view's first call fires
+ * another notification.
  *
- * 그래도 앱이 쉬지 않고 새 코드로 다시 뜰 수 있다 — 제 폴더에 쓰는 앱이면 다시 연 화면의 home 호출이 폴더를 바꾸고, host가
- * 그것을 반영해 또 다시 띄운다. 그래서 한 화면이 저절로 다시 열리는 수를 묶는다(1분에 세 번). 넘으면 "바뀌었다"만
- * 표시하고 사람이 누를 때 연다 — 고리는 사람의 손에서 끊긴다.
+ * Even so, an app can keep coming back up with new code without pause — for an app that writes to its
+ * own folder, a reopened view's `home` call can change the folder, and the host reflects that by
+ * bringing it up yet again. So there is a cap on how many times a single view reopens on its own
+ * (three within a minute). Past that, it only shows "changed" and waits for the person to press it —
+ * the loop is broken by a human hand.
  */
 function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): void {
   const { externalApps, pinnedViews, inlineViews } = get()
@@ -383,19 +422,22 @@ function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<A
   }
 }
 
-/** 지금 배율 (TEXT_SCALES 값). 실픽셀 ↔ zoom 좌표 환산에 쓴다 */
+/** The current scale (a `TEXT_SCALES` value). Used to convert between real pixels and zoom coordinates */
 export function useTextZoom(): number {
   return TEXT_SCALES[useStore((s) => s.textScale)] ?? 1
 }
 
 export type ChatItem = (
   /**
-   * pending: UI가 낙관적으로 그렸고 host의 확인(user_message)을 아직 못 받았다.
-   * from: 사람이 아니라 다른 세션이 시킨 말 (FR-11 — 오케스트레이터 지시·워커 보고).
+   * pending: the UI drew this optimistically and has not yet gotten the host's confirmation
+   * (`user_message`).
+   * from: a message that another session sent, not the person (FR-11 — orchestrator instructions,
+   * worker reports).
    */
   /**
-   * attachments: 함께 실어 보낸 것들. 이미지는 실물 썸네일로 그린다 (📎 라벨의 후신 —
-   * 라벨을 text에 섞던 시절엔 그린 것과 보낸 것이 달라 이중 렌더가 났다, #75).
+   * attachments: things sent along with it. Images are drawn as real thumbnails (the successor to
+   * the 📎 label — back when the label was mixed into the text, what was drawn and what was sent
+   * could differ, causing a double render, #75).
    */
   | {
       kind: 'user'
@@ -404,20 +446,22 @@ export type ChatItem = (
       attachments?: ChatAttachment[]
       pending?: boolean
       from?: { sessionId: string; name: string }
-      /** 대화 안 앱 화면이 보낸 말 (M4 B-1) — 사람이 보내기로 골랐지만 쓴 것은 앱이다 */
+      /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
       fromApp?: { appId: string; projectId: string | null; name: string }
     }
   | { kind: 'assistant'; seq: number; text: string }
-  /** 추론 요약 (#58). codex만 텍스트를 준다 — claude의 생각은 세션의 thinkingTokens로만 보인다 */
+  /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
   | { kind: 'reasoning'; seq: number; text: string }
   /*
-   * 에이전트가 내놓은 이미지 (#40). 파일로 영속된다 (attachments/ + 경로 참조, 500MB 상한).
-   * data가 비어 있으면 note가 이유를 말한다 (실패는 보이게).
+   * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
+   * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
    */
   | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
   /**
-   * live: 실행 중 출력의 꼬리 (#58, codex outputDelta). result가 오면 버린다 — 전체는 result에 있다.
-   * callId: 결과·출력이 제 줄을 찾는 이름 (#98) — 없으면 옛 자리 규칙을 쓴다 (ownerOf).
+   * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
+   * in — the full output lives in `result`.
+   * callId: the name by which the result/output finds its own row (#98) — falls back to the old
+   * positional rule (`ownerOf`) when absent.
    */
   | {
       kind: 'tool'
@@ -431,19 +475,23 @@ export type ChatItem = (
       live?: string
     }
   | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
-  /** 대화의 경계 표식 (압축 지점 등). 대화가 아니라 대화에 대한 사실이다 */
+  /** A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it */
   | { kind: 'mark'; seq: number; text: string }
 ) & {
   /**
-   * host가 이 줄을 저장하며 매긴 **세션 내 번호** (store의 messages.seq, #79).
+   * The **number within the session** the host assigned when it stored this row (the store's
+   * `messages.seq`, #79).
    *
-   * `seq`와 다른 번호다. `seq`는 React 키이고, 실시간 항목은 전 세션 공용 `chatSeq`에서 받는다.
-   * 기록 커서(`history.oldestSeq`)와 기록·실시간 합치기는 **이 번호로만** 한다. 렌더 키가 커서로
-   * 새어 들어가면 `loadOlder`가 엉뚱한 자리부터 읽는다: 앱이 부탁한 에이전트의 세션을 처음 열자
-   * 저장된 8줄 세션에 커서 48이 서서, 대화 전체가 한 번 더 붙었다 (실측 2026-09-25).
+   * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
+   * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
+   * merge of history with live items go **only by this number**. If the render key were to leak
+   * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
+   * session for an app's requested agent was opened, a stored 8-line session ended up with a
+   * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
    *
-   * 저장되지 않는 줄(`message_image`처럼 이벤트에 번호가 없는 것, 확인 전의 낙관적 말)에는 없다.
-   * 합친 메시지는 첫 조각의 번호다 — host의 loadMessages와 같은 규칙이다.
+   * Absent on rows that are never stored (like `message_image`, whose event carries no number, or
+   * an optimistic message before confirmation). A merged message carries the number of its first chunk
+   * — the same rule the host's `loadMessages` uses.
    */
   storedSeq?: number
 }
@@ -453,10 +501,11 @@ export type AppState = {
   connection: ConnectionState
   projects: Record<string, ProjectInfo>
   /**
-   * 프로젝트마다 "작업 트리가 움직였을지 모른다"를 들은 횟수 (#160). `refreshProjectGit`이
-   * 실제로 물으러 갈 때마다 하나 오른다. 증거 패널의 변경 목록·기록·접힌 띠는 목록을 스스로
-   * 들고 있어서 `project.git`(사이드바의 요약)만 고치는 새로 읽기를 듣지 못했다 — 이 숫자를
-   * 구독해서 턴 종료, 창 복귀, 승인, 브랜치 전환에 함께 다시 읽는다.
+   * How many times, per project, we have heard "the working tree may have moved" (#160). Bumped
+   * by one each time `refreshProjectGit` actually goes and asks. The evidence panel's change list,
+   * history and collapsed strip hold their own lists, so they never heard a re-read that only
+   * updated `project.git` (the sidebar's summary) — they now subscribe to this counter and re-read
+   * together on turn end, window focus, approval, and branch switch.
    */
   gitEpoch: Record<string, number>
   sessions: Record<string, SessionSummary>
@@ -472,14 +521,16 @@ export type AppState = {
   tools: ToolStatus[]
   chat: Record<string, ChatItem[]>
   /**
-   * 아직 보내지 않은 글 — **세션별로** 둔다.
+   * Text not yet sent — kept **per session**.
    *
-   * 예전에는 입력창 부품이 들고 있었다. 그러면 글이 세션이 아니라 화면의 그 자리에
-   * 붙는다: 포커스 뷰에서 세션을 바꿔도 같은 부품이 재사용되므로 A에 쓰던 글이
-   * B의 입력창에 그대로 앉아 있었다 — 그대로 보내면 **엉뚱한 세션에 간다** (실측 확인).
-   * 반대로 화면을 갈아 끼우는 그리드에서는 부품이 사라지며 글도 같이 사라졌다.
+   * It used to be held by the composer component itself. That binds the text to the screen's spot
+   * rather than to the session: switching sessions in the focus view reuses the same component, so
+   * text written for A was still sitting in B's composer — sending it as is would **go to the
+   * wrong session** (confirmed by measurement). Conversely, in the grid, which swaps out
+   * components, the text vanished along with the unmounted component.
    *
-   * 저장소에는 넣지 않는다. 앱을 껐다 켤 때까지 살아남아야 할 만큼 무거운 것은 아니다.
+   * Not put in the store's persisted snapshot. It is not heavy enough to need to survive the app
+   * being closed and reopened.
    */
   drafts: Record<string, Draft>
   /**
@@ -506,19 +557,23 @@ export type AppState = {
    */
   stickToBottom: Record<string, boolean>
   /**
-   * 바닥이 아닌 자리에서 떠났을 때 **어느 줄의 어디를** 보고 있었나 (#61).
+   * When a conversation was left somewhere other than the bottom, **which row and where in it** it
+   * was showing (#61).
    *
-   * 위 주석이 "픽셀 offset은 안 남긴다"고 한 것은 지금도 맞다 — 재지 않은 가상
-   * 스크롤에 생 scrollTop을 꽂으면 *비슷한* 자리에 떨어진다. 그런데 그 결론이
-   * "아무것도 안 남긴다"였고, 그 결과 바닥이 아니었던 대화는 돌아올 때마다 맨 위에서
-   * 다시 시작했다 (#61의 "스크롤이 위로 올라간다").
+   * The comment above, that no pixel offset is kept, is still true — pinning a raw `scrollTop` into
+   * a virtualizer that has not yet measured its rows lands only *near* the right place. But that
+   * conclusion had been read as "keep nothing at all," and the result was that any conversation not
+   * at the bottom restarted from the top every time it was reopened (#61's "the scroll jumps to
+   * the top").
    *
-   * 그래서 남기는 것은 픽셀이 아니라 **줄**이다: 화면 맨 위에 걸쳐 있던 항목의 seq와
-   * 그 항목 안에서의 offset. seq는 측정과 무관한 사실이라 재고 나서도 같은 줄을
-   * 가리키고, 나머지 몇 픽셀은 줄을 재는 동안 프레임마다 다시 맞춘다.
+   * So what is kept is not a pixel but a **row**: the `seq` of the item spanning the top of the
+   * screen, and the offset within that item. `seq` is a fact independent of measurement, so it
+   * still points at the same row after remeasuring, and the remaining few pixels are re-fit every
+   * frame while rows are being measured.
    *
-   * 바닥에 있었으면 여기 없다 — 그건 stickToBottom이 이미 말하고, 바닥은 잴 필요가
-   * 없는 자리다. 저장하지 않는다: 어디까지 읽었는지는 앱 종료를 넘길 값이 아니다.
+   * Absent when the conversation was at the bottom — `stickToBottom` already says that, and the
+   * bottom needs no measurement to be reached. Not persisted: how far one had read is not worth
+   * carrying past the app closing.
    */
   scrollAnchor: Record<string, { seq: number; offset: number }>
   /**
@@ -583,105 +638,121 @@ export type AppState = {
    * flipped rarely, so a write per flip costs nothing.
    */
   showIgnored: boolean
-  /** 전체 글자 크기 단계 — TEXT_SCALES의 인덱스 (0..4). 보는 방식이라 스냅샷에 실린다 */
+  /** The overall text size step — an index (0..4) into `TEXT_SCALES`. Carried in the snapshot because it is a way of viewing */
   textScale: number
   /**
-   * 그리드 칸의 입력창을 접어 둘까 (사용자 요청 2026-09-10).
+   * Whether to keep the composer folded in grid panels (user request, 2026-09-10).
    *
-   * 켜면 칸마다 입력창이 **둥근 카드의 윗머리만** 내놓고 접혀 있다가, 아래쪽에 마우스를
-   * 대면 대화 **위로 떠올라** 덮는다. 대화의 높이는 그대로라 읽던 줄이 안 밀린다.
-   * 끄면 예전처럼 언제나 펼쳐져 있다.
+   * When on, each panel's composer stays folded down to **only the rounded card's top edge**, and
+   * rises to **float over** the conversation when the mouse is over the bottom of the panel. The
+   * conversation's height does not change, so the row being read is not pushed around. When off, it
+   * stays expanded at all times, as before.
    */
   foldComposer: boolean
   /**
-   * 도는 표식을 **움직이게 둘까** (사용자 요청 2026-09-13). 그리드 칸 테두리와 사이드바
-   * 세션 아이콘이 따로 논다 — 크기도 자리도 달라서 거슬리는 지점이 다르다.
+   * Whether to **let the spinning marker move** (user request, 2026-09-13). The grid panel border
+   * and the sidebar session icon are independent of each other — they differ in size and position,
+   * so they are distracting in different ways.
    *
-   * 끄면 표식이 사라지는 게 아니라 **멈춘다**: 같은 무지개가 그대로 있고 각도만 고정이다.
-   * "지금 돌고 있다"는 말은 남기고 움직임만 뺀다.
+   * When off, the marker does not disappear, it **stops**: the same rainbow stays, only the angle
+   * is fixed. The message "this is currently running" is kept; only the motion is removed.
    *
-   * 이 설정이 있는 이유는 취향이 아니라 전력이다. 실측(2026-09-13, WKWebView): 세션 하나가
-   * 도는 동안 Centralu의 CPU 합계가 7.0% → 2.9%로 떨어졌다. 쉬지 않는 움직임은 화면을
-   * 최대 주사율로 붙들어 두는데, 그 비용은 무엇이 움직이느냐가 아니라 **움직이는 게
-   * 있느냐**로 정해진다.
+   * The reason this setting exists is power draw, not taste. Measured (2026-09-13, WKWebView):
+   * while one session was spinning, Centralu's total CPU usage dropped from 7.0% to 2.9%. Motion
+   * that never rests pins the screen at its maximum refresh rate, and that cost is set not by *what*
+   * is moving but by **whether anything is moving at all**.
    */
   spinGrid: boolean
   spinSessionIcon: boolean
   focusedSessionId: string | null
-  /** 깃·파일·뷰어는 프로젝트의 것이다 — 세션 없이도 봐야 한다 */
+  /** Git, files and the viewer belong to the project — they must be viewable without a session */
   focusedProjectId: string | null
   /**
-   * 세션 생성 창이 열려 있는 프로젝트 (null이면 닫혀 있다).
+   * The project whose session-creation window is open (`null` means closed).
    *
-   * 사이드바 칸의 지역 상태였는데 스토어로 올렸다: **첫 실행 화면이 이 창을 열어야
-   * 하기 때문이다.** 프로젝트가 하나 생기는 순간 첫 실행 화면은 사라지므로(App이
-   * 프로젝트 유무로 가른다), 그 화면이 스스로 다음 걸음을 이어줄 방법은 사라지는
-   * 자기 대신 다른 곳에 서게 될 창을 예약하는 것뿐이다.
+   * This used to be local state on the sidebar panel, and was lifted into the store because **the
+   * first-run screen needs to open this window.** The moment a project is created, the first-run
+   * screen disappears (`App` branches on whether any project exists), so the only way for that
+   * screen to hand off its next step is to reserve a window that will stand somewhere else, in
+   * place of the screen that is about to disappear.
    */
   newSessionFor: string | null
   /**
-   * 매니저의 워크트리 제안 (#69). propose_worktree_session이 세우고, 그 프로젝트의
-   * 새 세션 창이 열릴 때 소비된다 — 창은 워크트리가 켜지고 브랜치 이름이 채워진 채 뜬다.
-   * 프로젝트에 키를 묶는 이유: 다른 프로젝트의 창까지 물들이면 제안이 오염이 된다.
+   * A worktree suggestion from the manager (#69). Set by `propose_worktree_session`, and consumed
+   * when that project's new-session window opens — the window comes up with the worktree toggle on
+   * and the branch name filled in. The reason it is keyed to the project: letting it bleed into
+   * another project's window would contaminate the suggestion.
    */
   /**
-   * 큐다 (#69 도그푸딩): 매니저가 브랜치 둘을 연달아 제안했을 때 슬롯이 하나면
-   * 마지막 것만 살아남았다 — 첫 제안은 대화 줄에서 이름을 읽어 손으로 쳐야 했다.
-   * 창을 열 때마다 그 프로젝트의 가장 오래된 제안 하나를 소비한다 (FIFO).
+   * A queue (dogfooding for #69): when the manager suggested two branches back to back, a single
+   * slot meant only the last one survived — the first suggestion had to be typed by hand after
+   * reading the name off the conversation. Each time the window opens, it consumes that project's
+   * oldest suggestion (FIFO).
    */
   worktreeProposals: { projectId: string; branch: string }[]
   /**
-   * 오케스트레이터의 MCP 서버 제안 (propose_mcp_server → 사람의 원클릭 승인 →
-   * 앱이 등록하고 오케스트레이터 재시작). 목록의 진실은 host라 여기는 사본이다.
+   * The orchestrator's MCP server suggestion (`propose_mcp_server` → the person's one-click approval
+   * → the app registers it and restarts the orchestrator). The list here is a copy; the host holds
+   * the truth.
    */
   mcpProposals: { name: string; command: string; args: string[]; why?: string }[]
   refreshMcpProposals(): Promise<void>
   /**
-   * 앱 상태 (#81) — 앱마다 {문서, 켜짐}. 스토어는 앱 목록을 모른다(순환 금지):
-   * 항목은 앱의 useAppState가 처음 쓸 때(ensure) 또는 방송(app_state_changed)으로 생긴다.
+   * App state (#81) — a `{doc, enabled}` pair per app. The store does not know the list of apps
+   * (to avoid a cycle): an entry is created either the first time an app's `useAppState` uses it
+   * (`ensure`), or by a broadcast (`app_state_changed`).
    */
   apps: Record<AppId, { doc: unknown; enabled: boolean }>
   /**
-   * 외부 앱마다 "상태가 바뀌었다"를 들은 횟수 (M4 B-5). 열쇠는 `externalAppKey`다. 값의 크기에는
-   * 뜻이 없고, **바뀌었다는 사실**만 뜻이 있다. 열린 AppFrame이 이 값을 `changeSignal`로 받아
-   * 화면에 `centralu/notifications/changed`를 보낸다. 앱이 목록에 없어도 센다. 스토어는 외부 앱
-   * 목록을 모르고, 목록을 기다리다 신호를 놓치는 쪽이 더 나쁘다.
+   * How many times, per external app, we have heard "the state changed" (M4 B-5). Keyed by
+   * `externalAppKey`. The size of the value carries no meaning — only **the fact that it changed**
+   * does. An open `AppFrame` reads this as `changeSignal` and sends the view
+   * `centralu/notifications/changed`. Counted even when the app is not in the list. The store does
+   * not know the external app list, and missing a signal while waiting for the list is worse.
    */
   externalAppChanges: Record<string, number>
   /**
-   * 그 앱의 카운터를 마지막으로 올린 바뀜을 낸 화면 인스턴스 — 화면이 부른 호출이 낸 것일 때만, 아니면 null
-   * (`external_app_state_changed.cause`). AppFrame은 카운터가 딱 하나 올랐고 그 하나가 자기 것이면 알리지 않는다.
+   * The view instance whose call caused the last bump to that app's counter — only when the change
+   * came from a call the view itself made, otherwise `null` (`external_app_state_changed.cause`).
+   * `AppFrame` does not notify when the counter went up by exactly one and that one was its own.
    */
   externalAppChangedBy: Record<string, string | null>
   /**
-   * 외부 앱마다 "기록 판에 보이는 줄이 서거나 끝났다"를 들은 횟수 (M4 D-6, `external_app_runs_changed`). 열쇠는 `externalAppKey`다.
-   * 기록 판(RunsPanel)만 듣는다 — 화면에는 가지 않는다. 읽기 전용 도구의 호출과 그것이 세운 사슬도 여기로 온다.
+   * How many times, per external app, we have heard "a row shown in the runs panel started or
+   * finished" (M4 D-6, `external_app_runs_changed`). Keyed by `externalAppKey`. Read only by the
+   * runs panel (`RunsPanel`) — it does not reach the view. Calls to read-only tools, and the chains
+   * they start, also arrive here.
    */
   externalAppRunChanges: Record<string, number>
   /**
-   * 발견된 외부 앱과 그 상태 (M4 A-8) — host의 `apps.list` 사본이다. 정본은 host다: 여기서 고치지
-   * 않고, `external_apps_changed`가 오면 통째로 다시 읽는다. 내장 앱(`APPS`)과 합친 한 목록은
-   * `app-catalog.ts`가 만든다. 스토어는 여전히 내장 앱 명부를 모른다(순환 금지).
+   * Discovered external apps and their state (M4 A-8) — a copy of the host's `apps.list`. The host
+   * holds the source of truth: this is never edited here, only re-read in full when
+   * `external_apps_changed` arrives. The single list merged with the built-in apps (`APPS`) is
+   * built by `app-catalog.ts`. The store still does not know the built-in app roster (to avoid a
+   * cycle).
    */
   externalApps: ExternalAppInfo[]
   refreshExternalApps(): Promise<void>
   /**
-   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — host의 `apps.questions` 사본. `external_app_questions_changed`가 오면, 그리고
-   * 다시 붙을 때 통째로 다시 읽는다. 물음은 사슬을 시작한 앱(`origin`)의 고정 화면에 서고, 사이드바의 그 앱 줄이 표시를 단다.
-   * 세션에서 시작된 사슬의 물음은 그 세션의 승인 카드라 여기 없다.
+   * Capability questions for chains started from a view (M4 D-4) — a copy of the host's
+   * `apps.questions`. Re-read in full when `external_app_questions_changed` arrives, and on
+   * reconnect. A question stands on the pinned view of the app that started the chain (`origin`),
+   * and that app's sidebar row carries a badge. Questions for chains started from a session are not
+   * here — they are that session's approval card instead.
    */
   appQuestions: AppQuestion[]
-  /** 물음이 바뀐 횟수 — 기억된 답을 보이는 곳(기록 판)이 다시 읽을 신호다 */
+  /** How many times the questions changed — the signal for wherever remembered answers are shown (the runs panel) to re-read */
   appQuestionsVersion: number
   refreshAppQuestions(): Promise<void>
-  /** 능력 물음에 답한다 — 실패(이미 닫힌 물음)는 토스트로 말하고 목록을 다시 읽는다 */
+  /** Answers a capability question — a failure (the question is already closed) is reported as a toast and the list is re-read */
   answerAppQuestion(questionId: string, decision: 'allow' | 'deny'): Promise<void>
   /**
-   * 사용자 폴더의 앱을 지운다 (M4 A-7). 목록은 host의 방송으로 따라온다. 부르는 쪽이 먼저 확인을 받는다.
-   * @returns 지웠는가 — 실패는 토스트로 말한다
+   * Removes an app from the user folder (M4 A-7). The list follows from the host's broadcast. The
+   * caller is confirmed first.
+   * @returns whether it was removed — a failure is reported as a toast
    */
   removeUserApp(appId: string): Promise<boolean>
-  /** 앱 레일 슬롯의 폭 (#81) — 슬롯의 기하는 코어의 것이고(내용만 앱의 것), 보는 방식이라 워크스페이스에 실린다 */
+  /** Width of the app rail's slot (#81) — the slot's geometry belongs to core (only its content belongs to the app), and being a way of viewing, it is carried in the workspace snapshot */
   railWidth: number
   setRailWidth(px: number): void
   ensureAppState(appId: AppId): Promise<void>
@@ -690,54 +761,57 @@ export type AppState = {
   invokeAppTool(appId: AppId, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
   setAppEnabled(appId: AppId, enabled: boolean): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
-  /** 오케스트레이터의 스킬 제안 (#71) — 같은 제안→원클릭 승인 레일 */
+  /** The orchestrator's skill suggestion (#71) — the same suggest-then-one-click-approve rail */
   skillProposals: { name: string; content: string; why?: string }[]
   refreshSkillProposals(): Promise<void>
   resolveSkillProposal(name: string, approve: boolean): Promise<void>
   /**
-   * 새 세션 창이 워크트리 체크를 켠 채 열리는가 (#69).
-   * 매니저 줄의 +가 켠다 — 매니저 아래에 만드는 세션은 워크트리 세션이 기본이라서다.
-   * 창에서 끄는 것은 자유다 (강제가 아니라 예열이다).
+   * Whether the new-session window opens with the worktree checkbox on (#69). Turned on by the `+`
+   * on the manager's row, because a session created under a manager defaults to a worktree session.
+   * Turning it off in the window is free (a preset, not a requirement).
    */
   newSessionWorktree: boolean
-  /** 새 세션 창의 브랜치 이름 초기값 (#69) — 제안이 채운다. 빈 문자열이면 없음 */
+  /** The initial branch name for the new-session window (#69) — filled by a suggestion. An empty string means none */
   newSessionBranch: string
   /**
-   * 세션별로 지금 화면에 있는 가장 오래된 기록 지점.
-   * 압축으로 모델이 잊은 대화도 우리 저장소에는 남아 있으므로, 여기서부터 더 거슬러 읽는다.
+   * The oldest history point currently on screen, per session.
+   * Conversation the model has forgotten to compaction still survives in our store, so this is
+   * where reading further back starts from.
    */
   history: Record<string, { oldestSeq: number; more: boolean; loading: boolean }>
   /**
-   * 지금 깨우는 중인 세션.
+   * The session currently being woken up.
    *
-   * 세션을 고르면 **바로 깨운다.** 예전에는 메시지를 보낼 때 깨웠는데,
-   * 그러면 앱을 켜고 첫 응답까지 프로세스 기동 시간이 통째로 얹힌다.
-   * 게다가 잠든 세션에는 물어볼 프로세스가 없어서 슬래시 스킬 목록도 못 받는다.
-   * 고르는 행동이 이미 "이 세션을 쓰겠다"는 뜻이므로 그때 준비를 시작한다.
+   * Picking a session **wakes it immediately.** It used to wake on send, which piles the whole
+   * process-startup time onto the time between turning the app on and the first response. Worse, a
+   * sleeping session has no process to ask, so it cannot even hand back its slash-skill list. The
+   * act of picking already means "I am about to use this session," so preparation starts right then.
    */
   resuming: Record<string, boolean>
   /**
-   * 깨우기가 **왜** 실패했나.
+   * **Why** waking it failed.
    *
-   * 예전에는 조용히 넘겼다("보낼 때 다시 시도하니까"). 그런데 화면에는
-   * "메시지를 보내면 자동으로 이어집니다"라고 쓰여 있는데 실제로는 안 이어지는
-   * 상태가 되어, 사용자는 원인을 알 길이 없었다 (도그푸딩 지적).
-   * 조용한 실패 금지 — 이유를 그 자리에 적는다.
+   * This used to fail silently ("it will retry when sending anyway"). But the screen read "sending a
+   * message will resume it automatically" while it actually would not resume, and the person had no
+   * way to find out why (pointed out during dogfooding). No silent failures — the reason is written
+   * right there.
    */
   wakeError: Record<string, string>
   /**
-   * 못 깨운 이유가 **다른 쪽이 쥐고 있어서**인가.
+   * Whether waking it failed **because another side is holding it**.
    *
-   * 이유 문구를 정규식으로 되읽어 판정하지 않는다 — 문구를 고치는 순간 조용히 깨진다.
-   * host가 신호로 따로 내려주므로 그대로 들고만 있는다. 이 값이 참일 때만
-   * "갈라서 이어가기"를 내민다 (그 길이 실제로 열려 있는 경우가 그때뿐이다).
+   * This is never decided by pattern-matching the reason text with a regex — the moment the wording
+   * changes, that check breaks silently. The host sends this down as its own separate signal, and it
+   * is simply carried as is. Only when this is true is "split off and continue" offered (that is the
+   * only case where that path is actually open).
    */
   wakeLocked: Record<string, boolean>
   /**
-   * 증거 레인(깃·파일)이 열려 있는가.
-   * 탭이 아니라 패널인 이유: 깃 상태는 대화를 **대신하는** 화면이 아니라
-   * 대화가 주장하는 것의 **증거**다. 대체 관계가 아닌 것을 탭으로 묶으면
-   * "그거 어디서 봐?"가 나온다 (도그푸딩에서 실제로 나왔다).
+   * Whether the evidence lane (git, files) is open.
+   * Why it is a panel and not a tab: git status is not a screen that **replaces** the conversation,
+   * it is **evidence** for what the conversation claims. Grouping things that are not alternatives
+   * to each other into tabs produces "where do I see that?" (this actually came up during
+   * dogfooding).
    */
   panelOpen: boolean
   /**
@@ -749,28 +823,33 @@ export type AppState = {
    */
   panelLayout: PanelGroup[]
   /**
-   * 위아래로 나뉜 두 묶음 중 **위가 차지하는 몫** (0.15–0.85, 도그푸딩 요청).
-   * 묶음이 하나면 뜻이 없다. 반반 고정은 "터미널은 좁아도 되고 diff는 넓어야 한다"는
-   * 실제 사용을 못 담았다 — 나눈 비율도 보는 방식이라 스냅샷에 실린다.
+   * The **share the top group takes** of the two vertically split groups (0.15–0.85, per a
+   * dogfooding request). Meaningless with a single group. A fixed 50/50 split could not capture the
+   * actual use of "the terminal can be narrow, but the diff needs to be wide" — the split ratio is
+   * also a way of viewing, so it is carried in the snapshot.
    */
   panelSplit: number
-  /** 증거 패널 폭(px). 터미널을 쓰면 넓히고 싶어지므로 조절할 수 있어야 한다 */
+  /** Width of the evidence panel (px). Using the terminal makes you want to widen it, so it must be adjustable */
   panelWidth: number
-  /** 세션 목록 폭(px) */
+  /** Width of the session list (px) */
   sidebarWidth: number
   /**
-   * 세션 목록을 접어 둔 프로젝트들 (#205, 사용자 요청 2026-09-28 — 프로젝트가 늘자 사이드바가 붐볐다).
+   * Projects whose session list is folded (#205, user request 2026-09-28 — the sidebar got crowded
+   * as projects grew in number).
    *
-   * 프로젝트마다 기억하고, 작업 공간 스냅샷에 실린다 — 사이드바는 앱 전체를 보는 방식이고, 보는 방식은
-   * 사람의 것이다 (showIgnored와 같은 판단, #17). 접는 문은 이름 줄의 화살표 하나뿐이다: 이름은 프로젝트
-   * 화면을 여는 자리라(#206) 접기를 겸하면 둘 중 하나가 늘 엇나간다.
+   * Remembered per project and carried in the workspace snapshot — the sidebar is a way of viewing
+   * the whole app, and a way of viewing belongs to the person (the same call as `showIgnored`, #17).
+   * The only door to folding is the arrow on the name row: the name is where the project screen is
+   * opened from (#206), so doubling it as the fold control would always put one of the two purposes
+   * at odds with the other.
    *
-   * 접혀도 신호는 가리지 않는다 — 이름 줄이 기다리는 세션의 수를 대신 말한다 (Sidebar의 FoldSummary).
+   * Folding does not hide the signal — the name row instead reports the number of sessions waiting
+   * (the sidebar's `FoldSummary`).
    */
   foldedProjects: string[]
-  /** 그 프로젝트의 세션 줄을 접거나 편다 (#205) */
+  /** Folds or unfolds that project's session rows (#205) */
   toggleProjectFold(projectId: string): void
-  /** 이 프로젝트만 펴고 나머지는 모두 접는다 (#205) — 하나에 집중할 때 한 번에 */
+  /** Unfolds only this project and folds all the rest (#205) — for focusing on one in a single move */
   foldOtherProjects(projectId: string): void
   /**
    * What the person did to each project's screen (#203): the order they dragged its panels into and
@@ -787,85 +866,99 @@ export type AppState = {
   /** Writes one project's arrangement whole and saves the snapshot */
   arrangeProject(projectId: string, next: ProjectArrangement): void
   /**
-   * 프로젝트별 명령 실행 상태 — host `commands.state`의 투영 (#60 → 터미널 패널로 이관).
-   * 로그 본문은 host 버퍼가 들고, 여기는 뱃지가 읽을 사실(도는가 · 몇 번으로 끝났나)만
-   * 든다. 스토어에 있는 이유: "돌고 있다"는 실행 창만의 사정이 아니라 탭 뱃지·접힌
-   * 띠가 같이 읽어야 하는 사실이라서다 — 데브 서버 켜 두고 화면을 옮기면 어디서도
-   * 안 보이던 구멍이 이 조각의 출발점이다. projectId → command → 마지막 실행.
+   * Per-project command run state — a projection of the host's `commands.state` (#60, moved into
+   * the terminal panel). The host's buffer holds the log body; this only holds the facts a badge
+   * needs to read (is it running, what did it end with). Why this lives in the store: "it is
+   * running" is not only the run window's own concern, it is a fact the tab badge and the collapsed
+   * strip must read too — the gap this piece exists to close is that leaving a dev server on and
+   * moving away left no trace of it visible anywhere. Keyed projectId → command → last run.
    */
   commandRuns: Record<string, Record<string, CommandRunInfo>>
   /**
-   * 넓은 표면. 코드·diff는 360px 패널에서 읽을 수 없다.
-   * 대화 위에 덮었다가 esc로 걷는다 — 돌아오면 대화는 스크롤 위치까지 그대로다.
+   * The wide surface. Code and diffs cannot be read in a 360px panel.
+   * It covers the conversation and is dismissed with Escape — coming back, the conversation still
+   * has its scroll position intact.
    */
   overlay: Overlay
   inboxOpen: boolean
   toast: string | null
   appFocused: boolean
   /**
-   * 방금 응답을 마친 세션 — 화면을 한 번 쓸고 갈 바람의 방아쇠.
-   * at을 함께 두는 이유: 같은 세션이 연달아 끝나도 **매번** 불어야 한다 (키로 쓴다).
+   * The session that just finished responding — the trigger for one sweep of the screen.
+   * `at` is kept alongside it because the sweep must fire **every time**, even when the same session
+   * finishes twice in a row (it is used as a key).
    */
   completion: { sessionId: string; at: number } | null
   /**
-   * 화면 밖에서 일어난 일들 — 우측 상단에 쌓이는 알림 카드.
+   * Things that happened off screen — notification cards that pile up in the top right.
    *
-   * **스스로 사라지지 않는다.** OS 배너는 몇 초 뒤 걷혀서, 자리를 비운 사이에 온 것은
-   * 돌아왔을 때 이미 없다. 그게 이 앱이 배너로 못 푸는 부분이고, 그래서 여기 남는다.
-   * 걷히는 경우는 셋뿐이다: 그 세션을 보게 되거나, 카드를 눌러 그리로 가거나, ×를 누르거나.
+   * **They do not disappear on their own.** An OS banner is dismissed after a few seconds, so
+   * anything that arrived while you were away is already gone by the time you get back. That is the
+   * part a banner cannot cover for this app, so this stays. There are exactly three ways it is
+   * dismissed: seeing that session, clicking the card to go there, or pressing ×.
    *
-   * 세션당 하나만 둔다. 바쁜 세션 하나가 화면을 채우면 나머지가 묻힌다.
+   * Only one is kept per session. If one busy session filled the screen, the rest would get buried.
    */
   notices: Notice[]
-  /** 코드 뷰어가 보고 있는 파일 (프로젝트 상대 경로) */
+  /** The file the code viewer is showing (a project-relative path) */
   viewerPath: string | null
   /**
-   * 그 파일이 어느 프로젝트의 것인가 — 연 쪽이 말했을 때만 (#182). 그리드의 파일 링크는 자기 칸의
-   * 프로젝트를 싣는다. 포커스된 세션에서 고르면, 버튼 클릭이 포커스를 옮기지 않는 WKWebView에서
-   * 옆 칸의 링크가 포커스된 칸의 프로젝트에서 같은 상대 경로를 열었다. null이면 예전처럼 포커스를 따른다
+   * Which project that file belongs to — only when the side that opened it said so (#182). A file
+   * link in the grid carries its own panel's project. Picking from the focused session, in a WKWebView
+   * where a button click does not move focus, meant a link in an adjacent panel opened the same
+   * relative path in the focused panel's project instead. `null` follows focus, as before.
    */
   viewerProjectId: string | null
   paletteOpen: boolean
   /**
-   * 지금 떠 있는 창의 수 (#158) — `Modal`과 명령 창처럼 화면을 덮는 층이 뜰 때 올리고 닫힐 때 내린다(`useOpenLayer`).
-   * 창의 열림은 대개 그 컴포넌트의 지역 상태라 스토어가 따로 알 길이 없다. 승인 카드의 y/n/a가 이 값을 보지 않으면
-   * "Delete this session?" 창에서 확인하려고 누른 y가 그 뒤에 가려진 명령을 허용했다.
+   * The number of windows currently open (#158) — raised when a screen-covering layer like `Modal`
+   * or the command window opens and lowered when it closes (`useOpenLayer`). A window's open state
+   * is usually local state on that component, so the store has no other way to know. Without the
+   * approval card's y/n/a checking this value, pressing y to confirm a "Delete this session?" window
+   * had let through a command hidden behind it.
    */
   openLayers: number
   /**
-   * 응답을 보내고 아직 답을 받지 못한 승인 요청 (#158) — requestId → true. 첫 응답의 결과가 화면에 닿기 전에 같은
-   * 카드에 두 번째 입력(키 두 번, 카드와 레일)이 들어오면 두 번째 응답이 '사라진 요청'이 되어 실행된 명령을 거부로 적었다.
+   * Approval requests that have had a response sent but not yet answered (#158) — `requestId` →
+   * `true`. If a second input arrives on the same card (two key presses, the card and the rail)
+   * before the first response's result reaches the screen, the second response became a "vanished
+   * request" and recorded a command that had already run as denied.
    */
   approvalsInFlight: Record<string, true>
   /**
-   * 세션마다 올라가는 중인 첨부의 수 (#180). 칩은 host에 저장이 끝난 뒤에야 초안에 들어가는데, 그 사이에 보내면 글만
-   * 나가고 늦게 끝난 칩은 비워진 다음 초안에 붙어 다음 말에 실렸다. 입력창은 이 값이 0보다 크면 보내지 않는다.
+   * The number of attachments currently uploading, per session (#180). A chip only enters the draft
+   * once the host has finished storing it, and sending during that window sent only the text —
+   * the chip that finished later attached itself to the draft afterward and rode along with the next
+   * message. The composer refuses to send while this value is above zero.
    */
   uploading: Record<string, number>
-  /** 사용량 모달 (FR-9) */
+  /** The usage modal (FR-9) */
   usageOpen: boolean
   settingsOpen: boolean
   /**
-   * 세션 설정 메뉴(모델·강도·권한)를 열라는 요청 (2026-09-07, `/model` GUI 커맨드).
-   * 메뉴의 열림 상태는 SessionSettings의 지역 상태다 — 여기는 신호만 나른다.
-   * `at`이 있어야 같은 세션에 두 번 연달아 요청해도 매번 열린다.
+   * A request to open the session settings menu (model, effort, permissions) (2026-09-07, the
+   * `/model` GUI command). The menu's open state is local state on `SessionSettings` — this only
+   * carries the signal. `at` is needed so that requesting the same session twice in a row still
+   * opens it each time.
    */
   settingsMenuRequest: { sessionId: string; at: number } | null
   notifyPolicy: NotifyPolicy
   /**
-   * 이 설치가 레지스트리에 비해 어디쯤인가 (이슈 #43).
+   * Where this install stands relative to the registry (issue #43).
    *
-   * **host가 통째로 소유한다** — 여기서 계산하는 필드는 하나도 없다. 확인도 설치도
-   * 저쪽에서 일어나고, 이 값은 그 결과가 도착해 앉는 자리일 뿐이다. null은 아직
-   * 물어보지도 못한 것(연결 전)이고, '최신이다'가 아니다.
+   * **Owned entirely by the host** — not a single field here is computed. Both checking and
+   * installing happen on that side; this value is only the seat where the result lands once it
+   * arrives. `null` means it has not even been asked yet (before connecting), not "it is up to
+   * date."
    */
   update: UpdateStatus | null
   /**
-   * 이 사람이 화면에 대해 고른 것들 (protocol의 UiPreferences).
+   * What this person has chosen about the screen (protocol's `UiPreferences`).
    *
-   * **기동 때 한 번 받아서 여기 앉는다.** 쓰는 쪽(입력창)이 그때그때 물어보게 두면
-   * 답이 늦게 오는 동안 기본값으로 동작하다가 손가락 밑에서 규칙이 바뀐다 —
-   * 보내기 키가 그런 식으로 바뀌면 이미 보내진 뒤다.
+   * **Fetched once at startup and seated here.** Letting the consumer (the composer) ask on demand
+   * would mean it runs on defaults while the answer is late, and the rule changes out from under
+   * the person's fingers — if the send key changed that way, the message would already be sent by
+   * the time it did.
    */
   prefs: UiPreferences
 
@@ -888,20 +981,23 @@ export type AppState = {
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
   /**
-   * 보이는 고정 화면 옆에 대화가 열린 만드는 세션 (M4 C-5, BuilderPane) — 화면에 있는 세션이다(`isOnScreen`). 그 세션의 턴 끝은
-   * 카드가 아니라 바람이다. 고정 화면이 열고, 닫거나 가려지면 null로 둔다.
+   * The builder session whose conversation is open beside a visible pinned view (M4 C-5,
+   * `BuilderPane`) — a session that is on screen (`isOnScreen`). That session's turn ending is a
+   * sweep, not a card. Set by opening a pinned view, and set to `null` when it closes or is hidden.
    */
   builderPaneSessionId: string | null
   setBuilderPane(sessionId: string | null): void
-  /** 알림 카드를 걷는다 (×를 누르거나, 그 세션을 보게 됐거나) */
+  /** Dismisses notification cards (× pressed, or that session was seen) */
   dismissNotices(sessionIds: string[]): void
   /**
-   * 최신 기록 한 페이지를 읽어 화면의 대화와 합치고 커서를 세운다 (#79, mergePage). 처음 여는 세션도,
-   * 밖에서 이어간 대화를 따라잡는 다시 읽기(history_synced)도, 빈 구간을 메우는 재동기화도 같은 길이다 —
-   * 예전에는 다시 읽기만 갈아 끼우는 force가 따로 있었다. 이제 페이지 구간은 언제나 기록이 정본이다.
+   * Reads one page of the newest history, merges it with the conversation on screen, and sets the
+   * cursor (#79, `mergePage`). The same path serves a session opened for the first time, a re-read
+   * that catches up on a conversation continued elsewhere (`history_synced`), and a resync that
+   * fills a gap — there used to be a separate `force` that swapped in only for re-reads. Now, within
+   * a page's range, history is always the source of truth.
    */
   loadHistory(sessionId: string): Promise<void>
-  /** 더 오래된 대화를 앞에 붙인다 (압축 이전 대화를 읽기 위한 길) */
+  /** Prepends older conversation (the way to read conversation from before a compaction) */
   loadOlder(sessionId: string): Promise<void>
   saveWorkspace(): void
   togglePanel(open?: boolean): void
@@ -917,20 +1013,21 @@ export type AppState = {
   setPanelWidth(px: number): void
   setSidebarWidth(px: number): void
   /**
-   * 파일을 넓은 오버레이로 연다 (파일 트리·깃 패널의 공통 진입점).
-   * projectId를 주면 그 프로젝트의 파일이다 — 안 주면 포커스된 세션의 프로젝트
+   * Opens a file in the wide overlay (the common entry point for the file tree and the git panel).
+   * If `projectId` is given, the file belongs to that project — otherwise the focused session's project
    */
   openFile(path: string, projectId?: string | null): void
-  /** 대화 속 파일 링크의 우클릭 — 링크가 속한 프로젝트(안 주면 지금 보는 세션의 프로젝트)에서 Finder로 보여준다 */
+  /** Right-click on a file link in the conversation — reveals it in Finder under the link's own project (or the currently viewed session's project if none is given) */
   revealFile(path: string, projectId?: string | null): Promise<void>
   /**
-   * 깃 전체 화면(변경·기록·브랜치)을 오버레이로 연다. path를 주면 그 diff부터 편다.
-   * staged는 어느 쪽 diff인지다 — 안 주면 그 경로의 첫 항목을 편다
+   * Opens the full git screen (changes, history, branches) as an overlay. If `path` is given, opens
+   * that file's diff first. `staged` says which side the diff is — if not given, opens that path's
+   * first entry.
    */
   openGit(path?: string, staged?: boolean): void
-  /** 커밋 하나를 넓은 곳에서 펼친다 (340px에서 diff는 못 읽는다) */
+  /** Expands a single commit in the wide space (a diff cannot be read in 340px) */
   openCommit(sha: string): void
-  /** 브랜치 전환 화면 */
+  /** The branch-switching screen */
   openBranches(): void
   closeOverlay(): void
   toggleInbox(open?: boolean): void
@@ -938,33 +1035,36 @@ export type AppState = {
   toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
   /**
-   * 앱 가져오기 창 (M4 E-3) — 사이드바의 Import와 딥링크(E-4)가 연다. `source`는 창에 미리 채울 출처(딥링크의 주소)이고, `fromLink`면
-   * 창이 "링크가 연 것"임을 말한다. 창은 사람이 Review를 누르기 전에는 아무것도 읽거나 내려받지 않는다.
+   * The app-import window (M4 E-3) — opened by the sidebar's Import and by deep links (E-4).
+   * `source` is the origin to pre-fill in the window (the deep link's address), and `fromLink`
+   * tells the window it was "opened by a link." The window reads or downloads nothing until the
+   * person presses Review.
    */
   importDialog: { source: string; fromLink: boolean; at: number } | null
   openImport(source?: string, fromLink?: boolean): void
   closeImport(): void
-  /** `/model` GUI 커맨드 — 그 세션의 설정 메뉴(모델·강도·권한)를 연다 */
+  /** The `/model` GUI command — opens that session's settings menu (model, effort, permissions) */
   requestSettingsMenu(sessionId: string): void
-  /** 지금 확인한다 (설정의 버튼). 실패는 화면에 남되 던지지 않는다 */
+  /** Checks right now (the settings button). A failure stays on screen but is not thrown */
   checkUpdate(force?: boolean): Promise<void>
-  /** 주기 확인을 켜고 끈다 */
+  /** Turns periodic checking on and off */
   setUpdateAuto(enabled: boolean): Promise<void>
   /**
-   * 화면 설정을 바꾼다 — **바꾼 것만** 보낸다.
+   * Changes screen settings — sends **only what changed**.
    *
-   * 화면은 host가 돌려준 기록을 그대로 앉힌다(낙관적 반영이 아니다): 기록에 실패한
-   * 설정이 화면에서만 켜져 있으면, 다음에 켤 때 조용히 되돌아가 있다.
+   * The screen seats the record the host hands back as is (not an optimistic update): if a setting
+   * that failed to be recorded is only turned on in the screen, the next time it is turned on it is
+   * quietly back where it started.
    */
   setPrefs(patch: UiPreferencesPatch): Promise<void>
-  /** 새 버전을 설치한다. **재시작은 하지 않는다** — 끝나면 사람에게 말하고 멈춘다 */
+  /** Installs the new version. **Does not restart** — it tells the person and stops when done */
   applyUpdate(): Promise<void>
   setNotifyPolicy(p: NotifyPolicy): void
-  /** 아직 보내지 않은 것을 세션에 붙여 둔다 (비면 지운다) */
+  /** Attaches something not yet sent to a session (removed if it is empty) */
   setDraft(sessionId: string, draft: Draft): void
   /** Remember whether the conversation was left at its newest line (#31) */
   setStickToBottom(sessionId: string, sticking: boolean): void
-  /** 떠날 때 보고 있던 줄을 남긴다 (#61). null이면 지운다 — 바닥이었다는 뜻이다 */
+  /** Records the row that was showing when it was left (#61). `null` clears it — meaning it was at the bottom */
   setScrollAnchor(sessionId: string, anchor: { seq: number; offset: number } | null): void
   /** Open or close a folder in the file tree. The project owns it, not the session (#16) */
   toggleDir(projectId: string, path: string): void
@@ -975,32 +1075,37 @@ export type AppState = {
   setSpinGrid(on: boolean): void
   setSpinSessionIcon(on: boolean): void
   setToast(msg: string | null): void
-  /** 세션 생성 창을 연다/닫는다 (null이면 닫기) */
+  /** Opens/closes the session-creation window (`null` closes it) */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
   /**
-   * 워크트리 매니저 자리를 만든다 (#76) — 첫 브랜치보다 **먼저**.
+   * Creates a worktree manager's slot (#76) — **before** its first branch.
    *
-   * 만들고 나면 그 자리로 데려간다: 방금 만든 것과 이야기하려고 만드는 것이라,
-   * 목록에 한 줄이 늘기만 하고 끝나면 절반만 한 셈이다.
+   * Once created, it takes you there: it exists so you can talk to the thing you just created, so
+   * stopping at just adding a row to the list would leave the job half done.
    */
   createWorktreeManager(projectId: string, baseBranch: string): Promise<void>
 
   addProject(path: string): Promise<ProjectInfo>
   /**
-   * 방금 등록한, 아직 신뢰를 묻는 중인 프로젝트 (M4, 결정 3). 등록할 때 **한 번** 묻는다 — 답하거나
-   * 넘기면 걷힌다. 묻는 동안 아무것도 막지 않는다(사이드바의 그 프로젝트 아래에 선다): 등록 직후에는
-   * 새 세션 창이 곧바로 뜨는 길도 있어서, 창 위에 창을 얹으면 둘 다 반쯤만 읽힌다. 답하지 않은
-   * 프로젝트는 신뢰하지 않은 채로 남고, 프로젝트 메뉴에서 언제든 바꾼다.
+   * A project just registered whose trust is still being asked about (M4, decision 3). Asked
+   * **once**, at registration — answering or dismissing it clears it. Nothing is blocked while it
+   * is being asked (it stands under that project in the sidebar): right after registering there is
+   * also a path where the new-session window pops up immediately, and stacking a window on a window
+   * would leave both half-read. A project left unanswered stays untrusted, and can be changed at any
+   * time from the project menu.
    */
   trustAsk: string | null
   answerTrustAsk(trust: boolean): Promise<void>
   /**
-   * 신뢰를 켜고 끈다. 앱 목록은 host의 방송(external_apps_changed)으로 따라온다.
+   * Turns trust on and off. The app list follows from the host's broadcast
+   * (`external_apps_changed`).
    *
-   * 이미 돌고 있는 세션은 신뢰를 세션이 설 때 받는다(#92, 매니저의 `projectTrusted`) — 바꾼 신뢰는 그
-   * 세션이 다시 시작하거나 이어질 때부터 적용된다. 그 사실을 **돌고 있는 세션이 있을 때만** 한 줄로
-   * 말한다. 없을 때 말하면 뜻 없는 경고가 되고, 있을 때 말하지 않으면 사람은 신뢰를 끈 순간 그
-   * 세션들도 바뀌었다고 믿는다.
+   * A session already running receives trust only when a session comes up (#92, the manager's
+   * `projectTrusted`) — a changed trust setting takes effect only from the next time that session
+   * restarts or resumes. That fact is stated in a single line **only when there is a running
+   * session**. Saying it when there is none would be a warning about nothing, and not saying it when
+   * there is one would let the person believe that turning off trust changed those sessions too, at
+   * that instant.
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void>
   /**
@@ -1056,35 +1161,35 @@ export type AppState = {
    * Adding one and deleting one both arrive here as "the list is this now".
    */
   setProjectCommands(projectId: string, commands: SavedCommand[]): Promise<void>
-  /** 워크트리 프로비저닝 설정 저장 (#69) — 새 세션 창의 워크트리 영역이 부른다 */
+  /** Saves the worktree provisioning setup (#69) — called from the new-session window's worktree section */
   saveWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
-  /** host의 실행 장부를 읽는다 — 증거 패널이 프로젝트를 볼 때. UI만 리로드돼도 도는 명령이 보이게 */
+  /** Reads the host's run ledger — when the evidence panel views a project, so a running command stays visible even after just reloading the UI */
   loadCommandRuns(projectId: string): Promise<void>
-  /** 저장된 명령을 실행한다 (#44 → #60). 같은 명령이 돌고 있으면 host가 죽이고 새로 시작한다 */
+  /** Runs a saved command (#44 → #60). If the same command is already running, the host kills it and starts fresh */
   runCommand(projectId: string, command: string): Promise<void>
-  /** 데브 서버를 끈다 — 결말은 terminal.onExit으로 돌아와 commandRuns에 적힌다. 로그는 남는다 */
+  /** Stops a dev server — the outcome comes back through `terminal.onExit` and is recorded in `commandRuns`. The log survives */
   stopCommand(projectId: string, command: string): Promise<void>
   createSession(
     projectId: string,
     opts?: {
       tool?: ToolName
       model?: string
-      /** 명시하면 프로젝트 기본값 대신 이 값 — 인수인계가 죽는 세션의 설정을 통째로 넘길 때 쓴다 */
+      /** When given, this value is used instead of the project default — used to carry a dying session's settings whole through a handoff */
       effort?: string
       verbosity?: string
       serviceTier?: string
       permissionPreset?: PermissionPreset
       initialPrompt?: string
-      /** 물려받은 인수인계 노트 — 첫 메시지가 아니라 기록의 마커로 들어간다 (#102) */
+      /** An inherited handoff note — enters as a marker in the record, not as the first message (#102) */
       handoff?: { from: string; note: string; fromSessionId?: string }
-      /** 도구가 갖고 있던 이전 세션을 이어받는다 (터미널에서 만든 대화 포함) */
+      /** Resumes a previous session the tool already had (including a conversation created in a terminal) */
       resumeExternalId?: string
       importHistory?: boolean
-      /** 이 세션만 깃 워크트리에서 돌린다 (FR-2 옵션) */
+      /** Runs only this session in a git worktree (FR-2 option) */
       worktree?: boolean
-      /** 워크트리 브랜치 이름 (#69). 비우면 host가 자동 이름을 쓴다 */
+      /** The worktree branch name (#69). If empty, the host uses an automatic name */
       worktreeBranch?: string
-      /** 어디서 갈라질까. 비우면 프로젝트의 줄기, 그것도 없으면 지금 HEAD */
+      /** Where to branch off from. If empty, the project's trunk, or if there is none, the current HEAD */
       worktreeBase?: string
     },
   ): Promise<SessionInfo>
@@ -1096,11 +1201,11 @@ export type AppState = {
     decision: 'allow' | 'deny' | 'always',
     scope?: 'session' | 'project',
   ): Promise<void>
-  /** 답이 host에 닿았나 — false면 토스트를 띄웠다 (입력창에서 온 답은 send가 글을 되돌린다, #180) */
+  /** Whether the answer reached the host — `false` means a toast was shown (an answer from the composer has `send` put the text back, #180) */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<boolean>
   interrupt(sessionId: string): Promise<void>
-  /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
-  /** 에이전트만 재시작한다 (대화는 그대로) */
+  /** Hides from the list / brings back (the record survives) */
+  /** Restarts only the agent (the conversation stays as is) */
   restartSession(sessionId: string): Promise<boolean>
   /** Moves the session to the trash (#204); the two flags say what goes with it when it is deleted for good */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
@@ -1110,19 +1215,23 @@ export type AppState = {
    */
   restoreFromTrash(sessionId: string): Promise<string | null>
   /**
-   * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 코덱스 스레드의 되살리기 7~13초 문제의 출구).
-   * 죽는 세션이 인수인계 글을 쓰고 → 새 세션이 그 글로 시작하고 → 기존 세션은
-   * (기본값으로) 도구 쪽 원본까지 **정말로** 지워진다. 파괴는 맨 끝이다: 새 세션이
-   * 성공적으로 서기 전에는 아무것도 지우지 않는다.
+   * Hands off and starts fresh (a dogfooding request — the way out of the 7-13 second resume delay
+   * on an old codex thread). The dying session writes a handoff note → the new session starts from
+   * that note → the old session (by default) is **actually** deleted, all the way down to the tool's
+   * own original. Destruction comes last: nothing is deleted until the new session is successfully
+   * up.
    *
-   * tool: 다른 에이전트에게 넘길 수도 있다 (글은 그냥 텍스트라 도구를 가리지 않는다).
-   * 기본은 지금 도구. 도구가 바뀌면 모델·강도·응답 길이·속도는 물려주지 않는다 —
-   * 전부 도구별 값이라, codex의 모델명을 claude에 넘기면 생성부터 죽는다.
-   * deleteOld: 기본 true. 끄면 기존 세션을 그대로 남긴다 — 갈아타기가 아니라 분기다.
+   * tool: can also hand off to a different agent (the note is plain text, so it does not care which
+   * tool reads it). Defaults to the current tool. Switching tools does not carry over the model,
+   * effort, verbosity or speed — those are all tool-specific values, and handing codex's model name
+   * to claude would fail right at session creation.
+   * deleteOld: defaults to true. Turning it off leaves the old session standing — a branch, not a
+   * switch.
    */
   /**
-   * mode 'agent'(기본): 죽는 세션이 노트를 쓴다. 'record'(#78): 에이전트에게 아무것도
-   * 묻지 않고 host가 저장소 원문으로 기록을 만든다 — 서비스가 중단된 세션의 출구.
+   * mode 'agent' (default): the dying session writes the note. 'record' (#78): asks the agent
+   * nothing and has the host build the record straight from the store's own transcript — the way
+   * out for a session whose service has been cut off.
    */
   handoffSession(
     sessionId: string,
@@ -1140,72 +1249,81 @@ export type AppState = {
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /**
-   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
-   * **대화는 이어지지 않는다** — 부르는 쪽이 사람에게 먼저 그 사실을 알려야 한다.
+   * Switches a session's agent (claude ↔ codex).
+   * **The conversation does not carry over** — the caller must tell the person that beforehand.
    */
   switchTool(sessionId: string, tool: ToolName): Promise<void>
-  /** 세션을 고르는 즉시 깨운다 (첫 응답을 기다리지 않게) */
+  /** Wakes a session the instant it is picked (so we do not wait for the first response) */
   wake(sessionId: string): Promise<void>
   /**
-   * 잠긴 대화에서 갈라져 나와 이어간다.
-   * 다른 앱을 닫으러 가지 않아도 되는 유일한 출구 — 원본은 그대로 둔다.
+   * Branches off a locked conversation and continues it.
+   * The only way out that does not require going elsewhere to close another app — the original is
+   * left as is.
    */
   forkConversation(sessionId: string): Promise<void>
   /**
-   * 재연결 후 복구. host의 세션 목록을 스토어에 병합하고(끊긴 사이 생기고·바뀌고·지워진
-   * 세션), 돌고 있던 세션을 되살린다 (host가 죽으면 프로세스도 함께 죽는다).
-   * `resync`가 참이면 이벤트 재전송이 불가능했다는 뜻이다 — 보던 대화도 저장소에서 다시 읽는다.
+   * Recovery after reconnecting. Merges the host's session list into the store (sessions created,
+   * changed or deleted while disconnected), and revives sessions that were running (when the host
+   * dies, its processes die with it). If `resync` is true, event replay was not possible — the
+   * conversation being viewed is also re-read from the store.
    */
   recoverAfterReconnect(resync?: boolean): Promise<void>
-  /** 사이드바 순서 (사람이 끌어서 정한다) */
+  /** Sidebar order (set by the person dragging) */
   reorderProjects(orderedIds: string[]): Promise<void>
   reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
   /**
-   * 그리드.
+   * The grid.
    *
-   * `view`는 화면 하나를 고르는 값이다 — 포커스 뷰와 그리드는 **같은 세션 상태를**
-   * 다르게 보여줄 뿐이므로, 세션 데이터를 따로 들지 않고 보는 방식만 바꾼다.
-   * (그래야 그리드에서 모델을 바꿔도 사이드바·포커스 뷰가 같이 따라온다.)
+   * `view` is the value that picks one screen — the focus view and the grid only show **the same
+   * session state** differently, so they never hold separate session data, only a different way of
+   * viewing it. (That way, changing a model in the grid follows through to the sidebar and the focus
+   * view too.)
    */
   /**
-   * 지금 무엇을 보고 있나.
-   *   focus        세션 하나 (기본)
-   *   grid         그리드 — 눈으로 관제
-   *   orchestrator 오케스트레이터 — 말로 관제
+   * What is being viewed right now.
+   *   focus        a single session (default)
+   *   grid         the grid — controlling by eye
+   *   orchestrator the orchestrator — controlling by talking
    */
   view: 'focus' | 'grid' | 'orchestrator' | 'app'
   /**
-   * 고정 화면으로 보는 앱 (M4 B-2). `view`가 'app'일 때만 화면에 선다. 다른 것을 보러 가도 지우지 않는다 —
-   * 사이드바의 앱 줄을 다시 누르는 것과 되살리기가 같은 자리로 돌아온다.
+   * The app being viewed as a pinned view (M4 B-2). Stands on screen only while `view` is 'app'.
+   * Not cleared by going to view something else — pressing the app's sidebar row again, and reviving
+   * it, both return to the same place.
    */
   focusedApp: { projectId: string | null; appId: string } | null
-  /** 연 고정 화면들, 연 순서대로. 보이지 않는 것도 산다(`PinnedView`) */
+  /** Open pinned views, in the order they were opened. Ones not visible stay alive too (`PinnedView`) */
   pinnedViews: PinnedView[]
   /**
-   * 대화 안 앱 화면 (M4 B-1) — 세션 → (카드 id → 화면). 카드(`chat`)와 따로 둔다: 화면의 수명은 host의
-   * `app_view`가 정하고, 대화 기록을 다시 읽어도(loadHistory) 살아 있는 화면이 사라지면 안 된다.
+   * In-conversation app views (M4 B-1) — session → (call id → view). Kept separate from cards
+   * (`chat`): a view's lifetime is set by the host's `app_view`, and a live view must not disappear
+   * even when the conversation history is re-read (`loadHistory`).
    */
   inlineViews: Record<string, Record<string, InlineView>>
-  /** 그려진 대화 안 화면의 프레임이 오고 갈 때마다 오른다 — 값에는 뜻이 없다(`registerInlineFrame`) */
+  /** Bumped every time a drawn in-conversation view's frame comes or goes — the value itself carries no meaning (`registerInlineFrame`) */
   inlineFramesVersion: number
   /**
-   * 대화 안 화면을 접는다 — **접는 단 하나의 길**. 살아 있는 화면만 접는다(두 번 불러도 한 번이다). 그려진
-   * 프레임이 있으면 teardown을 먼저 보내고 답을 기다린 뒤, 자리표시로 바꾸고 host에 인스턴스를 닫으라고
-   * 한다(앱을 놓는다. host가 먼저 닫았으면 그 닫기는 아무 일도 하지 않는다).
+   * Closes an in-conversation view — the **single path to closing one**. Only closes a live view
+   * (calling it twice counts as once). If a frame is drawn, teardown is sent first and its answer
+   * awaited, then it is switched to a placeholder and the host is told to close the instance
+   * (releasing the app; if the host already closed it, that close is a no-op).
    */
   closeInlineView(sessionId: string, callId: string, reason: string): Promise<void>
   /**
-   * 접힌 화면을 다시 연다 — 도구를 다시 부르지 않는다. host가 새 인스턴스와 들고 있던 입력·결말을 돌려주면
-   * 화면이 규격대로 다시 받는다. 못 열면 이유를 자리표시에 남기고 다시 열기를 거둔다.
+   * Reopens a closed view — without calling the tool again. Once the host returns the new instance
+   * along with the input and outcome it was holding, the view receives them again per spec. If it
+   * cannot be opened, the reason is left on the placeholder and reopening is withdrawn.
    */
   reopenInlineView(sessionId: string, callId: string): Promise<void>
   /**
-   * 앱 화면의 말을 대화로 보낸다 (M4 B-1·B-4) — 사람이 확인한 뒤에만 부른다. 대화 안 화면은 그 대화로, 고정 화면은 사람이
-   * 고른 대화로. 어느 쪽이든 앱이 보낸 말로 남고 에이전트는 host가 감싼 앱의 글을 받는다.
-   * @returns 보냈는가 — 실패는 토스트로 말한다
+   * Sends an app view's message into the conversation (M4 B-1, B-4) — called only after the person
+   * has confirmed it. An in-conversation view sends to that conversation; a pinned view sends to
+   * whichever conversation the person picked. Either way it is recorded as a message the app sent,
+   * and the agent receives the app's text wrapped by the host.
+   * @returns whether it was sent — a failure is reported as a toast
    */
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<boolean>
-  /** 앱을 고정 화면으로 연다 — 처음이면 자리를 만들고, 이미 열려 있으면 그 화면으로 간다 */
+  /** Opens an app as a pinned view — creates its slot the first time, or goes to it if already open */
   openApp(projectId: string | null, appId: string): void
   /**
    * Gives the app a pinned view without going to it (#203). The project screen shows its apps' pinned views in its
@@ -1221,68 +1339,75 @@ export type AppState = {
    * once, losing whatever the person had in it. Returns whether it left; if not, the caller closes the view.
    */
   leavePinnedView(key: string): boolean
-  /** 자리의 인스턴스를 연다 (host가 home을 부른다). 열 수 있는 앱일 때 화면이 부른다 */
+  /** Opens the slot's instance (the host calls `home`). Called by the view when the app can be opened */
   startPinnedView(key: string): Promise<void>
   /**
-   * 인스턴스를 놓고 자리를 idle로 되돌린다 — 앱이 더 돌 수 없게 됐을 때(신뢰를 잃었다). 부르는 쪽이
-   * 먼저 AppFrame의 teardown을 부른다. 다시 돌 수 있게 되면 화면이 다시 연다.
+   * Releases the instance and returns the slot to idle — for when the app can no longer run
+   * (it lost trust). The caller must call `AppFrame`'s teardown first. Once it can run again, the
+   * view reopens it.
    */
   releasePinnedView(key: string): void
-  /** 고정 화면을 닫는다 — 부르는 쪽이 먼저 teardown을 부른다. 보던 것이면 포커스 뷰로 돌아간다 */
+  /** Closes a pinned view — the caller must call teardown first. If it was being viewed, returns to the focus view */
   closeApp(key: string): void
   /**
-   * 앱을 다시 시작하고 화면을 새로 연다 (M4 B-6) — 죽었거나 멈춘 앱, 열지 못한 화면의 "Restart".
-   * 부르는 쪽이 먼저 teardown을 부른다. 옛 인스턴스를 놓고, host가 앱을 내리고 셈을 지운 **뒤에**
-   * 다시 연다(home을 새로 부른다).
+   * Restarts the app and opens a fresh view (M4 B-6) — the "Restart" for a dead or stopped app, or a
+   * view that failed to open. The caller calls teardown first. Releases the old instance, and reopens
+   * (calls `home` fresh) **only after** the host has torn the app down and cleared its state.
    */
   restartApp(key: string): Promise<void>
   /**
-   * 고정 화면을 앱의 새 코드로 다시 연다 (M4 C-4) — 자리는 그대로(같은 줄, 같은 포커스), 인스턴스만 새로. 그려진 프레임에
-   * teardown을 먼저 보내고, 옛 인스턴스를 놓고, 화면이 다시 연다(home을 새 코드로 부른다). 코드가 바뀐 것을 스토어가
-   * 알아챘을 때(`followAppCode`)와 사람이 "Reload"를 누를 때 부른다.
+   * Reopens a pinned view with the app's new code (M4 C-4) — the slot stays put (same row, same
+   * focus), only the instance is new. Sends teardown to the drawn frame first, releases the old
+   * instance, and the view reopens (calls `home` with the new code). Called both when the store
+   * notices the code changed (`followAppCode`) and when the person presses "Reload".
    */
   reloadPinnedView(key: string): Promise<void>
   /**
-   * 대화 안 화면을 앱의 새 코드로 다시 연다 (M4 C-4) — teardown 뒤 접고, host가 들고 있던 그 호출의 입력과 결말로 새
-   * 인스턴스를 연다(도구를 다시 부르지 않는다). host가 들고 있지 않으면 접힌 채로 둔다.
+   * Reopens an in-conversation view with the app's new code (M4 C-4) — closes it after teardown, then
+   * opens a new instance with that call's input and outcome that the host was holding (without
+   * calling the tool again). If the host is not holding them, it stays closed.
    */
   reloadInlineView(sessionId: string, callId: string): Promise<void>
   /**
-   * 새 앱을 만든다 (M4 C-1, "New app" 창) — host가 템플릿을 펼치고 만드는 세션을 세운다. 만들면 앱이 목록에 서고,
-   * 그 앱의 고정 화면이 열리고, 만드는 세션이 사이드바에 선다. host가 거절하면 그 말 그대로 던진다(창이 보인다).
+   * Creates a new app (M4 C-1, the "New app" window) — the host expands the template and sets up a
+   * builder session. On success, the app takes its place in the list, its pinned view opens, and the
+   * builder session appears in the sidebar. If the host refuses, its message is thrown as is (shown
+   * in the window).
    */
   createApp(spec: NewAppSpec): Promise<AppCreated>
-  /** 오케스트레이터 세션 id (아직 만든 적 없으면 null — 화면은 빈 대화 + 추천 질문) */
+  /** The orchestrator session id (`null` if never created — the screen shows an empty conversation plus suggested questions) */
   orchestratorId: string | null
-  /** 첫 질문으로 세션을 만드는 중 (#63) — 빈 화면이 죽은 척하지 않게 하는 표시 */
+  /** A session is being created for the first question (#63) — a flag so the empty screen does not look dead */
   orchestratorWaking: boolean
   /**
-   * 사이드바의 Add project를 가리키는 중 (#63).
+   * Pointing at the sidebar's Add project (#63).
    *
-   * 오케스트레이터의 propose_project가 켜고, **사람이 그 문으로 들어가거나 화제를
-   * 옮기면 꺼진다.** 끄는 조건을 시간이 아니라 행동으로 두는 이유: 읽는 도중에
-   * 꺼지면 가리킨 적이 없는 것과 같고, 영영 켜져 있으면 안내가 아니라 잔소리다.
+   * Turned on by the orchestrator's `propose_project`, and **turned off once the person goes through
+   * that door or changes the subject.** Why turning it off is tied to an action rather than a timer:
+   * turning off mid-read would be the same as never having pointed at all, and leaving it on forever
+   * would stop being guidance and become nagging.
    */
   addProjectHint: boolean
   /**
-   * 소개 화면(오케스트레이터 + 도구 카드)을 지나왔는가 (#63).
-   * 워크스페이스 스냅샷에 남는다 — 이 화면은 첫 실행에 딱 한 번이다.
+   * Whether the intro screen (orchestrator plus tool cards) has been passed (#63).
+   * Kept in the workspace snapshot — this screen appears exactly once, on first run.
    */
   introSeen: boolean
   gridPanels: string[]
   setView(view: 'focus' | 'grid' | 'orchestrator'): void
   /**
-   * 오케스트레이터 **화면**을 연다. 세션은 만들지 않는다 (#63 지연 기동) —
-   * 이미 있으면 붙고, 없으면 빈 대화가 첫 질문을 기다린다. 만드는 것은 askOrchestrator다.
+   * Opens the orchestrator **screen**. Does not create a session (#63, deferred startup) — attaches
+   * to one if it already exists, otherwise an empty conversation waits for the first question.
+   * `askOrchestrator` is what creates it.
    */
   openOrchestrator(): Promise<void>
   /**
-   * 오케스트레이터에게 묻는다. **세션이 없으면 이 순간 만들어진다** — 추천 질문 카드와
-   * 빈 화면의 입력창이 둘 다 이 문으로 들어온다 (#63).
+   * Asks the orchestrator something. **If there is no session, one is created at this moment** —
+   * both the suggested-question cards and the empty screen's composer go through this door (#63).
    */
-  /** 첫 마디가 오케스트레이터에게 갔나 — false면 태어나지 못했다(부른 쪽이 글을 되돌린다, #180) */
+  /** Whether the first message reached the orchestrator — `false` means it was never born (the caller puts the text back, #180) */
   askOrchestrator(text: string): Promise<boolean>
-  /** 소개 화면 통과 (#63): 도구 선택을 host에 적고, 오케스트레이터 화면으로 간다 */
+  /** Passes the intro screen (#63): records the tool choice with the host, and goes to the orchestrator screen */
   completeIntro(tool: ToolName): Promise<void>
   setGridPanels(sessionIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
@@ -1290,15 +1415,17 @@ export type AppState = {
 }
 
 /**
- * 대화 항목의 고유 번호. 이 값이 곧 React key이고 가상 스크롤의 항목 키다.
+ * A conversation item's unique number. This value is both the React key and the virtual scroll's
+ * item key.
  *
- * **저장소에서 읽어온 항목과 절대 겹치면 안 된다.** 겹치면 같은 key가 둘이 되고,
- * 가상 스크롤이 둘을 같은 자리에 겹쳐 그려서 글자가 이어붙은 것처럼 뭉개진다.
- * (실제로 "가끔 이상하게 렌더링된다"로 보고된 증상이 이것이었다:
- *  기록을 불러온 세션 — 저장 seq 1..N — 에 새 메시지가 붙으면 그 seq도 1부터 셌다.)
- * 그래서 저장소 항목을 들일 때마다 이 번호를 그 위로 밀어 올린다.
+ * **Must never overlap an item read back from the store.** An overlap means two items share the
+ * same key, and the virtual scroll draws them both in the same spot, mashing the text together as
+ * if it had run on. (This was in fact the reported symptom "it sometimes renders strangely": a
+ * session that had loaded history — stored seq 1..N — started its own seq count over at 1 the
+ * moment a new message was appended.)
+ * So this number is pushed above every stored item as it is brought in.
  */
-/** 객체에서 키 하나를 뺀 새 객체 (상태를 직접 고치지 않는다) */
+/** A new object with one key removed (never mutates state directly) */
 function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
   const next = { ...obj }
   delete next[key]
@@ -1306,11 +1433,13 @@ function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
 }
 
 /**
- * RPC를 기다린 **뒤에** 세션 하나를 고치는 set (#163) — 그 사이에 session_deleted가 왔으면 아무것도 바꾸지 않는다.
+ * A `set` that updates one session **after** awaiting an RPC (#163) — changes nothing if
+ * `session_deleted` arrived in the meantime.
  *
- * 예전에는 기다린 뒤의 set이 `{ ...s.sessions[id]!, … }`로 펼쳤다. 기다리는 사이에 세션이 지워지면 필드가 거의 없는
- * 행(`{"live":true}`)이 되살아났고, 모든 세션을 도는 코드가 깨졌다(`s.touchedPaths is not iterable`). 기다린 뒤의
- * 세션 고치기는 모두 이 문을 지난다 — 다음에 더해지는 자리도 같은 규칙을 받게.
+ * The post-await `set` used to spread `{ ...s.sessions[id]!, … }`. If the session was deleted while
+ * awaiting, that revived a near-empty row (`{"live":true}`), which broke code that iterates all
+ * sessions (`s.touchedPaths is not iterable`). Every post-await session update now goes through this
+ * gate, so any future addition gets the same rule.
  */
 function ifSessionStill(
   sessionId: string,
@@ -1325,9 +1454,10 @@ function ifSessionStill(
 let chatSeq = 0
 
 /**
- * 한 대화의 살아 있는 화면을 상한(`APP_VIEWS_LIVE_PER_SESSION`) 안에 둔다 — 가장 오래 살아 있던 것부터 접는다.
- * 방금 살아난 화면은 접지 않는다. host도 같은 수를 지키므로 대개 같은 화면을 두 쪽이 함께 접는다 — 접는
- * 길이 하나라서(살아 있는 화면만 접는다) 두 번 접히지 않는다.
+ * Keeps a conversation's live views within the cap (`APP_VIEWS_LIVE_PER_SESSION`) — closes the
+ * longest-live one first. Never closes the view that just came alive. The host keeps the same cap,
+ * so both sides usually close the same view together — because there is only one path to closing
+ * (only a live view is closed), it is never closed twice.
  */
 function capInlineViews(get: () => AppState, sessionId: string, keep: string): void {
   const live = Object.values(get().inlineViews[sessionId] ?? {})
@@ -1341,18 +1471,21 @@ function capInlineViews(get: () => AppState, sessionId: string, keep: string): v
 }
 
 /**
- * 이 프로젝트가 이 도구를 위해 기억해 둔 모델·강도 중, **그 도구가 아직 받아 주는 것**만 (#107).
+ * Of the model and effort this project has remembered for this tool, keep only what **that tool
+ * still accepts** (#107).
  *
- * 도구별로 저장하는 것만으로는 부족하다: 모델은 은퇴한다. 어제 고른 이름이 오늘은
- * 목록에 없고, 그대로 보내면 세션은 첫 턴에 400으로 죽는다 — 기억 하나를 지키려다
- * 세션을 잃는 거래다. 그래서 쓰는 순간에 물어보고, 없으면 버린다.
+ * Saving per tool is not enough by itself: models retire. A name picked yesterday may not be on
+ * today's list, and sending it as is kills the session with a 400 on the first turn — a trade that
+ * loses the session to preserve one remembered value. So it is checked at the moment of use, and
+ * dropped if absent.
  *
- * **목록을 못 읽었으면 아무것도 버리지 않는다.** `supported: false`는 "그 모델이 없다"가
- * 아니라 "지금은 알 수 없다"는 뜻이고, 모른다는 이유로 버리면 도구가 잠시 응답하지
- * 않는 동안 사람이 고른 값이 조용히 사라진다.
+ * **Nothing is dropped if the list could not be read.** `supported: false` means "unknown right now,"
+ * not "that model does not exist," and dropping it for being unknown would silently erase what the
+ * person chose during a moment the tool happened not to respond.
  *
- * 강도는 모델과 **함께** 버린다. 강도는 모델의 손잡이라(ModelOption.efforts), 남겨 두면
- * 어느 모델의 것인지 모르는 high가 도구의 기본 모델에 얹힌다.
+ * Effort is dropped **together with** the model. Effort is a handle on the model
+ * (`ModelOption.efforts`), so leaving it behind would land a `high` of unknown origin onto the
+ * tool's default model.
  */
 async function usableDefaults(
   platform: Platform,
@@ -1366,25 +1499,28 @@ async function usableDefaults(
     if (!supported || models.length === 0) return saved
     return models.some((m) => m.id === saved.model) ? saved : none
   } catch {
-    return saved // 위와 같은 이유 — 못 물어본 것은 "없다"가 아니다
+    return saved // Same reason as above — failing to ask is not the same as "does not exist"
   }
 }
 
-/** 진행 중인 인수인계 — 같은 세션에 두 번 걸면 새 세션이 둘 태어난다 (모듈 상태: 재진입 가드일 뿐, 그릴 것은 없다) */
+/** A handoff in progress — calling it twice on the same session births two new sessions (module state: purely a re-entry guard, nothing to draw from it) */
 const handoffInFlight = new Set<string>()
 
 /**
- * 인수인계 프롬프트 (도그푸딩 요청: "프롬프팅 잘 해서" — 특히 사용자가 쓰는 언어가
- * 넘어가야 한다는 지적). 죽는 세션만이 전체 맥락을 갖고 있으므로 글은 그쪽이 쓴다.
+ * The handoff prompt (per a dogfooding request to "prompt it properly" — specifically, that the
+ * language the user is using needs to carry over). Only the dying session has the full context, so
+ * it is the one that writes the note.
  *
- * **노트는 답으로 받고, 파일은 host가 놓는다** (#142). 예전에는 에이전트가 프로젝트 안
- * `.centralu/handoff/`에 직접 썼다. 노트가 사용자 저장소 밖(데이터 폴더)으로 나가면서
- * 직접 쓰기는 두 도구 모두에게 권한을 더 줘야 하는 일이 됐다 — 그래서 에이전트는 답만 하고,
- * host가 그 턴이 끝난 뒤 **저장소에 남은 답**을 파일로 놓는다(`agents.exportHandoffNote`).
- * 도그푸딩 2차 지적(화면 대화에서 긁은 답에 스트리밍 조각·직전 턴의 잔여 출력이 섞였다)은
- * 그대로 피한다: 화면이 아니라 host의 기록에서, 이 부탁 뒤의 답만, 턴이 끝난 뒤에 읽는다.
+ * **The note is received as the reply, and the host places the file** (#142). The agent used to
+ * write directly into `.centralu/handoff/` inside the project. Once the note moved outside the
+ * user's repository (into the data folder), writing it directly would have meant granting both
+ * tools more permissions — so the agent only replies, and after that turn ends the host takes
+ * **the reply as recorded in the store** and places it as a file (`agents.exportHandoffNote`). This
+ * also sidesteps a second dogfooding finding (a reply scraped from the on-screen conversation mixed
+ * in streaming chunks and leftover output from the previous turn): it is read from the host's
+ * record, not the screen, only the reply to this specific request, and only after the turn ends.
  *
- * e2e·테스트가 이 문구로 인수인계 메시지를 식별하므로 export한다.
+ * Exported because the e2e tests identify the handoff message by this wording.
  */
 export function handoffPrompt(): string {
   return `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor. Your final message in this turn is the note: the app saves that message to a file and hands the file to your successor. Do not write the note to a file yourself, and do not add a preamble or a closing line around it — whatever your final message says is the note.
@@ -1402,11 +1538,11 @@ Cover, in this order:
 Write the note itself in the language the user has mostly used in this conversation.`
 }
 
-/** 미리보기에 실을 줄 수·글자 수 — 무슨 일이 있었는지 알아볼 만큼만, 노트를 옮기지는 않게 */
+/** The number of lines and characters carried in the preview — just enough to tell what happened, not enough to carry the note itself */
 const PREVIEW_LINES = 10
 const PREVIEW_CHARS = 700
 
-/** 노트의 첫 줄들 — 빈 줄은 건너뛴다 (마크다운 노트는 머리에 빈 줄이 흔하다) */
+/** The note's opening lines — blank lines are skipped (markdown notes commonly start with one) */
 function notePreview(note: string): string {
   const lines: string[] = []
   for (const line of note.split('\n')) {
@@ -1419,19 +1555,21 @@ function notePreview(note: string): string {
 }
 
 /**
- * 후임자의 첫 메시지 (#102) — **노트가 아니라 노트의 자리를 건넨다.**
+ * The successor's first message (#102) — **hands over the note's location, not the note itself.**
  *
- * 예전에는 노트 전문이 그대로 첫 메시지였다. 그런데 위 프롬프트는 전임자에게
- * "파일이니 길이는 제약이 아니다"라고 말한다 — 길수록 충실한 노트가 되고, 충실할수록
- * 후임자가 받는 한 통의 메시지가 커졌다 (실측: 긴 세션을 codex에 넘기자 도착하자마자
- * 에러). 파일은 host가 놓은 자리에 있으므로, 첫 메시지는 경로만 가리키면 된다 — 그제서야
- * 길이는 선언이 아니라 사실로 제약이 아니게 된다. 그 자리는 프로젝트 밖(데이터 폴더, #142)이라
- * 경로는 절대 경로다. 후임자가 묻지 않고 읽을 수 있게 host가 그 폴더를 열어 준다
- * (Claude의 추가 작업 폴더 — Codex는 읽기를 막지 않는다).
+ * The full note used to be the first message verbatim. But the prompt above tells the predecessor
+ * "it is a file, so length is not a constraint" — the longer the note, the more thorough it is, and
+ * the more thorough it is, the larger the single message the successor received grew (measured: handing
+ * a long session off to codex produced an error the moment it arrived). The file is already sitting
+ * where the host placed it, so the first message only needs to point at the path — only then does
+ * length stop being a constraint in fact, not merely by declaration. That location is outside the
+ * project (the data folder, #142), so the path is absolute. The host opens that folder so the
+ * successor can read it without asking (Claude's additional working folder — Codex does not block
+ * reading it).
  *
- * 미리보기를 함께 싣는 이유: 대화 기록만 읽는 사람도 무슨 일이 있었는지는 알아야 한다.
- * 조각으로 읽거나 grep해도 된다고 **명시**하는 이유: 그 말이 없으면 에이전트는 파일을
- * 통째로 읽어 방금 없앤 그 문제를 스스로 다시 만든다.
+ * Why the preview rides along too: someone who only reads the conversation record still needs to
+ * know what happened. Why it **explicitly** says reading in pieces or grepping is fine: without that
+ * line, the agent reads the whole file and recreates the exact problem this design just removed.
  */
 function handoffOpening(predecessor: string, note: string, path: string): string {
   return [
@@ -1451,12 +1589,13 @@ function handoffOpening(predecessor: string, note: string, path: string): string
 }
 
 /**
- * SessionInfo에서 **살아-있는-동안 사실들**만 골라낸다 (승인·질문·활동·한도·사용량).
+ * Picks out only the **while-alive facts** from `SessionInfo` (approval, questions, activity,
+ * limit, usage).
  *
- * host 메모리가 원본인 값들이라, 재연결·재시작 후 목록을 받을 때 이걸 안 옮기면
- * state=waiting_approval인데 카드 payload가 없어 승인이 화면에 영영 안 나타난다.
- * 통째로 spread하지 않는 이유: SessionInfo에는 SessionSummary에 없는 필드
- * (externalId·createdAt…)가 있어 섞이면 안 된다.
+ * These values live only in the host's memory, so if they are not carried over when the list
+ * arrives after a reconnect or restart, a session can sit at `state=waiting_approval` with no card
+ * payload and the approval never shows up on screen. Not spread whole, because `SessionInfo` has
+ * fields `SessionSummary` does not (`externalId`, `createdAt`, …) that must not leak in.
  */
 function liveFactsOf(
   s: SessionInfo,
@@ -1507,31 +1646,35 @@ function trackWorkingSince(
   return next
 }
 
-/** 저장소에서 들여온 항목보다 항상 큰 번호를 쓰도록 밀어 올린다 */
+/** Pushes the counter up so it always uses a number bigger than any item brought in from the store */
 function bumpSeqAbove(items: { seq: number }[]): void {
   for (const it of items) if (it.seq > chatSeq) chatSeq = it.seq
 }
 
 /**
- * 기록에서 읽은 줄이 화면에 이미 있는 키와 부딪히면 새 키를 준다 (#79).
+ * Gives a row read from history a new key if it collides with a key already on screen (#79).
  *
- * 기록의 키는 저장 번호고, 실시간 항목의 키는 `chatSeq`에서 온다. 이벤트가 기록보다 먼저 온 세션에서는
- * 실시간 키(예: 31)가 아직 안 읽은 저장 번호(31번 줄)와 같을 수 있다. 같은 키가 둘이면 가상 스크롤이 두 줄을
- * 한 자리에 겹쳐 그린다(위 `chatSeq` 주석). 바꾸는 쪽은 언제나 새로 들어오는 기록 줄이다 — 화면에 있던 줄의
- * 키가 바뀌면 그 줄이 다시 그려지고, 읽던 자리(`scrollAnchor`)가 그 키를 잃는다.
- * 부르기 전에 `bumpSeqAbove`로 올려 두었으므로 새 키는 어느 저장 번호와도 겹치지 않는다.
+ * History's key is the stored number, and a live item's key comes from `chatSeq`. In a session
+ * where events arrived before history, a live key (say, 31) can coincide with a stored number
+ * (row 31) not yet read. Two rows sharing one key makes the virtual scroll draw them on top of each
+ * other in the same spot (see the `chatSeq` comment above). The side that gets rekeyed is always the
+ * incoming history row — changing the key of a row already on screen would re-render it and make the
+ * read position (`scrollAnchor`) lose track of that key. Because `chatSeq` was already raised by
+ * `bumpSeqAbove` before this is called, the new key never collides with any stored number.
  */
 function rekeyAgainst(incoming: ChatItem[], taken: Set<number>): ChatItem[] {
   return incoming.map((it) => (taken.has(it.seq) ? { ...it, seq: ++chatSeq } : it))
 }
 
 /**
- * 기록의 줄이 화면의 줄과 같은 말일 때 둘을 하나로 (#79). 모양은 기록의 것, 키와 화면에만 있는 것
- * (도구의 실행 중 출력, 확인 표식)은 화면의 것이다.
+ * Merges a history row and a screen row into one when they are the same message (#79). The shape
+ * comes from history; the key and anything screen-only (a tool's live output, a confirmation mark)
+ * come from the screen.
  *
- * 흐르는 중인 말은 예외다: host는 본문을 몇 백 ms마다 내려 쓰므로, 화면의 말이 기록의 본문을 이어 가고
- * 있으면 화면 쪽이 더 길다 — 그때는 화면의 것을 둔다. 이어 가지 않으면(첫 연결이 말의 뒷부분만 재생했다)
- * 기록이 온전한 쪽이다.
+ * A message still streaming is the exception: the host writes down its body every few hundred ms, so
+ * if the screen's text continues history's text, the screen side is longer — in that case the screen
+ * version is kept. If it does not continue (the initial connection only replayed the tail of the
+ * message), history's version is the complete one.
  */
 function settle(live: ChatItem, row: ChatItem): ChatItem {
   if ((live.kind === 'assistant' || live.kind === 'reasoning') && row.kind === live.kind && live.text.startsWith(row.text)) {
@@ -1546,11 +1689,13 @@ function settle(live: ChatItem, row: ChatItem): ChatItem {
 }
 
 /**
- * 번호 없는 화면의 줄이 기록의 이 줄을 먼저 그린 것인가 — 내용으로 가린다 (#79).
+ * Whether an unnumbered row on screen is what already drew this history row first — matched by
+ * content (#79).
  *
- * 번호가 없는 줄은 셋이다: 확인 전의 말(목은 확인을 보내지 않는다), 이미지(host가 파일을 쓴 **뒤에** 번호를
- * 매겨 이벤트에는 번호가 없다), 오류(목은 오류를 기록하지 않아 번호를 싣지 않는다 — host의 오류는 #161부터 번호를
- * 싣는다). 셋 다 host의 저장소에는 있다.
+ * There are three kinds of unnumbered row: a message before confirmation (a mock never sends the
+ * confirmation), an image (the host assigns the number only **after** writing the file, so the event
+ * carries none), and an error (a mock never records the error, so it carries no number — the host's
+ * own errors have carried a number since #161). All three exist in the host's store.
  */
 function sameLine(live: ChatItem, row: ChatItem): boolean {
   if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && live.text === row.text
@@ -1560,19 +1705,30 @@ function sameLine(live: ChatItem, row: ChatItem): boolean {
 }
 
 /**
- * 최신 기록 페이지를 화면의 대화와 합친다 (#79) — 줄은 저장 번호(`storedSeq`)로만 맞춘다.
+ * Merges the newest history page with the conversation on screen (#79) — rows are matched only by
+ * stored number (`storedSeq`).
  *
- * 예전에는 화면에 줄이 있으면 페이지를 버리고 커서만 페이지에서 세웠다. 그러면 버린 페이지와 화면 사이가
- * 비었고(`loadOlder`는 커서 위만 읽는다), 커서를 화면 맨 위의 렌더 키에서 세운 길은 같은 대화를 한 번 더 붙였다.
+ * This used to discard the page and set the cursor from the page alone whenever the screen already
+ * had rows. That left a gap between the discarded page and the screen (`loadOlder` only reads above
+ * the cursor), and setting the cursor from the render key at the top of the screen appended the same
+ * conversation a second time.
  *
- * 페이지는 host가 읽은 순간의 마지막 N개고, 그 구간(첫 줄–끝 줄)은 **페이지가 정본이다.**
- *  - 페이지와 같은 번호의 화면 줄은 하나로 합친다(`settle`) — 두 번 서지 않고, 화면의 키를 지킨다.
- *  - 페이지보다 오래된 화면 줄(첫 연결이 재생한 옛 조각)은 버린다. 남기면 페이지 위에 이어지지 않는 줄이
- *    떠서, 커서를 어디에 세워도 가운데가 비거나 두 번 선다. 버린 줄은 `loadOlder`가 제자리로 데려온다.
- *  - 승인 줄은 기록에서 그려지지 않는다(`messagesToChat`) — 구간 안이어도 번호 자리에 남긴다.
- *  - 구간 안의 번호 없는 줄은 페이지가 이미 들고 있다(`sameLine`의 셋).
- * 구간 뒤의 화면 줄은 꼬리로 그대로 붙는다 — 흐르는 중인 말과 막 보낸 말이 여기 있다. 꼬리 머리의 번호 없는
- * 줄은 페이지 끝의 짝 없는 줄과 내용이 같으면 하나로 친다: 번호가 없을 뿐 저장소에는 이미 적혀 있다.
+ * The page is the last N rows as of the moment the host read them, and within that range (first row
+ * through last row) **the page is the source of truth.**
+ *  - A screen row with the same number as a page row is merged into one (`settle`) — it does not
+ *    appear twice, and the screen's key is kept.
+ *  - A screen row older than the page (a stale chunk replayed by the initial connection) is
+ *    discarded. Keeping it would leave a row that does not connect to the top of the page, and no
+ *    matter where the cursor is set, the middle would either have a gap or duplicate content. A
+ *    discarded row is brought back into place by `loadOlder`.
+ *  - Approval rows are never drawn from history (`messagesToChat`) — they are kept in their numbered
+ *    spot even when inside the range.
+ *  - An unnumbered row inside the range is already held by the page (the three kinds covered by
+ *    `sameLine`).
+ * Screen rows after the range are simply appended as the tail — this is where a streaming message
+ * and one just sent live. An unnumbered row at the head of the tail is treated as the same row as an
+ * unmatched row at the end of the page if their content matches: it merely lacks a number, but it is
+ * already recorded in the store.
  */
 function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): ChatItem[] {
   if (rows.length === 0) return have
@@ -1583,7 +1739,7 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
     if (p.storedSeq !== undefined) at.set(p.storedSeq, i)
   })
   const out = [...page]
-  /** 화면의 줄을 받아 그 키를 물려받은 페이지 자리 */
+  /** Page slots that have taken in a screen row and inherited its key */
   const adopted = new Set<number>()
   const approvals: ChatItem[] = []
 
@@ -1619,7 +1775,7 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
     tail.push(it)
   }
 
-  // 새로 들어온 기록 줄만 키를 바꾼다 (rekeyAgainst) — 화면에서 온 줄의 키는 그대로다
+  // Only newly incoming history rows get rekeyed (rekeyAgainst) — a row that came from the screen keeps its key
   const screen = new Set([...[...adopted].map((i) => out[i]!.seq), ...approvals.map((a) => a.seq), ...tail.map((t) => t.seq)])
   out.forEach((it, i) => {
     if (!adopted.has(i)) out[i] = rekeyAgainst([it], screen)[0]!
@@ -1634,13 +1790,17 @@ function mergePage(have: ChatItem[], page: ChatItem[], rows: StoredMessage[]): C
 }
 
 /**
- * 입력창의 글이 열린 질문에 무엇이 되는가 (#125, #174) — 입력창의 안내문과 `send`가 **같은 판정**을 쓴다. 판정이
- * 둘로 갈라져 있던 동안(안내문은 첨부를 보지 않았다) 파일을 붙인 사람에게 "답을 쓰라"고 해 놓고 글은 새 턴으로 갔다.
+ * What the composer's text becomes relative to an open question (#125, #174) — the composer's hint
+ * text and `send` use **the same decision**. While the two were decided separately (the hint
+ * text did not look at attachments), a person who attached a file was told to "write an answer," and
+ * the text went to a new turn instead.
  *
- *  - `answer`: 질문이 정확히 하나이고 첨부가 없다 — 글은 그 질문의 답이다.
- *  - `drops`: 질문이 열려 있지만 글이 답이 될 수 없다. 한 요청에 질문이 여럿이면 카드가 전부 답하게 하는데 글 한 줄이
- *    그중 어느 것의 답인지 알 수 없고, 답은 첨부를 실을 자리가 없다. 보내면 새 턴이 되고 질문은 버려진다.
- *  - `none`: 열린 질문이 없다.
+ *  - `answer`: exactly one question, and no attachments — the text is that question's answer.
+ *  - `drops`: a question is open but the text cannot be its answer. When one request has several
+ *    questions, the card requires all of them answered, and a single line of text cannot say which
+ *    one it answers, nor does an answer have room for an attachment. Sending it starts a new turn and
+ *    the question is dropped.
+ *  - `none`: no open question.
  */
 /**
  * The project whose screen is showing (#203), or null. The project screen is the focus lane with no session
@@ -1700,7 +1860,7 @@ export function composerTarget(open: SessionSummary['pendingQuestions'], hasAtta
   return open.length === 1 && open[0]!.questions.length === 1 && !hasAttachments ? 'answer' : 'drops'
 }
 
-/** 새 턴에 밀려 버려진 질문을 대화에 남기는 한 줄 (#174) */
+/** A line left in the conversation for a question dropped by a new turn (#174) */
 export function droppedQuestionsText(questions: string[]): string {
   const quoted = questions.map((q) => `"${q}"`).join(', ')
   return questions.length === 1
@@ -1709,8 +1869,8 @@ export function droppedQuestionsText(questions: string[]): string {
 }
 
 /**
- * 에이전트에게 인수인계 노트를 부탁할 수 없게 막는 카드 (#174) — 없으면 null. 스토어의 `handoffSession`과 사이드바의
- * 확인 창이 같은 판정을 쓴다.
+ * The card that blocks asking the agent for a handoff note (#174) — `null` if there is none. The
+ * store's `handoffSession` and the sidebar's confirmation window use the same decision.
  */
 export function handoffBlockedBy(s: Pick<SessionSummary, 'pendingQuestions' | 'pendingApproval'>): 'question' | 'approval' | null {
   if (s.pendingQuestions.length > 0) return 'question'
@@ -1718,16 +1878,18 @@ export function handoffBlockedBy(s: Pick<SessionSummary, 'pendingQuestions' | 'p
   return null
 }
 
-/** 보냈는지 모르는 말 (#173) — 말풍선의 렌더 키 → 되돌릴 때 필요한 것. 다시 붙은 뒤 저장소에서 가린다 */
+/** A message of unknown send status (#173) — bubble render key → what is needed to undo it. Cleared against the store after reconnecting */
 type UnsureSend = { sessionId: string; text: string; attachments?: ChatAttachment[]; prevState?: SessionSummary['state'] }
 const unsureSends = new Map<number, UnsureSend>()
 
 /**
- * 보내지 못한 말을 되돌린다 — 말풍선을 걷고, 쓴 글과 첨부를 입력창으로, '작업 중'을 그 전 상태로.
+ * Undoes a message that failed to send — removes the bubble, returns the written text and
+ * attachments to the composer, and returns "working" to its previous state.
  *
- * 쓴 글은 입력창으로 되돌린다. 입력창은 보내는 순간 비워지는데(#38), 말풍선을 걷어내기만 하면 문장이 **어디에도
- * 없다** — 토스트는 실패를 알리지만 글을 돌려주지는 못한다. 실패가 오기 전에 새로 쓴 글이 있으면 덮지 않고 앞에
- * 잇는다: 순서상 실패한 말이 먼저 쓴 말이다.
+ * The written text goes back to the composer. The composer is cleared the instant a message is sent
+ * (#38), so merely removing the bubble leaves the sentence **nowhere at all** — a toast reports the
+ * failure but does not give the text back. If new text was written before the failure arrived, it is
+ * not overwritten but prepended in front of it: in order, the failed message was written first.
  */
 function unsend(
   set: (fn: (s: AppState) => Partial<AppState>) => void,
@@ -1743,7 +1905,7 @@ function unsend(
     return {
       chat: { ...s.chat, [u.sessionId]: (s.chat[u.sessionId] ?? []).filter((i) => i.seq !== u.seq) },
       drafts,
-      // 기다릴 것이 없으니 '작업 중' 표시도 걷는다
+      // Nothing is left to wait for, so the "working" indicator comes down too
       sessions,
       // ...and the clock we started above stops with it, so a later turn cannot inherit it
       workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
@@ -1752,7 +1914,7 @@ function unsend(
   })
 }
 
-/** 보내지 못한 글과 첨부를 그 세션의 초안 앞에 잇는다 — 그 사이 새로 쓴 글은 덮지 않는다(순서상 실패한 말이 먼저다) */
+/** Prepends unsent text and attachments to that session's draft — text written in the meantime is not overwritten (in order, the failed message came first) */
 function draftsWith(drafts: Record<string, Draft>, sessionId: string, text: string, attachments?: ChatAttachment[]): Record<string, Draft> {
   const cur = drafts[sessionId] ?? EMPTY_DRAFT
   return {
@@ -1774,11 +1936,14 @@ function restoreDraft(
 }
 
 /**
- * 다시 붙은 뒤 보냈는지 모르는 말을 가린다 (#173). 저장소의 최신 페이지와 합치면(mergePage) host가 받은 말은 같은
- * 문장의 저장 줄로 확정된다 — 재연결의 재생이 먼저 `user_message`로 확정했을 수도 있다. 그래도 pending이면 host는
- * 받지 못했다: 그때 되돌린다. 기록을 읽지 못해도 되돌린다 — 확인하지 못한 말을 보낸 것으로 둘 수는 없다.
+ * Resolves messages of unknown send status after reconnecting (#173). Merging in the store's latest
+ * page (`mergePage`) settles a message the host received into the stored row for that same sentence
+ * — reconnect replay may already have confirmed it via `user_message` first. If it is still pending
+ * even so, the host never received it, and it is undone at that point. It is also undone if history
+ * could not be read at all — a message that could not be confirmed cannot be treated as sent.
  *
- * 남는 틈: host가 잠든 세션을 되살리는 중이라 아직 저장하지 않았으면 여기서 되돌린 뒤에 그 말이 도착한다.
+ * The remaining gap: if the host is in the middle of reviving a sleeping session and has not yet
+ * stored the message, it arrives only after this has already undone it here.
  */
 async function settleUnsureSends(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): Promise<void> {
   const mine = [...unsureSends].filter(([, u]) => get().sessions[u.sessionId])
@@ -1792,12 +1957,16 @@ async function settleUnsureSends(get: () => AppState, set: (fn: (s: AppState) =>
 }
 
 /**
- * 새 세션의 대화에 첫 프롬프트를 세운다 (#172) — **덮어쓰지 않는다.**
+ * Sets a new session's conversation to its opening prompt (#172) — **never overwrites.**
  *
- * host는 세션을 만들며 `session_created`·`handoff`·`user_message`를 응답보다 먼저 방송한다. 화면은 앞의 것으로 세션을
- * 등록하므로 뒤의 둘은 이미 이 대화에 붙어 있다. 예전에는 응답이 대화를 pending 첫 프롬프트 하나로 덮어써 인수인계
- * 마커가 사라졌고, 확정할 이벤트가 이미 지나간 pending 줄이 남아 기록을 읽을 때 같은 프롬프트가 두 번 섰다.
- * 같은 문장이 이미 붙어 있으면 새로 세우지 않고, 없으면 있는 줄 뒤에 붙인다(이벤트가 응답 뒤에 오면 이 줄을 확정한다).
+ * The host broadcasts `session_created`, `handoff` and `user_message`, in that order, before the
+ * response — the screen registers the session from the first one, so the other two are already
+ * attached to this conversation by the time the response arrives. This used to overwrite the
+ * conversation with a single pending opening prompt when the response came in, which erased the
+ * handoff marker, and left behind a pending row whose confirming event had already passed, so the
+ * same prompt appeared twice when history was later read. If the same sentence is already attached,
+ * nothing new is set; if not, it is appended after what is there (an event arriving after the
+ * response then confirms this row).
  */
 function withOpeningPrompt(chat: Record<string, ChatItem[]>, id: string, text: string): Record<string, ChatItem[]> {
   const have = chat[id] ?? []
@@ -1806,8 +1975,8 @@ function withOpeningPrompt(chat: Record<string, ChatItem[]>, id: string, text: s
 }
 
 /**
- * 더 오래된 페이지를 앞에 붙인다 (#79). 화면에 이미 있는 번호의 줄은 다시 붙이지 않고, 화면의 키와
- * 부딪히는 줄은 새 키를 받는다(`rekeyAgainst`).
+ * Prepends an older page (#79). A row whose number is already on screen is not appended again, and
+ * a row that collides with a key on screen gets a new key (`rekeyAgainst`).
  */
 function prependPage(have: ChatItem[], older: ChatItem[]): ChatItem[] {
   const held = new Set(have.flatMap((it) => (it.storedSeq === undefined ? [] : [it.storedSeq])))
@@ -1815,15 +1984,16 @@ function prependPage(have: ChatItem[], older: ChatItem[]): ChatItem[] {
   return [...rekeyAgainst(fresh, new Set(have.map((it) => it.seq))), ...have]
 }
 
-/** 첨부 상한. 이보다 크면 base64 변환과 WS 전송 양쪽에서 앱이 눈에 띄게 멈춘다 */
+/** The attachment size cap. Above this, the app visibly freezes both during the base64 conversion and the WS send */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 /**
- * 바이트 → base64.
+ * Bytes → base64.
  *
- * 한 글자씩 이어붙이면(`binary += String.fromCharCode(b)`) 문자열이 매번 새로 만들어져
- * 스크린샷 한 장(수 MB)에도 수십 초씩 멈춘다 — 화면에는 아무 일도 안 일어난 것처럼 보인다.
- * 실제로 "파일 첨부 안 됨"으로 보고된 증상이 이것이었다. 청크로 끊어 처리한다.
+ * Appending one character at a time (`binary += String.fromCharCode(b)`) rebuilds the string from
+ * scratch every time, freezing the app for tens of seconds even for a single screenshot (a few MB)
+ * — the screen looks as if nothing is happening. This was in fact the reported symptom "file
+ * attachment does not work." Processed in chunks instead.
  */
 function toBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000
@@ -1835,22 +2005,24 @@ function toBase64(bytes: Uint8Array): string {
 }
 
 /**
- * 한 번에 거슬러 읽는 기록 분량 — **행이 아니라 메시지 개수다** (#66).
- * host의 loadMessages가 델타 조각을 메시지로 병합해 세므로, 200이던 시절의
- * "행 200개 = 토큰 200개 = 두어 문장"이 아니라 진짜 메시지 100개가 온다.
+ * How much history is read back at a time — **a count of messages, not rows** (#66).
+ * The host's `loadMessages` merges delta chunks into messages before counting them, so what arrives
+ * is 100 real messages, not the "200 rows = 200 tokens = a couple of sentences" that 200 meant in
+ * the days before that merge.
  */
 const HISTORY_PAGE = 100
 
-/** 비포커스 세션이 유지하는 최근 메시지 수 — 다시 열면 저장소에서 더 불러온다 */
+/** How many recent messages a non-focused session keeps — reopening it loads more from the store */
 const WINDOW_SIZE = 50
 
-/** 아직 스토어에 등록되지 않은 세션의 이벤트 보관함 (등록 직후 재생) */
+/** A holding pen for events belonging to a session not yet registered in the store (replayed right after registration) */
 const pendingEvents = new Map<string, NormalizedEvent[]>()
 
 /**
- * 외부 앱 목록 다시 읽기의 줄 (M4 A-8). 읽는 중에 또 "바뀌었다"가 오면, 끝난 뒤 한 번 더 읽는다.
- * 겹쳐 읽으면 늦게 떠난 답이 먼저 도착할 수 있고, 그러면 옛 목록이 새 목록을 덮는다. 앱이 뜨는
- * 동안에는 방송이 연달아 오므로(뜨는 중 → 떴다) 실제로 겹친다.
+ * A queue for re-reading the external app list (M4 A-8). If another "changed" arrives while a read
+ * is in flight, it reads once more after the current one finishes. Overlapping reads can let a
+ * late-departing answer arrive first, letting an old list overwrite the new one. This actually
+ * overlaps while an app is coming up, since broadcasts arrive back to back (coming up → up).
  */
 let externalAppsReading: Promise<void> | null = null
 let externalAppsAgain = false
@@ -1890,12 +2062,14 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
 }
 
 /**
- * 등록을 기다리며 보관된 이벤트를, **이제 등록된 세션에 한해** 순서대로 재생한다.
+ * Replays events held while waiting for registration, in order, **only for sessions now
+ * registered**.
  *
- * createSession만 이 보관함을 비우던 동안, 앱을 켜기 전부터 host에서 돌던 세션의
- * 이벤트는 attach가 목록을 등록하기 전에 도착하면 영영 보관함에 남았다 —
- * 첫 턴의 출력이 재시작 전까지 통째로 사라졌다. 세션이 등록되는 길목마다 이걸 부른다.
- * 재생 전에 보관함에서 지우므로 두 길목이 겹쳐도 이중 적용은 없다.
+ * While only `createSession` drained this holding pen, events for a session that had already been
+ * running on the host before the app was even opened stayed in the pen forever if they arrived
+ * before `attach` registered the list — the entire output of the first turn was lost until a
+ * restart. This is now called at every point a session gets registered. Cleared from the pen before
+ * replay, so even overlapping calls never apply the same event twice.
  */
 function replayPendingEvents(get: () => AppState): void {
   for (const id of [...pendingEvents.keys()]) {
@@ -1907,11 +2081,12 @@ function replayPendingEvents(get: () => AppState): void {
 }
 
 /**
- * 알림 카드를 쌓는다 — 세션당 하나.
+ * Stacks a notification card — one per session.
  *
- * 같은 세션이 또 부르면 늘리지 않고 갱신하며, **자리는 처음 부른 순서를 지킨다.**
- * 매번 맨 아래로 보내면 바쁜 세션이 카드를 계속 움직여서, 누르려던 카드가
- * 손가락 밑에서 달아난다.
+ * If the same session calls again, it is updated in place rather than added again, and **its
+ * position keeps the order it was first added in.** Always sending it to the bottom would let a
+ * busy session keep the cards constantly moving, so the card someone was about to press slips out
+ * from under their finger.
  */
 function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notice: Notice): void {
   set((s) => {
@@ -1974,7 +2149,7 @@ export const useStore = create<AppState>((set, get) => ({
   expandedDirs: {},
   showIgnored: true,
   textScale: TEXT_SCALE_DEFAULT,
-  // 기본은 접음 — 두 줄짜리 그리드에서 읽는 자리가 좁다는 것이 이 기능의 출발점이다
+  // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read
   foldComposer: true,
   spinGrid: true,
   spinSessionIcon: true,
@@ -2040,14 +2215,17 @@ export const useStore = create<AppState>((set, get) => ({
 
   async attach(platform) {
     /*
-     * **먼저 이전 구독을 끊는다.**
+     * **Detach the previous subscription first.**
      *
-     * 구독은 매번 **새 클로저**라 Set에 넣어도 겹치지 않는다. 그래서 attach가 두 번
-     * 돌면 같은 이벤트가 두 번, 세 번 돌면 세 번 적용된다 — 화면에는 글자가
-     * "호호스트가스트가"처럼 그대로 곱해져 나온다 (도그푸딩에서 ×3, ×2로 두 번 나왔다).
+     * A subscription is a **fresh closure** every time, so putting it in a Set never deduplicates
+     * it. If `attach` runs twice, the same event is applied twice; three times, three times — the
+     * screen shows text multiplied as is, arriving letter-duplicated like "호호스트가스트가" ("the
+     * host is" with syllables doubled and overlapping) (this happened during dogfooding, once at ×3
+     * and once at ×2).
      *
-     * 스트리밍 델타는 **누적**이라 이 유형이 특히 나쁘다: 한 번 어긋나면 그 뒤로
-     * 전부 어긋난 채 쌓인다. attach는 언제 불려도 같은 상태가 되게(멱등) 만든다.
+     * Streaming deltas are **cumulative**, which makes this failure mode especially bad: once it
+     * goes wrong once, everything after it piles up wrong too. `attach` is built so calling it at any
+     * time lands in the same state (idempotent).
      */
     detachAll()
     set({ platform })
@@ -2056,13 +2234,14 @@ export const useStore = create<AppState>((set, get) => ({
       platform.agents.onConnectionChange((connection) => {
         const was = get().connection
         /*
-         * resync_required: 연결 자체는 살아 있는데 host가 끊긴 사이의 이벤트를
-         * 재전송해 주지 못한다는 뜻이다 (재전송 버퍼 밖으로 밀렸다).
+         * resync_required: the connection itself is alive, but the host could not resend the
+         * events that happened while it was disconnected (they fell outside the resend buffer).
          *
-         * 이 신호를 아무도 소비하지 않던 동안 두 가지가 잘못됐다: 놓친 이벤트는
-         * 영영 복구되지 않았고, 라벨 로직이 connected가 아니면 전부 'Disconnected'로
-         * 그려서 **연결돼 있는데 끊겼다고 표시**했다. 라벨에는 connected로 두고,
-         * 빈 구간은 전체 재동기화(세션 목록 병합 + 보던 대화 다시 읽기)로 메운다.
+         * While nothing consumed this signal, two things went wrong: missed events were never
+         * recovered, and the label logic drew anything other than `connected` as 'Disconnected',
+         * so it **showed disconnected while actually connected**. The label is kept at `connected`,
+         * and the gap is filled by a full resync (merging the session list and re-reading the
+         * conversation being viewed).
          */
         if (connection === 'resync_required') {
           set({ connection: 'connected' })
@@ -2070,13 +2249,14 @@ export const useStore = create<AppState>((set, get) => ({
           return
         }
         set({ connection })
-        // 끊겼다가 돌아왔다 — 돌던 세션을 되살린다
+        // Disconnected and came back — revive sessions that were running
         if (connection === 'connected' && was !== 'connected') void get().recoverAfterReconnect()
       }),
       /*
-       * 명령 실행의 결말 (#60) — runId가 terminalId 자리를 탄다. 셸 터미널의 exit는
-       * commandRuns에 그 id가 없으니 조용히 지나간다. 화면 부품이 아니라 여기서 듣는
-       * 이유: 로그를 보던 창이 닫혀 있어도 뱃지는 꺼져야 한다.
+       * A command run's outcome (#60) — `runId` rides in the `terminalId` slot. A shell terminal's
+       * exit has no matching id in `commandRuns`, so it is silently ignored. Why this is listened
+       * for here rather than in a screen component: the badge must turn off even when the window
+       * that was showing the log is closed.
        */
       platform.terminal.onExit((e) => {
         set((s) => {
@@ -2099,23 +2279,24 @@ export const useStore = create<AppState>((set, get) => ({
     const [projects, sessions, gridPanels, tools, prefs, externalApps] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
-      // 배치를 못 읽어도 앱은 떠야 한다 — 그리드가 비어 보일 뿐이다
+      // The app must come up even if the layout cannot be read — the grid just looks empty
       platform.agents.grid().catch(() => [] as string[]),
-      // 같은 이유로 도구 목록도 앱을 막지 않는다 — 못 읽으면 이름만 나오고 라벨이 빠진다
+      // Same reason: the tool list must not block the app either — if it cannot be read, only names show, with no label
       platform.agents.detect().catch(() => [] as ToolStatus[]),
       /*
-        화면 설정은 **첫 화면보다 늦으면 안 된다.**
+        The screen settings must **never arrive later than the first screen.**
 
-        늦게 와도 되는 것(업데이트 확인처럼)과 달리, 이 값은 입력창이 Enter를 어떻게
-        읽을지를 정한다. 뒤늦게 도착하면 사람이 이미 치고 있는 중에 보내기 키가
-        바뀌고, 그 실수는 되돌릴 수 없다 — 말은 이미 나갔다.
+        Unlike something that is fine arriving late (like an update check), this value decides how
+        the composer reads Enter. Arriving late means the send key changes while the person is
+        already typing, and that mistake cannot be undone — the message is already gone.
 
-        그래도 **막지는 않는다**: 못 읽으면 기본값이다. 설정 하나 때문에 앱이 못 뜨는
-        것은 그 설정이 하는 일보다 훨씬 나쁘다.
+        Even so, it must **never block**: if it cannot be read, use the default. An app that cannot
+        come up because of one setting is far worse than whatever that setting does.
       */
       platform.prefs.load().catch(() => DEFAULT_UI_PREFERENCES),
-      // 외부 앱 목록(A-8)도 첫 화면과 함께 온다 — 사이드바의 앱 줄이 뒤늦게 튀어나오지 않게.
-      // 못 읽어도 앱은 뜬다: 앱 줄이 비어 보일 뿐이고, 다음 방송이 다시 읽는다
+      // The external app list (A-8) also arrives with the first screen — so the sidebar's app rows
+      // do not pop in late. The app still comes up if it cannot be read: the app rows just look
+      // empty, and the next broadcast re-reads them
       platform.apps.list().catch(() => [] as ExternalAppInfo[]),
     ])
     const known: Record<string, SessionSummary> = Object.fromEntries(
@@ -2158,8 +2339,9 @@ export const useStore = create<AppState>((set, get) => ({
           lastSeq: s.lastSeq,
           lastReadSeq: s.lastReadSeq,
           waitingSince: s.waitingSince,
-          // 살아-있는-동안 사실들도 host가 준다 — 이게 없으면 state=waiting_approval인데
-          // 카드를 그릴 payload가 없어 승인 요청이 화면에 영영 안 나타난다 (재시작 후 실측)
+          // The while-alive facts also come from the host — without them, a session could sit at
+          // state=waiting_approval with no payload to draw the card, and the approval request would
+          // never appear on screen (measured after a restart)
           ...liveFactsOf(s),
         },
       ]),
@@ -2177,24 +2359,28 @@ export const useStore = create<AppState>((set, get) => ({
       connection: 'connected',
     }))
 
-    // 목록 등록 전에 도착한 이벤트를 재생한다 — 앱을 켜기 전부터 돌던 세션의 첫 출력이 여기 있다
+    // Replay events that arrived before the list was registered — the first output of a session that
+    // was already running before the app was even opened is held here
     replayPendingEvents(get)
 
-    // 앱을 껐다 켜도 승인 대기 중인 제안은 host에 남아 있다 — 카드가 다시 서야 한다
+    // A suggestion awaiting approval stays on the host even across the app being closed and reopened
+    // — its card must reappear
     void get().refreshMcpProposals()
-    // 능력 물음도 host에 남아 있다 (M4 D-4) — 답을 기다리는 앱의 호출이 거기 매달려 있다
+    // Capability questions also survive on the host (M4 D-4) — an app's call waiting for an answer hangs there
     void get().refreshAppQuestions()
     void get().refreshSkillProposals()
 
     /*
-     * host가 이미 알아낸 것을 따라잡는다 (이슈 #43).
+     * Catches up on what the host already knows (issue #43).
      *
-     * **기다리지 않는다.** 버전 확인 때문에 앱이 늦게 뜨면 순서가 뒤집힌 것이다.
-     * `force: false`라 대개 host의 캐시를 그대로 받아 오지만, 아직 아무것도 모를 때는
-     * 네트워크를 기다릴 수 있다 — 그 몇 초가 화면 앞에 서면 안 된다.
+     * **Does not wait.** If the app came up late because of a version check, the order is backwards.
+     * `force: false` means this usually just receives the host's cache, but when nothing is known
+     * yet, it can end up waiting on the network — those few seconds must never stand in front of the
+     * screen.
      *
-     * 구독만으로는 부족한 이유: host의 첫 확인은 기동 직후라 이 창이 붙기 전에 끝나 있다.
-     * 방송은 그때 이미 지나갔으므로, 늦게 온 쪽이 한 번 물어봐야 한다.
+     * Why a subscription alone is not enough: the host's first check happens right at startup, which
+     * finishes before this window even attaches. The broadcast has already passed by then, so
+     * whoever arrives late has to ask once for itself.
      */
     void get().checkUpdate(false)
 
@@ -2203,9 +2389,11 @@ export const useStore = create<AppState>((set, get) => ({
       const snap = await platform.workspace.load()
       if (snap) {
         /*
-         * 접어 둔 프로젝트는 **맨 먼저** 되살린다 (#205). 바로 아래 focusSession이 saveWorkspace를
-         * 부르는데, 그때 이 값이 아직 초기값([])이면 방금 읽은 스냅샷 위에 빈 목록을 되써서 접힘이
-         * 지워진다 — introSeen이 겪은 그 일이다 (아래 주석). 문자열이 아닌 것은 버린다.
+         * Folded projects are restored **first of all** (#205). `focusSession` right below this
+         * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
+         * writes an empty list back over the snapshot just read, erasing the fold — the same thing
+         * that happens to `introSeen` (see the comment below). Anything that is not a string is
+         * discarded.
          */
         const savedFolds = (snap as { foldedProjects?: unknown }).foldedProjects
         if (Array.isArray(savedFolds)) {
@@ -2215,8 +2403,9 @@ export const useStore = create<AppState>((set, get) => ({
         set({ projectPanels: sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels) })
         if (snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
           /*
-           * 되살리기는 펼치지 않는다 (#205). 보던 세션의 프로젝트를 접어 둔 채 껐다면 그 접힘도
-           * 사람이 남긴 것이다 — 펼치면 재시작할 때마다 기억한 접힘을 스스로 지운다.
+           * Reviving a session never unfolds it (#205). If the app was closed with the session's
+           * project folded, that fold was left deliberately by the person too — unfolding it would
+           * have this erase the remembered fold on every restart.
            */
           get().focusSession(snap.focusedSessionId, { reveal: false })
         }
@@ -2231,11 +2420,11 @@ export const useStore = create<AppState>((set, get) => ({
          * nothing is actually waking.
          */
         /*
-         * introSeen은 **view보다 먼저** 되살린다 (#63). 아래 openOrchestrator가
-         * saveWorkspace를 부르는데, 그 시점의 introSeen이 아직 초기값(false)이면
-         * 방금 읽은 스냅샷 위에 false를 되써서 저장값이 지워진다 — 다음 실행이
-         * 소개 화면을 또 보여줬다 (실측: 복원 도중의 부분 저장이 마지막에 복원되는
-         * 필드를 잡아먹는다).
+         * `introSeen` is restored **before** `view` (#63). `openOrchestrator` below calls
+         * `saveWorkspace`, and if `introSeen` is still its initial state (`false`) at that point, it
+         * writes `false` back over the snapshot just read, erasing the stored value — the next launch
+         * showed the intro screen again (measured: a partial save mid-restore clobbers whichever
+         * field is restored last).
          */
         if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
         const savedView = (snap as { view?: unknown }).view
@@ -2243,9 +2432,10 @@ export const useStore = create<AppState>((set, get) => ({
         else if (savedView === 'orchestrator') void get().openOrchestrator()
         else if (savedView === 'app') {
           /*
-           * 고정 화면으로 보던 앱 (B-2). 목록은 위의 첫 스냅샷에 이미 실려 있다 — 없는 앱(폴더가
-           * 사라졌다, 프로젝트를 지웠다)이면 되살리지 않고 포커스 뷰에 남는다. 열면 host가 home을
-           * 부른다: 보던 자리로 돌아오는 값이 앱 프로세스 하나다.
+           * The app that was being viewed as a pinned view (B-2). The list is already loaded from
+           * the first snapshot above — if the app no longer exists (its folder disappeared, its
+           * project was deleted), it is not restored and the focus view is left as is. Opening it
+           * has the host call `home`: what comes back to that spot is a single app process.
            */
           const app = snap.focusedApp
           if (app && get().externalApps.some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
@@ -2269,7 +2459,7 @@ export const useStore = create<AppState>((set, get) => ({
         const savedLayout = (snap as { panelLayout?: unknown }).panelLayout
         if (savedLayout != null) {
           set({ panelLayout: sanitizeLayout(savedLayout) })
-          // 나눈 비율도 배치의 일부다 — 배치가 돌아오는 자리에서 같이 돌아온다
+          // The split ratio is also part of the arrangement — it comes back alongside the arrangement itself
           const savedSplit = (snap as { panelSplit?: unknown }).panelSplit
           if (typeof savedSplit === 'number' && Number.isFinite(savedSplit)) {
             get().setPanelSplit(savedSplit)
@@ -2297,48 +2487,52 @@ export const useStore = create<AppState>((set, get) => ({
         // a stored `false` is a decision and outranks it.
         const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
         if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
-        // 글자 크기도 보는 방식이다 — 같은 typeof 가드, 같은 이유 (없음 ≠ 기본으로 정했음)
+        // Text size is also a way of viewing — the same `typeof` guard, for the same reason (absent
+        // is not the same as "decided to use the default")
         const savedScale = (snap as { textScale?: number }).textScale
         if (typeof savedScale === 'number') get().setTextScale(savedScale)
-        // 같은 typeof 가드 — 저장된 false는 사람의 결정이라 기본값보다 세다
+        // Same `typeof` guard — a stored `false` was the person's decision, and outranks the default
         const savedFold = (snap as { foldComposer?: boolean }).foldComposer
         if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
-        // 같은 규칙: 저장된 false는 사람이 끈 것이므로 기본값(켬)보다 세다
+        // Same rule: a stored `false` means the person turned it off, so it outranks the default (on)
         const savedSpinGrid = (snap as { spinGrid?: boolean }).spinGrid
         if (typeof savedSpinGrid === 'boolean') set({ spinGrid: savedSpinGrid })
         const savedSpinIcon = (snap as { spinSessionIcon?: boolean }).spinSessionIcon
         if (typeof savedSpinIcon === 'boolean') set({ spinSessionIcon: savedSpinIcon })
       }
     } catch {
-      /* 스냅샷이 없어도 앱은 정상 동작한다 */
+      /* The app works normally even with no snapshot */
     }
 
     /*
-     * 그리드에 올려둔 세션을 미리 깨워 둔다 (도그푸딩: 메아 — codex가 큰 스레드를
-     * 되살리는 데 실측 7~13초가 걸리는데, 그건 codex 자신의 비용이라 우리가 줄일 수
-     * 없다. 줄일 수 없는 비용은 **사람이 안 기다리는 시간으로 옮긴다**). 그리드에
-     * 올렸다는 것은 곧 볼 세션이라는 뜻이다 — 클릭했을 때는 이미 살아 있어야 한다.
+     * Wakes sessions parked in the grid ahead of time (a dogfooding finding: reviving a large codex
+     * thread measured at 7-13 seconds, and that cost belongs to codex itself, which we cannot
+     * reduce. A cost that cannot be reduced can still be **moved to a time nobody is waiting on**).
+     * Putting a session on the grid already means it is about to be watched — it needs to already be
+     * alive by the time it is clicked.
      *
-     * 순차로 깨운다: 칸마다 외부 프로세스가 하나씩 뜨므로 동시에 띄우면 기동 직후
-     * 프로세스 폭풍이 된다. wake()는 이미 살아 있거나 없는 세션을 알아서 지나치고
-     * (포커스 복원이 먼저 깨운 칸 포함), 실패는 그 칸의 wakeError로 남는다 —
-     * 클릭해서 깨울 때와 같은 자리라서 새 실패 경로가 생기지 않는다.
+     * Woken one at a time: each panel brings up its own external process, so waking them all at once
+     * would be a stampede of processes right at startup. `wake()` already skips a session that is
+     * already alive or gone (including a panel focus-restore has already woken), and a failure is
+     * left in that panel's `wakeError` — the same spot as when woken by a click, so no new failure
+     * path is introduced.
      */
     void (async () => {
       for (const id of get().gridPanels) {
-        if (get().connection !== 'connected') return // 끊겼으면 그만 — 재연결 경로가 다시 챙긴다
+        if (get().connection !== 'connected') return // Stop if disconnected — the reconnect path picks it back up
         await get().wake(id)
       }
     })()
   },
 
   /**
-   * 상태가 바뀔 때마다 저장한다 — '종료 시 저장'은 크래시에 무력하다.
+   * Saves every time state changes — "save on exit" is helpless against a crash.
    *
-   * **스냅샷을 쓰는 곳은 여기 하나뿐이어야 한다.** host는 layout을 통째로 갈아
-   * 끼우므로, 부분 스냅샷을 쓰는 두 번째 작성자가 생기는 순간 서로의 필드를 지운다 —
-   * 실제로 setNotifyPolicy가 자기 목록으로 따로 저장해서, 알림 정책과 기록 높이가
-   * 상대편 저장에 조용히 초기화됐다. 필드를 더하면 **이 함수에** 더해라.
+   * **This must be the only place that writes the snapshot.** The host replaces the layout whole,
+   * so the moment a second writer saves a partial snapshot, each erases the other's fields — this
+   * actually happened, when `setNotifyPolicy` saved separately with its own list, and the notify
+   * policy and history height were quietly reset by the other save. If you are adding a field, add
+   * it **to this function**.
    */
   saveWorkspace() {
     const s = get()
@@ -2399,34 +2593,35 @@ export const useStore = create<AppState>((set, get) => ({
     const drop = new Set(sessionIds)
     set((s) => {
       const kept = s.notices.filter((n) => !drop.has(n.sessionId))
-      // 같은 배열이면 그대로 둔다 — 새 배열을 넣으면 이걸 보는 효과가 다시 돈다
+      // Leave it as is when nothing changed — putting in a new array reruns any effect watching this
       return kept.length === s.notices.length ? {} : { notices: kept }
     })
   },
 
   dispatchEvent(e) {
     /*
-     * 세션에 속하지 않는 사건은 **세션 가드보다 먼저** 처리한다 (이슈 #43).
+     * Events that do not belong to a session are handled **before the session guard** (issue #43).
      *
-     * 아래 `if (!sessionId) return`은 이 파일에서 가장 넓은 문이고, 여기 걸리면
-     * 조용히 사라진다 — 업데이트 상태를 그 뒤에 두면 host가 보낸 것이 도착은 하는데
-     * 아무 일도 안 일어나는, 원인을 찾기 가장 나쁜 종류의 결함이 된다.
+     * The `if (!sessionId) return` below is the widest door in this file, and anything caught by it
+     * vanishes silently — placing the update status handling after it would make the host's message
+     * arrive and do nothing, the worst kind of defect to trace.
      */
     if (e.type === 'update_status') {
       set({ update: e.status })
       return
     }
 
-    // 앱 문서가 바뀌었다 (#81) — 일부러 거친 이벤트라 무엇이 바뀌었는지는 다시 읽는다
+    // An app's document changed (#81) — deliberately a coarse event, so what changed is re-read rather than carried
     if (e.type === 'app_state_changed') {
       void get().refreshAppState(e.appId)
       return
     }
 
     /*
-     * 외부 앱의 도구 호출이 끝났다 (M4 A-4 → B-5). 여기서는 다시 읽지 않는다. 외부 앱의 상태는
-     * 앱 프로세스에 살고, 다시 읽는 것은 열린 화면이 자기 상태 도구로 한다. 스토어는 세기만 하고,
-     * 그 앱의 열린 AppFrame들이 이 수의 변화를 알림 하나로 바꾼다.
+     * An external app's tool call finished (M4 A-4 → B-5). Not re-read here. An external app's state
+     * lives in the app process, and re-reading it is the open view's own job, through its state tool.
+     * The store only counts, and that app's open `AppFrame`s turn this count's change into a single
+     * notification.
      */
     if (e.type === 'external_app_state_changed') {
       const key = externalAppKey(e.projectId, e.appId)
@@ -2438,20 +2633,20 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
-    // 외부 앱의 기록이 바뀌었다 (M4 D-6) — 세기만 한다. 그 앱의 기록 판이 이 수의 변화로 다시 읽는다. 화면은 이것을 듣지 않는다
+    // An external app's run history changed (M4 D-6) — only counted. That app's runs panel re-reads on this count's change. The view never hears this
     if (e.type === 'external_app_runs_changed') {
       const key = externalAppKey(e.projectId, e.appId)
       set((s) => ({ externalAppRunChanges: { ...s.externalAppRunChanges, [key]: (s.externalAppRunChanges[key] ?? 0) + 1 } }))
       return
     }
 
-    // 외부 앱의 자리와 상태가 바뀌었다 (M4 A-8) — 무엇이 바뀌었는지는 싣지 않으므로 통째로 다시 읽는다
+    // An external app's slot or state changed (M4 A-8) — since what changed is not carried, the whole list is re-read
     if (e.type === 'external_apps_changed') {
       void get().refreshExternalApps()
       return
     }
 
-    // 능력 물음이 생기거나 닫혔다 (M4 D-4) — 같은 거칠기, 통째로 다시 읽는다
+    // A capability question was created or closed (M4 D-4) — same coarseness, the whole list is re-read
     if (e.type === 'external_app_questions_changed') {
       void get().refreshAppQuestions()
       return
@@ -2461,9 +2656,9 @@ export const useStore = create<AppState>((set, get) => ({
     if (!sessionId) return
 
     /*
-     * 밖에서(터미널의 도구로) 이어간 대화를 host가 따라잡았다.
-     * 내용은 저장소에 들어갔으므로 화면을 통째로 다시 읽는다 —
-     * 이벤트로 한 줄씩 재생하면 우리가 이미 아는 부분과 섞일 수 있다.
+     * The host caught up on a conversation continued from outside (through the tool's own
+     * terminal). Its content already went into the store, so the screen is re-read whole — replaying
+     * events row by row here could mix in with the part we already knew.
      */
     if (e.type === 'history_synced') {
       void get().loadHistory(sessionId)
@@ -2471,11 +2666,11 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     /*
-     * 오케스트레이터가 이 세션의 설정을 바꿨다 (#30).
+     * The orchestrator changed this session's settings (#30).
      *
-     * 토스트가 핵심이다 — 사람이 아닌 손이 바꾼 설정이 화면에 조용히 스며들면,
-     * 다음에 메뉴를 연 사람은 자기가 고른 적 없는 값을 보고 어리둥절해진다.
-     * 값은 스냅샷이라 그대로 덮어쓴다.
+     * The toast is the point — if a setting changed by a hand other than the person's quietly seeped
+     * into the screen, the next person to open the menu would be baffled by a value they never chose.
+     * The value is a snapshot, so it is overwritten as is.
      */
     if (e.type === 'settings_changed') {
       const cur0 = get().sessions[sessionId]
@@ -2504,33 +2699,37 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
-    /** 이 이벤트로 이미 사람을 불렀나 — 같은 순간에 두 번 울리지 않기 위한 표시 */
+    /** Whether this event already alerted the person — a flag so the same instant does not fire twice */
     let announced = false
 
     /*
-     * 응답이 끝났다 — 화면을 한 번 쓸고 갈 바람의 방아쇠.
+     * The response finished — the trigger for one sweep of the screen.
      *
-     * **보이는지를 지금 판정한다.** 예전에는 사실만 담아 두고 "보이는가"는 화면이
-     * 나중에 곱했는데, 그러면 두 시점이 어긋난다: 세션을 옮겨 그 세션이 보이게 되는
-     * 순간에도 곱셈의 답이 참이 되어 **새로 끝난 것이 없는데 바람이 불었다**
-     * (도그푸딩: "세션 창 이동할 때도 막 나고"). 게다가 이 값을 지우지 않으므로
-     * 오갈 때마다 몇 번이고 되풀이됐다.
+     * **Visibility is decided right now.** This used to keep only the fact, and let the screen
+     * multiply in "is it visible" later, which lets the two moments fall out of sync: switching to
+     * the session at the very instant it becomes visible would also make that later check true, so
+     * **the sweep fired even though nothing had just finished** (dogfooding: "it also fires just from
+     * switching session windows"). Worse, since this value was never cleared, it repeated every time
+     * on switching back and forth.
      *
-     * 사건이 일어난 그 순간에 한 번 판정하면 어긋날 자리가 없다.
-     * 시각을 함께 담는 이유는 같은 세션이 연달아 끝나도 매번 불어야 해서다.
+     * Deciding it once, at the instant the event happens, leaves no room to fall out of sync.
+     * The instant is kept alongside it so the same session finishing twice in a row still fires each
+     * time.
      *
-     * 화면 밖에서 끝난 것은 바람이 아니라 **카드**로 남는다 — 보고 있지 않았으니
-     * 지나가는 신호로는 놓친다. 둘은 같은 사건의 두 얼굴이고, 서로 배타적이다.
+     * Something that finished off screen is left as a **card**, not a sweep — since it was not being
+     * watched, a passing signal would be missed. The two are two faces of the same event, and mutually
+     * exclusive.
      */
     if (e.type === 'turn_complete') {
       const s = get()
       /*
-       * **본다 = 앱이 앞에 있고 + 그 세션이 화면에 있고.**
+       * **Seen = the app is in front, and that session is on screen.**
        *
-       * 앞엣것을 빠뜨렸었다. `isOnScreen`은 어느 세션이 UI에 떠 있는지만 보므로 앱이
-       * 다른 창 뒤에 있어도 참이었다 — 그런데 자리를 비우면 앱이 통째로 안 보인다.
-       * 그래서 바람은 빈 방에서 불고, 정작 자리 비움을 위해 만든 카드는 만들어지지
-       * 않았다. 알림이 가장 필요한 경우에 정확히 아무 일도 일어나지 않은 셈이다.
+       * The first half used to be missing. `isOnScreen` only checks which session is showing in the
+       * UI, so it was true even with the app behind another window — but stepping away makes the
+       * whole app invisible. So the sweep fired in an empty room, and the very card built for the
+       * case of stepping away was never created. Exactly nothing happened in the one case a
+       * notification mattered most.
        */
       const seen =
         s.appFocused &&
@@ -2551,9 +2750,10 @@ export const useStore = create<AppState>((set, get) => ({
           at: Date.now(),
         })
         /*
-         * 카드와 소리는 함께 간다. 카드만 쌓이고 소리가 없으면 "카드가 떴는데 왜 안
-         * 불렀지"가 되고, 자리를 비운 사람에게 카드는 돌아와야 보이는 것이라 반쪽이다.
-         * 소리는 다른 알림과 같은 정책을 탄다 — 눈앞에 있으면 조용히 카드만 남긴다.
+         * The card and the sound go together. A card that piles up silently reads as "the card is
+         * there, why did it not alert me," and to someone who stepped away, a card is only seen once
+         * they come back — so a card alone is half the job. The sound follows the same policy as
+         * every other notification — quietly leave only the card while the app is in view.
          */
         if (s.notifyPolicy.done && (!s.appFocused || s.notifyPolicy.whenFocused)) {
           announced = true
@@ -2577,10 +2777,12 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     /*
-     * host가 스스로 만든 세션의 유일한 통지 (#69) — 오케스트레이터의 create_session,
-     * 워크트리 입양이 세우는 매니저. 이게 없던 동안 그런 세션은 재연결 후에야 나타났고,
-     * 그 전에 도착한 이벤트는 보관함에서 영영 나오지 못했다 (비우는 조건이 "등록되면"인데
-     * 등록시켜 줄 것이 없었다). RPC로 만든 쪽은 응답으로 이미 등록했으므로 조용히 버린다.
+     * The only notice for a session the host created on its own (#69) — the orchestrator's
+     * `create_session`, or a manager set up by worktree adoption. Without this, such a session did
+     * not appear until after a reconnect, and any event that arrived before that stayed stuck in the
+     * holding pen forever (its release condition was "once registered," and nothing was there to
+     * register it). A session created through an RPC is already registered by its response, so this
+     * is silently discarded for that case.
      */
     if (e.type === 'session_created') {
       const parsed = SessionInfo.safeParse(e.session)
@@ -2618,25 +2820,26 @@ export const useStore = create<AppState>((set, get) => ({
             },
           },
         }))
-        // 등록 전에 도착해 보관해 둔 이벤트가 있으면 지금이 재생할 순간이다
+        // If there are events held from before registration, now is the moment to replay them
         replayPendingEvents(get)
       }
       return
     }
 
     /*
-     * 대화 안 앱 화면 (M4 B-1). 카드와 따로 산다 — 화면은 카드의 id로 제 자리를 찾는다. 세션이 아직 등록
-     * 전이어도 적어 둔다: 카드가 그려지는 순간 그 아래에 선다.
+     * An in-conversation app view (M4 B-1). Lives separate from cards — the view finds its own spot
+     * by the card's id. Recorded even before the session is registered: it takes its place under the
+     * card the instant the card is drawn.
      */
     if (e.type === 'app_view') {
       const was = get().inlineViews[sessionId]?.[e.callId]
       set((s) => ({ inlineViews: { ...s.inlineViews, [sessionId]: applyAppView(s.inlineViews[sessionId], e) } }))
-      // host가 살아 있는 화면을 닫았다 — teardown을 보낸 뒤 접는다
+      // The host closed a live view — send teardown, then close it
       if ((e.phase === 'closed' || e.phase === 'rejected') && was?.state === 'live') {
         void get().closeInlineView(sessionId, e.callId, e.reason ?? 'This view was closed')
       }
       if (e.phase === 'open') {
-        // 이 화면이 연 코드 (C-4) — 목록의 지문이 이것과 달라지면 옛 HTML이다(followAppCode)
+        // The code this view was opened with (C-4) — if the list's fingerprint differs from this, it is stale HTML (`followAppCode`)
         const codeStamp = codeStampOf(get().externalApps, e.projectId, e.appId)
         set((s) => {
           const cur = s.inlineViews[sessionId]?.[e.callId]
@@ -2647,7 +2850,7 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
-    // 삭제는 세션이 사라지는 것이므로 리듀서를 태우지 않는다
+    // A deletion means the session is gone, so it does not run through the reducer
     if (e.type === 'session_deleted') {
       set((s) => {
         const sessions = { ...s.sessions }
@@ -2657,13 +2860,14 @@ export const useStore = create<AppState>((set, get) => ({
         return {
           sessions,
           chat,
-          // 그 대화의 화면도 함께 — host가 인스턴스를 이미 닫았다
+          // That conversation's views go too — the host has already closed the instance
           inlineViews: omitKey(s.inlineViews, sessionId),
-          // 읽던 자리도 세션과 함께 사라진다 — 같은 id가 다시 날 일은 없다 (#61)
+          // The read position disappears along with the session — the same id will never be reused (#61)
           scrollAnchor: omitKey(s.scrollAnchor, sessionId),
           /*
-           * 세션별로 든 것은 전부 함께 간다 (#163). 알림 카드가 남으면 누를 때 없는 세션에 초점이 가서
-           * "Select a project or session"이 뜬다. 나머지(기록 커서·초안·깨우기 오류)는 아무도 읽지 않는 짐이다.
+           * Everything kept per session goes together (#163). A leftover notification card would
+           * focus a nonexistent session on click, showing "Select a project or session." The rest
+           * (history cursor, draft, wake error) is dead weight nobody reads any more.
            */
           notices: s.notices.filter((n) => n.sessionId !== sessionId),
           history: omitKey(s.history, sessionId),
@@ -2679,41 +2883,44 @@ export const useStore = create<AppState>((set, get) => ({
 
     const cur = get().sessions[sessionId]
     if (!cur) {
-      // 세션 등록 전에 도착한 이벤트 (초기 프롬프트가 곧바로 스트리밍되는 경우).
-      // 버리면 첫 턴이 통째로 사라지므로 보관했다가 등록 직후 재생한다.
+      // An event that arrived before the session was registered (the initial prompt streaming right
+      // away is one such case). Discarding it would lose the whole first turn, so it is held and
+      // replayed right after registration.
       pendingEvents.set(sessionId, [...(pendingEvents.get(sessionId) ?? []), e])
       return
     }
 
     const next = applyEvent(cur, e, Date.now())
     /*
-     * `chat[id]`가 **없다**는 것은 "아직 기록을 안 읽었다"는 뜻이다 — 포커스가 그걸 보고
-     * 기록을 부른다. 그런데 대화가 아닌 이벤트(상태 변화·컨텍스트 사용량 등)도 여기로 와서
-     * `[]`를 써 넣으면, 그 세션은 "읽었는데 비어 있다"가 되어 **기록을 영영 안 부른다.**
-     * 도그푸딩 2026-09-25: 11,550줄짜리 세션이 앱을 다시 켠 뒤 통째로 비어 보였다.
-     * host가 재개하면서 보낸 이벤트가 사용자가 그 세션을 누르기 전에 도착한 것이다.
-     * 그래서 보탤 대화가 없고 자리도 없던 세션에는 자리를 만들지 않는다.
+     * `chat[id]` being **absent** means "history has not been read yet" — focusing reads that and
+     * calls for history. But a non-conversation event (a state change, context usage, and so on)
+     * also arrives here, and writing `[]` for it would make that session read as "read, and empty,"
+     * so **history is never called for again.** Dogfooding, 2026-09-25: an 11,550-line session
+     * looked completely empty after reopening the app. An event the host sent while resuming it had
+     * arrived before the user ever clicked that session. So no slot is created for a session that had
+     * no conversation to append and no slot yet.
      */
     const had = get().chat[sessionId]
     const appended = appendChat(had ?? [], e)
     const chat = had === undefined && appended.length === 0 ? undefined : appended
     /*
-     * 프로젝트 제안 (#63)은 **가리키는 것**으로 끝난다.
+     * A project suggestion (#63) ends with **pointing**, nothing more.
      *
-     * 대화 안에 폴더 피커 버튼을 두면 사이드바의 Add project와 같은 일을 하는 문이
-     * 둘이 되고, 처음 보는 사람은 "프로젝트는 오케스트레이터에게 시키는 것"으로
-     * 배운다 — 실제로는 그 반대여야 한다. 그래서 여기서는 사이드바 버튼에 불을
-     * 켤 뿐이다: 문은 앱에 하나, 오케스트레이터는 그 문이 어디 있는지 알려준다.
+     * Putting a folder-picker button inside the conversation would create a second door doing the
+     * same job as the sidebar's Add project, and a first-time viewer would learn "projects are
+     * something you ask the orchestrator to do" — which should be exactly backwards. So this only
+     * lights up the sidebar button: there is one door in the app, and the orchestrator just points at
+     * where it is.
      */
     if (e.type === 'tool_call' && /propose_project$/.test(e.summary.tool)) set({ addProjectHint: true })
-    // MCP 서버 제안 (propose_mcp_server) — 목록은 host가 진실이라 다시 읽는다
+    // An MCP server suggestion (`propose_mcp_server`) — the list is re-read because the host holds the truth
     if (e.type === 'tool_call' && /propose_mcp_server$/.test(e.summary.tool)) void get().refreshMcpProposals()
-    // 스킬 제안 (#71) — 같은 규칙
+    // A skill suggestion (#71) — the same rule
     if (e.type === 'tool_call' && /propose_skill$/.test(e.summary.tool)) void get().refreshSkillProposals()
     /*
-     * 워크트리 제안 (#69) — 같은 원칙(가리키기)에 값이 하나 실린다: 브랜치 이름.
-     * 어댑터가 제목에 실어 보낸다 (다른 운반로가 없다). 제목이 도구 이름 그대로면
-     * 이름 없는 제안이다 — 창은 빈 이름으로 열린다.
+     * A worktree suggestion (#69) — the same principle (pointing), carrying one extra value: the
+     * branch name. The adapter carries it in the title (there is no other channel). If the title is
+     * exactly the tool's own name, the suggestion has no name — the window opens with an empty name.
      */
     if (e.type === 'tool_call' && /propose_worktree_session$/.test(e.summary.tool) && cur.projectId) {
       const branch = /propose_worktree_session$/.test(e.summary.title) ? '' : e.summary.title
@@ -2721,21 +2928,22 @@ export const useStore = create<AppState>((set, get) => ({
         worktreeProposals: st.worktreeProposals.some(
           (p) => p.projectId === cur.projectId && p.branch === branch,
         )
-          ? st.worktreeProposals // 같은 제안이 다시 와도 줄을 서지 않는다 (재생·재연결 멱등)
+          ? st.worktreeProposals // The same suggestion arriving again does not queue up a second time (idempotent across replay and reconnect)
           : [...st.worktreeProposals, { projectId: cur.projectId as string, branch }],
       }))
     }
     /*
-     * **안읽음 추적(lastSeq)은 host가 매긴 세션 내 seq로만 민다.**
+     * **Unread tracking (`lastSeq`) advances only by the seq the host assigns within the session.**
      *
-     * 예전에는 대화 아이템의 렌더 키(전 세션 공용 chatSeq)로 밀었다. 그 값이 markRead를
-     * 타고 host의 last_read_seq로 저장되니, 200메시지 세션을 본 뒤 2메시지 세션에
-     * 이벤트가 하나만 와도 그 세션의 last_read_seq가 ~201로 부풀어 — 재시작 후에도 —
-     * 다시는 안읽음 점이 뜨지 않았다. 렌더 키와 저장 시퀀스는 다른 번호 체계다.
+     * It used to advance by the conversation item's render key (`chatSeq`, shared across every
+     * session). That value flows through `markRead` into the host's `last_read_seq`, so after viewing
+     * a 200-message session, even a single event arriving in a 2-message session inflated that
+     * session's `last_read_seq` to around 201 — and even across a restart, its unread dot never
+     * appeared again. The render key and the stored sequence are two different numbering schemes.
      */
     const hostSeq = 'seq' in e && typeof e.seq === 'number' ? e.seq : null
     let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
-    // 내(혹은 오케스트레이터)가 보낸 말은 host도 읽음 처리한다 — 화면도 따라간다
+    // A message sent by me (or by the orchestrator) also gets marked read by the host — the screen follows
     if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
 
     set((st) => {
@@ -2749,7 +2957,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
     })
 
-    // 상태가 바뀌었을 때만 알림을 판정한다 (판정은 core, 전달은 system 포트)
+    // Notifications are decided only when the state changed (the decision belongs to core, delivery to the system port)
     if (withSeq.state !== cur.state) {
       const st = get()
       const platform = st.platform
@@ -2761,20 +2969,20 @@ export const useStore = create<AppState>((set, get) => ({
 
       const one = notificationFor({ id: sessionId, name: withSeq.name, state: withSeq.state }, cur.state, ctx)
       const all = allDoneNotification(after, before, ctx)
-      // 개별 알림이 있으면 그것만 — 같은 순간에 두 번 울리지 않는다
-      // 개별 완료로 이미 울렸으면 "전부 완료"는 겹쳐 울리지 않는다 — 같은 순간에 두 번은 소음이다
+      // If there is a per-session notice, use only that — do not fire twice at the same instant
+      // If a per-session completion already fired, "all done" does not fire on top of it — twice at the same instant is just noise
       const notice = one ?? (announced ? null : all)
       if (notice) {
-        // 배너는 되면 좋은 것으로 내려갔다 (macOS에서 이 경로는 죽어 있다).
-        // 못 보냈으면 화면에 남긴다 — 조용히 사라지면 "알림이 안 온다"를 밝혀낼 수 없다.
+        // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
+        // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
         void platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
-        // 실제로 사람에게 닿는 길. 권한도 서명도 타지 않는다.
+        // The path that actually reaches the person. Goes through neither permissions nor signing.
         void platform.system
           .alert(notice.kind, st.notifyPolicy.sound)
           .catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
       }
-      // 승인·오류는 사람이 와야 풀린다 → 돌아왔을 때 남아 있도록 카드로도 남긴다.
-      // "전부 완료"는 세션 하나의 일이 아니므로 카드를 만들지 않는다 (개별 카드가 이미 있다).
+      // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
+      // "All done" is not about a single session, so it never creates a card (a per-session card already exists for that).
       if (one) {
         pushNotice(set, {
           sessionId,
@@ -2787,19 +2995,22 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  /** 프로젝트만 선택 — 세션을 고르지 않아도 깃·파일·뷰어를 볼 수 있다 */
+  /** Selects only the project — git, files and the viewer can be viewed without picking a session */
   focusProject(id) {
     set(() => ({
       focusedProjectId: id,
       /*
-       * 프로젝트를 고르면 **언제나** 세션 포커스를 놓는다 — 프로젝트 화면을 보려고 누른 것이다.
-       * 예전에는 다른 프로젝트를 고를 때만 놓았다. 그래서 같은 프로젝트의 세션을 보다가 그 프로젝트 이름을
-       * 누르면 세션이 그대로 남아 아무 일도 안 일어난 것처럼 보였다(사용자 제보 2026-09-28). 부르는 곳은
-       * 사이드바의 이름과, 세션이 없는 프로젝트를 고른 팔레트뿐이다 — 둘 다 프로젝트 화면을 원한다.
+       * Picking a project **always** releases session focus — the click was made to see the project
+       * screen. This used to release it only when a *different* project was picked, so clicking that
+       * same project's name while already viewing one of its sessions left the session in place,
+       * looking as if nothing had happened (user report 2026-09-28). The only callers are the
+       * sidebar's name and the palette when it picks a project with no session — both want the
+       * project screen.
        */
       focusedSessionId: null,
-      // 프로젝트 화면은 포커스 레인에만 있다 — 고른 것은 보여야 한다 (focusSession과 같은 규칙).
-      // 온보딩이 오케스트레이터 뷰를 먼저 열면서(#63) 이 조합이 실제로 생겼다 (e2e가 잡았다)
+      // The project screen exists only in the focus lane — what you picked must be shown (the same
+      // rule as `focusSession`). This combination actually arose once onboarding started opening the
+      // orchestrator view first (#63) (caught by e2e).
       view: 'focus',
       viewerPath: null,
   viewerProjectId: null,
@@ -2812,47 +3023,53 @@ export const useStore = create<AppState>((set, get) => ({
     const prev = get().focusedSessionId
     const projectId = id ? get().sessions[id]?.projectId : undefined
     /*
-     * 세션을 고르면 **그 세션이 보여야 한다.**
+     * Picking a session **must make that session visible.**
      *
-     * 그리드를 열어둔 채 사이드바에서 다른 세션을 눌러도 화면이 그대로였다:
-     * 고른 것은 바뀌었는데 보이는 것은 안 바뀌니, 누른 사람 눈에는 아무 일도 안 일어난 것이다.
-     * 여기 두는 이유는 부르는 곳이 열 군데(사이드바·인박스·팔레트·승인 배너…)라서다 —
-     * 호출부마다 붙이면 언젠가 한 곳을 빠뜨린다.
+     * With the grid left open, clicking a different session in the sidebar left the screen
+     * unchanged: what was picked had changed but what was visible had not, so to the person who
+     * clicked, nothing appeared to happen. This lives here because there are a dozen call sites
+     * (sidebar, inbox, palette, approval banner, …) — attaching it at each call site means one of
+     * them eventually gets missed.
      *
-     * 선택 해제(null)는 뷰를 건드리지 않는다. 그건 "이걸 봐라"가 아니기 때문이다.
+     * Deselecting (`null`) leaves the view untouched, because that is not "look at this."
      */
     /*
-     * **오케스트레이터는 'focus'가 아니라 자기 화면으로 간다** (도그푸딩 버그).
+     * **The orchestrator goes to its own screen, not 'focus'** (a dogfooding bug).
      *
-     * 여기서 무조건 `view: 'focus'`를 켜는 바람에, 상단 바의 '응답 대기' 목록에서
-     * 오케스트레이터를 누르면 오케스트레이터 대화가 **세션 화면의 틀 안에서** 열렸다.
-     * 증상 둘이 거기서 나온다: 오른쪽 증거 레인이 딸려 나오고(App의 hasEvidenceLane은
-     * view로 판단한다 — 오케스트레이터에는 볼 저장소가 없다), 사이드바의 오케스트레이터
-     * 버튼은 안 눌린 것처럼 보인다(active 역시 view로 판단한다).
+     * Turning on `view: 'focus'` unconditionally here meant clicking the orchestrator from the top
+     * bar's "waiting for response" list opened the orchestrator's conversation **inside the frame of
+     * the session screen.** Two symptoms came from that: the right-hand evidence lane came along
+     * (`App`'s `hasEvidenceLane` decides by `view` — the orchestrator has no repository to view), and
+     * the sidebar's orchestrator button looked unpressed (`active` also decides by `view`).
      *
-     * 고치는 자리가 여기인 이유는 위 주석과 같다: 이 함수를 부르는 곳이 열 군데다
-     * (인박스·알림 카드·팔레트·승인 배너·단축키…). 그중 하나만 오케스트레이터를
-     * 만나도 같은 증상이 나므로, 판단은 부르는 쪽이 아니라 여기 한 곳에 있어야 한다.
+     * The fix belongs here for the same reason as the comment above: this function has a dozen call
+     * sites (inbox, notification card, palette, approval banner, shortcuts, …). Even one of them
+     * meeting the orchestrator reproduces the same symptom, so the decision has to live in this one
+     * place, not at each caller.
      */
-    // 이미 그리드에 올라와 있는 세션이면 그리드가 목적지다 (위 preferGrid 주석)
+    // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment above)
     const onGrid = !!id && !!opts?.preferGrid && get().gridPanels.includes(id)
     const orchestrator = !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
     /*
-     * 고른 세션의 프로젝트가 접혀 있으면 편다 (#205) — 고른 세션은 사이드바에서도 보여야 한다.
-     * 인박스·팔레트·알림 카드·다음 대기(⌘⇧A)·새 세션이 모두 이 문을 지나므로 판단도 여기 하나에 둔다
-     * (위의 view와 같은 이유: 부르는 곳이 열 군데다).
+     * If the picked session's project is folded, it is unfolded (#205) — a picked session must also
+     * be visible in the sidebar. The inbox, palette, notification card, next-waiting (⌘⇧A) and
+     * new-session all pass through this door, so the decision lives here alone (same reason as
+     * `view` above: a dozen call sites).
      *
-     * **편 것은 기억한다** — 사람이 화살표로 편 것과 같다. 잠깐만 펴 두었다가 떠날 때 다시 접는 길도
-     * 있었지만 버렸다. 그러려면 화면에 없는 두 번째 상태가 "언제 다시 접을지"를 정해야 하고, 사람은
-     * 그 순간을 예측할 수 없다 — 줄이 제멋대로 나타났다 사라지는 것은 호버로 펴기를 버린 이유와 같다.
-     * 기억하면 화살표가 언제나 화면 그대로를 말하고, 다시 켜도 본 그대로 돌아온다.
+     * **What gets unfolded is remembered** — the same as if the person had unfolded it with the
+     * arrow. A path that unfolds briefly and re-folds on leaving was considered and rejected. That
+     * would require a second, off-screen piece of state to decide "when to fold it back," and a
+     * person cannot predict that moment — a row appearing and disappearing on its own is exactly why
+     * unfolding on hover was rejected too. Remembering it means the arrow always states exactly what
+     * is on screen, and reopening the app returns to exactly what was last seen.
      *
-     * `reveal: false`는 둘뿐이다: 스냅샷 되살리기(접힘도 사람이 남긴 것이다)와 그리드 칸 누르기
-     * (세션이 이미 칸에 보이고, 칸에 입력할 때마다 접어 둔 프로젝트가 펴지면 접기가 소용없다).
+     * `reveal: false` happens in exactly two places: restoring a snapshot (a fold left there was also
+     * left by the person) and clicking a grid panel (the session is already visible in its panel, and
+     * if typing into a panel unfolded its project every time, folding would be pointless).
      */
     const reveal =
       opts?.reveal !== false && !!projectId && get().foldedProjects.includes(projectId)
-    // 세션을 바꾸면 덮어둔 것은 걷는다 — 새 세션의 대화가 먼저 보여야 한다
+    // Switching sessions clears any overlay — the new session's conversation must be visible first
     set({
       focusedSessionId: id,
       overlay: null,
@@ -2860,10 +3077,11 @@ export const useStore = create<AppState>((set, get) => ({
       ...(id
         ? {
             /*
-             * 오케스트레이터도 Grid에 올라갈 수 있다. 그 칸의 입력창·알림을 눌렀을 때
-             * 전용 화면으로 빼앗기면 "나란히 보기"가 바로 깨진다. preferGrid는 오직
-             * GridView가 준 명시적 의도이므로, 그때만 전용 화면보다 앞선다. 사이드바·
-             * 팔레트처럼 보통으로 고른 경우는 여전히 오케스트레이터 전용 화면으로 간다.
+             * The orchestrator can be placed on the grid too. If clicking its panel's composer or
+             * notification got hijacked into the dedicated screen, "view side by side" would break
+             * immediately. `preferGrid` is only ever the explicit intent `GridView` gives, so it is
+             * the only case where the grid outranks the dedicated screen. A normal pick, like from
+             * the sidebar or the palette, still goes to the orchestrator's dedicated screen.
              */
             view: onGrid ? ('grid' as const) : orchestrator ? ('orchestrator' as const) : ('focus' as const),
           }
@@ -2872,23 +3090,27 @@ export const useStore = create<AppState>((set, get) => ({
     })
     get().saveWorkspace()
 
-    // 포커스를 벗어난 세션의 메시지는 잘라낸다 (docs/state-management.md §4).
-    // 세션 10개 × 수백 턴을 전부 들고 있으면 §7.1 메모리 목표를 지킬 수 없다.
-    // 요약(상태·안읽음·미리보기)은 그대로 남으므로 사이드바·인박스는 정확하다.
+    // Messages of a session that lost focus are trimmed (docs/state-management.md §4).
+    // Holding all of ten sessions × hundreds of turns each would blow the §7.1 memory target.
+    // The summary (state, unread, preview) stays intact, so the sidebar and inbox remain accurate.
     if (prev && prev !== id) {
       const items = get().chat[prev]
       if (items && items.length > WINDOW_SIZE) {
         /*
-         * **창을 줄이면 커서도 함께 옮긴다** (도그푸딩 2026-09-09: "위에 대화가 안 불러와져").
+         * **Shrinking the window moves the cursor along with it** (dogfooding, 2026-09-09: "older
+         * conversation does not load above").
          *
-         * 예전에는 chat만 잘랐다. 그러면 화면의 맨 위는 방금 자른 자리인데 커서(oldestSeq)는
-         * 예전 그대로라, '이전 대화 불러오기'가 **화면과 안 이어지는 구간**을 앞에 붙였다 —
-         * 잘려 나간 사이가 영영 안 보인다. 자른 자리가 곧 새 커서다.
+         * This used to trim only `chat`. That left the top of the screen at the freshly trimmed spot
+         * while the cursor (`oldestSeq`) stayed at its old value, so "load earlier conversation"
+         * prepended **a range that does not connect to the screen** — the trimmed-away gap was never
+         * seen again. The trim point is now the new cursor.
          *
-         * 커서는 맨 위 줄의 **저장 번호**다 (#79). 렌더 키를 쓰던 동안, 남긴 50줄의 맨 위가 실시간 줄이면
-         * 커서가 전 세션 공용 번호를 받았다. 번호 없는 줄(이미지·확인 전의 말)에서는 창을 시작하지 않는다 —
-         * 세울 번호가 없고, 그 줄은 저장소에 있어 `loadOlder`가 다시 데려온다. 번호 있는 줄이 하나도 없으면
-         * 자르지 않는다: 커서 없이 자르면 잘린 사이로 갈 길이 없다.
+         * The cursor is the top row's **stored number** (#79). Back when the render key was used, if
+         * the top of the 50 kept rows was a live row, the cursor received a number shared across every
+         * session. The window never starts at an unnumbered row (an image, a message before
+         * confirmation) — it has no number to set, and that row lives in the store anyway, so
+         * `loadOlder` brings it back. If there is no numbered row at all, nothing is trimmed: trimming
+         * with no cursor would leave no way back into the trimmed gap.
          */
         let top = items.length - WINDOW_SIZE
         while (top < items.length && items[top]!.storedSeq === undefined) top++
@@ -2907,17 +3129,20 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (!id) return
     void get().markRead(id)
-    // 아직 안 읽어온 세션이면 저장된 대화를 불러온다 (host 재시작 후에도 기록은 남는다)
+    // If the session's conversation has not been read yet, load it from storage (history survives even a host restart)
     const cur = get()
     /*
-     * "읽었다"는 **커서가 있다**는 뜻이다 (#79). 대화 줄이 있다고 읽은 것이 아니다 — 이벤트가 화면보다
-     * 먼저 오면(앱이 부탁한 에이전트처럼 host가 뒤에서 만든 세션, 첫 연결이 재생한 이벤트) 줄만 생긴다.
+     * "Read" means **a cursor exists** (#79). Having conversation rows does not mean it was read —
+     * if an event arrives before the screen does (a session the host created in the background, like
+     * an app's requested agent, or an event replayed by the initial connection), only rows appear.
      *
-     * 예전(09-09)에는 그런 세션의 커서를 화면 맨 위 줄에서 세웠다. 다시 읽으면 스트리밍 중인 말이나
-     * 낙관적으로 그린 첫 프롬프트가 지워질 수 있어서였다. 그런데 그 번호는 렌더 키였다: 저장된 8줄 세션에
-     * 커서 48이 서서 '이전 대화'가 대화 전체를 한 번 더 붙였고(실측 2026-09-25), 키가 저장 번호보다
-     * 작으면 가운데가 통째로 빠졌다. 이제 `loadHistory`가 화면의 줄을 지우지 않고 기록과 합치므로
-     * (mergePage) 언제나 읽는다.
+     * Before this (09-09), such a session's cursor used to be set from the top row on screen. The
+     * reasoning was that re-reading could wipe out a still-streaming message or an optimistically
+     * drawn first prompt. But that number was the render key: a stored 8-line session ended up with a
+     * cursor of 48, so "earlier conversation" appended the whole conversation a second time (measured
+     * 2026-09-25), and whenever the key was lower than the stored number, the entire middle went
+     * missing. Now that `loadHistory` merges with history rather than clearing the screen's rows
+     * (`mergePage`), it is always safe to read.
      */
     if (!cur.history[id]) void get().loadHistory(id)
     void get().wake(id)
@@ -2932,13 +3157,16 @@ export const useStore = create<AppState>((set, get) => ({
       bumpSeqAbove(items)
       set((s) => ({
         /*
-         * 화면의 줄은 버리지 않고 기록과 합친다 (#79, mergePage). 예전에는 줄이 있으면 페이지를 버렸다 —
-         * 커서는 버린 페이지에서 세우면서. 다시 읽기(밖에서 이어간 대화 따라잡기, 빈 구간 메우기)도 같은 길이다:
-         * 페이지 구간은 기록이 정본이고, 그 뒤에 흐르는 말만 화면의 것이다.
-         * 커서는 합친 결과의 맨 위 저장 번호, 곧 페이지의 첫 줄이다 — 그보다 오래된 화면 줄은 합치며 버렸다.
+         * Screen rows are merged with history, never discarded (#79, `mergePage`). This used to
+         * discard the page whenever rows existed on screen — setting the cursor from the discarded
+         * page. Re-reads (catching up on a conversation continued elsewhere, filling a gap) go
+         * through the same path: within the page's range, history is the source of truth, and only
+         * whatever streams after it belongs to the screen.
+         * The cursor is the stored number of the top row of the merged result, i.e. the page's first
+         * row — screen rows older than that were discarded during the merge.
          */
         chat: { ...s.chat, [sessionId]: mergePage(s.chat[sessionId] ?? [], items, msgs) },
-        // 지난 카드의 앱 화면 자리 (M4 B-1) — 이 UI가 이미 아는 화면(살아 있는 것)은 그대로 둔다
+        // Slots for past cards' app views (M4 B-1) — a view this UI already knows about (a live one) is left as is
         inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
         history: {
           ...s.history,
@@ -2950,7 +3178,7 @@ export const useStore = create<AppState>((set, get) => ({
         },
       }))
     } catch {
-      // 기록을 못 불러와도 새 대화는 가능하므로 조용히 넘어간다
+      // Even if history fails to load, a new conversation is still possible, so this is silently ignored
       return
     }
     await syncInlineViews(get, set, sessionId)
@@ -3007,7 +3235,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setPanelSplit(share) {
-    // 한 묶음이 15% 아래로 내려가면 탭 띠만 남아 "사라진 것"처럼 읽힌다 — 바닥을 깐다
+    // If one group drops below 15%, only the tab strip remains and it reads as "gone" — a floor is set
     const clamped = Math.min(0.85, Math.max(0.15, share))
     if (clamped === get().panelSplit) return
     set({ panelSplit: clamped })
@@ -3016,7 +3244,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   setSidebarWidth(px) {
     const s = get()
-    // 패널이 접혀 있으면 32px 띠만 차지한다
+    // If the panel is collapsed, it only occupies a 32px strip
     const panel = s.panelOpen ? s.panelWidth : 32
     set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel, TEXT_SCALES[s.textScale] ?? 1) })
     get().saveWorkspace()
@@ -3027,8 +3255,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /*
-   * 우클릭의 Finder 열기. 경로는 파일 링크와 같은 자격(지금 보는 세션의 프로젝트 상대)으로
-   * 들어오고, 파일 트리의 reveal과 같은 포트를 지난다 — 실패는 트리와 같은 문장으로 시끄럽다.
+   * Opens Finder from a right-click. The path arrives with the same credentials as a file link
+   * (relative to the currently viewed session's project), and goes through the same port as the file
+   * tree's reveal — a failure is loud with the same wording as the tree's.
    */
   async revealFile(path, from) {
     const s = get()
@@ -3043,7 +3272,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   openGit(path, staged) {
-    // 탭을 적어 보낸다 — 기록을 보던 중에 변경 파일을 누르면 변경으로 돌아와야 한다
+    // The tab is recorded explicitly — clicking a changed file while viewing history must return to changes
     set((s) => ({ overlay: { kind: 'git', path: path ?? null, staged, sub: 'changes', pick: nextPick(s.overlay) } }))
   },
 
@@ -3071,7 +3300,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))
   },
   openImport(source = '', fromLink = false) {
-    // `at`이 있어야 열린 창에 새 링크가 와도 창이 그 링크로 다시 선다(같은 창을 두 번 여는 요청)
+    // `at` is needed so a new link arriving at an already-open window still makes the window stand up again for that link (a request to open the same window twice)
     set({ importDialog: { source, fromLink, at: Date.now() }, settingsOpen: false })
   },
   closeImport() {
@@ -3082,12 +3311,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /*
-   * 아래 셋은 전부 같은 모양이다: host에게 시키고, 돌아온 상태를 그대로 앉힌다.
+   * The three below all follow the same shape: tell the host, and seat whatever state comes back as
+   * is.
    *
-   * **낙관적으로 미리 그리지 않는다.** 다른 조작들과 다른 점인데, 이유가 있다 —
-   * 여기서 화면이 앞서 나가면 "설치 중"이라고 써 놓고 실제로는 아무 일도 없는 상태가
-   * 만들어질 수 있고, 그건 되돌릴 수 없는 일에 대해 할 수 있는 가장 나쁜 거짓말이다.
-   * 진행 상황은 host가 이벤트로 계속 보내 주므로 기다려도 화면이 멈추지 않는다.
+   * **Never drawn optimistically ahead of time.** This differs from other actions, and for a reason
+   * — if the screen got ahead of itself here, it could write "installing" while nothing is actually
+   * happening, and that is the worst lie possible about something that cannot be undone. The host
+   * keeps sending progress as events, so waiting does not freeze the screen.
    */
   async checkUpdate(force = true) {
     const platform = get().platform
@@ -3095,7 +3325,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       set({ update: await platform.updates.status(force) })
     } catch (e) {
-      // 버전 확인이 화면을 깨뜨리면 안 된다 — 확인 자체보다 앱이 중요하다
+      // A version check must never break the screen — the app matters more than the check itself
       set({ toast: `Could not check for updates: ${(e as Error).message}` })
     }
   },
@@ -3116,7 +3346,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       set({ prefs: await platform.prefs.save(patch) })
     } catch (e) {
-      // 화면은 그대로 둔다 — 저장 못 한 것을 켜 놓으면 다음에 켤 때 조용히 되돌아간다
+      // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
       set({ toast: `Could not save that: ${(e as Error).message}` })
     }
   },
@@ -3132,12 +3362,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setNotifyPolicy(notifyPolicy) {
     set({ notifyPolicy })
-    // 정책은 워크스페이스 스냅샷에 함께 실린다 (E-5) — 저장은 단일 작성자를 태운다
+    // The policy is carried in the workspace snapshot too (E-5) — saving goes through the single writer
     get().saveWorkspace()
   },
   setDraft(sessionId, draft) {
     set((s) => {
-      // 빈 초안은 남기지 않는다 — 안 그러면 세션을 지워도 찌꺼기가 쌓인다
+      // An empty draft is never kept — otherwise leftovers pile up even as sessions get deleted
       if (!draft.text && draft.attachments.length === 0) {
         if (!(sessionId in s.drafts)) return {}
         const { [sessionId]: _gone, ...rest } = s.drafts
@@ -3159,7 +3389,7 @@ export const useStore = create<AppState>((set, get) => ({
   setScrollAnchor(sessionId, anchor) {
     set((s) => {
       if (!anchor) {
-        // 바닥에서 떠났다 — 지난 앵커가 남아 있으면 다음 도착이 그 옛 자리로 간다
+        // Left at the bottom — if the previous anchor were left behind, arriving next time would go to that old spot
         if (!(sessionId in s.scrollAnchor)) return {}
         return { scrollAnchor: omitKey(s.scrollAnchor, sessionId) }
       }
@@ -3215,7 +3445,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setTextScale(step) {
-    // 다섯 단계 밖의 값(망가진 스냅샷·미래 버전)은 가장 가까운 단계로 접는다
+    // A value outside the five steps (a broken snapshot, a future version) is clamped to the nearest step
     set({ textScale: Math.min(TEXT_SCALES.length - 1, Math.max(0, Math.round(step))) })
     get().saveWorkspace()
   },
@@ -3224,8 +3454,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
   openNewSession(projectId, opts) {
     /*
-     * 제안(#69)은 **여는 순간** 소비된다 — 어느 문으로 열든 (프로젝트 +, 매니저 +,
-     * 제안 줄). 남겨 두면 다음에 무관하게 연 창까지 물들인다.
+     * A suggestion (#69) is consumed **at the moment it is opened** — no matter which door opens it
+     * (the project's +, the manager's +, the suggestion row). Leaving it behind would contaminate an
+     * unrelated window opened next.
      */
     const queue = get().worktreeProposals
     const at = projectId !== null ? queue.findIndex((p) => p.projectId === projectId) : -1
@@ -3244,9 +3475,10 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const info = await platform.projects.createWorktreeManager(projectId, baseBranch)
       /*
-       * 세션 등록은 session_created 이벤트가 이미 한다 (#69). 여기서 또 넣지 않는 이유는
-       * 그 길이 재시작·다른 창에서도 도는 유일한 길이라서다 — 두 곳에서 넣으면 한쪽이
-       * 조용히 낡는다. 여기서는 **프로젝트 쪽 링크만** 갱신하고 그 자리로 데려간다.
+       * Registering the session is already done by the `session_created` event (#69). It is not
+       * added a second time here because that path is the only one that also runs on a restart or in
+       * a different window — adding it in two places lets one of them silently go stale. This only
+       * updates **the project's own link** and takes the person there.
        */
       set((s) => {
         const p = s.projects[projectId]
@@ -3262,8 +3494,10 @@ export const useStore = create<AppState>((set, get) => ({
       get().focusSession(info.id)
     } catch (e) {
       /*
-       * 실패는 **부른 창에 돌려준다** (#180). 여기서 토스트로 바꿔 삼키던 동안 창의 `catch`에는 닿지 않아 창이 닫혔다 —
-       * 적은 브랜치와 이유가 함께 사라지고, 토스트는 2.5초 뒤 걷혔다. 창이 그 이유를 제 안에 남긴다.
+       * A failure is **returned to the caller's window** (#180). While this used to be swallowed into
+       * a toast, it never reached the window's own `catch`, so the window closed anyway — the typed
+       * branch name and the reason vanished together, and the toast was dismissed 2.5 seconds later.
+       * The window keeps the reason in place instead.
        */
       throw new Error(`Could not start the worktree manager: ${(e as Error).message}`)
     }
@@ -3271,11 +3505,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   async addProject(path) {
     const p = await get().platform!.projects.add(path)
-    // 가리키던 문으로 들어왔으니 불을 끈다 (#63) — 지나간 안내가 남아 반짝이면 잔소리다
+    // Went through the door that was being pointed at, so the light turns off (#63) — a lingering hint blinking after the fact would be nagging
     set((s) => ({
       projects: { ...s.projects, [p.id]: p },
       addProjectHint: false,
-      // 이미 신뢰한 프로젝트(같은 폴더를 다시 골랐다)에는 다시 묻지 않는다
+      // A project already trusted (the same folder chosen again) is not asked about again
       trustAsk: p.trusted ? s.trustAsk : p.id,
     }))
     return p
@@ -3309,17 +3543,19 @@ export const useStore = create<AppState>((set, get) => ({
     if (!platform || !get().projects[projectId]) return
     if (deleteFiles) {
       /*
-       * `'.'`는 프로젝트 루트다 — host의 resolveExisting이 루트 기준으로 풀고 밖은 거절하므로,
-       * 여기서 절대경로를 만들어 넘기지 않는다. 지우는 손은 셸(Rust)에 있고 그 손이 하는 일은
-       * **휴지통으로 옮기기**다 (fs 포트의 규칙: "Not a delete — that is the whole decision").
+       * `'.'` is the project root — the host's `resolveExisting` resolves relative to the root and
+       * refuses anything outside it, so no absolute path is built and passed here. The hand that
+       * deletes lives in the shell (Rust), and what that hand does is **move to trash** (the fs
+       * port's rule: "Not a delete — that is the whole decision").
        */
       const r = await platform.fs.trash(projectId, '.')
       if (!r.supported) throw new Error(r.reason ?? 'This build cannot delete files')
     }
     await platform.projects.remove(projectId)
     /*
-     * 세션은 host가 쏘는 session_deleted로도 사라지지만, 여기서 한 번 더 걷는다:
-     * 그 이벤트를 기다리는 동안 화면에는 없는 프로젝트의 세션 줄이 남는다.
+     * Sessions also disappear through the host's own `session_deleted`, but they are cleared here as
+     * well: waiting for that event would leave a session row on screen for a project that no longer
+     * exists.
      */
     set((s) => {
       const projects = omitKey(s.projects, projectId)
@@ -3359,8 +3595,9 @@ export const useStore = create<AppState>((set, get) => ({
         // The project can be gone by the time the window closes (removed, or a reconnect
         // rebuilt the list). Measuring a folder nobody is showing helps no one.
         if (!platform || !get().projects[projectId]) return
-        // 패널이 들고 있는 목록도 같은 순간에 다시 읽게 한다 (#160). 요약이 같아도 올린다 —
-        // 같은 파일을 다시 고치면 변경 수는 그대로인데 내용은 바뀌었다
+        // Makes the panel's own held list re-read at the same moment too (#160). Bumped even when
+        // the summary is unchanged — editing the same file again leaves the change count the same
+        // while the content has changed
         set((s) => ({ gitEpoch: { ...s.gitEpoch, [projectId]: (s.gitEpoch[projectId] ?? 0) + 1 } }))
         void platform.projects
           .gitStatus(projectId)
@@ -3430,7 +3667,7 @@ export const useStore = create<AppState>((set, get) => ({
     const before = get().projects[projectId]
     if (!platform || !before) return
     await platform.projects.setWorktreeSetup(projectId, setup)
-    // 요약 줄이 다음에 열릴 때 맞아야 한다 — host의 정규화 규칙(빈 설정 = null)을 따라간다
+    // The summary line must match the next time it opens — follows the host's own normalizing rule (an empty setup means `null`)
     const clean = setup && (setup.command || setup.copyFiles.length) ? setup : null
     set((s) => {
       const now = s.projects[projectId]
@@ -3477,7 +3714,7 @@ export const useStore = create<AppState>((set, get) => ({
         },
       }))
     } catch {
-      // 못 읽었으면 다음에 패널이 열릴 때 다시 읽는다 — 뱃지가 잠깐 어두운 것뿐이다
+      // If it could not be read, it is re-read the next time the panel opens — the badge is just dark for a moment
     }
   },
 
@@ -3485,7 +3722,7 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     try {
-      // 크기는 로그 창(CommandLog)이 붙으면서 실측으로 다시 맞춘다 — 여기는 시작값일 뿐
+      // The size is re-measured for real once the log window (`CommandLog`) attaches — this is only a starting value
       const info = await platform.commands.run(projectId, command, 100, 30)
       set((s) => ({
         commandRuns: {
@@ -3494,7 +3731,7 @@ export const useStore = create<AppState>((set, get) => ({
         },
       }))
     } catch (e) {
-      // 조용한 실패 금지 — 안 떴는데 뜬 줄 알면 로그를 기다리게 된다
+      // No silent failures — believing it started when it did not leaves someone waiting on a log that never comes
       set({ toast: `Could not run: ${(e as Error).message}` })
     }
   },
@@ -3510,18 +3747,19 @@ export const useStore = create<AppState>((set, get) => ({
     const project = get().projects[projectId]!
     const tool = opts?.tool ?? project.defaultTool ?? get().tools[0]?.name ?? ''
     /*
-     * 프로젝트의 기억은 **이 도구의 것만** 꺼낸다 (#107). 예전에는 프로젝트당 모델
-     * 하나였고, 그 하나가 도구를 가리지 않고 실렸다 — 인수인계가 도구를 바꿀 때
-     * 일부러 모델을 비워도(`sameTool ? … : undefined`) 바로 여기서 다시 채워졌다.
+     * The project's memory is pulled out **only for this tool** (#107). There used to be a single
+     * model per project, and that one value was carried regardless of which tool was used — so even
+     * when a handoff deliberately cleared the model on a tool switch (`sameTool ? … : undefined`),
+     * this line filled it right back in.
      */
     const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool])
     const info = await platform.agents.createSession({
       projectId,
       cwd: project.path,
-      // 고른 값이 그대로 host까지 간다 — 예전엔 프리셋이 'normal' 고정이고 모델은 전달조차 되지 않았다
+      // The chosen value travels straight to the host — the preset used to be pinned to 'normal' and the model was not even passed
       tool,
       model: opts?.model ?? remembered.model ?? undefined,
-      // 강도도 기억을 따라간다 (#69 ⑤) — 모델만 기억하면 Opus는 오는데 high는 또 눌러야 한다
+      // Effort follows the memory too (#69 ⑤) — remembering only the model meant Opus came back but high still had to be pressed again
       effort: opts?.effort ?? remembered.effort ?? undefined,
       verbosity: opts?.verbosity,
       serviceTier: opts?.serviceTier,
@@ -3544,10 +3782,12 @@ export const useStore = create<AppState>((set, get) => ({
             name: info.name,
             tool: info.tool,
             /*
-             * 설정도 host가 답한 그대로 (#37의 남은 반쪽 — attach·재연결 병합은 전체를
-             * 받는데 이 낙관적 등록만 빼먹고 있었다). 도그푸딩 실측: 인수인계로 만든
-             * 세션이 DB에는 model·effort를 물려받고도 재시작 전까지 메뉴에 Default로
-             * 보였다 — 설정이 안 넘어간 것처럼 읽힌다.
+             * The settings are also taken exactly as the host answered (the other half left unfixed
+             * by #37 — `attach` and the reconnect merge already receive everything, but this
+             * optimistic registration alone was missing it). Measured during dogfooding: a session
+             * created through a handoff had inherited its model and effort in the database, yet the
+             * menu showed Default until the app restarted — reading as if the settings had not carried
+             * over at all.
              */
             model: info.model,
             effort: info.effort,
@@ -3555,7 +3795,7 @@ export const useStore = create<AppState>((set, get) => ({
             serviceTier: info.serviceTier,
             permissionPreset: info.permissionPreset,
             worktree: info.worktree,
-            // 소속도 host가 정한다 (#69) — 빠뜨리면 매니저 아래 만든 세션이 재시작 전까지 최상위에 선다
+            // Its parent is also decided by the host (#69) — missing this would put a session created under a manager at the top level until a restart
             parentSessionId: info.parentSessionId,
             merged: info.worktreeMerged,
             pr: info.worktreePr,
@@ -3566,32 +3806,34 @@ export const useStore = create<AppState>((set, get) => ({
         },
       },
       /*
-       * **고른 도구가 이 프로젝트의 기본값이 된다.**
+       * **The chosen tool becomes this project's default.**
        *
-       * default_tool은 프로젝트를 만들 때 'claude'로 박힌 뒤 어디서도 갱신되지 않았다 —
-       * codex를 쓰는 사람은 새 세션을 만들 때마다 영원히 필을 다시 눌러야 했다.
-       * 별도의 설정 항목을 만들지 않는 이유: 마지막 선택이 곧 기본값이라는 사실은
-       * **세션을 만든 행위가 이미 말해 준다.** host도 같은 자리에서 같은 판단을 한다
-       * (manager.createSession) — 여기 것은 이번 실행에서 바로 보이게 하는 낙관적 갱신이다.
+       * `default_tool` used to be pinned to 'claude' when a project was created and never updated
+       * anywhere else — someone using codex had to re-press it forever, every time they created a new
+       * session. Why there is no separate setting for this: the fact that the last choice becomes the
+       * default **is already stated by the act of creating a session.** The host makes the same
+       * decision in the same place (`manager.createSession`) — what happens here is an optimistic
+       * update so it shows up right away in this run.
        */
       projects:
         opts?.tool && s.projects[projectId]
           ? { ...s.projects, [projectId]: { ...s.projects[projectId], defaultTool: opts.tool } }
           : s.projects,
-      // 시작 프롬프트도 내가 한 말이다 — 대화창에 보여야 한다 (E2E가 잡은 누락)
-      // pending을 세우는 이유: host도 첫 프롬프트를 저장하고 user_message로 알린다 —
-      // 이 표식이 없으면 재생된 그 이벤트가 같은 말을 한 번 더 그린다 (send()와 같은 규칙)
+      // The starting prompt was also said by me — it must show in the conversation (a gap caught by e2e)
+      // Why `pending` is set: the host also stores the first prompt and announces it via `user_message`
+      // — without this marker, the replayed event would draw the same message a second time (the same rule as `send()`)
       chat: opts?.initialPrompt ? withOpeningPrompt(s.chat, info.id, opts.initialPrompt) : s.chat,
     }))
     /*
-     * focusedSessionId를 직접 세우지 않고 focusSession을 거친다 — "고른 세션은 보여야
-     * 한다"는 뷰 강제가 저기 있다. 직접 세우던 시절엔 문제가 없었다: 다이얼로그를 쓸 때
-     * 화면은 이미 포커스 뷰였다. 온보딩이 오케스트레이터 뷰를 먼저 열면서(#63) 거기서
-     * 만든 세션이 **보이지 않는** 조합이 생겼다 (e2e가 잡았다).
+     * `focusedSessionId` is not set directly — it goes through `focusSession` instead, where the
+     * "a picked session must be shown" view enforcement lives. Setting it directly used to be fine:
+     * while a dialog was in use, the screen was already the focus view. Once onboarding started
+     * opening the orchestrator view first (#63), that created the combination where a session created
+     * there was **never shown** (caught by e2e).
      */
     get().focusSession(info.id)
 
-    // 불러온 세션은 host에 이미 이전 대화가 쌓여 있다 — 화면으로 끌어온다
+    // An imported session already has past conversation piled up on the host — pull it onto the screen
     if (opts?.importHistory && opts.resumeExternalId) {
       const msgs = await platform.agents.loadMessages(info.id)
       if (msgs.length > 0) {
@@ -3601,12 +3843,12 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
 
-    // 등록 전에 도착해 보관해 둔 이벤트를 순서대로 재생한다
+    // Replays events held from before registration, in order
     replayPendingEvents(get)
     return info
   },
 
-  /** 붙여넣기·드래그로 들어온 파일을 host에 저장하고 첨부 정보를 받는다 (FR-13) */
+  /** Saves a file that came in through paste or drag to the host, and receives its attachment info (FR-13) */
   async attachFile(sessionId, file) {
     const platform = get().platform
     if (!platform) return null
@@ -3630,7 +3872,7 @@ export const useStore = create<AppState>((set, get) => ({
         file.type || 'application/octet-stream',
         b64,
       )
-      // 이미지는 방금 읽은 바이트로 즉시 썸네일을 그린다 — host 왕복이 필요 없다
+      // An image draws its thumbnail immediately from the bytes just read — no round trip to the host is needed
       return saved.kind === 'image' ? { ...saved, data: b64 } : saved
     } catch (e) {
       set({ toast: `Could not attach: ${(e as Error).message}` })
@@ -3642,19 +3884,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   async send(sessionId, text, attachments) {
     /*
-     * **질문이 열려 있으면 입력창의 글은 새 턴이 아니라 그 질문의 답이다.**
+     * **If a question is open, the composer's text is that question's answer, not a new turn.**
      *
-     * 예전에는 이 자리가 pendingQuestions를 보지 않았다. 그래서 카드가 떠 있는 동안 글을
-     * 보내면 진행 중이던 턴이 끊기고, 답을 못 받은 AskUserQuestion이 **거절된 도구 사용**으로
-     * 정리됐다 — 카드는 이유 없이 사라지고 턴은 error_during_execution으로 깨졌다
-     * (실사고 2026-09-23: 사람이 "질문 다시 해줄래?"라고 쳤을 뿐인데 질문이 없어졌다).
+     * This used to not check `pendingQuestions` at all. So sending text while a card was up cut off
+     * the turn in progress, and an `AskUserQuestion` that never got an answer was cleaned up as
+     * **a refused tool use** — the card vanished for no visible reason and the turn broke with
+     * `error_during_execution` (an actual incident, 2026-09-23: the person only typed "can you ask
+     * the question again?" and the question disappeared).
      *
-     * 막는 대신 뜻을 살린다. 보기가 마음에 안 들어 직접 쓰는 것은 자연스러운 행동이고,
-     * 카드에도 "Other — write your own" 자리가 이미 있다. 손짓과 의미가 이미 맞는다.
+     * Instead of blocking it, the intent is honored. Writing an answer by hand because none of the
+     * options fit is a natural thing to do, and the card already has an "Other — write your own" slot.
+     * The gesture and its meaning already agree.
      *
-     * **질문이 정확히 하나일 때만** 이렇게 한다. 한 요청에 질문이 여럿이면 카드가 전부
-     * 답하게 하는데(반만 보내면 모델이 나머지를 지어낸다), 글 한 줄이 그중 어느 것의 답인지
-     * 알 방법이 없다. 첨부가 있을 때도 비켜선다 — 답으로 보내면 첨부가 버려진다.
+     * This is only done **when there is exactly one question.** With several questions in one
+     * request, the card requires all of them answered (sending half lets the model invent the rest),
+     * and a single line of text has no way to say which one it answers. It also steps aside when
+     * there is an attachment — sending it as an answer would discard the attachment.
      */
     const open = get().sessions[sessionId]?.pendingQuestions ?? []
     const target = composerTarget(open, !!attachments?.length)
@@ -3664,32 +3909,37 @@ export const useStore = create<AppState>((set, get) => ({
         { question: only.questions[0]!.question, answers: [text.trim()] },
       ])
       /*
-       * 닿지 않은 답은 입력창으로 되돌린다 (#180) — 보통 전송과 같은 규칙이다. 입력창은 보내는 순간 비워지고, 답은
-       * 대화에 말풍선으로 남지 않아 ↑ 되불러오기로도 꺼낼 수 없다. 질문이 이미 사라졌으면(host가 갈아 끼워짐) 카드도
-       * 함께 걷히므로, 되돌리지 않으면 쓴 글이 어디에도 없다. 되돌리기는 아무것도 다시 보내지 않는다 — 답이 사실은
-       * 닿았다면 카드가 걷힌 것을 보고 사람이 지우면 된다.
+       * An answer that failed to land is put back into the composer (#180) — the same rule as a
+       * normal send. The composer clears the instant it is sent, and an answer never leaves a bubble
+       * in the conversation, so it cannot even be pulled back with the ↑ recall. If the question has
+       * already gone (the host swapped it out), its card is dismissed too, and with nothing put back,
+       * the written text would be nowhere at all. Putting it back never resends anything — if the
+       * answer actually did land, the person just sees the card gone and can delete the text
+       * themselves.
        */
       if (!landed) restoreDraft(set, sessionId, text, attachments)
       return
     }
     /*
-     * 글이 답이 될 수 없는데 질문이 열려 있다 (#174) — 보내면 새 턴이 되고, 답을 못 받은 질문은 거절된 도구 사용으로
-     * 정리되어 카드가 사라진다. 입력창의 안내문이 보내기 전에 이것을 말하고(`composerTarget`), 보낸 뒤에는 무엇이
-     * 버려졌는지 대화에 한 줄 남긴다 — 카드가 설명 없이 사라지면 사람은 질문이 있었다는 것조차 다시 찾을 수 없다.
+     * The text cannot be an answer, but a question is open (#174) — sending it starts a new turn, and
+     * a question left unanswered is cleaned up as a refused tool use, so its card disappears. The
+     * composer's hint text says this before sending (`composerTarget`), and after sending, a line is
+     * left in the conversation saying what was dropped — a card that vanishes with no explanation
+     * would leave no trace that a question ever existed.
      */
     const dropped = target === 'drops' ? open.flatMap((q) => q.questions.map((x) => x.question)) : []
 
     const seq = ++chatSeq
     /*
-     * 보낸 즉시 '작업 중'으로 표시한다.
+     * Marked as "working" the instant it is sent.
      *
-     * host가 state_change를 보내주긴 하지만, 잠든 세션이면 프로세스를 되살리는 데
-     * 몇 초가 걸리고 그동안 화면은 완전히 조용하다 — 보냈는지조차 알 수 없다.
-     * 우리가 아는 사실은 이미 확정이다: **보냈고, 답을 기다린다.**
-     * 실패하면 아래에서 되돌린다.
+     * The host does send a `state_change`, but a sleeping session takes a few seconds to revive its
+     * process, and the screen sits completely silent during that time — it is impossible to even tell
+     * whether it was sent. What we already know is already settled: **it was sent, and an answer is
+     * awaited.** A failure is undone below.
      */
     const prevState = get().sessions[sessionId]?.state
-    // 다음 말을 걸었다 = 화제가 옮겨갔다. 지난 안내는 여기서 꺼진다 (#63)
+    // Talking again means the topic has moved on. Any lingering hint turns off here (#63)
     if (get().addProjectHint) set({ addProjectHint: false })
     set((s) => {
       const sessions = s.sessions[sessionId]
@@ -3697,16 +3947,17 @@ export const useStore = create<AppState>((set, get) => ({
         : s.sessions
       return {
         /*
-          pending: 내가 방금 그린 것이고 host의 확인을 아직 못 받았다.
-          host가 user_message로 같은 말을 알려주면 이 항목이 그것으로 확정된다 —
-          표식이 없으면 같은 말이 두 번 그려진다.
+          pending: I just drew this and have not yet gotten the host's confirmation.
+          Once the host reports the same message via `user_message`, this item is settled into it —
+          without this marker, the same message would be drawn twice.
         */
         chat: {
           ...s.chat,
           [sessionId]: [
             ...(s.chat[sessionId] ?? []),
-            // 첨부는 라벨(📎 이름)로 text에 섞지 않는다 — 이미지는 실물로, 파일은 칩으로 따로 그린다.
-            // text가 보낸 원문 그대로라 user_message 확정 대조도 이걸로 성립한다 (#75).
+            // Attachments are never mixed into `text` as a label (a 📎 name) — an image is drawn as a
+            // real thumbnail, a file as a separate chip. `text` stays exactly what was sent, so
+            // matching it against the `user_message` confirmation also relies on this (#75).
             { kind: 'user', seq, text, ...(attachments?.length ? { attachments } : {}), pending: true },
           ],
         },
@@ -3720,7 +3971,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
     })
     try {
-      // 바이트는 이미 host의 파일에 있다 — 전송에는 경로만 싣는다 (data를 실으면 페이로드가 두 배)
+      // The bytes already live in a file on the host — the send only carries the path (carrying `data` would double the payload)
       await get().platform!.agents.send(
         sessionId,
         text,
@@ -3734,31 +3985,34 @@ export const useStore = create<AppState>((set, get) => ({
           return at < 0 ? {} : { chat: { ...s.chat, [sessionId]: [...items.slice(0, at), mark, ...items.slice(at)] } }
         })
       }
-      // 보내는 데 성공했다면 잠들어 있던 세션이 되살아난 것이다 (host가 알아서 이어준다)
+      // A successful send means the sleeping session was revived (the host resumes it on its own)
       set(
         ifSessionStill(sessionId, (s, cur) => ({
           sessions: cur.live ? s.sessions : { ...s.sessions, [sessionId]: { ...cur, live: true } },
           wakeError: omitKey(s.wakeError, sessionId),
-          // 보내졌다는 건 잠금이 풀렸다는 뜻이다 — 갈림길을 계속 내밀 이유가 없다
+          // Having sent successfully means the lock is gone — no reason to keep offering the fork option
           wakeLocked: omitKey(s.wakeLocked, sessionId),
         })),
       )
     } catch (err) {
       const e = err as Error & { code?: string }
       /*
-       * **보냈는지 모른다** (#173). 소켓이 끊기면 클라이언트는 답을 못 받은 호출을 `connection_lost`로 거절하는데,
-       * host는 그 요청을 이미 받아 저장하고 방송했을 수 있다(잠든 세션을 되살리는 동안 끊기면 흔히 그렇다). 그것을 실패로
-       * 알리고 글을 되돌리면 사람은 다시 보내고, 같은 지시가 두 번 간다. 말풍선을 pending으로 남겨 두고, 다시 붙은 뒤
-       * 저장소에서 확인한다(`settleUnsureSends`) — 확정되면 보낸 것이고, 없으면 그때 되돌린다.
+       * **Unknown whether it was sent** (#173). If the socket drops, the client refuses a call that
+       * never got an answer with `connection_lost` — but the host may already have received, stored
+       * and broadcast that request (this is common when the connection drops while a sleeping session
+       * is being revived). Reporting that as a failure and putting the text back would have the person
+       * send it again, and the same instruction goes through twice. The bubble is instead left as
+       * pending, and checked against the store after reconnecting (`settleUnsureSends`) — if it is
+       * confirmed there, it was sent; if not, it is undone at that point.
        */
       if (e.code === 'connection_lost') {
         unsureSends.set(seq, { sessionId, text, attachments, prevState })
         set({ toast: 'Connection lost while sending — checking whether it arrived once reconnected' })
         return
       }
-      // 전송 실패를 조용히 삼키면 사용자는 답을 기다리며 계속 서 있게 된다.
-      // 보낸 것처럼 남은 말풍선을 걷어내고 무엇을 해야 하는지 알린다.
-      // host가 알아서 되살린 뒤 보낸다 — 여기까지 왔다면 되살리기 자체가 실패한 것이다
+      // Silently swallowing a send failure would leave the person standing there waiting for an
+      // answer forever. The bubble that looks sent is removed and what to do is reported.
+      // The host revives a sleeping session on its own before sending — reaching this point means reviving itself failed
       unsend(set, { seq, sessionId, text, attachments, prevState }, e.message)
     }
   },
@@ -3782,12 +4036,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async respondApproval(sessionId, requestId, decision, scope) {
-    // '항상 허용'의 패턴은 core가 계산한다 (host는 core를 모르므로 여기서 실어 보낸다)
+    // The "always allow" pattern is computed by core (the host does not know core, so it is carried here)
     const pending = get().sessions[sessionId]?.pendingApproval
     /*
-     * 한 요청에는 한 번만 답한다 (#158). 이미 보낸 응답이 돌아오는 중이거나, 그 결과로 카드가 이미 걷혔으면 다시 보내지
-     * 않는다. 카드는 `approval_resolved`가 반영되고 React가 다시 그릴 때까지 리스너를 들고 있어서, 그 사이의 두 번째 y가
-     * host에서 '사라진 요청'이 되어 방금 실행된 명령을 Denied로 적었다. 카드의 키·단추와 관제 레일이 모두 여기를 지난다.
+     * A request is answered exactly once (#158). If a response already sent is still in flight, or if
+     * that outcome already dismissed the card, this is not sent again. A card keeps its listener alive
+     * until `approval_resolved` lands and React re-renders, so a second `y` in that window became a
+     * "vanished request" on the host and recorded a command that had already run as Denied. Both the
+     * card's key/buttons and the control rail go through this same path.
      */
     if (get().approvalsInFlight[requestId] || pending?.requestId !== requestId) return
     set((s) => ({ approvalsInFlight: { ...s.approvalsInFlight, [requestId]: true } }))
@@ -3800,14 +4056,17 @@ export const useStore = create<AppState>((set, get) => ({
             : undefined
         : undefined
     /*
-     * 이 스토어에서 유일하게 실패를 삼키던 동작이었다. 승인은 **눌렀는데 아무 일도
-     * 안 일어나는 것이 가장 나쁜** 자리다 — 명령이 돌았는지 안 돌았는지 알 수 없다.
+     * This used to be the one action in this store that swallowed a failure. Approval is exactly the
+     * spot where **pressing it and having nothing happen is worst of all** — there is no way to tell
+     * whether the command ran or not.
      */
     try {
       await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
       /*
-       * 무엇이 기억됐는지는 **실제로 보낸 매처**로 말한다 (#170). 예전에는 카드가 따로 문구를 지어서, 매처가 없는
-       * 종류(`other`)에도 "Always allow in this session: other"라고 알렸다 — 어댑터도 저장소도 아무것도 남기지 않았는데.
+       * What got remembered is stated using **the matcher actually sent** (#170). The card used to
+       * compose its own wording separately, so even a kind with no matcher (`other`) was announced as
+       * "Always allow in this session: other" — even though neither the adapter nor the store had kept
+       * anything at all.
        */
       if (decision === 'always') {
         set({
@@ -3833,7 +4092,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ toast: (e as Error).message || '승인을 전달하지 못했습니다' })
     } finally {
-      // 실패했으면 다시 누를 수 있어야 한다. 성공했으면 카드가 이미 걷혔으므로 위의 `pendingApproval` 검사가 막는다
+      // A failure must allow pressing it again. A success already dismissed the card, so the `pendingApproval` check above blocks a repeat
       set((s) => {
         const { [requestId]: _done, ...rest } = s.approvalsInFlight
         return { approvalsInFlight: rest }
@@ -3841,7 +4100,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  /** 선택지에 답한다 — 답은 그 도구의 결과로 모델에게 간다 */
+  /** Answers a set of options — the answer reaches the model as that tool's result */
   async answerQuestion(sessionId, requestId, answers) {
     try {
       await get().platform!.agents.answerQuestion(sessionId, requestId, answers)
@@ -3856,7 +4115,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await get().platform!.agents.interrupt(sessionId)
     } catch (err) {
-      // 못 멈췄는데 조용하면 멈춘 줄 알고 기다린다 — 이 프로젝트가 금지하는 실패다
+      // Silence after failing to stop would leave someone believing it stopped and waiting — the exact kind of failure this project forbids
       set({ toast: `Could not stop: ${(err as Error).message}` })
     }
   },
@@ -3929,10 +4188,10 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           const externalApps = await platform.apps.list()
           set({ externalApps })
-          // 앱이 새 코드로 다시 떴으면 그 앱의 열린 화면을 다시 연다 (M4 C-4)
+          // If an app came up again with new code, reopen that app's open views (M4 C-4)
           followAppCode(get, set)
         } catch {
-          // 못 읽으면 옛 목록을 둔다 — 다음 방송이나 재연결이 다시 읽는다
+          // If it cannot be read, the old list stays — the next broadcast or reconnect re-reads it
         }
       } while (externalAppsAgain)
     })().finally(() => {
@@ -3948,7 +4207,7 @@ export const useStore = create<AppState>((set, get) => ({
       const appQuestions = await platform.apps.questions()
       set((s) => ({ appQuestions, appQuestionsVersion: s.appQuestionsVersion + 1 }))
     } catch {
-      // 못 읽으면 옛 목록을 둔다 — 다음 방송이나 재연결이 다시 읽는다
+      // If it cannot be read, the old list stays — the next broadcast or reconnect re-reads it
     }
   },
 
@@ -3960,7 +4219,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ toast: (e as Error).message || 'Could not answer the question' })
     }
-    // 답했든 못 했든(이미 닫혔다) host가 아는 목록으로 맞춘다 — 답한 물음이 화면에 남지 않게
+    // Whether the answer landed or not (already closed), align to the list the host knows — so an answered question does not linger on screen
     await get().refreshAppQuestions()
   },
 
@@ -3976,7 +4235,7 @@ export const useStore = create<AppState>((set, get) => ({
       const state = await platform.apps.state(appId)
       set((s) => ({ apps: { ...s.apps, [appId]: state } }))
     } catch {
-      // 앱 하나의 상태를 못 읽어도 앱은 (빈 문서로) 선다 — 레일이 통째로 죽으면 안 된다
+      // Even if one app's state fails to load, the app still stands (with an empty document) — the whole rail must not die with it
     }
   },
 
@@ -3984,17 +4243,20 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     /*
-     * 아직 읽지 못한 문서 위에는 쓰지 않는다 (#178). 사본이 없으면 `useAppState`는 null을 주고, 앱은
-     * 그 위에 고친 칸 하나만 담아 보낸다 — host는 받은 값으로 문서를 통째로 바꾸므로, 레일의 줄 하나를
-     * 누른 것으로 업무·감시·반장 설정·알림이 모두 `{ metrics }` 하나로 바뀌었다. 첫 읽기가 실패하면
-     * 이 상태가 계속된다. 쓰기는 버리고 다시 읽기를 건다: 지표 하나는 잃어도 되고, 설정은 읽힌 뒤
-     * 다시 하면 된다. 읽었는데 문서가 정말 비어 있는 것(처음 쓰는 앱)과는 항목의 유무로 갈린다.
+     * Never writes over a document that has not been read yet (#178). Without a copy, `useAppState`
+     * hands back `null`, and the app then sends only the single field it changed on top of that — the
+     * host replaces the whole document with whatever value it receives, so pressing one row in the
+     * rail turned tasks, monitoring, foreman settings and notifications into just `{ metrics }`. If
+     * the first read failed, this state persists. The write is discarded instead, and a re-read is
+     * triggered: losing one metric is acceptable, and a setting can simply be redone once it is read.
+     * This is told apart from the document actually being empty after a successful read (a freshly
+     * created app) by whether the entry exists at all.
      */
     if (!get().apps[appId]) {
       void get().refreshAppState(appId)
       return
     }
-    // 화면 먼저, 저장은 뒤따라 — 방송(app_state_changed)이 어차피 진실로 맞춘다
+    // Screen first, saving follows — the broadcast (`app_state_changed`) reconciles it against the truth either way
     set((s) => ({ apps: { ...s.apps, [appId]: { enabled: s.apps[appId]?.enabled ?? true, doc } } }))
     try {
       await platform.apps.setState(appId, doc)
@@ -4032,7 +4294,7 @@ export const useStore = create<AppState>((set, get) => ({
       const r = await platform.agents.mcpProposals()
       set({ mcpProposals: r.proposals })
     } catch {
-      /* 제안 목록을 못 읽어도 앱은 정상 — 다음 이벤트가 다시 부른다 */
+      /* The app is fine even if the suggestion list fails to load — the next event calls it again */
     }
   },
 
@@ -4059,7 +4321,7 @@ export const useStore = create<AppState>((set, get) => ({
       const r = await platform.agents.skillProposals()
       set({ skillProposals: r.proposals })
     } catch {
-      /* 못 읽어도 앱은 정상 — 다음 이벤트가 다시 부른다 */
+      /* The app is fine even if this fails to load — the next event calls it again */
     }
   },
 
@@ -4086,10 +4348,11 @@ export const useStore = create<AppState>((set, get) => ({
     if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
     const heirTool = opts?.tool ?? session.tool
     const mode = opts?.mode ?? 'agent'
-    // record 모드 기본은 **보존** — 응답 불능인 세션의 원본은 후임자가 확인될 때까지 남긴다 (#78)
+    // The record mode's default is to **preserve** — the original of a session that cannot respond is kept until its successor is confirmed (#78)
     const deleteOld = opts?.deleteOld ?? mode === 'agent'
-    // 매니저 삭제 규칙과 같다 — 살아 있는 자식이 있으면 마지막 삭제가 어차피 거부된다.
-    // 실패를 맨 끝(파괴 직전)에서 만나는 대신 시작에서 거른다.
+    // The same rule as a manager's own delete — if a live child exists, the final delete is refused
+    // anyway. This filters it at the start instead of meeting the failure at the very end (right
+    // before destruction).
     const liveKids = Object.values(s.sessions).filter(
       (x) => x.parentSessionId === sessionId && !x.merged,
     )
@@ -4098,10 +4361,13 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
     /*
-     * 에이전트에게 노트를 부탁하는 길은 **카드가 떠 있으면 시작하지 않는다** (#174). 부탁은 보통의 말로 가는데, 질문이
-     * 하나 열려 있으면 그 말이 질문의 답이 되어(`send`) 에이전트는 "Which DB?"의 답으로 인수인계 요청문을 받았다 —
-     * 에이전트에게 간 답은 되돌릴 수 없다. 질문이 여럿이거나 승인이 떠 있으면 새 턴이 되어 카드가 버려진다.
-     * 기록 모드는 에이전트에게 묻지 않으므로 그대로 간다. 사이드바의 확인 창도 같은 조건을 본다(`handoffBlockedBy`).
+     * The path that asks the agent for a note **never starts while a card is up** (#174). The request
+     * travels as an ordinary message, so if exactly one question is open, that message becomes the
+     * question's answer (`send`), and the agent would receive the handoff request text as the answer
+     * to "Which DB?" — an answer that has already reached the agent cannot be taken back. With several
+     * questions open, or an approval pending, it becomes a new turn instead and the card is dropped.
+     * Record mode never asks the agent, so it proceeds regardless. The sidebar's confirmation window
+     * checks the same condition (`handoffBlockedBy`).
      */
     const blocked = mode === 'agent' ? handoffBlockedBy(session) : null
     if (blocked) {
@@ -4111,30 +4377,34 @@ export const useStore = create<AppState>((set, get) => ({
     handoffInFlight.add(sessionId)
     try {
       /*
-       * 노트 자리는 host가 짓고 host가 쓴다 (#142) — 데이터 폴더의 `handoff/<프로젝트 id>/<넘기는 세션 id>.md`.
-       * 예전에는 여기서 프로젝트 안의 그 자리를 먼저 비웠다(#104: 지난 실패가 남긴 파일이 갓 쓴 노트로 배달됐다).
-       * 이제 파일은 host가 이 인수인계의 글로 **덮어쓰고 나서야** 경로를 돌려주므로, 남은 파일을 읽을 길이 없다.
+       * The note's location is decided and written by the host (#142) — under the data folder, at
+       * `handoff/<project id>/<departing session id>.md`. This used to clear that spot inside the
+       * project first (#104: a file left by a past failure was then delivered as if it were the
+       * freshly written note). Now the file is only returned as a path **after** the host has
+       * overwritten it with this handoff's text, so there is no way to read a leftover file.
        */
       let note = ''
       let notePath = ''
       if (mode === 'record') {
         /*
-         * 기록 모드 (#78): 에이전트에게 **아무것도 묻지 않는다** — 이 모드가 존재하는
-         * 이유가 그 에이전트의 응답 불능이다. host가 저장소 원문(+codex 롤아웃의
-         * 컴팩트 요약)으로 기록을 만든다.
+         * Record mode (#78): asks the agent **nothing at all** — the reason this mode exists is
+         * precisely that the agent cannot respond. The host builds the record from the store's own
+         * transcript (plus, for a codex rollout, its compaction summaries).
          *
-         * host는 그것을 에이전트 모드와 **같은 파일**에 써 놓는다 (#102) — 생산자만
-         * 다르고 후임자가 받는 첫 메시지는 두 모드에서 같다. 돌려받은 text는 미리보기용이다.
+         * The host writes this to **the same file** as agent mode (#102) — only the producer differs,
+         * and the first message the successor receives is identical between the two modes. The `text`
+         * returned here is only for the preview.
          */
         const record = await s.platform.agents.exportHandoffRecord(sessionId, heirTool)
         note = record.text
         notePath = record.path
       } else {
       /*
-       * 돌고 있는 턴이 있으면 **끝나기를 기다린 뒤** 부탁한다 (실측: 메아 인수인계 —
-       * 진행 중이던 턴에 프롬프트가 합류(steer)돼, 직전 작업 보고가 인수인계 글
-       * 머리에 통째로 붙었다. 유실은 아니지만 "앞이 잘린 글"로 읽혔다). 턴 경계
-       * 뒤에 보내야 그 뒤에 오는 답이 온전히 인수인계다.
+       * If a turn is running, the request **waits for it to finish** first (measured: a handoff where
+       * the prompt merged into (steered) the turn already in progress, so the report of the work just
+       * done ended up glued to the top of the handoff note. Nothing was actually lost, but it read as
+       * "a note with its beginning cut off"). Sending only after the turn boundary makes sure the reply
+       * that follows is the handoff, whole.
        */
       const quietBy = Date.now() + 10 * 60_000
       while (get().sessions[sessionId]?.state === 'working') {
@@ -4145,27 +4415,32 @@ export const useStore = create<AppState>((set, get) => ({
 
       const prompt = handoffPrompt()
       /*
-       * 부탁을 보내기 직전의 마지막 기록 — host는 그 뒤의 첫 사람 말을 이 부탁으로, 그 뒤의 답을 노트로 읽는다.
-       * 지난 인수인계가 실패해 같은 부탁과 그 답이 대화에 남아 있어도 그것은 이 자리 앞이다. 자리는 host의 기록에
-       * 묻는다: 화면의 lastSeq는 보낸 말의 확정(user_message)이 오기 전에는 그 말을 세지 않아 뒤처질 수 있고, 뒤처진
-       * 자리 뒤의 첫 사람 말은 이 부탁이 아니다.
+       * The last recorded point right before sending the request — the host reads the first human
+       * message after this point as the request, and the reply after that as the note. Even if a
+       * past handoff failed and the same request and its reply are still sitting in the conversation,
+       * they are before this point. The point is asked of the host's own record: the screen's
+       * `lastSeq` does not count a sent message until its confirmation (`user_message`) arrives, so it
+       * can lag, and the first human message after a lagging point would not be this request.
        */
       const before = (await s.platform.agents.loadMessages(sessionId, 1)).at(-1)?.seq ?? 0
       await get().send(sessionId, prompt)
-      // 전송 실패는 입력창 복원 경로로 흘러 프롬프트가 초안에 남는다 — 사람이 쓴 글이 아니니 걷는다
+      // A send failure flows through the composer-restore path and leaves the prompt in the draft — since this was never written by the person, it is cleared
       if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === prompt)) {
         if (get().drafts[sessionId]?.text.includes(prompt)) get().setDraft(sessionId, EMPTY_DRAFT)
         throw new Error('could not reach the session')
       }
 
       /*
-       * **턴이 끝나기를 기다렸다가 host에게 노트를 받는다** (#142) — 화면 대화에서 긁지 않는다 (실측: 돌던
-       * 턴의 잔여 출력이 글 머리에 섞여 "잘린 것"으로 읽혔다). host는 부탁한 말 뒤의 마지막 답을
-       * 자기 기록에서 읽어 파일로 놓는다. 턴이 아직 돌거나 답이 없으면 null — 다시 묻는다.
-       * 답이 안 오면 아무것도 지우지 않는다.
+       * **Waits for the turn to finish, then receives the note from the host** (#142) — never
+       * scraped from the on-screen conversation (measured: leftover output from a turn still in
+       * progress mixed into the top of the text and read as "cut off"). The host reads the last reply
+       * after the request message from its own record and places it as a file. If the turn is still
+       * running or there is no reply yet, it returns `null` and this asks again. Nothing is cleared if
+       * no reply ever arrives.
        *
-       * 받은 글은 후임자에게 통째로 보내지 않는다 (#102) — 미리보기를 뽑고, 원문은
-       * 기록에 박아 둔다. 전임자가 사라지면 이 글은 다시 만들 수 없기 때문이다.
+       * The received text is never sent whole to the successor (#102) — a preview is extracted, and
+       * the full text is embedded in the record instead, because this text cannot be recreated once
+       * the predecessor is gone.
        */
       const deadline = Date.now() + 10 * 60_000
       for (;;) {
@@ -4175,7 +4450,7 @@ export const useStore = create<AppState>((set, get) => ({
         if (!cur) throw new Error('the session disappeared while writing the note')
         if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
         if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
-        if (st.connection !== 'connected') continue // 끊긴 동안은 판단하지 않는다
+        if (st.connection !== 'connected') continue // No decision is made while disconnected
         if (cur.state === 'working' || cur.state === 'waiting_approval') continue
         const got = await s.platform.agents.exportHandoffNote(sessionId, before).catch(() => null)
         if (got) {
@@ -4187,10 +4462,11 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       /*
-       * 새 세션은 죽는 세션의 설정을 **전부** 물려받는다 (#37이 가르친 규칙: 하나만
-       * 옮기면 나머지가 기본값으로 새로 태어난다). 단 **도구가 바뀌면 물려주지
-       * 않는다** — 모델·강도·응답 길이·속도는 도구별 값이라, 넘기면 생성부터 죽거나
-       * 조용히 틀린 설정이 된다. 이름은 언제나 물려받는다.
+       * The new session inherits **every one** of the dying session's settings (the rule #37 taught:
+       * carrying over only one leaves the rest born fresh with defaults). Except **when the tool
+       * changes, nothing is carried over** — model, effort, verbosity and speed are all tool-specific
+       * values, and passing them across tools either kills session creation outright or leaves a
+       * setting silently wrong. The name is always inherited, regardless.
        */
       const sameTool = heirTool === session.tool
       const info = await get().createSession(session.projectId!, {
@@ -4201,19 +4477,22 @@ export const useStore = create<AppState>((set, get) => ({
         serviceTier: sameTool ? (session.serviceTier ?? undefined) : undefined,
         permissionPreset: session.permissionPreset,
         initialPrompt: handoffOpening(session.name, note, notePath),
-        // 노트 원문은 기록으로 간다 (#102). id도 함께 (#106) — host의 청소가 이 노트에
-        // 아직 주인이 있음을 아는 근거이고, 그것 없이는 전임자 삭제가 곧 노트의 삭제다
+        // The note's full text goes into the record (#102), along with the id (#106) — that id is
+        // what tells the host's cleanup this note still has an owner; without it, deleting the
+        // predecessor is the same as deleting the note
         handoff: { from: session.name, note, fromSessionId: sessionId },
       })
       await get().rename(info.id, session.name)
 
       /*
-       * 그리드 자리 승계 (도그푸딩 요청 2026-09-04): 죽는 세션이 그리드에 있었으면
-       * 후임자가 **같은 인덱스**에 선다. 삭제가 자리를 비운 뒤에 다시 넣으면 칸이
-       * 사라졌다 나타나고 순서도 밀린다 — 교체는 파괴 전에 한다. deleteOld=false여도
-       * 바꾼다: 그리드는 "지금 일하는 세션들"의 자리고 이어가는 쪽은 후임자다 —
-       * 남겨진 원본은 사이드바에서 닿는다. createSession이 이미 후임자를 포커스했으니,
-       * 여기서는 레인만 바로잡는다(그리드에 있으면 그리드 안에서 보이게).
+       * Grid slot succession (a dogfooding request, 2026-09-04): if the dying session was on the grid,
+       * the successor takes its place at **the same index**. Emptying the slot with the delete and
+       * then reinserting it would make the panel flicker away and reappear, shifting the order along
+       * the way — so the swap happens before destruction. It swaps even with `deleteOld: false`: the
+       * grid is a place for "sessions working right now," and the one that continues that work is the
+       * successor — the surviving original is still reachable from the sidebar. `createSession` has
+       * already focused the successor, so this only fixes up the lane (making it visible inside the
+       * grid if it was on the grid).
        */
       const grid = get().gridPanels
       if (grid.includes(sessionId)) {
@@ -4222,28 +4501,30 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       /*
-       * **여기서는 아무것도 치우지 않는다** (#106).
+       * **Nothing is cleaned up here** (#106).
        *
-       * 청소는 두 번 자리를 옮겼다. 처음엔 바로 이 자리, `createSession` 직후였고 —
-       * 후임자는 아직 파일을 열지도 않았다. #102가 그것을 후임자의 **첫 턴이 끝나는
-       * 순간**으로 옮겼지만, 그 조건은 턴이 성공했는지도 노트를 읽었는지도 묻지 않는다:
-       * 실사고에서 첫 턴은 1초도 안 돼 400으로 죽었고, 디렉토리는 3분 만에 비었다.
-       * 후임자가 받은 것은 이미 없는 파일의 경로였고, 그 글은 다시 만들 수 없다 —
-       * 쓴 전임자가 방금 대체됐기 때문이다.
+       * Cleanup has moved twice. The first time it was right here, right after `createSession` — the
+       * successor had not even opened the file yet. #102 moved it to **the instant the successor's
+       * first turn ends**, but that condition asks neither whether the turn succeeded nor whether the
+       * note was ever read: in an actual incident, the first turn died with a 400 in under a second,
+       * and the directory was empty within three minutes. What the successor received was a path to a
+       * file that no longer existed, and that text can never be recreated — the predecessor who wrote
+       * it had just been replaced.
        *
-       * "읽었는가"는 우리가 관찰할 수 있는 사실이 아니다. 그래서 턴에 매다는 방식 자체를
-       * 버리고, 읽는 이와 경주할 수 없는 두 순간(세션 삭제·기동)을 host에게 맡긴다
-       * (manager.sweepOrphanHandoffNotes). 파일 하나를 남겨 두는 값은 0에 가깝다 —
-       * 노트는 사용자 저장소가 아니라 데이터 폴더에 있다 (#142).
+       * "Was it read" is not a fact we can observe. So the whole approach of hanging cleanup off a
+       * turn is abandoned, and the two moments that cannot race the reader (session deletion, and
+       * startup) are handed to the host instead (`manager.sweepOrphanHandoffNotes`). The cost of
+       * leaving one extra file behind is close to zero — the note lives in the data folder, not the
+       * user's repository (#142).
        */
 
       if (deleteOld) {
-        // 파괴는 맨 끝 — 여기서 실패하면 두 세션이 함께 남는다 (반쯤 지워진 것보다 낫다)
+        // Destruction comes last — if this fails, both sessions are left standing (better than half deleted)
         await s.platform.agents.deleteSession(sessionId, false, true)
       }
       set({ toast: `Handed off: ${session.name}` })
     } catch (e) {
-      // 라이브 실패의 다음 카드는 기록 모드다 — 앱이 몰래 갈아타지 않고 사람에게 알려준다 (#78)
+      // The next card after a live failure is record mode — the app tells the person instead of switching silently on its own (#78)
       const hint = mode === 'agent' ? ' — if the agent cannot respond, retry with "From the record"' : ''
       set({ toast: `Handoff failed: ${(e as Error).message}${hint}` })
     } finally {
@@ -4264,9 +4545,10 @@ export const useStore = create<AppState>((set, get) => ({
                 ...s.sessions[sessionId]!,
                 tool: info.tool,
                 /*
-                 * 모델과 딸린 설정은 host가 놓는다 (manager.switchTool의 주석) —
-                 * 화면도 따라 놓지 않으면 메뉴에는 'sonnet'이 그대로 켜져 있는데
-                 * 실제 세션은 codex 기본값으로 도는, 읽을수록 틀린 화면이 된다.
+                 * The model and its dependent settings are decided by the host (see the comment on
+                 * `manager.switchTool`) — if the screen did not follow along, the menu would keep
+                 * showing 'sonnet' turned on while the session itself actually ran on codex's default,
+                 * a screen that gets more wrong the more it is read.
                  */
                 model: info.model,
                 effort: info.effort,
@@ -4302,9 +4584,10 @@ export const useStore = create<AppState>((set, get) => ({
         },
       })))
       /*
-       * 무엇을 바꿨는지 그대로 말한다. 예전에는 model 아니면 전부 "Perms:"라고 했다 —
-       * effort를 바꿔도 "Perms: normal"이 떠서, 방금 한 일과 화면의 말이 달랐다.
-       * (verbosity(#54)를 더하면서 세 번째로 거짓말할 자리가 생겨 고친다)
+       * States exactly what changed. This used to say "Perms:" for anything that was not the model —
+       * so even changing effort showed "Perms: normal," and what the screen said no longer matched
+       * what had just been done. (Adding verbosity, #54, created a third place to lie, which is why
+       * this is being fixed now.)
        */
       const changed =
         s.model !== undefined
@@ -4317,8 +4600,9 @@ export const useStore = create<AppState>((set, get) => ({
                 ? `Speed: ${info.serviceTier ?? 'default'}`
                 : `Perms: ${info.permissionPreset}`
       /*
-       * 언제 닿는지도 실제로 일어난 대로 말한다 (#164). 예전에는 늘 "(from next turn)"이었는데, host는 턴 도중에도
-       * 그 자리에서 프로세스를 갈아 끼워 도는 턴을 잃었다. 이제 host가 무엇을 했는지 돌려준다.
+       * When it takes effect is also stated as it actually happened (#164). This used to always say
+       * "(from next turn)," but the host could replace the process mid-turn on the spot and lose the
+       * turn in progress. It now returns what the host actually did.
        */
       const when =
         info.applied === 'restarted' ? 'agent restarted'
@@ -4332,34 +4616,36 @@ export const useStore = create<AppState>((set, get) => ({
 
 
   /**
-   * 에이전트만 재시작한다. 대화 기록은 그대로 두고 프로세스만 갈아 끼운다 —
-   * 도구가 먹통이 됐을 때 세션을 새로 만들면 맥락이 끊긴다.
+   * Restarts only the agent. The conversation record is left as is; only the process is replaced —
+   * creating a new session when a tool goes unresponsive would cut off the context.
    */
   /**
-   * 잠든 세션을 미리 깨운다 (고르는 즉시).
+   * Wakes a sleeping session ahead of time (the instant it is picked).
    *
-   * **실패하면 이유를 남긴다.** 토스트로 띄우지는 않는다 — 목록을 훑는 동안
-   * 화면이 시끄러워진다. 대신 그 세션의 안내 줄에 적어서, 왜 안 이어지는지
-   * 보고 있는 사람이 알 수 있게 한다.
+   * **A failure leaves its reason behind.** It is not raised as a toast — that would make the screen
+   * noisy while someone is scanning through the list. Instead it is written onto that session's own
+   * hint line, so whoever is looking can see why it is not resuming.
    */
   /**
-   * 끊겼다 돌아온 뒤 **돌고 있던 세션을 되살린다.**
+   * After reconnecting, **revives sessions that were running.**
    *
-   * host가 죽으면 수퍼바이저가 다시 띄우지만(최대 5회, 지수 백오프),
-   * 그 host는 **살아 있던 에이전트 프로세스를 하나도 모른다** — 프로세스는 함께
-   * 죽었고 새 host의 메모리는 비어 있다. 그래서 화면에는 세션이 전부 잠든 채로
-   * 남고, 사람이 하나씩 눌러 깨워야 했다 (도그푸딩: "다른 데서 세션 연결이 끊긴다").
+   * When the host dies, the supervisor brings it back up (up to five times, with exponential
+   * backoff), but that new host **knows none of the agent processes that were alive** — they died
+   * along with it, and the new host's memory starts empty. So every session was left sitting asleep
+   * on screen, and the person had to press each one by hand to wake it (dogfooding: "the session
+   * connection drops in other places too").
    *
-   * 무엇이 돌고 있었는지는 **UI가 안다** — 끊기기 직전의 live 상태가 여기 있다.
-   * 그걸 근거로 되살린다. 아카이브된 것과 원래 잠들어 있던 것은 건드리지 않는다:
-   * 끊김을 핑계로 사람이 안 켠 것까지 켜면 그건 복구가 아니라 다른 일이다.
+   * **The UI knows** what was running — the live state from right before the disconnect is right
+   * here, and revival works from that. An archived session and one that was already asleep to begin
+   * with are left untouched: using the disconnect as an excuse to turn on something the person never
+   * turned on would not be recovery, it would be a different action entirely.
    */
   /**
-   * 사이드바 순서.
+   * Sidebar order.
    *
-   * **화면을 먼저 바꾸고 저장은 뒤따라간다.** 끌어놓은 것이 서버 왕복을 기다렸다가
-   * 움직이면 손이 멈칫한 것처럼 느껴진다. 저장에 실패하면 host가 준 진실로 되돌린다 —
-   * 조용히 어긋난 채로 두지 않는다.
+   * **The screen changes first, and the save follows.** If a dragged item waited for a round trip to
+   * the server before moving, the hand would feel like it stumbled. If saving fails, it reverts to
+   * whatever the host says is true — it is never left silently out of sync.
    */
   async reorderProjects(orderedIds) {
     const platform = get().platform
@@ -4376,12 +4662,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   setView(view) {
     /*
-     * 화면을 골랐다 = 소개를 지나왔다 (#63).
+     * Picking a screen = having passed the intro (#63).
      *
-     * 소개 화면 옆의 사이드바에서 그리드나 오케스트레이터를 누르는 사람은 "설명은
-     * 됐고 앱을 쓰겠다"고 말한 것이다. 그 클릭이 화면을 안 바꾸면 버튼이 고장 난
-     * 것처럼 보이고, 그렇다고 버튼을 감추면 소개 읽기를 강요하는 셈이 된다 —
-     * 대화를 강요하지 않겠다는 이 온보딩의 전제와 정면으로 어긋난다.
+     * A person who clicks the grid or the orchestrator from the sidebar beside the intro screen is
+     * saying "enough explaining, I want to use the app." If that click did not change the screen, the
+     * button would look broken; hiding the button instead would force reading the intro — squarely
+     * against this onboarding's premise of never forcing a conversation.
      */
     set({ view, introSeen: true })
     get().saveWorkspace()
@@ -4395,10 +4681,10 @@ export const useStore = create<AppState>((set, get) => ({
         const cur = s.inlineViews[sessionId]?.[callId]
         return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
       })
-    // 접는 중 — 프레임은 teardown의 답이 올 때까지 그대로 선다. 이 사이에 온 두 번째 접기는 위에서 돌아간다
+    // Closing — the frame stays standing until teardown's answer comes back. A second close arriving in this window returns from the guard above
     patch({ state: 'closing', reason })
     await inlineFrames.get(inlineFrameKey(sessionId, callId))?.teardown().catch(() => {})
-    // 그사이 세션이 지워졌거나(화면째 사라짐) 다른 길이 이미 접었다
+    // The session was deleted in the meantime (gone along with the whole screen), or another path already closed it
     if (get().inlineViews[sessionId]?.[callId]?.state !== 'closing') return
     patch({ state: 'parked', instanceId: null })
     if (v.instanceId) void get().platform?.apps.closeView(v.instanceId).catch(() => {})
@@ -4415,7 +4701,7 @@ export const useStore = create<AppState>((set, get) => ({
       })
     try {
       const r = await platform.apps.reopenInlineView(sessionId, callId)
-      // 다시 여는 사이에 온 결말(아직 돌던 호출)이 있으면 그것이 더 새것이다
+      // If an outcome (from a call still running) arrived during the reopen, it is the newer one
       const now = get().inlineViews[sessionId]?.[callId]
       patch({
         state: 'live',
@@ -4425,7 +4711,7 @@ export const useStore = create<AppState>((set, get) => ({
         cancelled: r.cancelled ?? now?.cancelled,
         reason: undefined,
         liveAt: ++inlineLiveSeq,
-        // 새 인스턴스가 여는 코드 (C-4) — 목록의 지문이 이것과 달라지면 다시 연다
+        // The code the new instance opens with (C-4) — reopened again if the list's fingerprint ever differs from this
         codeStamp: codeStampOf(get().externalApps, v.projectId, v.appId),
       })
       capInlineViews(get, sessionId, callId)
@@ -4451,9 +4737,9 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({
       view: 'app',
       focusedApp: { projectId, appId },
-      // 고른 것은 보여야 한다(focusSession과 같은 규칙) — 덮어 둔 넓은 표면은 걷는다
+      // What is picked must be shown (the same rule as `focusSession`) — any covering wide surface is dismissed
       overlay: null,
-      // 화면을 골랐다 = 소개를 지나왔다 (setView와 같은 이유, #63)
+      // Picking a screen = having passed the intro (the same reason as `setView`, #63)
       introSeen: true,
       ...(projectId ? { focusedProjectId: projectId } : {}),
       pinnedViews: s.pinnedViews.some((p) => p.key === key)
@@ -4500,15 +4786,16 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const v = await platform.apps.openView(pv.appId, pv.projectId)
       /*
-       * 여는 사이에 닫혔거나(자리가 없다) 앱이 막혀 다시 idle이 됐다. 막 연 인스턴스는 쓸 곳이
-       * 없다 — 놓지 않으면 아무도 보지 않는 화면이 앱을 영영 붙든다(쉬는 앱 내리기가 멈춘다).
+       * It was closed while opening (its slot is gone), or the app was blocked and returned to idle.
+       * The instance just opened has nowhere to go — if it is not released, a view nobody sees ends up
+       * holding onto the app forever (blocking idle-app teardown).
        */
       const now = get().pinnedViews.find((p) => p.key === key)
       if (!now || now.phase !== 'opening') {
         void platform.apps.closeView(v.instanceId).catch(() => {})
         return
       }
-      // 이 인스턴스가 연 코드 — 목록의 지문이 이것과 달라지면 옛 HTML이다(followAppCode)
+      // The code this instance was opened with — if the list's fingerprint ever differs from this, it is stale HTML (`followAppCode`)
       const codeStamp = codeStampOf(get().externalApps, pv.projectId, pv.appId)
       patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult, codeStamp }))
     } catch (e) {
@@ -4538,7 +4825,7 @@ export const useStore = create<AppState>((set, get) => ({
       return {
         pinnedViews: s.pinnedViews.filter((p) => p.key !== key),
         ...(focused ? { focusedApp: null } : {}),
-        // 보던 화면을 닫았다 — 그 전에 보던 세션(focusedSessionId는 그대로다)으로 돌아간다
+        // The view being watched was closed — returns to the session it had been viewing before (`focusedSessionId` is untouched)
         ...(focused && s.view === 'app' ? { view: 'focus' as const } : {}),
       }
     })
@@ -4553,11 +4840,12 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === key ? fn(p) : p)) }))
     if (pv.instanceId) void platform.apps.closeView(pv.instanceId).catch(() => {})
     /*
-     * idle이 아니라 restarting으로 둔다. idle이면 화면이 곧바로 다시 열고(열 수 있는 앱이면), 그 열기가
-     * host의 restart보다 먼저 닿는다. 그러면 막 띄운 앱을 restart가 내리고, 열기는 "앱이 내려가서 기동을
-     * 그만뒀다"로 실패한다. 다시 여는 것은 restart가 끝난 뒤다.
+     * Set to `restarting`, not `idle`. With `idle`, the view would reopen immediately (if the app can
+     * be opened), and that open could reach the host before `restart` does. Then `restart` would tear
+     * down the app just brought up, and the open would fail with "the app went down and startup
+     * stopped." Reopening happens only after `restart` finishes.
      */
-    // "Updated"는 새 코드로 다시 연 화면의 말이다 — 사람이 다시 시작한 화면에 옛 소식을 다시 붙이지 않는다
+    // "Updated" is a message for a view that reopened with new code — it is never re-attached to a view the person just restarted themselves
     patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: null }))
     try {
       await platform.apps.restart(pv.appId, pv.projectId)
@@ -4572,12 +4860,12 @@ export const useStore = create<AppState>((set, get) => ({
     const pv = get().pinnedViews.find((p) => p.key === key)
     if (!platform || !pv || pv.phase !== 'open' || !pv.instanceId) return
     const instanceId = pv.instanceId
-    // 내리기 전에 알린다(규격) — 화면은 이 사이에 저장하거나 정리한다
+    // Notified before it comes down (per spec) — the view saves or cleans up during this window
     await pinnedFrames.get(key)?.teardown().catch(() => {})
-    // 그사이 닫혔거나 다른 길(다시 시작, 신뢰를 잃음)이 먼저 내렸다 — 그 길의 일이다
+    // It was closed in the meantime, or a different path (restart, losing trust) already brought it down first — that path's job
     if (get().pinnedViews.find((p) => p.key === key)?.instanceId !== instanceId) return
     void platform.apps.closeView(instanceId).catch(() => {})
-    // idle로 두면 화면이 다시 연다(열 수 있는 앱이면) — 같은 자리, 새 인스턴스. 새 지문은 열린 뒤에 받는다
+    // Setting it to `idle` makes the view reopen it (if the app can be opened) — the same slot, a fresh instance. The new fingerprint is received once it opens
     set((s) => ({
       pinnedViews: s.pinnedViews.map((p) =>
         p.key === key
@@ -4590,7 +4878,7 @@ export const useStore = create<AppState>((set, get) => ({
   async reloadInlineView(sessionId, callId) {
     const v = get().inlineViews[sessionId]?.[callId]
     if (!v || v.state !== 'live') return
-    // host가 입력과 결말을 들고 있지 않으면 다시 열 수 없다 — 옛 HTML을 두지 않고 접는다(앱을 여는 길은 남는다)
+    // If the host is not holding the input and outcome, it cannot be reopened — it is closed instead of left as stale HTML (the path to open the app is still there)
     if (!v.kept) return get().closeInlineView(sessionId, callId, 'Closed because the app now runs new code')
     await get().closeInlineView(sessionId, callId, "Reopening with the app's new code")
     await get().reopenInlineView(sessionId, callId)
@@ -4605,13 +4893,15 @@ export const useStore = create<AppState>((set, get) => ({
   async createApp(spec) {
     const platform = get().platform
     if (!platform) throw new Error('Not connected to the host')
-    // 거절은 그대로 던진다 — host의 말이 곧 이유다(이미 있는 id, 신뢰하지 않은 프로젝트). 창이 그 말을 보인다
+    // A refusal is thrown as is — the host's own message is the reason (an id already taken, an untrusted project). The window shows that message
     const made = await platform.apps.create(spec)
     const { app, builder } = made
     /*
-     * 목록에 곧바로 세운다. host도 목록 방송(external_apps_changed)을 보내지만, 그것을 기다리면 창이 닫힌 뒤 한동안
-     * 사이드바에 줄이 없고 고정 화면은 "앱이 없다"를 본다(고정 화면은 목록에 있는 앱만 연다). 방송이 오면 통째로
-     * 다시 읽으므로 여기서 세운 줄은 그 답으로 바뀐다.
+     * Placed into the list immediately. The host also sends its own list broadcast
+     * (`external_apps_changed`), but waiting for it would leave the sidebar without a row for a while
+     * after the window closes, and the pinned view would see "no such app" (a pinned view only opens
+     * an app that is in the list). Once the broadcast arrives, the whole list is re-read, so the row
+     * set here is simply replaced by that answer.
      */
     set((s) => ({
       externalApps: s.externalApps.some((a) => a.appId === app.appId && a.projectId === app.projectId)
@@ -4619,7 +4909,7 @@ export const useStore = create<AppState>((set, get) => ({
         : [...s.externalApps, app],
     }))
     void get().refreshExternalApps()
-    // 만드는 세션도 같은 까닭으로 곧바로 등록한다 — host의 session_created와 같은 길이라 두 번 와도 한 번이다
+    // The builder session is also registered right away for the same reason — the same path as the host's `session_created`, so arriving twice still counts as once
     if (builder) get().dispatchEvent({ type: 'session_created', sessionId: builder.id, session: builder })
     get().openApp(app.projectId, app.appId)
     if (!builder) {
@@ -4632,18 +4922,20 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     /*
-     * 화면부터 바꾼다. 조회가 늦어도 그동안 아무 반응이 없으면 누른 사람은 버튼이
-     * 죽은 줄 안다 — 보낸 즉시 '작업 중'으로 두는 것과 같은 이유다.
+     * The screen changes first. Even if the lookup is slow, if nothing happens in the meantime, the
+     * person who clicked assumes the button is dead — the same reason a message is marked "working"
+     * the instant it is sent.
      */
-    // 여기로 들어온 것도 소개를 지나온 것이다 (setView와 같은 이유, #63)
+    // Landing here also counts as having passed the intro (the same reason as `setView`, #63)
     set({ view: 'orchestrator', introSeen: true })
     get().saveWorkspace()
     try {
       /*
-       * **묻기만 한다 — 만들지 않는다** (#63 지연 기동). 화면을 여는 것과 프로세스를
-       * 만드는 것이 갈라졌다: 없으면 빈 대화(추천 질문 카드)가 서고, 만드는 것은
-       * 첫 질문이 던져지는 순간의 askOrchestrator다. 예전처럼 여기서 만들면
-       * 묻지도 않은 사람 몫의 도구 프로세스가 뜬다.
+       * **Only asks — never creates** (#63, deferred startup). Opening the screen and creating the
+       * process are now separate: if there is none, an empty conversation (with suggested-question
+       * cards) stands, and creation happens only in `askOrchestrator`, at the moment the first
+       * question is asked. Creating it here as before would bring up a tool process for a person who
+       * never even asked for it.
        */
       const info = await platform.agents.orchestratorPeek()
       if (!info) return
@@ -4654,11 +4946,11 @@ export const useStore = create<AppState>((set, get) => ({
           [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }),
         },
       }))
-      // 여기도 세션이 처음 등록되는 길목이다 — 보관해 둔 이벤트가 있으면 재생한다
+      // This is also a point where a session is first registered — replays any events held in the pen
       replayPendingEvents(get)
       if (!get().chat[info.id]) void get().loadHistory(info.id)
     } catch (e) {
-      // 못 열었으면 화면을 되돌린다 — 빈 화면을 켜둔 채 이유를 안 말하는 것이 최악이다
+      // If it could not be opened, the view reverts — the worst outcome is leaving an empty screen up with no explanation
       set({ view: 'focus', toast: `Could not open the orchestrator: ${(e as Error).message}` })
     }
   },
@@ -4668,7 +4960,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (!platform) return false
     let id = get().orchestratorId
     if (!id) {
-      // 첫 질문이 곧 탄생이다 (#63) — 카드를 누른 순간에만 프로세스가 뜬다
+      // The first question is the birth itself (#63) — the process comes up only the instant a card is pressed
       set({ orchestratorWaking: true })
       try {
         const info = await platform.agents.orchestrator()
@@ -4688,7 +4980,7 @@ export const useStore = create<AppState>((set, get) => ({
         set({ orchestratorWaking: false })
       }
     }
-    // 여기부터의 실패는 send가 글을 입력창(이제 진짜 세션의 초안)으로 되돌린다
+    // A failure from this point on has `send` put the text back into the composer (now the draft of a real session)
     await get().send(id, text)
     return true
   },
@@ -4696,8 +4988,9 @@ export const useStore = create<AppState>((set, get) => ({
   async completeIntro(tool) {
     const platform = get().platform
     /*
-     * 화면부터 통과시킨다 — 설정 저장이 실패해도 소개 화면에 사람을 가두지 않는다
-     * (기본값 claude로 동작한다). 카드 클릭은 설정을 적을 뿐, 프로세스는 안 뜬다.
+     * The screen is passed through first — a failed setting save must not trap the person on the intro
+     * screen (it runs on the default, claude). Clicking the card only records the setting; no process
+     * comes up.
      */
     set({ introSeen: true })
     get().saveWorkspace()
@@ -4710,10 +5003,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /**
-   * 배치를 통째로 저장한다 (추가·제거·순서가 전부 이 한 가지로 온다).
+   * Saves the whole arrangement (adding, removing and reordering all arrive as this one action).
    *
-   * 화면을 먼저 바꾸고 저장이 뒤따라간다 — 끌어놓은 패널이 서버 왕복을 기다렸다가
-   * 자리를 잡으면 손이 멈칫한 것처럼 느껴진다. 실패하면 host가 준 진실로 되돌린다.
+   * The screen changes first and the save follows — if a dropped panel waited for a round trip to
+   * the server before settling into place, the hand would feel like it stumbled. A failure reverts to
+   * whatever the host says is true.
    */
   async setGridPanels(sessionIds) {
     const platform = get().platform
@@ -4731,7 +5025,7 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     const before = get().sessions
-    // 이 프로젝트의 세션만 새 순서로, 나머지는 있던 자리에 그대로
+    // Only this project's sessions get the new order; everything else stays exactly where it was
     const mine = new Set(orderedIds)
     const reordered: typeof before = {}
     for (const [id, s] of Object.entries(before)) {
@@ -4749,9 +5043,9 @@ export const useStore = create<AppState>((set, get) => ({
   async recoverAfterReconnect(resync = false) {
     const s = get()
     if (!s.platform) return
-    // 끊기는 순간 보내던 말이 host에 닿았는지 가린다 (#173)
+    // Resolves whether a message being sent at the moment of disconnect reached the host (#173)
     void settleUnsureSends(get, set)
-    // 끊긴 사이의 방송은 다시 오지 않는다 — 앱 목록(A-8)도 host가 지금 아는 것으로 맞춘다
+    // Broadcasts from the gap while disconnected never come again — the app list (A-8) is also aligned to whatever the host currently knows
     void get().refreshExternalApps()
     void get().refreshAppQuestions()
 
@@ -4761,14 +5055,16 @@ export const useStore = create<AppState>((set, get) => ({
     if (!fresh) return
 
     /*
-     * **새 host의 목록을 버리지 않고 병합한다.**
+     * **The new host's list is merged in, never discarded.**
      *
-     * 예전에는 fresh를 live 판정에만 쓰고 버렸다 — 끊긴 사이(다른 앱·터미널에서)
-     * 만들어지거나 이름이 바뀌거나 지워진 세션이 앱을 껐다 켤 때까지 안 보였다.
-     * host가 아는 사실(이름·상태·읽음 위치·승인/질문/한도…)만 덮고, 로컬 파생 상태
-     * (preview·touchedPaths…)는 리듀서의 것이므로 지킨다.
-     * 승인·질문도 host가 원본이다 — 끊긴 사이에 풀렸거나 새로 왔을 수 있어
-     * 로컬 것을 지키면 죽은 requestId의 카드가 남는다.
+     * This used to use `fresh` only to decide `live` and throw the rest away — a session created,
+     * renamed or deleted elsewhere (a different app, a terminal) while disconnected stayed invisible
+     * until the app was closed and reopened. Only the facts the host knows (name, state, read
+     * position, approval/questions/limit, …) are overwritten; local derived state (preview,
+     * `touchedPaths`, …) belongs to the reducer and is preserved.
+     * Approval and questions also have the host as their source of truth — they could have been
+     * resolved or newly arrived while disconnected, and keeping the local ones would leave behind a
+     * card for a dead `requestId`.
      */
     set((st) => {
       const sessions: Record<string, SessionSummary> = {}
@@ -4784,7 +5080,7 @@ export const useStore = create<AppState>((set, get) => ({
               autoNamed: f.autoNamed,
               state: f.state,
               live: f.live,
-              // lastSeq는 우리가 이벤트로 더 멀리 갔을 수 있다 — 뒤로 감으면 안읽음이 되살아난다
+              // `lastSeq` might already be further ahead here from an event we received — winding it back would resurrect an unread mark
               lastSeq: Math.max(cur.lastSeq, f.lastSeq),
               lastReadSeq: f.lastReadSeq,
               waitingSince: f.waitingSince,
@@ -4823,7 +5119,7 @@ export const useStore = create<AppState>((set, get) => ({
               ...liveFactsOf(f),
             }
       }
-      // 지워진 세션의 잔해(대화·포커스)도 함께 걷는다
+      // The remains of a deleted session (its conversation, its focus) are cleared along with it
       const chat: typeof st.chat = {}
       for (const [id, items] of Object.entries(st.chat)) if (sessions[id]) chat[id] = items
       return {
@@ -4835,15 +5131,18 @@ export const useStore = create<AppState>((set, get) => ({
         focusedSessionId: st.focusedSessionId && sessions[st.focusedSessionId] ? st.focusedSessionId : null,
       }
     })
-    // 병합으로 처음 등록된 세션이 있으면, 등록 전에 도착해 보관해 둔 이벤트를 재생한다
+    // If the merge registered a session for the first time, replay any events held in the pen from before it was registered
     replayPendingEvents(get)
 
     /*
-     * 재동기화: 빈 구간의 이벤트는 다시 오지 않는다 — 화면이 든 대화를 저장소의 진실과 합친다(mergePage가 구간을 메운다).
+     * Resync: events from the gap never come again — the screen's conversation is merged with the
+     * store's own truth (`mergePage` fills the gap).
      *
-     * **보던 대화 하나가 아니라 대화를 든 세션 전부다** (#173). 예전에는 포커스된 세션만 다시 읽어, 다른 세션의 대화는
-     * 빈 구간을 품은 채 남았다. 그 세션을 나중에 열어도 커서가 이미 있어 기록을 다시 읽지 않으므로, 빈 구간은 앱을 다시
-     * 켜기 전까지 채워지지 않았다. 재동기화는 드문 일이라 세션마다 한 페이지를 읽는 값은 치를 만하다.
+     * **Every session holding a conversation, not just the one being viewed** (#173). This used to
+     * re-read only the focused session, leaving every other session's conversation holding onto its
+     * gap. Opening that session later would not re-read history, since a cursor already exists, so
+     * the gap stayed unfilled until the app itself was reopened. A resync is rare, so the cost of
+     * reading one page per session is affordable.
      */
     const focused = get().focusedSessionId
     if (resync) {
@@ -4852,7 +5151,7 @@ export const useStore = create<AppState>((set, get) => ({
       for (const id of holding) if (get().sessions[id]) void get().loadHistory(id)
     }
 
-    // 끊기기 직전에 돌고 있었는데 새 host가 모르는 프로세스만 되살린다
+    // Only revives a process that was running right before the disconnect but that the new host does not know about
     const alive = new Set(fresh.filter((x) => x.live).map((x) => x.id))
     const toWake = wasLive.filter(
       (x) => !alive.has(x.id) && get().sessions[x.id],
@@ -4860,7 +5159,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (toWake.length === 0) return
 
     set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
-    // 병합이 host의 live=false를 반영했으므로 wake가 "이미 살아 있다"고 오판하지 않는다
+    // The merge already reflects the host's `live: false`, so `wake` never mistakenly thinks it is already alive
     for (const x of toWake) await get().wake(x.id)
   },
 
@@ -4911,7 +5210,7 @@ export const useStore = create<AppState>((set, get) => ({
         wakeError: res.resumed
           ? omitKey(st.wakeError, sessionId)
           : { ...st.wakeError, [sessionId]: res.reason ?? '' },
-        // 갈라졌으면 더는 잠긴 상태가 아니다 — 실패했으면 갈림길은 그대로 남겨 둔다
+        // Once forked, it is no longer locked — if it failed, the fork option is left standing
         wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
         toast: res.resumed
           ? 'Continuing in a forked conversation — the original is untouched'
@@ -4931,15 +5230,16 @@ export const useStore = create<AppState>((set, get) => ({
   async restartSession(sessionId) {
     const platform = get().platform
     /*
-     * **두 번 누르지 못하게 한다** (도그푸딩).
+     * **Prevents a second press** (dogfooding).
      *
-     * 재시작은 프로세스를 죽이고 다시 띄우는 일이라 몇 초가 걸리는데 그동안 화면은
-     * 조용했다. 그래서 사람이 한 번 더 누르고, 두 번째 누름은 **방금 뜬 프로세스를
-     * 다시 죽인다** — 고치려고 누른 버튼이 고장을 만드는 자리였다.
+     * Restarting kills the process and brings it back up, which takes a few seconds, and the screen
+     * stayed silent through it. So the person pressed it again, and the second press **killed the
+     * process that had just come up** — the exact button pressed to fix something was the one causing
+     * the breakage.
      *
-     * 자물쇠는 wake·fork가 쓰는 그 `resuming`이다. 셋 다 "이 세션의 프로세스를 지금
-     * 갈아 끼우는 중"이라는 같은 사실을 말하므로, 표시등을 따로 두면 한쪽이 도는
-     * 동안 다른 쪽 버튼이 멀쩡해 보이는 상태가 생긴다.
+     * The lock is the same `resuming` that `wake` and `fork` use. All three state the same fact — "this
+     * session's process is being replaced right now" — so keeping a separate indicator for each would
+     * leave one button looking fine while another was mid-flight.
      */
     if (!platform || get().resuming[sessionId]) return false
     set((s) => {
@@ -4964,7 +5264,7 @@ export const useStore = create<AppState>((set, get) => ({
       )
       return r.resumed
     } catch (e) {
-      // 던져서 끝나면 자물쇠가 영영 안 풀린다 — 버튼이 죽은 채로 남는다
+      // Letting this throw and stop here would leave the lock stuck forever — the button would stay dead
       set({ toast: `Could not restart: ${(e as Error).message}` })
       return false
     } finally {
@@ -4973,12 +5273,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /**
-   * 세션 이름 바꾸기 (이슈 #5).
+   * Renaming a session (issue #5).
    *
-   * **먼저 host에 통과시키고, 그다음에 화면을 고친다.** 낙관적으로 먼저 그리면
-   * 실패했을 때 화면에는 새 이름이, DB에는 옛 이름이 남는다 — 다음에 목록을
-   * 다시 받는 순간 이름이 아무 설명 없이 되돌아간다. 이 저장소가 반복해서 데인 종류다.
-   * 실패는 respondApproval/answerQuestion과 같은 방식으로 토스트에 띄운다.
+   * **Passed to the host first, and the screen is fixed only after.** Drawing it optimistically first
+   * would leave the new name on screen and the old one in the database on failure — the moment the
+   * list is re-fetched, the name would revert with no explanation. This is a kind of mistake this
+   * store has been burned by more than once. A failure is raised as a toast the same way as
+   * `respondApproval`/`answerQuestion`.
    */
   async rename(sessionId, name) {
     const next = name.trim()
@@ -5004,8 +5305,8 @@ export const useStore = create<AppState>((set, get) => ({
 }))
 
 /**
- * 살아 있는 구독들. 스토어 상태가 아니라 모듈 스코프에 둔다 —
- * 화면이 다시 그려질 이유가 없는 값이라 상태에 넣으면 불필요한 렌더만 는다.
+ * Live subscriptions. Kept at module scope rather than in the store's state — a value the screen has
+ * no reason to re-render on, so putting it in state would only add unnecessary renders.
  */
 const subscriptions: (() => void)[] = []
 
@@ -5014,19 +5315,20 @@ function detachAll(): void {
 }
 
 /**
- * 이 결과·실행 중 출력의 **주인인 도구 줄** (#98).
+ * The **tool row that owns** this result or live output (#98).
  *
- * callId로 찾는다. 예전엔 자리로 찾았다 — 결과는 "열려 있는 가장 오래된 줄", 실행 중
- * 출력은 "열려 있는 마지막 줄". 줄이 callId를 들고 있지 않아서였고, 한 번에 하나씩
- * 열리는 동안에는 자리가 곧 주인이었다. 백그라운드 에이전트의 카드는 그렇지 않다:
- * 부모가 다른 도구를 쓰는 내내 열려 있으므로, 자리 규칙은 **부모의 Bash 결과를 에이전트
- * 카드에 붙이고** 에이전트의 걸음은 부모의 열린 Bash 카드로 보낸다 — 이슈가 말한
- * "누가 했는지 모르게 섞인다"가 화면 쪽에서 다시 생긴다.
+ * Found by `callId`. This used to be found by position — a result went to "the oldest open row," and
+ * live output to "the last open row." That was because a row did not carry a `callId`, and while only
+ * one thing was ever open at a time, position and ownership were the same thing. A background agent's
+ * card breaks that: it stays open the whole time its parent uses a different tool, so the positional
+ * rule ended up **attaching the parent's Bash result to the agent card**, and routed the agent's
+ * steps to the parent's open Bash card — reproducing on screen exactly the "mixed together with no
+ * way to tell who did what" the issue described.
  *
- * callId를 가진 줄은 제 것만 받는다. 옛 자리 규칙은 callId가 없는 줄끼리만 쓴다 —
- * 호출·결과를 따로 들고 오는 오래된 픽스처와 같은 모양을 위해서다. 실측: 저장소의
- * tool_call 44,140행(claude 28,517 · codex 15,623)에서 한 세션 안에 callId가 겹친 적은
- * 한 번도 없다 (2026-09-25).
+ * A row with a `callId` only ever receives its own. The old positional rule is used only among rows
+ * with no `callId` at all — kept for the shape of an older fixture that carries the call and its
+ * result separately. Measured: across 44,140 `tool_call` rows in the store (28,517 claude, 15,623
+ * codex), `callId` has never once collided within a single session (2026-09-25).
  */
 function ownerOf(items: ChatItem[], callId: string, fallback: 'oldest' | 'latest'): number {
   if (callId) {
@@ -5039,29 +5341,34 @@ function ownerOf(items: ChatItem[], callId: string, fallback: 'oldest' | 'latest
   return -1
 }
 
-/** host가 실어 보낸 저장 번호를 항목에 싣는다 (#79) — 없으면 싣지 않는다 */
+/** Carries the stored number the host sent along onto the item (#79) — omitted when there is none */
 const stored = (seq: number | undefined): { storedSeq?: number } => (seq === undefined ? {} : { storedSeq: seq })
 
 /**
- * 이 저장 번호의 줄을 이미 들고 있나 (#79).
+ * Does this hold a row with this stored number already (#79)?
  *
- * 기록 페이지가 먼저 도착하고 같은 줄의 이벤트가 뒤따르면(보관해 둔 이벤트의 재생) 같은 말이 두 번 선다.
- * 저장 번호가 같으면 같은 줄이다. 줄 하나가 항목 하나인 이벤트에만 쓴다. 스트리밍 조각은 한 번호가
- * 여러 번 오는 것이 정상이라 여기서 거르지 않는다.
+ * If a history page arrives first and an event for the same row follows (replaying an event held in
+ * the pen), the same message would appear twice. Rows with the same stored number are the same row.
+ * Used only for events where one row is one item. A streaming chunk carrying the same number more
+ * than once is normal, so it is not filtered here.
  */
 function holds(items: ChatItem[], seq: number | undefined): boolean {
   return seq !== undefined && items.some((i) => i.storedSeq === seq)
 }
 
 /**
- * 이 조각이 마지막 항목의 말을 잇는가 (#77) — **저장 번호가 다르면 다른 말이다.**
+ * Does this chunk continue the last item's message (#77) — **a different stored number means a
+ * different message.**
  *
- * host는 한 말의 조각을 한 행에 모으고(#66) 조각마다 그 행의 번호를 싣는다. 그래서 같은 말의 조각은 번호가 같고,
- * 사이에 사람의 말이 없는 새 답(백그라운드 작업이 끝났다, 질문 카드에 답했다)은 새 번호로 온다. 종류만 보고
- * 이어 붙이던 동안 그 둘이 공백 없이 한 문단이 됐다("…still running.All six reviews are in."). 기록(messagesToChat)도
- * 행 하나를 항목 하나로 세운다 — 두 길이 같은 화면을 그린다.
+ * The host groups a message's chunks into one row (#66) and carries that row's number on every
+ * chunk. So chunks of the same message share a number, while a new reply with no human message in
+ * between (a background task finished, a question card was answered) arrives under a new number.
+ * While this only checked the kind and appended blindly, two such messages ran together into one
+ * paragraph with no gap ("…still running.All six reviews are in."). History (`messagesToChat`) also
+ * counts one row as one item — both paths draw the same screen this way.
  *
- * 번호가 없는 쪽은 잇는다: 저장되지 않는 빈 조각(번호 없이 온다)과, 번호 없이 시작한 말(빈 조각이 먼저 왔다)이다.
+ * The unnumbered side is still appended: an unstored empty chunk (arrives with no number), and a
+ * message that started with no number (its empty chunk arrived first).
  */
 function continues<K extends 'assistant' | 'reasoning'>(
   last: ChatItem | undefined,
@@ -5071,20 +5378,20 @@ function continues<K extends 'assistant' | 'reasoning'>(
   return last?.kind === kind && (seq === undefined || last.storedSeq === undefined || last.storedSeq === seq)
 }
 
-/** 이벤트를 대화 아이템으로 (스트리밍 델타는 같은 말의 항목에 append — `continues`) */
+/** Converts an event to a conversation item (a streaming delta is appended to the same message's item — `continues`) */
 function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
     case 'message_delta': {
       const last = items[items.length - 1]
       if (continues(last, 'assistant', e.seq)) {
         const copy = items.slice(0, -1)
-        // 번호 없이 시작한 말(저장되지 않는 빈 조각이 먼저 왔다)은 처음 알게 된 번호를 받는다
+        // A message that started with no number (its unstored empty chunk arrived first) receives the first number learned
         return [...copy, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) }]
       }
       return [...items, { kind: 'assistant', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
     case 'reasoning_delta': {
-      // 텍스트 없는 조각(claude의 토큰 추정)은 대화가 아니라 세션 상태(thinkingTokens)다
+      // A chunk with no text (claude's token estimate) belongs to session state (`thinkingTokens`), not the conversation
       if (!e.text) return items
       const last = items[items.length - 1]
       if (continues(last, 'reasoning', e.seq)) {
@@ -5114,24 +5421,25 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       ]
     case 'tool_result': {
       /*
-       * 결과는 **제 호출의 줄**에 붙는다 (#98 — ownerOf). callId가 없는 줄끼리는
-       * 가장 오래 열려 있는 줄이다 (2026-09-12): 마지막-우선은 연달아 열린 두 호출의
-       * 결과를 서로 바꿔 붙였다. 복원(messagesToChat)도 같은 규칙을 쓴다 — 같은 화면이
-       * 두 길에서 서로 다른 짝을 짓는 일이 없어야 한다.
+       * A result attaches to **its own call's row** (#98 — `ownerOf`). Among rows with no `callId`,
+       * that is the longest-open row (2026-09-12): last-wins had swapped the results of two calls
+       * opened back to back. Restoration (`messagesToChat`) uses the same rule — the same screen must
+       * never end up pairing things differently across the two paths.
        */
       const real = ownerOf(items, e.callId, 'oldest')
       if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
-      // live는 여기서 버린다 — 완주한 출력 전체가 result로 왔으므로 조각은 역할이 끝났다
+      // `live` is discarded here — the full completed output has already arrived as `result`, so the chunk's job is done
       return items.map((it, i) =>
         i === real ? { ...target, result: e.summary, ok: e.ok, live: undefined } : it,
       )
     }
     /*
-     * 실행 중 출력 (#58). 제 호출의 줄에 단다 (ownerOf) — 열린 호출이 동시에 여럿인 경우가
-     * 실제로 생겼다: 백그라운드 에이전트의 카드는 부모가 다른 도구를 쓰는 동안에도 열려
-     * 있고, 그 에이전트의 걸음이 이 길로 온다 (#98). 이미 닫힌 줄에는 달지 않는다 —
-     * 결과가 전체를 들고 왔다. 꼬리만 남긴다: 보여줄 것은 "지금 뭐가 나오나"지 전문이 아니다.
+     * Live output while running (#58). Attaches to its own call's row (`ownerOf`) — having several
+     * calls open at once actually happens: a background agent's card stays open the whole time its
+     * parent uses a different tool, and that agent's own steps arrive through this same path (#98).
+     * Never attached to an already-closed row — its result already carries the whole output. Only the
+     * tail is kept: what needs showing is "what is coming out right now," not the full text.
      */
     case 'tool_output_delta': {
       const real = ownerOf(items, e.callId, 'latest')
@@ -5143,8 +5451,9 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     }
     case 'approval_request':
       /*
-       * 같은 카드가 다시 선다 — host가 능력 물음(M4 D-4)의 카드를, 그것을 가렸던 다른 카드가 닫힌 뒤 다시 세울 때다. 대화에는
-       * 이미 한 줄이 있다: 두 줄로 그리지 않는다.
+       * The same card stands again — when the host re-raises a capability question's card (M4 D-4)
+       * after whatever other card was covering it closes. The conversation already has one row for
+       * it: this never draws a second one.
        */
       if (items.some((it) => it.kind === 'approval' && it.requestId === e.requestId && it.decision === undefined)) return items
       if (holds(items, e.seq)) return items
@@ -5171,21 +5480,24 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       )
     case 'user_message': {
       /*
-       * 내가 보낸 말이면 이미 그려져 있다 — 확정만 한다.
-       * 남이 보낸 말(오케스트레이터의 send_to_session)이면 여기가 화면에 나타나는
-       * 유일한 길이다. 이 갈래가 없던 동안 주입된 말은 저장만 되고 안 보였다.
+       * If I sent it, it is already drawn — this only confirms it.
+       * If someone else sent it (the orchestrator's `send_to_session`), this is the only path by
+       * which it appears on screen at all. Before this branch existed, an injected message was only
+       * stored, never shown.
        *
-       * from이 달린 말은 확정 대조에서 뺀다 (FR-11) — 사람이 우연히 같은 문장을
-       * pending으로 띄워 뒀다면 오케스트레이터의 지시가 그 말풍선에 흡수되면서
-       * 출처 표식이 조용히 사라진다. 텍스트 일치는 내 말끼리만 성립하는 가정이다.
+       * A message carrying `from` is excluded from confirmation matching (FR-11) — if the person
+       * happened to have the same sentence sitting pending, the orchestrator's instruction would be
+       * absorbed into that bubble and its origin marker would quietly disappear. Matching by text is
+       * an assumption that only holds among my own messages.
        */
       /*
-       * 대조는 **보낸 원문**으로 한다 (#75). 첨부를 📎 라벨로 text에 섞던 시절, 그린 것과
-       * 보낸 것이 달라 확정이 안 맞물리고 두 번째 말풍선이 붙었다 (코덱스에서 발견).
-       * 지금은 첨부가 별도 필드라 text가 곧 원문이다 — 이 동일성이 이 대조의 전제다.
+       * The match is made against **the text as sent** (#75). Back when attachments were mixed into
+       * `text` as a 📎 label, what was drawn and what was sent differed, so confirmation never lined
+       * up and a second bubble was appended (discovered on codex). Now that attachments are a
+       * separate field, `text` is exactly the text sent — this identity is what this match relies on.
        */
-      // 앱이 보낸 말(M4 B-1)도 사람 말의 확정 대조에서 뺀다 — 출처 표식이 사람 말풍선에 흡수되면 안 된다
-      // 기록과 합치며 이미 확정된 말이다 (#79) — 기록 페이지가 이 이벤트보다 먼저 왔다
+      // A message sent by an app (M4 B-1) is also excluded from the human message's confirmation match — its origin marker must never be absorbed into a human bubble
+      // Already confirmed by the merge with history (#79) — a history page arrived before this event
       if (holds(items, e.seq)) return items
       const idx = e.from || e.fromApp ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
       if (idx === -1)
@@ -5198,7 +5510,7 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
             text: e.text,
             ...(e.from ? { from: e.from } : {}),
             ...(e.fromApp ? { fromApp: e.fromApp } : {}),
-            // host가 넣은 말의 첨부 (M4 C-5) — 경로와 이름뿐이다. 이미지 바이트는 기록을 다시 읽을 때 온다
+            // Attachments of a message inserted by the host (M4 C-5) — only a path and a name. Image bytes come when history is re-read
             ...(e.attachments?.length ? { attachments: e.attachments } : {}),
           },
         ]
@@ -5207,27 +5519,27 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       )
     }
     case 'history_synced':
-      // 실제 내용은 저장소에 들어갔다 — 화면은 dispatchEvent 밖에서 다시 읽는다
+      // The actual content already went into the store — the screen re-reads it outside `dispatchEvent`
       return items
     case 'compaction':
-      // 모델의 컨텍스트에서만 접힌 것이지 우리 기록은 그대로다 —
-      // 어디서 접혔는지 보여야 그 위로 거슬러 읽을 수 있다
+      // Only the model's own context was folded — our record stays intact. Where it was folded must
+      // be shown so someone can read back past that point
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: compactionText(e) }]
     case 'handoff':
-      // 이 세션이 어디서 왔는지 (#102). 노트 원문은 저장된 payload에만 있다 — 여기는 한 줄이다
+      // Where this session came from (#102). The note's full text lives only in the stored payload — this is a single line
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: handoffText(e) }]
     /*
-     * 실패한 턴도 대화에 남는다 (#107).
+     * A failed turn is also kept in the conversation (#107).
      *
-     * 오류는 지금까지 상태만 바꾸고 지나갔다. 그래서 400으로 죽은 턴은 화면에서
-     * **아무 일도 일어나지 않은 것**과 구별되지 않았다 — 빈 답변, 그리고 "사람을
-     * 기다리는 중". 무슨 일이 있었는지는 전사에 있어야 한다: 세션 배지는 다음 턴이
-     * 시작하면 회복되지만, 그때도 사람은 여전히 이유를 모른다.
+     * An error used to only change state and pass through. So a turn that died with a 400 was
+     * indistinguishable on screen from **nothing having happened at all** — an empty reply, and
+     * "waiting for a human." What happened must be visible in the transcript: the session badge
+     * recovers once the next turn starts, but even then the person still has no idea why.
      */
     case 'error':
-      // 세션의 오류는 마커 행으로 기록되고 그 번호를 싣는다 (#161) — 다른 기록 줄처럼 번호로 맞춘다
+      // A session's error is recorded as a marker row and carries its number (#161) — matched by number like every other stored row
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: errorText(e) }]
     default:
@@ -5236,10 +5548,11 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
 }
 
 /**
- * 압축 마커에 무엇을 적을 것인가.
+ * What to write on the compaction marker.
  *
- * "압축됐다"만으로는 부족하다. 실패했는데 성공한 것처럼 보이면 최악이고,
- * 얼마나 줄었는지는 다음 압축이 언제 올지 가늠하게 해준다 (도구가 알려줄 때만).
+ * "Compacted" alone is not enough. The worst case is a failure that looks like a success, and
+ * how much it shrank tells someone roughly when the next compaction might come (only when the tool
+ * reports it).
  */
 export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): string {
   if (e.failed) return `Compaction failed — ${e.reason ?? 'unknown reason'}`
@@ -5252,26 +5565,27 @@ export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' 
 const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /**
- * 인수인계 마커에 무엇을 적을 것인가 (#102).
+ * What to write on the handoff marker (#102).
  *
- * 노트 원문은 이 자리에 그리지 않는다 — 메가바이트가 될 수 있고, 후임자가 받은 첫
- * 메시지가 이미 미리보기를 담고 있다. 여기가 말하는 것은 "이 세션은 저 세션의
- * 뒤를 잇는다"는 사실 하나고, 원문은 그 사실과 함께 기록에 보관된다.
+ * The note's full text is never drawn here — it can run to megabytes, and the successor's first
+ * message already carries a preview. What this states is the single fact that "this session
+ * continues that one," and the full text is kept in the record alongside that fact.
  */
 export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
   return `Handed off from "${e.from}" — the note is kept with this session`
 }
 
-/** 실패한 턴의 한 줄 (#107) — 도구가 보낸 문장을 그대로 나른다. 우리 말로 바꾸면 원인이 지워진다 */
+/** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
 export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
   return `The agent could not finish this turn — ${e.error.message}`
 }
 
 /**
- * 대화 기록에서 대화 안 앱 화면의 자리 (M4 B-1). 기록에는 "이 카드 아래에 어느 앱의 화면이 섰다(또는 거절됐다)"만
- * 있다 — 입력도 결과도 없다. 그래서 지난 카드에는 자리표시만 선다. 다시 열 수 있는지(`kept`)는 host에 묻기
- * 전까지 모른다: host가 다시 떴다면 들고 있던 것이 없다. 같은 카드에 열림과 거절이 함께 있으면(결과가 남의
- * 화면을 가리켰다) 나중 줄인 거절이 이긴다.
+ * An in-conversation app view's slot within conversation history (M4 B-1). History only says "some
+ * app's view stood under this card (or was rejected)" — no input, no result. So a past card only ever
+ * shows a placeholder. Whether it can be reopened (`kept`) is unknown until the host is asked: if the
+ * host has already come back up, it is holding nothing. If the same card has both an open and a
+ * rejection (the result pointed at someone else's view), the rejection wins as the later row.
  */
 export function inlineViewsFromHistory(msgs: StoredMessage[]): Record<string, InlineView> {
   const out: Record<string, InlineView> = {}
@@ -5295,7 +5609,7 @@ export function inlineViewsFromHistory(msgs: StoredMessage[]): Record<string, In
   return out
 }
 
-/** 기록에서 읽은 자리를 더한다 — 이 UI가 이미 아는 카드(살아 있거나 이 UI가 접은 것)는 건드리지 않는다 */
+/** Adds slots read from history — never touches a card this UI already knows about (a live one, or one this UI closed) */
 function mergeInlineHistory(
   all: Record<string, Record<string, InlineView>>,
   sessionId: string,
@@ -5306,11 +5620,14 @@ function mergeInlineHistory(
 }
 
 /**
- * host에 이 대화에서 들고 있는 화면을 묻고 자리표시를 맞춘다 (M4 B-1, `apps.inlineViews`).
+ * Asks the host which views it is still holding for this conversation, and fixes up the placeholders
+ * (M4 B-1, `apps.inlineViews`).
  *
- * 들고 있는 카드는 "Reopen"을 얻고, 버려진 카드는 잃는다. 열린 채 남은 인스턴스 중 이 UI가 그리고 있지 않은
- * 것은 닫는다 — 다시 연 UI는 그 프레임을 모르고(보낼 입력·결과가 없다), 닫지 않으면 그 인스턴스가 앱을 계속
- * 붙든다. 사람이 원하면 Reopen이 새로 연다. 묻지 못하면(옛 host) 자리표시는 앱을 여는 길만 준다.
+ * A held card gains "Reopen"; a discarded one loses it. Among instances left open that this UI is not
+ * drawing, it closes them — a UI that reopened does not know that frame (it has no input or result to
+ * send), and leaving it open lets that instance keep holding onto the app. If the person wants it
+ * back, "Reopen" opens a fresh one. If it could not even ask (an old host), the placeholder only
+ * offers the path to open the app.
  */
 async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void, sessionId: string): Promise<void> {
   const platform = get().platform
@@ -5338,16 +5655,16 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
     if (!k.instanceId || releasedOrphans.has(k.instanceId)) continue
     const cur = get().inlineViews[sessionId]?.[k.callId]
     if (cur && cur.state !== 'parked' && cur.instanceId === k.instanceId) continue
-    // 기록을 두 번 읽는 사이(앞의 닫기가 host에 닿기 전) 같은 인스턴스를 두 번 닫지 않는다 — 인스턴스 id는 다시 쓰이지 않는다
+    // Between two reads of history (before an earlier close has reached the host), the same instance is never closed twice — an instance id is never reused
     releasedOrphans.add(k.instanceId)
     void platform.apps.closeView(k.instanceId).catch(() => {})
   }
 }
 
-/** 다시 연 UI가 닫은, 열린 채 남았던 인스턴스 (syncInlineViews) */
+/** An instance left open that a reopened UI has closed (`syncInlineViews`) */
 const releasedOrphans = new Set<string>()
 
-/** 메시지 복원 (재시작·세션 전환 시) */
+/** Message restoration (on restart, or switching sessions) */
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of msgs) {
@@ -5365,15 +5682,15 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
         text: String(p?.text ?? ''),
         ...(p?.from ? { from: p.from } : {}),
         ...(p?.fromApp ? { fromApp: p.fromApp } : {}),
-        // 첨부 복원 — 이미지 바이트(data)는 host가 loadMessages에서 파일을 읽어 실어 준다
+        // Attachment restoration — image bytes (`data`) come from the host reading the file inside `loadMessages`
         ...(p?.attachments?.length ? { attachments: p.attachments } : {}),
       })
     } else if (m.kind === 'text' || m.kind === 'reasoning') {
-      // 행 하나가 말 하나다 (#77) — 이웃한 행은 서로 다른 답이라 붙이지 않는다(라이브의 `continues`와 같은 규칙)
+      // One row is one message (#77) — neighboring rows are different replies and are never merged (the same rule as live's `continues`)
       const e = m.payload as { text?: string }
       items.push({ kind: m.kind === 'text' ? 'assistant' : 'reasoning', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
-      // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
+      // The stored payload is the event itself — live and restored paths must never produce different wording
       const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' }>
       const text =
         e.type === 'handoff' ? handoffText(e)
@@ -5394,24 +5711,25 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
         })
     } else if (m.kind === 'tool_result') {
       /*
-       * 복원된 도구 카드도 **출력을 들고 온다** (2026-09-12, 데모 씬에서 드러남).
+       * A restored tool card also **carries its output** (2026-09-12, surfaced in a demo scene).
        *
-       * host는 tool_call과 tool_result를 각각 한 행으로 남기는데 여기엔 tool_call 분기만
-       * 있었다. 그래서 세션을 다시 열면 카드는 제목만 남고 출력이 통째로 사라졌다 —
-       * 라이브로 보고 있던 사람에게만 보이는 화면이었던 셈이다. 붙이는 규칙은 라이브
-       * (appendChat)와 같다: **제 호출의 줄**(ownerOf, #98) — callId가 없는 옛 모양끼리는
-       * 아직 결과가 없는 가장 오래된 줄이다.
+       * The host keeps `tool_call` and `tool_result` as separate rows, but only the `tool_call` branch
+       * existed here. So reopening a session left the card with only its title, its output gone
+       * completely — a screen that had only ever been visible to whoever watched it live. The
+       * attachment rule is the same as live's (`appendChat`): **its own call's row** (`ownerOf`, #98)
+       * — among old-shaped rows with no `callId`, the longest-open row with no result yet.
        *
-       * 짝을 못 찾으면(페이지 경계로 tool_call이 이 묶음 밖에 있을 때) 조용히 버린다 —
-       * 주인 없는 출력을 대화에 새 줄로 세우면 없던 말이 생긴다. 남의 열린 카드에 붙여도
-       * 없던 말이 생긴다: 자리 규칙이 그 자리에 있던 백그라운드 에이전트 카드를 집었다.
+       * If no match is found (a page boundary put its `tool_call` outside this batch), it is silently
+       * dropped — attaching an ownerless output to the conversation as a new row would invent a
+       * message that never existed. Attaching it to someone else's open card would also invent one:
+       * the positional rule would grab whatever background agent card happened to occupy that spot.
        */
       const e = m.payload as { callId?: string; summary?: string; ok?: boolean }
       const i = ownerOf(items, e.callId ?? '', 'oldest')
       const it = items[i]
       if (it?.kind === 'tool') items[i] = { ...it, result: e.summary ?? '', ok: e.ok }
     } else if (m.kind === 'image') {
-      // 이미지는 영속된다 (#40 2차) — host가 파일에서 바이트를 다시 실어 보낸다
+      // An image is persisted (#40, second pass) — the host resends the bytes by reading the file again
       const e = m.payload as { mime?: string; data?: string; path?: string; note?: string }
       items.push({
         kind: 'image',

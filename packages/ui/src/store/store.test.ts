@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, type NotifyPolicy } from '@cc/core'
-// eslint-disable-next-line no-restricted-imports -- 런타임 ui는 ports만 알지만, 테스트는 즉석 모킹 대신 MockPlatform을 쓰는 것이 계약이다 (platform/src/mock/index.ts 머리말)
+// eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import {
   composerTarget,
@@ -18,13 +18,15 @@ import {
 } from './store.js'
 
 /**
- * 스토어 회귀 테스트 — 포트는 MockPlatform으로 (즉석 모킹 금지, 계약이 흩어진다).
- * pendingEvents 보관함은 모듈 상태라 테스트 사이에 못 비운다 — 세션 id를 테스트마다 다르게 쓴다.
+ * Store regression tests — ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls
+ * apart). The `pendingEvents` holding pen is module state, so it cannot be cleared between tests —
+ * each test uses a different session id instead.
  */
 
 /**
- * 전임자가 노트를 **답으로** 쓴 척한다 (#142) — 파일은 host(목)가 데이터 폴더의 노트 자리에 놓는다.
- * 돌려주는 것은 그 자리다. 경로는 넘기는 세션의 id로 갈린다 (#104).
+ * Pretends the predecessor wrote its note **as a reply** (#142) — the host (mocked) places the file at
+ * the note's spot in the data folder. What is returned is that location. The path is keyed to the
+ * departing session's id (#104).
  */
 function mockNote(mock: MockPlatform, sessionId: string, text: string): string {
   mock.emit({ type: 'message_delta', sessionId, role: 'assistant', text } as NormalizedEvent)
@@ -34,8 +36,8 @@ const notePathOf = (mock: MockPlatform, sessionId: string) =>
   `/mock-data/handoff/${mock.sessions.get(sessionId)!.projectId}/${sessionId}.md`
 
 /**
- * #142 이전의 인수인계가 사용자 저장소에 남긴 노트 — 옛 후임 세션이 아직 이 경로를 들고 있다.
- * 앱은 이것을 읽지도 덮지도 치우지도 않는다.
+ * A note a pre-#142 handoff left in the user's repository — an old successor session still holds this
+ * path. The app never reads it, overwrites it, or clears it away.
  */
 function oldRepoNote(mock: MockPlatform, sessionId: string): string {
   const path = `.centralu/handoff/${sessionId}.md`
@@ -43,7 +45,7 @@ function oldRepoNote(mock: MockPlatform, sessionId: string): string {
   return path
 }
 
-/** 사용자 저장소에 인수인계 파일이 새로 놓이거나 치워진 흔적 (#142) — 옛 노트 말고는 없어야 한다 */
+/** Traces of a handoff file being newly placed or cleared from the user's repository (#142) — there must be nothing but the old note */
 const repoHandoffTraces = (mock: MockPlatform, old: string) => [
   ...Object.keys(mock.fsState.files).filter((p) => p.includes('handoff') && p !== old),
   ...(mock.fsState.files[old] === '옛 자리의 노트' ? [] : [`${old} changed`]),
@@ -63,13 +65,14 @@ function sessionInfo(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
 const delta = (sessionId: string, text: string) =>
   ({ sessionId, type: 'message_delta', role: 'assistant', text }) as NormalizedEvent
 
-/** 대화 한 줄을 사람이 읽는 글로 — 도구는 제목, 이미지는 종류 */
+/** Turns one conversation row into human-readable text — a tool's title, an image's kind */
 const line = (i: ChatItem): string =>
   i.kind === 'tool' ? i.title : i.kind === 'image' ? `image:${i.mime}` : i.kind === 'approval' ? i.summary : i.text
 
 /**
- * 사람이 할 수 있는 만큼 거슬러 읽는다 — 기록이 선 뒤 '이전 대화'를 더 없을 때까지 (#79).
- * 커서가 틀리면 여기서 드러난다: 가운데가 빠지거나(커서가 너무 낮다) 같은 줄이 두 번 붙는다(너무 높다).
+ * Reads back as far as a person could — once history stands, keeps pressing "earlier conversation"
+ * until there is no more (#79). A wrong cursor shows up here: a gap in the middle (the cursor is too
+ * low) or the same row appended twice (too high).
  */
 async function readAll(id: string): Promise<string[]> {
   await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
@@ -113,8 +116,8 @@ beforeEach(() => {
   })
 })
 
-describe('프로젝트 고르기', () => {
-  it('같은 프로젝트의 세션을 보다가 그 프로젝트를 고르면 세션을 놓고 프로젝트 화면으로 간다', () => {
+describe('picking a project', () => {
+  it('picking a project while viewing one of its sessions releases the session and goes to the project screen', () => {
     useStore.setState({
       projects: { p1: { id: 'p1', path: '/tmp/p1', name: 'p1' } as never, p2: { id: 'p2', path: '/tmp/p2', name: 'p2' } as never },
       sessions: { 'pf-s1': { ...sessionInfo('pf-s1') } as never },
@@ -126,7 +129,7 @@ describe('프로젝트 고르기', () => {
     expect(useStore.getState()).toMatchObject({ focusedProjectId: 'p1', focusedSessionId: null, view: 'focus' })
   })
 
-  it('그리드에서 고른 칸의 프로젝트를 골라도 프로젝트 화면이 뜬다', () => {
+  it('picking the project of a panel chosen from the grid also brings up the project screen', () => {
     useStore.setState({
       projects: { p1: { id: 'p1', path: '/tmp/p1', name: 'p1' } as never },
       sessions: { 'pf-s2': { ...sessionInfo('pf-s2') } as never },
@@ -140,15 +143,16 @@ describe('프로젝트 고르기', () => {
 })
 
 /*
- * 사이드바 접기 (#205). 접힘은 프로젝트마다 기억되고 재시작을 넘긴다 — 작업 공간 스냅샷에 실린다.
- * 고른 세션은 보여야 하므로 인박스·팔레트·알림·새 세션은 그 프로젝트를 펴고, 편 것도 기억한다.
- * 펴지 않는 문은 둘: 스냅샷 되살리기와 그리드 칸 누르기.
+ * Sidebar folding (#205). A fold is remembered per project and survives a restart — carried in the
+ * workspace snapshot. Because a picked session must be shown, the inbox, palette, notification card
+ * and new-session all unfold that project, and what gets unfolded is remembered too. Exactly two
+ * doors never unfold: restoring a snapshot, and clicking a grid panel.
  */
-describe('사이드바 접기 (#205)', () => {
+describe('sidebar folding (#205)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
   const folds = (mock: MockPlatform) => (mock.workspaceSnapshot as { foldedProjects?: string[] } | null)?.foldedProjects
 
-  it('접힘은 스냅샷에 실리고, 다시 켜도 그대로다', async () => {
+  it('a fold is carried in the snapshot and survives a restart', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-a')
     const b = await mock.projects.add('/tmp/fold-b')
@@ -162,13 +166,13 @@ describe('사이드바 접기 (#205)', () => {
     await tick()
     expect(folds(mock)).toEqual([b.id])
 
-    // 앱을 다시 켠 셈 — 기본값(아무것도 안 접힘)으로 돌아간 스토어에 같은 스냅샷을 물린다
+    // Simulates reopening the app — feeds the same snapshot to a store reset back to the default (nothing folded)
     useStore.setState({ foldedProjects: [] })
     await useStore.getState().attach(mock)
     expect(useStore.getState().foldedProjects).toEqual([b.id])
   })
 
-  it('되살린 세션의 프로젝트가 접혀 있어도 펴지 않고, 되살리는 도중의 저장이 접힘을 지우지 않는다', async () => {
+  it('a revived session leaves its folded project folded, and a save mid-revival does not erase the fold', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-restore')
     mock.sessions.set('fold-r1', sessionInfo('fold-r1', { projectId: a.id }))
@@ -182,7 +186,7 @@ describe('사이드바 접기 (#205)', () => {
     expect(folds(mock)).toEqual([a.id])
   })
 
-  it('인박스·팔레트처럼 세션으로 가면 그 프로젝트를 펴고, 편 것을 기억한다', async () => {
+  it('going to a session, as the inbox or palette does, unfolds its project and remembers the unfold', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-go')
     const b = await mock.projects.add('/tmp/fold-stay')
@@ -194,12 +198,12 @@ describe('사이드바 접기 (#205)', () => {
     useStore.getState().focusSession('fold-g1', { preferGrid: true })
     await tick()
 
-    // 다른 프로젝트의 접힘은 건드리지 않는다
+    // Never touches another project's fold
     expect(useStore.getState().foldedProjects).toEqual([b.id])
     expect(folds(mock)).toEqual([b.id])
   })
 
-  it('그리드 칸을 눌러 고른 것(reveal: false)은 접힌 프로젝트를 펴지 않는다', async () => {
+  it('a pick made by clicking a grid panel (reveal: false) does not unfold a folded project', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-grid')
     mock.sessions.set('fold-q1', sessionInfo('fold-q1', { projectId: a.id }))
@@ -212,7 +216,7 @@ describe('사이드바 접기 (#205)', () => {
     expect(useStore.getState().foldedProjects).toEqual([a.id])
   })
 
-  it('접힌 프로젝트에 새 세션을 만들면 펴진다', async () => {
+  it('creating a new session in a folded project unfolds it', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/fold-new')
@@ -223,7 +227,7 @@ describe('사이드바 접기 (#205)', () => {
     expect(useStore.getState().foldedProjects).toEqual([])
   })
 
-  it('다른 프로젝트 모두 접기는 이 프로젝트만 펴 둔다', async () => {
+  it('folding every other project leaves only this one unfolded', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-o1')
     const b = await mock.projects.add('/tmp/fold-o2')
@@ -238,7 +242,7 @@ describe('사이드바 접기 (#205)', () => {
     expect([...(folds(mock) ?? [])].sort()).toEqual([a.id, c.id].sort())
   })
 
-  it('지운 프로젝트의 접힘은 남기지 않는다', async () => {
+  it('a deleted project leaves no fold behind', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-gone')
     await useStore.getState().attach(mock)
@@ -341,12 +345,12 @@ describe('project screen arrangement (#203)', () => {
   })
 })
 
-describe('세션 등록 전에 도착한 이벤트 (U2)', () => {
-  it('attach가 목록을 등록하면 보관해 둔 이벤트가 재생된다 — 앱을 켜기 전부터 돌던 세션', async () => {
+describe('events arriving before session registration (U2)', () => {
+  it('when attach registers the list, events held in the pen are replayed — a session that was already running before the app was opened', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u2-s1', sessionInfo('u2-s1'))
 
-    // 등록 전에 이벤트가 먼저 도착했다 (host에서 이미 돌던 세션의 스트리밍)
+    // The event arrived before registration (streaming from a session already running on the host)
     useStore.getState().dispatchEvent(delta('u2-s1', '먼저 온 출력'))
     expect(useStore.getState().chat['u2-s1']).toBeUndefined()
 
@@ -357,13 +361,13 @@ describe('세션 등록 전에 도착한 이벤트 (U2)', () => {
     expect(chat![0]).toMatchObject({ kind: 'assistant', text: '먼저 온 출력' })
   })
 
-  it('createSession 경로와 겹쳐도 이중 적용은 없다 (재생 전에 보관함에서 지운다)', async () => {
+  it('overlapping with the createSession path still applies it only once (cleared from the pen before replay)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u2-s2', sessionInfo('u2-s2'))
     useStore.getState().dispatchEvent(delta('u2-s2', 'once'))
 
     await useStore.getState().attach(mock)
-    // 다른 세션을 만들며 replayPendingEvents가 또 돈다 — 이미 재생된 것은 다시 오면 안 된다
+    // Creating another session runs replayPendingEvents again — an event already replayed must never come back
     const p = await useStore.getState().addProject('/tmp/u2')
     await useStore.getState().createSession(p.id)
 
@@ -371,23 +375,23 @@ describe('세션 등록 전에 도착한 이벤트 (U2)', () => {
   })
 })
 
-describe('resync_required 소비 (U3)', () => {
-  it('연결된 것으로 표시하고 전체 재동기화를 돌린다', async () => {
+describe('handling resync_required (U3)', () => {
+  it('marks the connection as connected and runs a full resync', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u3-s1', sessionInfo('u3-s1'))
     await useStore.getState().attach(mock)
 
-    // 끊긴 사이 host에 세션이 생겼고, 이벤트 재전송은 불가능하다고 통보됐다
+    // A session was created on the host while disconnected, and event replay was reported as impossible
     mock.sessions.set('u3-s2', sessionInfo('u3-s2', { name: '끊긴 사이 생김' }))
     mock.setConnectionState('resync_required')
 
-    // 라벨 로직은 connected가 아니면 전부 'Disconnected'로 그린다 — 그 값이 남으면 거짓말이다
+    // The label logic draws everything other than `connected` as 'Disconnected' — leaving this value set would be a lie
     expect(useStore.getState().connection).toBe('connected')
     await vi.waitFor(() => expect(useStore.getState().sessions['u3-s2']).toBeDefined())
     expect(useStore.getState().sessions['u3-s2']!.name).toBe('끊긴 사이 생김')
   })
 
-  it('재동기화는 보고 있던 대화를 저장소에서 다시 읽는다 (빈 구간의 이벤트는 다시 오지 않는다)', async () => {
+  it('a resync re-reads the conversation being viewed from the store (events from the gap never come again)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u3-s3', sessionInfo('u3-s3'))
     await useStore.getState().attach(mock)
@@ -399,10 +403,11 @@ describe('resync_required 소비 (U3)', () => {
   })
 
   /*
-   * #173: 재동기화가 포커스된 세션만 다시 읽던 동안, 다른 세션의 대화는 빈 구간을 품은 채 남았고 나중에 열어도 커서가
-   * 있어 다시 읽지 않았다 — 앱을 다시 켜기 전까지 채워지지 않았다.
+   * #173: while a resync re-read only the focused session, another session's conversation was left
+   * holding a gap, and opening it later did not re-read it either, since a cursor already existed —
+   * the gap stayed unfilled until the app was reopened.
    */
-  it('재동기화는 대화를 든 다른 세션의 빈 구간도 저장소에서 메운다', async () => {
+  it('a resync also fills the gap from the store for other sessions holding a conversation', async () => {
     const mock = new MockPlatform()
     const rows = (id: string, from: number, to: number) =>
       Array.from({ length: to - from + 1 }, (_, i) => ({
@@ -418,7 +423,7 @@ describe('resync_required 소비 (U3)', () => {
     await vi.waitFor(() => expect(useStore.getState().history['u3-f']).toBeDefined())
     expect(useStore.getState().chat['u3-g']!.map(line)).toEqual(['L1', 'L2', 'L3', 'L4', 'L5'])
 
-    // 끊긴 사이 g에 세 줄이 저장됐고, host는 그 이벤트를 재생해 줄 수 없다
+    // Three more lines were stored for `g` while disconnected, and the host cannot replay those events
     mock.messages.get('u3-g')!.push(...rows('u3-g', 6, 8))
     mock.setConnectionState('resync_required')
     await vi.waitFor(() =>
@@ -428,19 +433,20 @@ describe('resync_required 소비 (U3)', () => {
 })
 
 /**
- * 위로 거슬러 읽기 (도그푸딩 2026-09-09: "위에 대화가 안 불러와져").
+ * Reading back further (dogfooding, 2026-09-09: "older conversation does not load above").
  *
- * 화면이 든 대화와 기록 커서는 **함께 움직여야** 한다. 어긋나면 '이전 대화'가 화면과
- * 안 이어지는 구간을 앞에 붙이거나, 아예 불러올 길이 사라진다.
+ * The conversation the screen holds and the history cursor **must move together.** If they fall out
+ * of sync, "earlier conversation" either prepends a range that does not connect to the screen, or the
+ * way to load it disappears entirely.
  */
-describe('기록 커서', () => {
+describe('history cursor', () => {
   const many = (id: string, n: number) =>
     Array.from({ length: n }, (_, i) => ({
       sessionId: id, seq: i + 1, role: 'user' as const, kind: 'text' as const,
       payload: { text: `줄 ${i + 1}` }, ts: i + 1,
     }))
 
-  it('세션을 떠나며 창을 줄이면 커서도 잘린 자리로 옮긴다', async () => {
+  it('leaving a session while shrinking the window also moves the cursor to the trim point', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('h1', sessionInfo('h1'))
     mock.sessions.set('h2', sessionInfo('h2'))
@@ -455,22 +461,23 @@ describe('기록 커서', () => {
     const chat = useStore.getState().chat['h1']!
     const info = useStore.getState().history['h1']!
     expect(chat.length).toBe(50)
-    // 커서가 화면 맨 위와 같은 자리다 — 그래야 다음 페이지가 이어 붙는다
+    // The cursor is at the same spot as the top of the screen — that is what makes the next page line up
     expect(info.oldestSeq).toBe(chat[0]!.seq)
     expect(info.more).toBe(true)
   })
 
   /*
-   * 예전 단언은 `oldestSeq === chat[0].seq`였다. 결함이 있는 채로 통과했다: 그 seq가 렌더 키라서
-   * 커서가 화면과 "같은 자리"여도 `loadOlder`는 엉뚱한 곳부터 읽었다 (#79). 그래서 결과를 본다.
+   * The old assertion was `oldestSeq === chat[0].seq`. It passed while a bug remained: since that
+   * `seq` was the render key, `loadOlder` still started reading from the wrong place (#79) even
+   * though the cursor was at "the same spot" as the screen. So the actual outcome is checked instead.
    */
-  it('이벤트로만 생긴 대화도 끝까지 거슬러 읽으면 저장된 줄이 빠짐없이 한 번씩 있다', async () => {
+  it('a conversation built only from events still has every stored row exactly once when read back to the end', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('h3', sessionInfo('h3'))
     mock.messages.set('h3', many('h3', 120))
     await useStore.getState().attach(mock)
 
-    // 화면을 열기 전에 이벤트가 먼저 왔다 — chat만 생기고 커서는 없다
+    // The event arrived before the screen was opened — only `chat` exists, with no cursor
     mock.emit({ sessionId: 'h3', type: 'message_delta', role: 'assistant', text: '먼저 온 말' } as never)
     await vi.waitFor(() => expect(useStore.getState().chat['h3']).toBeDefined())
     expect(useStore.getState().history['h3']).toBeUndefined()
@@ -482,14 +489,17 @@ describe('기록 커서', () => {
 })
 
 /**
- * 기록 커서는 저장 번호로만 선다 (#79).
+ * The history cursor is set only by the stored number (#79).
  *
- * 실시간 줄의 `seq`는 전 세션 공용 렌더 키고, 기록에서 읽은 줄의 `seq`는 host가 세션마다 매긴 번호다.
- * 이벤트가 화면보다 먼저 온 세션에서 커서가 렌더 키를 받으면: 키가 저장 번호보다 작으면 가운데가 빠지고(A),
- * 크면 최신 페이지가 한 번 더 붙는다(A2). 기록을 읽는 사이 이벤트가 오면 받아 온 페이지를 버렸다(B).
- * 실측(2026-09-25): 앱이 부탁한 에이전트의 세션을 처음 열자 프롬프트와 Read·Write 카드가 두 번 보였다.
+ * A live row's `seq` is the render key shared across every session; the `seq` on a row read from
+ * history is the number the host assigned within that session. In a session where an event arrives
+ * before the screen, if the cursor took the render key instead: a key lower than the stored number
+ * leaves a gap in the middle (A), and a key higher appends the newest page a second time (A2). An
+ * event arriving mid-read used to discard the page just fetched (B). Measured (2026-09-25): opening
+ * the session for an app's requested agent for the first time showed the prompt and the Read/Write
+ * cards twice.
  */
-describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
+describe('the cursor for a session where an event arrives before history (#79)', () => {
   const rows = (id: string, n: number, from = 1) =>
     Array.from({ length: n }, (_, i) => ({
       sessionId: id, seq: from + i, role: 'user' as const, kind: 'text' as const,
@@ -497,7 +507,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     }))
   const L = (n: number) => Array.from({ length: n }, (_, i) => `L${i + 1}`)
 
-  /** 다른 세션의 큰 기록을 먼저 읽는다 — 렌더 키가 저장 번호보다 훨씬 커진다 (실측의 조건) */
+  /** Reads another session's large history first — makes the render key far larger than the stored number (the measured condition) */
   async function openBigFirst(mock: MockPlatform, id: string) {
     mock.sessions.set(id, sessionInfo(id))
     mock.messages.set(id, rows(id, 1000))
@@ -506,31 +516,31 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
   }
 
   it.each([
-    ['첫 페이지', 50],
-    ['더 오래된 페이지', 200],
-  ])('A: 렌더 키가 저장 번호보다 작아도 가운데가 빠지지 않는다 — 키가 %s의 번호와 겹쳐도 보던 줄의 키는 그대로다', async (_where, over) => {
+    ['the first page', 50],
+    ['an older page', 200],
+  ])('A: no gap in the middle even when the render key is lower than the stored number — the key overlapping %s\'s number still leaves the viewed row\'s key untouched', async (_where, over) => {
     const mock = new MockPlatform()
     mock.sessions.set('a79-probe', sessionInfo('a79-probe'))
     mock.sessions.set('a79', sessionInfo('a79'))
     await useStore.getState().attach(mock)
-    // 다음 렌더 키가 몇인지 재고, 그보다 200줄 긴 세션을 만든다 — 키가 저장 번호의 한가운데에 떨어진다
+    // Measures the next render key and creates a session 200 lines longer than that — the key lands inside the middle of the stored numbers
     mock.emit({ sessionId: 'a79-probe', type: 'tool_call', callId: 'p', summary: { tool: 'Read', title: 'probe', readOnly: true } } as never)
     const n = useStore.getState().chat['a79-probe']![0]!.seq + over
     mock.messages.set('a79', rows('a79', n))
 
     mock.emit(delta('a79', 'LIVE-D'))
     const key = useStore.getState().chat['a79']![0]!.seq
-    expect(key).toBeLessThan(n) // 조건이 섰다: 키가 저장 번호 안쪽이다
+    expect(key).toBeLessThan(n) // Condition confirmed: the key is inside the stored range
     useStore.getState().focusSession('a79')
 
     expect(await readAll('a79')).toEqual([...L(n), 'LIVE-D'])
     const chat = useStore.getState().chat['a79']!
-    // 합치며 화면의 줄은 다시 그려지지 않는다(키가 같다) — 같은 번호의 저장된 줄이 비켜 간다
+    // The screen's row is not redrawn during the merge (same key) — a stored row with the same number steps around it
     expect(chat.find((i) => line(i) === 'LIVE-D')!.seq).toBe(key)
     expect(new Set(chat.map((i) => i.seq)).size).toBe(chat.length)
   })
 
-  it('A2: 렌더 키가 저장 번호보다 커도 최신 페이지가 두 번 붙지 않는다', async () => {
+  it('A2: the newest page is not appended twice even when the render key is higher than the stored number', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('a2-79', sessionInfo('a2-79'))
     mock.messages.set('a2-79', rows('a2-79', 20))
@@ -544,13 +554,13 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(await readAll('a2-79')).toEqual([...L(20), 'LIVE-S'])
   })
 
-  it('B: 기록을 읽는 사이 도착한 말이 받아 온 페이지를 버리게 하지 않는다', async () => {
+  it('B: a message arriving mid-read never causes the fetched page to be discarded', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('b79', sessionInfo('b79'))
     mock.messages.set('b79', rows('b79', 250))
     await useStore.getState().attach(mock)
 
-    // host처럼: 요청을 받은 순간의 페이지를 읽고, 답은 그 뒤에 온 이벤트보다 늦게 도착한다
+    // Like the host: reads the page as of the moment the request was received, and the answer arrives later than an event that came in after it
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
     const real = mock.agents.loadMessages.bind(mock.agents)
@@ -567,12 +577,12 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(await readAll('b79')).toEqual([...L(250), 'LIVE'])
   })
 
-  it('앱이 부탁한 에이전트의 세션: 뒤에서 만들어져 일을 마친 뒤 처음 열어도 한 번씩만 보인다 (실측 재현)', async () => {
+  it("an app's requested agent's session: created in the background and opened for the first time only after it finished still shows everything exactly once (reproducing the measured incident)", async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     await openBigFirst(mock, 'app79-big')
 
-    // host가 뒤에서 세션을 만들고(D-1), 앱의 부탁이 첫 말로 들어가 에이전트가 읽고 쓰고 답한다
+    // The host creates the session in the background (D-1), the app's request enters as the first message, and the agent reads, writes and replies
     const info = sessionInfo('app79', { appId: 'notes' })
     mock.sessions.set('app79', info)
     mock.emit({ type: 'session_created', sessionId: 'app79', session: info } as never)
@@ -590,12 +600,12 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     useStore.getState().focusSession('app79')
 
     expect(await readAll('app79')).toEqual(['Make a note', 'Read note.md', 'Write note.md', 'Done.'])
-    // 보던 카드는 기록과 합쳐져도 같은 키다 — 다시 그려지지 않고, 읽던 자리(scrollAnchor)가 그 키로 남는다
+    // The card being viewed keeps the same key even after merging with history — it is not redrawn, and the read position (scrollAnchor) stays anchored to that key
     const write = useStore.getState().chat['app79']!.find((i) => line(i) === 'Write note.md')
     expect(write).toMatchObject({ seq: key, result: 'written', ok: true })
   })
 
-  it('첫 연결이 재생한 이벤트가 페이지와 겹쳐도 한 번씩, 제자리에 선다', async () => {
+  it('events replayed by the initial connection each appear exactly once, in their proper place, even overlapping the page', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('r79', sessionInfo('r79'))
     const approval = { type: 'approval_request', sessionId: 'r79', seq: 30, requestId: 'old', detail: { kind: 'command', command: 'old command' } }
@@ -607,9 +617,10 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     )
     mock.messages.set('r79', stored as never)
 
-    // 새로 붙은 UI에 host가 버퍼를 재생한다 — 세션을 등록하기 전이라 보관됐다가 attach에서 재생된다.
-    // 오래된 말(21), 페이지 안의 말들, 앞부분이 버퍼 밖으로 밀려난 마지막 답('150'만 남았다)
-    // 기록은 승인 줄을 그리지 않는다 — 페이지보다 오래된 승인은 제자리를 찾을 수 없으니 남지 않는다
+    // The host replays its buffer to a freshly attached UI — held before the session is registered,
+    // then replayed during attach. An old message (21), messages inside the page, and the last reply
+    // whose earlier part was pushed out of the buffer (only '150' remains)
+    // History never draws approval rows — an approval older than the page has nowhere to find its place, so it is left out
     const replay = [
       { type: 'user_message', sessionId: 'r79', seq: 21, text: 'L21' },
       approval,
@@ -627,7 +638,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(await readAll('r79')).toEqual(L(150).filter((t) => t !== 'L30' && t !== 'L31'))
   })
 
-  it('기록이 먼저 섰고 같은 줄의 이벤트가 뒤따라도 두 번 그리지 않는다', async () => {
+  it('history stands first, and an event for the same row that follows is never drawn twice', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('q79', sessionInfo('q79'))
     mock.messages.set('q79', [
@@ -639,7 +650,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     useStore.getState().focusSession('q79')
     await vi.waitFor(() => expect(useStore.getState().history['q79']).toBeDefined())
 
-    // 보관돼 있던 같은 줄의 이벤트가 페이지보다 늦게 재생됐다
+    // An event for the same row, held in the pen, was replayed later than the page
     for (const e of [
       { type: 'user_message', sessionId: 'q79', seq: 8, text: 'L8' },
       { type: 'tool_call', sessionId: 'q79', seq: 9, callId: 'c9', summary: { tool: 'Read', title: 'T9', readOnly: true } },
@@ -649,7 +660,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(useStore.getState().chat['q79']!.map(line)).toEqual([...L(8), 'T9', 'Earlier messages were compacted here'])
   })
 
-  it('흐르는 중인 말은 기록과 합쳐도 잘리지 않는다 — 화면 쪽이 저장된 본문보다 길다', async () => {
+  it('a streaming message is never truncated by merging with history — the screen version is longer than the stored text', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('s79', sessionInfo('s79'))
     mock.messages.set('s79', rows('s79', 10))
@@ -665,7 +676,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
       return page
     }
     useStore.getState().focusSession('s79')
-    // 페이지를 읽은 뒤에 도착한 조각 — 저장소의 그 말은 아직 'Hel'이다
+    // A chunk that arrived after the page was read — the store's own version of that message is still 'Hel'
     mock.emit(delta('s79', 'lo'))
     release()
     mock.agents.loadMessages = real
@@ -673,7 +684,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(await readAll('s79')).toEqual([...L(10), 'Hello'])
   })
 
-  it('번호 없는 꼬리(보낸 말·이미지·오류)는 기록에 이미 있으면 한 번만, 승인 줄은 제자리에 남는다', async () => {
+  it('an unnumbered tail (a sent message, an image, an error) already in history shows only once, and an approval row stays in its own place', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('e79', sessionInfo('e79'))
     mock.sessions.set('e79-other', sessionInfo('e79-other'))
@@ -681,8 +692,9 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     await useStore.getState().attach(mock)
     useStore.getState().focusSession('e79-other')
 
-    // 이 세션을 열기 전에: 승인을 거친 명령, 사람이 보낸 말(목은 확인을 보내지 않는다 — 번호가 없다),
-    // 에이전트의 이미지(이벤트에는 번호가 없다), 실패한 턴(스키마가 번호를 지운다, #161)
+    // Before this session is opened: a command that went through approval, a human message (a mock
+    // never sends the confirmation — so it has no number), an agent's image (its event carries no
+    // number), a failed turn (the schema strips the number, #161)
     mock.emit({ type: 'approval_request', sessionId: 'e79', requestId: 'q1', detail: { kind: 'command', command: 'rm -rf build' } } as never)
     mock.emit({ type: 'approval_resolved', sessionId: 'e79', requestId: 'q1', decision: 'allow' } as never)
     await useStore.getState().send('e79', 'Hi')
@@ -699,7 +711,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     ])
   })
 
-  it('불러오기로 복원한 세션도 끝까지 거슬러 읽으면 한 번씩이다 — 화면에 있는 번호는 다시 붙이지 않는다', async () => {
+  it('a session restored by importing also has each row exactly once when read back to the end — a number already on screen is never appended a second time', async () => {
     const mock = new MockPlatform()
     mock.externalHistory.set('ext-79', Array.from({ length: 150 }, (_, i) => ({ role: 'user' as const, text: `L${i + 1}` })))
     await useStore.getState().attach(mock)
@@ -709,13 +721,13 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(await readAll(info.id)).toEqual(L(150))
   })
 
-  it('번호 없는 빈 조각으로 시작한 말도 뒤따른 조각의 저장 번호를 받는다 — 합칠 때 두 번 서지 않는다', async () => {
+  it('a message that started with an unstored, unnumbered empty chunk still receives the stored number of the chunk that follows — it is never duplicated when merging', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('d79', sessionInfo('d79'))
     mock.messages.set('d79', rows('d79', 3))
     await useStore.getState().attach(mock)
 
-    // host는 빈 조각을 저장하지 않고 번호 없이 보낸다(codex 끝의 ""). 그 뒤 조각이 4번 줄을 시작한다
+    // The host never stores an empty chunk and sends it with no number (codex's trailing ""). The chunk that follows starts row 4
     useStore.getState().dispatchEvent(delta('d79', ''))
     mock.emit(delta('d79', 'Answer'))
     useStore.getState().focusSession('d79')
@@ -723,7 +735,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     expect(await readAll('d79')).toEqual([...L(3), 'Answer'])
   })
 
-  it('창을 자를 때 맨 위가 실시간 줄이어도 커서는 저장 번호다', async () => {
+  it('when trimming the window, the cursor is still the stored number even if the top row is a live one', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('t79', sessionInfo('t79'))
     mock.sessions.set('t79-other', sessionInfo('t79-other'))
@@ -733,7 +745,7 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
     useStore.getState().focusSession('t79')
     await vi.waitFor(() => expect(useStore.getState().history['t79']).toBeDefined())
 
-    // 보는 동안 도구 호출 60개가 이어진다 — 떠날 때 남는 50줄이 모두 실시간 줄이다
+    // 60 tool calls follow while it is being viewed — all 50 rows left when leaving are live rows
     for (let i = 121; i <= 180; i++) {
       mock.emit({ sessionId: 't79', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
     }
@@ -746,14 +758,14 @@ describe('기록보다 이벤트가 먼저 온 세션의 커서 (#79)', () => {
   })
 })
 
-describe('재연결 시 세션 목록 병합 (U4)', () => {
-  it('끊긴 사이 생기고·이름이 바뀌고·지워진 세션이 화면에 반영된다', async () => {
+describe('merging the session list on reconnect (U4)', () => {
+  it('a session created, renamed or deleted while disconnected is reflected on screen', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u4-s1', sessionInfo('u4-s1'))
     mock.sessions.set('u4-gone', sessionInfo('u4-gone'))
     await useStore.getState().attach(mock)
 
-    // 끊긴 사이: 하나는 지워지고, 하나는 이름이 바뀌고, 하나는 새로 생겼다
+    // While disconnected: one is deleted, one is renamed, one is newly created
     mock.sessions.delete('u4-gone')
     mock.sessions.get('u4-s1')!.name = '바뀐 이름'
     mock.sessions.set('u4-new', sessionInfo('u4-new'))
@@ -769,11 +781,11 @@ describe('재연결 시 세션 목록 병합 (U4)', () => {
     })
   })
 
-  it('로컬 파생 상태(preview 등)는 병합에서 살아남는다', async () => {
+  it('local derived state (like preview) survives the merge', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u4-s2', sessionInfo('u4-s2'))
     await useStore.getState().attach(mock)
-    // 이벤트로 만들어진 로컬 파생 상태 — host 목록에는 없는 값이다
+    // Local derived state created by an event — a value the host's list does not carry
     useStore.getState().dispatchEvent(delta('u4-s2', '진행 중이던 답'))
     expect(useStore.getState().sessions['u4-s2']!.preview).not.toBe('')
     const preview = useStore.getState().sessions['u4-s2']!.preview
@@ -781,13 +793,13 @@ describe('재연결 시 세션 목록 병합 (U4)', () => {
     mock.sessions.get('u4-s2')!.name = '병합 완료 표식'
     mock.setConnectionState('disconnected')
     mock.setConnectionState('connected')
-    // 이름 갱신이 곧 '병합이 실제로 돌았다'는 증거다 — 그 위에서 preview 보존을 확인한다
+    // The name update is the proof that "the merge actually ran" — preview preservation is checked on top of that
     await vi.waitFor(() => expect(useStore.getState().sessions['u4-s2']!.name).toBe('병합 완료 표식'))
 
     expect(useStore.getState().sessions['u4-s2']!.preview).toBe(preview)
   })
 
-  it('지워진 세션이 포커스 중이었다면 포커스도 걷는다', async () => {
+  it('a deleted session that was focused also has its focus released', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u4-s3', sessionInfo('u4-s3'))
     await useStore.getState().attach(mock)
@@ -803,17 +815,18 @@ describe('재연결 시 세션 목록 병합 (U4)', () => {
 })
 
 /*
- * 살아-있는-동안 사실(승인·질문·활동·한도·사용량)은 host 메모리가 원본이다.
- * 재연결·재시작 시 목록에 실려 온 값을 이어받지 않으면 state=waiting_approval인데
- * 카드 payload가 없어 승인이 화면에 영영 안 나타난다 (재시작 후 실측).
+ * The while-alive facts (approval, questions, activity, limit, usage) have the host's memory as their
+ * source of truth. If the value carried in the list on reconnect or restart is not inherited, a
+ * session can sit at state=waiting_approval with no card payload, and the approval never appears on
+ * screen (measured after a restart).
  */
-describe('살아-있는-동안 사실 이어받기', () => {
+describe('inheriting while-alive facts', () => {
   const approval = {
     requestId: 'req-9',
     detail: { kind: 'command' as const, command: 'rm -rf node_modules', cwd: '/tmp' },
   }
 
-  it('attach가 host의 pendingApproval을 세션 요약으로 옮긴다', async () => {
+  it('attach carries the host\'s pendingApproval into the session summary', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('lf-s1', sessionInfo('lf-s1', { state: 'waiting_approval', pendingApproval: approval }))
 
@@ -824,13 +837,13 @@ describe('살아-있는-동안 사실 이어받기', () => {
     expect(s.pendingApproval).toEqual(approval)
   })
 
-  it('재연결 병합은 host의 승인 상태를 원본으로 삼는다 — 끊긴 사이 풀렸으면 걷는다', async () => {
+  it('the reconnect merge treats the host\'s approval state as the source of truth — a resolved one is cleared', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('lf-s2', sessionInfo('lf-s2', { state: 'waiting_approval', pendingApproval: approval }))
     await useStore.getState().attach(mock)
     expect(useStore.getState().sessions['lf-s2']!.pendingApproval).toEqual(approval)
 
-    // 끊긴 사이 다른 창에서 승인이 풀렸다 — host 목록에는 더 이상 없다
+    // The approval was resolved from another window while disconnected — it is no longer in the host's list
     const resolved = { ...mock.sessions.get('lf-s2')!, state: 'idle' as const, pendingApproval: null }
     mock.sessions.set('lf-s2', resolved)
     mock.setConnectionState('disconnected')
@@ -850,7 +863,7 @@ describe('살아-있는-동안 사실 이어받기', () => {
  * A stored value must come from the session, never from what the startup path bothered to
  * name, so this checks all of them at once.
  */
-describe('저장된 세션 설정 이어받기 (이슈 #37)', () => {
+describe('inheriting stored session settings (issue #37)', () => {
   const stored = {
     model: 'claude-fable-5[1m]',
     effort: 'high',
@@ -858,7 +871,7 @@ describe('저장된 세션 설정 이어받기 (이슈 #37)', () => {
     worktree: { path: '/tmp/wt/feature', branch: 'feature' },
   }
 
-  it('앱을 다시 켜면 host가 준 모델·강도·권한·워크트리가 그대로 남는다', async () => {
+  it('reopening the app leaves the model, effort, permissions and worktree the host gave untouched', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('ss-s1', sessionInfo('ss-s1', stored))
 
@@ -867,11 +880,11 @@ describe('저장된 세션 설정 이어받기 (이슈 #37)', () => {
     expect(useStore.getState().sessions['ss-s1']).toMatchObject(stored)
   })
 
-  it('재연결 병합도 같은 값을 준다 — 두 경로가 같은 요약을 만든다', async () => {
+  it('the reconnect merge yields the same values — both paths build the same summary', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
-    // 끊긴 사이에 다른 창에서 만들어진 세션이다 — 병합이 처음 등록한다
+    // A session created in another window while disconnected — the merge registers it for the first time
     mock.sessions.set('ss-s2', sessionInfo('ss-s2', stored))
     mock.setConnectionState('disconnected')
     mock.setConnectionState('connected')
@@ -891,8 +904,8 @@ describe('저장된 세션 설정 이어받기 (이슈 #37)', () => {
  * It is deliberately not `waitingSince`: that one is when a session started waiting for a
  * *human*, and the reducer nulls it the moment a session goes back to working.
  */
-describe('턴이 시작된 시각 (이슈 #23)', () => {
-  it('스트리밍이 이어지는 동안 시각은 움직이지 않는다 — 경과는 여기서 파생된다', async () => {
+describe('the instant a turn started (issue #23)', () => {
+  it('the instant does not move while streaming continues — elapsed time is derived from it', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('ws-s1', sessionInfo('ws-s1'))
     await useStore.getState().attach(mock)
@@ -906,7 +919,7 @@ describe('턴이 시작된 시각 (이슈 #23)', () => {
     expect(useStore.getState().workingSince['ws-s1']).toBe(started)
   })
 
-  it('턴이 끝나면 시각도 놓는다 — 다음 턴이 남의 시작을 물려받으면 안 된다', async () => {
+  it('the instant is released once a turn ends — the next turn must never inherit someone else\'s start', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('ws-s2', sessionInfo('ws-s2'))
     await useStore.getState().attach(mock)
@@ -919,26 +932,27 @@ describe('턴이 시작된 시각 (이슈 #23)', () => {
     expect(useStore.getState().workingSince['ws-s2']).toBeUndefined()
   })
 
-  it('앱을 켜기 전부터 돌던 세션에도 시각이 찍힌다 — 없으면 화면이 셀 근거가 없다', async () => {
+  it('a session that was already running before the app was opened also gets an instant stamped — with none, the screen has nothing to count from', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('ws-s3', sessionInfo('ws-s3', { state: 'working' }))
 
     await useStore.getState().attach(mock)
 
-    // 턴이 진짜 시작된 시각은 host가 안 알려준다 — 우리가 알게 된 순간이 가장 이른 정직한 답이다
+    // The host never tells us when the turn really started — the moment we found out is the earliest honest answer
     expect(useStore.getState().workingSince['ws-s3']).toBeDefined()
   })
 })
 
-describe('첫 프롬프트 이중 그리기 방지', () => {
-  it('host의 user_message 확인이 낙관적 첫 프롬프트를 확정한다 — 두 번 그리지 않는다', async () => {
+describe('preventing the opening prompt from being drawn twice', () => {
+  it('the host\'s user_message confirmation settles the optimistic opening prompt — it is never drawn twice', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/ip')
     const info = await useStore.getState().createSession(p.id, { initialPrompt: '첫 지시' })
 
-    // host도 첫 프롬프트를 저장하고 알린다 (manager.createSession의 user_message) — 목도 응답 전에 알린다(#172).
-    // 같은 확인이 한 번 더 와도(재연결의 재생) 두 번 그리지 않는다
+    // The host also stores and announces the opening prompt (the `user_message` in manager.createSession)
+    // — the mock also announces it before the response (#172). Even if the same confirmation arrives a
+    // second time (reconnect replay), it is never drawn twice
     useStore
       .getState()
       .dispatchEvent({ type: 'user_message', sessionId: info.id, seq: 1, text: '첫 지시' } as NormalizedEvent)
@@ -949,8 +963,8 @@ describe('첫 프롬프트 이중 그리기 방지', () => {
   })
 })
 
-describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
-  it('알림 정책을 바꾼 뒤 레이아웃을 저장해도 정책이 지워지지 않는다', async () => {
+describe('the workspace snapshot has a single writer (U7)', () => {
+  it('saving the layout after changing the notify policy does not erase the policy', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
@@ -959,8 +973,9 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect((mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy } | null)?.notifyPolicy).toEqual(policy)
 
-    // 예전에는 이 저장이 notifyPolicy 없는 부분 스냅샷으로 통째로 덮었다 → 재시작 시 정책 초기화
-    // (사건 당시의 예시는 treeHeight였다 — 그 설정은 스트립과 함께 떠났고, 규칙은 남는다)
+    // This save used to overwrite the whole thing with a partial snapshot missing `notifyPolicy` →
+    // resetting the policy on restart (the example at the time of the incident was `treeHeight` — that
+    // setting left with the strip, but the rule remains)
     useStore.getState().setShowIgnored(false)
     await new Promise((r) => setTimeout(r, 0))
     const snap = mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy; showIgnored?: boolean } | null
@@ -968,7 +983,7 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     expect(snap?.showIgnored).toBe(false)
   })
 
-  it('반대로 정책 저장이 레이아웃(showIgnored)을 지우지도 않는다', async () => {
+  it('conversely, saving the policy does not erase the layout (showIgnored) either', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
@@ -981,10 +996,11 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
   })
 
   /*
-   * 글자 크기(5단계)도 보는 방식이다 — 스냅샷에 실리고, 재시작을 넘기고,
-   * 다섯 단계 밖의 값(망가진 스냅샷·미래 버전)은 가장 가까운 단계로 접힌다.
+   * Text size (five steps) is also a way of viewing — carried in the snapshot, surviving a restart,
+   * and any value outside the five steps (a broken snapshot, a future version) is clamped to the
+   * nearest step.
    */
-  it('글자 크기 단계가 저장되고, 범위 밖 값은 단계로 접힌다', async () => {
+  it('the text size step is saved, and a value outside the range is clamped to a step', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
@@ -998,7 +1014,7 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     expect(useStore.getState().textScale).toBe(0)
   })
 
-  it('저장된 글자 크기가 재시작(재연결) 후 되살아난다', async () => {
+  it('the stored text size is restored after a restart (reconnect)', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { textScale: 3 }
     await useStore.getState().attach(mock)
@@ -1006,14 +1022,15 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
   })
 
   /*
-   * "무시된 파일을 볼 수 없다"의 실제 내용은 "볼 수는 있는데 매번 잊는다"였다 (이슈 #17).
-   * 스위치가 부품에 있어서 깃 탭으로 나갔다 오면 꺼져 있었다.
+   * What "cannot see ignored files" actually meant was "can see them, but it forgets every time"
+   * (issue #17). The switch lived on the component, so leaving the git tab and coming back turned it
+   * off again.
    *
    * The direction that matters is now *off*, since on is the default (#17 again). Turning
    * it off is the only version of this choice a person can make deliberately, so it is the
    * one that has to survive a relaunch — and it has to survive the default too.
    */
-  it('무시된 파일 숨기기는 다음 실행에도 남는다 — 볼 방식은 사람의 것이다', async () => {
+  it('hiding ignored files survives the next run — a way of viewing belongs to the person', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('si-s1', sessionInfo('si-s1'))
     await useStore.getState().attach(mock)
@@ -1023,7 +1040,7 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(false)
 
-    // 앱을 다시 켠 셈 — 기본값으로 돌아간 스토어에 같은 스냅샷을 물린다
+    // Simulates reopening the app — feeds the same snapshot to a store reset back to the default
     useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
 
@@ -1036,13 +1053,13 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
    * false` or `!!snap.showIgnored` instead and every older snapshot suddenly claims someone
    * turned this off, so the default could never move again. That is what this pins.
    */
-  it('스냅샷에 없던 설정은 기본값 그대로 둔다 — 안 고른 것과 끈 것은 다르다', async () => {
+  it('a setting absent from the snapshot is left at its default — never having chosen is different from having turned it off', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('si-s2', sessionInfo('si-s2'))
     // A snapshot from before this setting existed: it has layout, but no opinion on this
     mock.workspaceSnapshot = { focusedSessionId: 'si-s2', panelOpen: true, panelTab: 'git' }
 
-    // 앱을 막 켠 셈 — 기본값(켜짐)에서 시작한다
+    // Simulates just opening the app — starts from the default (on)
     useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
 
@@ -1051,11 +1068,12 @@ describe('워크스페이스 스냅샷 단일 작성자 (U7)', () => {
 })
 
 /*
- * 이름 바꾸기가 실패했는데 화면만 성공하는 일이 없어야 한다 (이슈 #5).
- * 이 저장소가 반복해서 데인 버그라, 실패는 반드시 사람 눈에 닿는 자리(토스트)로 나와야 한다.
+ * A rename must never fail while only the screen reports success (issue #5). This store has been
+ * burned by this class of bug more than once, so a failure must always surface where a person can see
+ * it (a toast).
  */
-describe('세션 이름 바꾸기 (이슈 #5)', () => {
-  it('성공하면 이름이 바뀌고 자동 이름이 잠긴다', async () => {
+describe('renaming a session (issue #5)', () => {
+  it('a success changes the name and locks auto-naming', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('rn-s1', sessionInfo('rn-s1'))
     await useStore.getState().attach(mock)
@@ -1066,11 +1084,11 @@ describe('세션 이름 바꾸기 (이슈 #5)', () => {
     expect(useStore.getState().toast).toBeNull()
   })
 
-  it('실패하면 이름을 그대로 두고 토스트로 알린다', async () => {
+  it('a failure leaves the name untouched and reports it as a toast', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('rn-s2', sessionInfo('rn-s2', { name: '옛 이름' }))
     await useStore.getState().attach(mock)
-    // host가 거절하는 상황 — 세션이 사라진 뒤에 이름을 고치는 것이 실제 경로다
+    // The host refuses — the actual path is renaming after the session has already disappeared
     mock.sessions.delete('rn-s2')
 
     await useStore.getState().rename('rn-s2', '새 이름')
@@ -1079,7 +1097,7 @@ describe('세션 이름 바꾸기 (이슈 #5)', () => {
     expect(useStore.getState().toast).toMatch(/Could not rename/)
   })
 
-  it('빈 이름은 보내지 않고 그 자리에서 알린다', async () => {
+  it('an empty name is never sent, and is reported right there', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('rn-s3', sessionInfo('rn-s3', { name: '옛 이름' }))
     await useStore.getState().attach(mock)
@@ -1091,31 +1109,32 @@ describe('세션 이름 바꾸기 (이슈 #5)', () => {
   })
 })
 
-describe('대화가 바닥에 서 있었는가 (이슈 #31)', () => {
-  it('아무도 스크롤하지 않은 세션은 바닥에 있는 것으로 본다 — 대화는 최신 줄에서 시작한다', () => {
+describe('whether a conversation stood at the bottom (issue #31)', () => {
+  it('a session nobody has scrolled is treated as being at the bottom — a conversation starts at its newest line', () => {
     expect(useStore.getState().stickToBottom['sb-s1']).toBeUndefined()
   })
 
-  it('위로 올려 읽는 중이면 그 사실이 세션에 남는다', () => {
+  it('scrolling up to read leaves that fact recorded on the session', () => {
     useStore.getState().setStickToBottom('sb-s1', false)
     expect(useStore.getState().stickToBottom['sb-s1']).toBe(false)
   })
 
   /*
-   * 기본값(바닥)은 **기록하지 않는 것으로** 기록한다. 그래야 스쳐 간 세션마다
-   * 항목이 하나씩 쌓이지 않는다 — 쓰다 만 글이 빈 초안을 지우는 것과 같은 규칙이다.
+   * The default (bottom) is recorded **by not being recorded**. That way, an entry does not pile up
+   * for every session that was merely passed through — the same rule as an unfinished draft clearing
+   * itself once emptied.
    */
-  it('바닥으로 돌아오면 항목 자체가 사라진다', () => {
+  it('returning to the bottom makes the entry itself disappear', () => {
     useStore.getState().setStickToBottom('sb-s2', false)
     useStore.getState().setStickToBottom('sb-s2', true)
     expect('sb-s2' in useStore.getState().stickToBottom).toBe(false)
   })
 
   /*
-   * 스크롤 한 번에 이벤트가 수십 번 온다. 값이 그대로인데 새 객체를 만들면
-   * 이 map을 보는 모든 구독자가 스크롤하는 내내 다시 그려진다.
+   * A single scroll fires dozens of events. If a new object were created even when the value stays
+   * the same, every subscriber watching this map would re-render for the entire scroll.
    */
-  it('값이 그대로면 새 상태를 만들지 않는다 — 스크롤은 초당 수십 번 부른다', () => {
+  it('an unchanged value never creates a new state object — scrolling fires dozens of times a second', () => {
     useStore.getState().setStickToBottom('sb-s3', false)
     const before = useStore.getState().stickToBottom
     useStore.getState().setStickToBottom('sb-s3', false)
@@ -1124,26 +1143,26 @@ describe('대화가 바닥에 서 있었는가 (이슈 #31)', () => {
 })
 
 /**
- * 업데이트 상태는 세션에 속하지 않는다 (이슈 #43).
+ * Update status does not belong to a session (issue #43).
  *
- * `dispatchEvent`의 첫 줄은 `if (!sessionId) return`이고, 그것이 이 파일에서 가장 넓은
- * 문이다. 앱 전역 사건을 그 뒤에 두면 host가 보낸 것이 도착은 하는데 아무 일도 일어나지
- * 않는다 — 통신도 정상이고 오류도 없어서, 원인을 찾을 실마리가 어디에도 안 남는 종류의
- * 결함이다. 순서가 곧 계약이라 여기서 못을 박는다.
+ * `dispatchEvent`'s first line is `if (!sessionId) return`, and that is the widest door in this file.
+ * Placing an app-wide event after it means whatever the host sends arrives and does nothing —
+ * communication looks fine, there is no error, and it is the kind of defect that leaves no clue
+ * anywhere to trace the cause. Order is the contract here, so this pins it down.
  */
-describe('업데이트 상태 (#43)', () => {
+describe('update status (#43)', () => {
   const status = {
     current: '0.1.0-beta.2', latest: '9999.0.0', newer: true, auto: true,
     phase: 'idle' as const, error: null, checkedAt: 1,
   }
 
-  it('세션이 없는 이벤트도 스토어에 도착한다', () => {
+  it('an event with no session also reaches the store', () => {
     useStore.getState().dispatchEvent({ type: 'update_status', status })
     expect(useStore.getState().update?.latest).toBe('9999.0.0')
   })
 
-  /** 설치는 사람이 눌러야 시작한다 — 알아냈다는 것만으로는 아무 일도 안 일어난다 */
-  it('새 버전을 알게 되는 것만으로는 아무것도 설치하지 않는다', async () => {
+  /** Installing must be started by a person — merely finding out does nothing on its own */
+  it('merely learning of a new version installs nothing on its own', async () => {
     const platform = new MockPlatform()
     platform.registryVersion = '9999.0.0'
     useStore.setState({ platform })
@@ -1154,14 +1173,14 @@ describe('업데이트 상태 (#43)', () => {
 })
 
 /**
- * 입력창 포커스는 기존 wake()를 다시 부른다 — 그 wake가 지켜야 할 성질들.
+ * Composer focus simply calls the existing `wake()` — these are the properties that `wake` must keep.
  *
- * 사이드바에서 고르기(focusSession)와 그리드 칸·재시작 복원의 입력창 포커스가
- * 같은 문으로 들어온다. 실패는 wakeError에 남을 뿐 토스트로 소리치지 않고
- * (포커스는 행동이 아니다), 이미 살아 있으면 아무 데도 가지 않는다.
+ * Picking from the sidebar (`focusSession`) and composer focus from a grid panel or restart both go
+ * through the same door. A failure is only left in `wakeError`, never raised as a toast (focus is not
+ * an action), and if it is already alive, nothing happens.
  */
-describe('wake — 포커스 경로의 조용한 깨움', () => {
-  it('잠든 세션을 깨우고 live로 표시한다', async () => {
+describe('wake — silently waking along the focus path', () => {
+  it('wakes a sleeping session and marks it live', async () => {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
     useStore.setState({ platform, sessions: { [s.id]: { ...s, live: false } as never } })
@@ -1171,7 +1190,7 @@ describe('wake — 포커스 경로의 조용한 깨움', () => {
     expect(useStore.getState().toast).toBeNull()
   })
 
-  it('깨우기 실패는 토스트가 아니라 wakeError로 남는다', async () => {
+  it('a wake failure is left in wakeError, not raised as a toast', async () => {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
     platform.unresumable.add(s.id)
@@ -1183,7 +1202,7 @@ describe('wake — 포커스 경로의 조용한 깨움', () => {
     expect(useStore.getState().wakeError[s.id]).toBeTruthy()
   })
 
-  it('이미 살아 있으면 아무 데도 안 간다', async () => {
+  it('does nothing at all if it is already alive', async () => {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
     const spy = vi.spyOn(platform.agents, 'resumeSession')
@@ -1195,14 +1214,14 @@ describe('wake — 포커스 경로의 조용한 깨움', () => {
 })
 
 /**
- * 보던 화면이 재시작을 넘어온다.
+ * The screen being viewed carries over a restart.
  *
- * 세션은 돌아오는데 **보는 방식**은 돌아오지 않았다 — 그리드에서 껐는데 포커스 뷰로
- * 켜졌다. 복원 순서가 함정이다: focusSession이 view를 focus로 강제하므로
- * (고른 세션은 보여야 하니까), 화면 복원은 그 **뒤**여야 한다.
+ * The session comes back, but **the way it is viewed** did not — closed in the grid, it came back up
+ * in the focus view. The order of restoration is the trap: `focusSession` forces `view` to `focus`
+ * (because a picked session must be shown), so view restoration has to happen **after** that.
  */
-describe('화면(view) 복원', () => {
-  it('그리드에서 껐으면 그리드로 켜진다 — 세션 복원이 덮어쓰지 못한다', async () => {
+describe('view restoration', () => {
+  it('closed in the grid, it comes back in the grid — session restoration cannot overwrite it', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('vw-s1', sessionInfo('vw-s1'))
     mock.workspaceSnapshot = { focusedSessionId: 'vw-s1', view: 'grid' }
@@ -1213,7 +1232,7 @@ describe('화면(view) 복원', () => {
     expect(useStore.getState().view).toBe('grid')
   })
 
-  it('화면을 바꾸면 저장된다', async () => {
+  it('changing the view saves it', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
@@ -1222,7 +1241,7 @@ describe('화면(view) 복원', () => {
     expect((mock.workspaceSnapshot as { view?: string } | null)?.view).toBe('grid')
   })
 
-  it('모르는 화면 이름은 무시한다 — 스냅샷은 파일이다', async () => {
+  it('an unknown view name is ignored — a snapshot is just a file', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { view: 'hologram' }
 
@@ -1231,10 +1250,11 @@ describe('화면(view) 복원', () => {
   })
 })
 
-describe('messagesToChat — 도구 출력 복원', () => {
+describe('messagesToChat — restoring tool output', () => {
   /*
-   * host는 호출과 결과를 각각 한 행으로 남긴다. 결과 분기가 없던 동안 세션을 다시 열면
-   * 카드가 제목만 남고 출력이 사라졌다 — 라이브로 보던 사람에게만 있던 화면이다.
+   * The host keeps the call and the result as separate rows. While there was no branch for the
+   * result, reopening a session left the card with only its title, its output gone — a screen that
+   * had only ever existed for whoever watched it live.
    */
   const call = (seq: number) => ({
     sessionId: 's',
@@ -1253,13 +1273,13 @@ describe('messagesToChat — 도구 출력 복원', () => {
     ts: 0,
   })
 
-  it('결과 행은 아직 결과가 없는 도구 줄에 붙는다', () => {
+  it('a result row attaches to a tool row that has no result yet', () => {
     const items = messagesToChat([call(1), result(2, '3 passed')])
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ kind: 'tool', result: '3 passed', ok: true })
   })
 
-  it('호출이 여럿이면 뱉은 순서대로 짝을 짓는다 — 둘이 서로 바뀌지 않는다', () => {
+  it('with several calls, they are paired in the order they were emitted — the two are never swapped', () => {
     const items = messagesToChat([call(1), call(2), result(3, '첫째'), result(4, '둘째', false)])
     expect(items.map((i) => (i.kind === 'tool' ? [i.result, i.ok] : null))).toEqual([
       ['첫째', true],
@@ -1267,20 +1287,21 @@ describe('messagesToChat — 도구 출력 복원', () => {
     ])
   })
 
-  it('짝 없는 결과는 버린다 — 없던 줄을 만들지 않는다', () => {
+  it('a result with no match is discarded — never creates a row that never existed', () => {
     expect(messagesToChat([result(1, '주인 없는 출력')])).toEqual([])
   })
 })
 
 /**
- * 도구 줄은 callId로 제 결과·출력을 찾는다 (#98).
+ * A tool row finds its own result and output by `callId` (#98).
  *
- * 백그라운드 에이전트의 카드는 띄운 순간부터 끝날 때까지 열려 있고(어댑터가 띄운 결과를
- * 보류한다), 그동안 부모는 제 도구를 쓴다. 자리 규칙(가장 오래 열린 줄·마지막 열린 줄)은
- * 그 사이에서 주인을 바꿔 붙인다 — 부모의 Bash 결과가 에이전트 카드로, 에이전트의 걸음이
- * 부모의 Bash 카드로. 라이브와 복원 두 길을 같이 본다.
+ * A background agent's card stays open from the moment it is raised until it finishes (the adapter
+ * withholds the result of raising it), and in the meantime the parent uses its own tool. The
+ * positional rule (the longest-open row, the last-opened row) swaps ownership between them during
+ * that window — the parent's Bash result to the agent's card, the agent's own steps to the parent's
+ * Bash card. Both the live and restored paths are checked together.
  */
-describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카드 옆에서 (#98)', () => {
+describe('a tool row finds its pair by callId — beside an open agent card (#98)', () => {
   const agentCall = {
     type: 'tool_call', callId: 'toolu_agent',
     summary: { tool: 'Agent', title: 'Research the build', readOnly: false, paths: [] },
@@ -1294,7 +1315,7 @@ describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카�
   const tools = (items: ReturnType<typeof messagesToChat>) =>
     items.flatMap((i) => (i.kind === 'tool' ? [{ tool: i.tool, result: i.result, live: i.live }] : []))
 
-  it('라이브: 부모의 결과는 부모의 카드로, 에이전트의 걸음은 에이전트의 카드로', async () => {
+  it('live: the parent\'s result to the parent\'s card, the agent\'s steps to the agent\'s card', async () => {
     const s = 'cid-live'
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
@@ -1304,7 +1325,7 @@ describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카�
     send(agentCall)
     send({ type: 'tool_output_delta', callId: 'toolu_agent', text: 'Running in the background\n' })
     send(bashCall)
-    // 부모의 Bash가 열려 있는 동안 에이전트가 한 걸음 걷는다
+    // The agent takes a step while the parent's Bash is still open
     send({ type: 'tool_output_delta', callId: 'toolu_agent', text: 'Grep: boundaries\n' })
     send(bashDone)
 
@@ -1319,7 +1340,7 @@ describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카�
     })
   })
 
-  it('복원: 저장된 순서가 호출 순서와 달라도 제 짝을 찾는다', () => {
+  it('restoration: finds its own pair even when the stored order differs from the call order', () => {
     const row = (seq: number, kind: 'tool_call' | 'tool_result', payload: object) =>
       ({ sessionId: 's', seq, role: 'system' as const, kind, payload, ts: 0 })
     const items = messagesToChat([
@@ -1334,7 +1355,7 @@ describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카�
     ])
   })
 
-  it('복원: 호출이 이 묶음 밖에 있는 결과는 열린 에이전트 카드를 집지 않는다', () => {
+  it('restoration: a result whose call sits outside this batch never grabs an open agent card', () => {
     const items = messagesToChat([
       { sessionId: 's', seq: 1, role: 'system', kind: 'tool_call', payload: agentCall, ts: 0 },
       { sessionId: 's', seq: 2, role: 'system', kind: 'tool_result', payload: { ...bashDone, callId: 'toolu_elsewhere' }, ts: 0 },
@@ -1344,17 +1365,18 @@ describe('도구 줄은 callId로 짝을 찾는다 — 열린 에이전트 카�
 })
 
 /**
- * 실패한 턴은 **보여야 한다** (#107).
+ * A failed turn **must be visible** (#107).
  *
- * 실사고: codex 롤아웃에는 `task_complete`에 400 전문이 실려 있었는데 앱에는 빈 답변이
- * 남고 상태는 `waiting_input`이었다. "사람을 기다리는 중"은 거짓말이다 — 기다려야 할
- * 것은 사람이 아니라 설명이었다. 두 반쪽을 함께 본다: 전사에 남는가, 상태가 정직한가.
+ * An actual incident: a codex rollout carried the full 400 error in `task_complete`, but the app kept
+ * an empty reply and a state of `waiting_input`. "Waiting for a human" was a lie — what needed waiting
+ * for was an explanation, not a person. Both halves are checked together: does it survive in the
+ * transcript, and is the state honest.
  */
-describe('실패한 턴은 화면에 닿는다 (#107)', () => {
+describe('a failed turn reaches the screen (#107)', () => {
   const boom = (sessionId: string, message: string) =>
     ({ type: 'error', sessionId, error: { code: 'internal', message, retryable: true } }) as NormalizedEvent
 
-  it('오류가 전사에 한 줄로 서고, 세션은 idle인 척하지 않는다', async () => {
+  it('the error stands as one line in the transcript, and the session does not pretend to be idle', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('err-1', sessionInfo('err-1'))
     await useStore.getState().attach(mock)
@@ -1367,7 +1389,7 @@ describe('실패한 턴은 화면에 닿는다 (#107)', () => {
     expect(useStore.getState().sessions['err-1']?.state).toBe('error')
   })
 
-  it('다시 열어도 그 줄이 있다 — 오류는 마커로 저장된다', () => {
+  it('the line is still there after reopening — an error is stored as a marker', () => {
     const items = messagesToChat([
       {
         sessionId: 'err-2', seq: 4, role: 'system', kind: 'marker', ts: 1,
@@ -1380,8 +1402,8 @@ describe('실패한 턴은 화면에 닿는다 (#107)', () => {
   })
 })
 
-describe('messagesToChat — 이미지 행 (#40 2차)', () => {
-  it('영속된 이미지가 대화로 되살아난다', () => {
+describe('messagesToChat — image rows (#40, second pass)', () => {
+  it('a persisted image is restored into the conversation', () => {
     const items = messagesToChat([
       {
         sessionId: 's1', seq: 1, role: 'system', kind: 'image', ts: 1,
@@ -1391,7 +1413,7 @@ describe('messagesToChat — 이미지 행 (#40 2차)', () => {
     expect(items).toEqual([{ kind: 'image', seq: 1, storedSeq: 1, mime: 'image/png', data: 'aWJs', path: '/tmp/a.png', note: undefined }])
   })
 
-  it('정리된 이미지는 이유를 들고 되살아난다 — 조용한 공백이 아니다', () => {
+  it('a cleaned-up image is restored with its reason — not a silent gap', () => {
     const items = messagesToChat([
       {
         sessionId: 's1', seq: 2, role: 'system', kind: 'image', ts: 1,
@@ -1402,9 +1424,9 @@ describe('messagesToChat — 이미지 행 (#40 2차)', () => {
   })
 })
 
-/** 추론 요약 (#58) — 델타 행들이 한 덩어리로 되살아난다 (assistant와 같은 규칙) */
-describe('messagesToChat — 추론 행', () => {
-  it('이웃한 reasoning 행은 서로 다른 추론이다 — 붙이지 않는다 (#77)', () => {
+/** A reasoning summary (#58) — delta rows are restored as one block (the same rule as `assistant`) */
+describe('messagesToChat — reasoning rows', () => {
+  it('neighboring reasoning rows are different thoughts — they are never merged (#77)', () => {
     const row = (seq: number, kind: 'reasoning' | 'text', text: string) => ({
       sessionId: 's1', seq, role: 'assistant' as const, kind, ts: 1,
       payload: { type: kind === 'text' ? 'message_delta' : 'reasoning_delta', sessionId: 's1', text },
@@ -1419,18 +1441,20 @@ describe('messagesToChat — 추론 행', () => {
 })
 
 /*
- * 이웃한 두 답은 두 덩어리다 (#77). 사이에 사람의 말이 없는 새 답(백그라운드 작업이 끝났다, 질문 카드에 답했다)이
- * 앞의 답에 공백 없이 붙어 "…still running.All six reviews are in."이 됐다. 말은 저장 번호로 가른다 — host는 한 말의
- * 조각을 한 행에 모으고 조각마다 그 번호를 싣는다(#66). 목도 같은 규칙으로 번호를 매긴다.
+ * Two neighboring replies are two blocks (#77). A new reply with no human message in between (a
+ * background task finished, a question card was answered) used to run together with the reply before
+ * it, with no gap: "…still running.All six reviews are in." Messages are split by stored number — the
+ * host groups a message's chunks into one row and carries that row's number on every chunk (#66). The
+ * mock numbers them by the same rule.
  */
-describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
+describe('neighboring replies are split by stored number (#77)', () => {
   const ask = (sessionId: string, seq: number, text: string) =>
     ({ sessionId, seq, role: 'user' as const, kind: 'text' as const, payload: { text }, ts: seq })
   const reply = (sessionId: string, seq: number, text: string) =>
     ({ sessionId, seq, role: 'assistant' as const, kind: 'text' as const, payload: { type: 'message_delta', text }, ts: seq })
   const shape = (id: string) => useStore.getState().chat[id]!.map((i) => [i.kind, i.storedSeq, line(i)])
 
-  /** 기록이 네 줄인 세션을 열어 둔다 — 다음 말이 5번이다 */
+  /** Opens a session whose history has four rows — the next message is number 5 */
   async function opened(id: string) {
     const mock = new MockPlatform()
     mock.sessions.set(id, sessionInfo(id))
@@ -1441,11 +1465,11 @@ describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
     return mock
   }
 
-  it('5번 말의 조각 뒤에 6번 말의 조각이 오면 두 항목이다', async () => {
+  it('a chunk of message 6 arriving after a chunk of message 5 makes two items', async () => {
     const mock = await opened('s77-a')
     mock.emit(delta('s77-a', 'One review '))
     mock.emit(delta('s77-a', 'is still running.'))
-    // 턴이 끝나고, 사람의 말 없이 새 턴이 선다(백그라운드 작업이 끝났다)
+    // The turn ends, and a new turn stands with no human message in between (a background task finished)
     mock.emit({ type: 'turn_complete', sessionId: 's77-a' } as never)
     mock.emit(delta('s77-a', 'All six reviews are in.'))
     expect(shape('s77-a').slice(-2)).toEqual([
@@ -1454,7 +1478,7 @@ describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
     ])
   })
 
-  it('번호가 같은 조각은 한 항목에 모인다 — 추론도 같다', async () => {
+  it('chunks with the same number are gathered into one item — reasoning too', async () => {
     const mock = await opened('s77-b')
     mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '**경로 ' } as never)
     mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '검토**' } as never)
@@ -1466,7 +1490,7 @@ describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
     ])
   })
 
-  it('추론도 번호가 다르면 두 항목이다', async () => {
+  it('reasoning with a different number also makes two items', async () => {
     const mock = await opened('s77-c')
     mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: '앞 턴의 생각' } as never)
     mock.emit({ type: 'turn_complete', sessionId: 's77-c' } as never)
@@ -1477,15 +1501,15 @@ describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
     ])
   })
 
-  it('기록 페이지와 실시간 꼬리를 합쳐도(mergePage) 이웃한 답은 따로다', async () => {
+  it('neighboring replies stay separate even after merging the history page with the live tail (mergePage)', async () => {
     const id = 's77-d'
     const mock = new MockPlatform()
     mock.sessions.set(id, sessionInfo(id))
-    // 기록 끝에 이미 이웃한 두 답이 있다
+    // Two neighboring replies already exist at the end of history
     mock.messages.set(id, [ask(id, 1, '리뷰 돌려줘'), reply(id, 2, 'One review is still running.'), reply(id, 3, 'All six reviews are in.')])
     await useStore.getState().attach(mock)
 
-    // 페이지는 요청한 순간의 것이고, 답은 그 뒤에 온 말보다 늦게 도착한다(기록 커서 B와 같은 조건)
+    // The page is as of the moment it was requested, and the answer arrives later than a message that came after it (same condition as history cursor B)
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
     const real = mock.agents.loadMessages.bind(mock.agents)
@@ -1499,7 +1523,7 @@ describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
     release()
     await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
     mock.agents.loadMessages = real
-    // 합친 뒤에 오는 새 턴의 말도 꼬리에 따로 선다
+    // A new turn's message arriving after the merge also stands separately in the tail
     mock.emit({ type: 'turn_complete', sessionId: id } as never)
     mock.emit(delta(id, 'Anything else?'))
 
@@ -1514,18 +1538,19 @@ describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
 })
 
 /**
- * 대화 항목의 **정체성(identity)** — 바뀐 줄만 새 객체가 된다.
+ * A conversation item's **identity** — only a changed row becomes a new object.
  *
- * 화면 쪽 최적화가 이 규칙 위에 서 있다: ChatRow는 memo라, 항목 객체가 그대로면 다시
- * 그리지 않는다. 그래서 스트리밍 조각 하나가 도착할 때 다시 그려지는 말풍선은 **하나**다
- * (실측 1.0 렌더/조각). 리듀서가 어느 날 `items.map((i) => ({ ...i }))` 같은 걸 하면
- * 그 성질이 조용히 사라진다 — 화면은 똑같이 보이고 비용만 대화 길이에 비례해 자란다.
- * 렌더 수는 브라우저에서만 셀 수 있지만, 그 근거인 정체성은 여기서 못 박을 수 있다.
+ * The screen's own optimization rests on this rule: `ChatRow` is memoized, so it does not re-render
+ * while the item object stays the same. So when a single streaming chunk arrives, exactly **one**
+ * bubble re-renders (measured at 1.0 renders per chunk). If the reducer ever did something like
+ * `items.map((i) => ({ ...i }))`, that property would quietly disappear — the screen would look
+ * identical while the cost grew in proportion to the conversation's length. The render count can only
+ * be measured in a browser, but the identity it rests on can be pinned down right here.
  */
-describe('대화 항목의 정체성 — 바뀐 줄만 새 객체다', () => {
+describe('a conversation item\'s identity — only a changed row becomes a new object', () => {
   const idOf = (sessionId: string) => useStore.getState().chat[sessionId] ?? []
 
-  it('스트리밍 조각은 마지막 줄만 새로 만든다', async () => {
+  it('a streaming chunk only creates a new object for the last row', async () => {
     const s = 'ident-s1'
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
@@ -1538,11 +1563,11 @@ describe('대화 항목의 정체성 — 바뀐 줄만 새 객체다', () => {
     useStore.getState().dispatchEvent(delta(s, '이어서'))
     const after = idOf(s)
     expect(after.length).toBe(2)
-    expect(after[0]).toBe(before[0]) // 사람의 말은 손대지 않는다 — 같은 객체다
-    expect(after[1]).not.toBe(before[1]) // 자라는 줄만 새 객체
+    expect(after[0]).toBe(before[0]) // The human message is untouched — same object
+    expect(after[1]).not.toBe(before[1]) // Only the growing row becomes a new object
   })
 
-  it('도구 결과는 그 도구 줄만 새로 만든다 — 뒤에 온 말들은 그대로다', async () => {
+  it('a tool result only creates a new object for that tool row — messages that came after it are untouched', async () => {
     const s = 'ident-s2'
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
@@ -1559,35 +1584,35 @@ describe('대화 항목의 정체성 — 바뀐 줄만 새 객체다', () => {
       type: 'tool_result', sessionId: s, callId: 'c1', ok: true, summary: '12 lines',
     } as NormalizedEvent)
     const after = idOf(s)
-    expect(after[0]).not.toBe(before[0]) // 결과가 붙은 도구 줄만
-    expect(after[1]).toBe(before[1]) // 그 뒤의 말은 건드리지 않는다
+    expect(after[0]).not.toBe(before[0]) // Only the tool row that received the result
+    expect(after[1]).toBe(before[1]) // Messages after it are untouched
   })
 })
 
 /**
- * 전송 실패 시 쓴 글 복원 (2026-09-02 유실 사고 후속).
+ * Restoring written text after a send failure (a follow-up to the loss incident of 2026-09-02).
  *
- * 입력창은 보내는 순간 비워진다(#38). 실패하면 말풍선을 걷어내는데, 그러면 문장이
- * **어디에도 없다** — 토스트는 실패를 알릴 뿐 글을 돌려주지 못한다. 실패한 문장은
- * 입력창으로 돌아와야 다시 보낼 수 있다.
+ * The composer is cleared the instant it is sent (#38). On failure, the bubble is removed, which
+ * leaves the sentence **nowhere at all** — a toast only reports the failure, it does not return the
+ * text. A failed sentence must come back to the composer to be sent again.
  */
-describe('전송 실패 시 쓴 글 복원', () => {
-  it('실패하면 문장이 입력창으로 돌아온다', async () => {
+describe('restoring written text after a send failure', () => {
+  it('a failure returns the sentence to the composer', async () => {
     const s = 'sf-s1'
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
     await useStore.getState().attach(mock)
-    mock.sessions.delete(s) // host가 거절하는 상황 (rename 실패 테스트와 같은 수법)
+    mock.sessions.delete(s) // The host refuses it (the same trick as the rename-failure test)
 
     await useStore.getState().send(s, '날아가면 안 되는 문장')
 
     expect(useStore.getState().drafts[s]?.text).toBe('날아가면 안 되는 문장')
     expect(useStore.getState().toast).toMatch(/Could not send/)
-    // 보낸 것처럼 남는 말풍선은 여전히 없다 (기존 동작 유지)
+    // Still no bubble left behind that looks sent (existing behavior kept)
     expect((useStore.getState().chat[s] ?? []).some((i) => i.kind === 'user')).toBe(false)
   })
 
-  it('실패를 기다리는 사이 새로 쓴 글은 덮지 않는다 — 실패한 말이 앞에 붙는다', async () => {
+  it('text written while waiting for the failure is not overwritten — the failed message is prepended in front of it', async () => {
     const s = 'sf-s2'
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
@@ -1601,7 +1626,7 @@ describe('전송 실패 시 쓴 글 복원', () => {
     expect(useStore.getState().drafts[s]?.text).toBe('먼저 보낸 문장\n그새 쓴 문장')
   })
 
-  it('성공하면 입력창을 건드리지 않는다', async () => {
+  it('a success leaves the composer untouched', async () => {
     const s = 'sf-s3'
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
@@ -1614,13 +1639,13 @@ describe('전송 실패 시 쓴 글 복원', () => {
 })
 
 /**
- * 그리드 세션 예열 (도그푸딩: 메아 — codex 큰 스레드 되살리기가 실측 7~13초).
- * 줄일 수 없는 비용은 사람이 안 기다리는 시간으로 옮긴다: 그리드에 올려둔 세션은
- * 앱이 뜰 때 백그라운드에서 깨워 둔다. 실패해도 앱은 뜨고, 실패는 클릭해서 깨울
- * 때와 같은 자리(wakeError)에 남는다.
+ * Warming up grid sessions (a dogfooding finding: reviving a large codex thread measured at 7-13
+ * seconds). A cost that cannot be reduced is moved to a time nobody is waiting on: sessions parked on
+ * the grid are woken up in the background as the app comes up. If it fails, the app still comes up,
+ * and the failure is left in the same place (`wakeError`) as when woken by a click.
  */
-describe('그리드 세션 예열', () => {
-  it('attach가 그리드에 올려둔 잠든 세션을 미리 깨운다', async () => {
+describe('warming up grid sessions', () => {
+  it('attach wakes sleeping sessions parked on the grid ahead of time', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('warm-a', sessionInfo('warm-a', { live: false }))
     mock.sessions.set('warm-b', sessionInfo('warm-b', { live: false }))
@@ -1633,7 +1658,7 @@ describe('그리드 세션 예열', () => {
     })
   })
 
-  it('깨우기 실패는 그 칸의 wakeError로 남는다 — 앱은 계속 뜬다', async () => {
+  it('a wake failure is left in that panel\'s wakeError — the app still comes up', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('warm-c', sessionInfo('warm-c', { live: false }))
     mock.unresumable.add('warm-c')
@@ -1649,47 +1674,49 @@ describe('그리드 세션 예열', () => {
 })
 
 /**
- * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 스레드의 되살리기 7~13초 문제의 출구).
- * 죽는 세션이 쓴 글이 새 세션의 첫 메시지가 되고, 이름·설정이 이어지고,
- * 기존 세션은 원본까지 지워진다 — since #204 it goes to the trash, and its tool file goes when it is deleted for good.
- * 파괴는 맨 끝 — 실패하면 아무것도 안 지워진다.
+ * Handing off and starting fresh (a dogfooding request — the way out of the 7-13 second resume delay
+ * on an old thread). The dying session's written text becomes the new session's first message, its
+ * name and settings carry over, and the old session is deleted all the way to its own original —
+ * since #204 it goes to the trash, and its tool file goes when it is deleted for good.
+ * Destruction comes last — a failure deletes nothing.
  */
 /**
- * 앱 상태 (#81): 스토어는 앱 목록을 모른다 — 항목은 ensure(첫 사용)와
- * app_state_changed 방송으로만 생긴다. 문서의 의미는 앱만 안다.
+ * App state (#81): the store does not know the app list — an entry only appears through `ensure`
+ * (first use) or the `app_state_changed` broadcast. Only the app knows what the document means.
  */
-describe('앱 상태 (#81)', () => {
-  it('ensure가 불러오고, 방송이 다시 읽게 하고, setAppDoc은 화면 먼저다', async () => {
+describe('app state (#81)', () => {
+  it('ensure loads it, a broadcast triggers a re-read, and setAppDoc updates the screen first', async () => {
     const mock = new MockPlatform()
     mock.appDocs.set('control', { notifies: [{ id: 'n1', text: '첫 알림', ts: 1 }] })
     await useStore.getState().attach(mock)
 
-    // 첫 사용: ensure가 채운다
+    // First use: ensure fills it in
     await useStore.getState().ensureAppState('control')
     expect((useStore.getState().apps['control']?.doc as { notifies: unknown[] }).notifies).toHaveLength(1)
 
-    // host 쪽 변경은 방송으로 온다 — 스토어는 다시 읽는다
+    // A change on the host's side arrives as a broadcast — the store re-reads it
     mock.appDocs.set('control', { notifies: [] })
     mock.emit({ type: 'app_state_changed', appId: 'control' } as NormalizedEvent)
     await vi.waitFor(() => {
       expect((useStore.getState().apps['control']?.doc as { notifies: unknown[] }).notifies).toHaveLength(0)
     })
 
-    // UI 쪽 변경은 화면 먼저, 저장이 뒤따른다
+    // A change on the UI's side updates the screen first, and saving follows
     await useStore.getState().setAppDoc('control', { notifies: [], metrics: { replies: 1 } })
     expect(mock.appDocs.get('control')).toMatchObject({ metrics: { replies: 1 } })
 
-    // 토글도 같은 창구
+    // The toggle goes through the same channel
     await useStore.getState().setAppEnabled('control', false)
     expect(useStore.getState().apps['control']?.enabled).toBe(false)
     expect(mock.appDisabled.has('control')).toBe(true)
   })
 
   /*
-   * 읽지 못한 문서 위에 쓰지 않는다 (#178). 첫 읽기가 실패하면 레일의 `doc`은 null이고, 줄 하나를
-   * 누르면 `{ metrics }`만 든 문서가 host로 가서 업무·감시·알림을 통째로 덮었다.
+   * Never writes over a document that has not been read (#178). If the first read failed, the rail's
+   * `doc` is `null`, and pressing one row sent a document holding only `{ metrics }` to the host,
+   * overwriting tasks, monitoring and notifications entirely.
    */
-  it('문서를 아직 못 읽었으면 setAppDoc은 쓰지 않고 다시 읽는다 (#178)', async () => {
+  it('if the document has not been read yet, setAppDoc never writes and re-reads instead (#178)', async () => {
     useStore.setState({ apps: {} })
     const mock = new MockPlatform()
     const full = { tasks: [{ id: 't1', title: 'T' }], watches: [{ id: 'w', pattern: 'git push' }], metrics: { inlineReplies: 7 } }
@@ -1701,18 +1728,19 @@ describe('앱 상태 (#81)', () => {
 
     await useStore.getState().setAppDoc('control', { metrics: { inlineReplies: 1 } })
     expect(mock.appDocs.get('control')).toEqual(full)
-    // 버린 대신 다시 읽기를 걸었다 — 다음 쓰기는 진짜 문서 위에서 한다
+    // Discarded the write and triggered a re-read instead — the next write happens on the real document
     await vi.waitFor(() => expect(useStore.getState().apps['control']?.doc).toEqual(full))
     expect(read).toHaveBeenCalledTimes(2)
   })
 })
 
 /**
- * 외부 앱의 "바뀌었다" (M4 B-5): 스토어는 (프로젝트, 앱)마다 세기만 한다. 다시 읽는 것은 열린
- * 화면이 자기 상태 도구로 한다. 그래서 내장 앱처럼 apps.state를 부르지 않는다.
+ * An external app's "changed" (M4 B-5): the store only counts, per (project, app). Re-reading is the
+ * open view's own job, through its state tool — so unlike a built-in app, this never calls
+ * `apps.state`.
  */
-describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
-  it('방송이 그 (프로젝트, 앱)의 카운터만 올리고, 내장 앱의 상태를 다시 읽지 않는다', async () => {
+describe('an external app\'s change signal (M4 B-5)', () => {
+  it('a broadcast only bumps that (project, app)\'s counter, and never re-reads a built-in app\'s state', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const reads = vi.spyOn(mock.apps, 'state')
@@ -1723,23 +1751,23 @@ describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
     await vi.waitFor(() => expect(useStore.getState().externalAppChanges[externalAppKey(null, 'notes')]).toBe(1))
 
     expect(useStore.getState().externalAppChanges).toEqual({ 'p1/notes': 2, '_user/notes': 1 })
-    // 두 프로젝트의 notes는 다른 앱이다 — 열쇠가 섞이지 않는다
+    // The `notes` app of two different projects are two different apps — their keys never collide
     expect(externalAppKey('p2', 'notes')).not.toBe(externalAppKey('p1', 'notes'))
     expect(reads).not.toHaveBeenCalled()
     expect(useStore.getState().apps['notes']).toBeUndefined()
   })
 
-  it('기록의 신호(M4 D-6)는 기록 판의 카운터만 올린다 — 화면이 듣는 카운터는 그대로다', async () => {
+  it('a run signal (M4 D-6) only bumps the runs panel\'s counter — the counter the view listens to stays untouched', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     mock.emit({ type: 'external_app_runs_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
     mock.emit({ type: 'external_app_runs_changed', appId: 'notes', projectId: null } as NormalizedEvent)
     await vi.waitFor(() => expect(useStore.getState().externalAppRunChanges).toEqual({ 'p1/notes': 1, '_user/notes': 1 }))
-    // 읽기 전용 도구의 사슬도 이 신호로 온다 — 화면을 깨우면 #190의 고리가 돌아온다
+    // A read-only tool's chain also arrives through this signal — waking the view would bring back #190's loop
     expect(useStore.getState().externalAppChanges).toEqual({})
   })
 
-  it('카운터 곁에 그 바뀜을 낸 화면 인스턴스를 둔다 — 화면이 낸 것일 때만, 세션·앱·주인 없음이면 null', async () => {
+  it('keeps the view instance that caused the change beside the counter — only when it came from a view; null when there is no session, app or owner', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const key = externalAppKey('p1', 'notes')
@@ -1753,13 +1781,13 @@ describe('외부 앱의 바뀜 신호 (M4 B-5)', () => {
     await vi.waitFor(() => expect(seen()).toEqual([2, null]))
     say({ kind: 'view', instanceId: 'frame-b' })
     await vi.waitFor(() => expect(seen()).toEqual([3, 'frame-b']))
-    // 주인이 없는 바뀜(앱이 다시 떴다, host가 섞인 것을 모았다) — 모두가 듣는다
+    // A change with no owner (the app came up again, the host merged mixed sources) — everyone hears it
     say()
     await vi.waitFor(() => expect(seen()).toEqual([4, null]))
   })
 })
 
-/** 발견된 외부 앱 하나 (host의 `apps.list` 한 줄) */
+/** A single discovered external app (one row of the host's `apps.list`) */
 function appInfo(appId: string, over: Partial<ExternalAppInfo> = {}): ExternalAppInfo {
   return {
     appId, projectId: 'p1', dir: `/tmp/p1/.centralu/apps/${appId}`, name: `App ${appId}`, version: '0.1.0',
@@ -1768,13 +1796,13 @@ function appInfo(appId: string, over: Partial<ExternalAppInfo> = {}): ExternalAp
 }
 
 /**
- * 외부 앱 목록 (M4 A-8): 스토어는 host의 `apps.list` 사본을 든다. 방송(`external_apps_changed`)은
- * 무엇이 바뀌었는지 싣지 않으므로 통째로 다시 읽는다. 앱이 뜰 때는 방송이 연달아 오므로(뜨는 중 →
- * 떴다) 읽기가 겹친다. 겹친 읽기가 옛 목록으로 새 목록을 덮으면, 사이드바는 떠 있는 앱을 "뜨는 중"으로
- * 영영 보여 준다.
+ * The external app list (M4 A-8): the store holds a copy of the host's `apps.list`. The broadcast
+ * (`external_apps_changed`) never carries what changed, so the whole list is re-read. While an app is
+ * coming up, broadcasts arrive back to back (coming up → up), so reads overlap. If an overlapping read
+ * overwrites the new list with an old one, the sidebar shows a running app as "coming up" forever.
  */
-describe('외부 앱 목록 (M4 A-8)', () => {
-  it('처음 붙을 때 읽고, 방송이 올 때마다 다시 읽는다', async () => {
+describe('the external app list (M4 A-8)', () => {
+  it('reads on the first attach, and re-reads every time a broadcast arrives', async () => {
     const mock = new MockPlatform()
     mock.externalAppList = [appInfo('notes')]
     await useStore.getState().attach(mock)
@@ -1785,13 +1813,13 @@ describe('외부 앱 목록 (M4 A-8)', () => {
     expect(useStore.getState().externalApps[0]?.status).toBe('running')
   })
 
-  it('읽는 중에 또 방송이 오면 끝난 뒤 한 번 더 읽는다 — 마지막 목록이 남는다', async () => {
+  it('another broadcast arriving mid-read triggers one more read after it finishes — the last list wins', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const list = vi.spyOn(mock.apps, 'list')
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
-    // 첫 읽기는 그 순간의 목록(뜨는 중)을 들고 늦게 돌아온다
+    // The first read holds the list as of that moment (coming up) and returns late
     list.mockImplementationOnce(async () => {
       const snap = structuredClone(mock.externalAppList)
       await gate
@@ -1806,7 +1834,7 @@ describe('외부 앱 목록 (M4 A-8)', () => {
     await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('running'))
   })
 
-  it('다시 붙으면(끊긴 사이의 방송은 다시 오지 않는다) 목록을 다시 읽는다', async () => {
+  it('reattaching re-reads the list (a broadcast from the gap while disconnected never comes again)', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     mock.externalAppList = [appInfo('notes', { status: 'failed', error: 'boom' })]
@@ -1817,11 +1845,11 @@ describe('외부 앱 목록 (M4 A-8)', () => {
 })
 
 /**
- * 신뢰 (M4, 결정 3): 등록할 때 **한 번** 묻고, 답하지 않으면 아무것도 보내지 않는다. 이미 신뢰한
- * 프로젝트를 다시 골랐을 때는 묻지 않는다.
+ * Trust (M4, decision 3): asked **once**, at registration, and answering nothing sends nothing.
+ * Picking an already-trusted project again is never asked about.
  */
-describe('프로젝트 신뢰 (M4)', () => {
-  it('새로 등록한 프로젝트에 한 번 묻는다 — "나중에"는 아무것도 보내지 않고, "신뢰"는 보내고 화면에 적는다', async () => {
+describe('project trust (M4)', () => {
+  it('a newly registered project is asked once — "later" sends nothing, "trust" sends it and records it on screen', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/trust-a')
@@ -1838,12 +1866,12 @@ describe('프로젝트 신뢰 (M4)', () => {
     expect(useStore.getState().projects[q.id]?.trusted).toBe(true)
     expect(useStore.getState().trustAsk).toBeNull()
 
-    // 같은 폴더를 다시 골랐다 — 이미 신뢰했으니 다시 묻지 않는다
+    // The same folder was picked again — already trusted, so it is never asked about again
     await useStore.getState().addProject('/tmp/trust-b')
     expect(useStore.getState().trustAsk).toBeNull()
   })
 
-  it('돌고 있는 세션이 있을 때만, 바꾼 신뢰는 그 세션이 다시 시작하거나 이어질 때 적용된다고 한 줄로 말한다', async () => {
+  it('only when a running session exists, states in one line that changed trust applies when that session restarts or resumes', async () => {
     const mock = new MockPlatform()
     const busy = await mock.projects.add('/tmp/trust-busy')
     mock.sessions.set('trust-live', sessionInfo('trust-live', { projectId: busy.id, live: true }))
@@ -1857,7 +1885,7 @@ describe('프로젝트 신뢰 (M4)', () => {
     expect(useStore.getState().toast).toBe('Running sessions here pick up the new trust when they restart or resume.')
   })
 
-  it('신뢰를 끄면 그 프로젝트의 앱 목록이 방송을 따라 막힌다', async () => {
+  it('turning off trust blocks that project\'s app list, following the broadcast', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/trust-c')
@@ -1872,11 +1900,11 @@ describe('프로젝트 신뢰 (M4)', () => {
 })
 
 /**
- * 고정 화면 (M4 B-2): 연 화면은 포커스가 옮겨 가도 산다. 인스턴스는 host가 home을 불러 한 번 만들고,
- * 닫을 때 놓는다. 여는 사이에 닫혔으면 막 연 인스턴스도 놓는다 — 놓지 않으면 아무도 보지 않는 화면이
- * 앱을 영영 붙든다.
+ * A pinned view (M4 B-2): an opened view survives a focus change. Its instance is created once by the
+ * host calling `home`, and released when closed. If it was closed while opening, the just-opened
+ * instance is released too — otherwise a view nobody watches would hold onto the app forever.
  */
-describe('고정 화면 (M4 B-2)', () => {
+describe('a pinned view (M4 B-2)', () => {
   const live = async () => {
     const mock = new MockPlatform()
     mock.sessions.set('pin-s1', sessionInfo('pin-s1'))
@@ -1887,7 +1915,7 @@ describe('고정 화면 (M4 B-2)', () => {
   }
   const pinned = () => useStore.getState().pinnedViews
 
-  it('열면 자리가 서고, 세션을 보러 가도 자리는 그대로이며, 다시 열어도 새로 만들지 않는다', async () => {
+  it('opening stands up a slot, going to look at a session leaves it in place, and opening it again creates nothing new', async () => {
     const mock = await live()
     useStore.getState().openApp('p1', 'slider')
     expect(useStore.getState()).toMatchObject({ view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' }, focusedProjectId: 'p1' })
@@ -1905,7 +1933,7 @@ describe('고정 화면 (M4 B-2)', () => {
     expect(mock.openedViews).toEqual([{ appId: 'slider', projectId: 'p1' }])
   })
 
-  it('닫으면 인스턴스를 놓고 자리를 지우며, 보던 세션으로 돌아간다', async () => {
+  it('closing releases the instance, removes the slot, and returns to the session that was being viewed', async () => {
     const mock = await live()
     useStore.getState().focusSession('pin-s1')
     useStore.getState().openApp('p1', 'slider')
@@ -1918,7 +1946,7 @@ describe('고정 화면 (M4 B-2)', () => {
     expect(useStore.getState()).toMatchObject({ view: 'focus', focusedApp: null, focusedSessionId: 'pin-s1' })
   })
 
-  it('여는 사이에 닫았으면 막 연 인스턴스도 놓는다', async () => {
+  it('closing it while it is opening also releases the just-opened instance', async () => {
     const mock = await live()
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
@@ -1936,7 +1964,7 @@ describe('고정 화면 (M4 B-2)', () => {
     expect(pinned()).toEqual([])
   })
 
-  it('Restart는 옛 인스턴스를 놓고, host가 다시 시작을 마친 **뒤에야** 다시 연다 (B-6)', async () => {
+  it('Restart releases the old instance, and reopens only **after** the host finishes restarting (B-6)', async () => {
     const mock = await live()
     useStore.getState().openApp('p1', 'slider')
     await useStore.getState().startPinnedView('p1/slider')
@@ -1957,7 +1985,7 @@ describe('고정 화면 (M4 B-2)', () => {
 
     const restarting = useStore.getState().restartApp('p1/slider')
     expect(mock.closedViews).toEqual([old])
-    // 화면의 효과가 지금 열려고 해도(열 수 있는 앱이다) 열리지 않는다 — restart가 막 띄운 앱을 내린다
+    // Even if the screen's effect tries to open it now (it is an app that can be opened), it does not open — restart tears down the app just brought up
     await useStore.getState().startPinnedView('p1/slider')
     release()
     await restarting
@@ -1967,7 +1995,7 @@ describe('고정 화면 (M4 B-2)', () => {
     expect(pinned()[0]).toMatchObject({ phase: 'open', instanceId: expect.not.stringMatching(old!) })
   })
 
-  it('보던 고정 화면이 되살아난다 — 목록에 없는 앱이면 포커스 뷰에 남는다', async () => {
+  it('a pinned view that was being viewed is restored — an app not in the list leaves the focus view instead', async () => {
     const mock = new MockPlatform()
     mock.externalAppList = [appInfo('slider')]
     mock.workspaceSnapshot = { view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } }
@@ -1986,14 +2014,15 @@ describe('고정 화면 (M4 B-2)', () => {
 })
 
 /**
- * 프로젝트의 기본 모델은 **도구의 것**이다 (#107).
+ * A project's default model belongs to **the tool** (#107).
  *
- * 실사고: `default_tool=codex`인 프로젝트가 `default_model=opus[1m]`을 들고 있었고,
- * 거기서 태어난 codex 세션은 매 턴 `400 invalid_request_error`로 죽었다. 인수인계는
- * 도구가 바뀔 때 일부러 모델을 비웠는데(`sameTool ? … : undefined`), 그 아래에서
- * 프로젝트 기본값이 다시 채웠다 — 가드가 위임한 층에게 무너진 모양이다.
+ * An actual incident: a project with `default_tool=codex` was also holding
+ * `default_model=opus[1m]`, and a codex session born from it died every turn with a
+ * `400 invalid_request_error`. A handoff deliberately clears the model when the tool changes
+ * (`sameTool ? … : undefined`), but the project default filled it right back in beneath that guard —
+ * a shape where the guard collapsed onto a layer it had delegated to.
  */
-describe('프로젝트 기본 모델은 도구를 따라간다 (#107)', () => {
+describe('a project\'s default model follows the tool (#107)', () => {
   const withDefaults = async (mock: MockPlatform, path: string, defaults: Record<string, { model: string | null; effort: string | null }>) => {
     const proj = await mock.projects.add(path)
     proj.defaultModels = defaults
@@ -2001,7 +2030,7 @@ describe('프로젝트 기본 모델은 도구를 따라간다 (#107)', () => {
     return proj
   }
 
-  it('도구가 다르면 그 도구의 기억만 온다 — 없으면 아무것도 보내지 않는다', async () => {
+  it('a different tool receives only that tool\'s own memory — with none, nothing is sent at all', async () => {
     const mock = new MockPlatform()
     const proj = await withDefaults(mock, '/tmp/def-1', { claude: { model: 'opus', effort: 'high' } })
     await useStore.getState().attach(mock)
@@ -2011,28 +2040,28 @@ describe('프로젝트 기본 모델은 도구를 따라간다 (#107)', () => {
     expect(mock.lastCreateParams?.model).toBeUndefined()
     expect(mock.lastCreateParams?.effort).toBeUndefined()
 
-    // 같은 도구에는 그대로 온다 — 기억하는 기능 자체는 살아 있어야 한다
+    // The same tool still gets it as is — the remembering feature itself must keep working
     await useStore.getState().createSession(proj.id, { tool: 'claude' })
     expect(mock.lastCreateParams?.model).toBe('opus')
     expect(mock.lastCreateParams?.effort).toBe('high')
   })
 
   /*
-   * 도구별로 적어 두는 것만으로는 부족하다: 모델은 은퇴한다. 어제 고른 이름이 오늘
-   * 목록에 없으면 그대로 보내는 쪽이 세션을 죽인다 — agents.models가 진실이다.
+   * Storing it per tool is not enough by itself: models retire. If the name picked yesterday is not
+   * on today's list, sending it as is kills the session — `agents.models` is the source of truth.
    */
-  it('그 도구가 더는 받지 않는 모델은 버린다', async () => {
+  it('drops a model that tool no longer accepts', async () => {
     const mock = new MockPlatform()
     const proj = await withDefaults(mock, '/tmp/def-2', { codex: { model: 'gpt-5-retired', effort: 'high' } })
     await useStore.getState().attach(mock)
 
     await useStore.getState().createSession(proj.id, { tool: 'codex' })
     expect(mock.lastCreateParams?.model).toBeUndefined()
-    // 강도는 모델의 손잡이라 함께 버린다 — 어느 모델의 것인지 모르는 high가 남으면 안 된다
+    // Effort is a handle on the model, so it is dropped together — a `high` of unknown origin must never remain
     expect(mock.lastCreateParams?.effort).toBeUndefined()
   })
 
-  it('아직 목록에 있는 모델은 그대로 간다', async () => {
+  it('a model still on the list is sent as is', async () => {
     const mock = new MockPlatform()
     const proj = await withDefaults(mock, '/tmp/def-3', { codex: { model: 'gpt-5.6-terra', effort: 'medium' } })
     await useStore.getState().attach(mock)
@@ -2043,7 +2072,7 @@ describe('프로젝트 기본 모델은 도구를 따라간다 (#107)', () => {
   })
 })
 
-describe('인수인계하고 새로 시작', () => {
+describe('handing off and starting fresh', () => {
   it('makes a new session from the note, hands on the name, and moves the original to the trash (#204)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho1')
@@ -2052,44 +2081,45 @@ describe('인수인계하고 새로 시작', () => {
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-s1')
-    // 인수인계 요청은 숨기지 않는다 — 세션의 보통 메시지로 들어간다
+    // A handoff request is never hidden — it enters as the session's own ordinary message
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
-    // 죽는 세션이 글을 **답으로** 쓴다 (#142) — host가 그 턴이 끝난 뒤 기록에서 읽어 파일로 놓는다
+    // The dying session writes its text **as the reply** (#142) — the host reads it from the record after that turn ends and places it as a file
     const notePath = mockNote(mock, 'ho-s1', '후계자에게: 상태 요약')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s1' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s1', state: 'waiting_input' } as NormalizedEvent)
     await done
 
     /*
-     * 새 세션의 첫 메시지는 **노트가 아니라 노트의 자리**다 (#102). 미리보기는 실리되
-     * 원문은 안 실린다 — 길이가 제약이 아니라는 프롬프트의 약속은 파일에서만 참이다.
+     * The new session's first message is **the note's location, not the note** (#102). A preview is
+     * carried, but not the full text — the prompt's promise that length is not a constraint is only
+     * true inside the file.
      */
     expect(mock.lastCreateParams?.initialPrompt).toContain(notePath)
     expect(mock.handoffNotes.get(notePath)).toBe('후계자에게: 상태 요약')
-    expect(mock.lastCreateParams?.initialPrompt).toContain('후계자에게: 상태 요약') // 미리보기
-    // 사용자 저장소에는 아무것도 쓰지도 치우지도 않았다 — 옛 자리의 노트도 그대로다 (#142)
+    expect(mock.lastCreateParams?.initialPrompt).toContain('후계자에게: 상태 요약') // Preview
+    // Nothing was written to or cleared from the user's repository — even the old note's location is untouched (#142)
     expect(repoHandoffTraces(mock, old)).toEqual([])
-    // 원문은 기록으로 간다 — 전임자가 사라지면 다시 만들 수 없는 유일한 재료다
-    // id도 함께 간다 (#106) — host의 청소가 이 노트에 아직 주인이 있음을 아는 근거다
+    // The full text goes into the record — the only material that can never be recreated once the predecessor is gone
+    // Its id goes along too (#106) — this is how the host's cleanup knows this note still has an owner
     expect(mock.lastCreateParams?.handoff).toEqual({ from: '메아', note: '후계자에게: 상태 요약', fromSessionId: 'ho-s1' })
     expect(mock.lastCreateParams?.tool).toBe('codex')
     expect(mock.lastCreateParams?.model).toBe('gpt-5.6')
     const heir = [...mock.sessions.values()].find((r) => r.name === '메아')
     expect(heir).toBeDefined()
     expect(heir!.id).not.toBe('ho-s1')
-    // 화면의 요약도 즉시 물려받은 설정을 보인다 — DB에만 있고 메뉴는 Default면 "안 넘어간 것"으로 읽힌다 (도그푸딩)
+    // The screen's summary also shows the inherited settings immediately — if it is only in the database while the menu says Default, it reads as "never carried over" (dogfooding)
     expect(useStore.getState().sessions[heir!.id]).toMatchObject({ model: 'gpt-5.6', effort: null })
     // The old session is in the trash (#204), its tool file marked to go when it is deleted for good
     expect(mock.sessions.has('ho-s1')).toBe(false)
     expect(mock.externallyDeleted).not.toContain('ho-s1')
     expect((await mock.trash.list()).sessions.find((x) => x.id === 'ho-s1')?.conversationFile).toBe('remove')
-    // 화면은 새 세션을 본다
+    // The screen is looking at the new session
     expect(useStore.getState().focusedSessionId).toBe(heir!.id)
   })
 
-  it('그리드 자리를 물려준다 — 후임자가 같은 인덱스에 서고, 순서는 밀리지 않는다', async () => {
+  it('inherits the grid slot — the successor stands at the same index, and the order does not shift', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho7')
     mock.sessions.set('ho-g1', sessionInfo('ho-g1', { projectId: proj.id }))
@@ -2108,17 +2138,17 @@ describe('인수인계하고 새로 시작', () => {
     await done
 
     const heir = [...mock.sessions.values()].find((r) => r.name === '한가운데' && r.id !== 'ho-g2')!
-    // 가운데 칸이 그대로 후임자다 — 칸이 사라졌다 다시 생기면 배치가 흐트러진다 (도그푸딩)
+    // The middle panel keeps its successor in place — a panel disappearing and reappearing would scramble the arrangement (dogfooding)
     expect(useStore.getState().gridPanels).toEqual(['ho-g1', heir.id, 'ho-g3'])
     expect(useStore.getState().focusedSessionId).toBe(heir.id)
   })
 
   /*
-   * 기록 모드 (#78): 서비스가 중단된 에이전트에게 노트를 부탁하는 것은 응답 불능인
-   * 상대에게 유언장을 부탁하는 것이다 — host가 저장소 원문으로 기록을 만들고,
-   * 죽은 세션에게는 **아무것도 묻지 않는다**.
+   * Record mode (#78): asking an agent whose service has been cut off for a note is asking a
+   * counterpart who cannot respond for a will — the host builds the record from the store's own
+   * transcript and **asks the dead session nothing at all**.
    */
-  it('기록 모드는 죽은 세션에게 아무것도 묻지 않고, 원본은 기본으로 남긴다 (#78)', async () => {
+  it('record mode asks the dead session nothing, and leaves the original by default (#78)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-rec')
     mock.sessions.set('ho-r1', sessionInfo('ho-r1', { projectId: proj.id, name: '죽은 메아', tool: 'codex', state: 'error' }))
@@ -2127,23 +2157,23 @@ describe('인수인계하고 새로 시작', () => {
 
     await useStore.getState().handoffSession('ho-r1', { mode: 'record', tool: 'claude' })
 
-    // 죽은 세션으로 나간 메시지가 없다 — 이 모드의 존재 이유
+    // No message went out to the dead session — this is the whole reason this mode exists
     expect((useStore.getState().chat['ho-r1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
-    // 기록도 **같은 자리**로 모인다 (#102) — 생산자만 다르고 후임자가 받는 말은 같다
+    // The record also lands at **the same location** (#102) — only the producer differs, and what the successor receives is identical
     expect(mock.handoffNotes.get(notePathOf(mock, 'ho-r1'))).toContain('Handoff Record')
     expect(mock.lastCreateParams?.initialPrompt).toContain(notePathOf(mock, 'ho-r1'))
-    expect(repoHandoffTraces(mock, old)).toEqual([]) // 사용자 저장소는 건드리지 않는다 (#142)
-    expect(mock.lastCreateParams?.initialPrompt).toContain('Handoff Record') // 미리보기
+    expect(repoHandoffTraces(mock, old)).toEqual([]) // The user's repository is never touched (#142)
+    expect(mock.lastCreateParams?.initialPrompt).toContain('Handoff Record') // Preview
     expect(mock.lastCreateParams?.handoff?.note).toContain('Handoff Record')
     expect(mock.lastCreateParams?.tool).toBe('claude')
-    // 원본은 남는다 — record 모드의 기본은 보존이다 (후임자가 확인될 때까지)
+    // The original survives — record mode's default is to preserve it (until the successor is confirmed)
     expect(mock.sessions.has('ho-r1')).toBe(true)
     expect(mock.externallyDeleted).not.toContain('ho-r1')
-    // 이름은 물려받는다
+    // The name is inherited
     expect([...mock.sessions.values()].some((r) => r.name === '죽은 메아' && r.id !== 'ho-r1')).toBe(true)
   })
 
-  it('세션이 글을 쓰다 에러가 나면 아무것도 지우지 않는다 — 파괴는 성공 뒤에만', async () => {
+  it('deletes nothing if the session errors while writing — destruction only follows success', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho2')
     mock.sessions.set('ho-s2', sessionInfo('ho-s2', { projectId: proj.id, name: '메아2' }))
@@ -2161,7 +2191,7 @@ describe('인수인계하고 새로 시작', () => {
     expect(useStore.getState().toast).toMatch(/Handoff failed/)
   })
 
-  it('다른 에이전트에게 넘기면 도구별 설정은 물려주지 않는다', async () => {
+  it('handing off to a different agent never carries over tool-specific settings', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho5')
     mock.sessions.set('ho-s5', sessionInfo('ho-s5', { projectId: proj.id, name: '갈아타기', tool: 'codex', model: 'gpt-5.6', effort: 'high' }))
@@ -2177,13 +2207,13 @@ describe('인수인계하고 새로 시작', () => {
     await done
 
     expect(mock.lastCreateParams?.tool).toBe('claude')
-    // codex의 모델·강도를 claude에 넘기면 생성부터 죽는다 — 물려주지 않는다
+    // Passing codex's model and effort to claude kills session creation outright — never carried over
     expect(mock.lastCreateParams?.model).toBeUndefined()
     expect(mock.lastCreateParams?.effort).toBeUndefined()
-    expect(mock.sessions.has('ho-s5')).toBe(false) // 삭제 기본값은 그대로 켜져 있다
+    expect(mock.sessions.has('ho-s5')).toBe(false) // The delete default is still on
   })
 
-  it('삭제를 끄면 기존 세션이 남는다 — 갈아타기가 아니라 분기', async () => {
+  it('turning off deletion leaves the old session standing — a branch, not a switch', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho6')
     mock.sessions.set('ho-s6', sessionInfo('ho-s6', { projectId: proj.id, name: '분기' }))
@@ -2198,24 +2228,24 @@ describe('인수인계하고 새로 시작', () => {
     mock.emit({ type: 'state_change', sessionId: 'ho-s6', state: 'waiting_input' } as NormalizedEvent)
     await done
 
-    expect(mock.sessions.has('ho-s6')).toBe(true) // 기존 세션이 산다
+    expect(mock.sessions.has('ho-s6')).toBe(true) // The old session survives
     expect(mock.externallyDeleted).not.toContain('ho-s6')
     expect([...mock.sessions.values()].filter((r) => r.name === '분기').length).toBe(2)
   })
 
-  it('돌던 턴의 보고가 글 머리에 섞이지 않는다 — 턴이 끝난 뒤에 부탁한다 (메아 실측)', async () => {
+  it('a running turn\'s report never mixes into the top of the note — the request waits for the turn to end (a measured dogfooding case)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho4')
     mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: '메아4', state: 'working' }))
     await useStore.getState().attach(mock)
 
     const done = useStore.getState().handoffSession('ho-s4')
-    // 돌던 턴이 아직 안 끝났다 — 프롬프트는 나가지 않고, 그 턴의 보고만 흘러든다
+    // The running turn has not ended yet — the prompt is never sent, only that turn's report streams in
     await new Promise((r) => setTimeout(r, 700))
     mock.emit({ type: 'message_delta', sessionId: 'ho-s4', role: 'assistant', text: '적용했습니다: 직전 작업 보고' } as NormalizedEvent)
     expect((useStore.getState().chat['ho-s4'] ?? []).some((i) => i.kind === 'user')).toBe(false)
 
-    // 턴이 끝나면 그제야 부탁한다
+    // Only once the turn ends is the request finally sent
     mock.emit({ type: 'turn_complete', sessionId: 'ho-s4' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
     await vi.waitFor(() => {
@@ -2226,18 +2256,19 @@ describe('인수인계하고 새로 시작', () => {
     mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
     await done
 
-    // 직전 턴의 보고는 글에 없다 — "적용했습니다"로 시작하는 인수인계가 바로 그 사고였다
+    // The report from the previous turn is not in the text — a handoff starting with "Applied:" was exactly that incident
     expect(mock.lastCreateParams?.handoff?.note).toBe('# 1. 프로젝트와 목표')
     expect(mock.lastCreateParams?.initialPrompt).not.toContain('적용했습니다')
   })
 
   /*
-   * #102: 전임자에게는 "파일이니 길이는 제약이 아니다"라고 말해 놓고 그 결과를 한 통의
-   * 채팅 메시지로 배달했다 — 길수록 충실한 노트가 되고, 충실할수록 후임자가 도착하자마자
-   * 죽었다 (실측: 긴 세션을 codex에 넘기자 에러). 첫 메시지는 이제 노트의 **자리**를
-   * 가리키므로, 노트가 아무리 길어져도 첫 메시지는 자라지 않는다.
+   * #102: the predecessor was told "it is a file, so length is not a constraint" and then the result
+   * was delivered as a single chat message — the longer it got, the more thorough the note, and the
+   * more thorough, the more likely the successor died the moment it arrived (measured: handing a long
+   * session off to codex produced an error). The first message now points at the note's **location**
+   * instead, so no matter how long the note grows, the first message never grows with it.
    */
-  it('긴 노트도 거대한 첫 메시지가 되지 않는다 — 넘기는 것은 내용이 아니라 경로다 (#102)', async () => {
+  it('even a long note never becomes a huge first message — what is handed over is a path, not the content (#102)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-big')
     mock.sessions.set('ho-big', sessionInfo('ho-big', { projectId: proj.id, name: '오래 산 세션' }))
@@ -2254,24 +2285,25 @@ describe('인수인계하고 새로 시작', () => {
     await done
 
     const prompt = mock.lastCreateParams!.initialPrompt!
-    // 노트는 80만 자가 넘는데 첫 메시지는 한 화면이다 — 이 격차가 곧 이 고침이다
+    // The note is over 500,000 characters, but the first message fits on one screen — that gap is exactly what this fix is
     expect(huge.length).toBeGreaterThan(500_000)
     expect(prompt.length).toBeLessThan(2_000)
     expect(prompt).toContain(bigPath)
-    expect(prompt).toContain('# 1. 프로젝트와 목표') // 미리보기는 있다
-    // 그리고 노트는 유실되지 않는다 — 파일보다 오래 사는 곳(기록)에 원문이 있다
+    expect(prompt).toContain('# 1. 프로젝트와 목표') // A preview is there
+    // And the note is never lost — its full text lives somewhere that outlives the file (the record)
     const kept = mock.lastCreateParams?.handoff?.note ?? ''
     expect(kept).toHaveLength(huge.trim().length)
     expect(kept.endsWith('노트도 그만큼 길다.')).toBe(true)
   })
 
   /*
-   * #106: 청소는 턴 경계에 매달려 있었다 — 후임자의 **첫 턴이 끝나는 순간**. 그 조건은
-   * 턴이 성공했는지도, 노트를 읽었는지도 묻지 않는다. 실사고에서 첫 턴은 1초도 안 돼
-   * 400으로 죽었고 디렉토리는 3분 만에 비었다. 후임자는 없는 파일의 경로를 들고 있었고,
-   * 그 글은 쓴 세션이 방금 대체됐으므로 다시 만들 수 없다.
+   * #106: cleanup used to hang off a turn boundary — **the instant the successor's first turn ends.**
+   * That condition asks neither whether the turn succeeded nor whether the note was ever read. In an
+   * actual incident, the first turn died with a 400 in under a second, and the directory was empty
+   * within three minutes. The successor was holding a path to a file that no longer existed, and that
+   * text could never be recreated, since the session that wrote it had just been replaced.
    */
-  it('첫 턴이 실패해도 노트는 남는다 — 턴 경계에서는 아무것도 치우지 않는다 (#106)', async () => {
+  it('the note survives even if the first turn fails — nothing is ever cleared at a turn boundary (#106)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-sweep')
     mock.sessions.set('ho-sw', sessionInfo('ho-sw', { projectId: proj.id, name: '치우기' }))
@@ -2287,12 +2319,12 @@ describe('인수인계하고 새로 시작', () => {
     await done
 
     const heir = [...mock.sessions.values()].find((r) => r.name === '치우기' && r.id !== 'ho-sw')!
-    // 첫 턴이 400으로 죽는다 — 예전에는 이 자리에서 노트가 사라졌다
+    // The first turn dies with a 400 — the note used to disappear right here
     mock.emit({
       type: 'error', sessionId: heir.id,
       error: { code: 'internal', message: "The 'opus[1m]' model is not supported", retryable: true },
     } as NormalizedEvent)
-    // 성공한 턴이 와도 마찬가지다 — 근거는 "읽었는가"인데 그것은 관찰할 수 없다
+    // Same result even with a successful turn — the reasoning was "was it read," which cannot be observed
     mock.emit({ type: 'turn_complete', sessionId: heir.id } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 50))
 
@@ -2300,19 +2332,20 @@ describe('인수인계하고 새로 시작', () => {
   })
 
   /*
-   * #104: 한 프로젝트에서 세션 여럿을 동시에 돌리는 것이 이 앱의 존재 이유인데, 인수인계
-   * 파일은 프로젝트마다 하나였다. 그래서 동시에 도는 두 인수인계는 (1) 같은 자리에 써서
-   * 늦게 쓴 쪽이 이겼고 — 기다리던 쪽은 모양이 맞고 내용이 틀린 노트를 조용히 받았다 —
-   * (2) 먼저 첫 턴을 마친 후임자의 청소가 남의 글을 치웠다.
+   * #104: running several sessions at once in one project is the whole reason this app exists, yet the
+   * handoff file was one per project. So two handoffs running at the same time would (1) write to the
+   * same location, letting whichever wrote later win — the one waiting quietly received a note with
+   * the right shape and the wrong content — and (2) have the successor that finished its first turn
+   * first clear away someone else's text with its cleanup.
    */
-  it('같은 프로젝트의 두 인수인계가 서로의 글을 덮지도 치우지도 않는다 (#104)', async () => {
+  it('two handoffs in the same project never overwrite or clear each other\'s text (#104)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-pair')
     mock.sessions.set('ho-a', sessionInfo('ho-a', { projectId: proj.id, name: '왼쪽' }))
     mock.sessions.set('ho-b', sessionInfo('ho-b', { projectId: proj.id, name: '오른쪽' }))
     await useStore.getState().attach(mock)
 
-    // 둘을 나란히 건다 — 순서대로 하면 이 버그는 아예 나타나지 않는다
+    // Both are started side by side — doing them one after the other would never surface this bug at all
     const a = useStore.getState().handoffSession('ho-a', { deleteOld: false })
     const b = useStore.getState().handoffSession('ho-b', { deleteOld: false })
     await vi.waitFor(() => {
@@ -2327,7 +2360,7 @@ describe('인수인계하고 새로 시작', () => {
     }
     await Promise.all([a, b])
 
-    // 각자 제 전임자의 글을 받았다 — 이름이 하나였을 때는 둘 다 나중에 쓰인 한 글을 받았다
+    // Each received its own predecessor's text — when there was one filename, both received whichever one was written last
     const paramsOf = (from: string) => mock.createParamsLog.find((x) => x.handoff?.from === from)
     expect(paramsOf('왼쪽')?.handoff?.note).toBe('왼쪽의 노트')
     expect(paramsOf('오른쪽')?.handoff?.note).toBe('오른쪽의 노트')
@@ -2335,9 +2368,9 @@ describe('인수인계하고 새로 시작', () => {
     expect(paramsOf('오른쪽')?.initialPrompt).toContain(pathB)
 
     /*
-     * 한쪽 후임자의 첫 턴이 끝나도 **아무 글도 사라지지 않는다** (#106). 청소가 턴에
-     * 매달려 있던 동안에는 먼저 끝난 쪽이 남의 글을 치웠고(#104가 고친 것), 이제는
-     * 자기 전임자의 글조차 여기서 치우지 않는다 — 읽었는지 알 방법이 없어서다.
+     * Even after one successor's first turn ends, **no text disappears** (#106). While cleanup hung
+     * off a turn, whichever finished first cleared away someone else's text (what #104 fixed); now not
+     * even its own predecessor's text is cleared here — there is no way to tell whether it was read.
      */
     const heirA = [...mock.sessions.values()].find((r) => r.name === '왼쪽' && r.id !== 'ho-a')!
     mock.emit({ type: 'turn_complete', sessionId: heirA.id } as NormalizedEvent)
@@ -2348,18 +2381,20 @@ describe('인수인계하고 새로 시작', () => {
   })
 
   /*
-   * #104의 짝 (#142): 예전의 대기 루프는 "파일이 있고 비어 있지 않다"만 봐서, 지난 인수인계가 실패하고
-   * 남긴 파일이 갓 쓴 노트로 배달됐다. 이제 노트는 답이다 — 같은 함정은 **지난 부탁의 답**이다. 실패한
-   * 인수인계는 같은 부탁과 그 답을 대화에 남기고, host는 "부탁 뒤의 마지막 답"을 노트로 읽는다. 부탁을
-   * 처음 것으로 찾으면 그 답이 곧 옛 노트다.
+   * The counterpart of #104 (#142): the old wait loop only checked "the file exists and is not
+   * empty," so a file left behind by a past failed handoff was delivered as if it were the freshly
+   * written note. Now that the note is a reply, the same trap becomes **the reply to a past request.**
+   * A failed handoff leaves the same request and its reply sitting in the conversation, and the host
+   * reads "the last reply after the request" as the note. Finding the request by taking the first one
+   * makes that old reply the note.
    */
-  it('지난 실패가 남긴 답을 갓 쓴 노트로 착각하지 않는다 (#104, #142)', async () => {
+  it('a reply left by a past failure is never mistaken for a freshly written note (#104, #142)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-stale')
     mock.sessions.set('ho-st', sessionInfo('ho-st', { projectId: proj.id, name: '오래된 자리' }))
     await useStore.getState().attach(mock)
 
-    // 지난 번에 실패한 인수인계: 같은 부탁과 그 답이 이미 대화에 있다
+    // A handoff that failed previously: the same request and its reply are already in the conversation
     mock.emit({ type: 'user_message', sessionId: 'ho-st', seq: 1, text: handoffPrompt() } as NormalizedEvent)
     mockNote(mock, 'ho-st', '지난 달에 실패한 인수인계가 남긴 옛 노트')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
@@ -2369,13 +2404,13 @@ describe('인수인계하고 새로 시작', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-st'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
-    // 전임자가 이번 턴을 끝냈는데 아무것도 답하지 않았다 — 옛 글이 배달되던 바로 그 순간이다
+    // The predecessor ended this turn without answering anything — exactly the moment the old text used to be delivered
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 1_500))
-    expect(mock.createParamsLog).toEqual([]) // 후임자는 태어나지 않는다 — 아직 받을 글이 없다
+    expect(mock.createParamsLog).toEqual([]) // No successor is born — there is nothing yet for it to receive
 
-    // 진짜 노트가 오면 그제야 넘어간다
+    // Only once the real note arrives does it proceed
     mockNote(mock, 'ho-st', '방금 쓴 새 노트')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
@@ -2384,16 +2419,19 @@ describe('인수인계하고 새로 시작', () => {
   })
 
   /*
-   * #142: 노트의 자리는 "부탁 직전의 마지막 기록" 뒤의 첫 사람 말이다. 그 자리를 화면의 lastSeq로 재면, 앞서 보낸
-   * 말의 확정(user_message)이 아직 안 온 동안 lastSeq가 그 말을 세지 않아 뒤처진다 — 그러면 자리 뒤의 첫 사람 말은
-   * 앞서 보낸 말이고, 부탁은 "다음 사람 말"이 되어 답이 영영 노트로 읽히지 않는다(e2e에서 실제로 멈췄다).
+   * #142: the note's location is the first human message after "the last recorded point right before
+   * the request." If that point is measured by the screen's `lastSeq`, then while the confirmation
+   * (`user_message`) for a message sent earlier has not yet arrived, `lastSeq` does not count that
+   * message and lags behind — so the first human message after that lagging point is the earlier
+   * message, and the request becomes "the next human message," so the reply is never read as the note
+   * (this actually stalled in e2e).
    */
-  it('앞서 보낸 말이 아직 확정되지 않았어도 부탁의 자리를 놓치지 않는다 (#142)', async () => {
+  it('never misses the request\'s point even when a previously sent message has not been confirmed yet (#142)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-lag')
     mock.sessions.set('ho-lag', sessionInfo('ho-lag', { projectId: proj.id, name: '늦은 확정' }))
     await useStore.getState().attach(mock)
-    // 사람이 먼저 한 마디 했고 턴이 끝났다 — 목은 그 말의 확정을 보내지 않는다(화면의 lastSeq가 그 말을 모른다)
+    // A person spoke first and the turn ended — the mock never sends that message's confirmation (the screen's lastSeq does not know about it)
     await useStore.getState().send('ho-lag', '먼저 한 말')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-lag' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-lag', state: 'waiting_input' } as NormalizedEvent)
@@ -2409,7 +2447,7 @@ describe('인수인계하고 새로 시작', () => {
     expect(mock.lastCreateParams?.handoff?.note).toBe('늦은 확정의 노트')
   })
 
-  it('워크트리 세션은 거른다 — 워크트리의 수명이 세션에 묶여 있다', async () => {
+  it('filters out worktree sessions — a worktree\'s lifetime is bound to its session', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho3')
     mock.sessions.set(
@@ -2426,9 +2464,9 @@ describe('인수인계하고 새로 시작', () => {
   })
 })
 
-/** MCP 서버 제안 카드 (b안) — 제안 이벤트가 목록을 새로 읽고, 승인 클릭이 host로 간다 */
-describe('MCP 서버 제안', () => {
-  it('propose_mcp_server 도구 호출이 오면 제안 목록을 다시 읽는다', async () => {
+/** An MCP server suggestion card (option B) — a suggestion event re-reads the list, and clicking approve goes to the host */
+describe('MCP server suggestions', () => {
+  it('a propose_mcp_server tool call re-reads the suggestion list', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('mcp-s1', sessionInfo('mcp-s1'))
     await useStore.getState().attach(mock)
@@ -2446,7 +2484,7 @@ describe('MCP 서버 제안', () => {
     })
   })
 
-  it('승인 클릭이 host로 전달되고 목록이 비워진다', async () => {
+  it('clicking approve is passed to the host and empties the list', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: [] })
@@ -2460,9 +2498,9 @@ describe('MCP 서버 제안', () => {
   })
 })
 
-/** 스킬 제안 (#71) — MCP 제안과 같은 레일: 이벤트가 목록을 깨우고, 승인이 host로 간다 */
-describe('스킬 제안', () => {
-  it('propose_skill 도구 호출이 오면 제안 목록을 다시 읽고, 승인이 저장으로 이어진다', async () => {
+/** A skill suggestion (#71) — the same rail as an MCP suggestion: an event wakes the list, and approval goes to the host */
+describe('skill suggestions', () => {
+  it('a propose_skill tool call re-reads the suggestion list, and approving leads to a save', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('sk-s1', sessionInfo('sk-s1'))
     await useStore.getState().attach(mock)
@@ -2485,8 +2523,8 @@ describe('스킬 제안', () => {
   })
 })
 
-describe('명령 실행 장부 (#60 → 터미널 패널 이관)', () => {
-  it('runCommand는 프로젝트·명령 아래 실행을 적고, exit 이벤트가 결말을 적는다', async () => {
+describe('the command run ledger (#60, moved into the terminal panel)', () => {
+  it('runCommand records a run under its project and command, and an exit event records the outcome', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/cmd')
@@ -2495,31 +2533,31 @@ describe('명령 실행 장부 (#60 → 터미널 패널 이관)', () => {
     let r = useStore.getState().commandRuns[p.id]!['pnpm dev']!
     expect(r.running).toBe(true)
 
-    // 데브 서버가 죽었다 — runId가 terminalId 자리를 타고 exit가 온다
+    // The dev server dies — the runId rides in the terminalId slot and the exit arrives
     mock.exitCommand(p.id, 'pnpm dev', 1)
     r = useStore.getState().commandRuns[p.id]!['pnpm dev']!
     expect(r.running).toBe(false)
     expect(r.exitCode).toBe(1)
   })
 
-  it('셸 터미널의 exit는 장부를 건드리지 않는다 — 아는 runId만 결말로 받는다', async () => {
+  it('a shell terminal\'s exit never touches the ledger — only a known runId is recorded as an outcome', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/cmd2')
     await useStore.getState().runCommand(p.id, 'pnpm dev')
 
-    // 모르는 terminalId (셸 터미널이 죽은 상황)
+    // An unknown terminalId (a shell terminal dying)
     mock.emitTerminalExit('shell-1', 0)
     expect(useStore.getState().commandRuns[p.id]!['pnpm dev']!.running).toBe(true)
 
-    // 같은 방사구로 **아는** runId가 오면 결말이 적힌다 — 위 무시가 공허하지 않다는 증명
+    // A **known** runId arriving through the same channel records the outcome — proof that the ignore above is not empty
     mock.emitTerminalExit(useStore.getState().commandRuns[p.id]!['pnpm dev']!.runId, 0)
     expect(useStore.getState().commandRuns[p.id]!['pnpm dev']!.running).toBe(false)
   })
 
-  it('loadCommandRuns는 host 장부를 투영한다 — UI가 리로드돼도 도는 명령이 보인다', async () => {
+  it('loadCommandRuns projects the host\'s ledger — a running command stays visible even after a UI reload', async () => {
     const mock = new MockPlatform()
-    // UI(스토어)가 모르는 사이 host에서 이미 돌고 있던 실행
+    // A run already running on the host, unbeknownst to the UI (the store)
     const p0 = await mock.projects.add('/tmp/cmd3')
     await mock.commands.run(p0.id, 'pnpm dev', 80, 24)
 
@@ -2529,7 +2567,7 @@ describe('명령 실행 장부 (#60 → 터미널 패널 이관)', () => {
     expect(useStore.getState().commandRuns[p0.id]!['pnpm dev']!.running).toBe(true)
   })
 
-  it('stopCommand의 결말도 exit 이벤트로 돌아온다 (130 = SIGINT 관례)', async () => {
+  it('stopCommand\'s outcome also comes back as an exit event (130 = the SIGINT convention)', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     const p = await useStore.getState().addProject('/tmp/cmd4')
@@ -2544,13 +2582,14 @@ describe('명령 실행 장부 (#60 → 터미널 패널 이관)', () => {
 
 
 /**
- * 기록을 읽기 전에 대화 아닌 이벤트가 먼저 오면 (도그푸딩 2026-09-25).
+ * When a non-conversation event arrives before history is read (dogfooding, 2026-09-25).
  *
- * 앱을 다시 켜자 11,550줄짜리 세션이 통째로 비어 보였다. host가 세션을 재개하며 보낸
- * 상태·사용량 이벤트가, 사용자가 그 세션을 누르기 전에 `chat[id] = []`를 만들었고,
- * 포커스는 그 빈 배열을 "이미 읽었다"로 읽어 기록을 부르지 않았다. 오류도 없었다.
+ * Reopening the app showed an 11,550-line session as completely empty. A state or usage event the
+ * host sent while resuming the session created `chat[id] = []` before the user ever clicked that
+ * session, and focusing read that empty array as "already read," so history was never called. There
+ * was no error either.
  */
-describe('기록보다 먼저 온 이벤트', () => {
+describe('an event arriving before history', () => {
   const many = (id: string, n: number) =>
     Array.from({ length: n }, (_, i) => ({
       sessionId: id, seq: i + 1, role: 'user' as const, kind: 'text' as const,
@@ -2561,7 +2600,7 @@ describe('기록보다 먼저 온 이벤트', () => {
     ['context_usage', { type: 'context_usage', used: 111693, window: 1000000, exactness: 'exact' }],
   ] as const
 
-  it.each(quiet)('%s가 먼저 와도, 그 세션을 누르면 기록이 보인다', async (_name, ev) => {
+  it.each(quiet)('even if %s arrives first, clicking that session still shows history', async (_name, ev) => {
     const mock = new MockPlatform()
     mock.sessions.set('a', sessionInfo('a'))
     mock.sessions.set('b', sessionInfo('b'))
@@ -2576,13 +2615,13 @@ describe('기록보다 먼저 온 이벤트', () => {
     expect(useStore.getState().history['b']?.more).toBe(false)
   })
 
-  it('기록을 읽는 사이에 대화 아닌 이벤트가 끼어도 기록을 버리지 않는다', async () => {
+  it('a non-conversation event slipping in mid-read never discards history', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('c', sessionInfo('c'))
     mock.messages.set('c', many('c', 30))
     await useStore.getState().attach(mock)
 
-    // 기록 요청이 나간 뒤, 응답이 오기 전에 이벤트가 도착하도록 응답을 붙잡는다
+    // Holds back the answer so the event arrives after the history request goes out but before the answer comes back
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
     const real = mock.agents.loadMessages.bind(mock.agents)
@@ -2600,11 +2639,12 @@ describe('기록보다 먼저 온 이벤트', () => {
   })
 
   /*
-   * 근본 고침은 이쪽이다: 대화가 아닌 이벤트는 자리를 만들지 않는다. `chat[id]`가 없다는
-   * 것은 저장소 전체에서 "아직 안 읽었다"로 쓰인다(포커스, 세션 생성). 아래 두 방어선이
-   * 로딩을 막아 주므로, 이 약속은 따로 걸지 않으면 깨져도 아무도 모른다.
+   * The actual fix is here: a non-conversation event never creates a slot. `chat[id]` being absent is
+   * used throughout the store as "not read yet" (focus, session creation). The two safeguards below
+   * catch this at load time, so this promise would silently break without a test pinning it down on
+   * its own.
    */
-  it.each(quiet)('%s는 아직 안 읽은 세션에 빈 자리를 만들지 않는다', async (_name, ev) => {
+  it.each(quiet)('%s never creates an empty slot for an unread session', async (_name, ev) => {
     const mock = new MockPlatform()
     mock.sessions.set('g', sessionInfo('g'))
     await useStore.getState().attach(mock)
@@ -2612,16 +2652,17 @@ describe('기록보다 먼저 온 이벤트', () => {
     mock.emit({ sessionId: 'g', ...ev } as unknown as NormalizedEvent)
 
     expect(useStore.getState().chat['g']).toBeUndefined()
-    // 상태는 그대로 반영된다 — 자리를 안 만든다고 이벤트를 버리는 것이 아니다
+    // State is still applied as usual — not creating a slot does not mean discarding the event
     expect(useStore.getState().sessions['g']).toBeDefined()
   })
 
   /*
-   * 아래 둘은 이벤트와 **무관하게** 규칙 자체를 건다: 빈 자리는 읽지 않은 것과 같다.
-   * 빈 배열을 만드는 길은 이벤트만이 아니다(낙관적으로 그린 줄을 되돌리는 filter도
-   * 비울 수 있다). 위 시험들은 이벤트 쪽 고침이 막아 버려서 이 두 방어선을 보지 못한다.
+   * The two below pin down the rule itself, **independent of any event**: an empty slot is treated the
+   * same as never having read it. An event is not the only way an empty array gets created (a filter
+   * that undoes an optimistically drawn row can also empty it). The tests above never see these two
+   * safeguards, since the event-side fix already blocks it.
    */
-  it('빈 자리에 커서도 없는 세션을 누르면 기록을 부른다 — 빈 자리가 어디서 왔든', async () => {
+  it('clicking a session with an empty slot and no cursor still calls history — no matter where the empty slot came from', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('a', sessionInfo('a'))
     mock.sessions.set('e', sessionInfo('e'))
@@ -2635,7 +2676,7 @@ describe('기록보다 먼저 온 이벤트', () => {
     await vi.waitFor(() => expect(useStore.getState().chat['e']).toHaveLength(20))
   })
 
-  it('기록이 도착했을 때 자리가 비어 있으면 기록으로 채운다 — 빈 자리가 어디서 왔든', async () => {
+  it('if the slot is still empty by the time history arrives, history fills it — no matter where the empty slot came from', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('f', sessionInfo('f'))
     mock.messages.set('f', many('f', 25))
@@ -2656,7 +2697,7 @@ describe('기록보다 먼저 온 이벤트', () => {
     expect(useStore.getState().chat['f']).toHaveLength(25)
   })
 
-  it('화면에 줄이 이미 있어도 기록과 합칠 뿐 지우지 않는다 (09-09의 약속, #79)', async () => {
+  it('even when a row already exists on screen, it is merged with history rather than cleared (the promise from 09-09, #79)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('a', sessionInfo('a'))
     mock.sessions.set('d', sessionInfo('d'))
@@ -2664,7 +2705,7 @@ describe('기록보다 먼저 온 이벤트', () => {
     await useStore.getState().attach(mock)
     useStore.getState().focusSession('a')
 
-    // 스트리밍 중인 말이 먼저 왔다 — 이건 지우면 안 되는 줄이다
+    // A streaming message arrived first — this is a row that must never be cleared
     mock.emit(delta('d', '지금 쓰는 중'))
     useStore.getState().focusSession('d')
     await new Promise((r) => setTimeout(r, 20))
@@ -2676,17 +2717,18 @@ describe('기록보다 먼저 온 이벤트', () => {
 })
 
 /**
- * 대화 안 앱 화면의 자리 복원 (M4 B-1). 기록에는 본문 없이 "이 카드 아래에 어느 앱의 화면이 섰다(또는
- * 거절됐다)"만 있다 — 다시 연 UI는 그 카드에 자리표시를 세운다. 다시 열 수 있는지는 host에 묻기 전까지
- * 모른다(kept: false). 기록의 앱 화면 줄은 대화의 줄(ChatItem)이 되지 않는다.
+ * Restoring the slot of an in-conversation app view (M4 B-1). History carries no body, only "some
+ * app's view stood (or was rejected) under this card" — a reopened UI stands a placeholder on that
+ * card. Whether it can be reopened is unknown until the host is asked (`kept: false`). A history row
+ * for an app view never becomes a conversation row (`ChatItem`).
  */
-describe('inlineViewsFromHistory — 지난 카드의 앱 화면 자리', () => {
+describe('inlineViewsFromHistory — a past card\'s app view slot', () => {
   const row = (seq: number, payload: Record<string, unknown>) =>
     ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'app_view' as const, payload, ts: 0 })
   const call = (seq: number, callId: string) =>
     ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'tool_call' as const, payload: { type: 'tool_call', callId, summary: { tool: 'mcp__app-viewer__show', title: 'show', readOnly: false, paths: [] } }, ts: 0 })
 
-  it('열림은 다시 열 수 있는지 모르는 자리표시로, 거절은 이유만 있는 자리표시로 — 같은 카드면 나중 줄이 이긴다', () => {
+  it('an open becomes a placeholder of unknown reopenability, a rejection a placeholder with only a reason — the same card lets the later row win', () => {
     const msgs = [
       call(1, 'c-open'),
       row(2, { type: 'app_view', callId: 'c-open', appId: 'viewer', projectId: 'p1', tool: 'show', phase: 'open' }),
@@ -2695,7 +2737,7 @@ describe('inlineViewsFromHistory — 지난 카드의 앱 화면 자리', () => 
       call(5, 'c-late'),
       row(6, { type: 'app_view', callId: 'c-late', appId: 'viewer', projectId: 'p1', tool: 'show', phase: 'open' }),
       row(7, { type: 'app_view', callId: 'c-late', appId: 'viewer', projectId: 'p1', tool: 'show', phase: 'rejected', reason: "This call's result points at ui://other/main" }),
-      // 모양이 틀린 줄은 버린다
+      // A malformed row is discarded
       row(8, { type: 'app_view', phase: 'open' }),
     ]
     expect(inlineViewsFromHistory(msgs)).toEqual({
@@ -2709,20 +2751,21 @@ describe('inlineViewsFromHistory — 지난 카드의 앱 화면 자리', () => 
         rejected: "This call's result points at ui://other/main", reason: "This call's result points at ui://other/main",
       },
     })
-    // 대화의 줄은 카드 셋뿐이다 — 앱 화면의 기록은 줄이 되지 않는다
+    // The conversation's rows are only the three cards — a history row for an app view never becomes a row
     expect(messagesToChat(msgs).map((i) => i.kind)).toEqual(['tool', 'tool', 'tool'])
   })
 })
 
 /**
- * 새 코드를 따라 다시 연다 (M4 C-4). 판정은 목록의 지문(`codeStamp`) 하나다 — 화면을 열 때 떠 있던 코드와 달라지면 옛 HTML
- * 이다. 열 때 몰랐으면(앱이 그 순간 처음 떴다) 처음 알게 된 값을 받기만 한다: 그것을 변화로 읽으면 막 연 화면을 한 번 더
- * 연다.
+ * Reopening to follow new code (M4 C-4). The decision comes down to one thing: the list's fingerprint
+ * (`codeStamp`) — if it differs from the code that was up when the view opened, it is stale HTML. If
+ * it was unknown at open time (the app came up for the first time at that instant), only the first
+ * value learned is recorded: reading that as a change would reopen a view that had just opened.
  */
-describe('새 코드를 따라 다시 연다 (M4 C-4)', () => {
+describe('reopening to follow new code (M4 C-4)', () => {
   const pinned = () => useStore.getState().pinnedViews
 
-  it('열 때 지문을 모르면 받기만 하고, 그 뒤 지문이 바뀌면 teardown 뒤 같은 자리를 새로 연다', async () => {
+  it('records the fingerprint if it is unknown at open time, and once it later changes, tears down and reopens the same slot', async () => {
     const mock = new MockPlatform()
     mock.externalAppList = [appInfo('slider', { status: 'running' })]
     await useStore.getState().attach(mock)
@@ -2745,27 +2788,28 @@ describe('새 코드를 따라 다시 연다 (M4 C-4)', () => {
     expect(mock.closedViews).toEqual([first.instanceId])
     expect(pinned()).toEqual([expect.objectContaining({ key: 'p1/slider', instanceId: null, codeStamp: null, updatedAt: expect.any(Number) })])
     expect(useStore.getState().focusedApp).toEqual({ projectId: 'p1', appId: 'slider' })
-    // 화면이 다시 열면 새 지문을 받는다 — 그 뒤로는 같은 지문이라 조용하다
+    // Reopening the view receives the new fingerprint — after that it is quiet, since the fingerprint matches
     await useStore.getState().startPinnedView('p1/slider')
     expect(pinned()[0]).toMatchObject({ phase: 'open', codeStamp: 'bbbb', updatedAt: expect.any(Number) })
-    // 사람이 다시 시작한 화면에는 "Updated"가 서지 않는다 — 그 말은 새 코드로 다시 연 화면의 것이다
+    // A view the person restarted themselves never shows "Updated" — that belongs only to a view that reopened with new code
     await useStore.getState().restartApp('p1/slider')
     expect(pinned()[0]).toMatchObject({ updatedAt: null, codeStamp: null })
   })
 })
 
 /**
- * 기다리는 사이에 지워진 세션 (#163). RPC를 기다린 뒤의 set이 `{ ...s.sessions[id]!, … }`로 펼쳐서, 그 사이에
- * session_deleted가 오면 필드가 거의 없는 행을 되살렸다 — 모든 세션을 도는 코드가 그 행에서 깨졌다.
+ * A session deleted while awaited (#163). A post-await `set` spreading `{ ...s.sessions[id]!, … }`
+ * revived a nearly empty row if `session_deleted` arrived in that window — code that iterates every
+ * session broke on that row.
  */
-describe('기다리는 사이에 지워진 세션은 되살아나지 않는다 (#163)', () => {
+describe('a session deleted while awaited is never revived (#163)', () => {
   function stalled<T>() {
     let resolve!: (v: T) => void
     const p = new Promise<T>((r) => (resolve = r))
     return { p, resolve }
   }
 
-  it('깨우는 사이에 지워지면 깨우기의 답이 행을 다시 만들지 않는다', async () => {
+  it('if deleted while waking, the wake response never recreates the row', async () => {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
     const wake = stalled<{ session: SessionInfo; resumed: boolean; reason?: string }>()
@@ -2781,7 +2825,7 @@ describe('기다리는 사이에 지워진 세션은 되살아나지 않는다 (
     expect(useStore.getState().wakeError[s.id]).toBeUndefined()
   })
 
-  it('읽음 표시를 기다리는 사이에 지워져도 던지지 않고 행을 만들지 않는다', async () => {
+  it('a deletion while waiting for the mark-as-read call never throws and never creates a row', async () => {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
     const mark = stalled<void>()
@@ -2796,7 +2840,7 @@ describe('기다리는 사이에 지워진 세션은 되살아나지 않는다 (
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
   })
 
-  it('지운 세션의 알림 카드와 세션별 짐도 함께 사라진다', () => {
+  it('a deleted session\'s notification card and per-session baggage disappear along with it', () => {
     const id = 'del-163'
     useStore.setState({
       sessions: { [id]: { ...sessionInfo(id) } as never },
@@ -2818,9 +2862,10 @@ describe('기다리는 사이에 지워진 세션은 되살아나지 않는다 (
 })
 
 /*
- * 설정 변경 토스트는 host가 실제로 한 일을 말한다 (#164). 예전에는 늘 "(from next turn)"이었다.
+ * The settings-change toast states what the host actually did (#164). It used to always say "(from
+ * next turn)."
  */
-describe('설정 변경 토스트 (#164)', () => {
+describe('the settings-change toast (#164)', () => {
   it.each([
     ['after_turn', 'Effort: high (applies when this turn ends)'],
     ['restarted', 'Effort: high (agent restarted)'],
@@ -2837,10 +2882,11 @@ describe('설정 변경 토스트 (#164)', () => {
 })
 
 /*
- * "항상 허용"의 알림은 실제로 보낸 매처로 (#170). 예전에는 카드가 따로 문구를 지어서, 매처가 없는 종류(`other`)에도
- * "Always allow in this session: other"라고 알렸다 — 아무 규칙도 남지 않았는데.
+ * The "always allow" notification uses the matcher actually sent (#170). The card used to compose its
+ * own separate wording, so even a kind with no matcher (`other`) was announced as "Always allow in
+ * this session: other" — even though no rule had actually been kept.
  */
-describe('항상 허용 알림 (#170)', () => {
+describe('the always-allow notification (#170)', () => {
   async function answerAlways(detail: Record<string, unknown>, scope: 'session' | 'project' = 'session') {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'safe' })
@@ -2853,13 +2899,13 @@ describe('항상 허용 알림 (#170)', () => {
     return { matcher: spy.mock.calls[0]?.[4], toast: useStore.getState().toast }
   }
 
-  it('파일 편집은 그 경로를 보내고, 그 경로로 알린다', async () => {
+  it('a file edit sends its path, and the notification states that path', async () => {
     const r = await answerAlways({ kind: 'file_edit', path: '/x/a.ts', diffPreview: '', multi: false }, 'project')
     expect(r.matcher).toBe('/x/a.ts')
     expect(r.toast).toBe('Always allow in this project: /x/a.ts')
   })
 
-  it('매처가 없는 종류는 규칙이 생겼다고 알리지 않는다', async () => {
+  it('a kind with no matcher never claims a rule was kept', async () => {
     const r = await answerAlways({ kind: 'other', raw: 'mcp__x__y {}' })
     expect(r.matcher).toBeUndefined()
     expect(r.toast).not.toContain('Always allow in')
@@ -2868,10 +2914,11 @@ describe('항상 허용 알림 (#170)', () => {
 })
 
 /*
- * #158: 첫 응답의 결과가 화면에 닿기 전에 같은 카드에 두 번째 입력이 들어오면, 두 번째 응답이 host에서 '사라진 요청'이
- * 되어 방금 실행된 명령을 Denied로 적었다. 한 요청에는 한 번만 보낸다.
+ * #158: if a second input arrives on the same card before the first response's result reaches the
+ * screen, the second response became a "vanished request" on the host and recorded a command that had
+ * already run as Denied. A request is sent only once.
  */
-describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
+describe('an approval is sent only once per request (#158)', () => {
   async function pendingCard() {
     const platform = new MockPlatform()
     const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'safe' })
@@ -2884,7 +2931,7 @@ describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
     return { platform, id: s.id }
   }
 
-  it('응답이 돌아오기 전의 두 번째 입력은 보내지 않는다', async () => {
+  it('a second input before the response returns is never sent', async () => {
     const { platform, id } = await pendingCard()
     const finish: (() => void)[] = []
     const spy = vi
@@ -2897,7 +2944,7 @@ describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
     expect(spy.mock.calls.map((c) => c[2])).toEqual(['allow'])
   })
 
-  it('카드가 이미 걷힌 요청에는 보내지 않는다', async () => {
+  it('nothing is sent for a request whose card is already dismissed', async () => {
     const { platform, id } = await pendingCard()
     const spy = vi.spyOn(platform.agents, 'respondApproval').mockResolvedValue(undefined as never)
     useStore.setState((st) => ({ sessions: { ...st.sessions, [id]: { ...st.sessions[id]!, pendingApproval: null } } }))
@@ -2905,7 +2952,7 @@ describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('전송이 실패하면 다시 누를 수 있다', async () => {
+  it('a send failure allows pressing it again', async () => {
     const { platform, id } = await pendingCard()
     const spy = vi.spyOn(platform.agents, 'respondApproval').mockRejectedValueOnce(new Error('Connection lost'))
     await useStore.getState().respondApproval(id, 'r1', 'allow')
@@ -2918,16 +2965,18 @@ describe('승인은 한 요청에 한 번만 보낸다 (#158)', () => {
 })
 
 /*
- * #172: host는 세션을 만들며 `session_created`·`handoff`·`user_message`를 응답보다 먼저 방송한다. 화면은 앞의 것으로
- * 세션을 등록하고 뒤의 둘을 대화에 붙이는데, 돌아온 응답이 대화를 pending 첫 프롬프트 하나로 덮어써 마커가 사라졌다.
- * 기록을 읽으면 마커가 돌아오며 첫 프롬프트가 두 번 섰다. 목도 이제 host와 같은 순서로 방송한다.
+ * #172: the host broadcasts `session_created`, `handoff` and `user_message`, in that order, before the
+ * response, while creating a session. The screen registers the session from the first one and attaches
+ * the other two to the conversation, but the returned response used to overwrite the conversation with
+ * a single pending opening prompt, erasing the marker. Reading history brought the marker back, so the
+ * opening prompt stood twice. The mock now broadcasts in the same order as the host.
  */
-describe('인수인계로 태어난 세션의 첫 화면 (#172)', () => {
-  it('마커 하나와 첫 프롬프트 하나가 서고, 기록을 거슬러 읽어도 그대로다', async () => {
+describe('the first screen of a session born from a handoff (#172)', () => {
+  it('exactly one marker and one opening prompt stand, and reading back through history leaves them as is', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho172')
     await useStore.getState().attach(mock)
-    // 기록 페이지는 한 번 왕복 늦게 온다 — 기록과의 합치기(#197)가 응답이 덮어쓴 자리를 가리기 전의 화면을 본다
+    // The history page arrives one round trip late — the merge with history (#197) sees the screen before the response's overwrite covers it
     const load = mock.agents.loadMessages.bind(mock.agents)
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
@@ -2942,7 +2991,7 @@ describe('인수인계로 태어난 세션의 첫 화면 (#172)', () => {
     })
     const now = () => useStore.getState().chat[info.id] ?? []
     expect(now().map(line)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING'])
-    // 첫 프롬프트는 확정된 줄이다 — pending으로 남으면 나중에 같은 문장의 말을 흡수한다
+    // The opening prompt is a confirmed row — leaving it pending would let it absorb a later message with the same text
     expect(now().find((i) => i.kind === 'user' && i.pending)).toBeUndefined()
 
     release()
@@ -2953,10 +3002,12 @@ describe('인수인계로 태어난 세션의 첫 화면 (#172)', () => {
 })
 
 /*
- * #173: 소켓이 끊기면 클라이언트는 답을 못 받은 `agents.send`를 `connection_lost`로 거절한다. host는 그 말을 이미 받았을
- * 수 있는데, 화면은 실패 토스트를 띄우고 글을 입력창으로 되돌렸다 — 사람이 다시 보내면 같은 지시가 두 번 간다.
+ * #173: if the socket drops, the client refuses an `agents.send` that never got an answer with
+ * `connection_lost`. The host may already have received that message, but the screen used to raise a
+ * failure toast and put the text back into the composer — sending it again then sends the same
+ * instruction twice.
  */
-describe('끊기는 순간 보낸 말 (#173)', () => {
+describe('a message sent at the instant of disconnect (#173)', () => {
   async function sendingWhenTheLineDrops(delivered: boolean) {
     const mock = new MockPlatform()
     mock.sessions.set('cl-1', sessionInfo('cl-1'))
@@ -2964,7 +3015,7 @@ describe('끊기는 순간 보낸 말 (#173)', () => {
     useStore.getState().focusSession('cl-1')
     await vi.waitFor(() => expect(useStore.getState().history['cl-1']).toBeDefined())
     vi.spyOn(mock.agents, 'send').mockImplementationOnce(async (sessionId, text) => {
-      // host가 받아 저장했다면 저장소에 있다 — 확인(user_message)은 끊긴 소켓과 함께 사라졌다
+      // If the host received and stored it, it is in the store — the confirmation (`user_message`) vanished along with the dropped socket
       if (delivered) mock.messages.set(sessionId, [{ sessionId, seq: 1, role: 'user', kind: 'text', payload: { text }, ts: 1 }])
       mock.setConnectionState('disconnected')
       throw Object.assign(new Error('Connection lost'), { code: 'connection_lost', retryable: true })
@@ -2973,9 +3024,9 @@ describe('끊기는 순간 보낸 말 (#173)', () => {
     return mock
   }
 
-  it('host가 받은 말은 다시 붙은 뒤 확정되고, 실패로 알리지도 글을 되돌리지도 않는다', async () => {
+  it('a message the host received is settled after reconnecting — never reported as a failure, never put back', async () => {
     const mock = await sendingWhenTheLineDrops(true)
-    // 끊긴 동안은 모른다 — 말풍선은 남고 입력창은 비어 있다
+    // Unknown while disconnected — the bubble stays and the composer is empty
     expect(useStore.getState().chat['cl-1']!.map(line)).toEqual(['DO THE THING'])
     expect(useStore.getState().drafts['cl-1']?.text ?? '').toBe('')
 
@@ -2989,7 +3040,7 @@ describe('끊기는 순간 보낸 말 (#173)', () => {
     expect(st.toast ?? '').not.toContain('Could not send')
   })
 
-  it('host가 받지 못한 말은 다시 붙은 뒤에 글을 입력창으로 되돌리고 실패를 알린다', async () => {
+  it('a message the host never received is put back into the composer after reconnecting, and the failure is reported', async () => {
     const mock = await sendingWhenTheLineDrops(false)
     mock.setConnectionState('connected')
     await vi.waitFor(() => expect(useStore.getState().drafts['cl-1']?.text).toBe('DO THE THING'))
@@ -3000,17 +3051,19 @@ describe('끊기는 순간 보낸 말 (#173)', () => {
 })
 
 /*
- * #174 (#125의 나머지): 글이 질문의 답이 될 수 없을 때(질문이 여럿이거나 첨부가 있음) 보내면 새 턴이 되고 질문은
- * 버려진다. 안내문은 첨부를 보지 않아 "답을 쓰라"고 한 채 글을 새 턴으로 보냈고, 카드는 설명 없이 사라졌다.
- * 질문이 열린 세션을 인수인계하면 부탁문이 그 질문의 답으로 갔다.
+ * #174 (the rest of #125): when text cannot be an answer to a question (several questions, or an
+ * attachment), sending it starts a new turn and drops the question. The hint text never looked at
+ * attachments, so it said "write an answer" while sending the text as a new turn, and the card
+ * vanished with no explanation. Handing off a session with an open question sent the request text as
+ * that question's answer.
  */
-describe('열린 질문과 입력창 (#174)', () => {
+describe('an open question and the composer (#174)', () => {
   const q = (requestId: string, ...questions: string[]) => ({
     requestId,
     questions: questions.map((question) => ({ question, header: 'h', options: [{ label: 'a', description: '' }], multiSelect: false })),
   })
 
-  it('안내문과 전송은 같은 판정을 쓴다 — 첨부가 있으면 답이 아니다', () => {
+  it('the hint text and sending use the same decision — an attachment means it is never an answer', () => {
     expect(composerTarget([], false)).toBe('none')
     expect(composerTarget([q('r1', 'Which DB?')], false)).toBe('answer')
     expect(composerTarget([q('r1', 'Which DB?')], true)).toBe('drops')
@@ -3027,7 +3080,7 @@ describe('열린 질문과 입력창 (#174)', () => {
     return { mock, sent, answered }
   }
 
-  it('질문이 여럿이면 글은 새 턴으로 가고, 무엇이 버려졌는지 말풍선 앞에 한 줄 남는다', async () => {
+  it('with several questions, the text goes to a new turn, and a line is left before the bubble stating what was dropped', async () => {
     const { sent, answered } = await withQuestions(q('r1', 'Which DB?', 'Which port?'))
     await useStore.getState().send('q174', 'just do it')
     expect(answered).not.toHaveBeenCalled()
@@ -3035,7 +3088,7 @@ describe('열린 질문과 입력창 (#174)', () => {
     expect(useStore.getState().chat['q174']!.map(line)).toEqual([droppedQuestionsText(['Which DB?', 'Which port?']), 'just do it'])
   })
 
-  it('질문이 하나라도 첨부가 있으면 같은 길이다', async () => {
+  it('even one question takes the same path once there is an attachment', async () => {
     const { sent, answered } = await withQuestions(q('r1', 'Which DB?'))
     await useStore.getState().send('q174', 'see this', [{ kind: 'file', path: '/tmp/a.txt', name: 'a.txt', mime: 'text/plain', bytes: 1 }])
     expect(answered).not.toHaveBeenCalled()
@@ -3043,7 +3096,7 @@ describe('열린 질문과 입력창 (#174)', () => {
     expect(useStore.getState().chat['q174']!.map(line)).toEqual([droppedQuestionsText(['Which DB?']), 'see this'])
   })
 
-  it('질문이 열린 세션에 노트를 부탁하지 않는다 — 부탁문이 그 질문의 답이 된다', async () => {
+  it('never asks a session with an open question for a note — the request text would become that question\'s answer', async () => {
     const { mock, sent, answered } = await withQuestions(q('r1', 'Which DB?'))
     const proj = await mock.projects.add('/tmp/q174')
     useStore.setState((st) => ({
@@ -3058,10 +3111,10 @@ describe('열린 질문과 입력창 (#174)', () => {
 })
 
 /*
- * #180: 보내는 길이 실패하거나 경주하면 사람이 쓴 것이 사라졌다.
+ * #180: if the send path failed or raced, what a person wrote disappeared.
  */
-describe('실패한 전송이 쓴 것을 돌려준다 (#180)', () => {
-  it('질문의 답으로 보낸 글은 닿지 않으면 입력창으로 돌아온다', async () => {
+describe('a failed send returns what was written (#180)', () => {
+  it('text sent as an answer to a question comes back to the composer if it never lands', async () => {
     const mock = new MockPlatform()
     const open = [{ requestId: 'r1', questions: [{ question: 'Which DB?', header: 'DB', options: [{ label: 'pg', description: '' }], multiSelect: false }] }]
     mock.sessions.set('a180', sessionInfo('a180', { state: 'waiting_approval', pendingQuestions: open as never }))
@@ -3075,7 +3128,7 @@ describe('실패한 전송이 쓴 것을 돌려준다 (#180)', () => {
     expect(useStore.getState().toast).toBe('그 질문은 이미 사라졌습니다')
   })
 
-  it('오케스트레이터가 태어나지 못하면 첫 질문이 갔다고 말하지 않는다', async () => {
+  it('never claims the first question went out if the orchestrator failed to be born', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     vi.spyOn(mock.agents, 'orchestrator').mockRejectedValueOnce(new Error('no tool'))
@@ -3083,7 +3136,7 @@ describe('실패한 전송이 쓴 것을 돌려준다 (#180)', () => {
     expect(useStore.getState().toast).toBe('Could not start the orchestrator: no tool')
   })
 
-  it('워크트리 매니저를 못 만들면 부른 창에 실패를 돌려준다', async () => {
+  it('returns a failure to the calling window if a worktree manager could not be created', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/wm180')
     await useStore.getState().attach(mock)
@@ -3093,7 +3146,7 @@ describe('실패한 전송이 쓴 것을 돌려준다 (#180)', () => {
     )
   })
 
-  it('올라가는 동안의 첨부를 센다 — 입력창은 그동안 보내지 않는다', async () => {
+  it('counts an attachment while it is uploading — the composer refuses to send during that time', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u180', sessionInfo('u180'))
     await useStore.getState().attach(mock)
