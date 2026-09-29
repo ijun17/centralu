@@ -2059,21 +2059,24 @@ test('권한 거부를 "저장소 아님"과 구분해 안내한다 (F-1 실측 
   await expect(page.getByTestId('git-denied')).toContainText('permission')
 })
 
-test('세션 삭제: 확인 후 목록에서 사라진다 (M2.5)', async ({ page }) => {
+test('deleting a session: once confirmed it leaves the list and goes to the trash (M2.5, #204)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '지울 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
-  // "되돌릴 수 없습니다"는 사실이 아니다 — 무엇이 지워지고 무엇이 남는지를 말한다
-  await expect(page.getByTestId('confirm-delete')).toContainText('Chat history and attachments')
+  // "되돌릴 수 없습니다"는 사실이 아니다 — where it goes, and how it comes back or goes for good
+  await expect(page.getByTestId('delete-trash-note')).toContainText('Chat history and attachments stay in Centralu’s trash')
+  await expect(page.getByTestId('delete-trash-note')).toContainText('Settings → Trash reads it, restores it, or deletes it for good')
   await page.getByTestId('confirm-delete-yes').click()
 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toContainText('Moved to the trash')
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(0)
-  // 기본값이 진짜 삭제다 — 도구 쪽 원본도 같이 갔다 (도그푸딩 재지적으로 기본을 뒤집었다)
-  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toContain(id)
+  // The default deletes the tool file too (dogfooding asked for it), but only once it is deleted for good; until then it waits
+  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
 })
 
 /*
@@ -2106,10 +2109,11 @@ test('세션 삭제: 기본은 원본까지 지운다 — 체크를 끄면 도�
 
 /*
  * 인수인계하고 새로 시작 (도그푸딩): 죽는 세션이 쓴 글이 새 세션의 첫 메시지가 되고,
- * 이름이 이어지고, 기존 세션은 원본까지 지워진다. 요청과 글은 대화에 그대로 보인다 —
+ * 이름이 이어지고, 기존 세션은 원본까지 지워진다 (since #204: it moves to the trash, and the tool file goes when it is
+ * deleted for good). 요청과 글은 대화에 그대로 보인다 —
  * 뒤에서 몰래 하는 단계가 없다.
  */
-test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은 진짜로 지운다', async ({ page }) => {
+test('handoff: the note starts a new session and the old one moves to the trash (#204)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', '갈아탈 세션')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
@@ -2129,7 +2133,7 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
-  await expect(page.getByTestId('handoff-warning')).toContainText('deleted for real')
+  await expect(page.getByTestId('handoff-warning')).toContainText('moves to the trash')
   // 받는 에이전트는 기본으로 지금 도구가 선택돼 있고, 삭제는 기본으로 켜져 있다
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
@@ -2147,11 +2151,11 @@ test('인수인계: 글을 받아 새 세션으로 갈아타고 기존 세션은
     m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
   }, id)
 
-  // 새 세션이 이름을 물려받아 서고, 기존 세션은 원본까지 사라졌다
+  // The new session takes the name; the old one is in the trash, its tool file marked to go when it is deleted for good (#204)
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0, { timeout: 15_000 })
   const heirId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   await expect(page.getByTestId(`session-row-${heirId}`)).toContainText('갈아탈 세션')
-  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toContain(id)
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
   // 새 세션의 첫 메시지가 그 글이다
   await expect(page.getByTestId('chat-stream')).toContainText('후계자 노트')
   expect(await page.evaluate(() => [...(window as any).__mock.handoffNotes.values()])).toEqual(['후계자 노트: 여기까지 했다'])

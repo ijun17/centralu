@@ -1113,9 +1113,9 @@ function ConfirmHandoff({
             className="mt-3 rounded border border-del/40 bg-del-bg px-2.5 py-2 text-[11px] leading-relaxed text-chalk"
             data-testid="handoff-warning"
           >
-            When the new session is ready,{' '}
-            <span className="text-del">this session is deleted for real — including the {toolLabel} conversation
-            file</span>. Only the note survives.
+            When the new session is ready, this session moves to the trash — and{' '}
+            <span className="text-del">deleting it for good there deletes the {toolLabel} conversation file
+            too</span>. Until then, Settings → Trash reads it and restores it.
           </p>
         ) : (
           <p className="mt-3 text-[11px] leading-relaxed text-ash" data-testid="handoff-keep-note">
@@ -1134,7 +1134,7 @@ function ConfirmHandoff({
             checked={deleteOld}
             onChange={(e) => setDeleteOld(e.target.checked)}
           />
-          <span>Delete this session after the handoff</span>
+          <span>Move this session to the trash after the handoff</span>
         </label>
 
         <div className="mt-4 flex justify-end gap-2">
@@ -1527,6 +1527,10 @@ function ConfirmDelete({
   const platform = usePlatform()
   const toolLabel = useToolMeta(tool).label
   /*
+   * Since #204 the session goes to the trash, and both choices below are about what goes with it **when it is deleted
+   * for good** from Settings → Trash. The dialog says so in its first lines: a session that leaves the sidebar with
+   * no word about where it went and how it comes back is the retired archive (FR-20).
+   *
    * 도구 쪽 원본까지 지울지 (도그푸딩 "진짜로 삭제"). **기본은 지운다** — 처음엔
    * 남기는 쪽이 기본이었는데, 삭제를 누르는 사람의 실제 의도는 정리라서 "지웠는데
    * 파일은 남는" 반쪽 삭제가 오히려 어긋났다 (도그푸딩 재지적). 끄면 안내문이 같은
@@ -1556,18 +1560,20 @@ function ConfirmDelete({
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-edge bg-pit p-4 shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]">
-        <p className="text-[13px] text-chalk">Delete this session?</p>
+        <p className="text-[13px] text-chalk">Move this session to the trash?</p>
         <p className="mt-1.5 truncate text-[12px] text-ash">{name}</p>
-        <p className="mt-2 text-[11px] leading-relaxed text-slate">
-          Chat history and attachments in Centralu will be gone.
+        <p className="mt-2 text-[11px] leading-relaxed text-slate" data-testid="delete-trash-note">
+          Chat history and attachments stay in Centralu’s trash, out of the sidebar, search and the agents’ reach.{' '}
+          <span className="text-chalk">Settings → Trash</span> reads it, restores it, or deletes it for good.
         </p>
         {deleteExternal ? (
           <p
             className="mt-1 rounded border border-del/40 bg-del-bg px-2 py-1.5 text-[11px] leading-relaxed text-chalk"
             data-testid="delete-external-warning"
           >
-            <span className="text-del">The conversation file in {toolLabel} is deleted too</span> — there will
-            be nothing left to pull back.
+            When it is deleted for good,{' '}
+            <span className="text-del">the conversation file in {toolLabel} is deleted too</span> — there will be
+            nothing left to pull back.
           </p>
         ) : (
           <p className="mt-1 text-[11px] leading-relaxed text-ash" data-testid="delete-notice">
@@ -1587,7 +1593,7 @@ function ConfirmDelete({
             checked={deleteExternal}
             onChange={(e) => setDeleteExternal(e.target.checked)}
           />
-          <span>Delete the {toolLabel} conversation file too</span>
+          <span>Delete the {toolLabel} conversation file too, when deleted for good</span>
         </label>
 
         {/*
@@ -1599,9 +1605,11 @@ function ConfirmDelete({
             <p className="text-[11px] text-ash">
               This session ran in a worktree — <span className="font-mono text-chalk">{wt.branch}</span>
             </p>
+            <p className="mt-1 text-[11px] text-slate">It stays where it is while the session is in the trash.</p>
             {wt.dirty && (
               <p className="mt-1 text-[11px] text-chalk" data-testid="worktree-dirty">
-                {wt.changedFiles} uncommitted {wt.changedFiles === 1 ? 'change' : 'changes'} would be lost.
+                {wt.changedFiles} uncommitted {wt.changedFiles === 1 ? 'change' : 'changes'} would be lost once it is
+                deleted.
               </p>
             )}
             <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[11px] text-ash hover:text-chalk">
@@ -1613,7 +1621,7 @@ function ConfirmDelete({
                 data-testid="delete-worktree-toggle"
               />
               <span>
-                Delete the worktree too
+                Delete the worktree too, when deleted for good
                 <span className="mt-0.5 block text-[10px] break-all text-slate">{wt.path}</span>
               </span>
             </label>
@@ -1628,7 +1636,7 @@ function ConfirmDelete({
             onClick={() => onConfirm(deleteWorktree, deleteExternal)}
             data-testid="confirm-delete-yes"
           >
-            Delete
+            Move to trash
           </button>
         </div>
       </div>

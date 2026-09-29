@@ -393,6 +393,15 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('approvals.deleteRule', { id })
       },
     },
+    trash: {
+      list: () => rpc.call('trash.list', {}),
+      read: (sessionId, limit, beforeSeq) => rpc.call('trash.read', { sessionId, limit, beforeSeq }),
+      restore: (sessionId) => rpc.call('trash.restore', { sessionId }),
+      purge: async (sessionId) => {
+        await rpc.call('trash.purge', { sessionId })
+      },
+      empty: () => rpc.call('trash.empty', {}),
+    },
     fs: {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
       listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),

@@ -1084,7 +1084,13 @@ export type AppState = {
   /** 목록에서 숨긴다 / 다시 꺼낸다 (기록은 남는다) */
   /** 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<boolean>
+  /** Moves the session to the trash (#204); the two flags say what goes with it when it is deleted for good */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
+  /**
+   * Brings a session back from the trash (#204). A project its restore registered again is added here, and asked
+   * about trust as a newly added one is. Returns an error message, or null when it is back.
+   */
+  restoreFromTrash(sessionId: string): Promise<string | null>
   /**
    * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 코덱스 스레드의 되살리기 7~13초 문제의 출구).
    * 죽는 세션이 인수인계 글을 쓰고 → 새 세션이 그 글로 시작하고 → 기존 세션은
@@ -3758,16 +3764,39 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  /** 세션 완전 삭제. 되돌릴 수 없으므로 호출 전에 확인을 받는다 (UI 책임) */
+  /**
+   * Moves a session to the trash (#204). The toast says where it went: a session that leaves the sidebar with no word
+   * about where is the retired archive again (FR-20).
+   */
   async deleteSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
     if (!platform) return
     const name = get().sessions[sessionId]?.name ?? 'Session'
     try {
       await platform.agents.deleteSession(sessionId, deleteWorktree, deleteExternal)
-      set({ toast: `Deleted: ${name}` })
+      set({ toast: `Moved to the trash: ${name} — Settings → Trash restores it` })
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
+    }
+  },
+
+  async restoreFromTrash(sessionId) {
+    const platform = get().platform
+    if (!platform) return 'Not connected'
+    try {
+      const { session, project } = await platform.trash.restore(sessionId)
+      if (project && !get().projects[project.id]) {
+        set((s) => ({
+          projects: { ...s.projects, [project.id]: project },
+          trustAsk: project.trusted ? s.trustAsk : project.id,
+        }))
+      }
+      // The host announces it too; this is the same path, so hearing it twice registers it once
+      get().dispatchEvent({ type: 'session_created', sessionId: session.id, session } as NormalizedEvent)
+      set({ toast: `Restored: ${session.name}` })
+      return null
+    } catch (e) {
+      return (e as Error).message
     }
   },
 

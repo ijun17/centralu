@@ -10,6 +10,7 @@ import { Modal } from '../../components/Modal.jsx'
 import { APPS } from '../../apps/registry.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
+import { TrashSection } from './TrashSection.jsx'
 
 type Rule = {
   id: number
@@ -117,6 +118,8 @@ const CATEGORIES = [
   { id: 'notifications', label: 'Notifications' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'permissions', label: 'Permissions' },
+  // Deleted sessions (#204) — the only place a conversation is deleted for good, so it has a place of its own
+  { id: 'trash', label: 'Trash' },
   { id: 'shortcuts', label: 'Shortcuts' },
   { id: 'updates', label: 'Updates' },
 ] as const
@@ -298,6 +301,8 @@ export function Settings() {
                 )}
               </section>
             )}
+
+            {category === 'trash' && <TrashSection />}
 
             {/* E-3 단축키 */}
             {category === 'shortcuts' && (

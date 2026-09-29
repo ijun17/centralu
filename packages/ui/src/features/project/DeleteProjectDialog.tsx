@@ -16,6 +16,9 @@ import { Modal } from '../../components/Modal.jsx'
  * 하나짜리 창은 손이 기억으로 지나가고, 지나간 뒤에는 되돌릴 것이 없다. 이름을 치는
  * 동안 사람은 자기가 무엇을 지우는지 한 번 읽는다 — 그게 이 장치의 전부다.
  *
+ * **Its sessions go to Centralu's trash (#204), not with it** — only Settings deletes a conversation for good, and
+ * a project took every one of its conversations at once. Both sentences below say so, and where to find them.
+ *
  * 파일은 **휴지통으로** 간다. 앱의 파일 규칙 그대로다 (fs 포트: "Not a delete — that is
  * the whole decision"). 되돌릴 길을 OS가 하나 남겨두는 편이, 우리가 rm을 부르고
  * 사람의 미커밋 작업을 영영 없애는 것보다 낫다.
@@ -70,12 +73,13 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           >
             The folder itself goes to the Trash — <span className="readout text-ash">{project.path}</span> and
             everything inside it, <span className="text-del">including work the agents have not committed</span>.
-            Centralu’s records go with it.
+            Its sessions go to Centralu’s trash; restoring one needs the folder back.
           </p>
         ) : (
           <p className="mt-2 text-[11px] leading-relaxed text-ash" data-testid="delete-project-note">
-            Only what Centralu remembers is deleted — sessions, their conversations, the search index and the
-            always-allow rules. <span className="text-chalk">The folder on disk is left alone.</span>
+            The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s trash —
+            Settings → Trash restores them or deletes them for good.{' '}
+            <span className="text-chalk">The folder on disk is left alone.</span>
           </p>
         )}
 

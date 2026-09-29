@@ -1558,7 +1558,8 @@ describe('그리드 세션 예열', () => {
 /**
  * 인수인계하고 새로 시작 (도그푸딩 요청 — 늙은 스레드의 되살리기 7~13초 문제의 출구).
  * 죽는 세션이 쓴 글이 새 세션의 첫 메시지가 되고, 이름·설정이 이어지고,
- * 기존 세션은 원본까지 지워진다. 파괴는 맨 끝 — 실패하면 아무것도 안 지워진다.
+ * 기존 세션은 원본까지 지워진다 — since #204 it goes to the trash, and its tool file goes when it is deleted for good.
+ * 파괴는 맨 끝 — 실패하면 아무것도 안 지워진다.
  */
 /**
  * 앱 상태 (#81): 스토어는 앱 목록을 모른다 — 항목은 ensure(첫 사용)와
@@ -1950,10 +1951,10 @@ describe('프로젝트 기본 모델은 도구를 따라간다 (#107)', () => {
 })
 
 describe('인수인계하고 새로 시작', () => {
-  it('글을 받아 새 세션을 만들고 이름을 물려주고 원본까지 지운다', async () => {
+  it('makes a new session from the note, hands on the name, and moves the original to the trash (#204)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho1')
-    mock.sessions.set('ho-s1', sessionInfo('ho-s1', { projectId: proj.id, name: '메아', model: 'gpt-5.6', tool: 'codex' }))
+    mock.sessions.set('ho-s1', sessionInfo('ho-s1', { projectId: proj.id, name: '메아', model: 'gpt-5.6', tool: 'codex', externalId: 'rollout-1' }))
     const old = oldRepoNote(mock, 'ho-s1')
     await useStore.getState().attach(mock)
 
@@ -1987,9 +1988,10 @@ describe('인수인계하고 새로 시작', () => {
     expect(heir!.id).not.toBe('ho-s1')
     // 화면의 요약도 즉시 물려받은 설정을 보인다 — DB에만 있고 메뉴는 Default면 "안 넘어간 것"으로 읽힌다 (도그푸딩)
     expect(useStore.getState().sessions[heir!.id]).toMatchObject({ model: 'gpt-5.6', effort: null })
-    // 기존 세션은 원본까지 정말로 지워졌다
+    // The old session is in the trash (#204), its tool file marked to go when it is deleted for good
     expect(mock.sessions.has('ho-s1')).toBe(false)
-    expect(mock.externallyDeleted).toContain('ho-s1')
+    expect(mock.externallyDeleted).not.toContain('ho-s1')
+    expect((await mock.trash.list()).sessions.find((x) => x.id === 'ho-s1')?.conversationFile).toBe('remove')
     // 화면은 새 세션을 본다
     expect(useStore.getState().focusedSessionId).toBe(heir!.id)
   })
@@ -3015,5 +3017,34 @@ describe('실패한 전송이 쓴 것을 돌려준다 (#180)', () => {
     release()
     expect(await up).toMatchObject({ name: 'shot.png' })
     expect(useStore.getState().uploading['u180']).toBeUndefined()
+  })
+})
+
+/*
+ * The trash (#204) from the screen's side. Deleting says where the session went; restoring puts it back in the
+ * sidebar, and a project its restore registered again arrives with it — the screen has not heard of that project,
+ * and a session row under a project the sidebar does not have is drawn nowhere.
+ */
+describe('the trash (#204)', () => {
+  it('deleting says where the session went, and restoring brings it and its registered project back', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/trash-a')
+    await useStore.getState().attach(mock)
+    const s = await mock.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: s.id, session: s } as NormalizedEvent)
+
+    await useStore.getState().deleteSession(s.id)
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+    expect(useStore.getState().toast).toMatch(/Moved to the trash: .* Settings → Trash/)
+
+    await mock.projects.remove(p.id)
+    useStore.setState((st) => ({ projects: Object.fromEntries(Object.entries(st.projects).filter(([id]) => id !== p.id)) }))
+    expect(await useStore.getState().restoreFromTrash(s.id)).toBeNull()
+    const st = useStore.getState()
+    expect(st.projects[p.id]?.path).toBe('/tmp/trash-a')
+    expect(st.sessions[s.id]?.projectId).toBe(p.id)
+    // Registered again is added again: it is asked about trust as a new project is
+    expect(st.trustAsk).toBe(p.id)
+    expect(await useStore.getState().restoreFromTrash(s.id)).toMatch(/Not in the trash/)
   })
 })

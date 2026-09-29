@@ -26,6 +26,7 @@ import type {
   SavedCommand,
   SessionInfo,
   StoredMessage,
+  TrashedSession,
   UsageSnapshot,
   TerminalInfo,
   CommandRunInfo,
@@ -96,9 +97,11 @@ export interface AgentPort {
   /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */
   /** 세션에 연결된 에이전트만 재시작한다 (대화는 그대로) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
-  /** 완전 삭제 — 아카이브와 달리 기록도 사라진다 */
-  /** 워크트리 세션이면 워크트리까지 지울지 함께 받는다. 기본은 남기는 것 */
-  /** deleteExternal이면 도구 쪽 대화 원본(codex rollout·claude JSONL)까지 지운다 — "진짜로 삭제" */
+  /**
+   * Moves the session to the trash (#204) — nothing is destroyed here; `TrashPort` is the way out.
+   * `deleteWorktree` and `deleteExternal` choose what goes with it when it is deleted for good from the trash:
+   * the worktree, and the tool's own conversation file (codex rollout, claude JSONL). Both stay until then.
+   */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /** 지워도 되는지 사람에게 묻기 위한 재료. 워크트리 세션이 아니면 null */
   worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
@@ -456,6 +459,22 @@ export interface ApprovalRulesPort {
 }
 
 /**
+ * The trash (#204). Deleting a session moves it here; these are the ways out, and they belong to the person
+ * (Settings → Trash). Nothing here is emptied on its own, so `list` carries the total size.
+ */
+export interface TrashPort {
+  list(): Promise<{ sessions: TrashedSession[]; bytes: number }>
+  /** A trashed conversation, read-only — pages like `AgentPort.loadMessages` */
+  read(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
+  /** Back as it was. `project` is set when its project had been deleted and restoring registered the folder again */
+  restore(sessionId: string): Promise<{ session: SessionInfo; project: ProjectInfo | null }>
+  /** Deletes one for good, with what the person chose to remove with it */
+  purge(sessionId: string): Promise<void>
+  /** Deletes all of them for good; one that fails stays in the trash and is reported */
+  empty(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }>
+}
+
+/**
  * 앱 자체의 업데이트 (이슈 #43).
  *
  * **확인도 설치도 전부 저쪽(host)에서 한다.** 레지스트리에 묻고 `npm i -g`를 돌리는 것은
@@ -787,6 +806,7 @@ export interface Platform {
   fs: FsPort
   search: SearchPort
   rules: ApprovalRulesPort
+  trash: TrashPort
   workspace: WorkspacePort
   prefs: PreferencesPort
   updates: UpdatePort

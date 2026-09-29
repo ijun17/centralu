@@ -393,6 +393,110 @@ export class MockPlatform implements Platform {
     },
   }
 
+  /**
+   * The trash (#204), with the host's rules: deleting moves a session here with its messages, and nothing chosen in
+   * the dialog happens until it is deleted for good — only then does `externallyDeleted` record the tool's file.
+   */
+  readonly trashBin = new Map<
+    string,
+    {
+      session: SessionInfo
+      messages: StoredMessage[]
+      deletedAt: number
+      project: { id: string; name: string; path: string } | null
+      removeExternal: boolean
+      removeWorktree: boolean
+    }
+  >()
+
+  private moveToTrash(sessionId: string, removeWorktree: boolean, removeExternal: boolean): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const p = session.projectId ? this.projectsList.find((x) => x.id === session.projectId) : undefined
+    this.trashBin.set(sessionId, {
+      session: { ...session, live: false },
+      messages: this.messages.get(sessionId) ?? [],
+      deletedAt: this.now(),
+      project: p ? { id: p.id, name: p.name, path: p.path } : null,
+      removeExternal: removeExternal && !!(session.externalId ?? session.importedFrom),
+      removeWorktree: removeWorktree && !!session.worktree,
+    })
+    this.sessions.delete(sessionId)
+    this.messages.delete(sessionId)
+    this.gridPanels = this.gridPanels.filter((id) => id !== sessionId)
+    this.emit({ type: 'session_deleted', sessionId })
+  }
+
+  readonly trash = {
+    list: async () => {
+      const sessions = [...this.trashBin.values()]
+        .sort((a, b) => b.deletedAt - a.deletedAt)
+        .map(({ session: s, messages, deletedAt, project, removeExternal, removeWorktree }) => {
+          const live = project ? this.projectsList.find((x) => x.id === project.id) : undefined
+          const hasFile = !!(s.externalId ?? s.importedFrom)
+          return {
+            id: s.id,
+            name: s.name,
+            tool: s.tool,
+            project: project ? { id: project.id, name: live?.name ?? project.name, path: live?.path ?? project.path, exists: !!live } : null,
+            deletedAt,
+            messages: messages.length,
+            bytes: messages.reduce((n, m) => n + JSON.stringify(m.payload).length, 0),
+            conversationFile: (!hasFile ? 'none' : removeExternal ? 'remove' : 'keep') as 'none' | 'remove' | 'keep',
+            worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch, remove: removeWorktree } : null,
+          }
+        })
+      return { sessions, bytes: sessions.reduce((n, s) => n + s.bytes, 0) }
+    },
+    read: async (sessionId: string, limit = 200, beforeSeq?: number) => {
+      const t = this.trashBin.get(sessionId)
+      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      const filtered = beforeSeq ? t.messages.filter((m) => m.seq < beforeSeq) : t.messages
+      return filtered.slice(-limit)
+    },
+    restore: async (sessionId: string) => {
+      const t = this.trashBin.get(sessionId)
+      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      let registered: ProjectInfo | null = null
+      let projectId: string | null = null
+      if (t.project) {
+        const home =
+          this.projectsList.find((x) => x.id === t.project!.id) ?? this.projectsList.find((x) => x.path === t.project!.path)
+        if (home) projectId = home.id
+        else {
+          // The mock has no disk: the folder is always there, so the project is registered again under its id
+          const p: ProjectInfo = {
+            id: t.project.id, path: t.project.path, name: t.project.name, defaultTool: 'claude', defaultModels: {},
+            commands: [], worktreeSetup: null, worktreeManager: null, trusted: false,
+            git: { branch: 'main', changedFiles: 0, isRepo: true },
+          }
+          this.projectsList.push(p)
+          projectId = p.id
+          registered = this.withGit(p)
+        }
+      }
+      const live = ['working', 'waiting_approval'].includes(t.session.state)
+      const session: SessionInfo = { ...t.session, projectId, ...(live ? { state: 'idle' as const, waitingSince: null } : {}) }
+      this.trashBin.delete(sessionId)
+      this.sessions.set(sessionId, session)
+      this.messages.set(sessionId, t.messages)
+      this.emit({ type: 'session_created', sessionId, session: { ...session } })
+      return { session: { ...session }, project: registered }
+    },
+    purge: async (sessionId: string) => {
+      const t = this.trashBin.get(sessionId)
+      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      // host와 같은 규칙: 원본 삭제를 명시한 경우 그 사실이 기록에 남는다 (테스트가 검증할 관찰점)
+      if (t.removeExternal) this.externallyDeleted.push(sessionId)
+      this.trashBin.delete(sessionId)
+    },
+    empty: async () => {
+      const ids = [...this.trashBin.keys()]
+      for (const id of ids) await this.trash.purge(id)
+      return { purged: ids.length, failed: [] }
+    },
+  }
+
   /** 테스트용: 휴지통으로 보낸 것과 파일 관리자에서 열어본 것 (#18/#19) */
   readonly trashed: string[] = []
   readonly revealed: string[] = []
@@ -1757,12 +1861,9 @@ export class MockPlatform implements Platform {
       if (at === -1) throw Object.assign(new Error(`No skill named "${name}"`), { code: 'internal' })
       this.skillList.splice(at, 1)
     },
-    deleteSession: async (sessionId: string, _deleteWorktree = false, deleteExternal = false) => {
-      // host와 같은 규칙: 원본 삭제를 명시한 경우 그 사실이 기록에 남는다 (테스트가 검증할 관찰점)
-      if (deleteExternal) this.externallyDeleted.push(sessionId)
-      this.sessions.delete(sessionId)
-      this.messages.delete(sessionId)
-      this.emit({ type: 'session_deleted', sessionId })
+    // Moves it to the trash (#204) — the tool's file and the worktree wait there until it is deleted for good
+    deleteSession: async (sessionId: string, deleteWorktree = false, deleteExternal = false) => {
+      this.moveToTrash(sessionId, deleteWorktree, deleteExternal)
     },
     updateSettings: async (
       sessionId: string,
@@ -1957,14 +2058,14 @@ export class MockPlatform implements Platform {
     /*
      * 실물과 같은 순서로 없앤다: 세션을 하나씩 지우며 `session_deleted`를 쏘고,
      * 그 다음 프로젝트를 뺀다. 화면은 그 이벤트로 목록을 비우므로, 목이 프로젝트만
-     * 조용히 지우면 E2E에서는 사이드바에 유령 세션이 남는다.
+     * 조용히 지우면 E2E에서는 사이드바에 유령 세션이 남는다. The sessions go to the trash (#204), marked to keep
+     * the tool's files and worktrees, as the host does.
      */
     remove: async (projectId: string) => {
       const at = this.projectsList.findIndex((x) => x.id === projectId)
       if (at === -1) throw Object.assign(new Error('Project not found'), { code: 'internal' })
       for (const s of [...this.sessions.values()].filter((s) => s.projectId === projectId)) {
-        this.sessions.delete(s.id)
-        this.emit({ type: 'session_deleted', sessionId: s.id })
+        this.moveToTrash(s.id, false, false)
       }
       this.projectsList.splice(at, 1)
       return { ok: true as const }

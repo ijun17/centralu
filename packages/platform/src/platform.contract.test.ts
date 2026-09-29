@@ -247,6 +247,40 @@ describe.each([
     expect(msgs[0]!.role).toBe('user')
   })
 
+  /*
+   * The trash (#204): deleting moves a session there with its conversation, and the ways out answer alike in both
+   * implementations — the e2e scenarios drive the mock, so a mock that deleted for real would pass them all.
+   */
+  it('a deleted session goes to the trash, reads, comes back, and is deleted for good only from there', async () => {
+    const [p] = await h.platform.projects.list()
+    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    await h.platform.agents.send(s.id, 'kept in the trash')
+    await waitFor(async () => (await h.platform.agents.loadMessages(s.id)).length > 0)
+    const said = (await h.platform.agents.loadMessages(s.id)).map((m) => [m.seq, m.role, m.payload])
+
+    await h.platform.agents.deleteSession(s.id)
+    await waitFor(() => events.some((e) => e.type === 'session_deleted' && e.sessionId === s.id))
+    expect((await h.platform.agents.listSessions()).some((x) => x.id === s.id)).toBe(false)
+    const listed = await h.platform.trash.list()
+    const row = listed.sessions.find((x) => x.id === s.id)
+    expect(row).toMatchObject({ project: { id: p!.id, exists: true }, worktree: null })
+    expect(row!.conversationFile).not.toBe('remove') // nothing was chosen to go with it
+    expect(row!.messages).toBe(said.length)
+    expect(listed.bytes).toBeGreaterThan(0)
+    expect((await h.platform.trash.read(s.id)).map((m) => [m.seq, m.role, m.payload])).toEqual(said)
+
+    const back = await h.platform.trash.restore(s.id)
+    expect(back).toMatchObject({ session: { id: s.id, projectId: p!.id }, project: null })
+    expect((await h.platform.agents.listSessions()).some((x) => x.id === s.id)).toBe(true)
+    expect((await h.platform.trash.list()).sessions.some((x) => x.id === s.id)).toBe(false)
+
+    await h.platform.agents.deleteSession(s.id)
+    await h.platform.trash.purge(s.id)
+    expect((await h.platform.trash.list()).sessions.some((x) => x.id === s.id)).toBe(false)
+    await expect(h.platform.trash.read(s.id)).rejects.toThrow(/Not in the trash/)
+    await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the trash/)
+  })
+
   /**
    * 자판 표기도 capability다 (이슈 #32).
    *
