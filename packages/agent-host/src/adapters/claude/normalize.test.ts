@@ -3,7 +3,7 @@
  * SDK 형식이 바뀌면 여기가 먼저 깨진다.
  */
 import { describe, expect, it } from 'vitest'
-import { approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
+import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
 
 const SID = 's1'
 const n = (msg: unknown) => normalizeMessage(msg, SID)
@@ -345,5 +345,61 @@ describe('알 수 없는 메시지는 조용히 무시한다', () => {
     { type: 'future_message_type' },
   ])('%o', (msg) => {
     expect(n(msg)).toEqual([])
+  })
+})
+
+/**
+ * Thinking that streamed is not repeated from the finished message (2026-09-30).
+ *
+ * Measured in a live session: a message that thought and then called a tool, with no text in between, stored
+ * its thinking twice in one row ("...진행해보겠습니다.\n\n...진행해보겠습니다.\n\n") and showed it twice.
+ * The thinking streamed as `thinking_delta`s, then the finished assistant message carried the same block, and
+ * the only guard was `textStreamed`, which a message without text never set.
+ */
+describe('streamed thinking is not repeated from the finished message', () => {
+  const THOUGHT = 'Looking at why the click did not register after the permission was granted.\n\n'
+  const thinkingDelta = {
+    type: 'stream_event',
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: THOUGHT } },
+  }
+  const finished = {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: THOUGHT, signature: 'sig' },
+        { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } },
+      ],
+    },
+  }
+  const reasoningText = (events: { type: string; text?: string }[]) =>
+    events.filter((e) => e.type === 'reasoning_delta').map((e) => e.text ?? '').join('')
+
+  it('a message that streamed its thinking and then called a tool shows that thinking once', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const events = [...stream.push(thinkingDelta), ...stream.push(finished)]
+    expect(reasoningText(events)).toBe(THOUGHT)
+    expect(events.some((e) => e.type === 'tool_call')).toBe(true)
+  })
+
+  it('thinking that never streamed still comes out of the finished message', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
+  })
+
+  it('the next message starts counting again, so its own unstreamed thinking is not lost', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    stream.push(thinkingDelta)
+    stream.push(finished)
+    expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
+  })
+
+  it('encrypted thinking, which streams only token estimates, does not count as streamed', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    stream.push({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '', estimated_tokens: 40 } },
+    })
+    expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
   })
 })

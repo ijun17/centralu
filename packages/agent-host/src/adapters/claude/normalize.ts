@@ -128,6 +128,14 @@ export function normalizeMessage(
      * 반대로 스트리밍된 턴에서 또 내면 같은 글이 두 번 붙는다 — 그래서 플래그가 필요하다.
      */
     textStreamed?: boolean
+    /**
+     * The thinking of this assistant message already went out as streamed `thinking_delta`s. The finished
+     * message repeats the whole thinking block, so emitting it again doubled every thought. That stayed
+     * hidden while thinking arrived encrypted as "" (#58); once models sent readable thinking, a message
+     * that thought and then called a tool (no text, so `textStreamed` stayed false) showed its thinking
+     * twice, stored twice in one row.
+     */
+    reasoningStreamed?: boolean
   },
 ): NormalizedEvent[] {
   const m = msg as Json
@@ -268,13 +276,16 @@ export function normalizeMessage(
   if (type === 'assistant') {
     const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
     // 델타 없이 온 본문의 유일한 출구 (위 opts.textStreamed 주석 참고 — /usage가 이 길로 온다)
-    if (!opts?.textStreamed) {
-      // thinking 블록도 같은 규칙 — 실측으로는 항상 ""이지만, 텍스트가 실려 오는 날 여기로 흐른다
+    // Thinking follows the same rule as text, but on its own flag: a message can stream its thinking and
+    // then call a tool without any text, and then only the thinking has already gone out.
+    if (!opts?.reasoningStreamed) {
       const thinking = content
         .filter((b) => str(b.type) === 'thinking')
         .map((b) => str(b.thinking))
         .join('')
       if (thinking) out.push({ type: 'reasoning_delta', sessionId, text: thinking })
+    }
+    if (!opts?.textStreamed) {
       const text = content
         .filter((b) => str(b.type) === 'text')
         .map((b) => str(b.text))
@@ -489,6 +500,8 @@ export function normalizeMessage(
  */
 export class ClaudeStreamNormalizer {
   private textStreamed = false
+  /** Readable thinking of the current assistant message already went out as deltas (see normalizeMessage's opts) */
+  private reasoningStreamed = false
   /**
    * 우리가 턴을 끊었다 — 그 뒤 처음 오는 result가 끊긴 턴의 결말이다 (#168).
    *
@@ -525,7 +538,7 @@ export class ClaudeStreamNormalizer {
         ok: status === 'completed',
         summary: agentReport(str(m.summary), agentStats(usage.tool_uses, usage.duration_ms, status)),
       }
-      if (!this.textStreamed) return [done]
+      if (!this.textStreamed && !this.reasoningStreamed) return [done]
       this.deferred.push(done)
       return []
     }
@@ -535,15 +548,23 @@ export class ClaudeStreamNormalizer {
       if (launched) this.background.add(launched)
     }
 
-    let events = normalizeMessage(msg, this.sessionId, { textStreamed: this.textStreamed })
+    let events = normalizeMessage(msg, this.sessionId, {
+      textStreamed: this.textStreamed,
+      reasoningStreamed: this.reasoningStreamed,
+    })
     if (subagent) return events
     if (type === 'stream_event' && events.some((e) => e.type === 'message_delta')) this.textStreamed = true
+    // Only thinking that carried text counts: encrypted thinking streams token estimates, and its block is ""
+    if (type === 'stream_event' && events.some((e) => e.type === 'reasoning_delta' && !!e.text)) this.reasoningStreamed = true
     /*
      * assistant 메시지가 한 본문의 끝이다 — 다음 본문은 다시 처음부터 센다. **result도 끝이다** (#168): 글을 쓰는
      * 도중에 멈추면 그 덩어리의 assistant 메시지가 오지 않아서, 표식이 켜진 채 다음 턴으로 넘어가 델타 없이 오는
      * 통짜 응답(/usage 같은 로컬 응답, CLI가 합성한 API 오류)을 버렸다.
      */
-    if (type === 'assistant' || type === 'result') this.textStreamed = false
+    if (type === 'assistant' || type === 'result') {
+      this.textStreamed = false
+      this.reasoningStreamed = false
+    }
     if (type === 'result' && this.stopping) {
       this.stopping = false
       if (str(m.subtype) === 'error_during_execution') events = events.filter((e) => e.type !== 'error')
