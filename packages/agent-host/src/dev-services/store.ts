@@ -884,6 +884,31 @@ export class Store {
           if (!cols.some((c) => c.name === 'tokens_out')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN tokens_out INTEGER`)
         },
       },
+      {
+        to: 39,
+        /**
+         * The trash (#204): deleting a session stops destroying it.
+         *
+         *   deleted_at  when the person moved it to the trash; NULL is a live session. Every query that lists
+         *               sessions filters on this one column, so "is it in the trash" is answered in one place
+         *   trash       JSON (`TrashRecord`): where it came from (project id, name and path) and what the person
+         *               chose to remove with it when it is deleted for good (the tool's conversation file, the
+         *               worktree). NULL on a live session
+         *
+         * A column rather than a side table: a side table makes every listing query a `NOT EXISTS` join, and the
+         * easiest query to write would be the one that forgets it. A column that says NULL for every row written
+         * before this step means nothing old is in the trash, which is true.
+         *
+         * No backfill and no index: the step only adds two empty columns, and the sessions table holds tens of rows.
+         * Rows that later steps add for a session (see `purgeSession`) have to consider that the session may be in
+         * the trash — its rows still exist and still point at it.
+         */
+        run: () => {
+          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          if (!cols.some((c) => c.name === 'deleted_at')) this.db.exec(`ALTER TABLE sessions ADD COLUMN deleted_at INTEGER`)
+          if (!cols.some((c) => c.name === 'trash')) this.db.exec(`ALTER TABLE sessions ADD COLUMN trash TEXT`)
+        },
+      },
     ]
 
     const t0 = Date.now()
@@ -1338,8 +1363,14 @@ export class Store {
 
   /** 그리드 배치 — 올려둔 순서대로 */
   listGridView(): string[] {
+    // `trashSession` takes the panel away; the join keeps a panel written by an older build out of the grid too
     return (
-      this.db.prepare(`SELECT session_id FROM grid_panels ORDER BY position`).all() as {
+      this.db
+        .prepare(
+          `SELECT g.session_id FROM grid_panels g JOIN sessions s ON s.id = g.session_id
+           WHERE s.deleted_at IS NULL ORDER BY g.position`,
+        )
+        .all() as {
         session_id: string
       }[]
     ).map((r) => r.session_id)
@@ -1371,13 +1402,23 @@ export class Store {
    * 깨뜨렸으므로 이제 kind가 유일한 사실이고 이 질의는 그걸 읽을 뿐이다.
    */
   orchestratorId(): string | null {
+    /*
+     * A trashed session has no project (see `trashSession`), so without the filter a trashed project orchestrator
+     * would answer here as the central one.
+     */
     const row = this.db
-      .prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL LIMIT 1`)
+      .prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL AND deleted_at IS NULL LIMIT 1`)
       .get() as { id: string } | undefined
     return row?.id ?? null
   }
 
+  /** Live sessions only — the trash (#204) is listed by `listTrash` and nowhere else */
   listSessions(): SessionInfo[] {
+    return this.readSessions(`s.deleted_at IS NULL`)
+  }
+
+  /** The rows of `listSessions`, for any condition on `sessions s` — the one place a row becomes a `SessionInfo` */
+  private readSessions(where: string, ...params: unknown[]): SessionInfo[] {
     const rows = this.db
       .prepare(
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
@@ -1392,9 +1433,9 @@ export class Store {
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
-         FROM sessions s ORDER BY s.sidebar_order, s.created_at`,
+         FROM sessions s WHERE ${where} ORDER BY s.sidebar_order, s.created_at`,
       )
-      .all() as (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
+      .all(...params) as (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
       autoNamed: number
       isOrchestrator: number
       worktreePath: string | null
@@ -1471,10 +1512,6 @@ export class Store {
   }
 
   /**
-   * 세션을 완전히 지운다 (대화·검색 인덱스·승인 규칙까지).
-   * 아카이브는 "치우되 남긴다"이고 이건 "없앤다"다 — 둘 다 필요하다.
-   */
-  /**
    * 아직 **주인이 있는** 인수인계 노트들 — 살아 있는 세션이 물려받았다고 적어 둔 전임자 id (#106).
    *
    * 파일 이름은 전임자의 id다 (#104). 그래서 "전임자가 사라졌으니 그 노트도 사라져도
@@ -1485,8 +1522,15 @@ export class Store {
    * JOIN이 산 것: 세션이 사라진 마커는 함께 사라진다 — 죽은 세션이 노트를 붙들지 못한다.
    */
   handoffPredecessors(): Set<string> {
+    /*
+     * A successor in the trash still claims its note (#204): restoring it must find the note it was handed, so
+     * only deleting it for good lets the note go.
+     */
     const rows = this.db
-      .prepare(`SELECT m.payload as payload FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.kind = 'marker'`)
+      .prepare(
+        `/* includes the trash: a trashed successor keeps its note */
+         SELECT m.payload as payload FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.kind = 'marker'`,
+      )
       .all() as { payload: string }[]
     const out = new Set<string>()
     for (const r of rows) {
@@ -1518,22 +1562,86 @@ export class Store {
     })
   }
 
+  // ── The trash (#204) ──
+  //
+  // Deleting a session moves it here; only Settings removes it for good. While it is here its rows stay as they
+  // were, except its search index, which is dropped: no search and no agent's `recall` can reach it, and the index is
+  // the larger half of the store (71MB of 137MB, measured for #96). Restoring rebuilds the index from the messages.
+
   /**
-   * 세션을 지운다 — **조각으로 나눠 지우고, 조각 사이에 이벤트 루프를 놓아준다** (#179).
+   * Moves a live session into the trash. `record` carries where it came from and what the person chose to remove
+   * with it once it is deleted for good. Returns false when there was no live session to move.
    *
-   * 예전에는 한 트랜잭션이었다. better-sqlite3는 동기라, 실제 DB 복사본의 가장 큰 세션
-   * (메시지 57,729 · 색인 32,323행) 하나를 지우는 동안 호스트가 2.9초 멈췄다 — 다른 세션의
-   * 스트리밍도 RPC 답도 그만큼 밀렸다. 비용의 대부분은 trigram 색인을 고치는 데 든다.
-   * 조각으로 나눈 뒤 같은 복사본에서 가장 긴 멈춤은 84ms다(전체는 4.1초로 늘지만 그동안
-   * 이벤트 루프가 231번 돈다).
+   * The session leaves every listing in the first transaction: `deleted_at` is set before anything slow runs. It
+   * also leaves its project: `project_id` becomes NULL and the project is kept in `record`. That is what lets a
+   * project be deleted while its sessions sit in the trash — `sessions.project_id` cascades a project delete (FK), so
+   * a session still pointing at the project would be destroyed with it. The grid panel goes too: it is layout, not a
+   * record, and a restored session is opened from the sidebar.
    *
-   * 조각마다 메시지와 **그 메시지의 색인 행을 같이** 지운다(색인 rowid = 메시지 rowid).
-   * 그래서 중간에 끊겨도 남은 메시지는 제 색인을 그대로 갖고, 지운 메시지의 색인만
-   * 남는 일은 없다 — 지운 말이 검색에 나오는 것이 가장 나쁜 어긋남이다. 세션 행과
-   * 규칙은 **마지막 조각과 같은 트랜잭션에서** 지운다: 끊기면 세션이 목록에 남아 다시
-   * 지울 수 있고, 세션 없이 메시지만 남는 자리는 생기지 않는다.
+   * The index rows are then dropped in chunks, letting the event loop go between them (#179: the biggest session in
+   * a copy of the real store held 32,323 index rows, and dropping them in one transaction froze the host for 2.9s).
+   * If the host stops halfway, the session is in the trash with part of its index left; searches still skip it
+   * (`searchMessages` filters the trash), and restoring or purging finishes the job.
    */
-  async deleteSession(sessionId: string, chunk = DELETE_CHUNK): Promise<void> {
+  async trashSession(sessionId: string, record: TrashRecord, chunk = DELETE_CHUNK): Promise<boolean> {
+    const move = this.db.transaction((): boolean => {
+      const moved = this.db
+        .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
+        .run(Date.now(), JSON.stringify(record), sessionId).changes
+      if (moved === 0) return false
+      this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(sessionId)
+      return true
+    })
+    if (!move()) return false
+    const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
+    await this.walkMessages(sessionId, chunk, false, (rows) => {
+      for (const r of rows) dropFts.run(r.rowid)
+    })
+    return true
+  }
+
+  /**
+   * Takes a session out of the trash into `projectId` (null for one that had no project). Returns null when it was
+   * not in the trash.
+   *
+   * The index is rebuilt first, in chunks, and the session becomes live only in the last step. A restore cut short
+   * therefore leaves it in the trash with part of its index, which the search filter hides and the next restore
+   * overwrites (the index row is keyed by the message's rowid, so writing it again replaces it).
+   */
+  async restoreSession(sessionId: string, projectId: string | null, chunk = DELETE_CHUNK): Promise<SessionInfo | null> {
+    if (!this.isTrashed(sessionId)) return null
+    const put = this.db.prepare(`INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`)
+    const drop = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
+    await this.walkMessages(sessionId, chunk, true, (rows) => {
+      for (const r of rows) {
+        const body = extractText(r.payload ?? '')
+        if (body) put.run(r.rowid, body, sessionId, r.seq)
+        else drop.run(r.rowid)
+      }
+    })
+    const back = this.db
+      .prepare(`UPDATE sessions SET deleted_at = NULL, trash = NULL, project_id = ? WHERE id = ? AND deleted_at IS NOT NULL`)
+      .run(projectId, sessionId).changes
+    if (back === 0) return null
+    return this.readSessions(`s.id = ? AND s.deleted_at IS NULL`, sessionId)[0] ?? null
+  }
+
+  /**
+   * Deletes a session in the trash for good. It is the only way a session's rows leave the store, and it takes only
+   * a session already in the trash: a live one has to be moved there first, so nothing skips the way back.
+   *
+   * Everything that points at the session goes with it: its messages and whatever is left of their index, its
+   * approval rules, its commit links (`commit_sessions` — #96 found 57 of 304 links pointing at sessions that no
+   * longer existed, because deleting used to leave them behind), and the app runs it started or ran in
+   * (`app_runs.session_id` / `caller_session_id`, with their kept failures).
+   *
+   * Chunked like `trashSession` (#179: on the same copy of the real store the longest pause went from 2.9s to 84ms;
+   * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row, go in the same
+   * transaction as the last chunk, so a purge cut short leaves the session in the trash with fewer messages, to be
+   * purged again, and never messages without a session.
+   */
+  async purgeSession(sessionId: string, chunk = DELETE_CHUNK): Promise<boolean> {
+    if (!this.isTrashed(sessionId)) return false
     const pick = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? LIMIT ?`)
     const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     const dropMsg = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
@@ -1545,45 +1653,151 @@ export class Store {
       }
       if (rows.length === chunk) return false
       this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId)
+      this.db.prepare(`DELETE FROM commit_sessions WHERE session_id = ?`).run(sessionId)
+      this.db
+        .prepare(`DELETE FROM app_run_failures WHERE run_id IN (SELECT id FROM app_runs WHERE session_id = ? OR caller_session_id = ?)`)
+        .run(sessionId, sessionId)
+      this.db.prepare(`DELETE FROM app_runs WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
+      this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
+    })
+    while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
+    return true
+  }
+
+  /** One session's messages in seq order, one transaction per chunk, letting the event loop go between chunks (#179) */
+  private async walkMessages(
+    sessionId: string,
+    chunk: number,
+    withPayload: boolean,
+    each: (rows: { rowid: number; seq: number; payload?: string }[]) => void,
+  ): Promise<void> {
+    const pick = this.db.prepare(
+      `SELECT rowid, seq${withPayload ? ', payload' : ''} FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
+    )
+    let after = Number.MIN_SAFE_INTEGER
+    const step = this.db.transaction((): boolean => {
+      const rows = pick.all(sessionId, after, chunk) as { rowid: number; seq: number; payload?: string }[]
+      each(rows)
+      if (rows.length > 0) after = rows[rows.length - 1]!.seq
+      return rows.length < chunk
     })
     while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
+  isTrashed(sessionId: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).get(sessionId)
+  }
+
+  /** The ids in the trash — for the few callers that must tell "in the trash" from "gone" */
+  trashedIds(): Set<string> {
+    const rows = this.db.prepare(`SELECT id FROM sessions WHERE deleted_at IS NOT NULL`).all() as { id: string }[]
+    return new Set(rows.map((r) => r.id))
+  }
+
+  /** A session in the trash as it will come back, with its record — null when it is not in the trash */
+  trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
+    const session = this.readSessions(`s.id = ? AND s.deleted_at IS NOT NULL`, sessionId)[0]
+    if (!session) return null
+    const row = this.db.prepare(`SELECT deleted_at as deletedAt, trash FROM sessions WHERE id = ?`).get(sessionId) as {
+      deletedAt: number
+      trash: string | null
+    }
+    return { session, record: parseTrashRecord(row.trash), deletedAt: row.deletedAt }
+  }
+
   /**
-   * 프로젝트를 완전히 지운다 — 세션·대화·색인·규칙·귀속까지.
+   * What is in the trash, most recently deleted first, with how much of the store each one holds: the bytes of its
+   * messages (the index is already gone). Settings shows the total, because nothing empties the trash on its own.
+   * Measured on a copy of the real store (135,828 messages): summing every session's messages takes about 40ms.
+   */
+  listTrash(): TrashedRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.id, s.name, s.tool, s.deleted_at as deletedAt, s.trash as trash,
+                s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
+                (s.external_id IS NOT NULL OR s.imported_from IS NOT NULL) as hasConversationFile,
+                COUNT(m.seq) as messages, COALESCE(SUM(LENGTH(CAST(m.payload AS BLOB))), 0) as bytes
+         FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
+         WHERE s.deleted_at IS NOT NULL GROUP BY s.id ORDER BY s.deleted_at DESC`,
+      )
+      .all() as (Omit<TrashedRow, 'record' | 'worktree' | 'hasConversationFile'> & {
+      hasConversationFile: number
+      trash: string | null
+      worktreePath: string | null
+      worktreeBranch: string | null
+    })[]
+    return rows.map(({ trash, worktreePath, worktreeBranch, hasConversationFile, ...r }) => ({
+      ...r,
+      hasConversationFile: !!hasConversationFile,
+      record: parseTrashRecord(trash),
+      worktree: worktreePath ? { path: worktreePath, branch: worktreeBranch ?? '' } : null,
+    }))
+  }
+
+  /**
+   * Deletes a project. Its sessions go to the trash (#204), not with it.
    *
-   * **FK의 CASCADE에 기대지 않는다.** `sessions.project_id`에는 걸려 있지만 messages는
-   * 세션을 타고 두 다리 건너이고, `messages_fts`는 가상 테이블이라 외래키 자체가 없다.
-   * 그대로 두면 지운 프로젝트의 말이 검색에 계속 나온다 — 지운 것이 안 지워진 자리다.
-   * 그래서 세션마다 deleteSession을 거친다: 한 세션을 없애는 규칙이 한 곳에만 있어야
-   * 다음에 테이블이 하나 더 늘어도 고칠 곳이 한 곳이다.
+   * The manager moves each session to the trash first (`SessionManager.deleteProject`), which also stops its
+   * process. This step catches any live row that did not get there, in the same transaction as the project row, so
+   * deleting a project cannot destroy a conversation. Such a row is marked to keep the tool's conversation file and
+   * the worktree: nobody was asked about them.
    *
-   * project_id를 들고 있는 나머지 셋(approval_rules·usage_facts·commit_sessions)도 같이
-   * 간다. usage_facts는 날짜별 집계라 아깝지만, 지운 프로젝트의 이름이 사용량 화면에
-   * 남아 있는 쪽이 더 이상하다.
+   * **FK의 CASCADE에 기대지 않는다.** `messages_fts` is a virtual table with no foreign key at all, so the index rows
+   * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
    *
-   * 한 덩어리로 돈다 — 중간에 끊기면 세션 없는 프로젝트나 프로젝트 없는 세션이 남는다.
+   * The rows that belong to the project go with it as before: project-scope rules, usage (`usage_facts` is a daily
+   * total per project, with no session in it), the answers given to its apps, and the app runs and commit links that
+   * point at no session still here. Rows that point at a session in the trash stay with that session until it is
+   * deleted for good: its own rules, its commit links, the app runs it started or ran in. A restore that registers
+   * the folder again under the same id finds them where they were.
    */
   deleteProject(projectId: string): void {
     const tx = this.db.transaction(() => {
-      const ids = this.db.prepare(`SELECT id FROM sessions WHERE project_id = ?`).all(projectId) as {
+      const project = this.db.prepare(`SELECT name, path FROM projects WHERE id = ?`).get(projectId) as
+        | { name: string; path: string }
+        | undefined
+      const record: TrashRecord = {
+        projectId,
+        projectName: project?.name ?? null,
+        projectPath: project?.path ?? null,
+        removeExternal: false,
+        removeWorktree: false,
+      }
+      const left = this.db.prepare(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL`).all(projectId) as {
         id: string
       }[]
-      for (const { id } of ids) {
-        this.db.prepare(`DELETE FROM messages_fts WHERE session_id = ?`).run(id)
-        this.db.prepare(`DELETE FROM messages WHERE session_id = ?`).run(id)
-        this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(id)
-        this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id)
+      for (const { id } of left) {
+        this.db.prepare(`DELETE FROM messages_fts WHERE rowid IN (SELECT rowid FROM messages WHERE session_id = ?)`).run(id)
+        this.db
+          .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
+          .run(Date.now(), JSON.stringify(record), id)
+        this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(id)
       }
-      this.db.prepare(`DELETE FROM approval_rules WHERE project_id = ?`).run(projectId)
+      this.db
+        .prepare(
+          `/* includes the trash: a rule of a session in the trash stays with it */
+           DELETE FROM approval_rules WHERE project_id = ? AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))`,
+        )
+        .run(projectId)
       this.db.prepare(`DELETE FROM usage_facts WHERE project_id = ?`).run(projectId)
-      this.db.prepare(`DELETE FROM commit_sessions WHERE project_id = ?`).run(projectId)
-      // 그 프로젝트 앱의 실행 기록도 이 앱의 기록이다 (M4 A-6)
-      this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ?`).run(projectId)
-      this.db.prepare(`DELETE FROM app_runs WHERE project_id = ?`).run(projectId)
-      // 그 프로젝트 앱의 능력에 한 답도 (M4 D-4) — 같은 경로에 다시 등록해도 새 프로젝트다(id가 다르다)
+      this.db
+        .prepare(
+          `/* includes the trash: a commit link of a session in the trash stays with it */
+           DELETE FROM commit_sessions WHERE project_id = ? AND session_id NOT IN (SELECT id FROM sessions)`,
+        )
+        .run(projectId)
+      // 그 프로젝트 앱의 실행 기록도 이 앱의 기록이다 (M4 A-6) — a run that points at a session in the trash stays with it
+      this.db
+        .prepare(
+          `/* includes the trash: a run of a session in the trash stays with it */
+           DELETE FROM app_runs WHERE project_id = ?
+             AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))
+             AND (caller_session_id IS NULL OR caller_session_id NOT IN (SELECT id FROM sessions))`,
+        )
+        .run(projectId)
+      this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ? AND run_id NOT IN (SELECT id FROM app_runs)`).run(projectId)
+      // 그 프로젝트 앱의 능력에 한 답도 (M4 D-4) — a folder registered again, even under the same id by a restore, is asked again
       this.db.prepare(`DELETE FROM app_permissions WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
     })
@@ -1662,7 +1876,7 @@ export class Store {
       return this.db
         .prepare(
           `SELECT session_id as sessionId, seq, body FROM messages_fts
-           WHERE body LIKE ? ORDER BY seq DESC LIMIT ?`,
+           WHERE body LIKE ? AND ${OUT_OF_TRASH} ORDER BY seq DESC LIMIT ?`,
         )
         .all(`%${q}%`, limit) as { sessionId: string; seq: number; body: string }[]
     }
@@ -1671,7 +1885,7 @@ export class Store {
       return this.db
         .prepare(
           `SELECT session_id as sessionId, seq, body
-           FROM messages_fts WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?`,
+           FROM messages_fts WHERE messages_fts MATCH ? AND ${OUT_OF_TRASH} ORDER BY rank LIMIT ?`,
         )
         .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; body: string }[]
     } catch {
@@ -1893,7 +2107,9 @@ export class Store {
       .prepare(
         `SELECT id, scope, matcher, decision, project_id as projectId, session_id as sessionId,
                 created_at as createdAt
-         FROM approval_rules ORDER BY created_at DESC`,
+         FROM approval_rules
+         WHERE session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)
+         ORDER BY created_at DESC`,
       )
       .all() as never
   }
@@ -2071,6 +2287,61 @@ export class Store {
       .all(appKey) as AppPermissionRecord[]
   }
 }
+
+/**
+ * What a session in the trash remembers (`sessions.trash`, #204).
+ *
+ *   projectId, projectName, projectPath   where it came from. A trashed session has no `project_id` (see
+ *                                         `trashSession`), and its project may be deleted meanwhile; restoring
+ *                                         then registers the folder again under the same id
+ *   removeExternal   delete the tool's own conversation file (Claude JSONL, Codex rollout) when deleted for good
+ *   removeWorktree   remove the session's worktree when deleted for good
+ */
+export type TrashRecord = {
+  projectId: string | null
+  projectName: string | null
+  projectPath: string | null
+  removeExternal: boolean
+  removeWorktree: boolean
+}
+
+/** One row of `listTrash` */
+export type TrashedRow = {
+  id: string
+  name: string
+  tool: string
+  deletedAt: number
+  messages: number
+  bytes: number
+  /** The tool knows this conversation by an id of its own — there is a file of the tool's to keep or delete */
+  hasConversationFile: boolean
+  record: TrashRecord
+  worktree: { path: string; branch: string } | null
+}
+
+/** A record written by an older or broken build reads as "keep everything" — deleting for good must be asked for */
+function parseTrashRecord(json: string | null): TrashRecord {
+  let r: Partial<Record<keyof TrashRecord, unknown>> = {}
+  try {
+    r = json ? (JSON.parse(json) as typeof r) : {}
+  } catch {
+    // unreadable: the defaults below keep the files
+  }
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  return {
+    projectId: str(r.projectId),
+    projectName: str(r.projectName),
+    projectPath: str(r.projectPath),
+    removeExternal: r.removeExternal === true,
+    removeWorktree: r.removeWorktree === true,
+  }
+}
+
+/**
+ * The condition that keeps the trash out of a search (#204). Its index rows are dropped when it goes to the trash;
+ * this also covers the ones a trash step cut short left behind.
+ */
+const OUT_OF_TRASH = `session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)`
 
 /** app_permissions 한 줄 — 런타임의 `CapabilityDecision`과 같은 모양이다 (구조로 맞물린다, M4 D-4) */
 export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }

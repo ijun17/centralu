@@ -96,9 +96,10 @@ export function createRpcHandler(
       mgr.interrupt(RpcMethods['agents.interrupt'].params.parse(p).sessionId)
       return { ok: true as const }
     },
+    // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
     'agents.deleteSession': async (p) => {
       const { sessionId, deleteWorktree, deleteExternal } = RpcMethods['agents.deleteSession'].params.parse(p)
-      await mgr.deleteSession(sessionId, deleteWorktree, deleteExternal)
+      await mgr.trashSession(sessionId, deleteWorktree, deleteExternal)
       return { ok: true as const }
     },
     'agents.exportHandoffRecord': async (p) => {
@@ -595,6 +596,26 @@ export function createRpcHandler(
     'prefs.get': async () => mgr.uiPreferences(),
     'prefs.set': async (p) => mgr.setUiPreferences(RpcMethods['prefs.set'].params.parse(p).patch),
     'approvals.rules': async () => mgr.listApprovalRules(),
+    /*
+     * The trash (#204). These are the person's: this handler is reached only over the UI's socket. The agents'
+     * tools (`orchestrator-tools.ts`) and the apps' broker (`broker.ts`, `host_data`) have no verb for any of it.
+     */
+    'trash.list': async () => mgr.listTrash(),
+    'trash.read': async (p) => {
+      const { sessionId, limit, beforeSeq } = RpcMethods['trash.read'].params.parse(p)
+      return mgr.readTrashed(sessionId, limit, beforeSeq)
+    },
+    'trash.restore': async (p) => {
+      const r = await mgr.restoreSession(RpcMethods['trash.restore'].params.parse(p).sessionId)
+      // A project registered again is a project added — its apps are read the same way (`projects.add`)
+      if (r.project) externalApps?.refresh()
+      return r
+    },
+    'trash.purge': async (p) => {
+      await mgr.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
+      return { ok: true as const }
+    },
+    'trash.empty': async () => mgr.emptyTrash(),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
     'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
     // Answers once the install has started, not once it has finished — see the note on

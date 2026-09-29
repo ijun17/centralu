@@ -33,6 +33,7 @@ import type {
   SessionInfo,
   SessionState,
   StoredMessage,
+  TrashedSession,
   UsageSnapshot,
   ToolName,
   UiPreferences,
@@ -87,8 +88,8 @@ import {
 } from '../dev-services/fs.js'
 import { isMissingPathError } from '../dev-services/path-guard.js'
 import { DirWatchers } from '../dev-services/watch.js'
-import { saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
-import { handoffNoteDir, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
+import { attachmentBytes, saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
+import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 
 /**
@@ -818,11 +819,13 @@ export class SessionManager {
    * 이유: 경로를 아는 유일한 근거가 이 DB의 행이라, 행을 먼저 지우면 무엇을 버릴지
    * 물어볼 곳이 없어진다. 반대로 휴지통이 실패하면 아무것도 안 지운 채로 끝난다.
    *
-   * 세션은 `deleteSession`을 그대로 거친다 — 프로세스를 정리하고 첨부를 지우고
-   * `session_deleted`를 쏘는 일을 여기서 다시 쓰면 언젠가 두 벌이 어긋난다.
-   * 다만 **워크트리는 남긴다.** 지우려면 git이 필요한데 그 저장소가 방금 사라졌을 수도
-   * 있고, 무엇보다 워크트리 안의 것은 아직 병합되지 않은 사람의 일이다 —
-   * 세션 삭제 창이 워크트리를 기본으로 남기는 것과 같은 판단이다.
+   * 세션은 `trashSession`을 그대로 거친다 — **its sessions go to the trash (#204), not with the project.** The
+   * owner's rule is that a conversation leaves the store only from Settings, and deleting a project destroyed every
+   * one of its conversations at once — the largest loss one click could cause. The process is stopped and
+   * `session_deleted` is sent on the way, as for one session; writing that again here would drift one day.
+   * Nothing is marked for removal with them: the tool's conversation files and the worktrees stay even when the
+   * trash is emptied, because nobody was asked about them (a worktree also holds work not merged yet — the same
+   * call the session dialog makes by leaving it by default). Restoring one of them registers the folder again.
    *
    * 자식이 있는 매니저를 먼저 지우려 하면 #69의 보호가 막는다. 그래서 **잎부터** 지운다.
    */
@@ -831,7 +834,7 @@ export class SessionManager {
     const leavesFirst = [...mine].sort(
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
     )
-    for (const s of leavesFirst) await this.deleteSession(s.id).catch(() => {})
+    for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
     this.store.deleteProject(projectId)
   }
 
@@ -1963,23 +1966,38 @@ export class SessionManager {
     }
   }
 
-  /** 세션을 완전히 지운다 (프로세스 종료 + 기록·첨부 삭제) */
   /**
-   * @param deleteWorktree 워크트리까지 지울지. **기본은 남기는 것이다** — 에이전트가 몇 시간
-   * 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다. UI가 사람에게 먼저 묻는다.
+   * Moves a session to the trash (#204) — what deleting a session means now. Nothing is destroyed: the process
+   * stops, and the session leaves every list (sidebar, inbox, palette, grid, search, the agents' session tools and
+   * the apps' `sessions.list`, all of which read `meta` or filter the trash in the store). Its rows, attachments,
+   * handoff note, the tool's conversation file and its worktree stay until the person deletes it for good in
+   * Settings (`purgeSession`).
+   *
+   * @param removeWorktree remove the worktree **when it is purged**. 기본은 남기는 것이다 — 에이전트가 몇 시간
+   * 작업한 결과가 거기 있을 수 있다. It stays registered with git and in place while the session is in the trash:
+   * moving a worktree folder leaves git's record pointing at nothing (`git worktree list` calls it prunable, and
+   * `git worktree prune` or a `gc` then drops it), and Claude files a conversation by its working directory, so the
+   * restored session would not find its own history either.
+   * @param removeExternal delete the tool's conversation file **when it is purged**. It stays where the tool keeps
+   * it while the session is in the trash: the file is the tool's, in the tool's layout, and only the tool's own
+   * delete knows that layout (the Claude SDK's `deleteSession`). Left in place it is also a second way back — the
+   * tool, and **+ → Past conversations**, still have it.
    */
-  async deleteSession(sessionId: string, deleteWorktree = false, deleteExternal = false): Promise<void> {
+  async trashSession(sessionId: string, removeWorktree = false, removeExternal = false): Promise<void> {
     const m = this.meta.get(sessionId)
+    if (!m) {
+      // Already in the trash, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
+      this.emit({ type: 'session_deleted', sessionId })
+      return
+    }
     /*
      * 살아 있는 워크트리 자식이 있는 매니저는 지울 수 없다 (#69).
      *
      * 이 분류의 1번 실패가 고아 워크트리이고, 고아는 책임자가 사라질 때 생긴다.
-     * 자식이 아카이브되면 더는 붙들지 않는다 — 병합된/끝난 작업이 매니저를 영원히
-     * 고정하면 보호가 벌이 된다 (설계: merged children do not pin the manager).
+     * 병합된/끝난 작업이 매니저를 영원히 고정하면 보호가 벌이 된다 (설계: merged children do not pin the manager).
      */
     const liveKids = [...this.meta.values()].filter(
-      // 병합된 자식은 붙들지 않는다 (#69 설계: merged children do not pin the manager) —
-      // 이력이지 진행 중인 일이 아니다. 아카이브도 같다.
+      // 병합된 자식은 붙들지 않는다 — 이력이지 진행 중인 일이 아니다
       (s) => s.parentSessionId === sessionId && !s.worktreeMerged,
     )
     if (liveKids.length > 0) {
@@ -1991,13 +2009,20 @@ export class SessionManager {
       )
     }
     /*
+     * A tool that cannot delete its conversation file is refused now, not when the trash is emptied: the person
+     * choosing it is here, and "the file stays" is worth hearing before the dialog closes rather than as a purge
+     * that fails later.
+     */
+    const externalId = m.externalId ?? m.importedFrom
+    if (removeExternal && externalId && !this.adapters.get(m.tool)?.deleteExternalConversation) {
+      throw Object.assign(new Error(`${m.tool} does not support deleting its conversation file`), { code: 'internal' })
+    }
+    /*
      * 깨우는 중이면 그 깨우기를 물리고 끝나기를 기다린다 (#163). 예전에는 기다리지 않아서, 깨우기가 지운 세션에 핸들을
      * 앉히고 행을 다시 썼다 — 지운 세션이 다음 기동에 돌아왔고, 깨우기가 send에서 시작됐다면 에이전트가 방금 보낸
-     * 말을 실행했다. 도구 쪽 대화를 지울 때(deleteExternal) 깨어나던 Codex 프로세스가 잠금을 쥐고 있기도 했다.
+     * 말을 실행했다.
      */
     await this.untilWakeWithdrawn(sessionId, 'The session was deleted while waking')
-    // 행이 곧 지워지므로 마지막 flush는 의미가 없다 — 추적만 걷는다 (#66)
-    this.streams.delete(sessionId)
     // 앱이 답을 기다리던 세션이다 (M4 D-1) — 기다림을 이유와 함께 끝낸다. 안 끝내면 앱의 호출이 답 없이 매달린다
     const agentRun = this.agentRuns.get(sessionId)
     if (agentRun) {
@@ -2016,46 +2041,207 @@ export class SessionManager {
       this.handles.delete(sessionId)
     }
     /*
-     * 도구 쪽 원본 삭제 ("진짜로 삭제")는 **우리 쪽을 지우기 전에** 한다. 실패하면
-     * 그대로 던져서 세션이 목록에 남게 — "지웠다"고 답했는데 원본이 살아 있는 것이
-     * 최악이라서다(사람은 550MB가 사라진 줄 안다). dispose 뒤인 이유: codex는
-     * 살아 있는 동안 writer lock을 쥐고 있어 지울 수 없다.
+     * The message being streamed is written out, not dropped (#66 used to drop it, because the rows were about to go).
+     * The rows now stay, and a trashed conversation that stops mid-sentence is not the one that was deleted. Written
+     * before the trash step, so its index row is dropped with the rest.
      */
-    if (deleteExternal && m) {
-      const externalId = m.externalId ?? m.importedFrom
-      if (externalId) {
-        const del = this.adapters.get(m.tool)?.deleteExternalConversation
-        if (!del) {
-          throw Object.assign(
-            new Error(`${m.tool} does not support deleting its conversation file`),
-            { code: 'internal' },
-          )
-        }
-        await del.call(this.adapters.get(m.tool), externalId, this.cwdFor(m))
-      }
-    }
-    if (m?.worktree && deleteWorktree) {
-      /*
-       * force로 지운다 — 여기까지 온 것은 사람이 "커밋 안 된 변경이 있다"는 말을 듣고도
-       * 지우겠다고 답한 경우다. force 없이는 git이 거부해서 결국 아무것도 못 지운다.
-       * 실패해도 세션 삭제는 계속한다: 세션은 사라졌는데 목록에만 남는 편이 더 나쁘다.
-       */
-      await gitWorktreeRemove(this.cwdOf(m.projectId), m.worktree.path, true).catch(() => {})
-    }
+    this.closeStream(sessionId)
+    let project: { name: string; path: string } | undefined
+    if (m.projectId) project = this.store.listProjects().find((p) => p.id === m.projectId)
     this.running.delete(sessionId)
     this.restartAfterTurn.delete(sessionId)
     this.meta.delete(sessionId)
-    await this.store.deleteSession(sessionId)
-    await clearAttachments(sessionId).catch(() => {})
-    /*
-     * 이 세션과 함께 쓸모가 끝난 인수인계 노트를 걷는다 (#106). 행이 사라진 **뒤**에
-     * 도는 것이 중요하다 — 방금 지운 세션이 아직 자기 노트를 붙들고 있으면 안 된다.
-     * 지운 세션이 물려받았던 노트(전임자의 이름)도 같은 한 번에 걸린다.
-     */
-    if (m?.projectId) await this.sweepOrphanHandoffNotes(m.projectId).catch(() => {})
-    // 이 세션의 대화 안 앱 화면(M4 B-1)을 걷는다 — 붙들던 앱을 놓는다. 잠든 세션과 달리 돌아올 대화가 없다
+    await this.store.trashSession(sessionId, {
+      projectId: m.projectId,
+      projectName: project?.name ?? null,
+      projectPath: project?.path ?? null,
+      removeExternal: removeExternal && !!externalId,
+      removeWorktree: removeWorktree && !!m.worktree,
+    })
+    // 이 세션의 대화 안 앱 화면(M4 B-1)을 걷는다 — 붙들던 앱을 놓는다. A restored conversation reopens them from its history
     this.appsHub?.sessionGone(sessionId)
     this.emit({ type: 'session_deleted', sessionId })
+  }
+
+  /** Only one trash operation per session at a time — a purge racing a restore would restore half of a deleted session */
+  private trashBusy = new Set<string>()
+
+  private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    if (this.trashBusy.has(sessionId)) {
+      throw Object.assign(new Error('That session is already being restored or deleted'), { code: 'internal' })
+    }
+    this.trashBusy.add(sessionId)
+    try {
+      return await run()
+    } finally {
+      this.trashBusy.delete(sessionId)
+    }
+  }
+
+  /** The trash as Settings lists it (#204), with the total it takes on this machine */
+  async listTrash(): Promise<{ sessions: TrashedSession[]; bytes: number }> {
+    const projects = new Map(this.store.listProjects().map((p) => [p.id, p]))
+    const sessions = await Promise.all(
+      this.store.listTrash().map(async (r): Promise<TrashedSession> => {
+        const { record } = r
+        const live = record.projectId ? projects.get(record.projectId) : undefined
+        const files =
+          (await attachmentBytes(r.id).catch(() => 0)) +
+          (record.projectId ? await handoffNoteBytes(record.projectId, r.id).catch(() => 0) : 0)
+        return {
+          id: r.id,
+          name: r.name,
+          tool: r.tool,
+          project: record.projectId
+            ? {
+                id: record.projectId,
+                name: live?.name ?? record.projectName ?? record.projectId,
+                path: live?.path ?? record.projectPath,
+                exists: !!live,
+              }
+            : null,
+          deletedAt: r.deletedAt,
+          messages: r.messages,
+          bytes: r.bytes + files,
+          conversationFile: !r.hasConversationFile ? 'none' : record.removeExternal ? 'remove' : 'keep',
+          // Only a worktree still on disk is listed — the merged-worktree cleanup removes the folder before the trash is emptied
+          worktree: r.worktree && existsSync(r.worktree.path) ? { ...r.worktree, remove: record.removeWorktree } : null,
+        }
+      }),
+    )
+    return { sessions, bytes: sessions.reduce((a, s) => a + s.bytes, 0) }
+  }
+
+  /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
+  async readTrashed(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
+    if (!this.store.isTrashed(sessionId)) {
+      throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+    }
+    return this.loadMessages(sessionId, limit, beforeSeq)
+  }
+
+  /**
+   * Brings a session back from the trash as it was (#204): same id, same messages, same rules, its commit links and
+   * app runs still pointing at it, its search index rebuilt.
+   *
+   * Where it goes when its project was deleted meanwhile: the folder is registered again **under the same id**, so
+   * everything keyed by that id lines up again — the worktree folder (`<worktrees>/<project id>/<session id>`), the
+   * handoff notes (`<data>/handoff/<project id>/`), the commit links and app runs that stayed with the session. If
+   * the folder is registered already under another id, it goes there. If the folder is gone too, it refuses and
+   * says where the folder was: a project session without its folder cannot run, and it stays readable in the trash.
+   *
+   * A live-only state (working, waiting for approval) comes back idle, as it does after a restart: there is no
+   * process behind it. Other states come back as they were, so one that was waiting for the person is in the inbox again.
+   */
+  async restoreSession(sessionId: string): Promise<{ session: SessionInfo; project: ProjectInfo | null }> {
+    return this.trashOp(sessionId, async () => {
+      const t = this.store.trashedSession(sessionId)
+      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      const { record } = t
+      let projectId: string | null = null
+      let registered: ProjectInfo | null = null
+      if (record.projectId) {
+        const projects = this.store.listProjects()
+        const home =
+          projects.find((p) => p.id === record.projectId) ??
+          (record.projectPath ? projects.find((p) => p.path === record.projectPath) : undefined)
+        if (home) {
+          projectId = home.id
+        } else if (record.projectPath && existsSync(record.projectPath) && statSync(record.projectPath).isDirectory()) {
+          this.store.addProject({
+            id: record.projectId,
+            path: record.projectPath,
+            name: record.projectName ?? basename(record.projectPath),
+          })
+          projectId = record.projectId
+          registered = await this.projectInfo(projectId, record.projectPath)
+        } else {
+          throw Object.assign(
+            new Error(
+              `Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`,
+            ),
+            { code: 'internal' },
+          )
+        }
+      } else if (t.session.kind === 'orchestrator' && this.store.orchestratorId()) {
+        // Two central orchestrators would answer the same questions; the app has one (FR-11)
+        throw Object.assign(new Error('Another orchestrator is in place — the app runs one at a time'), { code: 'internal' })
+      }
+      const back = await this.store.restoreSession(sessionId, projectId)
+      if (!back) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
+      const fixed = LIVE_ONLY.includes(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
+      if (fixed !== back) this.store.upsertSession(fixed)
+      this.meta.set(sessionId, fixed)
+      // Its manager may be in the trash or gone: a worktree session does not stand without one (#69)
+      this.adoptOrphanWorktrees()
+      const session = { ...this.meta.get(sessionId)!, live: false }
+      this.emit({ type: 'session_created', sessionId, session })
+      return { session, project: registered }
+    })
+  }
+
+  /**
+   * Deletes a session in the trash for good (#204) — only the person, only from Settings. The agents' tools and the
+   * apps' broker have no path here; the RPC is the only caller.
+   *
+   * Order: the tool's conversation file first, when the person chose it. If that fails the purge stops and the
+   * session stays in the trash — answering "deleted" while the original lives is the worst outcome (a person
+   * believes 550MB is gone). It is skipped when a live session holds the same conversation (it was pulled back
+   * from Past conversations meanwhile): deleting it would take that session's history. Then the worktree, when
+   * chosen (a failure does not stop the purge — its folder is plain files the person can still remove). Then our
+   * rows, and last the attachments and the handoff note, which have to outlive the rows that point at them.
+   */
+  async purgeSession(sessionId: string): Promise<void> {
+    return this.trashOp(sessionId, async () => {
+      const t = this.store.trashedSession(sessionId)
+      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      const { session: s, record } = t
+      const cwd = this.store.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
+      const externalId = s.externalId ?? s.importedFrom
+      if (record.removeExternal && externalId) {
+        const held = [...this.meta.values()].some(
+          (x) => x.tool === s.tool && (x.externalId === externalId || x.importedFrom === externalId),
+        )
+        if (!held) {
+          const adapter = this.adapters.get(s.tool)
+          if (!adapter?.deleteExternalConversation) {
+            throw Object.assign(new Error(`${s.tool} does not support deleting its conversation file`), { code: 'internal' })
+          }
+          if (!cwd) throw Object.assign(new Error('The folder this conversation ran in is unknown'), { code: 'internal' })
+          await adapter.deleteExternalConversation(externalId, cwd)
+        }
+      }
+      if (record.removeWorktree && s.worktree && record.projectPath) {
+        /*
+         * force로 지운다 — 여기까지 온 것은 사람이 "커밋 안 된 변경이 있다"는 말을 듣고도
+         * 지우겠다고 답한 경우다. force 없이는 git이 거부해서 결국 아무것도 못 지운다.
+         */
+        await gitWorktreeRemove(record.projectPath, s.worktree.path, true).catch(() => {})
+      }
+      await this.store.purgeSession(sessionId)
+      await clearAttachments(sessionId).catch(() => {})
+      /*
+       * 이 세션과 함께 쓸모가 끝난 인수인계 노트를 걷는다 (#106). 행이 사라진 **뒤**에 도는 것이 중요하다 — 방금 지운
+       * 세션이 아직 자기 노트를 붙들고 있으면 안 된다. 지운 세션이 물려받았던 노트(전임자의 이름)도 같은 한 번에 걸린다.
+       */
+      if (record.projectId) await this.sweepOrphanHandoffNotes(record.projectId).catch(() => {})
+    })
+  }
+
+  /** Deletes everything in the trash for good. One that fails stays and is reported; the rest go on */
+  async emptyTrash(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }> {
+    let purged = 0
+    const failed: { sessionId: string; name: string; error: string }[] = []
+    for (const r of this.store.listTrash()) {
+      try {
+        await this.purgeSession(r.id)
+        purged++
+      } catch (e) {
+        failed.push({ sessionId: r.id, name: r.name, error: (e as Error).message })
+      }
+    }
+    return { purged, failed }
   }
 
   /**
@@ -2089,7 +2275,9 @@ export class SessionManager {
    */
   private async sweepOrphanHandoffNotes(projectId?: string): Promise<void> {
     const claimed = this.store.handoffPredecessors()
-    await sweepHandoffNotes((owner) => this.meta.has(owner) || claimed.has(owner), projectId)
+    // A session in the trash still owns its note (#204) — restoring it must find it; only purging lets it go
+    const trashed = this.store.trashedIds()
+    await sweepHandoffNotes((owner) => this.meta.has(owner) || claimed.has(owner) || trashed.has(owner), projectId)
   }
 
   /**
@@ -3371,7 +3559,11 @@ export class SessionManager {
   async gitLog(projectId: string, limit?: number) {
     const commits = await gitLog(this.cwdOf(projectId), limit)
     // 어느 세션이 만든 커밋인지 단다 (#50) — 기록이 없으면 그대로 지나간다
-    return attachCommitSessions(commits, this.store.commitSessions(projectId), (sid) => this.meta.get(sid)?.name)
+    // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
+    const trashed = this.store.trashedIds()
+    return attachCommitSessions(commits, this.store.commitSessions(projectId), (sid) =>
+      this.meta.get(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
+    )
   }
   gitCommitDetail(projectId: string, sha: string) {
     return gitCommitDetail(this.cwdOf(projectId), sha)
@@ -3825,8 +4017,14 @@ export class SessionManager {
         }
 
         const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
-        // 도구 쪽 대화 원본은 남긴다(deleteExternal=false) — 이 삭제의 마지막 복구 경로다
-        await this.deleteSession(sessionId, true, false)
+        /*
+         * The session goes to the trash (#204) like any other: an agent can put a session there but never delete it
+         * for good. The worktree is removed now, not at purge — it is proven merged and clean above, so it holds
+         * nothing that is not on trunk, and git will not delete a branch a worktree still has checked out.
+         * 도구 쪽 대화 원본은 남긴다 — 이 삭제의 마지막 복구 경로다.
+         */
+        await this.trashSession(sessionId)
+        await gitWorktreeRemove(cwd, path, true).catch(() => {})
         // 실패해도 되돌리지 않는다: 남은 브랜치 ref는 배지 하나의 비용이지 손실이 아니다
         await gitBranchDelete(cwd, branch).catch(() => {})
         console.error(`[worktree] manager cleaned up ${branch} (tip ${tip?.slice(0, 8) ?? '?'}, proof: ${proof})`)
@@ -4288,7 +4486,7 @@ export class SessionManager {
   /** 답을 넘긴(또는 끝난) 에이전트 세션을 쉬게 둔다 — 프로세스를 닫고 `idle`로 (`runAppAgent` 주석) */
   private async finishAppAgent(sessionId: string, wait: AgentRunWait): Promise<void> {
     if (this.agentRuns.get(sessionId) === wait) this.agentRuns.delete(sessionId)
-    // 지우는 중이다 — 끝맺을 세션이 없다(deleteSession이 프로세스를 닫는다)
+    // 지우는 중이다 — 끝맺을 세션이 없다(trashSession이 프로세스를 닫는다)
     if (wait.deleted) return
     const h = this.handles.get(sessionId)
     if (h) {

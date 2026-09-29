@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 38
+const LATEST_SCHEMA = 39
 
 function seeded() {
   const s = new Store()
@@ -25,6 +25,16 @@ function seeded() {
     ...sessionLiveDefaults(),
   })
   return s
+}
+
+/** A trash record that removes nothing outside the store when purged */
+const KEEP_ALL = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', removeExternal: false, removeWorktree: false }
+
+/** Counts one session's search index rows straight from the table — `searchMessages` filters the trash, this does not */
+function indexRowsOf(s: Store, sessionId: string): () => number {
+  const db = (s as unknown as { db: Database.Database }).db
+  const q = db.prepare(`SELECT COUNT(*) as n FROM messages_fts WHERE session_id = ?`)
+  return () => (q.get(sessionId) as { n: number }).n
 }
 
 /**
@@ -294,8 +304,10 @@ describe('마이그레이션 (E-0)', () => {
    * 큰 세션 하나를 한 트랜잭션으로 지우면 호스트가 2초 가까이 멈췄다 (#179, 실제 DB의
    * 메시지 49,710건 세션에서 1.96초). 조각 사이에 이벤트 루프가 돌아야 하고, 어느 조각
    * 사이에서 멈춰 보아도 남은 메시지와 색인이 서로 맞아야 한다.
+   * Since #204 that is purging a session from the trash; the index rows it meets are the ones a trash step cut
+   * short left behind, so they are put back here first to give the chunks something to keep in step.
    */
-  it('세션 삭제는 조각 사이에 이벤트 루프를 놓아주고, 어느 사이에서 보아도 색인이 메시지와 맞는다', async () => {
+  it('purging a session lets the event loop go between chunks, and its messages and index rows leave together', async () => {
     const s = seeded()
     const n = 1000
     s.appendMessages(
@@ -305,23 +317,28 @@ describe('마이그레이션 (E-0)', () => {
         payload: { text: `은하수 ${i}` }, ts: i,
       })),
     )
+    const fts = indexRowsOf(s, 's1')
+    await s.trashSession('s1', KEEP_ALL)
+    s.appendMessages(s.loadMessages('s1', n)) // the index rows a cut-short trash step would have left
+    expect(fts()).toBe(n)
     const seen: { messages: number; hits: number }[] = []
     let deleting = true
     const look = () => {
       if (!deleting) return
-      seen.push({ messages: s.loadMessages('s1', n).length, hits: s.searchMessages('은하수', n).length })
+      seen.push({ messages: s.loadMessages('s1', n).length, hits: fts() })
       setImmediate(look)
     }
     setImmediate(look)
-    await s.deleteSession('s1', 100)
+    await s.purgeSession('s1', 100)
     deleting = false
     // 한 번에 끝났다면 look은 한 번도 돌지 못한다
     expect(seen.length).toBeGreaterThanOrEqual(5)
     for (const at of seen) expect(at.hits).toBe(at.messages)
     expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
     expect(s.listSessions().map((x) => x.id)).not.toContain('s1')
+    expect(s.listTrash()).toEqual([])
     expect(s.loadMessages('s1')).toEqual([])
-    expect(s.searchMessages('은하수').length).toBe(0)
+    expect(fts()).toBe(0)
     s.close()
   })
 
@@ -511,7 +528,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
   it('세션을 지우면 배치에서도 빠진다 — 없는 것을 그리려 하면 안 된다', async () => {
     const s = seeded()
     s.setGridView(['s1'])
-    await s.deleteSession('s1')
+    await s.trashSession('s1', KEEP_ALL)
     expect(s.listGridView()).toEqual([])
     s.close()
   })
@@ -1489,5 +1506,225 @@ describe('앱이 부탁한 에이전트의 쓰임 (M4 D-5)', () => {
     expect(s.appAgentUse('p1', 'notes', 0)).toEqual({ runs: 1, durationMs: 3, tokens: null })
     s.close()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+/**
+ * The trash (#204). Deleting a session moves it here; only purging removes its rows. While it is here it is out of
+ * reach: of every list and of search (its index rows are dropped, which is also where the size is — #96 measured
+ * the index at 71MB of a 137MB store).
+ */
+describe('the trash (#204)', () => {
+  const galaxy = (sessionId: string, n: number): StoredMessage[] =>
+    Array.from({ length: n }, (_, i) => ({
+      sessionId, seq: i + 1, role: 'user' as const, kind: 'text' as const, payload: { text: `galaxy ${i}` }, ts: i,
+    }))
+  const session = (s: Store, id: string, projectId: string | null, over: Partial<SessionInfo> = {}) =>
+    s.upsertSession({
+      id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
+      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
+      verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(), ...over,
+    })
+
+  it('a trashed session leaves every listing and search at once, and keeps its messages', async () => {
+    const s = seeded()
+    s.appendMessages(galaxy('s1', 5))
+    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.setGridView(['s1'])
+    session(s, 'orch', null, { kind: 'orchestrator' })
+    expect(s.orchestratorId()).toBe('orch')
+
+    expect(await s.trashSession('s1', KEEP_ALL)).toBe(true)
+    await s.trashSession('orch', { ...KEEP_ALL, projectId: null })
+
+    expect(s.listSessions()).toEqual([])
+    expect(s.orchestratorId()).toBeNull()
+    expect(s.listGridView()).toEqual([])
+    expect(s.searchMessages('galaxy')).toEqual([])
+    expect(s.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
+    expect(s.listApprovalRules()).toEqual([])
+    expect(indexRowsOf(s, 's1')()).toBe(0)
+    // Out of reach is not gone: the conversation is all there, and the trash lists it with where it came from
+    expect(s.loadMessages('s1', 10)).toHaveLength(5)
+    expect(s.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
+      ['orch', 0, null],
+      ['s1', 5, 'p1'],
+    ])
+    expect(await s.trashSession('s1', KEEP_ALL)).toBe(false) // twice is once
+    s.close()
+  })
+
+  /*
+   * The guard for the next query. Every SQL string in the store that reads `sessions` has to say what it does about
+   * the trash: filter it (`deleted_at`), read one session by id, or carry a comment saying why it includes the trash.
+   * A new listing that forgets all three fails here, before it reaches a screen or an agent.
+   */
+  it('no query in the store reads sessions without deciding about the trash', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('./store.ts', import.meta.url), 'utf8')
+    // Migrations run before anything is in the trash; the queries that serve the app start after them
+    const body = src.slice(src.indexOf('get schemaVersion(): number'))
+    const literals = [...body.matchAll(/`([^`]*)`/g)].map((m) => m[1]!)
+    const reading = literals.filter((q) => /\b(FROM|JOIN)\s+sessions\b/i.test(q))
+    expect(reading.length).toBeGreaterThan(10)
+    const undecided = reading.filter(
+      (q) => !/deleted_at/.test(q) && !/\bid = \?/.test(q) && !/\/\* includes the trash: /.test(q) && !/\$\{where\}/.test(q),
+    )
+    expect(undecided).toEqual([])
+    // `readSessions` takes its condition from the caller — every caller has to name the trash in it
+    const callers = [...body.matchAll(/this\.readSessions\(`([^`]*)`/g)].map((m) => m[1]!)
+    expect(callers.length).toBeGreaterThanOrEqual(3)
+    expect(callers.filter((w) => !/deleted_at/.test(w))).toEqual([])
+  })
+
+  it('restoring rebuilds the index and brings the session back into its project as it was', async () => {
+    const s = seeded()
+    s.appendMessages(galaxy('s1', 5))
+    s.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
+    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    const before = s.listSessions()[0]!
+    await s.trashSession('s1', KEEP_ALL)
+
+    const back = await s.restoreSession('s1', 'p1')
+    expect(back).toEqual(before)
+    expect(s.listSessions()).toEqual([before])
+    expect(s.listTrash()).toEqual([])
+    expect(s.searchMessages('galaxy')).toHaveLength(5)
+    expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
+    expect(s.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
+    expect(await s.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
+    s.close()
+  })
+
+  it('moving to the trash and back let the event loop go between chunks, and search reaches it only once it is back', async () => {
+    const s = seeded()
+    const n = 1000
+    s.appendMessages(galaxy('s1', n))
+    const seen: { messages: number; hits: number; listed: number }[] = []
+    let busy = true
+    const look = () => {
+      if (!busy) return
+      seen.push({
+        messages: s.loadMessages('s1', n).length,
+        hits: s.searchMessages('galaxy', n).length,
+        listed: s.listSessions().length,
+      })
+      setImmediate(look)
+    }
+    setImmediate(look)
+    await s.trashSession('s1', KEEP_ALL, 100)
+    busy = false
+    expect(seen.length).toBeGreaterThanOrEqual(5)
+    // Out of reach from the first chunk, with every message still there
+    expect(seen.every((at) => at.hits === 0 && at.listed === 0 && at.messages === n)).toBe(true)
+    expect(indexRowsOf(s, 's1')()).toBe(0)
+
+    seen.length = 0
+    busy = true
+    setImmediate(look)
+    await s.restoreSession('s1', 'p1', 100)
+    busy = false
+    expect(seen.length).toBeGreaterThanOrEqual(5)
+    expect(seen.every((at) => at.hits === 0 && at.listed === 0)).toBe(true)
+    expect(s.searchMessages('galaxy', n)).toHaveLength(n)
+    s.close()
+  })
+
+  it('purging takes only a session in the trash, with every row that points at it and nothing else', async () => {
+    const s = seeded()
+    session(s, 's2', 'p1')
+    for (const id of ['s1', 's2']) {
+      s.appendMessages(galaxy(id, 3))
+      s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
+      s.recordCommit('p1', `sha-${id}`, id)
+      const run = { projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'session', parentRunId: null,
+        status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
+      s.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
+      s.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
+      s.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
+    }
+    expect(await s.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
+    expect(s.loadMessages('s1', 10)).toHaveLength(3)
+
+    await s.trashSession('s1', KEEP_ALL)
+    expect(await s.purgeSession('s1')).toBe(true)
+
+    const db = (s as unknown as { db: Database.Database }).db
+    const count = (sql: string, id: string) => (db.prepare(sql).get(id) as { n: number }).n
+    for (const [sql, left] of [
+      [`SELECT COUNT(*) as n FROM sessions WHERE id = ?`, 0],
+      [`SELECT COUNT(*) as n FROM messages WHERE session_id = ?`, 0],
+      [`SELECT COUNT(*) as n FROM messages_fts WHERE session_id = ?`, 0],
+      [`SELECT COUNT(*) as n FROM approval_rules WHERE session_id = ?`, 0],
+      [`SELECT COUNT(*) as n FROM commit_sessions WHERE session_id = ?`, 0],
+      [`SELECT COUNT(*) as n FROM app_runs WHERE ? IN (session_id, caller_session_id)`, 0],
+      [`SELECT COUNT(*) as n FROM app_run_failures WHERE run_id = 'called-' || ?`, 0],
+    ] as const) {
+      expect([sql, count(sql, 's1')]).toEqual([sql, left])
+      // the other session's rows are all still there
+      expect([sql, count(sql, 's2')]).not.toEqual([sql, 0])
+    }
+    expect(s.listTrash()).toEqual([])
+    s.close()
+  })
+
+  it('deleting a project moves its sessions to the trash and keeps the rows that point at them', async () => {
+    const s = seeded()
+    session(s, 's2', 'p1')
+    s.appendMessages(galaxy('s1', 3))
+    s.appendMessages(galaxy('s2', 2))
+    await s.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
+    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
+    s.recordCommit('p1', 'sha-s1', 's1')
+    s.recordCommit('p1', 'sha-gone', 'purged-long-ago')
+    const run = { projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: 'view', parentRunId: null,
+      status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
+    s.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
+    s.beginAppRun({ ...run, id: 'of-view', callerSessionId: null, sessionId: null })
+
+    s.deleteProject('p1')
+
+    expect(s.listProjects()).toEqual([])
+    expect(s.listSessions()).toEqual([])
+    const trash = s.listTrash()
+    expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
+    // Nobody was asked about the tool's files or a worktree, so emptying the trash leaves them
+    expect(trash.find((r) => r.id === 's1')?.record).toEqual(KEEP_ALL)
+    expect(s.searchMessages('galaxy')).toEqual([])
+    const db = (s as unknown as { db: Database.Database }).db
+    const rows = (sql: string) => db.prepare(sql).all()
+    expect(rows(`SELECT sha FROM commit_sessions`)).toEqual([{ sha: 'sha-s1' }])
+    expect(rows(`SELECT id FROM app_runs`)).toEqual([{ id: 'of-s1' }])
+    expect(rows(`SELECT matcher FROM approval_rules`)).toEqual([{ matcher: 'Bash(ls)' }])
+    s.close()
+  })
+
+  it('a store from before the trash comes up with nothing in it, in one step', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-v39-'))
+    const file = join(dir, 'store.db')
+    try {
+      const fresh = new Store(file)
+      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.close()
+      // Take the store back to v38: no trash columns
+      const raw = new Database(file)
+      raw.exec(`ALTER TABLE sessions DROP COLUMN deleted_at; ALTER TABLE sessions DROP COLUMN trash`)
+      raw.pragma('user_version = 38')
+      raw
+        .prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES ('old', 'p1', 'claude', 'old', 1)`)
+        .run()
+      raw.close()
+
+      const s = new Store(file)
+      expect(s.schemaVersion).toBe(LATEST_SCHEMA)
+      expect(s.migrationsRun).toBe(1)
+      expect(s.listSessions().map((x) => x.id)).toEqual(['old'])
+      expect(s.listTrash()).toEqual([])
+      s.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

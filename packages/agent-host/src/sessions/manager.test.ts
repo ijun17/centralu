@@ -16,7 +16,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, ToolName, Attachment } from '@cc/protocol'
+import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -625,14 +625,51 @@ describe('이전 세션 불러오기', () => {
  * 남은 것은 삭제 하나뿐이고, 그래서 삭제가 무엇을 지우는지가 더 중요해졌다.
  */
 describe('세션 삭제', () => {
-  it('삭제는 되돌릴 수 없다 — 기록까지 사라진다', async () => {
+  /*
+   * #204: deleting moves the session to the trash. This is the guard across the host's listing paths — every place a
+   * person, an agent or an app lists or searches sessions — and of the way back. The apps' `sessions.list` reads the
+   * same `listSessions` as the RPC here (app-host-data.test.ts holds its shape).
+   */
+  it('a deleted session is out of every list, search and agent tool, and comes back from the trash as it was', async () => {
     const p = await addProject()
-    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    await rpc('agents.send', { sessionId: s.id, text: '사라질 말' })
-    await rpc('agents.deleteSession', { sessionId: s.id })
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
+    await rpc('agents.send', { sessionId: s.id, text: 'the codename is BLUEBIRD' })
+    await rpc('grid.set', { sessionIds: [s.id] })
+    const orch = await mgr.orchestrator()
+    // The reply may still be streaming when the session is deleted; it is written out then, so its time moves
+    const said = (rows: unknown) => (rows as StoredMessage[]).map(({ seq, role, kind, payload }) => ({ seq, role, kind, payload }))
+    const before = said(await rpc('messages.load', { sessionId: s.id, limit: 100 }))
+    expect(before.length).toBeGreaterThan(0)
+    const reach = async () => ({
+      sessions: ((await rpc('sessions.list', {})) as SessionInfo[]).some((x) => x.id === s.id),
+      grid: ((await rpc('grid.get', {})) as string[]).includes(s.id),
+      search: ((await rpc('messages.search', { query: 'BLUEBIRD' })) as unknown[]).length > 0,
+      listTool: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'list_sessions', {})).includes(s.id),
+      recall: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'recall', { query: 'BLUEBIRD' })).includes(s.id),
+      read: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'read_session', { sessionId: s.id })).includes('BLUEBIRD'),
+    })
+    expect(await reach()).toEqual({ sessions: true, grid: true, search: true, listTool: true, recall: true, read: true })
 
-    expect(mgr.listSessions().find((x) => x.id === s.id)).toBeUndefined()
-    expect((await rpc('messages.load', { sessionId: s.id, limit: 100 })) as unknown[]).toHaveLength(0)
+    await rpc('agents.deleteSession', { sessionId: s.id })
+    expect(await reach()).toEqual({ sessions: false, grid: false, search: false, listTool: false, recall: false, read: false })
+
+    // The way back: listed with what it holds, readable, restorable
+    const trash = (await rpc('trash.list', {})) as { sessions: TrashedSession[]; bytes: number }
+    expect(trash.sessions.map((x) => [x.id, x.project?.id, x.project?.exists, x.messages])).toEqual([[s.id, p.id, true, before.length]])
+    expect(trash.bytes).toBeGreaterThan(0)
+    expect(said(await rpc('trash.read', { sessionId: s.id }))).toEqual(before)
+    await rpc('trash.restore', { sessionId: s.id })
+    // Back in its lists and in search; the grid is layout and is not put back
+    expect(await reach()).toEqual({ sessions: true, grid: false, search: true, listTool: true, recall: true, read: true })
+    expect(said(await rpc('messages.load', { sessionId: s.id, limit: 100 }))).toEqual(before)
+    expect(events.some((e) => e.type === 'session_created' && e.sessionId === s.id)).toBe(true)
+
+    // Only deleting it for good, from the trash, takes the conversation
+    await rpc('agents.deleteSession', { sessionId: s.id })
+    await rpc('trash.purge', { sessionId: s.id })
+    expect(await rpc('messages.load', { sessionId: s.id, limit: 100 })).toEqual([])
+    expect(((await rpc('trash.list', {})) as { sessions: unknown[] }).sessions).toEqual([])
+    await expect(rpc('trash.read', { sessionId: s.id })).rejects.toThrow(/Not in the trash/)
   })
 
   /**
@@ -1012,7 +1049,7 @@ describe('지운 세션은 이전 대화 목록에서 되찾을 수 있다', () 
     expect(listed.imported).toBe(true)
     expect(listed.importedAs).toBe(s.id)
 
-    await m.deleteSession(s.id)
+    await m.trashSession(s.id)
 
     /*
       지운 세션은 이전 대화 목록에서 **되찾을 수 있어야 한다.** 여기서 막으면 삭제가
@@ -2806,7 +2843,7 @@ describe('워크트리 세션', () => {
     const manager = wtMgr.listSessions().find((x) => x.id === worked.parentSessionId)!
 
     // 산 자식이 있는 동안은 못 지운다
-    await expect(wtMgr.deleteSession(manager.id)).rejects.toThrow(/worktree session/)
+    await expect(wtMgr.trashSession(manager.id)).rejects.toThrow(/worktree session/)
 
     writeFileSync(join(worked.worktree!.path, 'w.txt'), 'x\n')
     const g = (dir: string, args: string[]) =>
@@ -2817,7 +2854,7 @@ describe('워크트리 세션', () => {
     await wtMgr.refreshMergedWorktrees(project.id)
 
     // 병합됐으면 이력이다 — 매니저는 풀려난다
-    await expect(wtMgr.deleteSession(manager.id)).resolves.toBeUndefined()
+    await expect(wtMgr.trashSession(manager.id)).resolves.toBeUndefined()
   })
 
   it('지울 때 기본은 워크트리를 남긴다', async () => {
@@ -2829,14 +2866,43 @@ describe('워크트리 세션', () => {
     expect(existsSync(path)).toBe(true)
   })
 
-  it('지우라고 하면 커밋 안 된 변경이 있어도 지운다', async () => {
+  /*
+   * #204: the worktree the person chose to delete stays, in place and registered with git, until the session is
+   * deleted for good — moving the folder would leave git's record pointing at nothing. Then it goes, uncommitted
+   * changes and all, because the person heard about them in the dialog.
+   */
+  it('a worktree chosen for deletion stays registered while in the trash and goes, changes and all, when purged', async () => {
     const s = await create(true)
     const path = s.worktree!.path
     writeFileSync(join(path, 'a.txt'), '아직 커밋 안 함\n')
 
     await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
+    expect(readFileSync(join(path, 'a.txt'), 'utf8')).toBe('아직 커밋 안 함\n')
+    expect(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' })).not.toMatch(/prunable/)
+    const listed = (await wtRpc('trash.list', {})) as { sessions: TrashedSession[] }
+    expect(listed.sessions.find((x) => x.id === s.id)?.worktree).toEqual({ path, branch: s.worktree!.branch, remove: true })
 
+    await wtRpc('trash.purge', { sessionId: s.id })
     expect(existsSync(path)).toBe(false)
+  })
+
+  it('a restored worktree session finds its worktree, and the uncommitted work in it, where it was', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+
+    writeFileSync(join(path, 'wip.txt'), 'work in progress\n')
+    await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
+
+    const back = (await wtRpc('trash.restore', { sessionId: s.id })) as { session: SessionInfo }
+    expect(back.session.worktree).toEqual(s.worktree)
+    // The folder, the uncommitted work in it and git's record of it are all where they were
+    expect(readFileSync(join(path, 'wip.txt'), 'utf8')).toBe('work in progress\n')
+    expect(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' })).toContain(
+      `worktree ${realpathSync(path)}\n`,
+    )
+    expect(await wtRpc('agents.worktreeStatus', { sessionId: s.id })).toMatchObject({ path, dirty: true, changedFiles: 1 })
+    // Restored, it is a live session again — its worktree is not marked for anything
+    expect(((await wtRpc('trash.list', {})) as { sessions: unknown[] }).sessions).toEqual([])
   })
 
   it('상태를 물으면 지워도 되는지 판단할 재료를 준다', async () => {
@@ -3274,11 +3340,11 @@ describe('워크트리 세션의 매니저 (#69)', () => {
     const m2 = boot()
     const manager = m2.listSessions().find((s) => s.name === 'Worktree manager')!
 
-    await expect(m2.deleteSession(manager.id)).rejects.toThrow(/worktree session/)
+    await expect(m2.trashSession(manager.id)).rejects.toThrow(/worktree session/)
 
     // 자식이 사라지면 매니저는 풀려난다 — 끝난 작업이 매니저를 영원히 고정하면 보호가 벌이 된다
-    await m2.deleteSession('wt-a')
-    await expect(m2.deleteSession(manager.id)).resolves.toBeUndefined()
+    await m2.trashSession('wt-a')
+    await expect(m2.trashSession(manager.id)).resolves.toBeUndefined()
   })
 
   it('매니저는 부분집합 도구만 부를 수 있다 — 노출과 실행이 같은 판정을 쓴다 (#69)', async () => {
@@ -3423,34 +3489,51 @@ describe('도구 쪽 원본까지 삭제 (deleteExternal)', () => {
     return { m, r, s }
   }
 
-  it('deleteExternal이면 어댑터에 원본 삭제를 시킨다 — externalId와 cwd가 그대로 간다', async () => {
+  it('the conversation file waits in the trash and is deleted with the session, with its externalId and cwd', async () => {
     const a = new ExternallyDeletableAdapter()
     const { m, r, s } = await setupWith(a)
     await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
-    expect(a.deletedExternals).toEqual([{ externalId: 'ext-1', cwd: tmpdir() }])
+    // In the trash, not gone: the tool's file is untouched until the person deletes it for good (#204)
+    expect(a.deletedExternals).toEqual([])
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(false)
+    await r('trash.purge', { sessionId: s.id })
+    expect(a.deletedExternals).toEqual([{ externalId: 'ext-1', cwd: tmpdir() }])
   })
 
   it('플래그가 없으면 원본은 손대지 않는다 — 기본은 남기는 것', async () => {
     const a = new ExternallyDeletableAdapter()
     const { r, s } = await setupWith(a)
     await r('agents.deleteSession', { sessionId: s.id })
+    await r('trash.purge', { sessionId: s.id })
     expect(a.deletedExternals).toEqual([])
   })
 
-  it('원본 삭제가 실패하면 우리 쪽도 지우지 않는다 — "지웠다"는 거짓말을 만들지 않는다', async () => {
+  it('a conversation file the tool refuses to delete keeps the session in the trash — "deleted" is never said over a live original', async () => {
     const a = new ExternallyDeletableAdapter()
     a.failExternalDelete = true
-    const { m, s } = await setupWith(a)
-    await expect(m.deleteSession(s.id, false, true)).rejects.toThrow(/refused/)
-    expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
+    const { m, r, s } = await setupWith(a)
+    await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
+    await expect(m.purgeSession(s.id)).rejects.toThrow(/refused/)
+    expect(((await r('trash.list', {})) as { sessions: { id: string }[] }).sessions.map((x) => x.id)).toEqual([s.id])
     expect(store.loadMessages(s.id, 10)).toBeDefined() // 대화도 그대로다
   })
 
   it('어댑터가 지원하지 않으면 그렇게 말한다 — 조용히 우리 것만 지우면 반쪽 삭제다', async () => {
     const { m, s } = await setupWith(new FakeAdapter())
-    await expect(m.deleteSession(s.id, false, true)).rejects.toThrow(/does not support/)
+    await expect(m.trashSession(s.id, false, true)).rejects.toThrow(/does not support/)
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
+  })
+
+  it('a conversation pulled back from Past conversations meanwhile is not deleted with the trashed copy', async () => {
+    const a = new ExternallyDeletableAdapter()
+    const { m, r, s } = await setupWith(a)
+    await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
+    // The person imports the same conversation again: a live session now reads that file
+    await r('agents.createSession', {
+      projectId: s.projectId, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', permissionPreset: 'normal',
+    })
+    await m.purgeSession(s.id)
+    expect(a.deletedExternals).toEqual([])
   })
 })
 
@@ -3929,7 +4012,8 @@ describe('인수인계 노트는 읽는 이와 경주하지 않는다 (#106)', (
       handoff: { from: dying.name, note: '이어서 하세요', fromSessionId: dying.id },
     })
 
-    await mgr.deleteSession(dying.id)
+    await mgr.trashSession(dying.id)
+    await mgr.purgeSession(dying.id)
     expect(existsSync(note(dying.id))).toBe(true)
   })
 
@@ -3942,9 +4026,30 @@ describe('인수인계 노트는 읽는 이와 경주하지 않는다 (#106)', (
       handoff: { from: dying.name, note: '이어서 하세요', fromSessionId: dying.id },
     })) as SessionInfo
 
-    await mgr.deleteSession(dying.id)
-    await mgr.deleteSession(heir.id)
+    await mgr.trashSession(dying.id)
+    await mgr.trashSession(heir.id)
+    // Both in the trash: either could be restored and ask for the note, so it stays (#204)
+    expect(existsSync(note(dying.id))).toBe(true)
+    await mgr.purgeSession(dying.id)
+    expect(existsSync(note(dying.id))).toBe(true)
+    await mgr.purgeSession(heir.id)
     expect(existsSync(note(dying.id))).toBe(false)
+  })
+
+  it('a note whose session is in the trash survives a sweep, and goes when that session is deleted for good (#204)', async () => {
+    const p = await project()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
+    placeNote(s.id)
+    placeNote('gone-session', 'nobody owns this')
+    await mgr.trashSession(s.id)
+
+    // A restart sweeps orphan notes. One in the trash is not an orphan: restoring it must find its note
+    new SessionManager(store, new Map([['claude', adapter as AgentAdapter]]), () => {})
+    await vi.waitFor(() => expect(existsSync(note('gone-session'))).toBe(false))
+    expect(existsSync(note(s.id))).toBe(true)
+
+    await mgr.purgeSession(s.id)
+    expect(existsSync(note(s.id))).toBe(false)
   })
 
   it('기동이 고아를 걷는다 — 그때는 진행 중인 인수인계가 없다', async () => {
@@ -4021,7 +4126,8 @@ describe('인수인계 노트는 데이터 폴더에 산다 (#142)', () => {
     // 세션 삭제도 청소를 부른다 — 링크가 저장소 밖을 가리켜도 마찬가지다
     rmSync(join(repo, '.centralu', 'handoff'))
     symlinkSync(outside, join(repo, '.centralu', 'handoff'))
-    await mgr.deleteSession(s.id)
+    await mgr.trashSession(s.id)
+    await mgr.purgeSession(s.id)
     expect(repoFiles()).toEqual([true, true])
     expect(readdirSync(outside)).toEqual(['NOTES.md'])
   })

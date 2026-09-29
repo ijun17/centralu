@@ -466,6 +466,37 @@ export const StoredMessage = z.object({
 export type StoredMessage = z.infer<typeof StoredMessage>
 
 /**
+ * A session in the trash (#204), as Settings lists it.
+ *
+ * Deleting a session moves it here instead of destroying it; only Settings deletes it for good. The list says what
+ * each one still holds and what goes with it, because a trash that shows names but not contents is the hidden store
+ * the retired archive was (FR-20): it had a way in and no way out, and nobody could see what it kept.
+ */
+export const TrashedSession = z.object({
+  id: SessionId,
+  name: z.string(),
+  tool: ToolName,
+  /**
+   * Where it came from, null for a session that had no project. `exists` is false when that project has been
+   * deleted since: restoring then registers the folder again, and refuses if the folder is gone too.
+   */
+  project: z.object({ id: z.string(), name: z.string(), path: z.string().nullable(), exists: z.boolean() }).nullable(),
+  deletedAt: z.number(),
+  messages: z.number(),
+  /** What it takes on this machine: its messages in the store, and its attachments and handoff note in the data folder */
+  bytes: z.number(),
+  /**
+   * The tool's own conversation file (Claude JSONL, Codex rollout), which stays where the tool keeps it while the
+   * session is in the trash: `remove` if deleting for good deletes it too, as the person chose; `keep` if it stays
+   * in the tool; `none` if the session never had one.
+   */
+  conversationFile: z.enum(['remove', 'keep', 'none']),
+  /** The session's worktree, kept in place while it is in the trash; `remove` if deleting for good removes it */
+  worktree: z.object({ path: z.string(), branch: z.string(), remove: z.boolean() }).nullable(),
+})
+export type TrashedSession = z.infer<typeof TrashedSession>
+
+/**
  * 첨부 하나의 상한 (#94) — base64 글자 수로 센다. 원본 32MiB가 이 길이가 된다.
  *
  * 상한이 없던 자리다. 총량은 `sweepAttachments`가 500MB로 잡지만 그 청소는 이 길로
@@ -509,11 +540,13 @@ export const RpcMethods = {
   },
   'agents.interrupt': { params: z.object({ sessionId: SessionId }), result: z.object({ ok: z.literal(true) }) },
   /**
-   * 세션을 완전히 지운다 — 대화 기록·첨부까지 사라진다.
+   * Moves a session to the trash (#204). Nothing is destroyed here: the rows, the attachments, the handoff note, the
+   * tool's conversation file and the worktree all stay until the person deletes it for good in Settings
+   * (`trash.purge` / `trash.empty`). The two flags only record what that later step removes.
    *
    * 한때 그 앞에 아카이브(목록에서만 숨기기)가 있었다. 2026-09-02에 폐기했다:
    * 들어가는 문(인박스의 `d`)만 있고 나오는 문이 없어서, 사람 눈에는 삭제와
-   * 구별되지 않았다. 자세한 경위는 sessions/manager.ts의 deleteSession 주석에.
+   * 구별되지 않았다. The trash is that shape with its exits built in the same change: list, read, restore.
    */
   'agents.deleteSession': {
     params: z.object({
@@ -522,6 +555,7 @@ export const RpcMethods = {
        * 워크트리 세션일 때만 의미가 있다. **기본은 남기는 것이다** —
        * 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다.
        * UI가 `agents.worktreeStatus`로 먼저 묻고, 사람이 정한 답을 여기로 보낸다.
+       * The worktree stays in place while the session is in the trash; this marks it for removal when it is purged.
        */
       deleteWorktree: z.boolean().default(false),
       /**
@@ -530,6 +564,7 @@ export const RpcMethods = {
        * 삭제를 후회했을 때 그 도구에서 이어갈 마지막 길이 된다. 사람이 체크박스로
        * 명시한 경우에만 켠다. 원본 삭제가 실패하면 우리 쪽 삭제도 멈춘다 —
        * "지웠다"고 답했는데 원본이 남는 것이 최악의 결과라서다.
+       * Since #204 the file is deleted when the session is purged from the trash, not here; the rule above holds there.
        */
       deleteExternal: z.boolean().default(false),
     }),
@@ -1556,6 +1591,42 @@ export const RpcMethods = {
         sessionId: z.string().nullable().default(null),
       }),
     ),
+  },
+  /**
+   * The trash (#204). Only the person reaches these: the RPC is the UI's channel, and neither the agents' tools nor
+   * the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
+   *
+   * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own.
+   */
+  'trash.list': {
+    params: z.object({}),
+    result: z.object({ sessions: z.array(TrashedSession), bytes: z.number() }),
+  },
+  /** A trashed conversation, read-only — the same page shape as `messages.load` */
+  'trash.read': {
+    params: z.object({ sessionId: SessionId, limit: z.number().default(200), beforeSeq: z.number().optional() }),
+    result: z.array(StoredMessage),
+  },
+  /**
+   * Brings a session back as it was. `project` is set when its project had been deleted and restoring registered
+   * the folder again — the screen has not heard of that project yet.
+   */
+  'trash.restore': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ session: SessionInfo, project: ProjectInfo.nullable() }),
+  },
+  /** Deletes one session in the trash for good, with what the person chose to remove with it */
+  'trash.purge': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** Deletes everything in the trash for good. One that fails stays in the trash and is reported; the rest go on */
+  'trash.empty': {
+    params: z.object({}),
+    result: z.object({
+      purged: z.number(),
+      failed: z.array(z.object({ sessionId: z.string(), name: z.string(), error: z.string() })),
+    }),
   },
 } as const
 

@@ -118,6 +118,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'workspace.save': { layout: { focusedSessionId: S } },
   'workspace.load': {},
   'approvals.rules': {},
+  'trash.list': {},
   'files.search': { projectId: P, query: 'a' },
   'fs.listDir': { projectId: P, path: '' },
   'fs.readFile': { projectId: P, path: 'a.txt' },
@@ -162,6 +163,11 @@ const SKIP: Record<string, string> = {
   'agents.forkConversation': '잠긴 codex 대화가 있어야 함 — 헤드리스로 만들 수 없다',
   'agents.restartSession': '프로세스를 실제로 갈아 끼움 — 뒤 대조를 흔든다',
   'agents.deleteSession': '파괴적 — 맨 끝에서 따로 부른다',
+  // The trash (#204) needs a session in it — the end of the script puts one there and walks the ways out
+  'trash.read': 'needs a session in the trash — called at the end',
+  'trash.restore': 'needs a session in the trash — called at the end',
+  'trash.purge': 'needs a session in the trash — called at the end',
+  'trash.empty': 'deletes everything in the trash for good — called at the end',
   'git.commitDetail': '커밋 sha가 필요 — git.log 결과로 채운다',
   'terminal.create': '위에서 이미 불러 대조함',
   'terminal.close': '맨 끝에서 따로 부른다',
@@ -231,11 +237,17 @@ for (const m of Object.keys(RpcMethods) as RpcMethodName[]) {
 for (const [m, params] of [
   ['terminal.close', { terminalId: T }],
   ['agents.deleteSession', { sessionId: S }],
+  ['trash.read', { sessionId: S }],
+  ['trash.restore', { sessionId: S }],
+  ['agents.deleteSession', { sessionId: S }],
+  ['trash.purge', { sessionId: S }],
+  ['trash.empty', {}],
 ] as const) {
   try {
     const parsed = RpcMethods[m as RpcMethodName].result.safeParse(await rpc(m, params))
-    if (parsed.success) ok.push(m)
-    else bad.push({ m, issues: JSON.stringify(parsed.error.issues.slice(0, 3)) })
+    // agents.deleteSession runs twice (into the trash, and again after the restore) — count a method once
+    if (!parsed.success) bad.push({ m, issues: JSON.stringify(parsed.error.issues.slice(0, 3)) })
+    else if (!ok.includes(m)) ok.push(m)
   } catch (e) {
     failed.push({ m, why: (e as Error).message })
   }

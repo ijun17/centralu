@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isProjectId, isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
@@ -39,6 +39,12 @@ export function handoffNotePath(projectId: string, sessionId: string): string {
     throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
   }
   return join(handoffNoteDir(projectId), `${sessionId}.md`)
+}
+
+/** How much one session's note takes — the trash shows what it holds (#204). 0 when it has none */
+export async function handoffNoteBytes(projectId: string, sessionId: string): Promise<number> {
+  const s = await lstat(handoffNotePath(projectId, sessionId)).catch(() => null)
+  return s?.isFile() ? s.size : 0
 }
 
 /** 노트를 놓고 그 절대 경로를 돌려준다. 쓰는 것은 언제나 host다 — 에이전트는 이 폴더에 쓰지 않는다 */

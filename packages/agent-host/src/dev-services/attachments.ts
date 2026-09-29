@@ -56,9 +56,23 @@ export async function saveAttachment(
   return { kind: mime.startsWith('image/') ? 'image' : 'file', path: file, name, mime, bytes: buf.length }
 }
 
-/** 세션 아카이브·삭제 시 함께 정리 */
+/** Removed with the session when it is deleted for good from the trash (#204) — moving it to the trash keeps them */
 export async function clearAttachments(sessionId: string): Promise<void> {
   await rm(sessionDir(sessionId), { recursive: true, force: true })
+}
+
+/** How much one session's attachments take — the trash shows what it holds (#204). 0 when there are none */
+export async function attachmentBytes(sessionId: string): Promise<number> {
+  const { readdir, lstat } = await import('node:fs/promises')
+  const dir = sessionDir(sessionId)
+  const names = await readdir(dir).catch(() => [] as string[])
+  let total = 0
+  for (const name of names) {
+    // lstat: a link counts as itself — the folder is ours, and nothing here should follow a link out of it
+    const s = await lstat(join(dir, name)).catch(() => null)
+    if (s?.isFile()) total += s.size
+  }
+  return total
 }
 
 /** 총량 상한 — 이미지가 영속되면서(#40) 무한히 쌓일 수 있게 됐다. 사용자 결정: 500MB */
