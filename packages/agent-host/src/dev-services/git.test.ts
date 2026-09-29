@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { GIT_DIFF_MAX_CHARS, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles } from './git.js'
 
 /**
- * porcelain v2 파싱은 실제 git 출력으로 확인한다 — 흉내낸 문자열로는
- * 정확히 우리가 틀렸던 자리(필드 개수)를 다시 틀리게 흉내낼 수 있다.
+ * porcelain v2 parsing is checked against real git output — a hand-written string could
+ * reproduce exactly the same mistake we made (the field count) all over again.
  */
 
 const dirs: string[] = []
@@ -22,10 +22,12 @@ const repo = () => {
 }
 
 /**
- * git이 **정말로 받은 인자**를 적어 둔다 — PATH 앞에 껍데기 git을 놓고 진짜 git으로 넘긴다.
+ * Records the arguments git **actually received** — a shim is put ahead of it on PATH, which
+ * passes everything through to the real git.
  *
- * execFile을 가로채지 않는 이유: 가로채면 진짜 git이 돌지 않아, 같은 시험이 결과까지
- * 확인하던 힘을 잃는다. 여기서는 진짜 git이 그대로 돌고 줄만 복사된다.
+ * Why execFile itself is not intercepted: intercepting it would stop the real git from running,
+ * and the same test would lose its power to check the result too. Here the real git runs
+ * unchanged, and only its command line is copied.
  */
 function recordGitArgv(): { calls: () => string[][]; restore: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'cc-git-argv-'))
@@ -61,27 +63,27 @@ afterEach(() => {
 
 describe('gitStatusFiles — porcelain v2', () => {
   /*
-   * 이름 바뀜(2) 항목은 경로 앞에 필드가 하나 더 있다(R100 등).
-   * 보통 항목(1)과 같은 자리로 읽으면 경로가 "R100 새이름"이 되어 —
-   * 존재하지 않는 파일이라 — 스테이징이 조용히 실패했다.
+   * A rename (2) entry has one extra field before the path (R100, etc.).
+   * Reading it at the same position as an ordinary (1) entry turns the path into
+   * "R100 new-name" — a file that does not exist — and staging failed silently.
    */
-  it('이름을 바꾼 파일은 새 이름으로 나온다 (점수 필드가 경로에 섞이지 않는다)', async () => {
+  it('a renamed file comes out under its new name (the score field does not leak into the path)', async () => {
     const { d, git } = repo()
     writeFileSync(join(d, 'old.txt'), '내용이 충분히 길어야 rename으로 인식된다\n'.repeat(5))
     git('add', '.')
     git('commit', '-q', '-m', 'init')
-    // 공백 있는 이름으로 바꾼다 — 경로 복원(join)이 깨지는지도 함께 본다
+    // Rename to a name with a space — this also checks whether path reconstruction (join) breaks
     git('mv', 'old.txt', 'new name.txt')
 
     const files = await gitStatusFiles(d)
     expect(files).toEqual([{ path: 'new name.txt', staged: true, status: 'R' }])
-    // 원래 이름(old.txt)이 별도 항목으로 새어 나오면 안 된다 (-z에서는 다음 NUL 토큰으로 온다)
+    // The original name (old.txt) must not leak out as a separate entry (under -z it arrives as the next NUL token)
     expect(files.some((f) => f.path.includes('old.txt'))).toBe(false)
-    // 파싱된 경로가 진짜 파일이어야 스테이징이 된다 — 여기가 원래 조용히 죽던 자리다
+    // Staging only succeeds if the parsed path is a real file — this is the exact spot that used to fail silently
     await expect(gitStage(d, files.map((f) => f.path))).resolves.toBeUndefined()
   })
 
-  it('보통 변경(1)은 그대로 나온다', async () => {
+  it('an ordinary change (1) comes out unchanged', async () => {
     const { d, git } = repo()
     writeFileSync(join(d, 'a.txt'), 'v1\n')
     git('add', '.')
@@ -132,10 +134,12 @@ describe('git path containment', () => {
     }
 
     /*
-     * 결과만 보면 세 개의 `--` 중 하나만 지켜진다: `:(literal)` 접두가 붙는 자리에서는
-     * 인자가 이미 `:`로 시작해 git이 옵션으로 읽을 일이 없고, 반대로 `--`가 있으면
-     * 접두가 없어도 통과한다. 두 겹이 서로를 가려 주므로 **하나를 지워도 초록이었다**
-     * (#121). 그래서 결과가 아니라 git이 실제로 받은 줄을 본다.
+     * Looking at the result alone, only one of the three `--` is actually load-bearing: wherever
+     * the `:(literal)` prefix is applied, the argument already starts with `:`, so git has
+     * nothing to read as an option, and conversely, wherever `--` is present, the call passes
+     * even with no prefix. The two overlap and hide each other's absence, so **removing just one
+     * of them still passed** (#121). So this checks the line git actually received, not the
+     * result.
      */
     const carrying = argv.calls().filter((args) => args.some((a) => a.includes('owned.patch')))
     expect(carrying.length).toBeGreaterThan(0)
@@ -195,14 +199,15 @@ describe('git path containment', () => {
 })
 
 /**
- * git 경로도 같은 갈라짐에 샜다 (#119).
+ * The git path leaked through the same split (#119).
  *
- * `assertLexicalGitPath`는 `..`를 접은 문자열을 git에 넘기고, `assertCanonicalGitPath`는
- * 접지 않은 문자열을 검사했다. 링크의 대상이 링크 자신보다 깊으면 둘이 갈라져서, 검사는
- * 프로젝트 안을 보고 통과하는데 git은 바깥 파일을 읽어 그 내용을 diff 본문으로 돌려줬다.
+ * `assertLexicalGitPath` passed git a string with `..` folded away, while
+ * `assertCanonicalGitPath` checked the unfolded string. When a symlink's target sat deeper than
+ * the link itself, the two disagreed: the check looked inside the project and passed, while git
+ * read the outside file and returned its content as the diff body.
  */
-describe('링크 뒤의 .. 로 바깥 파일의 내용을 보지 못한다 (#119)', () => {
-  it('diff가 거부된다', async () => {
+describe('a .. past a symlink cannot reveal an outside file\'s content (#119)', () => {
+  it('the diff is rejected', async () => {
     const { d } = repo()
     const outside = mkdtempSync(join(tmpdir(), 'cc-git-outside-'))
     dirs.push(outside)
@@ -217,9 +222,9 @@ describe('링크 뒤의 .. 로 바깥 파일의 내용을 보지 못한다 (#119
 })
 
 /**
- * 브랜치 목록과 전환 (#175) — `origin`이 있는 진짜 저장소로 본다. 짧은 이름(`refname:short`)은
- * 원격 브랜치에 `remotes/`를 붙이지 않아서, 이름만 보고는 `origin/main`과 `feature/login`을
- * 가를 수 없었다.
+ * The branch list and checkout (#175) — checked against a real repository with an `origin`. The
+ * short name (`refname:short`) does not add `remotes/` to a remote branch, so `origin/main` and
+ * `feature/login` could not be told apart by their name alone.
  */
 describe('branches with a remote (#175)', () => {
   const withOrigin = () => {
@@ -271,9 +276,9 @@ describe('branches with a remote (#175)', () => {
 })
 
 /**
- * 한글 이름이 diff 머리줄에 그대로 나온다 (#176). `core.quotePath` 기본값이면 git은
- * `diff --git "a/\355\225\234…" "b/…"`로 감싸서, 화면의 이름표가 머리줄 원문이 되고 파일로
- * 가는 클릭이 경로를 잃었다.
+ * A Korean name comes through the diff header as written (#176). With `core.quotePath` at its
+ * default, git wraps it as `diff --git "a/\355\225\234…" "b/…"`, so the label on screen became
+ * that raw escaped header, and a click meant to reach the file lost the path.
  */
 describe('Korean file names in git output (#176)', () => {
   it('the diff header carries the name as written', async () => {
@@ -324,7 +329,7 @@ describe('commit detail and commit errors (#160)', () => {
 })
 
 /*
- * #134: 상한은 문자 수다(이름이 `maxChars`인 이유). 두 자리(`gitDiff`, `gitCommitDetail`)가 같은 이름의 값 하나를 쓴다.
+ * #134: the cap is in characters (why the name is `maxChars`). Both places (`gitDiff`, `gitCommitDetail`) share the one named value.
  */
 describe('the diff cap counts characters and is one named value (#134)', () => {
   it('maxChars cuts at that many characters even when the bytes are several times more', async () => {
@@ -333,7 +338,7 @@ describe('the diff cap counts characters and is one named value (#134)', () => {
     const { diff, truncated } = await gitDiff(d, '한글.txt', { maxChars: 1_000 })
     expect(truncated).toBe(true)
     expect(diff.length).toBe(1_000)
-    expect(Buffer.byteLength(diff, 'utf8')).toBeGreaterThan(2_000) // 바이트로 셌다면 여기서 잘렸다
+    expect(Buffer.byteLength(diff, 'utf8')).toBeGreaterThan(2_000) // if this counted bytes, it would have cut off here
   })
 
   it('both the working diff and the commit diff stop at GIT_DIFF_MAX_CHARS', async () => {

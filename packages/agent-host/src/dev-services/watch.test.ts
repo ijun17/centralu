@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import { DirWatchers, MAX_WATCHED_DIRS } from './watch.js'
 
 /**
- * 실제 파일시스템으로 검사한다 — 이 모듈의 계약은 "OS가 이벤트를 주면"이 아니라
- * "파일이 실제로 바뀌면"이다. fs.watch의 이벤트 모양은 플랫폼마다 다르고
- * (macOS는 rename 뭉뚱그림), 목으로 흉내 낸 이벤트는 그 차이를 못 잡는다.
+ * Checked against the real filesystem — this module's contract is not "when the OS gives an
+ * event" but "when a file actually changes." fs.watch's event shape differs by platform (macOS
+ * lumps things together as rename), and a mocked event cannot catch that difference.
  */
 
 const dirs: string[] = []
@@ -38,14 +38,15 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
+describe('DirWatchers — watches only expanded directories (#34)', () => {
   /*
-   * macOS의 fs.watch(FSEvents)는 스트림이 비동기로 서서, **감시 직후의 변화는 놓칠 수
-   * 있다** (전체 스위트로 돌릴 때 실제로 놓쳤다 — 단독으로는 통과). 앱에서는 다음 변화가
-   * 잡으므로 계약은 "언젠가는 알아챈다"이고, 테스트도 그 계약을 검사한다: 이벤트가 올
-   * 때까지 거듭 쓴다. 한 번만 쓰고 기다리면 OS의 시동 지연이 테스트 실패로 둔갑한다.
+   * macOS's fs.watch (FSEvents) starts its stream asynchronously, so **a change right after the
+   * watch begins can be missed** (this was actually missed running the full suite — it passes on
+   * its own). In the app, the next change catches it, so the contract is "notices eventually," and
+   * the test checks exactly that contract: it keeps writing until an event arrives. Writing once
+   * and waiting would turn the OS's own startup delay into a test failure.
    */
-  it('밖에서 파일을 만들면 그 디렉토리가 알려온다', async () => {
+  it('a file created from outside is reported by its directory', async () => {
     const root = tmp()
     mkdirSync(join(root, 'src'))
     const got: string[][] = []
@@ -60,29 +61,30 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
   })
 
   /*
-   * 실측: 파일 500개 쓰기 36ms에 이벤트 501발. 이벤트마다 다시 읽으면 목록 요청
-   * 500개다 — 이 검사가 지키는 계약은 "알림 수가 이벤트 수보다 훨씬 적다"이다.
-   * "정확히 한 번"이 아니다: 버스트가 플러시 창(80ms)보다 길어지면 간격마다 한 번씩
-   * 따라가는 것이 **설계**다 (npm install 내내 화면이 굶지 않는 이유). 전체 스위트의
-   * 부하에서 100개 쓰기가 창을 넘겨 두 번이 된 적이 있다 — 그건 고장이 아니었다.
+   * Measured: writing 500 files took 36ms and fired 501 events. Reading again on every event would
+   * be 500 listing requests — the contract this test checks is "far fewer notifications than
+   * events." Not "exactly once": once a burst runs longer than the flush window (80ms), keeping up
+   * with one notification per interval is **the design** (why the screen never starves through an
+   * entire npm install). Under the load of the full suite, writing 100 files once ran past the
+   * window and became two notifications — that was not a failure.
    */
-  it('한 버스트(파일 100개)는 이벤트 수보다 훨씬 적은 알림으로 접힌다', async () => {
+  it('one burst (100 files) folds into far fewer notifications than events', async () => {
     const root = tmp()
     const got: string[][] = []
     const w = makeWatcher((_p, d) => got.push(d))
     w.setWatched('p1', root, [''])
-    // FSEvents 시동 지연(위 주석)을 넘긴 뒤에 버스트를 쏜다 — 여기서 재는 것은 접힘이지 시동이 아니다
+    // Fires the burst only after clearing FSEvents's startup delay (see the comment above) — what is measured here is folding, not startup
     await new Promise((r) => setTimeout(r, 300))
 
     for (let i = 0; i < 100; i++) writeFileSync(join(root, `f${i}.txt`), 'x')
     await until(() => got.length > 0)
-    // 남은 플러시가 다 나올 시간을 주고 나서 센다
+    // counted only after giving time for any remaining flush to arrive
     await new Promise((r) => setTimeout(r, 300))
     expect(got.length).toBeLessThanOrEqual(4)
     expect(got.flat()).toContain('')
   })
 
-  it('집합에서 뺀 디렉토리는 더 이상 알려오지 않는다 — 접으면 눈도 감는다', async () => {
+  it('a directory removed from the set is no longer reported — folding it closes the eye too', async () => {
     const root = tmp()
     mkdirSync(join(root, 'sub'))
     const got: string[][] = []
@@ -95,7 +97,7 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     expect(got).toEqual([])
   })
 
-  it('감시 중이던 디렉토리가 지워지면 그 사실이 알려온다 — 화면이 걷을 수 있게', async () => {
+  it('deleting a watched directory reports that fact — so the screen can clear it', async () => {
     const root = tmp()
     mkdirSync(join(root, 'doomed'))
     const got: string[][] = []
@@ -108,7 +110,7 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     expect(got.flat()).toContain('doomed')
   })
 
-  it('이미 사라진 디렉토리를 감시하라고 하면, 감시 대신 그 사실을 알린다', async () => {
+  it('asked to watch an already-gone directory, reports that fact instead of watching', async () => {
     const root = tmp()
     const got: string[][] = []
     const w = makeWatcher((_p, d) => got.push(d))
@@ -118,13 +120,13 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     expect(got.flat()).toContain('never-existed')
   })
 
-  it('프로젝트 밖 경로는 집합에 못 들어간다 — 트리의 다른 fs 경로와 같은 규칙', () => {
+  it('a path outside the project cannot join the set — the same rule as every other fs path in the tree', () => {
     const root = tmp()
     const w = makeWatcher(() => {})
     expect(w.setWatched('p1', root, ['../outside'])).toBe(0)
   })
 
-  it('밖을 가리키는 링크 디렉토리는 감시하지 않는다', () => {
+  it('a link directory pointing outside is never watched', () => {
     const root = tmp()
     const outside = tmp()
     symlinkSync(outside, join(root, 'linked'), 'dir')
@@ -133,7 +135,7 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     expect(w.setWatched('p1', root, ['linked'])).toBe(0)
   })
 
-  it('끊어진 링크는 사라진 폴더 알림으로 바꾸지 않는다', async () => {
+  it('a broken link is never turned into a missing-folder notification', async () => {
     const root = tmp()
     const got: string[][] = []
     symlinkSync(join(root, 'missing'), join(root, 'dangling'))
@@ -144,9 +146,9 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
     expect(got).toEqual([])
   })
 
-  it('상한에 걸리면 지키는 수를 돌려준다 — 조용히 자르지 않는다', () => {
+  it('hitting the cap returns the number actually kept — it never silently truncates', () => {
     const root = tmp()
-    // 존재하지 않는 하위 경로 300개: watch는 실패해도 상한 판정이 먼저다
+    // 300 nonexistent subpaths: even if watch fails, the cap is judged first
     for (let i = 0; i < 300; i++) mkdirSync(join(root, `d${i}`))
     const w = makeWatcher(() => {})
     const rels = Array.from({ length: 300 }, (_, i) => `d${i}`)
@@ -155,14 +157,15 @@ describe('DirWatchers — 펼쳐진 디렉토리만 본다 (#34)', () => {
 })
 
 /**
- * 감시도 같은 갈라짐에 샜다 (#119).
+ * Watching leaked through the same split too (#119).
  *
- * `..`를 접지 않고 걸으면 가드는 링크를 따라간 뒤 부모로 올라가고, 실제로 감시가 걸리는
- * 경로는 `safeJoin`이 먼저 접어 만든 것이었다. 프로젝트 밖 디렉토리에 살아 있는 watcher가
- * 붙는다는 뜻이고, 그것은 남의 폴더에서 일어나는 일을 우리가 듣고 있다는 뜻이다.
+ * Walking with `..` left unfolded made the guard follow the link and then climb to a parent,
+ * while the path a watch was actually attached to was the one `safeJoin` had already folded first.
+ * That means a live watcher ends up attached to a directory outside the project — which means we
+ * are listening in on what happens in someone else's folder.
  */
-describe('링크 뒤의 .. 로는 바깥을 감시하지 못한다 (#119)', () => {
-  it('세운 감시가 없다', () => {
+describe('a .. past a symlink cannot watch outside (#119)', () => {
+  it('no watch was set up', () => {
     const root = tmp()
     const outside = tmp()
     mkdirSync(join(root, 'sub', 'deep'), { recursive: true })

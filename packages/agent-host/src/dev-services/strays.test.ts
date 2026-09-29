@@ -2,21 +2,22 @@ import { describe, expect, it } from 'vitest'
 import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays } from './strays.js'
 
 /**
- * 남은 프로세스 고르기 (사용자 요청 2026-09-07).
+ * Choosing a leftover process (user request, 2026-09-07).
  *
- * 실측이 규칙을 정했다: 에이전트가 띄운 데브 서버는 ppid=1에 제어 터미널이 없고(`??`),
- * 사람이 자기 터미널에서 띄운 것은 tty를 갖는다(`ttys005`). 그 선이 "치워도 되는 것"과
- * "남의 일"을 가른다. 여기서는 그 판단만 본다 — ps·lsof를 실제로 부르는 일은 아니다.
+ * Measurement set the rules: a dev server an agent launched has ppid=1 with no controlling
+ * terminal (`??`), while something the person launched in their own terminal has a tty
+ * (`ttys005`). That line is what separates "safe to clean up" from "someone else's work." This
+ * only checks that judgment — it never actually calls ps or lsof.
  */
 describe('pickStrays', () => {
   const rows = parsePsRows(
     [
-      '  100     1 ??       node /srv/dev-server.js', // 에이전트가 남긴 것
-      '  101     1 ttys005  node /srv/dev-server.js', // 사람이 터미널에서 띄운 것
+      '  100     1 ??       node /srv/dev-server.js', // left behind by an agent
+      '  101     1 ttys005  node /srv/dev-server.js', // launched by a person in a terminal
       '  200   100 ??       node child-of-stray.js',
-      '  900     1 ??       node host.mjs', // 우리(host)
-      '  901   900 ??       claude', // 우리 자손
-      '  300     1 ??       node /elsewhere/other.js', // 남의 폴더
+      '  900     1 ??       node host.mjs', // us (the host)
+      '  901   900 ??       claude', // our own descendant
+      '  300     1 ??       node /elsewhere/other.js', // someone else's folder
     ].join('\n'),
   )
   const cwds = new Map([
@@ -29,46 +30,47 @@ describe('pickStrays', () => {
   ])
   const roots = ['/work/proj']
 
-  it('우리 폴더에서 터미널 없이 도는 남의 프로세스만 고른다', () => {
+  it('picks only someone else\'s process running with no terminal in our folder', () => {
     const picked = pickStrays(rows, cwds, roots, 900).map((s) => s.pid)
     expect(picked).toEqual([100, 200])
   })
 
-  it('사람이 터미널에서 띄운 것은 건드리지 않는다 — tty가 그 선이다', () => {
+  it('leaves alone what a person launched in a terminal — tty is the line', () => {
     expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 101)).toBe(false)
   })
 
-  it('host의 자손은 목록에 없다 — 종료 절차가 이미 트리째 정리한다', () => {
+  it('the host\'s own descendant is not on the list — the shutdown procedure already cleans up the whole tree', () => {
     expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 901)).toBe(false)
   })
 
-  it('우리 폴더 밖은 남의 일이다', () => {
+  it('outside our folder is someone else\'s business', () => {
     expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 300)).toBe(false)
   })
 
-  it('cwd를 못 읽은 프로세스는 지어내지 않는다', () => {
+  it('never invents a cwd for a process it could not read one for', () => {
     expect(pickStrays(rows, new Map(), roots, 900)).toEqual([])
   })
 
-  it('고아가 낳은 자식은 함께 둔다 — 한 화면에서 그 나무를 다 고를 수 있어야 한다', () => {
-    // 200은 고아(100)의 자식이다. 사슬이 후보만 지나 init에 닿으므로 주인이 없다
+  it('keeps a child an orphan spawned together with it — the whole tree has to be selectable on one screen', () => {
+    // 200 is a child of the orphan (100). Since the chain only passes candidates on the way to init, it has no owner
     expect(pickStrays(rows, cwds, roots, 900).map((s) => s.pid)).toContain(200)
   })
 
   /**
-   * 남의 앱이 **지금 쓰고 있는** 프로세스 (사용자 지적 2026-09-10).
+   * A process another app is **currently using** (a point raised by the user, 2026-09-10).
    *
-   * VS Code의 확장들이 그대로 걸렸다: 워크스페이스가 우리 프로젝트라 cwd가 맞고, 파이프로
-   * 떠서 tty도 없다. 실측하면 이들의 부모는 살아 있는 확장 호스트(cwd `/`)다 — 고아가
-   * 아니다. 규칙 1~3만으로는 구별이 안 돼 종료할 때 Claude 확장이 SIGTERM으로 죽었다.
+   * VS Code's extensions ran straight into this: the workspace was our project, so cwd matched,
+   * and they were launched over a pipe, so they had no tty either. Measured, their parent turns
+   * out to be a living extension host (cwd `/`) — not an orphan. Rules 1 through 3 alone could
+   * not tell the difference, and the Claude extension was killed by SIGTERM when this actually ran.
    */
-  it('살아 있는 남의 앱이 들고 있는 프로세스는 목록에 없다 (VS Code 확장)', () => {
+  it('a process a living app still holds is not on the list (VS Code extensions)', () => {
     const vscode = parsePsRows(
       [
-        '  700     1 ??       Code Helper (Plugin)', // 확장 호스트 — 살아 있고, 우리 폴더 밖(cwd /)
-        '  701   700 ??       claude --output-format stream-json', // 그 확장이 띄운 것
+        '  700     1 ??       Code Helper (Plugin)', // the extension host — alive, and outside our folder (cwd /)
+        '  701   700 ??       claude --output-format stream-json', // launched by that extension
         '  702   700 ??       node languageServer.js',
-        '  800     1 ??       node dev-server.js', // 진짜 고아 — 이건 남는다
+        '  800     1 ??       node dev-server.js', // a genuine orphan — this one is kept
       ].join('\n'),
     )
     const cwd = new Map([
@@ -80,32 +82,32 @@ describe('pickStrays', () => {
     expect(pickStrays(vscode, cwd, roots, 900).map((s) => s.pid)).toEqual([800])
   })
 
-  it('부모를 우리 계정에서 못 찾으면 남의 것으로 본다 — 모를 때는 쏘지 않는다', () => {
+  it('treats it as someone else\'s when the parent cannot be found in our own account — never fires when in doubt', () => {
     const rowsUnknownParent = parsePsRows('  400  399 ??       node something.js')
     expect(pickStrays(rowsUnknownParent, new Map([[400, '/work/proj']]), roots, 900)).toEqual([])
   })
 })
 
 describe('insideAny', () => {
-  it('조각 경계로 잰다 — /a/proj-old는 /a/proj의 안이 아니다', () => {
+  it('measures by segment boundary — /a/proj-old is not inside /a/proj', () => {
     expect(insideAny('/a/proj-old/x', ['/a/proj'])).toBeNull()
     expect(insideAny('/a/proj/x', ['/a/proj'])).toBe('/a/proj')
     expect(insideAny('/a/proj', ['/a/proj'])).toBe('/a/proj')
   })
 
-  it('뿌리가 없으면 아무것도 안 맞는다', () => {
+  it('matches nothing when there are no roots', () => {
     expect(insideAny('/a/proj/x', [])).toBeNull()
   })
 })
 
-describe('출력 읽기', () => {
-  it('ps 줄에서 pid·ppid·tty·명령을 뗀다 (명령에 공백이 있어도)', () => {
+describe('reading output', () => {
+  it('pulls pid, ppid, tty and command out of a ps line (even with spaces in the command)', () => {
     expect(parsePsRows('  42     1 ??       node -e setInterval(...)')).toEqual([
       { pid: 42, ppid: 1, tty: '??', command: 'node -e setInterval(...)' },
     ])
   })
 
-  it('lsof -Fpn에서 pid별 cwd를 뗀다', () => {
+  it('pulls cwd per pid out of lsof -Fpn', () => {
     expect(parseLsofCwd('p10\nfcwd\nn/work/a\np11\nfcwd\nn/work/b\n')).toEqual(
       new Map([
         [10, '/work/a'],
@@ -114,7 +116,7 @@ describe('출력 읽기', () => {
     )
   })
 
-  it('제어 터미널 없음은 macOS(??)와 Linux(?) 표기를 모두 안다', () => {
+  it('recognizes both the macOS (??) and Linux (?) notation for no controlling terminal', () => {
     expect(noTty('??')).toBe(true)
     expect(noTty('?')).toBe(true)
     expect(noTty('ttys005')).toBe(false)

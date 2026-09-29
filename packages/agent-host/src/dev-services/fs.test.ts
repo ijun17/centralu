@@ -27,14 +27,14 @@ import {
 } from './fs.js'
 
 /**
- * 파일을 **바꾸는** 쪽의 검사 (#18, #19).
+ * Checks the side that **changes** files (#18, #19).
  *
- * 읽기에서 경로 검사를 빠뜨리면 남의 파일이 보인다. 쓰기에서 빠뜨리면 남의 파일이
- * **없어진다** — 그래서 여기 있는 것들은 편의 함수가 아니라 안전장치이고, 파일 시스템
- * 없이도 돌아가는 순수 함수로 떼어 둔 이유도 그것이다.
+ * Missing a path check on a read exposes someone else's file. Missing one on a write **destroys**
+ * it — which is why what is here is a safeguard, not a convenience function, and also why it is
+ * split out as a pure function that runs with no filesystem at all.
  *
- * 모든 실물 조작은 `mkdtemp`로 만든 임시 디렉토리 안에서만 일어난다. 이 파일이 다루는
- * 것이 '지우기'와 '옮기기'인 이상, 테스트가 그 밖으로 나가는 일은 없어야 한다.
+ * Every real filesystem operation happens only inside a temp directory made with `mkdtemp`. Since
+ * what this file deals with is deletion and moving, a test must never reach outside of it.
  */
 
 let root = ''
@@ -55,31 +55,32 @@ function outsideDir(): string {
   return d
 }
 
-describe('safeJoin — 프로젝트 밖으로 나가지 않는다', () => {
-  it('안쪽 경로는 그대로 붙는다', () => {
+describe('safeJoin — never leaves the project', () => {
+  it('a path inside is joined as-is', () => {
     expect(safeJoin(root, 'src/a.ts')).toBe(join(root, 'src/a.ts'))
   })
 
-  it('빈 경로는 루트 자신이다 (트리의 첫 목록이 이걸로 온다)', () => {
+  it('an empty path is the root itself (this is what the tree\'s first listing arrives as)', () => {
     expect(safeJoin(root, '')).toBe(root)
   })
 
   it.each([
-    ['../etc/passwd', '한 단계 위'],
-    ['../../etc/passwd', '두 단계 위'],
-    ['src/../../outside.txt', '들어갔다 나오기'],
-    ['/etc/passwd', '절대 경로'],
-  ])('%s 는 거절한다 (%s)', (rel) => {
+    ['../etc/passwd', 'one level up'],
+    ['../../etc/passwd', 'two levels up'],
+    ['src/../../outside.txt', 'going in and back out'],
+    ['/etc/passwd', 'an absolute path'],
+  ])('%s is rejected (%s)', (rel) => {
     expect(() => safeJoin(root, rel)).toThrow(/outside the project/)
   })
 
   /**
-   * 이름이 루트로 **시작만** 하는 형제 디렉토리는 안쪽이 아니다.
+   * A sibling directory whose name **merely starts with** the root's is not inside it.
    *
-   * `startsWith(root)`로만 검사하면 `/tmp/cc-fs-1` 프로젝트에서 `/tmp/cc-fs-12`가 통과한다.
-   * 구분자까지 붙여 봐야 하는 이유이고, 문자열 검사로 경로를 판정할 때 가장 흔히 새는 자리다.
+   * Checking only `startsWith(root)` would let `/tmp/cc-fs-12` pass for a project at
+   * `/tmp/cc-fs-1`. This is why the separator itself has to be checked too, and it is the most
+   * common leak when a path is judged by a string check.
    */
-  it('루트와 이름이 겹치는 옆 디렉토리는 안쪽이 아니다', () => {
+  it('a sibling directory whose name overlaps the root\'s is not inside it', () => {
     const sibling = `${root}-sibling`
     mkdirSync(sibling)
     try {
@@ -90,16 +91,16 @@ describe('safeJoin — 프로젝트 밖으로 나가지 않는다', () => {
   })
 })
 
-describe('baseName — 이름 자리에 경로가 들어오지 못한다', () => {
-  it('마지막 조각만 남는다', () => {
+describe('baseName — a path cannot pass itself off as a name', () => {
+  it('only the last segment survives', () => {
     expect(baseName('src/app/a.ts')).toBe('a.ts')
     expect(baseName('a.ts')).toBe('a.ts')
   })
 
-  it('올라가는 이름은 이름이 아니다', () => {
+  it('a name that climbs is not a name', () => {
     expect(() => baseName('..')).toThrow(/Not a file name/)
     expect(() => baseName('')).toThrow(/Not a file name/)
-    // `../../x` 처럼 생겼어도 이름 자리에서는 `x`가 된다 — 목적지 밖으로 못 나간다
+    // Even shaped like `../../x`, in the name slot it becomes `x` — it cannot leave the destination
     expect(baseName('../../x')).toBe('x')
   })
 
@@ -114,53 +115,56 @@ describe('baseName — 이름 자리에 경로가 들어오지 못한다', () =>
    * checkable on every platform is the invariant behind both answers — whatever comes back is
    * never something this machine would read as a path.
    */
-  it('구분자 판정은 플랫폼에게 묻는다 — 여기서 `\\`는 이름의 일부다', () => {
+  it('the separator decision is left to the platform — here `\\` is part of the name', () => {
     expect(baseName('src/a\\b.txt')).toBe('a\\b.txt')
     for (const input of ['src/app/a.ts', 'a\\b.txt', '../../.ssh/authorized_keys', 'x.md']) {
       let name: string
       try {
         name = baseName(input)
       } catch {
-        continue // 거절도 맞는 답이다 (Windows에서 두 번째가 그렇다)
+        continue // rejection is a correct answer too (the second one is, on Windows)
       }
       expect(name).not.toContain(sep)
     }
   })
 })
 
-describe('listDir — 저장소가 아닌 프로젝트', () => {
+describe('listDir — a project that is not a repository', () => {
   /**
-   * 프로젝트는 git 저장소가 아니어도 된다 — 시작 안내가 그렇게 적어 놓았다.
+   * A project does not have to be a git repository — the first-run screen says so in as many
+   * words.
    *
-   * 저장소가 아니면 `git check-ignore`는 아무것도 읽지 않고 바로 죽고, 우리가 쓰던 목록은
-   * 닫힌 파이프에 떨어진다(EPIPE). 답 자체는 문제가 없다(무시된 파일은 없다). 문제는 그
-   * EPIPE를 아무도 안 듣고 있으면 **호스트 프로세스가 통째로 죽는다**는 것 — 그 안에 든
-   * 세션 전부와 함께.
+   * When it is not one, `git check-ignore` reads nothing and dies immediately, and the list we
+   * were writing lands on a closed pipe (EPIPE). The answer itself has no problem (nothing is
+   * ignored). The problem is that if nobody is listening for that EPIPE, **the whole host process
+   * dies** — taking every session inside it down with it.
    *
-   * 목록이 파이프 버퍼(실측 65,536바이트)를 넘겨야 확실히 재현된다. 그 아래에서는 우리
-   * 쓰기가 git이 사라지기 전에 끝나서 그냥 지나가고, 그래서 이 버그가 몇 주를 살아남았다.
-   * CI의 리눅스 러너 둘은 훨씬 작은 크기에서 타이밍만으로 걸렸다.
+   * This only reproduces reliably once the list exceeds the pipe buffer (measured at 65,536
+   * bytes). Below that, our write finishes before git is gone and just goes through, which is how
+   * this bug survived for weeks. Two Linux runners in CI hit it at a much smaller size, on timing
+   * alone.
    */
-  it('파일이 많아도 목록이 나온다 — git이 먼저 죽어도 호스트는 산다', async () => {
+  it('the list comes back even with many files — the host survives even if git dies first', async () => {
     const long = 'n'.repeat(200)
     const names = Array.from({ length: 400 }, (_, i) => `${String(i).padStart(4, '0')}-${long}.txt`)
-    // 400 × 206바이트 ≈ 82KB — 버퍼를 확실히 넘긴다
+    // 400 x 206 bytes ~= 82KB — reliably exceeds the buffer
     expect(names.join('\n').length).toBeGreaterThan(65_536)
     for (const n of names) writeFileSync(join(root, n), '')
 
     const entries = await listDir(root, '')
     expect(entries).toHaveLength(names.length)
-    // 저장소가 아니니 무시되는 것도 없다 — 못 물어봤다고 전부 무시로 칠하면 트리가 빈다
+    // Not a repository, so nothing is ignored either — painting everything as ignored just because it could not be asked would leave the tree empty
     expect(entries.every((e) => !e.ignored)).toBe(true)
   })
 })
 
-describe('listDir — 한글 이름의 무시 판정 (#176)', () => {
+describe('listDir — the ignore decision for a Korean name (#176)', () => {
   /**
-   * `check-ignore`의 줄 단위 출력은 한글 이름을 `"\355\254\264…"`로 감싸 돌려준다. 받은 줄을
-   * 이름과 맞춰 보면 한글 파일만 어긋나서, 무시된 한글 파일이 흐리게 표시되지 않았다.
+   * `check-ignore`'s line-based output wraps a Korean name as `"\355\254\264…"`. Matching the
+   * line received against the name only disagreed for Korean files, so an ignored Korean file was
+   * never shown dimmed.
    */
-  it('무시된 한글 파일도 무시로 표시된다', async () => {
+  it('an ignored Korean file is shown as ignored too', async () => {
     execFileSync('git', ['init', '-q'], { cwd: root })
     writeFileSync(join(root, '.gitignore'), '무시됨.log\nascii.log\n')
     for (const n of ['무시됨.log', 'ascii.log', '한글파일.md']) writeFileSync(join(root, n), '')
@@ -170,18 +174,19 @@ describe('listDir — 한글 이름의 무시 판정 (#176)', () => {
   })
 })
 
-describe('copyTree — clone이 도중에 멈춘 뒤의 일반 복사 (#167)', () => {
+describe('copyTree — the ordinary copy after a clone stops partway (#167)', () => {
   /**
-   * `cp -Rc`는 실패하기 전에 일부를 이미 만들어 둔다. 그 위에 일반 복사를 하면 먼저 건너온
-   * 디렉토리 링크를 덮어쓰려다 죽어서, 대체 경로가 대체가 되지 못했다.
+   * `cp -Rc` already creates part of the result before it fails. Running an ordinary copy on top
+   * of that died trying to overwrite a directory symlink that had already come across, so the
+   * fallback path failed to actually fall back.
    */
-  it('반쯤 된 결과를 지우고 처음부터 복사한다', async () => {
+  it('deletes the half-finished result and copies again from scratch', async () => {
     const src = join(root, 'src')
     mkdirSync(join(src, 'pkg'), { recursive: true })
     writeFileSync(join(src, 'pkg', 'index.js'), 'module.exports = 1\n')
     symlinkSync('pkg', join(src, 'alias'))
     const dst = join(root, 'dst')
-    // clone이 링크와 폴더까지 만들어 놓고 실패한 모양
+    // The shape of a clone that created the link and folder, then failed
     const halfClone = async () => {
       mkdirSync(join(dst, 'pkg'), { recursive: true })
       symlinkSync('pkg', join(dst, 'alias'))
@@ -194,8 +199,8 @@ describe('copyTree — clone이 도중에 멈춘 뒤의 일반 복사 (#167)', (
   })
 })
 
-describe('readTextFile — 이미지 미리보기', () => {
-  it('지원하는 래스터 이미지는 텍스트가 아니라 MIME·base64로 돌려준다', async () => {
+describe('readTextFile — image previews', () => {
+  it('a supported raster image is returned as MIME and base64, not text', async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
     writeFileSync(join(root, 'logo.png'), bytes)
 
@@ -208,7 +213,7 @@ describe('readTextFile — 이미지 미리보기', () => {
     })
   })
 
-  it('SVG는 그림 미리보기와 텍스트 읽기를 함께 돌려준다', async () => {
+  it('SVG returns both an image preview and a text read', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
     writeFileSync(join(root, 'logo.svg'), svg)
 
@@ -221,7 +226,7 @@ describe('readTextFile — 이미지 미리보기', () => {
     })
   })
 
-  it('프로젝트 이미지는 상한을 넘기면 바이트를 전송하지 않고 이유를 말한다', async () => {
+  it('an image over the cap sends no bytes and says why', async () => {
     const { writeFile } = await import('node:fs/promises')
     await writeFile(join(root, 'large.png'), Buffer.alloc(10_000_001))
 
@@ -234,8 +239,8 @@ describe('readTextFile — 이미지 미리보기', () => {
   })
 })
 
-describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', () => {
-  it('Given 중간 경로가 밖을 가리키는 링크 When 목록을 열면 Then 프로젝트 밖이라 거절한다', async () => {
+describe('a symlink is only resolved within the project root', () => {
+  it('Given a link in the middle of the path points outside When the listing is opened Then it is rejected as outside the project', async () => {
     const outside = outsideDir()
     mkdirSync(join(outside, 'nested'))
     writeFileSync(join(outside, 'nested', 'secret.txt'), 'leak')
@@ -244,7 +249,7 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
     await expect(listDir(root, 'linked/nested')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given 마지막 경로가 밖의 파일을 가리키는 링크 When 셸 경로를 만들면 Then 프로젝트 밖이라 거절한다', async () => {
+  it('Given a link at the end of the path points to a file outside When a shell path is created Then it is rejected as outside the project', async () => {
     const outside = outsideDir()
     writeFileSync(join(outside, 'secret.txt'), 'leak')
     symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
@@ -252,7 +257,7 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
     await expect(resolveExisting(root, 'secret.txt')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given 옮길 대상이 밖으로 향한 링크 When 이동하면 Then 밖의 파일을 옮기지 않는다', async () => {
+  it('Given the item to move is a link pointing outside When it is moved Then the outside file is never moved', async () => {
     const outside = outsideDir()
     writeFileSync(join(outside, 'secret.txt'), 'leak')
     mkdirSync(join(root, 'dst'))
@@ -261,7 +266,7 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
     await expect(moveEntry(root, 'secret.txt', 'dst')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given 이동 목적 폴더가 밖을 가리키는 링크 When 이동하면 Then 밖에 쓰지 않는다', async () => {
+  it('Given the destination folder is a link pointing outside When moving Then nothing is written outside', async () => {
     const outside = outsideDir()
     writeFileSync(join(root, 'a.ts'), 'inside')
     symlinkSync(outside, join(root, 'drop'), 'dir')
@@ -270,14 +275,14 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
     expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('inside')
   })
 
-  it('Given 가져오기 목적 폴더가 링크 When 파일을 쓰면 Then 링크 밖에 만들지 않는다', async () => {
+  it('Given the import destination folder is a link When a file is written Then it is not created outside the link', async () => {
     const outside = outsideDir()
     symlinkSync(outside, join(root, 'drop'), 'dir')
 
     await expect(importFile(root, 'drop', 'a.ts', Buffer.from('inside'))).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given 읽을 파일이 링크 When 텍스트를 열면 Then 링크 대상을 읽지 않는다', async () => {
+  it('Given the file to read is a link When text is opened Then the link target is never read', async () => {
     const outside = outsideDir()
     writeFileSync(join(outside, 'secret.txt'), 'leak')
     symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
@@ -285,13 +290,13 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
     await expect(readTextFile(root, 'secret.txt')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given 끊어진 링크 When 셸 경로를 만들면 Then 사라진 파일로 거절한다', async () => {
+  it('Given a broken link When a shell path is created Then it is rejected as a missing file', async () => {
     symlinkSync(join(root, 'missing.txt'), join(root, 'dangling.txt'))
 
     await expect(resolveExisting(root, 'dangling.txt')).rejects.toThrow(/no longer there/i)
   })
 
-  it('Given 링크가 프로젝트 안을 가리키면 When 파일을 읽으면 Then 일반 파일처럼 허용한다', async () => {
+  it('Given the link points inside the project When a file is read Then it is allowed like an ordinary file', async () => {
     mkdirSync(join(root, 'actual'))
     writeFileSync(join(root, 'actual', 'inside.txt'), 'inside')
     symlinkSync(join(root, 'actual'), join(root, 'linked'), 'dir')
@@ -299,7 +304,7 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
     await expect(readTextFile(root, 'linked/inside.txt')).resolves.toMatchObject({ text: 'inside', binary: false })
   })
 
-  it('Given 링크가 프로젝트 안을 가리키면 When 목록을 열면 Then pnpm식 내부 링크도 따라간다', async () => {
+  it('Given the link points inside the project When the listing is opened Then a pnpm-style internal link is followed too', async () => {
     mkdirSync(join(root, 'store/pkg'), { recursive: true })
     writeFileSync(join(root, 'store/pkg', 'index.js'), 'export {}')
     mkdirSync(join(root, 'node_modules'))
@@ -313,7 +318,7 @@ describe('심볼릭 링크는 프로젝트 루트 안으로만 해석된다', ()
 })
 
 describe('moveEntry', () => {
-  it('파일을 폴더로 옮긴다', async () => {
+  it('moves a file into a folder', async () => {
     writeFileSync(join(root, 'a.ts'), 'hello')
     mkdirSync(join(root, 'src'))
     const res = await moveEntry(root, 'a.ts', 'src')
@@ -322,7 +327,7 @@ describe('moveEntry', () => {
     expect((await listDir(root, '')).map((e) => e.name)).toEqual(['src'])
   })
 
-  it('폴더는 안에 든 것과 함께 간다', async () => {
+  it('a folder moves along with everything inside it', async () => {
     mkdirSync(join(root, 'pkg/sub'), { recursive: true })
     mkdirSync(join(root, 'dest'))
     writeFileSync(join(root, 'pkg/sub/deep.ts'), 'x')
@@ -331,173 +336,176 @@ describe('moveEntry', () => {
   })
 
   /**
-   * **덮어쓰기는 없다.** 여기 있는 파일이 에이전트가 지금 고치고 있는 것인지 이쪽은 알 수
-   * 없고, 조용히 갈아치우는 것은 되돌릴 방법이 하나도 없는 유일한 결과다.
+   * **There is no overwrite.** This side has no way to know whether a file already there is one
+   * an agent is currently editing, and silently replacing it is the one outcome with no way back.
    */
-  it('자리가 차 있으면 옮기지 않고 무엇과 부딪혔는지 말한다', async () => {
+  it('when the spot is taken, nothing moves and it says what it collided with', async () => {
     mkdirSync(join(root, 'src'))
     writeFileSync(join(root, 'a.ts'), 'new')
     writeFileSync(join(root, 'src/a.ts'), 'old')
     await expect(moveEntry(root, 'a.ts', 'src')).rejects.toThrow('src/a.ts already exists')
-    // 원본도 목적지도 그대로여야 한다 — 반쯤 옮겨진 상태가 가장 나쁘다
+    // Both the source and the destination have to remain untouched — a half-moved state is the worst outcome
     expect(readFileSync(join(root, 'src/a.ts'), 'utf8')).toBe('old')
     expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('new')
   })
 
-  it('제자리에 놓는 것은 실패가 아니라 moved:false다', async () => {
+  it('putting it where it already is is not a failure, but moved:false', async () => {
     mkdirSync(join(root, 'src'))
     writeFileSync(join(root, 'src/a.ts'), 'x')
     expect(await moveEntry(root, 'src/a.ts', 'src')).toEqual({ path: 'src/a.ts', moved: false })
     expect(readFileSync(join(root, 'src/a.ts'), 'utf8')).toBe('x')
   })
 
-  it('폴더를 자기 안으로는 못 넣는다', async () => {
+  it('a folder cannot be moved into itself', async () => {
     mkdirSync(join(root, 'pkg/sub'), { recursive: true })
     await expect(moveEntry(root, 'pkg', 'pkg/sub')).rejects.toThrow(/into itself/)
   })
 
-  it('출발지가 프로젝트 밖이면 거절한다', async () => {
+  it('rejects when the source is outside the project', async () => {
     await expect(moveEntry(root, '../outside.txt', '')).rejects.toThrow(/outside the project/)
   })
 
-  it('목적지가 프로젝트 밖이면 거절한다', async () => {
+  it('rejects when the destination is outside the project', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
     await expect(moveEntry(root, 'a.ts', '../..')).rejects.toThrow(/outside the project/)
     expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('x')
   })
 
-  it('프로젝트 자신은 못 옮긴다', async () => {
+  it('the project itself cannot be moved', async () => {
     mkdirSync(join(root, 'sub'))
     await expect(moveEntry(root, '', 'sub')).rejects.toThrow(/Cannot move the project itself/)
   })
 })
 
-describe('importFile — 밖에서 끌어온 파일', () => {
-  it('폴더 안에 쓰고 새 경로를 돌려준다', async () => {
+describe('importFile — a file dragged in from outside', () => {
+  it('writes into the folder and returns the new path', async () => {
     mkdirSync(join(root, 'assets'))
     const res = await importFile(root, 'assets', 'shot.png', Buffer.from('bytes'))
     expect(res).toEqual({ path: 'assets/shot.png' })
     expect(readFileSync(join(root, 'assets/shot.png'), 'utf8')).toBe('bytes')
   })
 
-  it('이름에 경로가 섞여 와도 목적지 밖으로 못 나간다', async () => {
+  it('cannot leave the destination even when a path is mixed into the name', async () => {
     mkdirSync(join(root, 'assets'))
     const res = await importFile(root, 'assets', '../../evil.txt', Buffer.from('x'))
     expect(res.path).toBe('assets/evil.txt')
   })
 
-  it('같은 이름이 이미 있으면 덮지 않는다', async () => {
+  it('does not overwrite when the same name already exists', async () => {
     writeFileSync(join(root, 'shot.png'), 'original')
     await expect(importFile(root, '', 'shot.png', Buffer.from('new'))).rejects.toThrow(/already exists/)
     expect(readFileSync(join(root, 'shot.png'), 'utf8')).toBe('original')
   })
 
-  it('목적지가 폴더가 아니면 거절한다', async () => {
+  it('rejects when the destination is not a folder', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
     await expect(importFile(root, 'a.ts', 'b.ts', Buffer.from('y'))).rejects.toThrow(/not a folder/)
   })
 
-  it('목적지가 프로젝트 밖이면 거절한다', async () => {
+  it('rejects when the destination is outside the project', async () => {
     await expect(importFile(root, '..', 'evil.txt', Buffer.from('x'))).rejects.toThrow(/outside the project/)
   })
 })
 
-describe('resolveExisting — 셸에 넘길 절대 경로', () => {
-  it('있는 파일의 절대 경로를 준다', async () => {
+describe('resolveExisting — the absolute path handed to the shell', () => {
+  it('gives the absolute path of a file that exists', async () => {
     writeFileSync(join(root, 'a.ts'), 'x')
     expect(await resolveExisting(root, 'a.ts')).toBe(realpathSync(join(root, 'a.ts')))
   })
 
-  /** 없는 경로를 셸에 넘기면 아무 일도 일어나지 않는다 — 그 침묵을 여기서 막는다 */
-  it('없는 파일은 거절한다', async () => {
+  /** Handing the shell a path that does not exist does nothing at all — this blocks that silence */
+  it('rejects a file that does not exist', async () => {
     await expect(resolveExisting(root, 'gone.ts')).rejects.toThrow(/no longer there/)
   })
 
-  it('프로젝트 밖은 거절한다 (휴지통이 남의 파일을 삼키지 않게)', async () => {
+  it('rejects outside the project (so the trash never swallows someone else\'s file)', async () => {
     await expect(resolveExisting(root, '../..')).rejects.toThrow(/outside the project/)
   })
 })
 
 /**
- * **검사한 문자열이 곧 사용되는 문자열이어야 한다** (#119).
+ * **The string that is checked has to be the string that is used** (#119).
  *
- * 가드는 `..`를 조각으로 남긴 채 걸었고, 심볼릭 링크를 따라간 뒤에 부모로 올라갔다.
- * 실제 syscall이 쓰는 경로는 `safeJoin`이 `resolve()`로 먼저 접어 만든다. 링크의 대상이
- * 링크 자신보다 깊으면 둘이 갈라져서, 가드는 안쪽을 보고 허락하는데 열리는 곳은 바깥이었다.
+ * The guard walked with `..` left as a segment, following symlinks and then climbing back up to
+ * a parent. The path the actual syscall uses is instead built by `safeJoin` folding it first with
+ * `resolve()`. When a link's target sits deeper than the link itself, the two disagree: the guard
+ * looks inside and allows it, while what actually opens is outside.
  *
- * 네 경로를 모두 본다. 읽기만 새는 것이 아니라 **쓰기와 감시도** 샜기 때문이다.
+ * All four operations are checked, because it is not just reading that leaked — **writing and
+ * watching leaked too.**
  */
-describe('링크 뒤의 .. 는 가드와 syscall을 갈라놓지 못한다 (#119)', () => {
+describe('a .. past a symlink cannot split the guard from the syscall (#119)', () => {
   let outside = ''
 
   beforeEach(() => {
     outside = realpathSync(mkdtempSync(join(tmpdir(), 'cc-outside-')))
     extraDirs.push(outside)
     writeFileSync(join(outside, 'SECRET.txt'), '바깥')
-    // 링크의 대상이 링크 자신보다 깊다 — 이 차이가 두 경로를 갈라놓았다
+    // The link's target sits deeper than the link itself — this difference is what split the two paths
     mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
-    // 가드가 걸어가 보게 될 미끼. 이름이 바깥 링크와 같아야 한다
+    // The bait the guard will end up walking. Its name has to match the outside link's
     mkdirSync(join(root, 'sub', 'evil'))
     symlinkSync(join(root, 'sub', 'deep'), join(root, 'link'))
     symlinkSync(outside, join(root, 'evil'))
   })
 
-  it('나열하지 못한다', async () => {
+  it('cannot be listed', async () => {
     await expect(listDir(root, 'link/../evil')).rejects.toThrow(/outside the project/i)
   })
 
-  it('읽지 못한다', async () => {
+  it('cannot be read', async () => {
     await expect(readTextFile(root, 'link/../evil/SECRET.txt')).rejects.toThrow(/outside the project/i)
   })
 
-  it('그 안에 만들지 못한다', async () => {
+  it('cannot be created inside it', async () => {
     await expect(importFile(root, 'link/../evil', 'planted.txt', Buffer.from('x'))).rejects.toThrow(
       /outside the project/i,
     )
   })
 
-  it('프로젝트 파일을 그리로 옮기지 못한다', async () => {
+  it('a project file cannot be moved there', async () => {
     writeFileSync(join(root, 'mine.txt'), '내 것')
     await expect(moveEntry(root, 'mine.txt', 'link/../evil')).rejects.toThrow(/outside the project/i)
     expect(readFileSync(join(root, 'mine.txt'), 'utf8')).toBe('내 것')
   })
 
-  it('접고 나서도 루트 밖으로 나가는 경로는 그대로 막는다', async () => {
+  it('a path leaving the root is still blocked even after folding', async () => {
     await expect(listDir(root, '../')).rejects.toThrow(/outside the project/i)
     await expect(listDir(root, 'sub/../../')).rejects.toThrow(/outside the project/i)
   })
 
-  it('안쪽을 도는 .. 는 평소처럼 통한다', async () => {
+  it('a .. that stays inside still works as usual', async () => {
     writeFileSync(join(root, 'a.txt'), '안')
     await expect(readTextFile(root, 'sub/../a.txt')).resolves.toBeTruthy()
   })
 })
 
 /**
- * #95: 워크트리 프로비저닝이 복사를 끝낸 뒤 남는 링크들.
+ * #95: links left behind once worktree provisioning finishes copying.
  *
- * 여기서 정하는 경계는 하나다 — **밖을 가리키면 창문, 안을 가리키면 그냥 링크.**
+ * There is one boundary decided here — **pointing outside is a window, pointing inside is just a
+ * link.**
  */
-describe('복사된 나무에 남은 링크', () => {
-  it('끊어진 링크도 가리키는 글자로 판정한다 — 대상이 나중에 생기면 그때 창문이 된다', async () => {
+describe('links left in a copied tree', () => {
+  it('a broken link is judged by the text it points to too — becoming a window the moment its target comes to exist', async () => {
     const outside = outsideDir()
     symlinkSync(join(outside, 'not-yet'), join(root, 'later'))
     symlinkSync('also-not-yet', join(root, 'inside-later'))
 
     expect(await dropEscapingLinks(root, root)).toEqual(['later'])
     expect(() => lstatSync(join(root, 'later'))).toThrow()
-    // 안쪽을 가리키는 끊어진 링크는 그대로 둔다 — 대상이 이 나무 안에 생길 수도 있다
+    // A broken link pointing inside is left as-is — its target may still come to exist inside this tree
     expect(lstatSync(join(root, 'inside-later')).isSymbolicLink()).toBe(true)
   })
 
-  it('링크 안으로는 들어가지 않는다 — 순환에 걸리지 않는다', async () => {
+  it('never walks into a link — never gets caught in a cycle', async () => {
     mkdirSync(join(root, 'a'))
     symlinkSync(join(root, 'a'), join(root, 'a', 'self'))
 
     await expect(dropEscapingLinks(root, root)).resolves.toEqual([])
   })
 
-  it('목적지의 부모가 링크면 만들지도, 쓰지도 않는다', async () => {
+  it('creates nothing and writes nothing when the destination\'s parent is a link', async () => {
     const outside = outsideDir()
     symlinkSync(outside, join(root, 'out'))
 
@@ -505,7 +513,7 @@ describe('복사된 나무에 남은 링크', () => {
     expect(existsSync(join(outside, 'app.env'))).toBe(false)
   })
 
-  it('없는 부모는 만들어 준다 — 목록에 `sub/.env`를 적는 것은 평범한 일이다', async () => {
+  it('creates a missing parent — writing `sub/.env` in a list is an ordinary thing to do', async () => {
     const dst = await prepareCopyTarget(root, 'sub/deeper/.env')
 
     expect(dst).toBe(join(root, 'sub', 'deeper', '.env'))

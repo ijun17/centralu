@@ -4,26 +4,28 @@ import { shellPath } from './terminal.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
 /**
- * 자주 쓰는 명령어 실행기 (#60).
+ * The runner for frequently used commands (#60).
  *
- * **터미널 탭과 별개다.** 예전에는 저장된 명령을 첫 터미널 PTY에 타이핑해 넣었는데,
- * 그러면 단발성 빌드도 데브 서버도 전부 터미널 탭에 눌러앉았다. 여기서는 명령마다
- * 자기 프로세스를 띄우고 출력을 자기 로그로 받는다 — 단발/상주 구분이 필요 없다:
- * 안 끝나면 계속 흐르고, 끝나면 종료 코드와 함께 로그가 남는 것뿐이다.
+ * **Separate from a terminal tab.** This used to type a saved command into the first terminal's
+ * PTY, which meant a one-shot build and a long-running dev server both ended up parked in a
+ * terminal tab. Here, every command launches its own process and gets its own log for output —
+ * there is no need to tell one-shot apart from long-running: if it does not end, output keeps
+ * streaming, and once it ends, a log with an exit code is what is left.
  *
- * 사용자 결정 (2026-08-26):
- *   - 로그는 host가 살아 있는 동안만 (명령별 마지막 실행 하나)
- *   - 같은 명령을 다시 실행하면 죽이고 새로 시작
- *   - 서로 다른 명령은 동시 실행 허용 (명령당 프로세스 하나)
+ * The owner's decisions (2026-08-26):
+ *   - the log only lasts while the host is alive (one, the most recent run per command)
+ *   - running the same command again kills the old one and starts fresh
+ *   - different commands are allowed to run at the same time (one process per command)
  *
- * 출력은 터미널과 **같은 프레임 레인**을 탄다 (pushTerminal — runId가 terminalId 자리).
- * 이벤트 로그(seq 링 버퍼)를 태우지 않는 이유도 터미널과 같다: 출력량의 자릿수가 다르다.
+ * Output rides the **same frame lane** as a terminal (pushTerminal — runId takes terminalId's
+ * place). The reason this does not also go through the event log (the seq ring buffer) is the
+ * same as for a terminal: the volume of output is a different order of magnitude.
  */
 
 const require = createRequire(import.meta.url)
 
 type Pty = {
-  /** node-pty가 준 자식 pid — 그룹 킬의 과녁. pty 자식은 새 세션의 리더라 pgid == pid다 */
+  /** The child pid node-pty gave us — the target for a group kill. A pty child is the leader of a new session, so pgid == pid */
   pid?: number
   onData(cb: (data: string) => void): void
   onExit(cb: (e: { exitCode: number }) => void): void
@@ -33,12 +35,12 @@ type Pty = {
 }
 type PtyModule = { spawn(file: string, args: string[], opts: Record<string, unknown>): Pty }
 
-/** 터미널과 같은 상한 — 빌드 로그 하나가 수십 MB가 되는 일이 흔하다 */
+/** The same cap as a terminal — a single build log commonly reaches tens of MB */
 const LOG_BYTES = 256 * 1024
 
 export type CommandRun = {
   command: string
-  /** 실행마다 새 id — 화면이 스트림을 갈아탈 기준이다 */
+  /** A new id per run — what the screen uses to switch which stream it follows */
   runId: string
   running: boolean
   exitCode: number | null
@@ -59,7 +61,7 @@ type Entry = {
 export type CommandSink = (e: { terminalId: string; data?: string; exitCode?: number | null }) => void
 
 export class CommandRunner {
-  /** (cwd, command) 당 마지막 실행 하나 */
+  /** One, the most recent run, per (cwd, command) */
   private entries = new Map<string, Entry>()
   private counter = 0
 
@@ -70,11 +72,11 @@ export class CommandRunner {
   }
 
   /**
-   * SIGTERM으로 정중히, 유예 안에 안 죽으면 SIGKILL.
+   * Politely, with SIGTERM; if it has not died within the grace period, SIGKILL.
    *
-   * 트리를 어떻게 찾는지는 kill-tree.ts에 있다 — 터미널 탭도 같은 문제를 갖고 있어
-   * 한 군데서 푼다. onExit이 오면 e.pty가 비고, 그러면 두 번째 발은 셸 자신(거둬진 번호)을
-   * 빼고 **버틴 자손만** 쏜다 (#149).
+   * How the tree is found lives in kill-tree.ts — terminal tabs have the same problem, so it is
+   * solved in one place. Once onExit arrives, e.pty clears, and the second shot excludes the shell
+   * itself (a reaped number) and fires only at **the surviving descendants** (#149).
    */
   private stopEntry(e: Entry): void {
     const handle = e.pty
@@ -82,7 +84,7 @@ export class CommandRunner {
     stopTree(handle, KILL_GRACE_MS, () => e.pty === handle)
   }
 
-  /** 실행. 같은 명령이 돌고 있으면 죽이고 새로 시작한다 (사용자 결정) */
+  /** Runs the command. If the same command is already running, kills it and starts fresh (the owner's decision) */
   run(cwd: string, command: string, cols = 100, rows = 30): CommandRun {
     const existing = this.entries.get(this.key(cwd, command))
     if (existing) this.stopEntry(existing)
@@ -101,16 +103,16 @@ export class CommandRunner {
     return this.toRun(entry)
   }
 
-  /** 데브 서버를 끄는 버튼의 뒷면. 로그는 남는다 — 종료도 결과다 */
+  /** The other side of the button that turns off a dev server. The log survives — an exit is a result too */
   stop(cwd: string, command: string): void {
     const e = this.entries.get(this.key(cwd, command))
     if (e) this.stopEntry(e)
   }
 
   /**
-   * 프로젝트가 사라질 때 그 디렉토리의 실행을 모두 멈추고 잊는다 (#177). Stop과 같은
-   * 트리 킬이다. 기록까지 버리는 것은 같은 폴더를 다시 추가했을 때 지우기 전의 실행이
-   * 목록에 되살아나지 않게 하려는 것이다.
+   * Stops every run in a directory and forgets it when its project is removed (#177). This is the
+   * same tree kill as Stop. History is discarded too, so re-adding the same folder never brings
+   * back a pre-deletion run on the list.
    */
   stopCwd(cwd: string): void {
     for (const [key, e] of this.entries) {
@@ -120,7 +122,7 @@ export class CommandRunner {
     }
   }
 
-  /** 그 디렉토리에서 실행된 적 있는 명령들의 상태 (목록의 뱃지용 — 로그는 뺀다) */
+  /** The state of every command ever run in that directory (for the list's badges — the log is left out) */
   state(cwd: string): Omit<CommandRun, 'history'>[] {
     const out: Omit<CommandRun, 'history'>[] = []
     for (const e of this.entries.values()) {
@@ -131,7 +133,7 @@ export class CommandRunner {
     return out
   }
 
-  /** 명령 하나의 마지막 실행 — 로그째. 실행된 적 없으면 null */
+  /** One command's most recent run — log included. null if it was never run */
   log(cwd: string, command: string): CommandRun | null {
     const e = this.entries.get(this.key(cwd, command))
     return e ? this.toRun(e) : null
@@ -142,17 +144,17 @@ export class CommandRunner {
     try {
       this.entries.get(this.key(cwd, command))?.pty?.resize(cols, rows)
     } catch {
-      // 죽어가는 중일 수 있다 — 크기 조절 실패로 실행을 잃을 이유는 없다
+      // it may be in the process of dying — a resize failure is no reason to lose the run
     }
   }
 
   disposeAll(): void {
-    // 앱 종료 — 유예를 기다려 줄 프로세스가 이제 없다. 고아 데브 서버가 최악이므로 바로 SIGKILL
+    // the app is shutting down — there is no process left to wait out a grace period for. An orphaned dev server is the worst case, so this goes straight to SIGKILL
     for (const e of this.entries.values()) if (e.pty) killTree(e.pty, 'SIGKILL')
     this.entries.clear()
   }
 
-  /** 테스트가 갈아 끼운다 (terminal.ts와 같은 이유) */
+  /** A test substitutes this (the same reason as terminal.ts) */
   protected loadPty(): PtyModule {
     return require('node-pty') as PtyModule
   }
@@ -178,14 +180,14 @@ export class CommandRunner {
       return
     }
 
-    // GUI 앱은 로그인 셸의 PATH를 물려받지 못한다 (터미널과 같은 대비)
+    // A GUI app never inherits the login shell's PATH (the same precaution as a terminal)
     ensureToolPath()
 
     try {
       /*
-       * 로그인 셸 -lc로 돈다: 사용자의 별칭·PATH가 그대로 산다. PTY인 이유는 색이다 —
-       * 파이프로 띄우면 대부분의 도구가 색을 끈 채 출력하고, 데브 서버 로그는
-       * 색이 곧 가독성이다.
+       * Runs through a login shell with -lc: the user's aliases and PATH survive intact. The
+       * reason this is a PTY is color — launched over a pipe, most tools print with color turned
+       * off, and for a dev server's log, color is what makes it readable.
        */
       const handle = pty.spawn(shellPath(), ['-lc', e.command], {
         name: 'xterm-256color',
@@ -196,7 +198,7 @@ export class CommandRunner {
       })
       e.pty = handle
       handle.onData((data) => {
-        // 재실행 뒤 옛 프로세스의 마지막 출력은 버린다 — 새 로그에 섞이면 안 된다
+        // The old process's last output after a rerun is discarded — it must never mix into the new log
         if (e.pty !== handle) return
         this.append(e, data)
         this.emit({ terminalId: e.runId, data })
@@ -208,7 +210,7 @@ export class CommandRunner {
         this.emit({ terminalId: e.runId, exitCode: exitCode ?? null })
       })
     } catch (err) {
-      // 조용히 죽지 않는다 — 빈 로그만 남으면 원인을 알 길이 없다
+      // this never fails silently — an empty log with no message leaves no way to know the cause
       const msg = `Could not run: ${(err as Error).message}\r\n`
       this.append(e, msg)
       this.emit({ terminalId: e.runId, data: msg })

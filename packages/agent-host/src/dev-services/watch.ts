@@ -3,29 +3,32 @@ import { safeJoin } from './fs.js'
 import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
 
 /**
- * 파일 트리의 눈 (#34) — **펼쳐진 디렉토리만** 감시한다.
+ * The eyes of the file tree (#34) — watches **only expanded directories.**
  *
- * 저장소 전체를 재귀로 감시하지 않는 이유가 이 설계의 전부다. 트리는 lazy라서
- * 열어본 디렉토리만 읽는데, 감시가 재귀면 node_modules까지 걷게 되어 lazy를 우리
- * 손으로 되무른다 (Linux inotify는 재귀가 없어서 디렉토리마다 워치 하나 —
- * max_user_watches 고갈, 그 유명한 ENOSPC). 펼쳐진 집합은 화면에 실제로 보이는
- * 몇 개~몇십 개라, 세 플랫폼 모두에서 값이 같아진다.
+ * The reason this does not recursively watch the whole repository is the whole point of this
+ * design. The tree is lazy, so only a directory that has actually been opened is read — a
+ * recursive watch would walk into node_modules too, undoing that laziness by hand (Linux's
+ * inotify has no recursion, so it is one watch per directory — exhausting max_user_watches, the
+ * famous ENOSPC). The expanded set is only the handful to a few dozen a screen actually shows, so
+ * the numbers stay the same across all three platforms.
  *
- * 이벤트는 디렉토리별로 모아 **일정 간격으로 한 번** 내보낸다. 실측: 파일 500개
- * 쓰기가 36ms에 이벤트 501발 — 이벤트마다 다시 읽으면 목록 요청 500개다. 뒤로만
- * 미루는 디바운스는 npm install처럼 수십 초 잇는 버스트에서 끝날 때까지 화면이
- * 굶는다. 간격 플러시는 버스트 중에도 최대 3~4회/초로 따라간다.
+ * Events are gathered per directory and emitted **once per interval.** Measured: writing 500
+ * files took 36ms and fired 501 events — reading again on every event would be 500 listing
+ * requests. A debounce that only ever defers would starve the screen for the whole length of a
+ * burst like npm install, which can run tens of seconds. Flushing on an interval keeps up at up
+ * to 3 to 4 times a second even during a burst.
  */
 
 /**
- * 프로젝트당 감시 상한. 펼쳐진 폴더가 여기 닿는 일은 실사용에서 없지만
- * (수백 개를 손으로 펼쳐야 한다), 닿으면 **조용히 자르지 않고** 몇 개를 지키는지
- * 돌려준다 — 부르는 쪽이 그 수로 잘림을 안다.
+ * The watch cap per project. In real use, expanded folders never reach this (it would take
+ * expanding hundreds by hand), but if it is reached, this **never silently truncates** — it
+ * returns how many are actually being watched, so the caller knows from that count that it was cut
+ * off.
  */
 export const MAX_WATCHED_DIRS = 256
 
 export class DirWatchers {
-  /** projectId → (상대경로 → 워처) */
+  /** projectId -> (relative path -> watcher) */
   private byProject = new Map<string, Map<string, FSWatcher>>()
   private pending = new Map<string, Set<string>>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -37,9 +40,10 @@ export class DirWatchers {
   ) {}
 
   /**
-   * 이 프로젝트의 감시 집합을 **통째로** 이걸로 만든다 (projects.reorder와 같은 문법).
-   * "이걸 더하고 저걸 빼고"식이면 화면과 감시가 어긋난 채로도 오류가 없다 —
-   * 전체를 말하게 하면 어긋남 자체가 표현이 안 된다.
+   * Makes this project's watch set **exactly this, as a whole** (the same grammar as
+   * projects.reorder). An "add this, remove that" style would let the screen and the watch set
+   * drift apart with no error ever raised — stating the whole set makes that drift impossible to
+   * even express.
    */
   setWatched(projectId: string, root: string, rels: readonly string[]): number {
     if (this.closed) return 0
@@ -58,7 +62,7 @@ export class DirWatchers {
       if (cur.has(rel)) continue
       let abs = ''
       try {
-        // 트리의 다른 fs 경로들과 같은 규칙 — 프로젝트 밖과 링크는 감시 대상이 될 수 없다
+        // the same rule as every other fs path in the tree — neither outside the project nor a link can be watched
         abs = safeJoin(root, rel)
         const info = assertExistingPathSync(root, rel)
         if (!info.isDirectory()) continue
@@ -71,15 +75,16 @@ export class DirWatchers {
         w = watch(abs, () => this.schedule(projectId, rel))
       } catch {
         /*
-         * 경로 검사 뒤에 사라진 디렉토리다 (Finder에서 지운 폴더가 펼쳐져 있던 경우).
-         * 감시는 못 하지만 **그 사실이 곧 알릴 거리다** — 한 번 알리면 UI가
-         * 다시 읽고, 빈 목록과 부모의 재조회로 화면에서 걷힌다.
+         * A directory that vanished after the path check (a folder deleted from Finder while it
+         * was expanded). It cannot be watched, but **that fact itself is worth reporting** —
+         * reporting it once lets the UI read again, and an empty list combined with the parent
+         * being refetched clears it from the screen.
          */
         this.schedule(projectId, rel)
         continue
       }
       w.on('error', () => {
-        // 감시 중이던 디렉토리가 사라졌다 — 워처는 걷고, 화면에는 알린다
+        // the directory being watched has disappeared — the watcher is removed, and the screen is told
         w.close()
         cur.delete(rel)
         this.schedule(projectId, rel)
@@ -101,7 +106,7 @@ export class DirWatchers {
       this.pending.delete(projectId)
       if (dirs.length && !this.closed) this.onChange(projectId, dirs)
     }, this.flushMs)
-    // 플러시 하나가 host 종료를 붙들면 안 된다
+    // a single pending flush must never hold up the host shutting down
     t.unref?.()
     this.timers.set(projectId, t)
   }

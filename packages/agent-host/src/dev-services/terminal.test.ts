@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import { TerminalService, shellPath, shortCwd } from './terminal.js'
 
 /**
- * 터미널의 핵심 규칙은 하나다: **정체성은 cwd다.**
+ * The terminal has one core rule: **its identity is its cwd.**
  *
- * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 터미널이 이어지고,
- * 깃 워크트리 세션(다른 cwd)은 자기 터미널을 자동으로 갖는다.
- * 여기서는 그 규칙과, 셸이 죽거나 못 뜨는 경우의 처신을 확인한다.
+ * So switching sessions within the same project keeps the same terminal going, and a git
+ * worktree session (a different cwd) automatically gets its own terminal. This checks that rule,
+ * plus how it behaves when a shell dies or fails to launch.
  */
 
 const dirs: string[] = []
@@ -23,7 +23,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-/** 실제 셸을 띄우지 않고 규칙만 본다 — 검증 대상은 묶는 방식이지 셸이 아니다 */
+/** Checks only the rules, without launching a real shell — what is under test is the grouping logic, not the shell */
 function fakePty() {
   const spawned: { cwd: string; cols: number; rows: number }[] = []
   const instances: {
@@ -54,20 +54,20 @@ function fakePty() {
   return { mod, spawned, instances }
 }
 
-describe('터미널은 cwd로 묶인다', () => {
-  it('목록은 디렉토리의 것이다 — 세션을 바꿔도 그대로다', () => {
+describe('a terminal is grouped by cwd', () => {
+  it('the list belongs to the directory — it stays the same across a session switch', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
 
     const cwd = tmp()
     const a = svc.create(cwd, 80, 24)
-    // 세션을 바꿔 다시 조회해도 같은 터미널이 나온다 (새로 띄우지 않는다)
+    // Querying again after switching sessions still returns the same terminal (nothing new is launched)
     expect(svc.list(cwd).map((t) => t.id)).toEqual([a.id])
     expect(fake.spawned).toHaveLength(1)
   })
 
-  it('디렉토리가 다르면 목록도 다르다 (깃 워크트리 세션을 위한 준비)', () => {
+  it('a different directory means a different list (groundwork for git worktree sessions)', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
@@ -82,7 +82,7 @@ describe('터미널은 cwd로 묶인다', () => {
     expect(svc.list(one)[0]!.id).not.toBe(svc.list(two)[0]!.id)
   })
 
-  it('다시 조회하면 지금까지의 출력을 돌려준다 (빈 화면이면 터미널이 아니다)', () => {
+  it('querying again returns the output so far (an empty screen is not a real terminal)', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
@@ -94,7 +94,7 @@ describe('터미널은 cwd로 묶인다', () => {
     expect(svc.list(cwd)[0]!.history()).toContain('254 passed')
   })
 
-  it('붙는 쪽 화면 크기에 맞춘다', () => {
+  it('matches the size of whoever attaches', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
@@ -105,8 +105,8 @@ describe('터미널은 cwd로 묶인다', () => {
   })
 })
 
-describe('터미널 여러 개', () => {
-  it('한 디렉토리에 여러 개를 열고 순서대로 이름을 붙인다', () => {
+describe('multiple terminals', () => {
+  it('opens several in one directory and names them in order', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
@@ -120,7 +120,7 @@ describe('터미널 여러 개', () => {
     expect(fake.spawned).toHaveLength(3)
   })
 
-  it('닫으면 셸이 죽고 번호가 다시 매겨진다', () => {
+  it('closing one kills its shell and renumbers the rest', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
@@ -133,12 +133,12 @@ describe('터미널 여러 개', () => {
     svc.close(second.id)
 
     expect(fake.instances[1]!.kill).toHaveBeenCalled()
-    // 2번을 지웠는데 1,3이 남으면 세는 사람이 헷갈린다
+    // Deleting number 2 and leaving 1 and 3 would confuse anyone counting
     expect(svc.list(cwd).map((t) => t.title)).toEqual(['Terminal 1', 'Terminal 2'])
     expect(svc.list(cwd).map((t) => t.id)).not.toContain(second.id)
   })
 
-  it('마지막 하나까지 닫으면 목록이 빈다', () => {
+  it('closing the last one leaves the list empty', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)
@@ -150,8 +150,8 @@ describe('터미널 여러 개', () => {
   })
 })
 
-describe('셸이 끝나거나 못 뜰 때', () => {
-  it('종료를 알리고, 기록은 남긴 채 다시 띄울 수 있다', () => {
+describe('when a shell ends or fails to launch', () => {
+  it('reports the exit and can relaunch with the history kept', () => {
     const fake = fakePty()
     const seen: { terminalId: string; exitCode?: number | null }[] = []
     const svc = new TerminalService((e) => seen.push(e))
@@ -166,17 +166,18 @@ describe('셸이 끝나거나 못 뜰 때', () => {
 
     const again = svc.restart(h.id, 80, 24)!
     expect(again.alive).toBe(true)
-    // 뭘 하다 이렇게 됐는지가 단서다 — 기록을 지우지 않는다
+    // The history is the clue to what led to this — it is never erased
     expect(again.history()).toContain('작업하던 흔적')
     expect(fake.spawned).toHaveLength(2)
   })
 
   /*
-   * restart가 곧 터미널을 영영 죽이는 버튼이던 문제.
-   * kill한 옛 셸의 onExit은 새 셸이 앉은 **뒤에** 늦게 오는데,
-   * 그 콜백이 무조건 pty를 비워서 방금 띄운 새 셸을 죽은 것으로 만들었다.
+   * The bug where restart was effectively a button that killed the terminal forever.
+   * The killed old shell's onExit arrives late, **after** the new shell has already taken the
+   * slot, and that callback unconditionally cleared the pty, marking the just-launched new shell
+   * as dead.
    */
-  it('옛 셸의 늦은 종료가 새 셸을 덮어쓰지 않는다', () => {
+  it('a late exit from the old shell does not overwrite the new shell', () => {
     const fake = fakePty()
     const seen: { terminalId: string; data?: string; exitCode?: number | null }[] = []
     const svc = new TerminalService((e) => seen.push(e))
@@ -187,24 +188,24 @@ describe('셸이 끝나거나 못 뜰 때', () => {
     svc.restart(h.id, 80, 24)
     expect(fake.instances[0]!.kill).toHaveBeenCalled()
 
-    // kill의 결과인 onExit이 이제야 도착한다
+    // The onExit resulting from the kill only arrives now
     fake.instances[0]!.emitExit(0)
 
-    // 새 셸은 멀쩡히 살아 있어야 하고, 죽었다는 방송도 나가면 안 된다
+    // The new shell has to stay alive, and no broadcast claiming it died is allowed either
     expect(svc.list(cwd)[0]!.alive).toBe(true)
     expect(seen.some((e) => e.exitCode !== undefined)).toBe(false)
 
-    // 옛 셸이 마지막으로 뱉는 출력도 새 화면에 섞이지 않는다
+    // The old shell's last-gasp output does not mix into the new screen either
     fake.instances[0]!.emitData('죽어가며 남긴 말')
     expect(svc.list(cwd)[0]!.history()).not.toContain('죽어가며 남긴 말')
 
-    // 진짜 새 셸의 종료는 그대로 전해진다
+    // The genuine new shell's exit is still delivered as-is
     fake.instances[1]!.emitExit(1)
     expect(svc.list(cwd)[0]!.alive).toBe(false)
     expect(seen.some((e) => e.exitCode === 1)).toBe(true)
   })
 
-  it('셸을 못 띄우면 조용히 죽지 않고 이유를 화면에 남긴다', () => {
+  it('never fails silently when the shell cannot launch, and leaves the reason on screen', () => {
     const seen: { terminalId: string; data?: string }[] = []
     const svc = new TerminalService((e) => seen.push(e))
     stubPty(svc, {
@@ -220,37 +221,38 @@ describe('셸이 끝나거나 못 뜰 때', () => {
   })
 })
 
-describe('셸 선택', () => {
-  it('사용자가 쓰는 셸을 고른다 (별칭·프롬프트가 그대로 나오도록)', () => {
+describe('shell selection', () => {
+  it('picks the shell the user actually uses (so their aliases and prompt show up as-is)', () => {
     expect(shellPath()).toMatch(/\/(zsh|bash|sh|fish)$/)
   })
 
-  it('홈 경로는 ~로 줄인다', () => {
+  it('shortens the home path to ~', () => {
     expect(shortCwd(`${process.env.HOME}/work`)).toBe('~/work')
     expect(shortCwd('/opt/x')).toBe('/opt/x')
   })
 })
 
 /**
- * node-pty를 가짜로 갈아 끼운다.
- * 실제 셸을 띄우면 테스트가 환경(셸 설정·로그인 스크립트)에 휘둘린다 —
- * 진짜 PTY 동작은 L3 스모크에서 따로 확인한다.
+ * Substitutes a fake node-pty.
+ * Launching a real shell would leave a test at the mercy of the environment (shell
+ * configuration, login scripts) — real PTY behavior is checked separately in an L3 smoke test.
  */
 function stubPty(svc: TerminalService, mod: unknown): void {
   ;(svc as unknown as { loadPty: () => unknown }).loadPty = () => mod
 }
 
 /**
- * 터미널을 여는 일은 눈에 띄게 빨라야 한다.
+ * Opening a terminal has to be noticeably fast.
  *
- * 예전에는 create()마다 ensureToolPath()가 로그인 셸을 통째로 띄워서
- * 터미널 하나 여는 데 1~4초가 들었다 (테스트 러너에서 실측). 사용자에게는
- * '+ 추가'를 눌러도 한참 아무 일이 없는 것으로 보인다.
- * 시간을 재는 테스트는 무르지만, 예산을 크게 잡아 '셸을 다시 띄우는' 급의
- * 퇴행만 잡는다 (셸 1회 탐색이 ~1초, 여기 예산은 3개에 1.5초).
+ * This used to call ensureToolPath() on every create(), launching a whole login shell, which cost
+ * 1 to 4 seconds to open a single terminal (measured on the test runner). To the user, clicking
+ * "+ add" would look like nothing happened for a long while.
+ * A test that measures time is fragile, so the budget here is set generously, catching only a
+ * regression on the scale of "relaunching a shell" (one shell probe takes about 1 second; the
+ * budget here is 1.5 seconds for three).
  */
-describe('여는 속도', () => {
-  it('여러 개를 연달아 열어도 셸 탐색을 되풀이하지 않는다', () => {
+describe('open speed', () => {
+  it('opening several in a row does not repeat the shell probe', () => {
     const fake = fakePty()
     const svc = new TerminalService(() => {})
     stubPty(svc, fake.mod)

@@ -3,106 +3,108 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { killTargets, parsePs, stopTree, survivorTargets } from './kill-tree.js'
 
 /**
- * 트리 킬의 과녁 고르기 (실측 2026-09-07의 결론).
+ * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
  *
- * 핵심은 **잡 컨트롤**이다. 대화형 셸에서 띄운 프로그램은 자기 프로세스 그룹을 갖기
- * 때문에, 셸의 그룹만 쏘면 정작 데브 서버가 안 맞는다. 여기서 시험하는 것은 그
- * 판단뿐이다 — 실제로 시그널을 보내는 일은 맨 아래 "진짜 트리"가 본다.
+ * The key is **job control**. A program launched from an interactive shell gets its own process
+ * group, so firing only at the shell's group misses the dev server that actually matters. What is
+ * tested here is only that judgment — actually sending the signal is covered by "the real tree"
+ * further down.
  */
 describe('killTargets', () => {
   const rows = (s: string) => parsePs(s)
 
-  it('비대화형 셸: 자식이 같은 그룹에 있으면 과녁은 하나다', () => {
-    // zsh -lc "pnpm dev" → 셸 100, pnpm 200, node 300 전부 pgid 100
+  it('a non-interactive shell: one target, when the children are in the same group', () => {
+    // zsh -lc "pnpm dev" -> shell 100, pnpm 200, node 300, all with pgid 100
     const table = rows('  100   50  100\n  200  100  100\n  300  200  100\n  900   50  900\n')
     expect(killTargets(table, 100, 900)).toEqual([100])
   })
 
-  it('대화형 셸: 잡이 자기 그룹을 가지면 그 그룹도 과녁이다', () => {
-    // zsh -l 100(pgid 100) → 데브 서버 200이 pgid 200으로 떨어져 나간다
+  it('an interactive shell: a job with its own group is a target too', () => {
+    // zsh -l 100 (pgid 100) -> dev server 200 breaks off into its own pgid 200
     const table = rows('  100   50  100\n  200  100  200\n  300  200  200\n  900   50  900\n')
     expect(killTargets(table, 100, 900).sort()).toEqual([100, 200])
   })
 
-  it('손자까지 따라간다 — 트리지 자식 목록이 아니다', () => {
+  it('follows all the way to a grandchild — a tree, not a list of children', () => {
     const table = rows('  100   50  100\n  200  100  200\n  300  200  300\n  400  300  400\n')
     expect(killTargets(table, 100, 999).sort()).toEqual([100, 200, 300, 400])
   })
 
-  it('남의 가지는 건드리지 않는다', () => {
-    // 400은 50의 자식이지 100의 자손이 아니다
+  it('never touches someone else\'s branch', () => {
+    // 400 is a child of 50, not a descendant of 100
     const table = rows('  100   50  100\n  200  100  200\n  400   50  400\n')
     expect(killTargets(table, 100, 999).sort()).toEqual([100, 200])
   })
 
-  it('내가 속한 그룹은 절대 쏘지 않는다 — 정리하다 자기를 죽이면 나머지가 남는다', () => {
-    // 200이 어쩌다 호스트(900)와 같은 그룹에 있다
+  it('never fires at our own group — killing ourselves during cleanup would leave the rest behind', () => {
+    // 200 happens to be in the same group as the host (900)
     const table = rows('  100   50  100\n  200  100  900\n  900   50  900\n')
     expect(killTargets(table, 100, 900)).toEqual([100])
   })
 
-  it('ps는 읽혔는데 root가 없으면 아무것도 안 쏜다 — 재사용된 pid를 때릴 자리다', () => {
-    // 셸이 이미 죽은 뒤의 유예 타이머. 54321은 그새 남의 프로세스일 수 있다
+  it('fires at nothing when ps was read but root is missing — this is where a recycled pid could be hit', () => {
+    // the grace timer after the shell has already died. 54321 may since have become someone else's process
     const table = rows('  100   50  100\n  900   50  900\n')
     expect(killTargets(table, 54321, 900)).toEqual([])
   })
 
-  it('ps를 못 읽으면 root의 그룹 하나 — 예전 동작으로 내려앉는다', () => {
+  it('falls back to just root\'s own group when ps cannot be read — the old behavior', () => {
     expect(killTargets([], 54321, 900)).toEqual([54321])
   })
 
-  it('init(1)이나 그룹 0은 과녁이 아니다 — 시스템을 쏠 뻔한 자리다', () => {
+  it('init(1) and group 0 are never targets — this is where the system itself could almost be fired at', () => {
     const table = rows('  100   50    1\n  200  100    0\n')
     expect(killTargets(table, 100, 900)).toEqual([])
   })
 })
 
 /**
- * 두 번째 발의 과녁 (#149). `first`는 첫 발 때 본 트리, `rows`는 유예 뒤의 ps다. root(100)는 SIGTERM에
- * 먼저 죽었고, 버틴 자손은 init(1)에 입양되어 있다 — root에서 다시 훑으면 아무도 안 보이는 자리다.
+ * The targets for the second shot (#149). `first` is the tree seen at the first shot, `rows` is
+ * ps after the grace period. root (100) died first from SIGTERM, and its surviving descendant has
+ * been adopted by init (1) — a spot where walking again from the root would see nobody at all.
  */
 describe('survivorTargets', () => {
   const rows = (s: string) => parsePs(s)
-  // 첫 발 때: 셸 100 → 200 → 손자 300. 호스트는 900
+  // At the first shot: shell 100 -> 200 -> grandchild 300. The host is 900
   const first = rows('  100   50  100\n  200  100  100\n  300  200  100\n')
 
-  it('root가 먼저 죽어도 그 그룹에 남은 자손이 있으면 그룹째 쏜다', () => {
+  it('even if root dies first, a surviving descendant in that group fires at the whole group', () => {
     const now = rows('  300    1  100\n  900   50  900\n')
     expect(survivorTargets(now, first, 900)).toEqual([100])
   })
 
-  it('잡 컨트롤로 자기 그룹에 있던 자손도 — 그 그룹을 쏜다', () => {
+  it('a descendant that was in its own group from job control — that group is fired at too', () => {
     const jobs = rows('  100   50  100\n  200  100  200\n  300  200  300\n')
     const now = rows('  300    1  300\n  900   50  900\n')
     expect(survivorTargets(now, jobs, 900)).toEqual([300])
   })
 
-  it('다 끝났으면 쏠 것이 없다', () => {
+  it('nothing to fire at once everything has ended', () => {
     expect(survivorTargets(rows('  900   50  900\n'), first, 900)).toEqual([])
   })
 
-  it('같은 pid라도 그룹이 달라졌으면 남이다 — 그새 번호가 재사용된 자리다', () => {
+  it('the same pid in a different group is someone else — a spot where the number was recycled in the meantime', () => {
     const now = rows('  300   77  777\n  900   50  900\n')
     expect(survivorTargets(now, first, 900)).toEqual([])
   })
 
-  it('버틴 자손이 유예 사이에 새로 띄운 것도 — 자기 그룹을 새로 만들었어도 쏜다', () => {
+  it('something a surviving descendant launched during the grace period is fired at too — even in a newly created group of its own', () => {
     const now = rows('  300    1  100\n  400  300  400\n  500  400  400\n  900   50  900\n')
     expect(survivorTargets(now, first, 900).sort()).toEqual([100, 400])
   })
 
-  it('남의 가지는 건드리지 않는다 — 명단에 없던 init의 다른 자식', () => {
+  it('never touches someone else\'s branch — another child of init that was never on the list', () => {
     const now = rows('  300    1  100\n  600    1  600\n  900   50  900\n')
     expect(survivorTargets(now, first, 900)).toEqual([100])
   })
 
-  it('내가 속한 그룹은 여기서도 쏘지 않는다', () => {
+  it('our own group is never fired at here either', () => {
     const mixed = rows('  100   50  100\n  200  100  900\n')
     const now = rows('  200    1  900\n  900   50  900\n')
     expect(survivorTargets(now, mixed, 900)).toEqual([])
   })
 
-  it('init(1)이나 그룹 0은 과녁이 아니다', () => {
+  it('init(1) and group 0 are never targets', () => {
     const odd = rows('  100   50  100\n  200  100    1\n  300  100    0\n')
     const now = rows('  200    1    1\n  300    1    0\n')
     expect(survivorTargets(now, odd, 900)).toEqual([])
@@ -110,7 +112,7 @@ describe('survivorTargets', () => {
 })
 
 describe('parsePs', () => {
-  it('숫자 세 칸인 줄만 읽는다 — 헤더나 깨진 줄은 버린다', () => {
+  it('reads only a line with exactly three numeric columns — a header or a malformed line is dropped', () => {
     const out = '  PID  PPID  PGID\n  100   50  100\n쓰레기\n  200  100  200\n'
     expect(parsePs(out)).toEqual([
       { pid: 100, ppid: 50, pgid: 100 },
@@ -120,15 +122,18 @@ describe('parsePs', () => {
 })
 
 /**
- * 두 번째 발을 **진짜 프로세스 트리로** 잰다 (#149). 위의 표 검사는 누구를 쏠지만 보고, 여기서는 유예 뒤에
- * 트리의 그룹에 아무도 남지 않는지를 OS의 프로세스 표로 본다.
+ * Measures the second shot against **a real process tree** (#149). The table checks above only
+ * looked at who would be fired at; here the OS's own process table is used to see whether, after
+ * the grace period, nobody is left in the tree's groups.
  *
- * 고정물: root(sh) → 자식(sh) → 손자(sleep). root와 자식은 SIGTERM에 바로 죽고, 손자만 SIGTERM을 무시한다 —
- * trap을 건 데브 서버 자리다. `trap '' TERM`으로 무시한 시그널은 exec 뒤에도 무시된 채 남아서 sleep이 버틴다.
- * root는 detached로 띄워 자기 그룹을 준다(pty의 셸과 앱 프로세스가 그렇게 뜬다) — 우리 그룹에 붙어 있으면
- * kill-tree가 "자기 자신"으로 보고 건너뛴다.
+ * Fixture: root (sh) -> child (sh) -> grandchild (sleep). The root and child die immediately from
+ * SIGTERM, and only the grandchild ignores SIGTERM — standing in for a dev server that trapped
+ * the signal. A signal ignored with `trap '' TERM` stays ignored even after exec, so sleep
+ * survives. root is launched detached, so it gets its own group (the same way a pty's shell and an
+ * app process are launched) — if it stayed in our own group, kill-tree would see it as "itself"
+ * and skip it.
  */
-describe.skipIf(process.platform === 'win32')('stopTree — 진짜 트리 (#149)', () => {
+describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)', () => {
   const GRACE_MS = 500
   const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
   const table = () => parsePs(execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8' }))
@@ -140,7 +145,7 @@ describe.skipIf(process.platform === 'win32')('stopTree — 진짜 트리 (#149)
       return false
     }
   }
-  /** 조건이 설 때까지 기다리고 마지막 값을 돌려준다. 시간 안에 안 서도 던지지 않는다 — 판정은 expect가 한다 */
+  /** Waits until the condition holds and returns the last value read. Does not throw if it never holds in time — the assertion is expect's job */
   const settle = async <T,>(read: () => T, ok: (v: T) => boolean, ms: number): Promise<T> => {
     const deadline = Date.now() + ms
     let v = read()
@@ -151,19 +156,19 @@ describe.skipIf(process.platform === 'win32')('stopTree — 진짜 트리 (#149)
     return v
   }
 
-  /** 테스트가 실패해도 고아가 남지 않게 — 고정물의 그룹을 전부 치운다 */
+  /** So no orphan is left behind even if a test fails — cleans up every group the fixture launched */
   const planted: number[] = []
   afterEach(() => {
     for (const g of planted.splice(0)) {
       try {
         process.kill(-g, 'SIGKILL')
       } catch {
-        // 이미 비었다
+        // already empty
       }
     }
   })
 
-  /** 고정물을 띄우고 손자를 찾는다. `jobControl`이면 자식이 `set -m`을 켜서 손자가 자기 그룹을 갖는다 — 터미널 탭의 대화형 셸처럼 */
+  /** Launches the fixture and finds the grandchild. With `jobControl`, the child turns on `set -m` so the grandchild gets its own group — like an interactive shell in a terminal tab */
   async function plantTree(jobControl: boolean): Promise<{ root: ChildProcess; rootExited: () => boolean; grandchild: number; groups: number[] }> {
     const grandchild = `trap '' TERM; echo $$; exec sleep 30`
     const child = `${jobControl ? 'set -m; ' : ''}sh -c ${quote(grandchild)} & wait`
@@ -185,13 +190,14 @@ describe.skipIf(process.platform === 'win32')('stopTree — 진짜 트리 (#149)
   }
 
   /**
-   * SIGTERM에 root가 먼저 끝나고, 유예 뒤에 트리의 그룹이 비어야 한다.
-   * `rootAlive`는 호출자가 root에 대해 아는 것이다: 명령 실행기와 앱 프로세스는 root의 끝남을 보면 false를,
-   * 터미널 탭(셸 다시 띄우기)은 언제나 true를 준다.
+   * root has to end first on SIGTERM, and the tree's groups have to be empty after the grace
+   * period. `rootAlive` is what the caller knows about root: the command runner and an app
+   * process give false once they see root end, while a terminal tab (relaunching the shell)
+   * always gives true.
    */
   async function expectTreeGone(jobControl: boolean, rootAlive: 'until-it-exits' | 'always'): Promise<void> {
     const t = await plantTree(jobControl)
-    // 고정물 확인 — 손자는 SIGTERM을 무시하고, 잡 컨트롤이면 root와 다른 그룹에 있다
+    // Confirm the fixture — the grandchild ignores SIGTERM, and with job control it is in a different group than root
     process.kill(t.grandchild, 'SIGTERM')
     await new Promise((r) => setTimeout(r, 50))
     expect(alive(t.grandchild)).toBe(true)
@@ -199,21 +205,21 @@ describe.skipIf(process.platform === 'win32')('stopTree — 진짜 트리 (#149)
 
     const handle = { pid: t.root.pid, kill: (s?: string) => void t.root.kill(s as NodeJS.Signals) }
     stopTree(handle, GRACE_MS, rootAlive === 'always' ? () => true : () => !t.rootExited())
-    expect(await settle(t.rootExited, (x) => x, 5_000)).toBe(true) // 첫 발에 root는 끝난다
+    expect(await settle(t.rootExited, (x) => x, 5_000)).toBe(true) // root ends on the first shot
 
-    // 유예 뒤의 SIGKILL, 그리고 init이 거두는 시간까지 기다린다. 남은 것이 있으면 그 행이 실패 메시지가 된다
+    // Wait for the SIGKILL after the grace period, and for init to reap what is left. A surviving row becomes the failure message
     expect(await settle(() => table().filter((r) => t.groups.includes(r.pgid)), (left) => left.length === 0, GRACE_MS + 3_000)).toEqual([])
   }
 
-  it('손자가 root의 그룹에 있고(zsh -lc·앱 프로세스) root의 끝남을 본 호출자여도, 유예 뒤 SIGKILL을 맞는다', async () => {
+  it('even when the grandchild is in root\'s group (zsh -lc, an app process) and the caller saw root end, it is hit by SIGKILL after the grace period', async () => {
     await expectTreeGone(false, 'until-it-exits')
   }, 15_000)
 
-  it('손자가 잡 컨트롤로 자기 그룹에 있어도 — 터미널 탭처럼 alive가 언제나 true일 때', async () => {
+  it('even when the grandchild is in its own group from job control — with alive always true, like a terminal tab', async () => {
     await expectTreeGone(true, 'always')
   }, 15_000)
 
-  it('손자가 잡 컨트롤로 자기 그룹에 있어도 — root의 끝남을 본 호출자일 때', async () => {
+  it('even when the grandchild is in its own group from job control — with a caller that saw root end', async () => {
     await expectTreeGone(true, 'until-it-exits')
   }, 15_000)
 })

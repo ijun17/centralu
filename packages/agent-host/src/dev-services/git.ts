@@ -6,18 +6,20 @@ import { assertExistingPath, isMissingPathError } from './path-guard.js'
 const exec = promisify(execFile)
 
 /**
- * git 조회·조작 (B-1).
+ * Reads and operates on git (B-1).
  *
- * 문서 정정(G): 예전 주석은 "Tauri 4단계에서 Rust git2로 교체될 버릴 코드"라고 적었으나,
- * M1.5에서 Node 사이드카가 prod 경로가 되면서 그 계획은 **보류**됐다.
- * git2 이관은 측정으로 병목이 확인될 때까지 하지 않는다 (m2-plan 결정 3).
- * 포트 인터페이스가 같으므로 나중에 옮겨도 UI는 그대로다.
+ * Document correction (G): an earlier comment called this "throwaway code, to be replaced by
+ * Rust git2 at Tauri stage 4," but that plan was **put on hold** once the Node sidecar became
+ * the production path at M1.5. The git2 migration will not happen until measurement confirms
+ * it is a bottleneck (m2-plan decision 3). The port interface stays the same, so moving it
+ * later leaves the UI untouched.
  */
 
 /**
- * `denied`: 저장소이긴 한데 OS가 접근을 막았다 (서명되지 않은 앱이 ~/Desktop 같은 보호 폴더를 읽을 때).
- * '저장소 아님'과 반드시 구분한다 — 사용자가 할 일이 정반대다 (권한 부여 vs 아무것도 아님).
- * 배포 `.app` 실측에서 실제로 겪은 상황이다 (F-1).
+ * `denied`: it is a repository, but the OS blocked access (an unsigned app reading a protected
+ * folder such as ~/Desktop). This has to be kept distinct from "not a repository" — what the
+ * user needs to do is the opposite in each case (grant permission vs. nothing at all).
+ * A situation actually run into, measured against the shipped `.app` (F-1).
  */
 export type GitSummary = { isRepo: boolean; branch: string; changedFiles: number; denied?: boolean }
 export type GitFileStatus = { path: string; staged: boolean; status: 'M' | 'A' | 'D' | 'R' | 'U' | '?' }
@@ -27,17 +29,18 @@ export type GitBranch = { name: string; current: boolean; remote: boolean; upstr
 const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
 
 /**
- * 모든 호출에 `core.quotePath=false`를 준다 (#176). 기본값(켜짐)이면 git은 0x80 이상의 바이트가
- * 든 경로를 `"\355\225\234…"`처럼 따옴표와 8진 이스케이프로 감싸 내보낸다 — 한글 파일 이름이
- * diff 머리줄과 `--name-only`에서 그렇게 나와, 화면의 이름표가 깨지고 파일로 가는 클릭이
- * 경로를 잃었다. 끄면 원래 이름이 그대로 온다(따옴표·역슬래시·제어 문자만 여전히 인용된다).
+ * Every call is given `core.quotePath=false` (#176). With the default (on), git wraps any path
+ * containing a byte at or above 0x80 in quotes with octal escapes, like `"\355\225\234…"` — a
+ * Korean file name came out that way in diff headers and `--name-only`, breaking the label on
+ * screen and losing the path a click needed to follow it to the file. Turning it off leaves the
+ * original name intact (only quotes, backslashes and control characters are still escaped).
  */
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await exec('git', ['-c', 'core.quotePath=false', ...args], { cwd, ...OK })
   return stdout
 }
 
-/** git 저장소가 아니면 조회 계열은 전부 빈 결과를 준다 — 호출자가 매번 방어하지 않도록 */
+/** Every read function returns an empty result when this is not a git repository — so callers do not have to guard every time */
 async function isRepo(cwd: string): Promise<boolean> {
   try {
     await git(cwd, ['rev-parse', '--git-dir'])
@@ -59,13 +62,13 @@ export async function gitSummary(cwd: string): Promise<GitSummary> {
     return { isRepo: true, branch, changedFiles: changed }
   } catch (e) {
     const msg = String((e as { stderr?: string; message?: string }).stderr ?? (e as Error).message ?? '')
-    // macOS TCC: 서명되지 않은 앱이 보호 폴더를 읽으면 여기로 온다
+    // macOS TCC: an unsigned app reading a protected folder ends up here
     const denied = /Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)
     return { isRepo: denied, branch: '', changedFiles: 0, denied }
   }
 }
 
-/** 변경 파일 목록. porcelain v2를 쓰는 이유: 이름에 공백·유니코드가 있어도 안전하다 */
+/** The list of changed files. Why porcelain v2 is used: it stays safe even when a name has spaces or non-ASCII characters */
 export async function gitStatusFiles(cwd: string): Promise<GitFileStatus[]> {
   if (!(await isRepo(cwd))) return []
   const stdout = await git(cwd, ['status', '--porcelain=v2', '-z', '--untracked-files=all'])
@@ -81,10 +84,11 @@ export async function gitStatusFiles(cwd: string): Promise<GitFileStatus[]> {
       const parts = entry.split(' ')
       const xy = parts[1] ?? '..'
       /*
-       * 이름 바뀜(2)은 경로 앞에 필드가 하나 더 있다(<X><score>, 예: R100).
-       * 1과 같은 자리(8)로 읽으면 경로가 "R100 새이름"이 되어 — 존재하지 않는 파일이라 —
-       * 스테이징이 조용히 실패했다. -z에서는 원래 이름이 **다음 NUL 토큰**으로
-       * 따라오므로, 그 토큰을 항목으로 오해하지 않게 건너뛴다.
+       * A rename (2) has one extra field before the path (<X><score>, e.g. R100). Reading it at
+       * the same position as a 1-line (8) turned the path into "R100 new-name" — a file that
+       * does not exist — and staging failed silently. Under -z, the original name follows as
+       * **the next NUL-separated token**, so that token is skipped rather than mistaken for a
+       * new entry.
        */
       const rename = entry.startsWith('2 ')
       const path = parts.slice(rename ? 9 : 8).join(' ')
@@ -119,8 +123,9 @@ function assertLexicalGitPath(cwd: string, path: string): string {
   const target = isAbsolute(path) ? resolve(path) : resolve(root, path)
   const rel = relative(root, target)
   /*
-   * 루트 자신은 밖이 아니다 (#134) — 거절은 하되(여기 오는 것은 파일 하나의 경로다) 이유를 바로 말한다.
-   * 예전에는 루트도 "outside the project"라고 해서 읽는 사람이 원인을 엉뚱한 곳에서 찾았다.
+   * The root itself is not outside (#134) — this still rejects it (what arrives here is
+   * supposed to be a single file's path), but says why directly. This used to say the root was
+   * "outside the project" too, and readers went looking for the cause in the wrong place.
    */
   if (rel === '') throw Object.assign(new Error('Path is the project root, not a file in it'), { code: 'internal' })
   if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return rel
@@ -143,16 +148,19 @@ function literalPathspec(path: string): string {
 }
 
 /**
- * diff 상한 — **문자 수**다, 바이트가 아니다 (#134). `String.length`로 재고 자르므로 세는 것은 UTF-16 코드 단위고,
- * 한글이나 이모지가 섞이면 실제 바이트는 이 값의 몇 배가 된다. 예전 이름(`maxBytes`)은 코드가 지키지 않는 약속을
- * 했다. 바이트로 세면 사람이 보던 diff의 길이가 줄어들어서, 동작은 두고 이름이 하는 일을 말하게 했다(사용자 결정).
+ * The diff cap — in **characters**, not bytes (#134). Measured and sliced with `String.length`,
+ * so this counts UTF-16 code units; mixing in Korean text or emoji makes the actual byte count
+ * several times this value. The old name (`maxBytes`) made a promise the code did not keep.
+ * Counting bytes would have shrunk the diff length a person actually saw, so the behavior was
+ * left alone and the name was made to say what it does instead (the owner's decision).
  *
- * `gitDiff`와 `gitCommitDetail`이 같은 값을 쓴다 — 두 자리에 숫자를 따로 박아 두면 한쪽만 바뀐다. e2e가 이 상한에
- * 맞춘 고정물을 만들 때도 숫자를 다시 적지 않고 이것을 가져간다.
+ * `gitDiff` and `gitCommitDetail` share this one value — hardcoding the number in two places
+ * would let one of them drift. When e2e builds a fixture sized to this cap, it also imports this
+ * constant rather than writing the number again.
  */
 export const GIT_DIFF_MAX_CHARS = 400_000
 
-/** 파일 diff. 큰 diff는 앞부분만 — 화면은 어차피 가상 스크롤로 자른다 */
+/** A file's diff. A large diff is truncated to its start — the screen cuts it with virtual scrolling anyway */
 export async function gitDiff(
   cwd: string,
   path: string,
@@ -170,12 +178,12 @@ export async function gitDiff(
   } catch {
     return { diff: '', truncated: false, binary: false }
   }
-  // 추적되지 않은 파일은 diff가 비어 있다 — 내용을 직접 보여준다
+  // An untracked file has no diff — so its content is shown directly
   if (!stdout.trim() && !opts.staged) {
     try {
       stdout = await git(cwd, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', safePath])
     } catch (e) {
-      // --no-index는 차이가 있으면 exit 1이라 stdout이 error에 실려 온다
+      // --no-index exits 1 when there is a difference, so stdout rides along on the error
       stdout = String((e as { stdout?: string }).stdout ?? '')
     }
   }
@@ -192,12 +200,13 @@ export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
   const stdout = await git(cwd, [
     'log',
     /*
-     * **자식이 부모보다 먼저 오도록** 정렬을 못박는다.
+     * The order is pinned so that **a child always comes before its parent.**
      *
-     * 기본 정렬은 커밋 시각이라, rebase·cherry-pick으로 시각이 뒤집힌 커밋은
-     * 부모가 자식보다 먼저 나올 수 있다. 그래프 배치(core git/graph.ts)는 그런 입력에서
-     * 위로 올라가는 선을 그릴 수 없어 간선을 빼는데, 여기서 순서를 보장하면
-     * 애초에 뺄 간선이 생기지 않는다 (유령 레인의 원인이었다).
+     * The default sort is commit time, and a commit whose time got reversed by a rebase or
+     * cherry-pick can have its parent appear before its child. The graph layout (core
+     * git/graph.ts) cannot draw a line going upward for input shaped like that, so it drops the
+     * edge — guaranteeing the order here means there is never an edge to drop in the first
+     * place (this was the cause of the phantom lanes).
      */
     '--topo-order',
     `-n${limit}`,
@@ -213,8 +222,9 @@ export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
 }
 
 /**
- * 한 경로를 건드린 커밋 (M4 E-1) — 프로젝트 앱의 판은 git이라, 그 앱 폴더(`.centralu/apps/<id>`)의 최근 커밋을 보인다. 경로는 `--` 뒤에
- * 따로 넘긴다(옵션으로 읽히지 않게). 이름이 바뀐 폴더의 옛 커밋까지 따라가지는 않는다(`--follow`는 파일 하나에만 된다).
+ * Commits that touched a path (M4 E-1) — a project app's history is git's, so this shows the recent commits for that
+ * app's folder (`.centralu/apps/<id>`). The path is passed separately, after `--` (so it is not read as an option).
+ * This does not follow a renamed folder back to its earlier commits (`--follow` only works on a single file).
  */
 export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<{ repo: boolean; commits: GitCommit[] }> {
   if (!(await isRepo(cwd))) return { repo: false, commits: [] }
@@ -223,7 +233,7 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
   try {
     stdout = await git(cwd, ['log', '--topo-order', `-n${limit}`, `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`, '--', assertLexicalGitPath(cwd, rel)])
   } catch {
-    return { repo: true, commits: [] } // 커밋이 하나도 없는 저장소
+    return { repo: true, commits: [] } // a repository with no commits at all
   }
   return {
     repo: true,
@@ -238,11 +248,12 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
 }
 
 /**
- * 커밋 하나의 파일과 diff. `sha` 앞의 `--end-of-options`는 `-`로 시작하는 값이 옵션으로 읽히지 않게 한다 (#175).
+ * A single commit's files and diff. The `--end-of-options` before `sha` keeps a value starting with `-` from being
+ * read as an option (#175).
  *
- * 병합 커밋은 첫 부모와의 차이를 보인다(`--diff-merges=first-parent`, #160). 기본값인 결합 diff는
- * 충돌 없이 병합된 커밋에서 비어 있어서, 그런 병합은 모두 `0 files`에 빈 diff로 보였다.
- * 첫 부모와의 차이가 곧 "이 병합이 이 브랜치에 들여온 것"이다.
+ * A merge commit shows its difference against the first parent (`--diff-merges=first-parent`, #160). The default,
+ * a combined diff, is empty for a merge that had no conflicts, so every such merge showed up as `0 files` with an
+ * empty diff. The difference against the first parent is exactly "what this merge brought into this branch."
  */
 export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }> {
   if (!(await isRepo(cwd))) return { files: [], diff: '', truncated: false }
@@ -253,21 +264,22 @@ export async function gitCommitDetail(cwd: string, sha: string): Promise<{ files
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
 
-/** 지금 HEAD — 커밋 귀속(#50)에서 도구 출력이 잘려 해시를 못 주웠을 때의 대안 */
+/** The current HEAD — a fallback for commit attribution (#50) when the tool's output was truncated and the hash could not be picked up */
 export async function gitHeadSha(cwd: string): Promise<string | null> {
   if (!(await isRepo(cwd))) return null
   try {
     return (await git(cwd, ['rev-parse', 'HEAD'])).trim() || null
   } catch {
-    return null // 커밋이 하나도 없는 저장소 — 귀속할 것도 없다
+    return null // a repository with no commits at all — nothing to attribute either
   }
 }
 
 /**
- * 이 ref가 가리키는 sha — 없으면 null (#76).
+ * The sha this ref points at — null if there is none (#76).
  *
- * 존재 확인과 sha 읽기를 한 번에 한다. 줄기 브랜치가 지워졌는지 묻는 자리와 그
- * 브랜치의 sha를 기록하는 자리가 같은 질문을 두 번 하지 않게 하려는 것이다.
+ * Checks existence and reads the sha in one call. This is meant to keep the spot that asks
+ * whether the trunk branch was deleted and the spot that records that branch's sha from asking
+ * the same question twice.
  */
 export async function gitRevParse(cwd: string, ref: string): Promise<string | null> {
   try {
@@ -278,18 +290,20 @@ export async function gitRevParse(cwd: string, ref: string): Promise<string | nu
 }
 
 /**
- * git이 무시하는 것들 — 새 워크트리에 **없을** 파일 목록 (#76).
+ * What git ignores — the list of files that will be **missing** from a new worktree (#76).
  *
- * 새 워크트리에 빠지는 게 정확히 이것들이라(추적 파일은 git이 가져다 준다), "무엇을
- * 복사할까"의 후보는 이 목록이 전부다. 그래서 앱이 고르지 않고 **짚어만 준다** —
- * 여기서 "전부 복사"를 기본값으로 삼으면 이 저장소만 해도 node_modules 637MB와
- * Rust target 8.5GB가 딸려 온다.
+ * These are exactly what a new worktree lacks (tracked files come along with git), so this list
+ * is the entire set of candidates for "what should be copied." So the app does not choose for
+ * itself; it only **points them out** — defaulting to "copy everything" here would drag along
+ * node_modules's 637MB and the Rust target's 8.5GB, just from this one repository.
  *
- * `--directory`가 핵심이다: 통째로 무시되는 디렉토리는 그 안을 펼치지 않고 한 줄로
- * 접어 준다 (node_modules/ 안의 파일 수만 줄이 되면 목록이 아니라 소음이다).
+ * `--directory` is the key part: a directory that is ignored wholesale is folded into one line
+ * instead of expanded, so a directory like node_modules/ does not turn the list into noise the
+ * size of its file count.
  *
- * .DS_Store만 빼낸다. macOS 저장소마다 수십 개씩 나오는데 옮길 이유가 하나도 없고,
- * 목록의 맨 앞자리를 늘 차지해서 정작 봐야 할 .env를 밀어낸다.
+ * Only .DS_Store is filtered out. Every macOS repository has dozens of them, there is never a
+ * reason to copy one, and they always occupy the top of the list, pushing out the .env a person
+ * actually needs to see.
  */
 export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path: string; bytes: number | null }[]> {
   if (!(await isRepo(cwd))) return []
@@ -306,15 +320,16 @@ export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path
   if (paths.length === 0) return []
 
   /*
-   * 크기를 함께 준다 — 이 목록에서 사람이 실제로 하는 판단이 "이건 너무 크다"라서다.
-   * du 한 번에 전부 물어보고, 오래 걸리면 크기 없이 목록만 준다 (크기는 거들 뿐이라
-   * 이것 때문에 창이 멈추면 주객이 바뀐다).
+   * The size is included, because the judgment a person actually makes from this list is
+   * "this one is too big." One call to du asks for all of them, and if it takes too long the
+   * list is returned without sizes (the size is only a nicety, and it would be backwards for
+   * that to freeze the window).
    */
   const sizes = new Map<string, number>()
   try {
     const out = await new Promise<string>((resolve, reject) => {
       execFile('du', ['-sk', ...paths.slice(0, limit)], { cwd, timeout: 5000, maxBuffer: 1 << 20 }, (err, stdout) =>
-        // du는 읽을 수 없는 항목 하나에도 non-zero로 끝난다 — 나온 만큼은 쓴다
+        // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
         stdout ? resolve(stdout) : reject(err),
       )
     })
@@ -324,7 +339,7 @@ export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path
       if (p && kb) sizes.set(p.replace(/\/$/, ''), Number(kb) * 1024)
     }
   } catch {
-    // 크기 없이 간다
+    // proceed without sizes
   }
 
   return paths
@@ -334,15 +349,17 @@ export async function gitIgnoredEntries(cwd: string, limit = 50): Promise<{ path
 }
 
 /**
- * 브랜치 목록. 원격인지는 **전체 참조 이름**의 접두사로 가른다 (#175).
+ * The branch list. Whether a branch is remote is decided by the prefix of its **full ref name**
+ * (#175).
  *
- * 예전에는 `%(refname:short)`를 받아 이름에 `/`가 있으면 원격으로 쳤다. 그런데 짧은 이름은
- * `origin/main`에 `remotes/`를 붙이지 않고, `refs/remotes/origin/HEAD`를 그냥 `origin`으로
- * 줄인다 — 그래서 원격 브랜치는 로컬 칸에 섞이고, `origin`은 로컬 브랜치 행세를 하고,
- * `feature/login` 같은 로컬 브랜치는 원격으로 빠졌다. 전체 이름(`refs/heads/…`,
- * `refs/remotes/…`)은 줄이지 않으므로 접두사가 곧 답이다. 원격의 `HEAD`는 브랜치가 아니라
- * 기본 브랜치를 가리키는 별칭이라 뺀다. detached HEAD 줄처럼 참조가 아닌 줄도 뺀다 —
- * 그 줄을 브랜치로 알면 푸시가 "(HEAD detached at …)"라는 이름으로 upstream을 만들려 든다.
+ * This used to take `%(refname:short)` and call it remote whenever the name had a `/`. But a
+ * short name does not add `remotes/` to `origin/main`, and shortens `refs/remotes/origin/HEAD`
+ * to plain `origin` — so remote branches got mixed into the local column, `origin` passed itself
+ * off as a local branch, and a local branch like `feature/login` was sorted as remote. A full
+ * name (`refs/heads/…`, `refs/remotes/…`) is never shortened, so its prefix is the answer.
+ * A remote's `HEAD` is excluded because it is not a branch but an alias pointing at the default
+ * branch. A line that is not a ref at all, like the detached HEAD line, is excluded too — taking
+ * it for a branch would make a push try to create an upstream named "(HEAD detached at …)".
  */
 export async function gitBranches(cwd: string): Promise<GitBranch[]> {
   if (!(await isRepo(cwd))) return []
@@ -360,16 +377,18 @@ export async function gitBranches(cwd: string): Promise<GitBranch[]> {
 }
 
 /**
- * 체크아웃. 더티 상태여도 **막지 않고** 결과를 먼저 보여준다 (제품 철학: 막지 말고 보이게).
- * dryRun이면 무엇이 충돌하는지만 알려준다.
+ * Checks out a branch. A dirty state does **not block** this — the result is shown first
+ * (product philosophy: show, do not block). With dryRun, this only reports what would conflict.
  *
- * `checkout`이 아니라 `switch`를 쓴다 (#175). `checkout origin/release`는 오류 없이 HEAD를
- * 떼어 놓아서 "전환했다"는 토스트 뒤에 어느 브랜치에도 속하지 않는 커밋이 쌓였고,
- * `checkout <이름>`은 그 이름의 브랜치가 없고 같은 이름의 파일이 있으면 파일의 변경을
- * 버리는 명령으로 바뀐다. `switch`는 브랜치만 받고, `--detach` 없이는 HEAD를 떼지 않는다.
- * 원격 브랜치를 고르면 그것을 따라가는 로컬 브랜치를 만들어 옮긴다(`--track`) — 같은 이름의
- * 로컬 브랜치가 이미 있으면 git이 거절하고, 그 원문이 그대로 사람에게 간다.
- * 이름 앞의 `--end-of-options`는 `-f` 같은 이름이 옵션으로 읽혀 변경을 버리지 않게 한다.
+ * `switch` is used rather than `checkout` (#175). `checkout origin/release` detaches HEAD with
+ * no error, so a "switched" toast was followed by commits piling up on no branch at all, and
+ * `checkout <name>` turns into a command that discards a file's changes if no branch of that
+ * name exists but a file of the same name does. `switch` only accepts a branch, and never
+ * detaches HEAD without `--detach`. Choosing a remote branch creates a local branch tracking it
+ * and switches to that (`--track`) — if a local branch of the same name already exists, git
+ * refuses, and that raw message is passed straight through to the person. The
+ * `--end-of-options` before the name keeps something like `-f` from being read as an option and
+ * discarding changes.
  */
 export async function gitCheckout(
   cwd: string,
@@ -407,7 +426,7 @@ export async function gitCommit(cwd: string, message: string): Promise<{ ok: boo
   }
 }
 
-/** 푸시 (product-spec §8 M2의 v1.5 확정분). 업스트림이 없으면 만들어 준다 */
+/** Push (part of v1.5, finalized in product-spec §8 M2). Creates an upstream if there is none */
 export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: string }> {
   try {
     const branches = await gitBranches(cwd)
@@ -422,11 +441,12 @@ export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: str
 }
 
 /**
- * git의 원문 오류를 그대로 보여준다 — 요약하면 사용자가 다음 행동을 못 정한다.
+ * Shows git's raw error message as-is — summarizing it leaves the user unable to decide what to do next.
  *
- * 표준에러가 비었으면 표준출력을 본다 (#160). `git commit`은 커밋할 것이 없을 때 그 이유
- * ("nothing to commit")를 표준출력에 쓴다 — 그래서 토스트에는 `Command failed: git commit -m …`만
- * 떴다. 에이전트가 Bash로 먼저 커밋해 버린 뒤 패널에서 Commit을 누르면 정확히 이렇게 된다.
+ * Falls back to stdout when stderr is empty (#160). `git commit` writes its reason
+ * ("nothing to commit") to stdout when there is nothing to commit — so the toast used to show
+ * only `Command failed: git commit -m …`. This happens exactly when an agent has already
+ * committed with Bash and the person then clicks Commit in the panel.
  */
 function cleanGitError(e: unknown): string {
   const err = e as { stderr?: string; stdout?: string; message?: string }
@@ -435,32 +455,37 @@ function cleanGitError(e: unknown): string {
 }
 
 /*
- * ── 워크트리 (FR-2의 후순위 옵션) ─────────────────────────────────────
+ * ── Worktrees (FR-2's lower-priority option) ─────────────────────────────────────
  *
- * **원본 디렉토리에서 직접 작업하는 것이 기본이다.** 워크트리는 원하는 사람만 켜는 격리 수단이고,
- * 여기 있는 함수들은 그 체크박스 하나를 위해 존재한다.
+ * **Working directly in the original directory is the default.** A worktree is an isolation
+ * mechanism only someone who wants it turns on, and every function here exists for that one
+ * checkbox.
  *
- * 위치는 **저장소 밖**이다 (`~/.centralu/worktrees/…`). 저장소 안에 두면 `.gitignore`에
- * 줄을 넣어야 하고 — 사용자 파일을 우리가 고치는 것이다 — 안 넣으면 `git status`가 지저분해진다.
+ * The location is **outside the repository** (`~/.centralu/worktrees/…`). Putting it inside
+ * would require adding a line to `.gitignore` — us editing the user's own file — and leaving it
+ * out would make `git status` messy.
  */
 
 export type Worktree = { path: string; branch: string; base?: string }
 
 /**
- * 새 워크트리와 브랜치를 만든다. 브랜치는 **지금 HEAD에서** 갈라진다.
+ * Creates a new worktree and branch. The branch forks **from the current HEAD.**
  *
- * 실패를 삼키지 않는다: 워크트리를 못 만들었는데 세션이 원본 디렉토리에서 조용히 돌면
- * 사용자는 격리된 줄 알고 있다 — 그게 이 기능에서 가장 나쁜 결말이다.
+ * A failure here is never swallowed: if the worktree could not be created but the session went
+ * on to run quietly in the original directory, the user believes it is isolated — the worst
+ * possible outcome for this feature.
  */
 /**
- * 워크트리를 하나 만든다.
+ * Creates one worktree.
  *
- * `from`을 주면 **그 줄기에서** 갈라진다 (#76). 안 주면 예전처럼 루트의 HEAD에서
- * 갈라지는데, 그건 사람이 루트에서 브랜치를 바꿔 둔 순간 의미가 조용히 달라지는 기준이다 —
- * 매니저가 줄기를 쥐고 있으면 "어디서 갈라지는가"의 답이 하나로 고정된다.
+ * Given `from`, it forks **from that trunk** (#76). Without it, it falls back to forking from
+ * the root's HEAD as before, which is a baseline whose meaning silently changes the moment a
+ * person switches branches in the root — with the manager holding the trunk, the answer to
+ * "where does this fork from" is pinned to one value.
  *
- * 없는 줄기를 주면 git이 거절한다. 우리가 미리 검사해서 조용히 HEAD로 물러나지 않는
- * 이유: 지정한 줄기가 아닌 데서 갈라진 워크트리는 나중에 "왜 병합이 안 잡히지"로 돌아온다.
+ * Given a trunk that does not exist, git rejects it. Why this is not checked in advance and
+ * quietly falls back to HEAD: a worktree that forked from somewhere other than its named trunk
+ * comes back later as "why isn't this being detected as merged."
  */
 export async function gitWorktreeAdd(
   repoCwd: string,
@@ -473,25 +498,29 @@ export async function gitWorktreeAdd(
 }
 
 /**
- * 이 브랜치의 작업이 **줄기에 다 들어갔는가** (#69).
+ * Has this branch's work **entirely landed in the trunk** (#69)?
  *
- * 두 판정의 합이다:
- *   1. 브랜치 끝이 생성 시점(base)에서 움직였는가 — 안 움직였으면 "아직 일 안 함"이지
- *      "병합됨"이 아니다. 갓 만든 브랜치는 줄기의 조상이라 is-ancestor만 보면
- *      만들자마자 merged로 읽힌다 (이 함정 때문에 base를 기록한다).
- *   2. 브랜치가 줄기의 조상인가 (`merge-base --is-ancestor`) — 보통 병합과 FF 병합을 잡는다.
+ * The sum of two checks:
+ *   1. Has the branch tip moved from its creation point (base)? If not, that is "no work done
+ *      yet," not "merged." A freshly created branch is an ancestor of the trunk, so is-ancestor
+ *      alone would read it as merged the instant it is created (base is recorded to avoid
+ *      exactly this trap).
+ *   2. Is the branch an ancestor of the trunk (`merge-base --is-ancestor`)? This catches an
+ *      ordinary merge and a fast-forward merge.
  *
- * **줄기가 무엇인지는 부르는 쪽이 말한다** (#76). 예전에는 언제나 루트의 HEAD였는데,
- * 그건 사람이 루트에서 브랜치를 갈아탄 순간 뜻이 조용히 바뀌는 기준이었다: main에
- * 병합했는데 루트가 딴 브랜치에 있으면 안 잡히고, 반대로 루트의 HEAD가 우연히 그
- * 브랜치를 품고 있으면 병합된 적 없는 브랜치가 merged로 읽혔다. 매니저가 줄기를 쥐면
- * (worktreeManager.baseBranch) 이 질문의 답이 하나로 고정된다. 줄기가 없으면 HEAD로
- * 물러난다 — 매니저를 만들기 전에 생긴 워크트리들이 그 경우다.
+ * **The caller says what the trunk is** (#76). This used to always be the root's HEAD, which
+ * was a baseline whose meaning silently changed the instant a person switched branches in the
+ * root: a merge into main would go undetected if the root happened to be on a different branch,
+ * and conversely, if the root's HEAD happened to contain the branch, a branch that was never
+ * merged would read as merged. With the manager holding the trunk (worktreeManager.baseBranch),
+ * the answer to this question is pinned to one value. With no trunk recorded, this falls back to
+ * HEAD — the case for worktrees that existed before a manager did.
  *
- * **못 잡는 것 (실측, 2026-08-29):** 스쿼시 병합은 로컬에서 감지 불가다 — is-ancestor
- * NO, `branch --merged` NO, `git cherry`조차 미병합으로 답했다. 리베이스 병합도 sha가
- * 바뀌면 놓친다. 그런 브랜치는 자동 표식 없이 남고, 사람이 지우는 길(삭제 대화)은
- * 언제나 열려 있다 — 놓침의 비용은 배지 하나지, 데이터가 아니다.
+ * **What this cannot catch (measured, 2026-08-29):** a squash merge cannot be detected locally —
+ * is-ancestor says no, `branch --merged` says no, even `git cherry` reported it as unmerged.
+ * A rebase merge is missed too, once the sha changes. Such a branch is left with no automatic
+ * marker, and a person can always delete it by hand (the delete conversation) — the cost of
+ * missing it is one badge, not data.
  */
 export async function gitBranchMerged(
   projectCwd: string,
@@ -505,7 +534,7 @@ export async function gitBranchMerged(
     await git(projectCwd, ['merge-base', '--is-ancestor', tip, trunk])
     return true
   } catch {
-    return false // 브랜치가 없거나 조상이 아니다 — 어느 쪽이든 "병합됨"은 아니다
+    return false // the branch does not exist, or is not an ancestor — either way this is not "merged"
   }
 }
 
@@ -514,25 +543,28 @@ export type BranchPr = {
   state: 'open' | 'merged' | 'closed'
   url: string
   /**
-   * PR 머리의 커밋 sha. 하드 게이트(#76)의 "최신화" 판정 근거다: 로컬 팁이 이것과
-   * 같아야 "브랜치의 전부가 그 PR로 들어갔다"가 증명된다 — 스쿼시 병합 뒤 얹힌
-   * 새 커밋은 is-ancestor로도 PR 상태로도 안 보이는 유일한 손실 경로라서다.
+   * The commit sha at the PR's head. This is what the hard gate (#76) bases its "up to date"
+   * check on: the local tip has to match this before "all of the branch's work has landed in
+   * that PR" is proven — a new commit stacked on after a squash merge is the one way to lose
+   * work that neither is-ancestor nor the PR status can see.
    */
   headOid?: string
 }
 
 /**
- * 이 브랜치의 풀 리퀘스트 상태 — **gh에게 묻는다** (#76 stage 3).
+ * This branch's pull request status — **asked of gh** (#76 stage 3).
  *
- * gitBranchMerged가 못 보는 것(스쿼시·리베이스 병합 — GitHub PR의 지배적 결말)을
- * PR 상태는 정확히 안다: MERGED는 추론이 아니라 서버가 기록한 사실이다.
+ * What PR status knows precisely is exactly what gitBranchMerged cannot see (squash and rebase
+ * merges — the dominant outcome for a GitHub PR): MERGED is not an inference, it is a fact the
+ * server recorded.
  *
- * 조용히 물러나는 함수다. 실패의 두 갈래를 구분해서 돌려준다:
- *   - `'unavailable'` — gh 자체가 없다(ENOENT). 다시 물어도 답이 안 변하니
- *     호출자는 이 프로세스에서 그만 묻는 게 맞다.
- *   - `null` — 지금은 모른다(PR 없음·오프라인·GitHub 저장소 아님·인증 안 됨).
- *     다음에 물으면 답이 있을 수 있다.
- * 어느 쪽도 던지지 않는다 — 이 신호는 배지 하나의 근거이지 세션 목록의 전제가 아니다.
+ * This function fails quietly. Two branches of failure are returned as distinct:
+ *   - `'unavailable'` — gh itself is missing (ENOENT). The answer will not change on asking
+ *     again, so the caller is right to stop asking for the rest of this process.
+ *   - `null` — unknown for now (no PR, offline, not a GitHub repository, not authenticated).
+ *     Asking again later may get an answer.
+ * Neither branch throws — this signal is the basis for one badge, not a precondition for the
+ * session list.
  */
 export async function gitBranchPr(projectCwd: string, branch: string): Promise<BranchPr | 'unavailable' | null> {
   try {
@@ -551,11 +583,12 @@ export async function gitBranchPr(projectCwd: string, branch: string): Promise<B
 }
 
 /**
- * 브랜치 이름이 될 수 있는가 (#69) — 판정은 git 자신에게 시킨다.
+ * Whether a name can be a branch (#69) — the judgment is left to git itself.
  *
- * ref 이름 규칙(잠금 접미사, 연속 점, 제어 문자, `@{`…)을 우리가 다시 적으면
- * git이 규칙을 고칠 때 우리 것만 낡는다. `check-ref-format --branch`가 그 판정의
- * 원본이고, 종료 코드가 곧 답이다. 저장소가 필요 없는 명령이라 cwd는 아무 데나 된다.
+ * If ref name rules (the lock suffix, consecutive dots, control characters, `@{`…) were
+ * reimplemented here, they would go stale the moment git changed its own rules.
+ * `check-ref-format --branch` is the source of truth for that judgment, and its exit code is
+ * the answer. This command needs no repository, so cwd can be anywhere.
  */
 export async function gitValidBranchName(name: string): Promise<boolean> {
   try {
@@ -567,36 +600,38 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
 }
 
 /**
- * 워크트리를 지운다. `force`는 커밋 안 된 변경까지 버린다.
+ * Removes a worktree. `force` discards even uncommitted changes.
  *
- * 지우기 전에 `gitWorktreeDirty`로 물어보는 것은 **호출자의 몫**이다 — 여기서 임의로
- * 판단하면 "조용히 지웠다"가 된다. 에이전트가 몇 시간 작업한 결과가 들어 있을 수 있는 곳이다.
+ * Checking with `gitWorktreeDirty` before removing is **the caller's job** — making that
+ * judgment here would turn this into "silently deleted." This is a place that can hold hours of
+ * an agent's work.
  */
 export async function gitWorktreeRemove(repoCwd: string, path: string, force = false): Promise<void> {
   await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force'] : []), path])
 }
 
 /**
- * 브랜치 ref를 지운다 (#76 하드 게이트 전용).
+ * Deletes a branch ref (for the hard gate in #76 only).
  *
- * `-D`인 이유: `-d`의 자체 안전판(병합 확인)은 스쿼시 병합을 못 본다 — 정확히 그
- * 사각지대를 메우려고 게이트가 있는 것이라, git의 확인 대신 **호출자의 증명**이
- * 안전판이다. 게이트를 통과하지 않은 코드가 이 함수를 부르면 안 된다.
- * 지워도 커밋은 reflog에 남는다 — 호출자가 팁 sha를 로그로 남겨 복구 길을 표시한다.
+ * Why `-D`: `-d`'s own safety check (confirming a merge) cannot see a squash merge — the gate
+ * exists precisely to cover that blind spot, so **the caller's proof** is the safety check here,
+ * not git's. Code that has not passed the gate must not call this function.
+ * Deleting still leaves the commit in the reflog — the caller logs the tip sha to leave a path
+ * back to it.
  */
 export async function gitBranchDelete(repoCwd: string, branch: string): Promise<void> {
   await git(repoCwd, ['branch', '-D', branch])
 }
 
-/** 커밋되지 않은 변경이 남아 있는가 — 지워도 되는지 묻기 위한 것 */
+/** Whether uncommitted changes remain — used to ask whether removal is safe */
 export async function gitWorktreeDirty(path: string): Promise<{ dirty: boolean; changedFiles: number }> {
   const summary = await gitSummary(path)
   return { dirty: summary.changedFiles > 0, changedFiles: summary.changedFiles }
 }
 
 /**
- * 등록된 워크트리 목록. 사람이 Finder에서 지워버린 것을 걸러내는 데 쓴다
- * (git은 그런 것도 목록에 남겨둔다 — `prune`이 필요한 상태다).
+ * The list of registered worktrees. Used to filter out one a person deleted from Finder
+ * (git still lists it too — that state is what `prune` is for).
  */
 export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
   if (!(await isRepo(repoCwd))) return []
@@ -613,7 +648,7 @@ export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
   return list
 }
 
-/** 사라진 워크트리의 등록만 정리한다 (디렉토리를 지우지는 않는다) */
+/** Cleans up only the registration of a worktree that is gone (does not delete the directory) */
 export async function gitWorktreePrune(repoCwd: string): Promise<void> {
   await git(repoCwd, ['worktree', 'prune'])
 }

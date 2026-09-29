@@ -5,14 +5,15 @@ import type { ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefault
 import { sessionLiveDefaults } from '@cc/protocol'
 
 /**
- * 스키마 위치는 실행 형태에 따라 다르다.
- * dev(tsx)는 소스 트리에서, 번들(배포 `.app`)은 산출물 옆에서 읽는다 —
- * 번들 후에는 소스 경로가 존재하지 않으므로 후보를 순서대로 찾는다 (F-0).
+ * Where the schema lives depends on how the process is running.
+ * Dev (tsx) reads it from the source tree; the bundled (shipped `.app`) build reads it next to
+ * the build output — the source path does not exist after bundling, so the candidates are
+ * tried in order (F-0).
  */
 function resolveSchemaPath(): string {
   const candidates = [
-    new URL('./schema.sql', import.meta.url), // 번들 산출물 레이아웃
-    new URL('../../../protocol/src/schema/schema.sql', import.meta.url), // 소스 트리
+    new URL('./schema.sql', import.meta.url), // bundled output layout
+    new URL('../../../protocol/src/schema/schema.sql', import.meta.url), // source tree
   ].map((u) => fileURLToPath(u))
   const found = candidates.find((p) => existsSync(p))
   if (!found) throw new Error(`schema.sql not found: ${candidates.join(', ')}`)
@@ -22,18 +23,19 @@ function resolveSchemaPath(): string {
 const SCHEMA_PATH = resolveSchemaPath()
 
 /**
- * dev 전용 저장소 (docs/agent-host.md §5). Tauri 전환 시 rusqlite로 대체되며
- * 스키마 파일(protocol/src/schema/schema.sql)은 그대로 공유한다.
+ * The dev-only store (docs/agent-host.md §5). Replaced by rusqlite once the app moves to
+ * Tauri; the schema file (protocol/src/schema/schema.sql) is shared as-is.
  */
 export class Store {
   private db: Database.Database
 
   /**
-   * 이번에 **실제로 돌린** 마이그레이션 스텝 수.
+   * The number of migration steps **actually run** this time.
    *
-   * 진단이자 회귀 방지선이다. "이미 지난 스텝을 다시 돌지 않는다"는 성질은 눈에
-   * 보이지 않아서, 한 번 깨지면(schema.sql의 `PRAGMA user_version`이 그랬듯) 결과가
-   * 옳은 채로 시간만 먹으며 아무도 모르게 지낸다. 세어 두면 테스트가 물어볼 수 있다.
+   * This is both a diagnostic and a guard against regression. The property "a step that has
+   * already run does not run again" is invisible, so once it breaks (as it did when
+   * schema.sql kept rewriting `PRAGMA user_version`) the result stays correct while only the
+   * cost quietly grows, and nobody notices. Counting it lets a test ask.
    */
   migrationsRun = 0
 
@@ -44,39 +46,41 @@ export class Store {
     this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'))
     this.migrate()
     /*
-     * 물려받은 WAL을 여기서 접는다. 실측(2026-08-26): store.db 91MB 옆에 store.db-wal이
-     * 97MB — DB보다 컸다. WAL은 close()가 접어주지만, 앱 종료 경로에서 host가 close()에
-     * 못 미치고 SIGKILL당하면(예전 Tauri 300ms 예산) 다음 실행까지 그대로 남는다.
-     * 시작할 때 한 번, 그리고 닫을 때 한 번 — 어느 쪽이 못 돌아도 반대쪽이 접는다.
+     * Fold any inherited WAL here. Measured (2026-08-26): a 91MB store.db sat next to a
+     * 97MB store.db-wal — bigger than the database itself. close() folds the WAL, but if the
+     * host is SIGKILLed before it reaches close() on the app's shutdown path (as with the old
+     * Tauri 300ms budget), the WAL survives untouched until the next run. Fold once on start
+     * and once on close — whichever side fails to run, the other side still folds it.
      */
     this.checkpoint()
   }
 
-  /** WAL을 본 DB에 합치고 파일을 0으로 자른다. 실패해도 치명적이지 않아 조용히 넘어간다 */
+  /** Folds the WAL into the main database and truncates the file to zero. A failure here is not fatal, so it is swallowed. */
   checkpoint(): void {
     try {
       this.db.pragma('wal_checkpoint(TRUNCATE)')
     } catch {
-      // 다른 연결이 읽는 중이면 TRUNCATE가 미뤄질 수 있다 — 다음 기회에 다시
+      // TRUNCATE can be deferred while another connection is reading — try again next time
     }
   }
 
   /**
-   * 마이그레이션 러너 (E-0).
+   * The migration runner (E-0).
    *
-   * 스키마 파일은 `CREATE TABLE IF NOT EXISTS`뿐이라 **기존 DB에는 컬럼·인덱스 추가가
-   * 조용히 무시된다.** 이미 실사용 데이터가 쌓인 파일이 있으므로(~/.centralu/store.db)
-   * user_version을 보고 순차 적용한다.
+   * The schema file only has `CREATE TABLE IF NOT EXISTS`, so **adding a column or index is
+   * silently ignored on an existing database.** There is already a file with real user data
+   * on it (~/.centralu/store.db), so steps are applied in sequence based on user_version.
    *
-   * **한 번 지난 스텝은 다시 돌지 않는다.** 오랫동안 그러지 못했다 — schema.sql이
-   * 열 때마다 `PRAGMA user_version = 1`을 다시 적어서, v27인 DB도 매 실행 26개를
-   * 처음부터 다시 돌았다. 스텝들이 하나같이 멱등하게(guard로) 쓰여 있어서 결과는
-   * 옳았고, 그래서 **비용만 조용히 자랐다**: 열 때마다 4.4~5.0초, 그중 v3·v11·v21이
-   * 각각 전체 메시지(66,700건)를 훑는 값이었다. 그 PRAGMA를 지운 것이 이 성질을 만든다.
+   * **A step that has already run does not run again.** For a long time that was not true —
+   * schema.sql rewrote `PRAGMA user_version = 1` on every open, so even a v27 database replayed
+   * all 26 steps from scratch on every run. Every step happened to be written idempotently
+   * (guarded), so the result stayed correct, and **only the cost quietly grew**: 4.4 to 5.0
+   * seconds per open, of which v3, v11 and v21 each scanned the entire messages table
+   * (66,700 rows). Removing that PRAGMA is what gives migrations this property.
    *
-   * 아래 스텝들은 여전히 **멱등하게 써야 한다.** 새 DB는 0에서 시작해 26개를 순서대로
-   * 한 번에 다 돌고, schema.sql이 이미 만들어 둔 테이블 위에서 도는 스텝이 많다
-   * (예: v13은 v9가 만든 빈 테이블을 보고 건너뛴다).
+   * The steps below still **have to be written idempotently.** A new database starts at 0 and
+   * runs all 26 steps in order in one go, and many steps run on top of tables schema.sql has
+   * already created (for example v13 sees the empty table v9 made and skips it).
    */
   private migrate(): void {
     const current = this.schemaVersion
@@ -84,7 +88,7 @@ export class Store {
       {
         to: 2,
         run: () => {
-          // B-7: 에이전트가 만진 파일을 재시작 후에도 기억한다
+          // B-7: remember the files an agent touched, across restarts
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'touched_paths')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN touched_paths TEXT NOT NULL DEFAULT '[]'`)
@@ -94,14 +98,14 @@ export class Store {
       {
         to: 3,
         run: () => {
-          // E-1: 대화 전문 검색. 한국어는 조사가 붙으므로 trigram을 쓴다
-          //   (unicode61은 '승인'으로 '승인을'을 못 찾는다)
+          // E-1: full-text search over conversations. Korean words carry particles, so trigram
+          //   tokenizing is used (unicode61 cannot find '승인을' when searching for '승인')
           this.db.exec(`
             CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
               body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
             );
           `)
-          // 기존 메시지 백필 — 이게 없으면 예전 대화는 영원히 검색되지 않는다
+          // Backfill existing messages — without this, old conversations are never searchable
           const rows = this.db.prepare(`SELECT session_id, seq, kind, payload FROM messages`).all() as {
             session_id: string
             seq: number
@@ -121,7 +125,7 @@ export class Store {
       {
         to: 4,
         run: () => {
-          // FR-7: 모델·권한을 세션별로 기억한다 (대화 도중 변경 가능)
+          // FR-7: remember the model and permission per session (both can change mid-conversation)
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'model')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`)
@@ -134,8 +138,8 @@ export class Store {
       {
         to: 5,
         run: () => {
-          // 어느 이전 대화를 이어받았는지. external_id로는 알 수 없다 —
-          // 도구가 resume하면서 **새 식별자를 발급**할 수 있어서 원본과 달라진다.
+          // Which earlier conversation this one continues. external_id cannot tell us — a
+          // tool can **issue a new identifier** on resume, so it differs from the original.
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'imported_from')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN imported_from TEXT`)
@@ -146,12 +150,13 @@ export class Store {
         to: 6,
         run: () => {
           /*
-           * 슬래시 명령(스킬) 캐시.
+           * The slash command (skill) cache.
            *
-           * 스킬은 세션이 아니라 **도구+디렉토리의 성질**이라 세션과 함께 사라지면 안 된다.
-           * 메모리에만 두면 host를 껐다 켠 뒤 첫 세션(=잠들어 있는 세션)에서 영영 못 받는다:
-           * 잠든 세션에는 물어볼 프로세스가 없고, 캐시도 비어 있기 때문이다
-           * (도그푸딩에서 지적됨). 그래서 디스크에 남긴다.
+           * A skill is a property of **the tool plus the directory**, not of the session, so
+           * it must not disappear with the session. Keeping it in memory only means the first
+           * session after the host restarts (a sleeping session) never gets one: a sleeping
+           * session has no process to ask, and the cache is also empty (caught by
+           * dogfooding). So it is kept on disk.
            */
           this.db.exec(`
             CREATE TABLE IF NOT EXISTS command_cache (
@@ -167,7 +172,8 @@ export class Store {
       {
         to: 7,
         run: () => {
-          // 추론 강도도 세션별로 기억한다 — 모델과 같은 성질이라 같은 자리에 둔다
+          // Remember the reasoning effort per session too — the same kind of property as the
+          // model, so it lives in the same place
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'effort')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN effort TEXT`)
@@ -177,7 +183,7 @@ export class Store {
       {
         to: 8,
         run: () => {
-          // 사이드바 순서를 사람이 정할 수 있게 (프로젝트는 이미 컬럼이 있었다)
+          // Let the person set the sidebar order (projects already had this column)
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'sidebar_order')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN sidebar_order INTEGER NOT NULL DEFAULT 0`)
@@ -188,11 +194,12 @@ export class Store {
         to: 9,
         run: () => {
           /*
-           * 그리드에 올려둔 세션.
+           * Sessions placed on the grid.
            *
-           * 세션 테이블의 컬럼이 아니라 **따로 둔다**: 그리드에 있는 것과 세션이
-           * 존재하는 것은 다른 사실이고, 그리드에서 빼도 세션은 그대로 남는다.
-           * 컬럼으로 두면 "안 올라간 세션"을 0과 NULL 중 무엇으로 볼지가 계속 애매해진다.
+           * Kept **separate** from the sessions table rather than as a column: being on the
+           * grid and the session existing are different facts, and removing it from the grid
+           * leaves the session in place. As a column, "not on the grid" would stay ambiguous
+           * between 0 and NULL forever.
            */
           this.db.exec(`
             CREATE TABLE IF NOT EXISTS grid_panels (
@@ -206,34 +213,35 @@ export class Store {
         to: 10,
         run: () => {
           /*
-           * 오케스트레이터는 **프로젝트에 속하지 않는다.**
+           * The orchestrator **does not belong to a project.**
            *
-           * 앱에 하나뿐이고 프로젝트를 가로지르는 세션이라, project_id가 NOT NULL이면
-           * 아무 프로젝트에나 매달아야 하고 그 프로젝트를 지우면 CASCADE로 함께 죽는다.
-           * 둘 다 틀렸다.
+           * It is the single, project-crossing session in the app, so if project_id were
+           * NOT NULL it would have to hang off some project, and deleting that project would
+           * take it down with it via CASCADE. Both are wrong.
            *
-           * SQLite는 컬럼의 NOT NULL을 못 푼다 — 표준 절차대로 테이블을 다시 만든다.
-           * 이 프로젝트에서 가장 위험한 변경이므로 **옮긴 줄 수를 세어 확인**한다.
-           * 조용히 한 줄이라도 잃으면 되돌릴 방법이 없다.
+           * SQLite cannot drop a column's NOT NULL — the table is rebuilt following the
+           * standard procedure. This is the riskiest change in this project, so the number of
+           * rows moved is **counted and checked**. Silently losing even one row would be
+           * unrecoverable.
            */
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as {
             name: string
             notnull: number
           }[]
           const pid = cols.find((c) => c.name === 'project_id')
-          if (!pid || pid.notnull === 0) return // 이미 nullable
+          if (!pid || pid.notnull === 0) return // already nullable
 
           const before = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
           const names = cols.map((c) => c.name).join(', ')
 
           /*
-           * **한 덩어리로 돈다.**
+           * **This runs as one unit.**
            *
-           * DROP과 RENAME 사이에서 무엇이든 잘못되면 세션 테이블이 사라진 DB가 남는다.
-           * 되돌릴 방법이 없는 상태다.
+           * If anything goes wrong between the DROP and the RENAME, the database is left with
+           * no sessions table at all. There is no way back from that state.
            *
-           * foreign_keys 프래그마는 트랜잭션 **안에서는 무시된다**(SQLite 규칙).
-           * 그래서 끄고 → 트랜잭션 → 켜는 순서를 지킨다.
+           * The foreign_keys pragma **is ignored inside a transaction** (SQLite rule), so the
+           * order here is: turn it off, run the transaction, turn it back on.
            */
           this.db.pragma('foreign_keys = OFF')
           try {
@@ -247,15 +255,17 @@ export class Store {
         to: 11,
         run: () => {
           /*
-           * 색인을 메시지에 다시 못 박는다.
+           * Pin the index back to its message.
            *
-           * 그동안 색인은 맨 INSERT라 같은 메시지를 다시 쓸 때마다 행이 하나씩 늘었다.
-           * 실제 DB에서 메시지 28,892건에 색인 249,809행 — **8.6배**였다.
-           * 그래서 recall이 같은 말을 반복해서 내놓았고(limit이 무의미해졌다),
-           * 색인이 본문의 수십 배로 부풀어 있었다.
+           * The index has been a plain INSERT so far, so rewriting the same message added
+           * another row every time. In the real database that came to 28,892 messages against
+           * 249,809 index rows — **8.6x**. That made recall return the same line over and
+           * over (limit became meaningless), and the index had bloated to tens of times the
+           * size of the actual text.
            *
-           * 기존 행은 rowid가 메시지와 무관하므로 골라내지 못한다 — 통째로 다시 만든다.
-           * 한 덩어리로 돌린다: 중간에 끊기면 검색이 통째로 빈 채로 남는다.
+           * Existing rows cannot be picked out because their rowid has no relation to the
+           * message — the whole index is rebuilt from scratch. This runs as one unit: if it is
+           * interrupted partway, search is left entirely empty.
            */
           const tx = this.db.transaction(() => {
             this.db.exec(`DROP TABLE IF EXISTS messages_fts`)
@@ -281,9 +291,10 @@ export class Store {
           })
           tx()
           /*
-           * 지운 자리는 SQLite가 알아서 돌려주지 않는다. 겹친 행이 차지하던 공간이
-           * 그대로 파일에 남아 있으므로 여기서 한 번 걷는다 — 실측한 DB에서 165MB → 21MB.
-           * (트랜잭션 안에서는 돌지 않아 커밋 뒤에 따로 부른다.)
+           * SQLite does not hand back freed space on its own. The room the duplicate rows took
+           * up is still sitting in the file, so it is reclaimed once here — measured on the
+           * real database, 165MB to 21MB. (VACUUM does not run inside a transaction, so it is
+           * called separately after the commit.)
            */
           this.db.exec('VACUUM')
         },
@@ -292,10 +303,11 @@ export class Store {
         to: 12,
         run: () => {
           /*
-           * 워크트리 세션 (FR-2 옵션).
+           * Worktree sessions (FR-2, optional).
            *
-           * 경로를 DB에 남기는 이유: 재개할 때 **같은 워크트리로 돌아가야** 한다.
-           * 프로젝트 경로로 되돌아가면 격리가 조용히 풀리고, 사용자는 여전히 격리된 줄 안다.
+           * Why the path is written to the database: resuming has to **return to the same
+           * worktree.** Falling back to the project's path would silently drop the isolation
+           * while the user still believes it is isolated.
            */
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'worktree_path')) {
@@ -308,19 +320,23 @@ export class Store {
         to: 13,
         run: () => {
           /*
-           * 개명 마무리: 옛 이름의 테이블에 남은 그리드 배치를 `grid_panels`로 옮긴다. (legacy-name)
+           * Finishing the rename: move any grid placements left in the old-named table into
+           * `grid_panels`. (legacy-name)
            *
-           * **`ALTER TABLE ... RENAME TO`로 하면 안 된다.** `schema.sql`이 실행될 때마다
-           * `user_version`을 1로 되돌리므로 이 목록은 **매번 처음부터 다시 돈다** — 그래서
-           * 9번이 먼저 빈 `grid_panels`를 만들어 놓고, 여기서 "이미 있네" 하고 건너뛰게 된다.
-           * 그러면 사용자가 올려둔 배치가 옛 테이블에 고아로 남는다 (테스트가 잡은 실제 결함).
+           * **Do not do this with `ALTER TABLE ... RENAME TO`.** Every run of `schema.sql`
+           * used to reset `user_version` to 1, so this list of steps **replayed from scratch
+           * every time** — which meant step 9 would first create an empty `grid_panels`, and
+           * this step would then see "it already exists" and skip. The user's saved placement
+           * was left orphaned in the old table (a real defect a test caught).
            *
-           * 그래서 옮기고 지운다. 두 번째 실행부터는 옛 테이블이 없으므로 아무 일도 안 한다.
+           * So it is moved, then dropped. From the second run onward the old table no longer
+           * exists, so this does nothing.
            */
           const has = (name: string) =>
             this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`).get(name) !==
             undefined
-          // 표식은 옛 이름이 **적힌 그 줄**에 달아야 검사가 본다 — 다음 줄에 달면 못 본다
+          // The marker has to sit **on the line where the old name is written** for the check to
+          // see it — putting it on the next line means the check misses it
           if (has('control_center')) { // legacy-name
             this.db.exec(
               `INSERT OR IGNORE INTO grid_panels (session_id, position)
@@ -456,16 +472,18 @@ export class Store {
       {
         to: 18,
         run: () => {
-          // 응답 길이(codex의 model_verbosity, #54) — model/effort(v4/v7)와 같은 성질이라 같은 자리
+          // Response length (codex's model_verbosity, #54) — the same kind of property as
+          // model/effort (v4/v7), so it lives in the same place
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'verbosity')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN verbosity TEXT`)
           }
           /*
-           * is_orchestrator를 여기서도 보장한다 (#13). 새 DB의 DDL과 v10 재구축에는
-           * 있지만, **v10이 일찍 돌아나가는 DB**(project_id가 애초에 nullable이던 옛
-           * 스키마)는 이 컬럼 없이 v17까지 왔다 — orchestratorId()가 읽는 순간
-           * 터지는 지뢰였는데, listSessions까지 읽게 되면서(#13) 겉으로 드러났다.
+           * Guarantee is_orchestrator here too (#13). It is present in the new database's DDL
+           * and in the v10 rebuild, but **a database where v10 returned early** (an old schema
+           * where project_id was already nullable) reached v17 without this column — a mine
+           * waiting to go off the moment orchestratorId() read it, which surfaced once
+           * listSessions started reading it too (#13).
            */
           if (!cols.some((c) => c.name === 'is_orchestrator')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0`)
@@ -476,9 +494,10 @@ export class Store {
         to: 19,
         run: () => {
           /*
-           * 커밋 귀속 (#50). 저장소에는 아무것도 쓰지 않는다는 결정(2026-08-23)의
-           * 반쪽 — 기록은 여기, 우리 DB에만 남는다. 해시는 에이전트의 git commit
-           * 도구 출력에서 주운 것이라 짧을 수 있다(접두사 매칭으로 푼다).
+           * Commit attribution (#50). The other half of the decision (2026-08-23) to write
+           * nothing to the repository itself — the record lives only here, in our own
+           * database. The hash is picked up from the agent's git commit tool output, so it can
+           * be short (resolved by prefix matching).
            */
           this.db.exec(`CREATE TABLE IF NOT EXISTS commit_sessions (
             project_id TEXT NOT NULL,
@@ -492,7 +511,8 @@ export class Store {
       {
         to: 20,
         run: () => {
-          // 응답 속도(codex의 service_tier) — verbosity(v18)와 같은 성질이라 같은 자리
+          // Response speed (codex's service_tier) — the same kind of property as verbosity
+          // (v18), so it lives in the same place
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'service_tier')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN service_tier TEXT`)
@@ -507,10 +527,11 @@ export class Store {
         to: 22,
         run: () => {
           /*
-           * 세션 트리 (#69): 워크트리 세션이 매니저 세션 아래에 매달린다.
-           * FK 제약은 걸지 않는다 — 부모가 지워질 때 자식까지 CASCADE로 죽으면
-           * 워크트리 세션의 대화가 부모 삭제 한 번에 사라진다. 링크가 끊긴 자식은
-           * 다음 기동의 입양(adoptOrphanWorktrees)이 다시 붙인다.
+           * The session tree (#69): a worktree session hangs off its manager session.
+           * No FK constraint is added — if CASCADE killed children when the parent was
+           * deleted, a worktree session's whole conversation would vanish along with one
+           * delete of the parent. A child left with a broken link gets reattached by the next
+           * startup's adoption (adoptOrphanWorktrees).
            */
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'parent_session_id')) {
@@ -522,9 +543,10 @@ export class Store {
         to: 23,
         run: () => {
           /*
-           * 워크트리 프로비저닝 (#69): 새 워크트리는 빈 작업대다 — node_modules도
-           * .env도 없다. 프로젝트마다 셋업 커맨드와 복사할 파일 목록을 기억한다.
-           * 레포가 아니라 여기(우리 DB)에 사는 이유: 레포에는 아무것도 쓰지 않는다 (#50).
+           * Worktree provisioning (#69): a fresh worktree is an empty workbench — no
+           * node_modules, no .env. Each project remembers its setup command and the list of
+           * files to copy over. Why this lives here (in our database) and not in the repo:
+           * nothing is written to the repo (#50).
            */
           const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'worktree_setup')) {
@@ -536,10 +558,12 @@ export class Store {
         to: 24,
         run: () => {
           /*
-           * 병합 감지의 기준점 (#69): 워크트리 브랜치가 생성될 때의 HEAD sha.
-           * 갓 만든 브랜치는 HEAD의 조상이라, 이 기준 없이 is-ancestor만 보면
-           * 만들자마자 "병합됨"으로 읽힌다. 이전 행(base 없음)은 자동 감지에서 빠진다 —
-           * 추측으로 채우면 틀린 배지가 되고, 사람이 지우는 길은 언제나 열려 있다.
+           * The baseline for merge detection (#69): the HEAD sha at the moment the worktree
+           * branch was created. A brand-new branch is an ancestor of HEAD, so checking
+           * is-ancestor alone without this baseline would read it as "merged" the instant it
+           * is created. Existing rows (no base) are excluded from automatic detection —
+           * guessing a value would produce a wrong badge, and the person can always remove one
+           * by hand.
            */
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'worktree_base')) {
@@ -551,9 +575,10 @@ export class Store {
         to: 25,
         run: () => {
           /*
-           * 마지막으로 고른 추론 강도도 프로젝트 기본값이 된다 (#69 도그푸딩 ⑤).
-           * default_model은 v1부터 있었지만 effort 자리가 없어서, Opus·high를 고른
-           * 사람이 세션마다 high를 다시 눌렀다 — default_tool이 배운 교훈 그대로다.
+           * The last reasoning effort chosen also becomes the project default (#69 dogfooding
+           * finding 5). default_model has existed since v1, but there was no place for effort,
+           * so a person who chose Opus and high had to click high again in every new session —
+           * the exact lesson default_tool already taught.
            */
           const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'default_effort')) {
@@ -565,15 +590,16 @@ export class Store {
         to: 26,
         run: () => {
           /*
-           * 프로젝트 오케스트레이터 폐기 (2026-09-01, #13 되돌림).
+           * Retiring the project orchestrator (2026-09-01, reverting #13).
            *
-           * **데이터를 먼저 고쳐야 하는 이유가 있다.** 코드에서 프로젝트 범위 단계가
-           * 사라지면서, 표식이 남은 세션은 강등되는 게 아니라 **중앙 시야를 얻는다** —
-           * 자기 프로젝트만 보던 세션이 다음에 깰 때 모든 프로젝트의 세션에 지시할 수
-           * 있게 된다. 조용한 권한 확대라 화면 어디에도 안 나타난다.
+           * **There is a reason the data has to be fixed first.** Once the project-scoped
+           * tier is gone from the code, a session that still carries the marker is not
+           * demoted — it **gains central visibility**: a session that used to see only its own
+           * project can, the next time it wakes, direct sessions across every project. That is
+           * a silent privilege escalation, and nothing on screen shows it.
            *
-           * 그래서 표식을 지운다. 잃는 것은 도구 몇 개뿐이고 대화는 그대로다.
-           * 중앙 오케스트레이터(project_id IS NULL)는 건드리지 않는다.
+           * So the marker is cleared. All that is lost is a handful of tools; the conversation
+           * is untouched. The central orchestrator (project_id IS NULL) is left alone.
            */
           this.db.exec(
             `UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1 AND project_id IS NOT NULL`,
@@ -584,22 +610,25 @@ export class Store {
         to: 27,
         run: () => {
           /*
-           * 워크트리 매니저의 자리와 줄기 (#76).
+           * The worktree manager's place, and the trunk (#76).
            *
-           * **왜 프로젝트에 다는가.** 매니저는 지금까지 순전히 관계였다 — 워크트리 자식이
-           * 있으면 매니저다. 그 규칙은 표식과 링크가 어긋날 수 없다는 장점이 있었지만,
-           * 자식이 생기기 전에는 매니저가 존재할 수 없다는 뜻이기도 했다: 첫 브랜치는
-           * 언제나 사람이 혼자 정해야 했고, 매니저의 제안 기능은 두 번째 브랜치부터
-           * 쓸모가 생겼다.
+           * **Why hang this off the project.** Until now, being the manager was purely
+           * relational — having a worktree child made a session the manager. That rule had the
+           * merit that a marker and a link could never disagree, but it also meant a manager
+           * could not exist before it had a child: the first branch always had to be chosen by
+           * a person alone, and the manager's suggestion feature only became useful from the
+           * second branch onward.
            *
-           * 세션에 표식 컬럼을 다는 대신 **프로젝트가 자기 매니저를 가리킨다.** 여전히
-           * 링크지 플래그가 아니고, "프로젝트당 하나"가 컬럼 하나로 구조가 된다 (예전엔
-           * 명령형 검사였다). 가리키는 세션이 사라지거나 보관되면 없는 것으로 친다 —
-           * 링크가 끊긴 상태를 매니저 없음으로 읽는 쪽이, 유령을 붙드는 쪽보다 안전하다.
+           * Instead of a marker column on the session, **the project points at its manager.**
+           * This is still a link, not a flag, and "one per project" becomes structural through
+           * a single column (it used to be an imperative check). If the session it points at
+           * is gone or archived, it counts as absent — reading a broken link as "no manager"
+           * is safer than holding on to a ghost.
            *
-           * baseBranch가 같이 사는 이유: 줄기는 매니저의 성질이고 매니저는 프로젝트당
-           * 하나라, 둘은 같은 자리에 산다. 이 값이 세 질문의 답을 한 번에 고정한다 —
-           * 어디서 갈라지는가, 어디로 병합하는가, 무엇을 기준으로 병합됐다고 하는가.
+           * Why baseBranch lives alongside it: the trunk is a property of the manager, and a
+           * project has one manager, so the two belong in the same place. This one value
+           * settles three questions at once — where a branch forks from, where it merges to,
+           * and what "merged" is measured against.
            */
           const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'worktree_manager')) {
@@ -611,18 +640,19 @@ export class Store {
         to: 28,
         run: () => {
           /*
-           * 아카이브 폐기 (2026-09-02 도그푸딩).
+           * Retiring the archive (2026-09-02 dogfooding).
            *
-           * 인박스의 `d`가 유일한 진입점이었는데 화면에는 "Dismiss"라고 적혀 있었고,
-           * 되돌리는 UI는 **하나도 없었다** — 팔레트도 사이드바도 `!archived`로 거르기만
-           * 했다. 그래서 "대답 안 하겠다"는 뜻으로 누른 키가 세션을 사람 눈에서 영영
-           * 지웠다. FR-20은 나가는 문(프로젝트별 Archive 목록·팔레트·제자리 재개)까지
-           * 설계했지만 그 절반이 구현되지 않은 채 배포돼 있었다.
+           * `d` in the inbox was the only entry point, and it read "Dismiss" on screen, but
+           * there was **no way back at all** — neither the palette nor the sidebar did more
+           * than filter on `!archived`. So a key pressed to mean "I am not answering this"
+           * erased a session from view forever. FR-20 had designed a way out too (a per-project
+           * Archive list, the palette, resuming in place), but only half of that had shipped.
            *
-           * 숨겨져 있던 세션은 **전부 다시 보이게 된다** — 컬럼이 사라지면 거를 것도
-           * 없어지기 때문이다. 그게 이 이사의 목적이다: 앱에 보이지 않는 세션은 없다.
+           * Every session that was hidden **becomes visible again** — once the column is gone
+           * there is nothing left to filter on. That is the point of this migration: no
+           * session in the app is invisible.
            *
-           * 인덱스를 먼저 지우는 이유: SQLite는 인덱스가 참조하는 컬럼을 DROP 하지 못한다.
+           * Why the index is dropped first: SQLite cannot DROP a column an index refers to.
            */
           const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
           if (!cols.some((c) => c.name === 'archived')) return
@@ -635,16 +665,18 @@ export class Store {
         to: 29,
         run: () => {
           /*
-           * v21 병합이 짓밟은 시각 복원 (실사고 2026-09-03).
+           * Restoring the timestamps the v21 merge trampled (real incident, 2026-09-03).
            *
-           * 병합 스텝이 assistant 행의 ts에 원래 시각 대신 `Date.now()`를 찍었다 —
-           * 그것도 병합할 게 없는 행까지. beta.4가 user_version을 되감아 그 스텝이
-           * 재실행되면서, 새벽 대화 전체의 시각이 실행 시각(13:44)으로 덮였다.
-           * 원래 시각은 지워졌으니 되돌릴 수는 없다 — 대신 **이웃이 아는 사실로
-           * 조인다**: seq는 진실이므로, 어떤 행의 ts가 자기보다 뒤 행(seq가 큰)의
-           * ts보다 크면 그 행의 시각은 거짓이다. 뒤에서 앞으로 걸으며 최소값으로
-           * 눌러 앉히면, 덮인 행은 "다음 진짜 행의 시각"이라는 상계로 돌아온다 —
-           * 정확하진 않지만 순서와 크게 어긋나지 않는 근사다.
+           * The merge step stamped `Date.now()` onto an assistant row's ts instead of keeping
+           * the original — even on rows that had nothing to merge. When beta.4 rewound
+           * user_version and that step replayed, the timestamps of an entire night's worth of
+           * conversation were overwritten with the time the step happened to run (13:44). The
+           * original timestamps are gone, so they cannot be recovered — instead the fix
+           * **narrows them using what the neighbors still know**: seq is trustworthy, so if a
+           * row's ts is greater than the ts of a later row (larger seq), that row's timestamp
+           * is known to be false. Walking back to front and clamping to the running minimum
+           * gives every trampled row an upper bound — "no later than the next genuine row's
+           * time" — not exact, but close enough to not disturb the ordering.
            */
           const rows = this.db
             .prepare(`SELECT rowid, session_id, ts FROM messages ORDER BY session_id, seq DESC`)
@@ -674,12 +706,13 @@ export class Store {
       {
         to: 30,
         /*
-         * 조율 세션의 두 손잡이 (#80·#81) — 시야 허용 목록(JSON)과 창조 시 박제된
-         * 역할문. "업무·반장"이라는 이름은 코어에 없다: 이 열들은 물리
-         * (시야 강제·역할 재적용)고, 의미는 앱이 준다.
+         * The two handles of a coordinating session (#80, #81) — a visibility allow-list
+         * (JSON), and the role text fixed at creation time. There is no "task" or "lead"
+         * concept in the core: these columns are the mechanism (enforcing visibility,
+         * reapplying the role), and the app supplies the meaning.
          */
         run: () => {
-          // 멱등 — 테스트가 user_version을 되감아 재실행한다 (parent_session_id 선례)
+          // Idempotent — a test rewinds user_version and replays this (following parent_session_id's precedent)
           const cols = this.db.pragma('table_info(sessions)') as { name: string }[]
           if (!cols.some((c) => c.name === 'scope_session_ids')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN scope_session_ids TEXT`)
@@ -692,9 +725,10 @@ export class Store {
       {
         to: 31,
         /**
-         * 세션의 소유 앱 (#81, 사용자 요청 2026-09-09). 켜진 앱이 자기 세션을 보여주고,
-         * 사이드바는 프로젝트만 든다 — 그 판정의 근거가 이 한 칸이다. 옛 행은 null이고,
-         * 그건 "주인 없음"으로 읽혀 사이드바가 받는다 (닿지 못하는 세션을 만들지 않는다).
+         * The app that owns a session (#81, user request 2026-09-09). A running app shows its
+         * own sessions, and the sidebar carries only projects — this one column is what that
+         * decision is made from. Old rows are null, which reads as "no owner" and falls back
+         * to the sidebar (so no session becomes unreachable).
          */
         run: () => {
           const cols = this.db.pragma('table_info(sessions)') as { name: string }[]
@@ -706,21 +740,25 @@ export class Store {
       {
         to: 32,
         /**
-         * 기본 모델·강도가 도구를 갖는다 (#107).
+         * The default model and effort get a tool of their own (#107).
          *
-         * `default_model`·`default_effort`는 프로젝트당 하나였는데 그 옆에 `default_tool`이
-         * 앉아 있었다 — 모델 이름은 도구의 어휘이므로 도구 없는 모델 기본값은 어느 도구의
-         * 것인지 말할 수 없다. 실사고: `default_tool=codex`인 프로젝트가
-         * `default_model=opus[1m]`을 들고 있었고, 거기서 태어난 codex 세션이 매 턴
-         * `400 invalid_request_error`로 죽었다. 화면에는 아무것도 뜨지 않았다.
+         * `default_model` and `default_effort` were one value per project, sitting next to
+         * `default_tool` — but a model name is a tool's own vocabulary, so a model default with
+         * no tool attached cannot say which tool it is for. Real incident: a project with
+         * `default_tool=codex` was holding `default_model=opus[1m]`, and every codex session
+         * born from it died on its first turn with `400 invalid_request_error`. Nothing showed
+         * on screen.
          *
-         * **옛 값은 옮기지 않고 버린다.** 지금의 `default_tool`에 붙여 주는 것이 가장
-         * 그럴듯한 추측이지만, 그 추측이 정확히 이 버그를 만든 동작이다 — 스칼라는 어느
-         * 도구를 위해 골랐는지 기록한 적이 없다. 잃은 기본값의 값은 다음 세션에서의
-         * 클릭 한 번이고, 틀린 기본값의 값은 죽은 세션 하나다.
+         * **The old value is dropped, not migrated.** Attaching it to the current
+         * `default_tool` looks like the most plausible guess, but that exact guess is what
+         * caused this bug — the scalar never recorded which tool it was chosen for. The cost of
+         * a lost default is one click in the next session; the cost of a wrong one is a dead
+         * session.
          *
-         * 컬럼째 지우는 이유: 대화가 아니라 **마지막 선택 하나**라 남겨 둘 것이 없고,
-         * 남겨 두면 다음 사람이 "읽는 데가 있나" 묻는 열이 둘 더 생긴다 (v28 선례).
+         * Why the columns are dropped outright: this is not conversation history, only **the
+         * last choice made**, so there is nothing worth keeping, and keeping it would leave two
+         * more columns for the next person to wonder "does anything still read this" (following
+         * v28's precedent).
          */
         run: () => {
           const cols = () => this.db.pragma('table_info(projects)') as { name: string }[]
@@ -737,19 +775,24 @@ export class Store {
       {
         to: 33,
         /**
-         * 프로젝트 신뢰 (M4 A-2, 플랜 결정 3) — "이 저장소의 코드를 이 기계에서 돌려도 되는가".
+         * Project trust (M4 A-2, plan decision 3) — "is it fine to run this repository's code on
+         * this machine".
          *
-         * 프로젝트 앱은 저장소에 커밋되어 팀과 나뉜다. 받아 온 저장소를 여는 것만으로 그 안의
-         * `server.command`가 사용자 권한으로 돌면, 저장소를 여는 일이 곧 남의 코드를 실행하는
-         * 일이 된다. 그래서 앱은 신뢰한 프로젝트에서만 뜬다(발견과 목록은 신뢰와 무관하다).
+         * Project apps are committed to the repository and shared with the team. If simply
+         * opening a repository someone handed you lets the `server.command` inside it run with
+         * your own permissions, opening the repository has become the same act as running
+         * someone else's code. So an app only launches in a trusted project (discovery and
+         * listing do not care about trust).
          *
-         * **기존 프로젝트의 기본값은 "신뢰하지 않음"이다.** 지금까지 등록한 프로젝트는 앱이
-         * 없던 시절에 등록됐다 — 그때의 등록은 이 질문에 답한 적이 없다. 없는 답을 "예"로
-         * 채우는 것은 조용한 허락이다. 잃는 것은 앱을 처음 켤 때의 클릭 한 번이다.
+         * **An existing project's default is "not trusted."** Every project registered so far
+         * was registered before apps existed — that registration never answered this question.
+         * Filling in the missing answer with "yes" would be a silent grant of permission. The
+         * cost of "no" is one click the first time the app is launched.
          *
-         * 칸 하나로 앱과 #92(프로젝트 설정 존중)를 함께 정한다 — 결정 3이 둘을 한 질문으로 묶었다.
+         * One column settles both apps and #92 (respecting project settings) at once — decision
+         * 3 tied the two together as a single question.
          *
-         * (기존 행에 대한 이 판단은 v35가 뒤집었다. 새로 등록하는 프로젝트의 "아니오"는 그대로다.)
+         * (This call for existing rows is reversed by v35. New projects still default to "no.")
          */
         run: () => {
           const cols = this.db.pragma('table_info(projects)') as { name: string }[]
@@ -761,20 +804,25 @@ export class Store {
       {
         to: 34,
         /**
-         * 외부 앱의 실행 기록 (M4 A-6) — "누가 무엇을 실행했는지 남긴다"의 로컬 절반.
+         * A run log for external apps (M4 A-6) — the local half of "record who ran what".
          *
-         * 에이전트가 부른 것은 그 세션의 대화에 남지만, 화면이 부른 것과 앱끼리 부른 것은 아무
-         * 데도 남지 않았다(플랜 "지금 무엇이 막고 있나"). 모든 호출이 지나는 한 자리(중개)가
-         * 여기에 한 줄씩 적는다.
+         * A call made by an agent is left in that session's conversation, but a call made from
+         * the UI, or app-to-app, landed nowhere at all (the plan's "what is blocking this now").
+         * The one place every call passes through (the broker) writes one row here per call.
          *
-         * 플랜의 칸에 셋을 더했다:
-         *   project_id    앱 id는 범위(프로젝트·사용자 폴더) 안에서만 하나다 — 두 프로젝트의 `notes`는
-         *                 다른 앱이다. null은 사용자 폴더 앱
-         *   args_summary  인자는 요약과 해시만 남긴다 — 해시만으로는 사람이 읽을 것이 없다
-         *   error         거절·실패의 이유. 기록 화면(B-7)이 "왜"를 보여 줄 자리다
+         * Three columns were added beyond the plan's:
+         *   project_id    an app id is unique only within its scope (project, or the user's own
+         *                 folder) — two projects can each have a `notes` app that are different
+         *                 apps. null means a user-folder app
+         *   args_summary  arguments are kept only as a summary and a hash — a hash alone gives a
+         *                 person nothing to read
+         *   error         the reason for a rejection or failure. This is where the history
+         *                 screen (B-7) shows "why"
          *
-         * 인자 원문은 여기 없다. **최근 실패 몇 건만** 옆 표에 원문을 남긴다(비밀은 가린 채) —
-         * 앱을 고치는 에이전트는 실패한 입력을 봐야 하지만, 모든 호출의 원문을 쌓을 이유는 없다.
+         * The raw arguments are not kept here. A side table keeps the raw text (secrets
+         * redacted) for **only the most recent handful of failures** — an agent debugging an app
+         * needs to see the input that failed, but there is no reason to pile up the raw text of
+         * every call.
          */
         run: () => {
           this.db.exec(`
@@ -808,19 +856,25 @@ export class Store {
       {
         to: 35,
         /**
-         * 이미 등록된 프로젝트는 신뢰한다 (M4, v33의 기본값을 기존 행에 한해 뒤집는다).
+         * Projects already registered are trusted (M4, reversing v33's default, but only for
+         * existing rows).
          *
-         * v33은 "등록할 때 이 질문에 답한 적이 없다"며 옛 행을 신뢰하지 않음으로 두었다. 틀린 곳은
-         * 그 질문이 **지금 막 생겼다**는 점이다. 이 행들은 사람이 직접 고른 폴더이고, 그 안에서
-         * 에이전트를 몇 주씩 돌려 왔다. 신뢰는 앱만이 아니라 #92(프로젝트 설정 존중)도 함께
-         * 정한다(결정 3). 그래서 옛 행을 "아니오"로 두면, 업데이트 하나가 아무 말 없이 이 프로젝트들의
-         * `.claude/` 설정을 무시하기 시작한다. 사람은 자기가 한 적 없는 선택의 결과만 보게 된다.
+         * v33 left old rows untrusted, reasoning that "registration never answered this
+         * question." What that missed is that the question **had just come into existence**.
+         * These rows are folders a person chose by hand, and they have been running agents in
+         * them for weeks. Trust decides not just apps but also #92 (respecting project
+         * settings) (decision 3). So leaving old rows at "no" means a single update starts
+         * silently ignoring these projects' `.claude/` settings — the person only sees the
+         * result of a choice they never made.
          *
-         * 이 뒤로 등록하는 프로젝트는 여전히 "아니오"로 시작하고, 등록하는 순간 한 번 묻는다(UI).
-         * 새로 받아 온 저장소를 여는 것만으로 그 안의 코드가 돌면 안 된다는 v33의 이유는 그대로다.
+         * Projects registered from here on still start at "no" and are asked once, at
+         * registration time (UI). v33's reasoning — that a freshly handed-over repository's code
+         * must not run just from opening it — still holds.
          *
-         * **한 번만 돈다.** 이 스텝이 매번 돌면 사람이 끈 신뢰를 다음 기동이 다시 켠다. 러너는 지난
-         * 스텝을 다시 돌지 않고(user_version), 새 DB는 이 스텝이 돌 때 프로젝트가 0개라 아무것도 안 한다.
+         * **This runs only once.** If this step ran every time, the next startup would silently
+         * re-enable trust a person had turned off. The runner does not replay a step that has
+         * already run (user_version), and on a new database this step runs against zero
+         * projects, so it does nothing.
          */
         run: () => {
           this.db.exec(`UPDATE projects SET trusted = 1`)
@@ -829,14 +883,20 @@ export class Store {
       {
         to: 36,
         /**
-         * 앱의 능력에 사람이 한 답 (M4 D-4) — "처음 쓸 때 한 번 묻는다"의 기억.
+         * The person's answer to an app's capability request (M4 D-4) — the memory of "ask once
+         * on first use."
          *
-         * 앱은 (프로젝트, id)로 하나라 `app_key`(`<프로젝트 id | _user>/<앱 id>`)를 열쇠로 쓴다. project_id를 열쇠에 넣지 않는
-         * 이유: 사용자 폴더 앱은 null인데 SQLite의 PRIMARY KEY는 NULL끼리를 서로 다른 값으로 쳐서, 같은 앱의 같은 능력이 두
-         * 줄이 될 수 있다. project_id는 프로젝트를 지울 때 함께 걷으려고 따로 둔다.
+         * An app is unique per (project, id), so `app_key` (`<project id | _user>/<app id>`) is
+         * used as the key. project_id is kept out of the key because a user-folder app's
+         * project_id is null, and SQLite's PRIMARY KEY treats NULLs as distinct from one
+         * another, which would let the same app's same capability end up as two rows.
+         * project_id is kept as its own column so it can be cleaned up together when a project
+         * is deleted.
          *
-         * `uses_stamp`은 답할 때의 매니페스트 선언(`uses`)의 지문이다 — 지문이 달라지면 이 답은 쓰이지 않고 다시 묻는다.
-         * `text`는 물을 때 사람에게 보인 말이다. 기억된 답의 목록(기록 판)이 그 말로 다시 보여 준다.
+         * `uses_stamp` is a fingerprint of the manifest's declared `uses` at the moment the
+         * answer was given — if the fingerprint changes, the stored answer is no longer used and
+         * the question is asked again. `text` is what was shown to the person when asked. The
+         * list of remembered answers (the history screen) shows that same text back.
          */
         run: () => {
           this.db.exec(`
@@ -856,17 +916,22 @@ export class Store {
       {
         to: 37,
         /**
-         * 실행 기록이 사슬이 된다 (M4 D-6) — 앱이 fd 3으로 부탁한 것(중개)도 한 줄씩, 부탁을 일으킨 실행의 아래에.
+         * The run log becomes a chain (M4 D-6) — what an app asked the broker for over fd 3 also
+         * gets a row, nested under the run that caused it.
          *
-         *   kind        `tool`은 앱의 도구가 불린 것, `broker`는 앱이 중개에 부탁한 것. 옛 줄은 모두 도구 호출이었다
-         *   session_id  run_agent가 세운 에이전트 세션 — 기록 판이 그 세션으로 건너가는 자리
+         *   kind        `tool` is a call to the app's tool, `broker` is a request the app made to
+         *               the broker. Every old row was a tool call
+         *   session_id  the agent session run_agent set up — where the history screen jumps into
+         *               that session
          *
-         * 부모 칸(`parent_run_id`)에 색인을 단다: 기록 판은 한 앱의 줄에서 **아래로** 사슬을 따라 내려가 읽는다(재귀 질의).
-         * 색인이 없으면 한 단계마다 표 전체를 훑는다.
+         * An index is added on the parent column (`parent_run_id`): the history screen reads
+         * **downward**, walking the chain from one app's row (a recursive query). Without the
+         * index, every step scans the whole table.
          */
         run: () => {
           const cols = this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]
-          // 표가 없는 DB는 v34를 거치지 않고 버전만 적힌 것이다(이관 시험이 만드는 옛 DB) — 고칠 표가 없다
+          // A database with no table has only had its version bumped, never gone through v34
+          // (an old database made by the migration tests) — there is no table to fix
           if (cols.length === 0) return
           if (!cols.some((c) => c.name === 'kind')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'tool'`)
           if (!cols.some((c) => c.name === 'session_id')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN session_id TEXT`)
@@ -876,8 +941,10 @@ export class Store {
       {
         to: 38,
         /**
-         * 앱이 부탁한 에이전트가 쓴 토큰 (M4 D-5) — run_agent 줄에 도구가 알려 준 입력·출력 토큰을 적는다. 기록 판이 앱마다
-         * "에이전트를 몇 번, 얼마나 오래, 얼마나 썼나"를 이 표에서 더한다(`appAgentUse`). 다른 줄과 옛 줄은 null이다.
+         * Tokens spent by an agent an app requested (M4 D-5) — a run_agent row records the input
+         * and output tokens the tool reported. The history screen sums these from this table
+         * per app for "how many times, how long, how much" (`appAgentUse`). Every other kind of
+         * row, and old rows, are null.
          */
         run: () => {
           const cols = this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]
@@ -934,10 +1001,11 @@ export class Store {
       }
     }
     /*
-     * 마이그레이션이 돌았다면 **말한다** (도그푸딩 사고의 교훈: beta.4가 151k 메시지
-     * DB를 10초 넘게 조용히 다시 갈았는데, 화면도 로그도 아무 말이 없어 "멈췄다"로
-     * 읽혔고 사람이 Cmd+Q로 죽였다). 한 줄이면 host.log에서 그 침묵이 설명된다.
-     * 메모리 DB(테스트)는 스텝 전부가 매번 돌므로 시끄럽기만 하다 — 파일 DB만.
+     * If migrations ran, **say so** (a lesson from a dogfooding incident: beta.4 silently
+     * reworked a 151k-message database for over ten seconds, and with neither the UI nor the
+     * log saying anything, it read as "frozen" and the person killed it with Cmd+Q). One line
+     * is enough for host.log to explain that silence. An in-memory database (tests) runs every
+     * step every time, so this would just be noise there — file databases only.
      */
     if (this.migrationsRun > 0 && this.dbPath !== ':memory:') {
       console.error(
@@ -947,22 +1015,26 @@ export class Store {
   }
 
   /**
-   * v21: 델타 시절의 행들을 메시지로 합친다 (#66).
+   * v21: merges rows left over from the delta era into whole messages (#66).
    *
-   * 쓰기는 이미 메시지 단위로 바뀌었지만(persistMessage), 그 전에 쌓인 행들은
-   * **토큰 하나가 행 하나**다. 읽기가 병합해 주므로 동작에는 문제가 없었고,
-   * 그래서 이 이사는 급한 일이 아니라 **미룰 수 있는 일**이었다 — 크기와 검색을 위한 것이다.
-   * (실측: 한 세션이 시간당 32,698행 → 761행, 행당 2.1자 → 222자)
+   * Writes had already switched to whole messages (persistMessage), but the rows accumulated
+   * before that are **one token per row.** Reads already merged them back together, so nothing
+   * was broken and this move was not urgent — it was **something that could wait**, done for
+   * size and for search. (Measured: one session went from 32,698 rows per hour to 761, and from
+   * 2.1 characters per row to 222.)
    *
-   * 연속된 assistant의 text끼리, reasoning끼리만 잇는다 — 이사하던 때의 읽기(loadMessages)와 같은 규칙이라
-   * 이사 전후로 대화가 같아 보였다. 읽기는 이제 붙이지 않는다 (#77): 이사 뒤의 이웃한 행은 서로 다른 말이다.
+   * Only consecutive assistant text is joined with text, and reasoning with reasoning — the
+   * same rule the read path (loadMessages) used at the time of the move, so the conversation
+   * looked the same before and after. Reads no longer join rows (#77): a row that ended up
+   * neighboring another after the move is a genuinely different message.
    *
-   * 합친 자리의 seq는 **첫 조각의 것**을 남긴다 — 읽음 위치(last_read_seq)와
-   * fresh_start 경계가 전부 숫자 비교라, 중간 seq가 사라져 구멍이 생겨도 안전하다.
-   * 반대로 마지막 seq를 남기면 "안 읽음"이 되살아난다.
+   * The seq at the merged spot keeps **the first chunk's value** — the read position
+   * (last_read_seq) and the fresh_start boundary are both plain numeric comparisons, so a gap
+   * left by a disappearing seq in the middle is safe. Keeping the last chunk's seq instead
+   * would bring back "unread" states that had already been read.
    *
-   * 색인은 통째로 다시 만든다 (v11과 같은 이유: 행이 지워지면 rowid에 못 박힌
-   * 색인이 엉뚱한 곳을 가리킨다). VACUUM은 트랜잭션 밖에서 부른다.
+   * The index is rebuilt from scratch (same reason as v11: once rows are deleted, an index
+   * pinned to rowid points at the wrong place). VACUUM is called outside the transaction.
    */
   private mergeDeltaRows(): void {
     const before = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
@@ -982,7 +1054,7 @@ export class Store {
       const update = this.db.prepare(`UPDATE messages SET payload = ?, ts = ? WHERE rowid = ?`)
       const del = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
 
-      /** 지금 이어붙이는 중인 런 — 첫 조각의 행에 본문을 모은다 */
+      /** The run currently being joined — the body is accumulated onto the first chunk's row */
       let head: {
         rowid: number
         sessionId: string
@@ -995,11 +1067,12 @@ export class Store {
       const closeRun = () => {
         if (!head) return
         /*
-         * **합친 런만 고쳐 쓴다.** 예전에는 조각이 하나뿐인 행에도 UPDATE를 때렸고,
-         * ts에는 원래 시각 대신 `Date.now()`를 찍었다 — 이 마이그레이션이 돌 때마다
-         * 모든 assistant 행의 시각이 "지금"으로 덮였다 (실사고 2026-09-03: beta.4가
-         * user_version을 되감아 이 스텝이 재실행됐고, 새벽 대화 전체가 13:44로 찍혔다).
-         * 시각은 마지막 조각의 것이다 — 조각들 자신이 갖고 있던 사실을 남긴다.
+         * **Only a run that was actually joined is rewritten.** This used to run an UPDATE even
+         * on a row that was the only chunk, and it stamped ts with `Date.now()` instead of the
+         * original time — so every run of this migration overwrote every assistant row's
+         * timestamp with "now" (real incident, 2026-09-03: beta.4 rewound user_version and
+         * this step replayed, stamping an entire night's conversation with 13:44). The
+         * timestamp kept is the last chunk's — a fact the chunks themselves actually carried.
          */
         if (head.merged) update.run(JSON.stringify({ ...head.payload, text: head.text }), lastTs, head.rowid)
         head = null
@@ -1015,7 +1088,7 @@ export class Store {
         try {
           payload = JSON.parse(r.payload) as Record<string, unknown>
         } catch {
-          closeRun() // 못 읽는 행은 건드리지 않는다 — 합치려다 잃는 것보다 남기는 편이 낫다
+          closeRun() // leave an unparsable row untouched — keeping it is better than losing it while trying to merge
           continue
         }
         const text = typeof payload.text === 'string' ? payload.text : ''
@@ -1032,7 +1105,7 @@ export class Store {
       }
       closeRun()
 
-      // 색인 재구축 (v11과 같은 방식) — 지워진 행이 남긴 자리를 걷는다
+      // Rebuild the index (same approach as v11) — reclaim the room deleted rows left behind
       this.db.exec(`DROP TABLE IF EXISTS messages_fts`)
       this.db.exec(`
         CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -1066,7 +1139,7 @@ export class Store {
        * process does was also the one thing it did silently.
        */
       console.error(`[store] merged streaming rows into messages: ${before.n} -> ${after.n} rows`)
-      this.db.exec('VACUUM') // 지운 자리는 SQLite가 알아서 돌려주지 않는다 (v11 주석)
+      this.db.exec('VACUUM') // SQLite does not hand back freed space on its own (see v11's note)
     }
   }
 
@@ -1149,7 +1222,7 @@ export class Store {
     )
   }
 
-  /** v10: project_id의 NOT NULL을 푼다. SQLite는 컬럼을 못 고치므로 테이블을 다시 만든다 */
+  /** v10: drops the NOT NULL on project_id. SQLite cannot alter a column, so the table is rebuilt */
   private rebuildSessionsTable(names: string, before: number): void {
     this.db.exec(`
       CREATE TABLE sessions_new (
@@ -1181,7 +1254,7 @@ export class Store {
     this.db.exec(`ALTER TABLE sessions_new RENAME TO sessions`)
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived)`)
 
-    // 한 줄이라도 조용히 잃으면 되돌릴 방법이 없다 — 던지면 트랜잭션이 통째로 물러난다
+    // Silently losing even one row is unrecoverable — throwing here rolls back the whole transaction
     const after = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
     if (after !== before) throw new Error(`세션 이관 중 유실: ${before} → ${after}`)
   }
@@ -1218,7 +1291,7 @@ export class Store {
         `SELECT id, path, name, default_tool as defaultTool, trusted FROM projects ORDER BY sidebar_order, created_at`,
       )
       .all() as (Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels' | 'trusted'> & { trusted: number })[]
-    // SQLite에는 불리언이 없다 — 0/1을 그대로 흘리면 화면의 `if (p.trusted)`는 맞아도 스키마 검사가 틀린다
+    // SQLite has no boolean — passing 0/1 straight through would still satisfy `if (p.trusted)` on screen, but fail schema validation
     return rows.map((r) => ({ ...r, trusted: r.trusted === 1 }))
   }
 
@@ -1236,7 +1309,7 @@ export class Store {
     try {
       const parsed = JSON.parse(row.commands) as unknown
       if (!Array.isArray(parsed)) return []
-      // 옛 행은 문자열 배열이다 (별칭 이전, ~2026-09-06) — 읽을 때 승격하고, 다음 저장이 새 모양으로 굳힌다
+      // Old rows are an array of strings (before labels, ~2026-09-06) — upgraded on read, and the next save fixes the new shape
       return parsed.flatMap((c): SavedCommand[] => {
         if (typeof c === 'string') return [{ command: c }]
         if (c && typeof c === 'object' && typeof (c as { command?: unknown }).command === 'string') {
@@ -1256,8 +1329,8 @@ export class Store {
   }
 
   /**
-   * 워크트리 프로비저닝 설정 (#69). null이면 아무것도 안 돈다 — 강제하지 않는다.
-   * projectCommands와 같은 규칙: 통째로 읽고 통째로 쓴다.
+   * The worktree provisioning setup (#69). null means nothing runs — it is not enforced.
+   * The same rule as projectCommands: read whole, written whole.
    */
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
     const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
@@ -1283,11 +1356,12 @@ export class Store {
   }
 
   /**
-   * 이 프로젝트의 워크트리 매니저 자리와 줄기 (#76).
+   * This project's worktree manager slot and trunk (#76).
    *
-   * **가리키는 세션이 실제로 있는지는 여기서 보지 않는다** — 그건 세션을 아는 쪽
-   * (SessionManager)의 일이고, 저장소는 자기가 적어 둔 것을 그대로 돌려준다.
-   * 링크가 끊긴 상태(세션 삭제·보관)의 판정을 두 곳에 두면 서로 다른 답을 낸다.
+   * **This does not check whether the session it points at actually still exists** — that is
+   * the job of the side that knows sessions (SessionManager); the store just hands back what
+   * it was told to write down. Putting the "is this link broken" judgment (session deleted or
+   * archived) in two places would let the two places disagree.
    */
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
     const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
@@ -1323,11 +1397,12 @@ export class Store {
   }
 
   /**
-   * 마지막으로 고른 모델·강도가 기본값이 된다 (#69 ⑤) — 단 **도구마다** (#107).
+   * The last model and effort chosen becomes the default (#69 finding 5) — but **per tool**
+   * (#107).
    *
-   * projectCommands와 같은 규칙으로 통째로 읽고 통째로 쓴다. 못 읽는 JSON은 "없음"으로
-   * 읽는다: 기억 하나를 잃는 값은 클릭 한 번이고, 여기서 던지면 프로젝트 목록이 —
-   * 그러니까 사이드바가 — 함께 넘어간다.
+   * Read whole and written whole, the same rule as projectCommands. Unparsable JSON reads as
+   * "none": the cost of losing one remembered value is a click, while throwing here would take
+   * the project list — and with it the sidebar — down with it.
    */
   projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
     const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
@@ -1351,18 +1426,18 @@ export class Store {
     }
   }
 
-  /** 한 도구의 자리만 고쳐 쓴다 — 다른 도구의 기억은 이 선택과 아무 관계가 없다 (#107) */
+  /** Only one tool's slot is rewritten — another tool's remembered value has nothing to do with this choice (#107) */
   setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
     const all = { ...this.projectToolDefaults(projectId), [tool]: d }
     this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(all), projectId)
   }
 
   /**
-   * 앱 런타임이 보는 프로젝트 — 뿌리 경로와 신뢰 (M4 A-2).
+   * The projects the app runtime sees — root path and trust (M4 A-2).
    *
-   * 워크트리는 여기에 없다. 워크트리는 프로젝트가 아니라 프로젝트의 사본이고, 사본마다
-   * 앱 인스턴스가 서면 같은 앱이 데이터 폴더 하나를 두고 여럿이 돈다 — 앱은 등록된
-   * 뿌리에서만 읽는다(플랜 A-2).
+   * Worktrees are not here. A worktree is a copy of a project, not a project, and if an app
+   * instance stood up per copy, the same app would end up running multiple times over a single
+   * data folder — the app only reads from a registered root (plan A-2).
    */
   projectRoots(): { id: string; path: string; trusted: boolean }[] {
     const rows = this.db
@@ -1371,7 +1446,7 @@ export class Store {
     return rows.map((r) => ({ id: r.id, path: r.path, trusted: r.trusted === 1 }))
   }
 
-  /** @returns 그 프로젝트가 있었는가 — 없는 id에 조용히 성공하지 않는다 */
+  /** @returns whether the project existed — this does not silently succeed on an unknown id */
   setProjectTrusted(projectId: string, trusted: boolean): boolean {
     return this.db.prepare(`UPDATE projects SET trusted = ? WHERE id = ?`).run(trusted ? 1 : 0, projectId).changes > 0
   }
@@ -1381,10 +1456,11 @@ export class Store {
   }
 
   /**
-   * UPDATE 절에는 **바뀔 수 있는 것 전부**가 있어야 한다.
-   * tool이 빠져 있어서 에이전트 전환(claude↔codex)이 저장되지 않았다 —
-   * 재시작하면 도구는 되돌아가는데 이어갈 실마리(external_id)는 이미 끊긴 뒤라
-   * 되살릴 수도 없는 세션이 됐다. (project_id·created_at은 정의상 바뀌지 않는다)
+   * The UPDATE clause has to list **everything that can change.**
+   * It used to be missing tool, so switching agents (claude to codex) was never saved — on
+   * restart the tool reverted, but by then the thread to resume from (external_id) had already
+   * broken, turning the session into one that could not even be recovered. (project_id and
+   * created_at do not change, by definition.)
    */
   upsertSession(s: SessionInfo): void {
     this.db
@@ -1412,7 +1488,7 @@ export class Store {
       .run({
         ...s,
         autoNamed: s.autoNamed ? 1 : 0,
-        // 표식(#13)도 보통의 upsert에 실려 다닌다 — 쓰는 길이 둘이면 한쪽만 고쳐진다
+        // The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed
         isOrchestrator: s.kind === 'orchestrator' ? 1 : 0,
         effort: s.effort ?? null,
         verbosity: s.verbosity ?? null,
@@ -1422,7 +1498,7 @@ export class Store {
         worktreeBranch: s.worktree?.branch ?? null,
         worktreeBase: s.worktree?.base ?? null,
         parentSessionId: s.parentSessionId ?? null,
-        // 시야는 JSON 배열로 눕는다 (#80·#81) — 관계는 행에 산다 (고아 교훈)
+        // Visibility is flattened into a JSON array (#80, #81) — the relationship lives in the row (lesson of the orphan)
         scopeSessionIds: s.scopeSessionIds ? JSON.stringify(s.scopeSessionIds) : null,
         roleAppend: s.roleAppend ?? null,
         appId: s.appId ?? null,
@@ -1439,11 +1515,12 @@ export class Store {
   }
 
   /**
-   * 사이드바 순서 저장.
+   * Saves the sidebar order.
    *
-   * **전체 순서를 통째로 받아 다시 매긴다.** "이걸 저기로" 식으로 인접 항목만
-   * 건드리면 값이 촘촘해질 때 재배치가 필요해지고, 그 사이 목록이 바뀌면 어긋난다.
-   * 목록이 짧으니(사람이 보는 사이드바다) 전부 다시 쓰는 게 단순하고 안전하다.
+   * **The whole order is taken and renumbered from scratch.** Touching only the neighboring
+   * items in a "move this after that" way would eventually need a reshuffle once the values
+   * get packed too tight, and would drift if the list changed in between. The list is short
+   * (it is a sidebar a person looks at), so rewriting all of it is simple and safe.
    */
   setProjectOrder(orderedIds: readonly string[]): void {
     const stmt = this.db.prepare(`UPDATE projects SET sidebar_order = ? WHERE id = ?`)
@@ -1455,7 +1532,7 @@ export class Store {
     this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
   }
 
-  /** 그리드 배치 — 올려둔 순서대로 */
+  /** The grid layout — in the order the panels were placed */
   listGridView(): string[] {
     // `trashSession` takes the panel away; the join keeps a panel written by an older build out of the grid too
     return (
@@ -1471,10 +1548,11 @@ export class Store {
   }
 
   /**
-   * 배치를 통째로 다시 쓴다.
+   * Rewrites the layout whole.
    *
-   * 추가·제거·순서 바꾸기가 모두 이 한 가지로 오므로 지우고 새로 넣는 게 가장 단순하다.
-   * 목록이 짧고(사람이 보는 화면이다) 한 트랜잭션이라 중간 상태가 보이지 않는다.
+   * Adding, removing and reordering all arrive as this one call, so deleting and reinserting
+   * is the simplest approach. The list is short (a screen a person looks at), and being one
+   * transaction means no intermediate state is ever visible.
    */
   setGridView(sessionIds: readonly string[]): void {
     const del = this.db.prepare(`DELETE FROM grid_panels`)
@@ -1486,14 +1564,16 @@ export class Store {
   }
 
   /**
-   * **중앙** 오케스트레이터의 id (없으면 null).
+   * The id of the **central** orchestrator (null if there is none).
    *
-   * 예전에는 "오케스트레이터는 앱에 하나"여서 이 질의가 곧 전부였다. 프로젝트
-   * 오케스트레이터(#13)가 생기면서 표식(is_orchestrator=1)은 여럿일 수 있고,
-   * 그중 프로젝트가 없는 것이 중앙이다. 표식 자체는 SessionInfo.kind에 실려
-   * 보통의 upsert로 다닌다 — 한때 "두 곳에 두면 한쪽만 고쳐진다"며 여기서만
-   * 답했는데, 프로젝트 오케스트레이터가 그 전제(projectId=null과 같은 사실)를
-   * 깨뜨렸으므로 이제 kind가 유일한 사실이고 이 질의는 그걸 읽을 뿐이다.
+   * There used to be only one orchestrator per app, so this query was the whole answer. Once
+   * project orchestrators existed (#13), the marker (is_orchestrator=1) could be set on more
+   * than one row, and the central one is whichever of those has no project. The marker itself
+   * rides SessionInfo.kind through the ordinary upsert — at one point this was the only place
+   * that answered, on the reasoning that "keeping it in two places lets one drift out of sync,"
+   * but the project orchestrator broke the premise that reasoning relied on (that projectId
+   * being null was the same fact as the marker), so kind is now the single source of truth and
+   * this query just reads it.
    */
   orchestratorId(): string | null {
     /*
@@ -1540,7 +1620,7 @@ export class Store {
       contextExactness: string | null
       scopeSessionIdsJson: string | null
     })[]
-    // 살아-있는-동안 필드는 DB에 없다 — 복원된 세션에는 정의상 없는 것이 맞다 (host가 죽으면 함께 죽는 사실들)
+    // Live-only fields are not in the database — a restored session correctly has none of them (facts that die with the host)
     return rows.map(
       ({
         worktreePath,
@@ -1556,8 +1636,9 @@ export class Store {
         ...r,
         autoNamed: !!r.autoNamed,
         /*
-         * 조율자 판정도 관계다 (#80·#81): 시야 목록이 있으면 조율 세션이다 —
-         * 표식 열을 따로 두면 표식과 관계가 언젠가 어긋난다 (#13의 교훈).
+         * Whether a session coordinates is also relational (#80, #81): having a visibility list
+         * makes it a coordinating session — a separate marker column would eventually drift out
+         * of sync with the relationship it is meant to reflect (the lesson of #13).
          */
         kind: isOrchestrator
           ? ('orchestrator' as const)
@@ -1606,14 +1687,17 @@ export class Store {
   }
 
   /**
-   * 아직 **주인이 있는** 인수인계 노트들 — 살아 있는 세션이 물려받았다고 적어 둔 전임자 id (#106).
+   * Handoff notes that still **have an owner** — predecessor ids that a live session has
+   * recorded inheriting (#106).
    *
-   * 파일 이름은 전임자의 id다 (#104). 그래서 "전임자가 사라졌으니 그 노트도 사라져도
-   * 된다"가 **틀린다**: 인수인계의 마지막 걸음이 바로 그 전임자를 지우는 것이고,
-   * 그 순간 후임자는 아직 노트를 열지도 않았다. 누가 그 파일을 물려받았는지는 후임자의
-   * 마커만 알고 있으므로, 청소의 근거도 거기서 나온다.
+   * The note's file name is the predecessor's id (#104). So "the predecessor is gone, so its
+   * note can go too" is **wrong**: the last step of a handoff is deleting the predecessor
+   * itself, and at that moment the successor has not even opened the note yet. Only the
+   * successor's marker knows which file it inherited, so that is where cleanup has to get its
+   * evidence.
    *
-   * JOIN이 산 것: 세션이 사라진 마커는 함께 사라진다 — 죽은 세션이 노트를 붙들지 못한다.
+   * What the JOIN buys: a marker whose session is gone disappears along with it — a dead
+   * session cannot hold on to a note.
    */
   handoffPredecessors(): Set<string> {
     /*
@@ -1632,15 +1716,16 @@ export class Store {
         const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
         if (p.type === 'handoff' && typeof p.fromSessionId === 'string' && p.fromSessionId) out.add(p.fromSessionId)
       } catch {
-        // 못 읽는 행은 아무것도 주장하지 않는다 — 청소는 주장이 있을 때만 멈춘다
+        // A row that cannot be parsed claims nothing — cleanup only holds off when there is a claim
       }
     }
     return out
   }
 
   /**
-   * 이 세션이 인수인계를 물려받았는가 (#142) — 깨울 때 노트 폴더를 읽을 수 있게 다시 열어 주려고 묻는다.
-   * 판정은 위와 같다: `fromSessionId`가 실린 handoff 마커. 마커는 세션마다 몇 개뿐이라 그것만 읽는다.
+   * Whether this session inherited a handoff (#142) — asked so that waking it can reopen access to the notes
+   * folder it can read from. The same test as above: a handoff marker carrying `fromSessionId`. A session only
+   * ever has a handful of markers, so only those are read.
    */
   inheritsHandoff(sessionId: string): boolean {
     const rows = this.db
@@ -1837,7 +1922,7 @@ export class Store {
    * deleting a project cannot destroy a conversation. Such a row is marked to keep the tool's conversation file and
    * the worktree: nobody was asked about them.
    *
-   * **FK의 CASCADE에 기대지 않는다.** `messages_fts` is a virtual table with no foreign key at all, so the index rows
+   * **This does not rely on an FK's CASCADE.** `messages_fts` is a virtual table with no foreign key at all, so the index rows
    * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
    *
    * The rows that belong to the project go with it as before: project-scope rules, usage (`usage_facts` is a daily
@@ -1881,7 +1966,7 @@ export class Store {
            DELETE FROM commit_sessions WHERE project_id = ? AND session_id NOT IN (SELECT id FROM sessions)`,
         )
         .run(projectId)
-      // 그 프로젝트 앱의 실행 기록도 이 앱의 기록이다 (M4 A-6) — a run that points at a session in the trash stays with it
+      // The run log for that project's apps is part of this deletion too (M4 A-6) — a run that points at a session in the trash stays with it
       this.db
         .prepare(
           `/* includes the trash: a run of a session in the trash stays with it */
@@ -1891,7 +1976,7 @@ export class Store {
         )
         .run(projectId)
       this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ? AND run_id NOT IN (SELECT id FROM app_runs)`).run(projectId)
-      // 그 프로젝트 앱의 능력에 한 답도 (M4 D-4) — a folder registered again, even under the same id by a restore, is asked again
+      // Answers given to that project's apps' capabilities too (M4 D-4) — a folder registered again, even under the same id by a restore, is asked again
       this.db.prepare(`DELETE FROM app_permissions WHERE project_id = ?`).run(projectId)
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
     })
@@ -1899,21 +1984,24 @@ export class Store {
   }
 
   /**
-   * 메시지를 남긴다 — **같은 자리에 두 번 쓰면 덮어쓴다, 색인도 함께.**
+   * Writes messages — **writing the same spot twice overwrites it, index included.**
    *
-   * 예전에는 messages만 INSERT OR REPLACE고 색인은 맨 INSERT였다. 그래서 같은 (세션, seq)를
-   * 다시 쓸 때마다 색인에는 **행이 하나씩 늘었다.** 실제 DB에서 메시지 28,892건에
-   * 색인 249,809행 — 8.6배였고, 많은 것은 13번까지 겹쳐 있었다.
+   * messages used to be the only INSERT OR REPLACE; the index was a plain INSERT. So rewriting
+   * the same (session, seq) added **another row to the index** every time. In the real database
+   * that came to 28,892 messages against 249,809 index rows — 8.6x — and some had piled up as
+   * many as 13 duplicates.
    *
-   * 그 대가를 두 곳에서 치르고 있었다: recall 결과가 같은 말로 도배되어 limit이 무의미했고
-   * (도그푸딩: "limit 8인데 같은 게 5번"), 색인이 본문의 수십 배로 부풀었다.
+   * The cost showed up in two places: recall results were papered over with the same line
+   * repeated (dogfooding: "limit was 8 and the same thing came back 5 times"), and the index had
+   * bloated to tens of times the size of the actual text.
    *
-   * 고치는 방법은 색인 행을 **메시지 행에 못 박는 것**이다. rowid를 messages의 rowid로
-   * 쓰면 INSERT OR REPLACE가 알아서 덮는다. (session_id·seq는 UNINDEXED라
-   * WHERE로 지우려 하면 25만 행 전체 훑기가 된다 — 쓸 때마다 그럴 수는 없다.)
+   * The fix is to **pin the index row to its message row.** Using the messages rowid as the
+   * index's own rowid lets INSERT OR REPLACE overwrite it automatically. (session_id and seq
+   * are UNINDEXED, so deleting by a WHERE clause on them would scan all 250,000 rows — that
+   * cannot happen on every write.)
    *
-   * messages도 REPLACE가 아니라 UPDATE여야 한다. REPLACE는 지우고 다시 넣는 것이라
-   * **rowid가 바뀌고**, 그러면 색인이 가리키던 자리가 사라진다.
+   * messages also has to be UPDATE, not REPLACE. REPLACE deletes and reinserts, which **changes
+   * the rowid**, and once that happens the spot the index was pointing at is gone.
    */
   appendMessages(msgs: StoredMessage[]): void {
     const stmt = this.db.prepare(
@@ -1926,9 +2014,10 @@ export class Store {
       `INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
     )
     /*
-     * rowid로 지운다. FTS5의 `'delete'` 명령은 contentless·external content 표에서만 쓸 수
-     * 있는데 messages_fts는 본문을 직접 들고 있는 보통 표라, 그 명령은 언제나
-     * `SQL logic error`로 실패하고 같은 묶음의 다른 메시지까지 되돌렸다 (#179).
+     * Deletes by rowid. FTS5's `'delete'` command only works on contentless or external-content
+     * tables, and messages_fts is an ordinary table that holds its own text, so that command
+     * always failed with `SQL logic error` and rolled back other messages in the same batch
+     * along with it (#179).
      */
     const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     const tx = this.db.transaction((rows: StoredMessage[]) => {
@@ -1941,7 +2030,7 @@ export class Store {
         if (body) {
           fts.run(rid, body, m.sessionId, m.seq)
         } else {
-          // 본문이 사라진 자리는 색인에서도 걷는다 (안 그러면 옛 본문이 계속 검색된다)
+          // A spot whose text disappeared is removed from the index too (otherwise the old text stays searchable)
           dropFts.run(rid)
         }
       }
@@ -1950,22 +2039,26 @@ export class Store {
   }
 
   /**
-   * 대화 전문 검색 (E-1). 아카이브된 세션도 포함한다 — 찾으려는 것이 거기 있을 수 있다.
+   * Full-text search over conversations (E-1). Archived sessions are included too — what is
+   * being looked for may be sitting in one of them.
    */
   /**
-   * 대화 전문 검색. **본문을 통째로 돌려준다** — 자르는 일은 부르는 쪽이 한다.
+   * Full-text search over conversations. **Returns the whole body** — trimming it is left to
+   * the caller.
    *
-   * 예전에는 여기서 `snippet(..., 12)`으로 잘라 줬는데, 그 12는 글자 수가 아니라
-   * **토큰 수**고 토크나이저가 trigram이라 실질 15자쯤에서 끊겼다. 오케스트레이터에게는
-   * `"은하수 색이 이미 정책 목…"` 같은 것만 도착해서 **이게 찾던 대목인지 가릴 수가 없었다.**
-   * 앞뒤 문맥이 얼마나 필요한지는 쓰는 쪽이 아는 일이라 판단을 넘긴다.
+   * This used to trim with `snippet(..., 12)` here, but that 12 counted not characters but
+   * **tokens**, and with the trigram tokenizer that cut off after roughly 15 real characters.
+   * The orchestrator would receive something like `"the policy list already said the…"` and
+   * **could not tell whether this was even the passage it was looking for.** How much
+   * surrounding context is needed is something only the caller knows, so that judgment is
+   * left to it.
    */
   searchMessages(query: string, limit = 50): { sessionId: string; seq: number; body: string }[] {
     const q = query.trim()
     if (!q) return []
 
-    // trigram 토크나이저는 **3글자 미만을 찾지 못한다** (실측).
-    // 한국어에서 '승인'·'배포' 같은 두 글자 검색은 흔하므로 LIKE로 넘긴다.
+    // The trigram tokenizer **cannot find anything shorter than 3 characters** (measured).
+    // Two-character searches like '승인' or '배포' are common in Korean, so this falls back to LIKE.
     if (q.length < 3) {
       return this.db
         .prepare(
@@ -1983,7 +2076,7 @@ export class Store {
         )
         .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; body: string }[]
     } catch {
-      // FTS 구문 오류(특수문자 등)에는 조용히 빈 결과 — 검색창이 깨지면 안 된다
+      // An FTS syntax error (special characters, etc.) quietly returns an empty result — the search box must not break
       return []
     }
   }
@@ -2027,13 +2120,16 @@ export class Store {
   }
 
   /**
-   * 대화를 읽는다 — **행 하나가 메시지 하나다** (#77).
+   * Reads a conversation — **one row is one message** (#77).
    *
-   * 델타 시절(#66 전)에는 토큰 하나가 행 하나라, 여기서 연속된 assistant 행을 한 메시지로 붙여 읽었다.
-   * 그 행들은 v21이 한 번에 합쳤고 쓰기는 메시지마다 행 하나를 쓴다. 그 뒤로 이웃한 assistant 행은
-   * **서로 다른 말**이다 — 사이에 사람의 말이 없는 새 답(백그라운드 작업이 끝났다, 질문 카드에 답했다)과
-   * 기록 가져오기가 답마다 쓴 행이다. 계속 붙여 읽으면 "…still running.All six reviews are in."처럼
-   * 두 답이 공백 없이 한 문단이 된다. 그래서 행을 그대로 준다 — limit도 행(=메시지)을 센다.
+   * In the delta era (before #66), one token was one row, so this used to join consecutive
+   * assistant rows back into a single message when reading. Those rows were merged once by v21,
+   * and writes now write one row per message. Since then, neighboring assistant rows are
+   * **genuinely different messages** — a new reply with no human turn in between (a background
+   * task finished, a question card was answered), and rows written per reply by transcript
+   * import. Joining them the old way would run two replies together into one paragraph with no
+   * space, like "…still running.All six reviews are in." So rows are handed back as-is — limit
+   * also counts rows (= messages).
    */
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
@@ -2046,8 +2142,8 @@ export class Store {
   }
 
   /**
-   * afterSeq **뒤의** 대화 — loadMessages의 앞으로 가는 짝 (#66).
-   * recall이 준 자리의 "다음에 무슨 말이 오갔나"를 읽을 때 쓴다. 같은 규칙: 행 하나가 메시지 하나다 (#77).
+   * The conversation **after** afterSeq — loadMessages's forward-going counterpart (#66).
+   * Used to read "what was said next" from a spot recall handed back. Same rule: one row is one message (#77).
    */
   loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
@@ -2060,10 +2156,11 @@ export class Store {
   }
 
   /**
-   * 스트리밍 중의 행 갱신 — **색인은 건드리지 않는다** (#66).
+   * Updates a row while it is still streaming — **the index is left untouched** (#66).
    *
-   * 자라는 본문을 델타마다 trigram으로 다시 색인하면 메시지 길이의 제곱이 된다.
-   * 스트림이 닫힐 때 appendMessages가 한 번 색인한다 (turn_complete 경계).
+   * Re-indexing a growing body with trigram on every delta would make the cost grow with the
+   * square of the message's length. appendMessages indexes it once when the stream closes (the
+   * turn_complete boundary).
    */
   upsertMessageNoIndex(m: StoredMessage): void {
     this.db
@@ -2075,8 +2172,8 @@ export class Store {
       .run(m.sessionId, m.seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
   }
 
-  /** 스킬 목록을 남긴다 (도구+디렉토리 단위) */
-  /** 커밋 귀속 기록 (#50) — 저장소가 아니라 여기에만 남는다 */
+  /** Records the skill list (per tool and directory) */
+  /** Records commit attribution (#50) — kept here only, not in the repository */
   recordCommit(projectId: string, sha: string, sessionId: string): void {
     this.db
       .prepare(`INSERT OR REPLACE INTO commit_sessions (project_id, sha, session_id, ts) VALUES (?, ?, ?, ?)`)
@@ -2124,8 +2221,8 @@ export class Store {
   }
 
   /**
-   * 워크스페이스 스냅샷 (C-3). 종료 시점이 아니라 변화 시마다 저장하므로
-   * 크래시해도 마지막 상태가 남는다 (docs/state-management.md §5).
+   * A workspace snapshot (C-3). Saved on every change rather than at exit, so the last state
+   * survives even a crash (docs/state-management.md §5).
    */
   saveWorkspace(layout: unknown): void {
     this.db
@@ -2169,7 +2266,7 @@ export class Store {
       .run(key, value)
   }
 
-  /** 설정을 지운다 — 다시 읽으면 "한 번도 쓴 적 없음"(null)이다. 다 옮긴 옛 키를 걷는 자리 (M4 A-7) */
+  /** Deletes a setting — reading it back afterward is "never written" (null). Where an old key is cleaned up once everything is migrated off it (M4 A-7) */
   deleteAppSetting(key: string): void {
     this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)
   }
@@ -2208,15 +2305,15 @@ export class Store {
       .all() as never
   }
 
-  /** 규칙은 지울 수 있어야 한다 — 저장만 되고 못 지우면 '결과를 보이게 한다'가 반쪽이다 */
+  /** A rule has to be deletable — saving without being able to delete would make "show the outcome" only half true */
   deleteApprovalRule(id: number): void {
     this.db.prepare(`DELETE FROM approval_rules WHERE id = ?`).run(id)
   }
 
-  // ── 외부 앱 실행 기록 (M4 A-6) — 앱 런타임의 `RunLedger`를 이 저장소가 채운다 ──
+  // ── The run log for external apps (M4 A-6) — this store fills in the app runtime's `RunLedger` ──
   //
-  // 런타임은 이 클래스를 임포트하지 않는다. 필요한 모양(RunLedger)을 런타임이 선언하고,
-  // main.ts가 이 메서드들을 그 모양으로 넘긴다 (#97의 뒤집기).
+  // The runtime does not import this class. The runtime declares the shape it needs (RunLedger),
+  // and main.ts passes these methods in as that shape (inverting the dependency from #97).
 
   beginAppRun(r: AppRunRecord): void {
     this.db
@@ -2231,7 +2328,7 @@ export class Store {
       )
   }
 
-  /** 도는 run_agent 줄에 그 부탁이 세운 세션을 잇는다 (M4 D-6) */
+  /** Links a running run_agent row to the session that request set up (M4 D-6) */
   linkAppRunSession(id: string, sessionId: string): void {
     this.db.prepare(`UPDATE app_runs SET session_id = ? WHERE id = ?`).run(sessionId, id)
   }
@@ -2243,8 +2340,9 @@ export class Store {
   }
 
   /**
-   * 한 앱이 `since` 뒤로 부탁한 에이전트의 쓰임 (M4 D-5) — 세션이 선 run_agent 줄만(거절된 부탁은 에이전트를 세우지 않았다).
-   * 도는 중인 줄은 수에 들고 시간에는 아직 없다.
+   * How much of the agents an app requested since `since` were used (M4 D-5) — only run_agent
+   * rows that had a session stand up (a rejected request never set an agent up). A still-running
+   * row is counted, but its duration is not in yet.
    */
   appAgentUse(projectId: string | null, appId: string, since: number): { runs: number; durationMs: number; tokens: { input: number; output: number } | null } {
     const r = this.db
@@ -2259,8 +2357,9 @@ export class Store {
   }
 
   /**
-   * 실패 원문을 남기고, 그 앱의 원문은 **최근 `keep`건만** 둔다. 원문은 크고 드물게 읽힌다 —
-   * 만드는 에이전트가 고치는 데 필요한 것은 마지막 몇 번의 실패다.
+   * Keeps the raw text of a failure, but only the **most recent `keep`** for that app. The raw
+   * text is large and rarely read — what an agent building the app needs to fix it is the last
+   * handful of failures, not all of them.
    */
   keepAppRunFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void {
     const tx = this.db.transaction(() => {
@@ -2279,12 +2378,16 @@ export class Store {
   }
 
   /**
-   * 한 앱의 실행 기록, 최근 것부터 — **그 아래의 사슬까지** (M4 D-6). 원문이 남아 있는 실패는 원문과 함께.
+   * One app's run log, most recent first — **including the chain beneath each row** (M4 D-6).
+   * A failure whose raw text is still kept is returned with it.
    *
-   * 뿌리는 이 앱의 줄 가운데 부모가 이 앱의 줄이 아닌 것이다(화면·세션이 불렀거나, 다른 앱이 불렀거나, 열린 실행 없이
-   * 부탁했다). `limit`은 뿌리의 수다. 그 아래로 부모를 따라 내려가며 모두 싣는다 — 이 앱이 부른 다른 앱의 줄, 그 앱이
-   * 부탁한 에이전트의 줄까지. 그래야 기록 판 하나에서 "화면이 누른 것 → 다른 앱 → 에이전트"가 한 사슬로 읽힌다.
-   * 사슬 아래의 줄은 `CHAIN_ROWS_MAX`까지만 — 한 호출 안에서 부탁을 끝없이 거듭하는 앱이 판을 붙잡지 못하게.
+   * A root is one of this app's rows whose parent is not also one of this app's rows (called
+   * from the UI or a session, called by a different app, or requested with no open run at all).
+   * `limit` counts roots. Everything below a root is included by following parent links down —
+   * rows for other apps this app called, down to the rows for agents that app in turn requested.
+   * That is what lets a single history screen read "what the UI clicked → another app → an
+   * agent" as one chain. Rows below the roots are capped at `CHAIN_ROWS_MAX`, so an app that
+   * makes requests without end inside a single call cannot hold the screen hostage.
    */
   listAppRuns(
     projectId: string | null,
@@ -2323,7 +2426,7 @@ export class Store {
       seq: number
       isRoot: number
     })[]
-    // 뿌리를 먼저 채운 것은 자르는 순서일 뿐이다 — 돌려주는 것은 시간순(최근 것부터)이다
+    // Filling roots first was only the order used for truncation — what is returned is chronological (most recent first)
     rows.sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq)
     return rows.map(({ failureArgs, failureResult, tokensIn, tokensOut, seq: _seq, isRoot: _isRoot, ...r }) => ({
       ...r,
@@ -2332,7 +2435,7 @@ export class Store {
     }))
   }
 
-  /** 보관 기간 밖의 기록을 걷는다. @returns 지운 실행 수 */
+  /** Removes run records outside the retention window. @returns the number of runs deleted */
   pruneAppRuns(before: number): number {
     const tx = this.db.transaction(() => {
       this.db.prepare(`DELETE FROM app_run_failures WHERE created_at < ?`).run(before)
@@ -2342,15 +2445,16 @@ export class Store {
   }
 
   /**
-   * 끝을 못 본 실행을 닫는다 (기동에 한 번). host가 죽으면 앱 프로세스도 입력이 닫혀 끝난다 —
-   * `running`으로 남은 행은 영원히 달리는 중으로 보인다. 세션 상태를 기동에 바로잡는 것과
-   * 같은 이유다(`manager.ts`의 LIVE_ONLY): 살아 있는 상태는 프로세스가 있어야만 참이다.
+   * Closes out runs that never saw an end (once, at startup). When the host dies, the app
+   * process's input also closes and it ends — a row left at `running` would look like it is
+   * running forever. The same reasoning as fixing session state at startup (`manager.ts`'s
+   * LIVE_ONLY): a "live" state is only true while a process backs it.
    */
   settleUnfinishedAppRuns(error: string): number {
     return this.db.prepare(`UPDATE app_runs SET status = 'error', error = ? WHERE status = 'running'`).run(error).changes
   }
 
-  // ── 앱의 능력에 사람이 한 답 (M4 D-4) — 런타임의 `CapabilityBook`을 이 저장소가 채운다 ──
+  // ── The person's answers to an app's capability requests (M4 D-4) — this store fills in the runtime's `CapabilityBook` ──
 
   getAppPermission(appKey: string, capability: string): AppPermissionRecord | null {
     const row = this.db
@@ -2437,13 +2541,13 @@ function parseTrashRecord(json: string | null): TrashRecord {
  */
 const OUT_OF_TRASH = `session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)`
 
-/** app_permissions 한 줄 — 런타임의 `CapabilityDecision`과 같은 모양이다 (구조로 맞물린다, M4 D-4) */
+/** One row of app_permissions — the same shape as the runtime's `CapabilityDecision` (locked together structurally, M4 D-4) */
 export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }
 
-/** 기록 판이 한 앱의 뿌리 아래로 싣는 사슬 줄의 상한 (M4 D-6, `listAppRuns`) */
+/** The cap on chain rows the history screen loads beneath one app's roots (M4 D-6, `listAppRuns`) */
 const CHAIN_ROWS_MAX = 500
 
-/** app_runs 한 줄 — 런타임의 `AppRunRow`와 같은 모양이다 (구조로 맞물린다) */
+/** One row of app_runs — the same shape as the runtime's `AppRunRow` (locked together structurally) */
 export type AppRunRecord = {
   id: string
   projectId: string | null
@@ -2471,9 +2575,9 @@ const VACUUM_FREE_BYTES = 16 * 1024 * 1024
 const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)}MB`
 
 /**
- * 세션 삭제의 한 조각 (#179). 실제 DB에서 색인 행 하나를 걷는 데 약 0.064ms가 들어
- * (27,887행에 1,774ms) 250행이면 한 조각이 보통 20ms 안쪽이다. 더 잘게 자르면 커밋 수가
- * 늘어 전체 시간이 길어진다.
+ * One chunk of a session deletion (#179). Removing one index row from the real database took
+ * about 0.064ms (1,774ms for 27,887 rows), so 250 rows keeps one chunk under about 20ms. Cutting
+ * it finer would only add more commits and lengthen the total time.
  */
 const DELETE_CHUNK = 250
 

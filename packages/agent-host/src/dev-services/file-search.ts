@@ -6,28 +6,29 @@ import { promisify } from 'node:util'
 const exec = promisify(execFile)
 
 /**
- * `@` 자동완성용 파일 검색.
+ * File search for `@` autocomplete.
  *
- * **왜 우리가 만드나:** Claude SDK는 파일 제안을 공개 API로 열어두지 않았고,
- * Codex의 fuzzyFileSearch는 app-server를 띄워야 한다 — 글자마다 프로세스를 띄우는 건
- * 타이핑 응답으로 쓸 수 없다. 게다가 도구마다 결과가 다르면 같은 프로젝트인데
- * 세션에 따라 다른 파일이 뜨는 셈이라 더 헷갈린다. 그래서 한 벌로 통일한다.
+ * **Why this is built ourselves:** the Claude SDK does not expose file suggestions through a
+ * public API, and Codex's fuzzyFileSearch requires launching app-server — launching a process on
+ * every keystroke cannot serve a responsive typing experience. Worse, if each tool gave different
+ * results, the same project would show different files depending on the session, which is more
+ * confusing still. So one implementation is used for both.
  *
- * 목록은 git에게 받는다(`ls-files`) — .gitignore를 그대로 따르므로
- * node_modules나 빌드 산출물이 섞이지 않는다. 저장소가 아니면 얕게 걷는다.
+ * The list comes from git (`ls-files`) — it follows .gitignore as-is, so node_modules and build
+ * output never mix in. When this is not a repository, a shallow walk is used instead.
  */
 
-/** 한 번에 들고 있을 최대 파일 수. 이보다 큰 저장소는 앞쪽만 본다 */
+/** The maximum number of files held at once. A larger repository only sees the first portion */
 const MAX_FILES = 20_000
-/** 목록을 다시 읽기까지의 시간. 타이핑 중에는 다시 읽지 않는다 */
+/** How long before the list is read again. It is not reread while someone is still typing */
 const TTL_MS = 15_000
-/** 저장소가 아닐 때 걷는 최대 깊이 */
+/** The maximum depth to walk when this is not a repository */
 const WALK_DEPTH = 6
 
 type Index = { files: string[]; at: number }
 const cache = new Map<string, Index>()
 
-/** 테스트·프로젝트 변경 시 색인을 버린다 */
+/** Drops the index on a test or a project change */
 export function invalidateFileIndex(root?: string): void {
   if (root) cache.delete(root)
   else cache.clear()
@@ -36,10 +37,10 @@ export function invalidateFileIndex(root?: string): void {
 async function gitFiles(root: string): Promise<string[] | null> {
   try {
     /*
-     * 추적 중인 파일 + 무시되지 않은 새 파일 = 사람이 열 만한 것 전부.
-     * `-z`로 받는다 (#176): 줄 단위 출력은 `core.quotePath`에 따라 한글 이름을
-     * `"\355\225\234…"`로 감싸서, `@한글`이 아무것도 못 찾고 고른 경로는 없는 파일이었다.
-     * `-z`는 인용 없이 이름 그대로 NUL로 나눠 준다.
+     * Tracked files plus new files that are not ignored = everything a person might want to open.
+     * Read with `-z` (#176): line-based output, depending on `core.quotePath`, wrapped a Korean
+     * name as `"\355\225\234…"`, so `@한글` found nothing, and whatever path it did pick turned out
+     * to be a file that did not exist. `-z` splits names with NUL, with no quoting at all.
      */
     const { stdout } = await exec('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
       cwd: root,
@@ -53,7 +54,7 @@ async function gitFiles(root: string): Promise<string[] | null> {
   }
 }
 
-/** 저장소가 아닐 때의 폴백. 흔한 잡음 디렉토리만 건너뛴다 */
+/** The fallback for when this is not a repository. Only the common noisy directories are skipped */
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', 'target', '.next', '.venv', '__pycache__'])
 
 async function walk(root: string): Promise<string[]> {
@@ -73,9 +74,10 @@ async function walk(root: string): Promise<string[]> {
         if (SKIP.has(e.name) || depth >= WALK_DEPTH) continue
         queue.push({ dir: join(dir, e.name), depth: depth + 1 })
       } else {
-        // macOS 파일 시스템은 한글 이름을 NFD(자모 분리)로 돌려줄 때가 있다. 입력기가 치는 검색어는
-        // NFC라 부분 문자열 비교가 맞지 않는다 (#176). git 저장소는 git이 NFC로 돌려주므로
-        // 이 문제가 없다(`core.precomposeUnicode`) — 걸을 때도 같은 모양으로 맞춘다.
+        // The macOS filesystem sometimes returns a Korean name as NFD (decomposed jamo). What an
+        // IME actually types is NFC, so a substring comparison would not match (#176). A git
+        // repository does not have this problem, because git itself returns NFC
+        // (`core.precomposeUnicode`) — so the walk normalizes to the same shape too.
         out.push(relative(root, join(dir, e.name)).normalize('NFC'))
         if (out.length >= MAX_FILES) break
       }
@@ -95,11 +97,11 @@ async function indexOf(root: string): Promise<string[]> {
 export type FileHit = { path: string; name: string }
 
 /**
- * 퍼지 매칭 점수. 높을수록 위에 온다. 매치가 없으면 null.
+ * The fuzzy match score. Higher ranks higher. null if there is no match.
  *
- * 사람이 `@ses`라고 칠 때 찾는 건 대개 `SessionView.tsx`이지
- * `packages/…/s…e…s` 처럼 경로 여기저기 흩어진 글자가 아니다.
- * 그래서 **파일 이름에서의 매치를 경로 매치보다 훨씬 높게** 친다.
+ * When a person types `@ses`, what they are usually looking for is `SessionView.tsx`, not letters
+ * scattered across a path like `packages/…/s…e…s`. So **a match in the file name is scored far
+ * higher than a match in the path.**
  */
 export function score(path: string, query: string): number | null {
   if (!query) return 0
@@ -108,15 +110,15 @@ export function score(path: string, query: string): number | null {
   const name = path.slice(path.lastIndexOf('/') + 1)
   const lowerName = name.toLowerCase()
 
-  // 1) 이름이 그대로 들어있으면 최상위. 앞에서 시작할수록 더 높다
+  // 1) An exact substring in the name scores highest. The earlier it starts, the higher
   const inName = lowerName.indexOf(q)
   if (inName >= 0) return 1000 - inName * 10 - depthPenalty(path)
 
-  // 2) 경로 어딘가에 그대로 들어있으면 그다음
+  // 2) An exact substring anywhere in the path scores next
   const inPath = lowerPath.indexOf(q)
   if (inPath >= 0) return 600 - Math.min(inPath, 40) - depthPenalty(path)
 
-  // 3) 이름에 흩어져 있어도(부분 수열) 받아준다 — 연속될수록 높게
+  // 3) Accepted even scattered across the name (a subsequence) — the more contiguous, the higher
   const sub = subsequenceScore(lowerName, q)
   if (sub !== null) return 400 + sub - depthPenalty(path)
 
@@ -126,7 +128,7 @@ export function score(path: string, query: string): number | null {
   return null
 }
 
-/** 깊은 경로는 살짝 뒤로 — 대개 얕은 쪽이 찾던 것이다 */
+/** A deeper path is nudged back slightly — the shallower one is usually what was being looked for */
 function depthPenalty(path: string): number {
   let slashes = 0
   for (const c of path) if (c === '/') slashes++
@@ -149,10 +151,10 @@ function subsequenceScore(haystack: string, needle: string): number | null {
 
 export async function searchFiles(root: string, query: string, limit = 20): Promise<FileHit[]> {
   const files = await indexOf(root)
-  // 목록은 NFC로 맞춰 두었다 — 검색어도 같은 모양이어야 한글이 비교된다 (#176)
+  // The list is kept normalized to NFC — the query also has to be the same shape for Korean to compare correctly (#176)
   const q = query.trim().normalize('NFC')
 
-  // 빈 질의는 '최근 느낌'을 낼 수 없으니 얕은 것부터 보여준다
+  // An empty query cannot give a sense of "recent," so the shallowest results are shown first
   const scored: { path: string; s: number }[] = []
   for (const path of files) {
     const s = score(path, q)

@@ -4,27 +4,35 @@ import { isProjectId, isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
 
 /**
- * 인수인계 노트의 자리 (#142) — **데이터 폴더 아래** `<데이터>/handoff/<프로젝트 id>/<세션 id>.md`.
+ * Where a handoff note lives (#142) — **under the data folder**,
+ * `<data>/handoff/<project id>/<session id>.md`.
  *
- * 예전 자리는 `<프로젝트>/.centralu/handoff/`, 곧 사용자의 저장소였다. 거기서 둘이 틀렸다. 노트는 git에서
- * 무시되지 않았다 — 그 폴더를 거는 규칙은 **이 저장소의** .gitignore에만 있었고, 우리는 사용자의 .gitignore와
- * `.git/info/exclude`를 건드리지 않는다. 그리고 청소가 그 폴더를 믿었다: 저장소에 `.centralu/handoff -> ..`를
- * 커밋해 두면 clone한 사람의 host가 뜰 때 링크를 따라가 저장소 루트의 README.md를 지웠다(실측). 우리가 쓰고
- * 지우는 폴더는 우리 것이어야 한다.
+ * The old location was `<project>/.centralu/handoff/`, which is to say inside the user's own
+ * repository. Two things were wrong there. The note was not ignored by git — the rule excluding
+ * that folder lived only in **this repository's own** .gitignore, and we do not touch the user's
+ * .gitignore or `.git/info/exclude`. And cleanup trusted that folder blindly: committing
+ * `.centralu/handoff -> ..` into a repository meant that when a cloned copy's host started up, it
+ * followed the link and deleted the README.md at the repository root (measured). A folder we
+ * write to and delete from has to be ours.
  *
- * **옛 자리는 읽지도 쓰지도 치우지도 않는다.** 이미 놓인 옛 노트는 사용자 저장소의 파일이라 옮기지도 지우지도
- * 않는다 — 옛 후임 세션의 첫 메시지가 아직 그 경로를 가리키고, 그 파일은 그대로 있다.
+ * **The old location is never read, written to, or cleaned up.** A note already sitting there is
+ * the user's own repository file, so it is neither moved nor deleted — an old successor session's
+ * first message still points at that path, and the file stays where it is.
  *
- * **프로젝트마다 폴더를 나누는 이유**: 후임 Claude 세션은 노트가 든 폴더를 추가 작업 폴더로 받아야 묻지 않고
- * 읽는다(`CreateSessionOpts.readableDirs` — 실측은 거기 적었다). 폴더를 나누면 그 허락이 같은 프로젝트의
- * 노트에서 멈춘다. 한 폴더에 모으면 모든 프로젝트의 노트가 함께 열린다.
+ * **Why the folder is split per project**: a successor Claude session only gets to read the
+ * folder holding its note without asking if it is granted as an additional working directory
+ * (`CreateSessionOpts.readableDirs` — the measurement is written there). Splitting by project
+ * means that grant stops at the same project's own notes. Pooling them into one folder would open
+ * every project's notes together.
  */
-// **함수다.** 모듈 로드 시점에 정하면 host가 데이터 폴더를 고정하기 전의 값이 박힌다 (attachments.ts와 같다)
+// **This is a function.** Deciding this at module load time would bake in the value from before
+// the host has settled on a data folder (the same reasoning as attachments.ts)
 const root = () => join(dataRoot(), 'handoff')
 
 /**
- * 한 프로젝트의 노트 폴더. 프로젝트 id도 여기서는 경로 조각이다 — **조각 하나가 아니면 거절한다** (#132).
- * 경계(`ProjectId`)가 이미 거르지만, 경로를 만드는 쪽이 스스로도 확인한다 — 청소는 RPC를 거치지 않는다.
+ * One project's note folder. Here, the project id is also a path segment — **rejected if it is
+ * not exactly one segment** (#132). The boundary (`ProjectId`) already filters this, but the side
+ * building the path checks it again itself — cleanup does not go through the RPC layer.
  */
 export function handoffNoteDir(projectId: string): string {
   if (!isProjectId(projectId)) {
@@ -33,7 +41,7 @@ export function handoffNoteDir(projectId: string): string {
   return join(root(), projectId)
 }
 
-/** 넘기는 세션 하나의 노트 — 이름이 세션 id라 동시에 도는 두 인수인계가 자리를 다투지 않는다 (#104) */
+/** One handing-off session's note — since its name is the session id, two handoffs running at once never contend for the same spot (#104) */
 export function handoffNotePath(projectId: string, sessionId: string): string {
   if (!isSessionId(sessionId)) {
     throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
@@ -47,24 +55,27 @@ export async function handoffNoteBytes(projectId: string, sessionId: string): Pr
   return s?.isFile() ? s.size : 0
 }
 
-/** 노트를 놓고 그 절대 경로를 돌려준다. 쓰는 것은 언제나 host다 — 에이전트는 이 폴더에 쓰지 않는다 */
+/** Writes the note and returns its absolute path. The host is always the writer — an agent never writes into this folder */
 export async function writeHandoffNote(projectId: string, sessionId: string, text: string): Promise<string> {
   const path = handoffNotePath(projectId, sessionId)
   await mkdir(handoffNoteDir(projectId), { recursive: true })
-  // 있던 것부터 걷는다 (#104) — 그 자리에 링크가 있으면 쓰기가 링크를 따라간다
+  // Whatever is already there is removed first (#104) — a link sitting at that spot would have the write follow it
   await rm(path, { force: true })
   await writeFile(path, text, 'utf8')
   return path
 }
 
 /**
- * 주인 없는 노트를 지운다 (#106). 누가 주인인지는 부르는 쪽이 안다(`owned`).
+ * Deletes a note with no owner (#106). Which one has an owner is something the caller knows
+ * (`owned`).
  *
- * **디렉토리와 보통 파일만 본다.** 폴더도 파일도 host만 만들지만, 링크를 따라가 지우는 청소가 이 이슈의
- * 시작이었다 — `withFileTypes`의 항목은 링크를 따라가지 않고 링크 자신으로 답하므로, 링크는 폴더로도
- * 파일로도 보이지 않는다.
+ * **Only directories and regular files are looked at.** Both the folder and the files in it are
+ * created only by the host, but cleanup that followed a link and deleted through it is what
+ * started this issue — an entry from `withFileTypes` never follows a link and answers as the link
+ * itself, so a link never shows up as either a folder or a file.
  *
- * **빈 폴더는 남긴다** (#104) — 폴더를 통째로 가져가는 청소는 그 사이에 시작된 인수인계의 글을 함께 데려간다.
+ * **An empty folder is left as-is** (#104) — cleanup that took the whole folder away would also
+ * carry off the text of a handoff that started in the meantime.
  */
 export async function sweepHandoffNotes(owned: (sessionId: string) => boolean, projectId?: string): Promise<void> {
   let dirs: string[]
@@ -73,14 +84,14 @@ export async function sweepHandoffNotes(owned: (sessionId: string) => boolean, p
       ? [projectId]
       : (await readdir(root(), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name)
   } catch {
-    return // 인수인계를 한 적 없다 — 지울 것도 없다
+    return // no handoff has ever happened — nothing to delete
   }
   for (const pid of dirs) {
     let dir: string
     try {
       dir = handoffNoteDir(pid)
     } catch {
-      continue // 우리가 짓지 않은 이름이다 — 손대지 않는다
+      continue // a name we did not create — left untouched
     }
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
     for (const e of entries) {

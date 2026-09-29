@@ -1,48 +1,54 @@
 import { execFileSync } from 'node:child_process'
 
 /**
- * 프로세스 **트리**를 죽인다 — 명령 실행기, 터미널 탭, 앱 프로세스(M4)가 함께 쓴다.
+ * Kills a process **tree** — shared by the command runner, terminal tabs, and app processes
+ * (M4).
  *
- * node-pty의 `kill()`은 pty 자식 pid **하나**에만 시그널을 보낸다. 그런데 우리가 띄우는
- * 건 언제나 셸이고, 데브 서버는 그 아래에 있다. 셸만 맞고 서버는 살아남아 포트를 물고
- * 있는 일이 실제로 있었다 (도그푸딩 2026-09-07).
+ * node-pty's `kill()` sends a signal to **one** pty child pid only. But what we launch is always
+ * a shell, with the dev server underneath it. In practice the shell died and the server survived,
+ * still holding its port (dogfooding, 2026-09-07).
  *
- * 그룹(-pid) 하나로 끝나지 않는 이유 (실측 2026-09-07):
+ * Why one group (-pid) is not enough (measured 2026-09-07):
  *
- *   - `zsh -lc <command>` (명령 실행기)는 **비대화형**이라 잡 컨트롤이 없다. 자식들은
- *     셸과 같은 프로세스 그룹에 남으므로 `kill(-pid)` 한 방이면 트리 전체가 맞는다.
- *   - `zsh -l` (터미널 탭)은 **대화형**이라 잡 컨트롤이 켜진다. 거기서 띄운 데브 서버는
- *     **자기 프로세스 그룹**을 갖는다 — 셸의 그룹을 쏴도 서버는 안 맞는다. SIGHUP을
- *     스스로 다루는 서버(흔하다)라면 셸이 죽어도 그대로 남아 고아가 된다.
+ *   - `zsh -lc <command>` (the command runner) is **non-interactive**, so there is no job
+ *     control. Its children stay in the same process group as the shell, so one `kill(-pid)` hits
+ *     the whole tree.
+ *   - `zsh -l` (a terminal tab) is **interactive**, so job control is on. A dev server launched
+ *     from there gets **its own process group** — killing the shell's group does not touch the
+ *     server. A server that handles SIGHUP itself (common) survives the shell's death and is
+ *     orphaned.
  *
- * 그래서 ps로 자손을 훑어 **그들이 속한 그룹 전부**를 과녁으로 삼는다. 한 번의 ps는
- * 10ms 남짓이고, 이 함수는 Stop을 누를 때와 앱을 끌 때만 불린다.
+ * So ps is used to walk the descendants and target **every group they belong to.** One ps call
+ * costs around 10ms, and this function is only called when Stop is pressed or the app is closed.
  *
- * 유예 뒤의 두 번째 발(SIGKILL)은 **첫 발 때 본 트리**를 명단으로 들고 가서, 그중 아직
- * 남은 것을 쏜다 (#149). root(셸이나 앱)는 SIGTERM에 먼저 죽고, 그 아래에서 trap을 건
- * 데브 서버가 버티는 일이 흔하다. root가 죽으면 자손은 init(launchd)에 입양되어 ps에서
- * 더는 root 아래에 없다 — 두 번째 발을 root가 살아 있는지로 정하거나 root에서 다시
- * 훑으면, 버틴 자손이 과녁에서 빠진 채 고아로 남는다 (재현: 손자가 ppid 1로 살아 있었다).
+ * The second shot (SIGKILL) after the grace period carries **the tree seen at the first shot** as
+ * its list, and fires only at what is still there (#149). The root (the shell or app) usually
+ * dies first from SIGTERM, while a dev server underneath it that trapped the signal survives.
+ * Once the root dies, its descendants are adopted by init (launchd) and no longer appear under
+ * the root in ps — deciding the second shot by whether the root is still alive, or walking again
+ * from the root, would leave a surviving descendant off the target list, orphaned (reproduced: a
+ * grandchild survived with ppid 1).
  *
- * 닿지 않는 자리도 있다: 첫 발보다 **먼저** 트리를 떠난 것(setsid 뒤 부모를 끊고 데몬이
- * 된 서버)은 ps로 root에서 찾을 수 없다. 셸을 포함해 어떤 프로세스 관리자도 마찬가지다.
+ * There is a case this cannot reach: something that left the tree **before** the first shot (a
+ * server that called setsid, detached from its parent, and became a daemon) cannot be found under
+ * the root by ps. No process manager, including a shell, can reach it either.
  *
- * 자기 자신(호스트)이 속한 그룹은 절대 쏘지 않는다 — 정리하다 자기를 죽이면 남은
- * 프로세스를 아무도 못 치운다.
+ * The group the process itself (the host) belongs to is never targeted — killing itself during
+ * cleanup would leave nobody around to clean up what remained.
  */
 
-/** SIGTERM 뒤 이만큼 안 죽으면 SIGKILL — trap을 걸어 둔 데브 서버가 버티는 것까지 책임진다 */
+/** If this much time passes after SIGTERM with no death, SIGKILL follows — this also covers a dev server that trapped the signal and survived */
 export const KILL_GRACE_MS = 3000
 
 export type KillablePty = {
-  /** node-pty가 준 자식 pid. 페이크·win32에는 없다 */
+  /** The child pid node-pty gave us. Absent for a fake pty and on win32 */
   pid?: number
   kill(signal?: string): void
 }
 
 export type ProcRow = { pid: number; ppid: number; pgid: number }
 
-/** `ps -A -o pid=,ppid=,pgid=` 출력 → 행들. 못 읽은 줄은 조용히 버린다 */
+/** `ps -A -o pid=,ppid=,pgid=` output -> rows. A line that cannot be parsed is silently dropped */
 export function parsePs(out: string): ProcRow[] {
   const rows: ProcRow[] = []
   for (const line of out.split('\n')) {
@@ -53,7 +59,7 @@ export function parsePs(out: string): ProcRow[] {
   return rows
 }
 
-/** roots와, ppid를 따라 내려간 그 자손 전부 */
+/** The roots, plus every descendant reached by following ppid down */
 function descend(rows: ProcRow[], roots: readonly number[]): Set<number> {
   const byParent = new Map<number, number[]>()
   for (const r of rows) {
@@ -74,48 +80,52 @@ function descend(rows: ProcRow[], roots: readonly number[]): Set<number> {
   return seen
 }
 
-/** pids가 속한 그룹들. 두 발이 같은 규칙을 쓴다 — 우리 그룹과 init(1)·0은 과녁이 아니다 */
+/** The groups pids belong to. Both shots use the same rule — our own group and init(1)/0 are never targets */
 function groupsOf(pids: Iterable<number>, pgidOf: ReadonlyMap<number, number>, self: number): number[] {
   const selfPgid = pgidOf.get(self)
   const groups: number[] = []
   for (const pid of pids) {
     const g = pgidOf.get(pid)
     if (g === undefined || g <= 1) continue
-    if (g === selfPgid) continue // 우리 자신 — 여기서 죽으면 정리가 중간에 끊긴다
+    if (g === selfPgid) continue // ourselves — dying here would cut cleanup off partway through
     if (!groups.includes(g)) groups.push(g)
   }
   return groups
 }
 
 /**
- * 쏠 프로세스 그룹들 (음수로 보낼 pgid). root 자신의 그룹이 언제나 첫 과녁이다.
+ * The process groups to target (as negative pgids to send to). The root's own group is always
+ * the first target.
  *
- * `self`(호스트)가 속한 그룹은 뺀다. ps를 못 읽었으면 rows가 비고, 그러면 답은
- * root의 그룹 하나 — 예전 동작 그대로다.
+ * The group `self` (the host) belongs to is excluded. If ps could not be read, rows is empty, and
+ * the answer is just the root's own group — the old behavior, unchanged.
  */
 export function killTargets(rows: ProcRow[], root: number, self: number): number[] {
   const pgidOf = new Map<number, number>()
   for (const r of rows) pgidOf.set(r.pid, r.pgid)
 
   /*
-   * ps는 읽혔는데 root가 그 안에 없다 = 이미 죽었다. 그럴 땐 **아무것도 쏘지 않는다.**
-   * root의 그룹을 짐작해 쏘는 폴백은 ps 자체를 못 읽었을 때의 이야기고, 여기서 그러면
-   * 유예 뒤의 두 번째 발이 **재사용된 pid의 남의 그룹**을 때릴 수 있다.
+   * ps was read, but root is not in it — it is already dead. In that case, **nothing is fired
+   * at all.** Guessing at root's group as a fallback is only for when ps itself could not be
+   * read; doing that here risks the second shot, after the grace period, hitting **someone
+   * else's group under a recycled pid.**
    */
   if (rows.length > 0 && !pgidOf.has(root)) return []
-  if (rows.length === 0) pgidOf.set(root, root) // 그 폴백 — pty의 셸도 앱 프로세스도 자기 그룹의 우두머리로 뜬다
+  if (rows.length === 0) pgidOf.set(root, root) // that fallback — both the pty's shell and an app process start as the leader of their own group
 
   return groupsOf(descend(rows, [root]), pgidOf, self)
 }
 
 /**
- * 두 번째 발의 과녁 (#149). 첫 발 때 본 트리(`first`) 중 **아직 같은 그룹에 남은 것**과, 그들이
- * 유예 사이에 새로 띄운 자손이 속한 그룹 전부. root에서 다시 훑지 않는다 — root가 먼저 죽었으면
- * 버틴 자손은 init에 입양되어 root 아래에 없다 (머리말).
+ * The targets for the second shot (#149). Every group belonging to **whatever from the tree seen
+ * at the first shot (`first`) is still in the same group**, plus any descendant they launched
+ * during the grace period. This does not walk again from the root — if the root died first, a
+ * surviving descendant was adopted by init and is no longer under the root (see the file header).
  *
- * 같은 pid가 같은 그룹에 있으면 같은 프로세스로 본다. 그새 사라진 것은 쏘지 않는다 — 그 번호는
- * 남에게 갔을 수 있다(killTargets의 "이미 죽었다"와 같은 까닭). 남은 것이 하나라도 있는 그룹은
- * 그룹째 쏜다: 그룹에 누가 남아 있는 동안 그 번호는 재사용되지 않는다.
+ * The same pid in the same group is treated as the same process. Something that vanished in the
+ * meantime is never fired at — that number may have gone to someone else (the same reasoning as
+ * killTargets's "already dead"). A group with even one survivor is fired at as a whole group:
+ * while anyone remains in a group, that number is not recycled.
  */
 export function survivorTargets(rows: ProcRow[], first: readonly ProcRow[], self: number): number[] {
   const pgidOf = new Map<number, number>()
@@ -124,7 +134,7 @@ export function survivorTargets(rows: ProcRow[], first: readonly ProcRow[], self
   return groupsOf(descend(rows, survivors), pgidOf, self)
 }
 
-/** ps 한 장. 실패하면 빈 배열 — 그러면 root의 그룹만 쏘는 예전 동작으로 내려앉는다 */
+/** One ps snapshot. Returns an empty array on failure — which falls back to the old behavior of only firing at the root's group */
 function snapshot(): ProcRow[] {
   try {
     return parsePs(execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 2000 }))
@@ -133,14 +143,14 @@ function snapshot(): ProcRow[] {
   }
 }
 
-/** 트리에 시그널 한 발 쏘고, 그때 본 트리(root와 자손의 행)를 돌려준다 — 두 번째 발이 들고 갈 명단이다 */
+/** Fires one signal at the tree, and returns the tree seen at that moment (root's and descendants' rows) — the list the second shot will carry */
 function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): ProcRow[] {
   const pid = handle.pid
   if (process.platform === 'win32' || typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
     try {
       handle.kill(signal)
     } catch {
-      // 이미 죽었다
+      // already dead
     }
     return []
   }
@@ -152,32 +162,35 @@ function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): ProcRow[] {
       process.kill(-g, signal)
       hit = true
     } catch {
-      // 그 그룹은 이미 사라졌다 — 나머지는 계속 쏜다
+      // that group is already gone — keep firing at the rest
     }
   }
   if (!hit) {
     try {
-      handle.kill(signal) // 그룹이 전부 사라졌거나 권한이 없다 — 마지막 확인 사살
+      handle.kill(signal) // every group is gone, or there is no permission — one last confirming shot
     } catch {
-      // 이미 죽었다
+      // already dead
     }
   }
-  if (!rows.some((r) => r.pid === pid)) return [] // ps를 못 읽었거나 root가 이미 없었다 — 명단이 없다
+  if (!rows.some((r) => r.pid === pid)) return [] // ps could not be read, or root was already gone — no list
   const tree = descend(rows, [pid])
   return rows.filter((r) => tree.has(r.pid))
 }
 
-/** 트리에 시그널 한 발. pid를 모르면(페이크·win32) 종전처럼 pty.kill로 물러난다 */
+/** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty, win32) */
 export function killTree(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL'): void {
   shoot(handle, signal)
 }
 
 /**
- * SIGTERM으로 정중히, 유예 안에 안 죽으면 SIGKILL — 첫 발 때 본 트리에서 아직 남은 것에 (#149).
+ * Politely, with SIGTERM; if it has not died within the grace period, SIGKILL — aimed at whatever
+ * from the tree seen at the first shot is still there (#149).
  *
- * 두 번째 발을 쏠지는 root가 살아 있는지로 정하지 않는다. `alive`는 root **자신**에 대한 호출자의
- * 앎이다: false면 호출자가 root의 끝남을 이미 봤다(거둬졌다)는 뜻이고, 그 번호로 지금 보이는 것은
- * 남일 수 있으니 root만 명단에서 뺀다. 남은 자손은 그와 상관없이 맞는다.
+ * Whether the second shot is fired is not decided by whether the root is still alive. `alive` is
+ * the caller's own knowledge about the root **itself**: false means the caller has already
+ * observed the root end (it has been reaped), so whatever now shows up under that number could
+ * belong to someone else — only the root is excluded from the list. The remaining descendants are
+ * hit regardless.
  */
 export function stopTree(handle: KillablePty, graceMs: number, alive: () => boolean): void {
   const first = shoot(handle, 'SIGTERM')
@@ -186,26 +199,32 @@ export function stopTree(handle: KillablePty, graceMs: number, alive: () => bool
 }
 
 /**
- * 우두머리가 **이미 스스로 끝난** 그룹을 거둔다 — 두 발, stopTree와 같은 규칙으로.
+ * Reaps a group whose leader has **already ended on its own** — two shots, the same rule as
+ * stopTree.
  *
- * stopTree는 root에서 트리를 훑는다. 그런데 root가 먼저 끝났으면 ps에 root가 없어 과녁이 비고(killTargets의 "이미
- * 죽었다"), 그 자손은 init에 입양되어 root 아래에도 없다 — 스스로 잘 끝난 앱(M4 A-3)이 남긴 도우미가 바로 그 자리다.
- * 그래서 그룹 번호로 찾는다: 앱은 자기 그룹의 우두머리로 뜨고(detached), 그룹에 누가 남아 있는 동안 그 번호는 pid로
- * 재사용되지 않는다(POSIX) — 그룹째 쏘아도 남의 프로세스에 닿지 않는다.
+ * stopTree walks the tree from the root. But if the root ended first, root is missing from ps and
+ * the target list ends up empty (killTargets's "already dead"), and its descendants have been
+ * adopted by init and are not under the root either — this is exactly the spot where a helper
+ * left behind by an app that exited cleanly on its own (M4 A-3) sits. So this looks up by group
+ * number instead: an app starts as the leader of its own group (detached), and while anyone
+ * remains in that group, POSIX guarantees that number is not recycled as a pid — firing at the
+ * whole group never reaches someone else's process.
  *
- * 첫 발(SIGTERM) 때의 그룹 명단을 들고 가서, 유예 뒤 **아직 남은 것**과 그들이 새로 띄운 자손에 SIGKILL을 쏜다(survivorTargets).
- * SIGTERM을 무시하는 도우미가 launchd 아래 고아로 남던 자리다. ps를 못 읽으면 예전처럼 그룹째 쏜다.
+ * This carries the group list from the first shot (SIGTERM), and after the grace period fires
+ * SIGKILL at **whatever is still there** and any descendant they launched since (survivorTargets).
+ * This is exactly where a helper that ignores SIGTERM used to end up orphaned under launchd. If
+ * ps cannot be read, this falls back to firing at the whole group as before.
  */
 export function stopGroup(pgid: number, graceMs: number): void {
   if (process.platform === 'win32' || !Number.isInteger(pgid) || pgid <= 1) return
   const rows = snapshot()
   const members = rows.filter((r) => r.pgid === pgid)
-  if (rows.length > 0 && members.length === 0) return // 그룹이 비었다 — 흔한 경우다
-  if (members.some((r) => r.pid === process.pid)) return // 우리 그룹 — 여기서 죽으면 정리가 끊긴다
+  if (rows.length > 0 && members.length === 0) return // the group is empty — a common case
+  if (members.some((r) => r.pid === process.pid)) return // our own group — dying here would cut off cleanup
   try {
     process.kill(-pgid, 'SIGTERM')
   } catch {
-    return // 그 사이에 비었다
+    return // it emptied out in the meantime
   }
   const t = setTimeout(() => {
     const now = snapshot()
@@ -214,18 +233,19 @@ export function stopGroup(pgid: number, graceMs: number): void {
       try {
         process.kill(-g, 'SIGKILL')
       } catch {
-        // 그 그룹은 그새 비었다 — 나머지는 계속 쏜다
+        // that group has already emptied out — keep firing at the rest
       }
     }
   }, graceMs)
   t.unref?.()
 }
 
-/** stopTree의 두 번째 발 */
+/** stopTree's second shot */
 function finish(handle: KillablePty, first: ProcRow[], rootOurs: boolean): void {
   /*
-   * 명단이 없다 — pid를 모르거나(페이크·win32), ps를 못 읽었거나, root가 첫 발 때 이미 없었다.
-   * 누가 트리였는지 모르니 예전 동작 그대로: root가 아직 우리 것일 때만 root에서 다시 쏜다.
+   * There is no list — either the pid was unknown (a fake pty, win32), ps could not be read, or
+   * root was already gone at the first shot. With no way to know who was in the tree, this falls
+   * back to the old behavior: firing again from the root only when it is still ours.
    */
   const rows = first.length > 0 ? snapshot() : []
   if (rows.length === 0) {
@@ -240,17 +260,19 @@ function finish(handle: KillablePty, first: ProcRow[], rootOurs: boolean): void 
       process.kill(-g, 'SIGKILL')
       hit = true
     } catch {
-      // 그 그룹은 그새 비었다 — 나머지는 계속 쏜다
+      // that group has already emptied out — keep firing at the rest
     }
   }
   /*
-   * 그룹으로는 하나도 못 맞혔는데 root가 아직 표에 있다 — root가 우리 그룹에 있어 그룹째 쏠 수 없는
-   * 자리다. pid 하나로 확인 사살한다. 표에 없으면 이미 끝났다: 끝난 번호에는 쏘지 않는다.
+   * Not one group was hit, but root is still in the table — this is a spot where root sits in
+   * our own group and firing at the group is not an option. So a confirming shot fires at the
+   * single pid instead. If it is not in the table, it has already ended: a number that has ended
+   * is never fired at.
    */
   if (hit || !rootOurs || !rows.some((r) => r.pid === handle.pid)) return
   try {
     handle.kill('SIGKILL')
   } catch {
-    // 이미 죽었다
+    // already dead
   }
 }

@@ -3,10 +3,10 @@ import { spawn } from 'node:child_process'
 import { CommandRunner } from './commands.js'
 
 /**
- * 자주 쓰는 명령어 실행기 (#60)의 계약:
- *   - 명령별 마지막 실행 하나 (재실행 = 죽이고 새로, 로그 교체)
- *   - 서로 다른 명령은 동시 실행
- *   - 끝나면 종료 코드와 함께 로그가 남는다 (단발/상주 구분 없음)
+ * The contract for the frequently used command runner (#60):
+ *   - one, the most recent run per command (running again kills the old one and starts fresh, replacing the log)
+ *   - different commands run at the same time
+ *   - once it ends, a log with an exit code is left (no distinction between one-shot and long-running)
  */
 
 function fakePty() {
@@ -17,7 +17,7 @@ function fakePty() {
     emitExit: (code: number) => void
   }[] = []
   const mod = {
-    /** 실제 pid를 주면 그룹 킬 경로가 산다 — 반드시 process.kill을 모킹한 테스트에서만 줄 것 */
+    /** Giving a real pid brings the group-kill path to life — only ever do this in a test that has mocked process.kill */
     pid: undefined as number | undefined,
     spawn(_file: string, args: string[], _opts: Record<string, unknown>) {
       let onData = (_d: string) => {}
@@ -45,7 +45,7 @@ function stub(svc: CommandRunner, mod: unknown): void {
 }
 
 describe('CommandRunner', () => {
-  it('출력이 로그에 쌓이고, 끝나면 종료 코드가 남는다', () => {
+  it('output accumulates in the log, and an exit code is left once it ends', () => {
     const fake = fakePty()
     const frames: unknown[] = []
     const svc = new CommandRunner((f) => frames.push(f))
@@ -63,7 +63,7 @@ describe('CommandRunner', () => {
     expect(frames).toContainEqual({ terminalId: r.runId, exitCode: 0 })
   })
 
-  it('재실행은 죽이고 새로 시작하며 로그를 교체한다 — runId도 새것', () => {
+  it('rerunning kills the old one, starts fresh, and replaces the log — with a new runId too', () => {
     const fake = fakePty()
     const svc = new CommandRunner(() => {})
     stub(svc, fake.mod)
@@ -75,12 +75,12 @@ describe('CommandRunner', () => {
     expect(fake.instances[0]!.kill).toHaveBeenCalled()
     expect(r2.runId).not.toBe(r1.runId)
     expect(svc.log('/tmp/p', 'pnpm dev')!.history).toBe('')
-    // 죽어가는 옛 프로세스의 마지막 출력은 새 로그에 섞이지 않는다
+    // The dying old process's last output does not mix into the new log
     fake.instances[0]!.emitData('유령 출력')
     expect(svc.log('/tmp/p', 'pnpm dev')!.history).toBe('')
   })
 
-  it('서로 다른 명령은 동시에 돈다 — 명령당 프로세스 하나', () => {
+  it('different commands run at the same time — one process per command', () => {
     const fake = fakePty()
     const svc = new CommandRunner(() => {})
     stub(svc, fake.mod)
@@ -95,7 +95,7 @@ describe('CommandRunner', () => {
     expect(state.every((s) => s.running)).toBe(true)
   })
 
-  it('stop은 프로세스만 죽인다 — 로그는 남는다 (종료도 결과다)', () => {
+  it('stop kills only the process — the log survives (an exit is a result too)', () => {
     const fake = fakePty()
     const svc = new CommandRunner(() => {})
     stub(svc, fake.mod)
@@ -111,13 +111,13 @@ describe('CommandRunner', () => {
     expect(log.exitCode).toBe(130)
   })
 
-  it('실행된 적 없는 명령의 로그는 null — 빈 로그와 구분된다', () => {
+  it('the log of a command that has never run is null — distinct from an empty log', () => {
     const svc = new CommandRunner(() => {})
     stub(svc, fakePty().mod)
     expect(svc.log('/tmp/p', 'pnpm build')).toBeNull()
   })
 
-  it('디렉토리가 다르면 같은 명령도 별개다 (워크트리 준비 — 터미널과 같은 규칙)', () => {
+  it('the same command in a different directory is a separate entry (groundwork for worktrees — the same rule as a terminal)', () => {
     const fake = fakePty()
     const svc = new CommandRunner(() => {})
     stub(svc, fake.mod)
@@ -129,18 +129,21 @@ describe('CommandRunner', () => {
 })
 
 /**
- * Stop이 안 먹히던 버그 (도그푸딩 2026-09-07): node-pty kill()은 pty 자식 pid 하나에만
- * 시그널을 보내는데, 명령은 `zsh -lc`로 떠서 실제 서버는 그 아래 트리였다.
- * 계약: pid가 있으면 프로세스 **그룹**(-pid)으로 SIGTERM, 유예 안에 안 죽으면 SIGKILL.
+ * The bug where Stop did not actually work (dogfooding, 2026-09-07): node-pty's kill() sends a
+ * signal to only one pty child pid, but a command is launched via `zsh -lc`, so the real server was
+ * a tree underneath it.
+ * The contract: given a pid, SIGTERM goes to the process **group** (-pid); if it has not died
+ * within the grace period, SIGKILL follows.
  */
-describe('CommandRunner — 트리 킬', () => {
+describe('CommandRunner — tree kill', () => {
   /*
-   * pid는 **진짜 살아 있는 것**이어야 한다. killTree는 ps로 트리를 훑고, ps가 읽혔는데
-   * 그 pid가 없으면 "이미 죽었다"로 보고 아무것도 쏘지 않는다 (재사용된 pid를 때리지
-   * 않으려는 규칙). 지어낸 pid를 주면 그 규칙에 걸려 여기서 검증할 것이 사라진다.
+   * The pid has to be **genuinely alive.** killTree walks the tree with ps, and if ps was read but
+   * that pid is missing from it, it is treated as "already dead" and nothing is fired at all (the
+   * rule against hitting a recycled pid). A made-up pid would trip that rule and leave nothing here
+   * to actually verify.
    *
-   * detached로 띄워 **자기 프로세스 그룹**을 갖게 한다 — 우리 그룹에 붙어 있으면
-   * killTree가 "자기 자신"으로 보고 건너뛴다.
+   * Launched detached so it gets **its own process group** — if it stayed in our own group,
+   * killTree would see it as "itself" and skip it.
    */
   const spawned: number[] = []
   const livePid = (): number => {
@@ -152,14 +155,14 @@ describe('CommandRunner — 트리 킬', () => {
   afterEach(() => {
     for (const pid of spawned.splice(0)) {
       try {
-        process.kill(-pid, 'SIGKILL') // 진짜로 치운다 (process.kill 목은 이미 풀린 뒤다)
+        process.kill(-pid, 'SIGKILL') // actually cleans it up (the process.kill mock has already been restored by this point)
       } catch {
-        // 벌써 없다
+        // already gone
       }
     }
   })
 
-  it('stop은 프로세스 그룹에 SIGTERM을 보내고, 유예가 지나도 살아 있으면 SIGKILL한다', () => {
+  it('stop sends SIGTERM to the process group, and SIGKILL if it is still alive after the grace period', () => {
     vi.useFakeTimers()
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
     try {
@@ -172,7 +175,7 @@ describe('CommandRunner — 트리 킬', () => {
       svc.run('/tmp/p', 'pnpm dev')
       svc.stop('/tmp/p', 'pnpm dev')
       expect(killSpy).toHaveBeenCalledWith(-pid, 'SIGTERM')
-      // 단일 pid 킬로 물러나지 않았다 — 그룹이 과녁이다
+      // this never fell back to a single-pid kill — the group is the target
       expect(fake.instances[0]!.kill).not.toHaveBeenCalled()
 
       vi.advanceTimersByTime(3000)
@@ -183,7 +186,7 @@ describe('CommandRunner — 트리 킬', () => {
     }
   })
 
-  it('유예 안에 죽으면 SIGKILL은 없다 — 정중한 종료가 존중된다', () => {
+  it('no SIGKILL if it dies within the grace period — a polite exit is honored', () => {
     vi.useFakeTimers()
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
     try {
@@ -195,7 +198,7 @@ describe('CommandRunner — 트리 킬', () => {
 
       svc.run('/tmp/p', 'pnpm dev')
       svc.stop('/tmp/p', 'pnpm dev')
-      fake.instances[0]!.emitExit(143) // SIGTERM을 받고 죽었다
+      fake.instances[0]!.emitExit(143) // died after receiving SIGTERM
       vi.advanceTimersByTime(3000)
       expect(killSpy).not.toHaveBeenCalledWith(-pid, 'SIGKILL')
     } finally {
@@ -204,7 +207,7 @@ describe('CommandRunner — 트리 킬', () => {
     }
   })
 
-  it('앱 종료(disposeAll)는 그룹을 바로 SIGKILL한다 — 유예를 기다릴 프로세스가 없다', () => {
+  it('an app shutdown (disposeAll) sends SIGKILL to the group immediately — there is no process to wait a grace period for', () => {
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
     try {
       const fake = fakePty()
@@ -221,7 +224,7 @@ describe('CommandRunner — 트리 킬', () => {
     }
   })
 
-  it('pid가 없으면(페이크·win32) 종전처럼 pty.kill로 물러난다', () => {
+  it('falls back to pty.kill as before when there is no pid (a fake pty, win32)', () => {
     const fake = fakePty()
     const svc = new CommandRunner(() => {})
     stub(svc, fake.mod)

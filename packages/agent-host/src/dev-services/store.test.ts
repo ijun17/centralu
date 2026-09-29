@@ -1,4 +1,4 @@
-/** T1-2 완료 기준: 스키마가 실제로 적용되고 CRUD가 도는지 */
+/** T1-2 done criteria: whether the schema is actually applied and CRUD works */
 import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
@@ -9,9 +9,9 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
 /**
- * 지금의 최신 스키마 버전 — 마이그레이션을 더할 때 여기 **한 곳**만 올린다.
- * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
- * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
+ * The current latest schema version — bump **only this one place** when adding a migration.
+ * v22, v23 and v24 broke the same six assertions one after another: if the version is written
+ * six times, every migration bills six small chores.
  */
 const LATEST_SCHEMA = 40
 
@@ -38,16 +38,16 @@ function indexRowsOf(s: Store, sessionId: string): () => number {
 }
 
 /**
- * v10은 테이블을 통째로 다시 만든다 (SQLite는 NOT NULL을 못 푼다).
- * 이 프로젝트에서 가장 위험한 변경이라, **옛 DB에 데이터를 넣고 실제로 올려본다.**
- * 한 줄이라도 조용히 잃으면 되돌릴 방법이 없다.
+ * v10 rebuilds the table whole (SQLite cannot drop a NOT NULL).
+ * This is the riskiest change in this project, so **actual data is loaded into an old database
+ * and actually migrated.** Silently losing even one row would be unrecoverable.
  */
-describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
-  it('옛 DB(v9)의 세션·메시지가 그대로 살아 넘어온다', () => {
+describe('v10 migration — allows a session with no project', () => {
+  it('the sessions and messages of an old database (v9) survive the move intact', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v10-'))
     const file = join(dir, 'store.db')
 
-    // v9 상태의 DB를 손으로 만든다 (project_id NOT NULL)
+    // Build a v9-state database by hand (project_id NOT NULL)
     const old = new Database(file)
     old.pragma('foreign_keys = ON')
     old.exec(`
@@ -82,7 +82,7 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
     expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
     expect(store.loadMessages('s1').length).toBe(1)
 
-    // 그리고 이제 프로젝트 없는 세션이 들어간다
+    // And now a session with no project is inserted
     store.upsertSession({
       id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -95,22 +95,23 @@ describe('v10 이관 — 프로젝트 없는 세션을 허용한다', () => {
 })
 
 describe('Store (dev sqlite)', () => {
-  it('최신 스키마까지 마이그레이션된다', () => {
+  it('migrates all the way to the latest schema', () => {
     expect(new Store().schemaVersion).toBe(LATEST_SCHEMA)
   })
 
   /**
-   * 두 번째로 여는 DB는 마이그레이션을 **하나도** 돌지 않는다.
+   * Opening the database a second time runs **zero** migrations.
    *
-   * 오래 깨져 있던 성질이라 못을 박는다. schema.sql이 열 때마다 `user_version = 1`을
-   * 다시 적는 바람에 v27짜리 DB도 매 실행 26개를 처음부터 돌았다 — 스텝이 전부 멱등해서
-   * 결과는 옳았고, 그래서 **아무도 몰랐다.** 실측한 값은 열 때마다 4.4~5.0초였다
-   * (store.db 94MB · 메시지 66,700건; v3·v11·v21이 각각 전체 스캔).
+   * This is nailed down because it was broken for a long time. schema.sql used to rewrite
+   * `user_version = 1` on every open, so even a v27 database replayed all 26 steps from
+   * scratch on every run — every step was idempotent, so the result stayed correct, and
+   * **nobody noticed.** The measured cost was 4.4 to 5.0 seconds per open (a 94MB store.db,
+   * 66,700 messages; v3, v11 and v21 each scanned the whole table).
    *
-   * 시간이 아니라 횟수로 잰다. 시간은 기계와 데이터 크기를 타지만, "다시 돌았는가"는
-   * 어디서든 같은 답이다.
+   * This is measured by count, not by time. Time depends on the machine and the data size, but
+   * "did it run again" has the same answer everywhere.
    */
-  it('한 번 지난 마이그레이션은 다시 돌지 않는다', () => {
+  it('a migration that has already run does not run again', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-store-'))
     const file = join(dir, 'store.db')
 
@@ -123,14 +124,14 @@ describe('Store (dev sqlite)', () => {
     const again = new Store(file)
     expect(again.migrationsRun).toBe(0)
     expect(again.schemaVersion).toBe(LATEST_SCHEMA)
-    // 그리고 데이터는 그대로다 — 안 돌았다는 것이 안 읽힌다는 뜻이면 안 된다
+    // And the data is intact — "did not run" must not mean "cannot be read"
     expect(again.listProjects().map((p) => p.id)).toEqual(['p1'])
     again.close()
 
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('프로젝트 등록·조회, 경로 중복은 갱신으로 처리', () => {
+  it('registers and lists projects; a duplicate path is treated as an update', () => {
     const s = seeded()
     s.addProject({ id: 'p1b', path: '/tmp/p1', name: '이름변경' })
     const list = s.listProjects()
@@ -138,7 +139,7 @@ describe('Store (dev sqlite)', () => {
     expect(list[0]!.name).toBe('이름변경')
   })
 
-  it('세션 upsert와 목록', () => {
+  it('session upsert and listing', () => {
     const s = seeded()
     const before = s.listSessions()[0]!
     expect(before.autoNamed).toBe(true)
@@ -150,11 +151,12 @@ describe('Store (dev sqlite)', () => {
   })
 
   /*
-   * UPDATE 절에 tool이 빠져 있어서 에이전트 전환(claude→codex)이 저장되지 않았다.
-   * 재시작하면 도구는 claude로 되돌아가는데, 전환하면서 이어갈 실마리(external_id)는
-   * 이미 끊은 뒤라 되살릴 수도 없는 세션이 됐다.
+   * The UPDATE clause used to be missing tool, so switching agents (claude to codex) was never
+   * saved. On restart the tool reverted to claude, but by then the thread to resume from
+   * (external_id), already broken by the switch, turned the session into one that could not
+   * even be recovered.
    */
-  it('도구 전환이 저장된다 — 다시 켜도 codex다', () => {
+  it('a tool switch is saved — it is still codex after restart', () => {
     const s = seeded()
     const before = s.listSessions()[0]!
     s.upsertSession({ ...before, tool: 'codex', externalId: null, importedFrom: null })
@@ -163,7 +165,7 @@ describe('Store (dev sqlite)', () => {
     expect(after.externalId).toBeNull()
   })
 
-  it('메시지 append/load와 seq 증가', () => {
+  it('message append/load and seq incrementing', () => {
     const s = seeded()
     expect(s.nextSeq('s1')).toBe(1)
     s.appendMessages([
@@ -177,7 +179,7 @@ describe('Store (dev sqlite)', () => {
     expect(s.listSessions()[0]!.lastSeq).toBe(2)
   })
 
-  it('페이지네이션: beforeSeq 이전 것만', () => {
+  it('pagination: only what comes before beforeSeq', () => {
     const s = seeded()
     s.appendMessages(
       Array.from({ length: 5 }, (_, i) => ({
@@ -187,14 +189,14 @@ describe('Store (dev sqlite)', () => {
     expect(s.loadMessages('s1', 2, 4).map((m) => m.seq)).toEqual([2, 3])
   })
 
-  it('읽음 위치는 뒤로 가지 않는다', () => {
+  it('the read position never moves backward', () => {
     const s = seeded()
     s.markRead('s1', 5)
     s.markRead('s1', 3)
     expect(s.listSessions()[0]!.lastReadSeq).toBe(5)
   })
 
-  it('승인 규칙 저장·조회', () => {
+  it('saves and lists approval rules', () => {
     const s = seeded()
     s.addApprovalRule({ scope: 'session', sessionId: 's1', matcher: 'npm test*', decision: 'allow' })
     const rules = s.listApprovalRules()
@@ -203,12 +205,12 @@ describe('Store (dev sqlite)', () => {
   })
 })
 
-describe('마이그레이션 (E-0)', () => {
-  it('v1 DB를 열면 새 컬럼·FTS가 추가되고 기존 메시지가 검색된다', () => {
+describe('migrations (E-0)', () => {
+  it('opening a v1 database adds new columns and FTS, and existing messages become searchable', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-migrate-'))
     const file = join(dir, 'old.db')
 
-    // v1 상태를 손으로 만든다 (touched_paths도 messages_fts도 없는 상태)
+    // Build a v1 state by hand (neither touched_paths nor messages_fts exist)
     const raw = new Database(file)
     raw.exec(`
       CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT, tool TEXT, external_id TEXT,
@@ -225,16 +227,16 @@ describe('마이그레이션 (E-0)', () => {
     const store = new Store(file)
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
 
-    // 백필이 되어야 예전 대화도 찾을 수 있다
+    // Only the backfill lets an old conversation be found
     const hits = store.searchMessages('승인')
     expect(hits.length).toBe(1)
     expect(hits[0]!.sessionId).toBe('s1')
 
-    // 새 컬럼도 쓸 수 있다
+    // The new column is usable too
     store.setTouchedPaths('s1', ['src/a.ts'])
     expect(store.getTouchedPaths('s1')).toEqual(['src/a.ts'])
 
-    // v4: 모델·권한도 기존 세션에 붙는다 (기본값으로)
+    // v4: model and permission are also attached to an existing session (with default values)
     const migrated = store.listSessions().find((s) => s.id === 's1')
     expect(migrated).toMatchObject({ model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null })
 
@@ -242,23 +244,24 @@ describe('마이그레이션 (E-0)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('한국어 조사가 붙어도 검색된다 (trigram 토크나이저)', () => {
+  it('a search still matches a word with a Korean particle attached (trigram tokenizer)', () => {
     const s = seeded()
     s.appendMessages([
       { sessionId: 's1', seq: 10, role: 'assistant', kind: 'text', payload: { text: '승인을 기다리는 중입니다' }, ts: 0 },
     ])
-    // unicode61이면 '승인'으로 '승인을'을 못 찾는다 — 이게 이 앱에서 실제로 겪을 문제
+    // With unicode61, searching '승인' would not find '승인을' — a real problem this app runs into
     expect(s.searchMessages('승인').length).toBe(1)
     expect(s.searchMessages('기다리').length).toBe(1)
     s.close()
   })
 
   /*
-   * 색인이 메시지보다 8.6배 많았다 (실제 DB: 메시지 28,892 · 색인 249,809).
-   * messages는 덮어쓰는데 색인은 맨 INSERT라, 같은 자리를 다시 쓸 때마다 한 행씩 쌓였다.
-   * recall이 같은 말을 반복해 내놓은 것도, 색인이 본문의 수십 배로 부푼 것도 여기서 나왔다.
+   * The index held 8.6 times more rows than messages (real database: 28,892 messages, 249,809
+   * index rows). messages overwrites, but the index was a plain INSERT, so rewriting the same
+   * spot stacked up another row every time. This is where recall repeating the same line came
+   * from, and where the index bloating to tens of times the size of the actual text came from.
    */
-  it('같은 메시지를 다시 써도 색인이 늘지 않는다', () => {
+  it('rewriting the same message does not grow the index', () => {
     const s = seeded()
     const msg = {
       sessionId: 's1', seq: 10, role: 'assistant' as const, kind: 'text' as const,
@@ -269,7 +272,7 @@ describe('마이그레이션 (E-0)', () => {
     s.close()
   })
 
-  it('내용을 고쳐 쓰면 옛 내용은 검색되지 않는다', () => {
+  it('rewriting the content makes the old content unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', seq: 11, role: 'assistant' as const, kind: 'text' as const, ts: 0 }
     s.appendMessages([{ ...at, payload: { text: '옛날내용' } }])
@@ -280,11 +283,12 @@ describe('마이그레이션 (E-0)', () => {
   })
 
   /*
-   * 본문이 사라진 자리를 색인에서 걷는 문장이 FTS5의 'delete' 명령이었다. 그 명령은
-   * contentless·external content 표에서만 쓸 수 있어 언제나 SQL logic error로 실패했고,
-   * 같은 묶음의 다른 메시지까지 되돌렸다 (#179).
+   * The statement that removed a spot with no body from the index used to be FTS5's 'delete'
+   * command. That command only works on contentless or external-content tables, so it always
+   * failed with SQL logic error, and rolled back other messages in the same batch along with it
+   * (#179).
    */
-  it('색인된 자리를 본문 없이 다시 써도 묶음이 살고 옛 본문은 검색되지 않는다', () => {
+  it('rewriting an indexed spot with no body leaves the batch intact and makes the old body unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', role: 'assistant' as const, kind: 'text' as const, ts: 0 }
     s.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
@@ -301,9 +305,10 @@ describe('마이그레이션 (E-0)', () => {
   })
 
   /*
-   * 큰 세션 하나를 한 트랜잭션으로 지우면 호스트가 2초 가까이 멈췄다 (#179, 실제 DB의
-   * 메시지 49,710건 세션에서 1.96초). 조각 사이에 이벤트 루프가 돌아야 하고, 어느 조각
-   * 사이에서 멈춰 보아도 남은 메시지와 색인이 서로 맞아야 한다.
+   * Deleting one large session in a single transaction froze the host for nearly two seconds
+   * (#179, 1.96s on a real-database session with 49,710 messages). The event loop has to turn
+   * between chunks, and no matter which chunk boundary this is stopped at, the remaining
+   * messages and the index have to agree with each other.
    * Since #204 that is purging a session from the trash; the index rows it meets are the ones a trash step cut
    * short left behind, so they are put back here first to give the chunks something to keep in step.
    */
@@ -312,7 +317,7 @@ describe('마이그레이션 (E-0)', () => {
     const n = 1000
     s.appendMessages(
       Array.from({ length: n }, (_, i) => ({
-        // 사람의 말은 이어 붙지 않는다 — loadMessages의 개수가 곧 행의 개수다
+        // A human's words are never joined together — loadMessages's count is exactly the row count
         sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const,
         payload: { text: `은하수 ${i}` }, ts: i,
       })),
@@ -331,7 +336,7 @@ describe('마이그레이션 (E-0)', () => {
     setImmediate(look)
     await s.purgeSession('s1', 100)
     deleting = false
-    // 한 번에 끝났다면 look은 한 번도 돌지 못한다
+    // If this finished in one shot, look would never have run even once
     expect(seen.length).toBeGreaterThanOrEqual(5)
     for (const at of seen) expect(at.hits).toBe(at.messages)
     expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
@@ -342,20 +347,20 @@ describe('마이그레이션 (E-0)', () => {
     s.close()
   })
 
-  it('본문 전체를 돌려준다 — 자르는 일은 부르는 쪽이 한다', () => {
+  it('returns the whole body — trimming it is left to the caller', () => {
     const s = seeded()
     const long = `${'앞'.repeat(300)}은하수${'뒤'.repeat(300)}`
     s.appendMessages([
       { sessionId: 's1', seq: 12, role: 'assistant', kind: 'text', payload: { text: long }, ts: 0 },
     ])
-    // 예전에는 snippet(...,12)로 15자쯤에서 끊겨 무엇인지 가릴 수 없었다
+    // This used to be cut off at around 15 characters by snippet(...,12), unable to tell what it was
     expect(s.searchMessages('은하수')[0]!.body).toBe(long)
     s.close()
   })
 })
 
-describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
-  it('imported_from 컬럼이 생기고 왕복한다', () => {
+describe('migration v5 — the original conversation an import inherited', () => {
+  it('the imported_from column exists and round-trips', () => {
     const store = new Store()
     store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     const base = {
@@ -367,17 +372,18 @@ describe('마이그레이션 v5 — 이어받은 원본 기록', () => {
     }
     store.upsertSession(base)
     const back = store.listSessions().find((s) => s.id === 's-import')!
-    // resume이 새 식별자를 발급해도 어느 대화에서 왔는지는 남아 있어야 한다
+    // Even when resume issues a new identifier, which conversation it came from must survive
     expect(back.importedFrom).toBe('ext-old')
     expect(back.externalId).toBe('ext-new')
   })
 })
 
 /**
- * 추론 강도는 모델과 같은 성질이라 세션과 함께 남아야 한다.
- * 이미 쓰고 있는 DB에 컬럼이 붙는 것이므로 마이그레이션이 실제로 도는지 확인한다.
+ * Reasoning effort is the same kind of property as the model, so it has to persist with the
+ * session. It is a column added to a database already in use, so this checks that the
+ * migration actually runs.
  */
-describe('마이그레이션 v7 — 추론 강도', () => {
+describe('migration v7 — reasoning effort', () => {
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
     id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -387,7 +393,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     ...over,
   })
 
-  it('effort 컬럼이 생기고 왕복한다', () => {
+  it('the effort column exists and round-trips', () => {
     const store = seeded()
     store.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
     const back = store.listSessions().find((r) => r.id === 's-effort')
@@ -396,7 +402,7 @@ describe('마이그레이션 v7 — 추론 강도', () => {
     store.close()
   })
 
-  it('강도를 안 고른 세션은 null로 남는다 — 빈 문자열과 구분된다', () => {
+  it('a session with no effort chosen stays null — distinct from an empty string', () => {
     const store = seeded()
     store.upsertSession(row({ id: 's-none' }))
     expect(store.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
@@ -405,11 +411,12 @@ describe('마이그레이션 v7 — 추론 강도', () => {
 })
 
 /**
- * v18 — 응답 길이(#54). model(v4)·effort(v7)와 같은 반복 함정이 있는 자리다:
- * 컬럼을 넣고 네 자리(DDL·INSERT·UPDATE·SELECT) 중 하나를 빼먹으면 컴파일은
- * 지나가는데 값만 조용히 사라진다. 왕복이 그 네 자리를 한 번에 검사한다.
+ * v18 — response length (#54). This is a spot with the same recurring trap as model (v4) and
+ * effort (v7): add a column and miss one of the four places (DDL, INSERT, UPDATE, SELECT), and
+ * it compiles fine while the value just quietly disappears. A round-trip test checks all four
+ * places at once.
  */
-describe('마이그레이션 v18 — 응답 길이', () => {
+describe('migration v18 — response length', () => {
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
     id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '세션',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -419,25 +426,25 @@ describe('마이그레이션 v18 — 응답 길이', () => {
     ...over,
   })
 
-  it('verbosity 컬럼이 생기고 왕복한다', () => {
+  it('the verbosity column exists and round-trips', () => {
     const store = seeded()
     store.upsertSession(row({ id: 's-verb', verbosity: 'low' }))
     expect(store.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('low')
-    // 갱신도 남는다 — UPDATE 절에서 빠지면 첫 저장만 되고 그 뒤로는 안 바뀐다
+    // An update persists too — missing it from the UPDATE clause would save it only the first time and never after
     store.upsertSession(row({ id: 's-verb', verbosity: 'high' }))
     expect(store.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('high')
     store.close()
   })
 
-  it('안 고른 세션은 null — 도구 기본값과 구분된다', () => {
+  it('a session with none chosen is null — distinct from the tool default', () => {
     const store = seeded()
     store.upsertSession(row({ id: 's-verb-none' }))
     expect(store.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
     store.close()
   })
 
-  /** 응답 속도(v20)도 같은 성질 — 같은 왕복 계약 */
-  it('service_tier 컬럼이 생기고 왕복한다', () => {
+  /** Response speed (v20) is the same kind of property — the same round-trip contract */
+  it('the service_tier column exists and round-trips', () => {
     const store = seeded()
     store.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
     expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
@@ -448,12 +455,13 @@ describe('마이그레이션 v18 — 응답 길이', () => {
 })
 
 /**
- * 사이드바 순서는 사람이 정한 것이라 **다시 켜도 그대로여야 한다.**
- * 세션 저장(upsert)이 순서를 덮어쓰지 않는지도 함께 본다 — 대화 한 줄마다
- * upsert가 도는데 거기서 순서가 초기화되면 사람이 정한 것이 계속 흐트러진다.
+ * The sidebar order was set by a person, so it **has to survive a restart.** This also checks
+ * that saving a session (upsert) does not overwrite the order — upsert runs on every line of a
+ * conversation, and if the order reset there, what the person arranged would keep getting
+ * shuffled.
  */
-describe('마이그레이션 v8 — 사이드바 순서', () => {
-  it('세션 순서를 저장하고 그 순서로 읽는다', () => {
+describe('migration v8 — sidebar order', () => {
+  it('saves session order and reads it back in that order', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
       s.upsertSession({
@@ -469,7 +477,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
     s.close()
   })
 
-  it('세션을 다시 저장해도 순서가 흐트러지지 않는다', () => {
+  it('saving a session again does not disturb the order', () => {
     const s = seeded()
     s.setSessionOrder(['s1'])
     const before = s.listSessions()[0]!
@@ -478,7 +486,7 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
     s.close()
   })
 
-  it('프로젝트 순서도 저장된다', () => {
+  it('project order is saved too', () => {
     const s = seeded()
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.setProjectOrder(['p2', 'p1'])
@@ -488,11 +496,12 @@ describe('마이그레이션 v8 — 사이드바 순서', () => {
 })
 
 /**
- * 그리드 배치는 **껐다 켜도 그대로**여야 한다 — 사람이 짠 화면이기 때문이다.
- * 세션 테이블이 아니라 따로 두었으므로, 세션을 저장해도 배치가 흔들리지 않는지 함께 본다.
+ * The grid layout has to **survive a restart** — it is a screen a person arranged. Since it is
+ * kept separate from the sessions table, this also checks that saving a session does not
+ * disturb the layout.
  */
-describe('마이그레이션 v9 — 그리드 배치', () => {
-  it('올려둔 순서대로 돌아온다', () => {
+describe('migration v9 — the grid layout', () => {
+  it('comes back in the order it was placed', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
       s.upsertSession({
@@ -508,7 +517,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
     s.close()
   })
 
-  it('통째로 다시 쓴다 — 추가·제거·순서가 모두 한 가지로 온다', () => {
+  it('rewrites the whole thing — adding, removing and reordering all come through the same call', () => {
     const s = seeded()
     s.setGridView(['s1'])
     s.setGridView([])
@@ -516,7 +525,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
     s.close()
   })
 
-  it('세션을 다시 저장해도 배치는 그대로', () => {
+  it('the layout stays put even after resaving a session', () => {
     const s = seeded()
     s.setGridView(['s1'])
     const before = s.listSessions()[0]!
@@ -525,7 +534,7 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
     s.close()
   })
 
-  it('세션을 지우면 배치에서도 빠진다 — 없는 것을 그리려 하면 안 된다', async () => {
+  it('deleting a session drops it from the layout too — it must not try to draw something that no longer exists', async () => {
     const s = seeded()
     s.setGridView(['s1'])
     await s.trashSession('s1', KEEP_ALL)
@@ -535,10 +544,11 @@ describe('마이그레이션 v9 — 그리드 배치', () => {
 })
 
 /**
- * 표식은 kind 하나다 (#13). 예전에는 markOrchestrator가 따로 있어 "쓰는 길이 둘"이었다.
- * 프로젝트 오케스트레이터가 폐기되면서(v26) 표식이 붙은 세션은 다시 앱에 하나뿐이다.
+ * There is one marker, kind (#13). There used to be a separate markOrchestrator, which meant
+ * "two write paths." With the project orchestrator retired (v26), the marked session is once
+ * again unique to the app.
  */
-describe('오케스트레이터 표식(kind)', () => {
+describe('the orchestrator marker (kind)', () => {
   const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
     s.upsertSession({
       id, projectId, kind, tool: 'claude', externalId: null, name: id,
@@ -547,33 +557,34 @@ describe('오케스트레이터 표식(kind)', () => {
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
 
-  it('표식이 없으면 중앙은 null', () => {
+  it('the central orchestrator is null when there is no marker', () => {
     expect(seeded().orchestratorId()).toBeNull()
   })
 
-  it('kind가 upsert로 왕복한다 — 쓰는 길은 하나다', () => {
+  it('kind round-trips through upsert — there is one write path', () => {
     const s = seeded()
     mk(s, 'orc', null, 'orchestrator')
     expect(s.orchestratorId()).toBe('orc')
     expect(s.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
-    // 강등도 같은 길로 남는다
+    // A demotion persists through the same path
     mk(s, 'orc', null, 'worker')
     expect(s.orchestratorId()).toBeNull()
     s.close()
   })
 
   /**
-   * v26 — 프로젝트 오케스트레이터 폐기의 안전장치 (2026-09-01).
+   * v26 — the safeguard for retiring the project orchestrator (2026-09-01).
    *
-   * **강등이 아니라 승격이 될 뻔한 자리다.** 코드에서 프로젝트 범위 단계가 사라지면서,
-   * 표식이 남은 세션은 다음에 깰 때 자기 프로젝트가 아니라 **모든 프로젝트**를 보는
-   * 도구를 받는다 — 화면 어디에도 안 나타나는 권한 확대다. 그래서 데이터를 먼저 고친다.
+   * **This was about to become a promotion, not a demotion.** Once the project-scoped tier is
+   * gone from the code, a session that still carries the marker gets, the next time it wakes, a
+   * tool that sees **every project** rather than just its own — a privilege escalation that
+   * shows up nowhere on screen. So the data is fixed first.
    */
-  it('v26: 프로젝트를 가진 옛 표식은 지워지고, 중앙 표식은 살아남는다', () => {
+  it('v26: an old marker with a project is cleared, and the central marker survives', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v26-'))
     const file = join(dir, 'store.db')
 
-    // v25 상태를 만든다: 프로젝트 오케스트레이터 하나 + 중앙 하나
+    // Build a v25 state: one project orchestrator plus one central orchestrator
     const before = new Store(file)
     before.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     mk(before, 'proj-orc', 'p1', 'orchestrator')
@@ -585,9 +596,9 @@ describe('오케스트레이터 표식(kind)', () => {
 
     const after = new Store(file)
     expect(after.schemaVersion).toBe(LATEST_SCHEMA)
-    // 프로젝트를 가진 표식은 사라진다 — 대화는 그대로다
+    // The marker with a project disappears — the conversation is untouched
     expect(after.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
-    // 중앙은 그대로 — 이 앱의 유일한 오케스트레이터다
+    // The central one is untouched — the app's only orchestrator
     expect(after.orchestratorId()).toBe('central')
     after.close()
     rmSync(dir, { recursive: true, force: true })
@@ -595,24 +606,25 @@ describe('오케스트레이터 표식(kind)', () => {
 })
 
 /**
- * 개명의 마지막 조각: DB 테이블 이름.
+ * The last piece of the rename: the database table name.
  *
- * 데이터는 그대로여야 한다 — 그리드에 올려둔 세션이 개명 때문에 사라지면
- * "왜 화면이 비었지"가 되고, 그건 이름 하나 맞추자고 치를 값이 아니다.
+ * The data has to survive — a session that vanished from the grid because of a rename becomes
+ * "why is the screen empty," and that is not a price worth paying to line up a name.
  */
-describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // legacy-name
-  it('올려둔 그리드 배치가 그대로 살아 넘어온다', () => {
+describe('v13 migration — the old-named table becomes grid_panels', () => { // legacy-name
+  it('a saved grid layout survives the move intact', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v13-'))
     const file = join(dir, 'store.db')
 
     /*
-     * 옛 DB를 손으로 만든다 (테이블 이름은 옛것).
+     * Build an old database by hand (with the table under its old name).
      *
-     * **번호는 진짜여야 한다.** 이 파일에는 옛 이름의 테이블이 있고 `grid_panels`가 없는데,
-     * 그건 v9(grid_panels를 만드는 스텝) 이전의 모습이다. 예전에는 12로 적어도 통과했다 —
-     * schema.sql이 user_version을 1로 되돌려서 v9가 어차피 다시 돌았기 때문이다. 그 재실행을
-     * 없애자 이 거짓말이 곧바로 드러났다(`no such table: grid_panels`). 실제 v12 DB라면
-     * v9를 지나왔으므로 그 테이블을 반드시 갖고 있다.
+     * **The version number has to be genuine.** This file has the old-named table and no
+     * `grid_panels`, which is the shape the database had before v9 (the step that creates
+     * grid_panels). This test used to get away with writing 12 — because schema.sql reset
+     * user_version to 1, v9 replayed anyway. Once that replay was removed, this lie surfaced
+     * immediately (`no such table: grid_panels`). A genuine v12 database has already passed
+     * through v9, so it is guaranteed to have that table.
      */
     const old = new Database(file)
     old.exec(`
@@ -655,7 +667,7 @@ describe('v13 이관 — 옛 이름의 테이블을 grid_panels로', () => { // 
  * slug that had never existed. So this runs against a real v13-shaped database — a migration
  * that is only assumed to work is exactly the kind that quietly orphans someone's history.
  */
-describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', () => {
+describe('v14 migration — remembers the directory a session was created in', () => {
   const v13Db = (file: string) => {
     const old = new Database(file)
     old.exec(`
@@ -689,7 +701,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
     old.close()
   }
 
-  it('프로젝트·워크트리 세션은 자기 경로로 백필된다', () => {
+  it('project and worktree sessions are backfilled with their own path', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v14-'))
     const file = join(dir, 'store.db')
     v13Db(file)
@@ -710,7 +722,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
    * `~/.centralu/orchestrator` and blocked the real data move (see data-dir.ts). So it stays
    * NULL here and the manager resolves it the first time it actually needs a path.
    */
-  it('오케스트레이터는 NULL로 남는다 — 마이그레이션이 홈을 건드리지 않는다', () => {
+  it('the orchestrator stays NULL — the migration does not touch the home directory', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v14-orc-'))
     const file = join(dir, 'store.db')
     v13Db(file)
@@ -726,7 +738,7 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
    * backfill without `WHERE cwd IS NULL` would therefore rewrite the stored path on each
    * start — reintroducing the recomputation this version exists to end.
    */
-  it('다시 열어도 적어둔 경로를 덮어쓰지 않는다', () => {
+  it('reopening does not overwrite the recorded path', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v14-again-'))
     const file = join(dir, 'store.db')
     v13Db(file)
@@ -752,8 +764,8 @@ describe('v14 이관 — 세션이 만들어진 디렉토리를 기억한다', (
  * Run against a real v14-shaped database rather than a fresh one: the column has to arrive
  * on the file people already have, which is the half `CREATE TABLE IF NOT EXISTS` never does.
  */
-describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', () => {
-  it('옛 DB(v14)에 컬럼이 생기고, 껐다 켜도 명령이 남는다', () => {
+describe('v15 migration — remembers the shell commands a project registered', () => {
+  it('the column exists on an old database (v14), and commands survive a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v15-'))
     const file = join(dir, 'store.db')
 
@@ -769,7 +781,7 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
 
     const first = new Store(file)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
-    // 없던 프로젝트에는 없는 것이 맞다 — 빈 목록이 곧 '아직 등록한 적 없음'이다
+    // A project that never existed correctly has none — an empty list is exactly 'never registered any'
     expect(first.projectCommands('p1')).toEqual([])
     first.setProjectCommands('p1', [{ command: 'pnpm test', label: '테스트' }, { command: 'pnpm e2e' }])
     first.close()
@@ -779,27 +791,27 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
       { command: 'pnpm test', label: '테스트' },
       { command: 'pnpm e2e' },
     ])
-    // 별칭 이전(~2026-09-06)의 행은 문자열 배열이다 — 읽을 때 승격된다
+    // A row from before labels (~2026-09-06) is an array of strings — upgraded on read
     second.close()
     const raw2 = new Database(file)
     raw2.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('["pnpm dev","pnpm lint"]')
     raw2.close()
     const third = new Store(file)
     expect(third.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
-    // schema.sql이 user_version을 1로 되돌려 단계가 매번 다시 도는 구조다 —
-    // 다시 열기가 컬럼을 다시 만들어 목록을 비우면 안 된다
+    // schema.sql resets user_version to 1, so steps replay on every open —
+    // a second open must not recreate the column and wipe the list
     expect(third.listProjects().map((p) => p.id)).toEqual(['p1'])
     third.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
   /**
-   * 읽을 수 없는 값은 '없음'으로 읽는다.
+   * A value that cannot be parsed reads as 'none'.
    *
-   * 여기서 던지면 프로젝트 목록을 만드는 길이 통째로 막혀 사이드바가 빈 채로 뜬다 —
-   * 잃을 수 있는 최악이 "메뉴를 다시 채운다"로 끝나야 한다.
+   * Throwing here would block the whole path that builds the project list, leaving the sidebar
+   * empty — the worst that can be lost has to end at "the menu has to be filled in again."
    */
-  it('깨진 값이 들어 있어도 프로젝트 목록은 살아 있다', () => {
+  it('the project list survives a corrupted value', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v15-bad-'))
     const file = join(dir, 'store.db')
 
@@ -820,16 +832,18 @@ describe('v15 이관 — 프로젝트가 등록한 셸 명령을 기억한다', 
 })
 
 /**
- * v16 — host 자신의 설정 (이슈 #43).
+ * v16 — the host's own settings (issue #43).
  *
- * 처음 들어가는 것은 "업데이트를 자동으로 확인할까"이고, 그 답이 **다시 켰을 때 남아
- * 있어야** 이 설정이 설정이다. 끌 때마다 다시 켜지는 체크상자는 켜져 있는 것과 같다.
+ * The first one to go in is "check for updates automatically," and this only counts as a
+ * setting if the answer **survives a restart.** A checkbox that turns itself back on every time
+ * it is switched off is the same as being permanently on.
  *
- * 값이 아예 없는 것과 `'false'`가 들어 있는 것을 구분한다 — 나중에 기본값을 바꿀 때,
- * 일부러 꺼 둔 사람의 선택만은 덮지 않기 위한 여지다.
+ * A value that was never written is distinguished from one holding `'false'` — room left so
+ * that changing the default later does not overrule the choice of a person who deliberately
+ * turned it off.
  */
-describe('v16 이관 — host의 설정이 재시작을 넘긴다', () => {
-  it('옛 DB에 테이블이 생기고, 껐다 켜도 값이 남는다', () => {
+describe('v16 migration — the host settings survive a restart', () => {
+  it('the table exists on an old database, and the value survives a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v16-'))
     const file = join(dir, 'store.db')
 
@@ -841,15 +855,15 @@ describe('v16 이관 — host의 설정이 재시작을 넘긴다', () => {
     old.close()
 
     const first = new Store(file)
-    // 쓴 적이 없는 것은 null이다 — 'false'와 구별된다
+    // Something never written is null — distinct from 'false'
     expect(first.appSetting('updates.auto')).toBeNull()
     first.setAppSetting('updates.auto', 'false')
     first.close()
 
     const second = new Store(file)
     expect(second.appSetting('updates.auto')).toBe('false')
-    // schema.sql이 user_version을 1로 되돌려 단계가 매번 다시 도는 구조다 —
-    // 두 번째 열기가 테이블을 다시 만들어 답을 지우면 안 된다
+    // schema.sql resets user_version to 1, so steps replay on every open —
+    // a second open must not recreate the table and wipe the answer
     second.setAppSetting('updates.auto', 'true')
     expect(second.appSetting('updates.auto')).toBe('true')
     second.close()
@@ -868,7 +882,7 @@ describe('v16 이관 — host의 설정이 재시작을 넘긴다', () => {
  * one `CREATE TABLE IF NOT EXISTS` silently skips: adding columns to the database people
  * already have.
  */
-describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () => {
+describe('v17 migration — context usage survives a restart', () => {
   const v16Db = (file: string) => {
     const old = new Database(file)
     old.exec(`
@@ -905,37 +919,38 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
     ...over,
   })
 
-  it('옛 DB에 컬럼이 생기고, 껐다 켜도 사용량이 남는다', () => {
+  it('the column exists on an old database, and usage survives a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v17-'))
     const file = join(dir, 'store.db')
     v16Db(file)
 
     const first = new Store(file)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
-    // 한 번도 보고한 적 없는 세션은 null이다 — 화면의 `—`가 곧 이 사실이다
+    // A session that has never reported one is null — the `—` on screen is exactly this fact
     expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
     first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
     first.close()
 
-    // 껐다 켠 host — 여기서 비어 있던 것이 이슈 그대로의 증상이다
+    // The host restarted — an empty reading here would be exactly the bug this issue describes
     const second = new Store(file)
     expect(second.listSessions().find((s) => s.id === 'worked')!.context).toEqual({
       used: 168_000, window: 200_000, exactness: 'exact',
     })
-    // 아직 한 턴도 안 돈 세션은 여전히 모른다 — 0%가 아니라 모름이어야 한다
+    // A session that has not had a single turn yet is still unknown — this must read as unknown, not 0%
     expect(second.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
-    // schema.sql이 user_version을 1로 되돌려 단계가 매번 다시 도는 구조다 —
-    // 두 번째 열기가 컬럼을 다시 만들어 값을 지우면 안 된다
+    // schema.sql resets user_version to 1, so steps replay on every open —
+    // a second open must not recreate the column and wipe the value
     expect(second.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
   /**
-   * 압축(compaction)은 사용량을 **내린다.** 새 값이 옛 값을 못 덮으면 재시작 뒤의 눈금은
-   * 영영 실제보다 높은 채로 남아, 사람은 있지도 않은 한계를 보고 대화를 새로 시작한다.
+   * Compaction **lowers** usage. If a new value could not overwrite the old one, the gauge
+   * after a restart would be stuck too high forever, and a person would end a conversation
+   * over a limit that does not actually exist.
    */
-  it('나중 보고가 앞선 보고를 덮는다', () => {
+  it('a later report overwrites an earlier one', () => {
     const store = seeded()
     store.upsertSession(row({ id: 's1', context: { used: 190_000, window: 200_000, exactness: 'exact' } }))
     store.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
@@ -944,13 +959,13 @@ describe('v17 이관 — 컨텍스트 사용량이 재시작을 넘긴다', () =
   })
 })
 
-describe('커밋 귀속 (#50) — 저장소가 아니라 우리 DB에만', () => {
-  it('기록하고 프로젝트별로 되찾는다 (같은 해시는 마지막 기록이 이긴다)', () => {
+describe('commit attribution (#50) — kept in our own database, not the repository', () => {
+  it('records and looks up per project (the same hash: the last record wins)', () => {
     const s = new Store()
     s.recordCommit('p1', '4ce6fc7', 's-auth')
     s.recordCommit('p1', 'abc1234', 's-docs')
-    s.recordCommit('p2', '4ce6fc7', 's-other') // 다른 프로젝트의 같은 해시는 별개다
-    s.recordCommit('p1', '4ce6fc7', 's-auth2') // 재기록 — 덮는다
+    s.recordCommit('p2', '4ce6fc7', 's-other') // the same hash in a different project is a separate fact
+    s.recordCommit('p1', '4ce6fc7', 's-auth2') // recorded again — overwrites
     const rows = s.commitSessions('p1')
     expect(rows).toHaveLength(2)
     expect(rows.find((r) => r.sha === '4ce6fc7')?.sessionId).toBe('s-auth2')
@@ -959,13 +974,13 @@ describe('커밋 귀속 (#50) — 저장소가 아니라 우리 DB에만', () =>
   })
 })
 
-describe('WAL 체크포인트', () => {
+describe('WAL checkpoint', () => {
   /*
-   * 실측(2026-08-26): 실사용 DB 옆의 -wal이 97MB로 본 DB(91MB)보다 컸다.
-   * 기본 auto-checkpoint(PASSIVE)는 파일을 줄이지 않는다 — TRUNCATE만 줄인다.
-   * 계약: checkpoint()는 -wal 파일을 0으로 자른다.
+   * Measured (2026-08-26): a real database's -wal was 97MB, bigger than the main database
+   * itself (91MB). The default auto-checkpoint (PASSIVE) does not shrink the file — only
+   * TRUNCATE does. The contract: checkpoint() truncates the -wal file to zero.
    */
-  it('checkpoint()가 -wal 파일을 0바이트로 자른다', () => {
+  it('checkpoint() truncates the -wal file to 0 bytes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-wal-'))
     const path = join(dir, 'store.db')
     const s = new Store(path)
@@ -988,23 +1003,24 @@ describe('WAL 체크포인트', () => {
 })
 
 /*
- * 읽기는 행 하나를 메시지 하나로 준다 (#77).
- * 델타 시절의 행은 v21이 합쳤다. 그 뒤로 이웃한 assistant 행은 서로 다른 답이라 붙이지 않는다 —
- * 붙이면 "…still running."과 "All six reviews are in."이 공백 없이 한 문단이 된다.
+ * Reading gives one row as one message (#77).
+ * Rows from the delta era were merged by v21. Since then, neighboring assistant rows are
+ * different replies and are not joined — joining them would run "…still running." and
+ * "All six reviews are in." together into one paragraph with no space.
  */
-describe('loadMessages는 행 하나를 메시지 하나로 읽는다 (#77)', () => {
+describe('loadMessages reads one row as one message (#77)', () => {
   const reply = (seq: number, text: string) =>
     ({ sessionId: 's1', seq, role: 'assistant' as const, kind: 'text' as const, payload: { type: 'message_delta', text }, ts: seq })
   const ask = (seq: number, text: string) =>
     ({ sessionId: 's1', seq, role: 'user' as const, kind: 'text' as const, payload: { text }, ts: seq })
   const texts = (msgs: StoredMessage[]) => msgs.map((m) => [m.seq, (m.payload as { text?: string }).text])
 
-  it('이웃한 assistant 행은 두 메시지다 — 답끼리도, 추론끼리도 붙이지 않는다', () => {
+  it('neighboring assistant rows are two messages — neither replies nor reasoning are joined', () => {
     const s = seeded()
     s.appendMessages([
       ask(1, '리뷰 돌려줘'),
       reply(2, 'One review is still running.'),
-      // 사이에 사람의 말이 없는 새 답 — 백그라운드 작업이 끝나 새 턴이 섰다
+      // A new reply with no human turn in between — a background task finished and a new turn started
       reply(3, 'All six reviews are in.'),
       { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: '앞 생각' }, ts: 4 },
       { sessionId: 's1', seq: 5, role: 'assistant', kind: 'reasoning', payload: { text: '뒤 생각' }, ts: 5 },
@@ -1018,7 +1034,7 @@ describe('loadMessages는 행 하나를 메시지 하나로 읽는다 (#77)', ()
     ])
   })
 
-  it('limit은 행을 센다 — 커서로 이어 읽으면 이웃한 답이 겹치지도 붙지도 않는다', () => {
+  it('limit counts rows — reading onward by cursor never overlaps or joins neighboring replies', () => {
     const s = seeded()
     s.appendMessages([ask(1, '질문1'), reply(2, '답1-가'), reply(3, '답1-나'), ask(4, '질문2'), reply(5, '답2-가'), reply(6, '답2-나')])
     const page = s.loadMessages('s1', 2)
@@ -1028,31 +1044,32 @@ describe('loadMessages는 행 하나를 메시지 하나로 읽는다 (#77)', ()
     expect(texts(s.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, '질문1'], [2, '답1-가']])
   })
 
-  it('loadMessagesFrom은 그 자리 뒤를 같은 규칙으로 읽는다', () => {
+  it('loadMessagesFrom reads what comes after a spot, by the same rule', () => {
     const s = seeded()
     s.appendMessages([ask(1, '질문'), reply(2, '먼저 온 답.'), reply(3, '나중 답.'), ask(4, '다음 질문')])
     const after = s.loadMessagesFrom('s1', 1, 10)
     expect(texts(after)).toEqual([[2, '먼저 온 답.'], [3, '나중 답.'], [4, '다음 질문']])
   })
 
-  it('upsertMessageNoIndex는 본문만 갱신하고 색인은 건드리지 않는다', () => {
+  it('upsertMessageNoIndex updates only the body and leaves the index untouched', () => {
     const s = seeded()
     s.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문' }, ts: 1 })
     expect((s.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('자라는 본문')
-    expect(s.searchMessages('자라는 본문').length).toBe(0) // 색인은 닫힐 때(appendMessages) 한 번
+    expect(s.searchMessages('자라는 본문').length).toBe(0) // the index is written once, when it closes (appendMessages)
     s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문 끝' }, ts: 2 }])
     expect(s.searchMessages('자라는 본문').length).toBe(1)
   })
 })
 
 /*
- * v21 이관 (#66): 델타 시절의 행을 메시지로 합친다.
+ * v21 migration (#66): merges rows from the delta era into whole messages.
  *
- * 가장 중요한 성질은 크기가 아니라 **글을 잃지 않는다**는 것이다 — 이사하던 때는 읽기도 같은 규칙으로
- * 붙여 보여주고 있었으므로, 이사 뒤에 글이 달라지면 그건 데이터를 잃은 것이다. 읽기는 이제 붙이지
- * 않는다(#77) — 이사 전의 행을 이은 글이 이사 뒤의 글과 같아야 한다.
+ * The property that matters most is not size but **not losing any text** — at the time of the
+ * move, reads were also joining rows by the same rule to display them, so if the text differs
+ * after the move, data was lost. Reads no longer join rows (#77) — the text formed by joining
+ * the pre-move rows has to equal the post-move text.
  */
-describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
+describe('v21 migration — merges delta rows into messages', () => {
   const oldDbWithDeltas = () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v21-'))
     const file = join(dir, 'store.db')
@@ -1065,7 +1082,7 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     })
-    // 실측한 모양 그대로: 토큰 하나가 행 하나
+    // The exact shape observed in the real data: one token is one row
     s.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '맵 추출 어떻게 해?' }, ts: 1 },
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '한 ' }, ts: 2 },
@@ -1077,15 +1094,15 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
       { sessionId: 's1', seq: 8, role: 'assistant', kind: 'reasoning', payload: { text: '생각 ' }, ts: 8 },
       { sessionId: 's1', seq: 9, role: 'assistant', kind: 'reasoning', payload: { text: '조각' }, ts: 9 },
     ])
-    s.markRead('s1', 3) // 답변 중간을 읽은 상태 — 이사 뒤 안읽음이 되살아나면 안 된다
+    s.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
     const beforeRead = s.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
     s.close()
     return { file, beforeRead }
   }
 
-  it('행은 줄지만 읽은 결과는 이사 전과 똑같다', () => {
+  it('the row count drops, but the read result is identical to before the move', () => {
     const { file, beforeRead } = oldDbWithDeltas()
-    // 이사 전 상태로 되돌린다 (쓰기는 이미 새 방식이므로 버전만 낮춰 이 단계를 다시 태운다)
+    // Roll back to the pre-move state (writes already use the new approach, so only the version is lowered to replay this step)
     const raw = new Database(file)
     raw.pragma('user_version = 20')
     const rawRows = (raw.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }).n
@@ -1095,7 +1112,7 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
     const rows = s.loadMessages('s1', 50)
     const afterRead = rows.map((m) => [m.kind, (m.payload as { text?: string }).text])
 
-    // 글이 달라지면 잃은 것이다 — 이사 전의 행(9개)을 이은 글과 이사 뒤의 메시지(5개)를 이은 글이 같다
+    // Different text means data was lost — the text joined from the 9 pre-move rows equals the text joined from the 5 post-move messages
     const joined = (read: (string | undefined)[][]) => read.map(([, t]) => t ?? '').join('')
     expect(joined(afterRead)).toBe(joined(beforeRead))
     expect(afterRead).toEqual([
@@ -1105,14 +1122,14 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
       ['text', '결과는 이렇습니다'],
       ['reasoning', '생각 조각'],
     ])
-    // 9행 → 5행
+    // 9 rows -> 5 rows
     const nowRows = s.loadMessages('s1', 50).length
     expect(rawRows).toBe(9)
     expect(nowRows).toBe(5)
     s.close()
   })
 
-  it('합친 자리의 seq는 첫 조각의 것이라 읽음 위치가 뒤로 가지 않는다', () => {
+  it('the seq of a merged spot is the first chunk\'s, so the read position never moves backward', () => {
     const { file } = oldDbWithDeltas()
     const raw = new Database(file)
     raw.pragma('user_version = 20')
@@ -1120,30 +1137,31 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
 
     const s = new Store(file)
     const merged = s.loadMessages('s1', 50)
-    expect(merged[1]!.seq).toBe(2) // 2,3,4를 합친 자리는 2번
-    // 읽음 위치(3)는 그대로고, 첫 조각(2)이 남았으므로 이미 읽은 답변이 안읽음으로 돌아오지 않는다
+    expect(merged[1]!.seq).toBe(2) // the spot where 2, 3, 4 merged is numbered 2
+    // The read position (3) is unchanged, and since the first chunk (2) survives, a reply already read never comes back as unread
     expect(s.listSessions()[0]!.lastReadSeq).toBe(3)
     s.close()
   })
 
-  it('합친 뒤에는 조각 경계에 걸린 구절도 검색된다', () => {
+  it('after merging, even a phrase that spanned a chunk boundary is searchable', () => {
     const { file } = oldDbWithDeltas()
     const raw = new Database(file)
     raw.pragma('user_version = 20')
     raw.close()
 
     const s = new Store(file)
-    expect(s.searchMessages('번에 뽑게').length).toBe(1) // 옛 색인으로는 영영 못 찾던 구절
+    expect(s.searchMessages('번에 뽑게').length).toBe(1) // a phrase the old index could never have found
     expect(s.searchMessages('결과는 이렇습니다').length).toBe(1)
     s.close()
   })
 
   /*
-   * 시각 보존 (실사고 2026-09-03): 이 스텝이 ts에 Date.now()를 찍었고, 병합할 게
-   * 없는 행에도 UPDATE를 때렸다. beta.4가 user_version을 되감아 스텝이 재실행되자
-   * 새벽 대화 전체의 시각이 실행 시각으로 덮였다 — "대화가 저장 안 된 것 같다"의 정체.
+   * Preserving the timestamp (real incident, 2026-09-03): this step stamped ts with
+   * Date.now(), even on rows that had nothing to merge. When beta.4 rewound user_version and
+   * this step replayed, the timestamps of an entire night's conversation were overwritten with
+   * the time the step ran — the real cause behind "it looks like the conversation never saved."
    */
-  it('합친 행의 시각은 마지막 조각의 것이다 — 지금이 아니라', () => {
+  it('the timestamp of a merged row is the last chunk\'s — not the current time', () => {
     const { file } = oldDbWithDeltas()
     const raw = new Database(file)
     raw.pragma('user_version = 20')
@@ -1151,19 +1169,20 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
 
     const s = new Store(file)
     const ts = s.loadMessages('s1', 50).map((m) => m.ts)
-    // [user 1] [2+3+4 병합→4] [tool 5] [6+7 병합→7] [8+9 병합→9]
+    // [user 1] [2+3+4 merged -> 4] [tool 5] [6+7 merged -> 7] [8+9 merged -> 9]
     expect(ts).toEqual([1, 4, 5, 7, 9])
     s.close()
   })
 })
 
 /**
- * v29: v21이 짓밟은 시각 복원. 원본 시각은 지워졌으니 정확히 되돌릴 수는 없고,
- * seq(진실)와 이웃의 ts로 조인다 — 뒤 행보다 미래인 시각은 거짓이므로 뒤 행의
- * 시각으로 눌러 앉힌다.
+ * v29: restores the timestamps v21 trampled. The original timestamps are gone, so they cannot
+ * be recovered exactly — instead they are narrowed using seq (which is trustworthy) and the
+ * neighboring ts: a timestamp later than a later row's is known to be false, so it is clamped
+ * down to that later row's timestamp.
  */
-describe('v29 이관 — 짓밟힌 시각을 이웃으로 조인다', () => {
-  it('뒤 행보다 미래인 ts만 고치고, 멀쩡한 ts는 건드리지 않는다', () => {
+describe('v29 migration — narrows a trampled timestamp using its neighbor', () => {
+  it('fixes only a ts later than a later row\'s, and leaves an intact ts untouched', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v29-'))
     const file = join(dir, 'store.db')
     const s0 = new Store(file)
@@ -1177,7 +1196,7 @@ describe('v29 이관 — 짓밟힌 시각을 이웃으로 조인다', () => {
     })
     s0.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 100 },
-      // 짓밟힌 행 — 실제로는 110쯤이었는데 마이그레이션 시각(999999)이 찍혔다
+      // A trampled row — it was really around 110, but the migration's own time (999999) was stamped on it
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: '답' }, ts: 999_999 },
       { sessionId: 's1', seq: 3, role: 'system', kind: 'tool_call', payload: {}, ts: 120 },
       { sessionId: 's1', seq: 4, role: 'assistant', kind: 'text', payload: { text: '끝' }, ts: 130 },
@@ -1185,7 +1204,7 @@ describe('v29 이관 — 짓밟힌 시각을 이웃으로 조인다', () => {
     s0.close()
 
     const raw = new Database(file)
-    raw.pragma('user_version = 28') // v29만 다시 태운다
+    raw.pragma('user_version = 28') // replays only v29
     raw.close()
 
     const s = new Store(file)
@@ -1194,9 +1213,9 @@ describe('v29 이관 — 짓밟힌 시각을 이웃으로 조인다', () => {
   })
 })
 
-/** #69-1: 세션 트리 링크는 보통의 upsert에 실려 다닌다 — 쓰는 길이 둘이면 한쪽만 고쳐진다 */
-describe('parent_session_id 왕복 (#69)', () => {
-  it('부모 링크가 저장되고 되읽힌다', () => {
+/** #69-1: the session tree link rides the ordinary upsert — with two write paths, only one would end up fixed */
+describe('parent_session_id round-trip (#69)', () => {
+  it('a parent link is saved and read back', () => {
     const s = seeded()
     const before = s.listSessions().find((x) => x.id === 's1')!
     expect(before.parentSessionId).toBeNull()
@@ -1207,31 +1226,31 @@ describe('parent_session_id 왕복 (#69)', () => {
   })
 })
 
-/** v23 (#69): 워크트리 프로비저닝 설정의 왕복과 정규화 */
-describe('worktree_setup 왕복 (#69)', () => {
-  it('저장·되읽기, 빈 설정은 null로 눕는다', () => {
+/** v23 (#69): round-trip and normalization of the worktree provisioning setup */
+describe('worktree_setup round-trip (#69)', () => {
+  it('saves, reads back, and an empty setup lies down as null', () => {
     const s = seeded()
     expect(s.worktreeSetup('p1')).toBeNull()
 
     s.setWorktreeSetup('p1', { command: 'pnpm install', copyFiles: ['.env.local'] })
     expect(s.worktreeSetup('p1')).toEqual({ command: 'pnpm install', copyFiles: ['.env.local'] })
 
-    // 빈 설정을 저장하면 "설정 없음"이다 — 빈 문자열 커맨드가 exec되는 일이 없어야 한다
+    // Saving an empty setup means "no setup" — an empty string command must never be exec'd
     s.setWorktreeSetup('p1', { command: '', copyFiles: [] })
     expect(s.worktreeSetup('p1')).toBeNull()
   })
 })
 
-/** v27 (#76): 매니저 자리와 줄기는 프로젝트가 든다 — 세션의 플래그가 아니라 링크다 */
-describe('worktree_manager 왕복 (#76)', () => {
-  it('저장·되읽기, 지우기', () => {
+/** v27 (#76): the manager slot and trunk are held by the project — a link, not a flag on the session */
+describe('worktree_manager round-trip (#76)', () => {
+  it('saves, reads back, and clears', () => {
     const s = seeded()
     expect(s.worktreeManager('p1')).toBeNull()
 
     s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
     expect(s.worktreeManager('p1')).toEqual({ sessionId: 'mgr-1', baseBranch: 'main' })
 
-    // 줄기만 고치는 길 — 자리를 옮기지 않고 기준만 바꾼다
+    // A path that changes only the trunk — the slot stays put and only the baseline changes
     s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'develop' })
     expect(s.worktreeManager('p1')?.baseBranch).toBe('develop')
 
@@ -1239,7 +1258,7 @@ describe('worktree_manager 왕복 (#76)', () => {
     expect(s.worktreeManager('p1')).toBeNull()
   })
 
-  it('프로젝트마다 하나 — 컬럼이 하나라 둘일 수가 없다', () => {
+  it('one per project — there cannot be two, since there is only one column', () => {
     const s = seeded()
     s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
     s.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
@@ -1248,13 +1267,13 @@ describe('worktree_manager 왕복 (#76)', () => {
 })
 
 /**
- * v32 (#107): 기본 모델·강도가 도구를 갖는다.
+ * v32 (#107): the default model and effort get a tool of their own.
  *
- * 실사고의 모양 그대로 세운다 — `default_tool=codex`인 프로젝트가 Claude 모델 이름을
- * 스칼라로 들고 있다. 그 값을 codex의 것으로 옮겨 주는 것이 가장 그럴듯한 추측이고,
- * 그 추측이 정확히 세션을 죽인 동작이다.
+ * Set up in the exact shape of the real incident — a project with `default_tool=codex` holding
+ * a Claude model name as its scalar. Migrating that value over to codex looks like the most
+ * plausible guess, and that exact guess is what killed the session.
  */
-describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
+describe('v32 migration — the default model is per tool (#107)', () => {
   const v31Db = (file: string) => {
     const old = new Database(file)
     old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
@@ -1265,7 +1284,7 @@ describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
     old.close()
   }
 
-  it('옛 스칼라는 어느 도구의 것도 되지 않고 사라진다 — 잃은 기본값은 클릭 한 번, 틀린 기본값은 죽은 세션', () => {
+  it('the old scalar belongs to no tool and disappears — a lost default costs one click, a wrong one costs a dead session', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v32-'))
     const file = join(dir, 'store.db')
     v31Db(file)
@@ -1278,7 +1297,7 @@ describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
     expect(cols.map((c) => c.name)).not.toContain('default_model')
     expect(cols.map((c) => c.name)).not.toContain('default_effort')
 
-    // 도구마다 따로 앉고, 서로를 덮지 않는다
+    // Each tool sits in its own slot, and neither overwrites the other
     s.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5.6-terra', effort: 'high' })
     s.setProjectToolDefaults('p1', 'claude', { model: 'opus', effort: null })
     s.close()
@@ -1294,13 +1313,14 @@ describe('v32 이관 — 기본 모델은 도구마다 (#107)', () => {
 })
 
 /**
- * v33 (M4 A-2): 프로젝트 신뢰의 칸, v35: 이미 등록된 프로젝트는 신뢰한다.
+ * v33 (M4 A-2): the project trust column, v35: already-registered projects are trusted.
  *
- * v33은 옛 행을 "아니오"로 두었다. v35가 그것을 기존 행에 한해 뒤집는다: 그 프로젝트들은 사람이
- * 골라 에이전트를 돌려 온 폴더이고, 신뢰는 #92(프로젝트 설정 존중)도 함께 정한다. 업데이트 하나가
- * 아무 말 없이 그 설정을 무시하기 시작하면 안 된다. 새로 등록하는 프로젝트는 여전히 "아니오"로 시작한다.
+ * v33 left old rows at "no." v35 reverses that, but only for existing rows: those projects are
+ * folders a person chose and has been running agents in, and trust also decides #92 (respecting
+ * project settings). An update must not silently start ignoring that setting. A project
+ * registered after this still starts at "no."
  */
-describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 프로젝트만 신뢰', () => {
+describe('v33/v35 migration — the trust column, and only projects that existed at migration time are trusted', () => {
   const oldProjects = (file: string, version: number, cols = '', rows: string[] = ["('p1','/tmp/p1','p1',1)"]) => {
     const old = new Database(file)
     old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
@@ -1311,7 +1331,7 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
     old.close()
   }
 
-  it('v32의 프로젝트는 칸을 얻고 신뢰한 채로 올라온다 — 끈 신뢰는 재시작을 넘긴다', () => {
+  it('a v32 project gains the column and comes up trusted — turning trust off survives a restart', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v33-'))
     const file = join(dir, 'store.db')
     oldProjects(file, 32)
@@ -1319,7 +1339,7 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
     const s = new Store(file)
     expect(s.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
     expect(s.setProjectTrusted('p1', false)).toBe(true)
-    // 없는 프로젝트에는 조용히 성공하지 않는다
+    // This does not silently succeed on a project that does not exist
     expect(s.setProjectTrusted('nope', true)).toBe(false)
     s.close()
 
@@ -1329,7 +1349,7 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('v34의 프로젝트는 신뢰를 끈 채였어도 신뢰하고, 이관 뒤에 등록한 프로젝트는 아니오로 시작한다', () => {
+  it('a v34 project is trusted even if trust had been turned off, and a project registered after migration starts at no', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v35-'))
     const file = join(dir, 'store.db')
     oldProjects(file, 34, ', trusted INTEGER NOT NULL DEFAULT 0', ["('p1','/tmp/p1','p1',1)", "('p2','/tmp/p2','p2',2)"])
@@ -1340,7 +1360,7 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
       ['p1', true],
       ['p2', true],
     ])
-    // 화면에 가는 모양에도 실린다 — 신뢰 토글이 이 값을 보여 준다
+    // This is also carried in the shape sent to the screen — the trust toggle shows this value
     expect(s.listProjects().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', true],
@@ -1349,7 +1369,7 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
     s.setProjectTrusted('p2', false)
     s.close()
 
-    // 다시 열어도 이관은 다시 돌지 않는다 — 사람이 끈 신뢰와 새 프로젝트의 "아니오"가 남는다
+    // Reopening does not replay the migration — the trust a person turned off, and the new project's "no," both survive
     const reopened = new Store(file)
     expect(reopened.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
@@ -1360,7 +1380,7 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('새 DB에서 등록한 프로젝트는 신뢰하지 않은 채로 시작한다', () => {
+  it('a project registered on a new database starts out untrusted', () => {
     const s = new Store()
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     expect(s.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
@@ -1368,15 +1388,15 @@ describe('v33·v35 이관 — 신뢰의 칸, 그리고 이관 순간에 있던 �
   })
 })
 
-describe('앱의 능력에 사람이 한 답 (M4 D-4)', () => {
+describe('the person\'s answers to an app\'s capability requests (M4 D-4)', () => {
   const allow = (capability: string, at: number) => ({ capability, text: `do ${capability}`, decision: 'allow' as const, stamp: 'stamp-1', decidedAt: at })
 
-  it('앱과 능력마다 한 줄 — 다시 답하면 덮고, 잊으면 지우고, 사용자 폴더 앱도 한 줄이다', () => {
+  it('one row per app and capability — answering again overwrites, forgetting deletes, and a user-folder app is also one row', () => {
     const s = new Store()
     s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
     s.putAppPermission('p1/notes', 'p1', { ...allow('agent:claude', 2), decision: 'deny' })
     s.putAppPermission('p1/notes', 'p1', allow('host:git.status', 3))
-    // project_id가 null이어도 같은 열쇠는 한 줄이다 — PRIMARY KEY에 null을 넣지 않은 까닭
+    // Even with project_id null, the same key is one row — why null was kept out of the PRIMARY KEY
     s.putAppPermission('_user/timer', null, allow('agent:claude', 4))
     s.putAppPermission('_user/timer', null, allow('agent:claude', 5))
     expect(s.getAppPermission('p1/notes', 'agent:claude')).toEqual({ ...allow('agent:claude', 2), decision: 'deny' })
@@ -1386,7 +1406,7 @@ describe('앱의 능력에 사람이 한 답 (M4 D-4)', () => {
     expect(s.getAppPermission('p1/notes', 'host:git.status')).toBeNull()
   })
 
-  it('프로젝트를 지우면 그 프로젝트 앱의 답도 걷는다 — 사용자 폴더 앱의 답은 남는다', () => {
+  it('deleting a project clears the answers for that project\'s apps too — a user-folder app\'s answer survives', () => {
     const s = new Store()
     s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
@@ -1398,10 +1418,11 @@ describe('앱의 능력에 사람이 한 답 (M4 D-4)', () => {
 })
 
 /**
- * 실행 기록의 사슬 (M4 D-6) — 앱이 중개에 부탁한 것도 한 줄(`kind: broker`)이고, 한 앱의 기록을 읽으면 그 아래의 사슬(부른 다른
- * 앱의 줄, 부탁한 에이전트의 줄)이 함께 온다. 기록 판 하나에서 "화면이 누른 것 → 다른 앱 → 에이전트"가 읽혀야 한다.
+ * The run log chain (M4 D-6) — a request an app made to the broker gets a row too (`kind: broker`), and reading one
+ * app's run log brings the chain beneath it along (rows for other apps it called, rows for agents it requested). A
+ * single history screen has to read "what the UI clicked -> another app -> an agent" as one chain.
  */
-describe('실행 기록의 사슬 (M4 D-6)', () => {
+describe('the run log chain (M4 D-6)', () => {
   const t0 = 1_760_000_000_000
   let seq = 0
   const put = (s: Store, id: string, appId: string, parentRunId: string | null, over: Record<string, unknown> = {}) =>
@@ -1410,22 +1431,22 @@ describe('실행 기록의 사슬 (M4 D-6)', () => {
       status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: t0 + seq++, sessionId: null, ...over,
     })
 
-  it('한 앱의 기록에는 그 아래의 사슬이 함께 실린다 — 한도는 뿌리의 수이고, 다른 앱의 기록에서는 불린 줄이 뿌리다', () => {
+  it('one app\'s log carries the chain beneath it — the limit counts roots, and in another app\'s log the called row is the root', () => {
     const s = new Store()
-    put(s, 'a1', 'notes', null) // 화면이 notes를 불렀다
-    put(s, 'a1-ask', 'notes', 'a1', { kind: 'broker', tool: 'run_agent', callerKind: 'app', sessionId: 's-9' }) // notes가 에이전트를 부탁했다
-    put(s, 'b1', 'helper', 'a1') // notes가 helper를 불렀다
-    put(s, 'b1-ask', 'helper', 'b1', { kind: 'broker', tool: 'run_agent', callerKind: 'app', sessionId: 's-10' }) // helper가 에이전트를 부탁했다
+    put(s, 'a1', 'notes', null) // the UI called notes
+    put(s, 'a1-ask', 'notes', 'a1', { kind: 'broker', tool: 'run_agent', callerKind: 'app', sessionId: 's-9' }) // notes requested an agent
+    put(s, 'b1', 'helper', 'a1') // notes called helper
+    put(s, 'b1-ask', 'helper', 'b1', { kind: 'broker', tool: 'run_agent', callerKind: 'app', sessionId: 's-10' }) // helper requested an agent
     put(s, 'a2', 'notes', null)
-    put(s, 'c1', 'other', null) // 상관없는 앱
-    put(s, 'lonely', 'notes', null, { kind: 'broker', tool: 'host_data', callerKind: 'app', status: 'rejected' }) // 열린 실행 없이 부탁했다
+    put(s, 'c1', 'other', null) // an unrelated app
+    put(s, 'lonely', 'notes', null, { kind: 'broker', tool: 'host_data', callerKind: 'app', status: 'rejected' }) // requested with no open run
 
     const ids = (appId: string, limit: number) => s.listAppRuns('p1', appId, limit).map((r) => r.id)
     expect(ids('notes', 10)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
-    // 한도는 뿌리의 수다 — 사슬 아래의 줄이 뿌리를 밀어내지 않는다
+    // The limit counts roots — rows below a root do not push a root out
     expect(ids('notes', 2)).toEqual(['lonely', 'a2'])
     expect(ids('notes', 3)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
-    // helper의 기록에서는 notes가 부른 줄이 뿌리다 — 그 부모(notes의 줄)는 helper의 것이 아니다
+    // In helper's log, the row notes called is the root — its parent (notes's own row) does not belong to helper
     expect(ids('helper', 10)).toEqual(['b1-ask', 'b1'])
     expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b1-ask')).toMatchObject({ appId: 'helper', kind: 'broker', parentRunId: 'b1', sessionId: 's-10' })
 
@@ -1433,7 +1454,7 @@ describe('실행 기록의 사슬 (M4 D-6)', () => {
     expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a1')?.sessionId).toBe('s-1')
   })
 
-  it('v36의 기록은 모두 도구 호출의 줄로 올라온다', () => {
+  it('v36 records all come up as tool-call rows', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v37-'))
     const file = join(dir, 'store.db')
     const old = new Database(file)
@@ -1457,16 +1478,17 @@ describe('실행 기록의 사슬 (M4 D-6)', () => {
 })
 
 /**
- * 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — run_agent 줄의 토큰과, 앱마다·기간마다 더한 값.
+ * How much of the agents an app requested were used (M4 D-5) — tokens on a run_agent row, and the sum per app and
+ * per period.
  */
-describe('앱이 부탁한 에이전트의 쓰임 (M4 D-5)', () => {
+describe('how much of an app\'s requested agents were used (M4 D-5)', () => {
   const t0 = 1_760_000_000_000
   const row = (id: string, over: Record<string, unknown>) => ({
     id, projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'app', callerSessionId: null, parentRunId: 'r0',
     status: 'running', durationMs: null, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: t0, sessionId: null, ...over,
   })
 
-  it('세션이 선 run_agent 줄만 센다 — 시간과 토큰을 더하고, 토큰을 알려 주지 않은 실행은 토큰에서만 빠진다', () => {
+  it('only counts run_agent rows a session stood up — duration and tokens are summed, and a run with no reported tokens is left out only of the token sum', () => {
     const s = new Store()
     s.beginAppRun(row('old', { createdAt: t0 - 10_000, sessionId: 's0' }))
     s.endAppRun('old', { status: 'ok', durationMs: 7_000, error: null, tokens: { input: 5_000, output: 500 } })
@@ -1475,7 +1497,7 @@ describe('앱이 부탁한 에이전트의 쓰임 (M4 D-5)', () => {
     s.beginAppRun(row('b', { sessionId: 's2', createdAt: t0 + 1 }))
     s.endAppRun('b', { status: 'cancelled', durationMs: 2_500, error: 'stopped', tokens: null })
     s.beginAppRun(row('running', { sessionId: 's3', createdAt: t0 + 2 }))
-    // 세우지 못한 부탁, 다른 부탁, 다른 앱의 에이전트
+    // A request that never stood up an agent, an unrelated request, another app's agent
     s.beginAppRun(row('refused', { status: 'rejected', createdAt: t0 + 3 }))
     s.beginAppRun(row('data', { tool: 'host_data', sessionId: null, createdAt: t0 + 4 }))
     s.beginAppRun(row('other', { appId: 'other', sessionId: 's9', createdAt: t0 + 5 }))
@@ -1487,7 +1509,7 @@ describe('앱이 부탁한 에이전트의 쓰임 (M4 D-5)', () => {
     expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b')?.tokens).toBeNull()
   })
 
-  it('v37의 기록에는 토큰의 칸이 생기고 옛 줄은 비어 있다', () => {
+  it('v37 records gain the token columns, and old rows are empty', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v38-'))
     const file = join(dir, 'store.db')
     const old = new Database(file)

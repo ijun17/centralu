@@ -6,9 +6,10 @@ import { join } from 'node:path'
 import { gitSummary, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreeRemove } from './git.js'
 
 /**
- * 워크트리는 **진짜 git으로만** 시험할 수 있다.
- * 가짜를 세우면 우리가 아는 규칙만 확인하게 되고, 정작 git의 규칙(브랜치 중복·더러운 트리 거부)을
- * 못 본다 — 이 기능에서 사용자를 막는 것은 전부 후자다.
+ * A worktree can only be tested against **real git.**
+ * Standing up a fake one would only check the rules we already know about, and would miss
+ * exactly git's own rules (rejecting a duplicate branch, rejecting a dirty tree) — every case
+ * that actually stops the user in this feature is the latter.
  */
 let repo = ''
 let root = ''
@@ -24,19 +25,19 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-describe('워크트리', () => {
-  it('저장소 밖 경로에 만들고, 원본과 다른 브랜치를 준다', async () => {
+describe('worktrees', () => {
+  it('creates one outside the repository, with a branch different from the original', async () => {
     const path = join(root, 'outside', 'session-1')
     const wt = await gitWorktreeAdd(repo, path, 'centralu/abc12345')
 
     expect(wt).toEqual({ path, branch: 'centralu/abc12345' })
     expect(existsSync(join(path, 'a.txt'))).toBe(true)
-    // 원본은 그대로 main에 있어야 한다 — 격리가 그 뜻이다
+    // The original has to stay on main — that is what isolation means
     expect((await gitSummary(repo)).branch).toBe('main')
     expect((await gitSummary(path)).branch).toBe('centralu/abc12345')
   })
 
-  it('한쪽에서 고쳐도 다른 쪽은 안 흔들린다 (이 기능의 목적)', async () => {
+  it('editing one side never disturbs the other (the point of this feature)', async () => {
     const path = join(root, 'outside', 'session-2')
     await gitWorktreeAdd(repo, path, 'centralu/wt2')
     writeFileSync(join(path, 'a.txt'), '워크트리에서 고침\n')
@@ -45,12 +46,12 @@ describe('워크트리', () => {
     expect((await gitWorktreeDirty(repo)).dirty).toBe(false)
   })
 
-  it('커밋 안 된 변경이 있으면 force 없이는 안 지워진다', async () => {
+  it('an uncommitted change blocks removal unless force is given', async () => {
     const path = join(root, 'outside', 'session-3')
     await gitWorktreeAdd(repo, path, 'centralu/wt3')
     writeFileSync(join(path, 'a.txt'), '아직 커밋 안 함\n')
 
-    // git이 거부하는 것을 확인한다 — 우리가 force를 붙이는 이유가 여기 있다
+    // Confirms git itself rejects this — this is exactly why we attach force
     await expect(gitWorktreeRemove(repo, path)).rejects.toThrow()
     expect(existsSync(path)).toBe(true)
 
@@ -58,15 +59,15 @@ describe('워크트리', () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  it('같은 브랜치 이름으로 두 번 만들 수 없다', async () => {
+  it('cannot create two worktrees with the same branch name', async () => {
     const a = join(root, 'outside', 'a')
     const b = join(root, 'outside', 'b')
     await gitWorktreeAdd(repo, a, 'centralu/dup')
-    // 세션 id 앞자리로 브랜치를 짓는 이상 사실상 겪지 않지만, 겪으면 조용히 실패하면 안 된다
+    // Naming branches by a session id's prefix makes this practically unreachable, but it must not fail silently if it happens
     await expect(gitWorktreeAdd(repo, b, 'centralu/dup')).rejects.toThrow()
   })
 
-  it('목록에 등록된 것만 보인다 (지운 뒤에는 사라진다)', async () => {
+  it('only what is registered shows up in the list (and disappears once removed)', async () => {
     const path = join(root, 'outside', 'listed')
     await gitWorktreeAdd(repo, path, 'centralu/listed')
 
@@ -78,7 +79,7 @@ describe('워크트리', () => {
     expect(after.map((w) => w.branch)).not.toContain('centralu/listed')
   })
 
-  it('git 저장소가 아니면 목록은 빈 채로 답한다 (터지지 않는다)', async () => {
+  it('the list comes back empty, not thrown, when this is not a git repository', async () => {
     expect(await gitWorktreeList(root)).toEqual([])
   })
 })

@@ -6,11 +6,12 @@ import { wireBaseName, wireJoin } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
 
 /**
- * 파일 트리·뷰어 서비스 (C-1).
+ * The file tree and viewer service (C-1).
  *
- * 원칙 둘:
- *   1. **한 단계만 읽는다** — 10k+ 파일 저장소에서도 첫 렌더가 빨라야 한다.
- *   2. **프로젝트 밖으로 나가지 않는다** — 경로 탈출(`../../etc/passwd`)을 막는다.
+ * Two principles:
+ *   1. **Read only one level at a time** — the first render has to be fast even on a repository
+ *      with 10k+ files.
+ *   2. **Never leave the project** — blocks a path escape (`../../etc/passwd`).
  *
  * Issues #18/#19 added writing to that list, and writing is where rule 2 stops being a
  * tidiness rule: reading the wrong file leaks it, but *moving* or *trashing* the wrong one
@@ -33,11 +34,11 @@ export type FsFile = {
   previewError?: string
 }
 
-const MAX_TEXT = 2_000_000 // 2MB 넘으면 잘라 보여준다 (뷰어는 어차피 가상 스크롤)
-const MAX_IMAGE_PREVIEW = 10_000_000 // 10MB — base64와 WebSocket 복사까지 감당할 상한
+const MAX_TEXT = 2_000_000 // past 2MB this is truncated for display (the viewer virtual-scrolls anyway)
+const MAX_IMAGE_PREVIEW = 10_000_000 // 10MB — a cap that can absorb the base64 and WebSocket copy too
 const READ_TEXT_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW
 
-/** 뷰어가 `img`로 안전하게 표시할 래스터 형식. SVG는 텍스트 뷰어에 남긴다. */
+/** Raster formats the viewer can safely show with `img`. SVG is left to the text viewer. */
 const IMAGE_MIMES: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
@@ -52,7 +53,7 @@ function imageMime(path: string): string | undefined {
   return IMAGE_MIMES[extname(path).slice(1).toLowerCase()]
 }
 
-/** 프로젝트 루트를 벗어나는 경로를 막는다 */
+/** Blocks a path from leaving the project root */
 export function safeJoin(root: string, rel: string): string {
   const target = resolve(root, rel || '.')
   const rootResolved = resolve(root)
@@ -169,16 +170,17 @@ export async function resolveExisting(root: string, rel: string): Promise<string
   const expected = await assertExistingPath(root, rel)
   const canonical = await realpath(abs)
   /*
-   * **이 줄은 어떤 테스트도 보지 못한다** — 지우고 전체를 돌려도 1,284개가 전부 통과한다
-   * (실측). 죽은 줄이어서가 아니라, 덮는 구간이 시험으로 열 수 없는 곳이기 때문이다:
-   * 바로 위 assertExistingPath가 조각마다 걸으며 이미 봉쇄를 확인했으므로, 그 확인과
-   * 이 realpath 사이에 **파일 시스템이 바뀐 경우**에만 여기서 걸린다.
+   * **No test exercises this line** — removing it and running the whole suite still passes all
+   * 1,284 tests (measured). Not because it is dead code, but because the window it covers cannot
+   * be opened by a test: the assertExistingPath just above already confirmed containment by
+   * walking it piece by piece, so this only trips when **the filesystem changed** between that
+   * check and this realpath.
    *
-   * 아래 dev/ino 비교가 같은 경쟁을 더 정확히 잡지만, 그것은 "같은 파일인가"를 묻고
-   * 이것은 "안에 있는가"를 묻는다. 둘은 다른 질문이라 남겨 둔다.
+   * The dev/ino comparison below catches the same race more precisely, but that asks "is this
+   * the same file," while this asks "is this inside." They are different questions, so both stay.
    *
-   * 시험이 없다는 이유로 지우지 말 것 (#86). 실패할 수 없는 시험은 지웠지만(#121),
-   * 볼 수 없는 방어선은 다른 이야기다.
+   * Do not remove this for lacking a test (#86). A test that could never fail was removed
+   * (#121), but a safeguard that cannot be observed is a different matter.
    */
   safeJoin(rootReal, relative(rootReal, canonical))
   const current = await lstat(canonical)
@@ -189,9 +191,10 @@ export async function resolveExisting(root: string, rel: string): Promise<string
 }
 
 /**
- * .gitignore 판정은 git에게 맡긴다.
- * check-ignore를 파일마다 부르면 프로세스가 폭발하므로, **디렉토리 단위로 한 번** 묻는다.
- * git이 없거나 저장소가 아니면 전부 not-ignored로 본다.
+ * The .gitignore decision is left to git itself.
+ * Calling check-ignore per file would spawn a process per file, so this asks **once per
+ * directory** instead. If git is missing or this is not a repository, everything is treated as
+ * not ignored.
  */
 async function ignoredIn(root: string, names: string[], dir: string): Promise<Set<string>> {
   if (names.length === 0) return new Set()
@@ -203,9 +206,10 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
    */
   const rel = relative(root, dir).replaceAll(sep, '/')
   /*
-   * 입력과 출력 모두 NUL로 나눈다(`-z`, #176). 줄 단위 출력은 `core.quotePath`에 따라 한글 이름을
-   * `"\355\225\234…"`로 감싸 돌려주어, 아래에서 원래 이름과 맞지 않았다 — 무시된 한글 파일이
-   * 흐리게 표시되지 않았다. `-z`에서는 git이 받은 문자열을 인용 없이 그대로 돌려준다.
+   * Both input and output are NUL-separated (`-z`, #176). Line-based output, depending on
+   * `core.quotePath`, wrapped a Korean name as `"\355\225\234…"`, which no longer matched the
+   * original name below — an ignored Korean file was never shown dimmed. Under `-z`, git returns
+   * exactly the string it was given, with no quoting.
    */
   const input = names.map((n) => wireJoin(rel, n)).join('\0')
   const stdout = await new Promise<string>((resolveOut) => {
@@ -213,7 +217,7 @@ async function ignoredIn(root: string, names: string[], dir: string): Promise<Se
     let out = ''
     child.stdout.on('data', (d) => (out += String(d)))
     child.on('error', () => resolveOut(''))
-    // check-ignore는 매치가 없으면 exit 1 — 오류가 아니다
+    // check-ignore exits 1 when there is no match — that is not an error
     child.on('close', () => resolveOut(out))
     /*
      * A project does not have to be a git repository — the first-run screen says so in as
@@ -300,9 +304,10 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
 
     if (mime) {
       /*
-       * SVG는 이미지이면서 소스이기도 하다. raster처럼 text를 버리면 기존의 코드 읽기
-       * 길을 잃고, text로만 두면 그림을 확인할 수 없다. 둘 다 돌려 뷰어가 Text/Preview를
-       * 고르게 한다. `<img>`로만 그리므로 SVG를 앱 DOM에 주입하거나 실행하지 않는다.
+       * SVG is both an image and its own source. Dropping text like a raster image would lose
+       * the existing code-reading path, and keeping only text would leave no way to check the
+       * picture. Both are returned so the viewer can offer Text/Preview. It is drawn only as an
+       * `<img>`, so an SVG is never injected into or executed in the app's own DOM.
        */
       if (mime === 'image/svg+xml') {
         const truncated = total > MAX_TEXT
@@ -317,7 +322,7 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
       return { text: '', truncated: false, binary: true, bytes: info.size, image: { mime, data: bytes.toString('base64') } }
     }
 
-    // 널 바이트가 있으면 바이너리로 본다 (git과 같은 휴리스틱)
+    // A null byte anywhere is treated as binary (the same heuristic git uses)
     const head = bytes.subarray(0, 8000)
     if (head.includes(0)) return { text: '', truncated: false, binary: true, bytes: info.size }
 
@@ -333,22 +338,24 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
   }
 }
 /**
- * 파일·디렉토리를 통째로 옮긴다 — **가능하면 복사가 아니라 clone으로** (#76).
+ * Copies a file or directory whole — **cloned rather than copied, when possible** (#76).
  *
- * APFS의 clonefile은 데이터 블록을 공유하는 참조를 만든다: 만드는 순간에는 바이트를
- * 하나도 쓰지 않고, 이후 어느 쪽이 고쳐도 그 부분만 갈라진다(copy-on-write). 워크트리
- * 격리가 깨지지 않는다는 뜻이다 — 심볼릭 링크와 결정적으로 다른 점이 이것이고, 그래서
- * node_modules를 링크하지 않고 clone한다 (한쪽 설치가 다른 쪽을 바꾸면 안 된다).
+ * APFS's clonefile creates a reference that shares data blocks: not a single byte is written at
+ * creation time, and afterward, whichever side is edited only forks off the part that changed
+ * (copy-on-write). This means worktree isolation is never broken — the decisive difference from
+ * a symlink, and why node_modules is cloned rather than linked (one install must never change
+ * the other's).
  *
- * 실측 (이 저장소, APFS):
- *   Rust target 8.5GB — clone 3.98초·디스크 10MB  vs  일반 복사 14.7초·디스크 8.5GB
- *   node_modules 637MB (pnpm 심볼릭 숲) — 4.18초 vs 4.44초 (차이 없음, 손해도 없음)
- * 이득은 **실제 바이트가 있는 것**에서 나온다. 작은 파일 더미에서는 비용이 메타데이터라
- * 어느 쪽이든 같다.
+ * Measured (this repository, APFS):
+ *   Rust target, 8.5GB — clone 3.98s, 10MB on disk, vs. an ordinary copy at 14.7s, 8.5GB on disk
+ *   node_modules, 637MB (pnpm's forest of symlinks) — 4.18s vs. 4.44s (no real difference, and no penalty either)
+ * The gain comes from **content with actual bytes.** For a pile of small files the cost is all
+ * metadata, so it is the same either way.
  *
- * clone이 안 되는 자리가 여럿이다 — 다른 파일시스템, 다른 볼륨, APFS 아님, macOS 아님.
- * 전부 같은 처리를 한다: **조용히 일반 복사로 돌아간다.** 여기서 실패를 던지면 복사
- * 하나 때문에 세션 생성이 막히는데, 그건 이 기능이 막으려던 바로 그 상황이다.
+ * There are several places cloning cannot happen — a different filesystem, a different volume,
+ * not APFS, not macOS. All of them are handled the same way: **it silently falls back to an
+ * ordinary copy.** Throwing here would block session creation over one failed copy, which is
+ * exactly the situation this feature exists to prevent.
  */
 export async function copyTree(
   src: string,
@@ -361,21 +368,22 @@ export async function copyTree(
   )
   if (await clone(src, dst)) return
   /*
-   * `cp`는 실패하기 전에 이미 일부를 만들어 둔다 (#167). 그 위에 일반 복사를 하면, 먼저 건너온
-   * 디렉토리 링크를 덮어쓰려다 `ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY`로 죽었다 — 대체 경로가
-   * 대체가 되지 못했다. 그래서 반쯤 된 결과를 지우고 처음부터 복사한다. 복사 전부터 있던
-   * 자리는 우리 것이 아니므로 건드리지 않는다.
+   * `cp` already creates part of the result before it fails (#167). Running an ordinary copy on
+   * top of that died with `ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY` trying to overwrite a directory
+   * symlink that had already come across — the fallback path failed to actually fall back. So
+   * the half-finished result is deleted and the copy starts fresh. A destination that already
+   * existed before the copy started is left untouched, since it was never ours to begin with.
    */
   if (!existed) await rm(dst, { recursive: true, force: true })
   const { cpSync } = await import('node:fs')
   cpSync(src, dst, { recursive: true })
 }
 
-/** macOS의 clonefile 복사. 안 되는 자리(다른 볼륨, APFS 아님, macOS 아님)에서는 false */
+/** A macOS clonefile copy. Returns false wherever it cannot happen (a different volume, not APFS, not macOS) */
 async function cloneTree(src: string, dst: string): Promise<boolean> {
   if (process.platform !== 'darwin') return false
   return new Promise<boolean>((done) => {
-    // -c는 clonefile을 요구한다 (되면 쓰고 안 되면 실패한다 — 조용히 복사로 눕지 않는다)
+    // -c demands clonefile (used if it can be, failed otherwise — it never quietly falls back to a copy on its own)
     const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore' })
     p.on('error', () => done(false))
     p.on('close', (code) => done(code === 0))
@@ -383,12 +391,14 @@ async function cloneTree(src: string, dst: string): Promise<boolean> {
 }
 
 /**
- * 복사본이 놓일 자리를 만들고 그 절대 경로를 돌려준다 — **한 칸씩 가드에 물어보면서**.
+ * Creates the spot a copy will land in and returns its absolute path — **asking the guard one
+ * level at a time.**
  *
- * `mkdirSync(dirname(dst), { recursive: true })`는 도중의 심볼릭 링크를 말없이 따라간다.
- * 워크트리가 체크아웃한 추적 파일 중에 `logs -> /어딘가`가 있으면, `logs/.env`를 복사해
- * 달라는 요청이 남의 디렉토리에 사용자의 비밀을 쓴다. 통째로 만들지 않고 한 칸 만들 때마다
- * 물어보면 링크를 만나는 그 자리에서 멈춘다 — 밖에 빈 디렉토리 하나도 남기지 않는다.
+ * `mkdirSync(dirname(dst), { recursive: true })` silently follows a symlink along the way.
+ * If a worktree's checked-out tracked files include `logs -> /somewhere`, a request to copy
+ * `logs/.env` would write the user's secret into someone else's directory. Asking the guard for
+ * every level, instead of creating the whole path at once, stops exactly at the level where a
+ * symlink is found — leaving not even an empty directory outside.
  */
 export async function prepareCopyTarget(root: string, rel: string): Promise<string> {
   const parts = relative(resolve(root), resolve(root, rel || '.')).split(sep).filter((part) => part.length > 0)
@@ -401,20 +411,24 @@ export async function prepareCopyTarget(root: string, rel: string): Promise<stri
 }
 
 /**
- * 갓 복사된 나무에서 **워크트리 밖을 가리키는 심볼릭 링크만** 골라 지운다. 지운 것들을 돌려준다.
+ * Picks out and removes **only the symlinks that point outside the worktree** from a
+ * freshly copied tree. Returns what was removed.
  *
- * 왜 링크를 남기는가: pnpm의 node_modules는 심볼릭 링크 숲이다(이 저장소 기준 1,368개).
- * 전부 따라가 실체로 펴면 용량이 폭발하고 순환 링크에 걸리며, 무엇보다 pnpm이 아는 모양이
- * 아니게 된다. 링크를 통째로 거절하면 이 기능의 제일 흔한 쓰임(node_modules 가져오기)이
- * 그냥 못 쓰게 된다. 그 링크들은 상대 경로로 자기 나무 안을 가리키므로, 워크트리의 같은
- * 자리에 놓이면 워크트리 안을 가리킨다 — 그대로가 맞는 답이다.
+ * Why links are kept at all: pnpm's node_modules is a forest of symlinks (1,368 of them in this
+ * repository). Following every one and flattening it into a real file would blow up the size,
+ * run into circular links, and above all, stop being the shape pnpm expects. Rejecting links
+ * outright would make this feature's most common use (bringing over node_modules) simply
+ * unusable. Those links point, by relative path, into their own tree, so when placed at the same
+ * spot in the worktree they point into the worktree — leaving them as-is is the correct answer.
  *
- * 왜 밖을 가리키는 것만 지우는가: 그것이 에이전트의 눈에 자기 나무 안의 평범한 파일로
- * 보이는 창문이다(#95). 항목 하나가 이상하다고 나무 전체를 거절하면 사용자는 node_modules
- * 없는 작업대를 받는데, 그건 링크 하나 빠진 작업대보다 나쁘다. 그래서 창문만 닫고 남긴다.
+ * Why only the ones pointing outside are removed: that is the window through which something
+ * looks to an agent like an ordinary file inside its own tree (#95). Rejecting the whole tree
+ * because one entry looks off would hand the user a workbench with no node_modules at all, which
+ * is worse than one missing link. So only the window is closed, and the rest is kept.
  *
- * 읽기 자체는 싸다 — 위 숲 전체를 훑는 데 177ms(실측), 같은 나무를 복사하는 4초 옆에서.
- * 링크 안으로는 들어가지 않는다: 순환에 걸리지 않고, 같은 나무를 두 번 걷지도 않는다.
+ * The read itself is cheap — 177ms (measured) to walk the whole forest above, next to the 4
+ * seconds it takes to copy the same tree. This does not follow a link inward: it never gets
+ * caught in a cycle, and never walks the same tree twice.
  */
 export async function dropEscapingLinks(root: string, start: string): Promise<string[]> {
   const rootReal = await realpath(root)
@@ -429,7 +443,7 @@ export async function dropEscapingLinks(root: string, start: string): Promise<st
     try {
       entries = await readdir(dir, { withFileTypes: true })
     } catch {
-      continue // 파일 하나를 복사한 경우(ENOTDIR)와 그새 사라진 경우 — 둘 다 볼 것이 없다
+      continue // covers copying a single file (ENOTDIR) and something that vanished in the meantime — nothing to see in either case
     }
     for (const entry of entries) {
       const abs = join(dir, entry.name)
@@ -447,9 +461,9 @@ export async function dropEscapingLinks(root: string, start: string): Promise<st
 
 async function linkStaysInside(rootReal: string, link: string): Promise<boolean> {
   /*
-   * 끊어진 링크는 realpath가 못 푼다. 그래도 글자만 보고 판단한다 — 지금 대상이 없다는 것은
-   * 지금 못 읽는다는 뜻일 뿐이고, `~/.ssh/id_rsa`를 가리키는 링크는 그 파일이 생기는 순간
-   * 창문이 된다.
+   * A broken link cannot be resolved by realpath. The judgment is still made on the text alone —
+   * the target not existing right now only means it cannot be read right now, and a link
+   * pointing at `~/.ssh/id_rsa` becomes a window the moment that file comes into existence.
    */
   const target = await realpath(link).catch(async () => resolve(dirname(link), await readlink(link)))
   return staysInside(rootReal, target)

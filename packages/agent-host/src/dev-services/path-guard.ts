@@ -127,27 +127,28 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
 }
 
 /**
- * 걸어갈 조각들. **`..`를 먼저 접는다 — 이것이 이 함수의 요점이다.**
+ * The segments to walk. **`..` is folded first — that is the whole point of this function.**
  *
- * 예전에는 절대 경로일 때만 접고, 상대 경로는 받은 모양 그대로 쪼갰다. 그래서 `..`가
- * 조각으로 남았고, 걷는 도중 심볼릭 링크를 따라간 **뒤에** 부모로 올라갔다. 반면 실제
- * syscall이 쓰는 경로는 `safeJoin`이 `resolve()`로 **먼저** 접어서 만든다. 링크의 대상이
- * 링크 자신보다 깊으면 두 경로가 갈라지고, 가드는 안쪽을 보고 통과시키는데 syscall은
- * 바깥으로 나갔다.
+ * This used to fold only for an absolute path, and split a relative path exactly as given. So
+ * `..` was left as a segment, and the walk climbed to the parent **after** following a symlink
+ * along the way. Meanwhile, the path the real syscall uses is built by `safeJoin` folding it
+ * **first** with `resolve()`. When a link's target sits deeper than the link itself, the two paths
+ * diverge: the guard looks inside and lets it through, while the syscall went outside.
  *
- *   root/link -> root/sub/deep      링크의 대상이 자신보다 깊다
- *   root/sub/evil/                  가드가 걸어가 보는 미끼
- *   root/evil -> /어디든            실제로 열리는 곳
+ *   root/link -> root/sub/deep      the link's target sits deeper than the link itself
+ *   root/sub/evil/                  the bait the guard ends up walking
+ *   root/evil -> /wherever          where it actually opens
  *
- * `link/../evil`을 주면 가드는 `root/sub/evil`을 확인하고 허락했고, `safeJoin`은
- * `root/evil`을 돌려줬다. 실측으로 프로젝트 밖 디렉토리 나열, 임의 위치 파일 생성,
- * 프로젝트 파일 반출, 바깥 디렉토리 감시가 전부 가능했다.
+ * Given `link/../evil`, the guard checked `root/sub/evil` and allowed it, while `safeJoin`
+ * returned `root/evil`. Measured, this made it possible to list a directory outside the project,
+ * create a file at an arbitrary location, exfiltrate a project file, and watch an outside
+ * directory.
  *
- * 그래서 규칙을 한 줄로 못박는다: **검사한 문자열이 곧 사용되는 문자열이어야 한다.**
- * `safeJoin`과 같은 `resolve()`를 쓰는 이유가 그것이다.
+ * So the rule is pinned down in one line: **the string that is checked has to be the string that
+ * is used.** That is why the same `resolve()` as `safeJoin` is used here.
  *
- * 접은 뒤에도 `..`가 남는 경우가 있다. 루트 밖으로 나가는 경로(`../바깥`)가 그렇고,
- * 그때는 걷는 쪽의 `checkedParent`가 거부한다.
+ * Even after folding, `..` can remain — a path leaving the root (`../outside`) is one such case,
+ * and the walking side's `checkedParent` rejects it at that point.
  */
 function pathParts(root: string, rel: string): readonly string[] {
   const rootResolved = resolve(root)

@@ -7,46 +7,51 @@ import { wireSegments } from '@cc/protocol'
 const exec = promisify(execFile)
 
 /**
- * 우리 폴더에서 아직 돌고 있는 남은 프로세스 (사용자 요청 2026-09-07).
+ * A leftover process still running from our folder (user request, 2026-09-07).
  *
- * **왜 필요한가 (실측 2026-09-07):** 에이전트가 bash 도구로 띄운 데브 서버는 앱을 꺼도
- * 안 죽는다. 재보니 그 프로세스는 `ppid=1`(명령을 실행한 셸이 즉시 끝나 init에게 입양됨)에
- * **자기 프로세스 그룹**을 갖고 있었다 — 부모 사슬도 그룹도 우리와 끊겨 있어서, 우리가
- * PTY에 쓰는 트리 킬(kill-tree.ts)이 닿을 수 없는 자리다. codex는 명령이 끝날 때 자기
- * 그룹을 정리해서 이 문제가 없고, claude 경로에서만 남는다.
+ * **Why this is needed (measured 2026-09-07):** a dev server an agent launched with the bash tool
+ * does not die when the app quits. Investigating found that process had `ppid=1` (its shell had
+ * already ended and it was adopted by init) and **its own process group** — cut off from us in
+ * both parent chain and group, a spot the tree kill we use on the PTY (kill-tree.ts) cannot reach.
+ * codex cleans up its own group when a command ends, so it does not have this problem; it is only
+ * left behind on the claude path.
  *
- * 그래서 **죽이는 대신 먼저 보여준다.** 무엇을 죽일지는 사람이 안다 — 같은 폴더에서
- * 사람이 직접 띄운 서버를 앱이 말없이 죽이면, 고아를 없애려다 남의 일을 끊는다.
+ * So this **shows it to the person first, instead of killing it.** Only the person knows what
+ * should be killed — if the app silently killed a server the person launched by hand in the same
+ * folder, cleaning up an orphan would cut off someone else's work.
  *
- * 고르는 규칙 넷 (넷 다 만족해야 목록에 든다):
+ * Four rules pick a candidate (all four have to hold for it to make the list):
  *
- *  1. **cwd가 우리 폴더 안이다** — 프로젝트 디렉토리이거나 워크트리 디렉토리.
- *  2. **제어 터미널이 없다** (tty가 `??`). 이게 사람이 자기 터미널에서 띄운 것과 가르는
- *     선이다 (실측: 터미널에서 띄우면 `ttys005`, 에이전트가 파이프로 띄우면 `??`).
- *     사람의 셸과 그 셸에서 돌리는 것들이 목록에 섞이면 이 기능은 못 쓴다.
- *  3. **우리 자손이 아니다** — host의 자손은 종료 절차가 이미 트리째 정리한다. 여기
- *     싣는 것은 그 정리가 닿지 않는 것들뿐이다.
- *  4. **살아 있는 주인이 없다** (사용자 지적 2026-09-10). 부모 사슬을 타고 올라가 init(1)에
- *     닿아야 한다. VS Code의 Claude 확장이 이 규칙 없이 목록에 들었다 — 워크스페이스가
- *     우리 프로젝트 폴더라 cwd가 맞고, 파이프로 떠서 tty도 없다. 규칙 1~3만으로는
- *     **남의 앱이 지금 쓰고 있는 프로세스와 주인 없는 고아가 구별되지 않는다.**
- *     실제로 종료할 때 그 확장이 SIGTERM(143)을 맞고 죽었다.
+ *  1. **cwd is inside our own folder** — either the project directory or a worktree directory.
+ *  2. **It has no controlling terminal** (tty is `??`). This is the line that separates it from
+ *     something the person launched in their own terminal (measured: launched from a terminal it
+ *     is `ttys005`, launched by an agent over a pipe it is `??`). If a person's shell and whatever
+ *     runs in it got mixed into the list, this feature would be unusable.
+ *  3. **It is not our own descendant** — the shutdown procedure already cleans up the host's
+ *     descendants as a whole tree. What this carries is only what that cleanup cannot reach.
+ *  4. **It has no living owner** (a point raised by the user, 2026-09-10). Walking up the parent
+ *     chain has to reach init (1). VS Code's Claude extension made this list without this rule —
+ *     its workspace was our project folder, so cwd matched, and it was launched over a pipe, so it
+ *     had no tty either. With only rules 1 through 3, **a process another app is actively using
+ *     right now cannot be told apart from an ownerless orphan.** When this actually ran, that
+ *     extension was hit with SIGTERM (143) and died.
  *
- *     사슬 중간이 전부 후보(같은 폴더·터미널 없음)면 그건 고아가 낳은 자식들이라 함께
- *     둔다 — `npm run dev`(고아)가 띄운 node까지 한 화면에서 고를 수 있어야 한다.
+ *     If everything in between on the chain is also a candidate (same folder, no terminal), those
+ *     are children an orphan spawned, and they are kept together — a node launched by an orphaned
+ *     `npm run dev` has to be selectable on the same screen too.
  */
 
 export type StrayProcess = {
   pid: number
-  /** 실행 명령 (표시용, 앞부분만) */
+  /** The command it is running (for display, only the start of it) */
   command: string
-  /** 어느 폴더에서 도는가 — 사람이 "아 그거" 하고 알아보는 단서 */
+  /** Which folder it is running in — the clue that lets a person recognize "oh, that one" */
   cwd: string
 }
 
 export type PsRow = { pid: number; ppid: number; tty: string; command: string }
 
-/** `ps -o pid=,ppid=,tty=,command=` 출력 → 행들 */
+/** `ps -o pid=,ppid=,tty=,command=` output -> rows */
 export function parsePsRows(out: string): PsRow[] {
   const rows: PsRow[] = []
   for (const line of out.split('\n')) {
@@ -57,28 +62,28 @@ export function parsePsRows(out: string): PsRow[] {
   return rows
 }
 
-/** `lsof -a -d cwd -Fpn` 출력 → pid별 cwd */
+/** `lsof -a -d cwd -Fpn` output -> cwd per pid */
 export function parseLsofCwd(out: string): Map<number, string> {
   const cwds = new Map<number, string>()
   let pid: number | null = null
   for (const line of out.split('\n')) {
     if (line.startsWith('p')) pid = Number(line.slice(1)) || null
     else if (line.startsWith('n') && pid !== null) {
-      // 한 프로세스에 cwd는 하나다 — 처음 것만 취한다
+      // One process has one cwd — only the first is kept
       if (!cwds.has(pid)) cwds.set(pid, line.slice(1))
     }
   }
   return cwds
 }
 
-/** 제어 터미널이 없는가. macOS는 `??`, Linux ps는 `?`로 적는다 */
+/** Whether there is no controlling terminal. macOS writes `??`, Linux's ps writes `?` */
 export function noTty(tty: string): boolean {
   return tty === '??' || tty === '?' || tty === '-'
 }
 
 /**
- * `cwd`가 root 중 하나의 안(또는 그 자신)인가 — **조각 경계로** 판정한다.
- * 문자열 접두사로 재면 `/a/project-old`가 `/a/project`의 안이 된다.
+ * Whether `cwd` is inside one of the roots (or is that root itself) — judged **by segment
+ * boundary.** Measuring by string prefix would make `/a/project-old` count as inside `/a/project`.
  */
 export function insideAny(cwd: string, roots: readonly string[]): string | null {
   const parts = wireSegments(cwd)
@@ -90,14 +95,14 @@ export function insideAny(cwd: string, roots: readonly string[]): string | null 
   return null
 }
 
-/** 규칙 넷을 적용해 목록을 만든다 (순수 — 시험은 여기까지만 본다) */
+/** Builds the list by applying the four rules (pure — this is as far as a test needs to look) */
 export function pickStrays(
   rows: readonly PsRow[],
   cwdOf: ReadonlyMap<number, string>,
   roots: readonly string[],
   selfPid: number,
 ): StrayProcess[] {
-  // 우리 자손 집합 — host가 종료할 때 트리째 정리하는 쪽이다
+  // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
   const kids = new Map<number, number[]>()
   for (const r of rows) kids.set(r.ppid, [...(kids.get(r.ppid) ?? []), r.pid])
   const ours = new Set<number>([selfPid])
@@ -110,7 +115,7 @@ export function pickStrays(
     }
   }
 
-  // 규칙 1~3을 통과한 것들. 규칙 4(주인 없음)는 이 집합을 알아야 판정할 수 있다
+  // What passed rules 1 through 3. Rule 4 (no owner) can only be judged once this set is known
   const candidates = new Map<number, string>()
   for (const r of rows) {
     if (r.pid <= 1 || ours.has(r.pid)) continue
@@ -122,12 +127,13 @@ export function pickStrays(
 
   const byPid = new Map(rows.map((r) => [r.pid, r]))
   /**
-   * 이 프로세스를 **아직 들고 있는 앱이 있는가**를 부모 사슬로 묻는다.
+   * Asks the parent chain **whether some app still holds this process.**
    *
-   * init(1)까지 후보만 지나 올라가면 주인이 없다 — 우리가 치워도 되는 고아다.
-   * 중간에 후보가 아닌 살아 있는 프로세스가 있으면 그건 그 앱의 것이다 (VS Code의
-   * 확장 호스트가 정확히 그 자리에 있다). 사슬이 우리 계정 밖으로 나가 부모를 못 찾는
-   * 경우도 남의 것으로 본다 — 모를 때 쏘지 않는 쪽이 이 기능의 규칙이다.
+   * If only candidates lie between this and init (1), there is no owner — an orphan we are free
+   * to clean up. If a living process that is not a candidate sits somewhere in between, it belongs
+   * to that app (VS Code's extension host sits in exactly that spot). If the chain leaves our own
+   * account and the parent cannot be found, this is also treated as belonging to someone else —
+   * when in doubt, not firing is this feature's rule.
    */
   const unowned = (pid: number): boolean => {
     const seen = new Set<number>()
@@ -151,7 +157,7 @@ export function pickStrays(
 
 async function psRows(): Promise<PsRow[]> {
   try {
-    // 우리 계정 것만 본다 — 남의 계정 프로세스는 어차피 못 죽이고, 물어볼 일도 아니다
+    // Only our own account's processes are looked at — we could never kill another account's process anyway, and it is not ours to ask about
     const { stdout } = await exec('ps', ['-U', userInfo().username, '-o', 'pid=,ppid=,tty=,command='], {
       maxBuffer: 8 * 1024 * 1024,
       timeout: 5000,
@@ -171,15 +177,16 @@ async function cwdsOf(pids: readonly number[]): Promise<Map<number, string>> {
     })
     return parseLsofCwd(stdout)
   } catch (e) {
-    // lsof는 못 읽는 프로세스가 있으면 1로 끝내면서도 **읽은 것은 출력한다** — 버리지 않는다
+    // lsof exits 1 when some process cannot be read, but it still **prints what it did read** — that is not discarded
     const partial = (e as { stdout?: string }).stdout
     return partial ? parseLsofCwd(partial) : new Map()
   }
 }
 
 /**
- * 지금 살아 있는 남은 프로세스들. 두 단계로 훑는다: ps로 후보를 좁히고(터미널 없는 것만),
- * 그 pid들에만 lsof를 건다 — 전체 lsof는 수백 ms지만 후보만이면 수십 ms다.
+ * The leftover processes currently alive. This scans in two steps: ps narrows down the candidates
+ * (only those with no terminal), then lsof is run on just those pids — a full lsof takes hundreds
+ * of ms, but limited to candidates it takes tens.
  */
 export async function findStrays(roots: readonly string[], selfPid = process.pid): Promise<StrayProcess[]> {
   if (process.platform === 'win32' || roots.length === 0) return []
@@ -190,11 +197,12 @@ export async function findStrays(roots: readonly string[], selfPid = process.pid
 }
 
 /**
- * 심볼릭 링크를 푼 뿌리도 함께 본다.
+ * A root with its symlinks resolved is checked too.
  *
- * lsof는 **풀린 경로**를 답한다 (실측: `/tmp/x`에서 도는 프로세스를 `/private/tmp/x`로
- * 보고한다 — macOS의 /tmp·/var가 그렇다). 우리가 든 뿌리는 사람이 고른 그대로라, 한쪽만
- * 보면 같은 폴더인데 못 알아본다. 둘 다 후보로 든다.
+ * lsof answers with the **resolved path** (measured: a process running in `/tmp/x` is reported as
+ * `/private/tmp/x` — true of macOS's /tmp and /var). The root we hold is exactly what the person
+ * chose, so looking at only one side fails to recognize the same folder. Both are kept as
+ * candidates.
  */
 export function resolveRoots(roots: readonly string[]): string[] {
   const out = new Set<string>()
@@ -203,18 +211,19 @@ export function resolveRoots(roots: readonly string[]): string[] {
     try {
       out.add(realpathSync(r))
     } catch {
-      // 아직 없는 폴더(워크트리 뿌리가 그럴 수 있다) — 원본만 든다
+      // a folder that does not exist yet (a worktree root can be like this) — only the original is kept
     }
   }
   return [...out]
 }
 
 /**
- * 고른 것들을 멈춘다 — **죽이기 직전에 다시 잰다.**
+ * Stops what was chosen — **measured again right before killing.**
  *
- * 목록을 만든 순간과 사람이 누르는 순간 사이에 그 pid가 죽고 다른 프로세스가 그 번호를
- * 물려받았을 수 있다. 그때 그냥 쏘면 우리가 고아를 치우려다 남의 프로세스를 죽인다.
- * 그래서 "지금도 우리 폴더에서 도는 터미널 없는 프로세스"인 것만 신호를 받는다.
+ * Between the moment the list was made and the moment the person clicks, that pid may have died
+ * and a different process inherited the number. Firing at it blindly then would kill someone
+ * else's process while trying to clean up an orphan. So only what is still "a process with no
+ * terminal running right now in our own folder" receives the signal.
  */
 export async function stopStrays(
   pids: readonly number[],
@@ -230,7 +239,7 @@ export async function stopStrays(
       process.kill(pid, 'SIGTERM')
       stopped++
     } catch {
-      // 방금 죽었다 — 목적은 이뤄졌다
+      // it just died — the goal is already met
     }
   }
   return { stopped }
