@@ -1,34 +1,35 @@
 import type { GitCommit } from '@cc/protocol'
 
 /**
- * 커밋 그래프의 세로줄 배치.
+ * Lays out the vertical lines of the commit graph.
  *
- * 점만 찍어 두면 "무엇이 언제 들어왔나"는 알아도 **어디서 갈라져 어디로 합쳐졌나**를 알 수 없다.
- * 그런데 선을 그리려면 진짜 부모 관계를 따라 그려야 한다. `git log`가 뱉는 순서대로
- * 위아래를 그냥 이어버리면, 병합 뒤에 오는 줄들은 서로 부모-자식이 아닌데도 이어진 것처럼
- * 보인다 — 없는 관계를 그려 보이는 건 점만 찍는 것보다 나쁘다.
+ * With dots alone you can tell "what came in when", but not **where things split off and where they merged
+ * back**. To draw lines, though, they have to follow the real parent relationships. Simply joining each row
+ * to the next in the order `git log` emits them makes the rows after a merge look connected even though they
+ * are not parent and child — drawing a relationship that does not exist is worse than drawing dots alone.
  *
- * 그래서 부모 sha를 따라 레인을 잡는다. 규칙은 둘뿐이다:
- *   - 첫 부모는 **같은 레인을 이어받는다**. 그래야 주 줄기가 곧게 내려간다.
- *   - 나머지 부모는 옆 레인으로 갈라진다. 그 레인이 이미 있으면 새로 만들지 않고 합류한다.
+ * So lanes are assigned by following parent shas. There are only two rules:
+ *   - The first parent **inherits the same lane**. That is what keeps the main trunk running straight down.
+ *   - The other parents branch off into a lane beside it. If that lane already exists, they join it rather
+ *     than making a new one.
  *
- * 화면 밖(50개 너머)의 부모도 레인을 붙잡은 채로 둔다. 목록 바닥에서 선이 잘려 나가는 건
- * 사실 그대로다 — 역사는 거기서 끝난 게 아니라 우리가 거기까지만 읽은 것이다.
+ * A parent off screen (past the first 50) keeps holding its lane too. A line running off the bottom of the
+ * list is the plain truth — history does not end there; that is just as far as we read.
  */
 export type GraphRow = {
   sha: string
-  /** 이 커밋의 점이 놓이는 세로줄 */
+  /** The vertical line this commit's dot sits on */
   lane: number
-  /** 이 행 위에서 내려오는 세로줄들 */
+  /** The vertical lines coming down into this row from above */
   above: number[]
-  /** 이 행 아래로 내려가는 세로줄들 */
+  /** The vertical lines going on down below this row */
   below: number[]
-  /** 이 커밋에서 부모로 뻗는 선이 닿는 세로줄들 */
+  /** The vertical lines reached by the lines running from this commit to its parents */
   edges: number[]
 }
 
 export function layoutCommits(commits: GitCommit[]): GraphRow[] {
-  /** 각 레인이 '다음에 올 것'으로 기다리는 sha. null이면 빈 레인 */
+  /** The sha each lane is waiting for as 'what comes next'. Null is an empty lane */
   const lanes: (string | null)[] = []
   const active = (): number[] => lanes.flatMap((v, i) => (v === null ? [] : [i]))
   const alloc = (sha: string): number => {
@@ -39,36 +40,36 @@ export function layoutCommits(commits: GitCommit[]): GraphRow[] {
   }
 
   const rows: GraphRow[] = []
-  /** 이미 그린 커밋들 — rebase/cherry-pick 뒤에는 log가 topo 순서를 보장하지 않는다 */
+  /** Commits already drawn — after a rebase or cherry-pick, log does not guarantee topological order */
   const drawn = new Set<string>()
   for (const c of commits) {
     const above = active()
 
-    // 아무도 기다리지 않는 커밋이면 새 줄기다 (HEAD, 혹은 창 안에서 처음 보이는 가지)
+    // A commit nobody is waiting for starts a new trunk (HEAD, or a branch first seen inside the window)
     let lane = lanes.indexOf(c.sha)
     if (lane === -1) lane = alloc(c.sha)
 
-    // 이 커밋을 기다리던 레인은 전부 여기서 끝난다.
-    // 여러 자식이 같은 부모를 가리킬 수 있어서 하나만 지우면 유령 레인이 남는다.
+    // Every lane that was waiting for this commit ends here.
+    // Several children can point at the same parent, so clearing only one would leave a ghost lane.
     for (let i = 0; i < lanes.length; i++) if (lanes[i] === c.sha) lanes[i] = null
     drawn.add(c.sha)
 
     const edges: number[] = []
     for (const [n, parent] of c.parents.entries()) {
       /*
-       * 부모가 이미 위에 그려져 있으면 레인을 잡지 않는다.
+       * A parent already drawn above gets no lane.
        *
-       * 날짜 역전(rebase/cherry-pick)으로 부모가 자식보다 먼저 나오면, 그 부모를
-       * 기다리는 레인은 아무도 끝내 주지 않아 바닥까지 유령 선이 이어진다.
-       * 이 모델의 선은 아래로만 향하므로 위로 가는 선은 그냥 생략이 맞다 —
-       * 없는 선이 잘리는 것보다 없는 관계가 그려지는 게 나쁘다.
+       * When dates are out of order (rebase/cherry-pick) and a parent comes before its child, nothing ever
+       * ends the lane waiting for that parent, and a ghost line runs all the way to the bottom. Lines in this
+       * model only point downwards, so simply leaving out a line that would go up is right —
+       * drawing a relationship that does not exist is worse than a line that is not there being cut off.
        */
       if (drawn.has(parent)) continue
       const held = lanes.indexOf(parent)
       if (held !== -1) {
-        edges.push(held) // 이미 기다리는 레인이 있다 → 그리로 합류 (레인을 늘리지 않는다)
+        edges.push(held) // A lane is already waiting for it → join that lane (without adding a lane)
       } else if (n === 0) {
-        lanes[lane] = parent // 첫 부모가 줄기를 이어받는다
+        lanes[lane] = parent // The first parent inherits the trunk
         edges.push(lane)
       } else {
         edges.push(alloc(parent))
@@ -80,7 +81,7 @@ export function layoutCommits(commits: GitCommit[]): GraphRow[] {
   return rows
 }
 
-/** 가장 오른쪽 레인 번호. 그래프 열의 폭을 정하는 근거 */
+/** The rightmost lane number. What the width of the graph column is based on */
 export function laneCount(rows: GraphRow[]): number {
   let max = 0
   for (const r of rows) {

@@ -8,29 +8,29 @@ import { MAX_PANEL_H, MIN_PANEL_W, addPanel, columnsFor, removePanel, rowsFor, v
 const H = 900
 
 describe('rowsFor', () => {
-  it('열 수로 나눈 만큼 줄이 생긴다', () => {
+  it('makes as many rows as the count divided by the columns', () => {
     expect(rowsFor(6, 3)).toBe(2)
     expect(rowsFor(4, 3)).toBe(2)
     expect(rowsFor(3, 3)).toBe(1)
   })
 
-  it('빈 배치는 줄이 없다', () => {
+  it('an empty arrangement has no rows', () => {
     expect(rowsFor(0, 3)).toBe(0)
   })
 
-  it('열이 0으로 들어와도 나눗셈이 깨지지 않는다', () => {
+  it('the division does not break when the columns come in as 0', () => {
     expect(rowsFor(3, 0)).toBe(3)
   })
 })
 
 describe('columnsFor', () => {
-  it('넓으면 여러 열, 좁으면 한 열', () => {
+  it('several columns when wide, one when narrow', () => {
     expect(columnsFor(1600, H, 6)).toBe(3)
     expect(columnsFor(800, H, 6)).toBe(2)
     expect(columnsFor(400, H, 6)).toBe(1)
   })
 
-  it('패널이 최소 폭 아래로 내려가지 않는다 — 그게 그리드를 보류했던 이유다', () => {
+  it('a panel never goes below the minimum width — that is why the grid was held back', () => {
     // With the three-column cap gone this is the only hard limit left, so it is checked
     // over every count and width we expect to see rather than one of each (#51)
     for (const w of [500, 900, 1400, 2200, 2560, 4000]) {
@@ -41,7 +41,7 @@ describe('columnsFor', () => {
     }
   })
 
-  it('항목보다 많은 열을 만들지 않는다 — 빈칸만 생긴다', () => {
+  it('makes no more columns than items — the extra ones would only be empty cells', () => {
     expect(columnsFor(2000, H, 2)).toBe(2)
     expect(columnsFor(2000, H, 1)).toBe(1)
   })
@@ -133,19 +133,19 @@ describe('columnsFor', () => {
 })
 
 describe('addPanel / removePanel', () => {
-  it('맨 뒤에 붙는다', () => {
+  it('appends at the end', () => {
     expect(addPanel(['a'], 'b')).toEqual(['a', 'b'])
   })
 
-  it('두 번 놓아도 두 개가 되지 않는다', () => {
+  it('placing it twice does not make two', () => {
     expect(addPanel(['a', 'b'], 'a')).toEqual(['a', 'b'])
   })
 
-  it('빼면 나머지 순서는 그대로', () => {
+  it('removing one leaves the order of the rest as it was', () => {
     expect(removePanel(['a', 'b', 'c'], 'b')).toEqual(['a', 'c'])
   })
 
-  it('원본을 건드리지 않는다', () => {
+  it('does not touch the original', () => {
     const ids = ['a', 'b']
     addPanel(ids, 'c')
     removePanel(ids, 'a')
@@ -154,11 +154,11 @@ describe('addPanel / removePanel', () => {
 })
 
 describe('visiblePanels', () => {
-  it('사라진 세션은 그리지 않는다', () => {
+  it('does not draw sessions that are gone', () => {
     expect(visiblePanels(['a', 'gone', 'b'], new Set(['a', 'b']))).toEqual(['a', 'b'])
   })
 
-  it('순서는 그대로', () => {
+  it('keeps the order as it was', () => {
     expect(visiblePanels(['b', 'a'], new Set(['a', 'b']))).toEqual(['b', 'a'])
   })
 })

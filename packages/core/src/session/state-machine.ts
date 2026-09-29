@@ -1,32 +1,33 @@
 import type { NormalizedEvent, SessionState } from '@cc/protocol'
 
 /**
- * 세션 상태 머신 (product-spec FR-12).
- * UI에서 if문으로 상태를 추론하지 않는다 — 전이는 전부 여기를 통과한다.
+ * The session state machine (product-spec FR-12).
+ * The UI does not infer state with if statements — every transition goes through here.
  */
 
-/** 긴급도: 인박스 정렬·알림 정책의 근거. 낮을수록 급하다. */
+/** Urgency: what the inbox order and the notification policy are based on. Lower is more urgent. */
 export const URGENCY: Record<SessionState, number> = {
-  waiting_approval: 0, // 에이전트가 막혀 있음 — 내가 안 누르면 아무 일도 안 일어남
+  waiting_approval: 0, // The agent is blocked — nothing happens unless I press something
   error: 1,
-  waiting_input: 2, // 턴이 끝남 — 안 급함
+  waiting_input: 2, // The turn has ended — not urgent
   limited: 3,
   working: 9,
   idle: 9,
 }
 
-/** 사용자 개입을 기다리는 상태인가 (인박스 대상) */
+/** Whether the state is waiting for the user to step in (what the inbox holds) */
 export function isWaiting(state: SessionState): boolean {
   return state === 'waiting_approval' || state === 'waiting_input' || state === 'error'
 }
 
-/** FR-12 표의 합법 전이. 여기 없으면 불법. */
+/** The legal transitions in the FR-12 table. Anything not here is illegal. */
 const ALLOWED: Record<SessionState, readonly SessionState[]> = {
   idle: ['working', 'error'],
   working: ['waiting_approval', 'waiting_input', 'limited', 'error', 'idle'],
   /*
-   * waiting_approval → waiting_input: 승인 대기 중 인터럽트로 턴이 끝나는 경로.
-   * 이 전이가 없으면 승인 카드를 무시하고 중단한 세션이 영원히 waiting_approval에 갇힌다.
+   * waiting_approval → waiting_input: the path where an interrupt ends the turn while approval is waiting.
+   * Without this transition, a session stopped with its approval card ignored is stuck in waiting_approval
+   * forever.
    */
   waiting_approval: ['working', 'waiting_input', 'error', 'idle'],
   waiting_input: ['working', 'error', 'idle'],
@@ -39,8 +40,8 @@ export function canTransition(from: SessionState, to: SessionState): boolean {
 }
 
 /**
- * 이벤트가 함의하는 다음 상태. null이면 상태 변화 없음.
- * state_change 이벤트는 어댑터가 명시적으로 보낸 것이므로 그대로 따른다.
+ * The next state an event implies. Null means no change of state.
+ * A state_change event was sent explicitly by the adapter, so it is followed as is.
  */
 export function nextStateFor(event: NormalizedEvent): SessionState | null {
   switch (event.type) {
@@ -54,7 +55,7 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
       return 'waiting_approval'
     case 'approval_resolved':
       return 'working'
-    /* 선택지도 사람을 기다리는 것이다 — 신호등이 '도는 중'으로 남으면 안 된다 */
+    /* A set of choices is waiting on the person too — the status light must not stay on 'running' */
     case 'question_request':
       return 'waiting_approval'
     case 'question_resolved':
@@ -72,7 +73,7 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
 
 export type TransitionResult = {
   state: SessionState
-  /** 불법 전이라 무시됐는가 (dev에서 경고, prod에서 로그) */
+  /** Whether it was ignored as an illegal transition (a warning in dev, a log in prod) */
   illegal: boolean
 }
 
@@ -80,9 +81,10 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
   const to = nextStateFor(event)
   if (to === null) return { state: from, illegal: false }
   /*
-   * 승인·질문 요청은 추론이 아니라 호스트가 실제로 보낸 사실이다.
-   * resume 직후 idle에서 도착한 요청을 표가 삼키면 인박스·뱃지가 못 보고
-   * 에이전트는 영원히 막힌다 — 표는 state_change 같은 추론 전이만 거른다.
+   * An approval or question request is not an inference but a fact the host actually sent.
+   * If the table swallowed a request that arrived in idle right after a resume, the inbox and the badge would
+   * never see it and the agent would be blocked forever — the table filters only inferred transitions such
+   * as state_change.
    */
   if (event.type === 'approval_request' || event.type === 'question_request') return { state: to, illegal: false }
   if (!canTransition(from, to)) return { state: from, illegal: true }

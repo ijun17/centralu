@@ -5,105 +5,105 @@ import { DEFAULT_NOTIFY_POLICY, allDoneNotification, badgeCount, notificationFor
 const s = (state: SessionState, name = '세션') => ({ id: 's1', name, state })
 const bg = { appFocused: false }
 
-describe('즉시 알림 (승인·오류만)', () => {
-  it('승인 대기로 전이하면 알린다', () => {
+describe('immediate notifications (approvals and errors only)', () => {
+  it('notifies on a transition to waiting for approval', () => {
     expect(notificationFor(s('waiting_approval'), 'working', bg)).toMatchObject({ kind: 'approval' })
   })
 
-  it('오류로 전이하면 알린다', () => {
+  it('notifies on a transition to error', () => {
     expect(notificationFor(s('error'), 'working', bg)).toMatchObject({ kind: 'error' })
   })
 
-  it('응답 대기는 알리지 않는다 (뱃지로만 — 급하지 않다)', () => {
+  it('does not notify for awaiting response (badge only — it is not urgent)', () => {
     expect(notificationFor(s('waiting_input'), 'working', bg)).toBeNull()
   })
 
-  it('상태가 그대로면 알리지 않는다 (같은 이벤트 반복에도 한 번만)', () => {
+  it('does not notify when the state is unchanged (only once, even when the same event repeats)', () => {
     expect(notificationFor(s('waiting_approval'), 'waiting_approval', bg)).toBeNull()
   })
 
-  it('앱이 눈앞에 있으면 알리지 않는다 (보고 있는데 알림은 소음)', () => {
+  it('does not notify when the app is right in front of you (a notification while you are looking is noise)', () => {
     expect(notificationFor(s('waiting_approval'), 'working', { appFocused: true })).toBeNull()
   })
 
-  it('정책으로 포그라운드 알림을 켤 수 있다', () => {
+  it('a policy can turn on notifications in the foreground', () => {
     const ctx = { appFocused: true, policy: { ...DEFAULT_NOTIFY_POLICY, whenFocused: true } }
     expect(notificationFor(s('waiting_approval'), 'working', ctx)).toMatchObject({ kind: 'approval' })
   })
 
-  it('알림 본문에 세션 이름이 들어간다 (어느 세션인지 알아야 행동한다)', () => {
+  it('the notification body includes the session name (you have to know which session it is to act)', () => {
     expect(notificationFor(s('waiting_approval', 'auth 리팩터링'), 'working', bg)?.body).toContain('auth 리팩터링')
   })
 })
 
-describe('"전부 완료" 알림 (자리를 뜬 사람에게 필요한 신호)', () => {
-  // 판정이 신원 기반이라 prev/now의 같은 세션은 같은 id를 가져야 한다
+describe('the "all done" notification (the signal someone who has left the desk needs)', () => {
+  // The decision is based on identity, so the same session in prev and now has to have the same id
   const w = (id: string, state: SessionState) => ({ id, state })
 
-  it('마지막 작업이 끝났을 때 한 번 알린다', () => {
+  it('notifies once when the last piece of work finishes', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
     const now = [w('a', 'waiting_input'), w('b', 'waiting_input')]
     expect(allDoneNotification(now, prev, bg)).toMatchObject({ kind: 'all_done' })
   })
 
-  it('아직 일하는 세션이 남았으면 알리지 않는다', () => {
+  it('does not notify while a session is still working', () => {
     const prev = [w('a', 'working'), w('b', 'working')]
     const now = [w('a', 'working'), w('b', 'waiting_input')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 
-  it('이미 다 끝나 있었으면 다시 알리지 않는다 (중복 방지)', () => {
+  it('does not notify again if everything had already finished (no duplicates)', () => {
     const done = [w('a', 'waiting_input')]
     expect(allDoneNotification(done, done, bg)).toBeNull()
   })
 
-  it('세션이 하나도 없으면 알리지 않는다', () => {
+  it('does not notify when there are no sessions at all', () => {
     expect(allDoneNotification([], [w('a', 'working')], bg)).toBeNull()
   })
 
-  it('승인 대기 세션이 남았으면 "전부 완료"가 아니다 (막힌 에이전트는 손이 빈 게 아니다)', () => {
+  it('it is not "all done" while a session is waiting for approval (a blocked agent does not have its hands free)', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_approval')]
     const now = [w('a', 'waiting_input'), w('b', 'waiting_approval')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 
-  it('한도 대기 세션이 남았으면 알리지 않는다 (해제되면 스스로 재개한다)', () => {
+  it('does not notify while a session is waiting on a limit (it resumes on its own once the limit lifts)', () => {
     const prev = [w('a', 'working'), w('b', 'limited')]
     const now = [w('a', 'waiting_input'), w('b', 'limited')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 
-  it('마지막 승인이 풀려 전부 응답 대기가 되면 그때 알린다', () => {
+  it('notifies when the last approval is resolved and everything is awaiting response', () => {
     const prev = [w('a', 'waiting_input'), w('b', 'waiting_approval')]
     const now = [w('a', 'waiting_input'), w('b', 'waiting_input')]
     expect(allDoneNotification(now, prev, bg)).toMatchObject({ kind: 'all_done' })
   })
 
   /*
-   * 개수 비교의 함정: 마지막 working 세션을 **치우면** busy가 0이 되지만
-   * 일이 끝난 게 아니다 — 신원 비교라야 "바쁘던 그 세션이 실제로 손을 뗐다"를 안다.
+   * The trap in comparing counts: **putting away** the last working session brings busy to 0, but the work
+   * has not finished — only comparing identities can tell "the session that was busy has actually let go".
    */
-  it('마지막 working 세션을 지워도 "All done"은 울리지 않는다', () => {
+  it('removing the last working session does not set off "All done"', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
     const now = [w('b', 'waiting_input')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 
-  it('마지막 working 세션을 삭제해도 울리지 않는다', () => {
+  it('nothing goes off when the last working session is deleted', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
     const now = [w('b', 'waiting_input')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 
-  it('바쁘던 세션이 끝나는 사이 다른 세션이 새로 바빠졌으면 아직 끝이 아니다', () => {
+  it('if another session became busy while the busy one finished, it is not over yet', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
     const now = [w('a', 'waiting_input'), w('b', 'working')]
     expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 })
 
-describe('독 뱃지', () => {
-  it('승인과 오류만 센다 (응답 대기는 뱃지를 태우지 않는다)', () => {
+describe('dock badge', () => {
+  it('counts only approvals and errors (awaiting response does not go on the badge)', () => {
     expect(badgeCount({ approval: 2, error: 1 })).toBe(3)
     expect(badgeCount({ approval: 0, error: 0 })).toBe(0)
   })

@@ -12,109 +12,113 @@ import type {
 import { transition } from './state-machine.js'
 
 /**
- * 세션 요약 상태 (docs/state-management.md §2).
- * 비포커스 세션도 이것만은 유지한다 — 메시지 본문은 여기 없다 (§4 윈도잉).
+ * A session's summary state (docs/state-management.md §2).
+ * Even a session that is not focused keeps this much — message bodies are not here (§4 windowing).
  */
 export type SessionSummary = {
   id: string
-  /** 중앙 오케스트레이터만 null — 프로젝트를 가로지르는 세션이라 어디에도 속하지 않는다 */
+  /** Null only for the central orchestrator: a session that spans projects belongs to none of them */
   projectId: string | null
   /**
-   * 워커인가 오케스트레이터인가 (#13). projectId로 판정하던 시절의 여섯 군데가
-   * 이 한 필드로 모였다. 프로젝트를 가진 오케스트레이터(#13)는 폐기됐지만, 판정이 한 군데인 편은 여전히 낫다.
+   * Whether this is a worker or an orchestrator (#13). The six places that used to decide it from projectId
+   * were gathered into this one field. The orchestrator that belongs to a project (#13) has since been
+   * dropped, but deciding it in one place is still better.
    */
   kind: 'worker' | 'orchestrator' | 'coordinator'
   /**
-   * 이 세션이 쓰는 도구.
+   * The tool this session uses.
    *
-   * 프로젝트의 기본 도구와 다를 수 있다 — 한 프로젝트에서 claude 세션과 codex 세션을
-   * 섞어 쓸 수 있기 때문이다. 없을 때 프로젝트 기본값으로 대신하면 헤더·사용량이
-   * 틀린 도구를 가리킨다 (도그푸딩: 제목이 비슷한 두 세션을 다른 도구로 착각했다).
+   * It can differ from the project's default tool, because one project can mix claude sessions and codex
+   * sessions. Falling back to the project default when this is missing makes the header and the usage point
+   * at the wrong tool (dogfooding: two sessions with similar titles were taken to be on the wrong tool).
    */
   tool: ToolName
   name: string
   autoNamed: boolean
   state: SessionState
   /**
-   * 바쁜 동안 무엇을 하느라 바쁜가 (state를 세분한다, 대체하지 않는다).
-   * null이면 그냥 답을 기다리는 중.
+   * While busy, what it is busy doing (this refines state; it does not replace it).
+   * Null means it is simply waiting for the reply.
    */
   activity: SessionActivity | null
   waitingSince: number | null
   lastSeq: number
   lastReadSeq: number
   /**
-   * 프로세스가 살아 있는가 (FR-10).
-   * host를 껐다 켜면 기록은 남지만 프로세스는 사라진다 — 그 상태를 UI가 알아야
-   * "이어가기"를 권할 수 있다. 죽은 세션에 말을 걸고 기다리게 두는 것이 최악이다.
+   * Whether the process is alive (FR-10).
+   * Restarting the host keeps the transcript but the process is gone — the UI has to know that state to be
+   * able to suggest "resume". The worst thing is to let someone talk to a dead session and leave them
+   * waiting.
    */
   live: boolean
-  /** 사이드바·인박스 미리보기 한 줄 */
+  /** The one-line preview in the sidebar and the inbox */
   preview: string
   pendingApproval: { requestId: string; detail: ApprovalDetail } | null
   /**
-   * 답을 기다리는 선택지들 (AskUserQuestion).
+   * The choices waiting for an answer (AskUserQuestion).
    *
-   * **목록이다.** 승인은 단일 필드라 두 번째 요청이 첫 번째를 덮어 답할 길이 사라졌다 —
-   * 그 실수를 여기서 반복하지 않는다. 한 번에 최대 4개 질문이 한 장으로 오고,
-   * 장이 여럿 겹칠 수도 있다.
+   * **It is a list.** Approval is a single field, so a second request overwrote the first and left no way
+   * to answer it — that mistake is not repeated here. Up to four questions arrive at once on one card, and
+   * several cards can be stacked up.
    */
   pendingQuestions: { requestId: string; questions: Question[] }[]
   usage: TokenUsage | null
   context: { used: number; window: number; exactness: 'exact' | 'estimate' } | null
   limit: { resumeAt?: string; usedPercent?: number; windowMins?: number } | null
   lastError: { code: string; message: string } | null
-  /** 동시 세션 파일 충돌 감지용 (FR-2) */
+  /** For detecting file conflicts between concurrent sessions (FR-2) */
   touchedPaths: string[]
-  /** 세션 헤더에서 바꾼다 (FR-7) */
+  /** Changed from the session header (FR-7) */
   model: string | null
-  /** 추론 강도. 지원하지 않는 모델이면 null이다 (단계는 모델마다 다르다) */
+  /** Reasoning effort. Null for a model that does not support it (the levels differ from model to model) */
   effort: string | null
-  /** 응답 길이 (#54). 지원 여부는 어댑터 능력 선언(verbosities)이 말한다 */
+  /** Response length (#54). Support is stated in the adapter's capability declaration (verbosities) */
   verbosity: string | null
-  /** 응답 속도 (codex의 service_tier). 지원 티어는 모델 목록(ModelOption.tiers)이 말한다 */
+  /** Response speed (codex's service_tier). The model list (ModelOption.tiers) names the supported tiers */
   serviceTier: string | null
   permissionPreset: PermissionPreset
   /**
-   * 이 세션이 도는 워크트리 (FR-2 옵션). null이면 프로젝트 디렉토리에서 직접 돈다.
-   * 화면이 이걸 알아야 "왜 프로젝트 폴더의 파일이 안 바뀌지"를 겪지 않는다.
+   * The worktree this session runs in (an FR-2 option). Null means it runs directly in the project directory.
+   * The screen has to know this, or the person is left asking "why aren't the files in the project folder
+   * changing?".
    */
   worktree: { path: string; branch: string } | null
   /**
-   * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위.
-   * 사이드바 트리가 이 필드 하나로 그려진다 — 매니저는 자식을 가진 보통 세션이다.
+   * The manager session this session hangs under (#69). Null means top level.
+   * The sidebar tree is drawn from this one field — a manager is an ordinary session that has children.
    */
   parentSessionId: string | null
   /**
-   * 이 워크트리 브랜치의 작업이 프로젝트 줄기에 다 들어갔다 (#69).
-   * 배지 하나로 그려진다. 스쿼시·리베이스 병합은 로컬 감지 불가(실측)라 false로
-   * 남을 수 있다 — 놓침의 비용은 배지지 데이터가 아니다.
+   * All the work on this worktree's branch has made it into the project's trunk (#69).
+   * It is drawn as a single badge. Squash and rebase merges cannot be detected locally (measured), so this
+   * can stay false — what a miss costs is a badge, not data.
    */
   merged: boolean
   /**
-   * 이 브랜치의 풀 리퀘스트 (#76 stage 3). gh로 측정한 파생 사실 — 스쿼시 병합처럼
-   * merged가 로컬에서 못 보는 결말을 이것이 본다. null이면 "모른다"(gh 없음·오프라인 포함).
+   * This branch's pull request (#76 stage 3). A derived fact measured with gh — it sees the endings that
+   * `merged` cannot see locally, such as a squash merge. Null means "unknown" (including no gh, and offline).
    */
   pr: { number: number; state: 'open' | 'merged' | 'closed'; url: string } | null
   /**
-   * 세션에 걸린 골 (2026-09-07 — claude /goal · codex thread/goal/*). 도구가 판정하는
-   * 라이브 사실이라 null이면 "없거나 아직 모른다"다. 배지의 근거일 뿐 판정은 도구의 것.
+   * The goal set on the session (2026-09-07 — claude /goal · codex thread/goal/*). It is a live fact that the
+   * tool judges, so null means "there is none, or it is not known yet". It is only what the badge stands on;
+   * the judging belongs to the tool.
    */
   goal: SessionGoal | null
   /**
-   * 이번 턴에 모델이 생각에 쓴 토큰 추정치 누계 (#58 — claude는 thinking 본문이
-   * 암호화라 이 숫자가 보여줄 수 있는 전부다). activity와 같은 수명: working을
-   * 벗어나면 죽는다.
+   * The running total of the estimated tokens the model spent thinking in this turn (#58 — claude's thinking
+   * text is encrypted, so this number is all there is to show). Same lifetime as activity: it dies when the
+   * session leaves working.
    */
   thinkingTokens: number | null
   /**
-   * 에이전트가 세운 계획의 현재 스냅샷 (#58 — codex turn/plan/updated).
-   * activity와 같은 수명: 진행 표시일 뿐이라 working을 벗어나면 죽는다.
+   * The current snapshot of the plan the agent has made (#58 — codex turn/plan/updated).
+   * Same lifetime as activity: it only shows progress, so it dies when the session leaves working.
    */
   plan: { text: string; status: 'pending' | 'inProgress' | 'completed' }[] | null
   /**
-   * 이 세션을 만든 앱 (#81). null이면 주인 없음 — 그러면 사이드바가 받는다.
-   * 코어가 아는 것은 id 한 줄이고, 그 뜻은 앱만 안다.
+   * The app that created this session (#81). Null means it has no owner — then the sidebar takes it.
+   * All the core knows is a single id; only the app knows what it means.
    */
   appId: string | null
 }
@@ -134,55 +138,57 @@ const PREVIEW_MAX = 80
 const truncate = (s: string) => (s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX) + '…' : s)
 
 /**
- * 유일한 상태 변경 지점. 순수 함수 — 같은 입력이면 같은 출력.
- * `now`를 인자로 받는 이유: 대기 시작 시각 기록이 테스트 가능해야 하기 때문.
+ * The only place the state changes. A pure function — the same input gives the same output.
+ * `now` is taken as an argument because recording when a wait started has to be testable.
  */
 export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: number): SessionSummary {
   const { state, illegal } = transition(s.state, event)
   const stateChanged = state !== s.state
 
-  // 대기 진입 시각 기록 (인박스 정렬·경과 시간의 근거)
+  // Record when the wait began (what the inbox order and the elapsed time are based on)
   const wasWaiting = s.state === 'waiting_approval' || s.state === 'waiting_input' || s.state === 'error'
   const isWaitingNow = state === 'waiting_approval' || state === 'waiting_input' || state === 'error'
   const waitingSince = isWaitingNow ? (wasWaiting && s.waitingSince != null ? s.waitingSince : now) : null
 
   /*
-   * 바쁨의 종류는 바쁨보다 오래 살지 못한다.
+   * What it is busy with cannot outlive its being busy.
    *
-   * 압축 중에 프로세스가 죽거나 턴이 끝나버리면 도구는 "끝났다"는 신호를 못 보낸다.
-   * 그때 activity가 남아 있으면 화면은 영원히 "Compacting"이라고 거짓말한다 —
-   * 그래서 working에서 벗어나는 순간 함께 지운다.
+   * If the process dies or the turn ends in the middle of compacting, the tool never sends the "done" signal.
+   * If activity were still set then, the screen would claim "Compacting" forever, which is a lie —
+   * so it is cleared along with it the moment the session leaves working.
    */
   const activity = event.type === 'activity' ? event.activity : state === 'working' ? s.activity : null
 
-  // 생각의 양도 바쁨보다 오래 살지 못한다 (activity와 같은 규칙)
+  // The amount of thinking cannot outlive being busy either (the same rule as activity)
   const thinkingTokens =
     event.type === 'reasoning_delta' && event.estTokens ? (s.thinkingTokens ?? 0) + event.estTokens
     : state === 'working' ? s.thinkingTokens
     : null
 
-  // 계획도 바쁨보다 오래 살지 못한다 (#58 — 같은 규칙: 남으면 끝난 턴의 계획이 거짓말한다)
+  // The plan cannot outlive being busy either (#58 — the same rule: left behind, a finished turn's plan lies)
   const plan =
     event.type === 'plan_update' ? event.steps
     : state === 'working' ? s.plan
     : null
 
   /*
-   * 회복하면 배너도 함께 내려간다.
+   * When the session recovers, the banners come down with it.
    *
-   * limit·lastError는 "지금 막혀 있다"는 배너의 근거인데, 한도가 풀리거나 오류에서
-   * 살아나 다시 일하기 시작해도 남아 있으면 화면은 계속 막혀 있다고 거짓말한다 —
-   * working/idle 진입은 곧 회복이므로 그 순간 지운다.
+   * limit and lastError are what the "blocked right now" banner stands on. If they stayed after the limit
+   * lifted, or after the session came back from an error and started working again, the screen would go on
+   * claiming it is blocked, which is a lie — entering working or idle is itself recovery, so they are
+   * cleared at that moment.
    */
   const recovered = !illegal && stateChanged && (state === 'working' || state === 'idle')
   /*
-   * 승인·질문 카드는 **답할 수 있는 동안만** 산다.
+   * Approval and question cards live **only while they can be answered**.
    *
-   * requestId가 죽는 길은 error만이 아니다: 승인 대기 중 인터럽트(turn_complete →
-   * waiting_input)도, resume으로 idle 복귀도, working 재개도 그 요청을 끝장낸다.
-   * 카드를 남겨두면 클릭이 죽은 요청에 답하려다 던진다 — 상태(가시성)와 payload
-   * (액션 가능성)가 따로 놀면 안 된다. 회복 후 요청이 유효하면 호스트가 다시 보낸다
-   * (위의 강제 표면화). 새 요청은 아래 switch가 이 소거 위에 다시 세운다.
+   * error is not the only way a requestId dies: an interrupt while waiting for approval (turn_complete →
+   * waiting_input), a return to idle through resume, and working resuming all finish that request off too.
+   * Leave the card up and a click tries to answer a dead request and throws — the state (visibility) and the
+   * payload (whether it can be acted on) must not drift apart. If the request is still valid after recovery,
+   * the host sends it again (the forced surfacing above). A new request is set up again by the switch below,
+   * on top of this clearing.
    */
   const cardsDead =
     !illegal &&
@@ -202,7 +208,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'tool_call':
       return { ...next, preview: truncate(event.summary.title) }
     case 'question_request':
-      // 같은 id가 다시 오면 갈아 끼우고, 아니면 뒤에 쌓는다 (덮지 않는다)
+      // The same id arriving again replaces its entry; otherwise it is added at the end (never overwritten)
       return {
         ...next,
         pendingQuestions: [
@@ -229,15 +235,15 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
         limit: { resumeAt: event.resumeAt, usedPercent: event.usedPercent, windowMins: event.windowMins },
       }
     /*
-     * 사람이 지은 이름은 자동 이름이 덮지 않는다 (FR-18, 이슈 #5).
+     * An automatic name does not overwrite a name the person gave (FR-18, issue #5).
      *
-     * 판정 근거가 **이벤트**에 있다는 게 핵심이다. 예전엔 내 autoNamed만 보고
-     * 정했는데, 그러면 사람이 두 번째로 고친 이름이 다른 화면에는 영영 안 갔다 —
-     * 이미 autoNamed가 내려가 있어서 그 이벤트를 통째로 버렸기 때문이다.
+     * The point is that the decision rests on the **event**. It used to be decided by looking only at this
+     * side's own autoNamed, and then the second name the person gave never reached the other screens —
+     * autoNamed had already been turned off there, so the whole event was thrown away.
      *
-     * `auto`가 없으면 **자동으로 친다** — 스키마의 기본값과 같은 판정이다.
-     * `!event.auto`로 적으면, 파서를 거치지 않고 손으로 만든 이벤트(옛 버전 프레임·
-     * 테스트 픽스처)에서 undefined가 "사람이 정했다"로 뒤집힌다.
+     * A missing `auto` **counts as automatic** — the same decision as the schema's default. Written as
+     * `!event.auto`, an event built by hand without going through the parser (a frame from an old version, a
+     * test fixture) would have its undefined flipped into "the person chose it".
      */
     case 'worktree_merged':
       return { ...next, merged: true }
@@ -253,14 +259,14 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'error':
       return { ...next, lastError: { code: event.error.code, message: event.error.message } }
     case 'turn_complete':
-    case 'state_change': // limited 해제 등 회복 시 배너 정리는 위 recovered에서 일괄 처리
+    case 'state_change': // Banners on recovery (leaving limited, say) are all cleared by recovered above
       return next
     default:
       return next
   }
 }
 
-/** 메시지 적재 시 seq 갱신 (읽음/안읽음의 근거) */
+/** Advances seq when a message is stored (what read/unread is based on) */
 export function bumpSeq(s: SessionSummary, seq: number): SessionSummary {
   return seq > s.lastSeq ? { ...s, lastSeq: seq } : s
 }
@@ -273,7 +279,7 @@ export function rename(s: SessionSummary, name: string): SessionSummary {
   return { ...s, name, autoNamed: false }
 }
 
-/** 같은 디렉토리 동시 세션 중 같은 파일을 만진 세션들 (FR-2 데이터 손실 경고) */
+/** Concurrent sessions in the same directory that touched the same file (FR-2 data-loss warning) */
 export function detectFileConflicts(sessions: readonly SessionSummary[]): { path: string; sessionIds: string[] }[] {
   const byPath = new Map<string, string[]>()
   for (const s of sessions) {

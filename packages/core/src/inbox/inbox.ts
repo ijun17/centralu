@@ -3,13 +3,13 @@ import { URGENCY, isWaiting } from '../session/state-machine.js'
 import { isUnread } from '../unread/unread.js'
 
 /**
- * 인박스 = 파생 상태 (docs/state-management.md §3). 절대 저장하지 않는다.
- * 정렬: 긴급도 → 안읽음 → 대기 시작 오름차순 (오래 기다린 것부터).
+ * The inbox is derived state (docs/state-management.md §3). It is never stored.
+ * Order: urgency → unread → when the wait started, ascending (the longest wait first).
  */
 
 export type InboxCandidate = {
   id: string
-  /** 오케스트레이터는 프로젝트가 없다 */
+  /** An orchestrator has no project */
   projectId: string | null
   name: string
   state: SessionState
@@ -43,7 +43,7 @@ export function buildInbox(sessions: readonly InboxCandidate[], now: number): In
     )
 }
 
-/** 전역 카운터 — 절대 합산하지 않는다 (FR-12: "승인 2 · 응답대기 3") */
+/** The global counters — never summed (FR-12: "2 approvals · 3 awaiting response") */
 export type WaitingCounts = { approval: number; error: number; input: number }
 
 export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts {
@@ -57,8 +57,8 @@ export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts
 }
 
 /**
- * "다음 대기로 이동" (FR-17). 현재 세션 다음 항목으로 순환.
- * 인박스 정렬 순서를 그대로 따르므로 승인 → 오류 → 응답대기 순.
+ * "Go to the next waiting item" (FR-17). Cycles to the item after the current session.
+ * It follows the inbox order exactly, so the order is approval → error → awaiting response.
  */
 export function nextWaitingSession(inbox: readonly InboxItem[], currentId: string | null): string | null {
   if (inbox.length === 0) return null

@@ -2,33 +2,38 @@ import type { SessionState } from '@cc/protocol'
 import { isWaiting } from '../session/state-machine.js'
 
 /**
- * 알림 정책 (FR-12 표시 계층 ④).
- * 원칙: **알림은 사람의 주의를 강제로 가져오는 유일한 수단**이므로 가장 아껴 쓴다.
- * 승인·오류만 즉시 알리고, 응답 대기는 뱃지로만. 대신 "전부 끝났을 때" 한 번 알린다.
+ * Notification policy (FR-12 display layer ④).
+ * Principle: **a notification is the only means that forcibly takes the person's attention**, so it is the
+ * one used most sparingly. Only approvals and errors notify at once; awaiting response is a badge only.
+ * Instead, there is one notification "when everything has finished".
  */
 
 export type NotifyPolicy = {
-  /** 승인 대기 발생 시 즉시 알림 */
+  /** Notify at once when an approval starts waiting */
   approval: boolean
-  /** 오류 발생 시 즉시 알림 */
+  /** Notify at once when an error occurs */
   error: boolean
   /**
-   * 세션 하나가 **보이지 않는 곳에서** 응답을 마쳤을 때.
+   * When a single session finishes a response **somewhere it cannot be seen**.
    *
-   * 원래는 "전부 끝났을 때 한 번"만 울렸다. 그런데 화면 밖 완료마다 카드가 남게 되면서
-   * 어긋났다 — 카드는 매번 쌓이는데 소리는 마지막에만 나서, 자리를 비운 사이 둘이 끝나면
-   * 카드 두 장이 조용히 쌓여 있었다. 카드와 소리는 같은 사건이므로 함께 간다.
+   * Originally the sound came only "once, when everything has finished". That fell out of step once every
+   * off-screen finish started leaving a card — the cards piled up every time but the sound came only at the
+   * end, so if two sessions finished while the person was away, two cards had quietly piled up. A card and
+   * a sound are the same event, so they go together.
    */
   done: boolean
-  /** 모든 세션이 일을 마쳤을 때 1회 */
+  /** Once, when every session has finished its work */
   allDone: boolean
-  /** 앱이 포그라운드일 때도 알릴지 (기본: 안 알림 — 눈앞에 있는데 알림은 소음) */
+  /**
+   * Whether to notify even while the app is in the foreground (default: no — a notification about something
+   * right in front of you is noise)
+   */
   whenFocused: boolean
   /**
-   * 소리를 낼지.
+   * Whether to make a sound.
    *
-   * macOS 배너 경로가 죽어 있는 것을 실측한 뒤로 **소리가 자리 비움의 주력**이 됐다.
-   * 옆방에 가 있어도 닿는 유일한 신호라서 기본값이 켜짐이다.
+   * Since we measured that the macOS banner path is dead, **sound has been the main signal while the person
+   * is away**. It is the only signal that reaches them even in the next room, so it is on by default.
    */
   sound: boolean
 }
@@ -49,7 +54,7 @@ export type NotifyContext = {
   policy?: NotifyPolicy
 }
 
-/** 세션 상태 전이 → 알림 (없으면 null) */
+/** Session state transition → notification (null when there is none) */
 export function notificationFor(
   session: { id: string; name: string; state: SessionState },
   prevState: SessionState,
@@ -69,9 +74,9 @@ export function notificationFor(
 }
 
 /**
- * "전부 완료" 판정 (product-spec에서 결정한 정책).
- * 개별 세션이 끝날 때마다가 아니라, 일이 다 끝났을 때 한 번만 알린다 —
- * 자리를 뜬 사람에게 필요한 신호는 그것이다.
+ * Deciding "all done" (a policy decided in product-spec).
+ * It notifies once, when all the work is done, not every time an individual session finishes —
+ * that is the signal someone who has left the desk needs.
  */
 export function allDoneNotification(
   sessions: readonly { id: string; state: SessionState }[],
@@ -83,11 +88,11 @@ export function allDoneNotification(
   if (ctx.appFocused && !policy.whenFocused) return null
 
   /*
-   * "끝났다"의 반대는 working만이 아니다.
+   * The opposite of "finished" is not only working.
    *
-   * waiting_approval은 에이전트가 막혀 있는 것이지 손이 빈 게 아니고,
-   * limited는 해제되면 스스로 재개한다 — 이 상태에서 "All done"이 울리면
-   * 승인 카드가 쌓여 있는데 사람은 다 끝난 줄 알고 자리를 뜬다.
+   * waiting_approval means the agent is blocked, not that its hands are free, and limited resumes on its
+   * own once the limit lifts — if "All done" went off in these states, the person would think everything
+   * was finished and leave the desk while approval cards were piling up.
    */
   const isBusy = (s: { state: SessionState }) =>
     s.state === 'working' || s.state === 'waiting_approval' || s.state === 'limited'
@@ -95,12 +100,12 @@ export function allDoneNotification(
   const active = sessions.length
 
   /*
-   * **개수가 아니라 신원으로 판정한다.**
+   * **Decided by identity, not by count.**
    *
-   * busy(prev)>0 && busy(now)===0 식의 개수 비교는, 마지막 working 세션을
-   * **아카이브·삭제한 순간**에도 성립한다 — 일이 끝난 게 아니라 치운 것인데
-   * "All done"이 울린다. 바쁘던 바로 그 세션들이 **여전히 목록에 있고,
-   * 치워지지 않았고, 실제로 손을 뗐을 때**만 끝난 것이다.
+   * A count comparison like busy(prev)>0 && busy(now)===0 also holds **the moment the last working session
+   * is archived or deleted** — the work did not finish, it was put away, and yet "All done" goes off. It is
+   * finished only when the very sessions that were busy **are still in the list, have not been put away,
+   * and have actually let go of the work**.
    */
   const prevBusy = prevSessions.filter(isBusy).map((s) => s.id)
   if (prevBusy.length === 0 || active === 0) return null
@@ -109,7 +114,7 @@ export function allDoneNotification(
     const s = now.get(id)
     if (!s || isBusy(s)) return null
   }
-  // 그 사이 새로 바빠진 세션이 있어도 아직 끝난 게 아니다
+  // Nor is it finished if some session became busy in the meantime
   if (sessions.some(isBusy)) return null
 
   const waiting = sessions.filter((s) => isWaiting(s.state)).length
@@ -120,7 +125,10 @@ export function allDoneNotification(
   }
 }
 
-/** 독 뱃지 숫자 — 승인과 오류만 센다 (응답 대기는 급하지 않으므로 뱃지를 태우지 않는다) */
+/**
+ * The dock badge number — counts only approvals and errors (awaiting response is not urgent, so it does not
+ * go on the badge)
+ */
 export function badgeCount(counts: { approval: number; error: number }): number {
   return counts.approval + counts.error
 }
