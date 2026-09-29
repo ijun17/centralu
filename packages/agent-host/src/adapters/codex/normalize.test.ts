@@ -87,7 +87,13 @@ describe('스트리밍·도구 호출', () => {
       item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },
     })
     expect(out).toEqual([
-      { type: 'tool_call', sessionId: S, callId: 'exec-1', summary: { tool: 'Bash', title: "/bin/zsh -lc 'npm test'", readOnly: false, paths: [] } },
+      {
+        type: 'tool_call',
+        sessionId: S,
+        callId: 'exec-1',
+        summary: { tool: 'Bash', title: "/bin/zsh -lc 'npm test'", readOnly: false, paths: [] },
+        input: { command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },
+      },
     ])
   })
 
@@ -194,6 +200,55 @@ describe('스트리밍·도구 호출', () => {
 
   it('경로 없는 imageView는 버린다 (그릴 것이 없다)', () => {
     expect(n('item/completed', { item: { type: 'imageView', id: 'iv' } })).toEqual([])
+  })
+})
+
+/*
+ * A tool call is kept whole (#221). The card's summary stays as it was — the first 2,000 characters of a result, the
+ * paths of a file change — and the record goes in `output` and `input`. Shapes follow generated/v2/ThreadItem.ts.
+ */
+describe('the whole record of a tool call (#221)', () => {
+  it('a result keeps its whole output, and the card still shows the first 2,000 characters', () => {
+    const log = `${'building…\n'.repeat(400)}error: the conclusion is at the end`
+    const [result] = n('item/completed', {
+      item: { type: 'commandExecution', id: 'e', status: 'completed', command: 'npm run build', aggregatedOutput: log, exitCode: 1 },
+    })
+    expect(log.length).toBeGreaterThan(2000)
+    expect(result).toMatchObject({ type: 'tool_result', summary: log.slice(0, 2000), output: log })
+  })
+
+  it('an MCP result keeps its whole text, and an empty result carries no output', () => {
+    const text = 'x'.repeat(5000)
+    const [mcp] = n('item/completed', {
+      item: { type: 'mcpToolCall', id: 'm', server: 's', tool: 't', status: 'completed', result: { content: [{ type: 'text', text }] } },
+    })
+    expect(mcp).toMatchObject({ output: text })
+    const [empty] = n('item/completed', { item: { type: 'fileChange', id: 'fc', status: 'completed', changes: [] } })
+    expect(empty).not.toHaveProperty('output')
+  })
+
+  it('a file change keeps each file with its diff, where the card has only the paths', () => {
+    const changes = [
+      { path: 'src/a.ts', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-old\n+new' },
+      { path: 'src/b.ts', kind: { type: 'add' }, diff: '+export {}' },
+    ]
+    const [call] = n('item/started', { item: { type: 'fileChange', id: 'fc', status: 'inProgress', changes } })
+    expect(call).toMatchObject({ type: 'tool_call', summary: { title: 'src/a.ts, src/b.ts' }, input: { changes } })
+  })
+
+  it('a command keeps what was asked and none of how it went; an MCP call keeps its arguments', () => {
+    const [cmd] = n('item/started', {
+      item: {
+        type: 'commandExecution', id: 'e', command: 'ls', cwd: '/repo', status: 'inProgress',
+        aggregatedOutput: null, exitCode: null, durationMs: null, processId: 'pty-1',
+      },
+    })
+    expect((cmd as { input?: unknown }).input).toEqual({ command: 'ls', cwd: '/repo' })
+    const args = { query: 'boundaries', limit: 5 }
+    const [mcp] = n('item/started', {
+      item: { type: 'mcpToolCall', id: 'm', server: 's', tool: 't', status: 'inProgress', arguments: args, result: null, error: null },
+    })
+    expect((mcp as { input?: unknown }).input).toEqual({ server: 's', tool: 't', arguments: args })
   })
 })
 

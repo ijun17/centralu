@@ -142,7 +142,31 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      */
     attachments: z.array(Attachment).optional(),
   }),
-  z.object({ ...base, ...persistedSeq, type: z.literal('tool_call'), callId: z.string(), summary: ToolSummary }),
+  /**
+   * A tool call and its result. `summary` is what the card shows; `input` and `output` are the whole record (#221).
+   *
+   *   input   the tool's raw input as the tool received it: a Bash command with its options, the full content of a
+   *           Write, both sides of an Edit, the arguments of an MCP call, Codex's file changes with their diffs
+   *   output  the whole text the tool answered, uncut. Images are not in it: they are kept as attachments (#40)
+   *
+   * Before #221 the card's preview was the record: a result kept its first 300 characters (Claude) or 2,000 (Codex),
+   * and a file edit kept only its path. The full text lived only in the tools' own files, which do not last (Claude
+   * Code deletes a transcript after 30 days without activity). Rows written before then have neither field.
+   *
+   * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
+   * pages) and from every stored message it reads back unless the reader asks for them by name
+   * (`Store.loadMessages`). Full tool output reaching another session's prompt is the privilege path #73 closed:
+   * `read_session`, `recall`, the handoff record and the orchestrator's memory read `summary` and nothing else. And
+   * an agent `cat`-ing a large file would otherwise ride every page load. Neither field is in the search index.
+   */
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('tool_call'),
+    callId: z.string(),
+    summary: ToolSummary,
+    input: z.unknown().optional(),
+  }),
   z.object({
     ...base,
     ...persistedSeq,
@@ -150,6 +174,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     callId: z.string(),
     ok: z.boolean(),
     summary: z.string().default(''),
+    output: z.string().optional(),
   }),
   /**
    * 대화 안 앱 화면 (M4 B-1) — 세션의 에이전트가 **화면이 달린** 앱 도구를 불렀다. 그 호출 카드
@@ -455,4 +480,20 @@ export type NormalizedEventType = NormalizedEvent['type']
 export function parseEventLenient(raw: unknown): NormalizedEvent | null {
   const r = NormalizedEvent.safeParse(raw)
   return r.success ? r.data : null
+}
+
+/**
+ * The event as it may leave the host: a tool call without its `input`, a tool result without its `output` (#221).
+ * Everything else, `turn_complete`'s `output` included, is returned as it is.
+ */
+export function withoutToolRecord(e: NormalizedEvent): NormalizedEvent {
+  if (e.type === 'tool_call' && 'input' in e) {
+    const { input: _input, ...card } = e
+    return card
+  }
+  if (e.type === 'tool_result' && 'output' in e) {
+    const { output: _output, ...card } = e
+    return card
+  }
+  return e
 }

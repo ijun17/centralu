@@ -51,6 +51,28 @@ function resultSummary(item: Record<string, unknown>): string {
   return ''
 }
 
+/**
+ * The fields of a thread item that say how it went rather than what was asked (generated/v2/ThreadItem.ts): the
+ * status, a command's output, exit code and PTY, an MCP call's result and error, a dynamic tool's content, a search's
+ * results, a generated image (base64) and where it was saved. On `item/started` they are empty or null; they are
+ * listed so that a started item never carries half a result.
+ */
+const ITEM_OUTCOME = new Set([
+  'id', 'type', 'status', 'aggregatedOutput', 'output', 'exitCode', 'processId',
+  'result', 'error', 'contentItems', 'success', 'results', 'agentsStates', 'failure', 'savedPath',
+])
+
+/**
+ * What the tool was asked to do, whole — the call's `input` (#221): everything on the started item but its identity,
+ * its outcome and the fields it has no value for yet (a command's `durationMs` is null until it ends; a sleep's is
+ * what it was asked for). That is a command with its working directory, a file change with each file's diff (the
+ * title keeps only the paths), an MCP call's server, tool and arguments. Picking fields per item type would drop
+ * whatever a new Codex adds; this keeps it.
+ */
+function itemInput(item: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(item).filter(([k, v]) => !ITEM_OUTCOME.has(k) && v !== null && v !== undefined))
+}
+
 /** 도구 호출 항목을 사람이 읽는 한 줄로 (대화창 카드 제목) */
 function itemSummary(item: Record<string, unknown>): { tool: string; title: string; readOnly: boolean; paths: string[] } {
   const type = str(item.type)
@@ -267,7 +289,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       // 이미지 열람의 시작은 도구 줄이 아니다 — completed에서 이미지 자체를 낸다 (#40)
       if (type === 'imageView') return []
       const s = itemSummary(item)
-      return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s }]
+      return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s, input: itemInput(item) }]
     }
 
     case 'item/completed': {
@@ -298,13 +320,16 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         return path ? [{ type: 'message_image', sessionId, mime: '', data: '', path }] : []
       }
       const s = itemSummary(item)
+      // The card shows the first 2,000 characters; the result's record is all of it (#221)
+      const output = resultSummary(item)
       const out: NormalizedEvent[] = [
         {
           type: 'tool_result',
           sessionId,
           callId: str(item.id),
           ok: str(item.status) !== 'failed',
-          summary: resultSummary(item).slice(0, 2000),
+          summary: output.slice(0, 2000),
+          ...(output ? { output } : {}),
         },
       ]
       // 파일을 실제로 바꿨으면 충돌 감지·하이라이트용으로 알린다 (FR-2, FR-5)

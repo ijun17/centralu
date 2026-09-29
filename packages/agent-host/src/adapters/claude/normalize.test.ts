@@ -403,3 +403,83 @@ describe('streamed thinking is not repeated from the finished message', () => {
     expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
   })
 })
+
+/*
+ * A tool call is kept whole (#221). The card's summary stays as it was — a result's first 300 characters, a file
+ * edit's path — and the record goes in `output` and `input`.
+ */
+describe('the whole record of a tool call (#221)', () => {
+  const resultOf = (content: unknown, extra: Record<string, unknown> = {}) =>
+    n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content }] }, ...extra })[0] as {
+      summary: string
+      output?: string
+    }
+
+  it('a result keeps its whole output, and the card still shows the first 300 characters', () => {
+    const log = `${'compiling…\n'.repeat(100)}error TS2322: the conclusion is at the end`
+    const result = resultOf(log)
+    expect(log.length).toBeGreaterThan(300)
+    expect(result.summary).toBe(log.slice(0, 300))
+    expect(result.output).toBe(log)
+  })
+
+  it('a result made of blocks keeps their text and a tool reference, and leaves the images out', () => {
+    const result = resultOf([
+      { type: 'text', text: 'first' },
+      { type: 'image', source: { type: 'base64', data: 'aWJs', media_type: 'image/png' } },
+      { type: 'text', text: 'second' },
+      { type: 'tool_reference', tool_name: 'WebFetch' },
+    ])
+    expect(result.output).toBe('first\nsecond\n{"type":"tool_reference","tool_name":"WebFetch"}')
+    expect(result.output).not.toContain('aWJs')
+    // An image alone leaves nothing to keep
+    expect(resultOf([{ type: 'image', source: { type: 'base64', data: 'aWJs', media_type: 'image/png' } }])).not.toHaveProperty('output')
+  })
+
+  it('a Write keeps its content and an Edit both sides, where the card has only the path', () => {
+    const write = { file_path: '/repo/a.ts', content: 'export const a = 1\n'.repeat(50) }
+    const edit = { file_path: '/repo/b.ts', old_string: 'old line', new_string: 'new line', replace_all: false }
+    const out = n({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'w', name: 'Write', input: write },
+          { type: 'tool_use', id: 'e', name: 'Edit', input: edit },
+        ],
+      },
+    }).filter((e) => e.type === 'tool_call')
+    expect(out).toMatchObject([
+      { callId: 'w', summary: { title: 'Write: /repo/a.ts' }, input: write },
+      { callId: 'e', summary: { title: 'Edit: /repo/b.ts' }, input: edit },
+    ])
+  })
+
+  it('a finished foreground agent keeps its whole report, not the head the card shows', () => {
+    const report = `## Findings\n\n${'A long paragraph of the report. '.repeat(40)}\n\nThe conclusion is at the end.`
+    const result = resultOf([{ type: 'text', text: `[Subagent hand-back] The text below is the final report…\n\n${report}` }], {
+      tool_use_result: { status: 'completed', agentId: 'a1', content: [{ type: 'text', text: report }], totalToolUseCount: 3, totalDurationMs: 4000 },
+    })
+    expect(result.summary).toBe(`3 tool uses · 4s\n\n${report}`.slice(0, 300))
+    expect(result.output).toBe(`3 tool uses · 4s\n\n${report}`)
+  })
+
+  it('a finished background agent keeps its whole report, which its task_notification carries in summary', () => {
+    const report = `${'The background agent reports at length. '.repeat(20)}Done.`
+    const stream = new ClaudeStreamNormalizer(SID)
+    stream.push({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'bg', content: [{ type: 'text', text: 'Async agent launched successfully.' }] }] },
+      tool_use_result: { status: 'async_launched', agentId: 'a2' },
+    })
+    const [done] = stream.push({
+      type: 'system',
+      subtype: 'task_notification',
+      tool_use_id: 'bg',
+      status: 'completed',
+      summary: report,
+      usage: { tool_uses: 2, duration_ms: 9000 },
+    }) as { summary: string; output?: string }[]
+    expect(done?.summary).toBe(`2 tool uses · 9s\n\n${report}`.slice(0, 300))
+    expect(done?.output).toBe(`2 tool uses · 9s\n\n${report}`)
+  })
+})

@@ -49,6 +49,7 @@ import {
   isSessionId,
   parseUiPreferences,
   sessionLiveDefaults,
+  withoutToolRecord,
 } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, HistoryMessage, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -412,7 +413,13 @@ export class SessionManager {
      * 고리가 된다. 앱의 실패는 방송을 막지 못한다: 삼키고 기록한다.
      */
     const rawEmit = this.emit
-    this.emit = (e) => {
+    this.emit = (full) => {
+      /*
+       * Every event leaves the host here, and a tool's whole record does not leave with it (#221): the store keeps a
+       * call's `input` and a result's `output`, and the UI and the apps get the card. One `cat` of a large file would
+       * otherwise go to every window and sit in the reconnect log (transport/event-log.ts).
+       */
+      const e = withoutToolRecord(full)
       rawEmit(e)
       if (e.type === 'app_state_changed') return
       for (const app of HOST_APPS) {

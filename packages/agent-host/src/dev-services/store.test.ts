@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * v22·v23·v24가 연달아 같은 여섯 군데 단언을 깨뜨렸다: 버전이 여섯 번 적혀 있으면
  * 마이그레이션마다 여섯 번의 잔손질이 청구된다.
  */
-const LATEST_SCHEMA = 39
+const LATEST_SCHEMA = 40
 
 function seeded() {
   const s = new Store()
@@ -1701,7 +1701,7 @@ describe('the trash (#204)', () => {
     s.close()
   })
 
-  it('a store from before the trash comes up with nothing in it, in one step', () => {
+  it('a store from before the trash comes up with nothing in it, each step after v38 run once', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v39-'))
     const file = join(dir, 'store.db')
     try {
@@ -1719,7 +1719,7 @@ describe('the trash (#204)', () => {
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      expect(s.migrationsRun).toBe(1)
+      expect(s.migrationsRun).toBe(LATEST_SCHEMA - 38)
       expect(s.listSessions().map((x) => x.id)).toEqual(['old'])
       expect(s.listTrash()).toEqual([])
       s.close()

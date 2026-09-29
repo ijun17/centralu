@@ -36,7 +36,9 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'recall',
     description:
-      '지난 대화 전체에서 찾는다 (프로젝트를 가로지른다). "저번에 저쪽에서 하던 방식" 같은 것을 떠올릴 때 쓴다.',
+      '지난 대화 전체에서 찾는다 (프로젝트를 가로지른다). "저번에 저쪽에서 하던 방식" 같은 것을 떠올릴 때 쓴다. ' +
+      'It finds what people and agents said and the agents\' reasoning, not tool calls or their output (#221): ' +
+      'to see the commands a session ran, use read_session with tools.',
     schema: z.object({
       query: z.string().describe('찾을 낱말. 문장보다 낱말이 잘 걸린다'),
       limit: z.number().optional().describe('가져올 조각 수 (기본 12)'),

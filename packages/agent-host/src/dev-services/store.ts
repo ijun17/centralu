@@ -102,15 +102,16 @@ export class Store {
             );
           `)
           // 기존 메시지 백필 — 이게 없으면 예전 대화는 영원히 검색되지 않는다
-          const rows = this.db.prepare(`SELECT session_id, seq, payload FROM messages`).all() as {
+          const rows = this.db.prepare(`SELECT session_id, seq, kind, payload FROM messages`).all() as {
             session_id: string
             seq: number
+            kind: string
             payload: string
           }[]
           const insert = this.db.prepare(`INSERT INTO messages_fts (body, session_id, seq) VALUES (?, ?, ?)`)
           const tx = this.db.transaction(() => {
             for (const r of rows) {
-              const body = extractText(r.payload)
+              const body = indexedText(r.kind, r.payload)
               if (body) insert.run(body, r.session_id, r.seq)
             }
           })
@@ -263,17 +264,18 @@ export class Store {
                 body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
               );
             `)
-            const rows = this.db.prepare(`SELECT rowid, session_id, seq, payload FROM messages`).all() as {
+            const rows = this.db.prepare(`SELECT rowid, session_id, seq, kind, payload FROM messages`).all() as {
               rowid: number
               session_id: string
               seq: number
+              kind: string
               payload: string
             }[]
             const insert = this.db.prepare(
               `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
             )
             for (const r of rows) {
-              const body = extractText(r.payload)
+              const body = indexedText(r.kind, r.payload)
               if (body) insert.run(r.rowid, body, r.session_id, r.seq)
             }
           })
@@ -909,6 +911,18 @@ export class Store {
           if (!cols.some((c) => c.name === 'trash')) this.db.exec(`ALTER TABLE sessions ADD COLUMN trash TEXT`)
         },
       },
+      {
+        to: 40,
+        /**
+         * Tool calls leave the search index, and the file gives the space back (#221).
+         *
+         * From here on only what the person and the agent said, and the agent's reasoning, are indexed
+         * (`INDEXED_KINDS`). The rows the index already holds for tool calls are the bulk of it, so the index is
+         * rebuilt rather than picked clean, and the file is vacuumed — SQLite does not hand freed pages back on its own
+         * (v11's note). See `rebuildIndexWithoutToolCalls` for what was measured.
+         */
+        run: () => this.rebuildIndexWithoutToolCalls(),
+      },
     ]
 
     const t0 = Date.now()
@@ -1025,17 +1039,18 @@ export class Store {
           body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
         );
       `)
-      const fresh = this.db.prepare(`SELECT rowid, session_id, seq, payload FROM messages`).all() as {
+      const fresh = this.db.prepare(`SELECT rowid, session_id, seq, kind, payload FROM messages`).all() as {
         rowid: number
         session_id: string
         seq: number
+        kind: string
         payload: string
       }[]
       const insert = this.db.prepare(
         `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
       )
       for (const r of fresh) {
-        const body = extractText(r.payload)
+        const body = indexedText(r.kind, r.payload)
         if (body) insert.run(r.rowid, body, r.session_id, r.seq)
       }
     })
@@ -1053,6 +1068,85 @@ export class Store {
       console.error(`[store] merged streaming rows into messages: ${before.n} -> ${after.n} rows`)
       this.db.exec('VACUUM') // 지운 자리는 SQLite가 알아서 돌려주지 않는다 (v11 주석)
     }
+  }
+
+  /**
+   * v40: rebuilds the search index over `INDEXED_KINDS` alone, then vacuums the file (#221).
+   *
+   * Rebuilt rather than deleted from: the rows to go are two thirds of the index, and deleting from FTS5 leaves the
+   * old segments in place until they are merged. Rebuilding writes only what stays — the text and reasoning rows —
+   * and leaves out the sessions in the trash, whose index rows are dropped while they are there (#204). Each row is
+   * keyed by its message's rowid, as `appendMessages` writes it (v11).
+   *
+   * Nothing to rebuild when every index row already belongs to an indexed message: a new store, or a rerun after the
+   * rebuild committed. The vacuum is decided separately, by how much of the file is free, so a start that was killed
+   * during the vacuum (which SQLite rolls back whole) vacuums on the next start.
+   *
+   * A vacuum that fails — no room for its temporary copy, say — is reported and passed over: the index is already
+   * rebuilt, the freed pages stay in the file and later writes reuse them, and a store that cannot shrink must not
+   * keep the host from starting.
+   *
+   * Measured on a copy of the real store (2026-09-30, 137,722 messages): 55,131 index rows dropped and 26,685 kept;
+   * the rebuild took 1.25s and the vacuum 0.52–0.58s, so the start is held for about 1.9s, once. The file went from
+   * 236.2MiB to 145.4MiB, the index from 124.5MiB to 36.6MiB. The vacuum needs room for what it keeps twice over — its
+   * temporary copy and the WAL it writes the result through (146.2MiB at its peak; the volume's free space dipped by at
+   * most 306.5MiB) — which is the reason a failure is survivable rather than fatal.
+   */
+  private rebuildIndexWithoutToolCalls(): void {
+    const kinds = `(${[...INDEXED_KINDS].map((k) => `'${k}'`).join(', ')})`
+    // A store without the index at all (only a hand-made one in a test) is built one here rather than left broken
+    const present = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).get()
+    const stale = present
+      ? (this.db
+          .prepare(
+            `SELECT COUNT(*) as n FROM messages_fts f
+             WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.rowid = f.rowid AND m.kind IN ${kinds})`,
+          )
+          .get() as { n: number })
+      : { n: 0 }
+    const t0 = Date.now()
+    let rows = 0
+    if (stale.n > 0 || !present) {
+      this.db.transaction(() => {
+        this.db.exec(`DROP TABLE IF EXISTS messages_fts`)
+        this.db.exec(`
+          CREATE VIRTUAL TABLE messages_fts USING fts5(
+            body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
+          );
+        `)
+        const insert = this.db.prepare(`INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`)
+        const pick = this.db.prepare(
+          `SELECT rowid, session_id, seq, kind, payload FROM messages
+           WHERE kind IN ${kinds} AND session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)`,
+        )
+        // `.all()`, not `.iterate()`: better-sqlite3 refuses another statement while an iterator is open
+        for (const r of pick.all() as { rowid: number; session_id: string; seq: number; kind: string; payload: string }[]) {
+          const body = indexedText(r.kind, r.payload)
+          if (!body) continue
+          insert.run(r.rowid, body, r.session_id, r.seq)
+          rows += 1
+        }
+      })()
+    }
+    const t1 = Date.now()
+    const pageSize = this.db.pragma('page_size', { simple: true }) as number
+    const pages = () => this.db.pragma('page_count', { simple: true }) as number
+    const free = (this.db.pragma('freelist_count', { simple: true }) as number) * pageSize
+    if (free < VACUUM_FREE_BYTES) {
+      if (stale.n > 0) console.error(`[store] search index rebuilt without tool calls: dropped ${stale.n} rows, kept ${rows} (${t1 - t0}ms)`)
+      return
+    }
+    const before = pages() * pageSize
+    try {
+      this.db.exec('VACUUM')
+    } catch (err) {
+      console.error(`[store] could not vacuum after rebuilding the search index; ${mb(free)} stay free in the file: ${(err as Error).message}`)
+      return
+    }
+    console.error(
+      `[store] search index rebuilt without tool calls: dropped ${stale.n} rows, kept ${rows} (${t1 - t0}ms); ` +
+        `vacuumed ${mb(before)} -> ${mb(pages() * pageSize)} (${Date.now() - t1}ms)`,
+    )
   }
 
   /** v10: project_id의 NOT NULL을 푼다. SQLite는 컬럼을 못 고치므로 테이블을 다시 만든다 */
@@ -1614,7 +1708,7 @@ export class Store {
     const drop = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     await this.walkMessages(sessionId, chunk, true, (rows) => {
       for (const r of rows) {
-        const body = extractText(r.payload ?? '')
+        const body = indexedText(r.kind ?? '', r.payload ?? '')
         if (body) put.run(r.rowid, body, sessionId, r.seq)
         else drop.run(r.rowid)
       }
@@ -1670,14 +1764,14 @@ export class Store {
     sessionId: string,
     chunk: number,
     withPayload: boolean,
-    each: (rows: { rowid: number; seq: number; payload?: string }[]) => void,
+    each: (rows: { rowid: number; seq: number; kind?: string; payload?: string }[]) => void,
   ): Promise<void> {
     const pick = this.db.prepare(
-      `SELECT rowid, seq${withPayload ? ', payload' : ''} FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
+      `SELECT rowid, seq${withPayload ? ', kind, payload' : ''} FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
     )
     let after = Number.MIN_SAFE_INTEGER
     const step = this.db.transaction((): boolean => {
-      const rows = pick.all(sessionId, after, chunk) as { rowid: number; seq: number; payload?: string }[]
+      const rows = pick.all(sessionId, after, chunk) as { rowid: number; seq: number; kind?: string; payload?: string }[]
       each(rows)
       if (rows.length > 0) after = rows[rows.length - 1]!.seq
       return rows.length < chunk
@@ -1841,7 +1935,7 @@ export class Store {
       for (const m of rows) {
         const payload = JSON.stringify(m.payload)
         stmt.run(m.sessionId, m.seq, m.role, m.kind, payload, m.ts)
-        const body = extractText(payload)
+        const body = indexedText(m.kind, payload)
         const rid = (rowidOf.get(m.sessionId, m.seq) as { rowid: number } | undefined)?.rowid
         if (rid === undefined) continue
         if (body) {
@@ -1941,10 +2035,10 @@ export class Store {
    * 기록 가져오기가 답마다 쓴 행이다. 계속 붙여 읽으면 "…still running.All six reviews are in."처럼
    * 두 답이 공백 없이 한 문단이 된다. 그래서 행을 그대로 준다 — limit도 행(=메시지)을 센다.
    */
-  loadMessages(sessionId: string, limit = 200, beforeSeq?: number): StoredMessage[] {
+  loadMessages(sessionId: string, limit = 200, beforeSeq?: number, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
       .prepare(
-        `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
+        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM messages
          WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
       )
       .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
@@ -1955,10 +2049,10 @@ export class Store {
    * afterSeq **뒤의** 대화 — loadMessages의 앞으로 가는 짝 (#66).
    * recall이 준 자리의 "다음에 무슨 말이 오갔나"를 읽을 때 쓴다. 같은 규칙: 행 하나가 메시지 하나다 (#77).
    */
-  loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20): StoredMessage[] {
+  loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
       .prepare(
-        `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
+        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM messages
          WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
       )
       .all(sessionId, afterSeq, limit) as (StoredMessage & { payload: string })[]
@@ -2369,23 +2463,63 @@ export type AppRunRecord = {
 }
 
 /**
+ * How much free space in the file is worth a vacuum at startup (v40). Below this the pages stay in the file for later
+ * writes to reuse; a vacuum rewrites the whole file, which is not worth it for a few megabytes.
+ */
+const VACUUM_FREE_BYTES = 16 * 1024 * 1024
+
+const mb = (bytes: number): string => `${(bytes / 1048576).toFixed(1)}MB`
+
+/**
  * 세션 삭제의 한 조각 (#179). 실제 DB에서 색인 행 하나를 걷는 데 약 0.064ms가 들어
  * (27,887행에 1,774ms) 250행이면 한 조각이 보통 20ms 안쪽이다. 더 잘게 자르면 커밋 수가
  * 늘어 전체 시간이 길어진다.
  */
 const DELETE_CHUNK = 250
 
-/** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */
-function extractText(payload: string): string {
+/**
+ * How a stored message is read back (`loadMessages`, `loadMessagesFrom`).
+ *
+ *   full   include a tool call's `input` and a tool result's `output` — the whole record (#221)
+ *
+ * Without `full` a tool message reads as its card: `summary` and nothing more. That is the default because every
+ * reader today hands what it reads to someone else: the UI (a history page), another session's prompt
+ * (`read_session`, `recall`, the orchestrator's memory), a successor (the handoff record). Full tool output reaching
+ * another session's prompt is the privilege path #73 closed, and an agent `cat`-ing a large file must not ride every
+ * page load. A reader that needs the record asks for it by name here, where the question gets asked.
+ */
+export type ReadOpts = { full?: boolean }
+
+/**
+ * The payload column as `ReadOpts` asks for it. The fields are dropped by SQLite (`json_remove`) rather than after
+ * `JSON.parse`, so a page never pulls a megabyte of tool output into the host only to throw it away.
+ */
+function payloadColumn(opts: ReadOpts): string {
+  return opts.full
+    ? 'payload'
+    : `CASE WHEN kind IN ('tool_call', 'tool_result') THEN json_remove(payload, '$.input', '$.output') ELSE payload END as payload`
+}
+
+/**
+ * The kinds of message the search index holds (#221): what the person and the agent said, and the agent's reasoning.
+ *
+ * Tool calls are not in it, and neither are their results. Until #221 the index took whatever text a payload's shape
+ * offered, and a tool call's `summary.title` is a whole Bash command: on a copy of the real store (2026-09-30) 55,131
+ * of the 81,816 index rows were tool calls, 22.7M of the 29.2M indexed characters, and the index was 124.5MiB of a
+ * 236.2MiB file — half the file spent on finding a session by what it typed, while what the commands printed was never
+ * searchable at all. The owner chose to drop them and keep every tool call whole in the store instead (#221).
+ *
+ * Decided by the message's kind, not by what the payload happens to carry: a field added to a tool payload — or a
+ * payload of a new kind — cannot slip into the index unless someone adds its kind here.
+ */
+const INDEXED_KINDS: ReadonlySet<string> = new Set(['text', 'reasoning'])
+
+/** The text a message puts in the search index; '' puts none */
+function indexedText(kind: string, payload: string): string {
+  if (!INDEXED_KINDS.has(kind)) return ''
   try {
     const p = JSON.parse(payload) as Record<string, unknown>
-    if (typeof p.text === 'string') return p.text
-    if (typeof p.title === 'string') return p.title
-    if (p.summary && typeof p.summary === 'object') {
-      const s = p.summary as { title?: string }
-      return s.title ?? ''
-    }
-    return ''
+    return typeof p.text === 'string' ? p.text : ''
   } catch {
     return ''
   }

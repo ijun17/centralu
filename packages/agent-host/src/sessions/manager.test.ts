@@ -59,6 +59,11 @@ class FakeHandle implements SessionHandle {
       summary: { tool, title, readOnly: false, paths: [] },
     })
   }
+  /** A tool call and its result with their whole record (#221), as the adapters send them */
+  emitToolRecord(callId: string, title: string, input: unknown, output: string) {
+    this.emit({ type: 'tool_call', sessionId: this.sessionId, callId, summary: { tool: 'Bash', title, readOnly: false, paths: [] }, input })
+    this.emit({ type: 'tool_result', sessionId: this.sessionId, callId, ok: true, summary: output.slice(0, 300), output })
+  }
   /**
    * 컨텍스트 사용량 한 번 (#48).
    *
@@ -3626,6 +3631,77 @@ describe('죽은-에이전트 인수인계 기록 (#78)', () => {
     expect(out.text).toContain('컴팩트 뒤 질문')
 
     await expect(mgr.exportHandoffRecord('nope')).rejects.toThrow(/Session not found/)
+  })
+})
+
+/**
+ * A tool's whole record (#221) — a call's `input`, a result's `output` — is kept in the store and goes nowhere else.
+ *
+ * Not to the UI: one `cat` of a large file would ride the broadcast and every history page. And not to another session
+ * (#73): `read_session`, `recall`, the handoff record, `list_sessions` and the orchestrator's memory read the card at
+ * most. The secrets below sit where the card does not reach — past the result's first 300 characters, and in an input
+ * field the title does not show — so any of them turning up means the record leaked.
+ */
+describe('a tool call is kept whole in the store and leaves it only as its card (#221, #73)', () => {
+  const INPUT_SECRET = 'INPUT_SECRET_7f3a'
+  const OUTPUT_SECRET = 'OUTPUT_SECRET_91c2'
+  const output = `${'a line of build log\n'.repeat(40)}token=${OUTPUT_SECRET}`
+  const input = { command: 'npm run build', description: `build it (${INPUT_SECRET})` }
+
+  const setup = async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    await rpc('agents.send', { sessionId: a.id, text: 'build the package' })
+    adapter.handleOf(a.id)!.emitToolRecord('c-build', 'npm run build', input, output)
+    await new Promise((r) => setTimeout(r, 0))
+    return { p, a }
+  }
+  const leaks = (value: unknown) => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value)
+    return [INPUT_SECRET, OUTPUT_SECRET].filter((s) => text.includes(s))
+  }
+
+  it('the store keeps it, and the UI gets the card: neither the live broadcast nor a history page carries it', async () => {
+    const { a } = await setup()
+    const full = store.loadMessages(a.id, 50, undefined, { full: true }).filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result')
+    expect(full.map((r) => r.payload)).toMatchObject([{ input }, { output }])
+
+    const sent = events.filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
+    expect(sent.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
+    expect(sent[1]).toMatchObject({ summary: output.slice(0, 300), seq: expect.any(Number) })
+    expect(leaks(sent)).toEqual([])
+    expect(leaks(await rpc('messages.load', { sessionId: a.id, limit: 50 }))).toEqual([])
+
+    await rpc('agents.deleteSession', { sessionId: a.id })
+    expect(leaks(await rpc('trash.read', { sessionId: a.id }))).toEqual([])
+  })
+
+  it('another session never reads it: read_session, recall, search, list_sessions, the handoff record, the memory', async () => {
+    const { a } = await setup()
+    // Every reader below reads the store; what the store hands out by default is the card
+    expect(leaks(store.loadMessages(a.id, 50))).toEqual([])
+    expect(leaks(store.loadMessagesFrom(a.id, 0, 50))).toEqual([])
+
+    const orc = await mgr.orchestrator()
+    const tools = adapter.lastOrchestratorTools!
+    expect(leaks(await tools.readSession(a.id, 40, { tools: true }))).toEqual([])
+    expect(leaks(await mgr.runOrchestratorTool(orc.id, 'read_session', { sessionId: a.id, tools: true }))).toEqual([])
+    for (const q of [INPUT_SECRET, OUTPUT_SECRET, 'npm run build']) {
+      expect((await tools.recall(q)).hits).toEqual([])
+      expect(await rpc('messages.search', { query: q })).toEqual([])
+    }
+    expect(leaks(await tools.listSessions())).toEqual([])
+
+    const record = await mgr.exportHandoffRecord(a.id, 'codex')
+    expect(record.text).toContain('npm run build') // the card is there…
+    expect(leaks(record.text)).toEqual([]) // …and the record is not
+    expect(leaks(readFileSync(record.path, 'utf8'))).toEqual([])
+
+    // The orchestrator's own tool calls are not carried into its next process's prompt either
+    adapter.handleOf(orc.id)!.emitToolRecord('c-orc', 'npm run build', input, output)
+    await mgr.switchTool(orc.id, 'codex')
+    await mgr.resumeSession(orc.id)
+    expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
   })
 })
 

@@ -16,12 +16,16 @@ import {
   ToolDescriptor,
   ToolName,
   ToolStatus,
+  withoutToolRecord,
 } from './index.js'
 
 const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: '안녕' },
   { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: 'npm test', readOnly: false, paths: [] } },
   { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: true, summary: 'exit 0' },
+  // The whole record of a tool call (#221) — optional, so the two frames above still parse
+  { type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', readOnly: false, paths: ['a.ts'] }, input: { file_path: 'a.ts', content: 'export {}' } },
+  { type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote', output: 'wrote a.ts' },
   { type: 'approval_request', sessionId: 's1', requestId: 'r1', detail: { kind: 'command', command: 'npm run build', cwd: '/p' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r2', detail: { kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r3', detail: { kind: 'other', raw: '{}' } },
@@ -176,6 +180,20 @@ describe('전방 호환 (docs/protocol.md §4)', () => {
 
   it('필수 필드가 빠지면 거부한다', () => {
     expect(parseEventLenient({ type: 'message_delta', sessionId: 's1' })).toBeNull()
+  })
+})
+
+describe('a tool call leaves the host as its card (#221)', () => {
+  it('withoutToolRecord drops a call\'s input and a result\'s output, and nothing else', () => {
+    const call = GOLDEN_EVENTS_V1.find((e) => (e as { callId?: string }).callId === 'c2' && (e as { type: string }).type === 'tool_call')
+    const result = GOLDEN_EVENTS_V1.find((e) => (e as { callId?: string }).callId === 'c2' && (e as { type: string }).type === 'tool_result')
+    expect(withoutToolRecord(NormalizedEvent.parse(call))).toEqual({
+      type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', readOnly: false, paths: ['a.ts'] },
+    })
+    expect(withoutToolRecord(NormalizedEvent.parse(result))).toEqual({ type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote' })
+    // A turn's structured answer is also called `output`, and it is the answer — it stays
+    const answered = NormalizedEvent.parse({ type: 'turn_complete', sessionId: 's1', output: { summary: 'short' } })
+    expect(withoutToolRecord(answered)).toEqual(answered)
   })
 })
 

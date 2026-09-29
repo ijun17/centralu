@@ -74,9 +74,30 @@ function agentStats(toolUses: unknown, durationMs: unknown, status?: string): st
  * 카드 결과는 어느 도구든 300자에서 자른다(아래 tool_result). 에이전트의 보고서는
  * 수만 자가 예사라(도그푸딩: 15~24KB) 카드에는 머리만 오르고, 전문은 부모가 받아
  * 자기 말로 옮긴다 — 카드가 전문을 그리면 그게 곧 "답이 두 번 보인다"다.
+ *
+ * This returns the report uncut: its first 300 characters are the card's `summary`, and the whole of it is the
+ * result's `output`, the record (#221).
  */
 function agentReport(report: string, stats: string): string {
-  return (stats ? `${stats}\n\n${report}` : report).slice(0, 300)
+  return stats ? `${stats}\n\n${report}` : report
+}
+
+/**
+ * The whole text of a `tool_result` block — its `output` (#221): the string itself, or the blocks' text joined.
+ *
+ * Images are left out: they are saved as attachments (#40), and base64 would make the row as large as the picture.
+ * So is any other block that carries base64 (a document, say). Other blocks are kept as their JSON, which is how the
+ * card's summary has always shown them. Measured on this machine's transcripts (2026-09-30), a result is a string
+ * (25,150), text blocks (3,167), an image (493), image and text (26) or a `tool_reference` from ToolSearch (235);
+ * joining only the text would leave a ToolSearch result empty.
+ */
+function resultOutput(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return content == null ? '' : JSON.stringify(content)
+  return (content as Json[])
+    .filter((b) => str(b?.type) !== 'image' && str((b?.source as Json | undefined)?.type) !== 'base64')
+    .map((b) => (str(b?.type) === 'text' ? str(b.text) : JSON.stringify(b)))
+    .join('\n')
 }
 
 /**
@@ -296,7 +317,14 @@ export function normalizeMessage(
       if (str(block.type) === 'tool_use') {
         const name = str(block.name)
         const input = (block.input ?? {}) as Json
-        out.push({ type: 'tool_call', sessionId, callId: str(block.id), summary: toolSummary(name, input) })
+        // `input` is the record (#221): a Write's content and an Edit's both sides, which the title reduces to a path
+        out.push({
+          type: 'tool_call',
+          sessionId,
+          callId: str(block.id),
+          summary: toolSummary(name, input),
+          ...(block.input !== undefined ? { input: block.input } : {}),
+        })
         const paths = editedPaths(toolSummary(name, input))
         if (paths.length) out.push({ type: 'files_touched', sessionId, paths })
       }
@@ -336,6 +364,7 @@ export function normalizeMessage(
      * "[Subagent hand-back] The text below is…"로 시작하는 JSON이 오른다 (실측).
      */
     const agent = (m.tool_use_result ?? {}) as Json
+    // The finished agent's whole report is the result's record (#221); the card shows its head
     const agentDone =
       str(agent.status) === 'completed' && str(agent.agentId) && Array.isArray(agent.content) &&
       content.filter((b) => str(b.type) === 'tool_result').length === 1
@@ -347,12 +376,14 @@ export function normalizeMessage(
     for (const block of content) {
       if (str(block.type) === 'tool_result') {
         const c = block.content
+        const output = agentDone ?? resultOutput(c)
         out.push({
           type: 'tool_result',
           sessionId,
           callId: str(block.tool_use_id),
           ok: block.is_error !== true,
-          summary: agentDone ?? (typeof c === 'string' ? c : JSON.stringify(c ?? '')).slice(0, 300),
+          summary: agentDone?.slice(0, 300) ?? (typeof c === 'string' ? c : JSON.stringify(c ?? '')).slice(0, 300),
+          ...(output ? { output } : {}),
         })
         /*
          * 도구 결과에 실려 온 이미지 (#40). 스크린샷을 찍거나 이미지 파일을 Read하면
@@ -531,12 +562,21 @@ export class ClaudeStreamNormalizer {
       if (!this.background.delete(callId)) return []
       const status = str(m.status, 'completed')
       const usage = (m.usage ?? {}) as Json
+      /*
+       * The notification's `summary` is the agent's whole final report, not a one-line status (#221). Read in the
+       * CLI (2.1.282): a finished local agent's task is closed with `summary: <its final content joined by "\n"> ||
+       * <description>`, and the task_notification carries that summary as it is. (The model-facing notification
+       * puts `Agent "…" finished` in its own <summary> and the report in <result>; the SDK message has only the
+       * one field.) So the whole of it is the result's record, as for a foreground agent.
+       */
+      const output = agentReport(str(m.summary), agentStats(usage.tool_uses, usage.duration_ms, status))
       const done: NormalizedEvent = {
         type: 'tool_result',
         sessionId: this.sessionId,
         callId,
         ok: status === 'completed',
-        summary: agentReport(str(m.summary), agentStats(usage.tool_uses, usage.duration_ms, status)),
+        summary: output.slice(0, 300),
+        ...(output ? { output } : {}),
       }
       if (!this.textStreamed && !this.reasoningStreamed) return [done]
       this.deferred.push(done)
