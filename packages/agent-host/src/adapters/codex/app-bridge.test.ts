@@ -16,12 +16,14 @@ import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract
 import { bridgePath } from './bridge-path.js'
 
 /**
- * Codex의 앱 다리를 **다리째** 본다 (M4 A-5) — 진짜 다리 프로세스, 진짜 host WS 서버, 진짜 매니저와
- * 런타임과 앱. Codex 자리에는 테스트가 서서 stdio로 MCP를 말한다.
+ * Tests Codex's app bridge **as a whole bridge** (M4 A-5) — a real bridge process, a real host WS
+ * server, a real manager, runtime and app. In Codex's spot, the test itself stands in and speaks
+ * MCP over stdio.
  *
- * Codex를 쓰지 않는 이유: 로그아웃 상태라 실행할 수 없다(플랜 S-3). 그래서 "Codex가 이 다리를
- * 띄우고 tools/list·tools/call을 보낸다"는 가정이고, 여기서 보는 것은 그 뒤 — 다리가 host의 세션
- * 문을 지나 런타임의 한 길에 닿는가 — 다.
+ * Why Codex itself is not used: it cannot be run while logged out (plan S-3). So it is assumed
+ * that "Codex starts this bridge and sends tools/list/tools/call," and what is checked here is
+ * what happens after that — whether the bridge passes through the host's session gate and reaches
+ * the one path into the runtime.
  */
 
 class Handle implements SessionHandle {
@@ -35,7 +37,7 @@ class Handle implements SessionHandle {
   async dispose() {}
 }
 
-/** 핸들만 세워 주는 어댑터 — 세션이 살아 있어야 다리의 문이 열린다 */
+/** An adapter that only stands up a handle — the bridge's gate only opens for a live session */
 class NullAdapter implements AgentAdapter {
   tool: ToolName = 'codex'
   descriptor = { name: 'codex', label: 'Codex', mark: 'X', install: 'x', login: 'x' }
@@ -59,10 +61,10 @@ let server: HostServer
 let port = 0
 let projectId = ''
 let bridges: ChildProcessWithoutNullStreams[] = []
-/** `hold` 도구를 풀어 주는 문 파일 */
+/** A gate file that releases the `hold` tool */
 let gate = ''
 
-/** 다리 하나를 띄우고 Codex처럼 말을 건다 */
+/** Starts one bridge and speaks to it as if it were Codex */
 function bridge(sessionId: string, appServer: string, env: Record<string, string> = {}) {
   const child = spawn(process.execPath, [bridgePath()], {
     env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_HOST_TOKEN: TOKEN, CC_SESSION_ID: sessionId, CC_APP_SERVER: appServer, ...env },
@@ -122,8 +124,8 @@ afterEach(async () => {
 const worker = async () =>
   (await mgr.createSession({ projectId, cwd: root, tool: 'codex', permissionPreset: 'normal' })) as SessionInfo
 
-describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
-  it('다리의 tools/list는 host가 준 에이전트 도구를 주석째 그대로 내놓는다', async () => {
+describe('app bridge — end to end, seen from Codex\'s own spot', () => {
+  it("the bridge's tools/list surfaces the agent tools the host gave, annotations and all, unchanged", async () => {
     const s = await worker()
     const { request } = bridge(s.id, 'app-notes')
     const init = await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'codex', version: '0' } })
@@ -135,7 +137,7 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
     expect(tools.find((t) => t.name === 'peek')?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false })
   })
 
-  it('다리의 tools/call은 그 세션을 호출자로 런타임에 닿고 기록된다', async () => {
+  it("the bridge's tools/call reaches the runtime with that session as the caller, and is logged", async () => {
     const s = await worker()
     const { request } = bridge(s.id, 'app-notes')
     await request('initialize', {})
@@ -144,9 +146,9 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
     expect(rt.runs({ projectId, appId: 'notes' }).map((r) => [r.tool, r.callerKind, r.callerSessionId])).toEqual([['poke', 'session', s.id]])
   })
 
-  it('그 세션에 붙지 않은 앱의 다리는 아무것도 부르지 못한다 — 판정은 다리가 아니라 host가 한다', async () => {
+  it('the bridge of an app not attached to that session cannot call anything — the host decides this, not the bridge', async () => {
     const s = await worker()
-    // 사용자 폴더의 앱은 오케스트레이터에게만 붙는다
+    // A user-folder app is only attached to the orchestrator
     const { request } = bridge(s.id, 'app-helper')
     await request('initialize', {})
     const list = await request('tools/list')
@@ -156,7 +158,7 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
     expect(rt.runs({ projectId: null, appId: 'helper' })).toEqual([])
   })
 
-  it('살아 있는 핸들이 없는 세션의 이름으로는 부를 수 없다', async () => {
+  it('cannot call under the name of a session with no live handle', async () => {
     const { request } = bridge('00000000-0000-4000-8000-000000000000', 'app-notes')
     await request('initialize', {})
     const out = await request('tools/call', { name: 'peek', arguments: {} })
@@ -166,12 +168,13 @@ describe('앱 다리 — Codex 자리에서 본 끝에서 끝', () => {
 })
 
 /**
- * 오래 걸리는 호출을 다리째 본다. 제품의 값(240초)은 가짜 시계로 host 쪽에서 본다(long-calls.test.ts).
- * 여기서는 다리가 나르는 값을 1초로 줄여 **진짜 시계로** 끝에서 끝을 돈다: Codex 자리 → 다리 →
- * host의 세션 문 → 먼저 돌려주기 → run_status.
+ * Tests a long-running call across the whole bridge. The product's own value (240 seconds) is
+ * checked on the host side with a fake clock (long-calls.test.ts). Here, the value the bridge
+ * carries is shrunk to 1 second and run end to end **with a real clock**: Codex's spot -> the
+ * bridge -> the host's session gate -> returning early -> run_status.
  */
-describe('앱 다리 — 오래 걸리는 호출', () => {
-  it('다리가 나른 대기 시간을 넘기면 실행 id가 먼저 오고, run_status로 결과를 이어서 받는다', async () => {
+describe('app bridge — a long-running call', () => {
+  it('once the wait time the bridge carries is exceeded, a run id comes back first, and the result is followed up through run_status', async () => {
     const s = await worker()
     const { request } = bridge(s.id, 'app-notes', { CC_APP_WAIT_MS: '1000' })
     await request('initialize', {})

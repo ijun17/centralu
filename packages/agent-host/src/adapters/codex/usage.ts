@@ -1,20 +1,20 @@
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
 
 /**
- * Codex 사용량·한도 (FR-9).
+ * Codex usage and limits (FR-9).
  *
- * Claude와 달리 **일별 토큰을 API가 그대로 준다** — 우리가 집계할 필요가 없다.
- * 두 메서드 다 불안정 표시가 없는 정식 RPC다.
- *   account/rateLimits/read → primary/secondary 창
- *   account/usage/read      → dailyUsageBuckets
+ * Unlike Claude, **the API gives daily tokens directly** — there is no need for us to aggregate
+ * them. Both methods are official RPCs with no instability marker.
+ *   account/rateLimits/read -> the primary/secondary windows
+ *   account/usage/read      -> dailyUsageBuckets
  *
- * **구독 한도만 다룬다.** credits(추가 결제)는 범위 밖이라 읽지 않는다.
+ * **Only subscription limits are covered.** credits (additional billing) are out of scope and not read.
  */
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
-/** 창 길이(분)로 사람이 아는 이름을 만든다 — 도구가 이름을 주지 않는다 */
+/** Builds a human-readable name from the window length (minutes) — the tool does not give a name */
 function labelFor(mins: number | null): string {
   if (mins === null) return 'Limit'
   if (mins >= 10080) return `${Math.round(mins / 10080)}w`
@@ -32,7 +32,7 @@ function toWindow(id: string, raw: unknown): UsageWindow | null {
     id,
     label: labelFor(mins),
     percent: Math.max(0, Math.min(100, percent)),
-    // codex는 초 단위 유닉스 시각을 준다
+    // codex gives Unix time in seconds
     resetsAt: resets === null ? null : new Date(resets * 1000).toISOString(),
     scope: null,
   }

@@ -2,14 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { __resetWarningsForTest, approvalDetailFrom, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
- * A-2 계약 테스트. 픽스처는 M0 스파이크에서 **실제로 녹화한** 프로토콜 출력을 줄인 것이다
- * (docs/spikes/m0-findings.md). 실 프로세스 없이 돌아야 CI에서 쓸 수 있다.
+ * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
+ * recorded** during the M0 spike (docs/spikes/m0-findings.md). They must run without a real
+ * process so CI can use them.
  */
 
 const S = 'sess-1'
 const n = (method: string, params?: unknown) => normalizeNotification(S, { method, params })
 
-describe('스트리밍·도구 호출', () => {
+describe('streaming and tool calls', () => {
   it('agentMessage delta → message_delta', () => {
     expect(n('item/agentMessage/delta', { delta: '안녕' })).toEqual([
       { type: 'message_delta', sessionId: S, role: 'assistant', text: '안녕' },
@@ -17,9 +18,10 @@ describe('스트리밍·도구 호출', () => {
   })
 
   /*
-   * 추론 요약 (#58 실측). thread 설정에 model_reasoning_summary를 켜야만 오는
-   * 스트림이고, 실측 모양은 {itemId, delta, summaryIndex}다. completed 아이템의
-   * summary 전문은 내지 않는다 — 델타로 이미 흐른 글이다.
+   * Reasoning summary (measured for #58). This stream only arrives when model_reasoning_summary
+   * is turned on in the thread settings, and the measured shape is {itemId, delta, summaryIndex}.
+   * The full summary text on the completed item is not emitted — it is text that already
+   * streamed through the deltas.
    */
   it('reasoning summaryTextDelta → reasoning_delta', () => {
     expect(n('item/reasoning/summaryTextDelta', { itemId: 'rs-1', delta: '**경로 제약 검토**', summaryIndex: 0 })).toEqual([
@@ -27,23 +29,23 @@ describe('스트리밍·도구 호출', () => {
     ])
   })
 
-  it('둘째 단락부터는 경계가 빈 줄이 된다 — 첫 단락 앞에는 아무것도 없다', () => {
+  it('from the second paragraph on, the boundary becomes a blank line — there is nothing before the first paragraph', () => {
     expect(n('item/reasoning/summaryPartAdded', { itemId: 'rs-1', summaryIndex: 0 })).toEqual([])
     expect(n('item/reasoning/summaryPartAdded', { itemId: 'rs-1', summaryIndex: 1 })).toEqual([
       { type: 'reasoning_delta', sessionId: S, text: '\n\n' },
     ])
   })
 
-  it('completed의 reasoning 아이템은 여전히 조용하다 (델타와 중복)', () => {
+  it('the reasoning item on completed stays silent too (it would duplicate the delta)', () => {
     expect(n('item/completed', { item: { type: 'reasoning', id: 'rs-1', summary: ['**경로 제약 검토**'], content: [] } })).toEqual([])
   })
 
   /*
-   * 계획 진행 (#58 실측, 2026-08-26). 실측 모양: 매번 전체 스냅샷
-   * {threadId, turnId, explanation: null, plan: [{step, status}]}.
-   * 계획은 item으로 안 온다 — 이 알림이 화면으로 가는 유일한 길이다.
+   * Plan progress (measured for #58, 2026-08-26). Measured shape: a full snapshot every time,
+   * {threadId, turnId, explanation: null, plan: [{step, status}]}. A plan never arrives as an
+   * item — this notification is the only path to the screen.
    */
-  it('turn/plan/updated → plan_update (스냅샷 그대로)', () => {
+  it('turn/plan/updated → plan_update (the snapshot, unchanged)', () => {
     expect(
       n('turn/plan/updated', {
         threadId: 't', turnId: 'u', explanation: null,
@@ -65,16 +67,16 @@ describe('스트리밍·도구 호출', () => {
     ])
   })
 
-  it('모르는 계획 상태는 pending으로 접힌다 — 새 상태 하나에 진행 표시가 통째로 죽으면 안 된다', () => {
+  it('an unknown plan status folds to pending — progress display must not die outright over one new status value', () => {
     const out = n('turn/plan/updated', { plan: [{ step: 'X', status: 'blocked?' }] })
     expect(out[0]).toMatchObject({ steps: [{ text: 'X', status: 'pending' }] })
   })
 
-  it('빈 계획은 이벤트가 되지 않는다', () => {
+  it('an empty plan produces no event', () => {
     expect(n('turn/plan/updated', { plan: [] })).toEqual([])
   })
 
-  // 실행 중 출력 (#58 실측): {threadId, turnId, itemId, delta}
+  // Output while a command is running (measured for #58): {threadId, turnId, itemId, delta}
   it('commandExecution outputDelta → tool_output_delta', () => {
     expect(n('item/commandExecution/outputDelta', { threadId: 't', turnId: 'u', itemId: 'exec-1', delta: 'tick 2\n' })).toEqual([
       { type: 'tool_output_delta', sessionId: S, callId: 'exec-1', text: 'tick 2\n' },
@@ -82,7 +84,7 @@ describe('스트리밍·도구 호출', () => {
     expect(n('item/commandExecution/outputDelta', { itemId: 'exec-1', delta: '' })).toEqual([])
   })
 
-  it('commandExecution 시작 → tool_call (명령 전문이 제목)', () => {
+  it('the start of a commandExecution → tool_call (the full command text is the title)', () => {
     const out = n('item/started', {
       item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },
     })
@@ -97,12 +99,12 @@ describe('스트리밍·도구 호출', () => {
     ])
   })
 
-  it('조회성 명령은 접힘 힌트를 준다', () => {
+  it('a read-only command gives a collapse hint', () => {
     const out = n('item/started', { item: { type: 'commandExecution', id: 'e', command: "/bin/zsh -lc 'ls -la'" } })
     expect(out[0]).toMatchObject({ summary: { readOnly: true } })
   })
 
-  it('fileChange 완료 → tool_result + files_touched (충돌 감지용)', () => {
+  it('fileChange completed → tool_result + files_touched (for conflict detection)', () => {
     const out = n('item/completed', {
       item: { type: 'fileChange', id: 'fc-1', status: 'completed', changes: [{ path: 'src/a.ts', diff: '+1' }] },
     })
@@ -110,22 +112,23 @@ describe('스트리밍·도구 호출', () => {
     expect(out[1]).toMatchObject({ paths: ['src/a.ts'] })
   })
 
-  it('실패한 도구는 ok=false', () => {
+  it('a failed tool gets ok=false', () => {
     const out = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'failed', output: '오류' } })
     expect(out[0]).toMatchObject({ type: 'tool_result', ok: false })
   })
 
   /*
-   * MCP 호출의 답은 commandExecution과 **다른 자리**에 실린다 (result·error).
-   * 그 자리를 안 읽어서, 실패한 MCP 카드가 이유 한 글자 없이 빨갛기만 했다
-   * (도그푸딩 2026-09-08: 같은 도구가 옆 세션에서는 성공하고 있었다).
+   * An MCP call's answer is carried in a **different place** from commandExecution (result and
+   * error). Because that place was not read, a failed MCP card was red with not a single
+   * character of reason (dogfooding 2026-09-08: the same tool was succeeding in a neighboring
+   * session).
    */
   /*
-   * 인자 이름 하나가 달라 한 세션에서만 계속 실패한 일이 있었다 (도그푸딩 2026-09-08:
-   * 되던 호출은 {message}, 안 되던 호출은 {query}). 카드에 도구 이름만 있으면 그 둘은
-   * 화면에서 같아 보인다.
+   * There was a case where a single differing argument name kept one session failing on its own
+   * (dogfooding 2026-09-08: the call that worked used {message}, the one that failed used
+   * {query}). With only the tool name on the card, the two look identical on screen.
    */
-  it('MCP 호출 카드는 인자도 보여준다 — 같은 도구의 다른 호출을 가르는 것이 인자다', () => {
+  it('an MCP call card shows arguments too — the argument is what distinguishes two calls of the same tool', () => {
     const out = n('item/started', {
       item: {
         type: 'mcpToolCall', id: 'm0', server: 'msw-mcp', tool: 'mlua_api_retriever',
@@ -138,7 +141,7 @@ describe('스트리밍·도구 호출', () => {
     )
   })
 
-  it('인자가 길면 줄인다 — 모양이 보이면 되지 본문이 필요한 게 아니다', () => {
+  it('a long argument is trimmed — seeing the shape is enough, the full body is not needed', () => {
     const out = n('item/started', {
       item: {
         type: 'mcpToolCall', id: 'm4', server: 's', tool: 't', status: 'inProgress',
@@ -151,7 +154,7 @@ describe('스트리밍·도구 호출', () => {
     expect(title.endsWith('…}')).toBe(true)
   })
 
-  it('MCP 실패는 이유를 싣는다 — 빈 카드는 아무것도 말하지 않는다', () => {
+  it('an MCP failure carries a reason — an empty card says nothing', () => {
     const out = n('item/completed', {
       item: {
         type: 'mcpToolCall', id: 'm1', server: 'msw-mcp', tool: 'mlua_document_retriever',
@@ -161,7 +164,7 @@ describe('스트리밍·도구 호출', () => {
     expect(out[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'unexpected error' })
   })
 
-  it('MCP 성공은 답의 본문을 싣는다', () => {
+  it('an MCP success carries the answer body', () => {
     const out = n('item/completed', {
       item: {
         type: 'mcpToolCall', id: 'm2', server: 'msw-mcp', tool: 'mlua_api_retriever',
@@ -172,7 +175,7 @@ describe('스트리밍·도구 호출', () => {
     expect(out[0]).toMatchObject({ ok: true, summary: '첫 줄\n둘째 줄' })
   })
 
-  it('구조화된 답만 있으면 그것이라도 싣는다', () => {
+  it('when only a structured answer exists, that is carried instead', () => {
     const out = n('item/completed', {
       item: {
         type: 'mcpToolCall', id: 'm3', server: 's', tool: 't', status: 'completed',
@@ -182,23 +185,23 @@ describe('스트리밍·도구 호출', () => {
     expect(out[0]).toMatchObject({ summary: '{"ok":1}' })
   })
 
-  it('사용자 메시지·추론 항목은 버린다 (대화창 소음)', () => {
+  it('drops user-message and reasoning items (conversation-window noise)', () => {
     expect(n('item/started', { item: { type: 'userMessage', id: 'u' } })).toEqual([])
     expect(n('item/completed', { item: { type: 'reasoning', id: 'r' } })).toEqual([])
   })
 
   /*
-   * 이미지 열람 (#40). 실측 모양: {type:'imageView', id, path} — 경로만 온다.
-   * data는 어댑터가 파일을 읽어 채우므로 여기서는 비어 있어야 한다 (순수 함수).
+   * Viewing an image (#40). Measured shape: {type:'imageView', id, path} — only the path arrives.
+   * data must stay empty here (a pure function) since the adapter reads the file to fill it in.
    */
-  it('imageView 완료 → 경로만 실린 message_image (도구 줄은 안 만든다)', () => {
+  it('imageView completed → message_image carrying only the path (no tool line is created)', () => {
     expect(n('item/started', { item: { type: 'imageView', id: 'iv', path: '/tmp/shot.png' } })).toEqual([])
     expect(n('item/completed', { item: { type: 'imageView', id: 'iv', path: '/tmp/shot.png' } })).toEqual([
       { type: 'message_image', sessionId: S, mime: '', data: '', path: '/tmp/shot.png' },
     ])
   })
 
-  it('경로 없는 imageView는 버린다 (그릴 것이 없다)', () => {
+  it('drops an imageView with no path (nothing to draw)', () => {
     expect(n('item/completed', { item: { type: 'imageView', id: 'iv' } })).toEqual([])
   })
 })
@@ -252,18 +255,18 @@ describe('the whole record of a tool call (#221)', () => {
   })
 })
 
-describe('상태·계기판', () => {
+describe('state and gauges', () => {
   it('turn/completed → turn_complete', () => {
     expect(n('turn/completed', {})).toEqual([{ type: 'turn_complete', sessionId: S }])
   })
 
   /*
-   * 실패한 턴도 같은 알림으로 온다 (generated/v2/Turn.ts: status + error). 여기서
-   * turn.*을 통째로 버리던 동안, 400으로 죽은 턴은 성공한 턴과 똑같이 turn_complete
-   * 하나로만 나갔다 — 화면에는 빈 답변이, 상태에는 '사람을 기다리는 중'이 남았다.
-   * 픽스처는 실사고의 모양이다 (#107).
+   * A failed turn arrives on the same notification (generated/v2/Turn.ts: status + error). While
+   * we were dropping turn.* wholesale here, a turn that died with a 400 still went out as nothing
+   * more than turn_complete, same as a successful one — the screen was left with an empty answer,
+   * and the state stayed at "waiting for the person". The fixture is the shape of the real incident (#107).
    */
-  it('실패한 turn/completed → error (turn_complete는 내지 않는다)', () => {
+  it('a failed turn/completed → error (does not emit turn_complete)', () => {
     const out = n('turn/completed', {
       threadId: 't1',
       turn: {
@@ -292,21 +295,23 @@ describe('상태·계기판', () => {
   })
 
   /*
-   * 실패한 턴은 `error` 알림과 turn/completed(failed)를 둘 다 받는다 (#168). 실측(DB 사본): 토큰 갱신 실패 하나가 같은
-   * 초에 같은 문장 두 줄로 세 번 남았다. 턴의 결말을 기준으로 한 줄만 남긴다. 다시 시도하는 오류는 표식이 아니다.
+   * A failed turn arrives as both an `error` notification and a turn/completed(failed) (#168).
+   * Measured (from a copy of the database): a single token-refresh failure left the same sentence
+   * three times across two lines within the same second. We keep only one line, based on the
+   * turn's own outcome. An error that will be retried is not a marker.
    */
-  it('실패한 턴의 표식은 한 줄이다 — 턴에 딸린 error 알림은 turn/completed(failed)에 맡긴다 (#168)', () => {
+  it('a failed turn leaves one marker line — an error notification tied to a turn is left to turn/completed(failed) (#168)', () => {
     const error = { message: 'Your access token could not be refreshed', codexErrorInfo: null, additionalDetails: null, misalignment: null }
     const failed = [
       ...n('error', { error, willRetry: false, threadId: 'th', turnId: 'turn-9' }),
       ...n('turn/completed', { threadId: 'th', turn: { id: 'turn-9', items: [], status: 'failed', error } }),
     ]
     expect(failed.filter((e) => e.type === 'error')).toHaveLength(1)
-    // 턴 밖의 오류는 맡길 결말이 없다 — 그대로 낸다
+    // An error outside any turn has no outcome to defer to — it is emitted as-is
     expect(n('error', { error, willRetry: false, threadId: 'th', turnId: '' })).toHaveLength(1)
   })
 
-  it('Codex가 다시 시도하는 오류(willRetry)는 실패 표식으로 남지 않는다 (#168)', () => {
+  it('an error Codex will retry (willRetry) is not left as a failure marker (#168)', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const error = { message: 'stream disconnected before completion; retrying 1/5', codexErrorInfo: null, additionalDetails: null, misalignment: null }
     expect(n('error', { error, willRetry: true, threadId: 'th', turnId: '' })).toEqual([])
@@ -314,13 +319,13 @@ describe('상태·계기판', () => {
     spy.mockRestore()
   })
 
-  it('중단된 턴은 실패가 아니다 — 사람이 멈춘 것이고 대화는 계속된다', () => {
+  it('an interrupted turn is not a failure — the person stopped it, and the conversation continues', () => {
     expect(n('turn/completed', { turn: { id: 't', status: 'interrupted', error: null } })).toEqual([
       { type: 'turn_complete', sessionId: S },
     ])
   })
 
-  it('tokenUsage → usage_update (+ 윈도우가 있으면 context_update)', () => {
+  it('tokenUsage → usage_update (+ context_update when a window exists)', () => {
     const out = n('thread/tokenUsage/updated', {
       // `last` is required by ThreadTokenUsage and is what fills the window; `total` is the
       // thread's running spend and feeds usage_update only.
@@ -336,13 +341,14 @@ describe('상태·계기판', () => {
   })
 
   /*
-   * 사용량 갱신 ≠ 한도 도달.
+   * A usage update is not the same as hitting a limit.
    *
-   * 이 구분이 없어서 코덱스 세션은 첫 도구 호출 직후 곧바로 'limited'가 됐다 —
-   * 실측에서 27%인데도 그랬다. 아이콘 회전이 멈추고 흐려지고 없는 딱지가 붙었다.
-   * 도구가 `rateLimitReachedType`으로 직접 알려주는데 우리가 안 봤다.
+   * Without this distinction, a codex session flipped to 'limited' right after its very first
+   * tool call — even when the measured value was 27%. The spinning icon froze, dimmed, and a
+   * nonexistent label got slapped on. The tool tells us directly through
+   * `rateLimitReachedType`, and we simply were not looking at it.
    */
-  it('아직 안 걸렸으면 아무 일도 없다 — 사용량이 올라가는 것은 정상이다', () => {
+  it('nothing happens while the limit has not been hit yet — usage climbing is normal', () => {
     expect(
       n('account/rateLimits/updated', {
         rateLimits: {
@@ -353,7 +359,7 @@ describe('상태·계기판', () => {
     ).toEqual([])
   })
 
-  it('걸렸을 때만 limit_reached (주간 윈도우·해제 시각 포함)', () => {
+  it('limit_reached only once it is actually hit (includes the weekly window and reset time)', () => {
     const out = n('account/rateLimits/updated', {
       rateLimits: {
         primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 1787198872 },
@@ -364,54 +370,56 @@ describe('상태·계기판', () => {
     expect((out[0] as { resumeAt?: string }).resumeAt).toMatch(/^\d{4}-/)
   })
 
-  it('지출 한도도 한도다', () => {
+  it('a spend limit is a limit too', () => {
     const out = n('account/rateLimits/updated', {
       rateLimits: { primary: { usedPercent: 40 }, spendControlReached: true },
     })
     expect(out[0]).toMatchObject({ type: 'limit_reached' })
   })
 
-  it('thread/name/updated → session_title (FR-18 자동 이름)', () => {
+  it('thread/name/updated → session_title (FR-18 automatic naming)', () => {
     expect(n('thread/name/updated', { name: 'auth 리팩터링' })).toEqual([
-      // auto:true — 도구가 스스로 지은 이름이라 사람이 정한 이름을 덮지 못한다 (이슈 #5)
+      // auto:true — a name the tool made up on its own, so it never overwrites a name the person set (issue #5)
       { type: 'session_title', sessionId: S, title: 'auth 리팩터링', auto: true },
     ])
   })
 
   /*
-   * Codex는 압축을 ThreadItem으로 흘린다 (generated/v2/ThreadItem.ts: `contextCompaction`).
-   * 걸러내지 않으면 itemSummary를 타고 **가짜 도구 호출 줄**이 대화에 생긴다.
-   * 주의: 이 배선은 생성된 타입에서 추론한 것이고 실행으로 확인하지는 못했다 (Claude 쪽은 확인함).
+   * Codex streams compaction as a ThreadItem (generated/v2/ThreadItem.ts: `contextCompaction`).
+   * Without filtering it out, it flows through itemSummary and creates a **fake tool-call line**
+   * in the conversation. Note: this wiring was inferred from the generated type and has not been
+   * confirmed by actually running it (the Claude side has been confirmed).
    */
-  it('압축 item은 도구 호출이 아니라 activity다', () => {
+  it('a compaction item is an activity, not a tool call', () => {
     expect(n('item/started', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
       { type: 'activity', sessionId: S, activity: 'compacting' },
     ])
   })
 
-  it('압축이 끝나면 activity를 지운다 (마커는 thread/compacted가 낸다 — 두 줄이 되면 안 된다)', () => {
+  it('clears the activity once compaction ends (the marker is emitted by thread/compacted — must not become two lines)', () => {
     expect(n('item/completed', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
       { type: 'activity', sessionId: S, activity: null },
     ])
   })
 
   /*
-   * 리뷰(/review → review/start RPC)도 같은 종류다 — 실측(실제 app-server)한 모양:
-   * enteredReviewMode → agentMessage(결과 전문 스트리밍) → exitedReviewMode(review에 전문).
-   * 시작·끝 아이템을 걸러내지 않으면 정체불명의 도구 줄이 되고, exited의 review를
-   * 또 내면 agentMessage로 이미 온 결과가 두 번 붙는다.
+   * A review (/review -> the review/start RPC) is the same kind of thing — the measured shape
+   * (from the real app-server): enteredReviewMode -> agentMessage (the full result streaming) ->
+   * exitedReviewMode (with the full text on review). Without filtering the start/end items, they
+   * become unidentifiable tool lines, and emitting exited's review again would append the result
+   * that already arrived via agentMessage a second time.
    */
-  it('리뷰 시작 item은 activity=reviewing이다', () => {
+  it('the start-of-review item is activity=reviewing', () => {
     expect(n('item/started', { item: { type: 'enteredReviewMode', id: 'i1', review: 'current changes' } })).toEqual([
       { type: 'activity', sessionId: S, activity: 'reviewing' },
     ])
   })
 
-  it('리뷰 끝 item은 activity를 지울 뿐, 결과를 또 내지 않는다 (agentMessage로 이미 왔다)', () => {
+  it('the end-of-review item only clears the activity, without emitting the result again (it already arrived via agentMessage)', () => {
     expect(n('item/completed', { item: { type: 'exitedReviewMode', id: 'i2', review: '- [P1] …' } })).toEqual([
       { type: 'activity', sessionId: S, activity: null },
     ])
-    // 어느 쪽(started/completed)으로 오든 도구 줄이 되지는 않는다
+    // Neither side (started/completed) becomes a tool line
     expect(n('item/completed', { item: { type: 'enteredReviewMode', id: 'i1' } })).toEqual([])
     expect(n('item/started', { item: { type: 'exitedReviewMode', id: 'i2' } })).toEqual([
       { type: 'activity', sessionId: S, activity: null },
@@ -419,10 +427,11 @@ describe('상태·계기판', () => {
   })
 
   /*
-   * 이름이 최상위에 있는데 invocation.tool을 읽어서 코덱스의 MCP 호출이 전부
-   * 'MCP'로 뭉개져 보였다 — 대화창에서 무슨 도구를 썼는지 알 수 없었다.
+   * The name lives at the top level, but reading invocation.tool made every one of Codex's MCP
+   * calls collapse into 'MCP' — there was no way to tell which tool was used from the
+   * conversation window.
    */
-  it('MCP 도구 호출은 서버·도구 이름을 보여준다', () => {
+  it('an MCP tool call shows the server and tool name', () => {
     const out = n('item/started', {
       item: { type: 'mcpToolCall', id: 'm1', server: 'centralu', tool: 'list_sessions', status: 'inProgress' },
     })
@@ -432,11 +441,11 @@ describe('상태·계기판', () => {
     })
   })
 
-  it('thread/compacted → compaction 마커 (FR-14)', () => {
+  it('thread/compacted → the compaction marker (FR-14)', () => {
     expect(n('thread/compacted', {})).toEqual([{ type: 'compaction', sessionId: S, failed: false }])
   })
 
-  it('thread/goal/updated → goal 이벤트 (2026-09-07 — codex 어휘 그대로)', () => {
+  it('thread/goal/updated → a goal event (2026-09-07 — codex vocabulary carried through unchanged)', () => {
     const out = n('thread/goal/updated', {
       threadId: 't1',
       turnId: null,
@@ -447,11 +456,11 @@ describe('상태·계기판', () => {
     ])
   })
 
-  it('thread/goal/cleared → goal:null (걷힘 통지)', () => {
+  it('thread/goal/cleared → goal:null (a clearing notification)', () => {
     expect(n('thread/goal/cleared', { threadId: 't1' })).toEqual([{ type: 'goal', sessionId: S, goal: null }])
   })
 
-  it('status:complete인 updated도 걷힘이다 — 달성 배지가 영원히 남으면 안 된다 (도그푸딩 2026-09-07)', () => {
+  it('an updated with status:complete is a clearing too — an achieved badge must not stay forever (dogfooding 2026-09-07)', () => {
     const out = n('thread/goal/updated', {
       threadId: 't1',
       turnId: null,
@@ -460,37 +469,37 @@ describe('상태·계기판', () => {
     expect(out).toEqual([{ type: 'goal', sessionId: S, goal: null }])
   })
 
-  it('모르는 알림은 조용히 버린다 (프로토콜이 늘어나도 안 깨진다)', () => {
+  it('drops an unknown notification silently (does not break as the protocol grows)', () => {
     expect(n('thread/realtime/audioDelta', { blob: 'x' })).toEqual([])
     expect(n('완전히/새로운/메서드', {})).toEqual([])
   })
 })
 
-describe('승인 요청 변환 (배너 제자리 승인 판단의 근거)', () => {
-  it('명령 승인 → kind=command (배너에서 바로 승인 가능한 형태)', () => {
+describe('approval request conversion (the basis for approving right from the banner)', () => {
+  it('a command approval → kind=command (a shape the banner can approve directly)', () => {
     const d = approvalDetailFrom('item/commandExecution/requestApproval', {
       item: { command: 'npm run build', cwd: '/tmp/p' },
     })
     expect(d).toEqual({ kind: 'command', command: 'npm run build', cwd: '/tmp/p' })
   })
 
-  it('파일 수정 승인 → kind=file_edit (diff를 봐야 하므로 "확인 필요"로 분기된다)', () => {
+  it('a file-edit approval → kind=file_edit (branches to "needs review" since the diff must be seen)', () => {
     const d = approvalDetailFrom('item/fileChange/requestApproval', {
       item: { changes: [{ path: 'a.ts', diff: '+x' }, { path: 'b.ts', diff: '-y' }] },
     })
     expect(d).toMatchObject({ kind: 'file_edit', path: 'a.ts', multi: true })
   })
 
-  it('모르는 승인 종류는 other로 (판단을 사람에게 넘긴다)', () => {
+  it('an unknown approval kind becomes other (leaves the judgment to the person)', () => {
     expect(approvalDetailFrom('item/unknown/requestApproval', { x: 1 })).toMatchObject({ kind: 'other' })
   })
 })
 
-describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것)', () => {
-  it('허용/거부/항상 허용', () => {
+describe('approval decision mapping (the ones we use, out of the six confirmed in M0)', () => {
+  it('allow, deny, always allow', () => {
     expect(toCodexDecision('allow')).toBe('accept')
     expect(toCodexDecision('deny')).toBe('decline')
-    // '항상 허용·세션'과 정확히 대응하는 값이 프로토콜에 있다
+    // The protocol has a value that maps exactly to "always allow, this session"
     expect(toCodexDecision('always')).toBe('acceptForSession')
   })
 
@@ -500,7 +509,7 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
    * tokens looked right and only the percentage was missing, while the adapter went on
    * declaring `contextUsage: 'exact'`. The shape below is copied from the generated type.
    */
-  describe('컨텍스트 창은 modelContextWindow에서 온다', () => {
+  describe('the context window comes from modelContextWindow', () => {
     const notification = {
       method: 'thread/tokenUsage/updated',
       params: {
@@ -515,7 +524,7 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
       },
     }
 
-    it('퍼센트를 낼 수 있게 context_update를 낸다', () => {
+    it('emits context_update so a percentage can be shown', () => {
       const events = n(notification.method, notification.params)
       const ctx = events.find((e) => e.type === 'context_update')
       // 1200 (this turn), not 900000 (everything the thread has spent)
@@ -526,7 +535,7 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
      * Regression: reading `total` put the thread's running spend against a fixed window, and
      * the gauge reported 149,084% on a real session before anyone noticed.
      */
-    it('창보다 큰 값은 읽기가 아니라 오독이므로 내보내지 않는다', () => {
+    it('a value larger than the window is a misread, not a reading, so it is not emitted', () => {
       __resetWarningsForTest()
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const absurd = {
@@ -543,7 +552,7 @@ describe('승인 결정 매핑 (M0에서 확인한 6종 중 우리가 쓰는 것
       spy.mockRestore()
     })
 
-    it('창이 없으면 그 사실이 조용히 묻히지 않는다', () => {
+    it('when the window is missing, that fact is not buried silently', () => {
       __resetWarningsForTest()
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const without = { ...notification, params: { ...notification.params, tokenUsage: { ...notification.params.tokenUsage, modelContextWindow: null } } }

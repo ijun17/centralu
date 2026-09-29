@@ -2,14 +2,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * 재개는 클로드처럼 — 사람 앞에서 기다리지 않는다 (도그푸딩: 같은 122MB 스레드가
- * CLI에선 3초, 우리 경로에선 13초+. thread/resume이 파일을 되읽는 비용은 codex의
- * 것이지만, 그 비용을 "Waking…" 앞에서 치르는 것은 우리의 선택이었다).
+ * Resume works like Claude's — we do not make the person wait for it (dogfooding: the same 122MB
+ * thread took 3 seconds in the CLI, 13+ seconds on our path. The cost of thread/resume re-reading
+ * the file belongs to codex, but paying that cost in front of a "Waking…" screen was our own choice).
  *
- * 지키는 계약 셋:
- *  1. 큰 스레드는 3초 뒤 핸들이 먼저 나온다 — 메시지는 ready 큐에서 기다렸다 배달된다
- *  2. 잠금 오류는 3초 창 안에서 그대로 던진다 — "갈라서 이어가기" 갈림길 UI가 산다
- *  3. 배경 재개가 실패하면 조용히 잠들지 않는다 — adapter_crashed로 매니저가 걷는다
+ * Three contracts guarded here:
+ *  1. For a large thread, the handle comes out first after 3 seconds — a message waits in the ready queue until delivered
+ *  2. A lock error is thrown as-is within the 3-second window — this keeps the "split off and continue" fork-in-the-road UI alive
+ *  3. When a background resume fails, it does not go quietly to sleep — the manager retires it via adapter_crashed
  */
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params: Record<string, unknown> | undefined }[],
@@ -54,8 +54,8 @@ beforeEach(() => {
   state.rejecters.clear()
 })
 
-describe('codex 지연 재개 — 클로드처럼', () => {
-  it('큰 스레드는 3초 뒤 핸들이 먼저 나오고, 메시지는 큐에서 기다렸다 배달된다', { timeout: 10_000 }, async () => {
+describe('codex lazy resume — like Claude', () => {
+  it('for a large thread, the handle comes out first after 3 seconds, and a message waits in the queue until delivered', { timeout: 10_000 }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const adapter = new CodexAdapter()
@@ -66,16 +66,16 @@ describe('codex 지연 재개 — 클로드처럼', () => {
       (e) => events.push(e),
     )
     const waited = Date.now() - t0
-    expect(waited).toBeGreaterThanOrEqual(2900) // 잠금 오류를 잡을 창
-    expect(waited).toBeLessThan(6000) // 그 뒤로는 기다리지 않는다 — 이게 이 기능의 전부다
-    expect(h.externalId).toBe('big-thread') // 재개는 id를 이미 안다 — 즉시 저장 가능해야 한다
+    expect(waited).toBeGreaterThanOrEqual(2900) // the window for catching a lock error
+    expect(waited).toBeLessThan(6000) // does not wait past that — that is the entire point of this feature
+    expect(h.externalId).toBe('big-thread') // resume already knows the id — it must be possible to persist it immediately
 
-    // 재개가 끝나기 전의 메시지는 큐에서 기다린다
+    // A message sent before resume finishes waits in the queue
     h.send('깨기 전에 보낸 말')
     await tick()
     expect(methods()).not.toContain('turn/start')
 
-    // 재개가 끝나면 큐가 흐른다
+    // Once resume finishes, the queue flows
     state.resolvers.get('thread/resume')!({ thread: { id: 'big-thread' } })
     await tick()
     await tick()
@@ -85,10 +85,11 @@ describe('codex 지연 재개 — 클로드처럼', () => {
   })
 
   /*
-   * 재개가 끝나기 전에는 멈출 턴이 없다 (#168). 예전의 Stop은 아무것도 하지 않았고, 줄 서 있던 말이 재개가 끝나자
-   * turn/start로 나갔다 — 사람이 멈춘 뒤에 턴이 시작됐다.
+   * Before resume finishes, there is no turn to stop (#168). The old Stop did nothing, and a
+   * message queued up behind it went out as turn/start once resume finished — the turn started
+   * after the person had already stopped it.
    */
-  it('재개가 끝나기 전에 누른 Stop은 줄 서 있던 말을 거두고, 그 뒤의 말은 보낸다 (#168)', { timeout: 10_000 }, async () => {
+  it('a Stop pressed before resume finishes reclaims the queued message, and a message sent after it still goes out (#168)', { timeout: 10_000 }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const h = await new CodexAdapter().createSession(
@@ -107,7 +108,7 @@ describe('codex 지연 재개 — 클로드처럼', () => {
     expect(turns).toEqual([[{ type: 'text', text: '멈춘 뒤에 보낸 말' }]])
   })
 
-  it('잠금 오류는 3초 창 안에서 그대로 던진다 — 갈림길 UI가 산다', async () => {
+  it('a lock error is thrown as-is within the 3-second window — the fork-in-the-road UI stays alive', async () => {
     state.fail.set('thread/resume', 'thread abc already has an active writer')
     const adapter = new CodexAdapter()
     await expect(
@@ -118,7 +119,7 @@ describe('codex 지연 재개 — 클로드처럼', () => {
     ).rejects.toThrow(/already open elsewhere/)
   })
 
-  it('배경 재개가 실패하면 adapter_crashed가 오른다 — 조용한 좀비를 만들지 않는다', { timeout: 10_000 }, async () => {
+  it('adapter_crashed is raised when a background resume fails — does not leave a silent zombie', { timeout: 10_000 }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const adapter = new CodexAdapter()

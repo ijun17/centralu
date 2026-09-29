@@ -1,10 +1,10 @@
 import type { ApprovalDetail, NormalizedEvent, SessionGoal } from '@cc/protocol'
 
 /**
- * Codex 프로토콜 → NormalizedEvent 변환 (M0에서 확인한 메서드 이름 기준).
+ * Codex protocol to NormalizedEvent conversion (based on the method names confirmed in M0).
  *
- * 여기가 anti-corruption 경계다. 이 파일 밖으로 Codex 타입이 나가지 않는다.
- * 순수 함수로 유지해 계약 테스트가 프로세스 없이 돌게 한다.
+ * This is the anti-corruption boundary. No Codex type leaves this file.
+ * Kept as pure functions so contract tests can run without a process.
  */
 
 type Notification = { method: string; params?: unknown }
@@ -13,16 +13,17 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined)
 
 /**
- * 도구가 **뭐라고 답했나** — 카드에 실릴 본문.
+ * What the tool **actually answered** — the body that goes on the card.
  *
- * 예전에는 `aggregatedOutput`/`output`만 읽었는데, 그 둘은 commandExecution의 필드다.
- * **MCP 호출은 답을 다른 자리에 싣는다**(generated/v2/ThreadItem.ts: `result`와 `error`).
- * 그래서 MCP가 실패하면 화면에 빨간 줄만 뜨고 이유가 한 글자도 없었다 — 도그푸딩에서
- * "왜 이 세션에서만 스킬이 실패하지"를 사람이 에이전트에게 물어서 알아내야 했다
- * (실측 2026-09-08: 같은 도구가 다른 세션에서 90초 전에 성공, 실패한 쪽 카드는 빈칸).
+ * This used to read only `aggregatedOutput`/`output`, but those are fields of commandExecution.
+ * **An MCP call carries its answer in a different place** (generated/v2/ThreadItem.ts: `result`
+ * and `error`). So when an MCP call failed, the screen showed only a red line with not a single
+ * character of reason — during dogfooding, "why does this skill only fail in this session" had to
+ * be figured out by asking the agent itself (measured 2026-09-08: the same tool had succeeded in
+ * another session 90 seconds earlier, while the failed one's card was blank).
  *
- * 순서: 명령 출력 → 오류 메시지 → 결과 내용. 오류가 결과보다 앞인 이유는, 둘 다 있으면
- * 사람이 먼저 알아야 할 것이 실패의 이유이기 때문이다.
+ * Order: command output, then error message, then result content. Error comes before result
+ * because when both exist, the reason for failure is what a person needs to know first.
  */
 function resultSummary(item: Record<string, unknown>): string {
   const direct = str(item.aggregatedOutput) || str(item.output)
@@ -40,7 +41,7 @@ function resultSummary(item: Record<string, unknown>): string {
     if (text) return text
   }
   const structured = obj(item.result).structuredContent
-  // 구조화된 답만 있는 서버도 있다 — 빈 카드보다는 JSON 한 줄이 낫다
+  // Some servers only give a structured answer — one line of JSON beats an empty card
   if (structured && typeof structured === 'object') {
     try {
       return JSON.stringify(structured)
@@ -73,7 +74,7 @@ function itemInput(item: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(item).filter(([k, v]) => !ITEM_OUTCOME.has(k) && v !== null && v !== undefined))
 }
 
-/** 도구 호출 항목을 사람이 읽는 한 줄로 (대화창 카드 제목) */
+/** A tool-call item, into a human-readable line (the conversation card's title) */
 function itemSummary(item: Record<string, unknown>): { tool: string; title: string; readOnly: boolean; paths: string[] } {
   const type = str(item.type)
   if (type === 'commandExecution') {
@@ -87,13 +88,13 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
   }
   if (type === 'mcpToolCall') {
     /*
-     * 이름은 **최상위의 server·tool**에 있다 (generated/v2/ThreadItem.ts).
-     * invocation.tool을 읽고 있어서 코덱스의 MCP 호출이 전부 'MCP'로 뭉개져 보였다 —
-     * 오케스트레이터를 코덱스로 돌려보다 드러났다.
+     * The name lives in **the top-level server and tool** (generated/v2/ThreadItem.ts). We used
+     * to read invocation.tool, which made every one of Codex's MCP calls collapse into a single
+     * 'MCP' — this surfaced while running the orchestrator on Codex.
      */
     const tool = str(item.tool) || str(obj(item.invocation).tool)
     const server = str(item.server)
-    // 제안 카드(#63)는 이유를 제목으로 쓴다 — claude 쪽 toolSummary와 같은 규칙
+    // The proposal card (#63) uses the reason as its title — same rule as toolSummary on the claude side
     if (tool.endsWith('propose_project')) {
       const rawArgs = obj(item.invocation).arguments
       let reason = ''
@@ -101,11 +102,11 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
         const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
         reason = str(obj(parsed).reason)
       } catch {
-        /* 인자가 JSON이 아니면 이유 없이 카드만 뜬다 — 버튼이 일한다 */
+        /* If the arguments are not JSON, the card just shows up with no reason — the button still works */
       }
       return { tool, title: reason || tool, readOnly: false, paths: [] }
     }
-    // 워크트리 제안 (#69) — 브랜치 이름이 제목이다. 그 제목이 UI 프리필의 유일한 운반로다
+    // Worktree proposal (#69) — the branch name is the title, and that title is the only channel for the UI's prefill
     if (tool.endsWith('propose_worktree_session')) {
       const rawArgs = obj(item.invocation).arguments
       let branch = ''
@@ -113,18 +114,19 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
         const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
         branch = str(obj(parsed).branch)
       } catch {
-        /* 인자가 JSON이 아니면 이름 없이 카드만 뜬다 — 창은 빈 이름으로 열린다 */
+        /* If the arguments are not JSON, the card just shows up with no name — the window opens with a blank name */
       }
       return { tool, title: branch || tool, readOnly: false, paths: [] }
     }
     /*
-     * **인자도 제목에 싣는다** (도그푸딩 2026-09-08).
+     * **The arguments go on the title too** (dogfooding 2026-09-08).
      *
-     * 같은 도구가 한 세션에서만 계속 실패한 일이 있었다. 원인은 인자 이름 하나였다 —
-     * 되던 호출은 `{message: …}`, 안 되던 호출은 `{query: …}`였고, 서버는 그 차이를
-     * "An unexpected error occurred"로만 답했다. 화면에는 도구 이름만 있었으니 두 호출이
-     * 똑같아 보였고, 사람이 롤아웃 파일을 열어야 알 수 있었다. 인자가 카드에 있으면
-     * 그 차이는 눈에 띈다.
+     * There was a case where the same tool kept failing in only one session. The cause was a single
+     * argument name — the call that worked used `{message: …}`, the one that failed used
+     * `{query: …}`, and the server answered that difference with nothing more than "An unexpected
+     * error occurred". Since the screen only showed the tool name, the two calls looked identical,
+     * and a person had to open the rollout file to find out. With arguments on the card, that
+     * difference is visible at a glance.
      */
     const args = argsPreview(item.arguments ?? obj(item.invocation).arguments)
     const name = [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool'
@@ -142,10 +144,10 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
 }
 
 /**
- * 인자를 한 줄로 (카드 제목 꼬리표).
+ * The arguments, into one line (a tag on the card title).
  *
- * 값이 아니라 **모양**을 보여주는 것이 목적이라 짧게 자른다 — 어떤 이름으로 무엇을
- * 보냈는지가 읽히면 충분하고, 본문은 어차피 결과 카드에 있다.
+ * The goal is to show the **shape**, not the exact value, so it is cut short — it is enough to
+ * see what was sent under what name, and the full body is on the result card anyway.
  */
 function argsPreview(raw: unknown): string {
   let value: unknown = raw
@@ -165,7 +167,7 @@ function argsPreview(raw: unknown): string {
   return `{${body.length > 80 ? `${body.slice(0, 79)}…` : body}}`
 }
 
-/** 조회성 명령은 카드를 접는다 (core의 정책과 같은 취지 — 여기선 힌트만 준다) */
+/** A read-only command collapses its card (same intent as core's policy — this only supplies the hint) */
 function isReadOnlyCommand(cmd: string): boolean {
   const head = cmd.replace(/^\/bin\/\w*sh\s+-l?c\s+'?/, '').trimStart().split(/\s+/)[0] ?? ''
   return ['ls', 'cat', 'pwd', 'grep', 'rg', 'find', 'head', 'tail', 'wc', 'git'].includes(head)
@@ -192,17 +194,20 @@ export function approvalDetailFrom(method: string, params: Record<string, unknow
 }
 
 /**
- * 알림 하나를 0~N개의 NormalizedEvent로 변환한다.
- * 모르는 알림은 **조용히 버린다** — 프로토콜이 늘어나도 깨지지 않아야 한다 (protocol.md §4).
+ * Converts one notification into zero or more NormalizedEvents.
+ * An unknown notification is **dropped silently** — this must not break as the protocol grows
+ * (protocol.md §4).
  */
 /**
- * codex ThreadGoal → 프로토콜 SessionGoal (2026-09-07).
- * updated 알림과 재개 직후의 thread/goal/get이 같은 변환을 쓴다 — 두 벌이면 표류한다.
+ * codex ThreadGoal to protocol SessionGoal (2026-09-07).
+ * The updated notification and the thread/goal/get called right after resume share this same
+ * conversion — two copies would drift apart.
  *
- * **완료(complete)는 걷힘이다** (도그푸딩: complete 배지가 영원히 남았다). codex는
- * 달성 때 cleared가 아니라 updated(status:complete)를 보내는데, 달성된 골은 상태가
- * 아니라 결말이고 결말은 배지의 몫이 아니다 — claude(달성 → null 통지)와 같은 문법.
- * paused·blocked·usageLimited·budgetLimited는 남는다: 아직 행동할 수 있는 상태다.
+ * **Complete means cleared** (dogfooding: the complete badge stayed forever). codex sends
+ * updated(status:complete) rather than cleared when a goal is achieved, but an achieved goal is
+ * an ending, not a state, and an ending is not the badge's job — the same convention as claude
+ * (achieved -> a null notification). paused, blocked, usageLimited and budgetLimited survive:
+ * those are states where action is still possible.
  */
 export function goalFromCodex(g: Record<string, unknown>): SessionGoal | null {
   if (str(g.status) === 'complete') return null
@@ -222,36 +227,38 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(p.text) }]
 
     /*
-     * 추론 요약 (#58 실측). thread 설정에 model_reasoning_summary를 켜야만 오는
-     * 스트림이다 — index.ts가 켠다. 실측 모양:
-     *   item/reasoning/summaryPartAdded {itemId, summaryIndex}         — 새 단락
-     *   item/reasoning/summaryTextDelta {itemId, delta, summaryIndex}  — 본문 조각
-     * completed의 reasoning 아이템에도 summary 전문이 실리지만 내지 않는다 —
-     * 델타로 이미 흘렀으므로 또 내면 같은 글이 두 번 붙는다 (agentMessage와 같은 규칙).
+     * Reasoning summary (measured for #58). This stream only arrives if model_reasoning_summary
+     * is turned on in the thread settings — index.ts turns it on. Measured shape:
+     *   item/reasoning/summaryPartAdded {itemId, summaryIndex}         — a new paragraph
+     *   item/reasoning/summaryTextDelta {itemId, delta, summaryIndex}  — a chunk of text
+     * The completed reasoning item also carries the full summary text, but we do not emit it —
+     * it already streamed through the deltas, so emitting it again would append the same text
+     * twice (the same rule as agentMessage).
      */
     case 'item/reasoning/summaryTextDelta': {
       const text = str(p.delta)
       return text ? [{ type: 'reasoning_delta', sessionId, text }] : []
     }
     case 'item/reasoning/summaryPartAdded':
-      // 단락 경계. 첫 단락 앞에는 아무것도 없어야 한다
+      // A paragraph boundary. There must be nothing before the first paragraph
       return typeof p.summaryIndex === 'number' && p.summaryIndex > 0
         ? [{ type: 'reasoning_delta', sessionId, text: '\n\n' }]
         : []
 
     /*
-     * 계획 진행 (#58 실측). 실측한 모양:
+     * Plan progress (measured for #58). The measured shape:
      *   turn/plan/updated {threadId, turnId, explanation: null,
      *                      plan: [{step, status: 'pending'|'inProgress'|'completed'}]}
-     * 매번 전체 스냅샷이다. 계획은 item으로는 **안 온다** — 이 알림을 버리면
-     * codex의 계획 도구 사용이 화면 어디에도 나타나지 않는다 (실측: 이 턴의 item은
-     * userMessage/reasoning/agentMessage/commandExecution뿐이었다).
+     * It is a full snapshot every time. A plan **never arrives** as an item — dropping this
+     * notification would leave codex's use of the plan tool invisible everywhere on screen
+     * (measured: this turn's items were only userMessage, reasoning, agentMessage and
+     * commandExecution).
      */
     case 'turn/plan/updated': {
       const steps = (Array.isArray(p.plan) ? p.plan : []).map((raw) => {
         const it = obj(raw)
         const raw_ = str(it.status)
-        // 모르는 상태는 pending으로 — 진행 표시가 새 상태 하나에 통째로 죽으면 안 된다
+        // An unknown status falls back to pending — progress display must not die outright over one new status value
         const status: 'pending' | 'inProgress' | 'completed' =
           raw_ === 'inProgress' || raw_ === 'completed' ? raw_ : 'pending'
         return { text: str(it.step), status }
@@ -260,10 +267,10 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     /*
-     * 실행 중 출력 (#58 실측): {threadId, turnId, itemId, delta}.
-     * 완료 시 aggregatedOutput이 전체를 다시 실어 오므로 이건 표시 전용이다.
-     * (실측: 첫 조각은 스트림이 붙기 전에 소비돼 빠질 수 있다 — 델타의 합이
-     * 전체 출력이라는 가정은 성립하지 않는다.)
+     * Output while a command is running (measured for #58): {threadId, turnId, itemId, delta}.
+     * On completion, aggregatedOutput carries the whole thing again, so this is display-only.
+     * (Measured: the first chunk can be consumed before the stream attaches and get dropped —
+     * the assumption that summing the deltas equals the full output does not hold.)
      */
     case 'item/commandExecution/outputDelta': {
       const text = str(p.delta)
@@ -275,18 +282,20 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const type = str(item.type)
       if (type === 'userMessage' || type === 'reasoning' || type === 'agentMessage') return []
       /*
-       * 압축은 도구 호출이 아니다. 이걸 걸러내지 않으면 대화에 'contextCompaction'이라는
-       * 정체불명의 도구 줄이 생긴다 — 그리고 정작 필요한 "지금 압축 중"은 어디에도 없다.
+       * Compaction is not a tool call. Without filtering this out, the conversation gets an
+       * unidentifiable tool line named 'contextCompaction' — and the "compacting now" indicator
+       * that is actually needed is nowhere to be found.
        */
       if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: 'compacting' }]
       /*
-       * 리뷰의 시작(/review → review/start RPC). 압축과 같은 이유로 도구 줄이 아니라
-       * activity다 — 리뷰 본문은 agentMessage로 따로 스트리밍되므로, 여기서 도구 줄을
-       * 만들면 "enteredReviewMode"라는 정체불명의 호출이 대화에 남는다 (실측한 모양).
+       * The start of a review (/review -> the review/start RPC). For the same reason as
+       * compaction, this is an activity, not a tool line — the review body streams separately as
+       * agentMessage, so making a tool line here would leave an unidentifiable call named
+       * "enteredReviewMode" in the conversation (the measured shape).
        */
       if (type === 'enteredReviewMode') return [{ type: 'activity', sessionId, activity: 'reviewing' }]
       if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
-      // 이미지 열람의 시작은 도구 줄이 아니다 — completed에서 이미지 자체를 낸다 (#40)
+      // The start of viewing an image is not a tool line — the image itself is emitted at completion (#40)
       if (type === 'imageView') return []
       const s = itemSummary(item)
       return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s, input: itemInput(item) }]
@@ -296,24 +305,26 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const item = obj(p.item)
       const type = str(item.type)
       if (type === 'agentMessage') {
-        // 스트리밍 델타를 못 받은 경우를 위한 보강 (델타가 있었으면 중복이므로 비운다)
+        // A fallback for when the streamed deltas were missed (empty when deltas already arrived, to avoid duplicating)
         return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '' }] : []
       }
       if (type === 'userMessage' || type === 'reasoning') return []
-      // 마커는 thread/compacted가 낸다 — 여기서 또 내면 같은 자리에 두 줄이 생긴다
+      // The marker is emitted by thread/compacted — emitting it again here would put two lines in the same spot
       if (type === 'contextCompaction') return [{ type: 'activity', sessionId, activity: null }]
       /*
-       * 리뷰의 끝. item.review에 결과 전문이 있지만 내지 않는다 — 같은 글이
-       * agentMessage로 이미 스트리밍됐다 (실측). 여기서 또 내면 결과가 두 번 붙는다.
-       * (시작·끝 아이템은 started/completed 어느 쪽으로 오든 activity로만 남는다)
+       * The end of a review. item.review carries the full result text, but we do not emit it —
+       * the same text has already streamed as agentMessage (measured). Emitting it again here
+       * would append the result twice. (The start/end items only ever surface as activity,
+       * whether they arrive via started or completed.)
        */
       if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
       if (type === 'enteredReviewMode') return []
       /*
-       * 에이전트가 이미지를 봤다 (#40). 실측 모양: {type:'imageView', id, path} — 경로만
-       * 실려 온다. 파일 읽기는 IO라 여기(순수 함수)서 못 한다: data를 비운 채 내보내고,
-       * 어댑터(index.ts)가 내보내기 직전에 읽어 채운다. mime도 그쪽에서 확장자로 정한다.
-       * (imageGeneration은 아직 실측을 못 했다 — 관찰되면 그때 잇는다, #58과 같은 규칙)
+       * The agent viewed an image (#40). Measured shape: {type:'imageView', id, path} — only the
+       * path is carried. Reading the file is IO, which this pure function cannot do: it is
+       * emitted with data left empty, and the adapter (index.ts) reads and fills it in right
+       * before emitting. The mime type is also decided there, from the extension. (imageGeneration
+       * has not been measured yet — it will be wired up once observed, the same rule as #58.)
        */
       if (type === 'imageView') {
         const path = str(item.path)
@@ -332,25 +343,26 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
           ...(output ? { output } : {}),
         },
       ]
-      // 파일을 실제로 바꿨으면 충돌 감지·하이라이트용으로 알린다 (FR-2, FR-5)
+      // If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5)
       if (s.paths.length > 0) out.push({ type: 'files_touched', sessionId, paths: s.paths })
       return out
     }
 
     /*
-     * 턴이 끝났다 — **끝난 방식까지 읽는다** (#107).
+     * The turn ended — **read how it ended, too** (#107).
      *
-     * `turn/completed`는 실패한 턴도 나른다 (generated/v2/Turn.ts: `status`가
-     * "completed" | "interrupted" | "failed"이고, `error`는 failed일 때만 채워진다).
-     * 여기서 `turn.*`을 통째로 버리고 있어서 400이 난 턴도 성공한 턴과 똑같이
-     * `turn_complete` 하나로만 나갔다 — 화면에는 **빈 답변**이 남고 상태는
-     * `waiting_input`이 됐다. 실사고: 롤아웃에는
-     * `The 'opus[1m]' model …` 전문이 있었는데 앱에는 한 글자도 오지 않았고,
-     * host 로그에도 어댑터 오류가 없었다. 아무 데서도 실패라고 말하지 않은 것이다.
+     * `turn/completed` also carries a failed turn (generated/v2/Turn.ts: `status` is "completed" |
+     * "interrupted" | "failed", and `error` is only filled in when failed). We used to drop
+     * `turn.*` wholesale here, so a turn that errored with a 400 still went out as nothing more
+     * than a single `turn_complete`, same as a successful one — the screen was left with an
+     * **empty answer** while the state flipped to `waiting_input`. A real incident: the rollout
+     * had the full text of `The 'opus[1m]' model …`, but not a single character of it reached the
+     * app, and there was no adapter error in the host log either. Nowhere did anything say it had
+     * failed.
      *
-     * 실패는 `error`로 낸다 — **`turn_complete`를 함께 내지 않는다.** 두 이벤트가
-     * 같이 나가면 상태 머신의 마지막 말이 "사람을 기다리는 중"이 되어, 고치려는
-     * 거짓말을 그대로 다시 하게 된다. Claude 어댑터가 `result`에서 쓰는 규칙과 같다.
+     * A failure is emitted as `error` — **not together with `turn_complete`.** If both events go
+     * out, the state machine's last word ends up being "waiting for the person", which repeats
+     * exactly the lie we are trying to fix. The same rule the Claude adapter uses for `result`.
      */
     case 'turn/completed': {
       const turn = obj(p.turn)
@@ -427,15 +439,17 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     /*
-     * 사용량 갱신은 **한도에 걸린 것과 다르다.**
+     * A usage update is **not the same as hitting a limit.**
      *
-     * 여기에 조건이 없어서 코덱스 세션은 첫 도구 호출 직후 곧바로 'limited'가 됐다 —
-     * 실측에서 usedPercent 27%인데도 그랬다. 그러면 아이콘 회전이 멈추고 흐려지고,
-     * 있지도 않은 "Limit 27%" 딱지가 붙는다 (도그푸딩: "배시 돌 때 로딩이 안 돈다").
+     * Without a condition here, a codex session flipped to 'limited' right after its very first
+     * tool call — even when the measured usedPercent was only 27%. That freezes and dims the
+     * spinning icon and slaps on a "Limit 27%" label that does not actually apply (dogfooding:
+     * "the loading spinner does not spin while bash is running").
      *
-     * 도구는 걸렸는지를 직접 알려준다 — `rateLimitReachedType`이 null이면 안 걸린 것이다
-     * (Claude 어댑터도 `status !== 'allowed'`일 때만 낸다. 같은 규칙이어야 한다).
-     * 남는 사용량 정보는 잃지 않는다: 사용량 창이 `agents.usage`로 따로 읽는다.
+     * The tool tells us directly whether the limit was hit — `rateLimitReachedType` being null
+     * means it was not hit (the Claude adapter also only emits this when `status !== 'allowed'`;
+     * both must follow the same rule). No usage information is lost by this: the usage panel
+     * reads it separately through `agents.usage`.
      */
     case 'account/rateLimits/updated': {
       const snapshot = obj(p.rateLimits)
@@ -456,17 +470,18 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     case 'thread/name/updated':
-      // 도구가 스스로 지은 이름이다 → auto:true. 사람이 정한 이름은 이걸로 덮이지 않는다 (이슈 #5)
+      // This is a name the tool made up on its own -> auto:true. A name the person set is not overwritten by this (issue #5)
       return [{ type: 'session_title', sessionId, title: str(p.name), auto: true }]
 
     case 'thread/compacted':
       return [{ type: 'compaction', sessionId, failed: false }]
 
     /*
-     * 골 통지 (2026-09-07 — ThreadGoalUpdated/ClearedNotification). codex는 골이
-     * 일급이다: objective·status(active|paused|blocked|usageLimited|budgetLimited|
-     * complete)·토큰 예산/사용이 프로토콜로 온다. 어휘는 그대로 나른다 — 판정은
-     * 도구의 것이고 우리는 배지의 근거만 나른다.
+     * Goal notifications (2026-09-07 — ThreadGoalUpdated/ClearedNotification). codex treats a goal
+     * as a first-class thing: objective, status (active | paused | blocked | usageLimited |
+     * budgetLimited | complete), and token budget/usage all arrive over the protocol. We carry
+     * the vocabulary through unchanged — the judgment belongs to the tool, and we only carry the
+     * basis for the badge.
      */
     case 'thread/goal/updated':
       return [{ type: 'goal', sessionId, goal: goalFromCodex(obj(p.goal)) }]
@@ -475,12 +490,17 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'goal', sessionId, goal: null }]
 
     /*
-     * `error` 알림은 `{ error, willRetry, threadId, turnId }`다(생성 바인딩 ErrorNotification, codex-cli 0.153.4). 두 경우는
-     * 실패 표식으로 남기지 않는다 (#168):
-     *  - **다시 시도하는 오류**(willRetry) — 재연결처럼 Codex가 스스로 이어 간다. 표식으로 남기면 턴이 성공해도
-     *    "이 턴을 끝내지 못했다"가 대화에 남는다. 끝내 실패하면 아래 turn/completed(failed)가 말한다. host.log에만 남긴다.
-     *  - **턴에 딸린 오류** — 그 턴은 같은 문장을 실은 turn/completed(failed)로 끝난다. 둘 다 내면 표식이 두 줄이다
-     *    (실측: 토큰 갱신 실패 한 번이 같은 초에 같은 문장 두 줄로 세 번 남았다). 턴의 결말 쪽을 기준으로 삼는다.
+     * The `error` notification has the shape `{ error, willRetry, threadId, turnId }` (generated
+     * binding ErrorNotification, codex-cli 0.153.4). Two cases are not left as a failure marker
+     * (#168):
+     *  - **an error that will be retried** (willRetry) — Codex continues on its own, e.g. by
+     *    reconnecting. Leaving a marker here would leave "this turn did not finish" in the
+     *    conversation even when the turn eventually succeeds. If it does fail for good, the
+     *    turn/completed(failed) below reports it. This case is only logged to host.log.
+     *  - **an error that belongs to a turn** — that turn ends with a turn/completed(failed)
+     *    carrying the same sentence. Emitting both would leave two lines of marker (measured: one
+     *    token-refresh failure left the same sentence three times across two lines within the same
+     *    second). We treat the turn's own outcome as the source of truth.
      */
     case 'error': {
       const message = str(obj(p.error).message) || str(p.message) || 'Unknown error'
@@ -497,10 +517,10 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
   }
 }
 
-/** 승인 응답을 Codex decision으로 (6종 중 우리가 쓰는 것만) */
+/** Converts an approval response into a Codex decision (only the ones we use, out of the six) */
 export function toCodexDecision(decision: 'allow' | 'deny' | 'always'): string {
   if (decision === 'deny') return 'decline'
-  if (decision === 'always') return 'acceptForSession' // '항상 허용·세션'과 정확히 대응 (M0 확인)
+  if (decision === 'always') return 'acceptForSession' // Maps exactly to "always allow, this session" (confirmed in M0)
   return 'accept'
 }
 

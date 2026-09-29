@@ -1,29 +1,30 @@
 #!/usr/bin/env node
 /**
- * Codex ↔ Centralu 다리 (stdio MCP 서버).
+ * The Codex <-> Centralu bridge (an stdio MCP server).
  *
- * Codex는 스레드별 config로 **stdio 서버만** 물릴 수 있다 — HTTP(url) 방식은
- * 실측에서 요청이 한 건도 오지 않았다 (codex-cli 0.147.0). 그래서 프로세스가
- * 하나 더 붙는다. Claude는 인프로세스라 이 파일이 필요 없다.
+ * Codex can only attach an **stdio server** through per-thread config — measured, the HTTP (url)
+ * approach never received a single request (codex-cli 0.147.0). So one extra process ends up
+ * attached. Claude does not need this file, since it is in-process.
  *
- * **이 다리는 판단을 하지 않는다.** 도구 이름과 인자를 host로 넘기고 글을 받아
- * 그대로 돌려줄 뿐이다. 접근 범위·목록 규칙·표현은 전부 host에 남는다 —
- * 여기에 조금이라도 옮겨 적으면 두 어댑터의 도구가 갈라진다.
+ * **This bridge makes no decisions.** It only passes a tool name and arguments to the host and
+ * relays back whatever text it receives. Access scope, listing rules and presentation all stay on
+ * the host — copying even a little of that logic here would let the two adapters' tools drift apart.
  *
- * 이 파일은 codex가 `node <경로>`로 직접 띄우므로 **평범한 .mjs여야 한다**
- * (tsx도 번들도 거치지 않는다).
+ * codex launches this file directly with `node <path>`, so it **must stay a plain .mjs file**
+ * (it goes through neither tsx nor a bundler).
  *
- * 환경변수로 받는 것:
- *   CC_HOST_URL       host의 WS 주소
- *   CC_HOST_TOKEN     인증 토큰
- *   CC_SESSION_ID     이 세션 id (host가 권한을 이걸로 판정한다)
- *   CC_APP_SERVER     (있으면) 외부 앱 하나의 다리다 — 그 앱의 세션 서버 이름 `app-<id>` (M4 A-5)
+ * What it receives through environment variables:
+ *   CC_HOST_URL       the host's WS address
+ *   CC_HOST_TOKEN     the auth token
+ *   CC_SESSION_ID     this session's id (the host judges permission by this)
+ *   CC_APP_SERVER     (if present) this is the bridge for a single external app — that app's session server name `app-<id>` (M4 A-5)
  *
- * **다리가 둘이 아니라 하나인 이유.** 오케스트레이터 도구와 외부 앱은 host로 되돌아가는 길이
- * 같다(WS 주소·토큰·세션 id). 파일을 둘로 나누면 번들 복사·경로 찾기·재연결이 두 벌이 된다.
- * 달라지는 것은 부르는 RPC 두 개뿐이다: 앱이면 `apps.sessionTools`·`apps.sessionCall`,
- * 아니면 `orchestrator.tools`·`orchestrator.tool`. 앱 다리도 판단을 하지 않는다 — 결정 4(붙는 앱),
- * 공개 범위, 기록은 host가 세션 id로 다시 본다.
+ * **Why there is one bridge, not two.** The orchestrator tools and an external app take the same
+ * path back to the host (the WS address, token and session id). Splitting this into two files
+ * would double the bundle copy, path lookup and reconnection logic. Only two RPCs called differ:
+ * for an app it is `apps.sessionTools`/`apps.sessionCall`, otherwise `orchestrator.tools`/
+ * `orchestrator.tool`. The app bridge also makes no decisions — decision 4 (which apps attach),
+ * exposure scope, and logging are all re-checked by the host using the session id.
  */
 import { WebSocket } from 'ws'
 
@@ -32,20 +33,23 @@ const TOKEN = process.env.CC_HOST_TOKEN
 const SESSION_ID = process.env.CC_SESSION_ID
 const APP_SERVER = process.env.CC_APP_SERVER || null
 /**
- * 이보다 오래 걸리는 앱 호출은 host가 실행 id와 "아직 도는 중"을 먼저 돌려준다 (M4 A-5 "오래 걸리는
- * 호출"). 값은 어댑터가 Codex의 상한 옆에서 정해 넘긴다 — 다리는 나르기만 한다.
+ * An app call that takes longer than this gets a run id and "still running" back from the host
+ * first (M4 A-5, "long-running calls"). The value is decided by the adapter alongside Codex's own
+ * ceiling and passed down — the bridge only carries it through.
  */
 const APP_WAIT_MS = Number(process.env.CC_APP_WAIT_MS) || undefined
 
 /**
- * 앱 도구 호출 하나를 기다리는 상한. Codex 쪽 상한(`tool_timeout_sec` 300초 — 어댑터가 명시한다)
- * 보다 짧아야 다리가 먼저 이유를 말한다. 다리가 먼저 끊으면 모델은 "다리가 기다리다 그만뒀다"를
- * 읽고, Codex가 먼저 끊으면 이유 없는 시간 초과만 남는다. host가 먼저 돌려주는 때(APP_WAIT_MS)보다는
- * 길어야 한다 — 그래야 "아직 도는 중"이 다리를 지나 모델에게 닿는다.
+ * The ceiling for waiting on a single app tool call. It must be shorter than Codex's own ceiling
+ * (`tool_timeout_sec`, 300 seconds — set explicitly by the adapter) so the bridge is the one that
+ * states the reason first. If the bridge cuts it off first, the model reads "the bridge gave up
+ * waiting"; if Codex cuts it off first, all that is left is a timeout with no reason. It must also
+ * be longer than the point where the host returns early (APP_WAIT_MS) — otherwise "still running"
+ * cannot make it past the bridge to the model.
  */
 const APP_CALL_TIMEOUT_MS = 280_000
 
-/** stdout은 MCP 전용이다 — 진단은 전부 stderr로 (섞이면 프로토콜이 깨진다) */
+/** stdout is reserved for MCP — every diagnostic goes to stderr instead (mixing them breaks the protocol) */
 const log = (...a) => process.stderr.write(`[cc-bridge] ${a.join(' ')}\n`)
 
 let ws = null
@@ -114,7 +118,7 @@ async function handle(msg) {
 
   if (method === 'tools/list') {
     try {
-      // 자기 세션 id를 실어 보낸다 — 매니저 세션(#69)은 부분집합만 받아야 한다
+      // Sends its own session id along — a manager session (#69) must only receive the subset
       const tools = await rpc('orchestrator.tools', { sessionId: SESSION_ID })
       return ok(id, { tools })
     } catch (e) {
@@ -131,7 +135,7 @@ async function handle(msg) {
       })
       return ok(id, { content: [{ type: 'text', text: r.text }], isError: r.isError === true })
     } catch (e) {
-      // 조용히 성공한 척하지 않는다 — 모델이 시켰다고 믿고 넘어가면 사람만 모른다
+      // Does not silently pretend it succeeded — pretending the model's request went through leaves only the person unaware
       return ok(id, { content: [{ type: 'text', text: `도구를 실행하지 못했습니다 — ${e.message}` }], isError: true })
     }
   }
@@ -140,8 +144,9 @@ async function handle(msg) {
 }
 
 /**
- * 외부 앱 하나의 다리 (M4 A-5). 도구 목록과 결과는 host가 준 MCP 모양 그대로 내놓는다 —
- * 설명·주석·스키마를 여기서 다듬으면 Codex가 보는 도구가 Claude가 보는 도구와 갈라진다.
+ * The bridge for a single external app (M4 A-5). The tool list and results are surfaced exactly
+ * in the MCP shape the host gave — trimming the description, annotations or schema here would let
+ * the tool Codex sees drift apart from the one Claude sees.
  */
 async function handleApp(id, method, params) {
   if (method === 'tools/list') {
@@ -164,7 +169,7 @@ async function handleApp(id, method, params) {
       return ok(id, { content: [{ type: 'text', text: `Could not run the app's tool — ${e.message}` }], isError: true })
     }
   }
-  // 알림(notifications/cancelled 등)에는 답할 것이 없다 — 세션을 멈추면 host가 그 세션의 앱 호출을 직접 끊는다
+  // There is nothing to answer for a notification (notifications/cancelled, etc.) — stopping a session lets the host cut off that session's app calls directly
   if (id !== undefined) err(id, `Unsupported method: ${method}`)
 }
 

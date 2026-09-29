@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
 /**
- * 준비(핸드셰이크)에 실패한 세션은 핸들이 밖으로 나가지 않아 dispose를 불러줄 사람이 없다.
- * 그런데 app-server는 생성자에서 이미 떠 있다 — 여기서 거두지 않으면 실패할 때마다
- * 자식 프로세스가 하나씩 조용히 샜다. 클라이언트를 가짜로 갈아 끼워 그 계약만 본다.
+ * A session that fails to get ready (handshake) never has its handle handed out, so there is
+ * nobody left to call dispose. But the app-server has already been started in the constructor —
+ * without reclaiming it here, a child process leaked silently, one at a time, on every failure.
+ * The client is swapped for a fake so only this contract is checked.
  */
 type MockServerRequest = { readonly id: number | string; readonly method: string; readonly params?: unknown }
 type MockHandlers = {
@@ -57,8 +58,8 @@ vi.mock('./client.js', () => ({
 
 const { CodexAdapter } = await import('./index.js')
 
-describe('codex 세션 준비 실패', () => {
-  it('핸드셰이크가 실패하면 띄워 둔 app-server를 거둔다 (실패당 자식 하나 누수 방지)', async () => {
+describe('codex session readiness failure', () => {
+  it('reclaims the started app-server when the handshake fails (guards against a leaked child per failure)', async () => {
     state.failInitialize = true
     const adapter = new CodexAdapter()
 
@@ -72,7 +73,7 @@ describe('codex 세션 준비 실패', () => {
 })
 
 
-describe('codex 승인 요청', () => {
+describe('codex approval requests', () => {
   const createLiveSession = async () => {
     state.failInitialize = false
     state.instances.length = 0
@@ -85,7 +86,7 @@ describe('codex 승인 요청', () => {
     return { handle, events, client: state.instances[0]! }
   }
 
-  it('centralu 문자열이 들어간 명령 승인을 자동 허용하지 않는다', async () => {
+  it('does not auto-approve a command approval just because it contains the string centralu', async () => {
     const { events, client } = await createLiveSession()
 
     client.trigger({
@@ -100,7 +101,7 @@ describe('codex 승인 요청', () => {
     )
   })
 
-  it('centralu 경로가 포함된 다중 파일 승인을 자동 허용하지 않는다', async () => {
+  it('does not auto-approve a multi-file approval just because a path includes centralu', async () => {
     const { events, client } = await createLiveSession()
 
     client.trigger({
@@ -118,7 +119,7 @@ describe('codex 승인 요청', () => {
     )
   })
 
-  it('저장된 항상 허용 규칙은 그대로 자동 허용한다', async () => {
+  it('a saved always-allow rule auto-approves as-is', async () => {
     const { handle, client } = await createLiveSession()
     handle.applyRules?.(['printf centralu'])
 
@@ -131,7 +132,7 @@ describe('codex 승인 요청', () => {
     expect(client.responses).toContainEqual({ id: 12, payload: { decision: 'accept' } })
   })
 
-  it('관리 MCP elicitation은 승인 우회가 아니라 elicitation 응답으로만 허용한다', async () => {
+  it('accepts our own management MCP elicitation only through an elicitation response, not by bypassing approval', async () => {
     const { client } = await createLiveSession()
 
     client.trigger({ id: 13, method: 'mcp/elicitation/create', params: { serverName: 'centralu' } })

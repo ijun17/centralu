@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { CodexClient } from './client.js'
 
 /**
- * **우리가 닫은 것과 저쪽이 죽은 것은 다르다.**
+ * **A shutdown we caused is not the same as the other side dying.**
  *
- * 이 구분이 없어서 조사 하루를 통째로 잃었다. 잠긴 대화를 이어가려다 실패하면
- * 매니저가 세션을 정리하는데(dispose), 그 **정상 종료**가 어댑터에서 다시
- * `adapter_crashed`로 올라가 화면에 "codex app-server exited"라고 찍혔다.
- * 진짜 이유("already has an active writer")는 그 아래 깔려 보이지 않았고,
- * 사람은 죽지도 않은 프로세스가 죽었다는 말을 들었다.
+ * Without this distinction, an entire day of investigation was lost. When resuming a locked
+ * conversation failed, the manager cleaned the session up (dispose), and that **ordinary
+ * shutdown** came back through the adapter as `adapter_crashed`, printing "codex app-server
+ * exited" on screen. The real reason ("already has an active writer") was buried underneath, out
+ * of sight, and the person was told that a process which had never died had died.
  *
- * 실제 프로세스를 띄워 확인한다 — 이 계약은 프로세스 수명주기 그 자체라
- * 목으로 흉내내면 정작 틀어지는 자리를 못 잡는다.
+ * This is confirmed by launching a real process — this contract is the process lifecycle itself,
+ * and mocking it would miss exactly the spot where it actually goes wrong.
  */
 const exitOf = (args: string[]) =>
   new Promise<{ code: number | null; expected: boolean }>((resolve) => {
@@ -23,29 +23,30 @@ const exitOf = (args: string[]) =>
       },
       { command: process.execPath, args },
     )
-    // 살아 있는 프로세스만 우리가 닫을 수 있다 — 붙자마자 죽는 쪽은 아래 테스트가 본다
+    // We can only close a process that is still alive — the case of one that dies right after starting is covered by the test below
     if (args[1]?.includes('setTimeout')) setTimeout(() => void client.dispose(), 150)
   })
 
-describe('codex app-server 종료 판정', () => {
-  it('우리가 닫으면 expected=true — 죽었다고 말하지 않는다', async () => {
+describe('codex app-server exit judgment', () => {
+  it('expected=true when we close it — does not report it as having died', async () => {
     const { expected } = await exitOf(['-e', 'setTimeout(() => {}, 60000)'])
     expect(expected).toBe(true)
   })
 
-  it('저쪽이 스스로 끝나면 expected=false — 이때만 크래시다', async () => {
+  it('expected=false when the other side ends on its own — only then is it a crash', async () => {
     const { expected, code } = await exitOf(['-e', 'process.exit(3)'])
     expect(expected).toBe(false)
     expect(code).toBe(3)
   })
 
   /*
-   * spawn 실패(ENOENT — nvm 전환·codex 삭제로 경로가 어긋난 경우)는 'exit'이 아니라
-   * 'error'로 온다. 리스너가 없으면 uncaughtException으로 올라가 host 전체가 죽고,
-   * codex 하나 없다는 이유로 살아 있는 Claude 세션까지 전부 끊긴다.
-   * 이 세션만 실패해야 한다: 기다리던 요청은 이유와 함께 거절되고, onExit은 한 번만 온다.
+   * A spawn failure (ENOENT — when the path is off because of an nvm switch or codex being
+   * removed) arrives as 'error', not 'exit'. With no listener, it bubbles up as an
+   * uncaughtException, killing the entire host and disconnecting every live Claude session too,
+   * just because one codex was missing. Only this session must fail: the waiting request is
+   * rejected with a reason, and onExit fires exactly once.
    */
-  it('없는 명령이면 프로세스를 죽이지 않고 이 세션만 실패시킨다', async () => {
+  it('a nonexistent command fails only this session, without killing the process', async () => {
     let exits = 0
     const client = new CodexClient(
       {
@@ -58,30 +59,30 @@ describe('codex app-server 종료 판정', () => {
       { command: '/nonexistent/cc-no-such-codex' },
     )
 
-    // 짧은 타임아웃: 거절은 spawn 'error'에서 오지만, 남는 타이머가 러너를 붙들지 않게
+    // A short timeout: the rejection comes from spawn's 'error', but this keeps a leftover timer from holding the test runner open
     await expect(client.request('initialize', {}, 1000)).rejects.toThrow(/failed to start/)
-    // 'error'와 'exit'이 둘 다 와도 onExit은 한 번이다 (finished 표식)
+    // onExit fires only once even if both 'error' and 'exit' arrive (the finished flag)
     await new Promise((r) => setTimeout(r, 100))
     expect(exits).toBe(1)
-    // 이미 끝난 클라이언트에 또 요청하면 조용히 매달리지 않고 바로 거절한다
+    // Requesting again on a client that has already ended is rejected immediately, not left hanging silently
     await expect(client.request('x')).rejects.toThrow(/already exited/)
   })
 })
 
 /**
- * 아주 긴 한 줄이 조각나지 않는다 (MGH 재개 사고의 진범).
+ * A very long line does not get chopped up (the actual culprit behind the MGH resume incident).
  *
- * `readline.createInterface`는 23,244,422바이트짜리 `thread/resume` 응답을 조용히
- * 22,049,101 + 나머지로 갈라 내놓았다 — 둘 다 JSON이 아니게 되고, 응답은
- * "non-JSON output"으로 버려지고, 그 요청의 약속은 영원히 안 풀렸다. 원시 스트림을
- * 뜨면 코덱스는 한 줄을 온전히 보냈다 — 자른 쪽은 우리다.
+ * `readline.createInterface` silently split a 23,244,422-byte `thread/resume` response into
+ * 22,049,101 bytes plus the remainder — neither piece was valid JSON anymore, the response was
+ * dropped as "non-JSON output", and that request's promise never resolved. Capturing the raw
+ * stream showed codex sent the line whole — we were the ones who cut it.
  *
- * 실물 크기(24MB)로 검사한다. 줄인 크기로는 readline도 통과한다 — 이 버그는
- * **크기가 조건**이라, 조건을 줄이면 테스트가 지키는 것이 없어진다.
+ * This is checked at real size (24MB). readline also passes at a smaller size — this bug's
+ * **condition is the size itself**, so shrinking it would leave the test guarding nothing.
  */
-describe('CodexClient 스트림 절단', () => {
-  it('24MB 한 줄 응답이 온전히 도착한다', async () => {
-    // app-server 대역: 요청 한 줄을 받으면 거대한 응답 한 줄을 쓴다 (실제 codex 불요)
+describe('CodexClient stream truncation', () => {
+  it('a 24MB single-line response arrives intact', async () => {
+    // A stand-in for app-server: on receiving one request line, it writes one huge response line (no real codex needed)
     const fake = [
       `process.stdin.once('data', () => {`,
       `  const big = JSON.stringify({ id: '1', result: { blob: 'x'.repeat(24 * 1024 * 1024) } })`,
@@ -103,15 +104,17 @@ describe('CodexClient 스트림 절단', () => {
 })
 
 /**
- * 깨진 프레임은 조용히 버려지지 않는다 (readline 사고의 재발 방지 그 자체).
+ * A broken frame is not dropped silently (this is itself the safeguard against a repeat of the
+ * readline incident).
  *
- * 절단 수정 이후에도 이 층이 남는 이유: 다음 절단이 어디서 올지 모른다 — 파서 회귀,
- * 코덱스 쪽 끼어쓰기, 새 런타임. 어디서 오든 **매달리는 대신 이유를 들고 실패**해야
- * 재시도가 의미를 갖고, 사람이 읽을 원인이 남는다.
+ * Why this layer stays even after the truncation fix: we do not know where the next truncation
+ * will come from — a parser regression, codex writing over the buffer, a new runtime. Wherever it
+ * comes from, it must **fail with a reason instead of hanging**, so a retry has a point and a
+ * person is left with a readable cause.
  */
-describe('깨진 프레임', () => {
-  it('{로 시작하는 비JSON 줄은 기다리는 요청을 이유와 함께 깨운다', async () => {
-    // 요청을 받으면 **일부러 깨진 프레임**(잘린 JSON)을 내놓는 대역
+describe('a broken frame', () => {
+  it('a non-JSON line starting with { wakes the waiting request with a reason', async () => {
+    // A stand-in that **deliberately** produces a broken frame (truncated JSON) on receiving a request
     const fake = [
       `process.stdin.once('data', () => {`,
       `  process.stdout.write('{"id":"1","result":{"never":"closes"' + '\\n')`,
@@ -129,7 +132,7 @@ describe('깨진 프레임', () => {
     }
   })
 
-  it('{로 시작하지 않는 낙서는 세션을 실패시키지 않는다 — 배너는 배너다', async () => {
+  it('stray text not starting with { does not fail the session — a banner is just a banner', async () => {
     const fake = [
       `process.stdin.once('data', () => {`,
       `  process.stdout.write('codex banner: hello\\n')`,
@@ -149,12 +152,13 @@ describe('깨진 프레임', () => {
   })
 
   /**
-   * 프레이밍의 성질 검사: 스트림이 **어떤 조각으로 잘려 도착하든** 프레임은 같아야 한다.
-   * readline 사고는 이 성질의 위반이었다 — 인스턴스가 아니라 성질을 검사해야
-   * 다음 위반도 잡는다. 한 글자씩(최악의 경계), 멀티바이트 한글이 조각 경계에 걸리는
-   * 경우까지 포함한다.
+   * A property check for framing: the frame must come out the same **no matter how the stream is
+   * chopped up on arrival**. The readline incident was a violation of exactly this property —
+   * checking the property, rather than one instance, is what catches the next violation too.
+   * This covers arriving one character at a time (the worst-case boundary), including a
+   * multi-byte Korean character landing right on a chunk boundary.
    */
-  it('한 글자씩 흘려 보내도, 한글이 경계에 걸려도 프레임은 온전하다', async () => {
+  it('the frame stays intact even streamed one character at a time, and even with Korean text split across a boundary', async () => {
     const fake = [
       `const msg = Buffer.from(JSON.stringify({ id: '1', result: { text: '한글과 emoji 🙂 boundary' } }) + '\\n')`,
       `process.stdin.once('data', async () => {`,

@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { findRolloutPath, lastCompactSummary } from './rollout.js'
 
 /**
- * 죽은 codex의 컴팩트 요약 추출 (#78) — 롤아웃 포맷 실측(2026-09-04)의 고정.
- * compacted.payload.message는 비어 있고, replacement_history의 첫 user 메시지가
- * 요약 원문이다. 파일은 파일명(thread id)으로 찾는다 — 바이너리 의존 0.
+ * Extracting a dead codex process's compact summary (#78) — pinning the rollout format as
+ * measured (2026-09-04). compacted.payload.message is empty, and replacement_history's first user
+ * message is the summary text. The file is found by its file name (thread id) — zero dependency on the binary.
  */
 
 const SUMMARY = '# 1. 프로젝트와 목표\n\n' + 'MGH 스킬 이펙트 작업 상태와 규칙들. '.repeat(20)
@@ -25,7 +25,7 @@ const compactedLine = (message: string, historyText: string | null) =>
     },
   })
 
-describe('codex 롤아웃의 컴팩트 요약 (#78)', () => {
+describe("codex rollout's compact summary (#78)", () => {
   let dir = ''
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'cc-rollout-'))
@@ -40,7 +40,7 @@ describe('codex 롤아웃의 컴팩트 요약 (#78)', () => {
     return p
   }
 
-  it('파일은 파일명의 thread id로 찾는다 — codex 바이너리 없이', async () => {
+  it('finds the file by the thread id in its file name — with no codex binary involved', async () => {
     const p = put('aaaa-bbbb', [JSON.stringify({ type: 'session_meta' })])
     put('cccc-dddd', [JSON.stringify({ type: 'session_meta' })])
 
@@ -48,7 +48,7 @@ describe('codex 롤아웃의 컴팩트 요약 (#78)', () => {
     expect(await findRolloutPath('없는-스레드', dir)).toBeNull()
   })
 
-  it('마지막 compacted의 요약을 준다 — message가 비면 replacement_history의 첫 user 메시지가 원문이다', async () => {
+  it("gives the last compacted item's summary — if message is empty, replacement_history's first user message is the text", async () => {
     put('t1', [
       JSON.stringify({ type: 'session_meta' }),
       compactedLine('', '첫 번째 요약. ' + SUMMARY),
@@ -61,12 +61,12 @@ describe('codex 롤아웃의 컴팩트 요약 (#78)', () => {
     expect(s).not.toContain('첫 번째 요약')
   })
 
-  it('짧은 조각·깨진 줄·컴팩트 없음은 전부 null — 실패는 조용히 눕고 빌더가 물러난다', async () => {
-    // 200자 미만은 요약이 아니라 보존된 일반 메시지다
+  it('a short fragment, a broken line, or no compaction at all — all give null, a failure lying down quietly while the builder falls back', async () => {
+    // Under 200 characters is not a summary, but a preserved ordinary message
     put('t-short', [compactedLine('', '짧다')])
     expect(await lastCompactSummary('t-short', dir)).toBeNull()
 
-    // 도구가 쓰다 만 마지막 줄 — 깨진 JSON은 건너뛰고 앞의 온전한 것을 쓴다
+    // The last line the tool left half-written — broken JSON is skipped and the intact one before it is used
     put('t-broken', [compactedLine('', '온전한 요약. ' + SUMMARY), '{"type":"compacted","payl'])
     expect(await lastCompactSummary('t-broken', dir)).toContain('온전한 요약')
 

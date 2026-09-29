@@ -7,13 +7,16 @@ import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../con
 import { bridgePath } from './bridge-path.js'
 
 /**
- * Codex 세션에 붙은 외부 앱 (M4 A-5) — 앱마다 stdio 다리, 스레드를 시작·재개할 때 싣는다.
+ * External apps attached to a Codex session (M4 A-5) — an stdio bridge per app, loaded when a
+ * thread starts or resumes.
  *
- * 가짜는 app-server 클라이언트 하나다: 우리가 보낸 요청(스레드 설정)을 적고, 서버 요청(elicitation)을
- * 흉내 낸다. 앱 쪽은 진짜 런타임과 진짜 앱(도구 목록·주석)이다.
+ * The fake is a single app-server client: it records the requests we send (thread settings) and
+ * simulates server requests (elicitation). The app side is the real runtime and real apps (tool
+ * lists, annotations).
  *
- * **Codex의 동작은 소스·타입으로만 확인했다** (로그아웃이라 실행으로 재지 못했다, 플랜 S-3·S-7).
- * 이 테스트가 보는 것은 "우리가 Codex에게 무엇을 보내고, Codex가 보낼 것에 어떻게 답하는가"다.
+ * **Codex's behavior was confirmed only from source and types** (we could not re-verify by
+ * running it while logged out, plan S-3/S-7). What this test watches is "what we send Codex, and
+ * how we answer what Codex sends."
  */
 
 type Req = { method: string; params: Record<string, unknown> }
@@ -21,7 +24,7 @@ type Fake = {
   requests: Req[]
   responses: { id: number | string; payload: unknown }[]
   trigger(r: { id: number | string; method: string; params?: unknown }): void
-  /** app-server의 알림을 흉내 낸다 (item/started 등) */
+  /** Simulates an app-server notification (item/started, etc.) */
   note(n: { method: string; params?: unknown }): void
 }
 
@@ -69,7 +72,7 @@ async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) 
   state.instances.length = 0
   events = []
   handle = await new CodexAdapter().createSession(
-    // 프로젝트의 앱은 신뢰한 프로젝트에만 붙는다(결정 4) — 매니저가 넘기는 것과 같게 그 세션은 신뢰한 프로젝트의 것이다
+    // A project's app only attaches in a trusted project (decision 4) — matching what the manager passes, this session belongs to a trusted project
     { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), orchestratorBridge: BRIDGE, ...over },
     (e) => events.push(e),
   )
@@ -87,7 +90,7 @@ beforeEach(() => {
   w.plant('p2', 'other')
   w.plant('user', 'helper')
   w.rt.refresh()
-  // 짝을 못 찾은 호출(B-1)을 오래 기다리지 않게 — 제품의 값은 5초다
+  // So a call that never finds its match (B-1) is not waited on for too long — the product's own value is 5 seconds
   hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 300 })
 })
 
@@ -98,8 +101,8 @@ afterEach(async () => {
   await w.dispose()
 })
 
-describe('thread/start — 앱마다 다리 하나', () => {
-  it('붙은 앱마다 다리가 실린다: host로 돌아올 주소와 세션·서버 이름, 도구 상한', async () => {
+describe('thread/start — one bridge per app', () => {
+  it('a bridge is loaded for every attached app: an address back to the host, session/server names, and the tool ceiling', async () => {
     const c = await start(WORKER)
     const servers = mcpServers(c)!
     expect(Object.keys(servers).sort()).toEqual(['app-notes', 'app-tasks'])
@@ -109,14 +112,14 @@ describe('thread/start — 앱마다 다리 하나', () => {
       env: { CC_HOST_URL: BRIDGE.url, CC_HOST_TOKEN: BRIDGE.token, CC_SESSION_ID: 'codex-s1', CC_APP_SERVER: 'app-notes' },
       tool_timeout_sec: 300,
     })
-    // 오래 걸리는 호출은 Codex의 300초 상한보다 먼저(240초) 실행 id로 돌려받는다 — 값은 다리가 host로 나른다
+    // A long-running call is returned with a run id before Codex's own 300-second ceiling (at 240 seconds) — the bridge carries this value to the host
     expect((servers['app-notes']!.env as Record<string, string>).CC_APP_WAIT_MS).toBe('240000')
-    // 신뢰한 프로젝트의 워커다 — 오케스트레이터의 다리도, 문서 막기도 없다
+    // A worker in a trusted project — neither the orchestrator's bridge nor document blocking is present
     expect(servers).not.toHaveProperty('centralu')
     expect(threadConfig(c, 'thread/start')).not.toHaveProperty('project_doc_max_bytes')
   })
 
-  it('붙은 앱이 없는 세션에는 다리가 하나도 없다 — 대부분의 세션은 프로세스를 더 띄우지 않는다', async () => {
+  it('a session with no attached app has no bridge at all — most sessions start no extra process', async () => {
     const c = await start({ id: 'codex-s2', kind: 'worker', projectId: 'p2' })
     expect(mcpServers(c)).toBeNull()
   })
@@ -127,28 +130,28 @@ describe('thread/start — 앱마다 다리 하나', () => {
     ['safe', 'prompt'],
   ]
   for (const [preset, mode] of modes) {
-    it(`${preset} → default_tools_approval_mode ${mode}, 읽기 전용 도구는 어느 프리셋에서도 approve`, async () => {
+    it(`${preset} → default_tools_approval_mode ${mode}, a read-only tool is approve under any preset`, async () => {
       const c = await start(WORKER, { permissionPreset: preset })
       expect(mcpServers(c)!['app-notes']).toMatchObject({
         default_tools_approval_mode: mode,
         tools: { peek: { approval_mode: 'approve' } },
       })
-      // 읽기 전용이 아닌 도구는 도구별 칸이 없다 — 프리셋의 방식을 따른다. run_status는 host의 읽기 전용 도구다
+      // A tool that is not read-only has no per-tool entry — it follows the preset's own mode. run_status is the host's own read-only tool
       expect(Object.keys(mcpServers(c)!['app-notes']!.tools as object).sort()).toEqual(['peek', 'run_status'])
     })
   }
 })
 
-describe('thread/resume — 재개에도 서버를 다시 싣는다', () => {
-  it('워커의 재개에 앱 다리가 실린다 (스레드가 도는 동안 붙은 앱은 여기서 붙는다)', async () => {
+describe('thread/resume — servers are loaded again on resume too', () => {
+  it("the app bridge is loaded onto a worker's resume (an app attached while the thread was running gets attached here)", async () => {
     const c = await start(WORKER, { resumeExternalId: 'thread-9' })
     await (handle as unknown as { ready: Promise<void> }).ready
     expect(Object.keys(mcpServers(c, 'thread/resume')!).sort()).toEqual(['app-notes', 'app-tasks'])
     expect(mcpServers(c, 'thread/resume')!['app-notes']).toMatchObject({ default_tools_approval_mode: 'writes' })
   })
 
-  // 승인된 MCP 서버는 사용자 폴더의 앱(app-helper 자리)으로 온다 — 날것으로 실리는 서버는 없다 (A-7)
-  it('오케스트레이터의 재개에는 centralu와 사용자 폴더 앱의 다리, 문서 막기가 함께 실린다', async () => {
+  // An approved MCP server arrives as a user-folder app (occupying the app-helper slot) — no server is ever loaded raw (A-7)
+  it("the orchestrator's resume loads both the centralu bridge and the user-folder app's bridge, plus document blocking", async () => {
     const c = await start(ORCH, {
       resumeExternalId: 'thread-o',
       orchestratorTools: {} as OrchestratorTools,
@@ -166,7 +169,7 @@ describe('thread/resume — 재개에도 서버를 다시 싣는다', () => {
   })
 })
 
-describe('elicitation — 앱 도구 승인은 우리 카드로, 나머지는 예전 그대로', () => {
+describe('elicitation — app tool approval goes to our card, everything else stays as before', () => {
   const approval = (id: number, serverName: string, meta: Record<string, unknown> = { codex_approval_kind: 'mcp_tool_call' }) => ({
     id,
     method: 'mcpServer/elicitation/request',
@@ -181,10 +184,10 @@ describe('elicitation — 앱 도구 승인은 우리 카드로, 나머지는 �
     },
   })
 
-  it('붙인 앱의 도구 승인은 카드가 되고, 사람의 답이 elicitation 응답으로 간다', async () => {
+  it("an attached app's tool approval becomes a card, and the person's answer goes back as an elicitation response", async () => {
     const c = await start(WORKER)
     c.trigger(approval(21, 'app-notes'))
-    // 자동으로 답하지 않는다 — 사람을 기다린다
+    // Does not answer automatically — waits for the person
     expect(c.responses).toEqual([])
     const card = events.find((e) => e.type === 'approval_request')
     expect(card).toMatchObject({
@@ -205,13 +208,13 @@ describe('elicitation — 앱 도구 승인은 우리 카드로, 나머지는 �
     expect(c.responses).toContainEqual({ id: 23, payload: { action: 'accept', content: null, _meta: { persist: 'session' } } })
   })
 
-  it('모르는 서버, 붙이지 않은 app- 서버, 도구 승인이 아닌 elicitation은 여전히 거절한다', async () => {
+  it('still rejects an unknown server, an unattached app- server, and an elicitation that is not a tool approval', async () => {
     const c = await start(WORKER)
     const DECLINE = { action: 'decline', content: null, _meta: null }
     c.trigger(approval(31, 'playwright'))
-    // 이름은 앱 같지만 이 스레드에 우리가 싣지 않은 서버 (사용자의 config.toml 등)
+    // Looks like an app by name, but is a server we did not load onto this thread (e.g. from the user's own config.toml)
     c.trigger(approval(32, 'app-other'))
-    // 붙인 앱이라도 도구 승인이 아닌 입력 양식은 그릴 화면이 없다
+    // Even for an attached app, an input form that is not a tool approval has no screen to draw
     c.trigger(approval(33, 'app-notes', { codex_approval_kind: 'something_else' }))
     expect(c.responses).toEqual([
       { id: 31, payload: DECLINE },
@@ -221,7 +224,7 @@ describe('elicitation — 앱 도구 승인은 우리 카드로, 나머지는 �
     expect(events.filter((e) => e.type === 'approval_request')).toEqual([])
   })
 
-  it('centralu의 elicitation은 예전처럼 받아들인다 (앱과 섞이지 않는다)', async () => {
+  it("accepts centralu's own elicitation as before (not conflated with an app)", async () => {
     const c = await start(ORCH, { orchestratorTools: {} as OrchestratorTools, toolProfile: 'orchestrator' })
     c.trigger({ id: 41, method: 'mcpServer/elicitation/request', params: { serverName: 'centralu' } })
     expect(c.responses).toContainEqual({ id: 41, payload: { action: 'accept', content: null, _meta: null } })
@@ -229,23 +232,25 @@ describe('elicitation — 앱 도구 승인은 우리 카드로, 나머지는 �
 })
 
 /**
- * 세션을 멈추면 다리로 들어온 앱 호출이 멈춘다 (M4 A-5) — **턴이 없어도.** 240초를 넘겨 먼저
- * 돌려준 호출은 턴이 끝난 뒤에도 돈다. 다리는 판단하지 않으므로 host의 어댑터가 끊는다.
- * 다리의 호출은 host의 세션 문(`forSession`)으로 들어온다 — 여기서도 그 문으로 부른다.
+ * Stopping a session also stops an app call that came in through the bridge (M4 A-5) — **even
+ * without a turn.** A call that already returned early past 240 seconds keeps running even after
+ * the turn ends. The bridge does not make this decision, so the host's adapter cuts it off. A
+ * bridge call comes in through the host's session gate (`forSession`) — this test calls through
+ * that same gate too.
  */
-describe('멈추면 앱 호출도 멈춘다 — Codex', () => {
-  it('interrupt는 도는 턴이 없어도 이 세션의 앱 호출을 취소한다', async () => {
+describe('stopping a session also stops its app calls — Codex', () => {
+  it('interrupt cancels this session\'s app calls even with no turn running', async () => {
     const c = await start(WORKER)
     const p = hub.forSession(WORKER.id).call('app-notes', 'hold', {})
     await kit.until(() => w.records('notes').some((r) => r.t === 'holding'), Boolean)
     handle!.interrupt()
     expect((await p).isError).toBe(true)
     await kit.until(() => w.records('notes').some((r) => r.t === 'aborted'), Boolean)
-    // 턴이 없었으므로 Codex에는 아무것도 보내지 않았다 — 멈춘 것은 host다
+    // Nothing was sent to Codex since there was no turn — the host is what stopped it
     expect(c.requests.some((r) => r.method === 'turn/interrupt')).toBe(false)
   })
 
-  it('dispose도 이 세션의 앱 호출을 취소한다', async () => {
+  it('dispose also cancels this session\'s app calls', async () => {
     await start(WORKER)
     const p = hub.forSession(WORKER.id).call('app-notes', 'hold', {})
     await kit.until(() => w.records('notes').some((r) => r.t === 'holding'), Boolean)
@@ -256,16 +261,17 @@ describe('멈추면 앱 호출도 멈춘다 — Codex', () => {
 })
 
 /**
- * 대화 안 화면의 카드 (M4 B-1) — Codex. 다리로 들어오는 호출은 카드 id를 모른다. 어댑터가 본
- * `item/started`(mcpToolCall: id·server·tool·arguments)가 붙이기에 적히고, 다리의 호출이 그것과 짝지어진다.
+ * The card on the in-conversation screen (M4 B-1) — Codex. A call coming in through the bridge
+ * does not know the card id. The `item/started` (mcpToolCall: id, server, tool, arguments) the
+ * adapter observed is recorded by the attachment layer, and the bridge's call is matched against it.
  */
-describe('대화 안 화면의 카드 id — Codex', () => {
+describe('the in-conversation screen card id — Codex', () => {
   const mcpItem = (id: string, server: string, tool: string, args: unknown, status = 'inProgress') => ({
     threadId: 'thread-1',
     item: { type: 'mcpToolCall', id, server, tool, arguments: args, status },
   })
 
-  it('item/started의 mcpToolCall이 다리로 들어온 호출의 카드가 된다', async () => {
+  it("item/started's mcpToolCall becomes the card for the call that came in through the bridge", async () => {
     const ids: Promise<string | null>[] = []
     hub.onCall((c) => ids.push(c.callId))
     const c = await start(WORKER)
@@ -274,16 +280,16 @@ describe('대화 안 화면의 카드 id — Codex', () => {
     expect(await ids[0]).toBe('call_7')
   })
 
-  it('끝난 카드는 짝이 되지 않고, 붙이지 않은 서버와 다른 스레드의 호출은 적지 않는다', async () => {
+  it('a card that has already ended does not get matched, and a call from an unattached server or another thread is not recorded', async () => {
     const ids: Promise<string | null>[] = []
     hub.dispose()
     hub = new SessionAppsHub(w.rt, { toolListWaitMs: 10_000, callJoinWaitMs: 150 })
     hub.onCall((c) => ids.push(c.callId))
     const c = await start(WORKER)
-    // 승인에서 거절된 호출 — 시작하고 곧바로 끝난다
+    // A call rejected at approval — starts and ends immediately
     c.note({ method: 'item/started', params: mcpItem('call_denied', 'app-notes', 'poke', { to: 8 }) })
     c.note({ method: 'item/completed', params: mcpItem('call_denied', 'app-notes', 'poke', { to: 8 }, 'failed') })
-    // 자식 스레드의 호출, 우리가 싣지 않은 서버의 호출
+    // A call from a child thread, and a call from a server we did not load
     c.note({ method: 'item/started', params: { ...mcpItem('call_child', 'app-notes', 'poke', { to: 8 }), threadId: 'thread-child' } })
     c.note({ method: 'item/started', params: mcpItem('call_other', 'app-other', 'poke', { to: 8 }) })
     await hub.forSession(WORKER.id).call('app-notes', 'poke', { to: 8 })

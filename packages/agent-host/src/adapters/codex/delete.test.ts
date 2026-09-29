@@ -1,13 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 /**
- * 대화 원본 삭제 (도그푸딩 2026-09-07: "워크트리 세션을 잘못 만들었는데 안 지워져").
+ * Deleting the original conversation (dogfooding 2026-09-07: "created a worktree session by
+ * mistake and it will not delete").
  *
- * 실측한 사정: codex는 thread/start에서 id만 발급하고 rollout 파일은 **첫 턴에** 쓴다.
- * 한 번도 말을 안 건 세션은 지울 파일이 없어 thread/delete가 -32600으로 거절하고,
- * 그 거절이 매니저에서 던져지면 세션 행도 워크트리도 남는다.
+ * The measured circumstances: codex only issues the id at thread/start and writes the rollout
+ * file on **the first turn**. A session that never had a single message exchanged has no file to
+ * delete, so thread/delete rejects it with -32600, and if that rejection is thrown from the
+ * manager, neither the session row nor the worktree gets removed.
  *
- * 계약: **없는 것을 지우라는 요청은 성공**, 그 밖의 실패는 그대로 던진다.
+ * Contract: **a request to delete something that does not exist succeeds**, and every other
+ * failure is still thrown.
  */
 const state = vi.hoisted(() => ({
   requests: [] as string[],
@@ -39,22 +42,22 @@ beforeEach(() => {
 })
 
 describe('codex deleteExternalConversation', () => {
-  it('지울 것이 있으면 thread/delete를 부른다', async () => {
+  it('calls thread/delete when there is something to delete', async () => {
     await new CodexAdapter().deleteExternalConversation('t1', '/tmp')
     expect(state.requests).toContain('thread/delete')
   })
 
-  it('rollout이 없다는 거절은 성공이다 — 한 번도 안 쓴 세션이 그렇다', async () => {
+  it('a rejection saying no rollout exists is treated as success — this is what a session that was never used looks like', async () => {
     state.fail = '{"code":-32600,"message":"no rollout found for thread id 01a0"}'
     await expect(new CodexAdapter().deleteExternalConversation('t1', '/tmp')).resolves.toBeUndefined()
   })
 
-  it('다른 실패는 삼키지 않는다 — 원본이 살아 있는데 지웠다고 답하면 안 된다', async () => {
+  it('does not swallow other failures — must not report success while the original still exists', async () => {
     state.fail = 'permission denied'
     await expect(new CodexAdapter().deleteExternalConversation('t1', '/tmp')).rejects.toThrow(/permission denied/)
   })
 
-  it('어느 쪽이든 단명 클라이언트는 닫는다', async () => {
+  it('closes the short-lived client either way', async () => {
     state.fail = '{"code":-32600,"message":"no rollout found for thread id x"}'
     await new CodexAdapter().deleteExternalConversation('t1', '/tmp')
     expect(state.disposed).toBe(1)

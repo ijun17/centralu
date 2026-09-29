@@ -2,13 +2,13 @@ import { readFile, stat } from 'node:fs/promises'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * 경로만 실려 온 이미지(#40, imageView)를 화면에 그릴 수 있는 이벤트로 바꾼다.
+ * Turns an image that arrived carrying only a path (#40, imageView) into an event the screen can draw.
  *
- * normalize는 순수 함수라 파일을 못 읽는다 — IO는 여기서 한다. 어떤 실패든
- * 이벤트는 나간다: 조용한 공백보다 이유 있는 상자가 낫다 (실패는 보이게).
+ * normalize is a pure function and cannot read files — the IO happens here. An event goes out
+ * regardless of what fails: a box with a reason beats a silent blank (a failure should be visible).
  */
 
-/** 확장자로 mime을 정한다 — 목록 밖이면 그리지 않고 이유를 말한다 */
+/** Decides the mime type from the extension — outside this list, it does not draw the image and states why */
 const IMAGE_MIMES: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
@@ -18,7 +18,7 @@ const IMAGE_MIMES: Record<string, string> = {
   bmp: 'image/bmp',
 }
 
-/** 8MB — 이벤트는 WS로 UI까지 가는 짐이다. 큰 파일은 경로가 이미 화면에 있다 */
+/** 8MB — an event is a payload that travels over WS all the way to the UI. For a large file, the path is already on screen */
 export const IMAGE_MAX_BYTES = 8 * 1048576
 
 export async function imageEventFromDisk(
@@ -36,7 +36,7 @@ export async function imageEventFromDisk(
     const buf = await readFile(path)
     return { type: 'message_image', sessionId, mime, data: buf.toString('base64'), path }
   } catch (err) {
-    // 파일이 이미 지워졌을 수 있다 — 그래도 무슨 일이 있었는지는 화면에 남는다
+    // The file may already have been deleted — even so, what happened is left visible on screen
     return fail(`이미지를 읽지 못했습니다: ${(err as Error).message}`)
   }
 }

@@ -1,17 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 /**
- * 스톱이 안 먹던 버그 (도그푸딩 2026-09-07: "툴 호출만 멈추고 몇 초 뒤 다시 시작돼").
+ * The bug where stop did not work (dogfooding 2026-09-07: "only the tool call stops, and a few
+ * seconds later it starts again").
  *
- * 실측한 원인은 한 줄이었다 — `turn/interrupt`에 threadId만 실어 보냈고, 서버는
- * `Invalid request: missing field \`turnId\`` (-32600)로 **거절**했다. 거절은 에러
- * 이벤트로만 흘렀고 턴은 끝까지 돌았다. 그래서 여기서 보는 것은 하나다:
- * **멈추라는 말이 어느 턴을 가리키는가.**
+ * The measured cause was one line — `turn/interrupt` was sent with only threadId, and the server
+ * **rejected** it with `Invalid request: missing field \`turnId\`` (-32600). That rejection was
+ * only piped into an error event, and the turn ran to completion. So there is exactly one thing
+ * checked here: **which turn does the stop command point at.**
  */
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params: Record<string, unknown> | undefined }[],
   handlers: null as null | { onNotification: (n: { method: string; params?: unknown }) => void },
-  /** turn/start 응답에 실어 줄 턴 (알림이 먼저인지 응답이 먼저인지를 시험이 정한다) */
+  /** The turn to load into the turn/start response (the test decides whether the notification or the response comes first) */
   startTurnId: null as string | null,
 }))
 
@@ -47,8 +48,8 @@ async function session() {
   return adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
 }
 
-describe('codex 스톱 — 도는 턴을 가리켜야 멈춘다', () => {
-  it('turn/started가 알려준 턴을 과녁으로 삼는다', async () => {
+describe('codex stop — must point at the running turn to work', () => {
+  it('takes the turn turn/started reported as the target', async () => {
     const h = await session()
     h.send('오래 걸리는 일')
     await tick()
@@ -58,7 +59,7 @@ describe('codex 스톱 — 도는 턴을 가리켜야 멈춘다', () => {
     expect(interrupts()[0]?.params).toEqual({ threadId: 't1', turnId: 'turn-7' })
   })
 
-  it('알림보다 응답이 먼저 와도 멈춘다 — 아주 빨리 누르는 경우', async () => {
+  it('stops even when the response arrives before the notification — the case of pressing it very quickly', async () => {
     state.startTurnId = 'turn-9'
     const h = await session()
     h.send('오래 걸리는 일')
@@ -69,7 +70,7 @@ describe('codex 스톱 — 도는 턴을 가리켜야 멈춘다', () => {
     expect(interrupts()[0]?.params).toEqual({ threadId: 't1', turnId: 'turn-9' })
   })
 
-  it('턴이 끝난 뒤의 스톱은 아무 데도 안 보낸다 — 끝난 턴을 멈추라면 거절이 돌아온다', async () => {
+  it('a stop after the turn has ended sends nothing anywhere — stopping an ended turn would just come back rejected', async () => {
     const h = await session()
     h.send('짧은 일')
     await tick()
@@ -80,7 +81,7 @@ describe('codex 스톱 — 도는 턴을 가리켜야 멈춘다', () => {
     expect(interrupts()).toHaveLength(0)
   })
 
-  it('한 번도 안 보낸 세션에서 눌러도 조용하다', async () => {
+  it('stays quiet when pressed on a session that has never sent anything', async () => {
     const h = await session()
     h.interrupt()
     expect(interrupts()).toHaveLength(0)

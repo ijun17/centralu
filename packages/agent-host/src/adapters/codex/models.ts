@@ -5,28 +5,31 @@ import { CodexClient } from './client.js'
 import { isUnknownMethod, UNSUPPORTED } from './history.js'
 
 /**
- * 고를 수 있는 모델 목록 (`model/list`).
+ * The list of models available to choose from (`model/list`).
  *
- * **목록을 우리가 적지 않는다.** codex가 알려주는 것을 그대로 나른다 —
- * 하드코딩하면 새 모델이 나올 때마다 이 앱만 조용히 뒤처진다.
+ * **We do not maintain this list ourselves.** Whatever codex reports is carried through as-is —
+ * hard-coding it would leave only this app silently falling behind every time a new model ships.
  *
- * 추론 강도도 여기서 함께 온다 (`supportedReasoningEfforts`).
- * 모델마다 단계가 다르므로 모델에 붙여 두어야 "이 조합이 되나?"의 답이 하나가 된다.
+ * Reasoning effort levels come along here too (`supportedReasoningEfforts`). Since the levels
+ * differ per model, they have to stay attached to the model so that "does this combination work?"
+ * has one single answer.
  *
- * 계정의 성질이라 cwd를 받지 않는다. 클라이언트를 띄우려면 디렉토리가 필요할 뿐이라
- * 홈을 쓴다 (사용량 읽기와 같은 방식).
+ * Takes no cwd, since this is a property of the account. Starting the client just needs some
+ * directory, so home is used (the same approach as reading usage).
  */
-/** 페이지 상한. 실제 모델 수를 한참 넘는 값이라, 여기 걸리면 뭔가 잘못된 것이다 */
+/** The page ceiling. Set well above the actual number of models, so hitting it means something has gone wrong */
 const MAX_PAGES = 20
 
 /**
- * 커서를 따라 **끝까지** 모은다.
+ * Follows the cursor to collect **all the way to the end.**
  *
- * 처음엔 첫 페이지만 읽었다. 목록이 짧아 보여도 "이게 다인가 보다" 하고 넘어가게 되는
- * 종류의 버그라 — 사용자가 "다 가져오는 거지?"라고 묻기 전까지 아무도 몰랐다.
+ * At first, only the first page was read. This is the kind of bug where a short-looking list just
+ * gets accepted as "I guess that is all of them" — nobody noticed until a user asked "does this
+ * really fetch everything?"
  *
- * 페이징을 인자로 받는 순수 함수로 둔다: codex를 띄우지 않고도 "정말 끝까지 도는가"를
- * 검증할 수 있어야, 이 실수를 다시 하면 테스트가 먼저 말해준다.
+ * Kept as a pure function that receives paging as an argument: being able to verify "does it
+ * really run to the end" without starting codex means a test catches this mistake first if it
+ * happens again.
  */
 export async function collectModels(
   fetchPage: (cursor: string | null) => Promise<{ data?: unknown; nextCursor?: unknown }>,
@@ -39,7 +42,7 @@ export async function collectModels(
     cursor = typeof res?.nextCursor === 'string' && res.nextCursor ? res.nextCursor : null
     if (!cursor) return out
   }
-  // 조용히 자르지 않는다 — 잘린 목록을 전부인 것처럼 보여주는 게 제일 나쁘다
+  // Does not truncate silently — the worst outcome is showing a cut-off list as though it were complete
   throw new Error(`Too many models; read only ${MAX_PAGES} pages (list truncated)`)
 }
 
@@ -55,17 +58,17 @@ export async function listCodexModels(command: string): Promise<ModelOption[]> {
     })
     client.notify('initialized')
     /*
-     * **끝까지 읽는다.** 응답에 nextCursor가 있다 — 첫 페이지만 읽으면
-     * 뒤쪽 모델이 조용히 사라진다. 목록이 짧아 보여서 "이게 다인가 보다" 하고
-     * 넘어가기 딱 좋은 종류의 버그라, 커서가 null이 될 때까지 돈다.
+     * **Reads all the way to the end.** The response has a nextCursor — reading only the first
+     * page silently drops the later models. This is exactly the kind of bug a short-looking list
+     * lets slide as "I guess that is all of them", so this loops until the cursor is null.
      *
-     * 페이지 수에 상한을 둔다. 서버가 커서를 계속 돌려주는 상황에서
-     * 무한히 도는 것보다는 멈추는 편이 낫다 — 대신 **잘렸다고 말한다**.
+     * A ceiling is placed on the number of pages. If the server just keeps returning a cursor
+     * forever, stopping is better than looping forever — but instead **it says it was truncated**.
      */
     /*
-     * **await를 빼면 안 된다.** return만 하면 finally가 그 자리에서 돌아
-     * 요청이 날아가는 중에 서버를 죽인다 — 코덱스 모델 목록이 한 번도
-     * 성공한 적이 없던 이유가 이것이었다 (화면엔 "기본"만 남았다).
+     * **The await here must not be removed.** A bare return would let finally run right there and
+     * kill the server while the request is still in flight — this was the reason the codex model
+     * list never once succeeded (the screen was left with only "Default").
      */
     return await collectModels(async (cursor) => {
       try {
@@ -82,7 +85,7 @@ export async function listCodexModels(command: string): Promise<ModelOption[]> {
   }
 }
 
-/** 응답 → 우리 타입. 순수 함수로 분리해 codex를 띄우지 않고도 포맷 변화를 잡는다 */
+/** Response into our own type. Split out as a pure function so a format change is caught without starting codex */
 export function toModelOptions(data: unknown): ModelOption[] {
   const rows = Array.isArray(data) ? data : []
   const out: ModelOption[] = []
@@ -90,14 +93,14 @@ export function toModelOptions(data: unknown): ModelOption[] {
     const row = (r ?? {}) as Record<string, unknown>
     const id = typeof row.model === 'string' && row.model ? row.model : undefined
     if (!id) continue
-    // 기본 목록에서 숨긴 모델은 우리도 숨긴다 — codex가 숨긴 데는 이유가 있다
+    // A model hidden from the default list is hidden by us too — codex has a reason for hiding it
     if (row.hidden === true) continue
     /*
-     * 강도 항목의 실제 모양은 `{ reasoningEffort, description }`이다
-     * (generated/v2/ReasoningEffortOption.ts). 처음에 `{ effort }`로 짐작해서 읽었더니
-     * 항상 빈 배열이 나왔고 — 그래서 codex 세션에는 강도 셀렉터가 아예 뜨지 않았다.
-     * 짐작한 모양으로 테스트까지 써 두는 바람에 통과하기까지 했다.
-     * 문자열로 오는 경우도 함께 받아 둔다: 포맷이 바뀌어도 목록이 통째로 비지는 않게.
+     * The actual shape of an effort entry is `{ reasoningEffort, description }`
+     * (generated/v2/ReasoningEffortOption.ts). We first guessed `{ effort }` and read that, which
+     * always produced an empty array — so the effort selector never showed up at all for codex
+     * sessions. A test was even written against the guessed shape, so it passed too.
+     * A plain string is also accepted here: if the format changes, the list does not go entirely empty.
      */
     const efforts: string[] = []
     for (const e of Array.isArray(row.supportedReasoningEfforts) ? row.supportedReasoningEfforts : []) {
@@ -105,9 +108,9 @@ export function toModelOptions(data: unknown): ModelOption[] {
       if (typeof v === 'string' && v) efforts.push(v)
     }
     /*
-     * 응답 속도 티어. 실측 모양: serviceTiers: [{id:'priority', name:'Fast',
-     * description:'1.5x speed, increased usage'}] — 이름·설명을 그대로 나른다.
-     * (additionalSpeedTiers는 deprecated라 읽지 않는다)
+     * Response-speed tiers. Measured shape: serviceTiers: [{id:'priority', name:'Fast',
+     * description:'1.5x speed, increased usage'}] — the name and description are carried through
+     * unchanged. (additionalSpeedTiers is deprecated, so it is not read.)
      */
     const tiers: { id: string; name: string; description: string }[] = []
     for (const t of Array.isArray(row.serviceTiers) ? row.serviceTiers : []) {

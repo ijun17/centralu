@@ -12,120 +12,126 @@ import type {
 } from '@cc/protocol'
 
 /**
- * 어댑터 계약 (docs/agent-host.md §2).
+ * The adapter contract (docs/agent-host.md §2).
  *
- * 규칙: 외부 SDK 타입은 adapters/<tool>/ 밖으로 한 발짝도 못 나온다 (anti-corruption).
+ * Rule: an external SDK type must not step even one foot outside adapters/<tool>/ (anti-corruption).
  *
- * 어댑터가 다루는 축이 셋이다. 무엇에 매여 있는지가 곧 어디에 놓이는지다:
- *   세션  — SessionHandle의 메서드 (대화·승인·슬래시 명령)
- *   디렉토리 — AgentAdapter의 cwd 인자 메서드 (이전 세션 목록)
- *   계정  — AgentAdapter의 인자 없는 메서드 (사용량·한도)
+ * There are three axes an adapter deals with. What something is tied to is what decides where it lives:
+ *   session   — SessionHandle's methods (conversation, approval, slash commands)
+ *   directory — AgentAdapter's methods that take a cwd argument (listing previous sessions)
+ *   account   — AgentAdapter's argument-less methods (usage, limits)
  *
- * **선택 메서드로 능력을 표현한다.** capabilities에 같은 걸 또 적지 않는다 —
- * 플래그와 구현이 어긋나면 조용히 아무 일도 안 하게 된다 (실제로 겪었다).
+ * **Capability is expressed through optional methods.** Do not record the same thing again in
+ * capabilities — if the flag and the implementation drift apart, it silently does nothing (we
+ * have actually hit this).
  */
 
 /**
- * 오케스트레이터에게만 주는 도구 (FR-11).
+ * The tools given only to the orchestrator (FR-11).
  *
- * **여기가 접근 범위의 경계다.** 이 인터페이스가 줄 수 있는 것이 곧 오케스트레이터가
- * 할 수 있는 전부다 — 이 앱이 관리하는 세션 밖으로 나갈 방법이 아예 없다.
- * 파일도, 프로젝트도, 다른 도구도 여기 없다.
+ * **This is the boundary of the access scope.** Whatever this interface can give is the entire
+ * extent of what the orchestrator can do — there is no way at all to reach outside the sessions
+ * this app manages. No files, no projects, no other tools live here.
  *
- * 도구 중립적으로 둔다. Claude는 인프로세스 MCP로, 다른 도구는 자기 방식으로
- * 노출하면 된다 — SDK 타입은 adapters/<tool>/ 밖으로 한 발짝도 못 나온다.
+ * Kept tool-neutral. Claude exposes it through an in-process MCP server; other tools can expose
+ * it their own way — SDK types must not step even one foot outside adapters/<tool>/.
  */
 export type OrchestratedSession = {
   sessionId: string
   name: string
   project: string
   state: string
-  /** 워크트리 브랜치가 줄기에 들어갔는가 (#69) — 매니저가 "끝난 일"을 스스로 판단하는 근거 */
+  /** Whether the worktree branch has landed on trunk (#69) — how the manager decides "finished" on its own */
   merged?: boolean
-  /** 이 브랜치의 PR (#76 stage 3) — gh로 측정. "리뷰 대기"와 "그냥 진행 중"을 가른다 */
+  /** The PR for this branch (#76 stage 3) — measured via gh. Distinguishes "waiting on review" from "just in progress" */
   pr?: { number: number; state: 'open' | 'merged' | 'closed' }
   tool: ToolName
-  /** 마지막으로 무슨 일이 있었는지 한 줄 */
+  /** One line describing what last happened */
   preview: string
-  /** 마지막으로 움직인 시각 — 어느 세션이 '지금 이야기'인지 가른다 */
+  /** When it last moved — decides which session is the "current conversation" */
   lastActive?: string
 }
 
 export type OrchestratorTools = {
-  /** 지금 이 앱이 관리하는 세션들 (오케스트레이터 자신과 아카이브는 뺀다) */
+  /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
   listSessions(): Promise<OrchestratedSession[]>
   /**
-   * 한 세션에 일을 시킨다. 대상이 아니면 이유를 돌려준다 — 조용히 실패하지 않는다.
+   * Sends work to a session. Returns a reason if the target does not exist — does not fail silently.
    *
-   * `reportBack`이면 그 세션의 턴이 끝날 때 오케스트레이터에게 한 번 알린다.
-   * 기본이 꺼짐인 이유: 끝날 때마다 깨우면 서로 깨우는 고리가 되고, 턴 값도 두 배가 된다.
+   * With `reportBack`, the orchestrator is notified once when that session's turn ends. Off by
+   * default, because waking it up on every turn end would create a loop where they wake each
+   * other, and would also double the turn cost.
    */
   sendToSession(sessionId: string, text: string, reportBack?: boolean): Promise<{ ok: boolean; error?: string }>
   /**
-   * 다 끝난 워크트리 브랜치 세션을 정리한다 (#76 하드 게이트) — 매니저 전용.
+   * Cleans up a finished worktree-branch session (#76 hard gate) — manager only.
    *
-   * 유일한 파괴 권한이고, propose가 아니라 power인 이유는 게이트다: host가 삭제
-   * 순간에 **증명 가능하게 무손실**임을 측정했을 때만 실행된다(커밋 안 된 변경 없음 +
-   * 지금 팁이 줄기에 들어갔음). 증명 밖의 모든 삭제는 여전히 사람의 일이다.
+   * The only destructive power, and it is a power rather than a propose because of the gate: it
+   * only runs once the host has measured at the moment of deletion that it is **provably
+   * lossless** (no uncommitted changes, and the current tip has landed on trunk). Any deletion
+   * outside that proof is still a human's job.
    */
   deleteWorktreeSession(sessionId: string): Promise<{ ok: boolean; error?: string }>
   /**
-   * 한 세션의 최근 대화를 읽는다.
+   * Reads a session's recent conversation.
    *
-   * 이게 없어서 오케스트레이터는 보고가 부실할 때 **확인할 방법이 아예 없었다** —
-   * list_sessions의 한 줄과 보고가 같은 소스라 우회도 안 됐다.
-   * 사양서(FR-11)에는 처음부터 있던 도구다.
+   * Without this, the orchestrator had **no way at all to check** when a report seemed thin — the
+   * one-line summary from list_sessions and the report itself came from the same source, so there
+   * was no way around it either. This tool has been in the spec (FR-11) from the start.
    */
   readSession(
     sessionId: string,
     limit?: number,
     opts?: {
-      /** recall이 준 seq. 그 언저리를 읽는다 — 찾은 대목으로 바로 가는 길 */
+      /** A seq given by recall. Reads around that point — a direct path to the found passage */
       around?: number
-      /** 도구 호출 본문까지 펼칠지. 기본은 접는다 (스크립트 전문이 대화를 덮는다) */
+      /** Whether to expand tool-call bodies too. Collapsed by default (a full script's text would bury the conversation) */
       tools?: boolean
     },
   ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
   /**
-   * 지난 대화에서 찾는다 — **프로젝트를 가로지르는 기억**.
+   * Searches past conversations — **memory that crosses project boundaries**.
    *
-   * 기억을 따로 저장하지 않는 이유: 무엇을 기억할지 누가 정하느냐는 문제를 새로 만들고,
-   * 증류된 요약은 원본이 바뀌어도 그대로 남는다. 우리는 대화를 하나도 지우지 않으므로
-   * **찾을 수만 있으면 그게 기억이다.**
+   * Why we do not store memory separately: it creates a new problem of who decides what to
+   * remember, and a distilled summary stays frozen even after the original changes. We never
+   * delete a single conversation, so **being findable is already being remembered.**
    */
   /**
-   * 세션을 보관하거나 되돌린다.
+   * Archives or restores a session.
    *
-   * 막힌 창을 푸는 방법이 앱 재시작 아니면 아카이브→복구인데, 오케스트레이터는
-   * 둘 다 못 해서 결국 사람에게 넘겨야 했다 (도그푸딩). 되돌릴 수 있는 일이라 준다.
+   * Without this, the only way to unstick a jammed window was to restart the app or to archive
+   * and then restore, and the orchestrator could do neither, so it always had to hand off to a
+   * person (dogfooding). We give it this because it is reversible.
    */
   /**
-   * 워커 세션을 하나 만든다 (#13).
+   * Creates a worker session (#13).
    *
-   * 만들기는 주고 지우기는 안 주는 이유: 만든 세션은 사람이 목록에서 보고 되돌릴 수
-   * 있지만(보관·삭제 모두 사람 손에 있다), 지우기는 대화 기록까지 사라져 되돌릴 수 없다.
+   * Why creation is given but deletion is not: a session that gets created is visible to the
+   * person in the list and can be reversed (both archiving and deletion stay in the person's
+   * hands), but deletion also erases the conversation record and cannot be undone.
    */
   createSession(opts: {
-    /** 프로젝트 이름 또는 id — 오케스트레이터는 어느 프로젝트에도 속하지 않으므로 반드시 가리켜야 한다 */
+    /** The project's name or id — the orchestrator belongs to no project, so this must always be pointed to */
     project?: string
     tool?: ToolName
-    /** 세션 이름. 주면 자동 이름이 덮지 않는다 */
+    /** The session name. If given, the automatic name does not override it */
     name?: string
-    /** 만들자마자 보낼 첫 지시 */
+    /** The first instruction to send right after creation */
     firstMessage?: string
   }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string }>
   /**
-   * 한 세션의 성능 설정을 바꾼다 (#30).
+   * Changes a session's performance settings (#30).
    *
-   * **권한 프리셋이 이 타입에 없는 것이 곧 결정이다.** 오케스트레이터가 프리셋을
-   * auto로 바꿀 수 있으면 "대신 승인할 수 없다"는 규칙이 뒷문으로 무너진다 —
-   * 항목을 검사해서 막는 게 아니라 표현할 수 없게 한다.
-   * 변경은 화면에 이벤트로 알려진다 — 흔적 없는 설정 변경 금지.
+   * **The permission preset not existing on this type is itself the decision.** If the
+   * orchestrator could switch a preset to auto, the rule "cannot approve on someone else's
+   * behalf" would collapse through a back door — this blocks it by making it inexpressible,
+   * rather than by checking the field and rejecting it.
+   * A change is announced to the screen as an event — no silent, untraceable settings change.
    */
   updateSessionSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null },
-  ): Promise<{ ok: boolean; error?: string; /** 도는 턴이 끝나면 적용된다 (#164) */ deferred?: boolean }>
+  ): Promise<{ ok: boolean; error?: string; /** takes effect once the running turn ends (#164) */ deferred?: boolean }>
   recall(
     query: string,
     limit?: number,
@@ -135,16 +141,17 @@ export type OrchestratorTools = {
       session: string
       project: string
       snippet: string
-      /** read_session의 around로 넘기면 그 대목으로 간다 */
+      /** Pass this as read_session's around to jump straight to that passage */
       seq: number
       at?: string
     }[]
   }>
   /**
-   * MCP 서버 설치를 **사람에게 제안한다** (도그푸딩 요청 — Playwright 같은 능력을
-   * 스스로 갖추고 싶을 때). propose-not-power 규칙 그대로: 이 호출은 아무것도
-   * 설치하지 않는다. 사람이 승인하면 앱이 등록하고 오케스트레이터를 재시작한다 —
-   * 임의 명령 실행의 등록이라, 승인 없는 설치는 곧 뒷문이다.
+   * **Proposes to the person** that an MCP server be installed (a dogfooding request — wanting to
+   * equip itself with a capability like Playwright). Follows the propose-not-power rule exactly:
+   * this call installs nothing on its own. If the person approves, the app registers it and
+   * restarts the orchestrator — since this is registering arbitrary command execution, installing
+   * it without approval would simply be a back door.
    */
   proposeMcpServer(spec: {
     name: string
@@ -153,32 +160,37 @@ export type OrchestratorTools = {
     why?: string
   }): Promise<{ ok: boolean; error?: string }>
   /**
-   * 재사용할 작업 절차(스킬)를 **사람에게 제안한다** (#71). 스킬은 파일이 아니라
-   * 앱 DB에 산다 — 워커 세션은 파일은 쓸 수 있지만 DB는 못 쓰므로, 낮은 권한이
-   * 오케스트레이터의 지시문에 닿는 길이 열리지 않는다. 승인 전에는 아무 영향이 없다:
-   * 스킬은 모든 세션에 지시할 수 있는 에이전트에 대한 **영구적 영향력**이라,
-   * 자가 저작이 승인 없이 남으면 주입된 텍스트가 곧 영구 권한이 된다.
+   * **Proposes to the person** a reusable procedure (a skill) (#71). A skill lives in the app's
+   * database, not as a file — a worker session can write files but not the database, so this
+   * closes off any path for a lower-privilege session to reach the orchestrator's own
+   * instructions. It has no effect at all before approval: a skill is **permanent leverage** over
+   * an agent that can instruct every session, so if self-authorship survived without approval,
+   * injected text would effectively become permanent authority.
    */
   proposeSkill(spec: { name: string; content: string; why?: string }): Promise<{ ok: boolean; error?: string }>
   /**
-   * 자기 앱을 점검한다 (M4 C-3) — 만드는 세션 전용. 어느 앱인지는 부른 세션이 정한다(그 세션이 만드는 앱):
-   * 이름을 받지 않으므로 남의 앱을 띄워 볼 길이 없다. `text`는 에이전트가 읽을 보고서다.
+   * Checks its own app (M4 C-3) — for a session that creates an app only. Which app is decided by
+   * the calling session itself (the app it is creating): it takes no name, so there is no way to
+   * probe someone else's app. `text` is the report meant for the agent to read.
    */
   checkApp(): Promise<{ ok: boolean; text: string }>
   /**
-   * 새 앱을 템플릿으로 만든다 (M4 C-1b) — 오케스트레이터 전용. "새 앱" 버튼(`apps.create`)과 같은 길이다.
+   * Creates a new app from a template (M4 C-1b) — orchestrator only. The same path as the "New
+   * app" button (`apps.create`).
    *
-   * propose가 아니라 power인 이유: 만드는 것은 **템플릿의 사본**이다 — 저장소에 이미 있는 코드도, 사람이
-   * 고르지 않은 명령도 싣지 않는다. 앱은 신뢰한 프로젝트(와 사용자 폴더)에만 생기고, 이미 있는 id는
-   * 덮어쓰지 않는다. 지우기는 여전히 사람의 일이다(프로젝트 앱은 git, 사용자 폴더 앱은 `apps.remove`).
+   * Why this is a power rather than a propose: what gets created is **a copy of a template** — it
+   * loads no code that is already in the repository, and no command the person did not choose. An
+   * app is only ever created in a trusted project (or a user folder), and it never overwrites an
+   * id that already exists. Deletion is still a human's job (a project app through git, a
+   * user-folder app through `apps.remove`).
    */
   createApp(spec: {
-    /** 프로젝트 이름 또는 id. 없으면 사용자 폴더 앱 */
+    /** The project's name or id. A user-folder app if omitted */
     project?: string
     id: string
     name: string
     description?: string
-    /** 만드는 세션의 도구 (C-2). 없으면 프로젝트의 기본 도구 */
+    /** The tool for the session that creates it (C-2). The project's default tool if omitted */
     tool?: ToolName
   }): Promise<{
     ok: boolean
@@ -186,18 +198,20 @@ export type OrchestratorTools = {
     appId?: string
     projectId?: string | null
     dir?: string
-    /** 함께 선 만드는 세션 (C-2) — 서지 못했으면 없고 `builderError`가 이유다 */
+    /** The session created alongside it to build the app (C-2) — absent if it failed to start, with `builderError` as the reason */
     builder?: { sessionId: string; name: string }
     builderError?: string
   }>
 }
 
 /**
- * 세션에 붙은 외부 앱의 도구 하나 — MCP `Tool`의 모양 그대로다(outputSchema만 뺀다).
+ * A single tool of an external app attached to a session — carries the exact shape of an MCP
+ * `Tool` (minus outputSchema).
  *
- * 설명과 주석(`annotations`)을 **그대로** 나른다. 모델이 도구를 고르는 근거가 설명이고,
- * 승인을 건너뛸지(읽기 전용) 정하는 근거가 주석이다 — 어느 쪽을 다듬어도 앱이 말한 것과 다른
- * 도구가 된다.
+ * The description and the annotations (`annotations`) are carried through **unchanged**. The
+ * description is what the model uses to choose a tool, and the annotations decide whether
+ * approval can be skipped (read-only) — trimming either one turns it into a different tool than
+ * what the app actually declared.
  */
 export type AppToolSpec = {
   name: string
@@ -214,47 +228,51 @@ export type AppToolSpec = {
   _meta?: Record<string, unknown>
 }
 
-/** 앱 도구 호출의 결과 — MCP `CallToolResult`의 모양. 실패도 던지지 않고 `isError`로 돌아온다 */
+/** The result of an app tool call — the shape of MCP's `CallToolResult`. Even a failure is returned as `isError`, not thrown */
 export type AppToolResult = {
   content: unknown[]
   isError?: boolean
   structuredContent?: Record<string, unknown>
 }
 
-/** 지금 이 세션에 붙어 있는 앱 하나 */
+/** A single app currently attached to this session */
 export type AttachedApp = {
-  /** 세션에서 쓰는 서버 이름 (`app-<id>`) */
+  /** The server name used in the session (`app-<id>`) */
   server: string
   appId: string
   /**
-   * 이미 아는 도구 목록 — 한 번도 읽은 적이 없으면 null이다. null이어도 앱은 붙는다:
-   * `tools()`가 필요할 때 앱을 띄워 알아낸다.
+   * The tool list we already know — null if it has never been read. The app is still attached
+   * even when this is null: `tools()` starts the app and finds out when it is needed.
    */
   tools: AppToolSpec[] | null
 }
 
 /**
- * 이 세션에 붙은 외부 앱 (M4 A-5) — 어댑터가 자기 방식으로 붙인다.
+ * An external app attached to this session (M4 A-5) — each adapter attaches it its own way.
  *
- *   Claude  앱마다 인프로세스 대리 서버. 앱이 오고 가면 재시작 없이 서버 집합을 바꾼다
- *   Codex   앱마다 stdio 다리. 스레드를 시작·재개할 때만 붙는다(실행 중에 더할 길이 없다)
+ *   Claude  an in-process proxy server per app. Changes the server set with no restart as apps come and go
+ *   Codex   an stdio bridge per app. Attached only when a thread starts or resumes (there is no way to add one while it is running)
  *
- * **어느 앱이 붙는지는 여기서 정하지 않는다** — 매니저가 세션의 종류와 프로젝트로 정해서
- * 넘긴다(결정 4). 어댑터가 받는 것은 이미 걸러진 목록과, 모든 호출이 지나는 한 길(`call`)이다.
- * 핸들 하나에 하나다: 핸들을 닫으면 `close()`로 함께 닫는다.
+ * **Which apps get attached is not decided here** — the manager decides it from the session kind
+ * and the project, and passes it down (decision 4). What the adapter receives is an
+ * already-filtered list, plus the single path every call goes through (`call`). One per handle:
+ * closing the handle closes this with it via `close()`.
  */
 export type SessionApps = {
   current(): AttachedApp[]
-  /** 붙은 앱이나 그 도구가 바뀌었을 수 있다 — `current()`를 다시 읽을 때다. 돌려받은 함수로 끊는다 */
+  /** Attached apps or their tools may have changed — time to read `current()` again. Unsubscribe with the returned function */
   onChange(listener: () => void): () => void
-  /** 한 앱의 에이전트 도구. 모르면 앱을 띄워 알아낸다(기다리는 시간에 상한이 있다) */
+  /** An app's agent tools. If unknown, starts the app to find out (the wait is bounded) */
   tools(server: string): Promise<AppToolSpec[]>
   /**
-   * 앱 도구를 부른다 — 호출자는 이 세션이다. 붙지 않은 앱·없는 도구는 거절 결과로 돌아온다.
+   * Calls an app tool — the caller is this session. An unattached app or a nonexistent tool comes
+   * back as a rejected result.
    *
-   * `waitMs`를 주면 그보다 오래 걸리는 호출은 **실행 id와 "아직 도는 중"을 먼저 돌려준다** — 호출은
-   * 멈추지 않고, 결과는 각 앱 서버의 `run_status` 도구로 이어서 본다. 바깥에 호출 상한이 있는
-   * 도구(Codex 300초)가 쓴다. 상한이 사실상 없는 쪽(Claude의 인프로세스 서버)은 주지 않고 기다린다.
+   * If `waitMs` is given, a call taking longer than that **returns a run id and "still running"
+   * first** — the call itself does not stop, and the result is followed up through that app
+   * server's own `run_status` tool. Used by a tool that has its own call ceiling externally
+   * (Codex, 300 seconds). A tool with effectively no ceiling (Claude's in-process server) does not
+   * get this and simply waits.
    */
   call(
     server: string,
@@ -264,39 +282,45 @@ export type SessionApps = {
       signal?: AbortSignal
       waitMs?: number
       /**
-       * 이 호출의 대화 카드 id (어댑터의 `tool_call` callId) — **에이전트의 MCP 클라이언트가 알려 줄 때만**
-       * 준다(Claude Code: `_meta["claudecode/toolUseId"]`). 대화 안 화면(B-1)이 어느 카드 아래에 설지가
-       * 이것으로 정해진다. 없으면 `noteCall`로 적어 둔 것과 짝을 짓는다.
+       * The conversation card id for this call (the adapter's `tool_call` callId) — given **only
+       * when the agent's MCP client reports it** (Claude Code: `_meta["claudecode/toolUseId"]`).
+       * This decides which card the in-conversation screen (B-1) settles under. If absent, it is
+       * matched against what was recorded via `noteCall`.
        */
       callId?: string
     },
   ): Promise<AppToolResult>
   /**
-   * 에이전트가 붙은 앱의 도구를 부르기 **시작했다**고 어댑터가 제 이벤트 흐름에서 봤다 (M4 B-1).
+   * The adapter observed, in its own event stream, that the agent **started** calling an attached
+   * app's tool (M4 B-1).
    *
-   * 다리를 거치는 호출(Codex)은 카드 id를 들고 오지 않는다 — Codex는 MCP 요청에 그 id를 싣지 않는다
-   * (싣는다는 근거를 찾지 못했다). 그래서 어댑터가 본 "카드 X가 서버 S의 도구 T를 인자 A로 부른다"를
-   * 적어 두고, 뒤이어 들어오는 호출과 (서버, 도구, 인자)로 먼저 온 순서대로 짝짓는다. 어느 쪽이 먼저
-   * 도착해도 된다 — 짝이 오면 그때 맞춘다.
+   * A call going through a bridge (Codex) does not carry a card id — Codex does not put that id
+   * on the MCP request (we found no evidence that it does). So we record what the adapter
+   * observed ("card X calls server S's tool T with argument A"), and match it, in first-come
+   * order, against the call that follows by (server, tool, args). Either side may arrive first —
+   * whichever arrives second gets matched then.
    */
   noteCall(callId: string, server: string, tool: string, args: unknown): void
   /**
-   * 그 카드의 호출이 끝났다(성공·실패·거절). 아직 짝을 못 지은 기록이면 버린다 — 승인에서 거절된 호출은
-   * 앱까지 오지 않으므로, 남겨 두면 뒤에 같은 인자로 다시 부른 호출이 옛 카드와 짝지어진다.
+   * That card's call has ended (success, failure, or rejection). If it was never matched, the
+   * record is discarded — a call rejected at approval never reaches the app, so keeping the
+   * record around would let a later call with the same arguments get matched to the old card.
    */
   callEnded(callId: string): void
   /**
-   * 이 도구가 읽기 전용이라고 앱이 말했나(`readOnlyHint: true`) — 승인 판정(결정 5)의 근거.
-   * 붙은 앱의, 이미 읽은 에이전트 도구 목록만 본다. 모르면 false다(묻는 쪽으로 기운다).
+   * Whether the app itself declared this tool read-only (`readOnlyHint: true`) — the basis for the
+   * approval decision (decision 5). Only looks at the attached app's already-read agent tool
+   * list. Defaults to false when unknown (leans toward asking).
    */
   readOnly(server: string, tool: string): boolean
   /**
-   * 이 세션이 부른 앱 호출을 모두 취소한다 — 세션을 멈출 때(중단). 먼저 돌려준 호출(`waitMs`)도
-   * 포함한다: 사람이 멈춘 세션의 일이 뒤에서 계속 돌면 안 된다. 취소는 런타임이 앱과, 앱이 부탁한
-   * 아래쪽 일까지 전한다.
+   * Cancels every app call this session made — used when stopping the session (interrupt).
+   * Includes a call that already returned early (`waitMs`): work from a session the person
+   * stopped must not keep running in the background. Cancellation is carried by the runtime down
+   * through the app and whatever work the app requested below it.
    */
   cancelAll(): void
-  /** 핸들이 닫힌다 — 호출을 모두 취소하고 구독을 끊는다 */
+  /** The handle is closing — cancels every call and unsubscribes */
   close(): void
 }
 
@@ -304,97 +328,118 @@ export type CreateSessionOpts = {
   sessionId: string
   cwd: string
   model?: string
-  /** 추론 강도. 모델마다 단계가 달라 문자열 그대로 나른다 */
+  /** Reasoning effort. Carried as a plain string, since the levels differ per model */
   effort?: string
-  /** 응답 길이 (#54). capabilities.verbosities가 비어 있는 어댑터는 무시한다 */
+  /** Response verbosity (#54). Ignored by an adapter whose capabilities.verbosities is empty */
   verbosity?: string
-  /** 응답 속도 (codex의 service_tier). 지원 티어는 모델 목록(ModelOption.tiers)이 말한다 */
+  /** Response speed (codex's service_tier). Supported tiers are stated by the model list (ModelOption.tiers) */
   serviceTier?: string
   permissionPreset: PermissionPreset
   /**
-   * 이 세션이 일하는 폴더를 믿는가 (M4 결정 3, #92·#152) — **저장소의 파일이 이 세션을 바꿀 수 있는가.**
+   * Whether this session's working folder is trusted (M4 decision 3, #92, #152) — **whether files
+   * in the repository are allowed to alter this session.**
    *
-   * 신뢰하지 않았으면 저장소에 커밋된 도구 설정이 이 세션에 닿지 않는다: Claude는 `.claude/`의 설정·훅·
-   * 명령과 CLAUDE.md를, Codex는 `.codex/`의 설정·훅·규칙과 AGENTS.md를 읽지 않는다. 사용자 자신의 설정
-   * (`~/.claude`, `~/.codex`)은 그대로 산다 — 결정 3이 끄는 것은 저장소의 몫뿐이다.
+   * When untrusted, tool settings committed to the repository never reach this session: Claude
+   * does not read `.claude/`'s settings, hooks and commands or CLAUDE.md, and Codex does not read
+   * `.codex/`'s settings, hooks and rules or AGENTS.md. The user's own settings (`~/.claude`,
+   * `~/.codex`) still apply as usual — decision 3 only turns off the repository's own share.
    *
-   * **없으면 신뢰하지 않은 것이다.** 무엇을 믿는지는 매니저가 세션이 **무엇인가**로 정한다(`settingFilesFor`):
-   * 프로젝트의 세션(워커·매니저·프로젝트 앱의 만드는 세션)은 그 프로젝트의 신뢰를 받고, 사용자 폴더 앱의 만드는
-   * 세션은 프로젝트가 없어도 신뢰를 받는다 — 그 폴더는 사용자 자신의 것이다(결정 3). 매니저가 세션을 띄울 때
-   * (만들기·깨우기)마다 저장소에서 읽어 넘긴다: 신뢰가 바뀌면 도는 세션은 다음에 다시 뜰 때 바뀐 값을 받는다.
+   * **Absent means untrusted.** What gets trusted is decided by the manager from what the session
+   * **is** (`settingFilesFor`): a session belonging to a project (worker, manager, or the session
+   * that creates a project app) receives that project's trust, and the session that creates a
+   * user-folder app receives trust even without a project — that folder belongs to the user
+   * (decision 3). Every time the manager starts a session (creation or waking), it reads this from
+   * the repository and passes it down: if trust changes, a running session only gets the new value
+   * the next time it starts up.
    */
   projectTrusted?: boolean
   /**
-   * 설정 파일을 **하나도** 읽지 않는 세션이다 (#92) — 오케스트레이터와 조율 세션. `projectTrusted`보다 앞선다.
+   * A session that reads **no** settings files at all (#92) — the orchestrator and coordination
+   * sessions. Takes precedence over `projectTrusted`.
    *
-   * 그 세션들은 프로젝트가 없고, 일하는 폴더(orchestratorHome)는 워커가 쓸 수 있는 자리다. 여러 세션에 지시할
-   * 수 있는 쪽이 거기서 지시문을 읽으면 낮은 권한에서 높은 권한으로 넘어가는 길이 된다 — 역할은 파일 대신
-   * `systemPromptAppend`로 받는다. Claude는 사용자 설정까지 끈다(`settingSources: []`). Codex는 스레드 단위로
-   * 저장소 층(`.codex/`, AGENTS.md)을 끄고, 사용자의 `~/.codex`는 지금처럼 읽힌다.
+   * Those sessions have no project, and their working folder (orchestratorHome) is a spot a
+   * worker can write into. If a session that can instruct many other sessions read instructions
+   * from there, it would become a path from low privilege to high privilege — its role is instead
+   * given through `systemPromptAppend` rather than a file. Claude turns off even the user's own
+   * settings (`settingSources: []`). Codex turns off the repository layer (`.codex/`, AGENTS.md)
+   * per thread, while the user's own `~/.codex` is still read as usual.
    *
-   * 도구(`orchestratorTools`)를 받는지와는 따로다 — 워크트리 매니저와 만드는 세션도 도구를 받지만 프로젝트의
-   * 세션이라 `projectTrusted`를 따른다.
+   * This is independent of whether the session receives tools (`orchestratorTools`) — the worktree
+   * manager and the session that creates the worktree also receive tools, but since they belong to
+   * a project, they follow `projectTrusted` instead.
    */
   noSettingFiles?: boolean
   /**
-   * 작업 폴더 밖에서 **읽어야 하는** 폴더 (#142) — 지금은 물려받은 인수인계 노트가 든 폴더 하나다.
+   * Folders outside the working folder that **must be read** (#142) — currently just the one
+   * folder holding an inherited handoff note.
    *
-   * 노트는 데이터 폴더(`<데이터>/handoff/<프로젝트 id>/`)에 있고 후임자의 cwd는 프로젝트다. 두 도구가 다르다:
-   *  - Claude는 작업 폴더 밖 읽기를 **묻는다**. 실측(SDK 0.3.263 동봉 CLI 2.1.263, haiku, permissionMode 'default',
-   *    2026-09-29): 밖의 파일을 Read하자 canUseTool이 `Read`로 불렸다(= 승인 카드). 같은 폴더를
-   *    `additionalDirectories`로 주자 콜백 없이 읽었다. 그래서 Claude는 이 값을 `additionalDirectories`로 받는다.
-   *  - Codex는 읽기를 막지 않는다. 생성 타입(codex-cli 0.153.4 `SandboxPolicy`)의 샌드박스는 readOnly·
-   *    workspaceWrite 어느 쪽도 읽기 범위를 갖지 않는다 — 막는 것은 쓰기 뿌리(`writableRoots`)뿐이다. 그래서
-   *    Codex는 이 값을 쓰지 않는다: 스레드의 샌드박스를 건드리면 오히려 사용자의 설정을 덮는다.
+   * The note lives in the data folder (`<data>/handoff/<project id>/`), while the successor's cwd
+   * is the project. The two tools differ here:
+   *  - Claude **asks** before reading outside the working folder. Measured (SDK 0.3.263 bundled
+   *    with CLI 2.1.263, haiku, permissionMode 'default', 2026-09-29): Reading a file outside it
+   *    invoked canUseTool as `Read` (i.e. an approval card). Giving the same folder as
+   *    `additionalDirectories` let it read without the callback. So Claude receives this value as
+   *    `additionalDirectories`.
+   *  - Codex does not block reads at all. In the generated type (codex-cli 0.153.4
+   *    `SandboxPolicy`), neither the readOnly nor the workspaceWrite sandbox has a read scope — the
+   *    only thing it restricts is the writable roots (`writableRoots`). So Codex does not use this
+   *    value: touching the thread's sandbox would only end up overriding the user's own settings.
    */
   readableDirs?: string[]
   resumeExternalId?: string
-  /** 주어지면 이 세션은 앱 도구를 받는다 — 어댑터가 자기 방식으로 붙인다 */
+  /** If given, this session receives app tools — each adapter attaches them its own way */
   orchestratorTools?: OrchestratorTools
   /**
-   * 이 세션에 붙는 외부 앱 (M4 A-5). 내장 앱 도구(`orchestratorTools`)와는 따로다 — 일반
-   * 워커도 받는다(결정 4는 외부 앱에 한해 #81의 "워커에게는 도구가 없다"를 바꾼다).
+   * External apps attached to this session (M4 A-5). Separate from the built-in app tools
+   * (`orchestratorTools`) — an ordinary worker receives these too (decision 4 changes #81's "a
+   * worker has no tools" only for external apps).
    */
   /*
-   * 사람이 승인한 MCP 서버(propose_mcp_server)는 여기 따로 오지 않는다 — 사용자 폴더의 앱이 되어 `apps`로
-   * 온다(M4 A-7). 예전의 `extraMcpServers`는 그 서버를 어댑터 설정에 날것으로 실어서, 호출이 중개도
-   * 기록도 지나지 않았다.
+   * An MCP server the person approved (propose_mcp_server) does not arrive here separately — it
+   * becomes a user-folder app and arrives through `apps` instead (M4 A-7). The old
+   * `extraMcpServers` used to load that server raw into the adapter settings, so its calls went
+   * through neither mediation nor logging.
    */
   apps?: SessionApps
   /**
-   * 이 세션의 답이 따라야 할 JSON 스키마 (M4 D-1 — 앱이 `schema`를 주고 부탁한 에이전트). 뿌리는 객체다.
+   * The JSON schema this session's answer must follow (M4 D-1 — an agent an app asked for by
+   * giving a `schema`). The root is an object.
    *
-   * 두 도구가 받는 자리가 다르다: Claude는 **질의를 시작할 때만** 받는다(`outputFormat`, 질의 단위). Codex는 **턴마다**
-   * 받는다(`turn/start`의 `outputSchema`). 그래서 앱의 부탁은 요청마다 새 세션이 받는다 — 도는 세션의 형식을 중간에
-   * 바꿀 수 없다. 스키마로 답한 턴은 `turn_complete.output`으로 온다(Claude) — Codex는 마지막 메시지가 그 JSON이다.
+   * The two tools take it in different places: Claude receives it only **when starting the
+   * query** (`outputFormat`, per query). Codex receives it **per turn** (`outputSchema` on
+   * `turn/start`). So an app's request is always given to a fresh session per request — the format
+   * of a running session cannot be changed mid-flight. A turn answered with the schema arrives as
+   * `turn_complete.output` (Claude) — for Codex, the last message itself is that JSON.
    */
   outputSchema?: Record<string, unknown>
   /**
-   * 받는 도구 묶음 (#69). 'orchestrator'는 전부, 'manager'는 워크트리 매니저의
-   * 부분집합(제안·조회·지시)이다. orchestratorTools가 있을 때만 뜻이 있다.
-   * 노출과 실행 양쪽이 같은 판정(profileAllows)을 쓴다 — 노출만 좁히면
-   * 이름을 아는 쪽이 그냥 부른다.
+   * Which bundle of tools is received (#69). 'orchestrator' gets all of them; 'manager' gets a
+   * subset of the worktree manager's (propose, query, instruct). Only meaningful when
+   * orchestratorTools is present. Both exposure and execution use the same decision
+   * (profileAllows) — narrowing only the exposure would let a caller who already knows the name
+   * just call it anyway.
    */
   toolProfile?: 'orchestrator' | 'manager' | 'scoped' | 'builder'
   /**
-   * 앱이 보증하는 역할 설명. 도구의 기본 프롬프트에 **덧붙인다**.
+   * The role description the app vouches for. **Appended** to the tool's default prompt.
    *
-   * 파일(AGENTS.md)로 두지 않는 이유: 사람이 지우거나 잘못 고치면 함께 사라진다.
-   * 사람이 정할 몫과 우리가 지켜야 할 몫은 같은 자리에 두지 않는다.
+   * Why this is not kept as a file (AGENTS.md): it would disappear along with a person deleting or
+   * mis-editing it. What the person is meant to control and what we must guarantee do not belong
+   * in the same place.
    */
   systemPromptAppend?: string
   /**
-   * 도구를 **인프로세스로 못 붙이는** 어댑터가 host로 돌아올 길.
+   * The path back to the host for an adapter that **cannot attach tools in-process**.
    *
-   * Claude는 필요 없다(함수가 그대로 도구가 된다). Codex는 스레드별 config로
-   * stdio 서버만 물릴 수 있어서 별도 프로세스가 뜨고, 그 프로세스가 이 주소로 돌아온다.
-   * 오케스트레이터 도구의 다리와 외부 앱의 다리(M4 A-5)가 같은 길을 쓴다 — 이름은 먼저 생긴
-   * 쪽을 따랐다.
+   * Claude does not need this (a function simply becomes a tool). Codex can only attach an stdio
+   * server through per-thread config, so a separate process starts, and that process calls back to
+   * this address. The bridge for orchestrator tools and the bridge for an external app (M4 A-5)
+   * both use the same path — the name follows whichever one existed first.
    */
   orchestratorBridge?: { url: string; token: string }
 }
 
-/** 도구가 보관 중인 이전 세션 한 건 (도구 고유 타입은 여기까지 오지 않는다) */
+/** A single previous session kept by the tool (a tool's own type never reaches this far) */
 export type ExternalSessionSummary = {
   externalId: string
   title: string
@@ -403,7 +448,7 @@ export type ExternalSessionSummary = {
   branch?: string
 }
 
-/** 복원용 대화 한 줄. 도구를 막론하고 '사람의 말'과 '모델의 말'만 남긴다 */
+/** One line of conversation for restoration. Regardless of the tool, only "what the person said" and "what the model said" survive */
 export type HistoryMessage = { role: 'user' | 'assistant'; text: string; ts?: number }
 
 export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
@@ -414,22 +459,23 @@ export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
   send(text: string): void
-  /** matcher는 core가 계산해 UI가 전달한다 (경계 규칙: host는 core를 모른다) */
+  /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
-   * 승인 응답. **닿았는지를 돌려준다** (false = 그런 요청이 없다).
+   * The approval response. **Returns whether it reached anything** (false = no such request exists).
    *
-   * 조용히 무시하면 화면은 승인 카드를 붙든 채 영원히 남는다 — 눌러도 아무 일이
-   * 없고, 사용자는 명령이 실행됐는지 아닌지도 알 수 없다. 도그푸딩에서 실제로 이렇게 막혔다.
+   * Ignoring it silently leaves the screen holding the approval card forever — pressing it does
+   * nothing, and the user cannot even tell whether the command ran. This actually got stuck this
+   * way during dogfooding.
    */
   respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): boolean
   /**
-   * 선택지에 답한다 (AskUserQuestion). 승인과 같은 규칙 — **닿았는지를 돌려준다.**
-   * 이 도구를 지원하지 않는 어댑터는 구현하지 않는다.
+   * Answers a set of choices (AskUserQuestion). Same rule as approval — **returns whether it
+   * reached anything.** An adapter that does not support this tool leaves it unimplemented.
    */
   answerQuestion?(requestId: string, answers: QuestionAnswer[]): boolean
-  /** 저장된 '항상 허용' 규칙 주입 — 재시작 후에도 유지되도록 (FR-10, C-2) */
+  /** Injects saved "always allow" rules — so they survive a restart (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
-  /** 모델·권한 변경 (다음 턴부터). 지원하지 않으면 구현하지 않는다 */
+  /** Changes model or permission (starting next turn). Left unimplemented if unsupported */
   updateSettings?(settings: {
     model?: string | null
     effort?: string | null
@@ -437,8 +483,8 @@ export interface SessionHandle {
     permissionPreset?: PermissionPreset
   }): void
   /**
-   * 이 세션에서 쓸 수 있는 슬래시 명령(스킬).
-   * 도구가 아직 준비 중이면 던져도 된다 — 매니저가 캐시로 물러난다.
+   * Slash commands (skills) usable in this session.
+   * May throw if the tool is still starting up — the manager falls back to the cache.
    */
   listCommands?(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
   interrupt(): void
@@ -461,65 +507,72 @@ export interface AgentAdapter {
   detect(): Promise<DetectResult>
   createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle>
   /**
-   * 이 디렉토리에서 도구가 보관 중인 이전 세션 목록.
-   * 구현하지 않으면 '지원 안 함'으로 처리된다 — 지원 여부는 capabilities.listExternal이 말한다.
-   * 구버전 도구를 만나면 던져도 된다: 매니저가 이유와 함께 degrade한다.
+   * The list of previous sessions the tool keeps for this directory.
+   * Treated as unsupported when unimplemented — support is stated by capabilities.listExternal.
+   * May throw when facing an older tool version: the manager degrades with a reason.
    */
   listExternalSessions?(cwd: string, limit: number): Promise<ExternalSessionSummary[]>
 
   /**
-   * 도구 쪽 대화 원본을 **정말로** 지운다 (도그푸딩 요청 — "진짜로 삭제").
+   * **Truly** deletes the original conversation on the tool's own side (a dogfooding request —
+   * "actually delete it").
    *
-   * 우리 세션 삭제는 우리 DB만 걷어냈다: codex rollout(실측 550MB)·claude JSONL은
-   * 도구의 것이라 남겨 뒀다. 남기는 것이 기본이라는 규칙은 그대로다 — 이 메서드는
-   * 사람이 체크박스로 명시한 경우에만 불린다. 실패하면 던진다: 매니저가 우리 쪽
-   * 삭제를 멈추고 그대로 알린다 ("지웠다"고 말했는데 원본이 남는 것이 최악이다).
+   * Deleting our own session only cleared our own database: the codex rollout (measured at 550MB)
+   * and claude's JSONL belong to the tool, so they were left alone. The rule that leaving things
+   * behind is the default still holds — this method is only called when the person has explicitly
+   * checked the box. Thrown failures propagate: the manager stops deleting on our side and reports
+   * it as-is (saying "deleted" while the original survives would be the worst outcome).
    */
   deleteExternalConversation?(externalId: string, cwd: string): Promise<void>
   /**
-   * 죽은 도구의 마지막 컴팩트 요약 (#78) — 있으면 인수인계 기록의 머리가 된다.
+   * The last compact summary of a dead tool process (#78) — becomes the head of the handoff
+   * record when one exists.
    *
-   * **도구 프로세스 없이** 동작해야 한다: 이 메서드가 불리는 순간은 그 도구의
-   * 서비스가 중단됐을 때다. codex는 롤아웃 파일에서 읽고, claude는 스트림에
-   * 요약 본문이 안 실려 구현이 없다 — 없으면 기록 빌더가 원문 압축으로 물러난다.
+   * Must work **without the tool's process running** — this method is only called at the moment
+   * that tool's service has stopped. codex reads it from the rollout file; claude has no
+   * implementation because its stream never carries the summary body — when absent, the record
+   * builder falls back to compressing the raw text.
    */
   lastCompactSummary?(externalId: string): Promise<string | null>
-  /** 이전 세션의 대화를 읽는다 (표시용 스냅샷. 모델의 실제 컨텍스트는 도구가 갖고 있다) */
+  /** Reads a previous session's conversation (a display snapshot — the model's actual context is held by the tool) */
   readExternalHistory?(externalId: string, cwd: string, limit: number): Promise<HistoryMessage[]>
 
   /**
-   * 계정 사용량·한도 (FR-9).
+   * Account usage and limits (FR-9).
    *
-   * 세션도 디렉토리도 아닌 **계정**의 성질이라 인자가 없다.
-   * 구독 한도만 다룬다 — 추가 결제(크레딧)는 범위 밖이다.
-   * 못 가져오면 던진다: 매니저가 이유와 함께 degrade한다.
+   * Takes no argument because it is a property of the **account**, not a session or a directory.
+   * Only covers subscription limits — additional billing (credits) is out of scope.
+   * Throws when it cannot be fetched: the manager degrades with a reason.
    */
   listUsage?(): Promise<UsageSnapshot>
 
   /**
-   * 고를 수 있는 모델과 각 모델이 지원하는 추론 강도.
+   * The models available to choose from, and the reasoning effort levels each supports.
    *
-   * 사용량과 같은 **계정** 축이라 인자가 없다 — 어느 디렉토리에서 묻든 답이 같다.
-   * 목록을 우리가 적지 않기 위한 창구다: 도구가 새 모델을 내면 여기로 그냥 따라온다.
-   * 구버전 도구를 만나면 던져도 된다 — 매니저가 이유와 함께 degrade한다.
+   * Takes no argument because it is the same **account** axis as usage — the answer is the same no
+   * matter which directory it is asked from. Exists so that we do not have to maintain the list
+   * ourselves: when the tool ships a new model, it simply follows through here. May throw when
+   * facing an older tool version — the manager degrades with a reason.
    */
   listModels?(): Promise<ModelOption[]>
 
   /**
-   * 잠긴 대화에서 **갈라져 나온다** — 새 externalId를 돌려준다.
+   * **Splits off** a new thread from a locked conversation — returns a new externalId.
    *
-   * 왜 필요한가: 도구에 따라 한 대화의 쓰기 권한은 하나뿐이다. codex는 잠금으로
-   * 막고("already has an active writer"), 그러면 이 앱에서는 그 대화를 이어갈 방법이
-   * 아예 없었다 — 사람이 다른 앱을 닫으러 가는 것 말고는.
+   * Why this is needed: depending on the tool, only one writer can hold a given conversation at a
+   * time. codex blocks this with a lock ("already has an active writer"), and when that happens
+   * there was no way at all to continue that conversation from this app — short of the person going
+   * to close the other app.
    *
-   * 그런데 **막히는 건 쓰기 하나뿐이다.** 실측으로 확인한 것:
-   *   thread/resume  ❌ 잠김
-   *   thread/read    ✅ 잠겨 있어도 읽힌다 (우리는 이미 우리 저장소로 읽고 있다)
-   *   thread/fork    ✅ 잠겨 있어도 갈라진다
+   * But **only writing is blocked.** What we confirmed by measurement:
+   *   thread/resume  blocked
+   *   thread/read    works even while locked (we were already reading through our own store)
+   *   thread/fork    works even while locked
    *
-   * 그래서 막다른 길이 아니라 갈림길이다. 원본은 건드리지 않고 사본에서 이어간다.
-   * 이 능력이 없는 어댑터는 구현하지 않는다 — claude는 애초에 잠그지 않으므로 필요 없다
-   * (동시 resume이 그대로 동작한다는 것도 실측으로 확인했다).
+   * So this is a fork in the road, not a dead end. We leave the original untouched and continue
+   * from the copy instead. An adapter without this capability leaves it unimplemented — claude
+   * does not need it since it never locks in the first place (we also confirmed by measurement
+   * that a concurrent resume simply works).
    */
   forkConversation?(externalId: string, cwd: string): Promise<string>
 }

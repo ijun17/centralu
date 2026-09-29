@@ -6,10 +6,11 @@ import type { PermissionPreset } from '@cc/protocol'
 import type { OrchestratorTools } from '../contract.js'
 
 /**
- * 신뢰하지 않은 프로젝트의 파일은 Codex 스레드에 닿지 않는다 (M4 결정 3, #92).
+ * Files in an untrusted project do not reach a Codex thread (M4 decision 3, #92).
  *
- * 이 계약의 전부가 "스레드를 띄울 때 무엇을 보냈는가"다(verbosity.test.ts와 같은 방식). Codex가 그
- * 값으로 무엇을 하는지는 소스와 0.153.4 바이너리로만 확인했다(로그아웃 — repoFilesConfig의 주석).
+ * The whole of this contract is "what did we send when starting the thread" (the same approach as
+ * verbosity.test.ts). What Codex does with that value was confirmed only from source and the
+ * 0.153.4 binary (logged out — see the comment on repoFilesConfig).
  */
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params: Record<string, unknown> | undefined }[],
@@ -36,7 +37,7 @@ const configOf = (method: string) => paramsOf(method).config as Record<string, u
 let cwd: string
 beforeEach(() => {
   state.requests.length = 0
-  // macOS의 임시 폴더는 /var → /private/var 심볼릭 링크 아래다 — 두 철자가 갈리는 실제 경우
+  // macOS's temp folder sits under a /var -> /private/var symlink — a real case where the two spellings diverge
   cwd = mkdtempSync(join(tmpdir(), 'cc-codex-trust-'))
 })
 
@@ -57,24 +58,24 @@ function ancestors(p: string): string[] {
   }
 }
 
-describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
+describe('do files in the repository reach a Codex thread (#92)', () => {
   for (const preset of ['safe', 'normal', 'auto'] as const) {
-    it(`${preset}: 신뢰하지 않은 프로젝트는 그 폴더와 조상 전부를 이 스레드에서만 "untrusted"로 적는다 — 권한 옵션은 같다`, async () => {
+    it(`${preset}: for an untrusted project, that folder and every ancestor are written "untrusted", only for this thread — the permission options are unchanged`, async () => {
       await start(preset, false)
       const params = paramsOf('thread/start')
       const config = configOf('thread/start')
-      // 적힌 철자와 실제 경로(심볼릭 링크를 푼 것) 둘 다, 뿌리까지
+      // Both the path as written and the real path (with symlinks resolved), all the way to the root
       const keys = [...new Set([...ancestors(cwd), ...ancestors(realpathSync.native(cwd))])]
       expect(config.projects).toEqual(Object.fromEntries(keys.map((k) => [k, { trust_level: 'untrusted' }])))
       expect(config.project_doc_max_bytes).toBe(0)
-      // 프리셋의 권한 매핑은 신뢰와 무관하다 — normal은 여전히 사용자의 ~/.codex/config.toml을 따른다
+      // The preset's permission mapping is independent of trust — normal still follows the user's own ~/.codex/config.toml
       expect({ approvalPolicy: params.approvalPolicy, sandbox: params.sandbox }).toEqual({
         approvalPolicy: PRESET[preset].approvalPolicy,
         sandbox: PRESET[preset].sandbox,
       })
     })
 
-    it(`${preset}: 신뢰한 프로젝트는 지금과 같다 — 신뢰도 문서 상한도 싣지 않는다`, async () => {
+    it(`${preset}: a trusted project is unchanged from before — neither trust nor a document ceiling is loaded`, async () => {
       await start(preset, true)
       const params = paramsOf('thread/start')
       const config = configOf('thread/start')
@@ -87,7 +88,7 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
     })
   }
 
-  it('재개에도 같은 판정이 실린다 — 잠들었다 깨면 저장소의 설정이 살아나면 안 된다', async () => {
+  it('the same decision is loaded on resume too — settings from the repository must not come back alive after waking up', async () => {
     await start('normal', false, { resumeExternalId: 'ext-1' })
     const config = configOf('thread/resume')
     expect(config.projects).toMatchObject({ [cwd]: { trust_level: 'untrusted' } })
@@ -98,7 +99,7 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
     expect(configOf('thread/resume').projects).toBeUndefined()
   })
 
-  it('신뢰를 모르면 신뢰하지 않은 것이다 — 프로젝트가 없는 오케스트레이터도 그 폴더를 "untrusted"로 띄운다', async () => {
+  it('unknown trust means untrusted — even an orchestrator with no project starts that folder as "untrusted"', async () => {
     await start('normal', undefined, {
       orchestratorTools: {} as OrchestratorTools,
       orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' },
@@ -106,12 +107,12 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
     const config = configOf('thread/start')
     expect(config.projects).toMatchObject({ [cwd]: { trust_level: 'untrusted' } })
     expect(config.project_doc_max_bytes).toBe(0)
-    expect(config.mcp_servers).toBeDefined() // 한 덩어리로 합쳐졌다 — 서로를 덮지 않는다
+    expect(config.mcp_servers).toBeDefined() // Merged into one block — neither overwrites the other
   })
 
   const BRIDGE = { orchestratorTools: {} as OrchestratorTools, orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' } }
 
-  it('아무 파일도 읽지 않는 세션(noSettingFiles — 오케스트레이터·조율 세션)은 신뢰라고 넘어와도 저장소 층을 끈다 — 시작·재개 모두', async () => {
+  it('a session reading no files at all (noSettingFiles — orchestrator and coordination sessions) turns off the repository layer even when marked trusted — both start and resume', async () => {
     await start('normal', true, { ...BRIDGE, noSettingFiles: true, toolProfile: 'orchestrator' })
     await start('normal', true, { ...BRIDGE, noSettingFiles: true, toolProfile: 'scoped', resumeExternalId: 'ext-1' })
     for (const method of ['thread/start', 'thread/resume']) {
@@ -121,10 +122,11 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
   })
 
   /*
-   * 다리(오케스트레이터 도구)를 받는다는 것만으로는 AGENTS.md를 끄지 않는다 (#152). 예전에는 다리가 있으면
-   * `project_doc_max_bytes: 0`을 실어서, 신뢰한 프로젝트의 매니저와 만드는 세션이 AGENTS.md를 잃었다.
+   * Merely receiving the bridge (orchestrator tools) does not turn off AGENTS.md (#152). It used
+   * to load `project_doc_max_bytes: 0` whenever the bridge was present, so the manager and the
+   * session that creates the worktree lost AGENTS.md even in a trusted project.
    */
-  it('다리를 받는 프로젝트의 세션(매니저·만드는 세션)은 워커처럼 신뢰를 따른다 — 시작·재개 모두', async () => {
+  it('a project session that receives the bridge (manager, session that creates it) follows trust just like a worker — both start and resume', async () => {
     const seen: string[] = []
     for (const toolProfile of ['manager', 'builder'] as const) {
       for (const projectTrusted of [true, false]) {
@@ -151,14 +153,16 @@ describe('Codex 스레드에 저장소의 파일이 닿는가 (#92)', () => {
 })
 
 /*
- * 물려받은 인수인계 노트 (#142) — Codex는 노트 폴더를 받아도 **아무것도 바꾸지 않는다.** 생성 타입(codex-cli 0.153.4
- * `SandboxPolicy`)의 readOnly·workspaceWrite 어느 쪽에도 읽기 범위가 없다 — 막히는 것은 쓰기 뿌리(`writableRoots`)
- * 밖의 쓰기뿐이라 데이터 폴더의 노트는 이미 읽힌다. 샌드박스를 건드리면 오히려 사용자의 설정(normal)을 덮는다.
- * 로그아웃 상태라 실제 스레드로는 확인하지 못했다 — 여기서 보는 것은 "보낸 것이 같다"이다.
+ * An inherited handoff note (#142) — Codex **changes nothing** even when given the note folder.
+ * Neither readOnly nor workspaceWrite in the generated type (codex-cli 0.153.4 `SandboxPolicy`)
+ * has a read scope — the only thing blocked is writing outside the writable roots
+ * (`writableRoots`), so a note in the data folder is already readable. Touching the sandbox would
+ * only end up overriding the user's own settings (normal). We could not confirm with a real
+ * thread while logged out — what this checks is that "what is sent stays the same."
  */
-describe('물려받은 노트의 폴더 (#142)', () => {
+describe('the folder for an inherited note (#142)', () => {
   for (const preset of ['safe', 'normal', 'auto'] as const) {
-    it(`${preset}: readableDirs를 받아도 스레드와 턴에 보내는 것이 같다 — 쓰기 뿌리도 샌드박스도 넓히지 않는다`, async () => {
+    it(`${preset}: what is sent to the thread and turn stays the same even when readableDirs is given — neither the writable roots nor the sandbox widens`, async () => {
       const sent = async (extra: Record<string, unknown>) => {
         state.requests.length = 0
         const h = await start(preset, true, extra)

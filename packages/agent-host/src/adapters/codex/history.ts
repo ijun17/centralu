@@ -4,30 +4,29 @@ import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { CodexClient } from './client.js'
 
 /**
- * Codex가 보관 중인 이전 스레드 읽기.
+ * Reading a previous thread Codex has kept.
  *
- * **공식 app-server RPC만 쓴다** (`thread/list` · `thread/read`).
- * `~/.codex/sessions/**\/rollout-*.jsonl`을 직접 파싱하지 않는다 —
- * 롤아웃 포맷은 내부 구현이고, 그걸 우리가 따라다니기 시작하면
- * codex가 올라갈 때마다 조용히 틀린 대화를 보여주게 된다.
+ * **Only official app-server RPCs are used** (`thread/list`, `thread/read`). We do not parse
+ * `~/.codex/sessions/**\/rollout-*.jsonl` directly — the rollout format is an internal detail, and
+ * chasing it ourselves would mean silently showing a wrong conversation every time codex ships an update.
  *
- * 구버전 codex는 이 메서드를 모른다 → JSON-RPC "method not found"가 온다.
- * 그건 예외가 아니라 **정상적인 협상 결과**로 취급해 상위에 이유를 넘긴다.
+ * An older codex does not know these methods -> a JSON-RPC "method not found" comes back. That is
+ * treated not as an exception but as **a normal outcome of negotiation**, and the reason is passed up.
  */
 
 export const UNSUPPORTED =
   'The installed Codex does not support listing past sessions (update codex)'
 
-/** 구버전이 모르는 메서드를 불렀을 때의 응답. 문구는 버전마다 달라서 넓게 본다 */
+/** The response when an older version is called with a method it does not know. The wording differs by version, so this checks broadly */
 export function isUnknownMethod(err: unknown): boolean {
   const m = (err as Error | null)?.message ?? ''
   return /-32601|method not found|unknown method|unsupported method|not supported/i.test(m)
 }
 
 /**
- * 목록 조회용 단명 클라이언트. 세션 프로세스와 섞지 않는다 —
- * 대화 중인 스레드에 조회 트래픽을 얹으면 그쪽이 느려지고,
- * 실패했을 때 어느 쪽이 죽은 건지 구분이 안 된다.
+ * A short-lived client for listing lookups. Kept separate from the session process — piling
+ * lookup traffic onto a thread that is mid-conversation would slow that thread down, and if
+ * something fails, there would be no telling which side died.
  */
 async function withClient<T>(cwd: string, command: string, fn: (c: CodexClient) => Promise<T>): Promise<T> {
   const client = new CodexClient(
@@ -48,7 +47,7 @@ async function withClient<T>(cwd: string, command: string, fn: (c: CodexClient) 
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
-/** codex는 초 단위 유닉스 시각을 쓴다 — 우리 저장 단위는 ms다 */
+/** codex uses Unix time in seconds — our own storage unit is ms */
 const ms = (sec: unknown): number | undefined => {
   const n = num(sec)
   return n === undefined ? undefined : Math.round(n * 1000)
@@ -97,9 +96,9 @@ export async function readCodexHistory(
 }
 
 /**
- * thread/list 응답 → 요약 목록.
- * 응답 파싱은 순수 함수로 분리해 둔다 — codex를 띄우지 않고도 검증할 수 있어야
- * 포맷이 바뀌었을 때 테스트가 먼저 알려준다.
+ * A thread/list response into a summary list.
+ * Response parsing is split out as a pure function — being able to verify it without starting
+ * codex means a test is what tells us first when the format changes.
  */
 export function threadListToSummaries(data: unknown, cwd: string): ExternalSessionSummary[] {
   const rows = Array.isArray(data) ? data : []
@@ -108,17 +107,18 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
     const row = (r ?? {}) as Record<string, unknown>
     const id = str(row.id)
     if (!id) continue
-    // cwd 필터는 서버가 하지만, 구버전이 무시할 수 있으므로 한 번 더 거른다
+    // The server filters by cwd, but an older version might ignore it, so this filters once more
     if (str(row.cwd) && str(row.cwd) !== cwd) continue
     out.push({
       externalId: id,
       /*
-       * preview는 codex 기준 '보통 **첫** 사용자 메시지'다.
-       * 즉 며칠 이어온 대화도 맨 처음 주제로 표시된다 — Claude가 요약을 주는 것과 다르다.
-       * 목록을 만들면서 마지막 메시지를 가져오려면 스레드마다 thread/read를 해야 해서
-       * 타이핑 응답으로 쓸 수 없다. 그래서 제목은 이대로 두고,
-       * UI가 "마지막 N시간 전"을 함께 적어 최신 여부를 알 수 있게 한다.
-       * (하네스가 주입한 지시문이 섞여 오는 경우가 있어 그것만 걷어낸다)
+       * codex's preview is, as a rule, "**usually the first** user message." That means even a
+       * conversation spanning several days shows up under its very first topic — unlike Claude,
+       * which gives a summary. Fetching the last message while building the list would require a
+       * thread/read per thread, which is too slow to use for a snappy response. So the title is
+       * left as-is, and the UI states "last active N hours ago" alongside it so recency is still
+       * visible. (There are cases where instructions injected by the harness get mixed in, and
+       * only those are stripped out.)
        */
       title: cleanTitle(str(row.preview) ?? '') || 'Untitled session',
       updatedAt: ms(row.updatedAt) ?? ms(row.recencyAt) ?? Date.now(),
@@ -128,7 +128,7 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
   return out
 }
 
-/** thread/read의 turns → 대화 줄 목록. 넘치면 오래된 쪽부터 자른다 */
+/** thread/read's turns into a list of conversation lines. Trims from the older side when it exceeds the limit */
 export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] {
   const list = Array.isArray(turns) ? turns : []
   const out: HistoryMessage[] = []
@@ -145,11 +145,11 @@ export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] 
 }
 
 /**
- * ThreadItem → 대화 한 줄.
+ * A ThreadItem into one line of conversation.
  *
- * 우리가 아는 두 종류(userMessage·agentMessage)만 집는다.
- * 나머지(reasoning·commandExecution·fileChange…)는 **모르는 채로 흘려보낸다** —
- * codex가 항목 종류를 추가해도 여기서 터지지 않고 그냥 안 보일 뿐이다.
+ * Only picks up the two kinds we know about (userMessage, agentMessage). Everything else
+ * (reasoning, commandExecution, fileChange, ...) is **passed over as unknown** — even if codex
+ * adds a new item kind, this does not break, it just does not show up.
  */
 function itemToMessage(item: unknown, ts?: number): HistoryMessage | null {
   const it = (item ?? {}) as Record<string, unknown>
@@ -164,7 +164,7 @@ function itemToMessage(item: unknown, ts?: number): HistoryMessage | null {
   return null
 }
 
-/** UserInput[]에서 사람이 친 텍스트만. 이미지·파일 첨부는 표시에서 뺀다 */
+/** Only the text the person typed, out of UserInput[]. Image and file attachments are excluded from display */
 function userInputText(content: unknown): string {
   if (typeof content === 'string') return content.trim()
   if (!Array.isArray(content)) return ''

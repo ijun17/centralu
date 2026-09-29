@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { bridgePath } from './bridge-path.js'
-/** 다리로 붙는 우리 MCP 서버 이름 — elicitation 수락이 이 이름으로 판정한다 (정의는 한 곳, #93) */
+/** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
 import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -29,67 +29,81 @@ import { approvalDetailFrom, goalFromCodex, normalizeNotification, toCodexDecisi
 const exec = promisify(execFile)
 
 /**
- * Codex 어댑터 (M0에서 프로토콜·승인 오버라이드 검증 완료).
+ * Codex adapter (protocol and approval-override verification completed in M0).
  *
- * 설계 검증 대상(A-4): 이 디렉토리만 추가해서 UI·core가 그대로인가.
- * 규칙: Codex 타입은 여기서 끝난다 — 밖으로 나가는 것은 NormalizedEvent뿐.
+ * Design verification target (A-4): does adding only this directory leave the UI and core
+ * unchanged? Rule: Codex types end here — the only thing that leaves is NormalizedEvent.
  */
 
 /**
- * 권한 프리셋 → Codex의 권한 옵션.
+ * Permission preset to Codex permission options.
  *
- * Claude 쪽과 **같은 원칙**이다: normal은 우리가 정하지 않고 도구 자신의 설정
- * (`~/.codex/config.toml`)을 따른다. 그래서 아무 키도 넣지 않는다 — codex는 빠진 값을
- * 자기 설정에서 채운다.
+ * **Same principle** as the Claude side: for normal, we do not decide anything and defer to
+ * the tool's own settings (`~/.codex/config.toml`). So we set no key at all — codex fills in
+ * whatever is missing from its own settings.
  *
- * 덮어쓰던 것이 둘이었다는 점이 중요하다. approvalPolicy만이 아니라 **sandbox도**
- * 'workspace-write'로 못박고 있었다. 사용자가 config.toml에 danger-full-access를
- * 적어 두었어도 작업 폴더 밖은 막혀 있었다는 뜻이다 — 묻지도 않고 실패한다.
+ * It matters that there were two things being overridden. Not just approvalPolicy — **sandbox
+ * was also pinned** to 'workspace-write'. That meant even if the user had written
+ * danger-full-access into config.toml, anything outside the working folder was still blocked —
+ * it failed without even asking.
  */
 /*
- * "내 설정"은 사용자의 `~/.codex/config.toml`이다 — 저장소의 `.codex/config.toml`은 프로젝트를 신뢰했을
- * 때만 여기에 끼어든다(repoFilesConfig, #92).
+ * "My settings" means the user's own `~/.codex/config.toml` — the repository's
+ * `.codex/config.toml` only enters the picture when the project is trusted (repoFilesConfig, #92).
  */
 function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown> {
-  if (preset === 'safe') return { approvalPolicy: 'untrusted', sandbox: 'workspace-write' } // 모든 것을 묻는다
-  if (preset === 'auto') return { approvalPolicy: 'never', sandbox: 'workspace-write' } // 묻지 않는다
-  return {} // 내 설정을 따른다
+  if (preset === 'safe') return { approvalPolicy: 'untrusted', sandbox: 'workspace-write' } // asks about everything
+  if (preset === 'auto') return { approvalPolicy: 'never', sandbox: 'workspace-write' } // asks about nothing
+  return {} // defer to the user's own settings
 }
 
 /**
- * 저장소의 파일이 이 스레드를 바꾸지 못하게 한다 (M4 결정 3, #92·#152) — 신뢰하지 않은 프로젝트와, 파일을 하나도
- * 읽지 않는 세션(`noSettingFiles`: 오케스트레이터·조율 세션 — 그 폴더는 워커가 쓸 수 있는 자리다). Claude의
- * `settingSources: ['user']`·`[]`에 대응한다. 신뢰한 폴더(신뢰한 프로젝트, 사용자 폴더 앱)에서는 아무것도 싣지
- * 않는다 — 지금까지와 같다. 어느 쪽인지는 매니저가 세션의 종류와 프로젝트로 정해서 넘긴다: 도구를 받는지로 가르지
- * 않는다(워크트리 매니저와 만드는 세션도 도구를 받지만 프로젝트의 세션이다).
+ * Keeps files in the repository from being able to alter this thread (M4 decision 3, #92, #152) —
+ * for untrusted projects, and for sessions that must not read any files at all (`noSettingFiles`:
+ * orchestrator and coordination sessions — that folder is a spot a worker can write into). This
+ * mirrors Claude's `settingSources: ['user']` versus `[]`. In a trusted folder (a trusted project,
+ * or a user-folder app) nothing is loaded here — same as before. The manager decides which case
+ * applies from the session kind and the project, and passes that down: it is not decided by
+ * whether the session receives tools (the worktree manager and the session that creates the
+ * worktree also receive tools, but they are sessions of the project).
  *
- * Codex에도 프로젝트 신뢰가 따로 있다(`~/.codex/config.toml`의 `projects."<경로>".trust_level`). 신뢰하지
- * 않은 폴더에서 Codex는 저장소의 `.codex/config.toml`(승인 정책·샌드박스·MCP 서버를 바꿀 수 있다), 훅,
- * 실행 규칙(exec policy)을 불러오되 끈다. 문제는 **정해지지 않은** 폴더다: `thread/start`가 cwd를 받았고
- * 신뢰가 비어 있고 샌드박스가 그 폴더에 쓸 수 있으면, app-server가 그 폴더를 **신뢰한다고 사용자 설정
- * 파일에 적어 버린다**(codex 소스 app-server `thread_processor.rs`의 `set_project_trust_level(…, Trusted)`).
- * 그래서 이 앱으로 연 저장소는 Codex 쪽에서는 모두 신뢰된 폴더가 되어 있었다.
+ * Codex has its own separate project trust (`projects."<path>".trust_level` in
+ * `~/.codex/config.toml`). In an untrusted folder, Codex loads the repository's
+ * `.codex/config.toml` (which can change approval policy, sandbox and MCP servers), hooks and
+ * exec policy, but disables them. The problem is a folder whose trust is **unset**: if
+ * `thread/start` received a cwd, trust is empty, and the sandbox can write to that folder, the
+ * app-server **writes trust into the user's settings file, marking the folder as trusted**
+ * (`set_project_trust_level(…, Trusted)` in codex source `app-server/thread_processor.rs`). So
+ * every repository opened through this app ended up trusted on the Codex side.
  *
- * 스레드마다 넘기는 `config`는 CLI의 `-c`와 같은 층(SessionFlags)에 앉고, 신뢰 판정은 그 층까지 합친
- * 설정에서 `projects`를 읽는다(codex 소스 config `loader/mod.rs`의 `project_trust_context`). 그래서 이
- * 스레드에서만 그 폴더를 "untrusted"로 적으면:
- *   - 저장소의 `.codex/config.toml`·훅·실행 규칙이 꺼진 층으로 남는다 (`disabled_reason_for_decision`)
- *   - 신뢰가 정해져 있으므로 app-server가 신뢰를 적어 넣지 않는다 (위 자동 신뢰는 `trust_level.is_none()`일 때만)
- *   - AGENTS.md를 읽지 않는다 (`agents_md.rs`: `active_project.is_untrusted()`면 건너뛴다)
- * 판정은 폴더마다 **그 폴더의 열쇠를 먼저** 본다(`decision_for_dir`) — cwd에서 뿌리까지의 조상 전부를
- * 적는다. 사용자가 조상 하나를 신뢰해 두었어도 그 칸이 이기지 못한다. 경로는 적힌 그대로와 실제 경로
- * (심볼릭 링크를 푼 것) 둘 다 적는다 — Codex가 두 철자를 모두 찾는다(`normalized_project_trust_keys`).
+ * The per-thread `config` sits at the same layer as the CLI's `-c` (SessionFlags), and the trust
+ * decision reads `projects` from the settings merged up through that layer (`project_trust_context`
+ * in codex source config `loader/mod.rs`). So writing "untrusted" for that folder in this thread
+ * only:
+ *   - leaves the repository's `.codex/config.toml`, hooks and exec policy in the disabled layer
+ *     (`disabled_reason_for_decision`)
+ *   - stops app-server from writing trust in (the auto-trust above only fires when
+ *     `trust_level.is_none()`), because trust is now already set
+ *   - stops AGENTS.md from being read (`agents_md.rs` skips it when `active_project.is_untrusted()`)
+ * The decision looks at **that folder's own key first**, per folder (`decision_for_dir`) — it
+ * writes every ancestor from the cwd up to the root. Even if the user has trusted one ancestor,
+ * that entry does not win. Both the path as written and the real path (with symlinks resolved)
+ * are written, because Codex looks up both spellings (`normalized_project_trust_keys`).
  *
- * `project_doc_max_bytes: 0`도 함께 싣는다. AGENTS.md를 신뢰로 거르는 줄이 설치된 0.153.4에 있는지는
- * 바이너리로 확인하지 못했다. 이 키는 오케스트레이터에서 실측으로 확인한 길이다(심어 둔 AGENTS.md를 따르던
- * 것이 멈췄다). 사용자 자신의 `~/.codex/AGENTS.md`는 다른 길로 읽혀 그대로 남는다.
+ * `project_doc_max_bytes: 0` is loaded alongside it. We could not confirm from the binary whether
+ * installed 0.153.4 has the line that filters AGENTS.md by trust. This key is here because it was
+ * measured on the orchestrator (a planted AGENTS.md that had been followed stopped being followed).
+ * The user's own `~/.codex/AGENTS.md` is read through a different path and is unaffected.
  *
- * 남는 것: 저장소의 스킬(`.codex/skills`, `.agents/skills`)은 신뢰와 무관하게 읽힌다("skills still load" —
- * 0.153.4 바이너리의 경고 문구). 스레드 단위로 저장소 범위의 스킬만 끄는 키는 없다(`skills.include_instructions`는
- * 사용자의 스킬까지 끈다). 스킬은 지시문일 뿐이라, 스킬을 따라 모델이 하려는 일은 여전히 승인을 지난다.
+ * What remains: repository skills (`.codex/skills`, `.agents/skills`) are read regardless of trust
+ * ("skills still load" — a warning string in the installed 0.153.4 binary). There is no key that
+ * turns off only repository-scoped skills per thread (`skills.include_instructions` also turns off
+ * the user's own skills). Skills are only instructions, so whatever the model does after following
+ * a skill still goes through approval.
  *
- * **소스와 바이너리로만 확인했다** (Codex가 로그아웃 상태라 실행으로 재지 못했다): 키와 판정은 codex 소스
- * (main 75e0e0a, 2026-09-25)에서 읽었고, 설치된 0.153.4 바이너리에 같은 문구가 있음을 확인했다 —
+ * **Confirmed from source and binary only** (Codex was logged out, so we could not re-verify by
+ * running it): the keys and decisions were read from codex source (main 75e0e0a, 2026-09-25), and
+ * we confirmed the same strings exist in the installed 0.153.4 binary —
  * "failed to persist trusted project state for", "is marked as untrusted in the effective configuration",
  * "Project-local config, hooks, and exec policies are disabled … but skills still load".
  */
@@ -117,22 +131,28 @@ function realPathOr(path: string): string {
 }
 
 /**
- * 외부 앱 서버의 도구 승인 방식 (M4 결정 5) — 세션 프리셋 → Codex의 서버별 `default_tools_approval_mode`.
+ * How an external app server's tool calls get approved (M4 decision 5) — session preset to
+ * Codex's per-server `default_tools_approval_mode`.
  *
- *   auto    approve  묻지 않는다. 우리 auto는 `approvalPolicy: never`라서, 이 값을 적지 않으면
- *                    Codex가 주석 없는 MCP 도구를 **스스로 거부한다** ("requires approval, but
- *                    approval policy is never")
- *   normal  writes   읽기 전용 주석이 없는 도구만 묻는다 — Claude 쪽 판정과 같은 기준
- *   safe    prompt   전부 묻는다. 읽기 전용 도구는 도구별 `approve`로 따로 푼다(appBridgeConfig)
+ *   auto    approve  asks about nothing. Our auto uses `approvalPolicy: never`, so if this
+ *                    value is not set, Codex **rejects an unannotated MCP tool on its own**
+ *                    ("requires approval, but approval policy is never")
+ *   normal  writes   asks only about tools that lack a read-only annotation — the same rule
+ *                    the Claude side uses
+ *   safe    prompt   asks about everything. Read-only tools are handled separately per tool
+ *                    with `approve` (appBridgeConfig)
  *
- * **소스로만 확인했다** (Codex가 로그아웃 상태라 실행으로 재지 못했다, 플랜 S-3·S-7): 값의 어휘는
- * 설치된 0.153.4의 생성 타입(`AppToolApproval = "auto" | "prompt" | "writes" | "approve"`)과
- * 바이너리의 설정 필드 이름(`default_tools_approval_mode`, 도구별 `tools.<이름>.approval_mode`)으로,
- * 각 값의 뜻은 codex 소스(`core/src/mcp_tool_call.rs`의 requires_mcp_tool_approval_for_mode)로 읽었다.
+ * **Confirmed from source only** (Codex was logged out, so we could not re-verify by running it,
+ * plan S-3/S-7): the vocabulary of the values comes from the installed 0.153.4's generated type
+ * (`AppToolApproval = "auto" | "prompt" | "writes" | "approve"`) and the binary's settings field
+ * names (`default_tools_approval_mode`, per-tool `tools.<name>.approval_mode`); the meaning of
+ * each value was read from codex source (`requires_mcp_tool_approval_for_mode` in
+ * `core/src/mcp_tool_call.rs`).
  *
- * normal의 함정 하나: normal은 사용자의 config.toml을 따르므로(permissionOptionsFor), 사용자가
- * `approval_policy = "never"`를 적어 두었다면 `writes`가 물어야 할 도구를 Codex가 거부한다.
- * 우리는 사용자 설정을 읽지 않는다 — 그 조합에서는 쓰기 도구가 거절로 돌아온다.
+ * One trap in normal: since normal defers to the user's own config.toml (permissionOptionsFor),
+ * if the user has written `approval_policy = "never"`, Codex rejects a tool that `writes` should
+ * have prompted for. We do not read the user's settings — in that combination, a write tool
+ * comes back rejected.
  */
 const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt'> = {
   auto: 'approve',
@@ -141,26 +161,31 @@ const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt
 }
 
 /**
- * MCP 도구 호출 하나의 상한 — Codex의 코드 기본값(0.145부터 300초)을 **적어서** 고정한다.
- * 기본값에 기대면 Codex가 값을 바꾸는 날 오래 걸리는 호출의 처리(240초에 먼저 돌려주기)가
- * 조용히 어긋난다. 필드 이름(`tool_timeout_sec`)은 바이너리와 소스로만 확인했다.
+ * The ceiling for a single MCP tool call — **pinned in writing** to Codex's own code default
+ * (300 seconds since 0.145). Relying on the default means that the day Codex changes the value,
+ * our handling of long calls (returning early at 240 seconds) would silently go out of sync.
+ * The field name (`tool_timeout_sec`) was confirmed only from the binary and source.
  */
 export const CODEX_TOOL_TIMEOUT_SEC = 300
 /**
- * 앱 호출이 이보다 오래 걸리면 실행 id와 "아직 도는 중"을 먼저 돌려준다 (플랜 "오래 걸리는 호출").
- * 위 상한보다 60초 짧다 — 다리와 host 사이의 왕복과 Codex 쪽 처리가 그 안에 들어가야 "아직 도는
- * 중"이 시간 초과보다 먼저 모델에게 닿는다. 결과는 각 앱 서버의 `run_status`로 이어서 본다.
+ * If an app call takes longer than this, we return the run id and "still running" first (plan
+ * "long-running calls"). This is 60 seconds shorter than the ceiling above — the round trip
+ * between the bridge and the host, plus Codex's own processing, has to fit inside that margin
+ * for "still running" to reach the model before the timeout does. The result is then followed
+ * up through each app server's own `run_status`.
  */
 export const APP_CALL_WAIT_MS = 240_000
 /**
- * 앱 다리가 뜨고 도구 목록을 내놓기까지의 상한. 스레드를 띄우기 전에 목록을 미리 읽어 두므로
- * (mcpConfig) 보통은 즉시다. 목록을 모르는 앱은 host가 앱을 띄워 읽는 동안(최대 15초) 기다린다.
+ * The ceiling for how long it can take from the app bridge starting to it producing a tool list.
+ * We read the list ahead of time before starting the thread (mcpConfig), so this is usually
+ * instant. For an app whose list we do not already know, we wait while the host starts the app
+ * and reads it (up to 15 seconds).
  */
 const APP_STARTUP_TIMEOUT_SEC = 30
 
-/** 재개를 사람 앞에서 기다려 주는 시간 — 잠금 오류("active writer")는 이 안에 온다 (실측 ~0.3s) */
+/** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
-/** 배경 재개의 상한 — 매니저의 단계 제한(150s)과 같은 값. 이걸 넘기면 걸린 것이다 */
+/** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
 const BACKGROUND_RESUME_CAP_MS = 150_000
 
 class CodexSession implements SessionHandle {
@@ -171,49 +196,54 @@ class CodexSession implements SessionHandle {
   private client: CodexClient
   private threadId: string | null = null
   /**
-   * 지금 도는 턴의 id — **멈추려면 이게 있어야 한다** (도그푸딩 2026-09-07: 스톱이 안 먹혔다).
+   * The id of the turn currently running — **needed in order to stop it** (dogfooding
+   * 2026-09-07: stop did not work).
    *
-   * `turn/interrupt`는 threadId만으로는 안 된다. 실측하면 서버가
-   * `Invalid request: missing field \`turnId\``(-32600)로 거절하고, 우리는 그 거절을
-   * 에러 이벤트로만 흘려 보냈다 — 화면은 멈춘 듯 보이는데 턴은 끝까지 돌았다.
-   * 그래서 turn/started 알림과 turn/start 응답 **양쪽에서** 잡는다: 스톱을 아주 빨리
-   * 누르면 알림보다 응답이 먼저 올 수 있다.
+   * `turn/interrupt` does not work with only a threadId. Measured behavior: the server rejects
+   * it with `Invalid request: missing field \`turnId\``(-32600), and we were only piping that
+   * rejection into an error event — the screen looked stopped but the turn ran to completion.
+   * So we capture this **from both** the turn/started notification and the turn/start response:
+   * if stop is pressed very quickly, the response can arrive before the notification.
    */
   private turnId: string | null = null
-  /** 우리 requestId → Codex 서버 요청 id */
+  /** Our requestId to the Codex server's request id */
   private approvals = new Map<string, number | string>()
   /**
-   * 앱 도구 승인으로 띄운 카드 (M4 A-5) — 답의 모양이 다르다(`{ decision }`이 아니라 elicitation의
-   * `{ action }`). 이 집합에 있는 requestId만 elicitation으로 답한다.
+   * Cards raised for app tool approval (M4 A-5) — the answer has a different shape (elicitation's
+   * `{ action }`, not `{ decision }`). Only a requestId in this set gets answered as an elicitation.
    */
   private elicitations = new Set<string>()
-  /** 이 스레드에 다리로 실은 앱 서버 — 그 이름의 elicitation만 우리 카드로 간다 */
+  /** App servers loaded onto this thread through the bridge — only elicitations under those names go to our cards */
   private appServers = new Set<string>()
   private reqCounter = 0
   private alwaysAllow = new Set<string>()
   /**
-   * compact/review 턴이 도는 동안 도착한 메시지 (도그푸딩 실측 2026-09-02, MGH 세션).
+   * Messages that arrived while a compact/review turn was running (measured while dogfooding,
+   * 2026-09-02, MGH session).
    *
-   * codex 0.147.0의 turn/start는 compact 턴이 도는 동안 **성공을 답하면서 입력을 버린다** —
-   * rollout에는 설정 적용(thread_settings_applied)만 남고 user 메시지는 한 줄도 남지 않았고,
-   * 에러도 오지 않아 우리 화면에는 보낸 것처럼 보였다. 상류도 이 턴들을 조종 불가로
-   * 못박는다 ("cannot steer a compact turn" — turn_processor.rs). 일반 턴은 다르다:
-   * codex core가 도는 턴에 입력을 합류시키므로 그대로 보낸다. 그래서 **우리가 시작한**
-   * compact/review 동안만 여기 쌓고, 그 턴이 끝나면 한 턴으로 내보낸다.
+   * In codex 0.147.0, turn/start **answers success while dropping the input** while a compact
+   * turn is running — the rollout kept only the settings application (thread_settings_applied)
+   * and not a single line of the user message, and since no error came back either, our screen
+   * made it look sent. Upstream also pins these turns as unsteerable ("cannot steer a compact
+   * turn" — turn_processor.rs). A normal turn is different: codex core merges input into a turn
+   * that is running, so we just send it as usual. So we only queue here during compact/review
+   * **that we ourselves started**, and flush the queue as a single turn once that turn ends.
    */
   private pendingInputs: string[] = []
-  /** 조종 불가 턴(compact/review)이 도는 중 — 그 턴은 우리가 시작했으므로 우리가 안다 */
+  /** An unsteerable turn (compact/review) is running — we know because we are the ones who started it */
   private blockingTurn = false
   /**
-   * 보낸 말의 수와, 스레드가 서기 전에 누른 Stop이 거둔 말의 수 (#168).
+   * The count of messages sent, and the count reclaimed by a Stop pressed before the thread was
+   * up (#168).
    *
-   * 재개가 끝나기 전에는 멈출 턴이 없다(threadId·turnId가 없다). 예전의 Stop은 그때 아무것도 하지 않았고, ready
-   * 뒤에 줄 서 있던 말이 재개가 끝나자 turn/start로 나갔다 — 사람이 멈춘 뒤에 턴이 시작됐다. 이제 그 Stop은 그때까지
-   * 보낸 말을 거둔다. 그 뒤에 보낸 말은 그대로 간다.
+   * Before resume finishes there is no turn to stop (there is no threadId or turnId yet). The old
+   * Stop did nothing in that window, and a message queued up behind ready went out as turn/start
+   * once resume finished — the turn started after the person had already stopped it. Now that
+   * Stop reclaims whatever was sent up to that point. Anything sent after that still goes through.
    */
   private sendsIssued = 0
   private sendsStopped = 0
-  /** 스레드 준비 완료 — 생성 시점에 await해 externalId를 확보한다 */
+  /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
   constructor(
@@ -226,13 +256,14 @@ class CodexSession implements SessionHandle {
         onNotification: (n) => this.onNotification(n),
         onServerRequest: (r) => this.onServerRequest(r),
         /*
-         * **우리가 닫은 것을 죽었다고 말하지 않는다.**
+         * **Do not report a process we closed ourselves as having crashed.**
          *
-         * 여기가 조사 하루를 통째로 먹은 자리다. 잠긴 스레드를 이어가려다 실패하면
-         * 매니저가 세션을 정리하는데(dispose), 그 정상 종료가 다시 이 자리로 와서
-         * `adapter_crashed`를 올렸다. 화면에는 "codex app-server exited"만 남고
-         * 진짜 이유("already has an active writer")는 그 아래 깔려 보이지 않았다.
-         * 죽지도 않은 프로세스를 죽었다고 말하니, 원인을 찾을 길이 없었다.
+         * This is the spot that ate an entire day of investigation. When resuming a locked
+         * thread failed, the manager cleaned the session up (dispose), and that ordinary
+         * shutdown came back through here and raised `adapter_crashed`. The screen showed only
+         * "codex app-server exited", and the real reason ("already has an active writer") was
+         * buried underneath, out of sight. Calling a process that never crashed a crash left no
+         * way to find the actual cause.
          */
         onExit: (code, expected) => {
           if (expected) return
@@ -260,55 +291,61 @@ class CodexSession implements SessionHandle {
     this.client.notify('initialized')
 
     if (this.opts.resumeExternalId) {
-      // 재개 (FR-10). 실패하면 세션 매니저가 폴백을 안내한다
+      // Resume (FR-10). If it fails, the session manager guides the person through the fallback
       let res: Record<string, unknown>
       try {
         res = await this.client.request<Record<string, unknown>>('thread/resume', {
           threadId: this.opts.resumeExternalId,
           /*
-           * 응답 길이는 재개에도 따라와야 한다 (#54). turn/start에는 이 자리가 없어서
-           * (effort와 다른 점) 스레드를 띄우는 이 두 자리가 유일한 길이다 —
-           * 여기 빠지면 "잠들었다 깨면 설정이 풀리는" 종류의 조용한 유실이 된다.
+           * Verbosity has to be carried through on resume too (#54). turn/start has no place for
+           * it (unlike effort), so these two spots where the thread is started are the only
+           * place — leaving it out here becomes the quiet kind of loss where settings reset every
+           * time the session wakes back up.
            *
-           * 추론 요약도 같은 자리다 (#58 실측): 이 스위치를 켜지 않으면
-           * item/reasoning/* 스트림이 **한 건도 안 온다** — 배선만 하고 스위치를
-           * 안 켜면 아무 일도 일어나지 않는 종류의 기능이다.
+           * Reasoning summary is the same case (measured for #58): unless this switch is turned
+           * on, the item/reasoning/* stream **never arrives, not once** — the kind of feature
+           * where wiring it up without flipping the switch does nothing at all.
            */
           config: {
             model_reasoning_summary: 'auto',
             ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
             ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
             /*
-             * MCP 서버는 **재개에도 싣는다** (M4 A-5, 플랜 "별개로 확인할 것" 1).
+             * MCP servers are loaded **on resume too** (M4 A-5, plan "to confirm separately" 1).
              *
-             * 예전 재개는 서버를 하나도 보내지 않았다 — 처음 설정이 스레드에 남지 않는다면 잠들었다
-             * 깬 Codex 오케스트레이터는 centralu 도구를 잃는다. 남는지는 실행해 봐야 아는데(S-7)
-             * Codex가 로그아웃 상태라 재지 못했다. 그래서 확인을 기다리지 않고 다시 싣는다: 재개의
-             * `config`는 설정 덮어쓰기라(생성 타입 ThreadResumeParams — "Configuration overrides for
-             * the resumed thread") 같은 이름은 같은 칸이고, 남아 있었다면 덮어써도 잃을 것이 없다.
-             * 앱은 재개가 곧 "다음 스레드 시작"이다 — 스레드가 도는 동안 붙은 앱은 여기서 붙는다.
+             * The old resume sent no servers at all — if the initial settings do not survive on
+             * the thread, a Codex orchestrator that wakes back up loses the centralu tools.
+             * Whether they actually survive can only be known by running it (S-7), and we could
+             * not re-check because Codex was logged out. So we load them again without waiting
+             * for that confirmation: resume's `config` is a settings override (generated type
+             * ThreadResumeParams — "Configuration overrides for the resumed thread"), so the same
+             * name lands in the same slot, and overwriting it loses nothing if it had survived.
+             * For apps, resume is effectively "starting the next thread" — an app attached while
+             * the thread was running gets attached here.
              */
             ...(await this.mcpConfig()),
-            // 저장소의 파일은 신뢰한 프로젝트에서만 이 스레드에 닿는다 — 재개에도 같은 판정이다 (#92)
+            // Files in the repository only reach this thread in a trusted project — resume follows the same rule (#92)
             ...repoFilesConfig(this.opts),
           },
         })
       } catch (err) {
         /*
-         * 원문("already has an active writer")은 사용자에게 아무것도 설명하지 못한다.
+         * The raw message ("already has an active writer") explains nothing to the user.
          *
-         * 그리고 **사람에게 보여줄 문장만으로는 부족하다** — 위층이 문장을 정규식으로
-         * 다시 읽어야 한다면 그건 계약이 아니다. 기계가 읽을 코드를 함께 올린다:
-         * 이 코드가 있어야 UI가 "갈라서 이어가기"를 내밀 수 있다 (codex의 thread/fork는
-         * 잠겨 있어도 된다 — 실측으로 확인).
+         * And **a sentence meant for a human is not enough on its own** — if the layer above has
+         * to re-parse that sentence with a regular expression, that is not a contract. We surface
+         * a machine-readable code alongside it: the UI needs this code to be able to offer
+         * "split off and continue" (codex's thread/fork works fine even on a locked thread —
+         * confirmed by measurement).
          */
         const msg = (err as Error).message
         if (/active writer/i.test(msg)) {
           /*
-           * 실측(#57)으로 이 에러의 뜻이 좁혀졌다: 락은 파일 존재가 아니라 flock이라,
-           * 죽은 프로세스가 남긴 파일은 이 에러를 **못** 만든다. 여기 왔다는 건
-           * 지금 이 순간 flock을 쥔 산 프로세스가 있다는 뜻이다 — 터미널의 codex거나,
-           * 다른 앱이거나, 정리되지 못한 채 fd만 물려받고 살아남은 고아다.
+           * Measurement (#57) narrowed down what this error actually means: the lock is a flock,
+           * not a file's mere existence, so a file left behind by a dead process **cannot**
+           * produce this error. Landing here means a live process is holding the flock at this
+           * exact moment — codex running in a terminal, another app, or an orphan that survived
+           * without being cleaned up, having inherited only the fd.
            */
           throw Object.assign(
             new Error(
@@ -321,13 +358,14 @@ class CodexSession implements SessionHandle {
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       /*
-       * 골은 라이브 필드다 (2026-09-07) — 재시작 후에도 배지가 참이려면 재개 때 다시
-       * 묻는다. 옛 codex엔 이 메서드가 없다: 실패는 "골 없음"과 같게 조용히 눕는다.
+       * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
+       * we ask again on resume. Older codex has no such method: a failure lies down quietly as
+       * "no goal", same as having none.
        */
       void this.client
         .request<{ goal: Record<string, unknown> | null }>('thread/goal/get', { threadId: this.threadId })
         .then((r) => {
-          // complete는 goalFromCodex가 null로 접는다 — 기본 상태가 이미 null이라 그때는 낼 것이 없다
+          // goalFromCodex folds complete into null — the default state is already null, so there is nothing to emit then
           const g = r.goal ? goalFromCodex(r.goal) : null
           if (g) this.emit({ type: 'goal', sessionId: this.sessionId, goal: g })
         })
@@ -338,33 +376,35 @@ class CodexSession implements SessionHandle {
         ...permissionOptionsFor(this.opts.permissionPreset),
         model: this.opts.model,
         /*
-         * 오케스트레이터일 때만 붙는 둘.
+         * The following two are attached only for the orchestrator.
          *
-         * 역할은 developerInstructions로 직접 준다 — Claude의 systemPrompt append와
-         * 같은 자리다. 파일(AGENTS.md)로 두지 않는 이유도 같다: 낮은 권한의 세션이
-         * 그 파일을 고치면 모든 세션에 지시할 수 있는 쪽의 지시가 되어버린다.
+         * The role is given directly through developerInstructions — the same slot as Claude's
+         * systemPrompt append. The reason we avoid a file (AGENTS.md) is the same: if a
+         * lower-privilege session could edit that file, it would become able to instruct every
+         * session.
          *
-         * 도구는 stdio 다리를 통해 붙는다. 실측으로 확인한 것:
-         *   per-thread config.mcp_servers  ✅ 살아 있다 (우리 명령이 실제로 실행됨)
-         *   url(HTTP) 방식                 ❌ 요청이 한 건도 오지 않는다
-         * 그래서 프로세스가 하나 더 뜬다 — Claude 경로에는 없는 비용이다.
+         * Tools are attached through the stdio bridge. What we confirmed by measurement:
+         *   per-thread config.mcp_servers  works (our command actually runs)
+         *   the url (HTTP) approach        does not — not a single request ever arrives
+         * So one extra process ends up running — a cost that does not exist on the Claude path.
          */
         ...(this.opts.systemPromptAppend ? { developerInstructions: this.opts.systemPromptAppend } : {}),
         /*
-         * config는 **여기 한 곳에서만 조립한다.** 예전에는 verbosity 스프레드와
-         * 오케스트레이터 스프레드가 각자 config 키를 만들어 뒤가 앞을 통째로 덮는
-         * 함정이 있었다 — 기여자가 셋(요약·verbosity·오케스트레이터)이 되면서
-         * 함정을 기억하는 것보다 없애는 쪽이 싸다.
+         * config is **assembled in this one place only.** There used to be a trap where the
+         * verbosity spread and the orchestrator spread each built their own config keys, and one
+         * would silently overwrite the other entirely — once there were three contributors
+         * (summary, verbosity, orchestrator), it became cheaper to remove the trap than to keep
+         * remembering it.
          */
         config: {
-          // 추론 요약 스위치 (#58 실측): 안 켜면 item/reasoning/* 스트림이 한 건도 안 온다
+          // The reasoning-summary switch (measured for #58): without it, the item/reasoning/* stream never arrives
           model_reasoning_summary: 'auto',
           ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
-          // 응답 속도 (실측: priority = "Fast, 1.5x speed, increased usage")
+          // Response speed (measured: priority = "Fast, 1.5x speed, increased usage")
           ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
-          // MCP 서버 — 오케스트레이터의 다리와 붙은 외부 앱의 다리(승인된 MCP 서버 포함) (mcpConfig 참고)
+          // MCP servers — the orchestrator's bridge and any attached external app's bridge (including approved MCP servers) (see mcpConfig)
           ...(await this.mcpConfig()),
-          // 저장소의 파일(.codex/ 설정·훅·규칙, AGENTS.md)은 신뢰한 프로젝트에서만 (#92, repoFilesConfig)
+          // Files in the repository (.codex/ settings, hooks, rules, AGENTS.md) only in a trusted project (#92, repoFilesConfig)
           ...repoFilesConfig(this.opts),
         },
       })
@@ -374,19 +414,22 @@ class CodexSession implements SessionHandle {
   }
 
   /**
-   * 스레드에 실을 MCP 설정 — 시작과 재개가 **같은 조립**을 쓴다(재개에서 빠지는 것이 없게).
+   * The MCP settings loaded onto the thread — start and resume use **the exact same assembly**
+   * (so nothing is missing on resume).
    *
-   * 둘이다:
-   *   1. 오케스트레이터 도구의 다리 (FR-11)
-   *   2. 외부 앱의 다리 (M4 A-5) — 앱마다 하나. **붙은 앱이 있는 세션에만** 생긴다: 대부분의 세션은
-   *      다리 프로세스를 하나도 띄우지 않는다. 사람이 승인한 MCP 서버(propose_mcp_server)도 사용자
-   *      폴더의 앱이 되어 여기로 온다(A-7). 예전에는 그 서버를 날것으로 실었는데, Codex가 그 서버의
-   *      도구를 쓸지 묻는 elicitation을 우리가 거절해서(`ours`만 수락) 한 번도 돌지 못했을 가능성이
-   *      높았다(플랜 "별개로 확인할 것" 2). 앱 다리의 도구 승인은 우리 승인 카드로 간다.
+   * There are two:
+   *   1. The bridge for orchestrator tools (FR-11)
+   *   2. The bridge for an external app (M4 A-5) — one per app. This is only produced **for a
+   *      session that has an app attached**: most sessions start zero bridge processes. An MCP
+   *      server the person approved (propose_mcp_server) also becomes a user-folder app and
+   *      arrives here (A-7). It used to be loaded raw, but Codex's elicitation asking whether to
+   *      use that server's tools was likely being rejected by us (we only accept `ours`), so it
+   *      probably never ran even once (plan "to confirm separately" 2). Tool approval for an app
+   *      bridge goes to our own approval cards.
    *
-   * 앱 다리는 Codex가 띄우는 stdio 프로세스다(플랜 S-3의 셋 중 하나). HTTP(`url`)는 0.147.0에서
-   * 요청이 한 건도 오지 않았고 0.153.4에서는 재지 못했다. 다리는 오케스트레이터와 같은 파일이다
-   * (`CC_APP_SERVER`로 갈린다).
+   * The app bridge is an stdio process that Codex starts (one of the three in plan S-3). HTTP
+   * (`url`) never received a single request in 0.147.0, and we could not re-check in 0.153.4.
+   * The bridge is the same file as the orchestrator's (they are split by `CC_APP_SERVER`).
    */
   private async mcpConfig(): Promise<Record<string, unknown>> {
     const bridge = this.opts.orchestratorBridge
@@ -404,8 +447,9 @@ class CodexSession implements SessionHandle {
     this.appServers = new Set()
     if (apps && bridge && attached.length > 0) {
       /*
-       * 도구 목록을 먼저 읽는다 — 읽기 전용 도구를 도구별로 적어야 safe에서도 그 도구를 묻지 않는다.
-       * 모르는 앱은 여기서 띄워 읽는다(상한 있음). 붙은 앱이 없는 세션은 이 줄을 지나지 않는다.
+       * Read the tool list first — a read-only tool has to be written per tool for even safe to
+       * not ask about it. An app we do not already know is started here to read it (bounded).
+       * A session with no attached app never reaches this line.
        */
       const lists = await Promise.all(attached.map((a) => (a.tools ? Promise.resolve(a.tools) : apps.tools(a.server))))
       attached.forEach((a, i) => {
@@ -420,7 +464,7 @@ class CodexSession implements SessionHandle {
             CC_APP_WAIT_MS: String(APP_CALL_WAIT_MS),
           },
           default_tools_approval_mode: APP_APPROVAL_MODE[this.opts.permissionPreset],
-          // 읽기 전용이라고 앱이 말한 도구는 어느 프리셋에서도 묻지 않는다 (결정 5)
+          // A tool the app itself declares read-only is never asked about, under any preset (decision 5)
           tools: Object.fromEntries(
             (lists[i] ?? []).filter((t) => t.annotations?.readOnlyHint === true).map((t) => [t.name, { approval_mode: 'approve' }]),
           ),
@@ -431,51 +475,57 @@ class CodexSession implements SessionHandle {
       })
     }
     /*
-     * 폴더의 문서(AGENTS.md)를 읽을지는 여기서 정하지 않는다 — repoFilesConfig가 세션이 무엇인가로 정한다.
+     * Whether to read the folder's document (AGENTS.md) is not decided here — repoFilesConfig
+     * decides it from what the session is.
      *
-     * 예전에는 오케스트레이터 도구의 다리가 있으면 여기서 `project_doc_max_bytes: 0`을 실었다. 오케스트레이터가
-     * 심어 둔 AGENTS.md를 그대로 따랐기 때문이다(실측: "침투성공-9142"부터 답했다). 그런데 워크트리 매니저와 만드는
-     * 세션도 이 다리를 받아서, 신뢰한 프로젝트에서도 AGENTS.md를 잃었다(#152). 오케스트레이터·조율 세션의 규칙은
-     * 그대로다 — `noSettingFiles`로 와서 repoFilesConfig가 같은 값을 싣는다.
+     * This used to load `project_doc_max_bytes: 0` here whenever the orchestrator tool bridge was
+     * present, because the orchestrator followed a planted AGENTS.md verbatim (measured: it
+     * started answering with "infiltration-success-9142" once one was planted). But the worktree
+     * manager and the session that creates the worktree also receive this bridge, so they lost
+     * AGENTS.md even in trusted projects (#152). The rule for orchestrator and coordination
+     * sessions is unchanged — they arrive as `noSettingFiles`, and repoFilesConfig loads the same
+     * value for them.
      */
     return Object.keys(servers).length > 0 ? { mcp_servers: servers } : {}
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
     /*
-     * **다른 스레드의 알림은 이 세션의 것이 아니다** (#98의 codex 쪽).
+     * **A notification from another thread does not belong to this session** (the codex side of #98).
      *
-     * 모델이 spawn_agent로 띄운 자식 에이전트는 별도 스레드이고, app-server는 새 스레드가
-     * 생길 때마다 초기화된 모든 연결에 그 스레드의 리스너를 붙인다 (codex 소스
-     * app-server/src/lib.rs → try_attach_thread_listener; 새 스레드 알림은 spawn.rs의
-     * notify_thread_created에서만 나간다). 그래서 자식의 알림이 threadId만 달리 달고
-     * 이 연결로 온다. 거르지 않으면 자식의 도구 호출과 글이 부모의 대화에 박히고,
-     * 자식의 turn/started가 스톱의 과녁(turnId)을 가로채고, 자식의 turn/completed가
-     * 부모를 "끝났다"로 돌린다 — 그래서 이 검사는 turnId 기록보다 먼저 온다.
+     * A child agent spawned by the model via spawn_agent runs on a separate thread, and
+     * app-server attaches that thread's listener to every initialized connection whenever a new
+     * thread is created (codex source app-server/src/lib.rs -> try_attach_thread_listener; a
+     * new-thread notification is only sent from notify_thread_created in spawn.rs). So a child's
+     * notification arrives on this same connection, differing only in threadId. Without
+     * filtering, the child's tool calls and text get stuck into the parent's conversation, the
+     * child's turn/started hijacks the target of stop (turnId), and the child's turn/completed
+     * flips the parent to "finished" — which is why this check runs before turnId is recorded.
      *
-     * 서버 **요청**(승인)은 거르지 않는다(onServerRequest) — 자식이 묻는 승인에 아무도
-     * 답하지 않으면 자식이 멈춘다. 스레드를 아직 모르는 동안(thread/start 응답 전)은
-     * 자식이 있을 수 없으므로 통과시킨다.
+     * We do not filter server **requests** (approvals) (onServerRequest) — if nobody answers an
+     * approval the child is asking for, the child gets stuck. While the thread is still unknown
+     * (before the thread/start response), a child cannot exist yet, so we let it through.
      */
     const from = (n.params as { threadId?: unknown } | undefined)?.threadId
     if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) return
-    // 어느 턴이 도는지 (Turn.id — generated/v2/Turn.ts). 끝나면 지운다: 끝난 턴을
-    // 멈추려 들면 서버가 거절하고, 그 거절이 "안 멈췄다"는 거짓 신호가 된다
+    // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
+    // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') this.turnId = turnIdOf(n.params)
     if (n.method === 'turn/completed' || n.method === 'turn/failed') this.turnId = null
 
     this.noteAppCall(n)
 
-    // compact/review가 끝나는 자리 — 그동안 쌓인 메시지가 있으면 이제 내보낸다
+    // Where compact/review ends — if messages piled up during it, they go out now
     if (n.method === 'turn/completed' && this.blockingTurn) {
       this.blockingTurn = false
       this.flushPending()
     }
     for (const e of normalizeNotification(this.sessionId, n)) {
       /*
-       * 경로만 실려 온 이미지는 여기서 바이트를 채운다 (#40). normalize는 순수 함수라
-       * 파일을 못 읽는다 — IO는 어댑터의 몫이다. 읽기는 비동기지만 이미지는 대화의
-       * 순서에 민감하지 않으므로(도구 줄은 이미 나갔다) 나중에 도착해도 된다.
+       * An image that arrived carrying only a path gets its bytes filled in here (#40). normalize
+       * is a pure function and cannot read files — IO is the adapter's job. The read is async,
+       * but an image is not sensitive to conversation ordering (the tool line has already gone
+       * out), so it is fine for it to arrive later.
        */
       if (e.type === 'message_image' && !e.data && e.path) {
         void imageEventFromDisk(this.sessionId, e.path).then((filled) => this.emit(filled))
@@ -486,12 +536,15 @@ class CodexSession implements SessionHandle {
   }
 
   /**
-   * 붙은 앱의 도구 호출이 시작되고 끝나는 것을 붙이기에 알린다 (M4 B-1 — 대화 안 화면의 카드 짝짓기).
+   * Tells the attachment layer when an attached app's tool call starts and ends (M4 B-1 —
+   * matching cards to calls on the in-conversation screen).
    *
-   * 다리로 들어오는 호출은 카드 id(`item.id`)를 모른다 — Codex가 MCP 요청에 그 id를 싣는다는 근거를
-   * 찾지 못했다. 그래서 여기서 본 "카드 X가 서버 S의 도구 T를 인자 A로 부른다"를 적어 두고, 붙이기가
-   * 뒤이어 온 호출과 짝짓는다. 끝난 카드(거절 포함)는 짝짓기에서 뺀다. 다른 스레드(자식 에이전트)의
-   * 알림은 위에서 이미 걸렀다 — 자식의 호출은 부모의 카드가 아니다.
+   * A call coming in through the bridge does not know the card id (`item.id`) — we found no
+   * evidence that Codex carries that id on the MCP request. So we record here what we observed
+   * ("card X calls server S's tool T with argument A"), and the attachment layer matches it
+   * against the call that follows. A card that has ended (including a rejection) is removed from
+   * matching. A notification from another thread (a child agent) was already filtered out above —
+   * a child's call is not the parent's card.
    */
   private noteAppCall(n: { method: string; params?: unknown }): void {
     const apps = this.opts.apps
@@ -507,15 +560,15 @@ class CodexSession implements SessionHandle {
 
   private onServerRequest(r: { id: number | string; method: string; params?: unknown }): void {
     /*
-     * **elicitation은 승인과 응답 형식이 다르다.**
+     * **elicitation has a different response shape from an approval.**
      *
-     * MCP 서버를 쓸지 물을 때 codex는 elicitation을 보내고 `{ action }`을 기다린다.
-     * 우리는 모르는 서버 요청을 `{}`로 흘려보내고 있었는데, 그러면 codex가
-     * "missing field `action`"으로 역직렬화에 실패하고 **거절로 처리한다** —
-     * 화면에는 "권한이 거절되어"라고만 나와 원인을 알 수 없었다 (실측).
+     * When asking whether to use an MCP server, codex sends an elicitation and waits for an
+     * `{ action }`. We were passing an unknown server request through as `{}`, which made codex
+     * fail to deserialize it with "missing field `action`" and **treat it as a rejection** — the
+     * screen only showed "permission denied", with no way to know the actual cause (measured).
      *
-     * 우리 서버는 받아들이고, 모르는 서버는 거절한다. 물어볼 화면이 없는데
-     * 조용히 승낙하면 그건 사용자를 대신해 결정하는 것이다.
+     * We accept our own server and reject unknown ones. Silently approving when there is no
+     * screen to ask on would mean deciding on the user's behalf.
      */
     if (r.method.toLowerCase().includes('elicitation')) {
       const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as {
@@ -524,16 +577,18 @@ class CodexSession implements SessionHandle {
         _meta?: unknown
       }
       /*
-       * **붙인 앱의 도구 승인은 우리 승인 카드로 간다** (M4 A-5, 결정 5).
+       * **Tool approval for an attached app goes to our own approval card** (M4 A-5, decision 5).
        *
-       * Codex는 MCP 도구를 쓸지 이 elicitation으로 묻고, 그것이 도구 승인이라는 표시를
-       * `_meta`에 싣는다. 예전처럼 거절하면 앱 도구는 Codex에서 한 번도 돌지 못한다(플랜
-       * "별개로 확인할 것" 2와 같은 모양). 카드로 보내는 것은 **이 스레드에 우리가 실은 앱 서버**의
-       * **도구 승인**뿐이다 — 이름이 `app-`로 시작하는 남의 서버(사용자의 config.toml)도, 도구
-       * 승인이 아닌 elicitation(입력 양식)도 예전처럼 거절한다.
+       * Codex asks whether to use an MCP tool through this same elicitation, and marks in `_meta`
+       * that it is a tool approval. Rejecting it as before would mean the app tool never runs on
+       * Codex, not even once (the same shape as plan "to confirm separately" 2). We only route to
+       * a card for **tool approval on an app server we ourselves loaded onto this thread** — a
+       * third party's server whose name happens to start with `app-` (from the user's
+       * config.toml), and any elicitation that is not a tool approval (an input form), are still
+       * rejected as before.
        *
-       * 소스로만 확인했다(로그아웃, S-3): 0.153.4 바이너리의 문자열은 `codex_approval_kind`,
-       * 지금의 codex 소스는 `codex/approval_kind`다 — 둘 다 읽는다.
+       * Confirmed from source only (logged out, S-3): the string in the installed 0.153.4 binary
+       * is `codex_approval_kind`, while current codex source uses `codex/approval_kind` — we read both.
        */
       if (typeof p.serverName === 'string' && this.appServers.has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
         const requestId = `codex-req-${++this.reqCounter}`
@@ -549,10 +604,11 @@ class CodexSession implements SessionHandle {
 
     if (!r.method.includes('requestApproval') && !r.method.endsWith('Approval')) {
       /*
-       * 승인이 아닌 서버 요청은 빈 응답으로 흘려보낸다 (프로토콜이 늘어나도 멈추지 않게).
-       * 단 **무엇을 흘려보냈는지는 남긴다** (#58) — elicitation이 이 빈 {} 때문에
-       * 깨졌을 때 로그 한 줄이 없어서 원인 찾기가 미궁이었다. 요청은 알림과 달라
-       * 우리 답이 저쪽 행동을 바꾼다: 다음 번 같은 사고는 grep 한 번이어야 한다.
+       * A server request that is not an approval is passed through with an empty response (so we
+       * do not stall as the protocol grows). But **we do log what was passed through** (#58) — when
+       * an elicitation broke because of this empty {}, there was not a single log line to go on,
+       * and finding the cause turned into a maze. A request is not a notification: our answer
+       * changes what happens on the other side. The next time this happens, it should take one grep.
        */
       console.error('[codex] unknown server request answered with {}:', r.method)
       this.client.respond(r.id, {})
@@ -565,7 +621,7 @@ class CodexSession implements SessionHandle {
 
     const detail = approvalDetailFrom(r.method, params)
 
-    // 저장된 '항상 허용' 규칙에 맞으면 묻지 않는다 (C-2와 같은 규칙)
+    // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
     const key = detail.kind === 'command' ? detail.command : detail.kind === 'file_edit' ? detail.path : ''
     if (key && this.isAlwaysAllowed(key)) {
       this.client.respond(r.id, { decision: 'accept' })
@@ -592,45 +648,48 @@ class CodexSession implements SessionHandle {
     const nth = ++this.sendsIssued
     void this.ready
       .then(() => {
-        // 스레드가 서기 전에 누른 Stop이 이 말을 거뒀다 (sendsStopped) — 보내지 않는다
+        // A Stop pressed before the thread was up already reclaimed this message (sendsStopped) — do not send it
         if (nth <= this.sendsStopped) return
         if (!this.threadId) throw new Error('Thread is not ready')
         /*
-         * compact/review가 도는 동안은 보내지 않고 쌓는다 — pendingInputs 주석의 실측이
-         * 근거다 (보내면 codex가 성공을 답하며 **버린다**). 슬래시 함수가 여기 끼면
-         * 글자 그대로 전달되는 한계는 남는데, compact 중의 /compact은 어차피 무의미하다.
+         * While compact/review is running, we do not send but queue instead — the measurement in
+         * the pendingInputs comment is the reason (if sent, codex answers success while
+         * **dropping** it). This leaves a limitation where a slash command hitting this path is
+         * delivered as literal text, but /compact during a compact is meaningless anyway.
          */
         if (this.blockingTurn) {
           this.pendingInputs.push(text)
           return
         }
         /*
-         * **compact은 메시지가 아니라 함수다** (도그푸딩 지적 — "메시지 보내면 작동하는게
-         * 아니라"가 정확한 관찰이었다). codex CLI에서 /compact은 대화에 들어가지 않고
-         * 압축을 실행하는데, app-server 경로에는 그 슬래시 처리기가 없다 — turn/start로
-         * 보내면 모델이 "/compact"라는 **글자를 읽는다.** 전용 RPC가 따로 있다:
-         * thread/compact/start (generated/ClientRequest.ts). 실측: 즉시 {}를 답하고
-         * turn/started → contextCompaction 아이템 → thread/compacted로 진행돼,
-         * 기존 normalize 배관(압축 중 표시·완료 마커)이 그대로 받는다.
+         * **compact is a function, not a message** (a dogfooding observation nailed it exactly —
+         * "it does not work by sending a message"). In the codex CLI, /compact runs compaction
+         * without going into the conversation, but the app-server path has no such slash-command
+         * handler — sending it through turn/start makes the model **read the literal characters**
+         * "/compact". There is a dedicated RPC instead: thread/compact/start
+         * (generated/ClientRequest.ts). Measured: it answers {} immediately and proceeds
+         * turn/started -> contextCompaction item -> thread/compacted, which our existing normalize
+         * plumbing (the compacting indicator, the completion marker) already receives as-is.
          */
         if (text.trim() === '/compact') {
           this.blockingTurn = true
           return this.client
             .request('thread/compact/start', { threadId: this.threadId })
             .catch((e: unknown) => {
-              // 시작하지 못한 턴을 기다리면 큐가 영원히 잠긴다 — 풀고 쌓인 것부터 내보낸다
+              // Waiting on a turn that failed to start would lock the queue forever — unblock and flush what piled up
               this.blockingTurn = false
               this.flushPending()
               throw e
             })
         }
         /*
-         * /review도 같은 종류다 (review/start RPC). 실측: 인자 없으면 codex CLI의 기본과
-         * 같은 "지금 바뀐 것들" 리뷰, 인자가 있으면 그 지시대로(custom). 결과는 보통
-         * 턴처럼 온다 — 리뷰 본문은 agentMessage로 스트리밍되고(기존 배관), 시작·끝은
-         * enteredReviewMode/exitedReviewMode 아이템으로 온다 (normalize가 activity로 바꾼다).
-         * 상류가 review 턴도 조종 불가로 분류하므로("cannot steer a review turn")
-         * compact과 같이 큐로 지킨다.
+         * /review is the same kind of thing (the review/start RPC). Measured: with no argument it
+         * is the same "review what has changed right now" default as the codex CLI; with an
+         * argument it follows that instruction instead (custom). The result usually arrives like a
+         * turn — the review body streams as agentMessage (existing plumbing), and its start and end
+         * arrive as enteredReviewMode/exitedReviewMode items (normalize turns these into activity).
+         * Since upstream also classifies review turns as unsteerable ("cannot steer a review turn"),
+         * we guard it with the same queue as compact.
          */
         if (text.trim() === '/review' || text.trim().startsWith('/review ')) {
           const instructions = text.trim().slice('/review'.length).trim()
@@ -647,12 +706,13 @@ class CodexSession implements SessionHandle {
             })
         }
         /*
-         * /goal도 함수다 (2026-09-07 — /compact·/review와 같은 #58 부류). turn/start로
-         * 보내면 모델이 "/goal"이라는 글자를 읽는다. 전용 RPC 세 개가 있다:
-         * thread/goal/set·get·clear. 상태 변화는 thread/goal/updated|cleared 알림으로
-         * 돌아와 배지가 그걸 그린다 — 여기서는 채팅에 한 줄 확인만 남긴다 (로컬 명령의
-         * 답이 안 보이면 실행됐는지 알 길이 없다 — claude local_command_output의 교훈).
-         * 턴이 아니라서 blockingTurn은 걸지 않는다.
+         * /goal is also a function (2026-09-07 — the same #58 family as /compact and /review).
+         * Sending it through turn/start makes the model read the literal characters "/goal". There
+         * are three dedicated RPCs: thread/goal/set, get and clear. The state change comes back as
+         * a thread/goal/updated|cleared notification, which is what draws the badge — here we only
+         * leave a one-line confirmation in the chat (if a local command's answer is invisible,
+         * there is no way to know it ran — a lesson from claude's local_command_output). This is
+         * not a turn, so blockingTurn is not set.
          */
         if (text.trim() === '/goal' || text.trim().startsWith('/goal ')) {
           const arg = text.trim().slice('/goal'.length).trim()
@@ -675,13 +735,14 @@ class CodexSession implements SessionHandle {
               .then(() => say('Goal cleared.'))
           }
           /*
-           * 응답이 준 **상태를 그대로 말한다** (도그푸딩 2026-09-08: "등록은 된 것 같은데
-           * 동작을 안 한다").
+           * **State the status the response actually gave, verbatim** (dogfooding 2026-09-08:
+           * "it looks registered but does not do anything").
            *
-           * 실측: 스레드에 이미 끝난 골이 있으면, 새 목표를 넣어도 codex가 status를
-           * complete로 둔 채 objective만 갈아 끼운 기록을 남겼다. 그때 우리가 "Goal set"
-           * 이라고만 답하면, 화면은 됐다고 하는데 골 루프는 돌지 않는 상태가 된다 —
-           * 배지도 안 뜬다(완료된 골은 배지를 안 세우는 것이 우리 규칙이라).
+           * Measured: if the thread already has a finished goal, setting a new objective made
+           * codex leave status as complete while only swapping in the new objective. If we had
+           * just answered "Goal set" at that point, the screen would say it worked while the goal
+           * loop never actually ran — and no badge would appear either, since our own rule is that
+           * a completed goal does not raise a badge.
            */
           const setGoal = () =>
             this.client.request<{ goal?: { status?: string } }>('thread/goal/set', {
@@ -692,15 +753,16 @@ class CodexSession implements SessionHandle {
             typeof r?.goal?.status === 'string' ? r.goal.status : 'active'
           return setGoal().then(async (first) => {
             /*
-             * **끝난 골 위에 새 목표를 얹으면 끝난 채로 남는다** (실측 2026-09-08).
+             * **Setting a new goal on top of a finished one leaves it finished** (measured 2026-09-08).
              *
-             * 그 스레드에는 이틀 전 모델이 스스로 complete로 표시한 골이 있었고, 새
-             * 목표를 set하자 codex는 objective만 갈아 끼운 채 status를 complete로 두었다.
-             * 완료된 골은 아무것도 굴리지 않으므로, 사람 눈에는 "등록은 됐는데 동작을
-             * 안 하는" 상태가 된다.
+             * That thread had a goal the model had marked complete on its own two days earlier, and
+             * setting a new objective made codex swap in only the objective while leaving status at
+             * complete. A completed goal drives nothing, so to a person it looks like "it is
+             * registered but does not do anything".
              *
-             * 사람이 새 목표를 적었다는 것은 **다시 시작하겠다는 뜻**이다. 그래서 한 번만
-             * 비우고 다시 건다 — 그래도 active가 아니면 지어내지 않고 그 상태를 말한다.
+             * The person writing a new goal **means to start over**. So we clear it once and set it
+             * again — and if it is still not active after that, we state that status rather than
+             * making one up.
              */
             let status = statusOf(first)
             if (status !== 'active') {
@@ -716,13 +778,14 @@ class CodexSession implements SessionHandle {
               threadId: this.threadId,
               input: [{ type: 'text', text }],
               /*
-               * 추론 강도는 턴 단위로 넘긴다 — codex가 "이 턴과 이후 턴"에 적용한다고
-               * 문서화한 자리다. 세션을 다시 띄우지 않고 바꿀 수 있어서 이쪽이 더 싸다.
+               * Reasoning effort is passed per turn — this is the slot codex documents as applying
+               * to "this turn and turns after it". It is cheaper this way, since it can be changed
+               * without restarting the session.
                */
               ...(this.opts.effort ? { effort: this.opts.effort } : {}),
               ...this.outputSchemaParam(),
             })
-            // 응답에도 턴이 실려 온다 — 알림보다 먼저 도착하는 경우까지 덮는다 (스톱의 과녁)
+            // The turn also rides along on the response — this covers the case where it arrives before the notification (the target of stop)
             .then((res) => {
               this.turnId ??= turnIdOf(res)
             })
@@ -737,7 +800,7 @@ class CodexSession implements SessionHandle {
       })
   }
 
-  /** 막혔던 메시지를 한 턴으로 내보낸다 — 각 메시지는 제 input 항목으로 (경계를 뭉개지 않는다) */
+  /** Sends the messages that were queued out as one turn — each message as its own input item (does not blur the boundary) */
   private flushPending(): void {
     if (this.pendingInputs.length === 0 || !this.threadId) return
     const input = this.pendingInputs.map((text) => ({ type: 'text', text }))
@@ -762,10 +825,13 @@ class CodexSession implements SessionHandle {
   }
 
   /**
-   * 앱이 스키마를 주고 부탁한 에이전트의 턴 (M4 D-1). Codex는 스키마를 **턴마다** 받는다 — 설치된 0.153.4의 생성 타입
-   * `TurnStartParams.outputSchema`("Optional JSON Schema used to constrain the final assistant message for this turn").
-   * 그래서 이 세션의 모든 턴에 싣는다: 한 번 빠지면 그 턴의 마지막 메시지는 스키마 밖의 글이 된다. 답은 마지막 메시지
-   * 자체다 — 매니저가 그 글을 JSON으로 읽고 검증한다. 로그아웃 상태라 실행으로 재지 못했다(생성 타입으로만 확인).
+   * A turn belonging to an agent that an app gave a schema and asked for (M4 D-1). Codex receives
+   * the schema **per turn** — the installed 0.153.4's generated type is
+   * `TurnStartParams.outputSchema` ("Optional JSON Schema used to constrain the final assistant
+   * message for this turn"). So it is loaded onto every turn of this session: leaving it out even
+   * once means that turn's last message is free text outside the schema. The answer is the last
+   * message itself — the manager reads and validates that text as JSON. We could not re-verify by
+   * running it while logged out (confirmed only from the generated type).
    */
   private outputSchemaParam(): Record<string, unknown> {
     return this.opts.outputSchema ? { outputSchema: this.opts.outputSchema } : {}
@@ -778,15 +844,16 @@ class CodexSession implements SessionHandle {
     matcher?: string,
   ): boolean {
     const serverId = this.approvals.get(requestId)
-    // 스레드를 다시 띄우면 이 맵은 비어 있다 — 그 전에 뜬 카드의 id는 여기에 없다
+    // This map is empty when the thread has been started fresh — a card raised before that has no id here
     if (serverId === undefined) return false
     this.approvals.delete(requestId)
 
     if (this.elicitations.delete(requestId)) {
       /*
-       * 앱 도구 승인의 답 (M4 A-5). `always`는 Codex에게 "이 세션 동안 기억하라"로 넘긴다
-       * (`_meta.persist: "session"` → ApprovedForSession). 소스로만 확인했다(로그아웃, S-3):
-       * codex `parse_mcp_tool_approval_elicitation_response`가 accept와 이 값을 읽는다.
+       * The answer to an app tool approval (M4 A-5). `always` is passed to Codex as "remember
+       * this for the rest of the session" (`_meta.persist: "session"` -> ApprovedForSession).
+       * Confirmed from source only (logged out, S-3): codex's
+       * `parse_mcp_tool_approval_elicitation_response` reads accept together with this value.
        */
       this.client.respond(serverId, {
         action: decision === 'deny' ? 'decline' : 'accept',
@@ -802,15 +869,15 @@ class CodexSession implements SessionHandle {
     return true
   }
 
-  /** 슬래시 명령(스킬) — app-server의 공식 RPC */
+  /** Slash commands (skills) — the app-server's official RPC */
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     const res = await this.client.request<{ data?: unknown }>('skills/list', {})
     const groups = Array.isArray(res?.data) ? res.data : []
     /*
-     * compact은 스킬이 아니라 내장 명령이라 skills/list에 안 나온다 — 그런데 자동완성이
-     * 이 목록으로 그려지므로, 여기 없으면 **쓸 수 있는데 보이지 않는** 명령이 된다
-     * (있는 걸 숨기는 것도 목록의 거짓말이다). codex가 언젠가 목록에 실어 주면
-     * 아래 dedupe가 우리 것을 걷어낸다.
+     * compact is a built-in command, not a skill, so it does not appear in skills/list — but
+     * autocomplete is drawn from this list, so leaving it out makes it a command that **exists but
+     * is invisible** (hiding something that exists is also a lie the list tells). If codex ever
+     * starts including it in the list, the dedupe below removes our own entry.
      */
     const out: { name: string; description?: string; argumentHint?: string }[] = [
       { name: 'compact', description: '대화를 요약해 컨텍스트를 줄인다 (codex 내장)' },
@@ -838,23 +905,26 @@ class CodexSession implements SessionHandle {
 
   interrupt(): void {
     /*
-     * 이 세션이 부른 앱 호출을 멈춘다 (M4 A-5) — **턴이 없어도.** 240초를 넘겨 먼저 돌려준 호출은
-     * 턴이 끝난 뒤에도 돈다. 사람이 멈춤을 누른 세션의 일이 뒤에서 계속 돌면 안 된다.
-     * 다리는 판단하지 않으므로 여기(host)가 끊는다. 취소는 런타임이 앱과 그 아래 일까지 전한다.
+     * Stops app calls made by this session (M4 A-5) — **even without a turn.** A call that had
+     * already returned early past 240 seconds keeps running even after the turn ends. Work from a
+     * session the person pressed stop on must not keep running in the background. The bridge does
+     * not make this decision, so it is cut off here, at the host. The cancellation is carried by
+     * the runtime down through the app and whatever it started.
      */
     this.opts.apps?.cancelAll()
     /*
-     * 스레드가 아직 서지 않았다(지연 재개 중) — 줄 서 있는 말을 거두고 입력 대기로 돌린다 (#168, sendsStopped).
-     * 턴이 시작된 적이 없으니 turn/completed(interrupted)도 오지 않는다 — 상태는 여기서 돌린다.
+     * The thread has not come up yet (a lazy resume is in progress) — reclaim the queued message
+     * and go back to waiting for input (#168, sendsStopped). No turn/completed(interrupted) will
+     * arrive either, since no turn was ever started — the state is flipped here instead.
      */
     if (!this.threadId && this.sendsIssued > this.sendsStopped) {
       this.sendsStopped = this.sendsIssued
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
       return
     }
-    // 도는 턴이 없으면 멈출 것도 없다 (턴이 막 끝난 뒤의 스톱이 이 자리다)
+    // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
     if (!this.threadId || !this.turnId) return
-    // 실패를 삼키면 "멈췄겠지" 하고 기다리게 된다 — 안 멈췄으면 안 멈췄다고 말한다
+    // Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so
     void this.client
       .request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId })
       .catch((err: Error) => {
@@ -867,9 +937,10 @@ class CodexSession implements SessionHandle {
   }
 
   /**
-   * 배경 재개의 감시자 (지연 재개 전용). 핸들을 먼저 내준 뒤 재개가 실패하거나
-   * 상한을 넘기면, 조용히 잠들 수는 없다 — adapter_crashed를 올려서 매니저가
-   * 핸들을 걷고 "없으면 되살려 보낸다" 자동 복구 경로가 서게 한다.
+   * The watchdog for a background resume (lazy resume only). If resume fails or exceeds the
+   * ceiling after the handle has already been handed out, we cannot just go quietly to sleep — we
+   * raise adapter_crashed so the manager retires the handle and the "resend if missing" automatic
+   * recovery path can kick in.
    */
   watchBackgroundStart(): void {
     const timer = setTimeout(() => {
@@ -900,19 +971,20 @@ class CodexSession implements SessionHandle {
     )
   }
 
-  /** 매달린 승인을 말없이 놓지 않는다 (claude 어댑터와 같은 이유 — 화면이 카드를 붙든 채 막힌다) */
+  /** Does not silently drop a pending approval (same reason as the claude adapter — the screen would be stuck holding the card) */
   async dispose(): Promise<void> {
     this.closed = true
-    // 앱 붙이기는 핸들과 함께 닫힌다 — 새 핸들은 자기 것을 받는다
+    // App attachment closes together with the handle — a new handle gets its own
     this.opts.apps?.close()
     for (const requestId of this.approvals.keys()) {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     }
     this.approvals.clear()
     /*
-     * compact이 끝나기를 기다리던 메시지와 함께 죽는 경우 — 화면에는 이미 보낸 것으로
-     * 남아 있으므로(매니저가 먼저 기록한다), 말없이 버리면 원래 버그가 종료 시점에만
-     * 다시 태어난다. 배달 안 됐다고 말해야 사용자가 다시 보낼 수 있다.
+     * The case of dying together with messages that were waiting for a compact to finish — the
+     * screen already shows them as sent (the manager records them first), so dropping them
+     * silently would just resurrect the original bug at shutdown time. We have to say delivery
+     * failed, so the user can resend.
      */
     if (this.pendingInputs.length > 0) {
       const n = this.pendingInputs.length
@@ -931,7 +1003,7 @@ class CodexSession implements SessionHandle {
   }
 }
 
-/** elicitation의 `_meta`가 말하는 승인 종류 — 0.153.4는 `codex_approval_kind`, 지금 소스는 `codex/approval_kind` */
+/** The approval kind named by an elicitation's `_meta` — 0.153.4 uses `codex_approval_kind`, current source uses `codex/approval_kind` */
 function approvalKindOf(meta: unknown): string | null {
   if (typeof meta !== 'object' || meta === null) return null
   const m = meta as Record<string, unknown>
@@ -940,8 +1012,9 @@ function approvalKindOf(meta: unknown): string | null {
 }
 
 /**
- * 앱 도구 승인 카드의 내용 — 어느 앱의 무슨 도구를 어떤 인자로. Codex가 싣는 `_meta`의 도구
- * 제목(`tool_title`)과 인자(`tool_params`)를 쓰고, 없으면 Codex의 문장(`message`)으로 물러난다.
+ * The content of an app tool approval card — which app's tool, with what arguments. Uses the tool
+ * title (`tool_title`) and arguments (`tool_params`) that Codex loads into `_meta`, and falls back
+ * to Codex's own sentence (`message`) when those are absent.
  */
 function appApprovalDetail(server: string, message: unknown, meta: unknown): ApprovalDetail {
   const m = (typeof meta === 'object' && meta !== null ? meta : {}) as Record<string, unknown>
@@ -950,7 +1023,7 @@ function appApprovalDetail(server: string, message: unknown, meta: unknown): App
   return { kind: 'other', raw: `${server} · ${title}${params}` }
 }
 
-/** `{turn: {id}}` — turn/started 알림과 turn/start 응답이 같은 모양으로 준다 */
+/** `{turn: {id}}` — the turn/started notification and the turn/start response give it in the same shape */
 function turnIdOf(payload: unknown): string | null {
   const turn = (payload as { turn?: { id?: unknown } } | undefined)?.turn
   return typeof turn?.id === 'string' ? turn.id : null
@@ -964,11 +1037,11 @@ function threadIdOf(res: Record<string, unknown> | undefined): string | null {
 }
 
 /**
- * codex의 설정 폴더.
+ * Codex's settings folder.
  *
- * codex CLI 본체가 `CODEX_HOME`을 존중한다 — 우리만 홈 경로를 박아 쓰면
- * `CODEX_HOME`을 쓰는 사람에게 **엉뚱한 폴더를 보고** 로그인 여부를 답하게 된다.
- * (로그인돼 있는데 "로그인 필요"로 보이거나 그 반대.)
+ * The codex CLI itself honors `CODEX_HOME` — if we alone hard-code the home path, we end up
+ * answering whether a person using `CODEX_HOME` is logged in **by looking at the wrong folder**
+ * (showing "login required" while actually logged in, or the reverse).
  */
 function codexHome(): string {
   const custom = process.env.CODEX_HOME?.trim()
@@ -976,13 +1049,13 @@ function codexHome(): string {
 }
 
 /**
- * 응답 길이 단계 (#54). `model/list`가 모델별로 알려주지 않아 여기 적는다 — 대신
- * 생성 타입(generated/Verbosity.ts, ts-rs가 codex 소스에서 뽑는다)에 묶어 둔다:
- * codex가 단계를 더하거나 빼면 아래 두 검사 중 하나가 **컴파일에서** 터진다.
- * 실측(codex exec, 같은 질문): low 82단어 · high 269단어 — 이름값을 한다.
+ * The verbosity levels (#54). `model/list` does not report them per model, so we write them here
+ * instead — but tied to the generated type (generated/Verbosity.ts, extracted by ts-rs from codex
+ * source): if codex adds or removes a level, one of the two checks below **fails at compile time**.
+ * Measured (codex exec, same question): low 82 words, high 269 words — the names earn their keep.
  */
 const CODEX_VERBOSITIES = ['low', 'medium', 'high'] as const satisfies readonly Verbosity[]
-// 빠진 단계가 없는지 — satisfies는 '틀린 값'만 잡고 '빼먹은 값'은 못 잡는다
+// Checks that no level is missing — satisfies only catches a "wrong value", not a "missing value"
 type MissingVerbosity = Exclude<Verbosity, (typeof CODEX_VERBOSITIES)[number]>
 const _allVerbositiesListed: MissingVerbosity extends never ? true : never = true
 void _allVerbositiesListed
@@ -999,15 +1072,15 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, // M0 실측: thread/start의 approvalPolicy가 전역 설정을 덮어쓴다
+    approvals: true, // Measured in M0: thread/start's approvalPolicy overrides the global setting
     contextUsage: 'exact', // thread/tokenUsage/updated
     resume: true, // thread/resume
     autoTitle: true, // thread/name/updated
     attachments: ['image', 'file'],
     verbosities: [...CODEX_VERBOSITIES],
-    // app-server의 writer lock ("already has an active writer" — client.ts가 번역하는 그 오류).
-    // 우리가 핸들을 쥔 동안의 기록 변화는 전부 우리 것이라는 보장이고, 매니저가 그 위에서
-    // 따라잡기 스킵 표식을 찍는다 (48.6MB/8초짜리 thread/read를 건너뛰는 근거다).
+    // The app-server's writer lock ("already has an active writer" — the error client.ts
+    // translates). This is a guarantee that every record change while we hold the handle is ours,
+    // and the manager marks a catch-up skip on top of it (the basis for skipping a 48.6MB/8-second thread/read).
     exclusiveWriter: true,
   }
 
@@ -1016,7 +1089,7 @@ export class CodexAdapter implements AgentAdapter {
     try {
       const { stdout } = await exec(path ?? 'codex', ['--version'], { timeout: 5000 })
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
-      // 로그인 여부는 인증 파일 존재로 판단한다 (CLI를 띄우지 않고 값싸게)
+      // Login status is judged by whether the auth file exists (cheap — no need to start the CLI)
       const loggedIn = existsSync(join(codexHome(), 'auth.json'))
       return {
         tool: 'codex',
@@ -1039,12 +1112,12 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   /**
-   * 잠긴 대화에서 갈라져 나온다 (`thread/fork`).
+   * Splits off a new thread from a locked conversation (`thread/fork`).
    *
-   * 사용량 조회와 같은 이유로 **단명 클라이언트**를 쓴다 — 이건 세션이 아니라
-   * 세션을 만들기 **전에** 하는 일이라, 붙잡고 있을 스레드가 아직 없다.
+   * Uses a **short-lived client**, for the same reason as the usage lookup — this happens
+   * **before** a session is created, not as part of one, so there is no thread yet to hold onto.
    *
-   * 원본은 건드리지 않는다. codex가 새 스레드에 `forkedFromId`로 출처를 남겨 준다.
+   * The original is left untouched. Codex leaves the provenance on the new thread as `forkedFromId`.
    */
   async forkConversation(externalId: string, cwd: string): Promise<string> {
     const client = new CodexClient(
@@ -1059,7 +1132,7 @@ export class CodexAdapter implements AgentAdapter {
       client.notify('initialized')
       const res = await client.request<Record<string, unknown>>('thread/fork', { threadId: externalId })
       const forked = threadIdOf(res)
-      // 갈라졌다면서 새 id를 못 주면 이어갈 데가 없다 — 조용히 원본으로 되돌아가면 또 잠긴다
+      // Claiming a fork happened without giving a new id leaves nothing to continue from — falling back to the original silently would just be locked again
       if (!forked) throw new Error('codex forked the conversation but returned no thread id')
       return forked
     } finally {
@@ -1068,9 +1141,10 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   /**
-   * 스레드 원본을 지운다 (thread/delete RPC). fork와 같은 이유로 단명 클라이언트다 —
-   * 세션은 이미 dispose된 뒤라 붙잡고 있을 프로세스가 없다. 이 호출이 rollout 파일을
-   * 도구 쪽에서 거둬 간다 (실측 550MB짜리가 여기서 사라진다).
+   * Deletes the original thread (the thread/delete RPC). A short-lived client, for the same reason
+   * as fork — the session has already been disposed of, so there is no process left to hold onto.
+   * This call is what makes the tool itself reclaim the rollout file (measured: a 550MB one
+   * disappears here).
    */
   async deleteExternalConversation(externalId: string, cwd: string): Promise<void> {
     const client = new CodexClient(
@@ -1083,17 +1157,20 @@ export class CodexAdapter implements AgentAdapter {
       await client.request('thread/delete', { threadId: externalId })
     } catch (e) {
       /*
-       * **없는 것을 지우라는 요청은 실패가 아니다** (도그푸딩 2026-09-07: 워크트리 세션을
-       * 잘못 만들고 지우려다 "Could not delete: no rollout found for thread id …").
+       * **Asking to delete something that does not exist is not a failure** (dogfooding
+       * 2026-09-07: trying to delete a worktree session that had been created by mistake gave
+       * "Could not delete: no rollout found for thread id …").
        *
-       * 실측: codex는 thread/start에서 스레드 id만 발급하고 rollout 파일은 **첫 턴에**
-       * 쓴다. 그래서 한 번도 말을 안 건 세션은 지울 파일이 없고, thread/delete가
-       * -32600으로 거절한다. 그 거절을 그대로 던지면 매니저가 여기서 멈춰서 세션 행도
-       * 워크트리도 안 지워진다 — 잘못 만든 세션일수록 못 지우는 셈이다.
+       * Measured: codex only issues the thread id at thread/start and writes the rollout file on
+       * **the first turn**. So a session that never had a single message exchanged has no file to
+       * delete, and thread/delete rejects it with -32600. Throwing that rejection as-is would stop
+       * the manager here and leave neither the session row nor the worktree deleted — the more
+       * mistaken the session, the less deletable it would become.
        *
-       * 목적("도구 쪽에 남아 있지 않게 하기")은 이미 이뤄져 있으므로 성공으로 친다.
-       * 다른 실패는 그대로 던진다 — 원본이 살아 있는데 지웠다고 답하는 것이 최악이라는
-       * 규칙(매니저 주석)은 그대로다.
+       * The goal ("make sure nothing is left on the tool side") is already achieved, so we treat
+       * this as success. Any other failure is still thrown — the rule that answering "deleted"
+       * while the original still exists is the worst outcome (per the manager's own comment) still
+       * holds.
        */
       if (!/no rollout found/i.test((e as Error).message)) throw e
     } finally {
@@ -1101,14 +1178,15 @@ export class CodexAdapter implements AgentAdapter {
     }
   }
 
-  /** 죽은 codex의 마지막 컴팩트 요약 (#78) — 롤아웃 파일에서, 바이너리 없이 (rollout.ts) */
+  /** The last compact summary of a dead codex process (#78) — read from the rollout file, with no binary involved (rollout.ts) */
   async lastCompactSummary(externalId: string): Promise<string | null> {
     return rolloutLastCompactSummary(externalId)
   }
 
   /**
-   * 계정 사용량 (FR-9).
-   * 세션과 무관하므로 단명 클라이언트로 묻는다 — 대화 중인 스레드에 조회를 얹지 않는다.
+   * Account usage (FR-9).
+   * Asked with a short-lived client, since it has nothing to do with any session — we do not
+   * pile the lookup onto a thread that is mid-conversation.
    */
   async listUsage() {
     return readCodexUsage(whichTool('codex') ?? 'codex')
@@ -1125,16 +1203,17 @@ export class CodexAdapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const session = new CodexSession(opts, emit)
     /*
-     * **재개는 클로드처럼 — 사람 앞에서 기다리지 않는다** (도그푸딩: 같은 스레드가
-     * CLI에선 3초, 우리 경로에선 13초+였다. thread/resume이 파일 전체를 되읽는 비용은
-     * 못 없애지만, 그 비용을 "Waking…" 화면 앞에서 치를 이유는 없다 — 재개는 스레드
-     * id를 이미 알고 있어서, 핸들을 먼저 내줘도 잃는 것이 없다. send는 ready에
-     * 큐잉된다).
+     * **Resume works like Claude's — we do not make the person wait for it** (dogfooding: the same
+     * thread took 3 seconds in the CLI, 13+ seconds on our path. We cannot remove the cost of
+     * thread/resume re-reading the whole file, but there is no reason to make the person pay that
+     * cost in front of a "Waking…" screen — resume already knows the thread id, so handing out the
+     * handle early loses nothing. send gets queued on ready).
      *
-     * 단 3초는 동기로 기다린다: 잠금 오류("already has an active writer")는 즉시
-     * 오므로(실측 ~0.3s), 이 창 안에서 던져야 "다른 곳에서 열려 있음 → 갈라서
-     * 이어가기" 갈림길 UI가 지금처럼 산다. 새 스레드(thread/start)는 예전 그대로
-     * 끝까지 기다린다 — id가 생겨야 재개가 가능하다 (M1.5 결함 5번 교훈).
+     * We do wait synchronously for 3 seconds, though: a lock error ("already has an active writer")
+     * arrives immediately (measured ~0.3s), so it has to be thrown within this window for the
+     * "open elsewhere -> split off and continue" fork-in-the-road UI to keep working as it does now.
+     * A brand-new thread (thread/start) still waits all the way to completion as before — resume is
+     * only possible once an id exists (a lesson from M1.5 defect 5).
      */
     if (opts.resumeExternalId) {
       session.externalId = opts.resumeExternalId
@@ -1159,9 +1238,10 @@ export class CodexAdapter implements AgentAdapter {
       await session.ready
     } catch (err) {
       /*
-       * 준비에 실패한 세션은 핸들이 밖으로 나가지 않는다 — dispose를 불러줄 사람이 없다.
-       * 생성자에서 이미 뜬 app-server를 여기서 거두지 않으면, 잠긴 스레드를 이어가려다
-       * 실패할 때마다 자식 프로세스가 하나씩 조용히 샜다.
+       * A session that failed to become ready never has its handle handed out — there is nobody
+       * left to call dispose on it. If we did not reclaim the app-server the constructor already
+       * started here, a child process would leak silently, one at a time, every time resuming a
+       * locked thread failed.
        */
       await session.dispose().catch(() => {})
       throw err

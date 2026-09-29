@@ -5,21 +5,23 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * 죽은 codex의 마지막 컴팩트 요약 (#78) — **롤아웃 파일에서, 바이너리 없이**.
+ * The last compact summary of a dead codex process (#78) — **from the rollout file, with no
+ * binary involved**.
  *
- * 서비스가 중단된 에이전트에게는 요약을 부탁할 수 없지만, codex의 컴팩트 요약은
- * 롤아웃 파일에 평문으로 남는다 (실측 2026-09-04: `compacted` 아이템의
- * replacement_history 첫 user 메시지가 요약 원문이다). 로컬 파일이라 API가 죽어도,
- * 심지어 codex 바이너리가 깨져도 읽힌다 — 파일 위치도 **파일명**으로 찾는다
- * (`rollout-…-<threadId>.jsonl`): getConversationSummary RPC는 이름과 달리
- * 메타데이터만 주는 데다 살아 있는 바이너리를 요구한다.
+ * A summary cannot be requested from an agent whose service has stopped, but codex's compact
+ * summary survives as plain text in the rollout file (measured 2026-09-04: the first user message
+ * in a `compacted` item's replacement_history is the summary text itself). Since it is a local
+ * file, this still reads even if the API is dead, or even if the codex binary itself is broken —
+ * the file's location is also found by **file name** (`rollout-…-<threadId>.jsonl`), since the
+ * getConversationSummary RPC, despite its name, only gives metadata and also requires a live binary.
  *
- * 롤아웃 포맷은 비공식이다. 그래서 이 의존은 **재해 경로에만** 산다 — 컴팩트마다
- * 도는 상시 경로로 승격하지 않는다(#78 결정). 어떤 실패도 null로 눕는다:
- * 요약이 없으면 기록 빌더가 원문 계층 압축으로 물러날 뿐, 인수인계는 계속된다.
+ * The rollout format is unofficial. So this dependency is used **only on the disaster path** — it
+ * is not promoted to an always-on path that runs on every compaction (decision for #78). Any
+ * failure lies down as null: without a summary, the record builder just falls back to compressing
+ * the raw text, and the handoff still proceeds.
  */
 
-/** 요약이라 부를 최소 길이 — 몇 글자짜리 조각을 "요약"으로 승격시키지 않는다 */
+/** The minimum length to call something a summary — a fragment a few characters long is not promoted to "summary" */
 const MIN_SUMMARY_CHARS = 200
 
 export async function findRolloutPath(
@@ -29,7 +31,7 @@ export async function findRolloutPath(
   try {
     const suffix = `-${threadId}.jsonl`
     const names = await readdir(sessionsDir, { recursive: true })
-    // 같은 스레드의 롤아웃은 하나다 — 여럿이면(있을 수 없지만) 이름 정렬상 마지막(최신 타임스탬프)
+    // There is exactly one rollout per thread — if there were several (should not happen), take the last by name sort (the most recent timestamp)
     const hits = names.filter((n) => String(n).endsWith(suffix)).sort()
     const hit = hits[hits.length - 1]
     return hit ? join(sessionsDir, String(hit)) : null
@@ -38,7 +40,7 @@ export async function findRolloutPath(
   }
 }
 
-/** compacted 아이템 하나에서 요약 텍스트를 꺼낸다 — message가 비면 replacement_history의 첫 user 메시지 */
+/** Pulls the summary text out of a single compacted item — if message is empty, uses replacement_history's first user message */
 function summaryOf(payload: unknown): string | null {
   const p = payload as {
     message?: unknown
@@ -51,16 +53,17 @@ function summaryOf(payload: unknown): string | null {
       .filter((c) => c.type === 'input_text' && typeof c.text === 'string')
       .map((c) => c.text)
       .join('\n')
-    // 첫 user 메시지가 요약이다 (실측). 너무 짧으면 요약이 아니라 보존된 일반 메시지다
+    // The first user message is the summary (measured). If too short, it is a preserved ordinary message, not a summary
     return text.trim().length >= MIN_SUMMARY_CHARS ? text : null
   }
   return null
 }
 
 /**
- * 롤아웃을 순차로 흘려 읽으며 **마지막** compacted의 요약을 남긴다.
- * 550MB급 파일도 스트림이라 메모리는 한 줄 몫이다 — 파싱은 'compacted'가
- * 들어 있는 줄만 한다 (대부분의 줄은 그 문자열 검사 한 번으로 지나간다).
+ * Streams through the rollout sequentially, keeping the **last** compacted item's summary.
+ * Since it is a stream, memory use stays at one line's worth even for a 550MB-class file —
+ * parsing is done only on lines that contain 'compacted' (most lines pass through with just that
+ * one string check).
  */
 export async function lastCompactSummary(
   threadId: string,
@@ -79,7 +82,7 @@ export async function lastCompactSummary(
         const s = summaryOf(j.payload)
         if (s) last = s
       } catch {
-        // 깨진 줄은 건너뛴다 — 도구가 쓰다 만 마지막 줄일 수 있다
+        // A broken line is skipped — it could be the last line the tool left half-written
       }
     }
     return last

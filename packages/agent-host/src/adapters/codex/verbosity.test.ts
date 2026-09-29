@@ -1,15 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 /**
- * 응답 길이(verbosity, #54)는 **thread config로만** 넘어간다.
+ * Response verbosity (#54) is only ever passed through **thread config.**
  *
- * effort와 겉보기에 같은 설정인데 길이 다르다 — turn/start에는 verbosity 자리가 없다
- * (generated/v2/TurnStartParams.ts에 없음, 실측). 그래서 스레드를 띄우는 두 자리
- * (thread/start·thread/resume)에 실리는지를 본다. 여기 빠지면 화면에는 골라져 있는데
- * codex는 기본값으로 도는, 눈으로 못 잡는 종류의 유실이 된다.
+ * It looks like the same kind of setting as effort, but the shape differs — turn/start has no slot
+ * for verbosity (absent from generated/v2/TurnStartParams.ts, measured). So this checks whether it
+ * is loaded at the two spots where a thread is started (thread/start, thread/resume). Leaving it
+ * out here becomes the kind of loss nobody can see: the screen shows it selected, but codex runs
+ * on its default.
  *
- * 클라이언트를 가짜로 갈아 끼우고 **요청 파라미터를 그대로 본다** — 이 계약의 전부가
- * "무엇을 보냈는가"라서, 보낸 것을 기록하는 것보다 나은 검사가 없다.
+ * The client is swapped for a fake and **the request parameters are inspected directly** — since
+ * the whole of this contract is "what was sent," there is no better check than recording what was sent.
  */
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params: Record<string, unknown> | undefined }[],
@@ -38,8 +39,8 @@ beforeEach(() => {
   state.requests.length = 0
 })
 
-describe('codex 응답 길이(verbosity) 전달', () => {
-  it('thread/start의 config.model_verbosity로 실린다', async () => {
+describe('carrying codex response verbosity through', () => {
+  it("is loaded into thread/start's config.model_verbosity", async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession(
       { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', verbosity: 'low' },
@@ -48,7 +49,7 @@ describe('codex 응답 길이(verbosity) 전달', () => {
     expect(paramsOf('thread/start')?.config).toMatchObject({ model_verbosity: 'low' })
   })
 
-  it('재개(thread/resume)에도 따라온다 — 잠들었다 깨면 풀리는 설정이면 안 된다', async () => {
+  it('carries through on resume (thread/resume) too — settings must not reset after waking up', async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession(
       { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', verbosity: 'high', resumeExternalId: 'ext-1' },
@@ -57,8 +58,8 @@ describe('codex 응답 길이(verbosity) 전달', () => {
     expect(paramsOf('thread/resume')?.config).toMatchObject({ model_verbosity: 'high' })
   })
 
-  /** 응답 속도(service_tier)도 같은 배관이다 — 시작·재개 둘 다 */
-  it('속도 티어가 thread/start와 thread/resume의 config.service_tier로 실린다', async () => {
+  /** Response speed (service_tier) uses the same plumbing — both start and resume */
+  it("a speed tier is loaded into thread/start's and thread/resume's config.service_tier", async () => {
     const a1 = new CodexAdapter()
     await a1.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', serviceTier: 'priority' }, () => {})
     expect(paramsOf('thread/start')?.config).toMatchObject({ service_tier: 'priority' })
@@ -72,7 +73,7 @@ describe('codex 응답 길이(verbosity) 전달', () => {
     expect(paramsOf('thread/resume')?.config).toMatchObject({ service_tier: 'priority' })
   })
 
-  it('안 고르면 service_tier 키 자체가 없다 — 속도의 기본값도 codex의 것이다', async () => {
+  it('with nothing selected, the service_tier key does not exist at all — the default speed also belongs to codex', async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
     const config = paramsOf('thread/start')?.config as Record<string, unknown>
@@ -80,12 +81,12 @@ describe('codex 응답 길이(verbosity) 전달', () => {
   })
 
   /*
-   * 예전 계약은 "안 고르면 config 자체를 안 보낸다"였다. #58이 한 자리를 바꿨다:
-   * model_reasoning_summary는 우리가 켠다 — 이 스위치 없이는 추론 스트림이 한 건도
-   * 안 와서, 배선한 기능이 존재하지 않는 것과 같아지기 때문이다 (실측). 그 외의
-   * 기본값은 여전히 codex의 것이다: verbosity를 안 골랐으면 그 키는 없어야 한다.
+   * The old contract was "send no config at all if nothing is selected." #58 changed one spot:
+   * we turn on model_reasoning_summary ourselves — without that switch, the reasoning stream never
+   * arrives, not once, which makes the feature we wired up equivalent to not existing (measured).
+   * Every other default still belongs to codex: if verbosity was not selected, that key must be absent.
    */
-  it('안 고르면 verbosity 키를 보내지 않는다 — 추론 요약 스위치만 우리가 켠다', async () => {
+  it('sends no verbosity key when nothing is selected — only the reasoning-summary switch is ours to turn on', async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
     const config = paramsOf('thread/start')?.config as Record<string, unknown>
@@ -94,11 +95,12 @@ describe('codex 응답 길이(verbosity) 전달', () => {
   })
 
   /*
-   * config는 오케스트레이터 블록도 쓴다. 스프레드 둘이 같은 키를 만들면 **뒤가 앞을
-   * 통째로 덮는다** — 합쳐지는 게 아니다. 이 테스트가 없으면 verbosity를 더한 사람도,
-   * 나중에 config에 세 번째 것을 더할 사람도 그 사실을 코드에서 읽을 수 없다.
+   * config is also used by the orchestrator block. When two spreads produce the same key, **the
+   * later one overwrites the earlier one entirely** — they do not merge. Without this test,
+   * neither the person who added verbosity nor whoever adds a third thing to config later would be
+   * able to read that fact from the code.
    */
-  it('오케스트레이터의 config와 한 덩어리로 합쳐진다 — 서로를 덮지 않는다', async () => {
+  it("merges into one block with the orchestrator's config — neither overwrites the other", async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession(
       {

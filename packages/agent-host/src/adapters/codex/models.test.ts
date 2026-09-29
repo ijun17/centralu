@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { collectModels, toModelOptions } from './models.js'
 
 /**
- * 목록을 우리가 적지 않기로 했으므로, 응답 포맷이 바뀌면 **테스트가 먼저** 알려줘야 한다.
- * codex를 띄우지 않고 검증할 수 있게 순수 함수로 분리해 둔 이유다.
+ * Since we decided not to maintain the list ourselves, **a test must be the first thing** to say
+ * so if the response format changes. This is why it is split out as a pure function that can be
+ * verified without starting codex.
  */
 describe('toModelOptions', () => {
   const row = (over: Record<string, unknown> = {}) => ({
@@ -13,9 +14,10 @@ describe('toModelOptions', () => {
     description: '설명',
     hidden: false,
     /*
-     * **생성된 타입 그대로 쓴다.** 전에는 여기 모양을 짐작해서 적었는데,
-     * 구현도 같은 짐작을 하고 있어서 둘이 사이좋게 틀린 채로 통과했다.
-     * 짐작끼리 맞춰보는 테스트는 아무것도 지켜주지 못한다 — 타입으로 못을 박는다.
+     * **Uses the generated type exactly.** This shape used to be written from a guess, and the
+     * implementation was making the same guess, so the two happily agreed on the wrong shape and
+     * passed anyway. A test that checks one guess against another guarantees nothing — pinning it
+     * to the type is what nails it down.
      */
     /*
      * The shape is written out here instead of importing the generated
@@ -35,7 +37,7 @@ describe('toModelOptions', () => {
     ...over,
   })
 
-  it('모델과 추론 강도를 함께 나른다 — 강도는 모델에 붙어야 답이 하나가 된다', () => {
+  it('carries the model and its reasoning effort levels together — effort must stay attached to the model for the answer to be single', () => {
     expect(toModelOptions([row()])).toEqual([
       {
         id: 'gpt-5.6-terra',
@@ -48,51 +50,51 @@ describe('toModelOptions', () => {
     ])
   })
 
-  /** 응답 속도 티어 — 실측 모양: serviceTiers: [{id:'priority', name:'Fast', description:'1.5x…'}] */
-  it('속도 티어를 이름·설명째 나른다 — 사용량 경고문은 codex의 문장이 정확하다', () => {
+  /** Response-speed tiers — measured shape: serviceTiers: [{id:'priority', name:'Fast', description:'1.5x…'}] */
+  it('carries a speed tier through with its name and description — the usage warning text is codex\'s own wording, verbatim', () => {
     const out = toModelOptions([
       row({ serviceTiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] }),
     ])
     expect(out[0]!.tiers).toEqual([{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }])
   })
 
-  it('망가진 티어 항목은 버리되 목록은 산다', () => {
+  it('drops a broken tier entry but keeps the rest of the list alive', () => {
     const out = toModelOptions([row({ serviceTiers: [{ name: 'no-id' }, { id: 'ok' }] })])
     expect(out[0]!.tiers).toEqual([{ id: 'ok', name: 'ok', description: '' }])
   })
 
-  it('codex가 숨긴 모델은 우리도 숨긴다', () => {
+  it('a model codex hides is hidden by us too', () => {
     expect(toModelOptions([row({ hidden: true })])).toEqual([])
   })
 
-  it('강도가 문자열로만 와도 읽는다 — 포맷이 바뀌어도 통째로 비지는 않게', () => {
+  it('reads effort even when it arrives as plain strings — so a format change does not empty the list entirely', () => {
     const out = toModelOptions([row({ supportedReasoningEfforts: ['low', 'high'] })])
     expect(out[0]!.efforts).toEqual(['low', 'high'])
   })
 
-  it('모르는 키만 든 강도 항목은 버린다 — 빈 문자열이 셀렉터에 들어가면 안 된다', () => {
+  it('drops an effort entry that has only unknown keys — an empty string must not land in the selector', () => {
     const out = toModelOptions([row({ supportedReasoningEfforts: [{ effort: 'low' }, {}] })])
     expect(out[0]!.efforts).toEqual([])
   })
 
-  it('모르는 모양은 조용히 흘려보낸다 — 하나가 이상해도 목록 전체가 죽으면 안 된다', () => {
+  it('passes over an unrecognized shape silently — one bad entry must not kill the whole list', () => {
     expect(toModelOptions([null, { model: '' }, 'nope', row()])).toHaveLength(1)
     expect(toModelOptions(undefined)).toEqual([])
   })
 
-  it('이름이 없으면 id를 쓴다 — 빈 줄이 보이는 것보다 낫다', () => {
+  it('falls back to the id when there is no display name — better than showing a blank line', () => {
     expect(toModelOptions([row({ displayName: '' })])[0]!.label).toBe('gpt-5.6-terra')
   })
 })
 
 /**
- * "코덱스도 사용 가능한 모델 다 가져오는거지?" — 아니었다.
- * 첫 페이지만 읽고 nextCursor를 버리고 있었다. 그 회귀를 여기서 막는다.
+ * "Does this actually fetch every model codex has available?" — it did not. Only the first page
+ * was being read, and nextCursor was thrown away. This guards against that regression.
  */
-describe('collectModels — 커서를 끝까지 따라간다', () => {
+describe('collectModels — follows the cursor all the way to the end', () => {
   const m = (name: string) => ({ model: name, displayName: name, supportedReasoningEfforts: [] })
 
-  it('여러 페이지를 이어붙인다', async () => {
+  it('stitches multiple pages together', async () => {
     const pages: Record<string, { data: unknown[]; nextCursor: string | null }> = {
       '': { data: [m('a'), m('b')], nextCursor: 'c1' },
       c1: { data: [m('c')], nextCursor: 'c2' },
@@ -104,11 +106,11 @@ describe('collectModels — 커서를 끝까지 따라간다', () => {
       return pages[cursor ?? '']!
     })
     expect(out.map((x) => x.id)).toEqual(['a', 'b', 'c', 'd'])
-    // 첫 요청엔 커서를 보내지 않고, 이후엔 받은 커서를 그대로 되돌려준다
+    // No cursor is sent on the first request; after that, the cursor received is sent back exactly as-is
     expect(seen).toEqual([null, 'c1', 'c2'])
   })
 
-  it('한 페이지뿐이면 한 번만 묻는다', async () => {
+  it('asks only once when there is just one page', async () => {
     let calls = 0
     const out = await collectModels(async () => {
       calls++
@@ -118,7 +120,7 @@ describe('collectModels — 커서를 끝까지 따라간다', () => {
     expect(calls).toBe(1)
   })
 
-  it('커서가 끝나지 않으면 조용히 자르지 않고 잘렸다고 말한다', async () => {
+  it('when the cursor never ends, it does not silently truncate — it says it was truncated', async () => {
     await expect(collectModels(async () => ({ data: [m('x')], nextCursor: 'never-ends' }))).rejects.toThrow(
       /list truncated/,
     )
