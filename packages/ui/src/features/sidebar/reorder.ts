@@ -8,6 +8,12 @@
 /** 끌고 있는 것이 무엇인지. 서로 다른 종류가 서로의 자리에 떨어지면 안 된다 */
 export const PROJECT_MIME = 'application/x-cc-project'
 export const SESSION_MIME = 'application/x-cc-session'
+/**
+ * A panel on the project screen (#203) — a session's or an app's. Its own type, so a sidebar row
+ * dragged over the project screen is not taken for one of its panels: that screen shows what the
+ * project has, and nothing is added to it by hand.
+ */
+export const PANEL_MIME = 'application/x-cc-panel'
 
 /**
  * `dragged`를 `target`의 앞(before) 또는 뒤로 옮긴 새 순서.

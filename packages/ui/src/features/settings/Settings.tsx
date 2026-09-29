@@ -775,6 +775,7 @@ function AppearanceSection() {
         그리드 칸의 입력창 접기 (사용자 요청 2026-09-10). 두 줄짜리 그리드에서 읽는 자리가
         좁다는 데서 나온 설정이라, **그리드에만** 적용된다 — 포커스 뷰는 자리가 넉넉하고
         거기서 접으면 매번 올려야 하는 수고만 남는다.
+        The project screen's panels (#203) are the grid's panels at the grid's sizes, so it applies there too.
       */}
       <div className="mt-6 border-t border-edge pt-4">
         <label className="flex items-start gap-2 text-[12px] text-ash">
@@ -786,7 +787,7 @@ function AppearanceSection() {
             data-testid="settings-fold-composer"
           />
           <span>
-            Fold the message box in the grid
+            Fold the message box in the grid and on project screens
             <span className="mt-1 block text-[11px] leading-relaxed text-slate">
               It rests as a card peeking from the bottom and rises over the conversation when you
               reach for it. Off keeps it open, as before.
@@ -845,7 +846,7 @@ function AppearanceSection() {
             onChange={(e) => setSpinGrid(e.target.checked)}
             data-testid="settings-spin-grid"
           />
-          <span>Grid panel border</span>
+          <span>Panel border in the grid and on project screens</span>
         </label>
         <label className="mt-1.5 flex items-start gap-2 text-[12px] text-ash">
           <input

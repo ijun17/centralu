@@ -8,7 +8,7 @@ import { letterOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
-import { TEXT_SCALES, useStore } from '../store/store.js'
+import { TEXT_SCALES, projectScreenOf, useStore } from '../store/store.js'
 import { useCounts, computeInbox } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -17,6 +17,7 @@ import { SessionView } from '../features/session/SessionView.jsx'
 import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { PinnedApps } from '../features/pinned-app/PinnedApps.jsx'
+import { ProjectView } from '../features/project/ProjectView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
@@ -211,6 +212,8 @@ function Body() {
   const introSeen = useStore((s) => s.introSeen)
   // 훅은 **이른 return보다 먼저** — 아래 소개 분기 뒤에 두면 렌더마다 훅 수가 달라진다
   const view = useStore((s) => s.view)
+  // The focus lane with a project picked and no session is that project's screen (#203)
+  const projectScreen = useStore(projectScreenOf)
 
   if (virgin && !introSeen) {
     return (
@@ -278,7 +281,15 @@ function Body() {
         가로 스크롤된다 (도그푸딩에서 나온 버그의 진짜 원인).
       */}
       <div className="relative flex min-h-0 min-w-0 flex-1">
-        {view === 'orchestrator' ? <OrchestratorView /> : view === 'grid' ? <GridView /> : view === 'app' ? null : <SessionView />}
+        {view === 'orchestrator' ? (
+          <OrchestratorView />
+        ) : view === 'grid' ? (
+          <GridView />
+        ) : view === 'app' ? null : projectScreen ? (
+          <ProjectView projectId={projectScreen} />
+        ) : (
+          <SessionView />
+        )}
         {/*
           고정 화면(M4 B-2)은 늘 이 자리에서 그려지고, 다른 것을 볼 때는 숨기만 한다. iframe은
           DOM에서 떼는 순간 문서를 잃는다. 그러면 세션에 갔다 돌아올 때마다 앱이 처음부터 다시 뜬다.

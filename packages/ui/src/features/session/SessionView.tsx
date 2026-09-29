@@ -64,38 +64,19 @@ const LANDING_FRAMES = 30
  */
 export function SessionView() {
   const session = useFocusedSession()
-  const projectOnly = useStore((s) => (s.focusedSessionId ? undefined : s.projects[s.focusedProjectId ?? '']))
 
   if (!session) {
-    if (!projectOnly) {
-      return (
-        <div
-          className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
-          data-testid="empty-focus"
-        >
-          <p className="text-[13px] text-ash">Select a project or session</p>
-          <p className="text-[11px] text-slate">
-            <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you
-          </p>
-        </div>
-      )
-    }
+    // With a project picked and no session, App shows the project screen (ProjectView, #203) instead of this
     return (
-      <section className="flex min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
-        <DragRegion className="flex items-center gap-2.5 border-b border-edge px-4 py-2">
-          <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
-            {projectOnly.name}
-          </h1>
-          <span className="readout text-[11px] text-slate">{projectOnly.path}</span>
-        </DragRegion>
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-          <p className="text-[13px] text-ash">Select a session or start a new one</p>
-          <p className="text-[11px] text-slate">
-            Git and files are in the evidence panel on the right, even without a session (<Kbd mod />{' '}
-            <Kbd>B</Kbd>)
-          </p>
-        </div>
-      </section>
+      <div
+        className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
+        data-testid="empty-focus"
+      >
+        <p className="text-[13px] text-ash">Select a project or session</p>
+        <p className="text-[11px] text-slate">
+          <Kbd mod /> <Kbd>I</Kbd> shows everything waiting on you
+        </p>
+      </div>
     )
   }
 

@@ -292,6 +292,15 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
   test('닫으면 규격의 teardown을 보내고 인스턴스를 놓으며, 보던 세션 자리로 돌아간다', async ({ page }) => {
     const pid = await trustedProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid)])
+    /*
+     * A session to go back to. Without one the focus lane is the project's screen (#203), where the app is a panel
+     * and × only leaves — project-screen.spec.ts covers that way back.
+     */
+    await page.getByTestId('project-menu-alpha').click()
+    await page.getByTestId('new-session-alpha').click()
+    await page.getByTestId('create-session-confirm').click()
+    await expect(page.getByTestId('session-view')).toBeVisible()
+    const sessionId = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
     await page.getByTestId(`app-row-${pid}/slider`).click()
     const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
@@ -303,6 +312,8 @@ test.describe('고정 화면 (B-2, B-4, B-6, B-7)', () => {
     await expect.poll(() => teardowns(page)).toBe(1)
     await expect.poll(() => closed(page)).toEqual([instanceId])
     expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('focus')
+    await expect(page.getByTestId('session-view')).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(sessionId)
   })
 
   test('화면이 없는 앱은 목록에 서고, 열면 "이 앱에는 화면이 없다"고 말한다 — 부르지도 않는다', async ({ page }) => {

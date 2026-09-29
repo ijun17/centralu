@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { externalAppKey, registerPinnedFrame, useStore, type PinnedView } from '../../store/store.js'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { externalAppKey, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
@@ -14,6 +14,15 @@ import { CapabilityAsk } from './CapabilityAsk.jsx'
 import { SecretsPanel, missingSecrets } from './AppSecrets.jsx'
 import { ReviewAndEnable } from '../app-share/ReviewAndEnable.jsx'
 import { VersionsPanel } from '../app-share/VersionsPanel.jsx'
+import { registerSlottedView } from './slots.js'
+
+/**
+ * Where a pinned view is drawn.
+ *   full    the app view — the main area is this app
+ *   slot    laid over its panel on the project screen (#203, slots.ts) — the frame and what stands on it, no header
+ *   hidden  alive and out of sight
+ */
+type Mode = 'full' | 'slot' | 'hidden'
 
 /**
  * 고정 화면 (M4 B-2) — 사이드바에서 연 앱이 메인 영역을 차지한다.
@@ -34,16 +43,33 @@ export function PinnedApps() {
   const pinned = useStore((s) => s.pinnedViews)
   const showing = useStore((s) => s.view === 'app')
   const focusedKey = useStore((s) => (s.focusedApp ? externalAppKey(s.focusedApp.projectId, s.focusedApp.appId) : null))
+  // Joined into one string: a selector that returns a new array on every call never settles
+  const slotted = useStore((s) => projectScreenAppKeys(s).join('\n'))
+  const slots = new Set(slotted ? slotted.split('\n') : [])
+  const modeOf = (key: string): Mode => (showing ? (key === focusedKey ? 'full' : 'hidden') : slots.has(key) ? 'slot' : 'hidden')
   return (
-    <div className={showing ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'} data-testid="pinned-apps">
+    /*
+      On the project screen this layer takes no room of its own (`contents`): its slotted views are
+      absolutely placed in the middle lane, over their panels. Only the class changes between the
+      three, never the parent, so no frame is ever taken out of the document.
+    */
+    <div className={showing ? 'flex min-h-0 min-w-0 flex-1' : slots.size ? 'contents' : 'hidden'} data-testid="pinned-apps">
       {pinned.map((pv) => (
-        <PinnedAppView key={pv.key} pv={pv} visible={showing && pv.key === focusedKey} />
+        <PinnedAppView key={pv.key} pv={pv} mode={modeOf(pv.key)} />
       ))}
     </div>
   )
 }
 
-function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
+function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
+  // What only the app view has — the header, the side panels, the builder beside it
+  const visible = mode === 'full'
+  const section = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const el = section.current
+    if (mode !== 'slot' || !el) return
+    return registerSlottedView(pv.key, el)
+  }, [mode, pv.key])
   const app = useExternalApp(pv.projectId, pv.appId)
   const frame = useRef<AppFrameHandle>(null)
   const start = useStore((s) => s.startPinnedView)
@@ -177,7 +203,14 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
     })()
   }, [gone, pv.key, pv.appId, close, setToast])
 
+  /*
+   * Back to its project's screen, the app is a panel there and keeps this view (#203) — × only leaves. Anywhere else
+   * nothing shows the view any more, so it goes down, teardown first.
+   */
+  const toPanel = useStore((s) => returnsToPanel(s, pv.key))
+  const leave = useStore((s) => s.leavePinnedView)
   const onClose = async () => {
+    if (leave(pv.key)) return
     await frame.current?.teardown()
     close(pv.key)
   }
@@ -190,101 +223,113 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
 
   return (
     <section
-      className={visible ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}
+      ref={section}
+      className={
+        mode === 'full'
+          ? 'flex min-h-0 min-w-0 flex-1 flex-col'
+          : mode === 'slot'
+            ? // The slot is the panel's body: the panel's ground under it, and its rounded bottom corners inside the 1px border
+              'absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-b-[7px] bg-void'
+            : 'hidden'
+      }
       data-testid={`pinned-app-${pv.key}`}
       data-phase={pv.phase}
+      data-mode={mode}
       aria-label={app?.title ?? pv.appId}
     >
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b border-edge px-3">
-        <span className="text-ash">
-          <AppIcon />
-        </span>
-        <span className="truncate text-[13px] font-medium tracking-tight text-chalk" data-testid="pinned-title">
-          {app?.title ?? pv.appId}
-        </span>
-        <span className="truncate text-[11px] text-slate">{scope}</span>
-        {app && (
-          <span className="readout shrink-0 text-[10px] text-slate" data-testid="pinned-status">
-            {app.status.label}
+      {/* The panel on the project screen has its own header; this one's buttons open panels a slot has no room for */}
+      {visible && (
+        <header className="flex h-9 shrink-0 items-center gap-2 border-b border-edge px-3">
+          <span className="text-ash">
+            <AppIcon />
           </span>
-        )}
-        {/* 새 코드로 다시 열었다 (C-4) — 잠깐 서는 한 마디. 너무 자주 바뀌어 저절로 열지 않았으면 사람이 누른다 */}
-        {pv.phase === 'open' && pv.updatedAt && <UpdatedCue key={pv.updatedAt} at={pv.updatedAt} testId="pinned-updated" />}
-        {pv.phase === 'open' && pv.stale && (
+          <span className="truncate text-[13px] font-medium tracking-tight text-chalk" data-testid="pinned-title">
+            {app?.title ?? pv.appId}
+          </span>
+          <span className="truncate text-[11px] text-slate">{scope}</span>
+          {app && (
+            <span className="readout shrink-0 text-[10px] text-slate" data-testid="pinned-status">
+              {app.status.label}
+            </span>
+          )}
+          {/* 새 코드로 다시 열었다 (C-4) — 잠깐 서는 한 마디. 너무 자주 바뀌어 저절로 열지 않았으면 사람이 누른다 */}
+          {pv.phase === 'open' && pv.updatedAt && <UpdatedCue key={pv.updatedAt} at={pv.updatedAt} testId="pinned-updated" />}
+          {pv.phase === 'open' && pv.stale && (
+            <button
+              type="button"
+              className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
+              onClick={() => void reload(pv.key)}
+              title="The app now runs new code. It changed several times in a row, so this view was not reopened on its own"
+              data-testid="pinned-stale"
+            >
+              Changed · Reload
+            </button>
+          )}
+          {builder.id && (
+            <button
+              type="button"
+              className={`ml-auto rounded px-2 py-0.5 text-[11px] transition-colors ${
+                builderOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
+              }`}
+              aria-pressed={builderOpen}
+              onClick={() => setBuilderOpen((v) => !v)}
+              data-testid="pinned-builder-toggle"
+              title="The builder session's conversation, beside this app"
+            >
+              Builder
+            </button>
+          )}
           <button
             type="button"
-            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ash transition-colors hover:bg-graphite/50 hover:text-chalk"
-            onClick={() => void reload(pv.key)}
-            title="The app now runs new code. It changed several times in a row, so this view was not reopened on its own"
-            data-testid="pinned-stale"
-          >
-            Changed · Reload
-          </button>
-        )}
-        {builder.id && (
-          <button
-            type="button"
-            className={`ml-auto rounded px-2 py-0.5 text-[11px] transition-colors ${
-              builderOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
+            className={`${builder.id ? '' : 'ml-auto '}rounded px-2 py-0.5 text-[11px] transition-colors ${
+              runsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
             }`}
-            aria-pressed={builderOpen}
-            onClick={() => setBuilderOpen((v) => !v)}
-            data-testid="pinned-builder-toggle"
-            title="The builder session's conversation, beside this app"
+            aria-pressed={runsOpen}
+            onClick={() => setRunsOpen((v) => !v)}
+            data-testid="pinned-runs-toggle"
+            title="Recent runs of this app — who called which tool, and how it ended"
           >
-            Builder
+            Runs
           </button>
-        )}
-        <button
-          type="button"
-          className={`${builder.id ? '' : 'ml-auto '}rounded px-2 py-0.5 text-[11px] transition-colors ${
-            runsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
-          }`}
-          aria-pressed={runsOpen}
-          onClick={() => setRunsOpen((v) => !v)}
-          data-testid="pinned-runs-toggle"
-          title="Recent runs of this app — who called which tool, and how it ended"
-        >
-          Runs
-        </button>
-        {!!app?.info.secrets?.length && (
+          {!!app?.info.secrets?.length && (
+            <button
+              type="button"
+              className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+                secretsOpen ? 'bg-graphite text-chalk' : `${missing ? 'text-chalk' : 'text-slate'} hover:bg-graphite/50 hover:text-chalk`
+              }`}
+              aria-pressed={secretsOpen}
+              onClick={() => setSecretsOpen((v) => !v)}
+              data-testid="pinned-secrets-toggle"
+              title="The secrets this app declares — which are set, and a place to set them"
+            >
+              {missing ? `Secrets · ${missing} missing` : 'Secrets'}
+            </button>
+          )}
+          {app && (
+            <button
+              type="button"
+              className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+                versionsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
+              }`}
+              aria-pressed={versionsOpen}
+              onClick={() => setVersionsOpen((v) => !v)}
+              data-testid="pinned-versions-toggle"
+              title={app.projectId ? 'Commits that touched this app (git keeps its versions)' : 'Earlier versions of this app, and a way back to them'}
+            >
+              Versions
+            </button>
+          )}
           <button
             type="button"
-            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
-              secretsOpen ? 'bg-graphite text-chalk' : `${missing ? 'text-chalk' : 'text-slate'} hover:bg-graphite/50 hover:text-chalk`
-            }`}
-            aria-pressed={secretsOpen}
-            onClick={() => setSecretsOpen((v) => !v)}
-            data-testid="pinned-secrets-toggle"
-            title="The secrets this app declares — which are set, and a place to set them"
+            className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
+            aria-label={toPanel ? `Back to ${scope}, where ${app?.title ?? pv.appId} stays in its panel` : `Close ${app?.title ?? pv.appId}`}
+            onClick={() => void onClose()}
+            data-testid="pinned-close"
           >
-            {missing ? `Secrets · ${missing} missing` : 'Secrets'}
+            <CloseIcon />
           </button>
-        )}
-        {app && (
-          <button
-            type="button"
-            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
-              versionsOpen ? 'bg-graphite text-chalk' : 'text-slate hover:bg-graphite/50 hover:text-chalk'
-            }`}
-            aria-pressed={versionsOpen}
-            onClick={() => setVersionsOpen((v) => !v)}
-            data-testid="pinned-versions-toggle"
-            title={app.projectId ? 'Commits that touched this app (git keeps its versions)' : 'Earlier versions of this app, and a way back to them'}
-          >
-            Versions
-          </button>
-        )}
-        <button
-          type="button"
-          className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
-          aria-label={`Close ${app?.title ?? pv.appId}`}
-          onClick={() => void onClose()}
-          data-testid="pinned-close"
-        >
-          <CloseIcon />
-        </button>
-      </header>
+        </header>
+      )}
       {/*
         화면 칸은 늘 이 줄의 첫 자식이다. 판을 여닫아도 React가 화면 칸을 새로 만들지 않는다 — 새로 만들면
         iframe이 떨어져 문서를 잃는다(이 파일 머리말).
@@ -295,13 +340,13 @@ function PinnedAppView({ pv, visible }: { pv: PinnedView; visible: boolean }) {
           <ErrorTail app={app} builder={builder} onShowBuilder={() => setBuilderOpen(true)} onShowRuns={() => setRunsOpen(true)} />
           <FixBar app={app} pv={pv} builder={builder} onShowBuilder={() => setBuilderOpen(true)} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
-          {asking && <CapabilityAsk question={asking} visible={visible} />}
+          {asking && <CapabilityAsk question={asking} visible={mode !== 'hidden'} />}
         </div>
         {/* 보일 때만 그린다 — 숨은 동안 같은 세션을 포커스 뷰가 그리면 한 대화가 두 칸에 선다 */}
         {builderOpen && visible && builder.id && <BuilderPane sessionId={builder.id} onClose={() => setBuilderOpen(false)} />}
-        {runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
-        {secretsOpen && app && <SecretsPanel app={app} />}
-        {versionsOpen && app && <VersionsPanel app={app} />}
+        {visible && runsOpen && <RunsPanel appId={pv.appId} projectId={pv.projectId} />}
+        {visible && secretsOpen && app && <SecretsPanel app={app} />}
+        {visible && versionsOpen && app && <VersionsPanel app={app} />}
       </div>
     </section>
   )
