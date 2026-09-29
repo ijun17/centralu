@@ -1480,6 +1480,89 @@ test('뷰어 복사: 검색창의 ⌘A는 그대로다 (#36)', async ({ page }) 
   await expect(search).toHaveValue('line2')
 })
 
+/** 압축된 한 줄(4,000자)이 낀 파일 — 뷰어가 가로로 스크롤되는지는 이것으로만 드러난다 (#139) */
+async function openMinifiedFile(page: Page) {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'min.js', path: 'min.js', isDir: false, ignored: false }]
+    const text = ['// head', `var a=${'b'.repeat(4_000)}`, 'short()'].join('\n')
+    m.fs.readFile = async () => ({ text, truncated: false, binary: false, bytes: text.length })
+  })
+  await newSession(page, 'alpha', '작업')
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('file-min.js').click()
+  await expect(page.getByTestId('code-viewer')).toBeVisible()
+  await expect(page.locator('[data-line="1"]')).toBeVisible()
+}
+
+const VIEWER_SCROLLER = '[data-testid="code-viewer"] .overflow-auto'
+
+/**
+ * 뷰어는 가로로도 스크롤된다 — 그래서 키보드로 들어갈 수 있어야 한다 (#139).
+ * `tabIndex={-1}`이면 파일을 열 때 한 번 받은 포커스를 잃는 순간 다시 들어갈 길이 없어,
+ * 키보드만 쓰는 사람은 긴 줄의 오른쪽 끝에 닿지 못한다.
+ */
+test('뷰어: 스크롤 칸은 이름 있는 region이고 Tab으로 닿아 화살표로 민다 (#139)', async ({ page }) => {
+  await openMinifiedFile(page)
+
+  // 측정이 먼저다: 가로 스크롤이 없다면 이 시험은 아무것도 주장하지 않는다
+  const overflow = await page.evaluate((sel) => {
+    const root = document.querySelector<HTMLElement>(sel)!
+    return root.scrollWidth - root.clientWidth
+  }, VIEWER_SCROLLER)
+  expect(overflow).toBeGreaterThan(1_000)
+
+  // 파일을 열 때 받은 포커스는 버리고, 헤더의 마지막 버튼에서 Tab으로 들어간다
+  await page.getByTestId('viewer-open-ide').focus()
+  await page.keyboard.press('Tab')
+  const focused = await page.evaluate((sel) => {
+    const el = document.activeElement
+    return {
+      isScroller: el === document.querySelector(sel),
+      role: el?.getAttribute('role') ?? null,
+      label: el?.getAttribute('aria-label') ?? null,
+    }
+  }, VIEWER_SCROLLER)
+  expect(focused).toEqual({ isScroller: true, role: 'region', label: 'Code' })
+
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowRight')
+  await expect
+    .poll(() => page.evaluate((sel) => document.querySelector<HTMLElement>(sel)!.scrollLeft, VIEWER_SCROLLER))
+    .toBeGreaterThan(0)
+})
+
+/** 행이 `w-full`이면 가로로 민 만큼 배경이 왼쪽으로 끌려 나가 보이는 폭을 못 덮는다 (#139) */
+test('뷰어: 가로로 밀어도 행 배경이 보이는 폭을 덮는다 (#139)', async ({ page }) => {
+  await openMinifiedFile(page)
+  // 짧은 줄(3번 줄)을 일치로 칠해 둔다 — 긴 줄은 `w-max`만으로도 덮지만, 짧은 줄은 보이는 폭에서
+  // 끝나고 줄 번호도 함께 끌려 나갔다 (재 봄: 오른쪽 끝 -1,500, 줄 번호 -848)
+  await page.getByTestId('viewer-search').fill('short')
+  await expect(page.locator('[data-line="2"]')).toHaveClass(/bg-graphite/)
+
+  const seen = await page.evaluate((sel) => {
+    const root = document.querySelector<HTMLElement>(sel)!
+    root.scrollLeft = 1_500
+    const r = root.getBoundingClientRect()
+    const box = (line: number) => {
+      const b = document.querySelector(`[data-line="${line}"]`)!.getBoundingClientRect()
+      return { left: b.left - r.left, right: b.right - (r.left + root.clientWidth) }
+    }
+    const gutter = document.querySelector('[data-line="2"] > span')!.getBoundingClientRect()
+    return { scrollLeft: root.scrollLeft, long: box(1), short: box(2), gutterLeft: gutter.left - r.left }
+  }, VIEWER_SCROLLER)
+
+  // 가로 스크롤이 실제로 일어나야 이 시험이 무언가를 주장한다
+  expect(seen.scrollLeft).toBe(1_500)
+  for (const row of [seen.long, seen.short]) {
+    expect(row.left).toBeLessThanOrEqual(1)
+    expect(row.right).toBeGreaterThanOrEqual(-1)
+  }
+  // 줄 번호는 밀려 나가지 않고 왼쪽에 남는다
+  expect(Math.abs(seen.gutterLeft)).toBeLessThanOrEqual(1)
+})
+
 test('뷰어: 바이너리 파일은 안내만 한다 (C-3 비정상 경로)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import type { FsFile } from '@cc/platform/ports'
@@ -58,9 +58,23 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   /** The last readable anchor of the current selection (see `selectedText`) */
   const anchor = useRef<Caret | null>(null)
   const focusedFor = useRef<string | null>(null)
+  /**
+   * 이 파일에서 지금까지 그려진 줄 중 가장 넓은 줄의 폭 (#139).
+   *
+   * 행은 절대 위치라 부모의 폭을 밀어 넓히지 못한다. 그래서 행이 `w-full`이면 **보이는 폭**
+   * 만큼만 칠해져, 가로로 민 만큼 검색·도착 줄의 배경이 왼쪽으로 끌려 나가고 줄 번호
+   * (`sticky left-0`)도 자기 행 밖으로는 못 따라와 함께 사라진다. GitPanel의 `w-max min-w-full`
+   * 은 긴 줄만 구한다 — 짧은 줄은 여전히 보이는 폭이다 (재 봄: 1,500px 밀면 짧은 줄의 오른쪽
+   * 끝이 -1,500). 행들을 담는 칸을 가장 넓은 줄만큼 넓혀야 모든 행이 끝까지 칠해진다.
+   *
+   * 가상 목록이라 그려진 줄만 잴 수 있고, 값은 줄어들지 않는다: 긴 줄이 화면 밖으로 나가도
+   * 가로 스크롤 폭이 그대로라 보던 자리가 왼쪽으로 튀지 않는다.
+   */
+  const [rowsWidth, setRowsWidth] = useState(0)
 
   useEffect(() => {
     setFile(null)
+    setRowsWidth(0)
     setError(null)
     setCandidates([])
     setLandedIndex(-1)
@@ -160,6 +174,22 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     setLandedIndex(index)
     virtualizer.scrollToIndex(index, { align: 'center' })
   }, [file, jump, path, lines.length, virtualizer])
+
+  // 가상 목록이 같은 범위면 같은 배열을 돌려준다 — 그려진 줄이 바뀔 때만 다시 잰다
+  const virtualItems = virtualizer.getVirtualItems()
+  // 그리기 전에 잰다 — 짧은 줄이 한 프레임이라도 보이는 폭만큼만 칠해진 채 보이지 않게
+  useLayoutEffect(() => {
+    const el = rowsRef.current
+    if (!el) return
+    let widest = 0
+    for (const row of Array.from(el.children)) {
+      // 행 자체는 칸의 폭이라, 내용(줄 번호 + 코드)의 폭을 더해서 잰다
+      let w = 0
+      for (const cell of Array.from(row.children)) w += cell.getBoundingClientRect().width
+      widest = Math.max(widest, Math.ceil(w))
+    }
+    if (widest > rowsWidth) setRowsWidth(widest)
+  }, [virtualItems, file, showingImage, rowsWidth])
 
   /**
    * Remember where the selection began, while the row it began on still exists.
@@ -385,9 +415,18 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           {file.previewError ?? `Binary file (${(file.bytes / 1024).toFixed(0)}KB)`}
         </p>
       ) : (
+        /*
+         * `tabIndex={0}` + region — GitPanel의 diff 칸과 같은 판단이다 (#139).
+         * 이 칸도 **가로로 스크롤된다** (4,000자 한 줄로 재 봄). 파일을 열 때 포커스를 한 번
+         * 받기는 하지만, -1이면 그 포커스를 잃는 순간 키보드로는 다시 들어올 길이 없어
+         * 압축된 한 줄의 오른쪽 끝을 영영 못 본다. 이름은 `Code`로만 둔다 — 경로는 바로
+         * 위 헤더가 이미 말한다.
+         */
         <div
           ref={scrollRef}
-          tabIndex={-1}
+          role="region"
+          aria-label="Code"
+          tabIndex={0}
           className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-[18px] focus:outline-none"
           onKeyDown={(e) => {
             // Both modifiers, like every other shortcut here. ⌘⇧A is the global "next
@@ -401,8 +440,12 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             if (wholeFile.current) paintMountedRows()
           }}
         >
-          <div ref={rowsRef} className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-            {virtualizer.getVirtualItems().map((v) => (
+          <div
+            ref={rowsRef}
+            className="relative w-full"
+            style={{ height: `${virtualizer.getTotalSize()}px`, minWidth: `${rowsWidth}px` }}
+          >
+            {virtualItems.map((v) => (
               <div
                 key={v.key}
                 data-line={v.index}
