@@ -755,6 +755,20 @@ export type AppState = {
   /** 세션 목록 폭(px) */
   sidebarWidth: number
   /**
+   * 세션 목록을 접어 둔 프로젝트들 (#205, 사용자 요청 2026-09-28 — 프로젝트가 늘자 사이드바가 붐볐다).
+   *
+   * 프로젝트마다 기억하고, 작업 공간 스냅샷에 실린다 — 사이드바는 앱 전체를 보는 방식이고, 보는 방식은
+   * 사람의 것이다 (showIgnored와 같은 판단, #17). 접는 문은 이름 줄의 화살표 하나뿐이다: 이름은 프로젝트
+   * 화면을 여는 자리라(#206) 접기를 겸하면 둘 중 하나가 늘 엇나간다.
+   *
+   * 접혀도 신호는 가리지 않는다 — 이름 줄이 기다리는 세션의 수를 대신 말한다 (Sidebar의 FoldSummary).
+   */
+  foldedProjects: string[]
+  /** 그 프로젝트의 세션 줄을 접거나 편다 (#205) */
+  toggleProjectFold(projectId: string): void
+  /** 이 프로젝트만 펴고 나머지는 모두 접는다 (#205) — 하나에 집중할 때 한 번에 */
+  foldOtherProjects(projectId: string): void
+  /**
    * 프로젝트별 명령 실행 상태 — host `commands.state`의 투영 (#60 → 터미널 패널로 이관).
    * 로그 본문은 host 버퍼가 들고, 여기는 뱃지가 읽을 사실(도는가 · 몇 번으로 끝났나)만
    * 든다. 스토어에 있는 이유: "돌고 있다"는 실행 창만의 사정이 아니라 탭 뱃지·접힌
@@ -847,8 +861,12 @@ export type AppState = {
    * one big pane. You put it on the grid to watch it; an alert about it is not a reason to
    * take the other panels off the screen. Deliberate navigation — the sidebar, the palette —
    * leaves this off: picking a row means "give me that one, large".
+   *
+   * `reveal: false` keeps a folded project folded (#205). Every other door unfolds the
+   * session's project, so the row it lands on is visible; see `focusSession` for the two
+   * callers that pass it.
    */
-  focusSession(id: string | null, opts?: { preferGrid?: boolean }): void
+  focusSession(id: string | null, opts?: { preferGrid?: boolean; reveal?: boolean }): void
   focusProject(id: string): void
   setAppFocused(focused: boolean): void
   /**
@@ -1909,6 +1927,7 @@ export const useStore = create<AppState>((set, get) => ({
   panelSplit: 0.5,
   panelWidth: PANEL_DEFAULT,
   sidebarWidth: SIDEBAR_DEFAULT,
+  foldedProjects: [],
   commandRuns: {} as Record<string, Record<string, CommandRunInfo>>,
   overlay: null,
   inboxOpen: false,
@@ -2094,8 +2113,21 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const snap = await platform.workspace.load()
       if (snap) {
+        /*
+         * 접어 둔 프로젝트는 **맨 먼저** 되살린다 (#205). 바로 아래 focusSession이 saveWorkspace를
+         * 부르는데, 그때 이 값이 아직 초기값([])이면 방금 읽은 스냅샷 위에 빈 목록을 되써서 접힘이
+         * 지워진다 — introSeen이 겪은 그 일이다 (아래 주석). 문자열이 아닌 것은 버린다.
+         */
+        const savedFolds = (snap as { foldedProjects?: unknown }).foldedProjects
+        if (Array.isArray(savedFolds)) {
+          set({ foldedProjects: savedFolds.filter((id): id is string => typeof id === 'string') })
+        }
         if (snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
-          get().focusSession(snap.focusedSessionId)
+          /*
+           * 되살리기는 펼치지 않는다 (#205). 보던 세션의 프로젝트를 접어 둔 채 껐다면 그 접힘도
+           * 사람이 남긴 것이다 — 펼치면 재시작할 때마다 기억한 접힘을 스스로 지운다.
+           */
+          get().focusSession(snap.focusedSessionId, { reveal: false })
         }
         /*
          * The view comes back *after* the session, on purpose: focusSession forces
@@ -2233,6 +2265,7 @@ export const useStore = create<AppState>((set, get) => ({
         panelSplit: s.panelSplit,
         panelWidth: s.panelWidth,
         sidebarWidth: s.sidebarWidth,
+        foldedProjects: s.foldedProjects,
         railWidth: s.railWidth,
         notifyPolicy: s.notifyPolicy,
         showIgnored: s.showIgnored,
@@ -2711,10 +2744,26 @@ export const useStore = create<AppState>((set, get) => ({
     // 이미 그리드에 올라와 있는 세션이면 그리드가 목적지다 (위 preferGrid 주석)
     const onGrid = !!id && !!opts?.preferGrid && get().gridPanels.includes(id)
     const orchestrator = !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
+    /*
+     * 고른 세션의 프로젝트가 접혀 있으면 편다 (#205) — 고른 세션은 사이드바에서도 보여야 한다.
+     * 인박스·팔레트·알림 카드·다음 대기(⌘⇧A)·새 세션이 모두 이 문을 지나므로 판단도 여기 하나에 둔다
+     * (위의 view와 같은 이유: 부르는 곳이 열 군데다).
+     *
+     * **편 것은 기억한다** — 사람이 화살표로 편 것과 같다. 잠깐만 펴 두었다가 떠날 때 다시 접는 길도
+     * 있었지만 버렸다. 그러려면 화면에 없는 두 번째 상태가 "언제 다시 접을지"를 정해야 하고, 사람은
+     * 그 순간을 예측할 수 없다 — 줄이 제멋대로 나타났다 사라지는 것은 호버로 펴기를 버린 이유와 같다.
+     * 기억하면 화살표가 언제나 화면 그대로를 말하고, 다시 켜도 본 그대로 돌아온다.
+     *
+     * `reveal: false`는 둘뿐이다: 스냅샷 되살리기(접힘도 사람이 남긴 것이다)와 그리드 칸 누르기
+     * (세션이 이미 칸에 보이고, 칸에 입력할 때마다 접어 둔 프로젝트가 펴지면 접기가 소용없다).
+     */
+    const reveal =
+      opts?.reveal !== false && !!projectId && get().foldedProjects.includes(projectId)
     // 세션을 바꾸면 덮어둔 것은 걷는다 — 새 세션의 대화가 먼저 보여야 한다
     set({
       focusedSessionId: id,
       overlay: null,
+      ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== projectId) } : {}),
       ...(id
         ? {
             /*
@@ -3041,6 +3090,18 @@ export const useStore = create<AppState>((set, get) => ({
     set({ showIgnored: show })
     get().saveWorkspace()
   },
+  toggleProjectFold(projectId) {
+    set((s) => ({
+      foldedProjects: s.foldedProjects.includes(projectId)
+        ? s.foldedProjects.filter((id) => id !== projectId)
+        : [...s.foldedProjects, projectId],
+    }))
+    get().saveWorkspace()
+  },
+  foldOtherProjects(projectId) {
+    set((s) => ({ foldedProjects: Object.keys(s.projects).filter((id) => id !== projectId) }))
+    get().saveWorkspace()
+  },
   setFoldComposer(fold) {
     set({ foldComposer: fold })
     get().saveWorkspace()
@@ -3182,6 +3243,7 @@ export const useStore = create<AppState>((set, get) => ({
         focusedSessionId:
           s.focusedSessionId && doomed.includes(s.focusedSessionId) ? null : s.focusedSessionId,
         trustAsk: s.trustAsk === projectId ? null : s.trustAsk,
+        foldedProjects: s.foldedProjects.filter((id) => id !== projectId),
       }
     })
   },

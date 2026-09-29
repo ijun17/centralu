@@ -12,13 +12,14 @@ import { useIsProjectSelected, useSelectedSessionId, useSessionsOf, useToolMeta,
 import { Tooltip, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { AppIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
+import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
 import { useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo } from './reorder.js'
+import { foldSummary, type FoldSummaryState } from './fold.js'
 
 /**
  * 끌어서 순서 바꾸기.
@@ -483,6 +484,13 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   /** 메뉴가 매달릴 자리 — 누른 버튼이다 (사이드바 모서리가 아니라) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
   const [deleting, setDeleting] = useState(false)
+  // 접힘 (#205) — 스토어가 든다: 프로젝트마다 기억하고 다시 켜도 남는다
+  const folded = useStore((s) => s.foldedProjects.includes(projectId))
+  const toggleFold = useStore((s) => s.toggleProjectFold)
+  const foldOthers = useStore((s) => s.foldOtherProjects)
+  const manyProjects = useStore((s) => Object.keys(s.projects).length > 1)
+  // 펼쳐져 있으면 줄마다 제 표식이 상태를 말한다 — 같은 것을 이름 줄에서 또 말하지 않는다
+  const summary = folded ? foldSummary(sessions) : []
 
   /*
    * 훅은 **이른 return보다 먼저** 부른다. project가 없는 렌더가 한 번이라도 끼면
@@ -499,17 +507,37 @@ function ProjectBlock({ projectId }: { projectId: string }) {
     <section
       className={`relative border-b border-edge/70 py-2.5 ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
+      data-folded={folded || undefined}
       {...drop.handlers}
     >
       {/* 이름 줄을 잡아서 옮긴다 — 섹션 전체를 draggable로 두면 세션 끌기와 겹친다 */}
       <header
-        className="group flex items-baseline gap-2 px-3"
+        className="group flex items-baseline gap-2 pl-2.5 pr-3"
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData(PROJECT_MIME, projectId)
           e.dataTransfer.effectAllowed = 'move'
         }}
       >
+        {/*
+          접기 화살표 (#205). **접는 문은 이것 하나다** — 이름은 프로젝트 화면을 여는 자리라(#206)
+          누르기가 접기를 겸하면 둘 중 하나가 늘 엇나간다. 호버로 펴기도 쓰지 않는다: 마우스가 지나는
+          동안 목록이 펴졌다 접히면 누르려던 줄이 밀려나고, 기다리는 세션도 가려진다 (요청 원문).
+
+          ⋯와 달리 **늘 보인다.** 접혀 있다는 것은 행동이 아니라 상태라, 호버해야 보이면 줄이 왜
+          없는지 물을 곳이 없다. 화살표는 세션 줄의 도구 표식과 같은 세로줄에 서고(pl-2.5 + 버튼),
+          그래서 이름도 세션 이름과 같은 자리에서 시작한다 — 트리가 트리로 읽힌다. 이름 줄은 글자
+          기준선으로 맞추므로, 글자 없는 버튼은 감싼 칸으로 가운데에 따로 세운다.
+        */}
+        <span className="-my-1 flex shrink-0 self-center">
+          <IconButton
+            label={folded ? `Expand ${project.name}` : `Collapse ${project.name}`}
+            onClick={() => toggleFold(projectId)}
+            testId={`project-fold-${project.name}`}
+          >
+            <ChevronIcon open={!folded} />
+          </IconButton>
+        </span>
         {/*
           프로젝트 이름을 누르면 깃·파일·터미널을 볼 수 있다 (세션을 고르지 않아도).
           브랜치·변경 수·동시 세션 같은 배경 정보는 **이름 아래에 줄을 만들지 않는다** —
@@ -539,6 +567,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           숨기면 "막지 말고 보이게 하라"를 어기게 된다 (FR-2).
         */}
         <ProjectMarks project={project} />
+        {summary.length > 0 && <FoldSummary name={project.name} counts={summary} />}
         {/*
           이 줄의 모든 동작이 한 버튼 뒤에 있다 (도그푸딩 요청).
 
@@ -553,7 +582,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         */}
         <span
           ref={menuAnchor}
-          className={`-my-1 ml-auto shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
+          className={`-my-1 shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
+            summary.length > 0 ? '' : 'ml-auto'
+          } ${
             menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
           } ${proposalHere ? 'breathe rounded text-chalk' : ''}`}
           data-testid={`project-actions-${project.name}`}
@@ -583,6 +614,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             onNewApp={() => setNewAppOpen(true)}
             onStartManager={() => setManagerDialog(true)}
             onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
+            onFoldOthers={manyProjects ? () => foldOthers(projectId) : undefined}
             onDelete={() => setDeleting(true)}
           />
         )}
@@ -590,166 +622,177 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
       {askingTrust && <TrustAsk project={project} />}
 
-      <ul className="mt-1.5">
-        {orderAsTree(sessions).map(({ s, nested, managerOfLive }) => {
-          const unread = s.lastSeq > s.lastReadSeq
-          const focused = focusedSessionId === s.id
-          return (
-            <SessionRow
-              key={s.id}
-              id={s.id}
-              nested={nested}
-              /*
-               * 자식 줄은 끌 수 없다 — 자리가 곧 소속이다 (#69). 부모 아래 들여
-               * 그려지는 줄을 손으로 옮기게 두면, 옮긴 자리가 소속처럼 읽히는데
-               * 실제 소속(parentSessionId)은 그대로라 화면이 거짓말을 하게 된다.
-               */
-              draggable={renaming !== s.id && !nested}
-              onReorder={(draggedId, before) =>
-                void reorderSessions(
-                  projectId,
-                  moveTo(
-                    sessions.map((x) => x.id),
-                    draggedId,
-                    s.id,
-                    before,
-                  ),
-                )
-              }
-            >
-              {renaming === s.id ? (
-                <SessionNameInput
-                  id={s.id}
-                  initial={s.name}
-                  onDone={(name) => {
-                    setRenaming(null)
-                    // 같은 이름이면 왕복할 이유가 없다 (실패 토스트가 뜰 이유도 없다)
-                    if (name && name !== s.name) void renameSession(s.id, name)
-                  }}
-                />
-              ) : (
-                <>
-                  <button
-                    onClick={() => focusSession(s.id)}
-                    /*
-                      이름을 두 번 누르면 그 자리에서 고친다 — 파일 탐색기·탭 이름의 관행이라
-                      버튼을 못 찾은 사람도 손이 먼저 안다. 연필 버튼은 그 관행을 모르는
-                      사람을 위한 두 번째 입구다: 어느 한쪽만 두면 절반은 이름을 못 고친다.
-                    */
-                    onDoubleClick={() => setRenaming(s.id)}
-                    data-testid={`session-row-${s.id}`}
-                    /*
-                      안읽음(FR-16)은 이름 밝기가 말한다 (아래 truncate의 text-chalk).
-                      화면에 없는 사실을 테스트가 볼 수 있게 속성으로도 남긴다 —
-                      클래스 이름을 단언하면 색을 고칠 때마다 테스트가 깨진다.
-                    */
-                    data-unread={(unread && !focused) || undefined}
-                    /*
-                      오른쪽 여백은 호버에 나타나는 버튼 **두 개**를 비켜야 한다.
-                      pr-8은 삭제 하나만 있던 시절의 값이라, 연필이 늘면서 긴 이름이
-                      버튼 밑으로 들어간다 — 가려진 글자는 잘린 글자보다 나쁘다.
-                    */
-                    className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-[13px] transition-colors ${
-                      focused
-                        ? 'border-l-ash bg-graphite/40 text-chalk'
-                        : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
-                    }`}
-                  >
-                    {/*
-                      표식 하나가 두 가지를 말한다: 글자는 도구, 테두리는 상태.
-                      점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
-                    */}
-                    <ToolMark tool={s.tool} state={s.state} />
-                    <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
-                    {/*
-                      병합됨 (#69) — 이 브랜치의 작업이 줄기에 들어갔다. 이력이지 진행 중인
-                      일이 아니라는 표시고, 이 상태의 자식은 매니저 삭제를 붙들지 않는다.
-                      트리 정리는 사람이 삭제 대화에서 한다 (거긴 이미 무엇이 남는지 말한다).
-                    */}
-                    {s.merged && (
-                      <span
-                        className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
-                        data-testid={`merged-badge-${s.id}`}
-                        title="Branch merged into the trunk — safe to clean up from the delete dialog"
-                      >
-                        merged
-                      </span>
-                    )}
-                    {/*
-                      PR 칩 (#76 stage 3) — gh로 측정한 이 브랜치의 풀 리퀘스트.
-                      merged가 서면 안 그린다: PR 병합은 merged 배지를 함께 켜고,
-                      13px 줄에서 같은 결말을 두 번 말하면 둘 다 흐려진다.
-                    */}
-                    {s.pr && !s.merged && (
-                      <span
-                        className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
-                        data-testid={`pr-badge-${s.id}`}
-                        title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}
-                      >
-                        PR #{s.pr.number}
-                        {s.pr.state === 'closed' ? ' ✕' : ''}
-                      </span>
-                    )}
-                    {/*
-                      안읽음 점은 여기 있다가 **지워졌다** (도그푸딩 2026-09-02).
+      {/*
+        접히면 세션 줄과 앱 줄이 함께 빠진다 (#205). 신뢰 질문(위)은 남는다 — 줄이 아니라 답을 기다리는
+        물음이다. 창들(아래)도 그대로다: 접기는 보는 방식이지 하던 일을 닫는 것이 아니다.
 
-                      같은 사실을 이 줄에서 세 번째로 말하고 있었다: 도구 표식의 테두리가
-                      상태를(턴이 끝나면 ash 링), 이름 밝기가 안읽음을(위의 text-chalk)
-                      이미 말한다. 딴 데 있는 동안 턴이 끝나면 셋이 한꺼번에 켜지니
-                      점은 정보를 더하지 않고 "저건 또 뭐지"라는 질문만 더했다 —
-                      실제로 그 질문을 받았다. 판정(lastReadSeq·markRead)은 그대로다.
-                    */}
-                  </button>
-                  {/*
-                    아이콘 넷(연필·인수인계·워크트리·삭제) 대신 메뉴 하나 (도그푸딩 요청 —
-                    프로젝트 줄과 같은 문법). 아이콘이 넷이 되자 이름 없는 그림 맞추기가
-                    됐고, 그중 둘(인수인계·삭제)은 잘못 누르면 안 되는 것이었다.
-                  */}
-                  {/*
-                    오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
-                    같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
-                    (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
-                  */}
-                  <span
-                    className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 ${
-                      sessionMenu?.id === s.id ? 'opacity-100' : 'opacity-0'
-                    }`}
-                    data-testid={`session-actions-${s.id}`}
-                  >
-                    {/* 프로젝트 ⋯와 같은 맨 버튼 — 이름 붙은 메뉴가 바로 뜨므로 툴팁은 소음이다 */}
+        **접힌 프로젝트에는 세션을 떨어뜨릴 수 없다.** 세션은 제 프로젝트 안에서만 자리를 바꾸고
+        (onReorder가 그 프로젝트의 목록만 다룬다), 놓을 자리는 세션 줄이다 — 접힌 프로젝트에는 줄이
+        없으니 선도 서지 않고 놓아도 아무 일이 없다. 끌고 지나갈 때 펴 주지도 않는다: 펴서 보여 줄
+        자리가 전부 받지 않을 자리다. 제 프로젝트가 접혀 있으면 끌 줄 자체가 없다.
+      */}
+      {!folded && (
+        <ul className="mt-1.5">
+          {orderAsTree(sessions).map(({ s, nested, managerOfLive }) => {
+            const unread = s.lastSeq > s.lastReadSeq
+            const focused = focusedSessionId === s.id
+            return (
+              <SessionRow
+                key={s.id}
+                id={s.id}
+                nested={nested}
+                /*
+                 * 자식 줄은 끌 수 없다 — 자리가 곧 소속이다 (#69). 부모 아래 들여
+                 * 그려지는 줄을 손으로 옮기게 두면, 옮긴 자리가 소속처럼 읽히는데
+                 * 실제 소속(parentSessionId)은 그대로라 화면이 거짓말을 하게 된다.
+                 */
+                draggable={renaming !== s.id && !nested}
+                onReorder={(draggedId, before) =>
+                  void reorderSessions(
+                    projectId,
+                    moveTo(
+                      sessions.map((x) => x.id),
+                      draggedId,
+                      s.id,
+                      before,
+                    ),
+                  )
+                }
+              >
+                {renaming === s.id ? (
+                  <SessionNameInput
+                    id={s.id}
+                    initial={s.name}
+                    onDone={(name) => {
+                      setRenaming(null)
+                      // 같은 이름이면 왕복할 이유가 없다 (실패 토스트가 뜰 이유도 없다)
+                      if (name && name !== s.name) void renameSession(s.id, name)
+                    }}
+                  />
+                ) : (
+                  <>
                     <button
-                      type="button"
-                      aria-label={`Actions for ${s.name}`}
-                      onClick={(e) => {
-                        // updater 안에서 읽으면 늦다 — React가 핸들러를 끝내며 currentTarget을 비운다
-                        const el = e.currentTarget
-                        setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
-                      }}
-                      data-testid={`session-menu-${s.id}`}
-                      className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
+                      onClick={() => focusSession(s.id)}
+                      /*
+                        이름을 두 번 누르면 그 자리에서 고친다 — 파일 탐색기·탭 이름의 관행이라
+                        버튼을 못 찾은 사람도 손이 먼저 안다. 연필 버튼은 그 관행을 모르는
+                        사람을 위한 두 번째 입구다: 어느 한쪽만 두면 절반은 이름을 못 고친다.
+                      */
+                      onDoubleClick={() => setRenaming(s.id)}
+                      data-testid={`session-row-${s.id}`}
+                      /*
+                        안읽음(FR-16)은 이름 밝기가 말한다 (아래 truncate의 text-chalk).
+                        화면에 없는 사실을 테스트가 볼 수 있게 속성으로도 남긴다 —
+                        클래스 이름을 단언하면 색을 고칠 때마다 테스트가 깨진다.
+                      */
+                      data-unread={(unread && !focused) || undefined}
+                      /*
+                        오른쪽 여백은 호버에 나타나는 버튼 **두 개**를 비켜야 한다.
+                        pr-8은 삭제 하나만 있던 시절의 값이라, 연필이 늘면서 긴 이름이
+                        버튼 밑으로 들어간다 — 가려진 글자는 잘린 글자보다 나쁘다.
+                      */
+                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-[13px] transition-colors ${
+                        focused
+                          ? 'border-l-ash bg-graphite/40 text-chalk'
+                          : 'border-l-transparent text-ash hover:bg-graphite/20 hover:text-chalk'
+                      }`}
                     >
-                      <DotsIcon size={14} />
+                      {/*
+                        표식 하나가 두 가지를 말한다: 글자는 도구, 테두리는 상태.
+                        점을 따로 두면 표식 바로 옆에서 둘이 겹쳐 읽혀 오히려 둘 다 흐려진다.
+                      */}
+                      <ToolMark tool={s.tool} state={s.state} />
+                      <span className={`truncate ${unread && !focused ? 'text-chalk' : ''}`}>{s.name}</span>
+                      {/*
+                        병합됨 (#69) — 이 브랜치의 작업이 줄기에 들어갔다. 이력이지 진행 중인
+                        일이 아니라는 표시고, 이 상태의 자식은 매니저 삭제를 붙들지 않는다.
+                        트리 정리는 사람이 삭제 대화에서 한다 (거긴 이미 무엇이 남는지 말한다).
+                      */}
+                      {s.merged && (
+                        <span
+                          className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+                          data-testid={`merged-badge-${s.id}`}
+                          title="Branch merged into the trunk — safe to clean up from the delete dialog"
+                        >
+                          merged
+                        </span>
+                      )}
+                      {/*
+                        PR 칩 (#76 stage 3) — gh로 측정한 이 브랜치의 풀 리퀘스트.
+                        merged가 서면 안 그린다: PR 병합은 merged 배지를 함께 켜고,
+                        13px 줄에서 같은 결말을 두 번 말하면 둘 다 흐려진다.
+                      */}
+                      {s.pr && !s.merged && (
+                        <span
+                          className="shrink-0 rounded border border-edge px-1 text-[9px] leading-relaxed text-slate"
+                          data-testid={`pr-badge-${s.id}`}
+                          title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}
+                        >
+                          PR #{s.pr.number}
+                          {s.pr.state === 'closed' ? ' ✕' : ''}
+                        </span>
+                      )}
+                      {/*
+                        안읽음 점은 여기 있다가 **지워졌다** (도그푸딩 2026-09-02).
+
+                        같은 사실을 이 줄에서 세 번째로 말하고 있었다: 도구 표식의 테두리가
+                        상태를(턴이 끝나면 ash 링), 이름 밝기가 안읽음을(위의 text-chalk)
+                        이미 말한다. 딴 데 있는 동안 턴이 끝나면 셋이 한꺼번에 켜지니
+                        점은 정보를 더하지 않고 "저건 또 뭐지"라는 질문만 더했다 —
+                        실제로 그 질문을 받았다. 판정(lastReadSeq·markRead)은 그대로다.
+                      */}
                     </button>
-                  </span>
-                  {sessionMenu?.id === s.id && (
-                    <SessionMenu
-                      session={s}
-                      managerOfLive={managerOfLive}
-                      anchorEl={sessionMenu.el}
-                      onClose={() => setSessionMenu(null)}
-                      onRename={() => setRenaming(s.id)}
-                      onNewWorktree={() => openNewSession(projectId, { worktree: true })}
-                      onHandoff={() => setHandingOff(s.id)}
-                      onDelete={() => setConfirming(s.id)}
-                    />
-                  )}
-                </>
-              )}
-            </SessionRow>
-          )
-        })}
-      </ul>
-      <AppRows apps={projectApps} testId={`project-apps-${project.name}`} />
+                    {/*
+                      아이콘 넷(연필·인수인계·워크트리·삭제) 대신 메뉴 하나 (도그푸딩 요청 —
+                      프로젝트 줄과 같은 문법). 아이콘이 넷이 되자 이름 없는 그림 맞추기가
+                      됐고, 그중 둘(인수인계·삭제)은 잘못 누르면 안 되는 것이었다.
+                    */}
+                    {/*
+                      오른쪽 여백은 프로젝트 헤더의 px-3과 같아야 한다 — 둘은 사이드바에서
+                      같은 세로줄에 서는 버튼이라, 4px과 12px로 달라 두면 눈에 바로 걸린다
+                      (도그푸딩 지적). 한쪽만 고치면 다시 어긋나므로 값을 맞춰 둔다.
+                    */}
+                    <span
+                      className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 ${
+                        sessionMenu?.id === s.id ? 'opacity-100' : 'opacity-0'
+                      }`}
+                      data-testid={`session-actions-${s.id}`}
+                    >
+                      {/* 프로젝트 ⋯와 같은 맨 버튼 — 이름 붙은 메뉴가 바로 뜨므로 툴팁은 소음이다 */}
+                      <button
+                        type="button"
+                        aria-label={`Actions for ${s.name}`}
+                        onClick={(e) => {
+                          // updater 안에서 읽으면 늦다 — React가 핸들러를 끝내며 currentTarget을 비운다
+                          const el = e.currentTarget
+                          setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
+                        }}
+                        data-testid={`session-menu-${s.id}`}
+                        className="flex items-center justify-center rounded p-1 text-slate transition-colors hover:bg-graphite/60 hover:text-chalk"
+                      >
+                        <DotsIcon size={14} />
+                      </button>
+                    </span>
+                    {sessionMenu?.id === s.id && (
+                      <SessionMenu
+                        session={s}
+                        managerOfLive={managerOfLive}
+                        anchorEl={sessionMenu.el}
+                        onClose={() => setSessionMenu(null)}
+                        onRename={() => setRenaming(s.id)}
+                        onNewWorktree={() => openNewSession(projectId, { worktree: true })}
+                        onHandoff={() => setHandingOff(s.id)}
+                        onDelete={() => setConfirming(s.id)}
+                      />
+                    )}
+                  </>
+                )}
+              </SessionRow>
+            )
+          })}
+        </ul>
+      )}
+      {!folded && <AppRows apps={projectApps} testId={`project-apps-${project.name}`} />}
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}
@@ -1338,6 +1381,7 @@ function ProjectMenu({
   onNewApp,
   onStartManager,
   onToggleTrust,
+  onFoldOthers,
   onDelete,
 }: {
   project: ProjectInfo
@@ -1347,6 +1391,8 @@ function ProjectMenu({
   onNewApp: () => void
   onStartManager: () => void
   onToggleTrust: () => void
+  /** 프로젝트가 둘 이상일 때만 — 하나뿐이면 접을 "다른" 것이 없다 */
+  onFoldOthers?: () => void
   onDelete: () => void
 }) {
   const pick = (fn: () => void) => () => {
@@ -1382,6 +1428,18 @@ function ProjectMenu({
         onClick={pick(onToggleTrust)}
         testId={`toggle-trust-${project.name}`}
       />
+      {/*
+        한 번에 접기 (#205). 하나에 집중할 때 다른 프로젝트를 하나씩 접으러 다니지 않게 — 이 프로젝트는
+        펴 두고 나머지를 접는다. 되돌리기는 따로 두지 않는다: 접힌 줄도 기다리는 수를 말하고, 펴기는
+        화살표 한 번이다.
+      */}
+      {onFoldOthers && (
+        <ActionRow
+          label="Collapse other projects"
+          onClick={pick(onFoldOthers)}
+          testId={`fold-others-${project.name}`}
+        />
+      )}
       <div className="my-1 border-t border-edge" />
       <ActionRow
         label="Delete project…"
@@ -1615,6 +1673,53 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
           </span>
         </Tooltip>
       )}
+    </span>
+  )
+}
+
+/**
+ * 접힌 프로젝트의 상태 요약 (#205) — 가려진 세션 줄들이 무엇을 기다리는지, 센 수로.
+ *
+ * **세션 줄과 같은 표식을 쓴다.** 새 기호를 만들면 사람은 그것을 또 배워야 하고, 줄의 표식과 요약이
+ * 다른 말을 하는 것처럼 읽힌다. 그래서 칩 모양·링 색(RING)·회전(cc-orbit)이 ToolMark와 같고, 도구
+ * 글자 자리에 수가 들어갈 뿐이다. 승인은 순백 링이라 접힌 줄에서도 화면에서 가장 밝은 것이 된다 —
+ * 밝기가 곧 긴급도라는 이 앱의 규칙이 접힌 줄에서도 그대로 선다.
+ *
+ * 이름 줄 오른쪽 끝(⋯ 바로 앞)에 선다. 여럿이 접혀 있으면 요약이 한 세로줄로 모여, 누가 부르는지를
+ * 위에서 아래로 한 번 훑어 읽는다. 뜻은 앱 툴팁이 말한다 — 수만 있는 표식일수록 답이 빨라야 한다.
+ */
+function FoldSummary({ name, counts }: { name: string; counts: { state: FoldSummaryState; count: number }[] }) {
+  const label = counts.map((c) => `${c.count} ${stateLabel(c.state).toLowerCase()}`).join(' · ')
+  return (
+    <span className="-my-1 ml-auto flex shrink-0 self-center">
+      <Tooltip content={label} testId={`fold-summary-tip-${name}`} align="right">
+        <span className="flex items-center gap-1" aria-label={label} data-testid={`fold-summary-${name}`}>
+          {counts.map((c) => (
+            <StateCount key={c.state} state={c.state} count={c.count} />
+          ))}
+        </span>
+      </Tooltip>
+    </span>
+  )
+}
+
+/** ToolMark와 같은 칩 — 글자 대신 수. 멈춘 상태(오류)는 ToolMark처럼 글자를 흐린다 */
+function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
+  // 그리드 칸·세션 표식과 **같은 각도**로 돈다 (components/orbit.ts)
+  useOrbitSync(state === 'working')
+  return (
+    <span
+      className={`shrink-0 rounded-[5px] p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
+      style={state === 'working' ? undefined : { background: RING[state] }}
+      data-state={state}
+    >
+      <span
+        className={`readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-[3.5px] border border-graphite bg-void px-[3px] text-[9px] font-semibold leading-none text-chalk ${
+          state === 'error' ? 'opacity-50' : ''
+        }`}
+      >
+        {count}
+      </span>
     </span>
   )
 }

@@ -261,9 +261,11 @@ export function GridView() {
                 markRead가 이 칸의 안읽음을 지우고, "마지막 보던 세션"(다음 실행의
                 예열 대상)이 실제 손이 간 세션이 된다. preferGrid라 뷰는 그대로고,
                 WKWebView는 버튼 클릭에 포커스를 주지 않으므로 ×버튼으로는 안 움직인다.
+                사이드바에서 접어 둔 프로젝트는 펴지 않는다 (#205) — 세션은 이미 이 칸에 보이고,
+                칸에 입력할 때마다 펴지면 접기가 소용없다.
               */
               onFocusCapture={() => {
-                if (focusedSessionId !== id) focusSession(id, { preferGrid: true })
+                if (focusedSessionId !== id) focusSession(id, { preferGrid: true, reveal: false })
               }}
               /*
                 Where the dragged thing lands relative to this panel. The edge line that used

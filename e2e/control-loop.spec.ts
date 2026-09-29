@@ -2209,6 +2209,123 @@ test('같은 프로젝트의 세션을 보다가 프로젝트 이름을 누르�
   await expect(page.getByTestId('project-view-name')).toHaveText('beta')
 })
 
+/*
+ * 사이드바 접기 (#205). 접는 문은 이름 줄의 화살표 하나뿐이고, 이름은 여전히 프로젝트 화면을 연다.
+ * 접힘은 프로젝트마다 기억되어 다시 켜도 남고, 접힌 줄은 기다리는 세션의 수를 세션 표식과 같은
+ * 모양으로 말한다. 인박스처럼 밖에서 그 세션으로 가면 펴진다.
+ */
+const sessionRows = (page: Page, project: string) =>
+  page.getByTestId(`project-${project}`).locator('[data-testid^="session-row-"]')
+
+test('사이드바: 화살표로 프로젝트의 세션 줄을 접고 편다 (#205)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await newSession(page, 'alpha', '작업')
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+
+  await page.getByTestId('project-fold-alpha').click()
+  await expect(sessionRows(page, 'alpha')).toHaveCount(0)
+  await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
+  // 이름 줄은 남고, 다른 프로젝트는 그대로다
+  await expect(page.getByTestId('project-header-alpha')).toBeVisible()
+  await expect(page.getByTestId('project-beta')).not.toHaveAttribute('data-folded', 'true')
+
+  await page.getByTestId('project-fold-alpha').click()
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+  await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', 'true')
+
+  // 한 번에 접기 — 메뉴를 연 프로젝트만 펴 두고 나머지를 접는다
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('fold-others-alpha').click()
+  await expect(page.getByTestId('project-beta')).toHaveAttribute('data-folded', 'true')
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+})
+
+test('사이드바: 이름을 누르면 접히지 않고 프로젝트 화면이 열린다 (#205)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '작업')
+  await expect(page.getByTestId('project-view')).toHaveCount(0)
+
+  // 펼친 채로 이름 — 프로젝트 화면이 열리고 줄은 그대로 있다
+  await page.getByTestId('project-header-alpha').click()
+  await expect(page.getByTestId('project-view')).toBeVisible()
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+
+  // 세션으로 돌아가 접은 뒤 이름 — 여전히 프로젝트 화면이고, 펴지지도 않는다
+  await sessionRows(page, 'alpha').first().click()
+  await expect(page.getByTestId('project-view')).toHaveCount(0)
+  await page.getByTestId('project-fold-alpha').click()
+  await page.getByTestId('project-header-alpha').click()
+  await expect(page.getByTestId('project-view')).toBeVisible()
+  await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
+  await expect(sessionRows(page, 'alpha')).toHaveCount(0)
+})
+
+test('사이드바: 접힘은 다시 켜도 남는다 (#205)', async ({ page }) => {
+  /*
+   * 소개를 그리드 버튼으로 건너뛴다 — 오케스트레이터를 깨우지 않아야 목(mock)의 id 셈이 두 번의
+   * 실행에서 같게 간다. 실물 host는 프로젝트 id를 DB에 두어 재시작에도 같고, 목은 다시 켜면
+   * 프로젝트를 잊으므로 같은 폴더를 같은 순서로 다시 등록해 그 id를 되찾는다 (아래에서 확인한다).
+   */
+  const register = async () => {
+    await page.evaluate(() => {
+      ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
+    })
+    await page.getByTestId('add-project').click()
+    await expect(page.getByTestId('project-alpha')).toBeVisible()
+    if (await page.getByTestId('new-session-dialog').isVisible()) await page.keyboard.press('Escape')
+    return page.evaluate(() => Object.keys((window as any).__store.getState().projects)[0] as string)
+  }
+  await page.goto('/?mock=1')
+  await page.getByTestId('grid-button').click()
+  const id = await register()
+
+  await page.getByTestId('project-fold-alpha').click()
+  await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
+  expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects)).toEqual([id])
+
+  await page.reload()
+  // 같은 프로젝트여야 이 시험이 무언가를 주장한다
+  expect(await register()).toBe(id)
+  await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
+  await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Expand alpha')
+})
+
+test('사이드바: 접힌 프로젝트의 세션이 승인을 기다리면 이름 줄에 표식이 선다 (#205)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await newSession(page, 'alpha', 'A작업')
+  await newSession(page, 'beta', 'B작업') // 포커스는 beta
+  await page.getByTestId('project-fold-alpha').click()
+  await expect(sessionRows(page, 'alpha')).toHaveCount(0)
+
+  await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
+
+  // 세션 줄의 표식과 같은 칩 — 승인은 순백(beacon) 링, 글자 자리에 수
+  const mark = page.getByTestId('fold-summary-alpha').locator('[data-state="waiting_approval"]')
+  await expect(mark).toHaveText('1')
+  await expect(mark).toHaveAttribute('style', /--color-beacon/)
+  await page.getByTestId('fold-summary-alpha').hover()
+  await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
+  // 펼친 프로젝트에는 요약이 없다 — 줄마다 제 표식이 이미 말한다
+  await expect(page.getByTestId('fold-summary-beta')).toHaveCount(0)
+})
+
+test('사이드바: 인박스에서 접힌 프로젝트의 세션으로 가면 펴진다 (#205)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await newSession(page, 'alpha', 'A작업')
+  await newSession(page, 'beta', 'B작업') // 포커스는 beta
+  await page.getByTestId('project-fold-alpha').click()
+  await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
+
+  await page.getByTestId('counter').click()
+  await page.locator('[data-testid^="inbox-item-"]').first().click()
+
+  await expect(page.getByTestId('approval-card')).toBeVisible()
+  await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', 'true')
+  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
+  // 편 것은 기억한다 — 화살표가 언제나 화면 그대로를 말한다
+  expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects)).toEqual([])
+})
+
 test('세션 없이도 프로젝트의 깃·파일·뷰어를 볼 수 있다 (도그푸딩: 어디서 보는지 못 찾음)', async ({
   page,
 }) => {

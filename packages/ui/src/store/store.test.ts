@@ -69,6 +69,7 @@ beforeEach(() => {
     workingSince: {},
     expandedDirs: {},
     showIgnored: true,
+    foldedProjects: [],
     focusedSessionId: null,
     focusedProjectId: null,
     view: 'focus',
@@ -114,6 +115,117 @@ describe('프로젝트 고르기', () => {
     })
     useStore.getState().focusProject('p1')
     expect(useStore.getState()).toMatchObject({ focusedProjectId: 'p1', focusedSessionId: null, view: 'focus' })
+  })
+})
+
+/*
+ * 사이드바 접기 (#205). 접힘은 프로젝트마다 기억되고 재시작을 넘긴다 — 작업 공간 스냅샷에 실린다.
+ * 고른 세션은 보여야 하므로 인박스·팔레트·알림·새 세션은 그 프로젝트를 펴고, 편 것도 기억한다.
+ * 펴지 않는 문은 둘: 스냅샷 되살리기와 그리드 칸 누르기.
+ */
+describe('사이드바 접기 (#205)', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const folds = (mock: MockPlatform) => (mock.workspaceSnapshot as { foldedProjects?: string[] } | null)?.foldedProjects
+
+  it('접힘은 스냅샷에 실리고, 다시 켜도 그대로다', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/fold-a')
+    const b = await mock.projects.add('/tmp/fold-b')
+    await useStore.getState().attach(mock)
+
+    useStore.getState().toggleProjectFold(a.id)
+    await tick()
+    expect(folds(mock)).toEqual([a.id])
+    useStore.getState().toggleProjectFold(b.id)
+    useStore.getState().toggleProjectFold(a.id)
+    await tick()
+    expect(folds(mock)).toEqual([b.id])
+
+    // 앱을 다시 켠 셈 — 기본값(아무것도 안 접힘)으로 돌아간 스토어에 같은 스냅샷을 물린다
+    useStore.setState({ foldedProjects: [] })
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().foldedProjects).toEqual([b.id])
+  })
+
+  it('되살린 세션의 프로젝트가 접혀 있어도 펴지 않고, 되살리는 도중의 저장이 접힘을 지우지 않는다', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/fold-restore')
+    mock.sessions.set('fold-r1', sessionInfo('fold-r1', { projectId: a.id }))
+    mock.workspaceSnapshot = { focusedSessionId: 'fold-r1', foldedProjects: [a.id] } as never
+
+    await useStore.getState().attach(mock)
+    await tick()
+
+    expect(useStore.getState().focusedSessionId).toBe('fold-r1')
+    expect(useStore.getState().foldedProjects).toEqual([a.id])
+    expect(folds(mock)).toEqual([a.id])
+  })
+
+  it('인박스·팔레트처럼 세션으로 가면 그 프로젝트를 펴고, 편 것을 기억한다', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/fold-go')
+    const b = await mock.projects.add('/tmp/fold-stay')
+    mock.sessions.set('fold-g1', sessionInfo('fold-g1', { projectId: a.id }))
+    await useStore.getState().attach(mock)
+    useStore.getState().toggleProjectFold(a.id)
+    useStore.getState().toggleProjectFold(b.id)
+
+    useStore.getState().focusSession('fold-g1', { preferGrid: true })
+    await tick()
+
+    // 다른 프로젝트의 접힘은 건드리지 않는다
+    expect(useStore.getState().foldedProjects).toEqual([b.id])
+    expect(folds(mock)).toEqual([b.id])
+  })
+
+  it('그리드 칸을 눌러 고른 것(reveal: false)은 접힌 프로젝트를 펴지 않는다', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/fold-grid')
+    mock.sessions.set('fold-q1', sessionInfo('fold-q1', { projectId: a.id }))
+    await useStore.getState().attach(mock)
+    useStore.getState().toggleProjectFold(a.id)
+
+    useStore.getState().focusSession('fold-q1', { preferGrid: true, reveal: false })
+
+    expect(useStore.getState().focusedSessionId).toBe('fold-q1')
+    expect(useStore.getState().foldedProjects).toEqual([a.id])
+  })
+
+  it('접힌 프로젝트에 새 세션을 만들면 펴진다', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const p = await useStore.getState().addProject('/tmp/fold-new')
+    useStore.getState().toggleProjectFold(p.id)
+
+    await useStore.getState().createSession(p.id)
+
+    expect(useStore.getState().foldedProjects).toEqual([])
+  })
+
+  it('다른 프로젝트 모두 접기는 이 프로젝트만 펴 둔다', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/fold-o1')
+    const b = await mock.projects.add('/tmp/fold-o2')
+    const c = await mock.projects.add('/tmp/fold-o3')
+    await useStore.getState().attach(mock)
+    useStore.getState().toggleProjectFold(b.id)
+
+    useStore.getState().foldOtherProjects(b.id)
+    await tick()
+
+    expect([...useStore.getState().foldedProjects].sort()).toEqual([a.id, c.id].sort())
+    expect([...(folds(mock) ?? [])].sort()).toEqual([a.id, c.id].sort())
+  })
+
+  it('지운 프로젝트의 접힘은 남기지 않는다', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/fold-gone')
+    await useStore.getState().attach(mock)
+    useStore.getState().toggleProjectFold(a.id)
+
+    await useStore.getState().deleteProject(a.id, false)
+
+    expect(useStore.getState().foldedProjects).toEqual([])
   })
 })
 
