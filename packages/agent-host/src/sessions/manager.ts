@@ -2932,10 +2932,12 @@ export class SessionManager {
 
     const old = this.handles.get(sessionId)
     if (old) {
-      this.closeStream(sessionId) // 진행 중이던 메시지는 여기까지가 전부다 — 남기고 색인한다 (#66)
       await old.dispose().catch(() => {})
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
+      // The message in progress ends here — kept and indexed (#66), but only once the old process is gone, so its
+      // last deltas grow the open row instead of opening a second one (#213, restartSession's comment)
+      this.closeStream(sessionId)
     }
 
     m.tool = tool
@@ -3712,12 +3714,18 @@ export class SessionManager {
     this.restartAfterTurn.delete(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
-      this.closeStream(sessionId) // 죽는 프로세스의 마지막 말을 남긴다 (#66)
       await h.dispose().catch(() => {})
       // dispose가 **끝난 뒤에** 찍는다 — 내려가는 프로세스의 마지막 flush까지 표식 안쪽에 들어오게
       this.stampExternalSynced(sessionId)
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
+      /*
+       * The dying process's last words are kept (#66), and the message closes only now (#213). Closed before the
+       * dispose, the handle was still registered while it went down, so its last deltas opened a second row: one
+       * reply stored as two, cut mid-word. While it goes down its deltas grow the open row; once it is unregistered,
+       * anything later is dropped (#157). No await between here and the new handle, so the new process starts its own row.
+       */
+      this.closeStream(sessionId)
     }
     return this.resumeSession(sessionId)
   }
@@ -5214,10 +5222,13 @@ export class SessionManager {
     for (const q of [...this.appQuestions.values()]) q.resolve(null)
     this.appQuestions.clear()
     this.appsHub?.dispose()
-    // 진행 중이던 메시지들을 지금 모습대로 남긴다 — 종료가 마지막 2초를 삼키면 안 된다 (#66)
-    for (const id of [...this.streams.keys()]) this.closeStream(id)
+    // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
+    // Written, not closed: the supervisor may kill the host before the processes are down
+    for (const [id, run] of this.streams) this.flushStream(id, run)
     // 하나가 실패해도 나머지는 정리한다 — 종료 길에 거절 하나가 전체 정리를 막으면 고아가 남는다
     await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
+    // Closed once the processes are down, so their last deltas grow the open rows instead of opening new ones (#213)
+    for (const id of [...this.streams.keys()]) this.closeStream(id)
     // dispose가 끝난 뒤에 찍는다 (stampExternalSynced 주석). 크래시에는 안 찍는다 —
     // 죽은 시각을 모르는데 지금 시각을 찍으면 죽음~발견 사이의 밖 기록을 삼킬 수 있다.
     for (const id of this.handles.keys()) this.stampExternalSynced(id)

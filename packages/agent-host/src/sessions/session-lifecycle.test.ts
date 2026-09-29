@@ -30,8 +30,14 @@ class Handle implements SessionHandle {
     return true
   }
   interrupt() {}
+  /** What the process still says while it goes down, after dispose began and before it finished (#213) */
+  lastWords: (() => void) | null = null
   async dispose() {
     this.disposed = true
+    if (this.lastWords) {
+      await new Promise((r) => setTimeout(r, 0))
+      this.lastWords()
+    }
     this.onDispose()
   }
 }
@@ -161,6 +167,71 @@ describe('갈아 끼운 프로세스의 늦은 말 (#157)', () => {
     old.emit({ type: 'approval_resolved', sessionId: id, requestId: 'r1', decision: 'deny' })
 
     expect(mgr.listSessions().find((s) => s.id === id)!.pendingApproval ?? null).toBe(null)
+  })
+})
+
+/*
+ * A reply cut by replacing the process (#213). The manager closed the open message before it awaited the old
+ * process's dispose, and the old handle was still registered while it went down — so the dying process's last
+ * deltas opened a second row. One reply was stored as two, cut mid-word ("커|밋" in the owner's store).
+ */
+describe('A reply cut by replacing the process stays one row (#213)', () => {
+  const replies = (sessionId: string) =>
+    store
+      .loadMessages(sessionId, 100)
+      .filter((r) => r.role === 'assistant')
+      .map((r) => (r.payload as { text: string }).text)
+
+  it.each([
+    ['a restart', (id: string) => rpc('agents.restartSession', { sessionId: id })],
+    ['a tool switch', (id: string) => rpc('agents.switchTool', { sessionId: id, tool: 'codex' })],
+    ['shutting down', () => mgr.disposeAll()],
+  ])("the dying process's last delta during %s grows the open row", async (_, replace) => {
+    const id = await newSession()
+    const old = claude.last
+    await rpc('agents.send', { sessionId: id, text: 'commit it' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'I will com' })
+    let spoke = false
+    old.lastWords = () => {
+      spoke = true
+      old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'mit it now' })
+    }
+
+    await replace(id)
+
+    expect(spoke).toBe(true)
+    expect(replies(id)).toEqual(['I will commit it now'])
+    // Closed and indexed once, whole — not the first half
+    expect(store.searchMessages('commit it now', 10).some((h) => h.sessionId === id)).toBe(true)
+  })
+
+  it('a shutdown cut short before the processes are down still leaves what was said so far on disk (#66)', async () => {
+    const id = await newSession()
+    const old = claude.last
+    await rpc('agents.send', { sessionId: id, text: 'commit it' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'I will com' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'mit' }) // held in memory, under the flush bar
+
+    const closing = mgr.disposeAll()
+    // The supervisor may kill the host here, while the processes are still going down
+    expect(replies(id)).toEqual(['I will commit'])
+    await closing
+  })
+
+  it("the replacing process's first delta starts its own row, and the old process's words after it is gone are dropped", async () => {
+    const id = await newSession()
+    const old = claude.last
+    await rpc('agents.send', { sessionId: id, text: 'commit it' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'I will com' })
+    old.lastWords = () => old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'mit it' })
+
+    await rpc('agents.restartSession', { sessionId: id })
+    const fresh = claude.last
+    expect(fresh).not.toBe(old)
+    fresh.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'Resumed.' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: ' too late' })
+
+    expect(replies(id)).toEqual(['I will commit it', 'Resumed.'])
   })
 })
 
