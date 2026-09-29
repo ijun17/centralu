@@ -971,81 +971,51 @@ describe('WAL 체크포인트', () => {
 })
 
 /*
- * 읽기는 델타 시절의 데이터도 메시지로 병합한다 (#66).
- * 마이그레이션 전의 26만 행이 그대로 있어도, limit은 행이 아니라 메시지를 센다.
+ * 읽기는 행 하나를 메시지 하나로 준다 (#77).
+ * 델타 시절의 행은 v21이 합쳤다. 그 뒤로 이웃한 assistant 행은 서로 다른 답이라 붙이지 않는다 —
+ * 붙이면 "…still running."과 "All six reviews are in."이 공백 없이 한 문단이 된다.
  */
-describe('loadMessages는 델타 조각을 메시지로 병합한다 (#66)', () => {
-  const delta = (seq: number, text: string) =>
+describe('loadMessages는 행 하나를 메시지 하나로 읽는다 (#77)', () => {
+  const reply = (seq: number, text: string) =>
     ({ sessionId: 's1', seq, role: 'assistant' as const, kind: 'text' as const, payload: { type: 'message_delta', text }, ts: seq })
+  const ask = (seq: number, text: string) =>
+    ({ sessionId: 's1', seq, role: 'user' as const, kind: 'text' as const, payload: { text }, ts: seq })
+  const texts = (msgs: StoredMessage[]) => msgs.map((m) => [m.seq, (m.payload as { text?: string }).text])
 
-  it('연속 assistant 조각이 한 메시지가 되고, seq는 첫 조각의 것이다', () => {
+  it('이웃한 assistant 행은 두 메시지다 — 답끼리도, 추론끼리도 붙이지 않는다', () => {
     const s = seeded()
     s.appendMessages([
-      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 1 },
-      delta(2, '한 '), delta(3, '번에 '), delta(4, '뽑기'),
+      ask(1, '리뷰 돌려줘'),
+      reply(2, 'One review is still running.'),
+      // 사이에 사람의 말이 없는 새 답 — 백그라운드 작업이 끝나 새 턴이 섰다
+      reply(3, 'All six reviews are in.'),
+      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: '앞 생각' }, ts: 4 },
+      { sessionId: 's1', seq: 5, role: 'assistant', kind: 'reasoning', payload: { text: '뒤 생각' }, ts: 5 },
     ])
-    const msgs = s.loadMessages('s1')
-    expect(msgs.map((m) => [m.seq, (m.payload as { text?: string }).text])).toEqual([
-      [1, '질문'],
-      [2, '한 번에 뽑기'],
+    expect(texts(s.loadMessages('s1'))).toEqual([
+      [1, '리뷰 돌려줘'],
+      [2, 'One review is still running.'],
+      [3, 'All six reviews are in.'],
+      [4, '앞 생각'],
+      [5, '뒤 생각'],
     ])
   })
 
-  it('limit은 병합된 메시지를 센다 — 조각 수가 아니라', () => {
+  it('limit은 행을 센다 — 커서로 이어 읽으면 이웃한 답이 겹치지도 붙지도 않는다', () => {
     const s = seeded()
-    const rows = []
-    for (let turn = 0; turn < 4; turn++) {
-      rows.push({ sessionId: 's1', seq: turn * 11 + 1, role: 'user' as const, kind: 'text' as const, payload: { text: `질문${turn}` }, ts: turn * 11 + 1 })
-      for (let t = 0; t < 10; t++) rows.push(delta(turn * 11 + 2 + t, `조각${turn}-${t} `))
-    }
-    s.appendMessages(rows)
-    // 마지막 2개 = 질문3 + 그 답 (조각 10개가 아니라)
+    s.appendMessages([ask(1, '질문1'), reply(2, '답1-가'), reply(3, '답1-나'), ask(4, '질문2'), reply(5, '답2-가'), reply(6, '답2-나')])
     const page = s.loadMessages('s1', 2)
-    expect(page.length).toBe(2)
-    expect((page[0]!.payload as { text?: string }).text).toBe('질문3')
-    expect((page[1]!.payload as { text?: string }).text).toContain('조각3-0')
-    expect((page[1]!.payload as { text?: string }).text).toContain('조각3-9')
-    // 커서(첫 조각의 seq)로 이어 읽으면 같은 조각이 두 번 오지 않는다
+    expect(texts(page)).toEqual([[5, '답2-가'], [6, '답2-나']])
     const older = s.loadMessages('s1', 2, page[0]!.seq)
-    expect((older[1]!.payload as { text?: string }).text).toContain('조각2-9')
-  })
-
-  it('경계는 병합하지 않는다 — 사람의 말·도구 호출·reasoning이 갈라놓는다', () => {
-    const s = seeded()
-    s.appendMessages([
-      delta(1, '앞'),
-      { sessionId: 's1', seq: 2, role: 'system', kind: 'tool_call', payload: { summary: { tool: 'Bash', title: 'ls' } }, ts: 2 },
-      delta(3, '뒤'),
-      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: '생각' }, ts: 4 },
-      delta(5, '또'),
-    ])
-    expect(s.loadMessages('s1').map((m) => [m.kind, (m.payload as { text?: string }).text])).toEqual([
-      ['text', '앞'], ['tool_call', undefined], ['text', '뒤'], ['reasoning', '생각'], ['text', '또'],
-    ])
-  })
-
-  it('배치 경계에 걸친 조각도 잘리지 않는다', () => {
-    const s = seeded()
-    const rows: StoredMessage[] = [{ sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 1 }]
-    // 내부 배치(400행)보다 긴 답변 — 500조각이 한 메시지가 되어야 한다
-    for (let t = 0; t < 500; t++) rows.push(delta(t + 2, `${t},`))
-    s.appendMessages(rows)
-    const msgs = s.loadMessages('s1', 10)
-    expect(msgs.length).toBe(2)
-    const text = (msgs[1]!.payload as { text?: string }).text!
-    expect(text.startsWith('0,1,')).toBe(true)
-    expect(text.endsWith('499,')).toBe(true)
+    expect(texts(older)).toEqual([[3, '답1-나'], [4, '질문2']])
+    expect(texts(s.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, '질문1'], [2, '답1-가']])
   })
 
   it('loadMessagesFrom은 그 자리 뒤를 같은 규칙으로 읽는다', () => {
     const s = seeded()
-    s.appendMessages([
-      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 1 },
-      delta(2, '답 '), delta(3, '전체'),
-      { sessionId: 's1', seq: 4, role: 'user', kind: 'text', payload: { text: '다음 질문' }, ts: 4 },
-    ])
+    s.appendMessages([ask(1, '질문'), reply(2, '먼저 온 답.'), reply(3, '나중 답.'), ask(4, '다음 질문')])
     const after = s.loadMessagesFrom('s1', 1, 10)
-    expect(after.map((m) => (m.payload as { text?: string }).text)).toEqual(['답 전체', '다음 질문'])
+    expect(texts(after)).toEqual([[2, '먼저 온 답.'], [3, '나중 답.'], [4, '다음 질문']])
   })
 
   it('upsertMessageNoIndex는 본문만 갱신하고 색인은 건드리지 않는다', () => {
@@ -1061,9 +1031,9 @@ describe('loadMessages는 델타 조각을 메시지로 병합한다 (#66)', () 
 /*
  * v21 이관 (#66): 델타 시절의 행을 메시지로 합친다.
  *
- * 가장 중요한 성질은 크기가 아니라 **읽기와 같은 답을 준다**는 것이다 —
- * 이사 전에도 loadMessages가 병합해 보여주고 있었으므로, 이사 뒤에 대화가
- * 달라 보이면 그건 데이터를 잃은 것이다.
+ * 가장 중요한 성질은 크기가 아니라 **글을 잃지 않는다**는 것이다 — 이사하던 때는 읽기도 같은 규칙으로
+ * 붙여 보여주고 있었으므로, 이사 뒤에 글이 달라지면 그건 데이터를 잃은 것이다. 읽기는 이제 붙이지
+ * 않는다(#77) — 이사 전의 행을 이은 글이 이사 뒤의 글과 같아야 한다.
  */
 describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
   const oldDbWithDeltas = () => {
@@ -1108,7 +1078,9 @@ describe('v21 이관 — 델타 행을 메시지로 합친다', () => {
     const rows = s.loadMessages('s1', 50)
     const afterRead = rows.map((m) => [m.kind, (m.payload as { text?: string }).text])
 
-    expect(afterRead).toEqual(beforeRead) // 대화가 달라 보이면 잃은 것이다
+    // 글이 달라지면 잃은 것이다 — 이사 전의 행(9개)을 이은 글과 이사 뒤의 메시지(5개)를 이은 글이 같다
+    const joined = (read: (string | undefined)[][]) => read.map(([, t]) => t ?? '').join('')
+    expect(joined(afterRead)).toBe(joined(beforeRead))
     expect(afterRead).toEqual([
       ['text', '맵 추출 어떻게 해?'],
       ['text', '한 번에 뽑게 됩니다.'],

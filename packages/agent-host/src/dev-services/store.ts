@@ -915,8 +915,8 @@ export class Store {
    * 그래서 이 이사는 급한 일이 아니라 **미룰 수 있는 일**이었다 — 크기와 검색을 위한 것이다.
    * (실측: 한 세션이 시간당 32,698행 → 761행, 행당 2.1자 → 222자)
    *
-   * 규칙은 읽기(loadMessages)와 **같아야 한다**: 연속된 assistant의 text끼리,
-   * reasoning끼리만 잇는다. 다르면 이사 전후로 대화가 달라 보인다.
+   * 연속된 assistant의 text끼리, reasoning끼리만 잇는다 — 이사하던 때의 읽기(loadMessages)와 같은 규칙이라
+   * 이사 전후로 대화가 같아 보였다. 읽기는 이제 붙이지 않는다 (#77): 이사 뒤의 이웃한 행은 서로 다른 말이다.
    *
    * 합친 자리의 seq는 **첫 조각의 것**을 남긴다 — 읽음 위치(last_read_seq)와
    * fresh_start 경계가 전부 숫자 비교라, 중간 seq가 사라져 구멍이 생겨도 안전하다.
@@ -1719,85 +1719,36 @@ export class Store {
   }
 
   /**
-   * 대화를 읽는다 — **limit은 행이 아니라 메시지 개수다** (#66).
+   * 대화를 읽는다 — **행 하나가 메시지 하나다** (#77).
    *
-   * 예전 데이터는 스트리밍 델타 하나가 행 하나라, 행으로 세면 한 페이지가
-   * 토큰 200개 = 두어 문장이었다. 세션을 열면 답변 꼬리 토막만 보였고,
-   * 위로 스크롤하면 한 세션에 52번을 되읽었다 (#64의 방아쇠).
-   *
-   * 그래서 여기서 연속된 assistant 조각(text·reasoning)을 한 메시지로 합친 뒤에
-   * 센다. 새 데이터는 이미 메시지 하나가 행 하나라 병합이 그대로 통과한다 —
-   * 두 형식이 섞여 있어도(마이그레이션 전) 같은 모양이 나온다.
-   *
-   * 합친 메시지의 seq는 **첫 조각의 seq**다. beforeSeq 커서가 그 seq로 돌아오면
-   * 그 앞부터 이어 읽으므로 페이지 경계에서 같은 조각을 두 번 주지 않는다.
-   * ts는 마지막 조각의 것 — "언제까지 말했나"가 목록 정렬에 쓰인다.
+   * 델타 시절(#66 전)에는 토큰 하나가 행 하나라, 여기서 연속된 assistant 행을 한 메시지로 붙여 읽었다.
+   * 그 행들은 v21이 한 번에 합쳤고 쓰기는 메시지마다 행 하나를 쓴다. 그 뒤로 이웃한 assistant 행은
+   * **서로 다른 말**이다 — 사이에 사람의 말이 없는 새 답(백그라운드 작업이 끝났다, 질문 카드에 답했다)과
+   * 기록 가져오기가 답마다 쓴 행이다. 계속 붙여 읽으면 "…still running.All six reviews are in."처럼
+   * 두 답이 공백 없이 한 문단이 된다. 그래서 행을 그대로 준다 — limit도 행(=메시지)을 센다.
    */
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number): StoredMessage[] {
-    const stmt = this.db.prepare(
-      `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
-       WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
-    )
-    // 최신부터 병합해 내려간다. limit+1개가 모이면 limit번째 메시지의 경계가
-    // 확정된 것이다 — 조각이 배치 경계에 걸쳐 있어도 잘리지 않는다.
-    const merged: StoredMessage[] = []
-    let cursor: number | null = beforeSeq ?? null
-    const BATCH = 400
-    outer: for (;;) {
-      const raw = stmt.all(sessionId, cursor, cursor, BATCH) as (StoredMessage & { payload: string })[]
-      if (raw.length === 0) break
-      for (const r of raw) {
-        const row: StoredMessage = { ...r, payload: JSON.parse(r.payload) }
-        const oldest = merged[merged.length - 1]
-        if (oldest && continuesRun(row, oldest)) {
-          // row가 더 오래된 조각이다 — 앞에 이어 붙인다
-          const head = (row.payload as { text?: string }).text ?? ''
-          const tail = (oldest.payload as { text?: string }).text ?? ''
-          oldest.payload = { ...(oldest.payload as object), text: head + tail }
-          oldest.seq = row.seq
-        } else {
-          merged.push(row)
-          if (merged.length > limit) break outer
-        }
-      }
-      cursor = raw[raw.length - 1]!.seq
-      if (raw.length < BATCH) break
-    }
-    return merged.slice(0, limit).reverse()
+    const raw = this.db
+      .prepare(
+        `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
+         WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
+    return raw.reverse().map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
   }
 
   /**
    * afterSeq **뒤의** 대화 — loadMessages의 앞으로 가는 짝 (#66).
-   * recall이 준 자리의 "다음에 무슨 말이 오갔나"를 읽을 때 쓴다. 같은 병합 규칙.
+   * recall이 준 자리의 "다음에 무슨 말이 오갔나"를 읽을 때 쓴다. 같은 규칙: 행 하나가 메시지 하나다 (#77).
    */
   loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20): StoredMessage[] {
-    const stmt = this.db.prepare(
-      `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
-       WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
-    )
-    const merged: StoredMessage[] = []
-    let cursor = afterSeq
-    const BATCH = 400
-    outer: for (;;) {
-      const raw = stmt.all(sessionId, cursor, BATCH) as (StoredMessage & { payload: string })[]
-      if (raw.length === 0) break
-      for (const r of raw) {
-        const row: StoredMessage = { ...r, payload: JSON.parse(r.payload) }
-        const newest = merged[merged.length - 1]
-        if (newest && continuesRun(newest, row)) {
-          const head = (newest.payload as { text?: string }).text ?? ''
-          const tail = (row.payload as { text?: string }).text ?? ''
-          newest.payload = { ...(newest.payload as object), text: head + tail }
-          newest.ts = row.ts // 마지막 조각의 시각
-        } else {
-          merged.push(row)
-          if (merged.length > limit) break outer
-        }
-      }
-      cursor = raw[raw.length - 1]!.seq
-      if (raw.length < BATCH) break
-    }
-    return merged.slice(0, limit)
+    const raw = this.db
+      .prepare(
+        `SELECT session_id as sessionId, seq, role, kind, payload, ts FROM messages
+         WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
+      )
+      .all(sessionId, afterSeq, limit) as (StoredMessage & { payload: string })[]
+    return raw.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
   }
 
   /**
@@ -2146,17 +2097,6 @@ export type AppRunRecord = {
   sessionId: string | null
 }
 
-/** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */
-/**
- * older가 newer의 같은 메시지 조각인가 (#66) — UI의 messagesToChat과 같은 규칙:
- * assistant의 text끼리, reasoning끼리만 잇는다. 사람의 말(role=user)은 잇지 않는다.
- */
-function continuesRun(older: StoredMessage, newer: StoredMessage): boolean {
-  if (older.kind !== newer.kind || older.role !== newer.role) return false
-  if (older.role !== 'assistant') return false
-  return older.kind === 'text' || older.kind === 'reasoning'
-}
-
 /**
  * 세션 삭제의 한 조각 (#179). 실제 DB에서 색인 행 하나를 걷는 데 약 0.064ms가 들어
  * (27,887행에 1,774ms) 250행이면 한 조각이 보통 20ms 안쪽이다. 더 잘게 자르면 커밋 수가
@@ -2164,6 +2104,7 @@ function continuesRun(older: StoredMessage, newer: StoredMessage): boolean {
  */
 const DELETE_CHUNK = 250
 
+/** 검색 대상 텍스트만 뽑는다 (도구 호출 payload 전체를 넣으면 잡음이 된다) */
 function extractText(payload: string): string {
   try {
     const p = JSON.parse(payload) as Record<string, unknown>

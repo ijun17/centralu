@@ -1512,9 +1512,9 @@ export class SessionManager {
 
     const ours = this.store.loadMessages(info.id, SYNC_LIMIT)
     /*
-     * loadMessages는 이제 병합된 메시지를 준다 (#66). 이 되살리기 루프는 그래도
-     * 남는다 — 도구 호출 없이 턴이 갈린 연속 assistant 메시지를 도구 기록과 같은
-     * 단위로 잇는 일은 여전히 여기 몫이고, 병합된 행에는 멱등이라 해가 없다.
+     * loadMessages는 행 하나를 메시지 하나로 준다 (#77) — 이웃한 assistant 행도 붙이지 않는다.
+     * 이 되살리기 루프는 그대로 그것들을 잇는다: 읽기가 붙여 주던 때와 같은 글로 도구 기록과
+     * 맞춘다. 붙이지 않는 것은 화면의 규칙이고, 따라잡기의 기준을 함께 바꾸는 일은 아니다.
      */
     const lastMessageText = (): string | undefined => {
       const parts: string[] = []
