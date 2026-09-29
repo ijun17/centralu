@@ -699,7 +699,7 @@ export class SessionManager {
    * The name for the manager slot (user request, 2026-09-07: "add 'manager' to the name").
    *
    * Its old name was 'Worktrees'. Seeing only that row in the sidebar read like a **list** of
-   * worktrees, and the name gave no hint that this was a session you could address — a manager is
+   * worktrees, and the name gave no hint that this was a session the person could address — a manager is
    * a party to talk to, not a screen.
    */
   private static readonly MANAGER_NAME = 'Worktree manager'
@@ -4178,7 +4178,7 @@ export class SessionManager {
             sessionId: s.id,
             session: this.labelOf(s),
             project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
-            // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone tells you
+            // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
             // nothing)
             snippet: windowAround(this.contextAt(s.id, h.seq) || h.body, query, 160),
             seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
