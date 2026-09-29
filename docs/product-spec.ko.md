@@ -396,6 +396,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 - M1: 커맨드 팔레트(⌘K)에서 세션 이름과 프로젝트 검색.
 - M2: 대화 **내용**의 전문 검색 (SQLite FTS) — 며칠에 걸쳐 세션 4개를 굴리면 "그 얘기 어디서 했더라"는 반드시 나온다.
+- **내용은 오간 말이다**: 사람의 말, 에이전트의 답과 추론. 도구 호출과 그 출력은 검색하지 않는다 ([#221](https://github.com/ijun17/centralu/issues/221)). 그때까지는 명령이 색인됐는데, 색인 81,816행 중 55,131행이었고 236.2MiB 저장소의 124.5MiB 색인 대부분이었다 (실제 저장소의 사본, 2026-09-30). 명령의 출력은 한 번도 색인된 적이 없다. 빼도 오간 말을 찾는 검색은 잃은 것이 없고(표본 질의 397개가 모두 같은 메시지를 돌려줬다), 색인은 36.6MiB, 저장소는 145.4MiB가 됐다. 세션이 무엇을 실행했는지는 검색이 아니라 `read_session`으로 읽는다.
 - 휴지통의 세션(FR-22)은 사람의 검색에도 에이전트의 `recall`에도 **나오지 않는다**. 휴지통에 넣을 때 색인 행을 지우고, 되살릴 때 다시 만든다.
 
 #### FR-22. 세션 휴지통 (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
@@ -595,7 +596,7 @@ interface AgentAdapter {
 
 - `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
 - `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 휴지통에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
-- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다.
+- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계
 - `workspace(id, layout_json, updated_at)` — 스냅숏

@@ -36,8 +36,8 @@ type NormalizedEvent =
   | { type: 'message_delta';    sessionId, role, text }         // streaming body
   | { type: 'reasoning_delta';  sessionId, text?, estTokens? }  // #58: codex gives summary text; claude only a token estimate
   | { type: 'user_message';     sessionId, seq, text, from? }   // human input, or another session's instruction (FR-11)
-  | { type: 'tool_call';        sessionId, callId, summary: ToolSummary }
-  | { type: 'tool_result';      sessionId, callId, ok, summary }
+  | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: the raw tool input (#221)
+  | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: the whole result text (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker
   // in-turn progress (display-only, never persisted)
@@ -65,6 +65,16 @@ type NormalizedEvent =
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
+
+**A tool call's `summary` is its card; `input` and `output` are its record, and they never leave the host**
+([#221](https://github.com/ijun17/centralu/issues/221)). The adapter sends both: `summary` is what the card shows (a
+command, a path, the first 300 characters of a Claude result or 2,000 of a Codex one), `input` is what the tool received
+(a Write's content, an Edit's both sides, Codex's file changes with their diffs) and `output` is the whole text it
+answered, images excluded (they are attachments, #40). The host stores the event as it came and strips `input` and
+`output` from everything it sends — the event stream and the history pages (`messages.load`, `trash.read`) — so on this
+wire the two fields are always absent. They are declared here because the stored payload is this event, and a reader of
+the store that asks for them by name (`Store.loadMessages(…, { full: true })`) gets this shape. Why they stay behind:
+[security-boundaries.md](security-boundaries.md#tool-output-in-the-store).
 
 `ApprovalDetail` is **structured in advance by the adapter** so it carries what is needed to judge in-place banner approval (FR-3):
 

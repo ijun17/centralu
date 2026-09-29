@@ -37,8 +37,8 @@ type NormalizedEvent =
   | { type: 'message_delta';    sessionId, role, text }         // 스트리밍 본문
   | { type: 'reasoning_delta';  sessionId, text?, estTokens? }  // #58: codex는 요약 텍스트, claude는 토큰 추정치뿐
   | { type: 'user_message';     sessionId, seq, text, from? }   // 사람의 말, 또는 다른 세션의 지시 (FR-11)
-  | { type: 'tool_call';        sessionId, callId, summary: ToolSummary }
-  | { type: 'tool_result';      sessionId, callId, ok, summary }
+  | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: 도구가 받은 입력 그대로 (#221)
+  | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: 결과 글 전체 (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
@@ -66,6 +66,15 @@ type NormalizedEvent =
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
+
+**도구 호출의 `summary`는 카드이고, `input`과 `output`은 기록이다. 기록은 host 밖으로 나가지 않는다**
+([#221](https://github.com/ijun17/centralu/issues/221)). 어댑터는 둘 다 보낸다: `summary`는 카드가 보여 주는 것(명령,
+경로, Claude 결과의 앞 300자·Codex 결과의 앞 2,000자)이고, `input`은 도구가 받은 것(Write의 내용, Edit의 양쪽, Codex의
+파일 변경과 그 diff), `output`은 도구가 답한 글 전체다. 이미지는 빠진다(첨부로 남는다, #40). host는 이벤트를 온 그대로
+저장하고, 내보내는 모든 것 — 이벤트 스트림과 기록 페이지(`messages.load`, `trash.read`) — 에서 `input`과 `output`을
+걷는다. 그래서 이 선 위에서 두 칸은 언제나 비어 있다. 여기 선언해 두는 이유는 저장된 payload가 이 이벤트이고, 이름을 대고
+묻는 저장소의 독자(`Store.loadMessages(…, { full: true })`)가 이 모양을 받기 때문이다. 왜 남겨 두는지는
+[security-boundaries.md](security-boundaries.md#tool-output-in-the-store)에 있다.
 
 `ApprovalDetail`은 인라인 배너 승인(FR-3)의 판단에 필요한 것을 담도록 **어댑터가 미리 구조화**한다:
 

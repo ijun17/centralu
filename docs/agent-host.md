@@ -69,6 +69,11 @@ interface AdapterCapabilities {
 Implementation rules:
 
 - **External SDK types may not leave adapters/<tool>/** (anti-corruption). The adapter's only output is `NormalizedEvent`.
+- **A tool call carries its card and its record** (#221). `summary` is what the card shows and may be cut short;
+  `tool_call.input` is the input the tool received, as it received it, and `tool_result.output` is the whole text it
+  answered, uncut, with images left out (they go out as `message_image`, #40). The host keeps the record in the store
+  and strips it from everything it sends ([protocol.md](protocol.md) §2), so an adapter never has to choose between a
+  small card and a complete record.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).

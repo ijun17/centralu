@@ -17,6 +17,35 @@ JSON framing prevents ambiguous transcript-line assembly; it does **not** make t
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
 
+## Tool output in the store
+
+The store keeps every tool call whole ([#221](https://github.com/ijun17/centralu/issues/221)): the call's raw
+`input` (a Write's content, an Edit's both sides, a command with its options) and the result's whole `output`. It used to
+keep only the card — the first 300 characters of a Claude result, 2,000 of a Codex one, a file edit's path — and the
+full text lived only in the tools' own files, which Claude Code deletes after 30 days without activity. That record now
+outlives the tool's cleanup. It also means **secrets a tool printed stay in the store for as long as the session does**,
+instead of for as long as the tool keeps its file; deleting the session for good (FR-22) is what removes them.
+
+That record does not move the boundary of [#73](https://github.com/ijun17/centralu/issues/73): full tool output from
+one session reaching another session's prompt is the privilege path it closed. So the record stays in the store:
+
+- **Readers get the card unless they ask for the record by name.** `Store.loadMessages` and `loadMessagesFrom` drop
+  `input` and `output` in SQLite (`json_remove`) unless called with `{ full: true }`, and nothing calls them that way
+  yet. Every reader that hands stored messages to someone else goes through them: `read_session`, `recall`'s context,
+  `list_sessions`' preview and the report-back, the handoff record and handoff note, the orchestrator's memory, an app
+  agent's final answer, the UI's history pages (`messages.load`, `trash.read`). Each of these also names the fields it
+  copies (`summary.title`, the string `summary`, `text`), so a leak would take both layers failing.
+- **Events leave the host as their card.** `withoutToolRecord` is applied where every event leaves `SessionManager`,
+  before the WebSocket broadcast, its reconnect buffer and the in-process app observers.
+- **The search index holds none of it.** Only what the person and the agents said, and the agents' reasoning, are
+  indexed (`INDEXED_KINDS` in `store.ts`) — not tool calls, and not their output — so neither `recall` nor the palette
+  can find a session by what a command printed, or by the command.
+
+Tests: `manager.test.ts` ("a tool call is kept whole in the store and leaves it only as its card") puts secrets where
+the card does not reach and looks for them in the broadcast, the history and trash pages, `read_session`, `recall`,
+search, `list_sessions`, the handoff record and file, and the orchestrator's memory; `store-tool-record.test.ts` holds
+the store's default read and the index.
+
 ## Text an app sends
 
 An app's view can ask to put text into a conversation (MCP Apps `ui/message`). The person reads

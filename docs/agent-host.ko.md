@@ -70,6 +70,10 @@ interface AdapterCapabilities {
 구현 규칙:
 
 - **외부 SDK 타입은 adapters/<tool>/ 밖으로 나갈 수 없다** (anti-corruption). 어댑터의 유일한 출력은 `NormalizedEvent`다.
+- **도구 호출은 카드와 기록을 함께 싣는다** (#221). `summary`는 카드가 보여 주는 것이라 짧게 잘려도 된다.
+  `tool_call.input`은 도구가 받은 입력을 받은 그대로, `tool_result.output`은 도구가 답한 글 전체를 자르지 않고 싣는다.
+  이미지는 뺀다(`message_image`로 따로 나간다, #40). host가 기록을 저장소에 남기고 내보내는 모든 것에서 걷으므로
+  ([protocol.md](protocol.md) §2), 어댑터는 작은 카드와 온전한 기록 사이에서 고를 필요가 없다.
 - 어댑터는 상태를 갖지 않는다 — 세션 상태 추적은 `sessions/`가 이벤트를 관찰하며 수행한다. 어댑터는 변환기일 뿐이다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).
