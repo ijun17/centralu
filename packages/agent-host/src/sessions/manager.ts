@@ -44,6 +44,8 @@ import {
   DATA_DIR,
   // 틀의 한 줄 칸 (#120) — 목도 같은 틀로 만드는 세션에 말을 넣어야 해서 protocol에 산다(app-frames.ts)
   frameField,
+  isProjectId,
+  isSessionId,
   parseUiPreferences,
   sessionLiveDefaults,
 } from '@cc/protocol'
@@ -3089,6 +3091,13 @@ export class SessionManager {
 
   /** 워크트리는 **저장소 밖**에 만든다 — 사용자 저장소를 더럽히지 않는다 (.gitignore도 안 건드린다) */
   private worktreePathFor(projectId: string, sessionId: string): string {
+    /*
+     * 두 id가 곧 두 조각이다 (#132) — 조각 하나가 아니면 이 경로는 뿌리 밖이다. `"../escaped"`를 받았을 때
+     * 워크트리가 뿌리 밖에 생겼고, 등록된 프로젝트인지 묻는 자리는 그보다 뒤였다. 경계(`ProjectId`)가 이미 거르지만
+     * 경로를 만드는 쪽이 스스로도 확인한다 — 이 함수는 RPC를 거치지 않는 호출자도 부른다.
+     */
+    if (!isProjectId(projectId)) throw Object.assign(new Error(`Not a project id: ${projectId}`), { code: 'internal' })
+    if (!isSessionId(sessionId)) throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
     return join(this.worktreeRoot, projectId, sessionId)
   }
 

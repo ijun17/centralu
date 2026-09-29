@@ -27,6 +27,7 @@ import {
   SessionActivity,
   SessionGoal,
   SessionId,
+  ProjectId,
   SessionState,
   TokenUsage,
   ToolName,
@@ -39,7 +40,7 @@ import {
 /** UI → host RPC. 포트 인터페이스(platform/ports)와 1:1 대응 (docs/protocol.md §3) */
 
 export const CreateSessionParams = z.object({
-  projectId: z.string(),
+  projectId: ProjectId,
   cwd: z.string(),
   tool: ToolName,
   model: z.string().optional(),
@@ -684,7 +685,7 @@ export const RpcMethods = {
    * supported=false면 이유를 함께 준다 — 구버전 도구에서도 '새 세션'은 그대로 된다.
    */
   'agents.listExternalSessions': {
-    params: z.object({ projectId: z.string(), tool: ToolName, limit: z.number().default(30) }),
+    params: z.object({ projectId: ProjectId, tool: ToolName, limit: z.number().default(30) }),
     result: z.object({
       supported: z.boolean(),
       reason: z.string().optional(),
@@ -696,17 +697,17 @@ export const RpcMethods = {
     params: z.object({}),
     result: z.array(ToolStatus),
   },
-  'git.status': { params: z.object({ projectId: z.string() }), result: z.array(GitFileStatus) },
+  'git.status': { params: z.object({ projectId: ProjectId }), result: z.array(GitFileStatus) },
   'git.diff': {
-    params: z.object({ projectId: z.string(), path: z.string(), staged: z.boolean().optional() }),
+    params: z.object({ projectId: ProjectId, path: z.string(), staged: z.boolean().optional() }),
     result: GitDiff,
   },
-  'git.log': { params: z.object({ projectId: z.string(), limit: z.number().optional() }), result: z.array(GitCommit) },
+  'git.log': { params: z.object({ projectId: ProjectId, limit: z.number().optional() }), result: z.array(GitCommit) },
   'git.commitDetail': {
-    params: z.object({ projectId: z.string(), sha: z.string() }),
+    params: z.object({ projectId: ProjectId, sha: z.string() }),
     result: z.object({ files: z.array(z.string()), diff: z.string(), truncated: z.boolean() }),
   },
-  'git.branches': { params: z.object({ projectId: z.string() }), result: z.array(GitBranch) },
+  'git.branches': { params: z.object({ projectId: ProjectId }), result: z.array(GitBranch) },
   /**
    * git이 무시하는 것들 (#76) — 새 워크트리에 **없을** 것들의 목록.
    *
@@ -714,23 +715,23 @@ export const RpcMethods = {
    * 수 있다(측정이 오래 걸리면 포기한다) — 목록 자체가 답이고 크기는 판단의 재료다.
    */
   'git.ignoredEntries': {
-    params: z.object({ projectId: z.string() }),
+    params: z.object({ projectId: ProjectId }),
     result: z.array(z.object({ path: z.string(), bytes: z.number().nullable() })),
   },
   'git.checkout': {
-    params: z.object({ projectId: z.string(), branch: z.string(), dryRun: z.boolean().optional() }),
+    params: z.object({ projectId: ProjectId, branch: z.string(), dryRun: z.boolean().optional() }),
     result: z.object({ ok: z.boolean(), conflicts: z.array(z.string()), message: z.string().optional() }),
   },
   'git.stage': {
-    params: z.object({ projectId: z.string(), paths: z.array(z.string()), unstage: z.boolean().optional() }),
+    params: z.object({ projectId: ProjectId, paths: z.array(z.string()), unstage: z.boolean().optional() }),
     result: z.object({ ok: z.literal(true) }),
   },
   'git.commit': {
-    params: z.object({ projectId: z.string(), message: z.string() }),
+    params: z.object({ projectId: ProjectId, message: z.string() }),
     result: z.object({ ok: z.boolean(), message: z.string().optional() }),
   },
   'git.push': {
-    params: z.object({ projectId: z.string() }),
+    params: z.object({ projectId: ProjectId }),
     result: z.object({ ok: z.boolean(), message: z.string().optional() }),
   },
   /** 붙여넣은 이미지를 host가 파일로 저장한다 (base64를 DB에 넣지 않기 위해) */
@@ -744,7 +745,7 @@ export const RpcMethods = {
     result: Attachment,
   },
   'fs.listDir': {
-    params: z.object({ projectId: z.string(), path: z.string() }),
+    params: z.object({ projectId: ProjectId, path: z.string() }),
     result: z.array(z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })),
   },
   /**
@@ -754,11 +755,11 @@ export const RpcMethods = {
    * 변화는 `fs_changed` 이벤트로 온다. watched가 보낸 수보다 작으면 상한에 잘린 것이다.
    */
   'fs.watch': {
-    params: z.object({ projectId: z.string(), paths: z.array(z.string()) }),
+    params: z.object({ projectId: ProjectId, paths: z.array(z.string()) }),
     result: z.object({ watched: z.number() }),
   },
   'fs.readFile': {
-    params: z.object({ projectId: z.string(), path: z.string() }),
+    params: z.object({ projectId: ProjectId, path: z.string() }),
     result: z.object({
       text: z.string(),
       truncated: z.boolean(),
@@ -775,7 +776,7 @@ export const RpcMethods = {
    * the new name is always the old one. `moved: false` means it landed where it already was.
    */
   'fs.move': {
-    params: z.object({ projectId: z.string(), from: z.string(), toDir: z.string() }),
+    params: z.object({ projectId: ProjectId, from: z.string(), toDir: z.string() }),
     result: z.object({ path: z.string(), moved: z.boolean() }),
   },
   /**
@@ -785,7 +786,7 @@ export const RpcMethods = {
    * which is the same reason attachments travel this way.
    */
   'fs.importFile': {
-    params: z.object({ projectId: z.string(), toDir: z.string(), name: z.string(), dataBase64: z.string() }),
+    params: z.object({ projectId: ProjectId, toDir: z.string(), name: z.string(), dataBase64: z.string() }),
     result: z.object({ path: z.string() }),
   },
   /**
@@ -796,7 +797,7 @@ export const RpcMethods = {
    * to build one — and it refuses paths that leave the project, or that are not there.
    */
   'fs.resolve': {
-    params: z.object({ projectId: z.string(), path: z.string() }),
+    params: z.object({ projectId: ProjectId, path: z.string() }),
     result: z.object({ path: z.string() }),
   },
   'messages.search': {
@@ -823,7 +824,7 @@ export const RpcMethods = {
    * 받아 봐야 지킬 수 없는 약속이 된다.
    */
   'projects.delete': {
-    params: z.object({ projectId: z.string() }),
+    params: z.object({ projectId: ProjectId }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -833,7 +834,7 @@ export const RpcMethods = {
    * 돌면 안 된다. 끄면 그 프로젝트의 앱이 바로 내려간다.
    */
   'projects.setTrusted': {
-    params: z.object({ projectId: z.string(), trusted: z.boolean() }),
+    params: z.object({ projectId: ProjectId, trusted: z.boolean() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -860,7 +861,7 @@ export const RpcMethods = {
    * cost a `git status` — the caller already has everything else about the project.
    */
   'projects.setCommands': {
-    params: z.object({ projectId: z.string(), commands: z.array(SavedCommand) }),
+    params: z.object({ projectId: ProjectId, commands: z.array(SavedCommand) }),
     result: z.array(SavedCommand),
   },
   /**
@@ -872,19 +873,19 @@ export const RpcMethods = {
    * 이미 자리가 있으면 그 자리를 돌려주고 줄기만 새로 적는다 (줄기를 고치는 길).
    */
   'worktrees.createManager': {
-    params: z.object({ projectId: z.string(), baseBranch: z.string() }),
+    params: z.object({ projectId: ProjectId, baseBranch: z.string() }),
     result: SessionInfo,
   },
   /** 워크트리 프로비저닝 설정 저장 (#69) — 새 세션 창의 워크트리 영역이 편집한다 */
   'projects.setWorktreeSetup': {
     params: z.object({
-      projectId: z.string(),
+      projectId: ProjectId,
       setup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable(),
     }),
     result: z.object({ ok: z.literal(true) }),
   },
   'sessions.reorder': {
-    params: z.object({ projectId: z.string(), orderedIds: z.array(z.string()) }),
+    params: z.object({ projectId: ProjectId, orderedIds: z.array(z.string()) }),
     result: z.array(SessionInfo),
   },
   /**
@@ -934,7 +935,7 @@ export const RpcMethods = {
   'apps.viewFrame': {
     params: z.object({
       appId: AppId,
-      projectId: z.string().nullable().default(null),
+      projectId: ProjectId.nullable().default(null),
       instanceId: z.string(),
       hostOrigin: z.string(),
     }),
@@ -961,7 +962,7 @@ export const RpcMethods = {
    * 함께 실패하고 인스턴스를 남기지 않는다. 앱이 실패를 답했으면 연다 — 실패를 그리는 것도 화면이다.
    */
   'apps.openView': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({
       instanceId: z.string(),
       tool: z.string(),
@@ -1041,7 +1042,7 @@ export const RpcMethods = {
   'apps.readResource': {
     params: z.object({
       appId: AppId,
-      projectId: z.string().nullable().default(null),
+      projectId: ProjectId.nullable().default(null),
       uri: z.string(),
       instanceId: z.string().optional(),
     }),
@@ -1078,7 +1079,7 @@ export const RpcMethods = {
       appId: AppId,
       name: z.string(),
       args: z.record(z.string(), z.unknown()),
-      projectId: z.string().nullable().optional(),
+      projectId: ProjectId.nullable().optional(),
       /** 부른 화면의 인스턴스 — 이 호출이 낸 "바뀌었다"(`external_app_state_changed.cause`)를 그 화면만 건너뛴다 */
       instanceId: z.string().optional(),
     }),
@@ -1106,11 +1107,11 @@ export const RpcMethods = {
    */
   /** 외부 앱 하나의 실행 기록, 최근 것부터 (M4 A-6 — 기록 화면 B-7이 읽는다) */
   'apps.runs': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable(), limit: z.number().int().min(1).max(500).default(100) }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), limit: z.number().int().min(1).max(500).default(100) }),
     result: z.array(AppRun),
   },
   'apps.restart': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -1119,7 +1120,7 @@ export const RpcMethods = {
    * 거절한다 — 저장소의 파일이라 거두는 자리는 git이다. 목록은 `apps.list`의 `projectId: null`인 앱이다.
    */
   'apps.remove': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -1131,7 +1132,7 @@ export const RpcMethods = {
    */
   'apps.create': {
     params: z.object({
-      projectId: z.string().nullable(),
+      projectId: ProjectId.nullable(),
       id: z.string(),
       name: z.string(),
       description: z.string().optional(),
@@ -1149,7 +1150,7 @@ export const RpcMethods = {
    * 프로젝트 앱의 만드는 세션은 cwd가 프로젝트 뿌리이고, 사용자 폴더 앱의 것은 앱 폴더다.
    */
   'apps.builder': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: SessionInfo.nullable(),
   },
   /**
@@ -1161,7 +1162,7 @@ export const RpcMethods = {
    * 것만 든다(메모리에 산다). 오래 남는 것은 실행 기록(`apps.runs`)의 몫이다.
    */
   'apps.errors': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({ latest: AppErrorBundle.nullable(), recent: z.array(AppErrorBundle) }),
   },
   /**
@@ -1179,12 +1180,12 @@ export const RpcMethods = {
   },
   /** 한 앱에 대해 기억된 능력의 답 (M4 D-4) — 기록 판(B-7) 옆에서 보이고 잊을 수 있다 */
   'apps.permissions': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.array(AppPermission),
   },
   /** 기억된 답 하나를 잊는다 (M4 D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
   'apps.forgetPermission': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable(), capability: z.string() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), capability: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -1192,11 +1193,11 @@ export const RpcMethods = {
    * 남아 있는 동안은 읽힌다.
    */
   'apps.usage': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: AppUsage,
   },
   'apps.createBuilder': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable(), tool: ToolName.optional() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), tool: ToolName.optional() }),
     result: SessionInfo,
   },
   /**
@@ -1212,13 +1213,13 @@ export const RpcMethods = {
    * 거절한다. 에이전트에게는 앱의 출력을 인용으로 가둔 모양(protocol의 `builderErrorFrame`)이 간다.
    */
   'apps.sendError': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable(), at: z.number() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), at: z.number() }),
     result: z.object({ sessionId: SessionId }),
   },
   'apps.askBuilder': {
     params: z.object({
       appId: AppId,
-      projectId: z.string().nullable(),
+      projectId: ProjectId.nullable(),
       text: z.string().max(64_000),
       attachments: z.array(Attachment).optional(),
       instanceId: z.string().optional(),
@@ -1231,7 +1232,7 @@ export const RpcMethods = {
    * 돌려준다. `text`는 에이전트에게 보내도 되는 한 덩어리 글이다. 멈춘 앱도 다시 띄워 본다(다시 시작과 같다).
    */
   'apps.check': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({
       ok: z.boolean(),
       text: z.string(),
@@ -1246,7 +1247,7 @@ export const RpcMethods = {
   'apps.setSecret': {
     params: z.object({
       appId: AppId,
-      projectId: z.string().nullable(),
+      projectId: ProjectId.nullable(),
       name: z.string(),
       value: z.string().max(16 * 1024).nullable(),
     }),
@@ -1279,7 +1280,7 @@ export const RpcMethods = {
    * 다시 묻는 것이면 `changed`가 켠 때의 선언을 싣는다. 사용자 폴더의 앱만 받는다(프로젝트 앱은 프로젝트 신뢰를 따른다).
    */
   'apps.review': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: AppReview,
   },
   /**
@@ -1287,7 +1288,7 @@ export const RpcMethods = {
    * 대 본다: 그 사이 바뀌었으면 거절한다(다시 보고 켠다). 가져온 앱이 아니면 거절한다 — 켤 것이 없다.
    */
   'apps.enable': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable(), reviewKey: z.string() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), reviewKey: z.string() }),
     result: ExternalAppInfo,
   },
   /**
@@ -1295,7 +1296,7 @@ export const RpcMethods = {
    * 폴더를 건드린 최근 커밋(git이 판이다, 읽기만 한다). 저장소가 아니면 `repo: false`에 빈 목록이다.
    */
   'apps.versions': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: AppVersions,
   },
   /**
@@ -1304,7 +1305,7 @@ export const RpcMethods = {
    * 가져온 앱의 판이 다른 `server`·`uses`를 가졌으면 다시 묻는다. 프로젝트 앱은 거절한다 — 되돌리는 자리는 git이다.
    */
   'apps.restoreVersion': {
-    params: z.object({ appId: AppId, projectId: z.string().nullable(), id: z.string() }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), id: z.string() }),
     result: ExternalAppInfo,
   },
   'orchestrator.tools': {
@@ -1352,7 +1353,7 @@ export const RpcMethods = {
     result: z.array(z.string()),
   },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },
-  'projects.gitStatus': { params: z.object({ projectId: z.string() }), result: ProjectInfo },
+  'projects.gitStatus': { params: z.object({ projectId: ProjectId }), result: ProjectInfo },
   'sessions.list': { params: z.object({}), result: z.array(SessionInfo) },
   'sessions.rename': {
     params: z.object({ sessionId: SessionId, name: z.string() }),
@@ -1426,16 +1427,16 @@ export const RpcMethods = {
     result: z.object({ stopped: z.number() }),
   },
   'files.search': {
-    params: z.object({ projectId: z.string(), query: z.string(), limit: z.number().default(20) }),
+    params: z.object({ projectId: ProjectId, query: z.string(), limit: z.number().default(20) }),
     result: z.array(z.object({ path: z.string(), name: z.string() })),
   },
   'terminal.list': {
-    params: z.object({ projectId: z.string() }),
+    params: z.object({ projectId: ProjectId }),
     result: z.object({ terminals: z.array(TerminalInfo) }),
   },
   /** 터미널을 하나 더 연다 */
   'terminal.create': {
-    params: z.object({ projectId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
+    params: z.object({ projectId: ProjectId, cols: z.number().default(80), rows: z.number().default(24) }),
     result: TerminalInfo,
   },
   /** 터미널 하나를 닫는다 (셸 종료 + 기록 폐기) */
@@ -1458,26 +1459,26 @@ export const RpcMethods = {
   },
   /** 자주 쓰는 명령어 실행 (#60). 같은 명령이 돌고 있으면 죽이고 새로 시작한다 */
   'commands.run': {
-    params: z.object({ projectId: z.string(), command: z.string(), cols: z.number().default(100), rows: z.number().default(30) }),
+    params: z.object({ projectId: ProjectId, command: z.string(), cols: z.number().default(100), rows: z.number().default(30) }),
     result: CommandRunInfo,
   },
   /** 데브 서버를 끈다. 로그는 남는다 — 종료도 결과다 */
   'commands.stop': {
-    params: z.object({ projectId: z.string(), command: z.string() }),
+    params: z.object({ projectId: ProjectId, command: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /** 실행된 적 있는 명령들의 상태 (목록 뱃지용 — 로그는 log가 준다) */
   'commands.state': {
-    params: z.object({ projectId: z.string() }),
+    params: z.object({ projectId: ProjectId }),
     result: z.object({ runs: z.array(CommandRunInfo) }),
   },
   /** 명령 하나의 마지막 실행, 로그째. 실행된 적 없으면 null */
   'commands.log': {
-    params: z.object({ projectId: z.string(), command: z.string() }),
+    params: z.object({ projectId: ProjectId, command: z.string() }),
     result: z.object({ run: CommandRunInfo.extend({ history: z.string() }).nullable() }),
   },
   'commands.resize': {
-    params: z.object({ projectId: z.string(), command: z.string(), cols: z.number(), rows: z.number() }),
+    params: z.object({ projectId: ProjectId, command: z.string(), cols: z.number(), rows: z.number() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
@@ -1542,7 +1543,7 @@ export const RpcMethods = {
     result: UiPreferences,
   },
   'approvals.rules': {
-    params: z.object({ projectId: z.string().optional() }),
+    params: z.object({ projectId: ProjectId.optional() }),
     result: z.array(
       z.object({
         id: z.number(),

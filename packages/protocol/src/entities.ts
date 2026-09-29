@@ -34,6 +34,25 @@ export function isSessionId(value: string): boolean {
   return SESSION_ID_RE.test(value)
 }
 
+/**
+ * 프로젝트 id — 세션 id와 **같은 까닭으로** 모양을 못박는다 (#132).
+ *
+ * 이 값도 경로 조각이 된다: 워크트리(`<워크트리 뿌리>/<프로젝트 id>/<세션 id>`)와 인수인계 노트
+ * (`<데이터>/handoff/<프로젝트 id>/<세션 id>.md`). `z.string()`이던 시절 `agents.createSession`에
+ * `projectId: "../escaped"`와 `worktree: true`를 보내면, 등록된 프로젝트인지 묻기도 전에 워크트리 뿌리 밖에
+ * 깃 워크트리 하나와 브랜치 하나가 생겼고, 그 뒤에야 "Project not found"로 실패하며 둘 다 남겼다(실측).
+ *
+ * 프로젝트 id도 우리가 `randomUUID()`로 만든다(`addProject`가 유일한 자리다) — 실사용 데이터의 프로젝트 7개도
+ * 모두 36자 UUID였다. 그래서 세션 id의 판정을 그대로 쓴다: 묻는 것은 봉쇄가 아니라 **"애초에 조각 하나인가"**다.
+ */
+export const ProjectId = z.string().regex(SESSION_ID_RE, 'Not a project id')
+export type ProjectId = z.infer<typeof ProjectId>
+
+/** 같은 판정을, zod가 닿지 않는 곳에서 — 경로를 만드는 쪽의 2차 방어선이다 (`isSessionId`와 같다) */
+export function isProjectId(value: string): boolean {
+  return SESSION_ID_RE.test(value)
+}
+
 /** 세션 상태 (product-spec FR-12). 긴급도는 core/session이 판정한다. */
 export const SessionState = z.enum(['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error'])
 export type SessionState = z.infer<typeof SessionState>

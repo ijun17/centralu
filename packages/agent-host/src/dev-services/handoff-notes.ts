@@ -1,6 +1,6 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { isSessionId } from '@cc/protocol'
+import { isProjectId, isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
 
 /**
@@ -23,11 +23,11 @@ import { dataRoot } from '../data-dir.js'
 const root = () => join(dataRoot(), 'handoff')
 
 /**
- * 한 프로젝트의 노트 폴더. 프로젝트 id도 여기서는 경로 조각이다 — **조각 하나가 아니면 거절한다**.
- * 세션 id와 같은 판정을 빌린다: 둘 다 우리가 `randomUUID()`로 만든 불투명한 id다 (#94).
+ * 한 프로젝트의 노트 폴더. 프로젝트 id도 여기서는 경로 조각이다 — **조각 하나가 아니면 거절한다** (#132).
+ * 경계(`ProjectId`)가 이미 거르지만, 경로를 만드는 쪽이 스스로도 확인한다 — 청소는 RPC를 거치지 않는다.
  */
 export function handoffNoteDir(projectId: string): string {
-  if (!isSessionId(projectId)) {
+  if (!isProjectId(projectId)) {
     throw Object.assign(new Error(`Not a project id: ${projectId}`), { code: 'internal' })
   }
   return join(root(), projectId)

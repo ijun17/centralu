@@ -2169,6 +2169,25 @@ describe('워크트리 세션', () => {
     expect(existsSync(join(isolated.worktree!.path, 'a.txt'))).toBe(true)
   })
 
+  /*
+   * #132: 프로젝트 id는 워크트리 경로의 한 조각이다(`<워크트리 뿌리>/<프로젝트 id>/<세션 id>`). 전선에서 받은 id가 경로면
+   * 워크트리가 뿌리 밖에 생겼다 — 등록된 프로젝트인지도 묻지 않았다. 실제 RPC로 끝까지 재현한다.
+   */
+  it('프로젝트 id가 경로면 워크트리 뿌리 밖에 아무것도 만들지 않는다 (#132)', async () => {
+    const escaped = join(root, 'escaped')
+    await expect(
+      wtRpc('agents.createSession', { projectId: '../escaped', cwd: repo, tool: 'claude', worktree: true }),
+    ).rejects.toThrow(/project id/i)
+    expect(existsSync(escaped)).toBe(false)
+    // RPC를 거치지 않는 호출자도 같다 — 경로를 만드는 쪽이 스스로 거른다
+    await expect(
+      wtMgr.createSession({ projectId: '../escaped', cwd: repo, tool: 'claude', worktree: true, permissionPreset: 'normal' }),
+    ).rejects.toThrow(/Not a project id/)
+    expect(existsSync(escaped)).toBe(false)
+    const branches = execFileSync('git', ['branch', '--list', 'centralu/*'], { cwd: repo, encoding: 'utf8' })
+    expect(branches).toBe('') // 브랜치도 남기지 않는다 — 막는 자리가 git보다 앞이다
+  })
+
   it('앱을 껐다 켜고 재개해도 같은 워크트리로 돌아간다', async () => {
     const s = await create(true)
     const path = s.worktree!.path

@@ -12,6 +12,7 @@ import {
   parseEventLenient,
   parseServerFrame,
   RpcMethods,
+  isProjectId,
   ToolDescriptor,
   ToolName,
   ToolStatus,
@@ -264,6 +265,22 @@ describe('SessionId', () => {
     // merely caught — there is no second rule to keep in step with this one.
     expect(del.safeParse({ sessionId: '.hidden' }).success).toBe(false)
     expect(del.safeParse({ sessionId: '' }).success).toBe(false)
+  })
+
+  it('refuses a project id that is a path (#132)', () => {
+    // The project id is a path segment too: `<worktree root>/<project id>/<session id>` and the handoff notes folder.
+    const create = RpcMethods['agents.createSession'].params
+    const ok = { cwd: '/tmp/repo', tool: 'claude', worktree: true }
+    expect(create.safeParse({ ...ok, projectId: '../escaped' }).success).toBe(false)
+    expect(create.safeParse({ ...ok, projectId: '..' }).success).toBe(false)
+    expect(RpcMethods['git.status'].params.safeParse({ projectId: 'a/b' }).success).toBe(false)
+    expect(RpcMethods['apps.remove'].params.safeParse({ appId: 'notes', projectId: '../x' }).success).toBe(false)
+    expect(RpcMethods['apps.remove'].params.safeParse({ appId: 'notes', projectId: null }).success).toBe(true)
+    // Project ids are minted by randomUUID(), like session ids; fixtures use short readable ones
+    expect(create.safeParse({ ...ok, projectId: randomUUID() }).success).toBe(true)
+    expect(create.safeParse({ ...ok, projectId: 'p1' }).success).toBe(true)
+    expect(isProjectId('../escaped')).toBe(false)
+    expect(isProjectId(randomUUID())).toBe(true)
   })
 
   it('accepts the ids we actually mint', () => {
