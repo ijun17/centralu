@@ -17,7 +17,7 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 
 | Document | What is in it | Read first |
 |---|---|---|
-| [product-spec.md](product-spec.md) | The spec: requirements (FR-1–21), screens, roadmap, risks | — |
+| [product-spec.md](product-spec.md) | The spec: requirements (FR-1–22), screens (focus view, grid, project screen), roadmap, risks | — |
 | [architecture.md](architecture.md) | Axes of change, layers, dependency rules, design patterns, process topology | product-spec §6 |
 | [folder-structure.md](folder-structure.md) | How the monorepo is split, and where code for a given change goes | architecture |
 | [tech-stack.md](tech-stack.md) | Library choices with the reasoning, and the list of things not to reach for | architecture |

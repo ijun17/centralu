@@ -264,6 +264,11 @@ call.
 - While the app starts, a skeleton; if it fails, the reason and Restart. Restart waits until the
   host has stopped the app before opening again.
 - The Runs panel (§5.2) opens beside the view.
+- **On its project's screen** (product-spec §5.5) the pinned view stands in the app's panel. It is
+  the same entry, instance and frame as the app view's: the frame never moves in the document (a
+  moved iframe loses its document), the view is laid over the panel's slot and only its style
+  changes (`pinned-app/slots.ts`). In a panel the view has no header; the panel's Open goes to the
+  app view, and hiding the panel closes the view, teardown first.
 - **`ui/message`** from a pinned view asks the person which session to send it to. Nothing is sent
   before a choice, and cancelling tells the view it was not sent. Once picked, it goes the inline
   view's way (`apps.viewMessage`): stored as the app's message, and framed as the app's text for the

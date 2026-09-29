@@ -415,7 +415,7 @@ with no way back.
     record pointing at nothing (`git worktree list` calls it prunable, and `prune` or a `gc` then
     drops the record), and Claude files a conversation by its working directory, so a moved worktree
     would lose the restored session its own history too.
-- **Out of reach while trashed**: the sidebar, inbox, palette, grid, conversation search (FR-21), the
+- **Out of reach while trashed**: the sidebar, inbox, palette, grid, project screen (§5.5), conversation search (FR-21), the
   orchestrator's `list_sessions` / `recall` / `read_session`, the apps' `host_data` `sessions.list`,
   and the approval rules list in Settings. Every store query that reads sessions has to say what it
   does about the trash; a host test fails on one that does not.
@@ -521,6 +521,29 @@ The mark has not frozen the screen: since it went on, the grid gained drag reord
 same DOM node (conversation scroll survives), a rotating working-border (§7.1's measured cost included it),
 and real-pixel column math that holds under the text scale. **Experimental describes the two open objections
 above, not the build quality.** To be revisited in v2 as an option for large-monitor users.
+
+### 5.5 Project screen (2026-09-30, [#203](https://github.com/ijun17/centralu/issues/203))
+
+Clicking a project's name in the sidebar opens its screen (the name opens it; the arrow beside it
+folds the project's rows, #205). The screen shows **everything the project has — its sessions and its
+apps — as panels**, laid out and moved the way the grid's are.
+
+| Decision | Why |
+|---|---|
+| **Everything appears on its own**; nothing is put here by hand | The screen is "this project", not a selection from it. One that waited to be filled would be empty the first time it is opened, which is the one time it has to explain itself. |
+| New panels land **at the end**; panels nobody has placed follow the placed ones in the sidebar's order | A panel pushing into the middle of an arrangement someone made moves every panel after it. |
+| A panel can be **hidden** (×, the session keeps running); hidden panels are named above the panels, and one brought back lands at the end | Hidden is not deleted, and a panel that left with no trace is one nobody remembers hiding. Its old place is a memory of a screen that has changed since. |
+| What is remembered, **per project and across restarts**, is only the dragged order and the hidden set, in the workspace snapshot beside the sidebar fold | It is a way of looking at one project, read and written only by the UI; the host acts on none of it. Its panels are sessions *and* apps, which a table keyed to sessions (the grid's `grid_panels`) cannot hold without cleanup rules of its own for apps, and what that table buys — a panel leaving with its session — comes here from deriving the panels from what exists. Deleting a project drops its arrangement. |
+| A session in the trash (FR-22) is never a panel; one restored comes back at the end | The panels are derived from the session list, and a trashed session is not in it — a remembered order naming it shows nothing. |
+| **An app's panel is its pinned view** (apps.md §6.2): the same instance in the same frame; Open goes to the app view; × closes the view, teardown first | An iframe that moves loses its document, and one instance must have one frame. The view is laid over the panel instead of drawn inside it, so going between this screen, the app view and a session keeps one document. The header's Runs, Secrets, Versions and Builder open side panels a panel has no room for, so they stay in the app view. Showing an app here opens it (the host calls `home`), inside trust and import confirmation as always. |
+| **The grid is unchanged** | It stays a hand-picked list across projects. A session can be on both; a session's panel dropped on the Grid button goes onto the grid, like a sidebar row. |
+| The **evidence panel stays** beside it, unlike the grid | One project, one repository: objection 1 of §5.4 does not apply. Columns come from the width that is left (`columnsFor`), so no panel goes below the minimum either way. |
+
+The panels share the grid's parts: `SessionPane`, the column count, the whole-pixel tracks and the
+working ring (#208), and the settings that fold the message box and stop the ring. A session that
+finishes in a visible panel gets the breeze, not a card. A panel does not take the session focus, so
+typing in one does not leave the screen; objection 2 of §5.4 holds here too — ⌘⇧A and the inbox open
+the focus view. A project with nothing in it says so and offers a new session.
 
 ---
 
