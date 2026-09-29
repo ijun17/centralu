@@ -1311,18 +1311,111 @@ describe('messagesToChat — 이미지 행 (#40 2차)', () => {
 
 /** 추론 요약 (#58) — 델타 행들이 한 덩어리로 되살아난다 (assistant와 같은 규칙) */
 describe('messagesToChat — 추론 행', () => {
-  it('연속된 reasoning 행이 하나로 합쳐진다', () => {
-    const row = (seq: number, text: string) => ({
-      sessionId: 's1', seq, role: 'assistant' as const, kind: 'reasoning' as const, ts: 1,
-      payload: { type: 'reasoning_delta', sessionId: 's1', text },
+  it('이웃한 reasoning 행은 서로 다른 추론이다 — 붙이지 않는다 (#77)', () => {
+    const row = (seq: number, kind: 'reasoning' | 'text', text: string) => ({
+      sessionId: 's1', seq, role: 'assistant' as const, kind, ts: 1,
+      payload: { type: kind === 'text' ? 'message_delta' : 'reasoning_delta', sessionId: 's1', text },
     })
-    const items = messagesToChat([row(1, '**경로'), row(2, ' 검토**'), {
-      sessionId: 's1', seq: 3, role: 'assistant', kind: 'text', ts: 1,
-      payload: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: '답' },
-    }])
+    const items = messagesToChat([row(1, 'reasoning', '**경로 검토**'), row(2, 'reasoning', '**테스트 확인**'), row(3, 'text', '답')])
     expect(items).toEqual([
       { kind: 'reasoning', seq: 1, storedSeq: 1, text: '**경로 검토**' },
+      { kind: 'reasoning', seq: 2, storedSeq: 2, text: '**테스트 확인**' },
       { kind: 'assistant', seq: 3, storedSeq: 3, text: '답' },
+    ])
+  })
+})
+
+/*
+ * 이웃한 두 답은 두 덩어리다 (#77). 사이에 사람의 말이 없는 새 답(백그라운드 작업이 끝났다, 질문 카드에 답했다)이
+ * 앞의 답에 공백 없이 붙어 "…still running.All six reviews are in."이 됐다. 말은 저장 번호로 가른다 — host는 한 말의
+ * 조각을 한 행에 모으고 조각마다 그 번호를 싣는다(#66). 목도 같은 규칙으로 번호를 매긴다.
+ */
+describe('이웃한 답은 저장 번호로 가른다 (#77)', () => {
+  const ask = (sessionId: string, seq: number, text: string) =>
+    ({ sessionId, seq, role: 'user' as const, kind: 'text' as const, payload: { text }, ts: seq })
+  const reply = (sessionId: string, seq: number, text: string) =>
+    ({ sessionId, seq, role: 'assistant' as const, kind: 'text' as const, payload: { type: 'message_delta', text }, ts: seq })
+  const shape = (id: string) => useStore.getState().chat[id]!.map((i) => [i.kind, i.storedSeq, line(i)])
+
+  /** 기록이 네 줄인 세션을 열어 둔다 — 다음 말이 5번이다 */
+  async function opened(id: string) {
+    const mock = new MockPlatform()
+    mock.sessions.set(id, sessionInfo(id))
+    mock.messages.set(id, [ask(id, 1, '질문'), reply(id, 2, '답'), ask(id, 3, '리뷰 돌려줘'), reply(id, 4, 'Six reviews started.')])
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession(id)
+    await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
+    return mock
+  }
+
+  it('5번 말의 조각 뒤에 6번 말의 조각이 오면 두 항목이다', async () => {
+    const mock = await opened('s77-a')
+    mock.emit(delta('s77-a', 'One review '))
+    mock.emit(delta('s77-a', 'is still running.'))
+    // 턴이 끝나고, 사람의 말 없이 새 턴이 선다(백그라운드 작업이 끝났다)
+    mock.emit({ type: 'turn_complete', sessionId: 's77-a' } as never)
+    mock.emit(delta('s77-a', 'All six reviews are in.'))
+    expect(shape('s77-a').slice(-2)).toEqual([
+      ['assistant', 5, 'One review is still running.'],
+      ['assistant', 6, 'All six reviews are in.'],
+    ])
+  })
+
+  it('번호가 같은 조각은 한 항목에 모인다 — 추론도 같다', async () => {
+    const mock = await opened('s77-b')
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '**경로 ' } as never)
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-b', text: '검토**' } as never)
+    mock.emit(delta('s77-b', 'One review '))
+    mock.emit(delta('s77-b', 'is still running.'))
+    expect(shape('s77-b').slice(-2)).toEqual([
+      ['reasoning', 5, '**경로 검토**'],
+      ['assistant', 6, 'One review is still running.'],
+    ])
+  })
+
+  it('추론도 번호가 다르면 두 항목이다', async () => {
+    const mock = await opened('s77-c')
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: '앞 턴의 생각' } as never)
+    mock.emit({ type: 'turn_complete', sessionId: 's77-c' } as never)
+    mock.emit({ type: 'reasoning_delta', sessionId: 's77-c', text: '새 턴의 생각' } as never)
+    expect(shape('s77-c').slice(-2)).toEqual([
+      ['reasoning', 5, '앞 턴의 생각'],
+      ['reasoning', 6, '새 턴의 생각'],
+    ])
+  })
+
+  it('기록 페이지와 실시간 꼬리를 합쳐도(mergePage) 이웃한 답은 따로다', async () => {
+    const id = 's77-d'
+    const mock = new MockPlatform()
+    mock.sessions.set(id, sessionInfo(id))
+    // 기록 끝에 이미 이웃한 두 답이 있다
+    mock.messages.set(id, [ask(id, 1, '리뷰 돌려줘'), reply(id, 2, 'One review is still running.'), reply(id, 3, 'All six reviews are in.')])
+    await useStore.getState().attach(mock)
+
+    // 페이지는 요청한 순간의 것이고, 답은 그 뒤에 온 말보다 늦게 도착한다(기록 커서 B와 같은 조건)
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mock.agents.loadMessages.bind(mock.agents)
+    mock.agents.loadMessages = async (...args: Parameters<typeof real>) => {
+      const page = real(...args)
+      await gate
+      return page
+    }
+    useStore.getState().focusSession(id)
+    mock.emit(delta(id, 'Here is the summary.'))
+    release()
+    await vi.waitFor(() => expect(useStore.getState().history[id]).toBeDefined())
+    mock.agents.loadMessages = real
+    // 합친 뒤에 오는 새 턴의 말도 꼬리에 따로 선다
+    mock.emit({ type: 'turn_complete', sessionId: id } as never)
+    mock.emit(delta(id, 'Anything else?'))
+
+    expect(shape(id)).toEqual([
+      ['user', 1, '리뷰 돌려줘'],
+      ['assistant', 2, 'One review is still running.'],
+      ['assistant', 3, 'All six reviews are in.'],
+      ['assistant', 4, 'Here is the summary.'],
+      ['assistant', 5, 'Anything else?'],
     ])
   })
 })

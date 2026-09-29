@@ -346,6 +346,35 @@ test('세션 생성 → 대화 스트리밍 렌더 (T5-3)', async ({ page }) => 
   await expect(page.getByTestId('msg-assistant')).toContainText('네, 반갑습니다')
 })
 
+/*
+ * 사이에 사람의 말이 없는 두 답은 두 덩어리다 (#77). 백그라운드 작업이 끝나 새 턴이 서면 앞의 답에 공백 없이 붙어
+ * "…still running.All six reviews are in."으로 보였다. 실시간으로 받아도, 기록에서 다시 그려도 같아야 한다.
+ */
+test('사람의 말 없이 이어진 두 답은 두 덩어리로 그려진다 — 실시간도, 기록도 (#77)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', '리뷰 돌려줘')
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'One review ' })
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'is still running.' })
+  // 턴이 끝나고, 사람의 말 없이 새 턴이 선다
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'All six reviews are in.' })
+  await expect(page.getByTestId('msg-assistant')).toHaveText(['One review is still running.', 'All six reviews are in.'])
+
+  // 기록 끝에 이웃한 두 답이 저장된 세션을 연다 — 기록 가져오기가 답마다 행을 쓴 모양
+  const id = await page.evaluate(async () => {
+    const m = (window as any).__mock
+    const project = Object.values((window as any).__store.getState().projects)[0] as { id: string; path: string }
+    const info = await m.agents.createSession({ projectId: project.id, cwd: project.path, tool: 'claude' })
+    m.emit({ type: 'session_created', sessionId: info.id, session: info })
+    const row = (seq: number, role: string, text: string) => ({ sessionId: info.id, seq, role, kind: 'text', payload: { text }, ts: Date.now() })
+    m.messages.set(info.id, [row(1, 'user', '가져온 질문'), row(2, 'assistant', 'First imported reply.'), row(3, 'assistant', 'Second imported reply.')])
+    return info.id as string
+  })
+  await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), id)
+  await expect(page.getByTestId('msg-user')).toHaveText('가져온 질문')
+  await expect(page.getByTestId('msg-assistant')).toHaveText(['First imported reply.', 'Second imported reply.'])
+})
+
 test('첫 프롬프트가 세션 이름이 된다 (T5-6, FR-18)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'auth 모듈 리팩터링')

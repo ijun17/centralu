@@ -94,6 +94,8 @@ export class MockPlatform implements Platform {
   private gridPanels: string[] = []
   /** 세션별 저장된 메시지 — 시험이 "이미 긴 기록이 있는 세션"을 만들 수 있게 열어 둔다 */
   messages = new Map<string, StoredMessage[]>()
+  /** 세션마다 지금 흐르는 말의 행 — `messages` 안의 그 행 자체다(키우면 기록도 자란다) */
+  private streams = new Map<string, StoredMessage>()
   private handlers = new Set<(e: NormalizedEvent) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
   private idc = 0
@@ -279,23 +281,46 @@ export class MockPlatform implements Platform {
           s.lastSeq = seq
           out = { ...event, seq } as NormalizedEvent
         }
-        if (kind) {
-          const seq = (this.messages.get(s.id)?.length ?? 0) + 1
-          this.pushMessage({
-            sessionId: s.id,
-            seq,
-            role:
-              event.type === 'message_delta' || event.type === 'reasoning_delta'
-                ? 'assistant'
-                : event.type === 'user_message'
-                  ? 'user'
-                  : 'system',
-            kind,
-            payload: event,
-            ts: this.now(),
-          })
-          s.lastSeq = seq
-          out = { ...event, seq } as NormalizedEvent
+        /*
+         * 흐르는 말은 행 하나에 모은다 — 실물(host persistMessage, #66)과 같은 규칙. 같은 종류의 조각은 열린 행을
+         * 키우고 그 행의 번호를 싣는다. 다른 행(도구·사람의 말 — pushMessage)과 턴의 끝이 말을 닫는다. 조각마다
+         * 행을 세우면 조각마다 번호가 달라서, 번호로 말을 가르는 화면(#77)이 한 말을 조각마다 끊어 그린다.
+         */
+        const streamKind =
+          event.type === 'message_delta' ? 'text' : event.type === 'reasoning_delta' && event.text ? 'reasoning' : null
+        const piece = streamKind ? ((event as { text?: string }).text ?? '') : ''
+        const run = this.streams.get(s.id)
+        if (streamKind && run?.kind === streamKind) {
+          run.payload = { ...(run.payload as object), text: String((run.payload as { text?: string }).text ?? '') + piece }
+          s.lastSeq = run.seq
+          out = { ...event, seq: run.seq } as NormalizedEvent
+        } else {
+          const closes =
+            streamKind !== null ||
+            event.type === 'turn_complete' ||
+            event.type === 'error' ||
+            (event.type === 'state_change' && event.state !== 'working')
+          if (closes) this.streams.delete(s.id)
+          // 빈 조각으로 행을 시작하지 않는다 — 실물처럼 번호도 싣지 않는다
+          if (kind && !(streamKind && !piece)) {
+            const row: StoredMessage = {
+              sessionId: s.id,
+              seq: (this.messages.get(s.id)?.length ?? 0) + 1,
+              role:
+                event.type === 'message_delta' || event.type === 'reasoning_delta'
+                  ? 'assistant'
+                  : event.type === 'user_message'
+                    ? 'user'
+                    : 'system',
+              kind,
+              payload: event,
+              ts: this.now(),
+            }
+            this.pushMessage(row)
+            if (streamKind) this.streams.set(s.id, row)
+            s.lastSeq = row.seq
+            out = { ...event, seq: row.seq } as NormalizedEvent
+          }
         }
       }
     }
@@ -303,6 +328,7 @@ export class MockPlatform implements Platform {
   }
 
   private pushMessage(m: StoredMessage): void {
+    this.streams.delete(m.sessionId) // 새 행은 흐르던 말의 끝이다 — 흐르는 말의 첫 행이면 emit이 다시 연다
     const arr = this.messages.get(m.sessionId) ?? []
     arr.push(m)
     this.messages.set(m.sessionId, arr)
@@ -1685,15 +1711,13 @@ export class MockPlatform implements Platform {
     },
     /**
      * 살아 있는 인수인계의 노트 (#142) — 실물과 같은 규칙: afterSeq 뒤 첫 사람 말이 부탁이고, 그 뒤 다음 사람 말
-     * 앞의 **마지막** assistant 글이 노트다. 목은 델타 하나가 행 하나라 이어진 조각을 합쳐서 본다(실물의
-     * loadMessagesFrom이 하는 일).
+     * 앞의 **마지막** assistant 글이 노트다. 목도 말 하나를 행 하나에 모으므로(emit) 마지막 행이 곧 마지막 말이다.
      */
     exportHandoffNote: async (sessionId: string, afterSeq: number) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
       if (s.state === 'working' || s.state === 'waiting_approval') return null
       let note = ''
-      let prevAssistant = false
       let asked = false
       for (const r of this.messages.get(sessionId) ?? []) {
         if (r.seq <= afterSeq) continue
@@ -1702,9 +1726,7 @@ export class MockPlatform implements Platform {
           asked = true
           continue
         }
-        const text = asked && r.role === 'assistant' && r.kind === 'text' ? ((r.payload as { text?: string }).text ?? '') : null
-        if (text !== null) note = prevAssistant ? note + text : text
-        prevAssistant = text !== null
+        if (asked && r.role === 'assistant' && r.kind === 'text') note = (r.payload as { text?: string }).text ?? ''
       }
       note = note.trim()
       return note ? { text: note, path: this.placeHandoffNote(s, note) } : null

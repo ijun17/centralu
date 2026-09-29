@@ -4903,12 +4903,30 @@ function holds(items: ChatItem[], seq: number | undefined): boolean {
   return seq !== undefined && items.some((i) => i.storedSeq === seq)
 }
 
-/** 이벤트를 대화 아이템으로 (스트리밍 델타는 마지막 assistant 항목에 append) */
+/**
+ * 이 조각이 마지막 항목의 말을 잇는가 (#77) — **저장 번호가 다르면 다른 말이다.**
+ *
+ * host는 한 말의 조각을 한 행에 모으고(#66) 조각마다 그 행의 번호를 싣는다. 그래서 같은 말의 조각은 번호가 같고,
+ * 사이에 사람의 말이 없는 새 답(백그라운드 작업이 끝났다, 질문 카드에 답했다)은 새 번호로 온다. 종류만 보고
+ * 이어 붙이던 동안 그 둘이 공백 없이 한 문단이 됐다("…still running.All six reviews are in."). 기록(messagesToChat)도
+ * 행 하나를 항목 하나로 세운다 — 두 길이 같은 화면을 그린다.
+ *
+ * 번호가 없는 쪽은 잇는다: 저장되지 않는 빈 조각(번호 없이 온다)과, 번호 없이 시작한 말(빈 조각이 먼저 왔다)이다.
+ */
+function continues<K extends 'assistant' | 'reasoning'>(
+  last: ChatItem | undefined,
+  kind: K,
+  seq: number | undefined,
+): last is Extract<ChatItem, { kind: K }> {
+  return last?.kind === kind && (seq === undefined || last.storedSeq === undefined || last.storedSeq === seq)
+}
+
+/** 이벤트를 대화 아이템으로 (스트리밍 델타는 같은 말의 항목에 append — `continues`) */
 function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
     case 'message_delta': {
       const last = items[items.length - 1]
-      if (last?.kind === 'assistant') {
+      if (continues(last, 'assistant', e.seq)) {
         const copy = items.slice(0, -1)
         // 번호 없이 시작한 말(저장되지 않는 빈 조각이 먼저 왔다)은 처음 알게 된 번호를 받는다
         return [...copy, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) }]
@@ -4919,9 +4937,9 @@ function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // 텍스트 없는 조각(claude의 토큰 추정)은 대화가 아니라 세션 상태(thinkingTokens)다
       if (!e.text) return items
       const last = items[items.length - 1]
-      if (last?.kind === 'reasoning') {
+      if (continues(last, 'reasoning', e.seq)) {
         const copy = items.slice(0, -1)
-        return [...copy, { ...last, text: last.text + e.text }]
+        return [...copy, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) }]
       }
       return [...items, { kind: 'reasoning', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
@@ -5200,17 +5218,10 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
         // 첨부 복원 — 이미지 바이트(data)는 host가 loadMessages에서 파일을 읽어 실어 준다
         ...(p?.attachments?.length ? { attachments: p.attachments } : {}),
       })
-    } else if (m.kind === 'text') {
+    } else if (m.kind === 'text' || m.kind === 'reasoning') {
+      // 행 하나가 말 하나다 (#77) — 이웃한 행은 서로 다른 답이라 붙이지 않는다(라이브의 `continues`와 같은 규칙)
       const e = m.payload as { text?: string }
-      const last = items[items.length - 1]
-      if (last?.kind === 'assistant') last.text += e.text ?? ''
-      else items.push({ kind: 'assistant', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
-    } else if (m.kind === 'reasoning') {
-      // 델타 행들을 한 덩어리로 (assistant와 같은 규칙)
-      const e = m.payload as { text?: string }
-      const last = items[items.length - 1]
-      if (last?.kind === 'reasoning') last.text += e.text ?? ''
-      else items.push({ kind: 'reasoning', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
+      items.push({ kind: m.kind === 'text' ? 'assistant' : 'reasoning', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
     } else if (m.kind === 'marker') {
       // 저장된 payload가 곧 그 이벤트다 — 라이브와 복원이 다른 문장을 쓰면 안 된다
       const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' }>
