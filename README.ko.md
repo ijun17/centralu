@@ -82,7 +82,9 @@ CI에서 빌드·검사만 거쳤지 사람이 띄워본 적은 없습니다. �
 ## 라이선스
 
 [MIT](LICENSE). 이슈와 PR 모두 환영합니다. 다만 CLA가 있으니
-[CONTRIBUTING.md](CONTRIBUTING.md)를 먼저 읽어주세요.
+[CONTRIBUTING.md](CONTRIBUTING.md)를 먼저 읽어주세요. 참여하는 모든 사람은
+[행동 강령](CODE_OF_CONDUCT.md)을 따릅니다. 보안 문제를 찾았다면 공개 이슈 대신
+[SECURITY.md](SECURITY.md)에 적힌 대로 비공개로 알려 주세요.
 
 ## 문서
 
