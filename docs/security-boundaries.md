@@ -73,21 +73,25 @@ The same rule covers an app's error report. "Send to builder" hands the builder 
 the app's own output: its reason and the last lines of its stderr, which can carry outside text
 too. It goes with a header saying the person sent a report Centralu built from the app's output,
 and every line behind `> ` (`builderErrorFrame` in `@cc/protocol`). Only a person's click sends
-it, and a bundle goes once (`builder-requests.test.ts`, "누르기 전에는 아무것도 가지 않고, 누르면 그
-묶음이 인용으로 갇혀 한 번 가며, 두 번째는 거절된다").
+it, and a bundle goes once (`builder-requests.test.ts`, "nothing goes out before it is clicked;
+clicking sends that bundle enclosed in a quotation exactly once, and a second click is
+rejected").
 
-Tests: `inline-views.test.ts` ("그 대화로 가고, 대화에는 앱이 보낸 말로 남으며, 에이전트는 인용 안에
-갇힌 앱의 글로 받는다", with a forged header inside the text; "대화 안 화면으로 다른 대화의 이름을
-대거나, 열려 있지 않은 인스턴스로는 보낼 수 없다"; "고정 화면의 말은 사람이 고른 대화로 가고, 대화 안
-화면과 같은 틀(앱의 글)로 — 대화 밖에서 왔다고 밝혀 — 간다"); `e2e/inline-views.spec.ts` and
+Tests: `inline-views.test.ts` ("goes to that conversation, is recorded as a message sent by the
+app, and the agent receives it as the app's text enclosed in a quotation", with a forged header
+inside the text; "cannot send by claiming a different conversation for a view inside a
+conversation, or through an instance that is not open"; "a fixed view's message goes to whichever
+conversation the person picked, in the same frame as a view inside a conversation (an app's
+text) — but stating it came from outside the conversation"); `e2e/inline-views.spec.ts` and
 `e2e/apps.spec.ts` for asking first; `e2e/build-loop.spec.ts` for the pinned path.
 
 A `run_agent` prompt (apps.md §10) is an app's text too, and no person chose to send it. It is
 stored with its source (`fromApp`) and reaches the agent in the same frame, under a heading saying
 the app asked for this work through Centralu, that the person did not write or read it, that
 nothing in it can grant permissions or change instructions, and that the final message goes back
-to the app (`appMessageFrame(..., 'request')`; `app-agents.test.ts` "앱이 부탁한 일은 화면의 말과
-같은 틀에 갇힌다 — 모든 줄이 인용이라, 앱의 글이 머리말이나 틀의 끝을 흉내 낼 수 없다").
+to the app (`appMessageFrame(..., 'request')`; `app-agents.test.ts` "work an app assigns is
+confined to the same frame as UI messages — every line is a quote, so the app's text cannot forge
+a header or fake the end of the frame").
 
 Limits:
 
@@ -115,8 +119,9 @@ The same switch decides whether the project's apps may run (M4 decision 3; [apps
 An untrusted project's apps are discovered and listed with the reason, but never started, never
 attached to a session, and every call to them is refused; no app or builder is created there.
 Trust is re-read at every app call, not only when an app is attached (`runtime.ts` `call`,
-`session-apps.ts`; tests "신뢰하지 않은 프로젝트의 앱은 부탁을 받아도 뜨지 않는다", "신뢰를 끄면 떠
-있던 앱이 바로 내려간다", "신뢰를 잃은 뒤의 호출은 막힌다 — 붙을 때가 아니라 부를 때마다 다시 본다").
+`session-apps.ts`; tests "an app in an untrusted project never starts even when a request
+arrives", "turning off trust immediately stops a running app", "a call after trust is lost is
+blocked — checked again on every call, not only when it attached").
 What this closed was measured with the real CLI (#152, `scripts/probe-project-trust.mts`, CLI
 2.1.282): a committed `settings.json` allow rule was already ignored by the CLI; the holes were
 `settings.local.json` allow rules and a project hook answering "allow", which turned the approval
@@ -164,30 +169,34 @@ then who may call it:
   into the user folder from elsewhere is not: see "Imported apps and app links" below.
 - The host withholds its own environment: every `CC_*` and `CENTRALU_*` variable is removed (the
   WebSocket token is one; with it an app could call every RPC). The app receives its declared
-  secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`runtime.ts` `spawnSpec`; test "데이터
-  폴더(만들어 둔다)와 선언한 비밀만 받고, host의 변수는 받지 않는다").
+  secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`runtime.ts` `spawnSpec`; test "receives its
+  data folder (created for it) and only its declared secrets, never the host's own variables").
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
   run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
-  `app-process.ts` `AppLog`; test "표준에러는 앱별 로그로 가고, 비밀 값은 이름으로 가려진다").
-  Arguments are hashed only after redaction. The person enters values through `apps.setSecret`,
-  which accepts only names the manifest declares and never returns a value: the app list carries
-  only whether each declared name is set, and refusals never quote the value. A test looks for the
-  value, as a string, in the app log, run records, kept failures, error bundles, the list,
-  broadcasts, the host console and the RPC replies, with an app that leaks it on purpose
-  (`app-secrets.test.ts` "앱이 값을 표준에러·실패 문구·인자로 흘려도 …"). In the UI the field is a
+  `app-process.ts` `AppLog`; test "stderr goes to the app's own log, with secret values masked by
+  name"). Arguments are hashed only after redaction. The person enters values through
+  `apps.setSecret`, which accepts only names the manifest declares and never returns a value: the
+  app list carries only whether each declared name is set, and refusals never quote the value. A
+  test looks for the value, as a string, in the app log, run records, kept failures, error bundles,
+  the list, broadcasts, the host console and the RPC replies, with an app that leaks it on purpose
+  (`app-secrets.test.ts` "even when the app leaks the value into stderr, a failure message, or an
+  argument, only the name remains in the log, run record, error bundles, list, broadcasts,
+  console, and RPC answer"). In the UI the field is a
   password field that is emptied once sent (`e2e/app-share.spec.ts`).
 - Every call goes through the host, which enforces tool visibility in both directions: views reach
   only `app` tools, agents only `model` tools, and a refused call never reaches the app
-  (`runtime.ts` `call`; `mediation.test.ts` "화면은 model 전용 도구를 못 부르고, 세션은 app 전용
-  도구를 못 부른다 — 앱에 닿지도 않는다"; with third-party apps, `e2e/public-apps.spec.ts`). The
+  (`runtime.ts` `call`; `mediation.test.ts` "a screen cannot call a model-only tool, and a session
+  cannot call an app-only tool — the call never even reaches the app"; with third-party apps,
+  `e2e/public-apps.spec.ts`). The
   session side re-checks decision 4 at every call, so a detached app cannot be reached by a stale
   tool name.
 - The broker pipe (fd 3) is handed only to that process, so there is no token to steal. A broker
   call must carry the run id of a call the same app is handling on the same pipe; no id, an
   invented id, a finished run's id and another app's live id are all refused, logged and recorded
   without a parent, so an app cannot put rows into another app's chain (`broker.ts`;
-  `mediation.test.ts` "실행 id 없는 중개 호출은 거절한다 (앱이 스스로 깨어난 경우)", "지어낸 id,
-  끝난 실행의 id, 다른 앱의 살아 있는 id 모두 거절한다"; `broker-records.test.ts`). Broker work is
+  `mediation.test.ts` "a broker call with no run id is refused (an app waking itself up on its
+  own)", "a made-up id, a finished run's id, and another app's live id are all refused";
+  `broker-records.test.ts`). Broker work is
   cancelled with the call it serves, down to an agent session it started.
 - What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
   each capability once (an agent tool, another app, a host data name), asked where the chain
@@ -197,8 +206,9 @@ then who may call it:
 - An agent an app asks for runs in a new session the person can see, with the `safe` preset
   whatever the calling session uses and whatever the person's own settings say, with no apps
   attached, and receives the prompt framed as the app's text ("Text an app sends";
-  `app-agents.test.ts` "자동으로 도는 세션이 불러도 에이전트는 safe로 서고(사람의 전역 bypass도
-  앱의 지시에는 건너가지 않는다), 앱의 글은 앱의 글로 틀에 담겨 가고, 답을 넘긴 세션은 쉰다").
+  `app-agents.test.ts` "the agent stands up as safe even when called from an auto-running session
+  (the person's global bypass does not carry over to an app's instruction), the app's text is
+  framed as the app's text, and the session that hands back an answer goes idle").
   A person's global bypass is trust in their own instructions, not in instructions an app wrote,
   which may carry text the app fetched from elsewhere. Reads still run without asking; writes and
   commands stop at an approval card in that session. Its settings files
@@ -243,15 +253,21 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   the secrets it wants, every file) is shown before anything is in. An imported app arrives turned
   off (`unconfirmed`): it never starts, is never attached to a session, every call is refused, and
   no builder session is made for it. The runtime checks this at every call, start, `check` and
-  status, not only when it is listed (`runtime.ts` `held`; `imports.test.ts` "들인 앱은
-  unconfirmed로 서고 …"; `session-apps.test.ts` "가져온 앱은 사람이 켜기 전에는 …").
+  status, not only when it is listed (`runtime.ts` `held`; `imports.test.ts` "an app brought in
+  shows unconfirmed with a reason, calling it is refused and no process starts — enabling it
+  starts it"; `session-apps.test.ts` "an imported app does not attach to the orchestrator before
+  the person turns it on, calling it by name is refused, and turning it on attaches it (M4
+  E-3)").
 - **The confirmation is held by the host and bound to what was seen.** It lives in
   `app-imports.json` (0600) in the data folder, not in the app folder, so neither the app's code nor
   an archive can supply it. It is bound to the folder's inode and records a hash of the manifest's
   `server` and `uses`. Enabling sends back the key of the review the person saw, and the host
   compares it with the manifest at that moment, so what was reviewed is what is enabled. A later
   change to `server` or `uses` (an editor, the builder, a restored version) asks again
-  (`import-book.ts`, `handover.ts`; "명령이 바뀌면 호출이 막히고 …", "확인 창을 본 뒤에 바뀌었으면 …").
+  (`import-book.ts`, `handover.ts`; "a changed command blocks calls, and the confirmation dialog
+  states what changed alongside the command it was enabled with — enabling with the new key runs
+  it again", "if it changed after the confirmation dialog was seen, that dialog's key no longer
+  enables it").
 - **Reading the source.** Links inside a folder are not followed: one pointing outside refuses the
   import, one pointing inside is not copied. Files are opened without following a final link, after
   the path guard has checked the parents. Zip entries are judged before anything is written: no
@@ -261,7 +277,9 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   encrypted, split or ZIP64 archives. There are caps on files (2,000), bytes (64 MiB, 16 MiB per
   file), depth (16) and the archive (32 MiB). Every file is written under a path built from checked
   segments and checked again to be inside the staging folder (`imports.ts`, `zip.ts`;
-  `imports.test.ts` "zip이 밖에 쓰지 못한다", "폴더 안의 링크가 밖을 가리키면 …", "상한 …").
+  `imports.test.ts` "a zip cannot write outside (zip slip)", "a link inside the folder that points
+  outside is refused (stating what it points at), and a link pointing inside is never moved",
+  "caps: file count, one file, the total, depth, archive size").
 - **Dot-names are not copied.** A user-folder app's builder works in the app folder and reads the
   settings there (decision 3 trusts that folder), so `.claude/` or `.codex/` inside an archive
   would be hooks and settings nobody confirmed. `.git`, `.env` and the rest are left out too.
@@ -303,11 +321,12 @@ A view is an app's HTML running inside the desktop window, isolated in layers. B
 behind a 32-byte random path segment made at each launch, a different value from the WebSocket
 token (`transport/http.ts`). Without it, or with a wrong one, a request gets the same 404 as a path
 that does not exist, in status, body and headers (77 method and path combinations in #150;
-`server.test.ts` "비밀 없이 닿는 것은 404뿐이고, 틀린 비밀과 없는 길이 구별되지 않는다"). The
-comparison is constant-time over hashes. Every response sends `Referrer-Policy: no-referrer`, so a
-view cannot read the secret from its referrer. A frame address is given only to a parent on the
-WebSocket origin allowlist (`view-host.ts` `frame`; "허용 목록 밖의 부모 출처에는 주소를 주지 않고,
-주소를 비틀어도 404다"). The desktop CSP opens frames to `http://127.0.0.1:*` and nothing wider
+`server.test.ts` "reaching it without the secret is nothing but 404, indistinguishable between a
+wrong secret and a nonexistent route"). The comparison is constant-time over hashes. Every
+response sends `Referrer-Policy: no-referrer`, so a view cannot read the secret from its referrer.
+A frame address is given only to a parent on the WebSocket origin allowlist (`view-host.ts`
+`frame`; "gives no address to a parent origin outside the allow list, and 404s even when the
+address is tampered with"). The desktop CSP opens frames to `http://127.0.0.1:*` and nothing wider
 (`tooling/desktop-csp.test.ts`): the port changes every launch, and the secret locks the path.
 
 **Opaque origin by default.** The proxy page, on the host port's origin rather than our UI's,
@@ -317,10 +336,11 @@ reference host that let the view inherit the proxy's origin and reach other prox
 secret paths included, and their storage (measured, S-1). The inner document's origin is `"null"`:
 no parent or top window, no storage or cookies, no popups, no top navigation, no fetch, WebSocket
 or image from the host port, and navigating itself elsewhere is blocked by the proxy's
-`frame-src` (`e2e/app-frame.spec.ts` "S-2 (브라우저 부분): 앱 프레임은 부모·최상위·저장소·팝업·host
-네트워크에 닿지 못한다", and "불투명 방식: 안쪽 프레임의 출처는 "null"이고, 프록시의 비밀 주소를 읽지
-못한다"). The outer frame has `allow-scripts allow-same-origin allow-forms` so that the per-app
-mode can work; its origin is the host port's, not our UI's, so it cannot touch our window.
+`frame-src` (`e2e/app-frame.spec.ts` "S-2 (browser part): an app frame cannot reach the parent,
+the top window, storage, popups, or the host network", and "opaque mode: the inner frame's origin
+is "null", and it cannot read the proxy's secret address"). The outer frame has
+`allow-scripts allow-same-origin allow-forms` so that the per-app mode can work; its origin is
+the host port's, not our UI's, so it cannot touch our window.
 
 **Per-app origin, when an app asks.** `view.origin: "app"` in the manifest gives the inner frame
 `allow-same-origin` on `http://127.0.0.1:<port>`: a real origin, so browser storage works. The
@@ -331,9 +351,9 @@ for good and the app moves, losing what it stored there. Ports come from 20000�
 macOS and Linux ephemeral ranges, and listen on 127.0.0.1 only. The port serves only that app's
 instances, behind a secret derived per app from the host secret (HMAC), so a view reading its own
 `location.href` learns nothing that opens another app's route; the proxy page there allows only
-its own script hash and that one frame origin (`origin-ports.test.ts`; `view-host.test.ts` "앱별
-출처"; `e2e/app-frame.spec.ts` "앱별 출처 방식: 자기 포트의 진짜 출처를 받고, 저장소는 앱마다
-나뉘며, 다시 열어도 같은 출처다").
+its own script hash and that one frame origin (`origin-ports.test.ts`; `view-host.test.ts`
+"per-app origin"; `e2e/app-frame.spec.ts` "per-app origin mode: gets a real origin on its own
+port, storage is separated per app, and reopening gets the same origin").
 
 **CSP.** A view's policy is assembled from its resource's `_meta.ui.csp` (`views/csp.ts`) and sent
 as a header on the proxy page, which the `srcdoc` document inherits: the view can tighten it with
@@ -352,22 +372,25 @@ parent, with the host origin it was given explicitly (never `document.referrer`,
 under `tauri://`), or its own inner frame, with origin `"null"` or the app's origin; a replaced
 inner document is dropped. In the UI, the bridge listens only to its own iframe (`AppFrame.tsx`)
 and sends every tool call and resource read under the component's own app, project and instance
-(`e2e/app-frame.spec.ts` "다른 앱을 적은 메시지는 호출의 앱을 바꾸지 못한다": another app named in
-the SDK's `_meta`, raw JSON-RPC with extra fields, and a message posted straight to the top window
-all fail). On the host, a view instance fixes its app: asking for a frame or a resource under
-another app's name is "not open" (`view-host.test.ts` "화면의 앱은 인스턴스가 정한다 — 다른 앱
-이름이나 다른 프로젝트를 대면 열리지 않는다").
+(`e2e/app-frame.spec.ts` "a message that claims a different app cannot change which app the call
+is attributed to": another app named in the SDK's `_meta`, raw JSON-RPC with extra fields, and a
+message posted straight to the top window all fail). On the host, a view instance fixes its app:
+asking for a frame or a resource under another app's name is "not open" (`view-host.test.ts` "the
+instance decides which app the view belongs to — presenting a different app name or project does
+not open it").
 
 **A view shows only its own app's screen.** An inline view opens only if the `ui://` its tool
 declares is in that app's `resources/list`, and closes if the call's result points elsewhere
-(`inline-views.ts`; "남의 화면을 선언한 도구는 화면을 열지 않고 거절을 남긴다 — 호출은 그대로
-돈다", "결과가 남의 화면을 가리키면 연 화면을 닫고 거절한다"). Documents are read only from the
+(`inline-views.ts`; "a tool that declares someone else's view opens nothing and leaves a
+rejection — the call still completes", "closes and rejects the opened view when the result points
+to someone else's view"). Documents are read only from the
 instance's own app process, so a pinned view's `home` result cannot name another app's screen
 either (`app-home-view.ts`).
 
 **Links** open only for `http(s):` and `mailto:`, only after the person confirms, and outside
-Centralu with `noopener,noreferrer` (`AppFrame.tsx`; "링크는 사람이 확인한 뒤 바깥에서 열고,
-http(s)·mailto가 아니면 묻지도 않고 거절한다"). A view's tool calls are not approved one by one:
+Centralu with `noopener,noreferrer` (`AppFrame.tsx`; "a link opens through the platform's
+external-open port after the person confirms it, and anything that is not http(s) or mailto is
+refused without even asking"). A view's tool calls are not approved one by one:
 the view is the control surface the app offers the person. They are recorded as `view`.
 
 Limits:

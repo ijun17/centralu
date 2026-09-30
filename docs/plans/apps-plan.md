@@ -1,433 +1,440 @@
-# M4 앱 플랜: 만드는 자리와 쓰는 자리를 붙인다 (v2, 결정 확정)
+# M4 apps plan: the place it is built is the place it is used (v2, decisions finalized)
 
-> 기준: **에이전트가 만든 도구를, 만든 그 자리에서 사람이 눌러 쓰고 에이전트가 함수로 부르는가.**
+> Standard: **does the person click and use, in the very place it was built, a tool the agent
+> made — and does the agent call it as a function?**
 >
-> 선행 조사: 앱 계층 현황 실사(2026-09-25), MCP 샘플링 폐기(SEP-2577)와 Goose의 MCP Apps 구현 실사(2026-09-14),
-> 규격·SDK·Tauri를 1차 출처와 설치된 코드로 다시 확인(2026-09-25).
+> Prior investigation: a survey of the current app layer (2026-09-25), the deprecation of MCP
+> sampling (SEP-2577) and a survey of Goose's MCP Apps implementation (2026-09-14),
+> re-checking the spec, SDK and Tauri against primary sources and the installed code
+> (2026-09-25).
 >
-> **v2 (재검토 반영, 2026-09-25)**: v1을 1차 출처로 다시 확인하니 전제 셋이 틀렸다. 앱이 에이전트에게 부탁하는
-> 길(MRTR은 그 용도로 쓸 수 없다), 계속 떠 있는 화면(표준에는 없다), 열린 화면의 갱신(표준에는 구독이 없다).
-> 빠진 것도 여럿이었다: 대화 안에 뜨는 화면, 도구 공개 범위, 오래 걸리는 호출, Codex의 승인·재개 경로, 앱의
-> 데이터와 비밀, 기존 MCP 서버 승인 기능과의 중복. 아래 "v1에서 바뀐 것"에 정리했다.
+> **v2 (reflecting the re-review, 2026-09-25)**: re-checking v1 against primary sources found
+> three false premises: the path for an app to ask an agent something (MRTR cannot be used for
+> that), a screen that stays open indefinitely (not in the spec), and updates to an open screen
+> (the spec has no subscription). Several things were also missing: screens that open inside a
+> conversation, tool visibility scope, long-running calls, Codex's approval and resume paths, an
+> app's data and secrets, and overlap with the existing approved-MCP-server feature. These are
+> laid out below under "What changed from v1".
 >
-> **상태: 결정 확정(2026-09-25).** 열어 두었던 질문 12개를 모두 추천안으로 정했다(맨 끝 "결정 사항").
-> 진행 상황은 "진행 체크리스트"에 적는다.
+> **Status: decisions finalized (2026-09-25).** All 12 open questions were settled on the
+> recommended answer (see "Decisions" at the very end). Progress is tracked in the "Progress
+> checklist".
 
-## v1에서 바뀐 것
+## What changed from v1
 
-| v1의 가정 | 확인된 사실 | v2의 설계 |
+| v1's assumption | What was confirmed | v2's design |
 |---|---|---|
-| 앱이 에이전트에게 부탁할 때 MRTR에 `centralu/agent` 같은 자체 종류를 싣는다 | MRTR의 입력 요청은 세 종류(사용자에게 묻기, 모델 호출, 루트 목록)만 허용된다. 2026-07-28 규격부터 서버는 먼저 요청을 보낼 수 없다 | 호스트가 **중개 MCP 서버**를 열고, 앱 프로세스가 그 서버의 표준 클라이언트가 된다. MRTR은 본래 용도(작업 중 사람에게 묻기)에만 쓴다 |
-| 앱 화면은 대화 밖에 계속 떠 있다 | 표준의 모든 화면은 도구 호출 한 번이 만든 인스턴스다. 고정·상시 화면은 제안 단계다(ext-apps #684, #754) | 화면이 뜨는 자리를 둘로 나눈다. **대화 안**(표준 그대로)과 **고정 화면**(앱을 열면 호스트가 "홈 도구"를 부른다. 호스트가 호출하는 것도 규격에 맞다) |
-| 에이전트가 값을 바꾸면 열린 화면도 같은 값을 본다 | 화면은 리소스를 읽을 수만 있고 구독할 수 없다(ext-apps #659) | 앱의 도구 호출이 끝날 때마다 호스트가 열린 화면에 "바뀌었다"를 알린다(우리 확장). 우리 템플릿은 받아서 다시 읽는다 |
-| 브리지는 `@mcp-ui/client`를 쓴다 | `@mcp-ui/client` 7.1.1은 아직 SDK v1과 ext-apps 1.x에 머물러 있다. 공식 `@modelcontextprotocol/ext-apps`는 2.0.0이다 | 공식 `ext-apps` 2.x의 `AppBridge`를 직접 쓴다 |
-| 앱 도구는 모든 호출자에게 같은 목록으로 열린다 | 표준에 도구 공개 범위(`_meta.ui.visibility`: `model`, `app`)가 있고, 지키는 것은 호스트의 의무다 | 에이전트에는 `model` 도구만, 화면에는 같은 앱의 `app` 도구만 연다 |
-| 앱을 끄면 다음 턴부터 사라진다 | Claude는 실행 중인 세션의 서버를 바꿔 끼울 수 있다(`Query.setMcpServers`). Codex는 스레드를 시작할 때만 받고, 도구 목록 변경 알림을 무시한다 | 도구마다 다르게 다룬다(아래 "세션에 붙이기") |
-| 앱 도구 승인은 세션 프리셋을 따르면 된다 | 우리 Codex 어댑터는 `centralu`가 아닌 서버의 확인 요청을 전부 자동 거절한다(`codex/index.ts:309-314`). Codex는 MCP 도구 승인을 바로 그 확인 요청으로 묻는다. 우리 `auto` 프리셋(`approvalPolicy: never` + 샌드박스)에서는 Codex가 주석 없는 MCP 도구 호출을 스스로 거부한다 | Codex 승인 경로를 고치고, 승인 기준을 MCP 도구 주석(`readOnlyHint` 등)으로 맞춘다 |
-| 앱 상태는 기존 키-값 저장소에 둔다 | 그 저장소는 컴파일된 내장 앱만 쓸 수 있다. 외부 앱 프로세스는 닿지 않는다 | 앱별 데이터 폴더를 **저장소 밖**에 둔다 |
-| 루프백 iframe에 `allow-same-origin`, 필요하면 앱마다 사용자 정의 스킴 | Tauri는 등록한 사용자 정의 스킴 페이지를 **로컬**로 취급해 우리 화면과 같은 IPC 자격을 준다. `*.localhost`는 macOS 15 이하에서 이름이 풀리지 않는다 | 사용자 정의 스킴을 쓰지 않는다. 앱 화면은 불투명 출처(opaque origin)로 격리한다 |
-| 앱 버전은 폴더 해시로 따로 관리한다 | 프로젝트 안의 앱은 이미 git이 버전을 관리한다 | 스냅샷은 git 밖의 앱에만 둔다 |
+| When an app asks the agent for something, it carries a custom kind like `centralu/agent` on MRTR | MRTR's request-for-input allows only three kinds (ask the user, call the model, list roots). As of the 2026-07-28 spec, a server cannot send a request first | The host opens a **broker MCP server**, and the app process becomes that server's standard client. MRTR is used only for its original purpose (asking the person something mid-task) |
+| An app's screen stays open outside the conversation | Every screen in the spec is an instance created by a single tool call. A pinned, always-on screen is only at the proposal stage (ext-apps #684, #754) | Split where a screen can open into two places. **Inside a conversation** (spec as written) and a **pinned screen** (opening an app has the host call a "home tool" — the host doing the calling is also within spec) |
+| When the agent changes a value, an open screen sees the same value | A screen can only read a resource, not subscribe to it (ext-apps #659) | Every time an app's tool call ends, the host notifies its open screens that something "changed" (our extension). Our template receives it and reads again |
+| The bridge uses `@mcp-ui/client` | `@mcp-ui/client` 7.1.1 is still stuck on SDK v1 and ext-apps 1.x. The official `@modelcontextprotocol/ext-apps` is at 2.0.0 | Use the official `ext-apps` 2.x `AppBridge` directly |
+| An app's tools are open to every caller as the same list | The spec has a tool visibility scope (`_meta.ui.visibility`: `model`, `app`), and enforcing it is the host's job | Open only `model` tools to the agent, and only that same app's `app` tools to the screen |
+| Turning off an app makes it disappear starting the next turn | Claude can swap a running session's servers (`Query.setMcpServers`). Codex only takes them when a thread starts, and ignores tool-list-changed notifications | Handle it differently per tool (see "Attaching to a session" below) |
+| Approval for app tools just follows the session preset | Our Codex adapter auto-refuses every confirmation request from a server other than `centralu` (`codex/index.ts:309-314`). Codex asks for MCP tool approval through exactly that confirmation request. Under our `auto` preset (`approvalPolicy: never` + sandbox), Codex refuses an unannotated MCP tool call on its own | Fix the Codex approval path, and line up the approval criterion with MCP tool annotations (`readOnlyHint`, etc.) |
+| An app's state lives in the existing key-value store | That store can only be used by compiled-in built-in apps. An external app process cannot reach it | Put a per-app data folder **outside the repository** |
+| `allow-same-origin` on the loopback iframe, and a custom scheme per app if needed | Tauri treats a registered custom-scheme page as **local**, giving it the same IPC credentials as our own screens. `*.localhost` does not resolve by name on macOS 15 and below | Do not use a custom scheme. Isolate an app's screen with an opaque origin |
+| An app's version is tracked separately by a folder hash | An app inside a project already has git managing its version | Keep snapshots only for apps outside git |
 
-## 구현하며 바뀐 것 (2026-09-25)
+## What changed during implementation (2026-09-25)
 
-머지된 코드와 문서 대조(F-1 작업 중 발견)로 확정했다. 대부분은 결정을 뒤집은 것이 아니라, 구현이 더 나은 답을 찾았거나 플랜 문장이 서로 어긋났던 자리다. 예외는 결정 6 하나로, 구현하다 허점을 찾아 바꿨다(표의 `safe` 줄).
+Settled by comparing merged code against the document (found while working on F-1). Most of these are not reversed decisions — places where the implementation found a better answer, or where the plan's own sentences disagreed with each other. The one exception is decision 6, changed after implementation surfaced a hole in it (the `safe` row in the table).
 
-| 플랜 | 구현 | 이유 |
+| Plan | Implementation | Reason |
 |---|---|---|
-| 매니페스트 `csp`로 화면 CSP를 조립 | 각 `ui://` 리소스의 `_meta.ui.csp`로 조립. 매니페스트 `csp`는 쓰지 않는다 | 규격이 CSP를 리소스에 둔다. 다른 호스트용 앱이 그대로 돈다 |
-| 크래시는 지수 백오프로 되살림 | 타이머 없이 다음 필요할 때 되살림 | 아무도 부르지 않는 앱을 배경에서 되살릴 이유가 없다 |
-| 벗어난 대화 안 화면은 정지 이미지 | "다시 열기" 자리표시 | 불투명 출처 프레임은 찍을 수 없다 |
-| 고정 버튼은 대화 안 화면을 옮김 | 고정 화면을 `home` 호출로 새로 연다 | 모든 화면은 도구 호출에서 태어난다(규격) |
-| 승인한 MCP 서버를 오케스트레이터 밖에도 붙임 | 오케스트레이터(와 만드는 세션)에만 | 결정 4와 A-7 문장이 어긋나 있었다. 결정 4를 따른다 |
-| Windows에서는 fd 3 대신 루프백 HTTP | 모든 플랫폼에서 fd 3 | Windows는 아직 지원하지 않는다(#14). 지원할 때 대안을 만든다 |
-| "바뀌었다" 알림은 누가 불렀든 호출마다 | 읽기 전용 도구 호출은 알리지 않고, 화면은 자기가 일으킨 변경을 받지 않으며, 앱마다 알림을 합친다 | **플랜의 설계 결함.** 템플릿 화면이 알림마다 `show`를 불러 초당 약 700번 순환했다(측정: 3초에 2035번). #190에서 고쳤다 |
-| 만드는 세션은 워커처럼 신뢰에 따라 설정을 읽음 | 오케스트레이터 도구를 들고 있다는 이유로 설정을 아예 읽지 않았다(사용자 전역 설정 포함) | **구현 결함.** 세션의 종류로 정하도록 #193에서 고쳤다. 워크트리 매니저도 같은 결함이었다 |
-| 화면의 긴 호출에 진행 알림을 보냄 | 보내지 않아 60초에 화면 쪽이 포기했다 | **구현 누락.** `AppFrame`이 기다리는 동안 20초마다 진행 알림을 보내도록 #192에서 고쳤다 |
-| 앱이 부른 에이전트의 세션은 끝나면 보관(결정 6, D-1) | 끝나면 프로세스를 닫고 목록에 `idle`로 남긴다. 인박스에서는 기다리지 않는다 | 보관 기능은 폐기됐다(FR-20: 숨은 세션을 두지 않는다). `waiting_input`으로 두면 앱이 이미 가져간 턴에 사람이 답하라고 불린다 |
-| 앱이 부른 에이전트의 프리셋은 `normal`(결정 6) | `safe` | **결정의 허점.** `normal`은 승인 방식을 사람의 설정에서 가져온다. 그래서 전역 bypass를 쓰는 사람에게는 앱이 쓴 지시가 카드 하나 없이 파일을 쓰고 명령을 실행한다. 결정 6이 막으려던 길이 사람의 설정을 거쳐 다시 열린다. 전역 bypass는 자기 지시를 믿는다는 선택이지 앱이 쓴 지시까지 믿는다는 선택이 아니다(지시하는 이가 여전히 사람이었던 #92와 다르다). `safe`에서도 읽기는 묻지 않으므로 조회와 요약은 그대로 된다. #194 |
-| E-3 가져오기는 `uses`와 파일 목록을 보인 뒤 켠다 | 명령과 인자(`server`)를 맨 위에, 비밀·화면·옮기지 않은 것까지 보인다. 켠 기록은 host 쪽(`app-imports.json`, 폴더 inode에 묶임)에 `server`·`uses`의 해시로 두고, 둘 중 하나가 바뀌면 다시 묻는다. 점으로 시작하는 이름은 옮기지 않는다 | 앱 서버는 사람의 권한으로 도는 코드라 켜는 것은 곧 그 명령을 돌려도 된다는 말이다. 사용자 폴더 앱의 만드는 세션은 앱 폴더의 설정을 읽으므로, 묶음이 들고 온 `.claude/`의 훅이 확인 없이 돌 수 있었다 |
+| Assemble screen CSP from the manifest's `csp` | Assembled from each `ui://` resource's `_meta.ui.csp` instead. The manifest's `csp` is unused | The spec puts CSP on the resource. An app built for another host runs unmodified |
+| Revive a crash with exponential backoff | Revive with no timer, the next time it is needed | There is no reason to revive, in the background, an app nobody is calling |
+| An in-conversation screen that scrolls out becomes a frozen image | A "reopen" placeholder | An opaque-origin frame cannot be captured as an image |
+| The pin button moves the in-conversation screen | Opens the pinned screen fresh with a `home` call | Every screen is born from a tool call (spec) |
+| Attach an approved MCP server outside the orchestrator too | Only to the orchestrator (and its builder session) | Decision 4 and the A-7 wording disagreed. Follow decision 4 |
+| On Windows, loopback HTTP instead of fd 3 | fd 3 on every platform | Windows is not supported yet (#14). Build the alternative when it is |
+| A "changed" notification on every call, no matter who called it | A read-only tool call does not notify, a screen does not receive the change it caused itself, and notifications are coalesced per app | **A design flaw in the plan.** The template screen called `show` on every notification and looped roughly 700 times a second (measured: 2,035 times in 3 seconds). Fixed in #190 |
+| A builder session reads settings by trust, like a worker | Read no settings at all, because it held orchestrator tools (including the user's own global settings) | **An implementation defect.** Fixed in #193 to decide it by the session's kind. The worktree manager had the same defect |
+| Send progress notifications for a screen's long call | Did not send them, so the screen side gave up at 60 seconds | **An implementation gap.** Fixed in #192 so that `AppFrame` sends a progress notification every 20 seconds while it waits |
+| An agent session an app called is archived when it ends (decision 6, D-1) | Closes the process when it ends and leaves it `idle` in the list. It does not wait in the inbox | Archiving was retired (FR-20: keep no hidden sessions). Leaving it `waiting_input` would call the person to answer a turn the app has already taken |
+| The preset for an agent an app called is `normal` (decision 6) | `safe` | **A hole in the decision.** `normal` takes its approval behavior from the person's own settings. So for a person using global bypass, an instruction an app wrote writes files and runs commands with no card at all. The path decision 6 meant to close reopens through the person's own settings. Global bypass is a choice to trust one's own instructions, not a choice to trust instructions an app wrote (unlike #92, where the one giving the instruction was still the person). Reads still go unasked even under `safe`, so lookups and summaries still work. #194 |
+| E-3 import shows `uses` and a file list, then turns on | Shows the command and its arguments (`server`) at the top, plus secrets, screens, and what was not moved. The enabled record is kept host-side (`app-imports.json`, bound to the folder's inode) as a hash of `server` and `uses`; a change to either asks again. Names starting with a dot are not moved | An app server is code that runs with the person's own permissions, so turning it on means allowing that command to run. Because a user-folder app's builder session reads the settings in the app folder, a hook in a bundle's `.claude/` could have run unconfirmed |
 
-**아직 없는 것**: 호스트가 재시작하면 화면에 떠 있던 앱 하나만 다시 연다. 편집기에서 저장한 것만으로는 `failed` 상태의 앱이 되살아나지 않는다.
+**Still missing**: when the host restarts, only the one app whose screen was open reopens. Saving in an editor alone does not revive an app stuck in `failed` state.
 
-## 지금 무엇이 막고 있나
+## What is blocking this right now
 
-앱 계층의 뼈대는 이미 있다(#81). 그런데 그 뼈대는 **우리가 코드에 넣어 빌드한 앱**만 담을 수 있다.
+The skeleton of an app layer already exists (#81). But that skeleton can only hold **apps we wrote into the code and built**.
 
-| 막는 것 | 지금 벌어지는 일 | 근거 |
+| What blocks it | What happens now | Evidence |
 |---|---|---|
-| 앱을 새로 만들 수 없다 | 앱은 컴파일 시점 배열 두 개에 박혀 있다. 사용자도 에이전트도 Centralu를 다시 빌드하지 않고는 앱을 추가할 수 없다 | `agent-host/src/apps/registry.ts:11`, `ui/src/apps/registry.ts:8`, `AppId = 'control'`(`ui/src/apps/contract.ts:11`) |
-| 앱 화면을 격리해서 띄울 수 없다 | 화면은 `packages/ui`에 컴파일된 React 컴포넌트뿐이다. Tauri CSP에 `frame-src`가 없어 iframe은 `default-src 'self'`에 막힌다 | `tauri.conf.json` `security.csp` |
-| 일하는 세션이 앱을 못 부른다 | 앱 도구는 오케스트레이터·매니저·조율 세션에만 보인다. 일반 워커에는 도구가 아예 없다(#81의 의도된 결정) | `manager.ts:1106-1110`, `3553-3559` |
-| 앱이 에이전트를 못 부른다 | 호스트 쪽 앱이 할 수 있는 것은 조율 세션 생성 하나다. 프롬프트를 보내고 결과를 기다리는 길이 없다 | `apps/contract.ts:31-56`, `manager.ts:2740-2772` |
-| 앱끼리 못 부른다 | `HostAppContext`에 호출 수단이 없다 | #97 |
-| 사람이 부른 기록이 없다 | 에이전트가 부른 것은 그 세션 대화에 남지만, `apps.invoke`로 부른 것은 아무 데도 남지 않는다 | `manager.ts:414-430` |
-| 기존 MCP 서버 승인이 따로 논다 | `propose_mcp_server`로 승인한 서버는 오케스트레이터에만 붙고(stdio 전용), 목록 조회·제거가 없으며, 호출이 호스트를 거치지 않아 기록되지 않는다 | `manager.ts:1119`, `1576`, `3403-3417` |
-| Codex 세션은 남의 MCP 서버를 쓸 수 없다 | 확인 요청 자동 거절, `auto` 프리셋에서는 Codex가 거부 | `codex/index.ts:49-50`, `309-314` |
-| 건넬 수 없다 | 묶기·내보내기·가져오기·버전 개념이 없다 | #71·#72 댓글에만 있음 |
+| A new app cannot be created | Apps are baked into two compile-time arrays. Neither the user nor an agent can add an app without rebuilding Centralu | `agent-host/src/apps/registry.ts:11`, `ui/src/apps/registry.ts:8`, `AppId = 'control'` (`ui/src/apps/contract.ts:11`) |
+| An app's screen cannot be shown isolated | A screen is nothing but a React component compiled into `packages/ui`. The Tauri CSP has no `frame-src`, so an iframe is blocked by `default-src 'self'` | `tauri.conf.json` `security.csp` |
+| A working session cannot call an app | App tools are visible only to the orchestrator, manager and coordinating sessions. An ordinary worker has no such tool at all (a deliberate decision in #81) | `manager.ts:1106-1110`, `3553-3559` |
+| An app cannot call an agent | The only thing a host-side app can do is create a coordinating session. There is no path to send a prompt and wait for the result | `apps/contract.ts:31-56`, `manager.ts:2740-2772` |
+| Apps cannot call each other | `HostAppContext` has no means to call | #97 |
+| There is no record of what the person called | What an agent calls stays in that session's conversation, but what is called through `apps.invoke` is left nowhere | `manager.ts:414-430` |
+| The existing approved-MCP-server feature stands apart | A server approved through `propose_mcp_server` attaches only to the orchestrator (stdio only), has no way to list or remove it, and a call does not pass through the host so it is never recorded | `manager.ts:1119`, `1576`, `3403-3417` |
+| A Codex session cannot use another party's MCP server | Confirmation requests are auto-refused; under the `auto` preset Codex refuses on its own | `codex/index.ts:49-50`, `309-314` |
+| It cannot be handed off | There is no concept of bundling, exporting, importing or versioning | Only exists in the comments of #71 and #72 |
 
-이미 있어서 **다시 만들지 않는 것**: 도구 레지스트리와 프로필 검사(`orchestrator-tools.ts:546-595`), Claude 인프로세스 MCP와 Codex stdio 다리(`orchestrator-mcp.ts`, `orchestrator-bridge.mjs`), 앱이 소유한 세션(`app_id`, v31), 켜고 끄기, 폴더 감시(`DirWatchers`), 예약 이름 검사(#93의 `mcpServerNameError`), 질문 카드(MRTR의 "사람에게 묻기"를 그대로 받는다), 자손까지 끝내는 종료(`kill-tree`).
+Already there, so **not rebuilt**: the tool registry and profile check (`orchestrator-tools.ts:546-595`), Claude's in-process MCP and the Codex stdio bridge (`orchestrator-mcp.ts`, `orchestrator-bridge.mjs`), a session an app owns (`app_id`, v31), turning it on and off, folder watching (`DirWatchers`), the reserved-name check (#93's `mcpServerNameError`), the question card (takes MRTR's "ask the person" as is), and termination down to descendants (`kill-tree`).
 
-## 약속 대조표 (제품이 약속하는 것 ↔ 이 플랜)
+## Promise cross-check (what the product promises ↔ this plan)
 
-| 제품이 약속하는 것 | 이 플랜에서 |
+| What the product promises | In this plan |
 |---|---|
-| 에이전트가 일에 쓸 도구를 **화면과 함께** 만든다 | C (만들기 루프) |
-| 쓰다가 부족하면 **그 자리에서** "여기에 버튼 넣어 줘"라고 고친다 | C-4, C-5 |
-| 사람은 눌러서 쓰고 에이전트는 **같은 화면을 함수처럼** 부른다. 두 벌 만들지 않는다 | A-4 (호출 경로가 하나), B-5 (열린 화면 갱신) |
-| 도구가 **쓰고 있는 에이전트를 그대로** 부른다. API 키·토큰을 따로 사지 않는다 | D-1 |
-| 흩어진 자리마다 도구를 두고 **도구끼리 서로 부른다** | D-2, D-3 |
-| 버튼 하나로 팀에 건네고, 받은 쪽은 설치 없이 연다 | E (로컬 절반). 팀 서버 절반은 이 플랜 밖 |
-| 누가 무엇을 실행했는지 남긴다 | A-6 (로컬 실행 기록). 중앙 수집은 이 플랜 밖 |
+| The agent builds a tool for the work **together with its screen** | C (the build loop) |
+| When it falls short while in use, fix it **right there** by saying "put a button here" | C-4, C-5 |
+| The person clicks to use it, and the agent calls **that same screen like a function**. Not two builds | A-4 (a single call path), B-5 (updating an open screen) |
+| A tool calls **the very agent already in use**. No separate API key or token to buy | D-1 |
+| A tool sits in each scattered place, and **tools call one another** | D-2, D-3 |
+| Hand it to the team with one button, and the receiving side opens it with no install | E (the local half). The team-server half is outside this plan |
+| It keeps a record of who ran what | A-6 (a local run record). Central collection is outside this plan |
 
 ---
 
-## 설계의 뼈대
+## The skeleton of the design
 
-### 표준을 어디까지 따르나
+### How far this follows the spec
 
-| 층 | 무엇 |
+| Layer | What |
 |---|---|
-| **표준 그대로** | MCP 서버, `ui://` 리소스와 `_meta.ui.resourceUri`, 도구 공개 범위, 화면 수명 메시지(tool-input, tool-result, tool-cancelled, resource-teardown), 샌드박스 프록시, MRTR의 "사람에게 묻기" |
-| **표준 안에서 우리 방식** | 고정 화면(호스트가 홈 도구를 부른다), 중개(앱이 호스트의 MCP 서버를 부르는 클라이언트가 된다) |
-| **표준 밖 확장** | 열린 화면 갱신 알림, 중개 서버의 도구(에이전트 실행, 앱끼리 호출, 호스트 데이터), 실행 기록, 신뢰와 능력 승인 |
+| **Exactly as the spec** | An MCP server, `ui://` resources and `_meta.ui.resourceUri`, tool visibility scope, screen lifecycle messages (tool-input, tool-result, tool-cancelled, resource-teardown), the sandbox proxy, MRTR's "ask the person" |
+| **Our own way, within the spec** | A pinned screen (the host calls the home tool), brokering (an app becomes the client calling the host's MCP server) |
+| **Extensions outside the spec** | Update notifications for an open screen, the broker server's tools (running an agent, calling between apps, host data), run records, trust and capability approval |
 
-그래서 "Goose용 앱이 그대로 돈다"는 **대화 안 화면까지만** 참이다. 고정 화면에서의 실시간 갱신과 중개는 우리 템플릿으로 만든 앱에서만 된다. 문서에도 그렇게 적는다(F-1).
+So "an app built for Goose runs unmodified" is true **only up through an in-conversation screen**. Live updates on a pinned screen, and brokering, work only for an app built with our template. The document says so as well (F-1).
 
-지키는 원칙은 2026-09-14에 정한 그대로다. Goose를 품지 않는다(Goose는 자기가 에이전트라 제공자 API 키로 토큰을 사지만, 우리는 사용자가 이미 결제한 CLI를 몬다). 샘플링(`sampling/createMessage`)은 쓰지 않는다(2026-07-28 폐기, 빠르면 2027-07-28 제거).
+The principle held to is the one set on 2026-09-14. It does not embrace Goose (Goose is itself an agent, so it buys tokens with a provider API key, while we drive the CLI the user has already paid for). Sampling (`sampling/createMessage`) is not used (deprecated 2026-07-28, removed as soon as 2027-07-28).
 
-### 앱의 상태는 어디에 사나
+### Where an app's state lives
 
-MCP Apps의 **화면에는 상태가 없다.** 도구를 부를 때마다 새 인스턴스가 생기고, 상태 복원은 규격에 "향후 확장"으로만 적혀 있다. 그래서 이 설계는 상태를 화면에 두지 않는다.
+In MCP Apps, **the screen holds no state.** Every tool call creates a new instance, and state restoration is written into the spec only as "a future extension." So this design does not put state in the screen.
 
-| 무엇 | 어디에 | 수명 |
+| What | Where | Lifetime |
 |---|---|---|
-| 앱의 상태와 데이터 | 앱 서버 프로세스, 저장소 밖의 데이터 폴더 | 앱이 있는 한 |
-| 화면 | 샌드박스 iframe. 상태를 비추는 창일 뿐이다 | 도구 호출 한 번. 닫히거나 다시 뜨면 새로 읽는다 |
-| 계속 떠 있는 화면, 바뀜 알림 | 호스트(우리) | 사용자가 닫을 때까지 |
+| An app's state and data | The app server process, a data folder outside the repository | As long as the app exists |
+| The screen | A sandboxed iframe. Just a window reflecting the state | One tool call. Reads fresh again when closed or reopened |
+| An always-open screen, change notifications | The host (us) | Until the user closes it |
 
-MCP Apps는 **화면과 도구가 주고받는 규약**으로만 쓴다. "진짜 앱"에 필요한 나머지(상태, 상시 화면, 갱신, 중개)는 호스트가 채운다. 규약을 버리고 자체 형식을 만들면 다른 호스트용 앱을 띄울 수 없고, 우리 앱도 밖에서 돌 수 없다.
+MCP Apps is used only as **the protocol between a screen and a tool.** Everything else a "real app" needs (state, an always-on screen, updates, brokering) is filled in by the host. Dropping the protocol for our own format would mean an app built for another host could not open here, and our own apps could not run elsewhere.
 
-### 앱 하나의 모양
-
-```
-<앱 폴더>/                                  코드. 프로젝트 앱이면 저장소에 커밋된다
-  centralu.app.json                         매니페스트
-  server.mjs                                MCP 서버 (stdio)
-  ui/index.html                             화면
-  AGENTS.md, CLAUDE.md                      이 앱을 고치는 에이전트를 위한 안내
-
-~/.centralu/app-data/<프로젝트 id>/<앱 id>/   데이터. 저장소 밖, 사용자 기계에만 있다
-```
-
-- 매니페스트 필드: `manifestVersion`, `id`, `name`, `version`, `description`, `server { command, args }`, `home`(고정 화면을 여는 도구 이름), `uses { agent?, apps?, host? }`, `secrets?`(이름만), `view { origin: 'opaque' | 'app' }?`. 화면의 CSP는 매니페스트가 아니라 규격대로 각 `ui://` 리소스의 `_meta.ui.csp`에 둔다(구현하며 확정, 아래 "구현하며 바뀐 것"). `manifestVersion`은 팀원이 서로 다른 Centralu 버전을 쓸 때를 위한 것이다.
-- **id 규칙은 #93과 같다**: `^[a-z0-9][a-z0-9-]{0,31}$`, `centralu`로 시작 금지. 밑줄이 없으므로 도구 이름의 칸막이 `__`를 만들 수 없다. 세션에 붙는 서버 이름은 `app-<id>`이고, 앱 안의 도구 이름에도 `__`를 금지한다.
-- **데이터와 비밀은 저장소 밖이다.** 앱 코드는 커밋되어 팀과 나뉘므로, 실행 중에 만든 파일을 앱 폴더에 쓰면 팀에게 새어 나간다. 데이터 폴더는 환경 변수(`CENTRALU_APP_DATA`)로 넘긴다. 비밀은 매니페스트에 이름만 적고, 값은 사용자 기계에만 저장해(키체인 또는 권한 0600 파일) 환경 변수로 넣는다. 비밀 값은 실행 기록, 인자 요약, 에이전트 프롬프트 어디에도 싣지 않는다.
-
-### 화면이 뜨는 두 자리
-
-1. **대화 안 (표준)**: 세션의 에이전트가 화면이 달린 도구를 부르면, 대화의 그 도구 호출 카드 아래에 화면이 뜬다. 표준의 본래 쓰임이고, 다른 호스트용으로 만든 앱과 호환되는 자리다.
-2. **고정 화면 (우리 방식, 규격 준수)**: 사이드바에서 앱을 열면 호스트가 매니페스트의 `home` 도구를 부르고, 그 결과 화면을 메인 영역에 띄운다. 대화 안 화면에서 "고정" 버튼으로 옮길 수도 있다.
-
-두 자리 모두 화면은 도구 호출에서 태어나므로 규격을 벗어나지 않는다. 대화 안 화면에는 우리 사정 하나가 붙는다: 대화 목록은 가상 스크롤이라 화면 밖으로 나간 항목은 DOM에서 사라진다. iframe도 같이 사라지므로, 벗어나기 전에 규격의 teardown 요청을 보내고 "다시 열기" 자리표시를 남긴다(불투명 출처 프레임은 찍을 수 없어 정지 이미지 대신). 살아 있는 대화 안 화면은 최근 3개로 제한한다.
-
-### 호출 경로는 하나다 ("같은 화면을 함수처럼")
+### The shape of one app
 
 ```
-사람이 누름 ─▶ 화면(iframe) ─ tools/call ─▶ 호스트 ─┐
-                                                    ├─▶ 공개 범위 검사 ─▶ 승인 ─▶ 앱 프로세스
-에이전트 ─▶ 세션의 app-<id> 대리 서버 ─────────────┘                            │
-                                                                                ▼
-                                          실행 기록(app_runs) + 열린 화면에 "바뀌었다" 알림
+<app folder>/                               Code. Committed to the repository if it is a project app
+  centralu.app.json                         Manifest
+  server.mjs                                MCP server (stdio)
+  ui/index.html                             Screen
+  AGENTS.md, CLAUDE.md                      Guidance for an agent editing this app
+
+~/.centralu/app-data/<project id>/<app id>/  Data. Outside the repository, only on the user's machine
 ```
 
-- **호스트가 모든 호출의 한가운데에 선다.** 에이전트도 앱 프로세스에 직접 붙지 않는다. 그래서 화면이 부른 것과 에이전트가 부른 것이 같은 코드, 같은 기록을 지난다.
-- **호출자는 셋으로 적는다**: 화면, 세션(세션 id), 앱(부탁 사슬). v1은 화면 호출을 "사람"이라 적었는데 틀렸다. 화면은 앱의 코드라서 아무도 누르지 않아도 도구를 부를 수 있다.
-- **공개 범위**: 에이전트의 도구 목록에는 `visibility`에 `model`이 있는 도구만 올린다. 화면은 **같은 앱**의 `app` 도구만 부를 수 있다. 서버는 누가 불렀는지 구별할 수 없으므로(ext-apps #746) 호스트가 지킨다.
-- **화면의 앱 id는 메시지를 보낸 iframe으로 정한다.** 메시지 내용에 적힌 id를 믿지 않는다(#93·#94와 같은 원칙: 검증한 것이 곧 쓰는 것).
-- 도구 응답의 `_meta.ui.resourceUri`는 응답한 앱과 대조한다. 다른 앱이 남의 화면을 사칭하는 것을 막는다.
+- Manifest fields: `manifestVersion`, `id`, `name`, `version`, `description`, `server { command, args }`, `home` (the tool name that opens the pinned screen), `uses { agent?, apps?, host? }`, `secrets?` (names only), `view { origin: 'opaque' | 'app' }?`. A screen's CSP is not in the manifest but, per the spec, in each `ui://` resource's `_meta.ui.csp` (settled during implementation, see "What changed during implementation" above). `manifestVersion` is for when teammates are on different Centralu versions.
+- **The id rule is the same as #93**: `^[a-z0-9][a-z0-9-]{0,31}$`, forbidden to start with `centralu`. With no underscore, it cannot form the tool-name divider `__`. The server name attached to a session is `app-<id>`, and `__` is also forbidden in a tool name inside an app.
+- **Data and secrets are outside the repository.** Because app code is committed and shared with the team, writing a file created at runtime into the app folder would leak it to the team. The data folder is passed through an environment variable (`CENTRALU_APP_DATA`). A secret has only its name in the manifest; the value is stored only on the user's machine (keychain, or a 0600-permission file) and passed in as an environment variable. A secret value is never carried in a run record, an argument summary, or an agent prompt.
 
-### 앱이 밖으로 부탁하는 길: 중개 서버
+### The two places a screen can open
 
-- 호스트가 앱 프로세스를 띄울 때 표준 입출력 외에 **파이프 하나를 더** 준다. 그 파이프 위에서는 호스트가 MCP 서버이고 앱이 클라이언트다. 파이프를 가진 프로세스만 부를 수 있으므로 토큰이 없고, 누가 불렀는지는 파이프가 말해 준다.
-- 중개 서버의 도구: `run_agent { prompt, tool?, schema? }`, `call_app { app, tool, args }`, 호스트 데이터 도구(세션 목록, 깃 상태 등. `uses.host`에 선언한 것만).
-- 호스트는 앱에 도구 호출을 보낼 때 실행 id를 `_meta`에 싣고, 템플릿의 도우미가 중개 호출에 그 id를 되돌려 붙인다. 그래서 사슬이 기록되고, 깊이 제한과 취소가 사슬을 따라간다. **실행 id 없이 들어온 중개 호출**(앱이 스스로 깨어난 경우)은 v1에서 거절한다.
-- MRTR은 본래 용도로만 쓴다: 앱이 작업 중에 사람에게 물으면(`ElicitRequest`) 우리가 이미 가진 질문 카드로 보인다. 모델 호출(`CreateMessageRequest`)은 받지 않는다.
-- 앱 작성자가 쓰는 모양은 `await centralu.agent('…', { schema })` 한 줄이다. 파이프 연결과 실행 id 전달은 템플릿의 도우미가 감춘다.
+1. **Inside a conversation (spec)**: when a session's agent calls a tool that has a screen, the screen opens under that tool call's card in the conversation. This is the spec's original use, and the place compatible with an app built for another host.
+2. **A pinned screen (our own way, within spec)**: opening the app from the sidebar has the host call the manifest's `home` tool, and shows the resulting screen in the main area. It can also be moved there from an in-conversation screen with a "pin" button.
 
-### 열린 화면이 같은 값을 보는 법
+In both places the screen is born from a tool call, so neither leaves the spec. One constraint of our own attaches to an in-conversation screen: the conversation list is virtually scrolled, so an item that scrolls out of view disappears from the DOM. Its iframe disappears with it, so before it goes the spec's teardown request is sent and a "reopen" placeholder is left in its place (instead of a frozen image, since an opaque-origin frame cannot be captured). Live in-conversation screens are capped at the most recent 3.
 
-앱의 도구 호출이 끝날 때마다(누가 불렀든) 호스트는 그 앱의 열린 화면 모두에 `centralu/notifications/changed`를 보낸다. 우리 템플릿은 이것을 받으면 상태 도구를 다시 부른다. #81이 내장 앱에 고른 방식(알림 하나와 다시 읽기)과 같다. 표준 밖이므로, 우리 템플릿으로 만들지 않은 앱은 이 알림을 무시하고 갱신되지 않는다.
+### There is one call path ("the same screen, like a function")
 
-이것이 "같은 화면을 함수처럼"의 핵심이다. 사람이 고정 화면을 열어 둔 채 에이전트가 `set_interval`을 부르면, 사람 눈앞의 슬라이더가 움직여야 한다.
+```
+The person clicks ─▶ screen (iframe) ─ tools/call ─▶ host ─┐
+                                                            ├─▶ visibility check ─▶ approval ─▶ app process
+The agent ─▶ session's app-<id> proxy server ──────────────┘                            │
+                                                                                          ▼
+                                              run record (app_runs) + "changed" notice to open screens
+```
 
-### 오래 걸리는 호출
+- **The host stands in the middle of every call.** Even the agent does not attach directly to the app process. So what a screen calls and what an agent calls pass through the same code and the same record.
+- **The caller is recorded as one of three**: a screen, a session (session id), or an app (a request chain). v1 recorded a screen's call as "the person," which was wrong. A screen is the app's own code, so it can call a tool even when nobody clicked anything.
+- **Visibility scope**: only a tool whose `visibility` includes `model` is listed for the agent. A screen may call only that **same app's** `app` tools. Because the server itself cannot tell who called it (ext-apps #746), the host enforces this.
+- **A screen's app id is decided by the iframe that sent the message,** not trusted from the id written inside the message content (the same principle as #93 and #94: what is verified is exactly what is used).
+- A tool response's `_meta.ui.resourceUri` is checked against the app that responded, to stop one app impersonating another's screen.
 
-| 부르는 쪽 | 한 호출의 제한 | 근거 |
+### The path for an app to ask outward: the broker server
+
+- When the host starts an app process, it gives it **one extra pipe** besides standard input/output. On that pipe, the host is the MCP server and the app is the client. Only the process holding the pipe can call it, so there is no token, and the pipe itself says who called.
+- The broker server's tools: `run_agent { prompt, tool?, schema? }`, `call_app { app, tool, args }`, and host data tools (session list, git status, and so on — only what is declared in `uses.host`).
+- When the host sends a tool call to an app, it carries a run id in `_meta`, and the template's helper attaches that id back onto the broker call. That is how the chain is recorded, and how the depth limit and cancellation follow the chain. **A broker call that arrives with no run id** (an app waking itself up on its own) is refused in v1.
+- MRTR is used only for its original purpose: when an app asks the person something mid-task (`ElicitRequest`), it shows as the question card we already have. A model call (`CreateMessageRequest`) is not accepted.
+- What an app author writes is one line: `await centralu.agent('…', { schema })`. The pipe connection and carrying the run id are hidden by the template's helper.
+
+### How an open screen sees the same value
+
+Every time an app's tool call ends (no matter who called it), the host sends `centralu/notifications/changed` to every open screen of that app. Our template receives it and calls the state tool again. This is the same approach #81 chose for built-in apps (one notification and reread). Since this is outside the spec, an app not built with our template ignores the notification and does not update.
+
+This is the heart of "the same screen, like a function." If the person leaves a pinned screen open and the agent calls `set_interval`, the slider in front of the person's eyes has to move.
+
+### A long-running call
+
+| Caller | Limit on one call | Basis |
 |---|---|---|
-| Claude 세션 (인프로세스 대리 서버) | 사실상 없음 (`MCP_TOOL_TIMEOUT` 기본 약 28시간) | Claude Code 환경 변수 문서 |
-| Codex 세션 | 300초 (0.145부터의 코드 기본값. 문서의 60초는 옛 값이다) | codex `rmcp_client.rs` |
-| 화면 | 60초. 단 진행 알림이 오면 다시 센다(ext-apps가 켜 둔다) | MCP TS SDK, ext-apps `callServerTool` |
-| 호스트 → 앱 | 우리가 정한다 | |
+| Claude session (in-process proxy server) | Effectively none (`MCP_TOOL_TIMEOUT` default is about 28 hours) | Claude Code environment variable docs |
+| Codex session | 300 seconds (the code default since 0.145; the 60 seconds in the docs is stale) | codex `rmcp_client.rs` |
+| Screen | 60 seconds, though a progress notification resets the count (ext-apps turns this on) | MCP TS SDK, ext-apps `callServerTool` |
+| Host → app | We decide | |
 
-- 호스트는 기다리는 동안(승인을 기다릴 때도) 화면에 진행 알림을 보내 호출을 살려 둔다.
-- Codex에서 부른 호출이 240초를 넘기면 "진행 중"과 실행 id를 먼저 돌려준다. 결과는 앱 화면과 기록에 남고, 에이전트는 각 앱 대리 서버에 붙는 `run_status` 도구로 이어서 확인한다.
-- 사슬 위쪽이 취소되면(사람이 세션을 멈추면) 아래쪽 앱 호출과 에이전트 실행까지 취소를 전한다.
-- MCP Tasks는 2026-07-28에 핵심 규격에서 빠져 확장(`io.modelcontextprotocol/tasks`)이 되었다. 에이전트 쪽 클라이언트(Claude, Codex)가 지원하는지는 확인되지 않았다. 호스트와 앱 사이에서만 쓸지를 스파이크에서 정한다.
+- While waiting (including while waiting on approval), the host sends the screen progress notifications to keep the call alive.
+- If a call from Codex passes 240 seconds, "in progress" and the run id are returned first. The result lands in the app's screen and record, and the agent checks in afterward through the `run_status` tool attached to each app's proxy server.
+- If something upstream in the chain is cancelled (the person stops the session), the cancellation propagates down through the app call and the agent run.
+- MCP Tasks was dropped from the core spec on 2026-07-28 and became an extension (`io.modelcontextprotocol/tasks`). Whether the agent-side clients (Claude, Codex) support it is unconfirmed. Whether to use it only between the host and an app is decided in the spike.
 
-### 세션에 붙이기
+### Attaching to a session
 
 | | Claude | Codex |
 |---|---|---|
-| 붙이는 방식 | 앱마다 인프로세스 대리 서버(`createSdkMcpServer({ name: 'app-<id>' })`) | 스파이크에서 셋 중 고른다(S-3): HTTP 주소(`url` + `bearer_token_env_var`, 추가 프로세스 없음), `dynamicTools`(실험 기능, 호출이 호스트로 바로 온다), stdio 다리(세션 수 × 앱 수만큼 프로세스) |
-| 실행 중에 바꾸기 | `Query.setMcpServers()`로 재시작 없이 다음 턴부터(설치된 SDK 0.3.263에 있다) | 불가. 도구 목록 변경 알림을 무시하고, 설정 재적재는 모든 스레드에 한꺼번에 걸린다. 다음 스레드 시작부터 반영한다 |
-| 승인 | `canUseTool`에서 우리 승인 카드 | 확인 요청(`mcpServer/elicitation/request`, `_meta.codex_approval_kind: "mcp_tool_call"`)을 우리 승인 카드로 보낸다. 지금은 자동 거절이다 |
+| How it attaches | An in-process proxy server per app (`createSdkMcpServer({ name: 'app-<id>' })`) | Chosen among three in the spike (S-3): an HTTP address (`url` + `bearer_token_env_var`, no extra process), `dynamicTools` (an experimental feature, calls come straight to the host), a stdio bridge (a process per session count × app count) |
+| Changing it mid-run | With no restart, from the next turn, through `Query.setMcpServers()` (present in the installed SDK 0.3.263) | Not possible. Tool-list-changed notifications are ignored, and reloading the config applies to every thread at once. It takes effect from the next thread's start |
+| Approval | Our approval card in `canUseTool` | A confirmation request (`mcpServer/elicitation/request`, `_meta.codex_approval_kind: "mcp_tool_call"`) is sent as our approval card. It is auto-refused right now |
 
-- 지금 코드에서 Codex 재개(`thread/resume`)는 MCP 설정을 다시 보내지 않는다(`codex/index.ts:143-159`). 처음 설정이 스레드에 남는지는 실행해서 확인해야 한다(S-7).
-- Codex의 HTTP 방식은 codex-cli 0.147.0에서 요청이 한 건도 오지 않았다는 기록이 있다(`orchestrator-bridge.mjs:5-6`). 지금은 문서상 실험 플래그 없이 지원된다. 설치된 0.153.4에서 다시 잰다.
+- In the code right now, resuming Codex (`thread/resume`) does not resend the MCP configuration (`codex/index.ts:143-159`). Whether the initial configuration stays with the thread has to be confirmed by running it (S-7).
+- There is a record that Codex's HTTP approach received not a single request on codex-cli 0.147.0 (`orchestrator-bridge.mjs:5-6`). It is now documented as supported with no experimental flag needed. Measure it again on the installed 0.153.4.
 
-### 승인은 세 층이다
+### Approval has three layers
 
-1. **도구 호출**: MCP 도구 주석을 따른다. `readOnlyHint: true`인 도구는 묻지 않고, 나머지는 세션 프리셋을 따른다(`safe`는 항상 묻기, `normal`은 묻기, `auto`는 묻지 않기). Codex의 `writes` 방식(읽기 전용이 아닌 도구만 묻기)과 같은 기준이라 두 도구가 같게 움직인다. Codex `auto` 프리셋은 `approvalPolicy: never`라서, 앱 서버 설정에 `default_tools_approval_mode`를 명시하지 않으면 Codex가 주석 없는 도구를 스스로 거부한다.
-2. **능력**: 앱이 에이전트 실행, 다른 앱, 호스트 데이터를 처음 쓸 때 한 번 묻는다. 매니페스트의 `uses`가 바뀌면 다시 묻는다.
-3. **신뢰**: 이 앱의 코드를 이 기계에서 돌려도 되는가(질문 3).
+1. **Tool call**: follows the MCP tool annotation. A tool with `readOnlyHint: true` is not asked about; the rest follow the session preset (`safe` always asks, `normal` asks, `auto` does not ask). This is the same criterion as Codex's `writes` approach (ask only about a non-read-only tool), so both tools behave the same way. Codex's `auto` preset is `approvalPolicy: never`, so unless the app server configuration states `default_tools_approval_mode`, Codex refuses an unannotated tool on its own.
+2. **Capability**: asked once, the first time an app uses running an agent, another app, or host data. Asked again if the manifest's `uses` changes.
+3. **Trust**: whether this app's code may run at all on this machine (question 3).
 
-화면에서 부른 호출은 호출마다 묻지 않는다. 화면이 곧 그 앱이 사람에게 내놓은 조작면이기 때문이다. 대신 기록에 "화면"으로 남는다.
+A call made from a screen is not asked about per call, because the screen is itself the control surface the app offers the person. It is instead recorded as "screen."
 
-### 보안의 경계
+### Security boundaries
 
-- **샌드박스 프록시는 루프백 HTTP다.** Tauri 화면은 웹 페이지이므로 규격상 다른 출처의 프록시가 필수다. 사용자 정의 스킴은 쓰지 않는다. Tauri는 등록한 스킴을 로컬로 취급해 우리 화면과 같은 IPC 자격을 주고, 그때 막아 주는 것은 실행마다 바뀌는 invoke 키 하나뿐이다. 게다가 우리 빌드에는 앱 명령 권한 목록이 없어서, 로컬 출처라면 등록한 12개 명령이 모두 열린다.
-- **앱 화면은 불투명 출처로 격리한다.** 안쪽 iframe에 `allow-same-origin`을 주지 않는다. 그러면 앱끼리 브라우저 저장소가 섞이지 않는다(참조 구현은 모든 서버에 출처 하나를 쓴다). `*.localhost`로 앱마다 출처를 나누는 방법은 macOS 15 이하에서 이름이 풀리지 않아 쓸 수 없다. 대가는 화면이 브라우저 저장소를 못 쓰는 것이다. 상태는 서버에 두는 것이 이 설계의 원칙이라 받아들인다. 공개 앱 86개 중 5개가 이 방식에서 깨지므로(S-8), 가져온 앱과 요청한 앱에는 앱별 출처 방식을 따로 연다(S-1 결과).
-- Tauri CSP에 `frame-src http://127.0.0.1:*`를 더한다. 호스트 포트가 실행마다 바뀌어 포트를 고정할 수 없다. 대신 프록시 경로를 실행마다 새로 만든 비밀값으로 잠근다.
-- 앱 iframe에서 `__TAURI_INTERNALS__`와 `window.webkit.messageHandlers`로 명령을 부를 수 없음을 직접 시험한다(S-2). WKWebView는 메시지 핸들러를 모든 프레임에 노출한다.
-- **앱 서버는 사용자 권한으로 도는 코드다.** 샌드박스는 화면에만 걸린다. 그래서 신뢰(질문 3)가 가장 큰 경계다.
-- **앱이 부른 에이전트는 부른 세션의 `auto`도, 사람의 전역 bypass도 물려받지 않는다.** 프리셋은 언제나 `safe`다(결정 6). 앱이 넘기는 글은 남의 글로 감싼다(#120과 같은 규칙). 앱이 외부 데이터를 에이전트에게 넘기는 길이 곧 프롬프트 주입의 길이기 때문이다.
-- **비용**: 한 번 허락받은 앱은 화면에서 에이전트 실행을 되풀이할 수 있고, 사용자의 구독 한도는 앱과 공유된다. 앱마다 동시 실행 1개와 분당 횟수 상한을 두고, 앱별 사용량을 기록 화면에 보인다. 깊이 제한은 사슬만 막고 되풀이는 막지 못한다.
-
----
-
-## 순서와 근거
-
-위험이 큰 것부터 한다. 검증된 것이 0인 자리가 다섯이다: WKWebView에서 불투명 출처 iframe과 브리지, Codex에 붙이는 길, 한 프로세스 안의 두 SDK 세대(v1, v2), 추가 파이프를 쓰는 중개, 설치 없는 템플릿.
-
-```
-S 스파이크 ─▶ P 선행 정리 ─▶ A 런타임 ─▶ B 화면 ─▶ C 만들기 루프 ─▶ D 중개 ─▶ E 건네기 ─▶ F 문서·호환
-```
-
-B는 대화 안 화면을 먼저 한다. 표준 그대로라 위험이 작고, 고정 화면과 갱신 알림은 그 위에 얹힌다. A와 B가 끝나면 "손으로 만든 앱을 사람과 에이전트가 같이 쓴다"가 된다. C가 끝나야 이 기능의 첫 약속(만든 자리에서 쓰고 고친다)이 참이 된다. **도그푸딩 수용 기준은 C 끝이다.**
-
-대략의 크기: S 3일, P 1일, A 4일, B 5일, C 4일, D 5일, E 2일, F 1일. 합쳐 5주 안팎이다. 스파이크 뒤에 다시 잡는다.
+- **The sandbox proxy is loopback HTTP.** Because a Tauri screen is a web page, a different-origin proxy is required by the spec. A custom scheme is not used. Tauri treats a registered scheme as local and gives it the same IPC credentials as our own screens, and the only thing standing in the way then is the one invoke key that changes per launch. On top of that, our build has no app command permission list, so from a local origin all 12 registered commands are open.
+- **An app's screen is isolated with an opaque origin.** The inner iframe is not given `allow-same-origin`. That keeps browser storage from mixing between apps (the reference implementation uses one origin for every server). Separating origins per app through `*.localhost` cannot be used because the name does not resolve on macOS 15 and below. The cost is that a screen cannot use browser storage. This is accepted because keeping state on the server is this design's own principle. Since 5 of 86 public apps break under this approach (S-8), a separate per-app-origin mode is opened for imported apps and apps that request it (the S-1 result).
+- `frame-src http://127.0.0.1:*` is added to the Tauri CSP. The host port changes every launch, so it cannot be pinned. Instead the proxy path is locked with a secret value made fresh at each launch.
+- It is tested directly that a command cannot be called from the app iframe through `__TAURI_INTERNALS__` or `window.webkit.messageHandlers` (S-2). WKWebView exposes message handlers to every frame.
+- **An app's server is code that runs with the user's own permissions.** The sandbox applies only to the screen. So trust (question 3) is the largest boundary.
+- **An agent an app calls inherits neither the calling session's `auto` nor the person's global bypass.** The preset is always `safe` (decision 6). Text an app hands over is wrapped as someone else's text (the same rule as #120), because the path an app uses to hand external data to an agent is exactly the path of prompt injection.
+- **Cost**: once allowed, an app can repeat running an agent from its screen, and the user's subscription limit is shared with the app. Each app is capped at 1 concurrent run and a per-minute count, and per-app usage is shown on the record screen. The depth limit blocks only the chain, not repetition.
 
 ---
 
-## S. 스파이크 (3일 상자, 실패하면 설계를 바꾼다)
+## Order and reasoning
 
-| # | 확인할 것 | 통과 기준 | 실패하면 |
+Start with the biggest risks. There are five places where zero has been verified: an opaque-origin iframe and the bridge in WKWebView, the path for attaching to Codex, two SDK generations (v1, v2) in one process, brokering over an extra pipe, and an install-free template.
+
+```
+S spikes ─▶ P groundwork ─▶ A runtime ─▶ B screens ─▶ C build loop ─▶ D brokering ─▶ E handoff ─▶ F docs & compatibility
+```
+
+B does the in-conversation screen first. Since it is exactly as the spec, the risk is small, and the pinned screen and update notifications are layered on top of it. Once A and B are done, "a hand-built app is used by both the person and the agent" becomes true. Only once C is done does this feature's first promise (use it and fix it right where it was built) become true. **The dogfooding acceptance criterion is the end of C.**
+
+Rough size: S 3 days, P 1 day, A 4 days, B 5 days, C 4 days, D 5 days, E 2 days, F 1 day. About 5 weeks all together. Reschedule after the spikes.
+
+---
+
+## S. Spikes (a 3-day box; if it fails, the design changes)
+
+| # | What to check | Pass criterion | If it fails |
 |---|---|---|---|
-| S-1 | WKWebView에서 루프백 프록시 → 불투명 출처 iframe → ext-apps 2.x `AppBridge` | 공식 예제 앱이 **수정 없이** 뜨고 버튼이 도구를 부른다 | 출처가 문제면 안쪽 iframe에 앱마다 포트를 달리한 출처를 준다. 브리지가 문제면 `@mcp-ui/client` 7로 돌아간다(통신 규약이 같아 앱 쪽은 그대로다) |
-| S-2 | 같은 iframe에서 Tauri 명령 호출 시도 | `__TAURI_INTERNALS__`, `window.webkit.messageHandlers` 어느 쪽으로도 실패한다 | 앱 화면을 별도 창으로 옮기고, 그 창에는 IPC 권한을 주지 않는다 |
-| S-3 | Codex에 붙이는 길 셋(HTTP, `dynamicTools`, stdio 다리) | 0.153.4에서 도구 호출이 호스트에 도착하고, 승인 확인 요청이 우리 카드로 온다 | stdio 다리로 가고, 세션당 다리 하나가 여러 앱을 싣는 방법을 찾는다 |
-| S-4 | 한 프로세스 안의 SDK 공존: 앱 쪽 클라이언트는 v2(`@modelcontextprotocol/client`), Claude 대리 서버는 v1(Claude SDK 경유) | 충돌 없이 돌고, 2025-11-25 세대와 2026-07-28 세대 앱 서버 모두와 대화한다 | 앱 쪽도 v1로 맞추고, 사람에게 묻기(MRTR)는 v1에서 되는 방식으로 바꾼다 |
-| S-5 | 추가 파이프(fd 3) 위의 중개 | Node 앱과 Python 앱 모두 파이프로 호스트 도구를 부른다 | 루프백 HTTP와 앱별 비밀값 |
-| S-6 | 설치 없는 템플릿 | `npm install` 없이 `node server.mjs`로 뜬다(작은 런타임 파일을 복사) | 스캐폴드가 설치를 돌리고, 그동안 스켈레톤 화면을 보인다 |
-| S-7 | Codex 재개 뒤 MCP 설정 유지 | `thread/resume` 뒤에도 시작 때 붙인 서버의 도구를 부를 수 있다 | 재개 요청의 `config`에 `mcp_servers`를 다시 싣는다. 기존 오케스트레이터 다리도 같이 고친다 |
-| S-8 | 공개 MCP 앱 표본의 브라우저 저장소 사용 | 불투명 출처에서 깨지는 앱의 수를 센다 | 많으면 S-1의 대안(앱별 포트)을 기본으로 올린다 |
+| S-1 | Loopback proxy → opaque-origin iframe → ext-apps 2.x `AppBridge` in WKWebView | An official example app opens **with no modification** and a button calls a tool | If the origin is the problem, give the inner iframe a different origin per app via port. If the bridge is the problem, fall back to `@mcp-ui/client` 7 (the wire protocol is the same, so the app side is unaffected) |
+| S-2 | Attempt a Tauri command call from the same iframe | Fails through both `__TAURI_INTERNALS__` and `window.webkit.messageHandlers` | Move the app screen to a separate window and grant it no IPC permission |
+| S-3 | Three paths to attach to Codex (HTTP, `dynamicTools`, stdio bridge) | On 0.153.4, a tool call reaches the host, and an approval confirmation request comes to our card | Go with the stdio bridge, and find a way for one bridge per session to carry several apps |
+| S-4 | SDK coexistence in one process: the app-side client is v2 (`@modelcontextprotocol/client`), the Claude proxy server is v1 (through the Claude SDK) | Runs with no conflict, and talks to app servers of both the 2025-11-25 and 2026-07-28 generations | Line up the app side on v1 too, and switch asking the person (MRTR) to a way that works under v1 |
+| S-5 | Brokering over the extra pipe (fd 3) | Both a Node app and a Python app call a host tool over the pipe | Loopback HTTP with a per-app secret value |
+| S-6 | An install-free template | Starts with `node server.mjs`, no `npm install` (a small runtime file is copied in) | The scaffold runs the install and shows a skeleton screen meanwhile |
+| S-7 | The MCP configuration survives a Codex resume | A tool of the server attached at start can still be called after `thread/resume` | Carry `mcp_servers` again in the resume request's `config`. Fix the existing orchestrator bridge the same way |
+| S-8 | Browser storage use across a sample of public MCP apps | Count how many apps break under an opaque origin | If it is many, promote S-1's alternative (per-app port) to the default |
 
-## P. 선행 정리 (1일)
+## P. Groundwork (1 day)
 
-- **P-1** UI의 `AppId`를 닫힌 합집합에서 문자열로 연다(#74에서 `ToolName`을 연 것과 같은 일). 내장 앱과 외부 앱이 한 레지스트리에 선다.
-- **P-2** 호스트 HTTP 훅을 다시 만든다. 지금은 쓰이지 않는 채로, 경로만 받고, **인증 없이** WebSocket과 같은 포트에 열려 있다(`server.ts:55`, `91-98`). 메서드·쿼리·헤더를 받고, 비동기로 답하고, 비밀값으로 잠근다.
-- **P-3** `@modelcontextprotocol/client`(v2)와 `@modelcontextprotocol/ext-apps` 2.x를 직접 의존성으로 들인다. 지금 있는 SDK는 Claude SDK에 딸려 온 v1 1.30.0뿐이고, 우리 코드에서 가져올 수 없다.
-- **P-4** `app_guide`를 고친다. 없는 `archive_session`을 안내하고 컨트롤 도구는 하나도 모른다(`app-guide.ts:47`). 앱을 만들 에이전트가 가장 먼저 읽는 글이다.
-- **P-5** `ControlDoc`이 호스트와 UI에 서로 다른 모양으로 두 번 정의되어 있다(`control.ts:47-53`, `ControlRail.tsx:31-48`). 합치고, 상태 모양은 한곳에서 정한다는 원칙을 문서에 적는다.
-- **P-6** cwd가 프로젝트 경로와 다른 세션에서 깨지는 곳을 고친다. 기록 따라잡기가 `project.path`로 Claude 기록을 찾는다(`manager.ts:1626`). 사용자 폴더 앱의 만드는 세션이 바로 그런 세션이다.
+- **P-1** Open the UI's `AppId` from a closed union into a string (the same thing #74 did for `ToolName`). Built-in and external apps stand in one registry.
+- **P-2** Rebuild the host's HTTP hook. Right now it is unused, takes only a path, and sits open on the same port as the WebSocket **with no authentication** (`server.ts:55`, `91-98`). Have it take a method, query and headers, answer asynchronously, and lock it with a secret value.
+- **P-3** Bring in `@modelcontextprotocol/client` (v2) and `@modelcontextprotocol/ext-apps` 2.x as direct dependencies. The only SDK present now is v1 1.30.0 bundled with the Claude SDK, and our own code cannot import it.
+- **P-4** Fix `app_guide`. It documents an `archive_session` that does not exist and knows none of the control tools (`app-guide.ts:47`). It is the first thing an agent about to build an app reads.
+- **P-5** `ControlDoc` is defined twice, in different shapes, in the host and in the UI (`control.ts:47-53`, `ControlRail.tsx:31-48`). Merge them, and write down the principle that a state shape is defined in one place.
+- **P-6** Fix where things break for a session whose cwd differs from the project path. Record catch-up looks up Claude's history by `project.path` (`manager.ts:1626`), and a user-folder app's builder session is exactly such a session.
 
-## A. 런타임 (호스트)
+## A. Runtime (host)
 
-- **A-1 매니페스트** `centralu.app.json`을 zod로 검증한다. 모르는 필드는 경고만 한다.
-- **A-2 발견** 앱이 사는 자리를 훑고(질문 1), 폴더 감시로 추가·삭제·변경을 따라간다. 프로젝트 앱은 **등록된 프로젝트 루트**에서만 읽는다. 워크트리마다 같은 앱의 사본이 있어도 인스턴스는 프로젝트당 하나이고, 워크트리 세션도 루트의 앱을 쓴다.
-- **A-3 프로세스 수명** 처음 필요할 때 띄운다. 크래시한 앱은 타이머로 되살리지 않고 다음에 필요할 때 다시 띄운다(1초·2초 간격을 둔다). 세 번 연속 실패하면 멈추고 이유를 남긴다. 표준에러는 앱별 로그 파일에 남긴다. **쉬는 앱은 내린다**: 열린 화면도 진행 중인 호출도 없으면 5분 뒤 끝낸다.
-- **A-4 중개** 화면의 호출(`apps.call` RPC)과 세션 대리 서버의 호출이 같은 함수로 들어온다. 공개 범위 검사, 승인, 실행 id 발급, 기록이 여기서 한 번씩 일어난다.
-- **A-5 세션에 붙이기** 위 "세션에 붙이기" 표대로. 어느 세션에 붙는지는 질문 4.
-- **A-6 실행 기록** `app_runs(id, app_id, tool, caller_kind, caller_session_id, parent_run_id, status, duration_ms, args_digest, created_at)`. `caller_kind`는 화면·세션·앱, `status`는 진행 중·성공·실패·취소. 인자는 요약과 해시만 남기되, **최근 실패 몇 건은 원문을 로컬에 남긴다**(비밀은 가린다). 만드는 에이전트가 고치려면 실패한 입력을 봐야 하기 때문이다. 보관 기간을 둔다.
-- **A-7 기존 MCP 서버 승인 흡수** 승인한 MCP 서버를 "화면 없는 앱"으로 옮긴다(질문 8). 호출이 호스트를 거치게 되어 기록되고, 목록에서 지울 수 있다. 붙는 자리는 결정 4를 따른다: 사용자 폴더 앱이므로 오케스트레이터(와 그 앱을 만드는 세션)에만 붙는다. 등록부가 둘이면 승인 흐름도, 붙이는 길도 둘이 된다.
-- **A-8 내장 앱과 한 목록** `control`은 컴파일된 내장 앱으로 남는다. 레지스트리가 내장과 외부를 같은 목록으로 보여 준다.
+- **A-1 Manifest** Validate `centralu.app.json` with zod. An unknown field only warns.
+- **A-2 Discovery** Scan where apps live (question 1), and follow additions, deletions and changes with folder watching. A project app is read only from **the registered project root**. Even if every worktree has its own copy of the same app, there is one instance per project, and a worktree session also uses the root's app.
+- **A-3 Process lifetime** Starts the first time it is needed. A crashed app is not revived on a timer; it starts again the next time it is needed (with 1-second, 2-second spacing). Three failures in a row and it stops and records why. Stderr goes into a per-app log file. **An idle app is brought down**: with no open screen and no call in progress, it ends after 5 minutes.
+- **A-4 Brokering** A screen's call (`apps.call` RPC) and a session proxy server's call come into the same function. The visibility check, approval, issuing a run id and recording all happen here, once each.
+- **A-5 Attaching to a session** As in the "Attaching to a session" table above. Which sessions it attaches to is question 4.
+- **A-6 Run record** `app_runs(id, app_id, tool, caller_kind, caller_session_id, parent_run_id, status, duration_ms, args_digest, created_at)`. `caller_kind` is screen, session or app; `status` is in-progress, success, failure or cancelled. Only a summary and hash of the arguments are kept, but **the raw text of a few recent failures is kept locally** (with secrets redacted), because the builder agent needs to see the failed input to fix it. A retention period applies.
+- **A-7 Absorbing the existing approved-MCP-server feature** Move an approved MCP server to become a "screenless app" (question 8). Its calls now pass through the host, so they are recorded, and it can be removed from the list. Where it attaches follows decision 4: as a user-folder app, it attaches only to the orchestrator (and the session building that app). Two registries would mean two approval flows and two attach paths.
+- **A-8 One list with the built-in app** `control` remains a compiled-in built-in app. The registry shows the built-in and external ones as one list.
 
-## B. 화면 (UI)
+## B. Screens (UI)
 
-- **B-1 대화 안 화면** 도구 호출 카드 아래에 띄운다. 화면 수명 메시지는 규격대로 보낸다. 가상 스크롤에서 벗어날 때는 teardown을 먼저 보내고 자리표시를 남긴다.
-- **B-2 고정 화면** 사이드바의 프로젝트 아래에 앱이 세션과 나란히 선다. 누르면 호스트가 `home` 도구를 부르고 메인 영역에 띄운다. 세션처럼 포커스·단축키·순서 저장을 쓴다.
-- **B-3 샌드박스 호스팅** 루프백 프록시(비밀값) → 불투명 출처 iframe → `AppBridge`. 앱별 CSP는 매니페스트의 `csp`로 호스트가 조립한다. 테마와 글자 크기는 `host-context-changed`로 넘긴다.
-- **B-4 브리지 배선** `oncalltool` → 중개. `onreadresource` → 호스트가 앱에서 읽어 전달. `onopenlink` → 사람 확인 후 외부 브라우저. `size-changed` → 레이아웃. `ui/message` → 대화 안 화면이면 그 세션으로, 고정 화면이면 어느 세션에 보낼지 사람에게 묻는다.
-- **B-5 갱신 알림** 위 "열린 화면이 같은 값을 보는 법"대로.
-- **B-6 기다리는 화면** 프로세스가 뜨는 동안 스켈레톤을 보인다(2026-09-14 결정: 비동기는 스켈레톤만 잘하면 된다). 크래시는 화면 안에 이유와 "다시 시작" 버튼으로 보인다.
-- **B-7 기록 보기** 앱 화면 옆에 이 앱의 실행 기록과 에이전트 사용량을 연다.
+- **B-1 In-conversation screen** Shown under the tool call card. Screen lifecycle messages are sent per spec. When it scrolls out under virtual scrolling, teardown is sent first and a placeholder is left.
+- **B-2 Pinned screen** The app stands alongside sessions under the project in the sidebar. Clicking it has the host call the `home` tool and show it in the main area. It uses focus, shortcuts and saved order the same way a session does.
+- **B-3 Sandbox hosting** Loopback proxy (secret value) → opaque-origin iframe → `AppBridge`. The per-app CSP is assembled by the host from the manifest's `csp`. Theme and font size are passed through `host-context-changed`.
+- **B-4 Bridge wiring** `oncalltool` → brokering. `onreadresource` → the host reads from the app and passes it along. `onopenlink` → the external browser after the person confirms. `size-changed` → layout. `ui/message` → to that session if it is an in-conversation screen; if it is a pinned screen, the person is asked which session to send it to.
+- **B-5 Update notification** As in "How an open screen sees the same value" above.
+- **B-6 A waiting screen** Shows a skeleton while the process starts (decided 2026-09-14: for anything asynchronous, a good skeleton is enough). A crash is shown inside the screen with the reason and a "restart" button.
+- **B-7 Viewing the record** Opens this app's run record and agent usage next to the app screen.
 
-## C. 만들기 루프 (이 기능의 첫 약속)
+## C. The build loop (this feature's first promise)
 
-- **C-1 스캐폴드** "새 앱" 버튼과 오케스트레이터 도구 `create_app`이 같은 일을 한다. 템플릿이 처음부터 규칙을 지키게 만든다: 도구 주석, 공개 범위, 상태는 서버에, 데이터 폴더, 갱신 알림 받기, `centralu.agent` 쓰는 법, 금지 사항.
-- **C-2 만드는 세션** 앱마다 하나 둔다. 프로젝트 앱이면 **cwd는 프로젝트 루트**이고, 앱 안내는 `roleAppend`로 준다(조율 세션과 같은 방식). 앱 폴더를 cwd로 하면 인수인계 노트, 파일 링크, 기록 따라잡기가 프로젝트 루트를 가정하고 있어서 깨진다. 사용자 폴더 앱은 cwd가 앱 폴더다(그래서 P-6이 먼저다).
-- **C-3 만드는 세션이 자기 앱을 시험한다** 그 앱의 도구가 만드는 세션에 붙고, `check`(매니페스트 검증, 서버 기동, 도구 목록, `ui://` 읽기, 공개 범위와 주석 점검)를 부를 수 있다. 사람이 시험 담당이 되면 안 된다. 사람은 판단하는 자리에 있어야 한다.
-- **C-4 반영 시점** 파일이 바뀔 때마다 재시작하지 않는다. **만드는 세션의 턴이 끝나면** 한 번 다시 띄운다(세션 상태를 아는 우리만 할 수 있는 일이다). 진행 중인 호출은 끊지 않는다. "다시 시작" 버튼도 둔다. Claude 세션은 바뀐 도구 목록을 다음 턴부터 받고, Codex 세션은 다음 스레드부터 받는다.
-- **C-5 "여기를 고쳐 줘" 줄** 앱 화면 아래에 얇은 입력줄을 둔다. 여기 쓴 말은 만드는 세션으로 가고, 어느 앱의 어느 화면에서 왔는지가 함께 붙는다. 사용자는 앱을 떠나지 않는다. v1은 사용자가 스크린샷을 붙여 넣는다. 앱 화면을 직접 찍어 붙이는 것(WKWebView `takeSnapshot`)은 다음 단계다. Tauri가 노출하지 않아 objc2 호출이 필요하고, GPU로 그린 내용은 찍히지 않는다.
-- **C-6 오류가 만드는 쪽에 닿는다** 앱 프로세스가 죽거나 도구가 예외를 던지면 표준에러 끝부분이 화면에 보이고, "만드는 세션에 보내기" 한 번으로 넘어간다. 자동으로 보내지는 않는다. 에이전트가 사람 모르게 고치고 깨뜨리기를 되풀이하는 것을 막는다.
+- **C-1 Scaffold** The "New app" button and the orchestrator tool `create_app` do the same thing. The template follows the rules from the start: tool annotations, visibility scope, state on the server, the data folder, receiving update notifications, how to use `centralu.agent`, and what is forbidden.
+- **C-2 Builder session** One per app. For a project app, **cwd is the project root**, and app guidance is given through `roleAppend` (the same way as a coordinating session). Making the app folder the cwd breaks the handoff note, file links and record catch-up, which all assume the project root. For a user-folder app, cwd is the app folder (which is why P-6 comes first).
+- **C-3 The builder session tests its own app** That app's tools attach to the builder session, which can call `check` (manifest validation, starting the server, the tool list, reading `ui://`, checking visibility and annotations). The person must not become the tester. The person's place is to judge.
+- **C-4 When it takes effect** It does not restart on every file change. It restarts once **when the builder session's turn ends** (something only we can do, since we know the session's state). A call in progress is not cut off. A "restart" button is also provided. A Claude session gets the changed tool list from the next turn; a Codex session gets it from the next thread.
+- **C-5 The "fix this here" line** A thin composer sits under the app screen. What is typed here goes to the builder session, with which app and which screen it came from attached. The user never leaves the app. In v1, the user pastes in a screenshot. Capturing the app screen directly (WKWebView's `takeSnapshot`) is a later step: Tauri does not expose it, so it needs an objc2 call, and GPU-drawn content is not captured.
+- **C-6 An error reaches the builder** If the app process dies or a tool throws, the tail of stderr is shown in the screen, and one "send to builder session" click passes it along. It is never sent automatically, to stop the agent from repeating fix-and-break cycles without the person knowing.
 
-## D. 중개 (에이전트, 앱끼리, 호스트 데이터)
+## D. Brokering (an agent, between apps, host data)
 
-- **D-1 에이전트 실행** `run_agent`를 받으면 요청마다 새 세션을 그 앱 아래에 만들고, 끝나면 자동으로 보관한다. 요청마다 새로 만드는 이유는 Claude의 구조화 출력(`outputFormat`)이 세션을 시작할 때만 정해지기 때문이다(Codex는 턴마다 `outputSchema`를 받는다). `schema`를 주면 검증된 JSON을 돌려준다. 프리셋은 `safe`(결정 6), 도구는 `uses.agent`와 프로젝트 기본값을 따른다.
-- **D-2 앱끼리** `call_app`. `uses.apps`에 적힌 앱의 `model` 도구만 부를 수 있다.
-- **D-3 호스트 데이터** `uses.host`에 적은 것만 연다. #97에 남은 항목(앱이 필요한 호스트 기능을 선언하는 능력 모델)을 같은 모양으로 푼다.
-- **D-4 능력 승인** 앱이 한 능력을 처음 쓸 때 사람에게 묻는다("리소스 검색 앱이 Claude를 쓰려고 합니다"). 앱·능력 단위로 기억하고, `uses`가 바뀌면 다시 묻는다.
-- **D-5 폭주 막기** 사슬 깊이 제한(기본 3), 같은 사슬 안의 반복 감지, 앱별 동시 실행과 빈도 상한. #80에서 미뤄 둔 "A→B→A 반복 방지"를 여기서 푼다.
-- **D-6 취소와 기록** 취소는 사슬을 따라 아래로 전한다. 부탁마다 `app_runs`에 자식 행이 생기고, 사슬 전체를 한 화면에서 본다.
+- **D-1 Running an agent** On receiving `run_agent`, a new session is made under that app for each request, and archived automatically when it ends. It is made fresh per request because Claude's structured output (`outputFormat`) is fixed only when the session starts (Codex takes `outputSchema` per turn). Given a `schema`, it returns validated JSON. The preset is `safe` (decision 6), and its tools follow `uses.agent` and the project default.
+- **D-2 Between apps** `call_app`. Only the `model` tools of an app listed in `uses.apps` may be called.
+- **D-3 Host data** Opens only what is written in `uses.host`. Resolves the item left in #97 (a capability model for an app to declare the host feature it needs) the same way.
+- **D-4 Capability approval** Asks the person the first time an app uses a capability ("The resource-search app wants to use Claude"). Remembered per app and per capability, and asked again if `uses` changes.
+- **D-5 Stopping runaway calls** A chain depth limit (default 3), repetition detection within the same chain, and per-app concurrency and frequency caps. This is where "preventing an A→B→A loop," deferred in #80, is resolved.
+- **D-6 Cancellation and the record** A cancellation propagates down the chain. Each request creates a child row in `app_runs`, and the whole chain is viewed on one screen.
 
-## E. 건네기 (로컬 절반)
+## E. Handoff (the local half)
 
-팀 서버(권한·배포·중앙 기록)는 유료 경계라 이 플랜 밖이다. 여기서는 서버 없이 되는 것만 한다.
+A team server (permissions, distribution, central records) sits behind the paid boundary, so it is outside this plan. What is done here is only what works with no server.
 
-- **E-1 버전** 프로젝트 앱은 git이 버전이다. 기록 화면에 그 폴더의 커밋을 보이고, 되돌리기는 git으로 한다. git 밖에 있는 사용자 폴더 앱과 가져온 앱만 스냅샷을 남긴다.
-- **E-2 내보내기** 앱을 폴더 하나(또는 zip)로 묶는다. 프로젝트 앱은 저장소에 커밋되는 순간 이미 팀과 나뉜다.
-- **E-3 가져오기** 신뢰 모델(질문 3)을 따른다. 기본은 꺼진 채로 들어오고, `uses`와 파일 목록을 보여 준 뒤 사람이 켠다.
-- **E-4 딥링크** `centralu://app?url=…`로 열면 E-3의 확인 화면이 뜬다.
+- **E-1 Versions** For a project app, git is the version. The record screen shows that folder's commits, and reverting is done through git. Only a user-folder app or an imported app, which sit outside git, keep a snapshot.
+- **E-2 Export** Bundles the app into one folder (or a zip). A project app is already shared with the team the moment it is committed to the repository.
+- **E-3 Import** Follows the trust model (question 3). It arrives off by default, and the person turns it on after seeing `uses` and the file list.
+- **E-4 Deep link** Opening `centralu://app?url=…` brings up E-3's confirmation screen.
 
-## F. 문서와 호환
+## F. Documents and compatibility
 
-- **F-1** `docs/apps.md`: 앱의 모양, 호출 경로, 중개, 보안 경계. 호환 범위를 정직하게 적는다(대화 안 화면은 표준, 고정 화면의 갱신과 중개는 우리 확장). 영어·한국어 두 벌.
-- **F-2** `docs/security-boundaries.md`에 앱 서버의 권한, 화면 격리, 신뢰 모델을 적는다.
-- **F-3** 다른 호스트용으로 공개된 앱 두 개를 수정 없이 대화 안 화면에 띄우는 e2e를 둔다. 깨지면 호환이 깨진 것이다.
+- **F-1** `docs/apps.md`: the app's shape, the call path, brokering, security boundaries. States the scope of compatibility honestly (an in-conversation screen is spec, updates on a pinned screen and brokering are our own extension). Two copies, English and Korean.
+- **F-2** Write an app server's permissions, screen isolation, and trust model into `docs/security-boundaries.md`.
+- **F-3** Add an e2e test that opens two apps published for another host, unmodified, as in-conversation screens. If it breaks, compatibility is broken.
 
 ---
 
-## 검증 매트릭스
+## Verification matrix
 
-모든 새 테스트는 **뒤집어서** 확인한다: 고친 코드를 무력화했을 때 실패해야 한다(2026-09-24 규율).
+Every new test is confirmed by **inverting** it: it has to fail when the fixed code is disabled (a discipline set on 2026-09-24).
 
-**자동 (e2e, 목 에이전트)**
+**Automated (e2e, mock agent)**
 
-| 약속 | 시나리오 | 무엇을 본다 |
+| Promise | Scenario | What to look at |
 |---|---|---|
-| 대화 안에 뜬다 | 목 세션이 화면 달린 도구를 부른다 | 카드 아래 화면, tool-input과 tool-result 수신 |
-| 같은 화면을 함수로 | 고정 화면에서 슬라이더를 0.1초로 끈다 → 목 세션이 `get_interval`을 부른다 | 같은 값. 기록에 화면 한 줄, 세션 한 줄 |
-| 열린 화면 갱신 | 목 세션이 `set_interval`을 부른다 | 열려 있던 고정 화면의 슬라이더가 움직인다 |
-| 공개 범위 | 목 세션의 도구 목록, 화면이 `model` 전용 도구를 부름 | `app` 전용 도구가 목록에 없고, 화면의 호출은 거절된다 |
-| 사칭 차단 | 앱 A의 응답이 B의 `ui://`를 가리킴 | 화면이 뜨지 않고 거절이 기록된다 |
-| 앱 간 격리 | 앱 A의 화면이 B의 저장소와 창에 접근 | 실패 |
-| IPC 차단 | 앱 화면에서 Tauri 명령 호출 | 실패 |
-| 폭주 막기 | A가 B를, B가 다시 A를 부름 | 두 번째 A에서 멈추고 이유가 기록된다 |
-| 취소 전파 | 부른 세션을 멈춤 | 아래의 에이전트 실행까지 취소 |
-| Codex 승인 | 목 Codex가 앱 도구 확인 요청을 보냄 | 자동 거절이 아니라 승인 카드가 뜬다 |
+| Opens inside a conversation | A mock session calls a tool with a screen | The screen under the card, tool-input and tool-result received |
+| The same screen as a function | Set the slider to 0.1 seconds on the pinned screen → a mock session calls `get_interval` | The same value. One row for the screen, one row for the session in the record |
+| Updating an open screen | A mock session calls `set_interval` | The slider on the already-open pinned screen moves |
+| Visibility scope | The mock session's tool list; the screen calls a `model`-only tool | The `app`-only tool is absent from the list, and the screen's call is refused |
+| Blocking impersonation | App A's response points to B's `ui://` | No screen opens, and the refusal is recorded |
+| Isolation between apps | App A's screen accesses B's storage and window | Fails |
+| Blocking IPC | Calling a Tauri command from an app screen | Fails |
+| Stopping a runaway | A calls B, B calls A again | Stops at the second A, and the reason is recorded |
+| Cancellation propagation | Stop the calling session | The agent run downstream is cancelled too |
+| Codex approval | A mock Codex sends an app tool confirmation request | An approval card appears instead of an auto-refusal |
 
-**수동 (도그푸딩, 실제 에이전트)**
+**Manual (dogfooding, a real agent)**
 
-| 약속 | 시나리오 | 무엇을 본다 |
+| Promise | Scenario | What to look at |
 |---|---|---|
-| 화면과 함께 만든다 | "캡처 간격 슬라이더를 만들어 줘" | 사이드바에 앱이 생기고, 화면에 슬라이더가 있다 |
-| 그 자리에서 고친다 | 입력줄에 "초기화 버튼 넣어 줘" | 앱을 떠나지 않고, 턴이 끝나면 버튼이 생기며 값은 유지된다 |
-| 쓰는 에이전트를 부른다 | 앱 도구가 요약을 부탁 | 첫 사용에 능력 승인, 앱 아래 세션, 스키마에 맞는 JSON |
-| 수용 기준 (C 끝) | 예전에 만들었지만 설치와 환경 설정 장벽 때문에 쓰이지 않았던 도구 하나를 이 형식으로 다시 만든다 | 비개발자가 설명 없이 연다 |
+| Built together with a screen | "Make me a capture-interval slider" | The app appears in the sidebar, and the screen has a slider |
+| Fixed right there | "Add a reset button" in the composer | Never leaving the app, the button appears once the turn ends, and the value is kept |
+| Calls the agent in use | An app tool asks for a summary | Capability approval on first use, a session under the app, JSON matching the schema |
+| Acceptance criterion (end of C) | Rebuild, in this format, a tool that was made before but never used because of install and setup barriers | A non-developer opens it with no explanation |
 
-**성능 예산**
+**Performance budget**
 
-| 상황 | 기준 |
+| Situation | Standard |
 |---|---|
-| 앱 5개 설치, 아무것도 안 할 때 | CPU 0.2% 이내(지금 앱의 기준), 앱 프로세스 0개 |
-| 내려가 있던 앱의 고정 화면 열기 | 스켈레톤은 즉시, 첫 화면은 2초 안 |
+| 5 apps installed, doing nothing | Under 0.2% CPU (this app's own current standard), 0 app processes |
+| Opening the pinned screen of an app that was down | The skeleton is immediate, the first screen within 2 seconds |
 
-## 이 플랜 밖
+## Outside this plan
 
-- 팀 서버: 권한, 배포, 중앙 실행 기록, 릴레이 (유료 경계)
-- 앱이 스스로 깨어나는 일(타이머, 감시). 중개 서버는 실행 id 없는 호출을 거절한다
-- 앱 서버 자체의 샌드박스(프로세스 격리). v1은 신뢰로만 막는다
-- 앱 화면을 직접 찍어 만드는 세션에 넘기기
-- 컨트롤 앱을 새 형식으로 옮기기
-- 앱 마켓
+- Team server: permissions, distribution, central run records, relay (the paid boundary)
+- An app waking itself up (a timer, watching). The broker server refuses a call with no run id
+- A sandbox for the app server itself (process isolation). v1 relies on trust alone
+- Capturing the app screen directly and handing it to the builder session
+- Moving the control app to the new format
+- An app marketplace
 
-## 이 플랜과 별개로 확인할 것 (재검토 중 발견)
+## To confirm separately from this plan (found during the re-review)
 
-1. **Codex 재개가 MCP 설정을 다시 보내지 않는다**(`codex/index.ts:143-159`). 처음 설정이 스레드에 남지 않는다면, 잠들었다 깬 Codex 오케스트레이터는 `centralu` 도구를 잃는다. 실행해서 확인해야 한다(S-7과 같은 측정).
-2. **Codex 오케스트레이터에서 승인한 MCP 서버는 동작하지 않을 가능성이 높다.** 확인 요청을 자동 거절하기 때문이다(`codex/index.ts:309-314`). 역시 실행해서 확인해야 한다.
-3. ~~사용자 프로젝트의 `.centralu/handoff/`는 git에서 무시되지 않는다.~~ **해결(#142)**: 인수인계 노트는 사용자 저장소 밖, 데이터 폴더의 `handoff/<프로젝트 id>/<세션 id>.md`로 옮겼다. 앱은 저장소의 `.centralu/handoff/`를 더는 읽지도 쓰지도 치우지도 않는다(이미 놓인 옛 노트는 그대로 둔다). 살아 있는 인수인계에서 에이전트는 노트를 답으로 쓰고 파일은 host가 놓는다 — 어느 에이전트도 저장소 밖에 쓰지 않는다.
-4. **Tauri 앱 명령 권한 목록이 없다.** 로컬 출처 프레임이라면 등록한 12개 명령이 모두 열린다. 지금은 iframe이 없어 문제가 아니지만, 앱 화면보다 먼저 막아야 한다.
+1. **Codex resume does not resend the MCP configuration** (`codex/index.ts:143-159`). If the initial configuration does not stay with the thread, a Codex orchestrator that slept and woke up loses its `centralu` tools. This has to be confirmed by running it (the same measurement as S-7).
+2. **An MCP server approved in the Codex orchestrator is likely not to work.** because confirmation requests are auto-refused (`codex/index.ts:309-314`). This also has to be confirmed by running it.
+3. ~~The user project's `.centralu/handoff/` is not ignored by git.~~ **Resolved (#142)**: the handoff note was moved out of the user's repository, into the data folder as `handoff/<project id>/<session id>.md`. The app no longer reads, writes, or cleans up `.centralu/handoff/` in the repository (an old note already placed there is left as is). In a live handoff, the agent writes the note as its answer and the host is the one that places the file — no agent writes outside the repository.
+4. **There is no Tauri app command permission list.** From a local-origin frame, all 12 registered commands are open. It is not a problem right now since there is no iframe, but it has to be closed before the app screen exists.
 
 ---
 
-## 스파이크 결과
+## Spike results
 
-코드는 `spike/apps-host/`(브랜치 `spike/host`)에 있다. 숫자는 모두 Node 26.9.0, macOS arm64에서 잰 것이다.
+The code is in `spike/apps-host/` (branch `spike/host`). Every number was measured on Node 26.9.0, macOS arm64.
 
-### S-4 SDK 두 세대 공존: 통과
-- Claude SDK(0.3.263)는 MCP SDK v1을 자체 번들로 품고 있어, 우리가 들일 v2(`@modelcontextprotocol/client`·`server` 2.1.0)와 부딪히지 않는다. 저장소에 새로 드는 패키지는 3개이고 zod는 4.4.3 하나로 남는다.
-- v2 클라이언트는 2026-07-28 서버와 2025-11-25 서버 모두와 도구 목록·호출이 된다. MRTR의 "사람에게 묻기"는 두 세대 모두 **처리기 하나**로 받는다(2025 세대에서는 서버발신 `elicitation/create`로 대신 온다).
-- **플랜이 바뀌는 점**: v2 클라이언트의 기본값은 2025 규격이다. 호스트가 규격 세대를 명시해야 한다. SDK의 stdio 전송은 세대를 알아보려고 **앱 프로세스를 두 번 띄운다**(탐색용, 실제). 우리 전송 계층(약 45줄)을 따로 두고, 앱마다 알아낸 세대를 기억해 `connect({ prior })`로 다시 붙는다. 이 전송은 `pid`와 `stderr`를 드러내야 한다(아니면 HTTP로 오인해 탐색이 멈춘다). v2의 `LATEST_PROTOCOL_VERSION` 상수는 아직 2025-11-25라 세대 판별에 쓰지 않는다.
+### S-4 Two SDK generations coexisting: pass
+- The Claude SDK (0.3.263) bundles MCP SDK v1 on its own, so it does not collide with the v2 (`@modelcontextprotocol/client`/`server` 2.1.0) we are bringing in. 3 new packages enter the repository, and zod stays at one version, 4.4.3.
+- The v2 client lists tools and calls them with both a 2026-07-28 server and a 2025-11-25 server. MRTR's "ask the person" is received by **a single handler** across both generations (from the 2025 generation it instead arrives as a server-initiated `elicitation/create`).
+- **What changes in the plan**: the v2 client's default is the 2025 spec generation. The host has to state the spec generation explicitly. The SDK's stdio transport **starts the app process twice** to detect the generation (a probe, then the real one). We keep our own transport layer (about 45 lines) instead, remember the generation found for each app, and reconnect with `connect({ prior })`. This transport has to expose `pid` and `stderr` (otherwise it is mistaken for HTTP and detection stalls). v2's `LATEST_PROTOCOL_VERSION` constant is still 2025-11-25, so it is not used to tell the generation.
 
-### S-5 추가 파이프(fd 3) 위의 중개: 통과
-- Node 앱, Python 3.9 앱(표준 라이브러리만), 공식 Python SDK 앱 모두 "호스트 → 앱 도구 → 파이프로 중개 호출 → 앱 → 호스트" 왕복에 성공했다. 정상 상태 왕복 중앙값 0.2~1.2ms.
-- 실행 id가 없는 중개 호출과 위조된 id는 거절되고, 호스트가 취소하면 중개 쪽 기록이 "취소"로 끝난다.
-- 호스트 쪽 중개 서버는 SDK의 전송을 그대로 쓴다(추가 코드 0줄). 파이프는 macOS에서 유닉스 소켓 쌍이다.
-- **플랜이 바뀌는 점**: 호스트가 표준 입력만 닫으면 앱이 끝나지 않았다(Node는 파이프 소켓이, 공식 Python은 읽기 스레드가 붙잡는다). **종료 규칙**: 호스트는 표준 입력과 파이프를 함께 닫고, 유예 시간 뒤 자손까지 끝낸다. 템플릿은 파이프를 `unref`한다. Node 템플릿은 `AsyncLocalStorage`로 실행 id를 들고 다녀 `await centralu.agent('…')`가 인자 없이 한 줄이 된다.
-- **남은 위험**: Windows에서 fd 3는 자식이 MSVCRT 런타임을 쓸 때만 넘어간다(libuv 문서). 시험하지 못했다. Windows에서는 루프백 HTTP 대안을 쓴다.
+### S-5 Brokering over the extra pipe (fd 3): pass
+- A Node app, a Python 3.9 app (standard library only), and an official-Python-SDK app all succeeded at the "host → app tool → broker call over the pipe → app → host" round trip. Steady-state round trip median 0.2–1.2ms.
+- A broker call with no run id, and a forged id, are refused, and when the host cancels, the broker-side record ends as "cancelled."
+- The host-side broker server uses the SDK's own transport unmodified (0 lines of extra code). On macOS the pipe is a pair of Unix sockets.
+- **What changes in the plan**: an app did not end when the host closed only standard input (in Node, the pipe socket holds it open; in the official Python SDK, a reader thread does). **The shutdown rule**: the host closes standard input and the pipe together, and after the grace period ends descendants too. The template `unref`s the pipe. The Node template carries the run id in `AsyncLocalStorage`, so `await centralu.agent('…')` becomes one line with no argument for it.
+- **Remaining risk**: on Windows, fd 3 is only passed through when the child uses the MSVCRT runtime (libuv docs). This has not been tested. On Windows, the loopback HTTP alternative is used.
 
-### S-6 설치 없는 템플릿: 통과
-- 런타임 파일 하나(압축 902KiB, gzip 220KiB, 전부 MIT)를 앱 폴더에 두면 `npm install` 없이 뜬다. 첫 도구 목록까지 중앙값 180~215ms(맨 `node`는 123~133ms).
-- Claude(Sonnet)에게 버튼 추가를 시켰더니 런타임은 건드리지 않고 `server.mjs`와 화면만 고쳤다(26턴, 114초). 그러나 첫 시도의 서버 시작 오류가 **표준에러에 한 줄도 남지 않아** 15턴을 헤맸다. SDK가 모든 요청에 `-32603`만 돌려줬다.
-- **플랜이 바뀌는 점**:
-  - C-1 템플릿 런타임은 시작 오류를 표준에러에 반드시 쓰고, 화면 없는 도구도 받는다(스파이크에서 고쳐 확인함).
-  - C-3 `check`는 도구 목록을 실제로 불러 본다. 깨진 서버도 프로세스는 살아 있었다.
-  - C-6 압축한 런타임 안의 스택은 읽을 수 없다. 앱 코드의 오류는 파일:줄이 남는다. 런타임은 소스맵과 함께 둔다.
-  - 런타임에서 쓰지 않는 HTTP·OAuth 코드(약 280KiB)를 뺀다(파이프 전용 클라이언트 약 40줄이면 621KiB).
-  - 앱마다 커밋되는 `runtime/`(약 1.4MB)은 `.gitattributes`로 생성물 표시를 한다.
-  - 화면용 브리지(462KiB)가 화면을 열 때마다 HTML에 들어간다. 프록시 출처에서 캐시되는 스크립트로 따로 내보낼지 B-3에서 정한다.
+### S-6 An install-free template: pass
+- Placing one runtime file (902KiB minified, 220KiB gzipped, entirely MIT) in the app folder is enough to start with no `npm install`. Median time to the first tool list is 180–215ms (bare `node` is 123–133ms).
+- Asked to add a button, Claude (Sonnet) touched only `server.mjs` and the screen, leaving the runtime alone (26 turns, 114 seconds). But the first attempt's server-start error **left not a single line in stderr**, and it wandered for 15 turns. The SDK returned nothing but `-32603` for every request.
+- **What changes in the plan**:
+  - C-1 The template runtime must always write a start error to stderr, and also accepts a tool with no screen (fixed and confirmed in the spike).
+  - C-3 `check` actually fetches the tool list. Even a broken server had a live process.
+  - C-6 A stack trace inside the minified runtime cannot be read. An error in app code keeps its file:line. The runtime ships with a source map.
+  - Drop the HTTP/OAuth code the runtime does not use (about 280KiB) (a pipe-only client is about 40 lines, bringing it to 621KiB).
+  - The `runtime/` committed per app (about 1.4MB) is marked as generated with `.gitattributes`.
+  - The screen bridge (462KiB) goes into the HTML every time a screen opens. Whether to export it separately as a script cached at the proxy origin is decided in B-3.
 
-### S-1 WKWebView에서 공식 브리지와 불투명 출처: 통과 (단서 하나)
+### S-1 The official bridge and an opaque origin in WKWebView: pass (one caveat)
 
-코드는 `spike/apps-ui/`(브랜치 `spike/ui`). macOS 27.0, WebKit 22625, Tauri 2.11.5, ext-apps 2.0.0.
+The code is in `spike/apps-ui/` (branch `spike/ui`). macOS 27.0, WebKit 22625, Tauri 2.11.5, ext-apps 2.0.0.
 
-- 루프백 프록시(자기 출처) 안에 `allow-scripts allow-forms`만 준 불투명 출처 iframe을 두고 공식 `AppBridge`를 붙였다. Tauri 개발 창, 배포와 같은 `tauri://localhost` 빌드, 맨 WKWebView, Chromium·WebKit 모두에서 초기화, tool-input과 tool-result, 버튼 → 서버 도구 → 화면 갱신(71~92ms), `size-changed`가 된다. 브라우저 저장소 접근은 `SecurityError`로 막힌다(의도한 격리).
-- **지금 CSP는 프록시 프레임을 막는다.** `frame-src http://127.0.0.1:*`를 더하면 된다.
-- **단서**: 공식 예제 map-server(CesiumJS)는 불투명 출처에서 지도 타일을 하나도 못 받는다(Chromium에서는 blob 모듈 워커도 막힌다). 앱별 포트 출처(`allow-same-origin`)로 바꾸면 된다.
-- `@mcp-ui/client`는 필요 없었다.
-- **플랜이 바뀌는 점 (프록시 규칙)**:
-  - `sandbox`를 먼저 걸고 `srcdoc`으로 화면을 넣는다. **`document.write`는 쓰지 않는다.** 참조 구현의 그 방식은 화면이 프록시의 출처를 물려받아, 다른 프록시의 주소(비밀 경로 포함)와 저장소에 닿을 수 있었다(실측).
-  - 프레임은 출처가 아니라 `event.source`로 가린다. 불투명 출처는 모두 `"null"`이다.
-  - 호스트 출처를 `document.referrer`로 읽지 않고 명시해서 넘긴다. `tauri://`에서는 referrer가 빈 값이다.
-- **플랜이 바뀌는 점 (출처 방식)**: 우리 템플릿으로 만든 앱은 불투명 출처가 기본이다. 가져온 앱이나 매니페스트에서 요청한 앱에는 **앱별 출처 방식**을 연다. 이 방식은 앱 id마다 **고정되고 다시 쓰지 않는 포트**가 필요하다(WebKit 저장소가 포트 출처별로 남으므로, 포트를 재사용하면 한 앱의 저장소가 다른 앱에 넘어갈 수 있다). 개발·웹 모드처럼 최상위 페이지가 `http://127.0.0.1`이면 **쿠키는 모든 포트가 공유**한다(Chromium, WebKit, WKWebView 실측). localStorage는 나뉜다.
+- Inside the loopback proxy (its own origin), an opaque-origin iframe given only `allow-scripts allow-forms` was set up, and the official `AppBridge` attached. Init, tool-input and tool-result, button → server tool → screen update (71–92ms), and `size-changed` all worked in the Tauri dev window, a `tauri://localhost` build matching production, bare WKWebView, and both Chromium and WebKit. Browser storage access is blocked with `SecurityError` (the intended isolation).
+- **The current CSP blocks the proxy frame.** Adding `frame-src http://127.0.0.1:*` fixes it.
+- **The caveat**: the official example map-server (CesiumJS) cannot receive a single map tile under an opaque origin (in Chromium, a blob module worker is blocked too). Switching to a per-app-port origin (`allow-same-origin`) fixes it.
+- `@mcp-ui/client` was not needed.
+- **What changes in the plan (proxy rules)**:
+  - Set `sandbox` first, then put in the screen with `srcdoc`. **`document.write` is not used.** In the reference implementation, that approach let the screen inherit the proxy's origin and reach other proxies' addresses (secret paths included) and their storage (measured).
+  - A frame is filtered by `event.source`, not by origin. Every opaque origin is `"null"`.
+  - The host origin is not read from `document.referrer` but passed explicitly. Under `tauri://`, the referrer is empty.
+- **What changes in the plan (origin mode)**: an app built with our template defaults to an opaque origin. A per-app-origin mode is opened separately for an imported app or one that requests it in the manifest. This mode needs **a fixed, never-reused port** per app id (because WebKit storage persists per port origin, reusing a port could hand one app's storage to another). As in dev and web mode, where the top page is `http://127.0.0.1`, **cookies are shared across every port** (measured in Chromium, WebKit and WKWebView). localStorage is separated.
 
-### S-2 앱 프레임에서 IPC 차단: 통과 (보안)
+### S-2 Blocking IPC from the app frame: pass (security)
 
-- 앱 프레임과 프록시 프레임 어디에서도 `__TAURI_INTERNALS__` 등 Tauri 전역이 없고, 부모·최상위 창 접근은 `SecurityError`다.
-- `window.webkit.messageHandlers.ipc`는 두 프레임 모두에 **있고 메시지가 Tauri까지 간다.** 막는 것은 두 겹이다. 틀린 invoke 키는 응답 없이 버려진다. 키를 일부러 흘려도 Tauri의 출처별 권한 검사가 모두 거절한다. `ipc://` 가져오기도 같은 두 겹에서 막힌다.
-- 호출이 앱 명령 처리기에 닿는지 기록하는 임시 래퍼로 Tauri 실행 10번을 쟀다. 프레임에서 온 명령은 0건이고, 메인 프레임의 정상 호출은 기록되었다(대조군).
-- **플랜이 바뀌는 점**: S-2의 대안(앱 화면을 별도 창으로)은 필요 없다. 대신 규칙 셋을 지킨다. 프록시와 앱 내용을 로컬 출처(개발 서버 포트, `tauri://`, 사용자 정의 스킴)에서 내보내지 않는다. `127.0.0.1`을 덮는 `remote` 권한을 추가하지 않는다. Tauri는 키가 틀릴 때마다 **진짜 invoke 키를 표준에러에 쓴다.** 표준에러를 모으는 로그가 기계 밖으로 나가면 안 된다.
+- Neither the app frame nor the proxy frame has any Tauri global such as `__TAURI_INTERNALS__`, and accessing the parent or top window is a `SecurityError`.
+- `window.webkit.messageHandlers.ipc` **is present in both frames, and the message does reach Tauri.** What stops it is two layers: a wrong invoke key is dropped with no response, and even a deliberately leaked key is refused entirely by Tauri's per-origin permission check. Fetching `ipc://` is blocked by the same two layers.
+- A temporary wrapper recording whether a call reaches the app command handler was measured across 10 Tauri runs. Zero commands arrived from the frame, while a normal call from the main frame was recorded (the control).
+- **What changes in the plan**: S-2's fallback (moving the app screen to a separate window) is not needed. Instead, three rules are kept: never serve the proxy or app content from a local origin (the dev server port, `tauri://`, a custom scheme); never add a `remote` permission covering `127.0.0.1`; and since Tauri **writes the real invoke key to stderr** every time a wrong key arrives, whatever log collects stderr must never leave the machine.
 
-### S-8 공개 앱의 브라우저 저장소 사용: 측정 완료
+### S-8 Browser storage use by public apps: measured
 
-- 표본 86개(공식 예제 25, 외부 61). 저장소를 쓰는 앱 15개. 불투명 출처에서 **깨지는 앱 4개**, 문제없이 물러서는 앱 10개, 확인 못 함 1개. 저장소와 무관하게 깨지는 map-server를 더하면 **86개 중 5개**.
-- 공식 문서가 화면 상태를 `viewUUID` 키로 localStorage에 두라고 권하므로, 이 비율은 늘어날 수 있다. 저장소 검색만으로는 깨짐을 과소평가한다(map-server).
+- A sample of 86 (25 official examples, 61 external). 15 apps use storage. Under an opaque origin, **4 apps break**, 10 degrade gracefully, and 1 could not be checked. Adding map-server, which breaks for reasons unrelated to storage, makes it **5 of 86**.
+- Since the official docs recommend keeping screen state in localStorage under a `viewUUID` key, this ratio could grow. Searching for storage use alone underestimates breakage (as map-server shows).
 
-## 결정 사항 (2026-09-25 확정)
+## Decisions (finalized 2026-09-25)
 
-1. **앱의 자리**: 프로젝트 안(`<프로젝트>/.centralu/apps/<id>/`)이 기본, 여러 프로젝트에서 쓸 것은 사용자 폴더(`~/.centralu/apps/<id>/`). 인수인계 노트를 저장소 밖으로 옮기는 것은 별도 이슈로 검토한다(`.centralu/` 전체를 무시하면 앱도 숨기 때문). #142에서 데이터 폴더로 옮겼다.
-2. **앱 서버 언어**: 템플릿과 안내는 Node만. 실행 명령은 아무 명령이나 받는다.
-3. **신뢰**: 프로젝트 단위 신뢰 하나로 앱과 #92를 함께 정한다. 신뢰한 프로젝트에서는 앱이 돌고 프로젝트 설정도 존중한다. 신뢰하지 않은 프로젝트에서는 앱이 꺼져 있고 프로젝트 설정이 승인 카드를 끄지 못한다. 사용자 폴더 앱은 신뢰, 밖에서 가져온 앱만 따로 확인한다.
-4. **앱을 부르는 세션**: 신뢰한 프로젝트의 앱은 그 프로젝트의 모든 세션에, 사용자 폴더 앱은 오케스트레이터에만. 컨트롤 앱의 도구는 지금처럼 워커에게 안 보인다(#81의 결정은 외부 앱에 한해 바꾼다).
-5. **도구 호출 승인**: 읽기 전용 주석이 있는 도구는 묻지 않고, 나머지는 세션 프리셋을 따른다. 화면에서 부른 호출은 묻지 않는다. 능력(에이전트 실행, 다른 앱, 호스트 데이터)은 처음 한 번 묻는다.
-6. **앱이 부른 에이전트**: 요청마다 새 세션을 그 앱 아래에 만들고 끝나면 보관한다. 프리셋은 부른 세션과도, 사람의 전역 설정과도 무관하게 `safe`. 처음 결정은 `normal`이었고, 바꾼 이유는 "구현하며 바뀐 것"의 마지막 줄에 적었다.
-7. **화면 두 자리**: 둘 다 이번에 한다. 대화 안 화면이 먼저다.
-8. **기존 MCP 서버 승인 기능**: 앱으로 흡수한다(A-7).
-9. **범위**: S~D 전부, E는 가벼운 것(git 밖 앱의 스냅샷, 가져오기 확인, 딥링크)만. 팀 전달은 다음 플랜.
-10. **도그푸딩 대상**: 리소스 검색 도구.
-11. **이름**: 마일스톤은 **M4**(M3 "비용 대시보드"는 그대로 둔다). 제품 안에서 부르는 이름은 코드와 같은 **"앱"**. 제품 스펙 반영은 F에서 한다.
-12. **별개로 발견한 넷**: 3·4는 바로 이슈로 올리고, 1·2는 S-7에서 실행해 확인한 뒤 올린다.
+1. **Where an app lives**: inside the project (`<project>/.centralu/apps/<id>/`) by default; the user folder (`~/.centralu/apps/<id>/`) for something used across several projects. Moving the handoff note out of the repository is reviewed as a separate issue (since ignoring the whole `.centralu/` would also hide apps). Moved to the data folder in #142.
+2. **App server language**: the template and guidance are Node only. The run command accepts any command at all.
+3. **Trust**: one project-level trust setting decides both apps and #92 together. In a trusted project, apps run and the project's settings are respected. In an untrusted project, apps stay off and the project's settings cannot turn off the approval card. A user-folder app is trusted; only an app brought in from outside is checked separately.
+4. **Which sessions call an app**: a trusted project's app attaches to every session of that project; a user-folder app attaches only to the orchestrator. The control app's tools stay invisible to a worker, as now (#81's decision is changed only for external apps).
+5. **Tool call approval**: a tool with a read-only annotation is not asked about; the rest follow the session preset. A call made from a screen is never asked about. A capability (running an agent, another app, host data) is asked about once, the first time.
+6. **An agent an app calls**: a new session is made under that app for each request and archived when it ends. The preset is `safe`, regardless of the calling session or the person's global settings. The original decision was `normal`; the reason for changing it is written in the last row of "What changed during implementation."
+7. **The two places a screen opens**: both are done this time. The in-conversation screen comes first.
+8. **The existing approved-MCP-server feature**: absorbed into apps (A-7).
+9. **Scope**: all of S through D; for E, only the light pieces (a snapshot for an app outside git, import confirmation, a deep link). Team handoff is the next plan.
+10. **The dogfooding target**: a resource-search tool.
+11. **Naming**: the milestone is **M4** (M3, "cost dashboard," is left as is). The name used inside the product is **"app,"** the same as in the code. Reflecting this in the product spec is done in F.
+12. **The four found separately**: 3 and 4 are filed as issues right away; 1 and 2 are filed after being confirmed by running S-7.
 
-## 진행 체크리스트
+## Progress checklist
 
-- [x] 결정 확정과 플랜 커밋 (`2f08fc7`)
-- [x] "별개로 확인할 것" 3·4 이슈 등록 (#142, #143)
-- [ ] **S** 스파이크 — S-1·S-2·S-4·S-5·S-6 통과, S-8 측정 완료. **S-3·S-7은 Codex 로그인 대기**(Codex 쪽 동작은 지금 소스와 타입으로만 확인됨)
-- [x] **P** 선행 정리 — P-1·P-4·P-5·P-6(#144), P-2(#150), P-3(#148)
-- [x] **A** 런타임 — A-1~A-4·A-6(#148), A-5(#151), A-7(#152), A-8(#154). 결정 3의 #92 적용도 #152
-- [x] **B** 화면 — B-2·B-3·B-6·B-7과 고정 화면의 B-4(#150, #154), B-1과 대화 안의 B-4(#187), B-5(#154, 순환 수정 #190), 고정 화면 메시지 감싸기(#192)
-- [ ] **C** 만들기 루프 — 코드는 끝났다: 호스트 쪽 C-1~C-4·C-6(#155), UI 쪽 새 앱 버튼·C-5 입력줄·C-6 보내기 버튼·새 코드로 화면 다시 열기(#192). **남은 것: 도그푸딩 수용 기준(사람이 필요하다)**
-- [x] **D** 중개 — D-1~D-6(#194). 결정 6을 `safe`로 바꿨다. Codex의 `run_agent`는 로그인 전이라 가짜 클라이언트로만 확인했다. #97은 열어 둔다: D-3은 외부 앱의 선언 어휘를 만들었지만 내장 컨트롤 앱은 여전히 `AppHostApi`의 `useInbox`·`useCounts`로 인박스를 읽는다
-- [x] **E** 건네기 (가벼운 것) — 비밀 값 화면과 RPC, E-3 가져오기와 사람의 확인(꺼진 채 들어오고, `server`·`uses`가 바뀌면 다시 묻는다), E-1 사용자 폴더 앱의 스냅샷(최근 5벌)과 되돌리기·프로젝트 앱은 그 폴더의 git 커밋을 읽기만, E-4 앱 링크(macOS, 딥링크 플러그인 없이 OS의 열기 이벤트) — #196. E-2 내보내기는 결정 9의 범위 밖이다. 앱 링크의 끝에서 끝은 빌드한 앱에서 손으로 확인해야 한다(`tauri dev`는 스킴을 받지 못한다)
-- [x] **실제 에이전트 사전 점검** (2026-09-25, 소스에서 띄운 호스트 + 웹 화면 + 실제 Claude, 임시 데이터 폴더) — 수동 매트릭스의 세 줄(화면과 함께 만든다, 그 자리에서 고친다, 쓰는 에이전트를 부른다)과 대화 안 화면, 결정 6의 `safe`(사람의 전역 bypass에도 앱 에이전트의 쓰기가 승인 카드에서 멈춘다)가 통과했다. 발견 10건 중 앱 에이전트 세션의 대화가 두 번 보이던 것은 #197(기록 커서, #79)로, 실행 패널·토큰·만드는 턴 중 재시작·거절 표시·영어 문구·진행 알림·흰 화면·만드는 세션 옆 카드는 #198로 고쳤다. 남은 것: 화면이 직접 부른 호출은 진행 알림을 아직 받지 못한다, 완료 카드의 전역 배치(디자인 백로그), 앱 에이전트 세션도 완료 카드를 띄운다
-- [x] **F** 문서와 호환 — F-1·F-2·F-3과 제품 스펙의 M4(#191). 중개 부분은 #194
+- [x] Decisions finalized and the plan committed (`2f08fc7`)
+- [x] Filed issues for "To confirm separately" 3 and 4 (#142, #143)
+- [ ] **S** Spikes — S-1, S-2, S-4, S-5, S-6 pass, S-8 measured. **S-3 and S-7 are waiting on a Codex login** (the Codex-side behavior is confirmed only from source and types right now)
+- [x] **P** Groundwork — P-1, P-4, P-5, P-6 (#144), P-2 (#150), P-3 (#148)
+- [x] **A** Runtime — A-1 through A-4 and A-6 (#148), A-5 (#151), A-7 (#152), A-8 (#154). Applying decision 3's #92 is also #152
+- [x] **B** Screens — B-2, B-3, B-6, B-7, and the pinned-screen part of B-4 (#150, #154); B-1 and the in-conversation part of B-4 (#187); B-5 (#154, the loop fixed in #190); wrapping the pinned-screen message (#192)
+- [ ] **C** Build loop — the code is done: host-side C-1 through C-4 and C-6 (#155); UI-side new-app button, C-5's composer, C-6's send button, reopening the screen with the new code (#192). **What is left: the dogfooding acceptance criterion (needs a person)**
+- [x] **D** Brokering — D-1 through D-6 (#194). Changed decision 6 to `safe`. Codex's `run_agent` is confirmed only with a fake client, since login has not happened yet. #97 stays open: D-3 built the declaration vocabulary for external apps, but the built-in control app still reads the inbox through `AppHostApi`'s `useInbox` and `useCounts`
+- [x] **E** Handoff (the light pieces) — the secrets screen and RPC; E-3 import and the person's confirmation (arrives off, asks again if `server` or `uses` changes); E-1 a snapshot (the last 5) and revert for a user-folder app, read-only git commits of that folder for a project app; E-4 app links (macOS, through the OS's open event, no deep-link plugin) — #196. E-2 export is outside the scope of decision 9. The end-to-end app link path has to be confirmed by hand in a built app (`tauri dev` does not receive the scheme)
+- [x] **Real-agent pre-check** (2026-09-25, host started from source + web screen + real Claude, a temporary data folder) — the three rows of the manual matrix (built together with a screen, fixed right there, calls the agent in use), the in-conversation screen, and decision 6's `safe` (an app agent's write stops at the approval card even under the person's global bypass) all passed. Of 10 findings, an app agent session's conversation showing twice was fixed in #197 (the record cursor, #79); the run panel, tokens, restarting mid-builder-turn, the rejection indicator, English wording, the progress notification, a blank screen, and the card next to the builder session were fixed in #198. What is left: a call a screen made directly still gets no progress notification, the global placement of the completion card (design backlog), and an app agent session also showing a completion card
+- [x] **F** Documents and compatibility — F-1, F-2, F-3, and the product spec's M4 (#191). The brokering part is #194
