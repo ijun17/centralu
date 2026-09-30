@@ -1,12 +1,14 @@
 /**
- * L3 스모크: 권한 프리셋이 **실제 Claude 세션에서** 의도대로 도는지 관통 검증한다.
+ * L3 smoke test: verifies end-to-end that the permission preset behaves as intended on a **real
+ * Claude session**.
  *
- * 확인하는 것 두 가지 (도그푸딩에서 나온 의심):
- *   1. '자동'이 정말 안 묻는가 — 물으면 프리셋이 프로세스에 안 실린 것이다
- *   2. '보통'은 묻는가 — 안 물으면 사용자의 전역 bypass가 세션으로 새고 있는 것이다
- *      (M0에서 "전역 설정을 세션 단위로 덮어쓸 수 있다"를 확인했고, 그게 유지되는지 본다)
+ * Checks two things (a suspicion raised during dogfooding):
+ *   1. Does "auto" really not ask — if it asks, the preset is not being passed through to the process
+ *   2. Does "normal" ask — if it does not, the user's global bypass is leaking into the session
+ *      (M0 confirmed that "the global setting can be overridden per session"; this checks that it
+ *      still holds)
  *
- * 실행: npx tsx packages/agent-host/scripts/smoke-perm.mts
+ * Run with: npx tsx packages/agent-host/scripts/smoke-perm.mts
  */
 import { mkdtempSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -32,7 +34,7 @@ async function run(preset: PermissionPreset) {
     await new Promise((r) => setTimeout(r, 500))
     if (events.some((e) => e.type === 'approval_request')) break
     if (events.some((e) => e.type === 'error')) break
-    // turn_complete 후에도 파일 쓰기가 끝나길 잠깐 기다린다
+    // Wait a moment after turn_complete for the file write to actually finish
     if (events.some((e) => e.type === 'turn_complete') && existsSync(join(cwd, 'touched.txt'))) break
   }
   const asked = events.filter((e) => e.type === 'approval_request').length

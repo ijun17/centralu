@@ -1,11 +1,13 @@
 /**
- * M1.5 L3 스모크: 실 Claude 세션으로 **재개(FR-10)** 를 관통 검증한다.
+ * M1.5 L3 smoke test: verifies **resume (FR-10)** end-to-end against a real Claude session.
  *
- * S5 — host를 껐다 켜도 같은 대화를 이어간다 (이전 맥락을 기억하는지 실제로 물어본다)
- * S6 — 재개 식별자가 깨지면 조용히 죽지 않고 이유를 알린다
+ * S5 — the same conversation continues even after the host is shut down and restarted (actually
+ *   asks whether it remembers the earlier context)
+ * S6 — if the resume identifier is broken, it fails with a reason instead of dying silently
  *
- * 검증 모델은 haiku (문서의 모델 정책: 검증에 최상위 모델을 쓰지 않는다).
- * 실행: node packages/agent-host/scripts/smoke-resume.mjs
+ * The verification model is haiku (per the docs' model policy: do not use a top-tier model for
+ * verification).
+ * Run with: node packages/agent-host/scripts/smoke-resume.mjs
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
@@ -14,7 +16,7 @@ import { join } from 'node:path'
 import { WebSocket } from 'ws'
 
 const TOKEN = 'smoke-resume'
-const DB = join(mkdtempSync(join(tmpdir(), 'cc-resume-')), 'store.db') // 두 번의 host가 공유하는 저장소
+const DB = join(mkdtempSync(join(tmpdir(), 'cc-resume-')), 'store.db') // The store shared by both host runs
 const CWD = mkdtempSync(join(tmpdir(), 'cc-resume-cwd-'))
 const log = (...a) => console.log('[resume]', ...a)
 
@@ -36,7 +38,7 @@ function startHost() {
             resolve({ host, port: j.port })
           }
         } catch {
-          /* 로그 라인 */
+          /* a log line */
         }
       }
     })
@@ -98,7 +100,7 @@ const check = (ok, label, extra = '') => {
   if (!ok) failures++
 }
 
-// ── 1차 host: 세션을 만들고 기억할 만한 것을 말한다 ──────────────────
+// ── First host run: create a session and say something worth remembering ──────────────────
 const first = await startHost()
 const c1 = connect(first.port)
 await c1.ready
@@ -110,18 +112,19 @@ const session = await c1.call('agents.createSession', {
 await waitFor(c1.events, (e) => e.type === 'turn_complete')
 log('1차 응답:', JSON.stringify(textOf(c1.events).trim().slice(0, 60)))
 
-// SDK는 세션 id를 첫 init 이벤트에서 알려준다 — 생성 응답 시점에는 아직 없을 수 있다.
-// 중요한 것은 '첫 턴이 끝난 뒤에는 반드시 저장돼 있다'는 것 (그래야 재개할 수 있다).
+// The SDK tells us the session id only in the first init event — it may not exist yet at the moment
+// of the create response. What matters is that it is guaranteed to be saved once the first turn
+// ends (otherwise resuming is impossible).
 const afterFirstTurn = (await c1.call('sessions.list', {})).find((s) => s.id === session.id)
 check(!!afterFirstTurn?.externalId, '첫 턴 후 재개 식별자가 저장된다', afterFirstTurn?.externalId ?? '없음')
 
-// ── host 종료 (사용자가 앱을 껐다 켠 상황) ─────────────────────────
+// ── Shut down the host (simulating the user quitting and reopening the app) ─────────────────────────
 c1.ws.close()
 first.host.kill('SIGTERM')
 await new Promise((r) => first.host.once('exit', r))
 log('host 종료됨 — 프로세스는 사라지고 기록만 남았다')
 
-// ── 2차 host: 같은 저장소로 다시 켜고 재개한다 ─────────────────────
+// ── Second host run: start again against the same store and resume ─────────────────
 const second = await startHost()
 const c2 = connect(second.port)
 await c2.ready
@@ -131,11 +134,11 @@ const target = restored.find((s) => s.id === session.id)
 check(!!target, '재시작 후에도 세션이 목록에 남는다')
 check(target?.live === false, '프로세스가 없으므로 live=false로 표시된다', `live=${target?.live}`)
 
-// S6 먼저: 재개 불가 상황이 조용히 죽지 않는지
+// S6 first: does an unresumable situation avoid dying silently
 const broken = await c2.call('agents.resumeSession', { sessionId: 'no-such-session' }).catch((e) => e)
 check(broken instanceof Error, 'S6 없는 세션 재개는 오류로 알린다', broken?.message?.slice(0, 40))
 
-// S5: 진짜 재개
+// S5: the actual resume
 const res = await c2.call('agents.resumeSession', { sessionId: session.id })
 check(res.resumed === true, 'S5 재개 성공', res.reason ?? '')
 

@@ -1,7 +1,9 @@
 /**
- * G3 스모크: 실 Claude 세션으로 host를 관통 검증한다 (WS 클라이언트 → RPC → SDK → 이벤트).
- * 승인 1회 왕복을 포함한다 (M0에서 검증한 권한 오버라이드가 실제 코드에서도 동작하는지).
- * 실행: node packages/agent-host/scripts/smoke.mjs
+ * G3 smoke test: verifies the host end-to-end against a real Claude session (WS client → RPC → SDK
+ * → events).
+ * Includes one approval round trip (checks whether the permission override verified in M0 also
+ * works in the actual code).
+ * Run with: node packages/agent-host/scripts/smoke.mjs
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
@@ -27,7 +29,7 @@ const port = await new Promise((resolve, reject) => {
       try {
         const j = JSON.parse(line)
         if (j.ready) { clearTimeout(t); resolve(j.port) }
-      } catch { /* 로그 라인 무시 */ }
+      } catch { /* ignore log lines */ }
     }
   })
 })
@@ -87,8 +89,9 @@ try {
   })
   log('세션 생성:', session.id)
 
-  // 승인이 필요한 작업 (M0: echo 같은 안전 명령은 자동 승인되므로 파일 쓰기를 시킨다).
-  // 경로를 절대경로로 못박아 모델이 다른 파일을 고르는 흔들림을 없앤다.
+  // Something requiring approval (M0: a safe command like echo gets auto-approved, so a file write
+  // is used instead). The path is pinned as absolute to remove any chance of the model picking a
+  // different file.
   const target = join(cwd, 'smoke.txt')
   await rpc('agents.send', {
     sessionId: session.id,

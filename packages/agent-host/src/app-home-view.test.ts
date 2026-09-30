@@ -18,11 +18,12 @@ import { OriginPorts } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
 
 /**
- * 고정 화면 (M4 B-2) — `apps.openView`·`apps.closeView`를 진짜 RPC 문에서 두드린다.
+ * The fixed view (M4 B-2) — knocks on the real `apps.openView` / `apps.closeView` RPC door.
  *
- * 앱은 런타임 픽스처의 `view` 모드로 진짜 자식 프로세스로 뜬다. 판정은 host의 말이 아니라 앱이 겪은
- * 것(픽스처의 기록: home이 몇 번 불렸나), 실행 기록(누가 어느 도구를 불렀나), 그리고 화면 문서(프록시가
- * 싣는 HTML이 그 앱 프로세스의 것인가)로 한다.
+ * The app comes up as a real child process, in the runtime fixture's `view` mode. Judgment is
+ * based not on what the host says but on what the app actually experienced (the fixture's own
+ * log: how many times was home called), the run record (who called which tool), and the view
+ * document (is the HTML the proxy serves actually from that app's process).
  */
 
 const FIXTURE = fileURLToPath(new URL('./apps/external/test-fixtures/app.mjs', import.meta.url))
@@ -45,7 +46,7 @@ const plant = (id: string, over: Record<string, unknown> = {}) =>
     ...over,
   })
 
-/** 앱이 겪은 것 — `home`이 불린 횟수를 앱 쪽 기록으로 센다 */
+/** What the app actually experienced — counts how many times `home` was called, from the app's own log */
 const homeCalls = (id: string) => {
   const f = join(appLogs, `${id}.jsonl`)
   if (!existsSync(f)) return 0
@@ -128,7 +129,7 @@ afterEach(async () => {
 })
 
 describe('apps.openView', () => {
-  it('home을 화면 호출자로 한 번 부르고, 그 도구가 선언한 화면을 연다 — 답에 AppFrame이 받을 것이 다 있다', async () => {
+  it('calls home once with the view as caller, and opens the view that tool declares — the answer has everything AppFrame needs', async () => {
     plant('slider', { home: 'home' })
     await start()
 
@@ -137,17 +138,18 @@ describe('apps.openView', () => {
     expect(v.instanceId).toMatch(/^[A-Za-z0-9_-]{16,}$/)
     expect(homeCalls('slider')).toBe(1)
 
-    // 기록에는 "화면이 home을 불렀다" — 사람이 눌렀어도 호출자는 화면이다(플랜 "호출 경로는 하나다")
+    // The record shows "the view called home" — even though a person clicked it, the caller is the
+    // view (the plan's "there is one calling path")
     expect((await runs('slider')).map((r) => [r.tool, r.callerKind, r.status, r.id])).toEqual([['home', 'view', 'ok', v.runId]])
 
-    // 인스턴스의 화면은 그 앱 프로세스가 준 문서다
+    // The instance's view is the document that app's process actually served
     const frame = (await rpc('apps.viewFrame', { appId: 'slider', projectId: 'p1', instanceId: v.instanceId, hostOrigin: HOST_ORIGIN })) as { url: string }
     const page = await get(frame.url)
     expect(page.status).toBe(200)
     expect(page.body).toContain(`view from app process ${v.toolResult._meta?.['fixture/served-by']}`)
   })
 
-  it('화면을 선언하지 않은 home, 없는 home, ui://가 아닌 화면은 부르지도 않고 거절하고, 인스턴스를 남기지 않는다', async () => {
+  it('a home that declares no view, a missing home, and a view that is not a ui:// are rejected without even being called, and leave no instance', async () => {
     plant('plain', { home: 'no_screen' })
     plant('nohome')
     plant('missing', { home: 'nope' })
@@ -161,11 +163,11 @@ describe('apps.openView', () => {
     await expect(openView('outside')).rejects.toThrow(/must be a ui:\/\/ URI \(got "https:\/\/evil\.test\/view"\)/)
 
     expect(opened).not.toHaveBeenCalled()
-    // 부르지 않았다 — 기록도 없다
+    // Never called — no record either
     for (const id of ['plain', 'missing', 'outside']) expect(await runs(id)).toEqual([])
   })
 
-  it('에이전트에게만 열린 home은 화면 호출자로 부를 수 없다 — 거절이 기록되고 인스턴스는 없다', async () => {
+  it('a home open only to the agent cannot be called with the view as caller — the rejection is recorded and there is no instance', async () => {
     plant('agenthome', { home: 'agent_home' })
     await start()
     const opened = vi.spyOn(views, 'open')
@@ -175,7 +177,7 @@ describe('apps.openView', () => {
     expect((await runs('agenthome')).map((r) => [r.tool, r.callerKind, r.status])).toEqual([['agent_home', 'view', 'rejected']])
   })
 
-  it('신뢰하지 않은 프로젝트의 앱은 띄우지도 열지도 않는다', async () => {
+  it('an app from an untrusted project is neither started nor opened', async () => {
     trusted = false
     plant('slider', { home: 'home' })
     await start()
@@ -186,7 +188,7 @@ describe('apps.openView', () => {
     expect(homeCalls('slider')).toBe(0)
   })
 
-  it('앱이 실패를 답해도 화면은 연다 — 그 실패를 그리는 것도 화면이다', async () => {
+  it("opens the view even when the app answers with a failure — rendering that failure is also the view's job", async () => {
     plant('grumpy', { home: 'failing_home' })
     await start()
     const v = await openView('grumpy')
@@ -196,7 +198,7 @@ describe('apps.openView', () => {
 })
 
 describe('apps.closeView', () => {
-  it('연 화면은 앱을 붙들고, 닫으면 놓아서 쉬는 앱 내리기가 다시 돈다 — 두 번 닫아도 같다', async () => {
+  it('an open view holds the app open, and closing it releases the app so the idle shutdown runs again — closing twice is the same', async () => {
     plant('slider', { home: 'home' })
     await start({ idleMs: 250 })
     const v = await openView('slider')
@@ -207,7 +209,7 @@ describe('apps.closeView', () => {
     await expect(rpc('apps.closeView', { instanceId: v.instanceId })).resolves.toEqual({ ok: true })
     await until(() => alive(pid), (a) => a === false, 3000)
     expect(rt.list().find((a) => a.appId === 'slider')?.status).toBe('stopped')
-    // 닫힌 인스턴스의 주소는 더 열리지 않는다
+    // A closed instance's address no longer opens
     await expect(rpc('apps.viewFrame', { appId: 'slider', projectId: 'p1', instanceId: v.instanceId, hostOrigin: HOST_ORIGIN })).rejects.toThrow(/not open/)
     await expect(rpc('apps.closeView', { instanceId: v.instanceId })).resolves.toEqual({ ok: true })
   })

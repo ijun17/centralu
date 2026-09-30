@@ -1,12 +1,13 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- 스모크는 host의 raw 프레임을 그대로 훑는다 */
+/* eslint-disable @typescript-eslint/no-explicit-any -- the smoke test reads the host's raw frames directly */
 /**
- * 관통 스모크: **선택지가 화면까지 오고, 답이 모델에게 돌아가는가** (AskUserQuestion).
+ * End-to-end smoke test: **does a choice reach the screen, and does the answer make it back to the
+ * model?** (AskUserQuestion).
  *
- * 표시만 되고 답을 못 보내면 반쪽이다 — 승인 카드가 정확히 그래서 먹통이 됐다.
- * 그러니 여기서 보는 것은 두 가지다: question_request가 오는가, 그리고 답을 보낸 뒤
- * **모델이 그 답을 알고 말하는가.**
+ * Displaying it alone with no way to send an answer is only half the feature — that is exactly how
+ * the approval card once went dead. So there are two things checked here: does question_request
+ * arrive, and once an answer is sent, **does the model know that answer and act on it.**
  *
- * 실행: pnpm smoke:question
+ * Run with: pnpm smoke:question
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -28,7 +29,7 @@ const port: number = await new Promise((res, rej) => {
   host.stdout!.on('data', (d) => {
     for (const line of String(d).split('\n')) {
       if (!line.trim()) continue
-      try { const j = JSON.parse(line); if (j.ready) { clearTimeout(t); res(j.port) } } catch { /* 로그 */ }
+      try { const j = JSON.parse(line); if (j.ready) { clearTimeout(t); res(j.port) } } catch { /* log line */ }
     }
   })
 })
@@ -64,7 +65,7 @@ ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
 await new Promise((r) => setTimeout(r, 300))
 
 const project = await rpc('projects.add', { path: cwd })
-// 'normal'이어야 canUseTool이 붙는다 (auto면 가로챌 자리가 없다)
+// Has to be 'normal' for canUseTool to be attached (with auto there is nowhere to intercept it)
 const s = await rpc('agents.createSession', { projectId: project.id, cwd, tool: 'claude', permissionPreset: 'normal' })
 
 await rpc('agents.send', {
@@ -80,7 +81,7 @@ if (!got || !req) { ws.close(); host.kill(); process.exit(1) }
 const q = req.questions[0]
 console.log(`  질문: ${q.question}`)
 console.log(`  선택지: ${q.options.map((o: Json) => `${o.label}(${o.description})`).join(' · ')}`)
-// 잘림이 이 기능을 죽였다 — 설명이 통째로 살아 있는지 본다
+// Truncation once killed this feature — checks that the description survives whole
 const intact = q.options.every((o: Json) => typeof o.description === 'string' && !o.description.endsWith('…'))
 console.log(`  선택지 설명이 안 잘렸나 ${intact && q.options.length >= 2 ? '✅' : '❌'}`)
 
@@ -100,7 +101,7 @@ const cleared = events.some((e) => e.sessionId === s.id && e.type === 'question_
 console.log(`  카드가 걷혔나 ${cleared ? '✅' : '❌'}`)
 console.log(`  모델이 고른 답을 알고 있나 ${knew ? '✅' : '❌'}`)
 
-// 사라진 질문에 답하면 조용히 성공하면 안 된다
+// Answering a question that has disappeared must not silently succeed
 let toldUs = false
 try {
   await rpc('agents.answerQuestion', { sessionId: s.id, requestId: 'q-없는것', answers: [] })

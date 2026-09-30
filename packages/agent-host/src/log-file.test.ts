@@ -14,13 +14,13 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
-describe('host 로그 파일', () => {
-  it('stderr로 나간 말이 파일에도 남는다', () => {
+describe('the host log file', () => {
+  it('text written to stderr also remains in the file', () => {
     const path = hostLogPath(tmp())
     const stop = teeStderrToFile(path)
     try {
-      // console.error가 결국 부르는 자리를 직접 쓴다 —
-      // vitest는 console을 가로채므로 console.error로는 진짜 경로를 시험하지 못한다
+      // Writes directly to the spot console.error ultimately calls —
+      // vitest intercepts console, so console.error cannot exercise the real path
       process.stderr.write('[agent-host] hello\n')
     } finally {
       stop()
@@ -29,10 +29,11 @@ describe('host 로그 파일', () => {
   })
 
   /*
-   * 파일로 빼돌리기만 하면 터미널로 띄웠을 때 눈앞에서 사라진다 —
-   * 개발 중에는 그게 더 불편하다. 파일은 '또 하나의 청중'이지 대체재가 아니다.
+   * If output is only siphoned off to a file, it disappears from view when launched from a
+   * terminal — which is more inconvenient during development. The file is "one more audience,"
+   * not a replacement.
    */
-  it('원래 stderr도 그대로 흐른다 (가로채지 않는다)', () => {
+  it('the original stderr still flows through as well (not intercepted)', () => {
     const path = hostLogPath(tmp())
     const seen: string[] = []
     const real = process.stderr.write.bind(process.stderr)
@@ -51,7 +52,7 @@ describe('host 로그 파일', () => {
     expect(readFileSync(path, 'utf8')).toContain('보이는가')
   })
 
-  it('넘치면 한 세대만 남기고 밀어낸다 (폴더를 조용히 먹지 않는다)', () => {
+  it('rolls over and keeps only one prior generation once it overflows (does not silently eat up the folder)', () => {
     const path = hostLogPath(tmp())
     writeFileSync(path, 'x'.repeat(100))
     expect(rotateIfLarge(path, 50)).toBe(true)
@@ -59,19 +60,20 @@ describe('host 로그 파일', () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  it('아직 작으면 그대로 둔다', () => {
+  it('leaves it alone while it is still small', () => {
     const path = hostLogPath(tmp())
     writeFileSync(path, 'x'.repeat(10))
     expect(rotateIfLarge(path, MAX_LOG_BYTES)).toBe(false)
     expect(existsSync(`${path}.1`)).toBe(false)
   })
 
-  it('쓰는 도중에 넘쳐도 회전하고 계속 쓴다', () => {
+  it('rolls over even if it overflows mid-write, and keeps writing', () => {
     const path = hostLogPath(tmp())
     const stop = teeStderrToFile(path, 64)
     try {
       for (let i = 0; i < 12; i++) process.stderr.write(`line ${i} ${'y'.repeat(20)}\n`)
-      // 회전 **뒤에도** 계속 적히는지가 핵심이다 — 여기서 멈추면 조용히 눈이 먼다
+      // The key question is whether writing continues **even after** the rollover — stopping here
+      // means going silently blind
       process.stderr.write('after-roll\n')
     } finally {
       stop()
@@ -81,17 +83,18 @@ describe('host 로그 파일', () => {
   })
 
   /*
-   * 회전이 close 뒤 rename에서 실패하면, 예전에는 **닫은 fd 번호**가 그대로 남았다.
-   * OS는 그 번호를 곧 다른 파일(SQLite WAL·pty)에 재발급하므로 다음 writeSync가
-   * 남의 파일에 로그를 쓰는 조용한 오염이 된다. 실패 경로에서도 fd를 비우고
-   * 다시 열어, 그 뒤의 줄이 **여전히 이 로그 파일에** 남는지를 본다.
+   * If a rollover fails during the rename after close, the **closed fd number** used to be kept
+   * around as is. The OS soon reissues that number to a different file (SQLite WAL, a pty), so the
+   * next writeSync silently corrupted someone else's file with log lines. Even on the failure path,
+   * the fd is cleared and reopened, and this checks that subsequent lines **still** end up in this
+   * log file.
    */
-  it('회전이 실패해도 죽은 fd를 붙들지 않고 같은 파일에 계속 쓴다', () => {
+  it('does not hold onto a dead fd when the rollover fails, and keeps writing to the same file', () => {
     const dir = tmp()
     const path = hostLogPath(dir)
     const stop = teeStderrToFile(path, 64)
     try {
-      // rename이 실패하게 만든다 — 디렉토리에 쓰기 권한이 없으면 EACCES
+      // Makes the rename fail — EACCES when the directory has no write permission
       chmodSync(dir, 0o555)
       for (let i = 0; i < 12; i++) process.stderr.write(`line ${i} ${'y'.repeat(20)}\n`)
       process.stderr.write('after-failed-roll\n')
@@ -99,16 +102,17 @@ describe('host 로그 파일', () => {
       chmodSync(dir, 0o755)
       stop()
     }
-    // 회전은 못 했지만(한 파일에 그대로) 로그는 계속 이 파일로 흘렀다
+    // The rollover failed (stayed in one file), but the log kept flowing into this file
     expect(existsSync(`${path}.1`)).toBe(false)
     expect(readFileSync(path, 'utf8')).toContain('after-failed-roll')
   })
 
   /*
-   * "지금 도는 앱이 어느 커밋 빌드냐"에 바이너리 mtime과 커밋 시각을 맞춰 답해야 했다.
-   * 로그가 스스로 말하면 그 추측이 통째로 없어진다.
+   * "Which commit was the running app built from" used to have to be answered by matching the
+   * binary's mtime against commit timestamps. If the log states it outright, that whole guessing
+   * game disappears.
    */
-  it('기동 배너가 빌드·DB·pid를 스스로 말한다', () => {
+  it('the startup banner states the build, DB, and pid on its own', () => {
     const b = startupBanner({ build: 'abc1234', db: '/x/store.db', pid: 42 })
     expect(b).toContain('abc1234')
     expect(b).toContain('/x/store.db')
@@ -127,8 +131,8 @@ describe('host 로그 파일', () => {
  * no trace of having run. The lint rule (`no-console` in eslint.config.js) is the guard on
  * the writing side; this is the guard on the plumbing side.
  */
-describe('stdout은 파일로 새지 않는다', () => {
-  it('teeStderrToFile은 stdout을 건드리지 않는다 — 토큰이 그리로 나간다', () => {
+describe('stdout does not leak into the file', () => {
+  it('teeStderrToFile does not touch stdout — the token goes out that way', () => {
     const path = hostLogPath(tmp())
     const before = process.stdout.write
     const stop = teeStderrToFile(path)

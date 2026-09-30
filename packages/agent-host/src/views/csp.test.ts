@@ -1,8 +1,8 @@
-/** 앱 화면의 CSP 조립 (M4 B-3) — 선언한 곳만, 선언이 없으면 규격의 제한 기본값 */
+/** Assembling the CSP for an app view (M4 B-3) — only what is declared; the spec's restrictive default when nothing is declared */
 import { describe, expect, it } from 'vitest'
 import { allowAttribute, approvedPermissions, buildProxyCsp, buildViewCsp, sanitizeDomains } from './csp.js'
 
-/** 정책 문자열 → 지시문별 값 목록 */
+/** Policy string → list of values per directive */
 function directives(policy: string): Record<string, string[]> {
   return Object.fromEntries(
     policy.split(';').map((d) => {
@@ -13,7 +13,7 @@ function directives(policy: string): Record<string, string[]> {
 }
 
 describe('buildViewCsp', () => {
-  it('선언이 없으면 네트워크·바깥 리소스·중첩 프레임이 모두 막힌다', () => {
+  it('with nothing declared, network, outside resources and nested frames are all blocked', () => {
     const d = directives(buildViewCsp(undefined).policy)
     expect(d['default-src']).toEqual(["'none'"])
     expect(d['connect-src']).toEqual(["'none'"])
@@ -24,17 +24,17 @@ describe('buildViewCsp', () => {
     expect(d['style-src']).toEqual(["'unsafe-inline'"])
     expect(d['img-src']).toEqual(['data:', 'blob:'])
     expect(d['base-uri']).toEqual(["'self'"])
-    // 규격 기본값에도 없는 것들: 'self'(= host 포트)와 eval
+    // Things absent even from the spec's default: 'self' (= the host port) and eval
     const all = Object.values(d).flat()
     expect(all).not.toContain("'unsafe-eval'")
     expect(Object.entries(d).filter(([k, v]) => k !== 'base-uri' && v.includes("'self'"))).toEqual([])
-    // 빈 선언도 선언이 없는 것과 같다
+    // An empty declaration counts the same as no declaration
     expect(buildViewCsp({ connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] }).policy).toBe(
       buildViewCsp(undefined).policy,
     )
   })
 
-  it('선언한 도메인은 그 지시문에만 들어간다', () => {
+  it('a declared domain goes into only that directive', () => {
     const { policy, approved, dropped } = buildViewCsp({
       connectDomains: ['https://api.example.com', 'wss://live.example.com'],
       resourceDomains: ['https://cdn.example.com', 'https://*.fonts.example'],
@@ -55,8 +55,9 @@ describe('buildViewCsp', () => {
   })
 
   /**
-   * 도메인 선언은 도메인만 넓힌다. 정책을 바꾸는 모양(키워드, 체계 전체, `*`, 지시문 끼워 넣기)과
-   * host가 사는 루프백은 선언해도 들어가지 않는다.
+   * A domain declaration only widens domains. Shapes that would change the policy (keywords, an
+   * entire scheme, `*`, smuggling in a directive) and the loopback where the host itself lives are
+   * not admitted even if declared.
    */
   it.each([
     ['*', 'everything'],
@@ -77,7 +78,7 @@ describe('buildViewCsp', () => {
     ['http://0.0.0.0:80', 'the any address'],
     ['ftp://files.example.com', 'a scheme views have no use for'],
     ['api.example.com', 'no scheme'],
-  ])('%j (%s)는 선언해도 들어가지 않는다', (entry) => {
+  ])('%j (%s) is not admitted even if declared', (entry) => {
     for (const key of ['connectDomains', 'resourceDomains', 'frameDomains', 'baseUriDomains'] as const) {
       const { policy, dropped, approved } = buildViewCsp({ [key]: [entry] })
       expect(dropped).toEqual([entry])
@@ -86,7 +87,7 @@ describe('buildViewCsp', () => {
     }
   })
 
-  it('문자열이 아닌 선언과 배열이 아닌 목록은 버린다', () => {
+  it('drops a non-string declaration and a non-array list', () => {
     expect(sanitizeDomains(['https://a.example', 42, null, { x: 1 }])).toEqual({
       kept: ['https://a.example'],
       dropped: ['42', 'null', '{"x":1}'],
@@ -97,7 +98,7 @@ describe('buildViewCsp', () => {
 })
 
 describe('buildProxyCsp', () => {
-  it('앱별 출처의 프록시는 자기 스크립트 해시와 그 앱의 출처만 연다', () => {
+  it("a proxy for a per-app origin opens only its own script hash and that app's origin", () => {
     const d = directives(buildProxyCsp('sha256-abc', 'http://127.0.0.1:23456'))
     expect(d['default-src']).toEqual(["'none'"])
     expect(d['script-src']).toEqual(["'sha256-abc'"])
@@ -106,12 +107,12 @@ describe('buildProxyCsp', () => {
 })
 
 describe('allowAttribute', () => {
-  it('선언한 기능만 ext-apps와 같은 이름으로 넘긴다', () => {
+  it('passes through only the declared features, under the same names as ext-apps', () => {
     expect(allowAttribute(undefined)).toBe('')
     expect(allowAttribute({})).toBe('')
     expect(allowAttribute({ camera: {}, clipboardWrite: {} })).toBe('camera; clipboard-write')
     expect(allowAttribute({ microphone: {}, geolocation: {} } as never)).toBe('microphone; geolocation')
-    // 모르는 기능은 넘기지 않는다
+    // Does not pass through an unknown feature
     expect(allowAttribute({ usb: {}, 'display-capture': {} } as never)).toBe('')
     expect(approvedPermissions({ camera: {}, usb: {} } as never)).toEqual({ camera: {} })
   })

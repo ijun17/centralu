@@ -5,72 +5,83 @@ import type { SessionAppCall, SessionAppsHub } from './sessions/session-apps.js'
 import type { ViewHost } from './views/view-host.js'
 
 /**
- * 대화 안 앱 화면 (M4 B-1) — 세션의 에이전트가 화면이 달린 앱 도구를 부르면, 그 호출 카드 아래에
- * 화면이 선다(플랜 "화면이 뜨는 두 자리"의 1번, 표준의 본래 쓰임).
+ * An app view inside a conversation (M4 B-1) — when a session's agent calls an app tool that has a
+ * view, the view attaches under that call's card (item 1 of the plan's "two places a view is
+ * born," the spec's original intended use).
  *
- * 이 층이 하는 일은 셋이다.
- *   1. 세션의 앱 호출을 듣고(`SessionAppsHub.onCall`), 그 도구가 `_meta.ui.resourceUri`를 선언했으면
- *      화면 인스턴스를 연다(`ViewHost.open` — 연 동안 앱을 붙든다). 호출이 시작될 때 입력을, 끝날 때
- *      결과를 `app_view` 이벤트로 낸다. 화면은 규격대로 tool-input → tool-result(또는 tool-cancelled)를 받는다.
- *   2. **열기 전에 화면이 그 앱의 것인지 본다** (플랜 "사칭 차단"). 도구가 선언한 `ui://`가 그 앱의
- *      `resources/list`에 없으면 열지 않고 거절을 남긴다. 결과가 다른 화면을 가리켜도 같다.
- *   3. 인스턴스를 닫는다 — UI가 말할 때, 세션이 지워질 때, 앱이 사라지거나 더 돌 수 없을 때.
+ * This layer does three things.
+ *   1. Listens for a session's app calls (`SessionAppsHub.onCall`), and if that tool declares
+ *      `_meta.ui.resourceUri`, opens a view instance (`ViewHost.open` — holds the app open while it
+ *      is open). Emits an `app_view` event with the input when the call starts and the result when
+ *      it ends. Per the spec, the view receives tool-input → tool-result (or tool-cancelled).
+ *   2. **Checks that the view belongs to that app before opening it** (the plan's "block
+ *      impersonation"). If the `ui://` the tool declared is not in that app's `resources/list`, it
+ *      is not opened, and a rejection is recorded. The same applies if the result points at a
+ *      different view.
+ *   3. Closes the instance — when the UI says so, when the session is deleted, and when the app
+ *      disappears or can no longer run.
  *
- * 이 층은 호출을 바꾸지 않는다. 화면을 못 열어도(거절, 카드를 못 찾음) 호출은 그대로 돌고 에이전트는
- * 결과를 받는다 — 화면은 사람을 위한 덧붙임이지 호출의 조건이 아니다.
+ * This layer never changes the call. Even when the view fails to open (rejected, no matching card),
+ * the call still runs and the agent still gets its result — the view is an addition for the person,
+ * never a condition of the call.
  *
- * 누가 부른 호출인지는 붙이기(session-apps.ts)가 안다. 어느 카드인지는 어댑터가 알려 주거나 짝지은
- * `callId`다(Claude: 요청의 `_meta`, Codex: 어댑터가 본 호출 시작과 짝짓기). 매니저와 런타임은 이 층을
- * 모른다 — host(main.ts)와 시험이 `attachInlineViews`로 잇는다(app-view-source.ts와 같은 자리).
+ * Who made the call is known by the attachment (session-apps.ts). Which card it belongs to is
+ * either reported by the adapter or matched by `callId` (Claude: the request's `_meta`; Codex:
+ * matched against the call start the adapter observed). The manager and the runtime know nothing
+ * about this layer — the host (main.ts) and the tests wire it in with `attachInlineViews` (the same
+ * arrangement as app-view-source.ts).
  */
 
 type AppViewEvent = Extract<NormalizedEvent, { type: 'app_view' }>
 
 /**
- * 대화 안 화면의 숫자들 (B-1). 기본값이 제품의 값이고, 시험은 줄여서 쓴다.
+ * The numbers for views inside a conversation (B-1). The defaults are the product's values, and
+ * tests use smaller ones.
  *
- * **다시 열기에 드는 것은 host의 메모리에만 둔다.** 화면을 다시 열 때 도구를 다시 부르지 않으려면(부르면
- * 앱의 상태가 또 바뀐다) 그 호출의 입력과 결과가 있어야 한다. 결과는 앱이 준 그대로라 무엇이 들었는지
- * 모르고, 실행 기록(A-6)도 인자를 요약만 남긴다 — 그래서 디스크에 쓰지 않고, 크기를 묶는다. host가
- * 다시 뜨면 사라지고, 그때 자리표시는 "앱 열기"만 준다.
+ * **What reopening needs is kept only in the host's memory.** To reopen a view without calling the
+ * tool again (calling it again would change the app's state again), the input and result of that
+ * call have to exist. The result is the app's own, unexamined, so its contents are unknown, and the
+ * run record (A-6) keeps only a summary of the arguments — so this is never written to disk, and
+ * its size is capped. It disappears when the host restarts, and at that point the placeholder only
+ * offers "open app."
  */
 export type InlineLimits = {
-  /** 한 대화에서 동시에 열어 두는 화면 수 — 넘치면 가장 오래 열린 것부터 닫는다(플랜: 살아 있는 화면은 최근 몇 개) */
+  /** The number of views kept open at once in one conversation — once exceeded, the oldest open one is closed first (the plan: only a handful of live views) */
   livePerSession: number
-  /** 한 대화에서 다시 열 수 있게 들고 있는 호출 수 — 넘치면 오래된 것부터 버린다 */
+  /** The number of calls kept so they can be reopened in one conversation — once exceeded, the oldest is dropped first */
   keptPerSession: number
-  /** 호출 하나의 입력+결과(JSON 글자 수) 상한 — 넘치면 들고 있지 않는다 */
+  /** The cap on one call's input plus result (in JSON character count) — once exceeded, it is not kept */
   keptCallMax: number
-  /** host 전체의 상한 — 넘치면 어느 대화든 오래된 것부터 버린다 */
+  /** The cap across the entire host — once exceeded, the oldest anywhere is dropped first */
   keptTotalMax: number
 }
 
 export const DEFAULT_INLINE_LIMITS: InlineLimits = {
-  // UI가 그려 두는 프레임의 수와 같다 — 넘치는 인스턴스는 앱을 붙들 뿐 보이지 않는다
+  // Matches the number of frames the UI renders — an instance beyond that count holds the app open but is never shown
   livePerSession: APP_VIEWS_LIVE_PER_SESSION,
   keptPerSession: 20,
   keptCallMax: 256 * 1024,
   keptTotalMax: 8 * 1024 * 1024,
 }
 
-/** 대화 안 화면 하나 — 호출 한 번, 카드 하나. 인스턴스는 오고 가도 이 칸은 들고 있는 동안 산다 */
+/** One view inside a conversation — one call, one card. This slot lives on as long as it is kept, even as instances come and go */
 type InlineView = {
   sessionId: string
   callId: string
   ref: AppRef
   tool: string
   uri: string
-  /** 열린 인스턴스. 닫히면 null — 칸은 남는다(다시 열기) */
+  /** The open instance. null once closed — the slot itself remains (for reopening) */
   instanceId: string | null
-  /** 연 순서 — 상한은 가장 오래 **열린** 것부터 닫는다. 다시 열면 새 번호를 받는다 */
+  /** The order it was opened in — the cap closes the oldest **open** one first. Reopening gets a new number */
   openedAt: number
   toolInput: Record<string, unknown>
-  /** 호출의 결말 — 아직 도는 중이면 둘 다 없다 */
+  /** The call's outcome — neither exists while it is still running */
   toolResult: CallToolResult | null
   cancelled: string | null
-  /** 다시 열 수 있는가 — 결말이 너무 컸거나 앱이 사칭했으면 false */
+  /** Whether it can be reopened — false if the outcome was too large or the app impersonated another view */
   kept: boolean
-  /** 들고 있는 크기 (keptTotalMax를 센다) */
+  /** The size being kept (counted against keptTotalMax) */
   bytes: number
 }
 
@@ -78,13 +89,13 @@ export type InlineViewsDeps = {
   rt: ExternalApps
   views: ViewHost
   hub: SessionAppsHub
-  /** 이벤트를 내보내는 길 — host에서는 매니저의 기록·방송(`SessionManager.recordAppView`) */
+  /** The path an event is emitted through — on the host, the manager's record and broadcast (`SessionManager.recordAppView`) */
   emit: (e: AppViewEvent) => void
   log?: (line: string) => void
   limits?: Partial<InlineLimits>
 }
 
-/** 다시 연 화면 — AppFrame이 규격대로 다시 보낼 것(입력, 그리고 결과나 취소) */
+/** A reopened view — what AppFrame resends per the spec (the input, and either the result or a cancellation) */
 export type ReopenedView = {
   instanceId: string
   appId: string
@@ -95,13 +106,13 @@ export type ReopenedView = {
   cancelled?: string
 }
 
-/** 다시 열 수 없다 — 이유가 곧 메시지다(자리표시에 그대로 선다) */
+/** Cannot be reopened — the reason is the message itself (it stands as is in the placeholder) */
 function refuse(message: string): never {
   throw Object.assign(new Error(message), { code: 'internal' })
 }
 
 export class InlineViews {
-  /** 세션 → (카드 id → 화면) */
+  /** session → (card id → view) */
   private bySession = new Map<string, Map<string, InlineView>>()
   private byInstance = new Map<string, InlineView>()
   private stops: (() => void)[]
@@ -124,8 +135,9 @@ export class InlineViews {
   }
 
   /**
-   * UI가 화면을 내렸다(`apps.closeView`). 대화 안 화면이었으면 true — 인스턴스를 닫고 앱을 놓는다.
-   * 그 밖의 인스턴스(고정 화면)는 부른 쪽이 ViewHost에서 닫는다.
+   * The UI took the view down (`apps.closeView`). true if it was a view inside a conversation —
+   * closes the instance and releases the app. Any other instance (a fixed view) is closed by the
+   * caller directly on ViewHost.
    */
   close(instanceId: string): boolean {
     const v = this.byInstance.get(instanceId)
@@ -135,12 +147,15 @@ export class InlineViews {
   }
 
   /**
-   * 접었던 화면을 다시 연다 (RPC `apps.inlineReopen`) — **도구를 다시 부르지 않는다.** 새 인스턴스를 열고,
-   * 들고 있던 입력과 결말을 돌려준다(AppFrame이 규격대로 다시 보낸다). 호출이 아직 돌고 있으면 결말 없이
-   * 돌려주고, 끝나면 `result`·`cancelled`가 평소처럼 온다. 이미 열려 있으면 그 인스턴스다.
+   * Reopens a collapsed view (RPC `apps.inlineReopen`) — **never calls the tool again.** Opens a
+   * new instance and returns the input and outcome that were being kept (AppFrame resends them per
+   * the spec). If the call is still running, it is returned without an outcome, and `result` or
+   * `cancelled` arrives as usual once it finishes. If it is already open, this is that same
+   * instance.
    *
-   * 화면이 그 앱의 것인지 다시 본다 — 접은 사이 앱이 바뀌었을 수 있다. 열면 상한이 다시 걸린다(다른 화면이
-   * 닫힐 수 있다). 다시 열 수 없으면 이유와 함께 실패한다.
+   * Checks again whether the view belongs to that app — the app may have changed while collapsed.
+   * Opening it applies the cap again (a different view may get closed). Fails with a reason if it
+   * cannot be reopened.
    */
   async reopen(sessionId: string, callId: string): Promise<ReopenedView> {
     const v = this.bySession.get(sessionId)?.get(callId)
@@ -148,13 +163,13 @@ export class InlineViews {
     if (!v.instanceId) {
       const gone = this.unavailable(v.ref)
       if (gone) refuse(gone)
-      // 연달아 실패해 멈춘 앱은 스스로 뜨지 않는다 — 화면을 열어도 부를 곳이 없다(다시 시작은 고정 화면의 Restart)
+      // An app stopped after repeated failures does not start on its own — opening the view leaves nowhere to call it (Restart is on the fixed view)
       if (this.deps.rt.list().find((a) => a.appId === v.ref.appId && a.projectId === v.ref.projectId)?.status === 'failed') {
         refuse('This app stopped after failing repeatedly. Restart it, then reopen this view')
       }
       const refusal = await this.refusal(v.ref, v.uri)
       if (refusal) refuse(refusal)
-      // 기다리는 사이 다른 쪽이 먼저 열었을 수 있다
+      // While waiting, another side may have already opened it first
       if (!v.instanceId) {
         let instanceId: string
         try {
@@ -180,9 +195,11 @@ export class InlineViews {
   }
 
   /**
-   * 한 대화에서 들고 있는 화면 (RPC `apps.inlineViews`) — 다시 연 UI가 지난 카드의 자리표시에 "Reopen"을 줄지
-   * 정하는 근거다(`kept`). 열린 인스턴스도 알린다: 다시 연 UI는 그 인스턴스를 모르므로(입력·결과를 다시 보낼
-   * 프레임이 없다) 닫아서 앱을 놓고, 사람이 원하면 다시 연다. 본문은 싣지 않는다 — 다시 열 때 온다.
+   * The views held for one conversation (RPC `apps.inlineViews`) — the basis (`kept`) a reopened UI
+   * uses to decide whether to offer "Reopen" on a past card's placeholder. Also reports an open
+   * instance: since a reopened UI does not know that instance (there is no frame to resend the
+   * input and result to), it is closed and the app released, and reopened again if the person wants
+   * it. No body is carried — it arrives when reopened.
    */
   list(sessionId: string): { callId: string; appId: string; projectId: string | null; tool: string; kept: boolean; instanceId: string | null }[] {
     return [...(this.bySession.get(sessionId)?.values() ?? [])]
@@ -190,7 +207,7 @@ export class InlineViews {
       .map((v) => ({ callId: v.callId, appId: v.ref.appId, projectId: v.ref.projectId, tool: v.tool, kept: v.kept, instanceId: v.instanceId }))
   }
 
-  /** 이 인스턴스가 어느 세션의 어느 카드 화면인가 — 대화 안 화면이 아니면 null */
+  /** Which session and which card this instance's view belongs to — null if it is not a view inside a conversation */
   owner(instanceId: string): { sessionId: string; callId: string; ref: AppRef } | null {
     const v = this.byInstance.get(instanceId)
     return v ? { sessionId: v.sessionId, callId: v.callId, ref: v.ref } : null
@@ -205,9 +222,10 @@ export class InlineViews {
 
   private async onCall(c: SessionAppCall): Promise<void> {
     /*
-     * 화면이 달린 도구인가 — **에이전트가 받는 목록**(model 도구)에서 본다. 앱이 선언한 그대로다. 보통은
-     * 이미 읽은 목록이 있다(에이전트는 목록을 받고 나서 부른다). 없으면 호출이 어차피 앱을 띄우는
-     * 중이라 그 목록을 기다린다.
+     * Does this tool have a view — checked against **the list the agent receives** (the model
+     * tools). Exactly as the app declared it. Usually a list already read exists (the agent calls
+     * only after receiving the list). If not, the call is already in the middle of starting the
+     * app anyway, so that list is waited on.
      */
     const known = this.deps.rt.knownTools(c.ref, 'model') ?? (await this.deps.rt.tools(c.ref, 'model').catch(() => null))
     const def = known?.find((t) => t.name === c.tool)
@@ -233,7 +251,7 @@ export class InlineViews {
     try {
       instanceId = this.deps.views.open(c.ref, ui.uri).instanceId
     } catch (err) {
-      // 그사이 앱이 사라졌다 — 연 것이 없으니 알릴 화면도 없다. 호출의 결말은 에이전트가 받는다
+      // The app disappeared in the meantime — nothing was opened, so there is no view to report. The agent still receives the call's outcome
       this.log(`[apps] ${where}: view not opened — ${(err as Error).message}`)
       return
     }
@@ -254,13 +272,15 @@ export class InlineViews {
     this.track(v)
     this.keep(v)
     this.deps.emit({ ...base, phase: 'open', instanceId, toolInput: c.args })
-    // 살아 있는 화면은 최근 몇 개뿐이다 — 이 화면을 연 뒤에 센다(닫히는 것은 가장 오래 열린 것이다)
+    // Only a handful of live views stay open — counted after this one opens (the one closed is the oldest open one)
     this.capLive(c.sessionId, v)
 
     const o = await c.outcome
     /*
-     * 결과가 **다른 화면**을 가리키면 사칭이다 — 규격의 화면은 도구의 선언에서 오지 결과에서 오지 않는다.
-     * 우리는 결과의 그 칸을 쓰지 않지만, 다른 앱의 화면을 대려는 결과를 그 화면에 그대로 넘기지 않는다.
+     * If the result points at **a different view**, that is impersonation — per the spec, a view
+     * comes from the tool's declaration, not from the result. This never reads that field of the
+     * result, but a result trying to claim another app's view is never passed through to that view
+     * as is either.
      */
     const claimed = o.result ? resultViewUri(o.result) : null
     if (claimed !== null && claimed !== ui.uri) {
@@ -279,11 +299,13 @@ export class InlineViews {
   }
 
   /**
-   * 들고 있는 크기를 다시 재고, 상한 안에 둔다. 들고 있으면 true.
+   * Recomputes the size being kept, and keeps it within the cap. Returns true if it is kept.
    *
-   * 한 호출이 상한을 넘으면 입력·결말을 버리고 다시 열 수 없는 칸으로 둔다(열린 화면은 그대로 산다 —
-   * 이미 받은 것을 화면에서 빼앗지 않는다). 대화별·전체 상한을 넘으면 **열려 있지 않은** 가장 오래된
-   * 칸부터 버린다 — 열린 화면의 칸을 버리면 그 화면이 보낼 말(ui/message)의 주인을 잃는다.
+   * If one call exceeds the cap, its input and outcome are discarded and the slot is left as
+   * unable to be reopened (an already-open view lives on as is — nothing already given to a view is
+   * ever taken back from it). If the per-conversation or total cap is exceeded, the oldest **slot
+   * without an open instance** is dropped first — dropping the slot of an open view would leave the
+   * message it sends (ui/message) with no owner.
    */
   private keep(v: InlineView): boolean {
     this.keptBytes -= v.bytes
@@ -295,7 +317,7 @@ export class InlineViews {
         this.log(`[apps] ${v.ref.appId} ${v.tool}: this call's view is too large to keep for reopening (${bytes} characters)`)
       } else v.bytes = bytes
     }
-    // 들고 있지 않는 칸은 본문을 버린다 — 다시 열 수 없는 칸이 메모리를 쥐고 있을 까닭이 없다
+    // A slot that is not kept discards its body — a slot that can never be reopened has no reason to hold onto memory
     if (!v.kept) {
       v.toolInput = {}
       v.toolResult = null
@@ -316,7 +338,7 @@ export class InlineViews {
     return v.kept && !!this.bySession.get(v.sessionId)?.has(v.callId)
   }
 
-  /** 칸을 버린다(인스턴스는 부르는 쪽이 먼저 닫는다) */
+  /** Drops the slot (the instance is closed by the caller first) */
   private forget(v: InlineView): void {
     const mine = this.bySession.get(v.sessionId)
     if (mine?.get(v.callId) !== v) return
@@ -327,8 +349,9 @@ export class InlineViews {
   }
 
   /**
-   * 한 대화의 살아 있는 화면을 상한 안에 둔다 — 가장 오래 열린 것부터 닫고 알린다(`closed`). UI는 그 화면에
-   * teardown을 보낸 뒤 자리표시로 접는다. 방금 연 화면은 닫지 않는다.
+   * Keeps one conversation's live views within the cap — closes and reports (`closed`) the oldest
+   * open one first. The UI sends that view a teardown and collapses it into a placeholder. The view
+   * just opened is never the one closed.
    */
   private capLive(sessionId: string, keep: InlineView): void {
     const open = [...(this.bySession.get(sessionId)?.values() ?? [])].filter((x) => x.instanceId).sort((a, b) => a.openedAt - b.openedAt)
@@ -350,9 +373,11 @@ export class InlineViews {
   }
 
   /**
-   * 이 화면이 이 앱의 것인가 — 앱이 내놓은 리소스 목록에 그 `ui://`가 있어야 한다. 문서는 어차피
-   * 인스턴스의 앱에서만 읽지만(ViewHost), 남의 이름을 댄 선언은 여기서 끊고 이유를 남긴다: 앱을 만드는
-   * 사람은 왜 화면이 안 뜨는지 알아야 한다. 리소스 템플릿은 받지 않는다(v1).
+   * Does this view belong to this app — its `ui://` has to be in the resource list that app
+   * serves. The document is only ever read from the instance's own app anyway (ViewHost), but a
+   * declaration claiming someone else's name is cut off here with a recorded reason: the person
+   * building the app needs to know why the view is not opening. A resource template is not
+   * accepted (v1).
    */
   private async refusal(ref: AppRef, uri: string): Promise<string | null> {
     let listed: { uri: string }[]
@@ -379,7 +404,7 @@ export class InlineViews {
     if (v.instanceId) this.byInstance.set(v.instanceId, v)
   }
 
-  /** 인스턴스를 닫는다(앱을 놓는다). 기록은 남긴다. 두 번 불러도 한 번 닫는다 */
+  /** Closes the instance (releases the app). The record remains. Calling this twice still closes it once */
   private shut(v: InlineView): void {
     if (!v.instanceId) return
     this.byInstance.delete(v.instanceId)
@@ -388,21 +413,23 @@ export class InlineViews {
   }
 
   /**
-   * 이 앱의 화면을 띄울 수 없는 까닭 — 앱이 사라졌거나, 그 프로젝트를 더 믿지 않거나, 매니페스트가 깨졌다.
-   * 화면의 HTML도 그 앱의 코드라서 셋 모두 화면을 닫고 다시 열지 않는다(고정 화면 B-2와 같은 규칙). 죽었거나
-   * 멈춘 앱은 여기 없다 — 화면의 다음 호출이 앱을 다시 띄운다. 이유는 화면에 그대로 서므로 사람의 말로 적는다.
+   * The reason this app's view cannot be rendered — the app disappeared, its project is no longer
+   * trusted, or its manifest is broken. Since a view's HTML is also that app's code, all three cases
+   * close the view and never reopen it (the same rule as the fixed view, B-2). A crashed or stopped
+   * app is not one of these — the view's next call restarts the app. The reason is written in plain
+   * language, since it stands as is in the view.
    */
   private unavailable(ref: AppRef): string | null {
     const info = this.deps.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
     if (!info) return 'This app was removed'
     if (info.status === 'untrusted') return "This app's project is no longer trusted"
-    // 가져온 앱이 확인을 기다린다 (E-3) — 켠 뒤 무엇을 돌리는지가 바뀌었으면 화면의 HTML도 사람이 다시 보기 전의 코드다
+    // An imported app waiting for review (E-3) — if what runs after enabling it changed, the view's HTML is also code from before the person reviewed it again
     if (info.status === 'unconfirmed') return info.error ?? 'This imported app is not enabled'
     if (info.status === 'invalid') return `This app's manifest is invalid: ${info.error ?? 'unknown error'}`
     return null
   }
 
-  /** 세션이 지워졌다 — 그 세션의 화면을 모두 닫고 잊는다. 알릴 대화가 없다 */
+  /** A session was deleted — closes and forgets all of that session's views. There is no conversation left to notify */
   private dropSession(sessionId: string): void {
     const mine = this.bySession.get(sessionId)
     if (!mine) return
@@ -414,9 +441,10 @@ export class InlineViews {
   }
 
   /**
-   * 앱이 사라졌거나 더 돌 수 없다 — 열린 화면을 닫고 이유를 알린다. 화면의 HTML도 그 앱의 코드라서,
-   * 신뢰를 잃은 프로젝트의 화면을 계속 띄우지 않는다(고정 화면 B-2와 같은 규칙). 죽었거나 멈춘 앱은
-   * 닫지 않는다 — 화면의 다음 호출이 앱을 다시 띄운다.
+   * The app disappeared or can no longer run — closes any open view and reports the reason. Since
+   * a view's HTML is also that app's code, the view of a project that lost trust is never kept
+   * rendered (the same rule as the fixed view, B-2). A crashed or stopped app is not closed —
+   * the view's next call restarts the app.
    */
   private recheckApps(): void {
     if (this.byInstance.size === 0) return
@@ -438,7 +466,7 @@ export class InlineViews {
   }
 }
 
-/** JSON으로 쓴 길이 — 들고 있는 크기를 재는 자다. 못 쓰는 값은 무한으로 친다(들고 있지 않는다) */
+/** The length written as JSON — the ruler used to measure the size being kept. An unwritable value counts as infinite (never kept) */
 function jsonLength(v: unknown): number {
   try {
     return JSON.stringify(v)?.length ?? 0
@@ -447,7 +475,7 @@ function jsonLength(v: unknown): number {
   }
 }
 
-/** 결과가 가리키는 화면 (`_meta.ui.resourceUri`, 옛 모양 `_meta["ui/resourceUri"]`) — 없으면 null */
+/** The view the result points at (`_meta.ui.resourceUri`, or the old shape `_meta["ui/resourceUri"]`) — null if absent */
 function resultViewUri(result: CallToolResult): string | null {
   const meta = result._meta as { ui?: { resourceUri?: unknown }; 'ui/resourceUri'?: unknown } | undefined
   const raw = meta?.ui?.resourceUri ?? meta?.['ui/resourceUri']
@@ -455,8 +483,9 @@ function resultViewUri(result: CallToolResult): string | null {
 }
 
 /**
- * host의 이음새 — main.ts와 시험이 같은 함수로 잇는다. 매니저가 가진 붙이기(hub)에서 호출을 듣고,
- * 이벤트는 매니저의 기록·방송 길로 낸다. 런타임을 매니저에 붙인(`useExternalApps`) 뒤에 부른다.
+ * The host's seam — main.ts and the tests wire this in with the same function. Listens for calls
+ * on the manager's own attachment (hub), and emits events through the manager's record and
+ * broadcast path. Call this after the runtime has been attached to the manager (`useExternalApps`).
  */
 export function attachInlineViews(
   mgr: { sessionAppsHub(): SessionAppsHub | null; recordAppView(e: AppViewEvent): void },

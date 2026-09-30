@@ -2,33 +2,39 @@ import { createServer, type RequestListener, type Server } from 'node:http'
 import { randomInt } from 'node:crypto'
 
 /**
- * 앱별 출처의 포트 (M4 B-3, 스파이크 S-1).
+ * Per-app origin ports (M4 B-3, spike S-1).
  *
- * 불투명 출처에서 깨지는 앱(공개 앱 86개 중 5개, S-8)에는 자기 출처를 준다.
- * `http://127.0.0.1:<그 앱의 포트>`다. WebKit은 브라우저 저장소를 **출처별로** 남긴다. 그래서
- * 포트는 두 가지를 지켜야 한다.
+ * An app that breaks under an opaque origin (5 of 86 public apps, S-8) is given its own origin:
+ * `http://127.0.0.1:<that app's port>`. WebKit keeps browser storage **separated by origin**, so
+ * the port has to preserve two properties.
  *
- *   고정   같은 앱은 실행이 바뀌어도 같은 포트를 받는다. 아니면 앱의 저장소가 실행마다 사라진다.
- *   불변   한 번 어떤 앱에 준 포트는 **다른 앱에 다시 주지 않는다.** 앱이 지워져도 마찬가지다.
- *          그 출처의 저장소는 WebKit에 남아 있어서, 포트를 다시 주면 새 앱이 남의 저장소를 읽는다.
+ *   Fixed     The same app gets the same port across runs. Otherwise the app's storage disappears
+ *             on every run.
+ *   Immutable A port once given to an app is **never given to a different app again**, even after
+ *             that app is deleted. That origin's storage remains in WebKit, so reissuing the port
+ *             would let a new app read someone else's storage.
  *
- * 그래서 배정표(열쇠 → 포트)와 은퇴 목록을 host 쪽에 저장하고, 표는 줄지 않는다.
+ * So the assignment table (key → port) and the retired list are stored on the host side, and the
+ * table never shrinks.
  *
- * 포트 범위는 20000–32767이다. macOS의 임시 포트(49152–65535)와 Linux의 임시 포트
- * (32768–60999)를 피한다. 거기서 고르면 OS가 바깥 연결에 같은 번호를 잠깐씩 빌려 쓴다.
+ * The port range is 20000–32767. This avoids macOS's ephemeral port range (49152–65535) and
+ * Linux's (32768–60999) — picking from there would risk the OS briefly lending the same number to
+ * an outgoing connection.
  *
- * 배정된 포트를 다른 프로그램이 쥐고 있으면 그 앱을 새 포트로 옮기고, 옛 포트는 은퇴시킨다.
- * 앱은 그 출처의 저장소를 잃는다. 대신 화면은 뜬다. 상태는 서버에 두는 것이 이 설계의 원칙이라
- * 저장소를 잃는 쪽이 화면이 영영 안 뜨는 쪽보다 작다. 옮긴 사실은 host 로그에 남긴다.
+ * If another program is holding an assigned port, that app is moved to a new port and the old one
+ * is retired. The app loses that origin's storage. In exchange, the view comes up. Keeping state on
+ * the server is a principle of this design, so losing storage is a smaller cost than the view never
+ * coming up at all. The fact of the move is recorded in the host log.
  *
- * 쿠키는 이 격리 밖이다. 최상위가 `http://127.0.0.1`인 개발·웹 모드에서는 모든 포트가 쿠키를
- * 함께 쓴다(S-1 실측: Chromium, WebKit, WKWebView). localStorage·IndexedDB는 나뉜다.
+ * Cookies sit outside this isolation. In dev and web modes, where the top level is
+ * `http://127.0.0.1`, all ports share cookies (measured for S-1: Chromium, WebKit, WKWebView).
+ * localStorage and IndexedDB are separated.
  */
 
 export type PortBook = {
-  /** 열쇠 → 포트. 열쇠는 `<프로젝트 id 또는 _user>/<앱 id>` (views/view-host.ts) */
+  /** key → port. The key is `<project id or _user>/<app id>` (views/view-host.ts) */
   assigned: Record<string, number>
-  /** 쥐여 있어서 떠난 포트들. 누구에게도 다시 주지 않는다 */
+  /** Ports that left because they were held by someone else. Never given to anyone again */
   retired: number[]
 }
 
@@ -39,7 +45,7 @@ export interface PortBookStore {
 
 export type OriginPortsOptions = {
   range?: readonly [number, number]
-  /** 시험이 순서를 정할 수 있게. 기본은 범위 안의 균등 난수 */
+  /** Lets tests control the order. Defaults to a uniform random number within the range */
   pick?: (lo: number, hi: number) => number
   attempts?: number
   log?: (line: string) => void
@@ -47,7 +53,7 @@ export type OriginPortsOptions = {
 
 export const ORIGIN_PORT_RANGE = [20000, 32767] as const
 
-/** 저장된 값은 파일이다 — 모양이 틀린 부분은 버리고 읽는다 (버린 포트가 재배정될 위험보다 기동 실패가 크다) */
+/** The stored value is a file — malformed parts are dropped on read (a failure to start is a bigger risk than a dropped port being reassigned) */
 function readBook(raw: PortBook | null): PortBook {
   const book: PortBook = { assigned: {}, retired: [] }
   if (!raw || typeof raw !== 'object') return book
@@ -63,7 +69,7 @@ function listenOn(port: number, handler: RequestListener): Promise<Server> {
   return new Promise((resolve, reject) => {
     const server = createServer(handler)
     server.once('error', reject)
-    // 루프백에만 묶는다 — 같은 네트워크의 다른 기계는 이 화면에 닿을 이유가 없다
+    // Binds only to loopback — another machine on the same network has no reason to reach this view
     server.listen(port, '127.0.0.1', () => {
       server.removeListener('error', reject)
       resolve(server)
@@ -87,15 +93,16 @@ export class OriginPorts {
     this.log = opts.log ?? ((line) => console.error(line))
   }
 
-  /** 지금 배정표 (시험·진단용). 저장소의 값을 그대로 읽는다 */
+  /** The current assignment table (for tests and diagnostics). Reads the store's value as is */
   book(): PortBook {
     return readBook(this.store.load())
   }
 
   /**
-   * 이 열쇠의 포트에 처리기를 건 서버를 띄운다. 처음 보는 열쇠면 포트를 새로 정해 **적은 뒤에**
-   * 돌려준다. 적지 못하면 서버를 닫고 던진다. 적히지 않은 포트를 쓰면 다음 실행에서 그 포트가
-   * 다른 앱에 갈 수 있다.
+   * Starts a server with the handler attached at this key's port. For a key seen for the first
+   * time, a new port is chosen and returned only **after it is recorded**. If it cannot be
+   * recorded, the server is closed and this throws. Using an unrecorded port risks that port going
+   * to a different app on the next run.
    */
   async serve(key: string, handler: RequestListener): Promise<{ port: number; server: Server }> {
     const book = this.book()
@@ -123,7 +130,7 @@ export class OriginPorts {
         server = await listenOn(port, handler)
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e
-        // 지금 쥐인 포트는 누구의 것도 아니다 — 이번 시도에서만 건너뛴다
+        // A port currently held belongs to no one — it is only skipped for this attempt
         taken.add(port)
         continue
       }

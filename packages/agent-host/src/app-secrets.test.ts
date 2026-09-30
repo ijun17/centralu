@@ -15,16 +15,19 @@ import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
 
 /**
- * 비밀 칸 (M4 E) — 사람이 넣은 값이 **host의 어디에도 새지 않는가**, 그리고 앱은 그 값을 받는가.
+ * The secrets field (M4 E) — does a value the person enters **leak nowhere inside the host**, and
+ * does the app receive it?
  *
- * 진짜 RPC 문(`createRpcHandler`), 진짜 저장소의 실행 기록(`storeRunLedger`), 진짜 앱 프로세스(env-app.mjs). 값이 지날 수
- * 있는 자리를 모두 모아 글자로 뒤진다: 앱의 로그 파일, 실행 기록(인자·오류·남긴 실패), 오류 묶음, 목록, 방송, host의
- * 콘솔, RPC의 답과 거절 문구. 앱은 일부러 값을 흘린다(뜰 때 표준에러, 실패 문구, 인자) — 흘리지 않는 앱으로는 가리는
- * 쪽을 시험할 수 없다.
+ * A real RPC door (`createRpcHandler`), a real run record from the store (`storeRunLedger`), a
+ * real app process (env-app.mjs). Every place a value could pass through is collected and searched
+ * as text: the app's log file, the run record (arguments, errors, a failure it left behind), error
+ * bundles, the list, broadcasts, the host's console, and RPC answers and rejection messages. The
+ * app deliberately leaks the value (into stderr on startup, into a failure message, into an
+ * argument) — redaction cannot be tested with an app that never leaks it.
  */
 
 const APP = fileURLToPath(new URL('./apps/external/test-fixtures/env-app.mjs', import.meta.url))
-/** 넣을 값 — 4자 이상이라 가림의 대상이다(짧은 값은 가리지 않는다, secrets.ts) */
+/** The value to enter — 4 characters or longer, so it is subject to redaction (short values are not redacted, see secrets.ts) */
 const VALUE = 'sk-live-6f1d2c9a8b7e'
 
 let root = ''
@@ -67,7 +70,7 @@ function make(timing: Record<string, number> = {}) {
     emitChanged: (r) => changedRefs.push(r),
   })
   rt.refresh()
-  // host의 main과 같은 이음새 — 목록이 달라질 때마다 방송한다
+  // The same seam as the host's main — broadcasts whenever the list changes
   onExternalAppListChanged(rt, () => {
     broadcasts++
     events.push({ type: 'external_apps_changed' })
@@ -85,7 +88,7 @@ beforeEach(() => {
   broadcasts = 0
   changedRefs = []
   consoleText = []
-  // host의 콘솔도 뒤진다 — 값이 `[apps] …` 줄에 섞여 나가면 host.log에 남는다
+  // The host's console is searched too — if the value slips into a `[apps] …` line, it ends up in host.log
   for (const m of ['error', 'log', 'warn'] as const) {
     vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void consoleText.push(a.map(String).join(' ')))
   }
@@ -98,8 +101,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('있음·없음은 보이고, 값은 보이지 않는다', () => {
-  it('선언한 비밀이 비어 있으면 목록이 "없음"으로 말하고, 넣으면 "있음"이 되며 방송된다 — 값은 목록 어디에도 없다', async () => {
+describe('set or unset is visible, but the value is not', () => {
+  it('the list says "not set" while a declared secret is empty, and says "set" once entered, broadcasting the change — the value is nowhere in the list', async () => {
     plant([], ['API_KEY', 'OTHER_TOKEN'])
     make()
     expect(info().secrets).toEqual([
@@ -114,27 +117,27 @@ describe('있음·없음은 보이고, 값은 보이지 않는다', () => {
     ])
     await until(() => broadcasts, (n) => n > before)
     expect(JSON.stringify(rt.list())).not.toContain(VALUE)
-    // 지우면 다시 없음이다
+    // Clearing it returns it to not set
     await setSecret('API_KEY', null)
     expect(info().secrets?.[0]).toEqual({ name: 'API_KEY', set: false })
   })
 
-  it('비밀을 선언하지 않은 앱에는 칸이 없다', () => {
+  it('an app that declares no secrets has no field for it', () => {
     plant([], [])
     make()
     expect(info().secrets).toBeUndefined()
   })
 })
 
-describe('넣은 값은 다음 기동에 앱의 환경이 된다', () => {
-  it('떠 있던 앱은 내려가고, 다음 부름이 새 값으로 띄운다 — 바꾸기와 지우기도 같다', async () => {
+describe("an entered value becomes the app's environment on its next startup", () => {
+  it('a running app shuts down, and the next call starts it with the new value — changing it and clearing it behave the same way', async () => {
     plant([])
     make()
     const first = await envSeen()
     expect(first.text).toContain('API_KEY=(none)')
 
     await setSecret('API_KEY', VALUE)
-    // 진행 중인 호출이 없으니 곧바로 내려간다 — 다음 부름이 새 프로세스를 띄운다
+    // No call is in progress, so it shuts down immediately — the next call starts a new process
     const second = await envSeen()
     expect(second.text).toContain(`API_KEY=${VALUE}`)
     expect(second.pid).not.toBe(first.pid)
@@ -146,7 +149,7 @@ describe('넣은 값은 다음 기동에 앱의 환경이 된다', () => {
     expect((await envSeen()).text).toContain('API_KEY=(none)')
   })
 
-  it('키가 없어 연달아 못 떠 멈춘 앱도, 값을 넣으면 다시 뜬다', async () => {
+  it('an app stopped after repeated failures to start for lack of a key also starts up again once the value is entered', async () => {
     plant(['--require-env'])
     make({ maxFailures: 1 })
     const refused = await rt.call(ref, 'env', {}, { kind: 'session', sessionId: 's1' })
@@ -158,12 +161,12 @@ describe('넣은 값은 다음 기동에 앱의 환경이 된다', () => {
     expect((await envSeen()).text).toContain(`API_KEY=${VALUE}`)
   })
 
-  it('선언하지 않은 이름과 빈 값은 받지 않는다 — 거절 문구에도 값이 없다', async () => {
+  it('rejects an undeclared name and an empty value — the rejection message carries no value either', async () => {
     plant([])
     make()
     await expect(setSecret('NOT_DECLARED', VALUE)).rejects.toThrow('This app does not declare a secret named NOT_DECLARED')
     await expect(setSecret('API_KEY', '')).rejects.toThrow('Enter a value, or clear the secret instead')
-    // 너무 긴 값은 RPC의 모양 검사가 먼저 막는다 — 그 문구에도 값이 없다
+    // A value that is too long is blocked first by the RPC's shape check — that message carries no value either
     const long = VALUE.repeat(1000)
     const err = await setSecret('API_KEY', long).then(
       () => null,
@@ -181,12 +184,12 @@ describe('넣은 값은 다음 기동에 앱의 환경이 된다', () => {
   })
 })
 
-describe('값은 host의 어디에도 남지 않는다', () => {
-  it('앱이 값을 표준에러·실패 문구·인자로 흘려도 로그·실행 기록·오류 묶음·목록·방송·콘솔·RPC의 답에 이름만 남는다', async () => {
+describe('the value is left nowhere inside the host', () => {
+  it('even when the app leaks the value into stderr, a failure message, or an argument, only the name remains in the log, run record, error bundles, list, broadcasts, console, and RPC answer', async () => {
     plant(['--leak'])
     make()
     const reply = await setSecret('API_KEY', VALUE)
-    // 앱은 값을 받았다 — 받지 못한 앱으로는 가림을 시험할 수 없다
+    // The app received the value — redaction cannot be tested with an app that never receives it
     expect((await envSeen()).text).toContain(VALUE)
     await rt.call(ref, 'echo', { text: `the key is ${VALUE}` }, { kind: 'view' })
     await rt.call(ref, 'leak_fail', {}, { kind: 'session', sessionId: 's1' })
@@ -204,12 +207,12 @@ describe('값은 host의 어디에도 남지 않는다', () => {
       'setSecret reply': JSON.stringify(reply),
     }
     for (const [where, text] of Object.entries(places)) expect(text, where).not.toContain(VALUE)
-    // 이름으로 가려져 있다 — 흘린 자리가 사라진 것이 아니라 이름이 섰다
+    // Redacted by name — the place it leaked is not erased, a name stands in its place
     expect(places['app log']).toContain('[redacted:API_KEY]')
     expect(places['run records']).toContain('[redacted:API_KEY]')
     expect(places['error bundles']).toContain('[redacted:API_KEY]')
 
-    // 값이 사는 곳은 이 파일 하나, 권한 0600이다
+    // The one place the value lives is this file, with mode 0600
     const file = join(dataRoot, SECRETS_FILE)
     expect(readFileSync(file, 'utf8')).toContain(VALUE)
     expect(statSync(file).mode & 0o777).toBe(0o600)

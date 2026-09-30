@@ -1,15 +1,16 @@
 /**
- * F-0: agent-host를 배포 가능한 형태로 묶는다.
+ * F-0: bundles agent-host into a shippable form.
  *
- * 방식 결정(F-0a): **시스템 Node 실행**.
- *   Node SEA는 better-sqlite3(네이티브 애드온) 때문에 `.node` 별도 동봉 + 주입 후 재서명이 필요해
- *   도그푸딩 대비 비용이 과하다. 배포 대상이 넓어지면 이 파일만 바꿔 SEA로 전환한다.
+ * Approach decision (F-0a): **run on the system Node**.
+ *   Node SEA would require bundling `.node` separately plus re-signing after injection, because of
+ *   better-sqlite3 (a native addon) — too much cost for what dogfooding needs. If the deployment
+ *   target broadens later, only this file needs to change to switch to SEA.
  *
- * 산출물 (apps/desktop/src-tauri/resources/host/):
- *   main.mjs                     — 번들된 host (better-sqlite3만 external)
- *   schema.sql                   — store가 산출물 옆에서 찾는다
- *   codex-orchestrator-bridge.mjs — codex가 node로 직접 띄운다 (번들 안 함)
- *   node_modules/better-sqlite3  — 네이티브 애드온 (필요한 파일만)
+ * Output (apps/desktop/src-tauri/resources/host/):
+ *   main.mjs                     — the bundled host (only better-sqlite3 kept external)
+ *   schema.sql                   — the store looks for this next to the bundle
+ *   codex-orchestrator-bridge.mjs — codex launches this directly with node (not bundled)
+ *   node_modules/better-sqlite3  — the native addon (only the files needed)
  */
 import { build } from 'esbuild'
 import { execFileSync } from 'node:child_process'
@@ -25,13 +26,14 @@ const OUT = join(ROOT, 'apps/desktop/src-tauri/resources/host')
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
 
-// 1) JS 번들 — 네이티브 애드온은 묶을 수 없으므로 external
+// 1) JS bundle — native addons cannot be bundled, so they are kept external
 /**
- * **어느 커밋의 빌드인지 산출물이 스스로 말하게 한다.**
+ * **Makes the build output state which commit it came from, on its own.**
  *
- * 도그푸딩에서 "지금 도는 앱이 어느 커밋이냐"에 답하려고 바이너리 mtime과 커밋 시각을
- * 맞춰 봐야 했다 — 추측이고, 다시 빌드하면 틀어진다. 기동 로그 첫 줄에 박아 둔다.
- * 깃이 없거나 실패해도 빌드는 계속된다 ('unknown'이 빌드 실패보다 낫다).
+ * During dogfooding, answering "which commit is the running app" required matching the binary's
+ * mtime against commit times — a guess, and one that breaks the moment it is rebuilt. Embedded in
+ * the first line of the startup log instead. The build continues even if git is absent or fails
+ * ('unknown' is better than a failed build).
  */
 function buildId() {
   try {
@@ -51,7 +53,7 @@ await build({
   target: 'node22',
   format: 'esm',
   external: ['better-sqlite3', 'node-pty'],
-  // 워크스페이스 별칭을 소스로 해석 (빌드 산출물 없이 바로 번들)
+  // Resolves the workspace alias to source (bundles directly, without a build step)
   alias: {
     '@cc/protocol': join(ROOT, 'packages/protocol/src/index.ts'),
   },
@@ -59,33 +61,36 @@ await build({
     __CC_BUILD__: JSON.stringify(buildId()),
   },
   banner: {
-    // ESM 번들에서 CJS 의존(better-sqlite3)을 require로 불러올 수 있게 한다
+    // Lets the ESM bundle load a CJS dependency (better-sqlite3) via require
     js: "import { createRequire as __cr } from 'node:module';const require = __cr(import.meta.url);",
   },
   logLevel: 'warning',
 })
 
-// 2) 스키마 동봉 — store.ts가 산출물 옆에서 먼저 찾는다
+// 2) Bundle the schema — store.ts checks next to the build output first
 cpSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(OUT, 'schema.sql'))
 /*
- * Codex 오케스트레이터의 stdio 다리.
- * codex가 `node <경로>`로 직접 띄우므로 번들하지 않고 **파일 그대로** 옆에 둔다.
+ * The stdio bridge for the Codex orchestrator.
+ * Since codex launches it directly with `node <path>`, it is kept **as a plain file** rather than
+ * being bundled.
  */
 cpSync(
   join(ROOT, 'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs'),
   join(OUT, 'codex-orchestrator-bridge.mjs'),
 )
 /*
- * 앱 템플릿 (M4 C-1) — 새 앱을 만들 때 펼치는 틀. `scaffold.ts`가 산출물 옆(`app-template/`)에서 찾는다.
+ * The app template (M4 C-1) — the scaffold expanded when a new app is created. `scaffold.ts` looks
+ * for it next to the build output (`app-template/`).
  *
- * 런타임(`runtime/`)은 커밋된 생성물이다. **싣기 전에 소스와 바이트까지 같은지 본다** — 런타임 소스를
- * 고치고 다시 만들기를 잊은 채 배포하면, 그 뒤로 만드는 모든 앱이 옛 런타임을 받는다. 앱 폴더에
- * 커밋되는 파일이라 나중에 조용히 고칠 길도 없다.
+ * The runtime (`runtime/`) is a committed generated file. **Before shipping, it is checked to match
+ * its source byte for byte** — shipping after editing the runtime source but forgetting to
+ * regenerate it would mean every app created afterward gets the old runtime. Since this file gets
+ * committed into the app's own folder, there is no way to quietly fix it later either.
  */
 execFileSync(process.execPath, [join(ROOT, 'packages/agent-host/scripts/build-app-runtime.mjs'), '--check'], { stdio: 'inherit' })
 cpSync(join(ROOT, 'packages/agent-host/app-template'), join(OUT, 'app-template'), { recursive: true })
 
-// 3) 네이티브 애드온 — 이 플랫폼 prebuild만 골라 담는다 (26MB 전체 복사 회피)
+// 3) Native addon — picks out only this platform's prebuild (avoids copying all 26MB)
 const pkgJson = require.resolve('better-sqlite3/package.json')
 const src = dirname(pkgJson)
 const dest = join(OUT, 'node_modules/better-sqlite3')
@@ -101,12 +106,12 @@ if (!existsSync(prebuildSrc)) {
 mkdirSync(join(dest, 'prebuilds'), { recursive: true })
 cpSync(prebuildSrc, join(dest, 'prebuilds', prebuild))
 
-// bindings 탐색이 build/Release 경로도 보므로 함께 둔다 (로더 구현에 따라 달라지는 것 방어)
+// The bindings lookup also checks the build/Release path, so it is placed there too (a defense against loader implementation differences)
 mkdirSync(join(dest, 'build/Release'), { recursive: true })
 cpSync(prebuildSrc, join(dest, 'build/Release/better_sqlite3.node'))
 
-// 3-2) 터미널용 PTY — 역시 네이티브 애드온이라 함께 담는다.
-//      node-pty는 N-API 방식이라 Node 버전이 달라도 같은 prebuild가 동작한다.
+// 3-2) PTY for the terminal — also a native addon, so it is bundled the same way.
+//      node-pty uses N-API, so the same prebuild works across Node versions.
 const ptyPkg = require.resolve('node-pty/package.json')
 const ptySrc = dirname(ptyPkg)
 const ptyDest = join(OUT, 'node_modules/node-pty')
@@ -147,17 +152,18 @@ if (!ptyNativeDir) {
   )
 }
 mkdirSync(join(ptyDest, ptyNativeDir), { recursive: true })
-// 파일을 하나씩 고른다. `build/Release`는 node-gyp의 중간 산출물(obj.target 등)까지
-// 안고 있어서, 통째로 복사하면 번들에 수십 MB의 오브젝트 파일이 딸려 들어간다.
+// Files are picked one by one. `build/Release` also holds node-gyp's intermediate output
+// (obj.target and the like), so copying it whole would drag tens of megabytes of object files into
+// the bundle.
 for (const file of ['pty.node', 'spawn-helper']) {
   const from = join(ptySrc, ptyNativeDir, file)
   if (existsSync(from)) cpSync(from, join(ptyDest, ptyNativeDir, file))
 }
 
 /**
- * spawn-helper는 **실행 파일**이다. 압축을 풀거나 복사하는 과정에서 +x가 날아가면
- * 셸이 뜨지 않고 `posix_spawnp failed`만 남는다 (실제로 겪었고, 원인을 찾는 데 시간을 썼다).
- * 복사한 뒤 반드시 실행 권한을 다시 준다.
+ * spawn-helper is an **executable**. If the +x bit is lost while extracting or copying, the shell
+ * does not start, and only `posix_spawnp failed` is left behind (we actually hit this, and spent
+ * real time tracking down the cause). The execute permission is always reset after copying.
  *
  * This has to follow whichever directory won above: node-pty resolves the helper as
  * `<the dir the module loaded from>/spawn-helper` (lib/unixTerminal.js), so guarding
@@ -167,8 +173,9 @@ for (const file of ['pty.node', 'spawn-helper']) {
 const helper = join(ptyDest, ptyNativeDir, 'spawn-helper')
 if (existsSync(helper)) {
   chmodSync(helper, 0o755)
-  // 빌드 시점에 확인한다 — 실행 권한이 없으면 배포 앱에서 터미널이 통째로 죽는다.
-  // 이건 테스트로 잡기 어렵고(번들이 있어야 한다) 증상은 원인을 가리키지 않는다.
+  // Checked at build time — without the execute permission, the terminal is entirely dead in the
+  // packaged app. This is hard to catch with a test (it needs the bundle to exist), and the
+  // symptom does not point at the cause.
   const mode = statSync(helper).mode
   if (!(mode & 0o111)) {
     throw new Error(`spawn-helper에 실행 권한이 없습니다: ${helper} — 터미널이 뜨지 않습니다`)

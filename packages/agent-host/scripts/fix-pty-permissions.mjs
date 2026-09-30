@@ -1,11 +1,12 @@
 /**
- * node-pty의 spawn-helper에 실행 권한을 세운다.
+ * Sets the execute permission on node-pty's spawn-helper.
  *
- * 이 파일은 실행 파일인데, 패키지 매니저가 풀어놓을 때 +x가 빠지는 경우가 있다
- * (pnpm의 prebuild 추출에서 실제로 겪었다). 그러면 셸이 뜨지 않고
- * `posix_spawnp failed`만 남아서, 터미널이 통째로 안 되는데 원인은 안 보인다.
+ * This file is an executable, but the package manager sometimes drops the +x bit when it
+ * extracts the package (we actually hit this with pnpm's prebuild extraction). When that happens
+ * the shell does not start, only `posix_spawnp failed` is left behind, and the terminal is
+ * entirely broken with no visible cause.
  *
- * 설치 후 자동 실행된다 (postinstall).
+ * Runs automatically after install (postinstall).
  */
 import { chmodSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -21,5 +22,5 @@ try {
     console.log(`[node-pty] spawn-helper 실행 권한 확인: ${helper}`)
   }
 } catch {
-  // node-pty가 없는 환경(웹 전용 CI 등)에서는 조용히 넘어간다
+  // Silently skip in environments without node-pty (a web-only CI, for example)
 }

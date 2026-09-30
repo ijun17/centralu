@@ -4,19 +4,19 @@ import { EventLog } from './event-log.js'
 
 const ev = (text: string): NormalizedEvent => ({ type: 'message_delta', sessionId: 's1', role: 'assistant', text })
 
-describe('EventLog: 재연결 복원 (T3-1 완료 기준)', () => {
-  it('seq를 1부터 단조 증가로 부여한다', () => {
+describe('EventLog: reconnect restoration (T3-1 done criteria)', () => {
+  it('assigns seq as a monotonic increase starting from 1', () => {
     const log = new EventLog()
     expect(log.append(ev('a')).seq).toBe(1)
     expect(log.append(ev('b')).seq).toBe(2)
     expect(log.currentSeq).toBe(2)
   })
 
-  it('연결→이벤트 N개→끊김→afterSeq 재접속→유실분만 수신', () => {
+  it('connect → N events → disconnect → reconnect at afterSeq → receives only what was missed', () => {
     const log = new EventLog()
     log.append(ev('1'))
-    log.append(ev('2')) // 여기까지 UI가 받았다고 가정
-    log.append(ev('3')) // UI 끊긴 동안 발생
+    log.append(ev('2')) // assume the UI received up to here
+    log.append(ev('3')) // happened while the UI was disconnected
     log.append(ev('4'))
 
     const { events, resyncRequired } = log.since(2)
@@ -25,46 +25,48 @@ describe('EventLog: 재연결 복원 (T3-1 완료 기준)', () => {
     expect((events[0]!.event as { text: string }).text).toBe('3')
   })
 
-  it('최신까지 받았으면 빈 배열', () => {
+  it('an empty array when already caught up to the latest', () => {
     const log = new EventLog()
     log.append(ev('1'))
     expect(log.since(1)).toEqual({ events: [], resyncRequired: false })
   })
 
-  it('afterSeq 0이면 버퍼 전체를 준다 (첫 연결)', () => {
+  it('afterSeq 0 gives the whole buffer (first connection)', () => {
     const log = new EventLog()
     log.append(ev('1'))
     log.append(ev('2'))
     expect(log.since(0).events.map((e) => e.seq)).toEqual([1, 2])
   })
 
-  it('버퍼를 넘어간 지점 요청은 resyncRequired', () => {
+  it('a request past the edge of the buffer gets resyncRequired', () => {
     const log = new EventLog(3)
     for (let i = 0; i < 10; i++) log.append(ev(String(i)))
-    expect(log.oldestSeq).toBe(8) // 8,9,10만 남음
+    expect(log.oldestSeq).toBe(8) // only 8, 9, 10 remain
     const r = log.since(2)
     expect(r.resyncRequired).toBe(true)
     expect(r.events).toEqual([])
   })
 
-  it('오래 끊겼다가 첫 연결처럼 붙어도 유실을 알린다', () => {
+  it('signals loss even when it reconnects like a first connection after a long disconnect', () => {
     const log = new EventLog(2)
     for (let i = 0; i < 5; i++) log.append(ev(String(i)))
     expect(log.since(0).resyncRequired).toBe(true)
   })
 
   /*
-   * #173: host가 같은 주소로 다시 뜨면 번호가 처음부터 매겨진다. 옛 클라이언트가 옛 번호를 들고 오면, 빈 목록만 주고
-   * 재동기화를 요구하지 않던 동안 새 host의 번호가 옛 값을 넘을 때까지 아무것도 재생되지 않았다.
+   * #173: when the host comes back up at the same address, numbering starts over from scratch. If
+   * an old client shows up with an old number, previously it was given only an empty list without
+   * being told to resync, and nothing was replayed until the new host's numbering passed the old
+   * value.
    */
-  it('매긴 적 없는 번호를 들고 오면(host가 다시 떴다) 재동기화를 요구한다', () => {
+  it('requires a resync when a number it never assigned shows up (the host came back up)', () => {
     const log = new EventLog()
     for (let i = 0; i < 3; i++) log.append(ev(String(i)))
     expect(log.since(5000)).toEqual({ events: [], resyncRequired: true })
     expect(log.since(3)).toEqual({ events: [], resyncRequired: false })
   })
 
-  it('용량을 넘으면 오래된 것부터 버린다', () => {
+  it('discards the oldest first once capacity is exceeded', () => {
     const log = new EventLog(3)
     for (let i = 0; i < 5; i++) log.append(ev(String(i)))
     expect(log.since(4).events.map((e) => e.seq)).toEqual([5])

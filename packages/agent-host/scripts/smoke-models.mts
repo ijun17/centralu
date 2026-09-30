@@ -1,8 +1,9 @@
 /**
- * 실측: 두 도구가 정말 모델 목록을 주는가.
+ * Measured: do both tools actually return a model list?
  *
- * UI에서 "기본"만 보인다는 신고가 있었는데, 원인이 어댑터인지 RPC인지 UI인지
- * 화면만 봐서는 알 수 없다. 어댑터를 직접 불러 어느 층에서 끊기는지 가른다.
+ * There was a report that only "default" shows up in the UI, but looking at the screen alone
+ * cannot tell whether the cause is the adapter, the RPC layer, or the UI. Calls the adapter
+ * directly to tell which layer the break is at.
  */
 import { ClaudeAdapter } from '../src/adapters/claude/index.js'
 import { CodexAdapter } from '../src/adapters/codex/index.js'
@@ -17,7 +18,7 @@ async function tryClaude() {
   } catch (e) {
     console.log('세션 없이: 실패 —', (e as Error).message)
   }
-  // 세션을 하나 띄우고 다시
+  // Start a session and try again
   const h = await a.createSession(
     { sessionId: 'smoke', cwd, permissionPreset: 'auto' },
     () => {},

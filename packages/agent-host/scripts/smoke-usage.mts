@@ -1,8 +1,8 @@
 /**
- * L3 스모크: 사용량이 **실제 두 도구에서** 같은 모양으로 나오는지 관통 검증한다.
- * 구독 한도만 다룬다 — 크레딧은 읽지 않는다.
+ * L3 smoke test: verifies end-to-end that usage comes out in the same shape from **both real
+ * tools**. Covers only subscription limits — does not read credits.
  *
- * 실행: npx tsx packages/agent-host/scripts/smoke-usage.mts
+ * Run with: npx tsx packages/agent-host/scripts/smoke-usage.mts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,7 +24,7 @@ const show = (name: string, s: UsageSnapshot) => {
   console.log('  크레딧 정보 안 섞였나:', !leaked.includes('credit') ? 'O' : 'X')
 }
 
-// claude는 살아 있는 세션이 있어야 물어볼 수 있다
+// claude can only be queried while a live session exists
 const cwd = mkdtempSync(join(tmpdir(), 'cc-usage-'))
 const ca = new ClaudeAdapter()
 const h = await ca.createSession({ sessionId: 'u1', cwd, permissionPreset: 'auto' }, () => {})

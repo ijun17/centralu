@@ -1,15 +1,16 @@
 /**
- * L3 스모크: 남은 프로세스 찾기·멈추기 (사용자 요청 2026-09-07).
+ * L3 smoke test: finding and stopping stray processes (requested by the user, 2026-09-07).
  *
- * 단위 시험(strays.test.ts)은 **고르는 규칙**을 값으로 본다. 여기서는 진짜 프로세스를
- * 두 개 띄워 **ps·lsof가 이 기계에서 실제로 무엇을 답하는지**를 본다 — 이 기능의 위험은
- * 규칙이 아니라 도구 출력에 있다 (실측: lsof는 심볼릭 링크를 푼 경로를 답해서, 뿌리를
- * 안 풀면 같은 폴더인데 못 알아본다).
+ * The unit test (strays.test.ts) checks the **selection rule** as a value. Here, two real
+ * processes are actually started to see **what ps and lsof really answer on this machine** — the
+ * risk in this feature is not in the rule but in the tool output (measured: lsof answers with the
+ * symlink-resolved path, so without resolving the root, the same folder goes unrecognized).
  *
- *   1. 에이전트가 남긴 모양 — 중간 셸이 끝나 ppid=1, 제어 터미널 없음 → **잡혀야 한다**
- *   2. 사람이 터미널에서 띄운 것 — tty 있음 → **안 잡혀야 한다**
+ *   1. The shape an agent leaves behind — the intermediate shell exits, so ppid=1, no controlling
+ *      terminal → **must be caught**
+ *   2. Something a person started from a terminal — has a tty → **must not be caught**
  *
- * 실행: pnpm smoke:strays
+ * Run with: pnpm smoke:strays
  */
 import { spawn, execSync } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
@@ -24,7 +25,8 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch
 
 const root = mkdtempSync(join(tmpdir(), 'cc-stray-'))
 const pidfile = join(root, 'pid')
-// 중간 셸이 즉시 끝나 node가 init에게 입양된다 (에이전트 bash 도구가 만드는 모양)
+// The intermediate shell exits immediately, so node gets adopted by init (the shape the agent's
+// bash tool produces)
 const sh = spawn('/bin/sh', ['-c', `node -e 'require("fs").writeFileSync("${pidfile}", String(process.pid));setInterval(()=>{},1e3)' &`], {
   cwd: root, stdio: 'ignore', detached: true,
 })
@@ -52,7 +54,7 @@ const cleanup = (pid: number) => {
   try {
     process.kill(pid, 'SIGKILL')
   } catch {
-    // 이미 죽었다 — 치우려던 목적은 이뤄졌다
+    // Already dead — the point of cleaning up is achieved either way
   }
 }
 cleanup(mine)

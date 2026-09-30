@@ -4,20 +4,22 @@ import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 /**
- * GUI 앱의 PATH를 **사용자의 실제 PATH**로 맞춘다.
+ * Aligns the GUI app's PATH with **the user's actual PATH**.
  *
- * **왜 필요한가 (실측):** macOS에서 `.app`으로 실행하면 로그인 셸의 PATH를 물려받지 못해
- * `/usr/bin:/bin:/usr/sbin:/sbin`만 들어온다. 그래서 `claude`·`codex`가 "설치되지 않음"으로
- * 잡히고 세션 생성 다이얼로그의 시작 버튼이 아무 반응도 하지 않는 것처럼 보였다.
+ * **Why this is needed (measured):** launching as a `.app` on macOS does not inherit the login
+ * shell's PATH, so only `/usr/bin:/bin:/usr/sbin:/sbin` comes through. As a result, `claude` and
+ * `codex` were detected as "not installed," and the Start button in the create-session dialog
+ * appeared to do nothing at all.
  *
- * **어떻게:** 정적 경로 목록으로는 부족하다 — 에이전트 도구는 homebrew뿐 아니라 npm -g,
- * nvm, volta, mise, asdf, 수동 설치 등 어디에나 있을 수 있다.
- * 그래서 **사용자의 로그인 셸을 한 번 실행해 진짜 PATH를 물어본다.** 셸 설정(.zshrc 등)에
- * 무엇이 적혀 있든 그대로 반영된다.
- * 실패하거나 느리면 아래 정적 후보로 폴백한다 (아예 못 찾는 것보다는 낫다).
+ * **How:** a static list of paths is not enough — an agent tool could be anywhere: not just
+ * Homebrew, but npm -g, nvm, volta, mise, asdf, or a manual install.
+ * So **the user's login shell is run once to ask for the real PATH.** Whatever is written in the
+ * shell config (.zshrc, etc.) is reflected exactly.
+ * If that fails or is slow, it falls back to the static candidates below (better than finding
+ * nothing at all).
  */
 
-/** 셸을 못 쓸 때의 폴백. 흔한 설치 위치만 */
+/** The fallback for when the shell cannot be used. Only common install locations */
 const FALLBACK = [
   '/opt/homebrew/bin',
   '/usr/local/bin',
@@ -29,7 +31,7 @@ const FALLBACK = [
   join(homedir(), 'Library/pnpm'),
 ]
 
-/** 로그인 셸에게 PATH를 묻는다. 대화형(-i)이어야 .zshrc의 nvm/mise 초기화까지 반영된다 */
+/** Asks the login shell for PATH. It has to be interactive (-i) for .zshrc's nvm/mise init to take effect */
 function loginShellPath(): string[] {
   const shell = process.env.SHELL
   if (!shell || !existsSync(shell)) return []
@@ -37,14 +39,14 @@ function loginShellPath(): string[] {
     const out = execFileSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
       encoding: 'utf8',
       timeout: 3000,
-      // SIGTERM을 무시하는 셸이 있어 SIGKILL로 확실히 끊는다 —
-      // 여기서 멈추면 host가 ready를 못 찍고 앱이 통째로 기동 실패한다
+      // Some shells ignore SIGTERM, so SIGKILL is used to guarantee it is cut off —
+      // if this hangs, the host never reaches ready and the whole app fails to start
       killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'ignore'],
-      // 셸 초기화 스크립트가 대화형 프롬프트를 띄우지 않도록
+      // So that a shell init script does not pop up an interactive prompt
       env: { ...process.env, TERM: 'dumb', CI: '1' },
     })
-    // 셸 설정이 뭔가를 출력할 수 있으므로 표식이 붙은 줄만 고른다
+    // The shell config might print something else, so only the marked line is picked out
     const line = out.split('\n').find((l) => l.startsWith('__CC_PATH__:'))
     return line ? line.slice('__CC_PATH__:'.length).split(delimiter).filter(Boolean) : []
   } catch {
@@ -53,19 +55,20 @@ function loginShellPath(): string[] {
 }
 
 /**
- * PATH를 보강하고 결과를 돌려준다. 호스트 기동 시 한 번만 호출한다.
- * 터미널에서 `pnpm host`로 띄울 때는 이미 제대로 된 PATH가 있으므로 사실상 무해하다.
+ * Augments PATH and returns the result. Called exactly once at host startup.
+ * When launched from a terminal with `pnpm host`, PATH is already correct, so this is effectively
+ * a no-op.
  */
 /**
- * 로그인 셸 탐색 결과 캐시.
+ * Cache of the login shell PATH lookup result.
  *
- * loginShellPath()는 셸을 통째로 띄우므로 한 번에 1초 안팎이 든다.
- * 터미널을 열 때마다 부르면 그때마다 그만큼 멈춘다 (실측: 터미널 생성이 1~4초).
- * 프로세스가 사는 동안 PATH가 달라질 일은 없으므로 한 번만 묻는다.
+ * loginShellPath() launches the whole shell, so it costs around a second each time. Calling it
+ * every time a terminal is opened would stall by that much every time (measured: terminal creation
+ * takes 1 to 4 seconds). PATH cannot change while the process is alive, so it is asked only once.
  */
 let cachedShellPath: string[] | null = null
 
-/** 테스트에서 탐색을 다시 하게 만든다 */
+/** Forces the lookup to run again in tests */
 export function __resetToolPathCache(): void {
   cachedShellPath = null
 }
@@ -78,7 +81,7 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
   const source = fromShell.length > 0 ? 'shell' : 'fallback'
   const candidates = fromShell.length > 0 ? fromShell : FALLBACK.filter((p) => existsSync(p))
 
-  // 셸이 준 목록 자체에 중복이 있을 수 있다 — 순서를 지키며 한 번씩만 남긴다
+  // The shell's own list might have duplicates — preserve order and keep each entry only once
   const merged = [...new Set([...current, ...candidates])]
   if (merged.length === current.length) return { path: process.env.PATH ?? '', source: 'unchanged' }
 
@@ -87,8 +90,8 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
 }
 
 /**
- * 도구의 실제 경로를 찾는다 (`which`와 같은 일).
- * 어디에 설치됐는지 사용자에게 보여줄 수 있어야 "왜 못 찾지"를 스스로 풀 수 있다.
+ * Finds a tool's actual path (the same job as `which`).
+ * Being able to show the user where it is installed is what lets them work out "why can it not be found" on their own.
  */
 export function whichTool(name: string): string | null {
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {

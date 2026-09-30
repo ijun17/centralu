@@ -1,24 +1,30 @@
 /**
- * M4 C-1: 앱 템플릿이 들고 다니는 런타임을 만든다 — `node server.mjs`가 `npm install` 없이 뜨는 이유다.
+ * M4 C-1: builds the runtime the app template carries — the reason `node server.mjs` comes up with
+ * no `npm install`.
  *
- *   pnpm build:app-runtime            다시 만들어 app-template/runtime/에 쓴다
- *   pnpm build:app-runtime --check    새로 만든 것이 커밋된 것과 바이트까지 같은지만 본다 (테스트가 부른다)
+ *   pnpm build:app-runtime            rebuilds and writes to app-template/runtime/
+ *   pnpm build:app-runtime --check    only checks that a fresh build matches the committed one byte
+ *                                     for byte (called by the tests)
  *
- * 산출물 (packages/agent-host/app-template/runtime/):
- *   centralu-app-runtime.mjs       서버 SDK v2 + zod + MCP Apps 서버 도우미 + `centralu` (ESM, 압축)
- *   centralu-app-runtime.mjs.map   위의 소스맵 — 압축한 런타임 안의 스택을 읽을 수 있게 (S-6)
- *   mcp-app.js                     화면 쪽 브리지(ext-apps `App`) — 화면 HTML에 끼워 넣는다
- *   THIRD_PARTY_LICENSES.txt       묶어 넣은 모든 것의 라이선스 원문
+ * Output (packages/agent-host/app-template/runtime/):
+ *   centralu-app-runtime.mjs       server SDK v2 + zod + MCP Apps server helpers + `centralu` (ESM, minified)
+ *   centralu-app-runtime.mjs.map   the source map for the above — so a stack inside the minified runtime is readable (S-6)
+ *   mcp-app.js                     the view-side bridge (ext-apps `App`) — embedded into view HTML
+ *   THIRD_PARTY_LICENSES.txt       the full license text for everything bundled in
  *
- * **같은 입력이면 같은 바이트가 나온다.** 앱마다 이 파일들이 커밋되므로(프로젝트 앱은 저장소에 산다),
- * 빌드할 때마다 달라지면 아무것도 안 바꾼 Centralu 업데이트가 모든 앱에 변경을 만든다. 그래서 시각을
- * 싣지 않고, 소스맵의 경로를 이 기계의 폴더 배치(pnpm 저장소 해시)와 무관한 이름으로 바꾸고, 판을 못 박는다.
+ * **The same input produces the same bytes.** These files are committed into every app (a project
+ * app lives in the repository), so if a build produced different bytes each time, a Centralu
+ * update that changed nothing would still touch every app. So no timestamp is embedded, source map
+ * paths are rewritten to names independent of this machine's folder layout (the pnpm store hash),
+ * and versions are pinned.
  *
- * **판은 PINS가 정한다.** 설치된 판이 다르면 멈춘다 — 잠금 파일이 조용히 올린 판이 모든 앱의 런타임을
- * 바꾸면 안 된다. 올리는 것은 이 표를 고치는 커밋으로 한다.
+ * **PINS decides the version.** If the installed version differs, this stops — a version silently
+ * bumped by the lockfile must never change every app's runtime. Bumping it happens through a
+ * commit that edits this table on purpose.
  *
- * **MIT만 받는다.** 앱 폴더는 사용자의 저장소에 커밋되고 팀에 나뉜다 — 그 안에 든 제3자 코드의 조건이
- * 사용자의 저장소 조건이 된다. MIT가 아닌 것이 끼어들면 멈추고 이름을 댄다.
+ * **Only MIT is accepted.** An app folder is committed into the user's repository and shared with
+ * their team — the terms of any third-party code inside it become the terms of the user's own
+ * repository. If anything not MIT sneaks in, this stops and names it.
  */
 import { build, version as esbuildVersion } from 'esbuild'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -33,7 +39,7 @@ const ROOT = resolve(PKG, '../..')
 const SRC = join(PKG, 'app-runtime', 'src')
 const DEST = join(PKG, 'app-template', 'runtime')
 
-/** 묶어 넣는 것과 묶는 도구의 판 — 바꾸려면 여기를 고친다 */
+/** Versions of what gets bundled and of the bundler itself — change these here to bump */
 export const PINS = {
   esbuild: '0.28.2',
   '@modelcontextprotocol/server': '2.1.0',
@@ -61,14 +67,16 @@ function fail(msg) {
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'))
 
 /**
- * `from` 패키지가 들인 `name`의 폴더 — **들이는 쪽의 자리만** 본다: `from` 안의 node_modules와, `from`을 담은
- * node_modules(pnpm은 들인 것을 그 옆에 링크한다 — `.pnpm/<패키지>@<판>/node_modules/`). 워크스페이스 패키지인
- * agent-host는 자기 node_modules뿐이다. esbuild가 import를 푸는 자리도 여기다 — 가져오는 파일에서 위로 올라가다
- * 처음 닿는 곳.
+ * The folder of `name` as imported by the `from` package — checks **only the importer's own spot**:
+ * the node_modules inside `from`, and the node_modules holding `from` itself (pnpm links a
+ * dependency right next to its importer — `.pnpm/<package>@<version>/node_modules/`). For the
+ * workspace package agent-host, that is only its own node_modules. This is also exactly where
+ * esbuild resolves an import — walking up from the importing file to the first match.
  *
- * 그 밖은 보지 않는다: 조상 폴더의 node_modules, NODE_PATH, 전역 폴더. 거기서만 찾히는 것은 설치의 우연(pnpm이
- * 숨겨 끌어올린 `node_modules/.pnpm/node_modules`)이거나 이 기계의 사정이다. `require.resolve('<이름>/package.json')`도
- * 쓰지 않는다 — package.json을 exports에 싣지 않은 패키지(ext-apps)가 있다.
+ * Nowhere else is checked: an ancestor folder's node_modules, NODE_PATH, a global folder. Anything
+ * findable only there is either an accident of installation (pnpm's hidden hoisted
+ * `node_modules/.pnpm/node_modules`) or specific to this machine. `require.resolve('<name>/package.json')`
+ * is not used either — some packages (ext-apps) do not list package.json in their exports.
  */
 function dependencyOf(from, name) {
   const places = [join(from, 'node_modules')]
@@ -79,21 +87,27 @@ function dependencyOf(from, name) {
 }
 
 /**
- * 설치된 판이 PINS와 같은가 — 다르면 멈춘다.
+ * Whether the installed version matches PINS — stops if it does not.
  *
- * **묶이는 그것을 본다.** agent-host에서 시작해 들인 것을 따라가며(dependencies·peerDependencies, agent-host는
- * devDependencies까지) PINS의 패키지를 **들이는 쪽의 자리에서** 찾는다(dependencyOf). 들이는 쪽이 여럿이면 모두
- * 본다 — core는 server·client·ext-apps가 들이고, 그 가운데 한 곳이라도 다른 판이면 그 판도 묶인다. 들인다고 적었는데
- * 그 옆에 없으면(선택 peer가 아니면) 멈춘다: esbuild가 끌어올린 자리에서 무엇이든 가져갈 것이기 때문이다.
+ * **Checks the thing that actually gets bundled.** Starting from agent-host and following what it
+ * imports (dependencies and peerDependencies; devDependencies too for agent-host), each PINS
+ * package is looked up **at its importer's own spot** (dependencyOf). If there are several
+ * importers, all of them are checked — core is imported by server, client, and ext-apps, and if
+ * even one of them has a different version, that version is what gets bundled. If a package is
+ * declared as a dependency but is not found beside its importer (and is not an optional peer), this
+ * stops: esbuild would pick up whatever it finds at whatever spot it hoists to.
  *
- * 예전에는 `createRequire(agent-host).resolve.paths()`를 차례로 돌며 처음 찾힌 것 하나를 읽었다. 그 목록은 조상
- * 폴더 다음에 NODE_PATH와 전역 폴더까지 돈다. pnpm이 띄운 vitest는 NODE_PATH에 끌어올린 폴더를 싣고, 이 검사를
- * 부르는 테스트(app-template.test.ts)의 자식이 그것을 물려받는다. agent-host는 core를 직접 들이지 않으므로 그
- * 자리에 닿았고, 다른 워크스페이스 패키지가 core 2.0.0을 들이자 검사는 2.0.0을 읽고 멈췄다 — 묶이는 것은 server
- * 옆의 2.1.0인데(m4-docs 실측, 2026-09-25). 끌어올림은 설치의 우연이라, 거기에 기댄 판정은 워크스페이스의 다른
- * 곳이 바뀔 때마다 뒤집힌다.
+ * This used to walk `createRequire(agent-host).resolve.paths()` in order and read the first match.
+ * That list continues past ancestor folders into NODE_PATH and global folders. vitest launched by
+ * pnpm puts a hoisted folder in NODE_PATH, and a child process of the test that calls this check
+ * (app-template.test.ts) inherits it. Since agent-host does not import core directly, it landed on
+ * that spot, and once a different workspace package imported core 2.0.0, the check read 2.0.0 and
+ * stopped — while what actually gets bundled is the 2.1.0 sitting beside server (measured in
+ * m4-docs, 2026-09-25). Hoisting is an accident of installation, so a judgment resting on it flips
+ * every time something unrelated elsewhere in the workspace changes.
  *
- * esbuild는 묶이는 것이 아니라 묶는 도구다 — 지금 이 스크립트가 부르는 그것에게 판을 묻는다.
+ * esbuild is the bundler, not something that gets bundled — its version is asked directly from the
+ * copy this script itself is calling right now.
  */
 function checkPins() {
   const wrong = []
@@ -125,7 +139,7 @@ function checkPins() {
   if (wrong.length) fail(`installed versions differ from PINS — update PINS on purpose, not by accident:\n  ${wrong.join('\n  ')}`)
 }
 
-/** node_modules 안의 파일 → 그 패키지의 폴더 (pnpm의 `.pnpm/<해시>/node_modules/<이름>`도 같은 규칙이다) */
+/** A file inside node_modules → that package's folder (pnpm's `.pnpm/<hash>/node_modules/<name>` follows the same rule) */
 function packageDirOf(absPath) {
   const i = absPath.lastIndexOf(`${sep}node_modules${sep}`)
   if (i < 0) return null
@@ -135,14 +149,17 @@ function packageDirOf(absPath) {
 }
 
 /**
- * 소스맵의 경로를 이 기계와 무관한 이름으로. `vendored/<패키지>@<판>/<파일>`, 우리 것은 `vendored/centralu/<파일>`.
- * 원래 경로는 출력 폴더에서 pnpm 저장소까지의 상대 경로라, 폴더 배치가 다르면 같은 빌드가 다른 바이트가 된다.
+ * Rewrites a source map path to a name independent of this machine. `vendored/<package>@<version>/<file>`;
+ * our own code is `vendored/centralu/<file>`. The original path is relative from the output folder
+ * to the pnpm store, so a different folder layout would turn an identical build into different
+ * bytes.
  */
 function canonicalSource(absPath) {
   const pkgDir = packageDirOf(absPath)
   /*
-   * 패키지의 dist가 자기 소스맵을 싣고 있으면 esbuild는 그 원본(TS 소스)까지 거슬러 간다 — 스택이 더
-   * 잘 읽히는 쪽이라 그대로 둔다. 그 원본은 디스크에 없으므로(`core-internal/src/…`) 판 없이 이름만 붙인다.
+   * If a package's dist carries its own source map, esbuild traces back to the original (its TS
+   * source) — left as is, since the stack reads better that way. That original does not exist on
+   * disk (`core-internal/src/…`), so it is only named, with no version attached.
    */
   if (pkgDir && !existsSync(join(pkgDir, 'package.json'))) {
     const i = absPath.lastIndexOf(`${sep}node_modules${sep}`)
@@ -168,7 +185,7 @@ async function buildInto(outDir) {
     minify: true,
     sourcemap: 'linked',
     sourcesContent: false,
-    legalComments: 'none', // 라이선스 원문은 THIRD_PARTY_LICENSES.txt에 모은다
+    legalComments: 'none', // The full license text is collected in THIRD_PARTY_LICENSES.txt instead
     banner: { js: HEADER },
     metafile: true,
     logLevel: 'warning',
@@ -188,8 +205,9 @@ async function buildInto(outDir) {
     logLevel: 'warning',
   })
   /*
-   * 라이선스는 **출력에 실제로 들어간** 파일의 패키지만 센다. esbuild가 읽기만 하고 한 바이트도 싣지 않은
-   * 파일(쓰지 않는 OAuth 코드의 import 등)까지 세면, 앱 폴더에 없는 코드의 라이선스를 적게 된다.
+   * Licenses are counted only for packages whose files **actually made it into the output.**
+   * Counting a file esbuild merely read but embedded zero bytes of (an import from unused OAuth
+   * code, say) would list a license for code that is not even in the app folder.
    */
   for (const m of [node.metafile, view.metafile]) {
     for (const out of Object.values(m.outputs)) {
@@ -197,15 +215,17 @@ async function buildInto(outDir) {
     }
   }
 
-  // 소스맵의 경로를 고친다 (canonicalSource)
+  // Rewrite the source map's paths (canonicalSource)
   const mapPath = join(outDir, `${RUNTIME}.map`)
   const map = JSON.parse(readFileSync(mapPath, 'utf8'))
   const abs = map.sources.map((s) => resolve(outDir, s))
   map.sources = abs.map(canonicalSource)
   /*
-   * 원문은 **우리 도우미의 것만** 싣는다(몇 KiB). 잡히지 않은 오류가 나면 Node는 던진 줄을 스택 위에 찍는데,
-   * 원문이 없으면 압축된 한 줄(수백 자)을 찍어 표준에러 끝부분의 한 칸을 먹는다. 앱 작성자의 인자가 틀려
-   * 나는 오류는 대개 도우미 안에서 던져진다. 제3자 코드의 원문까지 실으면 맵이 몇 MB가 된다.
+   * The original source text is embedded **only for our own helper** (a few KiB). When an
+   * uncaught error occurs, Node prints the throwing line on top of the stack — without the source,
+   * that prints one minified line (hundreds of characters), eating up a chunk of the end of
+   * stderr. An error from an app author's bad argument is usually thrown from inside the helper.
+   * Embedding third-party source text too would swell the map to several megabytes.
    */
   map.sourcesContent = abs.map((p) => (p.startsWith(SRC + sep) ? readFileSync(p, 'utf8') : null))
   writeFileSync(mapPath, `${JSON.stringify(map)}\n`)
@@ -213,7 +233,7 @@ async function buildInto(outDir) {
   writeFileSync(join(outDir, LICENSES), licenses(inputs))
 }
 
-/** 묶어 넣은 패키지들의 라이선스 — MIT가 아니면 멈춘다 */
+/** Licenses of the bundled packages — stops if any is not MIT */
 function licenses(inputs) {
   const pkgs = new Map()
   for (const p of inputs) {

@@ -14,10 +14,12 @@ import { SessionManager } from './sessions/manager.js'
 import { createRpcHandler } from './rpc.js'
 
 /**
- * 실행 기록 (M4 A-6) — 진짜 앱 프로세스, 진짜 저장소, host의 main과 같은 이음새(storeRunLedger).
+ * The run record (M4 A-6) — a real app process, a real store, the same seam host's main uses
+ * (storeRunLedger).
  *
- * 기록의 약속: 호출마다 한 줄(거절도), 인자는 요약과 해시만, 비밀 값은 어디에도 없고, 실패한
- * 호출은 최근 20건만 원문이 남고, 30일이 지나면 걷힌다.
+ * The record's contract: one entry per call (rejections too), only a summary and a hash for
+ * arguments, no secret value anywhere, only the most recent 20 failed calls keep their original
+ * text, and everything is swept after 30 days.
  */
 
 const FIXTURE = fileURLToPath(new URL('./apps/external/test-fixtures/app.mjs', import.meta.url))
@@ -30,7 +32,7 @@ let store: Store
 let rt: ExternalApps
 
 const ref: AppRef = { projectId: 'p1', appId: 'notes' }
-/** 앱에 실제로 보내진(열린) 실행이 생길 때까지 — 기록의 running 줄은 앱이 뜨기 전에 선다 */
+/** Waits until a run that was actually sent to (opened on) the app exists — the record's running entry appears before the app finishes starting */
 const sentRun = () =>
   until(() => [...(rt as unknown as { openRuns: Map<string, unknown> }).openRuns.keys()][0], (id) => id !== undefined) as Promise<string>
 const runs = () => rt.runs(ref, 500) as AppRun[]
@@ -67,8 +69,8 @@ afterEach(async () => {
   rmSync(fixture, { recursive: true, force: true })
 })
 
-describe('호출마다 한 줄', () => {
-  it('누가 불렀는지(화면·세션·앱), 어느 도구를, 어떻게 끝났는지를 적는다 — 거절도 한 줄이다', async () => {
+describe('one entry per call', () => {
+  it('records who called it (view, session, or app), which tool, and how it ended — a rejection is one entry too', async () => {
     make()
     const view = await rt.call(ref, 'echo', { text: 'hi' }, { kind: 'view' })
     const session = await rt.call(ref, 'fail', {}, { kind: 'session', sessionId: 's-42' })
@@ -84,7 +86,7 @@ describe('호출마다 한 줄', () => {
     expect(byId(refused.runId)).toMatchObject({ status: 'rejected', error: expect.stringContaining('visibility') })
   })
 
-  it('부모 실행 id가 사슬로 남는다 (caller=app)', async () => {
+  it('the parent run id remains as a chain (caller=app)', async () => {
     make()
     const ac = new AbortController()
     const parent = rt.call(ref, 'slow', {}, { kind: 'session', sessionId: 's1' }, { signal: ac.signal })
@@ -95,7 +97,7 @@ describe('호출마다 한 줄', () => {
     await parent
   })
 
-  it('도는 동안은 running이고, 취소되면 cancelled로 닫힌다', async () => {
+  it('is running while it runs, and closes as cancelled if cancelled', async () => {
     make()
     const ac = new AbortController()
     const p = rt.call(ref, 'slow', {}, { kind: 'session', sessionId: 's1' }, { signal: ac.signal })
@@ -106,20 +108,20 @@ describe('호출마다 한 줄', () => {
     expect(byId(out.runId)).toMatchObject({ status: 'cancelled' })
   })
 
-  it('앱이 뜨는 동안 취소된 호출은 앱에 보내지 않고 cancelled로 닫힌다', async () => {
+  it('a call cancelled while the app is still starting is never sent to the app, and closes as cancelled', async () => {
     make()
     const ac = new AbortController()
     const t0 = Date.now()
     const p = rt.call(ref, 'slow', {}, { kind: 'session', sessionId: 's1' }, { signal: ac.signal })
-    ac.abort() // 앱은 아직 뜨는 중이다 (첫 호출)
+    ac.abort() // The app is still starting (the first call)
     const out = await p
     expect(out.status).toBe('cancelled')
     expect(byId(out.runId).status).toBe('cancelled')
-    // 5초짜리 도구를 돌리지 않았다 — 뜨는 시간만 걸렸다
+    // The 5-second-long tool was never run — only the startup time was spent
     expect(Date.now() - t0).toBeLessThan(2_000)
   })
 
-  it('인자의 해시는 키 순서와 무관하다 — 같은 입력으로 또 실패했다를 셀 수 있게', async () => {
+  it('the hash of the arguments does not depend on key order — so "failed again with the same input" can be counted', async () => {
     make()
     const a = await rt.call(ref, 'echo', { text: 'same', extra: 1 }, { kind: 'view' })
     const b = await rt.call(ref, 'echo', { extra: 1, text: 'same' }, { kind: 'view' })
@@ -127,7 +129,7 @@ describe('호출마다 한 줄', () => {
     expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe('{"a":{"c":3,"d":2},"b":1}')
   })
 
-  it('긴 인자는 요약만 남는다', async () => {
+  it('a long argument keeps only its summary', async () => {
     make()
     const out = await rt.call(ref, 'echo', { text: 'y'.repeat(1000) }, { kind: 'view' })
     const row = byId(out.runId)
@@ -136,11 +138,12 @@ describe('호출마다 한 줄', () => {
   })
 })
 
-describe('비밀 값은 기록 어디에도 없다', () => {
-  it('요약·해시·실패 원문·이유 모두 가린 뒤에 남는다', async () => {
+describe('a secret value is nowhere in the record', () => {
+  it('the summary, hash, failure text, and reason are all left only after redaction', async () => {
     make()
     rt.setSecret(ref, 'FIXTURE_SECRET', SECRET)
-    // 앱이 되돌려주는 글에 비밀이 섞이는 경우까지 — echo는 받은 것을 그대로 돌려준다
+    // Even covers the case where the secret gets mixed into text the app returns — echo returns
+    // exactly what it was given
     const ok = await rt.call(ref, 'echo', { text: `token ${SECRET}` }, { kind: 'view' })
     const failed = await rt.call(ref, 'fail', { note: `with ${SECRET}` }, { kind: 'view' })
 
@@ -148,14 +151,15 @@ describe('비밀 값은 기록 어디에도 없다', () => {
     expect(all).not.toContain(SECRET)
     expect(byId(ok.runId).argsSummary).toBe('{"text":"token [redacted:FIXTURE_SECRET]"}')
     expect(byId(failed.runId).failure?.args).toBe('{"note":"with [redacted:FIXTURE_SECRET]"}')
-    // 해시도 가린 입력의 해시다 — 짧은 비밀이 든 인자의 해시는 사전으로 되짚을 수 있다
+    // The hash is also a hash of the redacted input — the hash of an argument with a short secret
+    // could otherwise be reversed with a dictionary
     const again = await rt.call(ref, 'echo', { text: 'token [redacted:FIXTURE_SECRET]' }, { kind: 'view' })
     expect(byId(again.runId).argsDigest).toBe(byId(ok.runId).argsDigest)
   })
 })
 
-describe('실패한 입력은 최근 20건만 원문으로', () => {
-  it('성공에는 원문이 없고, 실패는 원문과 결과가 남되 앱마다 20건까지다', async () => {
+describe('only the most recent 20 failed inputs keep their original text', () => {
+  it('a success has no original text, and a failure keeps its original text and result, up to 20 per app', async () => {
     make()
     const ok = await rt.call(ref, 'echo', { text: 'fine' }, { kind: 'view' })
     expect(byId(ok.runId).failure).toBeNull()
@@ -167,20 +171,20 @@ describe('실패한 입력은 최근 20건만 원문으로', () => {
     expect(first.failure?.args).toBe('{"attempt":21}')
     expect(JSON.parse(first.failure!.result!)).toMatchObject({ isError: true, content: [{ type: 'text', text: 'the thing failed' }] })
     expect(failedIds.filter((id) => byId(id).failure !== null)).toHaveLength(20)
-    // 가장 오래된 둘이 밀려났다 — 줄 자체는 남는다
+    // The oldest two were pushed out — the entries themselves still remain
     expect(byId(failedIds[0]!).failure).toBeNull()
     expect(byId(failedIds[1]!).failure).toBeNull()
     expect(byId(failedIds[0]!).status).toBe('error')
   })
 })
 
-describe('기동에서의 정리', () => {
+describe('cleanup at startup', () => {
   const row = (id: string, createdAt: number, status = 'ok') => ({
     id, projectId: 'p1', appId: 'notes', kind: 'tool', tool: 'echo', callerKind: 'view', callerSessionId: null, parentRunId: null,
     status, durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt, sessionId: null,
   })
 
-  it('30일이 지난 기록과 그 원문은 걷히고, 그 안의 것은 남는다', () => {
+  it('a record older than 30 days and its original text are swept, while what is within that window remains', () => {
     const day = 24 * 60 * 60 * 1000
     store.beginAppRun(row('old', Date.now() - 31 * day, 'error'))
     store.keepAppRunFailure({ runId: 'old', projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: Date.now() - 31 * day }, 20)
@@ -189,15 +193,15 @@ describe('기동에서의 정리', () => {
     expect(runs().map((r) => r.id)).toEqual(['recent'])
   })
 
-  it('끝을 못 본 실행(host가 죽었다)은 error로 닫힌다 — 영원히 달리는 중으로 보이지 않게', () => {
+  it('a run that never saw its own end (the host died) closes as error — so it never appears to be running forever', () => {
     store.beginAppRun(row('orphan', Date.now() - 1000, 'running'))
     make()
     expect(byId('orphan')).toMatchObject({ status: 'error', error: 'the host stopped before this call finished' })
   })
 })
 
-describe('RPC와 프로젝트 삭제', () => {
-  it('apps.runs가 기록을 돌려주고, 프로젝트를 지우면 그 앱들의 기록도 사라진다', async () => {
+describe('RPC and project deletion', () => {
+  it('apps.runs returns the record, and deleting a project also erases the records for its apps', async () => {
     const adapters = new Map<ToolName, AgentAdapter>()
     const mgr = new SessionManager(store, adapters, () => {})
     const { id } = await mgr.addProject(projRoot)

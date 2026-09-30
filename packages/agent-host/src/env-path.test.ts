@@ -4,13 +4,14 @@ import { delimiter } from 'node:path'
 import { ensureToolPath, whichTool } from './env-path.js'
 
 /**
- * 배포 앱이 CLI를 못 찾던 문제의 회귀 테스트.
+ * Regression test for the packaged app not being able to find the CLI.
  *
- * 핵심은 "홈브류에 있어야만 찾는다"가 아니라 **사용자의 로그인 셸 PATH를 그대로 쓴다**는 것이다.
- * nvm·mise·수동 설치 등 어디에 깔려 있든 셸이 아는 곳이면 찾는다.
+ * The core point is not "it only finds things installed via Homebrew" but that **it uses the
+ * user's login shell PATH as is**. Wherever the tool is installed — nvm, mise, a manual install —
+ * it is found as long as the shell knows about it.
  */
-describe('CLI 탐색 경로 보강', () => {
-  it('GUI 앱의 빈약한 PATH에서도 셸이 아는 도구를 찾아낸다', () => {
+describe('CLI search path augmentation', () => {
+  it("finds a tool the shell knows even from the GUI app's meager PATH", () => {
     const original = process.env.PATH
     try {
       /*
@@ -39,14 +40,14 @@ describe('CLI 탐색 경로 보강', () => {
         return
       }
       const toolPath = probe.split('\n').find((l) => l.startsWith('/'))
-      if (!toolPath) return // 셸에서도 못 찾으면 검증할 것이 없다
+      if (!toolPath) return // If even the shell cannot find it, there is nothing to verify
       const toolName = toolPath.split('/').pop()!
 
-      // .app이 받는 빈약한 PATH — 이 상태에서는 도구를 못 찾는다
+      // The meager PATH the .app receives — the tool cannot be found in this state
       process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
       expect(whichTool(toolName)).toBeNull()
 
-      // 보강 후에는 찾는다 (홈브류든 nvm이든 어디에 깔렸든)
+      // After augmentation it is found (wherever it is installed — Homebrew, nvm, or elsewhere)
       ensureToolPath()
       expect(whichTool(toolName)).toBeTruthy()
     } finally {
@@ -54,7 +55,7 @@ describe('CLI 탐색 경로 보강', () => {
     }
   })
 
-  it('이미 있는 경로를 중복해서 넣지 않는다', () => {
+  it('does not add a path that is already present a second time', () => {
     const original = process.env.PATH
     try {
       const { path } = ensureToolPath()
@@ -65,15 +66,15 @@ describe('CLI 탐색 경로 보강', () => {
     }
   })
 
-  it('whichTool이 실제 실행 파일 경로를 돌려준다 (which와 같은 일)', () => {
+  it('whichTool returns the actual executable path (the same job as `which`)', () => {
     ensureToolPath()
     const found = whichTool('node')
     expect(found).toBeTruthy()
-    // 어느 디렉토리든 상관없다 — 실제로 존재하기만 하면 된다
+    // It does not matter which directory — it only has to actually exist
     expect(execFileSync(found!, ['--version'], { encoding: 'utf8' })).toMatch(/^v\d+/)
   })
 
-  it('없는 도구는 null (호출자가 안내 문구를 정할 수 있게)', () => {
+  it('a nonexistent tool is null (so the caller can decide the guidance text)', () => {
     expect(whichTool('이런도구는없다')).toBeNull()
   })
 })

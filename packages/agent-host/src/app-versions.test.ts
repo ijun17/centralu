@@ -12,8 +12,10 @@ import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
 
 /**
- * 앱의 판 — RPC 문에서 (M4 E-1). 프로젝트 앱은 git이 판이라 host의 코어가 **그 앱 폴더를 건드린 커밋만** 읽어 보인다(되돌리기는
- * git으로 한다). 사용자 폴더 앱은 런타임의 스냅샷이다. 진짜 저장소(git init), 진짜 런타임.
+ * App versions — from the RPC door (M4 E-1). For a project app, git is the version history, so
+ * the host's core reads and shows **only the commits that touched that app's folder** (restoring
+ * is done with git). For a user-folder app, versions are the runtime's snapshots. A real
+ * repository (git init), a real runtime.
  */
 
 let root = ''
@@ -48,7 +50,7 @@ afterEach(async () => {
 })
 
 describe('apps.versions', () => {
-  it('프로젝트 앱은 그 앱 폴더를 건드린 최근 커밋이다 — 다른 커밋은 끼지 않는다', async () => {
+  it('a project app is the recent commits that touched its app folder — other commits are not mixed in', async () => {
     plantApp(join(repo, ...PROJECT_APPS), 'notes')
     git('add', '.')
     git('commit', '-qm', 'Add the notes app')
@@ -61,7 +63,8 @@ describe('apps.versions', () => {
     rt.refresh()
 
     const v = (await rpc('apps.versions', { appId: 'notes', projectId })) as AppVersions
-    // 답은 프로토콜의 모양 그대로다 — 스냅샷의 지문 같은 안쪽 칸이 새어 나가지 않는다
+    // The answer matches the protocol shape exactly — internal fields like a snapshot's fingerprint
+    // do not leak through
     expect(RpcMethods['apps.versions'].result.safeParse(v).success).toBe(true)
     expect(v.kind).toBe('git')
     if (v.kind !== 'git') return
@@ -70,20 +73,21 @@ describe('apps.versions', () => {
       ['Tweak the notes app', 'Tester'],
       ['Add the notes app', 'Tester'],
     ])
-    // 되돌리기는 git으로 한다 — host는 거절한다
+    // Restoring is done with git — the host refuses
     await expect(rpc('apps.restoreVersion', { appId: 'notes', projectId, id: v.commits[1]!.sha })).rejects.toThrow(
       "A project app's versions are its git history; restore it with git",
     )
   })
 
-  it('저장소가 아닌 프로젝트는 repo: false에 빈 목록이고, 사용자 폴더 앱은 스냅샷이다', async () => {
+  it('a non-repository project is repo: false with an empty list, and a user-folder app is snapshots', async () => {
     rmSync(join(repo, '.git'), { recursive: true, force: true })
     plantApp(join(repo, ...PROJECT_APPS), 'notes')
     plantApp(join(root, 'data', 'apps'), 'mine')
     rt.refresh()
     expect(await rpc('apps.versions', { appId: 'notes', projectId })).toEqual({ kind: 'git', repo: false, commits: [] })
     expect(await rpc('apps.versions', { appId: 'mine', projectId: null })).toEqual({ kind: 'snapshots', snapshots: [] })
-    // 떠 둔 판이 있으면 그 줄은 프로토콜의 칸만 싣는다 (지문 전체는 host 안에 남는다)
+    // If a snapshot version was taken, that entry carries only the protocol's fields (the full
+    // fingerprint stays inside the host)
     await rt.call({ projectId: null, appId: 'mine' }, 'echo', { text: 'x' }, { kind: 'view' }).catch(() => {})
     const snaps = (await rpc('apps.versions', { appId: 'mine', projectId: null })) as AppVersions
     expect(RpcMethods['apps.versions'].result.safeParse(snaps).success).toBe(true)

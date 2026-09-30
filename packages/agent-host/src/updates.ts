@@ -46,7 +46,10 @@ const FORCED_TIMEOUT_MS = 8_000
 /** `npm i -g` on a cold cache is slow, but not this slow — past here something is stuck */
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 
-/** 레지스트리의 답. 실패도 값으로 돌려준다 — 던지면 부르는 쪽이 앱을 멈춰야 한다 */
+/**
+ * The registry's answer. Failure is returned as a value too — throwing would force the caller to
+ * stop the app.
+ */
 export type LatestResult = { ok: true; version: string } | { ok: false; reason: string }
 
 /**
@@ -133,7 +136,8 @@ export class UpdateService {
       fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
       run: deps.run ?? runCommand,
       now: deps.now ?? Date.now,
-      // 저장할 곳을 안 주면 켜져 있는 것으로 본다 — main.ts가 주는 것과 같은 기본값이다
+      // If no place to persist it is given, treat auto-update as on — the same default that main.ts
+      // passes in.
       readAuto: deps.readAuto ?? (() => true),
       writeAuto: deps.writeAuto ?? (() => {}),
     }
@@ -227,7 +231,8 @@ export class UpdateService {
      * the six-hourly requests and quietly keep the one at launch.
      */
     if (!force && !this.status.auto) return this.current()
-    // 아직 물어볼 때가 안 됐으면 알던 답을 준다 — 창을 열 때마다 요청이 나가지 않게
+    // If it is not yet time to ask, return the answer already known, so that opening the window
+    // does not send out a request every time.
     if (!force && this.status.checkedAt !== null && !this.isDue()) return this.current()
     /*
      * An update outranks a check, during and after.

@@ -1,10 +1,11 @@
 /**
- * L3 스모크: 컨텍스트 게이지가 실제 세션에서 말이 되는 값을 내는지 본다.
+ * L3 smoke test: checks that the context gauge produces sensible values on a real session.
  *
- * 배경: result의 modelUsage(세션 누적)로 계산하던 시절 "컨텍스트 533%"가 나왔다.
- * 누적값은 턴이 쌓일수록 커지므로, **여러 턴을 돌려야** 이 유형이 드러난다.
+ * Background: back when this was computed from result's modelUsage (a session-wide cumulative
+ * figure), it produced "context 533%." The cumulative value grows as turns pile up, so **multiple
+ * turns have to run** for this failure mode to show up.
  *
- * 실행: npx tsx packages/agent-host/scripts/smoke-context.mts
+ * Run with: npx tsx packages/agent-host/scripts/smoke-context.mts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

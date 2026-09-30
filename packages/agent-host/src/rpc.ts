@@ -7,7 +7,7 @@ import type { CommandRunner } from './dev-services/commands.js'
 import { findStrays, stopStrays } from './dev-services/strays.js'
 import { gitLogPath } from './dev-services/git.js'
 
-/** 내부 핸들 → 프로토콜 모양 (history는 그때그때 스냅샷으로 뜬다) */
+/** Internal handle → protocol shape (history is rendered as a fresh snapshot each time) */
 const toInfo = (h: TerminalHandle) => ({
   terminalId: h.id,
   cwd: h.cwd,
@@ -27,26 +27,29 @@ import type { InlineViews } from './inline-views.js'
 import type { ToolName } from '@cc/protocol'
 
 /**
- * host가 가진 선택 서비스들. 없으면 그 기능이 없는 host다(시험은 필요한 것만 넣는다).
- * 이름으로 받는다 — 뒤에 붙는 서비스가 늘 때마다 `undefined`를 세어 넣는 자리가 생기지 않게.
+ * The optional services a host has. Without one, that feature simply does not exist on this host
+ * (tests wire in only what they need).
+ * Received by name — so that as more services get added later, there is never a spot that has to
+ * count in `undefined` placeholders.
  */
 export type RpcServices = {
   terminals?: TerminalService
   updates?: UpdateService
   commands?: CommandRunner
   /**
-   * 외부 앱 런타임 (M4 A). 다른 서비스처럼 선택이다 — 없으면 외부 앱이 없는 host다.
-   * 프로젝트가 늘고 줄거나 신뢰가 바뀌면 **이 문이** 런타임에 다시 훑으라고 말한다:
-   * 매니저는 런타임을 모르고(코어는 앱을 모른다), 런타임은 매니저를 모른다.
+   * The external app runtime (M4 A). Optional like the other services — without it, this is a host
+   * with no external apps. When projects are added or removed or trust changes, **this door**
+   * tells the runtime to rescan: the manager does not know the runtime (the core does not know
+   * apps), and the runtime does not know the manager.
    */
   externalApps?: ExternalApps
-  /** 앱 화면 호스팅 (M4 B-3) — 샌드박스 프록시의 주소와 화면이 읽는 리소스 */
+  /** App view hosting (M4 B-3) — the sandbox proxy's address and the resource a view reads */
   views?: ViewHost
-  /** 대화 안 앱 화면 (M4 B-1) — 세션의 앱 호출이 연 인스턴스. 닫기가 이쪽의 기록도 고친다 */
+  /** An app view inside a conversation (M4 B-1) — the instance a session's app call opened. Closing it also updates this side's record */
   inlineViews?: InlineViews
 }
 
-/** RPC 라우팅. 파라미터는 경계에서 1회만 검증한다 (docs/protocol.md §4) */
+/** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
@@ -149,11 +152,11 @@ export function createRpcHandler(
       mgr.forkConversation(RpcMethods['agents.forkConversation'].params.parse(p).sessionId),
     'agents.updateSettings': async (p) => {
       /*
-       * **필드를 하나씩 꺼내 쓰지 않는다.**
+       * **Fields are never pulled out one at a time.**
        *
-       * effort를 추가했을 때 여기서 꺼내는 걸 빠뜨렸고, UI는 보내는데 host에는
-       * 도착하지 않아 아무 일도 안 일어났다 — 오류도 없이 조용히 무시됐다.
-       * parse된 결과를 통째로 넘기면 설정이 늘어나도 이 자리를 다시 고칠 일이 없다.
+       * When effort was added, pulling it out here was overlooked, and the UI sent it but it never
+       * reached the host — nothing happened, silently, with no error. Passing the parsed result
+       * through whole means this spot never needs fixing again as more settings are added.
        */
       const { sessionId, ...settings } = RpcMethods['agents.updateSettings'].params.parse(p)
       return await mgr.updateSettings(sessionId, settings)
@@ -267,7 +270,7 @@ export function createRpcHandler(
     },
     'apps.closeView': async (p) => {
       const { instanceId } = RpcMethods['apps.closeView'].params.parse(p)
-      // 대화 안 화면이면 그쪽이 닫는다(자기 기록과 함께). 아니면 고정 화면이다
+      // If it is a view inside a conversation, that side closes it (along with its own record). Otherwise it is the fixed view
       if (!inlineViews?.close(instanceId)) requireViews().close(instanceId)
       return { ok: true as const }
     },
@@ -276,15 +279,19 @@ export function createRpcHandler(
       if (!inlineViews) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
       return inlineViews.reopen(sessionId, callId)
     },
-    // 앱 런타임이 없는 host는 들고 있는 화면도 없다 — 다시 연 UI는 모두 "앱 열기"만 보인다
+    // A host with no app runtime holds no views either — a reopened UI shows nothing but "open app"
     'apps.inlineViews': async (p) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
     'apps.viewMessage': async (p) => {
       const { sessionId, instanceId, text } = RpcMethods['apps.viewMessage'].params.parse(p)
       /*
-       * 앱은 **인스턴스가** 정한다 — 부른 쪽이 댄 것은 대조만 한다 (#93·#94).
-       *   대화 안 화면  보낼 곳도 인스턴스가 정한다(그 화면이 선 대화). 다른 대화를 대면 거절한다
-       *   고정 화면     대화에 속하지 않는다 — 보낼 곳은 사람이 고른 대화다(UI가 묻고, 고른 뒤에만 부른다)
-       * 어느 쪽이든 같은 길(sendFromApp)을 지나 같은 틀(앱의 글)로 간다 — 고정 화면의 말이 사람의 말로 새지 않게.
+       * The app is decided by **the instance** — whatever the caller claims is only checked against
+       * it (#93, #94).
+       *   A view inside a conversation  the destination is also decided by the instance (the
+       *     conversation that view belongs to). Claiming a different conversation is rejected
+       *   A fixed view                  does not belong to any conversation — the destination is
+       *     whichever conversation the person picked (the UI asks, and only calls this after they pick)
+       * Either way it goes through the same path (sendFromApp) into the same frame (an app's
+       * message) — so a fixed view's message never leaks in as if it were the person's own.
        */
       const owner = inlineViews?.owner(instanceId) ?? null
       if (owner && owner.sessionId !== sessionId) {
@@ -298,7 +305,7 @@ export function createRpcHandler(
     },
     'apps.readResource': async (p) => {
       const { appId, projectId, uri, instanceId } = RpcMethods['apps.readResource'].params.parse(p)
-      // 답의 모양은 화면과 앱이 아는 것이다. 여기서는 봉투가 깨지지 않을 만큼만 본다
+      // The shape of the answer is known between the view and the app. Here, only enough is checked to keep the envelope from breaking
       return RpcMethods['apps.readResource'].result.parse(await requireViews().readResource({ appId, projectId }, uri, instanceId))
     },
     'apps.state': async (p) => {
@@ -312,9 +319,11 @@ export function createRpcHandler(
     },
     'apps.invoke': async (p) => {
       const { appId, name, args, projectId, instanceId } = RpcMethods['apps.invoke'].params.parse(p)
-      // 내장 명부가 먼저다 — 외부 앱은 내장 앱의 id를 가져갈 수 없으므로(발견이 막는다) 갈림이 겹치지 않는다
+      // The built-in registry is checked first — an external app can never take a built-in app's id
+      // (discovery blocks it), so the two branches never overlap
       if (projectId === undefined && HOST_APPS.some((a) => a.id === appId)) return mgr.invokeAppTool(appId, name, args)
-      // 인스턴스는 "바뀌었다"의 주인으로만 쓴다 — 그 화면이 자기가 낸 바뀜을 다시 듣지 않게(B-5). 권한과는 무관하다
+      // The instance is used only as the cause of "changed" — so that view does not hear the change
+      // it caused itself (B-5). Unrelated to permissions
       const caller = { kind: 'view' as const, ...(instanceId ? { instanceId } : {}) }
       const out = await requireExternalApps().call({ appId, projectId: projectId ?? null }, name, args, caller)
       return {
@@ -346,12 +355,13 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'apps.setSecret': async (p) => {
-      // 값은 여기서 런타임으로 곧장 간다 — 이 층은 값을 적지도, 되돌려 주지도 않는다
+      // The value goes straight to the runtime here — this layer never records it and never returns it
       const { appId, projectId, name, value } = RpcMethods['apps.setSecret'].params.parse(p)
       requireExternalApps().updateSecret({ appId, projectId }, name, value)
       return { ok: true as const }
     },
-    // 가져오기 (M4 E-3) — 준비(대기실) → 사람이 본다 → 들이기(꺼진 채로, 원하면 확인까지). 판정은 모두 런타임의 건네기가 한다
+    // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,
+    // with a review step if requested). All the judgment calls are made by the runtime's handoff
     'apps.importPrepare': async (p) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
     'apps.importCommit': async (p) => {
       const { token, enable, reviewKey } = RpcMethods['apps.importCommit'].params.parse(p)
@@ -370,8 +380,10 @@ export function createRpcHandler(
       return requireExternalApps().enableApp({ appId, projectId }, reviewKey)
     },
     /*
-     * 앱의 판 (M4 E-1). 사용자 폴더 앱은 런타임이 떠 둔 스냅샷이고, 프로젝트 앱은 git이다 — 그 앱 폴더를 건드린 최근 커밋을 여기(코어)서
-     * 읽는다. 런타임은 git을 모른다(`host-app-runtime-physics-only`): 판을 무엇으로 두는지가 앱의 자리에 따라 갈리는 것은 코어의 판단이다.
+     * App versions (M4 E-1). For a user-folder app, versions are snapshots the runtime took; for a
+     * project app, they are git — the recent commits that touched that app's folder are read here
+     * (the core). The runtime does not know git (`host-app-runtime-physics-only`): deciding what
+     * counts as a version, based on where the app lives, is the core's call.
      */
     'apps.versions': async (p) => {
       const { appId, projectId } = RpcMethods['apps.versions'].params.parse(p)
@@ -401,7 +413,8 @@ export function createRpcHandler(
       const r = await mgr.checkApp({ appId, projectId })
       return { ok: r.ok, text: r.text, findings: r.findings }
     },
-    // 능력 물음 (M4 D-4) — 화면에서 시작된 사슬의 것. 세션에서 시작된 것은 그 세션의 승인 카드로 `agents.respondApproval`에 온다
+    // A capability question (M4 D-4) — one from a chain started by a view. One started by a session
+    // comes through `agents.respondApproval` as that session's own approval card
     'apps.questions': async () => mgr.appQuestionList(),
     'apps.answerQuestion': async (p) => {
       const { questionId, decision } = RpcMethods['apps.answerQuestion'].params.parse(p)
@@ -442,7 +455,7 @@ export function createRpcHandler(
     },
     'orchestrator.tools': async (p) => {
       const { sessionId } = RpcMethods['orchestrator.tools'].params.parse(p)
-      // 세션을 모르면 전체 목록(호환) — 알면 그 세션의 묶음만 (#69: 매니저는 부분집합)
+      // The full list when no session is given (for compatibility) — only that session's bundle when one is known (#69: the manager takes a subset)
       const profile = sessionId ? mgr.toolProfileOf(sessionId) : 'orchestrator'
       return orchestratorToolSchemas(profile ?? 'orchestrator')
     },
@@ -470,17 +483,18 @@ export function createRpcHandler(
     'projects.delete': async (p) => {
       const { projectId } = RpcMethods['projects.delete'].params.parse(p)
       /*
-       * 그 프로젝트의 터미널과 Run 메뉴 실행도 같이 끝낸다 (#177). 둘 다 경로를 키로 쓰고
-       * 매니저는 이들을 모르므로 이 문이 한다. 경로는 행이 지워지기 **전에** 읽는다 —
-       * 지운 뒤에는 cwdOfProject가 Project not found를 던져, 화면도 여기도 그 프로세스에
-       * 닿을 길이 없다(앱을 끌 때까지 포트를 쥔 채 남던 자리다). 삭제가 실패하면 프로젝트가
-       * 남으므로 그 터미널도 남긴다.
+       * That project's terminals and Run-menu executions are also ended here (#177). Both use the
+       * path as their key, and the manager does not know about them, so this door does it. The path
+       * is read **before** the row is deleted — after deletion, cwdOfProject throws Project not
+       * found, leaving neither the view nor this door any way to reach that process (this used to
+       * be the spot where a port stayed held until the app quit). If deletion fails, the project
+       * remains, so its terminal is left in place too.
        */
       let cwd: string | null = null
       try {
         cwd = mgr.cwdOfProject(projectId)
       } catch {
-        // 없는 프로젝트다 — 정리할 것도 없다
+        // No such project — nothing to clean up
       }
       await mgr.deleteProject(projectId)
       if (cwd !== null) {
@@ -541,7 +555,7 @@ export function createRpcHandler(
     },
     'terminal.list': async (p) => {
       const { projectId } = RpcMethods['terminal.list'].params.parse(p)
-      // 터미널의 키는 프로젝트가 아니라 **디렉토리**다 (워크트리를 위한 준비)
+      // A terminal's key is the **directory**, not the project (preparation for worktrees)
       const cwd = mgr.cwdOfProject(projectId)
       return { terminals: requireTerminals().list(cwd).map(toInfo) }
     },
@@ -569,7 +583,7 @@ export function createRpcHandler(
       if (!h) throw Object.assign(new Error('Terminal not found'), { code: 'internal' })
       return toInfo(h)
     },
-    // 자주 쓰는 명령어 실행기 (#60) — 터미널과 같은 cwd 규칙 (워크트리 준비)
+    // Runner for frequently used commands (#60) — the same cwd rule as the terminal (preparation for worktrees)
     'commands.run': async (p) => {
       const { projectId, command, cols, rows } = RpcMethods['commands.run'].params.parse(p)
       const { history: _h, ...rest } = requireCommands().run(mgr.cwdOfProject(projectId), command, cols, rows)
@@ -630,17 +644,20 @@ export function createRpcHandler(
     const result = await h(params)
 
     /*
-     * 내보내는 것이 **선언한 모양과 같은지** 여기서 확인한다.
+     * Checks here whether what is being sent out **matches its declared shape.**
      *
-     * result 스키마 50개는 오랫동안 런타임에서 한 번도 쓰이지 않았다 — 문서일 뿐
-     * 아무도 지키지 않는 약속이었다. 그동안 통로가 스키마와 어긋나도 아무 일도
-     * 일어나지 않았고, 실제로 두 번 어긋났다 (effort 유실, Codex 모델 shape).
+     * The 50 result schemas went a long time without ever being run against the runtime — they
+     * were documentation only, a promise nobody actually kept. All that time, nothing happened even
+     * when the wire diverged from the schema, and it actually diverged twice (the effort field
+     * being lost, and the Codex model shape).
      *
-     * 켜기 전에 실 host로 47/50을 대조해 스키마가 실제 응답과 맞는 것을 확인했다
-     * (`pnpm smoke:schemas`). 그러지 않고 켜면 틀린 스키마가 멀쩡한 기능을 죽인다.
+     * Before turning this on, 47 of 50 were checked against a real host to confirm the schemas
+     * matched the real responses (`pnpm smoke:schemas`). Turning it on without doing that would let
+     * a wrong schema kill a perfectly working feature.
      *
-     * 던지는 이유: 모양이 어긋난 응답을 그대로 보내면 화면에서 이상하게 나타나고,
-     * 그때는 어디서 어긋났는지 알 수 없다. 여기가 가장 가까운 자리다.
+     * Why this throws: sending a malformed response through as is makes it show up oddly on the
+     * screen, and by then there is no way to tell where it went wrong. This is the closest point to
+     * where it actually happened.
      */
     const checked = RpcMethods[name].result.safeParse(result)
     if (!checked.success) {

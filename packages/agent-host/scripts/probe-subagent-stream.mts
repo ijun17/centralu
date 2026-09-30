@@ -1,27 +1,33 @@
 /**
- * 서브에이전트의 메시지가 **부모 스트림에 어떤 모양으로 섞여 오는가**를 재는 프로브 (#98).
+ * A probe measuring **the shape in which a subagent's messages get mixed into the parent
+ * stream** (#98).
  *
- * 부모 세션 대화에 서브에이전트의 도구 호출과 최종 보고가 부모의 것처럼 박혔다
- * (도그푸딩 — 보고서가 부모 답변으로 한 번, 부모 요약으로 또 한 번: "답이 두 번 보인다").
- * 고치기 전에 무엇이 오는지부터 본다:
+ * A subagent's tool calls and final report got embedded in the parent session's conversation as
+ * if they were the parent's own (dogfooding — the report showed up once as the parent's answer and
+ * once again in the parent's summary: "the answer shows up twice"). Before fixing it, check what
+ * actually arrives:
  *
- *   - 어떤 타입(stream_event·assistant·user·system)에 parent_tool_use_id가 실려 오는가
- *   - forwardSubagentText를 켜지 않아도 서브에이전트의 **글**이 오는가
- *   - 백그라운드 에이전트의 완료는 무엇으로 오는가 (task_* system 메시지, task-notification)
+ *   - which types (stream_event, assistant, user, system) carry parent_tool_use_id
+ *   - does the subagent's **text** arrive even without turning on forwardSubagentText
+ *   - what does a background agent's completion arrive as (task_* system messages,
+ *     task-notification)
  *
- * 실행: node --import tsx packages/agent-host/scripts/probe-subagent-stream.mts [--fg]
- * (소액 과금 — haiku 한 턴과 서브에이전트 하나)
+ * Run with: node --import tsx packages/agent-host/scripts/probe-subagent-stream.mts [--fg]
+ * (small cost — one haiku turn plus one subagent)
  *
- * 실측 (2026-09-25, CLI 2.1.282 · SDK 0.3.263, forwardSubagentText 안 켬):
- *   - 서브에이전트의 assistant·user 메시지에 parent_tool_use_id = 띄운 Agent 호출의 id.
- *     stream_event는 전부 parent=null — 서브에이전트의 글은 델타 없이 통짜로 온다.
- *   - 백그라운드: 부모의 델타 사이사이에 서브에이전트의 assistant(thinking, tool_use)가 낀다.
- *     마지막 글("I am done.")도 parent가 달린 assistant로 **온다** (문서와 다르다).
- *   - 띄우는 순간 Agent의 tool_result가 온다: tool_use_result {status:'async_launched', agentId}.
- *     끝은 system/task_notification {tool_use_id, status, summary, usage{tool_uses, duration_ms}}.
- *     통지는 서브에이전트 안의 Bash에도 온다 (task_started owned_by_subagent, 다른 tool_use_id).
- *   - 포그라운드: 서브에이전트의 마지막 글은 스트림에 없었고, Agent의 tool_result 본문이
- *     "[Subagent hand-back] The text below is the final report…"로 시작했다.
+ * Measured (2026-09-25, CLI 2.1.282, SDK 0.3.263, forwardSubagentText not enabled):
+ *   - The subagent's assistant and user messages carry parent_tool_use_id = the id of the Agent
+ *     call that launched it. Every stream_event has parent=null — the subagent's text arrives with
+ *     no deltas, all at once.
+ *   - Background: the subagent's assistant messages (thinking, tool_use) are interleaved between
+ *     the parent's deltas. Even the final text ("I am done.") **does** arrive as an assistant
+ *     message carrying a parent (unlike what the docs say).
+ *   - The instant it launches, the Agent's tool_result arrives: tool_use_result
+ *     {status:'async_launched', agentId}. It ends with system/task_notification {tool_use_id,
+ *     status, summary, usage{tool_uses, duration_ms}}. A notification also arrives for a Bash call
+ *     inside the subagent (task_started owned_by_subagent, a different tool_use_id).
+ *   - Foreground: the subagent's final text was not in the stream, and the Agent's tool_result
+ *     body started with "[Subagent hand-back] The text below is the final report…"
  */
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { execFileSync } from 'node:child_process'
@@ -56,7 +62,7 @@ const q = query({
   prompt: input(),
   options: {
     cwd,
-    // 앱과 같은 CLI를 쓴다 (어댑터가 whichTool('claude')로 사용자 설치본을 가리킨다)
+    // Uses the same CLI as the app (the adapter points to the user's installed copy via whichTool('claude'))
     pathToClaudeCodeExecutable: execFileSync('which', ['claude']).toString().trim(),
     model: 'haiku',
     includePartialMessages: true,

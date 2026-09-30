@@ -1,12 +1,14 @@
 /**
- * A-5 스모크: 실 Codex 세션으로 host를 관통 검증한다.
+ * A-5 smoke test: verifies the host end-to-end against a real Codex session.
  *
- * S9 — 승인 요청 → 허용 → 파일이 실제로 생긴다 (전역 approval_policy="never"를 덮어쓰는지)
- * S10 — host 재시작 후 thread/resume으로 이전 맥락을 기억한다
- * S11 — 좀비 검사: host를 죽이면 codex app-server도 남지 않는다
+ * S9 — approval request → allow → the file is actually created (checks whether this overrides the
+ *   global approval_policy="never")
+ * S10 — remembers the earlier context via thread/resume after the host restarts
+ * S11 — zombie check: killing the host leaves no codex app-server behind either
  *
- * 모델: Codex 기본 모델 (검증에 최상위 모델을 쓰지 않는다 — 문서의 모델 정책)
- * 실행: node packages/agent-host/scripts/smoke-codex.mjs
+ * Model: Codex's default model (do not use a top-tier model for verification — per the docs' model
+ * policy)
+ * Run with: node packages/agent-host/scripts/smoke-codex.mjs
  */
 import { spawn, execSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
@@ -39,7 +41,7 @@ function startHost() {
         try {
           const j = JSON.parse(line)
           if (j.ready) { clearTimeout(t); resolve({ host, port: j.port }) }
-        } catch { /* 로그 */ }
+        } catch { /* log line */ }
       }
     })
   })
@@ -87,7 +89,7 @@ const waitFor = (events, pred, ms = 180000, what = '이벤트') =>
 
 const textOf = (events) => events.filter((e) => e.type === 'message_delta').map((e) => e.text).join('')
 
-// ── 1차: 승인 왕복 (S9) ──────────────────────────────────────────────
+// ── First run: approval round trip (S9) ──────────────────────────────────────────────
 const first = await startHost()
 const c1 = connect(first.port)
 await c1.ready
@@ -112,8 +114,8 @@ await c1.call('agents.respondApproval', {
 await waitFor(c1.events, (e) => e.type === 'turn_complete', 180000, '턴 완료')
 check(existsSync(join(CWD, 'codex-ok.txt')), 'S9 승인 후 파일이 실제로 생성됨')
 
-// FR-18은 첫 프롬프트로 이름을 짓는 것으로 충족된다. Codex의 thread/name/updated는 보너스이며
-// 짧은 세션에서는 오지 않는다 (실측). 이름이 실제로 붙었는지를 본다.
+// FR-18 is satisfied by naming the session from its first prompt. Codex's thread/name/updated is
+// a bonus, and does not arrive for a short session (measured). Checks whether a name actually got attached.
 const named = (await c1.call('sessions.list', {})).find((s) => s.id === session.id)
 check(!!named?.name && named.name !== '새 세션', 'FR-18 세션 자동 이름', named?.name?.slice(0, 40))
 const titleEvent = c1.events.find((e) => e.type === 'session_title')
@@ -121,7 +123,7 @@ log(titleEvent ? `· Codex 제목 이벤트도 수신: ${titleEvent.title}` : '�
 const ctx = c1.events.find((e) => e.type === 'context_update' || e.type === 'usage_update')
 check(!!ctx, '토큰/컨텍스트 계기판 이벤트 수신', ctx?.type)
 
-// ── 2차: 재시작 후 재개 (S10) ────────────────────────────────────────
+// ── Second run: resume after restart (S10) ────────────────────────────────────────
 c1.ws.close()
 first.host.kill('SIGTERM')
 await new Promise((r) => first.host.once('exit', r))
@@ -139,14 +141,14 @@ if (res.resumed) {
   check(/MELON/i.test(answer), 'S10 재개된 세션이 이전 맥락을 기억', answer.slice(0, 40))
 }
 
-// ── 3차: 좀비 검사 (S11) ─────────────────────────────────────────────
+// ── Third run: zombie check (S11) ─────────────────────────────────────────────
 c2.ws.close()
 second.host.kill('SIGKILL')
 await new Promise((r) => setTimeout(r, 3000))
 let leftover = ''
 try {
   leftover = execSync('pgrep -f "codex app-server" || true', { encoding: 'utf8' }).trim()
-} catch { /* pgrep 없음 */ }
+} catch { /* no pgrep */ }
 check(leftover === '', 'S11 host를 죽이면 codex app-server도 남지 않는다', leftover || '없음')
 
 log(failures === 0 ? '전부 통과' : `${failures}건 실패`)

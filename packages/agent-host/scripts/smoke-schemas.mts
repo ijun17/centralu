@@ -1,11 +1,11 @@
 /**
- * 결과 스키마 50개가 **실제 host 응답과 맞는가**.
+ * Do the 50 result schemas **match the host's real responses?**
  *
- * `commands.ts`의 result 스키마는 지금까지 런타임에서 한 번도 쓰이지 않았다 —
- * 문서일 뿐 보증이 아니었다. 검증을 켜기 전에 먼저 대조한다:
- * 틀린 스키마가 하나라도 있으면, 검증을 켜는 순간 멀쩡하던 기능이 죽는다.
+ * The result schemas in `commands.ts` had never once run against the runtime — they were
+ * documentation, not a guarantee. This checks them before validation is turned on: if even one
+ * schema is wrong, turning validation on would kill a feature that used to work fine.
  *
- * 실행: pnpm smoke:schemas
+ * Run with: pnpm smoke:schemas
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -17,7 +17,7 @@ import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 
 const TOKEN = 'schema-token'
 const cwd = mkdtempSync(join(tmpdir(), 'cc-schema-'))
-// git 조회를 실제로 태우려면 저장소여야 한다
+// Has to be an actual repository to genuinely exercise a source-control lookup
 execSync('git init -q && git commit -q --allow-empty -m init', { cwd })
 writeFileSync(join(cwd, 'a.txt'), 'hello\n')
 
@@ -39,7 +39,7 @@ const port: number = await new Promise((resolve, reject) => {
           resolve(j.port)
         }
       } catch {
-        /* 로그 라인 무시 */
+        /* ignore log lines */
       }
     }
   })
@@ -74,7 +74,7 @@ await new Promise<void>((r) => ws.on('open', () => r()))
 ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: 1 }))
 await new Promise((r) => setTimeout(r, 300))
 
-// ── 대조에 필요한 것들을 먼저 만든다 ────────────────────────────────
+// ── First create what checking needs ────────────────────────────────
 const project = (await rpc('projects.add', { path: cwd })) as { id: string }
 const session = (await rpc('agents.createSession', {
   projectId: project.id,
@@ -88,7 +88,7 @@ const P = project.id
 const S = session.id
 const T = term.terminalId
 
-/** 메서드마다 무엇을 보낼지. null이면 "이번 대조에서는 부를 수 없음" + 이유 */
+/** What to send for each method. null means "cannot be called for this check" + a reason */
 const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> = {
   'projects.list': {},
   'projects.add': { path: cwd },
@@ -133,30 +133,30 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'terminal.resize': { terminalId: T, cols: 80, rows: 24 },
   'terminal.restart': { terminalId: T, cols: 80, rows: 24 },
   'agents.createSession': { projectId: P, cwd, tool: 'claude', permissionPreset: 'normal' },
-  // 버릴 임시 저장소다 — 실제로 커밋하고 체크아웃해도 잃을 것이 없다
+  // A disposable temp repository — actually committing and checking out loses nothing
   'git.commit': { projectId: P, message: '대조용 커밋' },
   'git.checkout': { projectId: P, branch: 'main', dryRun: true },
-  // 원격이 없으니 실패한다. **그 실패 응답이 스키마와 맞는지**가 궁금한 것이다
+  // Fails because there is no remote. **Whether that failure response matches the schema** is what is being checked
   'git.push': { projectId: P },
   'attachments.save': { sessionId: S, name: 'a.txt', mime: 'text/plain', dataBase64: 'aGk=' },
   'approvals.deleteRule': { id: 999999 },
-  // 보내기만 하고 응답 형태만 본다 (턴 완주는 smoke.mjs가 한다)
+  // Only sends it and checks the response shape (a full turn is covered by smoke.mjs)
   'agents.send': { sessionId: S, text: 'hi' },
-  // 없는 앱에도 답한다 — 만드는 세션은 null, 오류 묶음은 빈 목록 (M4 C-2·C-6)
+  // Answers even for a nonexistent app — the building session is null, the error bundle is an empty list (M4 C-2, C-6)
   'apps.builder': { appId: 'no-such-app', projectId: P },
   'apps.errors': { appId: 'no-such-app', projectId: P },
-  // 화면을 연 적 없는 대화 — 들고 있는 화면이 없다 (M4 B-1)
+  // A conversation that never opened a view — holds no view (M4 B-1)
   'apps.inlineViews': { sessionId: S },
-  // 없는 가져오기를 그만둔다 — 조용히 지나간다 (M4 E-3)
+  // Cancels a nonexistent import — passes through quietly (M4 E-3)
   'apps.importCancel': { token: 'no-such-import' },
-  // 능력 물음과 기억된 답 (M4 D-4) — 묻고 있는 것이 없고, 없는 앱에는 기억된 답이 없다(빈 목록). 잊기는 없는 것을 잊어도 된다
+  // A capability question and its remembered answer (M4 D-4) — nothing is being asked, and a nonexistent app has no remembered answer (an empty list). Forgetting something that does not exist is fine
   'apps.questions': {},
   'apps.permissions': { appId: 'no-such-app', projectId: P },
   'apps.forgetPermission': { appId: 'no-such-app', projectId: P, capability: 'agent:claude' },
   'apps.usage': { appId: 'no-such-app', projectId: P },
 }
 
-/** 부를 수 없는 것과 그 이유 — 조용히 빼면 "다 봤다"로 읽힌다 */
+/** What cannot be called, and why — leaving it out silently would read as "everything was checked" */
 const SKIP: Record<string, string> = {
   'agents.respondApproval': '승인 요청이 떠 있어야 함 (smoke.mjs가 관통)',
   'agents.answerQuestion': '질문 요청이 떠 있어야 함 (승인과 같은 이유)',
@@ -198,7 +198,7 @@ const ok: string[] = []
 const bad: { m: string; issues: string }[] = []
 const failed: { m: string; why: string }[] = []
 
-// orchestrator.tool은 오케스트레이터 자신만 부를 수 있다 — 그 id를 먼저 얻는다
+// orchestrator.tool can only be called by the orchestrator itself — get its id first
 try {
   const orc = (await rpc('orchestrator.get', {})) as { id: string }
   CASES['orchestrator.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
@@ -206,7 +206,7 @@ try {
   SKIP['orchestrator.tool'] = '오케스트레이터를 못 만듦'
 }
 
-// git.commitDetail은 sha를 얻어서 채운다
+// git.commitDetail fills in a sha once one is obtained
 try {
   const log = (await rpc('git.log', { projectId: P, limit: 1 })) as { sha: string }[]
   if (log[0]?.sha) {
@@ -214,7 +214,7 @@ try {
     delete SKIP['git.commitDetail']
   }
 } catch {
-  /* 그대로 skip */
+  /* leave it skipped */
 }
 
 for (const m of Object.keys(RpcMethods) as RpcMethodName[]) {
@@ -233,7 +233,7 @@ for (const m of Object.keys(RpcMethods) as RpcMethodName[]) {
   }
 }
 
-// 파괴적인 것들은 맨 끝에
+// Destructive ones go at the very end
 for (const [m, params] of [
   ['terminal.close', { terminalId: T }],
   ['agents.deleteSession', { sessionId: S }],
@@ -274,6 +274,6 @@ for (const [m, why] of Object.entries(SKIP)) console.log(`  ${m}: ${why}`)
 
 ws.close()
 host.kill()
-// 호출 실패(failed)도 실패다 — 스키마를 대조조차 못 했는데 0으로 끝나면
-// CI가 "다 맞다"로 읽는다. 불일치든 호출 실패든 초록으로 두지 않는다.
+// A call failure counts as a failure too — if the schema could not even be checked and this
+// exits 0, CI reads it as "everything is fine." Neither a mismatch nor a call failure is left green.
 process.exit(bad.length || failed.length ? 1 : 0)

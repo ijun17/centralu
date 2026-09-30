@@ -5,8 +5,9 @@ import { join } from 'node:path'
 import { migrateLegacyDataDir } from './data-dir.js'
 
 /**
- * 이 함수는 **사용자의 대화 기록이 든 폴더**를 옮긴다.
- * 그래서 시험하는 것은 "옮겨지는가"보다 **"어떤 경우에 손대지 않는가"**다.
+ * This function moves **the folder holding the user's conversation history**.
+ * So what is being tested is less "does it move" than **"in which cases does it leave things
+ * alone."**
  */
 let root = ''
 const seed = (dir: string, body: string) => {
@@ -19,8 +20,8 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-describe('데이터 폴더 이사', () => {
-  it('옛 폴더만 있으면 통째로 옮긴다 (내용 그대로)', () => {
+describe('data folder move', () => {
+  it('moves everything whole (content unchanged) when only the old folder exists', () => {
     const from = join(root, '.control-center') // legacy-name
     const to = join(root, '.centralu')
     seed(from, '진짜 대화 기록')
@@ -30,11 +31,12 @@ describe('데이터 폴더 이사', () => {
 
     expect(existsSync(from)).toBe(false)
     expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('진짜 대화 기록')
-    // WAL을 두고 가면 수십 MB의 최근 대화가 사라진다 — 폴더째 옮기는 이유다
+    // Leaving the WAL behind would lose tens of megabytes of recent conversation — the reason the
+    // whole folder is moved
     expect(readFileSync(join(to, 'store.db-wal'), 'utf8')).toBe('WAL도 함께')
   })
 
-  it('새 폴더가 이미 있으면 **아무것도 안 한다**', () => {
+  it('does **nothing** when the new folder already exists', () => {
     const from = join(root, '.control-center') // legacy-name
     const to = join(root, '.centralu')
     seed(from, '옛 기록')
@@ -42,26 +44,26 @@ describe('데이터 폴더 이사', () => {
 
     expect(migrateLegacyDataDir(from, to)).toBe(false)
 
-    // 합치는 것은 우리가 판단할 일이 아니다 — 어느 쪽이 진짜인지 모른다. 둘 다 남긴다
+    // Merging the two is not ours to decide — we do not know which one is the real one. Both are left in place
     expect(readFileSync(join(to, 'store.db'), 'utf8')).toBe('새 기록')
     expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('옛 기록')
   })
 
-  it('옛 폴더가 없으면 조용히 넘어간다 (새로 설치한 사람)', () => {
+  it('silently does nothing when the old folder does not exist (a fresh install)', () => {
     expect(migrateLegacyDataDir(join(root, '.control-center'), join(root, '.centralu'))).toBe(false) // legacy-name
     expect(existsSync(join(root, '.centralu'))).toBe(false)
   })
 
-  it('옮기지 못해도 옛 폴더를 손상시키지 않는다', () => {
+  it('does not damage the old folder when the move fails', () => {
     const from = join(root, '.control-center') // legacy-name
     seed(from, '지켜야 할 기록')
-    // 옮길 수 없는 목적지 (부모가 파일이라 디렉토리를 만들 수 없다)
+    // A destination that cannot be moved to (the parent is a file, so the directory cannot be created)
     const blocker = join(root, 'blocker')
     writeFileSync(blocker, 'x')
 
     expect(migrateLegacyDataDir(from, join(blocker, 'nested', '.centralu'))).toBe(false)
 
-    // 실패했으면 원본은 그대로여야 한다 — 반쪽만 남는 상태를 만들지 않는다
+    // If it failed, the original must be left untouched — no state is created where only half of it remains
     expect(readFileSync(join(from, 'store.db'), 'utf8')).toBe('지켜야 할 기록')
   })
 })

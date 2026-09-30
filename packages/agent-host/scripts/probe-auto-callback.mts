@@ -1,13 +1,18 @@
 /**
- * auto(`bypassPermissions`)에 canUseTool을 넘기면 무엇이 콜백에 닿는가 (#171, #92의 probe-project-trust에 더하는 auto 줄).
+ * If a `canUseTool` callback is passed with auto (`bypassPermissions`), what reaches the callback?
+ * (#171, an auto-mode line added to #92's probe-project-trust).
  *
- * auto는 콜백을 넘기지 않아서 AskUserQuestion이 사람에게 닿지 않았다. 넘기기 전에 잰다:
- *   1. AskUserQuestion이 콜백으로 오는가 (CLI 번들 판독: requiresUserInteraction 도구는 bypass보다 먼저 ask)
- *   2. 보통 도구(Bash)는 여전히 콜백을 지나지 않는가 (probe-perm2의 "bypass에서는 안 불림")
- *   3. 설정 파일의 `ask` 규칙에 걸린 요청은 어떻게 되는가 — 콜백이 있을 때와 없을 때
+ * Auto mode does not pass a callback, so AskUserQuestion never reached the person. Measure before
+ * passing one:
+ *   1. Does AskUserQuestion reach the callback? (read from the CLI bundle: a requiresUserInteraction
+ *      tool asks before bypass takes effect)
+ *   2. Does an ordinary tool (Bash) still skip the callback? (probe-perm2's "not called under bypass")
+ *   3. What happens to a request that matches an `ask` rule in the settings file — with and without
+ *      a callback
  *
- * 임시 폴더에서 haiku로 짧게 돈다(줄마다 모델 호출 한 번). 사용자 ~/.claude는 건드리지 않는다.
- * 실행: node --import tsx packages/agent-host/scripts/probe-auto-callback.mts
+ * Runs briefly against haiku in a temp folder (one model call per line). Does not touch the
+ * person's real ~/.claude.
+ * Run with: node --import tsx packages/agent-host/scripts/probe-auto-callback.mts
  */
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { execFileSync } from 'node:child_process'
@@ -37,7 +42,7 @@ async function run(label: string, prompt: string, opts: { callback: boolean; pla
         ? {
             canUseTool: async (n: string, i: Record<string, unknown>) => {
               seen.push(n)
-              // 어댑터가 하는 것과 같다 — 선택지의 답은 deny의 message로 간다
+              // Same as what the adapter does — the answer to the choice travels in deny's message
               if (n === 'AskUserQuestion') return { behavior: 'deny' as const, message: '{"answers":[{"answer":"A"}]}' }
               return { behavior: 'allow' as const, updatedInput: i }
             },

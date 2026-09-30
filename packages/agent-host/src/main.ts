@@ -28,13 +28,13 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
 /**
- * Agent Host 진입점.
- * dev: `pnpm host` 로 직접 실행. prod: Tauri가 사이드카로 spawn (docs/architecture.md §4)
+ * Agent Host entry point.
+ * dev: run directly with `pnpm host`. prod: spawned by Tauri as a sidecar (docs/architecture.md §4)
  */
 
 /**
- * 빌드 식별자. 번들러가 `__CC_BUILD__`를 실제 커밋으로 바꿔 넣는다
- * (소스로 그냥 실행하면 치환이 없으므로 'dev').
+ * The build identifier. The bundler swaps `__CC_BUILD__` for the actual commit
+ * (running straight from source has no substitution, so it stays 'dev').
  */
 declare const __CC_BUILD__: string | undefined
 const BUILD = typeof __CC_BUILD__ === 'string' ? __CC_BUILD__ : 'dev'
@@ -44,20 +44,21 @@ const { values } = parseArgs({
     port: { type: 'string', default: '5175' },
     token: { type: 'string' },
     db: { type: 'string' },
-    /** 부모가 죽으면 함께 종료 (Tauri 수퍼바이저가 켠다) */
+    /** Exits together if the parent dies (turned on by the Tauri supervisor) */
     'watch-parent': { type: 'boolean' },
     memory: { type: 'boolean', default: false },
   },
 })
 
-/** 데이터 폴더를 옮겼다면 그 사실. 로그가 켜진 뒤에 적는다 (아래 참조) */
+/** The fact that the data folder was moved, if it was. Recorded once logging is on (see below) */
 let movedNote: string | null = null
 
 const token = values.token || process.env.CC_HOST_TOKEN || randomBytes(16).toString('hex')
 /*
- * HTTP 길의 비밀 (M4 P-2). WebSocket 토큰과 **다른 값**이다. 이 값은 iframe 주소의 한 칸이
- * 되어 URL로 돌아다니므로, 새어도 RPC 문이 열리지 않아야 한다. 밖에서 정할 방법을 두지
- * 않는다. 주소는 host가 RPC 답으로 만들어 주므로 아무도 이 값을 미리 알 필요가 없다.
+ * The secret for the HTTP door (M4 P-2). A **different value** from the WebSocket token. Since
+ * this value ends up as a path segment in an iframe's address and travels around in a URL, even if
+ * it leaks the RPC door must stay closed. There is no way to set it from outside. The address is
+ * built by the host as part of the RPC answer, so nobody needs to know this value in advance.
  */
 const httpSecret = randomBytes(32).toString('base64url')
 const dbPath = values.memory
@@ -65,82 +66,85 @@ const dbPath = values.memory
   : (values.db ?? defaultDbPath())
 
 /**
- * 데이터 폴더.
+ * The data folder.
  *
- * **dev와 배포 앱은 서로 다른 폴더를 쓴다.** 같은 폴더를 쓰면 둘을 동시에 켰을 때
- * host 두 개가 같은 store.db를 붙잡고, 각자 다른 세션 목록을 들고 있게 된다.
- * 개발 중에는 배포 앱을 켜둔 채로 dev를 띄우는 게 자연스러우므로 아예 갈라 둔다.
+ * **dev and the packaged app use different folders.** If they shared one, running both at once
+ * would leave two hosts holding the same store.db, each keeping a different session list.
+ * Since starting dev with the packaged app still running is natural during development, they are
+ * kept entirely separate.
  */
 function defaultDbPath(): string {
-  // 번들된 산출물로 실행되면 배포, 소스에서 실행되면 dev (수퍼바이저가 알려준다)
+  // Packaged when run from the bundled output, dev when run from source (the supervisor tells this)
   const isDev = process.env.CC_DEV === '1'
   const dir = join(homedir(), isDev ? DATA_DIR_DEV : DATA_DIR)
   const legacy = join(homedir(), isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod)
   /*
-   * 이사는 여기서 하되, **말하는 것은 미뤄 둔다.**
+   * The move happens here, but **announcing it is deferred.**
    *
-   * 로그 파일은 이 함수가 경로를 정해준 뒤에야 열린다. 여기서 console.error를 하면
-   * 그 줄은 파일이 아니라 허공(부모 프로세스의 stderr)으로 간다 — 실제로 첫 이사에서
-   * `host.log`에 아무것도 안 남았다. 폴더가 왜 사라졌는지 설명하는 유일한 줄인데.
+   * The log file is only opened after this function decides the path. Calling console.error here
+   * would send that line into thin air (the parent process's stderr) instead of the file — on the
+   * very first move, `host.log` genuinely ended up with nothing in it, even though this is the one
+   * line that explains why the folder disappeared.
    */
   movedNote = migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
   mkdirSync(dir, { recursive: true })
-  // 첨부·오케스트레이터 홈·워크트리가 전부 이 아래로 오게 고정한다 (dev/prod가 갈린다)
+  // Pins attachments, the orchestrator home, and worktrees to all live under here (dev and prod diverge)
   process.env.CC_DATA_DIR = dir
   return join(dir, 'store.db')
 }
 
 
 /**
- * **로그를 가장 먼저 켠다.**
+ * **Logging is turned on before anything else.**
  *
- * 이 아래로 나오는 모든 말(PATH 보강, 인스턴스 잠금 충돌, codex의 stderr,
- * 미처리 거절)이 파일에 남는다. 늦게 켜면 정작 기동에서 어긋난 경우를 놓친다 —
- * 오늘 못 본 것이 정확히 그 구간이었다.
- *
- * 메모리 DB(테스트·스모크)는 남길 폴더가 없으므로 켜지 않는다.
+ * Everything said below this line (PATH augmentation, instance-lock conflicts, codex's stderr,
+ * unhandled rejections) ends up in the file. Turning it on late misses exactly the cases that go
+ * wrong at startup — that was exactly the gap that went unseen before.
  */
 const stopLog = dbPath === ':memory:' ? () => {} : teeStderrToFile(hostLogPath(dirname(dbPath)))
 if (dbPath !== ':memory:') console.error(startupBanner({ build: BUILD, db: dbPath, pid: process.pid }))
-// 배너 바로 다음이다 — 어느 기동에서 옮겼는지가 같은 자리에서 읽혀야 한다
+// Right after the banner — which startup did the move has to be readable in the same spot
 if (movedNote) console.error(movedNote)
 
-// GUI 앱은 로그인 셸 PATH를 물려받지 못한다 — CLI를 찾으려면 먼저 보강해야 한다 (실측).
-// 사용자의 로그인 셸에게 직접 물어보므로 nvm·mise·수동 설치도 잡힌다.
+// A GUI app does not inherit the login shell's PATH — it has to be augmented first to find the CLI
+// (measured). Since it asks the user's own login shell directly, nvm, mise, and manual installs are
+// all caught too.
 const pathResult = ensureToolPath()
 if (pathResult.source !== 'unchanged') {
   console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
 
 /**
- * 같은 데이터 폴더에 host가 둘이면 세션 목록이 어긋나고 SQLite가 경합한다.
- * 조용히 이상해지는 것보다 뜨지 않고 이유를 말하는 편이 낫다.
+ * Two hosts on the same data folder desync the session list and contend over SQLite.
+ * Failing to start with a stated reason is better than going quietly wrong.
  */
 const lock = acquireInstanceLock(dbPath)
 if (!lock.ok) {
   const message = lockConflictMessage(lock.heldByPid, lock.lockPath)
   console.error(message)
   /*
-   * 표준출력에도 쓴다 (#184). 데스크톱 수퍼바이저는 host의 표준출력만 읽는다(ready 줄의 자리).
-   * 표준에러로만 말하면 이 문장은 host.log에만 남고, 잠금 충돌을 곧바로 알리려고 둔
-   * 수퍼바이저의 분기("already using this data")는 한 번도 타지 못한 채 백오프 여섯 번 뒤
-   * "종료되었습니다 (code 1)"만 화면에 떴다. 동기로 쓴다 — 바로 process.exit인데, macOS에서
-   * 파이프로 가는 stdout은 비동기라 그냥 write하면 문장이 닿기 전에 끝날 수 있다.
+   * Also written to stdout (#184). The desktop supervisor only reads the host's stdout (the same
+   * spot as the ready line). Speaking only on stderr left this sentence stuck in host.log, so the
+   * supervisor's branch meant to immediately report a lock conflict ("already using this data")
+   * never once fired, and after six backoff attempts the screen just showed "exited (code 1)."
+   * Written synchronously — process.exit follows right after, and on macOS stdout to a pipe is
+   * asynchronous, so a plain write could end the process before the sentence actually got through.
    */
   try {
     writeSync(1, `${message}\n`)
   } catch {
-    // 표준출력이 닫혀 있어도 표준에러(host.log)에는 남았다
+    // Even if stdout is closed, it still made it into stderr (host.log)
   }
   process.exit(1)
 }
 /*
- * 시그널 핸들러를 여기서 달면 안 된다.
+ * A signal handler must never be attached here.
  *
- * 예전에는 SIGINT/SIGTERM에 lock.release() + process.exit(0)를 먼저 등록했는데,
- * 핸들러는 등록 순서대로 돌므로 뒤에 등록된 진짜 shutdown()이 **절대 실행되지 않았다** —
- * 종료할 때마다 자식 프로세스(claude/codex)가 고아로 남고 WAL 체크포인트를 건너뛰었다.
- * 잠금 해제는 exit 훅 하나로 충분하다 (어떤 경로로 끝나든 마지막에 돈다).
+ * This used to register lock.release() + process.exit(0) on SIGINT/SIGTERM first. Since handlers
+ * run in registration order, the real shutdown() registered afterward **never ran at all** — every
+ * time it exited, the child processes (claude, codex) were left orphaned and the WAL checkpoint was
+ * skipped. Releasing the lock through a single exit hook is enough (it runs last no matter which
+ * path led to exit).
  */
 process.on('exit', lock.release)
 
@@ -148,76 +152,82 @@ const store = new Store(dbPath)
 const adapters = createAdapters()
 
 /*
- * host 자신의 주소를 매니저에게 알려준다 — 인프로세스로 도구를 못 붙이는 어댑터의
- * 다리가 이 주소로 돌아온다. 포트는 listen() 뒤에야 정해지므로 값이 아니라 함수로 준다.
+ * Tells the manager the host's own address — the bridge of an adapter that cannot attach a tool
+ * in-process connects back through this address. Since the port is only decided after listen(),
+ * this is given as a function rather than a value.
  */
 const mgr = new SessionManager(
   store,
   adapters,
   (e) => server.broadcast(e),
   () => (port ? { url: `ws://127.0.0.1:${port}`, token } : null),
-  // 워크트리는 데이터 폴더 옆에 만든다 — dev와 배포 앱이 서로의 워크트리를 안 건드린다
+  // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
 )
 /*
- * 외부 앱 런타임 (M4 A). 기동에서는 **훑기만 한다** — 앱 프로세스는 처음 필요할 때 뜬다
- * (성능 예산: 앱 5개가 깔려 있어도 아무것도 안 할 때 앱 프로세스 0개).
- * 데이터 폴더는 위 defaultDbPath가 CC_DATA_DIR로 고정한 그 폴더다 — dev와 배포가 갈린다.
+ * The external app runtime (M4 A). Startup **only scans** — an app process starts only the first
+ * time it is needed (performance budget: zero app processes at idle, even with 5 apps installed).
+ * The data folder is the one defaultDbPath above pinned via CC_DATA_DIR — dev and the packaged app
+ * diverge here.
  */
-// 앱의 "바뀌었다"는 앱마다 모아서 방송한다 — 열린 화면의 다시 읽기가 고리가 되어도 한 앱에 초당 4번까지 (app-change-events.ts)
+// An app's "changed" broadcast is collected per app — even if an open view's re-read becomes a loop, it never exceeds 4 per second per app (app-change-events.ts)
 const appChanges = broadcastAppChanges((e) => server.broadcast(e))
-// 기록 판의 신호는 따로 모은다 — 읽기 전용 도구가 세운 사슬도 알리되 화면은 깨우지 않는다 (app-change-events.ts)
+// The run panel's signal is collected separately — a chain started by a read-only tool is reported too, but never wakes a view (app-change-events.ts)
 const appRunChanges = broadcastAppRuns((e) => server.broadcast(e))
 const externalApps = new ExternalApps({
   projects: () => store.projectRoots(),
   dataRoot: dataRoot(),
   reservedIds: HOST_APPS.map((a) => a.id),
-  // 실행 기록 (A-6) — 런타임이 선언한 모양을 저장소가 채운다. 런타임은 Store를 모른다
+  // The run record (A-6) — the store fills in the shape the runtime declared. The runtime does not know Store
   runs: storeRunLedger(store),
-  // 능력 승인의 답 (D-4) — 같은 뒤집기. 한 번 한 답은 host가 다시 떠도 남는다
+  // The answer to a capability approval (D-4) — the same flip. An answer given once remains even after the host restarts
   permissions: storePermissionBook(store),
-  // 앱에 닿은, 읽기 전용이 아닌 호출이 끝날 때마다 — 열린 화면이 다시 읽을 신호 (UI 스토어가 AppFrame의 changeSignal로 옮긴다)
+  // Every time a non-read-only call that reached the app ends — the signal for an open view to re-read (the UI store carries this to AppFrame's changeSignal)
   emitChanged: appChanges.emit,
-  // 기록 판에 보이는 줄이 서거나 끝날 때마다 — 기록 판이 다시 읽을 신호 (UI 스토어가 RunsPanel로 옮긴다)
+  // Every time an entry visible in the run panel starts or ends — the signal for the run panel to re-read (the UI store carries this to RunsPanel)
   emitRunsChanged: appRunChanges.emit,
-  // 앱 폴더가 바뀌어도 만드는 세션이 턴 안이면 턴 끝까지 기다린다 (C-4) — 턴의 끝은 매니저가 런타임에 알린다
+  // Even if the app folder changes, if the building session is mid-turn it waits until the turn ends (C-4) — the manager tells the runtime when the turn ends
   builderBusy: (ref) => mgr.builderBusy(ref),
 })
 externalApps.refresh()
-// 앱의 자리와 상태가 바뀌었다 (A-8) — 사이드바와 고정 화면이 apps.list를 다시 읽는다
+// An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
 onExternalAppListChanged(externalApps, () => server.broadcast({ type: 'external_apps_changed' }))
-// 세션에 앱을 붙인다 (A-5) — 매니저와 런타임은 서로를 모르고, 여기서 이어진다
+// Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.useExternalApps(externalApps)
 const terminals = new TerminalService((f) => server.pushTerminal(f))
-// 자주 쓰는 명령어 실행기 (#60) — 출력은 터미널과 같은 프레임 레인을 탄다
+// Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
 const commandRuns = new CommandRunner((f) => server.pushTerminal(f))
 /*
- * 업데이트 확인은 **host가 한다** — 실행기(launcher)가 아니라 (이슈 #43).
+ * The update check is done by **the host** — not by the launcher (issue #43).
  *
- * 실행기에도 같은 코드가 있지만, 도는 것은 사용자 기계에 **이미 깔려 있는** 사본이고
- * beta.1의 사본은 버전 비교가 틀려 있다 (#42). 그 결함은 소급해서 못 고친다: 고쳤다는
- * 사실을 알아차려야 할 쪽이 바로 그 틀린 비교다. 여기서 확인하면 앱과 같이 배포된 코드가
- * 돌기 때문에 앱보다 낡을 수 없고, 낡은 실행기를 통째로 건너뛴다.
+ * The launcher has the same code, but what runs there is the copy **already installed** on the
+ * user's machine, and the beta.1 copy has a broken version comparison (#42). That defect cannot be
+ * fixed retroactively: the thing that would have to notice it was fixed is that exact broken
+ * comparison. Checking here instead runs code shipped alongside the app itself, so it can never be
+ * older than the app, and it skips the stale launcher entirely.
  *
- * 확인 결과는 사람에게 **알리기만 한다.** 도는 앱을 갈아 끼우는 것은 되돌릴 수 없는 일이라
- * 조용히 하지 않는다 — 누르면 그때 한다.
+ * The check result **only informs** the person. Swapping out the running app is irreversible, so
+ * it is never done silently — it happens only when they click it.
  */
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
 const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
-  // 저장된 적이 없으면 켬이 기본이다. 확인은 읽기 전용이고 실패는 통째로 삼키므로 켜 둬도
-  // 잃는 게 없는 반면, 꺼 두면 **설정을 한 번도 안 여는 사람**이 영원히 옛 버전에 남는다 —
-  // 낡은 채로 있을 가능성이 가장 큰 쪽이 정확히 그 사람이다.
+  // On by default when nothing has been saved yet. Since the check is read-only and every failure
+  // is swallowed, leaving it on costs nothing, while leaving it off traps **someone who never once
+  // opens settings** on an old version forever — that person is exactly the one most likely to stay
+  // stale.
   readAuto: () => store.appSetting(AUTO_UPDATE_CHECK_KEY) !== 'false',
   writeAuto: (enabled) => store.setAppSetting(AUTO_UPDATE_CHECK_KEY, String(enabled)),
 })
-// origin 허용목록의 탈출구 — 거부 로그가 여기에 넣을 값을 그대로 알려준다.
-// 앱 화면의 프록시도 같은 목록을 쓴다: 화면을 띄울 수 있는 부모는 WebSocket에 붙을 수 있는 쪽뿐이다
+// The escape hatch for the origin allow list — the rejection log states exactly the value to put
+// here. An app view's proxy uses the same list too: only a parent able to connect over WebSocket
+// can ever render a view
 const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) ?? [...DEFAULT_ALLOWED_ORIGINS]
 /*
- * 앱 화면 호스팅 (M4 B-3). 문서는 외부 앱 런타임이 앱에서 읽고, 출처 방식은 매니페스트의
- * `view.origin`이 정하며, 열린 화면은 앱을 쉬는 앱으로 내리지 않게 붙든다(app-view-source.ts).
- * 앱별 출처의 포트 배정표는 app_settings에 산다. 표는 줄지 않는다(origin-ports.ts). 한 번 준
- * 포트를 다른 앱에 주면 그 앱이 남의 브라우저 저장소를 읽는다.
+ * App view hosting (M4 B-3). The document is read from the app by the external app runtime, the
+ * origin method is decided by the manifest's `view.origin`, and an open view holds its app from
+ * being shut down as idle (app-view-source.ts). The per-app origin port assignment table lives in
+ * app_settings. The table never shrinks (origin-ports.ts). Giving a port that was once assigned to
+ * a different app would let that app read someone else's browser storage.
  */
 const VIEW_PORTS_KEY = 'apps.viewPorts'
 const views = new ViewHost({
@@ -239,8 +249,9 @@ const views = new ViewHost({
   hostPort: () => port ?? null,
 })
 /*
- * 대화 안 앱 화면 (M4 B-1). 세션의 에이전트가 화면이 달린 앱 도구를 부르면 그 카드 아래에 화면을 연다.
- * 매니저의 붙이기에서 호출을 듣고, 이벤트는 매니저의 기록·방송 길로 낸다(inline-views.ts).
+ * An app view inside a conversation (M4 B-1). When a session's agent calls an app tool with a view,
+ * the view opens under that card. Calls are heard through the manager's own attachment, and events
+ * go out through the manager's record and broadcast path (inline-views.ts).
  */
 const inlineViews = attachInlineViews(mgr, externalApps, views)
 const server: HostServer = new HostServer({
@@ -248,7 +259,7 @@ const server: HostServer = new HostServer({
   token,
   allowedOrigins,
   onRpc: createRpcHandler(mgr, adapters, { terminals, updates, commands: commandRuns, externalApps, views, inlineViews }),
-  // 모든 HTTP 길은 이 비밀 뒤에 있다 (transport/http.ts)
+  // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
 })
 
@@ -259,32 +270,37 @@ try {
   console.error(`\n[agent-host] failed to start\n${(err as Error).message}\n`)
   process.exit(1)
 }
-// 이 줄은 Tauri 수퍼바이저가 파싱한다 (포트·토큰 전달 경로)
+// This line is parsed by the Tauri supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
 
 /*
- * 기동 직후 한 번, 그다음은 6시간마다 (이슈 #43).
+ * Once right after startup, and then every 6 hours (issue #43).
  *
- * **listen 뒤에 부른다.** 확인 결과는 방송으로 나가는데, 그 전에는 보낼 소켓이 없다.
- * 기동 직후를 첫 확인으로 잡는 이유: 앱이 꺼져 있는 동안 새 버전이 나왔을 가능성이
- * 가장 큰 순간이 바로 여기다. 이 앱은 며칠씩 켜 두는 물건이라 그다음이 필요하다.
+ * **Called after listen.** The check result goes out as a broadcast, and there is no socket to send
+ * it to before that. Right after startup is chosen as the first check because that is exactly the
+ * moment a new version is most likely to have shipped while the app was closed. Since people leave
+ * this app open for days at a time, the recurring check afterward is still needed.
  */
 updates.start()
 
 /**
- * 거절 하나로 죽지 않는다.
+ * A single rejection does not kill this process.
  *
- * Node는 미처리 거절이 뜨면 **프로세스를 종료한다.** 이 host는 모든 세션의 부모라,
- * 어딘가에서 새어 나온 거절 하나가 **살아 있는 세션 전부를 끊는다** —
- * 프로젝트를 추가하다가 관계없는 세션들이 함께 끊긴 일이 실제로 있었다.
- * 게다가 stderr는 배포된 앱에서 아무 데도 남지 않아, 왜 죽었는지조차 알 수 없었다.
+ * Node **terminates the process** the moment an unhandled rejection surfaces. Since this host is
+ * the parent of every session, one rejection leaking from anywhere **cuts off every live
+ * session** — this actually happened once, where adding a project cut off unrelated sessions along
+ * with it. On top of that, stderr goes nowhere at all in the packaged app, so there was not even a
+ * way to know why it died.
  *
- * 그래서 두 가지를 한다:
- *   1. 거절은 **삼키지 않고 크게 적되** 살려 둔다. 대개 한 요청의 문제이지
- *      프로세스 전체가 못 쓰게 된 상황은 아니다. 세션을 다 끊는 대가가 훨씬 크다.
- *   2. 예외·거절을 **파일로 남긴다.** 다음에 같은 일이 생기면 추측하지 않아도 된다.
+ * So two things are done here:
+ *   1. A rejection is **logged loudly, never swallowed,** but the process is kept alive. It is
+ *      usually the problem of one request, not a situation where the whole process has become
+ *      unusable. Cutting off every session is a far bigger cost.
+ *   2. Exceptions and rejections are **recorded to a file.** The next time this happens, nobody has
+ *      to guess.
  *
- * uncaughtException은 상태가 깨졌을 수 있어 다르다 — 남기고 정상 경로로 내려간다.
+ * uncaughtException is different, because state may have broken — it is recorded, and then this
+ * shuts down through the normal path.
  */
 const crashLog = join(dirname(dbPath), 'host-errors.log')
 
@@ -293,12 +309,13 @@ function record(kind: string, err: unknown): void {
   const line = `[${new Date().toISOString()}] ${kind}: ${e?.stack ?? String(err)}\n`
   console.error(`[agent-host] ${kind}`, e?.stack ?? err)
   try {
-    // host.log와 같은 규칙으로 한 세대만 남긴다 — 거절이 반복되는 날 이 파일이
-    // 사용자 폴더를 조용히 먹는다 (회전 없는 append는 상한이 없다)
+    // Keeps only one generation, the same rule as host.log — on a day when rejections repeat,
+    // this file would otherwise silently eat up the user's folder (appending with no rollover has
+    // no cap)
     rotateIfLarge(crashLog)
     appendFileSync(crashLog, line)
   } catch {
-    // 로그도 못 남기는 상황이면 stderr가 마지막 수단이다 — 여기서 또 던지지 않는다
+    // If even the log cannot be written, stderr is the last resort — nothing is thrown again here
   }
 }
 
@@ -311,17 +328,18 @@ process.on('uncaughtException', (err) => {
 const shutdown = async () => {
   updates.stop()
   /*
-   * **PTY를 먼저 끊는다.** 예전엔 mgr.disposeAll()을 await한 뒤였는데, Tauri 수퍼바이저가
-   * 주는 예산은 3초고 그 안에 안 끝나면 host가 SIGKILL당한다 — 그러면 이 두 줄이 아예
-   * 실행되지 않고 데브 서버가 고아로 남는다. 세션 정리는 늦어도 프로세스가 남지 않지만
-   * PTY는 남는다. 먼저 할 일은 남는 쪽이다.
+   * **The PTY is cut off first.** This used to come after awaiting mgr.disposeAll(), but the Tauri
+   * supervisor's budget is 3 seconds, and if this does not finish within that, the host gets
+   * SIGKILLed — meaning these two lines never run at all, and a dev server is left orphaned.
+   * Cleaning up sessions late still leaves no process behind, but a PTY does. Whichever one lingers
+   * is the one that has to go first.
    *
-   * (PTY 자식은 setsid()로 자기 세션이라 수퍼바이저의 그룹 kill도 못 미친다 — 여기서
-   *  안 죽이면 아무도 안 죽인다.)
+   * (A PTY child has its own session via setsid(), so even the supervisor's group kill cannot reach
+   *  it — if this does not kill it, nothing else will.)
    */
   terminals.disposeAll()
   commandRuns.disposeAll()
-  // 앱 프로세스는 세션 정리와 **나란히** 내린다 — 유예(1초)를 세션 정리 시간 안에 겹쳐 쓴다
+  // App processes are shut down **in parallel** with session cleanup — the grace period (1 second) overlaps with the session cleanup time
   const appsDown = externalApps.dispose()
   await mgr.disposeAll()
   await appsDown
@@ -330,7 +348,7 @@ const shutdown = async () => {
   await views.dispose()
   await server.close()
   store.close()
-  // 왜 끝났는지가 다음 조사의 첫 줄이 된다 — 조용히 사라지지 않는다
+  // Why it ended becomes the first line of the next investigation — it never disappears silently
   console.error(`[agent-host] shutting down (pid ${process.pid})`)
   stopLog()
   process.exit(0)
@@ -339,13 +357,14 @@ process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
 /**
- * 부모(Tauri 수퍼바이저)가 사라지면 스스로 종료한다.
+ * Shuts itself down when the parent (the Tauri supervisor) disappears.
  *
- * 수퍼바이저가 stdin을 파이프로 열어두므로, 앱이 어떤 이유로 죽든 — 정상 종료든
- * 크래시든 SIGKILL이든 — 이 파이프가 닫히고 EOF가 온다. 종료 훅에만 기대면
- * 강제 종료 시 host가 고아로 남아 포트를 물고 있게 된다 (실측으로 확인).
- * **명시적 플래그로만 켠다** — stdin이 /dev/null인 경우(다른 스크립트가 띄울 때)에도
- * EOF가 즉시 오므로, TTY 여부로 판단하면 엉뚱하게 자살한다 (실측으로 확인).
+ * Since the supervisor keeps stdin open as a pipe, whatever reason the app dies for — a normal
+ * exit, a crash, SIGKILL — this pipe closes and EOF arrives. Relying only on an exit hook would
+ * leave the host orphaned and still holding its port when force-killed (confirmed by measurement).
+ * **Only turned on by an explicit flag** — when stdin is /dev/null (when some other script launches
+ * it), EOF also arrives immediately, so deciding this by whether it is a TTY would make it kill
+ * itself for the wrong reason (confirmed by measurement).
  */
 if (values['watch-parent']) {
   process.stdin.resume()

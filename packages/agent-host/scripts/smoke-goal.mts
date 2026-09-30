@@ -1,12 +1,15 @@
 /**
- * L3 스모크: 골 상태가 실제로 흐르는가 (2026-09-07 — 도그푸딩 "배지가 안 보였어").
+ * L3 smoke test: does goal state actually flow through (2026-09-07 — dogfooding: "the badge did
+ * not show up").
  *
- * claude: 실측 결론 — 헤드리스 SDK에 /goal이 **없다** (원류에 active_goal 0건,
- *   모델이 역할극만 함). 어댑터가 가로채 정직하게 거절하는지를 본다.
- * codex: /goal은 우리 가로채기 → thread/goal/set·get·clear. set의 updated 알림이
- *   goal 이벤트가 되는지, clear가 null로 오는지 — 토큰 없이 프로토콜만으로 본다.
+ * claude: measured conclusion — the headless SDK **has no** /goal (zero active_goal events at the
+ *   source; the model only role-played having a goal). Checks that the adapter intercepts it and
+ *   refuses honestly.
+ * codex: /goal is our own interception → thread/goal/set, get, clear. Checks, using only the
+ *   protocol with no token, whether set's updated notification becomes a goal event, and whether
+ *   clear comes back as null.
  *
- * 실행: npx tsx packages/agent-host/scripts/smoke-goal.mts [claude|codex]
+ * Run with: npx tsx packages/agent-host/scripts/smoke-goal.mts [claude|codex]
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -63,10 +66,11 @@ async function codexSmoke() {
 
 async function claudeSmoke() {
   /*
-   * 실측 결론 (2026-09-07): 헤드리스 SDK에 /goal은 **없다** — 원류 프로브에서
-   * active_goal 0건, local_command_output 0건이었고 모델이 골 역할극만 했다.
-   * 그래서 어댑터가 가로채 정직한 한 줄을 답한다. 이 스모크는 그 거절과,
-   * SDK가 골 API를 열면 다시 잴 것(active_goal 수신 배선은 이미 있다)을 기록한다.
+   * Measured conclusion (2026-09-07): the headless SDK **has no** /goal — a probe at the source
+   * found zero active_goal events, zero local_command_output events, and the model only
+   * role-played having a goal. So the adapter intercepts it and answers with one honest line.
+   * This smoke test records that refusal, and the note that this should be measured again once
+   * the SDK exposes a goal API (the wiring to receive active_goal already exists).
    */
   const { ClaudeAdapter } = await import('../src/adapters/claude/index.js')
   const cwd = mkdtempSync(join(tmpdir(), 'cc-goal-c-'))

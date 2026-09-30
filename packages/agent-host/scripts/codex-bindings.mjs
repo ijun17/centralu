@@ -1,17 +1,18 @@
 /**
- * A-1: Codex app-server 프로토콜 계약 검증.
+ * A-1: verifies the Codex app-server protocol contract.
  *
- * 생성된 바인딩(642개, 2.6MB)은 **커밋하지 않는다** — 통째로 커밋하면 리뷰가 봐야 할
- * 신호가 노이즈에 묻힌다. 대신 `protocol-contract.json`(우리가 실제로 쓰는 메서드 목록)만
- * 커밋하고, 생성물과 대조해 **사라진 것**을 알린다 (변경 축 C4: 프로토콜 변동 감지).
+ * The generated bindings (642 files, 2.6MB) are **never committed** — committing them whole would
+ * bury the signal a review needs to see under noise. Instead, only `protocol-contract.json` (the
+ * list of methods we actually use) is committed, and **anything that has disappeared** is reported
+ * by diffing it against the generated output (change axis C4: protocol drift detection).
  *
- * 예외 하나: `generated/Verbosity.ts`는 커밋한다 (#54). 어댑터가 컴파일 타임에 import해서
- * (CODEX_VERBOSITIES의 satisfies 드리프트 덫), 없으면 tsc가 도는 모든 곳 — 특히 release의
- * `pnpm verify` — 이 깨진다. 여기서 재생성하면 그 파일도 갱신되므로, codex가 단계를 바꾸면
- * git diff와 컴파일 에러가 함께 드러낸다.
+ * One exception: `generated/Verbosity.ts` is committed (#54). The adapter imports it at compile
+ * time (the satisfies drift trap on CODEX_VERBOSITIES), and without it every place tsc runs would
+ * break — especially `pnpm verify` in release. Regenerating it here also updates that file, so if
+ * codex changes its enum values, both a git diff and a compile error surface it.
  *
- *   pnpm codex:bindings          — 타입 생성 (로컬 참고용, gitignore됨) + 계약 검증
- *   pnpm codex:bindings --check  — 계약 검증만 (CI용)
+ *   pnpm codex:bindings          — generates types (for local reference, gitignored) + verifies the contract
+ *   pnpm codex:bindings --check  — verifies the contract only (for CI)
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, cpSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -22,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 const ADAPTER = join(ROOT, 'packages/agent-host/src/adapters/codex')
 const CONTRACT = join(ADAPTER, 'protocol-contract.json')
-const KEEP = !process.argv.includes('--check') // --check는 생성물을 남기지 않는다
+const KEEP = !process.argv.includes('--check') // --check does not keep the generated output
 
 const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'))
 const version = execFileSync('codex', ['--version'], { encoding: 'utf8' }).trim()
@@ -35,7 +36,7 @@ try {
   process.exit(1)
 }
 
-/** 생성된 TS 전체에서 프로토콜 문자열 리터럴을 긁어 모은다 */
+/** Scrapes protocol string literals out of the entire generated TS output */
 function literalsIn(dir) {
   const found = new Set()
   const walk = (d) => {
@@ -71,13 +72,15 @@ for (const [key, label] of groups) {
 }
 
 /*
- * 메서드 **이름**만 대조하는 것으로는 부족하다는 걸 실측이 보여줬다 (2026-09-07):
- * `turn/interrupt`는 그대로 있었지만 turnId가 필수 인자로 늘어 있었고, 우리는 threadId만
- * 보내며 몇 달을 "멈췄겠지" 하고 있었다 — 스톱이 한 번도 안 먹었다.
+ * Measurement showed that comparing only method **names** is not enough (2026-09-07):
+ * `turn/interrupt` was still there, but turnId had been added as a required argument, and for
+ * months we had only been sending threadId while assuming "it must be stopping" — Stop never
+ * actually worked once.
  *
- * 그래서 **우리가 보내는 인자 목록**도 계약에 적고, 생성된 파라미터 타입과 양방향으로 맞춘다:
- *   - 타입의 필수 필드인데 우리가 안 보내면  → 서버가 거절한다 (그 버그)
- *   - 우리가 보내는데 타입에 없으면          → 이름이 바뀐 것이다 (조용히 무시된다)
+ * So **the list of arguments we send** is also recorded in the contract, and checked both ways
+ * against the generated parameter type:
+ *   - a field required by the type that we do not send  → the server rejects it (that bug)
+ *   - a field we send that is not in the type            → its name changed (silently ignored)
  */
 function paramFields(src) {
   const open = src.indexOf('= {')
@@ -145,7 +148,7 @@ if (missing.length > 0) {
 }
 
 if (KEEP) {
-  // 로컬 참고용으로만 남긴다 (gitignore됨 — 타입체크·린트 대상도 아니다)
+  // Kept only for local reference (gitignored — not subject to typecheck or lint either)
   const dest = join(ADAPTER, 'generated')
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })

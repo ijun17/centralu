@@ -8,16 +8,19 @@ import { ExternalApps, type RuntimeTiming } from './apps/external/runtime.js'
 import { PROJECT_APPS, plantApp, until } from './apps/external/test-helpers.js'
 
 /**
- * 외부 앱 목록이 달라졌다는 방송 (M4 A-8) — main.ts가 쓰는 `onExternalAppListChanged` 그대로.
+ * The external app list "changed" broadcast (M4 A-8) — the exact `onExternalAppListChanged` that
+ * main.ts uses.
  *
- * 사이드바의 앱 줄과 고정 화면의 "뜨는 중·멈춤·이유"는 이 방송이 올 때 `apps.list`를 다시 읽는다.
- * 그래서 여기서 보는 것은 두 가지다. 목록이 달라지는 길(발견, 신뢰, 앱의 수명)마다 방송이
- * 나가는가, 그리고 나간 순간 `list()`가 이미 새 모양인가. 방송을 받은 쪽이 옛 목록을 읽으면
- * 방송이 없는 것과 같다. 그래서 방송마다 그 순간의 목록을 적어 두고 그것으로 판정한다.
+ * The sidebar's app row and the fixed view's "starting, stopped, reason" re-read `apps.list` when
+ * this broadcast arrives. So there are two things checked here: does a broadcast go out on every
+ * path where the list changes (discovery, trust, an app's lifecycle), and is `list()` already in
+ * its new shape at the moment the broadcast goes out. If the receiver reads a stale list, that is
+ * the same as no broadcast at all. So each broadcast records the list as of that moment, and
+ * judgment is based on that.
  *
- * 폴더의 변화는 감시의 fs 이벤트를 기다리지 않고 `refresh()`로 직접 훑는다. 감시가 부르는 것과
- * 같은 rescan이다. 병렬 실행에서 macOS의 fs 이벤트가 몇 초씩 늦는 것이 실측됐고(c772e49),
- * 감시 자체는 discovery.test.ts가 본다.
+ * Folder changes are scanned directly with `refresh()` instead of waiting on the watcher's fs
+ * events — the same rescan the watcher calls. Measured (c772e49): macOS fs events can lag by
+ * several seconds under parallel execution. The watcher itself is covered by discovery.test.ts.
  */
 
 const FIXTURE = fileURLToPath(new URL('./apps/external/test-fixtures/app.mjs', import.meta.url))
@@ -27,7 +30,7 @@ let dataRoot = ''
 let projRoot = ''
 let projects: { id: string; path: string; trusted: boolean }[] = []
 let rt: ExternalApps
-/** 방송이 나갈 때마다, 그 순간의 목록을 `앱:상태`로 */
+/** Each time a broadcast goes out, the list as of that moment, as `app:status` */
 let heard: string[] = []
 
 const snapshot = () =>
@@ -49,7 +52,7 @@ const make = (timing: Partial<RuntimeTiming> = {}) => {
   return rt
 }
 
-/** 알림은 한 틱 뒤에 모여서 나간다 */
+/** Notifications are collected and go out one tick later */
 const settle = () => new Promise((r) => setTimeout(r, 30))
 
 const plant = (id: string, mode = 'normal', over: Record<string, unknown> = {}) =>
@@ -70,8 +73,8 @@ afterEach(async () => {
   rmSync(fixture, { recursive: true, force: true })
 })
 
-describe('발견', () => {
-  it('앱 폴더의 생김·고침·사라짐마다 방송하고, 방송한 순간의 목록이 이미 그 모양이다', async () => {
+describe('discovery', () => {
+  it('broadcasts on each appearance, edit, or disappearance of an app folder, and the list is already in that shape by the time it broadcasts', async () => {
     make().refresh()
     await settle()
     expect(heard).toEqual([])
@@ -81,7 +84,7 @@ describe('발견', () => {
     await settle()
     expect(heard).toEqual(['notes:stopped'])
 
-    // 매니페스트를 고쳤다 — 상태는 같아도 목록(이름)이 달라졌으니 방송한다
+    // The manifest was edited — even though status is unchanged, the list (name) changed, so it broadcasts
     plant('notes', 'normal', { name: 'Renamed notes' })
     rt.refresh()
     await settle()
@@ -94,7 +97,7 @@ describe('발견', () => {
     expect(heard).toEqual(['notes:stopped', 'notes:stopped', ''])
   })
 
-  it('아무것도 바뀌지 않은 다시 훑기는 조용하다', async () => {
+  it('a rescan where nothing changed is quiet', async () => {
     plant('notes')
     make().refresh()
     await settle()
@@ -107,8 +110,8 @@ describe('발견', () => {
   })
 })
 
-describe('신뢰', () => {
-  it('신뢰를 끄고 켜면 방송하고, 등록에서 빠진 프로젝트의 앱이 사라지는 것도 방송한다', async () => {
+describe('trust', () => {
+  it('broadcasts when trust is turned off and on, and also broadcasts an app disappearing when its project is removed from the registry', async () => {
     plant('notes')
     make().refresh()
     await settle()
@@ -124,7 +127,7 @@ describe('신뢰', () => {
     await settle()
     expect(heard).toEqual(['notes:untrusted', 'notes:stopped'])
 
-    // 프로젝트를 지웠다 — 그 범위는 훑지 않고 통째로 빠진다
+    // The project was deleted — its scope is not scanned, it just drops out entirely
     projects = []
     rt.refresh()
     await settle()
@@ -132,8 +135,8 @@ describe('신뢰', () => {
   })
 })
 
-describe('앱의 수명', () => {
-  it('뜨는 중 → 떴다 → 쉬어서 내렸다를 차례로 방송한다', async () => {
+describe("an app's lifecycle", () => {
+  it('broadcasts starting → running → shut down for idle, in order', async () => {
     plant('notes')
     make({ idleMs: 200 }).refresh()
     await settle()
@@ -146,7 +149,7 @@ describe('앱의 수명', () => {
     await until(() => heard.at(-1), (h) => h === 'notes:stopped', 3000)
   })
 
-  it('못 뜬 앱은 이유와 함께 crashed, 연달아 못 뜨면 failed, 다시 시작하면 stopped를 방송한다', async () => {
+  it('broadcasts crashed with a reason for an app that fails to start, failed after repeated failures, and stopped once it is restarted', async () => {
     plant('broken', 'crash-on-start')
     make().refresh()
     await settle()
@@ -163,7 +166,7 @@ describe('앱의 수명', () => {
     await until(() => heard.at(-1), (h) => h === 'broken:stopped')
   })
 
-  it('떠 있던 앱이 호출 중에 죽으면 방송한다', async () => {
+  it('broadcasts when a running app dies mid-call', async () => {
     plant('dies', 'mediation')
     make().refresh()
     await settle()
@@ -174,7 +177,7 @@ describe('앱의 수명', () => {
     await until(() => heard.at(-1), (h) => h === 'dies:crashed')
   })
 
-  it('다시 시작해서 이유가 지워진 앱(crashed → stopped)도 방송한다', async () => {
+  it('also broadcasts an app whose reason was cleared by restarting (crashed → stopped)', async () => {
     plant('dies', 'mediation')
     make().refresh()
     await settle()

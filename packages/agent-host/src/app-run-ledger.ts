@@ -2,11 +2,12 @@ import type { RunLedger } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
 
 /**
- * 외부 앱 런타임의 실행 기록 자리(`RunLedger`)를 저장소로 채운다 (M4 A-6).
+ * Backs the external app runtime's run record slot (`RunLedger`) with the store (M4 A-6).
  *
- * 런타임은 Store를 임포트하지 않는다(`host-app-runtime-physics-only`) — 필요한 모양을 선언하고,
- * 코어가 이 한 장으로 잇는다. host의 main과 테스트가 같은 이음새를 쓴다: 테스트만의 이음새가
- * 따로 있으면, 테스트가 초록이어도 진짜 host의 선은 끊겨 있을 수 있다.
+ * The runtime does not import Store (`host-app-runtime-physics-only`) — it declares the shape it
+ * needs, and the core wires it up in this one file. The host's main and the tests use the same
+ * seam: if the tests had their own separate seam, they could stay green while the real host's
+ * wiring was actually broken.
  */
 export function storeRunLedger(store: Store): RunLedger {
   return {

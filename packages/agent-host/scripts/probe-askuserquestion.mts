@@ -1,14 +1,15 @@
 /**
- * AskUserQuestion을 **실제로 어떻게 받아 답하는가**를 재는 프로브.
+ * A probe measuring **how AskUserQuestion is actually received and answered**.
  *
- * 오케스트레이터 창에서 이 도구가 선택지 UI 없이 원시 JSON으로 흘렀고,
- * 도구는 "사용자가 답하지 않음"으로 돌아왔다. 고치기 전에 길이 몇 개인지부터 본다:
+ * In the orchestrator window, this tool leaked through as raw JSON with no choice UI, and the
+ * tool came back as "the user did not answer." Before fixing it, first check how many paths there
+ * are:
  *
- *   (a) canUseTool로 오는가            → 온다면 우리가 가로채 답할 수 있다
- *   (b) onUserDialog로 오는가          → 공식 경로. dialog_kind 이름이 필요하다
- *   (c) 그냥 실행되고 끝나는가          → 둘 다 아니면 붙일 자리가 없다
+ *   (a) does it come through canUseTool           → if so we can intercept and answer it
+ *   (b) does it come through onUserDialog          → the official path. requires the dialog_kind name
+ *   (c) does it just run to completion             → if neither, there is nowhere to hook in
  *
- * 실행: node --import tsx packages/agent-host/scripts/probe-askuserquestion.mts
+ * Run with: node --import tsx packages/agent-host/scripts/probe-askuserquestion.mts
  */
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { mkdtempSync } from 'node:fs'
@@ -35,7 +36,7 @@ const opts: Record<string, unknown> = {
 }
 
 if (KINDS) {
-  // 선언한 종류만 CLI가 내보낸다 (없으면 dialog 없는 동작으로 degrade)
+  // The CLI only emits the kinds that are declared here (without any, it degrades to behavior with no dialog)
   opts.supportedDialogKinds = [
     'ask_user_question',
     'askUserQuestion',

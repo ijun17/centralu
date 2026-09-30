@@ -11,8 +11,8 @@ import { EventLog } from './event-log.js'
 import { createHttpHandler, type HttpGate } from './http.js'
 
 /**
- * WS 서버 (docs/protocol.md §1). dev/prod 동일 — Tauri는 이 프로세스를 spawn만 한다.
- * 보안: loopback 바인딩 + 기동 시 생성한 토큰 핸드셰이크.
+ * The WS server (docs/protocol.md §1). Identical in dev and prod — Tauri only spawns this process.
+ * Security: loopback binding + a token handshake generated at startup.
  */
 export type RpcHandler = (method: string, params: unknown) => Promise<unknown>
 
@@ -27,17 +27,19 @@ export const DEFAULT_ALLOWED_ORIGINS = [
 ] as const
 
 /**
- * `CC_HOST_ALLOWED_ORIGINS` (쉼표 구분) → allowedOrigins 오버라이드.
+ * `CC_HOST_ALLOWED_ORIGINS` (comma-separated) → overrides allowedOrigins.
  *
- * 기본 목록은 우리가 아는 dev 포트와 Tauri WebView뿐이다. 그 밖의 주소에서 붙어야 할 때
- * — 다른 포트로 vite를 띄웠거나, 리버스 프록시 뒤에서 열어봤거나 — 지금까지는 host를
- * 고쳐 다시 빌드하는 것 말고 방법이 없었다. 게다가 막혔다는 사실이 화면에는
- * `Disconnected`로만 보여서, 탈출구가 없다는 것조차 알기 어려웠다.
+ * The default list is only the dev ports and Tauri WebView we know about. When a connection has to
+ * come from somewhere else — vite started on a different port, or opened behind a reverse proxy —
+ * there was until now no way to do that other than editing the host and rebuilding it. On top of
+ * that, being blocked only ever showed up on screen as `Disconnected`, making it hard to even know
+ * there was a way out.
  *
- * **빈 값은 오버라이드가 아니라 "설정 안 함"이다.** 빈 문자열이나 쉼표뿐인 값을 그대로
- * 통과시키면 허용목록이 공집합인 host가 되어 아무도 못 붙는다 — 오타 하나의 대가로는
- * 너무 크고, 환경변수가 실수로 비는 일은 흔하다. 항목별 공백도 같은 이유로 버린다:
- * 빈 문자열은 originAllowed에서 "Origin 헤더 없음"과 같은 뜻이라 목록에 있으면 안 된다.
+ * **An empty value is "not configured," not an override.** Passing an empty string or a
+ * comma-only value straight through would turn the allow list into an empty set, and no one could
+ * connect — too big a cost for one typo, and an environment variable ending up empty by accident
+ * is common. Whitespace-only entries are dropped for the same reason: an empty string means "no
+ * Origin header" to originAllowed, and it must never end up in this list.
  */
 export function parseAllowedOrigins(raw: string | undefined): string[] | undefined {
   const parsed = raw
@@ -53,8 +55,9 @@ export type HostServerOptions = {
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
   /**
-   * 같은 포트의 HTTP 길 (M4 P-2). 모든 길이 실행마다 새로 만든 비밀 칸 뒤에 있다(http.ts).
-   * 없으면 모든 HTTP 요청이 404다. WebSocket 업그레이드는 이것과 무관하게 아래 규칙을 따른다.
+   * The HTTP door on the same port (M4 P-2). Every route sits behind a secret path generated fresh
+   * for that run (http.ts). Without one, every HTTP request is a 404. WebSocket upgrades follow the
+   * rule below independently of this.
    */
   http?: HttpGate
 }
@@ -67,27 +70,30 @@ export class HostServer {
   private listenError: ((err: Error) => void) | null = null
   private readonly allowedOrigins: ReadonlySet<string>
   /**
-   * 이미 적어 준 거부 origin — 같은 문장을 5초마다 반복하지 않으려고 (아래 verifyClient).
+   * Rejected origins already logged — so the same message does not repeat every 5 seconds (see
+   * verifyClient below).
    *
-   * **상한이 있다.** 이 집합의 열쇠는 요청이 보낸 Origin 헤더, 즉 바깥에서 고르는 값이다.
-   * 무한히 담으면 loopback에 붙을 수 있는 쪽이 매번 다른 Origin으로 두드려 host의 메모리를
-   * 늘릴 수 있다 — 토큰도 필요 없다(같은 자리에서 종료 멈춤도 그랬다). 서로 다른 origin이
-   * 64개를 넘길 만큼 나올 일은 정상 사용에서는 없으므로, 넘으면 비우고 다시 센다.
-   * 잃는 것은 "이 origin은 이미 적었다"는 기억뿐이라 최악이 로그 한 줄 더 남는 것이다.
+   * **This has a cap.** This set's keys are the Origin header a request sends, a value chosen from
+   * outside. Storing them without bound would let anyone able to reach loopback knock with a
+   * different Origin each time and grow the host's memory — no token even required (the same spot
+   * used to hang shutdown too). More than 64 distinct origins never comes up in normal use, so once
+   * exceeded the set is cleared and counting starts over. All that is lost is the memory of "this
+   * origin was already logged," so the worst case is one extra log line.
    */
   private readonly loggedRejections = new Set<string>()
   private static readonly MAX_LOGGED_REJECTIONS = 64
 
   constructor(private opts: HostServerOptions) {
     /*
-     * 공백뿐인 토큰은 **자격증명이 아니다** — 브라우저가 이미 그렇게 판정한다.
+     * A whitespace-only token is **not a credential** — the browser already treats it that way.
      *
-     * apps/web/src/bootstrap.ts의 browserHostOptions는 VITE_HOST_TOKEN을 trim한 뒤
-     * 비면 MissingHostTokenError를 던진다. 여기서 trim 없이 `!opts.token`만 보면
-     * `CC_HOST_TOKEN=" "` 하나로 양쪽 판정이 갈린다: host는 " "를 정상 토큰으로 받아
-     * 몇 번만 찍어보면 맞는 비밀로 돌고, UI는 ''를 보내므로 아예 붙지 못한다.
-     * 실제로 재현했다 — host는 listen까지 갔고, UI는 MissingHostTokenError를 던졌다.
-     * 두 쪽이 같은 규칙을 쓰게 맞춘다.
+     * apps/web/src/bootstrap.ts's browserHostOptions trims VITE_HOST_TOKEN and throws
+     * MissingHostTokenError if it comes out empty. If this side only checked `!opts.token` with no
+     * trim, a single `CC_HOST_TOKEN=" "` would split the two sides' judgment: the host would accept
+     * " " as a normal token and run with it as the correct secret after just a few guesses, while
+     * the UI sends '' and never connects at all. This was actually reproduced — the host got as far
+     * as listen, and the UI threw MissingHostTokenError. Both sides are aligned to use the same
+     * rule.
      */
     if (!opts.token.trim()) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
@@ -98,16 +104,17 @@ export class HostServer {
         const origin = info.req.headers.origin
         const ok = this.originAllowed(origin)
         /*
-         * 거부를 **적는다**. 브라우저는 업그레이드 403을 페이지 스크립트에 넘겨주지
-         * 않으므로 화면에는 그냥 `Disconnected`가 뜨고 재시도만 돈다 — "host가 꺼져
-         * 있다"와 구별이 안 된다. host 로그에도 아무것도 없으면 어디서 막혔는지
-         * 알아낼 방법이 사람에게 남지 않는다. 거부당한 origin을 그대로 찍어야
-         * CC_HOST_ALLOWED_ORIGINS에 무엇을 넣어야 하는지가 그 한 줄에서 나온다.
+         * The rejection **is logged.** The browser never hands the upgrade's 403 to the page
+         * script, so the screen just shows `Disconnected` and keeps retrying — indistinguishable
+         * from "the host is off." If the host log has nothing either, there is no way left for a
+         * person to find out where it was blocked. Printing the rejected origin as is means that
+         * one line alone tells them what to put in CC_HOST_ALLOWED_ORIGINS.
          *
-         * **origin당 한 번만 적는다.** 막힌 UI는 포기하지 않는다 — rpc-client의 백오프는
-         * 5초에서 멈추므로(web/rpc-client.ts) 계속 켜 두면 똑같은 문장이 시간당 700줄
-         * 넘게 쌓인다. 버그 신고에 붙이라고 안내하는 바로 그 host.log다. 두 번째 줄부터는
-         * 새로 알려주는 것이 없으니 첫 줄만 남긴다.
+         * **Logged only once per origin.** A blocked UI does not give up — rpc-client's backoff
+         * caps out at 5 seconds (web/rpc-client.ts), so leaving it running would pile up more than
+         * 700 identical lines an hour. This is the exact host.log people are told to attach to a bug
+         * report. From the second line on there is nothing new to say, so only the first line is
+         * kept.
          */
         if (!ok) {
           const key = origin ?? ''
@@ -125,24 +132,24 @@ export class HostServer {
       },
     })
     this.wss.on('connection', (ws) => this.onConnection(ws))
-    // ws는 http 서버 에러를 자기 인스턴스로 재방출한다 — 여기서 안 받으면 프로세스가 죽는다
+    // ws re-emits http server errors on its own instance — if this is not received here, the process dies
     this.wss.on('error', (err) => this.listenError?.(err))
   }
 
   /**
-   * origin 경계 (docs/security-boundaries.md).
+   * The origin boundary (docs/security-boundaries.md).
    *
-   * **Origin이 없거나 빈 것을 통과시키는 것은 실수가 아니라 결정이다.** 브라우저는
-   * 교차 출처 요청에 Origin을 반드시 붙이므로, 헤더가 아예 없는 연결은 브라우저가
-   * 아니다 — 네이티브 클라이언트(Tauri WebView가 아닌 경로, 테스트의 ws 클라이언트,
-   * curl)다. 그런 쪽은 origin으로 막을 수 있는 대상이 아니고, 어차피 loopback
-   * 바인딩 + 토큰 핸드셰이크가 막는다. 여기서 없는 Origin을 거부하면 막히는 것은
-   * 공격자가 아니라 우리 자신의 테스트와 사이드카뿐이다.
+   * **Letting a missing or empty Origin through is a decision, not an oversight.** A browser always
+   * attaches Origin to a cross-origin request, so a connection with no header at all is not a
+   * browser — it is a native client (a path other than the Tauri WebView, a test's ws client,
+   * curl). That kind of client cannot be blocked by origin anyway, and loopback binding plus the
+   * token handshake already block it regardless. Rejecting a missing Origin here would block not
+   * an attacker but only our own tests and sidecars.
    *
-   * 반면 문자열 `'null'`은 **있는 Origin이다.** sandbox iframe이나 file:// 페이지가
-   * 실제로 보내는 값이라 없는 것과 같이 취급하면 안 된다 — 그래서 명시적으로 막는다.
-   * server.test.ts가 origin 10종을 찌른다 — 허용목록 7개 전부, Origin 없음,
-   * `http://evil.example`, 문자열 `'null'`. 동작은 문서와 일치한다.
+   * The string `'null'`, on the other hand, **is an Origin that is present.** A sandbox iframe or a
+   * file:// page genuinely sends this value, so it must not be treated the same as missing — hence
+   * it is blocked explicitly. server.test.ts pokes at 10 kinds of origin — all 7 on the allow list,
+   * no Origin, `http://evil.example`, and the string `'null'`. Behavior matches the docs.
    */
   private originAllowed(origin: string | undefined): boolean {
     if (origin === undefined || origin === '') return true
@@ -167,7 +174,7 @@ export class HostServer {
         }
         reject(err)
       }
-      // http와 ws 양쪽에서 올 수 있다 (ws가 http 에러를 재방출)
+      // Can come from either http or ws (ws re-emits http errors)
       this.listenError = onError
       this.http.once('error', onError)
       this.http.listen(this.opts.port, '127.0.0.1', () => {
@@ -180,19 +187,20 @@ export class HostServer {
   }
 
   /**
-   * 닫기.
+   * Closing.
    *
-   * **`this.clients`가 아니라 `wss.clients`를 순회한다.** 앞의 집합은 hello를 통과한
-   * 소켓만 담는다 — 방송 대상이라서 그렇다. 그런데 업그레이드는 됐지만 아직 인증 전인
-   * 소켓도 http 서버 입장에서는 살아 있는 연결이라, 안 닫으면 `http.close()`의 콜백이
-   * 영영 안 온다.
+   * **Iterates `wss.clients`, not `this.clients`.** The latter set holds only sockets that passed
+   * hello — that is fine for broadcasting. But a socket that finished the upgrade but has not
+   * authenticated yet is still, from the http server's point of view, a live connection, and if it
+   * is not closed, `http.close()`'s callback never comes.
    *
-   * 테스트 얘기가 아니다 — 실측했다. 붙기만 하고 hello를 안 보낸 소켓 **하나**가 있을 때
-   * `this.clients`판 close()는 5초를 기다려도 안 끝났고(그대로 두면 영영), `wss.clients`판은
-   * 2ms에 끝났다. 즉 host 종료를 막는 데 인증도 필요 없다. 같은 것이 테스트에서는 훅
-   * 타임아웃으로 나타난다: origin 검사를 일부러 무력화해 두 소켓을 열린 채로 남기면
-   * `afterEach`가 각각 10초씩 걸려 파일이 644ms에서 20.54s가 됐고, 이 줄을 고치자
-   * 같은 조건에서 617ms로 돌아왔다.
+   * This is not a hypothetical — it was measured. With **one** socket that had connected but never
+   * sent hello, close() on the `this.clients` version did not finish even after waiting 5 seconds
+   * (and never would have, left alone), while the `wss.clients` version finished in 2ms. In other
+   * words, blocking host shutdown does not even require authentication. The same thing shows up in
+   * tests as a hook timeout: deliberately disabling the origin check to leave two sockets open made
+   * `afterEach` take 10 seconds each, pushing the file from 644ms to 20.54s, and fixing this line
+   * brought it back to 617ms under the same conditions.
    */
   async close(): Promise<void> {
     for (const c of this.wss.clients) c.close()
@@ -200,7 +208,7 @@ export class HostServer {
     await new Promise<void>((r) => this.http.close(() => r()))
   }
 
-  /** 이벤트 방송 — seq를 부여해 링 버퍼에 남기고 연결된 클라이언트에 push */
+  /** Broadcasts an event — assigns a seq, keeps it in the ring buffer, and pushes it to connected clients */
   broadcast(event: NormalizedEvent): void {
     const entry = this.log.append(event)
     const frame = JSON.stringify({ kind: 'event', seq: entry.seq, event })
@@ -208,9 +216,10 @@ export class HostServer {
   }
 
   /**
-   * 터미널 출력 push.
-   * 이벤트 로그(seq 링 버퍼)를 태우지 않는다 — 출력량이 대화 이벤트와 자릿수가 다르고,
-   * 놓친 부분은 다시 붙을 때 host의 스크롤백에서 통째로 받는다.
+   * Pushes terminal output.
+   * Does not run this through the event log (the seq ring buffer) — the volume of output is orders
+   * of magnitude different from conversation events, and anything missed is received whole from the
+   * host's scrollback on reconnect.
    */
   pushTerminal(frame: { terminalId: string; data?: string; exitCode?: number | null }): void {
     const payload =
@@ -262,7 +271,7 @@ export class HostServer {
             currentSeq: this.log.currentSeq,
           }),
         )
-        // 유실분 재전송 — 재연결이 상태 유실이 되지 않게 (docs/protocol.md §1)
+        // Resend what was missed — so that reconnecting never loses state (docs/protocol.md §1)
         for (const e of events) ws.send(JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
         return
       }
@@ -298,16 +307,17 @@ export class HostServer {
 
 
 /**
- * 프로토콜이 아는 코드만 나간다 (도그푸딩 2026-09-10).
+ * Only a code the protocol knows about ever goes out (dogfooding, 2026-09-10).
  *
- * 여기 던져지는 실패의 대부분은 **Node의 실패**다 — `fs.stat`은 `code: 'ENOENT'`를,
- * `spawn`은 `'EACCES'`를 달고 온다. 그 글자를 그대로 봉투에 실으면 프로토콜 enum에 없는
- * 값이라 **클라이언트가 프레임을 통째로 버린다**: 실패가 실패로 도착하는 게 아니라
- * 아예 도착하지 않고, 그 호출을 기다리던 화면은 30초 타임아웃까지 '불러오는 중'에
- * 멈춰 있었다 (파일 링크가 빈 화면으로 보인 이유가 이것이다).
+ * Most of the failures thrown here are **Node's own failures** — `fs.stat` comes with
+ * `code: 'ENOENT'`, `spawn` with `'EACCES'`. Putting that string into the envelope as is means a
+ * value the protocol enum does not have, and **the client drops the entire frame**: instead of a
+ * failure arriving as a failure, nothing arrives at all, and the view waiting on that call sat
+ * stuck on "loading" until the 30-second timeout (this is why a file link showed up as a blank
+ * screen).
  *
- * 그래서 모르는 코드는 `internal`로 갈아 끼운다. **설명은 message가 그대로 나른다** —
- * 사람이 읽는 문장에서 'ENOENT'는 사라지지 않는다.
+ * So an unrecognized code is swapped for `internal`. **The message still carries the explanation
+ * as is** — 'ENOENT' does not disappear from the sentence a person reads.
  */
 function errorCode(raw: unknown): ProtocolError['code'] {
   const known = ProtocolErrorCode.safeParse(raw)

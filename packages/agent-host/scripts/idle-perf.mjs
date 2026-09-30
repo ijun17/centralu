@@ -1,6 +1,6 @@
 /**
- * T6-2: 유휴 성능 1차 측정 (docs/product-spec.md §7.1 목표 대비).
- * host + 브라우저 없이 host 프로세스만 측정한다 (UI 측정은 G5에서 실물로).
+ * T6-2: first idle-performance measurement (against the docs/product-spec.md §7.1 target).
+ * Measures only the host process, without a host + browser (UI measurement happens for real in G5).
  */
 import { spawn } from 'node:child_process'
 import { execFile } from 'node:child_process'

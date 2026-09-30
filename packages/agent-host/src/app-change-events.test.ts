@@ -4,10 +4,13 @@ import { APP_CHANGE_WINDOW_MS, broadcastAppChanges } from './app-change-events.j
 import type { AppCaller, AppRef } from './apps/external/runtime.js'
 
 /**
- * 외부 앱의 "바뀌었다" 방송 (M4 B-5) — main.ts가 쓰는 `broadcastAppChanges` 그대로.
+ * The external app "changed" broadcast (M4 B-5) — the exact `broadcastAppChanges` that main.ts
+ * uses.
  *
- * 마지막 방어선이라, 앞의 두 겹(읽기는 알리지 않는다, 화면은 자기 바뀜을 듣지 않는다)이 모두 뚫린 고리를 흉내 내
- * 상한을 본다. 실측(65acb43): 막는 것이 없을 때 템플릿 화면 하나가 초당 약 700번 `show`를 불렀다.
+ * Because this is the last line of defense, it checks the ceiling by simulating a loop where both
+ * of the earlier two layers (reads are not broadcast; a view does not hear its own change) have
+ * been breached. Measured (65acb43): with nothing to stop it, a single template view called `show`
+ * about 700 times per second.
  */
 
 type Sent = Extract<NormalizedEvent, { type: 'external_app_state_changed' }>
@@ -35,8 +38,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('외부 앱의 "바뀌었다" 방송 — 앱마다 모은다', () => {
-  it('한 창 안의 알림 100개는 창 끝에 하나로 나가고, 모두 한 화면의 것이면 그 화면이 주인으로 실린다', () => {
+describe('the external app "changed" broadcast — collected per app', () => {
+  it('100 notifications within one window go out as one at the end of the window, and if all of them are from one view that view is carried as the cause', () => {
     const b = make()
     for (let i = 0; i < 100; i++) b.emit(notes, frameA)
     expect(sent).toEqual([])
@@ -44,15 +47,16 @@ describe('외부 앱의 "바뀌었다" 방송 — 앱마다 모은다', () => {
     expect(sent).toEqual([{ type: 'external_app_state_changed', appId: 'notes', projectId: 'p1', cause: frameA }])
   })
 
-  it('받자마자 다시 읽어 또 알리는 고리는 한 앱에 초당 4번으로 돈다', () => {
-    // 고리의 가장 빠른 모양: 방송을 받은 화면이 곧바로 다시 읽고, 그 읽기가 또 바뀜을 낸다
+  it('a loop that reads again the moment it receives, and notifies again, runs at 4 per second for one app', () => {
+    // The fastest shape of the loop: a view that received the broadcast reads again immediately,
+    // and that read produces another change
     const loop = make(() => loop.emit(notes, frameA))
     loop.emit(notes, frameA)
     vi.advanceTimersByTime(1000)
     expect(sent).toHaveLength(4)
   })
 
-  it('쉬지 않는 알림(1ms마다)도 한 앱에 초당 4번이다 — 창이 계속 밀려 끊기지는 않는다', () => {
+  it('a relentless notification (every 1ms) is still 4 per second for one app — the window keeps getting pushed back but never starves it', () => {
     const b = make()
     for (let t = 0; t < 1000; t++) {
       b.emit({ projectId: null, appId: 'timer' }, null)
@@ -61,13 +65,13 @@ describe('외부 앱의 "바뀌었다" 방송 — 앱마다 모은다', () => {
     expect(sent).toHaveLength(4)
   })
 
-  it('주인이 섞인 창은 주인 없이 나간다 — 남의 바뀜이 섞인 알림을 누구도 자기 것으로 알고 건너뛰지 않게', () => {
+  it("a window with mixed causes goes out with no cause — so that no one mistakes a notification mixed with someone else's change for its own and skips it", () => {
     const b = make()
     b.emit(notes, frameA)
     b.emit(notes, { kind: 'session', sessionId: 's1' })
     b.emit(notes, frameA)
     vi.advanceTimersByTime(APP_CHANGE_WINDOW_MS)
-    // 다른 화면이 낸 것이 섞여도 마찬가지다
+    // Same result even when it is another view's emission that got mixed in
     b.emit(notes, frameA)
     b.emit(notes, { kind: 'view', instanceId: 'frame-b' })
     vi.advanceTimersByTime(APP_CHANGE_WINDOW_MS)
@@ -77,7 +81,7 @@ describe('외부 앱의 "바뀌었다" 방송 — 앱마다 모은다', () => {
     ])
   })
 
-  it('앱마다 따로 모은다 — 다른 프로젝트의 같은 이름 앱도 남이다', () => {
+  it('collects separately per app — an app of the same name in another project is a different app', () => {
     const b = make()
     b.emit(notes, frameA)
     b.emit({ projectId: 'p2', appId: 'notes' }, { kind: 'session', sessionId: 's1' })

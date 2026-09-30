@@ -7,46 +7,49 @@ import { PROXY_SCRIPT_HASH, proxyPageHtml } from './proxy-page.js'
 import { viewDocumentFromResource, type ViewDocument } from './view-document.js'
 
 /**
- * 앱 화면 호스팅 (M4 B-3a).
+ * App view hosting (M4 B-3a).
  *
- * 화면 하나는 **도구 호출 한 번이 만든 인스턴스**다(규격: 화면에는 상태가 없다). 앱 런타임이
- * 결과에서 `_meta.ui.resourceUri`를 보면 `open()`으로 인스턴스를 만들고, 그 id가 UI로 간다.
- * UI는 `frame()`(RPC `apps.viewFrame`)으로 주소를 받아 샌드박스 프록시를 띄운다. 그 주소의
- * 길은 모두 host 포트의 비밀 칸 뒤에 있다(transport/http.ts).
+ * A single view is **an instance created by one tool call** (per the spec: a view has no state of
+ * its own). When the app runtime sees `_meta.ui.resourceUri` in a result, it creates the instance
+ * with `open()`, and that id goes to the UI. The UI gets the address with `frame()` (RPC
+ * `apps.viewFrame`) and loads the sandbox proxy. Every route to that address sits behind the host
+ * port's secret path (transport/http.ts).
  *
- * 이 층은 앱 프로세스를 모른다. 문서를 읽는 일은 `ViewSource`(런타임이 채운다)에게 맡기고,
- * 규격을 해석하는 일(무엇이 화면인가, CSP, 권한)은 여기서 한다.
+ * This layer does not know the app process. Reading the document is left to `ViewSource` (filled
+ * in by the runtime); interpreting the spec (what counts as a view, CSP, permissions) happens
+ * here.
  */
 
-/** 앱 하나. 같은 id가 두 프로젝트에 있으면 둘은 다른 앱이다. `projectId: null`은 사용자 폴더 앱 */
+/** One app. If the same id exists in two projects, they are different apps. `projectId: null` is a user-folder app */
 export type AppRef = { projectId: string | null; appId: string }
 
 /**
- * 화면의 출처 방식.
- *   opaque  기본. 안쪽 프레임에 `allow-same-origin`이 없다. 앱끼리 저장소가 섞이지 않는다.
- *   app     앱별 출처. 가져온 앱이나 요청한 앱에만 연다(S-1·S-8: 불투명 출처에서 깨지는 앱).
+ * A view's origin method.
+ *   opaque  the default. The inner frame has no `allow-same-origin`. Storage never mixes between apps.
+ *   app     per-app origin. Opens only for an app that was imported or that requested it (S-1, S-8: apps that break under an opaque origin).
  */
 export type OriginMode = 'opaque' | 'app'
 
-/** 앱 런타임이 채우는 쪽 (host에서는 app-view-source.ts가 런타임에 잇는다) */
+/** The side the app runtime fills in (on the host, app-view-source.ts wires this to the runtime) */
 export interface ViewSource {
-  /** MCP `resources/read`의 답을 그대로. 앱을 처음 필요할 때 띄우는 것도 저쪽의 일이다 */
+  /** The MCP `resources/read` answer, as is. Starting up the app the first time it is needed is also this side's job */
   readResource(app: AppRef, uri: string): Promise<unknown>
-  /** 없으면 불투명이다. 매니페스트나 가져오기가 정할 일이라 여기서는 기본만 둔다 */
+  /** Opaque if absent. Left with only a default here, since this is a call for the manifest or import to make */
   originMode?(app: AppRef): OriginMode
   /**
-   * 화면 하나가 앱을 붙든다. 열린 화면이 있는 앱은 쉬는 앱으로 내리지 않는다(A-3). 돌려받은
-   * 함수가 놓는다. 앱이 없으면 던진다 — 없는 앱의 화면은 열리지 않는다.
+   * One view holds an app open. An app with an open view is not shut down as idle (A-3). The
+   * returned function releases it. Throws if the app does not exist — the view of a nonexistent
+   * app never opens.
    */
   retain?(app: AppRef): () => void
 }
 
 export type ViewFrame = {
-  /** 프록시 페이지 주소. 비밀 칸이 들어 있다 — 로그에 적지 않는다 */
+  /** The proxy page's address. Carries the secret path — never write this to a log */
   url: string
-  /** 바깥 iframe의 `allow` (안쪽도 같은 값을 받는다) */
+  /** The outer iframe's `allow` (the inner one receives the same value) */
   allow: string
-  /** 호스트가 받아들인 것. 화면에 `hostCapabilities.sandbox`로 알려 준다 */
+  /** What the host accepted. Reported to the view as `hostCapabilities.sandbox` */
   sandbox: { csp: Required<ViewCspDomains>; permissions: ViewPermissions }
 }
 
@@ -55,33 +58,34 @@ type Instance = {
   app: AppRef
   uri: string
   doc: ViewDocument | null
-  /** 런타임에 붙든 것을 놓는다. 인스턴스가 사라지는 모든 길(닫기, 상한 밀어내기, 종료)이 부른다 */
+  /** Releases the hold on the runtime. Called by every path where the instance disappears (close, pushed out by the cap, shutdown) */
   release: (() => void) | null
 }
 
 export type ViewHostOptions = {
-  /** host 포트의 HTTP 비밀 (transport/http.ts). 앱별 출처의 비밀도 여기서 파생한다 */
+  /** The host port's HTTP secret (transport/http.ts). The per-app origin secret is also derived from this */
   secret: string
-  /** 프록시가 메시지를 주고받을 부모 출처의 허용 목록. WebSocket과 같은 목록이다 */
+  /** The allow list of parent origins the proxy can exchange messages with. The same list as WebSocket */
   allowedOrigins: readonly string[]
-  /** 런타임이 아직 없으면 null. 그때 화면 요청은 이유와 함께 실패한다 */
+  /** null if the runtime does not exist yet. In that case a view request fails with a reason */
   source: ViewSource | null
   ports: OriginPorts
-  /** listen() 뒤에야 정해진다 */
+  /** Only decided after listen() */
   hostPort: () => number | null
   log?: (line: string) => void
 }
 
 /**
- * 인스턴스 상한. 런타임이 닫는 것을 잊어도 host 메모리가 끝없이 늘지 않게 한다. 가장 오래된
- * 것부터 버린다. 버린 인스턴스의 화면은 다시 열 때 404를 받는다. 대화 안에서 살아 있는 화면은
- * 최근 몇 개뿐이라(플랜 "화면이 뜨는 두 자리") 이 수에 닿을 일이 드물다.
+ * The instance cap. Keeps the host's memory from growing without bound even if the runtime forgets
+ * to close one. The oldest is dropped first. Reopening a dropped instance's view gets a 404. Since
+ * only a handful of views stay alive within a conversation at once (the plan's "two places a view
+ * is born"), reaching this number is rare.
  */
 export const MAX_INSTANCES = 1000
 
 const INSTANCE_ID = /^[A-Za-z0-9_-]{16,64}$/
 
-/** 안쪽 프레임의 sandbox. `allow-popups`·`allow-top-navigation`은 어느 쪽에도 없다 */
+/** The inner frame's sandbox. Neither has `allow-popups` or `allow-top-navigation` */
 const SANDBOX_OPAQUE = 'allow-scripts allow-forms'
 const SANDBOX_APP = 'allow-scripts allow-same-origin allow-forms'
 
@@ -106,21 +110,23 @@ export class ViewHost {
   }
 
   /**
-   * 앱별 출처의 열쇠. 포트 배정표의 열쇠이기도 하다. 프로젝트까지 넣는다. 두 프로젝트의
-   * `notes` 앱은 서로 다른 앱이라 저장소도 달라야 한다.
+   * The key for a per-app origin. Also the key in the port assignment table. The project is
+   * included: the `notes` app in two different projects is a different app in each, so its storage
+   * has to differ too.
    */
   static originKey(app: AppRef): string {
     return `${app.projectId ?? '_user'}/${app.appId}`
   }
 
   /**
-   * 화면 인스턴스를 연다. 열려 있는 동안 앱은 쉬는 앱이 아니다(플랜 A-3: 열린 화면도 진행 중인
-   * 호출도 없을 때만 내린다). 사람이 화면을 열어 두고 몇 분 손대지 않았다고 앱을 내리면, 다음
-   * 누름은 앱이 다시 뜨기를 기다려야 한다.
+   * Opens a view instance. While it is open, the app is never treated as idle (plan A-3: shut down
+   * only once there is neither an open view nor a call in progress). If the app were shut down just
+   * because a person left a view open and untouched for a few minutes, the next click would have to
+   * wait for the app to start back up.
    */
   open(app: AppRef, uri: string): { instanceId: string } {
     const ref = { projectId: app.projectId ?? null, appId: app.appId }
-    // 붙드는 것이 먼저다. 없는 앱이면 여기서 던지고, 인스턴스는 생기지 않는다
+    // Holding the app open comes first. If the app does not exist, this throws here, and no instance is created
     const release = this.opts.source?.retain?.(ref) ?? null
     const id = randomBytes(16).toString('base64url')
     if (this.instances.size >= MAX_INSTANCES) {
@@ -136,8 +142,9 @@ export class ViewHost {
   }
 
   /**
-   * 열린 인스턴스의 앱과 화면 — 없으면(닫혔거나 모르는 id) null. 부르는 쪽이 댄 앱이 아니라 **인스턴스가** 정한 것이다:
-   * "이 화면에서 왔다"는 말(C-5의 머리말, B-4의 고정 화면 메시지)은 이것으로 대조한다(#93·#94).
+   * The app and view of an open instance — null if none exists (closed or an unknown id). This is
+   * decided by **the instance**, not by whatever app the caller claims: the statement "this came
+   * from this view" (C-5's header, B-4's fixed-view message) is checked against this (#93, #94).
    */
   describe(instanceId: string): { app: AppRef; uri: string } | null {
     const inst = this.instances.get(instanceId)
@@ -145,13 +152,15 @@ export class ViewHost {
   }
 
   /**
-   * UI가 화면을 띄울 주소 (RPC `apps.viewFrame`).
+   * The address the UI loads the view at (RPC `apps.viewFrame`).
    *
-   * **앱은 인스턴스가 정한다.** 부르는 쪽이 준 `app`은 인스턴스의 앱과 대조만 한다. 다르면
-   * 없는 것으로 친다. 그래서 A 앱의 화면 id로 B 앱의 이름을 대도 아무것도 열리지 않는다.
+   * **The instance decides the app.** The `app` the caller provides is only checked against the
+   * instance's own app; a mismatch is treated as nonexistent. So claiming app B's name with app
+   * A's view id opens nothing.
    *
-   * 문서는 여기서 한 번 읽어 인스턴스에 둔다. 화면을 다시 열면(`frame()`을 다시 부르면) 새로
-   * 읽는다. 앱을 고친 뒤 다시 연 화면이 옛 HTML을 보지 않게 하려는 것이다.
+   * The document is read once here and stored on the instance. Reopening the view (calling
+   * `frame()` again) reads it fresh — this is meant to keep a reopened view from showing stale HTML
+   * after the app has been edited.
    */
   async frame(p: { app: AppRef; instanceId: string; hostOrigin: string }): Promise<ViewFrame> {
     const inst = this.instances.get(p.instanceId)
@@ -164,7 +173,7 @@ export class ViewHost {
     if (csp.dropped.length) {
       this.log(`[agent-host] view ${inst.uri} (${ViewHost.originKey(inst.app)}): CSP entries not allowed: ${csp.dropped.join(', ')}`)
     }
-    // 앱별 출처라면 주소를 주기 **전에** 그 포트가 떠 있어야 한다. 프록시가 곧바로 그리로 간다
+    // Under a per-app origin, that port has to be up **before** the address is given out — the proxy goes straight there
     if (this.originMode(inst.app) === 'app') await this.originServer(ViewHost.originKey(inst.app))
     return {
       url: `http://127.0.0.1:${port}/${this.opts.secret}/views/${inst.id}/?${new URLSearchParams({ host: p.hostOrigin })}`,
@@ -174,8 +183,8 @@ export class ViewHost {
   }
 
   /**
-   * 화면이 자기 앱의 리소스를 읽는다 (RPC `apps.readResource`, 브리지의 `onreadresource`).
-   * 인스턴스를 주면 그 인스턴스의 앱과 같아야 한다.
+   * A view reads its own app's resource (RPC `apps.readResource`, the bridge's `onreadresource`).
+   * If an instance is given, it has to match that instance's own app.
    */
   async readResource(app: AppRef, uri: string, instanceId?: string): Promise<unknown> {
     if (instanceId !== undefined) {
@@ -185,7 +194,7 @@ export class ViewHost {
     return this.source().readResource(app, uri)
   }
 
-  /** host 포트에 거는 길. 모두 비밀 칸 뒤에 있다 (HostServer가 게이트를 건다) */
+  /** Routes attached to the host port. All of them sit behind the secret path (HostServer applies the gate) */
   get routes(): HttpRoute[] {
     return [
       {
@@ -213,7 +222,7 @@ export class ViewHost {
     )
   }
 
-  /** 인스턴스를 지우고 붙든 앱을 놓는다. 두 번 불러도 한 번만 놓는다 */
+  /** Deletes the instance and releases the app it held. Calling this twice still releases only once */
   private drop(instanceId: string): void {
     const inst = this.instances.get(instanceId)
     if (!inst) return
@@ -233,7 +242,7 @@ export class ViewHost {
     return viewDocumentFromResource(await this.source().readResource(inst.app, inst.uri), inst.uri)
   }
 
-  /** 없는 인스턴스, 허용되지 않은 부모, 읽지 못한 문서는 모두 404다 — 이 길은 무엇도 설명하지 않는다 */
+  /** A nonexistent instance, a disallowed parent, or a document that fails to read are all 404s — this route explains nothing */
   private async proxyPage(instanceId: string, hostOrigin: string | null) {
     if (!INSTANCE_ID.test(instanceId)) return null
     const inst = this.instances.get(instanceId)
@@ -260,24 +269,24 @@ export class ViewHost {
     }
     return {
       status: 200,
-      // srcdoc 문서는 이 응답의 정책을 물려받는다 — 화면의 CSP를 거는 자리가 여기다
+      // The srcdoc document inherits this response's policy — this is where the view's CSP is applied
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': buildViewCsp(doc.csp).policy },
       body: proxyPageHtml({ mode: 'opaque', hostOrigin, sandbox: SANDBOX_OPAQUE, allow, html: doc.html }),
     }
   }
 
   /**
-   * 앱별 출처의 비밀. host 비밀에서 열쇠마다 파생한다.
+   * The secret for a per-app origin. Derived from the host secret, per key.
    *
-   * 이 방식의 화면은 진짜 출처를 가지므로 `location.href`로 자기 주소를 읽는다. 그 주소에 host
-   * 포트의 비밀이 그대로 있으면 화면 하나가 모든 앱의 프록시 길을 아는 셈이 된다. 파생한
-   * 값은 그 앱의 포트에서만 통한다.
+   * Under this method a view has a real origin, so it reads its own address with `location.href`.
+   * If the host port's secret were left in that address as is, a single view would then know
+   * every app's proxy path. The derived value only works on that one app's port.
    */
   private originSecret(key: string): string {
     return createHmac('sha256', this.opts.secret).update(`view-origin\0${key}`).digest('base64url')
   }
 
-  /** 열쇠의 앱별 출처 서버. 처음 필요할 때 띄운다(고정 포트, origin-ports.ts) */
+  /** The per-app origin server for a key. Started the first time it is needed (fixed port, origin-ports.ts) */
   private originServer(key: string): Promise<{ port: number; server: Server }> {
     if (this.disposed) fail('The host is shutting down')
     let pending = this.origins.get(key)
@@ -293,14 +302,14 @@ export class ViewHost {
         ],
       })
       pending = this.opts.ports.serve(key, handler)
-      // 실패는 기억하지 않는다 — 다음 요청이 다시 시도한다 (포트를 쥔 프로그램이 떠났을 수 있다)
+      // A failure is not remembered — the next request tries again (the program holding the port may have left)
       pending.catch(() => this.origins.delete(key))
       this.origins.set(key, pending)
     }
     return pending
   }
 
-  /** 앱별 출처 포트에서 서빙하는 화면 문서. 그 포트의 앱이 아닌 인스턴스는 없는 것이다 */
+  /** The view document served from a per-app origin port. An instance not belonging to that port's app is treated as nonexistent */
   private async originDocument(key: string, instanceId: string) {
     if (!INSTANCE_ID.test(instanceId)) return null
     const inst = this.instances.get(instanceId)

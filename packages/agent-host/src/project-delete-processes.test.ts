@@ -11,14 +11,16 @@ import { SessionManager } from './sessions/manager.js'
 import { createRpcHandler } from './rpc.js'
 
 /**
- * 프로젝트를 지우면 그 터미널과 Run 메뉴 실행도 끝난다 (#177).
+ * Deleting a project also ends its terminals and Run-menu executions (#177).
  *
- * 둘 다 경로를 키로 쓰고 매니저는 이들을 모른다. 예전에는 `projects.delete`가 매니저만
- * 불러, 지운 프로젝트의 데브 서버가 앱을 끌 때까지 포트를 쥔 채 남았고, 같은 폴더를 다시
- * 추가하면 지우기 전의 터미널이 목록에 되살아났다. 웹뷰가 두드리는 RPC 문에서 본다.
+ * Both use the path as their key, and the manager knows nothing about them. Previously
+ * `projects.delete` called only the manager, so the deleted project's dev server kept holding its
+ * port until the app quit, and re-adding the same folder brought the pre-deletion terminal back to
+ * life in the list. Observed from the RPC door that the webview knocks on.
  *
- * 가짜 pty에는 pid가 없어 트리 킬이 `pty.kill(신호)`로 물러난다 — 그 호출이 곧 "끝냈다"의
- * 증거다. 트리를 어떻게 찾는지는 kill-tree.test.ts가 진짜 프로세스로 본다.
+ * The fake pty has no pid, so tree-kill falls back to `pty.kill(signal)` — that call is the proof
+ * that it "ended." How the process tree is actually found is covered by kill-tree.test.ts against
+ * real processes.
  */
 
 type FakePty = { kill: ReturnType<typeof vi.fn> }
@@ -63,8 +65,8 @@ afterEach(() => {
   rmSync(fixture, { recursive: true, force: true })
 })
 
-describe('프로젝트 삭제 — 터미널과 실행', () => {
-  it('지운 프로젝트의 터미널과 실행은 끝나고, 같은 폴더를 다시 추가해도 되살아나지 않는다', async () => {
+describe('project deletion — terminals and executions', () => {
+  it("a deleted project's terminals and executions end, and do not come back when the same folder is re-added", async () => {
     const a = (await rpc('projects.add', { path: join(fixture, 'a') })) as { id: string }
     const b = (await rpc('projects.add', { path: join(fixture, 'b') })) as { id: string }
     await rpc('terminal.create', { projectId: a.id, cols: 80, rows: 24 })
@@ -76,10 +78,11 @@ describe('프로젝트 삭제 — 터미널과 실행', () => {
 
     await rpc('projects.delete', { projectId: a.id })
 
-    // Stop 단추와 같은 첫 발이다 — 유예 뒤 버틴 것은 트리 킬이 SIGKILL로 거둔다
+    // The same first shot as the Stop button — anything that survives the grace period is collected
+    // by tree-kill with SIGKILL
     expect(termA!.kill).toHaveBeenCalledWith('SIGTERM')
     expect(runA!.kill).toHaveBeenCalledWith('SIGTERM')
-    // 남의 프로젝트는 건드리지 않는다
+    // Does not touch the other project
     expect(termB!.kill).not.toHaveBeenCalled()
     expect(runB!.kill).not.toHaveBeenCalled()
 

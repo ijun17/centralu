@@ -12,11 +12,12 @@ import { SessionManager } from './sessions/manager.js'
 import { createRpcHandler } from './rpc.js'
 
 /**
- * 외부 앱의 RPC 문 (M4 A) — 웹뷰가 실제로 두드리는 자리에서 본다.
+ * The external app RPC door (M4 A) — observed from the exact spot the webview actually knocks on.
  *
- * 런타임 테스트(apps/external/*.test.ts)는 가짜 프로젝트 목록으로 돈다. 여기서는 진짜
- * 저장소와 매니저를 끼워서, 신뢰가 **저장소에 적히고 런타임이 그걸 읽는** 길이 이어져
- * 있는지를 본다 — 두 쪽이 각자 초록이어도 그 사이의 선이 끊겨 있을 수 있다.
+ * The runtime tests (apps/external/*.test.ts) run against a fake project list. Here, a real store
+ * and manager are wired in, to check that the path where trust **is written to the store and the
+ * runtime reads it back** is actually connected — both sides can be green on their own while the
+ * wire between them is broken.
  */
 
 let fixture = ''
@@ -33,7 +34,7 @@ beforeEach(() => {
   mkdirSync(join(fixture, 'data'))
   mkdirSync(projRoot)
   plantApp(join(projRoot, ...PROJECT_APPS), 'notes')
-  // 진짜로 뜨는 앱 하나 — 중개의 RPC 문을 끝까지 두드린다
+  // One app that actually comes up — knocks all the way through the mediation RPC door
   plantApp(join(projRoot, ...PROJECT_APPS), 'live', {
     server: { command: process.execPath, args: [fileURLToPath(new URL('./apps/external/test-fixtures/app.mjs', import.meta.url)), '--mode', 'mediation'] },
   })
@@ -51,18 +52,19 @@ afterEach(async () => {
   rmSync(fixture, { recursive: true, force: true })
 })
 
-describe('외부 앱 RPC — 신뢰', () => {
-  it('등록한 프로젝트의 앱은 신뢰하지 않은 채로 목록에 서고, 신뢰를 켜고 끄는 대로 따라간다', async () => {
+describe('external app RPC — trust', () => {
+  it('an app from a newly registered project stands in the list untrusted, and follows trust being turned on and off', async () => {
     expect(await list()).toEqual([])
     const { id, trusted } = (await rpc('projects.add', { path: projRoot })) as { id: string; trusted: boolean }
-    // 화면이 신뢰를 물을지 정하는 값이다 — 새로 등록한 프로젝트는 "아니오"로 온다
+    // The value that decides whether the view asks about trust — a newly registered project comes
+    // in as "no"
     expect(trusted).toBe(false)
 
     expect((await list()).filter((a) => a.appId === 'notes').map((a) => [a.appId, a.projectId, a.status])).toEqual([['notes', id, 'untrusted']])
 
     await rpc('projects.setTrusted', { projectId: id, trusted: true })
     expect(store.projectRoots()[0]?.trusted).toBe(true)
-    // 프로젝트 메뉴의 신뢰 토글이 읽는 값 — 목록에도 실린다
+    // The value the project menu's trust toggle reads — also carried into the list
     expect(((await rpc('projects.list', {})) as { id: string; trusted: boolean }[]).map((p) => [p.id, p.trusted])).toEqual([[id, true]])
     expect((await list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')
 
@@ -73,19 +75,19 @@ describe('외부 앱 RPC — 신뢰', () => {
     expect(await list()).toEqual([])
   })
 
-  it('apps.restart는 발견된 앱에만 닿는다 — 없는 앱은 이름과 함께 거절한다', async () => {
+  it('apps.restart only reaches discovered apps — a nonexistent app is rejected with its name', async () => {
     const { id } = (await rpc('projects.add', { path: projRoot })) as { id: string }
     await expect(rpc('apps.restart', { appId: 'notes', projectId: id })).resolves.toEqual({ ok: true })
     await expect(rpc('apps.restart', { appId: 'ghost', projectId: id })).rejects.toThrow(/There is no such app: .*\/ghost/)
   })
 
-  it('없는 프로젝트의 신뢰는 조용히 성공하지 않는다', async () => {
+  it('setting trust on a nonexistent project does not silently succeed', async () => {
     await expect(rpc('projects.setTrusted', { projectId: 'nope', trusted: true })).rejects.toThrow(/Project not found/)
   })
 })
 
-describe('외부 앱 RPC — apps.invoke는 내장과 외부가 같은 문이다', () => {
-  it('projectId를 주면 외부 앱의 중개로 간다 — 호출자는 화면이고, 앱의 답이 그대로 실린다', async () => {
+describe('external app RPC — apps.invoke is the same door for built-in and external', () => {
+  it("given a projectId, it routes through external app mediation — the caller is the view, and the app's answer is carried through as is", async () => {
     const { id } = (await rpc('projects.add', { path: projRoot })) as { id: string }
     await rpc('projects.setTrusted', { projectId: id, trusted: true })
 
@@ -93,14 +95,14 @@ describe('외부 앱 RPC — apps.invoke는 내장과 외부가 같은 문이다
     expect(ok).toMatchObject({ text: 'app_only ran', isError: false, status: 'ok', result: { content: [{ type: 'text', text: 'app_only ran' }] } })
     expect(ok.runId).toMatch(/^run_/)
 
-    // 화면에 열리지 않은 도구 — host가 앱에 보내지 않고 이유를 말한다
+    // A tool not open to the view — the host does not send it to the app and states the reason
     const refused = (await rpc('apps.invoke', { appId: 'live', projectId: id, name: 'model_only', args: {} })) as Record<string, unknown>
     expect(refused).toMatchObject({ status: 'rejected', isError: true })
     expect(refused.text).toContain('visibility')
     expect(refused.result).toBeUndefined()
   })
 
-  it('projectId 없이 내장 앱의 id면 예전 길 그대로 — 내장 앱의 도구가 돈다', async () => {
+  it("a built-in app id with no projectId is the old path as is — the built-in app's tool runs", async () => {
     const out = (await rpc('apps.invoke', { appId: 'control', name: 'control_notify', args: { text: '사람이 봐야 할 일' } })) as {
       text: string
       isError?: boolean

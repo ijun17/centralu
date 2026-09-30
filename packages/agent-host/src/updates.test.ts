@@ -3,10 +3,10 @@ import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 import { UpdateService, type LatestResult } from './updates.js'
 
 /**
- * 앱 업데이트 확인·설치 (이슈 #43).
+ * Checking for and installing app updates (issue #43).
  *
- * **여기서 레지스트리에 나가거나 `npm i -g`를 도는 테스트는 하나도 없다.** 둘 다
- * 주입된 자리로만 지나가고, 그게 이 파일이 이 기계를 고칠 수 없다는 보장이다.
+ * **None of these tests reach out to the registry or run `npm i -g`.** Both pass only through
+ * injected seams, and that is the guarantee that this file cannot alter this machine.
  */
 function make(opts: { registry?: string | null; run?: (file: string, args: string[]) => Promise<void> } = {}) {
   const published: UpdateStatus[] = []
@@ -36,45 +36,46 @@ function make(opts: { registry?: string | null; run?: (file: string, args: strin
   }
 }
 
-/** 상태가 그 모양이 될 때까지 기다린다 — 설치는 답을 준 뒤에 끝난다 */
+/** Waits until state settles into shape — installation finishes after this returns */
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0))
 }
 
 describe('UpdateService', () => {
   /**
-   * 지금 도는 것이 무엇인지는 **빌드 상수**가 답한다.
+   * What is currently running is answered by a **build constant.**
    *
-   * 워크스페이스 루트의 package.json이 아니다 — 그건 private이고 아무도 설치하지 않는
-   * 버전이라, 틀려도 아무 일이 일어나지 않은 채로 남는다. `APP_VERSION`은
-   * `tooling/brand.test.ts`가 발행되는 패키지들과 같은지 지킨다.
+   * Not the workspace root's package.json — that one is private and is a version nobody installs,
+   * so being wrong there causes nothing to happen. `APP_VERSION` guards that it matches the
+   * published packages, checked by `tooling/brand.test.ts`.
    */
-  it('현재 버전은 빌드가 들고 있는 그 값이다', () => {
+  it('the current version is the value the build carries', () => {
     expect(make().svc.current().current).toBe(APP_VERSION)
   })
 
-  it('레지스트리가 더 새것을 들고 있으면 알린다 (설치는 하지 않는다)', async () => {
+  it('reports it when the registry has something newer (does not install it)', async () => {
     const h = make({ registry: '9999.0.0' })
     const s = await h.svc.check(true)
     expect(s.latest).toBe('9999.0.0')
     expect(s.newer).toBe(true)
-    // 알아낸 것만으로는 아무 일도 일어나지 않는다
+    // Nothing happens just from finding out
     expect(s.phase).toBe('idle')
     expect(h.calls).toEqual([])
   })
 
-  it('프리릴리스끼리도 비교한다 — #42가 여기서 다시 나면 안 된다', async () => {
+  it('compares prereleases against each other too — #42 must not resurface here', async () => {
     const h = make({ registry: '0.1.0-beta.99' })
     expect((await h.svc.check(true)).newer).toBe(true)
   })
 
   /**
-   * 못 닿은 것은 **'최신이다'가 아니다.**
+   * Failing to reach the registry is **not the same as "up to date."**
    *
-   * 그리고 지난번에 알아낸 것을 지우지 않는다. 지우면 네트워크가 한 번 깜빡일 때마다
-   * 확인이 자기 발견을 스스로 되돌리고, 화면은 아무 일도 없었던 것처럼 보인다.
+   * And it does not erase what was found last time. Erasing it would mean a single network
+   * hiccup makes the check undo its own earlier finding, and the screen would look as if nothing
+   * had ever happened.
    */
-  it('레지스트리에 못 닿아도 던지지 않고, 알던 답을 지우지 않는다', async () => {
+  it('does not throw when the registry cannot be reached, and does not erase the previously known answer', async () => {
     const h = make({ registry: '9999.0.0' })
     await h.svc.check(true)
     h.offer(null)
@@ -85,31 +86,32 @@ describe('UpdateService', () => {
   })
 
   /**
-   * 꺼 두면 **아무 데도 안 묻는다.**
+   * When turned off, **nothing is asked anywhere.**
    *
-   * 화면은 앱을 열 때마다 `check(false)`를 부른다. 그 자리에 가드가 없으면 이 설정은
-   * 주기 요청만 막고 기동 때 한 번은 그대로 내보내는, 절반만 지키는 약속이 된다.
+   * The screen calls `check(false)` every time the app opens. Without a guard there, this setting
+   * would only block the periodic requests while still letting the once-at-startup call through —
+   * a promise only half kept.
    */
-  it('자동 확인이 꺼져 있으면 자동 호출은 레지스트리에 닿지 않는다', async () => {
+  it('an automatic call does not reach the registry when auto-check is turned off', async () => {
     const h = make({ registry: '9999.0.0' })
     await h.svc.setAuto(false)
     const before = h.fetches
     await h.svc.check(false)
     expect(h.fetches).toBe(before)
-    // 사람이 누른 것은 여전히 통한다
+    // A person clicking it still goes through
     await h.svc.check(true)
     expect(h.fetches).toBe(before + 1)
   })
 
   /**
-   * 설치는 **정확한 버전을 지목한다.**
+   * Installation **names the exact version.**
    *
-   * `centralu update`를 부르면 한 줄로 끝나지만, 그 판단을 하는 것은 사용자 기계에 이미
-   * 깔린 실행기이고 그 사본의 비교가 틀려 있을 수 있다 (#42) — "이미 최신입니다"라고
-   * 답하며 아무것도 안 하는 것이 정확히 그 결함의 증상이다. 찾아낸 버전을 이름으로
-   * 넘기면 그 판단을 아예 거치지 않는다.
+   * Calling `centralu update` looks like one line, but the judgment of what to install is made by
+   * the runner already installed on the user's machine, and that copy's own comparison can be
+   * wrong (#42) — answering "already up to date" while doing nothing is exactly the symptom of
+   * that defect. Passing the version that was found by name skips that judgment entirely.
    */
-  it('찾아낸 버전을 그대로 지목해 설치한다 (실행기의 판단을 거치지 않는다)', async () => {
+  it("names the exact version found and installs it (does not go through the runner's own judgment)", async () => {
     const h = make({ registry: '9999.0.0' })
     await h.svc.check(true)
     expect(h.svc.apply().phase).toBe('updating')
@@ -118,7 +120,7 @@ describe('UpdateService', () => {
     expect(h.svc.current().phase).toBe('restart_required')
   })
 
-  it('설치가 실패하면 이유를 남긴다 (조용히 원래대로 돌아가지 않는다)', async () => {
+  it('records the reason when installation fails (does not silently revert)', async () => {
     const h = make({
       registry: '9999.0.0',
       run: async () => {
@@ -132,7 +134,7 @@ describe('UpdateService', () => {
     expect(h.svc.current().error).toMatch(/EACCES/)
   })
 
-  it('올릴 것이 없는데 부르면 그렇게 말한다 (아무 일도 안 하는 대신)', async () => {
+  it('says so when called with nothing to update (instead of doing nothing silently)', async () => {
     const h = make({ registry: null })
     const s = h.svc.apply()
     expect(s.phase).toBe('failed')
@@ -140,13 +142,13 @@ describe('UpdateService', () => {
   })
 
   /**
-   * 설치가 끝난 뒤의 주기 확인이 "다시 시작하세요"를 지우면 안 된다.
+   * A periodic check after installation finishes must not erase "please restart."
    *
-   * 디스크에는 새 버전이 있고 도는 프로세스는 옛것이라, 여섯 시간 뒤의 확인은 방금 깐
-   * 바로 그 버전을 '새것'으로 다시 찾아낸다 — 이미 업데이트한 사람에게 업데이트하라고
-   * 말하는 셈이다.
+   * The disk has the new version while the running process is still the old one, so a check six
+   * hours later would find the exact version just installed as "new" all over again — telling
+   * someone to update when they already have.
    */
-  it('다시 시작 대기 중에는 확인이 그 상태를 덮지 않는다', async () => {
+  it('a check does not overwrite the state while a restart is pending', async () => {
     const h = make({ registry: '9999.0.0' })
     await h.svc.check(true)
     h.svc.apply()

@@ -1,14 +1,16 @@
 import type { ViewCspDomains, ViewPermissions } from './csp.js'
 
 /**
- * `ui://` 리소스 읽기 결과 → 화면 문서 (M4 B-3).
+ * `ui://` resource read result → view document (M4 B-3).
  *
- * 앱 런타임은 MCP `resources/read`의 답을 **그대로** 넘긴다. 무엇이 화면인지는 규격(ext-apps
- * 2.0)이 정하고, 그 규격을 아는 것은 화면을 띄우는 이쪽이다. 그래서 해석을 여기 한 곳에 둔다.
- * 런타임이 이것까지 알면 규격을 읽는 자리가 둘이 된다.
+ * The app runtime passes through the MCP `resources/read` answer **as is**. What counts as a
+ * view is defined by the spec (ext-apps 2.0), and this side, which renders the view, is the one
+ * that knows that spec. So the interpretation lives in this one place. If the runtime also knew
+ * this, there would be two places reading the spec.
  *
- * 규격의 모양: `contents[0]`이 `mimeType: "text/html;profile=mcp-app"`이고 본문은 `text`
- * 또는 base64 `blob`이다. 보안 설정은 그 항목의 `_meta.ui.csp`·`_meta.ui.permissions`에 있다.
+ * The spec's shape: `contents[0]` has `mimeType: "text/html;profile=mcp-app"`, and the body is
+ * either `text` or a base64 `blob`. Security settings live in that entry's `_meta.ui.csp` and
+ * `_meta.ui.permissions`.
  */
 
 export const VIEW_MIME_TYPE = 'text/html;profile=mcp-app'
@@ -28,12 +30,13 @@ type Content = {
 }
 
 /**
- * 화면이 아니면 이유와 함께 던진다. 그 문장은 사람(앱을 만드는 쪽)이 읽는다.
+ * Throws with a reason when the resource is not a view. That message is read by a person — the
+ * one building the app.
  *
- * MIME의 매개변수는 공백과 대소문자를 느슨하게 본다(`text/html; profile=mcp-app`).
- * 그러나 `profile=mcp-app`이 없는 그냥 `text/html`은 받지 않는다. 규격이 화면으로 정한 것은
- * 그 프로필이다. 아무 HTML 리소스나 화면으로 띄우면, 앱이 읽기용으로 내놓은 문서가 스크립트가
- * 도는 화면이 된다.
+ * The MIME parameter is read leniently about whitespace and case (`text/html; profile=mcp-app`).
+ * But plain `text/html` without `profile=mcp-app` is not accepted. The spec defines that profile,
+ * specifically, as what counts as a view. Rendering any HTML resource as a view would turn a
+ * document the app meant only for reading into a view where scripts run.
  */
 export function viewDocumentFromResource(result: unknown, uri: string): ViewDocument {
   const contents = (result as { contents?: unknown } | null)?.contents

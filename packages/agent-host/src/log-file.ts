@@ -1,27 +1,30 @@
 import { closeSync, existsSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
 
 /**
- * host의 말을 **파일에 남긴다.**
+ * **Records the host's output to a file.**
  *
- * 여기가 없어서 하루를 잃었다. Tauri 수퍼바이저는 host의 stderr를 `Stdio::inherit`으로
- * 물려주는데, Finder로 띄운 `.app`의 stderr는 **아무 데도 가지 않는다**(/dev/null).
- * 그래서 세션이 왜 안 뜨는지 물으면 화면 문구 말고는 근거가 없었고, 그 문구가 하필
- * 원인을 덮는 문구였다("codex app-server exited"). 실제 원인은 codex가 stderr로 또박또박
- * 말하고 있었지만 그 줄이 닿는 곳이 없었다.
+ * Not having this cost a whole day. The Tauri supervisor passes the host's stderr through with
+ * `Stdio::inherit`, but a `.app` launched from Finder has stderr going **nowhere at all**
+ * (/dev/null). So asking why a session did not start left nothing to go on beyond the screen's
+ * message, and that message happened to obscure the real cause ("codex app-server exited"). The
+ * actual cause was that codex was stating it clearly on stderr, but that line had nowhere to land.
  *
- * `host-errors.log`가 있었지만 그건 **크래시 전용**이다 — 미처리 거절이나 예외가
- * 났을 때만 생긴다. 오늘처럼 아무것도 죽지 않고 조용히 어긋나는 경우엔 파일조차 안 생긴다.
+ * `host-errors.log` existed, but that is **crash-only** — it is created only when an unhandled
+ * rejection or exception occurs. In a case like this one, where nothing crashed and things merely
+ * went quietly wrong, that file was never even created.
  *
- * 그래서 stderr 전체를 받아 적는다. 터미널로 띄웠든 Finder로 띄웠든 같은 자리에 남는다.
+ * So all of stderr is transcribed here. It ends up in the same place whether launched from a
+ * terminal or from Finder.
  */
 
-/** 한 파일이 이만큼 넘으면 한 세대 밀어낸다 */
+/** Once one file exceeds this, one generation is rolled off */
 export const MAX_LOG_BYTES = 8 * 1024 * 1024
 
 /**
- * 넘치면 `.1`로 밀어낸다. 세대를 하나만 두는 이유: 로그는 **최근 것이 쓸모 있고**,
- * 무한정 쌓이면 사용자 폴더를 조용히 먹는다. 회전 자체가 실패해도 로깅은 계속되어야 한다 —
- * 로그를 못 남기는 것보다 큰 파일이 낫다.
+ * Rolls the file off to `.1` once it overflows. The reason for keeping only one generation: a log
+ * is **useful when it is recent**, and letting it accumulate indefinitely would silently eat up the
+ * user's folder. Logging must continue even if the rollover itself fails — a large file is better
+ * than no log at all.
  */
 export function rotateIfLarge(path: string, maxBytes: number = MAX_LOG_BYTES): boolean {
   try {
@@ -33,7 +36,7 @@ export function rotateIfLarge(path: string, maxBytes: number = MAX_LOG_BYTES): b
   }
 }
 
-/** 지금 파일 크기 (없으면 0) */
+/** The file's current size (0 if it does not exist) */
 function sizeOf(path: string): number {
   try {
     return existsSync(path) ? statSync(path).size : 0
@@ -43,17 +46,19 @@ function sizeOf(path: string): number {
 }
 
 /**
- * stderr를 파일로도 흘린다 (**가로채지 않고 겹쳐 쓴다**).
+ * Also flows stderr into a file (**mirrors it, without intercepting it**).
  *
- * 원래 stderr로도 그대로 내보낸다 — 터미널로 띄웠을 때 눈앞에서 사라지면
- * 개발 중에 더 불편해진다. 파일은 '또 하나의 청중'이지 대체재가 아니다.
+ * It still goes out on the original stderr too — if it disappeared from view when launched from a
+ * terminal, that would be more inconvenient during development. The file is "one more audience,"
+ * not a replacement.
  *
- * 실패는 **삼킨다.** 로그를 못 남기는 것이 host를 죽일 이유는 못 된다
- * (이 프로세스는 모든 세션의 부모다).
+ * Failures are **swallowed.** Failing to log is not a reason to kill the host (this process is the
+ * parent of every session).
  *
- * **동기로 쓴다.** 스트림에 버퍼링을 맡기면 프로세스가 갑자기 끝날 때 마지막 몇 줄이
- * 통째로 사라지는데, 하필 그 몇 줄이 우리가 보려던 것이다. fd를 열어 두고 writeSync만
- * 하므로 매번 파일을 다시 여는 비용도 없다 — host의 stderr는 원래 한산하다.
+ * **Written synchronously.** Leaving buffering to the stream would lose the last few lines whole
+ * when the process ends abruptly — and those are exactly the lines we wanted to see. Since the fd
+ * is kept open and only writeSync is called, there is no cost to reopening the file every time
+ * either — the host's stderr is quiet to begin with.
  */
 export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES): () => void {
   rotateIfLarge(path, maxBytes)
@@ -69,30 +74,30 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
 
   const roll = () => {
     /*
-     * **닫은 fd 번호를 붙들고 있으면 안 된다.**
+     * **A closed fd number must never be held onto.**
      *
-     * close 뒤에 rename이 실패하면(권한·디스크), 예전에는 그 죽은 번호가 fd에 남았다.
-     * OS는 그 번호를 곧 다른 파일 — SQLite WAL이든 pty든 — 에 재발급하므로,
-     * 다음 writeSync가 **남의 파일에 로그를 쓰는** 조용한 오염이 된다.
-     * 그래서 실패 경로에서도 반드시 비우고 새로 연다.
+     * If rename fails after close (permissions, disk), the dead number used to be left sitting in
+     * fd. The OS soon reissues that number to a different file — SQLite WAL, a pty, whatever — so
+     * the next writeSync silently corrupts **someone else's file** with log lines. So even on the
+     * failure path, it must always be cleared and reopened.
      */
     try {
       if (fd !== null) closeSync(fd)
     } catch {
-      /* 이미 닫혔으면 그만이다 */
+      /* If it was already closed, that is fine */
     }
     fd = null
     try {
       renameSync(path, `${path}.1`)
     } catch {
-      /* 회전에 실패하면 같은 파일에 계속 쓴다 — 큰 파일이 로그 없는 것보다 낫다 */
+      /* If the rollover fails, keep writing to the same file — a large file beats no log */
     }
     try {
       fd = openSync(path, 'a')
     } catch {
-      /* 못 열면 파일 쪽만 조용해진다 — 원래 stderr 경로는 살아 있다 */
+      /* If it cannot be opened, only the file side goes quiet — the original stderr path is still alive */
     }
-    // 실패했더라도 0으로 되돌린다 — 안 그러면 매 줄마다 회전을 다시 시도한다
+    // Reset to 0 even on failure — otherwise a rollover is attempted again on every line
     written = 0
   }
 
@@ -103,7 +108,7 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
       written += Buffer.byteLength(text)
       if (written >= maxBytes) roll()
     } catch {
-      /* 파일에 못 적어도 아래 원래 경로는 살아 있다 */
+      /* If it fails to write to the file, the original path below is still alive */
     }
     return original(chunk as never, enc as never, cb as never)
   }) as typeof process.stderr.write
@@ -113,20 +118,21 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
     try {
       if (fd !== null) closeSync(fd)
     } catch {
-      /* 이미 닫혔으면 그만이다 */
+      /* If it was already closed, that is fine */
     }
     fd = null
   }
 }
 
 /**
- * 기동 한 줄. **어느 빌드가 이 로그를 냈는지**를 로그 자신이 말하게 한다.
+ * The startup line. Makes the log itself state **which build produced it.**
  *
- * 오늘 "지금 도는 앱이 어느 커밋 빌드냐"에 답하려고 바이너리 mtime과 커밋 시각을
- * 맞춰봐야 했다. 로그가 스스로 말하면 그 추측이 통째로 없어진다.
+ * Answering "which commit was the running app built from" used to require matching the binary's
+ * mtime against commit timestamps. If the log states it outright, that whole guessing game
+ * disappears.
  *
- * 프로세스 시작을 **눈에 띄게** 가른다 — 한 파일에 여러 번의 실행이 이어 붙으므로,
- * 어디서부터가 이번 실행인지 한눈에 보여야 한다.
+ * Marks the start of a process **visibly** — since one file has multiple runs appended in
+ * sequence, it has to be obvious at a glance where this run begins.
  */
 export function startupBanner(info: { build: string; db: string; pid: number }): string {
   return [
@@ -141,12 +147,12 @@ export function startupBanner(info: { build: string; db: string; pid: number }):
   ].join('\n')
 }
 
-/** 크래시 로그와 달리 이건 '늘 켜 있는' 로그다 — 파일 이름으로 구분된다 */
+/** Unlike the crash log, this is an "always on" log — distinguished by its file name */
 export function hostLogPath(dataDir: string): string {
   return `${dataDir}/host.log`
 }
 
-/** 파일 핸들을 열어두지 않고 한 줄만 덧붙인다 (종료 직전처럼 스트림을 못 믿을 때) */
+/** Appends a single line without keeping the file handle open (for when the stream cannot be trusted, as right before exit) */
 export function appendLine(path: string, line: string): void {
   try {
     const fd = openSync(path, 'a')
@@ -156,6 +162,6 @@ export function appendLine(path: string, line: string): void {
       closeSync(fd)
     }
   } catch {
-    /* 로그도 못 남기는 상황이면 여기서 또 던지지 않는다 */
+    /* If even the log cannot be written, do not throw again here */
   }
 }

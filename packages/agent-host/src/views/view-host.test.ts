@@ -1,9 +1,10 @@
 /**
- * 앱 화면 호스팅 (M4 B-3a) — 진짜 HostServer 위에서.
+ * App view hosting (M4 B-3a) — on top of a real HostServer.
  *
- * 여기서 `ViewSource`는 시험 대역이다. 대역이 돌려주는 것은 MCP `resources/read`의 답 모양
- * 그대로다. 진짜 런타임과 앱 프로세스를 맞댄 이음새는 `app-views.test.ts`가 보고, 브라우저에서
- * 실제로 뜨는지는 e2e(app-frame.spec.ts)가 본다.
+ * Here `ViewSource` is a test stand-in. What the stand-in returns is exactly the shape of an MCP
+ * `resources/read` answer. The seam where the real runtime meets a real app process is covered by
+ * `app-views.test.ts`, and whether it actually comes up in a browser is covered by e2e
+ * (app-frame.spec.ts).
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { request } from 'node:http'
@@ -86,15 +87,15 @@ function get(url: string) {
   })
 }
 
-/** 프록시 페이지에 실린 설정 JSON */
+/** The config JSON embedded in the proxy page */
 function pageConfig(body: string): Record<string, string> {
   const m = /<script type="application\/json" id="cc-view-config">(.*?)<\/script>/s.exec(body)
   if (!m?.[1]) throw new Error('no config block')
   return JSON.parse(m[1]) as Record<string, string>
 }
 
-describe('ViewHost — 불투명 출처 (기본)', () => {
-  it('화면 주소는 비밀 칸 뒤에 있고, 프록시 페이지가 화면의 CSP와 문서를 함께 싣는다', async () => {
+describe('ViewHost — opaque origin (default)', () => {
+  it("the view's address sits behind the secret path, and the proxy page carries the view's CSP and document together", async () => {
     const { source, reads } = fakeSource({
       'notes ui://notes/board': { html: '<p>board</p></script><script>alert(1)</script>', csp: { connectDomains: ['https://api.example.com'] } },
     })
@@ -108,19 +109,19 @@ describe('ViewHost — 불투명 출처 (기본)', () => {
     const page = await get(frame.url)
     expect(page.status).toBe(200)
     expect(page.referrer).toBe('no-referrer')
-    // srcdoc 문서가 물려받을 정책이다 — 선언한 connect만, 나머지는 막힘
+    // The policy the srcdoc document inherits — only the declared connect, everything else blocked
     expect(page.csp).toContain('connect-src https://api.example.com')
     expect(page.csp).toContain("frame-src 'none'")
     const cfg = pageConfig(page.body)
     expect(cfg).toMatchObject({ mode: 'opaque', hostOrigin: HOST_ORIGIN, sandbox: 'allow-scripts allow-forms' })
-    // 앱의 HTML은 JSON 안에 이스케이프되어 실린다 — `</script>`로 블록을 빠져나오지 못한다
+    // The app's HTML is embedded escaped inside the JSON — it cannot escape the block with `</script>`
     expect(cfg.html).toBe('<p>board</p></script><script>alert(1)</script>')
     expect(page.body.match(/<\/script>/g)).toHaveLength(2)
-    // 문서는 frame()에서 한 번 읽고, 프록시 페이지는 그것을 쓴다
+    // The document is read once in frame(), and the proxy page uses that
     expect(reads).toEqual(['p1/notes ui://notes/board'])
   })
 
-  it('선언이 없으면 제한 기본값이 헤더로 나간다', async () => {
+  it('the restrictive default goes out in the header when nothing is declared', async () => {
     const { source } = fakeSource({ 'notes ui://notes/board': { html: '<p>x</p>' } })
     const { views: v } = await start(source)
     const { instanceId } = v.open(NOTES, 'ui://notes/board')
@@ -129,7 +130,7 @@ describe('ViewHost — 불투명 출처 (기본)', () => {
     expect(page.csp).toContain("default-src 'none'")
   })
 
-  it('화면의 앱은 인스턴스가 정한다 — 다른 앱 이름이나 다른 프로젝트를 대면 열리지 않는다', async () => {
+  it('the instance decides which app the view belongs to — presenting a different app name or project does not open it', async () => {
     const { source } = fakeSource({ 'notes ui://notes/board': { html: 'x' } })
     const { views: v } = await start(source)
     const { instanceId } = v.open(NOTES, 'ui://notes/board')
@@ -139,7 +140,7 @@ describe('ViewHost — 불투명 출처 (기본)', () => {
     await expect(v.readResource(OTHER, 'ui://notes/board', instanceId)).rejects.toThrow(/not open/)
   })
 
-  it('허용 목록 밖의 부모 출처에는 주소를 주지 않고, 주소를 비틀어도 404다', async () => {
+  it('gives no address to a parent origin outside the allow list, and 404s even when the address is tampered with', async () => {
     const { source } = fakeSource({ 'notes ui://notes/board': { html: 'x' } })
     const { views: v, port } = await start(source)
     const { instanceId } = v.open(NOTES, 'ui://notes/board')
@@ -161,7 +162,7 @@ describe('ViewHost — 불투명 출처 (기본)', () => {
     expect((await get(good.url)).status).toBe(200)
   })
 
-  it('닫은 인스턴스는 더 이상 서빙하지 않는다', async () => {
+  it('a closed instance no longer serves', async () => {
     const { source } = fakeSource({ 'notes ui://notes/board': { html: 'x' } })
     const { views: v } = await start(source)
     const { instanceId } = v.open(NOTES, 'ui://notes/board')
@@ -171,14 +172,14 @@ describe('ViewHost — 불투명 출처 (기본)', () => {
     await expect(v.frame({ app: NOTES, instanceId, hostOrigin: HOST_ORIGIN })).rejects.toThrow(/not open/)
   })
 
-  it('런타임이 없으면 이유와 함께 실패한다', async () => {
+  it('fails with a reason when the runtime is absent', async () => {
     const { views: v } = await start(null)
     const { instanceId } = v.open(NOTES, 'ui://notes/board')
     await expect(v.frame({ app: NOTES, instanceId, hostOrigin: HOST_ORIGIN })).rejects.toThrow(/runtime is not running/)
     await expect(v.readResource(NOTES, 'ui://notes/x')).rejects.toThrow(/runtime is not running/)
   })
 
-  it('화면이 아닌 리소스는 띄우지 않는다', async () => {
+  it('does not render a resource that is not a view', async () => {
     const source: ViewSource = { readResource: async (_a, uri) => ({ contents: [{ uri, mimeType: 'text/html', text: '<p>' }] }) }
     const { views: v } = await start(source)
     const { instanceId } = v.open(NOTES, 'ui://notes/board')
@@ -186,8 +187,8 @@ describe('ViewHost — 불투명 출처 (기본)', () => {
   })
 })
 
-describe('ViewHost — 앱별 출처', () => {
-  it('프록시는 앱의 고정 포트를 가리키고, 그 포트는 그 앱의 화면만 파생 비밀 뒤에서 서빙한다', async () => {
+describe('ViewHost — per-app origin', () => {
+  it("the proxy points to the app's fixed port, and that port serves only that app's view, behind a derived secret", async () => {
     const { source } = fakeSource(
       {
         'notes ui://notes/board': { html: '<p>notes</p>', csp: { resourceDomains: ['https://cdn.example.com'] } },
@@ -208,12 +209,12 @@ describe('ViewHost — 앱별 출처', () => {
     expect(appPort).toBeLessThanOrEqual(32767)
     const appOrigin = `http://127.0.0.1:${appPort}`
     expect(cfg).toMatchObject({ mode: 'app', appOrigin, sandbox: 'allow-scripts allow-same-origin allow-forms' })
-    // 프록시 자신의 정책: 자기 스크립트(해시)와 그 앱의 출처 하나만
+    // The proxy's own policy: only its own script (hash) and that one app's origin
     expect(page.csp).toContain(`script-src '${PROXY_SCRIPT_HASH}'`)
     expect(page.csp).toContain(`frame-src ${appOrigin}`)
     expect(PROXY_SCRIPT_HASH).toBe(`sha256-${createHash('sha256').update(PROXY_SCRIPT).digest('base64')}`)
 
-    // 화면의 주소에는 host 비밀이 아니라 파생 비밀이 있다 (화면이 location.href로 읽는 값이다)
+    // The view's address carries a derived secret, not the host secret (this is the value the view reads via location.href)
     const src = new URL(cfg.src!)
     expect(src.origin).toBe(appOrigin)
     expect(src.pathname).not.toContain(SECRET)
@@ -223,20 +224,20 @@ describe('ViewHost — 앱별 출처', () => {
     expect(doc.csp).toContain('script-src \'unsafe-inline\' https://cdn.example.com')
     expect(doc.csp).toContain("connect-src 'none'")
 
-    // 그 포트는 다른 앱의 인스턴스를 서빙하지 않고, host 비밀로도 열리지 않는다
+    // That port does not serve another app's instance, and does not open with the host secret either
     expect((await get(cfg.src!.replace(notes.instanceId, other.instanceId))).status).toBe(404)
     expect((await get(`${appOrigin}/${SECRET}/views/${notes.instanceId}/view`)).status).toBe(404)
-    // 파생 비밀은 host 포트에서 통하지 않는다
+    // A derived secret does not work on the host port
     const derived = src.pathname.split('/')[1]!
     expect((await get(`http://127.0.0.1:${port}/${derived}/views/${notes.instanceId}/?host=${encodeURIComponent(HOST_ORIGIN)}`)).status).toBe(404)
 
-    // 다른 앱은 다른 포트, 다른 비밀
+    // A different app gets a different port and a different secret
     const otherCfg = pageConfig((await get((await v.frame({ app: OTHER, instanceId: other.instanceId, hostOrigin: HOST_ORIGIN })).url)).body)
     expect(otherCfg.appOrigin).not.toBe(appOrigin)
     expect(new URL(otherCfg.src!).pathname.split('/')[1]).not.toBe(derived)
   })
 
-  it('같은 앱은 host를 다시 띄워도 같은 포트를 받는다', async () => {
+  it('the same app gets the same port even after the host restarts', async () => {
     const { source } = fakeSource({ 'notes ui://notes/board': { html: 'x' } }, { notes: 'app' })
     const first = await start(source)
     const i1 = first.views.open(NOTES, 'ui://notes/board')
@@ -253,10 +254,11 @@ describe('ViewHost — 앱별 출처', () => {
   })
 })
 
-describe('ViewHost — 열린 화면은 앱을 붙든다', () => {
+describe('ViewHost — an open view holds the app open', () => {
   /**
-   * 붙든 수를 앱마다 센다. 놓는 함수는 불릴 때마다 센다 — 런타임의 retainView는 두 번째 놓기를
-   * 무시하지만, 한 번만 놓는 것은 ViewHost 자신이 지켜야 한다(다른 ViewSource도 올 수 있다).
+   * Counts holds per app. The release function counts every time it is called — the runtime's
+   * retainView ignores a second release, but releasing exactly once is something ViewHost itself
+   * has to guarantee (a different ViewSource could behave differently).
    */
   function holdingSource() {
     const held = new Map<string, number>()
@@ -272,7 +274,7 @@ describe('ViewHost — 열린 화면은 앱을 붙든다', () => {
     return { source, held }
   }
 
-  it('열면 붙들고, 닫으면 놓는다 — 두 번 닫아도 한 번만 놓는다', async () => {
+  it('holds the app open on open, and releases it on close — closing twice releases only once', async () => {
     const { source, held } = holdingSource()
     const { views: v } = await start(source)
     const a = v.open(NOTES, 'ui://notes/board')
@@ -285,19 +287,19 @@ describe('ViewHost — 열린 화면은 앱을 붙든다', () => {
     expect(held.get('p1/notes')).toBe(0)
   })
 
-  it('없는 앱이면 열리지 않고 인스턴스도 생기지 않는다', async () => {
+  it('a nonexistent app neither opens nor creates an instance', async () => {
     const { source } = holdingSource()
     const { views: v } = await start(source)
     expect(() => v.open({ projectId: 'p1', appId: 'ghost' }, 'ui://ghost/main')).toThrow(/그런 앱이 없습니다/)
     expect((v as unknown as { instances: Map<string, unknown> }).instances.size).toBe(0)
   })
 
-  it('상한에 밀려난 화면과 끝날 때 남은 화면도 놓는다', async () => {
+  it('releases a view pushed out by the cap, and any views still open when it shuts down', async () => {
     const { source, held } = holdingSource()
     const { views: v } = await start(source)
     v.open(OTHER, 'ui://other/main')
     for (let i = 0; i < MAX_INSTANCES; i++) v.open(NOTES, 'ui://notes/board')
-    // 가장 오래된 것(other)이 밀려났다
+    // The oldest one (other) was pushed out
     expect(held.get('p1/other')).toBe(0)
     expect(held.get('p1/notes')).toBe(MAX_INSTANCES)
     await v.dispose()

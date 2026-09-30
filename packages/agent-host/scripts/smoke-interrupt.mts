@@ -1,14 +1,17 @@
 /**
- * L3 스모크: 스톱이 정말 멈추나 (도그푸딩 2026-09-07 — "툴만 멈추고 몇 초 뒤 다시 시작돼").
+ * L3 smoke test: does Stop actually stop? (dogfooding, 2026-09-07 — "only the tool stops, then it
+ * starts back up a few seconds later").
  *
- * 원인은 인자 하나였다: `turn/interrupt`에 threadId만 실어 보냈고 서버는
- * `missing field turnId`(-32600)로 거절했다. 거절은 에러 이벤트로만 흘렀고 턴은 끝까지
- * 돌았다 — 화면은 멈춘 듯 보이는데 모델은 20초를 더 일했다.
+ * The cause was a single argument: `turn/interrupt` was sent with only threadId, and the server
+ * rejected it with `missing field turnId` (-32600). The rejection only flowed out as an error
+ * event, and the turn ran to completion anyway — the screen looked stopped while the model kept
+ * working for another 20 seconds.
  *
- * 단위 시험은 "무엇을 보내는가"를 본다. 여기서는 **진짜 codex에게 보내고 조용해지는지**를
- * 본다. 그 둘은 다른 질문이고, 이 버그는 후자에서만 보였다.
+ * A unit test checks "what does it send." Here, what is checked is **whether sending it to a real
+ * codex actually goes quiet**. Those are different questions, and this bug showed up only in the
+ * latter.
  *
- * 실행: pnpm smoke:interrupt   (codex 로그인 필요)
+ * Run with: pnpm smoke:interrupt   (requires being logged into codex)
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,14 +32,15 @@ const h = await adapter.createSession({ sessionId: 'int-x', cwd, permissionPrese
 })
 
 h.send('세 번에 나눠서 bash로 `sleep 5`를 실행하고, 각각 끝나면 한 줄씩 말해줘.')
-// 도구가 실제로 돌기 시작할 때까지 (여기서 멈춰야 의미가 있다)
+// Wait until the tool actually starts running (stopping only makes sense once it has started)
 for (let i = 0; i < 40 && !events.some((e) => e.type === 'tool_call'); i++) await wait(500)
 const started = events.some((e) => e.type === 'tool_call')
 console.log('[codex] 도구 실행 시작:', started ? 'O' : 'X (모델이 안 움직였다 — 다시 돌려보세요)')
 
 h.interrupt()
 const mark = events.length
-// 끊긴 턴의 tool_result·usage 정도는 뒤따라온다. 문제는 **모델이 계속 말하느냐**다
+// A stray tool_result or usage event from the interrupted turn is expected to trail in. The
+// question is **whether the model keeps talking**
 await wait(20_000)
 const after = events.slice(mark)
 const kept = after.filter((e) => e.type === 'message_delta' || e.type === 'tool_call')

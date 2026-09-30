@@ -1,13 +1,14 @@
 /**
- * 실측: 에이전트 바꾸기(claude ↔ codex)가 정말로 되는가.
+ * Measured: does switching tools (claude ↔ codex) actually work?
  *
- * 화면에는 오래전부터 있는 기능인데 "도구마다 세션 형식이 다른데 제대로 들어가긴
- * 하나"라는 의심이 나왔다. 설계상 대화는 안 이어진다(확인 창이 그렇게 말한다).
- * 그러니 물어야 할 것은 하나다: **바꾼 뒤에 그 세션이 실제로 돌아가는가.**
+ * This has been a feature in the UI for a long time, but a suspicion came up: "each tool has a
+ * different session format — does it actually go in correctly?" By design the conversation does
+ * not continue (the confirmation dialog says so). So there is exactly one thing to ask: **after
+ * switching, does that session actually work?**
  *
- * 특히 의심스러운 자리: switchTool은 externalId·importedFrom만 지우고
- * model/effort/verbosity/serviceTier는 그대로 둔다. claude의 'sonnet'을 든 채로
- * codex 어댑터에 넘어가면 무슨 일이 일어나는가?
+ * The specific spot under suspicion: switchTool clears only externalId and importedFrom, and
+ * leaves model, effort, verbosity, and serviceTier alone. What happens when claude's 'sonnet' is
+ * carried over into the codex adapter?
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -20,12 +21,12 @@ const cwd = mkdtempSync(join(tmpdir(), 'switch-probe-'))
 console.log('cwd:', cwd)
 
 const log = (tag: string) => (e: NormalizedEvent) => {
-  if (e.type === 'message_delta') return // 본문은 시끄럽다
+  if (e.type === 'message_delta') return // the body content is noisy
   console.log(`  [${tag}] ${e.type}${'reason' in e && e.reason ? ` (${e.reason})` : ''}`)
   if (e.type === 'error') console.log('      →', JSON.stringify(e).slice(0, 300))
 }
 
-/** 실제로 답이 오는가 — 도는 척만 하는지 아닌지는 이걸로만 갈린다 */
+/** Does an answer actually come back — this is the only thing that separates real work from merely appearing to run */
 async function answers(h: { send: (t: string) => void }, tag: string, sink: NormalizedEvent[]) {
   h.send('Reply with exactly: OK')
   const start = Date.now()
@@ -38,7 +39,7 @@ async function answers(h: { send: (t: string) => void }, tag: string, sink: Norm
   return false
 }
 
-// ── 1. claude로 시작해 모델을 고른다 (사람이 흔히 하는 일)
+// ── 1. Start with claude and pick a model (a common thing for a person to do)
 const claude = new ClaudeAdapter()
 const aEvents: NormalizedEvent[] = []
 const a = await claude.createSession(
@@ -50,8 +51,8 @@ const externalId = a.externalId
 console.log('claude externalId:', externalId)
 await a.dispose()
 
-// ── 2. 고치기 전의 switchTool을 재현한다: 도구만 바꾸고 model은 들고 간다.
-//    (이 프로브가 처음 잡은 자리다. 회귀하면 여기서 다시 400이 뜬다)
+// ── 2. Reproduces switchTool as it was before the fix: only the tool changes, and model is carried
+//    over. (This is the spot this probe originally caught. If it regresses, a 400 shows up here again.)
 console.log('\n── [고치기 전 재현] codex로 바꾸며 model="sonnet"을 들고 가면 ──')
 const codex = new CodexAdapter()
 const bEvents: NormalizedEvent[] = []
