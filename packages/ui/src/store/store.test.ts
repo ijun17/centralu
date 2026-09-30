@@ -285,7 +285,11 @@ describe('project screen arrangement (#203)', () => {
     mock.sessions.set('arr-r1', sessionInfo('arr-r1', { projectId: a.id }))
     const saved = { [a.id]: { order: ['session:arr-r1'], hidden: [] } }
     mock.workspaceSnapshot = { focusedSessionId: 'arr-r1', projectPanels: saved } as never
-    // Restoring the focused session saves the snapshot; a crash right after must not find the arrangement gone
+    /*
+     * Restoring the focused session used to save the snapshot midway, and a crash right after must not find the
+     * arrangement gone. Saves are now held off for the whole restore (`restoringWorkspace`), so the stronger thing
+     * holds: the restore writes nothing, and the stored arrangement is exactly what it was.
+     */
     const written: unknown[] = []
     const save = mock.workspace.save
     mock.workspace.save = async (snap) => {
@@ -297,8 +301,8 @@ describe('project screen arrangement (#203)', () => {
     await tick()
 
     expect(useStore.getState().focusedSessionId).toBe('arr-r1')
-    expect(written.length).toBeGreaterThan(0)
-    expect(written.every((w) => JSON.stringify(w) === JSON.stringify(saved))).toBe(true)
+    expect(written).toEqual([])
+    expect((mock.workspaceSnapshot as { projectPanels?: unknown }).projectPanels).toEqual(saved)
   })
 
   it('leaves with its project', async () => {
@@ -3192,5 +3196,54 @@ describe('the trash (#204)', () => {
     // Registered again is added again: it is asked about trust as a new project is
     expect(st.trustAsk).toBe(p.id)
     expect(await useStore.getState().restoreFromTrash(s.id)).toMatch(/Not in the trash/)
+  })
+})
+
+/*
+ * The restore must not save a half-restored state (`restoringWorkspace` in store.ts). Every setter the restore goes
+ * through saves, so a save in the middle of it used to write the defaults of every field restored later back over
+ * the snapshot. The spinning-marker settings are restored last: the person turned both off, and after a restart
+ * both were on again (2026-09-30).
+ */
+describe('restoring the workspace saves nothing until it is done', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const lateFields = { spinGrid: false, spinSessionIcon: false, foldComposer: false }
+
+  it('settings turned off stay off across two launches, even the ones restored last', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/restore-late')
+    mock.sessions.set('late-r1', sessionInfo('late-r1', { projectId: p.id }))
+    mock.workspaceSnapshot = {
+      focusedSessionId: 'late-r1',
+      panelWidth: 300,
+      sidebarWidth: 240,
+      railWidth: 300,
+      textScale: 3,
+      ...lateFields,
+    } as never
+
+    // A launch starts from the defaults, which have all three on
+    useStore.setState({ spinGrid: true, spinSessionIcon: true, foldComposer: true })
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState()).toMatchObject(lateFields)
+    // What the host keeps is what the next launch reads
+    expect(mock.workspaceSnapshot).toMatchObject(lateFields)
+
+    useStore.setState({ spinGrid: true, spinSessionIcon: true, foldComposer: true })
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState()).toMatchObject(lateFields)
+  })
+
+  it('a change the person makes after the restore is still saved', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { ...lateFields } as never
+    await useStore.getState().attach(mock)
+    await tick()
+
+    useStore.getState().setSpinGrid(true)
+    await tick()
+    expect(mock.workspaceSnapshot).toMatchObject({ spinGrid: true, spinSessionIcon: false })
   })
 })

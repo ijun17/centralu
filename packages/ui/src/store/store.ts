@@ -2137,6 +2137,21 @@ export function usageTools(s: AppState): ToolName[] {
   return out
 }
 
+/**
+ * True while `attach` restores the workspace snapshot. `saveWorkspace` does nothing then.
+ *
+ * The restore goes through the same setters a person uses (`focusSession`, `setPanelWidth`,
+ * `setTextScale`, `openOrchestrator`), and each of them saves. A save in the middle of the restore writes
+ * the half-restored state back over the snapshot being read, so every field restored after that save is
+ * stored as its default, and the next launch reads the default. It hit the folded projects (#205) and
+ * `introSeen` (#63), each fixed by restoring that one field earlier, and then the spinning-marker
+ * settings, which are restored last: the person turned both off, and after the machine restarted both
+ * were on again (2026-09-30, on the real store: the snapshot held `false` for both at 06:18 and `true`
+ * after the restart, with every other field unchanged). Reordering fixes one field at a time; not saving
+ * while restoring fixes the class.
+ */
+let restoringWorkspace = false
+
 export const useStore = create<AppState>((set, get) => ({
   platform: null,
   connection: 'connecting',
@@ -2388,6 +2403,7 @@ export const useStore = create<AppState>((set, get) => ({
     void get().checkUpdate(false)
 
     // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
+    restoringWorkspace = true
     try {
       const snap = await platform.workspace.load()
       if (snap) {
@@ -2396,7 +2412,8 @@ export const useStore = create<AppState>((set, get) => ({
          * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
          * writes an empty list back over the snapshot just read, erasing the fold — the same thing
          * that happens to `introSeen` (see the comment below). Anything that is not a string is
-         * discarded.
+         * discarded. (Saves are now held off for the whole restore, `restoringWorkspace`, so this order
+         * is no longer what protects the fold.)
          */
         const savedFolds = (snap as { foldedProjects?: unknown }).foldedProjects
         if (Array.isArray(savedFolds)) {
@@ -2427,7 +2444,7 @@ export const useStore = create<AppState>((set, get) => ({
          * `saveWorkspace`, and if `introSeen` is still its initial state (`false`) at that point, it
          * writes `false` back over the snapshot just read, erasing the stored value — the next launch
          * showed the intro screen again (measured: a partial save mid-restore clobbers whichever
-         * field is restored last).
+         * field is restored last). That class is now closed by `restoringWorkspace`.
          */
         if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
         const savedView = (snap as { view?: unknown }).view
@@ -2505,6 +2522,8 @@ export const useStore = create<AppState>((set, get) => ({
       }
     } catch {
       /* The app works normally even with no snapshot */
+    } finally {
+      restoringWorkspace = false
     }
 
     /*
@@ -2538,6 +2557,8 @@ export const useStore = create<AppState>((set, get) => ({
    * added **to this function**.
    */
   saveWorkspace() {
+    // Nothing is saved while the snapshot is being restored: see `restoringWorkspace`
+    if (restoringWorkspace) return
     const s = get()
     void s.platform?.workspace
       .save({
