@@ -113,9 +113,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   // After every render: a panel can move without changing size (a drag's preview), which no
   // resize observer reports, and the app view laid over it has to move with it
-  useLayoutEffect(() => placeSlots(dragging, inbound))
+  useLayoutEffect(() => placeSlots(projectId, dragging, inbound))
   // Leaving the screen lets the frames take the pointer again, whatever a drag left behind
-  useEffect(() => () => placeSlots(null), [])
+  useEffect(() => () => placeSlots(projectId, null), [projectId])
 
   useEffect(() => {
     const el = ref.current

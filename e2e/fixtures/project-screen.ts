@@ -44,8 +44,11 @@ export const panels = (page: Page) =>
     ),
   )
 
-/** Drags panel `from` to one side of panel `to` and drops it there */
-export async function dragPanel(page: Page, from: string, to: string, side: 'before' | 'after') {
+/**
+ * Drags panel `from` to one side of panel `to` and drops it there. `view` is the app view laid over `from` when it
+ * is an app's panel: the view is not inside the panel, so it has to be dimmed with it on its own (slots.ts).
+ */
+export async function dragPanel(page: Page, from: string, to: string, side: 'before' | 'after', view?: Locator) {
   await page.evaluate((id) => {
     const w = window as any
     w.__dt = new DataTransfer()
@@ -54,6 +57,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragstart', { dataTransfer: w.__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).toHaveClass(/opacity-40/)
+  if (view) await expect(view).toHaveCSS('opacity', '0.4')
   await page.evaluate(
     ({ to, side }) => {
       const card = document.querySelector(`[data-testid="project-panel-${to}"]`)!
@@ -85,6 +89,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragend', { dataTransfer: (window as any).__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).not.toHaveClass(/opacity-40/)
+  if (view) await expect(view).toHaveCSS('opacity', '1')
 }
 
 /** Where a sidebar row is dropped: one half of a panel, or the screen's own padding (the empty screen's middle) */
@@ -443,8 +448,8 @@ export function appPanelTests(): void {
       await v.locator('#call').click()
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
 
-      // The panel moves; the view follows it without being taken out of the document
-      await dragPanel(page, 'app:slider', `session:${s}`, 'before')
+      // The panel moves, dimmed with its view while it is dragged; the view follows it without being taken out of the document
+      await dragPanel(page, 'app:slider', `session:${s}`, 'before', pinned)
       expect(await panels(page)).toEqual(['app:slider', `session:${s}`])
       await expectOverSlot(page, key)
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
