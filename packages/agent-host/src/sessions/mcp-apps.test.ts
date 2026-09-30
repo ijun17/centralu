@@ -118,7 +118,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
   it('a proposal creates nothing; approval creates the app and restarts the orchestrator, and the tool is recorded going through the intermediary', async () => {
     connect()
     const orc = await mgr.orchestrator()
-    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: '시험용 서버' })
+    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: 'test server' })
     expect(mgr.mcpProposals().map((p) => p.name)).toEqual(['echoer'])
     // Nothing exists yet at the proposal stage
     expect(existsSync(join(dataRoot, 'apps', 'echoer'))).toBe(false)
@@ -130,7 +130,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
 
     // A headless app: only a server command, no home. The app stands without starting (it starts the first time it is needed)
     const m = readManifest('echoer')
-    expect(m).toMatchObject({ manifestVersion: 1, id: 'echoer', name: 'echoer', description: '시험용 서버', server: SERVER })
+    expect(m).toMatchObject({ manifestVersion: 1, id: 'echoer', name: 'echoer', description: 'test server', server: SERVER })
     expect(m).not.toHaveProperty('home')
     expect(rt.list().find((a) => a.appId === 'echoer')).toMatchObject({ projectId: null, status: 'stopped', trusted: true, error: null })
     // It is not written to the legacy registry

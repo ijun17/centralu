@@ -158,7 +158,7 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   },
   coordinator: async (tool) => {
     const member = (await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo
-    return (await mgr.createCoordinator({ name: 'Crew', memberSessionIds: [member.id], roleAppend: '조율 세션', tool })).id
+    return (await mgr.createCoordinator({ name: 'Crew', memberSessionIds: [member.id], roleAppend: 'Coordinating session', tool })).id
   },
   worker: async (tool) => ((await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo).id,
   manager: async (tool) => {

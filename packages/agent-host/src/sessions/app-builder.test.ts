@@ -123,9 +123,9 @@ describe('creating an app stands up its building session', () => {
     expect(o.cwd).toBe(repo)
     expect(o.systemPromptAppend).toBe(builder!.roleAppend)
     const role = builder!.roleAppend!
-    expect(role).toContain('너는 Centralu 앱 "Team notes"(id notes)을 만드는 세션이다')
-    expect(role).toContain(`앱 폴더: ${join('.centralu', 'apps', 'notes')}/ (${app.dir})`)
-    for (const rule of ['runtime/은 Centralu가 만든 생성물이다', 'npm install', '"__"', 'readOnlyHint', "visibility: ['app']", 'centralu.readJson/writeJson', 'AGENTS.md']) {
+    expect(role).toContain('You are the session that builds the Centralu app "Team notes" (id notes)')
+    expect(role).toContain(`App folder: ${join('.centralu', 'apps', 'notes')}/ (${app.dir})`)
+    for (const rule of ['runtime/ is a build product Centralu generates', 'npm install', '"__"', 'readOnlyHint', "visibility: ['app']", 'centralu.readJson/writeJson', 'AGENTS.md']) {
       expect(role, rule).toContain(rule)
     }
   })
@@ -135,7 +135,7 @@ describe('creating an app stands up its building session', () => {
     expect(builder).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker' })
     expect(claude.last().cwd).toBe(app.dir)
     expect(app.dir).toBe(join(dataRoot, 'apps', 'timer'))
-    expect(builder!.roleAppend).toContain(`네 작업 폴더가 곧 앱 폴더다: ${app.dir}`)
+    expect(builder!.roleAppend).toContain(`Your working folder is the app folder: ${app.dir}`)
   })
 
   it('the caller picks the tool, and the project\'s default tool is used if none is picked', async () => {
@@ -207,7 +207,7 @@ describe('it is found by that app\'s building session', () => {
     const orch = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: projectId })
     const b = (await rpc('apps.builder', { appId: 'board', projectId })) as SessionInfo
-    expect(r.text).toContain(`만드는 세션: Board · builder [${b.id}] — 무엇을 만들지 send_to_session으로 그 세션에 시키세요`)
+    expect(r.text).toContain(`Building session: Board · builder [${b.id}] — send_to_session it what to build`)
   })
 })
 
@@ -227,7 +227,7 @@ describe('a building session tries out its own app (C-3)', () => {
     // The list the bridge (Codex) asks for is the same profile
     const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
     expect(tools.map((t) => t.name)).toEqual(['check'])
-    await expect(mgr.runOrchestratorTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/이 세션의 도구가 아닙니다: list_sessions/)
+    await expect(mgr.runOrchestratorTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session: list_sessions/)
   })
 
   it('a user-folder app\'s building session: only its own app attaches (other user-folder apps belong to the orchestrator)', async () => {

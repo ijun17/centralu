@@ -128,7 +128,7 @@ describe('a swapped-out process speaking late (#157)', () => {
   it('keeps the new handle even if the old handle raises adapter_crashed after a restart, and does not record the old turn\'s text or its end', async () => {
     const id = await newSession()
     const old = claude.last
-    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '옛 턴의 앞부분' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'the front part of the old turn' })
     // The person stopped the turn (the issue's order of events: Stop → change settings)
     old.emit({ type: 'state_change', sessionId: id, state: 'waiting_input', reason: 'interrupted' })
 
@@ -139,7 +139,7 @@ describe('a swapped-out process speaking late (#157)', () => {
     expect(old.disposed).toBe(true)
 
     // The old process finishes emitting the turn it was in the middle of, then dies carrying an error result
-    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: '옛 프로세스의 늦은 글' })
+    old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'late text from the old process' })
     old.emit({ type: 'turn_complete', sessionId: id })
     old.emit({
       type: 'error',
@@ -151,7 +151,7 @@ describe('a swapped-out process speaking late (#157)', () => {
     expect(mgr.isLive(id)).toBe(true)
     expect(events.some((e) => e.type === 'error' && e.error.code === 'adapter_crashed')).toBe(false)
     expect(events.some((e) => e.type === 'turn_complete')).toBe(false)
-    expect(texts(id).some((t) => t.includes('옛 프로세스의 늦은 글'))).toBe(false)
+    expect(texts(id).some((t) => t.includes('late text from the old process'))).toBe(false)
 
     // The new handle's own crash is still handled the same way as before — the guard did not block the crash branch entirely
     fresh.emit({ type: 'error', sessionId: id, error: { code: 'adapter_crashed', message: 'gone', retryable: true } })
@@ -307,19 +307,19 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 
   it('sends one failure report for a failed turn, and does not report the unrelated turn after it', async () => {
     const { worker, tools, w, reports } = await setup()
-    await tools.sendToSession(worker, '빌드를 고쳐 줘', true)
+    await tools.sendToSession(worker, 'fix the build', true)
     w.emit({ type: 'error', sessionId: worker, error: { code: 'internal', message: 'API Error: 400 bad model', retryable: true } })
     await tick()
 
     expect(reports()).toHaveLength(1)
-    expect(reports()[0]).toContain('실패했습니다')
+    expect(reports()[0]).toContain('failed')
     expect(reports()[0]).toContain('API Error: 400 bad model')
-    expect(reports()[0]).not.toContain('끝났습니다')
+    expect(reports()[0]).not.toContain('finished')
 
     // A turn the person spoke to directly, and a turn assigned without asking for a report, are not reported
-    await rpc('agents.send', { sessionId: worker, text: '직접 묻는 말' })
+    await rpc('agents.send', { sessionId: worker, text: 'something asked directly' })
     w.emit({ type: 'turn_complete', sessionId: worker })
-    await tools.sendToSession(worker, '조용히 해 줘', false)
+    await tools.sendToSession(worker, 'keep it quiet', false)
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toHaveLength(1)
@@ -327,8 +327,8 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 
   it('clears the previous report request when assigned again without one — the new instruction replaces it', async () => {
     const { worker, tools, w, reports } = await setup()
-    await tools.sendToSession(worker, '끝나면 알려줘', true)
-    await tools.sendToSession(worker, '아니, 이걸 대신 해 줘', false)
+    await tools.sendToSession(worker, 'let me know when it is done', true)
+    await tools.sendToSession(worker, 'no, do this instead', false)
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toEqual([])
@@ -336,11 +336,11 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 
   it('reports a finished turn as "finished," as before', async () => {
     const { worker, tools, w, reports } = await setup()
-    await tools.sendToSession(worker, '끝나면 알려줘', true)
+    await tools.sendToSession(worker, 'let me know when it is done', true)
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toHaveLength(1)
-    expect(reports()[0]).toContain('끝났습니다')
+    expect(reports()[0]).toContain('finished')
   })
 })
 
@@ -444,7 +444,7 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
 
   it('switching tools mid-turn leaves meta and the store as idle too — not only the broadcast', async () => {
     const id = await newSession()
-    await rpc('agents.send', { sessionId: id, text: '긴 일' })
+    await rpc('agents.send', { sessionId: id, text: 'a long job' })
     expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('working')
 
     await rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
@@ -477,7 +477,7 @@ describe('a setting changed mid-turn is applied once the turn ends (#164)', () =
   it('does not bring the process down while working, and swaps it for one with the new settings once the turn ends', async () => {
     const id = await newSession()
     const running = claude.last
-    await rpc('agents.send', { sessionId: id, text: '긴 일' })
+    await rpc('agents.send', { sessionId: id, text: 'a long job' })
 
     const r = (await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })) as { applied?: string }
     expect(r.applied).toBe('after_turn')

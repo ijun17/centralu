@@ -81,9 +81,9 @@ function seatSection(text: string, heading: string): string {
 }
 
 const SEATS: { profile: ToolProfile; heading: string }[] = [
-  { profile: 'orchestrator', heading: '오케스트레이터가 부르는 도구' },
-  { profile: 'manager', heading: '워크트리 매니저가 부르는 도구' },
-  { profile: 'scoped', heading: '반장이 부르는 도구' },
+  { profile: 'orchestrator', heading: 'Tools the orchestrator calls' },
+  { profile: 'manager', heading: 'Tools the worktree manager calls' },
+  { profile: 'scoped', heading: 'Tools the lead calls' },
 ]
 
 describe('the app guide speaks only of tools that exist in the registry', () => {

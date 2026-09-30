@@ -579,16 +579,16 @@ export class SessionManager {
    */
   async invokeAppTool(appId: string, name: string, args: Record<string, unknown>) {
     if (!name.startsWith(`${appId}_`) && !HOST_APPS.some((a) => a.id === appId && a.tools?.defs.some((d) => d.name === name))) {
-      throw Object.assign(new Error(`그 앱의 도구가 아닙니다: ${appId}/${name}`), { code: 'internal' })
+      throw Object.assign(new Error(`Not a tool of that app: ${appId}/${name}`), { code: 'internal' })
     }
     const app = HOST_APPS.find((a) => a.id === appId)
     const def = app?.tools?.defs.find((d) => d.name === name)
     if (!app || !def || !app.tools) {
-      throw Object.assign(new Error(`그 앱의 도구가 아닙니다: ${appId}/${name}`), { code: 'internal' })
+      throw Object.assign(new Error(`Not a tool of that app: ${appId}/${name}`), { code: 'internal' })
     }
-    if (!this.appEnabled(appId)) return { text: `이 도구의 앱이 꺼져 있습니다: ${name}`, isError: true }
+    if (!this.appEnabled(appId)) return { text: `This tool's app is turned off: ${name}`, isError: true }
     const parsed = def.schema.safeParse(args)
-    if (!parsed.success) return { text: `잘못된 인자: ${parsed.error.message}`, isError: true }
+    if (!parsed.success) return { text: `Invalid arguments: ${parsed.error.message}`, isError: true }
     return app.tools.run(this.appContext(appId), name, parsed.data as Record<string, unknown>, {
       sessionId: null,
       profile: 'human',
@@ -2718,8 +2718,8 @@ export class SessionManager {
      * raw report is record/screen provenance, and the vendor turn is the trust boundary.
      */
     const project = target.projectId
-      ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(사라진 프로젝트)')
-      : '(없음)'
+      ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(project no longer exists)')
+      : '(none)'
     const preview = this.previewOf(sessionId, 600)
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
@@ -2727,21 +2727,21 @@ export class SessionManager {
      * included too. The error is not the agent's last response, so it never shows up in the preview.
      */
     const outcome =
-      ending.type === 'error' ? `[Centralu] 지시한 일이 실패했습니다.\n`
-      : ending.type === 'limit_reached' ? `[Centralu] 지시한 일이 사용 한도에 걸려 멈췄습니다.\n`
-      : ending.type === 'turn_complete' ? `[Centralu] 지시한 일이 끝났습니다.\n`
-      : `[Centralu] 지시한 일이 끝나기 전에 멈췄습니다.\n`
-    const failure = ending.type === 'error' ? `오류: ${ending.error.message.slice(0, 600)}\n\n` : ''
+      ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
+      : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
+      : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
+      : `[Centralu] The assigned work stopped before finishing.\n`
+    const failure = ending.type === 'error' ? `Error: ${ending.error.message.slice(0, 600)}\n\n` : ''
     try {
       await this.deliver(
         orchestratorId,
         outcome +
-          `세션: ${frameField(target.name)}\n` +
+          `Session: ${frameField(target.name)}\n` +
           `id: ${sessionId}\n` +
-          `프로젝트: ${frameField(project)}\n\n` +
+          `Project: ${frameField(project)}\n\n` +
           failure +
-          `마지막 응답:\n${preview || '(내용 없음)'}\n\n` +
-          `더 필요하면 read_session으로 그 세션의 최근 대화를 읽을 수 있습니다.`,
+          `Last response:\n${preview || '(no content)'}\n\n` +
+          `If you need more, you can read that session's recent conversation with read_session.`,
         undefined,
         // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
         // source
@@ -2973,7 +2973,7 @@ export class SessionManager {
         // swept first
         void sweepAttachments().catch(() => {})
       } catch (err) {
-        note = `이미지를 저장하지 못했습니다: ${(err as Error).message}`
+        note = `Could not save the image: ${(err as Error).message}`
       }
     }
     const payload: NormalizedEvent = {
@@ -3176,7 +3176,7 @@ export class SessionManager {
      */
     const d = await adapter.detect()
     if (!d.installed || !d.loggedIn) {
-      throw Object.assign(new Error(`${tool}를 쓸 수 없습니다: ${d.detail}`), { code: 'tool_not_installed' })
+      throw Object.assign(new Error(`Cannot use ${tool}: ${d.detail}`), { code: 'tool_not_installed' })
     }
 
     const old = this.handles.get(sessionId)
@@ -3293,7 +3293,7 @@ export class SessionManager {
        */
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
       throw Object.assign(
-        new Error('그 승인 요청은 이미 사라졌습니다 (에이전트가 다시 시작됨). 명령은 실행되지 않았습니다.'),
+        new Error('That approval request is already gone (the agent restarted). The command was not run.'),
         { code: 'approval_gone' },
       )
     }
@@ -3324,7 +3324,7 @@ export class SessionManager {
     if (!landed) {
       this.emit({ type: 'question_resolved', sessionId, requestId })
       throw Object.assign(
-        new Error('그 질문은 이미 사라졌습니다 (에이전트가 다시 시작됨). 답은 전달되지 않았습니다.'),
+        new Error('That question is already gone (the agent restarted). The answer was not delivered.'),
         { code: 'question_gone' },
       )
     }
@@ -3723,9 +3723,9 @@ export class SessionManager {
   }): Promise<SessionInfo> {
     for (const id of params.memberSessionIds) {
       const t = this.meta.get(id)
-      if (!t) throw Object.assign(new Error(`구성원 세션이 없습니다: ${id}`), { code: 'session_not_found' })
+      if (!t) throw Object.assign(new Error(`No such member session: ${id}`), { code: 'session_not_found' })
       if (t.kind !== 'worker') {
-        throw Object.assign(new Error(`구성원은 워커 세션이어야 합니다: ${t.name} (${t.kind})`), { code: 'internal' })
+        throw Object.assign(new Error(`A member must be a worker session: ${t.name} (${t.kind})`), { code: 'internal' })
       }
     }
     const info = await this.createSession({
@@ -4068,9 +4068,9 @@ export class SessionManager {
       : scopeIds !== undefined ? scopeIds.includes(s.id)
       : true
     const scopeError = (id: string) =>
-      childrenOf !== undefined ? `이 매니저의 워크트리 세션이 아닙니다: ${id}`
-      : scopeIds !== undefined ? `이 조율 세션의 구성원이 아닙니다: ${id}`
-      : `이 앱이 관리하는 세션이 아닙니다: ${id}`
+      childrenOf !== undefined ? `Not a worktree session of this manager: ${id}`
+      : scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
+      : `Not a session this app manages: ${id}`
 
     return {
       listSessions: async () => {
@@ -4081,7 +4081,7 @@ export class SessionManager {
           .map((s) => ({
             sessionId: s.id,
             name: this.labelOf(s),
-            project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
+            project: s.projectId ? (byId.get(s.projectId) ?? '(project no longer exists)') : '(none)',
             state: s.state,
             ...(s.worktreeMerged ? { merged: true } : {}),
             // PR status (#76, stage 3) — what lets a manager tell "waiting on review" apart from "just still
@@ -4097,7 +4097,7 @@ export class SessionManager {
         if (sessionId === orchestratorId) {
           // Changing its own settings restarts its own process — that would be suicide in the middle of a
           // tool call
-          return { ok: false, error: '자기 자신의 설정은 사람이 바꿉니다' }
+          return { ok: false, error: 'The person changes its own settings' }
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
@@ -4135,7 +4135,7 @@ export class SessionManager {
         if (!project) {
           return {
             ok: false,
-            error: opts.project ? `그런 프로젝트가 없습니다: ${opts.project}` : 'project를 지정하세요 (이름 또는 id)',
+            error: opts.project ? `No such project: ${opts.project}` : 'Specify a project (name or id)',
           }
         }
         try {
@@ -4177,7 +4177,7 @@ export class SessionManager {
           out.push({
             sessionId: s.id,
             session: this.labelOf(s),
-            project: s.projectId ? (byId.get(s.projectId) ?? '(사라진 프로젝트)') : '(없음)',
+            project: s.projectId ? (byId.get(s.projectId) ?? '(project no longer exists)') : '(none)',
             // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
             // nothing)
             snippet: windowAround(this.contextAt(s.id, h.seq) || h.body, query, 160),
@@ -4191,7 +4191,7 @@ export class SessionManager {
 
       readSession: async (sessionId, limit = 40, opts) => {
         // The scope check follows the same rule as sendToSession — only a session within its own scope
-        if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 읽지 않습니다' }
+        if (sessionId === orchestratorId) return { ok: false, error: 'Does not read itself' }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 
@@ -4272,7 +4272,7 @@ export class SessionManager {
          * ask again or fix it itself.
          */
         if (sessionId === orchestratorId) {
-          return { ok: false, error: '자기 자신에게는 보낼 수 없습니다' }
+          return { ok: false, error: 'Cannot send to itself' }
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
@@ -4310,14 +4310,14 @@ export class SessionManager {
        * before the branch is deleted (a signpost for reflog recovery).
        */
       deleteWorktreeSession: async (sessionId) => {
-        if (sessionId === orchestratorId) return { ok: false, error: '자기 자신은 지울 수 없습니다' }
+        if (sessionId === orchestratorId) return { ok: false, error: 'Cannot delete itself' }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
         if (!target.worktree?.base || !target.projectId) {
-          return { ok: false, error: '워크트리 브랜치 세션이 아닙니다 — 이 도구는 병합이 끝난 브랜치만 정리합니다' }
+          return { ok: false, error: 'Not a worktree branch session — this tool only cleans up a branch that has finished merging' }
         }
         if (target.state === 'working' || target.state === 'waiting_approval') {
-          return { ok: false, error: `아직 일하고 있습니다: ${target.name} — 턴이 끝난 뒤에 정리하세요` }
+          return { ok: false, error: `Still working: ${target.name} — clean it up once the turn ends` }
         }
         const cwd = this.cwdOf(target.projectId)
         const { branch, path, base } = target.worktree
@@ -4326,8 +4326,8 @@ export class SessionManager {
         // A failed measurement is also treated as dirty: not knowing is never treated as the safe side.
         const wt = await gitWorktreeDirty(path).catch(() => ({ dirty: true, changedFiles: -1 }))
         if (wt.dirty) {
-          const n = wt.changedFiles >= 0 ? `${wt.changedFiles}개 ` : ''
-          return { ok: false, error: `커밋 안 된 변경이 ${n}있습니다 — 그 세션에 커밋(또는 폐기)을 시킨 뒤 다시 부르세요` }
+          const n = wt.changedFiles >= 0 ? `${wt.changedFiles} ` : ''
+          return { ok: false, error: `There are ${n}uncommitted changes — have that session commit (or discard) them, then call this again` }
         }
 
         // Gate 2: has the branch's **current** tip landed on the trunk
@@ -4344,7 +4344,7 @@ export class SessionManager {
             else if (pr.headOid && tip) {
               return {
                 ok: false,
-                error: `PR #${pr.number}는 병합됐지만 그 뒤에 새 커밋이 있습니다 — 새 커밋까지 줄기에 들어간 뒤에만 지웁니다`,
+                error: `PR #${pr.number} was merged, but there is a new commit since then — this is deleted only once that new commit has also landed on the trunk`,
               }
             }
           }
@@ -4352,7 +4352,7 @@ export class SessionManager {
         if (!proof) {
           return {
             ok: false,
-            error: `"${branch}"가 줄기에 들어갔음을 증명하지 못했습니다 — 병합(또는 PR 병합)이 확인된 뒤에만 지웁니다. 증명 없이 버리는 것은 사람이 삭제 대화에서 합니다`,
+            error: `Could not prove that "${branch}" has landed on the trunk — this is deleted only once a merge (or PR merge) is confirmed. Discarding it without proof is the person's job, in the delete conversation`,
           }
         }
 
@@ -4394,9 +4394,9 @@ export class SessionManager {
          * is exactly swapping out a command.
          */
         if (HOST_APPS.some((a) => a.id === spec.name)) {
-          return { ok: false, error: `"${spec.name}"은 내장 앱의 이름입니다 — 다른 이름으로 제안하세요` }
+          return { ok: false, error: `"${spec.name}" is the name of a built-in app — propose a different name` }
         }
-        if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}"은 이미 설치되어 있습니다` }
+        if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}" is already installed` }
         const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
         proposals.push({ name: spec.name, command: spec.command, args: spec.args, why: spec.why })
         this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
@@ -4407,17 +4407,17 @@ export class SessionManager {
       // effect until approved
       proposeSkill: async (spec) => {
         if (!/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(spec.name)) {
-          return { ok: false, error: '이름은 영숫자·하이픈·밑줄 32자 이내여야 합니다' }
+          return { ok: false, error: 'The name must be alphanumeric characters, hyphens, and underscores, 32 characters or fewer' }
         }
-        if (!spec.content.trim()) return { ok: false, error: '내용이 비어 있습니다' }
+        if (!spec.content.trim()) return { ok: false, error: 'The content is empty' }
         if (spec.content.length > SKILL_MAX_CHARS) {
-          return { ok: false, error: `내용이 너무 깁니다 (${spec.content.length}자 > ${SKILL_MAX_CHARS}자) — 절차의 핵심만 남기세요` }
+          return { ok: false, error: `The content is too long (${spec.content.length} characters > ${SKILL_MAX_CHARS}) — keep only the essentials of the procedure` }
         }
         if (this.orchestratorSkills().some((s) => s.name === spec.name)) {
-          return { ok: false, error: `"${spec.name}" 스킬은 이미 있습니다 — 고치려면 사람이 먼저 지워야 합니다` }
+          return { ok: false, error: `The "${spec.name}" skill already exists — the person has to delete it first before it can be changed` }
         }
         if (this.orchestratorSkills().length >= SKILL_MAX_COUNT) {
-          return { ok: false, error: `스킬이 이미 ${SKILL_MAX_COUNT}개입니다 — 시스템 프롬프트 예산이 다 찼으니, 덜 쓰는 것을 지우자고 사람에게 제안하세요` }
+          return { ok: false, error: `There are already ${SKILL_MAX_COUNT} skills — the system prompt budget is full, so suggest to the person that a less-used one be deleted` }
         }
         const proposals = this.skillProposals().filter((p) => p.name !== spec.name)
         proposals.push({ name: spec.name, content: spec.content, why: spec.why })
@@ -4441,7 +4441,7 @@ export class SessionManager {
         let projectId: string | null = null
         if (spec.project) {
           const project = this.store.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
-          if (!project) return { ok: false, error: `그런 프로젝트가 없습니다: ${spec.project}` }
+          if (!project) return { ok: false, error: `No such project: ${spec.project}` }
           projectId = project.id
         }
         try {
@@ -4987,7 +4987,7 @@ export class SessionManager {
         rt.installUserApp({
           id: s.name,
           name: s.name,
-          description: clampLine(`예전에 승인된 MCP 서버 (propose_mcp_server): ${[s.command, ...s.args].join(' ')}`),
+          description: clampLine(`Previously approved MCP server (propose_mcp_server): ${[s.command, ...s.args].join(' ')}`),
           server: { command: s.command, args: s.args },
         })
       } catch (err) {
@@ -5030,7 +5030,7 @@ export class SessionManager {
     const skills = this.orchestratorSkills()
     if (skills.length === 0) return ''
     return (
-      '\n\n## 승인된 스킬 (사람이 승인한 작업 절차 — 해당 상황에서 따른다)\n' +
+      '\n\n## Approved skills (procedures the person has approved — follow them in the matching situation)\n' +
       skills.map((s) => `### ${s.name}\n${s.content}`).join('\n\n')
     )
   }
@@ -5102,7 +5102,7 @@ export class SessionManager {
       rt.installUserApp({
         id: hit.name,
         name: hit.name,
-        description: clampLine(hit.why?.trim() || `사람이 승인한 MCP 서버 (propose_mcp_server): ${[hit.command, ...hit.args].join(' ')}`),
+        description: clampLine(hit.why?.trim() || `MCP server approved by the person (propose_mcp_server): ${[hit.command, ...hit.args].join(' ')}`),
         server: { command: hit.command, args: hit.args },
       })
     } catch (err) {
@@ -5139,7 +5139,7 @@ export class SessionManager {
       // Skips the compaction summary itself — that is exactly what ruined the name in the first place
       if (!t || /^This session is being continued|^Caveat:/i.test(t)) continue
       const one = t.replace(/\s+/g, ' ').slice(0, 60)
-      return `${one}${t.length > 60 ? '…' : ''} (이어받은 세션)`
+      return `${one}${t.length > 60 ? '…' : ''} (resumed session)`
     }
     return `${s.name.slice(0, 40)}…`
   }
@@ -5178,7 +5178,7 @@ export class SessionManager {
     for (const r of chosen) {
       const t = ((r.payload as { text?: string }).text ?? '').slice(0, CONTEXT_MSG_CHARS)
       // A person's message marks the boundary — mixing up who said what would only cause confusion
-      parts.push(r.role === 'user' ? `\n[사람] ${t}\n` : t)
+      parts.push(r.role === 'user' ? `\n[person] ${t}\n` : t)
     }
     return parts.join('')
   }
@@ -5234,7 +5234,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     const profile = this.toolProfileOf(sessionId)
     if (!m || !profile) {
-      throw Object.assign(new Error('오케스트레이터만 쓸 수 있는 도구입니다'), { code: 'internal' })
+      throw Object.assign(new Error('Only the orchestrator can use this tool'), { code: 'internal' })
     }
     /*
      * Narrowing only what is exposed still lets anyone who knows the name just call it anyway (#69) —
@@ -5242,7 +5242,7 @@ export class SessionManager {
      * check is made again on the execution side too.
      */
     if (!profileAllows(profile, name)) {
-      throw Object.assign(new Error(`이 세션의 도구가 아닙니다: ${name}`), { code: 'internal' })
+      throw Object.assign(new Error(`Not a tool of this session: ${name}`), { code: 'internal' })
     }
     const tools =
       profile === 'manager' ? this.orchestratorToolsFor(sessionId, sessionId)
@@ -5487,14 +5487,14 @@ export class SessionManager {
       if (payloadHasFrom(m.payload)) continue
       const text = payloadText(m.payload).trim()
       if (!text) continue
-      lines.push(`${m.role === 'user' ? '사람' : '나'}: ${text.slice(0, MEMORY_LINE_CHARS)}`)
+      lines.push(`${m.role === 'user' ? 'Person' : 'Me'}: ${text.slice(0, MEMORY_LINE_CHARS)}`)
     }
     if (lines.length === 0) return ''
     return [
       '',
-      '# 지난 대화 (이 프로세스가 시작되기 전)',
-      '이 앱의 기록에서 가져온 요약이다. 도구가 바뀌면서 문맥은 사라졌지만 대화는 이어진다 —',
-      '처음 만난 것처럼 굴지 말고, 필요하면 recall로 더 찾아본다.',
+      '# Past conversation (before this process started)',
+      'A summary pulled from the record of this app. The context disappeared when the tool changed, but the conversation continues —',
+      'do not act like this is a first meeting; look further with recall if needed.',
       ...lines,
     ].join('\n')
   }
@@ -5633,7 +5633,7 @@ export class SessionManager {
             const data = (await readFile(p.path)).toString('base64')
             return { ...r, payload: { ...p, data } }
           } catch {
-            return { ...r, payload: { ...p, note: '이미지가 정리되어 더 이상 없습니다 (총량 상한)' } }
+            return { ...r, payload: { ...p, note: 'The image was cleared and no longer exists (total-size cap)' } }
           }
         }
         // A user attachment's own image follows the same rule — bytes are loaded if the file is still

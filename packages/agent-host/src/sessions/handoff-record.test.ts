@@ -18,7 +18,7 @@ const row = (
   payload: unknown,
 ): StoredMessage => ({ sessionId: 's', seq, role, kind, payload, ts: seq })
 
-const base = { name: '메아', tool: 'codex', summary: null, pivotSeq: null }
+const base = { name: 'Mea', tool: 'codex', summary: null, pivotSeq: null }
 
 /** One tool-call pair (call + result) */
 const call = (seq: number, tool: string, path: string, body: string): StoredMessage[] => [
@@ -32,21 +32,21 @@ describe('the handoff record builder (#102)', () => {
       ...base,
       toTool: 'claude',
       rows: [
-        row(1, 'user', 'text', { text: '포트는 4317로 하자' }),
+        row(1, 'user', 'text', { text: 'use port 4317' }),
         ...call(2, 'Edit', 'packages/ui/src/api.ts', 'applied'),
-        row(4, 'assistant', 'text', { text: '4317로 잡았습니다' }),
+        row(4, 'assistant', 'text', { text: 'set it to 4317' }),
       ],
     })
 
     const head = text.split('\n')
-    expect(head[0]).toBe('# Handoff · 메아 · codex → claude')
+    expect(head[0]).toBe('# Handoff · Mea · codex → claude')
     // The file declares for itself how far it reaches — the reader must be able to tell whether it was cut
     expect(head[1]).toContain('covers seq 1–4 of 4')
     expect(head[1]).toContain('2.0 MB cap')
     // Touched files are lifted into the header — they have the highest value per byte, and computing them is free
     expect(head[2]).toBe('touched: packages/ui/src/api.ts')
-    expect(text).toContain('[user] 포트는 4317로 하자')
-    expect(text).toContain('[assistant] 4317로 잡았습니다')
+    expect(text).toContain('[user] use port 4317')
+    expect(text).toContain('[assistant] set it to 4317')
     // The instruction to match the conversation's language — if a handoff switched languages, that would be the user switching languages
     expect(text).toContain('Match the language')
   })
@@ -72,49 +72,49 @@ describe('the handoff record builder (#102)', () => {
   it('the cap fills from the most recent, and nothing inside an included entry is cut', () => {
     const rows: StoredMessage[] = []
     for (let i = 1; i <= 200; i++) {
-      rows.push(row(i, i % 2 ? 'user' : 'assistant', 'text', { text: `메시지 ${i} ` + '내용'.repeat(300) }))
+      rows.push(row(i, i % 2 ? 'user' : 'assistant', 'text', { text: `message ${i} ` + 'content'.repeat(300) }))
     }
     const text = buildHandoffRecord({ ...base, rows, cap: 60_000 })
 
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(60_000)
     // The most recent material survives **whole** — the old demotion to a first-few-characters stub is gone
-    expect(text).toContain(`[assistant] 메시지 200 ` + '내용'.repeat(300))
+    expect(text).toContain(`[assistant] message 200 ` + 'content'.repeat(300))
     // Old material is dropped entirely, and that fact is stated in the header
-    expect(text).not.toContain('메시지 1 ')
+    expect(text).not.toContain('message 1 ')
     expect(text).toMatch(/covers seq \d+–200 of 200/)
     expect(text).toContain("earlier material stays in the app's records")
   })
 
   it('the default cap is 2MB, and an ordinary session never touches the cap', () => {
     const rows: StoredMessage[] = []
-    for (let i = 1; i <= 500; i++) rows.push(row(i, 'assistant', 'text', { text: `줄 ${i}` }))
+    for (let i = 1; i <= 500; i++) rows.push(row(i, 'assistant', 'text', { text: `line ${i}` }))
     const text = buildHandoffRecord({ ...base, rows })
 
     expect(RECORD_CAP).toBe(2_000_000)
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(RECORD_CAP)
-    expect(text).toContain('[assistant] 줄 1')
+    expect(text).toContain('[assistant] line 1')
     expect(text).toContain('covers seq 1–500 of 500')
   })
 
   it('if there is a pivot, starts from there and places the tool\'s summary above it', () => {
     const text = buildHandoffRecord({
       ...base,
-      summary: '# 프로젝트와 목표\n' + 'MGH 스킬 이펙트 작업이다. '.repeat(20),
+      summary: '# Project and goal\n' + 'This is the MGH skill effect work. '.repeat(20),
       pivotSeq: 3,
       rows: [
-        row(1, 'user', 'text', { text: '옛날 이야기' }),
-        row(2, 'assistant', 'text', { text: '옛날 답변' }),
+        row(1, 'user', 'text', { text: 'an old story' }),
+        row(2, 'assistant', 'text', { text: 'an old answer' }),
         row(3, 'system', 'marker', { type: 'compaction', failed: false }),
-        row(4, 'user', 'text', { text: '컴팩트 뒤의 질문' }),
+        row(4, 'user', 'text', { text: 'the question after compaction' }),
       ],
     })
 
     expect(text).toContain("## The tool's last compaction summary")
-    expect(text).toContain('MGH 스킬 이펙트')
-    expect(text.indexOf('MGH 스킬 이펙트')).toBeLessThan(text.indexOf('── verbatim from here ──'))
-    expect(text).toContain('[user] 컴팩트 뒤의 질문')
+    expect(text).toContain('MGH skill effect')
+    expect(text.indexOf('MGH skill effect')).toBeLessThan(text.indexOf('── verbatim from here ──'))
+    expect(text).toContain('[user] the question after compaction')
     // The summary stands in for that span — carrying the same content again verbatim would only bulk up the file
-    expect(text).not.toContain('옛날 이야기')
+    expect(text).not.toContain('an old story')
     expect(text).toContain("earlier material stays in the app's records")
   })
 
@@ -124,31 +124,31 @@ describe('the handoff record builder (#102)', () => {
    * must still be built without one — whether or not there is a summary.
    */
   it('a record is still built with no pivot — with only a summary, or with nothing at all', () => {
-    const rows = [row(1, 'user', 'text', { text: '첫 질문' }), row(2, 'assistant', 'text', { text: '첫 답' })]
+    const rows = [row(1, 'user', 'text', { text: 'First question' }), row(2, 'assistant', 'text', { text: 'First answer' })]
 
-    const withSummary = buildHandoffRecord({ ...base, summary: '롤아웃 요약', pivotSeq: null, rows })
-    expect(withSummary).toContain('롤아웃 요약')
+    const withSummary = buildHandoffRecord({ ...base, summary: 'rollout summary', pivotSeq: null, rows })
+    expect(withSummary).toContain('rollout summary')
     // Nothing is dropped, since where it would have been folded is unknown
-    expect(withSummary).toContain('[user] 첫 질문')
+    expect(withSummary).toContain('[user] First question')
     expect(withSummary).toContain('covers seq 1–2 of 2')
 
     // Having no summary is not a failure — only the section is missing
     const bare = buildHandoffRecord({ ...base, rows })
     expect(bare).not.toContain("The tool's last compaction summary")
-    expect(bare).toContain('[assistant] 첫 답')
+    expect(bare).toContain('[assistant] First answer')
   })
 
   it('reasoning, approvals and markers are dropped, since they are not for a successor to read', () => {
     const text = buildHandoffRecord({
       ...base,
       rows: [
-        row(1, 'assistant', 'reasoning', { text: '내부 추론' }),
+        row(1, 'assistant', 'reasoning', { text: 'internal reasoning' }),
         row(2, 'system', 'approval', { requestId: 'r1', decision: 'allow' }),
-        row(3, 'assistant', 'text', { text: '답변' }),
+        row(3, 'assistant', 'text', { text: 'an answer' }),
       ],
     })
 
-    expect(text).not.toContain('내부 추론')
-    expect(text).toContain('[assistant] 답변')
+    expect(text).not.toContain('internal reasoning')
+    expect(text).toContain('[assistant] an answer')
   })
 })

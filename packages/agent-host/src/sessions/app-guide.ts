@@ -39,84 +39,101 @@ export type GuideTool = { name: string; description: string }
 export type GuideSeats = { orchestrator: GuideTool[]; manager: GuideTool[]; scoped: GuideTool[] }
 
 const STATIC: Record<Exclude<AppGuideTopic, 'orchestrator'>, string> = {
-  overview: `# Centralu 개요
-여러 Claude Code·Codex CLI 세션을 한 창에서 돌리고, 지켜보고, 조종하는 데스크톱 앱이다.
-(단축키의 ⌘는 macOS 기준이다. 다른 OS에서는 Ctrl이다.)
-- 왼쪽 사이드바: 맨 위에 Orchestrator·Grid 버튼, 그 아래 프로젝트와 세션 목록, 맨 아래 Add project.
-  프로젝트는 로컬 디렉토리 하나다.
-- 가운데: 고른 세션의 대화. 사이드바의 Grid 버튼을 누르면 여러 세션을 나란히 본다
-  (세션을 그 버튼에 끌어다 놓아도 그리드에 들어간다).
-- 오른쪽 증거 패널: 세션 하나를 볼 때만 선다. Git · History(커밋 그래프) · Files · Terminal 탭이 있고,
-  ⌘⇧1~4로 탭을 고르고 ⌘B로 접는다.
-- Waiting(⌘I): 사람을 기다리는 세션이 모인다 — 승인 대기, 오류, 응답 대기(턴이 끝나 다음 말을 기다림).
-  ⌘⇧A는 다음 기다리는 세션으로 간다.
-- 커맨드 팔레트는 ⌘K. 설정은 위쪽 막대의 Settings 버튼이나 팔레트의 Open settings로 연다.
-설치·업데이트는 npm으로 한다 (\`npm i -g centralu\`, 앱 안에서 확인·설치 가능).
-이 안내서에 없는 질문(버그 신고·기능 요청 포함)은 짐작으로 답하지 말고
-GitHub 이슈로 안내한다: https://github.com/ijun17/centralu/issues`,
+  overview: `# Centralu overview
+A desktop app that runs, watches, and steers several Claude Code and Codex CLI sessions in one window.
+(⌘ in shortcuts is for macOS. On other operating systems it is Ctrl.)
+- Left sidebar: the Orchestrator and Grid buttons at the top, the project and session list below
+  them, and Add project at the bottom. A project is one local directory.
+- Center: the conversation of the chosen session. Pressing the sidebar's Grid button shows several
+  sessions side by side (dragging a session onto that button also puts it in the grid).
+- Right evidence panel: it stands only while viewing a single session. It has Git, History (commit
+  graph), Files, and Terminal tabs; ⌘⇧1 through ⌘⇧4 pick a tab and ⌘B collapses it.
+- Waiting (⌘I): gathers sessions waiting on the person — waiting for approval, an error, or waiting
+  for a reply (the turn ended and it awaits the next message). ⌘⇧A goes to the next waiting session.
+- The command palette is ⌘K. Settings opens from the Settings button in the top bar or Open
+  settings in the palette.
+Install and update through npm (\`npm i -g centralu\`; you can also check and install from inside the app).
+For a question this guide does not cover (including bug reports and feature requests), do not
+answer from a guess; point to a GitHub issue: https://github.com/ijun17/centralu/issues`,
 
-  sessions: `# 세션
-세션 하나 = 에이전트 프로세스 하나 (Claude Code 또는 Codex).
-- 만들기: 사이드바의 프로젝트 줄에 마우스를 올리면 나오는 ⋯ 메뉴 → New session.
-  뜨는 창에서 새 대화를 시작하거나, 그 폴더에서 그 도구로 했던 지난 대화를 골라 불러온다(Load).
-- 프로젝트를 만드는 곳은 **사이드바 맨 아래의 Add project 버튼**이다 (누르면 폴더 선택창이 열린다).
-  오케스트레이터 대화가 비어 있을 때 보이는 폴더 고르기 링크도 같은 창을 연다.
-  프로젝트가 0개면 New session을 열 자리가 없으므로, "프로젝트 어떻게 만들어?"에는
-  Add project를 알려주고 propose_project로 자리를 짚어 준다.
-- 잠들기/깨우기: 앱을 껐다 켜면 기록은 남고 프로세스만 사라진다 — 세션을 고르거나
-  입력창을 누르거나 말을 걸면 이어서 깨어난다.
-- 워크트리 옵션 (git 저장소일 때만): New session 창의 "Run in a git worktree"를 켜면
-  별도 디렉토리·브랜치에서 돌아 파일 충돌을 막는다.
-- 인수인계: 세션의 ⋯ → Hand off to a fresh session… — 지금 세션이 노트를 쓰고, 새 세션이
-  그 노트로 시작한다. 받는 쪽 도구를 고를 수 있다. 워크트리 세션은 아직 넘길 수 없다.
-- 삭제: 세션의 ⋯ → Delete session…. 기본으로 도구 쪽 대화 파일까지 지운다. 그 칸을 끄면
-  대화가 도구에 남아 New session 창의 지난 대화 목록에서 다시 불러올 수 있다.
-- 보관(아카이브) 기능은 없다 — 폐기됐다. 목록에서 치우는 방법은 삭제뿐이다.
-- 세션의 에이전트(claude↔codex)를 바꾸는 메뉴는 없다. 새 도구는 옛 대화를 모르므로,
-  다른 도구로 이어가려면 인수인계를 쓴다. 오케스트레이터만 예외다(설정 → Orchestrator).`,
+  sessions: `# Sessions
+One session = one agent process (Claude Code or Codex).
+- Creating one: hover over a project row in the sidebar for the ⋯ menu → New session. In the
+  window that opens, start a new conversation, or pick and load a past conversation that tool had
+  in that folder (Load).
+- Projects are created from **the Add project button at the bottom of the sidebar** (pressing it
+  opens a folder picker). The folder-picker link shown when the orchestrator's conversation is
+  empty opens the same window. With zero projects there is no place to open New session from, so
+  for "how do I make a project?" point to Add project and use propose_project to mark the spot.
+- Sleeping and waking: turning the app off and on again keeps the record and only drops the
+  process — choosing the session, clicking the input box, or sending it a message wakes it back up.
+- Worktree option (git repositories only): turning on "Run in a git worktree" in the New session
+  window runs the session in a separate directory and branch, avoiding file conflicts.
+- Handoff: session's ⋯ → Hand off to a fresh session… — the current session writes a note, and the
+  new session starts from that note. You can choose the receiving tool. A worktree session cannot
+  be handed off yet.
+- Deleting: session's ⋯ → Delete session…. By default this also deletes the conversation file on
+  the tool's side. Turning that option off leaves the conversation on the tool, so it can be loaded
+  again from the past-conversation list in the New session window.
+- There is no archive feature — it was removed. Deleting is the only way to clear something from
+  the list.
+- There is no menu to change a session's agent (claude ↔ codex). A new tool does not know the old
+  conversation, so use a handoff to continue with a different tool. The orchestrator is the one
+  exception (Settings → Orchestrator).`,
 
-  apps: `# 앱
-실험 기능은 앱으로 들어온다. 설정 → Apps에서 앱마다 켜고 끈다 — 끄면 화면과 도구가 물러나고
-데이터는 남는다. 지금 있는 앱은 관제 레일(Control rail) 하나이고, 기본으로 켜져 있다.
+  apps: `# Apps
+Experimental features arrive as apps. Turn each one on or off in Settings → Apps — turning one off
+retires its screen and tools while keeping its data. The only app right now is the Control rail,
+and it is on by default.
 
-## 관제 레일
-오케스트레이터 화면의 오른쪽 레일이다 (폭은 왼쪽 모서리를 끌어 바꾼다). 네 칸이다.
-- Notices: 사람을 지목해 부른 알림. 에이전트가 control_notify로 올리고, 감시(아래)가 걸리거나
-  업무가 끝나도 선다. 사람이 × 로 지운다 — 에이전트는 올릴 수만 있다.
-- My turn: 사람을 기다리는 세션들. 승인·거절, 한 줄 답(Reply…)을 레일 안에서 끝낼 수 있다.
-- Tasks: 업무. + New task로 이름·목표·구성원 세션을 정하면 그 업무만 보는 반장(조율 세션)이 선다.
-  반장은 구성원에게 일을 나누고, 업무 보드에 상태를 적고, 사람이 필요하면 레일로 부른다.
-  오케스트레이터도 control_create_task로 업무를 만들 수 있다. 끝난 업무는 Done 아래로 간다.
-- Running: 지금 일하는 세션들과 그 세션이 마지막으로 한 말.
-설정 → Apps → Control rail의 패널: 레일 사용 횟수, 반장을 띄울 도구·모델·추론 강도(기본 Claude, high),
-그리고 감시(Watches). 감시는 도구 호출 한 줄에 대한 글자 일치이고, 걸리면 레일에 급한 알림이 선다.
-에이전트를 멈추지는 않는다.
-관제 앱이 꺼져 있으면 반장 세션은 사이드바의 No app 목록에 선다 — 앱을 꺼도 세션에는 닿는다.`,
+## Control rail
+The right-hand rail on the orchestrator screen (drag the left edge to resize it). It has four panes.
+- Notices: alerts that call out the person by name. An agent raises one with control_notify, and
+  one also appears when a watch (below) fires or a task finishes. The person clears it with ×; an
+  agent can only raise one, not clear it.
+- My turn: sessions waiting on the person. Approving, rejecting, and a one-line reply (Reply…) can
+  all be finished right in the rail.
+- Tasks: work items. + New task sets a name, a goal, and member sessions, and a lead (coordinating
+  session) that watches only that task stands up. The lead splits work among its members, writes
+  status on the task board, and calls the person to the rail when needed. The orchestrator can also
+  create a task with control_create_task. Finished tasks move down under Done.
+- Running: the sessions working right now, and the last thing each one said.
+Settings → Apps → Control rail panel: how many times the rail has been used, the tool, model, and
+reasoning effort used to spin up a lead (Claude and high by default), and Watches. A watch is a
+literal match against one line of a tool call, and firing it raises an urgent notice in the rail.
+It does not stop the agent.
+When the Control app is off, lead sessions still show in the sidebar's No app list — turning off
+the app does not cut off access to the session.`,
 
-  approvals: `# 승인과 권한
-세션마다 권한 프리셋이 있다: Safe(전부 묻기) · Normal(위험할 때 묻기) · Auto(묻지 않기).
-- Normal은 도구 자체의 설정을 따른다. Auto는 Claude에서 권한 확인을 건너뛰고,
-  Codex에서는 묻지 않되 작업 폴더 샌드박스 안에서 돈다.
-- 에이전트가 위험한 일을 하려면 승인 카드가 뜬다 — y(허용) / n(거절) / a(이 세션에서 항상 허용),
-  ⌥a(이 프로젝트에서 항상 허용).
-- '항상 허용'은 규칙으로 저장되고 설정 → Permissions에서 지울 수 있다.
-- 이 프리셋은 사람만 바꾼다 — 오케스트레이터의 설정 도구(update_session_settings)에는 이 항목이 없다.
-  (있으면 프리셋을 Auto로 바꿔 뒷문으로 승인하는 길이 생긴다.)`,
+  approvals: `# Approvals and permissions
+Every session has a permission preset: Safe (ask for everything), Normal (ask when risky), Auto
+(never ask).
+- Normal follows the tool's own settings. Auto skips the permission check in Claude, and in Codex
+  it does not ask but runs inside the working folder's sandbox.
+- When an agent wants to do something risky, an approval card appears — y (allow) / n (deny) /
+  a (always allow in this session), ⌥a (always allow in this project).
+- "Always allow" is saved as a rule and can be cleared from Settings → Permissions.
+- Only the person changes this preset — the orchestrator's settings tool (update_session_settings)
+  has no such field. (If it did, switching the preset to Auto would open a back door around
+  approval.)`,
 
-  settings: `# 세션 설정 (입력창 아래 메뉴)
-- Model: 도구가 알려주는 공식 목록에서 고른다.
-- Effort: 추론 강도 (모델이 지원할 때만 보인다).
-- Verbosity: 응답 길이 (codex 전용) — 짧을수록 빨리 온다.
-- Speed: 응답 속도 (모델이 속도 등급을 줄 때만 보인다) — 빠를수록 사용량을 더 쓴다.
-- Permissions: 승인 프리셋 (위 approvals 참고).
-살아 있는 세션의 설정을 바꾸면 대화를 이어서 다시 띄운다 — 다음 턴부터 적용된다.
-앱 설정(위쪽 막대의 Settings): Orchestrator(오케스트레이터의 도구 바꾸기·승인된 스킬) · Apps ·
-Notifications · Appearance · Permissions(저장된 승인 규칙) · Shortcuts(단축키 목록) · Updates.`,
+  settings: `# Session settings (the menu below the input box)
+- Model: pick from the official list the tool reports.
+- Effort: reasoning effort (shown only when the model supports it).
+- Verbosity: response length (Codex only) — shorter comes back faster.
+- Speed: response speed (shown only when the model reports speed tiers) — faster uses more usage.
+- Permissions: the approval preset (see approvals above).
+Changing a live session's settings restarts the conversation in place — the change applies from
+the next turn on.
+App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
+and approved skills), Apps, Notifications, Appearance, Permissions (saved approval rules),
+Shortcuts (the shortcut list), and Updates.`,
 
-  updates: `# 업데이트
-설정 → Updates에서 확인한다. npm 레지스트리 기준으로 새 버전을 알려주고,
-사람이 눌러야 설치한다 (자동 설치 없음). 새 버전 확인은 켤 때와 여섯 시간마다 돌고, 끌 수 있다.
-터미널에서는 \`centralu update\`.`,
+  updates: `# Updates
+Check from Settings → Updates. It reports a new version based on the npm registry, and the person
+must click to install it (there is no automatic install). The check for a new version runs on
+startup and every six hours, and it can be turned off.
+From the terminal: \`centralu update\`.`,
 }
 
 /**
@@ -137,28 +154,32 @@ function gist(description: string): string {
 }
 
 function toolLines(tools: readonly GuideTool[]): string {
-  return tools.length === 0 ? '- (없음)' : tools.map((t) => `- ${t.name}: ${gist(t.description)}`).join('\n')
+  return tools.length === 0 ? '- (none)' : tools.map((t) => `- ${t.name}: ${gist(t.description)}`).join('\n')
 }
 
 function orchestratorTopic(seats: GuideSeats): string {
-  return `# 오케스트레이터와 지휘하는 자리
-세션을 지휘하는 자리는 셋이다.
-- 오케스트레이터(너일 수 있다): 앱에 하나뿐이고, 프로젝트를 가로질러 모든 세션을 보고 시킨다.
-- 워크트리 매니저: 프로젝트마다 하나. 워크트리 세션을 처음 만들면 저절로 생기고, 프로젝트의
-  ⋯ 메뉴 → Start worktree manager로 먼저 세울 수도 있다. 자기 워크트리 자식만 보고 시킨다.
-- 반장(조율 세션): 관제 앱의 업무가 만든다 (apps 주제). 배정된 구성원 세션만 보고 시키고,
-  세션을 만들거나 지울 수 없다.
-승인은 대신 못 한다 — 대상 세션의 승인 설정이 그대로 살아 있다.
+  return `# The orchestrator and directing seats
+There are three seats that direct sessions.
+- The orchestrator (this may be you): there is only one per app, and it watches and directs every
+  session across projects.
+- The worktree manager: one per project. It appears automatically the first time a worktree session
+  is created, or it can be started ahead of time from the project's ⋯ menu → Start worktree manager.
+  It only watches and directs its own worktree children.
+- The lead (a coordinating session): created by a task in the Control app (see the apps topic). It
+  only watches and directs its assigned member sessions, and it cannot create or delete sessions.
+None of them can approve on another session's behalf — the target session's approval settings stay
+exactly as they are.
 
-아래 목록은 앱의 도구 명부에서 바로 만든 것이다. 꺼진 앱의 도구는 빠진다.
+The list below is generated directly from the app's tool registry. A turned-off app's tools are
+left out.
 
-## 오케스트레이터가 부르는 도구
+## Tools the orchestrator calls
 ${toolLines(seats.orchestrator)}
 
-## 워크트리 매니저가 부르는 도구
+## Tools the worktree manager calls
 ${toolLines(seats.manager)}
 
-## 반장이 부르는 도구
+## Tools the lead calls
 ${toolLines(seats.scoped)}`
 }
 
@@ -169,7 +190,7 @@ ${toolLines(seats.scoped)}`
 export function appGuide(topic: string | undefined, seats: GuideSeats): { text: string; isError?: boolean } {
   if (!topic) {
     return {
-      text: STATIC.overview + '\n\n다른 주제: ' + APP_GUIDE_TOPICS.filter((t) => t !== 'overview').join(', '),
+      text: STATIC.overview + '\n\nOther topics: ' + APP_GUIDE_TOPICS.filter((t) => t !== 'overview').join(', '),
     }
   }
   const t = topic.toLowerCase()
@@ -177,5 +198,5 @@ export function appGuide(topic: string | undefined, seats: GuideSeats): { text: 
   if ((APP_GUIDE_TOPICS as readonly string[]).includes(t)) {
     return { text: STATIC[t as Exclude<AppGuideTopic, 'orchestrator'>] }
   }
-  return { text: `그런 주제는 없습니다: ${topic}. 있는 주제: ${APP_GUIDE_TOPICS.join(', ')}`, isError: true }
+  return { text: `No such topic: ${topic}. Available topics: ${APP_GUIDE_TOPICS.join(', ')}`, isError: true }
 }

@@ -84,14 +84,14 @@ afterEach(async () => {
 
 describe('apps.create', () => {
   it('unpacks a template app into a trusted project, creates its data folder, and lists it — without starting it', async () => {
-    const { app } = await create({ projectId, id: 'resource-search', name: '리소스 검색' })
-    expect(app).toMatchObject({ appId: 'resource-search', projectId, name: '리소스 검색', status: 'stopped', home: 'show', error: null })
+    const { app } = await create({ projectId, id: 'resource-search', name: 'Resource Search' })
+    expect(app).toMatchObject({ appId: 'resource-search', projectId, name: 'Resource Search', status: 'stopped', home: 'show', error: null })
     expect(app.dir).toBe(join(appsDir(), 'resource-search'))
     expect(readdirSync(app.dir).sort()).toEqual(['.gitattributes', 'AGENTS.md', 'CLAUDE.md', 'centralu.app.json', 'runtime', 'server.mjs', 'ui'])
     expect(JSON.parse(readFileSync(join(app.dir, 'centralu.app.json'), 'utf8'))).toMatchObject({
       id: 'resource-search',
-      name: '리소스 검색',
-      description: '리소스 검색 (a Centralu app)',
+      name: 'Resource Search',
+      description: 'Resource Search (a Centralu app)',
     })
     expect(existsSync(join(dataRoot, 'app-data', projectId, 'resource-search'))).toBe(true)
     expect(((await rpc('apps.list', {})) as ExternalAppInfo[]).map((a) => a.appId)).toEqual(['resource-search'])
@@ -158,17 +158,17 @@ describe('create_app (the orchestrator)', () => {
     const name = store.listProjects()[0]!.name
     const made = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(made.isError).toBeFalsy()
-    expect(made.text).toContain(`"Board" 앱을 만들었습니다 (프로젝트, id board): ${join(appsDir(), 'board')}`)
+    expect(made.text).toContain(`Created the "Board" app (project, id board): ${join(appsDir(), 'board')}`)
     expect(existsSync(join(appsDir(), 'board', 'server.mjs'))).toBe(true)
 
     const user = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock', name: 'Clock' })
-    expect(user.text).toContain('(사용자 폴더, id clock)')
+    expect(user.text).toContain('(user folder, id clock)')
 
     const again = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(again).toMatchObject({ isError: true })
-    expect(again.text).toContain('만들지 못했습니다 — An app "board" already exists')
+    expect(again.text).toContain('Could not create it — An app "board" already exists')
     const nowhere = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'x', name: 'X', project: 'no-such-project' })
-    expect(nowhere.text).toBe('만들지 못했습니다 — 그런 프로젝트가 없습니다: no-such-project')
+    expect(nowhere.text).toBe('Could not create it — No such project: no-such-project')
 
     await rpc('projects.setTrusted', { projectId, trusted: false })
     const untrusted = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'later', name: 'Later', project: projectId })
