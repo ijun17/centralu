@@ -13,8 +13,9 @@ type Item =
   | { kind: 'message'; id: string; sessionId: string; label: string; sub: string }
 
 /**
- * 커맨드 팔레트 (E-2) — 프로젝트·세션·동작·**대화 내용**을 한 입력창에서 찾는다.
- * "그거 어디서 얘기했지"가 이 앱의 실제 질문이라, 검색 결과를 같은 목록에 섞는다.
+ * Command palette (E-2) — finds projects, sessions, actions and **conversation content** from
+ * one search box. Since "where did we talk about that" is the real question in this app, search
+ * results are mixed into the same list.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -35,7 +36,7 @@ export function CommandPalette() {
   const [hits, setHits] = useState<{ sessionId: string; seq: number; snippet: string }[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // 대화 내용 검색은 host에 묻는다 (SQLite FTS)
+  // Searching conversation content asks the host (SQLite FTS)
   useEffect(() => {
     if (!open || query.trim().length < 2) {
       setHits([])
@@ -55,16 +56,18 @@ export function CommandPalette() {
   }, [open, query, platform])
 
   /**
-   * 비우는 것은 **닫을 때**다. 열 때가 아니다.
+   * Clearing happens **on close**, not on open.
    *
-   * 이 효과는 `open`이 true가 된 **렌더 다음에** 돈다. 그런데 입력창은 그 렌더에서 이미
-   * 화면에 있다 — 그 사이에 사람이 친 글자는 이 효과가 지워 버린다. ⌘K를 누르자마자
-   * 타이핑하는 사람이 첫 글자를 잃는 것이고, 기계가 느릴수록(=그 틈이 벌어질수록) 더 잘
-   * 일어난다. 전체 e2e를 병렬로 돌릴 때 간헐적으로 재현됐다: 필터가 비워진 채 팔레트가
-   * 열려 있어 항목이 5개 그대로 남았다.
+   * This effect runs **after** the render where `open` became true. But the input box is already
+   * on screen in that same render — anything typed in between gets wiped out by this effect.
+   * Someone who starts typing the instant they press ⌘K loses their first character, and this
+   * happens more often the slower the machine is (the wider that gap gets). It showed up
+   * intermittently when the full e2e suite ran in parallel: the palette stayed open with the
+   * filter cleared, leaving all 5 items still listed.
    *
-   * 닫을 때 비우면 다음에 열릴 때는 이미 비어 있고, 렌더 뒤에 입력을 덮어쓰는 쓰기가
-   * 아예 사라진다. 사람이 보는 동작은 똑같다.
+   * Clearing on close means it is already empty the next time it opens, and the write that
+   * overwrites input after the render disappears entirely. What the person sees behaves
+   * identically.
    */
   useEffect(() => {
     if (open) {
@@ -100,7 +103,7 @@ export function CommandPalette() {
         label: 'Jump to next waiting',
         sub: `${sc('mod', '⇧A')} · approvals first`,
         run: () => {
-          // 정렬은 core가 안다 (승인 → 오류 → 응답대기) — App의 전역 단축키와 같은 길이다
+          // The ordering (approval → error → waiting for input) is known by core — the same path as App's global shortcut
           const st = useStore.getState()
           const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
           if (next) focusSession(next)
@@ -139,7 +142,7 @@ export function CommandPalette() {
         focusSession(item.kind === 'session' ? item.id : item.sessionId)
       } else if (item.kind === 'project') {
         const first = Object.values(sessions).find((s) => s.projectId === item.id)
-        // 세션이 없는 프로젝트도 고를 수 있어야 한다 (#183) — 예전에는 팔레트만 닫히고 화면이 그대로였다
+        // A project with no session still has to be selectable (#183) — it used to just close the palette and leave the screen unchanged
         if (first) focusSession(first.id)
         else focusProject(item.id)
       } else item.run()

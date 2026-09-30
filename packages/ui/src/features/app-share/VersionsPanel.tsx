@@ -5,13 +5,17 @@ import { useStore } from '../../store/store.js'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 
 /**
- * 앱의 판 (M4 E-1) — 고정 화면 옆에 여닫는 판(기록 판과 같은 자리·모양).
+ * An app's versions (M4 E-1) — an expandable panel next to the pinned view (the same spot and
+ * shape as the evidence panel).
  *
- * 사용자 폴더 앱은 host가 코드가 바뀌어 뜰 때마다 떠 둔 스냅샷이다(최근 5벌). 만드는 세션이 고치다 망가뜨린 앱을 사람이 되살리는 자리라
- * 맨 위에 "Restore previous version" 하나를 둔다 — 지금 코드의 바로 앞 판이다. 되돌리기는 파일을 되쓰는 일이라 한 번 묻는다. 그 물음이
- * 무엇이 남는지(지금 코드도 판으로 떠 둔다)를 함께 말한다.
+ * A user-folder app's versions are snapshots the host keeps every time it starts on new code
+ * (the most recent 5). Since this is where a person recovers an app a building session broke
+ * while fixing it, "Restore previous version" sits at the top — the version right before the
+ * current code. Restoring rewrites files, so it asks once. That question also says what stays
+ * (the current code is kept as a version too).
  *
- * 프로젝트 앱은 git이 판이라 되돌리지 않는다. 그 앱 폴더를 건드린 최근 커밋을 읽기만 한다.
+ * A project app is not restored here, since git is its version history. Only the recent commits
+ * that touched that app's folder are read.
  */
 export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const platform = usePlatform()
@@ -36,7 +40,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
       alive = false
     }
   }, [platform, app.appId, app.projectId])
-  // 앱이 새 코드로 다시 뜨면 새 판이 선다 — 목록의 codeStamp가 바뀔 때 다시 읽는다
+  // A new version appears when the app restarts on new code — reads again whenever the list's codeStamp changes
   useEffect(() => load(), [load, app.info.codeStamp])
 
   const restore = async (snap: AppSnapshot) => {
@@ -57,7 +61,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
 
   const snaps = versions?.kind === 'snapshots' ? versions.snapshots : []
   const at = snaps.findIndex((s) => s.current)
-  // 지금 코드의 바로 앞 판 — 지금 코드가 어느 판과도 같지 않으면(고쳤지만 아직 뜨지 않았다) 가장 최근 판이다
+  // The version right before the current code — if the current code matches no version at all (edited but not yet started), it is the most recent version
   const previous = at >= 0 ? snaps[at + 1] : snaps[0]
 
   return (
@@ -146,7 +150,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   )
 }
 
-/** 프로젝트 앱 — git이 판이다. 읽기만 한다 */
+/** A project app — git is its version history. Only reads it */
 function GitHistory({ versions }: { versions: Extract<AppVersions, { kind: 'git' }> }) {
   return (
     <div data-testid="versions-git">

@@ -4,18 +4,20 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 
 /**
- * 소개 화면 (#63) — 첫 실행에 딱 한 번, "네 오케스트레이터를 만나라".
+ * The intro screen (#63) — exactly once, on the very first run: "meet your orchestrator."
  *
- * FirstRun(폴더 먼저)을 대체한다. 이유는 효율이 아니라 **습관**이다: 첫 실행에서
- * 오케스트레이터에게 물어보는 경험을 겪지 않은 사람은 나중에도 누르지 않는다 —
- * 사람은 자기가 써 본 것만 쓴다. 이 앱의 질문 창구는 제작자가 아니라 오케스트레이터다.
+ * Replaces FirstRun (folder first). The reason is not efficiency but **habit**: someone who
+ * never goes through the experience of asking the orchestrator something on the first run does
+ * not click it later either — a person only uses what they have already tried. This app's
+ * question-answering channel is the orchestrator, not the people who built it.
  *
- * **카드가 곧 감지 표시다.** 도구 감지 화면을 따로 두지 않는다 — 준비된 도구는 살아
- * 있는 카드, 안 된 도구는 어두운 카드에 "Not connected"와 처방(설치·로그인 명령)이
- * 함께 선다. 상태를 보여주는 곳과 행동하는 곳이 같은 자리다.
+ * **The card doubles as the detection display.** There is no separate tool-detection screen — a
+ * ready tool gets a live card, and a tool that is not ready gets a dim card with "Not connected"
+ * and the prescription (an install or login command) standing right there together. Where the
+ * state is shown and where the action happens are the same spot.
  *
- * **카드 클릭은 설정을 적을 뿐, 프로세스는 뜨지 않는다** (지연 기동). 오케스트레이터가
- * 실제로 태어나는 것은 다음 화면에서 첫 질문이 던져지는 순간이다.
+ * **Clicking a card only records the choice; no process starts** (lazy start). The orchestrator
+ * is not actually born until the first question is asked on the next screen.
  */
 export function Intro() {
   const platform = usePlatform()
@@ -36,17 +38,18 @@ export function Intro() {
 
   const ready = (t: ToolStatus) => t.installed && t.loggedIn
   const anyReady = (tools ?? []).some(ready)
-  // detect는 **모든** 도구를 그 상태와 함께 돌려준다 — 안 깔린 도구도 카드가 서는 이유다
+  // detect returns **every** tool along with its status — the reason even an uninstalled tool gets a card
   const cards = tools ?? []
 
   return (
     <div className="flex flex-1 items-center justify-center px-8" data-testid="intro">
       <div className="w-full max-w-xl">
         {/*
-          **한 줄이 전부다.** 세 문단짜리 설명을 읽고 시작하는 사람은 없다 —
-          길수록 안 읽히고, 안 읽히면 이 화면은 아무것도 가르치지 못한 채 클릭
-          하나만 받아 간다 (도그푸딩 지적). 남길 문장은 이 화면이 존재하는 이유
-          하나: **말을 걸 상대가 있다.** 나머지는 다음 화면의 질문 카드가 한다.
+          **One line is all there is.** Nobody reads a three-paragraph explanation before
+          starting — the longer it is, the less it gets read, and unread, this screen teaches
+          nothing and just collects a click (a dogfooding observation). The one sentence worth
+          keeping is the single reason this screen exists: **there is someone to talk to.**
+          Everything else is left to the suggested-question cards on the next screen.
         */}
         <h1 className="text-[19px] font-medium tracking-tight text-chalk" data-testid="intro-role">
           Meet your <span className="text-chalk">orchestrator</span>.
@@ -66,8 +69,9 @@ export function Intro() {
                 disabled={!ok}
                 onClick={() => void completeIntro(t.name)}
                 /*
-                 * 비활성은 **어둡게** (사용자 요구) — 회색 글자는 "지금 없는 것"의
-                 * 관습이고, 여기서는 그 관습이 정확히 사실이다.
+                 * Disabled is **dim** (user requirement) — gray text is the convention for
+                 * "not available right now," and here that convention happens to be exactly
+                 * true.
                  */
                 className={`rounded-lg border px-4 py-4 text-left transition-colors ${
                   ok
@@ -80,7 +84,7 @@ export function Intro() {
                   <span className="readout mt-1 block text-[11px] text-slate">{t.detail}</span>
                 ) : (
                   <>
-                    {/* 진단은 한눈에, 처방은 그 아래 — 터미널을 모르는 눈이 먼저다 */}
+                    {/* The diagnosis at a glance, the prescription right below it — an eye that does not know a terminal comes first */}
                     <span className="mt-1 block text-[12px] text-ash" data-testid={`intro-card-${t.name}-status`}>
                       Not connected
                     </span>
@@ -94,7 +98,7 @@ export function Intro() {
           })}
         </div>
 
-        {/* 낮은 부담이 클릭을 만든다 — 이 선택은 못을 박는 것이 아니다 */}
+        {/* A low-stakes choice is what makes a click happen — this pick does not nail anything down */}
         <p className="mt-2 text-[11px] text-slate">You can change this later in Settings.</p>
 
         {tools === null ? (
@@ -106,7 +110,7 @@ export function Intro() {
                 No tool is ready yet — run a command above in your terminal, then check again.
               </p>
             )}
-            {/* 항상 있다 — 터미널에서 설치하고 돌아온 사람이 다시 감지할 길 */}
+            {/* Always present — a way for someone who just installed it in the terminal and came back to re-run detection */}
             <button
               className="mt-1.5 text-[11px] text-slate underline-offset-2 hover:text-chalk hover:underline"
               onClick={() => void detect()}

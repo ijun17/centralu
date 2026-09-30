@@ -1,21 +1,22 @@
 /**
- * diff 텍스트를 화면이 그리는 모양 그대로 쪼개는 곳.
+ * Where a diff's text is split up exactly the way the screen draws it.
  *
- * 컴포넌트에서 떼어낸 이유는 하나다 — **"지금 보고 있는 줄"은 계산이고, 계산은 재어 볼 수
- * 있어야 한다.** diff의 행 번호는 파일의 줄 번호가 아니다. `@@ -a,b +c,d @@`를 읽고,
- * 그 아래에서 새 파일에 실제로 남는 줄만 세어야 비로소 "IDE에서 여기"가 나온다.
+ * Pulled out of the component for one reason — **"the line currently on screen" is a
+ * computation, and a computation has to be measurable.** A diff's row number is not a file's
+ * line number. Only after reading `@@ -a,b +c,d @@` and, below it, counting only the lines that
+ * actually survive in the new file does "here, in the IDE" come out.
  */
 
 export type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
 export type DiffRow = { readonly kind: DiffRowKind; readonly marker: string; readonly body: string }
 
-/** 지금 화면 맨 위가 diff의 어디인가 — 밴드에 쓸 이름과 IDE에 넘길 줄 번호 */
+/** Where the top of the screen currently is in the diff — the name for the band and the line number to hand to the IDE */
 export type DiffPlace = {
-  /** `diff --git`의 b/ 쪽 경로. 헤더 없는 단일 파일 diff면 null */
+  /** The b/ side path from `diff --git`. null for a single-file diff with no header */
   readonly file: string | null
-  /** 밴드에 그릴 이름. 이름이 바뀌었으면 `before → after` */
+  /** The name to draw in the band. `before → after` if the name changed */
   readonly label: string | null
-  /** 새 파일 기준 줄 번호. hunk 헤더를 못 찾았으면 undefined */
+  /** Line number in the new file. undefined if no hunk header was found */
   readonly line?: number
 }
 
@@ -56,8 +57,9 @@ function hunkNewStart(body: string): number | null {
 }
 
 /**
- * 새 파일에 남는 줄인가. `-`로 지워진 줄은 세지 않고, `\ No newline at end of file`은
- * git이 붙이는 주석이라 줄이 아니다 — 이걸 세면 hunk 하나마다 한 칸씩 어긋난다.
+ * Whether the row survives in the new file. A line removed with `-` is not counted, and
+ * `\ No newline at end of file` is a note git attaches, not a line — counting it would throw
+ * every hunk off by one.
  */
 function onNewSide(row: DiffRow): boolean {
   if (row.kind === 'add') return true
@@ -65,10 +67,11 @@ function onNewSide(row: DiffRow): boolean {
 }
 
 /**
- * `index`번 행이 어느 파일의 몇 번째 줄인가.
+ * Which file, and which line of it, row `index` corresponds to.
  *
- * 뒤로 한 번만 훑는다: 먼저 만나는 hunk 헤더가 줄 번호의 기준이고, 그보다 더 뒤에 있는
- * `diff --git`이 파일이다. 사이를 지나며 **새 파일에 남는 줄만** 센다.
+ * Scans backward exactly once: the first hunk header it meets is the base for the line number,
+ * and the `diff --git` that comes further back is the file. While passing through, it counts
+ * **only the lines that survive in the new file**.
  */
 export function diffPlaceAt(rows: readonly DiffRow[], index: number): DiffPlace {
   if (rows.length === 0) return { file: null, label: null }

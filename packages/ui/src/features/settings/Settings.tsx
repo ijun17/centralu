@@ -23,9 +23,11 @@ type Rule = {
 }
 
 /**
- * 규칙의 주인 이름 (#183). 매처·범위·날짜만 있던 동안, 두 프로젝트에서 같은 명령에 '항상 허용'을
- * 누르면 똑같은 줄 둘이 생겨 어느 것이 어느 프로젝트의 것인지 알 수 없었다. 세션 범위 규칙은
- * 세션 이름을 쓴다. 이미 지운 프로젝트·세션의 규칙은 그렇다고 적는다 — 빈칸이면 또 구별이 안 된다.
+ * The name of a rule's owner (#183). While a rule only carried a matcher, scope and date,
+ * clicking "always allow" on the same command in two different projects produced two
+ * identical-looking rows with no way to tell which belonged to which project. A session-scoped
+ * rule uses the session name. A rule whose project or session has already been deleted says so
+ * — leaving it blank would make it indistinguishable again.
  */
 function RuleOwner({ rule }: { rule: Rule }) {
   const name = useStore((s) =>
@@ -47,19 +49,20 @@ function RuleOwner({ rule }: { rule: Rule }) {
 }
 
 /**
- * FR-17 단축키 표 — 설정에서 보고 확인할 수 있어야 한다.
+ * FR-17 shortcut table — has to be viewable and checkable from Settings.
  *
- * 조합은 **뜻으로** 적는다: `'mod'`·`'alt'`는 이 기계의 자판이 이름을 붙이고
- * (`⌘`/`Ctrl`, `⌥`/`Alt`), 나머지 조각은 키 이름 그대로다 (이슈 #32).
+ * A combination is written **by meaning**: `'mod'` and `'alt'` get named by this machine's own
+ * keyboard (`⌘`/`Ctrl`, `⌥`/`Alt`), and the remaining pieces are the key's own name as is
+ * (issue #32).
  *
- * 데스크톱 앱의 단축키 표는 **지금 이 기계의 자판**을 보여준다. 다른 답은 없다 —
- * 여기 적힌 키를 누르는 곳이 이 기계이기 때문이고, 두 벌을 다 적으면 정작 자기 것을
- * 찾는 데 시간이 든다.
+ * The desktop app's shortcut table shows **this machine's own keyboard**, right now. There is
+ * no other answer — the keys written here are pressed on this machine, and listing both sets
+ * would only cost time finding the one that actually applies.
  */
 const SHORTCUTS: [string[], string][] = [
   [['mod', 'I'], 'Waiting'],
-  // `⇧`는 저 자판들에도 찍혀 있어서 옮길 말이 없다. 뒤 키에 붙여 두는 편이
-  // `Ctrl+⇧+A`보다 읽힌다
+  // `⇧` is printed on those keyboards too, so there is no word to translate it into. Attaching
+  // it to the following key reads better than `Ctrl+⇧+A`
   [['mod', '⇧A'], 'Jump to next waiting'],
   [['mod', 'K'], 'Command palette'],
   [['mod', '1~9'], 'Jump to project'],
@@ -102,18 +105,20 @@ const SHORTCUTS: [string[], string][] = [
  */
 const CATEGORIES = [
   /*
-   * 오케스트레이터는 **설치본에 하나뿐인 존재**라 자리가 여기다.
+   * The orchestrator belongs here because it is **the one thing the installation has only one
+   * of**.
    *
-   * 에이전트 바꾸기는 원래 세션 설정 메뉴에 있었고 거기서 걷어냈다 — 대화가
-   * 이어지지 않으니 그 메뉴에서의 '바꾸기'는 '새 대화 시작'과 같은 말이었고,
-   * 그건 세션 만들기가 이미 더 정직하게 하는 일이다. 오케스트레이터만 예외인
-   * 이유는 하나: 앱에 하나뿐이라 "다른 도구로 새로 만든다"가 성립하지 않는다.
+   * Switching agents used to live in the session settings menu, and was removed from there —
+   * because the conversation does not carry over, "switching" there meant the same thing as
+   * "starting a new conversation," which creating a new session already does more honestly.
+   * The orchestrator is the one exception, for a single reason: since the app has only one,
+   * "create a new one with a different tool" does not make sense.
    *
-   * 그리고 소개 화면이 이미 여기를 가리키고 있었다 ("You can change this later
-   * in Settings") — 지금까지는 지키지 않은 약속이었다.
+   * And the intro screen was already pointing here ("You can change this later in Settings") —
+   * a promise that had gone unkept until now.
    */
   { id: 'orchestrator', label: 'Orchestrator' },
-  // 실험 기능은 앱이다 (#81) — 켜고 끄는 곳이 있어야 "안 쓰면 사라진다"가 성립한다
+  // An experimental feature is an app (#81) — there has to be a place to turn it on and off for "unused, it disappears" to hold true
   { id: 'apps', label: 'Apps' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'appearance', label: 'Appearance' },
@@ -127,8 +132,9 @@ const CATEGORIES = [
 type Category = (typeof CATEGORIES)[number]['id']
 
 /**
- * 설정 (E-3, E-4, E-5).
- * 알림 정책·승인 규칙은 **저장만 되고 못 보면 반쪽**이다 — 여기서 보고 지운다.
+ * Settings (E-3, E-4, E-5).
+ * Notification policy and approval rules are **only half done if they save but cannot be seen**
+ * — they are viewed and deleted here.
  *
  * One category at a time, chosen from the rail on the left. The sections used to stack into
  * a single scroll, which reads fine at three and stops reading the moment there are eight —
@@ -216,7 +222,7 @@ export function Settings() {
           <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="settings-pane">
             {category === 'orchestrator' && <OrchestratorSettings />}
             {category === 'apps' && <AppsSettings />}
-            {/* E-5 알림 정책 */}
+            {/* E-5 notification policy */}
             {category === 'notifications' && (
               <section>
                 <p className="text-[11px] leading-relaxed text-slate">
@@ -260,7 +266,7 @@ export function Settings() {
 
             {category === 'appearance' && <AppearanceSection />}
 
-            {/* E-4 승인 규칙 */}
+            {/* E-4 approval rules */}
             {category === 'permissions' && (
               <section>
                 <p className="text-[11px] leading-relaxed text-slate">
@@ -304,7 +310,7 @@ export function Settings() {
 
             {category === 'trash' && <TrashSection />}
 
-            {/* E-3 단축키 */}
+            {/* E-3 shortcuts */}
             {category === 'shortcuts' && (
               <section>
                 <ul className="grid grid-cols-2 gap-x-6 gap-y-1" data-testid="shortcut-list">
@@ -318,7 +324,7 @@ export function Settings() {
               </section>
             )}
 
-            {/* 업데이트 (이슈 #43) */}
+            {/* Updates (issue #43) */}
             {category === 'updates' && <UpdatesSection />}
           </div>
         </div>
@@ -328,48 +334,56 @@ export function Settings() {
 }
 
 /**
- * 업데이트 (이슈 #43).
+ * Updates (issue #43).
  *
- * 이 화면이 하는 말은 세 문장이다: 지금 도는 것은 이것이고, 저쪽에는 저것이 있고,
- * 올릴지는 당신이 정한다. **자동으로 올리지 않는다** — 도는 앱을 갈아 끼우는 것은
- * 되돌릴 수 없는 일이고, 이 앱은 되돌릴 수 없는 일을 조용히 하지 않는다.
+ * This screen says three sentences: this is what is currently running, that is what is out
+ * there, and whether to upgrade is for the person to decide. **It never upgrades
+ * automatically** — swapping out the running app is not reversible, and this app does not do
+ * irreversible things quietly.
  *
- * 확인은 host가 한다. 실행기(launcher)에도 같은 코드가 있지만 도는 것은 사용자 기계에
- * 이미 깔린 사본이고, 그 사본의 비교가 틀려 있었다 (#42) — 여기서 확인하면 앱과 같이
- * 배포된 코드가 도므로 낡은 실행기를 통째로 건너뛴다.
+ * The check is done by the host. The launcher has the same code too, but what actually runs is
+ * a copy already installed on the person's machine, and that copy's comparison logic was wrong
+ * (#42) — checking here runs the code shipped with the app itself, bypassing the stale launcher
+ * entirely.
  */
 /**
- * 전체 글자 크기 — 다섯 단계, 가운데가 기본.
+ * App-wide text size — five steps, with the middle one as the default.
  *
- * 미리보기가 곧 라벨이다: 각 단추의 "가Aa"가 실제 그 단계의 배율로 그려지므로,
- * 누르기 전에 결과를 안다. 숫자(85%…)를 따로 쓰지 않는 이유다 — 비율은 읽어도
- * 크기는 보여야 안다.
+ * The preview is the label: each button's "가Aa" is actually rendered at that step's own scale,
+ * so the result is known before it is clicked. That is why a number (85%…) is not written
+ * separately — a ratio can be read, but size has to be seen to be understood.
  */
 /**
- * 오케스트레이터가 어느 도구 위에서 도는가.
+ * Which tool the orchestrator runs on.
  *
- * **앱에서 에이전트를 바꿀 수 있는 유일한 자리다.** 세션 설정 메뉴에도 같은 것이
- * 있었는데 걷어냈다: 대화가 이어지지 않으니 거기서의 '바꾸기'는 '새 대화 시작'과
- * 같은 말이었고, 그건 세션 만들기가 이미 더 정직하게 하는 일이다. 오케스트레이터만
- * 남은 이유는 앱에 하나뿐이라 "다른 도구로 새로 만든다"가 성립하지 않아서다.
+ * **This is the only place in the app where an agent can be switched.** The same control used
+ * to live in the session settings menu, and was removed from there: because the conversation
+ * does not carry over, "switching" there meant the same thing as "starting a new conversation,"
+ * which creating a new session already does more honestly. The orchestrator is the one that
+ * remains, because the app has only one, so "create a new one with a different tool" does not
+ * make sense.
  *
- * 두 경우를 한 자리에서 다룬다: 아직 태어나지 않았으면 선택만 적어 두고(다음
- * 첫 질문이 그 도구로 태어난다), 이미 살아 있으면 그 자리에서 갈아 끼운다.
- * 확인을 한 번 받는 이유는 하나 — 프로세스가 바뀌면 그 도구의 문맥은 사라진다.
- * (기록은 남고, 새 프로세스는 지난 대화를 요약으로 넘겨받는다.)
+ * This handles both cases in one place: if it has not been born yet, only the choice is
+ * recorded (the next first question is born with that tool), and if it is already alive, it is
+ * swapped out on the spot. There is one reason a confirmation is asked for — once the process
+ * changes, that tool's context is gone. (The transcript stays, and the new process is handed a
+ * summary of the past conversation.)
  */
 /**
- * 승인된 오케스트레이터 스킬 (#71). 여기 있는 이유: "넣을 수만 있고 열람·삭제가
- * 없는 스킬은 없느니만 못하다" — 승인은 대화 옆 카드에서, 관리는 설정에서.
- * 삭제하면 host가 오케스트레이터를 재시작해 프롬프트에서도 즉시 빠진다.
+ * Approved orchestrator skills (#71). Why this exists here: "a skill that can only be added,
+ * with no way to view or delete it, is worse than not having it at all" — approval happens in
+ * the card next to the conversation, management happens in Settings. Deleting one restarts the
+ * orchestrator through the host, so it drops out of the prompt immediately too.
  */
 /**
- * 앱 목록 (#81) — 명부(registry)의 앱마다 토글 한 줄 + 앱이 가져온 설정 패널.
- * 끄기는 지우기가 아니다: 상태는 남고 화면·도구만 물러난다 — 실험 기능의 예의.
+ * The app list (#81) — one toggle row per app in the registry, plus a settings panel the app
+ * brought with it. Turning one off is not deletion: its state stays, only the view and tools
+ * step back — the etiquette of an experimental feature.
  *
- * 외부 앱(M4 A-8)도 같은 목록에 선다. 명부는 하나다(`app-catalog.ts`): 내장 앱은 켜고 끄는 줄,
- * 외부 앱은 범위(프로젝트·사용자 폴더)마다 상태와 이유가 있는 줄이다. 신뢰하지 않은 프로젝트의
- * 앱과 깨진 앱도 숨기지 않는다. 숨기면 왜 안 뜨는지 물을 곳이 없다.
+ * External apps (M4 A-8) stand in the same list. There is one registry (`app-catalog.ts`): a
+ * built-in app gets an on/off row, an external app gets a row with a status and a reason per
+ * scope (project or user folder). An app from an untrusted project, and a broken app, are not
+ * hidden either. Hiding one would leave no way to ask why it is not showing up.
  */
 function AppsSettings() {
   const catalog = useAppCatalog()
@@ -411,7 +425,7 @@ function AppsSettings() {
         <div className="mt-5 border-t border-edge pt-3" data-testid="settings-external-apps">
           {projectIds.map((pid) => (
             <div key={pid} className="mb-4">
-              {/* 지운 프로젝트의 앱은 host가 목록에서 뺀다. 이름을 못 찾는 순간은 목록이 따라오기 전의 한 틱뿐이다 */}
+              {/* The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up */}
               <p className="readout text-[10px] uppercase text-slate">{projects[pid]?.name ?? 'Project'}</p>
               <ul className="mt-2 space-y-2">
                 {catalog.byProject[pid]!.map((a) => (
@@ -437,14 +451,16 @@ function AppsSettings() {
 }
 
 /**
- * 외부 앱 한 줄 — 무엇이고, 지금 어떤가, 왜 그런가. 신뢰하지 않은 프로젝트의 앱에는 그 자리에서
- * 신뢰하는 단추가 있다. 이유만 읽히고 할 일을 찾으러 프로젝트 메뉴까지 가야 하면, 이유를 보여 준
- * 보람이 절반이다.
+ * A single row for an external app — what it is, its current state, and why. An app from an
+ * untrusted project gets a trust button right there. If only the reason is shown and the person
+ * has to go all the way to the project menu to find something to do about it, showing the
+ * reason is only half the point.
  *
- * 사용자 폴더의 앱은 여기서 지운다 (M4 A-7). 승인한 MCP 서버가 화면 없는 앱이 되면서, 예전 명부에는
- * 없던 "거두기"가 이 한 줄이 된다. 되돌리기 어려운 일이라 한 번 묻는다. 무엇이 남고 무엇이 사라지는지를
- * 같은 자리에서 말한다. 프로젝트 앱에는 단추가 없다 — 저장소의 파일이라 거두는 자리는 git이고, host도
- * 거절한다.
+ * An app in the user folder is removed right here (M4 A-7). Now that an approved MCP server has
+ * become a viewless app, "revoking" it, which the old registry had no place for, becomes this
+ * one row. Since it is hard to undo, it asks once. What stays and what disappears is said in the
+ * same place. A project app has no such button — it is a file in the repository, so the place
+ * to remove it is git, and the host refuses to do it too.
  */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
@@ -480,7 +496,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           Trust this project
         </button>
       )}
-      {/* 가져온 앱 (M4 E-3) — 어디서 왔는지, 그리고 사람의 확인을 기다리면 그 확인으로 가는 길 */}
+      {/* An imported app (M4 E-3) — where it came from, and, if it is waiting on the person's confirmation, the path to that confirmation */}
       {app.info.imported && (
         <p className="mt-1 break-words text-[11px] text-slate" data-testid="external-app-imported">
           Imported from {app.info.imported.source}
@@ -540,8 +556,10 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * 앱 줄 안의 비밀 (M4 E) — 선언한 비밀이 있는 앱에만 선다. 접혀 있을 때도 빈 것의 수를 말한다: 키가 빠져 뜨지 못하는 앱을
- * 설정에서 찾는 사람은, 줄을 펼치기 전에 무엇이 빠졌는지부터 봐야 한다. 칸은 고정 화면의 판과 같은 것이다(`AppSecrets`).
+ * Secrets within an app's row (M4 E) — appears only for an app that declares secrets. Even
+ * collapsed, it states how many are unset: someone in Settings looking for why an app is not
+ * coming up because of a missing key needs to see what is missing before expanding the row. The
+ * slot is the same panel as the pinned view (`AppSecrets`).
  */
 function SecretsLine({ app }: { app: ExternalCatalogApp }) {
   const [open, setOpen] = useState(false)
@@ -620,21 +638,23 @@ function OrchestratorSettings() {
   const switchTool = useStore((s) => s.switchTool)
   const setToast = useStore((s) => s.setToast)
   /*
-   * 저장된 선택이 아니라 **세션 자체**를 들고 있는다.
+   * Holds onto **the session itself**, not the saved choice.
    *
-   * 예전에는 도구 이름만 꺼내 뒀다. 그래서 갈아 끼울 대상이 있는지를 `orchestratorId`로
-   * 판정했는데, 그 값은 이번 실행에서 오케스트레이터를 **열어봤을 때만** 채워진다.
-   * 앱을 켜고 설정부터 연 사람에게는 늘 null이라, 살아 있는 세션을 두고도
-   * configureOrchestrator로 흘렀다 — 그 값은 host가 "세션이 생긴 뒤에는 다시 읽지
-   * 않는다"고 적어 둔 자리다. 선택은 적히고, 아무도 읽지 않고, 다시 그리면 peek이
-   * 세션에서 옛 도구를 도로 읽어 왔다 (도그푸딩: "바꿔도 코덱스로 돌아온다").
+   * Before, only the tool name was pulled out. So whether there was something to switch was
+   * decided by `orchestratorId`, and that value only gets filled once the orchestrator has
+   * actually been **opened** during this run. For someone who launches the app and opens
+   * Settings first, it is always null, so even with a live session sitting there, the flow fell
+   * through to configureOrchestrator — a value the host has documented as "not read again once
+   * a session exists." The choice gets written, nobody reads it, and on the next render, peek
+   * read the old tool back from the session (dogfooding: "switch it, and it still comes back as
+   * Codex").
    */
   const [peeked, setPeeked] = useState<SessionInfo | null>(null)
-  // 고른 것을 이름이 아니라 통째로 들고 있는다 — 확인 창이 이름을 다시 찾아 헤맬 일이 없다
+  // Holds onto the whole thing that was picked, not just its name — the confirmation dialog never has to hunt for the name again
   const [asking, setAsking] = useState<ToolStatus | null>(null)
   const tools = useTools()
 
-  // 세션이 아직 없으면 화면에 보일 값은 저장된 선택뿐이다 (소개 화면에서 고른 그것)
+  // If there is no session yet, the only value the screen can show is the saved choice (whatever was picked on the intro screen)
   useEffect(() => {
     const alive = true
     void platform.agents
@@ -643,13 +663,13 @@ function OrchestratorSettings() {
       .catch(() => {})
   }, [platform])
 
-  /** 갈아 끼울 대상 — 이번 실행에서 열었든 아니든, 존재하기만 하면 된다 */
+  /** What to swap out — whether it was opened during this run or not, existing is enough */
   const existingId = orchestratorId ?? peeked?.id ?? null
   const current = live ?? peeked?.tool ?? (tools[0]?.name ?? null)
 
   const apply = async (tool: ToolName) => {
     try {
-      // 살아 있으면 갈아 끼우고, 아직 없으면 선택만 적어 둔다
+      // If it is alive, swap it out; if not yet, only record the choice
       if (existingId) await switchTool(existingId, tool)
       else await platform.agents.configureOrchestrator(tool)
       setPeeked((p: SessionInfo | null) => (p ? { ...p, tool } : p))
@@ -694,10 +714,11 @@ function OrchestratorSettings() {
               Run the orchestrator on {asking.label}?
             </h2>
             {/*
-              **요약은 손실이라는 사실을 적는다.**
-              "요약을 넘겨받는다"까지만 쓰면 아무것도 안 잃는 것처럼 읽힌다 — 실제로는
-              최근 몇 턴의 줄기만 가고 세부는 떨어진다. 사람이 확인을 누르기 전에
-              알아야 할 것은 무엇이 남느냐가 아니라 **무엇이 사라질 수 있느냐**다.
+              **States plainly that a summary is a loss.**
+              Stopping at "it is handed a summary" reads as if nothing is lost — in reality only
+              the trunk of the recent turns goes across and the detail falls away. What the
+              person needs to know before clicking confirm is not what stays, but **what can
+              disappear**.
             */}
             <p className="mt-2 text-[12px] leading-relaxed text-ash">
               The current agent process ends and a new one starts.{' '}
@@ -772,9 +793,10 @@ function AppearanceSection() {
       <p className="mt-2 text-[11px] text-slate">Applies immediately and is remembered.</p>
 
       {/*
-        그리드 칸의 입력창 접기 (사용자 요청 2026-09-10). 두 줄짜리 그리드에서 읽는 자리가
-        좁다는 데서 나온 설정이라, **그리드에만** 적용된다 — 포커스 뷰는 자리가 넉넉하고
-        거기서 접으면 매번 올려야 하는 수고만 남는다.
+        Folding the composer in a grid panel (user request, 2026-09-10). The setting came from
+        the reading space being tight in a two-row grid, so it applies **only to the grid** —
+        the focus view has plenty of room, and folding there would only leave the person having
+        to unfold it again every time.
         The project screen's panels (#203) are the grid's panels at the grid's sizes, so it applies there too.
       */}
       <div className="mt-6 border-t border-edge pt-4">
@@ -797,14 +819,15 @@ function AppearanceSection() {
       </div>
 
       {/*
-        여러 줄짜리 프롬프트를 쓰는 사람을 위한 스위치.
+        A switch for someone writing multi-line prompts.
 
-        자리가 여기인 이유는 옆의 '입력창 접기'와 같다 — 둘 다 **메시지 상자**를
-        어떻게 쓸지에 대한 것이고, 찾으러 오는 사람은 입력창을 떠올리며 온다.
+        The reason it sits here is the same as "fold the composer" next to it — both are about
+        how the **message box** is used, and someone looking for this arrives thinking of the
+        composer.
 
-        기본값을 끔으로 두는 이유는 프로토콜의 타입 선언에 적어 뒀다: Enter가 보내기인
-        것은 채팅창의 관습이고, 쓰던 사람 밑에서 그걸 말없이 옮기는 쪽이 아예 안
-        내놓는 쪽보다 나쁘다.
+        The reason the default is off is recorded in the protocol's type declaration: Enter as
+        send is the chat-box convention, and silently moving it out from under someone already
+        used to it would be worse than never offering the option at all.
       */}
       <div className="mt-6 border-t border-edge pt-4">
         <label className="flex items-center gap-2 text-[12px] text-ash">
@@ -824,12 +847,13 @@ function AppearanceSection() {
       </div>
 
       {/*
-        도는 표식을 멈추는 스위치 (사용자 요청 2026-09-13).
+        A switch to stop the spinning indicator (user request, 2026-09-13).
 
-        취향 설정처럼 보이지만 **전력 설정**이다. 그래서 설명에 실측을 적는다 — 끄면
-        무엇이 좋아지는지 모르면 아무도 안 만진다. 그리드와 아이콘을 따로 두는 이유는
-        거슬리는 지점이 다르기 때문이다: 칸 테두리는 크고 곁눈에 걸리고, 사이드바
-        아이콘은 작지만 늘 보인다.
+        It looks like a preference, but it is really a **power setting**. That is why the
+        description states a measurement — nobody touches a switch when they do not know what
+        turning it off improves. The grid and the icon are kept separate because what bothers
+        people about each is different: the panel border is large and catches the corner of the
+        eye, while the sidebar icon is small but always visible.
       */}
       <div className="mt-6 border-t border-edge pt-4">
         <p className="text-[12px] text-ash">Spinning mark while a session is working</p>
@@ -870,11 +894,12 @@ function UpdatesSection() {
   const applyUpdate = useStore((s) => s.applyUpdate)
 
   /*
-   * host가 아직 답하기 전에도 **지금 버전은 말할 수 있다.**
+   * Even before the host has answered, **the current version can already be stated.**
    *
-   * 같은 빌드에서 나온 같은 상수이므로(`tooling/brand.test.ts`가 어디서든 같음을 지킨다)
-   * 어긋날 여지가 없고, 그 덕에 이 갈래는 여는 순간부터 비어 있지 않다 — 비교의 한쪽이
-   * 안 보이면 나머지 줄도 읽을 수 없다.
+   * It is the same constant from the same build (`tooling/brand.test.ts` keeps it identical
+   * everywhere), so there is no room for it to drift, and that is why this branch is never empty
+   * from the moment it opens — if one side of the comparison is invisible, the rest of the line
+   * cannot be read either.
    */
   const current = update?.current ?? APP_VERSION
   const busy = update?.phase === 'checking' || update?.phase === 'updating'
@@ -926,8 +951,9 @@ function UpdatesSection() {
         Check for updates automatically
       </label>
       {/*
-        켜 두는 것이 기본인 이유를 여기 적어 둔다. 끄는 사람이 무엇을 끄는 것인지 알아야
-        하고, 켜 두는 사람도 무엇이 나가는지 알아야 한다 — 몰래 나가는 요청은 없다.
+        Why leaving this on is the default is recorded here. Someone turning it off needs to
+        know what they are turning off, and someone leaving it on needs to know what goes out —
+        there is no request that goes out silently.
       */}
       <p className="mt-1 text-[11px] leading-relaxed text-slate">
         Once at startup and every six hours while the app is open. It asks the public npm
@@ -939,11 +965,12 @@ function UpdatesSection() {
 }
 
 /**
- * 한 줄로 "지금 어디쯤인가".
+ * "Where things stand right now," in one line.
  *
- * **순서가 곧 판단이다.** 진행 중인 것이 먼저고, 그다음이 결과다. 특히 `error`가
- * `latest`보다 뒤에 오면 안 된다 — 네트워크가 잠깐 끊긴 것을 "최신입니다"로 읽어 주는
- * 순간, 확인이 자기 발견을 스스로 지운다 (#42가 한 릴리스 내내 숨어 있던 방식이다).
+ * **The order itself is the judgment.** Whatever is in progress comes first, the outcome comes
+ * after. In particular, `error` must never come after `latest` — the moment a brief network
+ * drop gets read back as "you are up to date," the check erases its own finding (this is
+ * exactly how #42 stayed hidden for an entire release).
  */
 function describe(u: UpdateStatus | null): string {
   if (!u) return 'Not checked yet'

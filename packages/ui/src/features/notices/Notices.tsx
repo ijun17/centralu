@@ -3,14 +3,17 @@ import { projectScreenSessions, useStore, type Notice } from '../../store/store.
 import { isOnScreen } from '../../app/onscreen.js'
 
 /**
- * 화면 밖에서 일어난 일들이 우측 상단에 쌓인다.
+ * Things that happened off screen stack up in the top right.
  *
- * **스스로 사라지지 않는다.** OS 배너는 몇 초 뒤 걷히는데, 자리를 비운 사이에 온 것은
- * 돌아왔을 때 이미 없다 — 배너가 가장 필요한 경우에 가장 못 쓰이는 셈이다. 여기 남는 카드는
- * 그 구멍을 메운다. (macOS에서는 배너 경로 자체가 죽어 있어 더더욱 이쪽이 본진이다.)
+ * **It does not disappear on its own.** An OS banner clears itself after a few seconds, so
+ * anything that arrived while the person was away is already gone by the time they come back —
+ * a banner is least usable exactly when it is needed most. The card that stays here fills that
+ * gap. (On macOS the banner path is dead anyway, which makes this the primary channel all the
+ * more.)
  *
- * 지나가는 신호인 은하수 바람과는 서로 배타적이다: 보고 있던 세션이 끝나면 바람,
- * 보고 있지 않던 세션이 끝나면 카드. 한 사건에 하나씩만 나간다.
+ * Mutually exclusive with the passing signal, the milky-way wind: if the session being watched
+ * finishes, it is a wind; if a session not being watched finishes, it is a card. Exactly one of
+ * the two goes out per event.
  */
 export function Notices() {
   const notices = useStore((s) => s.notices)
@@ -26,16 +29,19 @@ export function Notices() {
   const projectScreen = useStore((s) => projectScreenSessions(s).join(' '))
 
   /*
-   * 보게 된 것은 더 알릴 이유가 없다.
+   * There is no reason to keep notifying about something that has now been seen.
    *
-   * 판정을 **여기 한 곳**에 둔다. 세션을 고를 때, 그리드에 올릴 때, 오케스트레이터를 열 때마다
-   * 지우는 코드를 따로 두면 언젠가 한 경로를 빠뜨리고, 그때부터 안 지워지는 카드가 생긴다.
-   * 어떤 경로로 보게 됐든 "지금 보이는가" 하나만 물으면 빠질 자리가 없다.
+   * The check lives in **one place, here**. Putting separate clearing code at every path —
+   * selecting a session, putting it in the grid, opening the orchestrator — would eventually
+   * miss one path, and from that point a card would exist that never clears. Whatever path led
+   * to it being seen, asking only "is it visible right now" leaves no gap for a card to fall
+   * through.
    *
-   * **앱이 앞에 있는지도 함께 본다.** 만드는 쪽과 걷는 쪽이 같은 기준을 써야 한다 —
-   * 앱이 뒤에 있는데 걷어 버리면, 자리를 비운 사이 온 카드가 돌아오기도 전에 사라진다.
-   * 그러면 정확히 필요한 경우에만 못 보는 카드가 된다. 돌아오는 순간 이 효과가 다시 돌면서
-   * 그때 걷힌다.
+   * **Whether the app itself is in front is checked too.** The side that creates a card and the
+   * side that clears it have to use the same standard — clearing while the app is in the
+   * background would make a card that arrived while the person was away vanish before they even
+   * come back. That would turn it into a card missed in exactly the case it exists for. The
+   * moment the person returns, this effect runs again and clears it then.
    */
   useEffect(() => {
     if (!appFocused) return
@@ -59,8 +65,9 @@ export function Notices() {
   return (
     <div
       /*
-       * 화면을 넘기지 않는다. 카드는 세션당 하나라 수가 세션 수를 넘지 않지만,
-       * 세션이 스무 개면 그것만으로도 화면 밖으로 나간다 — 나간 카드는 없는 카드다.
+       * Does not spill past the screen. There is one card per session, so the count never
+       * exceeds the session count, but with twenty sessions that alone runs off screen — a card
+       * that has run off screen is a card that does not exist.
        */
       className="absolute right-3 top-3 z-30 flex max-h-[calc(100%-1.5rem)] w-[300px] flex-col gap-1.5 overflow-y-auto"
       data-testid="notices"
@@ -77,7 +84,7 @@ export function Notices() {
   )
 }
 
-/** 무슨 일인지 — 색을 거의 쓰지 않는 화면이라 왼쪽 선 하나로 가른다 */
+/** What happened — since this screen barely uses color, a single line on the left distinguishes it */
 const LOOK: Record<Notice['kind'], { label: string; edge: string }> = {
   approval: { label: 'Awaiting approval', edge: 'border-l-beacon' },
   error: { label: 'Error', edge: 'border-l-[var(--color-del)]' },
@@ -101,7 +108,7 @@ function NoticeCard({
       data-kind={notice.kind}
       data-session={notice.sessionId}
     >
-      {/* 카드 전체가 그 세션으로 가는 문이다 — 작은 과녁을 겨누게 하지 않는다 */}
+      {/* The whole card is the door to that session — nobody has to aim at a small target */}
       <button
         type="button"
         className="min-w-0 flex-1 text-left"

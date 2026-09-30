@@ -5,13 +5,15 @@ import { letterOf } from '../../app/keys.js'
 import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
 
 /**
- * 인박스 (FR-15) — 자리로 돌아왔을 때의 진입점.
- * 프로젝트 구조를 무시하고 "지금 내 개입을 기다리는 것"만 긴급도 순으로 보여준다.
+ * The inbox (FR-15) — the entry point for coming back to the desk.
+ * Ignores project structure and shows only "what is waiting on me right now," in order of
+ * urgency.
  *
- * **상단 바 숫자 아래로 내려오는 드롭다운이다** (사용자 요청 2026-09-09). 화면 가운데
- * 모달이던 동안에는 누른 자리와 열린 자리가 멀어서, 숫자를 확인하고 목록을 여는 한
- * 동작이 눈을 두 번 움직이게 했다. 자리는 옮겼지만 **키보드 소유권은 그대로다** —
- * ↑↓·↵·esc로 목록을 비우는 것이 이 화면의 본체고, 그건 자리와 무관하다.
+ * **It is a dropdown hanging below the top-bar number** (user request, 2026-09-09). While it was
+ * a modal in the middle of the screen, the place clicked and the place it opened were far apart,
+ * so the one action of checking the number and opening the list moved the eye twice. The
+ * location moved, but **keyboard ownership stays the same** — clearing the list with ↑↓, ↵ and
+ * esc is the heart of this screen, and that has nothing to do with where it sits.
  */
 export function Inbox() {
   const open = useStore((s) => s.inboxOpen)
@@ -23,7 +25,7 @@ export function Inbox() {
   const [cursor, setCursor] = useState(0)
   const panelRef = useRef<HTMLDivElement>(null)
 
-  // 경과 시간 갱신 (1초 폴링은 표시 전용 — 상태는 이벤트 구동)
+  // Refreshes elapsed time (the 1-second poll is display-only — state itself is event-driven)
   useEffect(() => {
     if (!open) return
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -32,8 +34,8 @@ export function Inbox() {
 
   useEffect(() => {
     if (!open) return
-    // 인박스는 모달이다 — 키보드 소유권을 가져온다.
-    // 메시지를 보낸 직후엔 입력창에 포커스가 남아 있어, 그대로 두면 d·j·k가 본문에 타이핑된다.
+    // The inbox is a modal — it takes over keyboard ownership.
+    // Right after sending a message, focus stays on the composer; left alone, d, j and k would type straight into the body.
     ;(document.activeElement as HTMLElement | null)?.blur()
     panelRef.current?.focus()
   }, [open])
@@ -41,7 +43,7 @@ export function Inbox() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      // 글자는 뜻으로 읽는다 — 한글 자판에서 j·k·d는 ㅓ·ㅏ·ㅇ으로 도착한다 (app/keys.ts)
+      // A letter is read by meaning — on a Korean keyboard layout, j, k and d arrive as ㅓ, ㅏ and ㅇ (app/keys.ts)
       const letter = letterOf(e)
       if (e.key === 'ArrowDown' || letter === 'j') setCursor((c) => Math.min(c + 1, items.length - 1))
       else if (e.key === 'ArrowUp' || letter === 'k') setCursor((c) => Math.max(c - 1, 0))
@@ -63,7 +65,7 @@ export function Inbox() {
 
   return (
     <>
-      {/* 바깥을 누르면 닫힌다. 화면을 덮되 어둡히지 않는다 — 드롭다운은 화면을 뺏지 않는다 */}
+      {/* Clicking outside closes it. Covers the screen without dimming it — a dropdown does not take the screen away */}
       <div className="fixed inset-0 z-30" onClick={() => toggle(false)} data-testid="inbox-backdrop" />
       <div
         ref={panelRef}
@@ -118,7 +120,7 @@ export function Inbox() {
                           ? 'Error'
                           : 'Waiting for input'}
                     </span>
-                    {/* 오래 기다릴수록 밝아진다 — 새 도형 없이 시간 압력만 말한다 */}
+                    {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
                     <span className={`readout w-16 text-right text-[11px] ${waitingTone(it.waitingMs)}`}>
                       {formatWaiting(it.waitingMs)}
                     </span>

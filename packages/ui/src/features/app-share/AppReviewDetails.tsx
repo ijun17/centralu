@@ -1,11 +1,15 @@
 import type { AppReview, AppUses } from '@cc/protocol'
 
 /**
- * 켜기 전에 사람이 보는 것 (M4 E-3) — 가져올 앱(또는 다시 물어야 하는 가져온 앱)이 **무엇을 돌리는지**, **무엇을 쓰겠다는지**, 어떤
- * 비밀을 원하는지, 어떤 파일이 들어오는지. 가져오기 창과 고정 화면의 확인이 이 하나를 같이 쓴다.
+ * What the person sees before enabling something (M4 E-3) — what the app being imported (or the
+ * already-imported app that needs re-confirmation) **runs**, **what it will use**, what secrets
+ * it wants, and which files are coming in. The import dialog and the pinned-view confirmation
+ * share this one component.
  *
- * 순서가 곧 중요도다. 명령이 맨 위에 선다: 앱 서버는 이 기계에서 사람의 권한으로 도는 코드라(샌드박스는 화면에만 걸린다), 켜는 것은
- * 곧 이 명령을 돌려도 된다는 말이다. 다시 묻는 것이면 무엇이 바뀌었는지가 그보다 먼저 선다 — 다시 묻는 까닭이 그것이다.
+ * The order is the priority. The command stands at the top: an app server is code that runs on
+ * this machine with the person's own permissions (the sandbox only applies to the screen), so
+ * enabling it means agreeing to run this command. If this is a re-confirmation, what changed
+ * stands even before that — that is the whole reason it is asking again.
  */
 export function AppReviewDetails({ review }: { review: AppReview }) {
   const uses = usesLines(review.uses)
@@ -123,7 +127,7 @@ function Section({ title, testId, tone, children }: { title: string; testId: str
   )
 }
 
-/** 명령과 인자를 한 줄로 — 인자는 칸마다 따로 보인다(빈칸이 든 인자가 두 인자로 읽히지 않게) */
+/** The command and its arguments on one line — each argument shown in its own span (so an argument containing a space is not read as two arguments) */
 function Command({ server, testId = 'review-command' }: { server: AppReview['server']; testId?: string }) {
   return (
     <code className="block break-all rounded border border-edge bg-void px-2 py-1 font-mono text-[11px] text-chalk" data-testid={testId}>
@@ -137,7 +141,7 @@ function Command({ server, testId = 'review-command' }: { server: AppReview['ser
   )
 }
 
-/** `uses`를 사람의 말로 — 한 능력에 한 줄 */
+/** `uses` in plain words — one line per capability */
 export function usesLines(uses: AppUses): string[] {
   const out: string[] = []
   if (uses.agent === true) out.push('Run your default agent in a new session')

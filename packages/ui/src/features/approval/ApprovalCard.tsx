@@ -6,9 +6,10 @@ import { letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
- * 승인 카드 (FR-3). 키보드 우선 — y/n/a, ⌥a는 프로젝트 범위.
- * 마우스보다 느린 GUI는 터미널보다 나쁘다.
- * 색은 왼쪽 레일 하나로만 쓴다: 카드를 통째로 물들이면 명령문 자체가 안 읽힌다.
+ * Approval card (FR-3). Keyboard first — y/n/a, ⌥a scopes it to the project.
+ * A GUI slower than the mouse is worse than a terminal.
+ * Color is used only on the left rail: tinting the whole card would make the command itself
+ * unreadable.
  */
 export function ApprovalCard({
   sessionId,
@@ -20,7 +21,7 @@ export function ApprovalCard({
   detail: ApprovalDetail
 }) {
   const respond = useStore((s) => s.respondApproval)
-  // 응답이 돌아오는 중에는 단추도 누를 수 없다 — 두 번째 응답이 실행된 명령을 거부로 적는다 (#158)
+  // The buttons cannot be clicked while a response is in flight — a second response would record an executed command as denied (#158)
   const busy = useStore((s) => !!s.approvalsInFlight[requestId])
   const sc = useShortcut()
 
@@ -30,14 +31,14 @@ export function ApprovalCard({
       const st = useStore.getState()
       const action = approvalKeyAction(e, {
         typing: t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable,
-        // 카드가 다른 화면 뒤에 있거나 **포커스된 세션의 카드가 아니면** 받지 않는다 —
-        // 그리드에서 카드가 여럿 떠 있을 때 y 하나가 전부를 승인하면 안 된다
+        // Ignored if the card is behind another screen or **is not the card of the focused session** —
+        // when several cards are up in the grid, a single y must not approve all of them
         covered: approvalCardCovered(st, sessionId),
       })
       if (!action) return
-      // 능력 물음(M4 D-4)에는 "항상 허용"이 없다 — 답이 어차피 기억된다. a는 이 카드에서 아무 일도 하지 않는다
+      // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
       if (detail.kind === 'capability' && action.decision === 'always') return
-      // "항상 허용"의 알림은 스토어가 보낸 매처로 띄운다 (#170)
+      // The "always allow" toast is shown using the matcher the store sent back (#170)
       void respond(sessionId, requestId, action.decision, action.scope)
       e.preventDefault()
     }
@@ -94,10 +95,13 @@ export function ApprovalCard({
 }
 
 /**
- * 앱의 능력 물음 카드 (M4 D-4) — 승인 카드와 같은 모양(왼쪽 레일, 머리말, y/n 단추)이다. 세션 안에서는 ApprovalCard가,
- * 앱의 고정 화면에서는 CapabilityAsk가 이 카드를 세운다. 같은 물음이 어디에 서든 같은 얼굴이어야 사람이 같은 것으로 읽는다.
+ * An app's capability-question card (M4 D-4) — the same shape as the approval card (left rail,
+ * header, y/n buttons). ApprovalCard puts this up inside a session; CapabilityAsk puts it up in
+ * an app's pinned view. The same question has to wear the same face wherever it stands, for it
+ * to read to a person as the same thing.
  *
- * "항상 허용"이 없다: 허용도 거절도 한 번의 답으로 기억된다. 되돌리는 자리(기록 판의 Permissions)를 카드가 말한다.
+ * There is no "always allow": both allow and deny are remembered from a single answer. The card
+ * states where to reverse it (Permissions in the settings panel).
  */
 export function PermissionCard({
   appName,
@@ -167,12 +171,13 @@ function ActionKey({
 export type ApprovalKeyAction = { decision: 'allow' | 'deny' | 'always'; scope?: 'session' | 'project' }
 
 /**
- * 이 카드가 지금 키 입력을 받아도 되는가 (순수 함수 — 테스트가 여기 붙는다).
+ * Whether this card should accept a key press right now (a pure function — tests attach here).
  *
- * 모달·오버레이에 가린 경우 외에 **포커스되지 않은 세션의 카드**도 받으면 안 된다:
- * 그리드에서는 pane마다 카드가 각자 window 리스너를 달아, 승인이 2개 이상 떠 있을 때
- * y 한 번이 **전부를 한꺼번에 승인**했다 — 이 앱에서 가장 잘못 눌리면 안 되는 버튼이다.
- * 키보드 승인은 언제나 "지금 포커스한 그 세션" 하나에만 간다.
+ * Besides being covered by a modal or overlay, **a card belonging to a session that is not
+ * focused** must not accept one either: in the grid, each pane's card attaches its own window
+ * listener, so with two or more approvals up at once, a single y **approved all of them at
+ * once** — the single most dangerous button to have mis-fire in this app. Keyboard approval
+ * always goes to exactly one thing: "the session currently focused."
  */
 export function approvalCardCovered(
   st: {
@@ -182,7 +187,7 @@ export function approvalCardCovered(
     paletteOpen: boolean
     overlay: unknown
     focusedSessionId: string | null
-    /** 지역 상태로 열리는 창(삭제 확인, 새 세션, 이미지 확대, 명령 창…)의 수 — `Modal`이 스스로 센다 (#158) */
+    /** The count of windows opened via local state (delete confirmation, new session, image zoom, command palette…) — `Modal` counts itself (#158) */
     openLayers: number
   },
   sessionId: string,
@@ -199,12 +204,14 @@ export function approvalCardCovered(
 }
 
 /**
- * 전역 y/n/a 키가 **언제** 승인이 되는지의 전부 (순수 함수 — 테스트가 여기 붙는다).
+ * The complete rule for **when** the global y/n/a keys turn into an approval (a pure function —
+ * tests attach here).
  *
- * ⌘·⌃·⇧ 조합은 다른 단축키다: ⌘A(전체 선택)와, 이 앱이 상단 바에 광고하는
- * ⌘⇧A(다음 대기)가 그대로 흘러들어 '항상 허용'을 눌렀다 — 승인은 이 앱에서
- * 가장 잘못 눌리면 안 되는 버튼이다. ⌥만 통과시킨다 (⌥a = 프로젝트 범위 약속).
- * 입력창에 타이핑 중이거나 카드가 모달·오버레이 뒤에 가려져 있어도 받지 않는다.
+ * A ⌘, ⌃ or ⇧ combination is a different shortcut: ⌘A (select all) and ⌘⇧A (next waiting, which
+ * this app advertises in the top bar) used to flow straight through and trigger "always allow" —
+ * approval is the single most dangerous button to have mis-fire in this app. Only ⌥ is let
+ * through (⌥a is the established convention for project scope). Neither typing into a text field
+ * nor a card hidden behind a modal or overlay is accepted.
  */
 export function approvalKeyAction(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> & { repeat?: boolean },
@@ -212,12 +219,13 @@ export function approvalKeyAction(
 ): ApprovalKeyAction | null {
   if (e.metaKey || e.ctrlKey || e.shiftKey) return null
   /*
-   * 눌린 채 반복되는 키는 승인이 아니다 (#158). y를 누르고 있으면 첫 응답 뒤에 다음 카드가 뜨는 순간 그 카드도
-   * 사람이 읽기 전에 허용됐다.
+   * A key held down and repeating is not an approval (#158). Holding y down meant that the
+   * moment the next card appeared after the first response, it too got approved before anyone
+   * had read it.
    */
   if (e.repeat) return null
   if (ctx.typing || ctx.covered) return null
-  // 글자는 자판이 아니라 **뜻**으로 읽는다 — ⌥가 붙거나 한글 자판이면 `key`는 다른 글자다 (app/keys.ts)
+  // A letter is read by **meaning**, not by keycap — with ⌥ held, or on a Korean keyboard layout, `key` is a different character (app/keys.ts)
   const k = letterOf(e)
   if (k === 'y') return { decision: 'allow' }
   if (k === 'n') return { decision: 'deny' }

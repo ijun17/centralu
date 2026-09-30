@@ -10,19 +10,20 @@ import { clearViewerJump, currentViewerJump, requestViewerJump, useViewerJump } 
 import { suffixMatches } from './resolve.js'
 
 /**
- * 코드 뷰어 (FR-6, C-3) — **읽기 전용**. 편집은 IDE 몫이다 (비목표).
+ * Code viewer (FR-6, C-3) — **read-only**. Editing belongs to the IDE (a non-goal).
  *
- * 무거운 것을 넣지 않는 것이 이 화면의 설계다:
- *   - CodeMirror·Shiki를 쓰지 않는다. 읽기 전용 표시에 편집기 엔진은 과하고,
- *     Shiki의 기본 엔진은 WASM이라 Tauri CSP(`wasm-unsafe-eval` 없음)와 충돌한다.
- *   - 대신 가상 스크롤 + 무채색 강조(주석·문자열만 밝기로 구분)로 충분히 읽힌다.
- *   - 정밀한 하이라이트가 필요하면 "IDE에서 열기"가 한 번의 클릭이다.
+ * Not bringing in anything heavy is the design of this screen:
+ *   - No CodeMirror or Shiki. An editor engine is overkill for a read-only display, and Shiki's
+ *     default engine is WASM, which conflicts with Tauri's CSP (no `wasm-unsafe-eval`).
+ *   - Virtual scrolling plus grayscale emphasis (only comments and strings set apart by
+ *     brightness) reads well enough instead.
+ *   - If precise highlighting is needed, "Open in IDE" is one click away.
  */
 export function CodeViewer({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const path = useStore((s) => s.viewerPath)
   const setToast = useStore((s) => s.setToast)
-  // 훅은 아래 `if (!path)` 이른 return보다 먼저 — 분기 뒤에 두면 렌더마다 훅 수가 달라진다
+  // Hooks come before the `if (!path)` early return below — placed after it, the hook count would differ per render
   const sc = useShortcut()
   const jump = useViewerJump()
   const [file, setFile] = useState<FsFile | null>(null)
@@ -38,18 +39,19 @@ export function CodeViewer({ projectId }: { projectId: string }) {
    */
   const [error, setError] = useState<string | null>(null)
   /**
-   * 같은 이름으로 끝나는 파일이 여럿일 때의 후보들 (resolve.ts).
+   * Candidates for when several files end with the same name (resolve.ts).
    *
-   * 하나면 말없이 그리로 연다. 여럿이면 고르게 한다 — 그중 하나를 골라 주는 건
-   * 사실인 척하는 추측이고, 이 화면은 추측을 사실처럼 보이게 하지 않는다.
+   * If there is one, it opens there with no fuss. If there are several, the person is asked to
+   * pick — picking one of them for them would be a guess dressed up as a fact, and this screen
+   * does not make a guess look like a fact.
    */
   const [candidates, setCandidates] = useState<string[]>([])
-  /** 이미 한 번 열어 본 자리 — 그 파일마저 못 읽을 때 같은 곳을 무한히 다시 열지 않게 */
+  /** A place already opened once — so if even that file cannot be read, the same place is not reopened forever */
   const resolved = useRef(new Set<string>())
   /** The row a `path:123` click asked for — highlighted, because landing mid-file is disorienting */
   const [landedIndex, setLandedIndex] = useState(-1)
   const [query, setQuery] = useState('')
-  /** SVG는 소스이면서 그림이라, 어느 쪽을 볼지 사람이 고른다. */
+  /** An SVG is both source and a picture, so the person picks which one to look at. */
   const [svgPreview, setSvgPreview] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -59,16 +61,19 @@ export function CodeViewer({ projectId }: { projectId: string }) {
   const anchor = useRef<Caret | null>(null)
   const focusedFor = useRef<string | null>(null)
   /**
-   * 이 파일에서 지금까지 그려진 줄 중 가장 넓은 줄의 폭 (#139).
+   * The width of the widest row drawn so far in this file (#139).
    *
-   * 행은 절대 위치라 부모의 폭을 밀어 넓히지 못한다. 그래서 행이 `w-full`이면 **보이는 폭**
-   * 만큼만 칠해져, 가로로 민 만큼 검색·도착 줄의 배경이 왼쪽으로 끌려 나가고 줄 번호
-   * (`sticky left-0`)도 자기 행 밖으로는 못 따라와 함께 사라진다. GitPanel의 `w-max min-w-full`
-   * 은 긴 줄만 구한다 — 짧은 줄은 여전히 보이는 폭이다 (재 봄: 1,500px 밀면 짧은 줄의 오른쪽
-   * 끝이 -1,500). 행들을 담는 칸을 가장 넓은 줄만큼 넓혀야 모든 행이 끝까지 칠해진다.
+   * A row is absolutely positioned, so it cannot push its parent's width wider. That means a row
+   * with `w-full` only paints as wide as **the visible width**, so scrolling right drags the
+   * search or landed row's background back to the left, and the line number (`sticky left-0`)
+   * cannot follow past its own row either and disappears with it. GitPanel's `w-max min-w-full`
+   * only rescues the long lines — a short line is still just the visible width (found again:
+   * scroll 1,500px and a short line's right edge sits at -1,500). The container holding the rows
+   * has to be widened to the widest row for every row to paint all the way to the edge.
    *
-   * 가상 목록이라 그려진 줄만 잴 수 있고, 값은 줄어들지 않는다: 긴 줄이 화면 밖으로 나가도
-   * 가로 스크롤 폭이 그대로라 보던 자리가 왼쪽으로 튀지 않는다.
+   * Because this is a virtual list, only the rows that are drawn can be measured, and the value
+   * never shrinks: when a long line scrolls off screen, the horizontal scroll width stays put,
+   * so the spot being looked at does not jump to the left.
    */
   const [rowsWidth, setRowsWidth] = useState(0)
 
@@ -80,7 +85,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     setLandedIndex(-1)
     setSvgPreview(true)
     if (!path) return
-    // 파일·프로젝트를 옮기는 사이 늦게 온 응답이 **다른 파일의 내용**으로 그려지면 안 된다
+    // While switching files or projects, a late response must never be drawn as **another file's content**
     let alive = true
     void platform.fs
       .readFile(projectId, path)
@@ -88,10 +93,11 @@ export function CodeViewer({ projectId }: { projectId: string }) {
       .catch((e: Error) => {
         if (!alive) return
         /*
-         * 루트에 없다고 죽은 링크는 아니다. 에이전트는 자기가 보던 자리 기준으로 경로를
-         * 적곤 한다 (`Media/ImageSearch.cs` ↔ 진짜는 `WzComparerR2.Cli/Media/…`).
-         * 프로젝트 파일 목록에서 그 꼬리를 가진 파일을 찾아본다 — 실패한 뒤에만, 그리고
-         * 색인은 host가 들고 있어 이 한 번은 싸다.
+         * Not being at the root does not make it a dead link. An agent often writes a path
+         * relative to wherever it happened to be looking (`Media/ImageSearch.cs` ↔ the real one
+         * being `WzComparerR2.Cli/Media/…`). This looks through the project's file list for one
+         * with that tail — only after the first attempt failed, and since the host holds the
+         * index, this one extra call is cheap.
          */
         void platform.fs
           .search(projectId, path, 20)
@@ -105,7 +111,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             if (found.length === 1) {
               const target = found[0]!
               resolved.current.add(target)
-              // 줄 번호는 옛 경로로 부탁해 둔 것이라, 새 경로로 다시 부탁해야 살아남는다
+              // The line number was requested under the old path, so it has to be requested again under the new one to survive
               const jumpNow = currentViewerJump()
               if (jumpNow?.path === path) requestViewerJump(target, jumpNow.line)
               useStore.getState().openFile(target)
@@ -113,7 +119,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             }
             setCandidates(found.slice(0, 8))
             setError(e.message)
-            // 후보를 고르라고 화면이 말하고 있으면 토스트까지 겹칠 이유가 없다
+            // No reason to stack a toast on top when the screen is already asking the person to pick a candidate
             if (found.length === 0) setToast(e.message)
           })
       })
@@ -134,9 +140,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     return hit
   }, [lines, query])
   /*
-   * 검색 결과 사이를 옮겨 다닌다 (#183). 강조와 개수만 있던 동안, 목록이 가상화되어 있어 화면 밖의
-   * 일치는 사람이 스크롤해서 찾아야 했다. Enter는 다음, ⇧Enter는 이전 — 끝에서는 반대쪽 끝으로
-   * 돈다. 몇 번째인지는 검색어나 파일이 바뀌면 처음부터다.
+   * Moves between search results (#183). While only the highlighting and a count existed, since
+   * the list is virtualized, a match off screen had to be found by scrolling by hand. Enter goes
+   * to the next one, ⇧Enter to the previous — wrapping around at either end. Which match it is
+   * on resets to the start whenever the search term or the file changes.
    */
   const matchLines = useMemo(() => [...matches], [matches])
   const [matchAt, setMatchAt] = useState(-1)
@@ -175,15 +182,15 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     virtualizer.scrollToIndex(index, { align: 'center' })
   }, [file, jump, path, lines.length, virtualizer])
 
-  // 가상 목록이 같은 범위면 같은 배열을 돌려준다 — 그려진 줄이 바뀔 때만 다시 잰다
+  // Returns the same array if the virtual list's range is unchanged — remeasures only when the drawn rows change
   const virtualItems = virtualizer.getVirtualItems()
-  // 그리기 전에 잰다 — 짧은 줄이 한 프레임이라도 보이는 폭만큼만 칠해진 채 보이지 않게
+  // Measured before painting — so a short row is never seen, even for one frame, painted only as wide as the visible width
   useLayoutEffect(() => {
     const el = rowsRef.current
     if (!el) return
     let widest = 0
     for (const row of Array.from(el.children)) {
-      // 행 자체는 칸의 폭이라, 내용(줄 번호 + 코드)의 폭을 더해서 잰다
+      // The row itself is the width of the container, so its content's (line number + code) width is summed instead
       let w = 0
       for (const cell of Array.from(row.children)) w += cell.getBoundingClientRect().width
       widest = Math.max(widest, Math.ceil(w))
@@ -416,11 +423,12 @@ export function CodeViewer({ projectId }: { projectId: string }) {
         </p>
       ) : (
         /*
-         * `tabIndex={0}` + region — GitPanel의 diff 칸과 같은 판단이다 (#139).
-         * 이 칸도 **가로로 스크롤된다** (4,000자 한 줄로 재 봄). 파일을 열 때 포커스를 한 번
-         * 받기는 하지만, -1이면 그 포커스를 잃는 순간 키보드로는 다시 들어올 길이 없어
-         * 압축된 한 줄의 오른쪽 끝을 영영 못 본다. 이름은 `Code`로만 둔다 — 경로는 바로
-         * 위 헤더가 이미 말한다.
+         * `tabIndex={0}` + region — the same judgment as GitPanel's diff panel (#139). This
+         * panel also **scrolls horizontally** (tested with a single 4,000-character line). It
+         * does take focus once when the file opens, but at -1, once that focus is lost there is
+         * no way back in by keyboard, and the far right end of a wrapped-tight line would never
+         * be seen. The name is left as just `Code` — the path is already stated by the header
+         * right above.
          */
         <div
           ref={scrollRef}

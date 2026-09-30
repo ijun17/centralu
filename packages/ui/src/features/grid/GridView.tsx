@@ -9,27 +9,30 @@ import { SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reor
 import { GRID_GAP, wholePixelTracks } from './tracks.js'
 
 /**
- * 그리드 — 여러 세션을 한 화면에서.
+ * Grid — several sessions on one screen.
  *
- * 사양서(§5.4)는 그리드를 v1에서 제외했었다. 근거 셋 중 첫 번째 —
- * "패널당 600×400이면 대화도 입력창도 제대로 안 보인다" — 는 지금도 유효하다.
- * 그래서 열 수를 **폭에서 계산해** 패널이 최소 폭 아래로 내려가지 않게 한다
- * (core의 columnsFor). 창이 좁으면 열이 줄고, 끝내 한 줄이 된다.
+ * The spec (§5.4) originally left the grid out of v1. The first of three reasons given —
+ * "at 600×400 per panel, neither the conversation nor the composer reads well" — still holds.
+ * That is why the column count is **computed from the width**, so a panel never shrinks below
+ * the minimum width (core's columnsFor). As the window narrows, columns drop, eventually down
+ * to one.
  *
  * The height is measured too, but only as a guard — see MAX_PANEL_H. It changes nothing
  * on an ordinary screen, so a panel's shape here is still decided by the width.
  *
- * 칸은 포커스 뷰와 **같은 부품(SessionPane)**을 쓴다. 복사본을 두면 여기서 모델을
- * 바꿨을 때 사이드바가 옛 값을 들고 있게 된다 — 화면이 둘이어도 진실은 하나여야 한다.
+ * A panel uses the **same component (SessionPane)** as the focus view. A separate copy would
+ * let a model change here leave the sidebar holding a stale value — two screens, but there has
+ * to be one truth.
  */
 export function GridView() {
   const panels = useStore((s) => s.gridPanels)
   const sessions = useStore((s) => s.sessions)
   /*
-   * 고른 칸. 그리드에서 "고른 것"은 오래 아무 뜻이 없었다 — 열두 칸이 똑같이 서 있고
-   * 보는 화면이니 그럴 만했다. 알림에서 그리드로 오는 길이 생기면서 뜻이 생겼다
-   * (store의 preferGrid): 온 사람은 **어느 칸 때문에 왔는지** 알아야 하고, 이어서
-   * 답을 치려면 그 칸의 입력창에 손이 가 있어야 한다.
+   * The selected panel. For a long time "selected" meant nothing in the grid — reasonably so,
+   * since twelve panels stand there identically and it is a screen for looking, not reading. It
+   * gained meaning once a path opened from notices into the grid (store's preferGrid): the
+   * person arriving needs to know **which panel brought them here**, and to type a reply next,
+   * the composer of that panel has to already have focus.
    */
   const focusedSessionId = useStore((s) => s.focusedSessionId)
   const foldComposer = useStore((s) => s.foldComposer)
@@ -41,9 +44,9 @@ export function GridView() {
   const [height, setHeight] = useState(800)
   /** Which side of which panel the pointer is on — the preview order derives from this */
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
-  /** 지금 끌고 있는 칸. 원본을 흐리게 해서 "이게 움직이는 중"임을 보인다 */
+  /** The panel currently being dragged. The original is dimmed to show "this is what is moving" */
   const [dragging, setDragging] = useState<string | null>(null)
-  /** 끌 때 머리글이 아니라 **칸 전체**를 들어 올리기 위한 참조 */
+  /** Reference used to lift the **whole panel**, not just the header, while dragging */
   const cards = useRef(new Map<string, HTMLDivElement>())
   /** Conversation scroll positions, taken right before a reorder — see the layout effect below */
   const scrolls = useRef(new Map<string, number>())
@@ -70,13 +73,14 @@ export function GridView() {
   })
 
   /*
-   * 고른 칸의 입력창에 손을 얹는다.
+   * Put focus on the selected panel's composer.
    *
-   * 알림에서 그리드로 온 사람은 **답을 하러** 온 것이다 — 칸이 밝아진 것만으로는
-   * 어느 입력창에 쳐야 하는지 손이 모르고, 열두 칸 중에서 그걸 찾아 누르는 일이
-   * 남는다. 값이 바뀌는 경우는 둘이다: 밖에서 데려온 경우(이 효과가 필요한 그 경우)와,
-   * 칸 안에 손을 얹어서 바뀐 경우(onFocusCapture) — 후자는 입력창이 이미 포커스를
-   * 쥐고 있으므로 아래 focus()는 아무 일도 안 하고, 사람의 손을 뺏을 일이 없다.
+   * A person coming from notices into the grid came **to reply** — the panel merely lighting up
+   * does not tell their hand which composer to type into, leaving them to hunt for it among
+   * twelve panels. This value changes in two cases: brought in from outside (the case this
+   * effect exists for), and changed by putting a hand on the panel itself (onFocusCapture) — in
+   * the latter case the composer already holds focus, so the focus() call below does nothing and
+   * never takes focus away from the person.
    */
   useEffect(() => {
     if (!focusedSessionId) return
@@ -95,7 +99,7 @@ export function GridView() {
     }
   }
 
-  // 열 수가 화면 크기에서 나오므로 크기가 바뀌면 다시 잰다.
+  // Since the column count derives from the screen size, remeasure whenever the size changes.
   // Kept as two numbers rather than one object so an observer firing with an unchanged
   // dimension does not re-render the whole grid
   useEffect(() => {
@@ -113,14 +117,16 @@ export function GridView() {
     return () => ro.disconnect()
   }, [])
 
-  // 지워진 세션이 배치에 남아 있어도 그리지 않는다 (저장된 값은 그대로 둔다)
+  // Do not draw a deleted session even if it is still in the layout (leave the stored value as is)
   const known = new Set(Object.keys(sessions))
   const visible = visiblePanels(panels, known)
   /*
-   * 실픽셀로 환산해 넘긴다. ResizeObserver의 측정값은 zoom 좌표라, 글자 배율을 올리면
-   * 같은 창이 좁게 측정되어 열이 줄었다 — 3단계에서 한 줄이던 그리드가 4단계에서
-   * 두 줄이 됐다 (도그푸딩). 칸의 최소 폭(MIN_PANEL_W)은 사이드바·패널 최소와 같은
-   * 규칙으로 **실픽셀 고정**이다: 배율은 글자를 키우는 것이지 칸을 좁히는 것이 아니다.
+   * Convert to real pixels before passing this on. ResizeObserver's measurement is in zoom
+   * coordinates, so raising the text zoom measures the same window as narrower and shrinks the
+   * column count — a grid that was one row at zoom level 3 became two rows at level 4
+   * (dogfooding). A panel's minimum width (MIN_PANEL_W) follows the same rule as the sidebar and
+   * panel minimums: it is **fixed in real pixels**, because zoom is meant to enlarge the text,
+   * not narrow the panel.
    */
   const zoom = useTextZoom()
   const cols = columnsFor(width * zoom, height * zoom, visible.length)
@@ -147,12 +153,13 @@ export function GridView() {
   const order = preview ?? visible
 
   /*
-    도는 칸의 테두리는 사이드바 표식과 **같은 각도**에 있어야 한다 (components/orbit.ts).
-    도는 중인 세션을 뒤늦게 그리드로 데려오면 칸의 궤도만 거기서 0부터 시작하기 때문이다.
+    The border of a spinning panel has to be at the **same angle** as the sidebar's indicator
+    (components/orbit.ts). Bringing a session that is already spinning into the grid later would
+    otherwise make the panel's orbit start over from zero on its own.
   */
   useOrbitSync(visible.filter((id) => sessions[id]?.state === 'working').join(' '))
 
-  /** 사이드바에서 끌어온 세션을 받는다 — 이미 있으면 그 자리로 옮긴다 */
+  /** Accept a session dragged in from the sidebar — if it is already there, move it to that spot */
   const dropSession = (id: string, targetId: string | null, before: boolean) => {
     if (!known.has(id)) return
     const next = panels.includes(id)
@@ -169,8 +176,8 @@ export function GridView() {
     <section
       ref={ref}
       /*
-        스크롤하지 않는다. 아래에 더 있을지 모른다면 그건 목록이지 관제탑이 아니다 —
-        화면에 있는 것이 전부여야 "한눈에 본다"가 성립한다.
+        Does not scroll. If there might be more below, that makes it a list, not a control
+        room — "seeing it all at a glance" only holds if what is on screen is everything there is.
       */
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-deck p-2"
       data-testid="grid"
@@ -208,10 +215,12 @@ export function GridView() {
       ) : (
         <div
           /*
-            높이도 폭처럼 나눠 갖는다. 줄 수를 미리 세어 각 줄에 같은 몫을 주면
-            칸이 몇 개든 화면에 딱 맞는다 — 남는 공간도, 넘치는 부분도 없다.
-            몫은 온전한 픽셀로 자르고 나머지는 마지막 줄·열이 갖는다 (wholePixelTracks).
-            minmax(0, 1fr)의 0이 중요하다: 기본 min-content면 내용이 큰 칸이 줄을 밀어낸다.
+            Height is divided up the same way width is. Counting the row count up front and
+            giving each row an equal share makes the grid fit the screen exactly no matter how
+            many panels there are — no leftover space and nothing overflowing. Shares are cut to
+            whole pixels, and the remainder goes to the last row and column (wholePixelTracks).
+            The 0 in minmax(0, 1fr) matters: at the default min-content, a panel with more
+            content would push its row wider.
           */
           className="grid min-h-0 flex-1"
           style={{
@@ -228,30 +237,35 @@ export function GridView() {
                 else cards.current.delete(id)
               }}
               /*
-                응답 중인 칸은 테두리가 돈다 (사이드바 표식과 같은 궤도).
-                칸이 여럿일 때 작은 표식 하나로는 어느 것이 도는지 눈이 못 따라간다 —
-                그리드는 읽는 화면이 아니라 **보는 화면**이라 곁눈으로 잡혀야 한다.
+                A panel that is answering gets a spinning border (the same orbit as the sidebar
+                indicator). With several panels on screen, a single small indicator is not
+                something the eye can track to find which one is spinning — the grid is a screen
+                for **looking**, not reading, so it has to be caught out of the corner of the eye.
               */
               /*
-                고른 칸을 테두리로 밝히지 않는다 (도그푸딩 두 번의 결론). 처음에는
-                갱신이 안 돼서 한 칸만 며칠이고 밝았고, 손을 따라가게 고치자 이번에는
-                표시 자체가 필요 없다는 판단이 왔다 — 어디에 타이핑 중인지는 커서와
-                입력창의 포커스 윤곽이 이미 말한다. 응답 중(cc-orbit-ring)만 남는다.
+                The selected panel is not highlighted with a border (the conclusion of two
+                rounds of dogfooding). The first time, it failed to update, so a single panel
+                stayed lit for days; once that was fixed to follow the hand, the judgment came
+                back that the indicator was not needed at all — the cursor and the composer's
+                focus outline already say where the person is typing. Only the "answering"
+                indicator (cc-orbit-ring) remains.
               */
               /*
-                칸의 테두리가 칸 안의 어떤 선보다 밝다 (사용자 지적 2026-09-11).
-                전에는 칸이 edge, 접힌 입력 카드가 graphite라 **안에 든 것이 그릇보다**
-                밝았고, 눈이 칸의 경계가 아니라 카드의 곡선에 먼저 갔다. 둘을 맞바꾼다 —
-                칸을 graphite로 올리고 카드를 edge로 내린다.
+                The panel's border is brighter than any line inside the panel (user's
+                observation, 2026-09-11). Before, the panel was `edge` and the folded input card
+                was `graphite`, so **what was inside was brighter than the vessel holding it**,
+                and the eye went to the card's curve before the panel's boundary. The two are
+                swapped — the panel goes up to `graphite` and the card goes down to `edge`.
               */
               /*
-                isolate: 칸이 자기 층을 가둔다.
-                회전 테두리는 z-30으로 선다 — 칸 안에서 접힌 입력창(z-20)보다 위여야 하기
-                때문이다. 그런데 칸이 쌓임 맥락을 만들지 않으면 그 30이 칸 밖으로까지
-                나가, 파일·깃 오버레이(z-20) 위에 테두리가 그려졌다 (사용자 지적).
-                오버레이 쪽 숫자를 올려 이기는 방법도 있지만, 그러면 다음에 숫자를 고르는
-                사람이 같은 경주를 다시 시작한다. "칸 안에서 가장 위"라는 말이 참이 되려면
-                칸이 울타리여야 한다 — 같은 파일의 .cc-orbit이 배지에 쓰는 방법 그대로다.
+                isolate: the panel contains its own stacking layer.
+                The spinning border sits at z-30, because it has to be above the folded composer
+                (z-20) inside the panel. But without the panel forming a stacking context, that
+                30 leaked outside the panel, and the border was drawn over the file/git overlay
+                (z-20) (user's observation). Raising the overlay's number to win would also work,
+                but then whoever next picks a number starts the same race over again. For
+                "highest within the panel" to actually be true, the panel has to be a fence —
+                exactly the method .cc-orbit in the same file uses for the badge.
               */
               className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-graphite bg-void transition-opacity ${
                 sessions[id]?.state === 'working' ? 'cc-orbit-ring' : ''
@@ -259,13 +273,16 @@ export function GridView() {
               data-focused={focusedSessionId === id || undefined}
               data-testid={`grid-panel-${id}`}
               /*
-                손이 닿은 칸이 고른 칸이다 (도그푸딩: 앱을 켤 때 복원된 세션에
-                박제된 채 안 움직였다). 그리는 데는 이제 안 쓰지만 값은 실체가 있다:
-                markRead가 이 칸의 안읽음을 지우고, "마지막 보던 세션"(다음 실행의
-                예열 대상)이 실제 손이 간 세션이 된다. preferGrid라 뷰는 그대로고,
-                WKWebView는 버튼 클릭에 포커스를 주지 않으므로 ×버튼으로는 안 움직인다.
-                사이드바에서 접어 둔 프로젝트는 펴지 않는다 (#205) — 세션은 이미 이 칸에 보이고,
-                칸에 입력할 때마다 펴지면 접기가 소용없다.
+                The panel the hand touches is the selected panel (dogfooding: on launch it
+                stayed frozen on whichever session had been restored, and never moved). It is no
+                longer used for drawing anything, but the value still does real work: markRead
+                clears this panel's unread mark, and "the last session looked at" (the one
+                warmed up on the next launch) becomes the session the hand actually went to.
+                Because of preferGrid the view stays put, and since WKWebView does not give focus
+                on a button click, the × button does not move it. A project the sidebar has
+                collapsed is not expanded (#205) — the session is already visible in this panel,
+                and expanding it every time someone types into the panel would make collapsing
+                pointless.
               */
               onFocusCapture={() => {
                 if (focusedSessionId !== id) focusSession(id, { preferGrid: true, reveal: false })
@@ -317,44 +334,49 @@ export function GridView() {
               }}
             >
               {/*
-                회전 테두리는 실제 자식 레이어가 그린다 (styles/index.css의 cc-orbit-ring-layer).
-                칸의 cc-orbit-ring 클래스는 '이 칸이 돌고 있다'는 표식으로 남는다 — 테스트와
-                보조 기술이 상태를 픽셀이 아니라 값으로 읽을 수 있게.
+                The spinning border is actually drawn by a child layer (cc-orbit-ring-layer in
+                styles/index.css). The panel's cc-orbit-ring class remains as a marker that "this
+                panel is spinning" — so tests and assistive technology can read the state as a
+                value, not as pixels.
               */}
               {sessions[id]?.state === 'working' && <div className="cc-orbit-ring-layer" aria-hidden />}
               {/*
-                빼기는 화면에서만 내린다 — 세션은 사이드바에 그대로 남고 계속 돌아간다.
-                그래서 '삭제'가 아니라 '치우기'로 말한다.
+                Removing only takes it off the screen — the session stays in the sidebar and
+                keeps running. That is why it is called "remove", not "delete".
 
-                머리글 슬롯으로 넘긴다. 예전엔 칸 위에 절대좌표로 얹었는데, 그러면
-                헤더의 재시작 버튼과 크기도 높이도 따로 놀았다 (12px vs 14px, 다른 흐름).
-                같은 줄에 두면 맞출 것이 없다.
+                Passed as a header slot. It used to sit absolutely positioned on top of the
+                panel, which left its size and height out of sync with the header's restart
+                button (12px vs 14px, different flow). Placed on the same line, there is nothing
+                left to line up.
               */}
               <SessionPane
                 sessionId={id}
                 /*
-                  입력창 접기는 **그리드에만** 있다 (사용자 요청 2026-09-10). 두 줄짜리
-                  그리드에서 읽는 자리가 좁다는 데서 나온 설정이라, 자리가 넉넉한 포커스
-                  뷰까지 접으면 매번 올려야 하는 수고만 남는다.
+                  Folding the composer exists **only in the grid** (user request, 2026-09-10).
+                  The setting came from the reading space being tight in a two-row grid, so
+                  folding it in the focus view too, where there is plenty of room, would only
+                  leave the person having to unfold it again every time.
                 */
                 fold={foldComposer}
                 /*
-                  칸을 옮기는 손잡이는 **머리글뿐**이다.
-                  예전엔 칸 전체가 draggable이었는데, draggable인 조상이 있으면
-                  브라우저가 그 안의 글자를 못 고르게 한다 — 대화를 긁으면 칸이 끌려왔다.
+                  The **only** handle for moving a panel is the header.
+                  The whole panel used to be draggable, but with a draggable ancestor the
+                  browser will not let text inside it be selected — selecting text in the
+                  conversation dragged the panel instead.
 
-                  동시에 이 머리글은 창을 끄는 손잡이가 아니다. 포커스 뷰에서는
-                  머리글이 곧 타이틀바지만 여기서는 아니다 — 그대로 뒀더니
-                  칸을 옮기려는데 앱 창이 통째로 움직였다 (도그푸딩).
+                  At the same time, this header is not a handle for moving the window. In the
+                  focus view the header doubles as the title bar, but not here — left as is,
+                  trying to move a panel dragged the whole app window instead (dogfooding).
                 */
                 headerDrag={(e) => {
                   e.dataTransfer.setData(SESSION_MIME, id)
                   e.dataTransfer.effectAllowed = 'move'
                   /*
-                     끌리는 것은 **칸이다**, 머리글이 아니다.
-                     draggable인 요소가 머리글이라 브라우저는 머리글만 찍어 들고 다녔다 —
-                     칸은 제자리에 있고 얇은 띠 하나만 따라다니니 무엇을 옮기는지 알 수 없었다
-                     (도그푸딩). 들어 올릴 그림을 칸으로 바꿔준다.
+                     What is being dragged is **the panel**, not the header.
+                     Because the draggable element is the header, the browser picked up only the
+                     header and carried it around — the panel stayed put and only a thin strip
+                     followed the pointer, so nobody could tell what was actually being moved
+                     (dogfooding). This swaps the drag image over to the panel.
                    */
                   const card = cards.current.get(id)
                   if (card) {

@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { approvalCardCovered, approvalKeyAction } from './ApprovalCard.jsx'
 
 /**
- * `code`가 기본값을 갖는 것이 중요하다.
+ * `code` having a default value matters.
  *
- * 예전 이 헬퍼는 `key`만 만들었고, 그래서 `{ key: 'a', altKey: true }`로 ⌥a를 검사했다 —
- * **맥 자판이 절대 만들지 않는 이벤트다.** ABC 배열에서 ⌥A는 `å`로 오므로, 통과하던 이
- * 테스트 아래에서 실제 단축키는 죽어 있었다. 만들어낸 이벤트로 검사할 때는 그것이 진짜
- * 자판이 내는 모양인지부터 확인해야 한다.
+ * This helper used to construct only `key`, so it checked ⌥a with `{ key: 'a', altKey: true }` —
+ * **an event a Mac keyboard never actually produces.** On an ABC layout, ⌥A comes through as
+ * `å`, so underneath a passing test, the real shortcut was dead. When testing with a constructed
+ * event, the first thing to check is whether that shape is what a real keyboard actually sends.
  */
 const key = (
   k: string,
@@ -24,35 +24,36 @@ const key = (
 
 const FREE = { typing: false, covered: false }
 
-describe('approvalKeyAction — 전역 y/n/a가 승인이 되는 조건 (U6)', () => {
-  it('맨 y/n/a는 각각 허용·거부·항상 허용이다', () => {
+describe('approvalKeyAction — when the global y/n/a keys become an approval (U6)', () => {
+  it('plain y/n/a are allow, deny, and always allow respectively', () => {
     expect(approvalKeyAction(key('y'), FREE)).toEqual({ decision: 'allow' })
     expect(approvalKeyAction(key('n'), FREE)).toEqual({ decision: 'deny' })
     expect(approvalKeyAction(key('a'), FREE)).toEqual({ decision: 'always', scope: 'session' })
   })
 
   /**
-   * 자판에 물어본 값 그대로다 (UCKeyTranslate): ABC·U.S.에서 ⌥A는 `å`, 한글 2벌식에서
-   * A는 `ㅁ`. 리눅스·윈도우에서는 Alt가 문자를 바꾸지 않아 `a`로 온다 — 셋 다 같은 뜻이다.
+   * Exactly what the keyboard reports (UCKeyTranslate): on ABC/U.S., ⌥A comes as `å`; on a
+   * Korean 2-beolsik layout, A comes as `ㅁ`. On Linux and Windows, Alt does not change the
+   * character, so it comes as `a` — all three mean the same thing.
    */
-  it('⌥a는 프로젝트 범위 — 자판이 무슨 글자를 보내든', () => {
+  it('⌥a is project scope — whatever character the keyboard layout sends', () => {
     const project = { decision: 'always', scope: 'project' }
-    expect(approvalKeyAction(key('å', { altKey: true, code: 'KeyA' }), FREE)).toEqual(project) // 맥 ABC
-    expect(approvalKeyAction(key('a', { altKey: true }), FREE)).toEqual(project) // 리눅스·윈도우
+    expect(approvalKeyAction(key('å', { altKey: true, code: 'KeyA' }), FREE)).toEqual(project) // Mac ABC
+    expect(approvalKeyAction(key('a', { altKey: true }), FREE)).toEqual(project) // Linux and Windows
   })
 
-  it('한글 입력 중에도 y/n/a가 통한다 — 한글로 쓰는 사람이 이 앱을 만들었다', () => {
+  it('y/n/a work even while typing in Korean — this app was built by someone who writes in Korean', () => {
     expect(approvalKeyAction(key('ㅛ', { code: 'KeyY' }), FREE)).toEqual({ decision: 'allow' })
     expect(approvalKeyAction(key('ㅜ', { code: 'KeyN' }), FREE)).toEqual({ decision: 'deny' })
     expect(approvalKeyAction(key('ㅁ', { code: 'KeyA' }), FREE)).toEqual({ decision: 'always', scope: 'session' })
   })
 
-  /** Dvorak에서 f를 눌렀는데 승인이 되면 안 된다 — 자리가 아니라 글자를 먼저 믿는 이유 */
-  it('라틴 글자로 온 것은 자리를 묻지 않는다 (Dvorak 안전)', () => {
+  /** Pressing f on Dvorak must not trigger an approval — the reason a letter is trusted before a position */
+  it('a Latin letter does not care about position (Dvorak-safe)', () => {
     expect(approvalKeyAction(key('f', { code: 'KeyY' }), FREE)).toBeNull()
   })
 
-  it('⌘·⌃·⇧ 조합은 다른 단축키다 — ⌘A(전체 선택)·⌘⇧A(다음 대기)가 승인으로 새면 안 된다', () => {
+  it('a ⌘, ⌃ or ⇧ combination is a different shortcut — ⌘A (select all) and ⌘⇧A (next waiting) must not leak into an approval', () => {
     expect(approvalKeyAction(key('a', { metaKey: true }), FREE)).toBeNull()
     expect(approvalKeyAction(key('a', { metaKey: true, shiftKey: true }), FREE)).toBeNull()
     expect(approvalKeyAction(key('a', { ctrlKey: true }), FREE)).toBeNull()
@@ -60,49 +61,49 @@ describe('approvalKeyAction — 전역 y/n/a가 승인이 되는 조건 (U6)', (
     expect(approvalKeyAction(key('n', { metaKey: true }), FREE)).toBeNull()
   })
 
-  it('입력창에 타이핑 중이면 받지 않는다 (contenteditable 포함)', () => {
+  it('is not accepted while typing into a text field (contenteditable included)', () => {
     expect(approvalKeyAction(key('y'), { typing: true, covered: false })).toBeNull()
   })
 
-  it('카드가 모달·오버레이 뒤에 가려져 있으면 받지 않는다 — 안 보이는 명령을 승인하게 된다', () => {
+  it('is not accepted while the card is hidden behind a modal or overlay — this would approve a command nobody can see', () => {
     expect(approvalKeyAction(key('y'), { typing: false, covered: true })).toBeNull()
     expect(approvalKeyAction(key('a', { altKey: true }), { typing: false, covered: true })).toBeNull()
   })
 
-  /** #158: y를 누른 채로 두면 첫 응답 뒤에 뜬 다음 카드도 사람이 읽기 전에 허용됐다 */
-  it('눌린 채 반복되는 키는 승인이 아니다', () => {
+  /** #158: holding y down let the next card, which appeared right after the first response, get approved before anyone read it */
+  it('a key held down and repeating is not an approval', () => {
     expect(approvalKeyAction({ ...key('y'), repeat: true }, FREE)).toBeNull()
     expect(approvalKeyAction({ ...key('a', { altKey: true, code: 'KeyA' }), repeat: true }, FREE)).toBeNull()
     expect(approvalKeyAction({ ...key('y'), repeat: false }, FREE)).toEqual({ decision: 'allow' })
   })
 
-  it('승인과 무관한 키는 그대로 지나간다', () => {
+  it('a key unrelated to approval passes straight through', () => {
     expect(approvalKeyAction(key('x'), FREE)).toBeNull()
     expect(approvalKeyAction(key('Escape'), FREE)).toBeNull()
   })
 })
 
 /*
- * 그리드에서는 pane마다 카드가 각자 window 리스너를 단다 — 포커스 검사가 없으면
- * 승인 2개가 떠 있을 때 y 한 번이 전부를 한꺼번에 승인한다.
- * 키보드 승인은 언제나 "포커스한 그 세션" 하나에만 간다.
+ * In the grid, each pane's card attaches its own window listener — without a focus check, with
+ * two approvals up at once, a single y approves both of them at once.
+ * Keyboard approval always goes to exactly one thing: "the session that is focused."
  */
-describe('approvalCardCovered — 어느 카드가 키를 받는가', () => {
+describe('approvalCardCovered — which card accepts a key press', () => {
   const open = {
     inboxOpen: false, usageOpen: false, settingsOpen: false, paletteOpen: false,
     overlay: null as unknown, focusedSessionId: 's1', openLayers: 0,
   }
 
-  it('포커스된 세션의 카드만 키를 받는다', () => {
+  it('only the focused session\'s card accepts a key press', () => {
     expect(approvalCardCovered(open, 's1')).toBe(false)
-    expect(approvalCardCovered(open, 's2')).toBe(true) // 그리드의 다른 pane
+    expect(approvalCardCovered(open, 's2')).toBe(true) // another pane in the grid
   })
 
-  it('포커스가 없으면(그리드에서 아무 것도 안 고름) 어떤 카드도 받지 않는다', () => {
+  it('with no focus (nothing selected in the grid), no card accepts one', () => {
     expect(approvalCardCovered({ ...open, focusedSessionId: null }, 's1')).toBe(true)
   })
 
-  it('모달·오버레이가 덮으면 포커스된 카드도 받지 않는다', () => {
+  it('a modal or overlay covering the screen blocks even the focused card', () => {
     expect(approvalCardCovered({ ...open, inboxOpen: true }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, usageOpen: true }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, settingsOpen: true }, 's1')).toBe(true)
@@ -111,10 +112,12 @@ describe('approvalCardCovered — 어느 카드가 키를 받는가', () => {
   })
 
   /*
-   * #158: "Delete this session?"·새 세션·이미지 확대·명령 창은 지역 상태로 열려 스토어의 다섯 값에 드러나지 않는다.
-   * 그 창에서 확인하려고 누른 y가 창 뒤에 가려진 명령을 허용했다. 이런 창은 `Modal`(명령 창은 직접)이 `openLayers`로 센다.
+   * #158: "Delete this session?", a new session, image zoom, and the command palette all open
+   * via local state and do not show up in the store's five values. Pressing y to confirm in one
+   * of those windows approved a command hidden behind it. These windows are counted through
+   * `openLayers` by `Modal` (the command palette counts itself directly).
    */
-  it('지역 상태로 열린 창이 하나라도 떠 있으면 포커스된 카드도 받지 않는다', () => {
+  it('even a single window opened via local state blocks the focused card', () => {
     expect(approvalCardCovered({ ...open, openLayers: 1 }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, openLayers: 2 }, 's1')).toBe(true)
   })

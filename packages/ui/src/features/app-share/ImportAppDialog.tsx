@@ -9,19 +9,25 @@ const inputClass =
   'w-full rounded border border-edge bg-void px-2 py-1.5 font-mono text-[11px] text-chalk placeholder:text-slate focus:border-graphite focus:outline-none'
 
 /**
- * 앱 가져오기 (M4 E-3) — 폴더, .zip, https의 .zip에서 사용자 폴더로. 딥링크(E-4)도 이 창을 연다.
+ * Import an app (M4 E-3) — from a folder, a .zip, or an https link to a .zip, into the user
+ * folder. A deep link (E-4) opens this same dialog.
  *
- * 두 걸음이다. **출처**를 고르고 Review를 누르면 host가 대기실로 옮겨 담아 판정하고(아직 들어온 것이 아니다), **확인**에서 무엇을
- * 돌리는지·쓰겠다는지·원하는 비밀·파일을 본 뒤 들인다. 들인 앱은 꺼진 채 들어온다("Import"). "Import and enable"은 들이며 그 자리에서
- * 켠다 — 사람이 방금 본 창의 열쇠를 그대로 host에 보낸다(사람이 본 것이 켜지는 것이다).
+ * Two steps. Choosing a **source** and clicking Review moves it into a staging area where the
+ * host examines it (it has not been brought in yet); the **confirm** step shows what it runs,
+ * what it will use, what secrets it wants, and its files, before it is brought in. An imported
+ * app arrives turned off ("Import"). "Import and enable" brings it in and turns it on in the same
+ * step — it sends the host exactly the key to the window the person just looked at (what the
+ * person saw is what gets turned on).
  *
- * 링크가 연 창은 출처를 미리 채워 둘 뿐, **Review를 누르기 전에는 아무것도 읽거나 내려받지 않는다.** 링크를 누른 것은 사람이지만
- * 링크를 지은 것은 남이다 — 이 기계가 남의 주소로 요청을 보내는 것도 사람이 고른 뒤라야 한다.
+ * A window opened by a link only pre-fills the source — **nothing is read or downloaded before
+ * Review is clicked.** The person clicked the link, but somebody else made it — this machine
+ * sending a request to somebody else's address still has to wait for the person to choose to do
+ * so.
  */
 export function ImportAppDialog() {
   const request = useStore((s) => s.importDialog)
   if (!request) return null
-  // 새 요청(다른 링크)이 오면 창을 새로 세운다 — 반쯤 본 확인이 다른 출처의 것과 섞이지 않게
+  // A new request (a different link) stands up a fresh window — so a half-reviewed confirmation is never mixed with a different source's
   return <ImportDialogBody key={request.at} source={request.source} fromLink={request.fromLink} />
 }
 
@@ -35,7 +41,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
   const [staged, setStaged] = useState<{ token: string; review: AppReview } | null>(null)
   const [busy, setBusy] = useState<null | 'reading' | 'importing'>(null)
   const [error, setError] = useState<string | null>(null)
-  // 창이 닫히면(취소·esc·바깥) 대기실을 치운다 — 들이지 않은 것을 host에 남기지 않는다
+  // When the window closes (cancel, esc, clicking outside), the staging area is cleaned up — nothing that was never imported is left behind on the host
   const pending = useRef<string | null>(null)
   useEffect(() => () => void (pending.current && platform.apps.importCancel(pending.current).catch(() => {})), [platform])
 
@@ -64,7 +70,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       void refresh()
       close()
       setToast(enable ? `Imported and enabled ${app.name ?? app.appId}` : `Imported ${app.name ?? app.appId}. It stays off until you enable it`)
-      // 들인 앱으로 간다 — 켰으면 앱이, 켜지 않았으면 켜기 전의 확인이 선다
+      // Goes to the imported app — if it was enabled, the app itself; if not, the pre-enable confirmation stands
       openApp(app.projectId, app.appId)
     } catch (e) {
       setError((e as Error).message)

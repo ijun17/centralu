@@ -8,51 +8,58 @@ import { UsagePanel } from './UsagePanel.jsx'
 import { usageTone, weeklyWindow } from './weekly.js'
 
 /**
- * 상단 바의 사용량 — **도구마다 주간 도넛 하나** (사용자 요청 2026-09-09).
+ * Usage in the top bar — **one weekly donut per tool** (user request, 2026-09-09).
  *
- * 예전에는 'Usage'라는 글자 버튼 하나였고, 누르면 화면 가운데 모달이 떴다. 두 가지가
- * 아쉬웠다: ① 계기판에 숫자가 없으니 한도는 **물어봐야만** 아는 것이었고, ② 답이
- * 열리는 자리가 누른 자리에서 멀었다.
+ * It used to be a single text button labeled 'Usage', which opened a modal in the middle of the
+ * screen on click. Two things about that fell short: (1) with no number on the dashboard, the
+ * limit was something the person had to **ask** in order to know; (2) the place the answer
+ * opened in was far from where they clicked.
  *
- * 이제 도넛이 계기판에 상주한다 — 채운 만큼이 밝기로 보이고, 가운데에는 **그 도구의
- * 한 글자 표식**이 앉는다 (사이드바 세션 칩과 같은 글자라, 무엇의 한도인지 범례 없이
- * 읽힌다). 상세는 그 도넛 **바로 아래로** 내려온다.
+ * Now the donut lives on the dashboard permanently — how full it is shows as brightness, and the
+ * center holds **that tool's single-letter mark** (the same letter as the sidebar session chip,
+ * so which limit belongs to which tool reads without a legend). The detail drops down **directly
+ * below** that donut.
  *
- * 주간만 세우는 이유: 계기판은 한 눈에 읽는 자리고, 5시간 창은 금방 회복돼 "지금 급한가"를
- * 말하지 않는다. 나머지 창은 전부 상세에 있다.
+ * Why only the weekly window is put forward: the dashboard is a glance-read surface, and the
+ * 5-hour window recovers quickly and does not say "is this urgent right now." Every other window
+ * lives in the detail view.
  */
 export function UsageDonuts() {
   const platform = usePlatform()
   const usageOpen = useStore((s) => s.usageOpen)
   const toggleUsage = useStore((s) => s.toggleUsage)
   /**
-   * host 연결 (사용자 요청 2026-09-09: "호스트가 안 뜨면 도넛 자리에 Disconnected").
+   * The host connection (user request, 2026-09-09: "if the host does not come up, put
+   * Disconnected where the donut goes").
    *
-   * 에이전트는 host 안에서 산다 — 연결이 없으면 도구를 물어볼 방법 자체가 없다. 그래서
-   * 이 한 자리가 **둘 중 하나**를 말한다: 한도(도넛)이거나, 한도를 물어볼 수 없다는 사실.
-   * 빈 자리로 두면 "도구가 하나도 없다"로 읽히는데, 그건 사실이 아니라 **모르는 것**이다.
+   * Agents live inside the host — without a connection, there is no way at all to ask about a
+   * tool. So this single spot says **one of two things**: a limit (a donut), or the fact that a
+   * limit cannot be asked for. Leaving it empty would read as "there are no tools at all," which
+   * is not true — it is **unknown**.
    */
   const connection = useStore((s) => s.connection)
   const offline = connection !== 'connected'
   const [snap, setSnap] = useState<Partial<Record<ToolName, { usage: UsageSnapshot | null; reason?: string }>>>({})
   const [open, setOpen] = useState<ToolName | null>(null)
   const tools = useTools()
-  // 훅은 조건부로 부를 수 없다 — 닫혀 있는 동안의 값은 어차피 안 쓰인다
+  // A hook cannot be called conditionally — the value is unused anyway while closed
   const openMeta = useToolMeta(open ?? '')
   /**
-   * 도넛이 서는 도구 (사용자 요청 2026-09-09: "연결된 에이전트만 도넛이 뜨는 거야").
+   * The tools a donut gets put up for (user request, 2026-09-09: "only connected agents should
+   * get a donut").
    *
-   * **없는 도구의 한도는 계기판에 자리가 없다** — 안 쓰는 도구의 빈 고리는 아무것도
-   * 말하지 않으면서 눈만 쓴다. 판정은 설치+로그인(detect)이고, 그건 세션 만들기 창이
-   * 쓰는 것과 같은 판정이다: 화면 두 곳이 "이 도구를 쓸 수 있나"에 다르게 답하면 안 된다.
+   * **A limit for a tool that is not there has no place on the dashboard** — an empty ring for
+   * an unused tool says nothing while still taking up eye space. The check is
+   * installed-and-logged-in (detect), the same check the new-session window uses: two screens
+   * must never answer "can this tool be used" differently.
    *
-   * null은 "아직 안 물어봤다" — 그동안은 아무것도 안 그린다. 첫 답이 오기 전에 도넛을
-   * 세웠다 지우면 바가 깜빡인다.
+   * null means "not asked yet" — nothing is drawn in the meantime. Putting up a donut and then
+   * removing it before the first answer arrives would make the bar flicker.
    */
   const [live, setLive] = useState<ToolName[] | null>(null)
 
   const load = useCallback(() => {
-    // 끊긴 동안에는 묻지 않는다 — 큐에 쌓였다 30초 뒤에 실패할 뿐이다 (rpc-client의 대기 규칙)
+    // Does not ask while disconnected — it would just queue up and fail 30 seconds later (rpc-client's wait rule)
     if (useStore.getState().connection !== 'connected') return
     void platform.agents
       .detect()
@@ -67,19 +74,21 @@ export function UsageDonuts() {
   }, [platform, tools])
 
   /*
-   * 뜰 때 한 번, 그 뒤로는 5분마다. 한도는 분 단위로 움직이는 값이라 초 단위 폴링은
-   * 답을 바꾸지 않으면서 도구 프로세스만 두드린다 (claude는 살아 있는 세션에 묻는다).
+   * Once on mount, then every 5 minutes after that. A limit is a value that moves on the order
+   * of minutes, so polling every second would only hammer the tool's process without changing
+   * the answer (claude asks a live session).
    */
   useEffect(() => {
     load()
     const t = setInterval(load, 5 * 60_000)
     return () => clearInterval(t)
-    // connection: 돌아오는 순간이 다시 물어볼 자리다 (그 사이 로그인했을 수도 있다)
+    // connection: the moment it comes back is when to ask again (a login could have happened meanwhile)
   }, [load, connection])
 
   /*
-   * 팔레트·/usage로 열면 **지금 보고 있는 도구**의 상세가 열린다 (usageTools) — 화면에
-   * 그 도구가 없으면 첫 도넛. 문이 둘이어도 도착하는 곳은 하나다.
+   * Opening via the palette or /usage opens the detail for **whichever tool is currently being
+   * looked at** (usageTools) — or the first donut if that tool is not on screen. Two doors, one
+   * destination.
    */
   useEffect(() => {
     if (usageOpen) setOpen((cur) => cur ?? usageTools(useStore.getState())[0] ?? (live ?? [])[0] ?? null)
@@ -105,8 +114,8 @@ export function UsageDonuts() {
   }, [open])
 
   /*
-   * 끊겼으면 도넛 대신 그 사실이 선다. 숨 쉬는 점 하나와 한 단어 — 상단 바에서 가장 밝은
-   * 것이 나를 막고 있는 것이라는 규칙 그대로다.
+   * When disconnected, that fact stands in place of the donuts. One breathing dot and one word
+   * — exactly the rule that the brightest thing in the top bar is what is blocking me.
    */
   if (offline) {
     return (
@@ -118,9 +127,10 @@ export function UsageDonuts() {
   }
 
   /*
-   * host는 붙었는데 쓸 수 있는 도구가 하나도 없다 — 빈 자리로 두면 "볼 게 없다"로 읽히지만
-   * 실은 **할 일이 있는 상태**다(설치 또는 로그인). 끊김과 같은 규칙으로 그 사실을 적는다.
-   * 아직 안 물어봤을 때(null)는 아무 말도 안 한다 — 첫 답 전의 침묵은 사실이 아니다.
+   * The host is connected but there is not a single usable tool — leaving this empty would read
+   * as "nothing to see," but it is actually **a state that needs action** (install or log in).
+   * The fact is written using the same rule as disconnection. While it has not been asked yet
+   * (null), nothing is said — silence before the first answer would not be true.
    */
   if (live !== null && live.length === 0) {
     return (
@@ -154,7 +164,7 @@ export function UsageDonuts() {
 
       {open && (
         <>
-          {/* 바깥을 누르면 닫힌다 — 화면을 덮되 어둡히지 않는다 (인박스와 같은 규칙) */}
+          {/* Clicking outside closes it — covers the screen without dimming it (same rule as the inbox) */}
           <div className="fixed inset-0 z-30" onClick={() => show(null)} data-testid="usage-backdrop" />
           <div
             className="cc-drop absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-edge bg-pit shadow-[0_24px_60px_-12px_rgb(0_0_0/0.9)]"
@@ -175,11 +185,11 @@ export function UsageDonuts() {
 }
 
 /**
- * 도넛 하나 — 고리는 주간 사용량, 가운데는 도구의 한 글자.
+ * A single donut — the ring is weekly usage, the center is the tool's single letter.
  *
- * 숫자를 모를 때 **꽉 찬 회색 고리를 그리지 않는다**: 그건 "0% 썼다"로 읽힌다.
- * 점선 고리는 모른다는 뜻이고, 왜 모르는지는 눌러서 여는 상세가 답한다
- * (claude는 살아 있는 세션이 있어야 한도를 물을 수 있다 — 흔한 '모름'의 이유다).
+ * When the number is unknown, **it does not draw a full gray ring**: that reads as "0% used."
+ * A dashed ring means unknown, and the expandable detail answers why it is unknown (claude needs
+ * a live session to be asked about a limit at all — the usual reason for "unknown").
  */
 function Donut({
   tool,
@@ -220,13 +230,14 @@ function Donut({
         data-testid={`usage-donut-${tool}`}
         data-percent={known ? percent : ''}
         /*
-         * 열려 있는 동안에도 **다른 도넛을 바로 누를 수 있어야 한다** — 바깥 클릭 막이
-         * 도넛까지 덮으면 도구를 바꾸는 데 두 번 눌러야 한다. 그래서 막보다 위에 선다.
+         * Even while open, **another donut has to be clickable right away** — if the outside
+         * click shield covered the donuts too, switching tools would take two clicks. So this
+         * sits above the shield.
          */
         /*
-         * 하이라이트도 **동그랗다** (사용자 지적 2026-09-10). 고리를 가리키는 자리에
-         * 네모가 켜지면 손이 닿은 것이 도넛인지 그 뒤의 칸인지가 어긋나 보인다 —
-         * 밝아지는 모양은 그 버튼의 모양이어야 한다.
+         * The highlight is **round too** (user's observation, 2026-09-10). If a square lit up
+         * where a ring is drawn, whether the hand touched the donut or the panel behind it would
+         * look mismatched — the shape that lights up has to be the shape of the button.
          */
         className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-graphite/50 ${
           active ? 'bg-graphite/50' : ''
@@ -253,14 +264,15 @@ function Donut({
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeDasharray={`${filled} ${C - filled}`}
-              // 12시에서 시작해야 사람이 읽는 방향과 맞는다 (상세의 큰 도넛과 같은 규칙)
+              // Has to start at 12 o'clock to match the direction people read in (same rule as the larger donut in the detail view)
               transform="rotate(-90 12 12)"
               className={tone}
             />
           )}
           {/*
-            가운데 글자 = 사이드바 세션 칩과 **같은 표식**. 도넛이 둘 서 있을 때 어느
-            것이 무엇인지 범례 없이 읽히는 이유가 이 한 글자다.
+            The center letter is the **same mark** as the sidebar session chip. This single
+            letter is why, with two donuts standing side by side, which is which reads without
+            a legend.
           */}
           <text
             x="12"

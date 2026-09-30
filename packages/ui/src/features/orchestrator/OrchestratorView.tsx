@@ -8,31 +8,35 @@ import { RAIL_DEFAULT, RAIL_MAX, RAIL_MIN } from '../../store/store.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 
 /**
- * 오케스트레이터 화면 — **말로 관제**.
+ * The orchestrator screen — **control by talking**.
  *
- * 세션이 있으면 SessionPane을 그대로 쓴다. 그리드의 칸도, 포커스 뷰도
- * 같은 부품이다 — 복사본을 두면 한쪽에서 모델을 바꿨을 때 다른 쪽이 옛 값을 든다.
+ * If a session exists, it uses SessionPane as is. A grid panel and the focus view are the same
+ * component too — a separate copy would let one side change the model and leave the other
+ * holding a stale value.
  *
- * **세션이 없으면 빈 대화가 첫 질문을 기다린다** (#63). 화면을 여는 것은 프로세스를
- * 만들지 않는다 — 만드는 것은 질문 카드를 누르거나 입력창에 첫 마디를 치는 순간이다
- * (askOrchestrator). 그 전의 이 화면은 그저 "말을 걸 수 있는 자리"를 보여줄 뿐이다.
+ * **If no session exists, an empty conversation waits for the first question** (#63). Opening
+ * the screen does not create a process — what creates one is clicking a suggested question or
+ * typing the first word into the composer (askOrchestrator). Before that, this screen only shows
+ * "a place you can talk to."
  *
- * 추천 질문은 **대화가 비어 있을 때만** 선다 — 온보딩 상태 머신이 아니라 메시지
- * 수의 함수다. 첫 마디가 생기면 사라지고, 그 뒤로는 보통의 세션 화면이다.
+ * Suggested questions stand **only while the conversation is empty** — a function of the message
+ * count, not an onboarding state machine. They disappear once the first word exists, and from
+ * then on this is an ordinary session screen.
  *
- * 우측 증거 패널은 없다. 이 세션에는 프로젝트가 없어서 볼 깃도 파일도 없다 —
- * 빈 패널을 띄우면 "여기서 뭘 봐야 하나"를 매번 묻게 된다.
+ * There is no evidence panel on the right. This session has no project, so there is no git and
+ * no files to see — putting up an empty panel would leave people asking "what am I supposed to
+ * look at here" every time.
  */
 export function OrchestratorView() {
   const id = useStore((s) => s.orchestratorId)
-  // 기록을 아직 안 불러왔으면 "비었다"고 단정하지 않는다 — 카드가 번쩍였다 사라진다
+  // Does not assume "empty" before the transcript has even loaded — the card would flash and disappear
   const chatEmpty = useStore((s) => (id ? s.chat[id] !== undefined && s.chat[id].length === 0 : false))
   const mcpProposals = useStore((s) => s.mcpProposals)
   const resolveMcpProposal = useStore((s) => s.resolveMcpProposal)
   const skillProposals = useStore((s) => s.skillProposals)
   const resolveSkillProposal = useStore((s) => s.resolveSkillProposal)
 
-  // 레일(#81)은 오케스트레이터 세션이 없어도 선다 — 사람의 작업대는 챗의 부속이 아니다
+  // The rail (#81) stands even without an orchestrator session — a person's workbench is not an accessory to the chat
   if (!id)
     return (
       <div className="flex min-h-0 min-w-0 flex-1">
@@ -43,14 +47,15 @@ export function OrchestratorView() {
   return (
     <div className="relative flex min-w-0 flex-1 flex-col">
       {/*
-        MCP 서버 제안 카드 (propose_mcp_server → b안: 사람의 원클릭 승인). 대화 위에
-        배너로 선다 — 오케스트레이터가 제안한 그 대화 문맥 옆에서 결정해야 하기
-        때문이다. 승인은 곧 임의 명령 실행의 등록이라 명령 전문을 그대로 보여준다.
+        MCP server proposal card (propose_mcp_server → option b: one-click approval by the
+        person). Stands as a banner over the conversation — the decision has to be made right
+        next to the conversation context the orchestrator proposed it in. Approving it registers
+        arbitrary command execution, so the full command is shown as is.
       */}
       {/*
-        스킬 제안 카드 (#71). 승인은 곧 오케스트레이터에 대한 **영구적 영향력**의
-        승인이라 절차 전문을 그대로 보여준다 — 요약만 보고 승인한 스킬은 읽지 않은
-        계약이다. 긴 본문은 안에서 스크롤한다.
+        Skill proposal card (#71). Approving it grants **lasting influence** over the
+        orchestrator, so the full procedure is shown as is — a skill approved from just a summary
+        is an unread contract. A long body scrolls inside its own box.
       */}
       {skillProposals.map((p) => (
         <div
@@ -119,16 +124,18 @@ export function OrchestratorView() {
         </div>
       ))}
       {/*
-        가운데는 챗(배차), 오른쪽은 앱 레일(#80·#81) — 관제면. 세션 화면의 오른쪽이
-        증거 패널이듯, 이 화면의 오른쪽은 다른 정체성의 자리다: 사람의 작업대.
+        The chat (dispatch) sits in the center, the app rail (#80, #81) on the right — a control
+        surface. Just as the right side of a session screen is the evidence panel, the right
+        side of this screen is a place with a different identity: the person's workbench.
       */}
       <div className="flex min-h-0 min-w-0 flex-1">
         <div className="relative flex min-w-0 flex-1 flex-col">
           <SessionPane sessionId={id} />
           {/*
-            세션은 있는데 대화가 빈 경우(만들어만 두고 말을 안 걸었거나, 보내기가 실패한
-            경우)에도 같은 카드가 선다 — 카드는 메시지 수의 함수라는 규칙의 나머지 절반.
-            덮개로 띄우는 이유: SessionPane의 입력창·설정 메뉴는 그대로 살아 있어야 한다.
+            The same card stands even when the session exists but the conversation is empty
+            (created but never talked to, or a failed send) — the other half of the rule that
+            the card is a function of message count. Why it floats as an overlay: SessionPane's
+            composer and settings menu have to stay alive underneath it.
           */}
           {chatEmpty && (
             <div className="pointer-events-none absolute inset-x-0 bottom-24 top-0 flex items-center justify-center">
@@ -145,8 +152,8 @@ export function OrchestratorView() {
 }
 
 /**
- * 레일 자리에 서는 앱들 (#81). 코어가 앱에 대해 아는 것은 registry 한 줄이고,
- * 여기는 그 명부를 그리는 것뿐이다 — 꺼진 앱은 안 그린다 (지우는 게 아니라).
+ * The apps that stand in the rail (#81). All the core knows about an app is its one line in the
+ * registry, and this just draws that registry — a disabled app is not drawn (not deleted).
  */
 function AppRails() {
   const apps = useStore((s) => s.apps)
@@ -159,9 +166,9 @@ function AppRails() {
   const mounted = APPS.filter((a) => a.railPanel && (apps[a.id]?.enabled ?? true))
   if (mounted.length === 0) return null
   /*
-   * 폭은 슬롯(코어)의 기하다 — 내용은 앱의 것이지만, 얼마나 차지하는지는 화면의
-   * 일이라 워크스페이스에 실린다. 증거 패널과 같은 손잡이 문법: 왼 모서리 끌기,
-   * 더블클릭 = 기본 폭.
+   * The width is the geometry of the slot (core) — the content belongs to the app, but how much
+   * room it takes up is the screen's job, so it is stored in the workspace. Same handle grammar
+   * as the evidence panel: drag the left edge, double-click resets to the default width.
    */
   return (
     <div
@@ -186,12 +193,14 @@ function AppRails() {
 }
 
 /**
- * 추천 질문 (#63) — **읽는 답이 아니라 행동으로 끝나는 질문들**.
+ * Suggested questions (#63) — **questions that end in an action, not something to read as an
+ * answer**.
  *
- * "이 앱은 뭐 하는 앱인가요?"는 없다: 다운로드한 사람은 이미 대충 안다 (사용자 지적).
- * 대신 행동 하나(프로젝트 생성 — propose_project 카드로 끝난다) · 이 창구의 능력
- * 하나 · 이 앱을 고른 이유(다중 세션) 하나. **클릭은 곧 전송이다** — 입력창을
- * 채워주는 중간 단계가 없다. 그 클릭이 오케스트레이터를 깨우는 지연 기동 트리거다.
+ * There is no "what does this app do?": whoever downloaded it already roughly knows (user's
+ * observation). Instead: one action (creating a project — it ends in a propose_project card),
+ * one capability of this channel, and one reason someone picked this app (running several
+ * sessions). **A click sends it right away** — there is no intermediate step that just fills the
+ * composer. That click is the lazy-start trigger that wakes the orchestrator.
  */
 const QUESTIONS = [
   { key: 'create-project', text: 'Create a project for me.' },
@@ -207,12 +216,12 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
   const waking = useStore((s) => s.orchestratorWaking)
   const [picking, setPicking] = useState(false)
   /*
-   * 호스트가 없으면 이 초대는 지킬 수 없는 약속이다 (도그푸딩 2026-09-07:
-   * "연결이 디스커넥티드였는데 오케스트레이터 화면은 연결된 것처럼 보였다").
+   * Without the host, this invitation is a promise that cannot be kept (dogfooding, 2026-09-07:
+   * "the connection was disconnected, but the orchestrator screen looked connected anyway").
    *
-   * 끊긴 동안 눌러도 조용히 아무 일도 안 일어나는 게 아니라 **더 나쁘다**: RPC는
-   * 재연결을 기대하고 큐에 쌓이므로 30초를 기다린 뒤에야 실패한다. 그 30초 동안
-   * 화면은 "시작하는 중"이라고 말한다 — 사실이 아닌 말을.
+   * Clicking while disconnected does not just quietly do nothing — it is **worse**: an RPC call
+   * queues up expecting a reconnect, so it only fails after waiting 30 seconds. For those 30
+   * seconds, the screen says "starting" — something that is not true.
    */
   const connection = useStore((s) => s.connection)
   const offline = connection !== 'connected'
@@ -249,8 +258,9 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
         </p>
       )}
       {/*
-        말 걸기 싫은 사람의 길 — 대화를 강요하지 않는다 (#63 탈출구).
-        FirstRun이 하던 그대로: 피커 → 프로젝트 → 세션 만들기 창까지 이어준다.
+        The path for someone who does not want to talk — no conversation is forced on them
+        (#63's escape hatch). Exactly what FirstRun used to do: picker → project → all the way
+        through to the new-session window.
       */}
       <button
         className="mt-3 text-[12px] text-slate underline-offset-2 hover:text-chalk hover:underline disabled:opacity-40"
@@ -275,9 +285,9 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
 }
 
 /**
- * 아직 태어나지 않은 오케스트레이터의 자리. SessionPane은 세션 id 없이는 설 수
- * 없으므로, 같은 골격(가운데 내용 + 아래 입력창)을 가볍게 흉내 낸다 — 첫 마디가
- * 들어오는 순간 진짜 SessionPane이 이 자리를 물려받는다.
+ * The place for an orchestrator that has not been born yet. Since SessionPane cannot stand
+ * without a session id, this lightly imitates the same skeleton (center content plus a composer
+ * below) — the moment the first word arrives, the real SessionPane inherits this spot.
  */
 function OrchestratorEmpty() {
   const askOrchestrator = useStore((s) => s.askOrchestrator)
@@ -290,8 +300,10 @@ function OrchestratorEmpty() {
     if (!t || waking) return
     setText('')
     /*
-     * 태어나지 못했으면 첫 질문을 되돌린다 (#180). 태어난 뒤의 전송 실패는 send가 진짜 세션의 초안으로 되돌리지만,
-     * 태어나기 전의 실패는 send까지 가지 않아 글이 어디에도 없었다. 그 사이 새로 친 글은 덮지 않고 뒤에 둔다.
+     * If it never got born, the first question is put back (#180). A send failure after birth
+     * is restored by send into the real session's draft, but a failure before birth never
+     * reaches send, so the text had nowhere to live at all. Anything typed in the meantime is
+     * not overwritten — it is kept after the restored text.
      */
     void askOrchestrator(t).then((ok) => {
       if (!ok) setText((cur) => (cur ? `${t}\n${cur}` : t))
@@ -303,7 +315,7 @@ function OrchestratorEmpty() {
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <Suggestions ask={(t) => void askOrchestrator(t)} />
       </div>
-      {/* 진짜 입력창과 같은 옷 — 다음 순간 SessionPane의 입력창이 이 자리에 선다 */}
+      {/* Dressed identically to the real composer — a moment later, SessionPane's composer stands in this exact spot */}
       <div className="shrink-0 px-4 pb-4">
         <textarea
           rows={1}
@@ -311,7 +323,7 @@ function OrchestratorEmpty() {
           disabled={waking}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            // 세션 입력창과 같은 판정 (#180) — ⌘Enter로 보내기를 켠 사람에게 맨 Enter는 줄바꿈이고, 조합 중인 Enter는 보내지 않는다
+            // The same rule as the session composer (#180) — for someone who turned on ⌘Enter to send, plain Enter is a newline, and Enter mid-composition never sends
             const composing = composingKey({ key: e.key, isComposing: e.nativeEvent.isComposing })
             const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(key, sendWithModifierEnter)) {

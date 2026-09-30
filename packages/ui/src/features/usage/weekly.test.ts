@@ -7,21 +7,21 @@ const w = (over: Partial<UsageWindow>): UsageWindow => ({
 })
 
 /**
- * 상단 바 도넛이 그릴 창 고르기. 도구마다 이름이 다르다 (실측):
- * claude는 `weekly_all`, codex는 창 길이에서 만든 이름(`1w`).
+ * Picking the window the top-bar donut should draw. Names differ by tool (measured):
+ * claude uses `weekly_all`, codex uses a name derived from the window length (`1w`).
  */
 describe('weeklyWindow', () => {
-  it('claude: weekly_all을 고른다 (5시간 창이 앞에 있어도)', () => {
+  it('claude: picks weekly_all (even if the 5-hour window comes first)', () => {
     const picked = weeklyWindow([w({ id: 'session', label: '5 hours' }), w({ id: 'weekly_all', label: 'Weekly' })])
     expect(picked?.id).toBe('weekly_all')
   })
 
-  it('codex: 이름이 창 길이다 — 1w를 고른다', () => {
+  it('codex: the name is the window length — picks 1w', () => {
     const picked = weeklyWindow([w({ id: 'primary', label: '5h' }), w({ id: 'secondary', label: '1w' })])
     expect(picked?.id).toBe('secondary')
   })
 
-  it('주간이 여럿이면 먼저 닿는 벽 — 가장 많이 찬 창을 세운다', () => {
+  it('with several weekly windows, whichever wall comes first — puts forward the fullest one', () => {
     const picked = weeklyWindow([
       w({ id: 'weekly_all', label: 'Weekly', percent: 74 }),
       w({ id: 'weekly_scoped', label: 'Weekly (per model)', scope: 'Opus', percent: 95 }),
@@ -29,7 +29,7 @@ describe('weeklyWindow', () => {
     expect(picked?.id).toBe('weekly_scoped')
   })
 
-  it('계정 주간이 더 찼으면 그쪽 — 규칙은 모델이 아니라 숫자다', () => {
+  it('if the account weekly is fuller, picks that — the rule is the number, not the model', () => {
     const picked = weeklyWindow([
       w({ id: 'weekly_all', label: 'Weekly', percent: 88 }),
       w({ id: 'weekly_scoped', label: 'Weekly (per model)', scope: 'Opus', percent: 12 }),
@@ -37,14 +37,14 @@ describe('weeklyWindow', () => {
     expect(picked?.id).toBe('weekly_all')
   })
 
-  it('주간이라 할 만한 것이 없으면 null — 아무 창이나 그리면 도넛이 거짓말한다', () => {
+  it('null when nothing counts as weekly — drawing any window would make the donut lie', () => {
     expect(weeklyWindow([w({ id: 'session', label: '5 hours' })])).toBeNull()
     expect(weeklyWindow([])).toBeNull()
   })
 })
 
 describe('usageTone', () => {
-  it('찰수록 밝다 — 90%부터는 순백', () => {
+  it('the fuller it is, the brighter — pure white from 90% on', () => {
     expect(usageTone(10)).toBe('text-ash')
     expect(usageTone(70)).toBe('text-chalk')
     expect(usageTone(93)).toBe('text-beacon')

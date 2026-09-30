@@ -4,12 +4,13 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
 
 /**
- * 사용량 (FR-9).
+ * Usage (FR-9).
  *
- * **구독 한도만 다룬다** — 추가 결제(크레딧)는 범위 밖이다.
+ * **Only covers subscription limits** — additional paid credits are out of scope.
  *
- * 도구마다 창의 개수와 이름이 다르다(Claude는 5시간+주간, Codex는 주간 하나).
- * 그래서 UI는 창이 몇 개인지 모르는 채로 배열을 그린다 — 새 창이 생겨도 여기를 고치지 않는다.
+ * The number and names of windows differ by tool (Claude has 5-hour plus weekly, Codex has one
+ * weekly window). So the UI draws the array without knowing how many windows there are — a new
+ * window appearing does not require a change here.
  */
 export function UsagePanel({ tool }: { tool: ToolName }) {
   const platform = usePlatform()
@@ -39,7 +40,7 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
     )
   }
 
-  // 못 읽는 것과 없는 것은 다르다 — 이유를 그대로 보여준다
+  // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
     return (
       <p className="px-4 py-6 text-center text-[12px] leading-relaxed text-ash" data-testid="usage-unavailable">
@@ -65,17 +66,18 @@ export function UsagePanel({ tool }: { tool: ToolName }) {
         ))}
       </div>
 
-      {/* 일별 토큰은 주는 도구만 있다 (Codex는 준다, Claude는 창 자체가 없다) */}
+      {/* Only some tools provide daily tokens (Codex does; Claude has no such window at all) */}
       {daily.length > 0 && <DailyTokens daily={daily} />}
     </div>
   )
 }
 
 /**
- * 도넛.
+ * A donut.
  *
- * 색이 없으므로 채운 만큼을 밝기로 말한다. 위험할수록 밝아진다 —
- * 화면에서 가장 밝은 것이 나를 기다리는 것이라는 규칙과 같은 결이다.
+ * With no color to use, how full it is is expressed as brightness. The more dangerous, the
+ * brighter it gets — the same grain as the rule that the brightest thing on screen is what is
+ * waiting on me.
  */
 function Donut({ window: w }: { window: UsageWindow }) {
   const R = 26
@@ -109,16 +111,17 @@ function Donut({ window: w }: { window: UsageWindow }) {
             strokeWidth="6"
             strokeLinecap="round"
             strokeDasharray={`${filled} ${C - filled}`}
-            // 12시 방향에서 시작해야 사람이 읽는 방향과 맞는다
+            // Has to start at the 12 o'clock position to match the direction people read in
             transform="rotate(-90 32 32)"
             className={tone}
           />
         </svg>
         <span className={`readout text-[13px] leading-none ${tone}`}>{w.percent}%</span>
         {/*
-          모델 이름을 **적는다** (사용자 지적 2026-09-09). 예전에는 scope가 있으면 매달린
-          '·'만 찍고 이름은 툴팁에 뒀는데, 그러면 같은 74%짜리 주간 둘이 나란히 서서
-          하나가 무엇의 한도인지 화면에서 안 읽혔다 — "per model이 빠진 것 같다"가 그것이다.
+          The model name **is written out** (user's observation, 2026-09-09). Before, when a
+          scope existed, only a dangling "·" was shown and the name was left to the tooltip, so
+          two 74% weekly donuts standing side by side gave no way to read on screen which was
+          whose limit — that is what "per model seems to be missing" meant.
         */}
         <span className="max-w-[92px] truncate text-[10px] text-slate" title={w.scope ?? undefined}>
           {w.label}
@@ -129,7 +132,7 @@ function Donut({ window: w }: { window: UsageWindow }) {
   )
 }
 
-/** 남은 시간을 사람 단위로 — 정확한 시각보다 '얼마나 남았나'가 먼저다 */
+/** Time remaining in human units — "how much is left" matters more than the exact moment */
 function resetText(resetsAt: string | null): string {
   if (!resetsAt) return 'reset time unknown'
   const ms = new Date(resetsAt).getTime() - Date.now()
@@ -142,7 +145,7 @@ function resetText(resetsAt: string | null): string {
   return `resets in ${Math.floor(hour / 24)}d ${hour % 24}h`
 }
 
-/** 일별 토큰 — 최근 7일만. 막대는 그날 최대치 대비 길이다 */
+/** Daily tokens — only the most recent 7 days. Bar length is relative to that day's peak */
 function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
   const recent = daily.slice(-7)
   const peak = Math.max(...recent.map((d) => d.tokens), 1)

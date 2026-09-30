@@ -2,17 +2,20 @@ import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
 
 /**
- * "새 버전이 있습니다" — 계기판의 조용한 한 줄 (이슈 #43).
+ * "A new version is available" — a quiet line on the dashboard (issue #43).
  *
- * **할 말이 있을 때만 나타난다.** 상단 바에서 단축키 칩을 걷어낸 이유가 그거였다
- * (이슈 #33): 늘 켜져 있는 것은 볼 때마다 주의를 걷어가면서 처음 한 번 뒤로는
- * 아무것도 알려주지 않는다. 이 줄은 반대다 — 평소엔 아예 없고, 레지스트리에 새것이
- * 올라온 동안에만 있다가 다시 사라진다. 그래서 계기판에 설 자격이 있다.
+ * **It only appears when it has something to say.** That is why the shortcut chips were
+ * removed from the top bar (issue #33): something that stays on all the time takes attention
+ * every time it is seen, and after the first time it has nothing left to tell. This line is the
+ * opposite — most of the time it is not there at all, and it only shows up while something new
+ * has landed in the registry, then disappears again. That is what earns it a place on the
+ * dashboard.
  *
- * **누르는 것이 곧 동의다.** 그래서 라벨이 "New version available"이 아니라
- * "Update to 9.9.9"다 — 버튼은 자기가 무슨 일을 할지 적고 있어야 하고, 이건 되돌릴 수
- * 없는 일이다. 그리고 끝나도 **다시 시작하지 않는다.** 도는 앱을 갈아 끼우는 결정은
- * 대화 중간일 수도 있는 사람의 몫이고, 이 줄이 그 말을 하는 자리다.
+ * **Clicking it is consent.** That is why the label is not "New version available" but "Update
+ * to 9.9.9" — the button has to say what it is about to do, because this is not reversible.
+ * And once it finishes, **it does not restart on its own.** The decision to swap out the running
+ * app belongs to the person, who may be in the middle of a conversation, and this line is where
+ * that decision is left to them.
  */
 export function UpdateLine() {
   const update = useStore((s) => s.update)
@@ -41,11 +44,12 @@ export function UpdateLine() {
 
   if (update.phase === 'failed') {
     /*
-     * 실패한 설치는 조용히 넘기지 않는다 — 확인 실패와 다르다.
+     * A failed install is not passed over quietly — it is not the same as a failed check.
      *
-     * 확인은 아무도 안 시켰으니 조용히 실패해도 되지만, 설치는 사람이 눌러서 시작한
-     * 일이다. 아무 말 없이 원래대로 돌아가면 "눌렀는데 아무 일도 안 일어났다"가 되고,
-     * 그러면 다음에 또 누른다. 이유는 길 수 있어서 물어볼 때만 편다.
+     * Nobody asked for the check, so it is fine for it to fail quietly, but the install is
+     * something the person started by clicking. If it reverts with no explanation, it becomes
+     * "I clicked and nothing happened," and then the person clicks it again next time. The
+     * reason can be long, so it only unfolds when asked.
      */
     return (
       <Tooltip content={update.error ?? 'Something went wrong'} testId="update-error" align="right">
