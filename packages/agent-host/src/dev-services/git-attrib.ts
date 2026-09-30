@@ -38,6 +38,6 @@ export function attachCommitSessions(
     const rec = records.find((r) => c.sha.startsWith(r.sha) || r.sha.startsWith(c.sha))
     if (!rec) return c
     // Even if the session is deleted, the fact that "an agent made this" is kept
-    return { ...c, sessionName: nameOf(rec.sessionId) ?? '(지워진 세션)' }
+    return { ...c, sessionName: nameOf(rec.sessionId) ?? '(deleted session)' }
   })
 }

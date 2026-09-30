@@ -166,7 +166,7 @@ describe('the folder for an inherited note (#142)', () => {
       const sent = async (extra: Record<string, unknown>) => {
         state.requests.length = 0
         const h = await start(preset, true, extra)
-        h.send('노트를 읽어 주세요')
+        h.send('please read the notes')
         await vi.waitFor(() => expect(paramsOf('turn/start')).toBeDefined())
         await h.dispose()
         return state.requests.map((r) => ({ method: r.method, params: JSON.stringify(r.params) }))

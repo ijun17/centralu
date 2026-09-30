@@ -12,9 +12,9 @@ describe('streaming deltas', () => {
   it('stream_event content_block_delta → message_delta', () => {
     const out = n({
       type: 'stream_event',
-      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '안녕' } },
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello' } },
     })
-    expect(out).toEqual([{ type: 'message_delta', sessionId: SID, role: 'assistant', text: '안녕' }])
+    expect(out).toEqual([{ type: 'message_delta', sessionId: SID, role: 'assistant', text: 'hello' }])
   })
 
   /*
@@ -33,9 +33,9 @@ describe('streaming deltas', () => {
   it('if thinking ever arrives with text, it flows through as-is', () => {
     const out = n({
       type: 'stream_event',
-      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: '경로를 따져보자', estimated_tokens: 10 } },
+      event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'let us work out the path', estimated_tokens: 10 } },
     })
-    expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, text: '경로를 따져보자', estTokens: 10 }])
+    expect(out).toEqual([{ type: 'reasoning_delta', sessionId: SID, text: 'let us work out the path', estTokens: 10 }])
   })
 
   it('ignores a delta with no content', () => {
@@ -56,12 +56,12 @@ describe('streaming deltas', () => {
 describe('an assistant body that arrives with no deltas', () => {
   const assistant = {
     type: 'assistant',
-    message: { role: 'assistant', content: [{ type: 'text', text: '사용량: 18%' }] },
+    message: { role: 'assistant', content: [{ type: 'text', text: 'Usage: 18%' }] },
   }
 
   it('emits the whole body as a message_delta when there were no deltas — this is the path /usage\'s answer takes', () => {
     const events = normalizeMessage(assistant, SID, { textStreamed: false })
-    expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: '사용량: 18%' })
+    expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: 'Usage: 18%' })
   })
 
   it('does not emit a body again once it already went out as deltas — appearing twice would be a new bug', () => {
@@ -71,17 +71,17 @@ describe('an assistant body that arrives with no deltas', () => {
 
   it('local command output (system/local_command_output) is also a body — the same generalized channel', () => {
     const events = normalizeMessage(
-      { type: 'system', subtype: 'local_command_output', content: '명령 출력 내용' },
+      { type: 'system', subtype: 'local_command_output', content: 'command output content' },
       SID,
     )
-    expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: '명령 출력 내용' })
+    expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: 'command output content' })
   })
 
   it('active_goal becomes a goal event (2026-09-07 — the judgment behind /goal\'s Stop hook)', () => {
     const events = normalizeMessage(
       {
         type: 'active_goal',
-        value: { condition: '테스트 전부 통과', iterations: 3, set_at: 1, tokens_at_start: 10, last_reason: '2개 실패' },
+        value: { condition: 'all tests pass', iterations: 3, set_at: 1, tokens_at_start: 10, last_reason: '2 failures' },
         session_id: 'x',
       },
       SID,
@@ -90,7 +90,7 @@ describe('an assistant body that arrives with no deltas', () => {
       {
         type: 'goal',
         sessionId: SID,
-        goal: { objective: '테스트 전부 통과', status: 'active', iterations: 3, reason: '2개 실패' },
+        goal: { objective: 'all tests pass', status: 'active', iterations: 3, reason: '2 failures' },
       },
     ])
   })
@@ -172,7 +172,7 @@ describe('tool calls (the actual shape from the spike)', () => {
       },
     })
     const img = out.find((e) => e.type === 'message_image')
-    expect(img).toMatchObject({ data: '', note: expect.stringContaining('너무 큽니다') })
+    expect(img).toMatchObject({ data: '', note: expect.stringContaining('too large') })
   })
 
   it('a non-base64 image source becomes a visible failure (#58 — it used to vanish silently)', () => {
@@ -281,8 +281,8 @@ describe('the result message (usage, context, completion)', () => {
   })
 
   it('emits an error on failure', () => {
-    const out = n({ ...RESULT, subtype: 'error_max_turns', is_error: true, result: '최대 턴 초과' })
-    expect(out.at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: '최대 턴 초과' } })
+    const out = n({ ...RESULT, subtype: 'error_max_turns', is_error: true, result: 'max turns exceeded' })
+    expect(out.at(-1)).toMatchObject({ type: 'error', error: { code: 'internal', message: 'max turns exceeded' } })
   })
 
   /*

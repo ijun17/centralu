@@ -91,7 +91,7 @@ async function rpc(method, params, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
     setTimeout(() => {
-      if (pending.delete(id)) reject(new Error(`${method} 타임아웃`))
+      if (pending.delete(id)) reject(new Error(`${method} timed out`))
     }, timeoutMs)
   })
 }
@@ -122,7 +122,7 @@ async function handle(msg) {
       const tools = await rpc('orchestrator.tools', { sessionId: SESSION_ID })
       return ok(id, { tools })
     } catch (e) {
-      return err(id, `도구 목록을 못 받았습니다 — ${e.message}`)
+      return err(id, `Could not get the tool list — ${e.message}`)
     }
   }
 
@@ -136,11 +136,11 @@ async function handle(msg) {
       return ok(id, { content: [{ type: 'text', text: r.text }], isError: r.isError === true })
     } catch (e) {
       // Does not silently pretend it succeeded — pretending the model's request went through leaves only the person unaware
-      return ok(id, { content: [{ type: 'text', text: `도구를 실행하지 못했습니다 — ${e.message}` }], isError: true })
+      return ok(id, { content: [{ type: 'text', text: `Could not run the tool — ${e.message}` }], isError: true })
     }
   }
 
-  if (id !== undefined) err(id, `지원하지 않는 메서드: ${method}`)
+  if (id !== undefined) err(id, `Unsupported method: ${method}`)
 }
 
 /**
@@ -174,7 +174,7 @@ async function handleApp(id, method, params) {
 }
 
 if (!URL_ || !TOKEN || !SESSION_ID) {
-  log('CC_HOST_URL·CC_HOST_TOKEN·CC_SESSION_ID가 있어야 합니다')
+  log('CC_HOST_URL, CC_HOST_TOKEN, and CC_SESSION_ID are required')
   process.exit(1)
 }
 
@@ -193,7 +193,7 @@ process.stdin.on('data', (chunk) => {
     } catch {
       continue
     }
-    void handle(msg).catch((e) => log('처리 실패:', e.message))
+    void handle(msg).catch((e) => log('Failed to process:', e.message))
   }
 })
 process.stdin.on('end', () => process.exit(0))

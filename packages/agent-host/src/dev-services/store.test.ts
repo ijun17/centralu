@@ -19,7 +19,7 @@ function seeded() {
   const s = new Store()
   s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.upsertSession({
-    id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
+    id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
     ...sessionLiveDefaults(),
@@ -70,8 +70,8 @@ describe('v10 migration — allows a session with no project', () => {
     old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
     for (const id of ['s1', 's2', 's3']) {
       old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES (?,?,?,?,?)`)
-        .run(id, 'p1', 'claude', '이름 ' + id, 1)
-      old.prepare(`INSERT INTO messages VALUES (?,?,?,?,?,?)`).run(id, 1, 'user', 'text', '{"text":"안녕"}', 1)
+        .run(id, 'p1', 'claude', 'name ' + id, 1)
+      old.prepare(`INSERT INTO messages VALUES (?,?,?,?,?,?)`).run(id, 1, 'user', 'text', '{"text":"hello"}', 1)
     }
     old.pragma('user_version = 9')
     old.close()
@@ -79,7 +79,7 @@ describe('v10 migration — allows a session with no project', () => {
     const store = new Store(file)
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
     expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
-    expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('이름 s2')
+    expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
     expect(store.loadMessages('s1').length).toBe(1)
 
     // And now a session with no project is inserted
@@ -133,19 +133,19 @@ describe('Store (dev sqlite)', () => {
 
   it('registers and lists projects; a duplicate path is treated as an update', () => {
     const s = seeded()
-    s.addProject({ id: 'p1b', path: '/tmp/p1', name: '이름변경' })
+    s.addProject({ id: 'p1b', path: '/tmp/p1', name: 'Renamed' })
     const list = s.listProjects()
     expect(list).toHaveLength(1)
-    expect(list[0]!.name).toBe('이름변경')
+    expect(list[0]!.name).toBe('Renamed')
   })
 
   it('session upsert and listing', () => {
     const s = seeded()
     const before = s.listSessions()[0]!
     expect(before.autoNamed).toBe(true)
-    s.upsertSession({ ...before, name: 'auth 리팩터링', autoNamed: false, state: 'working' })
+    s.upsertSession({ ...before, name: 'auth refactor', autoNamed: false, state: 'working' })
     const after = s.listSessions()[0]!
-    expect(after.name).toBe('auth 리팩터링')
+    expect(after.name).toBe('auth refactor')
     expect(after.autoNamed).toBe(false)
     expect(after.state).toBe('working')
   })
@@ -169,13 +169,13 @@ describe('Store (dev sqlite)', () => {
     const s = seeded()
     expect(s.nextSeq('s1')).toBe(1)
     s.appendMessages([
-      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '안녕' }, ts: 1 },
-      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: '네' }, ts: 2 },
+      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'hello' }, ts: 1 },
+      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'yes' }, ts: 2 },
     ])
     expect(s.nextSeq('s1')).toBe(3)
     const msgs = s.loadMessages('s1')
     expect(msgs.map((m) => m.seq)).toEqual([1, 2])
-    expect(msgs[0]!.payload).toEqual({ text: '안녕' })
+    expect(msgs[0]!.payload).toEqual({ text: 'hello' })
     expect(s.listSessions()[0]!.lastSeq).toBe(2)
   })
 
@@ -218,7 +218,7 @@ describe('migrations (E-0)', () => {
         waiting_since INTEGER, created_at INTEGER);
       CREATE TABLE messages (session_id TEXT, seq INTEGER, role TEXT, kind TEXT, payload TEXT, ts INTEGER,
         PRIMARY KEY (session_id, seq));
-      INSERT INTO sessions VALUES ('s1','p1','claude',NULL,'옛 세션',1,'idle',0,0,NULL,0);
+      INSERT INTO sessions VALUES ('s1','p1','claude',NULL,'Old session',1,'idle',0,0,NULL,0);
       INSERT INTO messages VALUES ('s1',1,'assistant','text','{"text":"승인을 기다립니다"}',0);
       PRAGMA user_version = 1;
     `)
@@ -265,20 +265,20 @@ describe('migrations (E-0)', () => {
     const s = seeded()
     const msg = {
       sessionId: 's1', seq: 10, role: 'assistant' as const, kind: 'text' as const,
-      payload: { text: '은하수 그라데이션' }, ts: 0,
+      payload: { text: 'milky way gradient' }, ts: 0,
     }
     for (let i = 0; i < 5; i++) s.appendMessages([msg])
-    expect(s.searchMessages('은하수').length).toBe(1)
+    expect(s.searchMessages('milky way').length).toBe(1)
     s.close()
   })
 
   it('rewriting the content makes the old content unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', seq: 11, role: 'assistant' as const, kind: 'text' as const, ts: 0 }
-    s.appendMessages([{ ...at, payload: { text: '옛날내용' } }])
-    s.appendMessages([{ ...at, payload: { text: '새내용' } }])
-    expect(s.searchMessages('옛날내용').length).toBe(0)
-    expect(s.searchMessages('새내용').length).toBe(1)
+    s.appendMessages([{ ...at, payload: { text: 'old content' } }])
+    s.appendMessages([{ ...at, payload: { text: 'new content' } }])
+    expect(s.searchMessages('old content').length).toBe(0)
+    expect(s.searchMessages('new content').length).toBe(1)
     s.close()
   })
 
@@ -294,13 +294,13 @@ describe('migrations (E-0)', () => {
     s.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
     expect(s.searchMessages('hello').length).toBe(1)
     s.appendMessages([
-      { ...at, seq: 2, role: 'user', payload: { text: '새로 온 말' } },
+      { ...at, seq: 2, role: 'user', payload: { text: 'newly arrived words' } },
       { ...at, seq: 1, payload: { type: 'tool' } },
     ])
     expect(s.loadMessages('s1').map((m) => m.seq)).toEqual([1, 2])
     expect(s.loadMessages('s1')[0]!.payload).toEqual({ type: 'tool' })
     expect(s.searchMessages('hello').length).toBe(0)
-    expect(s.searchMessages('새로 온').length).toBe(1)
+    expect(s.searchMessages('newly arrived').length).toBe(1)
     s.close()
   })
 
@@ -319,7 +319,7 @@ describe('migrations (E-0)', () => {
       Array.from({ length: n }, (_, i) => ({
         // A human's words are never joined together — loadMessages's count is exactly the row count
         sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const,
-        payload: { text: `은하수 ${i}` }, ts: i,
+        payload: { text: `test message ${i}` }, ts: i,
       })),
     )
     const fts = indexRowsOf(s, 's1')
@@ -365,7 +365,7 @@ describe('migration v5 — the original conversation an import inherited', () =>
     store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     const base = {
       id: 's-import', projectId: 'p1', kind: 'worker' as const, tool: 'claude' as const, externalId: 'ext-new',
-      name: '이어받은 대화', autoNamed: true, state: 'idle' as const,
+      name: 'Imported conversation', autoNamed: true, state: 'idle' as const,
       lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: true,
       model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
@@ -385,7 +385,7 @@ describe('migration v5 — the original conversation an import inherited', () =>
  */
 describe('migration v7 — reasoning effort', () => {
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
-    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
+    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
     model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -418,7 +418,7 @@ describe('migration v7 — reasoning effort', () => {
  */
 describe('migration v18 — response length', () => {
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
-    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '세션',
+    id: 's-x', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'Session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true,
     model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -646,7 +646,7 @@ describe('v13 migration — the old-named table becomes grid_panels', () => { //
         position INTEGER NOT NULL);
     `)
     old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1)`).run()
-    old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES ('s1','p1','claude','올려둔 세션',1)`).run()
+    old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES ('s1','p1','claude','Pinned session',1)`).run()
     old.prepare(`INSERT INTO control_center (session_id, position) VALUES ('s1', 0)`).run() // legacy-name
     old.pragma('user_version = 8')
     old.close()
@@ -694,8 +694,8 @@ describe('v14 migration — remembers the directory a session was created in', (
       `INSERT INTO sessions (id, project_id, tool, name, created_at, is_orchestrator, worktree_path, worktree_branch)
        VALUES (?,?,?,?,?,?,?,?)`,
     )
-    add.run('plain', 'p1', 'claude', '프로젝트 세션', 1, 0, null, null)
-    add.run('wt', 'p1', 'claude', '워크트리 세션', 1, 0, '/tmp/wt/feature', 'feature')
+    add.run('plain', 'p1', 'claude', 'Project session', 1, 0, null, null)
+    add.run('wt', 'p1', 'claude', 'Worktree session', 1, 0, '/tmp/wt/feature', 'feature')
     add.run('orc', null, 'claude', 'Orchestrator', 1, 1, null, null)
     old.pragma('user_version = 13')
     old.close()
@@ -783,12 +783,12 @@ describe('v15 migration — remembers the shell commands a project registered', 
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // A project that never existed correctly has none — an empty list is exactly 'never registered any'
     expect(first.projectCommands('p1')).toEqual([])
-    first.setProjectCommands('p1', [{ command: 'pnpm test', label: '테스트' }, { command: 'pnpm e2e' }])
+    first.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
     first.close()
 
     const second = new Store(file)
     expect(second.projectCommands('p1')).toEqual([
-      { command: 'pnpm test', label: '테스트' },
+      { command: 'pnpm test', label: 'Test' },
       { command: 'pnpm e2e' },
     ])
     // A row from before labels (~2026-09-06) is an array of strings — upgraded on read
@@ -820,7 +820,7 @@ describe('v15 migration — remembers the shell commands a project registered', 
     first.close()
 
     const poke = new Database(file)
-    poke.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('{ 이건 JSON이 아니다')
+    poke.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('{ this is not json')
     poke.close()
 
     const second = new Store(file)
@@ -904,14 +904,14 @@ describe('v17 migration — context usage survives a restart', () => {
     `)
     old.prepare(`INSERT INTO projects VALUES ('p1','/tmp/p1','p1','claude',NULL,0,1,'[]')`).run()
     const add = old.prepare(`INSERT INTO sessions (id, project_id, tool, name, created_at) VALUES (?,?,?,?,?)`)
-    add.run('worked', 'p1', 'claude', '일한 세션', 1)
-    add.run('fresh', 'p1', 'codex', '아직 안 돈 세션', 1)
+    add.run('worked', 'p1', 'claude', 'Worked session', 1)
+    add.run('fresh', 'p1', 'codex', 'Session that has not run yet', 1)
     old.pragma('user_version = 16')
     old.close()
   }
 
   const row = (over: Partial<SessionInfo>): SessionInfo => ({
-    id: 'worked', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '일한 세션',
+    id: 'worked', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Worked session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
     permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -986,7 +986,7 @@ describe('WAL checkpoint', () => {
     const s = new Store(path)
     s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.upsertSession({
-      id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '새 세션',
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
@@ -1018,46 +1018,46 @@ describe('loadMessages reads one row as one message (#77)', () => {
   it('neighboring assistant rows are two messages — neither replies nor reasoning are joined', () => {
     const s = seeded()
     s.appendMessages([
-      ask(1, '리뷰 돌려줘'),
+      ask(1, 'run the review'),
       reply(2, 'One review is still running.'),
       // A new reply with no human turn in between — a background task finished and a new turn started
       reply(3, 'All six reviews are in.'),
-      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: '앞 생각' }, ts: 4 },
-      { sessionId: 's1', seq: 5, role: 'assistant', kind: 'reasoning', payload: { text: '뒤 생각' }, ts: 5 },
+      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: 'earlier thought' }, ts: 4 },
+      { sessionId: 's1', seq: 5, role: 'assistant', kind: 'reasoning', payload: { text: 'later thought' }, ts: 5 },
     ])
     expect(texts(s.loadMessages('s1'))).toEqual([
-      [1, '리뷰 돌려줘'],
+      [1, 'run the review'],
       [2, 'One review is still running.'],
       [3, 'All six reviews are in.'],
-      [4, '앞 생각'],
-      [5, '뒤 생각'],
+      [4, 'earlier thought'],
+      [5, 'later thought'],
     ])
   })
 
   it('limit counts rows — reading onward by cursor never overlaps or joins neighboring replies', () => {
     const s = seeded()
-    s.appendMessages([ask(1, '질문1'), reply(2, '답1-가'), reply(3, '답1-나'), ask(4, '질문2'), reply(5, '답2-가'), reply(6, '답2-나')])
+    s.appendMessages([ask(1, 'question1'), reply(2, 'answer1-a'), reply(3, 'answer1-b'), ask(4, 'question2'), reply(5, 'answer2-a'), reply(6, 'answer2-b')])
     const page = s.loadMessages('s1', 2)
-    expect(texts(page)).toEqual([[5, '답2-가'], [6, '답2-나']])
+    expect(texts(page)).toEqual([[5, 'answer2-a'], [6, 'answer2-b']])
     const older = s.loadMessages('s1', 2, page[0]!.seq)
-    expect(texts(older)).toEqual([[3, '답1-나'], [4, '질문2']])
-    expect(texts(s.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, '질문1'], [2, '답1-가']])
+    expect(texts(older)).toEqual([[3, 'answer1-b'], [4, 'question2']])
+    expect(texts(s.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, 'question1'], [2, 'answer1-a']])
   })
 
   it('loadMessagesFrom reads what comes after a spot, by the same rule', () => {
     const s = seeded()
-    s.appendMessages([ask(1, '질문'), reply(2, '먼저 온 답.'), reply(3, '나중 답.'), ask(4, '다음 질문')])
+    s.appendMessages([ask(1, 'question'), reply(2, 'the answer that came first.'), reply(3, 'the later answer.'), ask(4, 'the next question')])
     const after = s.loadMessagesFrom('s1', 1, 10)
-    expect(texts(after)).toEqual([[2, '먼저 온 답.'], [3, '나중 답.'], [4, '다음 질문']])
+    expect(texts(after)).toEqual([[2, 'the answer that came first.'], [3, 'the later answer.'], [4, 'the next question']])
   })
 
   it('upsertMessageNoIndex updates only the body and leaves the index untouched', () => {
     const s = seeded()
-    s.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문' }, ts: 1 })
-    expect((s.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('자라는 본문')
-    expect(s.searchMessages('자라는 본문').length).toBe(0) // the index is written once, when it closes (appendMessages)
-    s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: '자라는 본문 끝' }, ts: 2 }])
-    expect(s.searchMessages('자라는 본문').length).toBe(1)
+    s.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body' }, ts: 1 })
+    expect((s.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('a growing body')
+    expect(s.searchMessages('a growing body').length).toBe(0) // the index is written once, when it closes (appendMessages)
+    s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body, done' }, ts: 2 }])
+    expect(s.searchMessages('a growing body').length).toBe(1)
   })
 })
 
@@ -1076,7 +1076,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     const s = new Store(file)
     s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.upsertSession({
-      id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: '새 세션',
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -1188,18 +1188,18 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
     const s0 = new Store(file)
     s0.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s0.upsertSession({
-      id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: '세션',
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     })
     s0.appendMessages([
-      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '질문' }, ts: 100 },
+      { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'question' }, ts: 100 },
       // A trampled row — it was really around 110, but the migration's own time (999999) was stamped on it
-      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: '답' }, ts: 999_999 },
+      { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'answer' }, ts: 999_999 },
       { sessionId: 's1', seq: 3, role: 'system', kind: 'tool_call', payload: {}, ts: 120 },
-      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'text', payload: { text: '끝' }, ts: 130 },
+      { sessionId: 's1', seq: 4, role: 'assistant', kind: 'text', payload: { text: 'end' }, ts: 130 },
     ])
     s0.close()
 

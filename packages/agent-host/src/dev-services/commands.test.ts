@@ -52,14 +52,14 @@ describe('CommandRunner', () => {
     stub(svc, fake.mod)
 
     const r = svc.run('/tmp/p', 'pnpm test')
-    fake.instances[0]!.emitData('오류 0건\r\n')
+    fake.instances[0]!.emitData('0 errors\r\n')
     fake.instances[0]!.emitExit(0)
 
     const log = svc.log('/tmp/p', 'pnpm test')!
-    expect(log.history).toBe('오류 0건\r\n')
+    expect(log.history).toBe('0 errors\r\n')
     expect(log.running).toBe(false)
     expect(log.exitCode).toBe(0)
-    expect(frames).toContainEqual({ terminalId: r.runId, data: '오류 0건\r\n' })
+    expect(frames).toContainEqual({ terminalId: r.runId, data: '0 errors\r\n' })
     expect(frames).toContainEqual({ terminalId: r.runId, exitCode: 0 })
   })
 
@@ -69,14 +69,14 @@ describe('CommandRunner', () => {
     stub(svc, fake.mod)
 
     const r1 = svc.run('/tmp/p', 'pnpm dev')
-    fake.instances[0]!.emitData('옛 로그')
+    fake.instances[0]!.emitData('old log')
     const r2 = svc.run('/tmp/p', 'pnpm dev')
 
     expect(fake.instances[0]!.kill).toHaveBeenCalled()
     expect(r2.runId).not.toBe(r1.runId)
     expect(svc.log('/tmp/p', 'pnpm dev')!.history).toBe('')
     // The dying old process's last output does not mix into the new log
-    fake.instances[0]!.emitData('유령 출력')
+    fake.instances[0]!.emitData('ghost output')
     expect(svc.log('/tmp/p', 'pnpm dev')!.history).toBe('')
   })
 
@@ -101,13 +101,13 @@ describe('CommandRunner', () => {
     stub(svc, fake.mod)
 
     svc.run('/tmp/p', 'pnpm dev')
-    fake.instances[0]!.emitData('서버 뜸\r\n')
+    fake.instances[0]!.emitData('server up\r\n')
     svc.stop('/tmp/p', 'pnpm dev')
     fake.instances[0]!.emitExit(130)
 
     const log = svc.log('/tmp/p', 'pnpm dev')!
     expect(log.running).toBe(false)
-    expect(log.history).toBe('서버 뜸\r\n')
+    expect(log.history).toBe('server up\r\n')
     expect(log.exitCode).toBe(130)
   })
 

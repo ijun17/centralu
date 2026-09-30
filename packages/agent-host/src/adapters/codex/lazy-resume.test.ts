@@ -71,7 +71,7 @@ describe('codex lazy resume — like Claude', () => {
     expect(h.externalId).toBe('big-thread') // resume already knows the id — it must be possible to persist it immediately
 
     // A message sent before resume finishes waits in the queue
-    h.send('깨기 전에 보낸 말')
+    h.send('message sent before it woke up')
     await tick()
     expect(methods()).not.toContain('turn/start')
 
@@ -80,7 +80,7 @@ describe('codex lazy resume — like Claude', () => {
     await tick()
     await tick()
     const turn = state.requests.find((r) => r.method === 'turn/start')
-    expect(turn?.params?.input).toEqual([{ type: 'text', text: '깨기 전에 보낸 말' }])
+    expect(turn?.params?.input).toEqual([{ type: 'text', text: 'message sent before it woke up' }])
     expect(events.some((e) => e.type === 'error')).toBe(false)
   })
 
@@ -96,16 +96,16 @@ describe('codex lazy resume — like Claude', () => {
       { sessionId: 's4', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'big-thread' },
       (e) => events.push(e),
     )
-    h.send('깨기 전에 보낸 말')
+    h.send('message sent before it woke up')
     h.interrupt()
     expect(events).toContainEqual({ type: 'state_change', sessionId: 's4', state: 'waiting_input', reason: 'interrupted' })
-    h.send('멈춘 뒤에 보낸 말')
+    h.send('message sent after it stopped')
 
     state.resolvers.get('thread/resume')!({ thread: { id: 'big-thread' } })
     await tick()
     await tick()
     const turns = state.requests.filter((r) => r.method === 'turn/start').map((r) => r.params?.input)
-    expect(turns).toEqual([[{ type: 'text', text: '멈춘 뒤에 보낸 말' }]])
+    expect(turns).toEqual([[{ type: 'text', text: 'message sent after it stopped' }]])
   })
 
   it('a lock error is thrown as-is within the 3-second window — the fork-in-the-road UI stays alive', async () => {

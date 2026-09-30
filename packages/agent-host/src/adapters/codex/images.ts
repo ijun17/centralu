@@ -29,14 +29,14 @@ export async function imageEventFromDisk(
   const fail = (note: string): NormalizedEvent => ({ type: 'message_image', sessionId, mime: '', data: '', path, note })
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
   const mime = IMAGE_MIMES[ext]
-  if (!mime) return fail(`표시할 수 없는 형식입니다 (.${ext})`)
+  if (!mime) return fail(`Cannot display this format (.${ext})`)
   try {
     const s = await stat(path)
-    if (s.size > maxBytes) return fail(`이미지가 너무 큽니다 (${Math.round(s.size / 1048576)}MB)`)
+    if (s.size > maxBytes) return fail(`Image is too large (${Math.round(s.size / 1048576)}MB)`)
     const buf = await readFile(path)
     return { type: 'message_image', sessionId, mime, data: buf.toString('base64'), path }
   } catch (err) {
     // The file may already have been deleted — even so, what happened is left visible on screen
-    return fail(`이미지를 읽지 못했습니다: ${(err as Error).message}`)
+    return fail(`Failed to read image: ${(err as Error).message}`)
   }
 }

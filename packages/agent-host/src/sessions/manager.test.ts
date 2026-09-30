@@ -4097,7 +4097,7 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
     const foreman = mgr.listSessions().find((s) => s.id === task.coordinatorId)!
     expect(foreman.kind).toBe('coordinator')
     expect(foreman.scopeSessionIds).toEqual([a.id])
-    expect(foreman.roleAppend).toContain('반장')
+    expect(foreman.roleAppend).toContain('foreman')
     expect(foreman.roleAppend).toContain(task.id) // The role script knows its own task id.
     /*
      * The owning app is recorded on the row (#81, user request 2026-09-09). The value comes not
@@ -4123,7 +4123,7 @@ describe('coordinator sessions — an orchestrator-type with clipped sight (#80/
     expect(done.isError).not.toBe(true)
     const after = mgr.appState('control').doc as { tasks: { status: string }[]; notifies: { text: string }[] }
     expect(after.tasks[0]!.status).toBe('done')
-    expect(after.notifies.some((n) => n.text.includes('업무 완료') && n.text.includes('전부 통과'))).toBe(true)
+    expect(after.notifies.some((n) => n.text.includes('Task done') && n.text.includes('전부 통과'))).toBe(true)
 
     // A foreman cannot create a task — blocked from both exposure and execution (depth-1).
     await expect(

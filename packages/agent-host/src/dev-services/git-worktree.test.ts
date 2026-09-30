@@ -40,7 +40,7 @@ describe('worktrees', () => {
   it('editing one side never disturbs the other (the point of this feature)', async () => {
     const path = join(root, 'outside', 'session-2')
     await gitWorktreeAdd(repo, path, 'centralu/wt2')
-    writeFileSync(join(path, 'a.txt'), '워크트리에서 고침\n')
+    writeFileSync(join(path, 'a.txt'), 'fixed in the worktree\n')
 
     expect((await gitWorktreeDirty(path)).dirty).toBe(true)
     expect((await gitWorktreeDirty(repo)).dirty).toBe(false)
@@ -49,7 +49,7 @@ describe('worktrees', () => {
   it('an uncommitted change blocks removal unless force is given', async () => {
     const path = join(root, 'outside', 'session-3')
     await gitWorktreeAdd(repo, path, 'centralu/wt3')
-    writeFileSync(join(path, 'a.txt'), '아직 커밋 안 함\n')
+    writeFileSync(join(path, 'a.txt'), 'not committed yet\n')
 
     // Confirms git itself rejects this — this is exactly why we attach force
     await expect(gitWorktreeRemove(repo, path)).rejects.toThrow()

@@ -29,16 +29,16 @@ describe('imageEventFromDisk', () => {
 
   it('an extension outside the list is not drawn, and the reason is stated', async () => {
     const e = await imageEventFromDisk('s1', join(dir, 'note.txt'))
-    expect(e).toMatchObject({ data: '', note: expect.stringContaining('형식') })
+    expect(e).toMatchObject({ data: '', note: expect.stringContaining('format') })
   })
 
   it('a file over the ceiling states its size', async () => {
     const e = await imageEventFromDisk('s1', join(dir, 'dot.png'), 10)
-    expect(e).toMatchObject({ data: '', note: expect.stringContaining('너무 큽니다') })
+    expect(e).toMatchObject({ data: '', note: expect.stringContaining('too large') })
   })
 
   it('a missing file is still an event — a box with a reason beats a silent blank', async () => {
     const e = await imageEventFromDisk('s1', join(dir, 'gone.png'))
-    expect(e).toMatchObject({ data: '', note: expect.stringContaining('읽지 못했습니다') })
+    expect(e).toMatchObject({ data: '', note: expect.stringContaining('Failed to read') })
   })
 })

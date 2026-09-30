@@ -65,7 +65,7 @@ describe('a session id that leaves the path is rejected (#94)', () => {
   it('deleting: cannot touch a folder outside the attachments root', async () => {
     const victim = join(dir, 'Documents')
     await mkdir(join(victim, 'nested'), { recursive: true })
-    await writeFile(join(victim, 'nested', 'taxes.txt'), '중요')
+    await writeFile(join(victim, 'nested', 'taxes.txt'), 'important')
 
     // dataRoot() is dir, so '../../Documents' relative to attachments/ is exactly this folder
     await expect(clearAttachments('../../Documents')).rejects.toThrow(/Not a session id/)

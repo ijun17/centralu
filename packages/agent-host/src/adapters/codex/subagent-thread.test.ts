@@ -74,7 +74,7 @@ describe("a codex child thread's notifications are not the parent session's conv
 
   it("the parent does not finish when the child's turn ends — stop targets the parent's own turn", async () => {
     const { handle, events, notify } = await session()
-    handle.send('오래 걸리는 일')
+    handle.send('a long-running task')
     await tick()
     notify('turn/started', { threadId: 'parent-thread', turn: { id: 'turn-parent' } })
     notify('turn/started', { threadId: 'child-thread', turn: { id: 'turn-child' } })

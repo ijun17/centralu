@@ -12,8 +12,8 @@ const n = (method: string, params?: unknown) => normalizeNotification(S, { metho
 
 describe('streaming and tool calls', () => {
   it('agentMessage delta → message_delta', () => {
-    expect(n('item/agentMessage/delta', { delta: '안녕' })).toEqual([
-      { type: 'message_delta', sessionId: S, role: 'assistant', text: '안녕' },
+    expect(n('item/agentMessage/delta', { delta: 'hello' })).toEqual([
+      { type: 'message_delta', sessionId: S, role: 'assistant', text: 'hello' },
     ])
   })
 
@@ -24,8 +24,8 @@ describe('streaming and tool calls', () => {
    * streamed through the deltas.
    */
   it('reasoning summaryTextDelta → reasoning_delta', () => {
-    expect(n('item/reasoning/summaryTextDelta', { itemId: 'rs-1', delta: '**경로 제약 검토**', summaryIndex: 0 })).toEqual([
-      { type: 'reasoning_delta', sessionId: S, text: '**경로 제약 검토**' },
+    expect(n('item/reasoning/summaryTextDelta', { itemId: 'rs-1', delta: '**Reviewing path constraints**', summaryIndex: 0 })).toEqual([
+      { type: 'reasoning_delta', sessionId: S, text: '**Reviewing path constraints**' },
     ])
   })
 
@@ -37,7 +37,7 @@ describe('streaming and tool calls', () => {
   })
 
   it('the reasoning item on completed stays silent too (it would duplicate the delta)', () => {
-    expect(n('item/completed', { item: { type: 'reasoning', id: 'rs-1', summary: ['**경로 제약 검토**'], content: [] } })).toEqual([])
+    expect(n('item/completed', { item: { type: 'reasoning', id: 'rs-1', summary: ['**Reviewing path constraints**'], content: [] } })).toEqual([])
   })
 
   /*
@@ -113,7 +113,7 @@ describe('streaming and tool calls', () => {
   })
 
   it('a failed tool gets ok=false', () => {
-    const out = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'failed', output: '오류' } })
+    const out = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'failed', output: 'error' } })
     expect(out[0]).toMatchObject({ type: 'tool_result', ok: false })
   })
 
@@ -169,10 +169,10 @@ describe('streaming and tool calls', () => {
       item: {
         type: 'mcpToolCall', id: 'm2', server: 'msw-mcp', tool: 'mlua_api_retriever',
         status: 'completed', error: null,
-        result: { content: [{ type: 'text', text: '첫 줄' }, { type: 'text', text: '둘째 줄' }] },
+        result: { content: [{ type: 'text', text: 'first line' }, { type: 'text', text: 'second line' }] },
       },
     })
-    expect(out[0]).toMatchObject({ ok: true, summary: '첫 줄\n둘째 줄' })
+    expect(out[0]).toMatchObject({ ok: true, summary: 'first line\nsecond line' })
   })
 
   it('when only a structured answer exists, that is carried instead', () => {
@@ -378,9 +378,9 @@ describe('state and gauges', () => {
   })
 
   it('thread/name/updated → session_title (FR-18 automatic naming)', () => {
-    expect(n('thread/name/updated', { name: 'auth 리팩터링' })).toEqual([
+    expect(n('thread/name/updated', { name: 'auth refactor' })).toEqual([
       // auto:true — a name the tool made up on its own, so it never overwrites a name the person set (issue #5)
-      { type: 'session_title', sessionId: S, title: 'auth 리팩터링', auto: true },
+      { type: 'session_title', sessionId: S, title: 'auth refactor', auto: true },
     ])
   })
 
@@ -449,10 +449,10 @@ describe('state and gauges', () => {
     const out = n('thread/goal/updated', {
       threadId: 't1',
       turnId: null,
-      goal: { threadId: 't1', objective: '빌드 초록', status: 'blocked', tokenBudget: 50000, tokensUsed: 1200, createdAt: 1, updatedAt: 2 },
+      goal: { threadId: 't1', objective: 'build green', status: 'blocked', tokenBudget: 50000, tokensUsed: 1200, createdAt: 1, updatedAt: 2 },
     })
     expect(out).toEqual([
-      { type: 'goal', sessionId: S, goal: { objective: '빌드 초록', status: 'blocked', tokenBudget: 50000, tokensUsed: 1200 } },
+      { type: 'goal', sessionId: S, goal: { objective: 'build green', status: 'blocked', tokenBudget: 50000, tokensUsed: 1200 } },
     ])
   })
 
@@ -464,14 +464,14 @@ describe('state and gauges', () => {
     const out = n('thread/goal/updated', {
       threadId: 't1',
       turnId: null,
-      goal: { threadId: 't1', objective: '빌드 초록', status: 'complete', tokenBudget: null, tokensUsed: 900, createdAt: 1, updatedAt: 2 },
+      goal: { threadId: 't1', objective: 'build green', status: 'complete', tokenBudget: null, tokensUsed: 900, createdAt: 1, updatedAt: 2 },
     })
     expect(out).toEqual([{ type: 'goal', sessionId: S, goal: null }])
   })
 
   it('drops an unknown notification silently (does not break as the protocol grows)', () => {
     expect(n('thread/realtime/audioDelta', { blob: 'x' })).toEqual([])
-    expect(n('완전히/새로운/메서드', {})).toEqual([])
+    expect(n('totally/new/method', {})).toEqual([])
   })
 })
 

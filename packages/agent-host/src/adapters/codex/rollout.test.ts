@@ -10,7 +10,7 @@ import { findRolloutPath, lastCompactSummary } from './rollout.js'
  * message is the summary text. The file is found by its file name (thread id) — zero dependency on the binary.
  */
 
-const SUMMARY = '# 1. 프로젝트와 목표\n\n' + 'MGH 스킬 이펙트 작업 상태와 규칙들. '.repeat(20)
+const SUMMARY = '# 1. Project and Goals\n\n' + 'MGH skill effect work status and rules. '.repeat(20)
 
 const compactedLine = (message: string, historyText: string | null) =>
   JSON.stringify({
@@ -45,30 +45,30 @@ describe("codex rollout's compact summary (#78)", () => {
     put('cccc-dddd', [JSON.stringify({ type: 'session_meta' })])
 
     expect(await findRolloutPath('aaaa-bbbb', dir)).toBe(p)
-    expect(await findRolloutPath('없는-스레드', dir)).toBeNull()
+    expect(await findRolloutPath('missing-thread', dir)).toBeNull()
   })
 
   it("gives the last compacted item's summary — if message is empty, replacement_history's first user message is the text", async () => {
     put('t1', [
       JSON.stringify({ type: 'session_meta' }),
-      compactedLine('', '첫 번째 요약. ' + SUMMARY),
+      compactedLine('', 'first summary. ' + SUMMARY),
       JSON.stringify({ type: 'response_item' }),
-      compactedLine('', '마지막 요약이다. ' + SUMMARY),
+      compactedLine('', 'last summary. ' + SUMMARY),
     ])
 
     const s = await lastCompactSummary('t1', dir)
-    expect(s).toContain('마지막 요약이다')
-    expect(s).not.toContain('첫 번째 요약')
+    expect(s).toContain('last summary')
+    expect(s).not.toContain('first summary')
   })
 
   it('a short fragment, a broken line, or no compaction at all — all give null, a failure lying down quietly while the builder falls back', async () => {
     // Under 200 characters is not a summary, but a preserved ordinary message
-    put('t-short', [compactedLine('', '짧다')])
+    put('t-short', [compactedLine('', 'short')])
     expect(await lastCompactSummary('t-short', dir)).toBeNull()
 
     // The last line the tool left half-written — broken JSON is skipped and the intact one before it is used
-    put('t-broken', [compactedLine('', '온전한 요약. ' + SUMMARY), '{"type":"compacted","payl'])
-    expect(await lastCompactSummary('t-broken', dir)).toContain('온전한 요약')
+    put('t-broken', [compactedLine('', 'intact summary. ' + SUMMARY), '{"type":"compacted","payl'])
+    expect(await lastCompactSummary('t-broken', dir)).toContain('intact summary')
 
     put('t-none', [JSON.stringify({ type: 'session_meta' })])
     expect(await lastCompactSummary('t-none', dir)).toBeNull()

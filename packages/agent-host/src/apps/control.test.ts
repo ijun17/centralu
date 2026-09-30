@@ -19,11 +19,11 @@ function fakeCtx(doc: ControlDoc | null) {
       get: <T,>(k: string) => (kv.get(k) as T) ?? null,
       set: (k, v) => void kv.set(k, v),
     },
-    sessionSummary: (id) => (id === 's1' ? { name: '작업 세션', state: 'working', projectId: 'p1' } : null),
+    sessionSummary: (id) => (id === 's1' ? { name: 'Work session', state: 'working', projectId: 'p1' } : null),
     emitChanged: () => changed++,
     sessions: {
       createCoordinator: async () => {
-        throw new Error('감시 테스트에서 조율자를 만들 일은 없다')
+        throw new Error('A watch test should never create a coordinator')
       },
     },
   }
@@ -43,7 +43,7 @@ describe('control app watches (#80)', () => {
     expect(notifies).toHaveLength(1)
     expect(notifies[0]).toMatchObject({ sessionId: 's1', priority: 'high' })
     expect(notifies[0]!.text).toContain('git commit')
-    expect(notifies[0]!.text).toContain('작업 세션')
+    expect(notifies[0]!.text).toContain('Work session')
     expect(changedCount()).toBe(1)
   })
 
@@ -96,7 +96,7 @@ describe('a document with no notifies field — a document the UI wrote first', 
   it('control_notify still adds a notification even to a document that has only the inline-reply counter', async () => {
     const { ctx, kv } = fakeCtx({ metrics: { inlineReplies: 1 } })
 
-    const r = await controlHostApp.tools!.run(ctx, 'control_notify', { text: '사람이 봐야 합니다' }, {
+    const r = await controlHostApp.tools!.run(ctx, 'control_notify', { text: 'A person needs to see this' }, {
       sessionId: 'orc',
       profile: 'orchestrator',
     })
@@ -133,11 +133,11 @@ describe('the race between creating a task and writing the document (#178)', () 
         get: <T,>(k: string) => (kv.has(k) ? (JSON.parse(kv.get(k)!) as T) : null),
         set: (k, v) => void kv.set(k, JSON.stringify(v)),
       },
-      sessionSummary: (id) => (id === 's1' ? { name: '작업 세션', state: 'working', projectId: 'p1' } : null),
+      sessionSummary: (id) => (id === 's1' ? { name: 'Work session', state: 'working', projectId: 'p1' } : null),
       emitChanged: () => {},
       sessions: {
         // A Codex foreman waits until its app-server is ready — the test controls that window
-        createCoordinator: () => new Promise((done) => gates.push(() => done({ id: `coord-${++made}`, name: '반장' }))),
+        createCoordinator: () => new Promise((done) => gates.push(() => done({ id: `coord-${++made}`, name: 'Foreman' }))),
       },
     }
     const orch = { sessionId: 'orch', profile: 'orchestrator' as const }

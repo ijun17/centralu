@@ -62,8 +62,8 @@ async function session() {
 describe('stopping a turn in Claude (#168)', () => {
   it('does not leave an interrupted error_during_execution as a failure — the same ending for another reason is still a failure', async () => {
     const { handle, events, errors } = await session()
-    handle.send('긴 일을 해 줘')
-    cli.push(delta('하는 중'))
+    handle.send('do a long task')
+    cli.push(delta('working on it'))
     await tick()
     handle.interrupt()
     cli.push(interrupted)
@@ -73,7 +73,7 @@ describe('stopping a turn in Claude (#168)', () => {
     expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
 
     // The same ending for a turn that was not stopped is a failure — the flag is only consumed once.
-    handle.send('다시')
+    handle.send('again')
     cli.push(interrupted)
     await tick()
     expect(errors()).toHaveLength(1)
@@ -83,7 +83,7 @@ describe('stopping a turn in Claude (#168)', () => {
   it('pressing Stop on an idle session does not swallow a real failure on the next turn', async () => {
     const { handle, errors } = await session()
     handle.interrupt()
-    handle.send('해 줘')
+    handle.send('do it')
     cli.push(interrupted)
     await tick()
     expect(errors()).toHaveLength(1)
@@ -92,8 +92,8 @@ describe('stopping a turn in Claude (#168)', () => {
 
   it('a whole-response message on the next turn still shows up in the UI, even after stopping mid-write', async () => {
     const { handle, events } = await session()
-    handle.send('길게 써 줘')
-    cli.push(delta('반쯤 쓴 글'))
+    handle.send('write something long')
+    cli.push(delta('half-written text'))
     await tick()
     handle.interrupt()
     cli.push(interrupted) // The assistant message for the partial block never arrives.
@@ -101,9 +101,9 @@ describe('stopping a turn in Claude (#168)', () => {
 
     // A whole-response message that arrives without any deltas (e.g., a local response like /usage).
     handle.send('/usage')
-    cli.push({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: '사용량 42%' }] } })
+    cli.push({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: 'Usage 42%' }] } })
     await tick()
-    expect(events.some((e) => e.type === 'message_delta' && e.text === '사용량 42%')).toBe(true)
+    expect(events.some((e) => e.type === 'message_delta' && e.text === 'Usage 42%')).toBe(true)
     await handle.dispose()
   })
 })

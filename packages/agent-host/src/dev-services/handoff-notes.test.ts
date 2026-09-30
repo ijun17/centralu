@@ -23,10 +23,10 @@ afterEach(() => {
 
 describe('where a note lives (#142)', () => {
   it('under the data folder, one folder per project, one file per session', async () => {
-    const path = await writeHandoffNote('p1', 's1', '노트')
+    const path = await writeHandoffNote('p1', 's1', 'note')
     expect(path).toBe(join(data, 'handoff', 'p1', 's1.md'))
     expect(handoffNotePath('p1', 's1')).toBe(path)
-    expect(readFileSync(path, 'utf8')).toBe('노트')
+    expect(readFileSync(path, 'utf8')).toBe('note')
   })
 
   it('an id that is a path is denied a spot — neither the project id nor the session id', () => {
@@ -38,8 +38,8 @@ describe('where a note lives (#142)', () => {
   it('cleanup never follows a link — whether it sits at the folder\'s spot or the file\'s', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'cc-handoff-outside-'))
     try {
-      writeFileSync(join(outside, 'NOTES.md'), '밖의 글')
-      await writeHandoffNote('p1', 'gone', '주인 없는 글')
+      writeFileSync(join(outside, 'NOTES.md'), 'outside text')
+      await writeHandoffNote('p1', 'gone', 'orphaned text')
       // Someone placed a link inside the data folder — one at the project folder's spot, one at the note's spot
       mkdirSync(join(data, 'handoff'), { recursive: true })
       symlinkSync(outside, join(data, 'handoff', 'p2'))
@@ -48,7 +48,7 @@ describe('where a note lives (#142)', () => {
       await sweepHandoffNotes(() => false)
       expect(existsSync(join(data, 'handoff', 'p1', 'gone.md'))).toBe(false) // the orphan was removed
       expect(readdirSync(outside)).toEqual(['NOTES.md']) // what is past the link is untouched
-      expect(readFileSync(join(outside, 'NOTES.md'), 'utf8')).toBe('밖의 글')
+      expect(readFileSync(join(outside, 'NOTES.md'), 'utf8')).toBe('outside text')
     } finally {
       rmSync(outside, { recursive: true, force: true })
     }

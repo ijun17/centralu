@@ -51,7 +51,7 @@ async function session() {
 describe('codex stop — must point at the running turn to work', () => {
   it('takes the turn turn/started reported as the target', async () => {
     const h = await session()
-    h.send('오래 걸리는 일')
+    h.send('a long-running task')
     await tick()
     state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-7' } } })
 
@@ -62,7 +62,7 @@ describe('codex stop — must point at the running turn to work', () => {
   it('stops even when the response arrives before the notification — the case of pressing it very quickly', async () => {
     state.startTurnId = 'turn-9'
     const h = await session()
-    h.send('오래 걸리는 일')
+    h.send('a long-running task')
     await tick()
     await tick()
 
@@ -72,7 +72,7 @@ describe('codex stop — must point at the running turn to work', () => {
 
   it('a stop after the turn has ended sends nothing anywhere — stopping an ended turn would just come back rejected', async () => {
     const h = await session()
-    h.send('짧은 일')
+    h.send('a quick task')
     await tick()
     state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-7' } } })
     state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'turn-7' } } })

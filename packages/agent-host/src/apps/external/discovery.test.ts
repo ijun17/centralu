@@ -145,7 +145,7 @@ describe('folder watching', () => {
       if (got() || Date.now() >= deadline) break
       undo?.()
     }
-    expect(got(), `${EVENT_DEADLINE_MS}ms 안에 '${dir}'의 이벤트가 오지 않았다 — 들은 것: ${JSON.stringify(heard)}`).toBe(true)
+    expect(got(), `Within ${EVENT_DEADLINE_MS}ms, no event for '${dir}' arrived — heard: ${JSON.stringify(heard)}`).toBe(true)
   }
 
   it('watching delivers this project\'s events when an app folder is created, its manifest changes, and the folder is deleted', async () => {

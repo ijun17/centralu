@@ -38,14 +38,14 @@ describe('attachCommitSessions', () => {
     const out = attachCommitSessions(
       [commit('4ce6fc7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), commit('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')],
       [{ sha: '4ce6fc7', sessionId: 's1' }],
-      (id) => (id === 's1' ? '인증 리팩터링' : undefined),
+      (id) => (id === 's1' ? 'Auth refactor' : undefined),
     )
-    expect(out[0]!.sessionName).toBe('인증 리팩터링')
+    expect(out[0]!.sessionName).toBe('Auth refactor')
     expect(out[1]!.sessionName).toBeUndefined()
   })
 
   it('the fact of an agent commit survives even when the session is deleted', () => {
     const out = attachCommitSessions([commit('abc')], [{ sha: 'abc', sessionId: 'gone' }], () => undefined)
-    expect(out[0]!.sessionName).toBe('(지워진 세션)')
+    expect(out[0]!.sessionName).toBe('(deleted session)')
   })
 })

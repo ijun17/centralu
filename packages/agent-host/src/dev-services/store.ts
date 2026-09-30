@@ -1256,7 +1256,7 @@ export class Store {
 
     // Silently losing even one row is unrecoverable — throwing here rolls back the whole transaction
     const after = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
-    if (after !== before) throw new Error(`세션 이관 중 유실: ${before} → ${after}`)
+    if (after !== before) throw new Error(`Lost rows while migrating sessions: ${before} → ${after}`)
   }
 
   get schemaVersion(): number {

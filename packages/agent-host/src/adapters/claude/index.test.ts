@@ -133,7 +133,7 @@ describe('when a claude stream ends without warning', () => {
       (e) => events.push(e),
     )
 
-    handle.send('배달 안 된 메시지')
+    handle.send('an undelivered message')
     await handle.dispose()
 
     expect(events).toContainEqual(
@@ -160,15 +160,15 @@ describe('claude /goal — an honest refusal of a feature the SDK does not have'
       (e) => events.push(e),
     )
 
-    handle.send('/goal 테스트 전부 초록')
+    handle.send('/goal all tests green')
     await tick()
     expect(events.some((e) => e.type === 'message_delta' && /interactive Claude CLI/.test(e.text ?? ''))).toBe(true)
     expect(events.some((e) => e.type === 'turn_complete')).toBe(true)
     // There must be no transition to working toward the model — pretending to send it would be the worst outcome.
     expect(events.some((e) => e.type === 'state_change' && e.state === 'working')).toBe(false)
 
-    // The match is narrow — a real message that merely mentions /goal still goes through as-is.
-    handle.send('/goal이 뭐하는 명령이야?')
+    // The match is narrow — a real message that merely starts with the letters "/goal" still goes through as-is.
+    handle.send("/goal's syntax — what is it?")
     await tick()
     expect(events.some((e) => e.type === 'state_change' && e.state === 'working')).toBe(true)
     await handle.dispose()

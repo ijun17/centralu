@@ -880,11 +880,11 @@ class CodexSession implements SessionHandle {
      * starts including it in the list, the dedupe below removes our own entry.
      */
     const out: { name: string; description?: string; argumentHint?: string }[] = [
-      { name: 'compact', description: '대화를 요약해 컨텍스트를 줄인다 (codex 내장)' },
+      { name: 'compact', description: 'Summarizes the conversation to shrink context (built into codex)' },
       {
         name: 'review',
-        description: '바뀐 코드를 리뷰한다 (codex 내장). 인자를 주면 그 지시대로 리뷰한다',
-        argumentHint: '[지시]',
+        description: 'Reviews the changed code (built into codex). If given an argument, reviews following that instruction instead',
+        argumentHint: '[instruction]',
       },
     ]
     for (const g of groups) {

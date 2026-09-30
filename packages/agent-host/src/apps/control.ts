@@ -30,36 +30,37 @@ const NOTIFY_CAP = 50
  */
 export function taskRole(taskId: string, title: string, goal: string): string {
   return [
-    `너는 업무 "${title}"의 반장이다. 목표: ${goal}`,
-    `업무 id: ${taskId} — board_read/board_update의 taskId가 이것이다.`,
+    `You are the foreman of the task "${title}". Goal: ${goal}`,
+    `Task id: ${taskId} — this is the taskId for board_read/board_update.`,
     '',
-    '규칙:',
-    '- 구성원 세션들에게 일을 나눠 시키고(send_to_session, reportBack 권장), 결과를 **걸러 들어라** —',
-    '  구성원의 "됐습니다"를 검증 없이 믿고 전달하면 너는 반장이 아니라 확성기다.',
-    '  의심스러우면 read_session으로 실제 작업 내용을 확인하고, 필요하면 재작업을 시켜라.',
-    '- **보드가 네 기억이다.** 단계·배정·결정·산출물을 board_update로 그때그때 물질화하라 —',
-    '  네 대화는 압축되면 사라지지만 보드는 남는다. 깨어나면 board_read부터 하라.',
-    '- 사람이 봐야 할 일(막힘·범위 결정·완료)은 control_notify로 레일에 올려라.',
-    '- 업무가 끝나면 control_task_done으로 마감하라 — 보드에 최종 요약을 남긴 뒤에.',
-    '- 네 시야는 배정된 구성원이 전부다. 그 밖이 필요하면 사람에게 보고하라.',
+    'Rules:',
+    '- Split the work among the member sessions (send_to_session, reportBack recommended), and **filter what you hear** —',
+    '  if you trust a member\'s "done" without checking and pass it along, you are a megaphone, not a foreman.',
+    '  When in doubt, check the actual work with read_session, and have it redone if needed.',
+    '- **The board is your memory.** Materialize stages, assignments, decisions, and outputs through board_update as they happen —',
+    '  your conversation disappears once compacted, but the board remains. When you wake up, start with board_read.',
+    '- Put anything the person needs to see (a block, a scope decision, completion) on the rail with control_notify.',
+    '- When the task is done, close it with control_task_done — after leaving a final summary on the board.',
+    '- Your view extends only to the members assigned to you. If you need anything beyond that, report it to the person.',
+    '- Answer in the language the person writes in.',
   ].join('\n')
 }
 
 const BOARD_TEMPLATE = (title: string, goal: string, members: string[]) =>
   [
-    `# 업무 보드: ${title}`,
+    `# Task board: ${title}`,
     '',
-    `## 목표`,
+    `## Goal`,
     goal,
     '',
-    `## 구성원`,
+    `## Members`,
     ...members.map((m) => `- ${m}`),
     '',
-    '## 단계',
-    '(반장이 채운다)',
+    '## Stages',
+    '(filled in by the foreman)',
     '',
-    '## 결정과 산출물',
-    '(반장이 채운다)',
+    '## Decisions and outputs',
+    '(filled in by the foreman)',
   ].join('\n')
 
 function readDoc(ctx: HostAppContext): ControlDoc {
@@ -74,9 +75,9 @@ function pushNotify(doc: ControlDoc, n: Omit<ControlNotify, 'id' | 'ts'>): void 
 
 /** Validates access to the board — only that task's foreman or a person (null). Someone else's task board belongs to them */
 function boardDenied(task: ControlTask | undefined, caller: AppToolCaller): ToolOutput | null {
-  if (!task) return { text: '그런 업무가 없습니다', isError: true }
+  if (!task) return { text: 'No such task exists', isError: true }
   if (caller.sessionId !== null && caller.sessionId !== task.coordinatorId && caller.profile !== 'orchestrator') {
-    return { text: '이 업무의 반장만 보드를 만질 수 있습니다', isError: true }
+    return { text: 'Only this task\'s foreman can touch the board', isError: true }
   }
   return null
 }
@@ -92,49 +93,49 @@ export const controlHostApp: HostAppModule = {
       {
         name: 'control_notify',
         description:
-          '사람의 관제 레일(내 차례 큐)에 알림을 올린다 — 사람이 봐야 할 일이 생겼는데 세션 상태(승인·질문)로는 드러나지 않을 때. ' +
-          '예: 어떤 세션이 외부 조건에 막혔다, 여러 세션에 걸친 결정이 필요하다. 알림은 사람이 읽고 지운다 — 너는 올릴 수만 있다.',
+          'Puts a notification on the person\'s control rail (the my-turn queue) — for when something needs the person\'s attention but it does not show up in session state (approval, question). ' +
+          'For example: a session is blocked on an external condition, or a decision spanning multiple sessions is needed. A person reads and dismisses the notification — you can only put it there.',
         schema: z.object({
-          text: z.string().describe('사람이 읽을 한 줄 — 무엇이, 왜 사람을 필요로 하는가'),
-          sessionId: z.string().optional().describe('관련 세션 id — 주면 레일에서 바로 그 세션으로 이동할 수 있다'),
-          priority: z.enum(['high', 'normal']).optional().describe('high는 줄 맨 위에 선다. 기본 normal'),
+          text: z.string().describe('One line for the person to read — what it is, and why it needs a person'),
+          sessionId: z.string().optional().describe('The related session id — if given, the rail can jump straight to that session'),
+          priority: z.enum(['high', 'normal']).optional().describe('high goes to the top of the line. Defaults to normal'),
         }),
       },
       {
         name: 'control_create_task',
         description:
-          '업무를 만든다: 구성원 세션들을 묶고, 그 업무만 보는 반장(조율 세션)이 선다. ' +
-          '여러 세션에 걸친 일을 사람이 중계하는 대신 반장에게 맡길 때 쓴다. 반장은 보드에 상태를 적고, 사람이 필요하면 레일로 부른다.',
+          'Creates a task: bundles member sessions together, and a foreman (a coordinating session) that sees only that task stands up. ' +
+          'Use this when work spanning multiple sessions should be handed to a foreman instead of relayed by a person. The foreman writes status to the board, and calls the person to the rail when needed.',
         schema: z.object({
-          title: z.string().describe('업무 이름 — 반장 세션의 이름이 된다'),
-          goal: z.string().describe('업무의 목표 — 반장의 역할문에 박제된다'),
-          memberSessionIds: z.array(z.string()).min(1).describe('구성원 워커 세션 id들 (list_sessions의 [id])'),
+          title: z.string().describe('The task name — becomes the foreman session\'s name'),
+          goal: z.string().describe('The task\'s goal — baked into the foreman\'s role text'),
+          memberSessionIds: z.array(z.string()).min(1).describe('The member worker session ids (the [id] from list_sessions)'),
         }),
         // Never even exposed to a foreman (scoped) — a structural guarantee that depth stays at 1 (doubled up with the check on the execution side)
         profiles: ['orchestrator'],
       },
       {
         name: 'board_read',
-        description: '업무 보드를 읽는다 — 반장의 기억이자 사람의 현황판. 깨어난 반장은 이것부터 한다.',
-        schema: z.object({ taskId: z.string().describe('업무 id (역할문에 적혀 있다)') }),
+        description: 'Reads the task board — the foreman\'s memory and the person\'s status board. A foreman that just woke up starts with this.',
+        schema: z.object({ taskId: z.string().describe('The task id (written in the role text)') }),
         profiles: ['orchestrator', 'scoped'],
       },
       {
         name: 'board_update',
         description:
-          '업무 보드를 통째로 갱신한다 — 단계·배정·결정·산출물을 그때그때 물질화하라. 대화는 압축되면 사라지지만 보드는 남는다.',
+          'Replaces the task board wholesale — materialize stages, assignments, decisions, and outputs as they happen. The conversation disappears once compacted, but the board remains.',
         schema: z.object({
-          taskId: z.string().describe('업무 id'),
-          content: z.string().describe('보드 전문 (마크다운) — 부분 수정이 아니라 전체 교체다'),
+          taskId: z.string().describe('The task id'),
+          content: z.string().describe('The full board text (markdown) — a full replacement, not a partial edit'),
         }),
         profiles: ['scoped'],
       },
       {
         name: 'control_task_done',
-        description: '업무를 마감한다 — 보드에 최종 요약을 남긴 뒤 불러라. 사람의 레일에 완료 알림이 선다.',
+        description: 'Closes the task — call this after leaving a final summary on the board. A completion notification goes up on the person\'s rail.',
         schema: z.object({
-          taskId: z.string().describe('업무 id'),
-          summary: z.string().optional().describe('한 줄 마감 보고 — 레일 알림에 실린다'),
+          taskId: z.string().describe('The task id'),
+          summary: z.string().optional().describe('A one-line closing report — carried in the rail notification'),
         }),
         profiles: ['scoped'],
       },
@@ -146,7 +147,7 @@ export const controlHostApp: HostAppModule = {
       if (name === 'control_notify') {
         const sessionId = typeof args.sessionId === 'string' ? args.sessionId : undefined
         if (sessionId && !ctx.sessionSummary(sessionId)) {
-          return { text: `그런 세션이 없습니다: ${sessionId}`, isError: true }
+          return { text: `No such session: ${sessionId}`, isError: true }
         }
         pushNotify(doc, {
           text: String(args.text ?? ''),
@@ -155,19 +156,19 @@ export const controlHostApp: HostAppModule = {
         })
         ctx.kv.set('doc', doc)
         ctx.emitChanged()
-        return { text: '관제 레일에 알림을 올렸습니다. 지우는 것은 사람입니다.' }
+        return { text: 'Put the notification on the control rail. Only a person dismisses it.' }
       }
 
       if (name === 'control_create_task') {
         // A foreman is something created, not a creator — if scoped could call this tool, depth would grow.
         // This is already filtered out at profile exposure, but the execution side repeats the same check (the #69 rule).
-        if (caller.profile === 'scoped') return { text: '반장은 업무를 만들 수 없습니다', isError: true }
+        if (caller.profile === 'scoped') return { text: 'A foreman cannot create a task', isError: true }
         const members = args.memberSessionIds as string[]
         for (const id of members) {
-          if (!ctx.sessionSummary(id)) return { text: `구성원 세션이 없습니다: ${id}`, isError: true }
+          if (!ctx.sessionSummary(id)) return { text: `No such member session: ${id}`, isError: true }
         }
         const taskId = randomUUID().slice(0, 8)
-        const title = String(args.title ?? '').trim() || '이름 없는 업무'
+        const title = String(args.title ?? '').trim() || 'Untitled task'
         const goal = String(args.goal ?? '').trim()
         const foreman = doc.foreman ?? { tool: 'claude' as const, effort: 'high' }
         const coordinator = await ctx.sessions.createCoordinator({
@@ -196,8 +197,8 @@ export const controlHostApp: HostAppModule = {
         ctx.emitChanged()
         return {
           text:
-            `업무 "${title}"를 만들었습니다 (id: ${taskId}). 반장 세션 [${coordinator.id}]이 구성원 ${members.length}명을 조율합니다. ` +
-            '반장에게 첫 지시를 보내면 일이 시작됩니다.',
+            `Created the task "${title}" (id: ${taskId}). Foreman session [${coordinator.id}] is coordinating ${members.length} member(s). ` +
+            'Send the foreman its first instruction to get things started.',
         }
       }
 
@@ -205,7 +206,7 @@ export const controlHostApp: HostAppModule = {
         const task = (doc.tasks ?? []).find((t) => t.id === args.taskId)
         const denied = boardDenied(task, caller)
         if (denied) return denied
-        const board = ctx.kv.get<string>(`board:${task!.id}`) ?? '(보드가 비어 있습니다)'
+        const board = ctx.kv.get<string>(`board:${task!.id}`) ?? '(The board is empty)'
         return { text: board }
       }
 
@@ -215,7 +216,7 @@ export const controlHostApp: HostAppModule = {
         if (denied) return denied
         ctx.kv.set(`board:${task!.id}`, String(args.content ?? ''))
         ctx.emitChanged()
-        return { text: '보드를 갱신했습니다.' }
+        return { text: 'Updated the board.' }
       }
 
       if (name === 'control_task_done') {
@@ -224,16 +225,16 @@ export const controlHostApp: HostAppModule = {
         if (denied) return denied
         task!.status = 'done'
         pushNotify(doc, {
-          text: `✅ 업무 완료: ${task!.title}${args.summary ? ` — ${String(args.summary)}` : ''}`,
+          text: `✅ Task done: ${task!.title}${args.summary ? ` — ${String(args.summary)}` : ''}`,
           sessionId: task!.coordinatorId,
           priority: 'high',
         })
         ctx.kv.set('doc', doc)
         ctx.emitChanged()
-        return { text: '업무를 마감했습니다. 사람의 레일에 완료 알림이 섰습니다.' }
+        return { text: 'Closed the task. A completion notification is up on the person\'s rail.' }
       }
 
-      return { text: `모르는 도구입니다: ${name}`, isError: true }
+      return { text: `Unknown tool: ${name}`, isError: true }
     },
   },
 

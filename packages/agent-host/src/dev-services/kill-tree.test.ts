@@ -113,7 +113,7 @@ describe('survivorTargets', () => {
 
 describe('parsePs', () => {
   it('reads only a line with exactly three numeric columns — a header or a malformed line is dropped', () => {
-    const out = '  PID  PPID  PGID\n  100   50  100\n쓰레기\n  200  100  200\n'
+    const out = '  PID  PPID  PGID\n  100   50  100\ngarbage\n  200  100  200\n'
     expect(parsePs(out)).toEqual([
       { pid: 100, ppid: 50, pgid: 100 },
       { pid: 200, ppid: 100, pgid: 200 },
@@ -182,7 +182,7 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
         out += String(d)
         if (out.includes('\n')) resolve(Number(out.trim()))
       })
-      root.once('exit', () => reject(new Error(`고정물이 손자를 띄우기 전에 끝났다: ${JSON.stringify(out)}`)))
+      root.once('exit', () => reject(new Error(`Fixture exited before it could spawn a grandchild process: ${JSON.stringify(out)}`)))
     })
     const pgid = table().find((r) => r.pid === pid)!.pgid
     planted.push(pgid)

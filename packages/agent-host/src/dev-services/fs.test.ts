@@ -440,7 +440,7 @@ describe('a .. past a symlink cannot split the guard from the syscall (#119)', (
   beforeEach(() => {
     outside = realpathSync(mkdtempSync(join(tmpdir(), 'cc-outside-')))
     extraDirs.push(outside)
-    writeFileSync(join(outside, 'SECRET.txt'), '바깥')
+    writeFileSync(join(outside, 'SECRET.txt'), 'outside')
     // The link's target sits deeper than the link itself — this difference is what split the two paths
     mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
     // The bait the guard will end up walking. Its name has to match the outside link's
@@ -464,9 +464,9 @@ describe('a .. past a symlink cannot split the guard from the syscall (#119)', (
   })
 
   it('a project file cannot be moved there', async () => {
-    writeFileSync(join(root, 'mine.txt'), '내 것')
+    writeFileSync(join(root, 'mine.txt'), 'mine')
     await expect(moveEntry(root, 'mine.txt', 'link/../evil')).rejects.toThrow(/outside the project/i)
-    expect(readFileSync(join(root, 'mine.txt'), 'utf8')).toBe('내 것')
+    expect(readFileSync(join(root, 'mine.txt'), 'utf8')).toBe('mine')
   })
 
   it('a path leaving the root is still blocked even after folding', async () => {
@@ -475,7 +475,7 @@ describe('a .. past a symlink cannot split the guard from the syscall (#119)', (
   })
 
   it('a .. that stays inside still works as usual', async () => {
-    writeFileSync(join(root, 'a.txt'), '안')
+    writeFileSync(join(root, 'a.txt'), 'inside')
     await expect(readTextFile(root, 'sub/../a.txt')).resolves.toBeTruthy()
   })
 })

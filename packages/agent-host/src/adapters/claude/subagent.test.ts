@@ -81,7 +81,7 @@ const REPORT =
 
 const FIRST = '별도 작업이라 범위에서 뺐고, 결과 보고에 어디에 이름이 남았'
 const SECOND = '는지 적게 했습니다.'
-const LATER = '조사가 돌아왔습니다.'
+const LATER = 'The investigation is back.'
 
 /** The measured ordering: the parent launches a background agent, and that agent works interleaved with the parent's own stream. */
 const backgroundRun = [
@@ -155,7 +155,7 @@ const backgroundRun = [
   parentText(FIRST + SECOND),
   result,
   // The parent's turn has ended — the subagent keeps working.
-  subResult(SUB_1, "describe('ui 레이어 경계', () => {"),
+  subResult(SUB_1, "describe('ui layer boundary', () => {"),
   sub([{ type: 'tool_use', id: SUB_2, name: 'Grep', input: { pattern: 'boundaries' } }]),
   subResult(SUB_2, 'tooling/boundaries.test.ts'),
   sub([{ type: 'tool_use', id: SUB_EDIT, name: 'Edit', input: { file_path: '/repo/tooling/boundaries.test.ts', old_string: 'a', new_string: 'b' } }]),
@@ -267,10 +267,10 @@ describe('a subagent\'s work attaches to the Agent card that launched it (#98)',
     const notification = backgroundRun.find((m) => (m as { subtype?: string }).subtype === 'task_notification')
     const events = await run([
       ...backgroundRun.slice(0, 4), // init, the Agent call, task_started, the launch result
-      delta('로컬 조사도 돌아왔습니다. Codex'),
+      delta('The local investigation is back too. A Codex'),
       notification,
-      delta(' 세션에서 앱 도구를 부르면 조용히 거절됩니다.'),
-      parentText('로컬 조사도 돌아왔습니다. Codex 세션에서 앱 도구를 부르면 조용히 거절됩니다.'),
+      delta(' session quietly refuses when an app tool is called.'),
+      parentText('The local investigation is back too. A Codex session quietly refuses when an app tool is called.'),
       result,
     ])
     const kinds = events.map((e) => (e.type === 'tool_result' ? `result:${e.callId}` : e.type))
@@ -307,13 +307,13 @@ describe('the parent body\'s duplicate-prevention flag belongs to the parent (#9
   it('the parent\'s text is emitted once even when a subagent message lands between its last delta and its body', async () => {
     const events = await run([
       { type: 'system', subtype: 'init', session_id: 'ext-1' },
-      delta('부모의 '),
-      delta('문단'),
+      delta("the parent's "),
+      delta('paragraph'),
       sub([{ type: 'tool_use', id: SUB_1, name: 'Bash', input: { command: 'ls' } }]),
-      parentText('부모의 문단'),
+      parentText("the parent's paragraph"),
       result,
     ])
-    expect(texts(events)).toBe('부모의 문단')
+    expect(texts(events)).toBe("the parent's paragraph")
   })
 })
 

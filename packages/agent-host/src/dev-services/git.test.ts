@@ -69,7 +69,7 @@ describe('gitStatusFiles — porcelain v2', () => {
    */
   it('a renamed file comes out under its new name (the score field does not leak into the path)', async () => {
     const { d, git } = repo()
-    writeFileSync(join(d, 'old.txt'), '내용이 충분히 길어야 rename으로 인식된다\n'.repeat(5))
+    writeFileSync(join(d, 'old.txt'), 'the content needs to be long enough for git to recognize it as a rename\n'.repeat(5))
     git('add', '.')
     git('commit', '-q', '-m', 'init')
     // Rename to a name with a space — this also checks whether path reconstruction (join) breaks

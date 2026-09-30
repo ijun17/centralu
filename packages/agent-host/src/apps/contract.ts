@@ -155,9 +155,9 @@ export function mcpServerNameError(name: string): string | null {
   // Reserved words are checked first — the order of validation is enforced by protocol's serverNameProblem
   switch (serverNameProblem(name)) {
     case 'reserved':
-      return `"${ORCHESTRATOR_MCP_NAME}"로 시작하는 이름은 이 앱이 쓰는 이름입니다 — 다른 이름으로 제안하세요`
+      return `A name starting with "${ORCHESTRATOR_MCP_NAME}" is the name this app uses — suggest a different name`
     case 'shape':
-      return '이름은 소문자·숫자·하이픈으로 32자 이내여야 합니다 (밑줄은 도구 이름의 칸막이라 쓸 수 없습니다)'
+      return 'A name must be lowercase letters, digits, and hyphens, 32 characters or fewer (underscores cannot be used — they separate parts of a tool name)'
     case null:
       return null
   }
@@ -179,7 +179,7 @@ export function proposedMcpServerNameError(name: string): string | null {
   const base = mcpServerNameError(name)
   if (base) return base
   if (newAppIdProblem(name) === 'server-prefix') {
-    return `"${APP_MCP_PREFIX}"로 시작하는 이름은 외부 앱이 세션에 붙는 이름입니다 — 다른 이름으로 제안하세요`
+    return `A name starting with "${APP_MCP_PREFIX}" is the name an external app attaches to a session — suggest a different name`
   }
   return null
 }

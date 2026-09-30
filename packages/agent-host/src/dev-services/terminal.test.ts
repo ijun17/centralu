@@ -159,7 +159,7 @@ describe('when a shell ends or fails to launch', () => {
 
     const cwd = tmp()
     const h = svc.create(cwd, 80, 24)
-    fake.instances[0]!.emitData('작업하던 흔적\r\n')
+    fake.instances[0]!.emitData('traces of earlier work\r\n')
     fake.instances[0]!.emitExit(0)
 
     expect(seen.some((e) => e.exitCode === 0)).toBe(true)
@@ -167,7 +167,7 @@ describe('when a shell ends or fails to launch', () => {
     const again = svc.restart(h.id, 80, 24)!
     expect(again.alive).toBe(true)
     // The history is the clue to what led to this — it is never erased
-    expect(again.history()).toContain('작업하던 흔적')
+    expect(again.history()).toContain('traces of earlier work')
     expect(fake.spawned).toHaveLength(2)
   })
 
@@ -196,8 +196,8 @@ describe('when a shell ends or fails to launch', () => {
     expect(seen.some((e) => e.exitCode !== undefined)).toBe(false)
 
     // The old shell's last-gasp output does not mix into the new screen either
-    fake.instances[0]!.emitData('죽어가며 남긴 말')
-    expect(svc.list(cwd)[0]!.history()).not.toContain('죽어가며 남긴 말')
+    fake.instances[0]!.emitData('dying words')
+    expect(svc.list(cwd)[0]!.history()).not.toContain('dying words')
 
     // The genuine new shell's exit is still delivered as-is
     fake.instances[1]!.emitExit(1)

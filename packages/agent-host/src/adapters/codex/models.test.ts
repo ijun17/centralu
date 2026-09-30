@@ -11,7 +11,7 @@ describe('toModelOptions', () => {
     id: 'x',
     model: 'gpt-5.6-terra',
     displayName: 'GPT-5.6 Terra',
-    description: '설명',
+    description: 'A description',
     hidden: false,
     /*
      * **Uses the generated type exactly.** This shape used to be written from a guess, and the
@@ -29,9 +29,9 @@ describe('toModelOptions', () => {
      * contract check is the tripwire — not this literal.
      */
     supportedReasoningEfforts: [
-      { reasoningEffort: 'low', description: '빠르게' },
-      { reasoningEffort: 'medium', description: '보통' },
-      { reasoningEffort: 'high', description: '깊게' },
+      { reasoningEffort: 'low', description: 'Fast' },
+      { reasoningEffort: 'medium', description: 'Normal' },
+      { reasoningEffort: 'high', description: 'Deep' },
     ] satisfies { reasoningEffort: string; description: string }[],
     defaultReasoningEffort: 'medium',
     ...over,
@@ -42,7 +42,7 @@ describe('toModelOptions', () => {
       {
         id: 'gpt-5.6-terra',
         label: 'GPT-5.6 Terra',
-        description: '설명',
+        description: 'A description',
         efforts: ['low', 'medium', 'high'],
         defaultEffort: 'medium',
         tiers: [],

@@ -424,7 +424,7 @@ export function normalizeMessage(
             if (str(source.type) !== 'base64' || !str(source.data)) {
               out.push({
                 type: 'message_image', sessionId, mime: '', data: '',
-                note: `이 형식의 이미지는 아직 표시하지 못합니다 (source: ${str(source.type) || '없음'})`,
+                note: `Cannot display an image of this format yet (source: ${str(source.type) || 'none'})`,
               })
               continue
             }
@@ -434,7 +434,7 @@ export function normalizeMessage(
             if (data.length > 11_000_000) {
               out.push({
                 type: 'message_image', sessionId, mime, data: '',
-                note: `이미지가 너무 큽니다 (~${Math.round((data.length * 3) / 4 / 1048576)}MB)`,
+                note: `Image is too large (~${Math.round((data.length * 3) / 4 / 1048576)}MB)`,
               })
             } else {
               out.push({ type: 'message_image', sessionId, mime, data })

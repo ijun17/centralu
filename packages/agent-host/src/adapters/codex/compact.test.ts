@@ -38,7 +38,7 @@ vi.mock('./client.js', () => ({
       }
       if (method === 'skills/list') {
         return Promise.resolve({
-          data: [{ skills: [{ name: 'deploy', description: '배포' }, { name: 'compact', description: '중복' }] }],
+          data: [{ skills: [{ name: 'deploy', description: 'Deploy' }, { name: 'compact', description: 'Duplicate' }] }],
         })
       }
       return Promise.resolve({})
@@ -89,7 +89,7 @@ describe('codex /compact — runs as a function', () => {
 
   it('"/compact something else" is a message — too broad a check would swallow real text', async () => {
     const h = await session()
-    h.send('/compact 다음에 해줘')
+    h.send('/compact this later')
     await new Promise((r) => setTimeout(r, 0))
     expect(methods()).toContain('turn/start')
     expect(methods()).not.toContain('thread/compact/start')
@@ -126,17 +126,17 @@ describe('codex /review — runs as a function', () => {
 
   it('with an argument, it reviews following that instruction instead (custom)', async () => {
     const h = await session()
-    h.send('/review 보안 위주로 봐줘')
+    h.send('/review with a focus on security')
     await new Promise((r) => setTimeout(r, 0))
     expect(state.requests.find((r) => r.method === 'review/start')?.params).toEqual({
       threadId: 't1',
-      target: { type: 'custom', instructions: '보안 위주로 봐줘' },
+      target: { type: 'custom', instructions: 'with a focus on security' },
     })
   })
 
   it('"/reviewer job posting" is a message — a similar-looking prefix must not swallow it', async () => {
     const h = await session()
-    h.send('/reviewer 채용 공고 써줘')
+    h.send('/reviewer write a job posting')
     await new Promise((r) => setTimeout(r, 0))
     expect(methods()).toContain('turn/start')
     expect(methods()).not.toContain('review/start')
@@ -156,8 +156,8 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     const h = await session()
     h.send('/compact')
     await tick()
-    h.send('첫 메시지')
-    h.send('둘째 메시지')
+    h.send('first message')
+    h.send('second message')
     await tick()
     // If turn/start had gone out here, codex would have dropped it
     expect(methods()).not.toContain('turn/start')
@@ -166,8 +166,8 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     await tick()
     const turn = state.requests.find((r) => r.method === 'turn/start')
     expect(turn?.params?.input).toEqual([
-      { type: 'text', text: '첫 메시지' },
-      { type: 'text', text: '둘째 메시지' },
+      { type: 'text', text: 'first message' },
+      { type: 'text', text: 'second message' },
     ])
   })
 
@@ -177,10 +177,10 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     await tick()
     state.handlers!.onNotification({ method: 'turn/completed', params: {} })
     await tick()
-    h.send('끝난 뒤 메시지')
+    h.send('message sent after it finished')
     await tick()
     expect(state.requests.find((r) => r.method === 'turn/start')?.params?.input).toEqual([
-      { type: 'text', text: '끝난 뒤 메시지' },
+      { type: 'text', text: 'message sent after it finished' },
     ])
   })
 
@@ -188,13 +188,13 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     const h = await session()
     h.send('/review')
     await tick()
-    h.send('리뷰 중 메시지')
+    h.send('message sent during review')
     await tick()
     expect(methods()).not.toContain('turn/start')
     state.handlers!.onNotification({ method: 'turn/completed', params: {} })
     await tick()
     expect(state.requests.find((r) => r.method === 'turn/start')?.params?.input).toEqual([
-      { type: 'text', text: '리뷰 중 메시지' },
+      { type: 'text', text: 'message sent during review' },
     ])
   })
 
@@ -203,14 +203,14 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     const events: { type: string }[] = []
     const h = await session((e) => events.push(e as { type: string }))
     h.send('/compact')
-    h.send('같이 보낸 메시지')
+    h.send('message sent alongside it')
     await tick()
     await tick()
     // The failure is reported, and the queued message still goes out
     expect(events.some((e) => e.type === 'error')).toBe(true)
     expect(
       state.requests.some(
-        (r) => r.method === 'turn/start' && JSON.stringify(r.params?.input).includes('같이 보낸 메시지'),
+        (r) => r.method === 'turn/start' && JSON.stringify(r.params?.input).includes('message sent alongside it'),
       ),
     ).toBe(true)
   })
@@ -220,7 +220,7 @@ describe('codex compact/review — messages are not sent to the spot that drops 
     const h = await session((e) => events.push(e as { type: string; error?: { message: string } }))
     h.send('/compact')
     await tick()
-    h.send('유실 후보')
+    h.send('a message that might get lost')
     await tick()
     await h.dispose()
     expect(events.some((e) => e.type === 'error' && /not delivered/.test(e.error?.message ?? ''))).toBe(true)
@@ -237,10 +237,10 @@ describe('codex /goal — runs as a function', () => {
   it('/goal <objective> → thread/goal/set + a one-line confirmation, no turn/start', async () => {
     const events: { type: string; text?: string }[] = []
     const h = await session((e) => events.push(e as { type: string; text?: string }))
-    h.send('/goal 테스트 전부 초록')
+    h.send('/goal all tests green')
     await tick()
     const set = state.requests.find((r) => r.method === 'thread/goal/set')
-    expect(set?.params).toMatchObject({ threadId: 't1', objective: '테스트 전부 초록' })
+    expect(set?.params).toMatchObject({ threadId: 't1', objective: 'all tests green' })
     expect(methods()).not.toContain('turn/start')
     expect(events.some((e) => e.type === 'message_delta' && /Goal set/.test(e.text ?? ''))).toBe(true)
   })
@@ -255,13 +255,13 @@ describe('codex /goal — runs as a function', () => {
     state.goalStatus = 'complete'
     const events: { type: string; text?: string }[] = []
     const h = await session((e) => events.push(e as { type: string; text?: string }))
-    h.send('/goal 리팩토링 끝내기')
+    h.send('/goal finish the refactor')
     await tick()
     await tick()
     await tick()
     expect(methods()).toContain('thread/goal/clear')
     expect(state.requests.filter((r) => r.method === 'thread/goal/set')).toHaveLength(2)
-    expect(events.some((e) => /Goal set: 리팩토링 끝내기/.test(e.text ?? ''))).toBe(true)
+    expect(events.some((e) => /Goal set: finish the refactor/.test(e.text ?? ''))).toBe(true)
   })
 
   it('if it is still not active after clearing and setting again, states that status — does not make one up', async () => {
@@ -269,7 +269,7 @@ describe('codex /goal — runs as a function', () => {
     state.goalSetSticky = true
     const events: { type: string; text?: string }[] = []
     const h = await session((e) => events.push(e as { type: string; text?: string }))
-    h.send('/goal 리팩토링 끝내기')
+    h.send('/goal finish the refactor')
     await tick()
     await tick()
     await tick()
@@ -295,7 +295,7 @@ describe('codex /goal — runs as a function', () => {
 
   it('the check is narrow — a real message like "tell me about /goal" is not swallowed', async () => {
     const h = await session()
-    h.send('골 설정 얘기: /goal 문법이 뭐지?')
+    h.send('talking about goal setting: what is the /goal syntax?')
     await tick()
     expect(methods()).toContain('turn/start')
     expect(methods()).not.toContain('thread/goal/set')
