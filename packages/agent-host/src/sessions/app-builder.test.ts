@@ -203,7 +203,7 @@ describe('it is found by that app\'s building session', () => {
     await expect(rpc('apps.createBuilder', { appId: 'ghost', projectId })).rejects.toThrow(/There is no such app/)
   })
 
-  it('create_app tells you the session it created and says to hand off what comes next to that session', async () => {
+  it('create_app names the session it created and says to hand off what comes next to that session', async () => {
     const orch = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: projectId })
     const b = (await rpc('apps.builder', { appId: 'board', projectId })) as SessionInfo

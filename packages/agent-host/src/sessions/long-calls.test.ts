@@ -130,7 +130,7 @@ describe('what run_status shows', () => {
     expect(a.readOnly('app-notes', 'run_status')).toBe(true)
   })
 
-  it('another session\'s run is invisible even if you know its id', async () => {
+  it('another session\'s run stays invisible even to a caller that knows its id', async () => {
     const mine = hub.attach(WORKER)
     const { runId } = await detach(mine)
     const other = hub.attach({ id: 'long-s2', kind: 'worker', projectId: 'p1' })
