@@ -73,18 +73,20 @@ import type {
 } from '../ports/index.js'
 
 /**
- * 인메모리 구현 (docs/platform-abstraction.md §6).
- * 테스트·Playwright는 이걸 쓴다 — 모킹 라이브러리로 포트를 즉석 모킹하지 않는다 (계약이 흩어지므로).
+ * The in-memory implementation (docs/platform-abstraction.md §6).
+ * Tests and Playwright use this — the ports are not mocked ad hoc with a mocking library
+ * (that would split the contract apart).
  */
 
 /**
- * 내장 앱의 id — host의 `reservedIds`(HOST_APPS)와 같은 목록이다. 외부 앱은 이 이름을 가져갈 수 없다(`apps.invoke`가
- * 어느 쪽을 부를지 갈린다). 목은 host의 명부를 임포트할 수 없어 한 줄로 적는다.
+ * The ids of built-in apps — the same list as the host's `reservedIds` (HOST_APPS). An
+ * external app cannot take one of these names (`apps.invoke` uses it to decide which side to
+ * call). The mock cannot import the host's registry, so it is written out here as one line.
  */
 const MOCK_BUILTIN_APPS: readonly string[] = ['control']
 
 export type MockOptions = {
-  /** 결정적 시각 — 대기 경과 시간 테스트용 */
+  /** A deterministic clock — for testing elapsed waiting time */
   now?: () => number
 }
 
@@ -92,53 +94,53 @@ export class MockPlatform implements Platform {
   private projectsList: ProjectInfo[] = []
   sessions = new Map<string, SessionInfo>()
   private gridPanels: string[] = []
-  /** 세션별 저장된 메시지 — 시험이 "이미 긴 기록이 있는 세션"을 만들 수 있게 열어 둔다 */
+  /** Messages saved per session — left open so a test can build a "session with an already-long history" */
   messages = new Map<string, StoredMessage[]>()
-  /** 세션마다 지금 흐르는 말의 행 — `messages` 안의 그 행 자체다(키우면 기록도 자란다) */
+  /** The row of text currently streaming, per session — the very row inside `messages` (growing it also grows the record) */
   private streams = new Map<string, StoredMessage>()
   private handlers = new Set<(e: NormalizedEvent) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
   private idc = 0
   private now: () => number
 
-  /** 테스트용: 디렉토리 피커가 돌려줄 값 */
+  /** For tests: the value the directory picker will return */
   nextPickedDirectory: string | null = '/tmp/picked'
-  /** 파일 피커가 돌려줄 값 (M4 E-3 — 가져올 .zip). null이면 사람이 취소한 것이다 */
+  /** The value the file picker will return (M4 E-3 — the .zip to import). Null means the person cancelled */
   nextPickedFile: string | null = '/tmp/picked.zip'
-  /** 파일 피커가 무엇을 걸러 달라고 받았나 */
+  /** What the file picker was asked to filter by */
   readonly pickedFileAsks: { title: string; extensions: string[] }[] = []
-  /** 앱 링크를 듣는 쪽 (M4 E-4) — `openAppLink`가 OS처럼 건넨다 */
+  /** The side that listens for app links (M4 E-4) — `openAppLink` hands one over like the OS would */
   private readonly appLinkListeners = new Set<(link: string) => void>()
-  /** OS가 이 앱에 링크를 건넨 것처럼 (M4 E-4, e2e가 부른다) — 셸이 거르지 않은 날것 그대로 넘긴다 */
+  /** As if the OS handed this app a link (M4 E-4, called by e2e) — passes it through raw, unfiltered by the shell */
   openAppLink(link: string): void {
     for (const l of this.appLinkListeners) l(link)
   }
-  /** 소개 화면에서 고른 오케스트레이터 도구 (#63) — 실물은 app_settings에 적는다 */
+  /** The orchestrator tool chosen on the intro screen (#63) — the real thing writes it to app_settings */
   orchestratorTool: ToolName = 'claude'
-  /** 테스트용: 재개 불가로 만들 세션들 */
+  /** For tests: sessions to make unresumable */
   readonly unresumable = new Set<string>()
-  /** deleteExternal로 지워진 세션 id — "진짜로 삭제"가 실제로 전달됐는지의 관찰점 */
+  /** Session ids deleted via deleteExternal — the observation point for whether "really delete" was actually delivered */
   readonly externallyDeleted: string[] = []
-  /** 승인 대기 중인 MCP 서버 제안 (테스트가 채워 넣는다) */
+  /** Proposed MCP servers waiting for approval (filled in by tests) */
   readonly mcpProposalList: { name: string; command: string; args: string[]; why?: string }[] = []
-  /** 승인된 제안 이름 — 승인 클릭이 실제로 전달됐는지의 관찰점 */
+  /** Approved proposal names — the observation point for whether an approval click was actually delivered */
   readonly mcpApproved: string[] = []
-  /** 승인 대기 중인 스킬 제안 (#71 — 테스트가 채워 넣는다) */
+  /** Proposed skills waiting for approval (#71 — filled in by tests) */
   readonly skillProposalList: { name: string; content: string; why?: string }[] = []
-  /** 승인된 스킬 — 승인·삭제가 실제로 전달됐는지의 관찰점 */
+  /** Approved skills — the observation point for whether approving/deleting was actually delivered */
   readonly skillList: { name: string; content: string }[] = []
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
-  /** 바깥 브라우저로 연 주소들 (#159) — 터미널·앱 화면의 링크가 이 문을 지났는지 테스트가 본다 */
+  /** Addresses opened in the outside browser (#159) — tests check that terminal and app-screen links pass through this door */
   readonly openedUrls: string[] = []
   badge = 0
-  /** 테스트용: projects.gitStatus를 몇 번 물었나 — 디바운스가 도는지 보는 눈 (이슈 #41) */
+  /** For tests: how many times projects.gitStatus was asked — an eye on whether debouncing is working (issue #41) */
   gitStatusCalls = 0
-  /** 테스트용: 어느 프로젝트에서 파일을 읽고 보여줬나 — 그리드의 옆 칸 링크가 제 프로젝트로 가는지 보는 눈 (#182) */
+  /** For tests: which project a file was read from and shown for — an eye on whether the grid's neighboring-panel link goes to its own project (#182) */
   readonly fileOps: { op: 'read' | 'reveal'; projectId: string; path: string }[] = []
-  /** 테스트용: 어느 diff를 물었나 — 일부만 스테이징한 파일에서 무리가 맞는지 보는 눈 (#160) */
+  /** For tests: which diff was asked for — an eye on whether the group is right for a partially staged file (#160) */
   readonly gitDiffCalls: { path: string; staged: boolean }[] = []
-  /** 신뢰를 켜고 끈 기록 — "묻기만 하고 보내지 않았다"를 시험이 본다 (M4) */
+  /** The record of trust turned on and off — tests check "it only asks, it does not send" (M4) */
   readonly trustCalls: { projectId: string; trusted: boolean }[] = []
 
   constructor(opts: MockOptions = {}) {
@@ -154,20 +156,23 @@ export class MockPlatform implements Platform {
     // A browser has no window controls to leave room for, and E2E runs against this
     // mock — so the header it measures starts at the window edge.
     windowControlsInset: 0,
-    // 이 mock에는 물어볼 OS가 없다. 맥 표기를 답으로 정한다 — 개발도 E2E도 맥에서 돌고,
-    // 이 자리에서 자판을 짐작하기 시작하면 테스트가 도는 기계에 따라 결과가 달라진다.
+    // This mock has no OS to ask. Settles on the Mac notation as the answer — both development
+    // and e2e run on a Mac, and guessing the keyboard here would make the result depend on
+    // whatever machine the test happens to run on.
     shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
-    // 같은 이유로 맥의 이름을 답으로 정한다 — E2E가 도는 기계를 짐작하기 시작하면
-    // 화면에 뭐가 쓰일지가 테스트마다 달라진다.
+    // Same reason: settles on the Mac name as the answer — guessing the machine e2e runs on
+    // would make what gets written on screen vary from test to test.
     fileManagerName: 'Finder',
   }
 
-  /** 테스트가 이벤트를 주입하는 통로 */
+  /** The channel through which tests inject events */
   emit(event: NormalizedEvent): void {
     let out = event
     /*
-     * 대화 안 화면 (M4 B-1). host처럼: 인스턴스를 그 대화의 것으로 기억하고(apps.viewMessage), 다시 열 때 돌려줄
-     * 입력과 결말을 들고 있는다(apps.inlineReopen). 결말이 `kept: false`로 오면 host가 버린 것이다 — 목도 버린다.
+     * An in-conversation screen (M4 B-1). Like the host: remembers the instance as belonging
+     * to that conversation (apps.viewMessage), and holds onto the input and outcome to return
+     * when reopened (apps.inlineReopen). If the outcome arrives as `kept: false`, the host
+     * discarded it — the mock discards it too.
      */
     if (event.type === 'app_view') {
       const key = `${event.sessionId} ${event.callId}`
@@ -204,9 +209,11 @@ export class MockPlatform implements Platform {
           if (s.pendingApproval?.requestId === event.requestId) s.pendingApproval = null
         } else if (event.type === 'question_request') {
           /*
-           * 실물과 같은 규칙 (manager.trackLiveFacts): 살아 있는 질문은 **세션에 남는다**.
-           * 이벤트로만 흘리면 목록을 다시 받는 모든 경로(재연결·새로고침)에서 카드가
-           * 사라진다 — 실물에서는 남는데 목에서만 사라지면, 그 차이는 화면에서만 드러난다.
+           * The same rule as the real thing (manager.trackLiveFacts): a live question
+           * **stays on the session**. Only emitting it as an event would make the card
+           * disappear on every path that re-fetches the list (reconnect, refresh) — if it
+           * stays in the real thing but disappears only in the mock, that difference shows up
+           * on screen only.
            */
           s.state = 'waiting_input'
           s.waitingSince ??= this.now()
@@ -220,25 +227,28 @@ export class MockPlatform implements Platform {
           s.state = 'working'
           s.waitingSince = null
         } else if (event.type === 'worktree_merged') {
-          // 실물과 같은 규칙 (#69): 재연결 후 목록에도 남아야 한다
+          // The same rule as the real thing (#69): must stay in the list after a reconnect too
           s.worktreeMerged = true
         } else if (event.type === 'worktree_pr') {
-          // 실물과 같은 규칙 (#76 stage 3): PR 상태도 재연결 후 목록에 남는다
+          // The same rule as the real thing (#76 stage 3): the PR state also stays in the list after a reconnect
           s.worktreePr = event.pr
         } else if (event.type === 'context_update') {
           /*
-           * 실물(host)과 같은 규칙: 컨텍스트 사용량은 **세션에 남는다** (이슈 #48).
+           * The same rule as the real thing (the host): context usage **stays on the session**
+           * (issue #48).
            *
-           * 목이 이걸 흘리는 동안, 목록을 다시 받는 모든 경로(앱 재시작·재연결)에서
-           * 눈금이 `—`로 돌아갔다 — 실물은 그 값을 들고 있으므로, 이 자리가 비어 있으면
-           * E2E는 실물이 만들 수 없는 상태를 정상으로 보고 지나간다.
+           * While the mock was only emitting this, the gauge reverted to `—` on every path
+           * that re-fetches the list (app restart, reconnect) — the real thing holds onto the
+           * value, so if this spot is left empty, e2e passes a state the real thing could
+           * never produce as normal.
            */
           s.context = { used: event.used, window: event.window, exactness: event.exactness }
         }
         /*
-         * 실물(host)과 같은 규칙: 기록으로 남는 이벤트에는 세션 내 seq를 매겨 방송에 싣는다.
-         * UI의 안읽음 추적(lastSeq)은 이 seq만 믿는다 — 목이 안 실어 보내면
-         * 실물에서는 잡힐 버그가 테스트에서만 조용히 지나간다.
+         * The same rule as the real thing (the host): an event that stays in the record gets a
+         * seq within the session and carries it in the broadcast. The UI's unread tracking
+         * (lastSeq) trusts only this seq — if the mock does not carry it, a bug that the real
+         * thing would catch slips by quietly in tests only.
          */
         const kind =
           event.type === 'tool_call'
@@ -249,23 +259,24 @@ export class MockPlatform implements Platform {
                 ? ('approval' as const)
                 : event.type === 'message_delta'
                   ? ('text' as const)
-                  : // 추론 요약 (#58) — 실물과 같은 규칙: 텍스트가 실렸을 때만 기록
+                  : // A reasoning summary (#58) — the same rule as the real thing: recorded only when text is carried
                     event.type === 'reasoning_delta' && event.text
                     ? ('reasoning' as const)
-                    : // 시켜서 들어온 말 (FR-11). 실물 payload는 {text, from}이고 이벤트가 그 둘을
-                      // 그대로 갖고 있어, 복원(messagesToChat)이 같은 화면을 되살린다
+                    : // A message that came in from outside (FR-11). The real payload is {text, from}, and the event
+                      // holds both of them as-is, so restoring it (messagesToChat) brings back the same screen
                       event.type === 'user_message'
                       ? ('text' as const)
                       : event.type === 'compaction'
                         ? ('marker' as const)
-                        : // 이미지도 영속된다 (#40 2차). 실물은 파일+경로지만 목의 디스크는 메모리다 —
-                          // payload에 바이트를 그대로 두면 loadMessages가 실물과 같은 화면을 되살린다
+                        : // Images persist too (#40, second pass). The real thing has a file plus a path, but the
+                          // mock's disk is memory — leaving the bytes as-is in the payload lets loadMessages restore
+                          // the same screen as the real thing
                           event.type === 'message_image'
                           ? ('image' as const)
                           : null
         /*
-         * 대화 안 앱 화면 (M4 B-1) — 실물처럼 열림과 거절만, 본문 없이 남긴다(manager.persistMessage). 다시 연
-         * 화면이 이것으로 자리표시를 세운다.
+         * An in-conversation app screen (M4 B-1) — like the real thing, records only open and rejected, with no
+         * body (manager.persistMessage). A reopened screen sets up its placeholder from this.
          */
         if (event.type === 'app_view' && (event.phase === 'open' || event.phase === 'rejected')) {
           const seq = (this.messages.get(s.id)?.length ?? 0) + 1
@@ -282,9 +293,12 @@ export class MockPlatform implements Platform {
           out = { ...event, seq } as NormalizedEvent
         }
         /*
-         * 흐르는 말은 행 하나에 모은다 — 실물(host persistMessage, #66)과 같은 규칙. 같은 종류의 조각은 열린 행을
-         * 키우고 그 행의 번호를 싣는다. 다른 행(도구·사람의 말 — pushMessage)과 턴의 끝이 말을 닫는다. 조각마다
-         * 행을 세우면 조각마다 번호가 달라서, 번호로 말을 가르는 화면(#77)이 한 말을 조각마다 끊어 그린다.
+         * A streaming message is gathered into one row — the same rule as the real thing (host
+         * persistMessage, #66). A chunk of the same kind grows the open row and carries that
+         * row's number. A different row (a tool, a human message — pushMessage) or the end of
+         * a turn closes it. Making a new row per chunk would give each chunk a different
+         * number, and a screen that splits messages by number (#77) would draw one message as
+         * broken up chunk by chunk.
          */
         const streamKind =
           event.type === 'message_delta' ? 'text' : event.type === 'reasoning_delta' && event.text ? 'reasoning' : null
@@ -301,7 +315,7 @@ export class MockPlatform implements Platform {
             event.type === 'error' ||
             (event.type === 'state_change' && event.state !== 'working')
           if (closes) this.streams.delete(s.id)
-          // 빈 조각으로 행을 시작하지 않는다 — 실물처럼 번호도 싣지 않는다
+          // Does not start a row with an empty chunk — like the real thing, does not carry a number either
           if (kind && !(streamKind && !piece)) {
             const row: StoredMessage = {
               sessionId: s.id,
@@ -328,7 +342,7 @@ export class MockPlatform implements Platform {
   }
 
   private pushMessage(m: StoredMessage): void {
-    this.streams.delete(m.sessionId) // 새 행은 흐르던 말의 끝이다 — 흐르는 말의 첫 행이면 emit이 다시 연다
+    this.streams.delete(m.sessionId) // A new row is the end of whatever was streaming — if it is the first row of a stream, emit reopens it
     const arr = this.messages.get(m.sessionId) ?? []
     arr.push(m)
     this.messages.set(m.sessionId, arr)
@@ -338,7 +352,7 @@ export class MockPlatform implements Platform {
     for (const h of this.connHandlers) h(s)
   }
 
-  /** 테스트가 주무르는 가짜 깃 상태 */
+  /** The fake git state tests manipulate */
   gitState: {
     files: GitFileStatus[]
     diffs: Record<string, string>
@@ -346,15 +360,16 @@ export class MockPlatform implements Platform {
     branches: GitBranch[]
     dirty: string[]
     /**
-     * 잘렸다고 알릴 diff의 키 (경로 또는 sha).
+     * The keys (path or sha) of the diffs to report as truncated.
      *
-     * 실물 host는 상한(400,000자)을 넘으면 앞부분만 주고 truncated를 세운다. 목이 늘
-     * false를 주는 동안에는 "잘림 안내가 안 뜬다"는 시험이 **깨질 수가 없었다** (#121).
-     * 길이로 흉내내지 않고 키로 받는 이유: 시험이 400KB짜리 문자열을 만들지 않고도
-     * 그 상태를 그릴 수 있어야 한다.
+     * The real host gives only the first part and sets truncated once it crosses the cap
+     * (400,000 characters). While the mock always returned false, a test for "the truncation
+     * notice does not appear" **could not possibly fail** (#121). Taking a key rather than
+     * faking it by length: a test should be able to draw that state without having to build a
+     * 400KB string.
      */
     truncated: string[]
-    /** git이 무시하는 것들 (#76) — 셋업 창이 복사 후보로 내미는 목록 */
+    /** Things git ignores (#76) — the list the setup window offers as copy candidates */
     ignored: { path: string; bytes: number | null }[]
     lastCommitMessage?: string
     pushed: boolean
@@ -362,15 +377,15 @@ export class MockPlatform implements Platform {
 
   readonly savedAttachments: Attachment[] = []
   readonly sentAttachments: Attachment[] = []
-  /** 목의 디스크는 메모리다 — 실물이 attachments/ 파일에서 다시 읽는 바이트를 여기서 되찾는다 */
+  /** The mock's disk is memory — this is where the bytes the real thing re-reads from an attachments/ file are recovered from */
   readonly attachmentData = new Map<string, string>()
 
-  /** 테스트가 주무르는 가짜 파일 트리 */
+  /** The fake file tree tests manipulate */
   fsState: { entries: Record<string, FsEntry[]>; files: Record<string, string> } = { entries: {}, files: {} }
-  /** fs.watch로 등록된 감시 집합 (#34) — 테스트가 "화면이 뭘 감시해 달랬는지"를 본다 */
+  /** The set of watched paths registered via fs.watch (#34) — tests check what the screen asked to watch */
   watchedDirs = new Map<string, string[]>()
 
-  /** 테스트용 검색·규칙 상태 */
+  /** For tests: search and rule state */
   searchResults: { sessionId: string; seq: number; snippet: string }[] = []
   rulesList: {
     id: number
@@ -486,7 +501,7 @@ export class MockPlatform implements Platform {
     purge: async (sessionId: string) => {
       const t = this.trashBin.get(sessionId)
       if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
-      // host와 같은 규칙: 원본 삭제를 명시한 경우 그 사실이 기록에 남는다 (테스트가 검증할 관찰점)
+      // The same rule as the host: if removing the original was specified, that fact stays on the record (a point tests verify)
       if (t.removeExternal) this.externallyDeleted.push(sessionId)
       this.trashBin.delete(sessionId)
     },
@@ -497,17 +512,19 @@ export class MockPlatform implements Platform {
     },
   }
 
-  /** 테스트용: 휴지통으로 보낸 것과 파일 관리자에서 열어본 것 (#18/#19) */
+  /** For tests: what was sent to the trash and what was opened in the file manager (#18/#19) */
   readonly trashed: string[] = []
   readonly revealed: string[] = []
 
   /**
-   * 루트 밖으로 나가는 경로는 **목에서도** 거절한다.
+   * A path that goes outside the root gets rejected **in the mock too**.
    *
-   * 목에는 진짜 파일 시스템이 없으니 검사도 필요 없다고 넘길 뻔한 자리다. 그러면
-   * "프로젝트 밖은 못 건드린다"가 실물에만 있는 규칙이 되고, 그 차이는 E2E(브라우저 목)에
-   * 영원히 안 보인다 — 계약 테스트가 실제로 여기서 갈라진 것을 잡았다.
-   * 문자열만 보고 판정할 수 있다: 조각을 세면서 `..`로 내려간 깊이가 음수가 되면 밖이다.
+   * This is a spot it would have been tempting to skip, on the theory that a mock with no real
+   * filesystem needs no check either. Then "cannot touch outside the project" would become a
+   * rule that exists only in the real thing, and the difference would be invisible to e2e (the
+   * browser's mock) forever — the contract test actually caught this having split here.
+   * Decidable from the string alone: count segments, and going outside is whatever makes the
+   * depth negative after stepping down through a `..`.
    *
    * The segments come from `wireSegments` rather than from a `/` written here (#47). Reading the
    * separator out of the protocol instead of assuming it is what makes this check the *same*
@@ -528,16 +545,17 @@ export class MockPlatform implements Platform {
     }
   }
 
-  /** `a/b/c.ts` → `a/b` (루트는 `''`) — 목의 entries가 부모 경로로 묶여 있으므로 */
+  /** `a/b/c.ts` → `a/b` (the root is `''`) — since the mock's entries are grouped by parent path */
   private parentOf(path: string): string {
     const cut = path.lastIndexOf('/')
     return cut < 0 ? '' : path.slice(0, cut)
   }
 
   /**
-   * 목에서 항목 하나를 떼어낸다. 폴더면 그 아래 목록·파일까지 같이 따라온다 —
-   * 실물에서 폴더를 옮기면 안의 것이 함께 가므로, 목이 껍데기만 옮기면
-   * "옮겼는데 안이 비었다"가 **목에서만** 일어나지 않는 종류의 차이가 된다.
+   * Detaches one entry from the mock. If it is a folder, everything under it — the listing and
+   * the files — comes along. In the real thing, moving a folder takes what is inside it along
+   * too, so if the mock moved only the shell, "it moved, but the inside is empty" would become
+   * a kind of difference that happens **only in the mock**.
    */
   private detach(path: string): FsEntry | null {
     const parent = this.parentOf(path)
@@ -548,7 +566,7 @@ export class MockPlatform implements Platform {
     return entry
   }
 
-  /** 옮기거나 지울 때 딸려 가는 것들 — 하위 목록과 파일 내용 */
+  /** What comes along when moving or deleting — the sub-listing and file contents */
   private takeSubtree(path: string): { entries: Record<string, FsEntry[]>; files: Record<string, string> } {
     const under = (p: string) => p === path || p.startsWith(`${path}/`)
     const entries: Record<string, FsEntry[]> = {}
@@ -566,7 +584,7 @@ export class MockPlatform implements Platform {
     return { entries, files }
   }
 
-  /** host의 데이터 폴더에 놓인 인수인계 노트 (#142) — 경로 → 글. 프로젝트 파일(fsState)과 섞지 않는다 */
+  /** The handoff note placed in the host's data folder (#142) — path → text. Not mixed with project files (fsState) */
   handoffNotes = new Map<string, string>()
 
   private placeHandoffNote(s: SessionInfo, text: string): string {
@@ -576,12 +594,14 @@ export class MockPlatform implements Platform {
   }
 
   /**
-   * 파일 하나를 목에 눕히고 **올라가는 길까지** 세운다 (#104).
+   * Lays one file down in the mock and builds **the whole path up to it** (#104).
    *
-   * 실물에서는 host가 부모 폴더를 만들고 나서 쓴다. 목이 내용만 꽂아 두면 그 파일은
-   * 읽히기는 하는데 `trash`가 목록에서 못 찾아 거절한다 — 목이 실물보다 엄격해지는
-   * 자리고, 인수인계 청소가 목에서만 실패한다. 테스트가 "에이전트가 글을 남겼다"를
-   * 흉내낼 때도 이 문으로 들어와야 그 함정을 각자 다시 밟지 않는다.
+   * In the real thing, the host creates the parent folders before writing. If the mock only
+   * planted the content, that file would be readable but `trash` would fail to find it in the
+   * listing and reject it — a spot where the mock becomes stricter than the real thing, and
+   * handoff cleanup would fail only in the mock. When a test needs to fake "the agent left a
+   * note," it should also come in through this door, so nobody has to rediscover that trap on
+   * their own.
    */
   placeFile(path: string, text: string): void {
     this.fsState.files[path] = text
@@ -600,7 +620,7 @@ export class MockPlatform implements Platform {
 
   readonly fs = {
     search: async (_projectId: string, query: string, limit = 20) => {
-      // 목은 실제 퍼지 매칭을 흉내내지 않는다 — 검증 대상은 UI 흐름이다
+      // The mock does not fake real fuzzy matching — what is being verified is the UI flow
       const all = Object.values(this.fsState.entries)
         .flat()
         .filter((e) => !e.isDir)
@@ -611,7 +631,7 @@ export class MockPlatform implements Platform {
         .map((e) => ({ path: e.path, name: e.name }))
     },
     listDir: async (_projectId: string, path: string) => this.fsState.entries[path] ?? [],
-    // 감시 집합을 기록만 한다 — 테스트는 emit으로 fs_changed를 직접 흘려 화면 반응을 본다
+    // Only records the watch set — tests check the screen's reaction by emitting fs_changed directly
     watch: async (projectId: string, paths: string[]) => {
       this.watchedDirs.set(projectId, [...paths])
       return { watched: paths.length }
@@ -630,10 +650,11 @@ export class MockPlatform implements Platform {
       return { path: `/mock-project/${path}` }
     },
     /**
-     * 실물(host의 `moveEntry`)과 **같은 거절 규칙**을 지킨다: 자리가 차 있으면 옮기지
-     * 않고 무엇과 부딪혔는지 말하고, 폴더를 자기 안으로는 못 넣고, 제자리 드롭은
-     * 실패가 아니라 `moved: false`다. 목이 실물보다 너그러우면 E2E는 초록인데
-     * 실제 앱에서만 다르게 동작하는 자리가 생긴다.
+     * Follows **the same rejection rules** as the real thing (the host's `moveEntry`): if the
+     * spot is taken, it does not move and names what it collided with; a folder cannot be put
+     * inside itself; and dropping something back where it already was is `moved: false`, not a
+     * failure. If the mock were more forgiving than the real thing, e2e would stay green while
+     * the actual app behaved differently.
      */
     move: async (_projectId: string, from: string, toDir: string) => {
       this.requireInside(from)
@@ -660,8 +681,8 @@ export class MockPlatform implements Platform {
     },
     importFile: async (_projectId: string, toDir: string, name: string, dataBase64: string) => {
       this.requireInside(toDir)
-      // 이름은 마지막 조각만 쓴다 — 실물과 같은 규칙이라, 이름에 경로가 섞여 와도
-      // 목적지 밖으로 나가지 못한다
+      // Uses only the last segment of the name — the same rule as the real thing, so even if a
+      // path sneaks in mixed into the name, it cannot escape the destination
       const leaf = wireBaseName(name)
       const path = wireJoin(toDir, leaf)
       if ((this.fsState.entries[toDir] ?? []).some((e) => e.path === path)) {
@@ -677,10 +698,11 @@ export class MockPlatform implements Platform {
     trash: async (_projectId: string, path: string) => {
       this.requireInside(path)
       /*
-       * 프로젝트 루트(`'.'`)는 목록에 **항목으로 없다** — 항목은 루트 안의 것들이다.
-       * 실물에서는 host의 resolveExisting이 루트를 stat해서 통과시키므로(실재하는 폴더다),
-       * 여기서 "그런 항목 없음"으로 거절하면 목이 실물보다 **엄격해진다** — 프로젝트를
-       * 폴더째 지우는 길이 E2E에서만 막힌다.
+       * The project root (`'.'`) is **not an entry** in the listing — entries are the things
+       * inside the root. In the real thing, the host's resolveExisting stats the root and lets
+       * it through (it is a real folder), so rejecting it here as "no such entry" would make
+       * the mock **stricter** than the real thing — the path of deleting the whole project
+       * folder would end up blocked in e2e only.
        */
       if (wireSegments(path).every((seg) => seg === '' || seg === '.')) {
         this.fsState.entries = {}
@@ -741,38 +763,38 @@ export class MockPlatform implements Platform {
     },
   }
 
-  /** 테스트용: 사용량 (supported=false로 '못 가져옴'도 재현한다) */
+  /** For tests: usage (supported=false also reproduces "could not fetch it") */
   usageState: { supported: boolean; reason?: string; usage: UsageSnapshot | null } = {
     supported: true,
     usage: { plan: 'max', windows: [], daily: [] },
   }
 
-  /** 테스트용: 슬래시 명령 목록 (ready=false로 '아직 준비 안 됨'도 재현한다) */
+  /** For tests: the slash command list (ready=false also reproduces "the tool is not ready yet") */
   commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } =
     {
       ready: true,
       commands: [],
     }
 
-  /** 테스트용: 재시작을 요청받은 세션 */
+  /** For tests: sessions asked to restart */
   restarted: string[] = []
 
-  /** 테스트용: 마지막 createSession 파라미터 (고른 값이 실제로 전달됐는지 확인) */
+  /** For tests: the last createSession parameters (to check the chosen values were actually delivered) */
   lastCreateParams: CreateSessionParams | null = null
-  /** 테스트용: 모든 createSession 파라미터 — 동시에 둘이 태어나면 "마지막"으로는 누가 뭘 받았는지 못 본다 */
+  /** For tests: every createSession parameter — if two are born at once, "the last one" cannot tell who got what */
   readonly createParamsLog: CreateSessionParams[] = []
-  /** 테스트가 "커밋 안 된 변경이 있는 워크트리"를 만들 수 있게 하는 손잡이 */
+  /** The handle that lets a test create "a worktree with uncommitted changes" */
   mockWorktreeDirty = false
 
-  /** 테스트용: 도구가 갖고 있는 척할 이전 세션. supported=false로 구버전 도구도 재현한다 */
+  /** For tests: previous sessions the tool pretends to have. supported=false also reproduces an older tool version */
   externalSessions: { supported: boolean; reason?: string; sessions: ExternalSession[] } = {
     supported: true,
     sessions: [],
   }
-  /** 불러오기를 고른 세션의 이전 대화 (externalId → 줄 목록) */
+  /** The previous conversation of a session chosen to be imported (externalId → list of lines) */
   externalHistory = new Map<string, { role: 'user' | 'assistant'; text: string }[]>()
 
-  /** 앱 상태 (#81) — 목의 디스크는 메모리다. 실물과 같은 규칙: 쓰면 방송한다 */
+  /** App state (#81) — the mock's disk is memory. The same rule as the real thing: broadcasts on write */
   appDocs = new Map<string, unknown>()
   appDisabled = new Set<string>()
   readonly apps = {
@@ -790,8 +812,9 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'app_state_changed', appId } as NormalizedEvent)
     },
     /**
-     * 사람의 앱 도구 호출 (#81). 목의 디스크는 메모리다 — host 앱의 실제 로직은
-     * host 유닛 테스트가 덮고, 여기는 e2e가 필요로 하는 최소 흉내만 낸다.
+     * The person calling an app tool directly (#81). The mock's disk is memory — the real
+     * logic of the host's app is covered by the host's unit tests, and this is just the
+     * minimal fake that e2e needs.
      */
     invoke: async (appId: string, name: string, args: Record<string, unknown>) => {
       this.lastInvoke = { appId, name, args }
@@ -805,7 +828,7 @@ export class MockPlatform implements Platform {
           createdAt: this.now(), waitingSince: null, live: true, model: null, effort: 'high',
           verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null,
           worktree: null, parentSessionId: null, scopeSessionIds: members, roleAppend: '(mock role)',
-          // 실물과 같은 규칙 (#81): 소유 앱은 도구를 부른 앱의 등록 id다 — 앱이 못 지어낸다
+          // The same rule as the real thing (#81): the owning app is the registered id of the app that called the tool — an app cannot make one up
           appId,
           ...sessionLiveDefaults(),
         })
@@ -822,18 +845,19 @@ export class MockPlatform implements Platform {
       return { text: `mock: ${name}` }
     },
     /**
-     * 앱 화면 (M4 B-3). 목에는 host가 없어서 주소를 지을 수 없다. 시험이 진짜 host의 프록시를
-     * 띄우고 여기에 주소를 주는 함수를 꽂는다(e2e/app-frame.spec.ts). 꽂지 않으면 화면이 없는
-     * 것이다.
+     * The app screen (M4 B-3). There is no host in the mock, so no address can be constructed.
+     * A test plugs in a function that starts the real host's proxy and supplies an address here
+     * (e2e/app-frame.spec.ts). If nothing is plugged in, there is no screen.
      */
     viewFrame: async (appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => {
       if (!this.viewFrameProvider) throw new Error('This app view is not open')
       return this.viewFrameProvider(appId, instanceId, opts)
     },
     /**
-     * 화면의 도구 호출 — 적어 두고, 시험이 꽂은 답을 준다. 기본 답은 부른 것을 되돌려 준다.
-     * web과 같은 약속을 지킨다. projectId는 늘 실리고(없으면 null, 내장 앱의 문으로 새지 않는다),
-     * 답은 앱이 준 MCP 결과 모양 그대로다(`apps.invoke`의 `result`).
+     * A tool call from a screen — recorded, and answered with whatever a test plugged in. The
+     * default answer echoes back what was called. Keeps the same contract as web. projectId
+     * always travels along (null if absent, and never leaks through a built-in app's door), and
+     * the answer is exactly the shape of MCP result the app gave (`apps.invoke`'s `result`).
      */
     callTool: async (appId: string, tool: string, args: Record<string, unknown>, from?: AppCallOrigin) => {
       const origin: AppCallOrigin = { ...from, projectId: from?.projectId ?? null }
@@ -847,15 +871,17 @@ export class MockPlatform implements Platform {
       if (!found) throw new Error(`No resource ${uri} in app ${appId}`)
       return found
     },
-    // host처럼 가장 최근 오류 묶음의 때를 싣는다 (M4 C-6) — 목의 묶음은 시험이 든다(appErrors)
+    // Like the host, carries the time of the most recent error bundle (M4 C-6) — a test supplies the mock's bundles (appErrors)
     list: async (): Promise<ExternalAppInfo[]> =>
       structuredClone(this.externalAppList).map((a) => {
         const at = this.appErrors.get(`${a.projectId ?? '_user'}/${a.appId}`)?.[0]?.at
         return at === undefined ? a : { ...a, lastErrorAt: at }
       }),
     /**
-     * 고정 화면 (M4 B-2). 목에는 앱 프로세스도 ViewHost도 없다. 시험이 진짜 ViewHost의 인스턴스를 여는
-     * 함수를 꽂는다(e2e/apps.spec.ts). 꽂지 않으면 부른 것만 적고 빈 결과의 인스턴스를 지어 준다.
+     * A pinned screen (M4 B-2). The mock has neither an app process nor a ViewHost. A test
+     * plugs in a function that opens an instance from the real ViewHost (e2e/apps.spec.ts). If
+     * nothing is plugged in, this just records the call and fabricates an instance with an
+     * empty result.
      */
     openView: async (appId: string, projectId: string | null): Promise<AppHomeView> => {
       this.openedViews.push({ appId, projectId })
@@ -869,22 +895,24 @@ export class MockPlatform implements Platform {
             toolResult: { content: [{ type: 'text', text: 'mock home' }] },
             runId: `mock-run-${this.idc}`,
           }
-      // host의 ViewHost처럼 인스턴스가 어느 앱의 어느 화면인지 들고 있다 — "이 화면에서 왔다"는 이것으로 대조한다
+      // Like the host's ViewHost, holds which app and screen the instance belongs to — "this came from that screen" is checked against this
       this.pinnedInstances.set(v.instanceId, { appId, projectId, uri: v.resourceUri })
       return v
     },
     closeView: async (instanceId: string) => {
       this.closedViews.push(instanceId)
-      // 대화 안 화면이었으면 그 기록의 인스턴스도 닫힌다 — host처럼 기록(입력·결말)은 남는다
+      // If it was an in-conversation screen, that record's instance also closes — like the host, the record (input, outcome) stays
       for (const rec of this.inlineRecords.values()) if (rec.instanceId === instanceId) rec.instanceId = null
     },
     /**
-     * 앱 화면의 말 (M4 B-1·B-4). 실물처럼: 대화 안 화면은 그 대화의 것만, 고정 화면은 사람이 고른 대화로 받고, 대화에는
-     * 앱이 보낸 말(`fromApp`)로 남긴다. 에이전트가 받는 감싼 모양은 host의 일이라(manager의 appMessageFrame) 여기서는
-     * 받은 것을 적어 두기만 한다.
+     * A message from an app screen (M4 B-1·B-4). Like the real thing: an in-conversation
+     * screen only accepts one for the conversation it belongs to, a pinned screen accepts
+     * whichever conversation the person chose, and it is recorded in the conversation as a
+     * message the app sent (`fromApp`). Wrapping it in the shape the agent receives is the
+     * host's job (manager's appMessageFrame), so here it just records what came in.
      */
     sendViewMessage: async (sessionId: string, instanceId: string, text: string) => {
-      // 실물처럼: 대화 안 화면은 그 대화로만, 고정 화면은 사람이 고른 대화로 (앱은 인스턴스가 정한다)
+      // Like the real thing: an in-conversation screen only to that conversation, a pinned screen to whichever the person chose (the app is decided by the instance)
       const inline = this.inlineInstances.get(instanceId)
       if (inline && inline.sessionId !== sessionId) throw new Error('This app view is not open in that conversation')
       const owner = inline ?? this.pinnedInstances.get(instanceId)
@@ -898,11 +926,13 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'state_change', sessionId, state: 'working' })
     },
     /**
-     * 접은 대화 안 화면을 다시 연다 (M4 B-1). 실물처럼: 도구를 다시 부르지 않고 들고 있던 입력·결말을 새
-     * 인스턴스와 돌려준다. 인스턴스는 시험이 꽂은 쪽(진짜 ViewHost)이 짓는다. 들고 있지 않으면 host와 같은
-     * 말로 거절한다. 상한은 목이 지키지 않는다 — 그것은 host의 일이고, 그 시험은 agent-host에 있다.
+     * Reopens a collapsed in-conversation screen (M4 B-1). Like the real thing: does not call
+     * the tool again, and returns the held input and outcome with a new instance. The instance
+     * is built by whatever a test plugged in (the real ViewHost). Rejects with the same wording
+     * as the host if nothing is being held. The mock does not enforce the size cap — that is
+     * the host's job, and its test lives in agent-host.
      */
-    /** 실물처럼: 이 대화에서 들고 있는 화면, 본문 없이. 목은 결말이 너무 큰 것을 이미 버렸다(`kept: false`로 온 결말) */
+    /** Like the real thing: the screens held for this conversation, without their bodies. The mock has already discarded an outcome that was too large (an outcome that arrived as `kept: false`) */
     inlineViews: async (sessionId: string): Promise<InlineViewKept[]> =>
       [...this.inlineRecords.entries()]
         .filter(([key]) => key.startsWith(`${sessionId} `))
@@ -934,10 +964,11 @@ export class MockPlatform implements Platform {
       }
     },
     /**
-     * 실물처럼: 멈췄거나 죽었던 앱의 이유를 지우고 쉬는 앱(`stopped`)으로 세운 뒤 목록 방송을 한다.
-     * 띄우지는 않는다 — 다음에 여는 화면이 띄운다.
+     * Like the real thing: clears the reason of an app that was stalled or dead, sets it up as
+     * a resting app (`stopped`), then broadcasts the list. Does not start it — whichever screen
+     * opens next does that.
      */
-    /** 실물처럼: 사용자 폴더 앱만 지우고(프로젝트 앱은 거절), 목록 방송을 한다 */
+    /** Like the real thing: only deletes a user-folder app (rejects a project app), then broadcasts the list */
     remove: async (appId: string, projectId: string | null) => {
       if (projectId !== null) throw new Error("A project app is part of the project's repository — remove it there")
       const at = this.externalAppList.findIndex((a) => a.appId === appId && a.projectId === null)
@@ -959,9 +990,12 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'external_apps_changed' })
     },
     /**
-     * 새 앱 (M4 C-1). 실물(`ExternalApps.createApp` → `SessionManager.createAppBuilder`)처럼: 같은 판정(protocol의
-     * `newAppIdProblem`, 내장 앱 id, 신뢰, 이미 있는 id)으로 거절하고 — 거절의 말은 host의 말 그대로다, 창이 그것을
-     * 그대로 보이는지를 시험이 본다 — 목록에 세운 뒤 방송하고, 만드는 세션을 세운다. 세션이 서지 못해도 앱은 남는다.
+     * A new app (M4 C-1). Like the real thing (`ExternalApps.createApp` →
+     * `SessionManager.createAppBuilder`): rejects using the same checks (protocol's
+     * `newAppIdProblem`, built-in app ids, trust, an existing id) — the rejection wording is
+     * exactly the host's, and a test checks that the window shows it as-is — then adds it to
+     * the list, broadcasts, and creates the builder session. The app stays even if the session
+     * fails to start.
      */
     create: async (spec: NewAppSpec): Promise<AppCreated> => {
       this.createdApps.push(structuredClone(spec))
@@ -989,7 +1023,7 @@ export class MockPlatform implements Platform {
         name,
         version: '0.1.0',
         description: spec.description?.replace(/\s+/g, ' ').trim() || `${name} (a Centralu app)`,
-        // 템플릿의 home 도구 — 실물 템플릿과 같은 이름이다(app-template/centralu.app.json)
+        // The template's home tool — the same name as the real template (app-template/centralu.app.json)
         home: 'show',
         trusted: true,
         status: 'stopped',
@@ -1010,9 +1044,12 @@ export class MockPlatform implements Platform {
       return s ? structuredClone(s) : null
     },
     /**
-     * 만드는 세션 (M4 C-2). 실물처럼: 앱마다 하나(있으면 그것), 신뢰하지 않은 앱에는 세우지 않고, 도구를 안 고르면
-     * 프로젝트의 기본 도구(사용자 폴더 앱은 오케스트레이터의 도구). 그 도구가 없거나 로그인 전이면 세션이 서지 못한다.
-     * 이름은 "<앱> · builder"로 사람이 정한 이름이고, 세션의 앱 칸이 그 앱이다. 만들면 `session_created`를 방송한다.
+     * The builder session (M4 C-2). Like the real thing: one per app (returns the existing one
+     * if there is one), never created for an untrusted app, and if no tool is chosen, uses the
+     * project's default tool (the orchestrator's tool for a user-folder app). The session fails
+     * to start if that tool is absent or not logged in. The name is a human-chosen "<app> ·
+     * builder", and the session's app slot is that app. Broadcasts `session_created` on
+     * creation.
      */
     createBuilder: async (appId: string, projectId: string | null, tool?: ToolName): Promise<SessionInfo> => {
       const key = `${projectId ?? '_user'}/${appId}`
@@ -1059,15 +1096,18 @@ export class MockPlatform implements Platform {
       }
       this.sessions.set(id, info)
       this.appBuilders.set(key, id)
-      // 실물과 같은 규칙: 세션을 만드는 것이 그 프로젝트의 기본 도구를 정한다 (manager.createSession)
+      // The same rule as the real thing: creating a session sets that project's default tool (manager.createSession)
       if (project) project.defaultTool = chosen
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       return structuredClone(info)
     },
     /**
-     * "여기를 고쳐 줘" (M4 C-5). 실물(builder-requests.ts)처럼: 같은 말로 거절하고, 머리말은 **같은 함수**
-     * (protocol의 `builderRequestFrame`)로 목이 아는 사실에서 짓는다 — 앱 목록(이름·멈춤), 인스턴스(화면), 실행 기록
-     * (시험이 채운 `appRuns`의 맨 앞). 그렇게 지은 말이 만드는 세션의 대화에 사람의 말로 선다.
+     * "Fix this" (M4 C-5). Like the real thing (builder-requests.ts): rejects with the same
+     * wording, and builds the header with **the same function** (protocol's
+     * `builderRequestFrame`), from facts the mock knows — the app listing (name, stopped
+     * state), the instance (screen), the run history (the front of `appRuns`, as filled in by
+     * a test). The message built that way stands as a human message in the builder session's
+     * conversation.
      */
     askBuilder: async (req: BuilderAsk): Promise<{ sessionId: string }> => {
       this.builderAsks.push(structuredClone(req))
@@ -1095,7 +1135,7 @@ export class MockPlatform implements Platform {
       this.deliverToBuilder(builderId, builderRequestFrame(facts, text), req.attachments)
       return { sessionId: builderId }
     },
-    /** 오류 묶음 (M4 C-6) — 시험이 `appErrors`에 채운다(최근 것부터). 보낸 묶음에는 host처럼 `sentAt`이 붙는다 */
+    /** Error bundles (M4 C-6) — a test fills `appErrors` (most recent first). A sent bundle carries `sentAt`, like the host */
     errors: async (appId: string, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {
       this.errorReads++
       const key = `${projectId ?? '_user'}/${appId}`
@@ -1103,12 +1143,14 @@ export class MockPlatform implements Platform {
       return { latest: recent[0] ?? null, recent }
     },
     /**
-     * 오류 묶음을 만드는 세션에 보낸다 (M4 C-6). 실물(builder-requests.ts)처럼: 같은 말로 거절하고, 한 묶음은 한 번만
-     * 보내며(적는 것이 먼저다), 에이전트에게 가는 모양은 **같은 함수**(`builderErrorFrame`)로 짓는다.
+     * Sends an error bundle to the builder session (M4 C-6). Like the real thing
+     * (builder-requests.ts): rejects with the same wording, sends each bundle only once
+     * (recording comes first), and builds the shape sent to the agent with **the same
+     * function** (`builderErrorFrame`).
      */
     sendError: async (appId: string, projectId: string | null, at: number): Promise<{ sessionId: string }> => {
       this.errorSends.push({ appId, projectId, at })
-      // 시험이 "보내는 중"을 붙들 수 있게 — 그동안 화면이 두 번째 누름을 받는지 본다
+      // So a test can hold "sending" open — checking meanwhile whether the screen accepts a second click
       if (this.sendErrorGate) await this.sendErrorGate
       const key = `${projectId ?? '_user'}/${appId}`
       const info = this.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
@@ -1123,7 +1165,7 @@ export class MockPlatform implements Platform {
       this.deliverToBuilder(builderId, builderErrorFrame({ appId, name: info.name ?? appId }, bundle.text))
       return { sessionId: builderId }
     },
-    // 능력 물음 (M4 D-4) — 실물처럼: 목록을 읽고, 답하면 목록에서 빼고 방송한다. 닫힌 물음이면 거절한다
+    // A capability question (M4 D-4) — like the real thing: reads the list, and on an answer removes it from the list and broadcasts. Rejects a closed question
     questions: async (): Promise<AppQuestion[]> => structuredClone(this.appQuestionList),
     answerQuestion: async (questionId: string, decision: 'allow' | 'deny') => {
       const at = this.appQuestionList.findIndex((q) => q.id === questionId)
@@ -1141,7 +1183,7 @@ export class MockPlatform implements Platform {
       this.appPermissions.set(key, (this.appPermissions.get(key) ?? []).filter((p) => p.capability !== capability))
       this.forgottenPermissions.push({ appId, projectId, capability })
     },
-    // 에이전트의 쓰임 (M4 D-5) — 시험이 채운다. 없으면 host처럼 0이다
+    // Agent usage (M4 D-5) — a test fills this in. If absent, 0, like the host
     usage: async (appId: string, projectId: string | null): Promise<AppUsage> =>
       structuredClone(
         this.appUsage.get(`${projectId ?? '_user'}/${appId}`) ?? {
@@ -1150,9 +1192,11 @@ export class MockPlatform implements Platform {
         },
       ),
     /**
-     * 비밀 (M4 E). 실물(`ExternalApps.updateSecret`)처럼: 선언한 이름(목록의 `secrets`)만 넣고, 빈 값은 같은 말로 거절하며,
-     * 목록에는 있음·없음만 싣고 방송한다. 지우기는 이름을 가리지 않는다. 받은 값은 시험이 볼 수 있게 `secretWrites`에 적는다 —
-     * 화면(DOM)에 값이 남지 않는지는 시험이 따로 본다.
+     * A secret (M4 E). Like the real thing (`ExternalApps.updateSecret`): only lets in a
+     * declared name (the list's `secrets`), rejects an empty value with the same wording, and
+     * carries only present/absent in the listing before broadcasting. Deleting does not need
+     * to mask the name. What was received is recorded to `secretWrites` so a test can see it —
+     * whether the value stays out of the screen (the DOM) is checked separately by a test.
      */
     setSecret: async (appId: string, projectId: string | null, name: string, value: string | null): Promise<void> => {
       const a = this.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
@@ -1167,9 +1211,12 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'external_apps_changed' })
     },
     /**
-     * 가져오기 (M4 E-3). 목에는 파일 시스템이 없다 — 시험이 출처마다 host가 돌려줄 확인 창(`importSources`)이나 거절의 말
-     * (`importRefusals`)을 꽂는다. 실물(`AppHandover`)처럼: 준비는 들이는 것이 아니고(목록에 없다), 들이면 꺼진 채(`unconfirmed`)로
-     * 서며, "들이며 켜기"와 켜기는 사람이 본 창의 열쇠일 때만 받는다. 거절의 말은 host의 말 그대로다.
+     * Import (M4 E-3). The mock has no filesystem — for each source, a test plugs in the
+     * review window the host would return (`importSources`) or a rejection wording
+     * (`importRefusals`). Like the real thing (`AppHandover`): preparing does not admit it (it
+     * is not in the list yet); admitting it stands it up disabled (`unconfirmed`); and
+     * "admit and enable" or enabling only accepts the key from the window the person reviewed.
+     * The rejection wording is exactly the host's.
      */
     importPrepare: async (source: string): Promise<{ token: string; review: AppReview }> => {
       this.importPrepares.push(source)
@@ -1232,8 +1279,10 @@ export class MockPlatform implements Platform {
       return structuredClone(a)
     },
     /**
-     * 앱의 판 (M4 E-1) — 시험이 `appVersions`에 채운다. 채우지 않았으면 host처럼: 사용자 폴더 앱은 빈 스냅샷 목록, 프로젝트 앱은 빈
-     * 커밋 목록이다. 되돌리기는 실물처럼 프로젝트 앱을 거절하고, 고른 판이 지금 판이 되며 목록 방송을 한다.
+     * An app's versions (M4 E-1) — a test fills `appVersions`. If not filled, like the host: an
+     * empty snapshot list for a user-folder app, an empty commit list for a project app.
+     * Restoring rejects a project app like the real thing, and makes the chosen version the
+     * current one, then broadcasts the list.
      */
     versions: async (appId: string, projectId: string | null): Promise<AppVersions> => {
       const v = this.appVersions.get(`${projectId ?? '_user'}/${appId}`)
@@ -1252,104 +1301,110 @@ export class MockPlatform implements Platform {
       return structuredClone(a)
     },
   }
-  /** host에 닿은 비밀 넣기·지우기 (M4 E) — 무엇이 어느 앱의 어느 이름으로 갔는지를 시험이 본다 */
+  /** Setting or clearing a secret that reached the host (M4 E) — tests check what went to which app under which name */
   readonly secretWrites: { appId: string; projectId: string | null; name: string; value: string | null }[] = []
-  /** 가져올 출처 → host가 돌려줄 확인 창 (M4 E-3). 시험이 꽂는다 — 목은 폴더와 zip을 읽지 않는다 */
+  /** Import source → the review window the host would return (M4 E-3). A test plugs this in — the mock does not read folders or zips */
   readonly importSources = new Map<string, AppReview>()
-  /** 출처 → host의 거절의 말 (M4 E-3) — 창이 그 말을 그대로 보이는지를 시험이 본다 */
+  /** Source → the host's rejection wording (M4 E-3) — tests check whether the window shows that wording as-is */
   readonly importRefusals = new Map<string, string>()
-  /** 준비된 가져오기(토큰 → 확인 창)와, 들인 앱의 확인 창 (`(프로젝트 ?? _user)/앱`) */
+  /** A prepared import (token → review window), and an admitted app's review window (`(project ?? _user)/app`) */
   private readonly stagedImports = new Map<string, AppReview>()
   readonly appReviews = new Map<string, AppReview>()
-  /** host에 닿은 것 — 준비한 출처, 들인 것(켰는가), 그만둔 것, 켠 앱 */
+  /** What reached the host — sources prepared, admissions (whether enabled), cancellations, apps enabled */
   readonly importPrepares: string[] = []
   readonly importCommits: { token: string; enable: boolean; appId: string }[] = []
   readonly importCancels: string[] = []
   readonly enabledApps: string[] = []
-  /** 앱의 판 (M4 E-1) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다: 판을 뜨는 것은 런타임이다 */
+  /** An app's versions (M4 E-1) — the key is `(project ?? _user)/app`. A test fills this in: keeping a version is the runtime's job */
   readonly appVersions = new Map<string, AppVersions>()
-  /** 되돌리기가 host에 닿은 것 — 확인을 거친 뒤에만 닿는지를 시험이 본다 */
+  /** Restores that reached the host — tests check they only arrive after confirmation */
   readonly restoredVersions: { appId: string; id: string }[] = []
-  /** 앱의 오류 묶음 (M4 C-6) — 열쇠는 `(프로젝트 ?? _user)/앱`, 최근 것부터. 시험이 채운다: 묶음을 만드는 것은 런타임이다 */
+  /** An app's error bundles (M4 C-6) — the key is `(project ?? _user)/app`, most recent first. A test fills this in: making a bundle is the runtime's job */
   readonly appErrors = new Map<string, Omit<AppErrorBundle, 'sentAt'>[]>()
   /**
-   * host가 오류 묶음을 새로 든 것처럼 — 맨 앞에 넣고 목록 방송을 한다(목록의 `lastErrorAt`이 바뀐다). 실물의 런타임이
-   * 묶음을 적을 때 하는 일과 같다: 읽기 전용 도구의 실패는 "바뀌었다"를 내지 않으니 이것이 화면의 유일한 신호다.
+   * As if the host just picked up a new error bundle — puts it in front and broadcasts the
+   * list (the list's `lastErrorAt` changes). The same thing the real runtime does when it
+   * records a bundle: a read-only tool's failure does not emit "changed," so this is the
+   * screen's only signal.
    */
   recordAppError(appId: string, projectId: string | null, bundle: Omit<AppErrorBundle, 'sentAt'>): void {
     const key = `${projectId ?? '_user'}/${appId}`
     this.appErrors.set(key, [bundle, ...(this.appErrors.get(key) ?? [])])
     this.emit({ type: 'external_apps_changed' })
   }
-  /** 보낸 묶음 → 보낸 때 — host처럼 한 번만 */
+  /** Sent bundle → time sent — only once, like the host */
   private readonly errorsSent = new Map<string, number>()
-  /** "Send to builder"가 host에 닿은 것 — 누르기 전에는 비어 있고, 한 번 누르면 하나다 */
+  /** "Send to builder" calls that reached the host — empty before a click, one after */
   readonly errorSends: { appId: string; projectId: string | null; at: number }[] = []
-  /** 오류 묶음을 몇 번 읽었나 — "바뀌었다"가 오면 다시 읽는지를 시험이 본다 */
+  /** How many times a bundle has been read — tests check it is re-read when "changed" arrives */
   errorReads = 0
-  /** 있으면 sendError가 이것을 기다린다 — 보내는 동안의 화면을 시험이 본다 */
+  /** If set, sendError waits on this — lets a test check the screen while a send is in progress */
   sendErrorGate: Promise<void> | null = null
-  /** "New app" 창이 host에 보낸 것 — 창이 무엇을 골랐는지(id·이름·도구)를 시험이 본다 */
+  /** What the "New app" window sent to the host — tests check what the window chose (id, name, tool) */
   readonly createdApps: NewAppSpec[] = []
-  /** 고정 화면의 인스턴스 → 그 앱과 화면 (`openView`가 적는다). host의 ViewHost가 인스턴스로 아는 것과 같다 */
+  /** A pinned screen's instance → its app and screen (recorded by `openView`). Same as what the host's ViewHost knows as an instance */
   readonly pinnedInstances = new Map<string, { appId: string; projectId: string | null; uri: string }>()
-  /** 앱 화면 아래 입력줄이 host에 보낸 것 (M4 C-5) — 무엇을, 어느 화면에서, 무엇을 붙여 보냈는지를 시험이 본다 */
+  /** What the input line below an app screen sent to the host (M4 C-5) — tests check what was sent, from which screen, with what attached */
   readonly builderAsks: BuilderAsk[] = []
   /**
-   * 만드는 세션에 말을 넣는다 — host의 `deliver`처럼: 기록에 남기고, 첨부는 경로째 싣고, 화면에는 `user_message`로
-   * 알린다(host가 넣은 말은 UI가 그려 두지 않았다). 받은 세션은 일을 시작한다.
+   * Puts a message into the builder session — like the host's `deliver`: records it, carries
+   * attachments by path, and notifies the screen with `user_message` (a message the host
+   * injected was not already drawn by the UI). The receiving session starts working.
    */
   private deliverToBuilder(sessionId: string, text: string, attachments?: Attachment[]): void {
     const s = this.sessions.get(sessionId)
     if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     s.live = true
-    // emit이 host처럼 기록에 남기고 seq를 매긴다 (sendViewMessage와 같은 길)
+    // emit records it and assigns a seq, like the host (the same path as sendViewMessage)
     this.emit({ type: 'user_message', sessionId, seq: (this.messages.get(sessionId)?.length ?? 0) + 1, text, ...(attachments?.length ? { attachments } : {}) })
     this.emit({ type: 'state_change', sessionId, state: 'working' })
   }
-  /** 앱 → 만드는 세션 (M4 C-2). 열쇠는 `(프로젝트 ?? _user)/앱` — 실물의 명부(APP_BUILDERS_KEY)와 같은 모양 */
+  /** App → builder session (M4 C-2). The key is `(project ?? _user)/app` — the same shape as the real registry (APP_BUILDERS_KEY) */
   readonly appBuilders = new Map<string, string>()
   /**
-   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 시험이 `askAppQuestion`으로 세운다. host처럼 방송하고, 답이 오면 그 물음을
-   * 기다리던 쪽(시험이 꽂은 `appToolHandler`)을 푼다. 그래서 "답하면 멈춰 있던 화면의 호출이 이어진다"를 실제 길로 본다.
+   * A capability question from a chain that started at a screen (M4 D-4) — a test sets one up
+   * with `askAppQuestion`. Broadcasts like the host, and when an answer comes in, resolves
+   * whichever side was waiting on that question (a test-supplied `appToolHandler`). This is how
+   * "answering resumes the stalled screen's call" is checked over a real path.
    */
   appQuestionList: AppQuestion[] = []
   readonly answeredQuestions: { questionId: string; decision: 'allow' | 'deny' }[] = []
   private questionWaiters = new Map<string, (d: 'allow' | 'deny') => void>()
-  /** 기억된 답 (M4 D-4) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다 */
+  /** Remembered answers (M4 D-4) — the key is `(project ?? _user)/app`. A test fills this in */
   readonly appPermissions = new Map<string, AppPermission[]>()
-  /** 에이전트의 쓰임 (M4 D-5) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다 */
+  /** Agent usage (M4 D-5) — the key is `(project ?? _user)/app`. A test fills this in */
   readonly appUsage = new Map<string, AppUsage>()
   readonly forgottenPermissions: { appId: string; projectId: string | null; capability: string }[] = []
-  /** 시나리오 헬퍼: host가 능력 물음을 세운다 — 답이 오면 풀리는 약속을 돌려준다 (Playwright에서 사용) */
+  /** Scenario helper: the host sets up a capability question — returns a promise that resolves once an answer arrives (used from Playwright) */
   askAppQuestion(q: AppQuestion): Promise<'allow' | 'deny'> {
     this.appQuestionList.push(structuredClone(q))
     this.emit({ type: 'external_app_questions_changed' })
     return new Promise((resolve) => this.questionWaiters.set(q.id, resolve))
   }
-  /** 승인 카드에 한 답 — 어느 카드에 무엇을 눌렀는지를 시험이 본다 */
+  /** An answer given on an approval card — tests check which card got which click */
   readonly approvalAnswers: { sessionId: string; requestId: string; decision: ApprovalDecision }[] = []
-  /** 다시 시작한 앱 — Restart 단추가 host에 닿았는지를 시험이 본다 */
+  /** Apps asked to restart — tests check whether the Restart button reached the host */
   readonly restarts: { appId: string; projectId: string | null }[] = []
   /**
-   * 실행 기록 (M4 B-7) — 열쇠는 `(프로젝트 ?? _user)/앱`. 시험이 채운다(최근 것부터). host처럼 읽기만
-   * 하고 만들지 않는다: 기록을 만드는 것은 런타임의 단 하나의 길이고, 그 시험은 agent-host에 있다.
+   * Run history (M4 B-7) — the key is `(project ?? _user)/app`. A test fills this in (most
+   * recent first). Like the host, this only reads and never creates: making a record is the
+   * runtime's one and only path, and its test lives in agent-host.
    */
   readonly appRuns = new Map<string, AppRun[]>()
-  /** 기록을 몇 번 읽었나 — "바뀌었다"가 오면 다시 읽는지를 시험이 본다 */
+  /** How many times the history has been read — tests check it is re-read when "changed" arrives */
   appRunReads = 0
-  /** 있으면 기록을 여기서 읽는다 — 시험이 진짜 런타임의 기록(`ExternalApps.runs`)을 꽂는다 */
+  /** If set, history is read from here instead — a test plugs in the real runtime's history (`ExternalApps.runs`) */
   appRunsProvider: ((appId: string, projectId: string | null, limit: number) => AppRun[] | Promise<AppRun[]>) | null = null
-  /** 지운 사용자 폴더 앱 — 확인을 거친 뒤에만 host에 닿는지를 시험이 본다 */
+  /** A deleted user-folder app — tests check it only reaches the host after confirmation */
   readonly removedApps: string[] = []
-  /** 연 고정 화면과 닫은 인스턴스 — "몇 번 열었나", "닫을 때 놓았나"를 시험이 본다 */
+  /** Pinned screens opened and instances closed — tests check "how many times opened," "released on close" */
   readonly openedViews: { appId: string; projectId: string | null }[] = []
   readonly closedViews: string[] = []
-  /** 대화 안 화면의 인스턴스 → 그 대화와 앱 (M4 B-1) — `app_view`의 open을 방송할 때 적는다 */
+  /** An in-conversation screen's instance → its conversation and app (M4 B-1) — recorded when broadcasting `app_view`'s open */
   readonly inlineInstances = new Map<string, { sessionId: string; appId: string; projectId: string | null }>()
-  /** 대화 안 화면이 대화에 보낸 말 — 사람이 확인한 뒤에만 여기 닿는지를 시험이 본다 */
+  /** Messages an in-conversation screen sent into the conversation — tests check these only reach here after the person confirms */
   readonly viewMessages: { sessionId: string; instanceId: string; text: string }[] = []
-  /** 대화 안 화면의 입력과 결말 — host처럼 들고 있다가 다시 열 때 돌려준다. 열쇠는 `세션 카드` */
+  /** An in-conversation screen's input and outcome — held like the host, and returned when reopened. The key is the `session callId` pair */
   readonly inlineRecords = new Map<
     string,
     {
@@ -1359,36 +1414,36 @@ export class MockPlatform implements Platform {
       toolInput: Record<string, unknown>
       toolResult?: AppToolResult
       cancelled?: string
-      /** 열린 인스턴스 — 닫히면 null (기록은 남는다) */
+      /** The open instance — null once closed (the record stays) */
       instanceId: string | null
     }
   >()
-  /** 다시 연 화면 — "Reopen"이 host에 닿았는지를 시험이 본다 */
+  /** Reopened screens — tests check whether "Reopen" reached the host */
   readonly reopenedViews: { sessionId: string; callId: string }[] = []
-  /** 다시 열 때 새 인스턴스를 짓는 쪽 (시험이 진짜 ViewHost를 꽂는다) */
+  /** The side that builds a new instance when reopening (a test plugs in the real ViewHost) */
   inlineInstanceProvider: ((appId: string, projectId: string | null) => string | Promise<string>) | null = null
   openViewProvider: ((appId: string, projectId: string | null) => Promise<AppHomeView>) | null = null
-  /** 발견된 외부 앱 (M4 A-8) — 시험이 `setExternalApps`로 채운다. 목의 발견은 이 배열이다 */
+  /** External apps discovered (M4 A-8) — a test fills this in with `setExternalApps`. The mock's discovery is this array */
   externalAppList: ExternalAppInfo[] = []
-  /** host가 하는 대로: 목록을 바꾸고 `external_apps_changed`를 방송한다 */
+  /** Like the host: changes the list and broadcasts `external_apps_changed` */
   setExternalApps(list: ExternalAppInfo[]): void {
     this.externalAppList = structuredClone(list)
     this.emit({ type: 'external_apps_changed' })
   }
   lastInvoke: { appId: string; name: string; args: Record<string, unknown> } | null = null
-  /** 화면 주소를 짓는 쪽 (시험이 꽂는다) */
+  /** The side that builds a screen's address (a test plugs this in) */
   viewFrameProvider:
     | ((appId: string, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }) => Promise<AppViewFrame>)
     | null = null
-  /** 화면이 부른 도구 — 무엇이 어느 앱 이름으로 나갔는지를 시험이 본다 */
+  /** Tools called from a screen — tests check what went out under which app's name */
   readonly appToolCalls: { appId: string; tool: string; args: Record<string, unknown>; from: AppCallOrigin }[] = []
   appToolHandler: ((appId: string, tool: string, args: Record<string, unknown>, from: AppCallOrigin) => AppToolResult | Promise<AppToolResult>) | null =
     null
-  /** `${appId} ${uri}` → 읽기 결과 */
+  /** `${appId} ${uri}` → the read result */
   readonly appResources = new Map<string, AppResourceResult>()
   readonly appResourceReads: { appId: string; uri: string; from: AppCallOrigin }[] = []
 
-  /** 도구 감지 결과 — 테스트가 "로그인 안 된 도구"를 만들 수 있게 밖에 둔다 */
+  /** The detected tools — kept outside so a test can build "a tool that is not logged in" */
   detected: ToolStatus[] = [
     {
       name: 'claude',
@@ -1413,8 +1468,9 @@ export class MockPlatform implements Platform {
   ]
 
   /**
-   * 테스트가 심는 "남은 프로세스" 목록 — 실물은 ps·lsof로 찾지만 목은 그 자리를 흉내만 낸다
-   * (검증 대상은 종료 흐름이지 프로세스 탐지가 아니다. 탐지 규칙은 host 단위 시험이 본다).
+   * The "leftover process" list a test plants — the real thing finds these with ps and lsof,
+   * but the mock only fakes that spot (what is being verified is the shutdown flow, not
+   * process detection; the detection rules are covered by the host's unit tests).
    */
   strayProcesses: { pid: number; command: string; cwd: string }[] = []
 
@@ -1439,18 +1495,20 @@ export class MockPlatform implements Platform {
           }
         : null
       /*
-       * 실물과 같은 규칙 (#69, manager.managerFor): 워크트리 세션은 태어나는 순간부터
-       * 매니저 아래에 선다. 매니저는 자식을 가진 보통 세션이고, 없으면 행만 만든다
-       * (live=false — 프로세스는 말을 걸 때 태어난다).
+       * The same rule as the real thing (#69, manager.managerFor): a worktree session stands
+       * under a manager from the moment it is born. The manager is an ordinary session with
+       * children, and if there is none, only a row is created (live=false — the process is
+       * born when someone speaks to it).
        */
       let parentSessionId: string | null = null
       if (worktree && params.projectId) {
         const projectId = params.projectId
         const owner = this.projectsList.find((p) => p.id === projectId)
         /*
-         * 찾는 순서도 실물 그대로다 (#76): 프로젝트가 가리키는 자리 → 관계 → 만들기.
-         * 여기서 첫 갈래를 빼먹었더니 먼저 만들어 둔 매니저 옆에 두 번째 매니저가
-         * 섰다 (e2e가 잡았다) — 목이 실물보다 게으르면 계약이 화면에서만 갈라진다.
+         * The lookup order is also exactly the real thing's (#76): where the project points →
+         * relationship → create. Skipping the first branch here once made a second manager
+         * stand up next to one already created (e2e caught it) — if the mock is lazier than
+         * the real thing, the contract splits on screen only.
          */
         const seated = owner?.worktreeManager && this.sessions.get(owner.worktreeManager.sessionId)
         const withKids = new Set([...this.sessions.values()].map((x) => x.parentSessionId).filter(Boolean))
@@ -1488,7 +1546,7 @@ export class MockPlatform implements Platform {
           this.sessions.set(mgrId, mgr)
           this.emit({ type: 'session_created', sessionId: mgrId, session: mgr })
         }
-        // 관계로 찾았거나 방금 만든 자리도 프로젝트가 가리키게 한다 (실물의 자가 치유)
+        // Whether found through the relationship or just created, has the project point to it too (the real thing's self-healing)
         if (owner)
           owner.worktreeManager = { sessionId: mgr.id, baseBranch: owner.worktreeManager?.baseBranch ?? '' }
         parentSessionId = mgr.id
@@ -1508,9 +1566,10 @@ export class MockPlatform implements Platform {
         verbosity: params.verbosity ?? null,
         serviceTier: params.serviceTier ?? null,
         /*
-         * 실물과 같은 규칙 (#69): 사람이 브랜치를 정했으면 그 이름이 세션 이름이고 자동
-         * 이름이 덮지 않는다. 안 정했으면 자동 브랜치 이름으로 **시작**한다 — 'New session'
-         * 이던 자리라 워크트리 칸에서 어느 줄이 어느 브랜치인지 안 읽혔다.
+         * The same rule as the real thing (#69): if the person set the branch name, that name
+         * is the session name and the automatic name does not overwrite it. If they did not,
+         * it **starts** as the automatic branch name — this used to be 'New session' here, and
+         * in the worktree panel it was unreadable which row was which branch.
          */
         name:
           (params.worktreeBranch?.trim() || undefined) ??
@@ -1531,16 +1590,18 @@ export class MockPlatform implements Platform {
       }
       if (params.resumeExternalId) info.externalId = params.resumeExternalId
       this.sessions.set(id, info)
-      // 실물과 같은 규칙: 마지막에 고른 도구가 그 프로젝트의 기본값이 된다 (manager.createSession)
+      // The same rule as the real thing: the last tool chosen becomes that project's default (manager.createSession)
       const owner = this.projectsList.find((p) => p.id === params.projectId)
       if (owner) owner.defaultTool = params.tool
       /*
-       * 실물과 같은 순서 (#172): host는 세션을 만들면 `session_created`를 먼저 방송하고, 그 뒤에 인수인계 마커와 첫
-       * 프롬프트를 방송한 다음에야 응답한다. 목이 이것을 빼먹는 동안 이벤트는 등록 전에 도착해 보관됐다가 응답 뒤에
-       * 재생되어, 응답이 화면의 대화를 덮어쓰는 결함이 목 위에서만 가려졌다.
+       * The same order as the real thing (#172): once the host creates a session, it broadcasts
+       * `session_created` first, and only after broadcasting the handoff marker and the first
+       * prompt does it respond. While the mock skipped this, an event arriving before
+       * registration would be held and replayed after the response, and a defect where the
+       * response overwrites the screen's conversation was masked on the mock only.
        */
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
-      // 불러오기: 이전 대화를 이미 읽은 상태로 복원한다 (host의 importHistory와 같은 규칙)
+      // Import: restores a previous conversation already marked as read (the same rule as the host's importHistory)
       if (params.importHistory && params.resumeExternalId) {
         const history = this.externalHistory.get(params.resumeExternalId) ?? []
         for (const h of history) {
@@ -1562,8 +1623,9 @@ export class MockPlatform implements Platform {
         else if (firstUser) info.name = firstUser.text.slice(0, 40)
       }
       /*
-       * 실물과 같은 규칙 (#102): 물려받은 노트는 첫 메시지가 아니라 **마커**로 남는다.
-       * 목이 이걸 빼먹으면 "파일을 잃어도 노트는 남는다"는 계약이 화면에서만 성립한다.
+       * The same rule as the real thing (#102): an inherited note is not kept as the first
+       * message but as a **marker**. If the mock skips this, "the note survives even if the
+       * file is lost" becomes a contract that only holds on screen.
        */
       if (params.handoff) {
         const seq = (this.messages.get(id)?.length ?? 0) + 1
@@ -1581,8 +1643,10 @@ export class MockPlatform implements Platform {
       }
       if (params.initialPrompt) {
         /*
-         * 실물과 같은 규칙 (#172): 첫 프롬프트는 기록에 남고 `user_message`로 방송된 뒤에 응답이 간다. 보통의 `send`는
-         * 확인을 보내지 않으므로(목의 약속) 여기서는 host처럼 직접 알린다 — emit이 기록에 남기고 번호를 매긴다.
+         * The same rule as the real thing (#172): the first prompt is recorded and broadcast as
+         * `user_message` before the response goes out. The ordinary `send` does not send an
+         * acknowledgement (that is the mock's contract), so here it notifies directly like the
+         * host — emit records it and assigns the number.
          */
         this.emit({ type: 'user_message', sessionId: id, seq: (this.messages.get(id)?.length ?? 0) + 1, text: params.initialPrompt })
         info.lastReadSeq = info.lastSeq
@@ -1610,7 +1674,7 @@ export class MockPlatform implements Platform {
       if (attachments?.length) this.sentAttachments.push(...attachments)
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
-      // host와 같은 규칙: 잠들어 있으면 되살리고 나서 보낸다 (자동 이어가기)
+      // The same rule as the host: if it is asleep, revive it and then send (automatic resume)
       if (!s.live) {
         if (this.unresumable.has(sessionId)) {
           throw Object.assign(
@@ -1623,7 +1687,7 @@ export class MockPlatform implements Platform {
         s.live = true
       }
       const seq = (this.messages.get(sessionId)?.length ?? 0) + 1
-      // 실물과 같은 규칙: 첨부도 payload에 남고, 이미지 바이트는 "디스크"(여기선 맵)에서 다시 실린다
+      // The same rule as the real thing: attachments also stay in the payload, and image bytes are re-loaded from "disk" (a map, here)
       const stored = attachments?.map((a) =>
         a.kind === 'image' && this.attachmentData.has(a.path)
           ? { ...a, data: this.attachmentData.get(a.path) }
@@ -1654,8 +1718,9 @@ export class MockPlatform implements Platform {
       this.approvalAnswers.push({ sessionId, requestId, decision })
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
       /*
-       * 능력 물음의 카드(M4 D-4, host가 `cap-`로 세운다)는 어댑터의 카드가 아니다 — host가 답을 받으면 기다리던 앱의 호출이
-       * 이어지고, 에이전트는 그 도구의 결과를 받아 턴을 마친다. 목은 그 이어짐을 흉내 낸다.
+       * A capability-question card (M4 D-4, set up by the host with a `cap-` prefix) is not an
+       * adapter's card — once the host receives an answer, the waiting app's call resumes, and
+       * the agent gets that tool's result and finishes the turn. The mock fakes that resumption.
        */
       if (requestId.startsWith('cap-')) {
         this.emit({ type: 'state_change', sessionId, state: 'working' })
@@ -1670,7 +1735,7 @@ export class MockPlatform implements Platform {
     },
     answerQuestion: async (sessionId: string, requestId: string, answers: QuestionAnswer[]) => {
       this.emit({ type: 'question_resolved', sessionId, requestId })
-      // 무엇이 돌아갔는지 화면에서 확인할 수 있어야 한다 (표시만 되고 답이 안 가면 반쪽이다)
+      // It has to be possible to confirm on screen what came back (a display with no delivered answer would be only half done)
       this.emit({
         type: 'message_delta',
         sessionId,
@@ -1691,9 +1756,11 @@ export class MockPlatform implements Platform {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
       /*
-       * 실물과 같은 규칙: 도구를 바꾸면 이어갈 실마리를 끊고, **모델과 딸린 설정도 놓는다**
-       * (실측으로 확인된 규칙 — manager.switchTool 주석 참고: 'sonnet'을 든 채 codex로
-       * 가면 첫 턴이 400으로 죽는다). 워크트리는 디렉토리 사실이라 도구와 무관하다.
+       * The same rule as the real thing: switching tools breaks the thread to resume, and
+       * **also drops the model and its attached settings** (a rule confirmed by measurement —
+       * see the comment on manager.switchTool: keeping 'sonnet' while switching to codex kills
+       * the first turn with a 400). The worktree is a fact about the directory, so it is
+       * unaffected by the tool.
        */
       const next = {
         ...s,
@@ -1711,12 +1778,12 @@ export class MockPlatform implements Platform {
       return next
     },
     orchestrator: async () => {
-      // 실물과 같은 규칙: 없으면 그 자리에서 만든다. 프로젝트에는 속하지 않는다
+      // The same rule as the real thing: creates one on the spot if there is none. Does not belong to a project
       const found = [...this.sessions.values()].find((x) => x.projectId === null)
       if (found) return found
       const id = `orc-${++this.idc}`
       const info = {
-        // 실물과 같은 규칙: 도구는 소개 화면의 선택을 따른다 (#63)
+        // The same rule as the real thing: the tool follows the choice on the intro screen (#63)
         id,
         projectId: null,
         kind: 'orchestrator' as const,
@@ -1743,7 +1810,7 @@ export class MockPlatform implements Platform {
       this.sessions.set(id, info)
       return info
     },
-    // 실물과 같은 규칙 (#63): 화면 열기는 묻기만 한다 — 만드는 것은 첫 질문의 orchestrator()다
+    // The same rule as the real thing (#63): opening the screen only asks — creating it is orchestrator()'s job, at the first question
     orchestratorPeek: async () => [...this.sessions.values()].find((x) => x.projectId === null) ?? null,
     configureOrchestrator: async (tool: ToolName) => {
       this.orchestratorTool = tool
@@ -1758,7 +1825,7 @@ export class MockPlatform implements Platform {
       models:
         tool === 'codex'
           ? [
-              // 실측 모양 그대로: 티어는 큰 모델에만 있다 (priority = Fast, 1.5x)
+              // Exactly the measured shape: tiers exist only on the big model (priority = Fast, 1.5x)
               {
                 id: 'gpt-5.6-terra',
                 label: 'gpt-5.6-terra',
@@ -1803,9 +1870,10 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     },
     /**
-     * 죽은-에이전트 인수인계 기록 (#78) — 실물처럼 세션 이름이 실린 결정적 텍스트를 준다.
-     * 실물과 같이 **노트 자리에 놓는다** (#102, #142): 두 모드가 한 자리로 모이는 것이 이 기능의
-     * 계약이다. 자리는 host의 데이터 폴더라 목의 프로젝트 파일(fsState)에는 놓지 않는다.
+     * A dead-agent handoff record (#78) — gives deterministic text carrying the session name,
+     * like the real thing. **Placed in the notes location**, like the real thing (#102, #142):
+     * the two modes converging on one location is the contract of this feature. The location
+     * is the host's data folder, so it is not placed in the mock's project files (fsState).
      */
     exportHandoffRecord: async (sessionId: string, toTool?: ToolName) => {
       const s = this.sessions.get(sessionId)
@@ -1814,8 +1882,10 @@ export class MockPlatform implements Platform {
       return { text, path: this.placeHandoffNote(s, text) }
     },
     /**
-     * 살아 있는 인수인계의 노트 (#142) — 실물과 같은 규칙: afterSeq 뒤 첫 사람 말이 부탁이고, 그 뒤 다음 사람 말
-     * 앞의 **마지막** assistant 글이 노트다. 목도 말 하나를 행 하나에 모으므로(emit) 마지막 행이 곧 마지막 말이다.
+     * The note for a live handoff (#142) — the same rule as the real thing: the first human
+     * message after afterSeq is the request, and the note is the **last** assistant message
+     * before the next human message. The mock also gathers a message into one row (emit), so
+     * the last row is exactly the last message.
      */
     exportHandoffNote: async (sessionId: string, afterSeq: number) => {
       const s = this.sessions.get(sessionId)
@@ -1835,7 +1905,7 @@ export class MockPlatform implements Platform {
       note = note.trim()
       return note ? { text: note, path: this.placeHandoffNote(s, note) } : null
     },
-    /** 목에서도 워크트리를 흉내낸다 — UI가 "물어보고 지운다"를 시험할 수 있어야 한다 */
+    /** Fakes a worktree in the mock too — the UI needs to be able to test "ask, then delete" */
     worktreeStatus: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
       if (!s?.worktree) return null
@@ -1904,7 +1974,7 @@ export class MockPlatform implements Platform {
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
       return { session: { ...s }, resumed: true }
     },
-    /** 잠긴 대화에서 갈라져 나온다 — 사본을 가리키게 되므로 잠금이 풀린 것과 같아진다 */
+    /** Forks off a locked conversation — pointing at a copy makes it the same as if the lock had come off */
     forkConversation: async (sessionId: string) => {
       const s = this.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
@@ -1914,9 +1984,9 @@ export class MockPlatform implements Platform {
       return { session: { ...s }, resumed: true }
     },
     /*
-      실패는 실패로 돌려준다 — host(manager.rename)와 같은 규칙이다.
-      조용히 넘기면 "이름을 바꿨는데 목록은 그대로"가 mock에서만 재현되지 않아,
-      실제 앱에서만 터지는 종류의 버그가 된다.
+      Returns a failure as a failure — the same rule as the host (manager.rename).
+      Passing it through silently would mean "renamed, but the list stayed the same" cannot be
+      reproduced in the mock, turning it into the kind of bug that only surfaces in the actual app.
     */
     rename: async (sessionId: string, name: string) => {
       const s = this.sessions.get(sessionId)
@@ -1938,7 +2008,7 @@ export class MockPlatform implements Platform {
       return filtered.slice(-limit)
     },
     listExternalSessions: async (_projectId: string, tool: ToolName, _limit = 30) => {
-      // host와 같은 규칙: 숨기지 않은 세션이 들고 있는 원본은 '이미 열려 있음'이다
+      // The same rule as the host: the original held by a session that is not hidden is "already open"
       const known = new Map<string, string>()
       for (const s of this.sessions.values()) {
         if (s.tool !== tool) continue
@@ -1965,9 +2035,9 @@ export class MockPlatform implements Platform {
       resume: true,
       autoTitle: true,
       attachments: ['image', 'file'],
-      // 실물과 같은 모양: codex만 응답 길이 노브가 있다 (#54) — UI가 이 배열로 행을 그린다
+      // The same shape as the real thing: only codex has a response-length knob (#54) — the UI draws its row from this array
       verbosities: tool === 'codex' ? ['low', 'medium', 'high'] : [],
-      // 실물과 같은 모양: codex만 writer lock이 있다 (UI는 아직 안 읽지만 모양은 실물을 따른다)
+      // The same shape as the real thing: only codex has a writer lock (the UI does not read this yet, but the shape follows the real thing)
       exclusiveWriter: tool === 'codex',
     }),
     detect: async () => this.detected,
@@ -1982,11 +2052,12 @@ export class MockPlatform implements Platform {
   }
 
   /**
-   * 프로젝트를 돌려줄 때 변경 수를 **gitState에서 다시 센다** (이슈 #41).
+   * When returning a project, **recounts the change count from gitState** (issue #41).
    *
-   * 실물 host에서 사이드바의 숫자와 깃 패널의 목록은 같은 `git status` 한 번의 두 가지
-   * 읽기다. 목이 숫자를 따로 들고 있으면 테스트가 파일 목록을 바꿔도 숫자는 옛것이
-   * 남는데, 그건 실물이 만들 수 없는 불일치다 — 이 파일 머리말의 계약이 그것이다.
+   * On the real host, the sidebar's number and the git panel's listing are two readings of
+   * the same single `git status`. If the mock held the number separately, a test that changes
+   * the file list would leave the number stale — an inconsistency the real thing could never
+   * produce, and the contract this file's header lays out.
    */
   private withGit(p: ProjectInfo): ProjectInfo {
     return p.git ? { ...p, git: { ...p.git, changedFiles: this.gitState.files.length } } : { ...p }
@@ -2015,12 +2086,12 @@ export class MockPlatform implements Platform {
         path,
         name: osPathBaseName(path) || path,
         defaultTool: 'claude',
-        // 도구별 기본 모델·강도 (#107) — 아무것도 고른 적 없는 새 프로젝트는 비어 있다
+        // Default model and strength per tool (#107) — empty for a new project that has never had anything chosen
         defaultModels: {},
         commands: [],
         worktreeSetup: null,
         worktreeManager: null,
-        // 새로 등록한 프로젝트는 신뢰하지 않은 채로 시작한다 — 실물과 같다 (M4, 결정 3)
+        // A newly registered project starts untrusted — the same as the real thing (M4, decision 3)
         trusted: false,
         git: { branch: 'main', changedFiles: 0, isRepo: true },
       }
@@ -2028,15 +2099,15 @@ export class MockPlatform implements Platform {
       return info
     },
     /**
-     * 신뢰 (M4). 실물처럼 그 프로젝트의 앱 목록이 따라간다: 런타임은 신뢰가 바뀌면 다시 훑고,
-     * 신뢰하지 않은 프로젝트의 앱은 `untrusted`로, 신뢰하면 쉬는 앱(`stopped`)으로 선다. 목이 이것을
-     * 빠뜨리면 E2E는 "신뢰하기"를 눌러도 앱이 막힌 채로 남는 화면을 초록으로 통과시킨다.
+     * Trust (M4). Like the real thing, that project's app list follows along: the runtime
+     * re-scans when trust changes, standing an untrusted project's apps as `untrusted` and a
+     * trusted one's as resting (`stopped`). If the mock skips this, e2e would pass green on a
+     * screen where clicking "Trust" still leaves the app blocked.
      */
     setTrusted: async (projectId: string, trusted: boolean) => {
       const at = this.projectsList.findIndex((x) => x.id === projectId)
       if (at === -1) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
-      // 새 객체로 바꿔 끼운다 — `add`가 돌려준 객체를 화면이 그대로 들고 있어서, 고쳐 쓰면 전선을
-      // 건너지 않은 값이 화면에 새어 든다(실물의 답은 늘 새 객체다)
+      // Swaps in a new object — the screen holds onto the object `add` returned as-is, so mutating it would let a value that never crossed the wire leak into the screen (the real thing's response is always a new object)
       this.projectsList[at] = { ...this.projectsList[at]!, trusted }
       this.trustCalls.push({ projectId, trusted })
       const mine = this.externalAppList.filter((a) => a.projectId === projectId)
@@ -2056,9 +2127,10 @@ export class MockPlatform implements Platform {
       return this.withGit(p)
     },
     /*
-     * 실물과 같은 순서로 없앤다: 세션을 하나씩 지우며 `session_deleted`를 쏘고,
-     * 그 다음 프로젝트를 뺀다. 화면은 그 이벤트로 목록을 비우므로, 목이 프로젝트만
-     * 조용히 지우면 E2E에서는 사이드바에 유령 세션이 남는다. The sessions go to the trash (#204), marked to keep
+     * Removes things in the same order as the real thing: deletes sessions one by one, firing
+     * `session_deleted` for each, then drops the project. The screen clears its list from that
+     * event, so if the mock silently deleted only the project, e2e would be left with ghost
+     * sessions in the sidebar. The sessions go to the trash (#204), marked to keep
      * the tool's files and worktrees, as the host does.
      */
     remove: async (projectId: string) => {
@@ -2071,10 +2143,11 @@ export class MockPlatform implements Platform {
       return { ok: true as const }
     },
     /**
-     * 등록된 셸 명령 (이슈 #44).
+     * The registered shell commands (issue #44).
      *
-     * **host와 똑같이 빈 줄을 걷어낸다.** 목이 실물보다 너그러우면 E2E는 초록인데
-     * 실제 앱에서만 다르게 동작하는 자리가 생긴다 — 이 파일 머리말의 계약이 그것이다.
+     * **Strips blank lines exactly like the host.** If the mock were more forgiving than the
+     * real thing, e2e would stay green while the actual app behaved differently — the contract
+     * this file's header lays out.
      */
     setCommands: async (projectId: string, commands: SavedCommand[]) => {
       const p = this.projectsList.find((x) => x.id === projectId)
@@ -2087,7 +2160,7 @@ export class MockPlatform implements Platform {
       })
       return [...p.commands]
     },
-    // 실물과 같은 규칙 (#69): 빈 설정은 null로 눕는다 — 목이 더 너그러우면 계약이 흩어진다
+    // The same rule as the real thing (#69): an empty setup lays down as null — a mock that is more forgiving would split the contract apart
     setWorktreeSetup: async (projectId: string, setup: { command: string; copyFiles: string[] } | null) => {
       const p = this.projectsList.find((x) => x.id === projectId)
       if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
@@ -2097,9 +2170,10 @@ export class MockPlatform implements Platform {
       p.worktreeSetup = clean && (clean.command || clean.copyFiles.length) ? clean : null
     },
     /*
-     * 실물과 같은 규칙 (#76): 자리는 프로젝트당 하나이고, 다시 부르면 **줄기만 고쳐진다**.
-     * 매니저 행은 워크트리 세션의 부모로 태어나므로 여기서도 프로세스 없는 행으로 만든다
-     * (live:false) — 목이 살아 있는 세션을 만들면 화면이 실물보다 앞서 나간다.
+     * The same rule as the real thing (#76): there is one slot per project, and calling this
+     * again **only rewrites the trunk**. The manager row is born as the worktree session's
+     * parent, so this also creates it as a process-less row (live:false) — if the mock created
+     * a live session, the screen would get ahead of the real thing.
      */
     createWorktreeManager: async (projectId: string, baseBranch: string) => {
       const p = this.projectsList.find((x) => x.id === projectId)
@@ -2145,8 +2219,9 @@ export class MockPlatform implements Platform {
   }
 
   /**
-   * 목 터미널. 진짜 셸을 띄우지 않고 **cwd로 묶이는 성질**만 흉내낸다 —
-   * 검증하려는 것은 "세션을 바꿔도 같은 터미널이 이어지는가"이지 셸 자체가 아니다.
+   * The mock terminal. Does not spawn a real shell — it fakes only **the property of being
+   * bound to a cwd**, since what is being verified is "does the same terminal carry over when
+   * the session changes," not the shell itself.
    */
   terminalState: {
     byCwd: Map<string, { id: string; title: string; history: string; alive: boolean }[]>
@@ -2157,7 +2232,7 @@ export class MockPlatform implements Platform {
   private termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
   private termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
 
-  /** 테스트용: 터미널이 뭔가 출력한 상황을 만든다 */
+  /** For tests: makes a terminal produce some output */
   emitTerminal(terminalId: string, data: string): void {
     for (const [, list] of this.terminalState.byCwd) {
       for (const t of list) if (t.id === terminalId) t.history += data
@@ -2165,7 +2240,7 @@ export class MockPlatform implements Platform {
     for (const h of this.termHandlers) h({ terminalId, data })
   }
 
-  /** 테스트용: 셸이 죽은 상황 — 명령 실행(runId)이 아닌 exit도 같은 레인을 탄다 */
+  /** For tests: the shell has died — an exit that is not a command run (runId) rides the same lane */
   emitTerminalExit(terminalId: string, exitCode: number | null): void {
     for (const [, list] of this.terminalState.byCwd) {
       for (const t of list) if (t.id === terminalId) t.alive = false
@@ -2237,7 +2312,7 @@ export class MockPlatform implements Platform {
     },
   }
 
-  /** 자주 쓰는 명령어 실행 상태 (#60). 키는 실물과 같은 (projectId, command) 짝 */
+  /** Run state for frequently used commands (#60). The key is the same (projectId, command) pair as the real thing */
   commandRuns = new Map<
     string,
     {
@@ -2252,14 +2327,14 @@ export class MockPlatform implements Platform {
   private runKey(projectId: string, command: string): string {
     return `${projectId}\u0000${command}`
   }
-  /** 테스트용: 돌고 있는 실행이 출력을 뱉는 상황 (터미널과 같은 레인으로 나간다) */
+  /** For tests: a running command produces output (goes out on the same lane as the terminal) */
   emitCommandOutput(projectId: string, command: string, data: string): void {
     const r = this.commandRuns.get(this.runKey(projectId, command))
     if (!r) return
     r.history += data
     for (const h of this.termHandlers) h({ terminalId: r.runId, data })
   }
-  /** 테스트용: 실행이 끝나는 상황 — 단발성 명령의 결말 */
+  /** For tests: a run finishes — the outcome of a one-shot command */
   exitCommand(projectId: string, command: string, exitCode: number): void {
     const r = this.commandRuns.get(this.runKey(projectId, command))
     if (!r || !r.running) return
@@ -2268,7 +2343,7 @@ export class MockPlatform implements Platform {
     for (const h of this.termExitHandlers) h({ terminalId: r.runId, exitCode })
   }
 
-  // 실물과 같은 계약 (#60): 명령별 마지막 실행 하나, 재실행은 죽이고 교체, 로그는 살아있는 동안
+  // The same contract as the real thing (#60): one last run per command, a re-run kills and replaces it, and the log lives as long as the run does
   readonly commands = {
     run: async (projectId: string, command: string, _cols: number, _rows: number) => {
       const r = {
@@ -2284,7 +2359,7 @@ export class MockPlatform implements Platform {
       return rest
     },
     stop: async (projectId: string, command: string) => {
-      // 실물은 kill 뒤 onExit이 온다 — 목은 그 결말을 바로 낸다 (130 = SIGINT 관례)
+      // In the real thing, onExit comes after kill — the mock produces that outcome immediately (130 = the SIGINT convention)
       this.exitCommand(projectId, command, 130)
     },
     state: async (projectId: string) => {
@@ -2320,7 +2395,7 @@ export class MockPlatform implements Platform {
       this.openedUrls.push(url)
     },
     startWindowDrag: async () => {
-      // 창을 끈 횟수 — "칸을 옮기려 했는데 앱 창이 움직였다"를 테스트가 볼 수 있어야 한다
+      // The number of times the window drag started — a test needs to be able to see "tried to move a panel, but the app window moved instead"
       this.windowDrags++
     },
     pickDirectory: async () => this.nextPickedDirectory,
@@ -2334,10 +2409,10 @@ export class MockPlatform implements Platform {
     },
   }
 
-  /** 창 끌기가 몇 번 시작됐나 (Playwright에서 확인) */
+  /** How many times a window drag started (checked from Playwright) */
   windowDrags = 0
 
-  /** 소리·독으로 부른 기록 — 배너가 죽어 있어도 이쪽은 울려야 한다 */
+  /** The record of calls made with sound and the dock — this one has to ring even if the banner is dead */
   alerts: { kind: AlertKind; sound: boolean }[] = []
 
   /** Public so tests can look inside */
@@ -2374,12 +2449,13 @@ export class MockPlatform implements Platform {
   uiPrefs: UiPreferences = parseUiPreferences(undefined)
 
   /**
-   * 화면 설정 (UiPreferences).
+   * Screen preferences (UiPreferences).
    *
-   * 스냅샷과 같은 이유로 localStorage에도 남긴다: 실물은 DB에 두므로 "다시 켜도 고른
-   * 값이 그대로다"가 이 앱의 약속인데, 목이 페이지보다 먼저 죽으면 브라우저에서
-   * 도는 테스트가 그 약속을 아예 볼 수 없다. node에서는 localStorage가 던지므로
-   * try/catch 안쪽만 빠지고 메모리 사본이 그대로 답한다.
+   * Also kept in localStorage, for the same reason as the snapshot: the real thing keeps it
+   * in a DB, so "the chosen values survive a restart" is this app's promise, and if the mock
+   * died before the page did, a test running in a browser could never see that promise at
+   * all. localStorage throws in node, so it just falls out of the try/catch and the
+   * in-memory copy answers as it always did.
    */
   readonly prefs: PreferencesPort = {
     load: async () => {
@@ -2391,7 +2467,7 @@ export class MockPlatform implements Platform {
       }
       return { ...this.uiPrefs }
     },
-    // 실물과 같은 규칙: 적지 않은 필드는 건드리지 않고, 기록된 뒤의 전체를 돌려준다
+    // The same rule as the real thing: leaves an unwritten field untouched, and returns the whole thing after it was recorded
     save: async (patch: UiPreferencesPatch) => {
       this.uiPrefs = { ...this.uiPrefs, ...patch }
       try {
@@ -2404,12 +2480,12 @@ export class MockPlatform implements Platform {
   }
 
   /**
-   * 테스트용: 레지스트리가 `latest`로 들고 있는 척할 버전 (이슈 #43).
-   * null이면 못 닿은 것 — '최신이다'와 다르다.
+   * For tests: the version the registry pretends to hold as `latest` (issue #43).
+   * Null means it could not be reached — different from "this is the latest version."
    */
   registryVersion: string | null = null
 
-  /** 테스트용: `npm i -g`가 실패하는 상황 (진짜로 돌리지는 않는다) */
+  /** For tests: `npm i -g` fails (it is never actually run) */
   updateFails: string | null = null
 
   private updateStatus: UpdateStatus = {
@@ -2423,16 +2499,17 @@ export class MockPlatform implements Platform {
   }
 
   /**
-   * 앱 업데이트 (이슈 #43).
+   * App updates (issue #43).
    *
-   * **실물과 같은 규칙을 지킨다.** 특히 두 가지: 비교는 protocol의 것을 쓰고
-   * (`isNewerVersion` — 목이 자기 규칙을 만들면 갈라지는 것이 안 보인다), 설치는
-   * **끝나기 전에** 답하고 나머지는 이벤트로 보낸다. 여기서 `npm i -g`를 흉내만 내는
-   * 것이 아니라 아예 돌리지 않는 것도 계약이다 — 테스트가 기계를 고쳐서는 안 된다.
+   * **Follows the same rules as the real thing.** Two in particular: the comparison uses
+   * protocol's own (`isNewerVersion` — if the mock made up its own rule, a split between the
+   * two would be invisible), and installing responds **before it finishes** and sends the rest
+   * as events. It is also part of the contract here that `npm i -g` is not merely faked but
+   * never actually run at all — a test must never touch the machine.
    */
   readonly updates: UpdatePort = {
     status: async (force = false) => {
-      // 실물과 같다: 자동 확인이 꺼져 있으면 사람이 누르기 전엔 아무 데도 안 묻는다
+      // Same as the real thing: if automatic checking is off, it asks nowhere until the person clicks
       if (!force && !this.updateStatus.auto) return { ...this.updateStatus }
       if (!force && this.updateStatus.checkedAt !== null) return { ...this.updateStatus }
       if (this.updateStatus.phase === 'updating' || this.updateStatus.phase === 'restart_required') {
@@ -2443,7 +2520,7 @@ export class MockPlatform implements Platform {
     setAuto: async (enabled: boolean) => {
       if (this.updateStatus.auto === enabled) return { ...this.updateStatus }
       this.setUpdateStatus({ auto: enabled })
-      // 켠 사람은 지금 묻고 있는 것이다 — 6시간 뒤가 아니라
+      // Someone who just turned it on is asking right now — not six hours from now
       return enabled ? this.runUpdateCheck() : { ...this.updateStatus }
     },
     apply: async () => {
@@ -2455,8 +2532,9 @@ export class MockPlatform implements Platform {
       }
       this.setUpdateStatus({ phase: 'updating', error: null })
       /*
-       * 끝은 **답을 준 뒤에** 알린다. 설치는 RPC 제한 시간을 넘기는 일이라 실물도 그렇게
-       * 동작하고, 그래서 "설치 중 → 다시 시작하세요"는 이벤트로만 도착한다.
+       * The end is announced **after** the response is given. Installing routinely exceeds
+       * the RPC timeout, and the real thing behaves the same way, so "installing → please
+       * restart" only ever arrives as an event.
        */
       setTimeout(() => {
         if (this.updateFails) this.setUpdateStatus({ phase: 'failed', error: this.updateFails })
@@ -2468,7 +2546,7 @@ export class MockPlatform implements Platform {
 
   private runUpdateCheck(): UpdateStatus {
     if (this.registryVersion === null) {
-      // 못 닿았다 — 지난번에 알아낸 것은 그대로 둔다 (실물과 같은 규칙)
+      // Could not reach it — leaves what was found out last time untouched (the same rule as the real thing)
       this.setUpdateStatus({ phase: 'idle', error: 'Could not reach the registry — check the network' })
       return { ...this.updateStatus }
     }
@@ -2487,7 +2565,7 @@ export class MockPlatform implements Platform {
     this.emit({ type: 'update_status', status: { ...this.updateStatus } })
   }
 
-  /** 시나리오 헬퍼: 레지스트리에 새 버전이 올라온 상황을 만든다 (Playwright에서 사용) */
+  /** Scenario helper: makes it as if the registry got a new version (used from Playwright) */
   offerUpdate(version: string): void {
     this.registryVersion = version
     this.runUpdateCheck()
@@ -2498,7 +2576,7 @@ export class MockPlatform implements Platform {
     this.connHandlers.clear()
   }
 
-  /** 시나리오 헬퍼: 승인 요청을 만든다 (Playwright에서 사용) */
+  /** Scenario helper: creates an approval request (used from Playwright) */
   requestApproval(sessionId: string, detail: ApprovalDetail, requestId = `req-${++this.idc}`): string {
     this.emit({ type: 'approval_request', sessionId, requestId, detail })
     return requestId

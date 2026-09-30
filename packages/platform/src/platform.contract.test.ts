@@ -1,6 +1,7 @@
 /**
- * T4-2 완료 기준: 동일한 계약 테스트 스위트를 두 구현(web/mock)에 실행한다.
- * 구현이 갈라지면 여기서 잡힌다 — Tauri 구현이 추가되면 세 번째 항목으로 넣는다.
+ * T4-2 completion criterion: runs the same contract test suite against two implementations
+ * (web/mock). A split between implementations is caught here — when a Tauri implementation is
+ * added, it goes in as a third entry.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
@@ -28,7 +29,7 @@ import type { Platform } from './ports/index.js'
 import { createMockPlatform } from './mock/index.js'
 import { createWebPlatform } from './web/index.js'
 
-/** web 구현 테스트를 위한 최소 실 host (어댑터만 가짜) */
+/** The minimal real host for testing the web implementation (only the adapter is fake) */
 class EchoHandle implements SessionHandle {
   externalId = 'ext-1'
   constructor(readonly sessionId: string, private emit: EventSink) {}
@@ -53,12 +54,13 @@ class EchoAdapter implements AgentAdapter {
 }
 
 /**
- * `offerUpdate`: 레지스트리에 그 버전이 올라와 있는 상황을 만든다 (이슈 #43).
- * 두 구현이 같은 자극에 같은 답을 하는지가 이 파일의 존재 이유다.
+ * `offerUpdate`: makes it as if that version were already up on the registry (issue #43).
+ * Whether both implementations answer the same stimulus the same way is this file's reason to
+ * exist.
  *
- * `makeDir`: 폴더 하나를 미리 만들어 둔다. **포트로는 폴더를 만들 수 없다** — 만들기는
- * #19에서 일부러 뺀 것이라, 파일을 어디로 옮길지 시험하려면 준비만 구현별로 해야 한다.
- * 옮기고 지우는 일 자체는 아래에서 포트로만 한다.
+ * `makeDir`: creates a folder ahead of time. **The port cannot create a folder** — creation was
+ * deliberately left out in #19, so testing where a file gets moved to needs setup written
+ * per-implementation. The actual moving and deleting below goes only through the port.
  */
 type Harness = {
   platform: Platform
@@ -72,11 +74,11 @@ async function makeWeb(): Promise<Harness> {
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   /*
-   * 레지스트리도 `npm i -g`도 **주입한다.**
+   * Both the registry and `npm i -g` are **injected.**
    *
-   * 안 그러면 이 스위트가 도는 동안 진짜 레지스트리에 요청이 나가고, 최악의 경우
-   * 테스트가 이 기계의 전역 패키지를 갈아 끼운다. 여기 있는 두 줄이 그 일이 일어날 수
-   * 없다는 보장이다 — 규칙이 아니라 구조로.
+   * Otherwise, while this suite runs, a request would go out to the real registry, and in the
+   * worst case a test would swap out this machine's global package. The two lines here are the
+   * guarantee that cannot happen — by structure, not by rule.
    */
   let registryVersion: string | null = null
   const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
@@ -120,7 +122,7 @@ async function makeMock(): Promise<Harness> {
     offerUpdate: (version) => {
       platform.registryVersion = version
     },
-    // 목의 파일 트리는 "부모 경로 → 항목들"이라, 폴더 하나는 부모의 줄 하나와 빈 목록이다
+    // The mock's file tree is "parent path → entries", so one folder is one row under its parent plus an empty list
     makeDir: (_root, rel) => {
       const cut = rel.lastIndexOf('/')
       const parent = cut < 0 ? '' : rel.slice(0, cut)
@@ -145,8 +147,8 @@ async function waitFor(pred: () => boolean | Promise<boolean>, ms = 3000): Promi
 
 describe.each([
   ['mock', makeMock],
-  ['web(+실 host)', makeWeb],
-])('Platform 계약: %s', (_name, make) => {
+  ['web(+real host)', makeWeb],
+])('Platform contract: %s', (_name, make) => {
   let h: Harness
   let events: NormalizedEvent[]
 
@@ -157,46 +159,47 @@ describe.each([
   })
   afterAll(async () => h.cleanup())
 
-  it('프로젝트를 등록하고 목록에 나온다', async () => {
+  it('registers a project and it shows up in the list', async () => {
     const p = await h.platform.projects.add(tmpdir())
     expect(p.path).toBe(tmpdir())
     const list = await h.platform.projects.list()
     expect(list.some((x) => x.id === p.id)).toBe(true)
   })
 
-  it('같은 경로 재등록은 중복을 만들지 않는다', async () => {
+  it('re-registering the same path does not create a duplicate', async () => {
     const before = (await h.platform.projects.list()).length
     await h.platform.projects.add(tmpdir())
     expect((await h.platform.projects.list()).length).toBe(before)
   })
 
   /**
-   * 등록한 셸 명령은 **프로젝트와 함께 온다** (이슈 #44).
+   * A registered shell command **comes along with the project** (issue #44).
    *
-   * 저장이 되는지만 보는 테스트가 아니다. 실행 메뉴는 목록을 따로 묻지 않고 프로젝트에
-   * 딸려 온 것을 그대로 그리므로, 저장은 됐는데 `list()`가 안 실어 보내면 화면에는
-   * "등록한 적이 없다"로 보인다 — 두 구현이 같은 답을 하는지가 여기서 갈린다.
+   * This is not just a test of whether saving works. The run menu draws whatever comes
+   * attached to the project without asking the list separately, so if saving succeeded but
+   * `list()` does not carry it, the screen shows "never registered" — whether both
+   * implementations answer the same way is what this checks.
    */
-  it('프로젝트에 등록한 셸 명령이 목록과 함께 돌아온다 (#44, 별칭 2026-09-06)', async () => {
+  it('a shell command registered on a project comes back with the list (#44, label 2026-09-06)', async () => {
     const [p] = await h.platform.projects.list()
     const saved = await h.platform.projects.setCommands(p!.id, [
       { command: 'pnpm test', label: '  테스트  ' },
       { command: '   ' },
       { command: 'pnpm lint', label: '' },
     ])
-    // 빈 명령은 저장되지 않고, 별칭은 다듬어지고, 빈 별칭은 별칭 없음이다
+    // An empty command is not saved, a label is trimmed, and an empty label means no label
     expect(saved).toEqual([{ command: 'pnpm test', label: '테스트' }, { command: 'pnpm lint' }])
     const found = (await h.platform.projects.list()).find((x) => x.id === p!.id)
     expect(found?.commands).toEqual([{ command: 'pnpm test', label: '테스트' }, { command: 'pnpm lint' }])
 
-    // 지우기도 같은 문으로 온다 — 남은 것만 보내면 그것이 곧 목록이다
+    // Deleting also comes through the same door — sending only what remains is the new list
     await h.platform.projects.setCommands(p!.id, [{ command: 'pnpm lint' }])
     expect((await h.platform.projects.list()).find((x) => x.id === p!.id)?.commands).toEqual([
       { command: 'pnpm lint' },
     ])
   })
 
-  it('세션 생성 → 목록 반영', async () => {
+  it('creating a session shows up in the list', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     expect(s.id).toBeTruthy()
@@ -204,7 +207,7 @@ describe.each([
     expect(list.some((x) => x.id === s.id)).toBe(true)
   })
 
-  it('전송하면 이벤트가 구독자에게 온다', async () => {
+  it('sending delivers an event to subscribers', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     events.length = 0
@@ -213,14 +216,14 @@ describe.each([
     expect(events.some((e) => e.sessionId === s.id)).toBe(true)
   })
 
-  it('첫 메시지가 세션 이름이 된다 (FR-18)', async () => {
+  it('the first message becomes the session name (FR-18)', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.send(s.id, 'auth 리팩터링해줘')
     await waitFor(async () => (await h.platform.agents.listSessions()).find((x) => x.id === s.id)?.name === 'auth 리팩터링해줘')
   })
 
-  it('rename 후에는 자동 이름이 덮어쓰지 않는다', async () => {
+  it('after a rename, the automatic name does not overwrite it', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.rename(s.id, '내 세션')
@@ -229,7 +232,7 @@ describe.each([
     expect(found?.name).toBe('내 세션')
   })
 
-  it('markRead는 뒤로 가지 않는다', async () => {
+  it('markRead does not move backward', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.markRead(s.id, 10)
@@ -238,7 +241,7 @@ describe.each([
     expect(found?.lastReadSeq).toBe(10)
   })
 
-  it('메시지를 저장하고 다시 읽는다', async () => {
+  it('saves a message and reads it back', async () => {
     const [p] = await h.platform.projects.list()
     const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.send(s.id, '기록될 메시지')
@@ -282,43 +285,47 @@ describe.each([
   })
 
   /**
-   * 자판 표기도 capability다 (이슈 #32).
+   * The keyboard's labels are also a capability (issue #32).
    *
-   * ui에는 뒤에 붙은 구현이 없어서, 거기 OS 분기를 두면 우리가 돌리는 어떤 테스트에도
-   * 안 보인다 — 그래서 `⌘`는 포트를 통해 온다. 두 구현이 여기서 같은 답을 하는지 본다:
-   * 한쪽만 조용히 바뀌면 브라우저에서 보던 화면과 앱에서 보는 화면이 갈라진다.
+   * ui has no implementation behind it, so putting an OS branch there would be invisible to
+   * any test we run — that is why `⌘` comes through the port. This checks that both
+   * implementations answer alike here: if only one silently changed, the screen seen in a
+   * browser and the one seen in the app would diverge.
    *
-   * **두 구현 다 맥 표기가 정답이다.** 실제 자판을 아는 건 Rust뿐이고(tauri 구현),
-   * 이 둘은 각각 개발 서버와 E2E의 것이라 자판을 짐작하기 시작하면 테스트가 도는
-   * 기계에 따라 결과가 달라진다.
+   * **The Mac labels are the right answer for both implementations.** Only Rust (the tauri
+   * implementation) actually knows the keyboard; these two belong to the dev server and to
+   * e2e respectively, so guessing the keyboard here would make the result depend on whatever
+   * machine the test runs on.
    */
-  it('자판이 조합키를 뭐라고 부르는지 답한다 (#32)', () => {
+  it('answers what the keyboard calls a modifier combination (#32)', () => {
     const keys = h.platform.capabilities.shortcutKeys
     expect(keys.mod).toBe('⌘')
     expect(keys.alt).toBe('⌥')
-    // 기호는 붙여 쓴다 (`⌘⇧A`). 이름이 되는 자판에서만 구분자가 생긴다
+    // The symbols run together (`⌘⇧A`). A separator only appears on a keyboard whose keys become names
     expect(keys.join).toBe('')
   })
 
   /**
-   * 파일 조작의 계약 (#18, #19).
+   * The contract for file operations (#18, #19).
    *
-   * 여기서 파일을 만드는 것도 **포트로만** 한다. web 구현 뒤에는 진짜 host가, mock 뒤에는
-   * 메모리가 있어서 준비 과정을 각각 따로 쓰면 두 스위트가 서로 다른 세계를 시험하게 된다 —
-   * 같은 문으로 넣고 같은 문으로 옮겨 봐야 "구현이 갈라지면 여기서 잡힌다"가 참이 된다.
+   * Creating a file here also goes **only through the port.** A real host sits behind the web
+   * implementation, and memory sits behind the mock, so writing setup separately for each would
+   * mean the two suites test different worlds — sending it in through the same door and moving
+   * it through the same door is what makes "a split between implementations is caught here"
+   * true.
    */
-  describe('파일 조작 (#18, #19)', () => {
+  describe('file operations (#18, #19)', () => {
     let projectId = ''
     let dir = ''
 
     beforeAll(async () => {
-      // 실물 host 쪽은 진짜로 디스크에 쓴다 — 임시 디렉토리 밖으로는 한 발도 나가지 않는다
+      // The real host side really writes to disk — it never takes one step outside the temp directory
       dir = mkdtempSync(join(tmpdir(), 'cc-contract-fs-'))
       projectId = (await h.platform.projects.add(dir)).id
     })
     afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
-    it('밖에서 들어온 파일이 목록에 나타난다', async () => {
+    it('a file dropped in from outside appears in the listing', async () => {
       const res = await h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('hello'))
       expect(res.path).toBe('dropped.txt')
       const listed = await h.platform.fs.listDir(projectId, '')
@@ -326,51 +333,53 @@ describe.each([
       expect((await h.platform.fs.readFile(projectId, 'dropped.txt')).text).toBe('hello')
     })
 
-    /** 덮어쓰기는 없다 — 무엇과 부딪혔는지 이름을 대고 아무것도 하지 않는다 */
-    it('같은 이름이 이미 있으면 들여오지 않는다', async () => {
+    /** There is no overwrite — it names what it collided with and does nothing */
+    it('does not import if the same name already exists', async () => {
       await expect(h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('other'))).rejects.toThrow(
         /already exists/,
       )
       expect((await h.platform.fs.readFile(projectId, 'dropped.txt')).text).toBe('hello')
     })
 
-    it('프로젝트 밖으로는 들여오지 못한다', async () => {
+    it('cannot import outside the project', async () => {
       await expect(h.platform.fs.importFile(projectId, '../..', 'evil.txt', btoa('x'))).rejects.toThrow()
     })
 
-    it('트리 안에서 옮기면 부모가 바뀐다', async () => {
+    it('moving within the tree changes the parent', async () => {
       h.makeDir(dir, 'sub')
       const moved = await h.platform.fs.move(projectId, 'dropped.txt', 'sub')
       expect(moved).toEqual({ path: 'sub/dropped.txt', moved: true })
       expect((await h.platform.fs.listDir(projectId, 'sub')).map((e) => e.name)).toContain('dropped.txt')
     })
 
-    it('제자리에 놓는 것은 실패가 아니다 (moved:false)', async () => {
+    it('dropping something back where it already is is not a failure (moved:false)', async () => {
       expect(await h.platform.fs.move(projectId, 'sub/dropped.txt', 'sub')).toEqual({
         path: 'sub/dropped.txt',
         moved: false,
       })
     })
 
-    it('목적지가 차 있으면 옮기지 않는다', async () => {
+    it('does not move if the destination is already taken', async () => {
       await h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('second'))
       await expect(h.platform.fs.move(projectId, 'dropped.txt', 'sub')).rejects.toThrow(/already exists/)
-      // 원본은 제자리에 남아 있어야 한다 — 반쯤 옮겨진 상태가 가장 나쁘다
+      // The original has to stay where it was — a half-moved state is the worst outcome
       expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).toContain('dropped.txt')
     })
 
-    it('프로젝트 밖으로는 옮기지 못한다', async () => {
+    it('cannot move outside the project', async () => {
       await expect(h.platform.fs.move(projectId, 'dropped.txt', '../..')).rejects.toThrow()
     })
 
     /**
-     * 휴지통·파일 관리자는 **할 수 있는지부터 답한다** (`models()`와 같은 모양).
+     * The trash and the file manager **answer whether they can, first** (the same shape as
+     * `models()`).
      *
-     * 두 구현의 답이 갈리는 것이 정상이다: 브라우저에는 휴지통이 없고 앞으로도 없다.
-     * 계약은 "된다"가 아니라 **"안 되면 이유가 온다"**이다 — 이유 없는 supported:false는
-     * 화면에서 조용한 무동작과 구분되지 않는다.
+     * It is normal for the two implementations to answer differently here: a browser has no
+     * trash, and never will. The contract is not "it works" but **"if it does not, a reason
+     * comes with it"** — a supported:false with no reason is indistinguishable on screen from
+     * quietly doing nothing.
      */
-    it('휴지통은 되는지 답하고, 안 되면 이유를 준다', async () => {
+    it('the trash answers whether it can, and gives a reason if it cannot', async () => {
       const res = await h.platform.fs.trash(projectId, 'dropped.txt')
       if (res.supported) {
         expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).not.toContain('dropped.txt')
@@ -379,32 +388,32 @@ describe.each([
       }
     })
 
-    it('파일 관리자에서 보기도 같은 모양으로 답한다', async () => {
+    it('viewing in the file manager answers in the same shape', async () => {
       const res = await h.platform.fs.reveal(projectId, 'sub')
       if (!res.supported) expect(res.reason).toMatch(/\S/)
     })
 
-    it('이 데스크톱이 파일 관리자를 뭐라고 부르는지 답한다', () => {
+    it('answers what this desktop calls the file manager', () => {
       expect(h.platform.capabilities.fileManagerName).toMatch(/\S/)
     })
   })
 
-  it('capabilities와 detect를 노출한다', async () => {
+  it('exposes capabilities and detect', async () => {
     expect((await h.platform.agents.capabilities('claude')).approvals).toBe(true)
     expect((await h.platform.agents.detect()).length).toBeGreaterThan(0)
   })
 
-  it('없는 세션 조작은 에러', async () => {
+  it('an operation on a nonexistent session errors', async () => {
     await expect(h.platform.agents.send('nope', 'x')).rejects.toThrow()
   })
 
   /**
-   * 업데이트: 알리는 데서 멈춘다 (이슈 #43).
+   * Updates: stops at announcing it (issue #43).
    *
-   * 알아냈다는 사실만으로는 아무것도 바뀌지 않는지를 본다. `phase`가 'idle'이라는 것이
-   * 그 말이다 — 새 버전을 찾은 것과 그것을 설치한 것 사이에는 사람의 클릭이 있다.
+   * Checks that finding out about it does not change anything by itself. `phase` being 'idle'
+   * is what says so — between finding a new version and installing it, there is a human click.
    */
-  it('레지스트리에 새것이 있으면 알리되 스스로 설치하지 않는다 (#43)', async () => {
+  it('announces a new version on the registry but does not install it on its own (#43)', async () => {
     h.offerUpdate('9999.0.0')
     const s = await h.platform.updates.status(true)
     expect(s.current).toBe(APP_VERSION)
@@ -414,34 +423,37 @@ describe.each([
   })
 
   /**
-   * 꺼 두면 진짜로 안 묻는다.
+   * Turning it off really means it does not ask.
    *
-   * 이 체크상자가 장식이 되는 방식은 하나다: 주기 요청만 막고 **기동 직후의 한 번**은
-   * 그대로 나가는 것. 화면은 앱을 열 때마다 `status(force: false)`를 부르므로, 그 자리에
-   * 가드가 없으면 껐다고 말한 사람의 기계에서 요청이 계속 나간다.
+   * There is exactly one way this checkbox would become decorative: only blocking the
+   * periodic request while letting **the one right after startup** through unchanged. The
+   * screen calls `status(force: false)` every time the app opens, so without a guard there, a
+   * request keeps going out from the machine of someone who was told it is off.
    */
-  it('자동 확인을 끄면 자동 호출은 레지스트리에 닿지 않는다 (#43)', async () => {
+  it('turning off automatic checking keeps automatic calls from reaching the registry (#43)', async () => {
     await h.platform.updates.setAuto(false)
     h.offerUpdate('8888.0.0')
-    // 자동 호출은 아무 데도 안 갔다 — 알던 답이 그대로다
+    // The automatic call went nowhere — the previously known answer stays
     expect((await h.platform.updates.status(false)).latest).toBe('9999.0.0')
-    // 사람이 누른 것은 여전히 통한다
+    // A click from a person still goes through
     expect((await h.platform.updates.status(true)).latest).toBe('8888.0.0')
-    // 다시 켜면 그 자리에서 묻는다 — 방금 켠 사람은 지금 궁금한 것이다
+    // Turning it back on asks right there — someone who just turned it on wants to know now
     h.offerUpdate('9999.0.0')
     expect((await h.platform.updates.setAuto(true)).latest).toBe('9999.0.0')
   })
 
   /**
-   * 설치는 **시작하자마자** 답하고, 끝났다는 말은 이벤트로 온다 (이슈 #43).
+   * Installing responds **as soon as it starts**, and the word that it finished arrives as an
+   * event (issue #43).
    *
-   * `npm i -g`는 RPC 제한 시간(30초)을 넘기는 일이 흔하다. 끝을 기다리는 계약으로 두면
-   * 실제로는 성공한 설치가 화면에서는 시간 초과로 보이고, 그 뒤로 두 쪽이 서로 다른
-   * 이야기를 하게 된다.
+   * `npm i -g` routinely exceeds the RPC timeout (30 seconds). A contract that waits for it to
+   * finish would make an install that actually succeeded look like a timeout on screen, and
+   * from then on the two sides would be telling different stories.
    *
-   * 마지막 줄이 이 기능의 전부다: 끝났는데도 **앱은 그대로 돌고 있다.**
+   * The last line is this feature's whole point: even once it is done, **the app is still
+   * running as it was.**
    */
-  it('설치는 시작을 답하고 완료는 이벤트로 알린다 — 스스로 재시작하지 않는다 (#43)', async () => {
+  it('installing responds to the start and announces completion as an event — does not restart itself (#43)', async () => {
     h.offerUpdate('9999.0.0')
     await h.platform.updates.status(true)
     events.length = 0
@@ -454,27 +466,28 @@ describe.each([
   })
 
   /**
-   * 화면 설정 (UiPreferences).
+   * Screen preferences (UiPreferences).
    *
-   * 여기서 보는 것은 두 가지다. 하나, **아무것도 고른 적 없는 설치의 답은 기본값**이다 —
-   * 읽기가 빈손으로 돌아오면 입력창이 무엇을 할지 모르게 된다. 둘, 쓰기는 **적은 것만**
-   * 바꾼다. 필드가 하나뿐인 지금은 둘째 규칙이 공짜처럼 보이지만, 전체를 덮어쓰는
-   * 구현도 지금은 똑같이 통과한다 — 그래서 필드가 늘기 전에 여기서 못박는다.
+   * Two things are checked here. First, **a fresh install that has never chosen anything
+   * answers with defaults** — if a read came back empty-handed, the composer would not know
+   * what to do. Second, writing changes **only what was written**. With just one field today
+   * this second rule looks free, since an implementation that overwrites everything would pass
+   * just the same right now — so it is pinned down here before the fields grow.
    */
-  it('화면 설정은 기본값에서 시작하고, 쓰기는 적은 것만 바꾼다', async () => {
+  it('screen preferences start at defaults, and writing changes only what was written', async () => {
     expect(await h.platform.prefs.load()).toEqual({ sendWithModifierEnter: false })
 
     expect(await h.platform.prefs.save({ sendWithModifierEnter: true })).toEqual({
       sendWithModifierEnter: true,
     })
-    // 다시 물어도 같은 답이다 — 답이 기록에서 나온다는 뜻이다
+    // Asking again gives the same answer — meaning the answer comes from the record
     expect(await h.platform.prefs.load()).toEqual({ sendWithModifierEnter: true })
 
-    // 아무것도 안 적은 쓰기는 아무것도 되돌리지 않는다
+    // A write with nothing in it reverts nothing
     expect(await h.platform.prefs.save({})).toEqual({ sendWithModifierEnter: true })
   })
 
-  it('구독 해제가 동작한다', async () => {
+  it('unsubscribing works', async () => {
     const seen: NormalizedEvent[] = []
     const off = h.platform.agents.subscribe((e) => seen.push(e))
     const [p] = await h.platform.projects.list()
@@ -505,8 +518,8 @@ describe.each([
  * `C:\Users\me\proj` while the host called it `proj`, and e2e — which only ever runs the mock —
  * had no way to notice.
  */
-describe('Platform 계약: 경로 구분자 (#47)', () => {
-  it('mock이 짓는 프로젝트 이름은 host가 쓰는 basename과 같은 답이다', async () => {
+describe('Platform contract: path separator (#47)', () => {
+  it('the project name the mock builds matches the basename the host uses', async () => {
     const mock = createMockPlatform()
     const windowsDir = 'C:\\Users\\me\\proj'
     expect((await mock.projects.add(windowsDir)).name).toBe(win32.basename(windowsDir))
@@ -516,29 +529,32 @@ describe('Platform 계약: 경로 구분자 (#47)', () => {
   })
 
   /**
-   * 목의 "밖으로 나가지 못한다"는 **와이어 경로**를 읽는다 (#19에서 잡힌 그 규칙).
-   * 조각을 프로토콜에서 얻어 오므로, 실물과 목이 같은 문자열을 같은 조각으로 읽는다.
+   * The mock's "cannot go outside" reads the **wire path** (the same rule caught in #19).
+   * Since the segments are obtained from the protocol, the real thing and the mock read the
+   * same string as the same segments.
    */
-  it('와이어 경로로 루트 밖을 가리키면 목도 거절한다', async () => {
+  it('the mock also rejects a wire path that points outside the root', async () => {
     const mock = createMockPlatform()
     const p = await mock.projects.add('/tmp/sep-contract')
     await expect(mock.fs.importFile(p.id, '../..', 'evil.txt', btoa('x'))).rejects.toThrow(
       /outside the project/,
     )
-    // 그리고 안쪽은 그대로 받는다 — 거절이 전부를 막는 것이면 규칙이 아니라 고장이다
+    // And the inside is accepted as normal — if a rejection blocked everything, that would be a bug, not a rule
     expect((await mock.fs.importFile(p.id, '', 'ok.txt', btoa('x'))).path).toBe('ok.txt')
   })
 })
 
 /**
- * 앱 화면의 세 문 (M4 B-3) — web 구현이 host의 RPC에 그대로 잇는지.
+ * The app screen's three doors (M4 B-3) — whether the web implementation connects straight
+ * through to the host's RPC.
  *
- * 목과 같은 스위트를 돌릴 수 없는 자리다. 목에는 화면 주소를 지을 host가 없다(e2e는 진짜
- * ViewHost를 목에 꽂아 쓴다). 그래서 web 구현만 진짜 host와 ViewHost에 붙여 본다. 문서를 읽는
- * 쪽(ViewSource)만 대역이다.
+ * A spot where the same suite cannot be run against the mock. The mock has no host to
+ * construct a screen address (e2e plugs the real ViewHost into the mock for that). So only the
+ * web implementation is tested against a real host and ViewHost — only the side that reads
+ * documents (ViewSource) is a stand-in.
  */
-describe('Platform 계약: 앱 화면 (web + 실 host)', () => {
-  it('열린 화면은 비밀 경로의 주소를 받고, 리소스와 도구가 host로 간다', async () => {
+describe('Platform contract: app screen (web + real host)', () => {
+  it('an opened screen gets an address with a secret path, and resources and tools go to the host', async () => {
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
@@ -573,7 +589,7 @@ describe('Platform 계약: 앱 화면 (web + 실 host)', () => {
       const frame = await platform.apps.viewFrame('notes', instanceId, { projectId: 'p1', hostOrigin: 'http://127.0.0.1:5174' })
       expect(frame.url.startsWith(`http://127.0.0.1:${port}/${secret}/views/${instanceId}/?`)).toBe(true)
       expect(frame.sandbox.csp.connectDomains).toEqual([])
-      // 앱 이름이나 프로젝트가 다르면 같은 인스턴스라도 열리지 않는다
+      // Even the same instance does not open if the app name or the project differs
       await expect(platform.apps.viewFrame('other', instanceId, { projectId: 'p1', hostOrigin: 'http://127.0.0.1:5174' })).rejects.toThrow(/not open/)
       await expect(platform.apps.viewFrame('notes', instanceId, { hostOrigin: 'http://127.0.0.1:5174' })).rejects.toThrow(/not open/)
 
@@ -591,13 +607,15 @@ describe('Platform 계약: 앱 화면 (web + 실 host)', () => {
 })
 
 /**
- * 화면의 도구 호출 (M4 B-4 `oncalltool`) — web 구현 → `apps.invoke` → 외부 앱 런타임 → 진짜 앱
- * 프로세스(런타임 픽스처의 `view` 모드). 화면이 받는 것은 앱이 준 MCP 결과 그대로여야 한다.
- * 그 호출이 낸 "바뀌었다"는 main.ts와 같은 이음새(`broadcastAppChanges`)로 방송되어, 부른 화면의 인스턴스를
- * 주인으로 싣고 돌아온다(B-5) — 그 화면만 그 알림을 건너뛴다.
+ * A tool call from a screen (M4 B-4 `oncalltool`) — web implementation → `apps.invoke` →
+ * external app runtime → a real app process (the `view` mode of the runtime fixture). What the
+ * screen receives has to be exactly the MCP result the app gave. The "changed" that call
+ * produces is broadcast through the same seam as main.ts (`broadcastAppChanges`), and comes
+ * back carrying the calling screen's instance as the owner (B-5) — only that screen skips that
+ * notification.
  */
-describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', () => {
-  it('앱의 답이 structuredContent·isError·_meta까지 그대로 오고, 앱에 닿지 못한 호출은 이유가 담긴 isError다', async () => {
+describe('Platform contract: tool call from a screen (web + real host + real app)', () => {
+  it("the app's response arrives intact down to structuredContent, isError and _meta, and a call that could not reach the app is an isError carrying a reason", async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-apps-')))
     const projRoot = join(fixture, 'proj')
     mkdirSync(join(fixture, 'data'))
@@ -646,23 +664,23 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
         _meta: { 'fixture/served-by': expect.any(Number) },
       })
       expect(ok.isError).toBeFalsy()
-      // 상태는 앱 프로세스에 산다 — 다음 읽기가 같은 값을 본다
+      // The state lives in the app process — the next read sees the same value
       expect((await platform.apps.callTool('slider', 'get_interval', {}, from)).structuredContent).toEqual({ interval: 9 })
 
-      // 앱이 실패로 답했다 — 실패의 구조도 화면의 것이다
+      // The app answered with a failure — the shape of the failure also belongs to the screen
       const failed = await platform.apps.callTool('slider', 'set_interval', { seconds: -1 }, from)
       expect(failed).toMatchObject({ isError: true, structuredContent: { field: 'seconds', got: -1 }, content: [{ type: 'text', text: 'seconds must be positive' }] })
 
-      // host가 앱에 보내지 않았다(화면에 열리지 않은 도구) — 이유가 결과로 온다
+      // The host never sent it to the app (a tool not opened to a screen) — the reason arrives as the result
       const refused = await platform.apps.callTool('slider', 'agent_only', {}, from)
       expect(refused.isError).toBe(true)
       expect(refused.structuredContent).toBeUndefined()
       expect(JSON.stringify(refused.content)).toContain('visibility')
 
-      // 화면은 내장 앱의 문(projectId 없는 apps.invoke)으로 들어가지 못한다 — 사용자 폴더에 control은 없다
+      // A screen cannot enter through a built-in app's door (apps.invoke with no projectId) — there is no control in the user folder
       await expect(platform.apps.callTool('control', 'control_notify', { text: 'x' })).rejects.toThrow(/There is no such app: user\/control/)
 
-      // 이 화면이 낸 바뀜은 이 화면의 인스턴스를 주인으로 돌아온다 — 방송이 web의 검사를 지나 떨어지지 않는다
+      // The change this screen produced comes back carrying this screen's instance as the owner — the broadcast does not slip past web's own check
       await waitFor(() => heard.some((e) => e.type === 'external_app_state_changed'))
       const changed = heard.filter((e) => e.type === 'external_app_state_changed')
       for (const e of changed) {
@@ -683,11 +701,12 @@ describe('Platform 계약: 화면의 도구 호출 (web + 실 host + 실 앱)', 
 })
 
 /**
- * 외부 앱 목록 (M4 A-8) — web 구현의 `apps.list`와 `external_apps_changed`가 진짜 host와 진짜 런타임을
- * 지난다. main.ts가 쓰는 이음새(`onExternalAppListChanged`)를 그대로 끼운다.
+ * The external app list (M4 A-8) — the web implementation's `apps.list` and
+ * `external_apps_changed` run through a real host and a real runtime. Plugs in the exact same
+ * seam main.ts uses (`onExternalAppListChanged`).
  */
-describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
-  it('목록은 이유와 함께 오고, 신뢰가 바뀌면 방송이 오며 그때 다시 읽은 목록이 새 상태다', async () => {
+describe('Platform contract: external app list (web + real host)', () => {
+  it('the list comes with a reason, a broadcast arrives when trust changes, and the list re-read at that point is the new state', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-applist-')))
     const projRoot = join(fixture, 'proj')
     mkdirSync(join(fixture, 'data'))
@@ -713,7 +732,7 @@ describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
       await waitFor(() => heard.includes('external_apps_changed'))
       expect((await platform.apps.list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')
 
-      // 사용자 폴더 앱은 지울 수 있고(A-7), 프로젝트 앱은 host가 거절한다
+      // A user-folder app can be deleted (A-7), and the host rejects a project app
       plantApp(join(fixture, 'data', 'apps'), 'helper')
       rt.refresh()
       await waitFor(async () => (await platform.apps.list()).some((a) => a.appId === 'helper'))
@@ -733,11 +752,12 @@ describe('Platform 계약: 외부 앱 목록 (web + 실 host)', () => {
 })
 
 /**
- * 고정 화면 (M4 B-2) — web 구현의 `openView`·`closeView`가 진짜 host, 진짜 런타임, 진짜 앱 프로세스를
- * 지난다. 연 인스턴스는 `viewFrame`으로 열리고, 닫으면 더 열리지 않는다.
+ * A pinned screen (M4 B-2) — the web implementation's `openView`/`closeView` run through a
+ * real host, a real runtime and a real app process. An opened instance opens via `viewFrame`,
+ * and once closed does not open again.
  */
-describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
-  it('home이 부른 결과와 인스턴스가 오고, 화면이 없는 home은 이유로 거절되며, 닫은 인스턴스는 더 열리지 않는다', async () => {
+describe('Platform contract: pinned screen (web + real host + real app)', () => {
+  it('the result and instance home called arrive, a home with no screen is rejected with a reason, and a closed instance does not open again', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-home-')))
     const projRoot = join(fixture, 'proj')
     mkdirSync(join(fixture, 'data'))
@@ -781,7 +801,7 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
       expect(v).toMatchObject({ tool: 'home', resourceUri: 'ui://fixture/main', toolInput: {}, toolResult: { structuredContent: { interval: 5 } } })
       const frame = await platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })
       expect(frame.url).toContain(`/${secret}/views/${v.instanceId}/`)
-      // 기록 판(B-7)이 읽는 것 — host의 기록에 "화면이 home을 불렀다"가 있다
+      // What the run-history panel (B-7) reads — the host's history has "the screen called home"
       expect((await platform.apps.runs('slider', project.id)).map((r) => [r.id, r.tool, r.callerKind, r.status])).toEqual([[v.runId, 'home', 'view', 'ok']])
 
       await expect(platform.apps.openView('plain', project.id)).rejects.toThrow('declares no _meta.ui.resourceUri')
@@ -789,7 +809,7 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
       await platform.apps.closeView(v.instanceId)
       await expect(platform.apps.viewFrame('slider', v.instanceId, { projectId: project.id, hostOrigin })).rejects.toThrow(/not open/)
 
-      // Restart(B-6)는 host의 apps.restart로 간다 — 떠 있던 앱은 내려가고, 없는 앱은 이름과 함께 거절된다
+      // Restart (B-6) goes to the host's apps.restart — an app that was up comes down, and a nonexistent app is rejected with its name
       expect(rt.list().find((a) => a.appId === 'slider')?.status).toBe('running')
       await platform.apps.restart('slider', project.id)
       expect(rt.list().find((a) => a.appId === 'slider')?.status).toBe('stopped')
@@ -807,11 +827,12 @@ describe('Platform 계약: 고정 화면 (web + 실 host + 실 앱)', () => {
 })
 
 /**
- * 새 앱 (M4 C-1) — web 구현의 `create`·`builder`·`createBuilder`가 진짜 host, 진짜 런타임, 진짜 템플릿을 지난다.
- * 거절은 host의 말 그대로 온다("New app" 창이 그 말을 보인다).
+ * A new app (M4 C-1) — the web implementation's `create`, `builder` and `createBuilder` run
+ * through a real host, a real runtime and a real template. Rejection arrives exactly as the
+ * host phrased it (the "New app" window shows that wording).
  */
-describe('Platform 계약: 새 앱 (web + 실 host)', () => {
-  it('앱과 만드는 세션이 오고, 그 앱의 만드는 세션으로 찾아지며, 이미 있는 id는 host의 말로 거절되고, 입력줄의 말이 그 세션에 닿는다', async () => {
+describe('Platform contract: new app (web + real host)', () => {
+  it('the app and its builder session are returned, that app is found by its builder session, an existing id is rejected with the host wording, and a message from the input line reaches that session', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-newapp-')))
     const projRoot = join(fixture, 'proj')
     mkdirSync(projRoot)
@@ -837,7 +858,7 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
       await expect(platform.apps.create({ projectId: project.id, id: 'notes', name: 'Again' })).rejects.toThrow(/An app "notes" already exists/)
       expect(await platform.apps.builder('ghost', project.id)).toBeNull()
 
-      // "여기를 고쳐 줘" (C-5) — 만드는 세션의 에이전트가 host의 머리말을 단 말을 받는다(메아리 어댑터가 되돌려 준다)
+      // "Fix this" (C-5) — the builder session's agent receives the message with the host's header attached (the echo adapter sends it back)
       const heard: string[] = []
       const off = platform.agents.subscribe((e) => {
         if (e.type === 'message_delta' && e.sessionId === made.builder!.id) heard.push(e.text)
@@ -848,7 +869,7 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
       expect(heard).toEqual(['echo:[Centralu] The person wrote this in the app "Notes" (app-notes) that you build.\nAdd a reset button'])
       await expect(platform.apps.askBuilder({ appId: 'ghost', projectId: project.id, text: 'hi' })).rejects.toThrow('This app no longer exists')
 
-      // 오류 묶음 (C-6) — 화면이 부른 도구가 실패하면 host가 묶음을 들고, 사람이 누르면 한 번 간다
+      // An error bundle (C-6) — when a tool called from a screen fails, the host holds the bundle, and it goes out once when the person clicks
       await platform.apps.callTool('notes', 'increment', { by: 'many' }, { projectId: project.id })
       const { latest } = await platform.apps.errors('notes', project.id)
       expect(latest).toMatchObject({ kind: 'tool', tool: 'increment', sentAt: null })
@@ -874,11 +895,13 @@ describe('Platform 계약: 새 앱 (web + 실 host)', () => {
 })
 
 /**
- * 앱의 비밀 (M4 E) — web 구현의 `setSecret`이 진짜 host와 진짜 런타임을 지난다. 목록은 이름마다 있음·없음만 싣고(값은 없다), 넣으면
- * 방송이 온다. 거절은 host의 말 그대로 온다 — 비밀 칸이 그 말을 보인다.
+ * An app's secrets (M4 E) — the web implementation's `setSecret` runs through a real host and
+ * a real runtime. The list carries only present/absent per name (no values), and setting one
+ * broadcasts. Rejection arrives exactly as the host phrased it — the secret field shows that
+ * wording.
  */
-describe('Platform 계약: 앱의 비밀 (web + 실 host)', () => {
-  it('넣으면 목록이 "있음"으로 바뀌어 방송되고, 값은 목록에 없으며, 선언하지 않은 이름은 host의 말로 거절된다', async () => {
+describe('Platform contract: app secrets (web + real host)', () => {
+  it('setting one flips the listing to "set" and broadcasts, the value never appears in the listing, and an undeclared name is rejected with the host wording', async () => {
     const VALUE = 'contract-secret-value-42'
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-secrets-')))
     const projRoot = join(fixture, 'proj')
@@ -924,11 +947,13 @@ describe('Platform 계약: 앱의 비밀 (web + 실 host)', () => {
 })
 
 /**
- * 가져오기 (M4 E-3) — web 구현의 `importPrepare`·`importCommit`·`review`·`enable`이 진짜 host와 진짜 런타임을 지난다. 들인 앱은 꺼진
- * 채(`unconfirmed`) 목록에 서고, 사람이 본 열쇠로 켜면 보통의 사용자 폴더 앱이 된다. 거절은 host의 말 그대로 온다.
+ * Import (M4 E-3) — the web implementation's `importPrepare`, `importCommit`, `review` and
+ * `enable` run through a real host and a real runtime. An admitted app stands in the list
+ * disabled (`unconfirmed`), and enabling it with the key the person reviewed makes it an
+ * ordinary user-folder app. Rejection arrives exactly as the host phrased it.
  */
-describe('Platform 계약: 앱 가져오기 (web + 실 host)', () => {
-  it('준비는 들이는 것이 아니고, 들이면 꺼진 채 서며, 확인 창의 열쇠로 켜진다 — 다른 열쇠는 host의 말로 거절된다', async () => {
+describe('Platform contract: app import (web + real host)', () => {
+  it('preparing does not admit it, admitting it stands it up disabled, it is enabled with the review window key — a different key is rejected with the host wording', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-import-')))
     mkdirSync(join(fixture, 'data'))
     const source = plantApp(join(fixture, 'src'), 'notes', { uses: { agent: true } })

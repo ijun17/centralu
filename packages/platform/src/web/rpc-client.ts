@@ -10,60 +10,66 @@ import {
 import type { ConnectionState, Unsubscribe } from '../ports/index.js'
 
 /**
- * WS RPC 클라이언트 — 재연결 + 백오프 + afterSeq 복원 (tech-stack.md: 자작 ~50줄).
- * 이 파일이 ui가 WebSocket을 직접 몰라도 되게 하는 유일한 지점이다.
+ * The WS RPC client — reconnect + backoff + afterSeq restore (tech-stack.md: hand-rolled,
+ * ~50 lines). This file is the one place that lets ui not know WebSocket directly.
  */
 export type RpcClientOptions = {
   url: string
   token: string
-  /** 테스트 주입용 */
+  /** For injecting in tests */
   WebSocketImpl?: typeof WebSocket
   maxBackoffMs?: number
-  /** RPC 한 번의 응답 제한 시간. host가 응답을 영영 안 주는 경우의 마지막 안전망 */
+  /** The response timeout for one RPC call. A last-resort safety net for when the host never responds */
   callTimeoutMs?: number
 }
 
 /**
- * `sent`: 프레임이 실제로 소켓을 탔는가.
- * 끊길 때 **탄 것만** 거절한다 — 아직 큐에 있는 것은 재연결 후 전송되는 것이 기존 계약이다.
+ * `sent`: whether the frame actually went out over the socket.
+ * On disconnect, rejects **only what went out** — what is still in the queue is sent after
+ * reconnecting, per the existing contract.
  */
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout>; sent: boolean }
 
-/** RPC 응답 제한 시간 기본값. 세션 생성·깃 작업도 이 안에는 끝난다 (실측 수 초) */
+/** The default RPC response timeout. Session creation and git operations also finish within this (measured at a few seconds) */
 const DEFAULT_CALL_TIMEOUT_MS = 30_000
 
 /**
- * 세션을 **되살릴 수 있는** 호출들은 예산이 다르다 (도그푸딩: "리소스 업로드" 세션 —
- * codex의 thread/resume은 자기 rollout 파일을 통째로 되읽어서, 550MB 스레드가 13.5초,
- * 더 큰 스레드는 25초를 넘겼다. 30초 기본값 아래서는 큰 스레드가 영영 못 깨어나는
- * 세션이 된다). 파일은 자라기만 하므로 상한은 크기에 비례해 커질 수 있는 값이어야
- * 한다 — 180초는 실측 비율(550MB≈13.5s)로 7GB급까지 덮는다. 매니저 쪽 단계 제한
- * (150초)이 이 안쪽에 있어서, 시간이 다해도 이름 붙은 이유가 화면에 온다.
+ * Calls that **can revive a session** get a different budget (dogfooding: a "resource upload"
+ * session — codex's thread/resume rereads its whole rollout file, and a 550MB thread took
+ * 13.5 seconds, with larger threads going over 25. Under the 30-second default, a large thread
+ * becomes a session that can never wake up). Since the file only ever grows, the cap has to be
+ * a value that can scale with size — 180 seconds covers up to the 7GB class at the measured
+ * ratio (550MB ≈ 13.5s). The manager's own stage limit (150 seconds) sits inside this, so even
+ * when time runs out, a named reason reaches the screen.
  */
 const LONG_CALL_TIMEOUT_MS = 180_000
 const LONG_CALLS = new Set<string>([
-  'agents.resumeSession', // 명시적 깨우기
-  'agents.send', // 잠든 세션이면 되살린 뒤 보낸다 — 같은 비용을 문다
-  'agents.createSession', // resumeExternalId로 이전 대화를 이어받을 때
-  'agents.restartSession', // 프로세스를 갈아 끼우고 다시 되살린다
-  'agents.exportHandoffRecord', // 수백 MB 롤아웃을 스캔할 수 있다 (#78)
+  'agents.resumeSession', // An explicit wake-up
+  'agents.send', // If the session is asleep, revives it first, then sends — pays the same cost
+  'agents.createSession', // When picking up a previous conversation via resumeExternalId
+  'agents.restartSession', // Swaps out the process and revives it again
+  'agents.exportHandoffRecord', // Can scan a rollout hundreds of MB in size (#78)
   /*
-   * 끝에서 되살리기까지 가는 호출들 (#164) — 여기 없던 동안 큰 대화에서 host는 적용하고 다시 띄웠는데 화면은
-   * "RPC timed out"을 띄웠다(적용된 것을 실패로 알았다). 되살리기로 끝나는 RPC를 더하면 여기에도 더한다.
+   * Calls that end in a revival (#164) — while these were missing here, the host would apply
+   * and restart on a large conversation, but the screen showed "RPC timed out" (reading what
+   * succeeded as a failure). Add a new RPC that ends in a revival here too.
    */
-  'agents.updateSettings', // 쉬는 세션의 설정이 바뀌면 프로세스를 갈아 끼운다 (restartSession)
-  'agents.forkConversation', // 갈라진 사본으로 되살린다
-  'agents.resolveMcpProposal', // 승인하면 오케스트레이터를 다시 띄운다
-  'agents.resolveSkillProposal', // 같다
-  'agents.deleteOrchestratorSkill', // 같다
+  'agents.updateSettings', // Swaps out the process if a resting session's settings change (restartSession)
+  'agents.forkConversation', // Revives as a forked copy
+  'agents.resolveMcpProposal', // Restarts the orchestrator on approval
+  'agents.resolveSkillProposal', // Same
+  'agents.deleteOrchestratorSkill', // Same
 ])
 
 /**
- * 화면이 부르는 앱 도구(`apps.invoke`)의 예산 (M4 D-4). 그 호출은 사람을 기다릴 수 있다 — 앱이 능력을 처음 쓰려 하면 host가
- * 그 앱의 고정 화면에 묻고 답을 5분까지 기다린다(runtime의 capabilityQuestionMs). 그 뒤에 에이전트가 몇 분 돌 수도 있다.
- * 30초 기본값이면 사람이 읽고 답하는 사이에 화면의 호출이 먼저 끊겨, 답을 눌러도 화면은 이미 실패를 받은 뒤다.
- * 15분: 물음의 상한(5분)에 host → 앱 호출의 상한(10분, 진행 알림으로 다시 센다)을 더한 값이다. 화면 쪽의 기다림은
- * AppFrame이 진행 알림으로 살려 둔다.
+ * The budget for an app tool a screen calls (`apps.invoke`) (M4 D-4). That call can wait on a
+ * person — the first time an app tries to use a capability, the host asks that app's pinned
+ * screen and waits up to 5 minutes for an answer (the runtime's capabilityQuestionMs). After
+ * that, the agent may run for a few more minutes. With the 30-second default, the screen's
+ * call would cut off first while the person is still reading and answering, so even clicking
+ * the answer would find the screen already holding a failure. 15 minutes is the question's cap
+ * (5 minutes) plus the host-to-app call's cap (10 minutes, reset by progress notifications).
+ * The waiting on the screen's side is kept alive by AppFrame's progress notifications.
  */
 const APP_CALL_TIMEOUT_MS = 15 * 60_000
 
@@ -77,14 +83,17 @@ export class RpcClient {
   private nextId = 1
   private lastSeq = 0
   /**
-   * 이번 hello에 `afterSeq`를 싣지 않았다 — 이 host와 처음 만난다 (#173). 그런 hello에 host는 버퍼를 통째로 재생하는데,
-   * 그것은 화면이 붙기 전에 이미 끝난 일이다. 받은 대로 넘기면 페이지를 새로 열 때마다 끝난 턴마다 "done" 카드가 서고
-   * 소리가 났고, 옛 조각이 대화를 만들었다. 처음 만난 host에서는 목록과 저장소(스냅샷)가 출발점이다.
+   * This hello did not carry `afterSeq` — this is a first meeting with this host (#173). For a
+   * hello like that, the host replays its whole buffer, and that is all stuff that already
+   * finished before the screen was attached. Passing it through as received would mean, on
+   * every fresh page load, a "done" card standing for every finished turn, a sound playing, and
+   * old fragments building a conversation. On a first meeting with a host, the list and the
+   * store (the snapshot) are the starting point instead.
    */
   private firstContact = false
-  /** 처음 만난 host가 재생하는 옛 이벤트의 끝 번호 — 여기까지는 새 사건으로 넘기지 않는다 */
+  /** The end number of old events replayed by a first-met host — up to here, nothing is passed through as a new event */
   private replayedUpTo = 0
-  /** 한 번이라도 host와 인사를 마쳤다 — 그 뒤의 첫 만남(새 host)은 화면이 든 것을 다시 읽어야 한다 */
+  /** Whether a handshake with a host has ever completed — a first meeting after that (a new host) means the screen has to re-read what it is holding */
   private greeted = false
   private attempt = 0
   private closed = false
@@ -92,18 +101,20 @@ export class RpcClient {
   private readonly WS: typeof WebSocket
 
   /**
-   * host가 다시 뜨면 포트·토큰이 바뀐다 (수퍼바이저가 빈 포트를 새로 잡으므로).
-   * 옛 주소로 계속 재시도하면 앱은 영영 '연결 끊김'에 머문다 — 실측으로 확인한 결함.
+   * If the host comes back up, the port and token change (the supervisor claims a fresh empty
+   * port). Retrying the old address forever would leave the app stuck at 'disconnected' — a
+   * defect confirmed by measurement.
    */
   updateEndpoint(url: string, token: string): void {
     if (this.opts.url === url && this.opts.token === token) return
     this.opts = { ...this.opts, url, token }
     this.attempt = 0
-    this.lastSeq = 0 // 새 host는 이벤트 번호를 처음부터 매긴다
+    this.lastSeq = 0 // A new host numbers events from the start
     /*
-     * **옛 소켓의 핸들러를 먼저 뗀다.** close()는 비동기라 onclose가 나중에 도는데,
-     * 그대로 두면 그 onclose가 방금 만든 새 소켓 참조(this.ws)를 지우고 재연결을 하나 더
-     * 잡는다 — 소켓 둘이 같은 이벤트를 받아 스트리밍 델타가 이중 적용됐다 (실측).
+     * **Detaches the old socket's handlers first.** close() is asynchronous, so onclose fires
+     * later, and if left as is, that onclose would clear the reference to the new socket
+     * (this.ws) just created and open yet another reconnect — two sockets receiving the same
+     * events, applying a streaming delta twice (measured).
      */
     const old = this.ws
     if (old) {
@@ -114,8 +125,8 @@ export class RpcClient {
       old.close()
     }
     this.ws = null
-    // 옛 host로 나간 RPC의 응답은 영영 오지 않는다 — 여기서 거절하지 않으면
-    // 낙관적 UI가 확인을 기다리며 영원히 '작업 중'에 멈춘다 (onclose 핸들러는 방금 뗐다)
+    // The response to an RPC sent to the old host will never arrive — if this does not reject
+    // it, optimistic UI waits forever for confirmation, stuck at 'working' (the onclose handler was just detached)
     this.failInFlight('Host restarted')
     this.connect()
   }
@@ -131,7 +142,7 @@ export class RpcClient {
 
   connect(): void {
     if (this.closed) return
-    // 이미 소켓이 있으면 만들지 않는다 — 백오프 타이머와 updateEndpoint가 겹치면 둘이 된다
+    // Does not create one if a socket already exists — if the backoff timer and updateEndpoint overlap, this could end up with two
     if (this.ws) return
     this.emitConn('connecting')
     const ws = new this.WS(this.opts.url)
@@ -150,7 +161,7 @@ export class RpcClient {
       )
       for (const q of this.queue.splice(0)) {
         ws.send(q.frame)
-        // 이제부터는 '보냈고 답을 기다리는' 호출이다 — 다음 끊김 때 거절 대상이 된다
+        // From here on this is a call that is 'sent and waiting for an answer' — a candidate for rejection at the next disconnect
         const p = this.pending.get(q.id)
         if (p) p.sent = true
       }
@@ -158,19 +169,21 @@ export class RpcClient {
     }
 
     ws.onmessage = (e: MessageEvent) => {
-      if (this.ws !== ws) return // 교체된 소켓의 잔류 프레임은 무시한다
+      if (this.ws !== ws) return // Ignores a leftover frame from a socket that has been replaced
       this.onFrame(String(e.data))
     }
 
     ws.onclose = () => {
-      if (this.ws !== ws) return // 이미 교체됐다면 새 소켓을 건드리지 않는다
+      if (this.ws !== ws) return // If it has already been replaced, leaves the new socket alone
       this.ws = null
       if (this.closed) return
       /*
-       * **보내고 답을 못 받은 RPC는 여기서 거절한다.** 조용히 두면 낙관적 UI가
-       * 영원히 확인을 기다리고(세션이 '작업 중'에 멈춘다) pending이 무한히 자란다 —
-       * 그 응답은 재연결해도 오지 않는다 (host는 요청을 받은 적이 없거나 이미 버렸다).
-       * 아직 큐에만 있는(안 보낸) 호출은 그대로 둔다 — 재연결 후 전송이 기존 계약이다.
+       * **An RPC that was sent but got no answer is rejected right here.** Leaving it alone
+       * would let optimistic UI wait for confirmation forever (a session stuck at 'working')
+       * and pending would grow without bound — that response will never arrive even after
+       * reconnecting (the host either never received the request or has already discarded it).
+       * A call still only in the queue (never sent) is left as is — sending it after
+       * reconnecting is the existing contract.
        */
       this.failInFlight('Connection lost')
       this.emitConn('disconnected')
@@ -179,7 +192,7 @@ export class RpcClient {
     }
 
     ws.onerror = () => {
-      /* onclose가 뒤따르므로 여기선 아무것도 안 한다 */
+      /* Does nothing here, since onclose follows */
     }
   }
 
@@ -191,15 +204,15 @@ export class RpcClient {
       return
     }
     const parsed = parseServerFrame(json)
-    if (!parsed.success) return this.salvage(json) // 모르는 프레임은 무시 (전방 호환)
+    if (!parsed.success) return this.salvage(json) // Ignores an unknown frame (forward compatibility)
     const frame = parsed.data
 
     if ('kind' in frame && frame.kind === 'hello_ok') {
       const greeted = this.greeted
       this.greeted = true
       if (this.firstContact) {
-        // 처음 만난 host의 재생은 새 사건이 아니다 — 번호만 따라잡는다. 화면이 이미 무언가를 들고 있었다면(새 host로
-        // 옮겨 붙었다) 그것은 다시 읽어야 한다
+        // A first-met host's replay is not a new event — only its number is caught up to. If the screen was already
+        // holding something (it switched to a new host), that has to be re-read
         this.replayedUpTo = frame.currentSeq
         this.lastSeq = frame.currentSeq
         if (greeted) this.emitConn('resync_required')
@@ -207,9 +220,11 @@ export class RpcClient {
       }
       this.replayedUpTo = 0
       /*
-       * host의 번호가 우리가 받은 것보다 작다 — host가 같은 주소로 다시 떴다 (#173). 옛 번호를 계속 들고 있으면
-       * `Math.max` 때문에 값이 내려가지 않아, 새 host의 번호가 옛 값을 넘을 때까지 끊길 때마다 아무것도 재생받지
-       * 못한다. 새 host의 번호로 내려앉고, 놓친 것은 스냅샷에서 다시 읽는다.
+       * The host's number is smaller than what we already received — the host came back up on
+       * the same address (#173). Holding onto the old number would keep the value from going
+       * down because of `Math.max`, so nothing would ever be replayed on any disconnect until
+       * the new host's number passed the old value. Instead, this drops down to the new host's
+       * number, and reads whatever was missed back from the snapshot.
        */
       if (frame.currentSeq < this.lastSeq) {
         this.lastSeq = frame.currentSeq
@@ -225,7 +240,7 @@ export class RpcClient {
       for (const h of this.eventHandlers) h(frame.event)
       return
     }
-    // 터미널 출력은 seq를 갖지 않는다 (재전송 버퍼를 태우지 않는다 — envelope 참고)
+    // Terminal output carries no seq (it does not ride the resend buffer — see envelope)
     if (frame.kind === 'term') {
       for (const h of this.termHandlers) h({ terminalId: frame.terminalId, data: frame.data })
       return
@@ -243,20 +258,24 @@ export class RpcClient {
   }
 
   /**
-   * 읽을 수 없는 프레임이 **기다리던 응답**이면 그래도 끝을 낸다 (도그푸딩 2026-09-10).
+   * If an unreadable frame is the **response being waited for**, this still ends the call
+   * (dogfooding, 2026-09-10).
    *
-   * 모르는 프레임을 무시하는 규칙은 전방 호환을 위한 것이고 거기까진 맞다. 그런데 그
-   * 그물에 host의 **실패 응답**이 걸린 적이 있다: 봉투가 프로토콜에 없는 에러 코드
-   * (`ENOENT`)를 달고 와 검사에서 떨어졌고, 프레임은 조용히 버려졌다. 부른 쪽에서 보면
-   * 실패가 온 것이 아니라 **아무것도 안 온 것**이라, 그 화면은 30초 타임아웃까지
-   * '불러오는 중'으로 서 있었다 (파일 링크가 빈 화면이 된 이유).
+   * The rule of ignoring an unknown frame is for forward compatibility, and that much is
+   * right. But that net once caught one of the host's own **failure responses**: an envelope
+   * arrived carrying an error code not in the protocol (`ENOENT`), failed validation, and the
+   * frame was silently dropped. From the caller's side, it looked not like a failure arriving
+   * but like **nothing arriving at all**, so that screen sat at 'loading' all the way to the
+   * 30-second timeout (why a file link turned into a blank screen).
    *
-   * host는 이제 아는 코드만 보낸다. 그래도 이 그물을 남긴다 — 버전이 어긋난 host,
-   * 프록시가 건드린 봉투처럼 **읽을 수 없는 응답은 앞으로도 온다.** 그때 화면이
-   * 멈추는 것보다 "못 읽었다"고 지금 말하는 편이 언제나 낫다.
+   * The host now sends only codes it knows about. This net is kept anyway — **an unreadable
+   * response will still arrive someday**, from a version-mismatched host, or an envelope a
+   * proxy touched. When it does, saying "could not read it" right away is always better than
+   * letting the screen hang.
    *
-   * 성공 응답을 살려 쓰지는 않는다 — 검사에 떨어진 값을 결과인 척 넘기면 그 거짓말은
-   * 화면 어딘가에서 다른 모습으로 터진다. 끝내되, 사실대로 끝낸다.
+   * A successful response is not salvaged this way — passing a value that failed validation
+   * through as if it were a real result would let that lie blow up somewhere else on screen in
+   * a different shape. This ends the call, but ends it truthfully.
    */
   private salvage(json: unknown): void {
     const f = json as { kind?: unknown; id?: unknown; error?: { message?: unknown } }
@@ -267,7 +286,7 @@ export class RpcClient {
     p.reject(Object.assign(new Error(message), { code: 'internal', retryable: false }))
   }
 
-  /** pending에서 하나를 꺼낸다 — 타이머·큐 정리까지가 '꺼내기'다 (안 그러면 유령 타이머가 남는다) */
+  /** Takes one out of pending — "taking out" includes clearing its timer and the queue (otherwise a ghost timer stays behind) */
   private take(id: string): Pending | undefined {
     const p = this.pending.get(id)
     if (!p) return undefined
@@ -277,7 +296,7 @@ export class RpcClient {
     return p
   }
 
-  /** 보냈는데 답을 못 받은 호출을 전부 거절한다 (재시도 가능 표시와 함께) */
+  /** Rejects every call that was sent but got no answer (marked retryable) */
   private failInFlight(reason: string): void {
     for (const [id, p] of [...this.pending]) {
       if (!p.sent) continue
@@ -287,26 +306,29 @@ export class RpcClient {
   }
 
   /**
-   * RPC 한 번. **메서드 이름도 파라미터도 결과도 `RpcMethods`에서 나온다.**
+   * One RPC call. **The method name, the parameters and the result all come from
+   * `RpcMethods`.**
    *
-   * 예전 시그니처는 `call<T>(method: string, params: unknown)`이었다. 셋 다 검사되지
-   * 않는다는 뜻이다: 이름은 오타가 나도 컴파일이 지나가고, 결과 타입은 검증이 아니라
-   * **단언**이라 host가 다른 것을 줘도 TypeScript는 거짓말을 믿는다.
+   * The old signature was `call<T>(method: string, params: unknown)`. That means none of the
+   * three are checked: a typo in the name still compiles, and the result type is an
+   * **assertion**, not validation, so TypeScript believes the lie even when the host gives
+   * something else.
    *
-   * 그 틈으로 실제로 두 번 샜다 — RPC가 effort를 삼킨 것, Codex 모델 shape을 잘못 짚은 것.
-   * 둘 다 "스키마는 A라는데 손으로 쓴 통로는 B"였다. 통로를 손으로 쓰는 한
-   * 다음 것도 같은 방식으로 샌다.
+   * Two real bugs leaked through that gap — an RPC that swallowed effort, and a Codex model
+   * shape read wrong. Both were "the schema says A, but the hand-written channel says B." As
+   * long as the channel is written by hand, the next one leaks the same way.
    *
-   * 이제 `commands.ts`를 고치면 **컴파일러가 따라야 할 곳을 전부 알려준다.**
+   * Now, fixing `commands.ts` **makes the compiler point at every place that has to follow.**
    */
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
     const id = String(this.nextId++)
     const frame = JSON.stringify({ kind: 'rpc', id, method, params })
     return new Promise<RpcResult<M>>((resolve, reject) => {
       /*
-       * 제한 시간 안전망. 끊김은 onclose가 잡지만, 소켓은 멀쩡한데 host가 응답을
-       * 삼키는 경우(핸들러 버그·행)에는 아무도 거절해 주지 않는다 — 그때 pending이
-       * 무한히 자라고 그 호출의 UI는 영원히 기다린다. 큐에서 못 나간 호출도 여기서 정리된다.
+       * The timeout safety net. onclose catches a disconnect, but if the socket is fine and
+       * the host swallows the response (a handler bug, a hang), nobody rejects it — pending
+       * grows without bound and that call's UI waits forever. A call that never left the queue
+       * is also cleaned up here.
        */
       const timer = setTimeout(() => {
         if (!this.take(id)) return
@@ -315,7 +337,7 @@ export class RpcClient {
       const sent = this.ws?.readyState === 1
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, sent })
       if (sent) this.ws!.send(frame)
-      else this.queue.push({ id, frame }) // 재연결 후 전송
+      else this.queue.push({ id, frame }) // Sent after reconnecting
     })
   }
 
@@ -348,7 +370,7 @@ export class RpcClient {
     this.ws?.close()
     this.ws = null
     for (const [, p] of this.pending) {
-      clearTimeout(p.timer) // 타이머를 안 지우면 닫힌 클라이언트가 프로세스를 물고 있는다
+      clearTimeout(p.timer) // If the timer is not cleared, a closed client keeps the process alive
       p.reject(new Error('Connection closed'))
     }
     this.pending.clear()

@@ -7,12 +7,13 @@ import type { AlertKind, Platform, ShortcutKeys, SystemPort } from '../ports/ind
 import { createWebPlatform } from '../web/index.js'
 
 /**
- * Tauri 구현 (docs/platform-abstraction.md §5 마이그레이션 플레이북 2~3단계).
+ * The Tauri implementation (docs/platform-abstraction.md §5, migration playbook steps 2-3).
  *
- * agents/projects는 **web 구현을 그대로 재사용**한다 — 둘 다 같은 WS로 host에 위임하므로
- * 새로 쓸 코드가 없다. Tauri가 다르게 하는 것은 두 가지뿐:
- *   1. host의 포트·토큰을 사이드카 수퍼바이저에게서 받는다 (사람이 터미널을 띄우지 않는다)
- *   2. system 포트가 진짜 OS 기능이 된다 (알림·뱃지·IDE 열기)
+ * agents/projects **reuse the web implementation as-is** — both delegate to the host over the
+ * same WS, so there is no new code to write. Tauri only does two things differently:
+ *   1. Gets the host's port and token from the sidecar supervisor (the person never opens a
+ *      terminal)
+ *   2. The system port becomes real OS functionality (notifications, badge, opening the IDE)
  */
 
 type HostInfo = { port: number; token: string }
@@ -24,15 +25,17 @@ type HostStatus =
   | { state: 'failed'; message: string }
 
 /**
- * 사이드카가 준비될 때까지 기다린다. 앱은 host보다 먼저 뜬다.
+ * Waits for the sidecar to be ready. The app comes up before the host does.
  *
- * **순서가 중요하다:** 이벤트를 먼저 구독하고 그다음 현재 상태를 묻는다.
- * 반대로 하면 그 사이에 준비가 끝났을 때 신호를 놓쳐 타임아웃까지 멈춘다
- * (host가 1초 만에 뜨게 되면서 실제로 겪었다). 폴링까지 두어 삼중으로 막는다.
+ * **Order matters:** subscribe to the event first, then ask for the current state.
+ * Doing it the other way around can miss the signal if readiness finishes in between, and
+ * stall all the way to the timeout (this actually happened once the host started coming up in
+ * under a second). Polling is added on top as a third layer of defense.
  *
- * 폴링은 **실패도** 묻는다 (#184). 수퍼바이저는 포기할 때만 실패 문장을 남기므로(다시
- * 시작하면 비운다), 문장이 있으면 곧 답이다. 예전에는 `failed` 이벤트를 놓치면 — Retry로
- * 다시 띄운 수퍼바이저가 웹뷰가 듣기 전에 곧바로 포기하면 — 30초를 다 기다렸다.
+ * Polling also asks about **failure** (#184). The supervisor only leaves a failure message
+ * when it gives up (a restart clears it), so if there is a message, that is the answer. It
+ * used to be that missing the `failed` event — when a supervisor restarted by Retry gave up
+ * again before the webview was listening — meant waiting out the full 30 seconds.
  */
 async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
   return new Promise<HostInfo>((resolve, reject) => {
@@ -41,7 +44,7 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
       done = true
       clearTimeout(timer)
       clearInterval(poll)
-      // 다시 시도할 때마다 구독이 쌓이지 않게 푼다
+      // Unsubscribes so subscriptions do not pile up on every retry
       void unlisten.then((f) => f()).catch(() => {})
     }
     const finish = (info: HostInfo) => {
@@ -61,7 +64,7 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
         .then((err) => fail(err ?? 'agent-host did not become ready in time'))
     }, timeoutMs)
 
-    // ① 먼저 구독한다
+    // (1) Subscribes first
     const unlisten = listen<HostStatus>('host-status', (e) => {
       const p = e.payload
       if (typeof p !== 'object' || p === null) return
@@ -69,7 +72,7 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
       else if (p.state === 'failed') fail(p.message)
     })
 
-    // ② 이미 준비돼 있었는지(또는 이미 포기했는지) 확인한다 (구독 전에 끝난 경우)
+    // (2) Checks whether it was already ready (or had already given up) — in case it finished before the subscription
     const check = () => {
       void invoke<HostInfo | null>('host_info')
         .then((info) => info?.token && finish(info))
@@ -80,28 +83,33 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
     }
     check()
 
-    // ③ 이벤트를 놓쳐도 결국 붙는다
+    // (3) Eventually catches up even if the event was missed
     const poll = setInterval(check, 400)
   })
 }
 
 /**
- * 포기한 수퍼바이저를 다시 돌린다 (#184 — 실패 화면의 Retry). 웹뷰만 다시 읽어서는 host가
- * 다시 뜨지 않는다. 돌기 시작했으면 true, 이미 돌고 있었으면 false(곧 답이 온다).
+ * Restarts a supervisor that gave up (#184 — the failure screen's Retry). Reloading the
+ * webview alone does not bring the host back up. Returns true if it started running, and
+ * false if it was already running (an answer will follow shortly).
  */
 export async function restartHost(): Promise<boolean> {
   return invoke<boolean>('restart_host')
 }
 
 /**
- * 종료 요청(`quit-requested`)의 받는 곳 (#184). **첫 렌더 전에** 한 번 건다.
+ * The receiver for a quit request (`quit-requested`) (#184). Wired up once, **before the
+ * first render**.
  *
- * 셸은 ⌘Q·메뉴의 Quit·창 닫기를 모두 붙잡고 웹뷰에 이 이벤트를 보낸다. 예전에는 듣는 곳이
- * 앱 화면(종료 모달) 하나뿐이라, host를 기다리는 화면과 기동 실패 화면에서는 이벤트가 받는
- * 곳 없이 사라졌다 — Dock의 종료와 강제 종료 말고는 끌 길이 없었다.
+ * The shell catches ⌘Q, the menu's Quit, and closing the window, all alike, and sends this
+ * event to the webview. It used to be that the only listener was the app screen (the quit
+ * modal), so on the screen waiting for the host and on the startup-failure screen, the event
+ * vanished with nobody to receive it — the only way to close the app was from the Dock or by
+ * force-quitting.
  *
- * 물을 곳(모달)이 서 있으면 그쪽에 넘기고, 없으면 물을 것이 없으므로 바로 끈다.
- * @returns 물을 곳을 세우고(함수) 내리는(null) 손잡이
+ * If something to ask (a modal) is up, hands it off to that; if not, there is nothing to ask,
+ * so it quits right away.
+ * @returns a handle that installs something to ask (a function) or takes it down (null)
  */
 export function listenForQuit(): (ask: (() => void) | null) => void {
   let ask: (() => void) | null = null
@@ -114,18 +122,20 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   }
 }
 
-/** 내보내는 것은 시험을 위해서다 — 러스트 커맨드와의 이음매를 웹뷰 없이 본다 */
+/** Exported for testing — checks the seam with the Rust commands without a webview */
 export class TauriSystemPort implements SystemPort {
   private granted: boolean | null = null
 
   private warned = false
 
   /**
-   * 알림은 **자리를 비운 사람에게 닿는 유일한 수단**이다. 그래서 못 보냈으면 말한다.
+   * A notification is **the only way to reach a person who has stepped away.** So if one could
+   * not be sent, this says so.
    *
-   * 예전엔 권한이 없으면 그냥 return이었다. 그러면 "알림이 안 온다"를 밝혀낼 방법이
-   * 없다 — 코드는 정상이고 화면에도 아무 일이 없으니 도구를 의심하게 된다.
-   * 한 번만 알린다 (매 알림마다 띄우면 그게 더 소음이다).
+   * It used to just return if permission was missing. That leaves no way to ever find out "the
+   * notification never came" — the code looks fine and nothing happens on screen, so the tool
+   * ends up being the one suspected. Warns only once (raising it on every single notification
+   * would be more noise than it is worth).
    */
   async notify(title: string, body: string): Promise<void> {
     if (this.granted === null) {
@@ -140,16 +150,18 @@ export class TauriSystemPort implements SystemPort {
   }
 
   /**
-   * 소리와 독 — **실제로 사람에게 닿는 길.**
+   * Sound and the dock — **the path that actually reaches a person.**
    *
-   * 위의 `notify`는 남겨 두지만 믿지 않는다. 플러그인 소스를 읽어보면 데스크톱에서
-   * `permission_state()`와 `request_permission()`이 **둘 다 `Ok(Granted)` 상수**를
-   * 돌려주고, 전달 실패는 `let _ = notification.show()`로 버려진다. 즉 위의 `granted`
-   * 검사는 아무것도 검사하지 않으며 저 throw는 영원히 발생하지 않는다.
-   * 게다가 macOS 경로는 2018년에 deprecated된 `NSUserNotification`이라 배너가 뜨지 않는다.
+   * `notify` above is kept, but not trusted. Reading the plugin's source shows that on
+   * desktop, `permission_state()` and `request_permission()` **both return the constant
+   * `Ok(Granted)`**, and a delivery failure is dropped with `let _ = notification.show()`. In
+   * other words, the `granted` check above checks nothing, and that throw never fires. On top
+   * of that, the macOS path uses `NSUserNotification`, deprecated since 2018, so the banner
+   * never shows up.
    *
-   * 그래서 알림이 왔는지를 이쪽이 책임진다. 실패하면 던진다 — 조용히 넘기면
-   * "알림이 안 온다"를 또 밝혀낼 수 없게 된다.
+   * So this side takes responsibility for whether a notification actually arrived. Throws on
+   * failure — passing it through silently would once again make "the notification never came"
+   * impossible to find out.
    */
   async alert(kind: AlertKind, sound: boolean): Promise<void> {
     await invoke('alert', { kind, sound })
@@ -160,14 +172,15 @@ export class TauriSystemPort implements SystemPort {
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
-    // 러스트의 Err(String)이 그대로 오면 화면에 "Could not open in IDE: undefined"가 뜬다 (#159)
+    // If Rust's Err(String) arrived as-is, the screen would show "Could not open in IDE: undefined" (#159)
     await invoke('open_in_ide', { path, line }).catch(rethrowAsError)
   }
 
   /**
-   * opener 플러그인의 명령을 직접 부른다 — `@tauri-apps/plugin-opener`의 `openUrl`이 부르는
-   * 바로 그 명령이고, 권한은 이미 준 `opener:default`(http·https 주소)다. 플러그인의 JS
-   * 꾸러미를 이 패키지에 들이지 않으려고 이름으로 부른다.
+   * Calls the opener plugin's command directly — the exact command
+   * `@tauri-apps/plugin-opener`'s `openUrl` calls, using the `opener:default` permission
+   * (http/https addresses) already granted. Called by name to avoid pulling the plugin's JS
+   * package into this package.
    */
   async openUrl(url: string): Promise<void> {
     await invoke('plugin:opener|open_url', { url }).catch(rethrowAsError)
@@ -177,7 +190,7 @@ export class TauriSystemPort implements SystemPort {
     return pickDirectory()
   }
 
-  /** 파일 하나 (M4 E-3 — 가져올 .zip). 다이얼로그 플러그인의 `open`이라 권한은 이미 준 `dialog:default` 그대로다 */
+  /** One file (M4 E-3 — the .zip to import). This is the dialog plugin's `open`, so it uses the `dialog:default` permission already granted, as is */
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
     const picked = await openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] })
     return typeof picked === 'string' ? picked : null
@@ -188,9 +201,11 @@ export class TauriSystemPort implements SystemPort {
   }
 
   /**
-   * 앱 링크 (M4 E-4). 셸이 OS의 열기 이벤트로 받은 링크를 쌓아 두고 `app-link`로 부른다 — 그 부름은 "꺼내 가라"일 뿐이고 링크는
-   * `take_app_links`로 꺼낸다(꺼낸 것은 셸에서 비워진다). 구독하자마자 한 번 꺼낸다: 링크로 앱이 켜졌으면 웹뷰가 뜨기 전에 온 링크가
-   * 이미 쌓여 있다.
+   * App links (M4 E-4). The shell queues up links it received through the OS's open event and
+   * calls `app-link` — that call means only "come get it," and the link itself is retrieved
+   * with `take_app_links` (retrieving it clears it from the shell). Drains once as soon as
+   * subscribed: if the app was launched by a link, a link that arrived before the webview came
+   * up is already sitting in the queue.
    */
   onAppLink(cb: (link: string) => void): () => void {
     let alive = true
@@ -210,22 +225,23 @@ export class TauriSystemPort implements SystemPort {
 }
 
 /**
- * 커맨드가 준 `Err(String)`을 Error로 바꿔 다시 던진다.
+ * Turns the `Err(String)` a command gave into an Error and rethrows it.
  *
- * Tauri는 러스트 쪽 `Err`를 **문자열 그대로** 거절 값으로 넘긴다. Error가 아니므로
- * `e.message`가 undefined가 되고, 화면에는 "Could not delete a.ts: undefined"처럼
- * 이유가 빠진 실패가 뜬다 — 실패를 말하되 왜인지는 안 말하는, 가장 쓸모없는 모양이다.
+ * Tauri passes a Rust-side `Err` through as a rejection value **exactly as the string it is**.
+ * Since it is not an Error, `e.message` comes out undefined, and the screen shows a failure
+ * with no reason, like "Could not delete a.ts: undefined" — the most useless shape a failure
+ * can take, saying that it failed without saying why.
  */
 function rethrowAsError(e: unknown): never {
   throw e instanceof Error ? e : new Error(String(e))
 }
 
-/** 창을 앞으로 (알림 클릭·전역 단축키) */
+/** Brings the window forward (a notification click, a global shortcut) */
 export async function focusWindow(): Promise<void> {
   await invoke('focus_window')
 }
 
-/** 디렉토리 선택 — 웹 dev의 경로 타이핑을 대체한다 (FR-19) */
+/** Directory picker — replaces typing a path, which is what web dev does instead (FR-19) */
 export async function pickDirectory(): Promise<string | null> {
   const picked = await openDialog({ directory: true, multiple: false, title: 'Choose project directory' })
   return typeof picked === 'string' ? picked : null
@@ -254,17 +270,18 @@ export async function createTauriPlatform(): Promise<Platform> {
   // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
   const fileManagerName = await invoke<string>('file_manager_name').catch(() => 'file manager')
 
-  // 수퍼바이저가 host를 되살리면 포트·토큰이 바뀐다 → 새 주소로 갈아타야 한다.
-  // 이 구독이 없으면 사이드카가 크래시한 뒤 앱이 '연결 끊김'에 머문다 (L4-2 실측).
+  // If the supervisor revives the host, the port and token change → this has to switch to the new address.
+  // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
     fileManagerName,
     /*
-      휴지통과 '파일 관리자에서 보기'는 host가 못 하는 두 가지다 (#18/#19).
-      진짜 휴지통은 macOS의 `NSFileManager trashItem`·freedesktop 규격이지 임시 폴더로
-      옮기는 unlink가 아니므로, Node 사이드카가 아니라 여기서 Rust로 내려간다.
-      경로를 만드는 것은 여전히 host의 몫이다 — 프로젝트 루트를 아는 쪽은 거기뿐이다.
+      The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
+      A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink
+      that moves a file to a temp folder, so this goes down to Rust here rather than through
+      the Node sidecar. Building the path is still the host's job — it is the only side that
+      knows the project root.
     */
     nativeFiles: {
       trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),

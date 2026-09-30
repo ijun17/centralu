@@ -2,22 +2,25 @@ import type { NormalizedEvent } from '@cc/protocol'
 import type { MockPlatform } from './index.js'
 
 /**
- * 손으로 보는 화면 (사용자 요청 2026-09-10).
+ * A screen meant to be looked at by hand (requested by the person, 2026-09-10).
  *
- * 목(MockPlatform)은 E2E가 **프로그램으로** 조종하라고 만든 것이라, 사람이 그냥 열면
- * 아무것도 없다: 소개 화면에서 폴더를 고르고 세션을 만들고 타이핑해야 겨우 한 줄이 서고,
- * 답은 영영 오지 않는다(목의 `send`는 상태만 working으로 바꾼다). UI를 고치는 동안
- * 저장할 때마다 리로드되면 그 셋업을 매번 다시 해야 했다.
+ * The mock (MockPlatform) exists so that e2e can drive it **programmatically**, so opening it
+ * as a person just gives an empty shell: it takes picking a folder on the intro screen,
+ * creating a session and typing before even one line stands, and an answer never actually
+ * arrives (the mock's `send` only flips the state to working). While fixing the UI, a reload
+ * on every save meant redoing that setup every time.
  *
- * 그래서 **씬을 깐다.** 열자마자 프로젝트·세션·대화·깃·사용량이 채워져 있고, 말을 걸면
- * 답이 흐른다. 리로드해도 씨앗에서 같은 씬이 다시 자란다.
+ * So instead, **we lay down a scene.** The moment it opens, projects, sessions, conversations,
+ * git and usage are already filled in, and saying something gets an answer flowing. The same
+ * scene grows back from the seed even after a reload.
  *
- * 규칙 하나: **공개된 문(포트)으로만 만든다.** 내부 자료구조에 직접 손을 넣으면 목의
- * 계약과 씬이 갈라지고, 그러면 여기서 본 화면이 E2E·실물과 다른 것을 말하게 된다.
- * 대화 내용은 `emit`으로 넣는다 — 실물에서 이벤트가 오는 그 길 그대로다.
+ * One rule: **build it only through the public doors (the ports).** Reaching directly into
+ * internal data structures would split the mock's contract from the scene, and then what is
+ * seen here would say something different from e2e and from the real thing. Conversation
+ * content goes in through `emit` — the exact path events take from the real thing.
  */
 
-/** 지금 있는 씬들. `?demo=<이름>` */
+/** The scenes that exist right now. `?demo=<name>` */
 export const DEMO_SCENES = ['focus', 'grid', 'empty', 'shot'] as const
 export type DemoScene = (typeof DEMO_SCENES)[number]
 
@@ -26,25 +29,27 @@ export function isDemoScene(v: string): v is DemoScene {
 }
 
 /**
- * 씬을 깔고, 말을 걸면 답하게 만든다.
+ * Lays down a scene, and makes it answer when spoken to.
  *
- * 돌려주는 것은 **workspace 스냅샷에 얹을 것들**이다 (그리드에 어느 칸을 세울지 등).
- * 앱이 스냅샷을 읽기 전에 목에 넣어 둬야 해서, 부르는 쪽이 아니라 여기서 정한다.
+ * What it returns are **the things to lay onto the workspace snapshot** (which panels the
+ * grid should show, and so on). Since these have to be in the mock before the app reads the
+ * snapshot, they are decided here rather than by the caller.
  */
 export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): Promise<void> {
   installResponder(mock)
   if (scene === 'empty') return
   if (scene === 'shot') return seedShot(mock)
 
-  // 소개 화면을 건너뛴다 — 씬의 목적은 그 다음 화면이다
+  // Skips the intro screen — the point of the scene is the screen after it
   mock.orchestratorTool = 'claude'
 
   const centralu = await mock.projects.add('/Users/you/code/centralu')
   const site = await mock.projects.add('/Users/you/code/landing-site')
 
   /*
-   * 사용량 — 도넛이 뜨려면 주간 창이 있어야 한다. 두 도구 다 로그인된 상태로 둔다
-   * (`detected`가 그 판정이다 — 계기판은 설치+로그인만 도넛으로 세운다).
+   * Usage — the donut needs a weekly window to show up. Leaves both tools logged in
+   * (`detected` is what decides that — the dashboard only shows a donut for installed and
+   * logged-in tools).
    */
   mock.usageState = {
     supported: true,
@@ -59,7 +64,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     },
   }
 
-  // 깃 — 사이드바의 변경 수, 증거 패널의 변경·기록 탭이 빈 채로 서지 않게
+  // Git — so the sidebar's change count and the evidence panel's changes/history tabs do not stand empty
   mock.gitState = {
     ...mock.gitState,
     files: [
@@ -106,17 +111,18 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   ])
 
   /*
-   * 세션들. 상태를 일부러 흩뿌린다 — 응답 중(무지개 링)·승인 대기·질문 대기·잠든 것이
-   * 한 화면에 같이 있어야 사이드바·인박스·그리드가 실제로 하는 일이 보인다.
+   * The sessions. Their states are deliberately scattered — working (rainbow ring), waiting
+   * for approval, waiting for a question, and asleep all need to be on screen together for
+   * the sidebar, inbox and grid to show what they actually do.
    */
   const working = await session(mock, centralu.id, 'claude', '접힌 입력창 마무리')
   /*
-   * 대화는 **스크롤이 생길 만큼** 길다 (사용자 요청 2026-09-12).
+   * The conversation is long **enough to scroll** (requested by the person, 2026-09-12).
    *
-   * 두 줄짜리 씬으로는 손으로 볼 수 없는 것이 여럿이다: 위로 올라갈 때의 스크롤 복원,
-   * 가상화, 접힌 도구 카드가 쌓였을 때의 밀도, 긴 답 안에서 마크다운이 서는 모양.
-   * 그래서 실제 도그푸딩 한 자리를 통째로 옮겨 놓는다 — 지어낸 잡담을 늘리는 것보다
-   * 이 앱이 실제로 받는 화면에 가깝다.
+   * There are several things a two-line scene cannot show by hand: scroll restoration when
+   * paging up, virtualization, the density of stacked collapsed tool cards, how markdown
+   * renders inside a long answer. So a whole real dogfooding transcript is moved in wholesale
+   * — closer to what this app actually receives than padding it out with made-up chatter.
    */
   talk(mock, working.id, [
     ['user', '그리드에서 입력창이 떠오를 때 무지개 링을 덮지 않게 해줘.'],
@@ -161,8 +167,9 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     ['user', '좋아. 그리고 리소스 목록 한 번 더 불러와 줄래?'],
   ])
   /*
-   * 줄바꿈이 없는 한 덩어리 — 접힌 카드의 **높이 상한**이 일하는지 손으로 보는 자리다.
-   * 상한이 없으면 이 한 줄이 화면을 통째로 덮는다 (사용자 지적 2026-09-12).
+   * One chunk with no line breaks — the place to check by hand whether the collapsed card's
+   * **height cap** is doing its job. Without the cap, this single line covers the whole
+   * screen (pointed out by the person, 2026-09-12).
    */
   tool(
     mock,
@@ -201,11 +208,13 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact' })
   mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
   /*
-   * 계획 체크리스트는 **화면이 붙은 뒤에** 흘린다.
+   * The plan checklist is sent **after the screen has attached**.
    *
-   * 계획은 세션 목록에 남지 않는다 — 실물(host)도 SessionInfo에 안 적고, 도는 동안만
-   * 사는 사실이라 UI의 리듀서가 이벤트로 들고 있다. 그래서 그리기 전에 쏘면 아무도 안
-   * 듣는다. 목이 여기서만 남겨 주면 그건 실물에 없는 화면을 보여주는 것이므로 안 한다.
+   * A plan does not stay in the session list — the real thing (the host) does not write it
+   * into SessionInfo either; it is a fact that lives only while a turn runs, so the UI's
+   * reducer holds it from events. So firing it before anything is drawn means nobody is
+   * listening. The mock does not keep it around just for itself, since that would show a
+   * screen the real thing does not have.
    */
   setTimeout(
     () =>
@@ -257,16 +266,17 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   mock.emit({ type: 'turn_complete', sessionId: done.id })
 
   if (scene === 'grid') {
-    // 그리드 씬은 칸이 여럿일 때의 화면이 목적이다 — 접힘·링·읽는 공간이 여기서 보인다
+    // The grid scene's purpose is the screen with several panels — collapsing, the ring, and reading space all show up here
     const extra = await session(mock, centralu.id, 'claude', '릴리스 노트 정리')
     talk(mock, extra.id, [['user', '이번 주 커밋으로 릴리스 노트 써줘.']])
     mock.emit({ type: 'state_change', sessionId: extra.id, state: 'working' })
     const panels = [working.id, approving.id, asking.id, extra.id]
     await mock.agents.setGridView(panels)
     /*
-     * 씬의 이름이 `grid`면 그리드로 연다. 보는 방식은 작업공간 스냅샷의 것이라 여기서
-     * 적어 둔다 — 목의 id는 씨앗이 같은 순서로 자라 **리로드해도 같으므로**, 사람이
-     * 손으로 바꾼 배치도 다음 로드에서 그대로 살아난다.
+     * If the scene's name is `grid`, opens it in grid view. The way of looking belongs to the
+     * workspace snapshot, so it is written here — since the mock's ids grow in the same order
+     * from the seed and **stay the same across a reload**, a layout the person changed by hand
+     * also survives into the next load.
      */
     const saved = (await mock.workspace.load()) ?? {}
     await mock.workspace.save({ ...saved, view: 'grid', focusedSessionId: working.id })
@@ -277,16 +287,18 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
 }
 
 /**
- * 리드미에 넣을 한 장 (`?demo=shot`).
+ * The one shot to put in the README (`?demo=shot`).
  *
- * `focus` 씬과 나누는 이유는 둘이다. 하나는 **언어**다 — 영문 리드미에 한국어 대화가
- * 박힌 화면을 넣으면 읽는 사람이 제품이 아니라 글자를 먼저 본다. 다른 하나는 **초점**이다.
- * `focus`는 손으로 UI를 고치라고 만든 씬이라 응답 중인 세션을 열어 두지만, 리드미가
- * 팔아야 하는 장면은 "승인을 기다리는 것이 하나 있고, 그게 어느 것인지 보인다"이다.
- * 그래서 여기서는 **승인 대기 세션을 연 채로** 시작한다.
+ * Kept separate from the `focus` scene for two reasons. One is **language** — putting a
+ * screen with Korean conversation into an English README makes the reader look at the letters
+ * before the product. The other is **focus**. `focus` is a scene built for fixing the UI by
+ * hand, so it leaves a working session open, but the scene the README has to sell is "there is
+ * one thing waiting for approval, and it is clear which one." So this one starts with **the
+ * approval-waiting session open**.
  *
- * 대화는 전부 지어낸 것이다. 실제 도그푸딩을 옮겨 오면 사람 이름과 남의 저장소 이야기가
- * 같이 따라온다 (사용자 요청 2026-09-17).
+ * The conversations are entirely made up. Moving in a real dogfooding transcript would bring
+ * along people's names and someone else's repository along with it (requested by the person,
+ * 2026-09-17).
  */
 async function seedShot(mock: MockPlatform): Promise<void> {
   mock.orchestratorTool = 'claude'
@@ -352,7 +364,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
     { command: 'pnpm exec vitest run', label: 'Unit' },
   ])
 
-  // 응답 중인 세션 — 사이드바에서 도는 것이 하나 있어야 "지금 일하는 중"이 보인다
+  // A working session — the sidebar needs one thing spinning for "working right now" to be visible
   const working = await session(mock, api.id, 'claude', 'Cap the charge retries')
   talk(mock, working.id, [
     ['user', 'Declined charges retry forever. Put a ceiling on it.'],
@@ -406,10 +418,12 @@ async function seedShot(mock: MockPlatform): Promise<void> {
   mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
 
   /*
-   * 승인 대기 — 리드미가 팔아야 하는 장면이라 이 세션을 열어 둔다.
+   * Waiting for approval — this session is left open because it is the scene the README has
+   * to sell.
    *
-   * 명령은 **한눈에 위험한 것**으로 고른다. 화면 한 장에서 "왜 사람이 봐야 하는가"가
-   * 설명 없이 전해져야 하고, `--force`는 개발자라면 누구나 멈칫하는 자리다.
+   * The command is chosen to be **dangerous at a glance**. In a single screenshot, "why does a
+   * person need to see this" has to come across with no explanation, and `--force` is the spot
+   * where any developer would flinch.
    */
   const approving = await session(mock, api.id, 'codex', 'Land the release branch')
   talk(mock, approving.id, [
@@ -446,7 +460,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
     detail: { kind: 'command', command: 'git push --force origin main', cwd: '/Users/you/code/payments-api' },
   })
 
-  // 질문 대기 — 승인과 다른 종류의 기다림이 같이 있어야 인박스가 무엇을 세는지 보인다
+  // Waiting for a question — needs a different kind of waiting alongside approval for the inbox to show what it is counting
   const asking = await session(mock, site.id, 'claude', 'Hero line')
   talk(mock, asking.id, [
     ['user', 'The hero line is doing nothing. Give me two directions.'],
@@ -473,7 +487,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
     ],
   } as NormalizedEvent)
 
-  // 끝난 것 — "기다리는 중"과 "끝나서 조용한 것"이 달라 보여야 한다
+  // A finished one — "waiting" and "done and quiet" need to look different
   const done = await session(mock, site.id, 'codex', 'Shrink the hero images')
   talk(mock, done.id, [
     ['user', 'The hero images are 4 MB. Convert everything under public/ to webp.'],
@@ -492,28 +506,31 @@ async function seedShot(mock: MockPlatform): Promise<void> {
   mock.emit({ type: 'turn_complete', sessionId: done.id })
 
   /*
-   * 그리드로 연다.
+   * Opens in grid view.
    *
-   * 포커스로 열면 승인 카드가 크게 읽히는 대신 나머지 셋이 사이드바의 한 줄로 줄어든다.
-   * 이 앱이 파는 것은 "여럿이 각각 다른 상태로 있고, 그중 무엇이 나를 기다리는지 보인다"라서,
-   * 그 문장이 성립하는 화면은 칸이 여럿인 쪽이다. 그리드가 **도구 화면이 들어올 자리**이기도
-   * 하다 (사용자 2026-09-17) — 지금 세우는 것이 나중에 그 자리를 설명한다.
+   * Opening in focus would read the approval card large, but shrink the other three to a
+   * single line in the sidebar. What this app sells is "several things are each in a
+   * different state, and it is visible which one is waiting on me", and the screen where that
+   * sentence holds true is the one with several panels. The grid is also **the place a tool
+   * screen will land** (the person, 2026-09-17) — what is being set up now explains that spot
+   * later.
    *
-   * 칸 순서는 상태가 섞이게 둔다: 도는 것 · 승인 대기 · 질문 대기 · 끝난 것.
+   * The panel order is left mixed by state: working, waiting for approval, waiting for a
+   * question, done.
    */
   await mock.agents.setGridView([working.id, approving.id, asking.id, done.id])
   const saved = (await mock.workspace.load()) ?? {}
   await mock.workspace.save({ ...saved, view: 'grid', focusedSessionId: approving.id })
 }
 
-/** 세션 하나 — 만들고, 화면이 고를 수 있게 id를 돌려준다 */
+/** One session — creates it, and returns the id so the screen can pick it */
 async function session(mock: MockPlatform, projectId: string, tool: 'claude' | 'codex', name: string) {
   const info = await mock.agents.createSession({ projectId, cwd: '', tool, permissionPreset: 'normal' })
   await mock.agents.rename(info.id, name)
   return info
 }
 
-/** 지난 도구 한 번 — 부름과 결과가 한 쌍이라 여기서 묶는다 */
+/** One past tool call — the call and its result are a pair, so they are bundled here */
 function tool(
   mock: MockPlatform,
   sessionId: string,
@@ -526,7 +543,7 @@ function tool(
   mock.emit({ type: 'tool_result', sessionId, callId, ok: true, summary: result })
 }
 
-/** 지난 대화 몇 줄 — 이벤트로 넣는다 (실물에서 오는 길 그대로) */
+/** A few lines of past conversation — sent in as events (the exact path they come by in the real thing) */
 function talk(mock: MockPlatform, sessionId: string, lines: ['user' | 'assistant', string][]): void {
   for (const [role, text] of lines) {
     if (role === 'user') mock.emit({ type: 'user_message', sessionId, seq: 0, text })
@@ -535,12 +552,13 @@ function talk(mock: MockPlatform, sessionId: string, lines: ['user' | 'assistant
 }
 
 /**
- * 말을 걸면 답이 온다.
+ * An answer arrives when someone says something.
  *
- * 목의 `send`는 상태만 working으로 바꾼다 — 그게 E2E에는 맞다(테스트가 답을 직접 넣는다).
- * 사람이 보는 화면에서는 그것이 "영원히 도는 세션"으로만 보이므로, 여기서 **짧은 각본**을
- * 얹는다: 생각하는 척 → 도구 하나 → 답 몇 조각 → 끝. 입력창 접힘·무지개 링·끝났을 때의
- * 바람·읽음 처리가 전부 이 한 바퀴에서 실제로 움직인다.
+ * The mock's `send` only flips the state to working — that is right for e2e (the test feeds in
+ * the answer itself). On a screen a person is watching, that would only ever look like "a
+ * session running forever," so a **short script** is layered on here: pretend to think → one
+ * tool call → a few chunks of an answer → done. The composer collapsing, the rainbow ring, the
+ * flourish on finishing, and marking as read all actually move through this one cycle.
  */
 function installResponder(mock: MockPlatform): void {
   const original = mock.agents.send.bind(mock.agents)

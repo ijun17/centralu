@@ -40,13 +40,16 @@ import type {
 } from '@cc/protocol'
 
 /**
- * Platform 포트 (docs/platform-abstraction.md §2).
- * ui가 아는 유일한 외부 세계. 구현(web/tauri/mock)은 apps 진입점만 안다.
+ * The Platform port (docs/platform-abstraction.md §2).
+ * The only outside world ui knows about. The implementations (web/tauri/mock) know only the
+ * apps entry point.
  *
- * 규칙:
- *  - 모든 메서드는 Promise 반환 (동기 구현이라도 — IPC로 바뀌어도 시그니처 불변)
- *  - 스트림은 subscribe(handler): Unsubscribe 형태로 통일
- *  - 입출력 타입은 전부 protocol의 것. 구현 세부(WS 프레임, invoke 이름) 노출 금지
+ * Rules:
+ *  - Every method returns a Promise (even a synchronous implementation — the signature stays
+ *    stable even if it later moves to IPC)
+ *  - Streams are unified as subscribe(handler): Unsubscribe
+ *  - Input and output types all come from protocol. Implementation details (WS frames, invoke
+ *    names) must not leak out
  */
 
 export type Unsubscribe = () => void
@@ -62,40 +65,41 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'res
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
-  /** 붙여넣은 이미지를 저장하고 경로를 받는다 (base64를 대화 기록에 넣지 않기 위해) */
+  /** Saves a pasted image and returns its path (so base64 does not end up in the conversation record) */
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string): Promise<Attachment>
   respondApproval(
     sessionId: string,
     requestId: string,
     decision: ApprovalDecision,
     scope?: ApprovalScope,
-    /** '항상 허용'의 대상 패턴 (core가 계산) */
+    /** The pattern that "always allow" targets (computed by core) */
     matcher?: string,
   ): Promise<void>
-  /** 선택지에 답한다 (AskUserQuestion) — 답은 그 도구의 결과로 모델에게 간다 */
+  /** Answers the options (AskUserQuestion) — the answer goes to the model as that tool's result */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
-  /** 사이드바 순서 (사람이 끌어서 정한다). 전체 순서를 통째로 보낸다 */
+  /** Sidebar order (the person sets it by dragging). Sends the whole order at once */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
   /**
-   * 앱에 하나뿐인 오케스트레이터. **부르면 없을 때 만든다.**
-   * 프로젝트에 속하지 않으므로 projectId는 null이다.
+   * The app's one and only orchestrator. **Calling it creates one if it does not exist.**
+   * It does not belong to a project, so projectId is null.
    */
   orchestrator(): Promise<SessionInfo>
   /**
-   * 있으면 주고, **없으면 만들지 않는다** (#63). 화면을 여는 쪽이 쓴다 —
-   * 만드는 것은 사람이 첫 질문을 던지는 순간의 orchestrator()다 (지연 기동).
+   * Returns it if it exists, and **does not create one if it does not** (#63). Used by
+   * whichever screen is opening — creation happens in orchestrator(), at the moment the
+   * person asks the first question (lazy startup).
    */
   orchestratorPeek(): Promise<SessionInfo | null>
-  /** 중앙 오케스트레이터가 돌 도구 (#63, 소개 화면의 카드 선택). 생성 전에만 의미가 있다 */
+  /** The tool the central orchestrator runs on (#63, the card choice on the intro screen). Only meaningful before it is created */
   configureOrchestrator(tool: ToolName): Promise<void>
-  /** 그리드 배치 — 추가·제거·순서가 전부 이 한 가지로 온다 */
+  /** Grid layout — adding, removing and reordering all come through this one call */
   grid(): Promise<string[]>
   setGridView(sessionIds: string[]): Promise<string[]>
-  /** 고를 수 있는 모델과 각 모델의 추론 강도 (도구가 공식 API로 알려주는 것) */
+  /** The models available to pick and each model's reasoning strength (what the tool reports through its official API) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
-  /** 목록에서 숨긴다 / 다시 꺼낸다 (삭제와 달리 기록이 남는다) */
-  /** 세션에 연결된 에이전트만 재시작한다 (대화는 그대로) */
+  /** Hides it from the list, or brings it back (unlike delete, the record stays) */
+  /** Restarts only the agent attached to the session (the conversation stays as is) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
    * Moves the session to the trash (#204) — nothing is destroyed here; `TrashPort` is the way out.
@@ -103,33 +107,36 @@ export interface AgentPort {
    * the worktree, and the tool's own conversation file (codex rollout, claude JSONL). Both stay until then.
    */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
-  /** 지워도 되는지 사람에게 묻기 위한 재료. 워크트리 세션이 아니면 null */
+  /** The material needed to ask the person whether it is fine to delete. Null if it is not a worktree session */
   worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
   /**
-   * 죽은-에이전트 인수인계 기록 (#78) — 그 세션의 도구를 부르지 않고 host가 만든다.
-   * host가 데이터 폴더의 노트 자리에 써 놓고 절대 경로를 준다 (#102, #142); text는 미리보기용이다.
+   * A dead-agent handoff record (#78) — the host creates it without calling that session's
+   * tool. The host writes it to the notes location in the data folder and returns the
+   * absolute path (#102, #142); text is for the preview.
    */
   exportHandoffRecord(sessionId: string, toTool?: ToolName): Promise<{ text: string; path: string }>
   /**
-   * 살아 있는 인수인계의 노트 (#142) — afterSeq(부탁 직전의 마지막 seq) 뒤 첫 사람 말이 부탁이고, 그 뒤 에이전트의
-   * 마지막 답을 host가 같은 자리에 놓는다.
-   * null은 "아직"이다: 턴이 돌고 있거나 답이 없다.
+   * The note for a live handoff (#142) — the first human message after afterSeq (the last seq
+   * right before the request) is the request, and the host puts the agent's last answer after
+   * that in the same spot.
+   * Null means "not yet": either a turn is running, or there is no answer.
    */
   exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null>
-  /** 오케스트레이터의 MCP 서버 제안 목록 (propose_mcp_server → 승인 대기 중인 것들) */
+  /** The orchestrator's list of proposed MCP servers (propose_mcp_server → the ones waiting for approval) */
   mcpProposals(): Promise<{ proposals: { name: string; command: string; args: string[]; why?: string }[] }>
-  /** 제안에 대한 사람의 답 — 승인이면 앱이 등록하고 오케스트레이터를 재시작한다 */
+  /** The person's answer to a proposal — if approved, the app registers it and restarts the orchestrator */
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
-  /** 오케스트레이터의 스킬 제안 목록 (#71 — propose_skill → 승인 대기 중인 것들) */
+  /** The orchestrator's list of proposed skills (#71 — propose_skill → the ones waiting for approval) */
   skillProposals(): Promise<{ proposals: { name: string; content: string; why?: string }[] }>
-  /** 스킬 제안에 대한 사람의 답 — 승인이면 DB에 저장하고 오케스트레이터를 재시작한다 */
+  /** The person's answer to a skill proposal — if approved, saves it to the DB and restarts the orchestrator */
   resolveSkillProposal(name: string, approve: boolean): Promise<void>
-  /** 승인된 스킬 목록 — 설정에서 열람·삭제한다 (못 지우는 스킬은 없느니만 못하다) */
+  /** The list of approved skills — viewed and deleted from Settings (a skill that cannot be deleted is worse than none) */
   orchestratorSkills(): Promise<{ skills: { name: string; content: string }[] }>
   deleteOrchestratorSkill(name: string): Promise<void>
   /**
-   * 도구가 보관 중인 이전 세션 (터미널에서 만든 것 포함).
-   * supported=false면 이유가 함께 온다 — 구버전 도구에서도 '새 세션'은 막지 않는다.
+   * Previous sessions the tool has kept (including ones created from the terminal).
+   * If supported=false, a reason comes with it — even an older tool version does not block
+   * "new session".
    */
   listExternalSessions(
     projectId: string,
@@ -137,25 +144,27 @@ export interface AgentPort {
     limit?: number,
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>
   /**
-   * 죽은 세션을 되살린다 (FR-10). resumed=false면 이유가 함께 온다.
-   * `lockedElsewhere`면 이유를 읽지 않고도 "갈라서 이어가기"를 내밀 수 있다.
+   * Revives a dead session (FR-10). If resumed=false, a reason comes with it.
+   * If `lockedElsewhere`, "fork and continue" can be offered without even reading the reason.
    */
   resumeSession(
     sessionId: string,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   /**
-   * 잠긴 대화에서 갈라져 나와 이 세션으로 이어간다.
-   * 원본은 그대로 둔다 — 다른 앱이 쓰던 대화를 빼앗지 않는다.
+   * Forks off a locked conversation and continues it as this session.
+   * Leaves the original as is — does not take away a conversation another app was using.
    */
   forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
-   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
-   * **대화는 이어지지 않는다** — 새 도구는 옛 대화를 모른다. 기록은 우리 저장소에 남는다.
+   * Switches the session's agent (claude ↔ codex).
+   * **The conversation does not carry over** — the new tool does not know the old conversation.
+   * The record stays in our own store.
    */
   switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo>
   /**
-   * 모델·권한·추론 강도를 대화 도중에 바꾼다 (FR-7).
-   * 항목은 프로토콜이 정한다 — 여기 다시 적으면 늦게 추가된 필드가 조용히 빠진다.
+   * Changes model, permissions and reasoning strength mid-conversation (FR-7).
+   * The fields are defined by the protocol — restating them here would let a later-added field
+   * silently drop out.
    */
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<UpdateSettingsResult>
   rename(sessionId: string, name: string): Promise<void>
@@ -164,14 +173,14 @@ export interface AgentPort {
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   capabilities(tool: ToolName): Promise<AdapterCapabilities>
   /**
-   * 이 세션의 슬래시 명령(스킬).
-   * ready=false는 '없음'이 아니라 '아직 도구가 준비되지 않았다'는 뜻이다.
+   * This session's slash commands (skills).
+   * ready=false does not mean "none" — it means the tool is not ready yet.
    */
   commands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }>
-  /** 계정 사용량·한도 (FR-9). 구독 한도만 다룬다 */
+  /** Account usage and limits (FR-9). Handles only subscription limits */
   usage(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }>
   detect(): Promise<ToolStatus[]>
-  /** 이벤트 스트림 — 구독 시점 이후의 이벤트를 받는다 */
+  /** Event stream — receives events from the moment of subscription onward */
   subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe
   onConnectionChange(handler: (state: ConnectionState) => void): Unsubscribe
 }
@@ -198,32 +207,37 @@ export interface ProjectPort {
    * differ from what was sent.
    */
   setCommands(projectId: string, commands: SavedCommand[]): Promise<SavedCommand[]>
-  /** 워크트리 프로비저닝 설정 저장 (#69). null이면 지운다 */
+  /** Saves the worktree provisioning setup (#69). Null clears it */
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
   /**
-   * 이 프로젝트를 신뢰한다/그만둔다 (M4, 결정 3). 신뢰하면 이 프로젝트의 앱이 돌고 프로젝트 설정이
-   * 존중된다. 끄면 그 앱들이 바로 내려간다. 앱 목록의 변화는 `external_apps_changed`로 따로 온다.
+   * Trusts or stops trusting this project (M4, decision 3). Trusting it lets this project's
+   * apps run and its project settings be honored. Turning it off brings those apps down
+   * immediately. Changes to the app list come separately, as `external_apps_changed`.
    */
   setTrusted(projectId: string, trusted: boolean): Promise<void>
   /**
-   * 워크트리 매니저 자리를 만든다 (#76). 이미 있으면 그 자리를 주고 줄기만 새로 적는다.
-   * baseBranch는 부르는 쪽이 정한다 — 기본값을 아래에서 지어내면 틀린 줄기가 조용히 박힌다.
+   * Creates the worktree manager slot (#76). If it already exists, returns that slot and just
+   * rewrites the trunk.
+   * baseBranch is decided by the caller — inventing a default further down would silently
+   * bake in the wrong trunk.
    */
   createWorktreeManager(projectId: string, baseBranch: string): Promise<SessionInfo>
 }
 
 /**
- * 파일 트리·뷰어 (FR-5, FR-6 / C-1).
- * lazy 목록이 원칙 — 열어본 디렉토리만 읽는다 (대형 저장소에서 가벼움 유지).
+ * File tree and viewer (FR-5, FR-6 / C-1).
+ * Lazy listing is the principle — reads only directories that have been opened (keeps it
+ * light on large repositories).
  */
 export interface FsPort {
-  /** `@` 자동완성용 파일 검색 (프로젝트 안에서만) */
+  /** File search for `@` autocomplete (within the project only) */
   search(projectId: string, query: string, limit?: number): Promise<{ path: string; name: string }[]>
-  /** 한 단계만 읽는다. ignored는 .gitignore에 걸리는 항목 (git이 알려준 것을 재사용) */
+  /** Reads one level only. ignored are entries caught by .gitignore (reusing what git already reports) */
   listDir(projectId: string, relPath: string): Promise<FsEntry[]>
   /**
-   * 감시할 디렉토리 집합을 통째로 바꾼다 (#34). 화면의 펼쳐진 집합이 곧 감시 집합이다.
-   * 변화는 이벤트 스트림의 `fs_changed`로 온다 — 이 호출은 등록만 한다.
+   * Replaces the whole set of watched directories (#34). The set expanded on screen is
+   * exactly the watched set.
+   * Changes arrive as `fs_changed` on the event stream — this call only registers.
    */
   watch(projectId: string, paths: string[]): Promise<{ watched: number }>
   readFile(projectId: string, relPath: string): Promise<FsFile>
@@ -261,7 +275,7 @@ export interface FsPort {
   reveal(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
 }
 
-/** 무엇 때문에 부르는지 — 소리와 독 튀김의 세기가 여기서 갈린다 */
+/** What it is calling about — this decides how strong the sound and the dock bounce are */
 export type AlertKind = 'approval' | 'error' | 'done' | 'all_done'
 
 export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
@@ -278,41 +292,50 @@ export type FsFile = {
 export interface SystemPort {
   notify(title: string, body: string): Promise<void>
   /**
-   * 소리와 독 아이콘으로 부른다.
+   * Calls out with sound and the dock icon.
    *
-   * `notify`(OS 배너)와 나눠 둔 이유는 **닿는 경로가 다르기** 때문이다. 배너는 알림 권한과
-   * 코드 서명을 타지만 이쪽은 아무것도 타지 않는다. macOS에서 배너 경로가 죽어 있는 것을
-   * 실측한 뒤로, 자리를 비운 사람에게 실제로 닿는 것은 이쪽이다.
+   * Kept separate from `notify` (the OS banner) because **the delivery path is different**.
+   * The banner depends on notification permission and code signing, while this one depends
+   * on neither. Since we measured the banner path being dead on macOS, this is the one that
+   * actually reaches a person who has stepped away.
    */
   alert(kind: AlertKind, sound: boolean): Promise<void>
   setBadge(count: number): Promise<void>
   openInIde(path: string, line?: number): Promise<void>
   /**
-   * http(s) 주소를 OS의 기본 브라우저로 연다 (#159). 터미널 링크와 앱 화면의 링크가 쓴다.
+   * Opens an http(s) address in the OS's default browser (#159). Used by terminal links and
+   * links in app screens.
    *
-   * `window.open`을 부르는 쪽마다 두지 않는 이유: 데스크톱 웹뷰(WKWebView)에서는 그것이
-   * 아무것도 열지 않는다. 새 창 처리기가 없으면 wry가 요청을 버리고, 오류도 나지 않는다.
-   * 주소 검사(http(s)만)는 부르는 쪽이 이미 했다. 못 열었으면 던진다.
+   * Why this is not just `window.open` at every call site: in the desktop webview
+   * (WKWebView), that opens nothing. Without a new-window handler, wry drops the request, and
+   * no error is raised either. The address check (http(s) only) has already been done by the
+   * caller. Throws if it cannot open.
    */
   openUrl(url: string): Promise<void>
-  /** 디렉토리 선택. 데스크톱은 네이티브 피커, 웹 dev는 경로 입력으로 폴백한다 (FR-19) */
+  /** Directory picker. Desktop uses the native picker; web dev falls back to a path input (FR-19) */
   pickDirectory(): Promise<string | null>
   /**
-   * 파일 하나를 고른다 (M4 E-3 — 가져올 .zip). 데스크톱은 네이티브 피커(확장자로 거른다), 웹 dev는 경로 입력으로 폴백한다.
-   * 고른 경로는 host가 다시 판정한다 — 피커의 거르기는 편의일 뿐이다.
+   * Picks a single file (M4 E-3 — the .zip to import). Desktop uses the native picker
+   * (filtered by extension); web dev falls back to a path input.
+   * The host re-validates the chosen path — the picker's filtering is a convenience only.
    */
   pickFile(opts: { title: string; extensions: string[] }): Promise<string | null>
   /**
-   * OS가 이 앱에 건넨 앱 링크(`centralu://app?url=…`, M4 E-4)를 듣는다. 앱이 링크로 처음 켜졌을 때 이미 와 있던 링크도 구독하는 순간
-   * 한 번 받는다. 링크는 남이 지은 글이라 받은 쪽이 판정한다(`parseAppLink`). 링크를 받지 않는 구현(웹)은 아무것도 부르지 않는다.
-   * @returns 구독을 푼다
+   * Listens for an app link (`centralu://app?url=…`, M4 E-4) the OS handed this app. If the
+   * app was first launched by a link, that already-arrived link is also delivered once, right
+   * at the moment of subscribing. A link is text written by someone else, so the receiver
+   * validates it (`parseAppLink`). An implementation that does not receive links (web) never
+   * calls this.
+   * @returns unsubscribes
    */
   onAppLink(cb: (link: string) => void): () => void
   /**
-   * 지금부터 창을 끈다 (타이틀바를 숨겼으므로 우리가 손잡이를 만들어야 한다).
-   * data-tauri-drag-region만으로는 부족하다 — 그 속성은 **mousedown 타깃 자신**에
-   * 있어야 해서, 헤더 안의 글자를 잡으면 죽는다. 실제로 "가끔만 된다"로 나타났다.
-   * 웹에서는 아무 일도 하지 않는다.
+   * Starts dragging the window from here (since we hid the title bar, we have to build our
+   * own handle).
+   * `data-tauri-drag-region` alone is not enough — that attribute has to be on the
+   * **mousedown target itself**, so grabbing text inside the header breaks it. In practice
+   * this showed up as "only works sometimes".
+   * Does nothing on the web.
    */
   startWindowDrag(): Promise<void>
 }
@@ -363,11 +386,13 @@ export type PlatformCapabilities = {
 }
 
 /**
- * 자판이 두 조합키를 뭐라고 부르는가, 그리고 조합을 한 덩어리로 쓸 때 사이에 뭘 넣는가.
+ * What the keyboard calls the two modifier keys, and what goes between them when a
+ * combination is written as one chunk.
  *
- * `join`이 있는 이유: 맥은 `⌘⇧A`처럼 붙여 쓰지만, 그 규칙을 그대로 옮기면 다른 자판에서는
- * `CtrlShiftA`가 된다. 붙여 쓰기는 기호였기 때문에 읽혔던 것이라, 이름이 되는 순간 구분자가
- * 필요하다 — 자판을 아는 쪽이 함께 답한다.
+ * Why `join` exists: a Mac writes them run together, like `⌘⇧A`, but carrying that rule over
+ * as-is turns into `CtrlShiftA` on other keyboards. Running them together read fine only
+ * because they were symbols; the moment they become names, a separator is needed — so the
+ * side that knows the keyboard answers with it too.
  */
 export type ShortcutKeys = {
   /** `⌘` here, `Ctrl` where there is no command key */
@@ -379,8 +404,9 @@ export type ShortcutKeys = {
 }
 
 /**
- * 깃 조회·조작 (FR-4, B-1 신설).
- * 구현은 host의 dev-services에 있다 — git2(Rust) 이관은 측정으로 병목이 확인될 때까지 보류.
+ * Git inspection and operations (FR-4, B-1 new).
+ * The implementation lives in the host's dev-services — moving to git2 (Rust) is on hold
+ * until measurement confirms it is a bottleneck.
  */
 export interface GitPort {
   status(projectId: string): Promise<GitFileStatus[]>
@@ -388,16 +414,16 @@ export interface GitPort {
   log(projectId: string, limit?: number): Promise<GitCommit[]>
   commitDetail(projectId: string, sha: string): Promise<{ files: string[]; diff: string; truncated: boolean }>
   branches(projectId: string): Promise<GitBranch[]>
-  /** git이 무시하는 것들 (#76) — 새 워크트리에 없을 것들, 복사 후보로 짚어 준다 */
+  /** Things git ignores (#76) — things a new worktree will not have; flagged as copy candidates */
   ignoredEntries(projectId: string): Promise<{ path: string; bytes: number | null }[]>
-  /** dryRun이면 무엇이 충돌하는지만 알려준다 (막지 말고 보이게) */
+  /** With dryRun, only reports what would conflict (show it, do not block it) */
   checkout(projectId: string, branch: string, dryRun?: boolean): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
   stage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
   commit(projectId: string, message: string): Promise<{ ok: boolean; message?: string }>
   push(projectId: string): Promise<{ ok: boolean; message?: string }>
 }
 
-/** 워크스페이스 스냅샷 (C-3) — 창을 껐다 켜도 보던 자리로 돌아온다 */
+/** Workspace snapshot (C-3) — returns to the place being viewed even after the window is closed and reopened */
 export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
   /**
@@ -408,11 +434,12 @@ export type WorkspaceSnapshot = {
    */
   view?: string
   /**
-   * 고정 화면으로 보던 앱 (M4 B-2) — `view`가 'app'일 때 무엇을 보던 중이었나. 앱은 (프로젝트, id)로
-   * 하나다. 되살릴 때 그 앱이 목록에 없으면(폴더가 사라졌다) 조용히 넘긴다.
+   * The app being viewed as a pinned screen (M4 B-2) — what was being viewed when `view` was
+   * 'app'. An app is identified by (project, id). If that app is not in the list when
+   * restoring (its folder is gone), this is silently skipped.
    */
   focusedApp?: { projectId: string | null; appId: string } | null
-  /** 증거 패널(깃·파일)이 열려 있었는가 */
+  /** Whether the evidence panel (git/files) was open */
   panelOpen?: boolean
   /** What the evidence panel was showing — pre-#20 single-tab field, kept for old snapshots/builds */
   panelTab?: string
@@ -423,21 +450,21 @@ export type WorkspaceSnapshot = {
    * on disk, and the UI sanitizes whatever comes back (store/panelLayout.ts).
    */
   panelLayout?: { tabs: string[]; active: string }[]
-  /** 위 묶음이 차지하는 몫 (0.15–0.85). 묶음이 둘일 때만 뜻이 있다 — 나눈 비율도 보는 방식이다 */
+  /** The share the top group takes up (0.15–0.85). Only meaningful when there are two groups — the split ratio is also part of the way of looking */
   panelSplit?: number
-  /** 증거 패널 폭(px) */
+  /** Evidence panel width (px) */
   panelWidth?: number
-  /** 앱 레일 폭(px) (#81) */
+  /** App rail width (px) (#81) */
   railWidth?: number
-  /** 세션 목록 폭(px) */
+  /** Session list width (px) */
   sidebarWidth?: number
-  /** 전체 글자 크기 단계 (TEXT_SCALES 인덱스, 0..4) — 보는 방식이라 여기 실린다 */
+  /** Overall text size step (TEXT_SCALES index, 0..4) — carried here because it is part of the way of looking */
   textScale?: number
-  /** @deprecated 탭 구조는 3레인으로 대체됐다. 구버전 스냅샷을 읽을 때만 나타난다 */
+  /** @deprecated The tab structure was replaced by three lanes. Appears only when reading an old snapshot */
   tab?: string
 }
 
-/** 대화 검색·승인 규칙 관리 (E-1, E-4) */
+/** Conversation search and approval-rule management (E-1, E-4) */
 export interface SearchPort {
   messages(query: string, limit?: number): Promise<{ sessionId: string; seq: number; snippet: string }[]>
 }
@@ -450,7 +477,7 @@ export interface ApprovalRulesPort {
       matcher: string
       decision: string
       createdAt: number
-      /** 규칙의 주인 — 프로젝트 범위면 projectId, 세션 범위면 sessionId (#183) */
+      /** The rule's owner — projectId for project scope, sessionId for session scope (#183) */
       projectId?: string | null
       sessionId?: string | null
     }[]
@@ -475,41 +502,45 @@ export interface TrashPort {
 }
 
 /**
- * 앱 자체의 업데이트 (이슈 #43).
+ * Updates for the app itself (issue #43).
  *
- * **확인도 설치도 전부 저쪽(host)에서 한다.** 레지스트리에 묻고 `npm i -g`를 돌리는 것은
- * 브라우저가 할 수 없는 일이고, 무엇보다 확인을 실행기(launcher)에 맡기면 사용자 기계에
- * 이미 깔린 낡은 사본이 답하게 된다 — 그 사본의 비교가 틀려 있었던 것이 #42다.
+ * **Both checking and installing happen entirely on the other side (the host).** Asking the
+ * registry and running `npm i -g` is something a browser cannot do, and more importantly,
+ * leaving the check to the launcher means the stale copy already installed on the person's
+ * machine is the one that answers — that stale copy's comparison being wrong is what #42 was.
  *
- * 포트가 나르는 것은 상태 하나뿐이다. 화면은 "지금 어디쯤인가"만 알면 되고,
- * **재시작은 절대 이쪽에서 하지 않는다** — 앱은 사람에게 말하고 거기서 멈춘다.
+ * The port carries exactly one thing: status. The screen only needs to know "where are we
+ * right now", and **this side never restarts anything** — the app tells the person and stops
+ * there.
  */
 export interface UpdatePort {
-  /** 지금 아는 것. `force`면 레지스트리에 다시 묻는다 (설정의 '지금 확인') */
+  /** What is known right now. With `force`, asks the registry again (Settings' "Check now") */
   status(force?: boolean): Promise<UpdateStatus>
-  /** 주기 확인을 켜고 끈다 */
+  /** Turns periodic checking on and off */
   setAuto(enabled: boolean): Promise<UpdateStatus>
   /**
-   * 새 버전을 설치한다. **사람이 눌렀을 때만.**
+   * Installs the new version. **Only when the person clicks it.**
    *
-   * 시작하자마자 답한다 — `npm i -g`는 RPC 제한 시간을 넘기기 일쑤라, 끝을 기다리는
-   * 계약으로 두면 실제로는 성공한 설치가 화면에서는 실패로 보인다. 나머지는 이벤트로 온다.
+   * Responds as soon as it starts — `npm i -g` routinely exceeds the RPC timeout, and a
+   * contract that waits for it to finish would make an install that actually succeeded look
+   * like a failure on screen. The rest arrives as events.
    */
   apply(): Promise<UpdateStatus>
 }
 
 /**
- * 화면 설정 (UiPreferences).
+ * Screen preferences (UiPreferences).
  *
- * **워크스페이스 스냅샷과 일부러 나눠 놓는다.** 저쪽은 "무엇이 어디에 놓여 있었나"라
- * 떠날 때 통째로 덮어써도 되는 것이고, 이쪽은 "이 사람이 무엇을 골랐나"라 덮어쓰면
- * 안 되는 것이다. 한 덩어리에 섞으면 배치를 저장하는 모든 자리가 설정도 같이
- * 저장하게 되고, 그중 하나라도 낡은 값을 들고 있으면 고른 값이 조용히 되돌아간다.
+ * **Deliberately kept separate from the workspace snapshot.** The snapshot is "what was
+ * placed where" and is fine to overwrite wholesale on the way out; preferences are "what this
+ * person chose" and must never be overwritten that way. Mixing them into one blob would make
+ * every place that saves layout also save preferences, and if even one of those places is
+ * holding a stale value, the chosen setting silently reverts.
  */
 export interface PreferencesPort {
-  /** 기동 때 한 번. 실패는 부르는 쪽이 기본값으로 메운다 — 앱을 막지 않는다 */
+  /** Once at startup. On failure the caller fills in defaults — this never blocks the app */
   load(): Promise<UiPreferences>
-  /** 바뀐 것만 적는다. 돌려주는 것은 기록된 뒤의 전체다 */
+  /** Writes only what changed. What comes back is the whole thing after it was recorded */
   save(patch: UiPreferencesPatch): Promise<UiPreferences>
 }
 
@@ -519,52 +550,54 @@ export interface WorkspacePort {
 }
 
 /**
- * 프로젝트 터미널.
+ * Project terminal.
  *
- * **정체성은 cwd다** — 세션이 아니다. 같은 프로젝트에서 세션을 바꿔도 같은 터미널들이
- * 이어지고, 깃 워크트리 세션은 cwd가 달라 자기 터미널을 자동으로 갖는다.
+ * **Its identity is the cwd** — not the session. The same terminals carry over even when the
+ * session changes within the same project, and a git worktree session automatically gets its
+ * own terminal because its cwd is different.
  */
 export interface TerminalPort {
-  /** 그 프로젝트의 터미널 목록 (history로 화면을 되살린다) */
+  /** That project's terminal list (the screen is restored from history) */
   list(projectId: string): Promise<TerminalInfo[]>
-  /** 터미널을 하나 더 연다 */
+  /** Opens one more terminal */
   create(projectId: string, cols: number, rows: number): Promise<TerminalInfo>
-  /** 터미널 하나를 닫는다 */
+  /** Closes one terminal */
   close(terminalId: string): Promise<void>
   input(terminalId: string, data: string): Promise<void>
   resize(terminalId: string, cols: number, rows: number): Promise<void>
-  /** 셸이 먹통일 때 다시 띄운다 (기록은 남는다) */
+  /** Restarts it when the shell hangs (the record stays) */
   restart(terminalId: string, cols: number, rows: number): Promise<TerminalInfo>
   onOutput(handler: (e: { terminalId: string; data: string }) => void): Unsubscribe
   onExit(handler: (e: { terminalId: string; exitCode: number | null }) => void): Unsubscribe
 }
 
 /**
- * 자주 쓰는 명령어 실행기 (#60). 터미널 탭과 별개의 실행 경로다 —
- * 명령별 프로세스 하나, 마지막 실행 로그 하나 (host 수명 동안).
- * 출력 스트림은 terminal.onOutput/onExit을 그대로 탄다 (runId가 terminalId 자리).
+ * Runner for frequently used commands (#60). A separate execution path from terminal tabs —
+ * one process per command, one last-run log (for the lifetime of the host).
+ * The output stream rides on terminal.onOutput/onExit as is (runId takes the place of
+ * terminalId).
  */
 export interface CommandRunPort {
-  /** 실행. 같은 명령이 돌고 있으면 죽이고 새로 시작한다 */
+  /** Runs it. If the same command is already running, kills it and starts fresh */
   run(projectId: string, command: string, cols: number, rows: number): Promise<CommandRunInfo>
-  /** 데브 서버를 끈다. 로그는 남는다 */
+  /** Stops the dev server. The log stays */
   stop(projectId: string, command: string): Promise<void>
-  /** 실행된 적 있는 명령들의 상태 (목록 뱃지용) */
+  /** The status of commands that have run before (for the list badges) */
   state(projectId: string): Promise<CommandRunInfo[]>
-  /** 마지막 실행, 로그째. 실행된 적 없으면 null */
+  /** The last run, log included. Null if it has never run */
   log(projectId: string, command: string): Promise<(CommandRunInfo & { history: string }) | null>
   resize(projectId: string, command: string, cols: number, rows: number): Promise<void>
 }
 
 /**
- * 앱 화면 하나를 띄울 곳 (M4 B-3). host가 만든다. `url`에는 실행마다 바뀌는 비밀 칸이 들어
- * 있다. 로그나 화면에 적지 않는다.
+ * Where to mount one app screen (M4 B-3). Created by the host. `url` contains a secret slot
+ * that changes on every run. Never written to a log or the screen.
  */
 export type AppViewFrame = {
   url: string
-  /** 바깥 iframe의 `allow` — 앱이 선언하고 host가 받아들인 기능만 */
+  /** The outer iframe's `allow` — only the capabilities the app declared and the host accepted */
   allow: string
-  /** host가 받아들인 CSP 도메인과 권한. 화면에 `hostCapabilities.sandbox`로 알려 준다 */
+  /** The CSP domains and permissions the host accepted. Reported to the screen as `hostCapabilities.sandbox` */
   sandbox: {
     csp: { connectDomains: string[]; resourceDomains: string[]; frameDomains: string[]; baseUriDomains: string[] }
     permissions: Record<string, object>
@@ -572,12 +605,13 @@ export type AppViewFrame = {
 }
 
 /**
- * 화면이 부른 호출이 **어느 화면에서** 왔는가. 앱은 (프로젝트, id)로 정해지므로 projectId를
- * 함께 싣는다(`null`은 사용자 폴더 앱). instanceId가 있으면 host가 그 화면의 앱과 대조한다.
+ * **Which screen** a call from a screen came from. An app is identified by (project, id), so
+ * projectId travels with it (`null` is a user-folder app). If instanceId is present, the host
+ * checks it against that screen's app.
  */
 export type AppCallOrigin = { projectId?: string | null; instanceId?: string }
 
-/** MCP `tools/call`의 답 모양 (규격 그대로 — 이 층은 운반만 한다) */
+/** The shape of an MCP `tools/call` response (exactly per spec — this layer only carries it) */
 export type AppToolResult = {
   content: Record<string, unknown>[]
   structuredContent?: Record<string, unknown>
@@ -586,8 +620,9 @@ export type AppToolResult = {
 }
 
 /**
- * 고정 화면 하나 (M4 B-2) — host가 `home` 도구를 부르고 연 화면 인스턴스와, AppFrame이 규격대로
- * 보낼 그 호출의 입력(tool-input)과 결과(tool-result).
+ * One pinned screen (M4 B-2) — the screen instance the host opened by calling the `home`
+ * tool, plus that call's input (tool-input) and result (tool-result), which AppFrame sends
+ * per spec.
  */
 export type AppHomeView = {
   instanceId: string
@@ -599,8 +634,10 @@ export type AppHomeView = {
 }
 
 /**
- * 다시 연 대화 안 화면 (M4 B-1) — 새 인스턴스와, AppFrame이 규격대로 다시 보낼 그 호출의 입력과 결말.
- * 결과(`toolResult`)와 취소(`cancelled`)는 둘 중 하나이거나(끝났다), 둘 다 없다(아직 돈다).
+ * A reopened in-conversation screen (M4 B-1) — the new instance, plus that call's input and
+ * outcome, which AppFrame resends per spec.
+ * The result (`toolResult`) and cancellation (`cancelled`) are either one or the other (it
+ * finished), or neither (it is still running).
  */
 export type InlineViewReopened = {
   instanceId: string
@@ -612,7 +649,7 @@ export type InlineViewReopened = {
   cancelled?: string
 }
 
-/** host가 들고 있는 대화 안 화면 하나 (M4 B-1) — 본문 없이 */
+/** One in-conversation screen the host is holding (M4 B-1) — without its body */
 export type InlineViewKept = {
   callId: string
   appId: AppId
@@ -622,24 +659,28 @@ export type InlineViewKept = {
   instanceId: string | null
 }
 
-/** MCP `resources/read`의 답 모양 */
+/** The shape of an MCP `resources/read` response */
 export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
 
 /**
- * 새 앱 하나 (M4 C-1) — `projectId`가 null이면 사용자 폴더 앱이다. `tool`은 만드는 세션의 도구이고, 없으면 host가
- * 고른다(프로젝트의 기본 도구, 사용자 폴더 앱은 오케스트레이터의 도구).
+ * One new app (M4 C-1) — `projectId` null means a user-folder app. `tool` is the builder
+ * session's tool; if absent the host picks one (the project's default tool, or the
+ * orchestrator's tool for a user-folder app).
  */
 export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string; tool?: ToolName }
 
 /**
- * 만든 앱과 그 만드는 세션. 세션이 서지 못했으면(도구가 없거나 로그인 전) `builder`가 null이고 `builderError`가 이유다 —
- * 앱은 이미 만들어졌다.
+ * The created app and its builder session. If the session failed to start (no tool, or not
+ * logged in yet), `builder` is null and `builderError` is the reason — the app has already
+ * been created either way.
  */
 export type AppCreated = { app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }
 
 /**
- * 앱에서 만드는 세션에게 하는 말 (M4 C-5). `instanceId`는 사람이 보던 고정 화면이다 — host가 그 인스턴스로 어느 화면에서
- * 왔는지를 머리말에 적는다. 첨부는 만드는 세션의 id로 먼저 저장한 것이다(입력창과 같은 길).
+ * A message to the builder session, sent from an app (M4 C-5). `instanceId` is the pinned
+ * screen the person was viewing — the host writes which screen it came from into the header,
+ * using that instance. Attachments are already saved under the builder session's id (the
+ * same path the composer uses).
  */
 export type BuilderAsk = {
   appId: AppId
@@ -650,147 +691,179 @@ export type BuilderAsk = {
 }
 
 /**
- * 앱 상태 창구 (#81) — 앱마다 JSON 문서 하나 + 켜짐 여부. 앱별 포트를 만들지 않는다:
- * 문서의 의미는 앱만 알고, 이 창구는 운반만 한다.
+ * The app-state window (#81) — one JSON document per app, plus whether it is enabled. No
+ * per-app port is made: only the app knows what the document means, and this window only
+ * carries it.
  */
 export interface AppsPort {
   state(appId: AppId): Promise<{ doc: unknown; enabled: boolean }>
   setState(appId: AppId, doc: unknown): Promise<void>
   setEnabled(appId: AppId, enabled: boolean): Promise<void>
-  /** 사람이 앱 도구를 직접 부른다 (#81) — 업무 만들기 등. 사람은 프로필 판정을 안 받는다 */
+  /** The person calls an app tool directly (#81) — e.g. creating a task. The person is not subject to profile checks */
   invoke(appId: AppId, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }>
   /**
-   * 앱 화면을 띄울 주소 (M4 B-3). `hostOrigin`은 부르는 화면의 출처(`location.origin`)다.
-   * 샌드박스 프록시는 그 출처와만 메시지를 주고받는다.
+   * The address at which to mount an app screen (M4 B-3). `hostOrigin` is the origin
+   * (`location.origin`) of the calling screen. The sandbox proxy exchanges messages only with
+   * that origin.
    */
   viewFrame(appId: AppId, instanceId: string, opts: { projectId?: string | null; hostOrigin: string }): Promise<AppViewFrame>
   /**
-   * 화면이 부르는 앱 도구 (브리지의 `oncalltool`). 답은 앱이 준 MCP 결과 그대로다
-   * (`structuredContent`·`isError`·`_meta` 포함). 앱에 닿지 못했으면 host가 적은 이유를 담은
-   * `isError` 결과다. 공개 범위(`app`만)와 기록은 host의 중개가 맡는다.
+   * An app tool the screen calls (the bridge's `oncalltool`). The response is exactly the MCP
+   * result the app gave (including `structuredContent`, `isError`, `_meta`). If the app could
+   * not be reached, this is an `isError` result carrying a reason written by the host. Scope
+   * (`app` only) and logging are handled by the host's mediation.
    */
   callTool(appId: AppId, tool: string, args: Record<string, unknown>, from?: AppCallOrigin): Promise<AppToolResult>
-  /** 화면이 자기 앱의 리소스를 읽는다 (브리지의 `onreadresource`) */
+  /** The screen reads its own app's resource (the bridge's `onreadresource`) */
   readResource(appId: AppId, uri: string, from?: AppCallOrigin): Promise<AppResourceResult>
   /**
-   * 발견된 외부 앱 전부와 그 상태 (M4 A-8). 신뢰하지 않은 프로젝트의 앱과 깨진 앱도 이유와 함께
-   * 온다. 목록이 달라지면 host가 `external_apps_changed`를 방송하고, 받은 쪽이 이것을 다시 부른다.
+   * Every external app discovered, and its state (M4 A-8). Apps from an untrusted project and
+   * broken apps come too, with a reason. When the list changes, the host broadcasts
+   * `external_apps_changed`, and the receiver calls this again.
    */
   list(): Promise<ExternalAppInfo[]>
   /**
-   * 고정 화면을 연다 (M4 B-2) — host가 매니페스트의 `home`을 화면 호출자로 부르고 인스턴스를 연다.
-   * home이 없거나 화면을 선언하지 않았거나 앱에 닿지 못했으면 이유와 함께 실패한다.
+   * Opens a pinned screen (M4 B-2) — the host calls the manifest's `home` as the screen caller
+   * and opens an instance. Fails with a reason if there is no home, the app did not declare a
+   * screen, or the app could not be reached.
    */
   openView(appId: AppId, projectId: string | null): Promise<AppHomeView>
-  /** 고정 화면을 닫는다 — 붙들던 앱을 놓는다. 이미 닫혔으면 조용히 지나간다 */
+  /** Closes a pinned screen — releases the app it was holding. Passes quietly if it is already closed */
   closeView(instanceId: string): Promise<void>
   /**
-   * 앱 화면의 `ui/message`를 대화로 보낸다 (M4 B-1·B-4) — **사람이 확인한 뒤에만** 부른다. 앱은 host가 인스턴스로
-   * 가린다. 대화 안 화면이면 그 화면이 선 대화로만(아니면 host가 거절한다), 고정 화면이면 사람이 고른 대화로 간다.
-   * 대화에는 앱이 보낸 말(`user_message.fromApp`)로 남고, 에이전트는 앱의 글로 감싼 모양을 받는다.
+   * Sends an app screen's `ui/message` into the conversation (M4 B-1·B-4) — called **only
+   * after the person confirms**. The host masks the app behind the instance. For an
+   * in-conversation screen it can only go to the conversation that screen stands in (the host
+   * rejects it otherwise); for a pinned screen it goes to whichever conversation the person
+   * chose. It is recorded in the conversation as a message the app sent
+   * (`user_message.fromApp`), and the agent receives it wrapped in the app's own text.
    */
   sendViewMessage(sessionId: string, instanceId: string, text: string): Promise<void>
   /**
-   * 접었던 대화 안 화면을 다시 연다 (M4 B-1의 "Reopen") — 도구를 다시 부르지 않는다. host가 새 인스턴스와
-   * 들고 있던 입력·결말을 돌려준다. 들고 있지 않으면 이유와 함께 실패한다(그때는 앱을 여는 길만 남는다).
+   * Reopens an in-conversation screen that had been collapsed (M4 B-1's "Reopen") — does not
+   * call the tool again. The host returns a new instance plus the input and outcome it had
+   * been holding. Fails with a reason if it is not holding one (in that case, opening the app
+   * is the only path left).
    */
   reopenInlineView(sessionId: string, callId: string): Promise<InlineViewReopened>
   /**
-   * 한 대화에서 host가 들고 있는 대화 안 화면 (M4 B-1) — 다시 연 UI가 지난 카드의 자리표시를 세울 때 묻는다.
-   * `kept`면 다시 열 수 있고, `instanceId`가 있으면 열린 채 남은 인스턴스다(다시 연 UI는 닫아서 앱을 놓는다).
+   * The in-conversation screens the host is holding for one conversation (M4 B-1) — queried
+   * when the reopen UI is setting up the placeholder for a past card. `kept` means it can be
+   * reopened; if `instanceId` is present, it is an instance left open (the reopen UI closes it
+   * to release the app).
    */
   inlineViews(sessionId: string): Promise<InlineViewKept[]>
   /**
-   * 앱을 다시 시작할 수 있게 한다 (M4 B-6의 "Restart") — 연속 실패와 이유를 지우고, 떠 있으면 내린다.
-   * **띄우지는 않는다**: 다음에 부르는 쪽(다시 여는 화면)이 띄운다.
+   * Makes the app startable again (M4 B-6's "Restart") — clears consecutive failures and the
+   * reason, and brings it down if it is up.
+   * **Does not start it up**: whoever calls next (the screen that reopens it) starts it.
    */
   restart(appId: AppId, projectId: string | null): Promise<void>
   /**
-   * 한 앱의 실행 기록, 최근 것부터 (M4 B-7) — 누가(화면·세션·앱) 어느 도구를 불렀고 어떻게 끝났나.
-   * 인자는 요약만 온다. 폴더가 사라진 앱의 기록도 읽힌다.
+   * One app's run history, most recent first (M4 B-7) — who (screen, session, app) called
+   * which tool and how it ended. Arguments arrive only as a summary. The history is readable
+   * even for an app whose folder is gone.
    */
   runs(appId: AppId, projectId: string | null, limit?: number): Promise<AppRun[]>
   /**
-   * 사용자 폴더의 앱을 지운다 (M4 A-7) — 폴더는 데이터 폴더의 `app-trash/`로 옮겨지고, 실행 기록은
-   * 남는다. 프로젝트 앱은 host가 거절한다(저장소의 파일이라 거두는 자리는 git이다).
+   * Deletes a user-folder app (M4 A-7) — its folder is moved to `app-trash/` in the data
+   * folder, and the run history stays. The host rejects this for a project app (it is a file
+   * in the repository, so git is where it gets collected).
    */
   remove(appId: AppId, projectId: string | null): Promise<void>
   /**
-   * 새 앱을 템플릿으로 만든다 (M4 C-1) — "New app" 창이 부른다. 오케스트레이터의 `create_app`과 같은 문이다. 이름·신뢰·
-   * 이미 있는 id는 host가 판정하고, 거절하면 그 이유가 오류의 메시지다(창은 그대로 보인다). 앱은 띄우지 않는다.
+   * Creates a new app from a template (M4 C-1) — called by the "New app" window. The same
+   * door as the orchestrator's `create_app`. The host validates the name, trust and any
+   * existing id; a rejection carries the reason as the error message (the window stays open
+   * as it was). Does not start the app.
    */
   create(spec: NewAppSpec): Promise<AppCreated>
-  /** 그 앱의 만드는 세션 (M4 C-2) — 없으면(세우지 않았거나 지웠으면) null */
+  /** That app's builder session (M4 C-2) — null if there is none (never created, or deleted) */
   builder(appId: AppId, projectId: string | null): Promise<SessionInfo | null>
-  /** 그 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다 */
+  /** Creates that app's builder session (M4 C-2) — returns the existing one if there already is one */
   createBuilder(appId: AppId, projectId: string | null, tool?: ToolName): Promise<SessionInfo>
   /**
-   * "여기를 고쳐 줘" (M4 C-5) — 앱 화면 아래 입력줄의 말을 그 앱의 만드는 세션에 보낸다. host가 어느 앱의 어느 화면에서
-   * 왔는지, 앱이 멈췄거나 마지막 실행이 실패했으면 그 사실을 머리말로 붙인다. 만드는 세션이 없으면 거절한다.
-   * @returns 말이 간 만드는 세션
+   * "Fix this" (M4 C-5) — sends the message from the input line below an app screen to that
+   * app's builder session. The host attaches a header noting which app and screen it came
+   * from, and, if the app is stalled or the last run failed, that fact too. Rejects if there
+   * is no builder session.
+   * @returns the builder session the message went to
    */
   askBuilder(req: BuilderAsk): Promise<{ sessionId: string }>
   /**
-   * 한 앱의 최근 오류 묶음 (M4 C-6) — 앱이 뜨지 못했거나, 죽었거나, 도구가 실패한 순간. `latest`가 화면이 보이는 것이다.
-   * 만드는 세션에 보낸 묶음에는 `sentAt`이 붙는다.
+   * One app's recent error bundles (M4 C-6) — moments the app failed to start, died, or a
+   * tool failed. `latest` is what the screen displays. A bundle that has been sent to the
+   * builder session carries `sentAt`.
    */
   errors(appId: AppId, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }>
   /**
-   * 오류 묶음 하나(`at`)를 그 앱의 만드는 세션에 보낸다 (M4 C-6) — **사람이 누를 때만.** 한 묶음은 한 번만 간다(두 번째는
-   * host가 거절한다).
+   * Sends one error bundle (`at`) to that app's builder session (M4 C-6) — **only when the
+   * person clicks it.** Each bundle goes only once (the host rejects a second attempt).
    */
   sendError(appId: AppId, projectId: string | null, at: number): Promise<{ sessionId: string }>
   /**
-   * 화면에서 시작된 사슬의 능력 물음 가운데 답을 기다리는 것 (M4 D-4). 고정 화면이 그 앱의 물음을 그리고 사이드바의 앱 줄이
-   * "답을 기다린다"를 보인다. host가 `external_app_questions_changed`를 방송하면 다시 읽는다. 세션에서 시작된 사슬의 물음은
-   * 그 세션의 승인 카드(`capability`)라 여기 없다.
+   * The capability questions still waiting for an answer, among the chains that started from
+   * a screen (M4 D-4). The pinned screen draws that app's questions, and the app row in the
+   * sidebar shows "waiting for an answer". Re-read when the host broadcasts
+   * `external_app_questions_changed`. Questions from a chain that started in a session are
+   * not here — they are that session's approval card (`capability`).
    */
   questions(): Promise<AppQuestion[]>
-  /** 능력 물음에 답한다 (M4 D-4) — 답은 그 앱과 그 능력에 대해 기억된다. 닫힌 물음이면 host가 거절한다 */
+  /** Answers a capability question (M4 D-4) — the answer is remembered for that app and that capability. The host rejects it if the question is already closed */
   answerQuestion(questionId: string, decision: 'allow' | 'deny'): Promise<void>
-  /** 한 앱에 대해 기억된 능력의 답 (M4 D-4) */
+  /** The remembered capability answers for one app (M4 D-4) */
   permissions(appId: AppId, projectId: string | null): Promise<AppPermission[]>
-  /** 기억된 답 하나를 잊는다 (M4 D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
+  /** Forgets one remembered answer (M4 D-4) — asks again the next time that capability is needed */
   forgetPermission(appId: AppId, projectId: string | null, capability: string): Promise<void>
-  /** 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 지난 하루와 30일 */
+  /** The agent usage one app has requested (M4 D-5) — the last day and the last 30 days */
   usage(appId: AppId, projectId: string | null): Promise<AppUsage>
   /**
-   * 앱의 비밀 값 하나를 넣거나 바꾸거나(`value`) 지운다(`null`) (M4 E). 값은 host의 0600 파일에만 산다 — 이 답에도 목록에도
-   * 오지 않는다. 목록(`list`)은 선언한 이름마다 있음·없음만 말한다. 넣는 것은 매니페스트가 선언한 이름만이고, 떠 있는 앱은
-   * 다음에 필요할 때 새 값으로 뜬다.
+   * Sets or changes (`value`) or deletes (`null`) one of the app's secrets (M4 E). The value
+   * lives only in a 0600 file on the host — it never comes back in this response or in any
+   * listing. The list (`list`) only says whether each declared name is present or absent.
+   * Only names the manifest declares can be set, and a running app picks up the new value the
+   * next time it needs it.
    */
   setSecret(appId: AppId, projectId: string | null, name: string, value: string | null): Promise<void>
   /**
-   * 앱을 가져올 준비 (M4 E-3) — host가 출처(이 기계의 폴더나 .zip, 또는 https의 .zip)를 대기실로 옮겨 담고 사람이 볼 것을 돌려준다.
-   * **아직 들어온 것이 아니다.** 거절(밖을 가리키는 링크, zip slip, 상한, 겹치는 id)은 host의 말 그대로 던진다.
+   * Prepares to import an app (M4 E-3) — the host copies the source (a folder on this
+   * machine, a local .zip, or a .zip over https) into a staging area and returns what the
+   * person should review. **It has not been admitted yet.** Rejections (a link pointing
+   * outside, zip slip, exceeding the size limit, a colliding id) are thrown exactly as the
+   * host states them.
    */
   importPrepare(source: string): Promise<{ token: string; review: AppReview }>
-  /** 대기실의 앱을 들인다 — 꺼진 채로. `enable`이면 사람이 본 창의 열쇠(`reviewKey`)로 확인까지 적는다. 띄우지는 않는다 */
+  /** Admits the app from staging — disabled. With `enable`, also records confirmation using the key (`reviewKey`) from the window the person reviewed. Does not start it */
   importCommit(token: string, opts: { enable: boolean; reviewKey?: string }): Promise<ExternalAppInfo>
-  /** 가져오기를 그만둔다 — 대기실을 치운다 */
+  /** Cancels the import — clears the staging area */
   importCancel(token: string): Promise<void>
-  /** 들어온 앱의 확인 창 (M4 E-3) — 켜지 않은 가져온 앱, 또는 켠 뒤 `server`·`uses`가 바뀐 앱. 바뀐 것이면 `changed`가 켠 때의 선언이다 */
+  /** The review window for an admitted app (M4 E-3) — an imported app not yet enabled, or one whose `server`/`uses` changed after being enabled. If it changed, `changed` is the declaration from when it was enabled */
   review(appId: AppId, projectId: string | null): Promise<AppReview>
-  /** 가져온 앱을 켠다 — `reviewKey`는 사람이 본 창의 열쇠다. 그 사이 매니페스트가 바뀌었으면 host가 거절한다 */
+  /** Enables an imported app — `reviewKey` is the key from the window the person reviewed. The host rejects it if the manifest changed in the meantime */
   enable(appId: AppId, projectId: string | null, reviewKey: string): Promise<ExternalAppInfo>
   /**
-   * 앱의 판 (M4 E-1) — 사용자 폴더 앱은 host가 떠 둔 스냅샷(최근 것부터, 지금 코드와 같은 판에 `current`), 프로젝트 앱은 그 앱 폴더를
-   * 건드린 최근 커밋(git이 판이다, 읽기만 한다).
+   * An app's versions (M4 E-1) — for a user-folder app, snapshots the host has kept (most
+   * recent first, with `current` on the one matching the running code); for a project app,
+   * the recent commits that touched that app's folder (git is the version history here,
+   * read-only).
    */
   versions(appId: AppId, projectId: string | null): Promise<AppVersions>
   /**
-   * 사용자 폴더 앱을 떠 둔 판으로 되돌린다 (M4 E-1) — host가 지금 코드를 판으로 떠 둔 뒤 되쓰고 그 코드로 다시 띄운다. 프로젝트 앱은
-   * host가 거절한다(되돌리는 자리는 git이다).
+   * Restores a user-folder app to a kept version (M4 E-1) — the host keeps a snapshot of the
+   * current code as a version, then overwrites it and restarts with that code. The host
+   * rejects this for a project app (git is where restoring happens there).
    */
   restoreVersion(appId: AppId, projectId: string | null, id: string): Promise<ExternalAppInfo>
 }
 
 /**
- * 우리 폴더에서 아직 도는 남은 프로세스 (사용자 요청 2026-09-07).
+ * Leftover processes still running from our folders (requested by the person, 2026-09-07).
  *
- * 에이전트가 bash로 띄운 데브 서버는 부모도 프로세스 그룹도 우리와 끊겨 있어 종료
- * 절차가 못 잡는다 (실측). 그래서 죽이는 대신 **보여주고** 사람이 고른다 — 같은 폴더에서
- * 사람이 직접 띄운 것을 앱이 말없이 죽이면 고아를 없애려다 남의 일을 끊는 셈이다.
+ * A dev server an agent started with bash has neither its parent process nor its process
+ * group tied to ours, so our shutdown procedure cannot catch it (measured). So instead of
+ * killing it, we **show it** and let the person choose — if the app silently killed something
+ * the person started by hand in the same folder, cleaning up an orphan would mean cutting off
+ * someone else's work.
  */
 export interface ProcessPort {
   strays(): Promise<{ pid: number; command: string; cwd: string }[]>

@@ -23,11 +23,11 @@ import type {
 import { RpcClient } from './rpc-client.js'
 
 /**
- * 브라우저(dev) 구현. 대부분이 "WS로 host에 위임"이다 —
- * Tauri 전환 1단계에서 이 구현을 그대로 재사용한다 (docs/platform-abstraction.md §5).
+ * The browser (dev) implementation. Most of it is "delegate to the host over WS" —
+ * step 1 of the Tauri transition reuses this implementation as-is (docs/platform-abstraction.md §5).
  */
 export type WebPlatformOptions = {
-  /** host 재기동 시 새 포트·토큰을 알려주는 구독 (Tauri에서 주입) */
+  /** A subscription that reports a new port and token when the host restarts (injected by Tauri) */
   onEndpointChange?: (cb: (info: { port: number; token: string }) => void) => Unsubscribe
   hostUrl?: string
   token: string
@@ -45,7 +45,7 @@ export type WebPlatformOptions = {
     trash(absPath: string): Promise<void>
     reveal(absPath: string): Promise<void>
   }
-  /** 자판 이름과 같은 이유로 셸이 답한다 — 브라우저에는 물어볼 파일 관리자가 없다 */
+  /** Answered by the shell, for the same reason as the keyboard labels — a browser has no file manager to ask */
   fileManagerName?: string
 }
 
@@ -111,10 +111,11 @@ class WebAgentPort implements AgentPort {
     })
   }
   /*
-   * 포트와 같은 타입을 그대로 쓴다 (Omit<UpdateSettingsParams,'sessionId'>).
-   * 여기 손으로 다시 적었을 때 effort가 빠진 채로도 **동작했다** — 스토어가 변수로
-   * 넘기면 TS는 초과 속성을 검사하지 않아서다 (commands.ts의 그 사건). 타입이 거짓말을
-   * 못 하게 protocol의 이름 있는 타입 하나만 쓴다 — verbosity(#54)를 더하며 정리.
+   * Uses exactly the same type as the port (Omit<UpdateSettingsParams,'sessionId'>).
+   * Writing this out by hand once **worked even with effort missing** — because TS does not
+   * check for excess properties when the store passes a variable (the commands.ts incident).
+   * Uses only the one named type from protocol, so the type cannot lie — cleaned up while
+   * adding verbosity (#54).
    */
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>) {
     return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
@@ -230,59 +231,62 @@ class WebProjectPort implements ProjectPort {
   }
 }
 
-/** 웹 폴백 — capability가 false이므로 UI가 알아서 기능을 숨긴다 */
+/** The web fallback — since the capability is false, the UI hides the feature on its own */
 class WebSystemPort implements SystemPort {
   async notify(title: string, body: string) {
     if (typeof Notification === 'undefined') return
     if (Notification.permission === 'granted') new Notification(title, { body })
   }
   async alert(_kind: AlertKind, sound: boolean) {
-    // 브라우저에는 독이 없다. 소리는 낼 수 있지만 자동재생 정책에 막히는 일이 잦아,
-    // "가끔 울리는 알림"으로는 못 믿는다 — 웹은 dev용이므로 조용히 넘긴다.
+    // A browser has no dock. Sound can be played, but it is routinely blocked by autoplay
+    // policy, so it cannot be trusted as "the notification that sometimes rings" — the web
+    // build is for dev, so this passes through quietly.
     void sound
   }
   async setBadge(_count: number) {
-    /* 브라우저에는 독 뱃지가 없다 */
+    /* A browser has no dock badge */
   }
   async startWindowDrag(): Promise<void> {
-    // 브라우저에는 옮길 창이 없다
+    // A browser has no window to move
   }
 
   async pickDirectory(): Promise<string | null> {
-    // 브라우저에는 디렉토리 피커가 없다 — dev 전용 폴백
+    // A browser has no directory picker — a dev-only fallback
     return window.prompt('Enter the full path of the project directory', '')
   }
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
-    // 디렉토리 피커와 같은 폴백 — 브라우저의 파일 선택은 경로를 주지 않는다(host가 읽을 경로가 필요하다)
+    // The same fallback as the directory picker — a browser's file selection gives no path (the host needs a path it can read)
     return window.prompt(`${opts.title} — enter the full path (${opts.extensions.map((e) => `.${e}`).join(', ')})`, '')
   }
   async openInIde(_path: string, _line?: number) {
-    /* Tauri에서만 (capability로 UI가 비활성) */
+    /* Only on Tauri (the UI disables this via capability) */
   }
   async openUrl(url: string) {
-    // 브라우저에서는 이것이 곧 바깥 열기다 — 새 탭이라 이 앱의 작업을 건드리지 않는다
+    // In a browser this is simply opening it outside — a new tab, so it never touches this app's own work
     window.open(url, '_blank', 'noopener,noreferrer')
   }
   onAppLink(_cb: (link: string) => void): () => void {
-    // 브라우저에는 이 앱에 링크를 건네는 OS가 없다 (M4 E-4) — 데스크톱에서만 온다
+    // A browser has no OS handing links to this app (M4 E-4) — those only arrive on desktop
     return () => {}
   }
 }
 
 /*
-  브라우저에서 못 하는 두 가지의 이유. **"안 됨"으로 끝내지 않는다** — 왜 안 되는지와
-  어디로 가면 되는지를 함께 말한다 (`models()`가 supported=false에 reason을 다는 것과 같다).
+  The reasons for the two things a browser cannot do. **Never just ends at "cannot."** Says why
+  it cannot, and where to go instead (the same as `models()` attaching a reason to supported=false).
 */
 const NO_DESKTOP_TRASH = 'A browser has no trash — use the desktop app to delete files'
 const NO_DESKTOP_REVEAL = 'A browser cannot open a file manager — use the desktop app'
 
 /**
- * `apps.invoke`의 답 → 화면이 받을 MCP 결과.
+ * `apps.invoke`'s response → the MCP result the screen receives.
  *
- * 앱이 답했으면 그 답을 **그대로** 준다. `structuredContent`, `isError`, `_meta`까지 화면의 것이다
- * (규격: 화면은 도구 결과를 받는다). 글로 줄여 감싸면 상태를 `structuredContent`로 읽는 화면이
- * 빈손이 된다. 앱에 닿지 못한 호출(host의 거절, 뜨지 못함, 취소)에는 앱의 답이 없다. 그때는
- * host가 적은 이유를 실패한 도구 결과로 준다. 화면의 SDK는 던진 오류가 아니라 결과로 받는다.
+ * If the app answered, gives that answer **exactly as it is**. `structuredContent`, `isError`
+ * and `_meta` all belong to the screen too (per spec: a screen receives a tool result).
+ * Wrapping it down into text would leave a screen that reads state from `structuredContent`
+ * empty-handed. A call that could not reach the app (rejected by the host, failed to start,
+ * cancelled) has no answer from the app — in that case, gives the reason the host wrote as a
+ * failed tool result. The screen's SDK receives this as a result, not as a thrown error.
  */
 function viewToolResult(r: { text: string; isError?: boolean; result?: unknown }): AppToolResult {
   const raw = r.result
@@ -295,14 +299,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
   rpc.connect()
 
-  // host가 재기동되면 새 주소로 갈아탄다 (Tauri 수퍼바이저가 알려준다)
+  // If the host restarts, switches to the new address (the Tauri supervisor reports it)
   const unsubscribeEndpoint = opts.onEndpointChange?.((next) => {
     rpc.updateEndpoint(`ws://127.0.0.1:${next.port}`, next.token)
   })
 
   return {
     agents: new WebAgentPort(rpc),
-    // 앱 상태 (#81) — 얇은 운반. 문서의 의미는 앱만 안다
+    // App state (#81) — a thin carrier. Only the app knows what the document means
     apps: {
       state: (appId) => rpc.call('apps.state', { appId }),
       setState: async (appId, doc) => {
@@ -312,24 +316,25 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.setEnabled', { appId, enabled })
       },
       invoke: (appId, name, args) => rpc.call('apps.invoke', { appId, name, args }),
-      // 앱 화면 (M4 B-3). 주소도 비밀도 host가 만든다 — 이쪽은 부르는 화면의 출처만 알린다
+      // The app screen (M4 B-3). Both the address and the secret are made by the host — this side only reports the calling screen's origin
       viewFrame: (appId, instanceId, { projectId = null, hostOrigin }) =>
         rpc.call('apps.viewFrame', { appId, projectId, instanceId, hostOrigin }),
       /*
-        화면의 도구 호출은 사람의 호출과 **같은 문**(`apps.invoke`)으로 간다. 내장 앱과 외부
-        앱이 한 경로를 지나고, 공개 범위와 기록은 host의 중개가 한 번에 맡는다(플랜 "호출
-        경로는 하나다").
+        A tool call from a screen goes through the **same door** as a call from a person
+        (`apps.invoke`). Built-in and external apps go through one path, and scope and logging
+        are handled together by the host's mediation (the plan's "there is one call path").
 
-        `projectId`는 늘 싣는다(사용자 폴더 앱이면 null). 싣지 않으면 host는 이것을 사람이 내장
-        앱을 부른 것으로 읽는다. 화면은 외부 앱의 코드라서 그 문으로 들어가면 안 된다.
-        `instanceId`는 이 호출이 낸 "바뀌었다"의 주인이 된다 — 그 화면만 그 알림을 건너뛴다(B-5).
+        `projectId` is always carried (null for a user-folder app). Without it, the host reads
+        this as a human calling a built-in app. A screen is an external app's code, and must
+        never enter through that door. `instanceId` becomes the owner of the "changed" this
+        call produces — only that screen skips that notification (B-5).
       */
       callTool: async (appId, tool, args, from) =>
         viewToolResult(await rpc.call('apps.invoke', { appId, name: tool, args, projectId: from?.projectId ?? null, instanceId: from?.instanceId })),
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
       list: () => rpc.call('apps.list', {}),
-      // 답의 결과는 앱이 준 MCP 결과 그대로다 — 모양은 화면과 앱이 아는 것이라 여기서는 옮기기만 한다
+      // The response's result is exactly the MCP result the app gave — the shape is known to the screen and the app, so this just carries it
       openView: async (appId, projectId) => {
         const v = await rpc.call('apps.openView', { appId, projectId })
         return { ...v, toolResult: v.toolResult as AppToolResult }
@@ -340,7 +345,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       sendViewMessage: async (sessionId, instanceId, text) => {
         await rpc.call('apps.viewMessage', { sessionId, instanceId, text })
       },
-      // 결과는 앱이 준 MCP 결과 그대로다 — openView와 같이 옮기기만 한다
+      // The result is exactly the MCP result the app gave — carried through as with openView
       inlineViews: (sessionId) => rpc.call('apps.inlineViews', { sessionId }),
       reopenInlineView: async (sessionId, callId) => {
         const { toolResult, ...v } = await rpc.call('apps.inlineReopen', { sessionId, callId })
@@ -412,9 +417,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       importFile: (projectId, toDir, name, dataBase64) =>
         rpc.call('fs.importFile', { projectId, toDir, name, dataBase64 }),
       /*
-        휴지통과 '파일 관리자에서 보기'는 **두 걸음**이다: 프로젝트 루트를 아는 host에게
-        절대 경로를 받고, 그것을 OS에 넘길 수 있는 셸에게 건넨다. 경로를 UI가 조립하지
-        않는 이유가 여기 있다 — 루트 밖으로 나가는지 판정하는 자리는 한 곳이어야 한다.
+        The trash and "reveal in file manager" are **two steps**: get the absolute path from
+        the host, which knows the project root, and hand that to the shell, which can pass it
+        to the OS. This is why the UI never assembles the path itself — the place that decides
+        whether something goes outside the root has to be exactly one place.
       */
       trash: async (projectId, path) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
@@ -460,7 +466,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       onOutput: (h) => rpc.onTerminalOutput(h),
       onExit: (h) => rpc.onTerminalExit(h),
     },
-    // 자주 쓰는 명령어 실행기 (#60) — 출력은 위 terminal.onOutput/onExit이 그대로 나른다
+    // The runner for frequently used commands (#60) — output rides on terminal.onOutput/onExit above, as-is
     commands: {
       run: (projectId, command, cols, rows) => rpc.call('commands.run', { projectId, command, cols, rows }),
       stop: async (projectId, command) => {
@@ -472,7 +478,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('commands.resize', { projectId, command, cols, rows })
       },
     },
-    // 우리 폴더에서 아직 도는 남은 프로세스 (종료 모달이 묻는 자리)
+    // Leftover processes still running from our folders (what the quit modal asks about)
     processes: {
       strays: () => rpc.call('processes.strays', {}),
       stop: (pids) => rpc.call('processes.stop', { pids }),
@@ -486,22 +492,24 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
     },
     /*
-      화면 설정은 host의 DB에 산다 — 브라우저 저장소가 아니라.
+      Screen preferences live in the host's DB — not in browser storage.
 
-      localStorage에 두면 같은 기계에서도 dev 서버와 앱이 서로 다른 설정을 갖게 되고,
-      무엇보다 저장소를 비우는 것(캐시 지우기)이 설정을 지우는 일이 된다. 사람이 고른
-      값은 대화·프로젝트와 같은 곳에 있어야 같이 살아남는다.
+      Keeping them in localStorage would let the dev server and the app hold different
+      settings even on the same machine, and worse, clearing storage (clearing the cache)
+      would become the same as clearing preferences. A value the person chose has to live
+      alongside conversations and projects to survive along with them.
     */
     prefs: {
       load: () => rpc.call('prefs.get', {}),
       save: (patch) => rpc.call('prefs.set', { patch }),
     },
     /*
-      업데이트는 전부 host에 위임한다 (이슈 #43).
+      Updates are entirely delegated to the host (issue #43).
 
-      Tauri 구현이 이 자리를 덮어쓰지 않는 것이 맞다 — `npm i -g`를 도는 것은 Node이지
-      Rust가 아니고, 확인도 같은 WS 너머에서 일어난다. 화면이 진행 상황을 듣는 통로는
-      따로 없다: `update_status`는 다른 이벤트와 같은 스트림을 탄다 (agents.subscribe).
+      It is correct that the Tauri implementation does not override this spot — running
+      `npm i -g` is Node's job, not Rust's, and checking also happens over the same WS. There
+      is no separate channel for the screen to hear progress: `update_status` rides the same
+      stream as every other event (agents.subscribe).
     */
     updates: {
       status: (force = false) => rpc.call('updates.status', { force }),
