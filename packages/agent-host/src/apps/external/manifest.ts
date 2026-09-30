@@ -3,43 +3,48 @@ import { APP_ID_MAX_LENGTH, RESERVED_NAME_PREFIX, serverNameProblem } from '@cc/
 import { HOST_CAPABILITIES, isHostCapability } from './capabilities.js'
 
 /**
- * 외부 앱의 매니페스트 `centralu.app.json` (M4 A-1).
+ * The manifest of an external app, `centralu.app.json` (M4 A-1).
  *
- * 앱 폴더 하나가 앱 하나이고, 이 파일이 그 폴더를 앱으로 만든다. 폴더의 나머지(서버 코드,
- * 화면)는 우리가 읽지 않는다 — 서버를 띄우는 명령과, 사람·에이전트에게 보일 이름과,
- * 앱이 무엇을 쓰겠다고 **선언**하는지만 여기서 정한다.
+ * One app folder is one app, and this file is what turns that folder into an app. We never read the
+ * rest of the folder (server code, screens) — this file decides only the command that starts the
+ * server, the name shown to the person and agents, and what the app **declares** it wants to use.
  *
- * 판정은 zod 한 벌이다. 규칙이 코드 여기저기의 if로 흩어지면 "어느 검사가 이 필드를
- * 보나"를 매번 찾아야 하고, 느슨한 쪽이 곧 구멍이다(#93에서 배운 것).
+ * Validation is a single set of zod schemas. If the rules were scattered across if-statements around
+ * the codebase, finding "which check looks at this field" would take a search every time, and the
+ * loosest check would be the hole (a lesson from #93).
  */
 
 export const MANIFEST_FILE = 'centralu.app.json'
 
 /**
- * 이 Centralu가 읽을 줄 아는 매니페스트 판.
+ * The manifest version this Centralu knows how to read.
  *
- * 팀원끼리 Centralu 판이 다를 수 있어서 있는 칸이다(플랜 "앱 하나의 모양"). 모르는 판을
- * 추측으로 읽으면 뜻이 바뀐 필드를 옛 뜻으로 실행하게 된다 — 그래서 다르면 읽지 않고
- * "Centralu를 올려라"라고 말한다.
+ * This field exists because teammates can be on different Centralu versions (from the plan, "the
+ * shape of one app"). Guessing at an unrecognized version would mean running a field whose meaning
+ * changed under its old meaning — so instead, when the version differs, it is never read, and the
+ * message is "update Centralu".
  */
 export const MANIFEST_VERSION = 1
 
 /**
- * 매니페스트 파일의 크기 상한. 설명 몇 줄과 목록 몇 개가 전부라 실제로는 1KiB 남짓이다.
- * 폴더 감시가 바뀔 때마다 다시 읽으므로, 누가 여기에 큰 파일을 두어도 host가 그걸 통째로
- * 메모리에 올리지 않게 한다.
+ * The manifest file's size cap. In practice it is a bit over 1KiB — just a few lines of description
+ * and a few lists. Since folder watching re-reads it on every change, this keeps the host from
+ * loading an entire large file into memory even if someone places one here.
  */
 export const MAX_MANIFEST_BYTES = 64 * 1024
 
 /**
- * 앱 안의 도구 이름 규칙. 어겼으면 사람이 읽을 이유를, 괜찮으면 null.
+ * The naming rule for a tool inside an app. Returns a reason a person can read if it is broken, or
+ * null if it is fine.
  *
- * `__`가 금지인 이유는 앱 id의 밑줄 금지와 같다(#93): 세션에서 도구 이름은
- * `mcp__app-<id>__<도구>`로 펼쳐지고 칸막이가 `__`다. 도구 이름에 `__`가 있으면 앱 하나가
- * 이름의 칸을 하나 더 만들어 남의 이름처럼 읽히게 할 수 있다.
+ * `__` is forbidden for the same reason underscores are forbidden in an app id (#93): inside a
+ * session, a tool name expands to `mcp__app-<id>__<tool>`, with `__` as the separator. If a tool
+ * name contained `__`, one app could create an extra name segment and make its tool read as if it
+ * belonged to someone else.
  *
- * 도구 목록은 앱 서버가 실행 중에 말하는 것이라 매니페스트에는 없다 — 그래서 이 검사는
- * 목록을 읽는 자리(런타임)와 매니페스트의 `home`이 함께 쓴다.
+ * The tool list is something the app server states while running, so it never appears in the
+ * manifest — this check is instead shared between the place that reads the list (the runtime) and
+ * the manifest's `home` field.
  */
 export function toolNameError(name: string): string | null {
   if (name.length === 0) return 'a tool name is empty'
@@ -48,30 +53,33 @@ export function toolNameError(name: string): string | null {
 }
 
 /**
- * 비밀 이름 = 앱 프로세스가 받을 환경 변수 이름.
+ * A secret name = the environment variable name the app process receives it as.
  *
- * 우리가 앱에 넘기는 변수(`CENTRALU_APP_DATA` 등)와 host 자신의 변수(`CC_*`)는 비밀
- * 이름으로 가져갈 수 없다 — 사용자가 저장한 값이 데이터 폴더 경로를 덮어쓰면 앱이 남의
- * 폴더에 쓰게 된다.
+ * A variable we hand the app ourselves (`CENTRALU_APP_DATA` and similar) and the host's own
+ * variables (`CC_*`) cannot be taken as a secret name — if a value the user stored overwrote the
+ * data folder path, the app would end up writing into someone else's folder.
  */
 const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/
 const RESERVED_ENV_PREFIXES = ['CENTRALU_', 'CC_'] as const
 
 /**
- * `uses.host`의 능력 이름의 모양. 어휘(닫힌 목록)는 `capabilities.ts`가 정한다 — 모양이 틀린 이름은 매니페스트의 오류이고,
- * 모양은 맞는데 모르는 이름은 경고다(`parseManifest`): 새 Centralu가 더한 능력을 옛 Centralu가 만나면 앱 전체를 멈추기보다
- * 그 능력만 거절하는 편이 맞다(모르는 필드를 경고만 하는 것과 같은 이유).
+ * The shape of a capability name in `uses.host`. The vocabulary (the closed list) is decided by
+ * `capabilities.ts` — a malformed name is a manifest error, while a well-formed but unrecognized
+ * name is only a warning (`parseManifest`): when an older Centralu encounters a capability a newer
+ * one added, refusing just that capability is better than stopping the whole app (the same reasoning
+ * as warning-only on unknown fields).
  */
 const HOST_CAPABILITY = /^[a-z][a-z0-9_.-]{0,63}$/
 
 /**
- * `uses.agent`에 적는 도구 이름 (M4 D-1) — 어댑터의 이름(`claude`, `codex`)과 같은 모양이다. 어느 도구가 실제로 있는지는
- * 매니페스트가 알 수 없다(기계마다 다르다). 그래서 모양만 보고, 없는 도구는 부탁할 때 이유와 함께 거절한다.
+ * A tool name written in `uses.agent` (M4 D-1) — the same shape as an adapter's name (`claude`,
+ * `codex`). The manifest has no way to know which tools actually exist (it varies by machine). So
+ * only the shape is checked, and a tool that does not exist is refused with a reason when requested.
  */
 const AGENT_TOOL = /^[a-z][a-z0-9-]{0,31}$/
 
 const appIdField = z.string().superRefine((id, ctx) => {
-  // 판정은 한 벌(`serverNameProblem`, #93)이고 말만 여기서 붙인다 — 이 말은 앱 목록의 까닭과 check의 보고서로 사람과 만드는 에이전트가 읽는다
+  // Validation is a single function (`serverNameProblem`, #93); only the wording is attached here — this wording is what a person and the building agent read, in the app list's reason and check's report
   const problem = serverNameProblem(id)
   if (problem === 'reserved') ctx.addIssue({ code: 'custom', message: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself` })
   if (problem === 'shape') {
@@ -95,15 +103,16 @@ const secretNameField = z.string().superRefine((name, ctx) => {
   }
 })
 
-/** 화면 CSP에 더할 출처들 — ext-apps의 `McpUiResourceCsp`와 같은 네 칸. 조립은 B-3이 한다 */
+/** The origins to add to a screen's CSP — the same four fields as ext-apps's `McpUiResourceCsp`. Assembled by B-3 */
 const CSP_KEYS = ['connectDomains', 'resourceDomains', 'frameDomains', 'baseUriDomains'] as const
 const cspField = z.object(Object.fromEntries(CSP_KEYS.map((k) => [k, z.array(z.string()).optional()])))
 
 /**
- * 화면의 출처 방식 (B-3, 스파이크 S-1·S-8). `opaque`가 기본이다 — 안쪽 프레임에 출처가 없어서
- * 앱끼리 브라우저 저장소가 섞이지 않는다. `app`은 앱마다 고정된 포트의 진짜 출처를 달라는
- * **요청**이다. 브라우저 저장소나 blob 워커가 없으면 깨지는 앱(공개 앱 86개 중 5개, 지도 타일을
- * 못 받은 map-server)을 위한 문이다. 값은 ViewHost의 `OriginMode`와 같은 두 낱말이다.
+ * How a screen's origin is handled (B-3, spikes S-1 and S-8). `opaque` is the default — the inner
+ * frame has no origin, so browser storage never mixes between apps. `app` is a **request** for a
+ * real origin on a per-app fixed port. This is the escape hatch for an app that breaks without
+ * browser storage or blob workers (5 of 86 public apps tested, including map-server, which could not
+ * load its map tiles). The values match ViewHost's `OriginMode`, the same two words.
  */
 export const VIEW_ORIGINS = ['opaque', 'app'] as const
 const VIEW_KEYS = ['origin'] as const
@@ -128,18 +137,20 @@ const ManifestSchema = z.object({
     command: z.string().trim().min(1),
     args: z.array(z.string()).default([]),
   }),
-  /** 고정 화면을 여는 도구(B-2) — 목록에 실제로 있는지는 서버가 떠야 안다 */
+  /** The tool that opens the fixed screen (B-2) — whether it actually exists in the tool list is known only once the server starts */
   home: toolNameField.optional(),
   /**
-   * 앱이 **쓰겠다고 선언하는** 능력(D). 선언이지 허락이 아니다 — 허락은 처음 쓸 때 사람이
-   * 한다(D-4). 없으면 아무것도 쓰지 않는 앱이다: 빠진 선언을 "전부"로 읽는 쪽이 위험하다.
+   * The capabilities an app **declares that it uses** (D). This is a declaration, not a grant — the
+   * grant comes from the person on first use (D-4). If absent, the app uses nothing: treating an
+   * absent declaration as "everything" would be dangerous.
    */
   uses: z
     .object({
       /**
-       * 에이전트를 부탁할 수 있나 (D-1). `true`는 "사람의 기본 에이전트"다 — 프로젝트 앱이면 그 프로젝트의 기본 도구,
-       * 사용자 폴더 앱이면 오케스트레이터의 도구. 도구를 골라 부탁하려면 목록으로 적는다(`["codex"]`): 목록에 없는 도구는
-       * 거절한다. 선언이 좁을수록 사람이 허락할 것도 좁다(D-4는 도구마다 묻는다).
+       * Can it ask for an agent (D-1)? `true` means "the person's default agent" — the project's
+       * default tool for a project app, or the orchestrator's tool for a user-folder app. To request
+       * a specific tool, list it explicitly (`["codex"]`): a tool not in the list is refused. The
+       * narrower the declaration, the narrower what the person is asked to allow (D-4 asks per tool).
        */
       agent: z
         .union([
@@ -161,15 +172,16 @@ const ManifestSchema = z.object({
         .optional(),
     })
     .default({}),
-  /** 이름만 적는다. 값은 사용자 기계에만 있다(런타임의 비밀 파일) */
+  /** Only the name is listed here. The value lives only on the user's machine (the runtime's secrets file) */
   secrets: z.array(secretNameField).optional(),
   csp: cspField.optional(),
   /**
-   * 화면을 어떻게 띄울지 (B-3). 없으면 불투명 출처다.
+   * How to display the screen (B-3). Defaults to an opaque origin when absent.
    *
-   * 모르는 **값**은 거절한다(모르는 필드는 경고만 하는 것과 다르다). `"orgin": "app"` 같은 오타는
-   * 경고로 남지만, `"origin": "per-app"`을 조용히 기본값으로 읽으면 작성자는 저장소가 왜 안 되는지
-   * 알 길이 없다. 뜻을 모르는 값으로 앱을 띄우지 않는다는 manifestVersion의 규칙과 같은 쪽이다.
+   * An unrecognized **value** is rejected (unlike an unrecognized field, which is only a warning). A
+   * typo like `"orgin": "app"` stays a warning, but silently reading `"origin": "per-app"` as the
+   * default would leave the author with no way to find out why storage does not work. This follows
+   * the same principle as manifestVersion: never run an app with a value whose meaning is unknown.
    */
   view: z.object({ origin: z.enum(VIEW_ORIGINS).default('opaque') }).optional(),
 })
@@ -181,11 +193,12 @@ export type ManifestResult =
   | { ok: false; error: string; warnings: string[] }
 
 /**
- * 매니페스트 원문 → 판정.
+ * Raw manifest text → validation result.
  *
- * **모르는 필드는 경고만 한다.** 새 Centralu가 더한 필드를 옛 Centralu가 만나면(팀원끼리
- * 판이 다를 때) 앱 전체를 거절하기보다, 아는 것만 읽고 모르는 것은 말해 두는 편이 맞다.
- * 뜻이 바뀌는 변경은 필드 추가가 아니라 manifestVersion을 올리는 것으로 한다.
+ * **An unrecognized field only produces a warning.** When an older Centralu encounters a field a
+ * newer one added (teammates on different versions), reading what it recognizes and reporting what
+ * it does not is better than rejecting the whole app. A change whose meaning changes is done by
+ * bumping manifestVersion, not by adding a field.
  */
 export function parseManifest(text: string): ManifestResult {
   let raw: unknown
@@ -226,7 +239,7 @@ function unknownFields(raw: Record<string, unknown>): string[] {
   return out
 }
 
-/** 사람과 만드는 에이전트가 읽을 한 줄 — 어느 칸이 왜 틀렸는가 */
+/** One line for a person and the building agent to read — which field is wrong, and why */
 function describeIssue(issue: z.core.$ZodIssue): string {
   const path = issue.path.map(String).join('.') || '(the whole file)'
   if (issue.code === 'invalid_type' && issue.input === undefined) return `${path}: missing`

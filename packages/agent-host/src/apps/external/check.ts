@@ -4,34 +4,37 @@ import { toolNameError } from './manifest.js'
 import { resourceUriOf, visibilityOf } from './visibility.js'
 
 /**
- * 앱 점검 (M4 C-3) — 만드는 세션이 자기 앱을 시험하는 `check`의 판정.
+ * App check (M4 C-3) — the judgment behind `check`, which the building session uses to test its
+ * own app.
  *
- * 사람이 시험 담당이 되면 안 된다(플랜 C-3). 만드는 에이전트가 고친 뒤 스스로 부르고, 무엇이 틀렸는지 읽고,
- * 다시 고친다. 그래서 판정은 **실제로 띄운 앱**이 말한 것(도구 목록, 화면 리소스)을 본다 — 파일을 읽어
- * 짐작하지 않는다. 스파이크 S-6에서 깨진 서버도 프로세스는 살아 있었다: 떠 있는 것은 아무것도 증명하지 않는다.
+ * A person must not end up being the tester (plan C-3). The building agent fixes something, calls
+ * check on itself, reads what is wrong, and fixes it again. So the judgment looks at what the
+ * **actually running app** says (its tool list, its screen resources) — it does not guess by
+ * reading files. In spike S-6, even a broken server's process stayed alive: being up proves nothing.
  *
- * 이 파일은 판정과 글만 안다. 앱을 띄우고 읽는 일은 런타임의 문(`ExternalApps.check`)이 한다.
+ * This file knows only the judgment and the wording. Starting the app and reading from it is the
+ * runtime's door's job (`ExternalApps.check`).
  */
 
-/** 화면 리소스의 MIME — MCP Apps 규격이 정한다. 다르면 호스트가 화면으로 그리지 않는다 */
+/** The MIME type of a screen resource — set by the MCP Apps spec. If it differs, the host will not render it as a screen. */
 export const UI_MIME = 'text/html;profile=mcp-app'
-/** 템플릿 화면의 브리지 자리표시 — `centralu.uiResource`가 갈아 끼운다. 남아 있으면 화면에 브리지가 없다 */
+/** The bridge placeholder in a template screen — `centralu.uiResource` replaces it. If it is still there, the screen has no bridge. */
 const BRIDGE_TAG = 'centralu:mcp-app.js'
 
 export type CheckLevel = 'problem' | 'warning'
 export type CheckFinding = { level: CheckLevel; where: string; message: string }
 
-/** 도구 하나의 요약 — 보고서의 한 줄 */
+/** The summary of one tool — one line of the report */
 export type CheckedTool = { name: string; visibility: string[]; readOnly: boolean | null; screen: string | null }
 
 export type AppCheckReport = {
-  /** 문제가 하나도 없다 (주의는 있어도 된다) */
+  /** There are no problems at all (warnings are fine) */
   ok: boolean
   findings: CheckFinding[]
   tools: CheckedTool[]
-  /** 읽어 본 화면 — uri와 글자 수 */
+  /** The screens that were read — uri and character count */
   screens: { uri: string; chars: number }[]
-  /** 만드는 에이전트가 읽을 글 */
+  /** The text for the building agent to read */
   text: string
 }
 
@@ -39,7 +42,8 @@ const problem = (where: string, message: string): CheckFinding => ({ level: 'pro
 const warning = (where: string, message: string): CheckFinding => ({ level: 'warning', where, message })
 
 /**
- * 도구 목록의 판정. 돌려주는 `screens`는 도구들이 가리키는 `ui://` 리소스 — 런타임이 하나씩 읽어 `checkScreen`에 넘긴다.
+ * The judgment over a tool list. The `screens` it returns are the `ui://` resources the tools
+ * point at — the runtime reads them one at a time and passes each to `checkScreen`.
  */
 export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { findings: CheckFinding[]; tools: CheckedTool[]; screens: string[] } {
   const findings: CheckFinding[] = []
@@ -71,7 +75,8 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
     }
     if (!t.description?.trim()) findings.push(warning(where, 'no description — agents pick a tool by reading its description'))
 
-    // 고정 화면을 여는 쪽(`homeView`)과 같은 판정이다 — 점검이 통과시킨 선언을 화면이 거절하면 안 된다
+    // The same judgment as the side that opens the fixed screen (`homeView`) — the screen must not
+    // reject a declaration the check has already passed
     const ui = resourceUriOf(t)
     if (ui.error) findings.push(problem(where, `${ui.error} — it will not open as a screen`))
     if (ui.uri) screens.add(ui.uri)
@@ -96,7 +101,7 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
   return { findings, tools: summaries, screens: [...screens] }
 }
 
-/** 화면 리소스 하나의 판정 — 읽은 결과 또는 읽다 난 오류 */
+/** The judgment over one screen resource — either the result it read or the error reading it hit */
 export function checkScreen(uri: string, read: ReadResourceResult | Error): { findings: CheckFinding[]; chars: number } {
   const where = `screen ${uri}`
   if (read instanceof Error) return { findings: [problem(where, `could not be read: ${read.message.split('\n')[0]}`)], chars: 0 }
@@ -118,7 +123,7 @@ export function checkScreen(uri: string, read: ReadResourceResult | Error): { fi
   return { findings, chars: text.length }
 }
 
-/** 보고서의 글 — 만드는 에이전트가 읽고 고칠 수 있게: 문제가 먼저, 어디서, 무엇을 할지 */
+/** The report's wording — written so the building agent can read it and fix things: the problem first, where, and what to do */
 export function formatReport(
   label: string,
   r: Omit<AppCheckReport, 'text' | 'ok'>,

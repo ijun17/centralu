@@ -7,8 +7,10 @@ import { ExternalApps, type AppRef, type HostCapability } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, plantApp } from './test-helpers.js'
 
 /**
- * host 데이터 (M4 D-3) — 앱이 fd 3으로 `host_data`를 부탁하면 창구가 닫힌 목록과 선언을 본 뒤에만 host에 묻는다. 무엇을 주는지는
- * 매니저의 일이라(sessions/app-host-data.test.ts가 진짜로 본다) 여기서는 host 자리에 가짜를 앉혀 **언제 묻는가**만 본다.
+ * Host data (M4 D-3) — when an app asks for `host_data` over fd 3, the desk consults the closed
+ * list and the declaration before it ever asks the host. What the host actually gives back is the
+ * manager's job (sessions/app-host-data.test.ts checks that for real); here the host is a stand-in,
+ * and the only thing under test is **when it gets asked**.
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -51,8 +53,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('host_data — 닫힌 목록, 기본은 거절', () => {
-  it('선언하지 않은 이름은 host에 묻지도 않는다', async () => {
+describe('host_data — closed list, default is refusal', () => {
+  it('does not even ask the host for a name that was not declared', async () => {
     plant('notes', {})
     rt.refresh()
     expect(await ask('notes', { name: 'sessions.list' })).toMatchObject({
@@ -62,7 +64,7 @@ describe('host_data — 닫힌 목록, 기본은 거절', () => {
     expect(asked).toEqual([])
   })
 
-  it('목록 밖의 이름은 선언했어도 없는 능력이다 — 줄 수 있는 목록을 말한다', async () => {
+  it('a name outside the list is a capability that does not exist even if declared — it names what it can give', async () => {
     plant('notes', { host: ['sessions.list', 'files.read'] })
     rt.refresh()
     expect(await ask('notes', { name: 'files.read' })).toMatchObject({
@@ -72,7 +74,7 @@ describe('host_data — 닫힌 목록, 기본은 거절', () => {
     expect(asked).toEqual([])
   })
 
-  it('선언한 이름은 host가 답하고, 답은 JSON 그대로 온다 — host가 못 주면 그 이유가 온다', async () => {
+  it('a declared name gets answered by the host, and the answer comes through as plain JSON — if the host cannot give it, the reason comes through instead', async () => {
     plant('notes', { host: ['sessions.list', 'git.status'] })
     rt.refresh()
     expect(await ask('notes', { name: 'sessions.list' })).toEqual({

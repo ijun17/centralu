@@ -7,9 +7,12 @@ import { ExternalApps, type AppCaller, type AppRef, type BrokerHost } from './ru
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
 
 /**
- * 중개 부탁의 기록 (M4 D-6) — 앱이 fd 3으로 부탁한 것은 **어떻게 끝났든 한 줄**이다. 부탁한 앱의 `broker` 줄로, 부탁을
- * 일으킨 실행(부모) 아래에. 거절도, 틀린 부탁도, 취소도, 문지기가 받지 않은 부탁도. call_app이 부른 앱에 닿으면 그 앱의
- * 실행 줄이 곧 기록이다 — 같은 일을 두 줄로 적지 않는다. 진짜 앱 프로세스(픽스처)와 메모리 기록으로 본다.
+ * The ledger record of a broker request (M4 D-6) — whatever an app requested over fd 3 is **one row,
+ * however it ended.** As the requesting app's `broker` row, under the run that triggered the
+ * request (its parent). This holds for a denial, a malformed request, a cancellation, and a request
+ * the gatekeeper never accepted. When call_app reaches the called app, that app's own run row is
+ * already the record — the same event is never written as two rows. Exercised with real app
+ * processes (fixtures) and an in-memory ledger.
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -37,7 +40,7 @@ const make = (host: Partial<BrokerHost> = {}) => {
   rt.attachBrokerHost(fakeBrokerHost(host))
 }
 
-/** 앱이 처리 중인 호출 안에서 중개를 부른다 — 그 호출의 실행 id(부모)와 중개의 답 */
+/** Calls the broker from inside a call the app is handling — returns that call's run id (the parent) and the broker's answer */
 const ask = async (appId: string, tool: string, args: Record<string, unknown>, extra: Record<string, unknown> = {}, signal?: AbortSignal) => {
   const out = await rt.call(ref(appId), 'ask_broker', { mode: 'run', tool, args, ...extra }, SESSION, signal ? { signal } : {})
   return { parent: out.runId, outcome: out, said: (out.result?.structuredContent ?? null) as { isError: boolean; text: string } | null }
@@ -55,8 +58,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('부탁 하나에 줄 하나 — 부탁을 일으킨 실행 아래에', () => {
-  it('에이전트 부탁은 들어오자마자 도는 줄이 서고, 세션이 서면 그 세션을 가리키며, 끝나면 결말이 적힌다', async () => {
+describe('one row per request — under the run that triggered it', () => {
+  it('an agent request gets a running row as soon as it arrives, points at the session once it exists, and gets its outcome written when it ends', async () => {
     plant('notes', { agent: true })
     let release!: () => void
     make({
@@ -82,7 +85,7 @@ describe('부탁 하나에 줄 하나 — 부탁을 일으킨 실행 아래에',
     expect(brokerRows()[0]!.durationMs).toBeGreaterThanOrEqual(0)
   })
 
-  it('거절도 한 줄이다 — 선언 밖(host 데이터), 사람이 허락하지 않았다(에이전트)', async () => {
+  it('a denial is also a row — outside the declaration (host data), or not allowed by the person (agent)', async () => {
     plant('notes', { agent: true })
     make({ askCapability: async () => 'deny' })
     const undeclared = await ask('notes', 'host_data', { name: 'sessions.list' })
@@ -93,11 +96,11 @@ describe('부탁 하나에 줄 하나 — 부탁을 일으킨 실행 아래에',
     ])
     expect(brokerRows()[0]!.error).toContain(`host_data refused: "sessions.list" is not in this app's "uses.host"`)
     expect(brokerRows()[1]!.error).toContain('run_agent refused: the person did not allow App notes to run an agent')
-    // 거절은 막힌 것이지 틀린 것이 아니다 — 원문을 남기지 않는다
+    // A denial is being blocked, not being malformed — it does not keep the original text
     expect(ledger.failures).toEqual([])
   })
 
-  it('틀린 부탁은 실패로 적히고 그 입력이 원문으로 남는다 — 앱을 고치는 에이전트가 읽는다', async () => {
+  it('a malformed request is recorded as a failure and its input is kept as the original text — read by the agent fixing the app', async () => {
     plant('notes', { agent: true })
     make()
     const { parent } = await ask('notes', 'run_agent', { prompt: 'x', schema: { type: 'array' } })
@@ -107,7 +110,7 @@ describe('부탁 하나에 줄 하나 — 부탁을 일으킨 실행 아래에',
     expect(ledger.failures).toEqual([{ runId: row!.id, args: '{"prompt":"x","schema":{"type":"array"}}', result: expect.stringContaining('the schema must describe') }])
   })
 
-  it('call_app이 부른 앱에 닿으면 그 앱의 줄이 기록이다. 닿지 못한 부탁만 부탁한 앱의 줄로 남는다', async () => {
+  it('when call_app reaches the called app, that app\'s own row is the record. Only a request that never got through stays as the requesting app\'s row', async () => {
     plant('notes', { apps: ['other'] })
     plant('other', {})
     make()
@@ -121,7 +124,7 @@ describe('부탁 하나에 줄 하나 — 부탁을 일으킨 실행 아래에',
     expect(brokerRows()[0]!.error).toContain(`call_app refused: "third" is not in this app's "uses.apps"`)
   })
 
-  it('부탁이 취소되면 그 줄은 취소로 닫힌다', async () => {
+  it('when a request is cancelled, its row closes as cancelled', async () => {
     plant('notes', { agent: true })
     let started = false
     make({
@@ -141,13 +144,13 @@ describe('부탁 하나에 줄 하나 — 부탁을 일으킨 실행 아래에',
   })
 })
 
-describe('문지기가 받지 않은 부탁도 한 줄이다 — 부모 없이', () => {
-  it('실행 id가 없거나 열려 있지 않은 id를 내밀면 거절로 적히고, 내민 id는 부모가 되지 않는다', async () => {
+describe('a request the gatekeeper never accepted is also a row — with no parent', () => {
+  it('presenting no run id, or an id that is not open, is recorded as a denial, and the presented id never becomes a parent', async () => {
     plant('notes', { agent: true })
     plant('other', { agent: true })
     make()
     await ask('notes', 'run_agent', { prompt: 'x' }, { mode: 'none' })
-    // 다른 앱의 열린 실행 id를 내민다 — 그 id 아래에 줄을 끼워 넣지 못한다
+    // Presents another app's open run id — the row cannot be nested under that id
     let otherRun = ''
     let release!: () => void
     await rt.dispose()
@@ -175,12 +178,14 @@ describe('문지기가 받지 않은 부탁도 한 줄이다 — 부모 없이',
 })
 
 /**
- * 기록 판의 신호 (D-6) — 실측: 앱을 만든 에이전트가 `summarize`에 `readOnlyHint: true`를 달았고, 그 아래 25초짜리 `run_agent`
- * 사슬이 사람이 Refresh를 누를 때까지 기록 판에 보이지 않았다. 읽기 전용 도구의 호출은 "바뀌었다"를 내지 않는다(#190) — 기록 판이
- * 그 신호에 기대고 있었다. 기록의 줄마다 따로 알리되, 화면이 듣는 "바뀌었다"는 여전히 내지 않는다.
+ * The signal behind the runs panel (D-6) — measured: an app-building agent had set
+ * `readOnlyHint: true` on `summarize`, and the 25-second `run_agent` chain underneath it stayed
+ * invisible in the runs panel until the person pressed Refresh. A read-only tool's call does not
+ * emit "changed" (#190) — and the runs panel had been relying on that same signal. Each ledger row
+ * now notifies separately, while the "changed" signal the screen listens for still never fires.
  */
-describe('기록 판의 신호 — 읽기 전용 도구가 세운 사슬도 기록 판에 닿고, 화면은 깨우지 않는다', () => {
-  it('사슬이 도는 동안 그 줄들이 보이는 판마다 알리고(부른 앱의 판까지), 끝나면 또 알린다 — "바뀌었다"는 하나도 없다', async () => {
+describe('the signal behind the runs panel — a chain started by a read-only tool still reaches the runs panel without waking the screen', () => {
+  it('while the chain runs, every panel that can see those rows is notified (including the panel of the called app), and it notifies again when it ends — never a single "changed"', async () => {
     plant('notes', { apps: ['other'] })
     plant('other', { agent: true })
     const runsChanged: string[] = []
@@ -205,7 +210,7 @@ describe('기록 판의 신호 — 읽기 전용 도구가 세운 사슬도 기�
         },
       }),
     )
-    // notes의 읽기 전용 도구 → other의 읽기 전용 도구 → 에이전트
+    // notes' read-only tool → other's read-only tool → the agent
     const pending = rt.call(
       ref('notes'),
       'ask_broker_read',
@@ -213,22 +218,22 @@ describe('기록 판의 신호 — 읽기 전용 도구가 세운 사슬도 기�
       SESSION,
     )
     await until(brokerRows, (l) => l.length === 1 && l[0]!.sessionId === 's-agent')
-    // 에이전트가 도는 동안: 세 줄(notes, other, 에이전트) 모두 notes의 판에 보인다 — 알림이 이미 그 판에 갔다
+    // While the agent runs: all three rows (notes, other, the agent) are visible on notes' panel — a notification already went there
     expect(ledger.rows.map((r) => [r.appId, r.kind, r.status])).toEqual([
       ['notes', 'tool', 'running'],
       ['other', 'tool', 'running'],
       ['other', 'broker', 'running'],
     ])
-    expect(runsChanged.filter((a) => a === 'notes').length).toBeGreaterThanOrEqual(4) // 제 줄, other의 줄, 에이전트 줄이 서고 세션이 이어졌다
+    expect(runsChanged.filter((a) => a === 'notes').length).toBeGreaterThanOrEqual(4) // its own row, other's row, the agent's row appeared, and the session got linked
     expect(runsChanged.filter((a) => a === 'other').length).toBeGreaterThanOrEqual(3)
     const whileRunning = runsChanged.length
 
     release()
     const out = await pending
     expect(out.status).toBe('ok')
-    // 끝난 세 줄도 알린다 — 에이전트 줄은 두 판에, other의 줄은 두 판에, notes의 줄은 제 판에
+    // The three rows that ended also notify — the agent's row on two panels, other's row on two panels, notes' row on its own panel
     expect(runsChanged.length - whileRunning).toBe(5)
-    // 읽기 전용 도구만 불렸다 — 화면을 깨우는 신호는 하나도 없다
+    // Only read-only tools were called — not a single signal that wakes a screen
     expect(changed).toEqual([])
   })
 })

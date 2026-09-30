@@ -2,17 +2,18 @@ import { deflateRawSync } from 'node:zlib'
 import { crc32 } from './zip.js'
 
 /**
- * 시험용 zip 쓰기 — **나쁜 묶음을 만들 수 있어야 한다.** 이름에 `..`, 절대 경로, 링크 항목, 거짓 크기. 시스템의 `zip`은 이런 것을
- * 고쳐서 쓰거나 거부하므로 가져오기의 판정을 시험할 수 없다. (시험 전용이다. 런타임은 이것을 임포트하지 않는다)
+ * A zip writer for tests — **it has to be able to build bad archives.** Names with `..`, absolute
+ * paths, symlink entries, a lying declared size. The system's `zip` fixes or rejects these, so it
+ * cannot be used to test the import path's judgment. (Test-only. The runtime never imports this.)
  */
 export type ZipSpec = {
   name: string
   data?: Buffer | string
-  /** 유닉스 모드(종류 비트 포함) — 주면 "유닉스에서 만든" 항목이 된다. 링크는 0o120777 */
+  /** Unix mode (with the file-type bits) — setting it makes the entry look "made on Unix". A symlink is 0o120777. */
   mode?: number
-  /** 0 저장, 8 deflate (기본) */
+  /** 0 for stored, 8 for deflate (the default) */
   method?: 0 | 8
-  /** 선언할 풀린 크기 — 실제와 다르게 적어 zip 폭탄을 흉내 낸다 */
+  /** The uncompressed size to declare — set it differently from the real size to fake a zip bomb */
   declaredSize?: number
 }
 

@@ -1,30 +1,36 @@
 /**
- * 외부 앱 런타임 테스트의 앱 (M4 A). 진짜 자식 프로세스로 뜨는 진짜 MCP 서버다 —
- * v2 서버 SDK를 워크스페이스에서 그대로 가져온다(스파이크 S-5의 app-node와 같은 모양).
+ * The app used by the external app runtime tests (M4 A). A real MCP server started as a real child
+ * process — it imports the v2 server SDK straight from the workspace (the same shape as spike S-5's
+ * app-node).
  *
  *   node app.mjs --log <jsonl> [--mode <mode>]
  *
- * --log   이 프로세스가 본 것을 한 줄에 하나씩 JSON으로 남긴다. 테스트는 이 파일로
- *         "몇 번 떴나", "어떤 메서드가 왔나", "어떤 환경을 받았나"를 센다 — host의 말이
- *         아니라 앱이 실제로 겪은 것을 본다.
+ * --log   writes what this process saw, one JSON object per line. Tests count "how many times it
+ *         started", "which methods arrived", and "what environment it received" from this file —
+ *         judging by what the app actually experienced, not by anything the host says.
  * --mode  normal | crash-on-start | ignore-eof | grandchild | stubborn-grandchild | hold-fd3 | flood-stderr
  *         | secret-to-stderr | bad-tool-name | mediation | view | attach
  *
- * `attach`는 A-5(세션에 붙이기)를 위한 묶음이다: 주석이 다른 도구들(읽기 전용 `peek`, 바꾸는
- * `poke`), 화면 전용 도구, 문(`--gate <파일>`)이 생길 때까지 붙드는 `hold`, 그리고 기동할 때
- * `--extra-from <파일>`에 적힌 이름들로 더하는 도구(도구 목록이 바뀌는 앱).
+ * `attach` is the bundle for A-5 (attaching to a session): tools with different annotations (the
+ * read-only `peek`, the mutating `poke`), a screen-only tool, `hold`, which holds open until a gate
+ * (a `--gate <file>`) appears, and tools added at startup from the names listed in
+ * `--extra-from <file>` (for an app whose tool list changes).
  *
- * `mediation`은 A-4를 위한 도구 묶음을 연다: 공개 범위가 다른 도구들, 받은 실행 id를 돌려주는
- * 도구, 취소를 기다리는 도구, 실패·죽는 도구, 그리고 fd 3의 중개를 부르는 도구. 중개 클라이언트는
- * 템플릿 도우미의 모양 그대로다(S-5): fd 3 소켓을 unref하고, 받은 실행 id를 되돌려 붙인다.
+ * `mediation` opens the tool bundle for A-4: tools with different audiences, a tool that returns the
+ * run id it received, a tool that waits for cancellation, tools that fail or die, and a tool that
+ * calls the broker on fd 3. The broker client follows the template helper's own shape exactly (S-5):
+ * it unrefs the fd 3 socket, and attaches the received run id back onto its own calls.
  *
- * `view`는 화면(B-3)이 받는 모양을 시험한다: 상태를 서버에 두는 앱(간격 하나), 결과의
- * `structuredContent`·`isError`·`_meta`, CSP를 선언한 `ui://` 문서. 고정 화면(B-2)의 home 후보들도
- * 여기 있다(`home`, `no_screen`, `agent_home`, `bad_home`, `failing_home`).
+ * `view` tests the shape a screen (B-3) receives: an app that keeps state in the server (a single
+ * interval), a result's `structuredContent`, `isError`, and `_meta`, and a `ui://` document that
+ * declares a CSP. The candidates for a fixed screen's (B-2) home also live here (`home`, `no_screen`,
+ * `agent_home`, `bad_home`, `failing_home`).
  *
- * `inline`은 대화 안 화면(B-1)을 위한 묶음이다: 자기 화면(`ui://<앱 id>/main`)을 선언한 에이전트 도구
- * (`show`, 결과의 크기를 고르는 `show_big`, 문이 열릴 때까지 붙드는 `hold_view`), 화면 없는 도구(`plain`),
- * 남의 화면을 대는 도구(`spoof`는 선언에서, `spoof_result`는 결과에서 `ui://other/main`을 가리킨다).
+ * `inline` is the bundle for an in-conversation screen (B-1): an agent-facing tool that declares its
+ * own screen (`ui://<app id>/main`) (`show`, `show_big` which chooses the size of its result, and
+ * `hold_view` which holds open until the gate appears), a screen-less tool (`plain`), and tools that
+ * impersonate someone else's screen (`spoof` in its declaration, `spoof_result` in its result — both
+ * point at `ui://other/main`).
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -58,20 +64,22 @@ if (MODE === 'secret-to-stderr') {
   process.stderr.write(`about to use token=${process.env.FIXTURE_SECRET}\n`)
 }
 if (MODE === 'ignore-eof') {
-  // 표준 입력이 닫혀도 이 타이머가 프로세스를 붙든다 — 종료 규칙의 "유예 뒤 트리 끝내기"를 시험한다
+  // This timer keeps the process alive even after stdin closes — this tests the shutdown rule's "end the tree after the grace period"
   setInterval(() => {}, 1000)
 }
 if (MODE === 'hold-fd3') {
-  // unref하지 않은 fd 3 — S-5에서 Node 앱이 끝나지 않았던 모양 그대로다. host가 fd 3을
-  // 닫으면('end') 우리도 닫고, 그때서야 프로세스가 끝날 수 있다
+  // fd 3 without unref — exactly the shape that kept a Node app from ending in S-5. Only once the
+  // host closes fd 3 ('end') do we close ours, and only then can the process end
   const sock = new net.Socket({ fd: 3, readable: true, writable: true })
   sock.on('end', () => sock.end())
   sock.on('error', () => {})
 }
 if (MODE === 'stubborn-grandchild') {
   /*
-   * SIGTERM을 무시하는 손주 — 앱 자신은 입력이 닫히면 잘 끝나지만, 그룹째 받은 SIGTERM을 이 손주는 버틴다.
-   * 처리기를 단 **뒤에야** 적는다: 실측으로, 뜨는 중인(ps의 R) 손주는 처리기를 달기 전에 SIGTERM을 받고 죽었다.
+   * A grandchild that ignores SIGTERM — the app itself ends cleanly once its input closes, but this
+   * grandchild holds on against the SIGTERM the group receives. Recorded only **after** attaching its
+   * handler: measured, a grandchild still starting (state R in ps) received SIGTERM and died before it
+   * ever attached the handler.
    */
   const kid = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"], {
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -83,33 +91,34 @@ if (MODE === 'stubborn-grandchild') {
   })
 }
 if (MODE === 'ignore-eof' || MODE === 'grandchild') {
-  // 같은 그룹의 손주 — host가 트리째 끝내지 않으면 고아로 남는다
+  // A grandchild in the same group — left orphaned unless the host ends the whole tree
   const kid = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
-  // 손주의 핸들이 이 프로세스를 붙들지 않게 — 'grandchild'는 스스로 잘 끝나되 손주를 남기는 앱이다
+  // So the grandchild's handle never keeps this process alive — 'grandchild' is an app that ends cleanly on its own but leaves a grandchild behind
   kid.unref()
   log({ t: 'grandchild', grandchild: kid.pid })
 }
 
-// 들어온 요청의 메서드를 적는다 — 세대 탐색(`server/discover`)이 왔는지를 테스트가 본다.
-// SDK의 리스너와 같은 틱에 붙이므로 SDK가 놓치는 조각은 없다
+// Records the method of every incoming request — the test checks whether generation probing
+// (`server/discover`) arrived. Attached on the same tick as the SDK's own listener, so nothing the
+// SDK sees is missed here
 process.stdin.on('data', (chunk) => {
   for (const line of chunk.toString('utf8').split('\n')) {
     try {
       const m = JSON.parse(line)
       if (m.method) log({ t: 'method', method: m.method })
     } catch {
-      // 줄이 조각났다 — 세는 데만 쓰는 탭이라 버린다
+      // A fragmented line — this is only a tap used for counting, so it is discarded
     }
   }
 })
 
 const RUN_META = 'centralu/runId'
 let brokerP
-/** fd 3 위의 중개 클라이언트 — 처음 부를 때 붙는다 */
+/** The broker client on fd 3 — connects the first time it is called */
 function broker() {
   brokerP ??= (async () => {
     const sock = new net.Socket({ fd: 3, readable: true, writable: true })
-    // fd 3 혼자서 앱을 붙들면 안 된다 — 표준 입력의 EOF가 "끝내라"다 (S-5)
+    // fd 3 alone must never keep the app alive — stdin's EOF is what means "end" (S-5)
     sock.unref()
     const c = new Client({ name: 'fixture-app', version: '0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } })
     await c.connect(new StdioServerTransport(sock, sock))
@@ -129,7 +138,7 @@ serveStdio(() => {
     server.registerTool('model_only', { description: 'Only for agents', ...vis(['model']) }, async () => say('model_only ran'))
     server.registerTool('app_only', { description: 'Only for views', ...vis(['app']) }, async () => say('app_only ran'))
     server.registerTool('bad_visibility', { description: 'Malformed visibility', _meta: { ui: { visibility: 'app' } } }, async () => say('should never run'))
-    // 입력 스키마가 없는 도구의 핸들러는 v2에서 ctx 하나만 받는다
+    // In v2, a tool with no input schema has a handler that receives only ctx
     server.registerTool('whoami', { description: 'Returns the run id this call carried' }, async (ctx) =>
       say(String(ctx.mcpReq._meta?.[RUN_META] ?? '')),
     )
@@ -148,9 +157,11 @@ serveStdio(() => {
       return say(aborted ? 'aborted' : 'finished')
     })
     /*
-     * 중개를 부르는 도구. `args`를 주면 그대로 싣고(없으면 도구마다 정해 둔 인자), `timeoutMs`를 주면 그 상한에 진행 알림이
-     * 오면 다시 세게 한다(`resetTimeoutOnProgress`) — host가 기다리는 부탁을 살려 두는지 본다. 결과는 글 한 줄과 함께
-     * `structuredContent`에 중개의 답을 그대로 싣는다(isError·text·structured).
+     * A tool that calls the broker. If `args` is given, it is carried as-is (otherwise each tool has
+     * its own fixed arguments); if `timeoutMs` is given, a progress notification resets that cap
+     * (`resetTimeoutOnProgress`) — this checks whether the host keeps a waiting request alive. The
+     * result carries one line of text plus the broker's answer verbatim in `structuredContent`
+     * (isError, text, structured).
      */
     const askBroker = (name, config) => server.registerTool(
       name,
@@ -162,7 +173,7 @@ serveStdio(() => {
           tool: z.string().optional(),
           args: z.record(z.string(), z.unknown()).optional(),
           timeoutMs: z.number().optional(),
-          // 중개가 보낸 진행의 말을 이 호출로 올려 보낸다 — 템플릿의 도우미(`centralu.agent`)가 하는 일
+          // Relays the broker's progress message up onto this call — what the template's helper (`centralu.agent`) does
           relay: z.boolean().optional(),
         }),
       },
@@ -172,8 +183,8 @@ serveStdio(() => {
         const c = await broker()
         const name = tool ?? 'run_agent'
         if (mode === 'run-detached') {
-          // 부탁이 중개에 닿을 만큼만 기다리고, 결과는 기다리지 않고 답한다 — 부탁한 일이
-          // 부탁한 실행보다 오래 살려고 하는 앱
+          // Waits only long enough for the request to reach the broker, then answers without waiting
+          // for the result — an app whose requested work tries to outlive the run that requested it
           void c.callTool({ name, arguments: given ?? { prompt: 'fire and forget' }, _meta: meta }).catch(() => {})
           await new Promise((r) => setTimeout(r, 150))
           return say('detached')
@@ -205,7 +216,7 @@ serveStdio(() => {
       },
     )
     askBroker('ask_broker', { description: 'Calls the host broker on fd 3' })
-    // 같은 일을 하는 읽기 전용 도구 — 읽기만 하는 도구도 에이전트를 부탁해 사슬을 세울 수 있다 (기록 판의 신호, M4 D-6)
+    // A read-only tool that does the same thing — even a read-only tool can request an agent and start a chain (the runs panel's signal, M4 D-6)
     askBroker('ask_broker_read', { description: 'Calls the host broker on fd 3, and changes nothing itself', annotations: { readOnlyHint: true } })
     server.registerResource('view', 'ui://fixture/view', { mimeType: 'text/html;profile=mcp-app' }, async (uri) => ({
       contents: [{ uri: uri.href, mimeType: 'text/html;profile=mcp-app', text: '<p>fixture view</p>' }],
@@ -231,8 +242,9 @@ serveStdio(() => {
       },
     )
     server.registerTool('agent_only', { description: 'Only for agents', _meta: { ui: { visibility: ['model'] } } }, async () => say('agent_only ran'))
-    // 고정 화면(B-2)의 home 후보들: 화면을 선언한 도구, 화면이 없는 도구, 에이전트에게만 열린 화면 도구,
-    // ui://가 아닌 곳을 가리키는 도구. home은 부를 때마다 적는다 — host가 정말 불렀는지를 시험이 센다
+    // Candidates for the fixed screen's (B-2) home: a tool that declares a screen, one with no screen,
+    // a screen tool open only to agents, and one that points somewhere that is not ui://. `home`
+    // records every call — the test checks whether the host really called it
     server.registerTool('home', { description: 'Opens the slider', _meta: { ui: { resourceUri: 'ui://fixture/main' } } }, async (ctx) => {
       log({ t: 'home', runId: ctx.mcpReq._meta?.[RUN_META] ?? null })
       return state()

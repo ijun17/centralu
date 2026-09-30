@@ -4,21 +4,29 @@ import type { AppRef } from './ref.js'
 import { canonicalJson } from './runs.js'
 
 /**
- * 앱이 host에게서 읽을 수 있는 데이터 — **닫힌 목록** (M4 D-3, #97 셋째 항목의 "능력 모델"을 외부 앱 쪽에서 푼다).
+ * The data an app can read from the host — a **closed list** (M4 D-3, this is where the "capability
+ * model" from #97's third item gets worked out on the external-app side).
  *
- * 앱은 이 목록에서 쓸 것을 매니페스트의 `uses.host`에 적는다. 적지 않은 것은 주지 않는다(기본은 거절). 목록 밖의 이름은
- * 아예 없는 능력이다 — "host 데이터를 읽는 도구" 하나를 열어 두고 무엇을 줄지를 요청의 글자로 정하면, 무엇이 새는지를
- * 코드가 아니라 앱의 요청이 정하게 된다. 그래서 이름마다 무엇을 얼마나 주는지 여기서 정하고, 이름을 늘리는 것은 이 파일을
- * 고치는 일이다.
+ * An app lists what it wants to use from this list under `uses.host` in its manifest. Anything not
+ * listed is refused (default is denial). A name outside the list is not a capability at all —
+ * opening a single "read host data" tool and letting the request's text decide what it gets back
+ * would mean the app's request, not the code, decides what leaks. So this file decides here, by
+ * name, what and how much each capability gives, and adding a name means editing this file.
  *
- * 모두 **읽기 전용**이다. host를 바꾸는 능력(세션에 말 걸기, 세션 만들기)은 이 목록에 넣지 않는다 — 그런 일은 사람의
- * 에이전트에게 부탁하는 길(`run_agent`)이 있고, 그 길은 사람이 보는 세션에서 승인 규칙을 따른다.
+ * All of these are **read-only**. A capability that changes the host (sending a message into a
+ * session, creating a session) does not belong on this list — that kind of thing has its own path
+ * of asking the person's agent (`run_agent`), and that path follows the approval rules in the
+ * session the person watches.
  *
- *   sessions.list  세션 요약 — 이름·상태·도구·종류·시각. 대화(미리보기 포함)는 싣지 않는다. 이름은 사이드바에 보이는 그
- *                  이름이다: 사람이 짓지 않은 이름은 첫 메시지의 앞 40자라 그 조각이 이름으로 나간다 — 목록에 이름이
- *                  없으면 앱이 쓸 수 없고, 더 나가지는 않는다. 프로젝트 앱은 그 프로젝트의 세션, 사용자 폴더 앱은
- *                  모든 세션(사용자 폴더 앱은 오케스트레이터의 것이다 — 결정 4)
- *   git.status     프로젝트의 브랜치와 바뀐 파일 목록. 프로젝트 앱만 — 사용자 폴더 앱에는 고를 프로젝트가 없다
+ *   sessions.list  a summary of sessions — name, state, tool, kind, timestamp. Does not carry the
+ *                  conversation (not even a preview). The name is the same name shown in the
+ *                  sidebar: a session the person never named gets the first 40 characters of the
+ *                  first message as its name, so that fragment is what leaves — if the name is not
+ *                  in the list, the app cannot use it, and nothing further leaks. A project app gets
+ *                  that project's sessions; a user-folder app gets all sessions (a user-folder app
+ *                  belongs to the orchestrator — decision 4)
+ *   git.status     the project's branch and its list of changed files. Project apps only — a
+ *                  user-folder app has no project to pick
  */
 export const HOST_CAPABILITIES = ['sessions.list', 'git.status'] as const
 export const HostCapability = z.enum(HOST_CAPABILITIES)
@@ -28,7 +36,7 @@ export function isHostCapability(name: string): name is HostCapability {
   return HostCapability.safeParse(name).success
 }
 
-/** 사람이 읽을 말 — 능력 승인(D-4)의 질문과 거절의 이유가 쓴다. 범위에 따라 말이 다르다 */
+/** The wording for a person to read — used by capability approval's (D-4) question and by refusal reasons. The wording differs by scope. */
 export function hostCapabilityText(name: HostCapability, scope: 'project' | 'user'): string {
   switch (name) {
     case 'sessions.list':
@@ -41,19 +49,21 @@ export function hostCapabilityText(name: HostCapability, scope: 'project' | 'use
 }
 
 /**
- * 앱이 쓰려는 능력 하나 (M4 D-4) — 사람에게 묻고 답을 기억하는 단위.
+ * One capability an app wants to use (M4 D-4) — the unit that is asked about and whose answer is
+ * remembered.
  *
- *   agent  에이전트를 부탁한다 — 도구마다 따로(Claude를 허락했다고 Codex까지 허락한 것이 아니다)
- *   app    다른 앱을 부른다 — 부를 앱마다 따로. 앱은 (범위, id)라 범위까지 적는다: 같은 id의 앱이 프로젝트에 새로 생기면
- *          부르는 대상이 바뀐 것이고(resolveCallTarget), 사람이 허락한 것은 그 앱이 아니다
- *   host   host 데이터를 읽는다 — 이름마다 따로
+ *   agent  asks for an agent — per tool (allowing Claude does not also allow Codex)
+ *   app    calls another app — per app called. An app is (scope, id), so the scope is included too:
+ *          if an app with the same id is newly created in a project, the call target has changed
+ *          (resolveCallTarget), and what the person allowed was not that app
+ *   host   reads host data — per name
  */
 export type Capability =
   | { kind: 'agent'; tool: string }
   | { kind: 'app'; target: AppRef }
   | { kind: 'host'; name: HostCapability }
 
-/** 기억의 열쇠 — 한 앱 안에서 능력 하나를 가리킨다 */
+/** The memory key — points at one capability within one app */
 export function capabilityKey(c: Capability): string {
   switch (c.kind) {
     case 'agent':
@@ -66,28 +76,31 @@ export function capabilityKey(c: Capability): string {
 }
 
 /**
- * 매니페스트의 선언(`uses`)의 지문 — 답은 이 지문과 함께 기억되고, 지문이 달라지면 다시 묻는다(플랜 D-4). 선언 전체를
- * 본다: 어느 칸이 바뀌었든 앱을 만든 쪽이 앱이 무엇을 쓰는지 다시 말한 것이고, 사람도 다시 볼 까닭이 있다. 키 순서가
- * 달라도 같은 선언은 같은 지문이다(`canonicalJson`).
+ * The fingerprint of the manifest's declaration (`uses`) — an answer is remembered together with
+ * this fingerprint, and if the fingerprint changes, it is asked again (plan D-4). This looks at the
+ * whole declaration: whichever field changed, the app's builder has restated what the app uses, and
+ * the person has a reason to look again too. The same declaration produces the same fingerprint
+ * regardless of key order (`canonicalJson`).
  */
 export function usesStamp(uses: unknown): string {
   return createHash('sha256').update(canonicalJson(uses ?? {})).digest('hex')
 }
 
-/** 기억된 답 하나 */
+/** One remembered answer */
 export type CapabilityDecision = {
   capability: string
-  /** 물을 때 사람에게 보인 말 — 목록에서 그대로 다시 보인다 */
+  /** The wording shown to the person when asked — shown again verbatim in the list */
   text: string
   decision: 'allow' | 'deny'
-  /** 답할 때의 선언 지문 (`usesStamp`) */
+  /** The declaration fingerprint at the time of the answer (`usesStamp`) */
   stamp: string
   decidedAt: number
 }
 
 /**
- * 답을 둘 자리 — 런타임은 모양만 선언하고 host가 저장소로 채운다(`RunLedger`와 같은 뒤집기, main.ts). 없으면 메모리에
- * 둔다(`memoryCapabilityBook`) — host가 떠 있는 동안은 한 번 묻는다는 약속이 선다.
+ * Where answers are stored — the runtime only declares the shape, and the host fills it in with the
+ * store (the same inversion as `RunLedger`, main.ts). Without one, it falls back to memory
+ * (`memoryCapabilityBook`) — this keeps the promise of asking once per host lifetime.
  */
 export type CapabilityBook = {
   get(app: AppRef, capability: string): CapabilityDecision | null

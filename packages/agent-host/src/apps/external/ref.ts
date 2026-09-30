@@ -1,7 +1,9 @@
 /**
- * 앱 하나를 가리키는 이름 — (범위, id). 앱 id는 범위 안에서만 하나다: 두 프로젝트의 `notes`는 다른 앱이다.
- * `projectId`가 null이면 사용자 폴더의 앱이다.
+ * A name that points at one app — (scope, id). An app id is unique only within its scope: `notes`
+ * in two different projects is two different apps. When `projectId` is null, the app belongs to
+ * the user's folder rather than a project.
  *
- * 런타임의 문(`runtime.ts`)과 중개 창구(`desk.ts`)가 함께 쓴다 — 한쪽이 다른 쪽을 임포트하면 고리가 된다.
+ * Shared by the runtime's door (`runtime.ts`) and the broker desk (`desk.ts`) — if either one
+ * imported the other, it would form a cycle.
  */
 export type AppRef = { projectId: string | null; appId: string }

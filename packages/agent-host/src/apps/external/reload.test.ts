@@ -7,11 +7,13 @@ import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
 
 /**
- * 반영 (M4 C-4) — 앱 폴더가 바뀌면 **만드는 세션의 턴이 끝날 때** 한 번 다시 띄운다. 진행 중인 호출은 끊지 않는다.
- * 만드는 세션이 없거나 쉬고 있으면 조용해지기를 기다린다.
+ * Reflecting changes (M4 C-4) — when the app folder changes, this restarts once, **when the building
+ * session's turn ends.** A call in progress is never cut off. If there is no building session, or it
+ * is idle, this waits for things to go quiet.
  *
- * fs 이벤트를 기다리지 않는다(#153): 감시가 부를 훑기를 테스트가 직접 부른다(`refresh`). 판정은 앱 프로세스가 스스로
- * 말한 pid와, 런타임이 아는 도구 목록으로 한다.
+ * This never waits on fs events (#153): the test calls the scan watching would trigger directly
+ * (`refresh`). Judged by the pid the app process itself reports, and by the tool list the runtime
+ * knows about.
  */
 
 let root = ''
@@ -53,7 +55,7 @@ function make(opts: { builder?: boolean; timing?: Partial<RuntimeTiming> } = {})
 const gate = () => join(root, 'gate')
 const serverFile = () => join(projRoot, '.centralu', 'apps', ID, 'server.mjs')
 
-/** 템플릿 앱에 시험용 도구 둘(pid, hold)을 더해 펼친다 */
+/** Expands the template app, adding two test tools (pid, hold) */
 function plant(): void {
   const dir = join(projRoot, '.centralu', 'apps', ID)
   mkdirSync(dirname(dir), { recursive: true })
@@ -67,7 +69,7 @@ function plant(): void {
   })`)
 }
 
-/** 만드는 에이전트가 하는 일 — server.mjs에 도구를 더한다 */
+/** What a building agent does — adds a tool to server.mjs */
 function addTools(code: string): void {
   const f = serverFile()
   writeFileSync(f, readFileSync(f, 'utf8').replace('  return server\n})', `${code}\n  return server\n})`))
@@ -84,21 +86,21 @@ const status = () => rt.list().find((a) => a.appId === ID)?.status
 const reloads = () => (readFileSync(join(dataRoot, 'app-logs', 'p1', `${ID}.log`), 'utf8').match(/reloading: /g) ?? []).length
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-describe('만드는 세션의 턴이 끝날 때 다시 띄운다', () => {
-  it('턴 안에서는 폴더가 바뀌어도 그대로다 — 턴이 끝나면 한 번, 새 코드로 뜬다', async () => {
+describe('restarts when the building session\'s turn ends', () => {
+  it('stays the same mid-turn even if the folder changes — restarts once, with the new code, once the turn ends', async () => {
     plant()
     make()
     await rt.tools(ref)
     const before = await pid()
     busy = true
     addTool('added')
-    rt.refresh() // 감시가 부르는 훑기
-    await sleep(700) // 조용해지기(400ms)를 넘겨도
+    rt.refresh() // the scan watching would trigger
+    await sleep(700) // even past going quiet (400ms)
     expect(await pid()).toBe(before)
     expect(known()).not.toContain('added')
 
     busy = false
-    // 턴 끝과 상태 변화가 잇달아 와도 한 번이다
+    // turn end and a state change arriving back to back still produce one restart
     rt.builderTurnEnded(ref)
     rt.builderTurnEnded(ref)
     rt.builderTurnEnded(ref)
@@ -109,7 +111,7 @@ describe('만드는 세션의 턴이 끝날 때 다시 띄운다', () => {
     expect(status()).toBe('running')
   })
 
-  it('진행 중인 호출은 끊지 않는다 — 끝나기를 기다렸다가 다시 띄운다', async () => {
+  it('never cuts off a call in progress — waits for it to finish, then restarts', async () => {
     plant()
     make()
     await rt.tools(ref)
@@ -119,7 +121,7 @@ describe('만드는 세션의 턴이 끝날 때 다시 띄운다', () => {
     addTool('added')
     rt.builderTurnEnded(ref)
     await sleep(500)
-    expect(known()).not.toContain('added') // 아직 옛 프로세스다 — 호출이 도는 중
+    expect(known()).not.toContain('added') // still the old process — a call is in progress
     writeFileSync(gate(), '')
     const out = await held
     expect({ status: out.status, error: out.error }).toEqual({ status: 'ok', error: null })
@@ -128,23 +130,23 @@ describe('만드는 세션의 턴이 끝날 때 다시 띄운다', () => {
     expect(await pid()).not.toBe(before)
   })
 
-  it('폴더가 그대로면 턴이 끝나도 다시 띄우지 않는다', async () => {
+  it('does not restart at turn end if the folder is unchanged', async () => {
     plant()
     make()
     await rt.tools(ref)
     const before = await pid()
-    // 같은 내용으로 다시 쓴 것은 바뀐 것이 아니다 (편집기의 저장, 같은 내용의 체크아웃)
+    // Writing the same content again is not a change (an editor's save, or checking out the same content)
     writeFileSync(serverFile(), readFileSync(serverFile(), 'utf8'))
     rt.builderTurnEnded(ref)
     await sleep(400)
     expect(await pid()).toBe(before)
   })
 
-  it('쉬다 내려간 앱도 턴 끝에 새 코드로 띄워 도구 목록을 간다', async () => {
+  it('starts even an app that went idle and stopped, with the new code, at turn end, to move the tool list forward', async () => {
     plant()
     make()
     await rt.tools(ref)
-    await rt.restart(ref) // 내린다 (띄우지는 않는다)
+    await rt.restart(ref) // stops it (never starts it)
     expect(status()).toBe('stopped')
     addTool('added')
     rt.builderTurnEnded(ref)
@@ -152,7 +154,7 @@ describe('만드는 세션의 턴이 끝날 때 다시 띄운다', () => {
     expect(status()).toBe('running')
   })
 
-  it('고친 코드가 못 뜨면 이유가 남고, 다음 고침의 턴 끝에 다시 해 본다', async () => {
+  it('when the edited code fails to start, the reason is recorded, and it is tried again at the next fix\'s turn end', async () => {
     plant()
     make()
     await rt.tools(ref)
@@ -168,8 +170,8 @@ describe('만드는 세션의 턴이 끝날 때 다시 띄운다', () => {
   })
 })
 
-describe('만드는 세션이 없으면 조용해진 뒤 다시 띄운다', () => {
-  it('마지막 변화 뒤 조용해질 때까지 기다린다 — 변화가 이어지면 다시 센다', async () => {
+describe('restarts after going quiet when there is no building session', () => {
+  it('waits for things to go quiet after the last change — a continuing change resets the count', async () => {
     plant()
     make({ builder: false })
     await rt.tools(ref)
@@ -178,15 +180,15 @@ describe('만드는 세션이 없으면 조용해진 뒤 다시 띄운다', () =
     rt.refresh()
     await sleep(250)
     addTool('two')
-    rt.refresh() // 다시 센다 — 400ms는 여기서부터다
+    rt.refresh() // resets the count — the 400ms starts from here
     await sleep(250)
-    expect(await pid()).toBe(before) // 첫 변화에서 500ms가 지났지만 마지막 변화에서는 250ms
+    expect(await pid()).toBe(before) // 500ms passed since the first change, but only 250ms since the last
     await until(known, (names) => names.includes('one') && names.includes('two'))
     expect(await pid()).not.toBe(before)
     expect(reloads()).toBe(1)
   })
 
-  it('만드는 세션이 쉬고 있으면(편집기에서 고쳤다) 같은 길이다 — 턴 안이면 턴 끝을 기다린다', async () => {
+  it('follows the same path when the building session is idle (edited from an editor) — waits for turn end if mid-turn', async () => {
     plant()
     make()
     await rt.tools(ref)
@@ -197,21 +199,21 @@ describe('만드는 세션이 없으면 조용해진 뒤 다시 띄운다', () =
     expect(await pid()).not.toBe(before)
   })
 
-  it('떠 있지 않은 앱은 편집 때문에 깨우지 않는다', async () => {
+  it('never wakes a non-running app because of an edit', async () => {
     plant()
     make({ builder: false })
     await rt.tools(ref)
     await rt.restart(ref)
     addTool('added')
     rt.refresh()
-    // 조용해지기(400ms)의 몇 배 — 감시도 이 편집을 보고 시계를 다시 걸 수 있다(플러시 300ms)
+    // Several multiples of going quiet (400ms) — watching could also see this edit and reset its own timer (300ms flush)
     await sleep(1_500)
     expect(status()).toBe('stopped')
   })
 })
 
-describe('매니페스트가 바뀌어도 진행 중인 호출은 끝까지 간다', () => {
-  it('새 호출은 새 매니페스트의 앱이 받고, 옛 프로세스는 호출을 마친 뒤 내려간다', async () => {
+describe('a call in progress runs to completion even if the manifest changes', () => {
+  it('a new call is received by the app under the new manifest, and the old process stops after finishing its call', async () => {
     plant()
     make()
     await rt.tools(ref)
@@ -233,15 +235,17 @@ describe('매니페스트가 바뀌어도 진행 중인 호출은 끝까지 간�
 })
 
 /**
- * 턴 안의 매니페스트 바뀜 (C-4) — 실측: 만드는 세션의 턴(10:09:55–10:11:09) 가운데 10:10:45에 매니페스트가 바뀌자 앱이 "stopping:
- * manifest changed"로 내려갔고, 화면이 비었다가 반쯤 고친 코드로 다시 열렸다. 매니페스트도 폴더의 다른 파일처럼 턴 끝에 한 번이다.
+ * A manifest change mid-turn (C-4) — measured: within a building session's turn (10:09:55-10:11:09),
+ * the manifest changed at 10:10:45 and the app went down with "stopping: manifest changed", and the
+ * screen went blank and reopened with the half-edited code. The manifest is treated the same as any
+ * other file in the folder — once, at turn end.
  */
-describe('턴 안에서 매니페스트가 바뀌어도 턴 끝에 한 번이다', () => {
+describe('a manifest change mid-turn still happens once, at turn end', () => {
   const log = () => readFileSync(join(dataRoot, 'app-logs', 'p1', `${ID}.log`), 'utf8')
   const count = (re: RegExp) => (log().match(re) ?? []).length
   const description = () => rt.list().find((a) => a.appId === ID)?.description
 
-  it('턴 안에서는 옛 매니페스트의 앱이 그대로 돈다 — 턴이 끝나면 한 번 내리고, 새 매니페스트로 한 번 띄운다', async () => {
+  it('the old manifest\'s app keeps running mid-turn — at turn end, it stops once, then starts once under the new manifest', async () => {
     plant()
     make()
     await rt.tools(ref)
@@ -249,18 +253,18 @@ describe('턴 안에서 매니페스트가 바뀌어도 턴 끝에 한 번이다
     busy = true
     const mf = join(projRoot, '.centralu', 'apps', ID, 'centralu.app.json')
     writeFileSync(mf, readFileSync(mf, 'utf8').replace('"description": "counter"', '"description": "counter, renamed"'))
-    rt.refresh() // 감시가 부르는 훑기
-    await sleep(700) // 조용해지기(400ms)를 넘겨도
+    rt.refresh() // the scan watching would trigger
+    await sleep(700) // even past going quiet (400ms)
     expect(await pid()).toBe(before)
     expect(description()).toBe('counter')
     expect(count(/stopping: manifest changed/g)).toBe(0)
 
     busy = false
-    // 턴 끝과 상태 변화가 잇달아 와도 한 번이다
+    // turn end and a state change arriving back to back still produce one restart
     rt.builderTurnEnded(ref)
     rt.builderTurnEnded(ref)
     await until(description, (d) => d === 'counter, renamed')
-    // 부르지 않아도 뜬다 — 만드는 세션의 도구 목록을 새 매니페스트의 앱으로 간다
+    // starts without being called — this moves the building session's tool list to the app under the new manifest
     await until(status, (s) => s === 'running')
     expect(await pid()).not.toBe(before)
     await sleep(300)
@@ -270,14 +274,16 @@ describe('턴 안에서 매니페스트가 바뀌어도 턴 끝에 한 번이다
 })
 
 /**
- * 목록의 `codeStamp` (C-4, 화면 쪽) — 열린 화면이 "내 HTML은 옛 코드다"를 아는 열쇠. 떠 오른 프로세스의 코드가 바뀔 때만
- * 바뀐다: 같은 코드로 다시 뜬 것(죽었다 살아남, 다시 시작)과 못 뜬 새 코드는 바꾸지 않는다 — 그때 화면을 다시 열면
- * 달라질 것이 없거나 실패만 보인다. 화면이 되풀이해 다시 열리지 않게 하는 것이 이 구별이다.
+ * The list's `codeStamp` (C-4, the screen side) — the key an open screen uses to know "my HTML is old
+ * code". Changes only when a process that actually started has different code: starting again with
+ * the same code (died and came back, restarted) and new code that fails to start both leave it
+ * unchanged — reopening the screen then would show either nothing different or only a failure. This
+ * distinction is what keeps a screen from reopening repeatedly.
  */
-describe('목록의 codeStamp — 떠 있는 코드의 지문', () => {
+describe('the list\'s codeStamp — the fingerprint of the code currently running', () => {
   const stamp = () => rt.list().find((a) => a.appId === ID)?.codeStamp
 
-  it('뜨기 전에는 없고, 같은 코드로 다시 떠도 그대로이며, 새 코드로 다시 뜨면(턴 끝, check) 바뀐다', async () => {
+  it('is absent before starting, unchanged when it starts again with the same code, and changes when it starts again with new code (turn end, check)', async () => {
     plant()
     make()
     expect(stamp()).toBeUndefined()
@@ -285,18 +291,18 @@ describe('목록의 codeStamp — 떠 있는 코드의 지문', () => {
     const first = stamp()
     expect(first).toMatch(/^[0-9a-f]{16}$/)
 
-    // 죽었다가 다음 부름에 살아난다 — 같은 코드다
+    // Died and came back on the next call — the same code
     const before = await pid()
     process.kill(before, 'SIGKILL')
     await until(status, (s) => s === 'crashed')
     expect(await pid()).not.toBe(before)
     expect(stamp()).toBe(first)
-    // 사람이 다시 시작했다 — 역시 같은 코드다
+    // A person restarted it — still the same code
     await rt.restart(ref)
     await pid()
     expect(stamp()).toBe(first)
 
-    // 만드는 세션의 턴 끝에 새 코드로 다시 뜬다
+    // Starts again with new code at the building session's turn end
     busy = true
     addTool('added')
     rt.refresh()
@@ -307,14 +313,14 @@ describe('목록의 codeStamp — 떠 있는 코드의 지문', () => {
     expect(second).toMatch(/^[0-9a-f]{16}$/)
     expect(second).not.toBe(first)
 
-    // 턴 안의 check는 지금 파일로 띄운다 — 턴 끝을 기다리지 않고 바뀐다(턴 끝은 그때 할 일이 없다)
+    // A check mid-turn starts with the current files — it changes without waiting for turn end (turn end has nothing left to do at that point)
     busy = true
     addTool('checked')
     await rt.check(ref)
     expect(stamp()).not.toBe(second)
   })
 
-  it('못 뜬 새 코드는 지문을 바꾸지 않는다 — 떠 있던 코드가 아니다', async () => {
+  it('new code that fails to start never changes the fingerprint — it was never the code actually running', async () => {
     plant()
     make()
     await rt.tools(ref)

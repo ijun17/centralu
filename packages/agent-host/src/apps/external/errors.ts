@@ -1,13 +1,17 @@
 /**
- * 앱의 오류 묶음 (M4 C-6) — 앱이 뜨지 못했거나, 죽었거나, 도구가 실패했을 때 그 순간을 한 덩어리로 든다.
+ * An app's error bundle (M4 C-6) — holds the moment an app failed to start, crashed, or a tool
+ * failed, as one unit.
  *
- * 쓰는 쪽은 사람이다: 앱 화면이 "만드는 세션에 보내기"를 내밀고, 사람이 누르면 이 묶음이 만드는 세션에 간다.
- * **자동으로 보내지 않는다** — 에이전트가 사람 모르게 고치고 깨뜨리기를 되풀이하는 것을 막는다(플랜 C-6). 그래서
- * host는 모으고 물으면 답하기만 한다.
+ * The person is the one who sends it: the app's screen offers "send to the building session", and
+ * pressing it sends this bundle to the building session. **It is never sent automatically** — this
+ * stops an agent from fixing and breaking things over and over without the person knowing (plan
+ * C-6). So the host only collects it and answers when asked.
  *
- * 들어가는 것: 무엇이(종류·이유), 언제, 어느 도구가 어떤 인자로(요약 — 실행 기록과 같이 비밀은 가린다), 그때 앱이
- * 표준에러에 찍은 마지막 줄들. 스파이크 S-6에서 만드는 에이전트를 가장 오래 헤매게 한 것이 "서버는 떠 있는데 이유가
- * 어디에도 없다"였다 — 표준에러가 이 묶음의 몸통이다.
+ * What goes in it: what happened (kind, reason), when, which tool with what arguments (a summary —
+ * secrets are masked the same way the run ledger masks them), and the last lines the app printed to
+ * stderr at that moment. In spike S-6, the thing that cost the building agent the most time
+ * chasing was "the server is still up but there is no reason anywhere" — stderr is this bundle's
+ * body.
  */
 
 export type AppErrorKind = 'start' | 'crash' | 'tool'
@@ -15,26 +19,28 @@ export type AppErrorKind = 'start' | 'crash' | 'tool'
 export type AppErrorBundle = {
   kind: AppErrorKind
   at: number
-  /** 한 줄 이유 — 뜨지 못한 까닭, 끝난 모양, 도구가 돌려준 실패 */
+  /** A one-line reason — why it failed to start, the shape it ended in, or the failure a tool returned */
   message: string
-  /** 앱의 표준에러 마지막 줄들 (비밀은 가린 뒤) */
+  /** The last lines of the app's stderr (after secrets are masked) */
   stderr: string[]
-  /** 실패한 도구 (도구 오류만) */
+  /** The tool that failed (tool errors only) */
   tool: string | null
-  /** 그 호출의 인자 요약 — 비밀은 이름으로 가린다 (도구 오류만) */
+  /** A summary of that call's arguments — secrets are masked by name (tool errors only) */
   args: string | null
   runId: string | null
   /**
-   * 이 실패가 사람의 결정에서 왔다 (D-4) — 이 호출(또는 그 아래 사슬)의 부탁을 사람이 거절했다. 앱의 버그가 아니므로 화면은 오류로
-   * 보이지 않고 그 결정으로 말한다(되돌리는 자리는 그 앱의 기록 판: Permissions → Forget). 만드는 세션에도 보내지 않는다 — 보내면
-   * 만드는 에이전트가 멀쩡한 코드를 "고친다". 도구 실패의 묶음에만 선다.
+   * This failure came from a person's decision (D-4) — the person denied this call's request (or a
+   * request further up its chain). Since it is not a bug in the app, the screen does not show it as
+   * an error and instead states the decision (the place to reverse it is that app's record panel:
+   * Permissions → Forget). It is also not sent to the building session — sending it would make the
+   * building agent "fix" code that is working as intended. It appears only on a tool-failure bundle.
    */
   denied: { appId: string; projectId: string | null; name: string; capability: string; text: string } | null
-  /** 만드는 세션에 그대로 보낼 수 있는 글 */
+  /** The text that can be sent to the building session as-is */
   text: string
 }
 
-/** 앱마다 들고 있는 묶음의 수 — 최근 것만. host가 다시 뜨면 비워진다(오래 남는 것은 실행 기록의 몫이다) */
+/** How many bundles are kept per app — the most recent only. Cleared when the host restarts (keeping them longer is the run ledger's job). */
 export const ERRORS_KEPT = 10
 
 const KIND_LABEL: Record<AppErrorKind, string> = {

@@ -10,8 +10,10 @@ import { VERSIONS_KEPT, VERSIONS_REL } from './versions.js'
 import { until } from './test-helpers.js'
 
 /**
- * git 밖의 앱의 판 (M4 E-1) — 진짜 앱 프로세스(env-app.mjs)로 본다. 이 앱의 `version` 도구는 **뜰 때** 읽은 version.txt를 돌려준다:
- * 판이 떠진 것만이 아니라, 되돌린 뒤 앱이 정말 그 코드로 다시 떴는지를 앱의 입으로 듣는다.
+ * Versioning for apps outside git (M4 E-1) — exercised with a real app process (env-app.mjs). This
+ * app's `version` tool returns the version.txt it read **at startup**: this lets the test hear from
+ * the app's own mouth not only that a version was captured, but that after a restore the app really
+ * did start again with that code.
  */
 
 const APP = fileURLToPath(new URL('./test-fixtures/env-app.mjs', import.meta.url))
@@ -37,12 +39,12 @@ const write = (rel: string, text: string) => {
   mkdirSync(join(p, '..'), { recursive: true })
   writeFileSync(p, text)
 }
-/** 앱이 뜰 때 읽은 판 — 떠 있지 않으면 지금 띄워서 묻는다 */
+/** The version the app read at startup — if it is not running, starts it now and asks */
 const running = async () => {
   const out = await rt.call(ref, 'version', {}, { kind: 'view' })
   return out.result?.content.map((c) => (c.type === 'text' ? c.text : '')).join('') ?? `(${out.status}: ${out.error})`
 }
-/** 지금 파일로 다시 띄운다 — 사람의 Restart와 같다(내리고, 다음 부름이 띄운다) */
+/** Starts it again with the current files — the same as the person's Restart (stops it, and the next call starts it) */
 const startAgain = async () => {
   await rt.restart(ref)
   return running()
@@ -72,19 +74,19 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('판은 코드가 바뀌어 뜰 때 선다', () => {
-  it('처음 뜰 때 한 판, 같은 코드로 다시 떠도 그대로, 고친 코드로 뜨면 한 판 더 — 최근 5벌만 남는다', async () => {
+describe('a version is captured when the code changes and starts', () => {
+  it('one version at first start, unchanged after starting again with the same code, one more version for changed code — only the most recent 5 are kept', async () => {
     make()
     expect(rt.snapshots(ref)).toEqual([])
     expect(await running()).toBe('v1')
     expect(rt.snapshots(ref)).toEqual([expect.objectContaining({ reason: 'started', current: true, files: 2 })])
 
-    // 같은 코드 — 늘지 않는다
+    // Same code — does not grow
     expect(await startAgain()).toBe('v1')
     expect(rt.snapshots(ref)).toHaveLength(1)
 
     write('version.txt', 'v2')
-    // 아직 뜨지 않았다 — 판은 뜨는 코드를 뜬다
+    // Not started yet — a version captures the code that starts
     expect(rt.snapshots(ref)).toHaveLength(1)
     expect(rt.snapshots(ref)[0]!.current).toBe(false)
     expect(await startAgain()).toBe('v2')
@@ -99,7 +101,7 @@ describe('판은 코드가 바뀌어 뜰 때 선다', () => {
     const kept = rt.snapshots(ref)
     expect(kept).toHaveLength(VERSIONS_KEPT)
     expect(readdirSync(join(dataRoot, VERSIONS_REL, '_user', 'ver')).filter((n) => !n.startsWith('.'))).toHaveLength(VERSIONS_KEPT)
-    // 가장 오래된 둘(v1·v2)이 걷혔다 — 남은 판을 차례로 되돌려 보면 v7부터 v3까지다
+    // The two oldest (v1, v2) were pruned — restoring each remaining version in turn goes from v7 down to v3
     const versions: string[] = []
     for (const s of kept) {
       rt.restoreVersion(ref, s.id)
@@ -108,7 +110,7 @@ describe('판은 코드가 바뀌어 뜰 때 선다', () => {
     expect(versions).toEqual(['v7', 'v6', 'v5', 'v4', 'v3'])
   })
 
-  it('판은 앱 폴더 밖에 있고, 점으로 시작하는 이름과 node_modules는 뜨지 않는다', async () => {
+  it('versions live outside the app folder, and dot-names and node_modules are never captured', async () => {
     write('.env', 'SECRET=1')
     write('node_modules/dep/index.js', '// dep')
     write('ui/index.html', '<p>v1</p>')
@@ -121,8 +123,8 @@ describe('판은 코드가 바뀌어 뜰 때 선다', () => {
   })
 })
 
-describe('되돌리기', () => {
-  it('판의 파일이 되쓰이고(판에 없던 코드 파일은 지워진다), 떠 있던 앱은 그 코드로 다시 뜨며, 되돌리기 직전의 코드도 판으로 남는다', async () => {
+describe('restore', () => {
+  it('writes the version\'s files back (a code file not in the version is deleted), a running app starts again with that code, and the code right before the restore is also kept as a version', async () => {
     make()
     expect(await running()).toBe('v1')
     const v1 = rt.snapshots(ref)[0]!
@@ -131,29 +133,29 @@ describe('되돌리기', () => {
     write('.keep', 'not code')
     write('node_modules/dep/index.js', '// installed')
     expect(await startAgain()).toBe('v2')
-    // v3은 고쳤지만 아직 뜨지 않았다 — 되돌리기가 이것을 잃으면 안 된다
+    // v3 was edited but has not started yet — the restore must not lose this
     write('version.txt', 'v3')
 
     const back = rt.restoreVersion(ref, v1.id)
     expect(back.appId).toBe('ver')
     expect(readFileSync(join(appDir(), 'version.txt'), 'utf8')).toBe('v1')
     expect(existsSync(join(appDir(), 'extra.mjs'))).toBe(false)
-    // 판이 다루지 않는 것은 그대로다
+    // Anything the version does not cover is untouched
     expect(readFileSync(join(appDir(), '.keep'), 'utf8')).toBe('not code')
     expect(existsSync(join(appDir(), 'node_modules', 'dep', 'index.js'))).toBe(true)
-    // 떠 있던 앱은 스스로 그 코드로 다시 뜬다 — 사람이 Restart를 누르지 않아도
+    // A running app starts again with that code on its own — no need for the person to press Restart
     await until(() => info()?.status, (s) => s === 'running')
     expect(await running()).toBe('v1')
 
     const after = rt.snapshots(ref)
     expect(after.find((s) => s.reason === 'before restore')).toBeDefined()
     expect(after.find((s) => s.id === v1.id)?.current).toBe(true)
-    // 되돌리기도 되돌릴 수 있다 — 직전의 v3으로
+    // A restore can also be undone — back to the v3 that came right before it
     rt.restoreVersion(ref, after.find((s) => s.reason === 'before restore')!.id)
     expect(readFileSync(join(appDir(), 'version.txt'), 'utf8')).toBe('v3')
   })
 
-  it('연달아 실패해 멈춘 앱도 되돌리면 다시 뜬다 — 사람이 고른 코드다', async () => {
+  it('an app stopped after failing repeatedly also starts again once restored — it is the code the person chose', async () => {
     make()
     expect(await running()).toBe('v1')
     const good = rt.snapshots(ref)[0]!
@@ -166,7 +168,7 @@ describe('되돌리기', () => {
     expect(await running()).toBe('v1')
   })
 
-  it('없는 판과 프로젝트 앱은 거절한다 — 프로젝트 앱의 판은 git이다', () => {
+  it('rejects a missing version and a project app — a project app\'s versions are git', () => {
     make()
     expect(() => rt.restoreVersion(ref, 'nope')).toThrow('That version is no longer kept')
     expect(() => rt.restoreVersion({ projectId: 'p1', appId: 'ver' }, 'x')).toThrow("A project app's versions are its git history; restore it with git")
@@ -174,8 +176,8 @@ describe('되돌리기', () => {
   })
 })
 
-describe('가져온 앱의 판', () => {
-  it('들어온 그대로가 첫 판이고, 다른 server의 판으로 되돌리면 다시 묻는다', async () => {
+describe('an imported app\'s versions', () => {
+  it('the state it arrived in is the first version, and restoring to a version with a different server asks again', async () => {
     rmSync(appDir(), { recursive: true })
     const src = join(root, 'src', 'imp')
     mkdirSync(src, { recursive: true })
@@ -188,7 +190,7 @@ describe('가져온 앱의 판', () => {
     const [first] = rt.snapshots(imp)
     expect(first).toMatchObject({ reason: 'imported', current: true })
 
-    // 사람이 명령을 바꾸고 다시 켠 뒤 돌린다
+    // The person changes the command, re-enables it, and runs it
     const dir = join(dataRoot, 'apps', 'imp')
     writeFileSync(join(dir, MANIFEST_FILE), JSON.stringify(manifest({ id: 'imp', server: { command: process.execPath, args: [APP, '--env', 'OTHER'] } })))
     rt.refresh()
@@ -196,7 +198,7 @@ describe('가져온 앱의 판', () => {
     expect((await rt.call(imp, 'version', {}, { kind: 'view' })).status).toBe('ok')
     expect(rt.snapshots(imp)).toHaveLength(2)
 
-    // 들어온 판으로 되돌리면 server가 켠 때와 다르다 — 다시 묻는다
+    // Restoring to the imported version differs from what server was enabled with — asks again
     const back = rt.restoreVersion(imp, first!.id)
     expect(back.status).toBe('unconfirmed')
     expect((await rt.call(imp, 'version', {}, { kind: 'view' })).status).toBe('rejected')

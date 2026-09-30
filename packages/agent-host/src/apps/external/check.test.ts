@@ -7,8 +7,9 @@ import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
 
 /**
- * 앱 점검 (M4 C-3) — 템플릿으로 펼친 앱의 `server.mjs`를 일부러 틀리게 고쳐, `check`가 그 문제를 **실제로 띄운
- * 앱에서** 잡는지 본다. 템플릿 그대로는 통과해야 한다.
+ * App check (M4 C-3) — deliberately breaks the `server.mjs` of an app scaffolded from the template,
+ * to see whether `check` catches the problem **in the app actually running.** The template as-is
+ * must pass.
  */
 
 let root = ''
@@ -43,7 +44,7 @@ function make(timing: Partial<RuntimeTiming> = {}) {
   return rt
 }
 
-/** 템플릿 앱 하나 — `server`를 주면 server.mjs를 그것으로 갈아 끼운다 (템플릿 런타임을 그대로 쓴다) */
+/** One template app — if `server` is given, server.mjs is replaced with it (keeping the template's runtime as-is) */
 function app(id: string, server?: string, manifest?: (m: Record<string, unknown>) => void): string {
   const dir = join(projRoot, '.centralu', 'apps', id)
   mkdirSync(dirname(dir), { recursive: true })
@@ -57,7 +58,7 @@ function app(id: string, server?: string, manifest?: (m: Record<string, unknown>
   return dir
 }
 
-/** 화면 하나와 홈 도구 하나를 가진 서버 — `extra`로 틀린 도구를 더한다 */
+/** A server with one screen and one home tool — `extra` adds a malformed tool */
 const serverWith = (extra: string, home = `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'ui://x/index.html' } } }, async () => ({ content: [{ type: 'text', text: 'hi' }] }))`) => `
 serveStdio(() => {
   const server = new McpServer({ name: 'x', version: '0' }, { capabilities: { tools: {}, resources: {} } })
@@ -69,8 +70,8 @@ serveStdio(() => {
 
 const problems = (text: string) => text.split('\n').filter((l) => l.startsWith('- problem'))
 
-describe('템플릿 그대로는 통과한다', () => {
-  it('매니페스트·도구·화면 모두 문제 없음 — 도구마다 무엇인지와 화면의 크기를 말한다', async () => {
+describe('the template as-is passes', () => {
+  it('no problems with the manifest, the tools, or the screen — states what each tool is and the screen\'s size', async () => {
     app('counter')
     const r = await make().check(ref('counter'))
     expect(problems(r.text)).toEqual([])
@@ -81,15 +82,15 @@ describe('템플릿 그대로는 통과한다', () => {
     expect(r.text).toContain('reset — changes, app')
     expect(r.text).toMatch(/Screen ui:\/\/counter\/index\.html: \d{4,} characters/)
     expect(r.text).toMatch(/Process: pid \d+, (modern|legacy) \(.+\), restarted from the files on disk/)
-    // 점검 뒤 앱은 보통의 떠 있는 앱이다 — 도구도 그대로 부른다
+    // After a check, the app is a normal running app — its tools can be called as usual
     expect(status('counter')).toBe('running')
     const out = await rt.call(ref('counter'), 'increment', { by: 1 }, { kind: 'session', sessionId: 's1' })
     expect(out.status).toBe('ok')
   })
 })
 
-describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
-  it('도구 이름의 __ — Centralu가 빼는 도구다', async () => {
+describe('a broken app states what is wrong and where', () => {
+  it('__ in a tool name — a tool Centralu drops', async () => {
     app('names', serverWith(`server.registerTool('save__draft', { description: 'Save', annotations: { readOnlyHint: false } }, async () => ({ content: [] }))`))
     const r = await make().check(ref('names'))
     expect(r.ok).toBe(false)
@@ -98,7 +99,7 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     ])
   })
 
-  it('바꾸는 도구에 readOnlyHint가 없다', async () => {
+  it('a write tool has no readOnlyHint', async () => {
     app('annot', serverWith(`centralu.tool(server, 'save', { description: 'Save the note', inputSchema: z.object({ text: z.string() }) }, async () => ({ content: [] }))`))
     const r = await make().check(ref('annot'))
     expect(problems(r.text)).toEqual([
@@ -108,7 +109,7 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     expect(r.text).toContain('save — no readOnlyHint, model+app')
   })
 
-  it('home에 화면이 없다 / home이 화면에 닫혀 있다 / home이 목록에 없다', async () => {
+  it('home has no screen / home is closed to the screen / home is not in the tool list', async () => {
     app('nohome-ui', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))`))
     app('hidden-home', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'ui://x/index.html', visibility: ['model'] } } }, async () => ({ content: [] }))`))
     app('lost-home', serverWith(''), (m) => (m.home = 'open'))
@@ -124,14 +125,14 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     ])
   })
 
-  it('공개 범위의 모양이 틀렸다', async () => {
+  it('the audience field is malformed', async () => {
     app('vis', serverWith(`centralu.tool(server, 'peek', { description: 'Peek', annotations: { readOnlyHint: true }, _meta: { ui: { visibility: 'app' } } }, async () => ({ content: [] }))`))
     expect(problems((await make().check(ref('vis'))).text)).toEqual([
       '- problem [tool peek] peek: _meta.ui.visibility must be a list of "model" and "app" (got "app") — Centralu drops this tool',
     ])
   })
 
-  it('화면: 가리킨 ui://가 없다 / ui://가 아니다 / 브리지 없이 날것으로 냈다', async () => {
+  it('screen: the ui:// it points at does not exist / is not ui:// / was emitted raw with no bridge', async () => {
     app('screens', serverWith(`
   centralu.tool(server, 'missing', { description: 'M', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'ui://x/missing.html' } } }, async () => ({ content: [] }))
   centralu.tool(server, 'web', { description: 'W', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'https://example.com/app' } } }, async () => ({ content: [] }))
@@ -145,7 +146,7 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     expect(found[3]).toBe('- problem [screen ui://x/raw.html] <script src="centralu:mcp-app.js"> is still in the page — this screen has no bridge, so it cannot call tools. Register it with centralu.uiResource')
   })
 
-  it('매니페스트가 틀렸다 — 띄우지 않고 이유를 말한다', async () => {
+  it('the manifest is malformed — states the reason without starting the app', async () => {
     app('manifest', undefined, (m) => {
       m.id = 'other'
       m.extra = 1
@@ -157,7 +158,7 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
     expect(r.text).toContain('- warning [centralu.app.json] unknown field, ignored: extra')
   })
 
-  it('서버가 뜨지 못한다 — 이유와 표준에러가 보고서에 있다', async () => {
+  it('the server fails to start — the reason and stderr are in the report', async () => {
     app('broken', `serveStdio(() => { throw new Error('forgot to define the tools') })`)
     const r = await make().check(ref('broken'))
     expect(r.ok).toBe(false)
@@ -167,13 +168,13 @@ describe('틀린 앱은 무엇이 어디서 틀렸는지 말한다', () => {
   })
 })
 
-describe('점검은 앱을 이상한 상태로 두지 않는다', () => {
-  it('뜨지 못하는 앱을 몇 번 점검해도 멈춤(failed)으로 밀리지 않고, 고치면 통과하고 떠 있다', async () => {
+describe('a check never leaves the app in a strange state', () => {
+  it('checking an app that fails to start repeatedly never pushes it to a stopped (failed) state, and once fixed, it passes and stays running', async () => {
     const dir = app('fixme', `serveStdio(() => { throw new Error('not yet') })`)
     const r = make({ maxFailures: 3 })
     for (let i = 0; i < 4; i++) expect((await r.check(ref('fixme'))).ok).toBe(false)
     expect(status('fixme')).toBe('crashed')
-    // 부르는 쪽이 연달아 실패시켜 멈춘 앱도 — 점검은 다시 띄워 본다(사람의 "다시 시작"과 같다)
+    // Even an app stopped by the caller failing it repeatedly — a check tries starting it again (the same as the person's "Restart")
     for (let i = 0; i < 3; i++) await r.tools(ref('fixme')).catch(() => {})
     expect(status('fixme')).toBe('failed')
     writeFileSync(join(dir, 'server.mjs'), readFileSync(join(appTemplateDir(), 'server.mjs'), 'utf8').replaceAll('{{APP_ID}}', 'fixme').replaceAll('{{APP_NAME}}', 'fixme'))
@@ -182,7 +183,7 @@ describe('점검은 앱을 이상한 상태로 두지 않는다', () => {
     expect(status('fixme')).toBe('running')
   })
 
-  it('진행 중인 호출은 끊지 않는다 — 끝나기를 기다렸다가 지금 파일로 다시 띄운다', async () => {
+  it('does not cut off a call in progress — waits for it to finish, then restarts with the current files', async () => {
     const gate = join(root, 'gate')
     const dir = app(
       'busy',
@@ -196,12 +197,12 @@ describe('점검은 앱을 이상한 상태로 두지 않는다', () => {
     await r.tools(ref('busy'))
     const call = r.call(ref('busy'), 'hold', {}, { kind: 'session', sessionId: 's1' })
     await until(() => (r as unknown as { openRuns: Map<string, unknown> }).openRuns.size, (n) => n === 1)
-    // 그사이 코드가 바뀌었다 — 도구 하나를 더한다
+    // The code changes in the meantime — one more tool is added
     writeFileSync(join(dir, 'server.mjs'), readFileSync(join(dir, 'server.mjs'), 'utf8').replace("  return server\n", "  centralu.tool(server, 'added', { description: 'New', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))\n  return server\n"))
     let checked = false
     const report = r.check(ref('busy')).then((x) => ((checked = true), x))
     await new Promise((res) => setTimeout(res, 300))
-    expect(checked).toBe(false) // 호출이 끝나기 전에는 내리지 않는다
+    expect(checked).toBe(false) // it does not shut down before the call finishes
     writeFileSync(gate, '')
     const out = await call
     expect(out.status).toBe('ok')
@@ -212,7 +213,7 @@ describe('점검은 앱을 이상한 상태로 두지 않는다', () => {
     expect(rep.text).not.toContain(`pid ${held},`)
   })
 
-  it('호출이 상한 넘게 돌면 다시 띄우지 않고 떠 있는 것을 보며, 그렇다고 적는다', async () => {
+  it('when a call runs past the cap, it checks the already-running process instead of restarting, and states so', async () => {
     const gate = join(root, 'gate2')
     app(
       'slow',

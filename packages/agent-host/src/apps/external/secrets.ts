@@ -2,15 +2,18 @@ import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 
 /**
- * 앱 비밀의 값 (M4 A-3, 플랜 "데이터와 비밀은 저장소 밖이다").
+ * The values behind app secrets (M4 A-3, from the plan "data and secrets live outside the
+ * repository").
  *
- * 매니페스트에는 **이름만** 적힌다(커밋되어 팀과 나뉘므로). 값은 이 기계의 host 데이터
- * 폴더에 권한 0600 파일 하나로 산다 — v1은 키체인 대신 파일이다(플랜이 둘 다 허용한다).
- * 앱마다 칸이 나뉘고, 앱이 **선언한 이름만** 그 앱의 환경 변수로 들어간다: 값이 저장돼
- * 있어도 매니페스트에서 이름을 지우면 그 앱은 더 이상 받지 못한다.
+ * The manifest lists **only the names** (since it gets committed and shared with the team). Values
+ * live in a single mode-0600 file in this machine's host data folder — v1 uses a file instead of the
+ * keychain (the plan allows either). Each app gets its own section, and only the names an app
+ * **declares** are put into that app's environment: even if a value is stored, removing its name
+ * from the manifest means the app no longer receives it.
  *
- * 이 파일은 값을 어디에도 적지 않는다(로그·실행 기록·오류 문구). 값을 가리는 일은
- * 쓰는 쪽(`redactor`)이 한다 — 가려야 할 값의 목록을 아는 곳이 여기라서 함께 둔다.
+ * This file never writes a value anywhere (logs, the run ledger, error text). Masking values is the
+ * writer's job (`redactor`) — it lives here because this is where the list of values to mask is
+ * known.
  */
 
 export const SECRETS_FILE = 'app-secrets.json'
@@ -24,20 +27,22 @@ export class SecretStore {
     this.path = join(dataRoot, SECRETS_FILE)
   }
 
-  /** 이 앱의 저장된 값 전부 (선언과 무관) */
+  /** All values stored for this app (regardless of declaration) */
   all(appKey: string): Record<string, string> {
     return { ...(this.read()[appKey] ?? {}) }
   }
 
   /**
-   * 이 앱에 값이 저장된 이름들 — **값은 싣지 않는다.** 앱 목록이 "어느 비밀이 비어 있나"를 보이는 자리다(E, 비밀 칸).
-   * 목록은 방송마다 다시 읽히므로, 값이 든 객체를 목록 쪽으로 넘기지 않는 것을 모양으로 막는다.
+   * The names that have a value stored for this app — **never carries the values.** This is what
+   * the app list uses to show "which secrets are set" (E, the secrets section). Since the list gets
+   * re-read on every broadcast, the return type itself prevents a value-carrying object from ever
+   * reaching the list side.
    */
   names(appKey: string): Set<string> {
     return new Set(Object.keys(this.read()[appKey] ?? {}))
   }
 
-  /** 앱에 넘길 값 — 매니페스트가 선언한 이름만 */
+  /** The values to hand to the app — only the names its manifest declares */
   forApp(appKey: string, declared: readonly string[]): Record<string, string> {
     const stored = this.read()[appKey] ?? {}
     const out: Record<string, string> = {}
@@ -48,7 +53,7 @@ export class SecretStore {
     return out
   }
 
-  /** 값을 적거나(`value`) 지운다(`null`) */
+  /** Writes a value (`value`) or clears it (`null`) */
   set(appKey: string, name: string, value: string | null): void {
     const doc = this.read()
     const cur = { ...(doc[appKey] ?? {}) }
@@ -57,9 +62,10 @@ export class SecretStore {
     if (Object.keys(cur).length === 0) delete doc[appKey]
     else doc[appKey] = cur
     /*
-     * 임시 파일을 **처음부터 0600으로** 만들고 옮긴다. 쓰고 나서 chmod하면 그 사이에
-     * 기본 권한(보통 0644)으로 읽히는 순간이 생긴다. 옮긴 뒤 한 번 더 조이는 것은 이미
-     * 있던 파일을 누가 풀어 두었을 때를 위해서다.
+     * The temp file is created **at 0600 from the start** and then moved into place. Writing first
+     * and chmod-ing afterward would leave a window where it is readable at the default permissions
+     * (usually 0644). Tightening it once more after the move covers the case where someone had
+     * already loosened the permissions on an existing file.
      */
     const tmp = `${this.path}.tmp`
     writeFileSync(tmp, JSON.stringify(doc), { mode: 0o600 })
@@ -73,7 +79,7 @@ export class SecretStore {
       const doc = JSON.parse(readFileSync(this.path, 'utf8')) as unknown
       return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as SecretsDoc) : {}
     } catch {
-      // 깨진 파일은 빈 것으로 — 값을 추측해 넘기느니 앱이 "비밀이 없다"고 말하게 둔다
+      // A corrupt file is treated as empty — better for an app to say "no secrets" than to guess at values
       console.error(`[apps] ${SECRETS_FILE} is unreadable; apps start without secrets`)
       return {}
     }
@@ -81,16 +87,20 @@ export class SecretStore {
 }
 
 /**
- * 사람이 넣는 값 하나의 상한 (E, 비밀 칸). API 키·토큰은 수백 자, PEM 키도 몇 KiB다. 환경 변수로 넘기는 값이라
- * 커지면 앱이 뜨는 명령줄 환경 전체가 커진다.
+ * The cap on the length of a value a person enters (E, the secrets section). An API key or token
+ * runs to a few hundred characters, a PEM key to a few KiB. Since this value gets passed as an
+ * environment variable, a larger cap would enlarge the entire environment the app's command line
+ * starts with.
  */
 export const SECRET_VALUE_MAX_CHARS = 16 * 1024
 
 /**
- * 넣으려는 값의 문제 — 없으면 null. **문구에 값을 싣지 않는다**: 이 문구는 RPC의 오류로 화면까지 간다.
+ * The problem with a value someone wants to set — null if there is none. **Never carries the value
+ * in the message**: this message travels all the way to the screen as an RPC error.
  *
- * 빈 값은 받지 않는다. 지우기는 `null`이 따로 있고, 빈 문자열을 "넣었다"로 두면 목록은 "있음"이라 말하는데
- * 앱은 빈 변수를 받아 "키가 없다"로 실패한다. NUL은 환경 변수에 실을 수 없다(spawn이 거절한다).
+ * An empty value is not accepted. Clearing has its own separate `null`, and treating an empty string
+ * as "set" would leave the list saying "present" while the app receives an empty variable and fails
+ * with "no key". A NUL character cannot be carried in an environment variable (spawn rejects it).
  */
 export function secretValueProblem(value: string): string | null {
   if (value.length === 0) return 'Enter a value, or clear the secret instead'
@@ -100,11 +110,13 @@ export function secretValueProblem(value: string): string | null {
 }
 
 /**
- * 비밀 값을 `[redacted:이름]`으로 바꾸는 함수. 값이 없으면 그대로 돌려주는 항등 함수다.
+ * Builds a function that replaces secret values with `[redacted:name]`. If there are no values,
+ * returns the identity function.
  *
- * 긴 값부터 바꾼다 — 한 비밀이 다른 비밀의 일부이면(토큰과 그 접두어) 짧은 쪽을 먼저
- * 바꿨을 때 긴 쪽의 나머지가 남는다. 4자 미만 값은 가리지 않는다: `a`나 `1` 같은 값을
- * 가리면 기록 전체가 누더기가 되고, 그런 값은 비밀로서도 의미가 없다.
+ * Longer values are replaced first — if one secret is a substring of another (a token and its
+ * prefix), replacing the shorter one first would leave the remainder of the longer one exposed.
+ * Values shorter than 4 characters are never masked: masking a value like `a` or `1` would turn the
+ * whole record into confetti, and a value that short is not meaningful as a secret anyway.
  */
 export function redactor(secrets: Record<string, string>): (text: string) => string {
   const pairs = Object.entries(secrets)

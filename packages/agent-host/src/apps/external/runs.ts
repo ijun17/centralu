@@ -1,18 +1,19 @@
 import { createHash } from 'node:crypto'
 
 /**
- * 실행 기록의 모양과 규칙 (M4 A-6).
+ * The shape and rules of the run ledger (M4 A-6).
  *
- * 기록을 **어디에** 두는지는 런타임이 모른다 — 모양(`RunLedger`)만 선언하고, host가 저장소로
- * 채운다(main.ts). **무엇을** 남기는지는 여기서 정한다: 인자는 요약과 해시만, 비밀 값은 어디에도
- * 싣지 않고, 실패한 호출만 원문을 최근 몇 건 둔다.
+ * The runtime does not know **where** the ledger is stored — it only declares the shape
+ * (`RunLedger`), and the host fills it in with the store (main.ts). **What** gets kept is decided
+ * here: arguments are kept only as a summary and a hash, secret values are never written anywhere,
+ * and only the most recent failed calls keep their original text.
  */
 
-/** 보관 기간 — 기동마다 이보다 오래된 기록을 걷는다 */
+/** The retention period — on every startup, anything older than this is pruned */
 export const RUN_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
-/** 앱마다 원문을 남기는 실패의 수 */
+/** How many failures per app keep their original text */
 export const FAILURES_KEPT = 20
-/** 인자 요약의 길이 — 기록 화면의 한 줄 */
+/** The length of the argument summary — one line in the runs screen */
 export const SUMMARY_CHARS = 200
 
 export type AppRunRow = {
@@ -20,8 +21,10 @@ export type AppRunRow = {
   projectId: string | null
   appId: string
   /**
-   * 무엇의 기록인가 (M4 D-6) — `tool`은 이 앱의 도구가 불린 것, `broker`는 이 앱이 fd 3으로 **부탁한** 것(`tool`이 중개 도구의
-   * 이름이다: run_agent, call_app, host_data). 앱의 도구 이름이 중개 도구와 같을 수 있어 이름만으로는 가를 수 없다.
+   * What this row is a record of (M4 D-6) — `tool` is a call to this app's own tool, `broker` is
+   * something this app **requested** over fd 3 (`tool` is the broker tool's name: run_agent,
+   * call_app, host_data). An app's own tool name can collide with a broker tool's name, so the name
+   * alone cannot distinguish them.
    */
   kind: 'tool' | 'broker'
   tool: string
@@ -34,53 +37,62 @@ export type AppRunRow = {
   argsSummary: string
   error: string | null
   createdAt: number
-  /** 이 부탁이 세운 에이전트 세션 (run_agent의 줄) — 사슬에서 그 세션으로 건너가는 자리다 */
+  /** The agent session this request started (a run_agent row) — this is where a chain crosses over into that session */
   sessionId: string | null
 }
 
-/** 에이전트가 쓴 토큰 (M4 D-5) — 도구가 알려 준 만큼. 도구가 말하지 않았으면 줄에 없다(null) */
+/** Tokens an agent spent (M4 D-5) — as much as the tool reported. If the tool did not report it, the row has none (null) */
 export type AgentTokens = { input: number; output: number }
 
-/** 읽어 온 한 줄 — 저장소는 글자로 돌려준다(열린 문자열), 모양은 프로토콜이 가린다 */
+/** A row as read back — the store returns text (an open-ended string), and the protocol narrows its shape */
 export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status' | 'kind'> & {
   callerKind: string
   status: string
   kind: string
-  /** run_agent 줄의 토큰 (D-5) */
+  /** Tokens on a run_agent row (D-5) */
   tokens: AgentTokens | null
   failure: { args: string; result: string | null } | null
 }
 
 /**
- * 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 한 기간 동안 **실제로 선** 에이전트 실행(세션이 선 run_agent 줄)의 수, 걸린 시간의
- * 합, 토큰의 합. 거절된 부탁은 에이전트를 세우지 않았으므로 세지 않는다. 토큰은 알려 준 실행의 것만 더한다 — 하나도 없으면 null.
+ * The agent usage one app has requested (M4 D-5) — over a period, the count of agent runs that
+ * **actually started** (a run_agent row with a session), the sum of time spent, and the sum of
+ * tokens. A refused request never started an agent, so it is not counted. Tokens are added up only
+ * from runs that reported them — null if there were none at all.
  */
 export type AgentUse = { runs: number; durationMs: number; tokens: AgentTokens | null }
 
 export type RunLedger = {
   begin(row: AppRunRow): void
   end(id: string, end: { status: AppRunRow['status']; durationMs: number; error: string | null; tokens?: AgentTokens | null }): void
-  /** 도는 중인 줄에 에이전트 세션을 잇는다 (D-6) — 세션이 서는 순간, 끝나기 전에 */
+  /** Links an agent session to a still-running row (D-6) — the moment the session exists, before it ends */
   link(id: string, sessionId: string): void
   keepFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void
   list(projectId: string | null, appId: string, limit: number): AppRunListed[]
-  /** 이 앱이 `since` 뒤로 부탁한 에이전트의 쓰임 (D-5) */
+  /** The agent usage this app requested since `since` (D-5) */
   agentUse(projectId: string | null, appId: string, since: number): AgentUse
   prune(before: number): number
   settleUnfinished(error: string): number
 }
 
 /**
- * 기록이 바뀐 것을 알리는 기록 (M4 D-6) — 줄이 서고(`begin`), 세션이 이어지고(`link`), 끝날 때(`end`), **그 줄이 보이는 기록 판의
- * 앱마다** `announce`를 부른다. 한 앱의 기록 판은 그 앱의 줄과 그 아래의 사슬을 싣는다(`listAppRuns`) — 그래서 줄 하나는 제 앱과,
- * 부모를 따라 올라간 사슬 위의 앱들의 판에 보인다.
+ * A ledger that announces when the record changes (M4 D-6) — when a row starts (`begin`), gets
+ * linked to a session (`link`), and ends (`end`), it calls `announce` for **every app whose runs
+ * panel can see that row.** One app's runs panel shows that app's own rows and the chain beneath
+ * them (`listAppRuns`) — so a single row is visible on the panel of its own app, and on the panels
+ * of every app further up the chain it descended from.
  *
- * 줄마다 그 앱들을 **줄이 설 때** 정해 들고 있는다. 부모는 그때 열려 있다(열린 실행 아래에만 줄이 선다 — 부모가 없는 거절의 줄은
- * 제 앱뿐이다). 끝날 때 다시 따라 올라가지 않는 이유: 부모가 먼저 끝났으면 사슬이 끊겨 위의 판이 이 줄의 끝을 못 듣는다.
+ * Each row decides those apps and holds onto them **at the moment the row starts.** Its parent is
+ * open at that point (a row only ever starts under an open run — a denied row with no parent belongs
+ * only to its own app). It is not recomputed by walking up again when the row ends: if the parent
+ * ended first, the chain is already broken, and a panel further up would never hear about this row
+ * ending.
  *
- * "바뀌었다"(`emitChanged`)와 다른 신호인 이유: 그쪽은 앱 안의 값이 바뀌었다는 뜻이라 열린 화면이 다시 읽는다. 읽기 전용 도구의
- * 호출은 그것을 내지 않는다(내면 화면의 다시 읽기가 고리가 된다, #190). 그런데 읽기 전용 도구도 에이전트를 부탁해 몇 분짜리 사슬을
- * 세울 수 있다 — 기록 판은 그것을 들어야 하고, 화면은 듣지 않아야 한다.
+ * Why this is a different signal from "changed" (`emitChanged`): that one means a value inside the
+ * app changed, and its open screen re-reads. A read-only tool's call never emits that (doing so
+ * would turn the screen's re-read into a loop, #190). But a read-only tool can still request an
+ * agent and start a chain that runs for minutes — the runs panel has to hear about that, and the
+ * screen must not.
  */
 export function announcingLedger(inner: RunLedger, announce: (app: { projectId: string | null; appId: string }) => void): RunLedger {
   type App = { projectId: string | null; appId: string }
@@ -112,8 +124,8 @@ export function announcingLedger(inner: RunLedger, announce: (app: { projectId: 
 }
 
 /**
- * 키 순서를 고정한 JSON. 같은 인자가 키 순서만 달라 다른 해시가 되면 "같은 입력으로 또
- * 실패했다"를 셀 수 없다.
+ * JSON with key order fixed. If the same arguments produced a different hash just because their key
+ * order differed, there would be no way to count "failed again with the same input".
  */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value)) ?? 'null'
@@ -130,8 +142,9 @@ function sortKeys(v: unknown): unknown {
 }
 
 /**
- * 인자 → 기록에 남길 것. **가린 뒤에** 요약하고 해시한다: 해시도 입력의 흔적이다 — 짧은 비밀이
- * 든 인자의 해시는 사전 대입으로 되짚을 수 있다.
+ * Arguments → what gets kept in the ledger. Summarized and hashed **after masking**: a hash is still
+ * a trace of the input — the hash of an argument containing a short secret can be recovered by
+ * brute-force lookup.
  */
 export function describeArgs(args: unknown, redact: (t: string) => string): { json: string; digest: string; summary: string } {
   const json = redact(canonicalJson(args))

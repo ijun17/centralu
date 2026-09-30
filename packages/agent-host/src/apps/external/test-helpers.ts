@@ -5,13 +5,13 @@ import type { AgentTokens, AppRunListed, AppRunRow, RunLedger } from './runs.js'
 import type { BrokerHost } from './desk.js'
 
 /**
- * 외부 앱 테스트가 함께 쓰는 손 — 앱 폴더를 심고, 조건이 설 때까지 기다린다.
- * (테스트 전용 파일이다. 런타임은 이것을 임포트하지 않는다)
+ * Shared helpers for external-app tests — plant an app folder, and wait until a condition holds.
+ * (Test-only file. The runtime never imports this.)
  */
 
 export const PROJECT_APPS = ['.centralu', 'apps'] as const
 
-/** `<root>/<...parent>/<id>/centralu.app.json`을 쓴다. over가 null이면 원문 문자열을 쓴다 */
+/** Writes `<root>/<...parent>/<id>/centralu.app.json`. If `over` is null, writes the raw string verbatim. */
 export function plantApp(
   parentDir: string,
   id: string,
@@ -33,7 +33,7 @@ export function plantApp(
   return dir
 }
 
-/** fs 감시처럼 "곧" 일어나는 일을 기다린다. 시간 안에 안 서면 마지막 값을 들고 실패한다 */
+/** Waits for something that happens "soon", like an fs watch. If it does not settle in time, fails with the last value. */
 export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs = 4000): Promise<T> {
   const deadline = Date.now() + timeoutMs
   let v = read()
@@ -46,8 +46,9 @@ export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs =
 }
 
 /**
- * 메모리에 사는 실행 기록 — 저장소를 임포트할 수 없는 이 층의 시험이 쓴다(`host-app-runtime-physics-only`는 시험 파일에도
- * 걸린다). 저장소 쪽 이음새(`storeRunLedger`)는 코어 쪽 시험이 진짜 저장소로 본다.
+ * A run ledger that lives only in memory — used by tests at this layer, which cannot import the
+ * store (`host-app-runtime-physics-only` applies to test files too). The store-side seam
+ * (`storeRunLedger`) is exercised against the real store by the core-side tests.
  */
 export function memoryLedger(): RunLedger & { rows: AppRunRow[]; failures: { runId: string; args: string; result: string | null }[] } {
   const rows: AppRunRow[] = []
@@ -88,8 +89,9 @@ export function memoryLedger(): RunLedger & { rows: AppRunRow[]; failures: { run
 }
 
 /**
- * 시험이 쓰는 host의 몸통(D) — 시험이 준 것만 채우고 나머지는 "이 시험에서는 부르지 않는다"로 던진다. 부르지 않을 몸통을
- * 조용히 성공시키면, 부르지 말아야 할 때 불린 것을 시험이 못 본다.
+ * The host body (D) that tests use — fills in only what the test supplies, and everything else
+ * rejects with "not part of this test". If an unused-in-this-test body silently succeeded instead,
+ * the test would never see a call it should not have received.
  */
 export function fakeBrokerHost(over: Partial<BrokerHost>): BrokerHost {
   const never = (what: string) => () => Promise.reject(new Error(`${what} is not part of this test`))
@@ -98,7 +100,8 @@ export function fakeBrokerHost(over: Partial<BrokerHost>): BrokerHost {
     agentLabel: (tool) => (tool === 'claude' ? 'Claude Code' : tool),
     runAgent: never('runAgent'),
     hostData: never('hostData'),
-    // 묻지 않는 시험은 사람이 곧바로 허락한 것으로 친다 — 묻는 것을 보는 시험은 이 자리를 갈아 끼운다
+    // A test that does not ask about this is treated as if the person allowed it immediately — a
+    // test that checks the asking replaces this in place
     askCapability: async () => 'allow',
     ...over,
   }

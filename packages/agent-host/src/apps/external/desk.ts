@@ -18,67 +18,79 @@ import type { AppRef } from './ref.js'
 import { FAILURES_KEPT, describeArgs, type AgentTokens, type AppRunRow, type RunLedger } from './runs.js'
 
 /**
- * 중개 창구 (M4 D) — 앱이 fd 3으로 부탁한 것을 푸는 **한 자리**.
+ * The broker desk (M4 D) — the **one place** that resolves what an app requests over fd 3.
  *
- * 문지기(`broker.ts`)가 "이 파이프의 앱에 지금 열려 있는 실행"인지만 보고 넘기면, 여기서 부탁 하나를 끝까지 처리한다:
- * 매니페스트가 선언했나(`uses`), 무엇으로 풀까(도구마다의 몸통), 무엇을 돌려줄까. 선언은 허락이 아니다 — 선언하지
- * 않은 것은 몸통에 닿기 전에 거절한다(빠진 선언을 "전부"로 읽는 쪽이 위험하다, manifest.ts).
+ * Once the gatekeeper (`broker.ts`) checks only "is there a run currently open for this pipe's app"
+ * and hands it off, this is where a single request is fully processed: did the manifest declare it
+ * (`uses`), what resolves it (each tool's own body), and what gets returned. A declaration is not a
+ * grant — anything not declared is refused before it ever reaches the body (treating an absent
+ * declaration as "everything" would be dangerous, see manifest.ts).
  *
- * 몸통 가운데 host의 코어가 해야 하는 것(에이전트 세션을 세운다)은 `BrokerHost`로 받는다. 런타임은 세션을 모른다
- * (`host-app-runtime-physics-only`) — 필요한 모양을 여기서 선언하고, 매니저가 런타임을 받을 때 채운다(`useExternalApps`).
+ * The part of the body that only the host's core can do (starting an agent session) is received
+ * through `BrokerHost`. The runtime knows nothing about sessions
+ * (`host-app-runtime-physics-only`) — the shape needed is declared here, and the manager fills it in
+ * when it receives the runtime (`useExternalApps`).
  */
 
-/** 부탁한 앱 — 파이프가 말해 준 앱과, 그 프로세스가 뜰 때 읽은 매니페스트 */
+/** A requesting app — the app the pipe identified, and the manifest read when its process started */
 export type DeskApp = {
   ref: AppRef
-  /** 사람이 읽는 이름(매니페스트의 `name`) */
+  /** The name a person reads (the manifest's `name`) */
   name: string
   manifest: AppManifest
 }
 
-/** 앱이 부탁한 에이전트 실행 하나 (D-1) — 창구가 선언과 도구를 확인한 뒤 host에 넘기는 모양 */
+/** One agent run an app requested (D-1) — the shape the desk hands to the host after checking the declaration and the tool */
 export type AgentRunRequest = {
   app: AppRef
   appName: string
-  /** 창구가 고른 도구 — 매니페스트가 허락한 것 */
+  /** The tool the desk chose — one the manifest allows */
   tool: string
   prompt: string
-  /** 답의 모양 (JSON Schema, 뿌리는 객체). 있으면 도구에 구조화 출력을 시킨다 */
+  /** The shape of the answer (JSON Schema, an object at the root). If present, this makes the tool produce structured output */
   schema?: Record<string, unknown>
 }
 
 export type AgentRunResult = {
-  /** 이 부탁을 받은 세션 — 요청마다 새로 선다 */
+  /** The session that received this request — a new one is created for every request */
   sessionId: string
-  /** 턴의 마지막 답(마지막 도구 호출 뒤의 글). 없으면 빈 글이다 */
+  /** The final answer of the turn (the text after the last tool call). Empty text if there was none */
   text: string
-  /** 도구가 턴의 결말로 따로 준 구조화 출력(Claude) — 없으면 undefined(Codex는 마지막 글이 그 JSON이다) */
+  /** Structured output the tool supplied separately as the turn's outcome (Claude) — undefined if absent (for Codex, the last text is that JSON) */
   output?: unknown
 }
 
 /**
- * 창구가 런타임에게 묻는 것 — 앱 목록과, 앱 도구를 부르는 단 하나의 길(`ExternalApps.call`). 창구가 런타임의 속을 들여다보지
- * 않게 이 둘만 받는다: 앱끼리의 호출(D-2)도 화면·세션의 호출과 같은 길(공개 범위·실행 id·취소·기록)을 지나야 한다.
+ * What the desk asks of the runtime — the app list, and the single path for calling an app's tool
+ * (`ExternalApps.call`). It receives only these two so it never has to look inside the runtime: a
+ * call between apps (D-2) also has to pass through the same path a screen's or a session's call does
+ * (audience, run id, cancellation, the ledger).
  */
 export type DeskApps = {
-  /** 이 이름의 앱이 목록에 있나 — 틀린 매니페스트·신뢰하지 않은 프로젝트의 앱도 있다(부르면 그 이유로 거절된다) */
+  /** Whether an app with this name is in the list — this also includes an app with an invalid manifest or an untrusted project's app (calling it gets refused with that reason) */
   has(ref: AppRef): boolean
-  /** 사람이 읽는 앱 이름 — 매니페스트의 `name`, 없으면 id */
+  /** The name a person reads for an app — the manifest's `name`, or the id if absent */
   name(ref: AppRef): string
-  /** 이 앱의 저장된 비밀을 가리는 함수 — 기록(D-6)에 남기는 인자·이유는 도구 호출의 기록과 같은 규칙으로 가린다 */
+  /** A function that masks this app's stored secrets — arguments and reasons written to the ledger (D-6) are masked by the same rule as a tool call's own record */
   redactor(ref: AppRef): (text: string) => string
   /**
-   * 이 실행까지의 사슬 (D-5) — 사슬을 시작한 호출부터 이 실행까지, 앱의 도구 호출 하나가 한 칸. 폭주 막기가 깊이와 되풀이를 본다.
+   * The chain leading up to this run (D-5) — from the call that started the chain to this run, with
+   * one of an app's tool calls as one hop. Runaway prevention checks depth and repetition against
+   * this.
    */
   chain(runId: string): { ref: AppRef; tool: string }[]
   /**
-   * 이 실행이 속한 사슬을 **누가 시작했나** (D-4) — 부모를 따라 올라가 앱이 아닌 첫 호출자. 세션이면 그 세션에, 화면이면
-   * 그 앱의 고정 화면에 물음이 선다. 사슬을 더는 따라갈 수 없으면(부모가 이미 끝났다) null이다.
+   * **Who started** the chain this run belongs to (D-4) — walking up through parents to the first
+   * caller that is not an app. If it is a session, the question is attributed to that session; if a
+   * screen, to that app's fixed screen. Returns null if the chain can no longer be followed (the
+   * parent has already ended).
    */
   origin(runId: string): CapabilityOrigin | null
   /**
-   * 사람이 이 실행의 부탁을 거절했다 (D-4) — 그 자리에서 Deny를 눌렀거나, 기억된 거절이다. 부탁한 앱의 도구가 그 때문에 실패하면
-   * 그 실패는 앱의 버그가 아니라 사람의 결정이다: 런타임이 오류 묶음에 적어 화면이 그렇게 말하게 한다(C-6과 나란히).
+   * The person denied this run's request (D-4) — either they pressed Deny right there, or it is a
+   * remembered denial. If the requesting app's tool fails because of this, that failure is not a bug
+   * in the app, it is the person's decision: the runtime records it in the error bundle so the screen
+   * can state it that way (alongside C-6).
    */
   denied(runId: string, denial: CapabilityDenial): void
   call(
@@ -90,86 +102,103 @@ export type DeskApps = {
   ): Promise<{ status: string; result: CallToolResult | null; error: string | null }>
 }
 
-/** 사람이 거절한 능력 하나 — 어느 앱이 무엇을 하려 했나(물음에 적은 말 그대로). 되돌리는 자리는 그 앱의 기록 판이다 */
+/** One capability the person denied — which app tried to do what (the exact wording shown in the question). The place to reverse it is that app's runs panel */
 export type CapabilityDenial = { app: AppRef; name: string; capability: string; text: string }
 
-/** 물음이 설 자리 — 사슬을 시작한 세션, 또는 사슬을 시작한 화면의 앱 */
+/** Where a question is attributed — the session that started the chain, or the app of the screen that started it */
 export type CapabilityOrigin = { kind: 'session'; sessionId: string } | { kind: 'view'; app: AppRef }
 
-/** 사람에게 묻는 것 하나 (D-4) — 창구가 만들어 host에 넘긴다 */
+/** One thing asked of the person (D-4) — built by the desk and handed to the host */
 export type CapabilityQuestion = {
-  /** 능력을 쓰려는 앱 */
+  /** The app that wants to use the capability */
   app: AppRef
   appName: string
-  /** 기억의 열쇠 (`capabilityKey`) */
+  /** The memory key (`capabilityKey`) */
   capability: string
-  /** 무엇을 하려는가 — "run an agent (Claude Code) in a new session" */
+  /** What it wants to do — "run an agent (Claude Code) in a new session" */
   text: string
   origin: CapabilityOrigin
   /**
-   * 물은 때. 만료와 **같은 시계 읽기**에서 나온다 — 받는 쪽이 따로 `Date.now()`를 읽으면 그 사이 흐른 1ms만큼
-   * "5분짜리 물음"이 4분 59.999초가 된다(시험이 가끔 그것을 봤다).
+   * When it was asked. Comes from **the same clock read** as the expiry — if the receiving side read
+   * `Date.now()` separately instead, the 1ms drift between the two would turn a "5-minute question"
+   * into 4 minutes 59.999 seconds (a test occasionally caught exactly that).
    */
   askedAt: number
-  /** 이때까지 답이 없으면 창구가 거절로 닫는다 */
+  /** If there is no answer by this time, the desk closes it as a denial */
   expiresAt: number
 }
 
-/** 중개의 몸통 가운데 host의 코어가 채우는 것 */
+/** The part of the broker's body the host's core fills in */
 export type BrokerHost = {
-  /** 이 범위의 기본 에이전트 도구 — 프로젝트 앱이면 그 프로젝트의 기본 도구, 사용자 폴더 앱이면 오케스트레이터의 도구 */
+  /** The default agent tool for this scope — the project's default tool for a project app, the orchestrator's tool for a user-folder app */
   defaultAgentTool(projectId: string | null): string
   /**
-   * 새 세션에 부탁을 보내고 턴이 끝나기를 기다린다. 신호가 서면 세션을 멈춘다(인터럽트). 도구를 쓸 수 없으면(설치·로그인)
-   * 이유를 담아 던진다 — 그 이유가 곧 앱이 받는 말이다.
+   * Sends the request to a new session and waits for the turn to end. If the signal fires, stops the
+   * session (an interrupt). If the tool is unavailable (not installed, not logged in), throws with a
+   * reason — that reason is exactly the message the app receives.
    */
   runAgent(
     req: AgentRunRequest,
     ctx: {
       signal: AbortSignal
       progress(message: string): void
-      /** 세션이 서는 순간 한 번 — 기록(D-6)이 도는 동안에도 그 세션으로 건너갈 수 있게 */
+      /** Once, the moment the session exists — so a run visible in the ledger (D-6) can already cross over to that session */
       onSession(sessionId: string): void
-      /** 도구가 알려 준 이 실행의 토큰(누적) — 알려 줄 때마다. 마지막 것이 기록에 남는다 (D-5) */
+      /** The cumulative token count the tool reported for this run — called every time it reports. The last one reported is what ends up in the ledger (D-5) */
       onUsage(tokens: AgentTokens): void
     },
   ): Promise<AgentRunResult>
   /**
-   * host 데이터 하나를 읽는다 (D-3). 창구가 이름(닫힌 목록)과 선언을 확인한 뒤에 부른다. 범위는 앱이 정한다: 프로젝트 앱은 그
-   * 프로젝트, 사용자 폴더 앱은 사용자 전체. 줄 수 없으면(사용자 폴더 앱의 git.status) 이유를 담아 던진다.
+   * Reads one piece of host data (D-3). Called only after the desk has already checked the name
+   * (against the closed list) and the declaration. The app decides the scope: a project app gets that
+   * project, a user-folder app gets the whole user. If it cannot be given (a user-folder app asking
+   * for git.status), this throws with a reason.
    */
   hostData(name: HostCapability, app: AppRef): Promise<Record<string, unknown>>
-  /** 에이전트 도구의 사람이 읽는 이름 — 물음에 적는다("Claude Code") */
+  /** The human-readable name of an agent tool — written into the question ("Claude Code") */
   agentLabel(tool: string): string
   /**
-   * 사람에게 묻는다 (D-4) — 세션에서 시작된 사슬이면 그 세션의 승인 카드로, 화면에서 시작된 사슬이면 그 앱의 고정 화면에.
-   * 신호가 서면(시간이 지났다, 부탁이 취소됐다) 물음을 거두고 null로 끝낸다. 답을 기억하는 것은 창구의 일이다.
+   * Asks the person (D-4) — through that session's approval card if the chain started from a
+   * session, or on that app's fixed screen if it started from a screen. If the signal fires (time
+   * ran out, the request was cancelled), withdraws the question and resolves with null. Remembering
+   * the answer is the desk's job.
    */
   askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null>
 }
 
 /**
- * 부탁 한 번의 글 상한. 앱이 넘기는 글은 세션의 대화에 그대로 남고 매번 에이전트의 문맥을 채운다 — 이보다 긴 것은 글이
- * 아니라 자료이고, 자료는 파일로 넘길 일이다. 200,000자는 대략 5만 토큰으로 두 도구의 문맥 창 안쪽이다.
+ * The text cap for one request. Text an app hands over stays in the session's conversation verbatim
+ * and fills the agent's context on every turn — anything longer than this is not text, it is data,
+ * and data belongs in a file instead. 200,000 characters is roughly 50,000 tokens, comfortably inside
+ * both tools' context windows.
  */
 export const AGENT_PROMPT_MAX_CHARS = 200_000
-/** 스키마의 상한 — 답의 모양 하나를 적는 데 64KiB면 넉넉하다. 더 큰 것은 스키마가 아니라 자료다 */
+/** The schema cap — 64KiB is plenty to describe one answer shape. Anything larger is data, not a schema */
 export const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
 
 /**
- * 폭주 막기 (M4 D-5) — 앱은 코드이고, 코드의 고리는 사람이 보기 전에 수백 번 돈다. 앱끼리 서로 부르거나 에이전트를 끝없이
- * 세우면 사람의 기계와 사용량이 쓰인다. 그래서 중개가 세는 것:
+ * Runaway prevention (M4 D-5) — an app is code, and a loop in code runs hundreds of times before a
+ * person ever sees it. Apps calling each other, or starting agents without end, would spend the
+ * person's machine and usage. So this is what the broker counts:
  *
- *   사슬의 깊이   한 사슬에 앱 호출은 3칸까지 — 화면(또는 세션)이 부른 앱이 1칸, 그 앱이 부른 앱이 2칸, 그 앱이 부른 앱이 3칸.
- *                "화면의 앱 → 일을 맡는 앱 → 자료를 주는 앱"이 우리가 그리는 가장 긴 조합이다. 그보다 깊은 사슬은 설계보다
- *                고리일 때가 많고, 칸마다 에이전트를 세우고 사람의 호출을 붙잡을 수 있다. 상수라 늘리기 쉽다
- *   되풀이       한 사슬 위에 같은 (앱, 도구)가 다시 서면 거절한다 — A.t → B.x → A.t는 깊이에 닿기 전에 고리다
- *   에이전트     한 앱에 동시에 하나, 1분에 다섯. 실측: 가장 짧은 실행(haiku로 한 문장 답)이 4.0초, 스키마를 준 답이 5.6초 —
- *                하나씩 차례로 돌려도 1분에 11~15번이 한계다. 다섯이면 짧은 부탁 몇 개를 몰아서 해도 닿지 않고, 고리는
- *                1분에 다섯(한 시간에 300)에서 멈추며, 거절이 기록 판에 이유와 함께 선다. 일이 많으면 한 부탁에 모으라고 말한다
+ *   chain depth  an app call chain goes at most 3 hops — the app a screen (or session) calls is hop
+ *                1, the app that app calls is hop 2, the app that one calls is hop 3. "The screen's
+ *                app → an app that does the work → an app that supplies data" is the longest
+ *                combination we design for. A chain deeper than that is more often a loop than a
+ *                design, and every hop can start an agent and hold a person's call open. It is a
+ *                constant, so it is easy to raise
+ *   repetition   if the same (app, tool) appears again within one chain, it is refused — A.t → B.x →
+ *                A.t is already a loop before it ever reaches the depth cap
+ *   agent        at most one per app at a time, five within a minute. Measured: the shortest run (a
+ *                one-sentence answer from haiku) took 4.0 seconds, one given a schema took 5.6
+ *                seconds — even run one after another, the ceiling is 11 to 15 per minute. Five is
+ *                enough that a burst of a few short requests never hits it, while a loop is stopped
+ *                at five per minute (300 per hour), and the refusal shows up in the runs panel with
+ *                its reason. If there is a lot of work, it is told to fit into one request
  *
- * 둘째 에이전트를 줄 세우지 않고 거절하는 이유: 줄은 보이지 않는 기다림이다. 앱의 호출이 몇 분씩 말없이 붙잡히고, 고리는
- * 줄을 쌓는다. 거절은 곧바로 이유와 함께 앱에 닿는다 — 앱이 끝나기를 기다렸다 다시 부탁하면 된다.
+ * Why a second agent is refused instead of queued: a queue is an invisible wait. An app's call would
+ * be held silently for minutes, and a loop would only pile the queue higher. A refusal reaches the
+ * app immediately, with a reason — the app can wait for the first one to finish and ask again.
  */
 export const CHAIN_DEPTH_MAX = 3
 export const AGENT_RUNS_PER_WINDOW = 5
@@ -181,9 +210,11 @@ const CallAppArgs = z.object({
 })
 
 /**
- * 앱이 부르는 다른 앱의 이름 → 앱 (D-2). 세션이 앱을 받는 규칙(결정 4)과 같은 모양이다: 프로젝트 앱은 **자기 프로젝트의
- * 앱을 먼저**, 없으면 사용자 폴더의 앱을 부른다. 사용자 폴더 앱은 사용자 폴더의 앱만 부른다 — 어느 프로젝트에도 속하지
- * 않으므로 한 프로젝트의 앱을 고를 근거가 없다. 다른 프로젝트의 앱은 이름이 같아도 닿지 않는다(프로젝트마다 신뢰가 다르다).
+ * A name an app calls another app by → the app (D-2). Same shape as the rule sessions use to resolve
+ * an app (decision 4): a project app calls **its own project's app first**, and the user-folder app
+ * of the same name if that does not exist. A user-folder app can call only other user-folder apps —
+ * since it belongs to no project, there is no basis for picking any one project's app. An app in a
+ * different project is never reachable even under the same name (trust differs per project).
  */
 export function resolveCallTarget(asker: AppRef, id: string, has: (ref: AppRef) => boolean): AppRef | null {
   if (asker.projectId !== null) {
@@ -202,18 +233,18 @@ const RunAgentArgs = z.object({
   schema: z.record(z.string(), z.unknown()).optional(),
 })
 
-/** 기억된 답 하나의 보이는 모양 (`apps.permissions`) */
+/** The visible shape of one remembered answer (`apps.permissions`) */
 export type CapabilityDecisionListed = { capability: string; text: string; decision: 'allow' | 'deny'; decidedAt: number; current: boolean }
 
-/** 거절의 이유 — 앱의 결과에도 앱의 표준에러에도 이 말이 간다. 되돌리는 길까지 적는다 */
+/** The text of a denial — this goes both into the app's result and its stderr. Also states how to reverse it */
 function deniedText(tool: BrokerToolName, appName: string, text: string): string {
   return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
 }
 
-/** 앱 하나의 자리 이름 — 폭주 막기가 앱마다 센다 */
+/** The slot name for one app — runaway prevention counts per app under this */
 const slotOf = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
 
-/** 사람이 읽을 길이 — "5 minutes", "1 second" */
+/** A duration for a person to read — "5 minutes", "1 second" */
 function humanDuration(ms: number): string {
   const s = Math.max(1, Math.round(ms / 1000))
   if (s < 60) return `${s} second${s === 1 ? '' : 's'}`
@@ -224,12 +255,16 @@ function humanDuration(ms: number): string {
 const NOT_DECLARED = 'this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so'
 
 /**
- * 창구의 답 하나 — 앱에 돌려줄 결과와, 기록(D-6)에 남길 결말. 거절(`rejected`)은 정책이 막은 것(선언 밖, 사람이 허락하지 않았다,
- * 한도)이고, 실패(`error`)는 부탁이 틀렸거나 풀다가 잘못된 것(빈 글, 틀린 스키마, 에이전트의 실패)이다. 기록 판은 둘을 다른
- * 말로 보인다(refused / failed) — 앱을 고치는 사람에게 "막혔다"와 "틀렸다"는 다른 일이다.
+ * One answer from the desk — the result to return to the app, and the outcome to record in the
+ * ledger (D-6). `rejected` is policy blocking something (outside the declaration, not allowed by the
+ * person, a limit), and `error` is the request being malformed or something going wrong while
+ * resolving it (empty text, a bad schema, an agent failing). The runs panel shows these with
+ * different words (refused / failed) — to someone fixing the app, "blocked" and "wrong" are
+ * different things.
  *
- * `delegated`는 call_app이 부른 앱에 닿은 것이다. 그 앱의 실행 줄(호출자 app, 부모 = 이 부탁을 일으킨 실행)이 곧 이 부탁의
- * 기록이다 — 같은 일을 두 줄로 적지 않는다.
+ * `delegated` means call_app reached the called app. That app's own run row (caller kind `app`,
+ * parent = the run that triggered this request) is already this request's record — the same event is
+ * never written as two rows.
  */
 type Answer = { status: 'ok' | 'error' | 'rejected' | 'delegated'; result: CallToolResult }
 
@@ -239,12 +274,16 @@ const fail = (text: string): Answer => ({ status: 'error', result: { content: [{
 const firstText = (r: CallToolResult): string => r.content.find((c): c is { type: 'text'; text: string } => c.type === 'text')?.text ?? ''
 
 /**
- * 중개 부탁 하나의 기록 줄 (D-6) — 부탁한 앱의 `broker` 줄, 부모는 부탁을 일으킨 실행. 도구 호출의 줄과 같은 표에 같은 규칙
- * (인자는 가린 요약과 해시, 실패만 원문)으로 남는다. 그래서 한 앱의 기록을 뿌리부터 따라 내려가면 "화면이 누른 도구 → 앱이
- * 부탁한 에이전트"가 한 사슬로 읽힌다.
+ * The ledger row for one broker request (D-6) — the requesting app's `broker` row, with its parent
+ * being the run that triggered it. Kept in the same table as a tool call's row, under the same rules
+ * (arguments as a masked summary and a hash, original text kept only for failures). So following one
+ * app's ledger down from the root reads as a single chain: "the tool the screen pressed → the agent
+ * the app requested".
  *
- * 줄은 처음 필요할 때 선다(`open`) — run_agent·host_data는 부탁이 들어오자마자(에이전트는 몇 분을 돈다, 도는 줄이 보여야
- * 한다), call_app은 부른 앱에 닿지 못하고 끝날 때만(닿으면 그 앱의 줄이 기록이다).
+ * A row is created the first time it is needed (`open`) — for run_agent and host_data, as soon as the
+ * request arrives (an agent can run for minutes, and a running row has to be visible), and for
+ * call_app, only if it ends without ever reaching the called app (if it does reach it, that app's own
+ * row is the record).
  */
 class BrokerRow {
   readonly id = `run_${randomUUID()}`
@@ -270,7 +309,7 @@ class BrokerRow {
       appId: this.app.appId,
       kind: 'broker',
       tool: this.tool,
-      // 부탁한 쪽은 이 앱이다 — 사슬을 누가 시작했는지는 부모를 따라 올라가면 나온다
+      // The requester is this app — who started the chain comes from walking up through parents
       callerKind: 'app',
       callerSessionId: null,
       parentRunId: this.parentRunId,
@@ -284,13 +323,13 @@ class BrokerRow {
     })
   }
 
-  /** 이 부탁이 세운 에이전트 세션을 잇는다 — 세션이 서는 순간, 끝나기 전에 */
+  /** Links the agent session this request started — the moment the session exists, before it ends */
   link(sessionId: string): void {
     this.open()
     this.ledger?.link(this.id, sessionId)
   }
 
-  /** 에이전트가 쓴 토큰 — 도구가 알려 줄 때마다 덮는다(누적값이다). 닫을 때 적는다 */
+  /** Tokens the agent spent — overwritten every time the tool reports it (it is a cumulative value). Written when this closes */
   used: AgentTokens | null = null
 
   close(status: Exclude<AppRunRow['status'], 'running'>, error: string | null, result: CallToolResult | null = null): void {
@@ -298,7 +337,7 @@ class BrokerRow {
     this.closed = true
     this.open()
     this.ledger.end(this.id, { status, durationMs: Date.now() - this.t0, error: error === null ? null : this.redact(error), tokens: this.used })
-    // 실패한 부탁의 입력(글·스키마)은 앱을 고치는 에이전트가 봐야 한다 — 도구 호출과 같은 규칙으로, 최근 것만
+    // The input (text, schema) of a failed request needs to be seen by the agent fixing the app — under the same rule as a tool call, keeping only the most recent
     if (status === 'error') {
       this.ledger.keepFailure(
         {
@@ -316,8 +355,10 @@ class BrokerRow {
 }
 
 /**
- * 부탁한 도구와 선언을 맞춰 본다 (D-1). `true`는 사람의 기본 에이전트만, 목록은 목록에 적힌 도구만.
- * 도구를 안 적은 부탁은 기본 도구로 푼다 — 목록에 기본 도구가 없으면 목록의 첫 도구다(선언 밖으로 나가지 않는다).
+ * Checks a requested tool against the declaration (D-1). `true` allows only the person's default
+ * agent, and a list allows only the tools it names. A request that names no tool resolves to the
+ * default tool — if the default is not in the list, it resolves to the list's first tool instead (it
+ * never resolves outside the declaration).
  */
 export function pickAgentTool(declared: boolean | string[] | undefined, requested: string | undefined, fallback: string): { tool: string } | { error: string } {
   if (declared === true) {
@@ -341,21 +382,23 @@ export function pickAgentTool(declared: boolean | string[] | undefined, requeste
 export class BrokerDesk {
   private host: BrokerHost | null = null
   /**
-   * 지금 사람에게 묻고 있는 것 — (앱, 능력)마다 하나. 같은 앱의 부탁 둘이 같은 능력을 동시에 쓰려 하면 물음은 하나만 선다
-   * (둘째는 첫째의 답을 기다린다). 기다리는 쪽이 모두 떠나거나 시간이 지나면 물음을 거둔다.
+   * What is currently being asked of the person — one per (app, capability). If two requests from the
+   * same app try to use the same capability at the same time, only one question is asked (the second
+   * waits on the first's answer). The question is withdrawn once every waiter has left, or once time
+   * runs out.
    */
   private asking = new Map<string, { answer: Promise<'allow' | 'deny' | null>; waiters: number; withdraw: AbortController; timedOut: boolean }>()
-  /** 앱마다 지금 도는 에이전트가 선 때 (D-5) — 앱 하나에 하나 */
+  /** When the currently running agent started, per app (D-5) — one per app */
   private agentsRunning = new Map<string, number>()
-  /** 앱마다 최근 창 안에 에이전트를 세운 때들 (D-5) */
+  /** When agents were started within the recent window, per app (D-5) */
   private agentStarts = new Map<string, number[]>()
 
   constructor(
     private apps: DeskApps,
     private book: CapabilityBook,
-    /** 사람의 답을 기다리는 상한과 에이전트를 세는 창 (런타임의 timing — 시험이 줄인다) */
+    /** The cap on waiting for the person's answer, and the window for counting agents (the runtime's timing — reduced by tests) */
     private timing: () => { questionMs: number; agentRateWindowMs: number },
-    /** 부탁마다 한 줄을 남길 자리 (D-6) — 런타임의 실행 기록과 같은 것. 없으면 남기지 않는다 */
+    /** Where a row is kept per request (D-6) — the same thing as the runtime's run ledger. Nothing is kept if absent */
     private ledger: RunLedger | null = null,
   ) {}
 
@@ -364,19 +407,22 @@ export class BrokerDesk {
   }
 
   /**
-   * 답을 검증하는 JSON Schema 엔진 — MCP 서버 SDK가 도구의 outputSchema를 검증할 때 쓰는 것과 같은 것(ajv, 방언은
-   * `$schema`로 고른다). 저장소에 새 의존을 들이지 않는다.
+   * The JSON Schema engine used to validate an answer — the same one the MCP server SDK uses to
+   * validate a tool's outputSchema (ajv, dialect chosen by `$schema`). This avoids adding a new
+   * dependency to the repository.
    */
   private schemas = new AjvJsonSchemaValidator()
 
-  /** host의 코어가 몸통을 채운다 (`SessionManager.useExternalApps`). null이면 비운다 */
+  /** The host's core fills in the body (`SessionManager.useExternalApps`). Empties it if null */
   attach(host: BrokerHost | null): void {
     this.host = host
   }
 
   /**
-   * 부탁 하나를 끝까지 — 그리고 **어떻게 끝났든 한 줄을 남긴다** (D-6). 거절도, 실패도, 취소도. 부탁한 앱을 만드는 사람이 기록
-   * 판에서 "왜 에이전트가 안 돌았나"를 읽는 자리이고, 사람이 "이 앱이 내 이름으로 무엇을 시켰나"를 읽는 자리다.
+   * Runs one request all the way through — and **records a row no matter how it ends** (D-6). A
+   * denial, a failure, a cancellation, all of them. This is where the person building the requesting
+   * app reads "why didn't the agent run" in the runs panel, and where a person reads "what did this
+   * app do in my name".
    */
   async handle(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
     const row = new BrokerRow(this.ledger, app.ref, tool, args, call.parentRunId, this.apps.redactor(app.ref))
@@ -393,16 +439,20 @@ export class BrokerDesk {
   }
 
   /**
-   * 문지기가 받지 않은 부탁도 한 줄이다 (D-6) — 실행 id가 없거나, 이 앱에 열려 있지 않은 id를 내밀었다. 부모는 없다: 내민 id를
-   * 부모로 적으면 앱이 지어낸 id로 남의 사슬에 줄을 끼워 넣을 수 있다. 내민 id는 이유 안에만 남는다.
+   * A request the gatekeeper never accepted is also a row (D-6) — either there was no run id, or the
+   * presented id was not open for this app. There is no parent: recording the presented id as the
+   * parent would let an app nest a row into someone else's chain with a made-up id. The presented id
+   * survives only inside the reason text.
    */
   refused(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, why: string): void {
     new BrokerRow(this.ledger, app.ref, tool, args, null, this.apps.redactor(app.ref)).close('rejected', why)
   }
 
   /**
-   * `host_data` (D-3) — 닫힌 목록의 이름, 그리고 매니페스트가 `uses.host`에 적은 것만. 둘 다 기본은 거절이다: 목록 밖의 이름은
-   * 없는 능력이고, 적지 않은 이름은 쓰지 않겠다고 한 능력이다. 답은 JSON 하나다(`structuredContent`와 같은 글).
+   * `host_data` (D-3) — only a name from the closed list, and only one the manifest listed in
+   * `uses.host`. Both default to refusal: a name outside the list is not a capability at all, and one
+   * the manifest never listed is a capability it declared it would not use. The answer is one JSON
+   * value (the same text as `structuredContent`).
    */
   private async hostData(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<Answer> {
     const parsed = HostDataArgs.safeParse(raw)
@@ -424,11 +474,14 @@ export class BrokerDesk {
   }
 
   /**
-   * `run_agent` (D-1) — 선언 확인, 도구 고르기, 스키마 확인, 실행, 답 검증.
+   * `run_agent` (D-1) — checking the declaration, choosing a tool, checking the schema, running it,
+   * and validating the answer.
    *
-   * **검증한 것이 곧 돌려주는 것이다.** 스키마를 준 부탁의 답은 도구가 이미 모양을 맞췄더라도(Claude는 CLI가 다시 시키고,
-   * Codex는 디코딩을 묶는다) 여기서 한 번 더 같은 스키마로 검증한다. 앱은 이 답을 믿고 자기 상태에 쓴다 — 도구의 약속이
-   * 아니라 우리가 확인한 것을 넘긴다.
+   * **What gets returned is exactly what was validated.** For a request that supplied a schema, the
+   * answer is validated once more here against that same schema, even though the tool may have
+   * already shaped it (the CLI re-prompts for Claude, and decoding is bound for Codex). The app
+   * trusts this answer and writes it into its own state — what it receives is what we verified, not
+   * merely what the tool promised.
    */
   private async runAgent(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall, row: BrokerRow): Promise<Answer> {
     const parsed = RunAgentArgs.safeParse(raw)
@@ -438,7 +491,7 @@ export class BrokerDesk {
     if (prompt.length > AGENT_PROMPT_MAX_CHARS) {
       return fail(`run_agent: the prompt is ${prompt.length} characters, over the ${AGENT_PROMPT_MAX_CHARS} limit — pass large material as a file the agent can read`)
     }
-    // 선언이 먼저다 — 선언하지 않은 앱은 host가 무엇을 빌려줄 수 있든 같은 이유로 거절된다
+    // The declaration is checked first — an app that never declared this is refused for the same reason no matter what the host could lend it
     const declared = app.manifest.uses.agent
     if (!declared || (Array.isArray(declared) && declared.length === 0)) return refuse(`run_agent refused: ${NOT_DECLARED}`)
     const host = this.host
@@ -460,7 +513,7 @@ export class BrokerDesk {
     const denied = await this.permit('run_agent', app, { kind: 'agent', tool: picked.tool }, `run an agent (${host.agentLabel(picked.tool)}) in a new session`, call)
     if (denied) return denied
 
-    // 폭주 막기 (D-5) — 세고 자리를 잡는 사이에 기다림이 없다: 같은 앱의 부탁 둘이 함께 들어와도 하나만 지난다
+    // Runaway prevention (D-5) — no awaiting happens between counting and claiming the slot: if two requests from the same app arrive together, only one gets through
     const key = slotOf(app.ref)
     const since = this.agentsRunning.get(key)
     if (since !== undefined) {
@@ -504,11 +557,14 @@ export class BrokerDesk {
   }
 
   /**
-   * `call_app` (D-2) — `uses.apps`에 적은 앱의 에이전트용(`model`) 도구만, 세션과 같은 범위 규칙으로.
+   * `call_app` (D-2) — only the agent-facing (`model`) tools of an app listed in `uses.apps`, under
+   * the same scoping rule as a session.
    *
-   * 부르는 것은 런타임의 한 길이다(호출자 `app`, 부모 = 이 부탁을 일으킨 실행). 그래서 공개 범위 검사(화면 전용 도구는
-   * 거절), 신뢰·멈춘 앱의 거절, 실행 id, 기록이 다른 호출과 똑같이 일어나고, 부모 실행이 끝나거나 취소되면 이 호출도
-   * 취소된다. 부른 앱의 답은 그대로 돌려준다 — 실패를 답했으면 실패인 채로.
+   * The call itself goes through the runtime's one path (caller `app`, parent = the run that
+   * triggered this request). So audience checking (a screen-only tool is refused), refusing an
+   * untrusted or stopped app, run ids, and the ledger all happen exactly as they would for any other
+   * call, and this call is cancelled too if the parent run ends or is cancelled. The called app's
+   * answer is returned as-is — if it answered with a failure, it stays a failure.
    */
   private async callApp(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall): Promise<Answer> {
     const parsed = CallAppArgs.safeParse(raw)
@@ -529,7 +585,7 @@ export class BrokerDesk {
           : `call_app: there is no app "${id}" in this project or in your user folder`,
       )
     }
-    // 폭주 막기 (D-5) — 사람에게 묻기 전에: 어차피 거절될 부탁으로 사람을 부르지 않는다
+    // Runaway prevention (D-5) — before asking the person: they are never bothered with a request that would be refused anyway
     const path = this.apps.chain(call.parentRunId)
     const shown = [...path, { ref: target, tool }].map((p) => `${p.ref.appId}.${p.tool}`).join(' → ')
     if (path.some((p) => p.ref.appId === target.appId && p.ref.projectId === target.projectId && p.tool === tool)) {
@@ -545,22 +601,27 @@ export class BrokerDesk {
     const denied = await this.permit('call_app', app, { kind: 'app', target }, `call the app "${this.apps.name(target)}"${where}`, call)
     if (denied) return denied
     const o = await this.apps.call(target, tool, args ?? {}, { kind: 'app', parentRunId: call.parentRunId }, { signal: call.signal })
-    // 여기부터의 기록은 부른 앱의 줄이다 (`Answer`의 delegated). 부른 앱이 답했으면 그 답을 그대로(실패를 답했으면 실패인 채로)
+    // From here, the record is the called app's own row (`Answer`'s delegated). If the called app answered, its answer is returned as-is (if it was a failure, it stays a failure)
     if (o.result) return { status: 'delegated', result: o.status === 'ok' ? o.result : { ...o.result, isError: true } }
     const how = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
     return { status: 'delegated', result: { content: [{ type: 'text', text: `call_app: ${id}.${tool} ${how} — ${o.error ?? 'no reason was given'}` }], isError: true } }
   }
 
   /**
-   * 능력 승인 (D-4) — 선언을 지난 부탁이 그 능력을 **처음** 쓸 때 사람에게 한 번 묻는다. 거절이면 앱에 돌려줄 결과를, 허락이면
-   * null을 준다.
+   * Capability approval (D-4) — asks the person once, the **first** time a request past the
+   * declaration uses that capability. Returns the result to give the app if denied, or null if
+   * allowed.
    *
-   * 답은 (앱, 능력)마다 기억된다 — 허락도 거절도. 사람이 한 번 답한 것을 다시 묻지 않는다는 약속이고, 잘못 누른 답은 기록 판의
-   * 목록에서 잊을 수 있다(`apps.forgetPermission`). 매니페스트의 `uses`가 바뀌면 지문이 달라져 기억한 답은 쓰이지 않는다 —
-   * 앱을 만든 쪽이 무엇을 쓸지 다시 말했으니 사람도 다시 본다.
+   * The answer is remembered per (app, capability) — an allow and a deny alike. This is the promise
+   * that the person is never asked the same thing twice, and an answer pressed by mistake can be
+   * forgotten from the runs panel's list (`apps.forgetPermission`). If the manifest's `uses` changes,
+   * the fingerprint changes with it and the remembered answer is no longer used — the app's builder
+   * has restated what it uses, so the person looks at it again too.
    *
-   * 기다리는 동안 앱의 호출은 살아 있다(중개 통로의 진행 알림, `broker.ts`). 사람이 답하지 않고 상한(5분)이 지나면 거절로
-   * 닫되 **기억하지 않는다** — 답이 아니다. 다음에 쓰려 할 때 다시 묻는다.
+   * The app's call stays alive while this waits (a progress notification over the broker conduit,
+   * `broker.ts`). If the person never answers and the cap (5 minutes) passes, this closes as a
+   * denial, but **remembers nothing** — that is not an answer. It asks again the next time this is
+   * used.
    */
   private async permit(tool: BrokerToolName, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<Answer | null> {
     const key = capabilityKey(capability)
@@ -609,7 +670,7 @@ export class BrokerDesk {
       if (left) return
       left = true
       asked.waiters -= 1
-      // 기다리는 쪽이 모두 떠났다 — 물을 까닭이 없다
+      // Every waiter has left — there is no longer a reason to ask
       if (asked.waiters === 0) asked.withdraw.abort()
     }
     call.signal.addEventListener('abort', leave, { once: true })
@@ -631,14 +692,15 @@ export class BrokerDesk {
           : `${tool} refused: the question to the person was withdrawn before an answer`,
       )
     }
-    // 답이 둘 이상의 기다림에 닿아도 기억은 한 번이면 된다 — 같은 값을 다시 적어도 해가 없다
+    // Even if the answer reaches more than one waiter, it only needs to be remembered once — writing the same value again is harmless
     this.book.put(app.ref, { capability: key, text, decision: answer, stamp, decidedAt: Date.now() })
     return answer === 'allow' ? null : denied()
   }
 
   /**
-   * 한 앱에 대해 기억된 답 (D-4) — 기록 판이 보이고 잊게 한다. `current`는 지금 매니페스트의 선언과 같은 지문으로 답한 것인가다:
-   * 아니면 그 답은 더 쓰이지 않는다(다시 묻는다).
+   * The remembered answers for one app (D-4) — shown and forgettable in the runs panel. `current`
+   * means the answer was given against the same fingerprint as the manifest's current declaration; if
+   * not, that answer is no longer used (it is asked again).
    */
   permissions(ref: AppRef, manifestUses: unknown | null): (CapabilityDecisionListed)[] {
     const stamp = manifestUses === null ? null : usesStamp(manifestUses)
@@ -653,9 +715,11 @@ export class BrokerDesk {
   }
 
   /**
-   * 스키마를 받기 전에 보는 것. 뿌리가 객체여야 하는 이유: 답은 MCP 결과의 `structuredContent`로 가는데 그 칸은 객체다.
-   * Codex의 구조화 출력(OpenAI 규칙)도 뿌리에 객체를 요구한다. 엔진이 읽지 못하는 스키마는 세션을 세우기 **전에**
-   * 거절한다 — 세션을 세우고 도구를 한 턴 돌린 뒤에야 "스키마가 틀렸다"고 하면 사람의 사용량만 쓴다.
+   * Checked before a schema is accepted. Why the root must be an object: the answer goes into an MCP
+   * result's `structuredContent`, and that field is an object. Codex's structured output (the OpenAI
+   * convention) also requires an object at the root. A schema the engine cannot read is refused
+   * **before** starting a session — waiting until a session has started and the tool has already run
+   * for a turn to say "the schema is invalid" would only spend the person's usage for nothing.
    */
   private schemaProblem(schema: Record<string, unknown>): string | null {
     const size = JSON.stringify(schema).length
@@ -671,8 +735,9 @@ export class BrokerDesk {
 }
 
 /**
- * 마지막 글을 JSON으로 읽는다 — Codex는 스키마로 묶은 턴의 마지막 메시지 자체가 답이다. 코드 울타리(```json … ```)에
- * 싸여 와도 읽는다: 모델이 습관처럼 두르는 울타리 때문에 맞는 답을 버리지 않는다. 못 읽으면 undefined다.
+ * Reads the final text as JSON — for Codex, a schema-bound turn's last message is itself the answer.
+ * This also reads it when wrapped in a code fence (```json … ```): a habitual fence from the model
+ * must not cause a valid answer to be thrown away. Returns undefined if it cannot be read.
  */
 function parseJsonAnswer(text: string): unknown {
   const t = text.trim()

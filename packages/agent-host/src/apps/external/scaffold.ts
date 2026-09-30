@@ -5,42 +5,48 @@ import { assertExistingPathSync, isMissingPathError } from '../../dev-services/p
 import { MANIFEST_FILE, parseManifest, type AppManifest } from './manifest.js'
 
 /**
- * 새 앱의 틀 (M4 C-1) — 템플릿 폴더를 앱 폴더로 펼친다.
+ * The scaffold for a new app (M4 C-1) — expands the template folder into an app folder.
  *
- * 템플릿(`packages/agent-host/app-template/`)은 제품의 자산이다: 만드는 에이전트가 처음 보는 코드가
- * 이것이고, 규칙(도구 주석·공개 범위·상태는 서버에·데이터 폴더·갱신 알림)을 **처음부터 지키는** 앱이어야
- * 에이전트가 그 모양을 따라 고친다(S-6: 에이전트는 런타임을 건드리지 않고 서버와 화면만 고쳤다).
- * 런타임(`runtime/`)은 스크립트가 만든 생성물이라 바이트 그대로 복사한다(`build-app-runtime.mjs`).
+ * The template (`packages/agent-host/app-template/`) is a product asset: it is the first code a
+ * building agent ever sees, and it has to be an app that **follows the rules from the start** (tool
+ * annotations, audience, state kept in the server, the data folder, change notifications) for the
+ * agent to keep following that shape when it edits (S-6: the agent left the runtime alone and only
+ * edited the server and the screen). The runtime (`runtime/`) is a build artifact, so it is copied
+ * byte for byte (`build-app-runtime.mjs`).
  *
- * 이 파일은 **펼치기만 한다** — 어디에 펼칠지(신뢰·이름·이미 있는 id)는 런타임의 문(`createApp`)이 정한다.
+ * This file **only expands the template** — where it gets expanded (trust, the name, whether the id
+ * already exists) is decided by the runtime's door (`createApp`).
  */
 
-/** 앱 이름·id가 들어가는 자리 */
+/** Placeholders where the app name and id are substituted in */
 const ID = '{{APP_ID}}'
 const NAME = '{{APP_NAME}}'
 const DESCRIPTION = '{{APP_DESCRIPTION}}'
 
-/** 생성물 — 바이트 그대로 복사하고 자리 채우기를 하지 않는다 */
+/** A build artifact — copied byte for byte, with no placeholder substitution */
 const VERBATIM_DIR = 'runtime'
 
 /**
- * 점으로 시작하는 파일은 템플릿에 **점 없이** 둔다. 배포 묶음이 자원을 글롭(`resources/host/**`)으로 모으는데, 점 파일을
- * 줍는지는 묶는 도구마다 다르다 — 빠지면 앱마다 생성물 표시가 조용히 사라진다.
+ * A file that starts with a dot is kept in the template **without the dot**. The packaged build
+ * collects resources through a glob (`resources/host/**`), and whether dotfiles are picked up
+ * varies by bundling tool — if one is dropped, the build-artifact marker silently disappears from
+ * every app.
  */
 const RENAMED: Record<string, string> = { gitattributes: '.gitattributes' }
 
-/** 이 파일이 있어야 템플릿이다 — 런타임이 빠진 템플릿은 `node server.mjs`가 뜨지 않는 앱을 만든다 */
+/** These files must exist for this to count as a template — a template missing the runtime produces an app where `node server.mjs` never starts */
 const REQUIRED = [MANIFEST_FILE, 'server.mjs', join(VERBATIM_DIR, 'centralu-app-runtime.mjs'), join(VERBATIM_DIR, 'mcp-app.js')]
 
 /**
- * 템플릿이 있는 곳. 스키마·다리 스크립트와 같은 문제다(`bridge-path.ts`): 소스로 돌면 패키지 안에서,
- * 번들된 배포 앱은 산출물 옆에서 찾는다(`scripts/bundle.mjs`가 복사한다).
+ * Where the template lives. The same problem as the schema and bridge scripts (`bridge-path.ts`):
+ * running from source finds it inside the package, and a bundled build finds it next to the build
+ * output (`scripts/bundle.mjs` copies it there).
  */
 export function appTemplateDir(): string {
-  // 번들 쪽이 먼저다 — 배포 앱은 자기 옆의 템플릿만 믿는다(위로 세 칸에 무엇이 있든)
+  // The bundled layout is checked first — a packaged app trusts only the template next to it (whatever exists three levels up)
   const candidates = [
-    new URL('./app-template/', import.meta.url), // 번들 산출물 레이아웃 (resources/host/main.mjs 옆)
-    new URL('../../../app-template/', import.meta.url), // 소스 트리 (src/apps/external → packages/agent-host)
+    new URL('./app-template/', import.meta.url), // the bundled build layout (next to resources/host/main.mjs)
+    new URL('../../../app-template/', import.meta.url), // the source tree (src/apps/external → packages/agent-host)
   ].map((u) => fileURLToPath(u))
   const found = candidates.find((d) => REQUIRED.every((f) => existsSync(join(d, f))))
   if (!found) throw new Error(`app template not found (or its runtime is missing): ${candidates.join(', ')}`)
@@ -50,11 +56,11 @@ export function appTemplateDir(): string {
 export type ScaffoldSpec = { id: string; name: string; description: string }
 
 /**
- * 템플릿을 `dest`(아직 없는 폴더)에 펼치고 매니페스트를 돌려준다.
+ * Expands the template into `dest` (a folder that does not exist yet) and returns the manifest.
  *
- * 매니페스트는 글자를 갈아 끼우지 않고 **읽어서 고친 뒤 판정에 통과시켜** 쓴다(`parseManifest` —
- * 발견이 읽는 것과 같은 한 벌). 이름에 따옴표가 있어도 JSON이 깨지지 않고, 통과하지 못하는 앱은
- * 폴더가 생기기 전에 멈춘다.
+ * The manifest is not produced by text substitution — it is **read, edited, and validated** before
+ * being written (`parseManifest` — the same validation discovery reads with). A quote in the name
+ * cannot break the JSON, and an app that fails validation stops before its folder is even created.
  */
 export function scaffoldApp(templateDir: string, dest: string, spec: ScaffoldSpec): AppManifest {
   const raw = JSON.parse(readFileSync(join(templateDir, MANIFEST_FILE), 'utf8')) as Record<string, unknown>
@@ -86,9 +92,10 @@ function copyTree(from: string, to: string, rel: string, spec: ScaffoldSpec): vo
 }
 
 /**
- * 자리 채우기 — 들어가는 자리의 문법대로 거른다. id는 글자 규칙(#93)상 어디에 넣어도 안전하다.
- * 이름·설명은 사람이 쓴 글이라 HTML에서는 이스케이프하고, 그 밖(마크다운, 코드의 `//` 주석)에서는
- * 한 줄로만 넣는다(`normalizeName`이 이미 한 줄로 만든다).
+ * Placeholder substitution — filtered according to the syntax of where it is inserted. Because of
+ * the character rule (#93), an id is safe to insert anywhere. The name and description are text a
+ * person wrote, so they are escaped in HTML, and elsewhere (Markdown, a `//` comment in code) they
+ * are inserted only as a single line (`normalizeName` already reduces them to one line).
  */
 function fill(text: string, ext: string, spec: ScaffoldSpec): string {
   const esc = ext === '.html' ? escapeHtml : (s: string) => s
@@ -99,15 +106,17 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 }
 
-/** 사람이 준 이름·설명을 한 줄로 — 줄바꿈이 코드 주석을 끊지 못하게 */
+/** Reduces a person-supplied name or description to one line — so a line break cannot cut off a code comment */
 export function oneLine(s: string): string {
   return s.replace(/\s+/g, ' ').trim()
 }
 
 /**
- * `<root>/<parts…>`까지의 폴더를 **한 칸씩** 만든다 — 칸마다 뿌리 밖으로 새는 링크인지 먼저 본다.
- * `mkdir -p`로 한 번에 만들면, 프로젝트 안의 `.centralu`가 밖을 가리키는 링크일 때 앱이 저장소
- * 밖에 쓰인다(발견과 감시가 같은 가드로 거절하는 링크다 — 만드는 쪽도 같아야 한다).
+ * Creates the folders down to `<root>/<parts…>` **one segment at a time** — checking at each
+ * segment whether it is a link that escapes the root. Creating it all at once with `mkdir -p` would
+ * mean an app gets written outside the repository whenever `.centralu` inside a project is a link
+ * pointing elsewhere (the same link that discovery and watching reject with their guard — creation
+ * has to agree with them).
  */
 export function ensureDirInside(root: string, parts: readonly string[]): string {
   for (let i = 1; i <= parts.length; i++) {

@@ -26,37 +26,43 @@ import { folderFingerprint } from './fingerprint.js'
 import { AppVersions, VERSIONS_REL, type Snapshot } from './versions.js'
 
 /**
- * 건네기의 host 쪽 (M4 E) — 밖에서 가져온 앱의 대기실과 사람의 확인.
+ * The host side of handover (M4 E) — the staging area for an externally imported app, and the
+ * person's confirmation of it.
  *
- * 런타임은 앱의 수명과 호출의 한 길을 들고, 이 자리는 "이 앱을 들여도 되나, 돌려도 되나"를 든다. 둘을 나눈 이유: 런타임은
- * 중개(D)·반영(C-4)·수명이 함께 사는 파일이라, 건네기의 규칙이 그 사이에 흩어지면 어느 검사가 어디 있는지 찾기 어렵다. 런타임이
- * 이 자리에 묻는 것은 둘뿐이다 — 이 앱이 확인을 기다리나(`gate`), 가져온 앱의 표시(`imported`).
+ * The runtime holds an app's lifecycle and the single path a call takes; this file holds "may this
+ * app be brought in, may it run." These are kept separate because the runtime is already a file
+ * where the broker (D), reflecting changes (C-4), and the lifecycle all live together — scattering
+ * handover's rules through that too would make it hard to find which check lives where. The runtime
+ * asks this file only two things: whether this app is waiting on confirmation (`gate`), and the mark
+ * on an imported app (`imported`).
  *
- * 순서: 준비(`prepare`: 옮겨 담고 판정하고 볼 것을 만든다) → 사람이 본다 → 들이기(`commit`: 사용자 폴더로 옮기고 꺼진 채로 적는다,
- * 원하면 그 자리에서 확인까지) → 나중에 `server`·`uses`가 바뀌면 다시 묻는다(`review` → `enable`).
+ * The sequence: prepare (`prepare`: stage the files, validate, and build what the person will see) →
+ * the person reviews it → bring it in (`commit`: move it into the user folder and record it as
+ * disabled, or confirm it right there if requested) → later, if `server` or `uses` changes, ask again
+ * (`review` → `enable`).
  */
 
 export type HandoverHost = {
   dataRoot: string
   reservedIds: readonly string[]
-  /** 사용자 폴더를 지금 다시 훑는다 — 들인 앱이 곧바로 목록에 서도록 */
+  /** Rescans the user folder right now — so an app just brought in shows up in the list immediately */
   rescanUser(): void
-  /** 사용자 폴더 앱 하나의 지금 모습 — 없으면 null. 매니페스트가 틀렸으면 manifest가 null이다 */
+  /** The current state of one user-folder app — null if it does not exist. If the manifest is invalid, manifest is null */
   userApp(appId: string): { dir: string; manifest: AppManifest | null } | null
-  /** 목록이 달라졌을 수 있다(상태·표시) */
+  /** The list may have changed (status, mark) */
   changed(): void
 }
 
 export type HandoverOptions = {
-  /** 상한 (시험이 줄인다) */
+  /** Limits (reduced by tests) */
   limits?: Partial<ImportLimits>
-  /** 내려받기 (시험이 가짜를 꽂는다 — https 서버를 띄우지 않고 넘김·크기·내용을 시험한다) */
+  /** Download (a test plugs in a fake — this exercises transfer, size, and content without starting an https server) */
   fetch?: typeof fetch
-  /** 대기실이 스스로 치워지기까지 */
+  /** How long until the staging area cleans itself up */
   stagingMs?: number
 }
 
-/** 대기실 — 데이터 폴더 안이라 사용자 폴더로 옮기는 것이 같은 파일 시스템의 이름 바꾸기다. 발견은 여기를 훑지 않는다 */
+/** The staging area — inside the data folder, so moving it into the user folder is a rename on the same filesystem. Discovery never scans here */
 export const STAGING_REL = 'app-staging'
 const STAGING_MS = 30 * 60_000
 
@@ -67,7 +73,7 @@ const CHANGED = 'This app changed what it runs or what it uses since you enabled
 
 export class AppHandover {
   private book: ImportBook
-  /** git 밖의 앱(사용자 폴더 앱)의 판 (E-1) */
+  /** Versions of an app outside git (a user-folder app) (E-1) */
   private versions: AppVersions
   private staged = new Map<string, Staged>()
   private limits: ImportLimits
@@ -81,13 +87,15 @@ export class AppHandover {
     this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, '_user'))
     this.limits = { ...IMPORT_LIMITS, ...opts.limits }
     this.stagingRoot = join(host.dataRoot, STAGING_REL)
-    // 지난 host가 남긴 대기실 — 들이지 않은 것이라 버린다(다시 가져오면 된다)
+    // The staging area a previous host left behind — never brought in, so it is discarded (it can be imported again)
     rmSync(this.stagingRoot, { recursive: true, force: true })
   }
 
   /**
-   * 이 앱이 사람의 확인을 기다리나 — 그 까닭, 아니면 null. **부를 때마다** 표시와 지금의 매니페스트를 대 본다: 매니페스트의
-   * `server`·`uses`가 바뀌는 순간(편집기, 만드는 세션, 되돌리기) 다음 호출부터 막힌다.
+   * Whether this app is waiting on the person's confirmation — the reason, or null. **On every
+   * call**, the mark is checked against the current manifest: the moment the manifest's `server` or
+   * `uses` changes (an editor, a building session, a restore), it is blocked starting from the next
+   * call.
    */
   gate(appId: string, dir: string, manifest: AppManifest): string | null {
     const mark = this.book.get(appId, dir)
@@ -96,15 +104,17 @@ export class AppHandover {
     return mark.confirmed ? CHANGED : NOT_ENABLED
   }
 
-  /** 목록에 실을 표시 — 가져온 앱이 아니면 없다 */
+  /** The mark shown in the list — absent if the app was not imported */
   imported(appId: string, dir: string): ExternalAppInfo['imported'] {
     const mark = this.book.get(appId, dir)
     return mark ? { source: mark.source, at: mark.importedAt, confirmedAt: mark.confirmed?.at ?? null } : undefined
   }
 
   /**
-   * 가져올 준비 — 옮겨 담고, 판정하고, 사람이 볼 것을 만든다. 내려받는 것은 이 기계의 임시 폴더로 받아 풀고 지운다. 실패하면
-   * 대기실을 치우고 그 이유를 던진다(이유가 곧 창에 서는 말이다).
+   * Prepares an import — stages the files, validates it, and builds what the person reviews. A
+   * download is received into a temp folder on this machine, unpacked, and then deleted. On failure,
+   * the staging area is cleaned up and the reason is thrown (the reason is exactly the text that
+   * shows up in the dialog).
    */
   async prepare(raw: string): Promise<{ token: string; review: AppReview }> {
     const source = classifySource(raw)
@@ -139,9 +149,11 @@ export class AppHandover {
   }
 
   /**
-   * 대기실의 앱을 사용자 폴더로 들인다 — **꺼진 채로.** `enable`이면 그 자리에서 확인을 적는데, 열쇠는 준비할 때 사람에게 보인 그
-   * 열쇠여야 한다. 들이기 직전에 대기실의 매니페스트를 다시 읽어 그 열쇠와 대 본다(검사한 것이 곧 들이는 것이다).
-   * @returns 들인 앱의 id
+   * Brings a staged app into the user folder — **disabled.** With `enable`, the confirmation is
+   * recorded right there, but the key must be the same one shown to the person during preparation.
+   * Right before bringing it in, the staged manifest is read again and checked against that key (the
+   * thing validated is the thing brought in).
+   * @returns the id of the app brought in
    */
   commit(token: string, opts: { enable: boolean; reviewKey?: string }): string {
     const s = this.staged.get(token)
@@ -155,14 +167,14 @@ export class AppHandover {
     renameSync(s.appDir, dir)
     this.book.mark(id, dir, s.review.source)
     if (opts.enable) this.book.confirm(id, manifest)
-    // 들어온 그대로를 첫 판으로 떠 둔다 (E-1) — 만드는 세션이 고치다 망가뜨려도 가져온 판으로 돌아갈 수 있다
+    // Captures the state it arrived in as the first version (E-1) — so even if a building session breaks it while editing, it can be restored to the imported version
     this.snapshot(id, dir, 'imported')
     this.cancel(token)
     this.host.rescanUser()
     return id
   }
 
-  /** 그만둔다 — 대기실을 치운다. 이미 없으면 조용히 지나간다 */
+  /** Abandons it — cleans up the staging area. Silently does nothing if it is already gone */
   cancel(token: string): void {
     const s = this.staged.get(token)
     if (!s) return
@@ -172,8 +184,9 @@ export class AppHandover {
   }
 
   /**
-   * 들어온 앱을 다시 본다 — 켜지 않은 가져온 앱이나, 켠 뒤 `server`·`uses`가 바뀐 앱. 다시 묻는 것이면 켠 때의 선언을 함께 싣는다:
-   * "무엇이 바뀌었나"가 다시 묻는 까닭이다.
+   * Reviews an app already brought in — an imported app not yet enabled, or one whose `server` or
+   * `uses` changed after it was enabled. When asking again, this carries along the declaration seen
+   * at the time it was enabled: "what changed" is the reason it is being asked again.
    */
   review(appId: string): AppReview {
     this.host.rescanUser()
@@ -195,8 +208,9 @@ export class AppHandover {
   }
 
   /**
-   * 가져온 앱을 켠다 — 사람이 본 창의 열쇠가 지금의 매니페스트와 같을 때만. 그 사이 바뀌었으면 거절한다: 사람이 보지 않은 명령을
-   * "켰다"로 적지 않는다.
+   * Enables an imported app — only if the key from the dialog the person saw matches the current
+   * manifest. If it changed in the meantime, this refuses: a command the person never saw is never
+   * recorded as "enabled".
    */
   enable(appId: string, key: string): void {
     this.host.rescanUser()
@@ -209,11 +223,12 @@ export class AppHandover {
     this.host.changed()
   }
 
-  // ── 판 (E-1) ──────────────────────────────────────────────────────────────────
+  // ── versions (E-1) ──────────────────────────────────────────────────────────────────
 
   /**
-   * 사용자 폴더 앱의 지금 코드를 판으로 떠 둔다 — 같은 지문의 판이 있으면 아무것도 하지 않는다. **실패는 던지지 않는다**: 판을 못 뜬
-   * 것이 앱이 뜨는 것을 막으면 안 된다. 까닭은 host의 로그에 남긴다.
+   * Captures a user-folder app's current code as a version — does nothing if a version with the same
+   * fingerprint already exists. **Never throws on failure**: failing to capture a version must never
+   * stop the app from starting. The reason is written to the host's log.
    */
   snapshot(appId: string, dir: string, reason: string, stamp?: string): Snapshot | null {
     try {
@@ -224,15 +239,16 @@ export class AppHandover {
     }
   }
 
-  /** 한 앱의 판, 최근 것부터 — 지금 폴더의 지문과 같은 판에 `current`가 선다 */
+  /** An app's versions, most recent first — the version matching the folder's current fingerprint has `current` set */
   versionsOf(appId: string, dir: string): (Snapshot & { current: boolean })[] {
     const now = folderFingerprint(dir)
     return this.versions.list(appId).map((s) => ({ ...s, current: s.stamp === now }))
   }
 
   /**
-   * 판 하나를 앱 폴더에 되쓴다 — 되쓰기 전에 지금 폴더를 판으로 떠 둔다(되돌리기도 되돌릴 수 있게). 다시 띄우는 것은 부른 쪽(런타임)이
-   * 한다: 진행 중인 호출과 반영의 규칙이 거기 있다.
+   * Writes one version back into the app folder — before writing it back, captures the current
+   * folder as a version too (so a restore can itself be undone). Restarting the app is the caller's
+   * job (the runtime): that is where the rules for in-progress calls and reflecting changes live.
    */
   restore(appId: string, id: string, dir: string): Snapshot {
     this.snapshot(appId, dir, 'before restore')
@@ -243,7 +259,7 @@ export class AppHandover {
     }
   }
 
-  /** 앱이 사용자 폴더에서 치워졌다 — 표시도 걷는다 */
+  /** The app was removed from the user folder — its mark is dropped too */
   forget(appId: string): void {
     this.book.drop(appId)
   }
@@ -252,7 +268,7 @@ export class AppHandover {
     for (const token of [...this.staged.keys()]) this.cancel(token)
   }
 
-  /** 이미 있는 id — 틀린 매니페스트로 서 있는 폴더라도 사람의 것이다. 덮어쓰지 않는다(새 앱과 같다) */
+  /** An id that already exists — even a folder standing there with an invalid manifest belongs to the person. Never overwritten (the same rule as a new app) */
   private refuseTaken(id: string): void {
     this.host.rescanUser()
     if (this.host.userApp(id) || existsSync(join(this.host.dataRoot, 'apps', id))) {

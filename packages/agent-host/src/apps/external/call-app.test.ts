@@ -7,12 +7,13 @@ import { ExternalApps, type AppRef } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
 
 /**
- * 앱끼리 부르기 (M4 D-2) — 앱이 fd 3으로 `call_app`을 부탁하면 창구가 선언(`uses.apps`)과 범위를 보고, 런타임의 한 길로
- * 부른 앱의 에이전트용 도구를 부른다. 진짜 앱 프로세스(픽스처)와 진짜 실행 기록으로 본다.
+ * Apps calling each other (M4 D-2) — when an app asks for `call_app` over fd 3, the desk checks the
+ * declaration (`uses.apps`) and the scope, then calls the called app's agent-facing tool through
+ * the runtime's one path. Exercised with real app processes (fixtures) and a real run ledger.
  *
- *   p1     신뢰한 프로젝트 — notes, other, viewonly
- *   p2     신뢰한 다른 프로젝트 — far
- *   user   사용자 폴더 — shared, lonely
+ *   p1     a trusted project — notes, other, viewonly
+ *   p2     another trusted project — far
+ *   user   the user folder — shared, lonely
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -35,7 +36,7 @@ const records = (id: string): { t: string; runId?: string | null }[] => {
 const ref = (projectId: string | null, appId: string): AppRef => ({ projectId, appId })
 const SESSION = { kind: 'session' as const, sessionId: 's1' }
 
-/** notes(또는 다른 앱)가 처리 중인 호출 안에서 `call_app`을 부탁하고, 중개의 답을 돌려받는다 */
+/** Asks for `call_app` from inside a call notes (or another app) is handling, and returns the broker's answer */
 const askCallApp = async (asker: AppRef, args: Record<string, unknown>, signal?: AbortSignal) => {
   const out = await rt.call(asker, 'ask_broker', { mode: 'run', tool: 'call_app', args }, SESSION, signal ? { signal } : {})
   return { outcome: out, broker: (out.result?.structuredContent ?? null) as { isError: boolean; text: string; structured: unknown } | null }
@@ -57,7 +58,7 @@ beforeEach(() => {
     runs: memoryLedger(),
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
-  // 능력 승인(D-4)은 이 시험의 일이 아니다 — 사람이 곧바로 허락하는 host (묻는 것은 capabilities.test.ts가 본다)
+  // Capability approval (D-4) is not this test's concern — the host allows immediately (the asking itself is covered by capabilities.test.ts)
   rt.attachBrokerHost(fakeBrokerHost({}))
 })
 
@@ -66,8 +67,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('call_app — 적은 앱의 에이전트용 도구만', () => {
-  it('uses.apps에 적은 같은 프로젝트의 앱을 부르면 그 답이 그대로 오고, 부른 앱의 기록에는 호출자 app과 부모 실행이 남는다', async () => {
+describe('call_app — only the agent-facing tools of listed apps', () => {
+  it('calling an app in the same project that is listed in uses.apps returns its answer as-is, and the called app\'s ledger records the caller app and the parent run', async () => {
     plant('p1', 'notes', { apps: ['other'] })
     plant('p1', 'other')
     rt.refresh()
@@ -77,7 +78,7 @@ describe('call_app — 적은 앱의 에이전트용 도구만', () => {
     expect(row).toMatchObject({ tool: 'echo', callerKind: 'app', parentRunId: outcome.runId, status: 'ok' })
   })
 
-  it('적지 않은 앱은 부르지 않는다 — 그 앱은 뜨지도 않는다', async () => {
+  it('does not call an unlisted app — that app is never even started', async () => {
     plant('p1', 'notes', { apps: ['other'] })
     plant('p1', 'stranger')
     rt.refresh()
@@ -89,7 +90,7 @@ describe('call_app — 적은 앱의 에이전트용 도구만', () => {
     expect(records('stranger')).toEqual([])
   })
 
-  it('적은 앱이어도 화면 전용 도구는 부르지 못한다 — 앱이 부르는 것은 에이전트와 같은 model 도구뿐이다', async () => {
+  it('even a listed app cannot have its screen-only tools called — an app can call only the same model tools an agent can', async () => {
     plant('p1', 'notes', { apps: ['other'] })
     plant('p1', 'other')
     rt.refresh()
@@ -100,8 +101,8 @@ describe('call_app — 적은 앱의 에이전트용 도구만', () => {
   })
 })
 
-describe('call_app — 세션과 같은 범위 규칙', () => {
-  it('프로젝트 앱은 자기 프로젝트와 사용자 폴더의 앱을 부르고, 다른 프로젝트의 앱은 이름이 같아도 닿지 않는다', async () => {
+describe('call_app — the same scoping rule as a session', () => {
+  it('a project app can reach apps in its own project and the user folder, but not an app in a different project even with the same name', async () => {
     plant('p1', 'notes', { apps: ['shared', 'far'] })
     plant('user', 'shared')
     plant('p2', 'far')
@@ -112,7 +113,7 @@ describe('call_app — 세션과 같은 범위 규칙', () => {
     expect(records('far')).toEqual([])
   })
 
-  it('같은 이름이 프로젝트와 사용자 폴더에 다 있으면 프로젝트의 앱이다', async () => {
+  it('when the same name exists in both the project and the user folder, the project app wins', async () => {
     plant('p1', 'notes', { apps: ['twin'] })
     plant('p1', 'twin')
     plant('user', 'twin')
@@ -122,7 +123,7 @@ describe('call_app — 세션과 같은 범위 규칙', () => {
     expect(rt.runs(ref(null, 'twin'))).toHaveLength(0)
   })
 
-  it('사용자 폴더 앱은 사용자 폴더의 앱만 부른다 — 어느 프로젝트의 앱도 고를 근거가 없다', async () => {
+  it('a user-folder app can call only other user-folder apps — there is no basis for picking any one project\'s app', async () => {
     plant('user', 'lonely', { apps: ['shared', 'notes'] })
     plant('user', 'shared')
     plant('p1', 'notes')
@@ -135,14 +136,15 @@ describe('call_app — 세션과 같은 범위 규칙', () => {
   })
 })
 
-describe('call_app — 취소는 사슬을 따라 내려간다', () => {
-  it('처음 부른 쪽이 취소하면 부탁받아 도는 앱의 호출까지 취소된다', async () => {
+describe('call_app — cancellation propagates down the chain', () => {
+  it('cancelling at the original caller also cancels the call to the app it delegated to', async () => {
     plant('p1', 'notes', { apps: ['other'] })
     plant('p1', 'other')
     rt.refresh()
     const ac = new AbortController()
     const pending = askCallApp(ref('p1', 'notes'), { app: 'other', tool: 'slow' }, ac.signal)
-    // other가 호출을 실제로 받은 뒤에 취소한다 — 뜨는 중에 취소되면 보내지도 않는다(그것도 맞는 결말이지만 여기서 볼 것이 아니다)
+    // Cancel only after other has actually received the call — cancelling while it is still starting
+    // would mean the call is never even sent (a valid outcome too, but not what this test covers)
     await until(() => records('other').some((r) => r.t === 'method' && (r as { method?: string }).method === 'tools/call'), (x) => x)
     ac.abort()
     expect((await pending).outcome.status).toBe('cancelled')
@@ -151,10 +153,10 @@ describe('call_app — 취소는 사슬을 따라 내려간다', () => {
   })
 })
 
-describe('call_app — 부른 앱의 "바뀌었다"', () => {
-  it('부른 앱의 바꾸는 도구는 그 앱의 열린 화면에 알리고, 주인은 부탁한 실행(호출자 app)이다 — 읽기만 하는 도구는 알리지 않는다', async () => {
+describe('call_app — the called app\'s "changed"', () => {
+  it('a called app\'s write tool notifies that app\'s open screens, attributed to the run that requested it (the caller app) — a read-only tool does not notify', async () => {
     plant('p1', 'notes', { apps: ['board'] })
-    // board의 peek은 readOnlyHint: true, poke에는 주석이 없다(바꾸는 도구로 친다)
+    // board's peek has readOnlyHint: true; poke has no annotation (treated as a write tool)
     plantApp(join(roots.p1, ...PROJECT_APPS), 'board', { server: { command: process.execPath, args: [FIXTURE, '--mode', 'attach'] } })
     await rt.dispose()
     const changed: { ref: AppRef; cause: unknown }[] = []

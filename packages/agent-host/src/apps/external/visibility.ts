@@ -1,21 +1,23 @@
 import type { Tool } from '@modelcontextprotocol/client'
 
 /**
- * 도구 공개 범위 (M4 A-4, MCP Apps `_meta.ui.visibility`).
+ * A tool's audience (M4 A-4, MCP Apps `_meta.ui.visibility`).
  *
- *   model  에이전트의 도구 목록에 오른다 — 세션이, 그리고 다른 앱이(D-2) 부른다
- *   app    그 앱의 화면이 부른다
+ *   model  listed in the agent's tool list — called by the session, and by other apps (D-2)
+ *   app    called by that app's own view
  *
- * 없으면 둘 다다(규격의 기본값). 지키는 것은 **호스트의 의무**다 — 서버는 누가 불렀는지 구별할
- * 수 없다(ext-apps #746). 그래서 판정은 모든 호출이 지나는 한 자리(`ExternalApps.call`)에서 한다.
+ * When absent, it is both (the spec's default). Enforcing it is **the host's job** — a server has
+ * no way to tell who called it (ext-apps #746). So the check happens in the one place every call
+ * passes through (`ExternalApps.call`).
  */
 export type Audience = 'model' | 'app'
 
 export const DEFAULT_VISIBILITY: readonly Audience[] = ['model', 'app']
 
 /**
- * 도구 하나의 공개 범위. 칸이 **있는데 모양이 틀리면 거절한다** — 없는 것과 같게 읽어 기본값
- * (둘 다)을 주면, `["app"]`을 쓰려다 틀린 도구가 에이전트에게 열린다. 틀린 쪽이 닫히게 둔다.
+ * A single tool's audience. **When the field is present but malformed, this rejects it** — reading
+ * it as if it were absent and falling back to the default (both) would open a tool to the agent
+ * that its author meant to restrict to `["app"]`. It is better to let the malformed one stay closed.
  */
 export function visibilityOf(tool: Tool): { ok: true; visibility: Audience[] } | { ok: false; error: string } {
   const ui = (tool._meta as { ui?: unknown } | undefined)?.ui
@@ -30,10 +32,12 @@ export function visibilityOf(tool: Tool): { ok: true; visibility: Audience[] } |
 }
 
 /**
- * 도구가 선언한 화면 (MCP Apps `_meta.ui.resourceUri`, 옛 모양 `_meta["ui/resourceUri"]`) — B-2.
+ * The view a tool declares (MCP Apps `_meta.ui.resourceUri`, the old shape `_meta["ui/resourceUri"]`)
+ * — B-2.
  *
- * 새 모양이 있으면 그것이 이긴다(ext-apps `getToolUiResourceUri`와 같은 순서). `ui://`가 아닌 값은
- * 화면이 아니라 **틀린 선언**이다. 없는 것과 같게 읽으면 작성자는 왜 화면이 안 뜨는지 알 길이 없다.
+ * When the new shape is present, it wins (same order as ext-apps's `getToolUiResourceUri`). A value
+ * that is not `ui://` is not a view, it is a **malformed declaration**. Reading it as if it were
+ * absent would leave the author with no way to find out why their view does not show up.
  */
 export function resourceUriOf(tool: Tool): { uri: string | null; error: string | null } {
   const meta = tool._meta as { ui?: { resourceUri?: unknown }; 'ui/resourceUri'?: unknown } | undefined

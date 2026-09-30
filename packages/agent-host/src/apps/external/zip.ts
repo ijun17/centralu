@@ -1,15 +1,21 @@
 import { inflateRawSync } from 'node:zlib'
 
 /**
- * zip 읽기 (M4 E-3) — 가져올 앱의 묶음을 **판정하며** 푼다. 라이브러리를 들이지 않고 여기서 읽는 이유는 셋이다.
+ * Zip reading (M4 E-3) — unpacks an imported app's bundle **while validating it**. Three reasons
+ * this is read here rather than pulling in a library.
  *
- *   1. 막을 것이 이 파일의 모양에 달려 있다: 항목 이름(zip slip), 링크 항목, 선언한 크기와 실제로 풀린 크기(zip 폭탄), 암호.
- *      범용 라이브러리는 이것들을 "풀어 주는" 쪽으로 기본값을 둔다. 여기서는 모르는 것은 거절한다.
- *   2. 풀어서 쓰는 곳을 우리가 정한다: 이 파일은 바이트만 돌려주고, 경로를 만들고 파일을 쓰는 것은 부른 쪽(`imports.ts`)이
- *      검사한 이름으로 한다 — 검사한 문자열이 곧 쓰는 문자열이다.
- *   3. 필요한 것이 작다: 저장(0)과 deflate(8) 두 방식, ZIP64 없음(우리 상한은 4GiB에 한참 못 미친다).
+ *   1. What has to be blocked depends on this file's own shape: entry names (zip slip), symlink
+ *      entries, a declared size that disagrees with the actual unpacked size (a zip bomb),
+ *      encryption. A general-purpose library defaults toward "unpacking it anyway" for these. Here,
+ *      anything unrecognized is rejected.
+ *   2. We decide where the unpacked output is written: this file only returns bytes, and building
+ *      the path and writing the file is the caller's job (`imports.ts`), using the name it has
+ *      already validated — the validated string is the string that gets used.
+ *   3. What is actually needed is small: two methods, stored (0) and deflate (8), no ZIP64 (our cap
+ *      is well under 4GiB).
  *
- * 규격은 PKWARE APPNOTE 6.3.x. 중앙 디렉터리가 정본이다(지역 머리의 크기는 데이터 설명자가 있으면 0이다).
+ * The format is PKWARE APPNOTE 6.3.x. The central directory is authoritative (the size in the local
+ * header is 0 when a data descriptor is present).
  */
 
 export class ZipError extends Error {
@@ -17,12 +23,12 @@ export class ZipError extends Error {
 }
 
 export type ZipEntry = {
-  /** 항목 이름 그대로 (UTF-8). 디렉터리는 `/`로 끝난다 */
+  /** The entry name verbatim (UTF-8). A directory ends with `/` */
   name: string
   kind: 'file' | 'dir' | 'link' | 'other'
   method: number
   compressedSize: number
-  /** 중앙 디렉터리가 선언한 풀린 크기 — 풀 때 이것과 실제를 대 본다 */
+  /** The unpacked size the central directory declares — checked against the actual size when unpacked */
   size: number
   crc: number
   offset: number
@@ -31,10 +37,10 @@ export type ZipEntry = {
 const EOCD = 0x06054b50
 const CEN = 0x02014b50
 const LOC = 0x04034b50
-/** 주석까지 포함해 끝에서 거꾸로 찾는 범위 — 주석은 최대 65535바이트다 */
+/** How far back from the end to search, including the comment — a comment is at most 65535 bytes */
 const EOCD_SEARCH = 22 + 0xffff
 
-/** 중앙 디렉터리를 읽는다 — 항목 수가 `maxEntries`를 넘으면 읽기 전에 거절한다 */
+/** Reads the central directory — if the entry count exceeds `maxEntries`, rejects before reading further */
 export function readZipEntries(buf: Buffer, maxEntries: number): ZipEntry[] {
   let end = -1
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - EOCD_SEARCH); i--) {
@@ -72,7 +78,7 @@ export function readZipEntries(buf: Buffer, maxEntries: number): ZipEntry[] {
     const nameEnd = p + 46 + nameLen
     if (nameEnd > end) throw new ZipError('The zip file is damaged (entry name out of range)')
     const name = buf.toString('utf8', p + 46, nameEnd)
-    // UTF-8로 읽히지 않는 이름(옛 코드 페이지)은 추측하지 않는다 — 추측한 이름으로 파일을 쓰면 사람이 본 목록과 다르다
+    // A name that does not decode as UTF-8 (an old code page) is never guessed at — writing a file under a guessed name would differ from the list the person saw
     if (name.includes('�')) throw new ZipError('An entry name is not UTF-8; re-create the archive with UTF-8 names')
     if (flags & 0x1) throw new ZipError(`Encrypted entries are not supported: ${name}`)
     if (compressedSize === 0xffffffff || size === 0xffffffff || offset === 0xffffffff) throw new ZipError('ZIP64 archives are not supported')
@@ -83,8 +89,10 @@ export function readZipEntries(buf: Buffer, maxEntries: number): ZipEntry[] {
 }
 
 /**
- * 항목의 종류. 유닉스에서 만든 묶음(만든 곳 3, macOS 19)은 외부 속성의 위 16비트가 모드다 — 링크(`S_IFLNK`)는 거기서만
- * 알 수 있다. 링크를 파일로 풀면 그 내용(가리키는 경로)이 파일이 되고, 링크로 풀면 zip slip의 가장 오래된 길이 된다.
+ * An entry's kind. For a bundle made on Unix (made-by host 3, macOS 19), the upper 16 bits of the
+ * external attributes are the mode — a symlink (`S_IFLNK`) can only be recognized there. Unpacking a
+ * symlink as a regular file turns its content (the path it points at) into a file; unpacking it as
+ * an actual symlink is the oldest form of a zip-slip attack.
  */
 function kindOf(name: string, madeBy: number, external: number): ZipEntry['kind'] {
   const host = madeBy >> 8
@@ -97,8 +105,10 @@ function kindOf(name: string, madeBy: number, external: number): ZipEntry['kind'
 }
 
 /**
- * 항목 하나의 내용. **선언한 크기만큼만** 푼다(`maxOutputLength`) — 풀린 것이 선언보다 크면 그 자리에서 멈춘다(zip 폭탄).
- * 선언과 실제 크기, CRC가 다르면 거절한다: 사람에게 보인 목록(선언한 크기)과 쓰는 파일이 같아야 한다.
+ * The content of one entry. Unpacks **only up to the declared size** (`maxOutputLength`) — if the
+ * unpacked output would exceed it, stops right there (a zip bomb). Rejects if the declared size, the
+ * actual size, or the CRC disagree: the file that gets written must match the list (with its
+ * declared size) the person saw.
  */
 export function readZipEntry(buf: Buffer, e: ZipEntry): Buffer {
   if (e.offset + 30 > buf.length || buf.readUInt32LE(e.offset) !== LOC) throw new ZipError(`The zip file is damaged (bad local header): ${e.name}`)
@@ -109,7 +119,7 @@ export function readZipEntry(buf: Buffer, e: ZipEntry): Buffer {
   if (e.method === 0) data = raw
   else if (e.method === 8) {
     try {
-      // 선언이 0이면 1로 — 빈 파일도 deflate 스트림은 있다. 1바이트라도 넘으면 선언을 어긴 것이다
+      // A declared size of 0 is treated as 1 — even an empty file has a deflate stream. Exceeding it by even one byte breaks the declaration
       data = inflateRawSync(raw, { maxOutputLength: Math.max(e.size, 1) })
     } catch (err) {
       throw new ZipError(`Could not unpack ${e.name}: ${(err as Error).message}`)

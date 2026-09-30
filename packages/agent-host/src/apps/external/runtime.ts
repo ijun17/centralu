@@ -22,50 +22,56 @@ import type { Snapshot } from './versions.js'
 import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
 /**
- * 외부 앱 런타임 (M4 A) — **코어가 외부 앱에 대해 아는 문은 이 파일 하나다.**
+ * The external app runtime (M4 A) — **the one file that is the door the core knows external apps
+ * through.**
  *
- * 내장 앱(`registry.ts`의 HOST_APPS)은 컴파일된 모듈이고, 외부 앱은 실행 중에 발견되는
- * 폴더와 그 폴더가 띄우는 프로세스다. 둘은 사는 방식이 달라 명부도 다르지만, 코어가 앱을
- * 아는 길이 좁아야 한다는 규칙(#81)은 같다 — 그래서 이 런타임은 코어를 임포트하지 않고,
- * 필요한 것(프로젝트 목록과 신뢰, 데이터 폴더)을 `ExternalAppsDeps`로 **받는다.**
- * #97이 UI 런타임에서 한 뒤집기와 같다: 런타임이 필요한 것을 선언하고 host가 채운다.
+ * A built-in app (`HOST_APPS` in `registry.ts`) is a compiled module, while an external app is a
+ * folder discovered at runtime and the process that folder starts. The two live differently, so
+ * their registries differ too, but the same rule holds for both (#81): the core's path to knowing
+ * about an app has to stay narrow — so this runtime never imports the core, and instead **receives**
+ * what it needs (the project list and their trust, the data folder) through `ExternalAppsDeps`. This
+ * is the same inversion #97 did for the UI runtime: the runtime declares what it needs, and the host
+ * fills it in.
  *
- * 저장소(Store)도 임포트하지 않는다. 프로젝트와 신뢰는 함수로 묻는다 — 매번 묻는 이유는
- * 정본이 저장소 하나라서다. 여기에 사본을 들고 있으면 신뢰를 끈 뒤에도 사본이 "예"라고 답한다.
+ * It never imports the store either. Projects and trust are asked for through a function — asked
+ * every time because the store is the single source of truth. Holding a copy here would mean the
+ * copy still answers "yes" after trust has been turned off.
  */
 
 /**
- * 사용자 폴더 앱의 범위 이름 — 메모리의 키이자 데이터·로그 폴더의 한 칸이다.
- * 프로젝트 id는 UUID라 이 이름과 겹치지 않는다.
+ * The scope name for a user-folder app — a key in memory, and also one segment of the data and log
+ * folders.
+ * A project id is a UUID, so it never collides with this name.
  */
 const USER_SCOPE = '_user'
 
 export type { AppRef } from './ref.js'
 
-/** 점검 보고서의 모양도 이 문으로 나간다 (C-3) */
+/** The shape of a check report also leaves through this door (C-3) */
 export type { AppCheckReport, CheckFinding } from './check.js'
-/** 오류 묶음의 모양 (C-6) */
+/** The shape of an error bundle (C-6) */
 export type { AppErrorBundle } from './errors.js'
-/** 중개의 몸통 가운데 host의 코어가 채우는 것 (D) — 매니저가 `attachBrokerHost`로 준다 */
+/** The part of the broker's body the host's core fills in (D) — the manager supplies it via `attachBrokerHost` */
 export type { AgentRunRequest, AgentRunResult, BrokerHost, CapabilityOrigin, CapabilityQuestion, CapabilityDecisionListed } from './desk.js'
-/** 능력 승인의 답을 둘 자리 (D-4) — host가 저장소로 채운다(`app-permission-book.ts`) */
+/** Where a capability approval's answer is stored (D-4) — the host fills it in with the store (`app-permission-book.ts`) */
 export type { CapabilityBook, CapabilityDecision } from './capabilities.js'
-/** host 데이터의 닫힌 목록 (D-3) — 매니저가 이름마다 무엇을 줄지 채운다 */
+/** The closed list of host data (D-3) — the manager fills in what each name gives */
 export { HOST_CAPABILITIES, type HostCapability } from './capabilities.js'
 
-/** 기록의 모양은 이 문으로 나간다 — 코어가 채울 자리다(main.ts, `app-run-ledger.ts`) */
+/** The shape of the ledger also leaves through this door — a place for the core to fill in (main.ts, `app-run-ledger.ts`) */
 export type { RunLedger, AppRunRow, AppRunListed, AgentTokens, AgentUse } from './runs.js'
-/** 도구가 선언한 화면을 읽는 규칙도 이 문으로 나간다 — 대화 안 화면(B-1)이 고정 화면과 같은 판정을 쓴다 */
+/** The rule for reading a tool's declared screen also leaves through this door — an in-conversation screen (B-1) uses the same validation as a fixed screen */
 export { resourceUriOf } from './visibility.js'
 
 /**
- * 누가 불렀나 (플랜 "호출 경로는 하나다") — 셋이다.
+ * Who called it (from the plan, "there is one call path") — three kinds.
  *
- *   view     앱의 화면. v1 플랜은 이것을 "사람"이라 적었는데 틀렸다 — 화면은 앱의 코드라서
- *            아무도 누르지 않아도 도구를 부를 수 있다. 어느 화면인지(`instanceId`)는 "바뀌었다"의
- *            주인으로만 쓴다 — 그 화면은 자기가 낸 바뀜을 다시 듣지 않는다(B-5)
- *   session  세션의 에이전트 (A-5가 붙인다)
- *   app      다른 앱의 중개 호출 (D-2) — 부모 실행 id로 사슬이 이어진다
+ *   view     the app's screen. The v1 plan called this "a person", which was wrong — a screen is the
+ *            app's own code, so it can call a tool with no one pressing anything. Which screen
+ *            (`instanceId`) is used only to attribute "changed" — that screen never hears the change
+ *            it produced itself (B-5)
+ *   session  a session's agent (attached by A-5)
+ *   app      a broker call from another app (D-2) — the chain continues through the parent run id
  */
 export type AppCaller =
   | { kind: 'view'; instanceId?: string }
@@ -75,69 +81,77 @@ export type AppCaller =
 export type AppRunStatus = 'ok' | 'error' | 'cancelled' | 'rejected'
 
 /**
- * 호출 하나의 결말. **정책의 거절은 던지지 않고 돌려준다** — 거절도 기록되는 결말이고
- * (A-6), 부른 쪽(RPC·세션 대리 서버)은 그것을 "실패한 도구 호출"로 옮겨 주기만 하면 된다.
+ * The outcome of one call. **A policy denial is returned, never thrown** — a denial is also an
+ * outcome that gets recorded (A-6), and the caller (RPC, or a session's proxy server) only has to
+ * translate it into "a failed tool call".
  *
- *   ok         앱이 답했다
- *   error      앱이 실패를 답했거나(isError), 뜨지 못했거나, 호출 중에 죽었다
- *   cancelled  부른 쪽이 취소했다 — 앱에는 notifications/cancelled가 갔다
- *   rejected   host가 앱에 보내지 않았다 (공개 범위·신뢰·없는 도구·멈춘 앱·열려 있지 않은 부모)
+ *   ok         the app answered
+ *   error      the app answered with a failure (isError), failed to start, or died mid-call
+ *   cancelled  the caller cancelled it — the app received notifications/cancelled
+ *   rejected   the host never sent it to the app (audience, trust, an unknown tool, a stopped app, a
+ *              parent that is not open)
  */
 export type AppCallOutcome = {
   runId: string
   status: AppRunStatus
-  /** 앱의 답 그대로 (화면의 AppBridge가 받는 모양) — 답이 없었으면 null */
+  /** The app's answer verbatim (the shape the screen's AppBridge receives) — null if there was none */
   result: CallToolResult | null
   error: string | null
   durationMs: number
 }
 
 /**
- * 수명의 숫자들. 기본값이 제품의 값이고, 테스트는 줄여서 쓴다.
+ * The numbers that govern lifecycle. The defaults are the product's values, and tests use smaller
+ * ones.
  */
 export type RuntimeTiming = {
-  /** 열린 화면도 진행 중인 호출도 없으면 이만큼 뒤에 내린다 (플랜 A-3: 5분) */
+  /** Shuts down after this long with no open screen and no call in progress (from the plan, A-3: 5 minutes) */
   idleMs: number
-  /** n번째 연속 실패 뒤 다음 기동까지 base × 2^(n-1) */
+  /** After the nth consecutive failure, waits base × 2^(n-1) before the next start */
   backoffBaseMs: number
-  /** 연속 실패가 이만큼이면 멈추고 이유를 들고 있는다 (플랜 A-3: 3번) */
+  /** Stops and holds the reason once consecutive failures reach this many (from the plan, A-3: 3) */
   maxFailures: number
-  /** 이만큼 살아 있다가 죽었으면 연속 실패를 새로 센다 */
+  /** If it stayed alive this long before dying, consecutive failures are counted from zero again */
   stableMs: number
-  /** 표준 입력과 fd 3을 닫은 뒤 스스로 끝나기를 기다리는 시간 */
+  /** How long to wait for it to end on its own after stdin and fd 3 are closed */
   graceMs: number
-  /** 세대 탐색(`server/discover`)에 답이 없을 때 옛 세대로 내려가기까지 */
+  /** How long to wait for an answer to generation probing (`server/discover`) before falling back to the old generation */
   probeTimeoutMs: number
-  /** 연결과 첫 도구 목록 각각의 상한 */
+  /** The cap for the connection and for the first tool list, each */
   connectTimeoutMs: number
   /**
-   * host → 앱 도구 호출 하나의 상한. 앱이 진행 알림을 보내면 다시 센다. 부르는 쪽마다 제 상한이
-   * 따로 있다(Codex 300초, 화면 60초 — 플랜 "오래 걸리는 호출"); 이것은 그 바깥의 울타리다.
+   * The cap for one host → app tool call. Reset every time the app sends a progress notification.
+   * Each caller also has its own cap (Codex 300 seconds, a screen 60 seconds — from the plan,
+   * "long-running calls"); this is the outer fence around all of them.
    */
   callTimeoutMs: number
-  /** 앱별 로그 파일 한 세대의 크기 */
+  /** The size of one generation of an app's own log file */
   logMaxBytes: number
   /**
-   * 점검(C-3)이 진행 중인 호출이 끝나기를 기다리는 상한. 넘으면 다시 띄우지 않고 떠 있는 프로세스를 본다 —
-   * 호출을 끊지 않는다는 약속이 점검보다 앞선다.
+   * The cap on how long a check (C-3) waits for a call in progress to finish. Past this, it checks
+   * the running process instead of restarting it — the promise to never cut a call off outranks the
+   * check.
    */
   checkDrainMs: number
   /**
-   * 만드는 세션이 없거나 쉬고 있을 때, 앱 폴더의 마지막 변화 뒤 이만큼 조용하면 다시 띄운다 (C-4). 편집기의 저장
-   * 여러 번이 한 번의 재시작이 된다.
+   * When there is no building session, or it is idle, restarts after this much silence since the last
+   * change in the app folder (C-4). Several saves from an editor collapse into one restart.
    */
   reloadQuietMs: number
-  /** 만드는 세션의 턴 끝 알림을 모으는 시간 (C-4) — 턴 끝과 상태 변화가 잇달아 와도 한 번 다시 띄운다 */
+  /** How long to collect a building session's turn-end notifications (C-4) — a turn ending and a state change arriving back to back still produce one restart */
   turnEndDebounceMs: number
-  /** 기다리는 중개 호출에 살려 두는 진행 알림을 보내는 간격 (D) — `broker.ts`의 BROKER_KEEPALIVE_MS 주석 */
+  /** The interval for the keepalive progress notification sent to a waiting broker call (D) — see the BROKER_KEEPALIVE_MS comment in `broker.ts` */
   brokerKeepaliveMs: number
   /**
-   * 능력 승인(D-4)에 사람의 답을 기다리는 상한. 넘으면 거절로 닫는다(기억하지 않는다). 5분인 이유: 물음은 사람이 보는 자리(세션의
-   * 카드, 앱의 고정 화면)에 서지만 사람이 늘 거기 있지는 않다. 그동안 부탁한 앱의 호출과 그 위의 사슬이 모두 붙들린다 — 더
-   * 길면 사람이 떠난 자리에서 호출이 쌓이고, 더 짧으면 화면을 옮겨 다니는 사람이 답하기 전에 닫힌다.
+   * The cap on waiting for the person's answer in capability approval (D-4). Closes as a denial past
+   * this (remembering nothing). Why 5 minutes: the question shows up somewhere a person looks (a
+   * session's card, an app's fixed screen), but the person is not always there. During that wait, the
+   * requesting app's call and the entire chain above it are all held open — longer, and calls pile up
+   * while the person is away; shorter, and it closes before someone moving between screens gets a
+   * chance to answer.
    */
   capabilityQuestionMs: number
-  /** 한 앱이 에이전트를 몇 번 세웠나를 세는 창 (D-5, `AGENT_RUNS_PER_WINDOW`) — 1분. 시험이 줄인다 */
+  /** The window for counting how many times one app has started an agent (D-5, `AGENT_RUNS_PER_WINDOW`) — one minute. Reduced by tests */
   agentRateWindowMs: number
 }
 
@@ -146,12 +160,13 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   backoffBaseMs: 1_000,
   maxFailures: 3,
   stableMs: 60_000,
-  // S-5 실측: 잘 만든 앱은 입력이 닫히고 2~11ms 안에 끝났다. 2초면 느린 정리도 넉넉하다
+  // Measured in S-5: a well-built app ended within 2-11ms of its input closing. 2 seconds leaves plenty of room even for slow cleanup
   graceMs: 2_000,
   /*
-   * 탐색에 **답하지 않는** 2025 세대 서버만 이 시간을 낸다(모르는 메서드라고 답하는 서버는
-   * 즉시 내려간다 — 공식 v1 SDK 서버는 218ms에 legacy로 붙었다). 알아낸 세대는 앱마다
-   * 기억하므로 이 값은 host가 뜬 뒤 앱마다 많아야 한 번이다.
+   * Only a 2025-generation server that **never answers** the probe pays this cost (a server that
+   * answers with "unknown method" falls back immediately — the official v1 SDK server connected as
+   * legacy in 218ms). The generation discovered is remembered per app, so this cost is paid at most
+   * once per app after the host starts.
    */
   probeTimeoutMs: 10_000,
   connectTimeoutMs: 30_000,
@@ -166,120 +181,134 @@ export const DEFAULT_TIMING: RuntimeTiming = {
 }
 
 export type ExternalAppsDeps = {
-  /** 등록된 프로젝트의 뿌리와 신뢰 — 부를 때마다 저장소에서 읽는다 */
+  /** The root and trust of registered projects — read from the store every time this is called */
   projects(): readonly { id: string; path: string; trusted: boolean }[]
-  /** host의 데이터 폴더 (`dataRoot()`) — 사용자 앱과 앱 데이터가 이 아래에 산다 */
+  /** The host's data folder (`dataRoot()`) — user apps and app data live under it */
   dataRoot: string
-  /** 외부 앱이 가져갈 수 없는 id — 내장 앱의 id. 같은 이름이면 `apps.invoke`가 갈라진다 */
+  /** An id an external app can never take — a built-in app's id. `apps.invoke` disambiguates between them by the same name */
   reservedIds: readonly string[]
-  /** 폴더 감시 플러시 간격 (테스트가 줄인다) */
+  /** The folder-watching flush interval (reduced by tests) */
   watchFlushMs?: number
   timing?: Partial<RuntimeTiming>
-  /** 앱 프로세스가 물려받을 환경 (기본 process.env) — host 자신의 변수는 걸러진다 */
+  /** The environment an app process inherits (defaults to process.env) — the host's own variables are filtered out */
   env?: NodeJS.ProcessEnv
   /**
-   * 앱의 도구 호출이 끝났다(앱에 닿은 호출만 — 거절은 아무것도 바꾸지 않았다. 읽기만 하는 도구도 마찬가지다). 열린
-   * 화면이 같은 값을 보게 하는 신호다(플랜 "열린 화면이 같은 값을 보는 법"). host가 방송으로 옮긴다.
-   * `cause`는 그 호출을 한 쪽이다 — 앱이 다시 떠서 바뀐 것처럼 호출이 아니면 없다(모든 화면이 듣는다).
+   * An app's tool call ended (only a call that reached the app — a denial changes nothing. Neither
+   * does a read-only tool). The signal that lets an open screen see the same value (from the plan,
+   * "how an open screen sees the same value"). The host relays it as a broadcast.
+   * `cause` is whoever made that call — absent unless it is a call (as opposed to, say, the app
+   * restarting and changing on its own — every screen hears that one)
    */
   emitChanged?: (ref: AppRef, cause?: AppCaller | null) => void
-  /** 실행 기록을 둘 자리 (A-6) — host가 저장소로 채운다. 없으면 기록하지 않는다 */
+  /** Where the run ledger is stored (A-6) — the host fills it in with the store. Nothing is recorded if absent */
   runs?: RunLedger
   /**
-   * 이 앱의 기록 판에 보이는 줄이 서거나, 세션이 이어지거나, 끝났다 (D-6) — 기록 판이 다시 읽을 신호다. host가 앱마다 모아 방송한다.
-   * 읽기 전용 도구의 호출과 그 아래의 사슬도 알린다: 화면을 깨우는 `emitChanged`와 따로다(`announcingLedger` 주석).
+   * A row visible on this app's runs panel started, got linked to a session, or ended (D-6) — the
+   * signal that tells the runs panel to re-read. The host collects these per app and broadcasts them.
+   * This also fires for a read-only tool's call and the chain beneath it: kept separate from
+   * `emitChanged`, which wakes a screen (see the comment on `announcingLedger`).
    */
   emitRunsChanged?: (ref: AppRef) => void
   /**
-   * 능력 승인의 답을 둘 자리 (D-4) — host가 저장소로 채운다. 없으면 메모리에 둔다: host가 떠 있는 동안은 한 번 묻는다는
-   * 약속이 서고, 다시 뜨면 다시 묻는다.
+   * Where a capability approval's answer is stored (D-4) — the host fills it in with the store. Falls
+   * back to memory if absent: this still keeps the promise of asking once per host lifetime, and asks
+   * again once the host restarts.
    */
   permissions?: CapabilityBook
-  /** 새 앱을 펼칠 템플릿 폴더 (C-1). 기본은 제품이 싣고 다니는 것(`appTemplateDir`) */
+  /** The template folder a new app is expanded from (C-1). Defaults to the one the product ships (`appTemplateDir`) */
   templateDir?: string
   /**
-   * 이 앱의 만드는 세션이 지금 턴 안에 있나 (C-4) — host가 세션 상태로 채운다. 있으면 앱 폴더가 바뀌어도 바로
-   * 다시 띄우지 않고 턴 끝(`builderTurnEnded`)을 기다린다. 없으면(편집기에서 고쳤다) 조용해지기를 기다린다.
+   * Whether this app's building session is currently mid-turn (C-4) — the host fills it in from
+   * session state. If so, a change to the app folder does not trigger an immediate restart; it waits
+   * for the turn to end (`builderTurnEnded`) instead. If not (edited from an editor), it waits for
+   * things to go quiet.
    */
   builderBusy?: (ref: AppRef) => boolean
-  /** 건네기(E)의 상한과 내려받기 — 시험이 줄이고 가짜를 꽂는다. 없으면 제품의 값이다 */
+  /** Handover's (E) limits and download — reduced and replaced with a fake by tests. Uses the product's values if absent */
   handover?: HandoverOptions
 }
 
 type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
 
-/** 한 앱의 수명 — 프로세스는 오고 가도 이 칸은 앱이 목록에 있는 동안 산다 */
+/** One app's lifecycle — a process comes and goes, but this stays alive as long as the app is in the list */
 type Life = {
   proc: AppProcess | null
   starting: Promise<AppProcess> | null
-  /** 연속 실패 수 — 기동 실패와 예고 없는 종료를 센다 */
+  /** Consecutive failure count — counts both a failed start and an unannounced exit */
   failures: number
-  /** 다음 기동이 이 시각 전에는 일어나지 않는다 (지수 백오프) */
+  /** The next startup never happens before this time (exponential backoff) */
   retryAt: number
-  /** 마지막 실패의 이유 (표준에러 끝부분 포함) */
+  /** The reason for the last failure (including the tail of stderr) */
   lastError: string | null
-  /** 멈췄다 — maxFailures번 연달아 실패했다. 사람이 다시 시작하기 전까지 뜨지 않는다 */
+  /** Stopped — failed maxFailures times in a row. Does not start again until a person restarts it */
   gaveUp: boolean
-  /** 알아낸 규격 세대 — 다음 기동은 탐색 없이 붙는다 */
+  /** The spec generation discovered — the next startup connects without probing */
   verdict: PriorDiscovery | undefined
   /**
-   * 세대 번호. 내리거나 바뀔 때마다 올린다 — 진행 중이던 기동이 끝났을 때 번호가 다르면
-   * 그 프로세스는 이미 쓸모없는 것이라 버린다(바뀐 매니페스트로 떠야 할 앱이 옛 명령으로 뜨지 않게).
+   * A generation number. Raised every time it stops or changes — if a startup in progress finishes
+   * with a different number than when it began, that process is already stale and is discarded (so an
+   * app that should start with a changed manifest never starts with the old command instead).
    */
   epoch: number
   inflight: number
-  /** inflight가 0이 되기를 기다리는 쪽 — 점검(C-3)은 진행 중인 호출을 끊지 않고 기다린 뒤 다시 띄운다 */
+  /** Waiters for inflight to reach 0 — a check (C-3) never cuts off a call in progress, it waits and then restarts */
   idleWaiters: (() => void)[]
   /**
-   * 마지막으로 띄운 프로세스가 본 앱 폴더의 지문 (C-4) — 한 번도 띄우지 않았으면 null. 반영은 지금 폴더와 이것을
-   * 대 보고, 다르면 다시 띄운다. 프로세스가 내려가도 남는다: 쉬다 내려간 뒤에 고친 것도 "바뀌었다"다.
+   * The fingerprint of the app folder the last-started process saw (C-4) — null if it has never
+   * started. Reflecting a change compares the current folder against this, and restarts if they
+   * differ. Survives the process going down: an edit made while it was idle and stopped still counts
+   * as "changed".
    */
   stamp: string | null
   /**
-   * 마지막으로 **떠 오른** 프로세스가 읽은 지문 (C-4) — 목록의 `codeStamp`. `stamp`와 달리 못 뜬 기동에는 바뀌지 않는다:
-   * 열린 화면은 떠 있는 코드와 대조해 옛 HTML인지를 가린다. 못 뜬 새 코드로 화면을 다시 열면 보이는 것은 실패뿐이다.
+   * The fingerprint the last process that **actually started** read (C-4) — the list's `codeStamp`.
+   * Unlike `stamp`, a failed startup never changes this: an open screen compares it against the code
+   * currently running to tell whether it is showing stale HTML. Reopening a screen against new code
+   * that failed to start would show nothing but the failure.
    */
   loaded: string | null
   idle: NodeJS.Timeout | null
-  /** 지금 프로세스의 도구 목록(이름·공개 범위 규칙을 통과한 것)과, 걸러 낸 이유 */
+  /** The current process's tool list (names and audience passed validation), and the reasons for anything filtered out */
   tools: AppTool[] | null
   toolWarnings: string[]
   /**
-   * 마지막으로 읽은 도구 목록 — `tools`와 달리 **프로세스가 내려가도 남는다** (A-5).
+   * The last tool list read — unlike `tools`, **this survives the process going down** (A-5).
    *
-   * 세션에 앱을 붙이려면 도구 목록이 있어야 하는데, 목록을 알려면 앱을 띄워야 한다. 세션이 뜰
-   * 때마다 붙은 앱을 전부 띄우면 "아무것도 안 할 때 앱 프로세스 0개"(성능 예산)가 세션 하나에
-   * 깨진다. 한 번 읽은 목록은 기억해 두고, 앱이 다시 뜰 때 새로 읽어 바뀌었으면 알린다.
-   * 매니페스트가 바뀌면 항목이 새로 서므로 옛 목록은 함께 사라진다.
+   * Attaching an app to a session needs its tool list, but knowing the tool list requires starting
+   * the app. Starting every attached app every time a session starts would break "zero app processes
+   * while idle" (the performance budget) for a single session. The list read once is remembered, and
+   * re-read and announced if changed the next time the app starts. If the manifest changes, entries
+   * are rebuilt fresh, so the old list disappears along with it.
    */
   known: AppTool[] | null
   /**
-   * 지금 프로세스의 파이프 번호. 열린 실행은 자기가 태어난 파이프 번호를 들고 있고, 중개는
-   * 같은 번호의 실행만 받는다 — 앱이 다시 떠도 죽은 프로세스의 실행 id가 새 파이프에서 통하지 않는다.
+   * The current process's pipe number. An open run carries the pipe number it was born under, and the
+   * broker only accepts a run under that same number — so even if the app restarts, a dead process's
+   * run id never works on the new pipe.
    */
   pipeId: number
 }
 
 type AppTool = { tool: Tool; visibility: Audience[] }
 
-/** 지금 열려 있는 host → 앱 호출 */
+/** A currently open host → app call */
 type OpenRun = {
   entry: AppEntry
   pipeId: number
   tool: string
-  /** 누가 불렀나 — 사슬을 따라 올라가 누가 시작했는지 찾는 근거다 (D-4의 물음이 설 자리) */
+  /** Whoever called it — the basis for finding who started it by walking up the chain (where D-4's question is attributed) */
   caller: AppCaller
-  /** 호출이 끝나거나 취소되면 선다 — 이 실행 아래의 중개 일이 함께 멈춘다 */
+  /** Set when the call ends or is cancelled — broker work beneath this run stops together with it */
   abort: AbortController
 }
 
 type AppEntry = {
   ref: AppRef
   scope: Scope
-  /** 발견이 본 그대로 — 다음 훑기와 비교하는 기준이다 */
+  /** Exactly what discovery saw — the baseline the next scan is compared against */
   found: ScannedApp
   dir: string
-  /** 발견의 판정 위에 런타임의 판정(예약된 id)까지 얹은 결과 */
+  /** The result of layering the runtime's own validation (a reserved id) on top of discovery's */
   manifest: AppManifest | null
   error: string | null
   warnings: string[]
@@ -287,20 +316,23 @@ type AppEntry = {
 }
 
 /**
- * 도구 실패 뒤 표준에러를 한 번 더 옮겨 담기까지 (C-6). 앱이 던진 스택은 표준에러로, 실패 답은 표준출력으로 가서
- * 도착 순서가 정해져 있지 않다. 같은 기계의 파이프라 몇 밀리초면 둘 다 온다.
+ * How long it waits to capture stderr once more after a tool failure (C-6). The stack a thrown app
+ * error carries goes to stderr, while the failure answer goes to stdout, and the order they arrive in
+ * is not guaranteed. Since it is a pipe on the same machine, both arrive within a few milliseconds.
  */
 const STDERR_SETTLE_MS = 150
 
-/** 물으면 답하는 오류 묶음 — 만드는 세션에 보냈으면 그 때가 붙는다 (C-6) */
+/** An error bundle returned on request — carries the time it was sent, if it was sent to the building session (C-6) */
 export type SentErrorBundle = AppErrorBundle & { sentAt: number | null }
 
-/** 보낸 묶음의 열쇠 — 한 앱에서 묶음은 (종류, 때)로 하나다. 표준에러를 다시 담아 갈아 끼워져도 같은 열쇠다 */
+/** The key for a sent bundle — within one app, a bundle is uniquely (kind, time). Stays the same key even after stderr is re-captured and the bundle is replaced */
 const sentKey = (holdKey: string, b: Pick<AppErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
 
 /**
- * 새 앱 id가 걸린 까닭을 에이전트와 사람이 읽을 말로 (C-1b). 판정은 한 벌이다(`newAppIdProblem`, @cc/protocol) — 말만 여기서
- * 붙인다. 새 앱 창은 같은 판정에 자기 말을 붙이지만(`appIdHint`), 오케스트레이터의 `create_app`은 이 말을 그대로 읽는다.
+ * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
+ * one single function (`newAppIdProblem`, @cc/protocol) — only the wording is attached here. The new
+ * app dialog attaches its own wording to the same validation result (`appIdHint`), while the
+ * orchestrator's `create_app` reads this wording as-is.
  */
 const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
   shape: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
@@ -309,66 +341,76 @@ const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
   builtin: 'that is the id of a built-in app — pick another',
 }
 
-/** 부를 수 없는 앱 — 이유가 곧 메시지다 */
+/** An app that cannot be called — the reason is exactly the message */
 export class AppUnavailableError extends Error {
   readonly code = 'internal'
 }
 
 export class ExternalApps {
-  /** 범위 키 → (앱 id → 항목) */
+  /** Scope key → (app id → entry) */
   private scopes = new Map<string, { scope: Scope; apps: Map<string, AppEntry> }>()
   private watchers: DirWatchers
   private disposed = false
   private timing: RuntimeTiming
   private secrets: SecretStore
-  /** 실행 id → 열린 실행. 중개의 문지기가 여기에 묻는다 */
+  /** Run id → open run. The broker's gatekeeper asks against this */
   private openRuns = new Map<string, OpenRun>()
   /**
-   * (범위, 앱 id) → 열린 화면 수. 앱 칸(AppEntry)이 아니라 이름에 묶는다: 매니페스트가 바뀌면
-   * 칸은 새로 서지만 사람 앞의 화면은 그대로 열려 있다. 칸에 두면 새 칸은 화면을 0개로 알고,
-   * 화면이 열린 앱을 쉬는 앱으로 내린다.
+   * (scope, app id) → open screen count. Tied to the name rather than the app entry (AppEntry): when
+   * the manifest changes, a new entry is created, but the screen in front of the person stays open the
+   * whole time. Tying this to the entry instead would leave the new entry thinking it has zero
+   * screens, and demote an app with an open screen to idle.
    */
   private viewHolds = new Map<string, number>()
   private pipeSeq = 0
-  /** `onAppsChanged` 구독자와, 이번 틱에 알림이 이미 잡혀 있는가 */
+  /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
-  /** 반영의 시계 (C-4) — 앱 이름(holdKey)마다. 매니페스트가 바뀌어 칸이 새로 서도 이어진다 */
+  /** Timers for reflecting changes (C-4) — per app name (holdKey). Carried over even when the manifest changes and a new entry is created */
   private turnEndTimers = new Map<string, NodeJS.Timeout>()
   private quietTimers = new Map<string, NodeJS.Timeout>()
-  /** 진행 중인 반영 — 겹쳐 부르면 같은 것을 기다린다 */
+  /** A reflect in progress — an overlapping call waits on the same one */
   private reloading = new Map<string, Promise<boolean>>()
-  /** 앱 이름(holdKey)마다 최근 오류 묶음, 최근 것부터 (C-6) — 매니페스트가 바뀌어 칸이 새로 서도 이어진다 */
+  /** Recent error bundles per app name (holdKey), most recent first (C-6) — carried over even when the manifest changes and a new entry is created */
   private errorLog = new Map<string, AppErrorBundle[]>()
   /**
-   * 만드는 세션에 보낸 묶음 → 보낸 때 (C-6). 묶음에 적지 않고 따로 드는 이유: 도구 실패의 묶음은 표준에러를 조금 뒤에
-   * 다시 옮겨 담으며 **새 객체로 갈아 끼워진다**(recordError) — 묶음에 적은 표시는 그때 사라진다.
+   * A bundle sent to the building session → the time it was sent (C-6). Kept separately instead of
+   * marked on the bundle because a tool-failure bundle **gets replaced with a new object** shortly
+   * after, when it re-captures stderr (recordError) — a mark written onto the bundle would disappear
+   * at that point.
    */
   private errorsSent = new Map<string, number>()
   /**
-   * 이 런타임이 띄운 프로세스 전부 — 아직 끝나지 않은 것. 칸(`Life.proc`)이 들고 있는 것만이 아니다: 매니페스트가 바뀌어
-   * 새 칸이 선 뒤 호출을 마치기를 기다리는 옛 프로세스(`haltWhenDrained`), 점검·반영이 내리는 중인 프로세스는 어느 칸에도
-   * 없다. `dispose`는 칸이 아니라 이 목록을 끝낸다 — 칸만 끝내면 그런 프로세스가 host가 끝난 뒤 launchd 아래 고아로
-   * 남는다(점검·반영 시험을 뒤집어 돌린 뒤 픽스처 앱 셋이 그렇게 남아 있었다).
+   * Every process this runtime has ever started that has not yet ended. Not just the ones an entry
+   * (`Life.proc`) is holding onto: an old process waiting for its call to finish after a new entry was
+   * created because the manifest changed (`haltWhenDrained`), or a process being shut down by a check
+   * or a reflect, belongs to no entry at all. `dispose` ends this list, not the entries — ending only
+   * the entries would leave such a process orphaned under launchd after the host exits (this happened
+   * with three fixture apps left behind after running the check and reflect tests with the fix
+   * disabled).
    */
   private spawned = new Set<AppProcess>()
   /**
-   * 열린 실행 → 그 실행(또는 그 아래 사슬)의 부탁을 사람이 거절한 것 (D-4) — 창구가 적는다. 그 실행이 실패로 끝나면 그 실패의 오류
-   * 묶음에 싣고(앱의 버그가 아니라 사람의 결정이다), 앱이 부른 실행이면 부모에게 넘긴다: A가 부른 B의 부탁이 거절되어 B가 실패하고
-   * 그래서 A가 실패했으면, A의 화면이 말할 까닭도 그 거절이다. 실행이 끝나면 걷는다.
+   * Open run → the person denied this run's request (or one further down its chain) (D-4) — recorded
+   * by the desk. If that run ends in failure, this is attached to that failure's error bundle (it is
+   * not a bug in the app, it is the person's decision), and if the run belongs to an app that called
+   * another, it is passed up to the parent: if A called B, B's request was denied so B failed, and
+   * that is why A failed, then the reason A's screen states is that same denial. Cleared once the run
+   * ends.
    */
   private denials = new Map<string, CapabilityDenial>()
   /**
-   * 중개 창구 (D) — 앱이 fd 3으로 부탁한 것을 푸는 한 자리. 앱끼리의 호출(D-2)은 이 런타임의 단 하나의 길(`call`)로 간다.
-   * 생성자에서 세운다 — 답을 둘 자리(`deps.permissions`)와 기다림의 상한(`timing`)이 그때 정해진다.
+   * The broker desk (D) — the one place that resolves what an app requests over fd 3. A call between
+   * apps (D-2) goes through this runtime's single path (`call`). Constructed in the constructor —
+   * where the answer's storage (`deps.permissions`) and the wait cap (`timing`) are decided.
    */
   private desk: BrokerDesk
-  /** 건네기 (E) — 가져온 앱의 대기실과 사람의 확인(`handover.ts`) */
+  /** Handover (E) — the staging area for an imported app and the person's confirmation (`handover.ts`) */
   private handover: AppHandover
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
-    // 기록의 모든 줄은 이 한 자리를 지난다 — 도구 호출의 줄도(`call`), 중개 부탁의 줄도(창구). 그래서 기록 판의 신호도 여기서 한 번이다
+    // Every ledger row passes through this one place — a tool-call row (`call`) and a broker-request row (the desk) alike. So the runs panel's own signal is also produced here, once
     const notify = deps.emitRunsChanged
     if (deps.runs && notify) this.deps = { ...deps, runs: announcingLedger(deps.runs, notify) }
     this.desk = new BrokerDesk(
@@ -390,13 +432,13 @@ export class ExternalApps {
     this.secrets = new SecretStore(deps.dataRoot)
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
     /*
-     * 기동에 한 번: 끝을 못 본 실행을 닫고, 보관 기간 밖을 걷는다. 지금이 안전한 순간이다 —
-     * 이 host가 연 실행은 아직 하나도 없다.
+     * Once at startup: closes a run that never saw its own ending, and prunes anything past
+     * retention. This is the safe moment for it — this host has not opened a single run yet.
      */
     const settled = deps.runs?.settleUnfinished('the host stopped before this call finished') ?? 0
     const pruned = deps.runs?.prune(Date.now() - RUN_RETENTION_MS) ?? 0
     if (settled || pruned) console.error(`[apps] run records: ${settled} unfinished closed, ${pruned} past retention removed`)
-    // 건네기 (E) — 가져온 앱의 대기실과 확인. 런타임은 확인을 기다리는 앱을 띄우지 않는다(`held`)
+    // Handover (E) — an imported app's staging area and confirmation. The runtime never starts an app still waiting on confirmation (`held`)
     this.handover = new AppHandover(
       {
         dataRoot: deps.dataRoot,
@@ -413,8 +455,9 @@ export class ExternalApps {
   }
 
   /**
-   * 한 앱의 최근 오류 묶음 (M4 C-6) — 뜨지 못함·예고 없는 종료·도구 실패. `latest`가 "만드는 세션에 보내기"가 보낼
-   * 것이다. **보내지는 않는다** — 사람이 누를 때 UI가 이것을 읽어 보낸다(errors.ts 주석).
+   * An app's recent error bundles (M4 C-6) — failing to start, an unannounced exit, a tool failure.
+   * `latest` is what "send to the building session" would send. **Never sent automatically** — the
+   * UI reads and sends this when a person presses the button (see the comment in errors.ts).
    */
   errors(ref: AppRef): { latest: SentErrorBundle | null; recent: SentErrorBundle[] } {
     const key = this.holdKey(ref)
@@ -423,11 +466,14 @@ export class ExternalApps {
   }
 
   /**
-   * 묶음 하나를 만드는 세션에 보낸다고 적는다 (C-6) — **한 번만.** 보낼 묶음을 돌려주고, 이미 보냈으면 'sent', 들고 있지
-   * 않으면(오래돼 밀려났다, host가 다시 떴다) null. 적는 것이 보내기보다 먼저다: 사람이 두 번 눌러도, 두 창에서 눌러도
-   * 한 번만 간다. 보내다 실패하면 부른 쪽이 `unmarkErrorSent`로 되돌린다 — 못 간 묶음을 "보냈다"로 남기지 않는다.
+   * Records that one bundle was sent to the building session (C-6) — **only once.** Returns the
+   * bundle to send, `'sent'` if it was already sent, or null if it is no longer held (it aged out of
+   * the list, or the host restarted). Recording happens before sending: even if the person clicks
+   * twice, or from two windows, it goes out only once. If sending fails, the caller reverts this with
+   * `unmarkErrorSent` — a bundle that never actually went out is never left marked "sent".
    *
-   * 보내는 일은 여기서 하지 않는다. 런타임은 묶음을 모으고 물으면 답할 뿐이고(errors.ts), 보내는 쪽은 사람이 누른 RPC다.
+   * The sending itself does not happen here. The runtime only collects bundles and answers when asked
+   * (errors.ts); what actually sends it is the RPC a person triggers by clicking.
    */
   markErrorSent(ref: AppRef, at: number): AppErrorBundle | 'sent' | null {
     const key = this.holdKey(ref)
@@ -436,7 +482,7 @@ export class ExternalApps {
     if (!b) return null
     const k = sentKey(key, b)
     if (this.errorsSent.has(k)) return 'sent'
-    // 목록에서 밀려난 묶음의 표시는 걷는다 — 표시가 묶음보다 오래 살 까닭이 없다
+    // Clears the mark for a bundle that has aged out of the list — a mark has no reason to outlive the bundle it belongs to
     for (const old of [...this.errorsSent.keys()]) {
       if (old.startsWith(`${key}\n`) && !list.some((x) => sentKey(key, x) === old)) this.errorsSent.delete(old)
     }
@@ -451,8 +497,9 @@ export class ExternalApps {
   }
 
   /**
-   * 오류 묶음 하나를 적는다. 도구 실패는 앱의 답이 표준에러보다 먼저 올 수 있어서(파이프가 둘이다 — 던진 스택은
-   * 표준에러로, 실패 답은 표준출력으로 간다), 그 프로세스의 표준에러를 조금 뒤에 한 번 더 옮겨 담는다.
+   * Records one error bundle. Since a tool failure's answer can arrive before stderr does (two
+   * separate pipes — a thrown stack goes over stderr, the failure answer over stdout), that process's
+   * stderr is captured once more a little afterward.
    */
   private recordError(e: AppEntry, b: Omit<AppErrorBundle, 'text' | 'denied'> & { denied?: AppErrorBundle['denied'] }, proc: AppProcess | null = null): void {
     const key = this.holdKey(e.ref)
@@ -463,9 +510,11 @@ export class ExternalApps {
     if (list.length > ERRORS_KEPT) list.length = ERRORS_KEPT
     this.errorLog.set(key, list)
     /*
-     * 목록이 말하는 "마지막 오류의 때"가 바뀌었다 — 화면(오류 줄)은 그것을 보고 묶음을 다시 읽는다. "바뀌었다"
-     * (emitChanged)에 기대지 않는 이유: 읽기 전용 도구의 호출은 그것을 내지 않는다(내면 화면이 다시 읽다가 또
-     * 실패하는 고리가 된다). 뜨지 못함·죽음은 상태가 바뀌며 이미 알렸지만, 도구 실패는 이것이 유일한 신호다.
+     * The "time of the last error" the list states has changed — the screen (the error row) sees this
+     * and re-reads the bundle. Why this does not rely on "changed" (emitChanged): a read-only tool's
+     * call never emits it (doing so would turn a screen re-reading on failure into a loop). Failing to
+     * start or dying already announced through the status change, but for a tool failure, this is the
+     * only signal.
      */
     this.appsChanged()
     if (!proc) return
@@ -478,31 +527,34 @@ export class ExternalApps {
   }
 
   /**
-   * 중개의 몸통 가운데 host의 코어가 할 일(에이전트 세션)을 받는다 (D). 매니저가 런타임을 받을 때 부른다
-   * (`SessionManager.useExternalApps`) — host의 main과 테스트가 같은 이음새를 쓴다. null이면 비운다: 그 뒤의 부탁은
-   * "빌려줄 에이전트가 없다"로 거절된다.
+   * Receives the part of the broker's body only the host's core can do (an agent session) (D). Called
+   * by the manager when it receives the runtime (`SessionManager.useExternalApps`) — the host's main
+   * and the tests use the same seam. Empties it if null: a request afterward is refused with "no
+   * agent to lend".
    */
   attachBrokerHost(host: BrokerHost | null): void {
     this.desk.attach(host)
   }
 
   /**
-   * 한 앱에 대해 기억된 능력의 답 (D-4) — 최근 것부터. `current`는 지금 매니페스트의 `uses`로 답한 것인가: 아니면 더 쓰이지
-   * 않는다. 매니페스트가 틀렸거나 앱이 사라졌으면 모두 current가 아니다.
+   * The remembered capability answers for one app (D-4), most recent first. `current` means it was
+   * given against the manifest's current `uses`; otherwise it is no longer used. Everything is
+   * non-current if the manifest is invalid or the app is gone.
    */
   permissions(ref: AppRef): CapabilityDecisionListed[] {
     const m = this.find(ref)?.manifest
     return this.desk.permissions(ref, m ? m.uses : null)
   }
 
-  /** 기억된 답 하나를 잊는다 (D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
+  /** Forgets one remembered answer (D-4) — the next time that capability is needed, it is asked again */
   forgetPermission(ref: AppRef, capability: string): void {
     this.desk.forgetPermission(ref, capability)
   }
 
   /**
-   * 이 실행까지의 사슬 (D-5) — 사슬을 시작한 호출부터 이 실행까지의 (앱, 도구). 열린 실행만 따라간다: 아래의 호출은 부모가
-   * 열려 있는 동안에만 산다(부모가 끝나면 취소된다), 그래서 도는 부탁의 사슬은 끊기지 않는다.
+   * The chain leading up to this run (D-5) — the (app, tool) pairs from the call that started the
+   * chain to this run. Only open runs are followed: a call beneath it lives only while its parent is
+   * open (it is cancelled once the parent ends), so a running request's chain is never broken.
    */
   private chainOf(runId: string): { ref: AppRef; tool: string }[] {
     const path: { ref: AppRef; tool: string }[] = []
@@ -515,7 +567,8 @@ export class ExternalApps {
   }
 
   /**
-   * 한 앱이 부탁한 에이전트의 쓰임 (D-5) — 지난 하루와 기록이 남는 30일. 기록 판이 읽는다(`apps.usage`).
+   * The agent usage one app has requested (D-5) — over the last day, and over the 30 days records are
+   * kept. Read by the runs panel (`apps.usage`).
    */
   agentUse(ref: AppRef): { day: AgentUse; month: AgentUse } {
     const now = Date.now()
@@ -528,8 +581,9 @@ export class ExternalApps {
   }
 
   /**
-   * 이 실행의 사슬을 누가 시작했나 (D-4) — 부모를 따라 올라가 앱이 아닌 첫 호출자. 화면이면 그 화면의 앱이 답이다(물음이 그
-   * 고정 화면에 선다). 중간의 부모가 이미 끝났으면 따라갈 수 없다 — null.
+   * Who started this run's chain (D-4) — walking up through parents to the first caller that is not
+   * an app. For a screen, the answer is that screen's app (the question is attributed to its fixed
+   * screen). If a parent along the way has already ended, this cannot be followed — returns null.
    */
   private chainOrigin(runId: string): CapabilityOrigin | null {
     let run = this.openRuns.get(runId)
@@ -540,17 +594,18 @@ export class ExternalApps {
     return null
   }
 
-  /** 한 앱의 실행 기록, 최근 것부터 (B-7) — 폴더가 사라진 앱의 기록도 읽힌다 */
+  /** One app's run records, most recent first (B-7) — records are still readable even for an app whose folder is gone */
   runs(ref: AppRef, limit = 100): AppRunListed[] {
     return this.deps.runs?.list(ref.projectId, ref.appId, limit) ?? []
   }
 
   /**
-   * 프로젝트 목록과 신뢰를 다시 읽고 전부 다시 훑는다.
+   * Re-reads the project list and trust, and rescans everything.
    *
-   * 기동할 때 한 번, 그리고 프로젝트가 늘거나 줄거나 신뢰가 바뀔 때 부른다(RPC 문이 부른다).
-   * 폴더 안의 변화는 감시가 따로 따라간다 — 이 함수는 "어느 폴더를 볼 것인가"를 정한다.
-   * **아무것도 띄우지 않는다** — 앱은 처음 필요할 때 뜬다.
+   * Called once at startup, and whenever a project is added or removed or trust changes (an RPC door
+   * calls this). Changes inside a folder are tracked separately by watching — this function decides
+   * "which folders to watch". **It never starts anything** — an app starts only the first time it is
+   * needed.
    */
   refresh(): void {
     if (this.disposed) return
@@ -570,7 +625,7 @@ export class ExternalApps {
     }
   }
 
-  /** 발견된 외부 앱 전부 — 신뢰하지 않은 프로젝트의 앱과 깨진 매니페스트도 이유와 함께 선다 */
+  /** Every discovered external app — an untrusted project's app and one with a broken manifest appear too, with their reason */
   list(): ExternalAppInfo[] {
     const out: ExternalAppInfo[] = []
     for (const { apps } of this.scopes.values()) {
@@ -580,10 +635,12 @@ export class ExternalApps {
   }
 
   /**
-   * 앱의 도구 목록 — 앱이 내려가 있으면 **여기서 띄운다**(처음 필요할 때).
+   * An app's tool list — if the app is down, **this is where it starts** (the first time it is
+   * needed).
    *
-   * 이름에 `__`가 있는 도구는 여기서 빠진다(A-1 `toolNameError`). 목록을 읽는 자리가 곧
-   * 막는 자리다: 이 목록이 세션에 붙는 목록(A-5)과 화면이 부르는 도구의 정본이 된다.
+   * A tool with `__` in its name is dropped right here (A-1's `toolNameError`). The place a list is
+   * read is the place it is enforced: this list becomes the source of truth both for what attaches to
+   * a session (A-5) and for the tools a screen can call.
    */
   async tools(ref: AppRef, audience?: Audience): Promise<Tool[]> {
     const e = this.require(ref)
@@ -592,10 +649,11 @@ export class ExternalApps {
   }
 
   /**
-   * 마지막으로 읽은 도구 목록 — **앱을 띄우지 않는다.** 한 번도 읽은 적이 없으면 null이다.
+   * The last tool list read — **never starts the app.** Null if it has never been read.
    *
-   * 세션에 붙이는 쪽(A-5)이 먼저 이것을 보고, 없을 때만 `tools()`로 띄운다. 앱이 내려가 있어도
-   * 목록은 남아 있으므로, 세션이 뜰 때마다 앱 프로세스가 뜨지 않는다.
+   * The side that attaches an app to a session (A-5) checks this first, and starts the app with
+   * `tools()` only if there is none. The list survives even while the app is down, so an app process
+   * does not start every time a session starts.
    */
   knownTools(ref: AppRef, audience?: Audience): Tool[] | null {
     const known = this.require(ref).life.known
@@ -604,18 +662,21 @@ export class ExternalApps {
   }
 
   /**
-   * 앱 목록이나 어떤 앱의 에이전트 도구가 바뀌었을 수 있다 (A-5) — 세션에 붙은 앱을 다시 셀 때다.
+   * The app list, or an app's agent-facing tools, may have changed (A-5) — the moment to recount which
+   * apps are attached to a session.
    *
-   * 알리는 때: 앱 폴더가 생기거나 사라지거나 매니페스트가 바뀜, 프로젝트가 늘고 줆, 신뢰가 바뀜,
-   * 앱이 멈춤(연달아 실패)과 다시 시작, 다시 읽은 도구 목록이 달라짐. **무엇이** 바뀌었는지는
-   * 싣지 않는다 — 받는 쪽은 `list()`와 `knownTools()`를 다시 읽는다(#81의 "알림 하나와 다시
-   * 읽기"와 같은 방식이다). 한 틱에 몰린 변화는 한 번으로 모은다.
+   * When this fires: an app folder appears, disappears, or its manifest changes; a project is added
+   * or removed; trust changes; an app stops (repeated failure) or restarts; a re-read tool list
+   * differs from before. **What** changed is never carried — the receiving side re-reads `list()` and
+   * `knownTools()` instead (the same approach as #81's "one notification, then re-read"). Changes
+   * piling up within one tick are collapsed into one.
    *
-   * 앱의 수명(뜨는 중, 떴다, 쉬어서 내렸다, 죽었다)에도 알린다 (A-8). 사이드바와 고정 화면이
-   * `list()`의 상태를 보여 주므로, 그 상태가 바뀌는 자리는 모두 여기를 지나야 한다. 세션 쪽은
-   * 자기가 보는 모양(붙은 앱과 도구)을 비교해 같으면 아무것도 하지 않으므로, 알림이 늘어도
-   * 할 일은 늘지 않는다. 알림을 둘로 나누지 않은 이유: 목록을 바꾸는 자리가 두 알림 중 하나만
-   * 부르는 날, 그 변화는 한쪽 받는 이에게만 닿는다.
+   * This also fires for an app's lifecycle (starting, running, stopped from being idle, dead) (A-8).
+   * Since the sidebar and the fixed screen show `list()`'s status, every place that status changes has
+   * to pass through here. The session side compares what it currently sees (the attached apps and
+   * tools) and does nothing if unchanged, so more notifications never mean more work. Why this is not
+   * split into two separate notifications: the day something that changes the list calls only one of
+   * the two, that change would reach only one of the two kinds of listener.
    */
   onAppsChanged(listener: () => void): () => void {
     this.appsListeners.add(listener)
@@ -632,7 +693,7 @@ export class ExternalApps {
         try {
           l()
         } catch (err) {
-          // 받는 쪽 하나의 실패가 다른 세션의 갱신을 막지 않는다
+          // One listener's failure never blocks another session's update
           console.error('[apps] apps-changed listener failed:', err)
         }
       }
@@ -640,12 +701,12 @@ export class ExternalApps {
   }
 
   /**
-   * 앱 도구를 부르는 **단 하나의 길** (M4 A-4).
+   * The **single path** through which an app's tool is called (M4 A-4).
    *
-   * 화면이 부른 것(`apps.invoke`)도, 세션의 대리 서버가 부른 것(A-5)도, 다른 앱이 중개로 부른
-   * 것(D-2)도 여기로 들어온다. 그래서 공개 범위 검사, 실행 id 발급, 취소, "바뀌었다" 알림,
-   * 기록(A-6)이 호출마다 한 번씩, 같은 코드로 일어난다 — 경로가 둘이면 그중 하나는 언젠가
-   * 검사를 빠뜨린다.
+   * A call from a screen (`apps.invoke`), from a session's proxy server (A-5), and from another app
+   * via the broker (D-2) all come through here. So audience checking, issuing a run id, cancellation,
+   * the "changed" notification, and the ledger (A-6) all happen exactly once per call, through the
+   * same code — with two paths, one of them eventually misses a check.
    */
   async call(
     ref: AppRef,
@@ -655,13 +716,16 @@ export class ExternalApps {
     opts: {
       signal?: AbortSignal
       /**
-       * 실행 id가 정해지는 순간 한 번 불린다 — 결말을 기다리지 않고 id를 먼저 알아야 하는 쪽이 쓴다
-       * (A-5의 "오래 걸리는 호출": Codex의 상한 전에 "아직 도는 중, 실행 id는 …"을 먼저 돌려준다).
+       * Called once, the moment a run id is decided — used by a caller that needs the id before the
+       * outcome is known (A-5's "long-running calls": returning "still running, run id is …" before
+       * Codex's cap, rather than waiting for the outcome).
        */
       onRun?: (runId: string) => void
       /**
-       * 앱이 이 호출에 보낸 진행 알림의 말 (D) — "사람이 세션 X에서 승인하기를 기다린다"처럼 중개가 앱에 보낸 한 줄을 템플릿의 도우미가
-       * 이 호출로 올려 보낸다. 부른 쪽이 보일 수 있는 자리로 옮긴다(세션의 도구 카드). 말 없는 살려 두기 알림은 넘기지 않는다.
+       * The text of a progress notification the app sent for this call (D) — a line the broker sent
+       * the app, like "waiting on the person's approval in session X", is relayed up through this call
+       * by the template's helper. Moved to somewhere the caller can display it (a session's tool card).
+       * A wordless keepalive notification is never passed through.
        */
       onProgress?: (message: string) => void
     } = {},
@@ -671,8 +735,9 @@ export class ExternalApps {
     opts.onRun?.(runId)
     const t0 = Date.now()
     /*
-     * 기록은 호출이 들어온 순간 `running`으로 한 줄, 끝날 때 결말로 고친다 — 거절도 한 줄이다.
-     * 가리는 값은 이 앱에 저장된 비밀 전부다: 인자·결과·실패 이유 어디에 섞여 들어와도 이름만 남는다.
+     * A row is created as `running` the moment a call comes in, and corrected with its outcome when it
+     * ends — a denial is also a row. What is masked is every secret stored for this app: whichever of
+     * the arguments, the result, or the failure reason it ends up mixed into, only the name survives.
      */
     const redact = this.deps.runs ? redactor(this.secrets.all(this.appKey(e.ref))) : (t: string) => t
     const described = this.deps.runs ? describeArgs(args, redact) : null
@@ -693,16 +758,18 @@ export class ExternalApps {
       error: null,
       createdAt: t0,
     })
-    /** 앱에 실제로 보냈는가 — "바뀌었다"는 앱에 닿은 호출만 알린다 (거절·뜨는 중 취소·기동 실패는 아무것도 바꾸지 않았다) */
+    /** Whether it was actually sent to the app — "changed" only fires for a call that reached the app (a denial, cancellation while starting, or a failed startup changes nothing) */
     let sent = false
     /*
-     * 읽기만 하는 도구인가(`readOnlyHint: true`) — 읽기는 아무것도 바꾸지 않았으니 "바뀌었다"도 알리지 않는다.
-     * 실측(65acb43): 템플릿 화면은 알림마다 `show`를 다시 부르는데 그 `show`가 또 알림을 내서, 화면 하나가 초당
-     * 약 700번 `show`를 불렀다(1초에 실행 기록 618줄, 3초에 2035줄). 주석이 없는 도구는 MCP의 기본값대로 바꿀 수
-     * 있는 도구로 친다 — 틀린 쪽이 "안 알림"이면 화면이 낡은 값을 보여 준다.
+     * Is this a read-only tool (`readOnlyHint: true`)? Reading changes nothing, so "changed" is never
+     * emitted for it either. Measured (65acb43): the template screen re-calls `show` on every
+     * notification, and that `show` itself emits another notification, so a single screen called
+     * `show` roughly 700 times per second (618 run-ledger rows in one second, 2035 in three seconds).
+     * A tool with no annotation is treated as one that can change something, following MCP's own
+     * default — if the wrong choice here is "does not notify", the screen shows a stale value.
      */
     let readOnly = false
-    /** 이 호출을 받은 프로세스 — 실패했을 때 그 프로세스의 표준에러를 오류 묶음에 싣는다 (C-6) */
+    /** The process that received this call — its stderr is attached to the error bundle if the call fails (C-6) */
     let callee: AppProcess | null = null
     const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
       const denial = this.denials.get(runId) ?? null
@@ -711,8 +778,10 @@ export class ExternalApps {
         this.denials.set(caller.parentRunId, denial)
       }
       /*
-       * 앱에 닿은 호출이 실패했다 (C-6) — 앱의 잘못일 수 있는 것만 적는다. 거절은 정책이고, 뜨지 못한 것은
-       * 기동 쪽이 따로 적었다. 인자는 기록과 같은 규칙으로 가린다 — 이 묶음은 만드는 세션의 프롬프트가 될 수 있다.
+       * A call that reached the app failed (C-6) — this records only what could plausibly be the app's
+       * own fault. A denial is policy, and a failure to start was already recorded separately by the
+       * startup path. Arguments are masked under the same rule as the ledger — this bundle can become
+       * the building session's prompt.
        */
       if (status === 'error' && sent) {
         const hide = this.deps.runs ? redact : redactor(this.secrets.all(this.appKey(e.ref)))
@@ -735,7 +804,7 @@ export class ExternalApps {
       const ledger = this.deps.runs
       if (ledger && described) {
         ledger.end(runId, { status, durationMs, error: error === null ? null : redact(error) })
-        // 실패한 입력은 만드는 에이전트가 고치는 데 필요하다 — 최근 것만, 가린 채로
+        // A failed input is needed by the building agent to fix things — kept only for the most recent, and masked
         if (status === 'error') {
           ledger.keepFailure(
             { runId, projectId: e.ref.projectId, appId: e.ref.appId, args: described.json, result: result ? redact(JSON.stringify(result)) : null, createdAt: t0 },
@@ -747,7 +816,7 @@ export class ExternalApps {
       return { runId, status, result, error, durationMs }
     }
 
-    // 앱에 보내기 전에 끝나는 판정 — 프로세스를 띄울 필요도 없다
+    // Checks that end before anything is sent to the app — do not even need to start a process
     if (!e.manifest) return done('rejected', null, `This app's manifest is invalid: ${e.error}`)
     if (!e.scope.trusted) return done('rejected', null, "This app's project is not trusted, so Centralu does not call its apps")
     const held = this.held(e)
@@ -765,9 +834,10 @@ export class ExternalApps {
         const found = e.life.tools?.find((t) => t.tool.name === name)
         if (!found) return done('rejected', null, `This app has no tool named ${name}`)
         /*
-         * 화면은 `app` 도구만, 에이전트와 다른 앱은 `model` 도구만. 세션은 애초에 `model` 도구만
-         * 목록으로 받지만(A-5), 이름을 알면 부를 수 있다 — 목록에서 숨기는 것과 호출을 막는 것은
-         * 다른 일이고, 막는 것은 여기서 한다.
+         * A screen may call only `app` tools, and an agent or another app only `model` tools. A session
+         * only ever receives `model` tools in its list to begin with (A-5), but a tool could still be
+         * called if its name is known — hiding something from the list and blocking the call are
+         * different things, and the blocking happens here.
          */
         const need: Audience = caller.kind === 'view' ? 'app' : 'model'
         if (!found.visibility.includes(need)) {
@@ -776,8 +846,9 @@ export class ExternalApps {
 
         const upstream = [opts.signal, parent?.abort.signal].filter((x): x is AbortSignal => !!x)
         /*
-         * 앱이 뜨는 동안 취소됐으면 보내지 않는다. 실측: 뜨는 중에 취소된 호출이 5초짜리 도구를
-         * 끝까지 돌렸다 — 이미 선 신호에 붙인 리스너는 영영 불리지 않는다.
+         * If it was cancelled while the app was starting, this is never sent. Measured: a call
+         * cancelled while starting ran a 5-second tool to completion anyway — a listener attached to a
+         * signal that has already fired is never called.
          */
         if (upstream.some((sig) => sig.aborted)) return done('cancelled', null, 'Cancelled while the app was starting')
         const abort = new AbortController()
@@ -789,11 +860,14 @@ export class ExternalApps {
         callee = proc
         try {
           /*
-           * `onprogress`를 주는 이유: MCP SDK는 이것이 있을 때만 요청에 진행 토큰을 싣는다(client의 request — 토큰 없이는
-           * 앱이 진행 알림을 보낼 수 없다). 그래서 `resetTimeoutOnProgress`는 지금까지 아무것도 하지 않았다. 앱이 에이전트를
-           * 부탁하고 기다리는 동안(D-1, 몇 분이 걸린다) 템플릿의 도우미가 그 기다림을 이 호출의 진행으로 올려 보내야 이
-           * 호출이 `callTimeoutMs`에 끊기지 않는다. 알림에 말이 실려 있으면 부른 쪽에 넘긴다(`onProgress`) — 앱이 사람을 기다리는 동안
-           * 부른 세션의 카드가 "무엇을 기다리는지"를 말한다. 전에는 여기서 버려져 아무 데도 닿지 않았다.
+           * Why `onprogress` is provided: the MCP SDK only attaches a progress token to a request when
+           * this is present (in the client's request — without a token, the app has no way to send a
+           * progress notification). So until now, `resetTimeoutOnProgress` did nothing at all. While an
+           * app requests an agent and waits (D-1, which can take minutes), the template's helper has to
+           * relay that wait up as this call's own progress, or the call gets cut off at
+           * `callTimeoutMs`. If the notification carries a message, it is passed to the caller
+           * (`onProgress`) — while the app waits on a person, the calling session's card can state what
+           * it is waiting for. Before this, it was dropped here and never reached anywhere.
            */
           const result = await proc.client.callTool(
             { name, arguments: args, _meta: { [RUN_META]: runId } },
@@ -812,20 +886,21 @@ export class ExternalApps {
           return done('error', null, (err as Error).message)
         } finally {
           this.openRuns.delete(runId)
-          // 실행이 끝나면 그 아래의 중개 일도 끝난다 — 앱이 기다리지 않고 답했어도 아래가 남지 않게
+          // When a run ends, the broker work beneath it also ends — so nothing is left behind even if the app answered without waiting
           abort.abort()
           for (const sig of upstream) sig.removeEventListener('abort', onUp)
         }
       })
     } catch (err) {
-      // 뜨지 못했다(기동 실패·백오프 중 바뀜) — 앱에 닿지 못했지만 정책의 거절은 아니다
+      // Failed to start (a failed startup, or changed while backing off) — never reached the app, but this is not a policy denial
       return done('error', null, (err as Error).message)
     }
   }
 
   /**
-   * 앱의 리소스를 읽는다 — 화면이 자기 `ui://` 문서와 리소스를 읽는 길(B-3·B-4의 `onreadresource`).
-   * 도구 호출이 아니라 실행 기록은 남기지 않지만, 앱을 띄우는 규칙(신뢰·처음 필요할 때)은 같다.
+   * Reads an app's resource — the path a screen uses to read its own `ui://` document and resources
+   * (B-3, B-4's `onreadresource`). Not a tool call, so no run record is kept, but the rules for
+   * starting the app (trust, only when first needed) are the same.
    */
   async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
     const e = this.require(ref)
@@ -833,9 +908,11 @@ export class ExternalApps {
   }
 
   /**
-   * 앱이 내놓은 리소스 목록 (MCP `resources/list`, 쪽 넘김까지) — 대화 안 화면(B-1)이 도구가 선언한
-   * `ui://`가 **이 앱의 것인지** 보는 근거다(플랜 "사칭 차단"). 읽기와 같은 규칙으로 앱을 띄운다.
-   * 쪽은 몇 개까지만 넘긴다 — 끝없이 다음 쪽을 주는 앱이 host를 붙잡지 못하게.
+   * The list of resources an app offers (MCP `resources/list`, following pagination) — the basis an
+   * in-conversation screen (B-1) uses to check that a `ui://` a tool declared **actually belongs to
+   * this app** (from the plan, "blocking impersonation"). Starts the app under the same rule as
+   * reading. Follows only up to a page cap — so an app that keeps handing out the next page cannot
+   * hold the host hostage.
    */
   async listResources(ref: AppRef, maxPages = 20): Promise<ListResourcesResult['resources']> {
     const e = this.require(ref)
@@ -853,8 +930,8 @@ export class ExternalApps {
   }
 
   /**
-   * 화면 하나가 이 앱을 붙들고 있다 (ViewHost의 open이 부른다). 열린 화면이 있는 동안은 쉬는
-   * 앱으로 치지 않는다 — 돌려받은 함수를 부르면 놓는다(close).
+   * One screen is holding this app open (called by ViewHost's open). While a screen is open, this is
+   * never treated as an idle app — call the returned function to release the hold (close).
    */
   retainView(ref: AppRef): () => void {
     const e = this.require(ref)
@@ -868,20 +945,22 @@ export class ExternalApps {
       const left = (this.viewHolds.get(key) ?? 1) - 1
       if (left > 0) this.viewHolds.set(key, left)
       else this.viewHolds.delete(key)
-      // 붙들 때의 칸이 아니라 **지금의** 칸 — 그사이 매니페스트가 바뀌었으면 새 칸이 쉬기 시작한다
+      // Not the entry from when this was held, but the **current** entry — if the manifest changed in the meantime, the new entry starts going idle
       const now = this.find(ref)
       if (now) this.armIdle(now)
     }
   }
 
   /**
-   * 고정 화면을 여는 도구와 그 화면 (B-2) — 매니페스트의 `home`과, 그 도구가 선언한
-   * `_meta.ui.resourceUri`. 도구 목록을 알아야 해서 앱이 내려가 있으면 **여기서 띄운다**.
+   * The tool that opens the fixed screen, and that screen itself (B-2) — the manifest's `home`, and
+   * that tool's declared `_meta.ui.resourceUri`. Since this needs the tool list, if the app is down,
+   * **this is where it starts**.
    *
-   * 화면을 선언하지 않은 도구는 받지 않는다. 고정 화면은 도구 호출에서 태어나는 화면이고(플랜 "화면이
-   * 뜨는 두 자리"), 화면이 없는 도구를 부르면 결과만 남고 띄울 것이 없다. 그때 호출부터 해 버리면
-   * 사람은 아무것도 안 뜬 채로 앱의 상태만 바뀐 것을 보게 된다. 그래서 부르기 **전에** 거절한다.
-   * 이유는 화면에 그대로 보이므로 사람의 말로 적는다.
+   * A tool declaring no screen is never accepted. A fixed screen is one born from a tool call (from
+   * the plan, "the two places a screen can appear"), and calling a tool with no screen would leave
+   * only a result with nothing to open. Calling it anyway would leave the person watching the app's
+   * state change with nothing appearing on screen. So this is refused **before** ever calling it. The
+   * reason is worded for a person, since it shows up on screen verbatim.
    */
   async homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
     const e = this.require(ref)
@@ -898,43 +977,50 @@ export class ExternalApps {
   }
 
   /**
-   * 화면의 출처 방식 (B-3) — 매니페스트의 `view.origin`. 앱이 없거나 매니페스트가 틀렸으면
-   * 불투명이다: 모르는 앱에 진짜 출처(저장소가 남는 포트)를 내주지 않는다.
+   * A screen's origin handling (B-3) — the manifest's `view.origin`. Opaque if the app does not exist
+   * or its manifest is invalid: an unknown app is never handed a real origin (a port that leaves
+   * storage behind).
    */
   viewOrigin(ref: AppRef): 'opaque' | 'app' {
     return this.find(ref)?.manifest?.view?.origin ?? 'opaque'
   }
 
   /**
-   * 멈춘 앱을 다시 시작할 수 있게 한다 (B-6의 "다시 시작"). 연속 실패와 백오프를 지우고
-   * 떠 있으면 내린다 — **띄우지는 않는다**, 다음 필요가 띄운다.
+   * Lets a stopped app start again (B-6's "Restart"). Clears consecutive failures and backoff, and
+   * stops it if running — **never starts it**, the next time it is needed does.
    */
   async restart(ref: AppRef): Promise<void> {
     const e = this.require(ref)
     await this.halt(e, 'restart requested')
     Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
-    // 멈췄던 앱은 세션에서 떨어져 있었다 — 다시 붙을 수 있게 알린다. 죽었던(crashed) 앱도 이유가
-    // 지워져 목록의 상태가 바뀐다(A-8)
+    // A stopped app had been detached from sessions — announce so it can attach again. A crashed app's
+    // reason is also cleared, changing its status in the list (A-8)
     this.appsChanged()
   }
 
   /**
-   * 사용자 폴더에 화면 없는 앱을 하나 만든다 (M4 A-7, 결정 8) — 사람이 승인한 MCP 서버가 앱이 되는 자리.
+   * Creates a screen-less app in the user folder (M4 A-7, decision 8) — where an MCP server a person
+   * approved turns into an app.
    *
-   * 승인한 서버가 따로 된 명부(app_settings)에 살면 승인 흐름도 붙이는 길도 둘이 된다. 그 서버의 호출은
-   * 중개를 지나지 않았고, 기록되지 않았고, 목록에서 지울 수도 없었다. 앱이 되면 다른 앱과 같은 한 길
-   * (공개 범위·실행 기록·처음 필요할 때 띄우기·쉬면 내리기)을 탄다. 사용자 폴더 앱이라 오케스트레이터에
-   * 붙는다(결정 4 — 예전에 승인된 서버가 붙던 자리와 같다).
+   * If an approved server lived in a separate registry (app_settings), the approval flow and the
+   * attach path would both be duplicated. That server's calls never went through the broker, were
+   * never recorded, and could not even be removed from a list. Becoming an app puts it on the same one
+   * path every other app takes (audience, the run ledger, starting only when first needed, stopping
+   * when idle). Since it is a user-folder app, it attaches to the orchestrator (decision 4 — the same
+   * place a previously approved server used to attach).
    *
-   * 판정은 발견과 같은 한 벌이다: 매니페스트를 만들어 `parseManifest`에 읽혀 본 뒤에 쓴다(id 규칙 #93도
-   * 거기 있다). 내장 앱의 id는 가져갈 수 없다. **같은 id의 앱이 이미 있으면** — 같은 서버면 그 앱을
-   * 그대로 돌려주고(다시 불러도 같다: 옮기기가 중간에 끊겼다 다시 돌 때), 다르면 거절한다(사람이 만든
-   * 앱을 덮어쓰지 않는다).
+   * Validation is the same single set discovery uses: a manifest is built and passed through
+   * `parseManifest` before it is written (the id rule from #93 lives there too). A built-in app's id
+   * cannot be taken. **If an app with the same id already exists** — if it is the same server, that
+   * app is returned as-is (calling this again produces the same result: when a move was interrupted
+   * partway and runs again), and if different, this refuses (a person-made app is never overwritten).
    *
-   * 쓰는 방법: 점으로 시작하는 임시 폴더(발견이 건너뛴다)에 쓰고 이름을 바꾼다 — 반쯤 쓴 매니페스트를
-   * 발견이 "틀린 앱"으로 읽는 순간이 없다. 쓴 뒤 바로 다시 훑는다: 사용자 쪽은 `apps/`가 없을 때 아무것도
-   * 감시하지 않으므로(데이터 폴더 자체를 보면 store.db가 쓰일 때마다 깨어난다) 첫 앱은 감시가 못 본다.
-   * **띄우지는 않는다** — 처음 필요할 때 뜬다.
+   * How it is written: to a temp folder starting with a dot (skipped by discovery), then renamed —
+   * there is never a moment where discovery could read a half-written manifest as "a broken app".
+   * Rescanned immediately after writing: on the user side, nothing is watched while `apps/` does not
+   * exist yet (watching the data folder itself would wake up on every write to store.db), so watching
+   * never catches the very first app. **This never starts it** — it starts the first time it is
+   * needed.
    */
   installUserApp(spec: { id: string; name: string; description: string; server: { command: string; args: string[] } }): ExternalAppInfo {
     if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
@@ -984,20 +1070,23 @@ export class ExternalApps {
   }
 
   /**
-   * 앱을 점검한다 (M4 C-3) — 만드는 세션의 `check`와 `apps.check`가 부른다. 만드는 에이전트가 사람 대신 자기 앱을
-   * 시험하는 자리다.
+   * Checks an app (M4 C-3) — called by a building session's `check` and by `apps.check`. This is
+   * where a building agent tests its own app in place of a person.
    *
-   *   1. 다시 훑는다 — 방금 고친 매니페스트를 발견과 같은 판정(`parseManifest`)으로 읽는다
-   *   2. **지금 파일로** 다시 띄운다 — 떠 있던 프로세스는 옛 코드일 수 있다. 진행 중인 호출은 끊지 않는다:
-   *      끝나기를 기다리고(`checkDrainMs`), 넘으면 떠 있는 것을 보고 그렇다고 적는다
-   *   3. 도구 목록을 **실제로** 부른다 — S-6에서 깨진 서버도 프로세스는 살아 있었다
-   *   4. 도구가 가리키는 `ui://` 화면을 하나씩 읽는다
-   *   5. 이름·공개 범위·주석·home의 문제를 판정한다(`check.ts`)
+   *   1. Rescans — reads the just-edited manifest under the same validation discovery uses
+   *      (`parseManifest`)
+   *   2. Restarts **with the current files** — a running process could still be old code. A call in
+   *      progress is never cut off: this waits for it to finish (`checkDrainMs`), and past that, checks
+   *      the running process instead and states so
+   *   3. **Actually** calls for the tool list — in S-6, even a broken server's process stayed alive
+   *   4. Reads each `ui://` screen the tools point at, one at a time
+   *   5. Validates the naming, audience, annotation, and home problems (`check.ts`)
    *
-   * **앱을 이상한 상태로 두지 않는다.** 멈춘(failed) 앱도 점검은 다시 띄워 본다 — 사람이 "다시 시작"을 누른
-   * 것과 같다(연속 실패를 지운다). 그래서 점검을 되풀이해도 앱이 멈춤으로 밀려나지 않는다: 못 뜨면 그 한 번의
-   * 실패(crashed)와 이유가 남고, 뜨면 보통의 떠 있는 앱이 된다(쉬면 내려간다). 점검은 도구를 부르지 않으므로
-   * 실행 기록에 줄을 남기지 않는다.
+   * **This never leaves the app in a strange state.** A check tries starting even a stopped (failed)
+   * app — the same as a person pressing "Restart" (it clears consecutive failures). So repeating a
+   * check never pushes an app further toward stopped: if it fails to start, that one failure
+   * (crashed) and its reason are recorded, and if it starts, it becomes a normal running app (stopping
+   * again if idle). A check never calls a tool, so it leaves no row in the run ledger.
    */
   async check(ref: AppRef): Promise<AppCheckReport> {
     const label = `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
@@ -1009,7 +1098,7 @@ export class ExternalApps {
     const report = (stderr: string | null) => formatReport(label, { findings, tools, screens }, { process: procLine, notes, stderr })
 
     const key = ref.projectId ?? USER_SCOPE
-    // 점검은 지금 파일을 읽으라는 부탁이다 — 턴 안이라 미뤄 둔 매니페스트의 바뀜도 지금 읽는다 (C-4, `rescan`의 `now`)
+    // A check is a request to read the current files right now — even a manifest change deferred because it was mid-turn is read now (C-4, `rescan`'s `now`)
     if (this.scopes.has(key)) this.rescan(key, { now: ref.appId })
     else this.refresh()
     const e = this.find(ref)
@@ -1032,7 +1121,7 @@ export class ExternalApps {
       return report(null)
     }
 
-    // 지금 파일로 다시 띄운다 — 호출이 끝난 **바로 그 틱에** 내린다(drain 주석)
+    // Restarts with the current files — stopped in **the very same tick** the call finishes (see the comment on drain)
     let restarted = false
     for (;;) {
       if (e.life.inflight === 0) {
@@ -1078,30 +1167,38 @@ export class ExternalApps {
         stderr = proc.log.tail() || null
       })
     } catch (err) {
-      // 뜨지 못했다 — 이유에 표준에러 끝부분이 이미 들어 있다(AppProcess.start)
+      // Failed to start — the reason already includes the tail of stderr (AppProcess.start)
       findings.push({ level: 'problem', where: 'start', message: (err as Error).message })
     }
     return report(stderr)
   }
 
   /**
-   * 새 앱을 템플릿으로 만든다 (M4 C-1b) — "새 앱"(`apps.create`)과 오케스트레이터의 `create_app`이 같은 문을 쓴다.
+   * Creates a new app from the template (M4 C-1b) — "New app" (`apps.create`) and the orchestrator's
+   * `create_app` use the same door.
    *
-   *   프로젝트 앱     `<프로젝트>/.centralu/apps/<id>/` — 저장소에 커밋되어 팀과 나뉜다 (결정 1의 기본)
-   *   사용자 폴더 앱   `<데이터 폴더>/apps/<id>/` — 여러 프로젝트에서 쓰는 것 (`projectId: null`)
+   *   project app     `<project>/.centralu/apps/<id>/` — committed to the repository and shared with
+   *                   the team (decision 1's default)
+   *   user-folder app `<data folder>/apps/<id>/` — for something used across several projects
+   *                   (`projectId: null`)
    *
-   * 거절하는 것 셋, 모두 폴더가 생기기 전에:
-   *   - **이름**: 제안된 MCP 서버와 같은 규칙(`newAppIdProblem` — #93의 글자·`centralu` 예약에 `app-`
-   *     머리 금지). 발견은 `app-` 머리의 id도 읽지만(손으로 만든 앱), 새로 만드는 앱에 `app-app-notes`라는
-   *     서버 이름을 줄 까닭이 없다. 내장 앱의 id도 안 된다.
-   *   - **신뢰하지 않은 프로젝트**: 만든 앱은 이 기계에서 도는 코드이고, 신뢰하지 않은 프로젝트의 앱은 뜨지 않는다
-   *     (결정 3). 만들 수는 있는데 뜨지 않는 앱은 만드는 세션을 헛돌게 한다.
-   *   - **이미 있는 id**: 틀린 매니페스트로 서 있는 폴더라도 사람이나 에이전트의 것이다 — 덮어쓰지 않는다.
+   * Three things refused, all before the folder is created:
+   *   - **the name**: the same rule as a proposed MCP server (`newAppIdProblem` — #93's characters and
+   *     the `centralu` reservation, plus a ban on the `app-` prefix). Discovery still reads an id with
+   *     the `app-` prefix (a hand-made app), but there is no reason for a newly created app to have a
+   *     server name like `app-app-notes`. A built-in app's id is also refused.
+   *   - **an untrusted project**: a created app is code that runs on this machine, and an app in an
+   *     untrusted project never starts (decision 3). An app that can be created but never runs would
+   *     leave the building session spinning its wheels.
+   *   - **an id that already exists**: even a folder standing there with an invalid manifest belongs
+   *     to a person or an agent — never overwritten.
    *
-   * 쓰는 방법은 `installUserApp`과 같다: 점으로 시작하는 임시 폴더에 펼치고 이름을 바꾼다(발견이 반쯤 쓴 앱을
-   * 보지 않는다). 부모 폴더는 한 칸씩 경로 가드를 지나며 만든다(`ensureDirInside` — `.centralu`가 밖을
-   * 가리키는 링크면 멈춘다). 데이터 폴더도 지금 만든다. 쓴 뒤 바로 다시 훑는다 — 감시가 아직 그 자리를 보지
-   * 않을 수 있다. **띄우지는 않는다** — 처음 필요할 때 뜬다.
+   * Writing follows the same method as `installUserApp`: expanded into a temp folder starting with a
+   * dot, then renamed (so discovery never sees a half-written app). The parent folder is created one
+   * segment at a time through the path guard (`ensureDirInside` — stops if `.centralu` is a link
+   * pointing outside). The data folder is also created right away. Rescanned immediately after
+   * writing — watching might not be looking at that location yet. **This never starts it** — it
+   * starts the first time it is needed.
    */
   createApp(spec: { projectId: string | null; id: string; name: string; description?: string }): ExternalAppInfo {
     if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
@@ -1111,7 +1208,7 @@ export class ExternalApps {
     if (!name) throw new AppUnavailableError('The app needs a name')
     const description = oneLine(spec.description ?? '') || `${name} (a Centralu app)`
 
-    // 신뢰는 부를 때마다 정본(저장소)에서 읽는다 — 런타임의 범위 사본이 아니라
+    // Trust is read from the single source of truth (the store) every time this is called — never from the runtime's own copy of scope
     let root = this.deps.dataRoot
     if (spec.projectId !== null) {
       const project = this.deps.projects().find((p) => p.id === spec.projectId)
@@ -1151,15 +1248,18 @@ export class ExternalApps {
   }
 
   /**
-   * 사용자 폴더의 앱을 지운다 (M4 A-7) — 승인한 MCP 서버를 목록에서 거두는 길이다(예전 명부에는 없었다).
+   * Removes a user-folder app (M4 A-7) — the path for withdrawing an approved MCP server from the
+   * list (a path that did not exist in the old registry).
    *
-   * 폴더는 버리지 않고 데이터 폴더의 `app-trash/`로 옮긴다: 손으로 만든 앱일 수도 있고, 되돌릴 길이 있는
-   * 편이 낫다. 실행 기록·데이터 폴더·비밀은 남는다(기록은 지운 앱의 것도 읽힌다 — `runs`).
-   * **프로젝트 앱은 지우지 않는다** — 저장소의 파일이라 거두는 자리는 git이다.
+   * The folder is not deleted, only moved to `app-trash/` in the data folder: it could be a hand-made
+   * app, and it is better to have a way to bring it back. The run ledger, data folder, and secrets
+   * survive (a removed app's records are still readable — `runs`). **This never removes a project
+   * app** — that is a file in a repository, and the place to withdraw it is git.
    *
-   * 옮긴 뒤 바로 다시 훑는다: 떠 있던 프로세스가 내려가고, 붙어 있던 세션이 떼어 낸다(appsChanged).
-   * Claude 세션은 재시작 없이 서버 집합에서 빠지고, Codex 스레드는 다음 스레드까지 도구 이름이 남지만
-   * 부르면 "붙은 앱이 아니다"로 거절된다(세션 붙이기가 부를 때마다 다시 본다).
+   * Rescanned immediately after moving: a running process shuts down, and an attached session detaches
+   * (appsChanged). A Claude session drops it from its server set without restarting, and a Codex
+   * thread keeps the tool name until its next thread, but calling it is refused with "not an attached
+   * app" (attaching to a session re-checks on every call).
    */
   removeUserApp(ref: AppRef): void {
     if (ref.projectId !== null) {
@@ -1170,31 +1270,36 @@ export class ExternalApps {
     const trash = join(this.deps.dataRoot, 'app-trash')
     mkdirSync(trash, { recursive: true })
     renameSync(e.dir, join(trash, `${ref.appId}-${Date.now()}`))
-    // 가져온 앱의 표시도 걷는다 (E-3) — 휴지통에서 되살린 폴더는 사람이 손으로 옮긴 것이다(결정 3: 사용자 폴더 앱은 신뢰)
+    // Also drops the imported-app mark (E-3) — a folder restored from the trash is one a person moved back by hand (decision 3: a user-folder app is trusted)
     this.handover.forget(ref.appId)
     this.rescanUser()
   }
 
-  /** 사용자 폴더를 지금 다시 훑는다 — 한 번도 훑지 않았으면(기동 전) 전부 훑는다 */
+  /** Rescans the user folder right now — scans everything if it has never scanned before (pre-startup) */
   private rescanUser(opts: { now?: string } = {}): void {
     if (this.scopes.has(USER_SCOPE)) this.rescan(USER_SCOPE, opts)
     else this.refresh()
   }
 
-  /** 비밀 값을 적는다(`null`이면 지운다). 떠 있는 앱은 다음 기동부터 받는다 */
+  /** Writes a secret value (clears it if `null`). A running app receives it starting from its next startup */
   setSecret(ref: AppRef, name: string, value: string | null): void {
     this.secrets.set(this.appKey(ref), name, value)
   }
 
   /**
-   * 사람이 비밀 값을 넣거나 바꾸거나 지운다 (M4 E, 비밀 칸) — `apps.setSecret`의 몸통.
+   * A person sets, changes, or clears a secret value (M4 E, the secrets section) — the body of
+   * `apps.setSecret`.
    *
-   * 넣는 것은 **매니페스트가 선언한 이름만**이다. 선언하지 않은 이름은 앱이 받지 못하니(`forApp`) 넣어도 아무 일이 없고,
-   * 사람은 "넣었는데 왜 안 되나"를 묻게 된다. 지우기는 이름을 가리지 않는다 — 선언에서 빠진 이름의 값도 치울 수 있어야 한다.
-   * **어떤 문구에도 값을 싣지 않는다**: 거절은 RPC 오류로 화면까지 간다.
+   * Only **the names the manifest declares** can be set. Setting a name the manifest never declared
+   * does nothing, since the app never receives it (`forApp`), and the person is left asking "I set it,
+   * why doesn't it work". Clearing does not check the name — even a value for a name no longer in the
+   * declaration has to be removable. **Never carries the value in any message**: a denial travels all
+   * the way to the screen as an RPC error.
    *
-   * 떠 있는 앱은 **진행 중인 호출을 마친 뒤** 내린다 — 다음 필요가 새 값으로 띄운다(앱은 환경을 뜰 때 한 번 받는다). 멈춘 앱의
-   * 셈도 지운다: 키가 없어 연달아 못 떴던 앱에게 값을 넣는 것은 사람이 고친 것이다(다시 시작과 같다).
+   * A running app is stopped **only after finishing a call in progress** — the next time it is needed,
+   * it starts with the new value (an app receives its environment once, at startup). This also clears
+   * a stopped app's failure count: setting a value for an app that failed to start repeatedly for lack
+   * of a key is the person fixing it (the same as Restart).
    */
   updateSecret(ref: AppRef, name: string, value: string | null): void {
     const e = this.require(ref)
@@ -1212,22 +1317,24 @@ export class ExternalApps {
     }
     if (L.proc || L.starting) void this.haltWhenDrained(e, 'a secret changed; the next need starts it with the new value').then(fresh)
     else fresh()
-    // 목록의 "있음·없음"은 지금 바뀌었다 — 내리기를 기다리지 않고 알린다
+    // The list's "set / unset" just changed — this announces it without waiting for the app to stop
     this.appsChanged()
   }
 
-  // ── 건네기: 가져오기 (E-3) ──────────────────────────────────────────────────────
+  // ── Handover: importing (E-3) ──────────────────────────────────────────────────────
   //
-  // 몸통은 `handover.ts`에 있다. 여기서는 사람의 말로 된 거절을 RPC의 오류로 옮기고, 들인 앱의 목록 모양을 돌려준다. 가져온 앱이
-  // 확인 전에 뜨지 않게 막는 자리는 호출·기동·점검·상태가 공통으로 묻는 `held` 하나다.
+  // The body lives in `handover.ts`. Here, a denial worded for a person is translated into an RPC
+  // error, and the list-shape of an app brought in is returned. The one place that blocks an imported
+  // app from starting before confirmation is `held`, which a call, a startup, a check, and status all
+  // check against.
 
-  /** 가져올 준비 — 대기실로 옮겨 담고 사람이 볼 것을 돌려준다. 아직 아무것도 들어오지 않았다 */
+  /** Prepares an import — stages it and returns what a person reviews. Nothing has been brought in yet */
   prepareImport(source: string): Promise<{ token: string; review: AppReview }> {
     if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
     return this.handover.prepare(source)
   }
 
-  /** 대기실의 앱을 사용자 폴더로 들인다 — 꺼진 채로, `enable`이면 사람이 본 열쇠로 확인까지 적는다. **띄우지는 않는다** */
+  /** Brings a staged app into the user folder — disabled, or with `enable`, records the confirmation with the key the person reviewed. **This never starts it** */
   commitImport(token: string, opts: { enable: boolean; reviewKey?: string }): ExternalAppInfo {
     const id = this.handover.commit(token, opts)
     const made = this.find({ projectId: null, appId: id })
@@ -1239,22 +1346,22 @@ export class ExternalApps {
     this.handover.cancel(token)
   }
 
-  /** 들어온 앱의 확인 창 — 사용자 폴더의 앱만(프로젝트 앱은 프로젝트 신뢰를 따른다, 결정 3) */
+  /** The review dialog for an imported app — user-folder apps only (a project app follows the project's trust, decision 3) */
   reviewApp(ref: AppRef): AppReview {
     if (ref.projectId !== null) throw new AppUnavailableError("A project's apps follow the project's trust; there is nothing to review here")
     return this.handover.review(ref.appId)
   }
 
-  /** 가져온 앱을 켠다 — 사람이 본 확인 창의 열쇠가 지금의 매니페스트와 같을 때만 */
+  /** Enables an imported app — only if the key from the confirmation dialog the person saw matches the current manifest */
   enableApp(ref: AppRef, key: string): ExternalAppInfo {
     if (ref.projectId !== null) throw new AppUnavailableError("A project's apps follow the project's trust; they are not enabled one by one")
     this.handover.enable(ref.appId, key)
     return this.info(this.require(ref))
   }
 
-  // ── 건네기: 판 (E-1) ────────────────────────────────────────────────────────────
+  // ── Handover: versions (E-1) ────────────────────────────────────────────────────────────
 
-  /** git 밖의 앱의 판 — 사용자 폴더 앱만(프로젝트 앱의 판은 git이고, 그것은 host의 코어가 읽는다) */
+  /** Versions of an app outside git — user-folder apps only (a project app's versions are git, and the host's core reads those) */
   snapshots(ref: AppRef): (Snapshot & { current: boolean })[] {
     if (ref.projectId !== null) throw new AppUnavailableError('Project apps are versioned by git')
     this.rescanUser()
@@ -1262,16 +1369,19 @@ export class ExternalApps {
   }
 
   /**
-   * 판 하나로 되돌린다 — 지금 코드를 판으로 떠 둔 뒤 되쓰고, 사람이 고른 코드라 연달아 실패한 셈을 지우고, **그 코드로 다시 띄운다**
-   * (한 번이라도 떴던 앱이면. 진행 중인 호출은 끝나기를 기다린다 — 반영과 같은 길이다). 매니페스트까지 바뀌었으면 새 칸이 서고
-   * 옛 프로세스는 호출을 마친 뒤 내려간다. 가져온 앱의 판이 다른 server·uses를 가졌으면 그 칸은 다시 확인을 기다린다.
+   * Restores one version — captures the current code as a version before writing it back, clears the
+   * consecutive-failure count since this is code the person chose, and **restarts with that code** (if
+   * the app has ever started before. A call in progress is waited out — the same path as reflecting a
+   * change). If the manifest also changed, a new entry is created and the old process stops after
+   * finishing its call. If an imported app's version carries a different server or uses, that entry
+   * waits on confirmation again.
    */
   restoreVersion(ref: AppRef, id: string): ExternalAppInfo {
     if (ref.projectId !== null) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
     this.rescanUser()
     const before = this.require(ref)
     this.handover.restore(ref.appId, id, before.dir)
-    // 사람이 고른 판이다 — 만드는 세션이 턴 안이어도 그 판의 매니페스트를 지금 읽는다
+    // A version the person chose — reads that version's manifest right now even if the building session is mid-turn
     this.rescanUser({ now: ref.appId })
     const e = this.require(ref)
     Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
@@ -1290,26 +1400,29 @@ export class ExternalApps {
     this.appsListeners.clear()
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
-    // 종료 예산(Tauri 3초) 안에서 — 유예를 줄이고, SIGKILL까지 기다리지는 않는다
+    // Within the shutdown budget (Tauri's 3 seconds) — the grace period is shortened, and it does not wait all the way through SIGKILL
     await Promise.allSettled([
       ...all.map((e) => this.halt(e, 'host shutting down', { graceMs: 1_000, awaitKill: false })),
-      // 어느 칸에도 없는 프로세스까지 (`spawned` 주석) — 이미 내리는 중이면 그 내림을 기다린다(stop은 한 번만 돈다)
+      // Also processes belonging to no entry at all (see the `spawned` comment) — if one is already stopping, this waits for that same stop (stop only ever runs once)
       ...[...this.spawned].map((p) => p.stop(1_000, { awaitKill: false })),
     ])
     this.spawned.clear()
   }
 
-  // ── 반영 (C-4) ─────────────────────────────────────────────────────────────────
+  // ── Reflecting changes (C-4) ─────────────────────────────────────────────────────────────────
 
   /**
-   * 이 앱의 만드는 세션의 턴이 끝났다 (M4 C-4) — host가 세션 상태로 알린다.
+   * This app's building session's turn ended (M4 C-4) — announced by the host from session state.
    *
-   * 앱 폴더가 바뀔 때마다 다시 띄우지 않는다: 만드는 에이전트는 한 턴에 파일 여러 개를 여러 번 고치고, 그 사이의
-   * 앱은 반쯤 고친 코드다. 턴이 끝나야 한 덩어리의 수정이 끝난 것이고, 그것을 아는 것은 세션 상태를 보는 host뿐이다.
-   * 알림은 짧게 모은다(턴 끝과 상태 변화가 잇달아 온다) — 한 턴에 한 번 다시 띄운다.
+   * This does not restart on every single change to the app folder: a building agent edits several
+   * files, several times, within one turn, and the app in between is half-edited code. Only once the
+   * turn ends is a whole batch of edits complete, and only the host watching session state knows that.
+   * Notifications are briefly collected (a turn ending and a state change arrive back to back) — this
+   * restarts once per turn.
    *
-   * 턴 끝에는 지금 폴더를 **직접 잰다**(지문). 감시 이벤트를 몇 개 놓쳤든 답이 맞다. 앱이 쉬다 내려가 있어도 바뀌었으면
-   * 띄운다 — 만드는 세션의 도구 목록을 새 코드로 갈아야 한다.
+   * At turn end, the current folder is **measured directly** (its fingerprint). The answer is correct
+   * no matter how many watch events were missed. This starts the app even if it is idle and stopped,
+   * if it changed — the building session's tool list needs to move to the new code.
    */
   builderTurnEnded(ref: AppRef): void {
     if (this.disposed) return
@@ -1318,9 +1431,12 @@ export class ExternalApps {
     const t = setTimeout(() => {
       this.turnEndTimers.delete(key)
       /*
-       * 턴 안에서 미뤄 둔 매니페스트의 바뀜을 지금 읽는다(`rescan`의 `now`). 감시가 그 바뀜을 놓쳤어도 여기서 읽힌다. 칸이 새로
-       * 섰으면 옛 프로세스는 호출을 마친 뒤 내려가고(`haltWhenDrained`), 새 칸을 새 매니페스트로 **한 번** 띄운다 — 폴더만 바뀐
-       * 때와 같이, 한 번이라도 떴던 앱이면 내려가 있었어도 띄운다(만드는 세션의 도구 목록을 간다).
+       * A manifest change deferred while mid-turn is read right now (`rescan`'s `now`). Even if
+       * watching missed that change, it is read here. If a new entry was created, the old process
+       * stops after finishing its call (`haltWhenDrained`), and the new entry is started **once** with
+       * the new manifest — just like when only the folder changed, this starts an app even if it was
+       * idle and stopped, as long as it has ever started before (this moves the building session's
+       * tool list forward).
        */
       const before = this.find(ref)
       const scopeKey = ref.projectId ?? USER_SCOPE
@@ -1337,9 +1453,11 @@ export class ExternalApps {
   }
 
   /**
-   * 앱 폴더가 바뀐 것을 훑기가 보았다 (C-4). 만드는 세션이 턴 안에 있으면 아무것도 하지 않는다 — 턴 끝이 반영한다.
-   * 없거나 쉬고 있으면(편집기에서 고쳤다) 마지막 변화 뒤 조용해지기를 기다렸다가, 그때도 만드는 세션이 턴 밖이면
-   * 반영한다. 이 길은 떠 있는 앱만 다시 띄운다 — 아무도 쓰지 않는 앱을 편집 때문에 깨우지 않는다(성능 예산).
+   * A scan saw that the app folder changed (C-4). If a building session is mid-turn, this does
+   * nothing — turn end reflects it instead. If there is none, or it is idle (edited from an editor),
+   * this waits for things to go quiet after the last change, and reflects it if the building session
+   * is still not mid-turn at that point. This path only ever restarts a running app — an app no one is
+   * using is never woken up by an edit (the performance budget).
    */
   private folderChanged(e: AppEntry): void {
     if (this.deps.builderBusy?.(e.ref)) return
@@ -1356,12 +1474,15 @@ export class ExternalApps {
   }
 
   /**
-   * 폴더가 마지막으로 띄운 때와 다르면 지금 파일로 다시 띄운다 — 다시 띄웠으면 true.
+   * If the folder differs from the last time it started, restarts with the current files — returns
+   * true if it restarted.
    *
-   * **진행 중인 호출은 끊지 않는다.** 끝날 때까지 기다린다(상한 없이 — 끊는 것이 더 나쁘다). 끝난 바로 그 틱에 내린다
-   * (`drain` 주석). 폴더가 바뀌었다는 것은 작성자가 무언가 고쳤다는 뜻이라, 연달아 실패해 멈춘 앱도 다시 기회를
-   * 얻는다(셈을 지운다). 다시 띄우면 도구 목록을 새로 읽고, 에이전트 도구가 달라졌으면 세션이 알림을 받는다
-   * (Claude는 곧바로, Codex는 다음 스레드부터 — A-5 그대로). 열린 화면에도 "바뀌었다"를 보낸다.
+   * **A call in progress is never cut off.** This waits for it to finish (no cap — cutting it off is
+   * worse). Stopped in the very same tick it finishes (see the comment on `drain`). Since a changed
+   * folder means the author fixed something, an app stopped after failing repeatedly also gets another
+   * chance (its count is cleared). Restarting re-reads the tool list, and a session is notified if the
+   * agent-facing tools changed (immediately for Claude, from the next thread for Codex — same as A-5).
+   * An open screen also receives "changed".
    */
   private reloadIfChanged(ref: AppRef, opts: { startIfStopped: boolean; why: string }): Promise<boolean> {
     const key = this.holdKey(ref)
@@ -1374,7 +1495,7 @@ export class ExternalApps {
       if (L.stamp === null || folderFingerprint(e.dir) === L.stamp) return false
       if (!opts.startIfStopped && !L.proc?.alive) return false
       while (L.inflight > 0) await this.drain(e, 60_000)
-      // 기다리는 사이에 매니페스트가 바뀌어 칸이 갈렸거나 내려갔다 — 새 칸은 제 길로 뜬다
+      // The manifest changed and a new entry replaced this one, or it was removed, while waiting — a new entry starts through its own path
       if (this.find(ref) !== e || this.disposed) return false
       const pid = L.proc?.child.pid
       L.proc?.log.note(`reloading: ${opts.why}`)
@@ -1386,7 +1507,7 @@ export class ExternalApps {
         console.error(`[apps] ${this.label(ref)} reloaded (${opts.why})${pid ? `, was pid ${pid}` : ''}`)
         this.deps.emitChanged?.(ref)
       } catch (err) {
-        // 못 떴다 — 이유는 목록(crashed)과 오류 묶음에 남는다. 만드는 세션의 check가 그 이유를 읽는다
+        // Failed to start — the reason is recorded both in the list (crashed) and in an error bundle. The building session's check reads that reason
         console.error(`[apps] ${this.label(ref)} reload failed: ${(err as Error).message.split('\n')[0]}`)
       }
       return true
@@ -1395,15 +1516,17 @@ export class ExternalApps {
     return p
   }
 
-  /** 진행 중인 호출을 마친 뒤에 내린다 — 바뀐 매니페스트로 칸이 갈렸을 때 옛 칸의 프로세스를 거두는 길 */
+  /** Stops it only after finishing a call in progress — the way an old entry's process is collected when a manifest change replaces the entry */
   private async haltWhenDrained(e: AppEntry, why: string): Promise<void> {
     while (e.life.inflight > 0) await this.drain(e, 60_000)
     await this.halt(e, why)
   }
 
   /**
-   * 새 매니페스트로 선 칸을 띄운다 (C-4) — 만드는 세션의 턴 끝에 미뤄 둔 매니페스트를 읽어 칸이 갈렸을 때. 옛 프로세스는
-   * `rescan`이 호출을 마친 뒤 내린다. 띄웠으면 열린 화면에 "바뀌었다"를 보낸다(`reloadIfChanged`와 같다).
+   * Starts a newly created entry with a new manifest (C-4) — for when reading a manifest deferred
+   * until the building session's turn end replaces the entry. The old process is stopped by `rescan`
+   * after finishing its call. If it starts, "changed" is sent to an open screen (the same as
+   * `reloadIfChanged`).
    */
   private async startNewManifest(e: AppEntry, why: string): Promise<void> {
     if (!e.manifest || !e.scope.trusted || this.held(e) || this.disposed) return
@@ -1412,14 +1535,14 @@ export class ExternalApps {
       console.error(`[apps] ${this.label(e.ref)} started on its new manifest (${why})`)
       this.deps.emitChanged?.(e.ref)
     } catch (err) {
-      // 못 떴다 — 이유는 목록(crashed)과 오류 묶음에 남는다. 만드는 세션의 check가 그 이유를 읽는다
+      // Failed to start — the reason is recorded both in the list (crashed) and in an error bundle. The building session's check reads that reason
       console.error(`[apps] ${this.label(e.ref)} did not start on its new manifest: ${(err as Error).message.split('\n')[0]}`)
     }
   }
 
-  // ── 수명 ──────────────────────────────────────────────────────────────────────
+  // ── Lifecycle ──────────────────────────────────────────────────────────────────────
 
-  /** 앱을 쓰는 동안은 쉬는 앱이 아니다 — 끝나면 쉬는 시계를 다시 건다 */
+  /** An app is never idle while in use — the idle timer is set again once it is done */
   private async use<T>(e: AppEntry, fn: (proc: AppProcess) => Promise<T>): Promise<T> {
     e.life.inflight += 1
     this.clearIdle(e)
@@ -1433,8 +1556,9 @@ export class ExternalApps {
   }
 
   /**
-   * 진행 중인 호출이 다 끝날 때까지 기다린다 — `ms` 안에 끝나면 true. 돌려받은 뒤 **같은 틱에** 내려야 한다:
-   * 한 번 양보하면 그 사이에 들어온 호출이 다시 inflight를 올린다(부르는 쪽이 while로 다시 본다).
+   * Waits for every call in progress to finish — resolves true if that happens within `ms`. The
+   * caller has to stop it **in the same tick** it gets this back: yielding even once lets a call that
+   * arrives in the meantime raise inflight again (the caller re-checks this with a while loop).
    */
   private drain(e: AppEntry, ms: number): Promise<boolean> {
     if (e.life.inflight === 0) return Promise.resolve(true)
@@ -1453,11 +1577,12 @@ export class ExternalApps {
   }
 
   /**
-   * 떠 있으면 그것을, 뜨는 중이면 그 약속을, 아니면 새로 띄운다.
+   * If it is running, returns it; if starting, returns that promise; otherwise starts a new one.
    *
-   * **한 번에 하나만 띄운다.** 동시에 온 필요 다섯이 각자 "없다"를 보고 각자 띄우면 프로세스
-   * 다섯이 같은 데이터 폴더를 붙잡는다 — 세션 되살리기에서 겪은 것과 같은 모양이다
-   * (`manager.ts`의 `resuming` 주석). 뜨는 중인 약속을 모두가 기다린다.
+   * **Only one starts at a time.** If five simultaneous needs each saw "none exists" and each started
+   * one, five processes would grab hold of the same data folder — the same shape of problem
+   * encountered restoring sessions (see the `resuming` comment in `manager.ts`). Everyone waits on the
+   * same in-progress startup promise instead.
    */
   private ensureRunning(e: AppEntry): Promise<AppProcess> {
     const L = e.life
@@ -1465,7 +1590,7 @@ export class ExternalApps {
     if (!e.scope.trusted) {
       throw new AppUnavailableError("This app's project is not trusted, so the app does not start — trust the project and it will")
     }
-    // 가져온 앱은 사람이 보고 켜기 전에 뜨지 않는다 (E-3) — 부를 때마다 본다: 켠 뒤 server·uses가 바뀌면 다음 기동부터 막힌다
+    // An imported app never starts before a person reviews and enables it (E-3) — checked on every call: if server or uses changes after being enabled, it is blocked starting from the next startup
     const held = this.held(e)
     if (held) throw new AppUnavailableError(held)
     if (L.gaveUp) {
@@ -1484,18 +1609,20 @@ export class ExternalApps {
       const usedPrior = L.verdict !== undefined
       const pipeId = ++this.pipeSeq
       /*
-       * 띄우기 **전에** 지문을 잰다 (C-4) — 못 뜬 앱도 "이 코드로 한 번 떠 봤다"가 남아야, 고친 뒤 턴 끝이 다시 띄운다.
-       * 떴으면 한 번 더 잰다: 뜨면서 제 폴더에 무언가 쓰는 앱을 "바뀌었다"로 읽어 끝없이 다시 띄우지 않게.
+       * The fingerprint is measured **before** starting (C-4) — even an app that fails to start has to
+       * be left with "this code was tried once", or turn end would never restart it after a fix.
+       * Measured once more if it starts: so an app that writes something into its own folder while
+       * starting up is never read as "changed" and restarted without end.
        */
       L.stamp = folderFingerprint(e.dir)
-      // git 밖의 앱은 이제 돌 코드를 판으로 떠 둔다 (E-1) — 같은 코드면 아무것도 하지 않는다. 판을 못 떠도 앱은 뜬다
+      // An app outside git now has the code about to run captured as a version (E-1) — does nothing if it is the same code. The app still starts even if capturing the version fails
       if (e.ref.projectId === null) this.handover.snapshot(e.ref.appId, e.dir, 'started', L.stamp)
       let proc: AppProcess
       try {
         proc = await AppProcess.start(this.spawnSpec(e, pipeId))
       } catch (err) {
         if (L.epoch === epoch) {
-          // 기억한 세대로 붙다가 실패했다면 그 기억이 틀렸을 수 있다 — 다음엔 다시 묻는다
+          // If connecting failed with the remembered generation, that memory could be wrong — the next attempt probes again
           if (usedPrior) L.verdict = undefined
           this.fail(e, (err as Error).message)
           const started = err instanceof AppStartError ? err : null
@@ -1528,7 +1655,7 @@ export class ExternalApps {
       return proc
     })()
     L.starting = p
-    // 뜨는 중(starting)도, 뜬 뒤(running)와 못 뜬 뒤(crashed·failed)도 목록이 말하는 상태다 (A-8)
+    // Starting, running, and crashed or failed (after failing to start) are all states the list states (A-8)
     this.appsChanged()
     const settled = () => {
       if (L.starting === p) L.starting = null
@@ -1561,7 +1688,7 @@ export class ExternalApps {
     if (e.manifest?.home && !kept.some((t) => t.tool.name === e.manifest?.home)) {
       warnings.push(`the home tool (${e.manifest.home}) is not in the tool list`)
     }
-    // 세션이 보는 것(에이전트 도구)이 달라졌을 때만 알린다 — 화면 전용 도구의 변화는 세션과 무관하다
+    // Only announces when what a session sees (agent-facing tools) has changed — a change to a screen-only tool has nothing to do with a session
     const forModel = (list: AppTool[] | null) =>
       list === null ? null : JSON.stringify(list.filter((t) => t.visibility.includes('model')).map((t) => t.tool))
     const before = forModel(e.life.known)
@@ -1572,12 +1699,12 @@ export class ExternalApps {
   }
 
   /**
-   * 실패 하나를 센다. 세 번째면 멈추고, 아니면 다음 기동을 미룬다.
+   * Counts one failure. Stops it on the third, otherwise defers the next start.
    *
-   * **되살리기는 다음 필요가 한다.** 죽은 앱을 백오프 뒤 알아서 다시 띄우지 않는다 — 쉬는
-   * 앱을 내리는 것(A-3)과 같은 원칙이다: 부르는 이가 없는 앱 프로세스는 떠 있을 이유가 없다.
-   * 백오프는 "다음 기동이 이보다 이르지 않다"로 걸린다. 그 사이에 온 호출은 남은 시간을
-   * 기다렸다가 띄운다.
+   * **Reviving it is the next need's job.** A dead app is never automatically restarted after the
+   * backoff — the same principle as stopping an idle app (A-3): an app process with no one calling it
+   * has no reason to stay running. Backoff is set as "the next startup happens no earlier than this".
+   * A call that arrives in that window waits out the remaining time and then starts it.
    */
   private fail(e: AppEntry, reason: string): void {
     const L = e.life
@@ -1586,7 +1713,7 @@ export class ExternalApps {
     const where = this.label(e.ref)
     if (L.failures >= this.timing.maxFailures) {
       L.gaveUp = true
-      // 멈춘 앱은 세션에 붙지 않는다(결정 4) — 붙어 있던 세션이 떼어 내도록 알린다
+      // A stopped app never attaches to a session (decision 4) — announce so an already-attached session detaches it
       this.appsChanged()
       console.error(`[apps] ${where} stopped after ${L.failures} consecutive failures: ${reason.split('\n')[0]}`)
     } else {
@@ -1601,23 +1728,23 @@ export class ExternalApps {
     L.proc = null
     L.tools = null
     this.clearIdle(e)
-    // 오래 잘 돌다 죽었다면 연속 실패가 아니다 — 새로 센다
+    // If it died after running well for a long time, this is not a consecutive failure — counted from zero
     if (Date.now() - proc.startedAt >= this.timing.stableMs) L.failures = 0
     this.fail(e, reason)
     this.recordError(e, { kind: 'crash', at: Date.now(), message: reason.split('\n')[0]!, stderr: proc.log.tailLines(), tool: null, args: null, runId: null })
-    // 파이프·로그를 정리하고, 그룹에 남은 자손이 있으면 거둔다
+    // Cleans up the pipe and the log, and collects any descendant left in its group
     void proc.stop(0)
-    // 떠 있던 앱이 예고 없이 죽었다 — 화면 앞의 사람이 이유를 봐야 한다 (A-8, B-6)
+    // A running app died without warning — the person in front of the screen has to see the reason (A-8, B-6)
     this.appsChanged()
   }
 
-  /** 띄운 프로세스를 적는다 — 적을 때마다 이미 끝난 것은 걷는다(목록이 host의 수명 동안 자라지 않게) */
+  /** Records a started process — every time one is recorded, anything already ended is cleared out (so the list never grows over the host's lifetime) */
   private remember(proc: AppProcess): void {
     for (const p of this.spawned) if (!p.alive) this.spawned.delete(p)
     this.spawned.add(proc)
   }
 
-  /** 내린다 — 쉬어서, 바뀌어서, 신뢰를 잃어서, host가 끝나서 */
+  /** Stops it — because it went idle, changed, lost trust, or the host is exiting */
   private async halt(e: AppEntry, why: string, opts: { graceMs?: number; awaitKill?: boolean } = {}): Promise<void> {
     const L = e.life
     L.epoch += 1
@@ -1626,7 +1753,7 @@ export class ExternalApps {
     L.proc = null
     L.tools = null
     if (!proc) return
-    // 떠 있던 것이 내려간다 — 목록에서는 이 순간 running이 아니다 (A-8)
+    // A running app is stopping — it is not running in the list from this moment (A-8)
     this.appsChanged()
     proc.log.note(`stopping: ${why}`)
     await proc.stop(opts.graceMs ?? this.timing.graceMs, { awaitKill: opts.awaitKill })
@@ -1647,7 +1774,7 @@ export class ExternalApps {
     return this.viewHolds.get(this.holdKey(e.ref)) ?? 0
   }
 
-  /** 열린 화면의 열쇠. 경로에 쓰지 않으므로 프로젝트 id의 모양을 따지지 않는다(scopeDir와 다르다) */
+  /** The key for an open screen. Since this is never used in a path, it does not care about a project id's shape (unlike scopeDir) */
   private holdKey(ref: AppRef): string {
     return `${ref.projectId ?? USER_SCOPE}/${ref.appId}`
   }
@@ -1658,13 +1785,14 @@ export class ExternalApps {
   }
 
   /**
-   * 띄울 모양. 앱이 받는 것:
-   *   - cwd = 앱 폴더
-   *   - `CENTRALU_APP_DATA` = 저장소 밖의 데이터 폴더 (없으면 만든다). 앱 폴더에 쓰면 커밋되어
-   *     팀에게 새어 나간다(플랜 "데이터와 비밀").
-   *   - 매니페스트가 **선언한** 비밀만 환경 변수로
-   * 받지 않는 것: host 자신의 변수(`CC_*`). 그중에는 host WebSocket 토큰(`CC_HOST_TOKEN`)이
-   * 있다 — 앱에 넘기면 앱이 host의 모든 RPC를 부를 수 있다.
+   * The shape to start with. What the app receives:
+   *   - cwd = the app folder
+   *   - `CENTRALU_APP_DATA` = a data folder outside the repository (created if it does not exist).
+   *     Writing this inside the app folder would get it committed and leaked to the team (from the
+   *     plan, "data and secrets")
+   *   - only the secrets the manifest **declared**, as environment variables
+   * What it never receives: the host's own variables (`CC_*`). Among them is the host's WebSocket
+   * token (`CC_HOST_TOKEN`) — handing that to an app would let it call every one of the host's RPCs.
    */
   private spawnSpec(e: AppEntry, pipeId: number): SpawnSpec {
     const m = e.manifest!
@@ -1686,7 +1814,7 @@ export class ExternalApps {
       env,
       logPath: join(this.deps.dataRoot, 'app-logs', scopeDir, `${e.ref.appId}.log`),
       logMaxBytes: this.timing.logMaxBytes,
-      // 선언에서 빠졌어도 저장된 값은 전부 가린다 — 가려서 잃는 것은 없다
+      // Masks every stored value, even one absent from the declaration — masking it costs nothing
       redact: redactor(this.secrets.all(appKey)),
       prior: e.life.verdict,
       probeTimeoutMs: this.timing.probeTimeoutMs,
@@ -1695,7 +1823,7 @@ export class ExternalApps {
         serveBroker(
           fd3,
           {
-            // 이 파이프의 앱, 이 파이프에서 열린 실행만 — 남의 id도 죽은 프로세스의 id도 통하지 않는다
+            // Only this pipe's app, and a run open on this pipe — someone else's id and a dead process's id both fail
             openRun: (runId) => {
               const run = this.openRuns.get(runId)
               return run && run.entry === e && run.pipeId === pipeId ? run.abort.signal : null
@@ -1704,8 +1832,10 @@ export class ExternalApps {
             refused: (tool, args, why) => this.desk.refused({ ref: e.ref, name: m.name, manifest: m }, tool, args, why),
           },
           /*
-           * 부탁한 앱은 이 파이프의 앱이고, 매니페스트는 **이 프로세스가 뜰 때 읽은 것**이다. 그 사이 매니페스트가 바뀌었으면
-           * 새 칸이 서고 이 프로세스는 호출을 마친 뒤 내려간다 — 도는 동안은 자기가 뜬 선언대로 부탁한다(검증한 것이 곧 쓰는 것).
+           * The requesting app is this pipe's app, and the manifest is **the one read when this process
+           * started.** If the manifest changed in the meantime, a new entry was created and this process
+           * stops after finishing its call — while it is still running, it requests things under the
+           * declaration it started with (what was validated is what is used).
            */
           (tool, args, call) => this.desk.handle({ ref: e.ref, name: m.name, manifest: m }, tool, args, call),
           { keepaliveMs: this.timing.brokerKeepaliveMs },
@@ -1713,12 +1843,12 @@ export class ExternalApps {
     }
   }
 
-  /** 앱의 데이터 폴더 — 앱 폴더 밖이다(플랜 "데이터와 비밀"). 앱은 `CENTRALU_APP_DATA`로 받는다 */
+  /** An app's data folder — outside the app folder (from the plan, "data and secrets"). The app receives it as `CENTRALU_APP_DATA` */
   private dataDirOf(ref: AppRef): string {
     return join(this.deps.dataRoot, 'app-data', this.scopeDir(ref), ref.appId)
   }
 
-  /** 경로의 한 칸이 되는 범위 이름. 프로젝트 id는 UUID다 — 아니면 경로에 쓰지 않는다 */
+  /** The scope name used as one path segment. A project id is a UUID — refused rather than written into a path if it does not look like one */
   private scopeDir(ref: AppRef): string {
     if (ref.projectId === null) return USER_SCOPE
     if (!/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`This project id cannot be used in a path: ${ref.projectId}`)
@@ -1733,7 +1863,7 @@ export class ExternalApps {
     return `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
   }
 
-  // ── 발견 ──────────────────────────────────────────────────────────────────────
+  // ── Discovery ──────────────────────────────────────────────────────────────────────
 
   private require(ref: AppRef): AppEntry {
     const e = this.find(ref)
@@ -1760,7 +1890,7 @@ export class ExternalApps {
       status: this.status(e),
       error: e.error ?? this.held(e) ?? e.life.lastError,
       warnings: [...e.warnings, ...e.life.toolWarnings],
-      // 지문 전체는 쓸모가 없다 — 대조만 하는 열쇠라 앞 16자면 충분하다
+      // The full fingerprint is not needed — it is only ever a key for comparison, so the first 16 characters are enough
       ...(e.life.loaded ? { codeStamp: e.life.loaded.slice(0, 16) } : {}),
       ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
       ...this.secretSlots(e),
@@ -1769,20 +1899,21 @@ export class ExternalApps {
   }
 
   /**
-   * 가져온 앱이 사람의 확인을 기다리나 (E-3) — 그 까닭, 아니면 null. 사용자 폴더 앱만 가져온 앱일 수 있다(프로젝트 앱은 프로젝트
-   * 신뢰가 정한다, 결정 3). 부를 때마다 표시와 지금의 매니페스트를 대 본다(`AppHandover.gate`).
+   * Whether an imported app is waiting on the person's confirmation (E-3) — the reason, or null. Only
+   * a user-folder app can be an imported app (a project app is governed by project trust, decision 3).
+   * On every call, the mark is checked against the current manifest (`AppHandover.gate`).
    */
   private held(e: AppEntry): string | null {
     return e.ref.projectId === null && e.manifest ? this.handover.gate(e.ref.appId, e.dir, e.manifest) : null
   }
 
-  /** 목록에 실을 가져온 앱의 표시 (E-3) — 가져온 앱이 아니면 칸이 없다 */
+  /** The mark of an imported app, for the list (E-3) — absent for an app that was not imported */
   private importMark(e: AppEntry): Pick<ExternalAppInfo, 'imported'> {
     const imported = e.ref.projectId === null ? this.handover.imported(e.ref.appId, e.dir) : undefined
     return imported ? { imported } : {}
   }
 
-  /** 선언한 비밀마다 값이 들어 있는가 (E, 비밀 칸) — 이름과 있음·없음만. 선언이 없으면 칸도 없다 */
+  /** Whether a value is set for each declared secret (E, the secrets section) — just the name and whether it is set. No field at all if there is no declaration */
   private secretSlots(e: AppEntry): Pick<ExternalAppInfo, 'secrets'> {
     const declared = e.manifest?.secrets ?? []
     if (declared.length === 0) return {}
@@ -1803,8 +1934,10 @@ export class ExternalApps {
   }
 
   /**
-   * 한 범위를 다시 훑는다. `now`는 매니페스트의 바뀜을 **지금** 읽을 앱의 id다 — 만드는 세션의 턴 끝, 점검, 사람이 고른 판.
-   * 그 밖의 훑기(감시, `refresh`)는 만드는 세션이 턴 안에 있는 앱의 매니페스트 바뀜을 턴 끝으로 미룬다(아래 주석).
+   * Rescans one scope. `now` is the id of an app whose manifest change should be read **right now** —
+   * a building session's turn end, a check, or a version the person chose. Every other scan (watching,
+   * `refresh`) defers a manifest change for an app whose building session is mid-turn until turn end
+   * (see the comment below).
    */
   private rescan(key: string, opts: { now?: string } = {}): void {
     const held = this.scopes.get(key)
@@ -1815,7 +1948,7 @@ export class ExternalApps {
         ? scanApps(scope.root, USER_APPS_REL, [])
         : scanApps(scope.root, PROJECT_APPS_REL, ['', '.centralu'])
     const seen = new Set<string>()
-    /** 세션에 붙는 앱의 집합이 달라질 수 있는 변화가 있었나 (A-5) */
+    /** Whether there was a change that could change the set of apps attached to a session (A-5) */
     let changed = false
     for (const found of result.apps) {
       seen.add(found.folder)
@@ -1823,22 +1956,27 @@ export class ExternalApps {
       if (prev && prev.found.hash === found.hash && prev.found.error === found.error) {
         if (prev.scope.trusted !== scope.trusted) changed = true
         prev.scope = scope
-        // 신뢰를 잃은 프로젝트의 앱은 바로 내린다 — 목록에는 남는다
+        // An app in a project that lost trust is stopped immediately — it stays in the list
         if (!scope.trusted) void this.halt(prev, 'project is no longer trusted')
-        // 매니페스트 밖(server.mjs, 화면…)이 바뀌었나 (C-4) — 한 번이라도 띄운 앱만 잰다
+        // Did something outside the manifest change (server.mjs, a screen…) (C-4)? Measured only for an app that has started at least once
         else if (prev.life.stamp !== null && folderFingerprint(prev.dir) !== prev.life.stamp) this.folderChanged(prev)
         continue
       }
       /*
-       * 매니페스트가 바뀌었다 — 옛 명령으로 뜬 프로세스는 내리고, 셈과 기억한 세대도 새로 시작한다. 새 호출은 새 칸이
-       * 받는다. 옛 프로세스는 **진행 중인 호출을 마친 뒤에** 내린다(C-4): 파일을 고쳤다고 누군가의 호출이 끊기면 안 된다.
+       * The manifest changed — a process started with the old command is stopped, and its counts and
+       * remembered generation start fresh. A new call is received by the new entry. The old process is
+       * stopped **only after a call in progress finishes** (C-4): editing files must never cut off
+       * someone's call.
        */
       if (prev) {
         /*
-         * **만드는 세션이 턴 안이면 턴 끝까지 미룬다** (C-4). 반쯤 고친 매니페스트로 칸을 갈면 옛 프로세스가 내려가고, 열린 화면은
-         * 목록의 바뀐 코드를 보고 다시 열려 반쯤 고친 코드를 띄운다(실측: 턴 10:09:55–10:11:09 가운데 10:10:45에 "stopping:
-         * manifest changed", 화면이 비었다가 고치던 코드로 다시 열렸다). 그동안은 옛 칸이 옛 매니페스트와 옛 프로세스로 부름을
-         * 받는다. 턴 끝(`builderTurnEnded`)이 `now`로 다시 훑어 한 번에 간다. 신뢰를 잃는 것은 미루지 않는다.
+         * **If the building session is mid-turn, this is deferred until turn end** (C-4). Replacing the
+         * entry with a half-edited manifest would stop the old process, and an open screen would see the
+         * changed code in the list, reopen, and load the half-edited code (measured: within a turn
+         * spanning 10:09:55-10:11:09, "stopping: manifest changed" fired at 10:10:45, and the screen went
+         * blank and reopened with the code still being edited). Until then, the old entry continues to
+         * receive calls with its old manifest and old process. Turn end (`builderTurnEnded`) rescans with
+         * `now` and moves everything over at once. Losing trust is never deferred this way.
          */
         if (opts.now !== found.folder && scope.trusted && prev.scope.trusted && this.deps.builderBusy?.(prev.ref)) {
           prev.scope = scope
@@ -1862,7 +2000,7 @@ export class ExternalApps {
   private entry(scope: Scope, found: ScannedApp): AppEntry {
     let { manifest, error } = found
     if (manifest && this.deps.reservedIds.includes(manifest.id)) {
-      // 내장 앱과 같은 id면 `apps.invoke`가 어느 쪽을 부를지 갈린다 — 먼저 선 쪽이 이긴다
+      // The same id as a built-in app leaves `apps.invoke` to decide which one to call — whichever registered first wins
       error = `"${manifest.id}" is the name of a built-in app — use another id`
       manifest = null
     }
@@ -1905,7 +2043,7 @@ export class ExternalApps {
   }
 }
 
-/** 결과의 글 부분을 이어 붙인다 — 사람이 읽을 한 줄(RPC의 `text`)과 실패의 이유가 된다 */
+/** Joins together the text parts of a result — becomes the one line a person reads (RPC's `text`) and a failure's reason */
 export function resultText(result: CallToolResult): string {
   return result.content
     .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))

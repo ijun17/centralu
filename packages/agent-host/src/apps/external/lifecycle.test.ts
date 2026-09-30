@@ -8,11 +8,12 @@ import { SECRETS_FILE } from './secrets.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
 
 /**
- * 앱 프로세스의 수명 (M4 A-3) — **진짜 자식 프로세스로** 잰다.
+ * An app process's lifecycle (M4 A-3) — exercised **with a real child process.**
  *
- * 픽스처 앱(test-fixtures/app.mjs)은 자기가 겪은 것(떴다, 어떤 메서드가 왔다, 어떤 환경을
- * 받았다, 손주를 띄웠다)을 파일에 적는다. 이 테스트는 host의 말이 아니라 그 파일과 OS의
- * 프로세스 표로 판정한다 — "떴다고 적었다"가 아니라 "떴다"를 본다.
+ * The fixture app (test-fixtures/app.mjs) writes what happened to it (it started, which method
+ * arrived, what environment it received, it spawned a grandchild) to a file. This test judges by that
+ * file and the OS's process table, not by anything the host says — it checks "it started", not
+ * "it wrote down that it started".
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -41,7 +42,7 @@ const alive = (pid: number) => {
   }
 }
 
-/** 픽스처를 띄우는 앱 하나를 심는다 */
+/** Plants one app that starts the fixture */
 const plant = (id: string, mode = 'normal', over: Record<string, unknown> = {}) =>
   plantApp(join(projRoot, ...PROJECT_APPS), id, {
     server: { command: process.execPath, args: [FIXTURE, '--log', join(appLogs, `${id}.jsonl`), '--mode', mode] },
@@ -81,12 +82,12 @@ afterEach(async () => {
   rmSync(fixture, { recursive: true, force: true })
 })
 
-describe('처음 필요할 때 뜬다', () => {
-  it('훑고 목록을 봐도 프로세스는 0개 — 도구 목록을 물을 때 하나 뜬다', async () => {
+describe('starts only the first time it is needed', () => {
+  it('zero processes even after scanning and checking the list — one starts when the tool list is asked for', async () => {
     plant('notes')
     make()
     expect(status('notes')).toBe('stopped')
-    // 픽스처는 뜨고 100ms 남짓 뒤에 첫 줄을 쓴다 — 기동에서 몰래 띄웠다면 그 사이에 드러난다
+    // The fixture writes its first line roughly 100ms after starting — a secret startup during scanning would show up in that window
     await new Promise((r) => setTimeout(r, 400))
     expect(starts('notes')).toHaveLength(0)
 
@@ -96,14 +97,14 @@ describe('처음 필요할 때 뜬다', () => {
     expect(status('notes')).toBe('running')
   })
 
-  it('동시에 온 필요 다섯은 프로세스 하나를 띄운다 — 두 번 띄워 떠보지도 않는다', async () => {
+  it('five simultaneous needs start only one process — never even tries starting a second', async () => {
     plant('notes')
     make()
     await Promise.all([1, 2, 3, 4, 5].map(() => rt.tools(ref('notes'))))
     expect(starts('notes')).toHaveLength(1)
   })
 
-  it('신뢰하지 않은 프로젝트의 앱은 부탁을 받아도 뜨지 않는다', async () => {
+  it('an app in an untrusted project never starts even when a request arrives', async () => {
     trusted = false
     plant('notes')
     make()
@@ -112,7 +113,7 @@ describe('처음 필요할 때 뜬다', () => {
     expect(status('notes')).toBe('untrusted')
   })
 
-  it('신뢰를 끄면 떠 있던 앱이 바로 내려간다', async () => {
+  it('turning off trust immediately stops a running app', async () => {
     plant('notes')
     make()
     await rt.tools(ref('notes'))
@@ -124,8 +125,8 @@ describe('처음 필요할 때 뜬다', () => {
   })
 })
 
-describe('규격 세대는 앱마다 기억한다 (S-4)', () => {
-  it('첫 기동만 server/discover로 묻고, 쉬었다 다시 뜰 때는 기억한 세대로 바로 붙는다', async () => {
+describe('the spec generation is remembered per app (S-4)', () => {
+  it('only the first startup asks with server/discover — a later start after going idle connects directly with the remembered generation', async () => {
     plant('notes')
     make({ idleMs: 150 })
     await rt.tools(ref('notes'))
@@ -142,10 +143,10 @@ describe('규격 세대는 앱마다 기억한다 (S-4)', () => {
   })
 })
 
-describe('크래시', () => {
-  it('지수 백오프로 미루고, 세 번 연달아 실패하면 이유를 든 채 멈춘다', async () => {
+describe('crashing', () => {
+  it('defers with exponential backoff, and stops holding the reason after three consecutive failures', async () => {
     plant('broken', 'crash-on-start')
-    // 기준을 크게 잡는다 — 픽스처가 뜨는 데만 170ms 남짓 걸려서, 작은 기준은 백오프 없이도 채워진다
+    // A large base is chosen — the fixture alone takes roughly 170ms to start, so a small base would be satisfied without any backoff at all
     make({ backoffBaseMs: 400 })
 
     const failedAt: number[] = []
@@ -153,13 +154,13 @@ describe('크래시', () => {
       const err = await rt.tools(ref('broken')).catch((e: Error) => e)
       failedAt.push(Date.now())
       expect(err).toBeInstanceOf(Error)
-      // 이유는 앱이 표준에러에 남긴 마지막 줄까지 싣는다
+      // The reason carries the last line the app left on stderr too
       expect((err as Error).message).toContain('fixture: cannot open the thing it needs')
       expect((err as Error).message).toContain('code 3')
     }
     const s = starts('broken')
     expect(s).toHaveLength(3)
-    // 두 번째는 400ms, 세 번째는 800ms 뒤에야 떴다 (연속 실패 n → base × 2^(n-1))
+    // The second only started after 400ms, the third after 800ms (the nth consecutive failure → base × 2^(n-1))
     expect(s[1]!.at - failedAt[0]!).toBeGreaterThanOrEqual(390)
     expect(s[2]!.at - failedAt[1]!).toBeGreaterThanOrEqual(790)
 
@@ -167,11 +168,11 @@ describe('크래시', () => {
     expect(info.status).toBe('failed')
     expect(info.error).toContain('fixture: cannot open the thing it needs')
 
-    // 멈춘 앱은 더 띄우지 않는다
+    // A stopped app is never started again
     await expect(rt.tools(ref('broken'))).rejects.toThrow(/stopped after failing 3 times in a row/)
     expect(starts('broken')).toHaveLength(3)
 
-    // 다시 시작하면 셈이 지워지고, 다음 필요가 띄운다
+    // Restarting clears the count, and the next need starts it
     await rt.restart(ref('broken'))
     expect(status('broken')).toBe('stopped')
     await rt.tools(ref('broken')).catch(() => {})
@@ -179,8 +180,8 @@ describe('크래시', () => {
   })
 })
 
-describe('쉬는 앱은 내린다', () => {
-  it('진행 중인 호출도 열린 화면도 없으면 idleMs 뒤 프로세스가 끝난다', async () => {
+describe('an idle app stops', () => {
+  it('with no call in progress and no open screen, the process ends after idleMs', async () => {
     plant('notes')
     make({ idleMs: 200 })
     await rt.tools(ref('notes'))
@@ -190,7 +191,7 @@ describe('쉬는 앱은 내린다', () => {
     expect(status('notes')).toBe('stopped')
   })
 
-  it('열린 화면이 있는 동안은 내리지 않는다 — 화면을 닫으면 그때부터 센다', async () => {
+  it('never stops while a screen is open — the count starts once the screen is closed', async () => {
     plant('notes')
     make({ idleMs: 200 })
     const release = rt.retainView(ref('notes'))
@@ -203,8 +204,8 @@ describe('쉬는 앱은 내린다', () => {
   })
 })
 
-describe('종료 규칙 (S-5)', () => {
-  it('표준 입력과 fd 3을 함께 닫으면 fd 3을 붙든 앱도 유예 안에 스스로 끝난다', async () => {
+describe('the shutdown rule (S-5)', () => {
+  it('closing stdin and fd 3 together lets even an app holding fd 3 open end on its own within the grace period', async () => {
     plant('holder', 'hold-fd3')
     make({ graceMs: 3_000 })
     await rt.tools(ref('holder'))
@@ -213,12 +214,12 @@ describe('종료 규칙 (S-5)', () => {
     const t0 = Date.now()
     await rt.restart(ref('holder'))
     expect(alive(pid)).toBe(false)
-    // 유예(3초)를 다 쓰고 트리를 죽인 것이 아니다 — 스스로 끝났다
+    // Not the result of using up the full grace period (3s) and killing the tree — it ended on its own
     expect(Date.now() - t0).toBeLessThan(1_500)
     expect(hostLog('holder')).not.toContain('did not exit within')
   })
 
-  it('입력이 닫혀도 안 끝나는 앱은 유예 뒤 손주까지 끝낸다 — 고아가 남지 않는다', async () => {
+  it('an app that does not end even with its input closed has its descendants ended too after the grace period — no orphan is left behind', async () => {
     plant('stubborn', 'ignore-eof')
     make({ graceMs: 300 })
     await rt.tools(ref('stubborn'))
@@ -231,7 +232,7 @@ describe('종료 규칙 (S-5)', () => {
     expect(hostLog('stubborn')).toContain('did not exit within 300ms')
   })
 
-  it('스스로 잘 끝난 앱이 남긴 손주도 거둔다 — 앱의 그룹째 끝낸다', async () => {
+  it('even a descendant left by an app that ended cleanly on its own is collected — its entire group is ended', async () => {
     plant('parent', 'grandchild')
     make()
     await rt.tools(ref('parent'))
@@ -244,35 +245,35 @@ describe('종료 규칙 (S-5)', () => {
     await until(() => alive(grandchild), (a) => a === false)
   })
 
-  it('스스로 끝난 앱이 남긴, SIGTERM을 무시하는 손주도 유예 뒤 SIGKILL로 거둔다 — 고아가 남지 않는다', async () => {
+  it('a descendant that ignores SIGTERM, left by an app that ended on its own, is collected with SIGKILL after the grace period — no orphan is left behind', async () => {
     plant('parent', 'stubborn-grandchild')
     make()
     await rt.tools(ref('parent'))
     const pid = starts('parent')[0]!.pid
-    // 손주가 처리기를 단 뒤에야 적힌다 — 그 전에 쏘면 이 시험이 보려는 것(버티는 손주)이 아니다
+    // Recorded only after the grandchild attaches its own signal handler — signalling it earlier would not test what this test is about (a descendant that holds on)
     const grandchild = (await until(() => records('parent').find((r) => r.t === 'grandchild'), (r) => r !== undefined))!.grandchild!
     try {
       await rt.restart(ref('parent'))
       expect(alive(pid)).toBe(false)
       expect(hostLog('parent')).not.toContain('did not exit within')
-      // 첫 발(SIGTERM)은 버텼다 — 이 시험이 두 번째 발을 보고 있다는 증거
+      // The first blow (SIGTERM) was held off — proof that this test is watching the second blow
       await new Promise((r) => setTimeout(r, 500))
       expect(alive(grandchild)).toBe(true)
       await until(() => alive(grandchild), (a) => a === false, 6_000)
     } finally {
       if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
     }
-    // 시험의 상한이 기다림(6초)보다 길어야 finally가 돈다 — 짧으면 실패한 날 손주가 고아로 남는다
+    // The test's own cap must exceed the wait (6s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
   }, 15_000)
 
-  it('host가 끝날 때(dispose) 칸이 바뀌어 호출을 마치기를 기다리던 옛 프로세스도 내려간다', async () => {
+  it('when the host exits (dispose), an old process still waiting to finish a call after its entry was replaced also stops', async () => {
     plant('keeper', 'attach')
     make()
     const first = rt.call(ref('keeper'), 'hold', {}, { kind: 'session', sessionId: 's1' })
     await until(() => records('keeper').some((r) => r.t === 'holding'), (x) => x)
     const pid = starts('keeper')[0]!.pid
     try {
-      // 매니페스트가 바뀐다 — 새 칸이 서고, 옛 프로세스는 붙든 호출을 마치기를 기다린다(어느 칸에도 없다)
+      // The manifest changes — a new entry is created, and the old process waits to finish the call it is holding (it belongs to no entry at all)
       plant('keeper', 'attach', { description: 'a changed description' })
       rt.refresh()
       expect(alive(pid)).toBe(true)
@@ -284,7 +285,7 @@ describe('종료 규칙 (S-5)', () => {
     }
   }, 15_000)
 
-  it('host가 끝날 때(dispose) 떠 있던 앱이 전부 내려간다', async () => {
+  it('when the host exits (dispose), every running app stops', async () => {
     plant('a1')
     plant('a2', 'ignore-eof')
     make()
@@ -295,8 +296,8 @@ describe('종료 규칙 (S-5)', () => {
   })
 })
 
-describe('앱이 받는 것', () => {
-  it('데이터 폴더(만들어 둔다)와 선언한 비밀만 받고, host의 변수는 받지 않는다', async () => {
+describe('what an app receives', () => {
+  it('receives its data folder (created for it) and only its declared secrets, never the host\'s own variables', async () => {
     plant('notes', 'normal', { secrets: ['FIXTURE_SECRET'] })
     make({}, { ...process.env, CC_HOST_TOKEN: 'host-ws-token', CC_DATA_DIR: '/somewhere' })
     rt.setSecret(ref('notes'), 'FIXTURE_SECRET', 's3cret-value')
@@ -317,7 +318,7 @@ describe('앱이 받는 것', () => {
     expect(statSync(join(dataRoot, SECRETS_FILE)).mode & 0o777).toBe(0o600)
   })
 
-  it('표준에러는 앱별 로그로 가고, 비밀 값은 이름으로 가려진다', async () => {
+  it('stderr goes to the app\'s own log, with secret values masked by name', async () => {
     plant('leaky', 'secret-to-stderr', { secrets: ['FIXTURE_SECRET'] })
     make()
     rt.setSecret(ref('leaky'), 'FIXTURE_SECRET', 's3cret-value')
@@ -327,7 +328,7 @@ describe('앱이 받는 것', () => {
     expect(hostLog('leaky')).not.toContain('s3cret-value')
   })
 
-  it('앱별 로그는 크기 상한에서 한 세대 밀려난다', async () => {
+  it('an app\'s own log rolls one generation at the size cap', async () => {
     plant('noisy', 'flood-stderr')
     make({ logMaxBytes: 4_096 })
     await rt.tools(ref('noisy'))
@@ -337,8 +338,8 @@ describe('앱이 받는 것', () => {
   })
 })
 
-describe('도구 목록을 읽는 자리에서 이름 규칙을 지킨다', () => {
-  it('이름에 `__`가 있는 도구는 목록에서 빠지고 이유가 경고로 남는다', async () => {
+describe('the naming rule is enforced at the point the tool list is read', () => {
+  it('a tool with `__` in its name is dropped from the list, and the reason is recorded as a warning', async () => {
     plant('sneaky', 'bad-tool-name')
     make()
     expect((await rt.tools(ref('sneaky'))).map((t) => t.name)).toEqual(['echo'])

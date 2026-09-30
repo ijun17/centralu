@@ -5,34 +5,40 @@ import type { AppManifest } from './manifest.js'
 import { canonicalJson } from './runs.js'
 
 /**
- * 가져온 앱의 표시와 사람의 확인 (M4 E-3, 결정 3) — **host 쪽에** 산다.
+ * The mark on an imported app and the person's confirmation of it (M4 E-3, decision 3) — lives on
+ * the **host side**.
  *
- * 사용자 폴더 앱은 사람이 거기 둔 것이라 신뢰한다(결정 3). 밖에서 가져온 앱만 따로 묻는다: 가져온 앱은 꺼진 채 들어오고,
- * 사람이 무엇을 돌리는지(`server`)와 무엇을 쓰겠다는지(`uses`)를 본 뒤 켠다. 켠 기록은 그때 본 것의 열쇠(`reviewKey`)다 —
- * 매니페스트의 `server`나 `uses`가 나중에 바뀌면 열쇠가 맞지 않아 다시 묻는다.
+ * A user-folder app is trusted because a person put it there (decision 3). Only an app imported from
+ * outside gets asked about separately: an imported app arrives disabled, and is enabled only after
+ * the person sees what it runs (`server`) and what it claims to use (`uses`). The record of being
+ * enabled carries a key (`reviewKey`) for what was seen at that moment — if the manifest's `server`
+ * or `uses` changes later, the key no longer matches and it is asked again.
  *
- * 표시가 앱 폴더 밖(데이터 폴더의 파일 하나)에 있는 이유: 앱 폴더 안의 표시는 앱의 코드가 지우거나 고칠 수 있고, 가져온 묶음이
- * "이미 확인됨"을 들고 들어올 수도 있다. 표시는 그 폴더의 inode에 묶는다 — 같은 id로 다시 생긴 다른 폴더(지우고 새로 만든
- * 앱)에 옛 표시가 붙지 않는다. 이름을 바꾸거나 옮겨도(같은 파일 시스템) inode는 남는다.
+ * Why the mark lives outside the app folder (as a file in the data folder): a mark inside the app
+ * folder could be deleted or edited by the app's own code, and an imported bundle could arrive
+ * already carrying "already confirmed". The mark is tied to that folder's inode instead — so a
+ * different folder that comes to exist under the same id (an app deleted and recreated) never
+ * inherits the old mark. Renaming or moving the folder (on the same filesystem) preserves the inode.
  */
 
 export const IMPORTS_FILE = 'app-imports.json'
 
 export type ImportMark = {
-  /** 어디서 왔나 — 사람에게 보이는 그대로(경로나 https 주소) */
+  /** Where it came from — exactly as shown to the person (a path or an https address) */
   source: string
   importedAt: number
-  /** 가져온 폴더의 inode — 이 폴더일 때만 표시가 걸린다 */
+  /** The inode of the imported folder — the mark applies only while this is that folder */
   ino: number
-  /** 사람이 켠 기록 — 켤 때 본 server·uses와 그 열쇠. 켜지 않았으면 null */
+  /** The record of the person enabling it — the server and uses seen at that time, and their key. Null if never enabled */
   confirmed: { key: string; at: number; server: AppManifest['server']; uses: AppManifest['uses'] } | null
 }
 
 type Doc = Record<string, ImportMark>
 
 /**
- * 사람이 본 것의 열쇠 — 매니페스트의 `server`(명령과 인자)와 `uses`. 키 순서를 고정한 JSON의 해시다: 같은 선언이 키 순서만
- * 달라 "바뀌었다"로 읽히면 사람은 까닭 없이 다시 묻는 창을 본다.
+ * The key for what a person has seen — the manifest's `server` (command and args) and `uses`. A
+ * hash of the JSON with key order fixed: if the same declaration read as "changed" just because its
+ * key order differed, the person would see a re-confirmation prompt for no reason.
  */
 export function reviewKey(m: Pick<AppManifest, 'server' | 'uses'>): string {
   return createHash('sha256')
@@ -49,7 +55,7 @@ export class ImportBook {
     this.doc = this.read()
   }
 
-  /** 이 폴더에 걸린 표시 — 가져온 앱이 아니거나, 같은 id의 다른 폴더면 null */
+  /** The mark on this folder — null if it is not an imported app, or a different folder under the same id */
   get(appId: string, dir: string): ImportMark | null {
     const m = this.doc[appId]
     if (!m) return null
@@ -60,13 +66,13 @@ export class ImportBook {
     }
   }
 
-  /** 가져왔다 — 꺼진 채로 적는다 */
+  /** Records that this was imported — recorded as disabled */
   mark(appId: string, dir: string, source: string, at = Date.now()): void {
     this.doc[appId] = { source, importedAt: at, ino: statSync(dir).ino, confirmed: null }
     this.write()
   }
 
-  /** 사람이 켰다 — 그때 본 선언을 열쇠와 함께 적는다 */
+  /** Records that the person enabled it — the declaration seen at that time, together with its key */
   confirm(appId: string, manifest: Pick<AppManifest, 'server' | 'uses'>, at = Date.now()): void {
     const m = this.doc[appId]
     if (!m) return
@@ -87,21 +93,23 @@ export class ImportBook {
       return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Doc) : {}
     } catch {
       /*
-       * 깨진 파일 — 표시를 잃으면 가져온 앱이 확인 없이 도는 쪽으로 기운다. 그래서 읽지 못한 파일은 옆으로 치워 두고 알린다.
-       * 옮겨 둔 원본에서 사람이 되살릴 수 있다. (확인을 강제로 모두 거두는 길은 없다: 무엇이 가져온 앱이었는지가 그 파일에 있다)
+       * A corrupt file — losing the marks tips things toward an imported app running without
+       * confirmation. So an unreadable file is moved aside instead, and reported. A person can
+       * recover it from the moved-aside original. (There is no way to forcibly withdraw every
+       * confirmation: which apps were imported at all lives in that same file.)
        */
       const aside = `${this.path}.unreadable-${Date.now()}`
       try {
         renameSync(this.path, aside)
       } catch {
-        // 옮기지 못해도 읽지 못한 것은 같다
+        // Even if it cannot be moved, it is still unreadable either way
       }
       console.error(`[apps] ${IMPORTS_FILE} is unreadable; moved to ${aside}. Imported apps lost their marks`)
       return {}
     }
   }
 
-  /** 임시 파일을 0600으로 만들고 옮긴다 — 출처 주소에 토큰이 든 링크가 있을 수 있다 */
+  /** Creates the temp file at 0600 and moves it into place — a source address might be a link containing a token */
   private write(): void {
     const tmp = `${this.path}.tmp`
     writeFileSync(tmp, JSON.stringify(this.doc, null, 2), { mode: 0o600 })

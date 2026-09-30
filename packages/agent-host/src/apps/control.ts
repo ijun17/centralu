@@ -1,28 +1,32 @@
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-// 문서의 모양은 UI 절반과 같은 한 벌이다 (M4 P-5) — 전에는 여기 따로 적혀 있었고 `notifies`가
-// 필수였다. UI가 알림 칸 없이 쓴 문서를 믿고 읽다가 넘어졌다. 이제 모든 칸이 선택이다.
+// The document's shape is one shared set with the UI's half (M4 P-5) — it used to be defined
+// separately here, with `notifies` required. Trusting that and reading a document the UI had written
+// without a notifies field crashed. Every field is now optional.
 import type { ControlDoc, ControlNotify, ControlTask } from '@cc/protocol'
 import type { HostAppModule, HostAppContext, AppToolCaller, ToolOutput } from './contract.js'
 
 /**
- * 관제 앱의 host 절반 (#80·#81) — 레일 알림, 선언형 감시, 그리고 **업무**.
+ * The host half of the control app (#80, #81) — the rail's notifications, declarative watches, and
+ * **tasks**.
  *
- * "업무·반장"이라는 개념 전체가 이 파일(앱)에 산다. 코어가 주는 것은 이름 없는
- * 물리 둘(시야 허용 목록, 역할문 박제)뿐이고, 여기가 그 위에 의미를 입힌다 —
- * 앱을 꺼도 만들어진 조율 세션은 "시야 잘린 조율 세션"이라는 일관된 코어 객체로
- * 우아하게 강등된다 (#81 소유권 경계).
+ * The entire concept of "task and foreman" lives in this one file (the app). What the core provides
+ * is exactly two nameless physical primitives (a scope allowlist, pinning a role text), and this file
+ * gives them their meaning — turning the app off degrades an already-created coordination session
+ * gracefully into a plain, consistent core object, "a coordination session with its scope cut off"
+ * (#81's ownership boundary).
  */
 
-/** 알림 보관 상한 — 사람이 안 지운 옛 알림이 문서를 무한히 불리면 안 된다 */
+/** The cap on stored notifications — an old notification the person never dismissed must not grow the document without bound */
 const NOTIFY_CAP = 50
 
 /**
- * 반장의 역할문 — 창조 시 세션 행에 박제된다 (코어 손잡이 ②).
+ * The foreman's role text — pinned to a session's row at creation time (core handle ②).
  *
- * 핵심 요구 둘 (사용자 지정): **걸러듣기** — 구성원 보고를 그대로 전달하면 반장이
- * 아니라 확성기다 — 와 **보드가 기억** — 대화는 컴팩트되면 사라지므로 상태는
- * board_update로 물질화한다 (매니저 지침의 "파일에 적힌 배정만 살아남는다"와 동형).
+ * Two core requirements (specified by the user): **filtering what it hears** — forwarding a member's
+ * report verbatim makes the foreman a megaphone, not a foreman — and **the board is its memory** — a
+ * conversation disappears once compacted, so state is materialized through board_update instead
+ * (mirrors the manager guideline's "only an assignment written to a file survives").
  */
 export function taskRole(taskId: string, title: string, goal: string): string {
   return [
@@ -62,13 +66,13 @@ function readDoc(ctx: HostAppContext): ControlDoc {
   return ctx.kv.get<ControlDoc>('doc') ?? { notifies: [] }
 }
 
-/** 알림 칸이 없는 문서(UI가 먼저 쓴 것)에도 붙인다 — 칸이 없다는 것은 알림이 0개라는 뜻이다 */
+/** Also works on a document with no notifies field (one the UI wrote first) — an absent field means zero notifications */
 function pushNotify(doc: ControlDoc, n: Omit<ControlNotify, 'id' | 'ts'>): void {
   const all = [...(doc.notifies ?? []), { id: randomUUID(), ts: Date.now(), ...n }]
   doc.notifies = all.length > NOTIFY_CAP ? all.slice(-NOTIFY_CAP) : all
 }
 
-/** 보드 접근 판정 — 그 업무의 반장이거나 사람(null)만. 남의 업무 보드는 남의 것이다 */
+/** Validates access to the board — only that task's foreman or a person (null). Someone else's task board belongs to them */
 function boardDenied(task: ControlTask | undefined, caller: AppToolCaller): ToolOutput | null {
   if (!task) return { text: '그런 업무가 없습니다', isError: true }
   if (caller.sessionId !== null && caller.sessionId !== task.coordinatorId && caller.profile !== 'orchestrator') {
@@ -79,10 +83,10 @@ function boardDenied(task: ControlTask | undefined, caller: AppToolCaller): Tool
 
 export const controlHostApp: HostAppModule = {
   id: 'control',
-  /** 우리 문서가 든 업무들의 반장 세션이 우리 것이다 (appId 칸이 생기기 전에 만들어진 행들) */
+  /** The foreman sessions of the tasks in our document belong to us (rows created before the appId column existed) */
   claimSessions: (ctx) => readDoc(ctx).tasks?.map((t) => t.coordinatorId).filter(Boolean) ?? [],
   tools: {
-    // scoped(반장)도 notify·보드를 쓴다 — 사람 호출과 기억이 반장 역할의 반쪽이다
+    // scoped (the foreman) also uses notify and the board — calling out to a person and remembering are half of what being a foreman is
     profiles: ['orchestrator', 'manager', 'scoped'],
     defs: [
       {
@@ -106,7 +110,7 @@ export const controlHostApp: HostAppModule = {
           goal: z.string().describe('업무의 목표 — 반장의 역할문에 박제된다'),
           memberSessionIds: z.array(z.string()).min(1).describe('구성원 워커 세션 id들 (list_sessions의 [id])'),
         }),
-        // 반장(scoped)에게는 노출조차 안 한다 — 깊이 1의 구조적 보장 (실행 쪽 판정과 이중)
+        // Never even exposed to a foreman (scoped) — a structural guarantee that depth stays at 1 (doubled up with the check on the execution side)
         profiles: ['orchestrator'],
       },
       {
@@ -155,8 +159,8 @@ export const controlHostApp: HostAppModule = {
       }
 
       if (name === 'control_create_task') {
-        // 반장은 만드는 자가 아니라 만들어지는 자다 — scoped가 이 도구를 부르면 깊이가 자란다.
-        // 프로필 노출에서 이미 걸러지지만, 실행 쪽도 같은 판정을 한 번 더 한다 (#69 규칙).
+        // A foreman is something created, not a creator — if scoped could call this tool, depth would grow.
+        // This is already filtered out at profile exposure, but the execution side repeats the same check (the #69 rule).
         if (caller.profile === 'scoped') return { text: '반장은 업무를 만들 수 없습니다', isError: true }
         const members = args.memberSessionIds as string[]
         for (const id of members) {
@@ -176,10 +180,12 @@ export const controlHostApp: HostAppModule = {
         })
         ctx.kv.set(`board:${taskId}`, BOARD_TEMPLATE(title, goal, members.map((m) => ctx.sessionSummary(m)?.name ?? m)))
         /*
-         * 기다린 **뒤에** 문서를 다시 읽는다 (#178). 반장 세션을 띄우는 await는 Codex에서 app-server가
-         * 준비될 때까지라 초 단위다. 그 사이 다른 세션의 알림, 감시 적중, 사람이 지운 알림, 동시에 만든
-         * 다른 업무가 문서에 들어오는데, 위에서 읽은 사본으로 통째로 쓰면 그것들이 전부 되돌아갔다.
-         * 이 도구가 문서에 더하는 것은 업무 한 줄뿐이니, 지금의 문서 위에 그 한 줄만 얹는다.
+         * The document is re-read **after** waiting (#178). The await for starting the foreman session
+         * runs into the seconds, since it waits for Codex's app-server to become ready. In that window,
+         * another session's notification, a watch hit, a notification a person dismissed, or another
+         * task created concurrently can all land in the document — and overwriting it wholesale with the
+         * copy read above would revert every one of those. Since this tool only ever adds one task to
+         * the document, only that one line is layered on top of the current document instead.
          */
         const fresh = readDoc(ctx)
         fresh.tasks = [
@@ -235,7 +241,7 @@ export const controlHostApp: HostAppModule = {
     if (e.type !== 'tool_call' || !e.sessionId) return
     const doc = ctx.kv.get<ControlDoc>('doc')
     const watches = doc?.watches ?? []
-    if (watches.length === 0) return // 감시가 없으면 이 훅은 공짜여야 한다 — kv 읽기 하나로 끝
+    if (watches.length === 0) return // With no watches, this hook must cost nothing — it ends after a single kv read
     const line = `${e.summary.tool}: ${e.summary.title} ${(e.summary.paths ?? []).join(' ')}`.toLowerCase()
     const hits = watches.filter(
       (w) =>

@@ -3,17 +3,22 @@ import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * 앱 폴더의 지문 (M4 C-4) — "앱이 뜬 뒤로 폴더가 바뀌었나"를 이것 하나로 답한다.
+ * The fingerprint of an app folder (M4 C-4) — answers "has the folder changed since the app
+ * started" with this one value.
  *
- * 폴더 감시(fs 이벤트)에 기대지 않는 이유: 감시는 펼쳐진 폴더만 보고(`DirWatchers` — 재귀가 아니다), 이벤트는
- * 합쳐지거나 빠질 수 있다. 반영이 필요한 순간(만드는 세션의 턴이 끝났다)에 지금 폴더를 직접 재면 이벤트를 몇 개
- * 놓쳤든 답이 맞다. 감시는 "언제 재 볼까"만 알려 준다(만드는 세션이 없을 때).
+ * Why this does not rely on folder watching (fs events): watching only sees the folders that are
+ * expanded (`DirWatchers` — it is not recursive), and events can be coalesced or dropped. At the
+ * moment a change actually has to be reflected (the building session's turn ended), measuring the
+ * folder right now gives the correct answer no matter how many events were missed. Watching only
+ * tells us **when** to re-measure (while there is no building session).
  *
- * 작은 파일은 **내용**으로 잰다: `touch`나 같은 내용의 체크아웃은 앱을 바꾸지 않았으니 다시 띄울 까닭이 없다.
- * 큰 파일은 크기와 시각으로 — 폴더 하나를 재는 값이 몇 밀리초를 넘지 않게.
+ * Small files are measured by **content**: a `touch`, or checking out the same content again, has
+ * not changed the app, so there is no reason to restart it. Large files are measured by size and
+ * timestamp — so measuring one folder never takes more than a few milliseconds.
  *
- * 건너뛰는 것: 점으로 시작하는 이름(`.git`, `.gitattributes` — 앱의 동작이 아니다)과 `node_modules`(템플릿은
- * 설치하지 않는다. 누가 설치했어도 수만 개를 매번 걷지 않는다). 파일 수와 깊이에 상한이 있다.
+ * Skipped: names starting with a dot (`.git`, `.gitattributes` — not part of the app's behavior) and
+ * `node_modules` (the template never installs one; even if someone installed it manually, this does
+ * not walk tens of thousands of entries every time). There are caps on file count and depth.
  */
 
 const CONTENT_MAX_BYTES = 1024 * 1024
@@ -21,18 +26,21 @@ const MAX_FILES = 2_000
 const MAX_DEPTH = 8
 
 /**
- * 지문이 재는 것을 걷는다 — 지문과 스냅샷(E-1, `versions.ts`)이 **같은 걸음**을 쓴다. 스냅샷이 담는 파일과 지문이 재는 파일이 다르면,
- * 되돌린 뒤의 지문이 그 스냅샷의 지문과 맞지 않아 "지금 이 판"을 가리킬 수 없다.
+ * Walks what the fingerprint measures — the fingerprint and the snapshot mechanism (E-1,
+ * `versions.ts`) use **the same walk**. If the files a snapshot captures differed from the files the
+ * fingerprint measures, the fingerprint after a restore would not match that snapshot's fingerprint,
+ * and it could no longer be pointed to as "the current version".
  *
- * 건너뛰는 것·상한은 위 머리말 그대로다. 링크는 파일도 폴더도 아니라서 걷지 않는다(`Dirent`는 링크를 따라가지 않는다).
+ * The skip list and caps are exactly as described above. A link is neither a file nor a folder, so
+ * it is never walked (`Dirent` does not follow links).
  */
 export type CodeVisit = {
-  /** 못 읽은 폴더 — 사라진 폴더와 있는 폴더가 같은 모양이 되지 않게 지문은 이것도 잰다 */
+  /** An unreadable folder — the fingerprint measures this too, so a missing folder does not end up looking the same as an existing one */
   unreadable(rel: string): void
   dir(rel: string): void
-  /** 파일 하나 (앱 폴더 기준 상대 경로) */
+  /** One file (path relative to the app folder) */
   file(rel: string): void
-  /** 파일 수 상한을 넘었다 — 그 폴더의 나머지는 건너뛴다 */
+  /** The file count cap was exceeded — the rest of that folder is skipped */
   more(): void
 }
 
@@ -69,7 +77,7 @@ export function walkCode(dir: string, v: CodeVisit): void {
 export function folderFingerprint(dir: string): string {
   const h = createHash('sha256')
   walkCode(dir, {
-    unreadable: (rel) => void h.update(`!${rel}\n`), // 못 읽은 것도 모양이다 — 사라진 폴더와 있는 폴더가 같은 지문이 되지 않게
+    unreadable: (rel) => void h.update(`!${rel}\n`), // being unreadable is a shape too — so a missing folder does not end up with the same fingerprint as an existing one
     dir: (r) => void h.update(`d ${r}\n`),
     more: () => void h.update('…more files\n'),
     file: (r) => {
@@ -79,7 +87,7 @@ export function folderFingerprint(dir: string): string {
         if (st.size <= CONTENT_MAX_BYTES) h.update(`f ${r} `).update(readFileSync(path)).update('\n')
         else h.update(`F ${r} ${st.size} ${st.mtimeMs}\n`)
       } catch {
-        h.update(`? ${r}\n`) // 재는 사이에 사라졌다
+        h.update(`? ${r}\n`) // disappeared while being measured
       }
     },
   })

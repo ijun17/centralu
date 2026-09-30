@@ -8,10 +8,12 @@ import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
 
 /**
- * 능력 승인 (M4 D-4) — 앱이 능력(에이전트, 다른 앱, host 데이터)을 **처음** 쓸 때 사람에게 한 번 묻고, 답을 (앱, 능력)마다
- * 기억하고, 매니페스트의 `uses`가 바뀌면 다시 묻는다. 물음이 어디에 서는지(세션의 카드인가 화면인가)와 사람의 답은 host의
- * 몫이라 여기서는 가짜 host가 받는다 — 무엇을 물었는지 적고, 시험이 정한 때에 답한다. 매니저 쪽(카드와 화면의 물음)은
- * sessions/app-capabilities.test.ts가 본다.
+ * Capability approval (M4 D-4) — the person is asked once, the **first** time an app uses a
+ * capability (agent, another app, host data), the answer is remembered per (app, capability), and
+ * it is asked again if the manifest's `uses` changes. Where the question shows up (a session's card
+ * or a screen) and the person's answer are the host's job, so here a fake host receives them
+ * instead — it records what was asked, and answers at the time the test decides. The manager side
+ * (the card and the screen's question) is covered by sessions/app-capabilities.test.ts.
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -20,7 +22,7 @@ let root = ''
 let rt: ExternalApps
 type Asked = { q: CapabilityQuestion; answer: (d: 'allow' | 'deny') => void; withdrawn: boolean }
 let asked: Asked[] = []
-/** 사람이 곧바로 하는 답 — null이면 답하지 않고 기다린다(시험이 asked[i].answer로 답한다) */
+/** The answer the person gives immediately — null means it does not answer and waits instead (the test answers via asked[i].answer) */
 let autoAnswer: 'allow' | 'deny' | null = 'allow'
 
 const dir = (id: string) => join(root, 'p1', ...PROJECT_APPS, id)
@@ -29,7 +31,7 @@ const plant = (id: string, uses: Record<string, unknown>) =>
 const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })
 const SESSION: AppCaller = { kind: 'session', sessionId: 's1' }
 
-/** 앱이 처리 중인 호출 안에서 중개를 부른다 — 중개의 답을 돌려받는다 */
+/** Calls the broker from inside a call the app is handling — returns the broker's answer */
 const ask = async (appId: string, tool: string, args: Record<string, unknown>, caller: AppCaller = SESSION, extra: Record<string, unknown> = {}) => {
   const out = await rt.call(ref(appId), 'ask_broker', { mode: 'run', tool, args, ...extra }, caller)
   return out.result!.structuredContent as { isError: boolean; text: string; structured: unknown }
@@ -75,8 +77,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('처음 쓸 때 한 번 묻고, 답을 기억한다', () => {
-  it('허락하면 부탁이 이어지고, 같은 능력의 다음 부탁은 묻지 않는다', async () => {
+describe('asks once on first use, and remembers the answer', () => {
+  it('an allow lets the request through, and the next request for the same capability is not asked about', async () => {
     plant('notes', { agent: true })
     make()
     expect(await ask('notes', 'run_agent', { prompt: 'x' })).toMatchObject({ isError: false, text: 'agent ran on claude' })
@@ -85,7 +87,7 @@ describe('처음 쓸 때 한 번 묻고, 답을 기억한다', () => {
     expect(rt.permissions(ref('notes'))).toMatchObject([{ capability: 'agent:claude', decision: 'allow', current: true }])
   })
 
-  it('거절도 기억한다 — 다시 묻지 않고, 되돌리는 길을 말한다. 잊으면 다시 묻는다', async () => {
+  it('a denial is also remembered — it is not asked again, and it states how to reverse it. Forgetting it asks again', async () => {
     plant('notes', { agent: true })
     autoAnswer = 'deny'
     make()
@@ -103,7 +105,7 @@ describe('처음 쓸 때 한 번 묻고, 답을 기억한다', () => {
     expect(asked).toHaveLength(2)
   })
 
-  it('능력마다 따로 묻는다 — 에이전트를 허락했다고 host 데이터나 다른 앱까지 허락한 것이 아니다', async () => {
+  it('asks separately per capability — allowing the agent does not also allow host data or another app', async () => {
     plant('notes', { agent: true, apps: ['other'], host: ['sessions.list'] })
     plant('other', {})
     make()
@@ -117,12 +119,12 @@ describe('처음 쓸 때 한 번 묻고, 답을 기억한다', () => {
     ])
   })
 
-  it('매니페스트의 uses가 바뀌면 기억한 답을 쓰지 않고 다시 묻는다', async () => {
+  it('when the manifest\'s uses changes, the remembered answer is not used and it asks again', async () => {
     plant('notes', { agent: true })
     make()
     await ask('notes', 'run_agent', { prompt: 'x' })
     expect(asked).toHaveLength(1)
-    // 선언이 바뀐다 — 앱을 만든 쪽이 앱이 무엇을 쓰는지 다시 말했다
+    // The declaration changes — the app's builder has restated what the app uses
     const manifest = JSON.parse(readFileSync(join(dir('notes'), MANIFEST_FILE), 'utf8'))
     writeFileSync(join(dir('notes'), MANIFEST_FILE), JSON.stringify({ ...manifest, uses: { agent: true, host: ['git.status'] } }))
     rt.refresh()
@@ -132,8 +134,8 @@ describe('처음 쓸 때 한 번 묻고, 답을 기억한다', () => {
   })
 })
 
-describe('기다림', () => {
-  it('상한 안에 답이 없으면 거절로 닫고 물음을 거둔다 — 답이 아니므로 기억하지 않고, 다음에 다시 묻는다', async () => {
+describe('waiting', () => {
+  it('with no answer within the cap, closes as a denial and withdraws the question — since it was not an answer, nothing is remembered, and it asks again next time', async () => {
     plant('notes', { agent: true })
     autoAnswer = null
     make({ capabilityQuestionMs: 400 })
@@ -148,11 +150,11 @@ describe('기다림', () => {
     expect(asked).toHaveLength(2)
   })
 
-  it('사람을 기다리는 동안 앱의 호출은 살아 있다 — 앱의 상한을 넘겨도 진행 알림이 다시 세운다', async () => {
+  it('the app\'s call stays alive while waiting on the person — a progress notification keeps it alive even past the app\'s own cap', async () => {
     plant('notes', { agent: true })
     autoAnswer = null
     make({ brokerKeepaliveMs: 100 })
-    // 앱의 클라이언트는 0.5초 말이 없으면 포기한다. 사람은 1.2초 뒤에 답한다
+    // The app's client gives up after 0.5 seconds of silence. The person answers after 1.2 seconds
     const pending = ask('notes', 'run_agent', { prompt: 'x' }, SESSION, { timeoutMs: 500 })
     await until(() => asked.length, (n) => n === 1)
     await new Promise((r) => setTimeout(r, 1_200))
@@ -160,8 +162,8 @@ describe('기다림', () => {
     expect(await pending).toMatchObject({ isError: false, text: 'agent ran on claude' })
   })
 
-  it('같은 능력을 동시에 쓰려는 부탁 둘에는 물음이 하나만 선다', async () => {
-    // host 데이터로 본다 — 에이전트는 한 앱에 하나씩만 돌아(D-5) 둘째가 물음 뒤에 거절된다
+  it('two requests trying to use the same capability at once get only one question', async () => {
+    // Exercised with host data — an agent runs only one at a time per app (D-5), so the second would be refused right after the question
     plant('notes', { host: ['sessions.list'] })
     autoAnswer = null
     make()
@@ -175,7 +177,7 @@ describe('기다림', () => {
     expect((await b).isError).toBe(false)
   })
 
-  it('부탁한 호출이 취소되면 물음을 거둔다', async () => {
+  it('withdraws the question if the requesting call is cancelled', async () => {
     plant('notes', { agent: true })
     autoAnswer = null
     make()
@@ -188,14 +190,14 @@ describe('기다림', () => {
   })
 })
 
-describe('물음이 설 자리 — 사슬을 시작한 쪽', () => {
-  it('세션에서 시작했으면 그 세션, 화면에서 시작했으면 그 화면의 앱이다 — 다른 앱을 거쳐도 처음이 기준이다', async () => {
+describe('where the question is attributed — whoever started the chain', () => {
+  it('a chain started from a session is attributed to that session; started from a screen, to that screen\'s app — passing through another app does not change what started it', async () => {
     plant('notes', { apps: ['other'] })
     plant('other', { agent: true })
     make()
     await ask('notes', 'call_app', { app: 'other', tool: 'ask_broker', args: { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } } })
     await ask('notes', 'call_app', { app: 'other', tool: 'ask_broker', args: { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } } }, { kind: 'view' })
-    // notes가 other를 부르는 것도 능력이다(첫째), other가 에이전트를 쓰는 것도 능력이다(둘째)
+    // notes calling other is a capability too (the first), and other using an agent is another (the second)
     expect(asked.map((a) => [a.q.app.appId, a.q.capability, a.q.origin])).toEqual([
       ['notes', 'app:p1/other', { kind: 'session', sessionId: 's1' }],
       ['other', 'agent:claude', { kind: 'session', sessionId: 's1' }],

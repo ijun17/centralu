@@ -7,8 +7,9 @@ import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { fakeBrokerHost, until } from './test-helpers.js'
 
 /**
- * 오류가 만드는 쪽에 닿는다 — host의 절반 (M4 C-6). 앱이 뜨지 못함·죽음·도구 실패를 앱마다 묶어 두고, 물으면
- * 답한다. 보내지는 않는다. 템플릿의 런타임을 쓰는 진짜 앱으로 본다.
+ * Errors reach the builder — the host's half of it (M4 C-6). Failing to start, crashing, and a tool
+ * failing are kept per app, and the host answers when asked. It does not send them on its own.
+ * Exercised with real apps that use the template's runtime.
  */
 
 let root = ''
@@ -61,8 +62,8 @@ const tools = (body: string) => `serveStdio(() => {
   return server
 })`
 
-describe('앱마다 최근 오류를 묶어 둔다', () => {
-  it('뜨지 못했다 — 이유와 그때의 표준에러', async () => {
+describe('keeps recent errors per app', () => {
+  it('failed to start — the reason and its stderr at the time', async () => {
     app('broken', `serveStdio(() => { throw new Error('forgot to define the tools') })`)
     const r = make()
     const t0 = Date.now()
@@ -71,13 +72,13 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(recent).toHaveLength(1)
     expect(latest).toMatchObject({ kind: 'start', tool: null, args: null, runId: null })
     expect(latest!.at).toBeGreaterThanOrEqual(t0)
-    expect(latest!.message).not.toContain('--- stderr') // 이유와 표준에러는 따로 싣는다
+    expect(latest!.message).not.toContain('--- stderr') // the reason and stderr are carried separately
     expect(latest!.stderr.join('\n')).toContain('forgot to define the tools')
     expect(latest!.text).toMatch(/^App App broken \(p1\/broken\): the app could not start \(\d{4}-/)
     expect(latest!.text).toContain('stderr (last lines):')
   })
 
-  it('맨 위에서 던지고 끝났다 — 끝난 모양이 이유다', async () => {
+  it('threw at the top level and ended — the shape it ended in is the reason', async () => {
     app('exits', `throw new Error('config.json is missing')`)
     const r = make()
     await expect(r.tools(ref('exits'))).rejects.toThrow()
@@ -86,7 +87,7 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(latest!.stderr.join('\n')).toContain('Error: config.json is missing')
   })
 
-  it('도구가 던졌다 — 어느 도구가, 어떤 인자로, 어디서(스택은 server.mjs의 줄)', async () => {
+  it('a tool threw — which tool, with what arguments, and where (the stack is a line in server.mjs)', async () => {
     app('thrower', tools(`centralu.tool(server, 'save', { description: 'Save', inputSchema: z.object({ text: z.string() }), annotations: { readOnlyHint: false } }, async ({ text }) => {
     throw new Error('cannot save: ' + text)
   })`))
@@ -99,7 +100,7 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(latest!.text).toContain('Tool: save\nArguments: {"text":"hello"}')
   })
 
-  it('호출 중에 죽었다 — 도구의 실패와 프로세스의 끝이 둘 다 남고, 최근 것이 끝이다', async () => {
+  it('died mid-call — both the tool failure and the process ending are kept, and the most recent one is the ending', async () => {
     app('dies', tools(`centralu.tool(server, 'boom', { description: 'Dies', annotations: { readOnlyHint: true } }, async () => {
     console.error('about to run out of memory, pretending')
     process.exit(7)
@@ -114,7 +115,7 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(recent.find((b) => b.kind === 'tool')).toMatchObject({ tool: 'boom' })
   })
 
-  it('비밀은 이유·인자·표준에러 어디에도 남지 않는다', async () => {
+  it('secrets stay out of the reason, the arguments and stderr alike', async () => {
     app(
       'secretive',
       tools(`centralu.tool(server, 'call_api', { description: 'Calls', inputSchema: z.object({ token: z.string() }), annotations: { readOnlyHint: true } }, async () => {
@@ -133,7 +134,7 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
     expect(latest!.stderr).toContain('using key [redacted:API_KEY]')
   })
 
-  it('정책의 거절과 성공은 오류가 아니다 — 최근 것만 든다', async () => {
+  it('a policy denial and a success are not errors — only the most recent ones are kept', async () => {
     app('mixed', tools(`centralu.tool(server, 'ok', { description: 'Fine', annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: 'text', text: 'fine' }] }))
   centralu.tool(server, 'screen_only', { description: 'App only', annotations: { readOnlyHint: true }, _meta: { ui: { visibility: ['app'] } } }, async () => ({ content: [] }))
   centralu.tool(server, 'fail', { description: 'Fails', inputSchema: z.object({ n: z.number() }), annotations: { readOnlyHint: true } }, async ({ n }) => ({ content: [{ type: 'text', text: 'failure ' + n }], isError: true }))`))
@@ -149,9 +150,10 @@ describe('앱마다 최근 오류를 묶어 둔다', () => {
   })
 })
 
-describe('만드는 세션에 보낸 묶음 (C-6)', () => {
-  it('보냈다는 표시는 한 번만 서고, 표준에러를 다시 담아 묶음이 갈아 끼워져도 남으며, 지우면 다시 보낼 수 있다', async () => {
-    // 답 뒤에 표준에러가 한 줄 더 온다 — 묶음이 그 줄을 다시 담아 **새 객체로 갈아 끼워지는** 길을 반드시 지나게
+describe('the bundle sent to the building session (C-6)', () => {
+  it('the sent mark is set only once, survives the bundle being replaced when it re-captures stderr, and clearing it allows sending again', async () => {
+    // one more line of stderr comes after the reply — this makes sure the code takes the path where
+    // the bundle captures that line and gets **replaced with a new object**
     app('thrower', tools(`centralu.tool(server, 'save', { description: 'Save', annotations: { readOnlyHint: false } }, async () => {
     setTimeout(() => console.error('written after the reply'), 30)
     throw new Error('cannot save')
@@ -160,7 +162,7 @@ describe('만드는 세션에 보낸 묶음 (C-6)', () => {
     await r.call(ref('thrower'), 'save', {}, SESSION)
     const at = r.errors(ref('thrower')).latest!.at
     expect(r.errors(ref('thrower')).latest?.sentAt).toBeNull()
-    // 실패 바로 뒤 — 표준에러를 다시 담는 150ms 전에 보낸다
+    // right after the failure — sent 150ms before stderr is re-captured
     expect(r.markErrorSent(ref('thrower'), at)).toMatchObject({ kind: 'tool', at })
     expect(r.markErrorSent(ref('thrower'), at)).toBe('sent')
     await new Promise((res) => setTimeout(res, 300))
@@ -172,8 +174,8 @@ describe('만드는 세션에 보낸 묶음 (C-6)', () => {
   })
 })
 
-describe('목록의 lastErrorAt (C-6)', () => {
-  it('읽기 전용 도구가 던져도 목록의 마지막 오류 때가 바뀌고 목록을 듣는 쪽이 깨어난다 — "바뀌었다"는 내지 않는다', async () => {
+describe('the list\'s lastErrorAt (C-6)', () => {
+  it('even a read-only tool throwing updates the list\'s last-error time and wakes list listeners — it does not emit "changed"', async () => {
     app('reader', tools(`centralu.tool(server, 'get', { description: 'Read', annotations: { readOnlyHint: true } }, async () => {
     throw new Error('cannot read')
   })`))
@@ -201,12 +203,15 @@ describe('목록의 lastErrorAt (C-6)', () => {
 })
 
 /**
- * 사람이 거절한 능력 (D-4) — 실측: 사람이 Deny를 누른(또는 기억된 거절) 능력 때문에 멈춘 도구가 고정 화면 아래에 스택과
- * "Send to builder"를 단 앱의 오류로 섰다. 그런데 host는 알고 있다: 그 실행 아래 중개 줄이 사람의 답으로 `refused`다. 묶음에 그
- * 결정을 싣는다 — 화면이 그렇게 말하고, 만드는 세션에는 가지 않는다(builder-requests.test.ts).
+ * A capability the person denied (D-4) — measured: a tool that stopped because the person pressed
+ * Deny (or hit a remembered denial) showed up as an app error, complete with a stack trace and a
+ * "Send to builder" button under the fixed screen. But the host already knows: the broker line
+ * beneath that run got a `refused` from the person's answer. The bundle now carries that decision
+ * — the screen states it plainly, and it is not sent to the building session
+ * (builder-requests.test.ts).
  */
-describe('사람이 거절한 능력 때문에 멈춘 호출은 앱의 버그가 아니다', () => {
-  it('Deny를 누른 것도, 기억된 거절도, 그 앱을 부른 앱의 실패도 그 결정을 싣는다 — 진짜 버그는 그대로다', async () => {
+describe('a call stopped by a denied capability is not an app bug', () => {
+  it('carries the decision whether it was a pressed Deny, a remembered denial, or the failure of an app that called the denied one — a real bug still comes through as itself', async () => {
     const summarize = `centralu.tool(server, 'summarize', { description: 'Sum up', inputSchema: z.object({}), annotations: { readOnlyHint: true } }, async () => ({
     content: [{ type: 'text', text: String(await centralu.agent('sum up')) }],
   }))`
@@ -223,7 +228,7 @@ describe('사람이 거절한 능력 때문에 멈춘 호출은 앱의 버그가
     )
     const r = make()
     const asked: string[] = []
-    // 사람은 에이전트를 거절하고, board가 notes를 부르는 것은 허락한다
+    // The person denies the agent, and allows board to call notes
     r.attachBrokerHost(fakeBrokerHost({ askCapability: async (q) => (asked.push(q.capability), q.capability.startsWith('agent:') ? 'deny' : 'allow') }))
     const denied = { appId: 'notes', projectId: 'p1', name: 'App notes', capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' }
 
@@ -231,17 +236,17 @@ describe('사람이 거절한 능력 때문에 멈춘 호출은 앱의 버그가
     expect(first.status).toBe('error')
     expect(r.errors(ref('notes')).latest).toMatchObject({ kind: 'tool', tool: 'summarize', runId: first.runId, denied })
 
-    // 기억된 거절 — 다시 묻지 않고, 같은 결정이다
+    // A remembered denial — does not ask again, and it is the same decision
     const again = await r.call(ref('notes'), 'summarize', {}, SESSION)
     expect(asked).toEqual(['agent:claude'])
     expect(r.errors(ref('notes')).latest).toMatchObject({ runId: again.runId, denied })
 
-    // notes를 부른 board의 실패도 까닭은 그 거절이다
+    // board's failure from calling notes also has that denial as its reason
     const nested = await r.call(ref('board'), 'digest', {}, SESSION)
     expect(nested.status).toBe('error')
     expect(r.errors(ref('board')).latest).toMatchObject({ tool: 'digest', runId: nested.runId, denied })
 
-    // 진짜 버그는 오늘처럼 — 결정이 실리지 않는다
+    // A real bug is unchanged from before — no decision is attached
     const bug = await r.call(ref('board'), 'save', {}, SESSION)
     expect(bug.status).toBe('error')
     expect(r.errors(ref('board')).latest).toMatchObject({ tool: 'save', runId: bug.runId, denied: null })

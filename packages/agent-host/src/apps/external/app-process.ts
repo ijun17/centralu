@@ -9,14 +9,15 @@ import { rotateIfLarge } from '../../log-file.js'
 import { StreamTransport } from './stream-transport.js'
 
 /**
- * 앱 프로세스 하나 (M4 A-3) — 띄우고, MCP로 붙고, 말한 것을 적고, 끝낸다.
+ * One app process (M4 A-3) — starts it, connects over MCP, records what it says, and ends it.
  *
- *   fd 0/1  host = MCP 클라이언트, 앱 = 서버 (우리 StreamTransport, 제자리 세대 탐색)
- *   fd 2    앱의 표준에러 → 앱별 로그 파일 (비밀 값은 가린다)
- *   fd 3    중개 파이프 — host가 서버, 앱이 클라이언트 (A-4가 그 위에 중개 서버를 연다)
+ *   fd 0/1  host = MCP client, app = server (our StreamTransport, generation probing in place)
+ *   fd 2    the app's stderr → the app's own log file (secret values masked)
+ *   fd 3    the broker pipe — the host is the server, the app is the client (A-4 opens the broker
+ *           server on top of it)
  *
- * 수명의 규칙(언제 띄우고 언제 내리나, 몇 번 되살리나)은 여기 없다 — 런타임이 정한다.
- * 이 파일은 "한 번 띄운 프로세스"의 물리만 안다.
+ * Lifecycle rules (when to start, when to stop, how many times to revive it) do not live here — the
+ * runtime decides that. This file knows only the physics of "a process, started once".
  */
 
 export type SpawnSpec = {
@@ -26,15 +27,16 @@ export type SpawnSpec = {
   env: NodeJS.ProcessEnv
   logPath: string
   logMaxBytes: number
-  /** 로그에 쓰기 전에 비밀 값을 가린다 */
+  /** Masks secret values before writing to the log */
   redact: (text: string) => string
-  /** 이 앱에 대해 지난번에 알아낸 규격 세대 — 있으면 탐색을 건너뛴다 */
+  /** The spec generation discovered last time for this app — skips the probe if present */
   prior?: PriorDiscovery
   probeTimeoutMs: number
   connectTimeoutMs: number
   /**
-   * fd 3에 중개 서버를 연다 — 띄우자마자, 연결보다 먼저. 앱이 첫 도구 호출에서 바로 중개를
-   * 부를 수 있어야 하기 때문이다. 돌려받은 함수로 닫는다(종료 규칙과 함께).
+   * Opens the broker server on fd 3 — right after starting, before the connection. The app has to be
+   * able to call the broker from within its very first tool call. Closed with the function this
+   * returns (together with the shutdown rule).
    */
   serveFd3?: (fd3: Socket, note: (line: string) => void) => () => void
 }
@@ -42,8 +44,10 @@ export type SpawnSpec = {
 export type ExitInfo = { code: number | null; signal: string | null; error: string | null }
 
 /**
- * 뜨지 못했다 — 사람이 읽을 이유(`message`: 머리 + 표준에러 끝부분)와 함께, 그 둘을 **따로도** 싣는다 (C-6).
- * 오류 묶음이 "무엇이 났나"와 "앱이 무엇을 찍었나"를 나눠 보여 주려면 글을 다시 쪼개지 않아도 되어야 한다.
+ * The app failed to start — carries a reason a person can read (`message`: the headline plus the
+ * tail of stderr), and **also** keeps the two parts separately (C-6). An error bundle needs to show
+ * "what happened" and "what the app printed" separately without having to split the text apart
+ * again.
  */
 export class AppStartError extends Error {
   constructor(
@@ -58,10 +62,10 @@ export class AppStartError extends Error {
 export class AppProcess {
   readonly startedAt = Date.now()
   readonly client: Client
-  /** 연결할 때 받은 도구 목록 (거르기 전 원문) — 프로세스마다 한 번 묻는다 */
+  /** The tool list received on connection (the raw text, before filtering) — asked once per process */
   tools: Tool[] = []
   exit: ExitInfo | null = null
-  /** 우리가 내리는 중이 아닌데 끝났을 때 — 런타임이 크래시로 센다 */
+  /** Fires when the process ends while we are not the ones stopping it — the runtime counts this as a crash */
   onUnexpectedExit?: (reason: string) => void
 
   private stopping: Promise<void> | null = null
@@ -77,9 +81,10 @@ export class AppProcess {
     this.client = new Client(
       { name: CLIENT_INFO.name, version: CLIENT_INFO.version },
       /*
-       * **세대를 명시한다.** v2 클라이언트의 기본은 2025 규격이다(S-4: 기본값으로 붙으면
-       * 2026-07-28 서버와도 legacy로 이야기했다). `auto`는 `server/discover`로 묻고, 답이
-       * 없거나 모르는 메서드라고 하면 옛 `initialize`로 내려간다 — 두 세대 서버 모두 붙는다.
+       * **The generation is stated explicitly.** The v2 client's default is the 2025 spec (S-4:
+       * connecting with the default even spoke legacy to a 2026-07-28 server). `auto` asks with
+       * `server/discover`, and if there is no answer or the method is unrecognized, it falls back to
+       * the old `initialize` — this connects to servers of either generation.
        */
       { versionNegotiation: { mode: 'auto', probe: { timeoutMs: probeTimeoutMs } }, capabilities: {} },
     )
@@ -87,9 +92,10 @@ export class AppProcess {
       if (this.exit) return
       this.exit = info
       /*
-       * 'exit'는 표준에러가 다 흘러나오기 전에 올 수 있다 — 크래시 이유의 마지막 줄이 바로
-       * 그 줄이다. 'close'(모든 파이프가 닫힘)를 잠깐 기다리되, 앱이 띄운 손주가 파이프를
-       * 물려받아 붙들고 있으면 'close'는 영영 안 온다. 그래서 짧은 상한을 둔다.
+       * 'exit' can arrive before stderr has finished flowing out — and it is exactly the last line
+       * that carries the crash reason. This waits briefly for 'close' (every pipe closed), but if a
+       * grandchild the app spawned inherited the pipe and is holding it open, 'close' never comes. So
+       * a short cap is used instead.
        */
       let done = false
       const finish = () => {
@@ -106,18 +112,19 @@ export class AppProcess {
     child.once('exit', (code, signal) => settle({ code, signal, error: null }))
     child.once('error', (e) => settle({ code: null, signal: null, error: e.message }))
     child.stderr?.on('data', (chunk: Buffer) => this.log.stderr(chunk))
-    // 파이프의 오류(EPIPE 등)가 host의 미처리 예외가 되지 않게 — 끝남은 'exit'가 말한다
+    // So a pipe error (EPIPE and similar) never becomes an unhandled exception in the host — 'exit' is what reports the ending
     child.stdin?.on('error', () => {})
     fd3?.on('error', () => {})
   }
 
   /**
-   * 띄우고 붙고 도구 목록까지 읽어야 "떴다"다.
+   * "Started" means starting the process, connecting, and reading the tool list — all three.
    *
-   * 도구 목록을 여기서 읽는 이유(S-6): 시작에 실패한 서버도 **프로세스는 살아 있었고**
-   * 모든 요청에 `-32603`만 돌려줬다. 연결만 보고 "떴다"고 하면 그 앱은 이유도 없이
-   * 모든 호출이 실패하는 앱이 된다. 목록까지 받아야 시작으로 친다 — 못 받으면 그것이
-   * 실패의 이유가 되어 사람과 만드는 에이전트에게 간다.
+   * Why the tool list is read here (S-6): a server that had failed to start still had **a live
+   * process**, and returned nothing but `-32603` for every request. If success were judged by the
+   * connection alone, that app would look started while every call fails for no visible reason. It
+   * only counts as started once the tool list comes back — if it does not, that failure itself
+   * becomes the reason shown to a person and the building agent.
    */
   static async start(spec: SpawnSpec): Promise<AppProcess> {
     const log = new AppLog(spec.logPath, spec.logMaxBytes, spec.redact)
@@ -127,8 +134,8 @@ export class AppProcess {
       env: spec.env,
       stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
       /*
-       * 자기 프로세스 그룹을 준다. kill-tree는 host 자신의 그룹을 절대 쏘지 않으므로,
-       * 그룹을 나누지 않으면 앱과 그 자손을 그룹 단위로 끝낼 수 없다.
+       * Gives it its own process group. kill-tree never signals the host's own group, so without a
+       * separate group there would be no way to end the app and its descendants group-wide.
        */
       detached: true,
     })
@@ -140,9 +147,10 @@ export class AppProcess {
       return proc
     } catch (e) {
       /*
-       * 연결이 끊긴 이유는 대개 프로세스의 죽음이고, 그 사실을 먼저 말해야 한다. 실측: 시작하자마자
-       * `exit(3)`하는 앱에서 SDK의 "connection closed during the server/discover probe"가
-       * 종료 소식보다 먼저 도착했다 — 그 문구만 보면 세대 탐색이 문제인 것처럼 읽힌다.
+       * The reason the connection broke is usually the process dying, and that fact needs to be
+       * stated first. Measured: for an app that immediately does `exit(3)`, the SDK's "connection
+       * closed during the server/discover probe" arrived before news of the exit — reading that
+       * message alone makes it look like the generation probe itself is the problem.
        */
       await proc.waitExit(250)
       const head = proc.exit ? `exited before it was ready (${describeExit(proc.exit)})` : (e as Error).message
@@ -153,7 +161,7 @@ export class AppProcess {
     }
   }
 
-  /** 다음 기동이 탐색 없이 붙을 수 있게 — 알아낸 세대 (S-4의 `connect({ prior })`) */
+  /** So the next startup can connect without probing — the generation discovered (S-4's `connect({ prior })`) */
   verdict(): PriorDiscovery | undefined {
     const era = this.client.getProtocolEra()
     if (era === 'modern') {
@@ -168,17 +176,20 @@ export class AppProcess {
   }
 
   /**
-   * 종료 규칙 (S-5).
+   * The shutdown rule (S-5).
    *
-   * **표준 입력과 fd 3을 함께 닫는다.** 표준 입력만 닫으면 앱이 끝나지 않았다 — Node 앱은
-   * fd 3 소켓이, 공식 Python SDK 앱은 읽기 스레드가 붙잡았다(S-5 실측). 둘 다 닫히면 잘 만든
-   * 앱은 스스로 끝난다(Node 11ms, Python 2~7ms). 유예 안에 안 끝나면 **자손까지** 끝낸다
-   * (kill-tree — 터미널·명령 실행기와 같은 방법).
+   * **Stdin and fd 3 are closed together.** Closing only stdin was not enough to end the app — a
+   * Node app was held open by the fd 3 socket, and the official Python SDK's app was held open by its
+   * read thread (measured in S-5). Once both are closed, a well-built app ends on its own (Node
+   * 11ms, Python 2–7ms). If it does not end within the grace period, **its descendants** are ended
+   * too (kill-tree — the same method used for the terminal and the command runner).
    *
-   * 스스로 끝났어도 그 그룹에 남은 자손이 있을 수 있다(앱이 띄운 도우미). 앱의 그룹은 우리가
-   * 만들어 준 것이라(detached) 그룹째 거둔다 — 다른 종료 길과 같은 두 발(SIGTERM, 유예 뒤 남은 것에
-   * SIGKILL, kill-tree의 `stopGroup`). 예전에는 SIGTERM 한 발뿐이라, 그것을 무시하는 도우미가 launchd
-   * 아래 고아로 남았다. 그룹에 누가 남아 있는 동안 그 번호는 재사용되지 않으므로 남의 그룹에 닿지 않는다.
+   * Even when it ends on its own, descendants can remain in its group (a helper the app started). The
+   * app's group is one we created ourselves (detached), so it is collected group-wide — the same two
+   * blows as other shutdown paths (SIGTERM, then SIGKILL for anything left after the grace period,
+   * via kill-tree's `stopGroup`). Previously there was only one blow, SIGTERM, and a helper that
+   * ignored it was left orphaned under launchd. While anyone remains in a group, its pgid is not
+   * reused, so this never reaches into someone else's group.
    */
   stop(graceMs: number, opts: { awaitKill?: boolean } = {}): Promise<void> {
     if (this.stopping) return this.stopping
@@ -200,7 +211,7 @@ export class AppProcess {
     return this.stopping
   }
 
-  /** 실패 문구 + 앱이 표준에러에 남긴 마지막 줄들 — 사람과 만드는 에이전트가 읽는다 */
+  /** The failure text plus the last lines the app left on stderr — read by a person and the building agent */
   reason(head: string): string {
     const tail = this.log.tail()
     return tail ? `${head}\n--- stderr (last lines) ---\n${tail}` : head
@@ -245,16 +256,18 @@ function describeExit(e: ExitInfo): string {
   return `code ${e.code}`
 }
 
-/** 크래시 이유에 붙일 표준에러 끝부분 — 줄 수와 줄 길이 모두 상한을 둔다 */
+/** The tail of stderr to attach to a crash reason — both the number of lines and each line's length are capped */
 const TAIL_LINES = 20
 const TAIL_LINE_CHARS = 500
 
 /**
- * 앱별 로그 파일. host.log(`log-file.ts`)와 같은 규칙: 넘치면 `.1`로 한 세대 밀어내고,
- * 동기로 쓰고, 실패는 삼킨다 — 로그를 못 남기는 것이 앱을 멈출 이유는 못 된다.
+ * An app's own log file. The same rules as host.log (`log-file.ts`): overflow rolls it to `.1`,
+ * writes are synchronous, and failures are swallowed — failing to write a log is never a reason to
+ * stop the app.
  *
- * 앱의 표준에러는 **줄 단위로 가린 뒤에** 쓴다. 앱이 자기 비밀을 찍어도 파일에는 이름만 남는다
- * (비밀은 로그 어디에도 싣지 않는다 — 플랜 "데이터와 비밀").
+ * An app's stderr is written **only after masking it line by line.** Even if an app prints its own
+ * secret, only the name survives in the file (a secret is never written anywhere in a log — from the
+ * plan "data and secrets").
  */
 class AppLog {
   private fd: number | null = null
@@ -284,7 +297,7 @@ class AppLog {
   stderr(chunk: Buffer): void {
     const lines = (this.partial + chunk.toString('utf8')).split('\n')
     this.partial = lines.pop() ?? ''
-    // 끝나지 않는 한 줄이 메모리를 먹지 않게 — 길면 끊어서라도 적는다
+    // So a line that never ends does not consume memory — if it gets long, it is written even if that means cutting it off
     if (this.partial.length > 8192) {
       lines.push(this.partial)
       this.partial = ''
@@ -301,7 +314,7 @@ class AppLog {
     return this.recent.join('\n')
   }
 
-  /** 표준에러의 마지막 줄들(가린 뒤) — 사본이다. 오류 묶음(C-6)이 그 순간의 것을 들고 간다 */
+  /** The last lines of stderr (after masking) — a copy. An error bundle (C-6) carries away the ones from that moment */
   tailLines(): string[] {
     return [...this.recent]
   }
@@ -311,7 +324,7 @@ class AppLog {
     try {
       if (this.fd !== null) closeSync(this.fd)
     } catch {
-      /* 이미 닫혔다 */
+      /* already closed */
     }
     this.fd = null
   }
@@ -330,27 +343,27 @@ class AppLog {
       this.written += Buffer.byteLength(text)
       if (this.written >= this.maxBytes) this.roll()
     } catch {
-      /* 파일에 못 적어도 앱은 계속 돈다 */
+      /* even if the write fails, the app keeps running */
     }
   }
 
-  /** log-file.ts의 roll과 같은 이유로, 닫은 fd 번호를 붙들지 않는다 */
+  /** For the same reason as roll in log-file.ts, never hold onto a closed fd number */
   private roll(): void {
     try {
       if (this.fd !== null) closeSync(this.fd)
     } catch {
-      /* 이미 닫혔다 */
+      /* already closed */
     }
     this.fd = null
     try {
       renameSync(this.path, `${this.path}.1`)
     } catch {
-      /* 못 밀어내면 같은 파일에 이어 쓴다 */
+      /* if it cannot be rolled, keep writing to the same file */
     }
     try {
       this.fd = openSync(this.path, 'a')
     } catch {
-      /* 못 열면 파일 쪽만 조용해진다 */
+      /* if it cannot be opened, only the file side goes quiet */
     }
     this.written = 0
   }
