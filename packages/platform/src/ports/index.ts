@@ -98,7 +98,6 @@ export interface AgentPort {
   setGridView(sessionIds: string[]): Promise<string[]>
   /** The models available to pick and each model's reasoning strength (what the tool reports through its official API) */
   models(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
-  /** Hides it from the list, or brings it back (unlike delete, the record stays) */
   /** Restarts only the agent attached to the session (the conversation stays as is) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**

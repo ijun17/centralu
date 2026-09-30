@@ -31,7 +31,7 @@ describe('inbox order (FR-15)', () => {
     expect(inbox.map((i) => i.id)).toEqual(['old', 'new'])
   })
 
-  it('working, idle and archived sessions are not in the inbox', () => {
+  it('working and idle sessions are not in the inbox', () => {
     const inbox = buildInbox(
       [s('w', 'working'), s('i', 'idle'), s('ok', 'waiting_input')],
       NOW,
@@ -63,9 +63,6 @@ describe('global counters (FR-12: never summed)', () => {
     ])
     expect(c).toEqual({ approval: 2, error: 1, input: 3 })
   })
-
-  it('does not count archived sessions', () => {
-  })
 })
 
 describe('go to the next waiting item (FR-17)', () => {
@@ -86,8 +83,5 @@ describe('go to the next waiting item (FR-17)', () => {
 
   it('null for an empty inbox', () => {
     expect(nextWaitingSession([], 'a')).toBeNull()
-  })
-
-  it('moving on automatically after handling one goes to the most urgent of the rest', () => {
   })
 })

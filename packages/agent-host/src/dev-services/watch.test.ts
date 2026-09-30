@@ -148,7 +148,8 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
 
   it('hitting the cap returns the number actually kept — it never silently truncates', () => {
     const root = tmp()
-    // 300 nonexistent subpaths: even if watch fails, the cap is judged first
+    // 300 real subdirectories, more than the cap: only a directory that exists is watched, so all 300 are
+    // created, and the count that comes back is the cap — the caller can tell the list was cut
     for (let i = 0; i < 300; i++) mkdirSync(join(root, `d${i}`))
     const w = makeWatcher(() => {})
     const rels = Array.from({ length: 300 }, (_, i) => `d${i}`)

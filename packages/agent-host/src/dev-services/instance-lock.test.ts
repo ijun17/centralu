@@ -104,8 +104,9 @@ describe('single-instance lock for the host', () => {
 
 /*
  * The desktop supervisor reads only the host's stdout. When the lock-conflict message went only
- * to stderr, the screen showed "agent-host가 종료되었습니다 (code Some(1))" instead of the reason
- * (#184). This launches a real host and checks which channel the message comes out on.
+ * to stderr, the screen showed the supervisor's bare "agent-host exited (code Some(1))" (sidecar.rs;
+ * Korean at the time) instead of the reason (#184). This launches a real host and checks which channel
+ * the message comes out on.
  */
 describe('the lock-conflict message reaches the supervisor', () => {
   it('a blocked host also writes the reason to stdout, and exits with 1', () => {

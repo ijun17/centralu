@@ -1871,18 +1871,8 @@ function ProjectDetail({ project }: { project: ProjectInfo }) {
 }
 
 /**
- * Which tool's session this is.
- *
- * **No official logo is used.** Both companies' marks are trademarks with their own brand
- * guidelines — bundling a logo file into the app and distributing it could run into those rules.
- * With our own glyph, that problem does not exist at all, and it fits this app's own rule of
- * distinguishing things by shape in grayscale.
- *
- * Without this, there would be no way to tell apart two sessions with similar titles (this was
- * actually mixed up during dogfooding).
- */
-/**
- * The session mark — tool and state, in one spot.
+ * The session mark — tool and state, in one spot. Without the tool, there would be no way to tell
+ * apart two sessions with similar titles (this was actually mixed up during dogfooding).
  *
  * **No official logo is used.** Both companies' marks are trademarks with their own brand
  * guidelines — bundling a logo file into the app and distributing it could run into those rules.

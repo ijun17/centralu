@@ -334,48 +334,6 @@ export function Settings() {
 }
 
 /**
- * Updates (issue #43).
- *
- * This screen says three sentences: this is what is currently running, that is what is out
- * there, and whether to upgrade is for the person to decide. **It never upgrades
- * automatically** — swapping out the running app is not reversible, and this app does not do
- * irreversible things quietly.
- *
- * The check is done by the host. The launcher has the same code too, but what actually runs is
- * a copy already installed on the person's machine, and that copy's comparison logic was wrong
- * (#42) — checking here runs the code shipped with the app itself, bypassing the stale launcher
- * entirely.
- */
-/**
- * App-wide text size — five steps, with the middle one as the default.
- *
- * The preview is the label: each button's "가Aa" is actually rendered at that step's own scale,
- * so the result is known before it is clicked. That is why a number (85%…) is not written
- * separately — a ratio can be read, but size has to be seen to be understood.
- */
-/**
- * Which tool the orchestrator runs on.
- *
- * **This is the only place in the app where an agent can be switched.** The same control used
- * to live in the session settings menu, and was removed from there: because the conversation
- * does not carry over, "switching" there meant the same thing as "starting a new conversation,"
- * which creating a new session already does more honestly. The orchestrator is the one that
- * remains, because the app has only one, so "create a new one with a different tool" does not
- * make sense.
- *
- * This handles both cases in one place: if it has not been born yet, only the choice is
- * recorded (the next first question is born with that tool), and if it is already alive, it is
- * swapped out on the spot. There is one reason a confirmation is asked for — once the process
- * changes, that tool's context is gone. (The transcript stays, and the new process is handed a
- * summary of the past conversation.)
- */
-/**
- * Approved orchestrator skills (#71). Why this exists here: "a skill that can only be added,
- * with no way to view or delete it, is worse than not having it at all" — approval happens in
- * the card next to the conversation, management happens in Settings. Deleting one restarts the
- * orchestrator through the host, so it drops out of the prompt immediately too.
- */
-/**
  * The app list (#81) — one toggle row per app in the registry, plus a settings panel the app
  * brought with it. Turning one off is not deletion: its state stays, only the view and tools
  * step back — the etiquette of an experimental feature.
@@ -586,6 +544,12 @@ function SecretsLine({ app }: { app: ExternalCatalogApp }) {
   )
 }
 
+/**
+ * Approved orchestrator skills (#71). Why this exists here: "a skill that can only be added,
+ * with no way to view or delete it, is worse than not having it at all" — approval happens in
+ * the card next to the conversation, management happens in Settings. Deleting one restarts the
+ * orchestrator through the host, so it drops out of the prompt immediately too.
+ */
 function OrchestratorSkills() {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
@@ -631,6 +595,22 @@ function OrchestratorSkills() {
   )
 }
 
+/**
+ * Which tool the orchestrator runs on.
+ *
+ * **This is the only place in the app where an agent can be switched.** The same control used
+ * to live in the session settings menu, and was removed from there: because the conversation
+ * does not carry over, "switching" there meant the same thing as "starting a new conversation,"
+ * which creating a new session already does more honestly. The orchestrator is the one that
+ * remains, because the app has only one, so "create a new one with a different tool" does not
+ * make sense.
+ *
+ * This handles both cases in one place: if it has not been born yet, only the choice is
+ * recorded (the next first question is born with that tool), and if it is already alive, it is
+ * swapped out on the spot. There is one reason a confirmation is asked for — once the process
+ * changes, that tool's context is gone. (The transcript stays, and the new process is handed a
+ * summary of the past conversation.)
+ */
 function OrchestratorSettings() {
   const platform = usePlatform()
   const orchestratorId = useStore((s) => s.orchestratorId)
@@ -755,6 +735,13 @@ function OrchestratorSettings() {
   )
 }
 
+/**
+ * Appearance, opening with the app-wide text size — five steps, with the middle one as the default.
+ *
+ * The preview is the label: each button's "가Aa" is actually rendered at that step's own scale,
+ * so the result is known before it is clicked. That is why a number (85%…) is not written
+ * separately — a ratio can be read, but size has to be seen to be understood.
+ */
 function AppearanceSection() {
   const scale = useStore((s) => s.textScale)
   const setScale = useStore((s) => s.setTextScale)
@@ -887,6 +874,19 @@ function AppearanceSection() {
   )
 }
 
+/**
+ * Updates (issue #43).
+ *
+ * This screen says three sentences: this is what is currently running, that is what is out
+ * there, and whether to upgrade is for the person to decide. **It never upgrades
+ * automatically** — swapping out the running app is not reversible, and this app does not do
+ * irreversible things quietly.
+ *
+ * The check is done by the host. The launcher has the same code too, but what actually runs is
+ * a copy already installed on the person's machine, and that copy's comparison logic was wrong
+ * (#42) — checking here runs the code shipped with the app itself, bypassing the stale launcher
+ * entirely.
+ */
 function UpdatesSection() {
   const update = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)

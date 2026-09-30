@@ -118,7 +118,7 @@ export function removePanel(ids: readonly string[], id: string): string[] {
 /**
  * Clears sessions that are gone out of the arrangement.
  *
- * Deleting or archiving a session leaves its id in the arrangement. Left there, it would have the grid trying
+ * Deleting a session leaves its id in the arrangement. Left there, it would have the grid trying
  * to draw something that does not exist, so the ids are **filtered once before they are seated on the
  * screen.** The stored value is not corrected — here there is no telling something briefly out of sight (the
  * list has not been read yet) from something that is gone.

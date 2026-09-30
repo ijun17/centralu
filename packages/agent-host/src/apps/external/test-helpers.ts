@@ -11,7 +11,10 @@ import type { BrokerHost } from './desk.js'
 
 export const PROJECT_APPS = ['.centralu', 'apps'] as const
 
-/** Writes `<root>/<...parent>/<id>/centralu.app.json`. If `over` is null, writes the raw string verbatim. */
+/**
+ * Writes `<parentDir>/<id>/centralu.app.json`: a valid manifest with `over` merged over it, or, when `raw` is given,
+ * `raw` verbatim (for a broken manifest).
+ */
 export function plantApp(
   parentDir: string,
   id: string,

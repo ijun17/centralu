@@ -81,7 +81,7 @@ export function layoutCommits(commits: GitCommit[]): GraphRow[] {
   return rows
 }
 
-/** The rightmost lane number. What the width of the graph column is based on */
+/** How many lanes the graph uses: the rightmost lane number plus one. What the width of the graph column is based on */
 export function laneCount(rows: GraphRow[]): number {
   let max = 0
   for (const r of rows) {

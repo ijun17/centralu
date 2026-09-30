@@ -103,7 +103,7 @@ export function allDoneNotification(
    * **Decided by identity, not by count.**
    *
    * A count comparison like busy(prev)>0 && busy(now)===0 also holds **the moment the last working session
-   * is archived or deleted** — the work did not finish, it was put away, and yet "All done" goes off. It is
+   * is deleted** — the work did not finish, it was put away, and yet "All done" goes off. It is
    * finished only when the very sessions that were busy **are still in the list, have not been put away,
    * and have actually let go of the work**.
    */

@@ -80,15 +80,9 @@ describe('the "all done" notification (the signal someone who has left the desk 
   })
 
   /*
-   * The trap in comparing counts: **putting away** the last working session brings busy to 0, but the work
+   * The trap in comparing counts: **deleting** the last working session brings busy to 0, but the work
    * has not finished — only comparing identities can tell "the session that was busy has actually let go".
    */
-  it('removing the last working session does not set off "All done"', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_input')]
-    const now = [w('b', 'waiting_input')]
-    expect(allDoneNotification(now, prev, bg)).toBeNull()
-  })
-
   it('nothing goes off when the last working session is deleted', () => {
     const prev = [w('a', 'working'), w('b', 'waiting_input')]
     const now = [w('b', 'waiting_input')]

@@ -250,7 +250,7 @@ describe('limits, context and errors', () => {
   })
 })
 
-describe('read and archive', () => {
+describe('read position', () => {
   it('the read position never moves backwards', () => {
     expect(markRead(markRead(s0(), 5), 2).lastReadSeq).toBe(5)
   })

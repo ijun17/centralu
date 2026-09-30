@@ -187,8 +187,9 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
    * waiting_input), a return to idle through resume, and working resuming all finish that request off too.
    * Leave the card up and a click tries to answer a dead request and throws — the state (visibility) and the
    * payload (whether it can be acted on) must not drift apart. If the request is still valid after recovery,
-   * the host sends it again (the forced surfacing above). A new request is set up again by the switch below,
-   * on top of this clearing.
+   * the host sends it again, and `transition` (state-machine.ts) lets an approval or question request through
+   * from any state, so the card comes back. A new request is set up again by the switch below, on top of this
+   * clearing.
    */
   const cardsDead =
     !illegal &&
