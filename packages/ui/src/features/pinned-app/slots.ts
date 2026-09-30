@@ -18,6 +18,8 @@ const slots = new Map<string, HTMLElement>()
 const views = new Map<string, HTMLElement>()
 /** The panel being dragged on the project screen, if any — see `placeSlots` */
 let dragging: string | null = null
+/** A drag from outside the screen that the screen takes (one of its project's sidebar rows) — see `place` */
+let inbound = false
 
 /**
  * Lays one view over its slot. The two sit in different parents, so the slot is measured on
@@ -42,7 +44,17 @@ function place(key: string): void {
    * this one is not inside the panel it covers, so the panel under the hand would never hear
    * where the drag is and the preview order would freeze over every app panel.
    */
-  view.style.pointerEvents = dragging ? 'none' : ''
+  view.style.pointerEvents = dragging || inbound ? 'none' : ''
+  /*
+   * A row dragged in from the sidebar needs more: the views are hidden until it is dropped. In
+   * WebKit a drag goes into a frame whatever the frame's pointer-events say — measured in
+   * Playwright's WebKit, a row dragged over an app's view went quiet on the page the moment it
+   * crossed the frame's edge, and its drop never arrived; with the view hidden the page heard
+   * every dragover and the drop. A panel drag gets by, because its preview moves a panel under the
+   * hand; a row gets no preview (GridView), so without this it could not land beside an app. Hidden
+   * is not unloaded: the documents stay, and show again when the drag ends.
+   */
+  view.style.visibility = inbound ? 'hidden' : ''
   // The dragged panel is dimmed (ProjectView); its view is not inside it, so it is dimmed here
   view.style.opacity = dragging === key ? '0.4' : ''
 }
@@ -65,12 +77,16 @@ export function registerSlottedView(key: string, el: HTMLElement): () => void {
   place(key)
   return () => {
     if (views.get(key) === el) views.delete(key)
-    for (const p of ['left', 'top', 'width', 'height', 'pointerEvents', 'opacity'] as const) el.style[p] = ''
+    for (const p of ['left', 'top', 'width', 'height', 'pointerEvents', 'visibility', 'opacity'] as const) el.style[p] = ''
   }
 }
 
-/** Places every slotted view again — the project screen calls this after each render */
-export function placeSlots(draggingKey: string | null): void {
+/**
+ * Places every slotted view again — the project screen calls this after each render. `rowDragged`
+ * is a drag from outside the screen that the screen takes (one of its project's sidebar rows).
+ */
+export function placeSlots(draggingKey: string | null, rowDragged = false): void {
   dragging = draggingKey
+  inbound = rowDragged
   for (const key of views.keys()) place(key)
 }

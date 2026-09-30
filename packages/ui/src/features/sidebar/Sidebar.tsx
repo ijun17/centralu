@@ -18,7 +18,7 @@ import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
-import { PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo } from './reorder.js'
+import { APP_MIME, PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo, projectItemMime } from './reorder.js'
 import { foldSummary, type FoldSummaryState } from './fold.js'
 
 /**
@@ -66,12 +66,15 @@ function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) 
  */
 function SessionRow({
   id,
+  projectId,
   onReorder,
   draggable,
   nested,
   children,
 }: {
   id: string
+  /** Carried in the drag, so the project screen can tell its own sessions from another project's (reorder.ts) */
+  projectId: string
   onReorder: (draggedId: string, before: boolean) => void
   /**
    * Not draggable while the name is being edited. An input inside a draggable ancestor gets a
@@ -95,6 +98,7 @@ function SessionRow({
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
+        e.dataTransfer.setData(projectItemMime(projectId), projectId)
         e.dataTransfer.effectAllowed = 'move'
       }}
       {...drop.handlers}
@@ -676,6 +680,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
               <SessionRow
                 key={s.id}
                 id={s.id}
+                projectId={projectId}
                 nested={nested}
                 /*
                  * A child row cannot be dragged — position is membership (#69). Letting a row
@@ -936,8 +941,23 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
    */
   const asking = useStore((s) => s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId))
   const hint = asking ? 'asks you' : APP_HINT[app.info.status]
+  const projectId = app.projectId
   return (
-    <li className="relative">
+    <li
+      className="relative"
+      /*
+        A project's app can be dragged onto its project screen, like a session row (#203): hidden
+        there, it comes back where it is dropped. A user-folder app belongs to no project and no
+        screen takes an app otherwise — the grid shows sessions — so it is not draggable at all.
+      */
+      draggable={!!projectId}
+      onDragStart={(e) => {
+        if (!projectId) return
+        e.dataTransfer.setData(APP_MIME, app.key)
+        e.dataTransfer.setData(projectItemMime(projectId), projectId)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+    >
       <button
         type="button"
         onClick={() => openApp(app.projectId, app.appId)}

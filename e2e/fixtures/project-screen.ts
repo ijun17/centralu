@@ -1,11 +1,13 @@
-import { expect, test, type FrameLocator, type Page } from '@playwright/test'
+import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
 
 /**
- * Helpers for the project screen's scenarios (#203), and the app panels' scenario that runs in two engines.
+ * Helpers for the project screen's scenarios (#203), and the scenarios that run in two engines.
  *
- * Drags are dispatched by hand (a real OS drag cannot be automated), one step per `evaluate`: React commits the
- * `dragstart` state in a microtask, and a `dragover` sent in the same task would still see no drag.
+ * A panel drag is dispatched by hand, one step per `evaluate`: React commits the `dragstart` state in a microtask,
+ * and a `dragover` sent in the same task would still see no drag. A sidebar row is dragged with the mouse instead
+ * (`dragRow`): whether the screen refuses it is the browser's answer to the dragover — a drop cursor or none, a drop
+ * or none — and only a drag the browser runs itself asks that question.
  */
 
 export async function setup(page: Page, projects: string[]) {
@@ -83,6 +85,241 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
       .dispatchEvent(new DragEvent('dragend', { dataTransfer: (window as any).__dt, bubbles: true }))
   }, from)
   await expect(page.getByTestId(`project-panel-${from}`)).not.toHaveClass(/opacity-40/)
+}
+
+/** Where a sidebar row is dropped: one half of a panel, or the screen's own padding (the empty screen's middle) */
+export type RowTarget = { panel: string; side: 'before' | 'after' } | 'padding'
+
+/** Drags a sidebar row (or the orchestrator's) onto the project screen with the mouse, and lets go */
+export async function dragRow(page: Page, row: Locator, to: RowTarget) {
+  const from = (await row.boundingBox())!
+  let x: number
+  let y: number
+  if (to === 'padding') {
+    const grid = (await page.getByTestId('project-grid').boundingBox())!
+    const empty = await page.getByTestId('project-empty').count()
+    // The empty screen's middle, or the strip of padding under the panels
+    x = grid.x + grid.width / 2
+    y = empty ? grid.y + grid.height / 2 : grid.y + grid.height - 3
+  } else {
+    const card = (await page.getByTestId(`project-panel-${to.panel}`).boundingBox())!
+    x = card.x + card.width * (to.side === 'before' ? 0.2 : 0.8)
+    y = card.y + card.height * 0.4
+  }
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(x + 20, y, { steps: 8 })
+  await page.mouse.move(x, y, { steps: 4 })
+  await page.mouse.up()
+}
+
+/**
+ * Records what the last dragover over the project screen answered (`dropEffect`: 'none' is no drop cursor) and how
+ * many drops reached the screen.
+ *
+ * Listened for on React's root, after React's own listener there: the page's handlers have all run by then, and one
+ * that stopped the event (a panel taking a drop) stops it from reaching the window, not the root's other listeners.
+ */
+export async function watchDrags(page: Page) {
+  await page.evaluate(() => {
+    const w = window as any
+    w.__drags = { effect: null, drops: 0 }
+    const onScreen = (e: Event) => !!(e.target as Element | null)?.closest?.('[data-testid="project-view"]')
+    if (w.__dragWatch) return
+    w.__dragWatch = true
+    const root = document.getElementById('root')!
+    root.addEventListener('dragover', (e) => {
+      if (onScreen(e)) w.__drags.effect = e.dataTransfer?.dropEffect ?? null
+    })
+    root.addEventListener('drop', (e) => {
+      if (onScreen(e)) w.__drags.drops++
+    })
+  })
+}
+
+export const seenDrags = (page: Page) =>
+  page.evaluate(() => (window as any).__drags as { effect: string | null; drops: number })
+
+/** What the project screen remembers for a project (the store's `projectPanels`) */
+export const arrangement = (page: Page, projectId: string) =>
+  page.evaluate(
+    (p) => (window as any).__store.getState().projectPanels[p] as { order: string[]; hidden: string[] } | undefined,
+    projectId,
+  )
+
+const projectIdOf = (page: Page, name: string) =>
+  page.evaluate(
+    (n) =>
+      (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find(
+        (p) => p.name === n,
+      )!.id,
+    name,
+  )
+
+const gridPanels = (page: Page) => page.evaluate(() => (window as any).__store.getState().gridPanels as string[])
+
+/**
+ * Sidebar rows dropped on the project screen, the way sessions are dropped on the grid — only this project's.
+ *
+ * A function, like `appPanelTests`, because it runs in Chromium and in WebKit: the desktop app is WKWebView, and
+ * what a refused dragover means (no drop cursor, no drop) is the engine's to decide.
+ */
+export function sidebarDropTests(): void {
+  test.describe('sidebar rows dropped on the project screen', () => {
+    test('with every panel hidden the screen asks for the project’s rows, and a hidden session dropped on it comes back', async ({
+      page,
+    }) => {
+      await setup(page, ['/tmp/alpha'])
+      const a = await newSession(page, 'alpha')
+      const b = await newSession(page, 'alpha')
+      await page.getByTestId('project-header-alpha').click()
+      await page.getByTestId(`project-hide-session:${a}`).click()
+      await page.getByTestId(`project-hide-session:${b}`).click()
+
+      const empty = page.getByTestId('project-empty')
+      await expect(empty).toContainText("Drag this project's sessions and apps here from the sidebar")
+      await expect(empty).toContainText('They keep running — this is another way to look at them')
+      await expect(empty).not.toContainText('evidence panel')
+      await expect(empty).not.toContainText('Every panel is hidden')
+
+      await dragRow(page, page.getByTestId(`session-row-${b}`), 'padding')
+      await expect.poll(() => panels(page)).toEqual([`session:${b}`])
+      // The other stays hidden, still named above; the grid is not touched
+      await expect(page.getByTestId(`project-show-session:${a}`)).toBeVisible()
+      expect(await gridPanels(page)).toEqual([])
+    })
+
+    test('a row dropped on a panel stands before or after it, and one already on the screen moves there', async ({
+      page,
+    }) => {
+      await setup(page, ['/tmp/alpha'])
+      const a = await newSession(page, 'alpha')
+      const b = await newSession(page, 'alpha')
+      const c = await newSession(page, 'alpha')
+      const pid = await projectIdOf(page, 'alpha')
+      await page.getByTestId('project-header-alpha').click()
+      await page.getByTestId(`project-hide-session:${c}`).click()
+      expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
+
+      await dragRow(page, page.getByTestId(`session-row-${c}`), { panel: `session:${a}`, side: 'before' })
+      await expect.poll(() => panels(page)).toEqual([`session:${c}`, `session:${a}`, `session:${b}`])
+
+      await dragRow(page, page.getByTestId(`session-row-${c}`), { panel: `session:${b}`, side: 'after' })
+      await expect.poll(() => panels(page)).toEqual([`session:${a}`, `session:${b}`, `session:${c}`])
+
+      // Remembered through the screen's own arrangement; the grid keeps its own list
+      expect(await arrangement(page, pid)).toEqual({
+        order: [`session:${a}`, `session:${b}`, `session:${c}`],
+        hidden: [],
+      })
+      expect(await gridPanels(page)).toEqual([])
+    })
+
+    test('a row that passed over a panel and was let go elsewhere leaves nothing for the next panel drag to preview', async ({
+      page,
+    }) => {
+      await setup(page, ['/tmp/alpha'])
+      const a = await newSession(page, 'alpha')
+      const b = await newSession(page, 'alpha')
+      await page.getByTestId('project-header-alpha').click()
+      expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
+
+      // By hand, so the row can end without a drop anywhere (Escape, or let go outside the window)
+      const rowEvent = (type: 'dragstart' | 'dragend') =>
+        page.evaluate(
+          ({ id, type }) => {
+            const w = window as any
+            if (type === 'dragstart') w.__dt = new DataTransfer()
+            document
+              .querySelector(`[data-testid="session-row-${id}"]`)!
+              .closest('li')!
+              .dispatchEvent(new DragEvent(type, { dataTransfer: w.__dt, bubbles: true }))
+          },
+          { id: b, type },
+        )
+      await rowEvent('dragstart')
+      await page.evaluate((to) => {
+        const card = document.querySelector(`[data-testid="project-panel-${to}"]`)!
+        const r = card.getBoundingClientRect()
+        card.dispatchEvent(
+          new DragEvent('dragover', {
+            dataTransfer: (window as any).__dt,
+            bubbles: true,
+            cancelable: true,
+            clientX: r.left + r.width * 0.2,
+            clientY: r.top + 10,
+          }),
+        )
+      }, `session:${a}`)
+      await expect(page.getByTestId(`project-panel-session:${a}`)).toHaveAttribute('data-drop', 'before')
+      await rowEvent('dragend')
+      await expect(page.getByTestId(`project-panel-session:${a}`)).not.toHaveAttribute('data-drop')
+
+      // A panel picked up next stands where it is until the hand moves it
+      await page.evaluate((id) => {
+        document
+          .querySelector(`[data-testid="project-panel-${id}"] [data-testid="pane-header"]`)!
+          .dispatchEvent(new DragEvent('dragstart', { dataTransfer: new DataTransfer(), bubbles: true }))
+      }, `session:${b}`)
+      await expect(page.getByTestId(`project-panel-session:${b}`)).toHaveClass(/opacity-40/)
+      expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
+    })
+
+    test('another project’s session and the orchestrator are refused while dragged, and a drop that comes anyway changes nothing', async ({
+      page,
+    }) => {
+      await setup(page, ['/tmp/alpha', '/tmp/beta'])
+      const a = await newSession(page, 'alpha')
+      const hidden = await newSession(page, 'alpha')
+      const other = await newSession(page, 'beta')
+      await page.evaluate(async () => {
+        const st = (window as any).__store.getState()
+        await st.openOrchestrator()
+        await st.askOrchestrator('hello')
+      })
+      await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('draggable', 'true')
+      const pid = await projectIdOf(page, 'alpha')
+      await page.getByTestId('project-header-alpha').click()
+      await page.getByTestId(`project-hide-session:${hidden}`).click()
+      const before = await arrangement(page, pid)
+      expect(await panels(page)).toEqual([`session:${a}`])
+      await watchDrags(page)
+
+      await dragRow(page, page.getByTestId(`session-row-${other}`), { panel: `session:${a}`, side: 'before' })
+      expect(await seenDrags(page)).toEqual({ effect: 'none', drops: 0 })
+      await dragRow(page, page.getByTestId('orchestrator-button'), 'padding')
+      expect(await seenDrags(page)).toEqual({ effect: 'none', drops: 0 })
+      expect(await panels(page)).toEqual([`session:${a}`])
+
+      // A drop the dragover did not let in — one fired by a script — is ignored all the same
+      await page.evaluate(
+        ({ id, on }) => {
+          const dt = new DataTransfer()
+          dt.setData('application/x-cc-session', id)
+          const card = document.querySelector(`[data-testid="project-panel-session:${on}"]`)!
+          const r = card.getBoundingClientRect()
+          card.dispatchEvent(
+            new DragEvent('drop', {
+              dataTransfer: dt,
+              bubbles: true,
+              cancelable: true,
+              clientX: r.left + r.width * 0.2,
+              clientY: r.top + 10,
+            }),
+          )
+        },
+        { id: other, on: a },
+      )
+      expect(await panels(page)).toEqual([`session:${a}`])
+      expect(await arrangement(page, pid)).toEqual(before)
+
+      // This project's own row gets the drop cursor and is dropped, with the same hand
+      await watchDrags(page)
+      await dragRow(page, page.getByTestId(`session-row-${hidden}`), { panel: `session:${a}`, side: 'after' })
+      await expect.poll(() => panels(page)).toEqual([`session:${a}`, `session:${hidden}`])
+      expect(await seenDrags(page)).toEqual({ effect: 'move', drops: 1 })
+    })
+  })
 }
 
 /*
@@ -269,6 +506,83 @@ export function appPanelTests(): void {
       await expect.poll(() => teardowns(page)).toBe(1)
       await expect.poll(() => closed(page)).toEqual([instanceId])
       expect(await panels(page)).toEqual([`session:${s}`])
+    })
+
+    test('a hidden app comes back where its sidebar row is dropped, a row dropped on an app’s view lands beside it, and another project’s app of the same name is refused', async ({
+      page,
+    }) => {
+      await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
+      await page.getByTestId('add-project').click()
+      await page.getByTestId('trust-ask-yes-alpha').click()
+      await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/beta'))
+      await page.getByTestId('add-project').click()
+      await expect(page.getByTestId('project-beta')).toBeVisible()
+      const pid = await projectIdOf(page, 'alpha')
+      const other = await projectIdOf(page, 'beta')
+      await page.evaluate(
+        (projects) =>
+          (window as any).__mock.setExternalApps(
+            projects.map(([projectId, dir]) => ({
+              appId: 'slider',
+              projectId,
+              dir: `${dir}/.centralu/apps/slider`,
+              name: 'Slider',
+              version: '0.1.0',
+              description: null,
+              home: 'home',
+              trusted: true,
+              status: 'stopped',
+              error: null,
+              warnings: [],
+            })),
+          ),
+        [
+          [pid, '/tmp/alpha'],
+          [other, '/tmp/beta'],
+        ],
+      )
+      const s = await newSession(page, 'alpha')
+      const key = `${pid}/slider`
+      const pinned = page.getByTestId(`pinned-app-${key}`)
+
+      await page.getByTestId('project-header-alpha').click()
+      expect(await panels(page)).toEqual([`session:${s}`, 'app:slider'])
+      await page.getByTestId('project-hide-app:slider').click()
+      await expect(pinned).toHaveCount(0)
+      expect(await panels(page)).toEqual([`session:${s}`])
+
+      // Beta's slider is another app with the same id: refused while dragged, like another project's session
+      await watchDrags(page)
+      await dragRow(page, page.getByTestId(`app-row-${other}/slider`), { panel: `session:${s}`, side: 'before' })
+      expect(await seenDrags(page)).toEqual({ effect: 'none', drops: 0 })
+      expect(await panels(page)).toEqual([`session:${s}`])
+
+      // Alpha's own comes back where it is dropped, in its pinned view
+      await dragRow(page, page.getByTestId(`app-row-${key}`), { panel: `session:${s}`, side: 'before' })
+      await expect.poll(() => panels(page)).toEqual(['app:slider', `session:${s}`])
+      await expect(pinned).toHaveAttribute('data-mode', 'slot')
+      await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      await expectOverSlot(page, key)
+
+      /*
+       * A row dropped on the app's panel lands on its view, a frame laid over the panel and not inside it. For the
+       * drop to reach the panel the view steps aside while the row is dragged (slots.ts) — and comes back after, the
+       * same document, with what was done in it.
+       */
+      const v = viewOf(page, key)
+      await v.locator('#call').click()
+      await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
+      await page.getByTestId(`project-hide-session:${s}`).click()
+      expect(await panels(page)).toEqual(['app:slider'])
+      await dragRow(page, page.getByTestId(`session-row-${s}`), { panel: 'app:slider', side: 'before' })
+      await expect.poll(() => panels(page)).toEqual([`session:${s}`, 'app:slider'])
+      await expect
+        .poll(() => pinned.evaluate((el) => [(el as HTMLElement).style.pointerEvents, (el as HTMLElement).style.visibility]))
+        .toEqual(['', ''])
+      await expectOverSlot(page, key)
+      await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
+      expect(await opened(page)).toBe(2)
+      expect(await gridPanels(page)).toEqual([])
     })
   })
 }

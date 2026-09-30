@@ -2,11 +2,12 @@
  * The project screen's arrangement (#203).
  *
  * Clicking a project's name shows that project's sessions and apps as panels, laid out the
- * way the grid lays out sessions. Unlike the grid, nobody puts a panel there: **everything the
- * project has appears on its own**, because the screen is "this project", not a selection from
- * it. A grid you fill by hand is a way of watching some sessions; a project screen that waited
- * to be filled would be empty the first time it is opened, which is the one time it has to
- * explain itself.
+ * way the grid lays out sessions. Unlike the grid, nobody has to put a panel there: **everything
+ * the project has appears on its own**, because the screen is "this project", not a selection
+ * from it. A grid you fill by hand is a way of watching some sessions; a project screen that
+ * waited to be filled would be empty the first time it is opened, which is the one time it has
+ * to explain itself. (A row dropped there from the sidebar only shows or moves one of the
+ * project's own panels — the UI's project/drop.ts.)
  *
  * So what is remembered is not the list of panels but the person's hand on it: the order they
  * dragged panels into, and the panels they hid. Everything else is derived from what exists,

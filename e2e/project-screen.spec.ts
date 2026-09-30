@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { appPanelTests, dragPanel, newSession, panels, setup } from './fixtures/project-screen.js'
+import { appPanelTests, dragPanel, newSession, panels, setup, sidebarDropTests } from './fixtures/project-screen.js'
 
 /**
  * The project screen (#203): clicking a project's name shows everything the project has — its sessions and its
- * apps — as panels that move like the grid's, and the order is remembered per project. The helpers and the app
- * panels' scenario live in fixtures/project-screen.ts, which project-screen-webkit.spec.ts runs again in WebKit.
+ * apps — as panels that move like the grid's, and the order is remembered per project. The helpers, the app panels'
+ * scenarios and the sidebar drops live in fixtures/project-screen.ts, which project-screen-webkit.spec.ts runs again
+ * in WebKit.
  */
 test('clicking a project name shows only that project’s sessions as panels, and a session made after a drag lands at the end', async ({
   page,
@@ -131,8 +132,11 @@ test('a project with nothing in it says so and offers a session', async ({ page 
   await setup(page, ['/tmp/alpha'])
   await page.getByTestId('project-header-alpha').click()
   await expect(page.getByTestId('project-empty')).toContainText('Nothing in this project yet')
+  // The evidence panel stands beside the screen and says so itself; the empty screen does not point at it
+  await expect(page.getByTestId('project-empty')).not.toContainText('evidence panel')
   await page.getByTestId('project-empty-new-session').click()
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
 })
 
 appPanelTests()
+sidebarDropTests()

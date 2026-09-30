@@ -10,10 +10,32 @@ export const PROJECT_MIME = 'application/x-cc-project'
 export const SESSION_MIME = 'application/x-cc-session'
 /**
  * A panel on the project screen (#203) — a session's or an app's. Its own type, so a sidebar row
- * dragged over the project screen is not taken for one of its panels: that screen shows what the
- * project has, and nothing is added to it by hand.
+ * dragged over the project screen is not taken for one of its panels: a panel is reordered, a row
+ * is shown or moved (project/drop.ts), and the two must not be confused mid-drag.
  */
 export const PANEL_MIME = 'application/x-cc-panel'
+/**
+ * A project's app, dragged from its sidebar row; the data is its key (`externalAppKey`). Its own
+ * type rather than the session's, so nothing that takes a session takes an app — the grid shows
+ * sessions only.
+ */
+export const APP_MIME = 'application/x-cc-app'
+
+/**
+ * Which project a dragged session or app belongs to, carried in the **type**, not the data.
+ *
+ * While a drag is over a page, the page can read the drag's types but none of its data (browser
+ * security, see GridView). So the project screen cannot ask a dragged row which project it is from
+ * until the drop — too late to show that it will not take it. With the project in the type, the
+ * screen refuses another project's session or app while it is still being dragged, with no drop
+ * cursor. The orchestrator's row belongs to no project and carries none, so it is refused too.
+ *
+ * The browser lowercases types. Project ids are UUIDs, lowercase already; the encoding only keeps
+ * an unusual id from producing an odd type, and the drop checks the data anyway (project/drop.ts).
+ */
+export function projectItemMime(projectId: string): string {
+  return `application/x-cc-of-project.${encodeURIComponent(projectId)}`.toLowerCase()
+}
 
 /**
  * The new order with `dragged` moved to before or after `target`.

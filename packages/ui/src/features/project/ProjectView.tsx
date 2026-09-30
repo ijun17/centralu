@@ -6,22 +6,26 @@ import { useProjectApps, type ExternalCatalogApp } from '../../store/app-catalog
 import { SessionPane } from '../session/SessionView.jsx'
 import { AppIcon, CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { Kbd } from '../../components/primitives.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from '../grid/tracks.js'
 import { placeSlots, registerSlot } from '../pinned-app/slots.js'
+import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
 
 /**
  * The project screen (#203) — what clicking a project's name opens.
  *
  * It shows **everything the project has** — its sessions and its apps — as panels, laid out and
- * moved the way the grid lays out and moves sessions. Nobody puts a panel here: a session created
- * in the project appears at the end, a session sent to the trash (#204) is gone because it is no
- * longer in the session list, and a panel the person does not want is hidden, not deleted. What
- * is remembered, per project and across restarts, is only the person's hand: the order they
+ * moved the way the grid lays out and moves sessions. Nobody has to put a panel here: a session
+ * created in the project appears at the end, a session sent to the trash (#204) is gone because it
+ * is no longer in the session list, and a panel the person does not want is hidden, not deleted.
+ * What is remembered, per project and across restarts, is only the person's hand: the order they
  * dragged panels into and what they hid (core's `arrangePanels`, the store's `projectPanels`).
+ *
+ * The project's sidebar rows can be dropped here the way sessions are dropped on the grid: a
+ * hidden one comes back where it lands, a visible one moves there (drop.ts). Only this project's —
+ * another project's session or app, and the orchestrator, are refused while still being dragged.
  *
  * The global grid is untouched by any of this. It keeps its own hand-picked list across projects;
  * this screen is one project, whole. A session can be on both, the way it can be on the grid and
@@ -82,9 +86,34 @@ export function ProjectView({ projectId }: { projectId: string }) {
     }
   }
 
+  /*
+   * One of this project's sidebar rows is being dragged. Its drag starts outside this screen, so
+   * the screen hears of it at the document: the app views laid over the panels step aside for it
+   * (slots.ts), or a row dropped on an app's view lands in the app's frame instead of beside the
+   * app. Its end also clears the panel it was last over: a row let go somewhere else never reaches
+   * this screen's own dragend, and a target left behind would be the next panel drag's preview
+   * before the hand has moved.
+   */
+  const [inbound, setInbound] = useState(false)
+  useEffect(() => {
+    const start = (e: globalThis.DragEvent) => {
+      if (e.dataTransfer && dragVerdict(e.dataTransfer.types, projectId) === 'add') setInbound(true)
+    }
+    const end = () => {
+      setInbound(false)
+      setOver(null)
+    }
+    document.addEventListener('dragstart', start)
+    document.addEventListener('dragend', end)
+    return () => {
+      document.removeEventListener('dragstart', start)
+      document.removeEventListener('dragend', end)
+    }
+  }, [projectId])
+
   // After every render: a panel can move without changing size (a drag's preview), which no
   // resize observer reports, and the app view laid over it has to move with it
-  useLayoutEffect(() => placeSlots(dragging))
+  useLayoutEffect(() => placeSlots(dragging, inbound))
   // Leaving the screen lets the frames take the pointer again, whatever a drag left behind
   useEffect(() => () => placeSlots(null), [])
 
@@ -164,10 +193,42 @@ export function ProjectView({ projectId }: { projectId: string }) {
     setDragging(null)
   }
 
+  /**
+   * Is this drag one the screen takes? Its own panel while it is being dragged, or one of the
+   * project's sidebar rows — for which the drop cursor is said here, since the window's floor
+   * (App.tsx) has already said yes to every drag.
+   */
+  const takes = (e: DragEvent<HTMLElement>): boolean => {
+    const verdict = dragVerdict(e.dataTransfer.types, projectId)
+    if (verdict === 'add') e.dataTransfer.dropEffect = 'move'
+    return verdict === 'add' || (verdict === 'panel' && !!dragging)
+  }
+  /** A sidebar row dropped before or after the panel `target`, or at the end when it is null (drop.ts) */
+  const dropRow = (e: DragEvent<HTMLElement>, target: string | null, before: boolean): boolean => {
+    const id = droppedPanelId((type) => e.dataTransfer.getData(type), sessions, apps)
+    if (!id) return false
+    snapshotScroll()
+    const next = droppedArrangement(present, saved, id, target, before)
+    if (next) arrange(projectId, next)
+    setOver(null)
+    return true
+  }
+
   if (!project) return null
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-void" data-testid="project-view">
+    <section
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-void"
+      data-testid="project-view"
+      onDragOver={(e) => {
+        /*
+          Another project's session or app, or the orchestrator: no drop cursor anywhere on this
+          screen. The window's floor (App.tsx) has already said yes to every drag, so saying
+          nothing here would still show one. A drag the page answers 'none' is not dropped at all.
+        */
+        if (dragVerdict(e.dataTransfer.types, projectId) === 'refuse') e.dataTransfer.dropEffect = 'none'
+      }}
+    >
       <DragRegion className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-edge px-4 py-2">
         <h1 className="truncate text-[13px] font-medium text-chalk" data-testid="project-view-name">
           {project.name}
@@ -200,16 +261,21 @@ export function ProjectView({ projectId }: { projectId: string }) {
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-deck p-2"
         data-testid="project-grid"
         onDragOver={(e) => {
-          if (dragging && e.dataTransfer.types.includes(PANEL_MIME)) e.preventDefault()
+          if (takes(e)) e.preventDefault()
         }}
         onDrop={(e) => {
-          // Dropped on the padding or a gap: what the screen shows is what survives (GridView)
-          if (!dragging || !e.dataTransfer.types.includes(PANEL_MIME)) return
-          e.preventDefault()
-          snapshotScroll()
-          if (preview) arrange(projectId, withOrder(present, saved, preview))
-          setOver(null)
-          setDragging(null)
+          if (e.dataTransfer.types.includes(PANEL_MIME)) {
+            // Dropped on the padding or a gap: what the screen shows is what survives (GridView)
+            if (!dragging) return
+            e.preventDefault()
+            snapshotScroll()
+            if (preview) arrange(projectId, withOrder(present, saved, preview))
+            setOver(null)
+            setDragging(null)
+            return
+          }
+          // A sidebar row dropped on the padding, a gap or the empty screen: at the end, as on the grid
+          if (dropRow(e, null, false)) e.preventDefault()
         }}
       >
         {visible.length === 0 ? (
@@ -228,11 +294,14 @@ export function ProjectView({ projectId }: { projectId: string }) {
                 <p className="text-[11px] text-slate">Its sessions and apps appear here as panels you can arrange</p>
               </>
             ) : (
-              <p className="text-[13px] text-ash">Every panel is hidden — the names above bring them back</p>
+              // Said the way the empty grid says it — and the names above still bring a panel back
+              <p className="text-[13px] leading-relaxed text-ash">
+                Drag this project&apos;s sessions and apps here from the sidebar
+                <span className="mt-1 block text-[11px] text-slate">
+                  They keep running — this is another way to look at them
+                </span>
+              </p>
             )}
-            <p className="text-[11px] text-slate">
-              Git and files are in the evidence panel on the right (<Kbd mod /> <Kbd>B</Kbd>)
-            </p>
           </div>
         ) : (
           <div
@@ -257,7 +326,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
                   data-testid={`project-panel-${id}`}
                   data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
                   onDragOver={(e) => {
-                    if (!dragging || !e.dataTransfer.types.includes(PANEL_MIME)) return
+                    // A sidebar row gets no preview, as on the grid: its data is unreadable until the drop
+                    if (!takes(e)) return
                     e.preventDefault()
                     e.stopPropagation()
                     // Over the dragged panel itself: keep the last target, or the preview flickers (GridView)
@@ -270,7 +340,16 @@ export function ProjectView({ projectId }: { projectId: string }) {
                   }}
                   onDragEnd={endDrag}
                   onDrop={(e) => {
-                    if (!dragging || !e.dataTransfer.types.includes(PANEL_MIME)) return
+                    if (!e.dataTransfer.types.includes(PANEL_MIME)) {
+                      // A sidebar row lands before or after this panel, by the half it is dropped on (GridView).
+                      // Refused, it goes on to the screen, which refuses it too
+                      const r = e.currentTarget.getBoundingClientRect()
+                      if (!dropRow(e, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      return
+                    }
+                    if (!dragging) return
                     e.preventDefault()
                     e.stopPropagation()
                     snapshotScroll()
