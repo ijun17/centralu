@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { NormalizedEvent } from './events.js'
 import { ProtocolError } from './entities.js'
 
-/** 전송 봉투 (docs/protocol.md §1). WS 텍스트 프레임 1개 = 이 타입 1개. */
+/** Transport envelope (docs/protocol.md §1). One WS text frame equals one value of this type. */
 
 export const PROTOCOL_VERSION = 1
 
@@ -10,7 +10,7 @@ export const HelloClient = z.object({
   kind: z.literal('hello'),
   token: z.string(),
   protocolVersion: z.number(),
-  /** 재연결 시 유실분 재전송 요청 (없으면 전부 새로) */
+  /** Request resend of what was missed on reconnect (omit to receive everything fresh) */
   afterSeq: z.number().optional(),
 })
 export type HelloClient = z.infer<typeof HelloClient>
@@ -18,7 +18,7 @@ export type HelloClient = z.infer<typeof HelloClient>
 export const HelloServer = z.object({
   kind: z.literal('hello_ok'),
   protocolVersion: z.number(),
-  /** afterSeq가 버퍼 밖이면 true — UI는 스냅샷을 다시 로드해야 한다 */
+  /** True when afterSeq falls outside the buffer — the UI must reload the snapshot */
   resyncRequired: z.boolean().default(false),
   currentSeq: z.number(),
 })
@@ -46,9 +46,9 @@ export const EventPush = z.object({
 export type EventPush = z.infer<typeof EventPush>
 
 /**
- * 터미널 출력. **재전송 버퍼(seq)를 태우지 않는다** —
- * 출력량이 대화 이벤트와 자릿수가 다르고, 놓친 부분은 host의 스크롤백에서
- * 다시 붙일 때 통째로 받는다. 링 버퍼에 섞으면 진짜 이벤트가 밀려난다.
+ * Terminal output. **Does not go through the resend buffer (seq)** — its volume is an order
+ * of magnitude larger than conversation events, and anything missed is received whole from the
+ * host's scrollback on reattach. Mixing it into the ring buffer would push out the real events.
  */
 export const TerminalPush = z.object({
   kind: z.literal('term'),
@@ -57,7 +57,7 @@ export const TerminalPush = z.object({
 })
 export type TerminalPush = z.infer<typeof TerminalPush>
 
-/** 터미널이 끝났다 (셸 종료). UI는 다시 붙일 수 있게 안내한다 */
+/** The terminal has ended (the shell exited). The UI offers a way to reattach. */
 export const TerminalExit = z.object({
   kind: z.literal('term_exit'),
   terminalId: z.string(),
@@ -68,7 +68,7 @@ export type TerminalExit = z.infer<typeof TerminalExit>
 export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, RpcRequest])
 export type ClientFrame = z.infer<typeof ClientFrame>
 
-// 'res'가 ok별로 두 갈래라 discriminatedUnion('kind')를 못 쓴다 — 일반 union 사용
+// 'res' splits into two branches by ok, so discriminatedUnion('kind') does not work here — use a plain union
 export const ServerFrame = z.union([HelloServer, EventPush, RpcResponse, TerminalPush, TerminalExit])
 export type ServerFrame = z.infer<typeof ServerFrame>
 

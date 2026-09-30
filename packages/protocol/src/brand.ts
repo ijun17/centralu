@@ -1,55 +1,58 @@
 /**
- * 앱을 식별하는 값들.
+ * Values that identify the app.
  *
- * **여기 있는 것은 "기계가 읽는 값"만이다.** 화면에 보이는 문구는 리터럴로 둔다 —
- * `${APP_NAME}는 …`보다 `Centralu는 …`가 읽기 좋고, 다국어가 필요해지면 상수 참조가
- * 아니라 문자열 카탈로그로 가야 하기 때문이다.
+ * **Only "machine-read values" live here.** User-facing copy stays as a literal —
+ * `Centralu is …` reads better than `${APP_NAME} is …`, and once localization is needed the
+ * copy has to move to a string catalog anyway, not stay a constant reference.
  *
- * 상수로 뺀 기준은 하나다: **중복되어 있고, 어긋나도 빌드가 통과하는 값.**
- * 그리고 TypeScript가 닿지 못하는 곳(index.html · tauri.conf.json · Cargo.toml · Rust)은
- * 상수로 묶을 수 없으므로 계약 테스트가 지킨다 (`tooling/brand.test.ts`).
+ * There is one bar for pulling something out into a constant here: **it is duplicated, and a
+ * build still passes even if the copies drift apart.** Places TypeScript cannot reach
+ * (index.html, tauri.conf.json, Cargo.toml, Rust) cannot be bound to a constant, so a contract
+ * test guards them instead (`tooling/brand.test.ts`).
  */
 
-/** 사람에게 보이는 이름. 정적 파일들이 이 값과 같은지는 계약 테스트가 확인한다 */
+/** The human-facing name. A contract test checks that the static files match this value. */
 export const APP_NAME = 'Centralu'
 
-/** 번들 식별자 — `tauri.conf.json`의 identifier와 같아야 한다 */
+/** The bundle identifier — must match `identifier` in `tauri.conf.json`. */
 export const APP_ID = 'app.centralu'
 
 /**
- * 세 곳(tauri.conf.json · Cargo.toml · apps/desktop/package.json)과 npm 패키지 둘이
- * 이 값과 같아야 한다 — 어긋나면 `tooling/brand.test.ts`가 잡는다.
+ * Three places (tauri.conf.json, Cargo.toml, apps/desktop/package.json) and two npm packages
+ * must match this value — `tooling/brand.test.ts` catches it if they drift.
  *
- * 베타를 버전으로 먼저 말한다. "0.1.0"은 완성된 1차 릴리스처럼 읽히지만
- * "0.1.0-beta.1"은 기대치를 스스로 낮춘다 — 받는 사람이 문서를 안 읽어도 안다.
+ * The version says beta up front. "0.1.0" reads like a finished first release, while
+ * "0.1.0-beta.1" lowers expectations on its own — the reader knows even without reading the docs.
  */
 export const APP_VERSION = '0.1.0-beta.6'
 
-/** 기계가 읽는 이름 — 표시용과 달리 소문자·하이픈 형태를 지킨다 */
+/** The machine-read name — unlike the display name, it stays lowercase and hyphenated. */
 export const APP_SLUG = 'centralu'
 
 /**
- * 외부 CLI에 자기를 소개할 때 넘기는 덩어리 (codex `clientInfo`).
- * 다섯 군데에서 같은 것을 만들고 있었고, 버전만 손대면 조용히 어긋나던 자리다.
+ * The bundle passed when introducing the app to an external CLI (codex `clientInfo`).
+ * Five places were building the same object, and touching only the version would silently
+ * put them out of sync.
  */
 export const CLIENT_INFO = { name: APP_SLUG, title: APP_NAME, version: APP_VERSION } as const
 
 /**
- * 데이터 폴더 이름.
+ * The name of the data folder.
  *
- * 사용자가 이 경로를 보는 자리는 둘이다 — 버그 신고에 `host.log`를 붙일 때, 그리고
- * 워크트리 경로를 볼 때. 앱 이름과 다르면 그 순간 "이게 뭐지"가 된다.
+ * There are two places the user sees this path — when attaching `host.log` to a bug report,
+ * and when looking at a worktree path. If it does not match the app name, that moment turns
+ * into "what is this?".
  */
 export const DATA_DIR = '.centralu'
 
-/** dev로 띄운 host의 데이터 폴더 — 배포 앱과 섞이지 않게 갈라 둔다 */
+/** The data folder for a host started in dev mode — kept separate so it does not mix with the packaged app. */
 export const DATA_DIR_DEV = '.centralu-dev'
 
 /**
- * 개명 전 폴더 이름.
+ * The folder name from before the rename.
  *
- * **지우지 못한다.** 여기에 사용자의 대화 기록이 들어 있고, 새 폴더가 아직 없다면
- * 이것이 유일한 사본이다. host가 DB를 열기 전에 한 번 옮겨준다
+ * **Cannot be deleted.** It holds the user's conversation history, and if the new folder does
+ * not exist yet, this is the only copy. The host migrates it once, before opening the database
  * (`packages/agent-host/src/main.ts`).
  */
 export const DATA_DIR_LEGACY = { prod: '.control-center', dev: '.control-center-dev' } as const // legacy-name

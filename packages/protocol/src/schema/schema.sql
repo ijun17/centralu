@@ -1,23 +1,26 @@
--- Centralu 로컬 저장 스키마 v1
--- host(better-sqlite3)가 읽는다. 마이그레이션은 dev-services/store.ts의 steps가 담당한다.
+-- Centralu local storage schema v1
+-- Read by the host (better-sqlite3). Migrations are handled by the steps in dev-services/store.ts.
 --
--- **여기서 user_version을 정하지 않는다.** 이 파일은 열 때마다 실행되므로(테이블은
--- CREATE IF NOT EXISTS라 안전하다), `PRAGMA user_version = 1`이 있으면 이미 v27인 DB도
--- 매번 1로 되돌아가 마이그레이션 26개가 **전부 다시 돌았다**. 실측(2026-09-02,
--- store.db 94MB · 메시지 66,700건): 열 때마다 4.4~5.0초, 그중 v3 1.4초 + v11 1.7초 +
--- v21 1.7초가 전부 전체 테이블 스캔이었다 — 대화가 쌓일수록 커지는 시작 비용이다.
+-- **user_version is never set here.** This file runs every time the database is opened (safe,
+-- since every table uses CREATE IF NOT EXISTS), so if `PRAGMA user_version = 1` were here, a
+-- database already at v27 would reset to 1 on every open and **rerun all 26 migrations**.
+-- Measured (2026-09-02, store.db at 94MB, 66,700 messages): 4.4 to 5.0 seconds per open, of
+-- which v3 (1.4s), v11 (1.7s) and v21 (1.7s) were each a full table scan — a startup cost that
+-- only grows as the conversation history piles up.
 --
--- 값을 아예 안 적으면 새 DB는 0에서 시작해 스텝이 한 번 전부 돌고(예전과 같다),
--- 기존 DB는 마지막 스텝이 적어둔 번호를 그대로 들고 있어 아무것도 다시 돌지 않는다.
+-- Leaving the value unset entirely means a new database starts at 0 and runs every step once
+-- (the same as before), while an existing database keeps whatever number the last step left
+-- behind, so nothing reruns.
 
 CREATE TABLE IF NOT EXISTS projects (
   id            TEXT PRIMARY KEY,
   path          TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL,
   default_tool  TEXT NOT NULL DEFAULT 'claude',
-  -- 도구별 기본 모델·강도 (#107): {"codex":{"model":"gpt-5.6","effort":"high"}, ...}.
-  -- 스칼라 default_model/default_effort가 있던 자리다 — 모델 이름은 도구의 어휘라
-  -- 도구 없이 하나만 기억하면 다른 도구의 세션이 그 이름을 물려받아 첫 턴에 죽었다.
+  -- The default model and effort per tool (#107): {"codex":{"model":"gpt-5.6","effort":"high"}, ...}.
+  -- This is where the scalars default_model/default_effort used to be — a model name is a tool's
+  -- own vocabulary, so remembering a single one with no tool attached meant a session for a
+  -- different tool inherited that name and died on its first turn.
   default_models TEXT,
   sidebar_order INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL
@@ -25,8 +28,9 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE TABLE IF NOT EXISTS sessions (
   id            TEXT PRIMARY KEY,
-  -- 오케스트레이터는 프로젝트에 속하지 않는다 (앱에 하나, 프로젝트를 가로지른다).
-  -- NOT NULL이면 아무 데나 매달아야 하고 그 프로젝트를 지우면 CASCADE로 함께 죽는다.
+  -- The orchestrator does not belong to any project (one per app, crossing all projects).
+  -- Making this NOT NULL would force it to hang off some project, and deleting that project
+  -- would kill it too via CASCADE.
   project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
   tool          TEXT NOT NULL,
   external_id   TEXT,
@@ -50,7 +54,7 @@ CREATE TABLE IF NOT EXISTS messages (
   PRIMARY KEY (session_id, seq)
 );
 
--- "항상 허용" 규칙 (FR-3). scope=session이면 session_id, project면 project_id 사용
+-- "Always allow" rules (FR-3). Uses session_id when scope=session, project_id when scope=project
 CREATE TABLE IF NOT EXISTS approval_rules (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   scope      TEXT NOT NULL,
@@ -79,8 +83,8 @@ CREATE TABLE IF NOT EXISTS workspace (
   updated_at INTEGER NOT NULL
 );
 
--- 커밋 귀속 (#50): 어느 세션이 이 커밋을 만들었나 — 저장소가 아니라 여기에만 남는다.
--- 해시는 에이전트의 git commit 도구 출력에서 주운 것이라 짧을 수 있다 (접두사 매칭).
+-- Commit attribution (#50): which session made this commit — recorded only here, never in the repository.
+-- The hash is picked up from the agent's git commit tool output, so it can be short (matched by prefix).
 CREATE TABLE IF NOT EXISTS commit_sessions (
   project_id TEXT NOT NULL,
   sha        TEXT NOT NULL,

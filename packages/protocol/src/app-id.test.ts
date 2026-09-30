@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { APP_ID_MAX_LENGTH, newAppIdProblem, serverNameProblem } from './app-id.js'
 
 /**
- * 앱 id의 규칙 (#93, M4 C-1) — host와 "새 앱" 창이 같은 판정을 쓴다. 여기서는 판정 자체를 본다: host 쪽 말(한국어
- * 이유)은 apps/contract.ts의 시험들이, 창의 말은 ui의 newAppId.test.ts가 본다.
+ * The rule for app ids (#93, M4 C-1) — the host and the "new app" window use the same judgment.
+ * This file covers the judgment itself: the host-side wording (Korean reasons) is covered by
+ * apps/contract.ts's tests, and the window's wording by ui's newAppId.test.ts.
  */
 describe('serverNameProblem', () => {
-  it('글자 규칙: 소문자·숫자·하이픈, 첫 글자는 하이픈이 아니고, 32자까지', () => {
+  it('character rule: lowercase, digits, hyphens, not starting with a hyphen, up to 32 characters', () => {
     for (const ok of ['notes', 'a', '0', 'resource-search', 'a-b-c', 'x'.repeat(APP_ID_MAX_LENGTH)]) {
       expect(serverNameProblem(ok), ok).toBeNull()
     }
@@ -15,7 +16,7 @@ describe('serverNameProblem', () => {
     }
   })
 
-  it('예약어를 글자 규칙보다 먼저 본다 — 대소문자와 앞뒤 공백을 가리지 않는다', () => {
+  it('checks the reserved word before the character rule — case-insensitive and ignoring surrounding whitespace', () => {
     for (const name of ['centralu', 'centralu-tools', 'centralu__pw', 'Centralu', ' CENTRALU x']) {
       expect(serverNameProblem(name), name).toBe('reserved')
     }
@@ -23,19 +24,19 @@ describe('serverNameProblem', () => {
 })
 
 describe('newAppIdProblem', () => {
-  it('새 이름은 app- 머리를 가질 수 없다 — 발견은 막지 않는다(serverNameProblem은 통과한다)', () => {
+  it('a new name may not have the app- prefix — discovery is not blocked (serverNameProblem passes it)', () => {
     expect(newAppIdProblem('app-notes')).toBe('server-prefix')
     expect(serverNameProblem('app-notes')).toBeNull()
     expect(newAppIdProblem('apps')).toBeNull()
     expect(newAppIdProblem('my-app-notes')).toBeNull()
   })
 
-  it('부르는 쪽이 넘긴 내장 앱의 id는 쓸 수 없다', () => {
+  it('the id of a built-in app passed in by the caller cannot be used', () => {
     expect(newAppIdProblem('control', ['control'])).toBe('builtin')
     expect(newAppIdProblem('control')).toBeNull()
   })
 
-  it('앞의 판정이 이긴다 — 예약어, 글자, 머리, 내장 순', () => {
+  it('an earlier judgment wins — order is reserved, shape, prefix, builtin', () => {
     expect(newAppIdProblem('centralu', ['centralu'])).toBe('reserved')
     expect(newAppIdProblem('App-x', ['App-x'])).toBe('shape')
     expect(newAppIdProblem('app-x', ['app-x'])).toBe('server-prefix')

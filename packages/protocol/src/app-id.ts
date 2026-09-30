@@ -1,45 +1,60 @@
 /**
- * 앱 id(= 세션에 붙는 MCP 서버 이름)의 규칙 (#93, M4 A-1·C-1) — **한 벌이다.**
+ * The rule for app ids (= the MCP server name attached to a session) (#93, M4 A-1, C-1) —
+ * **there is exactly one copy of it.**
  *
- * host는 매니페스트·제안된 MCP 서버·새 앱을, UI는 "새 앱" 창을 이것으로 판정한다. 전에는 host(apps/contract.ts)에만
- * 있었다. 새 앱 창은 이름에서 id를 지어 보여 주고, 만들기 전에 쓸 수 있는 id인지 말해야 하는데, UI는 host를 임포트할
- * 수 없다 — 두 절반이 함께 읽는 선반은 이 패키지뿐이다. 규칙을 UI에 한 벌 더 적으면 창이 통과시킨 id를 host가
- * 거절하거나(사람은 이유를 두 번 듣는다) 그 반대가 되고, #93에서 배운 대로 느슨한 쪽이 곧 구멍이다. 그래서 **판정**은
- * 여기 한 곳에 두고, 사람이 읽을 **말**은 각자 제 자리에서 붙인다(host는 에이전트와 로그에게, UI는 창 앞의 사람에게).
+ * The host uses it to judge manifests, proposed MCP servers and new apps; the UI uses it for
+ * the "new app" window. It used to live only in the host (apps/contract.ts). The new-app window
+ * derives an id from the name and shows it, and it has to say whether that id can be used before
+ * the app is created, but the UI cannot import the host — this package is the only shelf both
+ * halves can read. Writing the rule a second time in the UI would let the window pass an id the
+ * host then rejects (the person hears the reason twice) or the other way around, and as learned
+ * from #93, whichever copy is looser becomes the hole. So the **judgment** stays in this one
+ * place, and the human-facing **wording** is attached separately where it belongs (the host
+ * speaks to the agent and the logs, the UI speaks to the person in front of the window).
  *
- * 여기에 없는 판정: 내장 앱의 id(명부는 각 절반이 컴파일해 들고 있다 — 부르는 쪽이 넘긴다), 이미 있는 id(발견은 host만
- * 한다), 신뢰(저장소가 정본이다). 그것들은 host가 만들 때 거절하고, 창은 그 말을 그대로 보인다.
+ * Judgments this file does not make: the id of a built-in app (each half compiles its own
+ * roster and the caller passes it in), whether an id already exists (only the host does
+ * discovery), and trust (the store is the source of truth). Those are rejected by the host when
+ * it creates something, and the window just displays that message as given.
  */
 
 /**
- * 이 머리로 시작하는 이름은 Centralu 자신의 것이다 — 인프로세스 오케스트레이터 서버의 이름. 승인된 서버가 이 이름을
- * 가져가면 내장 서버를 통째로 갈아치웠다(#93 실측).
+ * A name starting with this prefix belongs to Centralu itself — the name of the in-process
+ * orchestrator server. If an approved server took this name, it would replace the built-in
+ * server entirely (measured in #93).
  */
 export const RESERVED_NAME_PREFIX = 'centralu'
 
 /**
- * 외부 앱이 세션에 붙는 서버 이름의 머리 (M4 A-5) — 앱 `notes`는 세션에서 `app-notes`다. 새로 **제안되는** 이름(승인할
- * MCP 서버, 새 앱)은 이 머리로 시작할 수 없다: 승인된 `app-notes` 서버는 앱 `notes`의 대리 서버와 같은 칸에 들어간다.
+ * The prefix for the server name an external app is attached to a session under (M4 A-5) — the
+ * app `notes` is `app-notes` inside a session. A newly **proposed** name (an MCP server pending
+ * approval, or a new app) may not start with this prefix: an approved `app-notes` server would
+ * land in the same slot as the proxy server for the `notes` app.
  */
 export const APP_SERVER_PREFIX = 'app-'
 
-/** id 한 칸의 길이 상한 — 글자 규칙(아래)과 같은 수다. 이름에서 id를 지을 때 자르는 자리가 여기다 */
+/**
+ * The length limit for one id slot — the same number as the character rule below. This is where
+ * an id derived from a name gets truncated.
+ */
 export const APP_ID_MAX_LENGTH = 32
 
 /**
- * 밑줄이 빠진 것이 핵심이다: MCP 도구 이름의 칸막이가 `__`라, 밑줄을 허용하면 서버 하나가 남의 이름 뒤에 칸을 하나 더
- * 붙일 수 있다(`centralu__pw` → `mcp__centralu__pw__*`가 접두 검사를 통과했다, #93).
+ * Leaving out the underscore is the important part: MCP tool names use `__` as a separator, so
+ * allowing underscores would let one server append an extra segment behind someone else's name
+ * (`centralu__pw` produced `mcp__centralu__pw__*`, which passed the prefix check, #93).
  */
 const NAME_SHAPE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
-/** 서버 이름·앱 id가 공유하는 규칙에 걸린 까닭 */
+/** The reason a server name or app id failed the rule they share */
 export type ServerNameProblem = 'reserved' | 'shape'
 
 /**
- * MCP 서버 이름과 앱 id가 함께 따르는 규칙 (#93). 괜찮으면 null.
+ * The rule an MCP server name and an app id both follow (#93). Returns null when the name is fine.
  *
- * 예약어를 **먼저** 본다 — 나중에 글자 규칙을 느슨하게 고쳐도 이 판정만은 남아 있으라는 뜻이다. 예약어는 대소문자와
- * 앞뒤 공백을 가리지 않고 본다(`CENTRALU`도 같은 이름으로 읽힐 수 있는 자리가 있다).
+ * The reserved-word check runs **first** — so that even if the character rule is loosened later,
+ * this judgment still holds. The reserved word is checked case-insensitively and after trimming
+ * (`CENTRALU` can read as the same name in some places too).
  */
 export function serverNameProblem(name: string): ServerNameProblem | null {
   if (name.trim().toLowerCase().startsWith(RESERVED_NAME_PREFIX)) return 'reserved'
@@ -47,15 +62,17 @@ export function serverNameProblem(name: string): ServerNameProblem | null {
   return null
 }
 
-/** 새로 만드는 앱의 id가 걸린 까닭 */
+/** The reason a newly created app's id was rejected */
 export type NewAppIdProblem = ServerNameProblem | 'server-prefix' | 'builtin'
 
 /**
- * 새로 **제안되는** 이름의 판정 — 위 규칙에 `app-` 머리 금지, 그리고 부르는 쪽이 넘긴 내장 앱의 id. 괜찮으면 null.
+ * The judgment for a newly **proposed** name — the rule above, plus a ban on the `app-` prefix,
+ * plus the built-in app ids the caller passes in. Returns null when the name is fine.
  *
- * `app-` 머리는 발견에서는 막지 않는다(손으로 만든 `app-store` 앱은 `app-app-store`로 붙어 겹치지 않는다). 막는 것은
- * 새 이름이 들어오는 자리다 — 새 앱이 `app-app-notes`라는 서버 이름을 가질 까닭이 없고, 승인된 서버가 그 칸을 가져가면
- * 앱의 읽기 전용 주석으로 승인을 건너뛸 수 있다.
+ * The `app-` prefix is not blocked during discovery (a hand-made `app-store` app is attached as
+ * `app-app-store`, so it does not collide). What is blocked is the point where a new name comes
+ * in — a new app has no reason to have the server name `app-app-notes`, and if an approved
+ * server took that slot, it could skip approval under the app's read-only annotation.
  */
 export function newAppIdProblem(id: string, builtinIds: readonly string[] = []): NewAppIdProblem | null {
   const base = serverNameProblem(id)

@@ -1,14 +1,21 @@
 /**
- * 앱 링크 `centralu://app?url=<폴더나 zip의 주소>` (M4 E-4) — 누르면 가져오기 확인 창(E-3)이 그 출처를 채운 채 열린다.
+ * The app link `centralu://app?url=<address of a folder or zip>` (M4 E-4) — clicking it opens the
+ * import confirmation window (E-3) already filled in with that source.
  *
- * 링크는 **남이 지은 글**이다. 메일·채팅·웹 페이지의 링크를 누르면 OS가 이 앱에 건넨다. 그래서 여기서는 모양만 좁히고, 여는 일은
- * 사람이 확인 창에서 Review를 누른 뒤에만 한다(창이 먼저 읽거나 내려받지 않는다). host는 받은 출처를 자기 규칙으로 한 번 더 판정한다
- * (`apps/external/imports.ts` `classifySource`) — 이 파일은 화면이 어떤 링크를 창으로 올릴지만 정한다.
+ * A link is **text written by someone else**. Clicking a link in an email, a chat or a web page
+ * hands it to this app through the OS. So this file only narrows the shape, and opening only
+ * happens after the person clicks Review in the confirmation window (the window never reads or
+ * downloads anything up front). The host judges the received source once more by its own rules
+ * (`apps/external/imports.ts` `classifySource`) — this file only decides which links the screen
+ * is allowed to raise into the window at all.
  *
- * 받는 것: `centralu://app?url=` 하나, 그 값은 `https:`(계정이 든 주소는 아니다) 또는 이 기계의 `file:`. 경로만 적은 값, http,
- * 다른 스킴은 받지 않는다. `url`이 둘이면 어느 쪽을 열지 모호하므로 받지 않는다. 모르는 다른 칸은 읽지 않는다(뒤의 판이 더할 수 있다).
+ * Accepted: exactly one `centralu://app?url=`, whose value is either `https:` (not an address
+ * carrying credentials) or a `file:` on this machine. A bare path, http, or any other scheme is
+ * rejected. Two `url` values are rejected too, since it would be ambiguous which one to open.
+ * Any other, unknown field is not read (a later revision may add to them).
  *
- * 화면(UI)과 host가 같이 쓰도록 여기 둔다 — 이 패키지는 둘이 함께 닿는 유일한 선반이다.
+ * This lives here so the screen (UI) and the host can share it — this package is the only shelf
+ * both can reach.
  */
 
 export const APP_LINK_MAX_CHARS = 4096

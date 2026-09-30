@@ -1,6 +1,7 @@
 /**
- * 골든 테스트 (M1 플랜 T1-1). 여기 픽스처는 "이 버전이 파싱할 수 있어야 하는 메시지"의 고정 목록이다.
- * 스키마를 바꿀 때 이 파일이 깨지면 = 하위 호환 파괴. 필드 추가는 여기를 깨지 않아야 한다 (docs/protocol.md §4).
+ * Golden tests (M1 plan T1-1). The fixtures here are a fixed list of "messages this version must
+ * be able to parse." If changing the schema breaks this file, that is a backward-compatibility
+ * break. Adding a field must never break this file (docs/protocol.md §4).
  */
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
@@ -29,7 +30,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'approval_request', sessionId: 's1', requestId: 'r1', detail: { kind: 'command', command: 'npm run build', cwd: '/p' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r2', detail: { kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false } },
   { type: 'approval_request', sessionId: 's1', requestId: 'r3', detail: { kind: 'other', raw: '{}' } },
-  // 능력 물음의 카드 (M4 D-4) — host가 세운다
+  // A capability question's card (M4 D-4) — raised by the host
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -55,32 +56,32 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   },
   { type: 'question_resolved', sessionId: 's1', requestId: 'q1' },
   { type: 'turn_complete', sessionId: 's1' },
-  // 스키마로 답한 턴 (M4 D-1)
+  // A turn that answered against a schema (M4 D-1)
   { type: 'turn_complete', sessionId: 's1', output: { summary: 'short' } },
   { type: 'state_change', sessionId: 's1', state: 'waiting_input' },
   { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.01 } },
   { type: 'context_update', sessionId: 's1', used: 1000, window: 200000, exactness: 'exact' },
   { type: 'limit_reached', sessionId: 's1', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 },
-  // auto가 없던 v1 프레임 — 자동 이름으로 읽혀야 한다 (필드 추가가 옛 프레임을 깨면 안 된다)
+  // A v1 frame from before auto existed — must be read as an automatic name (adding a field must never break an old frame)
   { type: 'session_title', sessionId: 's1', title: 'auth 리팩터링' },
-  // 사람이 정한 이름 (이슈 #5). auto=false면 자동 이름이 다시 덮지 않는다
+  // A name a person set (issue #5). auto=false means an automatic name never overwrites it again
   { type: 'session_title', sessionId: 's1', title: '가드 MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
   { type: 'user_message', sessionId: 's1', seq: 12, text: '오케스트레이터가 넣어준 말' },
-  // 시켜서 들어온 말의 출처 (FR-11)
+  // The origin of a message that arrived via instruction (FR-11)
   { type: 'user_message', sessionId: 's1', seq: 13, text: '릴리즈 노트 정리', from: { sessionId: 'orc-1', name: '지휘 세션' } },
-  // 대화 안 앱 화면이 보낸 말 (M4 B-1·B-4) — 사람이 보냈지만 쓴 것은 앱이다
+  // A message sent by an inline conversation app screen (M4 B-1, B-4) — a person sent it, but an app wrote it
   { type: 'user_message', sessionId: 's1', seq: 15, text: 'Show details for row 3', fromApp: { appId: 'slider', projectId: 'p1', name: 'Slider' } },
-  // 대화 안 앱 화면 (M4 B-1) — 열림(입력), 결과, 취소, 거절, 닫힘
+  // An inline conversation app screen (M4 B-1) — open (input), result, cancelled, rejected, closed
   { type: 'app_view', sessionId: 's1', seq: 16, callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'open', instanceId: 'i-1', toolInput: { q: 'x' } },
   { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'result', toolResult: { content: [{ type: 'text', text: 'ok' }], structuredContent: { n: 1 } }, kept: true },
   { type: 'app_view', sessionId: 's1', callId: 'toolu_2', appId: 'slider', projectId: null, tool: 'show', phase: 'cancelled', reason: 'the caller cancelled this call' },
   { type: 'app_view', sessionId: 's1', seq: 17, callId: 'toolu_3', appId: 'slider', projectId: 'p1', tool: 'spoof', phase: 'rejected', reason: 'This app does not serve ui://other/main' },
   { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'closed', reason: 'This app was removed' },
-  // 추론 (#58 실측): codex는 요약 텍스트, claude는 토큰 추정치만 — 그래서 둘 다 optional
+  // Reasoning (measured in #58): codex has summary text, claude only a token estimate — so both are optional
   { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**경로 제약을 검토 중**' },
   { type: 'reasoning_delta', sessionId: 's1', estTokens: 150 },
-  // #58 실측 (codex turn/plan/updated): 스냅샷 — 세 상태가 다 있는 실제 모양
+  // Measured in #58 (codex turn/plan/updated): a snapshot — the real shape with all three states present
   {
     type: 'plan_update',
     sessionId: 's1',
@@ -90,42 +91,42 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       { text: 'Count its output lines and report', status: 'pending' },
     ],
   },
-  // #58 실측 (codex item/commandExecution/outputDelta): 실행 중 출력 조각
+  // Measured in #58 (codex item/commandExecution/outputDelta): an output chunk from a running command
   { type: 'tool_output_delta', sessionId: 's1', callId: 'exec-5de387b1', text: 'tick 2\n' },
-  // 에이전트가 내놓은 이미지 (#40) — 표시 전용이라 seq가 없다
+  // An image an agent produced (#40) — display-only, so no seq
   { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/shot.png' },
-  // 못 그린 이미지도 이벤트다 — 실패는 보이게
+  // An image that failed to render is still an event — a failure should be visible
   { type: 'message_image', sessionId: 's1', mime: '', data: '', path: '/tmp/big.png', note: '이미지가 너무 큽니다 (12MB)' },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },
-  // codex의 /review(전용 RPC)가 도는 동안 (실측 — enteredReviewMode 아이템)
+  // While codex's /review (a dedicated RPC) is running (measured — an enteredReviewMode item)
   { type: 'activity', sessionId: 's1', activity: 'reviewing' },
   { type: 'compaction', sessionId: 's1' },
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
   { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
-  // 인수인계로 태어난 세션의 마커 (#102) — note는 방송에 싣지 않으므로 없는 모양이 골든이다
+  // A marker for a session born from a handoff (#102) — note is never carried in a broadcast, so the shape without it is the golden one
   { type: 'handoff', sessionId: 's1', from: '메아' },
   { type: 'history_synced', sessionId: 's1', added: 2 },
   { type: 'session_deleted', sessionId: 's1' },
-  // host가 스스로 만든 세션의 통지 (#69) — session은 SessionInfo지만 이벤트 스키마는
-  // unknown으로 나른다 (events가 commands를 의존하지 않게). 받는 쪽이 파싱한다.
+  // An announcement for a session the host created on its own (#69) — session is a SessionInfo, but the
+  // event schema carries it as unknown (so events never depends on commands). The receiving side parses it.
   { type: 'session_created', sessionId: 's-new', session: { id: 's-new', projectId: 'p1', name: 'Worktrees' } },
   { type: 'worktree_merged', sessionId: 's1' },
   { type: 'app_state_changed', appId: 'control' },
-  // 외부 앱의 호출이 끝났다 (M4 A-4) — 앱은 (프로젝트, id)로 하나라 둘 다 싣는다. null은 사용자 폴더 앱
+  // An external app's call finished (M4 A-4) — an app is unique per (project, id), so both are carried. null means a user-folder app
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' },
   { type: 'external_app_state_changed', appId: 'timer', projectId: null },
-  // 화면이 낸 바뀜 — 그 화면은 이것을 다시 듣지 않는다(M4 B-5). 모르는 호출자 종류도 떨어지지 않는다
+  // A change caused by a screen — that screen never hears it again (M4 B-5). An unknown caller kind must not fail validation either
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1', cause: { kind: 'view', instanceId: 'i-1' } },
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1', cause: { kind: 'broker', via: 'x' } },
-  // 외부 앱의 기록 판이 바뀌었다 (M4 D-6) — 화면이 아니라 기록 판이 듣는다
+  // An external app's run history panel changed (M4 D-6) — heard by the run history panel, not a screen
   { type: 'external_app_runs_changed', appId: 'notes', projectId: 'p1' },
   { type: 'external_app_runs_changed', appId: 'timer', projectId: null },
-  // 외부 앱 목록이 달라졌다 (M4 A-8) — 싣는 것이 없다. 받은 쪽이 apps.list를 다시 읽는다
+  // The external app list changed (M4 A-8) — carries nothing. The receiving side refetches apps.list
   { type: 'external_apps_changed' },
   { type: 'external_app_questions_changed' },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
-  // 골 통지 (2026-09-07) — 두 도구의 합집합 모양과 걷힘(null) 양쪽 다 골든이다
+  // A goal announcement (2026-09-07) — both the union-of-both-tools shape and the cleared state (null) are golden
   {
     type: 'goal',
     sessionId: 's1',
@@ -134,13 +135,14 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'goal', sessionId: 's1', goal: null },
   { type: 'error', sessionId: 's1', error: { code: 'adapter_crashed', message: '프로세스 종료', retryable: true } },
   /*
-   * 세션에 속하지 않는 이벤트 (이슈 #43). sessionId가 **없어도** 파싱돼야 한다 —
-   * 이 앱이 통째로 낡았다는 사실은 어느 대화의 소유물이 아니다.
+   * An event that does not belong to a session (issue #43). It must parse **even without**
+   * sessionId — the fact that this app as a whole is out of date is not owned by any conversation.
    *
-   * 기본값이 붙은 필드는 생략된 채로도 읽혀야 한다. 옛 host가 status를 절반만 보내도
-   * 새 UI가 그걸 거절하면, 버전 확인이 버전 차이 때문에 죽는 셈이 된다.
+   * A field with a default must still be readable when omitted. If an old host sends only half
+   * of status and a new UI rejects it, checking the version would fail purely because of a
+   * version difference.
    */
-  // 프로젝트의 사건이라 sessionId가 없다 (#34) — update_status와 같은 규칙
+  // A project event, so there is no sessionId (#34) — the same rule as update_status
   { type: 'fs_changed', projectId: 'p1', dirs: ['', 'src'] },
   { type: 'update_status', status: { current: '0.1.0-beta.2' } },
   {
@@ -152,33 +154,33 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   },
 ]
 
-describe('golden: v1 이벤트 전종', () => {
+describe('golden: every v1 event type', () => {
   it.each(GOLDEN_EVENTS_V1.map((e) => [(e as { type: string }).type, e] as const))(
-    '%s 파싱',
+    'parses %s',
     (_type, raw) => {
       const parsed = NormalizedEvent.safeParse(raw)
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true)
     },
   )
 
-  it('모든 이벤트 타입이 픽스처에 있다 (새 타입 추가 시 골든도 추가하도록 강제)', () => {
+  it('every event type has a fixture (forces a new type to add a golden fixture too)', () => {
     const covered = new Set(GOLDEN_EVENTS_V1.map((e) => (e as { type: string }).type))
     const declared = NormalizedEvent.options.map((o) => o.shape.type.value as string)
     expect([...new Set(declared)].sort()).toEqual([...covered].sort())
   })
 })
 
-describe('전방 호환 (docs/protocol.md §4)', () => {
-  it('모르는 이벤트 타입은 무시한다 (throw 아님)', () => {
+describe('forward compatibility (docs/protocol.md §4)', () => {
+  it('ignores an unknown event type (does not throw)', () => {
     expect(parseEventLenient({ type: 'future_event_from_v2', sessionId: 's1' })).toBeNull()
   })
 
-  it('알려진 이벤트에 모르는 필드가 붙어도 파싱된다', () => {
+  it('parses a known event even with an unknown field attached', () => {
     const r = parseEventLenient({ type: 'turn_complete', sessionId: 's1', futureField: 123 })
     expect(r?.type).toBe('turn_complete')
   })
 
-  it('필수 필드가 빠지면 거부한다', () => {
+  it('rejects an event missing a required field', () => {
     expect(parseEventLenient({ type: 'message_delta', sessionId: 's1' })).toBeNull()
   })
 })
@@ -197,14 +199,14 @@ describe('a tool call leaves the host as its card (#221)', () => {
   })
 })
 
-describe('봉투', () => {
-  it('hello / rpc 클라이언트 프레임', () => {
+describe('envelope', () => {
+  it('hello / rpc client frames', () => {
     expect(parseClientFrame({ kind: 'hello', token: 't', protocolVersion: PROTOCOL_VERSION }).success).toBe(true)
     expect(parseClientFrame({ kind: 'rpc', id: '1', method: 'agents.send', params: {} }).success).toBe(true)
     expect(parseClientFrame({ kind: 'nope' }).success).toBe(false)
   })
 
-  it('hello_ok / event / res 서버 프레임', () => {
+  it('hello_ok / event / res server frames', () => {
     expect(parseServerFrame({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 0 }).success).toBe(true)
     expect(parseServerFrame({ kind: 'event', seq: 1, event: GOLDEN_EVENTS_V1[0] }).success).toBe(true)
     expect(parseServerFrame({ kind: 'res', id: '1', ok: true, result: {} }).success).toBe(true)
@@ -214,7 +216,7 @@ describe('봉투', () => {
     ).toBe(true)
   })
 
-  it('seq는 이벤트 푸시에 필수다 (재연결 복원의 근거)', () => {
+  it('seq is required on an event push (the basis for reconnect recovery)', () => {
     expect(parseServerFrame({ kind: 'event', event: GOLDEN_EVENTS_V1[0] }).success).toBe(false)
   })
 })

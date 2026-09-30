@@ -37,7 +37,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 
-/** UI → host RPC. 포트 인터페이스(platform/ports)와 1:1 대응 (docs/protocol.md §3) */
+/** UI → host RPC. Maps one-to-one to the port interface (platform/ports) (docs/protocol.md §3) */
 
 export const CreateSessionParams = z.object({
   projectId: ProjectId,
@@ -45,91 +45,100 @@ export const CreateSessionParams = z.object({
   tool: ToolName,
   model: z.string().optional(),
   effort: z.string().optional(),
-  /** 응답 길이 (codex의 model_verbosity). 지원 단계는 어댑터 능력 선언이 말한다 (#54) */
+  /** Response length (codex's model_verbosity). Which tiers are supported is stated by the adapter's capability declaration (#54) */
   verbosity: z.string().optional(),
-  /** 응답 속도 (codex의 service_tier). 지원 티어는 모델 목록(ModelOption.tiers)이 말한다 */
+  /** Response speed (codex's service_tier). Which tiers are supported is stated by the model list (ModelOption.tiers) */
   serviceTier: z.string().optional(),
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
   /**
-   * 이 세션이 물려받은 인수인계 노트 (#102) — 첫 메시지가 아니라 **기록**으로 들어간다.
+   * The handoff note this session inherited (#102) — enters as a **record**, not as the first
+   * message.
    *
-   * 에이전트가 쓴 노트는 전임자가 사라지면 다시 만들 수 없는 유일한 재료다. 첫 메시지가
-   * 경로만 나르게 되면서 그 글이 대화에 남을 자리가 없어졌으므로, 세션의 마커로 박아
-   * 둔다 (파일은 그 뒤로 순수한 파생물이라 언제 지워도 된다).
+   * A note the agent wrote is the one piece of material that cannot be recreated once its
+   * author is gone. Once the first message came to carry only a path, that text had nowhere to
+   * live in the conversation, so it is pinned as a marker on the session instead (the file
+   * after that point is a pure derivative and can be deleted at any time).
    */
   handoff: z
     .object({
       from: z.string(),
       note: z.string(),
       /**
-       * 전임 세션의 id (#106). 이름과 달리 이것은 **파일의 이름**이다 — 노트는
-       * `<데이터>/handoff/<프로젝트 id>/<전임 세션 id>.md`에 있고(#142), 이 값이
-       * 있어야 host가 "아직 주인이 있는 노트"와 고아를 구별하고, 후임자에게 그 폴더를
-       * 읽을 수 있게 열어 준다. 옛 프레임과 인수인계 밖의 호출을 위해 optional이다:
-       * 없으면 그 노트는 아무도 주장하지 않는다.
+       * The id of the predecessor session (#106). Despite the name, this is **the name of a
+       * file** — the note lives at `<data>/handoff/<project id>/<predecessor session id>.md`
+       * (#142), and the host needs this value to tell a "note that still has an owner" apart
+       * from an orphan, and to open that folder for the successor to read. It is optional for
+       * old frames and for calls made outside a handoff: without it, the note is claimed by
+       * nobody.
        */
       fromSessionId: SessionId.optional(),
     })
     .optional(),
   resumeExternalId: z.string().optional(),
-  /** 재개할 때 이전 대화도 화면에 복원한다 (resumeExternalId와 함께 쓴다) */
+  /** When resuming, also restore the prior conversation on screen (used together with resumeExternalId) */
   importHistory: z.boolean().optional(),
   /**
-   * 이 세션만 **깃 워크트리에서** 돌린다 (FR-2의 후순위 옵션).
+   * Run only this session **in a git worktree** (FR-2's lower-priority option).
    *
-   * 기본은 원본 디렉토리에서 직접 작업하는 것이다 — 워크트리는 강제하지 않는다.
-   * 같은 디렉토리에 세션이 여럿일 때 파일 충돌을 원천적으로 없애고 싶은 사람만 켠다.
+   * The default is to work directly in the original directory — a worktree is never forced.
+   * Only someone who wants to eliminate file conflicts outright, when several sessions share a
+   * directory, turns this on.
    */
   worktree: z.boolean().optional(),
   /**
-   * 워크트리 브랜치 이름 (#69). 생략하면 자동 이름(`centralu/<id 앞 8자>`)이다.
+   * The worktree branch name (#69). If omitted, an automatic name is used
+   * (`centralu/<first 8 characters of the id>`).
    *
-   * 브랜치 이름이 곧 세션 이름이자 워크트리 디렉토리 이름이다 — 사실상 영구라서
-   * (나중에 바꾸려면 트리를 다시 만들어야 한다) 여기서 사람이 정할 수 있어야 한다.
-   * 검증은 host가 한다 (`git check-ref-format` — 규칙을 우리가 다시 적지 않는다).
+   * The branch name doubles as the session name and the worktree directory name — since it is
+   * effectively permanent (changing it later means recreating the tree), the person has to be
+   * able to choose it here. Validation is done by the host (`git check-ref-format` — we do not
+   * re-implement that rule ourselves).
    */
   worktreeBranch: z.string().optional(),
   /**
-   * 어디서 갈라질까 (사용자 지적 2026-09-07: "워커 생성할 때 어디 브랜치에서 가져올지
-   * 정하는 게 없다").
+   * Where to branch off from (the person pointed this out on 2026-09-07: "when creating a
+   * worker, there is no way to pick which branch to pull from").
    *
-   * 생략하면 프로젝트의 줄기(매니저가 정한 baseBranch), 그것도 없으면 지금 HEAD다.
-   * 줄기를 정해 둔 사람도 "이번 하나만 저 브랜치에서"가 필요할 때가 있고, 그때 유일한
-   * 우회로가 원본 폴더에서 브랜치를 갈아 끼우는 것이면 워크트리를 쓰는 이유가 없어진다.
+   * If omitted, this is the project's trunk (the baseBranch the manager set), and if that is
+   * also missing, the current HEAD. Even someone who has set a trunk sometimes needs "just this
+   * one time, from that other branch," and if the only workaround were swapping branches in the
+   * original folder, there would be no reason left to use a worktree.
    */
   worktreeBase: z.string().optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 
 /**
- * 세션 설정 변경. **이름을 주는 이유**는 포트도 이 타입을 그대로 쓰기 위해서다.
+ * Change a session's settings. **The reason this has its own name** is so the port can use this
+ * exact type too.
  *
- * 예전에는 포트가 `{ model?, permissionPreset? }`라고 손으로 다시 적었고,
- * 나중에 추가된 `effort`가 거기 빠진 채로 남았다. 그런데도 동작했다 —
- * 스토어가 **변수**로 넘기면 TypeScript는 초과 속성을 검사하지 않기 때문이다.
- * 타입이 "없다"고 말하는 필드가 실제로는 흐르고 있었다.
+ * The port used to re-declare `{ model?, permissionPreset? }` by hand, and when `effort` was
+ * added later it was left out there. It still worked anyway — because when the store passes it
+ * as a **variable**, TypeScript does not check for excess properties. A field the type said did
+ * not exist was flowing through in practice.
  */
 export const UpdateSettingsParams = z.object({
   sessionId: SessionId,
   model: z.string().nullable().optional(),
-  /** 추론 강도. 모델마다 지원 단계가 다르므로 문자열 그대로 나른다 */
+  /** Reasoning effort. Carried as a raw string since supported tiers differ by model */
   effort: z.string().nullable().optional(),
-  /** 응답 길이. effort와 같은 규칙으로 문자열 그대로 나른다 (#54) */
+  /** Response length. Carried as a raw string under the same rule as effort (#54) */
   verbosity: z.string().nullable().optional(),
-  /** 응답 속도. 같은 규칙 — 지원 티어는 모델 목록이 말한다 */
+  /** Response speed. Same rule — which tiers are supported is stated by the model list */
   serviceTier: z.string().nullable().optional(),
   permissionPreset: PermissionPreset.optional(),
 })
 export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>
 
 /**
- * 세션의 역할 (#13).
+ * A session's role (#13).
  *
- * `projectId === null`이 곧 오케스트레이터라는 판정이 여섯 군데에 흩어져 있었고, 그
- * 흩어짐을 표식 하나로 모은 것이 이 필드다. 프로젝트 오케스트레이터가 폐기되면서
- * (2026-09-01) 두 판정은 다시 같은 뜻이 됐지만, 표식은 남긴다 — 판정이 한 군데인 편이
- * 여전히 낫고, 되돌리는 마이그레이션은 얻는 것 없이 위험만 있다.
+ * The judgment that `projectId === null` means orchestrator used to be scattered across six
+ * places, and this field gathers that scattering into a single marker. Once the project
+ * orchestrator was discontinued (2026-09-01), the two judgments became equivalent again, but the
+ * marker stays — having the judgment live in one place is still better, and a migration to
+ * revert it would carry risk with nothing to gain.
  */
 export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator'])
 export type SessionKind = z.infer<typeof SessionKind>
@@ -137,11 +146,12 @@ export type SessionKind = z.infer<typeof SessionKind>
 export const SessionInfo = z.object({
   id: z.string(),
   /**
-   * 소속 프로젝트. **오케스트레이터만 null이다** — 프로젝트를 가로지르는 세션이라
-   * 어디에도 매달지 않는다 (매달면 그 프로젝트를 지울 때 함께 죽는다).
+   * The project this session belongs to. **Only the orchestrator has null here** — it is a
+   * session that crosses projects, so it is not attached to any one of them (attaching it would
+   * mean it dies along with that project when the project is deleted).
    */
   projectId: z.string().nullable(),
-  /** 워커인가 오케스트레이터인가. 기본은 워커 — 옛 프레임에는 이 필드가 없다 */
+  /** Whether this is a worker or an orchestrator. Defaults to worker — old frames do not have this field */
   kind: SessionKind.default('worker'),
   tool: ToolName,
   externalId: z.string().nullable(),
@@ -151,114 +161,130 @@ export const SessionInfo = z.object({
   lastReadSeq: z.number().default(0),
   lastSeq: z.number().default(0),
   createdAt: z.number(),
-  /** 대기 시작 시각 — 인박스 정렬·경과 시간 표시 (FR-12/15) */
+  /** When waiting began — used for inbox ordering and showing elapsed time (FR-12/15) */
   waitingSince: z.number().nullable().default(null),
-  /** 프로세스가 살아 있는가. false면 대화를 이어가려면 재개가 필요하다 (FR-10) */
+  /** Whether the process is alive. If false, resuming is required to continue the conversation (FR-10) */
   live: z.boolean().default(true),
-  /** 대화 도중에도 바꿀 수 있다 (FR-7) — 세션 헤더에서 고른다 */
+  /** Can be changed mid-conversation (FR-7) — chosen from the session header */
   model: z.string().nullable().default(null),
-  /** 추론 강도. 지원하지 않는 모델이면 null이다 */
+  /** Reasoning effort. Null if the model does not support it */
   effort: z.string().nullable().default(null),
   /**
-   * 응답 길이 (#54). null이면 도구 기본값.
+   * Response length (#54). Null means the tool's default.
    *
-   * effort와 달리 **다음에 깰 때** 적용된다 — codex의 turn/start에는 이 자리가 없고
-   * thread config로만 넘어간다 (generated/v2/TurnStartParams.ts에 없음 — 실측).
-   * 매니저의 drift 재시작이 그 길을 이미 알고 있으므로 배관은 effort와 같다.
+   * Unlike effort, this takes effect **the next time the session wakes up** — codex's
+   * turn/start has no slot for it, it only flows through the thread config (confirmed absent
+   * from generated/v2/TurnStartParams.ts — measured). The manager's drift restart already knows
+   * that path, so the plumbing is the same as for effort.
    */
   verbosity: z.string().nullable().default(null),
-  /** 응답 속도 (#54와 같은 배관). null이면 codex 기본. verbosity처럼 다음에 깰 때 적용된다 */
+  /** Response speed (same plumbing as #54). Null means codex's default. Like verbosity, it applies the next time the session wakes up */
   serviceTier: z.string().nullable().default(null),
   permissionPreset: PermissionPreset.default('normal'),
   /**
-   * 이어받은 이전 대화의 식별자 (불러오기로 만든 세션만).
-   * externalId와 다를 수 있다 — 도구가 resume하면서 새 식별자를 발급하기 때문이다.
+   * The identifier of the prior conversation this session inherited (only for sessions created
+   * by importing). Can differ from externalId, since the tool issues a new identifier when it
+   * resumes.
    */
   importedFrom: z.string().nullable().default(null),
   /**
-   * 이 세션이 도는 워크트리. null이면 프로젝트 디렉토리에서 직접 돈다(기본).
+   * The worktree this session runs in. Null means it runs directly in the project directory
+   * (the default).
    *
-   * 경로를 들고 있는 이유: 재개할 때도 **같은 워크트리**로 돌아가야 한다.
-   * 프로젝트 경로로 되돌아가면 격리가 조용히 풀린다 — 사용자는 여전히 격리된 줄 안다.
+   * Why the path is held here: on resume, the session must return to **the same worktree**.
+   * Falling back to the project path would silently break isolation — the person would still
+   * believe it is isolated.
    */
   worktree: z
     .object({
       path: z.string(),
       branch: z.string(),
-      /** 생성 시점의 HEAD sha (#69) — 병합 감지의 기준점. 갓 만든 브랜치를 병합됨으로 안 읽기 위한 것 */
+      /** The HEAD sha at creation time (#69) — the baseline for merge detection. Keeps a freshly created branch from reading as merged. */
       base: z.string().optional(),
     })
     .nullable()
     .default(null),
   /**
-   * 이 워크트리 브랜치의 작업이 프로젝트 줄기에 다 들어갔는가 (#69).
+   * Whether this worktree branch's work has fully landed in the project trunk (#69).
    *
-   * git에서 파생되는 사실이라 저장하지 않는다 — 기동 때와 프로젝트 git 새로고침 때
-   * 다시 판정한다. 스쿼시·리베이스 병합은 로컬 감지 불가(실측)라 이 값이 false로
-   * 남을 수 있다. 그 비용은 배지 하나다: 사람이 지우는 길은 언제나 열려 있다.
+   * Not stored, since it is a fact derived from git — it is re-judged on startup and whenever
+   * the project's git state is refreshed. Squash and rebase merges cannot be detected locally
+   * (measured), so this value can stay false even after the work has landed. The cost of that is
+   * a single badge: the person can always delete it manually regardless.
    */
   worktreeMerged: z.boolean().default(false),
   /**
-   * 이 워크트리 브랜치의 풀 리퀘스트 (#76 stage 3). null이면 "모른다"다 — 없다가 아니다.
+   * The pull request for this worktree branch (#76 stage 3). Null means "unknown," not "none."
    *
-   * gh CLI로 측정한 파생 사실이라 저장하지 않는다(worktreeMerged와 같은 원칙).
-   * 존재 이유는 위 사각지대다: 스쿼시·리베이스 병합은 로컬 감지 불가인데 GitHub PR의
-   * 지배적 결말이 스쿼시다. PR의 MERGED는 서버가 기록한 사실이라 그 사각지대가 없다.
-   * gh가 없거나 오프라인이면 이 값은 그냥 null로 남는다 — 배지 하나의 근거일 뿐이다.
+   * Not stored, since it is a derived fact measured through the gh CLI (same principle as
+   * worktreeMerged). The reason this field exists is the blind spot above: squash and rebase
+   * merges cannot be detected locally, and squash is the dominant outcome for a GitHub PR. A
+   * PR's MERGED state is a fact recorded by the server, so it has no such blind spot. If gh is
+   * missing or the machine is offline, this value simply stays null — it is only the basis for
+   * one badge.
    */
   worktreePr: z
     .object({ number: z.number(), state: z.enum(['open', 'merged', 'closed']), url: z.string() })
     .nullable()
     .default(null),
   /**
-   * 세션에 걸린 골 (2026-09-07). 도구가 판정하는 파생 사실이라 저장하지 않는다 —
-   * 재시작 뒤 codex는 thread/goal/get으로 다시 묻고, claude는 다음 판정 때 다시 배운다.
+   * The goal set on the session (2026-09-07). Not stored, since it is a derived fact judged by
+   * the tool — after a restart, codex re-asks via thread/goal/get, and claude learns it again at
+   * the next judgment.
    */
   goal: SessionGoal.nullable().default(null),
   /**
-   * 조율 세션의 시야 허용 목록 (#80·#81 — 이름 없는 코어 손잡이 ①).
+   * A coordinating session's view allowlist (#80, #81 — unnamed core handle #1).
    *
-   * kind='coordinator' 세션의 오케스트레이터 도구가 볼 수 있는 세션들이다.
-   * 강제는 host가 한다(꺼질 수 있는 앱 코드에 강제를 두지 않는다). "업무"라는
-   * 이름은 코어에 없다 — 이것은 시야라는 물리일 뿐이다.
+   * The sessions visible to the orchestrator tool of a session with kind='coordinator'. The host
+   * enforces this (enforcement does not live in app code, which can be turned off). There is no
+   * concept of "task" in the core — this is purely the physical fact of visibility.
    */
   scopeSessionIds: z.array(z.string()).nullable().default(null),
   /**
-   * 창조 시 박제된 역할문 (#80·#81 — 이름 없는 코어 손잡이 ②).
+   * The role text pinned at creation time (#80, #81 — unnamed core handle #2).
    *
-   * 재기동·재개 때 다시 입힐 수 있어야 하므로 행에 산다. 내용의 의미는 앱만 안다 —
-   * 코어는 스폰 때 systemPromptAppend로 실어 나를 뿐이다.
+   * Lives on the row because it must be reapplied on restart or resume. The core does not know
+   * what the content means — only the app does. The core just carries it as systemPromptAppend
+   * when spawning.
    */
   roleAppend: z.string().nullable().default(null),
   /**
-   * 이 세션을 만든 앱 (#81 — 이름 없는 코어 손잡이 ③, 사용자 요청 2026-09-09).
+   * The app that created this session (#81 — unnamed core handle #3, requested by the person on
+   * 2026-09-09).
    *
-   * 코어가 아는 것은 **소유자의 id 한 줄**이고 그 뜻은 앱만 안다. 이 줄이 있으면
-   * "세션을 어느 목록이 보여주는가"가 정해진다: 켜진 앱이 자기 세션을 보여주고,
-   * 사이드바는 프로젝트만 든다. 앱이 꺼지거나 사라지면 사이드바가 받는다 —
-   * 앱을 꺼도 세션에 닿을 수 있어야 한다는 규칙(강등 원칙)이 그렇게 지켜진다.
+   * All the core knows is **a single id line naming the owner**; only the app knows what it
+   * means. This line decides which list shows the session: an app that is running shows its own
+   * sessions, and the sidebar only carries project sessions. If the app is turned off or removed,
+   * the sidebar takes it over — this is how the rule that a session must stay reachable even with
+   * its app off (the demotion principle) is kept.
    *
-   * 앱이 스스로 적을 수 없다: 값은 도구를 부른 앱의 등록 id에서 온다.
+   * An app cannot write this itself: the value comes from the registered id of the app that
+   * called the tool.
    */
   appId: AppId.nullable().default(null),
   /**
-   * 이 세션이 매달린 매니저 세션 (#69). null이면 최상위(보통).
+   * The manager session this session hangs off of (#69). Null means top-level (the usual case).
    *
-   * 워크트리 세션은 반드시 매니저 아래에 선다 — 소속이 없을 때 이 분류의 1번 문서화된
-   * 실패(고아 워크트리: Vibe Kanban #1764/#2335/#1571)가 일어난다. 매니저는 새로운 종류가
-   * 아니라 자식을 가진 보통 세션이고, 사이드바 트리가 이 필드 하나로 그려진다.
+   * A worktree session must always stand under a manager — without that attachment, the
+   * number-one documented failure in this category happens (an orphaned worktree: Vibe Kanban
+   * #1764/#2335/#1571). A manager is not a new kind of session, just an ordinary session with
+   * children, and the sidebar tree is drawn entirely from this one field.
    *
-   * 대화가 아니라 행에 사는 이유: 소속은 세션 프로세스보다 오래 살아야 한다.
-   * 도구 쪽 대화가 사라져도(외부 삭제) 이 링크는 남아서 관계가 복원된다.
+   * Why it lives on the row rather than in the conversation: the attachment must outlive the
+   * session process. Even if the tool-side conversation disappears (deleted externally), this
+   * link remains and the relationship is restored.
    */
   parentSessionId: z.string().nullable().default(null),
   /**
-   * **살아 있는 동안만 유효한 사실들** — DB가 아니라 host 메모리에서 온다.
+   * **Facts valid only while the process is alive** — these come from the host's memory, not
+   * the database.
    *
-   * 이 필드들이 없던 동안, 재연결·앱 재시작 후 목록을 다시 받으면
-   * state=waiting_approval인데 **카드를 그릴 payload가 없어** 승인 카드가 안 뜨고
-   * requestId도 없어 응답할 길이 없었다 — 에이전트는 영원히 블록됐다 (실측).
-   * host 프로세스가 재시작되면 정말로 사라진 것이므로 기본값(null/[])이 맞다.
+   * While these fields were missing, refetching the list after a reconnect or app restart could
+   * show state=waiting_approval with **no payload to draw the card from**, so the approval card
+   * never appeared, and with no requestId there was no way to respond — the agent stayed blocked
+   * forever (measured). If the host process itself restarts, the fact really is gone, so the
+   * default (null/[]) is correct.
    */
   pendingApproval: z.object({ requestId: z.string(), detail: ApprovalDetail }).nullable().default(null),
   pendingQuestions: z.array(z.object({ requestId: z.string(), questions: z.array(Question) })).default([]),
@@ -284,11 +310,12 @@ export const SessionInfo = z.object({
 export type SessionInfo = z.infer<typeof SessionInfo>
 
 /**
- * 설정 변경이 도는 프로세스에 언제 닿았나 (#164) — 화면이 "무엇이 일어났는지"를 그대로 말하게.
+ * When a settings change reached the running process (#164) — so the screen can say exactly
+ * what happened.
  *
- *   restarted    도구 프로세스를 지금 갈아 끼웠다 (쉬는 세션)
- *   after_turn   도는 턴을 끊지 않는다 — 이 턴이 끝나면 갈아 끼운다 (working·waiting_approval)
- *   saved        저장만 했다 — 도는 프로세스가 없거나(깨울 때 이 값으로 뜬다) 이미 같은 값으로 돈다
+ *   restarted    The tool process was just replaced (an idle session)
+ *   after_turn   The running turn is not interrupted — the process is replaced once this turn ends (working, waiting_approval)
+ *   saved        Only saved — either there is no running process (this value appears when the session wakes up) or it is already running with the same values
  */
 export const SettingsApplied = z.enum(['restarted', 'after_turn', 'saved'])
 export type SettingsApplied = z.infer<typeof SettingsApplied>
@@ -296,8 +323,9 @@ export const UpdateSettingsResult = SessionInfo.extend({ applied: SettingsApplie
 export type UpdateSettingsResult = z.infer<typeof UpdateSettingsResult>
 
 /**
- * 살아-있는-동안 필드들의 초기값. 저장소 행이나 새 세션에서 SessionInfo를 조립할 때 쓴다 —
- * 손으로 나열하면 필드가 늘 때 한 곳이 빠진 채 컴파일이 지나간다.
+ * The initial values for the live-only fields. Used when assembling a SessionInfo from a store
+ * row or a new session — listing them by hand risks a build that still compiles with one spot
+ * left out whenever a field is added.
  */
 export function sessionLiveDefaults(): Pick<
   SessionInfo,
@@ -310,20 +338,21 @@ export function sessionLiveDefaults(): Pick<
     limit: null,
     usage: null,
     context: null,
-    // 병합 여부(#69)도 여기 산다 — git에서 파생되는 사실이라 기동 때 다시 판정한다
+    // Merge status (#69) also lives here — it is a fact derived from git, re-judged on startup
     worktreeMerged: false,
-    // PR 상태(#76 stage 3)도 같은 원칙 — gh로 다시 측정한다
+    // PR status (#76 stage 3) follows the same principle — measured again through gh
     worktreePr: null,
-    // 골(2026-09-07)도 같은 원칙 — 도구가 다시 말해 준다
+    // The goal (2026-09-07) follows the same principle — the tool tells us again
     goal: null,
   }
 }
 
 /**
- * 저장된 셸 명령 하나 (#44, 별칭은 2026-09-06 사용자 요청).
- * `command`가 정체성이다 — 실행 장부(commandRuns)·host PTY 명부·로그 버퍼가 전부
- * 이 문자열로 키를 잡는다. `label`은 표시 전용이고, 보여줄 때는 항상 command를
- * 곁들인다 (이름이 몰래 딴 명령을 뜻하게 되는 표류 방지).
+ * A single saved shell command (#44, the alias was requested by the person on 2026-09-06).
+ * `command` is the identity — the run ledger (commandRuns), the host's PTY registry and the log
+ * buffer all key off this string. `label` is display-only, and wherever it is shown, the command
+ * is always shown alongside it (to prevent the name from drifting into secretly meaning a
+ * different command).
  */
 export const SavedCommand = z.object({
   command: z.string(),
@@ -332,10 +361,11 @@ export const SavedCommand = z.object({
 export type SavedCommand = z.infer<typeof SavedCommand>
 
 /**
- * 한 도구를 위해 마지막으로 고른 값들 (#107).
+ * The values last chosen for one tool (#107).
  *
- * verbosity·serviceTier는 여기 없다 — 프로젝트 기본값으로 기억된 적이 없고
- * (컬럼도 없다), 없는 기억을 지금 만들 이유도 없다. 생기면 같은 봉투에 들어온다.
+ * verbosity and serviceTier are not here — they have never been remembered as a project
+ * default (there is no column for them either), and there is no reason to invent that memory now.
+ * If they are added, they go into the same envelope.
  */
 export const ToolDefaults = z.object({
   model: z.string().nullable().default(null),
@@ -358,14 +388,14 @@ export const ProjectInfo = z.object({
    */
   defaultTool: ToolName.nullable().default(null),
   /**
-   * 마지막으로 고른 모델·강도 — **도구마다 따로** (#107).
+   * The last-chosen model and effort — **kept separately per tool** (#107).
    *
-   * 예전에는 프로젝트당 하나였다 (`defaultModel`·`defaultEffort` 스칼라). 그런데 모델
-   * 이름은 도구의 어휘라, 한 번 Claude 모델을 고른 프로젝트에서 시작한 Codex 세션이
-   * 전부 그 이름을 물려받았다 — 실측: `default_tool=codex`인 프로젝트가
-   * `default_model=opus[1m]`을 들고 있었고, 그 세션은 매 턴 400으로 죽었다.
-   * "고른 행위가 곧 기본값"이라는 규칙은 옳았고 저장 모양이 그 규칙을 표현하지
-   * 못했을 뿐이다: **선택은 언제나 어떤 도구를 위한 선택이다.**
+   * This used to be one value per project (the scalars `defaultModel` and `defaultEffort`). But
+   * a model name is a tool's own vocabulary, so a Codex session started in a project that had
+   * once had a Claude model chosen inherited that name wholesale — measured: a project with
+   * `default_tool=codex` held `default_model=opus[1m]`, and that session died with a 400 on
+   * every turn. The rule "the act of choosing becomes the default" was correct; the storage
+   * shape just failed to express it: **a choice is always a choice for some particular tool.**
    */
   defaultModels: z.record(ToolName, ToolDefaults).default({}),
   /**
@@ -385,21 +415,24 @@ export const ProjectInfo = z.object({
    */
   commands: z.array(SavedCommand).default([]),
   /**
-   * 워크트리 프로비저닝 (#69). 새 워크트리는 빈 작업대다 — 추적 파일만 있고
-   * node_modules도 gitignored .env도 없다. 생성 순서: 워크트리 → 파일 복사 → 셋업
-   * (Vibe Kanban이 검증한 순서). null이면 아무것도 안 돈다 — 강제하지 않는다.
-   * 레포가 아니라 우리 DB에 산다 (#50: 저장소에는 아무것도 쓰지 않는다).
+   * Worktree provisioning (#69). A new worktree is an empty workbench — it has only the tracked
+   * files, no node_modules, no gitignored .env. Creation order: worktree, then copy files, then
+   * setup (the order Vibe Kanban validated). Null means nothing runs — it is never forced.
+   * This lives in our own database, not the repo (#50: nothing is ever written into the repo).
    */
   worktreeSetup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable().default(null),
   /**
-   * 이 프로젝트의 워크트리 매니저 자리와 줄기 (#76). null이면 아직 없다 — 화면은 그때
-   * "매니저 시작"을 내민다. baseBranch가 워크트리가 갈라지는 곳이자 병합 판정의 기준이다.
+   * This project's worktree manager slot and trunk (#76). Null means there is not one yet — the
+   * screen then offers "start manager." baseBranch is both where a worktree branches off from
+   * and the baseline for merge judgment.
    */
   worktreeManager: z.object({ sessionId: z.string(), baseBranch: z.string() }).nullable().default(null),
   /**
-   * 이 프로젝트의 코드를 이 기계에서 돌려도 되는가 (M4, 플랜 결정 3) — 앱이 뜨고 프로젝트 설정이
-   * 존중되는가를 한 칸이 정한다. 새로 등록한 프로젝트는 "아니오"로 시작한다(`projects.setTrusted`).
-   * 없으면 "아니오"로 읽는다: 신뢰를 모르는 옛 host의 답을 "예"로 채우면 조용한 허락이 된다.
+   * Whether this project's code is allowed to run on this machine (M4, plan decision 3) — this
+   * one field decides whether apps start and whether project settings are honored. A newly
+   * registered project starts as "no" (`projects.setTrusted`). Missing reads as "no" too: if an
+   * old host's answer that does not know about trust were filled in as "yes," that would be a
+   * silent grant of permission.
    */
   trusted: z.boolean().default(false),
   git: z
@@ -407,7 +440,7 @@ export const ProjectInfo = z.object({
       branch: z.string(),
       changedFiles: z.number(),
       isRepo: z.boolean(),
-      /** OS가 접근을 막았다 — '저장소 아님'과 구분해 안내한다 (F-1 실측) */
+      /** The OS blocked access — reported distinctly from "not a repository" (measured in F-1) */
       denied: z.boolean().optional(),
     })
     .nullable()
@@ -415,37 +448,38 @@ export const ProjectInfo = z.object({
 })
 export type ProjectInfo = z.infer<typeof ProjectInfo>
 
-/** 슬래시 명령(스킬) 하나 */
+/** A single slash command (skill) */
 export const CommandInfo = z.object({
   name: z.string(),
   description: z.string().default(''),
-  /** 인자 힌트 (예: "<file>") */
+  /** Argument hint (e.g. "<file>") */
   argumentHint: z.string().default(''),
 })
 export type CommandInfo = z.infer<typeof CommandInfo>
 
-/** 터미널 하나 (목록·생성·재시작이 모두 이 모양을 돌려준다) */
+/** One terminal (listing, creation and restart all return this shape) */
 export const TerminalInfo = z.object({
   terminalId: z.string(),
   cwd: z.string(),
   title: z.string(),
-  /** 지금까지의 출력 — 다시 붙었을 때 화면을 되살린다 */
+  /** Output so far — restores the screen on reattach */
   history: z.string(),
   alive: z.boolean(),
 })
 export type TerminalInfo = z.infer<typeof TerminalInfo>
 
 /**
- * 자주 쓰는 명령어의 실행 하나 (#60). 명령별 **마지막 실행**만 남는다 —
- * 같은 명령을 다시 실행할 때만 교체된다 (사용자 결정, host 수명 동안 유지).
- * 출력 스트림은 터미널 프레임 레인을 그대로 탄다: runId가 terminalId 자리에 실린다.
+ * One run of a frequently used command (#60). Only the **latest run** per command is kept —
+ * it is replaced only when that same command runs again (the person's decision; kept for the
+ * host's lifetime). The output stream rides the same terminal frame lane: runId takes the place
+ * of terminalId.
  */
 export const CommandRunInfo = z.object({
   command: z.string(),
-  /** 실행마다 새 id — 화면이 출력 스트림을 갈아탈 기준 */
+  /** A fresh id per run — the basis for the screen to switch which output stream it follows */
   runId: z.string(),
   running: z.boolean(),
-  /** null이면 아직 돌고 있거나, 프로세스를 띄우지도 못한 것 (history가 이유를 말한다) */
+  /** Null means either still running, or the process never even started (history states the reason) */
   exitCode: z.number().nullable(),
   startedAt: z.number(),
 })
@@ -456,8 +490,9 @@ export const StoredMessage = z.object({
   seq: z.number(),
   role: z.enum(['user', 'assistant', 'system']),
   /*
-   * `app_view`: 이 도구 카드 아래에 어느 앱의 화면이 섰다(또는 거절됐다)는 사실 (M4 B-1). 본문은 없다 —
-   * 다시 연 UI가 그 자리에 자리표시를 세우는 근거다(events.ts의 `app_view`).
+   * `app_view`: the fact that some app's screen stood up (or was refused) under this tool card
+   * (M4 B-1). There is no body — this is only the basis for a reopened UI to plant a placeholder
+   * there (`app_view` in events.ts).
    */
   kind: z.enum(['text', 'tool_call', 'tool_result', 'approval', 'marker', 'image', 'reasoning', 'app_view']),
   payload: z.unknown(),
@@ -497,13 +532,15 @@ export const TrashedSession = z.object({
 export type TrashedSession = z.infer<typeof TrashedSession>
 
 /**
- * 첨부 하나의 상한 (#94) — base64 글자 수로 센다. 원본 32MiB가 이 길이가 된다.
+ * The cap on a single attachment (#94) — counted in base64 characters. A 32MiB original comes
+ * out to this length.
  *
- * 상한이 없던 자리다. 총량은 `sweepAttachments`가 500MB로 잡지만 그 청소는 이 길로
- * 들어온 파일을 보지 않으므로, 한 번의 호출이 디스크를 채우는 것을 막는 것은 여기뿐이다.
- * 게다가 문자열은 파일이 되기 전에 host의 메모리에 통째로 올라간다 — 거절은 쓰기 전에
- * 일어나야 의미가 있다. 32MiB는 붙여넣는 스크린샷(수 MB)보다 넉넉히 크고, 한 번에
- * 호스트를 눕힐 만큼 크지는 않은 자리로 골랐다.
+ * There used to be no cap here at all. The overall total is capped at 500MB by
+ * `sweepAttachments`, but that cleanup never looks at files arriving through this path, so this
+ * is the only thing stopping a single call from filling the disk. On top of that, the string is
+ * held whole in the host's memory before it ever becomes a file — a rejection only means
+ * anything if it happens before the write. 32MiB was chosen as comfortably larger than a pasted
+ * screenshot (a few MB), while still not large enough to bring down the host in one call.
  */
 export const ATTACHMENT_MAX_BASE64 = Math.ceil((32 * 1048576) / 3) * 4
 
@@ -519,16 +556,18 @@ export const RpcMethods = {
       requestId: z.string(),
       decision: ApprovalDecision,
       scope: ApprovalScope.optional(),
-      /** '항상 허용'의 대상 패턴. core가 계산해 UI가 보낸다 */
+      /** The target pattern for "always allow." Computed by the core and sent by the UI */
       matcher: z.string().optional(),
     }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 선택지에 답한다 (AskUserQuestion). 답은 그 도구의 결과로 모델에게 돌아간다.
+   * Answers a set of choices (AskUserQuestion). The answer returns to the model as that tool's
+   * result.
    *
-   * 승인과 나눠 둔 이유는 돌아가는 것이 다르기 때문이다 — 승인은 실행 여부고,
-   * 이건 **내용**이다. 질문이 여러 개면 답도 여러 개 온다.
+   * Kept separate from approval because what goes back is different — an approval is whether to
+   * run at all, while this is **content**. If there are several questions, several answers
+   * arrive together.
    */
   'agents.answerQuestion': {
     params: z.object({
@@ -544,26 +583,27 @@ export const RpcMethods = {
    * tool's conversation file and the worktree all stay until the person deletes it for good in Settings
    * (`trash.purge` / `trash.empty`). The two flags only record what that later step removes.
    *
-   * 한때 그 앞에 아카이브(목록에서만 숨기기)가 있었다. 2026-09-02에 폐기했다:
-   * 들어가는 문(인박스의 `d`)만 있고 나오는 문이 없어서, 사람 눈에는 삭제와
-   * 구별되지 않았다. The trash is that shape with its exits built in the same change: list, read, restore.
+   * There used to be an archive ahead of this (hiding a session from the list only). It was
+   * discontinued on 2026-09-02: it had a door in (the inbox's `d`) and no door out, so to the
+   * person it was indistinguishable from deletion. The trash is that shape with its exits built in the same change: list, read, restore.
    */
   'agents.deleteSession': {
     params: z.object({
       sessionId: SessionId,
       /**
-       * 워크트리 세션일 때만 의미가 있다. **기본은 남기는 것이다** —
-       * 에이전트가 몇 시간 작업한 결과가 거기 있을 수 있고, 조용히 지우면 되돌릴 길이 없다.
-       * UI가 `agents.worktreeStatus`로 먼저 묻고, 사람이 정한 답을 여기로 보낸다.
+       * Only meaningful for a worktree session. **The default is to keep it** — hours of an
+       * agent's work can live there, and deleting it silently leaves no way back. The UI asks
+       * first via `agents.worktreeStatus`, and sends whatever the person decided here.
        * The worktree stays in place while the session is in the trash; this marks it for removal when it is purged.
        */
       deleteWorktree: z.boolean().default(false),
       /**
-       * 도구 쪽 대화 원본까지 지운다 (도그푸딩 "진짜로 삭제" — codex rollout 실측 550MB,
-       * claude JSONL). 기본은 역시 남기는 것이다: 그 파일은 도구의 것이고, 남아 있으면
-       * 삭제를 후회했을 때 그 도구에서 이어갈 마지막 길이 된다. 사람이 체크박스로
-       * 명시한 경우에만 켠다. 원본 삭제가 실패하면 우리 쪽 삭제도 멈춘다 —
-       * "지웠다"고 답했는데 원본이 남는 것이 최악의 결과라서다.
+       * Also delete the tool-side conversation itself (dogfooding "actually delete" — measured
+       * at 550MB for a codex rollout, plus claude JSONL). The default is to keep it here too:
+       * that file belongs to the tool, and keeping it around is the last way back into that tool
+       * if the deletion is regretted. Only turned on when the person explicitly checks the box.
+       * If deleting the original fails, our own deletion stops too — because answering "deleted"
+       * while the original still exists would be the worst outcome.
        * Since #204 the file is deleted when the session is purged from the trash, not here; the rule above holds there.
        */
       deleteExternal: z.boolean().default(false),
@@ -571,12 +611,13 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 워크트리를 지워도 되는지 판단할 재료. 지우기 직전에 UI가 묻는다.
-   * `null`이면 워크트리 세션이 아니다 — 물어볼 것도 없다.
+   * The material needed to judge whether a worktree can be deleted. The UI asks this right
+   * before deleting. `null` means this is not a worktree session — there is nothing to ask.
    */
   /**
-   * 오케스트레이터의 MCP 서버 제안 흐름 (propose_mcp_server → 사람의 원클릭 승인 →
-   * 앱이 등록하고 오케스트레이터를 재시작). 제안 목록은 조회로, 답은 resolve로.
+   * The orchestrator's MCP server proposal flow (propose_mcp_server, then the person's one-click
+   * approval, then the app registers it and restarts the orchestrator). The proposal list is
+   * fetched by query, and the answer goes through resolve.
    */
   'agents.mcpProposals': {
     params: z.object({}),
@@ -596,8 +637,9 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 오케스트레이터 스킬 (#71) — 제안 조회·응답과, 승인된 스킬의 목록·삭제.
-   * 삭제가 있는 이유: 넣을 수만 있고 못 지우는 스킬은 없느니만 못하다 (이슈의 결정).
+   * Orchestrator skills (#71) — fetching and answering proposals, plus listing and deleting
+   * approved skills. The reason deletion exists: a skill that can only be added and never
+   * removed is worse than not having one at all (the decision recorded on the issue).
    */
   'agents.skillProposals': {
     params: z.object({}),
@@ -618,38 +660,43 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 죽은-에이전트 인수인계 기록 (#78). 그 세션의 도구를 부르지 않고 host가
-   * 저장소 원문(+codex 롤아웃의 컴팩트 요약)으로 만든다.
+   * The handoff transcript for a dead agent (#78). Built by the host from the raw store data
+   * (plus a compact summary of a codex rollout) without calling that session's tool.
    *
-   * **결과는 파일이다** (#102): host가 데이터 폴더의 노트 자리(`<데이터>/handoff/<프로젝트 id>/
-   * <세션 id>.md`, #142)에 써 놓고 그 절대 경로를 돌려준다 — 에이전트에게 받는 모드
-   * (`agents.exportHandoffNote`)와 **같은 자리**라, 후임자가 받는 첫 메시지는 두 모드에서
-   * 모양이 같다. text도 함께 돌려주는 것은 부르는 쪽이 첫 메시지에 넣을 짧은 미리보기를
-   * 뽑기 위해서다. 사용자 저장소에는 아무것도 쓰지 않는다.
+   * **The result is a file** (#102): the host writes it to the note's spot in the data folder
+   * (`<data>/handoff/<project id>/<session id>.md`, #142) and returns its absolute path — the
+   * **same spot** used by the mode that receives a note from the agent
+   * (`agents.exportHandoffNote`), so the first message the successor receives has the same
+   * shape either way. text is also returned so the caller can pull out a short preview to put in
+   * the first message. Nothing is ever written into the user's own repository.
    */
   'agents.exportHandoffRecord': {
     params: z.object({
       sessionId: SessionId,
-      /** 후임자가 될 도구 — 기록 헤더의 `codex → claude`. 모르면 생략한다 */
+      /** The tool that will be the successor — used for the transcript header's `codex → claude`. Omit if unknown. */
       toTool: ToolName.optional(),
     }),
     result: z.object({ text: z.string(), path: z.string() }),
   },
   /**
-   * 살아 있는 인수인계의 노트 (#142) — 에이전트가 **답으로** 쓴 노트를 host가 기록 모드와 같은 자리에 놓는다.
+   * The note from a live handoff (#142) — the host places the note the agent wrote **as its
+   * reply** at the same spot as the transcript mode.
    *
-   * 에이전트는 파일을 쓰지 않는다: 노트 자리가 저장소 밖이라 직접 쓰게 하면 두 도구 모두 권한을 더 줘야 한다.
-   * afterSeq는 부탁을 보내기 직전의 마지막 seq다 — 그 뒤 첫 사람 말이 부탁이고, 그 뒤 다음 사람 말 앞의
-   * 마지막 답이 노트다.
-   * **null은 "아직"이다**: 턴이 돌고 있거나 답이 없다. 부르는 쪽은 기다렸다가 다시 묻는다.
+   * The agent does not write the file itself: since the note's spot is outside the repository,
+   * letting it write directly would mean granting both tools more permission than they need.
+   * afterSeq is the last seq right before the request was sent — the first person message after
+   * it is the request, and the last reply before the next person message after that is the note.
+   * **Null means "not yet"**: either the turn is still running, or there is no reply yet. The
+   * caller waits and asks again.
    */
   'agents.exportHandoffNote': {
     params: z.object({ sessionId: SessionId, afterSeq: z.number().int().nonnegative() }),
     result: z.object({ text: z.string(), path: z.string() }).nullable(),
   },
   /**
-   * 시야가 잘린 조율 세션을 만든다 (#80·#81 물리). 의견(업무·반장)은 앱의 것이고,
-   * 여기는 "구성원 목록만 보이는 오케스트레이터형 세션"이라는 능력만 만든다.
+   * Creates a coordinating session with a restricted view (#80, #81 physics). The
+   * opinions (task, foreman) belong to the app; this only creates the underlying capability of
+   * "an orchestrator-shaped session that can only see a member list."
    */
   'agents.createCoordinator': {
     params: z.object({
@@ -669,8 +716,8 @@ export const RpcMethods = {
       .nullable(),
   },
   /**
-   * 세션에 연결된 에이전트만 재시작한다 (대화 기록은 그대로).
-   * 도구가 이상해졌을 때 세션을 새로 만들지 않고 프로세스만 갈아 끼우는 길.
+   * Restarts only the agent attached to the session (the conversation history stays untouched).
+   * A way to swap out only the process when a tool acts up, without creating a whole new session.
    */
   'agents.restartSession': {
     params: z.object({ sessionId: SessionId }),
@@ -683,41 +730,44 @@ export const RpcMethods = {
       resumed: z.boolean(),
       reason: z.string().optional(),
       /**
-       * 이 대화를 **다른 쪽이 쥐고 있다**. 화면은 이 값만 보고 갈림길을 내민다 —
-       * reason 문구를 되읽지 않는다 (문구를 고치면 조용히 깨지는 계약이 된다).
+       * **Someone else holds** this conversation. The screen decides which fork to offer based
+       * on this value alone — it never parses the reason string (doing that would make the
+       * wording a contract that breaks silently if it is ever edited).
        */
       lockedElsewhere: z.boolean().optional(),
     }),
   },
   /**
-   * 잠긴 대화에서 **갈라져 나와** 이 세션으로 이어간다.
+   * **Forks away** from a locked conversation and continues on this session instead.
    *
-   * 한 대화의 쓰기 권한이 하나뿐인 도구(codex)에서, 다른 앱을 닫지 않고도 이어갈 수 있는
-   * 유일한 길이다. 원본은 건드리지 않고 사본을 만들어 이 세션이 그쪽을 가리키게 한다.
+   * For a tool (codex) where only one place can hold write access to a conversation, this is the
+   * only way to keep going without closing the other app. The original is left untouched; a copy
+   * is made and this session is pointed at the copy.
    */
   'agents.forkConversation': {
     params: z.object({ sessionId: SessionId }),
     result: z.object({ session: SessionInfo, resumed: z.boolean(), reason: z.string().optional() }),
   },
   /**
-   * 세션의 에이전트를 바꾼다 (claude ↔ codex).
+   * Switches a session's agent (claude, codex).
    *
-   * updateSettings와 **따로 두는 이유**: 모델·권한은 같은 대화를 이어가며 바뀌지만
-   * 도구를 바꾸면 대화가 이어지지 않는다 (externalId가 도구 고유 id라 끊어내야 한다).
-   * 결과가 다른 일을 같은 문으로 부르면 부르는 쪽이 그 차이를 모른 채 쓴다.
+   * **Why it is kept separate** from updateSettings: model and permissions change while the same
+   * conversation continues, but switching tools means the conversation does not continue
+   * (externalId is a tool-specific id, so it has to be cut off). Calling two different-outcome
+   * operations through the same door would let a caller use it without knowing the difference.
    */
   'agents.switchTool': {
     params: z.object({ sessionId: SessionId, tool: ToolName }),
     result: SessionInfo,
   },
-  /** 모델·권한을 대화 도중에 바꾼다 (다음 턴부터 적용) */
+  /** Changes the model and permissions mid-conversation (takes effect from the next turn) */
   'agents.updateSettings': {
     params: UpdateSettingsParams,
     result: UpdateSettingsResult,
   },
   /**
-   * 이 프로젝트 디렉토리에서 도구가 보관 중인 이전 세션 (FR-10 확장).
-   * supported=false면 이유를 함께 준다 — 구버전 도구에서도 '새 세션'은 그대로 된다.
+   * Prior sessions the tool has stored for this project directory (an extension of FR-10).
+   * If supported=false, a reason comes with it — "new session" still works even on an older tool.
    */
   'agents.listExternalSessions': {
     params: z.object({ projectId: ProjectId, tool: ToolName, limit: z.number().default(30) }),
@@ -744,10 +794,11 @@ export const RpcMethods = {
   },
   'git.branches': { params: z.object({ projectId: ProjectId }), result: z.array(GitBranch) },
   /**
-   * git이 무시하는 것들 (#76) — 새 워크트리에 **없을** 것들의 목록.
+   * The things git ignores (#76) — the list of things that will **not** exist in a new worktree.
    *
-   * 워크트리 셋업 창이 "무엇을 복사할까"의 후보로 내민다. bytes는 거들 뿐이라 null일
-   * 수 있다(측정이 오래 걸리면 포기한다) — 목록 자체가 답이고 크기는 판단의 재료다.
+   * Offered as candidates for "what to copy" by the worktree setup window. bytes only assists
+   * and can be null (measuring it is abandoned if it takes too long) — the list itself is the
+   * answer, and the size is only material for the decision.
    */
   'git.ignoredEntries': {
     params: z.object({ projectId: ProjectId }),
@@ -769,7 +820,7 @@ export const RpcMethods = {
     params: z.object({ projectId: ProjectId }),
     result: z.object({ ok: z.boolean(), message: z.string().optional() }),
   },
-  /** 붙여넣은 이미지를 host가 파일로 저장한다 (base64를 DB에 넣지 않기 위해) */
+  /** The host saves a pasted image as a file (so base64 never goes into the database) */
   'attachments.save': {
     params: z.object({
       sessionId: SessionId,
@@ -784,10 +835,12 @@ export const RpcMethods = {
     result: z.array(z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })),
   },
   /**
-   * 이 프로젝트에서 감시할 디렉토리 집합 (#34). **전체를 통째로 받는다** —
-   * projects.reorder와 같은 문법, 같은 이유다: 화면의 펼쳐진 집합이 곧 감시 집합이라
-   * "이걸 더하고 저걸 빼고"로 주고받으면 둘이 어긋난 채로도 오류가 없다.
-   * 변화는 `fs_changed` 이벤트로 온다. watched가 보낸 수보다 작으면 상한에 잘린 것이다.
+   * The full set of directories to watch in this project (#34). **Received as the complete
+   * whole every time** — same syntax as projects.reorder, for the same reason: the set of
+   * expanded rows on screen is exactly the watch set, so exchanging it as "add this, drop that"
+   * would let the two sides drift apart with no error at all.
+   * Changes arrive as `fs_changed` events. If watched is smaller than the count sent, it was
+   * truncated by the cap.
    */
   'fs.watch': {
     params: z.object({ projectId: ProjectId, paths: z.array(z.string()) }),
@@ -850,31 +903,33 @@ export const RpcMethods = {
   'workspace.load': { params: z.object({}), result: z.record(z.string(), z.unknown()).nullable() },
   'projects.add': { params: z.object({ path: z.string() }), result: ProjectInfo },
   /**
-   * 프로젝트를 **지운다** — 목록에서 빼는 것이 아니라 이 앱의 기록에서 없앤다
-   * (세션·대화·검색 색인·승인 규칙·사용량 귀속까지).
+   * **Deletes** a project — not just removing it from the list, but erasing it from this app's
+   * records entirely (its sessions, conversations, search index, approval rules, even usage
+   * attribution).
    *
-   * **폴더는 건드리지 않는다.** 파일을 버리는 일은 OS 휴지통을 통해서만 하고 그건
-   * 셸(Rust)의 몫이라, 부르는 쪽이 이 명령보다 먼저 끝낸다. 여기에 `deleteFiles`
-   * 같은 스위치를 두지 않는 이유이기도 하다 — host는 파일을 버릴 손이 없으므로,
-   * 받아 봐야 지킬 수 없는 약속이 된다.
+   * **It never touches the folder.** Discarding files only ever happens through the OS trash,
+   * which is the shell's (Rust's) job, and the caller finishes that before this command runs.
+   * This is also why there is no `deleteFiles` switch here — the host has no hand that can
+   * discard files, so accepting one would just be a promise it cannot keep.
    */
   'projects.delete': {
     params: z.object({ projectId: ProjectId }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 이 프로젝트의 코드를 이 기계에서 돌려도 되는가 (M4 A-2, 플랜 결정 3).
+   * Whether this project's code is allowed to run on this machine (M4 A-2, plan decision 3).
    *
-   * 기본은 "아니오"다 — 받아 온 저장소를 여는 것만으로 그 안의 앱 서버가 사용자 권한으로
-   * 돌면 안 된다. 끄면 그 프로젝트의 앱이 바로 내려간다.
+   * The default is "no" — simply opening a repository someone handed you must not let the app
+   * server inside it run with the user's own permissions. Turning it off brings that project's
+   * apps down immediately.
    */
   'projects.setTrusted': {
     params: z.object({ projectId: ProjectId, trusted: z.boolean() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 사이드바 순서 바꾸기. **전체 순서를 통째로 받는다** —
-   * "이걸 저기로" 식으로 주고받으면 목록이 그 사이 바뀌었을 때 어긋난다.
+   * Reorders the sidebar. **Receives the entire order as a whole** — exchanging it as
+   * "move this one there" would drift out of sync if the list changed in the meantime.
    */
   'projects.reorder': {
     params: z.object({ orderedIds: z.array(z.string()) }),
@@ -900,18 +955,19 @@ export const RpcMethods = {
     result: z.array(SavedCommand),
   },
   /**
-   * 워크트리 매니저 자리를 만든다 (#76) — 자식이 하나도 없을 때도.
+   * Creates the worktree manager slot (#76) — even when it will have no children yet.
    *
-   * baseBranch는 이 프로젝트의 **줄기**다: 워크트리가 갈라지는 곳이자, 병합됐는지를
-   * 재는 기준이다. 기본값을 host가 지어내지 않는다 — 어느 브랜치가 줄기인지는
-   * 저장소마다 다르고, 틀린 기본값은 워크트리가 엉뚱한 데서 갈라진 뒤에야 드러난다.
-   * 이미 자리가 있으면 그 자리를 돌려주고 줄기만 새로 적는다 (줄기를 고치는 길).
+   * baseBranch is this project's **trunk**: both where a worktree branches off from and the
+   * baseline for measuring whether it has merged. The host never invents a default for it —
+   * which branch is the trunk differs by repository, and a wrong default only shows up once a
+   * worktree has already branched off from the wrong place. If the slot already exists, it is
+   * returned as-is and only the trunk is rewritten (this is how the trunk gets changed).
    */
   'worktrees.createManager': {
     params: z.object({ projectId: ProjectId, baseBranch: z.string() }),
     result: SessionInfo,
   },
-  /** 워크트리 프로비저닝 설정 저장 (#69) — 새 세션 창의 워크트리 영역이 편집한다 */
+  /** Saves worktree provisioning settings (#69) — edited by the worktree section of the new-session window */
   'projects.setWorktreeSetup': {
     params: z.object({
       projectId: ProjectId,
@@ -924,48 +980,55 @@ export const RpcMethods = {
     result: z.array(SessionInfo),
   },
   /**
-   * 그리드에 올려둔 세션들 (순서 포함).
+   * The sessions placed on the grid (order included).
    *
-   * 자동 흐름 그리드라 배치가 곧 순서 하나다. 그래서 **추가·제거·순서 바꾸기가
-   * 전부 이 한 가지**로 표현된다 — "목록을 이렇게 만들어라".
+   * Since this is an auto-flow grid, layout and order are the same single thing. So **adding,
+   * removing and reordering are all expressed by this one operation** — "make the list look
+   * like this."
    */
   /**
-   * 앱에 하나뿐인 오케스트레이터. **부르면 없을 때 만든다.**
-   * 미리 만들어 두면 쓰지도 않는 세션이 도구 프로세스를 물고 있게 된다.
+   * The app's single orchestrator. **Calling this creates one if it does not exist.**
+   * Creating it ahead of time would leave a session nobody uses holding onto a tool process.
    */
   'orchestrator.get': { params: z.object({}), result: SessionInfo },
   /**
-   * 있으면 주고, **없으면 만들지 않는다** (#63).
+   * Returns it if it exists, and **does not create one if it does not** (#63).
    *
-   * 온보딩이 오케스트레이터 화면을 먼저 보여주게 되면서 "화면을 연다"와 "프로세스를
-   * 만든다"가 갈라졌다 — 화면은 이걸로 묻기만 하고, 만드는 것은 사람이 첫 질문을
-   * 던지는 순간의 `orchestrator.get`이다. 그 전에 만들면 묻지도 않은 사람 몫의
-   * 도구 프로세스가 떠 있게 된다 (지연 기동 원칙).
+   * Once onboarding started showing the orchestrator screen first, "opening the screen" and
+   * "creating the process" had to split apart — the screen only asks via this, and creation
+   * happens through `orchestrator.get` at the moment the person actually asks their first
+   * question. Creating it any earlier would leave a tool process running for a person who never
+   * even asked (the lazy-startup principle).
    */
   'orchestrator.peek': { params: z.object({}), result: SessionInfo.nullable() },
   /**
-   * 중앙 오케스트레이터가 **어느 도구 위에서 돌지** (#63, 소개 화면의 카드 선택).
-   * 아직 세션이 없을 때를 위한 설정이다 — 이미 있으면 세션 설정의 Agent 전환이 맡는다.
+   * Which tool the central orchestrator will **run on top of** (#63, the card chosen on the
+   * intro screen). This setting is only for before a session exists — once one does, switching
+   * the Agent in session settings takes over.
    */
   'orchestrator.configure': {
     params: z.object({ tool: ToolName }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 오케스트레이터 도구 — **별도 프로세스(다리)가 host로 돌아오는 길**.
+   * The orchestrator tool — **the path a separate process (the bridge) uses to call back into
+   * the host**.
    *
-   * Claude는 인프로세스로 붙어서 이 문이 필요 없다. Codex는 스레드별 config로
-   * stdio 서버만 물릴 수 있어서(HTTP는 실측에서 안 붙었다) 다리가 필요하고,
-   * 다리는 판단을 하지 않는다 — 이름과 인자만 넘기고 규칙은 전부 host에 남는다.
+   * Claude attaches in-process, so it does not need this door. Codex can only attach a stdio
+   * server through its per-thread config (HTTP did not work when measured), so it needs a
+   * bridge, and the bridge makes no judgments itself — it only passes along a name and
+   * arguments, and every rule stays in the host.
    */
   /**
-   * 앱 화면을 띄울 주소 (M4 B-3). host가 샌드박스 프록시의 주소를 만들어 준다. 그 주소의
-   * 길은 실행마다 새로 만든 비밀 칸 뒤에 있어서, 주소를 아는 쪽만 화면을 띄운다. 비밀은
-   * 이 답으로만 나간다(WebSocket 토큰으로 이미 인증된 쪽).
+   * The address at which an app's screen is served (M4 B-3). The host builds the sandbox proxy
+   * address for it. That address's path sits behind a secret segment generated fresh on every
+   * run, so only whoever knows the address can raise the screen. The secret only ever leaves
+   * through this response (to a side already authenticated with the WebSocket token).
    *
-   * 화면 인스턴스는 도구 호출 한 번이 만든다. 어느 앱의 화면인지는 인스턴스가 정하고,
-   * `appId`·`projectId`는 대조만 한다. `hostOrigin`은 부르는 화면의 출처(`location.origin`)다.
-   * WebSocket과 같은 허용 목록에 있어야 하고, 프록시는 그 출처와만 메시지를 주고받는다.
+   * A screen instance is created by a single tool call. The instance decides which app's screen
+   * it is; `appId` and `projectId` are only checked against it. `hostOrigin` is the calling
+   * screen's own origin (`location.origin`). It has to be on the same allowlist as the
+   * WebSocket, and the proxy only exchanges messages with that origin.
    */
   'apps.viewFrame': {
     params: z.object({
@@ -989,12 +1052,16 @@ export const RpcMethods = {
     }),
   },
   /**
-   * 고정 화면을 연다 (M4 B-2). host가 매니페스트의 `home` 도구를 **화면 호출자로** 부르고(단 하나의
-   * 길: 공개 범위·실행 기록), 그 도구가 선언한 `_meta.ui.resourceUri`로 화면 인스턴스를 연다. 답에는
-   * AppFrame이 받을 것이 다 있다: 인스턴스, 그 호출의 입력과 결과(규격의 tool-input·tool-result).
+   * Opens the pinned screen (M4 B-2). The host calls the manifest's `home` tool **as the screen
+   * caller** (the one path used for this: visibility scope, run history), then opens a screen
+   * instance at the `_meta.ui.resourceUri` that tool declared. The response has everything
+   * AppFrame needs: the instance, and that call's input and result (the spec's tool-input,
+   * tool-result).
    *
-   * `home`이 없거나, 그 도구가 화면을 선언하지 않았거나, 앱에 닿지 못했으면(신뢰·기동 실패) 이유와
-   * 함께 실패하고 인스턴스를 남기지 않는다. 앱이 실패를 답했으면 연다 — 실패를 그리는 것도 화면이다.
+   * If there is no `home`, or that tool did not declare a screen, or the app cannot be reached
+   * (not trusted, or failed to start), this fails with a reason and leaves no instance behind. If
+   * the app itself answered with a failure, this still opens — drawing a failure is also the
+   * screen's job.
    */
   'apps.openView': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
@@ -1008,22 +1075,27 @@ export const RpcMethods = {
     }),
   },
   /**
-   * 고정 화면을 닫는다 (M4 B-2). 인스턴스가 붙들던 앱을 놓는다 — 열린 화면이 없으면 쉬는 앱으로
-   * 세어 내린다(A-3). 이미 닫힌 인스턴스는 조용히 지나간다(닫기는 두 번 와도 같은 결과다).
+   * Closes the pinned screen (M4 B-2). Releases the app the instance was holding on to — an app
+   * with no open screen counts down toward idle (A-3). An instance that is already closed is
+   * passed over silently (closing twice yields the same result).
    */
   'apps.closeView': {
     params: z.object({ instanceId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 접었던 대화 안 화면을 다시 연다 (M4 B-1) — 가상 스크롤에서 벗어났거나 상한에 밀려 자리표시가 된 화면의
-   * "Reopen". **도구를 다시 부르지 않는다**: host가 새 인스턴스를 열고, 들고 있던 그 호출의 입력과 결말(결과
-   * 또는 취소 이유)을 돌려준다 — AppFrame이 규격대로 다시 보낸다. 호출이 아직 돌고 있으면 결말 없이 오고,
-   * 끝나면 `app_view`의 result·cancelled가 평소처럼 온다.
+   * Reopens an inline conversation screen that had been collapsed (M4 B-1) — the "Reopen" for a
+   * screen that fell out of virtual scroll or was pushed into a placeholder by the cap. **Does
+   * not call the tool again**: the host opens a new instance and returns the input and outcome
+   * (a result, or the cancellation reason) of that same call it was still holding — AppFrame
+   * renders it again exactly to spec. If the call is still running, it arrives with no outcome
+   * yet, and once it finishes, `app_view`'s result and cancelled fields arrive as usual.
    *
-   * host는 입력과 결과를 메모리에만, 크기를 묶어 들고 있다(inline-views.ts). 들고 있지 않으면(너무 컸다,
-   * 오래돼서 버렸다, host가 다시 떴다) 이유와 함께 실패하고, 자리표시는 앱을 여는 길만 준다. 열면 한 대화의
-   * 살아 있는 화면 상한이 다시 걸린다 — 가장 오래 열린 다른 화면이 `closed`로 닫힐 수 있다.
+   * The host holds the input and result only in memory, size-capped (inline-views.ts). If it is
+   * no longer holding them (too large, discarded for age, or the host restarted), this fails
+   * with a reason, and the placeholder then only offers a way to open the app instead. Opening
+   * this re-enforces the cap on live screens per conversation — the other, longest-open screen
+   * may get closed with `closed`.
    */
   'apps.inlineReopen': {
     params: z.object({ sessionId: SessionId, callId: z.string() }),
@@ -1038,10 +1110,12 @@ export const RpcMethods = {
     }),
   },
   /**
-   * 한 대화에서 host가 들고 있는 대화 안 화면 (M4 B-1) — 다시 연 UI가 지난 카드의 자리표시를 세울 때 묻는다.
-   * `kept`면 "Reopen"이 도구를 다시 부르지 않고 그 화면을 연다. `instanceId`가 있으면 아직 열린 인스턴스다 —
-   * 다시 연 UI는 그 프레임을 모르므로 닫아서 앱을 놓는다. 본문(입력·결과)은 싣지 않는다. host가 다시 떴으면
-   * 빈 목록이다(들고 있던 것은 메모리에만 있었다).
+   * The inline conversation screens the host is holding for one conversation (M4 B-1) — asked by
+   * a freshly reopened UI when it plants placeholders for past cards. If `kept` is true,
+   * "Reopen" opens that screen without calling the tool again. If `instanceId` is present, that
+   * instance is still open — since the freshly reopened UI does not know that frame, it closes
+   * it to release the app. The body (input, result) is not carried here. If the host itself has
+   * restarted, this comes back empty (what it was holding lived only in memory).
    */
   'apps.inlineViews': {
     params: z.object({ sessionId: SessionId }),
@@ -1057,22 +1131,27 @@ export const RpcMethods = {
     ),
   },
   /**
-   * 앱 화면의 `ui/message` (M4 B-1·B-4) — 사람이 읽고 보내기로 고른 뒤에만 UI가 부른다.
+   * An app screen's `ui/message` (M4 B-1, B-4) — called by the UI only after a person reads it
+   * and chooses to send.
    *
-   * 앱은 **인스턴스가** 정한다(#93·#94: 검증한 것이 곧 쓰는 것). 보낼 곳은 화면의 자리에 따라 다르다:
-   *   대화 안 화면  그 화면이 선 대화다. `sessionId`는 대조만 하고, 다른 대화의 것이면 거절한다
-   *   고정 화면     대화에 속하지 않으므로 사람이 고른 대화다(UI가 먼저 묻는다). 열린 인스턴스가 아니면 거절한다
-   * 어느 쪽이든 대화에는 앱이 보낸 말로 남고(`user_message.fromApp`), 에이전트에게는 host가 "앱의 글"로 감싼
-   * 모양이 간다 — 고정 화면이면 대화 밖에서 왔다고 밝힌다.
+   * The app is decided by **the instance** (#93, #94: the string that was validated is the one
+   * that is used). Where it goes depends on where the screen lives:
+   *   inline screen   the conversation that screen stands in. `sessionId` is only checked against
+   *                   it and is rejected if it names a different conversation.
+   *   pinned screen   since it does not belong to a conversation, the conversation is whatever
+   *                   the person chose (the UI asks first). Rejected unless it is an open instance.
+   * Either way it lands in the conversation as text the app sent (`user_message.fromApp`), and
+   * what goes to the agent is the shape the host wraps as "app text" — for a pinned screen, it
+   * also states that this came from outside the conversation.
    */
   'apps.viewMessage': {
     params: z.object({ sessionId: SessionId, instanceId: z.string(), text: z.string().min(1).max(64_000) }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 화면이 자기 앱의 리소스를 읽는다 (M4 B-3, 브리지의 `onreadresource`). 답은 MCP
-   * `resources/read`의 결과 그대로다. 규격의 모양은 화면과 앱이 아는 것이고, 이 층은 운반만 한다.
-   * `instanceId`를 주면 그 화면의 앱과 같아야 한다.
+   * A screen reads its own app's resource (M4 B-3, the bridge's `onreadresource`). The response
+   * is exactly the result of MCP's `resources/read`. The spec's shape is known to the screen and
+   * the app; this layer only carries it. If `instanceId` is given, it must match that screen's app.
    */
   'apps.readResource': {
     params: z.object({
@@ -1084,8 +1163,8 @@ export const RpcMethods = {
     result: z.looseObject({ contents: z.array(z.looseObject({ uri: z.string() })) }),
   },
   /**
-   * 앱 상태 (#81). 앱마다 JSON 문서 하나 + 켜짐 여부 — 앱별 프로토콜을 만들지 않는다.
-   * 문서의 의미는 앱만 알고, 코어·프로토콜은 운반만 한다.
+   * App state (#81). One JSON document plus an enabled flag per app — no per-app protocol is
+   * ever built. Only the app knows what the document means; the core and the protocol only carry it.
    */
   'apps.state': {
     params: z.object({ appId: AppId }),
@@ -1096,18 +1175,21 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 화면이 앱 도구를 부른다 — **내장 앱과 외부 앱이 같은 문을 쓴다** (#81, M4 A-4).
+   * A screen calls an app tool — **built-in and external apps use the same door** (#81, M4 A-4).
    *
-   * 내장 앱(`projectId`가 없고 그 id가 내장 명부에 있을 때): 사람이 부른 것으로 친다 — 프로필
-   * 판정 대신 "그 앱의 도구인가"만 본다. caller.sessionId=null이 곧 사람이다.
+   * Built-in app (no `projectId`, and its id is on the built-in roster): treated as though the
+   * person called it — instead of a profile judgment, only "is this that app's tool" is checked.
+   * caller.sessionId=null means a person.
    *
-   * 외부 앱: 앱은 (프로젝트, id)로 하나라 `projectId`로 가른다(null = 사용자 폴더 앱). 호출자는
-   * **화면**으로 기록되고, 화면에 열린(`visibility`에 `app`이 있는) 도구만 부를 수 있다.
-   * `result`는 앱의 답 그대로다(화면의 AppBridge가 받는 모양). `status`가 `rejected`면 host가
-   * 앱에 보내지 않은 것이다 — 이유는 `text`에 있다.
+   * External app: an app is unique per (project, id), so `projectId` distinguishes it (null =
+   * a user-folder app). The caller is recorded **as a screen**, and only tools open to a screen
+   * (with `app` in `visibility`) can be called. `result` is exactly the app's own answer (the
+   * shape the screen's AppBridge receives). If `status` is `rejected`, the host never sent it to
+   * the app at all — the reason is in `text`.
    *
-   * 문을 따로 만들지 않은 이유: 부르는 쪽(화면)에게 내장과 외부는 같은 일이다. 문이 둘이면
-   * UI가 어느 쪽인지 알아야 하고, 그 갈림은 host만 아는 사실이다.
+   * Why there is no separate door for each: to the caller (a screen), built-in and external are
+   * the same operation. Two doors would force the UI to know which one it is dealing with, and
+   * that distinction is a fact only the host knows.
    */
   'apps.invoke': {
     params: z.object({
@@ -1115,7 +1197,7 @@ export const RpcMethods = {
       name: z.string(),
       args: z.record(z.string(), z.unknown()),
       projectId: ProjectId.nullable().optional(),
-      /** 부른 화면의 인스턴스 — 이 호출이 낸 "바뀌었다"(`external_app_state_changed.cause`)를 그 화면만 건너뛴다 */
+      /** The calling screen's instance — the caller's own screen is the one that skips the "changed" event (`external_app_state_changed.cause`) this call produces */
       instanceId: z.string().optional(),
     }),
     result: z.object({
@@ -1131,16 +1213,18 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 발견된 외부 앱 (M4 A-2) — 프로젝트 앱과 사용자 폴더 앱. 신뢰하지 않은 프로젝트의 앱과
-   * 매니페스트가 깨진 앱도 이유(`status`·`error`)와 함께 실린다: 숨기면 왜 안 뜨는지
-   * 물을 곳이 없다. 내장 앱은 여기 없다(내장 명부는 컴파일된 것이다, A-8이 합친다).
+   * Discovered external apps (M4 A-2) — project apps and user-folder apps. Apps from an
+   * untrusted project and apps with a broken manifest are listed too, with a reason (`status`,
+   * `error`): hiding them would leave nowhere to ask why they do not show up. Built-in apps are
+   * not here (the built-in roster is compiled in, and A-8 merges the two).
    */
   'apps.list': { params: z.object({}), result: z.array(ExternalAppInfo) },
   /**
-   * 멈춘(`failed`) 외부 앱을 다시 띄울 수 있게 한다 — 연속 실패를 지우고, 떠 있으면 내린다.
-   * **띄우지는 않는다**: 다음에 부르는 쪽이 띄운다(처음 필요할 때 뜬다는 원칙 그대로).
+   * Lets a stopped (`failed`) external app be started again — clears the run of consecutive
+   * failures, and takes it down if it happens to be up. **Does not start it**: whatever calls
+   * next starts it (the same principle: it starts only the first time it is actually needed).
    */
-  /** 외부 앱 하나의 실행 기록, 최근 것부터 (M4 A-6 — 기록 화면 B-7이 읽는다) */
+  /** The run history of one external app, most recent first (M4 A-6 — read by the run history screen B-7) */
   'apps.runs': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable(), limit: z.number().int().min(1).max(500).default(100) }),
     result: z.array(AppRun),
@@ -1150,20 +1234,24 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 사용자 폴더의 외부 앱을 지운다 (M4 A-7) — 승인한 MCP 서버(화면 없는 앱)를 거두는 길. 폴더는 데이터
-   * 폴더의 `app-trash/`로 옮겨지고, 붙어 있던 세션에서 떨어진다. 프로젝트 앱(`projectId`가 있는 것)은
-   * 거절한다 — 저장소의 파일이라 거두는 자리는 git이다. 목록은 `apps.list`의 `projectId: null`인 앱이다.
+   * Removes an external app in the user folder (M4 A-7) — the way to withdraw an approved MCP
+   * server (an app with no screen). Its folder is moved to `app-trash/` in the data folder, and
+   * it is detached from any session it was attached to. A project app (one with a `projectId`)
+   * is rejected — since it is a file in the repository, git is where it gets withdrawn. The
+   * relevant list is `apps.list`'s apps with `projectId: null`.
    */
   'apps.remove': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 새 앱을 템플릿으로 만든다 (M4 C-1b) — "새 앱" 버튼이 부른다. 오케스트레이터의 `create_app`과 같은 문이다.
-   * `projectId`가 있으면 그 프로젝트의 `.centralu/apps/<id>/`에(신뢰한 프로젝트만), null이면 사용자 폴더에 만든다.
-   * `id`는 폴더 이름이자 세션에서 `app-<id>`가 된다: 소문자·숫자·하이픈 32자 이내, `centralu`·`app-`로 시작 금지.
-   * 이미 있는 id·신뢰하지 않은 프로젝트·틀린 이름은 이유와 함께 실패하고 아무것도 만들지 않는다.
-   * 앱은 띄우지 않는다 — 처음 필요할 때 뜬다.
+   * Creates a new app from a template (M4 C-1b) — called by the "new app" button. The same door
+   * as the orchestrator's `create_app`. If `projectId` is given, it is created at
+   * `.centralu/apps/<id>/` in that project (only if trusted); if null, it goes in the user
+   * folder. `id` is both the folder name and becomes `app-<id>` in a session: lowercase, digits
+   * and hyphens, up to 32 characters, may not start with `centralu` or `app-`. An id that
+   * already exists, an untrusted project, or an invalid name fails with a reason and creates
+   * nothing. The app is not started — it starts only the first time it is actually needed.
    */
   'apps.create': {
     params: z.object({
@@ -1171,61 +1259,70 @@ export const RpcMethods = {
       id: z.string(),
       name: z.string(),
       description: z.string().optional(),
-      /** 만드는 세션의 도구 (C-2). 없으면 프로젝트의 기본 도구(사용자 폴더 앱은 오케스트레이터의 도구) */
+      /** The tool for the building session (C-2). If omitted, the project's default tool (for a user-folder app, the orchestrator's tool) */
       tool: ToolName.optional(),
     }),
     /**
-     * 앱을 만들면 그 앱의 만드는 세션도 선다 (C-2). 세션이 서지 못해도 앱은 남는다 — `builder`가 null이고
-     * `builderError`가 이유다. 그때는 `apps.createBuilder`로 다시 세운다.
+     * Creating an app also stands up its building session (C-2). If that session fails to stand
+     * up, the app still remains — `builder` is null and `builderError` states why. In that case
+     * it can be stood up again with `apps.createBuilder`.
      */
     result: z.object({ app: ExternalAppInfo, builder: SessionInfo.nullable(), builderError: z.string().optional() }),
   },
   /**
-   * 그 앱의 만드는 세션 (M4 C-2) — "앱 X의 만드는 세션 열기". 없으면(세우지 않았거나 지웠으면) null이다.
-   * 프로젝트 앱의 만드는 세션은 cwd가 프로젝트 뿌리이고, 사용자 폴더 앱의 것은 앱 폴더다.
+   * That app's building session (M4 C-2) — "open the building session for app X." Null if there
+   * is none (never stood up, or deleted). A project app's building session has its cwd at the
+   * project root; a user-folder app's has it at the app's own folder.
    */
   'apps.builder': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: SessionInfo.nullable(),
   },
   /**
-   * 그 앱의 만드는 세션을 세운다 (M4 C-2) — 이미 있으면 그것을 돌려준다(앱마다 하나). 손으로 만든 앱이나 만드는
-   * 세션을 지운 앱에 쓴다. 신뢰하지 않은 프로젝트의 앱은 거절한다(그 앱은 뜨지 않아 시험할 수 없다).
+   * Stands up that app's building session (M4 C-2) — returns the existing one if there already
+   * is one (one per app). Used for a hand-made app, or an app whose building session was
+   * deleted. An app in an untrusted project is rejected (that app never starts, so it cannot be
+   * tested).
    */
   /**
-   * 외부 앱 하나의 최근 오류 묶음 (M4 C-6) — `latest`가 "만드는 세션에 보내기"가 보낼 것이다. host가 기동한 뒤의
-   * 것만 든다(메모리에 산다). 오래 남는 것은 실행 기록(`apps.runs`)의 몫이다.
+   * The recent error bundles for one external app (M4 C-6) — `latest` is what "send to builder"
+   * would send. Only carries bundles from after the host started (they live in memory). Anything
+   * that needs to persist longer is the run history's job (`apps.runs`).
    */
   'apps.errors': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.object({ latest: AppErrorBundle.nullable(), recent: z.array(AppErrorBundle) }),
   },
   /**
-   * 화면에서 시작된 사슬의 능력 물음 (M4 D-4) — 아직 답을 기다리는 것. 고정 화면과 사이드바가 그린다. 세션에서 시작된 사슬의
-   * 물음은 그 세션의 승인 카드라 여기 없다. `external_app_questions_changed`가 오면 다시 읽는다.
+   * Capability questions raised by a chain that started from a screen (M4 D-4) — the ones still
+   * waiting for an answer. Drawn by the pinned screen and the sidebar. A question from a chain
+   * that started from a session is not here, since it is that session's own approval card.
+   * Refetched whenever `external_app_questions_changed` arrives.
    */
   'apps.questions': { params: z.object({}), result: z.array(AppQuestion) },
   /**
-   * 능력 물음에 답한다 (M4 D-4). 답은 그 앱과 그 능력에 대해 기억된다 — 허용도 거절도(`apps.permissions`에서 잊을 수 있다).
-   * 이미 닫힌 물음(시간이 지났다, 부탁이 취소됐다)이면 거절된다.
+   * Answers a capability question (M4 D-4). The answer is remembered for that app and that
+   * capability — whether allowed or denied (it can be forgotten later via `apps.permissions`).
+   * A question that is already closed (timed out, or the request was cancelled) is rejected.
    */
   'apps.answerQuestion': {
     params: z.object({ questionId: z.string(), decision: z.enum(['allow', 'deny']) }),
     result: z.object({ ok: z.literal(true) }),
   },
-  /** 한 앱에 대해 기억된 능력의 답 (M4 D-4) — 기록 판(B-7) 옆에서 보이고 잊을 수 있다 */
+  /** The remembered capability answers for one app (M4 D-4) — shown next to the run history panel (B-7) and can be forgotten there */
   'apps.permissions': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: z.array(AppPermission),
   },
-  /** 기억된 답 하나를 잊는다 (M4 D-4) — 다음에 그 능력을 쓰려 하면 다시 묻는다 */
+  /** Forgets one remembered answer (M4 D-4) — the next attempt to use that capability asks again */
   'apps.forgetPermission': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable(), capability: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 한 앱이 부탁한 에이전트의 쓰임 (M4 D-5) — 몇 번, 얼마나 오래, 토큰을 얼마나. 기록 판이 읽는다. 폴더가 사라진 앱도 기록이
-   * 남아 있는 동안은 읽힌다.
+   * How much agent use one app requested (M4 D-5) — how many times, for how long, how many
+   * tokens. Read by the run history panel. Even for an app whose folder is gone, this is still
+   * readable as long as the record remains.
    */
   'apps.usage': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
@@ -1236,16 +1333,21 @@ export const RpcMethods = {
     result: SessionInfo,
   },
   /**
-   * "여기를 고쳐 줘" (M4 C-5) — 앱 화면 아래 입력줄에서 사람이 쓴 말을 그 앱의 만드는 세션에 보낸다. 사람은 앱을 떠나지
-   * 않는다. host가 머리말을 붙인다: 어느 앱의 어느 화면에서 왔는지(`instanceId` — 사람이 보던 고정 화면. 그 앱의 열린
-   * 인스턴스여야 한다), 앱이 멈춰 있거나 마지막 실행이 실패했으면 그 사실(protocol의 `builderRequestFrame`). 쓴 것은
-   * 사람이라 본문은 지시로 간다. 첨부는 입력창과 같은 길로 먼저 저장한 것이다(`attachments.save`에 만드는 세션의 id).
-   * 만드는 세션이 없으면 거절한다 — 먼저 세운다(`apps.createBuilder`).
+   * "Fix this" (M4 C-5) — sends what a person wrote in the composer under an app's screen to
+   * that app's building session. The person never leaves the app. The host attaches a header:
+   * which app, which screen it came from (`instanceId` — the pinned screen the person was
+   * looking at; it must be an open instance of that app), and, if the app is stopped or its
+   * latest run failed, that fact (protocol's `builderRequestFrame`). Since a person wrote it, the
+   * body goes through as an instruction. Attachments are saved beforehand through the same path
+   * as the composer's (`attachments.save`, with the building session's id). Rejected if there is
+   * no building session — stand one up first with `apps.createBuilder`.
    */
   /**
-   * 오류 묶음 하나를 그 앱의 만드는 세션에 보낸다 (M4 C-6) — 사람이 "Send to builder"를 누를 때만 UI가 부른다. host는
-   * 스스로 보내지 않는다. 묶음은 `at`으로 가리킨다(`apps.errors`의 그 묶음). 한 묶음은 한 번만 간다 — 이미 보냈으면
-   * 거절한다. 에이전트에게는 앱의 출력을 인용으로 가둔 모양(protocol의 `builderErrorFrame`)이 간다.
+   * Sends one error bundle to that app's building session (M4 C-6) — called by the UI only when
+   * the person clicks "Send to builder." The host never sends one on its own. The bundle is
+   * identified by `at` (that bundle from `apps.errors`). Each bundle can only be sent once — it
+   * is rejected if already sent. What reaches the agent is the app's output wrapped in quotes
+   * (protocol's `builderErrorFrame`).
    */
   'apps.sendError': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable(), at: z.number() }),
@@ -1262,9 +1364,11 @@ export const RpcMethods = {
     result: z.object({ sessionId: SessionId }),
   },
   /**
-   * 앱을 점검한다 (M4 C-3) — 만드는 세션의 `check`와 같은 판정이다. 지금 파일로 앱을 다시 띄우고(진행 중인 호출은
-   * 기다린다), 도구 목록과 도구가 가리키는 화면을 실제로 읽어, 매니페스트·도구 이름·공개 범위·주석·home의 문제를
-   * 돌려준다. `text`는 에이전트에게 보내도 되는 한 덩어리 글이다. 멈춘 앱도 다시 띄워 본다(다시 시작과 같다).
+   * Checks an app (M4 C-3) — the same judgment as the building session's `check`. Restarts the
+   * app with its current files (waiting for any in-flight call), and actually reads the tool
+   * list and the screens the tools point to, returning problems with the manifest, tool names,
+   * visibility scope, annotations and home. `text` is one block of text safe to send to an
+   * agent. A stopped app is restarted for this too (the same as a normal restart).
    */
   'apps.check': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
@@ -1275,9 +1379,12 @@ export const RpcMethods = {
     }),
   },
   /**
-   * 앱의 비밀 값 하나를 넣거나 바꾸거나(`value`) 지운다(`null`) (M4 E, 비밀 칸). 값은 이 기계의 0600 파일에만 산다 — 답에도,
-   * 목록에도, 로그와 실행 기록에도 싣지 않는다(목록은 이름마다 있음·없음만 말한다, `ExternalAppInfo.secrets`). 넣는 것은
-   * 매니페스트가 선언한 이름만이다. 떠 있는 앱은 진행 중인 호출을 마친 뒤 내려가고, 다음에 필요할 때 새 값으로 뜬다.
+   * Sets, changes (`value`) or removes (`null`) one of an app's secret values (M4 E, the secrets
+   * field). The value lives only in a 0600 file on this machine — never in the response, the
+   * list, logs or run history (the list only says whether each name is present or not,
+   * `ExternalAppInfo.secrets`). Only names the manifest declares can be set. A running app is
+   * brought down after finishing any in-flight call, and comes back up with the new value the
+   * next time it is needed.
    */
   'apps.setSecret': {
     params: z.object({
@@ -1289,18 +1396,25 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 앱을 가져올 준비 (M4 E-3) — 이 기계의 폴더나 .zip(경로 또는 `file:` 주소), 또는 https 주소의 .zip을 host의 대기실로 옮겨 담고,
-   * 사람이 볼 것(`review`)을 돌려준다. **아직 들어온 것이 아니다**: 대기실은 발견이 훑지 않는 자리라 아무것도 뜨지 않는다. 링크가
-   * 폴더 밖을 가리키거나, 이름이 밖으로 새거나(zip slip), 상한을 넘거나, id가 규칙에 맞지 않거나 이미 있으면 이유와 함께 실패하고
-   * 대기실을 치운다. 들어오게 하는 것은 `apps.importCommit`, 그만두는 것은 `apps.importCancel`이다(대기실은 30분 뒤 스스로 치워진다).
+   * Prepares to import an app (M4 E-3) — moves a folder or .zip on this machine (a path or a
+   * `file:` address), or a .zip at an https address, into the host's waiting room, and returns
+   * what the person should review (`review`). **This does not admit it yet**: discovery never
+   * scans the waiting room, so nothing appears there. If the link points outside the folder, a
+   * name escapes it (zip slip), the size cap is exceeded, the id breaks the rule, or the id
+   * already exists, this fails with a reason and clears the waiting room. `apps.importCommit`
+   * admits it; `apps.importCancel` calls it off (and the waiting room clears itself after 30
+   * minutes regardless).
    */
   'apps.importPrepare': {
     params: z.object({ source: z.string().max(4096) }),
     result: z.object({ token: z.string(), review: AppReview }),
   },
   /**
-   * 대기실의 앱을 사용자 폴더로 들인다 (M4 E-3). 가져온 앱은 **꺼진 채**(`unconfirmed`) 들어온다. `enable`이면 들인 뒤 사람의 확인을
-   * 적는다 — 그때 `reviewKey`는 준비할 때 받은 그 열쇠여야 한다(사람이 본 것이 켜지는 것이다). 그 사이 같은 id가 생겼으면 거절한다.
+   * Admits the app in the waiting room into the user folder (M4 E-3). An imported app arrives
+   * **turned off** (`unconfirmed`). If `enable` is set, the person's confirmation is recorded
+   * right after admission — `reviewKey` must then be the key received during preparation (what
+   * turns on is exactly what the person reviewed). Rejected if the same id was created in the
+   * meantime.
    */
   'apps.importCommit': {
     params: z.object({ token: z.string(), enable: z.boolean().default(false), reviewKey: z.string().optional() }),
@@ -1311,40 +1425,50 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
-   * 들어온 앱을 다시 본다 (M4 E-3) — 켜지 않은 가져온 앱, 또는 켠 뒤 `server`·`uses`가 바뀌어 다시 물어야 하는 앱의 확인 창이 읽는다.
-   * 다시 묻는 것이면 `changed`가 켠 때의 선언을 싣는다. 사용자 폴더의 앱만 받는다(프로젝트 앱은 프로젝트 신뢰를 따른다).
+   * Reviews an admitted app again (M4 E-3) — read by the confirmation window for an imported app
+   * that has not been turned on, or one whose `server`/`uses` changed after being turned on and
+   * needs to be asked about again. When re-asking, `changed` carries the declaration from when
+   * it was turned on. Only accepts apps in the user folder (a project app follows the project's
+   * trust setting instead).
    */
   'apps.review': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: AppReview,
   },
   /**
-   * 가져온 앱을 켠다 (M4 E-3) — host가 이 앱의 확인을 적는다. `reviewKey`는 사람이 본 확인 창의 열쇠이고, host는 지금의 매니페스트와
-   * 대 본다: 그 사이 바뀌었으면 거절한다(다시 보고 켠다). 가져온 앱이 아니면 거절한다 — 켤 것이 없다.
+   * Turns on an imported app (M4 E-3) — the host records this app's confirmation. `reviewKey` is
+   * the key from the confirmation window the person saw, and the host checks it against the
+   * current manifest: rejected if it has changed in the meantime (review it again, then turn it
+   * on). Rejected if this is not an imported app — there is nothing to turn on.
    */
   'apps.enable': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable(), reviewKey: z.string() }),
     result: ExternalAppInfo,
   },
   /**
-   * 앱의 판 (M4 E-1) — 사용자 폴더 앱이면 host가 떠 둔 스냅샷(최근 것부터, 지금 코드와 같은 판에 `current`), 프로젝트 앱이면 그 앱
-   * 폴더를 건드린 최근 커밋(git이 판이다, 읽기만 한다). 저장소가 아니면 `repo: false`에 빈 목록이다.
+   * An app's versions (M4 E-1) — for a user-folder app, host-kept snapshots (most recent first,
+   * `current` marking whichever matches the code now); for a project app, the recent commits
+   * that touched that app's folder (git is the version history, read-only). If it is not a
+   * repository, this returns `repo: false` with an empty list.
    */
   'apps.versions': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable() }),
     result: AppVersions,
   },
   /**
-   * 사용자 폴더 앱을 떠 둔 판으로 되돌린다 (M4 E-1). 되쓰기 전에 지금 코드를 판으로 떠 두고(되돌리기도 되돌릴 수 있다), 판의 파일을
-   * 되쓴 뒤 앱을 그 코드로 다시 띄운다 — 진행 중인 호출은 끝나기를 기다린다. 열린 화면은 새 코드로 다시 열린다(`codeStamp`).
-   * 가져온 앱의 판이 다른 `server`·`uses`를 가졌으면 다시 묻는다. 프로젝트 앱은 거절한다 — 되돌리는 자리는 git이다.
+   * Restores a user-folder app to a kept version (M4 E-1). Before overwriting, it takes a
+   * snapshot of the current code as a version too (so restoring can itself be undone), then
+   * overwrites the files with the target version and restarts the app on that code — waiting for
+   * any in-flight call to finish. An open screen reopens on the new code (`codeStamp`). If an
+   * imported app's version has a different `server`/`uses`, it is asked about again. A project
+   * app is rejected — git is where restoring happens for those.
    */
   'apps.restoreVersion': {
     params: z.object({ appId: AppId, projectId: ProjectId.nullable(), id: z.string() }),
     result: ExternalAppInfo,
   },
   'orchestrator.tools': {
-    /** sessionId를 주면 그 세션의 도구 묶음(#69 매니저는 부분집합)으로 거른다 — 다리가 쓴다 */
+    /** If sessionId is given, filters to that session's tool set (a manager under #69 gets a subset) — used by the bridge */
     params: z.object({ sessionId: SessionId.optional() }),
     result: z.array(z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() })),
   },
@@ -1353,20 +1477,22 @@ export const RpcMethods = {
     result: z.object({ text: z.string(), isError: z.boolean().optional() }),
   },
   /**
-   * 세션에 붙은 외부 앱 하나의 에이전트 도구 (M4 A-5) — 인프로세스로 못 붙이는 어댑터의 다리가
-   * 부른다. 모양은 MCP `Tool` 그대로다(다리는 받은 것을 그대로 내놓는다). 그 세션에 붙지 않은
-   * 앱이면 거절한다.
+   * The agent tools of one external app attached to a session (M4 A-5) — called by the bridge
+   * of an adapter that cannot attach in-process. The shape is exactly MCP's `Tool` (the bridge
+   * hands back what it received, unchanged). Rejected if the app is not attached to that session.
    */
   'apps.sessionTools': {
     params: z.object({ sessionId: SessionId, server: z.string() }),
     result: z.object({ tools: z.array(z.record(z.string(), z.unknown())) }),
   },
   /**
-   * 세션의 에이전트가 붙은 앱의 도구를 부른다 (M4 A-5) — 다리가 부른다. 호출자는 그 세션이고,
-   * 런타임의 단 하나의 길을 지난다(공개 범위·실행 id·기록). 결과는 MCP `CallToolResult`의 모양이다.
+   * A session's agent calls a tool of an attached app (M4 A-5) — called by the bridge. The
+   * caller is that session, and it goes through the runtime's single path (visibility scope, run
+   * id, history). The result has the shape of MCP's `CallToolResult`.
    *
-   * `waitMs`: 이보다 오래 걸리면 실행 id와 "아직 도는 중"을 먼저 돌려준다(호출은 계속된다).
-   * 바깥에 상한이 있는 도구(Codex 300초)의 다리가 그 상한보다 짧게 싣는다.
+   * `waitMs`: if a call takes longer than this, the run id and "still running" are returned
+   * first (the call itself keeps going). The bridge of a tool with an outside time limit (Codex's
+   * 300 seconds) sets this shorter than that limit.
    */
   'apps.sessionCall': {
     params: z.object({
@@ -1395,9 +1521,10 @@ export const RpcMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /*
-   * 여기 있던 sessions.setKind(#13의 승격·강등)는 폐기했다 (2026-09-01).
-   * 오케스트레이터는 이제 앱에 하나(중앙)뿐이고, 프로젝트 안에서 세션을 지휘하는 자리는
-   * 워크트리 매니저(#69)다 — 역할은 고르는 것이 아니라 관계에서 나온다.
+   * sessions.setKind, which used to be here (the promote/demote from #13), was discontinued
+   * (2026-09-01). There is now only one orchestrator per app (the central one), and the role
+   * that directs sessions inside a project is the worktree manager (#69) instead — a role is not
+   * chosen; it comes from the relationship.
    */
   'sessions.markRead': {
     params: z.object({ sessionId: SessionId, seq: z.number() }),
@@ -1408,30 +1535,31 @@ export const RpcMethods = {
     result: z.array(StoredMessage),
   },
   /**
-   * 프로젝트의 터미널 목록.
+   * A project's terminal list.
    *
-   * **터미널의 정체성은 cwd다** — 세션이 아니다.
-   * 그래서 같은 프로젝트에서 세션을 바꿔도 같은 터미널들이 그대로 이어지고,
-   * 나중에 깃 워크트리 세션이 생기면 cwd가 다르므로 자기 터미널을 따로 갖는다.
+   * **A terminal's identity is its cwd** — not a session.
+   * So switching sessions within the same project keeps the same terminals continuing, and
+   * once a git worktree session exists later, it has its own terminals since its cwd differs.
    */
   /**
-   * 이 세션에서 쓸 수 있는 슬래시 명령(스킬).
+   * The slash commands (skills) available in this session.
    *
-   * ready=false는 **아직 도구가 준비되지 않았다**는 뜻이지 없다는 뜻이 아니다 —
-   * 세션을 막 만든 직후에는 CLI가 뜨는 중이라 물어볼 수 없다.
-   * UI는 이걸 구분해서 '없음'과 '불러오는 중'을 다르게 보여준다.
+   * ready=false means **the tool is not ready yet**, not that there are none — right after a
+   * session is created, the CLI is still starting up and cannot be asked yet.
+   * The UI distinguishes this, showing "none" and "loading" differently.
    */
   'agents.commands': {
     params: z.object({ sessionId: SessionId }),
     result: z.object({ ready: z.boolean(), commands: z.array(CommandInfo) }),
   },
   /**
-   * 계정 사용량·한도 (FR-9). 구독 한도만 다룬다.
-   * supported=false면 이유가 함께 온다 — 도구가 못 주는 것과 우리가 못 읽은 것을 구분한다.
+   * Account usage and limits (FR-9). Only covers subscription limits.
+   * If supported=false, a reason comes with it — distinguishing what the tool cannot give from
+   * what we failed to read.
    */
   /**
-   * 고를 수 있는 모델 목록. 도구가 공식 API로 알려주는 것을 그대로 나른다.
-   * 구버전 도구는 모를 수 있으므로 supported=false + 이유로 내려온다.
+   * The list of selectable models. Carries exactly what the tool reports through its official
+   * API. An older tool may not know this, so it comes back as supported=false plus a reason.
    */
   'agents.models': {
     params: z.object({ tool: ToolName }),
@@ -1445,18 +1573,19 @@ export const RpcMethods = {
     params: z.object({ tool: ToolName }),
     result: z.object({ supported: z.boolean(), reason: z.string().optional(), usage: UsageSnapshot.nullable() }),
   },
-  /** `@` 자동완성용 파일 검색 (프로젝트 안에서만) */
+  /** File search for `@` autocomplete (within the project only) */
   /**
-   * 우리 폴더에서 아직 도는 남은 프로세스 (사용자 요청 2026-09-07).
+   * Leftover processes still running under our folder (requested by the person on 2026-09-07).
    *
-   * 에이전트가 bash로 띄운 데브 서버는 부모도 프로세스 그룹도 우리와 끊겨 있어 종료
-   * 절차가 못 잡는다 (실측). 죽이는 대신 **보여주고** 사람이 고르게 한다.
+   * A dev server an agent started via bash has both its parent and its process group detached
+   * from ours, so our shutdown procedure cannot catch it (measured). Instead of killing it, this
+   * **shows it** and lets the person choose.
    */
   'processes.strays': {
     params: z.object({}),
     result: z.array(z.object({ pid: z.number(), command: z.string(), cwd: z.string() })),
   },
-  /** 고른 것들을 멈춘다 (SIGTERM). 죽이기 직전에 host가 조건을 다시 잰다 */
+  /** Stops the chosen ones (SIGTERM). The host re-measures the condition right before killing them */
   'processes.stop': {
     params: z.object({ pids: z.array(z.number()) }),
     result: z.object({ stopped: z.number() }),
@@ -1469,12 +1598,12 @@ export const RpcMethods = {
     params: z.object({ projectId: ProjectId }),
     result: z.object({ terminals: z.array(TerminalInfo) }),
   },
-  /** 터미널을 하나 더 연다 */
+  /** Opens one more terminal */
   'terminal.create': {
     params: z.object({ projectId: ProjectId, cols: z.number().default(80), rows: z.number().default(24) }),
     result: TerminalInfo,
   },
-  /** 터미널 하나를 닫는다 (셸 종료 + 기록 폐기) */
+  /** Closes one terminal (ends the shell and discards its history) */
   'terminal.close': {
     params: z.object({ terminalId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
@@ -1487,27 +1616,27 @@ export const RpcMethods = {
     params: z.object({ terminalId: z.string(), cols: z.number(), rows: z.number() }),
     result: z.object({ ok: z.literal(true) }),
   },
-  /** 셸을 끝내고 새로 띄운다 (먹통이 됐을 때) */
+  /** Ends the shell and starts a fresh one (for when it hangs) */
   'terminal.restart': {
     params: z.object({ terminalId: z.string(), cols: z.number().default(80), rows: z.number().default(24) }),
     result: TerminalInfo,
   },
-  /** 자주 쓰는 명령어 실행 (#60). 같은 명령이 돌고 있으면 죽이고 새로 시작한다 */
+  /** Runs a frequently used command (#60). If the same command is already running, it is killed and restarted */
   'commands.run': {
     params: z.object({ projectId: ProjectId, command: z.string(), cols: z.number().default(100), rows: z.number().default(30) }),
     result: CommandRunInfo,
   },
-  /** 데브 서버를 끈다. 로그는 남는다 — 종료도 결과다 */
+  /** Stops a dev server. The log remains — an exit is also a result */
   'commands.stop': {
     params: z.object({ projectId: ProjectId, command: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
-  /** 실행된 적 있는 명령들의 상태 (목록 뱃지용 — 로그는 log가 준다) */
+  /** The status of commands that have run before (for list badges — the log itself comes from commands.log) */
   'commands.state': {
     params: z.object({ projectId: ProjectId }),
     result: z.object({ runs: z.array(CommandRunInfo) }),
   },
-  /** 명령 하나의 마지막 실행, 로그째. 실행된 적 없으면 null */
+  /** The last run of one command, log included. Null if it has never run */
   'commands.log': {
     params: z.object({ projectId: ProjectId, command: z.string() }),
     result: z.object({ run: CommandRunInfo.extend({ history: z.string() }).nullable() }),
@@ -1556,22 +1685,23 @@ export const RpcMethods = {
     result: UpdateStatus,
   },
   /**
-   * 화면 설정을 읽는다 (UiPreferences).
+   * Reads screen settings (UiPreferences).
    *
-   * **기동 경로에 있다.** 답이 늦게 오면 늦게 오는 것으로 끝나지 않는다 — 입력창이
-   * 잠깐 옛 규칙으로 서 있다가 손가락 밑에서 규칙을 바꾼다. 그래서 이 호출은
-   * 화면이 뜨기 전에 하는 것들과 함께 나가고, 실패는 기본값으로 메운다.
+   * **Lives on the startup path.** A slow response does not just end up being slow — the
+   * composer stands briefly under the old rule and then the rule changes out from under the
+   * person's fingers. So this call goes out together with everything else done before the screen
+   * appears, and a failure is filled in with defaults.
    */
   'prefs.get': {
     params: z.object({}),
     result: UiPreferences,
   },
   /**
-   * 바뀐 것만 적는다. 결과는 **기록된 뒤의 기록 전체**다.
+   * Records only what changed. The result is **the entire record, after being written**.
    *
-   * 쓴 쪽이 자기가 보낸 것을 그대로 믿지 않고 돌려받은 것을 쓰게 하려는 것이다 —
-   * 저장된 모양이 곧 화면이 따르는 모양이어야, 저장이 실패한 설정이 화면에서만
-   * 켜져 있는 일이 생기지 않는다.
+   * This is so the writer uses what it gets back rather than trusting what it sent — the stored
+   * shape has to be exactly the shape the screen follows, or a setting that failed to save can
+   * end up looking turned on only on the screen.
    */
   'prefs.set': {
     params: z.object({ patch: UiPreferencesPatch }),
@@ -1586,7 +1716,7 @@ export const RpcMethods = {
         matcher: z.string(),
         decision: z.string(),
         createdAt: z.number(),
-        /** 어느 프로젝트·세션의 규칙인가 — 두 프로젝트의 같은 규칙이 설정에서 똑같은 줄로 보였다 (#183) */
+        /** Which project or session this rule belongs to — the same rule from two different projects used to look like one identical row in Settings (#183) */
         projectId: z.string().nullable().default(null),
         sessionId: z.string().nullable().default(null),
       }),
@@ -1633,13 +1763,14 @@ export const RpcMethods = {
 export type RpcMethodName = keyof typeof RpcMethods
 
 /**
- * **보내는 쪽**이 갖춰야 하는 것 (`z.input`).
+ * What the **sender** has to provide (`z.input`).
  *
- * 출력 타입이 아닌 이유: `.default()`가 붙은 필드는 파서가 채우므로 부르는 쪽은
- * 생략할 수 있다. 둘을 하나로 뭉뚱그리면 `files.search`의 `limit`처럼
- * "생략 가능한데 필수라고 우기는" 자리가 생긴다 — 실제로 걸렸다.
+ * Why not the output type: a field with `.default()` is filled in by the parser, so the caller
+ * is allowed to omit it. Collapsing the two into one produces spots like `files.search`'s
+ * `limit` that insist on being required when they are actually optional — this actually
+ * happened once.
  */
 export type RpcParams<M extends RpcMethodName> = z.input<(typeof RpcMethods)[M]['params']>
 
-/** **받는 쪽**이 손에 쥐는 것 (`z.output`) — 기본값이 채워진 뒤다 */
+/** What the **receiver** holds in hand (`z.output`) — after defaults have been filled in */
 export type RpcResult<M extends RpcMethodName> = z.output<(typeof RpcMethods)[M]['result']>
